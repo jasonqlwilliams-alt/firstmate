@@ -12,6 +12,7 @@ PRIMARY="$TMP_ROOT/primary"
 STATE="$PRIMARY/state"
 OUT="$TMP_ROOT/out"
 ERR="$TMP_ROOT/err"
+CODEX_PRIMARY="$TMP_ROOT/codex-primary"
 
 mkdir -p "$PRIMARY/bin" "$STATE"
 printf '# fixture\n' > "$PRIMARY/AGENTS.md"
@@ -69,6 +70,50 @@ expect_deny() {
     || fail "$label ($tool) deny omitted Claude's permission decision: $(cat "$ERR")"
   jq -e --arg tool "$tool" '.systemMessage | startswith("[subagent-dispatch]") and contains("blocked tool: " + $tool)' "$ERR" >/dev/null 2>&1 \
     || fail "$label ($tool) deny message lost its code or tool name: $(jq -r '.systemMessage' "$ERR")"
+}
+
+run_codex_pretool_hooks() {
+  local dir=$1 tool=$2 submitted_command=${3:-} payload command hook_rc=0 overall_rc=0 matched=0
+  payload=$(jq -nc --arg tool "$tool" --arg command "$submitted_command" \
+    '{hook_event_name:"PreToolUse",tool_name:$tool,tool_input:{command:$command}}') \
+    || fail "could not build Codex PreToolUse fixture payload"
+  : > "$OUT"
+  : > "$ERR"
+  while IFS= read -r command; do
+    [ -n "$command" ] || continue
+    matched=$((matched + 1))
+    hook_rc=0
+    printf '%s' "$payload" | (cd "$dir" && bash -c "$command") >> "$OUT" 2>> "$ERR" || hook_rc=$?
+    case "$hook_rc" in
+      0) ;;
+      2) overall_rc=2 ;;
+      *) fail "Codex PreToolUse hook for $tool failed with unexpected exit $hook_rc: $(cat "$ERR")" ;;
+    esac
+  done < <(jq -r --arg tool "$tool" '
+    .hooks.PreToolUse[]
+    | select((.matcher // ".*") as $matcher | ($tool | test($matcher)))
+    | .hooks[].command
+  ' "$dir/.codex/hooks.json")
+  [ "$matched" -gt 0 ] || fail "Codex PreToolUse matcher reached no hook for $tool"
+  return "$overall_rc"
+}
+
+setup_codex_hook_fixture() {
+  mkdir -p "$CODEX_PRIMARY/bin" "$CODEX_PRIMARY/state" "$CODEX_PRIMARY/.codex"
+  cp "$ROOT/AGENTS.md" "$CODEX_PRIMARY/AGENTS.md"
+  cp "$ROOT/.codex/hooks.json" "$CODEX_PRIMARY/.codex/hooks.json"
+  cp "$ROOT/bin/fm-subagent-pretool-check.sh" \
+    "$ROOT/bin/fm-primary-scope-lib.sh" \
+    "$ROOT/bin/fm-arm-pretool-check.sh" \
+    "$ROOT/bin/fm-cd-pretool-check.sh" \
+    "$ROOT/bin/fm-arm-command-policy.mjs" \
+    "$ROOT/bin/fm-cd-command-policy.mjs" \
+    "$CODEX_PRIMARY/bin/"
+  git -C "$CODEX_PRIMARY" init -q
+  git -C "$CODEX_PRIMARY" config user.name fixture
+  git -C "$CODEX_PRIMARY" config user.email fixture@example.test
+  git -C "$CODEX_PRIMARY" add AGENTS.md .codex bin
+  git -C "$CODEX_PRIMARY" commit -qm fixture
 }
 
 # ---------------------------------------------------------------------------
@@ -276,6 +321,34 @@ test_missing_jq_stdin_transport_fails_open() {
   pass "missing jq for stdin transport fails open rather than denying every tool call"
 }
 
+test_codex_real_hook_surface_routes_delegation_and_preserves_scope() {
+  local tool child="$TMP_ROOT/codex-child" rc=0
+  setup_codex_hook_fixture
+
+  for tool in collaborationspawn_agent spawn_agent; do
+    rc=0
+    run_codex_pretool_hooks "$CODEX_PRIMARY" "$tool" || rc=$?
+    [ "$rc" -eq 2 ] || fail "Codex primary hook surface must deny $tool, got exit $rc"
+    jq -e --arg tool "$tool" \
+      '.hookSpecificOutput.permissionDecision == "deny" and (.systemMessage | contains("blocked tool: " + $tool))' \
+      "$ERR" >/dev/null 2>&1 \
+      || fail "Codex primary deny for $tool lost the route-to-FirstMate decision: $(cat "$ERR")"
+  done
+
+  git -C "$CODEX_PRIMARY" worktree add -q -b fixture-codex-child "$child"
+  mkdir -p "$child/state"
+  rc=0
+  run_codex_pretool_hooks "$child" collaborationspawn_agent || rc=$?
+  [ "$rc" -eq 0 ] || fail "Codex delegation must remain allowed in a linked worker worktree, got exit $rc: $(cat "$ERR")"
+  [ ! -s "$OUT" ] && [ ! -s "$ERR" ] || fail "linked worker Codex hook allow wrote output"
+
+  rc=0
+  run_codex_pretool_hooks "$CODEX_PRIMARY" Bash 'printf safe' || rc=$?
+  [ "$rc" -eq 0 ] || fail "safe Bash must remain allowed through all matching Codex hooks, got exit $rc: $(cat "$ERR")"
+  [ ! -s "$OUT" ] && [ ! -s "$ERR" ] || fail "safe Bash through Codex hooks wrote output"
+  pass "the real Codex hook surface denies current and normalized delegation names only in FirstMate primaries"
+}
+
 test_guard_denies_every_currently_known_delegation_tool
 test_guard_denies_hypothetical_future_tools
 test_guard_allows_ordinary_and_observe_only_tools
@@ -289,3 +362,4 @@ test_secondmate_home_is_in_scope
 test_stdin_transports_and_output_shapes
 test_malformed_transport_fails_open
 test_missing_jq_stdin_transport_fails_open
+test_codex_real_hook_surface_routes_delegation_and_preserves_scope

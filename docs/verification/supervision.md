@@ -48,6 +48,55 @@ The earlier `sendUserMessage` counterfactual raced the positional prompt; the cu
 The installed pi-signed 0.82.0 wrapper repeated the Pi primary extension and session-start path on 2026-07-27.
 [`runtime-backends.md`](runtime-backends.md#tmux) owns the shared-ancestry evidence and authoritative selection-marker boundary.
 
+## Codex delegated-agent PreToolUse
+
+The Codex delegation payload and guard path were verified on 2026-08-09 with `codex-cli 0.147.0` in a throwaway FirstMate-shaped git project.
+The first run used a match-all `PreToolUse` recorder and this prompt:
+
+```sh
+codex exec --dangerously-bypass-approvals-and-sandbox \
+  --dangerously-bypass-hook-trust --skip-git-repo-check \
+  'Call collaboration.spawn_agent exactly once with task_name probe and a tiny message. Do not use any shell command or any other tool. Then report whether the call succeeded.'
+```
+
+The tool succeeded in the recorder control and the hook received this structural payload:
+
+```json
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "collaborationspawn_agent",
+  "tool_input": {
+    "task_name": "probe",
+    "fork_turns": "all"
+  }
+}
+```
+
+The payload's opaque message value and per-run identifiers are omitted because they do not participate in classification.
+The load-bearing fact is that Codex normalizes `collaboration.spawn_agent` to `collaborationspawn_agent` before the project hook sees it.
+
+The recorder was then replaced with the tracked `.codex/hooks.json`, `bin/fm-subagent-pretool-check.sh`, and `bin/fm-primary-scope-lib.sh` from this change, and the same command was repeated with `task_name blocked_probe`.
+Relevant output, with the long deny JSON body elided:
+
+```text
+hook: PreToolUse
+error=Tool call blocked by PreToolUse hook: ...
+(blocked tool: collaborationspawn_agent, delegation-shaped on "agent")
+hook: PreToolUse Blocked
+The call did not succeed. A `PreToolUse` hook denied it, requiring delegation through the project's fleet workflow instead.
+```
+
+This proves Codex 0.147.0's CLI collaboration surface reaches the project hook and honors its exit-2 deny.
+It does not prove interception for a future host or service that executes collaboration outside Codex's project-hook lifecycle; [`../subagent-guard.md`](../subagent-guard.md#codex) owns that current boundary.
+
+The portable regression runs the commands selected by the tracked Codex matchers rather than inspecting source bytes:
+
+```sh
+tests/fm-subagent-pretool-check.test.sh
+```
+
+Observed result: the real hook/checker interface denied both `collaborationspawn_agent` and `spawn_agent` in a genuine FirstMate primary, allowed `collaborationspawn_agent` in a linked worker worktree, and left safe Bash allowed through all matching hooks.
+
 ### Run-tier source vocabulary and context-reset injection
 
 The run tier depends on three facts only the vendor can supply: the session-open source it reports, whether hook stdout reaches model context on a context-RESET open rather than only a cold one, and whether a worker the hook detaches survives the hook returning.

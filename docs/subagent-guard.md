@@ -38,7 +38,7 @@ It says nothing about whether the resulting brief, project, or delivery mode is 
 
 `bin/fm-subagent-pretool-check.sh` is the shipped layer.
 It classifies the tool NAME by shape rather than against a fixed list.
-The tracked Claude PreToolUse matcher is `.*`, so every Claude tool name reaches the script and the script is the single owner of classification.
+The tracked Claude and Codex PreToolUse matchers are `.*`, so every tool name from either harness reaches the script and the script is the single owner of classification.
 A stem-enumerating matcher would reintroduce the fail-open-by-enumeration problem this guard exists to solve, because any future tool name outside the matcher would be silently missed before the script could inspect it.
 A tool is delegation-shaped when its normalized lowercase name contains one of these stems:
 
@@ -181,45 +181,22 @@ Applicability turns on one question: does the harness expose built-in delegation
 | Harness | Delegation surface | Status |
 | --- | --- | --- |
 | Claude | 16 known tools, listed above | Scoped guard wired and live-verified; untracked local deny list verified and recommended. |
-| Codex | none | Not applicable, verified empirically below. Codex 0.144.1 exposes no subagent, sub-task, or delegated-agent tool, so there is nothing to remove or intercept. `.codex/hooks.json` is unchanged. |
+| Codex | `collaboration.spawn_agent`, delivered to hooks as `collaborationspawn_agent` | Scoped match-all guard wired and live-verified on Codex 0.147.0. |
 | Grok | present, exact tokens unconfirmed | Not wired pending live verification. See below. |
 | OpenCode | present, exact tokens unconfirmed | Not wired pending live verification. See below. |
 | Pi | none reported | Not wired pending live verification. See below. |
 
-### Codex, verified not applicable
+### Codex
 
-Codex 0.144.1 was asked to enumerate its own tools in a scratch git repo on 2026-07-22.
+Codex 0.147.0 exposes `collaboration.spawn_agent` to a primary session and delivers its call to the real project `PreToolUse` hook as `tool_name: "collaborationspawn_agent"`.
+The existing classifier needs no Codex-specific exception because normalization preserves that token and the established `agent` and `spawn` stems both classify it as delegation-shaped.
+The tracked `.codex/hooks.json` keeps the watcher-arm and directory-change checkers on their existing `Bash`-only entry and adds a separate `.*` entry for `bin/fm-subagent-pretool-check.sh`.
+That separation lets the delegation checker see current normalized `spawn_agent` spellings and future delegation-shaped names without widening either Bash checker.
 
-```sh
-codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check \
-  "List the exact names of every tool available to you in this session, one per line, nothing else. Then state on a final line whether you have any tool that spawns a subagent, sub-task, or delegated agent: answer SUBAGENT_TOOL=yes or SUBAGENT_TOOL=no."
-```
-
-Exact reported tool set and verdict:
-
-```text
-web.run
-functions.exec_command
-functions.write_stdin
-functions.list_mcp_resources
-functions.list_mcp_resource_templates
-functions.read_mcp_resource
-functions.update_plan
-functions.request_user_input
-functions.request_plugin_install
-functions.view_image
-functions.get_goal
-functions.create_goal
-functions.update_goal
-functions.apply_patch
-image_gen.imagegen
-tool_search.tool_search_tool
-multi_tool_use.parallel
-SUBAGENT_TOOL=no
-```
-
-`multi_tool_use.parallel` batches calls to the tools above; it does not spawn an agent.
-Codex is therefore not applicable today, and this table row is the tripwire: if a future Codex release adds a delegated-agent tool, wire `.codex/hooks.json` the same way its `Bash` PreToolUse entries already forward stdin to a checker.
+The Codex project hook is the enforceable boundary.
+On 0.147.0 the CLI collaboration call reached that boundary and was refused with the route to `bin/fm-brief.sh` and `bin/fm-spawn.sh`; it did not bypass local hooks.
+A collaboration implementation executed outside Codex's project-hook lifecycle would remain outside this mechanism, so the guarantee is deliberately limited to delegation calls that the supported Codex `PreToolUse` surface can observe.
+The dated payload and live-deny evidence is recorded in [`verification/supervision.md`](verification/supervision.md#codex-delegated-agent-pretooluse).
 
 ### Grok, OpenCode, and Pi, inspected but not wired
 
@@ -233,7 +210,7 @@ The integration surface of each was inspected and each is structurally wireable 
 - Pi's tracked extension gates on `event.toolName !== "bash"` inside `pi.on("tool_call", ...)` and blocks by returning `{block: true}`.
   The same change applies. A parallel evaluation reports that Pi exposes no delegation tool at all, which would make it not applicable, but that was not verified here.
 
-None of the three is wired in this change because none of the three binaries is installed on the host where this work was done, so the exact tool-name tokens could not be confirmed and the wiring could not be validated against the real harness.
+None of the three is wired because the exact tool-name tokens have not been confirmed and the wiring has not been validated against the real harness.
 This repo's rule in the `firstmate-coding-guidelines` skill is that a harness hook must be validated in a scratch project before it is trusted, and `arm-pretool-check.md` records the concrete cost of guessing: a Grok hook whose `command` string is even slightly wrong fails to launch the hook at all.
 Wiring an unvalidated matcher would trade a known gap for an unknown breakage.
 
@@ -353,7 +330,8 @@ The live consequence is confirmed by the shipped-guard result above: Claude hono
 ## Automated validation
 
 `tests/fm-subagent-pretool-check.test.sh` owns the acceptance matrix and is registered in the `pure-contract-unit` family in `bin/fm-test-run.sh`.
-It covers the tracked Claude settings boundary that forbids a `permissions` key; the match-all Claude hook registration; denial of every work-creating delegation tool by shape; denial of twelve hypothetical future tool names that appear on no list; the observe-or-stop, plan-only, and MCP exclusions; the exactness of the plan-only exclusion against six near-miss names a substring or shorter-stem widening would release; the scout-present and scout-absent message variants; the escape hatch including its fail-closed values; inertness in a linked task worktree and in a non-firstmate repo; in-scope enforcement for a marked secondmate home; both stdin transports; the empty-stdout requirement; fail-open transport behavior; and the preserved `Bash` seatbelts and `Stop` guard.
+It covers the tracked Claude settings boundary that forbids a `permissions` key; the match-all Claude and Codex hook registrations; denial of every work-creating delegation tool by shape; denial of twelve hypothetical future tool names that appear on no list; the observe-or-stop, plan-only, and MCP exclusions; the exactness of the plan-only exclusion against six near-miss names a substring or shorter-stem widening would release; the scout-present and scout-absent message variants; the escape hatch including its fail-closed values; inertness in a linked task worktree and in a non-firstmate repo; in-scope enforcement for a marked secondmate home; both stdin transports; the empty-stdout requirement; fail-open transport behavior; and the preserved `Bash` seatbelts and `Stop` guard.
+Its Codex hook runner executes the commands selected by the tracked matcher against a FirstMate-shaped primary and linked worktree, proving the current `collaborationspawn_agent` token and normalized `spawn_agent` spelling are denied only in the primary while safe Bash stays allowed.
 
 Run:
 
@@ -377,5 +355,5 @@ Without an independent Relay need, unaccounted primary work therefore reads as i
 
 The durable fix for that class is to make the guards treat "the primary is doing project-shaped work with zero `state/*.meta` files" as a suspicious state rather than an idle one.
 That would catch this class on any harness, including work created through `Bash`.
-This change fences only the Claude tool surface.
+This mechanism fences the Claude tool surface and the Codex delegation calls observable through project `PreToolUse`.
 That is a separate change to `bin/fm-supervision-lib.sh` and `bin/fm-turnend-guard.sh` and is out of scope here.
