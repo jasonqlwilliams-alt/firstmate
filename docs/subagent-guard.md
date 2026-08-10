@@ -51,8 +51,9 @@ Three exclusions keep the shape test from producing false positives.
 
 - A name beginning `mcp__` is never classified.
   An MCP server chooses its own tool names, a task or agent noun there is common, and it has no bearing on fleet dispatch.
-- `OBSERVE_ONLY_TOOLS`: the exact names `taskoutput`, `taskstop`, `taskget`, `tasklist`, `cronlist`, `bashoutput`, and `killshell` are allowed.
+- `OBSERVE_ONLY_TOOLS`: the exact names `taskoutput`, `taskstop`, `taskget`, `tasklist`, `cronlist`, `bashoutput`, `killshell`, `listagents`, `waitagent`, `interruptagent`, `collaborationlistagents`, `collaborationwaitagent`, and `collaborationinterruptagent` are allowed.
   These observe or stop work that already exists rather than creating it, and denying them at this layer could strand already-running work with no way to inspect or end it.
+  The bare and `collaboration`-prefixed variants cover Codex's direct tool spellings and the namespace-normalized spellings delivered to project hooks.
   A Claude primary's optional local deny list may still remove them from the schema.
   The shipped guard stays narrower on purpose so it can never be the reason a runaway task cannot be stopped.
 - `PLAN_ONLY_TOOLS`: the exact names `taskcreate` and `taskupdate` are allowed.
@@ -331,7 +332,7 @@ The live consequence is confirmed by the shipped-guard result above: Claude hono
 
 `tests/fm-subagent-pretool-check.test.sh` owns the acceptance matrix and is registered in the `pure-contract-unit` family in `bin/fm-test-run.sh`.
 It covers the tracked Claude settings boundary that forbids a `permissions` key; the match-all Claude and Codex hook registrations; denial of every work-creating delegation tool by shape; denial of twelve hypothetical future tool names that appear on no list; the observe-or-stop, plan-only, and MCP exclusions; the exactness of the plan-only exclusion against six near-miss names a substring or shorter-stem widening would release; the scout-present and scout-absent message variants; the escape hatch including its fail-closed values; inertness in a linked task worktree and in a non-firstmate repo; in-scope enforcement for a marked secondmate home; both stdin transports; the empty-stdout requirement; fail-open transport behavior; and the preserved `Bash` seatbelts and `Stop` guard.
-Its Codex hook runner executes the commands selected by the tracked matcher against a FirstMate-shaped primary and linked worktree, proving the current `collaborationspawn_agent` token and normalized `spawn_agent` spelling are denied only in the primary while safe Bash stays allowed.
+Its Codex hook runner executes the commands selected by the tracked matcher against a FirstMate-shaped primary and linked worktree, proving the current `collaborationspawn_agent` token and normalized `spawn_agent` spelling are denied only in the primary while exact `list_agents`, `wait_agent`, and `interrupt_agent` controls and safe Bash stay allowed.
 
 Run:
 

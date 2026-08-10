@@ -42,6 +42,10 @@ PLAN_ONLY_TOOLS='TaskCreate TaskUpdate'
 # assumed.
 PLAN_ONLY_NEAR_MISSES='TaskCreateAgent TaskCreateWorktree TaskUpdateAgent RemoteTaskCreate Task TaskCreator'
 
+CODEX_OBSERVE_ONLY_TOOLS='collaborationlist_agents collaborationwait_agent collaborationinterrupt_agent list_agents wait_agent interrupt_agent'
+
+CODEX_OBSERVE_NEAR_MISSES='collaborationlist_agents_spawn collaborationwait_agent_task collaborationinterrupt_agent_worktree'
+
 run_tool() {
   local tool=$1 rc=0
   shift
@@ -335,6 +339,19 @@ test_codex_real_hook_surface_routes_delegation_and_preserves_scope() {
       || fail "Codex primary deny for $tool lost the route-to-FirstMate decision: $(cat "$ERR")"
   done
 
+  for tool in $CODEX_OBSERVE_ONLY_TOOLS; do
+    rc=0
+    run_codex_pretool_hooks "$CODEX_PRIMARY" "$tool" || rc=$?
+    [ "$rc" -eq 0 ] || fail "Codex observe-or-stop control $tool must remain allowed, got exit $rc: $(cat "$ERR")"
+    [ ! -s "$OUT" ] && [ ! -s "$ERR" ] || fail "Codex observe-or-stop control $tool wrote output"
+  done
+
+  for tool in $CODEX_OBSERVE_NEAR_MISSES; do
+    rc=0
+    run_codex_pretool_hooks "$CODEX_PRIMARY" "$tool" || rc=$?
+    [ "$rc" -eq 2 ] || fail "Codex observe-or-stop near miss $tool must remain denied, got exit $rc"
+  done
+
   git -C "$CODEX_PRIMARY" worktree add -q -b fixture-codex-child "$child"
   mkdir -p "$child/state"
   rc=0
@@ -346,7 +363,7 @@ test_codex_real_hook_surface_routes_delegation_and_preserves_scope() {
   run_codex_pretool_hooks "$CODEX_PRIMARY" Bash 'printf safe' || rc=$?
   [ "$rc" -eq 0 ] || fail "safe Bash must remain allowed through all matching Codex hooks, got exit $rc: $(cat "$ERR")"
   [ ! -s "$OUT" ] && [ ! -s "$ERR" ] || fail "safe Bash through Codex hooks wrote output"
-  pass "the real Codex hook surface denies current and normalized delegation names only in FirstMate primaries"
+  pass "the real Codex hook surface denies delegation while preserving exact observe-or-stop controls"
 }
 
 test_guard_denies_every_currently_known_delegation_tool
