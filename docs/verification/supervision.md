@@ -95,7 +95,7 @@ The portable regression runs the commands selected by the tracked Codex matchers
 tests/fm-subagent-pretool-check.test.sh
 ```
 
-Observed result: the real hook/checker interface denied `collaborationspawn_agent`, `spawn_agent`, and V1 `multi_agent_v1spawn_agent` in a genuine FirstMate primary, allowed the exact bare and namespace-normalized `list_agents`, `wait_agent`, and `interrupt_agent` controls plus V1 `multi_agent_v1wait_agent` and `multi_agent_v1close_agent`, denied delegation-shaped near misses of those controls, allowed `collaborationspawn_agent` in a linked worker worktree, and left safe Bash allowed through all matching hooks.
+Observed result: the real hook/checker interface denied `collaborationspawn_agent`, `spawn_agent`, and V1 `multi_agent_v1spawn_agent` in a genuine FirstMate primary, still denied `collaborationspawn_agent` with `jq` unavailable, allowed the exact bare and namespace-normalized `list_agents`, `wait_agent`, and `interrupt_agent` controls plus V1 `multi_agent_v1wait_agent` and `multi_agent_v1close_agent`, denied delegation-shaped near misses of those controls, allowed `collaborationspawn_agent` in a linked worker worktree, and left safe Bash allowed through all matching hooks.
 
 ### Run-tier source vocabulary and context-reset injection
 

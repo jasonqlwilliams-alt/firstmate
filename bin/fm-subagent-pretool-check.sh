@@ -44,7 +44,7 @@
 #   INERT - not a genuine primary home (a crewmate/scout task worktree or a
 #           non-firstmate repo): exit 0 with no output, exactly like ALLOW.
 #   ESCAPE - FM_ALLOW_SUBAGENT=1 in the environment allows deliberately.
-#   FAIL OPEN - malformed or empty stdin, or missing jq for stdin transport.
+#   FAIL OPEN - malformed or empty stdin, or an unavailable Node runtime.
 #
 # Claude requires stdout to remain empty on deny.
 # Codex blocks on exit 2 and displays stderr.
@@ -81,10 +81,31 @@ PLAN_ONLY_TOOLS='taskcreate taskupdate'
 TOOL=""
 TOOL_SET=0
 CLAUDE_MODE=0
+CODEX_HOOK_CONFIG=""
+
+validate_codex_hook_config() {
+  command -v node >/dev/null 2>&1 || return 1
+  node -e '
+    const fs = require("node:fs");
+    try {
+      const config = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      const entries = config?.hooks?.PreToolUse;
+      const present = Array.isArray(entries) && entries.some((entry) =>
+        Array.isArray(entry?.hooks) && entry.hooks.some((hook) =>
+          typeof hook?.command === "string" && hook.command.includes("fm-subagent-pretool-check.sh")
+        )
+      );
+      process.exit(present ? 0 : 1);
+    } catch {
+      process.exit(1);
+    }
+  ' "$1"
+}
 
 usage() {
   cat <<'EOF'
 Usage: fm-subagent-pretool-check.sh [--tool <tool-name>] [--claude]
+       fm-subagent-pretool-check.sh --validate-codex-hook-config <path>
 
 With no --tool, reads a PreToolUse-style JSON payload on stdin (Claude/Codex
 tool_name, or Grok toolName).
@@ -121,6 +142,11 @@ while [ "$#" -gt 0 ]; do
       CLAUDE_MODE=1
       shift
       ;;
+    --validate-codex-hook-config)
+      [ "$#" -gt 1 ] || { echo "error: --validate-codex-hook-config requires a value" >&2; exit 2; }
+      CODEX_HOOK_CONFIG=$2
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -133,11 +159,27 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+if [ -n "$CODEX_HOOK_CONFIG" ]; then
+  validate_codex_hook_config "$CODEX_HOOK_CONFIG"
+  exit $?
+fi
+
 if [ "$TOOL_SET" -eq 0 ]; then
   PAYLOAD=$(cat 2>/dev/null || true)
   [ -n "$PAYLOAD" ] || exit 0
-  command -v jq >/dev/null 2>&1 || exit 0
-  TOOL=$(printf '%s' "$PAYLOAD" | jq -r '(.tool_name // .toolName // empty)' 2>/dev/null) || exit 0
+  command -v node >/dev/null 2>&1 || exit 0
+  TOOL=$(printf '%s' "$PAYLOAD" | node -e '
+    const fs = require("node:fs");
+    try {
+      const payload = JSON.parse(fs.readFileSync(0, "utf8"));
+      const tool = typeof payload?.tool_name === "string"
+        ? payload.tool_name
+        : typeof payload?.toolName === "string" ? payload.toolName : "";
+      process.stdout.write(tool);
+    } catch {
+      process.exit(1);
+    }
+  ' 2>/dev/null) || exit 0
 fi
 
 [ -n "$TOOL" ] || exit 0

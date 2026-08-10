@@ -169,7 +169,7 @@ A tool removed from the schema stays removed, so a genuinely intended use of a l
 - Default deny mode also writes `{"decision":"deny","reason":"[subagent-dispatch] ..."}` to stdout for Grok.
 - `--claude` suppresses stdout completely, because Claude Code ignores a PreToolUse deny when stdout is nonempty.
   This is the same verified quirk recorded in [`arm-pretool-check.md`](arm-pretool-check.md), and the tracked Claude hook therefore passes `--claude`.
-- Malformed or empty stdin, invalid JSON, a payload with no tool name, and missing `jq` for stdin transport all fail open with exit 0 and no output.
+- Malformed or empty stdin, invalid JSON, a payload with no tool name, and an unavailable universal Node runtime all fail open with exit 0 and no output.
 
 The deny message names the real dispatch path.
 When `bin/fm-scout.sh` exists in the home the message first defers to the `AGENTS.md` intake classification, then routes work already classified as a scout there and authorized ship work with its bounded research to `bin/fm-brief.sh` then `bin/fm-spawn.sh`.
@@ -194,6 +194,7 @@ Codex 0.147.0 exposes `collaboration.spawn_agent` to a primary session and deliv
 The existing classifier needs no Codex-specific exception because normalization preserves that token and the established `agent` and `spawn` stems both classify it as delegation-shaped.
 The tracked `.codex/hooks.json` keeps the watcher-arm and directory-change checkers on their existing `Bash`-only entry and adds a separate `.*` entry for `bin/fm-subagent-pretool-check.sh`.
 That separation lets the delegation checker see current normalized `spawn_agent` spellings and future delegation-shaped names without widening either Bash checker.
+The delegation entry uses the universal Node runtime for its registration validation and payload extraction, so it does not depend on optional `jq` in a default tmux home.
 
 The Codex project hook is the enforceable boundary.
 On 0.147.0 the CLI collaboration call reached that boundary and was refused with the route to `bin/fm-brief.sh` and `bin/fm-spawn.sh`; it did not bypass local hooks.
@@ -332,7 +333,7 @@ The live consequence is confirmed by the shipped-guard result above: Claude hono
 ## Automated validation
 
 `tests/fm-subagent-pretool-check.test.sh` owns the acceptance matrix and is registered in the `pure-contract-unit` family in `bin/fm-test-run.sh`.
-It covers the tracked Claude settings boundary that forbids a `permissions` key; the match-all Claude and Codex hook registrations; denial of every work-creating delegation tool by shape; denial of twelve hypothetical future tool names that appear on no list; the observe-or-stop, plan-only, and MCP exclusions; the exactness of the plan-only exclusion against six near-miss names a substring or shorter-stem widening would release; the scout-present and scout-absent message variants; the escape hatch including its fail-closed values; inertness in a linked task worktree and in a non-firstmate repo; in-scope enforcement for a marked secondmate home; both stdin transports; the empty-stdout requirement; fail-open transport behavior; and the preserved `Bash` seatbelts and `Stop` guard.
+It covers the tracked Claude settings boundary that forbids a `permissions` key; the match-all Claude and Codex hook registrations; denial of every work-creating delegation tool by shape; denial of twelve hypothetical future tool names that appear on no list; the observe-or-stop, plan-only, and MCP exclusions; the exactness of the plan-only exclusion against six near-miss names a substring or shorter-stem widening would release; the scout-present and scout-absent message variants; the escape hatch including its fail-closed values; inertness in a linked task worktree and in a non-firstmate repo; in-scope enforcement for a marked secondmate home; both stdin transports; the empty-stdout requirement; jq-free Codex hook and checker enforcement; fail-open malformed transport behavior; and the preserved `Bash` seatbelts and `Stop` guard.
 Its Codex hook runner executes the commands selected by the tracked matcher against a FirstMate-shaped primary and linked worktree, proving the current `collaborationspawn_agent`, normalized `spawn_agent`, and V1 `multi_agent_v1spawn_agent` spellings are denied only in the primary while exact V2 list, wait, and interrupt controls, V1 wait and close controls, and safe Bash stay allowed.
 
 Run:

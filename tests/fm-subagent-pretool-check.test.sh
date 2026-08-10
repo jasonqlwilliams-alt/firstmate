@@ -77,7 +77,7 @@ expect_deny() {
 }
 
 run_codex_pretool_hooks() {
-  local dir=$1 tool=$2 submitted_command=${3:-} payload command hook_rc=0 overall_rc=0 matched=0
+  local dir=$1 tool=$2 submitted_command=${3:-} hook_bash_env=${4:-} payload command hook_rc=0 overall_rc=0 matched=0
   payload=$(jq -nc --arg tool "$tool" --arg command "$submitted_command" \
     '{hook_event_name:"PreToolUse",tool_name:$tool,tool_input:{command:$command}}') \
     || fail "could not build Codex PreToolUse fixture payload"
@@ -87,7 +87,11 @@ run_codex_pretool_hooks() {
     [ -n "$command" ] || continue
     matched=$((matched + 1))
     hook_rc=0
-    printf '%s' "$payload" | (cd "$dir" && bash -c "$command") >> "$OUT" 2>> "$ERR" || hook_rc=$?
+    if [ -n "$hook_bash_env" ]; then
+      printf '%s' "$payload" | (cd "$dir" && env BASH_ENV="$hook_bash_env" bash -c "$command") >> "$OUT" 2>> "$ERR" || hook_rc=$?
+    else
+      printf '%s' "$payload" | (cd "$dir" && bash -c "$command") >> "$OUT" 2>> "$ERR" || hook_rc=$?
+    fi
     case "$hook_rc" in
       0) ;;
       2) overall_rc=2 ;;
@@ -308,25 +312,26 @@ test_malformed_transport_fails_open() {
   pass "malformed, empty, and tool-name-less payloads fail open rather than blocking every tool call"
 }
 
-test_missing_jq_stdin_transport_fails_open() {
-  local fakebin="$TMP_ROOT/no-jq-bin" bash_bin cat_bin rc=0
-  bash_bin=$(command -v bash) || fail "test needs bash to simulate the hook shebang"
-  cat_bin=$(command -v cat) || fail "test needs cat to feed stdin without jq"
+test_node_stdin_transport_does_not_require_jq() {
+  local fakebin="$TMP_ROOT/no-jq-bin" tool tool_bin rc=0
   mkdir -p "$fakebin"
-  ln -sf "$bash_bin" "$fakebin/bash"
-  ln -sf "$cat_bin" "$fakebin/cat"
+  for tool in bash cat node tr dirname git sed; do
+    tool_bin=$(command -v "$tool") || fail "test needs $tool for the jq-free stdin path"
+    ln -sf "$tool_bin" "$fakebin/$tool"
+  done
   : > "$OUT"; : > "$ERR"
   printf '%s' '{"tool_name":"Agent"}' \
     | env PATH="$fakebin" FM_ROOT_OVERRIDE="$PRIMARY" FM_HOME="$PRIMARY" FM_STATE_OVERRIDE="$STATE" \
       "$CHECK" --claude > "$OUT" 2> "$ERR" || rc=$?
-  [ "$rc" -eq 0 ] || fail "missing jq transport must fail open, got exit $rc: $(cat "$ERR")"
-  [ ! -s "$OUT" ] || fail "missing jq fail-open path wrote stdout: $(cat "$OUT")"
-  [ ! -s "$ERR" ] || fail "missing jq fail-open path wrote stderr: $(cat "$ERR")"
-  pass "missing jq for stdin transport fails open rather than denying every tool call"
+  [ "$rc" -eq 2 ] || fail "Node stdin transport must deny without jq, got exit $rc: $(cat "$ERR")"
+  [ ! -s "$OUT" ] || fail "jq-free Node stdin deny wrote stdout: $(cat "$OUT")"
+  jq -e '.hookSpecificOutput.permissionDecision == "deny"' "$ERR" >/dev/null 2>&1 \
+    || fail "jq-free Node stdin deny lost its permission decision: $(cat "$ERR")"
+  pass "the Node stdin transport denies delegation without jq"
 }
 
 test_codex_real_hook_surface_routes_delegation_and_preserves_scope() {
-  local tool child="$TMP_ROOT/codex-child" rc=0
+  local tool child="$TMP_ROOT/codex-child" no_jq_env="$TMP_ROOT/no-jq.bash" no_jq_loaded="$TMP_ROOT/no-jq.loaded" no_jq_called="$TMP_ROOT/no-jq.called" rc=0
   setup_codex_hook_fixture
 
   for tool in collaborationspawn_agent spawn_agent multi_agent_v1spawn_agent; do
@@ -338,6 +343,29 @@ test_codex_real_hook_surface_routes_delegation_and_preserves_scope() {
       "$ERR" >/dev/null 2>&1 \
       || fail "Codex primary deny for $tool lost the route-to-FirstMate decision: $(cat "$ERR")"
   done
+
+  cat > "$no_jq_env" <<'SH'
+printf 'loaded\n' >> "${FM_TEST_NO_JQ_LOADED:?}"
+command() {
+  if [ "${1:-}" = -v ] && [ "${2:-}" = jq ]; then
+    return 1
+  fi
+  builtin command "$@"
+}
+jq() {
+  printf 'called\n' >> "${FM_TEST_NO_JQ_CALLED:?}"
+  return 127
+}
+SH
+  export FM_TEST_NO_JQ_LOADED="$no_jq_loaded" FM_TEST_NO_JQ_CALLED="$no_jq_called"
+  rc=0
+  run_codex_pretool_hooks "$CODEX_PRIMARY" collaborationspawn_agent '' "$no_jq_env" || rc=$?
+  unset FM_TEST_NO_JQ_LOADED FM_TEST_NO_JQ_CALLED
+  [ -s "$no_jq_loaded" ] || fail "jq-free Codex hook fixture did not load its dependency mask"
+  [ ! -e "$no_jq_called" ] || fail "jq-free Codex delegation hook still invoked jq"
+  [ "$rc" -eq 2 ] || fail "Codex delegation hook must deny without jq, got exit $rc: $(cat "$ERR")"
+  jq -e '.hookSpecificOutput.permissionDecision == "deny"' "$ERR" >/dev/null 2>&1 \
+    || fail "jq-free Codex hook deny lost its permission decision: $(cat "$ERR")"
 
   for tool in $CODEX_OBSERVE_ONLY_TOOLS; do
     rc=0
@@ -378,5 +406,5 @@ test_task_worktree_and_non_firstmate_repo_are_inert
 test_secondmate_home_is_in_scope
 test_stdin_transports_and_output_shapes
 test_malformed_transport_fails_open
-test_missing_jq_stdin_transport_fails_open
+test_node_stdin_transport_does_not_require_jq
 test_codex_real_hook_surface_routes_delegation_and_preserves_scope
