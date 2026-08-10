@@ -51,9 +51,10 @@ Three exclusions keep the shape test from producing false positives.
 
 - A name beginning `mcp__` is never classified.
   An MCP server chooses its own tool names, a task or agent noun there is common, and it has no bearing on fleet dispatch.
-- `OBSERVE_ONLY_TOOLS`: the exact names `taskoutput`, `taskstop`, `taskget`, `tasklist`, `cronlist`, `bashoutput`, `killshell`, `listagents`, `waitagent`, `interruptagent`, `collaborationlistagents`, `collaborationwaitagent`, and `collaborationinterruptagent` are allowed.
+- `OBSERVE_ONLY_TOOLS`: the exact names `taskoutput`, `taskstop`, `taskget`, `tasklist`, `cronlist`, `bashoutput`, `killshell`, `listagents`, `waitagent`, `interruptagent`, `collaborationlistagents`, `collaborationwaitagent`, `collaborationinterruptagent`, `multiagentv1waitagent`, and `multiagentv1closeagent` are allowed.
   These observe or stop work that already exists rather than creating it, and denying them at this layer could strand already-running work with no way to inspect or end it.
   The bare and `collaboration`-prefixed variants cover Codex's direct tool spellings and the namespace-normalized spellings delivered to project hooks.
+  The `multiagentv1` variants cover Codex 0.147.0's V1 namespaced wait and close controls.
   A Claude primary's optional local deny list may still remove them from the schema.
   The shipped guard stays narrower on purpose so it can never be the reason a runaway task cannot be stopped.
 - `PLAN_ONLY_TOOLS`: the exact names `taskcreate` and `taskupdate` are allowed.
@@ -182,7 +183,7 @@ Applicability turns on one question: does the harness expose built-in delegation
 | Harness | Delegation surface | Status |
 | --- | --- | --- |
 | Claude | 16 known tools, listed above | Scoped guard wired and live-verified; untracked local deny list verified and recommended. |
-| Codex | `collaboration.spawn_agent`, delivered to hooks as `collaborationspawn_agent` | Scoped match-all guard wired and live-verified on Codex 0.147.0. |
+| Codex | `collaboration.spawn_agent`, delivered to hooks as `collaborationspawn_agent`; V1 `multi_agent_v1.spawn_agent`, serialized as `multi_agent_v1spawn_agent` | Scoped match-all guard wired; the V2 call was live-verified and the V1 serialization is behavior-covered on Codex 0.147.0. |
 | Grok | present, exact tokens unconfirmed | Not wired pending live verification. See below. |
 | OpenCode | present, exact tokens unconfirmed | Not wired pending live verification. See below. |
 | Pi | none reported | Not wired pending live verification. See below. |
@@ -332,7 +333,7 @@ The live consequence is confirmed by the shipped-guard result above: Claude hono
 
 `tests/fm-subagent-pretool-check.test.sh` owns the acceptance matrix and is registered in the `pure-contract-unit` family in `bin/fm-test-run.sh`.
 It covers the tracked Claude settings boundary that forbids a `permissions` key; the match-all Claude and Codex hook registrations; denial of every work-creating delegation tool by shape; denial of twelve hypothetical future tool names that appear on no list; the observe-or-stop, plan-only, and MCP exclusions; the exactness of the plan-only exclusion against six near-miss names a substring or shorter-stem widening would release; the scout-present and scout-absent message variants; the escape hatch including its fail-closed values; inertness in a linked task worktree and in a non-firstmate repo; in-scope enforcement for a marked secondmate home; both stdin transports; the empty-stdout requirement; fail-open transport behavior; and the preserved `Bash` seatbelts and `Stop` guard.
-Its Codex hook runner executes the commands selected by the tracked matcher against a FirstMate-shaped primary and linked worktree, proving the current `collaborationspawn_agent` token and normalized `spawn_agent` spelling are denied only in the primary while exact `list_agents`, `wait_agent`, and `interrupt_agent` controls and safe Bash stay allowed.
+Its Codex hook runner executes the commands selected by the tracked matcher against a FirstMate-shaped primary and linked worktree, proving the current `collaborationspawn_agent`, normalized `spawn_agent`, and V1 `multi_agent_v1spawn_agent` spellings are denied only in the primary while exact V2 list, wait, and interrupt controls, V1 wait and close controls, and safe Bash stay allowed.
 
 Run:
 

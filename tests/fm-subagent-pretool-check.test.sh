@@ -42,7 +42,7 @@ PLAN_ONLY_TOOLS='TaskCreate TaskUpdate'
 # assumed.
 PLAN_ONLY_NEAR_MISSES='TaskCreateAgent TaskCreateWorktree TaskUpdateAgent RemoteTaskCreate Task TaskCreator'
 
-CODEX_OBSERVE_ONLY_TOOLS='collaborationlist_agents collaborationwait_agent collaborationinterrupt_agent list_agents wait_agent interrupt_agent'
+CODEX_OBSERVE_ONLY_TOOLS='collaborationlist_agents collaborationwait_agent collaborationinterrupt_agent list_agents wait_agent interrupt_agent multi_agent_v1wait_agent multi_agent_v1close_agent'
 
 CODEX_OBSERVE_NEAR_MISSES='collaborationlist_agents_spawn collaborationwait_agent_task collaborationinterrupt_agent_worktree'
 
@@ -329,7 +329,7 @@ test_codex_real_hook_surface_routes_delegation_and_preserves_scope() {
   local tool child="$TMP_ROOT/codex-child" rc=0
   setup_codex_hook_fixture
 
-  for tool in collaborationspawn_agent spawn_agent; do
+  for tool in collaborationspawn_agent spawn_agent multi_agent_v1spawn_agent; do
     rc=0
     run_codex_pretool_hooks "$CODEX_PRIMARY" "$tool" || rc=$?
     [ "$rc" -eq 2 ] || fail "Codex primary hook surface must deny $tool, got exit $rc"
