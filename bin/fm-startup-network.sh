@@ -30,9 +30,10 @@
 #     running the digest states by name what is not yet confirmed.
 #   - Mutation authority is leased. The worker outlives the command that launched
 #     it, so it takes the same acquisition lease a new session must hold before
-#     replacing a dead owner, re-checks the captured owner under that lease, and
-#     holds it through the bounded mutating run. A takeover stays read-only until
-#     that run settles, so old and new owners can never sweep concurrently.
+#     replacing a safely reclaimable owner, re-checks the captured owner under
+#     that lease, and holds it through the bounded mutating run. A takeover stays
+#     read-only until that run settles, so old and new owners can never sweep
+#     concurrently.
 #
 # Usage: fm-startup-network.sh start --locked <0|1> --harvest-pid <pid>
 #          Launch the detached worker and return immediately. Single-flight: a
@@ -280,10 +281,10 @@ EOF
 # The question is deliberately "does the lock still name the session that asked
 # for this work?", not "is that session still alive". The hazard being closed is
 # a SECOND session sweeping concurrently, and taking the lock is exactly what
-# rewrites this value - bin/fm-lock.sh overwrites a dead holder's pid with its
-# own. An unchanged value therefore proves no one else owns the sweeps, which is
-# the whole guarantee. Requiring liveness instead would refuse to finish work
-# nobody else has claimed, and the sweeps are idempotent, so finishing it is
+# rewrites this value - bin/fm-lock.sh overwrites a safely reclaimed holder's pid
+# with its own. An unchanged value therefore proves no one else owns the sweeps,
+# which is the whole guarantee. Requiring liveness instead would refuse to finish
+# work nobody else has claimed, and the sweeps are idempotent, so finishing it is
 # strictly better than abandoning it. A missing, unreadable, or replaced lock all
 # fail closed to the read-only probe.
 lock_unchanged() {  # <expected-pid>

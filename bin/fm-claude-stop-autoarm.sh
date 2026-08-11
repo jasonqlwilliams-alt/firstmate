@@ -88,11 +88,11 @@ cat >/dev/null 2>&1 || true
 fm_primary_scope_matches "$FM_ROOT" "$STATE" || exit 0
 
 # --- identity: only the lock-owning session's hooks may arm ------------------
-# A prior session may have died after leaving its numeric harness pid in .lock.
-# Use the shared liveness predicate to recognize only that stale-owner case.
+# A prior session may have exited or stopped after leaving its numeric harness
+# pid in .lock. Recognize only owner states that fm-lock.sh can reclaim safely.
 # Defer the mutating claim until after the unchanged AFK and need gates, so an
-# idle or away home remains byte-for-byte inert. Missing or malformed locks are
-# uncertainty rather than stale-owner evidence and remain inert.
+# idle or away home remains byte-for-byte inert. Missing or malformed locks and
+# unclassifiable owners remain inert.
 RECOVER_SESSION_LOCK=0
 if ! fm_session_lock_owned_by_self "$STATE"; then
   LOCK_PID=$(cat "$STATE/.lock" 2>/dev/null || true)
@@ -117,10 +117,10 @@ need_supervision() {
 }
 need_supervision || exit 0
 
-# --- stale session-lock recovery ---------------------------------------------
-# Delegate the claim to fm-lock.sh so its live-owner refusal and write semantics
-# remain the single acquisition owner, then re-verify current-session identity
-# before touching any auto-arm state.
+# --- reclaimable session-lock recovery ---------------------------------------
+# Delegate the claim to fm-lock.sh so its owner classification, fencing, and
+# write semantics remain with the single acquisition owner, then re-verify
+# current-session identity before touching any auto-arm state.
 if [ "$RECOVER_SESSION_LOCK" -eq 1 ]; then
   "$SCRIPT_DIR/fm-lock.sh" >/dev/null 2>&1 || exit 0
   fm_session_lock_owned_by_self "$STATE" || exit 0
