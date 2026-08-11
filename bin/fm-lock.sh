@@ -44,6 +44,12 @@ if [ "${1:-}" = "status" ]; then
 fi
 
 me=$(fm_harness_ancestry_pid) || { echo "error: cannot locate harness process in ancestry" >&2; exit 1; }
+if [ -f "$LOCK" ] && [ ! -L "$LOCK" ]; then
+  existing_owner=$(cat "$LOCK" 2>/dev/null || true)
+  if fm_session_lock_pid_owned_by_self "$STATE" "$existing_owner"; then
+    me=$existing_owner
+  fi
+fi
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 me_identity=$(fm_pid_identity "$me" 2>/dev/null) || {
@@ -119,9 +125,7 @@ if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
       holder_state=$?
       case "$holder_state" in
         1)
-          recorded_identity=$(fm_session_lock_recorded_identity "$STATE" "$old" 2>/dev/null || true)
-          if [ -n "$recorded_identity" ] \
-            && ! fm_harness_pid_fence_stopped "$old" "$recorded_identity"; then
+          if ! fm_harness_pid_fence_stopped "$old"; then
             echo "error: prior session execution could not be safely excluded (pid $old); operate read-only until resolved" >&2
             exit 1
           fi

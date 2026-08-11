@@ -119,6 +119,13 @@ run_stage() {  # <home> <root> <args...>
     FM_HOME="$home" FM_ROOT_OVERRIDE="$root" "$root/bin/fm-startup-network.sh" "$@"
 }
 
+record_session_lock() {  # <home> [pid]
+  local home=$1 pid=${2:-$$} identity
+  identity=$(fm_test_pid_identity "$pid") || fail "could not capture fixture session identity for pid $pid"
+  printf '%s\n' "$pid" > "$home/state/.lock"
+  printf '%s\n%s\n' "$pid" "$identity" > "$home/state/.lock.pid-identity"
+}
+
 wait_for_startup_network_wake() {  # <home> [tenths]
   local home=$1 limit=${2:-50} waited=0
   while ! grep -Fq $'check\tstartup-network' "$home/state/.wake-queue" 2>/dev/null \
@@ -142,7 +149,7 @@ test_start_returns_without_holding_the_callers_stdout() {
   IFS='|' read -r home root log <<EOF
 $rec
 EOF
-  printf '%s\n' $$ > "$home/state/.lock"
+  record_session_lock "$home"
 
   started=$(date +%s)
   # Command substitution reads to EOF, exactly like a hook harvesting hook output.
@@ -165,7 +172,7 @@ test_harvest_acknowledgement_suppresses_the_wake_and_no_claim_produces_it() {
   IFS='|' read -r home root log <<EOF
 $rec
 EOF
-  printf '%s\n' $$ > "$home/state/.lock"
+  record_session_lock "$home"
 
   sleep 30 &
   claimant=$!
@@ -284,7 +291,7 @@ EOF
 
   # A detached start captures the lock itself and may run the mutating phase.
   : > "$log"
-  printf '%s\n' $$ > "$home/state/.lock"
+  record_session_lock "$home"
   FM_FAKE_BOOTSTRAP_LOG="$log" run_stage "$home" "$root" start --locked 1 --harvest-pid $$
   run_stage "$home" "$root" wait 30 >/dev/null || fail "the lock-authorized worker never published"
   assert_grep 'network=only detect_only=0' "$log" \
@@ -300,7 +307,7 @@ test_the_stage_bound_is_reported_not_swallowed() {
   IFS='|' read -r home root log <<EOF
 $rec
 EOF
-  printf '%s\n' $$ > "$home/state/.lock"
+  record_session_lock "$home"
 
   FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_SLEEP=20 FM_STARTUP_NETWORK_TIMEOUT=2 \
     run_stage "$home" "$root" start --locked 1 --harvest-pid $$
@@ -363,7 +370,7 @@ test_start_is_single_flight() {
   IFS='|' read -r home root log <<EOF
 $rec
 EOF
-  printf '%s\n' $$ > "$home/state/.lock"
+  record_session_lock "$home"
 
   FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_SLEEP=6 \
     run_stage "$home" "$root" start --locked 1 --harvest-pid $$
@@ -413,13 +420,13 @@ test_new_lock_owner_does_not_reuse_the_previous_owners_worker() {
   IFS='|' read -r home root log <<EOF
 $rec
 EOF
-  printf '%s\n' $$ > "$home/state/.lock"
+  record_session_lock "$home"
   FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_SLEEP=6 \
     run_stage "$home" "$root" start --locked 1 --harvest-pid $$
   generation_one=$(sed -n 's/^generation=//p' "$home/state/.startup-network.status")
 
   next_owner=$(/bin/ps -o ppid= -p $$ | tr -d ' ')
-  printf '%s\n' "$next_owner" > "$home/state/.lock"
+  record_session_lock "$home" "$next_owner"
   FM_FAKE_HARNESS_PID_OVERRIDE="$next_owner" FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_SLEEP=1 \
     run_stage "$home" "$root" start --locked 1 --harvest-pid $$
   generation_two=$(sed -n 's/^generation=//p' "$home/state/.startup-network.status")
@@ -435,7 +442,7 @@ test_lock_takeover_stays_read_only_while_a_sweep_holds_the_lease() {
   IFS='|' read -r home root log <<EOF
 $rec
 EOF
-  printf '%s\n' $$ > "$home/state/.lock"
+  record_session_lock "$home"
   FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_SLEEP=6 \
     run_stage "$home" "$root" start --locked 1 --harvest-pid $$
   while [ ! -s "$log" ] && [ "$waited" -lt 50 ]; do
@@ -466,6 +473,41 @@ EOF
     "the fleet lock did not record the harness owner reported by acquisition"
   [ "$new_owner" != "$$" ] || fail "the prior harness still owned the lock after takeover"
   pass "fm-startup-network: fleet-lock takeover cannot overlap a mutating sweep"
+}
+
+test_reused_lock_pid_with_changed_identity_downgrades_under_the_lease() {
+  local rec home root log blocker waited=0 report
+  rec=$(new_world identity-handoff)
+  IFS='|' read -r home root log <<EOF
+$rec
+EOF
+  record_session_lock "$home"
+
+  FM_HOME="$home" FM_ROOT_OVERRIDE="$root" bash -c '
+    . "$1/bin/fm-wake-lib.sh"
+    fm_lock_acquire_wait "$FM_HOME/state/.lock.acquire"
+    : > "$FM_HOME/state/acquire-held"
+    while [ ! -e "$FM_HOME/state/release-acquire" ]; do sleep 0.02; done
+    fm_lock_release "$FM_HOME/state/.lock.acquire"
+  ' _ "$root" &
+  blocker=$!
+  while [ ! -e "$home/state/acquire-held" ] && [ "$waited" -lt 100 ]; do
+    sleep 0.02
+    waited=$((waited + 1))
+  done
+  [ -e "$home/state/acquire-held" ] || fail "fixture never held the acquisition lease"
+
+  FM_FAKE_BOOTSTRAP_LOG="$log" run_stage "$home" "$root" start --locked 1 --harvest-pid $$
+  printf '%s\n%s\n' $$ replacement-identity > "$home/state/.lock.pid-identity"
+  : > "$home/state/release-acquire"
+  wait "$blocker" 2>/dev/null || true
+  run_stage "$home" "$root" wait 30 >/dev/null || fail "identity-handoff worker never published"
+  assert_grep 'network=only detect_only=1' "$log" \
+    "a worker mutated after its captured PID was reused with a different identity"
+  report=$(run_stage "$home" "$root" report)
+  assert_contains "$report" "NETWORK_CHECKS: the fleet lock was no longer held" \
+    "identity replacement did not produce the stale-worker downgrade report"
+  pass "fm-startup-network: detached workers bind mutation leases to owner identity"
 }
 
 # Every record carries a start offset from ONE origin, so the artifact reads as a
@@ -518,7 +560,7 @@ test_timings_are_published_and_only_the_on_demand_report_prints_them() {
   IFS='|' read -r home root log <<EOF
 $rec
 EOF
-  printf '%s\n' $$ > "$home/state/.lock"
+  record_session_lock "$home"
 
   FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_OUT='sweep finding' \
     FM_FAKE_TIMING_PHASE=fleet-sync FM_FAKE_TIMING_DETAIL=dotfiles-private \
@@ -556,7 +598,7 @@ test_a_bounded_run_still_publishes_the_timings_it_managed_to_record() {
   IFS='|' read -r home root log <<EOF
 $rec
 EOF
-  printf '%s\n' $$ > "$home/state/.lock"
+  record_session_lock "$home"
 
   FM_STARTUP_NETWORK_TIMEOUT=1 FM_SESSION_START_TIMEOUT=2 \
     FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_SLEEP=20 \
@@ -582,7 +624,7 @@ test_the_timing_artifact_cannot_carry_a_command_line_or_forge_records() {
   IFS='|' read -r home root log <<EOF
 $rec
 EOF
-  printf '%s\n' $$ > "$home/state/.lock"
+  record_session_lock "$home"
 
   FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_TIMING_PHASE=secondmate-sync \
     FM_FAKE_TIMING_DETAIL="ssh -i /key host	v1	forged	0	9999
@@ -624,6 +666,7 @@ test_start_is_single_flight
 test_start_reserves_its_generation_before_returning
 test_new_lock_owner_does_not_reuse_the_previous_owners_worker
 test_lock_takeover_stays_read_only_while_a_sweep_holds_the_lease
+test_reused_lock_pid_with_changed_identity_downgrades_under_the_lease
 test_records_share_one_origin_so_offsets_form_a_timeline
 test_timings_are_published_and_only_the_on_demand_report_prints_them
 test_a_bounded_run_still_publishes_the_timings_it_managed_to_record

@@ -95,17 +95,21 @@ fm_primary_scope_matches "$FM_ROOT" "$STATE" || exit 0
 # unclassifiable owners remain inert.
 RECOVER_SESSION_LOCK=0
 if ! fm_session_lock_owned_by_self "$STATE"; then
-  LOCK_PID=$(cat "$STATE/.lock" 2>/dev/null || true)
-  case "$LOCK_PID" in
-    ''|*[!0-9]*) exit 0 ;;
-  esac
-  if fm_harness_pid_alive "$LOCK_PID"; then
-    exit 0
+  if fm_session_lock_pid_owned_by_self "$STATE"; then
+    RECOVER_SESSION_LOCK=1
   else
-    LOCK_STATE=$?
-    [ "$LOCK_STATE" -eq 1 ] || [ "$LOCK_STATE" -eq 3 ] || exit 0
+    LOCK_PID=$(cat "$STATE/.lock" 2>/dev/null || true)
+    case "$LOCK_PID" in
+      ''|*[!0-9]*) exit 0 ;;
+    esac
+    if fm_harness_pid_alive "$LOCK_PID"; then
+      exit 0
+    else
+      LOCK_STATE=$?
+      [ "$LOCK_STATE" -eq 1 ] || [ "$LOCK_STATE" -eq 3 ] || exit 0
+    fi
+    RECOVER_SESSION_LOCK=1
   fi
-  RECOVER_SESSION_LOCK=1
 fi
 
 # --- AFK: the away daemon owns the watcher and triage; never rewake ----------

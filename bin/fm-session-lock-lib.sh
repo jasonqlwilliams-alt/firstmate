@@ -192,7 +192,6 @@ fm_process_group_execution_state() {
 
 fm_harness_pid_fence_stopped() {
   local pid=$1 expected_identity=${2:-} owner_state attempt=0 pgid caller_pgid current_identity group_state
-  [ -n "$expected_identity" ] || return 1
   if fm_harness_pid_alive "$pid"; then
     return 1
   else
@@ -208,7 +207,7 @@ fm_harness_pid_fence_stopped() {
       [ "$group_state" -eq 1 ]
       return $?
       ;;
-    3) ;;
+    3) [ -n "$expected_identity" ] || return 1 ;;
     *) return 1 ;;
   esac
   pgid=$(LC_ALL=C ps -o pgid= -p "$pid" 2>/dev/null) || return 1
@@ -245,20 +244,21 @@ fm_harness_pid_fence_stopped() {
   return 1
 }
 
-# True when state dir $1 holds a session lock whose pid is ANY harness ancestor
-# of the current process: this script runs inside the session that owns the
-# home's fleet lock. Membership is the honest test of that question, because the
-# lock owner sits at an unknown depth in a contiguous Claude run - it is the
+# True when state dir $1 holds a session lock whose numeric pid is ANY harness
+# ancestor of the current process. Membership is the honest test of that
+# question, because the lock owner sits at an unknown depth in a contiguous
+# Claude run - it is the
 # outermost pid when the hook fires inside the session's own nested worker chain,
 # and an inner pid when a harness-named daemon parents the session. A missing
 # lock, a malformed lock, a lock held by a harness outside this ancestry, or an
 # ancestry that cannot be resolved all fail closed.
-fm_session_lock_owned_by_self() {
-  local state=$1 lock_pid pids pid
+fm_session_lock_pid_owned_by_self() {
+  local state=$1 expected_pid=${2:-} lock_pid pids pid
   lock_pid=$(cat "$state/.lock" 2>/dev/null || true)
   case "$lock_pid" in
     ''|*[!0-9]*) return 1 ;;
   esac
+  [ -z "$expected_pid" ] || [ "$lock_pid" = "$expected_pid" ] || return 1
   pids=$(fm_harness_ancestry_pids) || return 1
   while IFS= read -r pid; do
     [ "$pid" = "$lock_pid" ] && return 0
@@ -266,4 +266,16 @@ fm_session_lock_owned_by_self() {
 $pids
 EOF
   return 1
+}
+
+fm_session_lock_owned_by_self() {
+  local state=$1 lock_pid recorded_identity current_identity confirmed_identity
+  lock_pid=$(cat "$state/.lock" 2>/dev/null) || return 1
+  fm_session_lock_pid_owned_by_self "$state" "$lock_pid" || return 1
+  recorded_identity=$(fm_session_lock_recorded_identity "$state" "$lock_pid" 2>/dev/null) || return 1
+  current_identity=$(fm_pid_identity "$lock_pid" 2>/dev/null) || return 1
+  [ "$current_identity" = "$recorded_identity" ] || return 1
+  [ "$(cat "$state/.lock" 2>/dev/null || true)" = "$lock_pid" ] || return 1
+  confirmed_identity=$(fm_session_lock_recorded_identity "$state" "$lock_pid" 2>/dev/null) || return 1
+  [ "$confirmed_identity" = "$recorded_identity" ]
 }

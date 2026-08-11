@@ -61,6 +61,7 @@ lib_eval() {  # <fakebin> <expression>
         *) return 0 ;;
       esac
     }
+    fm_pid_identity() { printf "fixture-identity-%s\n" "$1"; }
     eval "$2"
   ' _ "$LIB" "$expr"
 }
@@ -96,6 +97,7 @@ esac
 SH
   chmod +x "$fakebin/ps"
   printf '700\n' > "$dir/state/.lock"
+  printf '700\nfixture-identity-700\n' > "$dir/state/.lock.pid-identity"
 
   for shape in linux macos; do
     got=$(FM_TEST_CLAUDE_SHAPE="$shape" lib_eval "$fakebin" 'fm_harness_ancestry_pid') \
@@ -106,6 +108,16 @@ SH
     FM_TEST_CLAUDE_SHAPE="$shape" lib_eval "$fakebin" "fm_session_lock_owned_by_self '$dir/state'" \
       || fail "$shape: the session holding the lock did not recognize itself as the owner"
   done
+  rm -f "$dir/state/.lock.pid-identity"
+  FM_TEST_CLAUDE_SHAPE=linux lib_eval "$fakebin" "fm_session_lock_pid_owned_by_self '$dir/state'" \
+    || fail "a legacy lock no longer retained its numeric current-session membership"
+  if FM_TEST_CLAUDE_SHAPE=linux lib_eval "$fakebin" "fm_session_lock_owned_by_self '$dir/state'"; then
+    fail "a legacy numeric-only lock was accepted as durable current-session ownership"
+  fi
+  printf '700\nwrong-identity\n' > "$dir/state/.lock.pid-identity"
+  if FM_TEST_CLAUDE_SHAPE=linux lib_eval "$fakebin" "fm_session_lock_owned_by_self '$dir/state'"; then
+    fail "a mismatched birth identity was accepted as current-session ownership"
+  fi
   pass "session-lock: a version-named Claude Code session is identified from its install path and argv[0]"
 }
 
@@ -197,9 +209,56 @@ SH
     fail "an unrelated harness beyond a non-harness gap was accepted as this session's lock owner"
   fi
   printf '900\n' > "$dir/state/.lock"
+  printf '900\nfixture-identity-900\n' > "$dir/state/.lock.pid-identity"
   lib_eval "$fakebin" "fm_session_lock_owned_by_self '$dir/state'" \
     || fail "the contiguous harness run did not recognize its own lock"
   pass "session-lock: ownership stops at the first non-harness gap above the contiguous run"
+}
+
+test_legacy_dead_group_leader_with_a_surviving_child_stays_read_only() {
+  local dir owner_bin owner child owner_pgid child_pgid monitor_was_on i out status
+  dir="$TMP_ROOT/legacy-surviving-group"
+  owner_bin="$dir/owner-bin"
+  mkdir -p "$dir/home/state" "$owner_bin"
+  ln -s /bin/bash "$owner_bin/claude"
+
+  monitor_was_on=0
+  case $- in *m*) monitor_was_on=1 ;; esac
+  set -m
+  "$owner_bin/claude" -c 'trap "" HUP; sleep 60 & printf "%s\n" "$!" > "$1"; wait' _ "$dir/child-pid" &
+  owner=$!
+  [ "$monitor_was_on" -eq 1 ] || set +m
+  LOCK_FIXTURE_PIDS+=("$owner")
+  i=0
+  while [ "$i" -lt 100 ] && [ ! -s "$dir/child-pid" ]; do
+    sleep 0.02
+    i=$((i + 1))
+  done
+  [ -s "$dir/child-pid" ] || fail "synthetic legacy owner did not start its child"
+  child=$(cat "$dir/child-pid")
+  LOCK_FIXTURE_PIDS+=("$child")
+  owner_pgid=$(ps -o pgid= -p "$owner" 2>/dev/null | tr -d '[:space:]')
+  child_pgid=$(ps -o pgid= -p "$child" 2>/dev/null | tr -d '[:space:]')
+  [ "$owner_pgid" = "$owner" ] && [ "$child_pgid" = "$owner" ] \
+    || fail "synthetic legacy owner and child did not share a leader-owned process group"
+
+  kill -KILL "$owner"
+  wait "$owner" 2>/dev/null || true
+  kill -0 "$child" 2>/dev/null || fail "synthetic child did not survive its group leader"
+  printf '%s\n' "$owner" > "$dir/home/state/.lock"
+  out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$NAMED_CLAUDE" -c \
+    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) && status=0 || status=$?
+  expect_code 1 "$status" "a legacy dead group leader with surviving execution must stay read-only"
+  assert_contains "$out" "prior session execution could not be safely excluded" \
+    "legacy surviving execution was not reported as the takeover blocker"
+  [ "$(cat "$dir/home/state/.lock")" = "$owner" ] \
+    || fail "legacy surviving execution allowed lock replacement"
+  kill -0 "$child" 2>/dev/null || fail "the non-destructive legacy check signaled the surviving child"
+
+  kill "$child" 2>/dev/null || true
+  wait "$child" 2>/dev/null || true
+  LOCK_FIXTURE_PIDS=()
+  pass "session-lock: legacy dead leaders cannot hide surviving process-group execution"
 }
 
 test_competing_version_named_session_is_seen_as_live() {
@@ -607,6 +666,7 @@ test_ordinary_paths_are_never_harness_processes
 test_harness_beyond_a_gap_never_owns_the_lock
 test_competing_version_named_session_is_seen_as_live
 test_supported_process_state_surfaces_are_classified
+test_legacy_dead_group_leader_with_a_surviving_child_stays_read_only
 test_real_lock_interface_classifies_owner_process_state
 test_e2e_version_named_session_claims_the_home
 test_e2e_daemon_parented_session_claims_the_home

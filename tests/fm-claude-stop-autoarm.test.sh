@@ -226,6 +226,31 @@ test_reclaims_stale_session_lock_before_arming() {
   pass "auto-arm: a demonstrably dead recorded session owner is reclaimed through fm-lock.sh before arming"
 }
 
+test_repairs_current_owner_identity_before_arming() {
+  local dir out status expected_pid expected_identity recorded_pid recorded_identity
+  dir=$(make_primary_dir "$TMP_ROOT/current-owner-identity")
+  : > "$dir/state/task.meta"
+  write_arm_fixture "$dir" actionable
+  out=$(printf '%s\n' '{"session_id":"identity"}' \
+    | FM_HOME="$dir" "$FAKE_CLAUDE" -c '
+        . "$FM_HOME/bin/fm-wake-lib.sh"
+        printf "%s\n" "$$" > "$FM_HOME/state/.lock"
+        printf "%s\n" "$$" > "$FM_HOME/state/expected-owner"
+        fm_pid_identity "$$" > "$FM_HOME/state/expected-identity"
+        printf "%s\n%s\n" "$$" stale-identity > "$FM_HOME/state/.lock.pid-identity"
+        "$FM_HOME/bin/fm-claude-stop-autoarm.sh"
+      ' 2>&1); status=$?
+  expect_code 2 "$status" "a current owner with stale identity must upgrade its lock before arming"
+  expected_pid=$(cat "$dir/state/expected-owner")
+  expected_identity=$(cat "$dir/state/expected-identity")
+  recorded_pid=$(sed -n '1p' "$dir/state/.lock.pid-identity")
+  recorded_identity=$(sed -n '2p' "$dir/state/.lock.pid-identity")
+  [ "$recorded_pid" = "$expected_pid" ] && [ "$recorded_identity" = "$expected_identity" ] \
+    || fail "current-owner recovery did not publish the exact PID-and-birth-identity pair"
+  [ -e "$dir/state/arm-ran" ] || fail "hook did not arm after upgrading current-owner identity"
+  pass "auto-arm: current numeric owners upgrade stale identity before arming"
+}
+
 test_inert_when_lock_held_by_other_harness() {
   local dir other out status owner_after
   dir=$(make_primary_dir "$TMP_ROOT/other-lock")
@@ -623,6 +648,7 @@ test_fm_lock_status_still_works_with_shared_lib() {
 test_inert_in_child_worktree
 test_inert_without_session_lock
 test_reclaims_stale_session_lock_before_arming
+test_repairs_current_owner_identity_before_arming
 test_inert_when_lock_held_by_other_harness
 test_inert_when_other_harness_state_is_unknown
 test_inert_when_afk

@@ -929,7 +929,7 @@ SH
 }
 
 test_network_sweeps_recheck_lock_ownership() {
-  local case_dir fakebin fake_root marker out
+  local case_dir fakebin fake_root marker out identity
   case_dir="$TMP_ROOT/network-lock-handoff"
   mkdir -p "$case_dir/home/config" "$case_dir/home/projects" "$case_dir/home/state"
   printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
@@ -957,6 +957,18 @@ SH
     "the stale worker did not report the refused handoff sweep"
   assert_contains "$out" "changed before project clone refresh" \
     "the stale worker did not report the refused clone refresh"
+
+  identity=$(fm_test_pid_identity "$$") || fail "could not capture bootstrap fixture identity"
+  printf '%s\n' $$ > "$case_dir/home/state/.lock"
+  printf '%s\n%s\n' $$ replacement-identity > "$case_dir/home/state/.lock.pid-identity"
+  rm -f "$marker"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$fake_root" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_BOOTSTRAP_NETWORK=only \
+    FM_BOOTSTRAP_NETWORK_LOCK_PID=$$ FM_BOOTSTRAP_NETWORK_LOCK_IDENTITY="$identity" \
+    FM_FAKE_FLEET_SYNC_STARTED_MARKER="$marker" "$ROOT/bin/fm-bootstrap.sh")
+  assert_absent "$marker" "a stale worker refreshed project clones after same-PID identity handoff"
+  assert_contains "$out" "changed before project clone refresh" \
+    "same-PID identity replacement did not revoke deferred mutation authority"
   pass "bootstrap: every deferred mutating sweep rechecks fleet-lock ownership"
 }
 
@@ -981,11 +993,13 @@ assert_timing_record() {
 # bin/fm-timing-lib.sh stays inert unless FM_TIMING_LOG names a file, so an
 # ordinary bootstrap run is unaffected either way, which is asserted here too.
 test_network_phases_record_per_step_elapsed_times() {
-  local case_dir fakebin log fields
+  local case_dir fakebin log fields identity
   case_dir="$TMP_ROOT/network-timings"
   mkdir -p "$case_dir/home/config" "$case_dir/home/state" "$case_dir/home/data" "$case_dir/home/projects"
   printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
   printf '%s\n' $$ > "$case_dir/home/state/.lock"
+  identity=$(fm_test_pid_identity "$$") || fail "could not capture bootstrap timing fixture identity"
+  printf '%s\n%s\n' $$ "$identity" > "$case_dir/home/state/.lock.pid-identity"
   fakebin=$(make_fake_toolchain "$case_dir")
   # A real clone with a real origin, so fm-fleet-sync.sh genuinely iterates it.
   fm_git_init_commit "$case_dir/home/projects/alpha"
@@ -997,7 +1011,8 @@ test_network_phases_record_per_step_elapsed_times() {
   log="$case_dir/timings.tsv"
   PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$ROOT" \
     FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_BOOTSTRAP_NETWORK=only \
-    FM_BOOTSTRAP_NETWORK_LOCK_PID=$$ FM_TIMING_LOG="$log" FM_TIMING_EPOCH_MS=0 \
+    FM_BOOTSTRAP_NETWORK_LOCK_PID=$$ FM_BOOTSTRAP_NETWORK_LOCK_IDENTITY="$identity" \
+    FM_TIMING_LOG="$log" FM_TIMING_EPOCH_MS=0 \
     "$ROOT/bin/fm-bootstrap.sh" >/dev/null 2>&1
 
   assert_present "$log" "the network phase recorded no elapsed times at all"
@@ -1022,7 +1037,7 @@ test_network_phases_record_per_step_elapsed_times() {
   rm -f "$log"
   PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$ROOT" \
     FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_BOOTSTRAP_NETWORK=only \
-    FM_BOOTSTRAP_NETWORK_LOCK_PID=$$ \
+    FM_BOOTSTRAP_NETWORK_LOCK_PID=$$ FM_BOOTSTRAP_NETWORK_LOCK_IDENTITY="$identity" \
     "$ROOT/bin/fm-bootstrap.sh" >/dev/null 2>&1
   assert_absent "$log" "a run that never asked for timings recorded them anyway"
   pass "bootstrap: each deferred network phase, secondmate, and clone records its own elapsed time"
