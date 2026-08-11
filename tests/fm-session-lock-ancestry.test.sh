@@ -52,11 +52,17 @@ trap 'cleanup_lock_fixture_processes; exit 143' TERM
 # liveness questions are decided by the process table alone.
 lib_eval() {  # <fakebin> <expression>
   local fakebin=$1 expr=$2
-  PATH="$fakebin:$PATH" bash -c "
-    . \"\$0\"
-    kill() { return 0; }
-    $expr
-  " "$LIB"
+  PATH="$fakebin:$PATH" bash -c '
+    . "$1"
+    kill() {
+      case "${FM_TEST_KILL_PROBE:-alive}" in
+        missing) printf "%s\n" "kill: ($2) - No such process" >&2; return 1 ;;
+        denied) printf "%s\n" "kill: ($2) - Operation not permitted" >&2; return 1 ;;
+        *) return 0 ;;
+      esac
+    }
+    eval "$2"
+  ' _ "$LIB" "$expr"
 }
 
 test_version_named_session_is_identified_on_both_platforms() {
@@ -271,18 +277,29 @@ SH
       && status=0 || status=$?
     expect_code 0 "$status" "active ps state $process_state must retain a live harness owner's lock"
   done
-  for process_state in T t X Z; do
+  for process_state in T t; do
     FM_TEST_OWNER_STATE="$process_state" lib_eval "$fakebin" 'fm_harness_pid_alive 700' \
       && status=0 || status=$?
-    expect_code 1 "$status" "stopped or terminal ps state $process_state must reject harness ownership"
+    expect_code 3 "$status" "stopped ps state $process_state must require fenced recovery"
+  done
+  for process_state in X Z; do
+    FM_TEST_OWNER_STATE="$process_state" lib_eval "$fakebin" 'fm_harness_pid_alive 700' \
+      && status=0 || status=$?
+    expect_code 1 "$status" "terminal ps state $process_state must reject harness ownership"
   done
   for process_state in error Q; do
     FM_TEST_OWNER_STATE="$process_state" lib_eval "$fakebin" 'fm_harness_pid_alive 700' \
       && status=0 || status=$?
     expect_code 2 "$status" "unreadable or unrecognized ps state $process_state must stay unknown"
   done
+  FM_TEST_OWNER_STATE=S FM_TEST_KILL_PROBE=missing lib_eval "$fakebin" \
+    'fm_harness_pid_alive 700' && status=0 || status=$?
+  expect_code 1 "$status" "a no-such-process probe must classify the owner as absent"
+  FM_TEST_OWNER_STATE=S FM_TEST_KILL_PROBE=denied lib_eval "$fakebin" \
+    'fm_harness_pid_alive 700' && status=0 || status=$?
+  expect_code 2 "$status" "a permission-denied process probe must stay unknown"
 
-  pass "session-lock: Linux and macOS ps state surfaces distinguish active, stopped, terminal, and unknown owners"
+  pass "session-lock: process probes and Linux and macOS states distinguish absent, active, stopped, terminal, and unknown owners"
 }
 
 test_real_lock_interface_classifies_owner_process_state() {
@@ -327,16 +344,22 @@ test_real_lock_interface_classifies_owner_process_state() {
   esac
 
   out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$ROOT/bin/fm-lock.sh" status 2>&1)
-  assert_contains "$out" "lock: stale" "status must reject a stopped harness as a live owner"
+  assert_contains "$out" "lock: stopped" "status must disclose a stopped harness owner"
   out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$NAMED_CLAUDE" -c \
     '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) && status=0 || status=$?
+  wait "$owner" 2>/dev/null || true
   expect_code 0 "$status" "a challenger must reclaim the lock from a stopped harness owner"
   assert_contains "$out" "lock acquired: harness pid" \
     "stopped-owner reclamation must complete through the real lock interface"
   owner_after=$(cat "$dir/home/state/.lock")
   [ "$owner_after" != "$owner" ] || fail "stopped harness owner retained the session lock"
+  kill -CONT "$owner" 2>/dev/null \
+    && fail "a fenced former owner remained resumable after lock takeover"
+  LOCK_FIXTURE_PIDS=()
 
-  kill -CONT "$owner"
+  "$owner_bin/claude" 60 &
+  owner=$!
+  LOCK_FIXTURE_PIDS+=("$owner")
   printf '%s\n' "$owner" > "$dir/home/state/.lock"
   cat > "$fakebin/ps" <<'SH'
 #!/usr/bin/env bash
@@ -374,7 +397,7 @@ SH
   wait "$owner" 2>/dev/null || true
   LOCK_FIXTURE_PIDS=()
 
-  pass "session-lock: real acquisition excludes active owners, rejects stopped owners, and fails closed on unknown state"
+  pass "session-lock: real acquisition excludes active owners, fences stopped owners, and fails closed on unknown state"
 }
 
 # --- end-to-end layer: the real Stop auto-arm in real process trees ----------

@@ -130,17 +130,22 @@ EOF
 }
 
 # Classify whether $1 is an active process that looks like a verified harness.
-# Return 0 for an active harness owner, 1 for a demonstrably absent, stopped,
-# terminal, or non-harness process, and 2 when an existing harness process
-# cannot be inspected safely.
+# Return 0 for an active harness owner, 1 for a demonstrably absent, terminal,
+# or non-harness process, 2 when the process cannot be inspected safely, and 3
+# for a stopped harness owner that must be fenced before lock takeover.
 #
 # Linux procps and macOS BSD ps both expose the process state through `stat`.
 # Their first state character is structural: D/I/R/S/U/W are active or waiting,
 # T/t are stopped, and X/Z are terminal; any other or unreadable value is
 # unknown and must not authorize lock takeover.
 fm_harness_pid_alive() {
-  local pid=$1 comm args process_state
-  kill -0 "$pid" 2>/dev/null || return 1
+  local pid=$1 comm args process_state probe_error
+  if ! probe_error=$(LC_ALL=C kill -0 "$pid" 2>&1); then
+    case "$probe_error" in
+      *"No such process"*) return 1 ;;
+      *) return 2 ;;
+    esac
+  fi
   comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 2
   args=$(ps -o args= -p "$pid" 2>/dev/null) || return 2
   fm_harness_process_matches "$comm" "$args" || return 1
@@ -148,9 +153,40 @@ fm_harness_pid_alive() {
   process_state=${process_state#"${process_state%%[![:space:]]*}"}
   case "$process_state" in
     [DIRSUW]*) return 0 ;;
-    [TtXZ]*) return 1 ;;
+    [XZ]*) return 1 ;;
+    [Tt]*) return 3 ;;
     *) return 2 ;;
   esac
+}
+
+fm_harness_pid_fence_stopped() {
+  local pid=$1 owner_state attempt=0
+  if fm_harness_pid_alive "$pid"; then
+    return 1
+  else
+    owner_state=$?
+  fi
+  case "$owner_state" in
+    1) return 0 ;;
+    3) ;;
+    *) return 1 ;;
+  esac
+  kill -KILL "$pid" 2>/dev/null || return 1
+  while [ "$attempt" -lt 100 ]; do
+    if fm_harness_pid_alive "$pid"; then
+      owner_state=0
+    else
+      owner_state=$?
+    fi
+    case "$owner_state" in
+      1) return 0 ;;
+      0|3) ;;
+      *) return 1 ;;
+    esac
+    sleep 0.02
+    attempt=$((attempt + 1))
+  done
+  return 1
 }
 
 # True when state dir $1 holds a session lock whose pid is ANY harness ancestor

@@ -244,6 +244,10 @@ case "$*" in
     fi
     exit 0
     ;;
+  *"stat="*)
+    printf '%s\n' 'S'
+    exit 0
+    ;;
   *"ppid="*)
     [ -n "${FM_FAKE_HARNESS_PID:-}" ] || exit 1
     /bin/ps -o ppid= -p "$pid"
@@ -283,6 +287,7 @@ case "\$*" in
     fi
     exit 0
     ;;
+  *"stat="*) printf '%s\n' 'S'; exit 0 ;;
   *"ppid="*) printf '%s\n' "$holder_pid"; exit 0 ;;
 esac
 exit 1
@@ -893,6 +898,7 @@ case "$*" in
       printf '%s\n' bash
     fi
     ;;
+  *"stat="*) printf '%s\n' 'S' ;;
   *"ppid="*) printf '%s\n' "$FM_FAKE_HARNESS_PID" ;;
   *) exit 1 ;;
 esac

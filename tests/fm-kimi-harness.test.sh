@@ -548,6 +548,7 @@ test_kimi_session_lock_identity() {
 case "$*" in
   *"comm="*) printf '%s\n' '/opt/kimi/bin/kimi'; exit 0 ;;
   *"args="*) printf '%s\n' 'kimi'; exit 0 ;;
+  *"stat="*) printf '%s\n' 'S'; exit 0 ;;
 esac
 exit 1
 SH

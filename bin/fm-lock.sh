@@ -33,11 +33,11 @@ if [ "${1:-}" = "status" ]; then
     echo "lock: held by live harness pid $old"
   else
     holder_state=$?
-    if [ "$holder_state" -eq 1 ]; then
-      echo "lock: stale (pid $old inactive, dead, or not a harness)"
-    else
-      echo "lock: unknown (cannot classify harness pid $old)"
-    fi
+    case "$holder_state" in
+      1) echo "lock: stale (pid $old dead, terminal, or not a harness)" ;;
+      3) echo "lock: stopped (pid $old requires fenced recovery)" ;;
+      *) echo "lock: unknown (cannot classify harness pid $old)" ;;
+    esac
   fi
   exit 0
 fi
@@ -75,7 +75,7 @@ if [ -f "$LOCK" ] && [ ! -L "$LOCK" ]; then
     exit 1
   else
     holder_state=$?
-    if [ "$holder_state" -ne 1 ]; then
+    if [ "$holder_state" -ne 1 ] && [ "$holder_state" -ne 3 ]; then
       echo "error: cannot classify session lock owner process (pid $old); operate read-only until resolved" >&2
       exit 1
     fi
@@ -107,10 +107,19 @@ if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
       exit 1
     else
       holder_state=$?
-      if [ "$holder_state" -ne 1 ]; then
-        echo "error: cannot classify session lock owner process (pid $old); operate read-only until resolved" >&2
-        exit 1
-      fi
+      case "$holder_state" in
+        1) ;;
+        3)
+          if ! fm_harness_pid_fence_stopped "$old"; then
+            echo "error: stopped session lock owner could not be safely fenced (pid $old); operate read-only until resolved" >&2
+            exit 1
+          fi
+          ;;
+        *)
+          echo "error: cannot classify session lock owner process (pid $old); operate read-only until resolved" >&2
+          exit 1
+          ;;
+      esac
     fi
   fi
 fi
