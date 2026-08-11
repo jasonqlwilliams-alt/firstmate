@@ -546,6 +546,7 @@ test_kimi_session_lock_identity() {
   cat > "$fakebin/ps" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
+  *"lstart="*) /bin/ps "$@"; exit $? ;;
   *"comm="*) printf '%s\n' '/opt/kimi/bin/kimi'; exit 0 ;;
   *"args="*) printf '%s\n' 'kimi'; exit 0 ;;
   *"stat="*) printf '%s\n' 'S'; exit 0 ;;

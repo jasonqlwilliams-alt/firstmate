@@ -226,6 +226,10 @@ for argument in "$@"; do
   previous=$argument
 done
 case "$*" in
+  *"lstart="*)
+    /bin/ps "$@"
+    exit $?
+    ;;
   *"comm="*)
     if [ -z "${FM_FAKE_HARNESS_PID:-}" ] || [ "$pid" = "$FM_FAKE_HARNESS_PID" ] \
       || [ "$pid" = "${FM_FAKE_LIVE_HOLDER_PID:-}" ]; then
@@ -271,6 +275,7 @@ for arg in "\$@"; do
   prev="\$arg"
 done
 case "\$*" in
+  *"lstart="*) /bin/ps "\$@"; exit \$? ;;
   *"comm="*)
     if [ "\$pid" = "$holder_pid" ]; then
       printf '/usr/local/bin/pi\n'
@@ -884,6 +889,7 @@ for argument in "$@"; do
   previous=$argument
 done
 case "$*" in
+  *"lstart="*) /bin/ps "$@" ;;
   *"comm="*)
     if [ -f "$FM_FAKE_LOCK_STATE/harness-$pid" ]; then
       printf '%s\n' /usr/local/bin/claude

@@ -159,28 +159,84 @@ fm_harness_pid_alive() {
   esac
 }
 
+fm_session_lock_recorded_identity() {
+  local state=$1 pid=$2 identity_file recorded_pid identity extra
+  identity_file="$state/.lock.pid-identity"
+  [ -f "$identity_file" ] && [ ! -L "$identity_file" ] || return 1
+  {
+    IFS= read -r recorded_pid \
+      && IFS= read -r identity \
+      && ! IFS= read -r extra
+  } < "$identity_file" 2>/dev/null || return 1
+  [ "$recorded_pid" = "$pid" ] && [ -n "$identity" ] || return 1
+  printf '%s\n' "$identity"
+}
+
+fm_process_group_execution_state() {
+  local pgid=$1 rows member_pgid member_state extra
+  case "$pgid" in
+    ''|*[!0-9]*|0|1) return 2 ;;
+  esac
+  rows=$(LC_ALL=C ps -axo pgid=,stat= 2>/dev/null) || return 2
+  while read -r member_pgid member_state extra; do
+    [ "$member_pgid" = "$pgid" ] || continue
+    [ -z "$extra" ] || return 2
+    case "$member_state" in
+      [XZ]*) ;;
+      [DIRSUWTt]*) return 0 ;;
+      *) return 2 ;;
+    esac
+  done <<< "$rows"
+  return 1
+}
+
 fm_harness_pid_fence_stopped() {
-  local pid=$1 owner_state attempt=0
+  local pid=$1 expected_identity=${2:-} owner_state attempt=0 pgid caller_pgid current_identity group_state
+  [ -n "$expected_identity" ] || return 1
   if fm_harness_pid_alive "$pid"; then
     return 1
   else
     owner_state=$?
   fi
   case "$owner_state" in
-    1) return 0 ;;
+    1)
+      if fm_process_group_execution_state "$pid"; then
+        return 1
+      else
+        group_state=$?
+      fi
+      [ "$group_state" -eq 1 ]
+      return $?
+      ;;
     3) ;;
     *) return 1 ;;
   esac
-  kill -KILL "$pid" 2>/dev/null || return 1
+  pgid=$(LC_ALL=C ps -o pgid= -p "$pid" 2>/dev/null) || return 1
+  pgid=${pgid//[[:space:]]/}
+  [ "$pgid" = "$pid" ] || return 1
+  caller_pgid=$(LC_ALL=C ps -o pgid= -p "${BASHPID:-$$}" 2>/dev/null) || return 1
+  caller_pgid=${caller_pgid//[[:space:]]/}
+  [ "$caller_pgid" != "$pgid" ] || return 1
+  current_identity=$(fm_pid_identity "$pid" 2>/dev/null) || return 1
+  [ "$current_identity" = "$expected_identity" ] || return 1
+  if fm_harness_pid_alive "$pid"; then
+    return 1
+  else
+    owner_state=$?
+  fi
+  [ "$owner_state" -eq 3 ] || return 1
+  current_identity=$(fm_pid_identity "$pid" 2>/dev/null) || return 1
+  [ "$current_identity" = "$expected_identity" ] || return 1
+  kill -KILL -"$pgid" 2>/dev/null || return 1
   while [ "$attempt" -lt 100 ]; do
-    if fm_harness_pid_alive "$pid"; then
-      owner_state=0
+    if fm_process_group_execution_state "$pgid"; then
+      group_state=0
     else
-      owner_state=$?
+      group_state=$?
     fi
-    case "$owner_state" in
+    case "$group_state" in
       1) return 0 ;;
-      0|3) ;;
+      0) ;;
       *) return 1 ;;
     esac
     sleep 0.02

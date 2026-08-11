@@ -303,16 +303,34 @@ SH
 }
 
 test_real_lock_interface_classifies_owner_process_state() {
-  local dir fakebin owner_bin owner i state out status owner_after
+  local dir fakebin identity_fakebin owner_bin sleep_owner owner child owner_pgid child_pgid monitor_was_on i state child_state out status owner_after identity
   dir="$TMP_ROOT/owner-process-state"
   fakebin=$(fm_fakebin "$dir")
   owner_bin="$dir/owner-bin"
-  mkdir -p "$dir/home/state" "$owner_bin"
-  ln -s /bin/sleep "$owner_bin/claude"
+  sleep_owner="$dir/sleep-owner/claude"
+  mkdir -p "$dir/home/state" "$owner_bin" "${sleep_owner%/*}"
+  ln -s /bin/bash "$owner_bin/claude"
+  ln -s /bin/sleep "$sleep_owner"
 
-  "$owner_bin/claude" 60 &
+  monitor_was_on=0
+  case $- in *m*) monitor_was_on=1 ;; esac
+  set -m
+  "$owner_bin/claude" -c 'sleep 60 & printf "%s\n" "$!" > "$1"; wait' _ "$dir/child-pid" &
   owner=$!
+  [ "$monitor_was_on" -eq 1 ] || set +m
   LOCK_FIXTURE_PIDS+=("$owner")
+  i=0
+  while [ "$i" -lt 100 ] && [ ! -s "$dir/child-pid" ]; do
+    sleep 0.02
+    i=$((i + 1))
+  done
+  [ -s "$dir/child-pid" ] || fail "synthetic harness owner did not start its child"
+  child=$(cat "$dir/child-pid")
+  LOCK_FIXTURE_PIDS+=("$child")
+  owner_pgid=$(ps -o pgid= -p "$owner" 2>/dev/null | tr -d '[:space:]')
+  child_pgid=$(ps -o pgid= -p "$child" 2>/dev/null | tr -d '[:space:]')
+  [ "$owner_pgid" = "$owner" ] && [ "$child_pgid" = "$owner" ] \
+    || fail "synthetic owner tree did not share its leader-owned process group: owner=$owner owner_pgid=$owner_pgid child=$child child_pgid=$child_pgid"
   printf '%s\n' "$owner" > "$dir/home/state/.lock"
 
   state=$(ps -o stat= -p "$owner" 2>/dev/null || true)
@@ -329,7 +347,7 @@ test_real_lock_interface_classifies_owner_process_state() {
   [ "$(cat "$dir/home/state/.lock")" = "$owner" ] \
     || fail "active-owner refusal replaced the competing harness lock"
 
-  kill -STOP "$owner"
+  kill -STOP -"$owner"
   i=0
   state=
   while [ "$i" -lt 100 ]; do
@@ -342,9 +360,52 @@ test_real_lock_interface_classifies_owner_process_state() {
     [Tt]*) : ;;
     *) fail "synthetic harness owner did not enter a stopped state: pid=$owner state=$state" ;;
   esac
+  child_state=$(ps -o stat= -p "$child" 2>/dev/null || true)
+  case "$child_state" in
+    [Tt]*) ;;
+    *) fail "synthetic harness child did not enter a stopped state: pid=$child state=$child_state" ;;
+  esac
 
   out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$ROOT/bin/fm-lock.sh" status 2>&1)
   assert_contains "$out" "lock: stopped" "status must disclose a stopped harness owner"
+  out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$NAMED_CLAUDE" -c \
+    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) && status=0 || status=$?
+  expect_code 1 "$status" "a legacy stopped-owner lock without birth identity must stay read-only"
+  [ "$(cat "$dir/home/state/.lock")" = "$owner" ] \
+    || fail "missing owner identity allowed stopped-owner lock replacement"
+
+  printf '%s\n%s\n' "$owner" mismatch > "$dir/home/state/.lock.pid-identity"
+  out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$NAMED_CLAUDE" -c \
+    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) && status=0 || status=$?
+  expect_code 1 "$status" "a mismatched stopped-owner birth identity must stay read-only"
+  [ "$(cat "$dir/home/state/.lock")" = "$owner" ] \
+    || fail "mismatched owner identity allowed stopped-owner lock replacement"
+
+  identity=$(FM_STATE_OVERRIDE="$dir/home/state" bash -c \
+    '. "$1"; fm_pid_identity "$2"' _ "$ROOT/bin/fm-wake-lib.sh" "$owner") \
+    || fail "could not capture the synthetic owner identity"
+  printf '%s\n%s\n' "$owner" "$identity" > "$dir/home/state/.lock.pid-identity"
+  identity_fakebin=$(fm_fakebin "$dir/identity-unreadable")
+  cat > "$identity_fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+pid= previous=
+for argument in "$@"; do
+  [ "$previous" = -p ] && pid=$argument
+  previous=$argument
+done
+if [ "$pid" = "$FM_TEST_UNREADABLE_PID" ]; then
+  case "$*" in *"lstart="*) exit 1 ;; esac
+fi
+exec /bin/ps "$@"
+SH
+  chmod +x "$identity_fakebin/ps"
+  out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" FM_PROC_ROOT_OVERRIDE="$dir/no-proc" \
+    FM_TEST_UNREADABLE_PID="$owner" PATH="$identity_fakebin:$PATH" "$NAMED_CLAUDE" -c \
+    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) && status=0 || status=$?
+  expect_code 1 "$status" "an unclassifiable stopped-owner birth identity must stay read-only"
+  [ "$(cat "$dir/home/state/.lock")" = "$owner" ] \
+    || fail "unclassifiable owner identity allowed stopped-owner lock replacement"
+
   out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$NAMED_CLAUDE" -c \
     '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) && status=0 || status=$?
   wait "$owner" 2>/dev/null || true
@@ -353,11 +414,18 @@ test_real_lock_interface_classifies_owner_process_state() {
     "stopped-owner reclamation must complete through the real lock interface"
   owner_after=$(cat "$dir/home/state/.lock")
   [ "$owner_after" != "$owner" ] || fail "stopped harness owner retained the session lock"
+  [ "$(sed -n '1p' "$dir/home/state/.lock.pid-identity")" = "$owner_after" ] \
+    || fail "replacement lock did not publish its PID-bound birth identity"
   kill -CONT "$owner" 2>/dev/null \
     && fail "a fenced former owner remained resumable after lock takeover"
+  child_state=$(ps -o stat= -p "$child" 2>/dev/null || true)
+  case "$child_state" in
+    ''|[XZ]*) ;;
+    *) fail "the stopped owner's child survived process-group fencing: pid=$child state=$child_state" ;;
+  esac
   LOCK_FIXTURE_PIDS=()
 
-  "$owner_bin/claude" 60 &
+  "$sleep_owner" 60 &
   owner=$!
   LOCK_FIXTURE_PIDS+=("$owner")
   printf '%s\n' "$owner" > "$dir/home/state/.lock"

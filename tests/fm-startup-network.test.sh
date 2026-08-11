@@ -73,6 +73,7 @@ for argument in "$@"; do
 done
 if [ "$pid" = "${FM_FAKE_HARNESS_PID:-}" ]; then
   case "$*" in
+    *lstart=*) /bin/ps "$@" ;;
     *comm=*) printf '/usr/local/bin/claude\n' ;;
     *args=*) printf 'claude\n' ;;
     *ppid=*) /bin/ps -o ppid= -p "$pid" ;;
