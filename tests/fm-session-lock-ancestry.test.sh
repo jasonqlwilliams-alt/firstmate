@@ -32,6 +32,20 @@ FAKEBIN=$(fm_fakebin "$TMP_ROOT/harness-bin")
 ln -s /bin/bash "$FAKEBIN/claude"
 NAMED_CLAUDE="$FAKEBIN/claude"
 
+LOCK_FIXTURE_PIDS=()
+cleanup_lock_fixture_processes() {
+  local pid
+  for pid in "${LOCK_FIXTURE_PIDS[@]:-}"; do
+    kill -CONT "$pid" 2>/dev/null || true
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  done
+  fm_test_cleanup
+}
+trap cleanup_lock_fixture_processes EXIT
+trap 'cleanup_lock_fixture_processes; exit 130' INT
+trap 'cleanup_lock_fixture_processes; exit 143' TERM
+
 # --- unit layer: identity behind a deterministic process table ---------------
 
 # Run one library expression with <fakebin> shadowing ps. kill is stubbed so
@@ -64,8 +78,10 @@ done
 case "$pid:$field:${FM_TEST_CLAUDE_SHAPE:-linux}" in
   700:comm=:linux) printf '%s\n' '2.1.220' ;;
   700:args=:linux) printf '%s\n' '/opt/claude/versions/2.1.220 --resume' ;;
+  700:stat=:linux) printf '%s\n' 'S' ;;
   700:comm=:macos) printf '%s\n' '/Users/u/.local/share/claude/versions/2.1.220' ;;
   700:args=:macos) printf '%s\n' '/Users/u/.local/share/claude/versions/2.1.220 --resume' ;;
+  700:stat=:macos) printf '%s\n' 'S' ;;
   700:ppid=:*) printf '%s\n' 1 ;;
   *:comm=:*) printf '%s\n' bash ;;
   *:args=:*) printf '%s\n' 'bash /repo/bin/fm-claude-stop-autoarm.sh' ;;
@@ -108,6 +124,7 @@ case "$pid:$field:${FM_TEST_PATH_SHAPE:-hookdir}" in
   810:args=:hookdir) printf '%s\n' '/home/u/.claude/hooks/notify.sh --quiet' ;;
   810:comm=:piprefix) printf '%s\n' '/opt/pipeline/bin/runner' ;;
   810:args=:piprefix) printf '%s\n' '/opt/pipeline/bin/runner --once' ;;
+  810:stat=:*) printf '%s\n' 'S' ;;
   810:ppid=:*) printf '%s\n' 1 ;;
   *:comm=:*) printf '%s\n' bash ;;
   *:args=:*) printf '%s\n' 'bash /repo/bin/fm-watch-arm.sh' ;;
@@ -198,6 +215,7 @@ done
 case "$pid:$field" in
   600:comm=) printf '%s\n' '2.1.220' ;;
   600:args=) printf '%s\n' '/opt/claude/versions/2.1.220' ;;
+  600:stat=) printf '%s\n' 'S' ;;
   600:ppid=) printf '%s\n' 1 ;;
   650:comm=) printf '%s\n' claude ;;
   650:args=) printf '%s\n' claude ;;
@@ -218,6 +236,145 @@ SH
   lib_eval "$fakebin" 'fm_harness_pid_alive 600' \
     || fail "a live competing version-named session was classified as a dead lock owner"
   pass "session-lock: a live version-named session holding the lock is not mistaken for a stale owner"
+}
+
+test_supported_process_state_surfaces_are_classified() {
+  local dir fakebin process_state status
+  dir="$TMP_ROOT/process-states"
+  fakebin=$(fm_fakebin "$dir")
+  cat > "$fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+set -u
+field=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) field=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "$field" in
+  comm=) printf '%s\n' claude ;;
+  args=) printf '%s\n' 'claude --resume fixture' ;;
+  stat=)
+    [ "$FM_TEST_OWNER_STATE" != error ] || exit 1
+    printf '%s\n' "$FM_TEST_OWNER_STATE"
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$fakebin/ps"
+
+  # Linux reports D/I/R/S/W as active and T/t/X/Z as stopped or terminal.
+  # macOS reports I/R/S/U as active and T/Z as stopped or terminal.
+  for process_state in D I R+ S U W; do
+    FM_TEST_OWNER_STATE="$process_state" lib_eval "$fakebin" 'fm_harness_pid_alive 700' \
+      && status=0 || status=$?
+    expect_code 0 "$status" "active ps state $process_state must retain a live harness owner's lock"
+  done
+  for process_state in T t X Z; do
+    FM_TEST_OWNER_STATE="$process_state" lib_eval "$fakebin" 'fm_harness_pid_alive 700' \
+      && status=0 || status=$?
+    expect_code 1 "$status" "stopped or terminal ps state $process_state must reject harness ownership"
+  done
+  for process_state in error Q; do
+    FM_TEST_OWNER_STATE="$process_state" lib_eval "$fakebin" 'fm_harness_pid_alive 700' \
+      && status=0 || status=$?
+    expect_code 2 "$status" "unreadable or unrecognized ps state $process_state must stay unknown"
+  done
+
+  pass "session-lock: Linux and macOS ps state surfaces distinguish active, stopped, terminal, and unknown owners"
+}
+
+test_real_lock_interface_classifies_owner_process_state() {
+  local dir fakebin owner_bin owner i state out status owner_after
+  dir="$TMP_ROOT/owner-process-state"
+  fakebin=$(fm_fakebin "$dir")
+  owner_bin="$dir/owner-bin"
+  mkdir -p "$dir/home/state" "$owner_bin"
+  ln -s /bin/sleep "$owner_bin/claude"
+
+  "$owner_bin/claude" 60 &
+  owner=$!
+  LOCK_FIXTURE_PIDS+=("$owner")
+  printf '%s\n' "$owner" > "$dir/home/state/.lock"
+
+  state=$(ps -o stat= -p "$owner" 2>/dev/null || true)
+  case "$state" in
+    [RSDIWU]*) : ;;
+    *) fail "synthetic live harness owner did not reach an active process state: pid=$owner state=$state" ;;
+  esac
+
+  out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$NAMED_CLAUDE" -c \
+    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) && status=0 || status=$?
+  expect_code 1 "$status" "a competing active harness owner must retain the session lock"
+  assert_contains "$out" "another live firstmate session holds the lock" \
+    "active-owner refusal must identify live contention"
+  [ "$(cat "$dir/home/state/.lock")" = "$owner" ] \
+    || fail "active-owner refusal replaced the competing harness lock"
+
+  kill -STOP "$owner"
+  i=0
+  state=
+  while [ "$i" -lt 100 ]; do
+    state=$(ps -o stat= -p "$owner" 2>/dev/null || true)
+    case "$state" in [Tt]*) break ;; esac
+    sleep 0.02
+    i=$((i + 1))
+  done
+  case "$state" in
+    [Tt]*) : ;;
+    *) fail "synthetic harness owner did not enter a stopped state: pid=$owner state=$state" ;;
+  esac
+
+  out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$ROOT/bin/fm-lock.sh" status 2>&1)
+  assert_contains "$out" "lock: stale" "status must reject a stopped harness as a live owner"
+  out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$NAMED_CLAUDE" -c \
+    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) && status=0 || status=$?
+  expect_code 0 "$status" "a challenger must reclaim the lock from a stopped harness owner"
+  assert_contains "$out" "lock acquired: harness pid" \
+    "stopped-owner reclamation must complete through the real lock interface"
+  owner_after=$(cat "$dir/home/state/.lock")
+  [ "$owner_after" != "$owner" ] || fail "stopped harness owner retained the session lock"
+
+  kill -CONT "$owner"
+  printf '%s\n' "$owner" > "$dir/home/state/.lock"
+  cat > "$fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+set -u
+field= pid=
+args=("$@")
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) field=$2; shift 2 ;;
+    -p) pid=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [ "$pid" = "$FM_TEST_UNREADABLE_PID" ] && [ "$field" = "stat=" ]; then
+  exit 1
+fi
+exec /bin/ps "${args[@]}"
+SH
+  chmod +x "$fakebin/ps"
+
+  out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" FM_TEST_UNREADABLE_PID="$owner" \
+    PATH="$fakebin:$PATH" "$ROOT/bin/fm-lock.sh" status 2>&1)
+  assert_contains "$out" "lock: unknown" \
+    "status must disclose an owner whose process state cannot be classified"
+  out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" FM_TEST_UNREADABLE_PID="$owner" \
+    PATH="$fakebin:$PATH" "$NAMED_CLAUDE" -c '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) \
+    && status=0 || status=$?
+  expect_code 1 "$status" "an unreadable owner process state must fail closed"
+  assert_contains "$out" "cannot classify session lock owner process" \
+    "unknown-owner refusal must explain why acquisition stays read-only"
+  [ "$(cat "$dir/home/state/.lock")" = "$owner" ] \
+    || fail "unknown-owner refusal replaced the unclassifiable lock owner"
+
+  kill "$owner" 2>/dev/null || true
+  wait "$owner" 2>/dev/null || true
+  LOCK_FIXTURE_PIDS=()
+
+  pass "session-lock: real acquisition excludes active owners, rejects stopped owners, and fails closed on unknown state"
 }
 
 # --- end-to-end layer: the real Stop auto-arm in real process trees ----------
@@ -358,6 +515,8 @@ test_version_named_session_is_identified_on_both_platforms
 test_ordinary_paths_are_never_harness_processes
 test_harness_beyond_a_gap_never_owns_the_lock
 test_competing_version_named_session_is_seen_as_live
+test_supported_process_state_surfaces_are_classified
+test_real_lock_interface_classifies_owner_process_state
 test_e2e_version_named_session_claims_the_home
 test_e2e_daemon_parented_session_claims_the_home
 test_e2e_daemon_parented_version_named_session_keeps_its_lock

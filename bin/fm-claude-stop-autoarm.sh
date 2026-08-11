@@ -11,10 +11,11 @@
 #     secondmate home) with AGENTS.md, bin/, and the effective state dir - the
 #     exact fm-turnend-guard.sh scope. Child crew/scout worktrees stay inert.
 #   - Identity: only when THIS session's harness ancestor holds state/.lock.
-#     When an existing numeric owner fails the shared harness-liveness predicate,
-#     the hook delegates guarded recovery to bin/fm-lock.sh and then re-verifies
-#     ownership. A live owner, missing lock, malformed lock, or unresolved
-#     ancestry remains inert, so a competing session never arms or rewakes.
+#     When an existing numeric owner is positively stale under the shared
+#     harness-liveness predicate, the hook delegates guarded recovery to
+#     bin/fm-lock.sh and then re-verifies ownership. A live or unclassifiable
+#     owner, missing lock, malformed lock, or unresolved ancestry remains inert,
+#     so a competing session never arms or rewakes.
 #   - AFK: while state/.afk exists the away daemon owns the watcher and triage;
 #     this hook exits 0 and NEVER rewakes the primary (checked again at
 #     translation time so a mid-cycle AFK transition is honored).
@@ -98,7 +99,12 @@ if ! fm_session_lock_owned_by_self "$STATE"; then
   case "$LOCK_PID" in
     ''|*[!0-9]*) exit 0 ;;
   esac
-  fm_harness_pid_alive "$LOCK_PID" && exit 0
+  if fm_harness_pid_alive "$LOCK_PID"; then
+    exit 0
+  else
+    LOCK_STATE=$?
+    [ "$LOCK_STATE" -eq 1 ] || exit 0
+  fi
   RECOVER_SESSION_LOCK=1
 fi
 

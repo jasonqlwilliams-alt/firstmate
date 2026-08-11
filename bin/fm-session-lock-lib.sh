@@ -129,13 +129,28 @@ EOF
   printf '%s\n' "$outermost"
 }
 
-# True if $1 is a live process that looks like a verified harness.
+# Classify whether $1 is an active process that looks like a verified harness.
+# Return 0 for an active harness owner, 1 for a demonstrably absent, stopped,
+# terminal, or non-harness process, and 2 when an existing harness process
+# cannot be inspected safely.
+#
+# Linux procps and macOS BSD ps both expose the process state through `stat`.
+# Their first state character is structural: D/I/R/S/U/W are active or waiting,
+# T/t are stopped, and X/Z are terminal; any other or unreadable value is
+# unknown and must not authorize lock takeover.
 fm_harness_pid_alive() {
-  local pid=$1 comm args
+  local pid=$1 comm args process_state
   kill -0 "$pid" 2>/dev/null || return 1
-  comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 1
-  args=$(ps -o args= -p "$pid" 2>/dev/null)
-  fm_harness_process_matches "$comm" "$args"
+  comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 2
+  args=$(ps -o args= -p "$pid" 2>/dev/null) || return 2
+  fm_harness_process_matches "$comm" "$args" || return 1
+  process_state=$(LC_ALL=C ps -o stat= -p "$pid" 2>/dev/null) || return 2
+  process_state=${process_state#"${process_state%%[![:space:]]*}"}
+  case "$process_state" in
+    [DIRSUW]*) return 0 ;;
+    [TtXZ]*) return 1 ;;
+    *) return 2 ;;
+  esac
 }
 
 # True when state dir $1 holds a session lock whose pid is ANY harness ancestor
