@@ -444,7 +444,7 @@ EOF
 }
 
 test_lock_takeover_stays_read_only_while_a_sweep_holds_the_lease() {
-  local rec home root log next_owner new_owner out rc started elapsed waited=0
+  local rec home root log next_owner out rc started elapsed waited=0
   rec=$(new_world sweep-lease)
   IFS='|' read -r home root log <<EOF
 $rec
@@ -472,14 +472,23 @@ EOF
     || fail "the lease-blocked takeover replaced the prior owner"
 
   run_stage "$home" "$root" wait 30 >/dev/null || fail "the leased sweep never settled"
+  FM_HOME="$home" FM_ROOT_OVERRIDE="$root" bash -c '
+    . "$1/bin/fm-wake-lib.sh"
+    fm_lock_try_acquire "$FM_HOME/state/.lock.acquire" || exit 1
+    fm_lock_release "$FM_HOME/state/.lock.acquire"
+  ' _ "$root" || fail "the sweep retained its acquisition lease after settling"
+  rc=0
   out=$(PATH="$root/bin:$PATH" FM_FAKE_HARNESS_PID="$next_owner" \
     FM_HOME="$home" FM_ROOT_OVERRIDE="$root" "$root/bin/fm-lock.sh" 2>&1) \
-    || fail "lock takeover still failed after the sweep released its lease"
-  new_owner=$(cat "$home/state/.lock")
-  assert_contains "$out" "lock acquired: harness pid $new_owner" \
-    "the fleet lock did not record the harness owner reported by acquisition"
-  [ "$new_owner" != "$$" ] || fail "the prior harness still owned the lock after takeover"
-  pass "fm-startup-network: fleet-lock takeover cannot overlap a mutating sweep"
+    || rc=$?
+  [ "$rc" -ne 0 ] || fail "a challenger replaced the original session while it remained active"
+  assert_not_contains "$out" "bounded startup sweep is finishing" \
+    "the settled sweep still appeared to hold its acquisition lease"
+  assert_contains "$out" "prior session execution could not be safely excluded" \
+    "the active original session was not the post-sweep takeover blocker: $out"
+  [ "$(cat "$home/state/.lock")" = "$$" ] \
+    || fail "post-sweep active-owner exclusion replaced the original session"
+  pass "fm-startup-network: mutating sweeps lease acquisition only while running and never weaken active-owner exclusion"
 }
 
 test_reused_lock_pid_with_changed_identity_downgrades_under_the_lease() {

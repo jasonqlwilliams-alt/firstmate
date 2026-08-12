@@ -894,7 +894,7 @@ test_network_phase_partitions_the_run() {
   fakebin=$(make_fake_toolchain "$case_dir")
   # Break the two diagnostics that stand for the two halves: a local tool floor
   # and the network GitHub-auth probe.
-  rm -f "$fakebin/node"
+  fm_fake_version_tool "$fakebin" gh-axi FM_FAKE_GH_AXI_VERSION 0.1.19
   cat > "$fakebin/gh" <<'SH'
 #!/usr/bin/env bash
 exit 1
@@ -903,18 +903,18 @@ SH
 
   all_out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
     FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
-  assert_contains "$all_out" "MISSING: node (install:" "the unsplit run lost its local diagnostic"
+  assert_contains "$all_out" "MISSING: gh-axi (install:" "the unsplit run lost its local diagnostic"
   assert_contains "$all_out" "NEEDS_GH_AUTH" "the unsplit run lost its network diagnostic"
 
   skip_out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
     FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_BOOTSTRAP_NETWORK=skip "$ROOT/bin/fm-bootstrap.sh")
-  assert_contains "$skip_out" "MISSING: node (install:" "the local half lost its own diagnostic"
+  assert_contains "$skip_out" "MISSING: gh-axi (install:" "the local half lost its own diagnostic"
   assert_not_contains "$skip_out" "NEEDS_GH_AUTH" "the local half still made a network call"
 
   only_out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
     FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_BOOTSTRAP_NETWORK=only "$ROOT/bin/fm-bootstrap.sh")
   assert_contains "$only_out" "NEEDS_GH_AUTH" "the network half lost its own diagnostic"
-  assert_not_contains "$only_out" "MISSING: node" "the network half repeated the local half's work"
+  assert_not_contains "$only_out" "MISSING: gh-axi" "the network half repeated the local half's work"
 
   combined=$(printf '%s\n%s\n' "$skip_out" "$only_out" | LC_ALL=C sort)
   [ "$combined" = "$(printf '%s\n' "$all_out" | LC_ALL=C sort)" ] \
