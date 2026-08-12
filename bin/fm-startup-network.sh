@@ -192,7 +192,7 @@ phase_label() {  # <phases>
 # --- start -------------------------------------------------------------------
 
 cmd_start() {  # <locked> <harvest-pid>
-  local locked=$1 harvest_pid=$2 lock_pid lock_identity= generation worker_pid phases started
+  local locked=$1 harvest_pid=$2 lock_pid lock_identity='' generation worker_pid phases started
   mkdir -p "$STATE" 2>/dev/null || return 1
   # Captured HERE, at the moment the caller still holds the lock, and carried to
   # the worker: re-reading the lock later would only prove that SOME session
