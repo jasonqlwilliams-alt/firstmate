@@ -31,6 +31,8 @@ VERSIONED_CLAUDE="$CLAUDE_VERSION_DIR/2.1.220"
 FAKEBIN=$(fm_fakebin "$TMP_ROOT/harness-bin")
 ln -s /bin/bash "$FAKEBIN/claude"
 NAMED_CLAUDE="$FAKEBIN/claude"
+# Keep a command after each fm-lock.sh invocation below so Bash cannot replace
+# this synthetic harness process with the lock script before ancestry inspection.
 
 LOCK_FIXTURE_PIDS=()
 cleanup_lock_fixture_processes() {
@@ -250,7 +252,7 @@ test_legacy_dead_group_leader_with_a_surviving_child_stays_read_only() {
   kill -0 "$child" 2>/dev/null || fail "synthetic child did not survive its group leader"
   printf '%s\n' "$owner" > "$dir/home/state/.lock"
   out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$NAMED_CLAUDE" -c \
-    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) && status=0 || status=$?
+    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; exit $?' 2>&1) && status=0 || status=$?
   expect_code 1 "$status" "a legacy dead group leader with surviving execution must stay read-only"
   assert_contains "$out" "prior session execution could not be safely excluded" \
     "legacy surviving execution was not reported as the takeover blocker"
@@ -404,7 +406,7 @@ test_real_lock_interface_classifies_owner_process_state() {
   esac
 
   out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$NAMED_CLAUDE" -c \
-    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) && status=0 || status=$?
+    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; exit $?' 2>&1) && status=0 || status=$?
   expect_code 1 "$status" "a competing active harness owner must retain the session lock"
   assert_contains "$out" "another live firstmate session holds the lock" \
     "active-owner refusal must identify live contention"
@@ -433,7 +435,7 @@ test_real_lock_interface_classifies_owner_process_state() {
   out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$ROOT/bin/fm-lock.sh" status 2>&1)
   assert_contains "$out" "lock: stopped" "status must disclose a stopped harness owner"
   out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$NAMED_CLAUDE" -c \
-    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) && status=0 || status=$?
+    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; exit $?' 2>&1) && status=0 || status=$?
   expect_code 1 "$status" "a legacy stopped-owner lock without completion proof must stay read-only"
   assert_contains "$out" "lacks corroborating completion proof" \
     "missing legacy completion proof was not reported as the takeover blocker"
@@ -463,7 +465,7 @@ test_real_lock_interface_classifies_owner_process_state() {
 
   printf '%s\n%s\n' "$owner" mismatch > "$dir/home/state/.lock.pid-identity"
   out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$NAMED_CLAUDE" -c \
-    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) && status=0 || status=$?
+    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; exit $?' 2>&1) && status=0 || status=$?
   expect_code 1 "$status" "a mismatched stopped-owner birth identity must stay read-only"
   [ "$(cat "$dir/home/state/.lock")" = "$owner" ] \
     || fail "mismatched owner identity allowed stopped-owner lock replacement"
@@ -488,14 +490,14 @@ SH
   chmod +x "$identity_fakebin/ps"
   out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" FM_PROC_ROOT_OVERRIDE="$dir/no-proc" \
     FM_TEST_UNREADABLE_PID="$owner" PATH="$identity_fakebin:$PATH" "$NAMED_CLAUDE" -c \
-    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) && status=0 || status=$?
+    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; exit $?' 2>&1) && status=0 || status=$?
   expect_code 1 "$status" "an unclassifiable stopped-owner birth identity must stay read-only"
   [ "$(cat "$dir/home/state/.lock")" = "$owner" ] \
     || fail "unclassifiable owner identity allowed stopped-owner lock replacement"
 
   rm -f "$dir/home/state/.lock.pid-identity"
   out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$NAMED_CLAUDE" -c \
-    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) && status=0 || status=$?
+    '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; exit $?' 2>&1) && status=0 || status=$?
   wait "$leader" 2>/dev/null || true
   expect_code 0 "$status" "a challenger must reclaim a legacy lock from a stopped non-leader harness owner"
   assert_contains "$out" "lock acquired: harness pid" \
@@ -546,7 +548,7 @@ SH
   assert_contains "$out" "lock: unknown" \
     "status must disclose an owner whose process state cannot be classified"
   out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" FM_TEST_UNREADABLE_PID="$owner" \
-    PATH="$fakebin:$PATH" "$NAMED_CLAUDE" -c '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) \
+    PATH="$fakebin:$PATH" "$NAMED_CLAUDE" -c '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; exit $?' 2>&1) \
     && status=0 || status=$?
   expect_code 1 "$status" "an unreadable owner process state must fail closed"
   assert_contains "$out" "cannot classify session lock owner process" \
