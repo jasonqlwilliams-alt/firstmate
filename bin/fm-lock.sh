@@ -75,11 +75,22 @@ release_claim_lock() {
 trap release_claim_lock EXIT
 trap 'exit 1' HUP INT TERM
 
+publish_session_lock_lease() {
+  local owner_pid=$1 owner_identity=$2 group_leader=$3 group_leader_identity=$4 identity_tmp
+  identity_tmp=$(mktemp "$STATE/.lock-pid-identity.XXXXXX" 2>/dev/null) || return 1
+  if ! printf '%s\n%s\n%s\n%s\n' \
+      "$owner_pid" "$owner_identity" "$group_leader" "$group_leader_identity" > "$identity_tmp" 2>/dev/null \
+    || ! chmod 0600 "$identity_tmp" 2>/dev/null \
+    || ! mv -f "$identity_tmp" "$LOCK_IDENTITY" 2>/dev/null; then
+    rm -f "$identity_tmp" 2>/dev/null || true
+    return 1
+  fi
+}
+
 if [ -f "$LOCK" ] && [ ! -L "$LOCK" ]; then
   old=$(cat "$LOCK" 2>/dev/null || true)
   if [ "$old" = "$me" ]; then
-    recorded_identity=$(fm_session_lock_recorded_identity "$STATE" "$old" 2>/dev/null || true)
-    if [ "$recorded_identity" = "$me_identity" ]; then
+    if fm_session_lock_owned_by_self "$STATE"; then
       echo "lock acquired: harness pid $me"
       exit 0
     fi
@@ -125,14 +136,64 @@ if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
       holder_state=$?
       case "$holder_state" in
         1)
-          if ! fm_harness_pid_fence_stopped "$old"; then
+          recorded_identity=
+          recorded_group_leader=
+          recorded_group_leader_identity=
+          if fm_session_lock_recorded_lease "$STATE" "$old"; then
+            recorded_identity=$FM_SESSION_LOCK_OWNER_IDENTITY
+            recorded_group_leader=$FM_SESSION_LOCK_GROUP_LEADER_PID
+            recorded_group_leader_identity=$FM_SESSION_LOCK_GROUP_LEADER_IDENTITY
+          elif [ -e "$LOCK_IDENTITY" ] || [ -L "$LOCK_IDENTITY" ]; then
+            fm_session_lock_legacy_recorded_identity "$STATE" "$old" >/dev/null 2>&1 || {
+              echo "error: session lock owner lease is malformed (pid $old); operate read-only until resolved" >&2
+              exit 1
+            }
+          fi
+          if ! fm_harness_pid_fence_stopped \
+              "$old" "$recorded_identity" "$recorded_group_leader" "$recorded_group_leader_identity"; then
             echo "error: prior session execution could not be safely excluded (pid $old); operate read-only until resolved" >&2
             exit 1
           fi
           ;;
         3)
-          recorded_identity=$(fm_session_lock_recorded_identity "$STATE" "$old" 2>/dev/null || true)
-          if ! fm_harness_pid_fence_stopped "$old" "$recorded_identity"; then
+          recorded_identity=
+          recorded_group_leader=
+          recorded_group_leader_identity=
+          if fm_session_lock_recorded_lease "$STATE" "$old"; then
+            recorded_identity=$FM_SESSION_LOCK_OWNER_IDENTITY
+            recorded_group_leader=$FM_SESSION_LOCK_GROUP_LEADER_PID
+            recorded_group_leader_identity=$FM_SESSION_LOCK_GROUP_LEADER_IDENTITY
+          else
+            if [ -e "$LOCK_IDENTITY" ] || [ -L "$LOCK_IDENTITY" ]; then
+              recorded_identity=$(fm_session_lock_legacy_recorded_identity "$STATE" "$old" 2>/dev/null) || {
+                echo "error: stopped session lock owner lease is malformed (pid $old); operate read-only until resolved" >&2
+                exit 1
+              }
+            else
+              fm_session_lock_legacy_owner_corroborated "$STATE" "$old" || {
+                echo "error: legacy stopped session owner lacks corroborating completion proof (pid $old); operate read-only until resolved" >&2
+                exit 1
+              }
+            fi
+            fm_session_lock_capture_stopped_lease "$old" "$recorded_identity" || {
+              echo "error: stopped session lock owner group could not be safely identified (pid $old); operate read-only until resolved" >&2
+              exit 1
+            }
+            recorded_identity=$FM_SESSION_LOCK_OWNER_IDENTITY
+            recorded_group_leader=$FM_SESSION_LOCK_GROUP_LEADER_PID
+            recorded_group_leader_identity=$FM_SESSION_LOCK_GROUP_LEADER_IDENTITY
+            [ "$(cat "$LOCK" 2>/dev/null || true)" = "$old" ] || {
+              echo "error: session lock changed during owner lease migration; operate read-only until resolved" >&2
+              exit 1
+            }
+            publish_session_lock_lease \
+              "$old" "$recorded_identity" "$recorded_group_leader" "$recorded_group_leader_identity" || {
+              echo "error: cannot migrate stopped session lock owner lease; operate read-only until resolved" >&2
+              exit 1
+            }
+          fi
+          if ! fm_harness_pid_fence_stopped \
+              "$old" "$recorded_identity" "$recorded_group_leader" "$recorded_group_leader_identity"; then
             echo "error: stopped session lock owner could not be safely fenced (pid $old); operate read-only until resolved" >&2
             exit 1
           fi
@@ -145,14 +206,13 @@ if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
     fi
   fi
 fi
-identity_tmp=$(mktemp "$STATE/.lock-pid-identity.XXXXXX" 2>/dev/null) || {
-  echo "error: cannot write session lock owner identity; operate read-only until resolved" >&2
+fm_session_lock_capture_active_lease "$me" "$me_identity" || {
+  echo "error: cannot establish session lock owner process group; operate read-only until resolved" >&2
   exit 1
 }
-if ! printf '%s\n%s\n' "$me" "$me_identity" > "$identity_tmp" 2>/dev/null \
-  || ! chmod 0600 "$identity_tmp" 2>/dev/null \
-  || ! mv -f "$identity_tmp" "$LOCK_IDENTITY" 2>/dev/null; then
-  rm -f "$identity_tmp" 2>/dev/null || true
+me_group_leader=$FM_SESSION_LOCK_GROUP_LEADER_PID
+me_group_leader_identity=$FM_SESSION_LOCK_GROUP_LEADER_IDENTITY
+if ! publish_session_lock_lease "$me" "$me_identity" "$me_group_leader" "$me_group_leader_identity"; then
   echo "error: cannot write session lock owner identity; operate read-only until resolved" >&2
   exit 1
 fi
@@ -164,9 +224,18 @@ written=$(cat "$LOCK" 2>/dev/null) || {
   echo "error: cannot verify session lock ownership; operate read-only until resolved" >&2
   exit 1
 }
-written_identity=$(fm_session_lock_recorded_identity "$STATE" "$me" 2>/dev/null || true)
+written_identity=
+written_group_leader=
+written_group_leader_identity=
+if fm_session_lock_recorded_lease "$STATE" "$me"; then
+  written_identity=$FM_SESSION_LOCK_OWNER_IDENTITY
+  written_group_leader=$FM_SESSION_LOCK_GROUP_LEADER_PID
+  written_group_leader_identity=$FM_SESSION_LOCK_GROUP_LEADER_IDENTITY
+fi
 if [ ! -f "$LOCK" ] || [ -L "$LOCK" ] || [ "$written" != "$me" ] \
-  || [ "$written_identity" != "$me_identity" ]; then
+  || [ "$written_identity" != "$me_identity" ] \
+  || [ "$written_group_leader" != "$me_group_leader" ] \
+  || [ "$written_group_leader_identity" != "$me_group_leader_identity" ]; then
   echo "error: session lock ownership verification failed; operate read-only until resolved" >&2
   exit 1
 fi

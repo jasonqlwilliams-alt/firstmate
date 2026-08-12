@@ -227,7 +227,7 @@ test_reclaims_stale_session_lock_before_arming() {
 }
 
 test_repairs_current_owner_identity_before_arming() {
-  local dir out status expected_pid expected_identity recorded_pid recorded_identity
+  local dir out status expected_pid expected_identity recorded_pid recorded_identity lease_lines
   dir=$(make_primary_dir "$TMP_ROOT/current-owner-identity")
   : > "$dir/state/task.meta"
   write_arm_fixture "$dir" actionable
@@ -245,8 +245,10 @@ test_repairs_current_owner_identity_before_arming() {
   expected_identity=$(cat "$dir/state/expected-identity")
   recorded_pid=$(sed -n '1p' "$dir/state/.lock.pid-identity")
   recorded_identity=$(sed -n '2p' "$dir/state/.lock.pid-identity")
+  lease_lines=$(wc -l < "$dir/state/.lock.pid-identity" | tr -d '[:space:]')
   [ "$recorded_pid" = "$expected_pid" ] && [ "$recorded_identity" = "$expected_identity" ] \
     || fail "current-owner recovery did not publish the exact PID-and-birth-identity pair"
+  [ "$lease_lines" = 4 ] || fail "current-owner recovery did not publish a fixed owner-and-group lease"
   [ -e "$dir/state/arm-ran" ] || fail "hook did not arm after upgrading current-owner identity"
   pass "auto-arm: current numeric owners upgrade stale identity before arming"
 }

@@ -76,6 +76,8 @@ if [ "$pid" = "${FM_FAKE_HARNESS_PID:-}" ]; then
     *lstart=*) /bin/ps "$@" ;;
     *comm=*) printf '/usr/local/bin/claude\n' ;;
     *args=*) printf 'claude\n' ;;
+    *pgid=*) /bin/ps "$@" ;;
+    *stat=*) /bin/ps "$@" ;;
     *ppid=*) /bin/ps -o ppid= -p "$pid" ;;
   esac
 else
@@ -120,10 +122,15 @@ run_stage() {  # <home> <root> <args...>
 }
 
 record_session_lock() {  # <home> [pid]
-  local home=$1 pid=${2:-$$} identity
+  local home=$1 pid=${2:-$$} identity group_leader group_leader_identity
   identity=$(fm_test_pid_identity "$pid") || fail "could not capture fixture session identity for pid $pid"
+  group_leader=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]') \
+    || fail "could not capture fixture session process group for pid $pid"
+  group_leader_identity=$(fm_test_pid_identity "$group_leader") \
+    || fail "could not capture fixture session group leader identity for pid $group_leader"
   printf '%s\n' "$pid" > "$home/state/.lock"
-  printf '%s\n%s\n' "$pid" "$identity" > "$home/state/.lock.pid-identity"
+  printf '%s\n%s\n%s\n%s\n' \
+    "$pid" "$identity" "$group_leader" "$group_leader_identity" > "$home/state/.lock.pid-identity"
 }
 
 wait_for_startup_network_wake() {  # <home> [tenths]
@@ -498,7 +505,10 @@ EOF
   [ -e "$home/state/acquire-held" ] || fail "fixture never held the acquisition lease"
 
   FM_FAKE_BOOTSTRAP_LOG="$log" run_stage "$home" "$root" start --locked 1 --harvest-pid $$
-  printf '%s\n%s\n' $$ replacement-identity > "$home/state/.lock.pid-identity"
+  printf '%s\n%s\n%s\n%s\n' $$ replacement-identity \
+    "$(sed -n '3p' "$home/state/.lock.pid-identity")" \
+    "$(sed -n '4p' "$home/state/.lock.pid-identity")" > "$home/state/.lock.pid-identity.replacement"
+  mv "$home/state/.lock.pid-identity.replacement" "$home/state/.lock.pid-identity"
   : > "$home/state/release-acquire"
   wait "$blocker" 2>/dev/null || true
   run_stage "$home" "$root" wait 30 >/dev/null || fail "identity-handoff worker never published"

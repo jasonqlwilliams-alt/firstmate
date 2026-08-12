@@ -89,6 +89,7 @@ case "$pid:$field:${FM_TEST_CLAUDE_SHAPE:-linux}" in
   700:comm=:macos) printf '%s\n' '/Users/u/.local/share/claude/versions/2.1.220' ;;
   700:args=:macos) printf '%s\n' '/Users/u/.local/share/claude/versions/2.1.220 --resume' ;;
   700:stat=:macos) printf '%s\n' 'S' ;;
+  700:pgid=:*) printf '%s\n' 700 ;;
   700:ppid=:*) printf '%s\n' 1 ;;
   *:comm=:*) printf '%s\n' bash ;;
   *:args=:*) printf '%s\n' 'bash /repo/bin/fm-claude-stop-autoarm.sh' ;;
@@ -97,7 +98,7 @@ esac
 SH
   chmod +x "$fakebin/ps"
   printf '700\n' > "$dir/state/.lock"
-  printf '700\nfixture-identity-700\n' > "$dir/state/.lock.pid-identity"
+  printf '700\nfixture-identity-700\n700\nfixture-identity-700\n' > "$dir/state/.lock.pid-identity"
 
   for shape in linux macos; do
     got=$(FM_TEST_CLAUDE_SHAPE="$shape" lib_eval "$fakebin" 'fm_harness_ancestry_pid') \
@@ -188,6 +189,8 @@ done
 case "$pid:$field" in
   900:comm=) printf '%s\n' claude ;;
   900:args=) printf '%s\n' 'claude' ;;
+  900:stat=) printf '%s\n' S ;;
+  900:pgid=) printf '%s\n' 900 ;;
   900:ppid=) printf '%s\n' 910 ;;
   910:comm=) printf '%s\n' bash ;;
   910:args=) printf '%s\n' 'bash tests/run.sh' ;;
@@ -209,7 +212,7 @@ SH
     fail "an unrelated harness beyond a non-harness gap was accepted as this session's lock owner"
   fi
   printf '900\n' > "$dir/state/.lock"
-  printf '900\nfixture-identity-900\n' > "$dir/state/.lock.pid-identity"
+  printf '900\nfixture-identity-900\n900\nfixture-identity-900\n' > "$dir/state/.lock.pid-identity"
   lib_eval "$fakebin" "fm_session_lock_owned_by_self '$dir/state'" \
     || fail "the contiguous harness run did not recognize its own lock"
   pass "session-lock: ownership stops at the first non-harness gap above the contiguous run"
@@ -362,34 +365,36 @@ SH
 }
 
 test_real_lock_interface_classifies_owner_process_state() {
-  local dir fakebin identity_fakebin owner_bin sleep_owner owner child owner_pgid child_pgid monitor_was_on i state child_state out status owner_after identity
+  local dir fakebin identity_fakebin leader_bin owner_bin sleep_owner leader owner owner_pgid leader_pgid monitor_was_on i state leader_state out status owner_after identity
   dir="$TMP_ROOT/owner-process-state"
   fakebin=$(fm_fakebin "$dir")
-  owner_bin="$dir/owner-bin"
+  leader_bin="$dir/leader-bin/pi-signed"
+  owner_bin="$dir/owner-bin/pi"
   sleep_owner="$dir/sleep-owner/claude"
-  mkdir -p "$dir/home/state" "$owner_bin" "${sleep_owner%/*}"
-  ln -s /bin/bash "$owner_bin/claude"
+  mkdir -p "$dir/home/state" "${leader_bin%/*}" "${owner_bin%/*}" "${sleep_owner%/*}"
+  ln -s /bin/bash "$leader_bin"
+  ln -s /bin/sleep "$owner_bin"
   ln -s /bin/sleep "$sleep_owner"
 
   monitor_was_on=0
   case $- in *m*) monitor_was_on=1 ;; esac
   set -m
-  "$owner_bin/claude" -c 'sleep 60 & printf "%s\n" "$!" > "$1"; wait' _ "$dir/child-pid" &
-  owner=$!
+  "$leader_bin" -c '"$1" 60 & printf "%s\n" "$!" > "$2"; wait' _ "$owner_bin" "$dir/owner-pid" &
+  leader=$!
   [ "$monitor_was_on" -eq 1 ] || set +m
-  LOCK_FIXTURE_PIDS+=("$owner")
+  LOCK_FIXTURE_PIDS+=("$leader")
   i=0
-  while [ "$i" -lt 100 ] && [ ! -s "$dir/child-pid" ]; do
+  while [ "$i" -lt 100 ] && [ ! -s "$dir/owner-pid" ]; do
     sleep 0.02
     i=$((i + 1))
   done
-  [ -s "$dir/child-pid" ] || fail "synthetic harness owner did not start its child"
-  child=$(cat "$dir/child-pid")
-  LOCK_FIXTURE_PIDS+=("$child")
+  [ -s "$dir/owner-pid" ] || fail "synthetic group leader did not start its harness owner"
+  owner=$(cat "$dir/owner-pid")
+  LOCK_FIXTURE_PIDS+=("$owner")
   owner_pgid=$(ps -o pgid= -p "$owner" 2>/dev/null | tr -d '[:space:]')
-  child_pgid=$(ps -o pgid= -p "$child" 2>/dev/null | tr -d '[:space:]')
-  [ "$owner_pgid" = "$owner" ] && [ "$child_pgid" = "$owner" ] \
-    || fail "synthetic owner tree did not share its leader-owned process group: owner=$owner owner_pgid=$owner_pgid child=$child child_pgid=$child_pgid"
+  leader_pgid=$(ps -o pgid= -p "$leader" 2>/dev/null | tr -d '[:space:]')
+  [ "$leader_pgid" = "$leader" ] && [ "$owner_pgid" = "$leader" ] && [ "$owner" != "$leader" ] \
+    || fail "synthetic non-leader owner did not share its harness leader's process group: leader=$leader leader_pgid=$leader_pgid owner=$owner owner_pgid=$owner_pgid"
   printf '%s\n' "$owner" > "$dir/home/state/.lock"
 
   state=$(ps -o stat= -p "$owner" 2>/dev/null || true)
@@ -406,7 +411,7 @@ test_real_lock_interface_classifies_owner_process_state() {
   [ "$(cat "$dir/home/state/.lock")" = "$owner" ] \
     || fail "active-owner refusal replaced the competing harness lock"
 
-  kill -STOP -"$owner"
+  kill -STOP -"$leader"
   i=0
   state=
   while [ "$i" -lt 100 ]; do
@@ -419,19 +424,42 @@ test_real_lock_interface_classifies_owner_process_state() {
     [Tt]*) : ;;
     *) fail "synthetic harness owner did not enter a stopped state: pid=$owner state=$state" ;;
   esac
-  child_state=$(ps -o stat= -p "$child" 2>/dev/null || true)
-  case "$child_state" in
+  leader_state=$(ps -o stat= -p "$leader" 2>/dev/null || true)
+  case "$leader_state" in
     [Tt]*) ;;
-    *) fail "synthetic harness child did not enter a stopped state: pid=$child state=$child_state" ;;
+    *) fail "synthetic harness group leader did not enter a stopped state: pid=$leader state=$leader_state" ;;
   esac
 
   out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$ROOT/bin/fm-lock.sh" status 2>&1)
   assert_contains "$out" "lock: stopped" "status must disclose a stopped harness owner"
   out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$NAMED_CLAUDE" -c \
     '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) && status=0 || status=$?
-  expect_code 1 "$status" "a legacy stopped-owner lock without birth identity must stay read-only"
+  expect_code 1 "$status" "a legacy stopped-owner lock without completion proof must stay read-only"
+  assert_contains "$out" "lacks corroborating completion proof" \
+    "missing legacy completion proof was not reported as the takeover blocker"
   [ "$(cat "$dir/home/state/.lock")" = "$owner" ] \
-    || fail "missing owner identity allowed stopped-owner lock replacement"
+    || fail "missing completion proof allowed stopped-owner lock replacement"
+
+  kill -CONT -"$leader"
+  i=0
+  state=
+  while [ "$i" -lt 100 ]; do
+    state=$(ps -o stat= -p "$owner" 2>/dev/null || true)
+    case "$state" in [Tt]*) ;; *) break ;; esac
+    sleep 0.02
+    i=$((i + 1))
+  done
+  sleep 1.1
+  printf '%s\n' "$owner" > "$dir/home/state/.session-start-complete"
+  kill -STOP -"$leader"
+  i=0
+  while [ "$i" -lt 100 ]; do
+    state=$(ps -o stat= -p "$owner" 2>/dev/null || true)
+    case "$state" in [Tt]*) break ;; esac
+    sleep 0.02
+    i=$((i + 1))
+  done
+  case "$state" in [Tt]*) ;; *) fail "synthetic harness owner did not stop after legacy completion" ;; esac
 
   printf '%s\n%s\n' "$owner" mismatch > "$dir/home/state/.lock.pid-identity"
   out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$NAMED_CLAUDE" -c \
@@ -465,22 +493,28 @@ SH
   [ "$(cat "$dir/home/state/.lock")" = "$owner" ] \
     || fail "unclassifiable owner identity allowed stopped-owner lock replacement"
 
+  rm -f "$dir/home/state/.lock.pid-identity"
   out=$(FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" "$NAMED_CLAUDE" -c \
     '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"' 2>&1) && status=0 || status=$?
-  wait "$owner" 2>/dev/null || true
-  expect_code 0 "$status" "a challenger must reclaim the lock from a stopped harness owner"
+  wait "$leader" 2>/dev/null || true
+  expect_code 0 "$status" "a challenger must reclaim a legacy lock from a stopped non-leader harness owner"
   assert_contains "$out" "lock acquired: harness pid" \
     "stopped-owner reclamation must complete through the real lock interface"
   owner_after=$(cat "$dir/home/state/.lock")
   [ "$owner_after" != "$owner" ] || fail "stopped harness owner retained the session lock"
   [ "$(sed -n '1p' "$dir/home/state/.lock.pid-identity")" = "$owner_after" ] \
     || fail "replacement lock did not publish its PID-bound birth identity"
-  kill -CONT "$owner" 2>/dev/null \
-    && fail "a fenced former owner remained resumable after lock takeover"
-  child_state=$(ps -o stat= -p "$child" 2>/dev/null || true)
-  case "$child_state" in
+  [ "$(wc -l < "$dir/home/state/.lock.pid-identity" | tr -d '[:space:]')" = 4 ] \
+    || fail "replacement lock did not publish a fixed owner-and-group lease"
+  state=$(ps -o stat= -p "$owner" 2>/dev/null || true)
+  case "$state" in
     ''|[XZ]*) ;;
-    *) fail "the stopped owner's child survived process-group fencing: pid=$child state=$child_state" ;;
+    *) fail "a fenced former owner remained resumable after lock takeover: pid=$owner state=$state" ;;
+  esac
+  leader_state=$(ps -o stat= -p "$leader" 2>/dev/null || true)
+  case "$leader_state" in
+    ''|[XZ]*) ;;
+    *) fail "the stopped owner's group leader survived process-group fencing: pid=$leader state=$leader_state" ;;
   esac
   LOCK_FIXTURE_PIDS=()
 

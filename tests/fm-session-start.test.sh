@@ -226,7 +226,15 @@ for argument in "$@"; do
   previous=$argument
 done
 case "$*" in
+  *"pgid=,stat="*)
+    /bin/ps "$@"
+    exit $?
+    ;;
   *"lstart="*)
+    /bin/ps "$@"
+    exit $?
+    ;;
+  *"pgid="*)
     /bin/ps "$@"
     exit $?
     ;;
@@ -275,7 +283,9 @@ for arg in "\$@"; do
   prev="\$arg"
 done
 case "\$*" in
+  *"pgid=,stat="*) /bin/ps "\$@"; exit \$? ;;
   *"lstart="*) /bin/ps "\$@"; exit \$? ;;
+  *"pgid="*) /bin/ps "\$@"; exit \$? ;;
   *"comm="*)
     if [ "\$pid" = "$holder_pid" ]; then
       printf '/usr/local/bin/pi\n'
@@ -889,7 +899,9 @@ for argument in "$@"; do
   previous=$argument
 done
 case "$*" in
+  *"pgid=,stat="*) /bin/ps "$@" ;;
   *"lstart="*) /bin/ps "$@" ;;
+  *"pgid="*) /bin/ps "$@" ;;
   *"comm="*)
     if [ -f "$FM_FAKE_LOCK_STATE/harness-$pid" ]; then
       printf '%s\n' /usr/local/bin/claude
@@ -1882,6 +1894,10 @@ for argument in "$@"; do
   previous=$argument
 done
 case "$*" in
+  *"pgid=,stat="*) /bin/ps "$@" ;;
+  *"lstart="*) /bin/ps "$@" ;;
+  *"pgid="*) /bin/ps "$@" ;;
+  *"stat="*) /bin/ps "$@" ;;
   *"comm="*)
     if [ "$pid" = "${FM_FAKE_HARNESS_PID:-}" ]; then printf '%s\n' /usr/local/bin/claude
     else printf '%s\n' /bin/bash; fi

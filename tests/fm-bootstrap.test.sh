@@ -929,7 +929,7 @@ SH
 }
 
 test_network_sweeps_recheck_lock_ownership() {
-  local case_dir fakebin fake_root marker out identity
+  local case_dir fakebin fake_root marker out identity group_leader group_leader_identity
   case_dir="$TMP_ROOT/network-lock-handoff"
   mkdir -p "$case_dir/home/config" "$case_dir/home/projects" "$case_dir/home/state"
   printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
@@ -959,8 +959,14 @@ SH
     "the stale worker did not report the refused clone refresh"
 
   identity=$(fm_test_pid_identity "$$") || fail "could not capture bootstrap fixture identity"
+  group_leader=$(ps -o pgid= -p "$$" 2>/dev/null | tr -d '[:space:]') \
+    || fail "could not capture bootstrap fixture process group"
+  group_leader_identity=$(fm_test_pid_identity "$group_leader") \
+    || fail "could not capture bootstrap fixture group leader identity"
   printf '%s\n' $$ > "$case_dir/home/state/.lock"
-  printf '%s\n%s\n' $$ replacement-identity > "$case_dir/home/state/.lock.pid-identity"
+  printf '%s\n%s\n%s\n%s\n' \
+    $$ replacement-identity "$group_leader" "$group_leader_identity" \
+    > "$case_dir/home/state/.lock.pid-identity"
   rm -f "$marker"
   out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$fake_root" \
     FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_BOOTSTRAP_NETWORK=only \
@@ -993,13 +999,19 @@ assert_timing_record() {
 # bin/fm-timing-lib.sh stays inert unless FM_TIMING_LOG names a file, so an
 # ordinary bootstrap run is unaffected either way, which is asserted here too.
 test_network_phases_record_per_step_elapsed_times() {
-  local case_dir fakebin log fields identity
+  local case_dir fakebin log fields identity group_leader group_leader_identity
   case_dir="$TMP_ROOT/network-timings"
   mkdir -p "$case_dir/home/config" "$case_dir/home/state" "$case_dir/home/data" "$case_dir/home/projects"
   printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
   printf '%s\n' $$ > "$case_dir/home/state/.lock"
   identity=$(fm_test_pid_identity "$$") || fail "could not capture bootstrap timing fixture identity"
-  printf '%s\n%s\n' $$ "$identity" > "$case_dir/home/state/.lock.pid-identity"
+  group_leader=$(ps -o pgid= -p "$$" 2>/dev/null | tr -d '[:space:]') \
+    || fail "could not capture bootstrap timing fixture process group"
+  group_leader_identity=$(fm_test_pid_identity "$group_leader") \
+    || fail "could not capture bootstrap timing fixture group leader identity"
+  printf '%s\n%s\n%s\n%s\n' \
+    $$ "$identity" "$group_leader" "$group_leader_identity" \
+    > "$case_dir/home/state/.lock.pid-identity"
   fakebin=$(make_fake_toolchain "$case_dir")
   # A real clone with a real origin, so fm-fleet-sync.sh genuinely iterates it.
   fm_git_init_commit "$case_dir/home/projects/alpha"
