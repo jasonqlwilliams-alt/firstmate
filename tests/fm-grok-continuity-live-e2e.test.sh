@@ -103,10 +103,37 @@ while [ "$i" -lt 240 ]; do
 done
 grep -Eq 'reason=actionable-signal' "$HOME_DIR/state/.watch-cycle-exits.log" 2>/dev/null \
   || fail "Grok action cycle was not classified in the lifecycle ledger"
-wait_for_text "Task completed in" 120 || fail "Grok did not surface its native background-task completion notification"
+
+# Native background completion is a behavioral contract, not a rendered phrase.
+# Grok's rendered completion copy changes across releases, while the continuity
+# invariant remains the same: the completed task re-enters this session and the
+# model starts a distinct live successor arm without a human prompt. Waiting for
+# that successor also proves the actionable cycle was consumed instead of
+# treating an ambiguous busy footer as success.
+i=0
+successor_watcher=
+while [ "$i" -lt 240 ]; do
+  successor_watcher=$(cat "$HOME_DIR/state/.watch.lock/pid" 2>/dev/null || true)
+  if [ -n "$successor_watcher" ] \
+    && [ "$successor_watcher" != "$initial_watcher" ] \
+    && kill -0 "$successor_watcher" 2>/dev/null; then
+    break
+  fi
+  sleep 0.5
+  i=$((i + 1))
+done
+if [ -z "$successor_watcher" ] \
+  || [ "$successor_watcher" = "$initial_watcher" ] \
+  || ! kill -0 "$successor_watcher" 2>/dev/null; then
+  capture >&2
+  fail "Grok did not consume native background completion and start a live successor watcher"
+fi
 pane=$(capture)
+if printf '%s\n' "$pane" | grep -Fq 'GROK_EXIT='; then
+  fail "Grok exited instead of continuing in the same interactive session"
+fi
 if printf '%s\n' "$pane" | grep -Fq 'bin/fm-watch-arm.sh &'; then
   fail "Grok used a shell ampersand instead of its tracked background task"
 fi
 
-printf 'ok - %s live E2E preserved tracked background completion and shared ledger classification\n' "$GROK_VERSION"
+printf 'ok - %s live E2E consumed actionable native completion and re-armed a live successor in the same session\n' "$GROK_VERSION"
