@@ -7,6 +7,12 @@ It does not create a ninth seat, a Discord connector, an orchestrator, or a memo
 
 ## Working path
 
+The live capability audit on 2026-08-21 found one active Composio Discord user OAuth connection.
+That connection can identify its user and list the user's guilds, but its Discord toolkit has no action for creating a guild, channel, thread, invite, or message.
+The separate Composio Discord Bot toolkit has those actions but has no connected account.
+An authenticated read-only proxy request for the existing guild's channels also returned `401 Unauthorized`, confirming that the user OAuth grant is not a hidden bot-management path.
+Composio therefore remains discovery evidence only and is not a room connector or wake path.
+
 The working path is the existing Relay plus the seat-message action already used by the live Grokbot runtime:
 
 ```text
@@ -29,8 +35,8 @@ No direct Discord bot token, webhook, Gateway client, Composio connector, Rakazo
 
 ## Server and room plan
 
-Use the server name `Grokbots Rooms` unless Jason chooses an already-existing private server during activation.
-The name is a plan until the owner activation receipt records the live server.
+The live user OAuth audit proved that Jason owns an existing server named `Continuum server`.
+Use that server rather than creating another server or memory authority.
 
 | Discord surface | Durable purpose | Wake route |
 | --- | --- | --- |
@@ -68,19 +74,18 @@ An agent must not sign in, authorize the application, handle the pairing token, 
 
 ### Exact click path
 
-1. Open Discord while signed into Jason's intended owner account.
-2. Select an existing private server or click `+` in the server rail, choose `Create My Own`, choose `For me and my friends`, and name it `Grokbots Rooms`.
-3. Open `Server Settings`, then `Roles`, select `@everyone`, and turn off `View Channels` for the private Grokbots category.
-4. Create a category named `GROKBOTS` and create the eleven text channels listed in the room plan inside it.
-5. In `#projects`, use a normal message thread for each job and name the thread with the existing job id.
-6. Open `https://myfirstmate.io`, choose Discord sign-in, and confirm that the account shown is Jason's intended owner account.
-7. Use the authenticated dashboard's Discord install control, choose the `Grokbots Rooms` server, and inspect the authorization screen before approving it.
-8. Approve only the scopes and permissions in the least-privilege list below.
-9. Return to Discord, open the `GROKBOTS` category permissions, add the installed myfirstmate bot role, and allow the listed room permissions only.
-10. Return to the myfirstmate dashboard and copy the pairing token directly into this Firstmate home's gitignored `.env` with a local editor as `FMX_PAIRING_TOKEN=<token>`.
-11. Close the editor without placing the token in chat, shell arguments, terminal output, screenshots, Git, or any task artifact.
-12. Start a new Firstmate session so the existing locked bootstrap can activate the Relay poll.
-13. Hand control back to Firstmate for the eight-seat canary and latency run.
+1. Open Discord while signed into the owner account for `Continuum server`.
+2. Open `Continuum server`, create a category named `GROKBOTS`, and make it private from `@everyone` by disabling `View Channels` on the category.
+3. Create the eleven text channels listed in the room plan inside that category.
+4. In `#projects`, create one normal message thread for each current job and name each thread with its existing job id.
+5. Open `https://myfirstmate.io`, choose Discord sign-in, and confirm that the account shown is the same owner account.
+6. Use the authenticated dashboard's Discord install control, choose `Continuum server`, and inspect the authorization screen before approving it.
+7. Approve only the scopes and permissions in the least-privilege list below.
+8. Return to Discord, open the `GROKBOTS` category permissions, add the installed myfirstmate bot role, and allow the listed room permissions only.
+9. Return to the myfirstmate dashboard and copy the pairing token directly into `/home/jason/kun-agent-workspace/.env` with a local editor as `FMX_PAIRING_TOKEN=<token>`.
+10. Close the editor without placing the token in chat, shell arguments, terminal output, screenshots, Git, or any task artifact.
+11. Start a new Firstmate session so the existing locked bootstrap can activate the Relay poll.
+12. Hand control back to Firstmate for the eight-seat canary and latency run.
 
 The owner sitting ends after activation.
 The eight canary posts and evidence capture are agent verification, not additional owner authorization gates.
@@ -142,7 +147,6 @@ Do not treat the prepared text above as a live post.
 
 Keep these names unchanged in the activation report until live evidence replaces them:
 
-- `UNKNOWN_LIVE_SERVER_NAME_OR_INVITE`.
 - `UNKNOWN_LIVE_ROOM_IDS`.
 - `UNKNOWN_OFFICIAL_INSTALL_SCOPES_AND_PERMISSIONS`.
 - `UNKNOWN_PAIRING_TOKEN_PRESENT`.
@@ -157,8 +161,8 @@ Keep these names unchanged in the activation report until live evidence replaces
 - `UNKNOWN_ARGON_DISCORD_WAKE_LATENCY_MS`.
 - `UNKNOWN_LIVE_TEST_POST_RECEIPT`.
 
-Do not fill an unknown from the guild id recorded for the earlier Rakazo roundtable lane.
-That id is neither a credential nor authority for this room layer.
+The server name is live evidence from the active user OAuth audit, but no invite URL or requested room id is available.
+Do not infer any room or invite from the earlier Rakazo roundtable record.
 
 ## Failure boundaries
 

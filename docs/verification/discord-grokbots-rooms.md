@@ -1,11 +1,13 @@
 # Grokbots Discord rooms verification
 
-Date: 2026-08-20.
+Date: 2026-08-21.
 
 ## Active claim
 
-The existing myfirstmate Relay can carry explicit Discord room addresses without a second Discord connector, and the new local helper resolves only the eight existing Grokbots seats and validates complete eight-seat latency receipts.
-The Discord server, room ids, application installation, live seat-delivery surface, live test post, and live per-seat latency remain owner-gated unknowns until the activation sitting completes.
+The existing myfirstmate Relay can carry explicit Discord room addresses without a second Discord connector, and the local helper resolves only the eight existing Grokbots seats and validates complete eight-seat latency receipts.
+The live account audit proves that Jason owns an existing Discord server named `Continuum server`.
+The audit resolved the captain-supplied guild id `1539100295932551189` to that server, so the room plan targets it and does not create another guild.
+The requested room ids, application installation, live seat-delivery surface, live test post, and live per-seat latency remain owner-gated unknowns until the activation sitting completes.
 
 The operator plan and owner gate are in [`../discord-grokbots-rooms.md`](../discord-grokbots-rooms.md).
 The address and receipt mechanics are owned by `bin/fm-discord-rooms.sh --help`.
@@ -21,7 +23,9 @@ The address and receipt mechanics are owned by `bin/fm-discord-rooms.sh --help`.
 | Fleet routes to Eleusis and Continuum guest routes to Flux | New hermetic route tests | Proven by test |
 | A latency receipt requires all eight seats exactly once and monotonic timestamps | New hermetic receipt tests | Proven by test |
 | Fixture latency cannot be reported as live | New hermetic receipt tests | Proven by test |
-| Discord server and rooms exist | Live Discord credential required | `UNKNOWN_LIVE_SERVER_NAME_OR_INVITE` |
+| Existing Discord server is available | Live Composio user OAuth audit | `Continuum server` is visible and owner-held |
+| Active user OAuth can create or inspect rooms | Live tool-catalog and read-only proxy audit | Refuted: no mutation tools, and channel proxy returned `401 Unauthorized` |
+| Requested rooms exist | Owner activation required | `UNKNOWN_LIVE_ROOM_IDS` |
 | Official bot is installed with the permitted scope | Owner authorization required | `UNKNOWN_OFFICIAL_INSTALL_SCOPES_AND_PERMISSIONS` |
 | Each live Grokbot receives the addressed event | Live seat-delivery surface required | `UNKNOWN_LIVE_MESSAGE_TO_GROKBOT_SURFACE` |
 | Per-seat end-to-end latency | Live Discord and seat receipts required | Eight named latency unknowns remain |
