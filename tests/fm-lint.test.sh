@@ -6,7 +6,7 @@
 # commands.lint) invoke, so the local lint can never diverge from CI again.
 # Regression origin: with no commands.lint configured, the local no-mistakes
 # lint step never ran the deterministic
-# `shellcheck bin/*.sh bin/backends/*.sh tests/*.sh`, so PRs passed local
+# `shellcheck bin/*.sh bin/backends/*.sh bin/fm-delivery-shims/* tests/*.sh`, so PRs passed local
 # validation yet failed that exact check in CI on info/warning findings such as
 # SC2015, SC1007, and SC2034. A second axis was tool-version skew: CI's
 # ShellCheck floated with the runner image and still emitted SC2015, which
@@ -172,7 +172,7 @@ test_list_files_reports_the_shell_inventory() {
   # working-tree diff a local test run happens to have, so this stays a pure
   # inventory check independent of fm-lint.sh's own changed-file mode below.
   listed=$(CI=true "$LINT" --list-files)
-  expected=$(find bin bin/backends tests -maxdepth 1 -type f -name '*.sh' -print | LC_ALL=C sort)
+  expected=$({ find bin bin/backends tests -maxdepth 1 -type f -name '*.sh' -print; printf '%s\n' bin/fm-delivery-shims/gh bin/fm-delivery-shims/gh-axi; } | LC_ALL=C sort)
   [ "$(printf '%s\n' "$listed" | LC_ALL=C sort)" = "$expected" ] \
     || fail "fm-lint.sh --list-files did not return the complete shell inventory"
   pass "fm-lint.sh --list-files reports the complete shell inventory"
@@ -405,7 +405,7 @@ test_ci_forces_full_lint_even_with_empty_diff() {
   # No git stub: CI=true must short-circuit fm-lint.sh's mode selection before
   # it ever consults git, so this proves CI wins regardless of local diff state.
   listed=$(CI=true "$LINT" --list-files)
-  expected=$(find bin bin/backends tests -maxdepth 1 -type f -name '*.sh' -print | LC_ALL=C sort)
+  expected=$({ find bin bin/backends tests -maxdepth 1 -type f -name '*.sh' -print; printf '%s\n' bin/fm-delivery-shims/gh bin/fm-delivery-shims/gh-axi; } | LC_ALL=C sort)
   [ "$(printf '%s\n' "$listed" | LC_ALL=C sort)" = "$expected" ] \
     || fail "CI=true did not force the full canonical file set"
   pass "fm-lint.sh forces a full lint in CI even when the local diff would be empty"
@@ -421,7 +421,7 @@ test_main_branch_forces_full_lint() {
   # not the ambient CI signal a real CI run would otherwise supply.
   listed=$(PATH="$fakebin:$PATH" GITHUB_ACTIONS='' CI='' \
     FM_TEST_GIT_BRANCH=main "$LINT" --list-files)
-  expected=$(find bin bin/backends tests -maxdepth 1 -type f -name '*.sh' -print | LC_ALL=C sort)
+  expected=$({ find bin bin/backends tests -maxdepth 1 -type f -name '*.sh' -print; printf '%s\n' bin/fm-delivery-shims/gh bin/fm-delivery-shims/gh-axi; } | LC_ALL=C sort)
   [ "$(printf '%s\n' "$listed" | LC_ALL=C sort)" = "$expected" ] \
     || fail "fm-lint.sh did not force a full lint when HEAD is on main"
   pass "fm-lint.sh forces a full lint when HEAD is on main"

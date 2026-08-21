@@ -190,6 +190,16 @@ fm_ask_user_escalation_block() {  # <data-dir> <task-id>
 EOF
 }
 
+# True when this home configures config/repository-policy.json, which is what arms
+# the repository delivery guard. The guard is opt-in, so a home without that file
+# renders the same direct-PR contract it rendered before the guard existed.
+fm_dod_delivery_policy_present() {
+  local config
+  config=${FM_CONFIG_OVERRIDE:-${FM_HOME:+$FM_HOME/config}}
+  [ -n "$config" ] || return 1
+  [ -e "$config/repository-policy.json" ] || [ -L "$config/repository-policy.json" ]
+}
+
 fm_dod_block() {  # <mode> <task-id>
   local mode=$1 id=$2
   case "$mode" in
@@ -202,6 +212,12 @@ The task is complete only when committed on your branch.
 When it is implemented and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}\` to the status file and stop.
 Do NOT run /no-mistakes. The configured merge authority decides whether to merge the PR; firstmate relays the outcome.
 EOF
+      if fm_dod_delivery_policy_present; then
+        cat <<EOF
+This home configures a repository delivery policy, so the installed pre-push guard names and verifies the effective fork before transmitting.
+Set the PR repository explicitly with \`export GH_REPO=\$("\$FM_HOME/bin/fm-delivery-guard.sh" pr-target .)\` before you open the PR, so the PR lands on the approved fork rather than whatever repository \`origin\` happens to name.
+EOF
+      fi
       ;;
     local-only)
       cat <<EOF

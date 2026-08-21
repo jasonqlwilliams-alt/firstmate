@@ -25,6 +25,50 @@ Wake, watcher, away-mode, and Relay-specific state mechanics remain with their n
 `AGENTS.md` retains the run-once and read-once operator rules, lock-refusal safety, installation consent, and direct-report recovery boundaries because those facts apply at every session start.
 Ordinary dead-direct-report recovery is owned by `stuck-crewmate-recovery`, while persistent-secondmate recovery is owned by `secondmate-provisioning`.
 
+## Repository delivery policy (config/repository-policy.json)
+
+The optional, primary-authoritative, gitignored `config/repository-policy.json` is the single owner of repository write destinations for the fleet.
+The whole repository delivery guard is opt-in: while this file is absent, no repository is armed, no command shim is installed, and every push, pull request, and merge path behaves exactly as it does without the guard.
+The file is inherited into secondmate homes through the declared local-material propagation contract.
+
+The guard exists because a clone's `origin` may name an original-author upstream rather than a captain-owned repository.
+Ordinary delivery pushes to a remote by name, so a routine lane can aim a branch or pull request at a stranger's repository.
+The remote name is therefore never authority; only the explicit URLs and allowlists in this file are.
+
+The current schema is:
+
+```json
+{
+  "version": 1,
+  "approvedOwners": ["captain-github-login"],
+  "approvedAccounts": ["captain-github-login"],
+  "repositories": {
+    "project-name": {
+      "upstreamFetchUrl": "https://github.com/original-owner/project-name.git",
+      "forkPushUrl": "https://github.com/captain-github-login/project-name.git",
+      "defaultBranch": "main"
+    }
+  }
+}
+```
+
+`approvedOwners` is the durable allowlist for destination repository owners.
+`approvedAccounts` is the durable allowlist for the GitHub account returned immediately before a write by `gh-axi api /user`; when omitted it defaults to `approvedOwners`.
+Every remotely delivered project needs an explicit `upstreamFetchUrl` and `forkPushUrl`, even when both URLs intentionally name the same captain-owned repository.
+Repository keys use letters, digits, dot, underscore, or dash and match registered project names; the firstmate code repository itself uses `firstmate`.
+GitHub URL transport spellings are normalized to one host/owner/repository identity for comparison, but no remote is added, renamed, removed, or rewritten.
+
+`bin/fm-delivery-guard.sh arm <project> <repository-path>` validates the policy and installs one shared pre-push hook in the repository's common Git directory, so every existing and future worktree receives the same boundary.
+When a policy file is present, `bin/fm-spawn.sh` calls that arming command before creating an endpoint and refuses the spawn if the policy is malformed or if a PR-based ship names a project the policy does not cover.
+When no policy file is present it arms nothing and refuses nothing.
+The hook checks Git's effective push URL rather than assuming a remote name.
+For a `no-mistakes` proxy push, it also reads the tool's reported fork branch destination and upstream PR destination and requires both to equal `forkPushUrl` before the local gate receives objects.
+Spawned workers in an armed home receive guarded `gh` and `gh-axi` command shims that apply the same repository and account check to pull-request writes.
+Every allowed operation prints a `DELIVERY TARGET` line naming the project, action, repository, and authenticated account before it writes; every mismatch exits nonzero with a `REFUSED` line naming the unsafe target.
+
+The policy configuration declares authority but never changes a remote URL.
+Migrating an existing clone whose `origin` names an upstream therefore remains a separate explicit project operation, and an unsafe no-mistakes configuration stays refused until its branch and PR targets are both captain-owned.
+
 ## Pi Calm preference (config/calm)
 
 The Pi Calm extension stores the captain's home-local presentation choice in gitignored `config/calm` under the effective Firstmate home, resolved from `FM_HOME`, then `FM_ROOT_OVERRIDE`, then the tracked code root derived from the extension path, or under `FM_CONFIG_OVERRIDE` when that test and specialized-setup override is present.
