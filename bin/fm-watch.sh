@@ -7,9 +7,10 @@
 # actively-running no-mistakes step, or a backend busy signal), and surfaced
 # otherwise, so a crew that finishes (or stops and waits) without a current
 # working signal is never silently swallowed. A declared wait, either a paused:
-# external wait or a verified captain-held transfer, is the separate idle absorb
-# case and re-surfaces only on its long bounded cadence, although its initial
-# no-verb status signal still surfaces in normal mode.
+# external wait, a verified captain-held transfer, or an active backlog hold with
+# a confirmed agent-less window, is the separate idle absorb case and re-surfaces
+# only on its long bounded cadence, although its initial no-verb status signal
+# still surfaces in normal mode.
 # While state/.afk exists, the daemon owns triage and this watcher queues and exits
 # on every wake. Printed reason lines:
 #   signal: <file>...      status/turn-end signals, surfaced when a listed status
@@ -20,10 +21,10 @@
 #                          run-step or busy pane outranks even a captain-relevant log
 #                          line, since the crew's own log gets no new entry once
 #                          firstmate hands it to a no-mistakes validation. A declared
-#                          external-wait pause or verified captain-held transfer is
-#                          absorbed instead with its own long re-surface cadence,
-#                          never as a wedge, and that recheck reason names which
-#                          human the wait is on. Only when neither absorb class
+#                          external-wait pause, verified captain-held transfer, or
+#                          active backlog hold with a confirmed agent-less window
+#                          is absorbed instead with its own long re-surface cadence,
+#                          never as a wedge. Only when neither absorb class
 #                          applies does the log's last line decide:
 #                          terminal (captain-relevant) or non-terminal (no verb),
 #                          both surfaced at once. A provably-working stale past the
@@ -214,9 +215,11 @@ SECONDMATE_WAKE_STALL_SECS=${FM_SECONDMATE_WAKE_STALL_SECS:-60}
 # A crew that declared a pause is idling on a known external wait, so its stale
 # pane is absorbed rather than wedge-escalated.
 # A captain-held or paused crew whose agent has confidently exited uses the same
-# bounded cadence, while a live or ambiguously read agent still surfaces once; a
-# secondmate earns the cadence on its declaration alone, because its endpoint
-# liveness is deliberately never read (pause_state_class owns that split).
+# bounded cadence. An active backlog hold earns that cadence only when the ordinary
+# crew's recorded window positively reports an agent-less shell. A live,
+# ambiguously read, or missing agent does not qualify for backlog suppression.
+# A secondmate earns the cadence on its status declaration alone, because its
+# endpoint liveness is deliberately never read (pause_state_class owns that split).
 # These cases re-surface once for a recheck every PAUSE_RESURFACE_SECS - far
 # longer than the wedge threshold, but finite so a forgotten hold cannot rot invisibly.
 PAUSE_RESURFACE_SECS=${FM_PAUSE_RESURFACE_SECS:-$FM_PAUSE_RESURFACE_SECS_DEFAULT}
@@ -393,6 +396,57 @@ recorded_windows() {
     seen="$seen|$w|"
     printf '%s\n' "$w"
   done
+}
+
+# Refresh the exact task ids tasks-axi currently classifies as held. The list is
+# rebuilt once per watcher poll, so unhold and hold-expiry changes self-clear on
+# the next cycle without leaving a permanent mute. A missing tool, failed read,
+# malformed row, or empty result proves nothing and leaves the task alarmable.
+# Hold kind is intentionally not a filter: tasks-axi's `--state held`
+# classification is the authoritative deliberate-idleness fact, while the
+# separate backend predicate below proves no agent is attached. This includes
+# external holds such as a branch awaiting merge without extending suppression to
+# any live worker.
+ACTIVE_HOLD_IDS=
+ACTIVE_HOLD_REFRESH_FAILED=0
+refresh_active_hold_ids() {
+  local output ids
+  ACTIVE_HOLD_IDS=
+  command -v tasks-axi >/dev/null 2>&1 || return 1
+  output=$(cd "$FM_HOME" && tasks-axi list --state held --limit 100000 2>/dev/null) || return 1
+  ids=$(printf '%s\n' "$output" | awk -F, '
+    /^  [A-Za-z0-9._-]+,/ {
+      id = $1
+      sub(/^  /, "", id)
+      if (id ~ /^[A-Za-z0-9._-]+$/) print id
+    }
+  ')
+  ACTIVE_HOLD_IDS=$ids
+}
+
+task_has_active_hold() {  # <task>
+  local task=$1
+  case "$task" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  case "
+$ACTIVE_HOLD_IDS
+" in
+    *"
+$task
+"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# 0 only for the exact suppression pair: an active backlog hold and an existing
+# recorded window whose backend positively classifies its agent shell as dead.
+# `missing`, `alive`, `ambiguous`, `unreadable`, and `unverified` all fail closed
+# without qualifying for suppression. Secondmates are excluded because their
+# liveness is deliberately not read by this watcher.
+task_hold_has_no_agent() {  # <window> <task>
+  local win=$1 task=$2
+  task_has_active_hold "$task" || return 1
+  [ "$(window_kind "$win")" != secondmate ] || return 1
+  [ "$(fm_backend_agent_state "$(window_backend "$win")" "$win" 2>/dev/null || printf unreadable)" = dead ]
 }
 
 # Print the oldest structurally valid row in a local secondmate's foreign queue.
@@ -594,16 +648,17 @@ busy_turn_over_age() {  # <task>
   [ "$(age_of "$f")" -ge "$BUSY_TURN_MAX_SECS" ]
 }
 
-# Absorb a stale pane under a declared external-wait pause (paused:) or a
-# dead-agent captain-held transfer, and re-surface it once every
-# PAUSE_RESURFACE_SECS for a recheck so it cannot rot invisibly. Called on any
-# stale poll once pause_state_class permits the bounded cadence, so it must be
-# cheap: it NEVER re-reads crew state. The re-surface age is anchored on the
-# status file mtime, not a per-hash marker, so a churny idle pane (a ticking
-# clock, a token counter) cannot keep resetting the cadence the way a hash-tied
-# timer would. The bounded re-surface itself is the shared resurface_absorbed
-# above, throttled by this window's own .paused-resurfaced-<key> marker. Advances
-# the stale suppressor to <hash> and flags the key paused.
+# Absorb a stale pane under a declared external-wait pause (paused:), a
+# dead-agent captain-held transfer, or the exact active-hold plus agent-less pair
+# owned by task_hold_has_no_agent. Re-surface it once every PAUSE_RESURFACE_SECS
+# for a recheck so it cannot rot invisibly. Called on any stale poll once
+# pause_state_class permits the bounded cadence, so it must be cheap: it never
+# re-reads crew state. The re-surface age is anchored on the status file mtime,
+# not a per-hash marker, so a churny idle pane cannot keep resetting the cadence
+# the way a hash-tied timer would. The bounded re-surface itself is the shared
+# resurface_absorbed above, throttled by this window's own
+# .paused-resurfaced-<key> marker. Advances the stale suppressor to <hash> and
+# flags the key paused.
 #
 # The recheck names WHICH human the declared wait is on, because that is the whole
 # point of a recheck the captain reads: an external dependency for paused:, and the
@@ -621,7 +676,10 @@ handle_paused_stale() {  # <window> <task> <hash>
   mtime=$(stat_mtime "$statusf")
   case "$mtime" in ''|*[!0-9]*) mtime=$(date +%s) ;; esac
   age=$(( $(date +%s) - mtime ))
-  if status_is_captain_held "$(last_status_line "$statusf")"; then
+  if task_hold_has_no_agent "$win" "$task"; then
+    detail="backlog-held, no agent attached"
+    reason="backlog-held ${age}s with no agent attached - active hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent"
+  elif status_is_captain_held "$(last_status_line "$statusf")"; then
     detail="captain-held, awaiting the captain"
     reason="captain-held ${age}s, awaiting the captain - verified hold transfer, rechecked on a long cadence not a wedge; answer the held decision or release the hold"
   else
@@ -701,15 +759,22 @@ clear_pause_tracking() {  # <window-key>
   rm -f "$STATE/.stale-$key" "$STATE/.stale-since-$key" "$STATE/.wedge-escalations-$key"
 }
 
-# Reconcile a declared pause or captain-held status with authoritative crew state.
-# After fm-crew-state has fallen back to stopped or unknown, paused classification is
-# recovered only for a confidently dead ordinary crew, or for a secondmate, whose
-# endpoint liveness this function deliberately never reads.
+# Reconcile a declared pause, captain-held status, or active backlog hold with
+# authoritative crew state. An active backlog hold returns paused only through
+# task_hold_has_no_agent's exact positive pair. After fm-crew-state has fallen
+# back to stopped or unknown, status-declared paused classification is recovered
+# only for a confidently dead ordinary crew, or for a secondmate, whose endpoint
+# liveness this function deliberately never reads.
 pause_state_class() {  # <window> <task>
   local win=$1 task=$2 key last recheck_file class agent_alive kind
   key=$(window_key "$win")
   last=$(last_status_line "$STATE/$task.status")
   recheck_file="$STATE/.paused-rechecked-$key"
+  if task_hold_has_no_agent "$win" "$task"; then
+    date +%s > "$recheck_file"
+    printf 'paused'
+    return
+  fi
   if ! status_is_paused_or_captain_held "$last"; then
     rm -f "$recheck_file"
     crew_absorb_class "$task"
@@ -1510,6 +1575,17 @@ EOF
   # stale hash is surfaced, absorbed, or timed toward escalation once (.stale-*
   # remembers the hash already classified, or the declaration a busy pane's
   # crossed turn bound already handed to the away-mode daemon).
+  if refresh_active_hold_ids; then
+    if [ "$ACTIVE_HOLD_REFRESH_FAILED" -eq 1 ]; then
+      triage_log "active backlog hold refresh recovered"
+    fi
+    ACTIVE_HOLD_REFRESH_FAILED=0
+  else
+    if [ "$ACTIVE_HOLD_REFRESH_FAILED" -eq 0 ]; then
+      triage_log "active backlog hold refresh unavailable; held-lane suppression disabled"
+    fi
+    ACTIVE_HOLD_REFRESH_FAILED=1
+  fi
   while IFS= read -r w; do
     kind=$(window_kind "$w")
     task=$(window_to_task "$w" "$STATE")
@@ -1518,7 +1594,9 @@ EOF
     [ -z "$task" ] || inbox_steer_check "$w" "$task"
     key=$(window_key "$w")
     last=$(last_status_line "$STATE/$task.status")
-    if ! status_is_paused_or_captain_held "$last" && [ -e "$STATE/.paused-$key" ]; then
+    if ! status_is_paused_or_captain_held "$last" \
+      && ! task_hold_has_no_agent "$w" "$task" \
+      && [ -e "$STATE/.paused-$key" ]; then
       clear_pause_tracking "$key"
     fi
     # An idle secondmate endpoint is healthy by design, so a mate is admitted to
@@ -1564,6 +1642,12 @@ EOF
             printf '%s' "$h" > "$sf"
             wake "stale: $w"
           fi
+        elif task_hold_has_no_agent "$w" "$task"; then
+          # A held lane with a positively agent-less recorded window is parked,
+          # even when an older terminal status remains at the end of its sparse
+          # event log. The active hold and backend liveness facts are refreshed
+          # every poll, so either changing sends the lane back to normal alarms.
+          handle_paused_stale "$w" "$task" "$h"
         elif stale_is_terminal "$w" "$STATE"; then
           # The log's last line is captain-relevant - but that alone is not
           # proof the crew is actually done: a crew's own status log gets no
@@ -1642,7 +1726,9 @@ EOF
             esac
           else
             task=$(window_to_task "$w" "$STATE")
-            if [ -e "$pf" ] || status_is_paused_or_captain_held "$(last_status_line "$STATE/$task.status")"; then
+            if [ -e "$pf" ] \
+              || status_is_paused_or_captain_held "$(last_status_line "$STATE/$task.status")" \
+              || task_hold_has_no_agent "$w" "$task"; then
               case "$(pause_state_class "$w" "$task")" in
                 paused)  handle_paused_stale "$w" "$task" "$h" ;;
                 working) clear_pause_state "$key"
@@ -1687,7 +1773,9 @@ EOF
         clear_write_tracking "$key"
       fi
       task=$(window_to_task "$w" "$STATE")
-      if ! afk_present && status_is_paused_or_captain_held "$(last_status_line "$STATE/$task.status")" && [ "$busy_now" -ne 0 ]; then
+      if ! afk_present && [ "$busy_now" -ne 0 ] \
+        && { status_is_paused_or_captain_held "$(last_status_line "$STATE/$task.status")" \
+          || task_hold_has_no_agent "$w" "$task"; }; then
         case "$(pause_state_class "$w" "$task")" in
           paused) handle_paused_stale "$w" "$task" "$h" ;;
           *)      clear_pause_tracking "$key" ;;

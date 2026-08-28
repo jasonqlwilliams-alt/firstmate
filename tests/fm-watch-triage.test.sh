@@ -51,6 +51,35 @@ watch_bg() {  # <state> <fakebin> <out> [extra env assignments...]
     FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$@" "$WATCH" > "$out" &
 }
 
+# Install the tasks-axi read surface the watcher uses to refresh active holds.
+# The fixture reads one task id per line from FM_FAKE_HELD_TASKS_FILE, so a test
+# can lift a hold while the watcher stays alive and prove suppression self-clears.
+install_fake_tasks_axi_held_list() {  # <fakebin>
+  local fakebin=$1
+  cat > "$fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+set -u
+if [ "${1:-}" = list ]; then
+  held_file=${FM_FAKE_HELD_TASKS_FILE:-}
+  count=0
+  if [ -f "$held_file" ]; then
+    count=$(awk 'NF { n++ } END { print n + 0 }' "$held_file")
+  fi
+  printf 'count: %s\n' "$count"
+  printf 'tasks[%s]{id,state,kind,repo,title}:\n' "$count"
+  if [ -f "$held_file" ]; then
+    while IFS= read -r id || [ -n "$id" ]; do
+      case "$id" in ''|*[!A-Za-z0-9._-]*) continue ;; esac
+      printf '  %s,queued,ship,firstmate,Held fixture\n' "$id"
+    done < "$held_file"
+  fi
+  exit 0
+fi
+exit 1
+SH
+  chmod +x "$fakebin/tasks-axi"
+}
+
 # Wait up to <limit> 0.1s ticks while <pid> stays alive; 0 if still alive, 1 if it died.
 wait_live() {
   local pid=$1 limit=${2:-30} i=0
@@ -1369,6 +1398,90 @@ test_exited_declared_pause_is_bounded_but_live_gate_surfaces() {
   [ "$wakes" -eq 0 ] || fail "acknowledged external-decision surface replayed $wakes wakes"
   [ "$bare" -eq 0 ] || fail "acknowledged external-decision bare stale remained queued"
   pass "exited declared-pause and captain-held panes use bounded pause cadence while a live decision gate still surfaces once"
+}
+
+# An active backlog hold is a deliberate idle fact only when the recorded window
+# also positively reports an agent-less shell. The pair takes the existing long
+# recheck cadence and clears any old wedge counter. Lifting the hold while the
+# watcher stays alive must clear that cadence on the next poll and restore the
+# ordinary stale alarm. Keeping the hold while a live agent is attached must
+# retain the wedge timer instead of borrowing the parked-lane suppression.
+test_backlog_hold_suppresses_only_an_agentless_lane() {
+  local dir state fakebin out capture_file held_file statusf window key pane_hash sig pid
+
+  dir=$(make_case backlog-held-agentless); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"; held_file="$dir/held.ids"
+  statusf="$state/parked.status"; window="test:fm-parked"
+  install_fake_tasks_axi_held_list "$fakebin"
+  printf '%s\n' parked > "$held_file"
+  printf 'idle bare shell under an active backlog hold\n' > "$capture_file"
+  printf 'window=%s\nkind=ship\nharness=codex\nbackend=tmux\n' "$window" > "$state/parked.meta"
+  printf 'working: last worker note before it exited\n' > "$statusf"
+  sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-parked_status"
+  key=$(printf '%s' "$window" | tr '.:/' '___')
+  pane_hash=$(hash_text "idle bare shell under an active backlog hold")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '%s' "$pane_hash" > "$state/.stale-$key"
+  printf '1\n' > "$state/.count-$key"
+  printf '%s\n' $(( $(date +%s) - 500 )) > "$state/.stale-since-$key"
+  printf '494\n' > "$state/.wedge-escalations-$key"
+
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_FAKE_HELD_TASKS_FILE="$held_file" \
+    FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=zsh FM_FAKE_CREW_STATE='state: unknown · source: none · bare shell' \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  if ! wait_live "$pid" 40; then
+    wait "$pid" || true
+    fail "held agent-less lane alarmed instead of parking: $(cat "$out")"
+  fi
+  [ -e "$state/.paused-$key" ] || { reap "$pid"; fail "held agent-less lane did not enter bounded pause tracking"; }
+  [ ! -e "$state/.stale-since-$key" ] || { reap "$pid"; fail "held agent-less lane retained its wedge timer"; }
+  [ ! -e "$state/.wedge-escalations-$key" ] || { reap "$pid"; fail "held agent-less lane retained its repeat escalation counter"; }
+  [ ! -s "$state/.wake-queue" ] || { reap "$pid"; fail "held agent-less lane queued a repeat wake"; }
+
+  : > "$held_file"
+  wait_for_exit "$pid" 100 || { reap "$pid"; fail "lifting the active hold did not restore the stale alarm"; }
+  grep -Fx "stale: $window" "$out" >/dev/null \
+    || fail "hold removal did not surface the ordinary stale alarm: $(cat "$out")"
+  grep -F "backlog-held" "$out" >/dev/null \
+    && fail "hold removal left the lane on the backlog-held cadence"
+
+  dir=$(make_case backlog-held-live-agent); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"; held_file="$dir/held.ids"
+  statusf="$state/live-held.status"; window="test:fm-live-held"
+  install_fake_tasks_axi_held_list "$fakebin"
+  printf '%s\n' live-held > "$held_file"
+  printf 'live agent on a static pane\n' > "$capture_file"
+  printf 'window=%s\nkind=ship\nharness=codex\nbackend=tmux\n' "$window" > "$state/live-held.meta"
+  printf 'working: agent is still attached\n' > "$statusf"
+  sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-live-held_status"
+  key=$(printf '%s' "$window" | tr '.:/' '___')
+  pane_hash=$(hash_text "live agent on a static pane")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '%s' "$pane_hash" > "$state/.stale-$key"
+  printf '1\n' > "$state/.count-$key"
+  : > "$state/.paused-$key"
+  date +%s > "$state/.paused-rechecked-$key"
+  date +%s > "$state/.paused-resurfaced-$key"
+
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_FAKE_HELD_TASKS_FILE="$held_file" \
+    FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=codex FM_FAKE_CREW_STATE='state: working · source: pane · live agent' \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_STALE_ESCALATE_SECS=0 FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_for_exit "$pid" 100 || { reap "$pid"; fail "active hold silenced a live agent's wedge alarm"; }
+  grep -F "possible wedge" "$out" >/dev/null \
+    || fail "live agent under an active hold did not retain wedge detection: $(cat "$out")"
+  [ ! -e "$state/.paused-$key" ] \
+    || fail "an attached live agent did not clear the prior agent-less suppression"
+  grep -F "backlog-held" "$out" >/dev/null \
+    && fail "live agent under an active hold borrowed the agent-less suppression"
+  pass "active backlog holds suppress only agent-less lanes and self-clear when the hold or liveness fact changes"
 }
 
 test_secondmate_paused_resurfaces_in_normal_mode() {
@@ -3158,6 +3271,7 @@ test_afk_busy_declared_pause_ticking_pane_hands_off_once
 test_nonterminal_stale_not_working_surfaced
 test_nonterminal_stale_paused_absorbed_then_resurfaced
 test_exited_declared_pause_is_bounded_but_live_gate_surfaces
+test_backlog_hold_suppresses_only_an_agentless_lane
 test_secondmate_paused_resurfaces_in_normal_mode
 test_secondmate_captain_held_resurfaces_in_normal_mode
 test_secondmate_nonpaused_stale_remains_suppressed
