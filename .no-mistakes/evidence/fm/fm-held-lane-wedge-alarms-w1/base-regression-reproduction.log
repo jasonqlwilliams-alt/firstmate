@@ -1,0 +1,2 @@
+not ok - held agent-less lane alarmed instead of parking: stale: test:fm-parked (idle 501s, possible wedge, escalation 495, demand-deep-inspection: same pane has wedge-escalated 495 times in a row - do not re-absorb on the run-step/pane state alone)
+EXPECTED BASELINE RESULT: exit 1; the pre-fix watcher surfaced the held agent-less lane instead of parking it.

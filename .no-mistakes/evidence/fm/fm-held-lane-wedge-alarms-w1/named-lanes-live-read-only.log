@@ -1,0 +1,9 @@
+Live read-only named-lane classification using target watcher functions
+acs-4544332-paper-tighten-fbmn-e3 | hold_kind=captain | agent_state=dead | watcher=suppressed-as-captain-held-agentless
+grokbots-discord-d1 | hold_kind=external | agent_state=dead | watcher=alarmable-by-ordinary-wedge-rules
+Mutation check
+data/backlog.md | unchanged=yes | fingerprint=244619:1788069338 636526a84ac5ad1f4402cd0970ae9ec55110b185121cd111c9edfa11ea2aaf4c
+state/acs-4544332-paper-tighten-fbmn-e3.meta | unchanged=yes | fingerprint=791:1787341269 7067f81d6fd8aa684485dbcb84e691be9a5561788e46930dc95fa22bcb45c334
+state/acs-4544332-paper-tighten-fbmn-e3.status | unchanged=yes | fingerprint=22363:1787342022 7ff35f1aa1594836e7f84897af953522a42973af286593fd7e15180c88461afe
+state/grokbots-discord-d1.meta | unchanged=yes | fingerprint=580:1787298549 0030b934a373922005ae066bdf8eb58f8d77019adb38a184e9ac9912bc1eb313
+state/grokbots-discord-d1.status | unchanged=yes | fingerprint=2353:1787370764 7da4a83ed1c76e4efb351643a4ac300c09660de7685c4366695911aae07112ca

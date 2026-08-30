@@ -1,0 +1,4 @@
+Named-lane isolated replay (real lane records were not accessed or mutated)
+- acs-4544332-paper-tighten-fbmn-e3: captain hold + confirmed dead agent suppresses the repeated idle alarm; removing the hold restores the ordinary stale notification.
+- grokbots-discord-d1: attaching a live agent clears suppression; once the stale timer crosses its bound, the watcher emits a possible-wedge notification.
+ok - captain backlog holds suppress only agent-less lanes across normal and away modes
