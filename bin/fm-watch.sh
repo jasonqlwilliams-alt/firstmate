@@ -46,11 +46,13 @@
 #                          only up to BUSY_TURN_MAX_SECS with no completed turn
 #                          (state/<id>.turn-ended, or the spawn record before any
 #                          turn completes). Past that bound, a declared external
-#                          wait or verified captain-held transfer uses the long
-#                          pause recheck cadence (under afk it is instead handed
-#                          to the daemon as this plain reason, once per
-#                          declaration; busy_turn_bound_check owns that handoff);
-#                          every other pane goes through the same wedge timer and
+#                          wait uses the long pause recheck cadence (under afk it
+#                          is instead handed to the daemon as this plain reason,
+#                          once per declaration; busy_turn_bound_check owns that
+#                          handoff). An active captain backlog hold uses that
+#                          cadence only when the recorded endpoint is positively
+#                          agent-less; a live captain-held worker and every other
+#                          pane go through the same wedge timer and
 #                          surfaces with the identical "stale: ..." reason,
 #                          escalation count, and demand-deep-inspection marker,
 #                          for human inspection only - never an automatic
@@ -399,10 +401,10 @@ recorded_windows() {
 }
 
 # Refresh the exact task ids tasks-axi currently classifies as captain-held. The
-# list is rebuilt once per watcher poll, so unhold and hold-expiry changes
-# self-clear on the next cycle without leaving a permanent mute. A missing tool,
-# failed read, malformed row, non-captain hold, or empty result proves nothing and
-# leaves the task alarmable.
+# list is rebuilt once per watcher poll, so this backlog-derived decision follows
+# unhold and hold-expiry changes on the next cycle before existing status and pane
+# classification resumes. A missing tool, failed read, malformed row, non-captain
+# hold, or empty result proves nothing for this suppression path.
 ACTIVE_CAPTAIN_HOLD_IDS=
 ACTIVE_CAPTAIN_HOLD_REFRESH_FAILED=0
 refresh_active_captain_hold_ids() {
@@ -692,15 +694,14 @@ handle_paused_stale() {  # <window> <task> <hash>
 # 0 when the declared-pause cadence took the pane, 1 when the wedge timer did.
 #
 # A busy pane past BUSY_TURN_MAX_SECS is normally a wedge suspect because a hung
-# foreground call can hide behind a busy signature. A `paused:` declaration or
-# verified captain-held transfer instead identifies that live foreground call as
-# the expected external wait. The caller has already confirmed liveness through
-# the busy verdict, so this exception does not suppress undeclared wedges or
-# alter the separate non-busy classification. handle_paused_stale keeps the
-# exception bounded by re-surfacing it once per PAUSE_RESURFACE_SECS. Away mode
-# remains daemon-owned and receives the undecorated wake identity for its own
-# classification, which is why the declaration is read before the afk branch
-# rather than after it.
+# foreground call can hide behind a busy signature. A `paused:` declaration
+# instead identifies that live foreground call as the expected external wait.
+# An active captain backlog hold takes the same cadence only when the recorded
+# endpoint is positively agent-less, so a live captain-held worker retains the
+# wedge path. handle_paused_stale keeps either exception bounded by re-surfacing
+# it once per PAUSE_RESURFACE_SECS. Away mode receives a paused declaration as an
+# undecorated wake identity for daemon classification, which is why that
+# declaration is read before the afk branch rather than after it.
 busy_turn_bound_check() {  # <window> <task> <hash> <since-file> <escalation-file>
   local win=$1 task=$2 h=$3 since_file=$4 escalation_file=$5 key statusf declared last
   statusf="$STATE/$task.status"
@@ -1640,7 +1641,7 @@ EOF
           # A captain-held lane with a positively agent-less recorded window is
           # parked in normal and away mode. The active hold and backend liveness
           # facts are refreshed every poll, so either changing sends the lane
-          # back to normal alarms.
+          # back to its existing status and pane classification.
           handle_paused_stale "$w" "$task" "$h"
         elif afk_present; then
           # Daemon owns triage: one-shot per distinct stale hash, as before.
