@@ -7,9 +7,10 @@
 # actively-running no-mistakes step, or a backend busy signal), and surfaced
 # otherwise, so a crew that finishes (or stops and waits) without a current
 # working signal is never silently swallowed. A declared wait, either a paused:
-# external wait or a verified captain-held transfer, is the separate idle absorb
-# case and re-surfaces only on its long bounded cadence, although its initial
-# no-verb status signal still surfaces in normal mode.
+# external wait, a verified captain-held transfer, or an active captain backlog
+# hold with a confirmed agent-less window, is the separate idle absorb case and
+# re-surfaces only on its long bounded cadence, although its initial no-verb
+# status signal still surfaces in normal mode.
 # While state/.afk exists, the daemon owns triage and this watcher queues and exits
 # on every wake. Printed reason lines:
 #   signal: <file>...      status/turn-end signals, surfaced when a listed status
@@ -20,10 +21,10 @@
 #                          run-step or busy pane outranks even a captain-relevant log
 #                          line, since the crew's own log gets no new entry once
 #                          firstmate hands it to a no-mistakes validation. A declared
-#                          external-wait pause or verified captain-held transfer is
-#                          absorbed instead with its own long re-surface cadence,
-#                          never as a wedge, and that recheck reason names which
-#                          human the wait is on. Only when neither absorb class
+#                          external-wait pause, verified captain-held transfer, or
+#                          active captain backlog hold with a confirmed agent-less
+#                          window is absorbed instead with its own long re-surface
+#                          cadence, never as a wedge. Only when neither absorb class
 #                          applies does the log's last line decide:
 #                          terminal (captain-relevant) or non-terminal (no verb),
 #                          both surfaced at once. A provably-working stale past the
@@ -45,11 +46,13 @@
 #                          only up to BUSY_TURN_MAX_SECS with no completed turn
 #                          (state/<id>.turn-ended, or the spawn record before any
 #                          turn completes). Past that bound, a declared external
-#                          wait or verified captain-held transfer uses the long
-#                          pause recheck cadence (under afk it is instead handed
-#                          to the daemon as this plain reason, once per
-#                          declaration; busy_turn_bound_check owns that handoff);
-#                          every other pane goes through the same wedge timer and
+#                          wait uses the long pause recheck cadence (under afk it
+#                          is instead handed to the daemon as this plain reason,
+#                          once per declaration; busy_turn_bound_check owns that
+#                          handoff). An active captain backlog hold uses that
+#                          cadence only when the recorded endpoint is positively
+#                          agent-less; a live captain-held worker and every other
+#                          pane go through the same wedge timer and
 #                          surfaces with the identical "stale: ..." reason,
 #                          escalation count, and demand-deep-inspection marker,
 #                          for human inspection only - never an automatic
@@ -214,9 +217,11 @@ SECONDMATE_WAKE_STALL_SECS=${FM_SECONDMATE_WAKE_STALL_SECS:-60}
 # A crew that declared a pause is idling on a known external wait, so its stale
 # pane is absorbed rather than wedge-escalated.
 # A captain-held or paused crew whose agent has confidently exited uses the same
-# bounded cadence, while a live or ambiguously read agent still surfaces once; a
-# secondmate earns the cadence on its declaration alone, because its endpoint
-# liveness is deliberately never read (pause_state_class owns that split).
+# bounded cadence. An active captain backlog hold earns that cadence only when the
+# ordinary crew's recorded window positively reports an agent-less shell. A live,
+# ambiguously read, or missing agent does not qualify for backlog suppression.
+# A secondmate earns the cadence on its status declaration alone, because its
+# endpoint liveness is deliberately never read (pause_state_class owns that split).
 # These cases re-surface once for a recheck every PAUSE_RESURFACE_SECS - far
 # longer than the wedge threshold, but finite so a forgotten hold cannot rot invisibly.
 PAUSE_RESURFACE_SECS=${FM_PAUSE_RESURFACE_SECS:-$FM_PAUSE_RESURFACE_SECS_DEFAULT}
@@ -393,6 +398,53 @@ recorded_windows() {
     seen="$seen|$w|"
     printf '%s\n' "$w"
   done
+}
+
+# Refresh the exact task ids tasks-axi currently classifies as captain-held. The
+# list is rebuilt once per watcher poll, so this backlog-derived decision follows
+# unhold and hold-expiry changes on the next cycle before existing status and pane
+# classification resumes. A missing tool, failed read, malformed row, non-captain
+# hold, or empty result proves nothing for this suppression path.
+ACTIVE_CAPTAIN_HOLD_IDS=
+ACTIVE_CAPTAIN_HOLD_REFRESH_FAILED=0
+refresh_active_captain_hold_ids() {
+  local output ids
+  ACTIVE_CAPTAIN_HOLD_IDS=
+  command -v tasks-axi >/dev/null 2>&1 || return 1
+  output=$(cd "$FM_HOME" && tasks-axi list --state held --fields hold_kind --limit 100000 2>/dev/null) || return 1
+  ids=$(printf '%s\n' "$output" | awk -F, '
+    /^  [A-Za-z0-9._-]+,/ && $NF == "captain" {
+      id = $1
+      sub(/^  /, "", id)
+      if (id ~ /^[A-Za-z0-9._-]+$/) print id
+    }
+  ')
+  ACTIVE_CAPTAIN_HOLD_IDS=$ids
+}
+
+task_has_active_captain_hold() {  # <task>
+  local task=$1
+  case "$task" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  case "
+$ACTIVE_CAPTAIN_HOLD_IDS
+" in
+    *"
+$task
+"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# 0 only for the exact suppression pair: an active captain backlog hold and an
+# existing recorded window whose backend positively classifies its agent shell as dead.
+# `missing`, `alive`, `ambiguous`, `unreadable`, and `unverified` all fail closed
+# without qualifying for suppression. Secondmates are excluded because their
+# liveness is deliberately not read by this watcher.
+task_hold_has_no_agent() {  # <window> <task>
+  local win=$1 task=$2
+  task_has_active_captain_hold "$task" || return 1
+  [ "$(window_kind "$win")" != secondmate ] || return 1
+  [ "$(fm_backend_agent_state "$(window_backend "$win")" "$win" 2>/dev/null || printf unreadable)" = dead ]
 }
 
 # Print the oldest structurally valid row in a local secondmate's foreign queue.
@@ -594,16 +646,17 @@ busy_turn_over_age() {  # <task>
   [ "$(age_of "$f")" -ge "$BUSY_TURN_MAX_SECS" ]
 }
 
-# Absorb a stale pane under a declared external-wait pause (paused:) or a
-# dead-agent captain-held transfer, and re-surface it once every
-# PAUSE_RESURFACE_SECS for a recheck so it cannot rot invisibly. Called on any
-# stale poll once pause_state_class permits the bounded cadence, so it must be
-# cheap: it NEVER re-reads crew state. The re-surface age is anchored on the
-# status file mtime, not a per-hash marker, so a churny idle pane (a ticking
-# clock, a token counter) cannot keep resetting the cadence the way a hash-tied
-# timer would. The bounded re-surface itself is the shared resurface_absorbed
-# above, throttled by this window's own .paused-resurfaced-<key> marker. Advances
-# the stale suppressor to <hash> and flags the key paused.
+# Absorb a stale pane under a declared external-wait pause (paused:), a
+# dead-agent captain-held transfer, or the exact captain-hold plus agent-less pair
+# owned by task_hold_has_no_agent. Re-surface it once every PAUSE_RESURFACE_SECS
+# for a recheck so it cannot rot invisibly. Called on any stale poll once
+# pause_state_class permits the bounded cadence, so it must be cheap: it never
+# re-reads crew state. The re-surface age is anchored on the status file mtime,
+# not a per-hash marker, so a churny idle pane cannot keep resetting the cadence
+# the way a hash-tied timer would. The bounded re-surface itself is the shared
+# resurface_absorbed above, throttled by this window's own
+# .paused-resurfaced-<key> marker. Advances the stale suppressor to <hash> and
+# flags the key paused.
 #
 # The recheck names WHICH human the declared wait is on, because that is the whole
 # point of a recheck the captain reads: an external dependency for paused:, and the
@@ -621,7 +674,10 @@ handle_paused_stale() {  # <window> <task> <hash>
   mtime=$(stat_mtime "$statusf")
   case "$mtime" in ''|*[!0-9]*) mtime=$(date +%s) ;; esac
   age=$(( $(date +%s) - mtime ))
-  if status_is_captain_held "$(last_status_line "$statusf")"; then
+  if task_hold_has_no_agent "$win" "$task"; then
+    detail="backlog-held, no agent attached"
+    reason="backlog-held ${age}s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent"
+  elif status_is_captain_held "$(last_status_line "$statusf")"; then
     detail="captain-held, awaiting the captain"
     reason="captain-held ${age}s, awaiting the captain - verified hold transfer, rechecked on a long cadence not a wedge; answer the held decision or release the hold"
   else
@@ -638,19 +694,23 @@ handle_paused_stale() {  # <window> <task> <hash>
 # 0 when the declared-pause cadence took the pane, 1 when the wedge timer did.
 #
 # A busy pane past BUSY_TURN_MAX_SECS is normally a wedge suspect because a hung
-# foreground call can hide behind a busy signature. A `paused:` declaration or
-# verified captain-held transfer instead identifies that live foreground call as
-# the expected external wait. The caller has already confirmed liveness through
-# the busy verdict, so this exception does not suppress undeclared wedges or
-# alter the separate non-busy classification. handle_paused_stale keeps the
-# exception bounded by re-surfacing it once per PAUSE_RESURFACE_SECS. Away mode
-# remains daemon-owned and receives the undecorated wake identity for its own
-# classification, which is why the declaration is read before the afk branch
-# rather than after it.
+# foreground call can hide behind a busy signature. A `paused:` declaration
+# instead identifies that live foreground call as the expected external wait.
+# An active captain backlog hold takes the same cadence only when the recorded
+# endpoint is positively agent-less, so a live captain-held worker retains the
+# wedge path. handle_paused_stale keeps either exception bounded by re-surfacing
+# it once per PAUSE_RESURFACE_SECS. Away mode receives a paused declaration as an
+# undecorated wake identity for daemon classification, which is why that
+# declaration is read before the afk branch rather than after it.
 busy_turn_bound_check() {  # <window> <task> <hash> <since-file> <escalation-file>
-  local win=$1 task=$2 h=$3 since_file=$4 escalation_file=$5 key statusf declared
+  local win=$1 task=$2 h=$3 since_file=$4 escalation_file=$5 key statusf declared last
   statusf="$STATE/$task.status"
-  if status_is_paused_or_captain_held "$(last_status_line "$statusf")"; then
+  last=$(last_status_line "$statusf")
+  if task_hold_has_no_agent "$win" "$task"; then
+    handle_paused_stale "$win" "$task" "$h"
+    return 0
+  fi
+  if status_is_paused "$last"; then
     if afk_present; then
       # Away mode is daemon-owned, so this bound hands off the PLAIN wake identity
       # and lets the daemon classify the declaration itself - the undecorated
@@ -701,15 +761,22 @@ clear_pause_tracking() {  # <window-key>
   rm -f "$STATE/.stale-$key" "$STATE/.stale-since-$key" "$STATE/.wedge-escalations-$key"
 }
 
-# Reconcile a declared pause or captain-held status with authoritative crew state.
-# After fm-crew-state has fallen back to stopped or unknown, paused classification is
-# recovered only for a confidently dead ordinary crew, or for a secondmate, whose
-# endpoint liveness this function deliberately never reads.
+# Reconcile a declared pause, captain-held status, or active captain backlog hold
+# with authoritative crew state. An active captain backlog hold returns paused only through
+# task_hold_has_no_agent's exact positive pair. After fm-crew-state has fallen
+# back to stopped or unknown, status-declared paused classification is recovered
+# only for a confidently dead ordinary crew, or for a secondmate, whose endpoint
+# liveness this function deliberately never reads.
 pause_state_class() {  # <window> <task>
   local win=$1 task=$2 key last recheck_file class agent_alive kind
   key=$(window_key "$win")
   last=$(last_status_line "$STATE/$task.status")
   recheck_file="$STATE/.paused-rechecked-$key"
+  if task_hold_has_no_agent "$win" "$task"; then
+    date +%s > "$recheck_file"
+    printf 'paused'
+    return
+  fi
   if ! status_is_paused_or_captain_held "$last"; then
     rm -f "$recheck_file"
     crew_absorb_class "$task"
@@ -1510,6 +1577,17 @@ EOF
   # stale hash is surfaced, absorbed, or timed toward escalation once (.stale-*
   # remembers the hash already classified, or the declaration a busy pane's
   # crossed turn bound already handed to the away-mode daemon).
+  if refresh_active_captain_hold_ids; then
+    if [ "$ACTIVE_CAPTAIN_HOLD_REFRESH_FAILED" -eq 1 ]; then
+      triage_log "active captain backlog hold refresh recovered"
+    fi
+    ACTIVE_CAPTAIN_HOLD_REFRESH_FAILED=0
+  else
+    if [ "$ACTIVE_CAPTAIN_HOLD_REFRESH_FAILED" -eq 0 ]; then
+      triage_log "active captain backlog hold refresh unavailable; held-lane suppression disabled"
+    fi
+    ACTIVE_CAPTAIN_HOLD_REFRESH_FAILED=1
+  fi
   while IFS= read -r w; do
     kind=$(window_kind "$w")
     task=$(window_to_task "$w" "$STATE")
@@ -1518,7 +1596,9 @@ EOF
     [ -z "$task" ] || inbox_steer_check "$w" "$task"
     key=$(window_key "$w")
     last=$(last_status_line "$STATE/$task.status")
-    if ! status_is_paused_or_captain_held "$last" && [ -e "$STATE/.paused-$key" ]; then
+    if ! status_is_paused_or_captain_held "$last" \
+      && ! task_hold_has_no_agent "$w" "$task" \
+      && [ -e "$STATE/.paused-$key" ]; then
       clear_pause_tracking "$key"
     fi
     # An idle secondmate endpoint is healthy by design, so a mate is admitted to
@@ -1557,6 +1637,12 @@ EOF
             paused) handle_paused_stale "$w" "$task" "$h" ;;
             *)      clear_pause_tracking "$key" ;;
           esac
+        elif task_hold_has_no_agent "$w" "$task"; then
+          # A captain-held lane with a positively agent-less recorded window is
+          # parked in normal and away mode. The active hold and backend liveness
+          # facts are refreshed every poll, so either changing sends the lane
+          # back to its existing status and pane classification.
+          handle_paused_stale "$w" "$task" "$h"
         elif afk_present; then
           # Daemon owns triage: one-shot per distinct stale hash, as before.
           if [ "$(cat "$sf" 2>/dev/null || true)" != "$h" ]; then
@@ -1642,14 +1728,22 @@ EOF
             esac
           else
             task=$(window_to_task "$w" "$STATE")
-            if [ -e "$pf" ] || status_is_paused_or_captain_held "$(last_status_line "$STATE/$task.status")"; then
+            if [ -e "$pf" ] \
+              || status_is_paused_or_captain_held "$(last_status_line "$STATE/$task.status")" \
+              || task_hold_has_no_agent "$w" "$task"; then
               case "$(pause_state_class "$w" "$task")" in
                 paused)  handle_paused_stale "$w" "$task" "$h" ;;
                 working) clear_pause_state "$key"
                          printf '%s' "$h" > "$sf"
                          wedge_timer_check "$w" "$ssf" "non-terminal stale (provably working after a declared pause)" "$ewf" "$task"
                          triage_log "absorbed non-terminal stale (provably working): $w" ;;
-                *)       handle_paused_stale "$w" "$task" "$h" ;;
+                *)       if status_is_captain_held "$(last_status_line "$STATE/$task.status")"; then
+                           clear_pause_state "$key"
+                           printf '%s' "$h" > "$sf"
+                           wedge_timer_check "$w" "$ssf" "non-terminal stale (live agent after a captain hold)" "$ewf" "$task"
+                         else
+                           handle_paused_stale "$w" "$task" "$h"
+                         fi ;;
               esac
             else
               wedge_timer_check "$w" "$ssf" "non-terminal stale" "$ewf" "$task"
@@ -1687,7 +1781,9 @@ EOF
         clear_write_tracking "$key"
       fi
       task=$(window_to_task "$w" "$STATE")
-      if ! afk_present && status_is_paused_or_captain_held "$(last_status_line "$STATE/$task.status")" && [ "$busy_now" -ne 0 ]; then
+      if ! afk_present && [ "$busy_now" -ne 0 ] \
+        && { status_is_paused_or_captain_held "$(last_status_line "$STATE/$task.status")" \
+          || task_hold_has_no_agent "$w" "$task"; }; then
         case "$(pause_state_class "$w" "$task")" in
           paused) handle_paused_stale "$w" "$task" "$h" ;;
           *)      clear_pause_tracking "$key" ;;
