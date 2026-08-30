@@ -51,26 +51,34 @@ watch_bg() {  # <state> <fakebin> <out> [extra env assignments...]
     FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$@" "$WATCH" > "$out" &
 }
 
-# Install the tasks-axi read surface the watcher uses to refresh active holds.
-# The fixture reads one task id per line from FM_FAKE_HELD_TASKS_FILE, so a test
-# can lift a hold while the watcher stays alive and prove suppression self-clears.
+# Install the tasks-axi read surface the watcher uses to refresh active captain
+# holds. The fixture reads one "<task> <hold-kind>" row per line from
+# FM_FAKE_HELD_TASKS_FILE, so tests can change either fact while the watcher runs.
 install_fake_tasks_axi_held_list() {  # <fakebin>
   local fakebin=$1
   cat > "$fakebin/tasks-axi" <<'SH'
 #!/usr/bin/env bash
 set -u
 if [ "${1:-}" = list ]; then
+  case " $* " in
+    *" --fields hold_kind "*) ;;
+    *) exit 1 ;;
+  esac
   held_file=${FM_FAKE_HELD_TASKS_FILE:-}
   count=0
   if [ -f "$held_file" ]; then
-    count=$(awk 'NF { n++ } END { print n + 0 }' "$held_file")
+    count=$(awk 'NF >= 2 { n++ } END { print n + 0 }' "$held_file")
   fi
   printf 'count: %s\n' "$count"
-  printf 'tasks[%s]{id,state,kind,repo,title}:\n' "$count"
+  printf 'tasks[%s]{id,state,kind,repo,title,hold_kind}:\n' "$count"
   if [ -f "$held_file" ]; then
-    while IFS= read -r id || [ -n "$id" ]; do
+    while read -r id hold_kind extra || [ -n "${id:-}" ]; do
       case "$id" in ''|*[!A-Za-z0-9._-]*) continue ;; esac
-      printf '  %s,queued,ship,firstmate,Held fixture\n' "$id"
+      [ -z "${extra:-}" ] || continue
+      case "$hold_kind" in captain|parked|future|load|external) ;;
+        *) continue ;;
+      esac
+      printf '  %s,queued,ship,firstmate,Held fixture,%s\n' "$id" "$hold_kind"
     done < "$held_file"
   fi
   exit 0
@@ -1413,7 +1421,7 @@ test_backlog_hold_suppresses_only_an_agentless_lane() {
   out="$dir/watch.out"; capture_file="$dir/pane.txt"; held_file="$dir/held.ids"
   statusf="$state/parked.status"; window="test:fm-parked"
   install_fake_tasks_axi_held_list "$fakebin"
-  printf '%s\n' parked > "$held_file"
+  printf 'parked captain\n' > "$held_file"
   printf 'idle bare shell under an active backlog hold\n' > "$capture_file"
   printf 'window=%s\nkind=ship\nharness=codex\nbackend=tmux\n' "$window" > "$state/parked.meta"
   printf 'working: last worker note before it exited\n' > "$statusf"
@@ -1449,39 +1457,148 @@ test_backlog_hold_suppresses_only_an_agentless_lane() {
   grep -F "backlog-held" "$out" >/dev/null \
     && fail "hold removal left the lane on the backlog-held cadence"
 
-  dir=$(make_case backlog-held-live-agent); state="$dir/state"; fakebin="$dir/fakebin"
+  dir=$(make_case backlog-external-held-agentless); state="$dir/state"; fakebin="$dir/fakebin"
   out="$dir/watch.out"; capture_file="$dir/pane.txt"; held_file="$dir/held.ids"
-  statusf="$state/live-held.status"; window="test:fm-live-held"
+  statusf="$state/external-held.status"; window="test:fm-external-held"
   install_fake_tasks_axi_held_list "$fakebin"
-  printf '%s\n' live-held > "$held_file"
-  printf 'live agent on a static pane\n' > "$capture_file"
-  printf 'window=%s\nkind=ship\nharness=codex\nbackend=tmux\n' "$window" > "$state/live-held.meta"
-  printf 'working: agent is still attached\n' > "$statusf"
-  sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-live-held_status"
+  printf 'external-held external\n' > "$held_file"
+  printf 'idle bare shell under an external hold\n' > "$capture_file"
+  printf 'window=%s\nkind=ship\nharness=codex\nbackend=tmux\n' "$window" > "$state/external-held.meta"
+  printf 'working: last worker note before it exited\n' > "$statusf"
+  sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-external-held_status"
   key=$(printf '%s' "$window" | tr '.:/' '___')
-  pane_hash=$(hash_text "live agent on a static pane")
+  pane_hash=$(hash_text "idle bare shell under an external hold")
   printf '%s' "$pane_hash" > "$state/.hash-$key"
   printf '%s' "$pane_hash" > "$state/.stale-$key"
   printf '1\n' > "$state/.count-$key"
-  : > "$state/.paused-$key"
-  date +%s > "$state/.paused-rechecked-$key"
-  date +%s > "$state/.paused-resurfaced-$key"
+  printf '%s\n' $(( $(date +%s) - 500 )) > "$state/.stale-since-$key"
 
   PATH="$fakebin:$PATH" FM_HOME="$dir" FM_FAKE_HELD_TASKS_FILE="$held_file" \
     FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
-    FM_FAKE_TMUX_CURRENT_COMMAND=codex FM_FAKE_CREW_STATE='state: working · source: pane · live agent' \
+    FM_FAKE_TMUX_CURRENT_COMMAND=zsh FM_FAKE_CREW_STATE='state: unknown · source: none · bare shell' \
     FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
-    FM_STALE_ESCALATE_SECS=0 FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_STALE_ESCALATE_SECS=240 FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
     FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
   pid=$!
-  wait_for_exit "$pid" 100 || { reap "$pid"; fail "active hold silenced a live agent's wedge alarm"; }
+  wait_for_exit "$pid" 100 || { reap "$pid"; fail "a non-captain hold silenced an agent-less lane's wedge alarm"; }
   grep -F "possible wedge" "$out" >/dev/null \
-    || fail "live agent under an active hold did not retain wedge detection: $(cat "$out")"
-  [ ! -e "$state/.paused-$key" ] \
-    || fail "an attached live agent did not clear the prior agent-less suppression"
+    || fail "an agent-less lane under a non-captain hold did not retain wedge detection: $(cat "$out")"
+  [ ! -e "$state/.paused-$key" ] || fail "a non-captain hold entered captain-held pause tracking"
   grep -F "backlog-held" "$out" >/dev/null \
-    && fail "live agent under an active hold borrowed the agent-less suppression"
-  pass "active backlog holds suppress only agent-less lanes and self-clear when the hold or liveness fact changes"
+    && fail "a non-captain hold borrowed the captain-held suppression"
+
+  dir=$(make_case backlog-captain-held-afk); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"; held_file="$dir/held.ids"
+  statusf="$state/afk-held.status"; window="test:fm-afk-captain-held"
+  install_fake_tasks_axi_held_list "$fakebin"
+  printf 'afk-held captain\n' > "$held_file"
+  printf 'idle bare shell while away\n' > "$capture_file"
+  printf 'window=%s\nkind=ship\nharness=codex\nbackend=tmux\n' "$window" > "$state/afk-held.meta"
+  printf 'working: last worker note before it exited\n' > "$statusf"
+  sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-afk-held_status"
+  key=$(printf '%s' "$window" | tr '.:/' '___')
+  pane_hash=$(hash_text "idle bare shell while away")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+  printf '%s\n' $(( $(date +%s) - 500 )) > "$state/.stale-since-$key"
+  printf '494\n' > "$state/.wedge-escalations-$key"
+  date +%s > "$state/.afk"
+
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_FAKE_HELD_TASKS_FILE="$held_file" \
+    FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=zsh FM_FAKE_CREW_STATE='state: unknown · source: none · bare shell' \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_poll_cycle "$state" "$pid" || { reap "$pid"; fail "away mode surfaced an agent-less captain-held lane: $(cat "$out")"; }
+  [ -e "$state/.paused-$key" ] || { reap "$pid"; fail "away mode did not park an agent-less captain-held lane"; }
+  [ ! -e "$state/.stale-since-$key" ] || { reap "$pid"; fail "away mode retained a captain-held lane's wedge timer"; }
+  [ ! -e "$state/.wedge-escalations-$key" ] || { reap "$pid"; fail "away mode retained a captain-held lane's repeat escalation counter"; }
+  [ ! -s "$state/.wake-queue" ] || { reap "$pid"; fail "away mode queued a captain-held lane's repeat wake"; }
+  reap "$pid"
+
+  dir=$(make_case backlog-captain-held-live-transition); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"; held_file="$dir/held.ids"
+  statusf="$state/live-held.status"; window="test:fm-live-held"
+  install_fake_tasks_axi_held_list "$fakebin"
+  printf 'live-held captain\n' > "$held_file"
+  printf 'static pane under a captain hold\n' > "$capture_file"
+  printf 'window=%s\nkind=ship\nharness=codex\nbackend=tmux\n' "$window" > "$state/live-held.meta"
+  printf 'captain-held [key=route]: tracked by live-held\n' > "$statusf"
+  sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-live-held_status"
+  key=$(printf '%s' "$window" | tr '.:/' '___')
+  pane_hash=$(hash_text "static pane under a captain hold")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_FAKE_HELD_TASKS_FILE="$held_file" \
+    FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=zsh FM_FAKE_CREW_STATE='state: stopped · source: pane · bare shell' \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_poll_cycle "$state" "$pid" || { reap "$pid"; fail "an agent-less captain-held lane did not enter suppression: $(cat "$out")"; }
+  [ -e "$state/.paused-$key" ] || { reap "$pid"; fail "an agent-less captain-held lane did not record pause tracking"; }
+  reap "$pid"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the agent-less captain-held phase"
+
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_FAKE_HELD_TASKS_FILE="$held_file" \
+    FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=codex FM_FAKE_CREW_STATE='state: unknown · source: none · static live agent' \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_STALE_ESCALATE_SECS=999 FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_poll_cycle "$state" "$pid" || { reap "$pid"; fail "an attached live agent alarmed before the wedge threshold: $(cat "$out")"; }
+  [ ! -e "$state/.paused-$key" ] || { reap "$pid"; fail "an attached live agent did not clear captain-held suppression"; }
+  [ -s "$state/.stale-since-$key" ] || { reap "$pid"; fail "an attached live agent did not restore the wedge timer"; }
+  reap "$pid"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the live-agent timer phase"
+
+  printf '%s\n' $(( $(date +%s) - 500 )) > "$state/.stale-since-$key"
+  : > "$out"
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_FAKE_HELD_TASKS_FILE="$held_file" \
+    FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=codex FM_FAKE_CREW_STATE='state: unknown · source: none · static live agent' \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_STALE_ESCALATE_SECS=240 FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_for_exit "$pid" 100 || { reap "$pid"; fail "a live agent under a captain hold did not wedge-escalate"; }
+  grep -F "possible wedge" "$out" >/dev/null \
+    || fail "a live agent under a captain hold did not retain wedge detection: $(cat "$out")"
+
+  dir=$(make_case backlog-captain-held-live-busy); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"; held_file="$dir/held.ids"
+  statusf="$state/busy-held.status"; window="test:fm-busy-held"
+  install_fake_tasks_axi_held_list "$fakebin"
+  printf 'busy-held captain\n' > "$held_file"
+  printf 'Working... (7200.4s)\n' > "$capture_file"
+  printf 'window=%s\nkind=ship\nharness=pi\nbackend=tmux\n' "$window" > "$state/busy-held.meta"
+  record_pi_busy "$state" busy-held
+  printf 'captain-held [key=route]: tracked by busy-held\n' > "$statusf"
+  sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-busy-held_status"
+  key=$(printf '%s' "$window" | tr '.:/' '___')
+  pane_hash=$(hash_text "Working... (7200.4s)")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+  touch -t 200001010000 "$state/busy-held.meta"
+  printf '%s\n' $(( $(date +%s) - 500 )) > "$state/.stale-since-$key"
+
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_FAKE_HELD_TASKS_FILE="$held_file" \
+    FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=codex FM_FAKE_CREW_STATE='state: working · source: pane · harness busy' \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_BUSY_TURN_MAX_SECS=1 FM_STALE_ESCALATE_SECS=240 FM_PAUSE_RESURFACE_SECS=999 \
+    FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_for_exit "$pid" 100 || { reap "$pid"; fail "a busy live agent under a captain hold did not wedge-escalate"; }
+  grep -F "possible wedge" "$out" >/dev/null \
+    || fail "the busy-turn bound suppressed a live captain-held agent: $(cat "$out")"
+  [ ! -e "$state/.paused-$key" ] || fail "the busy-turn bound parked a live captain-held agent"
+  pass "captain backlog holds suppress only agent-less lanes across normal and away modes"
 }
 
 test_secondmate_paused_resurfaces_in_normal_mode() {
