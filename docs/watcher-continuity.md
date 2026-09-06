@@ -1,7 +1,7 @@
 # Watcher continuity
 
 The watcher remains intentionally one-shot: one actionable reason closes one watcher cycle.
-Must-work continuity now lives above that process boundary instead of depending on the model remembering a re-arm step.
+Successor ownership depends on the harness integration below; the [foreground checkpoint boundary](#foreground-checkpoint-boundary) covers model-owned continuation.
 
 ## Ownership
 
@@ -35,7 +35,7 @@ Claude's Stop hook starts the successor arm at the next Stop after the handling 
 The durable wake queue preserves actionable events during the residual active-turn window, and the bounded turn-end guard enforces recovery at Stop when no watcher is live and no open generation claim is still deciding, so a finished, hung, or identity-mismatched claim cannot suppress it ([`turnend-guard.md`](turnend-guard.md#harness-integrations) owns that boundary).
 The recovery-episode contract below owns once-per-generation announcement.
 A handling successor does not re-announce; it enters its poll loop immediately and keeps scanning signals, stale panes, and checks.
-The model no longer re-arms after ordinary wakes.
+Claude's model no longer re-arms after ordinary wakes.
 No PreToolUse hook denies fleet commands based on watcher status.
 A genuine auto-arm failure describes the automatic mechanism as broken and never directs a routine manual background arm.
 Terminal arm-output classification (`started`, `attached`, or `FAILED`) remains defense in depth for the manual recovery path.

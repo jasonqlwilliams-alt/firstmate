@@ -12,7 +12,7 @@ When this session holds the fleet lock and away mode is inactive, use the bounde
    ```
 
    The rendered paths select this session's home and source its Relay cadence when present.
-   Keep setup, drain, and acknowledgement work in separate calls; [`arm-pretool-check.md`](../arm-pretool-check.md#blessed-syntax-tree) owns the accepted command shape.
+   Keep drain and acknowledgement work in separate calls from this setup-prefixed checkpoint; [`arm-pretool-check.md`](../arm-pretool-check.md#blessed-syntax-tree) owns the accepted command shape.
 3. After every return, including `check: rearm-resurface` and a quiet exit 124, repeat the drain, handling, and acknowledgement step.
    Inspect other failures before trying a fresh checkpoint.
 4. The owning model must start the next checkpoint while supervision remains required.
