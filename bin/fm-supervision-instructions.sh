@@ -99,6 +99,7 @@ shell_quote() {
 }
 
 x_mode_env_sh=$(shell_quote "$x_mode_env")
+fm_home_sh=$(shell_quote "$FM_HOME")
 
 if [ "$X_MODE" -eq 0 ] && [ -f "$x_mode_env" ]; then
   X_MODE=1
@@ -111,6 +112,7 @@ render_snippet() {
     line=${line//__FM_PI_TURNEND_EXT__/$pi_turnend_ext}
     line=${line//__FM_X_MODE_ENV_SH__/$x_mode_env_sh}
     line=${line//__FM_X_MODE_ENV__/$x_mode_env}
+    line=${line//__FM_HOME_SH__/$fm_home_sh}
     printf '%s\n' "$line"
   done < "$SNIPPET"
 }
@@ -153,7 +155,7 @@ repair_line() {
       printf '%s%s\n' "$prefix" 'watcher supervision is owned by the stop-hook park; inspect the hook registration and watcher startup path before ending the turn.'
       ;;
     *)
-      printf '%s%s\n' "$prefix" 'repair missing watcher supervision according to the session-start block for this harness; do not use shell &.'
+      printf '%s%s%s%s\n' "$prefix" 'use the foreground fallback bin/fm-watch-checkpoint.sh --seconds ' "$checkpoint_seconds" '; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.'
       ;;
   esac
 }

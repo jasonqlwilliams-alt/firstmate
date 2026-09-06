@@ -14,3 +14,4 @@ When this session owns supervision and away mode is not active:
 
 Codex cannot reason while a foreground tool call is running.
 The bounded checkpoint returns control regularly so user messages and queued wakes can be handled without relying on background-task wake semantics.
+[`watcher-continuity.md`](../watcher-continuity.md#foreground-checkpoint-boundary) owns the checkpoint lifetime, successor ownership, and warning interpretation.

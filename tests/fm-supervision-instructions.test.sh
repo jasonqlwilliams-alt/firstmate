@@ -24,7 +24,24 @@ test_unknown_fallback() {
   out=$("$RENDER" --harness not-real)
   assert_contains "$out" "primary harness: unknown" "unknown heading missing"
   assert_contains "$out" "Mode: Unknown harness fallback." "unknown fallback snippet missing"
+  assert_contains "$out" 'bin/fm-watch-checkpoint.sh --seconds' "unknown fallback omitted its supported foreground command"
+  assert_contains "$out" 'The owning model must start the next checkpoint' "unknown fallback omitted successor ownership"
+  assert_contains "$out" 'no callback continuity' "unknown fallback omitted the unverified callback limitation"
   pass "renderer falls back to unknown.md for unverified harness names"
+}
+
+test_unknown_foreground_command_passes_seatbelt() {
+  local home out command status=0 result
+  home="$TMP_ROOT/unknown home"
+  mkdir -p "$home/state" "$home/config"
+  out=$(FM_HOME="$home" "$RENDER" --harness unknown)
+  command=$(printf '%s\n' "$out" | sed -n '/^   export FM_HOME=/s/^   //p')
+  [ -n "$command" ] || fail "unknown fallback did not render its standalone export command"
+  assert_contains "$command" "export FM_HOME='$home'" "unknown command did not select the effective home"
+  assert_contains "$command" "[ -f '$home/config/x-mode.env' ]" "unknown command did not select the effective Relay config"
+  result=$(FM_HOME="$home" "$ROOT/bin/fm-arm-pretool-check.sh" --command "$command" 2>&1) || status=$?
+  expect_code 0 "$status" "rendered unknown foreground command was refused by the real seatbelt: $result"
+  pass "unknown fallback renders an effective-home command accepted by the watcher seatbelt"
 }
 
 test_conditional_stanzas() {
@@ -48,6 +65,10 @@ test_repair_lines() {
   mkdir -p "$home/state" "$home/config"
   out=$(FM_HOME="$home" FM_CODEX_WATCH_CHECKPOINT=7 "$RENDER" --harness codex --repair-line)
   assert_contains "$out" "bin/fm-watch-checkpoint.sh --seconds 7" "codex repair line did not use checkpoint helper and env override"
+
+  out=$(FM_HOME="$home" FM_CODEX_WATCH_CHECKPOINT=7 "$RENDER" --harness unknown --repair-line)
+  assert_contains "$out" "bin/fm-watch-checkpoint.sh --seconds 7" "unknown repair line omitted the bounded fallback command"
+  assert_contains "$out" "no verified exit callback" "unknown repair line omitted its callback limitation"
 
   out=$(FM_HOME="$home" "$RENDER" --harness claude --queue-pending 1 --repair-line)
   assert_contains "$out" "After draining queued wakes" "queue-pending prefix missing"
@@ -180,6 +201,7 @@ test_pi_snippet_uses_effective_extension_path() {
 
 test_selected_harness_block_only
 test_unknown_fallback
+test_unknown_foreground_command_passes_seatbelt
 test_conditional_stanzas
 test_repair_lines
 test_cross_harness_ordinary_continuation_and_repair_matrix
