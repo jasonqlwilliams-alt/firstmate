@@ -1,7 +1,7 @@
 # Watcher continuity
 
 The watcher remains intentionally one-shot: one actionable reason closes one watcher cycle.
-Must-work continuity now lives above that process boundary instead of depending on the model remembering a re-arm step.
+Successor ownership depends on the harness integration below; the [foreground checkpoint boundary](#foreground-checkpoint-boundary) covers model-owned continuation.
 
 ## Ownership
 
@@ -35,7 +35,7 @@ Claude's Stop hook starts the successor arm at the next Stop after the handling 
 The durable wake queue preserves actionable events during the residual active-turn window, and the bounded turn-end guard enforces recovery at Stop when no watcher is live and no open generation claim is still deciding, so a finished, hung, or identity-mismatched claim cannot suppress it ([`turnend-guard.md`](turnend-guard.md#harness-integrations) owns that boundary).
 The recovery-episode contract below owns once-per-generation announcement.
 A handling successor does not re-announce; it enters its poll loop immediately and keeps scanning signals, stale panes, and checks.
-The model no longer re-arms after ordinary wakes.
+Claude's model no longer re-arms after ordinary wakes.
 No PreToolUse hook denies fleet commands based on watcher status.
 A genuine auto-arm failure describes the automatic mechanism as broken and never directs a routine manual background arm.
 Terminal arm-output classification (`started`, `attached`, or `FAILED`) remains defense in depth for the manual recovery path.
@@ -44,6 +44,26 @@ Grok retains its tracked background-task notification protocol.
 No adapter starts a replacement with shell `&`.
 
 The turn-end guard remains the final backstop rather than the normal continuity mechanism and cooperates with the auto-arm in its `--claude` mode.
+
+## Foreground checkpoint boundary
+
+Codex and the unknown-harness foreground fallback run one bounded watcher cycle through `bin/fm-watch-checkpoint.sh`.
+The checkpoint returns the watcher result to its calling tool; it neither registers a model callback nor launches a successor.
+An actionable exit or quiet deadline releases the watcher lock, leaving a real interval without a polling watcher until the owning model handles the result and starts the next checkpoint.
+Ending the model turn does not establish that next cycle, and a turn-end guard warning is a backstop rather than a callback adapter.
+The harness protocols own the drain, handle, generation-bound acknowledgement, and repeat sequence.
+Acknowledging an empty-queue recovery episode is still required when the drain requests it; omitting it can produce `check: rearm-resurface` on the next cycle.
+
+Under this foreground model the pull guard requires the same home, watcher path, process identity, and fresh beacon as a live watcher.
+A recent beacon after the checkpoint has returned does not prove that a watcher remains alive.
+Conversely, a running checkpoint wrapper or child PID does not prove complete lock publication, matching identity, or a fresh beacon: a suspended or stalled watcher can remain alive while polling has stopped.
+Inspect those facts at the warning's timestamp before classifying an alarm during a foreground call.
+An unacknowledged `state/.watcher-down` generation alone does not cause a watcher-health alarm; queued wakes have their own independent warning.
+
+A successful demonstration of a foreground wake, durable acknowledgement, and model-issued successor proves that sequence only.
+It does not establish unattended notification or continuity after the owning model stops making calls.
+An unknown API harness needs its own verified notification integration before it can claim that guarantee.
+`tests/fm-watch-checkpoint.test.sh` exercises the foreground lifecycle, and `tests/fm-watcher-lock.test.sh` covers a suspended live watcher whose beacon becomes stale.
 
 ## Recovery episode acknowledgement
 
