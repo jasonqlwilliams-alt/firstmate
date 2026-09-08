@@ -217,6 +217,12 @@ run_scout_spawn() {  # <home> <wt> <fakebin> <launch-log> <spawn-args...>
   FM_FAKE_LAUNCH_LOG="$launchlog" fm_test_run_spawn "$home" "$wt" "$fakebin" "$@" --scout
 }
 
+run_ship_spawn() {  # <home> <wt> <fakebin> <launch-log> <spawn-args...>
+  local home=$1 wt=$2 fakebin=$3 launchlog=$4
+  shift 4
+  FM_FAKE_LAUNCH_LOG="$launchlog" fm_test_run_spawn "$home" "$wt" "$fakebin" "$@" --mode direct-PR --yolo off
+}
+
 test_spawn_launch_line_hooks_and_trust() {
   local rec id=agy-launch-q1 out status launch state hooks trust
   rec=$(make_spawn_case launch "$id")
@@ -259,6 +265,40 @@ test_spawn_launch_line_hooks_and_trust() {
   assert_present "$trust" "agy spawn did not create agy's own settings store"
   assert_grep "$WT_DIR" "$trust" "agy spawn did not pre-register the worktree as a trusted workspace"
   pass "fm-spawn: the agy launch line clears markers, carries both workspaces, wires state-resident hooks, and pre-registers trust"
+}
+
+# The agy launch template carries no task-kind branch, unlike codex's notify=
+# wiring or omp's -e. Assert that directly rather than assuming it: a crewmate
+# and a scout must produce the SAME launch shape and the same state-resident
+# hook wiring, so verifying one kind live verifies both.
+test_ship_and_scout_launch_shapes_match() {
+  local rec ship_launch scout_launch ship_state scout_state
+  rec=$(make_spawn_case kind-ship agy-kind-ship-q7)
+  read_case_record "$rec"
+  ship_state="$HOME_DIR/state"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" agy-kind-ship-q7 "$PROJ_DIR" --harness agy)
+  expect_code 0 "$?" "an agy ship spawn should succeed: $out"
+  assert_present "$ship_state/agy-kind-ship-q7.agy-hooks/.agents/hooks.json" "an agy crewmate must get the same hook wiring as a scout"
+  ship_launch=$(cat "$LAUNCH_LOG")
+
+  rec=$(make_spawn_case kind-scout agy-kind-scout-q8)
+  read_case_record "$rec"
+  scout_state="$HOME_DIR/state"
+  out=$(run_scout_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" agy-kind-scout-q8 "$PROJ_DIR" --harness agy)
+  expect_code 0 "$?" "an agy scout spawn should succeed: $out"
+  scout_launch=$(cat "$LAUNCH_LOG")
+
+  # Compare the shapes with the per-task paths and ids normalized away, so the
+  # assertion is about the launch SHAPE rather than the two tasks' own names.
+  ship_launch=${ship_launch//agy-kind-ship-q7/TASK}
+  scout_launch=${scout_launch//agy-kind-scout-q8/TASK}
+  ship_launch=${ship_launch//kind-ship/CASE}
+  scout_launch=${scout_launch//kind-scout/CASE}
+  [ "$ship_launch" = "$scout_launch" ] \
+    || fail "the agy crewmate and scout launch shapes must be identical:
+ship:  $ship_launch
+scout: $scout_launch"
+  pass "fm-spawn: the agy crewmate and scout launch shapes are identical, so one live launch verifies both"
 }
 
 test_spawn_effort_is_capped_not_dropped() {
@@ -401,6 +441,7 @@ test_tmux_liveness_classification
 test_control_tables
 test_wiring_paths_and_busy_source_trust
 test_spawn_launch_line_hooks_and_trust
+test_ship_and_scout_launch_shapes_match
 test_spawn_effort_is_capped_not_dropped
 test_spawn_model_validation
 test_secondmate_is_refused
