@@ -223,7 +223,7 @@ run_repository_checks() {  # <cache> <candidate> <project> <log-prefix>
   VALIDATION_WORKTREE="$SYNC_ROOT/worktrees/${project}.$$.$RANDOM"
   VALIDATION_CACHE=$cache
   if ! git --git-dir "$cache" worktree add --quiet --detach "$VALIDATION_WORKTREE" "$candidate"; then
-    VALIDATION_RESULT=worktree-failed
+    VALIDATION_RESULT="worktree-failed"
     return 0
   fi
 

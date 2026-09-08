@@ -348,10 +348,84 @@ require_tasks_axi() {
     || fail "tasks-axi does not expose the captain-hold contract"
 }
 
+# tasks-axi prunes closed tasks out of the backlog into the configured archive
+# once the Done list exceeds done_keep, so a captain hold that was answered and
+# closed stops resolving through `tasks-axi show`. Reading the archived record
+# back keeps such a hold verifiable instead of failing as absent, which is what
+# a late answer, an exact retry, and durability verification all depend on.
+# The archive path is the addressing root's `.tasks.toml` `archive` value, with
+# tasks-axi's own default when that file configures none.
+archived_backlog_file() {  # <resolved-data-dir>
+  local data=$1 root configured
+  root=$(fm_backlog_root "$data") || return 1
+  configured=$(sed -n 's/^[[:space:]]*archive[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+    "$root/.tasks.toml" 2>/dev/null | head -1)
+  [ -n "$configured" ] || configured=data/done-archive.md
+  case "$configured" in
+    /*) printf '%s\n' "$configured" ;;
+    *) printf '%s/%s\n' "$root" "$configured" ;;
+  esac
+}
+
+archived_task_show() {  # <resolved-data-dir> <id>
+  local data=$1 id=$2 file block header body_lines line
+  local title state held kind hold_kind body_escaped
+  file=$(archived_backlog_file "$data") || return 1
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  block=$(awk -v id="$id" '
+    BEGIN { found = 0; done_needle = "- [x] " id " -"; open_needle = "- [ ] " id " -" }
+    /^- \[[x ]\] / {
+      if (found) exit
+      if (index($0, done_needle) == 1 || index($0, open_needle) == 1) { found = 1; print; next }
+      next
+    }
+    found && /^## / { exit }
+    found { print }
+  ' "$file")
+  [ -n "$block" ] || return 1
+  header=${block%%$'\n'*}
+  body_lines=${block#*$'\n'}
+  [ "$body_lines" = "$block" ] && body_lines=
+
+  case "$header" in *"(hold-kind: captain)"*) hold_kind=captain ;; *) hold_kind='"-"' ;; esac
+  case "$header" in *"(kind: captain)"*) kind=captain ;; *) kind=task ;; esac
+  case "$header" in *"(held: yes)"*) held=yes ;; *) held=no ;; esac
+  case "$header" in "- [x] "*) state="done" ;; *) state="queued" ;; esac
+
+  title=${header#*"] $id - "}
+  # Archived rows carry trailing annotations such as (done <date>), (hold: ...),
+  # (hold-kind: captain), and (repo: ...); the title is what precedes them.
+  title=$(printf '%s' "$title" | sed -E 's/( \([a-z][a-z-]*:? [^)]*\))+$//')
+
+  body_escaped=
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line#  }
+    [ -n "$line" ] || continue
+    line=${line//\\/\\\\}
+    line=${line//\"/\\\"}
+    if [ -n "$body_escaped" ]; then
+      body_escaped="${body_escaped}"$'\n'"${line}"
+    else
+      body_escaped=$line
+    fi
+  done <<EOF
+$body_lines
+EOF
+  body_escaped=${body_escaped//$'\n'/\\n}
+
+  printf 'task:\n  id: %s\n  title: %s\n  state: %s\n  held: %s\n  kind: %s\n  hold_kind: %s\n  body: "%s"\n' \
+    "$id" "$title" "$state" "$held" "$kind" "$hold_kind" "$body_escaped"
+}
+
 task_show() {  # <id>
-  local data
+  local data show
   data=$(fm_backlog_data_absolute "$DATA") || fail "data directory cannot be resolved: $DATA"
-  fm_backlog_row_show "$data" "$1" --full 2>/dev/null
+  if show=$(fm_backlog_row_show "$data" "$1" --full 2>/dev/null) \
+    && printf '%s\n' "$show" | grep -q '^task:$'; then
+    printf '%s\n' "$show"
+    return 0
+  fi
+  archived_task_show "$data" "$1"
 }
 
 show_field() {  # <show-output> <field>

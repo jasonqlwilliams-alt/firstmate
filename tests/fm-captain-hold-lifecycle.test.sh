@@ -366,6 +366,49 @@ test_complete_accepts_a_migrated_inventory_on_beads() {
   pass "the completion gate attests an inventory resolved through a migrated beads row"
 }
 
+# tasks-axi prunes closed tasks out of the backlog into the configured archive
+# once the Done list exceeds done_keep. An answered captain call must stay
+# verifiable after that prune, because the completion gate and every later
+# durability check read the same record back through `task_show`.
+test_verify_resolves_a_hold_pruned_into_the_archive() {
+  local home scout id decision i out rc
+  home=$(make_home archived-hold)
+  scout=sample-archived-scout
+  id=archived-captain-call
+
+  tasks_in "$home" add "$id" "which option ships" >/dev/null \
+    || fail "could not create the captain call"
+  run_captain "$home" hold "$id" --reason "captain must decide" >/dev/null \
+    || fail "could not hold the captain call"
+  decision="$home/captain-decision.txt"
+  printf 'Ship option B.\n' > "$decision"
+  run_captain "$home" answer "$id" --decision-file "$decision" >/dev/null \
+    || fail "could not record the captain answer"
+  write_scout_with_attested_inventory "$home" "$scout" "$id"
+
+  out=$(run_captain "$home" verify "$scout" 2>&1) \
+    || fail "verify refused the answered call before any pruning: $out"
+
+  # Push the answered call past done_keep so tasks-axi moves it to the archive.
+  for i in $(seq 1 12); do
+    tasks_in "$home" add "filler-$i" "filler $i" >/dev/null || fail "could not add filler-$i"
+    tasks_in "$home" 'done' "filler-$i" >/dev/null || fail "could not close filler-$i"
+  done
+  if tasks_in "$home" show "$id" --full >/dev/null 2>&1; then
+    fail "the fixture never pruned the answered call, so this case would prove nothing"
+  fi
+  assert_grep "$id" "$home/data/done-archive.md" \
+    "the answered call did not reach the configured archive"
+
+  rc=0
+  out=$(run_captain "$home" verify "$scout" 2>&1) || rc=$?
+  [ "$rc" -eq 0 ] \
+    || fail "an answered captain call stopped verifying once tasks-axi archived it: $out"
+  assert_contains "$out" "verified: $scout captain-call inventory" \
+    "verify did not confirm the archived inventory"
+  pass "an answered captain call stays verifiable after tasks-axi archives it"
+}
+
 test_verify_names_the_unresolvable_legacy_id_once() {
   local fixture home scout err rc
   require_tasks_axi_beads "verify an unresolvable beads legacy id" || return 0
@@ -2636,5 +2679,6 @@ test_verify_resolves_a_hold_migrated_under_the_configured_prefix
 test_marker_noted_row_wins_over_a_prefix_namesake
 test_complete_accepts_a_migrated_inventory_on_beads
 test_verify_names_the_unresolvable_legacy_id_once
+test_verify_resolves_a_hold_pruned_into_the_archive
 test_verify_resolves_a_pre_collapse_key_through_its_derived_marker
 test_captain_hold_mutations_address_the_beads_backend

@@ -68,7 +68,7 @@ if [ "$command_index" -ge 0 ] && [ -n "$command_name" ] \
       fi
       ;;
     *)
-      read -r alias_command alias_tail <<< "$alias_value"
+      read -r alias_command _ <<< "$alias_value"
       case "$alias_command" in
         push|send-pack) resolved_command=$alias_command ;;
       esac
