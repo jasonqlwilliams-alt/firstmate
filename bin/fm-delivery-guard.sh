@@ -4,6 +4,8 @@
 # Usage:
 #   fm-delivery-guard.sh validate
 #   fm-delivery-guard.sh arm <project> <repository-path>
+#   fm-delivery-guard.sh arm-refuse <project> <repository-path>
+#   fm-delivery-guard.sh arm-all
 #   fm-delivery-guard.sh check-push <repository-path> <remote-name> <effective-url>
 #   fm-delivery-guard.sh check-pr <repository-path> <target-url-or-host/owner/repo>
 #   fm-delivery-guard.sh pr-target <repository-path>
@@ -29,6 +31,7 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
+PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
 
 # shellcheck source=bin/fm-repository-policy-lib.sh
 . "$SCRIPT_DIR/fm-repository-policy-lib.sh"
@@ -87,11 +90,10 @@ HOOK
   mv -f "$tmp" "$hook"
 }
 
-cmd_arm() {  # <project> <repo>
+install_guard() {  # <project> <repo>; installs a fail-closed hook without trusting policy
   local project=$1 repo=$2 top common managed configured previous
   top=$(repository_top "$repo") || die "not a Git worktree: $repo"
   common=$(repository_common_dir "$top") || die "cannot resolve the shared Git directory for $top"
-  fm_repository_policy_load "$project" || exit 1
   managed="$common/firstmate-hooks"
   configured=$(git -C "$top" config --local --get core.hooksPath 2>/dev/null || true)
   previous=$(git -C "$top" config --local --get firstmate.previousHooksPath 2>/dev/null || true)
@@ -106,8 +108,53 @@ cmd_arm() {  # <project> <repo>
   git -C "$top" config --local firstmate.guardHome "$FM_HOME" || die "cannot record guard home for $top"
   git -C "$top" config --local firstmate.previousHooksPath "$previous" || die "cannot preserve previous hooks path for $top"
   git -C "$top" config --local core.hooksPath "$managed" || die "cannot activate managed hooks for $top"
+  ARMED_TOP=$top
+}
+
+cmd_arm() {  # <project> <repo>
+  local project=$1 repo=$2
+  install_guard "$project" "$repo" || return 1
+  # Validate only after installation. A malformed or missing policy therefore
+  # aborts the caller while leaving a deny-by-default pre-push hook in place.
+  fm_repository_policy_load "$project" || return 1
   printf 'armed: project=%s repository=%s push=%s upstream=%s\n' \
-    "$project" "$top" "$FM_REPOSITORY_POLICY_FORK_ID" "$FM_REPOSITORY_POLICY_UPSTREAM_ID"
+    "$project" "$ARMED_TOP" "$FM_REPOSITORY_POLICY_FORK_ID" "$FM_REPOSITORY_POLICY_UPSTREAM_ID"
+}
+
+cmd_arm_refuse() {  # <project> <repo>
+  install_guard "$1" "$2" || return 1
+  printf 'armed-refuse-only: project=%s repository=%s\n' "$1" "$ARMED_TOP"
+}
+
+cmd_arm_all() {
+  local project repo
+  # Fail-close every present clone before trusting config. This protects crews
+  # that were already running when a policy became malformed: validation may
+  # fail, but their shared pre-push hooks are installed first and will refuse.
+  if git -C "$FM_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    cmd_arm_refuse firstmate "$FM_ROOT" || return 1
+  fi
+  if [ -d "$PROJECTS" ]; then
+    for repo in "$PROJECTS"/*; do
+      [ -d "$repo" ] || continue
+      git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue
+      cmd_arm_refuse "$(basename "$repo")" "$repo" || return 1
+    done
+  fi
+  fm_repository_policy_validate || return 1
+  while IFS= read -r project; do
+    [ -n "$project" ] || continue
+    if [ "$project" = firstmate ]; then
+      repo=$FM_ROOT
+    else
+      repo="$PROJECTS/$project"
+    fi
+    if ! git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      printf 'arm-skip: project=%s repository=%s reason=clone-absent\n' "$project" "$repo"
+      continue
+    fi
+    cmd_arm "$project" "$repo" || return 1
+  done < <(fm_repository_policy_projects)
 }
 
 read_no_mistakes_targets() {  # <repo>; sets NM_UPSTREAM and NM_FORK
@@ -130,19 +177,11 @@ read_no_mistakes_targets() {  # <repo>; sets NM_UPSTREAM and NM_FORK
 }
 
 authorize_exact_target() {  # <action> <url> <expected-identity>
-  local action=$1 url=$2 expected=$3 actual
-  actual=$(fm_repository_url_identity "$url") || {
-    printf 'REFUSED: %s has no verifiable GitHub repository target: %s.\n' "$action" "$url" >&2
-    return 1
-  }
-  if [ "$actual" != "$expected" ]; then
-    printf 'REFUSED: %s would write to %s, but project %s permits only %s.\n' \
-      "$action" "$actual" "$FM_REPOSITORY_POLICY_PROJECT" "$expected" >&2
-    return 1
-  fi
-  fm_repository_policy_authorize_identity "$action" "$actual" || return 1
+  local action=$1 url=$2 expected=$3
+  fm_repository_policy_authorize_url "$action" "$url" "$expected" || return 1
   printf 'DELIVERY TARGET: project=%s action=%s repository=%s account=%s\n' \
-    "$FM_REPOSITORY_POLICY_PROJECT" "$action" "$actual" "$FM_REPOSITORY_POLICY_AUTH_ACCOUNT" >&2
+    "$FM_REPOSITORY_POLICY_PROJECT" "$action" "$FM_REPOSITORY_POLICY_EFFECTIVE_ID" \
+    "$FM_REPOSITORY_POLICY_AUTH_ACCOUNT" >&2
 }
 
 cmd_check_push() {  # <repo> <remote-name> <effective-url>
@@ -186,6 +225,14 @@ case "${1:-}" in
   arm)
     [ "$#" -eq 3 ] || usage
     cmd_arm "$2" "$3"
+    ;;
+  arm-refuse)
+    [ "$#" -eq 3 ] || usage
+    cmd_arm_refuse "$2" "$3"
+    ;;
+  arm-all)
+    [ "$#" -eq 1 ] || usage
+    cmd_arm_all
     ;;
   check-push)
     [ "$#" -eq 4 ] || usage

@@ -242,7 +242,7 @@ fm_lint_is_canonical_root() {
       case "$base" in *.sh) return 0 ;; esac
       ;;
     bin/fm-delivery-shims)
-      case "$base" in gh|gh-axi) return 0 ;; esac
+      case "$base" in gh|gh-axi|git) return 0 ;; esac
       ;;
     *) return 1 ;;
   esac
@@ -269,7 +269,7 @@ else
   fi
 
   if [ "$full_lint" -eq 1 ]; then
-    ROOTS=(bin/*.sh bin/backends/*.sh bin/fm-delivery-shims/gh bin/fm-delivery-shims/gh-axi tests/*.sh)
+    ROOTS=(bin/*.sh bin/backends/*.sh bin/fm-delivery-shims/gh bin/fm-delivery-shims/gh-axi bin/fm-delivery-shims/git tests/*.sh)
   else
     CHANGED_MODE=1
     ROOTS=()

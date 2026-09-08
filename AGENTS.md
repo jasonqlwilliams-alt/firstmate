@@ -96,6 +96,7 @@ data/                personal fleet records; LOCAL, gitignored as a whole
   <id>/report.md     scout task deliverable, written by the crewmate; survives teardown
 projects/            cloned repos; gitignored; read-only except under hard rule 1's concrete captain-approved project operation exception
 state/               runtime records and signals; gitignored
+  upstream-sync/      bare upstream/fork caches, per-project check state and locks, validation logs, and review packets; owned by bin/fm-upstream-sync.sh
   <id>.status        appended by crewmates: "<state>: <note>" wake-event lines, not current-state truth
   <id>.turn-ended    touched by turn-end hooks
   <id>.grok-turnend-token   firstmate-owned grok hook registry token for the task; removed by teardown
@@ -331,7 +332,7 @@ Supervise all live work under section 8.
 ### Selected delivery path and merge authority
 
 The selected delivery path owns its own rigor.
-When `config/repository-policy.json` is present, every PR-based path is armed from it before spawn, and its shared pre-push hook and spawned GitHub-command shims refuse any branch or PR write whose effective repository or authenticated account is not captain-approved.
+In a home that configures `config/repository-policy.json`, every worker is armed before spawn and every PR-based path must validate that policy; the shared pre-push hook and the spawned Git and GitHub-command shims then refuse any branch, PR, or repository API write whose effective repository or authenticated account is not captain-approved.
 When no-mistakes is selected, no-mistakes alone owns review, fixes, tests, documentation, push, PR, and CI; otherwise follow the faster path without adding an independent reviewer.
 Never hold work outside no-mistakes for a manual clean verdict, stack serial manual reviews, or infer authority for one from security, architecture, or risk alone.
 A separate review or audit is allowed only when the captain explicitly requests that deliverable or the authorized task is a knowledge-only review; one named question remains scoped to that question.

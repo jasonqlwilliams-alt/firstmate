@@ -46,7 +46,18 @@ The current schema is:
     "project-name": {
       "upstreamFetchUrl": "https://github.com/original-owner/project-name.git",
       "forkPushUrl": "https://github.com/captain-github-login/project-name.git",
-      "defaultBranch": "main"
+      "defaultBranch": "main",
+      "upstreamSync": {
+        "enabled": true,
+        "intervalHours": 24,
+        "validationCommand": ["bin/project-check.sh"],
+        "gateCommand": ["bin/upstream-review-gate.sh"],
+        "protectedPaths": [".github/workflows/**"],
+        "deploymentPaths": ["deploy/**"],
+        "migrationPaths": ["migrations/**"],
+        "reviewRequiredPaths": ["security-policy/**"],
+        "requireCaptainReview": false
+      }
     }
   }
 }
@@ -57,14 +68,37 @@ The current schema is:
 Every remotely delivered project needs an explicit `upstreamFetchUrl` and `forkPushUrl`, even when both URLs intentionally name the same captain-owned repository.
 Repository keys use letters, digits, dot, underscore, or dash and match registered project names; the firstmate code repository itself uses `firstmate`.
 GitHub URL transport spellings are normalized to one host/owner/repository identity for comparison, but no remote is added, renamed, removed, or rewritten.
+`upstreamSync.enabled` controls scheduled checks only and defaults to true; an explicit on-demand check still runs.
+`upstreamSync.intervalHours` is an integer from 1 through 8760 and defaults conservatively to 24 hours.
+`validationCommand` is an argv array for the repository's required side-effect-free validation and is mandatory for automatic default-branch fast-forward: an absent or failing command sends the candidate to review.
+`gateCommand` is an optional side-effect-free repository check whose nonzero result requires captain review.
+The four path arrays contain shell glob patterns; a changed protected, deployment, migration, or repository-specific path requires review, as does `requireCaptainReview: true`.
+These commands are checks only: policy never grants authority to deploy, restart a service, run a migration, or promote production state.
 
 `bin/fm-delivery-guard.sh arm <project> <repository-path>` validates the policy and installs one shared pre-push hook in the repository's common Git directory, so every existing and future worktree receives the same boundary.
+`arm-refuse` installs that hook before policy validation, and `arm-all` covers every present configured clone at a locked session boundary, so within an armed home a missing or malformed policy refuses rather than leaving an unguarded checkout.
 When a policy file is present, `bin/fm-spawn.sh` calls that arming command before creating an endpoint and refuses the spawn if the policy is malformed or if a PR-based ship names a project the policy does not cover.
 When no policy file is present it arms nothing and refuses nothing.
 The hook checks Git's effective push URL rather than assuming a remote name.
 For a `no-mistakes` proxy push, it also reads the tool's reported fork branch destination and upstream PR destination and requires both to equal `forkPushUrl` before the local gate receives objects.
-Spawned workers in an armed home receive guarded `gh` and `gh-axi` command shims that apply the same repository and account check to pull-request writes.
+Spawned workers in an armed home receive guarded `gh` and `gh-axi` command shims that apply the same repository and account check to pull-request and REST repository writes and refuse GraphQL calls whose mutation destination cannot be proven, plus a guarded `git` shim that refuses `--no-verify` and `send-pack` hook bypasses.
 Every allowed operation prints a `DELIVERY TARGET` line naming the project, action, repository, and authenticated account before it writes; every mismatch exits nonzero with a `REFUSED` line naming the unsafe target.
+
+`bin/fm-upstream-sync.sh check [<project>]` performs an on-demand check, and `scheduled [<project>]` applies the due interval.
+The locked deferred network stage invokes the scheduled form at session start; repeated invocations before the interval are silent.
+Upstream branches and tags are fetched by the explicit URL into a persistent bare cache under `state/upstream-sync/repos/`, while GitHub releases are read from the explicit upstream identity through `gh-axi`.
+Before each upstream, fork, or baseline fetch, Git's effective URL is resolved after `insteadOf` processing and refused if it no longer has the configured repository identity.
+No project working tree moves during detection.
+Repository checks use a disposable detached worktree of the bare cache and persist their logs under `state/upstream-sync/logs/`.
+
+The fork default branch advances automatically only when the fork has zero unique commits, its current commit is an ancestor of upstream, `validationCommand` passes, `gateCommand` clears, no configured path pattern matches, and no unconditional review gate is set.
+The script resolves Git's effective push URL (including URL rewrite configuration), checks it against `forkPushUrl`, resolves the authenticated account, and prints the target immediately before each push.
+Every non-clean candidate gets a stable `fm/upstream-sync-<full-upstream-oid>` branch in the fork and a Markdown decision packet under `state/upstream-sync/reviews/`; a clean divergent merge candidate is constructed in the bare cache, while conflicts are recorded without modifying the fork default.
+The stable name, remote-ref check, per-project lock, and completed-state publication make repeated polls and interruption recovery idempotent.
+No path force-pushes, rewrites history, deletes a remote branch, merges into upstream, or performs deployment work.
+
+For every project that has a policy entry, `fm-spawn.sh` resets only its newly acquired isolated worktree to the explicit fork default through `fm-upstream-sync.sh baseline`, including scouts and local-only tasks; it no longer treats `origin` as the baseline authority.
+This makes the fork default the newest accepted upstream baseline for normal `fm/*` work while review-required upstream candidates stay isolated.
 
 The policy configuration declares authority but never changes a remote URL.
 Migrating an existing clone whose `origin` names an upstream therefore remains a separate explicit project operation, and an unsafe no-mistakes configuration stays refused until its branch and PR targets are both captain-owned.
@@ -498,6 +532,7 @@ An absent or too-old `quota-axi` reports `MISSING: quota-axi (install: npm insta
 Bootstrap also reports a `TANGLE:` line when `FM_ROOT` is on a named non-default branch; follow the printed checkout remediation rather than treating it as an installable tool problem.
 In a read-only session that did not get the fleet lock, the same line is advisory and omits the checkout command.
 The locked session-start deferred network stage runs bootstrap's best-effort project clone refresh through `fm-fleet-sync.sh`; [`fm-bootstrap.sh`'s header](../bin/fm-bootstrap.sh) owns the exact clone-refresh overlap, liveness-before-convergence, per-mate concurrency, ordered diagnostic replay, and sequential-fallback contract.
+In a home that configures a repository delivery policy, the same stage also runs every due policy-backed upstream check through `fm-upstream-sync.sh scheduled`.
 It emits `FLEET_SYNC:` for skipped refreshes that may matter, recovered self-heals, and `STUCK:` alarms.
 Normal completed runs keep local-only and no-origin skips silent.
 If bootstrap kills a timed-out refresh, it replays any completed `fm-fleet-sync.sh` output before the aggregate timeout skip so no finished result is lost.

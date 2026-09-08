@@ -319,12 +319,14 @@
 # one W3C traceparent= carrier, the same value injected into the pane as
 # TRACEPARENT; the default-off path writes neither, leaving the generated meta
 # and launch environment unchanged.
-# When this home configures config/repository-policy.json, every PR-based ship is
-# armed with bin/fm-delivery-guard.sh before an endpoint
-# exists. The shared pre-push hook then covers every worktree of that repository,
-# while guarded gh/gh-axi PATH shims cover PR writes from the spawned worker.
-# A configured policy that has no safe entry for the project refuses the spawn,
-# while an absent policy file leaves every spawn path unchanged.
+# When this home configures config/repository-policy.json, every ordinary worker
+# is armed deny-by-default with bin/fm-delivery-guard.sh before an endpoint
+# exists, and PR-based ships additionally require a valid policy entry. The
+# shared pre-push hook then covers every worktree of that repository, while
+# guarded git/gh/gh-axi PATH shims cover pushes and PR writes from the spawned
+# worker. A configured policy that has no safe entry for a PR-based ship's
+# project refuses the spawn; an absent policy file arms nothing, installs no
+# shim, and leaves every spawn path exactly as it is without the guard.
 #   --traceparent <carrier> delivers a carrier that a REMOTE parent already
 #   resolved and will record, instead of resolving one from this home's frozen
 #   decision. It is accepted only for --secondmate spawns, only as a strictly
@@ -2235,12 +2237,50 @@ delivery_rigor_rank() {  # <mode> -> 3 (most rigor) .. 1 (least); 0 = not a task
   esac
 }
 
+# Resolve the durable repository key once. The firstmate code repository may be
+# entered through any of its linked worktrees, so basename alone is insufficient
+# for that one shared common Git directory.
+PROJ_NAME=$(basename "$PROJ_ABS")
+DELIVERY_PROJECT=$PROJ_NAME
+DELIVERY_POLICY_VALIDATED=0
+if [ "$KIND" != secondmate ] && [ "$DELIVERY_POLICY_PRESENT" -eq 1 ]; then
+  FM_COMMON=$(git -C "$FM_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+  PROJ_COMMON=$(git -C "$PROJ_ABS" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+  if [ -n "$FM_COMMON" ] && [ "$FM_COMMON" = "$PROJ_COMMON" ]; then
+    DELIVERY_PROJECT=firstmate
+  fi
+  if [ "${FM_GATE_REFUSE_BYPASS:-0}" != 1 ]; then
+    FM_HOME="$FM_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" FM_CONFIG_OVERRIDE="$CONFIG" \
+      "$FM_ROOT/bin/fm-delivery-guard.sh" arm-refuse "$DELIVERY_PROJECT" "$PROJ_ABS" >/dev/null || {
+        echo "error: repository delivery guard could not fail-close $ID before endpoint creation" >&2
+        exit 1
+      }
+    # This home has an explicit repository policy, so validate it for every new
+    # worker, including scouts and local-only tasks. That makes the accepted
+    # captain-fork default the worktree baseline instead of letting a third-party
+    # remote named origin become the accidental source of normal work.
+    if ! FM_HOME="$FM_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" FM_CONFIG_OVERRIDE="$CONFIG" \
+      "$FM_ROOT/bin/fm-delivery-guard.sh" validate; then
+      echo "error: repository delivery policy is invalid; refusing $ID before endpoint creation" >&2
+      exit 1
+    fi
+    if jq -e --arg project "$DELIVERY_PROJECT" \
+      '.repositories | has($project)' "$CONFIG/repository-policy.json" >/dev/null 2>&1; then
+      FM_HOME="$FM_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" FM_CONFIG_OVERRIDE="$CONFIG" \
+        "$FM_ROOT/bin/fm-delivery-guard.sh" arm "$DELIVERY_PROJECT" "$PROJ_ABS" >/dev/null || {
+          echo "error: repository delivery guard refused $ID before endpoint creation" >&2
+          exit 1
+        }
+      DELIVERY_POLICY_VALIDATED=1
+    fi
+  fi
+fi
+
 # Brief/spawn delivery agreement, checked before any endpoint exists.
 # fm-brief.sh records a ship brief's mode as a fixed "Delivery contract: mode=<mode>"
 # line. A spawn that disagrees would launch a worker whose instructions and whose
 # recorded task delivery differ, which is the exact drift this contract prevents.
 if [ "$KIND" = ship ]; then
-  PROJ_NAME=$(basename "$PROJ_ABS")
   BRIEF_MODE=$(sed -n 's/^Delivery contract: mode=\([^ ]*\).*$/\1/p' "$BRIEF" | head -n 1)
   if [ -z "$BRIEF_MODE" ]; then
     echo "warning: $BRIEF records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode $MODE - confirm its definition of done matches" >&2
@@ -2258,19 +2298,19 @@ if [ "$KIND" = ship ]; then
      && [ "$(delivery_rigor_rank "$MODE")" -lt "$(delivery_rigor_rank "$STANDING_MODE")" ]; then
     echo "notice: $ID ships mode=$MODE while the standing posture for $PROJ_NAME is $STANDING_MODE - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state" >&2
   fi
+  # A PR-based ship in a configured home needs its own policy entry. The block
+  # above already armed and validated one when the policy covers this project,
+  # so reaching here means it does not, and arm refuses rather than delivering
+  # to whatever repository the clone's remotes happen to name.
   if [ "$MODE" != local-only ] && [ "$DELIVERY_POLICY_PRESENT" -eq 1 ] \
+     && [ "$DELIVERY_POLICY_VALIDATED" -ne 1 ] \
      && [ "${FM_GATE_REFUSE_BYPASS:-0}" != 1 ]; then
-    DELIVERY_PROJECT=$PROJ_NAME
-    FM_COMMON=$(git -C "$FM_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
-    PROJ_COMMON=$(git -C "$PROJ_ABS" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
-    if [ -n "$FM_COMMON" ] && [ "$FM_COMMON" = "$PROJ_COMMON" ]; then
-      DELIVERY_PROJECT=firstmate
-    fi
     FM_HOME="$FM_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" FM_CONFIG_OVERRIDE="$CONFIG" \
       "$FM_ROOT/bin/fm-delivery-guard.sh" arm "$DELIVERY_PROJECT" "$PROJ_ABS" || {
         echo "error: repository delivery guard refused $ID before endpoint creation" >&2
         exit 1
       }
+    DELIVERY_POLICY_VALIDATED=1
   fi
 fi
 
@@ -2439,6 +2479,11 @@ spawn_worktree_has_origin_config() {  # <worktree>
 
 freshen_spawn_worktree_base() {  # <worktree>
   local worktree=$1 default target expected actual status
+  if [ "$DELIVERY_POLICY_VALIDATED" -eq 1 ]; then
+    FM_HOME="$FM_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" FM_CONFIG_OVERRIDE="$CONFIG" \
+      "$FM_ROOT/bin/fm-upstream-sync.sh" baseline "$DELIVERY_PROJECT" "$worktree"
+    return $?
+  fi
   status=$(git -C "$worktree" -c core.quotePath=false status --porcelain) || {
     echo "error: could not inspect pooled worktree '$worktree' before refreshing its base" >&2
     return 1
@@ -3750,8 +3795,10 @@ sq_delivery_root=$(shell_quote "$FM_ROOT")
 sq_delivery_shims=$(shell_quote "$FM_ROOT/bin/fm-delivery-shims")
 REAL_GH_AXI=$(command -v gh-axi 2>/dev/null || true)
 REAL_GH=$(command -v gh 2>/dev/null || true)
+REAL_GIT=$(command -v git 2>/dev/null || true)
 sq_real_gh_axi=$(shell_quote "$REAL_GH_AXI")
 sq_real_gh=$(shell_quote "$REAL_GH")
+sq_real_git=$(shell_quote "$REAL_GIT")
 MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT")
 LAUNCH=${LAUNCH//__MODELFLAG__/$MODELFLAG}
@@ -3794,7 +3841,7 @@ if [ "$HARNESS" = claude ] && [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
   LAUNCH="CLAUDE_CONFIG_DIR=$(shell_quote "$CLAUDE_CONFIG_DIR") $LAUNCH"
 fi
 if [ "$KIND" != secondmate ] && [ "$DELIVERY_POLICY_PRESENT" -eq 1 ]; then
-  LAUNCH="FM_DELIVERY_GUARD_ROOT=$sq_delivery_root FM_REAL_GH_AXI=$sq_real_gh_axi FM_REAL_GH=$sq_real_gh PATH=$sq_delivery_shims:\$PATH $LAUNCH"
+  LAUNCH="FM_DELIVERY_GUARD_ROOT=$sq_delivery_root FM_REAL_GH_AXI=$sq_real_gh_axi FM_REAL_GH=$sq_real_gh FM_REAL_GIT=$sq_real_git PATH=$sq_delivery_shims:\$PATH $LAUNCH"
 fi
 if [ "$KIND" = secondmate ]; then
   sq_home=$(shell_quote "$PROJ_ABS")
@@ -3864,7 +3911,7 @@ fi
 # The repository delivery guard is inert while this home configures no policy,
 # so an unconfigured home keeps its unguarded PATH exactly as before.
 if [ "$KIND" != secondmate ] && [ "$DELIVERY_POLICY_PRESENT" -eq 1 ]; then
-  spawn_send_text_line "$T" "export FM_DELIVERY_GUARD_ROOT=$sq_delivery_root FM_REAL_GH_AXI=$sq_real_gh_axi FM_REAL_GH=$sq_real_gh PATH=$sq_delivery_shims:\$PATH"
+  spawn_send_text_line "$T" "export FM_DELIVERY_GUARD_ROOT=$sq_delivery_root FM_REAL_GH_AXI=$sq_real_gh_axi FM_REAL_GH=$sq_real_gh FM_REAL_GIT=$sq_real_git PATH=$sq_delivery_shims:\$PATH"
 fi
 # Send through the exact channel that already ships GOTMPDIR, so every backend
 # and harness - ship, scout, and secondmate - gets it before launch. Skipped

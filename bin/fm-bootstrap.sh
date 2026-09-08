@@ -100,7 +100,12 @@
 #          fleet_sync) while still
 #          printing every read-only detect line
 #          above; the TANGLE line switches to advisory-only wording with no
-#          checkout command. Used by
+#          checkout command.
+#          A home that configures config/repository-policy.json adds two more
+#          MUTATING sweeps, repository_delivery_arm and
+#          scheduled_upstream_sync; both return immediately when that file
+#          is absent.
+#          Used by
 #          fm-session-start.sh's read-only path when another live session holds
 #          the fleet lock, so a second concurrent session never race-mutates
 #          secondmate homes, pending handoff outboxes,
@@ -1328,6 +1333,30 @@ startup_memory_budget_setup() {
   fi
 }
 
+repository_delivery_arm() {
+  local policy="$CONFIG/repository-policy.json" output
+  [ -e "$policy" ] || [ -L "$policy" ] || return 0
+  if output=$(FM_HOME="$FM_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" \
+    FM_PROJECTS_OVERRIDE="$PROJECTS" FM_CONFIG_OVERRIDE="$CONFIG" \
+    "$SCRIPT_DIR/fm-delivery-guard.sh" arm-all 2>&1); then
+    [ "${FM_BOOTSTRAP_VERBOSE_FACTS:-0}" != 1 ] \
+      || printf '%s\n' "$output" | sed 's/^/BOOTSTRAP_INFO: repository delivery /'
+  else
+    echo "REPOSITORY_POLICY: delivery arming failed: $(first_line "$output")"
+  fi
+}
+
+scheduled_upstream_sync() {
+  local policy="$CONFIG/repository-policy.json" output
+  [ -e "$policy" ] || [ -L "$policy" ] || return 0
+  if output=$(FM_HOME="$FM_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" FM_STATE_OVERRIDE="$STATE" \
+    FM_CONFIG_OVERRIDE="$CONFIG" "$SCRIPT_DIR/fm-upstream-sync.sh" scheduled 2>&1); then
+    [ -z "$output" ] || printf '%s\n' "$output"
+  else
+    echo "UPSTREAM_SYNC: scheduled check failed: $(first_line "$output")"
+  fi
+}
+
 if [ "${1:-}" = "install" ]; then
   shift
   [ $# -gt 0 ] || { echo "usage: fm-bootstrap.sh install <tool>..." >&2; exit 1; }
@@ -1396,6 +1425,7 @@ if [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ] && local_phase; then
       exit 1
     fi
   fi
+  repository_delivery_arm
 fi
 
 # Local detection: presence, version floors, and configuration. Nothing here
@@ -1584,6 +1614,12 @@ if [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ]; then
     wait "$fleet_sync_pid" || true
     cat "$fleet_sync_out"
     rm -f "$fleet_sync_out"
+  fi
+  if network_phase && { [ -e "$CONFIG/repository-policy.json" ] || [ -L "$CONFIG/repository-policy.json" ]; } \
+    && network_sweep_authorized 'scheduled upstream synchronization'; then
+    __fm_timing_stamp=$(fm_timing_now_ms)
+    scheduled_upstream_sync
+    fm_timing_record phase upstream-sync "$__fm_timing_stamp"
   fi
 fi
 local_phase && secondmate_handoff_detect

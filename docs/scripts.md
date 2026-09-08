@@ -69,6 +69,7 @@ The shared no-mistakes gate refusal for fleet lifecycle entrypoints is summarize
 | `fm-delivery-guard.sh`   | Arm the shared pre-push hook and enforce configured branch and pull-request destinations |
 | `fm-repository-policy-lib.sh` | Parse explicit upstream/fork policy and authenticate GitHub write authority |
 | `fm-github-write-guard-lib.sh` | Resolve pull-request mutation targets for the spawned gh and gh-axi shims |
+| `fm-upstream-sync.sh`    | Check explicit upstreams now or when daily-due, validate, and fast-forward or stage isolated review branches |
 | `fm-project-mode.sh`     | Resolve a project's registered delivery posture from `data/projects.md` for fleet sync and home seeding |
 | `fm-merge-local.sh`      | Fast-forward a `local-only` project's local default branch after approval            |
 | `fm-review-diff.sh`      | Review a crewmate branch or resolved PR head against the authoritative base          |

@@ -9,6 +9,7 @@ set -u
 
 GUARD="$ROOT/bin/fm-delivery-guard.sh"
 GH_AXI_SHIM="$ROOT/bin/fm-delivery-shims/gh-axi"
+GIT_SHIM="$ROOT/bin/fm-delivery-shims/git"
 TMP_ROOT=$(fm_test_tmproot fm-delivery-guard)
 
 make_policy() {  # <home>
@@ -33,9 +34,11 @@ JSON
 make_fake_tools() {  # <dir>
   local fakebin=$1
   mkdir -p "$fakebin"
-  cat > "$fakebin/gh-axi" <<'SH'
+cat > "$fakebin/gh-axi" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = api ]; then
+  [ "${GH_HOST:-}" = github.com ] || exit 3
+  case " $* " in *" --hostname "*) exit 4 ;; esac
   printf 'api_response:\n  body: %s\n  truncated: false\n' "${FAKE_GH_ACCOUNT:-captain}"
   exit 0
 fi
@@ -135,6 +138,28 @@ EOF
   pass "delivery guard: authenticated-account mismatch fails closed before transmission"
 }
 
+test_effective_push_url_rewrite_refuses() {
+  local rec repo home fakebin upstream fork gate out rc log
+  rec=$(make_repo effective-rewrite)
+  IFS='|' read -r repo home fakebin upstream fork gate <<EOF
+$rec
+EOF
+  log="$home/gh.log"
+  FM_HOME="$home" GH_AXI_LOG="$log" PATH="$fakebin:$PATH" "$GUARD" arm widgets "$repo" >/dev/null
+  git -C "$repo" config url.git@github.com:upstream/.pushInsteadOf git@github.com:captain/
+  out=$(FM_HOME="$home" FAKE_GIT_REMOTE_ROOT="${repo%/repo}" GH_AXI_LOG="$log" PATH="$fakebin:$PATH" \
+    git -C "$repo" push fork main 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "pushInsteadOf rewrite to upstream should have been refused"
+  assert_contains "$out" "branch-push would write to github.com/upstream/widgets" \
+    "effective-URL refusal did not name the rewritten upstream destination"
+  git --git-dir="$upstream" show-ref --verify --quiet refs/heads/main \
+    && fail "effective-URL-refused push still reached upstream"
+  git --git-dir="$fork" show-ref --verify --quiet refs/heads/main \
+    && fail "effective-URL-refused push unexpectedly reached the fork"
+  pass "delivery guard: Git URL rewriting cannot hide an unsafe effective push target"
+}
+
 test_no_mistakes_checks_branch_and_pr_targets() {
   local rec repo home fakebin upstream fork gate out rc log
   rec=$(make_repo no-mistakes-targets)
@@ -197,6 +222,28 @@ EOF
     "allowed gh-axi PR did not announce its repository"
   assert_grep 'pr create --title safe --body safe' "$log" \
     "allowed gh-axi PR did not reach the real executable"
+
+  out=$(cd "$repo" && FM_HOME="$home" GH_REPO=captain/widgets GH_AXI_LOG="$log" \
+    FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
+    "$GH_AXI_SHIM" api graphql -f query=mutation 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "gh-axi shim should fail closed for unresolvable GraphQL mutations"
+  assert_contains "$out" "GraphQL is unavailable in a guarded worker" \
+    "GraphQL refusal did not explain why its repository cannot be proven"
+  out=$(cd "$repo" && FM_HOME="$home" GH_AXI_LOG="$log" \
+    FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
+    "$GH_AXI_SHIM" api /repos/upstream/widgets/pulls --field title=unsafe 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "implicit POST API write should be destination-guarded"
+  assert_contains "$out" "pull-request would write to github.com/upstream/widgets" \
+    "implicit POST API refusal did not identify the unsafe repository"
+  out=$(cd "$repo" && FM_HOME="$home" GH_AXI_LOG="$log" \
+    FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
+    "$GH_AXI_SHIM" api --method=post /repos/upstream/widgets/pulls 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "lower-case API methods should be destination-guarded"
+  assert_contains "$out" "pull-request would write to github.com/upstream/widgets" \
+    "lower-case method refusal did not identify the unsafe repository"
   pass "delivery guard: gh-axi PR writes are refused or allowed by the same durable target"
 }
 
@@ -255,10 +302,52 @@ test_direct_pr_contract_is_unchanged_without_a_policy() {
   pass "delivery guard: the ship contract only names the guard in a home that configures a policy"
 }
 
+test_git_shim_blocks_hook_bypasses() {
+  local dir fake log out rc
+  dir="$TMP_ROOT/git-shim"
+  fake="$dir/git-real"
+  log="$dir/git.log"
+  mkdir -p "$dir"
+  cat > "$fake" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${GIT_REAL_LOG:?}"
+SH
+  chmod +x "$fake"
+  : > "$log"
+  out=$(FM_REAL_GIT="$fake" GIT_REAL_LOG="$log" "$GIT_SHIM" push --no-verify origin main 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "guarded git should refuse --no-verify"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "git --no-verify refusal was not explicit"
+  out=$(FM_REAL_GIT="$fake" GIT_REAL_LOG="$log" "$GIT_SHIM" send-pack origin main 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "guarded git should refuse send-pack"
+  assert_contains "$out" "send-pack bypasses" "send-pack refusal was not explicit"
+  out=$(FM_REAL_GIT="$fake" GIT_REAL_LOG="$log" "$GIT_SHIM" \
+    -c core.hooksPath=/dev/null push origin main 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "guarded git should refuse a core.hooksPath override"
+  assert_contains "$out" "cannot override the Firstmate pre-push hook" \
+    "core.hooksPath refusal was not explicit"
+  out=$(FM_REAL_GIT="$fake" GIT_REAL_LOG="$log" \
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null \
+    "$GIT_SHIM" push origin main 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "guarded git should refuse an environment hook override"
+  assert_contains "$out" "cannot override the Firstmate pre-push hook" \
+    "environment hook-override refusal was not explicit"
+  [ ! -s "$log" ] || fail "a refused Git bypass still reached the real executable"
+  FM_REAL_GIT="$fake" GIT_REAL_LOG="$log" "$GIT_SHIM" status
+  assert_grep 'status' "$log" "ordinary Git commands did not reach the real executable"
+  pass "delivery guard: worker Git cannot bypass target checks with --no-verify or send-pack"
+}
+
 test_upstream_push_refuses_and_fork_push_succeeds
 test_authenticated_account_mismatch_refuses
+test_effective_push_url_rewrite_refuses
 test_no_mistakes_checks_branch_and_pr_targets
 test_gh_axi_pr_write_shim_refuses_and_allows
 test_unarmed_repository_pushes_anywhere
 test_arm_refuses_without_a_policy_file
 test_direct_pr_contract_is_unchanged_without_a_policy
+test_git_shim_blocks_hook_bypasses

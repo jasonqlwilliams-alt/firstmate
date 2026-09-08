@@ -2,6 +2,8 @@
 # Shared target resolution for the gh and gh-axi delivery command shims.
 # Source after setting FM_GITHUB_GUARD_TOOL to gh or gh-axi.
 
+fm_github_guard_upper() { LC_ALL=C tr '[:lower:]' '[:upper:]'; }
+
 fm_github_guard_repo_flag() {  # <argv...>; prints explicit selector or empty
   local want='' arg
   for arg in "$@"; do
@@ -18,14 +20,31 @@ fm_github_guard_repo_flag() {  # <argv...>; prints explicit selector or empty
   return 0
 }
 
+fm_github_guard_hostname() {  # <argv...>; prints explicit/ambient/default host
+  local want arg
+  want=
+  for arg in "$@"; do
+    if [ "$want" = host ]; then
+      printf '%s\n' "$arg"
+      return 0
+    fi
+    case "$arg" in
+      --hostname) want=host ;;
+      --hostname=*) printf '%s\n' "${arg#--hostname=}"; return 0 ;;
+    esac
+  done
+  printf '%s\n' "${GH_HOST:-github.com}"
+}
+
 fm_github_guard_effective_target() {  # <argv...>
-  local target origin
+  local target origin host
+  host=$(fm_github_guard_hostname "$@") || return 1
   target=$(fm_github_guard_repo_flag "$@") || return 1
   [ -n "$target" ] || target=${GH_REPO:-}
   if [ -n "$target" ]; then
     case "$target" in
       */*/*) printf '%s\n' "$target" ;;
-      */*) printf 'github.com/%s\n' "$target" ;;
+      */*) printf '%s/%s\n' "$host" "$target" ;;
       *) return 1 ;;
     esac
     return 0
@@ -42,29 +61,56 @@ fm_github_guard_pr_mutation() {  # <argv...>
   return 1
 }
 
-fm_github_guard_api_pr_mutation_target() {  # <argv...>; prints target or empty
-  local method=GET arg path='' owner repo
+fm_github_guard_api_mutation_target() {  # <argv...>; prints repository target or empty
+  local method method_explicit arg path owner repo host
+  method=GET
+  method_explicit=0
+  path=''
+  host=$(fm_github_guard_hostname "$@") || return 1
   for arg in "$@"; do
+    if [ "$method" = __next ]; then
+      method=$(printf '%s' "$arg" | fm_github_guard_upper)
+      method_explicit=1
+      continue
+    fi
     case "$arg" in
-      GET|POST|PUT|PATCH|DELETE|HEAD) method=$arg ;;
-      -X|--method) method=__next ;;
-      -X*|--method=*) method=${arg#*=}; method=${method#-X} ;;
-      /*|repos/*) [ -n "$path" ] || path=$arg ;;
-      *)
-        if [ "$method" = __next ]; then method=$arg; fi
+      [Gg][Ee][Tt]|[Pp][Oo][Ss][Tt]|[Pp][Uu][Tt]|[Pp][Aa][Tt][Cc][Hh]|[Dd][Ee][Ll][Ee][Tt][Ee]|[Hh][Ee][Aa][Dd])
+        method=$(printf '%s' "$arg" | fm_github_guard_upper); method_explicit=1
         ;;
+      -X|--method) method=__next ;;
+      -X*|--method=*)
+        method=${arg#*=}; method=${method#-X}
+        method=$(printf '%s' "$method" | fm_github_guard_upper)
+        method_explicit=1
+        ;;
+      -f|-F|--field|--raw-field|--input)
+        [ "$method_explicit" -eq 1 ] || method=POST
+        ;;
+      -f*|-F*|--field=*|--raw-field=*|--input=*)
+        [ "$method_explicit" -eq 1 ] || method=POST
+        ;;
+      /*|repos/*) [ -n "$path" ] || path=$arg ;;
+      *) ;;
     esac
   done
   case "$method" in POST|PUT|PATCH|DELETE) ;; *) return 0 ;; esac
   path=${path#/}
   case "$path" in
-    repos/*/pulls|repos/*/pulls/*)
+    repos/*/*)
       owner=${path#repos/}; owner=${owner%%/*}
       repo=${path#repos/"$owner"/}; repo=${repo%%/*}
       [ -n "$owner" ] && [ -n "$repo" ] || return 1
-      printf 'github.com/%s/%s\n' "$owner" "$repo"
+      printf '%s/%s/%s\n' "$host" "$owner" "$repo"
       ;;
   esac
+}
+
+fm_github_guard_api_is_graphql() {  # <argv...>
+  local arg
+  for arg in "$@"; do
+    case "$arg" in graphql|/graphql) return 0 ;; esac
+  done
+  return 1
 }
 
 fm_github_guard_check() {  # <argv...>
@@ -83,8 +129,13 @@ fm_github_guard_check() {  # <argv...>
   fi
   if [ "${1:-}" = api ]; then
     shift
-    api_target=$(fm_github_guard_api_pr_mutation_target "$@") || {
-      printf 'REFUSED: %s could not resolve the pull-request API repository before writing.\n' "$FM_GITHUB_GUARD_TOOL" >&2
+    if fm_github_guard_api_is_graphql "$@"; then
+      printf 'REFUSED: %s GraphQL is unavailable in a guarded worker because its mutation repository cannot be proven before writing.\n' \
+        "$FM_GITHUB_GUARD_TOOL" >&2
+      return 1
+    fi
+    api_target=$(fm_github_guard_api_mutation_target "$@") || {
+      printf 'REFUSED: %s could not resolve the GitHub API repository before writing.\n' "$FM_GITHUB_GUARD_TOOL" >&2
       return 1
     }
     if [ -n "$api_target" ]; then

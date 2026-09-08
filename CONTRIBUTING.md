@@ -17,18 +17,24 @@ GitHub Actions and Dependabot are exempt so their automation keeps working, but 
 ## Workflow
 
 1. Fork the repo, then clone the parent repo or set your local `origin` back to the parent (`git@github.com:kunchenguid/firstmate.git`).
+   Choose explicitly which repository may receive your branch and PR; with that layout `origin` is the parent, so the name `origin` is not ownership evidence.
 2. Create a branch and make your changes.
 3. Initialize the gate with your fork as the push target: `no-mistakes init --fork-url git@github.com:<you>/firstmate.git` (contributing to firstmate requires **no-mistakes v1.46.0+** for structured attestation; without a fork, plain `no-mistakes init` still works for maintainers with push access).
-4. Commit your changes.
-5. Push through the gate instead of pushing to `origin`:
+4. Optional, and recommended when your `origin` names the original author's repository rather than your own: record the original-author fetch URL, your chosen write URL, its approved owner and account, validation command, and review gates in local `config/repository-policy.json` as documented in [`docs/configuration.md`](docs/configuration.md#repository-delivery-policy-configrepository-policyjson), then run `bin/fm-delivery-guard.sh arm firstmate .`.
+   The guard does nothing until that file exists.
+   Once armed, `--fork-url` alone is insufficient when `origin` is a third-party upstream, because no-mistakes opens PRs against `origin`: the guard refuses the proxy push before it receives objects unless both reported destinations match your explicit write repository.
+   A fresh clone can make the fork `origin` and add the original-author repository under an explicit fetch-only name; Firstmate automation never rewrites, renames, or deletes an existing remote to obtain that layout.
+5. Commit your changes.
+6. Push through the gate instead of pushing to `origin`:
 
    ```sh
    git push no-mistakes
    ```
 
-6. Run `no-mistakes` to attach to the pipeline, watch findings, authorize auto-fixes, and review ask-user findings as needed.
+7. Run `no-mistakes` to attach to the pipeline, watch findings, authorize auto-fixes, and review ask-user findings as needed.
    Follow the installed no-mistakes version's SKILL.md and live `axi` help for gate mechanics.
-7. Once the pipeline passes, it pushes the branch to your fork and opens the PR against the parent repo for you.
+8. Once the pipeline passes, it pushes the branch to your fork and opens the PR against the parent repo for you.
+   With a local repository delivery policy armed, it can only do so in the repository that policy permits.
 
 See the [no-mistakes quick start](https://kunchenguid.github.io/no-mistakes/start-here/quick-start/) for the full first-run walkthrough.
 
