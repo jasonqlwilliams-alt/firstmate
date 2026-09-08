@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Detect the agent harness this process tree runs on.
-# Usage: fm-harness.sh                  print own harness: claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|unknown
+# Usage: fm-harness.sh                  print own harness: claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|unknown
 #        fm-harness.sh crew             print the effective CREWMATE harness
 #                                        (config/crew-harness; "default" resolves to own)
 #        fm-harness.sh secondmate       print the harness the PRIMARY uses to launch
@@ -40,6 +40,29 @@ detect_own() {
   # multiplexer's stored environment can silently misidentify one of them before
   # ancestry is consulted. This is a precedence hazard, not evidence that
   # CLAUDECODE inheritance into a kimi child was observed; it was not observed.
+  # agy (Antigravity CLI) is tested FIRST, and as a conjunction rather than a
+  # bare marker. It sets ANTIGRAVITY_AGENT=1 on its tool subprocesses alongside
+  # ANTIGRAVITY_AGENTAPI_EXE, ANTIGRAVITY_CONVERSATION_ID, and
+  # ANTIGRAVITY_LS_VERSION (verified live, agy 1.1.27, by dumping the
+  # environment of a run_command tool subprocess). Only ANTIGRAVITY_AGENT is
+  # read: the others carry a path, a per-conversation id, or a version rather
+  # than an identity.
+  # FIRST, because agy scrubs NOTHING it inherits - the same dump showed the
+  # launching Claude session's CLAUDECODE=1 passing straight through - so every
+  # marker tested above it could outrank agy's own inside a real agy worker.
+  # A CONJUNCTION, because ANTIGRAVITY_AGENT is a vendor name shared with the
+  # Antigravity desktop app and IDE, whose own ANTIGRAVITY_* variables this
+  # binary also carries; a terminal opened inside that app could therefore
+  # export it with no agy CLI anywhere, and a bare marker test would relabel
+  # every harness in that terminal. Demanding a real anchored `agy` process in
+  # the ancestry makes the marker a PRECEDENCE override over inherited foreign
+  # markers and never evidence on its own, exactly as FM_OMP_HARNESS is for
+  # omp below. The anchored ancestry arm in layer 2 covers a hand-started agy
+  # that carries no marker at all.
+  if [ "${ANTIGRAVITY_AGENT:-}" = "1" ] && ancestry_names_agy; then
+    echo agy
+    return
+  fi
   # Cursor is checked BEFORE claude, deliberately. cursor-agent does NOT clear
   # an inherited CLAUDECODE, so a cursor worker launched from a claude primary
   # carries BOTH markers and whichever is tested first wins. Cursor's own
@@ -161,6 +184,11 @@ detect_own() {
       # named `claude` with its own node child, and that fallback's *claude*
       # args glob would otherwise claim it if that subtree were ever walked.
       omp) echo omp; return ;;
+      # agy (Antigravity CLI) is a single Go binary whose live process name is
+      # exactly `agy` (verified, agy 1.1.27: `ps -o comm=` reports agy for the
+      # supervised pane process). Anchored, never *agy*, so unrelated commands
+      # carrying that fragment cannot be misread as this harness.
+      agy) echo agy; return ;;
       node*|python*)
         # Bare interpreter: match the harness name in its script path.
         args=$(ps -o args= -p "$pid" 2>/dev/null)
@@ -184,19 +212,22 @@ detect_own() {
   echo unknown
 }
 
-# True when an exact `omp` process sits within eight parents of this one. The
-# same anchored match as the ancestry walk in detect_own, kept separate so the
-# marker precedence above can demand real process evidence.
-ancestry_names_omp() {
-  local pid=$$ comm
+# True when a process named exactly $1 sits within eight parents of this one.
+# The same anchored match as the ancestry walk in detect_own, kept separate so
+# the marker precedences above can demand real process evidence.
+ancestry_names_exact() {  # <command-name>
+  local want=$1 pid=$$ comm
   for _ in 1 2 3 4 5 6 7 8; do
     comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 1
-    [ "$(basename -- "$comm")" = omp ] && return 0
+    [ "$(basename -- "$comm")" = "$want" ] && return 0
     pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
     [ -n "$pid" ] && [ "$pid" -gt 1 ] || return 1
   done
   return 1
 }
+
+ancestry_names_omp() { ancestry_names_exact omp; }
+ancestry_names_agy() { ancestry_names_exact agy; }
 
 # Resolve the effective crewmate harness: config/crew-harness (a bare adapter
 # name) wins; absent or "default" mirrors firstmate's own harness.

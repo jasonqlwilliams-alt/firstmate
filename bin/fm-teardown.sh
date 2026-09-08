@@ -2938,6 +2938,7 @@ cleanup_firstmate_home_children() {
       "$sub_state/$child_id.muse-session" "$sub_state/$child_id.muse-session-current" \
       "$sub_state/$child_id.cursor-session" "$sub_state/$child_id.reconcile-nudged" \
       "$sub_state/.$child_id.branch-outcome-index"
+    rm -rf "$sub_state/$child_id.agy-hooks"
   done
 }
 
@@ -3349,6 +3350,13 @@ rm -f "$STATE/$ID.turn-ended" \
 # retired endpoint; teardown only runs after landing is confirmed, so any
 # leftover unhandled steer here is moot rather than unlanded work.
 rm -rf "$STATE/$ID.inbox"
+# agy's per-task customization root (bin/fm-spawn.sh writes .agents/hooks.json
+# inside it and the launch names it as a second --add-dir workspace). It is a
+# DIRECTORY rather than a single file, so it needs its own recursive removal
+# alongside the flat state files above; nothing of the worker's own output ever
+# lands in it, because agy writes its transcripts and artifacts under the user's
+# own config tree instead.
+rm -rf "$STATE/$ID.agy-hooks"
 # The record is gone, so the backlog must not still show this task in flight
 # when teardown reports success. Still under this task's meta lock, so a steer
 # racing the same id stays serialized exactly as it was before. A captain-held

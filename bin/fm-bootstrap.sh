@@ -1109,7 +1109,7 @@ crew_dispatch_validate() {
     return 0
   fi
   err=$(jq -r '
-    def verified($h): ["claude","codex","opencode","pi","pi-signed","grok","kimi","cursor","muse","rovo","omp"] | index($h);
+    def verified($h): ["claude","codex","opencode","pi","pi-signed","grok","kimi","cursor","muse","rovo","omp","agy"] | index($h);
     def effort_ok($h; $e):
       if $e == null then true
       elif ($e | type) != "string" then false
@@ -1119,6 +1119,10 @@ crew_dispatch_validate() {
       elif $h == "pi" or $h == "pi-signed" or $h == "omp" then (["low","medium","high","xhigh","max"] | index($e))
       elif $h == "muse" then (["low","medium","high","xhigh","max"] | index($e))
       elif $h == "rovo" then (["low","medium","high","max"] | index($e))
+      # agy accepts only low|medium|high natively; bin/fm-spawn.sh caps xhigh and
+      # max onto high rather than dropping the intent, so all five are valid to
+      # request here.
+      elif $h == "agy" then (["low","medium","high","xhigh","max"] | index($e))
       elif $h == "opencode" or $h == "kimi" or $h == "cursor" then false
       else true
       end;
