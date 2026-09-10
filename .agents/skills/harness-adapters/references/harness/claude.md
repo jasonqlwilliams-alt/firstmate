@@ -58,7 +58,9 @@ Hooks still run through cwd-sensitive `/bin/sh`, so tracked commands anchor thro
 `../../../docs/turnend-guard.md` owns details.
 
 The Stop-owned watcher hook runs every Stop, foregrounds `../../../bin/fm-watch-arm.sh` only when eligible, and uses exit-2 async reawakening as notification.
-The model handles notifications but never routine re-arm.
+While supervision demand remains, a bounded six-hour arm lease requests one short exit-2 maintenance turn before the native eight-hour timeout.
+Quiet waiting therefore has a periodic model cost; idle and AFK homes do not renew.
+The model drains and acknowledges real wakes and stops promptly, but never performs routine re-arm.
 Claude's PreToolUse seatbelt blocks directly, and its deny is honored only with empty stdout; `../../../docs/arm-pretool-check.md` owns that contract.
 
 ### Delegation guard

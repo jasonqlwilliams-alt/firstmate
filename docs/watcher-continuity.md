@@ -12,7 +12,15 @@ Pi same-process session replacement follows the generation-owner contract in `.p
 A main follow-up counts as delivered once Pi accepts it, never once the model reads it, because a follow-up queued while main is streaming joins the running run without a `before_agent_start`; the extension header owns how consumption is observed and why it only decides what a replacement replays.
 omp's replacement follows the same generation-owner contract in `.omp/extensions/fm-primary-omp-watch.ts`, whose header owns the one difference: omp reports no shutdown reason, so every shutdown with a pending actionable close persists the handoff for the next owning `session_start` to replay.
 Cursor's `.cursor/hooks.json` `stop` hook (`bin/fm-turnend-guard-cursor.sh`) owns routine tokenless re-arm for a Cursor primary by parking that awaited hook on `bin/fm-watch-arm.sh` and returning an actionable close as one follow-up; [`turnend-guard.md`](turnend-guard.md#harness-integrations) owns its Pi-host stand-down, loop bounds, and supersession baton.
-Claude's `.claude/settings.json` Stop `asyncRewake` hook (`bin/fm-claude-stop-autoarm.sh`) owns routine tokenless re-arm.
+Claude's `.claude/settings.json` Stop `asyncRewake` hook (`bin/fm-claude-stop-autoarm.sh`) owns routine re-arm.
+Quiet waiting uses no model tokens between events, but ongoing Claude supervision needs one short maintenance turn about every six hours.
+The hook bounds its foreground arm with the shared timeout runner at 21,600 seconds, before Claude's native 28,800-second hook deadline can kill that tree without delivering a wake.
+The lease covers all retry attempts and produces at most one generation-owned exit-2 renewal.
+Renewal rechecks supervision demand, AFK, supersession, and failure-alarm gates; a held backlog alone creates no demand.
+Renewal publishes the existing generation-bound handling marker so its one handling turn can acknowledge the watcher gap, including when bounded teardown interrupted watcher cleanup.
+No synthetic maintenance record is queued, so renewal cannot create its own supervision demand.
+Handle renewal by draining and acknowledging any real wakes, then stop promptly: the next eligible Stop acquires the successor generation.
+`FM_CLAUDE_AUTOARM_LEASE_SECONDS` may shorten the lease for isolated tests; zero, invalid values, and values above 21,600 use the six-hour bound.
 The hook fires on every Stop, and an eligible primary with supervision need admits one home-scoped owner that foregrounds `bin/fm-watch-arm.sh` inside the hook-owned process tree.
 A numeric session-lock owner that fails the shared `fm_harness_pid_alive` predicate is reclaimed through `bin/fm-lock.sh` before auto-arm state changes, while a live owner, absent lock, or malformed lock keeps the competing hook inert.
 The stale-owner claim occurs only after the existing AFK and supervision-need gates pass.
@@ -120,7 +128,9 @@ The same suite covers ordinary same-process session replacement for `/new`, `/re
 `tests/fm-subagent-pretool-check.test.sh` proves Claude retains only the non-status Bash seatbelts.
 `tests/fm-claude-stop-autoarm.test.sh` covers the auto-arm's scope, stale and live session owners, unchanged AFK and need boundaries, single-flight, bounded failure retries, benign live-watcher cycle ends, one-notice failure episodes, and exit-2 translation.
 It also covers generation-claim single-flight, stuck-claim supersession, superseded-owner silence, notice-marker refusal and retry, ownership-atomic episode reset, and the legacy upgrade shim; [`turnend-guard.md`](turnend-guard.md) owns those behavior contracts.
-`FM_CLAUDE_LIVE_E2E=1 tests/fm-claude-stop-autoarm-live-e2e.test.sh` starts with the reproduced stale-lock state, runs session start first, completes two tokenless cycles, and checks the competing-live-owner negative control.
+`FM_CLAUDE_LIVE_E2E=1 tests/fm-claude-stop-autoarm-live-e2e.test.sh` starts with the reproduced stale-lock state, runs session start first, completes two immediate fixture cycles, and checks the competing-live-owner negative control.
+It also runs a real parked watcher with a 40-second lease and 60-second native deadline, delivers an inbox note after that original deadline with no additional human turn, checks singleton ownership and exact acknowledgements, and verifies that held backlog alone does not renew.
+Set `FM_CLAUDE_LIVE_E2E_KEEP=1` to retain the isolated transcripts and evidence.
 `tests/fm-turnend-guard.test.sh` covers the cooperative `--claude` guard, including monotonic failed-epoch progression, the integrated bounded fail-open, post-alarm continuation suppression, and positive recovery reset; [`turnend-guard.md`](turnend-guard.md#regression-coverage) lists that suite's full generation and legacy claim coverage.
 
 ## Active limits and verification

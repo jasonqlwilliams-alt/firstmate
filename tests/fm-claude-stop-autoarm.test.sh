@@ -33,6 +33,7 @@ install_autoarm_scripts() {
   cp "$ROOT/bin/fm-session-lock-lib.sh" "$dir/bin/fm-session-lock-lib.sh"
   cp "$ROOT/bin/fm-cursor-lib.sh" "$dir/bin/fm-cursor-lib.sh"
   cp "$ROOT/bin/fm-hook-host-lib.sh" "$dir/bin/fm-hook-host-lib.sh"
+  cp "$ROOT/bin/fm-timeout-lib.sh" "$dir/bin/fm-timeout-lib.sh"
   cp "$ROOT/bin/fm-lock.sh" "$dir/bin/fm-lock.sh"
   chmod +x "$dir/bin/fm-claude-stop-autoarm.sh" "$dir/bin/fm-lock.sh"
 }
@@ -1236,6 +1237,41 @@ test_fm_lock_status_still_works_with_shared_lib() {
   pass "fm-lock: shared session-lock lib preserves the status path"
 }
 
+# Real bounded process lifetime, with a quiet arm and controlled changes to
+# demand/authority while it is parked. No actual fleet processes are touched.
+test_quiet_lease_renewal_gates() {
+  local mode dir out status
+  for mode in demand held afk superseded alarm; do
+    dir=$(make_primary_dir "$TMP_ROOT/lease-$mode")
+    : > "$dir/state/task.meta"
+    cat > "$dir/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$$" > "$FM_HOME/state/arm-ran"
+case "${LEASE_TEST_MODE}" in
+  held) rm "$FM_HOME/state/task.meta" ;;
+  afk) touch "$FM_HOME/state/.afk" ;;
+  superseded) sed -i 's/epoch=1 /epoch=2 /' "$FM_HOME/state/.claude-autoarm-epoch" ;;
+  alarm) touch "$FM_HOME/state/.claude-autoarm-failure-alarmed" ;;
+esac
+sleep 30
+SH
+    chmod +x "$dir/bin/fm-watch-arm.sh"
+    out=$(LEASE_TEST_MODE="$mode" FM_CLAUDE_AUTOARM_LEASE_SECONDS=3 run_autoarm "$dir" 2>/dev/null); status=$?
+    if [ "$mode" = demand ]; then
+      expect_code 2 "$status" "quiet live demand needs an owned renewal"
+      assert_contains "$out" 'check: claude-lease-renewal' "lease maintenance reason"
+      grep -q '^pending:handling:' "$dir/state/.watcher-down" || fail "renewal did not publish an acknowledgeable handling episode"
+      [ "$(printf '%s' "$out" | grep -c '^check: claude-lease-renewal')" = 1 ] || fail "duplicate maintenance event"
+    else
+      expect_code 0 "$status" "$mode must suppress lease renewal"
+      [ -z "$out" ] || fail "$mode emitted lease feedback: $out"
+    fi
+    [ -s "$dir/state/arm-ran" ] || fail "lease fixture never parked an arm"
+    ! kill -0 "$(cat "$dir/state/arm-ran")" 2>/dev/null || fail "bounded arm survived lease"
+  done
+  pass "auto-arm: quiet lease renews once only with demand and authority; bounded arm is reaped"
+}
+
 test_inert_in_child_worktree
 test_inert_without_session_lock
 test_reclaims_stale_session_lock_before_arming
@@ -1279,3 +1315,5 @@ test_afk_mid_cycle_suppresses_rewake
 test_active_in_marked_secondmate_home
 test_long_poll_grace_reaches_arm_wrapper
 test_fm_lock_status_still_works_with_shared_lib
+
+test_quiet_lease_renewal_gates

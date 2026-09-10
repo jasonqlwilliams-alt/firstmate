@@ -4,7 +4,7 @@
 # Registered in tracked .claude/settings.json as a Stop command hook with
 # "asyncRewake": true and an explicit multi-hour timeout. Claude Code fires it
 # in the background on EVERY Stop of a Claude primary session, with no
-# deduplication across firings. It owns routine tokenless watcher continuity
+# deduplication across firings. It owns routine watcher continuity
 # for Claude primaries (main home and marked secondmate homes):
 #
 #   - Scope: only a genuine primary checkout (plain checkout or validly marked
@@ -34,7 +34,11 @@
 #     pre-generation lock).
 #   - Foreground arm: the owner runs bin/fm-watch-arm.sh in the FOREGROUND of
 #     this hook-owned process tree (never shell &); Claude owns the process
-#     group, so its timeout/session teardown kills arm and watcher together.
+#     tree, so session teardown kills arm and watcher together. A six-hour
+#     lease bounds the arm using fm-timeout-lib.sh, before Claude's eight-hour
+#     hook deadline. While demand remains, one owned exit-2 maintenance turn
+#     renews the lease through the next Stop; quiet waiting is not tokenless
+#     across that renewal. An idle or AFK home never requests renewal.
 #   - Translation: while supervision is still needed and AFK remains inactive,
 #     an actionable arm close (signal:/stale:/check:/heartbeat) prints one
 #     rewake banner to stderr and exits 2, which wakes Claude even while idle
@@ -76,12 +80,23 @@ CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 OWNER_LOCK="$STATE/.claude-autoarm.lock"
 FAILURE_NOTICE="$STATE/.claude-autoarm-failure-notified"
 FAILURE_ALARM="$STATE/.claude-autoarm-failure-alarmed"
+# The override only accelerates isolated tests; it cannot extend the safety
+# bound or disable it. SECONDS budgets all attempts from hook startup.
+LEASE_SECONDS=${FM_CLAUDE_AUTOARM_LEASE_SECONDS:-21600}
+case "$LEASE_SECONDS" in
+  ''|*[!0-9]*|??????*) LEASE_SECONDS=21600 ;;
+esac
+LEASE_SECONDS=$((10#$LEASE_SECONDS))
+[ "$LEASE_SECONDS" -gt 0 ] && [ "$LEASE_SECONDS" -le 21600 ] || LEASE_SECONDS=21600
+LEASE_DEADLINE=$((SECONDS + LEASE_SECONDS))
 AUTOARM_ATTEMPTS=${FM_CLAUDE_AUTOARM_ATTEMPTS:-2}
 case "$AUTOARM_ATTEMPTS" in
   1|2|3) : ;;
   *) AUTOARM_ATTEMPTS=2 ;;
 esac
 
+# shellcheck source=bin/fm-timeout-lib.sh
+. "$SCRIPT_DIR/fm-timeout-lib.sh"
 # shellcheck source=bin/fm-primary-scope-lib.sh
 . "$SCRIPT_DIR/fm-primary-scope-lib.sh"
 # shellcheck source=bin/fm-supervision-lib.sh
@@ -211,6 +226,7 @@ autoarm_record() {  # <outcome>
 OUT=
 ACTIONABLE=0
 HEALTHY=0
+LEASE_EXPIRED=0
 attempt=0
 while [ "$attempt" -lt "$AUTOARM_ATTEMPTS" ]; do
   # A superseded owner must not start or attach another watcher or mutate any
@@ -222,10 +238,14 @@ while [ "$attempt" -lt "$AUTOARM_ATTEMPTS" ]; do
   fi
   attempt=$((attempt + 1))
   OUT=$(mktemp "$STATE/.claude-autoarm-output.XXXXXX") || OUT=
-  if [ -n "$OUT" ]; then
-    FM_GUARD_GRACE="$GRACE" "$SCRIPT_DIR/fm-watch-arm.sh" >"$OUT" 2>&1 || true
-  else
-    FM_GUARD_GRACE="$GRACE" "$SCRIPT_DIR/fm-watch-arm.sh" >/dev/null 2>&1 || true
+  ARM_RC=124
+  LEASE_REMAINING=$((LEASE_DEADLINE - SECONDS))
+  if [ "$LEASE_REMAINING" -gt 0 ]; then
+    # This runner waits and reaps its bounded child tree. It never detaches a
+    # watcher or outlives this hook. Do not reset the lease for retries.
+    FM_GUARD_GRACE="$GRACE" fm_run_timed "$LEASE_REMAINING" \
+      "$SCRIPT_DIR/fm-watch-arm.sh" >"${OUT:-/dev/null}" 2>&1
+    ARM_RC=$?
   fi
 
   # AFK may have appeared mid-cycle: the daemon owns triage now, so suppress
@@ -237,6 +257,19 @@ while [ "$attempt" -lt "$AUTOARM_ATTEMPTS" ]; do
   fi
 
   ACTIONABLE=0
+  if [ "$ARM_RC" -eq 124 ] && [ "$SECONDS" -ge "$LEASE_DEADLINE" ]; then
+    # Native hook timeout decides failure before signalling its child tree;
+    # a TERM trap there cannot request a rewake. Finish normally beforehand.
+    # The terminal demand/AFK/failure/ownership gates below still apply. This
+    # single exit-2 feedback is the maintenance event; do not queue a synthetic
+    # demand record that could keep an otherwise idle home supervising itself.
+    ACTIONABLE=1
+    LEASE_EXPIRED=1
+    if [ -n "$OUT" ]; then
+      printf 'check: claude-lease-renewal quiet supervision lease elapsed; take one short drain/ack turn and stop to renew while demand remains.\n' > "$OUT"
+    fi
+    break
+  fi
   if [ -n "$OUT" ]; then
     grep -Eq '^(signal:|stale:|check:|heartbeat($|:))' "$OUT" 2>/dev/null && ACTIONABLE=1
   fi
@@ -288,6 +321,28 @@ if [ -e "$FAILURE_ALARM" ]; then
   autoarm_record failed-suppressed
   [ -z "$OUT" ] || rm -f "$OUT" 2>/dev/null || true
   exit 0
+fi
+
+# A bounded process-tree teardown can interrupt the watcher's EXIT cleanup.
+# Publish the ordinary handling episode before delivery so this one maintenance
+# turn receives its exact acknowledgement. Otherwise the next arm would first
+# recover the stale lock and spend a second empty rearm-resurface turn.
+if [ "$LEASE_EXPIRED" -eq 1 ]; then
+  if ! fm_autoarm_still_owner "$STATE" "$MY_GEN"; then
+    [ -z "$OUT" ] || rm -f "$OUT" 2>/dev/null || true
+    exit 0
+  fi
+  if fm_lock_try_acquire "$STATE/.watch.lock"; then
+    # Reclaim only a provably dead lock through its existing serialized owner.
+    # Clearing it on the successor's startup would mint a second down episode
+    # after the handling turn had already acknowledged the first one.
+    fm_recovery_transition "$STATE/.watcher-down" release-lock "$STATE/.watch.lock" handling || ACTIONABLE=0
+  elif fm_watcher_healthy "$STATE" "$SCRIPT_DIR/fm-watch.sh" "$GRACE" "$FM_HOME"; then
+    # An attached peer watcher remains live; never release its lock.
+    fm_recovery_marker_publish "$STATE/.watcher-down" handling || ACTIONABLE=0
+  else
+    ACTIONABLE=0
+  fi
 fi
 
 if [ "$ACTIONABLE" -eq 1 ]; then
