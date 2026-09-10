@@ -38,14 +38,15 @@ fm_sup_stat_mtime() {
 #   FM_SUP_NEEDED         true/false - in-flight work, an X-mode relay poll, a
 #                         registered event source (a source is a wait on an
 #                         external process, not a task, so it has no metadata),
-#                         or a registered custom check
+#                         a registered custom check, an unread wake queue,
+#                         or an unhandled inbox note
 #   FM_SUP_WATCHER_FRESH  true/false - a watcher beacon within the grace window
 #   FM_SUP_BEACON_DESC    human-readable beacon age, for banners ("never" if absent)
 #   FM_SUP_QUEUE_PENDING  true/false - state/.wake-queue has unread records
 # grace-seconds defaults to $FM_GUARD_GRACE, then 300, matching fm-guard.sh.
 # Always returns 0; callers read the vars, or use fm_supervision_unhealthy below.
 fm_supervision_status() {
-  local state=$1 grace=${2:-${FM_GUARD_GRACE:-300}} meta source check id beat m age
+  local state=$1 grace=${2:-${FM_GUARD_GRACE:-300}} meta source check id note beat m age
   FM_SUP_IN_FLIGHT=0
   FM_SUP_NEEDED=false
   FM_SUP_WATCHER_FRESH=false
@@ -92,8 +93,18 @@ fm_supervision_status() {
     fi
   fi
 
-  # shellcheck disable=SC2034 # Read by callers (fm-guard.sh) after sourcing.
-  [ -s "$state/.wake-queue" ] && FM_SUP_QUEUE_PENDING=true
+  if [ -s "$state/.wake-queue" ]; then
+    # shellcheck disable=SC2034 # Read by callers (fm-guard.sh) after sourcing.
+    FM_SUP_QUEUE_PENDING=true
+    FM_SUP_NEEDED=true
+  fi
+  # The note survives a failed wake append, so it is independent demand.
+  # Handled notes and backlog holds do not keep an otherwise idle home active.
+  for note in "$state"/inbox/*.note; do
+    [ -f "$note" ] || continue
+    FM_SUP_NEEDED=true
+    break
+  done
   return 0
 }
 

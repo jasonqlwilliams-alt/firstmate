@@ -1129,6 +1129,58 @@ test_superseded_owner_goes_silent_and_never_double_translates() {
   pass "auto-arm: a superseded owner goes silent - one supersession episode, one translation, no held mutex"
 }
 
+# A dead owner cannot defer even with a freshly updated claim and beacon.
+# This is the state left by a hook-tree timeout, followed by an actual Stop.
+test_dead_generation_reclaims_promptly() {
+  local dir pid out status
+  dir=$(make_primary_dir "$TMP_ROOT/v2-dead-fresh")
+  : > "$dir/state/task.meta"
+  write_arm_fixture "$dir" actionable
+  sleep 60 &
+  pid=$!
+  record_autoarm_v2_claim "$dir" 37 "$pid" arming "$pid" || fail "could not record claim"
+  : > "$dir/state/.last-watcher-beat"
+  kill "$pid"
+  wait "$pid" 2>/dev/null || true
+  out=$(run_autoarm "$dir" 2>/dev/null); status=$?
+  expect_code 2 "$status" "dead owner must be reclaimed at the next Stop without waiting for grace"
+  [ "$(epoch_field "$dir" epoch)" = 38 ] || fail "next Stop must claim generation 38"
+  assert_contains "$out" "firstmate watcher wake" "new generation must translate"
+  pass "auto-arm: the next Stop supersedes a dead generation immediately despite fresh ledger and beacon"
+}
+
+# The real inbox, watcher, arm, and exact queue acknowledgement share one
+# isolated home, with no task metadata, poll registration, or event source.
+test_inbox_only_real_watch_and_exact_ack() {
+  local dir out status id sequence generation
+  dir=$(make_primary_dir "$TMP_ROOT/inbox-only-real")
+  cp -R "$ROOT/bin/." "$dir/bin/"
+  mkdir -p "$dir/data"
+  printf '## Queued\n\n- [ ] parked-review - Parked review (repo: fixture) (kind: task) (since 2026-09-10) (hold: awaiting a decision) (hold-kind: parked)\n' > "$dir/data/backlog.md"
+  cp "$ROOT/.tasks.toml" "$dir/.tasks.toml"
+  out=$(FM_HOME="$dir" "$dir/bin/fm-inbox.sh" note inbox-only-real) || fail "note append failed"
+  id=$(printf '%s\n' "$out" | sed -n 's/^queued //p')
+  [ -n "$id" ] || fail "missing saved note id"
+  out=$(FM_POLL=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 run_autoarm "$dir" 2>/dev/null); status=$?
+  expect_code 2 "$status" "inbox-only home must arm a real watcher and rewake"
+  assert_contains "$out" 'check: rearm-resurface' "real watcher must surface the persisted note wake"
+  [ -f "$dir/state/inbox/$id.note" ] || fail "notification must not acknowledge the note"
+  [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = 1 ] || fail "note wake must not be duplicated"
+  FM_HOME="$dir" "$dir/bin/fm-wake-drain.sh" >"$dir/drain.out" 2>"$dir/drain.err" || fail "wake drain failed"
+  sequence=$(sed -n 's/^WAKE_ACK_REQUIRED:.*--ack-through \([0-9][0-9]*\) --recovery-generation [A-Za-z0-9._-][A-Za-z0-9._-]*$/\1/p' "$dir/drain.err")
+  generation=$(sed -n 's/^WAKE_ACK_REQUIRED:.*--ack-through [0-9][0-9]* --recovery-generation \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' "$dir/drain.err")
+  [ -n "$sequence" ] && [ -n "$generation" ] || fail "missing exact acknowledgement boundary"
+  FM_HOME="$dir" "$dir/bin/fm-inbox.sh" drain --ack "$id" >/dev/null || fail "note ack failed"
+  FM_HOME="$dir" "$dir/bin/fm-wake-drain.sh" --ack-through "$sequence" --recovery-generation "$generation" >/dev/null || fail "queue ack failed"
+  [ ! -s "$dir/state/.wake-queue" ] || fail "handled wake remained queued"
+  [ -f "$dir/state/inbox/handled/$id.note" ] || fail "exact note missing from handled inbox"
+  out=$(run_autoarm "$dir" 2>/dev/null); status=$?
+  expect_code 0 "$status" "held work alone must not start another cycle after exact acknowledgement"
+  [ -z "$out" ] || fail "idle held home produced another continuation"
+  [ "$(epoch_field "$dir" epoch)" = 1 ] || fail "idle held home advanced the generation"
+  pass "auto-arm: real inbox-only wake handles once, exact acknowledgements retire demand, held work does not spin"
+}
+
 test_need_vanished_mid_cycle_closes_quietly() {
   local dir out status
   dir=$(make_primary_dir "$TMP_ROOT/vanished")
@@ -1220,6 +1272,8 @@ test_stuck_generation_claim_is_superseded_and_rearms
 test_identityless_ledger_never_defers
 test_superseded_owner_never_reinvokes_the_arm
 test_superseded_owner_goes_silent_and_never_double_translates
+test_dead_generation_reclaims_promptly
+test_inbox_only_real_watch_and_exact_ack
 test_need_vanished_mid_cycle_closes_quietly
 test_afk_mid_cycle_suppresses_rewake
 test_active_in_marked_secondmate_home

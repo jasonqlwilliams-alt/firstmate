@@ -75,7 +75,25 @@ test_predicate_queue_pending_flag() {
   printf 'record\n' > "$state/.wake-queue"
   fm_supervision_status "$state" 300
   [ "$FM_SUP_QUEUE_PENDING" = true ] || fail "a non-empty wake queue must read as pending"
-  pass "fm_supervision_status: FM_SUP_QUEUE_PENDING tracks state/.wake-queue"
+  [ "$FM_SUP_NEEDED" = true ] || fail "pending wake alone must require supervision"
+  pass "fm_supervision_status: a pending wake alone requires supervision"
+}
+
+test_predicate_inbox_and_held_work() {
+  local dir="$TMP_ROOT/pred-inbox" state
+  state="$dir/state"
+  mkdir -p "$state/inbox/handled" "$dir/data"
+  printf '## Queued\n\n- [ ] parked-review - Parked review (repo: fixture) (kind: task) (since 2026-09-10) (hold: awaiting a decision) (hold-kind: parked)\n' > "$dir/data/backlog.md"
+  cp "$ROOT/.tasks.toml" "$dir/.tasks.toml"
+  : > "$state/inbox/handled/old.note"
+  : > "$state/inbox/.staging-unpublished"
+  fm_supervision_needed "$state" && fail "held backlog and handled notes must stay idle"
+  : > "$state/inbox/pending.note"
+  fm_supervision_needed "$state" || fail "an unhandled note alone must require supervision"
+  [ "$FM_SUP_QUEUE_PENDING" = false ] || fail "a note is independent of the wake queue"
+  FM_HOME="$dir" "$ROOT/bin/fm-inbox.sh" drain --ack pending >/dev/null
+  fm_supervision_needed "$state" && fail "acknowledged note must not keep held work spinning"
+  pass "fm_supervision_needed: unhandled inbox notes activate; handled notes and held backlog stay idle"
 }
 
 test_predicate_x_mode_needs_supervision() {
@@ -2074,6 +2092,7 @@ test_predicate_unhealthy_no_beacon
 test_predicate_unhealthy_stale_beacon
 test_predicate_healthy_fresh_beacon
 test_predicate_queue_pending_flag
+test_predicate_inbox_and_held_work
 test_predicate_x_mode_needs_supervision
 test_predicate_source_needs_supervision
 test_predicate_registered_check_needs_supervision
