@@ -1502,3 +1502,8 @@ A throwaway scout was spawned through `bin/fm-spawn.sh --scout --harness omp --m
 6. `bin/fm-control.sh <id> exit` stopped the agent and `bin/fm-teardown.sh` returned the worktree and closed the item.
 
 `FM_OMP_LIVE_E2E=1 tests/fm-omp-primary-live-e2e.test.sh` refreshes the primary evidence; the worker path above is refreshed by repeating the scout dispatch after any omp upgrade.
+
+## Claude Stop lifetime
+
+Claude Code 2.1.267 passed two consecutive accelerated quiet-lease lifecycle runs on Linux on 2026-09-10.
+[Supervision verification](supervision.md#claude-quiet-lease-renewal-2026-09-10) owns the exact commands, output, singleton and acknowledgement checks, and the distinction between accelerated proof and live-session activation.

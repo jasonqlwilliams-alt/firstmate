@@ -1272,6 +1272,49 @@ SH
   pass "auto-arm: quiet lease renews once only with demand and authority; bounded arm is reaped"
 }
 
+# The lease may retire a dead lock, but a live PID remains protected even when
+# its identity no longer matches. Exercise the real lock/identity helpers.
+test_quiet_lease_preserves_live_lock() {
+  local mode dir out status pid identity lock_same live
+  for mode in live mismatched dead; do
+    dir=$(make_primary_dir "$TMP_ROOT/lease-lock-$mode")
+    : > "$dir/state/task.meta"
+    write_arm_fixture "$dir" blocking-actionable
+    sleep 60 &
+    pid=$!
+    identity=$(watcher_identity "$dir" "$pid") || fail "could not identify fixture holder"
+    [ "$mode" != mismatched ] || identity="identity-mismatch"
+    record_watcher_lock "$dir" "$pid" "$identity"
+    cp -R "$dir/state/.watch.lock" "$dir/expected-lock"
+    touch "$dir/state/.last-watcher-beat"
+    if [ "$mode" = dead ]; then
+      kill "$pid"
+      wait "$pid" 2>/dev/null || true
+    fi
+    out=$(FM_CLAUDE_AUTOARM_LEASE_SECONDS=3 run_autoarm "$dir" 2>/dev/null); status=$?
+    lock_same=0
+    diff -r "$dir/expected-lock" "$dir/state/.watch.lock" >/dev/null 2>&1 && lock_same=1
+    live=0
+    kill -0 "$pid" 2>/dev/null && live=1
+    if [ "$mode" != dead ]; then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      [ "$live" = 1 ] || fail "lease retirement signalled a $mode holder"
+      [ "$lock_same" = 1 ] || fail "lease retirement changed a $mode holder's lock"
+    else
+      [ ! -e "$dir/state/.watch.lock" ] && [ ! -L "$dir/state/.watch.lock" ] || fail "lease left dead watcher lock for successor to reclaim"
+    fi
+    expect_code 2 "$status" "$mode lease outcome must use the owned handoff"
+    if [ "$mode" = mismatched ]; then
+      assert_contains "$out" 'auto-arm FAILED' "unverified live lock must fail closed"
+    else
+      assert_contains "$out" 'check: claude-lease-renewal' "verified lease handoff"
+      grep -q '^pending:handling:' "$dir/state/.watcher-down" || fail "lease gap is not acknowledgeable"
+    fi
+  done
+  pass "auto-arm: lease retires only dead watcher locks and preserves live or identity-mismatched live holders"
+}
+
 test_inert_in_child_worktree
 test_inert_without_session_lock
 test_reclaims_stale_session_lock_before_arming
@@ -1317,3 +1360,5 @@ test_long_poll_grace_reaches_arm_wrapper
 test_fm_lock_status_still_works_with_shared_lib
 
 test_quiet_lease_renewal_gates
+
+test_quiet_lease_preserves_live_lock

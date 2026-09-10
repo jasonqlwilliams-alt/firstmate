@@ -73,15 +73,14 @@ def sample():
         evidence['owners'][fields['epoch']] = fields
     # Count only this lab's actual watcher executables, never shared sessions.
     watchers = {}
-    needle = str(project / 'bin/fm-watch.sh').encode()
-    for path in Path('/proc').glob('[0-9]*/cmdline'):
-        try:
-            args = path.read_bytes().split(b'\0')
-            if needle in args:
-                fields = (path.parent / 'stat').read_text().rsplit(')', 1)[1].split()
-                watchers[int(path.parent.name)] = int(fields[1])
-        except (FileNotFoundError, ProcessLookupError, PermissionError):
-            pass
+    needle = str(project / 'bin/fm-watch.sh')
+    # ps has this form on Linux and macOS; do not make an installed-Claude
+    # regression depend on Linux-only /proc files.
+    processes = subprocess.check_output(['ps', '-axo', 'pid=,ppid=,command='], text=True)
+    for line in processes.splitlines():
+        fields = line.strip().split(None, 2)
+        if len(fields) == 3 and fields[2].endswith(' ' + needle):
+            watchers[int(fields[0])] = int(fields[1])
     # Bash command substitutions inherit the script's argv. They are
     # children of the watcher, not independent singleton owners.
     owners = [pid for pid, parent in watchers.items() if parent not in watchers]

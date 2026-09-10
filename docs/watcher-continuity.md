@@ -17,7 +17,8 @@ Quiet waiting uses no model tokens between events, but ongoing Claude supervisio
 The hook bounds its foreground arm with the shared timeout runner at 21,600 seconds, before Claude's native 28,800-second hook deadline can kill that tree without delivering a wake.
 The lease covers all retry attempts and produces at most one generation-owned exit-2 renewal.
 Renewal rechecks supervision demand, AFK, supersession, and failure-alarm gates; a held backlog alone creates no demand.
-Renewal publishes the existing generation-bound handling marker so its one handling turn can acknowledge the watcher gap, including when bounded teardown interrupted watcher cleanup.
+Before notification, renewal uses the existing serialized lock helper to reclaim only a provably dead watcher lock and publishes the generation-bound handling marker, so its one handling turn can acknowledge the gap even when bounded teardown interrupted watcher cleanup.
+A live lock holder remains protected, including when its identity is mismatched; a verified live attached watcher retains its lock.
 No synthetic maintenance record is queued, so renewal cannot create its own supervision demand.
 Handle renewal by draining and acknowledging any real wakes, then stop promptly: the next eligible Stop acquires the successor generation.
 `FM_CLAUDE_AUTOARM_LEASE_SECONDS` may shorten the lease for isolated tests; zero, invalid values, and values above 21,600 use the six-hour bound.

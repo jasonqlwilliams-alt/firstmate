@@ -445,6 +445,46 @@ Observed output:
 fm-claude-stop-autoarm: ok
 ```
 
+## Claude quiet-lease renewal, 2026-09-10
+
+Verified on Linux with Claude Code 2.1.267 in two consecutive isolated real-harness runs.
+[Watcher continuity](../watcher-continuity.md) owns the six-hour maintenance policy and acknowledgement contract.
+The test accelerates the lease to 40 seconds and the native hook deadline to 60 seconds, parks the real watcher, and submits one inbox note after the original native deadline without another user message.
+Both runs delivered exactly one maintenance event, reached exactly one successor generation, handled and acknowledged one note once, and kept the generation unchanged for 45 seconds after its runtime obligation was removed while a held backlog remained.
+This is an accelerated lifecycle proof, not a six-hour soak or proof of an already-running session's activation.
+The separate immediate-action fixture checks session-start recovery and is not the quiet-expiry proof.
+
+Run twice, sequentially:
+
+```sh
+FM_CLAUDE_LIVE_E2E=1 FM_CLAUDE_LIVE_E2E_KEEP=1 bin/fm-test-run.sh tests/fm-claude-stop-autoarm-live-e2e.test.sh
+FM_CLAUDE_LIVE_E2E=1 FM_CLAUDE_LIVE_E2E_KEEP=1 bin/fm-test-run.sh tests/fm-claude-stop-autoarm-live-e2e.test.sh
+```
+
+Both runs printed:
+
+```text
+ok - real Claude quiet lease: native 60s deadline passed; successor handled one inbox note with no human turn, one watcher, exact ack, and no held-work renewal
+```
+
+Their runner summaries, in order:
+
+```text
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=136385
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=134918
+```
+
+The portable suite additionally checks that lease cleanup retires a dead watcher lock while preserving both a healthy live holder and an identity-mismatched live holder:
+
+```sh
+bin/fm-test-run.sh tests/fm-claude-stop-autoarm.test.sh tests/fm-supervision-instructions.test.sh
+```
+
+```text
+ok - auto-arm: lease retires only dead watcher locks and preserves live or identity-mismatched live holders
+FM_TEST_SUMMARY total=2 failed=0 skipped_gate=0 duration_ms=48717
+```
+
 ## Watcher continuity
 
 The cross-harness evidence combines the 2026-07-17 live pass with Claude's replacement Stop-owned path revalidated on 2026-07-24, all against isolated project and home state.
