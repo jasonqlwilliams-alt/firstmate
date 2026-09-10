@@ -1764,6 +1764,12 @@ test_live_presentation_holder_is_deadlined_without_weakening_ack() {
   [ -s "$dir/presentation.ready" ] \
     || { kill "$presentation_holder" 2>/dev/null || true; fail "presentation holder never acquired its lock"; }
 
+  # Queue-only demand now legitimately warns about the missing watcher. Capture
+  # the same episode's public guard output so the deadline assertion still
+  # rejects every unexpected helper diagnostic without rejecting that warning.
+  FM_STATE_OVERRIDE="$state" "$ROOT/bin/fm-guard.sh" >/dev/null 2>&1
+  FM_STATE_OVERRIDE="$state" "$ROOT/bin/fm-guard.sh" >"$dir/guard.out" 2>"$dir/guard.err"
+
   start=$(date +%s)
   FM_STATE_OVERRIDE="$state" FM_STATUS_PRESENTATION_LOCK_TIMEOUT=1 \
     "$DRAIN" > "$first_out" 2> "$first_err" \
@@ -1776,7 +1782,8 @@ test_live_presentation_holder_is_deadlined_without_weakening_ack() {
     "$first_out" || true)
   [ "$advisory_count" -eq 1 ] \
     || { kill "$presentation_holder" 2>/dev/null || true; fail "presentation deadline did not emit exactly one holder advisory"; }
-  if grep -v '^WAKE_ACK_REQUIRED:' "$first_err" | grep . >/dev/null; then
+  grep -v '^WAKE_ACK_REQUIRED:' "$first_err" >"$dir/deadline.err"
+  if ! cmp -s "$dir/guard.err" "$dir/deadline.err"; then
     kill "$presentation_holder" 2>/dev/null || true
     fail "presentation deadline leaked helper-process diagnostics"
   fi

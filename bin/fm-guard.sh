@@ -237,8 +237,10 @@ if [ "$watcher_healthy" = false ]; then
         printf '●  %s process-event source(s) registered, but %s.\n' "$sources" "$watcher_cause"
       elif [ "$checks" -gt 0 ]; then
         printf '●  %s registered custom check(s), but %s.\n' "$checks" "$watcher_cause"
-      else
+      elif [ -f "$STATE/x-watch.check.sh" ]; then
         printf '●  X-mode relay polling needs supervision, but %s.\n' "$watcher_cause"
+      else
+        printf '●  Pending wakes or captain inbox notes need supervision, but %s.\n' "$watcher_cause"
       fi
       if [ "$READ_ONLY" -eq 1 ]; then
         printf '●  This read-only session should report the lapse, not repair it.\n'

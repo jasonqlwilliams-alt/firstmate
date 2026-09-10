@@ -485,6 +485,20 @@ test_hook_x_mode_only_blocks_in_default_mode() {
   pass "fm-turnend-guard: X-mode-only supervision remains guarded in default mode"
 }
 
+test_hook_queue_only_blocks_with_queue_banner() {
+  local dir out status
+  dir=$(make_primary_dir "$TMP_ROOT/hook-queue-only")
+  printf '1\t1\tcheck\tinbox:fixture\tcheck: captain inbox note fixture\n' > "$dir/state/.wake-queue"
+  out=$(run_hook "$dir" false); status=$?
+  expect_code 2 "$status" "queue-only blind turn must block"
+  assert_contains "$out" "Pending wakes or captain inbox notes need supervision" "queue-only stop must identify its demand"
+  assert_not_contains "$out" "X-mode relay polling needs supervision" "queue-only demand is not relay polling"
+  out=$(FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" "$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$out" "Pending wakes or captain inbox notes need supervision" "pull guard must identify queue-only demand"
+  assert_not_contains "$out" "X-mode relay polling needs supervision" "pull guard must not label inbox demand as relay"
+  pass "supervision guards: pending-wake-only demand blocks or warns with the correct reason"
+}
+
 test_hook_registered_check_only_blocks_with_check_banner() {
   local dir out status
   dir=$(make_primary_dir "$TMP_ROOT/hook-check-only")
@@ -2111,6 +2125,7 @@ test_hook_blocks_when_unhealthy_in_primary
 test_hook_blocks_from_fm_home_state
 test_hook_x_mode_reason_sources_cadence
 test_hook_x_mode_only_blocks_in_default_mode
+test_hook_queue_only_blocks_with_queue_banner
 test_hook_registered_check_only_blocks_with_check_banner
 test_hook_ignores_repo_state_when_fm_home_set
 test_hook_uses_state_override
