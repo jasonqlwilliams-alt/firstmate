@@ -205,7 +205,11 @@ autoarm_commit() {  # <outcome> [marker-file]
     session_pid=$(sed -n '1p' "$STATE/.lock" 2>/dev/null || true)
     fm_recovery_marker_snapshot "$STATE/.watcher-down" || return 2
     case "$FM_RECOVERY_MARKER_TOKEN" in
-      pending:downtime:*|announced:downtime:*) recovery=${FM_RECOVERY_MARKER_TOKEN##*:} ;;
+      # A quiet lease publishes a handling episode before retiring its arm.
+      # Bind it exactly like a watcher downtime handoff; acknowledged episodes
+      # still cannot authorize a new continuation.
+      pending:downtime:*|announced:downtime:*|pending:handling:*|announced:handling:*)
+        recovery=${FM_RECOVERY_MARKER_TOKEN##*:} ;;
       *) return 2 ;;
     esac
     fm_autoarm_write_owned "$STATE" "$MY_GEN" "$outcome" "$marker" "$session_pid" "$recovery"

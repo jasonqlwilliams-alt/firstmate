@@ -440,7 +440,7 @@ test_spawn_policy_uses_primary_history() {
   git -C "$dir/widgets" -c user.name=fmtest -c user.email=fmtest@example.invalid \
     commit -qm 'accepted primary code'
   primary=$(git -C "$dir/widgets" rev-parse HEAD)
-  id=baseline-primary-spawn
+  id="baseline-primary-spawn"
   fm_test_spawn_home "$dir/home" codex
   fm_test_spawn_brief "$dir/home" "$id"
   out=$(FM_GATE_REFUSE_BYPASS=0 FIXTURE_ROOT="$dir" TRANSPORT_LOG="$dir/transport.log" \

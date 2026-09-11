@@ -1275,6 +1275,10 @@ SH
       expect_code 2 "$status" "quiet live demand needs an owned renewal"
       assert_contains "$out" 'check: claude-lease-renewal' "lease maintenance reason"
       grep -q '^pending:handling:' "$dir/state/.watcher-down" || fail "renewal did not publish an acknowledgeable handling episode"
+      assert_grep "session_pid=$(cat "$dir/state/.lock")" "$dir/state/.claude-autoarm-epoch" \
+        "renewal did not bind the current owning session"
+      assert_grep "recovery_generation=$(sed 's/.*://' "$dir/state/.watcher-down")" \
+        "$dir/state/.claude-autoarm-epoch" "renewal did not bind its handling generation"
       [ "$(printf '%s' "$out" | grep -c '^check: claude-lease-renewal')" = 1 ] || fail "duplicate maintenance event"
     else
       expect_code 0 "$status" "$mode must suppress lease renewal"

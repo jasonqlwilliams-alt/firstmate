@@ -396,7 +396,7 @@ test_repository_policy_gates_the_merge() {
   rc=$?
   set -e
   expect_code 0 "$rc" "an unconfigured home must merge exactly as it did before the guard existed"
-  assert_logged_gh_merge "$case_dir" 9 example/repo
+  assert_logged_gh_merge "$case_dir" 9 example/repo --squash
 
   # A policy that approves a different owner: refuse before the forge call.
   case_dir=$(make_case policy-refuses)

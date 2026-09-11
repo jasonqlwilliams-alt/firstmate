@@ -52,14 +52,13 @@
 #                          only up to BUSY_TURN_MAX_SECS with no completed turn
 #                          (state/<id>.turn-ended, or the spawn record before any
 #                          turn completes). Past that bound, a declared external
-#                          wait or verified captain-held transfer uses the long
-#                          pause recheck cadence; under daemon-backed afk an
-#                          external wait is instead handed to the daemon as this
-#                          plain reason once per declaration, while captain-held
-#                          work stays silent until return
+#                          wait uses the long pause recheck cadence;
+#                          under daemon-backed afk it is handed to the daemon
+#                          as this plain reason once per declaration
 #                          (busy_turn_bound_check owns that split);
 #                          an active backlog hold also parks a positively
-#                          agent-less endpoint; every other pane goes through the same wedge timer and
+#                          agent-less endpoint; every other pane goes through
+#                          the same wedge timer and
 #                          surfaces with the identical "stale: ..." reason,
 #                          escalation count, and demand-deep-inspection marker,
 #                          for human inspection only - never an automatic
@@ -1097,9 +1096,8 @@ handle_paused_stale() {  # <window> <task> <hash>
 # foreground call can hide behind a busy signature. A `paused:` declaration
 # instead identifies that live foreground call as the expected external wait.
 # An active captain backlog hold takes the same cadence only when the recorded
-# endpoint is positively agent-less; an explicit verified captain-held transfer
-# separately declares a wait, while a live worker with only a backlog hold retains
-# the wedge path. handle_paused_stale keeps either exception bounded by re-surfacing
+# endpoint is positively agent-less. A live worker retains the wedge path even
+# with a captain-held status: queue ownership is not evidence of agent health. handle_paused_stale keeps either exception bounded by re-surfacing
 # it once per PAUSE_RESURFACE_SECS. Away mode receives a paused declaration as an
 # undecorated wake identity for daemon classification, which is why that
 # declaration is read before the afk branch rather than after it.
@@ -1111,7 +1109,7 @@ busy_turn_bound_check() {  # <window> <task> <hash> <since-file> <escalation-fil
     handle_paused_stale "$win" "$task" "$h"
     return 0
   fi
-  if status_is_paused "$last" || status_is_captain_held "$last"; then
+  if status_is_paused "$last"; then
     if afk_present; then
       # Away mode is daemon-owned, so this bound hands off the PLAIN wake identity
       # and lets the daemon classify the declaration itself - the undecorated
