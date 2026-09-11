@@ -396,8 +396,7 @@ test_repository_policy_gates_the_merge() {
   rc=$?
   set -e
   expect_code 0 "$rc" "an unconfigured home must merge exactly as it did before the guard existed"
-  assert_grep 'pr merge 9 --repo example/repo' "$case_dir/gh-axi.log" \
-    "the unconfigured merge never reached the forge"
+  assert_logged_gh_merge "$case_dir" 9 example/repo
 
   # A policy that approves a different owner: refuse before the forge call.
   case_dir=$(make_case policy-refuses)
@@ -417,7 +416,7 @@ test_repository_policy_gates_the_merge() {
   [ "$rc" -ne 0 ] || fail "a configured home merged a PR in an unapproved repository"
   assert_contains "$out" "github.com/example/repo" \
     "the merge refusal did not name the unapproved repository"
-  assert_no_grep 'pr merge' "$case_dir/gh-axi.log" \
+  assert_no_grep 'pr merge' "$case_dir/gh.log" \
     "a refused merge still reached the forge"
   pass "fm-pr-merge authorizes through the delivery guard only when a policy is configured"
 }

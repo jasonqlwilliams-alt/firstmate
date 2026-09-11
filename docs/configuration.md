@@ -97,8 +97,8 @@ Every non-clean candidate gets a stable `fm/upstream-sync-<full-upstream-oid>` b
 The stable name, remote-ref check, per-project lock, and completed-state publication make repeated polls and interruption recovery idempotent.
 No path force-pushes, rewrites history, deletes a remote branch, merges into upstream, or performs deployment work.
 
-For every project that has a policy entry, `fm-spawn.sh` resets only its newly acquired isolated worktree to the explicit fork default through `fm-upstream-sync.sh baseline`, including scouts and local-only tasks; it no longer treats `origin` as the baseline authority.
-This makes the fork default the newest accepted upstream baseline for normal `fm/*` work while review-required upstream candidates stay isolated.
+For every project that has a policy entry, `fm-spawn.sh` uses `fm-upstream-sync.sh baseline` with its primary checkout, including scouts and local-only tasks; that script owns ancestor selection, divergence refusal, and preservation of pooled commits.
+This keeps committed local work available when the fork mirror lags, while review-required upstream candidates stay isolated.
 
 The policy configuration declares authority but never changes a remote URL.
 Migrating an existing clone whose `origin` names an upstream therefore remains a separate explicit project operation, and an unsafe no-mistakes configuration stays refused until its branch and PR targets are both captain-owned.

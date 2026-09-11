@@ -4,8 +4,8 @@
 # fake SSH transport; gh-axi identity and release responses are local fakes.
 set -u
 
-# shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/fixtures.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
 
 SYNC="$ROOT/bin/fm-upstream-sync.sh"
 TMP_ROOT=$(fm_test_tmproot fm-upstream-sync)
@@ -161,7 +161,7 @@ test_original_author_fetch_and_captain_fork_push() {
     || fail "captain fork did not reach the upstream commit"
 
   git clone -q "$dir/upstream.git" "$dir/task-worktree"
-  git -C "$dir/task-worktree" reset --hard HEAD^ >/dev/null
+  git -C "$dir/task-worktree" checkout -q --detach HEAD^
   baseline=$(env FM_HOME="$dir/home" FM_STATE_OVERRIDE="$dir/home/state" \
     FIXTURE_ROOT="$dir" TRANSPORT_LOG="$dir/transport.log" \
     GIT_SSH_COMMAND="$dir/fakebin/ssh" PATH="$dir/fakebin:$PATH" \
@@ -343,6 +343,123 @@ test_recovers_after_interruption_without_duplicate_push() {
   pass "upstream sync: interruption recovery reconciles remote state without duplicate writes"
 }
 
+run_baseline() {  # <fixture> [primary]
+  local dir=$1
+  shift
+  env FM_HOME="$dir/home" FM_STATE_OVERRIDE="$dir/home/state" \
+    FIXTURE_ROOT="$dir" TRANSPORT_LOG="$dir/transport.log" \
+    GIT_SSH_COMMAND="$dir/fakebin/ssh" PATH="$dir/fakebin:$PATH" \
+    "$SYNC" baseline widgets "$dir/task-worktree" "$@"
+}
+
+test_baseline_preserves_committed_primary_and_pool_history() {
+  local dir out before primary_before fork_before rc
+  dir=$(make_fixture baseline-primary-ahead)
+  git clone -q "$dir/fork.git" "$dir/task-worktree"
+  printf 'accepted local work\n' > "$dir/seed/local.txt"
+  git -C "$dir/seed" add local.txt
+  git -C "$dir/seed" -c user.name=fmtest -c user.email=fmtest@example.invalid \
+    commit -qm 'accepted local work'
+  primary_before=$(git -C "$dir/seed" rev-parse HEAD)
+  fork_before=$(fork_oid "$dir")
+  out=$(run_baseline "$dir" "$dir/seed" 2>&1); rc=$?
+  expect_code 0 "$rc" "a lagging fork must not hide accepted primary work: $out"
+  [ "$(git -C "$dir/task-worktree" rev-parse HEAD)" = "$primary_before" ] \
+    || fail "task baseline omitted the primary-only commit"
+  assert_contains "$out" 'source=primary' "baseline did not disclose primary selection"
+  [ "$(git -C "$dir/seed" rev-parse HEAD)" = "$primary_before" ] || fail "baseline moved primary HEAD"
+  [ "$(fork_oid "$dir")" = "$fork_before" ] || fail "baseline changed the fork"
+  [ -z "$(git -C "$dir/seed" status --porcelain)" ] || fail "baseline dirtied primary"
+
+  # Same primary, one fork-only commit: the original incident must now refuse.
+  fork_commit "$dir" fork.txt 'accepted fork work'
+  before=$(git -C "$dir/task-worktree" rev-parse HEAD)
+  out=$(run_baseline "$dir" "$dir/seed" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "divergent primary and fork were silently selected around"
+  assert_contains "$out" 'diverge; reconcile both histories' "divergence did not identify the remedy"
+  [ "$(git -C "$dir/task-worktree" rev-parse HEAD)" = "$before" ] || fail "divergence moved pooled HEAD"
+
+  # A normal merge preserves both sides and makes exactly the same input usable.
+  git -C "$dir/seed" fetch -q "$dir/fork.git" main
+  git -C "$dir/seed" -c user.name=fmtest -c user.email=fmtest@example.invalid \
+    merge -q --no-ff --no-edit FETCH_HEAD
+  out=$(run_baseline "$dir" "$dir/seed" 2>&1); rc=$?
+  expect_code 0 "$rc" "reconciled primary should unblock baseline selection: $out"
+  git -C "$dir/task-worktree" merge-base --is-ancestor "$primary_before" HEAD \
+    || fail "reconciled baseline lost primary history"
+  git -C "$dir/task-worktree" merge-base --is-ancestor "$(fork_oid "$dir")" HEAD \
+    || fail "reconciled baseline lost fork history"
+  pass "baseline retains local work, refuses divergence, and accepts an ordinary reconciliation"
+}
+
+test_baseline_fork_ahead_and_pool_refusals() {
+  local dir out rc before branch
+  dir=$(make_fixture baseline-fork-ahead)
+  git clone -q "$dir/fork.git" "$dir/task-worktree"
+  fork_commit "$dir" fork.txt newer
+  before=$(git -C "$dir/seed" rev-parse HEAD)
+  out=$(run_baseline "$dir" "$dir/seed" 2>&1); rc=$?
+  expect_code 0 "$rc" "a containing fork tip should remain eligible: $out"
+  [ "$(git -C "$dir/task-worktree" rev-parse HEAD)" = "$(fork_oid "$dir")" ] \
+    || fail "fork-ahead selection did not advance the task"
+  [ "$(git -C "$dir/seed" rev-parse HEAD)" = "$before" ] || fail "fork-ahead selection moved primary"
+
+  git -C "$dir/task-worktree" checkout -qb pool-work
+  printf 'unlanded\n' > "$dir/task-worktree/unlanded.txt"
+  git -C "$dir/task-worktree" add unlanded.txt
+  git -C "$dir/task-worktree" -c user.name=fmtest -c user.email=fmtest@example.invalid \
+    commit -qm 'unlanded pool work'
+  before=$(git -C "$dir/task-worktree" rev-parse HEAD)
+  out=$(run_baseline "$dir" "$dir/seed" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "baseline discarded pool-only commits"
+  assert_contains "$out" 'has commits outside selected baseline' "pool-only refusal missing"
+  [ "$(git -C "$dir/task-worktree" rev-parse HEAD)" = "$before" ] || fail "refusal changed pooled HEAD"
+  branch=$(git -C "$dir/task-worktree" symbolic-ref --short HEAD)
+  [ "$branch" = pool-work ] || fail "refusal detached or changed the pooled branch"
+  printf 'dirty\n' >> "$dir/task-worktree/unlanded.txt"
+  out=$(run_baseline "$dir" "$dir/seed" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "baseline accepted dirty pooled work"
+  assert_grep dirty "$dir/task-worktree/unlanded.txt" "baseline discarded dirty bytes"
+  out=$(run_baseline "$dir" "$dir/task-worktree" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "baseline accepted its own primary as a target"
+  assert_contains "$out" 'baseline target is the primary checkout' "primary isolation gate was not reached"
+  pass "baseline allows a containing fork but preserves divergent commits and dirty pooled bytes"
+}
+
+
+test_spawn_policy_uses_primary_history() {
+  local dir fakebin out rc id primary
+  dir=$(make_fixture spawn-primary-ahead)
+  # Share the normal spawn fixture while retaining the explicit-URL fake forge.
+  fakebin=$(make_spawn_fakebin "$dir/spawn-tools")
+  cp "$dir/fakebin/gh-axi" "$dir/fakebin/ssh" "$fakebin/"
+  git clone -q "$dir/fork.git" "$dir/widgets"
+  git -C "$dir/widgets" worktree add -q --detach "$dir/task-worktree" HEAD
+  printf 'accepted primary code\n' > "$dir/widgets/primary.txt"
+  git -C "$dir/widgets" add primary.txt
+  git -C "$dir/widgets" -c user.name=fmtest -c user.email=fmtest@example.invalid \
+    commit -qm 'accepted primary code'
+  primary=$(git -C "$dir/widgets" rev-parse HEAD)
+  id=baseline-primary-spawn
+  fm_test_spawn_home "$dir/home" codex
+  fm_test_spawn_brief "$dir/home" "$id"
+  out=$(FM_GATE_REFUSE_BYPASS=0 FIXTURE_ROOT="$dir" TRANSPORT_LOG="$dir/transport.log" \
+    GIT_SSH_COMMAND="$fakebin/ssh" \
+    fm_test_run_spawn "$dir/home" "$dir/task-worktree" "$fakebin" \
+    "$id" "$dir/widgets" --scout 2>&1); rc=$?
+  expect_code 0 "$rc" "policy-enabled spawn must retain primary history: $out"
+  assert_contains "$out" 'source=primary' "spawn did not select its primary default"
+  [ "$(git -C "$dir/task-worktree" rev-parse HEAD)" = "$primary" ] \
+    || fail "spawn dropped the primary-only commit"
+  [ "$(git -C "$dir/widgets" rev-parse main)" = "$primary" ] \
+    || fail "spawn moved the primary default"
+  pass "policy-enabled spawn starts its isolated worker from committed primary history"
+}
+
+
+test_spawn_policy_uses_primary_history
+test_baseline_preserves_committed_primary_and_pool_history
+test_baseline_fork_ahead_and_pool_refusals
 test_original_author_fetch_and_captain_fork_push
 test_effective_fetch_url_rewrite_refuses
 test_upstream_release_fast_forwards_cleanly

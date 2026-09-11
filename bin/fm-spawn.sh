@@ -2403,8 +2403,8 @@ if [ "$KIND" != secondmate ] && [ "$DELIVERY_POLICY_PRESENT" -eq 1 ]; then
       }
     # This home has an explicit repository policy, so validate it for every new
     # worker, including scouts and local-only tasks. That makes the accepted
-    # captain-fork default the worktree baseline instead of letting a third-party
-    # remote named origin become the accidental source of normal work.
+    # captain fork and primary default jointly constrain the worktree baseline;
+    # neither an upstream origin nor a stale mirror may hide accepted local work.
     if ! FM_HOME="$FM_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" FM_CONFIG_OVERRIDE="$CONFIG" \
       "$FM_ROOT/bin/fm-delivery-guard.sh" validate; then
       echo "error: repository delivery policy is invalid; refusing $ID before endpoint creation" >&2
@@ -2627,7 +2627,7 @@ freshen_spawn_worktree_base() {  # <worktree>
   local worktree=$1 default target expected actual status
   if [ "$DELIVERY_POLICY_VALIDATED" -eq 1 ]; then
     FM_HOME="$FM_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" FM_CONFIG_OVERRIDE="$CONFIG" \
-      "$FM_ROOT/bin/fm-upstream-sync.sh" baseline "$DELIVERY_PROJECT" "$worktree"
+      "$FM_ROOT/bin/fm-upstream-sync.sh" baseline "$DELIVERY_PROJECT" "$worktree" "$PROJ_ABS"
     return $?
   fi
   status=$(git -C "$worktree" -c core.quotePath=false status --porcelain) || {

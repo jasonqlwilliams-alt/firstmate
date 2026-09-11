@@ -113,10 +113,10 @@ test_tmux_liveness_classification() {
   # shellcheck source=bin/fm-backend.sh
   . "$ROOT/bin/fm-backend.sh"
   fm_backend_source tmux || fail "fm_backend_source tmux failed"
-  [ "$(fm_backend_tmux_classify_process_name agy)" = agent ] || fail "tmux liveness must classify agy as an agent"
-  [ "$(fm_backend_tmux_classify_process_name /home/u/.local/bin/agy)" = agent ] || fail "tmux liveness must classify an agy path as an agent"
-  [ "$(fm_backend_tmux_classify_process_name magyar)" != agent ] || fail "tmux liveness must not classify magyar as an agent"
-  [ "$(fm_backend_tmux_classify_process_name agyd)" != agent ] || fail "tmux liveness must not classify agyd as an agent"
+  [ "$(fm_agent_process_classify_name agy)" = agent ] || fail "tmux liveness must classify agy as an agent"
+  [ "$(fm_agent_process_classify_name /home/u/.local/bin/agy)" = agent ] || fail "tmux liveness must classify an agy path as an agent"
+  [ "$(fm_agent_process_classify_name magyar)" != agent ] || fail "tmux liveness must not classify magyar as an agent"
+  [ "$(fm_agent_process_classify_name agyd)" != agent ] || fail "tmux liveness must not classify agyd as an agent"
   pass "tmux liveness: agy is anchored, decoys stay out"
 }
 

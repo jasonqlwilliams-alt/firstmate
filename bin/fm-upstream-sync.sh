@@ -4,7 +4,7 @@
 # Usage:
 #   fm-upstream-sync.sh check [<project>]
 #   fm-upstream-sync.sh scheduled [<project>]
-#   fm-upstream-sync.sh baseline <project> <worktree>
+#   fm-upstream-sync.sh baseline <project> <worktree> [<primary-checkout>]
 #
 # `check` is the on-demand path. `scheduled` runs only entries whose last
 # completed check is older than upstreamSync.intervalHours (24 by default).
@@ -18,10 +18,13 @@
 # gate passes. Every other candidate is preserved on a stable
 # fm/upstream-sync-<upstream-oid> branch with a durable review packet.
 #
-# `baseline` fetches the configured fork default into a dedicated local ref in
-# an already-isolated task worktree and resets that clean task worktree to it.
-# fm-spawn uses this after acquiring a new worktree so normal work starts from
-# the newest fork state accepted by the synchronization workflow.
+# `baseline` fetches the configured fork default in an already-isolated clean
+# task worktree. When given the primary checkout, it also fetches that checkout's
+# committed default branch (read-only at the source), then selects whichever tip
+# contains the other. Divergence refuses launch until the histories are reconciled.
+# The current task HEAD must be an ancestor of that tip; checkout detaches without
+# resetting a branch or discarding pooled commits. fm-spawn always supplies its
+# primary checkout, so an off-box mirror cannot silently hide accepted local work.
 #
 # No path force-pushes, deletes a remote branch, rewrites history, updates an
 # original-author repository, deploys, restarts a service, or runs a migration.
@@ -552,11 +555,21 @@ sync_project() {  # <project> <scheduled:0|1>
   cleanup
 }
 
-baseline_worktree() {  # <project> <worktree>
-  local project=$1 worktree=$2 top git_dir target expected actual status
+baseline_worktree() {  # <project> <worktree> [primary-checkout]
+  local project=$1 worktree=$2 primary=${3:-} top git_dir target expected actual status
+  local primary_top local_oid fork_oid source=fork
   top=$(git -C "$worktree" rev-parse --show-toplevel 2>/dev/null) \
     || { die "baseline target is not a Git worktree: $worktree"; return 1; }
   fm_repository_policy_load "$project" || return 1
+  if [ -n "$primary" ]; then
+    primary_top=$(git -C "$primary" rev-parse --show-toplevel 2>/dev/null) || {
+      die "baseline primary is not a Git checkout: $primary"; return 1;
+    }
+    primary_top=$(cd "$primary_top" && pwd -P) || return 1
+    [ "$primary_top" != "$(cd "$top" && pwd -P)" ] || {
+      die "baseline target is the primary checkout; refusing to change it"; return 1;
+    }
+  fi
   git_dir=$(git -C "$top" rev-parse --absolute-git-dir 2>/dev/null) || {
     die "cannot resolve Git metadata for baseline target $top"; return 1;
   }
@@ -576,15 +589,34 @@ baseline_worktree() {  # <project> <worktree>
   expected=$(git -C "$top" rev-parse --verify --quiet "$target^{commit}") || {
     die "configured fork default is not a commit: $FM_REPOSITORY_POLICY_FORK_ID/$FM_REPOSITORY_POLICY_DEFAULT_BRANCH"; return 1;
   }
-  git -C "$top" reset --hard "$target" >/dev/null || {
-    die "cannot set isolated task worktree $top to verified fork baseline $target"; return 1;
+  fork_oid=$expected
+  if [ -n "$primary" ]; then
+    # Fetch commits from the source; never run a mutating Git command there.
+    git -C "$top" fetch --quiet --no-tags "$primary_top" \
+      "refs/heads/$FM_REPOSITORY_POLICY_DEFAULT_BRANCH" || {
+        die "cannot fetch primary default branch from $primary_top"; return 1;
+      }
+    local_oid=$(git -C "$top" rev-parse --verify 'FETCH_HEAD^{commit}') || return 1
+    if git -C "$top" merge-base --is-ancestor "$fork_oid" "$local_oid"; then
+      expected=$local_oid
+      source=primary
+    elif ! git -C "$top" merge-base --is-ancestor "$local_oid" "$fork_oid"; then
+      die "primary default $local_oid and fork default $fork_oid diverge; reconcile both histories before dispatch"; return 1;
+    fi
+  fi
+  actual=$(git -C "$top" rev-parse --verify HEAD) || return 1
+  git -C "$top" merge-base --is-ancestor "$actual" "$expected" || {
+    die "pooled HEAD $actual has commits outside selected baseline $expected; preserve and reconcile them before dispatch"; return 1;
+  }
+  git -C "$top" checkout --quiet --detach "$expected" || {
+    die "cannot set isolated task worktree $top to verified baseline $expected"; return 1;
   }
   actual=$(git -C "$top" rev-parse --verify --quiet HEAD 2>/dev/null || true)
   [ "$actual" = "$expected" ] || {
-    die "task worktree $top did not reach verified fork baseline $expected"; return 1;
+    die "task worktree $top did not reach verified baseline $expected"; return 1;
   }
-  printf 'UPSTREAM BASELINE: project=%s repository=%s branch=%s commit=%s\n' \
-    "$project" "$FM_REPOSITORY_POLICY_FORK_ID" "$FM_REPOSITORY_POLICY_DEFAULT_BRANCH" "$expected"
+  printf 'UPSTREAM BASELINE: project=%s repository=%s branch=%s commit=%s source=%s fork=%s\n' \
+    "$project" "$FM_REPOSITORY_POLICY_FORK_ID" "$FM_REPOSITORY_POLICY_DEFAULT_BRANCH" "$expected" "$source" "$fork_oid"
 }
 
 run_checks() {  # <scheduled:0|1> [project]
@@ -623,8 +655,8 @@ case "${1:-}" in
     run_checks 1 "${2:-}"
     ;;
   baseline)
-    [ "$#" -eq 3 ] || usage
-    baseline_worktree "$2" "$3"
+    [ "$#" -eq 3 ] || [ "$#" -eq 4 ] || usage
+    baseline_worktree "$2" "$3" "${4:-}"
     ;;
   -h|--help) usage ;;
   *) usage ;;
