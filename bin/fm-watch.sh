@@ -2436,7 +2436,8 @@ EOF
                          printf '%s' "$h" > "$sf"
                          wedge_timer_check "$w" "$ssf" "non-terminal stale (provably working after a declared pause)" "$ewf" "$task"
                          triage_log "absorbed non-terminal stale (provably working): $w" ;;
-                *)       if status_is_captain_held "$(last_status_line "$STATE/$task.status")"; then
+                *)       if task_has_active_captain_hold "$task" \
+                           && status_is_captain_held "$(last_status_line "$STATE/$task.status")"; then
                            clear_pause_state "$key"
                            printf '%s' "$h" > "$sf"
                            wedge_timer_check "$w" "$ssf" "non-terminal stale (live agent after a captain hold)" "$ewf" "$task"
