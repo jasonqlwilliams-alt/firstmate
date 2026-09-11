@@ -1055,6 +1055,13 @@ handle_paused_stale() {  # <window> <task> <hash>
       triage_log "absorbed stale (backlog-held, no agent attached, awaiting return): $win"
       return 0
     fi
+    # A lifecycle-identified call owns its first notification and replacement
+    # scope even when its worker has exited. Legacy/list-only holds retain the
+    # long-cadence fallback; neither path revives the worker's wedge timer.
+    if task_captain_call_open "$task"; then
+      declaration=$(captain_call_declaration "$task" "$CAPTAIN_CALL_IDENTITY")
+      min_age=0
+    fi
     detail="backlog-held, no agent attached"
     reason="backlog-held ${age}s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent"
   elif status_is_captain_held "$last"; then
@@ -2466,7 +2473,9 @@ EOF
         # is cleared - but not in the same poll the declared-pause cadence just
         # recorded it, or the re-surface throttle it depends on would be erased and
         # the pause would re-surface every poll instead of once per long cadence.
-        if [ "$paused_bound" -ne 0 ] && [ -e "$pf" ] && { [ "$n" -ge 2 ] || ! status_is_paused_or_captain_held "$(last_status_line "$STATE/$(window_to_task "$w" "$STATE").status")"; }; then
+        if [ "$paused_bound" -ne 0 ] && [ -e "$pf" ] \
+          && ! task_hold_has_no_agent "$w" "$task" \
+          && { [ "$n" -ge 2 ] || ! status_is_paused_or_captain_held "$(last_status_line "$STATE/$(window_to_task "$w" "$STATE").status")"; }; then
           clear_pause_tracking "$key"
         fi
       fi
