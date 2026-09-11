@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# Guarded worker entrypoint for Git. The repository pre-push hook owns target
+# authorization; this shim prevents Git's explicit hook-bypass path and the
+# lower-level send-pack command from stepping around that boundary.
+set -u
+
+REAL=${FM_REAL_GIT:-}
+[ -n "$REAL" ] && [ -x "$REAL" ] || {
+  printf 'REFUSED: guarded git cannot resolve the real Git executable.\n' >&2
+  exit 1
+}
+
+args=("$@")
+command_name=
+command_index=-1
+hook_override=0
+i=0
+while [ "$i" -lt "${#args[@]}" ]; do
+  arg=${args[$i]}
+  case "$arg" in
+    -c)
+      [ $((i + 1)) -ge "${#args[@]}" ] \
+        || case "${args[$((i + 1))]}" in core.hooksPath=*) hook_override=1 ;; esac
+      i=$((i + 2))
+      continue
+      ;;
+    --config-env)
+      [ $((i + 1)) -ge "${#args[@]}" ] \
+        || case "${args[$((i + 1))]}" in core.hooksPath=*) hook_override=1 ;; esac
+      i=$((i + 2))
+      continue
+      ;;
+    -C|--git-dir|--work-tree|--namespace|--super-prefix)
+      i=$((i + 2))
+      continue
+      ;;
+    -ccore.hooksPath=*|--config-env=core.hooksPath=*)
+      hook_override=1
+      i=$((i + 1))
+      continue
+      ;;
+    --git-dir=*|--work-tree=*|--namespace=*|--super-prefix=*|--config-env=*|--exec-path=*|--*)
+      i=$((i + 1))
+      continue
+      ;;
+    -*)
+      i=$((i + 1))
+      continue
+      ;;
+    *) command_name=$arg; command_index=$i; break ;;
+  esac
+done
+
+# Resolve ordinary Git aliases without evaluating their content. A shell alias
+# that can invoke push/send-pack is refused because the nested Git command would
+# run outside this wrapper. A non-shell alias whose first word is push is treated
+# exactly like a direct push, including command-line hook-bypass checks.
+resolved_command=$command_name
+if [ "$command_index" -ge 0 ] && [ -n "$command_name" ] \
+  && [ "$command_name" != push ] && [ "$command_name" != send-pack ]; then
+  alias_value=$("$REAL" "${args[@]:0:$command_index}" config --get "alias.$command_name" 2>/dev/null || true)
+  case "$alias_value" in
+    !*)
+      if [[ "$alias_value" =~ (^|[[:space:]/])git[[:space:]]+(push|send-pack)([[:space:]]|$) ]] \
+        || [[ "$alias_value" =~ (^|[[:space:]])send-pack([[:space:]]|$) ]]; then
+        printf 'REFUSED: a Git shell alias that can push bypasses the Firstmate repository delivery guard.\n' >&2
+        exit 1
+      fi
+      ;;
+    *)
+      read -r alias_command _ <<< "$alias_value"
+      case "$alias_command" in
+        push|send-pack) resolved_command=$alias_command ;;
+      esac
+      ;;
+  esac
+fi
+
+if [ "$resolved_command" = push ]; then
+  case "${GIT_CONFIG_PARAMETERS:-}" in
+    *core.hooksPath*) hook_override=1 ;;
+  esac
+  config_count=${GIT_CONFIG_COUNT:-0}
+  case "$config_count" in ''|*[!0-9]*) config_count=0 ;; esac
+  i=0
+  while [ "$i" -lt "$config_count" ]; do
+    config_key_name="GIT_CONFIG_KEY_$i"
+    [ "${!config_key_name:-}" != core.hooksPath ] || hook_override=1
+    i=$((i + 1))
+  done
+  if [ "$hook_override" -eq 1 ]; then
+    printf 'REFUSED: git push cannot override the Firstmate pre-push hook configuration.\n' >&2
+    exit 1
+  fi
+fi
+
+case "$resolved_command" in
+  push)
+    for arg in "${args[@]}"; do
+      if [ "$arg" = --no-verify ]; then
+        printf 'REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.\n' >&2
+        exit 1
+      fi
+    done
+    case " ${alias_value:-} " in
+      *' --no-verify '*)
+        printf 'REFUSED: a Git push alias cannot disable the Firstmate repository delivery guard.\n' >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  send-pack)
+    printf 'REFUSED: git send-pack bypasses the Firstmate repository delivery guard; use guarded git push.\n' >&2
+    exit 1
+    ;;
+esac
+
+exec "$REAL" "$@"

@@ -70,6 +70,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
+CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 
 # shellcheck source=bin/fm-pr-lib.sh
 . "$SCRIPT_DIR/fm-pr-lib.sh"
@@ -193,6 +194,28 @@ META="$STATE/$ID.meta"
 if [ ! -f "$META" ] || [ -L "$META" ]; then
   echo "error: task metadata is unavailable" >&2
   exit 1
+fi
+
+# The repository delivery policy is opt-in. bin/fm-bootstrap.sh arms the guard
+# only when config/repository-policy.json exists, and bin/fm-spawn.sh validates
+# only a project that has an explicit policy entry. Applying the same condition
+# here keeps an unconfigured home able to merge instead of refusing every PR as
+# unarmed, while a configured home is still authorized before anything is read.
+POLICY="$CONFIG/repository-policy.json"
+if [ -e "$POLICY" ] || [ -L "$POLICY" ]; then
+  PROJECT=$(grep '^project=' "$META" | tail -1 | cut -d= -f2- || true)
+  [ -n "$PROJECT" ] || {
+    echo "error: task metadata has no project for repository delivery authorization" >&2
+    exit 1
+  }
+  # The guard target is rebuilt from the parsed identity so a GitLab merge
+  # request is authorized against its own instance rather than a hardcoded host.
+  # This script resolves its home and config without exporting them, so the
+  # guard is handed the same locations that selected the policy above rather
+  # than re-deriving a different home from the ambient environment.
+  FM_HOME="$FM_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" FM_CONFIG_OVERRIDE="$CONFIG" \
+    "$SCRIPT_DIR/fm-delivery-guard.sh" check-pr "$PROJECT" "$FM_PR_HOST/$FM_PR_PATH" \
+    || exit 1
 fi
 
 # Reading the merge request state needs both tools. Report them together and

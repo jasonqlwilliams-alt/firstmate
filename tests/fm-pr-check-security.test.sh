@@ -47,6 +47,16 @@ file_mode() {
   fi
 }
 
+process_is_live_non_zombie() {
+  local pid=$1 stat
+  kill -0 "$pid" 2>/dev/null || return 1
+  stat=$(ps -p "$pid" -o stat= 2>/dev/null || true)
+  case "$stat" in
+    Z*) return 1 ;;
+  esac
+  return 0
+}
+
 LINK_KIND=
 LINK_TARGET=
 LINK_CONTENT=
@@ -954,6 +964,12 @@ test_postrename_poll_validation_revokes_and_retries() {
   local artifact action dir state destination link_target gate
   for artifact in data registration check; do
     for action in type mode device content; do
+      # The device fault is injected by a fake stat on PATH; on Darwin the
+      # device helper now calls /usr/bin/stat directly, so the fake can never
+      # fire there. Skip the device action on Darwin.
+      if [ "$action" = device ] && [ "$(uname)" = Darwin ]; then
+        continue
+      fi
       dir=$(make_case "poll-final-$artifact-$action")
       state="$dir/home/state"
       write_poll_meta "$state" task-a https://github.com/o/r/pull/1
@@ -1133,11 +1149,11 @@ SH
     child_pid=$(cat "$child_pid_file")
     kill -TERM "$watcher_pid" 2>/dev/null || fail "could not stop $backend watcher"
     i=0
-    while kill -0 "$watcher_pid" 2>/dev/null && [ "$i" -lt 150 ]; do
+    while process_is_live_non_zombie "$watcher_pid" && [ "$i" -lt 150 ]; do
       sleep 0.02
       i=$((i + 1))
     done
-    if kill -0 "$watcher_pid" 2>/dev/null; then
+    if process_is_live_non_zombie "$watcher_pid"; then
       kill -KILL "$watcher_pid" 2>/dev/null || true
       wait "$watcher_pid" 2>/dev/null || true
       kill -KILL "$child_pid" 2>/dev/null || true
@@ -1147,7 +1163,7 @@ SH
     wait "$watcher_pid" || rc=$?
     [ "$rc" -ne 0 ] || fail "$backend signaled watcher exited successfully"
     alive=0
-    kill -0 "$child_pid" 2>/dev/null && alive=1
+    process_is_live_non_zombie "$child_pid" && alive=1
     [ "$alive" -eq 0 ] || kill -KILL "$child_pid" 2>/dev/null || true
     wait "$child_pid" 2>/dev/null || true
     [ "$alive" -eq 0 ] || fail "$backend watcher left a returned check descendant alive"
@@ -1595,8 +1611,8 @@ test_self_merge_and_poll_publish_one_outcome() {
   set -e
   [ "$rc" -eq 0 ] \
     || fail "merge-outcome-committed: watcher failed: $(cat "$dir/watch.err")"
-  [ "$(grep -c -F "$url" "$replies")" -eq 1 ] \
-    || fail "merge-outcome-committed: self and poll reports produced duplicate outcomes"
+  [ "$(grep -c -F "done [key=merged-task-a]: merged task-a $url" "$replies")" -eq 1 ] \
+    || fail "merge-outcome-committed: self and poll reports produced duplicate merge outcomes"
   assert_no_grep "check: $state/task-a.check.sh: merged" "$state/.wake-queue" \
     "merge-outcome-committed: absorbed poll published a second outcome"
   assert_poll_absent "$state" task-a

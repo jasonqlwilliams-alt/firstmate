@@ -96,7 +96,7 @@ make_case() {
   local name=$1 case_dir fakebin
   case_dir="$TMP_ROOT/$name"
   fakebin="$case_dir/fakebin"
-  mkdir -p "$case_dir/state" "$fakebin"
+  mkdir -p "$case_dir/state" "$case_dir/config" "$fakebin"
   fm_write_meta "$case_dir/state/task-x1.meta" \
     "window=fm-task-x1" \
     "worktree=$case_dir/wt" \
@@ -122,6 +122,11 @@ add_gh_mocks() {
   local case_dir=$1 head=$2
   cat > "$case_dir/fakebin/gh-axi" <<'SH'
 #!/usr/bin/env bash
+if [ "${1:-}" = api ]; then
+  [ "${GH_HOST:-}" = github.com ] || exit 3
+  printf 'api_response:\n  body: captain\n  truncated: false\n'
+  exit 0
+fi
 printf '%s\n' "$*" >> "$FM_TEST_GH_AXI_LOG"
 case "${1:-} ${2:-}" in
   "pr merge") printf 'merged:\n  number: %s\n  status: ok\n' "${3:-}" ;;
@@ -356,6 +361,7 @@ run_pr_merge() {
   FM_ROOT_OVERRIDE="$ROOT" \
   FM_HOME="${FM_TEST_HOME:-$ROOT}" \
   FM_STATE_OVERRIDE="$case_dir/state" \
+  FM_CONFIG_OVERRIDE="$case_dir/config" \
   FM_TEST_GH_AXI_LOG="$case_dir/gh-axi.log" \
   FM_TEST_GH_LOG="$case_dir/gh.log" \
   FM_TEST_GH_OUTCOME="$case_dir/github-outcome" \
@@ -381,6 +387,67 @@ write_github_outcome() {
     "merged=$merged" \
     "queued=$queued" \
     "base=$base" > "$case_dir/github-outcome"
+}
+
+# fm-pr-merge.sh authorizes through the repository delivery guard only when this
+# home configures a policy. Both halves matter: an unconfigured home must merge
+# exactly as before, and a configured one must refuse an unapproved repository
+# before the forge call that cannot be undone.
+write_repository_policy() {  # <case-dir> <approved-owner>
+  local case_dir=$1 owner=$2
+  cat > "$case_dir/config/repository-policy.json" <<JSON
+{
+  "version": 1,
+  "approvedOwners": ["$owner"],
+  "approvedAccounts": ["captain"],
+  "repositories": {
+    "project": {
+      "upstreamFetchUrl": "https://github.com/$owner/repo.git",
+      "forkPushUrl": "https://github.com/$owner/repo.git",
+      "defaultBranch": "main"
+    }
+  }
+}
+JSON
+}
+
+test_repository_policy_gates_the_merge() {
+  local case_dir rc out
+
+  # No policy file: the guard is inert and the merge proceeds untouched.
+  case_dir=$(make_case policy-absent)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks "$case_dir" deadbeefcafefeed0000000000000000deadbeef
+  : > "$case_dir/gh-axi.log"
+  set +e
+  run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/9 >/dev/null 2>&1
+  rc=$?
+  set -e
+  expect_code 0 "$rc" "an unconfigured home must merge exactly as it did before the guard existed"
+  assert_grep 'pr merge 9 --repo example/repo' "$case_dir/gh-axi.log" \
+    "the unconfigured merge never reached the forge"
+
+  # A policy that approves a different owner: refuse before the forge call.
+  case_dir=$(make_case policy-refuses)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks "$case_dir" deadbeefcafefeed0000000000000000deadbeef
+  : > "$case_dir/gh-axi.log"
+  fm_git_init_commit "$case_dir/project"
+  write_repository_policy "$case_dir" approved-owner
+  FM_HOME="$case_dir" FM_CONFIG_OVERRIDE="$case_dir/config" FM_ROOT_OVERRIDE="$ROOT" \
+    PATH="$case_dir/fakebin:$PATH" \
+    "$ROOT/bin/fm-delivery-guard.sh" arm project "$case_dir/project" >/dev/null \
+    || fail "could not arm the case repository from its policy"
+  set +e
+  out=$(run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/9 2>&1)
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "a configured home merged a PR in an unapproved repository"
+  assert_contains "$out" "github.com/example/repo" \
+    "the merge refusal did not name the unapproved repository"
+  assert_no_grep 'pr merge' "$case_dir/gh-axi.log" \
+    "a refused merge still reached the forge"
+  pass "fm-pr-merge authorizes through the delivery guard only when a policy is configured"
 }
 
 test_verified_merge_records_pr_and_head() {
@@ -1824,15 +1891,21 @@ test_secondmate_merge_reports_upward_once() {
 
   assert_grep "done [key=merged-task-x1]: merged task-x1 $url" "$replies" \
     "secondmate-merge-reports: the landed PR was not reported upward"
-  [ "$(wc -l <"$replies")" -eq 1 ] \
-    || fail "secondmate-merge-reports: one merge produced more than one upward line"
+  [ "$(grep -c 'merged-task-x1' "$replies")" -eq 1 ] \
+    || fail "secondmate-merge-reports: one merge produced more than one upward merge line"
+  # The merge path registers the PR first, and that registration publishes the
+  # child's ready line on the same channel from fm-pr-check itself.
+  assert_grep "done [key=child-pr-task-x1]: child task-x1 PR ready: $url" "$replies" \
+    "secondmate-merge-reports: the registration's ready line was not reported upward"
 
   # The same merge again: the forge accepts it in this fixture, so only the
   # at-most-once contract can keep the parent from being told twice.
   FM_TEST_HOME="$case_dir/home" run_pr_merge "$case_dir" task-x1 "$url" \
     >"$case_dir/stdout2" 2>"$case_dir/stderr2" || fail "secondmate-merge-reports: repeat merge failed"
-  [ "$(parent_reply_lines "$replies" "$url")" -eq 1 ] \
+  [ "$(grep -c 'merged-task-x1' "$replies")" -eq 1 ] \
     || fail "secondmate-merge-reports: a repeat merge of the same PR duplicated the upward line"
+  [ "$(parent_reply_lines "$replies" "$url")" -eq 2 ] \
+    || fail "secondmate-merge-reports: a repeat merge changed the upward lines: $(cat "$replies")"
   pass "a merge a secondmate home performs itself is reported upward exactly once"
 }
 
@@ -1868,7 +1941,9 @@ test_failed_merge_reports_nothing() {
   set -e
 
   expect_code 1 "$rc" "failed-merge-silent: a failed merge should propagate"
-  assert_absent "$case_dir/state/parent-replies.status" \
+  # The registration's ready line is a fact of its own; only a merge line
+  # would misreport the unlanded merge.
+  assert_no_grep 'merged-task-x1' "$case_dir/state/parent-replies.status" \
     "failed-merge-silent: a merge that never landed was reported as landed"
   pass "a refused or failed merge reports no outcome"
 }
@@ -1887,7 +1962,9 @@ test_gitlab_refusal_reports_nothing() {
   set -e
 
   expect_code 1 "$rc" "gitlab-refusal-silent: a refused GitLab merge should exit non-zero"
-  assert_absent "$case_dir/state/parent-replies.status" \
+  # Registration succeeds before the later GitLab pre-merge refusal, so the
+  # PR-ready fact is expected; only a merged outcome would be false.
+  assert_no_grep 'merged-task-x1' "$case_dir/state/parent-replies.status" \
     "gitlab-refusal-silent: a refused merge request was reported as landed"
   pass "a GitLab merge refused before the forge call reports no outcome"
 }
@@ -2077,6 +2154,7 @@ test_github_closed_unqueued_outcome_omits_retry_flags
 test_github_agreeing_queue_rules_keep_retry_guidance
 test_github_conflicting_queue_rules_report_ambiguity
 test_verified_merge_records_pr_and_head
+test_repository_policy_gates_the_merge
 test_pr_metadata_is_recorded_before_the_forge_call
 test_merge_failure_propagates_after_recording
 test_github_open_unqueued_outcome_refuses

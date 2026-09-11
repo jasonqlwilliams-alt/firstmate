@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Spawn-only gh shim: fail closed on PR writes outside the configured fork.
+set -u
+
+ROOT=${FM_DELIVERY_GUARD_ROOT:-}
+REAL=${FM_REAL_GH:-}
+[ -n "$ROOT" ] && [ -x "$ROOT/bin/fm-delivery-guard.sh" ] || {
+  echo "REFUSED: Firstmate gh write guard is unavailable." >&2
+  exit 1
+}
+[ -n "$REAL" ] && [ -x "$REAL" ] || {
+  echo "REFUSED: the real gh executable was not recorded before the guarded PATH was installed." >&2
+  exit 1
+}
+FM_GITHUB_GUARD_TOOL=gh
+FM_DELIVERY_GUARD_ROOT=$ROOT
+export FM_GITHUB_GUARD_TOOL FM_DELIVERY_GUARD_ROOT
+# shellcheck source=bin/fm-github-write-guard-lib.sh
+. "$ROOT/bin/fm-github-write-guard-lib.sh"
+fm_github_guard_check "$@" || exit $?
+exec "$REAL" "$@"

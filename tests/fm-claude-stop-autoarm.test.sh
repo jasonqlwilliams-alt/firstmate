@@ -33,6 +33,7 @@ install_autoarm_scripts() {
   cp "$ROOT/bin/fm-session-lock-lib.sh" "$dir/bin/fm-session-lock-lib.sh"
   cp "$ROOT/bin/fm-cursor-lib.sh" "$dir/bin/fm-cursor-lib.sh"
   cp "$ROOT/bin/fm-hook-host-lib.sh" "$dir/bin/fm-hook-host-lib.sh"
+  cp "$ROOT/bin/fm-timeout-lib.sh" "$dir/bin/fm-timeout-lib.sh"
   cp "$ROOT/bin/fm-lock.sh" "$dir/bin/fm-lock.sh"
   chmod +x "$dir/bin/fm-claude-stop-autoarm.sh" "$dir/bin/fm-lock.sh"
 }
@@ -173,6 +174,15 @@ echo "$$" >> "$FM_HOME/state/arm-ran"
 : > "$FM_HOME/state/.afk"
 printf 'watcher: started pid=%s (beacon fresh)\n' "$$"
 printf 'stale: fixture-win actionable\n'
+exit 0
+SH
+      ;;
+    records-grace)
+      cat > "$dir/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+echo "$$" >> "$FM_HOME/state/arm-ran"
+printf '%s\n' "${FM_GUARD_GRACE:-unset}" > "$FM_HOME/state/arm-received-grace"
+printf 'watcher: attached pid=%s (beacon 2s)\n' "$$"
 exit 0
 SH
       ;;
@@ -621,6 +631,20 @@ test_arms_for_x_mode_poll_need_without_inflight() {
   expect_code 2 "$status" "an X-mode relay poll need must keep the auto-arm active with zero tasks in flight"
   [ -e "$dir/state/arm-ran" ] || fail "hook did not arm for the X-mode poll need"
   pass "auto-arm: X-mode poll need arms the cycle even with no tasks in flight"
+}
+
+test_arms_for_registered_custom_check_without_inflight() {
+  local dir out status
+  dir=$(make_primary_dir "$TMP_ROOT/check-need")
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/state/issue-comments.check.sh"
+  chmod 700 "$dir/state/issue-comments.check.sh"
+  FM_STATE_OVERRIDE="$dir/state" "$ROOT/bin/fm-check-register.sh" issue-comments >/dev/null \
+    || fail "fm-check-register.sh could not register the custom check"
+  write_arm_fixture "$dir" actionable
+  out=$(run_autoarm "$dir" 2>/dev/null); status=$?
+  expect_code 2 "$status" "a registered custom check must keep the auto-arm active with zero tasks in flight"
+  [ -e "$dir/state/arm-ran" ] || fail "hook did not arm for the registered custom check"
+  pass "auto-arm: a registered custom check arms the cycle even with no tasks in flight"
 }
 
 test_single_flight_admits_exactly_one_owner() {
@@ -1106,6 +1130,58 @@ test_superseded_owner_goes_silent_and_never_double_translates() {
   pass "auto-arm: a superseded owner goes silent - one supersession episode, one translation, no held mutex"
 }
 
+# A dead owner cannot defer even with a freshly updated claim and beacon.
+# This is the state left by a hook-tree timeout, followed by an actual Stop.
+test_dead_generation_reclaims_promptly() {
+  local dir pid out status
+  dir=$(make_primary_dir "$TMP_ROOT/v2-dead-fresh")
+  : > "$dir/state/task.meta"
+  write_arm_fixture "$dir" actionable
+  sleep 60 &
+  pid=$!
+  record_autoarm_v2_claim "$dir" 37 "$pid" arming "$pid" || fail "could not record claim"
+  : > "$dir/state/.last-watcher-beat"
+  kill "$pid"
+  wait "$pid" 2>/dev/null || true
+  out=$(run_autoarm "$dir" 2>/dev/null); status=$?
+  expect_code 2 "$status" "dead owner must be reclaimed at the next Stop without waiting for grace"
+  [ "$(epoch_field "$dir" epoch)" = 38 ] || fail "next Stop must claim generation 38"
+  assert_contains "$out" "firstmate watcher wake" "new generation must translate"
+  pass "auto-arm: the next Stop supersedes a dead generation immediately despite fresh ledger and beacon"
+}
+
+# The real inbox, watcher, arm, and exact queue acknowledgement share one
+# isolated home, with no task metadata, poll registration, or event source.
+test_inbox_only_real_watch_and_exact_ack() {
+  local dir out status id sequence generation
+  dir=$(make_primary_dir "$TMP_ROOT/inbox-only-real")
+  cp -R "$ROOT/bin/." "$dir/bin/"
+  mkdir -p "$dir/data"
+  printf '## Queued\n\n- [ ] parked-review - Parked review (repo: fixture) (kind: task) (since 2026-09-10) (hold: awaiting a decision) (hold-kind: parked)\n' > "$dir/data/backlog.md"
+  cp "$ROOT/.tasks.toml" "$dir/.tasks.toml"
+  out=$(FM_HOME="$dir" "$dir/bin/fm-inbox.sh" note inbox-only-real) || fail "note append failed"
+  id=$(printf '%s\n' "$out" | sed -n 's/^queued //p')
+  [ -n "$id" ] || fail "missing saved note id"
+  out=$(FM_POLL=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 run_autoarm "$dir" 2>/dev/null); status=$?
+  expect_code 2 "$status" "inbox-only home must arm a real watcher and rewake"
+  assert_contains "$out" 'check: rearm-resurface' "real watcher must surface the persisted note wake"
+  [ -f "$dir/state/inbox/$id.note" ] || fail "notification must not acknowledge the note"
+  [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = 1 ] || fail "note wake must not be duplicated"
+  FM_HOME="$dir" "$dir/bin/fm-wake-drain.sh" >"$dir/drain.out" 2>"$dir/drain.err" || fail "wake drain failed"
+  sequence=$(sed -n 's/^WAKE_ACK_REQUIRED:.*--ack-through \([0-9][0-9]*\) --recovery-generation [A-Za-z0-9._-][A-Za-z0-9._-]*$/\1/p' "$dir/drain.err")
+  generation=$(sed -n 's/^WAKE_ACK_REQUIRED:.*--ack-through [0-9][0-9]* --recovery-generation \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' "$dir/drain.err")
+  [ -n "$sequence" ] && [ -n "$generation" ] || fail "missing exact acknowledgement boundary"
+  FM_HOME="$dir" "$dir/bin/fm-inbox.sh" drain --ack "$id" >/dev/null || fail "note ack failed"
+  FM_HOME="$dir" "$dir/bin/fm-wake-drain.sh" --ack-through "$sequence" --recovery-generation "$generation" >/dev/null || fail "queue ack failed"
+  [ ! -s "$dir/state/.wake-queue" ] || fail "handled wake remained queued"
+  [ -f "$dir/state/inbox/handled/$id.note" ] || fail "exact note missing from handled inbox"
+  out=$(run_autoarm "$dir" 2>/dev/null); status=$?
+  expect_code 0 "$status" "held work alone must not start another cycle after exact acknowledgement"
+  [ -z "$out" ] || fail "idle held home produced another continuation"
+  [ "$(epoch_field "$dir" epoch)" = 1 ] || fail "idle held home advanced the generation"
+  pass "auto-arm: real inbox-only wake handles once, exact acknowledgements retire demand, held work does not spin"
+}
+
 test_need_vanished_mid_cycle_closes_quietly() {
   local dir out status
   dir=$(make_primary_dir "$TMP_ROOT/vanished")
@@ -1142,11 +1218,101 @@ test_active_in_marked_secondmate_home() {
   pass "auto-arm: active in a marked secondmate home"
 }
 
+test_long_poll_grace_reaches_arm_wrapper() {
+  local dir out status
+  dir=$(make_primary_dir "$TMP_ROOT/long-poll-grace")
+  : > "$dir/state/task.meta"
+  write_arm_fixture "$dir" records-grace
+  out=$(unset FM_GUARD_GRACE; FM_POLL=900 run_autoarm "$dir" 2>/dev/null); status=$?
+  expect_code 2 "$status" "an unverified close without a healthy watcher must still fail closed"
+  [ -e "$dir/state/arm-received-grace" ] || fail "arm wrapper never recorded FM_GUARD_GRACE"
+  [ "$(cat "$dir/state/arm-received-grace")" = 960 ] || fail "arm wrapper must see the poll-derived grace (900+60), got: $(cat "$dir/state/arm-received-grace")"
+  pass "auto-arm: a long FM_POLL with FM_GUARD_GRACE unset reaches fm-watch-arm.sh with the derived grace"
+}
+
 test_fm_lock_status_still_works_with_shared_lib() {
   local out
   out=$(FM_HOME="$TMP_ROOT/lock-status-home" bash "$ROOT/bin/fm-lock.sh" status 2>&1)
   assert_contains "$out" "lock: free" "fm-lock.sh status must keep working after the session-lock lib extraction"
   pass "fm-lock: shared session-lock lib preserves the status path"
+}
+
+# Real bounded process lifetime, with a quiet arm and controlled changes to
+# demand/authority while it is parked. No actual fleet processes are touched.
+test_quiet_lease_renewal_gates() {
+  local mode dir out status
+  for mode in demand held afk superseded alarm; do
+    dir=$(make_primary_dir "$TMP_ROOT/lease-$mode")
+    : > "$dir/state/task.meta"
+    cat > "$dir/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$$" > "$FM_HOME/state/arm-ran"
+case "${LEASE_TEST_MODE}" in
+  held) rm "$FM_HOME/state/task.meta" ;;
+  afk) touch "$FM_HOME/state/.afk" ;;
+  superseded) sed -i 's/epoch=1 /epoch=2 /' "$FM_HOME/state/.claude-autoarm-epoch" ;;
+  alarm) touch "$FM_HOME/state/.claude-autoarm-failure-alarmed" ;;
+esac
+sleep 30
+SH
+    chmod +x "$dir/bin/fm-watch-arm.sh"
+    out=$(LEASE_TEST_MODE="$mode" FM_CLAUDE_AUTOARM_LEASE_SECONDS=3 run_autoarm "$dir" 2>/dev/null); status=$?
+    if [ "$mode" = demand ]; then
+      expect_code 2 "$status" "quiet live demand needs an owned renewal"
+      assert_contains "$out" 'check: claude-lease-renewal' "lease maintenance reason"
+      grep -q '^pending:handling:' "$dir/state/.watcher-down" || fail "renewal did not publish an acknowledgeable handling episode"
+      [ "$(printf '%s' "$out" | grep -c '^check: claude-lease-renewal')" = 1 ] || fail "duplicate maintenance event"
+    else
+      expect_code 0 "$status" "$mode must suppress lease renewal"
+      [ -z "$out" ] || fail "$mode emitted lease feedback: $out"
+    fi
+    [ -s "$dir/state/arm-ran" ] || fail "lease fixture never parked an arm"
+    ! kill -0 "$(cat "$dir/state/arm-ran")" 2>/dev/null || fail "bounded arm survived lease"
+  done
+  pass "auto-arm: quiet lease renews once only with demand and authority; bounded arm is reaped"
+}
+
+# The lease may retire a dead lock, but a live PID remains protected even when
+# its identity no longer matches. Exercise the real lock/identity helpers.
+test_quiet_lease_preserves_live_lock() {
+  local mode dir out status pid identity lock_same live
+  for mode in live mismatched dead; do
+    dir=$(make_primary_dir "$TMP_ROOT/lease-lock-$mode")
+    : > "$dir/state/task.meta"
+    write_arm_fixture "$dir" blocking-actionable
+    sleep 60 &
+    pid=$!
+    identity=$(watcher_identity "$dir" "$pid") || fail "could not identify fixture holder"
+    [ "$mode" != mismatched ] || identity="identity-mismatch"
+    record_watcher_lock "$dir" "$pid" "$identity"
+    cp -R "$dir/state/.watch.lock" "$dir/expected-lock"
+    touch "$dir/state/.last-watcher-beat"
+    if [ "$mode" = dead ]; then
+      kill "$pid"
+      wait "$pid" 2>/dev/null || true
+    fi
+    out=$(FM_CLAUDE_AUTOARM_LEASE_SECONDS=3 run_autoarm "$dir" 2>/dev/null); status=$?
+    lock_same=0
+    diff -r "$dir/expected-lock" "$dir/state/.watch.lock" >/dev/null 2>&1 && lock_same=1
+    live=0
+    kill -0 "$pid" 2>/dev/null && live=1
+    if [ "$mode" != dead ]; then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      [ "$live" = 1 ] || fail "lease retirement signalled a $mode holder"
+      [ "$lock_same" = 1 ] || fail "lease retirement changed a $mode holder's lock"
+    else
+      [ ! -e "$dir/state/.watch.lock" ] && [ ! -L "$dir/state/.watch.lock" ] || fail "lease left dead watcher lock for successor to reclaim"
+    fi
+    expect_code 2 "$status" "$mode lease outcome must use the owned handoff"
+    if [ "$mode" = mismatched ]; then
+      assert_contains "$out" 'auto-arm FAILED' "unverified live lock must fail closed"
+    else
+      assert_contains "$out" 'check: claude-lease-renewal' "verified lease handoff"
+      grep -q '^pending:handling:' "$dir/state/.watcher-down" || fail "lease gap is not acknowledgeable"
+    fi
+  done
+  pass "auto-arm: lease retires only dead watcher locks and preserves live or identity-mismatched live holders"
 }
 
 test_inert_in_child_worktree
@@ -1168,6 +1334,7 @@ test_benign_cycle_end_with_live_watcher_is_silent
 test_positive_recovery_budget_contention_preserves_episode
 test_owner_mutex_contention_preserves_failure_episode_reset
 test_arms_for_x_mode_poll_need_without_inflight
+test_arms_for_registered_custom_check_without_inflight
 test_single_flight_admits_exactly_one_owner
 test_abandoned_owner_claim_is_reclaimed_and_rearms
 test_arming_claim_with_fresh_beacon_is_never_reclaimed
@@ -1184,7 +1351,14 @@ test_stuck_generation_claim_is_superseded_and_rearms
 test_identityless_ledger_never_defers
 test_superseded_owner_never_reinvokes_the_arm
 test_superseded_owner_goes_silent_and_never_double_translates
+test_dead_generation_reclaims_promptly
+test_inbox_only_real_watch_and_exact_ack
 test_need_vanished_mid_cycle_closes_quietly
 test_afk_mid_cycle_suppresses_rewake
 test_active_in_marked_secondmate_home
+test_long_poll_grace_reaches_arm_wrapper
 test_fm_lock_status_still_works_with_shared_lib
+
+test_quiet_lease_renewal_gates
+
+test_quiet_lease_preserves_live_lock

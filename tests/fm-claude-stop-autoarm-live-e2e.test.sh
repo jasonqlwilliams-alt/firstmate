@@ -3,8 +3,8 @@
 # (bin/fm-claude-stop-autoarm.sh + bin/fm-turnend-guard.sh --claude).
 # Proves, against the real installed Claude Code and the real tracked hook
 # registration: a fresh session with in-flight work, no watcher, and a stale
-# session lock can run fm-session-start.sh first; session start reclaims the
-# dead owner; at least two tokenless auto-arm and rewake cycles then complete
+# session lock runs fm-session-start.sh through SessionStart; it reclaims the
+# dead owner; two immediate fixture auto-arm and rewake cycles then complete
 # with zero model-issued arm commands; and the cooperative guard consumes no
 # forced continuation while the hook's launch is healthy.
 # The project and FM_HOME are isolated; Claude keeps using its existing managed
@@ -12,10 +12,10 @@
 # shellcheck disable=SC2016 # the model, not this test shell, reads the prompt text
 set -u
 
-if [ "${FM_CLAUDE_LIVE_E2E:-0}" != 1 ]; then
-  echo "skip: set FM_CLAUDE_LIVE_E2E=1 to run the Claude Stop auto-arm regression"
-  exit 0
-fi
+# shellcheck source=tests/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+fm_live_gate opt-in FM_CLAUDE_LIVE_E2E claude
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -23,8 +23,6 @@ fail() {
   printf 'not ok - %s\n' "$1" >&2
   exit 1
 }
-
-command -v claude >/dev/null 2>&1 || fail "claude not found"
 
 LAB="$ROOT/.claude-autoarm-live-e2e.$$"
 PROJECT="$LAB/project"
@@ -34,7 +32,11 @@ TRANSCRIPT="$LAB/claude.jsonl"
 CLAUDE_VERSION=$(claude --version)
 
 cleanup() {
-  rm -rf "$LAB"
+  if [ "${FM_CLAUDE_LIVE_E2E_KEEP:-0}" = 1 ]; then
+    printf "Live lifecycle artifacts: %s\n" "$LAB"
+  else
+    rm -rf "$LAB"
+  fi
 }
 trap cleanup EXIT
 
@@ -77,6 +79,14 @@ printf 'project=fixture\nwindow=fixture\nbackend=tmux\n' > "$HOME_DIR/state/task
 # harness owner under fm_harness_pid_alive, matching the reproduced incident.
 printf '9999999\n' > "$HOME_DIR/state/.lock"
 
+# No fleet networking is part of this isolated lifecycle test. Session start
+# still runs its real lock/bootstrap/drain path, but this fixture neither
+# contacts external backends nor queues an unrelated startup completion wake.
+cat > "$PROJECT/bin/fm-startup-network.sh" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+
 # Rapid-death arm fixture: started plus an immediate actionable reason, the
 # exact spent-Stop edge shape. Runs 1-2 close actionable; run 3 closes clean so
 # a misbehaving session can never loop forever.
@@ -107,12 +117,15 @@ printf 'stale: fixture-rapid drained\n'
 SH
 chmod +x "$PROJECT/bin/fm-watch-arm.sh" "$PROJECT/bin/fm-wake-drain.sh"
 
-PROMPT='Run exactly `bin/fm-session-start.sh` with Bash as your first tool call. After reading its complete digest, reply with exactly CYCLE0 and stop. Whenever a Stop hook feedback message wakes you, run exactly `bin/fm-wake-drain.sh` once with Bash, then reply with exactly ACK and stop. Never run bin/fm-watch-arm.sh or any other arm command, and never use any other tool.'
+PROMPT='The SessionStart hook has run bin/fm-session-start.sh for you. Read its complete digest, then reply with exactly CYCLE0 and stop without running it again. Whenever a Stop hook feedback message wakes you, run exactly `bin/fm-wake-drain.sh` once with Bash, then reply with exactly ACK and stop. Never run bin/fm-watch-arm.sh or any other arm command, and never use any other tool.'
 
 (
   cd "$PROJECT" || exit 1
-  FM_HOME="$HOME_DIR" CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false \
-    claude -p "$PROMPT" --dangerously-skip-permissions --effort low --output-format stream-json --verbose
+  unset FM_ROOT FM_ROOT_OVERRIDE FM_STATE_OVERRIDE FM_CONFIG_OVERRIDE CLAUDECODE HERDR_ENV HERDR_SOCKET_PATH TMUX TMUX_PANE
+  FM_HOME="$HOME_DIR" CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false CLAUDE_CODE_SEND_FEEDBACK=0 \
+    claude -p "$PROMPT" --dangerously-skip-permissions --settings '{"feedbackDrafts":"off"}' \
+    --setting-sources project,local --strict-mcp-config --mcp-config '{"mcpServers":{}}' \
+    --effort low --output-format stream-json --verbose
 ) > "$TRANSCRIPT" 2>&1 || fail "Claude credentialed auto-arm session failed: $(tail -20 "$TRANSCRIPT")"
 
 ARM_RUNS=$(wc -l < "$HOME_DIR/state/arm-ran" 2>/dev/null | tr -d ' ')
@@ -123,8 +136,9 @@ REWAKES=$(grep -c 'Stop hook feedback' "$TRANSCRIPT" 2>/dev/null || true)
 [ "$REWAKES" -ge 2 ] || fail "expected at least 2 exit-2 rewake deliveries, got $REWAKES"
 grep -q 'stale: fixture-rapid-1' "$TRANSCRIPT" || fail "first rapid rewake reason missing from the transcript"
 grep -q 'stale: fixture-rapid-2' "$TRANSCRIPT" || fail "second rapid rewake reason missing from the transcript"
-[ "$(sed -n '1p' "$HOME_DIR/state/tool-calls.log" 2>/dev/null)" = 'bin/fm-session-start.sh' ] \
-  || fail "fresh Claude session did not run session start first: $(cat "$HOME_DIR/state/tool-calls.log" 2>/dev/null)"
+grep -q 'SESSION START' "$TRANSCRIPT" || fail "fresh Claude session did not run SessionStart hook"
+[ "$(sed -n '1p' "$HOME_DIR/state/tool-calls.log" 2>/dev/null)" = 'bin/fm-wake-drain.sh' ] \
+  || fail "first model tool must handle the first wake after automatic session start"
 [ "$(cat "$HOME_DIR/state/.lock" 2>/dev/null)" != 9999999 ] \
   || fail "session start did not reclaim the stale dead-owner lock"
 if [ -f "$HOME_DIR/state/tool-calls.log" ]; then
@@ -161,4 +175,7 @@ printf '%s\n' '{"session_id":"live-owner-control"}' \
 [ ! -s "$LAB/live-owner.out" ] && [ ! -s "$LAB/live-owner.err" ] || fail "competing Stop hook produced a rewake while another live session owned the home"
 wait "$LIVE_OWNER_PID"
 
-printf 'ok - Claude %s live E2E reclaimed a stale session lock through session start, completed two tokenless Stop-owned rewake cycles, and preserved the competing-live-owner boundary\n' "$CLAUDE_VERSION"
+printf 'ok - Claude %s live E2E reclaimed a stale session lock through session start, completed two Stop-owned fixture rewake cycles, and preserved the competing-live-owner boundary\n' "$CLAUDE_VERSION"
+
+# Real parked watcher across the native deadline; no immediate-action fixture.
+python3 "$ROOT/tests/fixtures/claude-quiet-lease.py" "$ROOT" "$LAB" || fail "real quiet-lease lifecycle (see $LAB/quiet-debug.log)"

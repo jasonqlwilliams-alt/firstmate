@@ -206,6 +206,7 @@ case "${1:-}" in
     for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
     printf '%%1\n'; exit 0 ;;
   capture-pane) printf '╭────╮\n│    │\n╰────╯\n'; exit 0 ;;
+  list-windows) printf 'fm-lane-ok\n'; exit 0 ;;
 esac
 exit 0
 SH
@@ -256,7 +257,7 @@ test_send_refuses_and_admits() {
     || fail "send: normal steer was not durably enqueued"
   assert_not_contains "$(cat "$log")" "literal=1 arg=hello captain" \
     "send: normal steer payload must not be typed"
-  assert_contains "$(cat "$log")" "target=sess:fm-lane-ok literal=1 arg=Firstmate instruction waiting" \
+  assert_contains "$(cat "$log")" "target=sess:fm-lane-ok literal=1 arg=: Firstmate instruction waiting" \
     "send: normal steer should ring the durable inbox doorbell"
   pass "fm-send: refuses on marker and gate-worktree backstop; a normal steer uses the inbox"
 }
@@ -269,7 +270,7 @@ test_send_refuses_and_admits() {
 make_teardown_case() {
   local name=$1 case_dir fakebin t
   case_dir="$TMP/$name"; fakebin="$case_dir/fakebin"
-  mkdir -p "$case_dir/state" "$case_dir/config" "$fakebin"
+  mkdir -p "$case_dir/state" "$case_dir/config" "$case_dir/data" "$fakebin"
   for t in treehouse tmux; do
     printf '#!/usr/bin/env bash\nexit 0\n' > "$fakebin/$t"
     chmod +x "$fakebin/$t"
@@ -305,7 +306,7 @@ SH
   fm_write_meta "$case_dir/state/task-x1.meta" \
     "window=firstmate:fm-task-x1" "endpoint_task_id=task-x1" \
     "worktree=$case_dir/wt" "project=$case_dir/project" \
-    "kind=ship" "mode=no-mistakes"
+    "kind=ship" "mode=no-mistakes" "spawn_gen=spawn-gate-refuse-task-x1"
   touch "$case_dir/state/.last-watcher-beat"
   printf '%s\n' "$case_dir"
 }
@@ -315,7 +316,8 @@ run_teardown() {
   local cwd=$1 case_dir=$2; shift 2
   ( cd "$cwd" && env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS \
       "FM_ROOT_OVERRIDE=$ROOT" "FM_STATE_OVERRIDE=$case_dir/state" \
-      "FM_CONFIG_OVERRIDE=$case_dir/config" "PATH=$case_dir/fakebin:$PATH" "$@" \
+      "FM_DATA_OVERRIDE=$case_dir/data" "FM_CONFIG_OVERRIDE=$case_dir/config" \
+      "PATH=$case_dir/fakebin:$PATH" "$@" \
       "$TEARDOWN" task-x1 ) 2>&1
 }
 

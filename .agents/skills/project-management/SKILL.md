@@ -30,6 +30,10 @@ Absence from the main `data/projects.md` registry is never evidence that no seco
 If the owning second mate cannot accept the route, report that concrete blocker or obtain an explicit captain redirection rather than silently duplicating the project in the main home.
 
 Resolve the project name, destination, delivery posture, and autonomy posture before changing local or remote state.
+When this home configures `config/repository-policy.json`, also resolve every remote-backed project's explicit upstream fetch URL and captain-owned push URL, add or update its entry there, and keep the approved owner and account arrays consistent with the captain's authorization.
+Never infer the push URL from a remote name, and never rewrite a remote while recording policy.
+Define its side-effect-free `upstreamSync.validationCommand`, any protected, deployment, migration, or review-required path gates, and a non-default schedule only when the captain wants something other than the conservative 24-hour cadence.
+A home with no policy file has no repository delivery guard to satisfy, so this step does not apply there.
 Keep a newly added clone and its registry entry consistent, and roll back only artifacts created by the incomplete operation when a later initialization step fails and that rollback is safe.
 Do not overwrite or repurpose an existing path.
 
@@ -59,6 +63,8 @@ Clone into `projects/<name>` and add the registry entry only after the destinati
 A `no-mistakes` or `no-mistakes-prod-only` project must have an `origin` remote and must complete the initialization procedure below, because a conditional policy's product-facing work runs the pipeline while its internal-only work still takes the direct PR.
 A `direct-PR` project needs an `origin` remote but skips no-mistakes initialization.
 A `local-only` project may have no remote and skips no-mistakes initialization.
+In a home that configures a repository delivery policy, run `bin/fm-delivery-guard.sh arm <project> projects/<name>` before dispatching work for either PR-based posture, and treat any refusal as an initialization failure.
+After a policy change in such a home, run `bin/fm-delivery-guard.sh arm-all`; this installs the shared hook in every present configured clone without changing its remotes.
 
 ## Create a project
 

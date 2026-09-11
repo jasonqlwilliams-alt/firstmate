@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Detect the agent harness this process tree runs on.
-# Usage: fm-harness.sh                  print own harness: claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|muse|unknown
+# Usage: fm-harness.sh                  print own harness: claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|unknown
 #        fm-harness.sh crew             print the effective CREWMATE harness
 #                                        (config/crew-harness; "default" resolves to own)
 #        fm-harness.sh secondmate       print the harness the PRIMARY uses to launch
@@ -29,6 +29,8 @@ CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 
 # shellcheck source=bin/fm-cursor-lib.sh
 . "$SCRIPT_DIR/fm-cursor-lib.sh"
+# shellcheck source=bin/fm-gemini-lib.sh
+. "$SCRIPT_DIR/fm-gemini-lib.sh"
 
 detect_own() {
   # Layer 1: environment markers for verified harnesses.
@@ -38,6 +40,29 @@ detect_own() {
   # multiplexer's stored environment can silently misidentify one of them before
   # ancestry is consulted. This is a precedence hazard, not evidence that
   # CLAUDECODE inheritance into a kimi child was observed; it was not observed.
+  # agy (Antigravity CLI) is tested FIRST, and as a conjunction rather than a
+  # bare marker. It sets ANTIGRAVITY_AGENT=1 on its tool subprocesses alongside
+  # ANTIGRAVITY_AGENTAPI_EXE, ANTIGRAVITY_CONVERSATION_ID, and
+  # ANTIGRAVITY_LS_VERSION (verified live, agy 1.1.27, by dumping the
+  # environment of a run_command tool subprocess). Only ANTIGRAVITY_AGENT is
+  # read: the others carry a path, a per-conversation id, or a version rather
+  # than an identity.
+  # FIRST, because agy scrubs NOTHING it inherits - the same dump showed the
+  # launching Claude session's CLAUDECODE=1 passing straight through - so every
+  # marker tested above it could outrank agy's own inside a real agy worker.
+  # A CONJUNCTION, because ANTIGRAVITY_AGENT is a vendor name shared with the
+  # Antigravity desktop app and IDE, whose own ANTIGRAVITY_* variables this
+  # binary also carries; a terminal opened inside that app could therefore
+  # export it with no agy CLI anywhere, and a bare marker test would relabel
+  # every harness in that terminal. Demanding a real anchored `agy` process in
+  # the ancestry makes the marker a PRECEDENCE override over inherited foreign
+  # markers and never evidence on its own, exactly as FM_OMP_HARNESS is for
+  # omp below. The anchored ancestry arm in layer 2 covers a hand-started agy
+  # that carries no marker at all.
+  if [ "${ANTIGRAVITY_AGENT:-}" = "1" ] && ancestry_names_agy; then
+    echo agy
+    return
+  fi
   # Cursor is checked BEFORE claude, deliberately. cursor-agent does NOT clear
   # an inherited CLAUDECODE, so a cursor worker launched from a claude primary
   # carries BOTH markers and whichever is tested first wins. Cursor's own
@@ -50,6 +75,43 @@ detect_own() {
   # CURSOR_AGENT=1 is set for the child/tool processes this script runs as.
   [ "${CURSOR_AGENT:-}" = "1" ] && { echo cursor; return; }
   [ "${CURSOR_INVOKED_AS:-}" = "cursor-agent" ] && { echo cursor; return; }
+  # Gemini is checked BEFORE claude for exactly cursor's reason above: the
+  # Gemini CLI does NOT clear an inherited CLAUDECODE, so a gemini worker
+  # launched from a claude primary carries BOTH markers and whichever is
+  # tested first wins. Verified live on gemini-cli 0.58.0: a tool process
+  # spawned by a gemini worker under a claude primary reported GEMINI_CLI=1
+  # AND CLAUDECODE=1 together. GEMINI_CLI is gemini's own and is unset in the
+  # launching environment, so ordering it first is what makes the verdict
+  # correct; bin/fm-spawn.sh additionally clears the foreign markers at the
+  # launch boundary. Both are kept for the same reason cursor keeps both.
+  # AI_AGENT is deliberately NOT used: it was present in that same process
+  # carrying the claude primary's value (claude-code_2-1-260_agent), so it is
+  # an inherited launcher marker, not a Gemini identity.
+  [ "${GEMINI_CLI:-}" = "1" ] && { echo gemini; return; }
+  # rovo (Atlassian Rovo CLI) sets ATLASSIAN_AGENT_TYPE=rovo, ROVODEV_CLI=1, and
+  # AGENT=rovodev_cli on its tool subprocesses (verified, rovo 202609.1.2). It does
+  # NOT scrub an inherited CLAUDECODE, so a rovo worker launched from a claude
+  # session carries both markers - this must be tested BEFORE the CLAUDECODE line,
+  # the same ordering hazard cursor documents above (see issue #3517). bin/fm-spawn.sh
+  # additionally clears foreign markers at rovo's launch boundary as defense in depth.
+  [ "${ATLASSIAN_AGENT_TYPE:-}" = "rovo" ] && { echo rovo; return; }
+  [ "${ROVODEV_CLI:-}" = "1" ] && { echo rovo; return; }
+  # omp (Oh My Pi) publishes NO harness-identity marker of its own: verified on
+  # omp 18.1.11 that PI_CODING_AGENT is absent from the binary and that the
+  # default profile sets neither PI_CODING_AGENT_DIR nor OMP_PROFILE in the
+  # process environment. FM_OMP_HARNESS=omp is therefore a Firstmate-OWNED
+  # launch marker, established by bin/fm-spawn.sh at the omp launch boundary
+  # (which also clears every foreign marker) and by the README's primary launch
+  # command. It is a PRECEDENCE override, never evidence on its own: it wins
+  # over an inherited CLAUDECODE only when an omp process is genuinely in the
+  # ancestry, so `FM_OMP_HARNESS=omp omp` started from a Claude pane identifies
+  # as omp, while the same variable leaking from an omp secondmate into that
+  # home's claude worker (whose ancestry holds no omp) changes nothing. The
+  # anchored ancestry arm below covers a plain hand-started `omp` by itself.
+  if [ "${FM_OMP_HARNESS:-}" = omp ] && ancestry_names_omp; then
+    echo omp
+    return
+  fi
   [ "${CLAUDECODE:-}" = "1" ] && { echo claude; return; }
   if [ "${PI_CODING_AGENT:-}" = "true" ]; then
     if [ "${FM_PI_HARNESS:-}" = pi-signed ]; then echo pi-signed; else echo pi; fi
@@ -81,12 +143,30 @@ detect_own() {
       echo cursor
       return
     fi
+    if fm_gemini_path_is_gemini "$comm"; then
+      echo gemini
+      return
+    fi
     case "$(basename -- "$comm")" in
+      # gemini precedes claude here for the same precedence reason as the
+      # marker layer above, so a gemini worker under a claude primary is never
+      # read as claude. This arm covers a natively-named gemini binary only.
+      # It does NOT reach the currently installed CLI, which is a node bundle
+      # (~/.local/bin/gemini -> @google/gemini-cli/bundle/gemini.js): modern
+      # Node on Linux reports `comm` as MainThread rather than node (measured
+      # on Node v24.20.0), so neither this arm nor the node interpreter arm
+      # below matches a live gemini process. GEMINI_CLI above is therefore
+      # load-bearing for gemini rather than a fast path, which is why gemini
+      # is not offered as a primary or secondmate harness. Do NOT add
+      # MainThread to the interpreter arm to close this: that would make the
+      # args of EVERY node process searchable and let an unrelated node
+      # command carrying a harness name in its arguments claim an identity.
       *claude*) echo claude; return ;;
       *codex*) echo codex; return ;;
       *opencode*) echo opencode; return ;;
       *grok*) echo grok; return ;;
       kimi) echo kimi; return ;;
+      rovo) echo rovo; return ;;
       # muse's installed launcher ~/.local/bin/muse execs ~/.local/bin/muse-bin-<version>
       # (verified in the published launcher, muse 0.1.0-R708.1), so the live process
       # name carries the version and CHANGES on every auto-update. Match the stable
@@ -95,9 +175,27 @@ detect_own() {
       muse|muse-bin-*) echo muse; return ;;
       pi-signed) echo pi; return ;;
       pi) echo pi; return ;;
+      # omp is a Bun-compiled single binary whose process name is exactly `omp`
+      # (verified, omp 18.1.11: `ps -o comm=` reports omp from both its `!`
+      # bash path and the model's bash tool). Anchored, never *omp*, so ompd,
+      # comp, and similar unrelated commands are not misread as this harness.
+      # It sits above the node*|python* interpreter fallback deliberately: the
+      # optional claude-bridge extension runs a nested executable literally
+      # named `claude` with its own node child, and that fallback's *claude*
+      # args glob would otherwise claim it if that subtree were ever walked.
+      omp) echo omp; return ;;
+      # agy (Antigravity CLI) is a single Go binary whose live process name is
+      # exactly `agy` (verified, agy 1.1.27: `ps -o comm=` reports agy for the
+      # supervised pane process). Anchored, never *agy*, so unrelated commands
+      # carrying that fragment cannot be misread as this harness.
+      agy) echo agy; return ;;
       node*|python*)
         # Bare interpreter: match the harness name in its script path.
         args=$(ps -o args= -p "$pid" 2>/dev/null)
+        if fm_gemini_args_are_gemini "$args"; then
+          echo gemini
+          return
+        fi
         case "$args" in
           *claude*) echo claude; return ;;
           *codex*) echo codex; return ;;
@@ -113,6 +211,23 @@ detect_own() {
   done
   echo unknown
 }
+
+# True when a process named exactly $1 sits within eight parents of this one.
+# The same anchored match as the ancestry walk in detect_own, kept separate so
+# the marker precedences above can demand real process evidence.
+ancestry_names_exact() {  # <command-name>
+  local want=$1 pid=$$ comm
+  for _ in 1 2 3 4 5 6 7 8; do
+    comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 1
+    [ "$(basename -- "$comm")" = "$want" ] && return 0
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    [ -n "$pid" ] && [ "$pid" -gt 1 ] || return 1
+  done
+  return 1
+}
+
+ancestry_names_omp() { ancestry_names_exact omp; }
+ancestry_names_agy() { ancestry_names_exact agy; }
 
 # Resolve the effective crewmate harness: config/crew-harness (a bare adapter
 # name) wins; absent or "default" mirrors firstmate's own harness.

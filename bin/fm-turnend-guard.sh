@@ -32,6 +32,21 @@
 # primary checkout - the main home or a genuinely marked secondmate home - and
 # stay a silent, fast no-op inside child task worktrees.
 #
+# Away mode (state/.afk): the away-mode daemon owns supervision and runs the
+# watcher one-shot, restarting it after every wake, so the watch lock is
+# regularly unheld at a turn boundary with nothing wrong. A live
+# identity-matched daemon holding this home, plus a fresh beacon, is what
+# proves supervision there - see fm_afk_daemon_owns_supervision in
+# bin/fm-wake-lib.sh. The beacon freshness test there uses AFK_GRACE
+# (fm_poll_derived_grace, docs/turnend-guard.md "Guard grace and the poll
+# cadence"), not the flat $GRACE every other check on this page uses: the
+# daemon starts a fresh one-shot watcher only after it finishes handling the
+# previous wake, and that handling can legitimately run past a flat 300s
+# window under load (a slow registered check, a busy supervisor pane) with the
+# daemon perfectly healthy throughout. The strict watcher predicate and $GRACE
+# are unchanged everywhere else, including for a dead daemon pid or a beacon
+# older than AFK_GRACE, which still block.
+#
 # Loop-guard, codex/Grok (default) mode: never block twice in the same turn.
 # Codex uses stop_hook_active and Grok uses stopHookActive; typed camel-case
 # takes precedence when both spellings are present. A true value means the
@@ -49,7 +64,8 @@
 # (docs/turnend-guard.md records the 2026-07-21 incident). In --claude mode this
 # guard ignores stop_hook_active and instead cooperates with the Stop-owned
 # auto-arm (bin/fm-claude-stop-autoarm.sh), which fires on the same Stop event:
-#   1. a live identity-matched watcher with a fresh beacon allows immediately;
+#   1. a live identity-matched watcher with a fresh beacon - or, in away mode, a
+#      live identity-matched daemon with a fresh beacon - allows immediately;
 #   2. otherwise wait briefly (FM_CLAUDE_AUTOARM_SYNC_WAIT_MS, default 800ms)
 #      for the auto-arm to claim this home (a live OPEN generation claim in the
 #      state/.claude-autoarm-epoch ledger - fm_autoarm_claim_open - or a legacy
@@ -165,10 +181,34 @@ if [ "$FM_SUP_NEEDED" = false ]; then
   [ -e "$FAILURE_NOTICE" ] || budget_reset
   exit 0
 fi
-if fm_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$FM_HOME"; then
+# One owner of the "supervision is on, let this turn end" exit contract, shared
+# by every proof of supervision below.
+allow_supervised_stop() {
   [ "$CLAUDE_MODE" -eq 1 ] || exit 0
   fm_failure_episode_reset "$STATE" && exit 0
   exit 2
+}
+
+if fm_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$FM_HOME"; then
+  allow_supervised_stop
+fi
+
+# Away mode transfers supervision ownership from the watcher to the away-mode
+# daemon, which runs the watcher one-shot and starts its replacement after every
+# wake (bin/fm-supervise-daemon.sh). A turn boundary regularly lands in that
+# hand-off, when no watcher process holds the lock and nothing is wrong, so
+# requiring one here alarmed on healthy away-mode supervision. A live
+# identity-matched daemon holding this home is the right owner to test for.
+# The beacon half of the predicate still applies: a daemon that stops
+# restarting its watcher still blocks once the beacon passes grace, and a home
+# with no daemon and no watcher blocks exactly as before. It uses AFK_GRACE
+# (poll-cadence-derived, see the comment above) instead of the flat $GRACE
+# every other check on this page uses, so a daemon that is genuinely still
+# cycling - just slower than a fixed 300s window - is not misread as down.
+AFK_GRACE=${FM_GUARD_GRACE:-$(fm_poll_derived_grace)}
+if [ "$(fm_path_age "$STATE/.last-watcher-beat")" -lt "$AFK_GRACE" ] \
+  && fm_afk_daemon_owns_supervision "$STATE"; then
+  allow_supervised_stop
 fi
 
 block_stop() {
@@ -187,8 +227,12 @@ block_stop() {
       printf '●  %s task(s) in flight, but no live watcher holds this home lock (last beat: %s).\n' "$FM_SUP_IN_FLIGHT" "$FM_SUP_BEACON_DESC"
     elif [ "$FM_SUP_SOURCES" -gt 0 ]; then
       printf '●  %s process-event source(s) registered, but no live watcher holds this home lock (last beat: %s).\n' "$FM_SUP_SOURCES" "$FM_SUP_BEACON_DESC"
-    else
+    elif [ "$FM_SUP_CHECKS" -gt 0 ]; then
+      printf '●  %s registered custom check(s), but no live watcher holds this home lock (last beat: %s).\n' "$FM_SUP_CHECKS" "$FM_SUP_BEACON_DESC"
+    elif [ -f "$STATE/x-watch.check.sh" ]; then
       printf '●  X-mode relay polling needs supervision, but no live watcher holds this home lock (last beat: %s).\n' "$FM_SUP_BEACON_DESC"
+    else
+      printf '●  Pending wakes or captain inbox notes need supervision, but no live watcher holds this home lock (last beat: %s).\n' "$FM_SUP_BEACON_DESC"
     fi
     if [ "$CLAUDE_MODE" -eq 1 ]; then
       printf '●  The Stop-owned auto-arm did not claim this home either, so recovery is NOT already under way.\n'
@@ -422,8 +466,12 @@ if [ "$terminal_status" -eq 0 ]; then
     NEED_DESC="$FM_SUP_IN_FLIGHT task(s) in flight"
   elif [ "$FM_SUP_SOURCES" -gt 0 ]; then
     NEED_DESC="$FM_SUP_SOURCES process-event source(s) registered"
-  else
+  elif [ "$FM_SUP_CHECKS" -gt 0 ]; then
+    NEED_DESC="$FM_SUP_CHECKS registered custom check(s)"
+  elif [ -f "$STATE/x-watch.check.sh" ]; then
     NEED_DESC="X-mode relay polling active"
+  else
+    NEED_DESC="pending wakes or captain inbox notes"
   fi
   printf '{"systemMessage":"FIRSTMATE SUPERVISION IS GENUINELY DOWN: %s, the Stop-owned auto-arm exhausted its bounded retries and one failure notice, no watcher or automatic continuation exists, and the block budget is exhausted. Keep this session attended and diagnose the automatic Stop-hook and watcher startup before relying on unattended supervision."}\n' "$NEED_DESC"
   exit 0
