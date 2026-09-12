@@ -12,15 +12,13 @@
 # consumer re-derives the identity from the stored URL and refuses any record
 # whose parts do not reconstruct that exact URL.
 #
+# Lifecycle writers can append fields after a recorded PR without changing its
+# identity, so their updates must not invalidate an otherwise armed merge poll.
 # Task metadata must contain exactly one canonical pr= line; any trailing
-# pr_head= must be a valid hash. The identity parser also permits the named
-# Relay link fields and control-plane fields after pr=: control_relaunch_tx
-# and traceparent (fm-spawn.sh), decisions_reviewed and decision_keys
-# (fm-captain-hold.sh), spawn_gen (fm-teardown.sh legacy stamping), and
-# kind, mode, and yolo (fm-promote.sh).
-# These fields are opaque to PR identity validation, never evaluated as shell
-# input; their writers own their value contracts. The parser's explicit cases
-# are the single allowlist, and every other trailing line remains invalid.
+# pr_head= must be a valid hash. fm_pr_metadata_identity_parse owns the single
+# allowlist for other trailing fields; every unrecognized trailing line is
+# invalid. Allowlisted values are opaque to PR identity validation and never
+# evaluated as shell input; their writers own their value contracts.
 #
 # A validated exact merged result is retired through a private receipt only
 # after its durable wake is appended.
