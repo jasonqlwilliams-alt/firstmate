@@ -1122,9 +1122,16 @@ ok - real herdr: a drifted agent-free shell returns to its worktree and reuses t
 ```
 
 `tests/fm-backend-herdr.test.sh` pins the logic portably by driving the two signals apart - the same failed pane read yields `missing` under a stopped server and `unreadable` under a running one - and asserts that the husk classifier still refuses on that identical read.
-`tests/fm-control-herdr-smoke.test.sh` proves the Herdr-only drift recovery against a real binary in an isolated lab session.
-`tests/fm-control-relaunch.test.sh` drives a tmux stub and proves that tmux retains its prior refusal without sending `cd` or any other input to the pane.
-The Herdr refusal when a shell accepts the command but does not move is not exercised in this change.
+`tests/fm-control-herdr-smoke.test.sh` proves the Herdr drift recovery against a real binary in an isolated lab session.
+The portable tmux regression now covers the same recorded-worktree return through `tests/fm-control-relaunch.test.sh`; its former immediate-refusal expectation was replaced by recovery after agent exit.
+Run `bin/fm-test-run.sh tests/fm-control-relaunch.test.sh` to refresh the portable evidence for exited and unwinding shells, refusal when a shell does not move, and preparation failures that preserve the running agent.
+The portable fixture does not constitute a new live Herdr verification; the dated live result above remains the Herdr evidence.
+Observed on 2026-09-12 with GNU Bash 5.3.15 on Linux, using that portable command and a tmux fixture:
+
+```text
+ok - fm-control relaunch: exited and unwinding shells return to their recorded worktree
+ok - fm-control relaunch: replacement refusals preserve the running agent, metadata, and instructions
+```
 
 ### Stale agent registration
 

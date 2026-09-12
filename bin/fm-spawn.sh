@@ -41,8 +41,16 @@
 #   agent-free on a backend with a recovery-grade agent-state classifier (tmux
 #   or herdr), and clears the previous harness's per-task wiring before arming
 #   the new incarnation. The replacement still never starts outside the copy
-#   holding the work: a Herdr shell that has drifted out of the recorded
-#   worktree is told once to return, and only a shell that will not go refuses.
+#   holding the work: an agent-free tmux or Herdr shell outside the recorded
+#   worktree is told once to return and must confirm that path before launch.
+#   Control's internal FM_CONTROL_RELAUNCH_PREPARE directory is accepted only
+#   from the parent holding the task's control lock. The spawn prepares inputs,
+#   checks the recorded worktree and trust, and publishes ready there before
+#   retiring any prior wiring. It waits for control's continue marker after
+#   exit, retaining its locks and resolved launch profile throughout. A live
+#   endpoint outside the recorded worktree refuses preparation without sending
+#   shell commands. An exit that unwinds the shell is repaired after stop;
+#   transport failures at that point remain reported launch failures.
 #   --harness <name> is the explicit per-spawn harness/profile adapter. The old
 #   positional harness arg still works for back-compat.
 #   --model <name> and --effort <low|medium|high|xhigh|max|ultra> are concrete profile
@@ -945,6 +953,7 @@ SPAWN_TASK_LOCK_HELD=0
 SPAWN_CONTROL_LOCK=
 SPAWN_CONTROL_LOCK_HELD=0
 SPAWN_CONTROL_PARENT=0
+RELAUNCH_PREPARE=
 SPAWN_META_TMP=
 SPAWN_META_LOCK=
 SPAWN_META_LOCK_HELD=0
@@ -1247,6 +1256,17 @@ if [ "$RELAUNCH" -eq 1 ]; then
   control_owner=$(cat "$SPAWN_CONTROL_LOCK/pid" 2>/dev/null || true)
   if [ "$control_owner" = "$PPID" ] && fm_pid_alive "$control_owner"; then
     SPAWN_CONTROL_PARENT=1
+    RELAUNCH_PREPARE=${FM_CONTROL_RELAUNCH_PREPARE:-}
+    if [ -n "$RELAUNCH_PREPARE" ]; then
+      case "$RELAUNCH_PREPARE" in
+        "$STATE/.$ID.relaunch-prepare."*) ;;
+        *) echo "error: invalid relaunch preparation directory" >&2; exit 1 ;;
+      esac
+      [ -d "$RELAUNCH_PREPARE" ] && [ ! -L "$RELAUNCH_PREPARE" ] || {
+        echo "error: relaunch preparation directory is missing or unsafe" >&2
+        exit 1
+      }
+    fi
   elif [ "$(fm_lease_actor)" = branch ]; then
     # Role partition refinement: branch recovery relaunches only through the
     # fm-control transaction that owns the control lock, never by invoking
@@ -1380,7 +1400,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     exit 1
   }
   RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET")
-  [ "$RELAUNCH_STATE" = dead ] || {
+  [ "$RELAUNCH_STATE" = dead ] || { [ -n "$RELAUNCH_PREPARE" ] && [ "$RELAUNCH_STATE" = alive ]; } || {
     echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit)" >&2
     exit 1
   }
@@ -2333,6 +2353,7 @@ if [ "$KIND" = secondmate ]; then
     SECONDMATE_PROJECTS=$SECONDMATE_REGISTRY_MATCH_PROJECTS
   fi
   WT="$PROJ_ABS"
+  sync_secondmate_home() {
   # Local-HEAD sync: before launch, fast-forward this secondmate's worktree to the
   # PRIMARY checkout's current default-branch commit, so a freshly spawned or
   # recovery-respawned secondmate always runs the primary's version (AGENTS.md
@@ -2379,6 +2400,8 @@ if [ "$KIND" = secondmate ]; then
       propagate_secondmate_inheritance "$FM_HOME" "$PROJ_ABS" "$CONFIG" "$DATA" \
       || echo "warning: secondmate $ID inheritance failed for $PROJ_ABS" >&2
   fi
+  }
+  [ "$RELAUNCH" -eq 1 ] || sync_secondmate_home
   if [ -f "$PROJ_ABS/data/charter.md" ]; then
     BRIEF="$PROJ_ABS/data/charter.md"
   else
@@ -3297,11 +3320,15 @@ rovo_endpoint_cleanup() {
   fm_backend_kill "$BACKEND" "$T" "$tab_id" "fm-$ID" 2>/dev/null || true
 }
 
-if [ "$RELAUNCH" -eq 1 ]; then
-  # No worktree is acquired: the recorded one is reused as-is. What must be
-  # proven instead is that the adopted endpoint's shell is actually sitting in
-  # that worktree, so the replacement agent starts where the work is rather
-  # than wherever the pane happened to drift.
+# Only send shell commands after the recovery-grade classifier proves that
+# no agent can consume them. An exited treehouse subshell may leave its parent
+# in the home or pool directory; the metadata still owns the worktree identity.
+relaunch_return_to_worktree() {
+  local relaunch_wt_real relaunch_seen relaunch_cd_path
+  [ "$(fm_backend_agent_state "$BACKEND" "$T")" = dead ] || {
+    echo "error: task $ID is not positively agent-free; refusing to send a worktree return command. Inspect with bin/fm-crew-state.sh $ID" >&2
+    exit 1
+  }
   relaunch_wt_real=$(real_path_or_raw "$WT")
   relaunch_seen=
   for _ in $(seq 1 10); do
@@ -3310,13 +3337,9 @@ if [ "$RELAUNCH" -eq 1 ]; then
     sleep 0.5
   done
   if [ -z "$relaunch_seen" ] || [ "$(real_path_or_raw "$relaunch_seen")" != "$relaunch_wt_real" ]; then
-    if [ "$BACKEND" != herdr ]; then
-      echo "error: task $ID's endpoint is in '${relaunch_seen:-unknown}', not its recorded worktree '$WT'; refusing to relaunch an agent outside the copy holding its work" >&2
-      exit 1
-    fi
     relaunch_cd_path=${WT//\'/\'\\\'\'}
     spawn_send_text_line "$WT_TARGET" "cd -- '$relaunch_cd_path'" || {
-      echo "error: task $ID's endpoint is in '${relaunch_seen:-unknown}' and could not be told to return to its recorded worktree '$WT'; refusing to relaunch an agent outside the copy holding its work" >&2
+      echo "error: task $ID's endpoint is in '${relaunch_seen:-unknown}' and could not be told to return to its recorded worktree '$WT'; refusing to relaunch an agent outside the copy holding its work. Inspect with bin/fm-crew-state.sh $ID" >&2
       exit 1
     }
     for _ in $(seq 1 10); do
@@ -3325,11 +3348,23 @@ if [ "$RELAUNCH" -eq 1 ]; then
       sleep 0.5
     done
     if [ -z "$relaunch_seen" ] || [ "$(real_path_or_raw "$relaunch_seen")" != "$relaunch_wt_real" ]; then
-      echo "error: task $ID's endpoint is in '${relaunch_seen:-unknown}' and did not return to its recorded worktree '$WT' when told to; refusing to relaunch an agent outside the copy holding its work" >&2
+      echo "error: task $ID's endpoint is in '${relaunch_seen:-unknown}' and did not return to its recorded worktree '$WT' when told to; refusing to relaunch an agent outside the copy holding its work. Inspect with bin/fm-crew-state.sh $ID" >&2
       exit 1
     fi
   fi
+}
+
+if [ "$RELAUNCH" -eq 1 ]; then
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
+  if [ "$RELAUNCH_STATE" = dead ]; then
+    relaunch_return_to_worktree
+  else
+    relaunch_seen=$(spawn_current_path "$WT_TARGET" || true)
+    if [ -z "$relaunch_seen" ] || [ "$(real_path_or_raw "$relaunch_seen")" != "$(real_path_or_raw "$WT")" ]; then
+      echo "error: task $ID's live endpoint is in '${relaunch_seen:-unknown}', not its recorded worktree '$WT'; refusing before stop because a live agent cannot receive a shell return command. Inspect with bin/fm-crew-state.sh $ID" >&2
+      exit 1
+    fi
+  fi
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   spawn_send_text_line "$WT_TARGET" 'treehouse get'
 
@@ -3457,6 +3492,27 @@ fi
 # targeted knob: TMPDIR is too broad (affects every program's temp, not just Go's).
 TASK_TMP="/tmp/fm-$ID"
 mkdir -p "$TASK_TMP/gotmp"
+
+# Internal prepare/continue handshake, accepted only from the process holding
+# this task's control lock. Preparation keeps the old wiring and metadata
+# intact. Control stops the old agent only after readiness, then releases this
+# same launch process; losing the parent never authorizes a replacement.
+if [ -n "$RELAUNCH_PREPARE" ]; then
+  : > "$RELAUNCH_PREPARE/ready"
+  while [ ! -f "$RELAUNCH_PREPARE/continue" ]; do
+    fm_pid_alive "$PPID" && [ -d "$RELAUNCH_PREPARE" ] || {
+      echo "error: relaunch controller disappeared before launch authorization; refusing replacement" >&2
+      exit 1
+    }
+    sleep 0.1
+  done
+  # Exit may itself unwind a treehouse subshell after the pre-stop cwd check.
+  relaunch_return_to_worktree
+fi
+
+if [ "$RELAUNCH" -eq 1 ] && [ "$KIND" = secondmate ]; then
+  sync_secondmate_home
+fi
 
 # Per-harness turn-end hook where enabled: a file that touches
 # state/<id>.turn-ended when the agent finishes a turn. Worktree-resident hooks

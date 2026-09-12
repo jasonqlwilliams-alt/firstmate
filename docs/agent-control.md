@@ -68,8 +68,11 @@ It is not deterministic across the verified adapters: codex, grok, and gemini re
 3. **Record the note.**
    A ship or scout relaunch requires `--note`, because the replacement inherits the local copy but none of the conversation; the note is appended to the instructions it reads.
    A secondmate relaunch does not require one and never rewrites its standing charter.
-4. **Stop the old agent** through the `exit` verb, with its postcondition.
-5. **Launch the replacement** through its single owner, `bin/fm-spawn.sh --relaunch`, which adopts the recorded endpoint and worktree instead of creating either, clears the previous harness's per-task wiring, and arms a fresh busy generation.
+4. **Prepare the replacement** through its single owner, `bin/fm-spawn.sh --relaunch`, before stopping the old agent.
+   Preparation checks launch configuration, instructions, delivery policy, backlog eligibility, recorded worktree isolation, and workspace trust while retaining the previous wiring and task record.
+   The same spawn process holds its locks and resolved launch inputs until control authorizes it to continue; the script's header owns this internal handoff.
+5. **Stop the old agent** through the `exit` verb, with its postcondition, then release the prepared launch.
+   The replacement reuses the recorded endpoint and worktree, clears the previous harness's per-task wiring, and arms a fresh busy generation.
 
 Switching harness is therefore one ordinary relaunch rather than a separate mechanism.
 
@@ -100,7 +103,11 @@ Switching harness is therefore one ordinary relaunch rather than a separate mech
 - An ambiguous or unreadable endpoint state refuses.
   Only a positively classified state acts.
 - `fm-spawn --relaunch` independently refuses unless the recorded endpoint is positively agent-free, so a replacement can never join a live agent.
-  It also requires the shell to be in the recorded worktree: tmux refuses immediately when it is not, while Herdr sends one `cd` to the recorded path and refuses unless a subsequent path read confirms the move.
+  On tmux and Herdr, an agent-free shell outside the recorded worktree receives one `cd` to the validated recorded path and must confirm the move before launch.
+  This includes shells that unwound to the home or pool parent after the agent exited.
+  A live endpoint outside that path refuses preparation before stop; shell commands are never sent to a live agent.
+  The path is checked again after stop because exiting can itself unwind a subshell.
+  A later transport or filesystem failure remains a launch failure with an explicit recovery record; preparation cannot guarantee that the environment will remain available.
 
 ## Capability matrix
 

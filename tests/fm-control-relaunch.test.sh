@@ -73,6 +73,7 @@ case "${1:-}" in
       case "$payload" in
         /exit|/quit)
           printf 'zsh' > "$D/command"
+          [ ! -f "$D/exit-cwd" ] || cat "$D/exit-cwd" > "$D/cwd"
           [ -z "${FM_FAKE_EXIT_TRANSPORT_FAIL_AFTER_STOP:-}" ] || exit 1
           ;;
         *'encode launch-brief'*)
@@ -83,6 +84,11 @@ case "${1:-}" in
     else
       printf '%s\n' "$payload" >> "$D/keys"
       case "$payload" in
+        'cd -- '*)
+          if [ ! -e "$D/refuse-cd" ]; then
+            ( eval "$payload" && pwd -P ) > "$D/cwd"
+          fi
+          ;;
         'export GOTMPDIR='*)
           if [ -n "${FM_FAKE_TRACE_PREPARE:-}" ]; then
             : > "$FM_FAKE_TRACE_PREPARE"
@@ -118,6 +124,7 @@ SH
   cat > "$fb/sleep" <<'SH'
 #!/usr/bin/env bash
 [ -z "${FM_FAKE_LOCK_WAITING:-}" ] || : > "$FM_FAKE_LOCK_WAITING"
+case "${1:-}" in 0.01|0.1) /bin/sleep 0.01 ;; esac
 exit 0
 SH
   chmod +x "$fb/sleep"
@@ -403,7 +410,9 @@ test_relaunch_serializes_concurrent_durable_metadata_publication() {
     FM_FAKE_TRACE_RELEASE="$launch_release" \
     run_control "$dir" rl28 relaunch --note "continue after publication" > "$dir/control.out" &
   control_pid=$!
-  while [ ! -e "$prepare" ] && [ "$i" -lt 500 ]; do
+  # This checkpoint follows preparation, exit, and launch setup. Allow the
+  # controller's 90-second preparation budget before judging it missing.
+  while [ ! -e "$prepare" ] && [ "$i" -lt 10000 ]; do
     /bin/sleep 0.01
     i=$((i + 1))
   done
@@ -1043,9 +1052,10 @@ test_launch_failure_keeps_the_prior_record_and_reports_it() {
   dir=$(new_case rollback rl13)
   add_ship_task "$dir" rl13 claude
   before=$(cat "$dir/home/state/rl13.meta")
-  # The endpoint's shell is not in the recorded worktree, so the launch owner
-  # refuses AFTER the previous agent has already been stopped.
-  printf '%s' "$dir/proj" > "$dir/fake/cwd"
+  # A transport failure after stop remains a real launch-time failure:
+  # preparation cannot predict a later shell that stops accepting commands.
+  printf '%s' "$dir/proj" > "$dir/fake/exit-cwd"
+  : > "$dir/fake/refuse-cd"
   out=$(run_control "$dir" rl13 relaunch --harness codex --note "carry this forward"); rc=$?
   expect_code 1 "$rc" "a failed launch should fail closed"$'\n'"$out"
   assert_contains "$out" "no agent is running" "the failure should say no agent is running"
@@ -1065,7 +1075,8 @@ test_prepublication_failure_keeps_concurrent_durable_metadata() {
   local dir control_pid link_out rc i=0
   dir=$(new_case rollback-race rl30)
   add_ship_task "$dir" rl30 claude
-  printf '%s' "$dir/proj" > "$dir/fake/cwd"
+  printf '%s' "$dir/proj" > "$dir/fake/exit-cwd"
+  : > "$dir/fake/refuse-cd"
   FM_FAKE_CWD_RACE_READY="$dir/cwd-race-ready" \
     run_control "$dir" rl30 relaunch --harness codex --note "preserve concurrent metadata" \
       > "$dir/control.out" &
@@ -1513,16 +1524,19 @@ test_spawn_relaunch_refuses_an_unrecorded_task() {
   pass "fm-spawn --relaunch: an unrecorded task is refused"
 }
 
-test_spawn_relaunch_refuses_a_pane_outside_the_worktree() {
+test_spawn_relaunch_refuses_a_shell_that_cannot_return() {
   local dir out rc
   dir=$(new_case wrongcwd rl18)
   add_ship_task "$dir" rl18 claude
   printf 'zsh' > "$dir/fake/command"
   printf '%s' "$dir/proj" > "$dir/fake/cwd"
+  : > "$dir/fake/refuse-cd"
   out=$(run_spawn "$dir" rl18 --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "a pane outside the worktree should refuse"
-  assert_contains "$out" "not its recorded worktree" "the refusal should name the wrong location"
-  [ ! -s "$dir/fake/keys" ] || fail "a refused tmux relaunch must send nothing to the pane"
+  assert_contains "$out" "did not return to its recorded worktree" "the refusal should name the failed return"
+  [ "$(grep -c '^cd -- ' "$dir/fake/keys")" = 1 ] \
+    || fail "the shell should be told exactly once to return"
+  [ ! -s "$dir/fake/literal" ] || fail "a failed return must deliver no launch bytes"
   pass "fm-spawn --relaunch: refuses to start a replacement outside the copy holding its work"
 }
 
@@ -1589,6 +1603,74 @@ test_relaunch_from_guarded_path() {
   pass "fm-control relaunch: armed PATH exports real tools and checkpoint fixtures preserve shim delegates"
 }
 
+test_relaunch_recovers_an_exited_shell() {
+  local dir out rc scenario
+  for scenario in home pool-parent unwind-on-exit quoted-path; do
+    dir=$(new_case "exited-$scenario" rl-exited)
+    if [ "$scenario" = quoted-path ]; then
+      dir=$(new_case "exited-worker's copy" rl-exited)
+    fi
+    add_ship_task "$dir" rl-exited claude
+    case "$scenario" in
+      home|quoted-path) printf 'zsh' > "$dir/fake/command"; printf '%s' "$dir/home" > "$dir/fake/cwd" ;;
+      pool-parent) printf 'zsh' > "$dir/fake/command"; printf '%s' "$dir" > "$dir/fake/cwd" ;;
+      unwind-on-exit) printf '%s' "$dir/home" > "$dir/fake/exit-cwd" ;;
+    esac
+    out=$(run_control "$dir" rl-exited relaunch --note 'Continue preserved work.'); rc=$?
+    expect_code 0 "$rc" "relaunch should recover $scenario shell"$'\n'"$out"
+    [ "$(cat "$dir/fake/command")" = claude ] || fail "replacement is absent"
+    [ "$(cat "$dir/fake/cwd")" = "$dir/wt" ] || fail "replacement is outside recorded worktree"
+    [ "$(meta_field "$dir" rl-exited worktree)" = "$dir/wt" ] || fail "worktree identity changed"
+  done
+  pass "fm-control relaunch: exited and unwinding shells return to their recorded worktree"
+}
+
+test_relaunch_preparation_refuses_before_stop() {
+  local dir out rc scenario expected
+  for scenario in config brief worktree live-cwd pending-close; do
+    dir=$(new_case "bad-prepare-$scenario" rl-preflight)
+    add_ship_task "$dir" rl-preflight claude
+    case "$scenario" in
+      config)
+        mkdir -p "$dir/home/config"
+        printf 'invalid\n' > "$dir/home/config/claude-permission-mode"
+        expected='claude-permission-mode'
+        ;;
+      brief)
+        printf '# Task\nContinue a legacy task.\n' > "$dir/home/data/rl-preflight/brief.md"
+        expected='legacy mixed # Task brief has no provenance-marked captain words'
+        ;;
+      worktree)
+        sed "s|^worktree=.*|worktree=$dir/proj|" "$dir/home/state/rl-preflight.meta" > "$dir/new.meta"
+        mv "$dir/new.meta" "$dir/home/state/rl-preflight.meta"
+        expected='did not yield an isolated worktree'
+        ;;
+      live-cwd)
+        printf '%s' "$dir/home" > "$dir/fake/cwd"
+        expected='refusing before stop'
+        ;;
+      pending-close)
+        printf 'pending\n' > "$dir/home/state/rl-preflight.backlog-close"
+        expected='pending authoritative backlog close'
+        ;;
+    esac
+    cp "$dir/home/state/rl-preflight.meta" "$dir/meta.before"
+    cp "$dir/home/data/rl-preflight/brief.md" "$dir/brief.before"
+    out=$(run_control "$dir" rl-preflight relaunch --note 'Do not lose the worker.'); rc=$?
+    expect_code 1 "$rc" "invalid replacement $scenario must refuse"$'\n'"$out"
+    assert_contains "$out" "$expected" "refusal should identify $scenario"
+    [ "$(cat "$dir/fake/command")" = claude ] || fail "preparation refusal stopped the old agent"
+    [ ! -s "$dir/fake/literal" ] || fail "preparation refusal sent lifecycle or launch bytes"
+    [ ! -s "$dir/fake/keys" ] || fail "preparation refusal sent shell commands"
+    cmp -s "$dir/meta.before" "$dir/home/state/rl-preflight.meta" || fail "preparation refusal changed metadata"
+    cmp -s "$dir/brief.before" "$dir/home/data/rl-preflight/brief.md" || fail "preparation refusal changed instructions"
+  done
+  pass "fm-control relaunch: replacement refusals preserve the running agent, metadata, and instructions"
+}
+
+test_relaunch_recovers_an_exited_shell
+test_relaunch_preparation_refuses_before_stop
+
 test_relaunch_from_guarded_path
 
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
@@ -1641,6 +1723,6 @@ test_spawn_relaunch_keeps_its_early_meta_lock_continuous
 test_spawn_relaunch_refuses_a_pending_authoritative_close
 test_spawn_relaunch_refuses_contradicting_flags
 test_spawn_relaunch_refuses_an_unrecorded_task
-test_spawn_relaunch_refuses_a_pane_outside_the_worktree
+test_spawn_relaunch_refuses_a_shell_that_cannot_return
 test_relaunch_reverifies_an_already_in_flight_item_instead_of_rewriting_it
 test_relaunch_moves_a_drifted_item_back_in_flight
