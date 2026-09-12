@@ -106,7 +106,7 @@ case "${1:-} ${2:-}" in
   "pr view")
     case " $* " in
       *statusCheckRollup*)
-        printf '%s\n' '{"state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"1111111111111111111111111111111111111111","statusCheckRollup":[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]}'
+        printf '%s\n' '{"state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"1111111111111111111111111111111111111111","baseRefName":"main","statusCheckRollup":[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]}'
         ;;
       *headRefOid*) printf '%s\n' 1111111111111111111111111111111111111111 ;;
     esac
@@ -504,6 +504,28 @@ test_verify_resolves_a_hold_pruned_into_the_archive() {
   assert_contains "$out" "verified: $scout captain-call inventory" \
     "verify did not confirm the archived inventory"
   pass "an answered captain call stays verifiable after tasks-axi archives it"
+
+  # An older archived answer is not evidence about a current row whose read
+  # never completed. Preserve the read bound even when the fallback can answer.
+  cat > "$home/fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = show ] && [ "${2:-}" = archived-captain-call ]; then
+  sleep 300
+  exit 0
+fi
+exec "$REAL_TASKS_AXI" "$@"
+SH
+  chmod +x "$home/fakebin/tasks-axi"
+  rc=0
+  out=$(FM_BACKLOG_ROW_TIMEOUT_SECS=2 run_captain "$home" verify "$scout" 2>&1) || rc=$?
+  [ "$rc" -ne 0 ] || fail "an archived answer masked a timed-out current lookup: $out"
+  assert_contains "$out" "$id" "timeout did not name the archived call"
+  assert_contains "$out" "bound" "timeout lost the bounded-read diagnostic"
+  assert_not_contains "$out" "verified:" "unreadable current state was certified from the archive"
+  rm "$home/fakebin/tasks-axi"
+  run_captain "$home" verify "$scout" >/dev/null \
+    || fail "archived answer did not verify after current reads recovered"
+  pass "archive fallback cannot mask a timed-out current read and recovers afterward"
 }
 
 test_verify_names_the_unresolvable_legacy_id_once() {
