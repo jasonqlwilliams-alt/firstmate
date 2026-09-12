@@ -1,0 +1,171 @@
+
+CASE legitimate-lifecycle-metadata
+$ fm-pr-check.sh task https://github.com/example/repo/pull/19
+armed: state/task.check.sh
+Metadata following PR registration:
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=test.20260912.1
+traceparent=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01
+decisions_reviewed=1
+decision_keys=review
+spawn_gen=s123.456.789
+kind=ship
+mode=direct-PR
+yolo=off
+Validator exit: 0 (expected 0)
+$ fm-watch.sh
+check: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BSYSQ4GPKFH524947Y3DKY/.test-phase-tmp/metadata-boundary.woxr9q/legitimate-lifecycle-metadata/home/state/task.check.sh: merged
+Persisted wake queue:
+1789250564	1	check	merged-task-https://github.com/example/repo/pull/19	check: merge landed: task https://github.com/example/repo/pull/19
+Forge requests:
+pr view https://github.com/example/repo/pull/19 --json headRefOid -q .headRefOid
+pr view https://github.com/example/repo/pull/19 --json state -q .state
+Merged notification persisted; poll artifacts retired.
+
+CASE unknown-key
+$ fm-pr-check.sh task https://github.com/example/repo/pull/19
+armed: state/task.check.sh
+Metadata following PR registration:
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=test.20260912.1
+traceparent=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01
+decisions_reviewed=1
+decision_keys=review
+spawn_gen=s123.456.789
+kind=ship
+mode=direct-PR
+yolo=off
+unknown=value
+Validator exit: 1 (expected 1)
+$ fm-watch.sh
+check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BSYSQ4GPKFH524947Y3DKY/.test-phase-tmp/metadata-boundary.woxr9q/unknown-key/home/state/task.check.sh
+Persisted wake queue:
+1789250570	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BSYSQ4GPKFH524947Y3DKY/.test-phase-tmp/metadata-boundary.woxr9q/unknown-key/home/state/task.check.sh
+Forge requests:
+pr view https://github.com/example/repo/pull/19 --json headRefOid -q .headRefOid
+Tampering rejected before forge polling; artifacts retained; no merge wake.
+
+CASE lookalike-key
+$ fm-pr-check.sh task https://github.com/example/repo/pull/19
+armed: state/task.check.sh
+Metadata following PR registration:
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=test.20260912.1
+traceparent=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01
+decisions_reviewed=1
+decision_keys=review
+spawn_gen=s123.456.789
+kind=ship
+mode=direct-PR
+yolo=off
+control_relaunch_tx_extra=value
+Validator exit: 1 (expected 1)
+$ fm-watch.sh
+check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BSYSQ4GPKFH524947Y3DKY/.test-phase-tmp/metadata-boundary.woxr9q/lookalike-key/home/state/task.check.sh
+Persisted wake queue:
+1789250574	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BSYSQ4GPKFH524947Y3DKY/.test-phase-tmp/metadata-boundary.woxr9q/lookalike-key/home/state/task.check.sh
+Forge requests:
+pr view https://github.com/example/repo/pull/19 --json headRefOid -q .headRefOid
+Tampering rejected before forge polling; artifacts retained; no merge wake.
+
+CASE malformed-key
+$ fm-pr-check.sh task https://github.com/example/repo/pull/19
+armed: state/task.check.sh
+Metadata following PR registration:
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=test.20260912.1
+traceparent=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01
+decisions_reviewed=1
+decision_keys=review
+spawn_gen=s123.456.789
+kind=ship
+mode=direct-PR
+yolo=off
+control_relaunch_tx
+Validator exit: 1 (expected 1)
+$ fm-watch.sh
+check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BSYSQ4GPKFH524947Y3DKY/.test-phase-tmp/metadata-boundary.woxr9q/malformed-key/home/state/task.check.sh
+Persisted wake queue:
+1789250579	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BSYSQ4GPKFH524947Y3DKY/.test-phase-tmp/metadata-boundary.woxr9q/malformed-key/home/state/task.check.sh
+Forge requests:
+pr view https://github.com/example/repo/pull/19 --json headRefOid -q .headRefOid
+Tampering rejected before forge polling; artifacts retained; no merge wake.
+
+CASE invalid-head
+$ fm-pr-check.sh task https://github.com/example/repo/pull/19
+armed: state/task.check.sh
+Metadata following PR registration:
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=test.20260912.1
+traceparent=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01
+decisions_reviewed=1
+decision_keys=review
+spawn_gen=s123.456.789
+kind=ship
+mode=direct-PR
+yolo=off
+pr_head=invalid
+Validator exit: 1 (expected 1)
+$ fm-watch.sh
+check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BSYSQ4GPKFH524947Y3DKY/.test-phase-tmp/metadata-boundary.woxr9q/invalid-head/home/state/task.check.sh
+Persisted wake queue:
+1789250583	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BSYSQ4GPKFH524947Y3DKY/.test-phase-tmp/metadata-boundary.woxr9q/invalid-head/home/state/task.check.sh
+Forge requests:
+pr view https://github.com/example/repo/pull/19 --json headRefOid -q .headRefOid
+Tampering rejected before forge polling; artifacts retained; no merge wake.
+
+CASE duplicate-pr
+$ fm-pr-check.sh task https://github.com/example/repo/pull/19
+armed: state/task.check.sh
+Metadata following PR registration:
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=test.20260912.1
+traceparent=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01
+decisions_reviewed=1
+decision_keys=review
+spawn_gen=s123.456.789
+kind=ship
+mode=direct-PR
+yolo=off
+pr=https://github.com/example/repo/pull/20
+Validator exit: 1 (expected 1)
+$ fm-watch.sh
+check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BSYSQ4GPKFH524947Y3DKY/.test-phase-tmp/metadata-boundary.woxr9q/duplicate-pr/home/state/task.check.sh
+Persisted wake queue:
+1789250587	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BSYSQ4GPKFH524947Y3DKY/.test-phase-tmp/metadata-boundary.woxr9q/duplicate-pr/home/state/task.check.sh
+Forge requests:
+pr view https://github.com/example/repo/pull/19 --json headRefOid -q .headRefOid
+Tampering rejected before forge polling; artifacts retained; no merge wake.
+
+CASE opaque-shell-bytes
+$ fm-pr-check.sh task https://github.com/example/repo/pull/19
+armed: state/task.check.sh
+Metadata following PR registration:
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=test.20260912.1
+traceparent=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01
+decisions_reviewed=1
+decision_keys=review
+spawn_gen=s123.456.789
+kind=ship
+mode=direct-PR
+yolo=off
+control_relaunch_tx=$(touch /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BSYSQ4GPKFH524947Y3DKY/.test-phase-tmp/metadata-boundary.woxr9q/must-not-execute)
+Validator exit: 0 (expected 0)
+$ fm-watch.sh
+check: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BSYSQ4GPKFH524947Y3DKY/.test-phase-tmp/metadata-boundary.woxr9q/opaque-shell-bytes/home/state/task.check.sh: merged
+Persisted wake queue:
+1789250591	1	check	merged-task-https://github.com/example/repo/pull/19	check: merge landed: task https://github.com/example/repo/pull/19
+Forge requests:
+pr view https://github.com/example/repo/pull/19 --json headRefOid -q .headRefOid
+pr view https://github.com/example/repo/pull/19 --json state -q .state
+Merged notification persisted; poll artifacts retired.
+
+Opaque metadata stayed data: command substitution did not execute.
