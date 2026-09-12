@@ -23,8 +23,29 @@ set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-fail() { printf 'not ok - %s\n' "$1" >&2; cleanup_all; exit 1; }
+fail() {
+  printf 'not ok - %s\n' "$1" >&2
+  if [ "${FM_TEST_EVIDENCE:-0}" = 1 ] && [ -n "${PANE_ID:-}" ]; then
+    printf '# evidence: failed real Herdr pane\n' >&2
+    fm_backend_herdr_capture "$SESSION:$PANE_ID" 60 >&2 || true
+    herdr pane process-info --pane "$PANE_ID" --session "$SESSION" >&2 || true
+  fi
+  cleanup_all
+  exit 1
+}
 pass() { printf 'ok - %s\n' "$1"; }
+
+relaunch_evidence() {
+  [ "${FM_TEST_EVIDENCE:-0}" = 1 ] || return 0
+  printf '# evidence begin: real Herdr %s\n' "$1"
+  printf '$ bin/fm-spawn.sh hsmoke --relaunch --harness codex\n%s\n' "$OUT"
+  printf 'pane cwd=%s\n' "$(fm_backend_herdr_current_path "$SESSION:$PANE_ID")"
+  printf 'saved task metadata:\n'
+  cat "$HOME_DIR/state/hsmoke.meta"
+  printf 'actual pane output:\n'
+  fm_backend_herdr_capture "$SESSION:$PANE_ID" 30
+  printf '\n# evidence end\n'
+}
 
 command -v herdr >/dev/null 2>&1 || { echo "skip: herdr not found"; exit 0; }
 command -v jq >/dev/null 2>&1 || { echo "skip: jq not found (required by the herdr adapter)"; exit 0; }
@@ -188,6 +209,7 @@ done
   || fail "the Herdr relaunch replaced its endpoint instead of reusing it"
 herdr pane get "$PANE_ID" --session "$SESSION" >/dev/null 2>&1 \
   || fail "the Herdr relaunch removed the endpoint it was required to reuse"
+relaunch_evidence 'exited-shell recovery'
 awk -F= '$1 == "harness" {$0="harness=claude"} {print}' "$HOME_DIR/state/hsmoke.meta" \
   > "$HOME_DIR/state/hsmoke.meta.tmp"
 mv "$HOME_DIR/state/hsmoke.meta.tmp" "$HOME_DIR/state/hsmoke.meta"
@@ -270,6 +292,12 @@ kill "$AGENT_PID" 2>/dev/null || fail "could not stop the agent-named process"
 wait_process_state shell 50 \
   || version_fail "after the agent process exited the pane reads '$(fm_backend_herdr_pane_process_state "$SESSION" "$PANE_ID")' rather than 'shell' through pane process-info. Raw process-info: $(herdr pane process-info --pane "$PANE_ID" --session "$SESSION" 2>&1 | tr -d '\n')"
 
+# The sleep stand-in never reads the Escape sent by the interrupt test. Clear
+# that fixture-only input after proving the process is gone, so it cannot
+# corrupt the next shell command's bracketed-paste prefix.
+fm_backend_herdr_send_key "$SESSION:$PANE_ID" C-c \
+  || fail "could not clear the exited stand-in's unread terminal input"
+
 # The divergence that makes this case non-vacuous: Herdr's own registry still
 # reports the agent, and only the process-level view disagrees.
 REGISTERED=$(herdr agent get "$PANE_ID" --session "$SESSION" 2>/dev/null | jq -r '.result.agent.agent_status // empty')
@@ -305,6 +333,7 @@ done
 herdr pane get "$PANE_ID" --session "$SESSION" >/dev/null 2>&1 \
   || fail "the relaunch removed the endpoint it was required to reuse"
 [ -d "$WT" ] || fail "the relaunch must never remove the task's local copy"
+relaunch_evidence 'stale-registration recovery'
 awk -F= '$1 == "harness" {$0="harness=claude"} {print}' "$HOME_DIR/state/hsmoke.meta" \
   > "$HOME_DIR/state/hsmoke.meta.tmp"
 mv "$HOME_DIR/state/hsmoke.meta.tmp" "$HOME_DIR/state/hsmoke.meta"

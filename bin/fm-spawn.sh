@@ -38,19 +38,19 @@
 #   positional, and batch pairs are all refused alongside it; only harness,
 #   model, and effort may change, which is what makes a harness switch one
 #   ordinary relaunch. It refuses unless the recorded endpoint is positively
-#   agent-free on a backend with a recovery-grade agent-state classifier (tmux
-#   or herdr), and clears the previous harness's per-task wiring before arming
+#   agent-free before launch on a backend with a recovery-grade classifier (tmux
+#   or herdr), and clears the previous harness's per-task wiring before activating
 #   the new incarnation. The replacement still never starts outside the copy
 #   holding the work: an agent-free tmux or Herdr shell outside the recorded
 #   worktree is told once to return and must confirm that path before launch.
 #   Control's internal FM_CONTROL_RELAUNCH_PREPARE directory is accepted only
-#   from the parent holding the task's control lock. The spawn prepares inputs,
-#   checks the recorded worktree, trust, and target executable, and stages all
-#   replacement wiring before publishing ready or retiring any prior wiring.
+#   from the parent holding the task's control lock. The ready marker is
+#   published only after prepare_relaunch succeeds under the preparation
+#   contract in docs/agent-control.md.
 #   It waits for control's continue marker after exit, retaining its locks and
-#   resolved launch profile throughout. A live
-#   endpoint outside the recorded worktree refuses preparation without sending
-#   shell commands. An exit that unwinds the shell is repaired after stop;
+#   resolved launch profile throughout. A live endpoint outside the recorded
+#   worktree refuses preparation without sending shell commands. An exit that
+#   unwinds the shell is repaired after stop;
 #   transport failures at that point remain reported launch failures.
 #   --harness <name> is the explicit per-spawn harness/profile adapter. The old
 #   positional harness arg still works for back-compat.
@@ -3639,7 +3639,7 @@ spawn_arm_busy() {
 
 retire_relaunch_wiring() {
   [ "$RELAUNCH" -eq 1 ] || return 0
-  # Retire the previous incarnation's per-task harness wiring before arming the
+  # Retire the previous incarnation's per-task harness wiring before activating the
   # new one. Without this, a harness switch would leave the old adapter's hook
   # files and turn-end token registry entries behind, and even a same-harness
   # relaunch would orphan the retired busy generation's token
