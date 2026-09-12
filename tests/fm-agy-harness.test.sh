@@ -286,6 +286,7 @@ test_ship_and_scout_launch_shapes_match() {
   scout_state="$HOME_DIR/state"
   out=$(run_scout_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" agy-kind-scout-q8 "$PROJ_DIR" --harness agy)
   expect_code 0 "$?" "an agy scout spawn should succeed: $out"
+  assert_present "$scout_state/agy-kind-scout-q8.agy-hooks/.agents/hooks.json" "an agy scout must get the same hook wiring as a crewmate"
   scout_launch=$(cat "$LAUNCH_LOG")
 
   # Compare the shapes with the per-task paths and ids normalized away, so the
