@@ -16,7 +16,8 @@
 # pr_head= must be a valid hash. The identity parser also permits the named
 # Relay link fields and control-plane fields after pr=: control_relaunch_tx
 # and traceparent (fm-spawn.sh), decisions_reviewed and decision_keys
-# (fm-captain-hold.sh), and spawn_gen (fm-teardown.sh legacy stamping).
+# (fm-captain-hold.sh), spawn_gen (fm-teardown.sh legacy stamping), and
+# kind, mode, and yolo (fm-promote.sh).
 # These fields are opaque to PR identity validation, never evaluated as shell
 # input; their writers own their value contracts. The parser's explicit cases
 # are the single allowlist, and every other trailing line remains invalid.
@@ -327,6 +328,8 @@ fm_pr_metadata_identity_parse() {
       x_request=*|x_request_ts=*|x_followups=*|x_platform=*|x_reply_max_chars=*)
         ;;
       control_relaunch_tx=*|traceparent=*|decisions_reviewed=*|decision_keys=*|spawn_gen=*)
+        ;;
+      kind=*|mode=*|yolo=*)
         ;;
       *)
         [ "$seen_pr" -eq 0 ] || post_pr_invalid=1

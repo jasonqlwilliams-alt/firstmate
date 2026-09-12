@@ -25,6 +25,8 @@ set -u
 . "$ROOT/bin/fm-control-lib.sh"
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-trace-context-lib.sh"
+# shellcheck source=/dev/null
+. "$ROOT/bin/fm-pr-lib.sh"
 
 CONTROL="$ROOT/bin/fm-control.sh"
 SPAWN="$ROOT/bin/fm-spawn.sh"
@@ -360,6 +362,84 @@ test_relaunch_from_linked_home_preserves_recorded_worktree() {
   assert_grep 'unfinished task work' "$dir/wt/task.txt" "relaunch discarded unfinished task work"
   [ ! -e "$fetch_head" ] || fail "relaunch fetched instead of preserving the recorded copy"
   pass "fm-control relaunch: a linked spawning home preserves committed and unfinished work in the recorded copy"
+}
+
+test_relaunch_preserves_registered_merge_poll() {
+  local dir state id=rl-merge url=https://github.com/example/repo/pull/19
+  local suffix before='' after='' out rc trace_mode
+  for trace_mode in off on; do
+    dir=$(new_case "merge-poll-$trace_mode" "$id")
+    add_ship_task "$dir" "$id" claude
+    state="$dir/home/state"
+    printf '%s\n' "$$" > "$state/.lock"
+    FM_TRACE_CONTEXT="$trace_mode" fm_trace_context_session_start \
+      "$dir/home/config" "$state/.trace-context-effective" \
+      || fail "could not configure the fixture session's trace context"
+    mkdir -p "$dir/pollbin" "$dir/root/bin"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/root/bin/fm-guard.sh"
+    cat > "$dir/pollbin/gh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FM_TEST_POLL_GH_LOG"
+case "$*" in
+  *headRefOid*) printf '0123456789abcdef0123456789abcdef01234567\n' ;;
+  *'--json state'*) printf 'MERGED\n' ;;
+  *) exit 2 ;;
+esac
+SH
+    chmod +x "$dir/pollbin/gh" "$dir/root/bin/fm-guard.sh"
+    printf 'BEGIN merge-poll relaunch trace=%s\n' "$trace_mode"
+    env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" \
+      FM_TEST_POLL_GH_LOG="$dir/gh.log" PATH="$dir/pollbin:$PATH" \
+      "$ROOT/bin/fm-pr-check.sh" "$id" "$url" \
+      > "$dir/arm.out" 2>&1 || fail "could not register the PR before relaunch"
+    cat "$dir/arm.out"
+    [ "$(tail -2 "$state/$id.meta")" = "pr=$url"$'\npr_head=0123456789abcdef0123456789abcdef01234567' ] \
+      || fail "PR registration did not reproduce the original metadata ordering"
+    fm_pr_poll_artifacts_valid "$state" "$id" "$ROOT/bin/fm-pr-poll.sh" \
+      || fail "registered merge poll did not validate before relaunch"
+    before=''
+    for suffix in check.sh pr-poll pr-poll-registration; do
+      before+="$suffix $(fm_pr_sha256 "$state/$id.$suffix") $(fm_pr_file_identity "$state/$id.$suffix")"$'\n'
+    done
+
+    out=$(FM_TRACE_CONTEXT="$trace_mode" run_control "$dir" "$id" relaunch --note 'Continue reviewing the recorded PR.'); rc=$?
+    printf '%s\n' "$out"
+    expect_code 0 "$rc" "registered PR relaunch should succeed"
+    [ -n "$(meta_field "$dir" "$id" control_relaunch_tx)" ] \
+      || fail "relaunch did not publish its transaction"
+    if [ "$trace_mode" = on ]; then
+      fm_trace_context_valid "$(meta_field "$dir" "$id" traceparent)" \
+        || fail "trace-enabled relaunch did not publish its trace context"
+    fi
+    after=''
+    for suffix in check.sh pr-poll pr-poll-registration; do
+      after+="$suffix $(fm_pr_sha256 "$state/$id.$suffix") $(fm_pr_file_identity "$state/$id.$suffix")"$'\n'
+    done
+    [ "$before" = "$after" ] || fail "relaunch replaced or changed the armed poll artifacts"
+    printf 'Armed poll SHA-256 and device:inode bindings unchanged:\n%s' "$after"
+    sed -n '/^pr=/,$p' "$state/$id.meta"
+    fm_pr_poll_artifacts_valid "$state" "$id" "$ROOT/bin/fm-pr-poll.sh" \
+      || fail "real relaunch invalidated the registered merge poll"
+
+    perl -e 'my $pid=fork; die unless defined $pid; if (!$pid) { exec @ARGV } local $SIG{ALRM}=sub { kill "TERM", $pid; waitpid $pid, 0; exit 124 }; alarm 15; waitpid $pid, 0; alarm 0; exit($? >> 8)' \
+      env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+      FM_TEST_POLL_GH_LOG="$dir/gh.log" PATH="$dir/pollbin:/usr/bin:/bin:/usr/sbin:/sbin" \
+      FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=2 FM_POLL=0.02 FM_HEARTBEAT=999999 FM_SIGNAL_GRACE=0 \
+      "$ROOT/bin/fm-watch.sh" > "$dir/watch.out" 2> "$dir/watch.err" \
+      || fail "watcher failed after real relaunch: $(cat "$dir/watch.err")"
+    cat "$dir/watch.out"
+    case "$(cat "$dir/watch.out")" in
+      check:*"$id.check.sh: merged") ;;
+      *) fail "watcher lost the merge notification after real relaunch" ;;
+    esac
+    assert_grep "$url" "$state/.wake-queue" "merge notification was not durably queued"
+    cat "$state/.wake-queue"
+    for suffix in check.sh pr-poll pr-poll-registration; do
+      [ ! -e "$state/$id.$suffix" ] || fail "watcher did not retire the merged poll"
+    done
+    printf 'END merge-poll relaunch trace=%s\n' "$trace_mode"
+  done
+  pass "fm-control relaunch: registered PR polls retain their bindings and deliver durable merge wakes with tracing off and on"
 }
 
 test_relaunch_preserves_durable_task_metadata() {
@@ -1589,6 +1669,12 @@ test_relaunch_from_guarded_path() {
   pass "fm-control relaunch: armed PATH exports real tools and checkpoint fixtures preserve shim delegates"
 }
 
+if [ "${1:-}" = --merge-poll-only ]; then
+  test_relaunch_preserves_registered_merge_poll
+  exit 0
+fi
+
+test_relaunch_preserves_registered_merge_poll
 test_relaunch_from_guarded_path
 
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint

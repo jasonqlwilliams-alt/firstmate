@@ -534,6 +534,63 @@ test_control_metadata_preserves_armed_poll() {
   pass "control-plane trailing metadata preserves armed polls while unknown lines and PR tampering fail closed"
 }
 
+test_promotion_preserves_armed_poll() {
+  local dir state before after suffix line
+  dir=$(make_case promotion-metadata)
+  state="$dir/home/state"
+  fm_write_meta "$state/task-a.meta" \
+    'window=firstmate:fm-task-a' 'endpoint_task_id=task-a' \
+    "worktree=$dir/wt" "project=$dir/project" 'kind=scout'
+  mkdir -p "$dir/home/data/task-a"
+  cat > "$dir/home/data/task-a/brief.md" <<'EOF'
+# Task
+## Captain's intent
+Investigate the existing PR and implement the recommended changes.
+
+## Firstmate spec
+Preserve the existing task and its PR notification when promoting it to ship.
+EOF
+  run_check_entry "$dir" task-a https://github.com/o/r/pull/37 \
+    > "$dir/arm.out" 2> "$dir/arm.err" || fail "could not arm the scout PR poll"
+  fm_pr_poll_artifacts_valid "$state" task-a "$POLL" \
+    || fail "scout PR poll did not authenticate before promotion"
+  before=$(cat "$state/task-a.pr-poll-registration")
+  FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" \
+    FM_TEST_GUARD_LOG="$dir/guard.log" \
+    "$ROOT/bin/fm-promote.sh" task-a --mode direct-PR --yolo off \
+    > "$dir/promote.out" 2> "$dir/promote.err" \
+    || fail "scout promotion failed: $(cat "$dir/promote.err")"
+  cat "$dir/arm.out" "$dir/promote.out" "$state/task-a.meta"
+  after=$(cat "$state/task-a.pr-poll-registration")
+  [ "$before" = "$after" ] || fail "promotion rewrote the poll registration"
+  fm_pr_poll_artifacts_valid "$state" task-a "$POLL" \
+    || fail "promoted task's PR poll no longer authenticates"
+  cp "$state/task-a.meta" "$dir/promoted.meta"
+  for line in 'unknown=value' 'kind_extra=ship' 'mode_extra=direct-PR' \
+    'yolo_extra=off' 'kind' 'mode' 'yolo' 'pr_head=invalid' \
+    'pr=https://github.com/o/r/pull/38'; do
+    cp "$dir/promoted.meta" "$state/task-a.meta"
+    printf '%s\n' "$line" >> "$state/task-a.meta"
+    ! fm_pr_poll_artifacts_valid "$state" task-a "$POLL" \
+      || fail "promoted task's PR poll accepted tampering: $line"
+  done
+  cp "$dir/promoted.meta" "$state/task-a.meta"
+  FM_TEST_GH_STATE=MERGED run_watcher_bounded "$dir/home" "$dir/fakebin" \
+    > "$dir/watch.out" 2> "$dir/watch.err" \
+    || fail "watcher failed after promotion: $(cat "$dir/watch.err")"
+  cat "$dir/watch.out" "$state/.wake-queue"
+  case "$(cat "$dir/watch.out")" in
+    check:*task-a.check.sh:*merged) ;;
+    *) fail "promotion invalidated the armed poll and lost the merged notification" ;;
+  esac
+  assert_grep 'https://github.com/o/r/pull/37' "$state/.wake-queue" \
+    "promoted task's merge notification was not durably queued"
+  for suffix in check.sh pr-poll pr-poll-registration; do
+    [ ! -e "$state/task-a.$suffix" ] || fail "promoted task's merged poll did not retire"
+  done
+  pass "scout promotion preserves the registered PR poll and its durable merge notification"
+}
+
 test_valid_recording_and_merge_derivation() {
   local dir expected sidecar count rc
   dir=$(make_case valid-recording)
@@ -2179,6 +2236,11 @@ test_gitlab_merged_poll_retires() {
   pass "GitHub and GitLab exact merged results share one retirement path"
 }
 
+if [ "${1:-}" = --promotion-poll-only ]; then
+  test_promotion_preserves_armed_poll
+  exit 0
+fi
+
 test_control_metadata_preserves_armed_poll
 test_parser_matrix
 test_gitlab_merge_watch
@@ -2194,6 +2256,7 @@ test_external_merge_transition_retires_only_terminal_poll
 test_retirement_refuses_replacement_and_nonterminal_results
 test_retirement_queue_failure_and_receipt_tampering
 test_gitlab_merged_poll_retires
+test_promotion_preserves_armed_poll
 test_invalid_entrypoints_have_zero_side_effects
 test_valid_recording_and_merge_derivation
 test_rejected_metacharacter_bytes_are_inert
