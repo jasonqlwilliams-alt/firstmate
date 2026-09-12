@@ -178,7 +178,7 @@ run_control() {  # <case-dir> <args...>
     HOME="$dir/user-home" CLAUDE_CONFIG_DIR='' \
     FM_SPAWN_NO_GUARD=1 GROK_HOME="$dir/grokhome" \
     FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 FM_CONTROL_LAUNCH_WAIT=0.05 \
-    FM_REAL_GIT="${FM_REAL_GIT:-}" FM_FAKE_GIT_FAILURE="${FM_FAKE_GIT_FAILURE:-}" \
+    FM_TEST_GIT_DELEGATE="${FM_TEST_GIT_DELEGATE:-}" FM_FAKE_GIT_FAILURE="${FM_FAKE_GIT_FAILURE:-}" \
     FM_REAL_MV="${FM_REAL_MV:-}" FM_FAKE_COMPLETE_JOURNAL_MV_FAIL="${FM_FAKE_COMPLETE_JOURNAL_MV_FAIL:-}" \
     FM_FAKE_META_PUBLISH_MV_FAIL="${FM_FAKE_META_PUBLISH_MV_FAIL:-}" \
     FM_FAKE_TRACE_PREPARE="${FM_FAKE_TRACE_PREPARE:-}" \
@@ -215,7 +215,7 @@ case "${FM_FAKE_GIT_FAILURE:-}:$*" in
   head:*' rev-parse --verify HEAD'|head:*' symbolic-ref -q HEAD') exit 128 ;;
   status:*' status --porcelain') exit 128 ;;
 esac
-exec "$FM_REAL_GIT" "$@"
+exec "$FM_TEST_GIT_DELEGATE" "$@"
 SH
   chmod +x "$1/fakebin/git"
 }
@@ -1011,12 +1011,15 @@ test_checkpoint_refusal_leaves_the_record_byte_identical() {
 
 test_checkpoint_refuses_uninspectable_head_and_status() {
   local dir out rc real_git
+  # The delegate may itself be a delivery shim in an armed test environment.
+  # Keep its FM_REAL_GIT intact; the fake uses a separate variable so it cannot
+  # turn that delegate into a self-referencing shim.
   real_git=$(command -v git)
 
   dir=$(new_case badhead rl22)
   add_ship_task "$dir" rl22 claude
   make_git_failure_stub "$dir"
-  out=$(FM_REAL_GIT="$real_git" FM_FAKE_GIT_FAILURE=head \
+  out=$(FM_TEST_GIT_DELEGATE="$real_git" FM_FAKE_GIT_FAILURE=head \
     run_control "$dir" rl22 relaunch --note "x"); rc=$?
   expect_code 1 "$rc" "an uninspectable HEAD should refuse"
   assert_contains "$out" "HEAD cannot be inspected" "the refusal should name the failed HEAD proof"
@@ -1025,7 +1028,7 @@ test_checkpoint_refuses_uninspectable_head_and_status() {
   dir=$(new_case badstatus rl23)
   add_ship_task "$dir" rl23 claude
   make_git_failure_stub "$dir"
-  out=$(FM_REAL_GIT="$real_git" FM_FAKE_GIT_FAILURE=status \
+  out=$(FM_TEST_GIT_DELEGATE="$real_git" FM_FAKE_GIT_FAILURE=status \
     run_control "$dir" rl23 relaunch --note "x"); rc=$?
   expect_code 1 "$rc" "an uninspectable worktree status should refuse"
   assert_contains "$out" "status cannot be inspected" "the refusal should name the failed dirty-state proof"
@@ -1557,6 +1560,36 @@ test_relaunch_moves_a_drifted_item_back_in_flight() {
     || fail "a relaunch left its item at $(backlog_state "$dir" rl41)"
   pass "relaunch heals an item that drifted out of In flight while the task stayed live"
 }
+
+test_relaunch_from_guarded_path() {
+  local dir out rc real_git line result expected tool
+  real_git=${FM_REAL_GIT:-$(command -v git)}
+  dir=$(new_case guardedpath rl-guarded)
+  add_ship_task "$dir" rl-guarded claude
+  mkdir -p "$dir/home/config" "$dir/real-tools"
+  printf '{}\n' > "$dir/home/config/repository-policy.json"
+  for tool in gh gh-axi; do
+    printf '#!/bin/sh\nexit 0\n' > "$dir/real-tools/$tool"
+    chmod +x "$dir/real-tools/$tool"
+  done
+  ln -s "$real_git" "$dir/real-tools/git"
+  out=$(PATH="$ROOT/bin/fm-delivery-shims:$dir/real-tools:$PATH" \
+    FM_REAL_GIT="$real_git" FM_REAL_GH="$dir/real-tools/gh" \
+    FM_REAL_GH_AXI="$dir/real-tools/gh-axi" FM_DELIVERY_GUARD_ROOT="$ROOT" \
+    run_control "$dir" rl-guarded relaunch --note 'Continue guarded work.'); rc=$?
+  expect_code 0 "$rc" "relaunch under guarded PATH should succeed: $out"
+  line=$(sed -n '/^export FM_DELIVERY_GUARD_ROOT=/p' "$dir/fake/keys")
+  [ -n "$line" ] || fail "relaunch did not export the delivery environment"
+  result=$(/bin/bash -c "$line"'; printf "%s\n" "$FM_REAL_GIT" "$FM_REAL_GH" "$FM_REAL_GH_AXI"')
+  expected=$(printf '%s\n' "$dir/real-tools/git" "$dir/real-tools/gh" "$dir/real-tools/gh-axi")
+  [ "$result" = "$expected" ] || fail "relaunch recorded a shim instead of real tools: $result"
+  # Replay the historical failing checkpoint fixture in the same armed PATH.
+  PATH="$ROOT/bin/fm-delivery-shims:$PATH" FM_REAL_GIT="$real_git" \
+    test_checkpoint_refuses_uninspectable_head_and_status
+  pass "fm-control relaunch: armed PATH exports real tools and checkpoint fixtures preserve shim delegates"
+}
+
+test_relaunch_from_guarded_path
 
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
 test_relaunch_from_linked_home_preserves_recorded_worktree

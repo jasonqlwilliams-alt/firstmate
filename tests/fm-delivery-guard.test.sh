@@ -342,6 +342,54 @@ SH
   pass "delivery guard: worker Git cannot bypass target checks with --no-verify or send-pack"
 }
 
+# Every bash entered through the shim (including exec and alias lookup) reads
+# this test-only startup file. A missing guard reaches at most four levels and
+# exits 97; it cannot consume the host process table. No time-based kill race.
+test_shims_refuse_self_reference() {
+  local dir tool variable spelling target out rc
+  dir="$TMP_ROOT/self-reference"
+  mkdir -p "$dir/fm-delivery-shims"
+  cp "$ROOT"/bin/fm-delivery-shims/{git,gh,gh-axi} "$dir/fm-delivery-shims/"
+  cat > "$dir/bash-env" <<'SH'
+export FM_TEST_SHIM_DEPTH=$(( ${FM_TEST_SHIM_DEPTH:-0} + 1 ))
+printf 'entry\n' >> "$FM_TEST_SHIM_ENTRIES"
+if [ "$FM_TEST_SHIM_DEPTH" -ge 4 ]; then
+  printf 'test recursion bound reached\n' >&2
+  exit 97
+fi
+SH
+  for tool in git gh gh-axi; do
+    case "$tool" in
+      git) variable=FM_REAL_GIT ;;
+      gh) variable=FM_REAL_GH ;;
+      gh-axi) variable=FM_REAL_GH_AXI ;;
+    esac
+    ln -s "$dir/fm-delivery-shims/$tool" "$dir/$tool-link"
+    ln "$dir/fm-delivery-shims/$tool" "$dir/$tool-hardlink"
+    for spelling in absolute relative symlink hardlink; do
+      case "$spelling" in
+        absolute) target="$dir/fm-delivery-shims/$tool" ;;
+        relative) target="./fm-delivery-shims/$tool" ;;
+        symlink) target="$dir/$tool-link" ;;
+        hardlink) target="$dir/$tool-hardlink" ;;
+      esac
+      : > "$dir/entries"
+      out=$(cd "$dir" && env BASH_ENV="$dir/bash-env" FM_TEST_SHIM_DEPTH=0 \
+        FM_TEST_SHIM_ENTRIES="$dir/entries" FM_DELIVERY_GUARD_ROOT="$ROOT" \
+        "$variable=$target" /bin/bash "$dir/fm-delivery-shims/$tool" \
+        config --get alias.config 2>&1); rc=$?
+      expect_code 1 "$rc" "$tool must refuse a $spelling self-reference: $out"
+      assert_contains "$out" "$variable points to the guarded $tool shim itself" \
+        "$tool refusal must identify the self-reference"
+      [ "$(wc -l < "$dir/entries" | tr -d ' ')" = 1 ] \
+        || fail "$tool entered another bash before refusing $spelling self-reference"
+    done
+    pass "delivery guard: $tool refuses absolute, relative, symlink and hardlink self-reference before recursion"
+  done
+}
+
+test_shims_refuse_self_reference
+
 test_upstream_push_refuses_and_fork_push_succeeds
 test_authenticated_account_mismatch_refuses
 test_effective_push_url_rewrite_refuses

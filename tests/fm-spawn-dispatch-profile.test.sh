@@ -1297,6 +1297,55 @@ test_non_claude_harness_ignores_claude_permission_mode() {
 }
 
 test_worker_launch_delivers_role_scope
+# Exercise the emitted command in a real shell with a harmless probe. The fake
+# session provider records launch delivery; no model or backend is started.
+test_guarded_path_resolves_real_tools() {
+  local variant rec id out rc prefix tool launch result expected real_git
+  real_git=${FM_REAL_GIT:-$(command -v git)}
+  for variant in fresh armed directory-link executable-link other-checkout; do
+    id="guarded-path-$variant"
+    rec=$(make_spawn_case "$id" codex "$id")
+    read_case_record "$rec"
+    # The standard spawn fixture bypasses repository-policy setup, while this
+    # presence marker exercises the real guarded environment construction.
+    printf '{}\n' > "$HOME_DIR/config/repository-policy.json"
+    for tool in gh gh-axi; do
+      printf '#!/bin/sh\nexit 0\n' > "$FAKEBIN_DIR/$tool"
+      chmod +x "$FAKEBIN_DIR/$tool"
+    done
+    ln -s "$real_git" "$FAKEBIN_DIR/git"
+    mkdir -p "$CASE_DIR/aliases" "$CASE_DIR/other/bin/fm-delivery-shims"
+    cp "$ROOT"/bin/fm-delivery-shims/{git,gh,gh-axi} "$CASE_DIR/other/bin/fm-delivery-shims/"
+    ln -s "$ROOT/bin/fm-delivery-shims" "$CASE_DIR/shims-link"
+    for tool in git gh gh-axi; do
+      ln -s "$ROOT/bin/fm-delivery-shims/$tool" "$CASE_DIR/aliases/$tool"
+    done
+    case "$variant" in
+      fresh) prefix="$FAKEBIN_DIR" ;;
+      armed) prefix="$ROOT/bin/fm-delivery-shims:$FAKEBIN_DIR" ;;
+      directory-link) prefix="$CASE_DIR/shims-link:$FAKEBIN_DIR" ;;
+      executable-link) prefix="$CASE_DIR/aliases:$FAKEBIN_DIR" ;;
+      other-checkout) prefix="$CASE_DIR/other/bin/fm-delivery-shims:$FAKEBIN_DIR" ;;
+    esac
+    cat > "$CASE_DIR/probe.sh" <<'SH'
+#!/bin/sh
+printf '%s\n' "$FM_REAL_GIT" "$FM_REAL_GH" "$FM_REAL_GH_AXI"
+SH
+    out=$(FM_REAL_GIT="$real_git" FM_REAL_GH="$FAKEBIN_DIR/gh" \
+      FM_REAL_GH_AXI="$FAKEBIN_DIR/gh-axi" FM_DELIVERY_GUARD_ROOT="$ROOT" \
+      run_spawn "$HOME_DIR" "$WT_DIR" "$prefix" "$LAUNCH_LOG" \
+      "$id" "$PROJ_DIR" --mode local-only --yolo off --harness "/bin/sh '$CASE_DIR/probe.sh'"); rc=$?
+    expect_code 0 "$rc" "$variant guarded spawn should succeed: $out"
+    launch=$(cat "$LAUNCH_LOG")
+    result=$(/bin/bash -c "$launch") || fail "$variant launch probe failed"
+    expected=$(printf '%s\n' "$FAKEBIN_DIR/git" "$FAKEBIN_DIR/gh" "$FAKEBIN_DIR/gh-axi")
+    [ "$result" = "$expected" ] || fail "$variant spawn recorded a shim instead of the real tools: $result"
+    pass "spawn delivery: $variant PATH records real Git, gh and gh-axi"
+  done
+}
+
+test_guarded_path_resolves_real_tools
+
 test_no_profile_keeps_claude_profile_defaults
 test_non_cursor_launch_clears_inherited_cursor_markers
 test_relative_home_overrides_launch_with_absolute_cross_process_paths

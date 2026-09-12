@@ -4,6 +4,12 @@ set -u
 
 ROOT=${FM_DELIVERY_GUARD_ROOT:-}
 REAL=${FM_REAL_GH_AXI:-}
+# -ef compares resolved file identity, covering relative paths, symlinks and
+# hard links without forking another process before this recursion boundary.
+if [ -n "$REAL" ] && [ "$REAL" -ef "${BASH_SOURCE[0]}" ]; then
+  printf 'REFUSED: FM_REAL_GH_AXI points to the guarded gh-axi shim itself; a real executable is required.\n' >&2
+  exit 1
+fi
 [ -n "$ROOT" ] && [ -x "$ROOT/bin/fm-delivery-guard.sh" ] || {
   echo "REFUSED: Firstmate gh-axi write guard is unavailable." >&2
   exit 1

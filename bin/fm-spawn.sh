@@ -364,7 +364,9 @@
 # exists, and PR-based ships additionally require a valid policy entry. The
 # shared pre-push hook then covers every worktree of that repository, while
 # guarded git/gh/gh-axi PATH shims cover pushes and PR writes from the spawned
-# worker. A configured policy that has no safe entry for a PR-based ship's
+# worker. Fresh spawns and relaunches resolve the real tools outside physical
+# fm-delivery-shims directories, including symlinked PATH entries/executables.
+# A configured policy that has no safe entry for a PR-based ship's
 # project refuses the spawn; an absent policy file arms nothing, installs no
 # shim, and leaves every spawn path exactly as it is without the guard.
 #   --traceparent <carrier> delivers a carrier that a REMOTE parent already
@@ -4114,9 +4116,32 @@ sq_opinput=$(shell_quote "$FM_ROOT/bin/fm-operational-input.sh")
 sq_worktree=$(shell_quote "$WT")
 sq_delivery_root=$(shell_quote "$FM_ROOT")
 sq_delivery_shims=$(shell_quote "$FM_ROOT/bin/fm-delivery-shims")
-REAL_GH_AXI=$(command -v gh-axi 2>/dev/null || true)
-REAL_GH=$(command -v gh 2>/dev/null || true)
-REAL_GIT=$(command -v git 2>/dev/null || true)
+# Fresh spawns and control relaunches share this resolution boundary. A caller
+# may already carry a guarded PATH, including another checkout's shims. Search
+# physical directories outside every delivery-shim directory, and also reject
+# individual symlinks into one. Do not trust inherited FM_REAL_* values or the
+# shell's command hash. Perl/Cwd is already a required Firstmate dependency.
+spawn_real_delivery_tool() {
+  perl -MCwd=abs_path -MFile::Basename=dirname,basename -e '
+    my ($tool) = @ARGV;
+    for my $entry (split /:/, $ENV{PATH}, -1) {
+      my $dir = abs_path(length($entry) ? $entry : ".");
+      next unless defined($dir) && -d $dir;
+      next if basename($dir) eq "fm-delivery-shims";
+      my $candidate = "$dir/$tool";
+      next unless -f $candidate && -x $candidate;
+      my $real = abs_path($candidate);
+      next unless defined($real);
+      next if basename(dirname($real)) eq "fm-delivery-shims";
+      print "$candidate\n";
+      exit 0;
+    }
+    exit 1;
+  ' "$1"
+}
+REAL_GH_AXI=$(spawn_real_delivery_tool gh-axi || true)
+REAL_GH=$(spawn_real_delivery_tool gh || true)
+REAL_GIT=$(spawn_real_delivery_tool git || true)
 sq_real_gh_axi=$(shell_quote "$REAL_GH_AXI")
 sq_real_gh=$(shell_quote "$REAL_GH")
 sq_real_git=$(shell_quote "$REAL_GIT")
