@@ -2703,10 +2703,22 @@ hold_watch_launch() {  # <dir> <out> <capture>
 }
 
 # One sighting that must surface and exit the cycle.
+# The bound is whole poll cycles, not wall clock. A stale alarm needs three polls
+# by design - one records the pane hash, two count it stable - and on a loaded
+# machine their subprocess work outlasts the file's fixed 100-tick budget, which
+# then reaps a watcher that has already queued and printed its wake. Counting
+# cycles keeps the verdict independent of machine speed: a watcher that completes
+# HOLD_SURFACE_MAX_CYCLES whole polls without exiting has genuinely stopped
+# alarming, while one that is merely slow never gets there.
+HOLD_SURFACE_MAX_CYCLES=5
 hold_watch_surface() {  # <dir> <out> <capture> <pane-text>
-  local dir=$1 out=$2 capture=$3 text=$4
+  local dir=$1 out=$2 capture=$3 text=$4 cycles=0
   printf '%s\n' "$text" > "$capture"
   hold_watch_launch "$dir" "$out" "$capture"
+  while wait_poll_cycle "$dir/state" "$HOLD_WATCH_PID"; do
+    cycles=$((cycles + 1))
+    [ "$cycles" -lt "$HOLD_SURFACE_MAX_CYCLES" ] || { reap "$HOLD_WATCH_PID"; return 1; }
+  done
   wait_for_exit "$HOLD_WATCH_PID" 100 || { reap "$HOLD_WATCH_PID"; return 1; }
   return 0
 }
