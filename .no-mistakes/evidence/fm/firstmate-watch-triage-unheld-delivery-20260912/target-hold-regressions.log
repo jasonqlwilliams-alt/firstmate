@@ -1,0 +1,182 @@
+
+QUEUED NOTIFICATION BEFORE ACK (/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/.phase-triage-test/tmp/fm-watch-triage-tests.kAC7Jh/unheld-delivery):
+1789256548	1	stale	test:fm-held-merge	stale: test:fm-held-merge
+
+QUEUED NOTIFICATION BEFORE ACK (/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/.phase-triage-test/tmp/fm-watch-triage-tests.kAC7Jh/unheld-delivery):
+1789256555	2	stale	test:fm-held-merge	stale: test:fm-held-merge
+
+QUEUED NOTIFICATION BEFORE ACK (/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/.phase-triage-test/tmp/fm-watch-triage-tests.kAC7Jh/unheld-blocker):
+1789256561	1	stale	test:fm-held-merge	stale: test:fm-held-merge
+
+QUEUED NOTIFICATION BEFORE ACK (/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/.phase-triage-test/tmp/fm-watch-triage-tests.kAC7Jh/unheld-blocker):
+1789256567	2	stale	test:fm-held-merge	stale: test:fm-held-merge
+
+QUEUED NOTIFICATION BEFORE ACK (/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/.phase-triage-test/tmp/fm-watch-triage-tests.kAC7Jh/unheld-worker-line):
+1789256573	1	stale	test:fm-held-merge	stale: test:fm-held-merge
+
+QUEUED NOTIFICATION BEFORE ACK (/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/.phase-triage-test/tmp/fm-watch-triage-tests.kAC7Jh/unheld-worker-line):
+1789256579	2	stale	test:fm-held-merge	stale: test:fm-held-merge
+ok - a stale window with no open captain call keeps alarming on every new hash
+
+QUEUED NOTIFICATION BEFORE ACK (/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/.phase-triage-test/tmp/fm-watch-triage-tests.kAC7Jh/held-delivery):
+1789256584	1	stale	test:fm-held-merge	stale: test:fm-held-merge (backlog-held 1s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent)
+
+QUEUED NOTIFICATION BEFORE ACK (/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/.phase-triage-test/tmp/fm-watch-triage-tests.kAC7Jh/held-worker-line):
+1789256623	1	stale	test:fm-held-merge	stale: test:fm-held-merge (backlog-held 1s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent)
+ok - work under an open captain call surfaces once, absorbs pane churn, then re-surfaces when the window elapses
+ok - a wake that never reached the durable queue arms no re-surface throttle
+
+QUEUED NOTIFICATION BEFORE ACK (/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/.phase-triage-test/tmp/fm-watch-triage-tests.kAC7Jh/reheld-call):
+1789256685	1	stale	test:fm-held-merge	stale: test:fm-held-merge (backlog-held 2s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent)
+ok - a released-then-re-held task is a distinct captain call whose first sight still alarms
+
+CASE append-failure
+
+--- watch.out ---
+/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/bin/fm-wake-lib.sh: line 1825: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/.phase-triage-test/tmp/fm-watch-triage-tests.kAC7Jh/append-failure/state/.wake-queue: Is a directory
+stale: test:fm-held-merge (backlog-held 5s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent)
+
+--- state/.wake-queue ---
+1789256679	2	stale	test:fm-held-merge	stale: test:fm-held-merge (backlog-held 5s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent)
+
+--- data/backlog.md ---
+## In flight
+
+## Queued
+- [ ] held-merge - delivered work (since 2026-09-12) (hold: awaiting the captain on the merge) (hold-kind: captain)
+  Captain hold set: 2026-09-12T23:44:32Z
+## Done
+
+CASE held-delivery
+
+--- watch.out ---
+stale: test:fm-held-merge (backlog-held 1s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent)
+stale: test:fm-held-merge (backlog-held 35s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent)
+
+--- state/.wake-queue ---
+1789256618	2	stale	test:fm-held-merge	stale: test:fm-held-merge (backlog-held 35s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent)
+
+--- state/.watch-triage.log ---
+[2026-09-12T16:43:09-0700] absorbed stale (backlog-held, no agent attached, age 6s): test:fm-held-merge
+[2026-09-12T16:43:13-0700] absorbed stale (backlog-held, no agent attached, age 10s): test:fm-held-merge
+[2026-09-12T16:43:15-0700] absorbed stale (backlog-held, no agent attached, age 13s): test:fm-held-merge
+[2026-09-12T16:43:18-0700] absorbed stale (backlog-held, no agent attached, age 15s): test:fm-held-merge
+[2026-09-12T16:43:21-0700] absorbed stale (backlog-held, no agent attached, age 18s): test:fm-held-merge
+[2026-09-12T16:43:26-0700] absorbed stale (backlog-held, no agent attached, age 23s): test:fm-held-merge
+[2026-09-12T16:43:29-0700] absorbed stale (backlog-held, no agent attached, age 26s): test:fm-held-merge
+[2026-09-12T16:43:32-0700] absorbed stale (backlog-held, no agent attached, age 29s): test:fm-held-merge
+[2026-09-12T16:43:35-0700] absorbed stale (backlog-held, no agent attached, age 32s): test:fm-held-merge
+
+--- data/backlog.md ---
+## In flight
+
+## Queued
+- [ ] held-merge - delivered work (since 2026-09-12) (hold: awaiting the captain on the merge) (hold-kind: captain)
+  Captain hold set: 2026-09-12T23:43:01Z
+## Done
+
+CASE held-worker-line
+
+--- watch.out ---
+stale: test:fm-held-merge (backlog-held 1s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent)
+stale: test:fm-held-merge (backlog-held 49s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent)
+
+--- state/.wake-queue ---
+1789256671	2	stale	test:fm-held-merge	stale: test:fm-held-merge (backlog-held 49s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent)
+
+--- state/.watch-triage.log ---
+[2026-09-12T16:43:49-0700] absorbed stale (backlog-held, no agent attached, age 8s): test:fm-held-merge
+[2026-09-12T16:43:54-0700] absorbed stale (backlog-held, no agent attached, age 13s): test:fm-held-merge
+[2026-09-12T16:43:57-0700] absorbed stale (backlog-held, no agent attached, age 16s): test:fm-held-merge
+[2026-09-12T16:43:59-0700] absorbed stale (backlog-held, no agent attached, age 19s): test:fm-held-merge
+[2026-09-12T16:44:03-0700] absorbed stale (backlog-held, no agent attached, age 21s): test:fm-held-merge
+[2026-09-12T16:44:10-0700] absorbed stale (backlog-held, no agent attached, age 29s): test:fm-held-merge
+[2026-09-12T16:44:13-0700] absorbed stale (backlog-held, no agent attached, age 32s): test:fm-held-merge
+[2026-09-12T16:44:17-0700] absorbed stale (backlog-held, no agent attached, age 35s): test:fm-held-merge
+[2026-09-12T16:44:23-0700] absorbed stale (backlog-held, no agent attached, age 40s): test:fm-held-merge
+
+--- data/backlog.md ---
+## In flight
+
+## Queued
+- [ ] held-merge - delivered work (since 2026-09-12) (hold: awaiting the captain on the merge) (hold-kind: captain)
+  Captain hold set: 2026-09-12T23:43:39Z
+## Done
+
+CASE reheld-call
+
+--- watch.out ---
+stale: test:fm-held-merge (backlog-held 2s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent)
+stale: test:fm-held-merge (backlog-held 24s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent)
+
+--- state/.wake-queue ---
+1789256706	2	stale	test:fm-held-merge	stale: test:fm-held-merge (backlog-held 24s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent)
+
+--- state/.watch-triage.log ---
+[2026-09-12T16:44:50-0700] absorbed stale (backlog-held, no agent attached, age 8s): test:fm-held-merge
+[2026-09-12T16:44:54-0700] absorbed stale (backlog-held, no agent attached, age 12s): test:fm-held-merge
+[2026-09-12T16:44:57-0700] absorbed stale (backlog-held, no agent attached, age 15s): test:fm-held-merge
+[2026-09-12T16:44:59-0700] absorbed stale (backlog-held, no agent attached, age 18s): test:fm-held-merge
+
+--- data/backlog.md ---
+## In flight
+
+## Queued
+- [ ] held-merge - delivered work (since 2026-09-12) (hold: awaiting the captain a second time) (hold-kind: captain)
+  Captain hold set: 2026-09-12T23:45:03Z
+
+  Resolution recorded by fm-captain-hold.
+  Decision digest: d44fcf731c17b28d746d1558dedab8e8540162ee63b87e10e8b9918037c277ee
+  Resolution mode: released
+
+  Captain decision:
+  go ahead
+## Done
+
+CASE unheld-blocker
+
+--- watch.out ---
+stale: test:fm-held-merge
+stale: test:fm-held-merge
+
+--- state/.wake-queue ---
+
+--- data/backlog.md ---
+## In flight
+
+## Queued
+- [ ] held-merge - delivered work (since 2026-09-12)
+
+## Done
+
+CASE unheld-delivery
+
+--- watch.out ---
+stale: test:fm-held-merge
+stale: test:fm-held-merge
+
+--- state/.wake-queue ---
+
+--- data/backlog.md ---
+## In flight
+
+## Queued
+- [ ] held-merge - delivered work (since 2026-09-12)
+
+## Done
+
+CASE unheld-worker-line
+
+--- watch.out ---
+stale: test:fm-held-merge
+stale: test:fm-held-merge
+
+--- state/.wake-queue ---
+
+--- data/backlog.md ---
+## In flight
+
+## Queued
+- [ ] held-merge - delivered work (since 2026-09-12)
+
+## Done

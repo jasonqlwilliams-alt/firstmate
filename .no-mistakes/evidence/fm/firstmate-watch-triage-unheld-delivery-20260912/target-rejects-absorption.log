@@ -1,0 +1,30 @@
+
+QUEUED NOTIFICATION BEFORE ACK (/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/.phase-triage-test/tmp/fm-watch-triage-tests.AmH4cz/expected-absorption):
+1789256601	1	stale	test:fm-held-merge	stale: test:fm-held-merge (backlog-held 1s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent)
+Expected rejection: surface helper exit=1 after bounded polls; queue empty; child reaped.
+ok - surface wait tolerates slow alarms but rejects a watcher that keeps absorbing
+
+CASE expected-absorption
+
+--- watch.out ---
+stale: test:fm-held-merge (backlog-held 1s with no agent attached - active captain hold verified, rechecked on a long cadence not a wedge; release the hold or attach an agent)
+
+--- state/.wake-queue ---
+
+--- state/.watch-triage.log ---
+[2026-09-12T16:43:26-0700] absorbed stale (backlog-held, no agent attached, age 5s): test:fm-held-merge
+[2026-09-12T16:43:30-0700] absorbed stale (backlog-held, no agent attached, age 10s): test:fm-held-merge
+[2026-09-12T16:43:33-0700] absorbed stale (backlog-held, no agent attached, age 13s): test:fm-held-merge
+[2026-09-12T16:43:36-0700] absorbed stale (backlog-held, no agent attached, age 16s): test:fm-held-merge
+[2026-09-12T16:43:39-0700] absorbed stale (backlog-held, no agent attached, age 19s): test:fm-held-merge
+[2026-09-12T16:43:42-0700] absorbed stale (backlog-held, no agent attached, age 21s): test:fm-held-merge
+[2026-09-12T16:43:46-0700] absorbed stale (backlog-held, no agent attached, age 25s): test:fm-held-merge
+[2026-09-12T16:43:49-0700] absorbed stale (backlog-held, no agent attached, age 29s): test:fm-held-merge
+
+--- data/backlog.md ---
+## In flight
+
+## Queued
+- [ ] held-merge - delivered work (since 2026-09-12) (hold: awaiting the captain on the merge) (hold-kind: captain)
+  Captain hold set: 2026-09-12T23:43:17Z
+## Done

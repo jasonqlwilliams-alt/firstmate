@@ -1,0 +1,14 @@
+Controlled terminal capture delay: 3s per capture
+not ok - [unheld-delivery] an unheld stale window stopped alarming on round 1
+
+CASE unheld-delivery
+
+--- watch.out ---
+
+--- data/backlog.md ---
+## In flight
+
+## Queued
+- [ ] held-merge - delivered work (since 2026-09-12)
+
+## Done

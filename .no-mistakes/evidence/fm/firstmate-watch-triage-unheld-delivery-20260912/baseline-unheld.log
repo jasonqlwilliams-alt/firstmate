@@ -1,0 +1,49 @@
+ok - a stale window with no open captain call keeps alarming on every new hash
+
+CASE unheld-blocker
+
+--- watch.out ---
+stale: test:fm-held-merge
+stale: test:fm-held-merge
+
+--- state/.wake-queue ---
+
+--- data/backlog.md ---
+## In flight
+
+## Queued
+- [ ] held-merge - delivered work (since 2026-09-12)
+
+## Done
+
+CASE unheld-delivery
+
+--- watch.out ---
+stale: test:fm-held-merge
+stale: test:fm-held-merge
+
+--- state/.wake-queue ---
+
+--- data/backlog.md ---
+## In flight
+
+## Queued
+- [ ] held-merge - delivered work (since 2026-09-12)
+
+## Done
+
+CASE unheld-worker-line
+
+--- watch.out ---
+stale: test:fm-held-merge
+stale: test:fm-held-merge
+
+--- state/.wake-queue ---
+
+--- data/backlog.md ---
+## In flight
+
+## Queued
+- [ ] held-merge - delivered work (since 2026-09-12)
+
+## Done

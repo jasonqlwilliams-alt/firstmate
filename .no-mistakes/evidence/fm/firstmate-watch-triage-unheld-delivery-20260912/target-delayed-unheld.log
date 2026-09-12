@@ -1,0 +1,68 @@
+Controlled terminal capture delay: 3s per capture
+
+QUEUED NOTIFICATION BEFORE ACK (/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/.phase-triage-test/tmp/fm-watch-triage-tests.zPoQyW/unheld-delivery):
+1789256571	1	stale	test:fm-held-merge	stale: test:fm-held-merge
+
+QUEUED NOTIFICATION BEFORE ACK (/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/.phase-triage-test/tmp/fm-watch-triage-tests.zPoQyW/unheld-delivery):
+1789256587	2	stale	test:fm-held-merge	stale: test:fm-held-merge
+
+QUEUED NOTIFICATION BEFORE ACK (/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/.phase-triage-test/tmp/fm-watch-triage-tests.zPoQyW/unheld-blocker):
+1789256603	1	stale	test:fm-held-merge	stale: test:fm-held-merge
+
+QUEUED NOTIFICATION BEFORE ACK (/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/.phase-triage-test/tmp/fm-watch-triage-tests.zPoQyW/unheld-blocker):
+1789256618	2	stale	test:fm-held-merge	stale: test:fm-held-merge
+
+QUEUED NOTIFICATION BEFORE ACK (/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/.phase-triage-test/tmp/fm-watch-triage-tests.zPoQyW/unheld-worker-line):
+1789256635	1	stale	test:fm-held-merge	stale: test:fm-held-merge
+
+QUEUED NOTIFICATION BEFORE ACK (/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BZP9Z8XSXB3B531W0GRYRF/.phase-triage-test/tmp/fm-watch-triage-tests.zPoQyW/unheld-worker-line):
+1789256651	2	stale	test:fm-held-merge	stale: test:fm-held-merge
+ok - a stale window with no open captain call keeps alarming on every new hash
+
+CASE unheld-blocker
+
+--- watch.out ---
+stale: test:fm-held-merge
+stale: test:fm-held-merge
+
+--- state/.wake-queue ---
+
+--- data/backlog.md ---
+## In flight
+
+## Queued
+- [ ] held-merge - delivered work (since 2026-09-12)
+
+## Done
+
+CASE unheld-delivery
+
+--- watch.out ---
+stale: test:fm-held-merge
+stale: test:fm-held-merge
+
+--- state/.wake-queue ---
+
+--- data/backlog.md ---
+## In flight
+
+## Queued
+- [ ] held-merge - delivered work (since 2026-09-12)
+
+## Done
+
+CASE unheld-worker-line
+
+--- watch.out ---
+stale: test:fm-held-merge
+stale: test:fm-held-merge
+
+--- state/.wake-queue ---
+
+--- data/backlog.md ---
+## In flight
+
+## Queued
+- [ ] held-merge - delivered work (since 2026-09-12)
+
+## Done
