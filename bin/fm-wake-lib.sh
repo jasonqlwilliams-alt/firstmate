@@ -551,12 +551,15 @@ fm_lock_remove_path() {
 }
 
 fm_lock_mid_acquire_is_fresh() {
-  local lockdir=$1 pid=$2 mid_acquire_stale
+  local lockdir=$1 pid=$2 mid_acquire_stale age
   case "$pid" in
     ''|*[!0-9]*)
       mid_acquire_stale=$FM_LOCK_STALE_AFTER
       [ "$mid_acquire_stale" -lt 2 ] && mid_acquire_stale=2
-      [ "$(fm_path_age "$lockdir")" -lt "$mid_acquire_stale" ]
+      # A failed age read (including a failed subshell fork) is not evidence
+      # that a mid-acquire owner is stale. Leave it held until a later read.
+      age=$(fm_path_age "$lockdir") || return 0
+      [ "$age" -lt "$mid_acquire_stale" ]
       return
       ;;
   esac

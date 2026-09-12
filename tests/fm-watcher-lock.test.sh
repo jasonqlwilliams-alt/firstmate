@@ -357,6 +357,29 @@ test_lock_empty_pid_uses_minimum_grace() {
   pass "empty mid-acquire lock keeps a minimum grace"
 }
 
+# A failed command substitution can leave no age at all (for example when the
+# shell cannot fork). Unknown age must not authorize stealing a mid-claim lock.
+test_lock_failed_age_preserves_owner() {
+  local dir state lockdir out
+  dir=$(make_case lock-failed-age)
+  state="$dir/state"
+  lockdir="$state/.contend.lock"
+  mkdir "$lockdir"
+  out=$(FM_STATE_OVERRIDE="$state" bash -c '
+    . "$1"
+    fm_path_age() { return 1; }
+    if fm_lock_try_acquire "$2"; then exit 20; fi
+    [ -d "$2" ] && [ ! -L "$2" ] && [ ! -e "$2/pid" ] || exit 21
+    # Restore real age reads. A genuinely old unclaimed lock remains reclaimable.
+    . "$1"
+    touch -t 200001010000 "$2" || exit 22
+    fm_lock_try_acquire "$2" || exit 23
+    fm_lock_release "$2"
+  ' _ "$LIB" "$lockdir" 2>&1) || fail "failed age read did not preserve the owner until recovery: $out"
+  [ -z "$out" ] || fail "failed age read emitted an integer diagnostic: $out"
+  pass "failed lock age preserves the mid-acquire owner and recovers when reads resume"
+}
+
 test_lock_late_claim_loses_after_recreate() {
   local dir state lockdir out
   dir=$(make_case lock-late-claim)
@@ -1116,6 +1139,7 @@ test_lock_stale_steal_single_winner_under_concurrency
 test_lock_live_steal_mutex_is_not_reclaimed
 test_lock_does_not_steal_live_lock
 test_lock_empty_pid_uses_minimum_grace
+test_lock_failed_age_preserves_owner
 test_lock_late_claim_loses_after_recreate
 test_lock_paused_mid_acquire_claim_fails_during_steal
 test_watch_restart_rejects_reused_pid
