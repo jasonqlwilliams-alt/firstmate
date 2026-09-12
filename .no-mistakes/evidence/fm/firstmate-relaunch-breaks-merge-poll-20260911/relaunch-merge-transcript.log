@@ -1,0 +1,33 @@
+Command: TMPDIR=/tmp FM_TEST_SKIP_ORPHAN_REAP=1 bash tests/fm-control-relaunch.test.sh
+Real PR registration, control/relaunch, watcher, and persisted wake queue; deterministic forge and session-provider fixtures.
+
+BEGIN merge-poll relaunch trace=off
+armed: state/rl-merge.check.sh
+warning: /tmp/fm-control-relaunch.z6IzOr/merge-poll-off-24367/home/data/rl-merge/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched rl-merge harness=claude from=claude model=default effort=default backend=tmux endpoint=fmses:fm-rl-merge worktree=/tmp/fm-control-relaunch.z6IzOr/merge-poll-off-24367/wt
+Armed poll SHA-256 and device:inode bindings unchanged:
+check.sh e87aae384ec62ae28f78a0779020f52f7b891ba0cafea2551b5a2c4e967870cf 111:584735
+pr-poll b533e16491cd6ab5453b06ceab03b3ffe6fd3f1eae5813cc72ef61e65ea1fc29 111:584734
+pr-poll-registration 8eab6e8ec392929f067b7517bc76f4ddf00e14ca83befcb7d066403adc1594cb 111:584737
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=3142152.20260912T211346Z.27842
+check: /tmp/fm-control-relaunch.z6IzOr/merge-poll-off-24367/home/state/rl-merge.check.sh: merged
+1789247631	1	check	merged-rl-merge-https://github.com/example/repo/pull/19	check: merge landed: rl-merge https://github.com/example/repo/pull/19
+END merge-poll relaunch trace=off
+
+BEGIN merge-poll relaunch trace=on
+armed: state/rl-merge.check.sh
+warning: /tmp/fm-control-relaunch.z6IzOr/merge-poll-on-4255/home/data/rl-merge/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched rl-merge harness=claude from=claude model=default effort=default backend=tmux endpoint=fmses:fm-rl-merge worktree=/tmp/fm-control-relaunch.z6IzOr/merge-poll-on-4255/wt
+Armed poll SHA-256 and device:inode bindings unchanged:
+check.sh e87aae384ec62ae28f78a0779020f52f7b891ba0cafea2551b5a2c4e967870cf 111:586144
+pr-poll b533e16491cd6ab5453b06ceab03b3ffe6fd3f1eae5813cc72ef61e65ea1fc29 111:586143
+pr-poll-registration bc2ca17d1c05d77cc7cbf9d2ecc204c2d5875685901afc7fc95ce239f4aec117 111:586145
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=3162811.20260912T211355Z.11822
+traceparent=00-db923407871c6c984c145c68f50ae0c6-ccffcf6ab523695f-01
+check: /tmp/fm-control-relaunch.z6IzOr/merge-poll-on-4255/home/state/rl-merge.check.sh: merged
+1789247639	1	check	merged-rl-merge-https://github.com/example/repo/pull/19	check: merge landed: rl-merge https://github.com/example/repo/pull/19
+END merge-poll relaunch trace=on

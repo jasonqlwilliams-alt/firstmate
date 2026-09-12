@@ -1,0 +1,24 @@
+armed: state/task-a.check.sh
+
+Append tampering after valid control metadata: unknown=value
+$ bin/fm-watch.sh
+check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.test-tmp/tampering-evidence.8cXuhR/1/home/state/task-a.check.sh
+1789247200	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.test-tmp/tampering-evidence.8cXuhR/1/home/state/task-a.check.sh
+armed: state/task-a.check.sh
+
+Append tampering after valid control metadata: control_relaunch_tx_extra=value
+$ bin/fm-watch.sh
+check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.test-tmp/tampering-evidence.8cXuhR/2/home/state/task-a.check.sh
+1789247201	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.test-tmp/tampering-evidence.8cXuhR/2/home/state/task-a.check.sh
+armed: state/task-a.check.sh
+
+Append tampering after valid control metadata: pr_head=invalid
+$ bin/fm-watch.sh
+check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.test-tmp/tampering-evidence.8cXuhR/3/home/state/task-a.check.sh
+1789247203	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.test-tmp/tampering-evidence.8cXuhR/3/home/state/task-a.check.sh
+armed: state/task-a.check.sh
+
+Append tampering after valid control metadata: pr=https://github.com/example/repo/pull/20
+$ bin/fm-watch.sh
+check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.test-tmp/tampering-evidence.8cXuhR/4/home/state/task-a.check.sh
+1789247205	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.test-tmp/tampering-evidence.8cXuhR/4/home/state/task-a.check.sh

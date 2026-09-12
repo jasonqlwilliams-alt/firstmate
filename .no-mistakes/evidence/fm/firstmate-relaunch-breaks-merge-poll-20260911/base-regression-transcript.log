@@ -1,0 +1,32 @@
+Base: a67578d21cda9972dfbe84a88d14e2319796680d, exported with git archive inside the test worktree.
+Current regression tests copied into that snapshot; production files untouched. Both commands exited 1 as expected.
+
+$ bash .tmp-test-validation/base/tests/fm-control-relaunch.test.sh --merge-poll-only
+BEGIN merge-poll relaunch trace=off
+armed: state/rl-merge.check.sh
+warning: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.tmp-test-validation/tmp/fm-control-relaunch.WEiWEC/merge-poll-off-28395/home/data/rl-merge/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched rl-merge harness=claude from=claude model=default effort=default backend=tmux endpoint=fmses:fm-rl-merge worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.tmp-test-validation/tmp/fm-control-relaunch.WEiWEC/merge-poll-off-28395/wt
+Armed poll SHA-256 and device:inode bindings unchanged:
+check.sh e87aae384ec62ae28f78a0779020f52f7b891ba0cafea2551b5a2c4e967870cf 2128:2391926
+pr-poll b533e16491cd6ab5453b06ceab03b3ffe6fd3f1eae5813cc72ef61e65ea1fc29 2128:2391924
+pr-poll-registration 6542bb87dc79baba58342f0c15544f2f6927dad5a9ea64c5baecb8c43b198103 2128:2391927
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=3085792.20260912T211305Z.14887
+not ok - real relaunch invalidated the registered merge poll
+
+$ bash .tmp-test-validation/base/tests/fm-pr-check-security.test.sh --promotion-poll-only
+armed: state/task-a.check.sh
+promoted task-a to ship mode=direct-PR yolo=off (teardown protection restored)
+wrote ship instructions for mode=direct-PR: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.tmp-test-validation/tmp/fm-pr-check-security.CXvq3F/promotion-metadata/home/data/task-a/ship-instructions.md
+next: FM_HOME=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.tmp-test-validation/tmp/fm-pr-check-security.CXvq3F/promotion-metadata/home bin/fm-send.sh fm-task-a "$(cat /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.tmp-test-validation/tmp/fm-pr-check-security.CXvq3F/promotion-metadata/home/data/task-a/ship-instructions.md)"
+window=firstmate:fm-task-a
+endpoint_task_id=task-a
+worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.tmp-test-validation/tmp/fm-pr-check-security.CXvq3F/promotion-metadata/wt
+project=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.tmp-test-validation/tmp/fm-pr-check-security.CXvq3F/promotion-metadata/project
+pr=https://github.com/o/r/pull/37
+pr_head=0123456789abcdef0123456789abcdef01234567
+kind=ship
+mode=direct-PR
+yolo=off
+not ok - promoted task's PR poll no longer authenticates

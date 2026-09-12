@@ -1,0 +1,29 @@
+$ bin/fm-pr-check.sh scout-a https://github.com/example/repo/pull/19
+armed: state/scout-a.check.sh
+Poll authenticated before metadata writers.
+$ bin/fm-x-link.sh scout-a request-19 --carry-count 1 --carry-ts 1700000000 --carry-platform x --carry-max 280
+linked scout-a to X request request-19
+Poll authenticated after the real Relay metadata writer.
+$ bin/fm-promote.sh scout-a --mode direct-PR --yolo off
+promoted scout-a to ship mode=direct-PR yolo=off (teardown protection restored)
+wrote ship instructions for mode=direct-PR: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.test-tmp/metadata-writers.fGqXlE/home/data/scout-a/ship-instructions.md
+next: FM_HOME=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.test-tmp/metadata-writers.fGqXlE/home bin/fm-send.sh fm-scout-a "$(cat /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.test-tmp/metadata-writers.fGqXlE/home/data/scout-a/ship-instructions.md)"
+Persisted metadata after successful promotion:
+window=fmses:fm-scout-a
+endpoint_task_id=scout-a
+worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.test-tmp/metadata-writers.fGqXlE/wt
+project=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.test-tmp/metadata-writers.fGqXlE/project
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+x_request=request-19
+x_request_ts=1700000000
+x_followups=1
+x_platform=x
+x_reply_max_chars=280
+kind=ship
+mode=direct-PR
+yolo=off
+FAIL: successful promotion invalidated the registered PR poll.
+$ bin/fm-watch.sh (fixture forge reports MERGED)
+check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.test-tmp/metadata-writers.fGqXlE/home/state/scout-a.check.sh
+1789246951	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.test-tmp/metadata-writers.fGqXlE/home/state/scout-a.check.sh
