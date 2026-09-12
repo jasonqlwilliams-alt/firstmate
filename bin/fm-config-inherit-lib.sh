@@ -608,6 +608,29 @@ fm_config_inherit_lock_path() {
   printf '%s/%s\n' "$dest_home" "$FM_CONFIG_INHERIT_LOCK_REL"
 }
 
+fm_config_inherit_destination_check() {
+  local dest_home=$1 item path parent
+  while IFS= read -r item; do
+    case "$item" in ''|/*|.|..|../*|*/../*|*/..) return 1 ;; esac
+    path="$dest_home/$item"
+    parent=${path%/*}
+    while [ ! -e "$parent" ] && [ ! -L "$parent" ]; do
+      parent=${parent%/*}
+    done
+    [ -d "$parent" ] && [ -r "$parent" ] && [ -w "$parent" ] && [ -x "$parent" ] || {
+      echo "error: secondmate inheritance directory is not accessible: $parent" >&2
+      return 1
+    }
+    if [ -e "$path" ] && [ ! -f "$path" ] && [ ! -L "$path" ]; then
+      echo "error: secondmate inheritance destination is not a file: $path" >&2
+      return 1
+    fi
+  done <<EOF
+$(fm_config_inherit_items)
+$FM_CONFIG_INHERIT_LOCK_REL
+EOF
+}
+
 fm_config_reread_retry_dir() {
   local source_home=$1 id=$2 token
   [ -n "$source_home" ] && [ -n "$id" ] || return 1

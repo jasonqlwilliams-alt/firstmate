@@ -12,9 +12,9 @@
 # verbs addressed to an exact task id, with the per-harness mechanics owned
 # here rather than improvised per harness in agent prose.
 #
-# This file owns three capability tables plus their pure artifact-path tables
-# and nothing else. It has no side effects, runs no backend command, and reads
-# no state, so it can be sourced by a test as a pure contract:
+# This file owns three capability tables, artifact-path tables, and read-only
+# wiring retirement validation. Sourcing it has no side effects and runs no
+# backend command:
 #
 #   1. Verb allowlist. There is no arbitrary-text and no generic raw-key entry
 #      point on the control plane; a caller either names an allowlisted verb or
@@ -286,4 +286,48 @@ fm_control_harness_turnend_auth_path() {  # <harness> <token>
     kimi) printf '%s\n' "$HOME/.kimi-code/fm-turn-end.d/$token" ;;
     *) return 0 ;;
   esac
+}
+
+fm_control_harness_retirement_paths() {
+  local harness=$1 wt=$2 state=$3 id=$4 token_path token auth_path paths path parent
+  harness=$(fm_control_harness_family "$harness") || harness=
+  paths=$(fm_control_harness_wiring_paths "$harness" "$wt" "$state" "$id") || return 1
+  token_path=$(fm_control_harness_turnend_token_path "$harness" "$state" "$id") || return 1
+  if [ -n "$token_path" ] && { [ -e "$token_path" ] || [ -L "$token_path" ]; }; then
+    token=
+    [ -f "$token_path" ] && [ ! -L "$token_path" ] && [ -r "$token_path" ] \
+      && token=$(cat -- "$token_path") || {
+      echo "error: cannot read retirement token at $token_path" >&2
+      return 1
+    }
+    case "$token" in
+      ''|.|..|*[!A-Za-z0-9._-]*)
+        echo "error: invalid retirement token at $token_path" >&2
+        return 1
+        ;;
+    esac
+    auth_path=$(fm_control_harness_turnend_auth_path "$harness" "$token") || return 1
+    [ -n "$auth_path" ] || return 1
+    paths="$auth_path"$'\n'"$paths"
+  elif [ -n "$token_path" ] && { [ -e "$wt/.fm-$harness-turnend" ] || [ -L "$wt/.fm-$harness-turnend" ]; }; then
+    echo "error: missing retirement token at $token_path" >&2
+    return 1
+  fi
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    parent=${path%/*}
+    while [ ! -e "$parent" ] && [ ! -L "$parent" ]; do
+      parent=${parent%/*}
+    done
+    [ -d "$parent" ] && [ -x "$parent" ] || {
+      echo "error: cannot access retirement wiring directory at $parent" >&2
+      return 1
+    }
+    [ -e "$path" ] || [ -L "$path" ] || continue
+    [ -f "$path" ] && [ ! -L "$path" ] && [ -w "${path%/*}" ] && [ -x "${path%/*}" ] || {
+      echo "error: cannot retire harness wiring at $path" >&2
+      return 1
+    }
+  done <<< "$paths"
+  printf '%s\n' "$paths"
 }
