@@ -621,6 +621,8 @@ fm_config_inherit_destination_check() {
       echo "error: secondmate inheritance directory is not accessible: $parent" >&2
       return 1
     }
+    # The lock owner validates its format and recovers abandoned legacy locks.
+    [ "$item" != "$FM_CONFIG_INHERIT_LOCK_REL" ] || continue
     if [ -e "$path" ] && [ ! -f "$path" ] && [ ! -L "$path" ]; then
       echo "error: secondmate inheritance destination is not a file: $path" >&2
       return 1

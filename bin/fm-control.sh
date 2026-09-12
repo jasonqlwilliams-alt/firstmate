@@ -123,12 +123,14 @@ fi
   echo "error: FM_HOME '$FM_HOME' is not a directory" >&2
   exit 1
 }
+FM_HOME=$(CDPATH='' cd -- "$FM_HOME" && pwd -P) || exit 1
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 [ -d "$STATE" ] || {
   echo "error: state dir '$STATE' is missing; fm-control cannot resolve tasks for FM_HOME '$FM_HOME'" >&2
   exit 1
 }
+STATE=$(CDPATH='' cd -- "$STATE" && pwd -P) || exit 1
 
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"

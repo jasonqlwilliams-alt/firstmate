@@ -957,6 +957,7 @@ SPAWN_CONTROL_PARENT=0
 RELAUNCH_PREPARE=
 RELAUNCH_WIRING_FILES=()
 RELAUNCH_WIRING_TARGETS=()
+KIMI_STAGE_HOME=
 RELAUNCH_BUSY_STATE=
 RELAUNCH_RETIRE_PATHS=
 RELAUNCH_PATH_PROBE=
@@ -1481,7 +1482,7 @@ resolve_spawn_executable() {
 }
 
 spawn_pane_launch_path() {
-  local pids pid value result= info attempt probe_command
+  local pids pid value result='' info attempt probe_command
   if [ "$RELAUNCH_STATE" = dead ]; then
     RELAUNCH_PATH_PROBE=$(mktemp "$STATE/.$ID.relaunch-path.XXXXXXXX") || return 1
     probe_command="printf '%s\\n' \"\$PATH\" > $(shell_quote "$RELAUNCH_PATH_PROBE")"
@@ -2506,7 +2507,7 @@ else
   WT=""
   BRIEF="$DATA/$ID/brief.md"
 fi
-if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
+if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   SPAWN_TREEHOUSE_PROJECT_LOCK=$(fm_treehouse_project_lock_path "$PROJ_ABS") || {
     echo "error: could not resolve the shared Treehouse project lock for $PROJ_ABS" >&2
     exit 1
@@ -3449,6 +3450,15 @@ relaunch_return_to_worktree() {
 }
 
 if [ "$RELAUNCH" -eq 1 ]; then
+  if [ "$KIND" != secondmate ] && fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
+    # Retain the allocation lock through launch so a checked slot cannot be
+    # reassigned between ownership validation and returning the exited shell.
+    fm_treehouse_slot_owner_state "$WT" "$ID"
+    [ "$FM_TREEHOUSE_SLOT_OWNER" = mine ] || {
+      echo "error: recorded Treehouse slot $WT is not owned by task $ID (claim: $FM_TREEHOUSE_SLOT_OWNER, owner: ${FM_TREEHOUSE_SLOT_OWNER_ID:-none}); refusing relaunch before worktree entry or stop" >&2
+      exit 1
+    }
+  fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
   if [ "$RELAUNCH_STATE" = dead ]; then
     relaunch_return_to_worktree
@@ -4086,17 +4096,17 @@ EOF
         done
         spawn_wiring_target_check "$HOME/.kimi-code/config.toml"
         mkdir -p "$KIMI_STAGE_HOME/.kimi-code"
-        mkdir -p -m 700 "$HOME/.kimi-code/fm-turn-end.d"
+        if [ ! -d "$HOME/.kimi-code/fm-turn-end.d" ]; then
+          mkdir -m 700 "$HOME/.kimi-code/fm-turn-end.d"
+        fi
         cp -p "$HOME/.kimi-code/config.toml" "$KIMI_STAGE_HOME/.kimi-code/config.toml"
         if [ -e "$HOME/.kimi-code/fm-turn-end.sh" ] || [ -L "$HOME/.kimi-code/fm-turn-end.sh" ]; then
           spawn_wiring_target_check "$HOME/.kimi-code/fm-turn-end.sh"
           cp -p "$HOME/.kimi-code/fm-turn-end.sh" "$KIMI_STAGE_HOME/.kimi-code/fm-turn-end.sh"
         fi
         HOME="$KIMI_STAGE_HOME" "$FM_ROOT/bin/fm-kimi-turnend-hook.sh" install
-        for kimi_file in config.toml fm-turn-end.sh; do
-          spawn_wiring_file "$HOME/.kimi-code/$kimi_file"
-          cp -p "$KIMI_STAGE_HOME/.kimi-code/$kimi_file" "$WIRING_FILE"
-        done
+        spawn_wiring_file "$HOME/.kimi-code/fm-turn-end.sh"
+        cp -p "$KIMI_STAGE_HOME/.kimi-code/fm-turn-end.sh" "$WIRING_FILE"
       fi
       KIMI_AUTH_DIR="$HOME/.kimi-code/fm-turn-end.d"
       old_umask=$(umask)
@@ -4174,6 +4184,11 @@ if [ "$RELAUNCH" -eq 1 ] && [ "$KIND" = secondmate ]; then
 fi
 
 if [ -n "$RELAUNCH_PREPARE" ]; then
+  if [ -n "${KIMI_STAGE_HOME:-}" ]; then
+    # Reapply only the owned region to the current config. Publishing the
+    # preparation snapshot would overwrite unrelated edits made before stop.
+    "$FM_ROOT/bin/fm-kimi-turnend-hook.sh" install
+  fi
   retire_relaunch_wiring
   if [ -n "${BUSY_GEN:-}" ]; then
     RELAUNCH_REPLACEMENT_BUSY_GEN=$BUSY_GEN
@@ -4378,7 +4393,8 @@ fi
 # still being delivered, cannot observe or complete a fresh provisional record
 # between its state check and `tasks-axi start`, and a delivery failure cannot
 # follow a committed In-flight transition.
-if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
+# Relaunch retains slot ownership protection until the replacement is launched.
+if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ] && [ "$RELAUNCH" -eq 0 ]; then
   SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
   fm_lock_release "$SPAWN_TREEHOUSE_PROJECT_LOCK"
 fi

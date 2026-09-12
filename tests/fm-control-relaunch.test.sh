@@ -79,7 +79,8 @@ case "${1:-}" in
           [ ! -f "$D/exit-cwd" ] || cat "$D/exit-cwd" > "$D/cwd"
           [ -z "${FM_FAKE_EXIT_TRANSPORT_FAIL_AFTER_STOP:-}" ] || exit 1
           ;;
-        *'encode launch-brief'*)
+        *'encode launch-brief'*|*' --auto')
+          [ ! -x "$D/before-launch" ] || "$D/before-launch" || exit 1
           cat "$D/becomes" > "$D/command"
           [ -z "${FM_FAKE_LAUNCH_TRANSPORT_FAIL_AFTER_START:-}" ] || exit 1
           ;;
@@ -125,7 +126,12 @@ case "${1:-}" in
       esac
     done
     printf 'fakepane\n'; exit 0 ;;
-  capture-pane) printf '╭────╮\n│    │\n╰────╯\n'; exit 0 ;;
+  capture-pane)
+    printf '╭────╮\n│    │\n╰────╯\n'
+    if [ "$(cat "$D/command")" = kimi ]; then
+      printf 'Welcome to Kimi Code!\ncontext: 1%% (2k/256k)\n'
+    fi
+    exit 0 ;;
   list-windows) [ -f "$D/windows" ] && cat "$D/windows"; exit 0 ;;
 esac
 exit 0
@@ -214,7 +220,7 @@ run_control() {  # <case-dir> <args...>
   fi
   pane_pid=$!
   env FM_FAKE_PANE_PID="$pane_pid" FM_FAKE_PANE_PATH="${FM_FAKE_PANE_PATH:-$dir/fakebin:$PATH}" \
-    PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
+    PATH="$dir/fakebin:$PATH" FM_HOME="${FM_FAKE_CONTROL_HOME:-$dir/home}" FM_FAKE_DIR="$dir/fake" \
     HOME="$dir/user-home" CLAUDE_CONFIG_DIR='' \
     FM_SPAWN_NO_GUARD=1 GROK_HOME="$dir/grokhome" \
     FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 FM_CONTROL_LAUNCH_WAIT=0.05 \
@@ -1996,8 +2002,8 @@ SH
 }
 
 test_secondmate_preparation_holds_inheritance_until_stop() {
-  local dir scenario home out rc lock
-  for scenario in state-unwritable config-unwritable destination-directory locked success exit-refused; do
+  local dir scenario home out rc lock dead_pid
+  for scenario in state-unwritable config-unwritable destination-directory locked stale-lock success exit-refused; do
     dir=$(new_case "sm-prepare-$scenario" sm-prepare)
     home="$dir/smhome"
     fm_git_worktree "$dir/proj" "$home" sm-branch
@@ -2031,7 +2037,14 @@ test_secondmate_preparation_holds_inheritance_until_stop() {
         ;;
       destination-directory) rm "$home/config/crew-harness"; mkdir "$home/config/crew-harness" ;;
       locked) mkdir "$lock"; printf '%s\n' "$$" > "$lock/pid" ;;
-      success|exit-refused)
+      stale-lock|success|exit-refused)
+        if [ "$scenario" = stale-lock ]; then
+          /bin/true &
+          dead_pid=$!
+          wait "$dead_pid"
+          mkdir "$lock"
+          printf '%s\n' "$dead_pid" > "$lock/pid"
+        fi
         printf '%s' "$scenario" > "$dir/fake/scenario"
         cat > "$dir/fake/before-exit" <<'SH'
 #!/usr/bin/env bash
@@ -2052,7 +2065,7 @@ SH
     case "$scenario" in
       state-unwritable|config-unwritable) chmod 700 "$home/${scenario%-unwritable}" ;;
     esac
-    if [ "$scenario" = success ]; then
+    if [ "$scenario" = success ] || [ "$scenario" = stale-lock ]; then
       expect_code 0 "$rc" "prepared secondmate should relaunch: $out"
       assert_present "$dir/inheritance-proven-at-stop" "inheritance or lock was not proven at stop"
       [ "$(cat "$home/config/crew-harness")" = codex ] || fail "inheritance was not published after stop"
@@ -2285,6 +2298,178 @@ SH
   pass "fm-control and fm-spawn relaunch: relative PATH entries resolve Cursor to an absolute launcher"
 }
 
+test_relaunch_normalizes_control_paths() {
+  local dir scenario out rc
+  for scenario in relative-home relative-state; do
+    dir=$(new_case "$scenario" rl-relative-control)
+    add_ship_task "$dir" rl-relative-control claude
+    out=$(
+      cd "$dir/home" || exit 1
+      if [ "$scenario" = relative-home ]; then
+        FM_FAKE_CONTROL_HOME=. run_control "$dir" rl-relative-control relaunch --note 'Continue in this home.'
+      else
+        FM_STATE_OVERRIDE=./state run_control "$dir" rl-relative-control relaunch --note 'Use the relative state directory.'
+      fi
+    ); rc=$?
+    expect_code 0 "$rc" "$scenario should complete the preparation handshake: $out"
+    [ "$(journal_field "$dir" rl-relative-control phase)" = complete ] || fail "$scenario did not complete"
+    [ "$(cat "$dir/fake/command")" = claude ] || fail "$scenario left no replacement"
+    assert_grep 'encode launch-brief' "$dir/fake/literal" "$scenario never launched the replacement"
+  done
+  pass "fm-control relaunch: relative home and state paths share the absolute preparation directory"
+}
+
+test_relaunch_proves_recorded_pool_slot_ownership() {
+  local dir scenario wt lock out rc
+  for scenario in mine reassigned absent unsafe locked live-reassigned direct-reassigned; do
+    dir=$(new_case "slot-$scenario" rl-slot)
+    add_ship_task "$dir" rl-slot claude
+    wt="$dir/pool/1/proj"
+    mkdir -p "$dir/pool/1"
+    git -C "$dir/proj" worktree move "$dir/wt" "$wt" || fail "could not move fixture into a pool slot"
+    printf '{}\n' > "$dir/pool/treehouse-state.json"
+    sed "s|^worktree=.*|worktree=$wt|" "$dir/home/state/rl-slot.meta" > "$dir/slot.meta"
+    mv "$dir/slot.meta" "$dir/home/state/rl-slot.meta"
+    lock=$(
+      FM_HOME="$dir/home"
+      STATE="$FM_HOME/state"
+      # shellcheck source=/dev/null
+      . "$ROOT/bin/fm-wake-lib.sh"
+      fm_treehouse_slot_owner_claim "$wt" rl-slot "$FM_HOME" || exit 1
+      fm_treehouse_project_lock_path "$dir/proj"
+    ) || fail "could not seed pool ownership"
+    printf zsh > "$dir/fake/command"
+    printf '%s' "$dir/home" > "$dir/fake/cwd"
+    printf 'successor wiring\n' > "$wt/.fm-slot-fixture"
+    case "$scenario" in
+      reassigned|live-reassigned|direct-reassigned)
+        printf 'task=successor\nhome=%s\n' "$dir/home" > "$dir/pool/1/.fm-slot-owner"
+        ;;
+      absent) rm "$dir/pool/1/.fm-slot-owner" ;;
+      unsafe) rm "$dir/pool/1/.fm-slot-owner"; mkdir "$dir/pool/1/.fm-slot-owner" ;;
+      locked) mkdir "$lock"; printf '%s\n' "$$" > "$lock/pid" ;;
+      mine)
+        printf '%s\n' "$ROOT/bin/fm-wake-lib.sh" > "$dir/wake-lib"
+        printf '%s\n' "$lock" > "$dir/project-lock"
+        cat > "$dir/fake/after-cd" <<'SH'
+#!/usr/bin/env bash
+set -eu
+CASE=${FM_FAKE_DIR%/*}
+FM_HOME="$CASE/home"
+STATE="$FM_HOME/state"
+# shellcheck source=/dev/null
+. "$(cat "$CASE/wake-lib")"
+lock=$(cat "$CASE/project-lock")
+if fm_lock_try_acquire "$lock"; then
+  fm_lock_release "$lock"
+  exit 1
+fi
+kill -0 "$FM_LOCK_HELD_PID"
+printf 'held\n' >> "$CASE/slot-lock-proven"
+SH
+        chmod +x "$dir/fake/after-cd"
+        cp -p "$dir/fake/after-cd" "$dir/fake/before-launch"
+        ;;
+    esac
+    if [ "$scenario" = live-reassigned ]; then
+      printf claude > "$dir/fake/command"
+      printf '%s' "$wt" > "$dir/fake/cwd"
+    fi
+    cp "$dir/home/state/rl-slot.meta" "$dir/meta.before"
+    cp "$dir/fake/cwd" "$dir/cwd.before"
+    cp "$dir/fake/command" "$dir/command.before"
+    if [ "$scenario" = direct-reassigned ]; then
+      out=$(run_spawn "$dir" rl-slot --relaunch --harness claude); rc=$?
+    else
+      out=$(run_control "$dir" rl-slot relaunch --note 'Recover the recorded slot.'); rc=$?
+    fi
+    if [ "$scenario" = mine ]; then
+      expect_code 0 "$rc" "an owned slot should relaunch: $out"
+      [ "$(cat "$dir/fake/cwd")" = "$wt" ] || fail "owned slot was not re-entered"
+      [ "$(cat "$dir/fake/command")" = claude ] || fail "owned slot did not launch"
+      [ "$(wc -l < "$dir/slot-lock-proven")" -eq 2 ] || fail "project lock did not cover entry and launch"
+    else
+      expect_code 1 "$rc" "$scenario must refuse before entry or stop: $out"
+      assert_contains "$out" Treehouse "refusal should identify the pool ownership boundary"
+      cmp -s "$dir/cwd.before" "$dir/fake/cwd" || fail "$scenario entered the recorded slot"
+      cmp -s "$dir/command.before" "$dir/fake/command" || fail "$scenario stopped or launched an agent"
+      cmp -s "$dir/meta.before" "$dir/home/state/rl-slot.meta" || fail "$scenario changed the task record"
+      [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "$scenario sent lifecycle bytes"
+    fi
+    [ "$(cat "$wt/.fm-slot-fixture")" = 'successor wiring' ] || fail "relaunch changed unrelated slot wiring"
+    if [ "$scenario" = locked ]; then
+      [ "$(cat "$lock/pid")" = "$$" ] || fail "relaunch stole the allocation lock"
+    else
+      assert_absent "$lock" "relaunch leaked the allocation lock"
+    fi
+  done
+  pass "relaunch: pool ownership is proven under the allocation lock before entry or stop"
+}
+
+test_kimi_relaunch_preserves_concurrent_config_edits() {
+  local dir scenario config out rc token inode
+  for scenario in installed install-needed; do
+    dir=$(new_case "kimi-config-$scenario" rl-kimi-config)
+    add_ship_task "$dir" rl-kimi-config claude
+    printf '#!/bin/sh\nexit 0\n' > "$dir/fakebin/kimi"
+    chmod +x "$dir/fakebin/kimi"
+    mkdir -p "$dir/user-home/.kimi-code"
+    config="$dir/user-home/.kimi-code/config.toml"
+    printf '# Preserve user settings.\ndefault_model = "original"\n' > "$config"
+    if [ "$scenario" = installed ]; then
+      HOME="$dir/user-home" "$ROOT/bin/fm-kimi-turnend-hook.sh" install || fail "could not seed Kimi wiring"
+    fi
+    cp "$config" "$dir/config.before"
+    printf kimi > "$dir/fake/becomes"
+    cat > "$dir/fake/before-exit" <<'SH'
+#!/usr/bin/env bash
+set -eu
+CASE=${FM_FAKE_DIR%/*}
+config="$HOME/.kimi-code/config.toml"
+cmp -s "$CASE/config.before" "$config"
+set -- "$CASE/home/state"/.rl-kimi-config.relaunch-prepare.*
+[ "$#" = 1 ] && [ -f "$1/ready" ]
+[ -x "$1/kimi-home/.kimi-code/fm-turn-end.sh" ]
+printf '\n[concurrent]\nvalue = "preserved"\n' >> "$config"
+cp "$config" "$CASE/config.at-stop"
+python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_ino)' "$config" > "$CASE/config.inode"
+: > "$CASE/kimi-staging-proven"
+SH
+    chmod +x "$dir/fake/before-exit"
+    out=$(run_control "$dir" rl-kimi-config relaunch --harness kimi --note 'Keep concurrent configuration edits.'); rc=$?
+    expect_code 0 "$rc" "Kimi $scenario relaunch should succeed: $out"
+    assert_present "$dir/kimi-staging-proven" "Kimi preparation changed live config or failed to stage wiring"
+    [ "$(cat "$dir/fake/command")" = kimi ] || fail "Kimi did not launch"
+    python3 - "$config" <<'PY'
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as stream:
+    config = tomllib.load(stream)
+assert config["default_model"] == "original"
+assert config["concurrent"]["value"] == "preserved"
+assert len(config["hooks"]) == 1
+assert config["hooks"][0]["event"] == "Stop"
+PY
+    expect_code 0 "$?" "Kimi activation lost concurrent settings or the Stop hook"
+    if [ "$scenario" = installed ]; then
+      cmp -s "$dir/config.at-stop" "$config" || fail "unchanged Kimi config was altered"
+      inode=$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_ino)' "$config")
+      [ "$inode" = "$(cat "$dir/config.inode")" ] || fail "unchanged Kimi config was replaced"
+    fi
+    token=$(cat "$dir/home/state/rl-kimi-config.kimi-turnend-token")
+    [ "$(cat "$dir/user-home/.kimi-code/fm-turn-end.d/$token")" = "$dir/home/state/rl-kimi-config.turn-ended" ] \
+      || fail "Kimi registry does not point to the relaunched task"
+    jq -cn --arg cwd "$dir/wt" '{hook_event_name:"Stop",cwd:$cwd}' \
+      | HOME="$dir/user-home" bash "$dir/user-home/.kimi-code/fm-turn-end.sh"
+    assert_present "$dir/home/state/rl-kimi-config.turn-ended" "Kimi replacement hook did not deliver turn end"
+  done
+  pass "fm-control relaunch: Kimi activation preserves concurrent settings and avoids unchanged config replacement"
+}
+
+test_relaunch_normalizes_control_paths
+test_relaunch_proves_recorded_pool_slot_ownership
+test_kimi_relaunch_preserves_concurrent_config_edits
 test_relaunch_preserves_ampersands_in_executable_paths
 test_exited_relaunch_normalizes_relative_cursor_executable
 test_native_process_path_preserves_entry_boundaries

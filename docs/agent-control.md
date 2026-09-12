@@ -70,15 +70,17 @@ It is not deterministic across the verified adapters: codex, grok, and gemini re
    A secondmate relaunch does not require one and never rewrites its standing charter.
 4. **Prepare the replacement** through its single owner, `bin/fm-spawn.sh --relaunch`, before stopping the old agent.
    Preparation checks launch configuration, instructions, delivery policy, backlog eligibility, recorded worktree isolation, and workspace trust.
+   A recorded Treehouse pool slot must still be claimed by this task under the shared project lock before worktree re-entry or stop; that lock remains held through launch and record publication.
    Executable resolution uses the pane's `PATH` in the recorded worktree: an exited shell returns there before its `PATH` is captured, while a live endpoint's `PATH` comes from its native process environment with entry boundaries preserved.
    For a direct raw-command relaunch through `fm-spawn.sh`, the explicitly selected executable is validated.
    Before readiness, `prepare_relaunch` verifies the resolved executable and staged hook and plugin files and their destinations.
    It obtains validated retirement paths through `bin/fm-control-lib.sh`, including any Grok or Kimi token sidecar and its resolved registry entry.
-   For a secondmate, it also proves inheritance destination access and acquires the required inheritance lock; home synchronization and inherited-file publication wait until the old agent has stopped.
+   For a secondmate, it also proves inheritance destination access and acquires the required inheritance lock through the shared lock owner, including recovery of abandoned legacy locks; home synchronization and inherited-file publication wait until the old agent has stopped.
    Preparation preserves the previous wiring, active busy generation, and task record.
    The same spawn process holds its locks and resolved launch inputs until control authorizes it to continue; the script's header owns this internal handoff.
 5. **Stop the old agent** through the `exit` verb, with its postcondition, then release the prepared launch.
    The replacement reuses the recorded endpoint and worktree, retires the previous harness's per-task wiring, publishes the staged wiring, and activates the prepared busy generation where one was armed.
+   Kimi's installer reapplies its owned hook region to the current configuration after stop, preserving unrelated edits made during preparation and leaving an unchanged configuration file untouched.
 
 Switching harness is therefore one ordinary relaunch rather than a separate mechanism.
 

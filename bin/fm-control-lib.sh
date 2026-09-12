@@ -295,11 +295,11 @@ fm_control_harness_retirement_paths() {
   token_path=$(fm_control_harness_turnend_token_path "$harness" "$state" "$id") || return 1
   if [ -n "$token_path" ] && { [ -e "$token_path" ] || [ -L "$token_path" ]; }; then
     token=
-    [ -f "$token_path" ] && [ ! -L "$token_path" ] && [ -r "$token_path" ] \
-      && token=$(cat -- "$token_path") || {
+    if ! { [ -f "$token_path" ] && [ ! -L "$token_path" ] && [ -r "$token_path" ] \
+      && token=$(cat -- "$token_path"); }; then
       echo "error: cannot read retirement token at $token_path" >&2
       return 1
-    }
+    fi
     case "$token" in
       ''|.|..|*[!A-Za-z0-9._-]*)
         echo "error: invalid retirement token at $token_path" >&2
