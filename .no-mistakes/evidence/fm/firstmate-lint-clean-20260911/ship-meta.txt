@@ -1,0 +1,13 @@
+window=firstmate:fm-agy-kind-ship-q7
+endpoint_task_id=agy-kind-ship-q7
+worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPP204BMFXY7AQH39PHTQH/.nm-agy-test-56qqcurz/fm-agy-harness.t2pjUI/kind-ship/wt
+project=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPP204BMFXY7AQH39PHTQH/.nm-agy-test-56qqcurz/fm-agy-harness.t2pjUI/kind-ship/project
+harness=agy
+kind=ship
+mode=direct-PR
+yolo=off
+tasktmp=/tmp/fm-agy-kind-ship-q7
+model=default
+effort=default
+busy_gen=g1789247058.2590687.32422
+spawn_gen=s1789247058.2587294.4883

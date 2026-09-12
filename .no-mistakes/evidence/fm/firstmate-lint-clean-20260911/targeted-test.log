@@ -1,0 +1,86 @@
+ok - fm-harness: agy detects by its anchored name, and magyar/agyd stay out
+ok - fm-harness: the agy marker is a precedence override that needs real agy ancestry
+ok - tmux liveness: agy is anchored, decoys stay out
+ok - fm-control-lib: the agy lifecycle table matches the verified mechanics
+ok - fm-busy-lib and fm-control-lib: agy's hook source is trusted only for agy, and its wiring stays out of the worktree
+ok - fm-spawn: the agy launch line clears markers, carries both workspaces, wires state-resident hooks, and pre-registers trust
+ok - fm-spawn: the agy crewmate and scout launch shapes are identical, so one live launch verifies both
+ok - fm-spawn: agy caps xhigh and max onto high while recording the requested effort verbatim
+ok - fm-spawn: an unlisted agy model refuses, while an unreadable listing passes through
+ok - fm-spawn: an agy secondmate is refused because it has no primary supervision protocol
+ok - fm-agy-trust.sh: the structural scope test holds and registration is idempotent
+{
+  "scope": "Real fm-spawn CLI and generated hooks; tmux and agy are fixture binaries, with no vendor session or model call.",
+  "tasks": [
+    {
+      "kind": "ship",
+      "task": "agy-kind-ship-q7",
+      "hooks_path": "/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPP204BMFXY7AQH39PHTQH/.nm-agy-test-56qqcurz/fm-agy-harness.t2pjUI/kind-ship/home/state/agy-kind-ship-q7.agy-hooks/.agents/hooks.json",
+      "hooks_in_project_worktree": false,
+      "lifecycle": [
+        {
+          "event": "spawn",
+          "busy_record": "v1 gen=g1789247058.2590687.32422 seq=1 state=busy source=fm-spawn event=launch-brief ts=1789247058",
+          "classification": "busy fm-spawn",
+          "turn_ended": false
+        },
+        {
+          "event": "PreInvocation",
+          "busy_record": "v1 gen=g1789247058.2590687.32422 seq=2 state=busy source=agy-hook event=pre-invocation ts=1789247079",
+          "classification": "busy agy-hook",
+          "turn_ended": false,
+          "hook_replies": [
+            "{}"
+          ]
+        },
+        {
+          "event": "Stop",
+          "busy_record": "v1 gen=g1789247058.2590687.32422 seq=3 state=idle source=agy-hook event=stop ts=1789247079",
+          "classification": "idle agy-hook",
+          "turn_ended": true,
+          "hook_replies": [
+            "{}"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "scout",
+      "task": "agy-kind-scout-q8",
+      "hooks_path": "/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPP204BMFXY7AQH39PHTQH/.nm-agy-test-56qqcurz/fm-agy-harness.t2pjUI/kind-scout/home/state/agy-kind-scout-q8.agy-hooks/.agents/hooks.json",
+      "hooks_in_project_worktree": false,
+      "lifecycle": [
+        {
+          "event": "spawn",
+          "busy_record": "v1 gen=g1789247062.2598702.31341 seq=1 state=busy source=fm-spawn event=launch-brief ts=1789247062",
+          "classification": "busy fm-spawn",
+          "turn_ended": false
+        },
+        {
+          "event": "PreInvocation",
+          "busy_record": "v1 gen=g1789247062.2598702.31341 seq=2 state=busy source=agy-hook event=pre-invocation ts=1789247079",
+          "classification": "busy agy-hook",
+          "turn_ended": false,
+          "hook_replies": [
+            "{}"
+          ]
+        },
+        {
+          "event": "Stop",
+          "busy_record": "v1 gen=g1789247062.2598702.31341 seq=3 state=idle source=agy-hook event=stop ts=1789247079",
+          "classification": "idle agy-hook",
+          "turn_ended": true,
+          "hook_replies": [
+            "{}"
+          ]
+        }
+      ]
+    }
+  ],
+  "actionlint": {
+    "check": "PATH resolution and version metadata only; no lint run",
+    "output": "/home/jason/.local/bin/actionlint\n1.7.12\ninstalled by downloading from release page\nbuilt with go1.26.1 compiler for linux/amd64\n"
+  }
+}
+Missing-hook counterfactual: exit=1; restored assertion rejected the missing scout hooks.
+not ok - an agy scout must get the same hook wiring as a crewmate

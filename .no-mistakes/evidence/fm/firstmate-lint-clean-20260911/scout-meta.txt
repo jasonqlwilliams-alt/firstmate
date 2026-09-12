@@ -1,0 +1,11 @@
+window=firstmate:fm-agy-kind-scout-q8
+endpoint_task_id=agy-kind-scout-q8
+worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPP204BMFXY7AQH39PHTQH/.nm-agy-test-56qqcurz/fm-agy-harness.t2pjUI/kind-scout/wt
+project=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPP204BMFXY7AQH39PHTQH/.nm-agy-test-56qqcurz/fm-agy-harness.t2pjUI/kind-scout/project
+harness=agy
+kind=scout
+tasktmp=/tmp/fm-agy-kind-scout-q8
+model=default
+effort=default
+busy_gen=g1789247062.2598702.31341
+spawn_gen=s1789247063.2595116.21055
