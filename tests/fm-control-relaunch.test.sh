@@ -2234,6 +2234,59 @@ SH
   pass "fm-control and fm-spawn relaunch: returning to the worktree precedes directory-dependent executable resolution"
 }
 
+test_relaunch_preserves_ampersands_in_executable_paths() {
+  local dir out rc launch
+  dir=$(new_case ampersand-path rl-ampersand-path)
+  add_ship_task "$dir" rl-ampersand-path claude
+  mkdir -p "$dir/R&D"
+  cat > "$dir/R&D/codex" <<SH
+#!/bin/sh
+printf replacement > '$dir/executable-ran'
+SH
+  chmod +x "$dir/R&D/codex"
+  printf codex > "$dir/fake/becomes"
+  out=$(
+    shopt -s patsub_replacement 2>/dev/null || true
+    export BASHOPTS
+    FM_FAKE_PANE_PATH="$dir/R&D" run_control "$dir" rl-ampersand-path relaunch --harness codex --note 'Preserve the executable path.'
+  ); rc=$?
+  expect_code 0 "$rc" "an executable path containing & should relaunch: $out"
+  launch=$(tail -n 1 "$dir/fake/literal")
+  bash -c "$launch" || fail "generated launch corrupted the executable path containing &"
+  [ "$(cat "$dir/executable-ran")" = replacement ] || fail "replacement executable did not run"
+  pass "fm-control relaunch: executable paths containing & survive template substitution"
+}
+
+test_exited_relaunch_normalizes_relative_cursor_executable() {
+  local dir entry out rc launch
+  for entry in control spawn; do
+    dir=$(new_case "relative-cursor-$entry" rl-relative-cursor)
+    add_ship_task "$dir" rl-relative-cursor claude
+    mkdir -p "$dir/wt/bin"
+    cat > "$dir/wt/bin/cursor-agent" <<SH
+#!/bin/sh
+printf cursor > '$dir/executable-ran'
+SH
+    chmod +x "$dir/wt/bin/cursor-agent"
+    printf zsh > "$dir/fake/command"
+    printf cursor-agent > "$dir/fake/becomes"
+    printf '%s' "$dir/home" > "$dir/fake/cwd"
+    if [ "$entry" = control ]; then
+      out=$(FM_FAKE_PANE_PATH='./bin:/usr/bin:/bin' run_control "$dir" rl-relative-cursor relaunch --harness cursor --note 'Use the worktree Cursor installation.'); rc=$?
+    else
+      out=$(FM_FAKE_PANE_PATH='./bin:/usr/bin:/bin' run_spawn "$dir" rl-relative-cursor --relaunch --harness cursor); rc=$?
+    fi
+    expect_code 0 "$rc" "$entry should resolve Cursor from the worktree's relative PATH: $out"
+    launch=$(tail -n 1 "$dir/fake/literal")
+    ( cd "$dir/home" && bash -c "$launch" ) || fail "generated Cursor launch depends on the controller directory"
+    [ "$(cat "$dir/executable-ran")" = cursor ] || fail "worktree Cursor executable did not run"
+    [ "$(meta_field "$dir" rl-relative-cursor harness)" = cursor ] || fail "Cursor relaunch did not publish its harness"
+  done
+  pass "fm-control and fm-spawn relaunch: relative PATH entries resolve Cursor to an absolute launcher"
+}
+
+test_relaunch_preserves_ampersands_in_executable_paths
+test_exited_relaunch_normalizes_relative_cursor_executable
 test_native_process_path_preserves_entry_boundaries
 test_relaunch_ignores_path_assignments_in_arguments
 test_exited_relaunch_resolves_path_after_worktree_return

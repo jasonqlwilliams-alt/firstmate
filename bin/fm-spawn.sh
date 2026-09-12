@@ -1519,6 +1519,7 @@ spawn_pane_launch_path() {
 }
 
 spawn_resolve_launch_binary() (
+  local candidate
   if [ "$RELAUNCH" -eq 1 ]; then
     if [ "$RAW_LAUNCH" -eq 1 ] && [ -n "${RAW_BIN:-}" ]; then
       printf '%s\n' "$RAW_BIN"
@@ -1527,7 +1528,11 @@ spawn_resolve_launch_binary() (
     cd -- "$RELAUNCH_WT" || exit 1
     export PATH="$SPAWN_LAUNCH_PATH"
   fi
-  "$@"
+  candidate=$("$@") || exit 1
+  case "$candidate" in
+    /*) printf '%s\n' "$candidate" ;;
+    *) resolve_spawn_executable "$candidate" ;;
+  esac
 )
 
 # Pi's CLI surface is version-dependent, so probe the resolved executable's help
@@ -1920,7 +1925,7 @@ resolve_launch_executables() {
           echo "error: $HARNESS executable not found on PATH; refusing relaunch before stop" >&2
           exit 1
         }
-        LAUNCH=${LAUNCH//__HARNESSBIN__/$(shell_quote "$TARGET_BIN")}
+        LAUNCH=${LAUNCH//__HARNESSBIN__/"$(shell_quote "$TARGET_BIN")"}
       else
         LAUNCH=${LAUNCH//__HARNESSBIN__/$HARNESS}
       fi
