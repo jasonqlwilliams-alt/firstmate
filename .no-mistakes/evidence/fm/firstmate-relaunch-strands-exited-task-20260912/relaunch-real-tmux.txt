@@ -1,0 +1,112 @@
+Real tmux lifecycle evidence; agent is an inert compiled fixture.
+Initial agent: command=codex; cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree; HEAD=3d3ad879455092e2acc259e66aa414069a29441d
+$ /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/bin/fm-control.sh e2e-relaunch-782958 exit
+stopped e2e-relaunch-782958 harness=codex backend=tmux endpoint=relaunch:fm-e2e-relaunch-782958 worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+exit=0; pane_command=bash; pane_cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/home
+Agent exited; real subshell unwound to the parent home.
+$ /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/bin/fm-control.sh e2e-relaunch-782958 relaunch --note 'Continue the preserved task.'
+relaunched e2e-relaunch-782958 harness=codex from=codex model=default effort=default backend=tmux endpoint=relaunch:fm-e2e-relaunch-782958 worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+warning: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/home/data/e2e-relaunch-782958/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+exit=0; pane_command=codex; pane_cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+$ /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/bin/fm-control.sh e2e-relaunch-782958 relaunch --harness gemini --note 'Missing executable must preserve this worker.'
+warning: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/home/data/e2e-relaunch-782958/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: gemini executable not found on PATH; refusing relaunch before stop
+error: replacement preparation for e2e-relaunch-782958 failed; the previous agent was not stopped. Inspect with bin/fm-crew-state.sh e2e-relaunch-782958
+error: relaunch of e2e-relaunch-782958 was refused before its agent was touched; its record and instructions were preserved
+exit=1; pane_command=codex; pane_cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+$ /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/bin/fm-control.sh e2e-relaunch-782958 relaunch --harness opencode --note 'Invalid plugin path must preserve this worker.'
+warning: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/home/data/e2e-relaunch-782958/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+mkdir: cannot create directory ‘/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree/.opencode/plugins’: File exists
+error: replacement preparation for e2e-relaunch-782958 failed; the previous agent was not stopped. Inspect with bin/fm-crew-state.sh e2e-relaunch-782958
+error: relaunch of e2e-relaunch-782958 was refused before its agent was touched; its record and instructions were preserved
+exit=1; pane_command=codex; pane_cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+Both refusals retained the same running worker: pid=793970 cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+$ /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/bin/fm-control.sh e2e-relaunch-782958 exit
+stopped e2e-relaunch-782958 harness=codex backend=tmux endpoint=relaunch:fm-e2e-relaunch-782958 worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+exit=0; pane_command=bash; pane_cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+$ /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/bin/fm-control.sh e2e-relaunch-782958 relaunch --harness cursor --note 'Resolve Cursor from the worktree-relative PATH.'
+relaunched e2e-relaunch-782958 harness=cursor from=codex model=default effort=default backend=tmux endpoint=relaunch:fm-e2e-relaunch-782958 worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+warning: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/home/data/e2e-relaunch-782958/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+exit=0; pane_command=cursor-agent; pane_cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+Persisted task metadata:
+window=relaunch:fm-e2e-relaunch-782958
+endpoint_task_id=e2e-relaunch-782958
+worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+project=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/project
+harness=cursor
+kind=ship
+mode=no-mistakes
+yolo=off
+tasktmp=/tmp/fm-e2e-relaunch-782958
+model=default
+effort=default
+spawn_gen=s1789254102.799784.18918
+control_relaunch_tx=799520.20260912T230134Z.19889
+
+Persisted control journal:
+v1
+task=e2e-relaunch-782958
+phase=complete
+ts=2026-09-12T23:01:43Z
+backend=tmux
+endpoint=relaunch:fm-e2e-relaunch-782958
+worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+kind=ship
+from_harness=codex
+from_model=default
+from_effort=default
+to_harness=cursor
+to_model=default
+to_effort=default
+worktree_head=3d3ad879455092e2acc259e66aa414069a29441d
+worktree_dirty=yes
+note_file=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/home/state/e2e-relaunch-782958.control-relaunch.note
+exit_result=already-stopped
+
+Preserved task.txt:
+committed task work
+unfinished task work
+
+Actual launched process log:
+pid=783511 cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+pid=793970 cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+pid=809735 cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+
+TARGET VERIFIED: same endpoint, same worktree and HEAD, uncommitted work preserved.
+Terminal capture:
+export PATH='./R&D:./bin:/usr/bin:/bin'; touch /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/shell-ready
+bash-5.3$ export PATH='./R&D:./bin:/usr/bin:/bin'; touch /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/shell-
+ready
+bash-5.3$ ( cd /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree; codex )
+fixture agent running: pid=783511 cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+/quit
+bash-5.3$ cd -- '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree'
+bash-5.3$ printf '%s\n' "$PATH" > '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/home/state/.e2e-relaunch-782
+958.relaunch-path.0diL4pmd'
+bash-5.3$ export GOTMPDIR=/tmp/fm-e2e-relaunch-782958/gotmp
+bash-5.3$ export FM_TASK_ID=e2e-relaunch-782958
+bash-5.3$ unset TRACEPARENT; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/
+.test-phase/real-tmux/worktree/R&D/codex' --dangerously-bypass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch '/home/jason/.no-mistakes/worktrees/e95
+238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/home/state/e2e-relaunch-782958.turn-ended'\"]" "$('/home/jason/.no-mistakes/worktrees/e95238b70e4e/01
+M2BRHG50BDTXRXWEJA3J597H/bin/fm-operational-input.sh' encode launch-brief < '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-ph
+ase/real-tmux/home/data/e2e-relaunch-782958/launch-brief.md')"
+fixture agent running: pid=793970 cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+/quit
+bash-5.3$ cd /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/home
+bash-5.3$ cd -- '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree'
+bash-5.3$ printf '%s\n' "$PATH" > '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/home/state/.e2e-relaunch-782
+958.relaunch-path.sG408qYW'
+bash-5.3$ export GOTMPDIR=/tmp/fm-e2e-relaunch-782958/gotmp
+bash-5.3$ export FM_TASK_ID=e2e-relaunch-782958
+bash-5.3$ unset TRACEPARENT; env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_INVOKED_AS '/home/jason/.no-mistakes/wo
+rktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree/bin/cursor-agent' --trust --yolo --workspace '/home/jason/.no-mistakes/worktrees/
+e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree' "$('/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/bin/fm-op
+erational-input.sh' encode launch-brief < '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/home/data/e2e-relaun
+ch-782958/launch-brief.md')"
+fixture agent running: pid=809735 cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/real-tmux/worktree
+
+
+
+
+
+

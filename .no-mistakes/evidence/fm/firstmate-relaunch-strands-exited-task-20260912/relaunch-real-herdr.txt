@@ -1,0 +1,97 @@
+# evidence begin: real Herdr exited-shell recovery
+$ bin/fm-spawn.sh hsmoke --relaunch --harness codex
+spawned hsmoke harness=codex kind=ship mode=no-mistakes yolo=off window=fm-lab-control-smoke-879729:w1:p2 worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.fcfuMO/wt
+pane cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.fcfuMO/wt
+saved task metadata:
+window=fm-lab-control-smoke-879729:w1:p2
+endpoint_task_id=hsmoke
+worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.fcfuMO/wt
+project=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.fcfuMO/proj
+harness=codex
+kind=ship
+mode=no-mistakes
+yolo=off
+tasktmp=/tmp/fm-hsmoke
+model=default
+effort=default
+spawn_gen=s1789254160.882422.30130
+backend=herdr
+herdr_session=fm-lab-control-smoke-879729
+herdr_workspace_id=w1
+herdr_tab_id=w1:t2
+herdr_pane_id=w1:p2
+actual pane output:
+[jason@Lights wt]$ export PATH=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tm
+p/fm-control-herdr.fcfuMO/fakebin:$PATH
+[jason@Lights wt]$ cd -- /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-c
+ontrol-herdr.fcfuMO/proj
+[jason@Lights proj]$ cd -- '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/f
+m-control-herdr.fcfuMO/wt'
+[jason@Lights wt]$ printf '%s\n' "$PATH" > '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.
+test-phase/tmp/fm-control-herdr.fcfuMO/home/state/.hsmoke.relaunch-path.lTbWkLXz'
+[jason@Lights wt]$ export GOTMPDIR=/tmp/fm-hsmoke/gotmp
+[jason@Lights wt]$ export FM_TASK_ID=hsmoke
+[jason@Lights wt]$ unset TRACEPARENT; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI '/home/jason/.no-mistakes/w
+orktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.fcfuMO/fakebin/codex' --dangerously-by
+pass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG
+50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.fcfuMO/home/state/hsmoke.turn-ended'\"]" "$('/home/jason/.no-mistake
+s/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/bin/fm-operational-input.sh' encode launch-brief < '/home/jason/.no-
+mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.fcfuMO/home/data/hsmoke/laun
+ch-brief.md')"
+[jason@Lights wt]$
+# evidence end
+
+# evidence begin: real Herdr stale-registration recovery
+$ bin/fm-spawn.sh hsmoke --relaunch --harness codex
+spawned hsmoke harness=codex kind=ship mode=no-mistakes yolo=off window=fm-lab-control-smoke-879729:w1:p2 worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.fcfuMO/wt
+pane cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.fcfuMO/wt
+saved task metadata:
+window=fm-lab-control-smoke-879729:w1:p2
+endpoint_task_id=hsmoke
+worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.fcfuMO/wt
+project=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.fcfuMO/proj
+harness=codex
+kind=ship
+mode=no-mistakes
+yolo=off
+tasktmp=/tmp/fm-hsmoke
+model=default
+effort=default
+spawn_gen=s1789254176.901810.12718
+backend=herdr
+herdr_session=fm-lab-control-smoke-879729
+herdr_workspace_id=w1
+herdr_tab_id=w1:t2
+herdr_pane_id=w1:p2
+actual pane output:
+[jason@Lights proj]$ cd -- '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/f
+m-control-herdr.fcfuMO/wt'
+[jason@Lights wt]$ printf '%s\n' "$PATH" > '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.
+test-phase/tmp/fm-control-herdr.fcfuMO/home/state/.hsmoke.relaunch-path.lTbWkLXz'
+[jason@Lights wt]$ export GOTMPDIR=/tmp/fm-hsmoke/gotmp
+[jason@Lights wt]$ export FM_TASK_ID=hsmoke
+[jason@Lights wt]$ unset TRACEPARENT; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI '/home/jason/.no-mistakes/w
+orktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.fcfuMO/fakebin/codex' --dangerously-by
+pass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG
+50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.fcfuMO/home/state/hsmoke.turn-ended'\"]" "$('/home/jason/.no-mistake
+s/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/bin/fm-operational-input.sh' encode launch-brief < '/home/jason/.no-
+mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.fcfuMO/home/data/hsmoke/laun
+ch-brief.md')"
+[jason@Lights wt]$ /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control
+-herdr.fcfuMO/agentbin/claude 900
+^[Terminated                 /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/
+fm-control-herdr.fcfuMO/agentbin/claude 900
+[jason@Lights wt]$ ^C
+[jason@Lights wt]$ printf '%s\n' "$PATH" > '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.
+test-phase/tmp/fm-control-herdr.fcfuMO/home/state/.hsmoke.relaunch-path.sxFOzoWt'
+[jason@Lights wt]$ export GOTMPDIR=/tmp/fm-hsmoke/gotmp
+[jason@Lights wt]$ export FM_TASK_ID=hsmoke
+[jason@Lights wt]$ unset TRACEPARENT; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI '/home/jason/.no-mistakes/w
+orktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.fcfuMO/fakebin/codex' --dangerously-by
+pass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG
+50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.fcfuMO/home/state/hsmoke.turn-ended'\"]" "$('/home/jason/.no-mistake
+s/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/bin/fm-operational-input.sh' encode launch-brief < '/home/jason/.no-
+mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.fcfuMO/home/data/hsmoke/laun
+ch-brief.md')"
+[jason@Lights wt]$
+# evidence end

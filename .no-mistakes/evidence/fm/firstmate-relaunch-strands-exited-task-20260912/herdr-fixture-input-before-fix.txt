@@ -1,0 +1,25 @@
+[jason@Lights wt]$ export PATH=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tm
+p/fm-control-herdr.vO8ukE/fakebin:$PATH
+[jason@Lights wt]$ cd -- /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-c
+ontrol-herdr.vO8ukE/proj
+[jason@Lights proj]$ cd -- '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/f
+m-control-herdr.vO8ukE/wt'
+[jason@Lights wt]$ printf '%s\n' "$PATH" > '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.
+test-phase/tmp/fm-control-herdr.vO8ukE/home/state/.hsmoke.relaunch-path.YbnEIzA8'
+[jason@Lights wt]$ export GOTMPDIR=/tmp/fm-hsmoke/gotmp
+[jason@Lights wt]$ export FM_TASK_ID=hsmoke
+[jason@Lights wt]$ unset TRACEPARENT; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI '/home/jason/.no-mistakes/w
+orktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.vO8ukE/fakebin/codex' --dangerously-by
+pass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG
+50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.vO8ukE/home/state/hsmoke.turn-ended'\"]" "$('/home/jason/.no-mistake
+s/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/bin/fm-operational-input.sh' encode launch-brief < '/home/jason/.no-
+mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.vO8ukE/home/data/hsmoke/laun
+ch-brief.md')"
+[jason@Lights wt]$ /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control
+-herdr.vO8ukE/agentbin/claude 900
+^[Terminated                 /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/
+fm-control-herdr.vO8ukE/agentbin/claude 900
+[jason@Lights wt]$ [200~printf '%s\n' "$PATH" > '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J5
+97H/.test-phase/tmp/fm-control-herdr.vO8ukE/home/state/.hsmoke.relaunch-path.W0gmHY70'~
+bash: [200~printf: command not found
+[jason@Lights wt]${"id":"cli:pane:process_info","result":{"process_info":{"foreground_process_group_id":608001,"foreground_processes":[{"argv":["/usr/bin/bash"],"cmdline":"/usr/bin/bash","cwd":"/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/tmp/fm-control-herdr.vO8ukE/wt","name":"bash","pid":608001}],"pane_id":"w1:p2","shell_pid":608001},"type":"pane_process_info"}}

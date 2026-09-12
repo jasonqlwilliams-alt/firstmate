@@ -1,0 +1,50 @@
+Real tmux lifecycle evidence; agent is an inert compiled fixture.
+Initial agent: command=codex; cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/base-tmux/worktree; HEAD=870253805b906f7c30fb3f10e2bcfa08fdd770f0
+$ /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/base/bin/fm-control.sh e2e-relaunch-824370 exit
+stopped e2e-relaunch-824370 harness=codex backend=tmux endpoint=relaunch:fm-e2e-relaunch-824370 worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/base-tmux/worktree
+exit=0; pane_command=bash; pane_cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/base-tmux/home
+Agent exited; real subshell unwound to the parent home.
+$ /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/base/bin/fm-control.sh e2e-relaunch-824370 relaunch --note 'Continue the preserved task.'
+warning: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/base-tmux/home/data/e2e-relaunch-824370/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: task e2e-relaunch-824370's endpoint is in '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/base-tmux/home', not its recorded worktree '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/base-tmux/worktree'; refusing to relaunch an agent outside the copy holding its work
+error: the replacement agent for e2e-relaunch-824370 could not be launched on codex
+error: e2e-relaunch-824370's agent was stopped but the replacement did not launch; no agent is running, and its work plus the recorded progress note are preserved at /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/base-tmux/worktree
+exit=1; pane_command=bash; pane_cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/base-tmux/home
+BASELINE REPRODUCED: relaunch refused and task remains agent-free.
+Terminal capture:
+bash-5.3$ export PATH='./R&D:./bin:/usr/bin:/bin'; touch /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/base-tmux/shell-
+ready
+bash-5.3$ ( cd /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/base-tmux/worktree; codex )
+fixture agent running: pid=825177 cwd=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BRHG50BDTXRXWEJA3J597H/.test-phase/base-tmux/worktree
+/quit
+bash-5.3$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
