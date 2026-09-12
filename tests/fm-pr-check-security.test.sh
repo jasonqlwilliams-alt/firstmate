@@ -490,6 +490,50 @@ test_invalid_entrypoints_have_zero_side_effects() {
   pass "PR and teardown entrypoints reject invalid arguments before every side effect"
 }
 
+test_control_metadata_preserves_armed_poll() {
+  local dir state line
+  dir=$(make_case control-metadata)
+  state="$dir/home/state"
+  write_task_meta "$dir"
+  run_check_entry "$dir" task-a https://github.com/o/r/pull/37 \
+    > "$dir/stdout" 2> "$dir/stderr" || fail "could not arm control metadata fixture"
+  fm_pr_poll_artifacts_valid "$state" task-a "$POLL" \
+    || fail "poll did not validate before relaunch"
+  [ "$(tail -2 "$state/task-a.meta")" = $'pr=https://github.com/o/r/pull/37\npr_head=0123456789abcdef0123456789abcdef01234567' ] \
+    || fail "fixture did not reproduce the recorded PR/head ordering"
+
+  # Reproduce the 2026-09-11 relaunch append, then other lifecycle writers
+  # that can legitimately add metadata after an already recorded PR.
+  for line in \
+    'control_relaunch_tx=12345.20260911T120000Z.6789' \
+    'traceparent=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01' \
+    'decisions_reviewed=1' \
+    'decision_keys=review-call' \
+    'spawn_gen=12345.20260911T120000Z.6789'; do
+    printf '%s\n' "$line" >> "$state/task-a.meta"
+    fm_pr_poll_artifacts_valid "$state" task-a "$POLL" \
+      || fail "armed poll rejected legitimate trailing metadata: $line"
+  done
+
+  cp "$state/task-a.meta" "$dir/valid.meta"
+  for line in 'unknown=value' 'control_relaunch_tx_extra=value' \
+    'control_relaunch_tx' 'pr_head=invalid' 'pr=https://github.com/o/r/pull/38'; do
+    cp "$dir/valid.meta" "$state/task-a.meta"
+    printf '%s\n' "$line" >> "$state/task-a.meta"
+    ! fm_pr_poll_artifacts_valid "$state" task-a "$POLL" \
+      || fail "armed poll accepted trailing tampering: $line"
+  done
+  cp "$dir/valid.meta" "$state/task-a.meta"
+  FM_TEST_GH_STATE=MERGED run_watcher_bounded "$dir/home" "$dir/fakebin" \
+    > "$dir/watch.out" 2> "$dir/watch.err" \
+    || fail "watcher failed after control metadata append: $(cat "$dir/watch.err")"
+  case "$(cat "$dir/watch.out")" in
+    check:*task-a.check.sh:*merged) ;;
+    *) fail "watcher lost the merged notification after control metadata append" ;;
+  esac
+  pass "control-plane trailing metadata preserves armed polls while unknown lines and PR tampering fail closed"
+}
+
 test_valid_recording_and_merge_derivation() {
   local dir expected sidecar count rc
   dir=$(make_case valid-recording)
@@ -2135,6 +2179,7 @@ test_gitlab_merged_poll_retires() {
   pass "GitHub and GitLab exact merged results share one retirement path"
 }
 
+test_control_metadata_preserves_armed_poll
 test_parser_matrix
 test_gitlab_merge_watch
 test_merged_poll_retires_once

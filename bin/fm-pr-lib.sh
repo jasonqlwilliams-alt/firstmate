@@ -12,6 +12,15 @@
 # consumer re-derives the identity from the stored URL and refuses any record
 # whose parts do not reconstruct that exact URL.
 #
+# Task metadata must contain exactly one canonical pr= line; any trailing
+# pr_head= must be a valid hash. The identity parser also permits the named
+# Relay link fields and control-plane fields after pr=: control_relaunch_tx
+# and traceparent (fm-spawn.sh), decisions_reviewed and decision_keys
+# (fm-captain-hold.sh), and spawn_gen (fm-teardown.sh legacy stamping).
+# These fields are opaque to PR identity validation, never evaluated as shell
+# input; their writers own their value contracts. The parser's explicit cases
+# are the single allowlist, and every other trailing line remains invalid.
+#
 # A validated exact merged result is retired through a private receipt only
 # after its durable wake is appended.
 # The receipt binds the terminal observation to the canonical registration and
@@ -316,6 +325,8 @@ fm_pr_metadata_identity_parse() {
         fi
         ;;
       x_request=*|x_request_ts=*|x_followups=*|x_platform=*|x_reply_max_chars=*)
+        ;;
+      control_relaunch_tx=*|traceparent=*|decisions_reviewed=*|decision_keys=*|spawn_gen=*)
         ;;
       *)
         [ "$seen_pr" -eq 0 ] || post_pr_invalid=1
