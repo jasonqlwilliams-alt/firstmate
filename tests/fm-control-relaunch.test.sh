@@ -72,6 +72,9 @@ case "${1:-}" in
       printf '%s\n' "$payload" >> "$D/literal"
       case "$payload" in
         /exit|/quit)
+          if [ -x "$D/before-exit" ]; then
+            "$D/before-exit" || exit 1
+          fi
           printf 'zsh' > "$D/command"
           [ ! -f "$D/exit-cwd" ] || cat "$D/exit-cwd" > "$D/cwd"
           [ -z "${FM_FAKE_EXIT_TRANSPORT_FAIL_AFTER_STOP:-}" ] || exit 1
@@ -132,7 +135,7 @@ SH
 
 # new_case <name> [id] -> echoes a case dir with a live claude ship task.
 new_case() {
-  local id=${2:-t1} dir="$TMP_ROOT/$1-$RANDOM"
+  local id=${2:-t1} dir="$TMP_ROOT/$1-$RANDOM" tool
   mkdir -p "$dir/home/state" "$dir/home/data" "$dir/fake"
   : > "$dir/fake/literal"
   : > "$dir/fake/keys"
@@ -140,6 +143,10 @@ new_case() {
   printf 'claude' > "$dir/fake/becomes"
   printf '%s\n' "fm-$id" > "$dir/fake/windows"
   make_tmux_stub "$dir"
+  for tool in claude codex opencode grok gemini pi; do
+    printf '#!/bin/sh\nexit 0\n' > "$dir/fakebin/$tool"
+    chmod +x "$dir/fakebin/$tool"
+  done
   printf '%s\n' "$dir"
 }
 
@@ -1668,8 +1675,161 @@ test_relaunch_preparation_refuses_before_stop() {
   pass "fm-control relaunch: replacement refusals preserve the running agent, metadata, and instructions"
 }
 
+test_relaunch_rejects_unlaunchable_replacement_before_stop() {
+  local dir out rc scenario target expected path_dir executable
+  local -a path_dirs
+  for scenario in plugin-directory missing-executable nonexecutable; do
+    dir=$(new_case "unlaunchable-$scenario" rl-launchable)
+    add_ship_task "$dir" rl-launchable claude
+    printf zsh > "$dir/fake/command"
+    out=$(run_spawn "$dir" rl-launchable --relaunch --harness claude); rc=$?
+    expect_code 0 "$rc" "seed the original live wiring"$'\n'"$out"
+    cp "$dir/wt/.claude/settings.local.json" "$dir/hook.before"
+    cp "$dir/home/state/rl-launchable.busy-gen" "$dir/gen.before"
+    cp "$dir/home/state/rl-launchable.busy-state" "$dir/busy.before"
+    cp "$dir/home/state/rl-launchable.meta" "$dir/meta.before"
+    cp "$dir/home/data/rl-launchable/brief.md" "$dir/brief.before"
+    : > "$dir/fake/literal"
+    : > "$dir/fake/keys"
+    target=codex
+    expected='codex executable not found'
+    if [ "$scenario" = plugin-directory ]; then
+      target=opencode
+      expected='.opencode/plugins'
+      mkdir -p "$dir/wt/.opencode"
+      printf 'project-owned file\n' > "$dir/wt/.opencode/plugins"
+      out=$(run_control "$dir" rl-launchable relaunch --harness "$target" --note 'Keep the current worker.'); rc=$?
+    else
+      mkdir -p "$dir/dependencies"
+      IFS=: read -r -a path_dirs <<< "$PATH"
+      for path_dir in "${path_dirs[@]}"; do
+        [ -d "$path_dir" ] || continue
+        path_dir=$(cd "$path_dir" && pwd -P)
+        for executable in "$path_dir"/*; do
+          [ -f "$executable" ] && [ -x "$executable" ] || continue
+          [ "${executable##*/}" != codex ] || continue
+          [ -e "$dir/dependencies/${executable##*/}" ] || ln -s "$executable" "$dir/dependencies/${executable##*/}"
+        done
+      done
+      rm "$dir/fakebin/codex"
+      if [ "$scenario" = nonexecutable ]; then
+        printf '#!/bin/sh\nexit 0\n' > "$dir/fakebin/codex"
+        chmod 600 "$dir/fakebin/codex"
+      fi
+      out=$(PATH="$dir/dependencies" run_control "$dir" rl-launchable relaunch --harness "$target" --note 'Keep the current worker.'); rc=$?
+    fi
+    expect_code 1 "$rc" "$scenario must refuse before stop"$'\n'"$out"
+    assert_contains "$out" "$expected" "refusal should name the invalid prerequisite"
+    [ "$(cat "$dir/fake/command")" = claude ] || fail "$scenario stopped the original agent"
+    [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "$scenario sent lifecycle bytes"
+    cmp -s "$dir/hook.before" "$dir/wt/.claude/settings.local.json" || fail "$scenario changed the old hook"
+    cmp -s "$dir/gen.before" "$dir/home/state/rl-launchable.busy-gen" || fail "$scenario retired the old generation"
+    cmp -s "$dir/busy.before" "$dir/home/state/rl-launchable.busy-state" || fail "$scenario changed busy state"
+    cmp -s "$dir/meta.before" "$dir/home/state/rl-launchable.meta" || fail "$scenario changed metadata"
+    cmp -s "$dir/brief.before" "$dir/home/data/rl-launchable/brief.md" || fail "$scenario changed instructions"
+    if [ "$scenario" = plugin-directory ]; then
+      [ "$(cat "$dir/wt/.opencode/plugins")" = 'project-owned file' ] || fail "plugin blocker was overwritten"
+    fi
+  done
+  pass "fm-control relaunch: invalid plugin paths and unavailable executables preserve the running worker"
+}
+
+test_relaunch_stages_wiring_until_stop() {
+  local dir out rc target old_gen hook_cmd
+  for target in claude opencode; do
+    dir=$(new_case "staged-$target" rl-staging)
+    add_ship_task "$dir" rl-staging claude
+    printf zsh > "$dir/fake/command"
+    out=$(run_spawn "$dir" rl-staging --relaunch --harness claude); rc=$?
+    expect_code 0 "$rc" "seed the original live wiring"$'\n'"$out"
+    cp "$dir/wt/.claude/settings.local.json" "$dir/hook.before"
+    cp "$dir/home/state/rl-staging.busy-gen" "$dir/gen.before"
+    cp "$dir/home/state/rl-staging.busy-state" "$dir/busy.before"
+    old_gen=$(cat "$dir/gen.before")
+    printf '%s' "$target" > "$dir/fake/becomes"
+    printf '%s' "$target" > "$dir/fake/target"
+    cat > "$dir/fake/before-exit" <<'SH'
+#!/usr/bin/env bash
+set -eu
+D=$FM_FAKE_DIR
+CASE=${D%/*}
+STATE="$CASE/home/state"
+cmp -s "$CASE/hook.before" "$CASE/wt/.claude/settings.local.json"
+cmp -s "$CASE/gen.before" "$STATE/rl-staging.busy-gen"
+cmp -s "$CASE/busy.before" "$STATE/rl-staging.busy-state"
+set -- "$STATE"/.rl-staging.relaunch-prepare.*
+[ "$#" = 1 ] && [ -f "$1/ready" ]
+[ -s "$1/busy/rl-staging.busy-state" ]
+[ "$(cat "$1/busy/rl-staging.busy-gen")" != "$(cat "$CASE/gen.before")" ]
+if [ "$(cat "$D/target")" = claude ]; then
+  set -- "$CASE/wt/.claude"/.fm-rl-staging.relaunch.*
+else
+  [ ! -e "$CASE/wt/.opencode/plugins/fm-busy-state.js" ]
+  set -- "$CASE/wt/.opencode/plugins"/.fm-rl-staging.relaunch.*
+fi
+[ "$#" = 1 ] && [ -s "$1" ]
+cp "$1" "$CASE/staged-hook"
+hook_cmd=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hooks"]["Stop"][0]["hooks"][0]["command"])' "$CASE/hook.before")
+bash -c "$hook_cmd"
+: > "$CASE/old-wiring-proven-at-stop"
+SH
+    chmod +x "$dir/fake/before-exit"
+    out=$(run_control "$dir" rl-staging relaunch --harness "$target" --note 'Activate the staged replacement.'); rc=$?
+    expect_code 0 "$rc" "staged $target relaunch should succeed"$'\n'"$out"
+    assert_present "$dir/old-wiring-proven-at-stop" "the stop did not observe intact old wiring and staged replacement"
+    [ "$(cat "$dir/fake/command")" = "$target" ] || fail "replacement did not start"
+    [ "$(cat "$dir/home/state/rl-staging.busy-gen")" != "$old_gen" ] || fail "replacement reused the old generation"
+    "$ROOT/bin/fm-busy-event.sh" apply "$dir/home/state" rl-staging idle --gen "$old_gen" --source test --event stale >/dev/null 2>&1
+    rc=$?
+    expect_code 1 "$rc" "the replacement must reject an old agent's late event"
+    if [ "$target" = claude ]; then
+      cmp -s "$dir/staged-hook" "$dir/wt/.claude/settings.local.json" || fail "the prepared hook was not installed"
+      hook_cmd=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hooks"]["Stop"][0]["hooks"][0]["command"])' "$dir/wt/.claude/settings.local.json")
+      bash -c "$hook_cmd" || fail "replacement hook could not run"
+    else
+      cmp -s "$dir/staged-hook" "$dir/wt/.opencode/plugins/fm-busy-state.js" || fail "the prepared plugin was not installed"
+      assert_absent "$dir/wt/.claude/settings.local.json" "old hook survived the switch"
+      node --input-type=module - "$dir/wt/.opencode/plugins/fm-busy-state.js" <<'JS'
+import { pathToFileURL } from 'node:url';
+const { FmBusyState } = await import(pathToFileURL(process.argv[2]));
+const plugin = await FmBusyState();
+await plugin.event({ event: { type: 'session.status', properties: { sessionID: 'main', status: { type: 'busy' } } } });
+await plugin.event({ event: { type: 'session.idle', properties: { sessionID: 'main' } } });
+JS
+      expect_code 0 "$?" "replacement plugin could not run"
+    fi
+    assert_grep ' state=idle ' "$dir/home/state/rl-staging.busy-state" "replacement wiring did not update its activated generation"
+  done
+  pass "fm-control relaunch: hook and plugin staging preserves old wiring through stop and activates functional replacements"
+}
+
+test_relaunch_discards_staging_when_exit_refuses() {
+  local dir out rc path
+  dir=$(new_case refused-stop rl-stage-abort)
+  add_ship_task "$dir" rl-stage-abort claude
+  printf zsh > "$dir/fake/command"
+  out=$(run_spawn "$dir" rl-stage-abort --relaunch --harness claude); rc=$?
+  expect_code 0 "$rc" "seed the original live wiring"$'\n'"$out"
+  cp "$dir/wt/.claude/settings.local.json" "$dir/hook.before"
+  cp "$dir/home/state/rl-stage-abort.busy-gen" "$dir/gen.before"
+  printf '#!/bin/sh\nexit 1\n' > "$dir/fake/before-exit"
+  chmod +x "$dir/fake/before-exit"
+  out=$(run_control "$dir" rl-stage-abort relaunch --note 'Preserve wiring if exit refuses.'); rc=$?
+  expect_code 1 "$rc" "an exit refusal must abort replacement"$'\n'"$out"
+  [ "$(cat "$dir/fake/command")" = claude ] || fail "exit refusal stopped the worker"
+  cmp -s "$dir/hook.before" "$dir/wt/.claude/settings.local.json" || fail "abort changed the original hook"
+  cmp -s "$dir/gen.before" "$dir/home/state/rl-stage-abort.busy-gen" || fail "abort changed the original generation"
+  for path in "$dir/wt/.claude"/.fm-rl-stage-abort.relaunch.* "$dir/home/state"/.rl-stage-abort.relaunch-prepare.*; do
+    assert_absent "$path" "aborted relaunch left prepared wiring behind"
+  done
+  pass "fm-control relaunch: an exit refusal discards staged wiring and preserves the running worker"
+}
+
 test_relaunch_recovers_an_exited_shell
 test_relaunch_preparation_refuses_before_stop
+test_relaunch_rejects_unlaunchable_replacement_before_stop
+test_relaunch_stages_wiring_until_stop
+test_relaunch_discards_staging_when_exit_refuses
 
 test_relaunch_from_guarded_path
 
