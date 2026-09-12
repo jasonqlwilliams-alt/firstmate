@@ -1510,13 +1510,7 @@ spawn_pane_launch_path() {
   [ -n "$pids" ] || return 1
   while IFS= read -r pid; do
     case "$pid" in ''|*[!0-9]*) return 1 ;; esac
-    if [ -d /proc ]; then
-      value=$(perl -0ne 'if (s/^PATH=//) { s/\0$//; print; $found=1 } END { exit(!$found) }' "/proc/$pid/environ") || return 1
-    else
-      value=$(LC_ALL=C ps eww -p "$pid" -o command= | perl -ne '
-        if (/(?:^| )PATH=(.*?)(?= [A-Za-z_][A-Za-z0-9_]*=|$)/) { print "$1"; $found=1 }
-        END { exit(!$found) }') || return 1
-    fi
+    value=$(python3 "$SCRIPT_DIR/fm-process-path.py" "$pid") || return 1
     [ -n "$value" ] || return 1
     [ -z "$result" ] || [ "$result" = "$value" ] || return 1
     result=$value
@@ -1535,13 +1529,6 @@ spawn_resolve_launch_binary() (
   fi
   "$@"
 )
-
-if [ "$RELAUNCH" -eq 1 ]; then
-  spawn_pane_launch_path || {
-    echo "error: could not read the pane PATH; refusing relaunch before stop" >&2
-    exit 1
-  }
-fi
 
 # Pi's CLI surface is version-dependent, so probe the resolved executable's help
 # before composing the optional regular-TUI flag. An absent or inconclusive probe
@@ -1918,68 +1905,71 @@ if [ "$KIND" = secondmate ] && [ "$HARNESS" = agy ]; then
   exit 1
 fi
 
-if [ "$RAW_LAUNCH" -eq 1 ] && [ "$RELAUNCH" -eq 1 ]; then
-  RAW_BIN=$(spawn_resolve_launch_binary resolve_spawn_executable "$RAW_EXECUTABLE") || {
-    echo "error: raw launch executable '$RAW_EXECUTABLE' is unavailable on the pane PATH; refusing relaunch before stop" >&2
-    exit 1
-  }
-fi
+resolve_launch_executables() {
+  if [ "$RAW_LAUNCH" -eq 1 ] && [ "$RELAUNCH" -eq 1 ]; then
+    RAW_BIN=$(spawn_resolve_launch_binary resolve_spawn_executable "$RAW_EXECUTABLE") || {
+      echo "error: raw launch executable '$RAW_EXECUTABLE' is unavailable on the pane PATH; refusing relaunch before stop" >&2
+      exit 1
+    }
+  fi
 
-case "$HARNESS" in
-  claude|codex|opencode|grok|gemini)
-    if [ "$RELAUNCH" -eq 1 ]; then
-      TARGET_BIN=$(spawn_resolve_launch_binary resolve_spawn_executable "$HARNESS") || {
-        echo "error: $HARNESS executable not found on PATH; refusing relaunch before stop" >&2
+  case "$HARNESS" in
+    claude|codex|opencode|grok|gemini)
+      if [ "$RELAUNCH" -eq 1 ]; then
+        TARGET_BIN=$(spawn_resolve_launch_binary resolve_spawn_executable "$HARNESS") || {
+          echo "error: $HARNESS executable not found on PATH; refusing relaunch before stop" >&2
+          exit 1
+        }
+        LAUNCH=${LAUNCH//__HARNESSBIN__/$(shell_quote "$TARGET_BIN")}
+      else
+        LAUNCH=${LAUNCH//__HARNESSBIN__/$HARNESS}
+      fi
+      ;;
+    pi|pi-signed)
+      PI_BIN=$(spawn_resolve_launch_binary resolve_spawn_executable "$HARNESS") || {
+        echo "error: $HARNESS executable not found on PATH; install it or select a different verified harness" >&2
         exit 1
       }
-      LAUNCH=${LAUNCH//__HARNESSBIN__/$(shell_quote "$TARGET_BIN")}
-    else
-      LAUNCH=${LAUNCH//__HARNESSBIN__/$HARNESS}
-    fi
-    ;;
-  pi|pi-signed)
-    PI_BIN=$(spawn_resolve_launch_binary resolve_spawn_executable "$HARNESS") || {
-      echo "error: $HARNESS executable not found on PATH; install it or select a different verified harness" >&2
-      exit 1
-    }
-    PI_TUI_MODE=
-    if pi_supports_tui_mode "$PI_BIN"; then
-      PI_TUI_MODE=' --tui-mode regular'
-    fi
-    LAUNCH=${LAUNCH//__PITUIMODE__/$PI_TUI_MODE}
-    LAUNCH="FM_PI_HARNESS=$HARNESS $LAUNCH"
-    ;;
-  cursor)
-    # `cursor` is not the CLI name, and the legacy alias `agent` is far too
-    # generic to launch on its name alone, so resolution runs through the
-    # verified owner rather than a bare command lookup. Refusing here keeps a
-    # missing install a loud spawn refusal instead of a pane that dies with a
-    # command-not-found the supervisor would read as a wedged worker.
-    CURSOR_BIN=$(spawn_resolve_launch_binary fm_cursor_resolve_binary) || exit 1
-    if [ -n "$MODEL" ] && [ "$MODEL" != default ]; then
-      if CURSOR_MODELS=$(fm_cursor_list_models "$CURSOR_BIN"); then
-        if ! printf '%s\n' "$CURSOR_MODELS" | fm_cursor_catalog_has_model "$MODEL"; then
-          echo "error: Cursor model '$MODEL' is not available from '$CURSOR_BIN --list-models'; choose an id listed by that command or omit --model" >&2
-          exit 1
+      PI_TUI_MODE=
+      if pi_supports_tui_mode "$PI_BIN"; then
+        PI_TUI_MODE=' --tui-mode regular'
+      fi
+      LAUNCH=${LAUNCH//__PITUIMODE__/$PI_TUI_MODE}
+      LAUNCH="FM_PI_HARNESS=$HARNESS $LAUNCH"
+      ;;
+    cursor)
+      # `cursor` is not the CLI name, and the legacy alias `agent` is far too
+      # generic to launch on its name alone, so resolution runs through the
+      # verified owner rather than a bare command lookup. Refusing here keeps a
+      # missing install a loud spawn refusal instead of a pane that dies with a
+      # command-not-found the supervisor would read as a wedged worker.
+      CURSOR_BIN=$(spawn_resolve_launch_binary fm_cursor_resolve_binary) || exit 1
+      if [ -n "$MODEL" ] && [ "$MODEL" != default ]; then
+        if CURSOR_MODELS=$(fm_cursor_list_models "$CURSOR_BIN"); then
+          if ! printf '%s\n' "$CURSOR_MODELS" | fm_cursor_catalog_has_model "$MODEL"; then
+            echo "error: Cursor model '$MODEL' is not available from '$CURSOR_BIN --list-models'; choose an id listed by that command or omit --model" >&2
+            exit 1
+          fi
         fi
       fi
-    fi
-    ;;
-  agy)
-    AGY_BIN=$(spawn_resolve_launch_binary resolve_agy_binary) || exit 1
-    ;;
-  omp)
-    OMP_BIN=$(spawn_resolve_launch_binary resolve_spawn_executable omp) || {
-      echo "error: omp executable not found on PATH; install Oh My Pi or select a different verified harness" >&2
-      exit 1
-    }
-    OMP_WORKER_CFG="$FM_ROOT/.omp/fm-worker-overlay.yml"
-    [ -f "$OMP_WORKER_CFG" ] || {
-      echo "error: omp worker posture overlay missing at $OMP_WORKER_CFG; a worker launched without it can park on the captain's own approval or plan-mode settings" >&2
-      exit 1
-    }
-    ;;
-esac
+      ;;
+    agy)
+      AGY_BIN=$(spawn_resolve_launch_binary resolve_agy_binary) || exit 1
+      ;;
+    omp)
+      OMP_BIN=$(spawn_resolve_launch_binary resolve_spawn_executable omp) || {
+        echo "error: omp executable not found on PATH; install Oh My Pi or select a different verified harness" >&2
+        exit 1
+      }
+      OMP_WORKER_CFG="$FM_ROOT/.omp/fm-worker-overlay.yml"
+      [ -f "$OMP_WORKER_CFG" ] || {
+        echo "error: omp worker posture overlay missing at $OMP_WORKER_CFG; a worker launched without it can park on the captain's own approval or plan-mode settings" >&2
+        exit 1
+      }
+      ;;
+  esac
+}
+[ "$RELAUNCH" -eq 1 ] || resolve_launch_executables
 
 # config/secondmate-harness may carry optional model/effort tokens alongside the
 # harness ("<harness> [<model>] [<effort>]"). They apply only when this is a
@@ -2011,12 +2001,15 @@ if [ "$EFFORT" = ultra ]; then
     exit 1
   }
 fi
-if [ "$HARNESS" = omp ]; then
-  omp_model_validate "$OMP_BIN" "$MODEL" || exit 1
-fi
-if [ "$HARNESS" = agy ]; then
-  agy_model_validate "$AGY_BIN" "$MODEL" || exit 1
-fi
+validate_launch_models() {
+  if [ "$HARNESS" = omp ]; then
+    omp_model_validate "$OMP_BIN" "$MODEL" || exit 1
+  fi
+  if [ "$HARNESS" = agy ]; then
+    agy_model_validate "$AGY_BIN" "$MODEL" || exit 1
+  fi
+}
+[ "$RELAUNCH" -eq 1 ] || validate_launch_models
 
 secondmate_registry_value() {
   secondmate_registry_field "$DATA/secondmates.md" "$1" "$2"
@@ -2223,45 +2216,48 @@ effort_flag_for_harness() {
   esac
 }
 
-case "$LAUNCH" in
-  *__MUSEBIN__*)
-    MUSE_BIN=$(spawn_resolve_launch_binary resolve_muse_binary) || exit 1
-    MUSE_CONFIG_HOME=$(resolve_directory_input XDG_CONFIG_HOME "${XDG_CONFIG_HOME:-${HOME:-}/.config}") || exit 1
-    MUSE_DATA_HOME=$(resolve_directory_input XDG_DATA_HOME "${XDG_DATA_HOME:-${HOME:-}/.local/share}") || exit 1
-    MUSE_AUTH_FILE="$MUSE_CONFIG_HOME/muse/auth.json"
-    if ! muse_credential_present "$MUSE_AUTH_FILE"; then
-      if [ -n "${META_API_KEY:-}" ]; then
-        echo "error: muse has no worker-reachable credential; META_API_KEY is set for fm-spawn but cannot be proven present in the $BACKEND worker environment. Store the fleet credential at '$MUSE_AUTH_FILE' with 'muse login' or 'muse auth set --api-key-stdin'. The secret will not be copied into the launch command." >&2
-      else
-        echo "error: muse has no worker-reachable credential; META_API_KEY cannot be proven present in the $BACKEND worker environment and '$MUSE_AUTH_FILE' is absent or empty. Store the fleet credential with 'muse login' or 'muse auth set --api-key-stdin'." >&2
-      fi
-      exit 1
-    fi
-    LAUNCH=${LAUNCH//__MUSEBIN__/$(shell_quote "$MUSE_BIN")}
-    LAUNCH=${LAUNCH//__MUSECONFIG__/$(shell_quote "$MUSE_CONFIG_HOME")}
-    LAUNCH=${LAUNCH//__MUSEDATA__/$(shell_quote "$MUSE_DATA_HOME")}
-    ;;
-esac
-
-case "$LAUNCH" in
-  *__KIMIBIN__*)
-    KIMI_BIN=$(spawn_resolve_launch_binary resolve_kimi_binary) || exit 1
-    LAUNCH=${LAUNCH//__KIMIBIN__/$(shell_quote "$KIMI_BIN")}
-    if [ "$KIND" != secondmate ] && [ -z "$RELAUNCH_PREPARE" ]; then
-      "$FM_ROOT/bin/fm-kimi-turnend-hook.sh" install || {
-        echo "error: refusing Kimi spawn because the global turn-end hook could not be installed safely" >&2
+resolve_additional_launch_executables() {
+  case "$LAUNCH" in
+    *__MUSEBIN__*)
+      MUSE_BIN=$(spawn_resolve_launch_binary resolve_muse_binary) || exit 1
+      MUSE_CONFIG_HOME=$(resolve_directory_input XDG_CONFIG_HOME "${XDG_CONFIG_HOME:-${HOME:-}/.config}") || exit 1
+      MUSE_DATA_HOME=$(resolve_directory_input XDG_DATA_HOME "${XDG_DATA_HOME:-${HOME:-}/.local/share}") || exit 1
+      MUSE_AUTH_FILE="$MUSE_CONFIG_HOME/muse/auth.json"
+      if ! muse_credential_present "$MUSE_AUTH_FILE"; then
+        if [ -n "${META_API_KEY:-}" ]; then
+          echo "error: muse has no worker-reachable credential; META_API_KEY is set for fm-spawn but cannot be proven present in the $BACKEND worker environment. Store the fleet credential at '$MUSE_AUTH_FILE' with 'muse login' or 'muse auth set --api-key-stdin'. The secret will not be copied into the launch command." >&2
+        else
+          echo "error: muse has no worker-reachable credential; META_API_KEY cannot be proven present in the $BACKEND worker environment and '$MUSE_AUTH_FILE' is absent or empty. Store the fleet credential with 'muse login' or 'muse auth set --api-key-stdin'." >&2
+        fi
         exit 1
-      }
-    fi
-    ;;
-esac
+      fi
+      LAUNCH=${LAUNCH//__MUSEBIN__/$(shell_quote "$MUSE_BIN")}
+      LAUNCH=${LAUNCH//__MUSECONFIG__/$(shell_quote "$MUSE_CONFIG_HOME")}
+      LAUNCH=${LAUNCH//__MUSEDATA__/$(shell_quote "$MUSE_DATA_HOME")}
+      ;;
+  esac
 
-case "$LAUNCH" in
-  *__ROVOBIN__*)
-    ROVO_BIN=$(spawn_resolve_launch_binary resolve_rovo_binary) || exit 1
-    LAUNCH=${LAUNCH//__ROVOBIN__/$(shell_quote "$ROVO_BIN")}
-    ;;
-esac
+  case "$LAUNCH" in
+    *__KIMIBIN__*)
+      KIMI_BIN=$(spawn_resolve_launch_binary resolve_kimi_binary) || exit 1
+      LAUNCH=${LAUNCH//__KIMIBIN__/$(shell_quote "$KIMI_BIN")}
+      if [ "$KIND" != secondmate ] && [ -z "$RELAUNCH_PREPARE" ]; then
+        "$FM_ROOT/bin/fm-kimi-turnend-hook.sh" install || {
+          echo "error: refusing Kimi spawn because the global turn-end hook could not be installed safely" >&2
+          exit 1
+        }
+      fi
+      ;;
+  esac
+
+  case "$LAUNCH" in
+    *__ROVOBIN__*)
+      ROVO_BIN=$(spawn_resolve_launch_binary resolve_rovo_binary) || exit 1
+      LAUNCH=${LAUNCH//__ROVOBIN__/$(shell_quote "$ROVO_BIN")}
+      ;;
+  esac
+}
+[ "$RELAUNCH" -eq 1 ] || resolve_additional_launch_executables
 
 json_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
@@ -3458,6 +3454,13 @@ if [ "$RELAUNCH" -eq 1 ]; then
       exit 1
     fi
   fi
+  spawn_pane_launch_path || {
+    echo "error: could not read the pane PATH; refusing relaunch before stop" >&2
+    exit 1
+  }
+  resolve_launch_executables
+  validate_launch_models
+  resolve_additional_launch_executables
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   spawn_send_text_line "$WT_TARGET" 'treehouse get'
 

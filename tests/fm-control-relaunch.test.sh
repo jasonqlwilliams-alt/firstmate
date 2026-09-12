@@ -88,11 +88,15 @@ case "${1:-}" in
       printf '%s\n' "$payload" >> "$D/keys"
       case "$payload" in
         'printf '*)
-          ( export PATH="${FM_FAKE_PANE_PATH:-$PATH}"; eval "$payload" ) || exit 1
+          pane_path=${FM_FAKE_PANE_PATH:-$PATH}
+          [ ! -f "$D/path" ] || pane_path=$(cat "$D/path")
+          cat "$D/cwd" > "$D/path-probe-cwd"
+          ( export PATH="$pane_path"; eval "$payload" ) || exit 1
           ;;
         'cd -- '*)
           if [ ! -e "$D/refuse-cd" ]; then
             ( eval "$payload" && pwd -P ) > "$D/cwd"
+            [ ! -x "$D/after-cd" ] || "$D/after-cd" || exit 1
           fi
           ;;
         'export GOTMPDIR='*)
@@ -202,7 +206,12 @@ run_control() {  # <case-dir> <args...>
   # store (bin/fm-claude-trust.sh), and a relaunch reaches it through fm-control.sh, so this runs against a throwaway HOME;
   # without it this suite would write the developer's real ~/.claude.json.
   mkdir -p "$dir/user-home"
-  env PATH="${FM_FAKE_PANE_PATH:-$dir/fakebin:$PATH}" /bin/sleep 120 >/dev/null 2>&1 &
+  if [ -n "${FM_FAKE_PANE_ARGS:-}" ]; then
+    env PATH="${FM_FAKE_PANE_PATH:-$dir/fakebin:$PATH}" \
+      "$(command -v python3)" -c 'import time; time.sleep(120)' "$FM_FAKE_PANE_ARGS" >/dev/null 2>&1 &
+  else
+    env PATH="${FM_FAKE_PANE_PATH:-$dir/fakebin:$PATH}" /bin/sleep 120 >/dev/null 2>&1 &
+  fi
   pane_pid=$!
   env FM_FAKE_PANE_PID="$pane_pid" FM_FAKE_PANE_PATH="${FM_FAKE_PANE_PATH:-$dir/fakebin:$PATH}" \
     PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
@@ -2067,6 +2076,167 @@ SH
   done
   pass "fm-control relaunch: secondmate access and lock are proven before stop, with inheritance deferred and abort cleanup"
 }
+
+test_native_process_path_preserves_entry_boundaries() {
+  python3 - "$ROOT/bin/fm-process-path.py" <<'PYTHON'
+import ctypes
+import errno
+import importlib.util
+import os
+import struct
+import subprocess
+import sys
+import types
+from unittest.mock import patch
+
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("fm_process_path", sys.argv[1])
+reader = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(reader)
+expected = b"/real install FLAG=1/bin:/usr/bin"
+arguments = [b"claude", b"", b"Prompt: PATH=/wrong/bin FLAG=1", b"PATH=/another/bin"]
+
+def packet(environment):
+    return (struct.pack("@i", len(arguments)) + b"/usr/bin/claude\0\0\0"
+            + b"\0".join(arguments) + b"\0"
+            + b"\0".join(environment) + b"\0\0PATH=/trailing/apple/string\0")
+
+payload = packet([b"OTHER=PATH=/wrong/env FLAG=1", b"PATH=" + expected, b"FLAG=2"])
+calls = []
+
+def sysctl(names, count, output, length, new_value, new_length):
+    mib = list(names[:count])
+    calls.append(mib)
+    assert new_value is None and new_length == 0
+    if mib == [1, 8]:
+        data = struct.pack("@i", 4096)
+    else:
+        assert mib == [1, 49, 4242], mib
+        data = payload
+    size = ctypes.cast(length, ctypes.POINTER(ctypes.c_size_t))
+    assert size.contents.value >= len(data)
+    ctypes.memmove(output, data, len(data))
+    size.contents.value = len(data)
+    return 0
+
+with patch.object(reader.sys, "platform", "darwin"), patch.object(
+        reader.ctypes, "CDLL", return_value=types.SimpleNamespace(sysctl=sysctl)):
+    assert reader.process_path(4242) == expected
+    assert calls == [[1, 8], [1, 49, 4242]], calls
+    for payload in (
+        packet([b"OTHER=PATH=/not-path"]),
+        packet([b"PATH=/one", b"PATH=/two"]),
+        packet([b"PATH="]),
+        struct.pack("@i", 3) + b"/claude\0\0claude\0unfinished",
+        struct.pack("@i", -1) + b"/claude\0",
+    ):
+        try:
+            reader.process_path(4242)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("accepted missing, ambiguous, or malformed environment")
+
+    def denied(*args):
+        ctypes.set_errno(errno.EACCES)
+        return -1
+
+    with patch.object(reader.ctypes, "CDLL", return_value=types.SimpleNamespace(sysctl=denied)):
+        try:
+            reader.process_path(4242)
+        except OSError as error:
+            assert error.errno == errno.EACCES
+        else:
+            raise AssertionError("accepted an unreadable native environment")
+
+environment = dict(os.environ, PATH=os.fsdecode(expected), OTHER="PATH=/wrong/env FLAG=1")
+with subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)",
+                       "Prompt: PATH=/wrong/bin FLAG=1"], env=environment) as process:
+    try:
+        result = subprocess.run([sys.executable, sys.argv[1], str(process.pid)], capture_output=True)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == expected, result.stdout
+    finally:
+        process.terminate()
+        process.wait()
+result = subprocess.run([sys.executable, sys.argv[1], str(process.pid)], capture_output=True)
+assert result.returncode != 0 and not result.stdout
+PYTHON
+  expect_code 0 "$?" "native PATH reader must preserve process environment boundaries"
+  pass "native process PATH: argument text, other entries, and trailing strings cannot replace the environment PATH"
+}
+
+test_relaunch_ignores_path_assignments_in_arguments() {
+  local dir out rc launch
+  dir=$(new_case argument-path rl-argument-path)
+  add_ship_task "$dir" rl-argument-path claude
+  mkdir -p "$dir/real install" "$dir/prompt-bin"
+  cat > "$dir/real install/codex" <<SH
+#!/bin/sh
+printf environment > '$dir/executable-ran'
+SH
+  cat > "$dir/prompt-bin/codex" <<SH
+#!/bin/sh
+printf arguments > '$dir/executable-ran'
+SH
+  chmod +x "$dir/real install/codex" "$dir/prompt-bin/codex"
+  printf codex > "$dir/fake/becomes"
+  out=$(FM_FAKE_PANE_PATH="$dir/real install" \
+    FM_FAKE_PANE_ARGS="Prompt: PATH=$dir/prompt-bin FLAG=1" \
+    run_control "$dir" rl-argument-path relaunch --harness codex --note 'Use only the process environment.'); rc=$?
+  expect_code 0 "$rc" "PATH text in process arguments must not affect executable selection: $out"
+  launch=$(tail -n 1 "$dir/fake/literal")
+  bash -c "$launch" || fail "generated launch command failed"
+  [ "$(cat "$dir/executable-ran")" = environment ] || fail "process arguments selected the executable"
+  pass "fm-control relaunch: PATH text in live process arguments cannot select another installation"
+}
+
+test_exited_relaunch_resolves_path_after_worktree_return() {
+  local dir entry scenario out rc launch
+  for entry in control spawn; do
+    for scenario in parent-missing parent-install; do
+      dir=$(new_case "directory-path-$entry-$scenario" rl-directory-path)
+      add_ship_task "$dir" rl-directory-path claude
+      mkdir -p "$dir/worktree-bin" "$dir/parent-bin"
+      cat > "$dir/worktree-bin/codex" <<SH
+#!/bin/sh
+printf worktree > '$dir/executable-ran'
+SH
+      chmod +x "$dir/worktree-bin/codex"
+      if [ "$scenario" = parent-install ]; then
+        cat > "$dir/parent-bin/codex" <<SH
+#!/bin/sh
+printf parent > '$dir/executable-ran'
+SH
+        chmod +x "$dir/parent-bin/codex"
+      fi
+      cat > "$dir/fake/after-cd" <<SH
+#!/bin/sh
+printf '%s' '$dir/worktree-bin' > '$dir/fake/path'
+SH
+      chmod +x "$dir/fake/after-cd"
+      printf zsh > "$dir/fake/command"
+      printf codex > "$dir/fake/becomes"
+      printf '%s' "$dir/home" > "$dir/fake/cwd"
+      if [ "$entry" = control ]; then
+        out=$(FM_FAKE_PANE_PATH="$dir/parent-bin" run_control "$dir" rl-directory-path relaunch --harness codex --note 'Load the worktree environment.'); rc=$?
+      else
+        out=$(FM_FAKE_PANE_PATH="$dir/parent-bin" run_spawn "$dir" rl-directory-path --relaunch --harness codex); rc=$?
+      fi
+      expect_code 0 "$rc" "$entry should return before resolving the worktree-only executable: $out"
+      [ "$(cat "$dir/fake/path-probe-cwd")" = "$dir/wt" ] || fail "PATH was captured before worktree return"
+      launch=$(tail -n 1 "$dir/fake/literal")
+      bash -c "$launch" || fail "generated launch command failed"
+      [ "$(cat "$dir/executable-ran")" = worktree ] || fail "parent directory selected the executable"
+      [ "$(meta_field "$dir" rl-directory-path worktree)" = "$dir/wt" ] || fail "recorded worktree changed"
+    done
+  done
+  pass "fm-control and fm-spawn relaunch: returning to the worktree precedes directory-dependent executable resolution"
+}
+
+test_native_process_path_preserves_entry_boundaries
+test_relaunch_ignores_path_assignments_in_arguments
+test_exited_relaunch_resolves_path_after_worktree_return
 
 test_relaunch_validates_retirement_inputs_before_stop
 test_relaunch_uses_the_pane_executable
