@@ -965,6 +965,7 @@ RELAUNCH_BUSY_STATE=
 RELAUNCH_RETIRE_PATHS=
 RELAUNCH_PATH_PROBE=
 SPAWN_LAUNCH_PATH=$PATH
+SPAWN_LAUNCH_HOME=
 SPAWN_META_TMP=
 SPAWN_META_LOCK=
 SPAWN_META_LOCK_HELD=0
@@ -1472,30 +1473,32 @@ shell_quote() {
 }
 
 resolve_spawn_executable() {
-  resolve_relaunch_executable_token "$1"
+  local candidate dir
+  candidate=$(type -P -- "$1" 2>/dev/null) || return 1
+  [ -f "$candidate" ] && [ -x "$candidate" ] || return 1
+  case "$candidate" in
+    /*) printf '%s\n' "$candidate" ;;
+    *)
+      dir=$(cd "$(dirname "$candidate")" 2>/dev/null && pwd -P) || return 1
+      printf '%s/%s\n' "$dir" "$(basename "$candidate")"
+      ;;
+  esac
 }
 
-# Resolve one executable token against the pane HOME, PATH, and recorded
-# worktree. Never eval or execute the token. Returns an absolute existing
-# executable path, or refuses.
+# Resolve one relaunch executable token against the pane HOME, PATH, and
+# recorded worktree. Never eval or execute the token. Returns an absolute
+# existing executable path, or refuses.
 resolve_relaunch_executable_token() {
-  local token=$1 home=${SPAWN_LAUNCH_HOME:-${HOME:-}} path=${SPAWN_LAUNCH_PATH:-${PATH:-}}
-  local worktree=${RELAUNCH_WT:-${WT:-}} expanded candidate dir parent
-  [ -n "$token" ] || return 1
-  if [ "$token" = '~' ]; then
-    [ -n "$home" ] || return 1
-    expanded=$home
-  elif [ "${token#"~/"}" != "$token" ]; then
-    [ -n "$home" ] || return 1
-    expanded=$home/${token#"~/"}
-  else
+  local token=$1 home=$SPAWN_LAUNCH_HOME path=$SPAWN_LAUNCH_PATH worktree=$RELAUNCH_WT
+  local expanded candidate dir parent
   case "$token" in
+    '') return 1 ;;
+    \~|\~/*)
+      [ -n "$home" ] || return 1
+      expanded=$home${token#\~}
+      ;;
     /*)
       expanded=$token
-      ;;
-    ./*|../*)
-      [ -n "$worktree" ] || return 1
-      expanded=$worktree/$token
       ;;
     */*)
       [ -n "$worktree" ] || return 1
@@ -1518,8 +1521,7 @@ resolve_relaunch_executable_token() {
         esac
         [ -f "$candidate" ] && [ -x "$candidate" ] || continue
         parent=${candidate%/*}
-        [ "$parent" = "$candidate" ] && parent=.
-        dir=$(cd "$parent" 2>/dev/null && pwd -P) || continue
+        dir=$(cd "${parent:-/}" 2>/dev/null && pwd -P) || continue
         printf '%s/%s\n' "$dir" "${candidate##*/}"
         return 0
       done
@@ -1527,11 +1529,9 @@ resolve_relaunch_executable_token() {
       return 1
       ;;
   esac
-  fi
   [ -f "$expanded" ] && [ -x "$expanded" ] || return 1
   parent=${expanded%/*}
-  [ "$parent" = "$expanded" ] && parent=.
-  dir=$(cd "$parent" 2>/dev/null && pwd -P) || return 1
+  dir=$(cd "${parent:-/}" 2>/dev/null && pwd -P) || return 1
   printf '%s/%s\n' "$dir" "${expanded##*/}"
 }
 
@@ -1565,18 +1565,15 @@ spawn_pane_launch_path() {
   local pid attempt probe_command
   if [ "$RELAUNCH_STATE" = dead ]; then
     RELAUNCH_PATH_PROBE=$(mktemp "$STATE/.$ID.relaunch-path.XXXXXXXX") || return 1
-    # Append: mktemp pre-creates the file, and a noclobber pane shell refuses `>`.
-    probe_command="printf '%s\\n%s\\n' \"\$PATH\" \"\$HOME\" >> $(shell_quote "$RELAUNCH_PATH_PROBE")"
+    rm -f -- "$RELAUNCH_PATH_PROBE"
+    probe_command="printf '%s\\n%s\\n' \"\$PATH\" \"\$HOME\" > $(shell_quote "$RELAUNCH_PATH_PROBE")"
     "fm_backend_${BACKEND}_send_text_line" "$RELAUNCH_TARGET" "$probe_command" || return 1
     for ((attempt = 0; attempt < 50; attempt++)); do
-      if [ -s "$RELAUNCH_PATH_PROBE" ]; then
-        {
-          IFS= read -r SPAWN_LAUNCH_PATH || return 1
-          IFS= read -r SPAWN_LAUNCH_HOME || SPAWN_LAUNCH_HOME=
-        } < "$RELAUNCH_PATH_PROBE" || return 1
-        [ -n "$SPAWN_LAUNCH_PATH" ] || return 1
+      if [ -f "$RELAUNCH_PATH_PROBE" ] \
+        && { IFS= read -r SPAWN_LAUNCH_PATH && IFS= read -r SPAWN_LAUNCH_HOME; } < "$RELAUNCH_PATH_PROBE"; then
         rm -f -- "$RELAUNCH_PATH_PROBE"
         RELAUNCH_PATH_PROBE=
+        [ -n "$SPAWN_LAUNCH_PATH" ] || return 1
         return 0
       fi
       sleep 0.1
@@ -1985,7 +1982,7 @@ fi
 
 resolve_launch_executables() {
   if [ "$RAW_LAUNCH" -eq 1 ] && [ "$RELAUNCH" -eq 1 ]; then
-    RAW_BIN=$(spawn_resolve_launch_binary resolve_spawn_executable "$RAW_EXECUTABLE") || {
+    RAW_BIN=$(resolve_relaunch_executable_token "$RAW_EXECUTABLE") || {
       echo "error: raw launch executable '$RAW_EXECUTABLE' is unavailable on the pane PATH; refusing relaunch before stop" >&2
       exit 1
     }
@@ -1999,7 +1996,7 @@ resolve_launch_executables() {
   case "$HARNESS" in
     claude|codex|opencode|grok|gemini)
       if [ "$RELAUNCH" -eq 1 ]; then
-        TARGET_BIN=$(spawn_resolve_launch_binary resolve_spawn_executable "$HARNESS") || {
+        TARGET_BIN=$(spawn_resolve_launch_binary resolve_relaunch_executable_token "$HARNESS") || {
           echo "error: $HARNESS executable not found on PATH; refusing relaunch before stop" >&2
           exit 1
         }
@@ -2026,16 +2023,7 @@ resolve_launch_executables() {
       # verified owner rather than a bare command lookup. Refusing here keeps a
       # missing install a loud spawn refusal instead of a pane that dies with a
       # command-not-found the supervisor would read as a wedged worker.
-      if [ "$RELAUNCH" -eq 1 ]; then
-        CURSOR_BIN=$(spawn_resolve_launch_binary resolve_relaunch_executable_token cursor-agent) \
-          || CURSOR_BIN=$(spawn_resolve_launch_binary resolve_relaunch_executable_token agent) || {
-          echo "error: no verified cursor executable found on the pane PATH; refusing relaunch before stop" >&2
-          exit 1
-        }
-        fm_cursor_verify_executable "$CURSOR_BIN" || exit 1
-      else
-        CURSOR_BIN=$(spawn_resolve_launch_binary fm_cursor_resolve_binary) || exit 1
-      fi
+      CURSOR_BIN=$(spawn_resolve_launch_binary fm_cursor_resolve_binary) || exit 1
       if [ -n "$MODEL" ] && [ "$MODEL" != default ]; then
         if CURSOR_MODELS=$(fm_cursor_list_models "$CURSOR_BIN"); then
           if ! printf '%s\n' "$CURSOR_MODELS" | fm_cursor_catalog_has_model "$MODEL"; then
@@ -4220,75 +4208,27 @@ EOF
 fi
 
 prepare_relaunch() {
-  local busy_file wiring_index executable token
+  local busy_file wiring_index executable_var token executable
   if [ "$RAW_LAUNCH" -eq 1 ]; then
-    token=$RAW_EXECUTABLE
-    executable=$(resolve_relaunch_executable_token "$token") || {
-      echo "error: replacement executable is unavailable: $token" >&2
-      return 1
-    }
-    RAW_BIN=$executable
+    executable_var=RAW_BIN
   else
     case "$HARNESS" in
-      cursor)
-        executable=$(resolve_relaunch_executable_token cursor-agent) \
-          || executable=$(resolve_relaunch_executable_token agent) || {
-          echo "error: replacement executable is unavailable: cursor-agent" >&2
-          return 1
-        }
-        CURSOR_BIN=$executable
-        ;;
-      pi|pi-signed)
-        executable=$(resolve_relaunch_executable_token "$HARNESS") || {
-          echo "error: replacement executable is unavailable: $HARNESS" >&2
-          return 1
-        }
-        PI_BIN=$executable
-        ;;
-      omp)
-        executable=$(resolve_relaunch_executable_token omp) || {
-          echo "error: replacement executable is unavailable: omp" >&2
-          return 1
-        }
-        OMP_BIN=$executable
-        ;;
-      agy)
-        executable=$(resolve_relaunch_executable_token agy) || {
-          echo "error: replacement executable is unavailable: agy" >&2
-          return 1
-        }
-        AGY_BIN=$executable
-        ;;
-      muse)
-        executable=$(resolve_relaunch_executable_token muse) || {
-          echo "error: replacement executable is unavailable: muse" >&2
-          return 1
-        }
-        MUSE_BIN=$executable
-        ;;
-      kimi)
-        executable=$(resolve_relaunch_executable_token kimi) || {
-          echo "error: replacement executable is unavailable: kimi" >&2
-          return 1
-        }
-        KIMI_BIN=$executable
-        ;;
-      rovo)
-        executable=$(resolve_relaunch_executable_token rovo) || {
-          echo "error: replacement executable is unavailable: rovo" >&2
-          return 1
-        }
-        ROVO_BIN=$executable
-        ;;
-      *)
-        executable=$(resolve_relaunch_executable_token "$HARNESS") || {
-          echo "error: replacement executable is unavailable: $HARNESS" >&2
-          return 1
-        }
-        TARGET_BIN=$executable
-        ;;
+      pi|pi-signed) executable_var=PI_BIN ;;
+      omp) executable_var=OMP_BIN ;;
+      cursor) executable_var=CURSOR_BIN ;;
+      agy) executable_var=AGY_BIN ;;
+      muse) executable_var=MUSE_BIN ;;
+      kimi) executable_var=KIMI_BIN ;;
+      rovo) executable_var=ROVO_BIN ;;
+      *) executable_var=TARGET_BIN ;;
     esac
   fi
+  token=${!executable_var:-}
+  executable=$(resolve_relaunch_executable_token "$token") || {
+    echo "error: replacement executable is unavailable: ${token:-$HARNESS}" >&2
+    return 1
+  }
+  printf -v "$executable_var" '%s' "$executable"
   for wiring_index in "${!RELAUNCH_WIRING_FILES[@]}"; do
     [ -f "${RELAUNCH_WIRING_FILES[$wiring_index]}" ] && [ -r "${RELAUNCH_WIRING_FILES[$wiring_index]}" ] || return 1
     spawn_wiring_target_check "${RELAUNCH_WIRING_TARGETS[$wiring_index]}" || return 1
