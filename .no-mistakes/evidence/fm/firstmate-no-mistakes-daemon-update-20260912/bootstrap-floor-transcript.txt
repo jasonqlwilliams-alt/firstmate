@@ -1,0 +1,26 @@
+
+=== BASE 5f68d28  (NO_MISTAKES_MIN=1.46.0) ===
+real daemon binary           | installed: no-mistakes version v1.72.0 (9fcc865) 2026-09-08T13:12:43Z | bootstrap says: (silent - all good)
+old floor 1.46.0             | installed: no-mistakes version v1.46.0 (fake)                         | bootstrap says: (silent - all good)
+mid 1.60.0                   | installed: no-mistakes version v1.60.0 (fake)                         | bootstrap says: (silent - all good)
+just below 1.71.9            | installed: no-mistakes version v1.71.9 (fake)                         | bootstrap says: (silent - all good)
+digit trap 1.7.20            | installed: no-mistakes version v1.7.20 (fake)                         | bootstrap says: MISSING: no-mistakes (install: curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh)
+exact floor 1.72.0           | installed: no-mistakes version v1.72.0 (fake)                         | bootstrap says: (silent - all good)
+patch above 1.72.1           | installed: no-mistakes version v1.72.1 (fake)                         | bootstrap says: (silent - all good)
+three-digit minor 1.100.0    | installed: no-mistakes version v1.100.0 (fake)                        | bootstrap says: (silent - all good)
+next major 2.0.0             | installed: no-mistakes version v2.0.0 (fake)                          | bootstrap says: (silent - all good)
+unparseable dev build        | installed: no-mistakes development build                              | bootstrap says: MISSING: no-mistakes (install: curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh)
+not installed                | installed: (not installed)                                            | bootstrap says: MISSING: no-mistakes (install: curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh)
+
+=== TARGET 09f5ba1  (NO_MISTAKES_MIN=1.72.0) ===
+real daemon binary           | installed: no-mistakes version v1.72.0 (9fcc865) 2026-09-08T13:12:43Z | bootstrap says: (silent - all good)
+old floor 1.46.0             | installed: no-mistakes version v1.46.0 (fake)                         | bootstrap says: MISSING: no-mistakes (install: curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh)
+mid 1.60.0                   | installed: no-mistakes version v1.60.0 (fake)                         | bootstrap says: MISSING: no-mistakes (install: curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh)
+just below 1.71.9            | installed: no-mistakes version v1.71.9 (fake)                         | bootstrap says: MISSING: no-mistakes (install: curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh)
+digit trap 1.7.20            | installed: no-mistakes version v1.7.20 (fake)                         | bootstrap says: MISSING: no-mistakes (install: curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh)
+exact floor 1.72.0           | installed: no-mistakes version v1.72.0 (fake)                         | bootstrap says: (silent - all good)
+patch above 1.72.1           | installed: no-mistakes version v1.72.1 (fake)                         | bootstrap says: (silent - all good)
+three-digit minor 1.100.0    | installed: no-mistakes version v1.100.0 (fake)                        | bootstrap says: (silent - all good)
+next major 2.0.0             | installed: no-mistakes version v2.0.0 (fake)                          | bootstrap says: (silent - all good)
+unparseable dev build        | installed: no-mistakes development build                              | bootstrap says: MISSING: no-mistakes (install: curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh)
+not installed                | installed: (not installed)                                            | bootstrap says: MISSING: no-mistakes (install: curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh)

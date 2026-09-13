@@ -1,0 +1,3 @@
+ok - fm_backend_tmux_agent_state: separates live, dead, missing, ambiguous, and unreadable
+ok - fm_backend_tmux_agent_state: rejects malformed targets before probing tmux
+not ok - Herdr pane state unknown should map to unreadable, got 'missing'

@@ -1,0 +1,6 @@
+fm-secondmate-liveness rc=1 secs=4
+fm-startup-memory-budget rc=0 secs=18
+fm-shared-captain-inheritance rc=0 secs=18
+fm-secondmate-sync rc=0 secs=115
+fm-secondmate-harness rc=1 secs=696
+fm-session-start rc=0 secs=953

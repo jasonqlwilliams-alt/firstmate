@@ -1,0 +1,9 @@
+ok - shared captain first copy converges, is read-only, and preserves local captain/learnings files
+ok - shared captain drift is quarantined collision-safely and repeated convergence is idempotent
+ok - missing primary shared file mirrors absence only after quarantining a local copy
+ok - unsafe shared captain artifacts are rejected and failure restores read-only mode
+ok - spawn convergence point propagates data/captain-shared.md from FM_DATA_OVERRIDE
+ok - bootstrap convergence point propagates data/captain-shared.md from FM_DATA_OVERRIDE
+ok - fm-config-push convergence point updates changed shared captain source bytes from FM_DATA_OVERRIDE
+ok - session-start digest renders data/captain-shared.md with the shared read-only label
+# all fm-shared-captain-inheritance tests passed

@@ -1,0 +1,5 @@
+ok - primary bootstrap materializes only the visible default and preserves valid captain choices
+ok - budget parser accepts one exact positive value and rejects malformed or unsafe inputs
+ok - budget accounting sums the three startup files and reports safe failures
+ok - budget propagation converges through config push with exact rereads, absence, and safe rejection
+# all fm-startup-memory-budget tests passed
