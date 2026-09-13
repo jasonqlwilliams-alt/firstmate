@@ -66,7 +66,60 @@ test_missing_head_fails() {
   pass "shared action rejects an attestation with no head_sha"
 }
 
+test_repair_push_event_requires_refreshed_attestation() {
+  # GitHub's serialized event payload is the action's public input contract.
+  # Exercise the same empty-input fallback used by the workflow, including the
+  # stale body left by publishers that push a CI repair without attesting it.
+  python3 - "$VERIFY" "$TMP_ROOT" "$SIGNATURE" "$COMPLETED_STEPS" "$OLD_SHA" "$NEW_SHA" <<'PY' || fail "repair-push event attestation lifecycle failed"
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+verifier, root, signature, steps_json, old_sha, new_sha = sys.argv[1:]
+steps = json.loads(steps_json)
+event_path = Path(root) / "pull-request-event.json"
+env = {
+    key: value for key, value in os.environ.items()
+    if not key.startswith(("PR_", "NM_EXEMPT_"))
+    and key not in ("GITHUB_EVENT_PATH", "GITHUB_OUTPUT")
+}
+env["GITHUB_EVENT_PATH"] = str(event_path)
+
+def verify_event(attested, head, action, expected):
+    body = signature + "\n<!-- no-mistakes-pipeline-attestation:v1 " + json.dumps({
+        "head_sha": attested, "steps": steps,
+    }) + " -->"
+    event_path.write_text(json.dumps({
+        "action": action,
+        "pull_request": {
+            "number": 3006, "body": body,
+            "head": {"sha": head, "ref": "repair-fixture"},
+            "user": {"login": "regression"},
+        },
+    }), encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, verifier], env=env, capture_output=True, text=True,
+    )
+    assert result.returncode == expected, result.stdout + result.stderr
+    if expected:
+        assert attested in result.stderr and head in result.stderr, result.stderr
+
+verify_event(old_sha, old_sha, "opened", 0)
+verify_event(old_sha, new_sha, "synchronize", 1)
+# Re-running the frozen event cannot repair its stale attestation.
+verify_event(old_sha, new_sha, "synchronize", 1)
+# A publisher's refreshed body must bind to the head carried by the new event.
+verify_event(new_sha, new_sha, "edited", 0)
+verify_event(new_sha, new_sha, "synchronize", 0)
+verify_event(new_sha, old_sha, "edited", 1)
+PY
+  pass "repair-push events reject stale attestations and accept a matching refresh"
+}
+
 fetch_shared_verifier
 test_matching_head_and_completed_steps_pass
 test_mismatched_head_fails_with_both_shas
 test_missing_head_fails
+test_repair_push_event_requires_refreshed_attestation
