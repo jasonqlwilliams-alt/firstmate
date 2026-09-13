@@ -12,6 +12,14 @@
 # consumer re-derives the identity from the stored URL and refuses any record
 # whose parts do not reconstruct that exact URL.
 #
+# Lifecycle writers can append fields after a recorded PR without changing its
+# identity, so their updates must not invalidate an otherwise armed merge poll.
+# Task metadata must contain exactly one canonical pr= line; any trailing
+# pr_head= must be a valid hash. fm_pr_metadata_identity_parse owns the single
+# allowlist for other trailing fields; every unrecognized trailing line is
+# invalid. Allowlisted values are opaque to PR identity validation and never
+# evaluated as shell input; their writers own their value contracts.
+#
 # A validated exact merged result is retired through a private receipt only
 # after its durable wake is appended.
 # The receipt binds the terminal observation to the canonical registration and
@@ -316,6 +324,10 @@ fm_pr_metadata_identity_parse() {
         fi
         ;;
       x_request=*|x_request_ts=*|x_followups=*|x_platform=*|x_reply_max_chars=*)
+        ;;
+      control_relaunch_tx=*|traceparent=*|decisions_reviewed=*|decision_keys=*|spawn_gen=*)
+        ;;
+      kind=*|mode=*|yolo=*)
         ;;
       *)
         [ "$seen_pr" -eq 0 ] || post_pr_invalid=1

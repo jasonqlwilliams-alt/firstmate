@@ -54,6 +54,7 @@ It is not deterministic across the verified adapters: codex, grok, and gemini re
 ## Transactional relaunch
 
 `relaunch` is the only verb that changes durable records, so it runs as a transaction with a journal at `state/<id>.control-relaunch`, the prior record preserved beside it, and a ship or scout's prior instructions preserved when a progress note is appended.
+An already registered PR merge poll remains armed and authenticated across relaunch without re-registration; [`bin/fm-pr-lib.sh`](../bin/fm-pr-lib.sh) owns its metadata validation boundary.
 
 1. **Resolve the profile.**
    An explicit `--harness`, `--model`, or `--effort` wins.
@@ -135,5 +136,5 @@ The empirical basis for each adapter's value is the `harness-adapters` skill's v
 ## Verification
 
 - `tests/fm-control.test.sh` - the adapter contract for every verified harness, the backend capability matrix, exact-id scoping, the closed verb list, the busy, idle, dead, and idempotent lifecycle cases, and marker non-regression, all against a stubbed session provider.
-- `tests/fm-control-relaunch.test.sh` - the relaunch transaction, preparation refusals, exited-shell recovery, and rollback; [runtime verification](verification/runtime-backends.md) records the reusable evidence.
+- `tests/fm-control-relaunch.test.sh` - the relaunch transaction, preparation refusals, exited-shell recovery, registered merge-poll continuity, and rollback; [runtime verification](verification/runtime-backends.md) records the reusable evidence.
 - `tests/fm-control-herdr-smoke.test.sh` - the second state-verified backend against the real herdr binary, on an isolated throwaway lab session.
