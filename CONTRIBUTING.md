@@ -9,11 +9,10 @@ We require this to reduce the maintainer's burden of reviewing and merging contr
 `no-mistakes` puts a local git proxy in front of your real remote.
 Pushing through it runs an AI-driven review/test/lint pipeline in an isolated worktree, forwards the push upstream only after every check passes, and opens a clean PR automatically.
 
-A GitHub Actions check (`Require no-mistakes`) runs on PRs targeting `main` and requires both the deterministic signature and a parseable structured attestation from no-mistakes.
+A GitHub Actions check (`Require no-mistakes`) runs on PRs targeting `main` and requires both the deterministic signature and a parseable structured attestation from no-mistakes v1.46.0 or newer.
 The attestation must bind to the current PR head commit and report the review, test, and document steps as completed, so a stale attestation, a missing `head_sha`, or a skipped required step fails.
 It evaluates every PR opening and body edit independently, reruns after head synchronization or reopening, and prevents a later edit from replacing an earlier pending compliance check.
 Each run reads the PR's current body and head from GitHub, including on reruns, and fails closed if that lookup fails.
-Use no-mistakes v1.60.2 or newer so pipeline-owned CI repair pushes refresh the PR attestation ([upstream fix](https://github.com/kunchenguid/no-mistakes/pull/899)); a live lookup cannot repair an attestation the publisher left on an older head.
 GitHub Actions and Dependabot are exempt so their automation keeps working, but other contributor PRs that do not satisfy the attestation contract will not be reviewed or merged.
 
 CI repair pushes require a publisher that refreshes the attestation before pushing the replacement head; [no-mistakes v1.68.0](https://github.com/kunchenguid/no-mistakes/releases/tag/v1.68.0) fixes this publication ordering.
@@ -26,7 +25,7 @@ The check must continue rejecting an attestation for a different head.
 1. Fork the repo, then clone the parent repo or set your local `origin` back to the parent (`git@github.com:kunchenguid/firstmate.git`).
    Choose explicitly which repository may receive your branch and PR; with that layout `origin` is the parent, so the name `origin` is not ownership evidence.
 2. Create a branch and make your changes.
-3. Initialize the gate with your fork as the push target: `no-mistakes init --fork-url git@github.com:<you>/firstmate.git` (use the minimum version required above; without a fork, plain `no-mistakes init` still works for maintainers with push access).
+3. Initialize the gate with your fork as the push target: `no-mistakes init --fork-url git@github.com:<you>/firstmate.git` (contributing to firstmate requires **no-mistakes v1.46.0+** for structured attestation; without a fork, plain `no-mistakes init` still works for maintainers with push access).
 4. Optional, and recommended when your `origin` names the original author's repository rather than your own: record the original-author fetch URL, your chosen write URL, its approved owner and account, validation command, and review gates in local `config/repository-policy.json` as documented in [`docs/configuration.md`](docs/configuration.md#repository-delivery-policy-configrepository-policyjson), then run `bin/fm-delivery-guard.sh arm firstmate .`.
    The guard does nothing until that file exists.
    Once armed, `--fork-url` alone is insufficient when `origin` is a third-party upstream, because no-mistakes opens PRs against `origin`: the guard refuses the proxy push before it receives objects unless both reported destinations match your explicit write repository.
