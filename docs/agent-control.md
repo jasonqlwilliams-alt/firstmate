@@ -136,5 +136,5 @@ The empirical basis for each adapter's value is the `harness-adapters` skill's v
 ## Verification
 
 - `tests/fm-control.test.sh` - the adapter contract for every verified harness, the backend capability matrix, exact-id scoping, the closed verb list, the busy, idle, dead, and idempotent lifecycle cases, and marker non-regression, all against a stubbed session provider.
-- `tests/fm-control-relaunch.test.sh` - the relaunch transaction, preparation refusals, exited-shell recovery, and rollback; [runtime verification](verification/runtime-backends.md) records the reusable evidence.
+- `tests/fm-control-relaunch.test.sh` - the relaunch transaction, preparation refusals, exited-shell recovery, registered merge-poll continuity, and rollback; [runtime verification](verification/runtime-backends.md) records the reusable evidence.
 - `tests/fm-control-herdr-smoke.test.sh` - the second state-verified backend against the real herdr binary, on an isolated throwaway lab session.
