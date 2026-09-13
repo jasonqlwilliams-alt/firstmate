@@ -1,0 +1,13 @@
+BEGIN merge-poll relaunch trace=off
+armed: state/rl-merge.check.sh
+warning: /tmp/fm-control-relaunch.ZC9JFr/merge-poll-off-13831/home/data/rl-merge/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched rl-merge harness=claude from=claude model=default effort=default backend=tmux endpoint=fmses:fm-rl-merge worktree=/tmp/fm-control-relaunch.ZC9JFr/merge-poll-off-13831/wt
+Armed poll SHA-256 and device:inode bindings unchanged:
+check.sh e87aae384ec62ae28f78a0779020f52f7b891ba0cafea2551b5a2c4e967870cf 111:3370456
+pr-poll b533e16491cd6ab5453b06ceab03b3ffe6fd3f1eae5813cc72ef61e65ea1fc29 111:3370455
+pr-poll-registration c229e5c142592bfac008cacaa6debd412e9db99fdb46e600d1e1002354aa865b 111:3370457
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=4171078.20260913T162609Z.3734
+not ok - real relaunch invalidated the registered merge poll
+EXIT=1

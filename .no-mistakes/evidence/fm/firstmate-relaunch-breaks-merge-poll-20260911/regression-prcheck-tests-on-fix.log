@@ -1,0 +1,18 @@
+ok - control-plane trailing metadata preserves armed polls while unknown lines and PR tampering fail closed
+armed: state/task-a.check.sh
+promoted task-a to ship mode=direct-PR yolo=off (teardown protection restored)
+wrote ship instructions for mode=direct-PR: /tmp/fm-pr-check-security.EZHD7d/promotion-metadata/home/data/task-a/ship-instructions.md
+next: FM_HOME=/tmp/fm-pr-check-security.EZHD7d/promotion-metadata/home bin/fm-send.sh fm-task-a "$(cat /tmp/fm-pr-check-security.EZHD7d/promotion-metadata/home/data/task-a/ship-instructions.md)"
+window=firstmate:fm-task-a
+endpoint_task_id=task-a
+worktree=/tmp/fm-pr-check-security.EZHD7d/promotion-metadata/wt
+project=/tmp/fm-pr-check-security.EZHD7d/promotion-metadata/project
+pr=https://github.com/o/r/pull/37
+pr_head=0123456789abcdef0123456789abcdef01234567
+kind=ship
+mode=direct-PR
+yolo=off
+check: /tmp/fm-pr-check-security.EZHD7d/promotion-metadata/home/state/task-a.check.sh: merged
+1789316776	1	check	merged-task-a-https://github.com/o/r/pull/37	check: merge landed: task-a https://github.com/o/r/pull/37
+ok - scout promotion preserves the registered PR poll and its durable merge notification
+EXIT=0

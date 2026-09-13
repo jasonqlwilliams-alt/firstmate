@@ -1,0 +1,10 @@
+ok - shared action accepts a matching head_sha with completed required steps
+ok - shared action rejects a mismatched head_sha and names both SHAs
+ok - shared action rejects an attestation with no head_sha
+ok - shared action handles stale synchronize body with refreshed live attestation
+ok - shared action handles old passing event with a newly unattested head
+ok - shared action handles live skipped required steps
+ok - shared action handles API permission failure with a passing cached event
+ok - shared action handles malformed live response with a passing cached event
+ok - repair-push events reject stale attestations and accept a matching refresh
+EXIT=0 SECONDS=4

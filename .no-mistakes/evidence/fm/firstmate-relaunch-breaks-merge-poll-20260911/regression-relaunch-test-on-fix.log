@@ -1,0 +1,31 @@
+BEGIN merge-poll relaunch trace=off
+armed: state/rl-merge.check.sh
+warning: /tmp/fm-control-relaunch.363hPS/merge-poll-off-17382/home/data/rl-merge/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched rl-merge harness=claude from=claude model=default effort=default backend=tmux endpoint=fmses:fm-rl-merge worktree=/tmp/fm-control-relaunch.363hPS/merge-poll-off-17382/wt
+Armed poll SHA-256 and device:inode bindings unchanged:
+check.sh e87aae384ec62ae28f78a0779020f52f7b891ba0cafea2551b5a2c4e967870cf 111:3370453
+pr-poll b533e16491cd6ab5453b06ceab03b3ffe6fd3f1eae5813cc72ef61e65ea1fc29 111:3370452
+pr-poll-registration 67fe4c5d1ace825a53a0d79228999b7030e9cc2b2ab55f9c0ffb0f034228746b 111:3370454
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=4171038.20260913T162609Z.9262
+check: /tmp/fm-control-relaunch.363hPS/merge-poll-off-17382/home/state/rl-merge.check.sh: merged
+1789316773	1	check	merged-rl-merge-https://github.com/example/repo/pull/19	check: merge landed: rl-merge https://github.com/example/repo/pull/19
+END merge-poll relaunch trace=off
+BEGIN merge-poll relaunch trace=on
+armed: state/rl-merge.check.sh
+warning: /tmp/fm-control-relaunch.363hPS/merge-poll-on-15636/home/data/rl-merge/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched rl-merge harness=claude from=claude model=default effort=default backend=tmux endpoint=fmses:fm-rl-merge worktree=/tmp/fm-control-relaunch.363hPS/merge-poll-on-15636/wt
+Armed poll SHA-256 and device:inode bindings unchanged:
+check.sh e87aae384ec62ae28f78a0779020f52f7b891ba0cafea2551b5a2c4e967870cf 111:3371052
+pr-poll b533e16491cd6ab5453b06ceab03b3ffe6fd3f1eae5813cc72ef61e65ea1fc29 111:3371051
+pr-poll-registration 0150c8a830d822c4e94ea0a64d76cf6f50847ee277fecf793800fc6401b7c4d8 111:3371053
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=4181480.20260913T162615Z.15810
+traceparent=00-c9d3a4c9aff375e3932e285f779ac7ec-335137647f219611-01
+check: /tmp/fm-control-relaunch.363hPS/merge-poll-on-15636/home/state/rl-merge.check.sh: merged
+1789316778	1	check	merged-rl-merge-https://github.com/example/repo/pull/19	check: merge landed: rl-merge https://github.com/example/repo/pull/19
+END merge-poll relaunch trace=on
+ok - fm-control relaunch: registered PR polls retain their bindings and deliver durable merge wakes with tracing off and on
+EXIT=0

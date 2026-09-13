@@ -1,0 +1,32 @@
+
+### 1. real fm-pr-check.sh records the PR on a scout
+armed: state/sc-live.check.sh
+fm-pr-check exit=0
+
+### 2. real fm-promote.sh sc-live --mode direct-PR --yolo off
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+promoted sc-live to ship mode=direct-PR yolo=off (teardown protection restored)
+wrote ship instructions for mode=direct-PR: /tmp/fm-live-promote-SKcxqH/home/data/sc-live/ship-instructions.md
+next: FM_HOME=/tmp/fm-live-promote-SKcxqH/home bin/fm-send.sh fm-sc-live "$(cat /tmp/fm-live-promote-SKcxqH/home/data/sc-live/ship-instructions.md)"
+fm-promote exit=0
+--- state/sc-live.meta after promotion
+window=firstmate:fm-sc-live
+endpoint_task_id=sc-live
+worktree=/tmp/fm-live-promote-SKcxqH/wt
+project=/tmp/fm-live-promote-SKcxqH/project
+pr=https://github.com/jasonqlwilliams-alt/firstmate/pull/5
+pr_head=cdf8197340aacb02f407835945f163bbb3fee64f
+kind=ship
+mode=direct-PR
+yolo=off
+
+### 3. real fm-watch.sh runs the armed poll against the real GitHub PR
+fm-watch exit=0
+--- watcher stdout
+check: rejected unauthenticated state checks: /tmp/fm-live-promote-SKcxqH/home/state/sc-live.check.sh
+--- state/.wake-queue
+1789316733	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /tmp/fm-live-promote-SKcxqH/home/state/sc-live.check.sh
+--- remaining poll artifacts
+sc-live.check.sh
+sc-live.pr-poll
+sc-live.pr-poll-registration

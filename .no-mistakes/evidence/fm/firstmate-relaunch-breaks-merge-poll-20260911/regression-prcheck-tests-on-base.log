@@ -1,0 +1,18 @@
+not ok - armed poll rejected legitimate trailing metadata: control_relaunch_tx=12345.20260911T120000Z.6789
+RESULT control_metadata=FAIL
+armed: state/task-a.check.sh
+promoted task-a to ship mode=direct-PR yolo=off (teardown protection restored)
+wrote ship instructions for mode=direct-PR: /tmp/fm-pr-check-security.o3g12u/promotion-metadata/home/data/task-a/ship-instructions.md
+next: FM_HOME=/tmp/fm-pr-check-security.o3g12u/promotion-metadata/home bin/fm-send.sh fm-task-a "$(cat /tmp/fm-pr-check-security.o3g12u/promotion-metadata/home/data/task-a/ship-instructions.md)"
+window=firstmate:fm-task-a
+endpoint_task_id=task-a
+worktree=/tmp/fm-pr-check-security.o3g12u/promotion-metadata/wt
+project=/tmp/fm-pr-check-security.o3g12u/promotion-metadata/project
+pr=https://github.com/o/r/pull/37
+pr_head=0123456789abcdef0123456789abcdef01234567
+kind=ship
+mode=direct-PR
+yolo=off
+not ok - promoted task's PR poll no longer authenticates
+RESULT promotion=FAIL
+EXIT=0

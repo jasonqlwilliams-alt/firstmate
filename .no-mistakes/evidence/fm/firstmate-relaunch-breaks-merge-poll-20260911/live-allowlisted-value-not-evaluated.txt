@@ -1,0 +1,54 @@
+
+### real tmux pane before relaunch
+pane_current_command=bash pane_pid=4034007 cwd=/tmp/fm-live-7kRP5A/wt
+
+### 1. real fm-pr-check.sh records the PR (real gh reads the head)
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+armed: state/rl-live.check.sh
+fm-pr-check exit=0
+--- tail of state/rl-live.meta
+effort=default
+pr=https://github.com/jasonqlwilliams-alt/firstmate/pull/5
+pr_head=cdf8197340aacb02f407835945f163bbb3fee64f
+armed artifact: rl-live.check.sh
+armed artifact: rl-live.meta
+armed artifact: rl-live.pr-poll
+armed artifact: rl-live.pr-poll-registration
+
+### 2. real fm-control.sh rl-live relaunch (trace=off)
+warning: /tmp/fm-live-7kRP5A/home/data/rl-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched rl-live harness=claude from=claude model=default effort=default backend=tmux endpoint=fmses:fm-rl-live worktree=/tmp/fm-live-7kRP5A/wt
+fm-control relaunch exit=0
+--- stand-in agent log (old agent exit, new agent start)
+start pid=4034025 cwd=/tmp/fm-live-7kRP5A/wt
+input: /exit
+exit pid=4034025
+start pid=4058441 cwd=/tmp/fm-live-7kRP5A/wt
+after relaunch: pane_current_command=bash
+--- state/rl-live.meta from pr= onward (after relaunch)
+pr=https://github.com/jasonqlwilliams-alt/firstmate/pull/5
+pr_head=cdf8197340aacb02f407835945f163bbb3fee64f
+control_relaunch_tx=4045471.20260913T162447Z.1562
+
+### ADVERSARIAL: append tampering line after relaunch: traceparent=$(touch /tmp/fm-live-pwned-marker)
+pr=https://github.com/jasonqlwilliams-alt/firstmate/pull/5
+pr_head=cdf8197340aacb02f407835945f163bbb3fee64f
+control_relaunch_tx=4045471.20260913T162447Z.1562
+traceparent=$(touch /tmp/fm-live-pwned-marker)
+
+### 3. real fm-watch.sh runs the armed poll against the real GitHub PR
+fm-watch exit=0
+--- watcher stdout
+check: /tmp/fm-live-7kRP5A/home/state/rl-live.check.sh: merged
+--- watcher stderr
+--- state/.wake-queue
+1789316697	1	check	merged-rl-live-https://github.com/jasonqlwilliams-alt/firstmate/pull/5	check: merge landed: rl-live https://github.com/jasonqlwilliams-alt/firstmate/pull/5
+--- remaining poll artifacts
+(none: poll retired)
+ls: cannot access '/tmp/fm-live-pwned-marker': No such file or directory
