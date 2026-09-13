@@ -13,6 +13,10 @@
 #       Arming again replaces the previous incarnation: late events carrying
 #       the old gen are rejected as stale from then on.
 #
+#   activate <state-dir> <id> <prepared-state-dir>
+#       Consume an armed, unused launch generation from a private preparation
+#       directory and publish it under the destination's writer lock.
+#
 #   apply <state-dir> <id> <busy|idle|unknown> (--gen G | --current-gen)
 #         --source S --event E
 #       Append one lifecycle event: validate the gen against the armed
@@ -44,6 +48,7 @@ usage() {
   cat >&2 <<'EOF'
 usage:
   fm-busy-event.sh arm <state-dir> <id> [--state busy|idle|unknown] [--source S] [--event E]
+  fm-busy-event.sh activate <state-dir> <id> <prepared-state-dir>
   fm-busy-event.sh apply <state-dir> <id> <busy|idle|unknown> (--gen G | --current-gen) --source S --event E
   fm-busy-event.sh progress <state-dir> <id> --gen G
   fm-busy-event.sh retire <state-dir> <id> (--gen G | --current-gen)
@@ -58,7 +63,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 CMD=${1:-}
 case "$CMD" in
-  arm|apply|progress|retire) shift ;;
+  arm|activate|apply|progress|retire) shift ;;
   *) usage ;;
 esac
 
@@ -74,7 +79,17 @@ GEN=
 USE_CURRENT_GEN=0
 SOURCE=
 EVENT=
-if [ "$CMD" = apply ]; then
+PREPARED_STATE=
+if [ "$CMD" = activate ]; then
+  [ "$#" -eq 1 ] || usage
+  PREPARED_STATE=$1
+  shift
+  GEN=$(fm_busy_current_gen "$PREPARED_STATE" "$ID") || exit 1
+  [ "$(fm_busy_record_read "$PREPARED_STATE" "$ID")" = 'busy fm-spawn launch-brief 1' ] || {
+    echo "error: prepared busy-state is not an unused launch generation for $ID" >&2
+    exit 1
+  }
+elif [ "$CMD" = apply ]; then
   NEW_STATE=${1:-}
   case "$NEW_STATE" in busy|idle|unknown) shift ;; *) usage ;; esac
 elif [ "$CMD" = arm ]; then
@@ -154,6 +169,18 @@ write_record() {  # <gen> <seq>
 
 old_umask=$(umask)
 umask 077
+
+if [ "$CMD" = activate ]; then
+  lock_acquire || exit 1
+  {
+    mv -f "$(fm_busy_gen_path "$PREPARED_STATE" "$ID")" "$GEN_FILE" \
+      && mv -f "$(fm_busy_record_path "$PREPARED_STATE" "$ID")" "$REC" \
+      && rm -f "$STATE/$ID.progress"
+  } || { lock_release; umask "$old_umask"; echo "error: activation failed for $ID" >&2; exit 1; }
+  lock_release
+  umask "$old_umask"
+  exit 0
+fi
 
 if [ "$CMD" = arm ]; then
   GEN="g$(date +%s).$$.$RANDOM"

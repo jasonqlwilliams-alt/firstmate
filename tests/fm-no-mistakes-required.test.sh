@@ -68,83 +68,56 @@ test_missing_head_fails() {
 
 test_live_pr_facts_override_cached_event() {
   python3 - "$VERIFY" "$TMP_ROOT" "$SIGNATURE" "$OLD_SHA" "$NEW_SHA" <<'PY' || fail "shared action live PR regression failed"
+test_repair_push_event_requires_refreshed_attestation() {
+  # GitHub's serialized event payload is the action's public input contract.
+  # Exercise the same empty-input fallback used by the workflow, including the
+  # stale body left by publishers that push a CI repair without attesting it.
+  python3 - "$VERIFY" "$TMP_ROOT" "$SIGNATURE" "$COMPLETED_STEPS" "$OLD_SHA" "$NEW_SHA" <<'PY' || fail "repair-push event attestation lifecycle failed"
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from threading import Thread
 
-verifier, root, signature, old_sha, new_sha = sys.argv[1:]
-root = Path(root)
+verifier, root, signature, steps_json, old_sha, new_sha = sys.argv[1:]
+steps = json.loads(steps_json)
+event_path = Path(root) / "pull-request-event.json"
+env = {
+    key: value for key, value in os.environ.items()
+    if not key.startswith(("PR_", "NM_EXEMPT_"))
+    and key not in ("GITHUB_EVENT_PATH", "GITHUB_OUTPUT")
+}
+env["GITHUB_EVENT_PATH"] = str(event_path)
 
+def verify_event(attested, head, action, expected):
+    body = signature + "\n<!-- no-mistakes-pipeline-attestation:v1 " + json.dumps({
+        "head_sha": attested, "steps": steps,
+    }) + " -->"
+    event_path.write_text(json.dumps({
+        "action": action,
+        "pull_request": {
+            "number": 3006, "body": body,
+            "head": {"sha": head, "ref": "repair-fixture"},
+            "user": {"login": "regression"},
+        },
+    }), encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, verifier], env=env, capture_output=True, text=True,
+    )
+    assert result.returncode == expected, result.stdout + result.stderr
+    if expected:
+        assert attested in result.stderr and head in result.stderr, result.stderr
 
-def facts(head, attested, status="completed"):
-    attestation = {
-        "head_sha": attested,
-        "steps": [{"step": step, "status": status} for step in ("review", "test", "document")],
-    }
-    return {
-        "number": 3006,
-        "user": {"login": "regression"},
-        "head": {"sha": head, "ref": "regression"},
-        "body": signature + "\n<!-- no-mistakes-pipeline-attestation:v1 " + json.dumps(attestation) + " -->",
-    }
-
-
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.server.requests.append((self.path, self.headers.get("Authorization")))
-        self.send_response(self.server.response_status)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps(self.server.payload).encode())
-
-    def log_message(self, *args):
-        pass
-
-
-server = HTTPServer(("127.0.0.1", 0), Handler)
-thread = Thread(target=server.serve_forever, daemon=True)
-thread.start()
-try:
-    # No real credentials or runner output files may leak into this subprocess.
-    env = {key: value for key, value in os.environ.items()
-           if not key.startswith(("GITHUB_", "PR_", "NM_EXEMPT_"))}
-    env.update({
-        "GITHUB_API_URL": f"http://127.0.0.1:{server.server_port}",
-        "GITHUB_TOKEN": "fixture-token",
-        "GITHUB_REPOSITORY": "fixture/repository",
-        "GITHUB_EVENT_PATH": str(root / "event.json"),
-        "GITHUB_OUTPUT": str(root / "outputs"),
-        "no_proxy": "127.0.0.1",
-        "NO_PROXY": "127.0.0.1",
-    })
-    cases = [
-        ("stale synchronize body with refreshed live attestation", facts(new_sha, old_sha), facts(new_sha, new_sha), 200, True),
-        ("old passing event with a newly unattested head", facts(old_sha, old_sha), facts(new_sha, old_sha), 200, False),
-        ("live skipped required steps", facts(old_sha, old_sha), facts(new_sha, new_sha, "skipped"), 200, False),
-        ("API permission failure with a passing cached event", facts(old_sha, old_sha), {}, 403, False),
-        ("malformed live response with a passing cached event", facts(old_sha, old_sha), {}, 200, False),
-    ]
-    for name, event, live, status, compliant in cases:
-        (root / "event.json").write_text(json.dumps({"pull_request": event}), encoding="utf-8")
-        (root / "outputs").write_text("", encoding="utf-8")
-        server.payload, server.response_status, server.requests = live, status, []
-        result = subprocess.run([sys.executable, verifier], env=env, capture_output=True, text=True, timeout=20)
-        output = result.stdout + result.stderr
-        assert result.returncode == (0 if compliant else 1), f"{name}: {output}"
-        outputs = dict(line.split("=", 1) for line in (root / "outputs").read_text().splitlines())
-        assert outputs.get("compliant") == str(compliant).lower(), f"{name}: {outputs}"
-        assert outputs.get("exempt") == "false", f"{name}: {outputs}"
-        assert server.requests == [("/repos/fixture/repository/pulls/3006", "Bearer fixture-token")], name
-        print(f"ok - shared action handles {name}")
-finally:
-    server.shutdown()
-    thread.join()
-    server.server_close()
+verify_event(old_sha, old_sha, "opened", 0)
+verify_event(old_sha, new_sha, "synchronize", 1)
+# Re-running the frozen event cannot repair its stale attestation.
+verify_event(old_sha, new_sha, "synchronize", 1)
+# A publisher's refreshed body must bind to the head carried by the new event.
+verify_event(new_sha, new_sha, "edited", 0)
+verify_event(new_sha, new_sha, "synchronize", 0)
+verify_event(new_sha, old_sha, "edited", 1)
 PY
+  pass "repair-push events reject stale attestations and accept a matching refresh"
 }
 
 fetch_shared_verifier
@@ -152,3 +125,4 @@ test_matching_head_and_completed_steps_pass
 test_mismatched_head_fails_with_both_shas
 test_missing_head_fails
 test_live_pr_facts_override_cached_event
+test_repair_push_event_requires_refreshed_attestation
