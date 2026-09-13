@@ -72,10 +72,15 @@ case "${1:-}" in
       printf '%s\n' "$payload" >> "$D/literal"
       case "$payload" in
         /exit|/quit)
+          if [ -x "$D/before-exit" ]; then
+            "$D/before-exit" || exit 1
+          fi
           printf 'zsh' > "$D/command"
+          [ ! -f "$D/exit-cwd" ] || cat "$D/exit-cwd" > "$D/cwd"
           [ -z "${FM_FAKE_EXIT_TRANSPORT_FAIL_AFTER_STOP:-}" ] || exit 1
           ;;
-        *'encode launch-brief'*)
+        *'encode launch-brief'*|*' --auto')
+          [ ! -x "$D/before-launch" ] || "$D/before-launch" || exit 1
           cat "$D/becomes" > "$D/command"
           [ -z "${FM_FAKE_LAUNCH_TRANSPORT_FAIL_AFTER_START:-}" ] || exit 1
           ;;
@@ -83,6 +88,18 @@ case "${1:-}" in
     else
       printf '%s\n' "$payload" >> "$D/keys"
       case "$payload" in
+        'printf '*)
+          pane_path=${FM_FAKE_PANE_PATH:-$PATH}
+          [ ! -f "$D/path" ] || pane_path=$(cat "$D/path")
+          cat "$D/cwd" > "$D/path-probe-cwd"
+          ( export PATH="$pane_path"; eval "$payload" ) || exit 1
+          ;;
+        'cd -- '*)
+          if [ ! -e "$D/refuse-cd" ]; then
+            ( eval "$payload" && pwd -P ) > "$D/cwd"
+            [ ! -x "$D/after-cd" ] || "$D/after-cd" || exit 1
+          fi
+          ;;
         'export GOTMPDIR='*)
           if [ -n "${FM_FAKE_TRACE_PREPARE:-}" ]; then
             : > "$FM_FAKE_TRACE_PREPARE"
@@ -109,15 +126,32 @@ case "${1:-}" in
       esac
     done
     printf 'fakepane\n'; exit 0 ;;
-  capture-pane) printf '╭────╮\n│    │\n╰────╯\n'; exit 0 ;;
+  capture-pane)
+    printf '╭────╮\n│    │\n╰────╯\n'
+    if [ "$(cat "$D/command")" = kimi ]; then
+      printf 'Welcome to Kimi Code!\ncontext: 1%% (2k/256k)\n'
+    fi
+    exit 0 ;;
   list-windows) [ -f "$D/windows" ] && cat "$D/windows"; exit 0 ;;
 esac
 exit 0
 SH
   chmod +x "$fb/tmux"
+  cat > "$fb/ps" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -t ] && [ "${2:-}" = fakepane ]; then
+  command_name=$(cat "$FM_FAKE_DIR/command")
+  case "$command_name" in bash|zsh|sh) exit 0 ;; esac
+  printf '%s %s %s %s\n' "$FM_FAKE_PANE_PID" "$FM_FAKE_PANE_PID" "$FM_FAKE_PANE_PID" "$command_name"
+  exit 0
+fi
+exec /bin/ps "$@"
+SH
+  chmod +x "$fb/ps"
   cat > "$fb/sleep" <<'SH'
 #!/usr/bin/env bash
 [ -z "${FM_FAKE_LOCK_WAITING:-}" ] || : > "$FM_FAKE_LOCK_WAITING"
+case "${1:-}" in 0.01|0.1) /bin/sleep 0.01 ;; esac
 exit 0
 SH
   chmod +x "$fb/sleep"
@@ -125,7 +159,7 @@ SH
 
 # new_case <name> [id] -> echoes a case dir with a live claude ship task.
 new_case() {
-  local id=${2:-t1} dir="$TMP_ROOT/$1-$RANDOM"
+  local id=${2:-t1} dir="$TMP_ROOT/$1-$RANDOM" tool
   mkdir -p "$dir/home/state" "$dir/home/data" "$dir/fake"
   : > "$dir/fake/literal"
   : > "$dir/fake/keys"
@@ -133,6 +167,10 @@ new_case() {
   printf 'claude' > "$dir/fake/becomes"
   printf '%s\n' "fm-$id" > "$dir/fake/windows"
   make_tmux_stub "$dir"
+  for tool in claude codex opencode grok gemini pi; do
+    printf '#!/bin/sh\nexit 0\n' > "$dir/fakebin/$tool"
+    chmod +x "$dir/fakebin/$tool"
+  done
   printf '%s\n' "$dir"
 }
 
@@ -169,12 +207,20 @@ EOF
 }
 
 run_control() {  # <case-dir> <args...>
-  local dir=$1; shift
+  local dir=$1 pane_pid rc; shift
   # A claude spawn pre-registers workspace trust in the launching user's own
   # store (bin/fm-claude-trust.sh), and a relaunch reaches it through fm-control.sh, so this runs against a throwaway HOME;
   # without it this suite would write the developer's real ~/.claude.json.
   mkdir -p "$dir/user-home"
-  env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
+  if [ -n "${FM_FAKE_PANE_ARGS:-}" ]; then
+    env PATH="${FM_FAKE_PANE_PATH:-$dir/fakebin:$PATH}" \
+      "$(command -v python3)" -c 'import time; time.sleep(120)' "$FM_FAKE_PANE_ARGS" >/dev/null 2>&1 &
+  else
+    env PATH="${FM_FAKE_PANE_PATH:-$dir/fakebin:$PATH}" /bin/sleep 120 >/dev/null 2>&1 &
+  fi
+  pane_pid=$!
+  env FM_FAKE_PANE_PID="$pane_pid" FM_FAKE_PANE_PATH="${FM_FAKE_PANE_PATH:-$dir/fakebin:$PATH}" \
+    PATH="$dir/fakebin:$PATH" FM_HOME="${FM_FAKE_CONTROL_HOME:-$dir/home}" FM_FAKE_DIR="$dir/fake" \
     HOME="$dir/user-home" CLAUDE_CONFIG_DIR='' \
     FM_SPAWN_NO_GUARD=1 GROK_HOME="$dir/grokhome" \
     FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 FM_CONTROL_LAUNCH_WAIT=0.05 \
@@ -186,18 +232,29 @@ run_control() {  # <case-dir> <args...>
     FM_FAKE_META_WRITER_READY="${FM_FAKE_META_WRITER_READY:-}" \
     FM_FAKE_TRACE_EXPORTED="${FM_FAKE_TRACE_EXPORTED:-}" \
     "$CONTROL" "$@" 2>&1
+  rc=$?
+  kill "$pane_pid" 2>/dev/null || true
+  wait "$pane_pid" 2>/dev/null || true
+  return "$rc"
 }
 
 run_spawn() {  # <case-dir> <args...>
-  local dir=$1; shift
+  local dir=$1 pane_pid rc; shift
   # A claude spawn pre-registers workspace trust in the launching user's own
   # store (bin/fm-claude-trust.sh), so it runs against a throwaway HOME;
   # without it this suite would write the developer's real ~/.claude.json.
   mkdir -p "$dir/user-home"
-  env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
+  env PATH="${FM_FAKE_PANE_PATH:-$dir/fakebin:$PATH}" /bin/sleep 120 >/dev/null 2>&1 &
+  pane_pid=$!
+  env FM_FAKE_PANE_PID="$pane_pid" FM_FAKE_PANE_PATH="${FM_FAKE_PANE_PATH:-$dir/fakebin:$PATH}" \
+    PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
     HOME="$dir/user-home" CLAUDE_CONFIG_DIR='' \
     FM_SPAWN_NO_GUARD=1 GROK_HOME="$dir/grokhome" \
     "$SPAWN" "$@" 2>&1
+  rc=$?
+  kill "$pane_pid" 2>/dev/null || true
+  wait "$pane_pid" 2>/dev/null || true
+  return "$rc"
 }
 
 meta_field() {  # <case-dir> <id> <key>
@@ -403,7 +460,9 @@ test_relaunch_serializes_concurrent_durable_metadata_publication() {
     FM_FAKE_TRACE_RELEASE="$launch_release" \
     run_control "$dir" rl28 relaunch --note "continue after publication" > "$dir/control.out" &
   control_pid=$!
-  while [ ! -e "$prepare" ] && [ "$i" -lt 500 ]; do
+  # This checkpoint follows preparation, exit, and launch setup. Allow the
+  # controller's 90-second preparation budget before judging it missing.
+  while [ ! -e "$prepare" ] && [ "$i" -lt 10000 ]; do
     /bin/sleep 0.01
     i=$((i + 1))
   done
@@ -1043,9 +1102,10 @@ test_launch_failure_keeps_the_prior_record_and_reports_it() {
   dir=$(new_case rollback rl13)
   add_ship_task "$dir" rl13 claude
   before=$(cat "$dir/home/state/rl13.meta")
-  # The endpoint's shell is not in the recorded worktree, so the launch owner
-  # refuses AFTER the previous agent has already been stopped.
-  printf '%s' "$dir/proj" > "$dir/fake/cwd"
+  # A transport failure after stop remains a real launch-time failure:
+  # preparation cannot predict a later shell that stops accepting commands.
+  printf '%s' "$dir/proj" > "$dir/fake/exit-cwd"
+  : > "$dir/fake/refuse-cd"
   out=$(run_control "$dir" rl13 relaunch --harness codex --note "carry this forward"); rc=$?
   expect_code 1 "$rc" "a failed launch should fail closed"$'\n'"$out"
   assert_contains "$out" "no agent is running" "the failure should say no agent is running"
@@ -1065,7 +1125,8 @@ test_prepublication_failure_keeps_concurrent_durable_metadata() {
   local dir control_pid link_out rc i=0
   dir=$(new_case rollback-race rl30)
   add_ship_task "$dir" rl30 claude
-  printf '%s' "$dir/proj" > "$dir/fake/cwd"
+  printf '%s' "$dir/proj" > "$dir/fake/exit-cwd"
+  : > "$dir/fake/refuse-cd"
   FM_FAKE_CWD_RACE_READY="$dir/cwd-race-ready" \
     run_control "$dir" rl30 relaunch --harness codex --note "preserve concurrent metadata" \
       > "$dir/control.out" &
@@ -1513,16 +1574,19 @@ test_spawn_relaunch_refuses_an_unrecorded_task() {
   pass "fm-spawn --relaunch: an unrecorded task is refused"
 }
 
-test_spawn_relaunch_refuses_a_pane_outside_the_worktree() {
+test_spawn_relaunch_refuses_a_shell_that_cannot_return() {
   local dir out rc
   dir=$(new_case wrongcwd rl18)
   add_ship_task "$dir" rl18 claude
   printf 'zsh' > "$dir/fake/command"
   printf '%s' "$dir/proj" > "$dir/fake/cwd"
+  : > "$dir/fake/refuse-cd"
   out=$(run_spawn "$dir" rl18 --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "a pane outside the worktree should refuse"
-  assert_contains "$out" "not its recorded worktree" "the refusal should name the wrong location"
-  [ ! -s "$dir/fake/keys" ] || fail "a refused tmux relaunch must send nothing to the pane"
+  assert_contains "$out" "did not return to its recorded worktree" "the refusal should name the failed return"
+  [ "$(grep -c '^cd -- ' "$dir/fake/keys")" = 1 ] \
+    || fail "the shell should be told exactly once to return"
+  [ ! -s "$dir/fake/literal" ] || fail "a failed return must deliver no launch bytes"
   pass "fm-spawn --relaunch: refuses to start a replacement outside the copy holding its work"
 }
 
@@ -1589,6 +1653,838 @@ test_relaunch_from_guarded_path() {
   pass "fm-control relaunch: armed PATH exports real tools and checkpoint fixtures preserve shim delegates"
 }
 
+test_relaunch_recovers_an_exited_shell() {
+  local dir out rc scenario
+  for scenario in home pool-parent unwind-on-exit quoted-path; do
+    dir=$(new_case "exited-$scenario" rl-exited)
+    if [ "$scenario" = quoted-path ]; then
+      dir=$(new_case "exited-worker's copy" rl-exited)
+    fi
+    add_ship_task "$dir" rl-exited claude
+    case "$scenario" in
+      home|quoted-path) printf 'zsh' > "$dir/fake/command"; printf '%s' "$dir/home" > "$dir/fake/cwd" ;;
+      pool-parent) printf 'zsh' > "$dir/fake/command"; printf '%s' "$dir" > "$dir/fake/cwd" ;;
+      unwind-on-exit) printf '%s' "$dir/home" > "$dir/fake/exit-cwd" ;;
+    esac
+    out=$(run_control "$dir" rl-exited relaunch --note 'Continue preserved work.'); rc=$?
+    expect_code 0 "$rc" "relaunch should recover $scenario shell"$'\n'"$out"
+    [ "$(cat "$dir/fake/command")" = claude ] || fail "replacement is absent"
+    [ "$(cat "$dir/fake/cwd")" = "$dir/wt" ] || fail "replacement is outside recorded worktree"
+    [ "$(meta_field "$dir" rl-exited worktree)" = "$dir/wt" ] || fail "worktree identity changed"
+  done
+  pass "fm-control relaunch: exited and unwinding shells return to their recorded worktree"
+}
+
+test_relaunch_preparation_refuses_before_stop() {
+  local dir out rc scenario expected
+  for scenario in config brief worktree live-cwd pending-close; do
+    dir=$(new_case "bad-prepare-$scenario" rl-preflight)
+    add_ship_task "$dir" rl-preflight claude
+    case "$scenario" in
+      config)
+        mkdir -p "$dir/home/config"
+        printf 'invalid\n' > "$dir/home/config/claude-permission-mode"
+        expected='claude-permission-mode'
+        ;;
+      brief)
+        printf '# Task\nContinue a legacy task.\n' > "$dir/home/data/rl-preflight/brief.md"
+        expected='legacy mixed # Task brief has no provenance-marked captain words'
+        ;;
+      worktree)
+        sed "s|^worktree=.*|worktree=$dir/proj|" "$dir/home/state/rl-preflight.meta" > "$dir/new.meta"
+        mv "$dir/new.meta" "$dir/home/state/rl-preflight.meta"
+        expected='did not yield an isolated worktree'
+        ;;
+      live-cwd)
+        printf '%s' "$dir/home" > "$dir/fake/cwd"
+        expected='refusing before stop'
+        ;;
+      pending-close)
+        printf 'pending\n' > "$dir/home/state/rl-preflight.backlog-close"
+        expected='pending authoritative backlog close'
+        ;;
+    esac
+    cp "$dir/home/state/rl-preflight.meta" "$dir/meta.before"
+    cp "$dir/home/data/rl-preflight/brief.md" "$dir/brief.before"
+    out=$(run_control "$dir" rl-preflight relaunch --note 'Do not lose the worker.'); rc=$?
+    expect_code 1 "$rc" "invalid replacement $scenario must refuse"$'\n'"$out"
+    assert_contains "$out" "$expected" "refusal should identify $scenario"
+    [ "$(cat "$dir/fake/command")" = claude ] || fail "preparation refusal stopped the old agent"
+    [ ! -s "$dir/fake/literal" ] || fail "preparation refusal sent lifecycle or launch bytes"
+    [ ! -s "$dir/fake/keys" ] || fail "preparation refusal sent shell commands"
+    cmp -s "$dir/meta.before" "$dir/home/state/rl-preflight.meta" || fail "preparation refusal changed metadata"
+    cmp -s "$dir/brief.before" "$dir/home/data/rl-preflight/brief.md" || fail "preparation refusal changed instructions"
+  done
+  pass "fm-control relaunch: replacement refusals preserve the running agent, metadata, and instructions"
+}
+
+test_relaunch_rejects_unlaunchable_replacement_before_stop() {
+  local dir out rc scenario target expected path_dir executable
+  local -a path_dirs
+  for scenario in plugin-directory missing-executable nonexecutable; do
+    dir=$(new_case "unlaunchable-$scenario" rl-launchable)
+    add_ship_task "$dir" rl-launchable claude
+    printf zsh > "$dir/fake/command"
+    out=$(run_spawn "$dir" rl-launchable --relaunch --harness claude); rc=$?
+    expect_code 0 "$rc" "seed the original live wiring"$'\n'"$out"
+    cp "$dir/wt/.claude/settings.local.json" "$dir/hook.before"
+    cp "$dir/home/state/rl-launchable.busy-gen" "$dir/gen.before"
+    cp "$dir/home/state/rl-launchable.busy-state" "$dir/busy.before"
+    cp "$dir/home/state/rl-launchable.meta" "$dir/meta.before"
+    cp "$dir/home/data/rl-launchable/brief.md" "$dir/brief.before"
+    : > "$dir/fake/literal"
+    : > "$dir/fake/keys"
+    target=codex
+    expected='codex executable not found'
+    if [ "$scenario" = plugin-directory ]; then
+      target=opencode
+      expected='.opencode/plugins'
+      mkdir -p "$dir/wt/.opencode"
+      printf 'project-owned file\n' > "$dir/wt/.opencode/plugins"
+      out=$(run_control "$dir" rl-launchable relaunch --harness "$target" --note 'Keep the current worker.'); rc=$?
+    else
+      mkdir -p "$dir/dependencies"
+      IFS=: read -r -a path_dirs <<< "$PATH"
+      for path_dir in "${path_dirs[@]}"; do
+        [ -d "$path_dir" ] || continue
+        path_dir=$(cd "$path_dir" && pwd -P)
+        for executable in "$path_dir"/*; do
+          [ -f "$executable" ] && [ -x "$executable" ] || continue
+          [ "${executable##*/}" != codex ] || continue
+          [ -e "$dir/dependencies/${executable##*/}" ] || ln -s "$executable" "$dir/dependencies/${executable##*/}"
+        done
+      done
+      rm "$dir/fakebin/codex"
+      if [ "$scenario" = nonexecutable ]; then
+        printf '#!/bin/sh\nexit 0\n' > "$dir/fakebin/codex"
+        chmod 600 "$dir/fakebin/codex"
+      fi
+      out=$(PATH="$dir/dependencies" run_control "$dir" rl-launchable relaunch --harness "$target" --note 'Keep the current worker.'); rc=$?
+    fi
+    expect_code 1 "$rc" "$scenario must refuse before stop"$'\n'"$out"
+    assert_contains "$out" "$expected" "refusal should name the invalid prerequisite"
+    [ "$(cat "$dir/fake/command")" = claude ] || fail "$scenario stopped the original agent"
+    [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "$scenario sent lifecycle bytes"
+    cmp -s "$dir/hook.before" "$dir/wt/.claude/settings.local.json" || fail "$scenario changed the old hook"
+    cmp -s "$dir/gen.before" "$dir/home/state/rl-launchable.busy-gen" || fail "$scenario retired the old generation"
+    cmp -s "$dir/busy.before" "$dir/home/state/rl-launchable.busy-state" || fail "$scenario changed busy state"
+    cmp -s "$dir/meta.before" "$dir/home/state/rl-launchable.meta" || fail "$scenario changed metadata"
+    cmp -s "$dir/brief.before" "$dir/home/data/rl-launchable/brief.md" || fail "$scenario changed instructions"
+    if [ "$scenario" = plugin-directory ]; then
+      [ "$(cat "$dir/wt/.opencode/plugins")" = 'project-owned file' ] || fail "plugin blocker was overwritten"
+    fi
+  done
+  pass "fm-control relaunch: invalid plugin paths and unavailable executables preserve the running worker"
+}
+
+test_relaunch_stages_wiring_until_stop() {
+  local dir out rc target old_gen hook_cmd
+  for target in claude opencode; do
+    dir=$(new_case "staged-$target" rl-staging)
+    add_ship_task "$dir" rl-staging claude
+    printf zsh > "$dir/fake/command"
+    out=$(run_spawn "$dir" rl-staging --relaunch --harness claude); rc=$?
+    expect_code 0 "$rc" "seed the original live wiring"$'\n'"$out"
+    cp "$dir/wt/.claude/settings.local.json" "$dir/hook.before"
+    cp "$dir/home/state/rl-staging.busy-gen" "$dir/gen.before"
+    cp "$dir/home/state/rl-staging.busy-state" "$dir/busy.before"
+    old_gen=$(cat "$dir/gen.before")
+    printf '%s' "$target" > "$dir/fake/becomes"
+    printf '%s' "$target" > "$dir/fake/target"
+    cat > "$dir/fake/before-exit" <<'SH'
+#!/usr/bin/env bash
+set -eu
+D=$FM_FAKE_DIR
+CASE=${D%/*}
+STATE="$CASE/home/state"
+cmp -s "$CASE/hook.before" "$CASE/wt/.claude/settings.local.json"
+cmp -s "$CASE/gen.before" "$STATE/rl-staging.busy-gen"
+cmp -s "$CASE/busy.before" "$STATE/rl-staging.busy-state"
+set -- "$STATE"/.rl-staging.relaunch-prepare.*
+[ "$#" = 1 ] && [ -f "$1/ready" ]
+[ -s "$1/busy/rl-staging.busy-state" ]
+[ "$(cat "$1/busy/rl-staging.busy-gen")" != "$(cat "$CASE/gen.before")" ]
+if [ "$(cat "$D/target")" = claude ]; then
+  set -- "$CASE/wt/.claude"/.fm-rl-staging.relaunch.*
+else
+  [ ! -e "$CASE/wt/.opencode/plugins/fm-busy-state.js" ]
+  set -- "$CASE/wt/.opencode/plugins"/.fm-rl-staging.relaunch.*
+fi
+[ "$#" = 1 ] && [ -s "$1" ]
+cp "$1" "$CASE/staged-hook"
+hook_cmd=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hooks"]["Stop"][0]["hooks"][0]["command"])' "$CASE/hook.before")
+bash -c "$hook_cmd"
+: > "$CASE/old-wiring-proven-at-stop"
+SH
+    chmod +x "$dir/fake/before-exit"
+    out=$(run_control "$dir" rl-staging relaunch --harness "$target" --note 'Activate the staged replacement.'); rc=$?
+    expect_code 0 "$rc" "staged $target relaunch should succeed"$'\n'"$out"
+    assert_present "$dir/old-wiring-proven-at-stop" "the stop did not observe intact old wiring and staged replacement"
+    [ "$(cat "$dir/fake/command")" = "$target" ] || fail "replacement did not start"
+    [ "$(cat "$dir/home/state/rl-staging.busy-gen")" != "$old_gen" ] || fail "replacement reused the old generation"
+    "$ROOT/bin/fm-busy-event.sh" apply "$dir/home/state" rl-staging idle --gen "$old_gen" --source test --event stale >/dev/null 2>&1
+    rc=$?
+    expect_code 1 "$rc" "the replacement must reject an old agent's late event"
+    if [ "$target" = claude ]; then
+      cmp -s "$dir/staged-hook" "$dir/wt/.claude/settings.local.json" || fail "the prepared hook was not installed"
+      hook_cmd=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hooks"]["Stop"][0]["hooks"][0]["command"])' "$dir/wt/.claude/settings.local.json")
+      bash -c "$hook_cmd" || fail "replacement hook could not run"
+    else
+      cmp -s "$dir/staged-hook" "$dir/wt/.opencode/plugins/fm-busy-state.js" || fail "the prepared plugin was not installed"
+      assert_absent "$dir/wt/.claude/settings.local.json" "old hook survived the switch"
+      node --input-type=module - "$dir/wt/.opencode/plugins/fm-busy-state.js" <<'JS'
+import { pathToFileURL } from 'node:url';
+const { FmBusyState } = await import(pathToFileURL(process.argv[2]));
+const plugin = await FmBusyState();
+await plugin.event({ event: { type: 'session.status', properties: { sessionID: 'main', status: { type: 'busy' } } } });
+await plugin.event({ event: { type: 'session.idle', properties: { sessionID: 'main' } } });
+JS
+      expect_code 0 "$?" "replacement plugin could not run"
+    fi
+    assert_grep ' state=idle ' "$dir/home/state/rl-staging.busy-state" "replacement wiring did not update its activated generation"
+  done
+  pass "fm-control relaunch: hook and plugin staging preserves old wiring through stop and activates functional replacements"
+}
+
+test_relaunch_discards_staging_when_exit_refuses() {
+  local dir out rc path
+  dir=$(new_case refused-stop rl-stage-abort)
+  add_ship_task "$dir" rl-stage-abort claude
+  printf zsh > "$dir/fake/command"
+  out=$(run_spawn "$dir" rl-stage-abort --relaunch --harness claude); rc=$?
+  expect_code 0 "$rc" "seed the original live wiring"$'\n'"$out"
+  cp "$dir/wt/.claude/settings.local.json" "$dir/hook.before"
+  cp "$dir/home/state/rl-stage-abort.busy-gen" "$dir/gen.before"
+  printf '#!/bin/sh\nexit 1\n' > "$dir/fake/before-exit"
+  chmod +x "$dir/fake/before-exit"
+  out=$(run_control "$dir" rl-stage-abort relaunch --note 'Preserve wiring if exit refuses.'); rc=$?
+  expect_code 1 "$rc" "an exit refusal must abort replacement"$'\n'"$out"
+  [ "$(cat "$dir/fake/command")" = claude ] || fail "exit refusal stopped the worker"
+  cmp -s "$dir/hook.before" "$dir/wt/.claude/settings.local.json" || fail "abort changed the original hook"
+  cmp -s "$dir/gen.before" "$dir/home/state/rl-stage-abort.busy-gen" || fail "abort changed the original generation"
+  for path in "$dir/wt/.claude"/.fm-rl-stage-abort.relaunch.* "$dir/home/state"/.rl-stage-abort.relaunch-prepare.*; do
+    assert_absent "$path" "aborted relaunch left prepared wiring behind"
+  done
+  pass "fm-control relaunch: an exit refusal discards staged wiring and preserves the running worker"
+}
+
+test_relaunch_validates_retirement_inputs_before_stop() {
+  local dir harness scenario registry token out rc
+  for harness in grok kimi; do
+    for scenario in empty-token malformed-token missing-token token-directory registry-directory registry-parent-file inaccessible-registry valid; do
+      dir=$(new_case "retirement-$harness-$scenario" rl-retire)
+      add_ship_task "$dir" rl-retire "$harness"
+      printf '%s' "$harness" > "$dir/fake/command"
+      printf codex > "$dir/fake/becomes"
+      if [ "$harness" = grok ]; then
+        registry="$dir/grokhome/hooks/fm-turn-end.d"
+      else
+        registry="$dir/user-home/.kimi-code/fm-turn-end.d"
+      fi
+      mkdir -p "$registry"
+      token="$dir/home/state/rl-retire.$harness-turnend-token"
+      printf 'fm.retired' > "$token"
+      printf 'token=fm.retired\n' > "$dir/wt/.fm-$harness-turnend"
+      printf '%s\n' "$dir/home/state/rl-retire.turn-ended" > "$registry/fm.retired"
+      case "$scenario" in
+        empty-token) : > "$token" ;;
+        malformed-token) printf '../other\n' > "$token" ;;
+        missing-token) rm "$token" ;;
+        token-directory) rm "$token"; mkdir "$token" ;;
+        registry-directory) rm "$registry/fm.retired"; mkdir "$registry/fm.retired" ;;
+        registry-parent-file) rm -r "$registry"; printf blocked > "$registry" ;;
+        inaccessible-registry)
+          [ "$(id -u)" != 0 ] || continue
+          chmod 500 "$registry"
+          ;;
+      esac
+      cp "$dir/home/state/rl-retire.meta" "$dir/meta.before"
+      out=$(run_control "$dir" rl-retire relaunch --harness codex --note 'Keep the worker until retirement is safe.'); rc=$?
+      [ "$scenario" != inaccessible-registry ] || chmod 700 "$registry"
+      if [ "$scenario" = valid ]; then
+        expect_code 0 "$rc" "valid $harness retirement should succeed: $out"
+        assert_absent "$registry/fm.retired" "old registry entry survived retirement"
+        assert_absent "$token" "old token survived retirement"
+        [ "$(cat "$dir/fake/command")" = codex ] || fail "replacement did not start"
+      else
+        expect_code 1 "$rc" "$harness $scenario must refuse before stop: $out"
+        [ "$(cat "$dir/fake/command")" = "$harness" ] || fail "$scenario stopped the old worker"
+        [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "$scenario sent lifecycle bytes"
+        cmp -s "$dir/meta.before" "$dir/home/state/rl-retire.meta" || fail "$scenario changed metadata"
+        assert_present "$dir/wt/.fm-$harness-turnend" "preparation removed the old pointer"
+      fi
+    done
+  done
+  pass "fm-control relaunch: shared retirement validation preserves workers with invalid token or registry inputs"
+}
+
+test_relaunch_uses_the_pane_executable() {
+  local dir scenario state out rc launch
+  for state in alive dead; do
+    for scenario in different-install pane-only controller-only; do
+      dir=$(new_case "pane-path-$state-$scenario" rl-pane-path)
+      add_ship_task "$dir" rl-pane-path claude
+      [ "$state" != dead ] || printf zsh > "$dir/fake/command"
+      mkdir -p "$dir/pane-bin"
+      cat > "$dir/pane-bin/codex" <<SH
+#!/bin/sh
+printf pane > '$dir/executable-ran'
+SH
+      chmod +x "$dir/pane-bin/codex"
+      cat > "$dir/fakebin/codex" <<SH
+#!/bin/sh
+printf controller > '$dir/executable-ran'
+SH
+      chmod +x "$dir/fakebin/codex"
+      case "$scenario" in
+        pane-only) rm "$dir/fakebin/codex" ;;
+        controller-only) rm "$dir/pane-bin/codex" ;;
+      esac
+      printf codex > "$dir/fake/becomes"
+      out=$(FM_FAKE_PANE_PATH="$dir/pane-bin" run_control "$dir" rl-pane-path relaunch --harness codex --note 'Use the pane installation.'); rc=$?
+      if [ "$scenario" = controller-only ]; then
+        expect_code 1 "$rc" "controller binary must not substitute for absent pane binary: $out"
+        assert_contains "$out" 'codex executable not found' "missing pane executable was not reported"
+        [ "$state" != alive ] || [ "$(cat "$dir/fake/command")" = claude ] || fail "missing pane binary stopped worker"
+      else
+        expect_code 0 "$rc" "pane binary should launch for $state/$scenario: $out"
+        launch=$(tail -n 1 "$dir/fake/literal")
+        bash -c "$launch" || fail "generated launch command failed"
+        [ "$(cat "$dir/executable-ran")" = pane ] || fail "generated launch selected the controller binary"
+      fi
+    done
+  done
+  pass "fm-control relaunch: live and exited panes resolve their own executable rather than the controller installation"
+}
+
+test_raw_relaunch_validates_the_selected_executable() {
+  local dir scenario out rc launch
+  for scenario in available missing nonexecutable quoted pi; do
+    dir=$(new_case "raw-$scenario" rl-raw)
+    add_ship_task "$dir" rl-raw claude
+    printf zsh > "$dir/fake/command"
+    mkdir -p "$dir/explicit install"
+    cat > "$dir/explicit install/codex" <<SH
+#!/bin/sh
+printf '%s' "\$1" > '$dir/raw-ran'
+printf '%s' "\${FM_PI_HARNESS:-}" > '$dir/raw-harness'
+SH
+    chmod +x "$dir/explicit install/codex"
+    if [ "$scenario" != quoted ]; then
+      mv "$dir/explicit install" "$dir/explicit"
+      launch="$dir/explicit/codex --flag"
+    else
+      launch="'$dir/explicit install/codex' --flag"
+    fi
+    case "$scenario" in
+      missing) rm "$dir/explicit/codex" ;;
+      nonexecutable) chmod 600 "$dir/explicit/codex" ;;
+      pi) mv "$dir/explicit/codex" "$dir/explicit/pi"; launch="$dir/explicit/pi --flag" ;;
+    esac
+    out=$(FM_FAKE_PANE_PATH="$dir/missing-bin" run_spawn "$dir" rl-raw --relaunch --harness "$launch"); rc=$?
+    case "$scenario" in
+      missing|nonexecutable)
+        expect_code 1 "$rc" "raw $scenario executable should refuse: $out"
+        [ ! -s "$dir/fake/literal" ] || fail "unavailable raw executable was sent to the pane"
+        ;;
+      *)
+        expect_code 0 "$rc" "explicit executable should not require canonical PATH entry: $out"
+        launch=$(tail -n 1 "$dir/fake/literal")
+        bash -c "$launch" || fail "generated raw launch failed"
+        [ "$(cat "$dir/raw-ran")" = --flag ] || fail "raw executable or arguments changed"
+        if [ "$scenario" = pi ]; then
+          [ "$(cat "$dir/raw-harness")" = pi ] || fail "raw Pi lost its adapter environment"
+        fi
+        ;;
+    esac
+  done
+  pass "fm-spawn --relaunch: raw commands validate and execute the explicitly selected binary"
+}
+
+test_secondmate_preparation_holds_inheritance_until_stop() {
+  local dir scenario home out rc lock dead_pid
+  for scenario in state-unwritable config-unwritable destination-directory locked stale-lock success exit-refused; do
+    dir=$(new_case "sm-prepare-$scenario" sm-prepare)
+    home="$dir/smhome"
+    fm_git_worktree "$dir/proj" "$home" sm-branch
+    mkdir -p "$home/state" "$home/data" "$home/config" "$home/bin" "$dir/home/config"
+    printf 'state/\nconfig/\ndata/\n' >> "$(git -C "$home" rev-parse --git-path info/exclude)"
+    printf 'sm-prepare\n' > "$home/.fm-secondmate-home"
+    printf '# agents\n' > "$home/AGENTS.md"
+    printf '# charter\n' > "$home/data/charter.md"
+    printf claude > "$home/config/crew-harness"
+    printf codex > "$dir/home/config/crew-harness"
+    : > "$dir/home/config/trace-context"
+    {
+      echo 'window=fmses:fm-sm-prepare'
+      echo 'endpoint_task_id=sm-prepare'
+      echo "worktree=$home"
+      echo "project=$home"
+      echo 'harness=claude'
+      echo 'kind=secondmate'
+      echo 'mode=secondmate'
+      echo 'yolo=off'
+      echo 'model=default'
+      echo 'effort=default'
+      echo "home=$home"
+    } > "$dir/home/state/sm-prepare.meta"
+    printf '%s' "$home" > "$dir/fake/cwd"
+    lock="$home/state/.fm-inherited-config.lock"
+    case "$scenario" in
+      state-unwritable|config-unwritable)
+        [ "$(id -u)" != 0 ] || continue
+        chmod 500 "$home/${scenario%-unwritable}"
+        ;;
+      destination-directory) rm "$home/config/crew-harness"; mkdir "$home/config/crew-harness" ;;
+      locked) mkdir "$lock"; printf '%s\n' "$$" > "$lock/pid" ;;
+      stale-lock|success|exit-refused)
+        if [ "$scenario" = stale-lock ]; then
+          dead_pid=$(bash -c 'printf "%s\n" "$$"')
+          mkdir "$lock"
+          printf '%s\n' "$dead_pid" > "$lock/pid"
+        fi
+        printf '%s' "$scenario" > "$dir/fake/scenario"
+        cat > "$dir/fake/before-exit" <<'SH'
+#!/usr/bin/env bash
+set -eu
+CASE=${FM_FAKE_DIR%/*}
+SM="$CASE/smhome"
+[ "$(cat "$SM/config/crew-harness")" = claude ]
+[ ! -e "$SM/config/trace-context" ]
+owner=$(cat "$SM/state/.fm-inherited-config.lock/pid")
+kill -0 "$owner"
+: > "$CASE/inheritance-proven-at-stop"
+[ "$(cat "$FM_FAKE_DIR/scenario")" != exit-refused ]
+SH
+        chmod +x "$dir/fake/before-exit"
+        ;;
+    esac
+    out=$(run_control "$dir" sm-prepare relaunch --harness claude); rc=$?
+    case "$scenario" in
+      state-unwritable|config-unwritable) chmod 700 "$home/${scenario%-unwritable}" ;;
+    esac
+    if [ "$scenario" = success ] || [ "$scenario" = stale-lock ]; then
+      expect_code 0 "$rc" "prepared secondmate should relaunch: $out"
+      assert_present "$dir/inheritance-proven-at-stop" "inheritance or lock was not proven at stop"
+      [ "$(cat "$home/config/crew-harness")" = codex ] || fail "inheritance was not published after stop"
+      assert_present "$home/config/trace-context" "session config was not published after stop"
+    else
+      expect_code 1 "$rc" "invalid secondmate $scenario should refuse: $out"
+      [ "$(cat "$dir/fake/command")" = claude ] || fail "$scenario stopped secondmate"
+      assert_absent "$home/config/trace-context" "$scenario inherited session config before stop"
+      if [ "$scenario" = exit-refused ]; then
+        assert_present "$dir/inheritance-proven-at-stop" "exit refusal did not see the prepared inheritance lock"
+        [ "$(cat "$home/config/crew-harness")" = claude ] || fail "exit refusal changed inherited config"
+      else
+        [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "$scenario sent lifecycle bytes"
+      fi
+    fi
+    if [ "$scenario" = locked ]; then
+      [ "$(cat "$lock/pid")" = "$$" ] || fail "preparation stole the inheritance lock"
+    else
+      assert_absent "$lock" "preparation leaked the inheritance lock"
+    fi
+  done
+  pass "fm-control relaunch: secondmate access and lock are proven before stop, with inheritance deferred and abort cleanup"
+}
+
+test_native_process_path_preserves_entry_boundaries() {
+  python3 - "$ROOT/bin/fm-process-path.py" <<'PYTHON'
+import ctypes
+import errno
+import importlib.util
+import os
+import struct
+import subprocess
+import sys
+import types
+from unittest.mock import patch
+
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("fm_process_path", sys.argv[1])
+reader = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(reader)
+expected = b"/real install FLAG=1/bin:/usr/bin"
+arguments = [b"claude", b"", b"Prompt: PATH=/wrong/bin FLAG=1", b"PATH=/another/bin"]
+
+def packet(environment):
+    return (struct.pack("@i", len(arguments)) + b"/usr/bin/claude\0\0\0"
+            + b"\0".join(arguments) + b"\0"
+            + b"\0".join(environment) + b"\0\0PATH=/trailing/apple/string\0")
+
+payload = packet([b"OTHER=PATH=/wrong/env FLAG=1", b"PATH=" + expected, b"FLAG=2"])
+calls = []
+
+def sysctl(names, count, output, length, new_value, new_length):
+    mib = list(names[:count])
+    calls.append(mib)
+    assert new_value is None and new_length == 0
+    if mib == [1, 8]:
+        data = struct.pack("@i", 4096)
+    else:
+        assert mib == [1, 49, 4242], mib
+        data = payload
+    size = ctypes.cast(length, ctypes.POINTER(ctypes.c_size_t))
+    assert size.contents.value >= len(data)
+    ctypes.memmove(output, data, len(data))
+    size.contents.value = len(data)
+    return 0
+
+with patch.object(reader.sys, "platform", "darwin"), patch.object(
+        reader.ctypes, "CDLL", return_value=types.SimpleNamespace(sysctl=sysctl)):
+    assert reader.process_path(4242) == expected
+    assert calls == [[1, 8], [1, 49, 4242]], calls
+    for payload in (
+        packet([b"OTHER=PATH=/not-path"]),
+        packet([b"PATH=/one", b"PATH=/two"]),
+        packet([b"PATH="]),
+        struct.pack("@i", 3) + b"/claude\0\0claude\0unfinished",
+        struct.pack("@i", -1) + b"/claude\0",
+    ):
+        try:
+            reader.process_path(4242)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("accepted missing, ambiguous, or malformed environment")
+
+    def denied(*args):
+        ctypes.set_errno(errno.EACCES)
+        return -1
+
+    with patch.object(reader.ctypes, "CDLL", return_value=types.SimpleNamespace(sysctl=denied)):
+        try:
+            reader.process_path(4242)
+        except OSError as error:
+            assert error.errno == errno.EACCES
+        else:
+            raise AssertionError("accepted an unreadable native environment")
+
+environment = dict(os.environ, PATH=os.fsdecode(expected), OTHER="PATH=/wrong/env FLAG=1")
+with subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)",
+                       "Prompt: PATH=/wrong/bin FLAG=1"], env=environment) as process:
+    try:
+        result = subprocess.run([sys.executable, sys.argv[1], str(process.pid)], capture_output=True)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == expected, result.stdout
+    finally:
+        process.terminate()
+        process.wait()
+result = subprocess.run([sys.executable, sys.argv[1], str(process.pid)], capture_output=True)
+assert result.returncode != 0 and not result.stdout
+PYTHON
+  expect_code 0 "$?" "native PATH reader must preserve process environment boundaries"
+  pass "native process PATH: argument text, other entries, and trailing strings cannot replace the environment PATH"
+}
+
+test_relaunch_ignores_path_assignments_in_arguments() {
+  local dir out rc launch
+  dir=$(new_case argument-path rl-argument-path)
+  add_ship_task "$dir" rl-argument-path claude
+  mkdir -p "$dir/real install" "$dir/prompt-bin"
+  cat > "$dir/real install/codex" <<SH
+#!/bin/sh
+printf environment > '$dir/executable-ran'
+SH
+  cat > "$dir/prompt-bin/codex" <<SH
+#!/bin/sh
+printf arguments > '$dir/executable-ran'
+SH
+  chmod +x "$dir/real install/codex" "$dir/prompt-bin/codex"
+  printf codex > "$dir/fake/becomes"
+  out=$(FM_FAKE_PANE_PATH="$dir/real install" \
+    FM_FAKE_PANE_ARGS="Prompt: PATH=$dir/prompt-bin FLAG=1" \
+    run_control "$dir" rl-argument-path relaunch --harness codex --note 'Use only the process environment.'); rc=$?
+  expect_code 0 "$rc" "PATH text in process arguments must not affect executable selection: $out"
+  launch=$(tail -n 1 "$dir/fake/literal")
+  bash -c "$launch" || fail "generated launch command failed"
+  [ "$(cat "$dir/executable-ran")" = environment ] || fail "process arguments selected the executable"
+  pass "fm-control relaunch: PATH text in live process arguments cannot select another installation"
+}
+
+test_exited_relaunch_resolves_path_after_worktree_return() {
+  local dir entry scenario out rc launch
+  for entry in control spawn; do
+    for scenario in parent-missing parent-install; do
+      dir=$(new_case "directory-path-$entry-$scenario" rl-directory-path)
+      add_ship_task "$dir" rl-directory-path claude
+      mkdir -p "$dir/worktree-bin" "$dir/parent-bin"
+      cat > "$dir/worktree-bin/codex" <<SH
+#!/bin/sh
+printf worktree > '$dir/executable-ran'
+SH
+      chmod +x "$dir/worktree-bin/codex"
+      if [ "$scenario" = parent-install ]; then
+        cat > "$dir/parent-bin/codex" <<SH
+#!/bin/sh
+printf parent > '$dir/executable-ran'
+SH
+        chmod +x "$dir/parent-bin/codex"
+      fi
+      cat > "$dir/fake/after-cd" <<SH
+#!/bin/sh
+printf '%s' '$dir/worktree-bin' > '$dir/fake/path'
+SH
+      chmod +x "$dir/fake/after-cd"
+      printf zsh > "$dir/fake/command"
+      printf codex > "$dir/fake/becomes"
+      printf '%s' "$dir/home" > "$dir/fake/cwd"
+      if [ "$entry" = control ]; then
+        out=$(FM_FAKE_PANE_PATH="$dir/parent-bin" run_control "$dir" rl-directory-path relaunch --harness codex --note 'Load the worktree environment.'); rc=$?
+      else
+        out=$(FM_FAKE_PANE_PATH="$dir/parent-bin" run_spawn "$dir" rl-directory-path --relaunch --harness codex); rc=$?
+      fi
+      expect_code 0 "$rc" "$entry should return before resolving the worktree-only executable: $out"
+      [ "$(cat "$dir/fake/path-probe-cwd")" = "$dir/wt" ] || fail "PATH was captured before worktree return"
+      launch=$(tail -n 1 "$dir/fake/literal")
+      bash -c "$launch" || fail "generated launch command failed"
+      [ "$(cat "$dir/executable-ran")" = worktree ] || fail "parent directory selected the executable"
+      [ "$(meta_field "$dir" rl-directory-path worktree)" = "$dir/wt" ] || fail "recorded worktree changed"
+    done
+  done
+  pass "fm-control and fm-spawn relaunch: returning to the worktree precedes directory-dependent executable resolution"
+}
+
+test_relaunch_preserves_ampersands_in_executable_paths() {
+  local dir out rc launch
+  dir=$(new_case ampersand-path rl-ampersand-path)
+  add_ship_task "$dir" rl-ampersand-path claude
+  mkdir -p "$dir/R&D"
+  cat > "$dir/R&D/codex" <<SH
+#!/bin/sh
+printf replacement > '$dir/executable-ran'
+SH
+  chmod +x "$dir/R&D/codex"
+  printf codex > "$dir/fake/becomes"
+  out=$(
+    shopt -s patsub_replacement 2>/dev/null || true
+    export BASHOPTS
+    FM_FAKE_PANE_PATH="$dir/R&D" run_control "$dir" rl-ampersand-path relaunch --harness codex --note 'Preserve the executable path.'
+  ); rc=$?
+  expect_code 0 "$rc" "an executable path containing & should relaunch: $out"
+  launch=$(tail -n 1 "$dir/fake/literal")
+  bash -c "$launch" || fail "generated launch corrupted the executable path containing &"
+  [ "$(cat "$dir/executable-ran")" = replacement ] || fail "replacement executable did not run"
+  pass "fm-control relaunch: executable paths containing & survive template substitution"
+}
+
+test_exited_relaunch_normalizes_relative_cursor_executable() {
+  local dir entry out rc launch
+  for entry in control spawn; do
+    dir=$(new_case "relative-cursor-$entry" rl-relative-cursor)
+    add_ship_task "$dir" rl-relative-cursor claude
+    mkdir -p "$dir/wt/bin"
+    cat > "$dir/wt/bin/cursor-agent" <<SH
+#!/bin/sh
+printf cursor > '$dir/executable-ran'
+SH
+    chmod +x "$dir/wt/bin/cursor-agent"
+    printf zsh > "$dir/fake/command"
+    printf cursor-agent > "$dir/fake/becomes"
+    printf '%s' "$dir/home" > "$dir/fake/cwd"
+    if [ "$entry" = control ]; then
+      out=$(FM_FAKE_PANE_PATH='./bin:/usr/bin:/bin' run_control "$dir" rl-relative-cursor relaunch --harness cursor --note 'Use the worktree Cursor installation.'); rc=$?
+    else
+      out=$(FM_FAKE_PANE_PATH='./bin:/usr/bin:/bin' run_spawn "$dir" rl-relative-cursor --relaunch --harness cursor); rc=$?
+    fi
+    expect_code 0 "$rc" "$entry should resolve Cursor from the worktree's relative PATH: $out"
+    launch=$(tail -n 1 "$dir/fake/literal")
+    ( cd "$dir/home" && bash -c "$launch" ) || fail "generated Cursor launch depends on the controller directory"
+    [ "$(cat "$dir/executable-ran")" = cursor ] || fail "worktree Cursor executable did not run"
+    [ "$(meta_field "$dir" rl-relative-cursor harness)" = cursor ] || fail "Cursor relaunch did not publish its harness"
+  done
+  pass "fm-control and fm-spawn relaunch: relative PATH entries resolve Cursor to an absolute launcher"
+}
+
+test_relaunch_normalizes_control_paths() {
+  local dir scenario out rc
+  for scenario in relative-home relative-state; do
+    dir=$(new_case "$scenario" rl-relative-control)
+    add_ship_task "$dir" rl-relative-control claude
+    out=$(
+      cd "$dir/home" || exit 1
+      if [ "$scenario" = relative-home ]; then
+        FM_FAKE_CONTROL_HOME=. run_control "$dir" rl-relative-control relaunch --note 'Continue in this home.'
+      else
+        FM_STATE_OVERRIDE=./state run_control "$dir" rl-relative-control relaunch --note 'Use the relative state directory.'
+      fi
+    ); rc=$?
+    expect_code 0 "$rc" "$scenario should complete the preparation handshake: $out"
+    [ "$(journal_field "$dir" rl-relative-control phase)" = complete ] || fail "$scenario did not complete"
+    [ "$(cat "$dir/fake/command")" = claude ] || fail "$scenario left no replacement"
+    assert_grep 'encode launch-brief' "$dir/fake/literal" "$scenario never launched the replacement"
+  done
+  pass "fm-control relaunch: relative home and state paths share the absolute preparation directory"
+}
+
+test_relaunch_proves_recorded_pool_slot_ownership() {
+  local dir scenario wt lock out rc
+  for scenario in mine reassigned absent unsafe locked live-reassigned direct-reassigned; do
+    dir=$(new_case "slot-$scenario" rl-slot)
+    add_ship_task "$dir" rl-slot claude
+    wt="$dir/pool/1/proj"
+    mkdir -p "$dir/pool/1"
+    git -C "$dir/proj" worktree move "$dir/wt" "$wt" || fail "could not move fixture into a pool slot"
+    printf '{}\n' > "$dir/pool/treehouse-state.json"
+    sed "s|^worktree=.*|worktree=$wt|" "$dir/home/state/rl-slot.meta" > "$dir/slot.meta"
+    mv "$dir/slot.meta" "$dir/home/state/rl-slot.meta"
+    lock=$(
+      FM_HOME="$dir/home"
+      STATE="$FM_HOME/state"
+      # shellcheck source=/dev/null
+      . "$ROOT/bin/fm-wake-lib.sh"
+      fm_treehouse_slot_owner_claim "$wt" rl-slot "$FM_HOME" || exit 1
+      fm_treehouse_project_lock_path "$dir/proj"
+    ) || fail "could not seed pool ownership"
+    printf zsh > "$dir/fake/command"
+    printf '%s' "$dir/home" > "$dir/fake/cwd"
+    printf 'successor wiring\n' > "$wt/.fm-slot-fixture"
+    case "$scenario" in
+      reassigned|live-reassigned|direct-reassigned)
+        printf 'task=successor\nhome=%s\n' "$dir/home" > "$dir/pool/1/.fm-slot-owner"
+        ;;
+      absent) rm "$dir/pool/1/.fm-slot-owner" ;;
+      unsafe) rm "$dir/pool/1/.fm-slot-owner"; mkdir "$dir/pool/1/.fm-slot-owner" ;;
+      locked) mkdir "$lock"; printf '%s\n' "$$" > "$lock/pid" ;;
+      mine)
+        printf '%s\n' "$ROOT/bin/fm-wake-lib.sh" > "$dir/wake-lib"
+        printf '%s\n' "$lock" > "$dir/project-lock"
+        cat > "$dir/fake/after-cd" <<'SH'
+#!/usr/bin/env bash
+set -eu
+CASE=${FM_FAKE_DIR%/*}
+FM_HOME="$CASE/home"
+STATE="$FM_HOME/state"
+# shellcheck source=/dev/null
+. "$(cat "$CASE/wake-lib")"
+lock=$(cat "$CASE/project-lock")
+if fm_lock_try_acquire "$lock"; then
+  fm_lock_release "$lock"
+  exit 1
+fi
+kill -0 "$FM_LOCK_HELD_PID"
+printf 'held\n' >> "$CASE/slot-lock-proven"
+SH
+        chmod +x "$dir/fake/after-cd"
+        cp -p "$dir/fake/after-cd" "$dir/fake/before-launch"
+        ;;
+    esac
+    if [ "$scenario" = live-reassigned ]; then
+      printf claude > "$dir/fake/command"
+      printf '%s' "$wt" > "$dir/fake/cwd"
+    fi
+    cp "$dir/home/state/rl-slot.meta" "$dir/meta.before"
+    cp "$dir/fake/cwd" "$dir/cwd.before"
+    cp "$dir/fake/command" "$dir/command.before"
+    if [ "$scenario" = direct-reassigned ]; then
+      out=$(run_spawn "$dir" rl-slot --relaunch --harness claude); rc=$?
+    else
+      out=$(run_control "$dir" rl-slot relaunch --note 'Recover the recorded slot.'); rc=$?
+    fi
+    if [ "$scenario" = mine ]; then
+      expect_code 0 "$rc" "an owned slot should relaunch: $out"
+      [ "$(cat "$dir/fake/cwd")" = "$wt" ] || fail "owned slot was not re-entered"
+      [ "$(cat "$dir/fake/command")" = claude ] || fail "owned slot did not launch"
+      [ "$(wc -l < "$dir/slot-lock-proven")" -eq 2 ] || fail "project lock did not cover entry and launch"
+    else
+      expect_code 1 "$rc" "$scenario must refuse before entry or stop: $out"
+      assert_contains "$out" Treehouse "refusal should identify the pool ownership boundary"
+      cmp -s "$dir/cwd.before" "$dir/fake/cwd" || fail "$scenario entered the recorded slot"
+      cmp -s "$dir/command.before" "$dir/fake/command" || fail "$scenario stopped or launched an agent"
+      cmp -s "$dir/meta.before" "$dir/home/state/rl-slot.meta" || fail "$scenario changed the task record"
+      [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "$scenario sent lifecycle bytes"
+    fi
+    [ "$(cat "$wt/.fm-slot-fixture")" = 'successor wiring' ] || fail "relaunch changed unrelated slot wiring"
+    if [ "$scenario" = locked ]; then
+      [ "$(cat "$lock/pid")" = "$$" ] || fail "relaunch stole the allocation lock"
+    else
+      assert_absent "$lock" "relaunch leaked the allocation lock"
+    fi
+  done
+  pass "relaunch: pool ownership is proven under the allocation lock before entry or stop"
+}
+
+test_kimi_relaunch_preserves_concurrent_config_edits() {
+  local dir scenario config out rc token inode
+  for scenario in installed install-needed; do
+    dir=$(new_case "kimi-config-$scenario" rl-kimi-config)
+    add_ship_task "$dir" rl-kimi-config claude
+    printf '#!/bin/sh\nexit 0\n' > "$dir/fakebin/kimi"
+    chmod +x "$dir/fakebin/kimi"
+    mkdir -p "$dir/user-home/.kimi-code"
+    config="$dir/user-home/.kimi-code/config.toml"
+    printf '# Preserve user settings.\ndefault_model = "original"\n' > "$config"
+    if [ "$scenario" = installed ]; then
+      HOME="$dir/user-home" "$ROOT/bin/fm-kimi-turnend-hook.sh" install || fail "could not seed Kimi wiring"
+    fi
+    cp "$config" "$dir/config.before"
+    printf kimi > "$dir/fake/becomes"
+    cat > "$dir/fake/before-exit" <<'SH'
+#!/usr/bin/env bash
+set -eu
+CASE=${FM_FAKE_DIR%/*}
+config="$HOME/.kimi-code/config.toml"
+cmp -s "$CASE/config.before" "$config"
+set -- "$CASE/home/state"/.rl-kimi-config.relaunch-prepare.*
+[ "$#" = 1 ] && [ -f "$1/ready" ]
+[ -x "$1/kimi-home/.kimi-code/fm-turn-end.sh" ]
+printf '\n[concurrent]\nvalue = "preserved"\n' >> "$config"
+cp "$config" "$CASE/config.at-stop"
+python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_ino)' "$config" > "$CASE/config.inode"
+: > "$CASE/kimi-staging-proven"
+SH
+    chmod +x "$dir/fake/before-exit"
+    out=$(run_control "$dir" rl-kimi-config relaunch --harness kimi --note 'Keep concurrent configuration edits.'); rc=$?
+    expect_code 0 "$rc" "Kimi $scenario relaunch should succeed: $out"
+    assert_present "$dir/kimi-staging-proven" "Kimi preparation changed live config or failed to stage wiring"
+    [ "$(cat "$dir/fake/command")" = kimi ] || fail "Kimi did not launch"
+    python3 - "$config" <<'PY'
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as stream:
+    config = tomllib.load(stream)
+assert config["default_model"] == "original"
+assert config["concurrent"]["value"] == "preserved"
+assert len(config["hooks"]) == 1
+assert config["hooks"][0]["event"] == "Stop"
+PY
+    expect_code 0 "$?" "Kimi activation lost concurrent settings or the Stop hook"
+    if [ "$scenario" = installed ]; then
+      cmp -s "$dir/config.at-stop" "$config" || fail "unchanged Kimi config was altered"
+      inode=$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_ino)' "$config")
+      [ "$inode" = "$(cat "$dir/config.inode")" ] || fail "unchanged Kimi config was replaced"
+    fi
+    token=$(cat "$dir/home/state/rl-kimi-config.kimi-turnend-token")
+    [ "$(cat "$dir/user-home/.kimi-code/fm-turn-end.d/$token")" = "$dir/home/state/rl-kimi-config.turn-ended" ] \
+      || fail "Kimi registry does not point to the relaunched task"
+    jq -cn --arg cwd "$dir/wt" '{hook_event_name:"Stop",cwd:$cwd}' \
+      | HOME="$dir/user-home" bash "$dir/user-home/.kimi-code/fm-turn-end.sh"
+    assert_present "$dir/home/state/rl-kimi-config.turn-ended" "Kimi replacement hook did not deliver turn end"
+  done
+  pass "fm-control relaunch: Kimi activation preserves concurrent settings and avoids unchanged config replacement"
+}
+
+test_relaunch_normalizes_control_paths
+test_relaunch_proves_recorded_pool_slot_ownership
+test_kimi_relaunch_preserves_concurrent_config_edits
+test_relaunch_preserves_ampersands_in_executable_paths
+test_exited_relaunch_normalizes_relative_cursor_executable
+test_native_process_path_preserves_entry_boundaries
+test_relaunch_ignores_path_assignments_in_arguments
+test_exited_relaunch_resolves_path_after_worktree_return
+
+test_relaunch_validates_retirement_inputs_before_stop
+test_relaunch_uses_the_pane_executable
+test_raw_relaunch_validates_the_selected_executable
+test_secondmate_preparation_holds_inheritance_until_stop
+
+test_relaunch_recovers_an_exited_shell
+test_relaunch_preparation_refuses_before_stop
+test_relaunch_rejects_unlaunchable_replacement_before_stop
+test_relaunch_stages_wiring_until_stop
+test_relaunch_discards_staging_when_exit_refuses
+
 test_relaunch_from_guarded_path
 
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
@@ -1641,6 +2537,6 @@ test_spawn_relaunch_keeps_its_early_meta_lock_continuous
 test_spawn_relaunch_refuses_a_pending_authoritative_close
 test_spawn_relaunch_refuses_contradicting_flags
 test_spawn_relaunch_refuses_an_unrecorded_task
-test_spawn_relaunch_refuses_a_pane_outside_the_worktree
+test_spawn_relaunch_refuses_a_shell_that_cannot_return
 test_relaunch_reverifies_an_already_in_flight_item_instead_of_rewriting_it
 test_relaunch_moves_a_drifted_item_back_in_flight

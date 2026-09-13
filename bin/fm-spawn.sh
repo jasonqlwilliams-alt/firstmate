@@ -38,11 +38,20 @@
 #   positional, and batch pairs are all refused alongside it; only harness,
 #   model, and effort may change, which is what makes a harness switch one
 #   ordinary relaunch. It refuses unless the recorded endpoint is positively
-#   agent-free on a backend with a recovery-grade agent-state classifier (tmux
-#   or herdr), and clears the previous harness's per-task wiring before arming
+#   agent-free before launch on a backend with a recovery-grade classifier (tmux
+#   or herdr), and clears the previous harness's per-task wiring before activating
 #   the new incarnation. The replacement still never starts outside the copy
-#   holding the work: a Herdr shell that has drifted out of the recorded
-#   worktree is told once to return, and only a shell that will not go refuses.
+#   holding the work: an agent-free tmux or Herdr shell outside the recorded
+#   worktree is told once to return and must confirm that path before launch.
+#   Control's internal FM_CONTROL_RELAUNCH_PREPARE directory is accepted only
+#   from the parent holding the task's control lock. The ready marker is
+#   published only after prepare_relaunch succeeds under the preparation
+#   contract in docs/agent-control.md.
+#   It waits for control's continue marker after exit, retaining its locks and
+#   resolved launch profile throughout. A live endpoint outside the recorded
+#   worktree refuses preparation without sending shell commands. An exit that
+#   unwinds the shell is repaired after stop;
+#   transport failures at that point remain reported launch failures.
 #   --harness <name> is the explicit per-spawn harness/profile adapter. The old
 #   positional harness arg still works for back-compat.
 #   --model <name> and --effort <low|medium|high|xhigh|max|ultra> are concrete profile
@@ -945,6 +954,14 @@ SPAWN_TASK_LOCK_HELD=0
 SPAWN_CONTROL_LOCK=
 SPAWN_CONTROL_LOCK_HELD=0
 SPAWN_CONTROL_PARENT=0
+RELAUNCH_PREPARE=
+RELAUNCH_WIRING_FILES=()
+RELAUNCH_WIRING_TARGETS=()
+KIMI_STAGE_HOME=
+RELAUNCH_BUSY_STATE=
+RELAUNCH_RETIRE_PATHS=
+RELAUNCH_PATH_PROBE=
+SPAWN_LAUNCH_PATH=$PATH
 SPAWN_META_TMP=
 SPAWN_META_LOCK=
 SPAWN_META_LOCK_HELD=0
@@ -991,7 +1008,11 @@ parse_orca_worktree_result() {
 }
 
 spawn_abort_cleanup() {
-  local status=$?
+  local status=$? staged_file
+  [ -z "$RELAUNCH_PATH_PROBE" ] || rm -f -- "$RELAUNCH_PATH_PROBE" || true
+  for staged_file in "${RELAUNCH_WIRING_FILES[@]:-}"; do
+    [ -z "$staged_file" ] || rm -f -- "$staged_file" || true
+  done
   if [ "$RELAUNCH_REPLACEMENT_PENDING" = 1 ] \
      && [ "$SPAWN_META_PUBLISH_STARTED" = 1 ] \
      && [ -n "$SPAWN_META_TMP" ] \
@@ -1145,30 +1166,15 @@ spawn_herdr_presentation_order_lock_acquire() {
 }
 
 clear_relaunch_harness_wiring() {
-  local harness=$1 wt=$2 state=$3 id=$4 token_path token auth_path path
-  # The wiring arms above match on harness PREFIXES, because a task launched
-  # from a raw command records that command's basename rather than the exact
-  # adapter name. The retirement tables are keyed by the exact adapter, so the
-  # recorded value is resolved to its adapter first; otherwise a task recorded
-  # as, say, `grok-2` would have wiring armed and never retired. An
-  # unrecognized value resolves to no adapter, which is also the case in which
-  # no wiring was armed to begin with.
-  harness=$(fm_control_harness_family "$harness") || harness=
-  token_path=$(fm_control_harness_turnend_token_path "$harness" "$state" "$id") || return 1
-  token=
-  if [ -n "$token_path" ] && [ -f "$token_path" ]; then
-    IFS= read -r token < "$token_path" || [ -n "$token" ] || return 1
-  fi
-  auth_path=$(fm_control_harness_turnend_auth_path "$harness" "$token") || return 1
-  if [ -n "$auth_path" ]; then
-    rm -f -- "$auth_path" || return 1
+  local harness=$1 wt=$2 state=$3 id=$4 paths path
+  paths=${5-}
+  if [ "$#" -lt 5 ]; then
+    paths=$(fm_control_harness_retirement_paths "$harness" "$wt" "$state" "$id") || return 1
   fi
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     rm -f -- "$path" || return 1
-  done <<EOF
-$(fm_control_harness_wiring_paths "$harness" "$wt" "$state" "$id")
-EOF
+  done <<< "$paths"
 }
 
 spawn_herdr_presentation_order_lock_release() {
@@ -1247,6 +1253,17 @@ if [ "$RELAUNCH" -eq 1 ]; then
   control_owner=$(cat "$SPAWN_CONTROL_LOCK/pid" 2>/dev/null || true)
   if [ "$control_owner" = "$PPID" ] && fm_pid_alive "$control_owner"; then
     SPAWN_CONTROL_PARENT=1
+    RELAUNCH_PREPARE=${FM_CONTROL_RELAUNCH_PREPARE:-}
+    if [ -n "$RELAUNCH_PREPARE" ]; then
+      case "$RELAUNCH_PREPARE" in
+        "$STATE/.$ID.relaunch-prepare."*) ;;
+        *) echo "error: invalid relaunch preparation directory" >&2; exit 1 ;;
+      esac
+      [ -d "$RELAUNCH_PREPARE" ] && [ ! -L "$RELAUNCH_PREPARE" ] || {
+        echo "error: relaunch preparation directory is missing or unsafe" >&2
+        exit 1
+      }
+    fi
   elif [ "$(fm_lease_actor)" = branch ]; then
     # Role partition refinement: branch recovery relaunches only through the
     # fm-control transaction that owns the control lock, never by invoking
@@ -1380,7 +1397,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     exit 1
   }
   RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET")
-  [ "$RELAUNCH_STATE" = dead ] || {
+  [ "$RELAUNCH_STATE" = dead ] || { [ -n "$RELAUNCH_PREPARE" ] && [ "$RELAUNCH_STATE" = alive ]; } || {
     echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit)" >&2
     exit 1
   }
@@ -1451,10 +1468,10 @@ shell_quote() {
   printf "'"
 }
 
-resolve_pi_executable() {
+resolve_spawn_executable() {
   local candidate dir
   candidate=$(type -P -- "$1" 2>/dev/null) || return 1
-  [ -x "$candidate" ] || return 1
+  [ -f "$candidate" ] && [ -x "$candidate" ] || return 1
   case "$candidate" in
     /*) printf '%s\n' "$candidate" ;;
     *)
@@ -1463,6 +1480,61 @@ resolve_pi_executable() {
       ;;
   esac
 }
+
+spawn_pane_launch_path() {
+  local pids pid value result='' info attempt probe_command
+  if [ "$RELAUNCH_STATE" = dead ]; then
+    RELAUNCH_PATH_PROBE=$(mktemp "$STATE/.$ID.relaunch-path.XXXXXXXX") || return 1
+    probe_command="printf '%s\\n' \"\$PATH\" > $(shell_quote "$RELAUNCH_PATH_PROBE")"
+    "fm_backend_${BACKEND}_send_text_line" "$RELAUNCH_TARGET" "$probe_command" || return 1
+    for ((attempt = 0; attempt < 50; attempt++)); do
+      if [ -s "$RELAUNCH_PATH_PROBE" ]; then
+        IFS= read -r SPAWN_LAUNCH_PATH < "$RELAUNCH_PATH_PROBE" || return 1
+        rm -f -- "$RELAUNCH_PATH_PROBE"
+        RELAUNCH_PATH_PROBE=
+        return 0
+      fi
+      sleep 0.1
+    done
+    return 1
+  fi
+  case "$BACKEND" in
+    tmux) pids=$(fm_backend_tmux_foreground_pids "$RELAUNCH_TARGET") || return 1 ;;
+    herdr)
+      info=$(fm_backend_herdr_cli "$HERDR_SES" pane process-info --pane "$HERDR_PANE_ID") || return 1
+      pids=$(printf '%s' "$info" | jq -er --arg pane "$HERDR_PANE_ID" '
+        .result.process_info | select(.pane_id == $pane) | .foreground_processes[].pid
+        | select(type == "number" and . > 1) | floor') || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  [ -n "$pids" ] || return 1
+  while IFS= read -r pid; do
+    case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+    value=$(python3 "$SCRIPT_DIR/fm-process-path.py" "$pid") || return 1
+    [ -n "$value" ] || return 1
+    [ -z "$result" ] || [ "$result" = "$value" ] || return 1
+    result=$value
+  done <<< "$pids"
+  SPAWN_LAUNCH_PATH=$result
+}
+
+spawn_resolve_launch_binary() (
+  local candidate
+  if [ "$RELAUNCH" -eq 1 ]; then
+    if [ "$RAW_LAUNCH" -eq 1 ] && [ -n "${RAW_BIN:-}" ]; then
+      printf '%s\n' "$RAW_BIN"
+      exit 0
+    fi
+    cd -- "$RELAUNCH_WT" || exit 1
+    export PATH="$SPAWN_LAUNCH_PATH"
+  fi
+  candidate=$("$@") || exit 1
+  case "$candidate" in
+    /*) printf '%s\n' "$candidate" ;;
+    *) resolve_spawn_executable "$candidate" ;;
+  esac
+)
 
 # Pi's CLI surface is version-dependent, so probe the resolved executable's help
 # before composing the optional regular-TUI flag. An absent or inconclusive probe
@@ -1587,15 +1659,15 @@ launch_template() {
     # __CLAUDEPERMFLAG__ is the permission flag config/claude-permission-mode
     # selects (header above): --dangerously-skip-permissions by default, or
     # --permission-mode auto for a captain who refuses bypass mode.
-    claude) printf '%s' 'CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false CLAUDE_CODE_SEND_FEEDBACK=0 claude __CLAUDEPERMFLAG__ --settings '\''{"feedbackDrafts":"off","attribution":{"commit":"","pr":"","sessionUrl":false}}'\'' __MODELFLAG____EFFORTFLAG__"$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
+    claude) printf '%s' 'CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false CLAUDE_CODE_SEND_FEEDBACK=0 __HARNESSBIN__ __CLAUDEPERMFLAG__ --settings '\''{"feedbackDrafts":"off","attribution":{"commit":"","pr":"","sessionUrl":false}}'\'' __MODELFLAG____EFFORTFLAG__"$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
     codex)
       if [ "$kind" = secondmate ]; then
-        printf '%s' 'codex __MODELFLAG____EFFORTFLAG__--dangerously-bypass-approvals-and-sandbox "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
+        printf '%s' '__HARNESSBIN__ __MODELFLAG____EFFORTFLAG__--dangerously-bypass-approvals-and-sandbox "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
       else
-        printf '%s' 'codex __MODELFLAG____EFFORTFLAG__--dangerously-bypass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch __TURNEND__\"]" "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
+        printf '%s' '__HARNESSBIN__ __MODELFLAG____EFFORTFLAG__--dangerously-bypass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch __TURNEND__\"]" "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
       fi
       ;;
-    opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}}'\'' opencode __MODELFLAG__--prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
+    opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}}'\'' __HARNESSBIN__ __MODELFLAG__--prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
     pi|pi-signed)
       printf '%s' '__PIBIN____PITUIMODE__'
       if [ "$kind" = secondmate ]; then
@@ -1655,7 +1727,7 @@ launch_template() {
     # --dangerously-skip-permissions. grok's turn-end signal does NOT ride the
     # launch command - it is a Stop-event hook installed below (global hook +
     # per-task pointer), so the template is identical for ship/scout/secondmate.
-    grok) printf '%s' 'grok --always-approve __MODELFLAG____EFFORTFLAG__"$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
+    grok) printf '%s' '__HARNESSBIN__ --always-approve __MODELFLAG____EFFORTFLAG__"$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
     # Cursor Agent CLI. --trust suppresses the workspace-trust prompt, which
     # --yolo does NOT cover and which would otherwise block every spawn, since
     # each task gets a fresh worktree path cursor has never seen. --yolo is the
@@ -1703,7 +1775,7 @@ launch_template() {
     # stays in task metadata only, per the record-and-omit contract.
     # Its turn-end and busy-state signals do NOT ride the launch command:
     # they are project hooks written into the worktree below.
-    gemini) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS GEMINI_CLI_TRUST_WORKSPACE=true GEMINI_CLI_SYSTEM_SETTINGS_PATH=__GEMINISETTINGS__ gemini -y __MODELFLAG__"$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
+    gemini) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS GEMINI_CLI_TRUST_WORKSPACE=true GEMINI_CLI_SYSTEM_SETTINGS_PATH=__GEMINISETTINGS__ __HARNESSBIN__ -y __MODELFLAG__"$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
     # Kimi Code rejects a positional prompt, so it launches bare and receives
     # only an absolute brief pointer after the TUI readiness gate below.
     # Its turn-end signal is a globally configured Stop hook plus a guarded
@@ -1766,10 +1838,14 @@ case "$ARG3" in
   *' '*)  # raw launch command (unverified-adapter escape hatch)
     RAW_LAUNCH=1
     LAUNCH=$ARG3
-    HARNESS=""
-    for word in $LAUNCH; do
-      case "$word" in [A-Za-z_]*=*) continue ;; *) HARNESS=$(basename "$word"); break ;; esac
-    done
+    RAW_EXECUTABLE=$(perl -MText::ParseWords=shellwords -e '
+      for my $word (shellwords($ARGV[0])) {
+        next if $word =~ /^[A-Za-z_][A-Za-z0-9_]*=/;
+        print $word; exit 0;
+      }
+      exit 1;
+    ' -- "$LAUNCH") || { echo "error: raw launch has no executable" >&2; exit 1; }
+    HARNESS=$(basename -- "$RAW_EXECUTABLE")
     ;;
   '')
     # No explicit harness: resolve from config. A secondmate AGENT launches on the
@@ -1835,50 +1911,71 @@ if [ "$KIND" = secondmate ] && [ "$HARNESS" = agy ]; then
   exit 1
 fi
 
-case "$HARNESS" in
-  pi|pi-signed)
-    PI_BIN=$(resolve_pi_executable "$HARNESS") || {
-      echo "error: $HARNESS executable not found on PATH; install it or select a different verified harness" >&2
+resolve_launch_executables() {
+  if [ "$RAW_LAUNCH" -eq 1 ] && [ "$RELAUNCH" -eq 1 ]; then
+    RAW_BIN=$(spawn_resolve_launch_binary resolve_spawn_executable "$RAW_EXECUTABLE") || {
+      echo "error: raw launch executable '$RAW_EXECUTABLE' is unavailable on the pane PATH; refusing relaunch before stop" >&2
       exit 1
     }
-    PI_TUI_MODE=
-    if pi_supports_tui_mode "$PI_BIN"; then
-      PI_TUI_MODE=' --tui-mode regular'
-    fi
-    LAUNCH=${LAUNCH//__PITUIMODE__/$PI_TUI_MODE}
-    LAUNCH="FM_PI_HARNESS=$HARNESS $LAUNCH"
-    ;;
-  cursor)
-    # `cursor` is not the CLI name, and the legacy alias `agent` is far too
-    # generic to launch on its name alone, so resolution runs through the
-    # verified owner rather than a bare command lookup. Refusing here keeps a
-    # missing install a loud spawn refusal instead of a pane that dies with a
-    # command-not-found the supervisor would read as a wedged worker.
-    CURSOR_BIN=$(fm_cursor_resolve_binary) || exit 1
-    if [ -n "$MODEL" ] && [ "$MODEL" != default ]; then
-      if CURSOR_MODELS=$(fm_cursor_list_models "$CURSOR_BIN"); then
-        if ! printf '%s\n' "$CURSOR_MODELS" | fm_cursor_catalog_has_model "$MODEL"; then
-          echo "error: Cursor model '$MODEL' is not available from '$CURSOR_BIN --list-models'; choose an id listed by that command or omit --model" >&2
+  fi
+
+  case "$HARNESS" in
+    claude|codex|opencode|grok|gemini)
+      if [ "$RELAUNCH" -eq 1 ]; then
+        TARGET_BIN=$(spawn_resolve_launch_binary resolve_spawn_executable "$HARNESS") || {
+          echo "error: $HARNESS executable not found on PATH; refusing relaunch before stop" >&2
           exit 1
+        }
+        LAUNCH=${LAUNCH//__HARNESSBIN__/"$(shell_quote "$TARGET_BIN")"}
+      else
+        LAUNCH=${LAUNCH//__HARNESSBIN__/$HARNESS}
+      fi
+      ;;
+    pi|pi-signed)
+      PI_BIN=$(spawn_resolve_launch_binary resolve_spawn_executable "$HARNESS") || {
+        echo "error: $HARNESS executable not found on PATH; install it or select a different verified harness" >&2
+        exit 1
+      }
+      PI_TUI_MODE=
+      if pi_supports_tui_mode "$PI_BIN"; then
+        PI_TUI_MODE=' --tui-mode regular'
+      fi
+      LAUNCH=${LAUNCH//__PITUIMODE__/$PI_TUI_MODE}
+      LAUNCH="FM_PI_HARNESS=$HARNESS $LAUNCH"
+      ;;
+    cursor)
+      # `cursor` is not the CLI name, and the legacy alias `agent` is far too
+      # generic to launch on its name alone, so resolution runs through the
+      # verified owner rather than a bare command lookup. Refusing here keeps a
+      # missing install a loud spawn refusal instead of a pane that dies with a
+      # command-not-found the supervisor would read as a wedged worker.
+      CURSOR_BIN=$(spawn_resolve_launch_binary fm_cursor_resolve_binary) || exit 1
+      if [ -n "$MODEL" ] && [ "$MODEL" != default ]; then
+        if CURSOR_MODELS=$(fm_cursor_list_models "$CURSOR_BIN"); then
+          if ! printf '%s\n' "$CURSOR_MODELS" | fm_cursor_catalog_has_model "$MODEL"; then
+            echo "error: Cursor model '$MODEL' is not available from '$CURSOR_BIN --list-models'; choose an id listed by that command or omit --model" >&2
+            exit 1
+          fi
         fi
       fi
-    fi
-    ;;
-  agy)
-    AGY_BIN=$(resolve_agy_binary) || exit 1
-    ;;
-  omp)
-    OMP_BIN=$(resolve_pi_executable omp) || {
-      echo "error: omp executable not found on PATH; install Oh My Pi or select a different verified harness" >&2
-      exit 1
-    }
-    OMP_WORKER_CFG="$FM_ROOT/.omp/fm-worker-overlay.yml"
-    [ -f "$OMP_WORKER_CFG" ] || {
-      echo "error: omp worker posture overlay missing at $OMP_WORKER_CFG; a worker launched without it can park on the captain's own approval or plan-mode settings" >&2
-      exit 1
-    }
-    ;;
-esac
+      ;;
+    agy)
+      AGY_BIN=$(spawn_resolve_launch_binary resolve_agy_binary) || exit 1
+      ;;
+    omp)
+      OMP_BIN=$(spawn_resolve_launch_binary resolve_spawn_executable omp) || {
+        echo "error: omp executable not found on PATH; install Oh My Pi or select a different verified harness" >&2
+        exit 1
+      }
+      OMP_WORKER_CFG="$FM_ROOT/.omp/fm-worker-overlay.yml"
+      [ -f "$OMP_WORKER_CFG" ] || {
+        echo "error: omp worker posture overlay missing at $OMP_WORKER_CFG; a worker launched without it can park on the captain's own approval or plan-mode settings" >&2
+        exit 1
+      }
+      ;;
+  esac
+}
+[ "$RELAUNCH" -eq 1 ] || resolve_launch_executables
 
 # config/secondmate-harness may carry optional model/effort tokens alongside the
 # harness ("<harness> [<model>] [<effort>]"). They apply only when this is a
@@ -1910,12 +2007,15 @@ if [ "$EFFORT" = ultra ]; then
     exit 1
   }
 fi
-if [ "$HARNESS" = omp ]; then
-  omp_model_validate "$OMP_BIN" "$MODEL" || exit 1
-fi
-if [ "$HARNESS" = agy ]; then
-  agy_model_validate "$AGY_BIN" "$MODEL" || exit 1
-fi
+validate_launch_models() {
+  if [ "$HARNESS" = omp ]; then
+    omp_model_validate "$OMP_BIN" "$MODEL" || exit 1
+  fi
+  if [ "$HARNESS" = agy ]; then
+    agy_model_validate "$AGY_BIN" "$MODEL" || exit 1
+  fi
+}
+[ "$RELAUNCH" -eq 1 ] || validate_launch_models
 
 secondmate_registry_value() {
   secondmate_registry_field "$DATA/secondmates.md" "$1" "$2"
@@ -2122,45 +2222,48 @@ effort_flag_for_harness() {
   esac
 }
 
-case "$LAUNCH" in
-  *__MUSEBIN__*)
-    MUSE_BIN=$(resolve_muse_binary) || exit 1
-    MUSE_CONFIG_HOME=$(resolve_directory_input XDG_CONFIG_HOME "${XDG_CONFIG_HOME:-${HOME:-}/.config}") || exit 1
-    MUSE_DATA_HOME=$(resolve_directory_input XDG_DATA_HOME "${XDG_DATA_HOME:-${HOME:-}/.local/share}") || exit 1
-    MUSE_AUTH_FILE="$MUSE_CONFIG_HOME/muse/auth.json"
-    if ! muse_credential_present "$MUSE_AUTH_FILE"; then
-      if [ -n "${META_API_KEY:-}" ]; then
-        echo "error: muse has no worker-reachable credential; META_API_KEY is set for fm-spawn but cannot be proven present in the $BACKEND worker environment. Store the fleet credential at '$MUSE_AUTH_FILE' with 'muse login' or 'muse auth set --api-key-stdin'. The secret will not be copied into the launch command." >&2
-      else
-        echo "error: muse has no worker-reachable credential; META_API_KEY cannot be proven present in the $BACKEND worker environment and '$MUSE_AUTH_FILE' is absent or empty. Store the fleet credential with 'muse login' or 'muse auth set --api-key-stdin'." >&2
-      fi
-      exit 1
-    fi
-    LAUNCH=${LAUNCH//__MUSEBIN__/$(shell_quote "$MUSE_BIN")}
-    LAUNCH=${LAUNCH//__MUSECONFIG__/$(shell_quote "$MUSE_CONFIG_HOME")}
-    LAUNCH=${LAUNCH//__MUSEDATA__/$(shell_quote "$MUSE_DATA_HOME")}
-    ;;
-esac
-
-case "$LAUNCH" in
-  *__KIMIBIN__*)
-    KIMI_BIN=$(resolve_kimi_binary) || exit 1
-    LAUNCH=${LAUNCH//__KIMIBIN__/$(shell_quote "$KIMI_BIN")}
-    if [ "$KIND" != secondmate ]; then
-      "$FM_ROOT/bin/fm-kimi-turnend-hook.sh" install || {
-        echo "error: refusing Kimi spawn because the global turn-end hook could not be installed safely" >&2
+resolve_additional_launch_executables() {
+  case "$LAUNCH" in
+    *__MUSEBIN__*)
+      MUSE_BIN=$(spawn_resolve_launch_binary resolve_muse_binary) || exit 1
+      MUSE_CONFIG_HOME=$(resolve_directory_input XDG_CONFIG_HOME "${XDG_CONFIG_HOME:-${HOME:-}/.config}") || exit 1
+      MUSE_DATA_HOME=$(resolve_directory_input XDG_DATA_HOME "${XDG_DATA_HOME:-${HOME:-}/.local/share}") || exit 1
+      MUSE_AUTH_FILE="$MUSE_CONFIG_HOME/muse/auth.json"
+      if ! muse_credential_present "$MUSE_AUTH_FILE"; then
+        if [ -n "${META_API_KEY:-}" ]; then
+          echo "error: muse has no worker-reachable credential; META_API_KEY is set for fm-spawn but cannot be proven present in the $BACKEND worker environment. Store the fleet credential at '$MUSE_AUTH_FILE' with 'muse login' or 'muse auth set --api-key-stdin'. The secret will not be copied into the launch command." >&2
+        else
+          echo "error: muse has no worker-reachable credential; META_API_KEY cannot be proven present in the $BACKEND worker environment and '$MUSE_AUTH_FILE' is absent or empty. Store the fleet credential with 'muse login' or 'muse auth set --api-key-stdin'." >&2
+        fi
         exit 1
-      }
-    fi
-    ;;
-esac
+      fi
+      LAUNCH=${LAUNCH//__MUSEBIN__/$(shell_quote "$MUSE_BIN")}
+      LAUNCH=${LAUNCH//__MUSECONFIG__/$(shell_quote "$MUSE_CONFIG_HOME")}
+      LAUNCH=${LAUNCH//__MUSEDATA__/$(shell_quote "$MUSE_DATA_HOME")}
+      ;;
+  esac
 
-case "$LAUNCH" in
-  *__ROVOBIN__*)
-    ROVO_BIN=$(resolve_rovo_binary) || exit 1
-    LAUNCH=${LAUNCH//__ROVOBIN__/$(shell_quote "$ROVO_BIN")}
-    ;;
-esac
+  case "$LAUNCH" in
+    *__KIMIBIN__*)
+      KIMI_BIN=$(spawn_resolve_launch_binary resolve_kimi_binary) || exit 1
+      LAUNCH=${LAUNCH//__KIMIBIN__/$(shell_quote "$KIMI_BIN")}
+      if [ "$KIND" != secondmate ] && [ -z "$RELAUNCH_PREPARE" ]; then
+        "$FM_ROOT/bin/fm-kimi-turnend-hook.sh" install || {
+          echo "error: refusing Kimi spawn because the global turn-end hook could not be installed safely" >&2
+          exit 1
+        }
+      fi
+      ;;
+  esac
+
+  case "$LAUNCH" in
+    *__ROVOBIN__*)
+      ROVO_BIN=$(spawn_resolve_launch_binary resolve_rovo_binary) || exit 1
+      LAUNCH=${LAUNCH//__ROVOBIN__/$(shell_quote "$ROVO_BIN")}
+      ;;
+  esac
+}
+[ "$RELAUNCH" -eq 1 ] || resolve_additional_launch_executables
 
 json_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
@@ -2333,6 +2436,19 @@ if [ "$KIND" = secondmate ]; then
     SECONDMATE_PROJECTS=$SECONDMATE_REGISTRY_MATCH_PROJECTS
   fi
   WT="$PROJ_ABS"
+  prepare_secondmate_home() {
+    fm_config_inherit_destination_check "$PROJ_ABS" || return 1
+    mkdir -p "$PROJ_ABS/state" || return 1
+    if [ "${FM_SKIP_SECONDMATE_INHERIT:-0}" != 1 ]; then
+      CONFIG_INHERIT_LOCK=$(fm_config_inherit_lock_path "$PROJ_ABS") || return 1
+      fm_lock_try_acquire "$CONFIG_INHERIT_LOCK" || {
+        echo "error: could not acquire secondmate inheritance lock for $PROJ_ABS" >&2
+        return 1
+      }
+      CONFIG_INHERIT_LOCK_HELD=1
+    fi
+  }
+  sync_secondmate_home() {
   # Local-HEAD sync: before launch, fast-forward this secondmate's worktree to the
   # PRIMARY checkout's current default-branch commit, so a freshly spawned or
   # recovery-respawned secondmate always runs the primary's version (AGENTS.md
@@ -2368,7 +2484,7 @@ if [ "$KIND" = secondmate ]; then
       echo "error: could not resolve secondmate inheritance lock for $PROJ_ABS" >&2
       exit 1
     }
-    if ! fm_lock_acquire_wait "$CONFIG_INHERIT_LOCK"; then
+    if [ "$CONFIG_INHERIT_LOCK_HELD" != 1 ] && ! fm_lock_acquire_wait "$CONFIG_INHERIT_LOCK"; then
       echo "error: could not acquire secondmate inheritance lock for $PROJ_ABS" >&2
       exit 1
     fi
@@ -2379,6 +2495,8 @@ if [ "$KIND" = secondmate ]; then
       propagate_secondmate_inheritance "$FM_HOME" "$PROJ_ABS" "$CONFIG" "$DATA" \
       || echo "warning: secondmate $ID inheritance failed for $PROJ_ABS" >&2
   fi
+  }
+  [ "$RELAUNCH" -eq 1 ] || sync_secondmate_home
   if [ -f "$PROJ_ABS/data/charter.md" ]; then
     BRIEF="$PROJ_ABS/data/charter.md"
   else
@@ -2389,7 +2507,7 @@ else
   WT=""
   BRIEF="$DATA/$ID/brief.md"
 fi
-if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
+if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   SPAWN_TREEHOUSE_PROJECT_LOCK=$(fm_treehouse_project_lock_path "$PROJ_ABS") || {
     echo "error: could not resolve the shared Treehouse project lock for $PROJ_ABS" >&2
     exit 1
@@ -3110,7 +3228,7 @@ EOF
     ;;
 esac
 fi
-if [ "$KIND" = secondmate ]; then
+if [ "$KIND" = secondmate ] && [ "$RELAUNCH" -eq 0 ]; then
   FM_INHERITABLE_CONFIG=trace-context \
     propagate_inheritable_config "$CONFIG" "$PROJ_ABS/config" \
     || echo "warning: secondmate $ID trace-context inheritance failed for $PROJ_ABS" >&2
@@ -3297,11 +3415,15 @@ rovo_endpoint_cleanup() {
   fm_backend_kill "$BACKEND" "$T" "$tab_id" "fm-$ID" 2>/dev/null || true
 }
 
-if [ "$RELAUNCH" -eq 1 ]; then
-  # No worktree is acquired: the recorded one is reused as-is. What must be
-  # proven instead is that the adopted endpoint's shell is actually sitting in
-  # that worktree, so the replacement agent starts where the work is rather
-  # than wherever the pane happened to drift.
+# Only send shell commands after the recovery-grade classifier proves that
+# no agent can consume them. An exited treehouse subshell may leave its parent
+# in the home or pool directory; the metadata still owns the worktree identity.
+relaunch_return_to_worktree() {
+  local relaunch_wt_real relaunch_seen relaunch_cd_path
+  [ "$(fm_backend_agent_state "$BACKEND" "$T")" = dead ] || {
+    echo "error: task $ID is not positively agent-free; refusing to send a worktree return command. Inspect with bin/fm-crew-state.sh $ID" >&2
+    exit 1
+  }
   relaunch_wt_real=$(real_path_or_raw "$WT")
   relaunch_seen=
   for _ in $(seq 1 10); do
@@ -3310,13 +3432,9 @@ if [ "$RELAUNCH" -eq 1 ]; then
     sleep 0.5
   done
   if [ -z "$relaunch_seen" ] || [ "$(real_path_or_raw "$relaunch_seen")" != "$relaunch_wt_real" ]; then
-    if [ "$BACKEND" != herdr ]; then
-      echo "error: task $ID's endpoint is in '${relaunch_seen:-unknown}', not its recorded worktree '$WT'; refusing to relaunch an agent outside the copy holding its work" >&2
-      exit 1
-    fi
     relaunch_cd_path=${WT//\'/\'\\\'\'}
     spawn_send_text_line "$WT_TARGET" "cd -- '$relaunch_cd_path'" || {
-      echo "error: task $ID's endpoint is in '${relaunch_seen:-unknown}' and could not be told to return to its recorded worktree '$WT'; refusing to relaunch an agent outside the copy holding its work" >&2
+      echo "error: task $ID's endpoint is in '${relaunch_seen:-unknown}' and could not be told to return to its recorded worktree '$WT'; refusing to relaunch an agent outside the copy holding its work. Inspect with bin/fm-crew-state.sh $ID" >&2
       exit 1
     }
     for _ in $(seq 1 10); do
@@ -3325,11 +3443,39 @@ if [ "$RELAUNCH" -eq 1 ]; then
       sleep 0.5
     done
     if [ -z "$relaunch_seen" ] || [ "$(real_path_or_raw "$relaunch_seen")" != "$relaunch_wt_real" ]; then
-      echo "error: task $ID's endpoint is in '${relaunch_seen:-unknown}' and did not return to its recorded worktree '$WT' when told to; refusing to relaunch an agent outside the copy holding its work" >&2
+      echo "error: task $ID's endpoint is in '${relaunch_seen:-unknown}' and did not return to its recorded worktree '$WT' when told to; refusing to relaunch an agent outside the copy holding its work. Inspect with bin/fm-crew-state.sh $ID" >&2
       exit 1
     fi
   fi
+}
+
+if [ "$RELAUNCH" -eq 1 ]; then
+  if [ "$KIND" != secondmate ] && fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
+    # Retain the allocation lock through launch so a checked slot cannot be
+    # reassigned between ownership validation and returning the exited shell.
+    fm_treehouse_slot_owner_state "$WT" "$ID"
+    [ "$FM_TREEHOUSE_SLOT_OWNER" = mine ] || {
+      echo "error: recorded Treehouse slot $WT is not owned by task $ID (claim: $FM_TREEHOUSE_SLOT_OWNER, owner: ${FM_TREEHOUSE_SLOT_OWNER_ID:-none}); refusing relaunch before worktree entry or stop" >&2
+      exit 1
+    }
+  fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
+  if [ "$RELAUNCH_STATE" = dead ]; then
+    relaunch_return_to_worktree
+  else
+    relaunch_seen=$(spawn_current_path "$WT_TARGET" || true)
+    if [ -z "$relaunch_seen" ] || [ "$(real_path_or_raw "$relaunch_seen")" != "$(real_path_or_raw "$WT")" ]; then
+      echo "error: task $ID's live endpoint is in '${relaunch_seen:-unknown}', not its recorded worktree '$WT'; refusing before stop because a live agent cannot receive a shell return command. Inspect with bin/fm-crew-state.sh $ID" >&2
+      exit 1
+    fi
+  fi
+  spawn_pane_launch_path || {
+    echo "error: could not read the pane PATH; refusing relaunch before stop" >&2
+    exit 1
+  }
+  resolve_launch_executables
+  validate_launch_models
+  resolve_additional_launch_executables
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   spawn_send_text_line "$WT_TARGET" 'treehouse get'
 
@@ -3472,13 +3618,43 @@ exclude_path() {
   mkdir -p "$(dirname "$EXCL")"
   grep -qxF "$rel" "$EXCL" 2>/dev/null || echo "$rel" >> "$EXCL"
 }
-if [ "$RELAUNCH" -eq 1 ]; then
-  # Retire the previous incarnation's per-task harness wiring before arming the
+spawn_wiring_target_check() {
+  local target=$1
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    [ -f "$target" ] && [ ! -L "$target" ] || {
+      echo "error: replacement wiring requires a regular file at $target" >&2
+      return 1
+    }
+  fi
+  mkdir -p -- "${target%/*}" || return 1
+  [ -w "${target%/*}" ] && [ -x "${target%/*}" ] || {
+    echo "error: replacement wiring directory is not writable: ${target%/*}" >&2
+    return 1
+  }
+}
+
+spawn_wiring_file() {
+  WIRING_FILE=$1
+  [ -n "$RELAUNCH_PREPARE" ] || return 0
+  spawn_wiring_target_check "$1" || return 1
+  case "$1" in "$WT"/*) exclude_path '.fm-*.relaunch.*' ;; esac
+  WIRING_FILE=$(mktemp "${1%/*}/.fm-$ID.relaunch.XXXXXXXX") || return 1
+  RELAUNCH_WIRING_FILES+=("$WIRING_FILE")
+  RELAUNCH_WIRING_TARGETS+=("$1")
+}
+
+spawn_arm_busy() {
+  "$FM_ROOT/bin/fm-busy-event.sh" arm "${RELAUNCH_BUSY_STATE:-$STATE_REAL}" "$ID"
+}
+
+retire_relaunch_wiring() {
+  [ "$RELAUNCH" -eq 1 ] || return 0
+  # Retire the previous incarnation's per-task harness wiring before activating the
   # new one. Without this, a harness switch would leave the old adapter's hook
   # files and turn-end token registry entries behind, and even a same-harness
   # relaunch would orphan the retired busy generation's token
   # (bin/fm-control-lib.sh owns where those artifacts live).
-  clear_relaunch_harness_wiring "$RELAUNCH_PRIOR_HARNESS" "$WT" "$STATE_REAL" "$ID" || {
+  clear_relaunch_harness_wiring "$RELAUNCH_PRIOR_HARNESS" "$WT" "$STATE_REAL" "$ID" "$RELAUNCH_RETIRE_PATHS" || {
     echo "error: could not retire $RELAUNCH_PRIOR_HARNESS wiring for task $ID; refusing to arm the replacement" >&2
     exit 1
   }
@@ -3486,6 +3662,17 @@ if [ "$RELAUNCH" -eq 1 ]; then
   RELAUNCH_REPLACEMENT_HARNESS=$HARNESS
   RELAUNCH_REPLACEMENT_STATE=$STATE_REAL
   RELAUNCH_REPLACEMENT_WT=$WT
+}
+
+if [ -n "$RELAUNCH_PREPARE" ]; then
+  RELAUNCH_BUSY_STATE="$RELAUNCH_PREPARE/busy"
+  mkdir -p "$RELAUNCH_BUSY_STATE"
+else
+  if [ "$RELAUNCH" -eq 1 ]; then
+    RELAUNCH_RETIRE_PATHS=$(fm_control_harness_retirement_paths "$RELAUNCH_PRIOR_HARNESS" "$WT" "$STATE_REAL" "$ID")
+    [ "$KIND" != secondmate ] || prepare_secondmate_home
+  fi
+  retire_relaunch_wiring
 fi
 if [ "$KIND" != secondmate ]; then
   # Arm the semantic busy-state contract (bin/fm-busy-lib.sh) for every
@@ -3508,11 +3695,11 @@ if [ "$KIND" != secondmate ]; then
   esac
   case "$HARNESS" in
     claude*|opencode*|pi|pi-signed|omp)
-      BUSY_GEN=$("$FM_ROOT/bin/fm-busy-event.sh" arm "$STATE_REAL" "$ID") || {
+      BUSY_GEN=$(spawn_arm_busy) || {
         echo "error: failed to arm the busy-state contract for $ID" >&2
         exit 1
       }
-      [ "$RELAUNCH" -ne 1 ] || RELAUNCH_REPLACEMENT_BUSY_GEN=$BUSY_GEN
+      [ "$RELAUNCH_REPLACEMENT_PENDING" != 1 ] || RELAUNCH_REPLACEMENT_BUSY_GEN=$BUSY_GEN
       ;;
     agy)
       # agy's PreInvocation / Stop hooks are a verified open-close pair, so it
@@ -3520,20 +3707,20 @@ if [ "$KIND" != secondmate ]; then
       # hook workspace, so nothing would ever write the record; arming there
       # would seed a busy state nothing can clear.
       if [ "$RAW_LAUNCH" -eq 0 ]; then
-        BUSY_GEN=$("$FM_ROOT/bin/fm-busy-event.sh" arm "$STATE_REAL" "$ID") || {
+        BUSY_GEN=$(spawn_arm_busy) || {
           echo "error: failed to arm the busy-state contract for $ID" >&2
           exit 1
         }
-        [ "$RELAUNCH" -ne 1 ] || RELAUNCH_REPLACEMENT_BUSY_GEN=$BUSY_GEN
+        [ "$RELAUNCH_REPLACEMENT_PENDING" != 1 ] || RELAUNCH_REPLACEMENT_BUSY_GEN=$BUSY_GEN
       fi
       ;;
     gemini)
       if [ "$RAW_LAUNCH" -eq 0 ]; then
-        BUSY_GEN=$("$FM_ROOT/bin/fm-busy-event.sh" arm "$STATE_REAL" "$ID") || {
+        BUSY_GEN=$(spawn_arm_busy) || {
           echo "error: failed to arm the busy-state contract for $ID" >&2
           exit 1
         }
-        [ "$RELAUNCH" -ne 1 ] || RELAUNCH_REPLACEMENT_BUSY_GEN=$BUSY_GEN
+        [ "$RELAUNCH_REPLACEMENT_PENDING" != 1 ] || RELAUNCH_REPLACEMENT_BUSY_GEN=$BUSY_GEN
       fi
       ;;
     kimi*)
@@ -3565,7 +3752,8 @@ if [ "$KIND" != secondmate ]; then
       j_stop=$(json_escape "touch $(shell_quote "$TURNEND"); $busy_cmd_prefix idle $busy_suffix --event stop 2>/dev/null || true")
       j_stopfail=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event stop-failure 2>/dev/null || true")
       j_sessionend=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event session-end 2>/dev/null || true")
-      cat > "$WT/.claude/settings.local.json" <<EOF
+      spawn_wiring_file "$WT/.claude/settings.local.json"
+      cat > "$WIRING_FILE" <<EOF
 {"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"$j_submit"}]}],"Stop":[{"hooks":[{"type":"command","command":"$j_stop"}]}],"StopFailure":[{"hooks":[{"type":"command","command":"$j_stopfail"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"$j_sessionend"}]}]}}
 EOF
       exclude_path '.claude/settings.local.json'
@@ -3599,7 +3787,8 @@ EOF
       g_before=$(json_escape "$busy_cmd_prefix busy $busy_suffix --event before-agent >/dev/null 2>&1 || true; printf '{}'")
       g_after=$(json_escape "touch $(shell_quote "$TURNEND"); $busy_cmd_prefix idle $busy_suffix --event after-agent >/dev/null 2>&1 || true; printf '{}'")
       g_sessionend=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event session-end >/dev/null 2>&1 || true; printf '{}'")
-      cat > "$STATE_REAL/$ID.gemini-settings.json" <<EOF
+      spawn_wiring_file "$STATE_REAL/$ID.gemini-settings.json"
+      cat > "$WIRING_FILE" <<EOF
 {"hooks":{"BeforeAgent":[{"hooks":[{"type":"command","command":"$g_before"}]}],"AfterAgent":[{"hooks":[{"type":"command","command":"$g_after"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"$g_sessionend"}]}]}}
 EOF
       fi
@@ -3631,14 +3820,16 @@ EOF
       busy_suffix="--gen $(shell_quote "$BUSY_GEN") --source agy-hook"
       a_pre=$(json_escape "$busy_cmd_prefix busy $busy_suffix --event pre-invocation >/dev/null 2>&1 || true; printf '{}'")
       a_stop=$(json_escape "touch $(shell_quote "$TURNEND"); $busy_cmd_prefix idle $busy_suffix --event stop >/dev/null 2>&1 || true; printf '{}'")
-      cat > "$STATE_REAL/$ID.agy-hooks/.agents/hooks.json" <<EOF
+      spawn_wiring_file "$STATE_REAL/$ID.agy-hooks/.agents/hooks.json"
+      cat > "$WIRING_FILE" <<EOF
 {"fm-busy-state":{"PreInvocation":[{"type":"command","command":"$a_pre"}],"Stop":[{"type":"command","command":"$a_stop"}]}}
 EOF
       fi
       ;;
     opencode*)
       mkdir -p "$WT/.opencode/plugins"
-      cat > "$WT/.opencode/plugins/fm-busy-state.js" <<EOF
+      spawn_wiring_file "$WT/.opencode/plugins/fm-busy-state.js"
+      cat > "$WIRING_FILE" <<EOF
 // Firstmate semantic busy-state events + turn-end notification; written by
 // fm-spawn under the contract owned by bin/fm-busy-lib.sh.
 // Semantic state comes from OpenCode's session.status events: busy and retry
@@ -3693,7 +3884,8 @@ EOF
       # Written OUTSIDE the worktree: pi's project-trust gate fires on any extension
       # loaded from inside the project (verified live), but an explicit -e path
       # elsewhere loads without a dialog. Lives in state/, cleaned by teardown.
-      cat > "$STATE/$ID.pi-ext.ts" <<EOF
+      spawn_wiring_file "$STATE/$ID.pi-ext.ts"
+      cat > "$WIRING_FILE" <<EOF
 // Firstmate semantic busy-state events + turn-end notification; written by
 // fm-spawn under the contract owned by bin/fm-busy-lib.sh.
 // Semantic state: "agent_start" -> busy when a low-level agent run begins;
@@ -3738,7 +3930,8 @@ EOF
       # has no trust gate, yet its cwd-only extension auto-discovery would load a
       # worktree-resident copy a SECOND time next to the explicit -e (verified,
       # omp 18.1.11). Lives in state/, cleaned by teardown.
-      cat > "$STATE/$ID.omp-ext.ts" <<EOF
+      spawn_wiring_file "$STATE/$ID.omp-ext.ts"
+      cat > "$WIRING_FILE" <<EOF
 // Firstmate semantic busy-state events + turn-end notification for omp (Oh My
 // Pi); written by fm-spawn under the contract owned by bin/fm-busy-lib.sh.
 // Semantic state: "agent_start" -> busy when a low-level agent run begins;
@@ -3800,12 +3993,16 @@ EOF
       mkdir -p "$GROK_AUTH_DIR"
       old_umask=$(umask)
       umask 077
-      auth_file=$(mktemp "$GROK_AUTH_DIR/fm.XXXXXXXXXXXX")
+      auth_file=$(mktemp "${RELAUNCH_PREPARE:-$GROK_AUTH_DIR}/fm.XXXXXXXXXXXX")
+      auth_file="$GROK_AUTH_DIR/${auth_file##*/}"
       umask "$old_umask"
-      printf '%s\n' "$TURNEND" > "$auth_file"
-      printf '%s\n' "${auth_file##*/}" > "$STATE/$ID.grok-turnend-token"
+      spawn_wiring_file "$auth_file"
+      printf '%s\n' "$TURNEND" > "$WIRING_FILE"
+      spawn_wiring_file "$STATE/$ID.grok-turnend-token"
+      printf '%s\n' "${auth_file##*/}" > "$WIRING_FILE"
       sq_grok_auth_dir=$(shell_quote "$GROK_AUTH_DIR")
-      cat > "$GROK_HOOKS_DIR/fm-turn-end.sh" <<EOF
+      spawn_wiring_file "$GROK_HOOKS_DIR/fm-turn-end.sh"
+      cat > "$WIRING_FILE" <<EOF
 #!/usr/bin/env bash
 set -u
 auth_dir=$sq_grok_auth_dir
@@ -3823,10 +4020,12 @@ case "\$t" in /*.turn-ended) : ;; *) exit 0 ;; esac
 touch "\$t" 2>/dev/null || true
 exit 0
 EOF
-      chmod +x "$GROK_HOOKS_DIR/fm-turn-end.sh"
+      chmod +x "$WIRING_FILE"
       hook_command=$(json_escape "bash $(shell_quote "$GROK_HOOKS_DIR/fm-turn-end.sh")")
-      printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"%s"}]}]}}\n' "$hook_command" > "$GROK_HOOKS_DIR/fm-turn-end.json"
-      printf 'token=%s\n' "${auth_file##*/}" > "$WT/.fm-grok-turnend"
+      spawn_wiring_file "$GROK_HOOKS_DIR/fm-turn-end.json"
+      printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"%s"}]}]}}\n' "$hook_command" > "$WIRING_FILE"
+      spawn_wiring_file "$WT/.fm-grok-turnend"
+      printf 'token=%s\n' "${auth_file##*/}" > "$WIRING_FILE"
       exclude_path '.fm-grok-turnend'
       ;;
     muse*)
@@ -3845,7 +4044,8 @@ EOF
       # already-running task at a different log tree.
       MUSE_SESSIONS_ROOT="${MUSE_DATA_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}}/muse/sessions"
       MUSE_BINDING_ID="$$.$RANDOM.$(date +%s)"
-      rm -f "$STATE/$ID.muse-session-current"
+      [ -n "$RELAUNCH_PREPARE" ] || rm -f "$STATE/$ID.muse-session-current"
+      spawn_wiring_file "$STATE/$ID.muse-session"
       {
         printf 'sessions_root=%s\n' "$MUSE_SESSIONS_ROOT"
         printf 'workspace_root=%s\n' "$WT"
@@ -3855,7 +4055,7 @@ EOF
         done <<EOF
 $(fm_busy_muse_matching_logs "$MUSE_SESSIONS_ROOT" "$WT" || true)
 EOF
-      } > "$STATE/$ID.muse-session"
+      } > "$WIRING_FILE"
       ;;
     cursor*)
       # Cursor's turn lifecycle is neither a hook nor a launch flag: it writes
@@ -3869,6 +4069,7 @@ EOF
       # conversation instead of its predecessor's. The classifier then accepts
       # only one remaining conversation and never guesses between incarnations.
       CURSOR_PROJECTS_ROOT="${CURSOR_PROJECTS_ROOT_OVERRIDE:-$HOME/.cursor/projects}"
+      spawn_wiring_file "$STATE/$ID.cursor-session"
       {
         printf 'projects_root=%s\n' "$CURSOR_PROJECTS_ROOT"
         printf 'workspace_root=%s\n' "$WT"
@@ -3878,24 +4079,125 @@ EOF
             printf 'prior_conversation=%s\n' "$(basename -- "${CURSOR_PRIOR_DIR%/}")"
           done
         fi
-      } > "$STATE/$ID.cursor-session"
+      } > "$WIRING_FILE"
       ;;
     kimi*)
       # Kimi's Stop hook is global, but it is inert unless cwd contains this
       # task's token pointer and the token resolves through Firstmate's private
       # registry. The installer above owns the format-preserving config edit and
       # the always-zero, silent hook script.
+      if [ -n "$RELAUNCH_PREPARE" ]; then
+        KIMI_STAGE_HOME="$RELAUNCH_PREPARE/kimi-home"
+        for kimi_dir in "$HOME/.kimi-code" "$HOME/.kimi-code/fm-turn-end.d"; do
+          [ ! -L "$kimi_dir" ] || {
+            echo "error: Kimi wiring directory is a symlink: $kimi_dir" >&2
+            exit 1
+          }
+        done
+        spawn_wiring_target_check "$HOME/.kimi-code/config.toml"
+        mkdir -p "$KIMI_STAGE_HOME/.kimi-code"
+        if [ ! -d "$HOME/.kimi-code/fm-turn-end.d" ]; then
+          mkdir -m 700 "$HOME/.kimi-code/fm-turn-end.d"
+        fi
+        cp -p "$HOME/.kimi-code/config.toml" "$KIMI_STAGE_HOME/.kimi-code/config.toml"
+        if [ -e "$HOME/.kimi-code/fm-turn-end.sh" ] || [ -L "$HOME/.kimi-code/fm-turn-end.sh" ]; then
+          spawn_wiring_target_check "$HOME/.kimi-code/fm-turn-end.sh"
+          cp -p "$HOME/.kimi-code/fm-turn-end.sh" "$KIMI_STAGE_HOME/.kimi-code/fm-turn-end.sh"
+        fi
+        HOME="$KIMI_STAGE_HOME" "$FM_ROOT/bin/fm-kimi-turnend-hook.sh" install
+        spawn_wiring_file "$HOME/.kimi-code/fm-turn-end.sh"
+        cp -p "$KIMI_STAGE_HOME/.kimi-code/fm-turn-end.sh" "$WIRING_FILE"
+      fi
       KIMI_AUTH_DIR="$HOME/.kimi-code/fm-turn-end.d"
       old_umask=$(umask)
       umask 077
-      auth_file=$(mktemp "$KIMI_AUTH_DIR/fm.XXXXXXXXXXXX")
+      auth_file=$(mktemp "${RELAUNCH_PREPARE:-$KIMI_AUTH_DIR}/fm.XXXXXXXXXXXX")
+      auth_file="$KIMI_AUTH_DIR/${auth_file##*/}"
       umask "$old_umask"
-      printf '%s\n' "$TURNEND" > "$auth_file"
-      printf '%s\n' "${auth_file##*/}" > "$STATE/$ID.kimi-turnend-token"
-      printf 'token=%s\n' "${auth_file##*/}" > "$WT/.fm-kimi-turnend"
+      spawn_wiring_file "$auth_file"
+      printf '%s\n' "$TURNEND" > "$WIRING_FILE"
+      spawn_wiring_file "$STATE/$ID.kimi-turnend-token"
+      printf '%s\n' "${auth_file##*/}" > "$WIRING_FILE"
+      spawn_wiring_file "$WT/.fm-kimi-turnend"
+      printf 'token=%s\n' "${auth_file##*/}" > "$WIRING_FILE"
       exclude_path '.fm-kimi-turnend'
       ;;
   esac
+fi
+
+prepare_relaunch() {
+  local busy_file wiring_index executable
+  if [ "$RAW_LAUNCH" -eq 1 ]; then
+    executable=$RAW_BIN
+  else
+    case "$HARNESS" in
+      pi|pi-signed) executable=$PI_BIN ;;
+      omp) executable=$OMP_BIN ;;
+      cursor) executable=$CURSOR_BIN ;;
+      agy) executable=$AGY_BIN ;;
+      muse) executable=$MUSE_BIN ;;
+      kimi) executable=$KIMI_BIN ;;
+      rovo) executable=$ROVO_BIN ;;
+      *) executable=$TARGET_BIN ;;
+    esac
+  fi
+  [ -f "$executable" ] && [ -x "$executable" ] || {
+    echo "error: replacement executable is unavailable: $executable" >&2
+    return 1
+  }
+  for wiring_index in "${!RELAUNCH_WIRING_FILES[@]}"; do
+    [ -f "${RELAUNCH_WIRING_FILES[$wiring_index]}" ] && [ -r "${RELAUNCH_WIRING_FILES[$wiring_index]}" ] || return 1
+    spawn_wiring_target_check "${RELAUNCH_WIRING_TARGETS[$wiring_index]}" || return 1
+  done
+  RELAUNCH_RETIRE_PATHS=$(fm_control_harness_retirement_paths "$RELAUNCH_PRIOR_HARNESS" "$WT" "$STATE_REAL" "$ID") || return 1
+  if [ -n "${BUSY_GEN:-}" ]; then
+    for busy_file in busy-gen busy-state progress; do
+      spawn_wiring_target_check "$STATE_REAL/$ID.$busy_file" || return 1
+    done
+  fi
+  [ "$KIND" != secondmate ] || prepare_secondmate_home
+}
+
+# Internal prepare/continue handshake, accepted only from the process holding
+# this task's control lock. Preparation keeps the old wiring and metadata
+# intact. Control stops the old agent only after readiness, then releases this
+# same launch process; losing the parent never authorizes a replacement.
+if [ -n "$RELAUNCH_PREPARE" ]; then
+  prepare_relaunch
+  : > "$RELAUNCH_PREPARE/ready"
+  while [ ! -f "$RELAUNCH_PREPARE/continue" ]; do
+    fm_pid_alive "$PPID" && [ -d "$RELAUNCH_PREPARE" ] || {
+      echo "error: relaunch controller disappeared before launch authorization; refusing replacement" >&2
+      exit 1
+    }
+    sleep 0.1
+  done
+  # Exit may itself unwind a treehouse subshell after the pre-stop cwd check.
+  relaunch_return_to_worktree
+fi
+
+if [ "$RELAUNCH" -eq 1 ] && [ "$KIND" = secondmate ]; then
+  sync_secondmate_home
+  FM_INHERITABLE_CONFIG=trace-context \
+    propagate_inheritable_config "$CONFIG" "$PROJ_ABS/config" \
+    || echo "warning: secondmate $ID trace-context inheritance failed for $PROJ_ABS" >&2
+fi
+
+if [ -n "$RELAUNCH_PREPARE" ]; then
+  if [ -n "${KIMI_STAGE_HOME:-}" ]; then
+    # Reapply only the owned region to the current config. Publishing the
+    # preparation snapshot would overwrite unrelated edits made before stop.
+    "$FM_ROOT/bin/fm-kimi-turnend-hook.sh" install
+  fi
+  retire_relaunch_wiring
+  if [ -n "${BUSY_GEN:-}" ]; then
+    RELAUNCH_REPLACEMENT_BUSY_GEN=$BUSY_GEN
+    "$FM_ROOT/bin/fm-busy-event.sh" activate "$STATE_REAL" "$ID" "$RELAUNCH_BUSY_STATE"
+  fi
+  for wiring_index in "${!RELAUNCH_WIRING_FILES[@]}"; do
+    mv -f -- "${RELAUNCH_WIRING_FILES[$wiring_index]}" "${RELAUNCH_WIRING_TARGETS[$wiring_index]}"
+  done
+  RELAUNCH_WIRING_FILES=()
 fi
 
 # Delivery posture recorded in meta so fm-teardown's safety check and the
@@ -4091,7 +4393,8 @@ fi
 # still being delivered, cannot observe or complete a fresh provisional record
 # between its state check and `tasks-axi start`, and a delivery failure cannot
 # follow a committed In-flight transition.
-if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
+# Relaunch retains slot ownership protection until the replacement is launched.
+if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ] && [ "$RELAUNCH" -eq 0 ]; then
   SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
   fm_lock_release "$SPAWN_TREEHOUSE_PROJECT_LOCK"
 fi

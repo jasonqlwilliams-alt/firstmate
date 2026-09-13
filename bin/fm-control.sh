@@ -46,9 +46,12 @@
 #              inherits the local copy but none of the conversation; a
 #              secondmate reconciles its own home's records at startup, so its
 #              standing charter is never rewritten.
-#              Records a durable checkpoint and that note, exits the old agent,
-#              then delegates the launch to its single owner,
-#              bin/fm-spawn.sh --relaunch. A failure before publication keeps
+#              Records a durable checkpoint and that note, then prepares the
+#              replacement through bin/fm-spawn.sh --relaunch before stopping
+#              the old agent. The prepared process holds its launch locks
+#              until control proves exit and authorizes launch. An exited
+#              shell is returned to the recorded worktree before launch.
+#              A failure before publication keeps
 #              the prior durable record in place and reports the concrete
 #              state; it never leaves a half-transitioned task claiming to be
 #              running.
@@ -89,6 +92,7 @@
 #   FM_CONTROL_POLL              poll interval for postcondition waits (0.5)
 #   FM_CONTROL_SETTLE_WAIT       adapter acknowledgement wait after interrupt (5)
 #   FM_CONTROL_EXIT_WAIT         alive->dead wait after the exit command (30)
+#   FM_CONTROL_PREPARE_WAIT      preparation deadline before any stop (90)
 #   FM_CONTROL_LAUNCH_WAIT       dead->alive wait after a relaunch (90)
 #   FM_CONTROL_EXIT_RETRIES      Enter retries for the exit command (3)
 set -eu
@@ -119,12 +123,16 @@ fi
   echo "error: FM_HOME '$FM_HOME' is not a directory" >&2
   exit 1
 }
+FM_HOME=$(CDPATH='' cd -- "$FM_HOME" && pwd -P) || exit 1
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 [ -d "$STATE" ] || {
   echo "error: state dir '$STATE' is missing; fm-control cannot resolve tasks for FM_HOME '$FM_HOME'" >&2
   exit 1
 }
+STATE=$(CDPATH='' cd -- "$STATE" && pwd -P) || exit 1
+# Imported state owners prefer the override, so keep it normalized as well.
+if [ -n "${FM_STATE_OVERRIDE:-}" ]; then FM_STATE_OVERRIDE=$STATE; fi
 
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
@@ -152,9 +160,17 @@ CONTROL_LOCK=
 CONTROL_LOCK_HELD=0
 RELAUNCH_ACTIVE=0
 RELAUNCH_PHASE=start
+RELAUNCH_PREPARE_DIR=
+RELAUNCH_SPAWN_PID=
 
 control_cleanup() {
   local status=$?
+  if [ -n "$RELAUNCH_SPAWN_PID" ]; then
+    kill "$RELAUNCH_SPAWN_PID" 2>/dev/null || true
+    wait "$RELAUNCH_SPAWN_PID" 2>/dev/null || true
+    RELAUNCH_SPAWN_PID=
+  fi
+  [ -z "$RELAUNCH_PREPARE_DIR" ] || rm -rf -- "$RELAUNCH_PREPARE_DIR"
   if [ "$RELAUNCH_ACTIVE" = 1 ] \
      && declare -F relaunch_rollback >/dev/null 2>&1; then
     relaunch_rollback || true
@@ -559,14 +575,14 @@ relaunch_rollback() {
   [ "$RELAUNCH_PHASE" != complete ] || return 0
   RELAUNCH_ACTIVE=0
   case "$RELAUNCH_PHASE" in
-    checkpoint|noted)
+    checkpoint|noted|preparing)
       # The old agent was never touched. Restore the instructions byte-exact so
       # a refused relaunch leaves nothing behind.
       if [ -n "$RELAUNCH_BRIEF" ] && [ -f "$BRIEF_PRIOR" ]; then
         cp -p "$BRIEF_PRIOR" "$RELAUNCH_BRIEF" 2>/dev/null || true
       fi
       journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-restored" || true
-      echo "error: relaunch of $ID was refused before its agent was touched; nothing changed" >&2
+      echo "error: relaunch of $ID was refused before its agent was touched; its record and instructions were preserved" >&2
       ;;
     stopping)
       state=$(agent_state 2>/dev/null || printf unknown)
@@ -824,21 +840,41 @@ do_relaunch() {
   record_note
   journal_write noted "${CHECKPOINT_LINES[@]}" "$note_line"
 
-  journal_write stopping "${CHECKPOINT_LINES[@]}" "$note_line"
-  exit_result=$(do_exit)
-  journal_write exited "${CHECKPOINT_LINES[@]}" "$note_line" "exit_result=$exit_result"
-
-  # The launch owner (fm-spawn --relaunch) clears the previous incarnation's
-  # per-task harness wiring before arming the new one, so nothing to do here.
+  # Keep the launch owner alive across preparation and stop. Its validated
+  # profile, locks, and prepared inputs are reused rather than checked by a
+  # second implementation or discarded between a dry run and the launch.
   RELAUNCH_TX="${BASHPID:-$$}.$(date -u +%Y%m%dT%H%M%SZ).$RANDOM"
-  journal_write launching "${CHECKPOINT_LINES[@]}" "$note_line" "relaunch_tx=$RELAUNCH_TX"
+  RELAUNCH_PREPARE_DIR=$(mktemp -d "$STATE/.$ID.relaunch-prepare.XXXXXXXX")
   spawn_args=("$ID" --relaunch --harness "$TARGET_HARNESS")
   [ "$TARGET_MODEL" = default ] || spawn_args+=(--model "$TARGET_MODEL")
   [ "$TARGET_EFFORT" = default ] || spawn_args+=(--effort "$TARGET_EFFORT")
-  if FM_CONTROL_RELAUNCH_TX="$RELAUNCH_TX" \
-      "$SCRIPT_DIR/fm-spawn.sh" "${spawn_args[@]}" >/dev/null; then
+  journal_write preparing "${CHECKPOINT_LINES[@]}" "$note_line" "relaunch_tx=$RELAUNCH_TX"
+  FM_CONTROL_RELAUNCH_TX="$RELAUNCH_TX" \
+    FM_CONTROL_RELAUNCH_PREPARE="$RELAUNCH_PREPARE_DIR" \
+    "$SCRIPT_DIR/fm-spawn.sh" "${spawn_args[@]}" >/dev/null &
+  RELAUNCH_SPAWN_PID=$!
+  local prepare_deadline=$((SECONDS + ${FM_CONTROL_PREPARE_WAIT:-90}))
+  while [ ! -f "$RELAUNCH_PREPARE_DIR/ready" ]; do
+    if ! kill -0 "$RELAUNCH_SPAWN_PID" 2>/dev/null; then
+      wait "$RELAUNCH_SPAWN_PID" || true
+      RELAUNCH_SPAWN_PID=
+      die "replacement preparation for $ID failed; the previous agent was not stopped. Inspect with bin/fm-crew-state.sh $ID"
+    fi
+    [ "$SECONDS" -lt "$prepare_deadline" ] \
+      || die "replacement preparation for $ID timed out before stop. Inspect with bin/fm-crew-state.sh $ID"
+    sleep "$POLL"
+  done
+
+  journal_write stopping "${CHECKPOINT_LINES[@]}" "$note_line"
+  exit_result=$(do_exit)
+  journal_write exited "${CHECKPOINT_LINES[@]}" "$note_line" "exit_result=$exit_result"
+  journal_write launching "${CHECKPOINT_LINES[@]}" "$note_line" "relaunch_tx=$RELAUNCH_TX"
+  : > "$RELAUNCH_PREPARE_DIR/continue"
+  if wait "$RELAUNCH_SPAWN_PID"; then
+    RELAUNCH_SPAWN_PID=
     RELAUNCH_META_PUBLISHED=1
   else
+    RELAUNCH_SPAWN_PID=
     [ "$(fm_meta_get "$META" control_relaunch_tx)" != "$RELAUNCH_TX" ] \
       || RELAUNCH_META_PUBLISHED=1
     die "the replacement agent for $ID could not be launched on $TARGET_HARNESS"

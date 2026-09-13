@@ -42,7 +42,7 @@ trap 'rm -rf -- "$TMP_ROOT"' EXIT
 # the request carried. That answer is a real status append read by the real
 # pending-reply machinery, not a stubbed verdict.
 make_stub() {  # <case-dir>
-  local fb="$1/fakebin"
+  local fb="$1/fakebin" tool
   mkdir -p "$fb"
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
@@ -115,6 +115,19 @@ esac
 exit 0
 SH
   chmod +x "$fb/tmux"
+  cat > "$fb/ps" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -t ] && [ "${2:-}" = fakepane ]; then
+  printf '%s %s %s zsh\n' "$FM_FAKE_PANE_PID" "$FM_FAKE_PANE_PID" "$FM_FAKE_PANE_PID"
+  exit 0
+fi
+exec /bin/ps "$@"
+SH
+  chmod +x "$fb/ps"
+  for tool in claude codex; do
+    printf '#!/bin/sh\nexit 0\n' > "$fb/$tool"
+    chmod +x "$fb/$tool"
+  done
   cat > "$fb/sleep" <<'SH'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -235,13 +248,22 @@ arm_answer() {
 }
 
 run_restart() {  # <case-dir> <args...>
-  local dir=$1; shift
-  env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
+  local dir=$1 pane_pid rc; shift
+  # The preparation guard reads the foreground process's native environment.
+  # Keep a real process with the fixture PATH alive until restart finishes.
+  env PATH="$dir/fakebin:$PATH" /bin/sleep 120 >/dev/null 2>&1 &
+  pane_pid=$!
+  env FM_FAKE_PANE_PID="$pane_pid" \
+    PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
     FM_SPAWN_NO_GUARD=1 FM_SECONDMATE_PERSIST_POLL=1 \
     FM_SECONDMATE_PERSIST_WAIT="${FM_TEST_PERSIST_WAIT:-30}" \
     FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 FM_CONTROL_LAUNCH_WAIT=0.05 \
     FM_SSH_BIN="${FM_TEST_SSH_BIN:-ssh}" \
     "$RESTART" "$@" 2>&1
+  rc=$?
+  kill "$pane_pid" 2>/dev/null || true
+  wait "$pane_pid" 2>/dev/null || true
+  return "$rc"
 }
 
 # --- T1: the persist request is the task subset of /stow, and it gates --------
