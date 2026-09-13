@@ -17,7 +17,7 @@ GitHub Actions and Dependabot are exempt so their automation keeps working, but 
 
 CI repair pushes require a publisher that refreshes the attestation before pushing the replacement head; [no-mistakes v1.68.0](https://github.com/kunchenguid/no-mistakes/releases/tag/v1.68.0) fixes this publication ordering.
 An older publisher can emit valid structured attestations when opening a PR but leave them stale after repairing CI.
-During an active pipeline, return that failure to its outer executor to repair publication; rerunning a failed workflow uses the same frozen event payload and cannot refresh the attestation.
+During an active pipeline, return that failure to its outer executor to repair publication; rerunning a failed workflow re-reads the live PR body and passes only after the attestation is refreshed for the current head.
 The check must continue rejecting an attestation for a different head.
 
 ## Workflow
