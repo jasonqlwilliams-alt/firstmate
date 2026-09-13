@@ -89,29 +89,6 @@ focus_snapshot() {
   printf '%s' "$tabs" | jq -e --arg tab "$tab" '([.result.tabs[] | select(.focused == true)] | length) == 1 and ([.result.tabs[] | select(.focused == true)][0].tab_id == $tab)' >/dev/null || return 1
   printf '%s\t%s' "$workspace" "$tab"
 }
-# Record one focus observation. A failed read is UNREADABLE, never a
-# substitute for a genuine wrong-focus sample.
-append_focus_sample() {  # <file>
-  local file=$1 sample
-  if sample=$(focus_snapshot); then
-    printf '%s\n' "$sample" >> "$file"
-  else
-    printf '%s\n' UNREADABLE >> "$file"
-  fi
-}
-# Count readable snapshots that are not the exact pre-close focus.
-# UNREADABLE lines are missed observations, not focus changes.
-count_wrong_focus_samples() {  # <anchor> <file>
-  local anchor=$1 file=$2 line n=0
-  [ -f "$file" ] || { printf '0'; return 0; }
-  while IFS= read -r line || [ -n "$line" ]; do
-    [ -n "$line" ] || continue
-    [ "$line" = "$anchor" ] && continue
-    [ "$line" = UNREADABLE ] && continue
-    n=$((n + 1))
-  done < "$file"
-  printf '%s' "$n"
-}
 ws_order() { lab workspace list | jq -er '[.result.workspaces[].workspace_id] | join(",")'; }
 wait_ws_gone() {  # <workspace_id>
   local i=0
@@ -300,7 +277,11 @@ SAMPLER_STOP="$TMP_ROOT/sampler-c.stop"
   : > "$C_SAMPLER_READY"
   while [ ! -e "$SAMPLER_STOP" ]; do
     if [ -e "$C_OPERATION_ACTIVE" ]; then
-      append_focus_sample "$C_FOCUS_SAMPLES"
+      if C_SAMPLE=$(focus_snapshot); then
+        printf '%s\n' "$C_SAMPLE" >> "$C_FOCUS_SAMPLES"
+      else
+        printf '%s\n' UNREADABLE >> "$C_FOCUS_SAMPLES"
+      fi
     fi
   done
 ) &
@@ -323,38 +304,19 @@ done
 [ -s "$C_FOCUS_SAMPLES" ] || fail 'the Part C focus sampler took no in-operation sample before the close'
 # A short proof budget keeps the exhausted-proof path fast; the count below is
 # what proves the proof was exhausted rather than skipped.
-# The steal window on a defective release is the gap between pane close
-# returning and the production restore. A background sampler iteration can land
-# entirely after that restore, so the close shim also records one sample at
-# that instant. The shim must never change the production close's status: a
-# failed snapshot is UNREADABLE, not a close failure.
 C_PROOF_POLLS=3
-export -f lab focus_snapshot append_focus_sample
-export C_FOCUS_SAMPLES
 C_OUT=$(PATH="$FAKEBIN:$HERDR_ORIGINAL_PATH" FM_FLASH_CALL_LOG="$C_CALL_LOG" \
   FM_BACKEND_HERDR_IDLE_SHELL_PROOF_POLLS="$C_PROOF_POLLS" bash -c '
   . "$1/bin/backends/herdr.sh"
   fm_backend_herdr_cli() {
     local session=$1
-    local st
     shift
     printf "%s\n" "$*" >> "$FM_FLASH_CALL_LOG"
     HERDR_SESSION="$session" herdr "$@" --session "$session"
-    st=$?
-    if [ "$1 ${2:-}" = "pane close" ]; then
-      append_focus_sample "$C_FOCUS_SAMPLES"
-    fi
-    return "$st"
   }
   fm_backend_herdr_projection_close_pane_focus_preserving "$2" "$3"
 ' _ "$ROOT" "$HERDR_LAB_SESSION" "$C_DOOMED_PANE" 2>&1)
 C_STATUS=$?
-# Drain in-flight sampler snapshots of the restore window before stopping.
-C_DRAIN=0
-while [ "$C_DRAIN" -lt 20 ]; do
-  sleep 0.01
-  C_DRAIN=$((C_DRAIN + 1))
-done
 rm -f "$C_OPERATION_ACTIVE"
 : > "$SAMPLER_STOP"
 wait "$SAMPLER_PID" 2>/dev/null || true
@@ -380,7 +342,7 @@ pass 'fallback: a doomed pane holding a persistent child exhausts the proof and 
 C_AFTER=$(focus_snapshot) || fail 'could not capture the Part C post-close focus'
 [ "$C_AFTER" = "$C_BEFORE" ] \
   || fail "the fallback close left focus off the anchor ($C_BEFORE -> $C_AFTER)"
-C_WRONG=$(count_wrong_focus_samples "$C_BEFORE" "$C_FOCUS_SAMPLES")
+C_WRONG=$(grep -Fvxc -- "$C_BEFORE" "$C_FOCUS_SAMPLES" || true)
 if [ "$STEAL_LIVE" = 1 ]; then
   # A defective release cannot make this path focus-safe, which is precisely why
   # default-on projection is floored above it. The wrong-focus window is
