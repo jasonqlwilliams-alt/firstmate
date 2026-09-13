@@ -1,0 +1,25 @@
+== live tmux relaunch lab: scenario=cursor-fallback root=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2DPX9WYSYV8N9CRFCNRVDRH
+tmux: tmux 3.7c socket=-L fm-lab-relaunch-1207643
+recorded worktree: /tmp/fm-live-relaunch.KSQbhJ/wt
+pane shell PATH: /tmp/fm-live-relaunch.KSQbhJ/leader-bin:/usr/bin:/bin; pane shell HOME: /tmp/fm-live-relaunch.KSQbhJ/user-home
+pane state before: dead; pane cwd before: /tmp/fm-live-relaunch.KSQbhJ/parent
+pane PATH has an unrelated agent: agent
+codex; Cursor install: /tmp/fm-live-relaunch.KSQbhJ/user-home/.local/bin/cursor-agent (not on the pane PATH)
+$ bin/fm-control.sh lab1 relaunch --harness cursor --note 'Live lab relaunch.'
+warning: /tmp/fm-live-relaunch.KSQbhJ/home/data/lab1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched lab1 harness=cursor from=claude model=default effort=default backend=tmux endpoint=fmlab:fm-lab1 worktree=/tmp/fm-live-relaunch.KSQbhJ/wt
+exit code: 0
+-- after --
+pane state after: alive; pane cwd after: /tmp/fm-live-relaunch.KSQbhJ/wt
+replacement launched: cursor-local-bin cwd=/tmp/fm-live-relaunch.KSQbhJ/wt argc=5
+project lock after: released
+recorded harness after: cursor
+pane screen (last lines):
+  | bash-5.3$ ( cd '/tmp/fm-live-relaunch.KSQbhJ/wt' && exec '/tmp/fm-live-relaunch.KSQbhJ/agentbin/claude' -c 'pass' )
+  | bash-5.3$ cd -- '/tmp/fm-live-relaunch.KSQbhJ/wt'
+  | bash-5.3$ printf '%s\n%s\n' "$PATH" "$HOME" > '/tmp/fm-live-relaunch.KSQbhJ/home/state/.lab1.relaunch-path.LLsSIBTK'
+  | bash-5.3$ export GOTMPDIR=/tmp/fm-lab1/gotmp
+  | bash-5.3$ export FM_TASK_ID=lab1
+  | bash-5.3$ unset TRACEPARENT; env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_INVOKED_AS '/tmp/fm-live-relaunch.KSQbhJ/user-home/.local/bin/cursor-agent' --trust --yolo --worksp
+  | ace '/tmp/fm-live-relaunch.KSQbhJ/wt' "$('/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2DPX9WYSYV8N9CRFCNRVDRH/bin/fm-operational-input.sh' encode launch-brief < '/tmp/fm-live-relaunch.KSQbhJ/home/data/lab1/launch-
+  | brief.md')"

@@ -1,0 +1,29 @@
+== live tmux relaunch lab: scenario=pool-mine-live root=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2DPX9WYSYV8N9CRFCNRVDRH
+tmux: tmux 3.7c socket=-L fm-lab-relaunch-1006121
+recorded worktree: /tmp/fm-live-relaunch.cQv7WE/pool/1/proj
+old agent pid: 1006642
+pane shell PATH: /tmp/fm-live-relaunch.cQv7WE/leader-bin:/usr/bin:/bin; pane shell HOME: /tmp/fm-live-relaunch.cQv7WE/user-home
+pane state before: alive; pane cwd before: /tmp/fm-live-relaunch.cQv7WE/pool/1/proj
+slot claim before: task=lab1 home=/tmp/fm-live-relaunch.cQv7WE/home 
+$ bin/fm-control.sh lab1 relaunch --harness codex --note 'Live lab relaunch.'
+warning: /tmp/fm-live-relaunch.cQv7WE/home/data/lab1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched lab1 harness=codex from=claude model=default effort=default backend=tmux endpoint=fmlab:fm-lab1 worktree=/tmp/fm-live-relaunch.cQv7WE/pool/1/proj
+exit code: 0
+-- after --
+pane state after: alive; pane cwd after: /tmp/fm-live-relaunch.cQv7WE/pool/1/proj
+old agent: stopped
+replacement launched: leader cwd=/tmp/fm-live-relaunch.cQv7WE/pool/1/proj argc=4
+project lock observed while the old agent was stopping: free
+project lock after: released
+slot claim after: task=lab1 home=/tmp/fm-live-relaunch.cQv7WE/home 
+recorded harness after: codex
+pane screen (last lines):
+  | bash-5.3$ ( cd '/tmp/fm-live-relaunch.cQv7WE/pool/1/proj' && LAB_EXIT_HOOK='/tmp/fm-live-relaunch.cQv7WE/exit-hook.sh' exec '/tmp/fm-live-relaunch.cQv7WE/agentbin/claude' '/tmp/fm-live-relaunch.cQv7WE/agent.py' '/tmp/fm-
+  | live-relaunch.cQv7WE' )
+  | /exit
+  | bash-5.3$ cd -- '/tmp/fm-live-relaunch.cQv7WE/pool/1/proj'
+  | bash-5.3$ export GOTMPDIR=/tmp/fm-lab1/gotmp
+  | bash-5.3$ export FM_TASK_ID=lab1
+  | bash-5.3$ unset TRACEPARENT; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI '/tmp/fm-live-relaunch.cQv7WE/leader-bin/codex' --dangerously-bypass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch '/tmp/fm-
+  | live-relaunch.cQv7WE/home/state/lab1.turn-ended'\"]" "$('/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2DPX9WYSYV8N9CRFCNRVDRH/bin/fm-operational-input.sh' encode launch-brief < '/tmp/fm-live-relaunch.cQv7WE/home/da
+  | ta/lab1/launch-brief.md')"

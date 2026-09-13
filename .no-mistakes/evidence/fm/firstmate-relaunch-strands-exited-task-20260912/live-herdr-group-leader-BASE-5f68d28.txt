@@ -1,0 +1,29 @@
+== live Herdr relaunch lab (live agent + same-group child) root=/tmp/fm-lab-base
+herdr: herdr 0.9.0 session=fm-lab-relaunch-leader-base-1176484 pane=w1:p2
+recorded worktree: /tmp/fm-live-herdr-relaunch.PzjMxs/wt
+agent state before: alive
+herdr pane process-info foreground_processes (pid name) with kernel pgid:
+  pid=1178612 name=claude pgid=1178612 PATH=/tmp/fm-live-herdr-relaunch.PzjMxs/leader-bin:/usr/bin:/bin
+  pid=1178645 name=sleep pgid=1178612 PATH=/tmp/fm-live-herdr-relaunch.PzjMxs/child-bin:/usr/bin:/bin
+child pid (from the stand-in): 1178645 pgid=1178612 PATH=/tmp/fm-live-herdr-relaunch.PzjMxs/child-bin:/usr/bin:/bin
+pane cwd before: /tmp/fm-live-herdr-relaunch.PzjMxs/wt
+$ bin/fm-control.sh hlab relaunch --harness codex --note 'Live Herdr lab relaunch.'
+warning: /tmp/fm-live-herdr-relaunch.PzjMxs/home/data/hlab/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: could not read the pane PATH; refusing relaunch before stop
+error: replacement preparation for hlab failed; the previous agent was not stopped. Inspect with bin/fm-crew-state.sh hlab
+error: relaunch of hlab was refused before its agent was touched; its record and instructions were preserved
+exit code: 1
+-- after --
+agent state after: alive
+pane cwd after: /tmp/fm-live-herdr-relaunch.PzjMxs/wt
+old agent: STILL RUNNING
+replacement launched: NONE
+recorded harness after: claude
+endpoint reused: yes (w1:p2)
+pane screen (last lines):
+  | exec env -i HOME='/tmp/fm-live-herdr-relaunch.PzjMxs/user-home' PATH='/tmp/fm-live-herdr-relaunch.PzjMxs/leader-bin:/usr
+  | /bin:/bin' TERM=xterm-256color LANG=C.UTF-8 /bin/bash --norc --noprofile -i
+  | [jason@Lights wt]$ exec env -i HOME='/tmp/fm-live-herdr-relaunch.PzjMxs/user-home' PATH='/tmp/fm-live-herdr-relaunch.Pzj
+  | Mxs/leader-bin:/usr/bin:/bin' TERM=xterm-256color LANG=C.UTF-8 /bin/bash --norc --noprofile -i
+  | bash-5.3$ LAB_CHILD_PATH='/tmp/fm-live-herdr-relaunch.PzjMxs/child-bin:/usr/bin:/bin' '/tmp/fm-live-herdr-relaunch.PzjMx
+  | s/agentbin/claude' '/tmp/fm-live-herdr-relaunch.PzjMxs/agent.py' '/tmp/fm-live-herdr-relaunch.PzjMxs'

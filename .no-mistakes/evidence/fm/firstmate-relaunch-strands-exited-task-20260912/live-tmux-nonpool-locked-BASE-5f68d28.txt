@@ -1,0 +1,26 @@
+== live tmux relaunch lab: scenario=nonpool-locked root=/tmp/fm-lab-base
+tmux: tmux 3.7c socket=-L fm-lab-relaunch-1071607
+recorded worktree: /tmp/fm-live-relaunch.x6pN3t/wt
+old agent pid: 1072229
+pane foreground group before relaunch (pid pgid tpgid comm):
+  1071709 1071709 1072229 bash
+  1072229 1072229 1072229 claude
+  1072274 1072229 1072229 sleep
+leader PATH: /tmp/fm-live-relaunch.x6pN3t/leader-bin:/usr/bin:/bin
+child  PATH: /tmp/fm-live-relaunch.x6pN3t/child-bin:/usr/bin:/bin
+pane shell PATH: /tmp/fm-live-relaunch.x6pN3t/leader-bin:/usr/bin:/bin; pane shell HOME: /tmp/fm-live-relaunch.x6pN3t/user-home
+pane state before: alive; pane cwd before: /tmp/fm-live-relaunch.x6pN3t/wt
+project lock held before relaunch by pid 1072396
+$ bin/fm-control.sh lab1 relaunch --harness codex --note 'Live lab relaunch.'
+error: another Treehouse slot allocation or return is in progress for /tmp/fm-live-relaunch.x6pN3t/proj; refusing to race it
+error: replacement preparation for lab1 failed; the previous agent was not stopped. Inspect with bin/fm-crew-state.sh lab1
+error: relaunch of lab1 was refused before its agent was touched; its record and instructions were preserved
+exit code: 1
+-- after --
+pane state after: alive; pane cwd after: /tmp/fm-live-relaunch.x6pN3t/wt
+old agent: STILL RUNNING
+replacement launched: NONE
+project lock after: present (pid 1072396)
+recorded harness after: claude
+pane screen (last lines):
+  | bash-5.3$ LAB_CHILD_PATH='/tmp/fm-live-relaunch.x6pN3t/child-bin:/usr/bin:/bin' '/tmp/fm-live-relaunch.x6pN3t/agentbin/claude' '/tmp/fm-live-relaunch.x6pN3t/agent.py' '/tmp/fm-live-relaunch.x6pN3t'

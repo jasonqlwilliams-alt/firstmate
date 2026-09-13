@@ -1,0 +1,96 @@
+ok - real herdr: exit on a pane with no registered agent is idempotent success
+ok - real herdr 0.9.0: a gone session reads recoverable while a live pane and a malformed target do not
+warning: /tmp/fm-control-herdr.TId6gM/home/data/hsmoke/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+# evidence begin: real Herdr exited-shell recovery
+$ bin/fm-spawn.sh hsmoke --relaunch --harness codex
+spawned hsmoke harness=codex kind=ship mode=no-mistakes yolo=off window=fm-lab-control-smoke-722379:w1:p2 worktree=/tmp/fm-control-herdr.TId6gM/wt
+pane cwd=/tmp/fm-control-herdr.TId6gM/wt
+saved task metadata:
+window=fm-lab-control-smoke-722379:w1:p2
+endpoint_task_id=hsmoke
+worktree=/tmp/fm-control-herdr.TId6gM/wt
+project=/tmp/fm-control-herdr.TId6gM/proj
+harness=codex
+kind=ship
+mode=no-mistakes
+yolo=off
+tasktmp=/tmp/fm-hsmoke
+model=default
+effort=default
+spawn_gen=s1789318173.723179.24736
+backend=herdr
+herdr_session=fm-lab-control-smoke-722379
+herdr_workspace_id=w1
+herdr_tab_id=w1:t2
+herdr_pane_id=w1:p2
+actual pane output:
+[jason@Lights wt]$ export PATH=/tmp/fm-control-herdr.TId6gM/fakebin:$PATH
+[jason@Lights wt]$ cd -- /tmp/fm-control-herdr.TId6gM/proj
+[jason@Lights proj]$ cd -- '/tmp/fm-control-herdr.TId6gM/wt'
+[jason@Lights wt]$ printf '%s\n%s\n' "$PATH" "$HOME" > '/tmp/fm-control-herdr.TId6gM/home/state/.hsmoke.relaunch-path.Oe
+E0KRZs'
+[jason@Lights wt]$ export GOTMPDIR=/tmp/fm-hsmoke/gotmp
+[jason@Lights wt]$ export FM_TASK_ID=hsmoke
+[jason@Lights wt]$ unset TRACEPARENT; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI '/tmp/fm-control-herdr.TId6
+gM/fakebin/codex' --dangerously-bypass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch '/tmp/fm-control-herdr.
+TId6gM/home/state/hsmoke.turn-ended'\"]" "$('/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2DPX9WYSYV8N9CRFCNRVDRH/
+bin/fm-operational-input.sh' encode launch-brief < '/tmp/fm-control-herdr.TId6gM/home/data/hsmoke/launch-brief.md')"
+[jason@Lights wt]$
+# evidence end
+ok - real herdr: a drifted agent-free shell returns to its worktree and reuses the same endpoint
+ok - real herdr: interrupt refuses when herdr's own agent registry reports no agent
+ok - real herdr: interrupt delivers the harness's key and proves the agent survived it
+ok - real herdr: no control verb removed the endpoint or the task's local copy
+ok - real herdr 0.9.0: a registration Herdr keeps after its agent exits reads stale-agent and recovers as dead
+ok - real herdr: exit on a pane with a stale registration is idempotent success
+warning: /tmp/fm-control-herdr.TId6gM/home/data/hsmoke/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+# evidence begin: real Herdr stale-registration recovery
+$ bin/fm-spawn.sh hsmoke --relaunch --harness codex
+spawned hsmoke harness=codex kind=ship mode=no-mistakes yolo=off window=fm-lab-control-smoke-722379:w1:p2 worktree=/tmp/fm-control-herdr.TId6gM/wt
+pane cwd=/tmp/fm-control-herdr.TId6gM/wt
+saved task metadata:
+window=fm-lab-control-smoke-722379:w1:p2
+endpoint_task_id=hsmoke
+worktree=/tmp/fm-control-herdr.TId6gM/wt
+project=/tmp/fm-control-herdr.TId6gM/proj
+harness=codex
+kind=ship
+mode=no-mistakes
+yolo=off
+tasktmp=/tmp/fm-hsmoke
+model=default
+effort=default
+spawn_gen=s1789318177.733908.8923
+backend=herdr
+herdr_session=fm-lab-control-smoke-722379
+herdr_workspace_id=w1
+herdr_tab_id=w1:t2
+herdr_pane_id=w1:p2
+actual pane output:
+[jason@Lights wt]$ export PATH=/tmp/fm-control-herdr.TId6gM/fakebin:$PATH
+[jason@Lights wt]$ cd -- /tmp/fm-control-herdr.TId6gM/proj
+[jason@Lights proj]$ cd -- '/tmp/fm-control-herdr.TId6gM/wt'
+[jason@Lights wt]$ printf '%s\n%s\n' "$PATH" "$HOME" > '/tmp/fm-control-herdr.TId6gM/home/state/.hsmoke.relaunch-path.Oe
+E0KRZs'
+[jason@Lights wt]$ export GOTMPDIR=/tmp/fm-hsmoke/gotmp
+[jason@Lights wt]$ export FM_TASK_ID=hsmoke
+[jason@Lights wt]$ unset TRACEPARENT; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI '/tmp/fm-control-herdr.TId6
+gM/fakebin/codex' --dangerously-bypass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch '/tmp/fm-control-herdr.
+TId6gM/home/state/hsmoke.turn-ended'\"]" "$('/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2DPX9WYSYV8N9CRFCNRVDRH/
+bin/fm-operational-input.sh' encode launch-brief < '/tmp/fm-control-herdr.TId6gM/home/data/hsmoke/launch-brief.md')"
+[jason@Lights wt]$ /tmp/fm-control-herdr.TId6gM/agentbin/claude 900
+^[Terminated                 /tmp/fm-control-herdr.TId6gM/agentbin/claude 900
+[jason@Lights wt]$ ^C
+[jason@Lights wt]$ printf '%s\n%s\n' "$PATH" "$HOME" > '/tmp/fm-control-herdr.TId6gM/home/state/.hsmoke.relaunch-path.7w
+IhTY51'
+[jason@Lights wt]$ export GOTMPDIR=/tmp/fm-hsmoke/gotmp
+[jason@Lights wt]$ export FM_TASK_ID=hsmoke
+[jason@Lights wt]$ unset TRACEPARENT; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI '/tmp/fm-control-herdr.TId6
+gM/fakebin/codex' --dangerously-bypass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch '/tmp/fm-control-herdr.
+TId6gM/home/state/hsmoke.turn-ended'\"]" "$('/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2DPX9WYSYV8N9CRFCNRVDRH/
+bin/fm-operational-input.sh' encode launch-brief < '/tmp/fm-control-herdr.TId6gM/home/data/hsmoke/launch-brief.md')"
+[jason@Lights wt]$
+# evidence end
+ok - real herdr: a stale registration no longer blocks relaunch, and the endpoint and local copy survive
+ok - real herdr: an agent that does not stop fails closed instead of being reported as stopped
+rc=0

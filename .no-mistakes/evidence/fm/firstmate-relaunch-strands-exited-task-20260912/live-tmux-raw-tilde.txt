@@ -1,0 +1,22 @@
+== live tmux relaunch lab: scenario=raw-tilde root=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2DPX9WYSYV8N9CRFCNRVDRH
+tmux: tmux 3.7c socket=-L fm-lab-relaunch-997291
+recorded worktree: /tmp/fm-live-relaunch.gGLA5y/wt
+pane shell PATH: /tmp/fm-live-relaunch.gGLA5y/leader-bin:/usr/bin:/bin; pane shell HOME: /tmp/fm-live-relaunch.gGLA5y/user-home
+pane state before: dead; pane cwd before: /tmp/fm-live-relaunch.gGLA5y/parent
+$ bin/fm-spawn.sh lab1 --relaunch --harness '~/lab-bin/codex --lab-flag'
+(fm-spawn runs with HOME=/tmp/fm-live-relaunch.gGLA5y/spawn-home; the pane shell HOME is /tmp/fm-live-relaunch.gGLA5y/user-home)
+warning: /tmp/fm-live-relaunch.gGLA5y/home/data/lab1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+spawned lab1 harness=codex kind=ship mode=no-mistakes yolo=off window=fmlab:fm-lab1 worktree=/tmp/fm-live-relaunch.gGLA5y/wt
+exit code: 0
+-- after --
+pane state after: alive; pane cwd after: /tmp/fm-live-relaunch.gGLA5y/wt
+replacement launched: tilde cwd=/tmp/fm-live-relaunch.gGLA5y/wt argc=1
+project lock after: released
+recorded harness after: codex
+pane screen (last lines):
+  | bash-5.3$ ( cd '/tmp/fm-live-relaunch.gGLA5y/wt' && exec '/tmp/fm-live-relaunch.gGLA5y/agentbin/claude' -c 'pass' )
+  | bash-5.3$ cd -- '/tmp/fm-live-relaunch.gGLA5y/wt'
+  | bash-5.3$ printf '%s\n%s\n' "$PATH" "$HOME" > '/tmp/fm-live-relaunch.gGLA5y/home/state/.lab1.relaunch-path.9PEYNzhL'
+  | bash-5.3$ export GOTMPDIR=/tmp/fm-lab1/gotmp
+  | bash-5.3$ export FM_TASK_ID=lab1
+  | bash-5.3$ unset TRACEPARENT; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI '/tmp/fm-live-relaunch.gGLA5y/user-home/lab-bin/codex' --lab-flag

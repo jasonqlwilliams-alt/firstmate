@@ -1,0 +1,28 @@
+== live tmux relaunch lab: scenario=pool-mine-live root=/tmp/fm-lab-base
+tmux: tmux 3.7c socket=-L fm-lab-relaunch-1078198
+recorded worktree: /tmp/fm-live-relaunch.ovr3dX/pool/1/proj
+old agent pid: 1080034
+pane shell PATH: /tmp/fm-live-relaunch.ovr3dX/leader-bin:/usr/bin:/bin; pane shell HOME: /tmp/fm-live-relaunch.ovr3dX/user-home
+pane state before: alive; pane cwd before: /tmp/fm-live-relaunch.ovr3dX/pool/1/proj
+slot claim before: task=lab1 home=/tmp/fm-live-relaunch.ovr3dX/home 
+$ bin/fm-control.sh lab1 relaunch --harness codex --note 'Live lab relaunch.'
+warning: /tmp/fm-live-relaunch.ovr3dX/home/data/lab1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched lab1 harness=codex from=claude model=default effort=default backend=tmux endpoint=fmlab:fm-lab1 worktree=/tmp/fm-live-relaunch.ovr3dX/pool/1/proj
+exit code: 0
+-- after --
+pane state after: alive; pane cwd after: /tmp/fm-live-relaunch.ovr3dX/pool/1/proj
+old agent: stopped
+replacement launched: leader cwd=/tmp/fm-live-relaunch.ovr3dX/pool/1/proj argc=4
+project lock observed while the old agent was stopping: held-by-pid=1082936
+project lock after: released
+slot claim after: task=lab1 home=/tmp/fm-live-relaunch.ovr3dX/home 
+recorded harness after: codex
+pane screen (last lines):
+  | bash-5.3$ ( cd '/tmp/fm-live-relaunch.ovr3dX/pool/1/proj' && LAB_EXIT_HOOK='/tmp/fm-live-relaunch.ovr3dX/exit-hook.sh' exec '/tmp/fm-live-relaunch.ovr3dX/agentbin/claude' '/tmp/fm-live-relaunch.ovr3dX/agent.py' '/tmp/fm-
+  | live-relaunch.ovr3dX' )
+  | /exit
+  | bash-5.3$ cd -- '/tmp/fm-live-relaunch.ovr3dX/pool/1/proj'
+  | bash-5.3$ export GOTMPDIR=/tmp/fm-lab1/gotmp
+  | bash-5.3$ export FM_TASK_ID=lab1
+  | bash-5.3$ unset TRACEPARENT; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI '/tmp/fm-live-relaunch.ovr3dX/leader-bin/codex' --dangerously-bypass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch '/tmp/fm-
+  | live-relaunch.ovr3dX/home/state/lab1.turn-ended'\"]" "$('/tmp/fm-lab-base/bin/fm-operational-input.sh' encode launch-brief < '/tmp/fm-live-relaunch.ovr3dX/home/data/lab1/launch-brief.md')"

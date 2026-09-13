@@ -1,0 +1,23 @@
+== live tmux relaunch lab: scenario=exited-noclobber root=/tmp/fm-lab-base
+tmux: tmux 3.7c socket=-L fm-lab-relaunch-1227983
+recorded worktree: /tmp/fm-live-relaunch.Tw2TvA/wt
+pane shell PATH: /tmp/fm-live-relaunch.Tw2TvA/leader-bin:/usr/bin:/bin; pane shell HOME: /tmp/fm-live-relaunch.Tw2TvA/user-home
+pane state before: dead; pane cwd before: /tmp/fm-live-relaunch.Tw2TvA/parent
+$ bin/fm-control.sh lab1 relaunch --harness codex --note 'Live lab relaunch.'
+warning: /tmp/fm-live-relaunch.Tw2TvA/home/data/lab1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: could not read the pane PATH; refusing relaunch before stop
+error: replacement preparation for lab1 failed; the previous agent was not stopped. Inspect with bin/fm-crew-state.sh lab1
+error: relaunch of lab1 was refused before its agent was touched; its record and instructions were preserved
+exit code: 1
+-- after --
+pane state after: dead; pane cwd after: /tmp/fm-live-relaunch.Tw2TvA/wt
+replacement launched: NONE
+project lock after: released
+recorded harness after: claude
+pane screen (last lines):
+  | bash-5.3$ set -o noclobber
+  | bash-5.3$ ( cd '/tmp/fm-live-relaunch.Tw2TvA/wt' && exec '/tmp/fm-live-relaunch.Tw2TvA/agentbin/claude' -c 'pass' )
+  | bash-5.3$ cd -- '/tmp/fm-live-relaunch.Tw2TvA/wt'
+  | bash-5.3$ printf '%s\n' "$PATH" > '/tmp/fm-live-relaunch.Tw2TvA/home/state/.lab1.relaunch-path.ZFqy1j6k'
+  | bash: /tmp/fm-live-relaunch.Tw2TvA/home/state/.lab1.relaunch-path.ZFqy1j6k: cannot overwrite existing file
+  | bash-5.3$

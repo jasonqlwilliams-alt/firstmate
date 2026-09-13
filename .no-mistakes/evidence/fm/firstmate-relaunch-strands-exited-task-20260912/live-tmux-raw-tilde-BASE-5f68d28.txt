@@ -1,0 +1,20 @@
+== live tmux relaunch lab: scenario=raw-tilde root=/tmp/fm-lab-base
+tmux: tmux 3.7c socket=-L fm-lab-relaunch-1239026
+recorded worktree: /tmp/fm-live-relaunch.0qtjFw/wt
+pane shell PATH: /tmp/fm-live-relaunch.0qtjFw/leader-bin:/usr/bin:/bin; pane shell HOME: /tmp/fm-live-relaunch.0qtjFw/user-home
+pane state before: dead; pane cwd before: /tmp/fm-live-relaunch.0qtjFw/parent
+$ bin/fm-spawn.sh lab1 --relaunch --harness '~/lab-bin/codex --lab-flag'
+(fm-spawn runs with HOME=/tmp/fm-live-relaunch.0qtjFw/spawn-home; the pane shell HOME is /tmp/fm-live-relaunch.0qtjFw/user-home)
+warning: /tmp/fm-live-relaunch.0qtjFw/home/data/lab1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: raw launch executable '~/lab-bin/codex' is unavailable on the pane PATH; refusing relaunch before stop
+exit code: 1
+-- after --
+pane state after: dead; pane cwd after: /tmp/fm-live-relaunch.0qtjFw/wt
+replacement launched: NONE
+project lock after: released
+recorded harness after: claude
+pane screen (last lines):
+  | bash-5.3$ ( cd '/tmp/fm-live-relaunch.0qtjFw/wt' && exec '/tmp/fm-live-relaunch.0qtjFw/agentbin/claude' -c 'pass' )
+  | bash-5.3$ cd -- '/tmp/fm-live-relaunch.0qtjFw/wt'
+  | bash-5.3$ printf '%s\n' "$PATH" > '/tmp/fm-live-relaunch.0qtjFw/home/state/.lab1.relaunch-path.tcmQGwwB'
+  | bash-5.3$

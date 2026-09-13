@@ -1,0 +1,29 @@
+== live Herdr relaunch lab (live agent + same-group child) root=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2DPX9WYSYV8N9CRFCNRVDRH
+herdr: herdr 0.9.0 session=fm-lab-relaunch-leader-target-1166238 pane=w1:p2
+recorded worktree: /tmp/fm-live-herdr-relaunch.5lkJzZ/wt
+agent state before: alive
+herdr pane process-info foreground_processes (pid name) with kernel pgid:
+  pid=1167538 name=claude pgid=1167538 PATH=/tmp/fm-live-herdr-relaunch.5lkJzZ/leader-bin:/usr/bin:/bin
+  pid=1167580 name=sleep pgid=1167538 PATH=/tmp/fm-live-herdr-relaunch.5lkJzZ/child-bin:/usr/bin:/bin
+child pid (from the stand-in): 1167580 pgid=1167538 PATH=/tmp/fm-live-herdr-relaunch.5lkJzZ/child-bin:/usr/bin:/bin
+pane cwd before: /tmp/fm-live-herdr-relaunch.5lkJzZ/wt
+$ bin/fm-control.sh hlab relaunch --harness codex --note 'Live Herdr lab relaunch.'
+warning: /tmp/fm-live-herdr-relaunch.5lkJzZ/home/data/hlab/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched hlab harness=codex from=claude model=default effort=default backend=herdr endpoint=fm-lab-relaunch-leader-target-1166238:w1:p2 worktree=/tmp/fm-live-herdr-relaunch.5lkJzZ/wt
+exit code: 0
+-- after --
+agent state after: alive
+pane cwd after: /tmp/fm-live-herdr-relaunch.5lkJzZ/wt
+old agent: stopped
+replacement launched: leader cwd=/tmp/fm-live-herdr-relaunch.5lkJzZ/wt argc=4
+recorded harness after: codex
+endpoint reused: yes (w1:p2)
+pane screen (last lines):
+  | /exit
+  | bash-5.3$ export GOTMPDIR=/tmp/fm-hlab/gotmp
+  | bash-5.3$ export FM_TASK_ID=hlab
+  | bash-5.3$ unset TRACEPARENT; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI '/tmp/fm-live-herdr-relaunch.5lkJzZ/
+  | leader-bin/codex' --dangerously-bypass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch '/tmp/fm-live-herdr-rel
+  | aunch.5lkJzZ/home/state/hlab.turn-ended'\"]" "$('/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2DPX9WYSYV8N9CRFCNRV
+  | DRH/bin/fm-operational-input.sh' encode launch-brief < '/tmp/fm-live-herdr-relaunch.5lkJzZ/home/data/hlab/launch-brief.m
+  | d')"

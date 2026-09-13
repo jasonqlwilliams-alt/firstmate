@@ -1,0 +1,26 @@
+== live tmux relaunch lab: scenario=pool-stolen root=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2DPX9WYSYV8N9CRFCNRVDRH
+tmux: tmux 3.7c socket=-L fm-lab-relaunch-1019305
+recorded worktree: /tmp/fm-live-relaunch.Gpcmip/pool/1/proj
+old agent pid: 1020289
+pane shell PATH: /tmp/fm-live-relaunch.Gpcmip/leader-bin:/usr/bin:/bin; pane shell HOME: /tmp/fm-live-relaunch.Gpcmip/user-home
+pane state before: alive; pane cwd before: /tmp/fm-live-relaunch.Gpcmip/pool/1/proj
+slot claim before: task=lab1 home=/tmp/fm-live-relaunch.Gpcmip/home 
+$ bin/fm-control.sh lab1 relaunch --harness codex --note 'Live lab relaunch.'
+warning: /tmp/fm-live-relaunch.Gpcmip/home/data/lab1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: recorded Treehouse slot /tmp/fm-live-relaunch.Gpcmip/pool/1/proj is not owned by task lab1 (claim: other, owner: successor); refusing relaunch after stop; the slot was reassigned while its agent was stopped
+error: the replacement agent for lab1 could not be launched on codex
+error: lab1's agent was stopped but the replacement did not launch; no agent is running, and its work plus the recorded progress note are preserved at /tmp/fm-live-relaunch.Gpcmip/pool/1/proj
+exit code: 1
+-- after --
+pane state after: dead; pane cwd after: /tmp/fm-live-relaunch.Gpcmip/parent
+old agent: stopped
+replacement launched: NONE
+project lock observed while the old agent was stopping: successor-claimed-under-lock
+project lock after: released
+slot claim after: task=successor home=/tmp/fm-live-relaunch.Gpcmip/home 
+recorded harness after: claude
+pane screen (last lines):
+  | bash-5.3$ ( cd '/tmp/fm-live-relaunch.Gpcmip/pool/1/proj' && LAB_EXIT_HOOK='/tmp/fm-live-relaunch.Gpcmip/exit-hook.sh' exec '/tmp/fm-live-relaunch.Gpcmip/agentbin/claude' '/tmp/fm-live-relaunch.Gpcmip/agent.py' '/tmp/fm-
+  | live-relaunch.Gpcmip' )
+  | /exit
+  | bash-5.3$
