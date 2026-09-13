@@ -1,0 +1,393 @@
+FM_TEST_BEGIN 2026-09-13T00:07:45Z tests/fm-pr-merge.test.sh family=pr-forge expected_gate_skip=none
+ok - fm-pr-merge reports exact queue retry flags after a zero-exit false success
+ok - fm-pr-merge omits merge-queue retry guidance for a closed GitHub PR
+ok - fm-pr-merge aggregates agreeing merge-queue rules
+ok - fm-pr-merge reports ambiguity for conflicting merge-queue rules
+ok - fm-pr-merge records pr= and pr_head= for a verified GitHub merge
+ok - fm-pr-merge authorizes through the delivery guard only when a policy is configured
+ok - fm-pr-merge records pr= before the forge call can land the merge
+ok - fm-pr-merge propagates a real merge failure without silently succeeding
+ok - fm-pr-merge refuses a GitHub merge call that leaves the PR open and unqueued
+ok - fm-pr-merge keeps PR bookkeeping when it cannot read a successful merge call's outcome
+ok - fm-pr-merge refuses with the forge's own output quoted apart from its verdict
+ok - fm-pr-merge quotes the forge output when it cannot read the outcome either
+ok - fm-pr-merge does not echo back queue flags the caller already used
+ok - fm-pr-merge still names retry flags when the caller used a different method
+ok - fm-pr-merge names the queue requirement even when its method is unrecognised
+ok - fm-pr-merge distinguishes unreadable branch rules from a base with no merge queue
+ok - fm-pr-merge says nothing about a merge queue when the base branch has no queue rule
+ok - fm-pr-merge accepts only a proved merge from the gh-axi fallback
+ok - fm-pr-merge explains an armed auto-merge that landed nothing on a queue-less base
+ok - fm-pr-merge never reports auto-merge as armed when the merge command failed
+ok - fm-pr-merge claims no acceptance for a failed merge command carrying queue flags
+ok - fm-pr-merge falls back to the gh-axi view when gh's read fails
+ok - fm-pr-merge names a landed state hiding behind a failed GitHub merge command
+ok - fm-pr-merge refuses a GitHub merge when gh is missing, before recording
+ok - fm-pr-merge refuses a GitHub merge when gh is missing rather than merging blind
+ok - fm-pr-merge verifies a genuinely merged GitHub pull request
+ok - fm-pr-merge refuses to claim a merge when poll recording fails
+ok - fm-pr-merge accepts and accurately reports a GitHub merge-queue entry
+ok - fm-pr-merge explains how to retry with the required GitHub merge queue method
+ok - fm-pr-merge refuses branch deletion unless --attended-override is passed
+ok - fm-pr-merge refuses before merging when task meta is missing
+ok - fm-pr-merge refuses malformed PR URLs before calling gh-axi
+ok - fm-pr-merge refuses unsafe PR URL segments before recording state
+ok - fm-pr-merge refuses repo override args before recording state
+ok - fm-pr-merge refuses a bundled short-option repo override and refuses -d unless attended
+ok - fm-pr-merge does not add default --squash when the caller passes an explicit merge method
+ok - fm-pr-merge respects --method=<value> as an explicit merge method
+ok - fm-pr-merge parses a GitHub PR URL into gh-axi number and --repo arguments
+ok - fm-pr-merge refuses a caller --sha on GitHub because the head comes from the live read
+ok - fm-pr-merge merges a GitLab merge request through glab instead of refusing it
+ok - fm-pr-merge takes the GitLab instance from the URL rather than assuming one
+ok - fm-pr-merge imposes no merge method on GitLab, leaving the project's own one
+ok - fm-pr-merge refuses GitLab source-branch deletion unless --attended-override is passed
+ok - fm-pr-merge propagates a real glab merge failure without silently succeeding
+ok - fm-pr-merge refuses on each GitLab pre-merge condition independently
+ok - fm-pr-merge reports every failing GitLab condition, not only the first
+ok - fm-pr-merge reports a stale recorded head and verifies the live one
+ok - fm-pr-merge refuses an unreadable GitLab merge request state rather than merging blind
+ok - fm-pr-merge refuses a GitLab head commit it cannot validate
+ok - fm-pr-merge refuses before recording anything when glab or jq is absent
+ok - fm-pr-merge refuses a GitLab head override before recording state
+ok - a merge a secondmate home performs itself is reported upward exactly once
+ok - a locally routed secondmate home reports the landed PR into its parent's own channel
+ok - a landed GitLab merge request is reported upward on the same channel
+ok - a queued GitLab merge stays silent and leaves confirmation to the armed poll
+ok - a refused or failed merge reports no outcome
+ok - a GitLab merge refused before the forge call reports no outcome
+ok - a merge a main home performs itself leaves one durable wake naming the PR
+ok - a queued GitHub merge stays silent and leaves confirmation to the armed poll
+ok - distinct merged PRs for one task retain distinct captain-facing wakes
+ok - an uncommitted marker retry preserves at least one durable outcome
+ok - a secondmate home that cannot report upward says so instead of merging in silence
+ok - fm-pr-merge proceeds when the home carries no backlog at all
+ok - fm-pr-merge refuses when the backlog exists but cannot be read
+ok - fm-pr-merge refuses when its configured backend cannot be read
+ok - fm-pr-merge refuses when its user backend configuration cannot be read
+ok - fm-pr-merge refuses when its user backend configuration directory cannot be traversed
+ok - fm-pr-merge proceeds once when its user configuration directory and backlog are genuinely absent
+ok - fm-pr-merge honors a backend override over an unreadable user configuration
+ok - fm-pr-merge refuses red GitHub checks and waives only a named --allow-red check
+ok - fm-pr-merge rechecks away presence before an attended red merge
+ok - fm-pr-merge accepts exactly one separately named red-check waiver
+ok - away merges require yolo or a grant, and --attended-override does not skip that
+ok - a grant does not bypass red checks, and a recorded pr= must match the URL
+ok - an unreadable away-posture record refuses the merge instead of skipping the grant
+ok - fm-pr-merge refuses --allow-red on GitLab
+FM_TEST_END 2026-09-13T00:10:38Z tests/fm-pr-merge.test.sh exit=0 duration_ms=172804 gate_skip=false
+FM_TEST_BEGIN 2026-09-13T00:10:38Z tests/fm-watcher-lock.test.sh family=watcher-wake-lock expected_gate_skip=none
+FM_TEST_BEGIN 2026-09-13T00:10:38Z tests/fm-watch-arm.test.sh family=watcher-wake-lock expected_gate_skip=none
+FM_TEST_BEGIN 2026-09-13T00:10:38Z tests/fm-watch-recovery-loop.test.sh family=watcher-wake-lock expected_gate_skip=none
+FM_TEST_BEGIN 2026-09-13T00:10:38Z tests/fm-watch-checkpoint.test.sh family=watcher-wake-lock expected_gate_skip=none
+ok - quiet checkpoint exits 124 with a clean checkpoint line and no live lock
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 3610987.1789258242.FT7ipM
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  Pending wakes or captain inbox notes need supervision, but no live watcher process holds this home lock (last beat: 3s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  After draining queued wakes, use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+ok - checkpoint passes through a real watcher wake and leaves the queue for drain
+ok - checkpoint preserves watcher environment for registered custom checks
+ok - checkpoint rejects an existing watcher singleton as unowned
+ok - foreground wake is durable, caller owns its successor, and pending recovery does not falsify live health
+FM_TEST_END 2026-09-13T00:10:54Z tests/fm-watch-checkpoint.test.sh exit=0 duration_ms=15601 gate_skip=false
+ok - a resurfacing handling successor stays alive and supervises instead of going blind
+ok - unacknowledged recovery is announced at most once per generation and the successor stays alive
+FM_TEST_END 2026-09-13T00:11:39Z tests/fm-watch-recovery-loop.test.sh exit=0 duration_ms=60781 gate_skip=false
+ok - simultaneous watcher starts leave exactly one live process
+ok - fm_pid_identity real ps fallback is locale-invariant
+ok - fm_pid_identity is locale-invariant across LC_ALL/LC_TIME
+ok - /proc process identity ignores simulated btime changes
+ok - /proc process identity detects pid reuse
+ok - MSYS /proc process identity regression skipped on non-Windows host
+ok - killed watcher stale lock is reclaimed
+tests/fm-watcher-lock.test.sh: line 1065: 3604896 Killed                     FM_STATE_OVERRIDE="$state" bash -c '
+    . "$1"
+    fm_lock_remove_path() {
+      if [ "$1" = "$STATE/.watch.lock" ]; then
+        kill -KILL "${BASHPID:-$$}"
+      fi
+      return 1
+    }
+    fm_lock_try_acquire "$2"
+  ' _ "$LIB" "$lockdir" > /dev/null 2>&1
+ok - stale watcher reclaim publishes durable recovery evidence before clear
+ok - live watcher lock with stale heartbeat is actionable
+ok - guard banner leads when down with pending wakes (repair-after-drain) and stays silent when live and fresh
+ok - concurrent fm_lock_try_acquire yields exactly one winner
+ok - dead-pid stale lock is reclaimed by a single acquirer
+ok - concurrent stale-lock steal yields exactly one winner
+ok - live steal mutex is not reclaimed
+ok - live-held lock is not stolen
+ok - empty mid-acquire lock keeps a minimum grace
+ok - failed lock age preserves the mid-acquire owner and recovers when reads resume
+ok - late original claimant cannot claim a recreated lock
+ok - paused mid-acquire claimant backs off to active stealer
+ok - watch restart preserves recovery without signaling a reused pid
+ok - watch restart attaches to a verified healthy peer and later surfaces a successor gap
+ok - watcher self-evicts when the lock pid no longer names it
+ok - arm turns clean self-eviction without a successor into a typed failure
+ok - arm attaches to a live fresh watcher and fails loudly when that cycle has no successor
+ok - attached arm signals record a classified lifecycle entry
+ok - arm starts cleanly and resurfaces recovery after a dead-pid lock
+ok - arm cleans child watcher and temp output on HUP
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 3652689.1789258276.qhXGbn
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 registered custom check(s), but no live watcher process holds this home lock (last beat: 2s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  After draining queued wakes, use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+ok - arm propagates an immediate watcher wake before confirmation
+ok - arm attaches to a peer watcher after child stands down and surfaces a missing successor
+watcher: lock held by live pid 3668499 but heartbeat is stale for 842544689s (>300s); inspect or stop that watcher before re-arming.
+ok - arm reports FAILED and exits non-zero when no fresh watcher can be confirmed
+ok - cycle-exit ledger links a verified successor and remains size-capped
+ok - SIGSTOP distinguishes live PID from stale beacon and termination records the exit class
+FM_TEST_END 2026-09-13T00:11:44Z tests/fm-watcher-lock.test.sh exit=0 duration_ms=65744 gate_skip=false
+ok - watch-arm: an attached arm reports the wake its cycle delivered instead of a false failure
+ok - watch-arm: a delivered wake consumed by the handling turn still closes the attached arm cleanly
+ok - watch-arm: an unusable launch confirm window refuses to arm by name
+ok - watch-arm: a cycle that delivered no wake of its own still fails loudly
+/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/bin/fm-watch-arm.sh: line 566: 3626845 Killed                     "$WATCH" > "$child_out"
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 3628090.1789258257.mPWdYg
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  Pending wakes or captain inbox notes need supervision, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  After draining queued wakes, use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+ok - watch-arm: re-arm surfaces every queued wake and an open remote decision after downtime
+watcher: recovery state could not be persisted; retaining stale lock evidence
+ok - watch-arm: marker publication failure retains stale-lock recovery evidence
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 3640172.1789258269.r7OEZJ
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  Pending wakes or captain inbox notes need supervision, but no live watcher process holds this home lock (last beat: 2s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  After draining queued wakes, use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 3643688.1789258271.eQBpmv
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+ok - watch-arm: a wake queued after handling drain is recovered once at successor arm
+ok - watch-arm: interrupted handling leaves its wake durable for successor re-drain
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 3659670.1789258282.riAmde
+ok - watch-arm: malformed recovery state is quarantined without a successor loop
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 3662586.1789258285.MHnUxk
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  Pending wakes or captain inbox notes need supervision, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  After draining queued wakes, use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+ok - watch-arm: publication after recovery handoff is surfaced
+ok - watch-arm: restart publishes recovery before clearing a reused-pid watcher lock
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 7 --recovery-generation 3667490.1789258288.PyRQ4C
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  Pending wakes or captain inbox notes need supervision, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  After draining queued wakes, use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+ok - watch-arm: markerless legacy queues are adopted and recovered
+ok - watch-arm: a watcher close during handling keeps the printed acknowledgement valid
+ok - watch-arm: a moved recovery generation consumes handled rows and names its remedy
+ok - watch-arm: downtime marker publication does not follow symlinks
+FM_TEST_END 2026-09-13T00:11:48Z tests/fm-watch-arm.test.sh exit=0 duration_ms=69720 gate_skip=false
+FM_TEST_BEGIN 2026-09-13T00:11:48Z tests/fm-pr-check-security.test.sh family=pr-forge expected_gate_skip=none
+ok - control-plane trailing metadata preserves armed polls while unknown lines and PR tampering fail closed
+ok - raw-byte parser accepts canonical URLs and rejects the complete adversarial matrix
+ok - GitLab merge requests are followed on any instance and never wake falsely
+ok - validated merged polls notify once and retire before the next watcher cycle
+ok - a repeat identical merged poll for an already-notified task is absorbed, never queued as a main-blocking row
+ok - a failed upward merge report keeps its poll armed for repair and retry
+ok - staged self-merge and poll interleavings are never silent
+ok - a merge detected by the poll is reported upward from a secondmate home exactly once
+ok - a different merged PR for the same task gets its own first notification
+ok - merged poll retirement preserves every persistent secondmate lifecycle artifact
+ok - queue, receipt, and every fixed-path removal crash point recover without loss or repeated execution
+ok - open/red, closed-unmerged, malformed, and forge errors remain armed until an exact merged transition
+ok - replacement, nonterminal, tampered, and custom results receive no deletion authority
+ok - queue failure and untrusted receipts preserve canonical poll evidence
+ok - GitHub and GitLab exact merged results share one retirement path
+armed: state/task-a.check.sh
+promoted task-a to ship mode=direct-PR yolo=off (teardown protection restored)
+wrote ship instructions for mode=direct-PR: /tmp/fm-test-run.8SXV3h/w6/tmp/fm-pr-check-security.ZCVhbd/promotion-metadata/home/data/task-a/ship-instructions.md
+next: FM_HOME=/tmp/fm-test-run.8SXV3h/w6/tmp/fm-pr-check-security.ZCVhbd/promotion-metadata/home bin/fm-send.sh fm-task-a "$(cat /tmp/fm-test-run.8SXV3h/w6/tmp/fm-pr-check-security.ZCVhbd/promotion-metadata/home/data/task-a/ship-instructions.md)"
+window=firstmate:fm-task-a
+endpoint_task_id=task-a
+worktree=/tmp/fm-test-run.8SXV3h/w6/tmp/fm-pr-check-security.ZCVhbd/promotion-metadata/wt
+project=/tmp/fm-test-run.8SXV3h/w6/tmp/fm-pr-check-security.ZCVhbd/promotion-metadata/project
+pr=https://github.com/o/r/pull/37
+pr_head=0123456789abcdef0123456789abcdef01234567
+kind=ship
+mode=direct-PR
+yolo=off
+check: /tmp/fm-test-run.8SXV3h/w6/tmp/fm-pr-check-security.ZCVhbd/promotion-metadata/home/state/task-a.check.sh: merged
+1789258455	1	check	merged-task-a-https://github.com/o/r/pull/37	check: merge landed: task-a https://github.com/o/r/pull/37
+ok - scout promotion preserves the registered PR poll and its durable merge notification
+ok - PR and teardown entrypoints reject invalid arguments before every side effect
+ok - valid direct and merge flows record exact metadata and reject multiline head metadata
+ok - rejected metacharacter bytes remain inert at generation and watcher time
+ok - static poll is silent except for one merged line and remains watcher-bounded
+ok - interrupted atomic preparation cleans private temporaries and publishes nothing
+ok - concurrent watchers observe only complete private poll publications
+ok - poll publication paths refuse symlinks and directories
+ok - live poll and custom-check artifacts require private single-link files
+ok - post-rename poll validation faults revoke both names and allow a clean retry
+ok - bootstrap does not rewrite unauthenticated checks or emit retired migration diagnostics
+ok - watcher signals promptly stop custom checks and clean private state
+ok - returned custom check descendants are drained on installed and fallback timeout paths
+not ok - tests/fm-pr-check-security.test.sh exceeded the per-script bound of 300s and was terminated
+FM_TEST_END 2026-09-13T00:16:48Z tests/fm-pr-check-security.test.sh exit=124 duration_ms=300004 gate_skip=false
+FM_TEST_BEGIN 2026-09-13T00:16:48Z tests/fm-control.test.sh family=backend-dispatch expected_gate_skip=none
+ok - fm-control exit: every verified harness gets its own verified exit command
+ok - fm-control interrupt: every verified harness gets its own verified key and repeat count
+ok - fm-control interrupt: opencode needs a double Escape, claude a single one
+ok - fm-control: a harness with no verified control mechanics is refused, not guessed at
+ok - fm-control-lib: a recorded harness resolves to its verified adapter without guessing
+ok - fm-control: prefixed recorded harnesses reach interrupt and exit mechanics
+ok - fm-control-lib: the backend key matrix matches each adapter's real send-key surface
+ok - fm-control-lib: adapter capability is per task kind, not per adapter alone
+ok - fm-control interrupt: a backend that cannot deliver the harness's key refuses instead of sending another
+ok - fm-control: a backend that cannot prove an agent stopped refuses exit and relaunch
+ok - fm-control-lib: stop-proving verbs are gated on the backends that really classify agent state
+ok - fm-control: a legacy window label is refused and the exact task id is named
+ok - fm-control: an explicit backend endpoint is never a control target
+ok - fm-control: an unrecorded task id is refused
+ok - fm-control: a record whose endpoint identity names another task is refused
+ok - fm-control: a remotely placed secondmate is refused by placement, not by a metadata complaint
+ok - fm-control: interrupt and exit lock before task-state resolution
+ok - fm-control: the verb list is closed - no raw keys, arbitrary text, or clear verb
+ok - fm-control: resume is refused with the determinism reason and the alternative
+ok - fm-control: profile and note flags belong to relaunch only
+ok - fm-control exit: an already-stopped agent is idempotent success with no bytes sent
+ok - fm-control exit: a vanished endpoint refuses instead of silently succeeding
+ok - fm-control interrupt: refuses when no agent is running rather than keying a shell
+ok - fm-control exit: an endpoint whose process cannot be attributed refuses
+ok - fm-control exit: a busy agent receives interrupt delivery before the exit command
+ok - fm-control exit: an idle agent goes straight to its exit command
+ok - fm-control interrupt: unconfirmed delivery preserves observed busy state
+ok - fm-control interrupt: muse confirms cancellation from its session log
+ok - fm-control interrupt: postconditions are revalidated after acknowledgement polling
+ok - fm-control exit: an interrupt-stopped agent satisfies the gone-state postcondition
+ok - fm-control exit: a stubborn agent reports delivered input and an unconfirmed exit
+ok - fm-control interrupt: grok reports delivery without claiming cancellation
+ok - fm-control interrupt: grok's idle footer does not confirm cancellation
+ok - fm-control: a lifecycle command to a secondmate is unmarked and opens no reply expectation
+ok - fm-control's arrival leaves fm-send's from-firstmate marking untouched
+FM_TEST_END 2026-09-13T00:17:09Z tests/fm-control.test.sh exit=0 duration_ms=21202 gate_skip=false
+FM_TEST_BEGIN 2026-09-13T00:17:09Z tests/fm-control-relaunch.test.sh family=backend-dispatch expected_gate_skip=none
+BEGIN merge-poll relaunch trace=off
+armed: state/rl-merge.check.sh
+warning: /tmp/fm-control-relaunch.FhPybd/merge-poll-off-13041/home/data/rl-merge/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched rl-merge harness=claude from=claude model=default effort=default backend=tmux endpoint=fmses:fm-rl-merge worktree=/tmp/fm-control-relaunch.FhPybd/merge-poll-off-13041/wt
+Armed poll SHA-256 and device:inode bindings unchanged:
+check.sh e87aae384ec62ae28f78a0779020f52f7b891ba0cafea2551b5a2c4e967870cf 111:1775648
+pr-poll b533e16491cd6ab5453b06ceab03b3ffe6fd3f1eae5813cc72ef61e65ea1fc29 111:1775647
+pr-poll-registration 7f9b38741dd75c4bb3d660b029e96149edf6cac19894d0ef364a93a064afccd4 111:1775649
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=3903135.20260913T001710Z.1599
+check: /tmp/fm-control-relaunch.FhPybd/merge-poll-off-13041/home/state/rl-merge.check.sh: merged
+1789258635	1	check	merged-rl-merge-https://github.com/example/repo/pull/19	check: merge landed: rl-merge https://github.com/example/repo/pull/19
+END merge-poll relaunch trace=off
+BEGIN merge-poll relaunch trace=on
+armed: state/rl-merge.check.sh
+warning: /tmp/fm-control-relaunch.FhPybd/merge-poll-on-26947/home/data/rl-merge/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched rl-merge harness=claude from=claude model=default effort=default backend=tmux endpoint=fmses:fm-rl-merge worktree=/tmp/fm-control-relaunch.FhPybd/merge-poll-on-26947/wt
+Armed poll SHA-256 and device:inode bindings unchanged:
+check.sh e87aae384ec62ae28f78a0779020f52f7b891ba0cafea2551b5a2c4e967870cf 111:1775969
+pr-poll b533e16491cd6ab5453b06ceab03b3ffe6fd3f1eae5813cc72ef61e65ea1fc29 111:1775968
+pr-poll-registration d5de9f1413f0f06edd72a7e1672c7a4caabee3da3b9eceb964a7dd6face04d82 111:1775970
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=3910701.20260913T001718Z.11752
+traceparent=00-37142355206e708a95d1dace953e4773-9002d71ed6de595e-01
+check: /tmp/fm-control-relaunch.FhPybd/merge-poll-on-26947/home/state/rl-merge.check.sh: merged
+1789258642	1	check	merged-rl-merge-https://github.com/example/repo/pull/19	check: merge landed: rl-merge https://github.com/example/repo/pull/19
+END merge-poll relaunch trace=on
+ok - fm-control relaunch: registered PR polls retain their bindings and deliver durable merge wakes with tracing off and on
+ok - fm-control relaunch: checkpoint inspection failures refuse before stopping
+ok - fm-control relaunch: armed PATH exports real tools and checkpoint fixtures preserve shim delegates
+ok - fm-control relaunch: a same-harness relaunch replaces the agent in the same endpoint and worktree
+ok - fm-control relaunch: a linked spawning home preserves committed and unfinished work in the recorded copy
+ok - fm-control relaunch: durable task metadata survives replacement launch publication
+ok - fm-control relaunch: delivery and concurrent task metadata publication serialize
+ok - fm-control relaunch: disabling tracing clears metadata and pane context
+ok - fm-control relaunch: the progress note lands in the instructions the replacement reads
+ok - fm-control relaunch: a ship task refuses without the progress note its replacement needs
+ok - fm-control relaunch: switching harness is one ordinary relaunch, and the old wiring goes with the old agent
+ok - fm-control relaunch: a harness switch resets model and effort unless they are named too
+ok - fm-control relaunch: a prefixed recorded harness can switch adapters transactionally
+ok - fm-control relaunch: a prefixed command requires an explicit replacement harness
+ok - fm-control relaunch: a same-harness relaunch keeps the profile axes it was running with
+ok - native Ultra relaunch preserves its profile and rejects an unsupported model before stopping
+ok - fm-control relaunch: explicit model and effort win over the recorded ones
+ok - fm-control relaunch: refuses to relaunch onto an adapter with no verified mechanics
+ok - fm-control relaunch: the retired incarnation's global turn-end token is revoked
+ok - fm-control relaunch: wiring cleanup failure refuses replacement arming
+ok - fm-control-lib: one owner resolves each harness's turn-end registry entry, and refuses a malformed token
+ok - fm-control relaunch: a secondmate relaunch re-resolves its durable configured harness pin
+ok - fm-control relaunch: invalid configured effort is ignored before stop
+ok - fm-control relaunch: an adapter unverified for this task kind refuses before the agent is stopped
+ok - fm-control relaunch: explicit secondmate harness resets unnamed profile axes
+ok - fm-control relaunch: a ship task keeps its recorded harness instead of re-reading crew config
+ok - fm-spawn --relaunch: with no explicit harness it reuses the task's recorded one, never the crew default
+ok - fm-spawn --relaunch: wiring armed under a prefixed harness name is still retired
+ok - fm-spawn --relaunch: switching away from muse retires its session binding
+ok - fm-spawn --relaunch: switching away from cursor retires its session binding
+ok - fm-control relaunch: an unaccountable local copy refuses before the agent is touched
+ok - fm-control relaunch: a worker with nothing to work from is never launched
+ok - fm-control relaunch: a refusal before the agent is stopped leaves the durable record untouched
+ok - fm-control relaunch: checkpoint inspection failures refuse before stopping
+ok - fm-control relaunch: a launch failure after the stop keeps the prior record and reports the real state
+ok - fm-control relaunch: unpublished rollback keeps concurrent durable metadata
+ok - fm-control relaunch: post-publication failure keeps the new durable record
+ok - fm-control relaunch: partial stop reconciles actual agent state
+ok - fm-control relaunch: failed journal replacement preserves durable phase
+ok - fm-spawn relaunch: prepublication abort removes replacement state
+ok - fm-control relaunch: the checkpoint records the exact unlanded work it preserved
+ok - fm-control relaunch: a secondmate's child work is accounted for and its charter is left alone
+ok - fm-control relaunch: a secondmate home that is not this secondmate's is refused
+ok - fm-control relaunch: unreadable and untraversable child state fails checkpoint
+ok - fm-control relaunch: two control actions on one task serialize instead of interleaving
+ok - fm-spawn relaunch: direct entry participates in lifecycle serialization
+ok - fm-promote: promotion participates in lifecycle serialization
+ok - fm-spawn --relaunch: refuses to launch a second agent into a live endpoint
+ok - fm-spawn --relaunch: symlinked records refuse before inspection
+ok - fm-spawn --relaunch: keeps its early meta lock continuous
+ok - fm-spawn --relaunch: pending closes refuse before replacement begins
+ok - fm-spawn --relaunch: every identity axis comes from the record, and a contradicting flag refuses
+ok - fm-spawn --relaunch: an unrecorded task is refused
+ok - fm-spawn --relaunch: refuses to start a replacement outside the copy holding its work
+ok - relaunch re-reads the backlog item instead of blindly re-running the transition
+ok - relaunch heals an item that drifted out of In flight while the task stayed live
+FM_TEST_END 2026-09-13T00:18:47Z tests/fm-control-relaunch.test.sh exit=0 duration_ms=98220 gate_skip=false
+FM_TEST_SUMMARY total=8 failed=1 skipped_gate=0 duration_ms=662581
+FM_TEST_SUMMARY_FAMILY family=backend-dispatch count=2 duration_ms=119422 failed=0
+FM_TEST_SUMMARY_FAMILY family=pr-forge count=2 duration_ms=472808 failed=1
+FM_TEST_SUMMARY_FAMILY family=watcher-wake-lock count=4 duration_ms=211846 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-pr-check-security.test.sh duration_ms=300004
+FM_TEST_SLOWEST rank=2 script=tests/fm-pr-merge.test.sh duration_ms=172804
+FM_TEST_SLOWEST rank=3 script=tests/fm-control-relaunch.test.sh duration_ms=98220
+FM_TEST_SLOWEST rank=4 script=tests/fm-watch-arm.test.sh duration_ms=69720
+FM_TEST_SLOWEST rank=5 script=tests/fm-watcher-lock.test.sh duration_ms=65744
+FM_TEST_SLOWEST rank=6 script=tests/fm-watch-recovery-loop.test.sh duration_ms=60781
+FM_TEST_SLOWEST rank=7 script=tests/fm-control.test.sh duration_ms=21202
+FM_TEST_SLOWEST rank=8 script=tests/fm-watch-checkpoint.test.sh duration_ms=15601

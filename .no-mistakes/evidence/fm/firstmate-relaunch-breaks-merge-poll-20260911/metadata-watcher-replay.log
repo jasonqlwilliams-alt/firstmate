@@ -1,31 +1,184 @@
-Fixture: deterministic forge responses; real Firstmate CLI and persisted wake queue.
-$ fm-pr-check.sh task-a https://github.com/example/repo/pull/19
+Real interfaces: fm-pr-check.sh, fm-watch.sh, fm_pr_poll_artifacts_valid.
+Fixtures: gh reports a fixed head and MERGED; tmux reports no windows; guard is isolated. No live forge or worker is contacted.
+
+SCENARIO legitimate
 armed: state/task-a.check.sh
-$ fm-promote.sh task-a --mode direct-PR --yolo off
-promoted task-a to ship mode=direct-PR yolo=off (teardown protection restored)
-wrote ship instructions for mode=direct-PR: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.tmp-test-validation/tmp/fm-metadata-watcher-evidence.m9gMSP/home/data/task-a/ship-instructions.md
-next: FM_HOME=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.tmp-test-validation/tmp/fm-metadata-watcher-evidence.m9gMSP/home bin/fm-send.sh fm-task-a "$(cat /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.tmp-test-validation/tmp/fm-metadata-watcher-evidence.m9gMSP/home/data/task-a/ship-instructions.md)"
-Persisted metadata after promotion:
-window=firstmate:fm-task-a
-endpoint_task_id=task-a
-worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.tmp-test-validation/tmp/fm-metadata-watcher-evidence.m9gMSP/wt
-project=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.tmp-test-validation/tmp/fm-metadata-watcher-evidence.m9gMSP/project
 pr=https://github.com/example/repo/pull/19
 pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=12345.20260911T120000Z.6789
+traceparent=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01
+decisions_reviewed=1
+decision_keys=review-call
+spawn_gen=12345.20260911T120000Z.6789
 kind=ship
 mode=direct-PR
 yolo=off
+x_request=request-19
+x_request_ts=1789250000
+x_followups=2
+x_platform=x
+x_reply_max_chars=280
+validator exit=0
+check: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/.test-phase-metadata.Iipp0i/legitimate/home/state/task-a.check.sh: merged
+1789258225	1	check	merged-task-a-https://github.com/example/repo/pull/19	check: merge landed: task-a https://github.com/example/repo/pull/19
+Observed: merge notification persisted; poll retired; injected bytes did not execute.
 
-Inject an unrecognized trailing field: unknown=value
-$ fm-watch.sh (forge fixture now reports MERGED)
-check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.tmp-test-validation/tmp/fm-metadata-watcher-evidence.m9gMSP/home/state/task-a.check.sh
-Forge calls unchanged; rejected poll remains registered.
-Durable rejection wake:
-1789247740	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.tmp-test-validation/tmp/fm-metadata-watcher-evidence.m9gMSP/home/state/task-a.check.sh
+SCENARIO unknown-field
+armed: state/task-a.check.sh
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=12345.20260911T120000Z.6789
+traceparent=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01
+decisions_reviewed=1
+decision_keys=review-call
+spawn_gen=12345.20260911T120000Z.6789
+kind=ship
+mode=direct-PR
+yolo=off
+x_request=request-19
+x_request_ts=1789250000
+x_followups=2
+x_platform=x
+x_reply_max_chars=280
+unknown=value
+validator exit=1
+check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/.test-phase-metadata.Iipp0i/unknown-field/home/state/task-a.check.sh
+1789258228	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/.test-phase-metadata.Iipp0i/unknown-field/home/state/task-a.check.sh
+Observed: rejection persisted; forge not queried; poll retained; modified bytes did not execute.
 
-Restore the authentic promoted metadata; do not re-register the poll.
-$ fm-watch.sh (forge fixture reports MERGED)
-check: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2BPEPN4K4T4B6NCQ23JX56W/.tmp-test-validation/tmp/fm-metadata-watcher-evidence.m9gMSP/home/state/task-a.check.sh: merged
-Durable merge wake:
-1789247742	2	check	merged-task-a-https://github.com/example/repo/pull/19	check: merge landed: task-a https://github.com/example/repo/pull/19
-Merged poll retired after its notification was durably queued.
+SCENARIO prefix-lookalike
+armed: state/task-a.check.sh
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=12345.20260911T120000Z.6789
+traceparent=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01
+decisions_reviewed=1
+decision_keys=review-call
+spawn_gen=12345.20260911T120000Z.6789
+kind=ship
+mode=direct-PR
+yolo=off
+x_request=request-19
+x_request_ts=1789250000
+x_followups=2
+x_platform=x
+x_reply_max_chars=280
+control_relaunch_tx_extra=value
+validator exit=1
+check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/.test-phase-metadata.Iipp0i/prefix-lookalike/home/state/task-a.check.sh
+1789258230	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/.test-phase-metadata.Iipp0i/prefix-lookalike/home/state/task-a.check.sh
+Observed: rejection persisted; forge not queried; poll retained; modified bytes did not execute.
+
+SCENARIO missing-equals
+armed: state/task-a.check.sh
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=12345.20260911T120000Z.6789
+traceparent=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01
+decisions_reviewed=1
+decision_keys=review-call
+spawn_gen=12345.20260911T120000Z.6789
+kind=ship
+mode=direct-PR
+yolo=off
+x_request=request-19
+x_request_ts=1789250000
+x_followups=2
+x_platform=x
+x_reply_max_chars=280
+control_relaunch_tx
+validator exit=1
+check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/.test-phase-metadata.Iipp0i/missing-equals/home/state/task-a.check.sh
+1789258231	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/.test-phase-metadata.Iipp0i/missing-equals/home/state/task-a.check.sh
+Observed: rejection persisted; forge not queried; poll retained; modified bytes did not execute.
+
+SCENARIO duplicate-pr
+armed: state/task-a.check.sh
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=12345.20260911T120000Z.6789
+traceparent=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01
+decisions_reviewed=1
+decision_keys=review-call
+spawn_gen=12345.20260911T120000Z.6789
+kind=ship
+mode=direct-PR
+yolo=off
+x_request=request-19
+x_request_ts=1789250000
+x_followups=2
+x_platform=x
+x_reply_max_chars=280
+pr=https://github.com/example/repo/pull/20
+validator exit=1
+check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/.test-phase-metadata.Iipp0i/duplicate-pr/home/state/task-a.check.sh
+1789258233	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/.test-phase-metadata.Iipp0i/duplicate-pr/home/state/task-a.check.sh
+Observed: rejection persisted; forge not queried; poll retained; modified bytes did not execute.
+
+SCENARIO invalid-head
+armed: state/task-a.check.sh
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=12345.20260911T120000Z.6789
+traceparent=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01
+decisions_reviewed=1
+decision_keys=review-call
+spawn_gen=12345.20260911T120000Z.6789
+kind=ship
+mode=direct-PR
+yolo=off
+x_request=request-19
+x_request_ts=1789250000
+x_followups=2
+x_platform=x
+x_reply_max_chars=280
+pr_head=invalid
+validator exit=1
+check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/.test-phase-metadata.Iipp0i/invalid-head/home/state/task-a.check.sh
+1789258234	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/.test-phase-metadata.Iipp0i/invalid-head/home/state/task-a.check.sh
+Observed: rejection persisted; forge not queried; poll retained; modified bytes did not execute.
+
+SCENARIO modified-check
+armed: state/task-a.check.sh
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=12345.20260911T120000Z.6789
+traceparent=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01
+decisions_reviewed=1
+decision_keys=review-call
+spawn_gen=12345.20260911T120000Z.6789
+kind=ship
+mode=direct-PR
+yolo=off
+x_request=request-19
+x_request_ts=1789250000
+x_followups=2
+x_platform=x
+x_reply_max_chars=280
+validator exit=1
+check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/.test-phase-metadata.Iipp0i/modified-check/home/state/task-a.check.sh
+1789258236	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/.test-phase-metadata.Iipp0i/modified-check/home/state/task-a.check.sh
+Observed: rejection persisted; forge not queried; poll retained; modified bytes did not execute.
+
+SCENARIO opaque-shell-bytes
+armed: state/task-a.check.sh
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=12345.20260911T120000Z.6789
+traceparent=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01
+decisions_reviewed=1
+decision_keys=review-call
+spawn_gen=12345.20260911T120000Z.6789
+kind=ship
+mode=direct-PR
+yolo=off
+x_request=request-19
+x_request_ts=1789250000
+x_followups=2
+x_platform=x
+x_reply_max_chars=280
+control_relaunch_tx=$(touch "/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/.test-phase-metadata.Iipp0i/opaque-shell-bytes/sentinel")
+validator exit=0
+check: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/.test-phase-metadata.Iipp0i/opaque-shell-bytes/home/state/task-a.check.sh: merged
+1789258238	1	check	merged-task-a-https://github.com/example/repo/pull/19	check: merge landed: task-a https://github.com/example/repo/pull/19
+Observed: merge notification persisted; poll retired; injected bytes did not execute.

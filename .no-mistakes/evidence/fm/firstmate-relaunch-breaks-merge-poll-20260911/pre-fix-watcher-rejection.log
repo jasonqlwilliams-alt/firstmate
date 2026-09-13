@@ -1,0 +1,23 @@
+Real interfaces: fm-pr-check.sh, fm-watch.sh, fm_pr_poll_artifacts_valid.
+Fixtures: gh reports a fixed head and MERGED; tmux reports no windows; guard is isolated. No live forge or worker is contacted.
+
+SCENARIO legitimate
+armed: state/task-a.check.sh
+pr=https://github.com/example/repo/pull/19
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=12345.20260911T120000Z.6789
+traceparent=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01
+decisions_reviewed=1
+decision_keys=review-call
+spawn_gen=12345.20260911T120000Z.6789
+kind=ship
+mode=direct-PR
+yolo=off
+x_request=request-19
+x_request_ts=1789250000
+x_followups=2
+x_platform=x
+x_reply_max_chars=280
+validator exit=1
+check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/.test-phase-baseline/.test-phase-metadata.T80jvo/legitimate/home/state/task-a.check.sh
+1789258289	1	check	unauthenticated-state-checks	check: rejected unauthenticated state checks: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2C15NP480E6879881GHSHD3/.test-phase-baseline/.test-phase-metadata.T80jvo/legitimate/home/state/task-a.check.sh
