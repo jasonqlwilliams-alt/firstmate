@@ -71,6 +71,7 @@ It is not deterministic across the verified adapters: codex, grok, and gemini re
 4. **Prepare the replacement** through its single owner, `bin/fm-spawn.sh --relaunch`, before stopping the old agent.
    Preparation checks launch configuration, instructions, delivery policy, backlog eligibility, recorded worktree isolation, and workspace trust.
    A recorded Treehouse pool slot must still be claimed by this task (`mine` or `absent`) under the shared project lock before worktree re-entry or stop; that lock is released once re-entry or the live cwd check is confirmed, before the continue-marker wait.
+   After stop, the spawn waits for that lock again and proves the claim again before returning the shell into the slot, so a slot reassigned while the agent was stopped refuses the return; the lock is released once re-entry is confirmed.
    Executable resolution uses the pane `HOME`, `PATH`, and recorded worktree.
    An exited shell returns there before those values are captured.
    A live endpoint reads them from the foreground process-group leader only, with native environment entry boundaries preserved.

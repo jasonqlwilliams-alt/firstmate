@@ -50,7 +50,9 @@
 #   It waits for control's continue marker after exit, retaining the resolved
 #   launch profile throughout.
 #   A pool-slot allocation lock is held only through ownership proof and
-#   worktree re-entry, then released before that wait.
+#   worktree re-entry, then released before that wait. After continue it is
+#   taken again, waiting rather than refusing, and the slot claim is proven
+#   again before the post-stop return; it is released once re-entry is confirmed.
 #   A live endpoint outside the recorded
 #   worktree refuses preparation without sending shell commands. An exit that
 #   unwinds the shell is repaired after stop;
@@ -3525,17 +3527,21 @@ relaunch_return_to_worktree() {
   fi
 }
 
+relaunch_require_slot_claim() {  # <refusal-point>
+  fm_treehouse_slot_owner_state "$WT" "$ID"
+  case "$FM_TREEHOUSE_SLOT_OWNER" in
+    mine|absent) ;;
+    *)
+      echo "error: recorded Treehouse slot $WT is not owned by task $ID (claim: $FM_TREEHOUSE_SLOT_OWNER, owner: ${FM_TREEHOUSE_SLOT_OWNER_ID:-none}); refusing relaunch $1" >&2
+      exit 1
+      ;;
+  esac
+}
+
 if [ "$RELAUNCH" -eq 1 ]; then
   if [ "$KIND" != secondmate ] && fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
     # Hold the allocation lock only through ownership proof and re-entry.
-    fm_treehouse_slot_owner_state "$WT" "$ID"
-    case "$FM_TREEHOUSE_SLOT_OWNER" in
-      mine|absent) ;;
-      *)
-        echo "error: recorded Treehouse slot $WT is not owned by task $ID (claim: $FM_TREEHOUSE_SLOT_OWNER, owner: ${FM_TREEHOUSE_SLOT_OWNER_ID:-none}); refusing relaunch before worktree entry or stop" >&2
-        exit 1
-        ;;
-    esac
+    relaunch_require_slot_claim "before worktree entry or stop"
   fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
   if [ "$RELAUNCH_STATE" = dead ]; then
@@ -4257,7 +4263,16 @@ if [ -n "$RELAUNCH_PREPARE" ]; then
     sleep 0.1
   done
   # Exit may itself unwind a treehouse subshell after the pre-stop cwd check.
+  if [ -n "$SPAWN_TREEHOUSE_PROJECT_LOCK" ]; then
+    fm_lock_acquire_wait "$SPAWN_TREEHOUSE_PROJECT_LOCK"
+    SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=1
+    relaunch_require_slot_claim "after stop; the slot was reassigned while its agent was stopped"
+  fi
   relaunch_return_to_worktree
+  if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
+    SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
+    fm_lock_release "$SPAWN_TREEHOUSE_PROJECT_LOCK"
+  fi
 fi
 
 if [ "$RELAUNCH" -eq 1 ] && [ "$KIND" = secondmate ]; then

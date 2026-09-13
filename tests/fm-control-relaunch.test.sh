@@ -2421,7 +2421,7 @@ test_relaunch_normalizes_control_paths() {
 
 test_relaunch_proves_recorded_pool_slot_ownership() {
   local dir scenario wt lock out rc
-  for scenario in mine mine-live reassigned absent unsafe locked live-reassigned direct-reassigned; do
+  for scenario in mine mine-live stolen-at-stop reassigned absent unsafe locked live-reassigned direct-reassigned; do
     dir=$(new_case "slot-$scenario" rl-slot)
     add_ship_task "$dir" rl-slot claude
     wt="$dir/pool/1/proj"
@@ -2448,9 +2448,12 @@ test_relaunch_proves_recorded_pool_slot_ownership() {
       absent) rm "$dir/pool/1/.fm-slot-owner" ;;
       unsafe) rm "$dir/pool/1/.fm-slot-owner"; mkdir "$dir/pool/1/.fm-slot-owner" ;;
       locked) mkdir "$lock"; printf '%s\n' "$$" > "$lock/pid" ;;
-      mine)
-        printf '%s\n' "$ROOT/bin/fm-wake-lib.sh" > "$dir/wake-lib"
-        printf '%s\n' "$lock" > "$dir/project-lock"
+    esac
+    printf '%s\n' "$ROOT/bin/fm-wake-lib.sh" > "$dir/wake-lib"
+    printf '%s\n' "$lock" > "$dir/project-lock"
+    printf '%s\n' "$wt" > "$dir/slot-worktree"
+    case "$scenario" in
+      mine|mine-live)
         cat > "$dir/fake/after-cd" <<'SH'
 #!/usr/bin/env bash
 set -eu
@@ -2469,9 +2472,9 @@ printf 'held\n' >> "$CASE/slot-lock-proven"
 SH
         chmod +x "$dir/fake/after-cd"
         ;;
+    esac
+    case "$scenario" in
       mine-live)
-        printf '%s\n' "$ROOT/bin/fm-wake-lib.sh" > "$dir/wake-lib"
-        printf '%s\n' "$lock" > "$dir/project-lock"
         cat > "$dir/fake/before-exit" <<'SH'
 #!/usr/bin/env bash
 set -eu
@@ -2487,11 +2490,30 @@ fm_lock_release "$lock"
 SH
         chmod +x "$dir/fake/before-exit"
         ;;
+      stolen-at-stop)
+        cat > "$dir/fake/before-exit" <<'SH'
+#!/usr/bin/env bash
+set -eu
+CASE=${FM_FAKE_DIR%/*}
+FM_HOME="$CASE/home"
+STATE="$FM_HOME/state"
+# shellcheck source=/dev/null
+. "$(cat "$CASE/wake-lib")"
+lock=$(cat "$CASE/project-lock")
+fm_lock_try_acquire "$lock"
+fm_treehouse_slot_owner_claim "$(cat "$CASE/slot-worktree")" successor "$FM_HOME"
+fm_lock_release "$lock"
+SH
+        chmod +x "$dir/fake/before-exit"
+        ;;
     esac
-    if [ "$scenario" = live-reassigned ] || [ "$scenario" = mine-live ]; then
-      printf claude > "$dir/fake/command"
-      printf '%s' "$wt" > "$dir/fake/cwd"
-    fi
+    case "$scenario" in
+      live-reassigned|mine-live|stolen-at-stop)
+        printf claude > "$dir/fake/command"
+        printf '%s' "$wt" > "$dir/fake/cwd"
+        [ "$scenario" = live-reassigned ] || printf '%s' "$dir/home" > "$dir/fake/exit-cwd"
+        ;;
+    esac
     cp "$dir/home/state/rl-slot.meta" "$dir/meta.before"
     cp "$dir/fake/cwd" "$dir/cwd.before"
     cp "$dir/fake/command" "$dir/command.before"
@@ -2500,22 +2522,35 @@ SH
     else
       out=$(run_control "$dir" rl-slot relaunch --note 'Recover the recorded slot.'); rc=$?
     fi
-    if [ "$scenario" = mine ] || [ "$scenario" = mine-live ] || [ "$scenario" = absent ]; then
-      expect_code 0 "$rc" "an owned or unclaimed slot should relaunch: $out"
-      [ "$(cat "$dir/fake/cwd")" = "$wt" ] || fail "$scenario slot was not re-entered"
-      [ "$(cat "$dir/fake/command")" = claude ] || fail "$scenario slot did not launch"
-      case "$scenario" in
-        mine) [ "$(wc -l < "$dir/slot-lock-proven")" -eq 1 ] || fail "project lock did not cover re-entry" ;;
-        mine-live) assert_present "$dir/slot-lock-free-at-stop" "project lock was still held during the stop wait" ;;
-      esac
-    else
-      expect_code 1 "$rc" "$scenario must refuse before entry or stop: $out"
-      assert_contains "$out" Treehouse "refusal should identify the pool ownership boundary"
-      cmp -s "$dir/cwd.before" "$dir/fake/cwd" || fail "$scenario entered the recorded slot"
-      cmp -s "$dir/command.before" "$dir/fake/command" || fail "$scenario stopped or launched an agent"
-      cmp -s "$dir/meta.before" "$dir/home/state/rl-slot.meta" || fail "$scenario changed the task record"
-      [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "$scenario sent lifecycle bytes"
-    fi
+    case "$scenario" in
+      mine|mine-live|absent)
+        expect_code 0 "$rc" "an owned or unclaimed slot should relaunch: $out"
+        [ "$(cat "$dir/fake/cwd")" = "$wt" ] || fail "$scenario slot was not re-entered"
+        [ "$(cat "$dir/fake/command")" = claude ] || fail "$scenario slot did not launch"
+        if [ "$scenario" != absent ]; then
+          [ "$(wc -l < "$dir/slot-lock-proven")" -eq 1 ] || fail "project lock did not cover $scenario re-entry"
+        fi
+        if [ "$scenario" = mine-live ]; then
+          assert_present "$dir/slot-lock-free-at-stop" "project lock was still held during the stop wait"
+        fi
+        ;;
+      stolen-at-stop)
+        expect_code 1 "$rc" "a slot reassigned during stop must refuse the post-stop return: $out"
+        assert_contains "$out" Treehouse "post-stop refusal should identify the pool ownership boundary"
+        [ "$(cat "$dir/fake/cwd")" = "$dir/home" ] || fail "relaunch returned into a reassigned slot"
+        [ "$(cat "$dir/fake/command")" = zsh ] || fail "relaunch launched into a reassigned slot"
+        ! grep -q '^cd -- ' "$dir/fake/keys" || fail "relaunch sent a return command toward a reassigned slot"
+        [ "$(sed -n 's/^task=//p' "$dir/pool/1/.fm-slot-owner")" = successor ] || fail "relaunch changed the successor claim"
+        ;;
+      *)
+        expect_code 1 "$rc" "$scenario must refuse before entry or stop: $out"
+        assert_contains "$out" Treehouse "refusal should identify the pool ownership boundary"
+        cmp -s "$dir/cwd.before" "$dir/fake/cwd" || fail "$scenario entered the recorded slot"
+        cmp -s "$dir/command.before" "$dir/fake/command" || fail "$scenario stopped or launched an agent"
+        cmp -s "$dir/meta.before" "$dir/home/state/rl-slot.meta" || fail "$scenario changed the task record"
+        [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "$scenario sent lifecycle bytes"
+        ;;
+    esac
     [ "$(cat "$wt/.fm-slot-fixture")" = 'successor wiring' ] || fail "relaunch changed unrelated slot wiring"
     if [ "$scenario" = locked ]; then
       [ "$(cat "$lock/pid")" = "$$" ] || fail "relaunch stole the allocation lock"
@@ -2523,7 +2558,7 @@ SH
       assert_absent "$lock" "relaunch leaked the allocation lock"
     fi
   done
-  pass "relaunch: pool ownership is proven under the allocation lock before entry, then released"
+  pass "relaunch: pool ownership is proven under the allocation lock before entry and again before the post-stop return"
 }
 
 test_kimi_relaunch_preserves_concurrent_config_edits() {
