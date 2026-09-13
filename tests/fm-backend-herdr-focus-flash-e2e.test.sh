@@ -267,32 +267,51 @@ done
 [ "$C_CHILD_STABLE" -ge 2 ] || fail 'the Part C doomed pane never reported a stable persistent child process'
 
 C_CALL_LOG="$TMP_ROOT/call-c.log"
-C_CLOSE_FOCUS="$TMP_ROOT/focus-c.after-close"
+C_FOCUS_SAMPLES="$TMP_ROOT/focus-c.samples"
+C_OPERATION_ACTIVE="$TMP_ROOT/operation-c.active"
+C_SAMPLER_READY="$TMP_ROOT/sampler-c.ready"
+SAMPLER_STOP="$TMP_ROOT/sampler-c.stop"
 : > "$C_CALL_LOG"
-# Observe the real close synchronously before returning to the adapter, which
-# can immediately restore focus. A background sampler can miss that interval
-# entirely when its next read runs after the restore, even on a defective release.
-export -f lab focus_snapshot
+: > "$C_FOCUS_SAMPLES"
+(
+  : > "$C_SAMPLER_READY"
+  while [ ! -e "$SAMPLER_STOP" ]; do
+    if [ -e "$C_OPERATION_ACTIVE" ]; then
+      if C_SAMPLE=$(focus_snapshot); then
+        printf '%s\n' "$C_SAMPLE" >> "$C_FOCUS_SAMPLES"
+      else
+        printf '%s\n' UNREADABLE >> "$C_FOCUS_SAMPLES"
+      fi
+    fi
+  done
+) &
+SAMPLER_PID=$!
+C_READY_ATTEMPT=0
+while [ ! -e "$C_SAMPLER_READY" ] && [ "$C_READY_ATTEMPT" -lt 100 ]; do
+  sleep 0.01
+  C_READY_ATTEMPT=$((C_READY_ATTEMPT + 1))
+done
+[ -e "$C_SAMPLER_READY" ] || fail 'the Part C focus sampler did not start'
+: > "$C_OPERATION_ACTIVE"
 # A short proof budget keeps the exhausted-proof path fast; the count below is
 # what proves the proof was exhausted rather than skipped.
 C_PROOF_POLLS=3
 C_OUT=$(PATH="$FAKEBIN:$HERDR_ORIGINAL_PATH" FM_FLASH_CALL_LOG="$C_CALL_LOG" \
-  FM_FLASH_CLOSE_FOCUS="$C_CLOSE_FOCUS" \
   FM_BACKEND_HERDR_IDLE_SHELL_PROOF_POLLS="$C_PROOF_POLLS" bash -c '
   . "$1/bin/backends/herdr.sh"
   fm_backend_herdr_cli() {
     local session=$1
     shift
     printf "%s\n" "$*" >> "$FM_FLASH_CALL_LOG"
-    HERDR_SESSION="$session" herdr "$@" --session "$session" || return $?
-    if [ "$1 ${2:-}" = "pane close" ]; then
-      focus_snapshot > "$FM_FLASH_CLOSE_FOCUS" || return 1
-    fi
-    return 0
+    HERDR_SESSION="$session" herdr "$@" --session "$session"
   }
   fm_backend_herdr_projection_close_pane_focus_preserving "$2" "$3"
 ' _ "$ROOT" "$HERDR_LAB_SESSION" "$C_DOOMED_PANE" 2>&1)
 C_STATUS=$?
+rm -f "$C_OPERATION_ACTIVE"
+: > "$SAMPLER_STOP"
+wait "$SAMPLER_PID" 2>/dev/null || true
+SAMPLER_PID=
 [ "$C_STATUS" -eq 0 ] || fail "the production focus-preserving close failed (status $C_STATUS): $C_OUT"
 wait_ws_gone "$C_DOOMED_WS" || fail 'the fallback close left the doomed workspace behind'
 if lab pane get "$C_DOOMED_PANE" >/dev/null 2>&1; then
@@ -314,21 +333,20 @@ pass 'fallback: a doomed pane holding a persistent child exhausts the proof and 
 C_AFTER=$(focus_snapshot) || fail 'could not capture the Part C post-close focus'
 [ "$C_AFTER" = "$C_BEFORE" ] \
   || fail "the fallback close left focus off the anchor ($C_BEFORE -> $C_AFTER)"
-C_AT_CLOSE=$(cat "$C_CLOSE_FOCUS") || fail 'Part C did not record focus immediately after the explicit close'
-[ -n "$C_AT_CLOSE" ] || fail 'Part C could not read exact focus immediately after the explicit close'
+C_WRONG=$(grep -Fvxc -- "$C_BEFORE" "$C_FOCUS_SAMPLES" || true)
 if [ "$STEAL_LIVE" = 1 ]; then
   # A defective release cannot make this path focus-safe, which is precisely why
   # default-on projection is floored above it. The wrong-focus window is
   # explicitly accepted here, but only as a BOUNDED one: the restore backstop
   # must have put the anchor back exactly, and the whole exposure must end with
   # the operation rather than parking the captain somewhere else.
-  [ "$C_AT_CLOSE" != "$C_BEFORE" ] \
-    || fail 'Part C explicit close preserved focus despite Part A reproducing the defect'
-  pass 'fallback on a defective release: the focus change observed immediately after close was fully restored to the anchor'
+  [ "$C_WRONG" -ge 1 ] \
+    || fail 'Part C reached the fallback on a defective release but observed no wrong-focus sample at all, so the sampler proved nothing'
+  pass "fallback on a defective release: a bounded wrong-focus window of $C_WRONG samples was fully restored to the anchor"
 else
-  [ "$C_AT_CLOSE" = "$C_BEFORE" ] \
-    || fail "a focus-preserving release changed focus on the fallback path ($C_BEFORE -> $C_AT_CLOSE)"
-  pass 'fallback on a focus-preserving release: the plain explicit close preserved exact focus'
+  [ "$C_WRONG" -eq 0 ] \
+    || fail "a focus-preserving release exposed $C_WRONG wrong-focus samples on the fallback path"
+  pass 'fallback on a focus-preserving release: the plain explicit close preserved exact focus throughout'
 fi
 
 # The live guard on the version floor itself: Part A measured whether THIS
