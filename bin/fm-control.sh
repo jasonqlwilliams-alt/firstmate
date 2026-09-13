@@ -131,6 +131,8 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
   exit 1
 }
 STATE=$(CDPATH='' cd -- "$STATE" && pwd -P) || exit 1
+# Imported state owners prefer the override, so keep it normalized as well.
+if [ -n "${FM_STATE_OVERRIDE:-}" ]; then FM_STATE_OVERRIDE=$STATE; fi
 
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"

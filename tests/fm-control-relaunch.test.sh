@@ -2039,9 +2039,7 @@ test_secondmate_preparation_holds_inheritance_until_stop() {
       locked) mkdir "$lock"; printf '%s\n' "$$" > "$lock/pid" ;;
       stale-lock|success|exit-refused)
         if [ "$scenario" = stale-lock ]; then
-          /bin/true &
-          dead_pid=$!
-          wait "$dead_pid"
+          dead_pid=$(bash -c 'printf "%s\n" "$$"')
           mkdir "$lock"
           printf '%s\n' "$dead_pid" > "$lock/pid"
         fi
