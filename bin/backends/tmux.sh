@@ -222,6 +222,25 @@ fm_backend_tmux_foreground_pids() {  # <target>
       done
 }
 
+# The foreground process-group leader: pid == pgid == tpgid. Children that
+# share the group (npx, uv, MCP servers) have pid != pgid and must not supply
+# the pane PATH used for relaunch executable resolution.
+fm_backend_tmux_foreground_leader_pid() {  # <target>
+  local target=$1 tty pid pgid tpgid comm
+  tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || return 1
+  [ -n "$tty" ] || return 1
+  while read -r pid pgid tpgid comm; do
+    [ -n "$comm" ] || continue
+    [ "$pgid" = "$tpgid" ] || continue
+    [ "$pid" = "$pgid" ] || continue
+    printf '%s\n' "$pid"
+    return 0
+  done <<EOF
+$(LC_ALL=C ps -t "${tty#/dev/}" -o pid=,pgid=,tpgid=,comm= 2>/dev/null)
+EOF
+  return 1
+}
+
 fm_backend_tmux_foreground_argv0s() {  # <target>
   local target=$1 tty pid pgid tpgid comm args argv0
   tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || return 0

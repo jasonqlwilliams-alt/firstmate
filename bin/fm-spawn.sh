@@ -47,8 +47,13 @@
 #   from the parent holding the task's control lock. The ready marker is
 #   published only after prepare_relaunch succeeds under the preparation
 #   contract in docs/agent-control.md.
-#   It waits for control's continue marker after exit, retaining its locks and
-#   resolved launch profile throughout. A live endpoint outside the recorded
+#   It waits for control's continue marker after exit, retaining its other
+#   locks and the resolved launch profile throughout.
+#   A pool-slot allocation lock is held only through ownership proof and
+#   worktree re-entry, then released before that wait. After continue it is
+#   taken again, waiting rather than refusing, and the slot claim is proven
+#   again before the post-stop return; it is released once re-entry is confirmed.
+#   A live endpoint outside the recorded
 #   worktree refuses preparation without sending shell commands. An exit that
 #   unwinds the shell is repaired after stop;
 #   transport failures at that point remain reported launch failures.
@@ -962,6 +967,7 @@ RELAUNCH_BUSY_STATE=
 RELAUNCH_RETIRE_PATHS=
 RELAUNCH_PATH_PROBE=
 SPAWN_LAUNCH_PATH=$PATH
+SPAWN_LAUNCH_HOME=
 SPAWN_META_TMP=
 SPAWN_META_LOCK=
 SPAWN_META_LOCK_HELD=0
@@ -1481,25 +1487,63 @@ resolve_spawn_executable() {
   esac
 }
 
-spawn_pane_launch_path() {
-  local pids pid value result='' info attempt probe_command
-  if [ "$RELAUNCH_STATE" = dead ]; then
-    RELAUNCH_PATH_PROBE=$(mktemp "$STATE/.$ID.relaunch-path.XXXXXXXX") || return 1
-    probe_command="printf '%s\\n' \"\$PATH\" > $(shell_quote "$RELAUNCH_PATH_PROBE")"
-    "fm_backend_${BACKEND}_send_text_line" "$RELAUNCH_TARGET" "$probe_command" || return 1
-    for ((attempt = 0; attempt < 50; attempt++)); do
-      if [ -s "$RELAUNCH_PATH_PROBE" ]; then
-        IFS= read -r SPAWN_LAUNCH_PATH < "$RELAUNCH_PATH_PROBE" || return 1
-        rm -f -- "$RELAUNCH_PATH_PROBE"
-        RELAUNCH_PATH_PROBE=
+# Resolve one relaunch executable token against the pane HOME, PATH, and
+# recorded worktree. Never eval or execute the token. Returns an absolute
+# existing executable path, or refuses.
+resolve_relaunch_executable_token() {
+  local token=$1 home=$SPAWN_LAUNCH_HOME path=$SPAWN_LAUNCH_PATH worktree=$RELAUNCH_WT
+  local expanded candidate dir parent
+  case "$token" in
+    '') return 1 ;;
+    \~|\~/*)
+      [ -n "$home" ] || return 1
+      expanded=$home${token#\~}
+      ;;
+    /*)
+      expanded=$token
+      ;;
+    */*)
+      [ -n "$worktree" ] || return 1
+      expanded=$worktree/$token
+      ;;
+    *)
+      IFS=:
+      for dir in $path; do
+        unset IFS
+        case "$dir" in
+          ''|.)
+            [ -n "$worktree" ] || continue
+            candidate=$worktree/$token
+            ;;
+          /*) candidate=$dir/$token ;;
+          *)
+            [ -n "$worktree" ] || continue
+            candidate=$worktree/$dir/$token
+            ;;
+        esac
+        [ -f "$candidate" ] && [ -x "$candidate" ] || continue
+        parent=${candidate%/*}
+        dir=$(cd "${parent:-/}" 2>/dev/null && pwd -P) || continue
+        printf '%s/%s\n' "$dir" "${candidate##*/}"
         return 0
-      fi
-      sleep 0.1
-    done
-    return 1
-  fi
+      done
+      unset IFS
+      return 1
+      ;;
+  esac
+  [ -f "$expanded" ] && [ -x "$expanded" ] || return 1
+  parent=${expanded%/*}
+  dir=$(cd "${parent:-/}" 2>/dev/null && pwd -P) || return 1
+  printf '%s/%s\n' "$dir" "${expanded##*/}"
+}
+
+spawn_pane_leader_pid() {
+  local pids pid pgid info
   case "$BACKEND" in
-    tmux) pids=$(fm_backend_tmux_foreground_pids "$RELAUNCH_TARGET") || return 1 ;;
+    tmux)
+      fm_backend_tmux_foreground_leader_pid "$RELAUNCH_TARGET"
+      return
+      ;;
     herdr)
       info=$(fm_backend_herdr_cli "$HERDR_SES" pane process-info --pane "$HERDR_PANE_ID") || return 1
       pids=$(printf '%s' "$info" | jq -er --arg pane "$HERDR_PANE_ID" '
@@ -1510,13 +1554,40 @@ spawn_pane_launch_path() {
   esac
   [ -n "$pids" ] || return 1
   while IFS= read -r pid; do
-    case "$pid" in ''|*[!0-9]*) return 1 ;; esac
-    value=$(python3 "$SCRIPT_DIR/fm-process-path.py" "$pid") || return 1
-    [ -n "$value" ] || return 1
-    [ -z "$result" ] || [ "$result" = "$value" ] || return 1
-    result=$value
+    case "$pid" in ''|*[!0-9]*) continue ;; esac
+    pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]')
+    [ "$pgid" = "$pid" ] || continue
+    printf '%s\n' "$pid"
+    return 0
   done <<< "$pids"
-  SPAWN_LAUNCH_PATH=$result
+  return 1
+}
+
+spawn_pane_launch_path() {
+  local pid attempt probe_command
+  if [ "$RELAUNCH_STATE" = dead ]; then
+    RELAUNCH_PATH_PROBE=$(mktemp "$STATE/.$ID.relaunch-path.XXXXXXXX") || return 1
+    rm -f -- "$RELAUNCH_PATH_PROBE"
+    probe_command="printf '%s\\n%s\\n' \"\$PATH\" \"\$HOME\" > $(shell_quote "$RELAUNCH_PATH_PROBE")"
+    "fm_backend_${BACKEND}_send_text_line" "$RELAUNCH_TARGET" "$probe_command" || return 1
+    for ((attempt = 0; attempt < 50; attempt++)); do
+      if [ -f "$RELAUNCH_PATH_PROBE" ] \
+        && { IFS= read -r SPAWN_LAUNCH_PATH && IFS= read -r SPAWN_LAUNCH_HOME; } < "$RELAUNCH_PATH_PROBE"; then
+        rm -f -- "$RELAUNCH_PATH_PROBE"
+        RELAUNCH_PATH_PROBE=
+        [ -n "$SPAWN_LAUNCH_PATH" ] || return 1
+        return 0
+      fi
+      sleep 0.1
+    done
+    return 1
+  fi
+  pid=$(spawn_pane_leader_pid) || return 1
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  SPAWN_LAUNCH_PATH=$(python3 "$SCRIPT_DIR/fm-process-path.py" "$pid") || return 1
+  [ -n "$SPAWN_LAUNCH_PATH" ] || return 1
+  SPAWN_LAUNCH_HOME=$(python3 "$SCRIPT_DIR/fm-process-path.py" "$pid" HOME) || return 1
+  [ -n "$SPAWN_LAUNCH_HOME" ] || return 1
 }
 
 spawn_resolve_launch_binary() (
@@ -1913,16 +1984,21 @@ fi
 
 resolve_launch_executables() {
   if [ "$RAW_LAUNCH" -eq 1 ] && [ "$RELAUNCH" -eq 1 ]; then
-    RAW_BIN=$(spawn_resolve_launch_binary resolve_spawn_executable "$RAW_EXECUTABLE") || {
+    RAW_BIN=$(resolve_relaunch_executable_token "$RAW_EXECUTABLE") || {
       echo "error: raw launch executable '$RAW_EXECUTABLE' is unavailable on the pane PATH; refusing relaunch before stop" >&2
       exit 1
     }
+    case "$LAUNCH" in
+      "$RAW_EXECUTABLE"|"$RAW_EXECUTABLE"*)
+        LAUNCH="$(shell_quote "$RAW_BIN")${LAUNCH#"$RAW_EXECUTABLE"}"
+        ;;
+    esac
   fi
 
   case "$HARNESS" in
     claude|codex|opencode|grok|gemini)
       if [ "$RELAUNCH" -eq 1 ]; then
-        TARGET_BIN=$(spawn_resolve_launch_binary resolve_spawn_executable "$HARNESS") || {
+        TARGET_BIN=$(spawn_resolve_launch_binary resolve_relaunch_executable_token "$HARNESS") || {
           echo "error: $HARNESS executable not found on PATH; refusing relaunch before stop" >&2
           exit 1
         }
@@ -2508,15 +2584,17 @@ else
   BRIEF="$DATA/$ID/brief.md"
 fi
 if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
-  SPAWN_TREEHOUSE_PROJECT_LOCK=$(fm_treehouse_project_lock_path "$PROJ_ABS") || {
-    echo "error: could not resolve the shared Treehouse project lock for $PROJ_ABS" >&2
-    exit 1
-  }
-  if ! fm_lock_try_acquire "$SPAWN_TREEHOUSE_PROJECT_LOCK"; then
-    echo "error: another Treehouse slot allocation or return is in progress for $PROJ_ABS; refusing to race it" >&2
-    exit 1
+  if [ "$RELAUNCH" -eq 0 ] || fm_treehouse_pool_slot "$PROJ_ABS" "${RELAUNCH_WT:-$WT}"; then
+    SPAWN_TREEHOUSE_PROJECT_LOCK=$(fm_treehouse_project_lock_path "$PROJ_ABS") || {
+      echo "error: could not resolve the shared Treehouse project lock for $PROJ_ABS" >&2
+      exit 1
+    }
+    if ! fm_lock_try_acquire "$SPAWN_TREEHOUSE_PROJECT_LOCK"; then
+      echo "error: another Treehouse slot allocation or return is in progress for $PROJ_ABS; refusing to race it" >&2
+      exit 1
+    fi
+    SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=1
   fi
-  SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=1
 fi
 [ -f "$BRIEF" ] || { echo "error: task $ID has no brief at inaccessible data path $BRIEF" >&2; exit 1; }
 if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
@@ -3449,15 +3527,21 @@ relaunch_return_to_worktree() {
   fi
 }
 
+relaunch_require_slot_claim() {  # <refusal-point>
+  fm_treehouse_slot_owner_state "$WT" "$ID"
+  case "$FM_TREEHOUSE_SLOT_OWNER" in
+    mine|absent) ;;
+    *)
+      echo "error: recorded Treehouse slot $WT is not owned by task $ID (claim: $FM_TREEHOUSE_SLOT_OWNER, owner: ${FM_TREEHOUSE_SLOT_OWNER_ID:-none}); refusing relaunch $1" >&2
+      exit 1
+      ;;
+  esac
+}
+
 if [ "$RELAUNCH" -eq 1 ]; then
   if [ "$KIND" != secondmate ] && fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
-    # Retain the allocation lock through launch so a checked slot cannot be
-    # reassigned between ownership validation and returning the exited shell.
-    fm_treehouse_slot_owner_state "$WT" "$ID"
-    [ "$FM_TREEHOUSE_SLOT_OWNER" = mine ] || {
-      echo "error: recorded Treehouse slot $WT is not owned by task $ID (claim: $FM_TREEHOUSE_SLOT_OWNER, owner: ${FM_TREEHOUSE_SLOT_OWNER_ID:-none}); refusing relaunch before worktree entry or stop" >&2
-      exit 1
-    }
+    # Hold the allocation lock only through ownership proof and re-entry.
+    relaunch_require_slot_claim "before worktree entry or stop"
   fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
   if [ "$RELAUNCH_STATE" = dead ]; then
@@ -3468,6 +3552,10 @@ if [ "$RELAUNCH" -eq 1 ]; then
       echo "error: task $ID's live endpoint is in '${relaunch_seen:-unknown}', not its recorded worktree '$WT'; refusing before stop because a live agent cannot receive a shell return command. Inspect with bin/fm-crew-state.sh $ID" >&2
       exit 1
     fi
+  fi
+  if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
+    SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
+    fm_lock_release "$SPAWN_TREEHOUSE_PROJECT_LOCK"
   fi
   spawn_pane_launch_path || {
     echo "error: could not read the pane PATH; refusing relaunch before stop" >&2
@@ -4126,25 +4214,27 @@ EOF
 fi
 
 prepare_relaunch() {
-  local busy_file wiring_index executable
+  local busy_file wiring_index executable_var token executable
   if [ "$RAW_LAUNCH" -eq 1 ]; then
-    executable=$RAW_BIN
+    executable_var=RAW_BIN
   else
     case "$HARNESS" in
-      pi|pi-signed) executable=$PI_BIN ;;
-      omp) executable=$OMP_BIN ;;
-      cursor) executable=$CURSOR_BIN ;;
-      agy) executable=$AGY_BIN ;;
-      muse) executable=$MUSE_BIN ;;
-      kimi) executable=$KIMI_BIN ;;
-      rovo) executable=$ROVO_BIN ;;
-      *) executable=$TARGET_BIN ;;
+      pi|pi-signed) executable_var=PI_BIN ;;
+      omp) executable_var=OMP_BIN ;;
+      cursor) executable_var=CURSOR_BIN ;;
+      agy) executable_var=AGY_BIN ;;
+      muse) executable_var=MUSE_BIN ;;
+      kimi) executable_var=KIMI_BIN ;;
+      rovo) executable_var=ROVO_BIN ;;
+      *) executable_var=TARGET_BIN ;;
     esac
   fi
-  [ -f "$executable" ] && [ -x "$executable" ] || {
-    echo "error: replacement executable is unavailable: $executable" >&2
+  token=${!executable_var:-}
+  executable=$(resolve_relaunch_executable_token "$token") || {
+    echo "error: replacement executable is unavailable: ${token:-$HARNESS}" >&2
     return 1
   }
+  printf -v "$executable_var" '%s' "$executable"
   for wiring_index in "${!RELAUNCH_WIRING_FILES[@]}"; do
     [ -f "${RELAUNCH_WIRING_FILES[$wiring_index]}" ] && [ -r "${RELAUNCH_WIRING_FILES[$wiring_index]}" ] || return 1
     spawn_wiring_target_check "${RELAUNCH_WIRING_TARGETS[$wiring_index]}" || return 1
@@ -4173,7 +4263,16 @@ if [ -n "$RELAUNCH_PREPARE" ]; then
     sleep 0.1
   done
   # Exit may itself unwind a treehouse subshell after the pre-stop cwd check.
+  if [ -n "$SPAWN_TREEHOUSE_PROJECT_LOCK" ]; then
+    fm_lock_acquire_wait "$SPAWN_TREEHOUSE_PROJECT_LOCK"
+    SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=1
+    relaunch_require_slot_claim "after stop; the slot was reassigned while its agent was stopped"
+  fi
   relaunch_return_to_worktree
+  if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
+    SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
+    fm_lock_release "$SPAWN_TREEHOUSE_PROJECT_LOCK"
+  fi
 fi
 
 if [ "$RELAUNCH" -eq 1 ] && [ "$KIND" = secondmate ]; then
@@ -4393,8 +4492,8 @@ fi
 # still being delivered, cannot observe or complete a fresh provisional record
 # between its state check and `tasks-axi start`, and a delivery failure cannot
 # follow a committed In-flight transition.
-# Relaunch retains slot ownership protection until the replacement is launched.
-if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ] && [ "$RELAUNCH" -eq 0 ]; then
+# Fresh dispatch releases here; relaunch already released after re-entry.
+if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
   SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
   fm_lock_release "$SPAWN_TREEHOUSE_PROJECT_LOCK"
 fi

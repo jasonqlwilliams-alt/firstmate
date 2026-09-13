@@ -94,7 +94,7 @@ case "${1:-}" in
           pane_path=${FM_FAKE_PANE_PATH:-$PATH}
           [ ! -f "$D/path" ] || pane_path=$(cat "$D/path")
           cat "$D/cwd" > "$D/path-probe-cwd"
-          ( export PATH="$pane_path"; eval "$payload" ) || exit 1
+          ( set -C; export PATH="$pane_path"; eval "$payload" ) || exit 1
           ;;
         'cd -- '*)
           if [ ! -e "$D/refuse-cd" ]; then
@@ -144,6 +144,9 @@ SH
 if [ "${1:-}" = -t ] && [ "${2:-}" = fakepane ]; then
   command_name=$(cat "$FM_FAKE_DIR/command")
   case "$command_name" in bash|zsh|sh) exit 0 ;; esac
+  if [ -n "${FM_FAKE_PANE_CHILD_PID:-}" ]; then
+    printf '%s %s %s %s\n' "$FM_FAKE_PANE_CHILD_PID" "$FM_FAKE_PANE_PID" "$FM_FAKE_PANE_PID" "$command_name"
+  fi
   printf '%s %s %s %s\n' "$FM_FAKE_PANE_PID" "$FM_FAKE_PANE_PID" "$FM_FAKE_PANE_PID" "$command_name"
   exit 0
 fi
@@ -2282,6 +2285,35 @@ SH
   pass "fm-control relaunch: PATH text in live process arguments cannot select another installation"
 }
 
+test_live_relaunch_reads_path_from_the_group_leader() {
+  local dir out rc launch child_pid
+  dir=$(new_case group-leader-path rl-leader-path)
+  add_ship_task "$dir" rl-leader-path claude
+  mkdir -p "$dir/leader-bin" "$dir/child-bin"
+  cat > "$dir/leader-bin/codex" <<SH
+#!/bin/sh
+printf leader > '$dir/executable-ran'
+SH
+  cat > "$dir/child-bin/codex" <<SH
+#!/bin/sh
+printf child > '$dir/executable-ran'
+SH
+  chmod +x "$dir/leader-bin/codex" "$dir/child-bin/codex"
+  printf codex > "$dir/fake/becomes"
+  env PATH="$dir/child-bin:/usr/bin:/bin" /bin/sleep 120 >/dev/null 2>&1 &
+  # shellcheck disable=SC2031 # The background PID is captured immediately in this shell.
+  child_pid=$!
+  out=$(FM_FAKE_PANE_PATH="$dir/leader-bin" FM_FAKE_PANE_CHILD_PID="$child_pid" \
+    run_control "$dir" rl-leader-path relaunch --harness codex --note 'Use the agent process environment.'); rc=$?
+  kill "$child_pid" 2>/dev/null || true
+  wait "$child_pid" 2>/dev/null || true
+  expect_code 0 "$rc" "a same-group child with another PATH must not block relaunch: $out"
+  launch=$(tail -n 1 "$dir/fake/literal")
+  bash -c "$launch" || fail "generated launch command failed"
+  [ "$(cat "$dir/executable-ran")" = leader ] || fail "a same-group child PATH selected the executable"
+  pass "fm-control relaunch: a live pane PATH comes from the process-group leader, not same-group children"
+}
+
 test_exited_relaunch_resolves_path_after_worktree_return() {
   local dir entry scenario out rc launch
   for entry in control spawn; do
@@ -2376,6 +2408,76 @@ SH
   pass "fm-control and fm-spawn relaunch: relative PATH entries resolve Cursor to an absolute launcher"
 }
 
+test_relaunch_executable_token_table() {
+  local dir scenario token out rc launch
+  for scenario in tilde relative-dot bare absolute ampersand missing; do
+    dir=$(new_case "token-$scenario" rl-token)
+    add_ship_task "$dir" rl-token claude
+    printf zsh > "$dir/fake/command"
+    printf codex > "$dir/fake/becomes"
+    mkdir -p "$dir/user-home/bin" "$dir/wt/bin" "$dir/abs bin" "$dir/R&D"
+    case "$scenario" in
+      tilde)
+        cat > "$dir/user-home/bin/codex" <<SH
+#!/bin/sh
+printf $scenario > '$dir/executable-ran'
+SH
+        chmod +x "$dir/user-home/bin/codex"
+        token=\~'/bin/codex --token'
+        ;;
+      relative-dot)
+        cat > "$dir/wt/bin/codex" <<SH
+#!/bin/sh
+printf $scenario > '$dir/executable-ran'
+SH
+        chmod +x "$dir/wt/bin/codex"
+        token='./bin/codex --token'
+        ;;
+      bare)
+        cat > "$dir/abs bin/codex" <<SH
+#!/bin/sh
+printf $scenario > '$dir/executable-ran'
+SH
+        chmod +x "$dir/abs bin/codex"
+        token=codex
+        ;;
+      absolute)
+        cat > "$dir/abs bin/codex" <<SH
+#!/bin/sh
+printf $scenario > '$dir/executable-ran'
+SH
+        chmod +x "$dir/abs bin/codex"
+        token="'$dir/abs bin/codex' --token"
+        ;;
+      ampersand)
+        cat > "$dir/R&D/codex" <<SH
+#!/bin/sh
+printf $scenario > '$dir/executable-ran'
+SH
+        chmod +x "$dir/R&D/codex"
+        token="'$dir/R&D/codex' --token"
+        ;;
+      missing)
+        token="'$dir/missing-bin/codex' --token"
+        ;;
+    esac
+    case "$scenario" in
+      bare) out=$(FM_FAKE_PANE_PATH="$dir/abs bin" run_spawn "$dir" rl-token --relaunch --harness "$token"); rc=$? ;;
+      *) out=$(FM_FAKE_PANE_PATH="$dir/missing-bin" run_spawn "$dir" rl-token --relaunch --harness "$token"); rc=$? ;;
+    esac
+    if [ "$scenario" = missing ]; then
+      expect_code 1 "$rc" "missing executable token must refuse: $out"
+      [ ! -s "$dir/fake/literal" ] || fail "missing token still launched"
+    else
+      expect_code 0 "$rc" "$scenario token should relaunch: $out"
+      launch=$(tail -n 1 "$dir/fake/literal")
+      bash -c "$launch" || fail "$scenario generated launch failed"
+      [ "$(cat "$dir/executable-ran")" = "$scenario" ] || fail "$scenario resolved the wrong executable"
+    fi
+  done
+  pass "fm-spawn relaunch: one resolver covers tilde, relative, bare, absolute, ampersand, and missing tokens"
+}
+
 test_relaunch_normalizes_control_paths() {
   local dir scenario out rc
   for scenario in relative-home relative-state; do
@@ -2399,7 +2501,7 @@ test_relaunch_normalizes_control_paths() {
 
 test_relaunch_proves_recorded_pool_slot_ownership() {
   local dir scenario wt lock out rc
-  for scenario in mine reassigned absent unsafe locked live-reassigned direct-reassigned; do
+  for scenario in mine mine-live stolen-at-stop reassigned absent unsafe locked live-reassigned direct-reassigned; do
     dir=$(new_case "slot-$scenario" rl-slot)
     add_ship_task "$dir" rl-slot claude
     wt="$dir/pool/1/proj"
@@ -2426,9 +2528,12 @@ test_relaunch_proves_recorded_pool_slot_ownership() {
       absent) rm "$dir/pool/1/.fm-slot-owner" ;;
       unsafe) rm "$dir/pool/1/.fm-slot-owner"; mkdir "$dir/pool/1/.fm-slot-owner" ;;
       locked) mkdir "$lock"; printf '%s\n' "$$" > "$lock/pid" ;;
-      mine)
-        printf '%s\n' "$ROOT/bin/fm-wake-lib.sh" > "$dir/wake-lib"
-        printf '%s\n' "$lock" > "$dir/project-lock"
+    esac
+    printf '%s\n' "$ROOT/bin/fm-wake-lib.sh" > "$dir/wake-lib"
+    printf '%s\n' "$lock" > "$dir/project-lock"
+    printf '%s\n' "$wt" > "$dir/slot-worktree"
+    case "$scenario" in
+      mine|mine-live)
         cat > "$dir/fake/after-cd" <<'SH'
 #!/usr/bin/env bash
 set -eu
@@ -2446,13 +2551,49 @@ kill -0 "$FM_LOCK_HELD_PID"
 printf 'held\n' >> "$CASE/slot-lock-proven"
 SH
         chmod +x "$dir/fake/after-cd"
-        cp -p "$dir/fake/after-cd" "$dir/fake/before-launch"
         ;;
     esac
-    if [ "$scenario" = live-reassigned ]; then
-      printf claude > "$dir/fake/command"
-      printf '%s' "$wt" > "$dir/fake/cwd"
-    fi
+    case "$scenario" in
+      mine-live)
+        cat > "$dir/fake/before-exit" <<'SH'
+#!/usr/bin/env bash
+set -eu
+CASE=${FM_FAKE_DIR%/*}
+FM_HOME="$CASE/home"
+STATE="$FM_HOME/state"
+# shellcheck source=/dev/null
+. "$(cat "$CASE/wake-lib")"
+lock=$(cat "$CASE/project-lock")
+fm_lock_try_acquire "$lock"
+fm_lock_release "$lock"
+: > "$CASE/slot-lock-free-at-stop"
+SH
+        chmod +x "$dir/fake/before-exit"
+        ;;
+      stolen-at-stop)
+        cat > "$dir/fake/before-exit" <<'SH'
+#!/usr/bin/env bash
+set -eu
+CASE=${FM_FAKE_DIR%/*}
+FM_HOME="$CASE/home"
+STATE="$FM_HOME/state"
+# shellcheck source=/dev/null
+. "$(cat "$CASE/wake-lib")"
+lock=$(cat "$CASE/project-lock")
+fm_lock_try_acquire "$lock"
+fm_treehouse_slot_owner_claim "$(cat "$CASE/slot-worktree")" successor "$FM_HOME"
+fm_lock_release "$lock"
+SH
+        chmod +x "$dir/fake/before-exit"
+        ;;
+    esac
+    case "$scenario" in
+      live-reassigned|mine-live|stolen-at-stop)
+        printf claude > "$dir/fake/command"
+        printf '%s' "$wt" > "$dir/fake/cwd"
+        [ "$scenario" = live-reassigned ] || printf '%s' "$dir/home" > "$dir/fake/exit-cwd"
+        ;;
+    esac
     cp "$dir/home/state/rl-slot.meta" "$dir/meta.before"
     cp "$dir/fake/cwd" "$dir/cwd.before"
     cp "$dir/fake/command" "$dir/command.before"
@@ -2461,19 +2602,35 @@ SH
     else
       out=$(run_control "$dir" rl-slot relaunch --note 'Recover the recorded slot.'); rc=$?
     fi
-    if [ "$scenario" = mine ]; then
-      expect_code 0 "$rc" "an owned slot should relaunch: $out"
-      [ "$(cat "$dir/fake/cwd")" = "$wt" ] || fail "owned slot was not re-entered"
-      [ "$(cat "$dir/fake/command")" = claude ] || fail "owned slot did not launch"
-      [ "$(wc -l < "$dir/slot-lock-proven")" -eq 2 ] || fail "project lock did not cover entry and launch"
-    else
-      expect_code 1 "$rc" "$scenario must refuse before entry or stop: $out"
-      assert_contains "$out" Treehouse "refusal should identify the pool ownership boundary"
-      cmp -s "$dir/cwd.before" "$dir/fake/cwd" || fail "$scenario entered the recorded slot"
-      cmp -s "$dir/command.before" "$dir/fake/command" || fail "$scenario stopped or launched an agent"
-      cmp -s "$dir/meta.before" "$dir/home/state/rl-slot.meta" || fail "$scenario changed the task record"
-      [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "$scenario sent lifecycle bytes"
-    fi
+    case "$scenario" in
+      mine|mine-live|absent)
+        expect_code 0 "$rc" "an owned or unclaimed slot should relaunch: $out"
+        [ "$(cat "$dir/fake/cwd")" = "$wt" ] || fail "$scenario slot was not re-entered"
+        [ "$(cat "$dir/fake/command")" = claude ] || fail "$scenario slot did not launch"
+        if [ "$scenario" != absent ]; then
+          [ "$(wc -l < "$dir/slot-lock-proven")" -eq 1 ] || fail "project lock did not cover $scenario re-entry"
+        fi
+        if [ "$scenario" = mine-live ]; then
+          assert_present "$dir/slot-lock-free-at-stop" "project lock was still held during the stop wait"
+        fi
+        ;;
+      stolen-at-stop)
+        expect_code 1 "$rc" "a slot reassigned during stop must refuse the post-stop return: $out"
+        assert_contains "$out" Treehouse "post-stop refusal should identify the pool ownership boundary"
+        [ "$(cat "$dir/fake/cwd")" = "$dir/home" ] || fail "relaunch returned into a reassigned slot"
+        [ "$(cat "$dir/fake/command")" = zsh ] || fail "relaunch launched into a reassigned slot"
+        ! grep -q '^cd -- ' "$dir/fake/keys" || fail "relaunch sent a return command toward a reassigned slot"
+        [ "$(sed -n 's/^task=//p' "$dir/pool/1/.fm-slot-owner")" = successor ] || fail "relaunch changed the successor claim"
+        ;;
+      *)
+        expect_code 1 "$rc" "$scenario must refuse before entry or stop: $out"
+        assert_contains "$out" Treehouse "refusal should identify the pool ownership boundary"
+        cmp -s "$dir/cwd.before" "$dir/fake/cwd" || fail "$scenario entered the recorded slot"
+        cmp -s "$dir/command.before" "$dir/fake/command" || fail "$scenario stopped or launched an agent"
+        cmp -s "$dir/meta.before" "$dir/home/state/rl-slot.meta" || fail "$scenario changed the task record"
+        [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "$scenario sent lifecycle bytes"
+        ;;
+    esac
     [ "$(cat "$wt/.fm-slot-fixture")" = 'successor wiring' ] || fail "relaunch changed unrelated slot wiring"
     if [ "$scenario" = locked ]; then
       [ "$(cat "$lock/pid")" = "$$" ] || fail "relaunch stole the allocation lock"
@@ -2481,16 +2638,24 @@ SH
       assert_absent "$lock" "relaunch leaked the allocation lock"
     fi
   done
-  pass "relaunch: pool ownership is proven under the allocation lock before entry or stop"
+  pass "relaunch: pool ownership is proven under the allocation lock before entry and again before the post-stop return"
 }
 
 test_kimi_relaunch_preserves_concurrent_config_edits() {
-  local dir scenario config out rc token inode
-  for scenario in installed install-needed; do
+  local dir scenario config out rc token inode pane_path
+  for scenario in installed install-needed fallback-install; do
     dir=$(new_case "kimi-config-$scenario" rl-kimi-config)
     add_ship_task "$dir" rl-kimi-config claude
-    printf '#!/bin/sh\nexit 0\n' > "$dir/fakebin/kimi"
-    chmod +x "$dir/fakebin/kimi"
+    pane_path="$dir/fakebin:$PATH"
+    if [ "$scenario" = fallback-install ]; then
+      mkdir -p "$dir/user-home/.kimi-code/bin"
+      printf '#!/bin/sh\nexit 0\n' > "$dir/user-home/.kimi-code/bin/kimi"
+      chmod +x "$dir/user-home/.kimi-code/bin/kimi"
+      pane_path="$dir/fakebin:/usr/bin:/bin"
+    else
+      printf '#!/bin/sh\nexit 0\n' > "$dir/fakebin/kimi"
+      chmod +x "$dir/fakebin/kimi"
+    fi
     mkdir -p "$dir/user-home/.kimi-code"
     config="$dir/user-home/.kimi-code/config.toml"
     printf '# Preserve user settings.\ndefault_model = "original"\n' > "$config"
@@ -2514,10 +2679,14 @@ python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_ino)' "$config" > "$CAS
 : > "$CASE/kimi-staging-proven"
 SH
     chmod +x "$dir/fake/before-exit"
-    out=$(run_control "$dir" rl-kimi-config relaunch --harness kimi --note 'Keep concurrent configuration edits.'); rc=$?
+    out=$(FM_FAKE_PANE_PATH="$pane_path" run_control "$dir" rl-kimi-config relaunch --harness kimi --note 'Keep concurrent configuration edits.'); rc=$?
     expect_code 0 "$rc" "Kimi $scenario relaunch should succeed: $out"
     assert_present "$dir/kimi-staging-proven" "Kimi preparation changed live config or failed to stage wiring"
     [ "$(cat "$dir/fake/command")" = kimi ] || fail "Kimi did not launch"
+    if [ "$scenario" = fallback-install ]; then
+      assert_contains "$(cat "$dir/fake/literal")" "$dir/user-home/.kimi-code/bin/kimi" \
+        "an off-PATH Kimi install did not launch from its owner fallback"
+    fi
     python3 - "$config" <<'PY'
 import sys
 import tomllib
@@ -2542,16 +2711,18 @@ PY
       | HOME="$dir/user-home" bash "$dir/user-home/.kimi-code/fm-turn-end.sh"
     assert_present "$dir/home/state/rl-kimi-config.turn-ended" "Kimi replacement hook did not deliver turn end"
   done
-  pass "fm-control relaunch: Kimi activation preserves concurrent settings and avoids unchanged config replacement"
+  pass "fm-control relaunch: Kimi activation preserves concurrent settings, avoids unchanged config replacement, and keeps off-PATH installs"
 }
 
 test_relaunch_normalizes_control_paths
 test_relaunch_proves_recorded_pool_slot_ownership
 test_kimi_relaunch_preserves_concurrent_config_edits
 test_relaunch_preserves_ampersands_in_executable_paths
+test_relaunch_executable_token_table
 test_exited_relaunch_normalizes_relative_cursor_executable
 test_native_process_path_preserves_entry_boundaries
 test_relaunch_ignores_path_assignments_in_arguments
+test_live_relaunch_reads_path_from_the_group_leader
 test_exited_relaunch_resolves_path_after_worktree_return
 
 test_relaunch_validates_retirement_inputs_before_stop
