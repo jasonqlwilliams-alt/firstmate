@@ -1,0 +1,16 @@
+# herdr 0.7.4 isolated; test=branch; fault: Part C sampler workspace-list read delayed 5s while operation-c.active exists
+# exit=1 secs=7
+ok - old path: the explicit last-pane close of a non-focused workspace stole focus (w3	w3:t1 -> w2	w2:t1)
+ok - mitigation: every in-operation sample preserved exact focus while the doomed workspace was removed
+ok - mitigation: no explicit close and no corrective focus were needed on the defective release
+not ok - the Part C focus sampler took no in-operation sample before the close
+# --- injection log (calls seen while the Part C operation marker existed) ---
+11:23:54.478 delayed 5s: workspace list --session fm-lab-fm-herdr-focus-f-3718072-28718
+11:23:59.498 test call: tab list --workspace w8 --session fm-lab-fm-herdr-focus-f-3718072-28718
+11:23:59.518 test call: session list --json --session fm-lab-fm-herdr-focus-f-3718072-28718
+11:23:59.530 test call: session list --json --session fm-lab-fm-herdr-focus-f-3718072-28718
+11:23:59.541 test call: session stop fm-lab-fm-herdr-focus-f-3718072-28718 --json --session fm-lab-fm-herdr-focus-f-3718072-28718
+11:24:00.152 test call: session list --json --session fm-lab-fm-herdr-focus-f-3718072-28718
+11:24:00.162 test call: session delete fm-lab-fm-herdr-focus-f-3718072-28718 --json --session fm-lab-fm-herdr-focus-f-3718072-28718
+11:24:00.168 test call: session list --json --session fm-lab-fm-herdr-focus-f-3718072-28718
+11:24:00.180 test call: session list --json --session fm-lab-fm-herdr-focus-f-3718072-28718

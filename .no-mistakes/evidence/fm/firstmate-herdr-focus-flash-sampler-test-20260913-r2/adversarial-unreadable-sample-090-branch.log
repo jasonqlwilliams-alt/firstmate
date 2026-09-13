@@ -1,0 +1,13 @@
+# herdr 0.9.0 isolated (focus-preserving); test=branch; fault: 2nd in-operation Part C sampler read fails -> one UNREADABLE sample
+# exit=1
+ok - old path note: this Herdr release preserves focus across the explicit close; continuing with outcome-only assertions
+ok - mitigation: every in-operation sample preserved exact focus while the doomed workspace was removed
+ok - fallback: a doomed pane holding a persistent child exhausts the proof and takes the plain explicit close
+not ok - a focus-preserving release exposed 1 wrong-focus samples on the fallback path
+# --- injection log (first lines) ---
+11:25:31.830 sampler read #1 ok
+11:25:31.869 sampler read #2 forced to fail: workspace list --session fm-lab-fm-herdr-focus-f-3775809-4735
+11:25:31.882 sampler read #3 ok
+11:25:31.916 sampler read #4 ok
+11:25:31.947 sampler read #5 ok
+... total sampler reads during operation: 16

@@ -1,0 +1,12 @@
+load: 24 busy-loop processes on 12 CPUs; loadavg at start: 6.38 5.33 4.88
+run 01 exit=0 secs=14 loadavg=10.23 | ok - fallback on a defective release: a bounded wrong-focus window of 2 samples was fully restored to the anchor
+run 02 exit=0 secs=12 loadavg=14.62 | ok - fallback on a defective release: a bounded wrong-focus window of 2 samples was fully restored to the anchor
+run 03 exit=0 secs=14 loadavg=19.08 | ok - fallback on a defective release: a bounded wrong-focus window of 3 samples was fully restored to the anchor
+run 04 exit=0 secs=14 loadavg=20.44 | ok - fallback on a defective release: a bounded wrong-focus window of 3 samples was fully restored to the anchor
+run 05 exit=0 secs=16 loadavg=24.43 | ok - fallback on a defective release: a bounded wrong-focus window of 3 samples was fully restored to the anchor
+run 06 exit=0 secs=15 loadavg=26.10 | ok - fallback on a defective release: a bounded wrong-focus window of 2 samples was fully restored to the anchor
+run 07 exit=0 secs=14 loadavg=26.92 | ok - fallback on a defective release: a bounded wrong-focus window of 3 samples was fully restored to the anchor
+run 08 exit=0 secs=12 loadavg=27.87 | ok - fallback on a defective release: a bounded wrong-focus window of 2 samples was fully restored to the anchor
+run 09 exit=0 secs=13 loadavg=28.94 | ok - fallback on a defective release: a bounded wrong-focus window of 3 samples was fully restored to the anchor
+run 10 exit=0 secs=14 loadavg=29.11 | ok - fallback on a defective release: a bounded wrong-focus window of 4 samples was fully restored to the anchor
+SUMMARY herdr=0.7.4 branch=9a88104 cpu-load runs: pass=10 fail=0

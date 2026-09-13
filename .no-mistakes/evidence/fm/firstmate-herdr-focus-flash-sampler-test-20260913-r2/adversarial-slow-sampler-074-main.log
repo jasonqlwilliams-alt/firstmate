@@ -1,0 +1,27 @@
+# herdr 0.7.4 isolated; test=main; fault: Part C sampler workspace-list read delayed 5s while operation-c.active exists
+# exit=1 secs=7
+ok - old path: the explicit last-pane close of a non-focused workspace stole focus (w3	w3:t1 -> w2	w2:t1)
+ok - mitigation: every in-operation sample preserved exact focus while the doomed workspace was removed
+ok - mitigation: no explicit close and no corrective focus were needed on the defective release
+ok - fallback: a doomed pane holding a persistent child exhausts the proof and takes the plain explicit close
+not ok - Part C reached the fallback on a defective release but observed no wrong-focus sample at all, so the sampler proved nothing
+# --- injection log (calls seen while the Part C operation marker existed) ---
+11:24:01.502 delayed 5s: workspace list --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:01.523 production call: workspace list --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:01.541 production call: tab list --workspace w8 --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:01.560 production call: pane get w9:p1 --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:01.588 production call: tab list --workspace w9 --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:01.606 production call: pane list --workspace w9 --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:01.623 production call: workspace list --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:01.643 production call: pane process-info --pane w9:p1 --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:01.769 production call: pane process-info --pane w9:p1 --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:01.895 production call: pane process-info --pane w9:p1 --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:01.924 production call: terminal title clear --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:01.941 production call: pane close w9:p1 --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:01.961 production call: pane get w9:p1 --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:01.978 production call: workspace list --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:01.995 production call: tab list --workspace wA --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:02.011 production call: tab get w8:t1 --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:02.028 production call: tab focus w8:t1 --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:02.040 production call: workspace list --session fm-lab-fm-herdr-focus-f-3721766-1857
+11:24:02.057 production call: tab list --workspace w8 --session fm-lab-fm-herdr-focus-f-3721766-1857

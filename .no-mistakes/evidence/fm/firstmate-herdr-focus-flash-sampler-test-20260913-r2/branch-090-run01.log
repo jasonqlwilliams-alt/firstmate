@@ -1,0 +1,8 @@
+ok - old path note: this Herdr release preserves focus across the explicit close; continuing with outcome-only assertions
+ok - mitigation: every in-operation sample preserved exact focus while the doomed workspace was removed
+ok - fallback: a doomed pane holding a persistent child exhausts the proof and takes the plain explicit close
+ok - fallback on a focus-preserving release: the plain explicit close preserved exact focus throughout
+ok - version floor: herdr 0.9.0 protocol 22 is at or above the floor and preserves focus
+ok - version floor: an unconfigured home stays projected on herdr 0.9.0 and the explicit opt-in agrees
+evidence: herdr=0.9.0 protocol=22 steal_live=0 floor_verdict=0 default-session-tripwire=armed
+run01 exit=0

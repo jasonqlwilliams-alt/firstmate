@@ -1,0 +1,16 @@
+run 01 exit=0 | ok - fallback on a defective release: a bounded wrong-focus window of 3 samples was fully restored to the anchor
+run 02 exit=0 | ok - fallback on a defective release: a bounded wrong-focus window of 4 samples was fully restored to the anchor
+run 03 exit=0 | ok - fallback on a defective release: a bounded wrong-focus window of 3 samples was fully restored to the anchor
+run 04 exit=0 | ok - fallback on a defective release: a bounded wrong-focus window of 4 samples was fully restored to the anchor
+run 05 exit=0 | ok - fallback on a defective release: a bounded wrong-focus window of 3 samples was fully restored to the anchor
+run 06 exit=0 | ok - fallback on a defective release: a bounded wrong-focus window of 3 samples was fully restored to the anchor
+run 07 exit=0 | ok - fallback on a defective release: a bounded wrong-focus window of 3 samples was fully restored to the anchor
+run 08 exit=0 | ok - fallback on a defective release: a bounded wrong-focus window of 4 samples was fully restored to the anchor
+run 09 exit=0 | ok - fallback on a defective release: a bounded wrong-focus window of 3 samples was fully restored to the anchor
+run 10 exit=0 | ok - fallback on a defective release: a bounded wrong-focus window of 3 samples was fully restored to the anchor
+run 11 exit=0 | ok - fallback on a defective release: a bounded wrong-focus window of 3 samples was fully restored to the anchor
+run 12 exit=0 | ok - fallback on a defective release: a bounded wrong-focus window of 4 samples was fully restored to the anchor
+run 13 exit=0 | ok - fallback on a defective release: a bounded wrong-focus window of 3 samples was fully restored to the anchor
+run 14 exit=0 | ok - fallback on a defective release: a bounded wrong-focus window of 3 samples was fully restored to the anchor
+run 15 exit=0 | ok - fallback on a defective release: a bounded wrong-focus window of 3 samples was fully restored to the anchor
+SUMMARY herdr=0.7.4 branch=9a88104 idle runs: pass=15 fail=0

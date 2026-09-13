@@ -1,0 +1,35 @@
+$ git diff --stat 6b5860f..9a88104
+ tests/fm-backend-herdr-focus-flash-e2e.test.sh | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+$ git diff 6b5860f..9a88104 -- bin/  (production code)
+lines of diff: 0
+
+$ git show --stat 9a88104 (on-top message commit)
+commit 9a881040f85f72f72adcd187378491159299bb4f
+Author: Jason Williams <jason@still-labs.com>
+Date:   Sun Sep 13 11:13:36 2026 -0700
+
+    test(herdr): wait for a Part C in-operation sample before close
+    
+    This message replaces the a74b194 message as the description of the branch.
+    The only Part C change on this branch is a sampler handshake. After the
+    sampler ready file appears and the operation marker is set, the test waits
+    until the background sampler has written at least one in-operation sample.
+    Only then does it run the production focus-preserving close. If no sample
+    appears, Part C fails with a clear message.
+    
+    The close-instant shim sample, the post-close drain wait, and the UNREADABLE
+    counting change that a74b194 describes are not on this branch. Part C counts
+    wrong-focus samples with the same grep as main, so UNREADABLE still counts.
+    STEAL_LIVE=1 handling and production close behavior in bin/backends/herdr.sh
+    are unchanged.
+    
+    The handshake only proves the sampler is sampling before the close starts. It
+    does not force a sample into the defective-release steal window, so this is
+    not a CI determinism fix.
+    
+    Evidence: isolated Herdr 0.7.4 passed 85/85 on main and 43/43 on this branch.
+    Neither run showed a zero-sample miss.
+    
+    Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

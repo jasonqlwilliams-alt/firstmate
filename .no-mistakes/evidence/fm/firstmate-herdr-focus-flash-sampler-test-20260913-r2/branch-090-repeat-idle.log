@@ -1,0 +1,6 @@
+run 01 exit=0 | ok - fallback on a focus-preserving release: the plain explicit close preserved exact focus throughout
+run 02 exit=0 | ok - fallback on a focus-preserving release: the plain explicit close preserved exact focus throughout
+run 03 exit=0 | ok - fallback on a focus-preserving release: the plain explicit close preserved exact focus throughout
+run 04 exit=0 | ok - fallback on a focus-preserving release: the plain explicit close preserved exact focus throughout
+run 05 exit=0 | ok - fallback on a focus-preserving release: the plain explicit close preserved exact focus throughout
+SUMMARY herdr=0.9.0 branch=9a88104 idle runs: pass=5 fail=0

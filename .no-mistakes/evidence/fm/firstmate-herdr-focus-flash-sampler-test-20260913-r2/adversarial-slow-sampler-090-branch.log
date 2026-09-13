@@ -1,0 +1,15 @@
+# herdr 0.9.0 isolated (focus-preserving); test=branch; fault: Part C sampler workspace-list read delayed 5s while operation-c.active exists
+# exit=1 secs=7
+ok - old path note: this Herdr release preserves focus across the explicit close; continuing with outcome-only assertions
+ok - mitigation: every in-operation sample preserved exact focus while the doomed workspace was removed
+not ok - the Part C focus sampler took no in-operation sample before the close
+# --- injection log (calls seen while the Part C operation marker existed) ---
+11:24:58.765 delayed 5s: workspace list --session fm-lab-fm-herdr-focus-f-3755345-382
+11:25:03.785 test call: tab list --workspace w8 --session fm-lab-fm-herdr-focus-f-3755345-382
+11:25:03.804 test call: session list --json --session fm-lab-fm-herdr-focus-f-3755345-382
+11:25:03.815 test call: session list --json --session fm-lab-fm-herdr-focus-f-3755345-382
+11:25:03.826 test call: session stop fm-lab-fm-herdr-focus-f-3755345-382 --json --session fm-lab-fm-herdr-focus-f-3755345-382
+11:25:04.694 test call: session list --json --session fm-lab-fm-herdr-focus-f-3755345-382
+11:25:04.704 test call: session delete fm-lab-fm-herdr-focus-f-3755345-382 --json --session fm-lab-fm-herdr-focus-f-3755345-382
+11:25:04.711 test call: session list --json --session fm-lab-fm-herdr-focus-f-3755345-382
+11:25:04.724 test call: session list --json --session fm-lab-fm-herdr-focus-f-3755345-382

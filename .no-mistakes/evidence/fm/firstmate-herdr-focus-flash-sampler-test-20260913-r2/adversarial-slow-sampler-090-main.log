@@ -1,0 +1,25 @@
+# herdr 0.9.0 isolated (focus-preserving); test=main; fault: Part C sampler workspace-list read delayed 5s while operation-c.active exists
+# exit=0 secs=8
+ok - old path note: this Herdr release preserves focus across the explicit close; continuing with outcome-only assertions
+ok - mitigation: every in-operation sample preserved exact focus while the doomed workspace was removed
+ok - fallback: a doomed pane holding a persistent child exhausts the proof and takes the plain explicit close
+ok - fallback on a focus-preserving release: the plain explicit close preserved exact focus throughout
+ok - version floor: herdr 0.9.0 protocol 22 is at or above the floor and preserves focus
+ok - version floor: an unconfigured home stays projected on herdr 0.9.0 and the explicit opt-in agrees
+evidence: herdr=0.9.0 protocol=22 steal_live=0 floor_verdict=0 default-session-tripwire=armed
+# --- injection log (calls seen while the Part C operation marker existed) ---
+11:25:06.306 delayed 5s: workspace list --session fm-lab-fm-herdr-focus-f-3759369-13179
+11:25:06.333 production call: workspace list --session fm-lab-fm-herdr-focus-f-3759369-13179
+11:25:06.355 production call: tab list --workspace w8 --session fm-lab-fm-herdr-focus-f-3759369-13179
+11:25:06.375 production call: pane get w9:p1 --session fm-lab-fm-herdr-focus-f-3759369-13179
+11:25:06.410 production call: tab list --workspace w9 --session fm-lab-fm-herdr-focus-f-3759369-13179
+11:25:06.431 production call: pane list --workspace w9 --session fm-lab-fm-herdr-focus-f-3759369-13179
+11:25:06.452 production call: workspace list --session fm-lab-fm-herdr-focus-f-3759369-13179
+11:25:06.480 production call: pane process-info --pane w9:p1 --session fm-lab-fm-herdr-focus-f-3759369-13179
+11:25:06.614 production call: pane process-info --pane w9:p1 --session fm-lab-fm-herdr-focus-f-3759369-13179
+11:25:06.748 production call: pane process-info --pane w9:p1 --session fm-lab-fm-herdr-focus-f-3759369-13179
+11:25:06.781 production call: terminal title clear --session fm-lab-fm-herdr-focus-f-3759369-13179
+11:25:06.804 production call: pane close w9:p1 --session fm-lab-fm-herdr-focus-f-3759369-13179
+11:25:06.829 production call: pane get w9:p1 --session fm-lab-fm-herdr-focus-f-3759369-13179
+11:25:06.852 production call: workspace list --session fm-lab-fm-herdr-focus-f-3759369-13179
+11:25:06.870 production call: tab list --workspace w8 --session fm-lab-fm-herdr-focus-f-3759369-13179
