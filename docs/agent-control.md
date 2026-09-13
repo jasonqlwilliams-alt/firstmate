@@ -81,7 +81,7 @@ It is not deterministic across the verified adapters: codex, grok, and gemini re
    It obtains validated retirement paths through `bin/fm-control-lib.sh`, including any Grok or Kimi token sidecar and its resolved registry entry.
    For a secondmate, it also proves inheritance destination access and acquires the required inheritance lock through the shared lock owner, including recovery of abandoned legacy locks; home synchronization and inherited-file publication wait until the old agent has stopped.
    Preparation preserves the previous wiring, active busy generation, and task record.
-   The same spawn process holds its locks and resolved launch inputs until control authorizes it to continue; the script's header owns this internal handoff.
+   Apart from that Treehouse project lock, the same spawn process holds its locks and resolved launch inputs until control authorizes it to continue; the script's header owns this internal handoff.
 5. **Stop the old agent** through the `exit` verb, with its postcondition, then release the prepared launch.
    The replacement reuses the recorded endpoint and worktree, retires the previous harness's per-task wiring, publishes the staged wiring, and activates the prepared busy generation where one was armed.
    Kimi's installer reapplies its owned hook region to the current configuration after stop, preserving unrelated edits made during preparation and leaving an unchanged configuration file untouched.

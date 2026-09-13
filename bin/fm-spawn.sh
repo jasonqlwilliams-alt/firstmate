@@ -47,8 +47,8 @@
 #   from the parent holding the task's control lock. The ready marker is
 #   published only after prepare_relaunch succeeds under the preparation
 #   contract in docs/agent-control.md.
-#   It waits for control's continue marker after exit, retaining the resolved
-#   launch profile throughout.
+#   It waits for control's continue marker after exit, retaining its other
+#   locks and the resolved launch profile throughout.
 #   A pool-slot allocation lock is held only through ownership proof and
 #   worktree re-entry, then released before that wait. After continue it is
 #   taken again, waiting rather than refusing, and the slot claim is proven

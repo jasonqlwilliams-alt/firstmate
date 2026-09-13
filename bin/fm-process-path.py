@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read a process's PATH from its native environment: fm-process-path.py <pid>."""
+"""Read one variable (default PATH) from a process's native environment: fm-process-path.py <pid> [NAME]."""
 
 import ctypes
 import os
