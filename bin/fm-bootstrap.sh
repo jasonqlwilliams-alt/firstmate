@@ -56,7 +56,8 @@
 #          treehouse is also MISSING when its installed version lacks
 #          "treehouse get --lease" support.
 #          no-mistakes is also MISSING when its installed version is older than
-#          1.72.0 (structured pipeline attestation floor; see CONTRIBUTING.md).
+#          NO_MISTAKES_MIN below, the shared no-mistakes daemon version; the
+#          structured attestation format dates from 1.46.0 (see CONTRIBUTING.md).
 #          The AXI-family floor policy is owned beside GH_AXI_MIN and
 #          LAVISH_AXI_MIN below; the per-tool owners point there. An installed
 #          essential build below its floor reports MISSING like no-mistakes.
