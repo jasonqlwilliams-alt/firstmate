@@ -68,29 +68,37 @@ def parse_darwin_environment(data):
     return entries
 
 
-def process_path(pid):
+def process_env(pid, name="PATH"):
     if not 0 < pid <= 2**31 - 1:
         raise ValueError("pid must be a positive native process id")
+    if not name.isidentifier() or not name.isascii():
+        raise ValueError("environment name must be an identifier")
     if sys.platform == "darwin":
         entries = darwin_environment(pid)
     elif sys.platform.startswith("linux"):
         entries = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
     else:
         raise ValueError("native process environment is unsupported")
-    matches = [entry[5:] for entry in entries if entry.startswith(b"PATH=")]
+    prefix = name.encode() + b"="
+    matches = [entry[len(prefix):] for entry in entries if entry.startswith(prefix)]
     if len(matches) != 1 or not matches[0]:
-        raise ValueError("process environment has no unique nonempty PATH")
+        raise ValueError(f"process environment has no unique nonempty {name}")
     return matches[0]
 
 
+def process_path(pid):
+    return process_env(pid, "PATH")
+
+
 def main(argv):
-    if len(argv) != 2:
-        print("usage: fm-process-path.py <pid>", file=sys.stderr)
+    if len(argv) not in (2, 3):
+        print("usage: fm-process-path.py <pid> [NAME]", file=sys.stderr)
         return 2
+    name = argv[2] if len(argv) == 3 else "PATH"
     try:
-        value = process_path(int(argv[1]))
+        value = process_env(int(argv[1]), name)
     except (OSError, ValueError) as error:
-        print(f"error: cannot read process PATH: {error}", file=sys.stderr)
+        print(f"error: cannot read process {name}: {error}", file=sys.stderr)
         return 1
     sys.stdout.buffer.write(value)
     return 0

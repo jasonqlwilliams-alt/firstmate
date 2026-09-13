@@ -70,8 +70,10 @@ It is not deterministic across the verified adapters: codex, grok, and gemini re
    A secondmate relaunch does not require one and never rewrites its standing charter.
 4. **Prepare the replacement** through its single owner, `bin/fm-spawn.sh --relaunch`, before stopping the old agent.
    Preparation checks launch configuration, instructions, delivery policy, backlog eligibility, recorded worktree isolation, and workspace trust.
-   A recorded Treehouse pool slot must still be claimed by this task under the shared project lock before worktree re-entry or stop; that lock remains held through launch and record publication.
-   Executable resolution uses the pane's `PATH` in the recorded worktree: an exited shell returns there before its `PATH` is captured, while a live endpoint's `PATH` comes from its native process environment with entry boundaries preserved.
+   A recorded Treehouse pool slot must still be claimed by this task (`mine` or `absent`) under the shared project lock before worktree re-entry or stop; that lock is released once re-entry or the live cwd check is confirmed, before the continue-marker wait.
+   Executable resolution uses one token resolver against the pane `HOME`, `PATH`, and recorded worktree.
+   An exited shell returns there before those values are captured.
+   A live endpoint reads them from the foreground process-group leader only, with native environment entry boundaries preserved.
    For a direct raw-command relaunch through `fm-spawn.sh`, the explicitly selected executable is validated.
    Before readiness, `prepare_relaunch` verifies the resolved executable and staged hook and plugin files and their destinations.
    It obtains validated retirement paths through `bin/fm-control-lib.sh`, including any Grok or Kimi token sidecar and its resolved registry entry.
