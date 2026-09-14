@@ -769,7 +769,9 @@ test_cli_scopes_the_selected_client_to_its_session() {
 session=${!#}
 printf '%s\n' "$*" >> "${FM_HERDR_PAIR_DIR:?}/stale.log"
 if [ "${1:-} ${2:-}" = "status --json" ]; then
-  if [ "$session" = fresh ]; then
+  if [ "$session" = fresh ] && [ -e "$FM_HERDR_PAIR_DIR/server.out" ]; then
+    printf '{"client":{"version":"0.8.2","protocol":20},"server":{"running":true}}\n'
+  elif [ "$session" = fresh ]; then
     printf '{"client":{"version":"0.8.2","protocol":20},"server":{"running":false}}\n'
   elif [ -e "$FM_HERDR_PAIR_DIR/switched" ]; then
     printf '{"client":{"version":"0.8.2","protocol":20},"server":{"running":true,"protocol":20,"compatible":true}}\n'
@@ -777,7 +779,8 @@ if [ "${1:-} ${2:-}" = "status --json" ]; then
     printf '{"client":{"version":"0.8.2","protocol":20},"server":{"running":true,"protocol":22,"compatible":false}}\n'
   fi
 elif [ "$session" = fresh ] && [ "${1:-}" = server ]; then
-  printf 'path-default-server\n'
+  printf 'path-default-server\n' > "$FM_HERDR_PAIR_DIR/server.tmp"
+  mv "$FM_HERDR_PAIR_DIR/server.tmp" "$FM_HERDR_PAIR_DIR/server.out"
 elif [ "$session" = modern ] && [ -e "$FM_HERDR_PAIR_DIR/switched" ]; then
   printf 'legacy\n'
 else
@@ -790,7 +793,9 @@ SH
 session=${!#}
 printf '%s\n' "$*" >> "${FM_HERDR_PAIR_DIR:?}/current.log"
 if [ "${1:-} ${2:-}" = "status --json" ]; then
-  if [ "$session" = fresh ]; then
+  if [ "$session" = fresh ] && [ -e "$FM_HERDR_PAIR_DIR/server.out" ]; then
+    printf '{"client":{"version":"0.9.0","protocol":22},"server":{"running":true}}\n'
+  elif [ "$session" = fresh ]; then
     printf '{"client":{"version":"0.9.0","protocol":22},"server":{"running":false}}\n'
   elif [ -e "$FM_HERDR_PAIR_DIR/switched" ]; then
     printf '{"client":{"version":"0.9.0","protocol":22},"server":{"running":true,"protocol":20,"compatible":false}}\n'
@@ -798,7 +803,8 @@ if [ "${1:-} ${2:-}" = "status --json" ]; then
     printf '{"client":{"version":"0.9.0","protocol":22},"server":{"running":true,"protocol":22,"compatible":true}}\n'
   fi
 elif [ "$session" = fresh ] && [ "${1:-}" = server ]; then
-  printf 'selected-server\n'
+  printf 'selected-server\n' > "$FM_HERDR_PAIR_DIR/server.tmp"
+  mv "$FM_HERDR_PAIR_DIR/server.tmp" "$FM_HERDR_PAIR_DIR/server.out"
 elif [ "$session" = modern ] && [ ! -e "$FM_HERDR_PAIR_DIR/switched" ]; then
   printf 'modern\n'
 else
@@ -810,7 +816,7 @@ SH
   out=$(run_with_clients "$dir" "$dir/stale:$dir/current" \
     'fm_backend_herdr_cli modern pane get w1:p1 > "$FM_HERDR_PAIR_DIR/modern.out" || exit 1
      fm_backend_herdr_cli fresh status --json > "$FM_HERDR_PAIR_DIR/fresh-status.out" || exit 1
-     fm_backend_herdr_cli fresh server > "$FM_HERDR_PAIR_DIR/server.out" || exit 1
+     fm_backend_herdr_server_ensure fresh || exit 1
      touch "$FM_HERDR_PAIR_DIR/switched"
      fm_backend_herdr_cli modern pane get w1:p1 > "$FM_HERDR_PAIR_DIR/legacy.out" || exit 1
      printf "%s|%s|%s|%s|%s" "$(cat "$FM_HERDR_PAIR_DIR/modern.out")" "$(jq -r .server.running "$FM_HERDR_PAIR_DIR/fresh-status.out")" "$(cat "$FM_HERDR_PAIR_DIR/server.out")" "$(cat "$FM_HERDR_PAIR_DIR/legacy.out")" "${FM_BACKEND_HERDR_BIN:-PATH-default}"')
@@ -1137,13 +1143,16 @@ test_server_ensure_scrubs_home_and_harness_identity() {
 # Mirrors Linux fm-remote-doctor --fix: the remote job worker captures stdout
 # and stderr through fifos until EOF, and start_herdr_server calls
 # fm_backend_herdr_server_ensure with those streams redirected to /dev/null.
-# A long-lived fake server that still held the fifo write ends would make the
-# readers time out the same way the seed readiness gate hung.
+# The caller also holds its own plain (not close-on-exec) descriptors on both
+# fifos. A long-lived fake server that still held any fifo write end, or a
+# shell left waiting on it, would make the readers time out the same way the
+# seed readiness gate hung.
 test_server_ensure_releases_caller_capture_pipes() {
-  local dir fb marker stop pidfile r1 r2 wrap_rc r1_rc r2_rc pid
+  local dir fb marker stop pidfile launcher r1 r2 wrap_rc r1_rc r2_rc pid
+  [ -d /proc/self/fd ] || { echo "skip: /proc/self/fd not found (Linux-only server detach)"; return 0; }
   command -v python3 >/dev/null 2>&1 || fail "python3 is required to wait for capture-pipe EOF"
   dir="$TMP_ROOT/server-detach"; mkdir -p "$dir"
-  marker="$dir/running"; stop="$dir/stop"; pidfile="$dir/pid"
+  marker="$dir/running"; stop="$dir/stop"; pidfile="$dir/pid"; launcher="$dir/launcher-pid"
   fb=$(make_herdr_server_persist_fakebin "$dir")
   mkfifo "$dir/stdout.pipe" "$dir/stderr.pipe"
   cat > "$dir/wait_eof.py" <<'PY'
@@ -1165,14 +1174,14 @@ try:
 finally:
     os.close(fd)
 PY
-  python3 "$dir/wait_eof.py" "$dir/stdout.pipe" 2 >"$dir/stdout.cap" 2>"$dir/stdout.err" &
+  python3 "$dir/wait_eof.py" "$dir/stdout.pipe" 10 >"$dir/stdout.cap" 2>"$dir/stdout.err" &
   r1=$!
-  python3 "$dir/wait_eof.py" "$dir/stderr.pipe" 2 >"$dir/stderr.cap" 2>"$dir/stderr.err" &
+  python3 "$dir/wait_eof.py" "$dir/stderr.pipe" 10 >"$dir/stderr.cap" 2>"$dir/stderr.err" &
   r2=$!
   sleep 0.1
   PATH="$fb:$PATH" FM_HERDR_SERVER_MARKER="$marker" FM_HERDR_SERVER_STOP="$stop" \
     FM_HERDR_SERVER_PID="$pidfile" \
-    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_server_ensure fmtest >/dev/null 2>&1; printf "ENSURE_RETURNED\n"' "$ROOT" \
+    bash -c '. "$0/bin/backends/herdr.sh"; exec 7>&1 8>&2; fm_backend_herdr_server_ensure fmtest >/dev/null 2>&1; rc=$?; printf "%s\n" "$!" > "$1"; printf "ENSURE_RETURNED\n"; exit "$rc"' "$ROOT" "$launcher" \
     > "$dir/stdout.pipe" 2> "$dir/stderr.pipe"
   wrap_rc=$?
   wait "$r1"
@@ -1188,6 +1197,8 @@ PY
   expect_code 0 "$wrap_rc" "server_ensure should return once the fake server reports running"
   [ "$r1_rc" -eq 0 ] || fail "stdout capture pipe did not see EOF after server_ensure returned (rc=$r1_rc)"
   [ "$r2_rc" -eq 0 ] || fail "stderr capture pipe did not see EOF after server_ensure returned (rc=$r2_rc)"
+  [ -n "${pid:-}" ] && [ "$pid" = "$(cat "$launcher")" ] \
+    || fail "the backgrounded launcher should become the server with no waiting shell (server=${pid:-none} launcher=$(cat "$launcher" 2>/dev/null))"
   pass "fm_backend_herdr_server_ensure: a pipe-capturing caller gets EOF after Linux --fix starts the server"
 }
 

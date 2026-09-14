@@ -393,12 +393,12 @@ fm_backend_herdr_cli() {  # <session> <herdr-subcommand-and-args...>
   # stderr is buffered (stdout streams untouched) so a protocol_mismatch
   # refusal can be recognized and retried once on a compatible client; see
   # "client selection" below. A failed command's stderr is replayed verbatim.
-  # The long-lived `server` launch is invoked without that buffer: wrapping it
-  # would hold this call open for the server's whole lifetime. Detach and
-  # replacement of the launcher shell are owned by fm_backend_herdr_server_ensure.
+  # The long-lived `server` launch replaces the calling shell instead: buffering
+  # or waiting on it would hold the launcher open for the server's whole
+  # lifetime. Only fm_backend_herdr_server_ensure's detached launch subshell
+  # calls it.
   if [ "${1:-}" = server ]; then
-    HERDR_SESSION="$session" "$client_bin" "$@" --session "$session"
-    return $?
+    HERDR_SESSION="$session" exec "$client_bin" "$@" --session "$session"
   fi
   failed_bin=$client_bin
   { err=$(HERDR_SESSION="$session" "$failed_bin" "$@" --session "$session" 2>&1 1>&3 3>&-) || rc=$?; } 3>&1
@@ -448,31 +448,23 @@ fm_backend_herdr_bin() {
   printf '%s' "${FM_BACKEND_HERDR_BIN:-herdr}"
 }
 
-# fm_backend_herdr_close_inherited_fds: close every descriptor except stdin,
-# stdout, and stderr. Bash saves a redirected caller's original stdout and
-# stderr on high fds (observed 10 and 11) for the duration of that call; a
-# backgrounded `herdr server` that inherits those write ends keeps a pipe
-# capture from ever seeing EOF. Snapshot the fd list before closing so
-# iterating /proc/self/fd cannot skip entries. When /proc is absent, close
-# the conventional 3-255 range, which covers bash's saved stdio fds.
+# fm_backend_herdr_close_inherited_fds: close every descriptor listed in
+# /proc/self/fd except stdin, stdout, and stderr. Bash's own saved copies of
+# redirected stdio are close-on-exec, but a descriptor the caller opened itself
+# is not; a `herdr server` that inherits such a write end of an output pipe
+# keeps that capture from ever seeing EOF. Snapshot the fd list before closing
+# so iterating /proc/self/fd cannot skip entries. Hosts without /proc/self/fd
+# are left unchanged.
 fm_backend_herdr_close_inherited_fds() {
   local fd
   local -a fds=()
-  if [ -d /proc/self/fd ]; then
-    for fd in /proc/self/fd/*; do
-      fds+=("${fd##*/}")
-    done
-  else
-    fd=3
-    while [ "$fd" -le 255 ]; do
-      fds+=("$fd")
-      fd=$((fd + 1))
-    done
-  fi
+  [ -d /proc/self/fd ] || return 0
+  for fd in /proc/self/fd/*; do
+    fds+=("${fd##*/}")
+  done
   for fd in "${fds[@]}"; do
     case "$fd" in
-      ''|*[!0-9]*) continue ;;
-      0|1|2) continue ;;
+      ''|*[!0-9]*|0|1|2) continue ;;
     esac
     eval "exec ${fd}>&-" 2>/dev/null || true
   done
@@ -1694,13 +1686,9 @@ fm_backend_herdr_server_ensure() {  # <session>
   (
     unset FM_HOME FM_ROOT_OVERRIDE FM_STATE_OVERRIDE FM_DATA_OVERRIDE FM_PROJECTS_OVERRIDE FM_CONFIG_OVERRIDE \
       CURSOR_AGENT CURSOR_INVOKED_AS CLAUDECODE PI_CODING_AGENT FM_PI_HARNESS GROK_AGENT FM_SUPERVISION_MODEL
-    client_bin=herdr
-    if [ "${FM_BACKEND_HERDR_CLIENT_SESSION:-}" = "$session" ]; then
-      client_bin=$(fm_backend_herdr_bin)
-    fi
     exec </dev/null >/dev/null 2>&1
     fm_backend_herdr_close_inherited_fds
-    HERDR_SESSION="$session" exec "$client_bin" server --session "$session"
+    fm_backend_herdr_cli "$session" server
   ) &
   for i in $(seq 1 20); do
     running=$(fm_backend_herdr_cli "$session" status --json 2>/dev/null | jq -r '.server.running // false' 2>/dev/null)
