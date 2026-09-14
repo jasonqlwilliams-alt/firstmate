@@ -110,6 +110,36 @@ SH
   printf '%s\n' "$fb"
 }
 
+# make_herdr_server_persist_fakebin: like the env stub, but the server command
+# stays alive until FM_HERDR_SERVER_STOP exists so a pipe-capture caller can
+# observe whether inherited write ends keep EOF from arriving.
+make_herdr_server_persist_fakebin() {  # <dir> -> echoes fakebin dir
+  local dir=$1 fb="$1/fakebin"
+  mkdir -p "$fb"
+  cat > "$fb/herdr" <<'SH'
+#!/usr/bin/env bash
+set -u
+case "${1:-}" in
+  status)
+    if [ -e "$FM_HERDR_SERVER_MARKER" ]; then
+      printf '{"server":{"running":true}}\n'
+    else
+      printf '{"server":{"running":false}}\n'
+    fi
+    ;;
+  server)
+    printf '%s\n' "$$" > "$FM_HERDR_SERVER_PID"
+    : > "$FM_HERDR_SERVER_MARKER"
+    while [ ! -f "$FM_HERDR_SERVER_STOP" ]; do
+      sleep 0.05
+    done
+    ;;
+esac
+SH
+  chmod +x "$fb/herdr"
+  printf '%s\n' "$fb"
+}
+
 # make_herdr_statefake: a STATEFUL `herdr` stub that models the parts of herdr's
 # real container behavior the workspace-leak fix (and the default-tab-prune
 # safety fix) depend on, so a full spawn->teardown cycle can be replayed
@@ -1102,6 +1132,63 @@ test_server_ensure_scrubs_home_and_harness_identity() {
   assert_contains "$output" "HERDR_SESSION=fmtest" "server_ensure lost explicit Herdr session routing"
   assert_contains "$output" "args=server --session fmtest" "server_ensure lost the trailing Herdr session flag"
   pass "fm_backend_herdr_server_ensure: scrubs home and harness identity without disturbing unrelated environment or session routing"
+}
+
+# Mirrors Linux fm-remote-doctor --fix: the remote job worker captures stdout
+# and stderr through fifos until EOF, and start_herdr_server calls
+# fm_backend_herdr_server_ensure with those streams redirected to /dev/null.
+# A long-lived fake server that still held the fifo write ends would make the
+# readers time out the same way the seed readiness gate hung.
+test_server_ensure_releases_caller_capture_pipes() {
+  local dir fb marker stop pidfile r1 r2 wrap_rc r1_rc r2_rc pid
+  command -v python3 >/dev/null 2>&1 || fail "python3 is required to wait for capture-pipe EOF"
+  dir="$TMP_ROOT/server-detach"; mkdir -p "$dir"
+  marker="$dir/running"; stop="$dir/stop"; pidfile="$dir/pid"
+  fb=$(make_herdr_server_persist_fakebin "$dir")
+  mkfifo "$dir/stdout.pipe" "$dir/stderr.pipe"
+  cat > "$dir/wait_eof.py" <<'PY'
+import os, select, sys, time
+path, timeout = sys.argv[1], float(sys.argv[2])
+fd = os.open(path, os.O_RDONLY)
+end = time.monotonic() + timeout
+try:
+    while True:
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            sys.exit(124)
+        ready, _, _ = select.select([fd], [], [], remaining)
+        if not ready:
+            sys.exit(124)
+        chunk = os.read(fd, 65536)
+        if not chunk:
+            sys.exit(0)
+finally:
+    os.close(fd)
+PY
+  python3 "$dir/wait_eof.py" "$dir/stdout.pipe" 2 >"$dir/stdout.cap" 2>"$dir/stdout.err" &
+  r1=$!
+  python3 "$dir/wait_eof.py" "$dir/stderr.pipe" 2 >"$dir/stderr.cap" 2>"$dir/stderr.err" &
+  r2=$!
+  sleep 0.1
+  PATH="$fb:$PATH" FM_HERDR_SERVER_MARKER="$marker" FM_HERDR_SERVER_STOP="$stop" \
+    FM_HERDR_SERVER_PID="$pidfile" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_server_ensure fmtest >/dev/null 2>&1; printf "ENSURE_RETURNED\n"' "$ROOT" \
+    > "$dir/stdout.pipe" 2> "$dir/stderr.pipe"
+  wrap_rc=$?
+  wait "$r1"
+  r1_rc=$?
+  wait "$r2"
+  r2_rc=$?
+  : > "$stop"
+  if [ -f "$pidfile" ]; then
+    pid=$(cat "$pidfile")
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  fi
+  expect_code 0 "$wrap_rc" "server_ensure should return once the fake server reports running"
+  [ "$r1_rc" -eq 0 ] || fail "stdout capture pipe did not see EOF after server_ensure returned (rc=$r1_rc)"
+  [ "$r2_rc" -eq 0 ] || fail "stderr capture pipe did not see EOF after server_ensure returned (rc=$r2_rc)"
+  pass "fm_backend_herdr_server_ensure: a pipe-capturing caller gets EOF after Linux --fix starts the server"
 }
 
 test_container_ensure_reuses_existing_workspace() {
@@ -5213,6 +5300,7 @@ test_workspace_ensure_other_home_ignores_the_launcher_identity
 test_container_ensure_refuses_an_ambiguous_home_label
 test_container_ensure_starts_server_and_workspace
 test_server_ensure_scrubs_home_and_harness_identity
+test_server_ensure_releases_caller_capture_pipes
 test_container_ensure_reuses_existing_workspace
 test_container_ensure_creates_with_no_focus_flag
 test_container_ensure_uses_secondmate_home_label
