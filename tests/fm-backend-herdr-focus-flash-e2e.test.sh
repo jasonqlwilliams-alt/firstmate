@@ -293,6 +293,15 @@ while [ ! -e "$C_SAMPLER_READY" ] && [ "$C_READY_ATTEMPT" -lt 100 ]; do
 done
 [ -e "$C_SAMPLER_READY" ] || fail 'the Part C focus sampler did not start'
 : > "$C_OPERATION_ACTIVE"
+# The ready file only proves the sampler process started. Wait until it has
+# taken at least one in-operation sample so close cannot run against a
+# sampler that has not yet entered its sampling loop.
+C_SAMPLE_WAIT=0
+while [ ! -s "$C_FOCUS_SAMPLES" ] && [ "$C_SAMPLE_WAIT" -lt 200 ]; do
+  sleep 0.01
+  C_SAMPLE_WAIT=$((C_SAMPLE_WAIT + 1))
+done
+[ -s "$C_FOCUS_SAMPLES" ] || fail 'the Part C focus sampler took no in-operation sample before the close'
 # A short proof budget keeps the exhausted-proof path fast; the count below is
 # what proves the proof was exhausted rather than skipped.
 C_PROOF_POLLS=3
