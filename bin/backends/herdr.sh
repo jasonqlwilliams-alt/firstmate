@@ -393,11 +393,12 @@ fm_backend_herdr_cli() {  # <session> <herdr-subcommand-and-args...>
   # stderr is buffered (stdout streams untouched) so a protocol_mismatch
   # refusal can be recognized and retried once on a compatible client; see
   # "client selection" below. A failed command's stderr is replayed verbatim.
-  # The long-lived `server` launch is exec'd straight through: buffering its
-  # stderr would hold this call open for the server's whole lifetime.
+  # The long-lived `server` launch replaces the calling shell instead: buffering
+  # or waiting on it would hold the launcher open for the server's whole
+  # lifetime. Only fm_backend_herdr_server_ensure's detached launch subshell
+  # calls it.
   if [ "${1:-}" = server ]; then
-    HERDR_SESSION="$session" "$client_bin" "$@" --session "$session"
-    return $?
+    HERDR_SESSION="$session" exec "$client_bin" "$@" --session "$session"
   fi
   failed_bin=$client_bin
   { err=$(HERDR_SESSION="$session" "$failed_bin" "$@" --session "$session" 2>&1 1>&3 3>&-) || rc=$?; } 3>&1
@@ -445,6 +446,28 @@ fm_backend_herdr_cli() {  # <session> <herdr-subcommand-and-args...>
 # PATH-first client.
 fm_backend_herdr_bin() {
   printf '%s' "${FM_BACKEND_HERDR_BIN:-herdr}"
+}
+
+# fm_backend_herdr_close_inherited_fds: close every descriptor listed in
+# /proc/self/fd except stdin, stdout, and stderr. Bash's own saved copies of
+# redirected stdio are close-on-exec, but a descriptor the caller opened itself
+# is not; a `herdr server` that inherits such a write end of an output pipe
+# keeps that capture from ever seeing EOF. Snapshot the fd list before closing
+# so iterating /proc/self/fd cannot skip entries. Hosts without /proc/self/fd
+# are left unchanged.
+fm_backend_herdr_close_inherited_fds() {
+  local fd
+  local -a fds=()
+  [ -d /proc/self/fd ] || return 0
+  for fd in /proc/self/fd/*; do
+    fds+=("${fd##*/}")
+  done
+  for fd in "${fds[@]}"; do
+    case "$fd" in
+      ''|*[!0-9]*|0|1|2) continue ;;
+    esac
+    eval "exec ${fd}>&-" 2>/dev/null || true
+  done
 }
 
 # fm_backend_herdr_client_candidates: every distinct executable named herdr on
@@ -1651,8 +1674,11 @@ fm_backend_herdr_projection_order_best_effort() {  # <session> <created-workspac
 # NOT auto-start the server, so this must run before any workspace/tab/pane
 # call. The server outlives its launcher and passes its startup environment to
 # every later pane, so remove home, harness identity, and supervision selection
-# inherited from whichever agent happened to start it. Bounded poll for the
-# server to report running.
+# inherited from whichever agent happened to start it. The launch subshell is
+# backgrounded and then replaced by `herdr server` after closing inherited
+# fds, so a pipe-capturing caller such as Linux `fm-remote-doctor.sh --fix`
+# can reach EOF once this function returns. Bounded poll for the server to
+# report running.
 fm_backend_herdr_server_ensure() {  # <session>
   local session=$1 running out i
   running=$(fm_backend_herdr_cli "$session" status --json 2>/dev/null | jq -r '.server.running // false' 2>/dev/null)
@@ -1660,8 +1686,10 @@ fm_backend_herdr_server_ensure() {  # <session>
   (
     unset FM_HOME FM_ROOT_OVERRIDE FM_STATE_OVERRIDE FM_DATA_OVERRIDE FM_PROJECTS_OVERRIDE FM_CONFIG_OVERRIDE \
       CURSOR_AGENT CURSOR_INVOKED_AS CLAUDECODE PI_CODING_AGENT FM_PI_HARNESS GROK_AGENT FM_SUPERVISION_MODEL
-    fm_backend_herdr_cli "$session" server >/dev/null 2>&1 &
-  ) || return 1
+    exec </dev/null >/dev/null 2>&1
+    fm_backend_herdr_close_inherited_fds
+    fm_backend_herdr_cli "$session" server
+  ) &
   for i in $(seq 1 20); do
     running=$(fm_backend_herdr_cli "$session" status --json 2>/dev/null | jq -r '.server.running // false' 2>/dev/null)
     [ "$running" = "true" ] && return 0
