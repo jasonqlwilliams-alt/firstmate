@@ -1,0 +1,25 @@
+mode=fix
+path=/tmp/fm-live-after-fix-73d5476.twPcrO/root/bin:/root/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+entrypoint=yes
+platform=linux
+fix herdr-server=applied: started the herdr server for session fm-remote
+required git=/usr/bin/git
+required jq=/usr/bin/jq
+required herdr=/root/.local/bin/herdr
+required tasks-axi=/root/.local/bin/tasks-axi
+required treehouse=/root/.local/bin/treehouse
+required harness=claude:/root/.local/bin/claude
+optional tmux=/usr/bin/tmux
+optional no-mistakes=absent
+optional gh=/usr/bin/gh
+check herdr=ok: /root/.local/bin/herdr
+check gui-session=skip: no Aqua login session applies on linux
+check remote-job-worker=ok: the Linux remote job worker is running
+check remote-job-worker-loaded=skip: Aqua launch agents do not apply on linux
+check remote-job-probe=ok: the remote job worker completed the required-tool probe
+check launchagent=skip: launch agents apply only on darwin
+check launchagent-scope=skip: launch agents apply only on darwin
+check launchagent-loaded=skip: launch agents apply only on darwin
+check herdr-server=ok: session fm-remote is running
+check entrypoint-link=ok: /root/.local/bin/fm-remote-entrypoint.sh
+ok: remote second-mate readiness confirmed on this host

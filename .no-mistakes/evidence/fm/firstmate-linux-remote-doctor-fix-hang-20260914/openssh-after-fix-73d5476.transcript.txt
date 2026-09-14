@@ -1,0 +1,63 @@
+== openssh-after-fix-73d5476: commit 73d5476 ==
+sandbox: /tmp/fm-sshd-openssh-after-fix-73d5476.7l0m3P
+herdr: herdr 0.9.0
+host: Linux 6.18.33.2-microsoft-standard-WSL2
+ssh: OpenSSH_10.5p1, OpenSSL 3.6.4 25 Aug 2026; sshd pid 2105493 on 127.0.0.1:43389
+
+## run 1: clean account, --fix must start the worker and the real herdr server
+[run1] remote login shell holds extra plain fds 7/8 on the channel: 0
+[run1] fm-on.sh -> real ssh: exited rc=0 after 1.15s
+[run1] stdout capture: EOF_AT=1.14 (reader rc=0)
+[run1] stderr capture: EOF_AT=1.14 (reader rc=0)
+[run1] --- remote stdout ---
+mode=fix
+entrypoint=yes
+platform=linux
+fix remote-job-worker=applied: installed or reloaded dev.firstmate.remote-job
+fix herdr-server=applied: started the herdr server for session fm-remote
+check herdr=ok: /home/jason/.local/bin/herdr
+check remote-job-worker=ok: the Linux remote job worker is running
+check remote-job-worker-loaded=skip: Aqua launch agents do not apply on linux
+check remote-job-probe=ok: the remote job worker completed the required-tool probe
+check herdr-server=ok: session fm-remote is running
+check entrypoint-link=ok: /home/jason/.local/bin/fm-remote-entrypoint.sh
+ok: remote second-mate readiness confirmed on this host
+[run1] --- remote stderr ---
+herdr fm-remote status after run1: {"running":true,"socket":"/tmp/fm-sshd-openssh-after-fix-73d5476.7l0m3P/remote-account/.config/herdr/sessions/fm-remote/herdr.sock"}
+sandbox processes after run1:
+  pid=2106384 ppid=248 (/usr/lib/systemd/systemd --user ) cmd=/bin/bash /tmp/fm-sshd-openssh-after-fix-73d5476.7l0m3P/root/bin/fm-remote-job-worker.sh 
+  pid=2106455 ppid=2106384 (/bin/bash /tmp/fm-sshd-openssh-after-fix-73d5476.7l0m3P/root) cmd=/bin/bash /tmp/fm-sshd-openssh-after-fix-73d5476.7l0m3P/root/bin/fm-remote-job-worker.sh --serve 
+    fd 3 -> pipe:[90569353]
+  pid=2106772 ppid=248 (/usr/lib/systemd/systemd --user ) cmd=herdr server --session fm-remote 
+    fd 6 -> pipe:[90567317]
+
+## stop only the herdr server; the worker keeps running
+herdr fm-remote status after stop: {"running":false,"socket":"/tmp/fm-sshd-openssh-after-fix-73d5476.7l0m3P/remote-account/.config/herdr/sessions/fm-remote/herdr.sock"}
+
+## run 2: adversarial - the remote shell holds plain fds 7/8 on the ssh channel; --fix restarts only the herdr server
+[run2] remote login shell holds extra plain fds 7/8 on the channel: 1
+[run2] fm-on.sh -> real ssh: exited rc=0 after 0.94s
+[run2] stdout capture: EOF_AT=0.88 (reader rc=0)
+[run2] stderr capture: EOF_AT=0.88 (reader rc=0)
+[run2] --- remote stdout ---
+mode=fix
+entrypoint=yes
+platform=linux
+fix herdr-server=applied: started the herdr server for session fm-remote
+check herdr=ok: /home/jason/.local/bin/herdr
+check remote-job-worker=ok: the Linux remote job worker is running
+check remote-job-worker-loaded=skip: Aqua launch agents do not apply on linux
+check remote-job-probe=ok: the remote job worker completed the required-tool probe
+check herdr-server=ok: session fm-remote is running
+check entrypoint-link=ok: /home/jason/.local/bin/fm-remote-entrypoint.sh
+ok: remote second-mate readiness confirmed on this host
+[run2] --- remote stderr ---
+herdr fm-remote status after run2: {"running":true,"socket":"/tmp/fm-sshd-openssh-after-fix-73d5476.7l0m3P/remote-account/.config/herdr/sessions/fm-remote/herdr.sock"}
+sandbox processes after run2:
+  pid=2106384 ppid=248 (/usr/lib/systemd/systemd --user ) cmd=/bin/bash /tmp/fm-sshd-openssh-after-fix-73d5476.7l0m3P/root/bin/fm-remote-job-worker.sh 
+  pid=2106455 ppid=2106384 (/bin/bash /tmp/fm-sshd-openssh-after-fix-73d5476.7l0m3P/root) cmd=/bin/bash /tmp/fm-sshd-openssh-after-fix-73d5476.7l0m3P/root/bin/fm-remote-job-worker.sh --serve 
+    fd 3 -> pipe:[90579518]
+  pid=2110073 ppid=248 (/usr/lib/systemd/systemd --user ) cmd=herdr server --session fm-remote 
+
+## cleanup
+remaining sandbox processes: 0

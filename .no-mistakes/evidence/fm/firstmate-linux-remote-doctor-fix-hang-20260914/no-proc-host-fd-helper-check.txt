@@ -1,0 +1,8 @@
+== Linux with /proc: helper closes inherited fd 7 ==
+  /proc/self/fd present
+  server_ensure rc=0
+  server pid 2125047 fds: 0->/dev/null 1->/dev/null 2->/dev/null 255->/tmp/fm-noproc.pULbWJ/fakebin/herdr 
+== /proc hidden (macOS-like): helper leaves fd 7 alone ==
+  /proc/self/fd absent
+  server_ensure rc=0
+  server pid 2125215 fds: 0->/dev/null 1->/dev/null 2->/dev/null 255->/tmp/fm-noproc.pULbWJ/fakebin/herdr 7->/tmp/fm-noproc.pULbWJ/fd7-target 

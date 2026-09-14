@@ -1,0 +1,36 @@
+
+== variant: fixed-head ==
+test_server_ensure_releases_caller_capture_pipes: rc=0 (0.2s)
+    ok - fm_backend_herdr_server_ensure: a pipe-capturing caller gets EOF after Linux --fix starts the server
+test_cli_scopes_the_selected_client_to_its_session: rc=0 (0.1s)
+    ok - herdr client selection: selected clients remain scoped to their session
+
+== variant: pre-fix-base-herdr-sh ==
+test_server_ensure_releases_caller_capture_pipes: rc=1 (10.2s)
+    not ok - stdout capture pipe did not see EOF after server_ensure returned (rc=124)
+test_cli_scopes_the_selected_client_to_its_session: rc=0 (0.1s)
+    ok - herdr client selection: selected clients remain scoped to their session
+
+== variant: no-fd-close ==
+test_server_ensure_releases_caller_capture_pipes: rc=1 (10.2s)
+    not ok - stdout capture pipe did not see EOF after server_ensure returned (rc=124)
+test_cli_scopes_the_selected_client_to_its_session: rc=0 (0.1s)
+    ok - herdr client selection: selected clients remain scoped to their session
+
+== variant: no-exec-waiting-parent ==
+test_server_ensure_releases_caller_capture_pipes: rc=1 (0.2s)
+    not ok - the backgrounded launcher should become the server with no waiting shell (server=1919123 launcher=1919121)
+test_cli_scopes_the_selected_client_to_its_session: rc=0 (0.1s)
+    ok - herdr client selection: selected clients remain scoped to their session
+
+== variant: server-ignores-selected-client ==
+test_server_ensure_releases_caller_capture_pipes: rc=0 (0.2s)
+    ok - fm_backend_herdr_server_ensure: a pipe-capturing caller gets EOF after Linux --fix starts the server
+test_cli_scopes_the_selected_client_to_its_session: rc=0 (0.1s)
+    ok - herdr client selection: selected clients remain scoped to their session
+
+== variant: server-always-uses-other-sessions-client ==
+test_server_ensure_releases_caller_capture_pipes: rc=0 (0.2s)
+    ok - fm_backend_herdr_server_ensure: a pipe-capturing caller gets EOF after Linux --fix starts the server
+test_cli_scopes_the_selected_client_to_its_session: rc=1 (0.1s)
+    not ok - a selected client should stay scoped to its session while forced reselection still returns to the PATH default, got: modern|false|selected-server|legacy|PATH-default

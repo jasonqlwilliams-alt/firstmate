@@ -1,0 +1,9 @@
+Server listening on 127.0.0.1 port 54591.
+Connection closed by 127.0.0.1 port 59290 [preauth]
+Accepted publickey for jason from 127.0.0.1 port 59292 ssh2: ED25519 SHA256:Mx1ZZkF3/eHhuVra/v49LUZ0XnKyMPJZKXu8nmvOXj4
+Received disconnect from 127.0.0.1 port 59292:11: disconnected by user
+Disconnected from user jason 127.0.0.1 port 59292
+Accepted publickey for jason from 127.0.0.1 port 38006 ssh2: ED25519 SHA256:Mx1ZZkF3/eHhuVra/v49LUZ0XnKyMPJZKXu8nmvOXj4
+Received disconnect from 127.0.0.1 port 38006:11: disconnected by user
+Disconnected from user jason 127.0.0.1 port 38006
+Received signal 15; terminating.

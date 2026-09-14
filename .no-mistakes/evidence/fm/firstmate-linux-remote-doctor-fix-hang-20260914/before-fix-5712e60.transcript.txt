@@ -1,0 +1,88 @@
+== before-fix-5712e60: commit 5712e60 ==
+sandbox: /tmp/fm-live-before-fix-5712e60.eCokzp
+herdr: herdr 0.9.0
+host: Linux 6.18.33.2-microsoft-standard-WSL2
+
+## run 1: clean account, --fix must start the worker and the real herdr server
+[run1] processes holding the capture at the 45s budget:
+  pid=1751034 ppid=248 (/usr/lib/systemd/systemd --user ) cmd=/bin/bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm-remote-job-worker.sh 
+  pid=1751117 ppid=1751034 (/bin/bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm) cmd=/bin/bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm-remote-job-worker.sh --serve 
+    fd 3 -> pipe:[90243893]
+  pid=1751460 ppid=248 (/usr/lib/systemd/systemd --user ) cmd=bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm-remote-doctor.sh --fix 
+    fd 10 -> /tmp/fake-ssh-chan.7RvKbz/out
+    fd 11 -> /tmp/fake-ssh-chan.7RvKbz/err
+  pid=1751465 ppid=1751460 (bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm-remo) cmd=herdr server --session fm-remote 
+[run1] extra caller fds 7/8 on the channel: 0
+[run1] fm-on.sh (fake ssh waits for channel EOF): still running at 45s
+[run1] stdout capture: EOF_AT=none (reader rc=124)
+[run1] stderr capture: EOF_AT=none (reader rc=124)
+[run1] --- remote stdout ---
+mode=fix
+entrypoint=yes
+platform=linux
+fix remote-job-worker=applied: installed or reloaded dev.firstmate.remote-job
+fix herdr-server=applied: started the herdr server for session fm-remote
+check herdr=ok: /root/.local/bin/herdr
+check remote-job-worker=ok: the Linux remote job worker is running
+check remote-job-worker-loaded=skip: Aqua launch agents do not apply on linux
+check remote-job-probe=ok: the remote job worker completed the required-tool probe
+check herdr-server=ok: session fm-remote is running
+check entrypoint-link=ok: /root/.local/bin/fm-remote-entrypoint.sh
+ok: remote second-mate readiness confirmed on this host
+[run1] --- remote stderr ---
+herdr fm-remote status after run1: {"running":true,"socket":"/tmp/fm-live-before-fix-5712e60.eCokzp/remote-account/.config/herdr/sessions/fm-remote/herdr.sock"}
+sandbox processes after run1:
+  pid=1751034 ppid=248 (/usr/lib/systemd/systemd --user ) cmd=/bin/bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm-remote-job-worker.sh 
+  pid=1751117 ppid=1751034 (/bin/bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm) cmd=/bin/bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm-remote-job-worker.sh --serve 
+  pid=1751460 ppid=248 (/usr/lib/systemd/systemd --user ) cmd=bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm-remote-doctor.sh --fix 
+    fd 10 -> /tmp/fake-ssh-chan.7RvKbz/out
+    fd 11 -> /tmp/fake-ssh-chan.7RvKbz/err
+  pid=1751465 ppid=1751460 (bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm-remo) cmd=herdr server --session fm-remote 
+
+## stop only the herdr server; the worker keeps running
+herdr fm-remote status after stop: {"running":false,"socket":"/tmp/fm-live-before-fix-5712e60.eCokzp/remote-account/.config/herdr/sessions/fm-remote/herdr.sock"}
+
+## run 2: adversarial - the remote shell holds plain fds 7/8 on the ssh channel; --fix restarts only the herdr server
+[run2] processes holding the capture at the 45s budget:
+  pid=1751034 ppid=248 (/usr/lib/systemd/systemd --user ) cmd=/bin/bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm-remote-job-worker.sh 
+  pid=1751117 ppid=1751034 (/bin/bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm) cmd=/bin/bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm-remote-job-worker.sh --serve 
+  pid=1801763 ppid=248 (/usr/lib/systemd/systemd --user ) cmd=bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm-remote-doctor.sh --fix 
+    fd 10 -> /tmp/fake-ssh-chan.BvA4aF/out
+    fd 11 -> /tmp/fake-ssh-chan.BvA4aF/err
+    fd 7 -> /tmp/fake-ssh-chan.BvA4aF/out
+    fd 8 -> /tmp/fake-ssh-chan.BvA4aF/err
+  pid=1801768 ppid=1801763 (bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm-remo) cmd=herdr server --session fm-remote 
+    fd 7 -> /tmp/fake-ssh-chan.BvA4aF/out
+    fd 8 -> /tmp/fake-ssh-chan.BvA4aF/err
+[run2] extra caller fds 7/8 on the channel: 1
+[run2] fm-on.sh (fake ssh waits for channel EOF): still running at 45s
+[run2] stdout capture: EOF_AT=none (reader rc=124)
+[run2] stderr capture: EOF_AT=none (reader rc=124)
+[run2] --- remote stdout ---
+mode=fix
+entrypoint=yes
+platform=linux
+fix herdr-server=applied: started the herdr server for session fm-remote
+check herdr=ok: /root/.local/bin/herdr
+check remote-job-worker=ok: the Linux remote job worker is running
+check remote-job-worker-loaded=skip: Aqua launch agents do not apply on linux
+check remote-job-probe=ok: the remote job worker completed the required-tool probe
+check herdr-server=ok: session fm-remote is running
+check entrypoint-link=ok: /root/.local/bin/fm-remote-entrypoint.sh
+ok: remote second-mate readiness confirmed on this host
+[run2] --- remote stderr ---
+herdr fm-remote status after run2: {"running":true,"socket":"/tmp/fm-live-before-fix-5712e60.eCokzp/remote-account/.config/herdr/sessions/fm-remote/herdr.sock"}
+sandbox processes after run2:
+  pid=1751034 ppid=248 (/usr/lib/systemd/systemd --user ) cmd=/bin/bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm-remote-job-worker.sh 
+  pid=1751117 ppid=1751034 (/bin/bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm) cmd=/bin/bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm-remote-job-worker.sh --serve 
+  pid=1801763 ppid=248 (/usr/lib/systemd/systemd --user ) cmd=bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm-remote-doctor.sh --fix 
+    fd 10 -> /tmp/fake-ssh-chan.BvA4aF/out
+    fd 11 -> /tmp/fake-ssh-chan.BvA4aF/err
+    fd 7 -> /tmp/fake-ssh-chan.BvA4aF/out
+    fd 8 -> /tmp/fake-ssh-chan.BvA4aF/err
+  pid=1801768 ppid=1801763 (bash /tmp/fm-live-before-fix-5712e60.eCokzp/root/bin/fm-remo) cmd=herdr server --session fm-remote 
+    fd 7 -> /tmp/fake-ssh-chan.BvA4aF/out
+    fd 8 -> /tmp/fake-ssh-chan.BvA4aF/err
+
+## cleanup
+remaining sandbox processes: 0
