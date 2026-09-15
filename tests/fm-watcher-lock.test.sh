@@ -184,6 +184,39 @@ test_watcher_beacon_poll_writes_informational_content() {
   pass "a poll leaves a non-empty fresh beacon and mtime-based readers honor content independently of size"
 }
 
+test_watcher_beacon_rewrite_never_reads_empty() {
+  # A size-based outside observer must never catch a live watcher's beacon at
+  # zero bytes mid-rewrite. A fast poll gives many rewrites to race against; a
+  # truncate-then-write beacon is caught here within a few seconds.
+  local dir state fakebin beat pid i samples=0 empty=0 end
+  dir=$(make_case beacon-never-empty)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  beat="$state/.last-watcher-beat"
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_POLL=0.05 \
+    FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 FM_GUARD_GRACE=60 \
+    "$WATCH" > "$dir/watch.out" &
+  pid=$!
+  i=0
+  while [ "$i" -lt 120 ]; do
+    [ -s "$beat" ] && break
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.05
+    i=$((i + 1))
+  done
+  [ -s "$beat" ] || { kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; fail "watcher poll did not leave a non-empty beacon"; }
+  end=$((SECONDS + 3))
+  while [ "$SECONDS" -lt "$end" ]; do
+    [ -s "$beat" ] || empty=$((empty + 1))
+    samples=$((samples + 1))
+  done
+  kill -0 "$pid" 2>/dev/null || { wait "$pid" 2>/dev/null || true; fail "watcher exited while its beacon was sampled"; }
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  [ "$empty" -eq 0 ] || fail "size-based observer read an empty beacon $empty time(s) in $samples samples"
+  pass "a live watcher's beacon rewrite never reads as zero bytes"
+}
+
 test_guard_warnings() {
   # The guard's two operator-visible states, with resilient substrings instead of
   # four copy-coupled tests:
@@ -1201,6 +1234,7 @@ test_stale_watch_lock_reclaimed
 test_stale_watch_reclaim_publishes_before_clear
 test_live_stale_watch_lock_is_actionable
 test_watcher_beacon_poll_writes_informational_content
+test_watcher_beacon_rewrite_never_reads_empty
 test_guard_warnings
 test_lock_single_winner_under_concurrency
 test_lock_steals_dead_pid_lock

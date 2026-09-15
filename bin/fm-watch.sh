@@ -2005,9 +2005,14 @@ while :; do
   # Liveness beacon for fm-guard.sh: mtime freshness means a watcher is alive.
   # The one-line content is informational for external observers; every reader
   # judges liveness from mtime only. Supervision scripts warn when this goes
-  # stale with tasks in flight.
-  printf '%s pid=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$WATCHER_PID" \
-    > "$STATE/.last-watcher-beat"
+  # stale with tasks in flight. The line is renamed into place so a size-based
+  # observer never sees the truncate-then-write gap; if the rename fails (a
+  # Windows handle can hold the target), touch keeps mtime fresh without ever
+  # emptying the existing content.
+  beat_tmp=$(mktemp "$STATE/.last-watcher-beat.XXXXXX") \
+    && printf '%s pid=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$WATCHER_PID" > "$beat_tmp" \
+    && mv -f -- "$beat_tmp" "$STATE/.last-watcher-beat" \
+    || { [ -z "$beat_tmp" ] || rm -f -- "$beat_tmp"; touch "$STATE/.last-watcher-beat"; }
 
   if [ "$(age_of "$STATE/home-summary.json")" -ge "$HOME_SUMMARY_INTERVAL" ]; then
     home_summary_refresh_detached
