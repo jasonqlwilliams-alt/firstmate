@@ -269,6 +269,14 @@ An absent file means `auto`, i.e. default-on on macOS: the alarm exists precisel
 A missing or failing channel logs and falls through to the next, never crashing the daemon.
 See [`wedge-alarm.md`](wedge-alarm.md) for the current channel reference, [`verification/supervision.md`](verification/supervision.md#wedge-alarm-channels) for active evidence, and [`examples/wedge-alarm`](examples/wedge-alarm) for a copyable config.
 
+## Packet Router inbox (config/packet-router-inbox)
+
+The optional local, gitignored `config/packet-router-inbox` file is this home's path to a Packet Router `inbox/new` directory.
+Firstmate writes one URGENT-ALERT packet there when `bin/fm-captain-hold.sh hold --urgent-alert` records a new live halt-progress captain call, so Spur can ping the captain.
+The file is not inherited by secondmate homes: the path is machine-local, and an absent, empty, or unreadable file, or a missing directory, is a no-op so homes without Packet Router stay unaffected.
+`bin/fm-urgent-alert.sh` is the single owner of the read, packet shape, and best-effort write; packet write failure never fails the hold.
+The first non-comment, non-blank line is the directory path; a relative path is resolved from `FM_HOME`.
+
 ## Trace context propagation (config/trace-context / FM_TRACE_CONTEXT)
 
 The optional local, gitignored `config/trace-context` presence flag enables default-off native W3C trace-context propagation.
