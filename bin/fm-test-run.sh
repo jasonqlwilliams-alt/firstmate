@@ -277,6 +277,7 @@ family_for_basename() {
     fm-classify-decision-key.test.sh|\
     fm-composer-ghost.test.sh|fm-composer-lib.test.sh|\
     fm-crew-state.test.sh|fm-delivery-guard.test.sh|fm-upstream-sync.test.sh|fm-captain-hold-lifecycle.test.sh|\
+    fm-urgent-alert.test.sh|\
     fm-documentation-audiences.test.sh|fm-ensure-agents-md.test.sh|fm-grok-harness.test.sh|\
     fm-kimi-harness.test.sh|fm-muse-harness.test.sh|fm-rovo-harness.test.sh|fm-omp-harness.test.sh|\
     fm-agy-harness.test.sh|fm-herdr-lab.test.sh|fm-lint.test.sh|\

@@ -21,7 +21,8 @@
 #
 # Usage:
 #   fm-captain-hold.sh hold <task-id> --reason <reason> \
-#     [--title <title>] [--repo <repo>] [--origin <origin-id>] [--until YYYY-MM-DD]
+#     [--title <title>] [--repo <repo>] [--origin <origin-id>] [--until YYYY-MM-DD] \
+#     [--urgent-alert]
 #   fm-captain-hold.sh answer <task-id> --decision-file <path> [--release]
 #   fm-captain-hold.sh answers [<legacy-origin> | --any-origin] --source <provenance>   (keyed answers on stdin)
 #   fm-captain-hold.sh reconcile-requests --source-id <source-id> --source <provenance>   (task ids on stdin)
@@ -46,6 +47,13 @@
 # A task already closed is refused rather than reopened. `--until` records the
 # captain's own deferral date through `tasks-axi hold --until`, so a "revisit
 # later" answer is stored as a date instead of a live card.
+# `--urgent-alert` is fail-closed opt-in (default off). After every successful
+# live hold with that flag, including a repeat of an already-active hold, this
+# command calls bin/fm-urgent-alert.sh with the task title as what is blocked;
+# that helper owns the packet write, its stable `fm:<task-id>` dedupe key, and
+# the no-op when this home has no Packet Router inbox. A `--until` deferral
+# and a hold without the flag never emit. Packet write failure never fails
+# `hold`.
 #
 # `answer` records the captain's exact words and resolves the call in the same
 # act. It requires a non-empty captain decision file of at most 8192 bytes and
@@ -837,9 +845,19 @@ write_hold_set_stamp() {  # <task-id> <shown-body> <timestamp> <preserve-existin
   rm -f -- "$tmp"
 }
 
+emit_urgent_alert_best_effort() {  # <task-id> <reason> <title>
+  local id=$1 reason=$2 title=$3
+  "$SCRIPT_DIR/fm-urgent-alert.sh" \
+    --task-id "$id" \
+    --why "$reason" \
+    --blocked "$title" \
+    --ask "$reason" \
+    >/dev/null || true
+}
+
 command_hold() {
   local id=${1:-} title='' reason='' repo='' origin='' until='' show state existing_title body='' hold_kind hold_set occurrence
-  local existing_hold_kind='' existing_held='' preserve_hold_set=0
+  local existing_hold_kind='' existing_held='' preserve_hold_set=0 urgent_alert=0
   [ "$#" -ge 1 ] || { usage >&2; exit 2; }
   shift
   while [ "$#" -gt 0 ]; do
@@ -849,6 +867,7 @@ command_hold() {
       --repo) shift; repo=${1:-} ;;
       --origin) shift; origin=${1:-} ;;
       --until) shift; until=${1:-} ;;
+      --urgent-alert) urgent_alert=1 ;;
       *) usage >&2; exit 2 ;;
     esac
     shift
@@ -926,6 +945,9 @@ command_hold() {
   [ -n "$(body_hold_set_timestamp "$(show_field_value "$show" body)")" ] \
     || fail "task $id lost its hold-set stamp while being held"
   publish_parent_hold "$id" "$occurrence" needs-decision "$reason"
+  if [ "$urgent_alert" = 1 ] && [ -z "$until" ]; then
+    emit_urgent_alert_best_effort "$id" "$reason" "$(show_field_value "$show" title)"
+  fi
   printf '%s\n' "$id"
 }
 
