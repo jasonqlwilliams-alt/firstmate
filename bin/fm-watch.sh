@@ -2009,10 +2009,13 @@ while :; do
   # observer never sees the truncate-then-write gap; if the rename fails (a
   # Windows handle can hold the target), touch keeps mtime fresh without ever
   # emptying the existing content.
-  beat_tmp=$(mktemp "$STATE/.last-watcher-beat.XXXXXX") \
-    && printf '%s pid=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$WATCHER_PID" > "$beat_tmp" \
-    && mv -f -- "$beat_tmp" "$STATE/.last-watcher-beat" \
-    || { [ -z "$beat_tmp" ] || rm -f -- "$beat_tmp"; touch "$STATE/.last-watcher-beat"; }
+  beat_tmp=$(mktemp "$STATE/.last-watcher-beat.XXXXXX")
+  if [ -z "$beat_tmp" ] \
+    || ! printf '%s pid=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$WATCHER_PID" > "$beat_tmp" \
+    || ! mv -f -- "$beat_tmp" "$STATE/.last-watcher-beat"; then
+    [ -z "$beat_tmp" ] || rm -f -- "$beat_tmp"
+    touch "$STATE/.last-watcher-beat"
+  fi
 
   if [ "$(age_of "$STATE/home-summary.json")" -ge "$HOME_SUMMARY_INTERVAL" ]; then
     home_summary_refresh_detached
