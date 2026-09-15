@@ -150,19 +150,24 @@ test_watcher_beacon_poll_writes_informational_content() {
   ' _ "$SUP_LIB" "$state")
   [ "$fresh" = true ] \
     || { kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; fail "fm_supervision_status did not treat a non-empty fresh beacon as fresh"; }
+  kill -STOP "$pid" 2>/dev/null \
+    || { kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; fail "could not SIGSTOP watcher before stale beacon setup"; }
   printf 'stale informational line pid=1\n' > "$beat"
   if [ "$(uname)" = Darwin ]; then
     touch -mt 200001010000 "$beat"
   else
     touch -m -d '2000-01-01' "$beat"
   fi
-  [ -s "$beat" ] || fail "beacon lost non-empty content during stale setup"
+  [ -s "$beat" ] \
+    || { kill -CONT "$pid" 2>/dev/null || true; kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; fail "beacon lost non-empty content during stale setup"; }
   age=$(FM_STATE_OVERRIDE="$state" bash -c '. "$1"; fm_path_age "$2"' _ "$LIB" "$beat")
-  [ "$age" -ge 60 ] || fail "stale beacon setup did not leave an old mtime (age ${age}s)"
+  [ "$age" -ge 60 ] \
+    || { kill -CONT "$pid" 2>/dev/null || true; kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; fail "stale beacon setup did not leave an old mtime (age ${age}s)"; }
   if FM_HOME="$dir" FM_STATE_OVERRIDE="$state" bash -c '
     . "$1"
     fm_watcher_healthy "$2" "$3" 60 "$4"
   ' _ "$LIB" "$state" "$WATCH" "$dir"; then
+    kill -CONT "$pid" 2>/dev/null || true
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
     fail "fm_watcher_healthy accepted a non-empty stale beacon"
@@ -172,9 +177,10 @@ test_watcher_beacon_poll_writes_informational_content() {
     fm_supervision_status "$2" 60
     printf "%s" "$FM_SUP_WATCHER_FRESH"
   ' _ "$SUP_LIB" "$state")
-  [ "$fresh" = false ] || fail "fm_supervision_status treated a non-empty stale beacon as fresh"
+  kill -CONT "$pid" 2>/dev/null || true
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
+  [ "$fresh" = false ] || fail "fm_supervision_status treated a non-empty stale beacon as fresh"
   pass "a poll leaves a non-empty fresh beacon and mtime-based readers honor content independently of size"
 }
 
