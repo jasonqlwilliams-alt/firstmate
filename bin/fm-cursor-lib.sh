@@ -143,6 +143,53 @@ fm_cursor_catalog_has_model() {  # <model>
   '
 }
 
+# Spawn-time Cursor model allowlist. config/cursor-model-allowlist is the lock;
+# its absent-file default is this glob. bin/fm-spawn.sh owns file parsing.
+FM_CURSOR_MODEL_ALLOWLIST_DEFAULT='cursor-grok-*'
+
+fm_cursor_model_allowlist_default() {
+  printf '%s\n' "$FM_CURSOR_MODEL_ALLOWLIST_DEFAULT"
+}
+
+# True when $1 is Cursor's auto router. Spawn refuses this id even when the
+# allowlist file names auto or *.
+fm_cursor_model_is_auto() {  # <model>
+  case "$1" in
+    [Aa][Uu][Tt][Oo]) return 0 ;;
+  esac
+  return 1
+}
+
+# True when model $1 matches glob pattern $2. Patterns are limited to Cursor
+# id characters plus * and ? so a crafted file cannot inject case syntax.
+fm_cursor_model_matches_pattern() {  # <model> <pattern>
+  local model=$1 pattern=$2
+  case "$pattern" in
+    ''|*[!A-Za-z0-9._*?-]*) return 1 ;;
+  esac
+  # Allowlist globs must expand as case patterns; quoting would make * literal.
+  # shellcheck disable=SC2254
+  case "$model" in
+    $pattern) return 0 ;;
+  esac
+  return 1
+}
+
+# True when model $1 matches a glob on stdin, one pattern per line.
+# Empty, default, and auto are never allowed: omitting --model would let
+# Cursor pick auto, and auto is refused even if a pattern would match it.
+fm_cursor_model_allowlisted() {  # <model>
+  local model=$1 pattern
+  [ -n "$model" ] || return 1
+  [ "$model" != default ] || return 1
+  fm_cursor_model_is_auto "$model" && return 1
+  while IFS= read -r pattern || [ -n "$pattern" ]; do
+    [ -n "$pattern" ] || continue
+    fm_cursor_model_matches_pattern "$model" "$pattern" && return 0
+  done
+  return 1
+}
+
 # Print the stable absolute launcher path for the Cursor executable, or return 1
 # with a diagnostic on stderr.
 #
