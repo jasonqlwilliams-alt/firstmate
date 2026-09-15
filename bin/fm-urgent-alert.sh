@@ -7,19 +7,20 @@
 # that class; this helper does not decide the class. Callers opt in.
 #
 # Usage:
-#   fm-urgent-alert.sh --task-id <id> --why <text> --blocked <text> --ask <text> \
-#     [--action-hint <text>] [--link <text>]
+#   fm-urgent-alert.sh --task-id <id> --why <text> --blocked <text> --ask <text>
 #
 # Configuration:
 #   config/packet-router-inbox  first non-comment, non-blank line is the
-#                               Packet Router inbox/new directory for this
-#                               home. LOCAL, gitignored, not inherited.
-#                               bin/fm-urgent-alert.sh's header owns the
-#                               read and no-op contract.
+#                               absolute Packet Router inbox/new directory
+#                               for this home. LOCAL, gitignored, not
+#                               inherited. bin/fm-urgent-alert.sh's header
+#                               owns the read and no-op contract.
 #
-# If that file is absent or empty, or the named directory is missing, this
-# command no-ops with exit 0 so an unconfigured home is unaffected and a
-# captain-hold still succeeds. A packet write failure is also exit 0.
+# If that file is absent, empty, or does not name an absolute path, this
+# command silently no-ops with exit 0 so an unconfigured home is unaffected.
+# When an absolute inbox is configured but the packet is not written (missing
+# directory, temp-file, write, or rename failure), it prints one `actionable:`
+# line on stderr and still exits 0 so a captain-hold still succeeds.
 #
 # Environment:
 #   FM_HOME                 operational home whose config/ is read.
@@ -29,7 +30,7 @@
 #                           empty when that clock cannot be read.
 #
 # Output: the written packet path on stdout after a successful write.
-# Nothing is printed on a no-op. Exit 2 is usage only.
+# Nothing is printed on an unconfigured no-op. Exit 2 is usage only.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -87,13 +88,6 @@ validate_one_line() {
   esac
 }
 
-validate_optional_one_line() {
-  local label=$1 value=$2
-  case "$value" in
-    *$'\n'*|*$'\r'*) fail_usage "$label must be one line" ;;
-  esac
-}
-
 pacific_now() {
   if [ -n "${FM_URGENT_ALERT_NOW:-}" ]; then
     printf '%s' "$FM_URGENT_ALERT_NOW"
@@ -102,23 +96,24 @@ pacific_now() {
   TZ=America/Los_Angeles date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || true
 }
 
-resolve_inbox_dir() {
-  local inbox=$1
-  case "$inbox" in
-    /*) printf '%s' "$inbox" ;;
-    *) printf '%s' "$FM_HOME/$inbox" ;;
-  esac
+report_unwritten() {  # <cause>
+  printf 'actionable: URGENT-ALERT for task %s was not written to Packet Router inbox %s (%s)\n' \
+    "$task_id" "$inbox" "$1" >&2
 }
 
 write_packet() {
-  local inbox=$1 dest=$2 packet=$3 tmp
-  tmp=$(umask 077; mktemp "$inbox/.fm-urgent-alert.XXXXXX" 2>/dev/null) || return 0
-  if ! printf '%s' "$packet" > "$tmp" 2>/dev/null; then
+  local dest=$1 packet=$2 tmp
+  [ -d "$inbox" ] || { report_unwritten "inbox directory is missing"; return 0; }
+  tmp=$(umask 077; mktemp "$inbox/.fm-urgent-alert.XXXXXX" 2>/dev/null) \
+    || { report_unwritten "could not create a temp file"; return 0; }
+  if ! printf '%s\n' "$packet" > "$tmp" 2>/dev/null; then
     rm -f -- "$tmp"
+    report_unwritten "could not write the packet"
     return 0
   fi
   if ! mv -f -- "$tmp" "$dest" 2>/dev/null; then
     rm -f -- "$tmp"
+    report_unwritten "could not move the packet into place"
     return 0
   fi
   printf '%s\n' "$dest"
@@ -128,8 +123,6 @@ task_id=''
 why=''
 blocked=''
 ask=''
-action_hint='Answer the captain hold'
-link=''
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -137,8 +130,6 @@ while [ "$#" -gt 0 ]; do
     --why) shift; why=${1:-} ;;
     --blocked) shift; blocked=${1:-} ;;
     --ask) shift; ask=${1:-} ;;
-    --action-hint) shift; action_hint=${1:-} ;;
-    --link) shift; link=${1:-} ;;
     -h|--help) usage; exit 0 ;;
     *) fail_usage "unknown argument: $1" ;;
   esac
@@ -149,14 +140,12 @@ validate_slug "$task_id"
 validate_one_line why "$why"
 validate_one_line blocked "$blocked"
 validate_one_line ask "$ask"
-validate_optional_one_line action-hint "$action_hint"
-validate_optional_one_line link "$link"
-[ -n "$action_hint" ] || fail_usage "action-hint must not be empty"
 
 inbox=$(read_inbox_setting)
-[ -n "$inbox" ] || exit 0
-inbox=$(resolve_inbox_dir "$inbox")
-[ -d "$inbox" ] || exit 0
+case "$inbox" in
+  /*) : ;;
+  *) exit 0 ;;
+esac
 
 packet_id="pkt-urgent-$task_id"
 dedupe_key="fm:$task_id"
@@ -186,9 +175,8 @@ packet=$(printf '%s\n' \
   "why: $why" \
   "blocked: $blocked" \
   "ask: $ask" \
-  "action_hint: $action_hint" \
-  "link: $link")
-packet=$(printf '%s\n' "$packet")
+  'action_hint: Answer the captain hold' \
+  'link:')
 
-write_packet "$inbox" "$dest" "$packet" || true
+write_packet "$dest" "$packet" || true
 exit 0

@@ -271,11 +271,11 @@ See [`wedge-alarm.md`](wedge-alarm.md) for the current channel reference, [`veri
 
 ## Packet Router inbox (config/packet-router-inbox)
 
-The optional local, gitignored `config/packet-router-inbox` file is this home's path to a Packet Router `inbox/new` directory.
-Firstmate writes one URGENT-ALERT packet there when `bin/fm-captain-hold.sh hold --urgent-alert` records a new live halt-progress captain call, so Spur can ping the captain.
-The file is not inherited by secondmate homes: the path is machine-local, and an absent, empty, or unreadable file, or a missing directory, is a no-op so homes without Packet Router stay unaffected.
-`bin/fm-urgent-alert.sh` is the single owner of the read, packet shape, and best-effort write; packet write failure never fails the hold.
-The first non-comment, non-blank line is the directory path; a relative path is resolved from `FM_HOME`.
+The optional local, gitignored `config/packet-router-inbox` file is this home's absolute path to a Packet Router `inbox/new` directory.
+Firstmate writes one URGENT-ALERT packet there when `bin/fm-captain-hold.sh hold --urgent-alert` records a live halt-progress captain call, so Spur can ping the captain.
+The file is not inherited by secondmate homes: the path is machine-local, and an absent, empty, or unreadable file, or a value that is not an absolute path, is a silent no-op so homes without Packet Router stay unaffected.
+`bin/fm-urgent-alert.sh` is the single owner of the read, packet shape, and best-effort write; a configured inbox that is missing or cannot take the packet prints one `actionable:` stderr line, and packet write failure never fails the hold.
+The first non-comment, non-blank line is the directory path.
 
 ## Trace context propagation (config/trace-context / FM_TRACE_CONTEXT)
 

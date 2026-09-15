@@ -47,11 +47,13 @@
 # A task already closed is refused rather than reopened. `--until` records the
 # captain's own deferral date through `tasks-axi hold --until`, so a "revisit
 # later" answer is stored as a date instead of a live card.
-# `--urgent-alert` is fail-closed opt-in (default off). After a successful new
-# live hold with that flag, this command calls bin/fm-urgent-alert.sh; that
-# helper owns the packet write and no-ops when this home has no Packet Router
-# inbox. Repeating an already-active hold, a `--until` deferral, and a hold
-# without the flag never emit. Packet write failure never fails `hold`.
+# `--urgent-alert` is fail-closed opt-in (default off). After every successful
+# live hold with that flag, including a repeat of an already-active hold, this
+# command calls bin/fm-urgent-alert.sh with the task title as what is blocked;
+# that helper owns the packet write, its stable `fm:<task-id>` dedupe key, and
+# the no-op when this home has no Packet Router inbox. A `--until` deferral
+# and a hold without the flag never emit. Packet write failure never fails
+# `hold`.
 #
 # `answer` records the captain's exact words and resolves the call in the same
 # act. It requires a non-empty captain decision file of at most 8192 bytes and
@@ -844,15 +846,12 @@ write_hold_set_stamp() {  # <task-id> <shown-body> <timestamp> <preserve-existin
 }
 
 emit_urgent_alert_best_effort() {  # <task-id> <reason> <title>
-  local id=$1 reason=$2 title=$3 blocked
-  blocked=$reason
-  [ -n "$title" ] && blocked=$title
+  local id=$1 reason=$2 title=$3
   "$SCRIPT_DIR/fm-urgent-alert.sh" \
     --task-id "$id" \
     --why "$reason" \
-    --blocked "$blocked" \
+    --blocked "$title" \
     --ask "$reason" \
-    --action-hint "Answer the captain hold" \
     >/dev/null || true
 }
 
@@ -946,8 +945,8 @@ command_hold() {
   [ -n "$(body_hold_set_timestamp "$(show_field_value "$show" body)")" ] \
     || fail "task $id lost its hold-set stamp while being held"
   publish_parent_hold "$id" "$occurrence" needs-decision "$reason"
-  if [ "$urgent_alert" = 1 ] && [ -z "$until" ] && [ "$preserve_hold_set" != 1 ]; then
-    emit_urgent_alert_best_effort "$id" "$reason" "$title"
+  if [ "$urgent_alert" = 1 ] && [ -z "$until" ]; then
+    emit_urgent_alert_best_effort "$id" "$reason" "$(show_field_value "$show" title)"
   fi
   printf '%s\n' "$id"
 }
