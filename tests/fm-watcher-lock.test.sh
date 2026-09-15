@@ -12,6 +12,7 @@ WATCH="$ROOT/bin/fm-watch.sh"
 WATCH_ARM="$ROOT/bin/fm-watch-arm.sh"
 DRAIN="$ROOT/bin/fm-wake-drain.sh"
 LIB="$ROOT/bin/fm-wake-lib.sh"
+SUP_LIB="$ROOT/bin/fm-supervision-lib.sh"
 
 # An arm only reports its typed failure after wait_for_healthy_successor has
 # spent the whole confirmation budget, so cases that wait for that failure must
@@ -114,6 +115,67 @@ test_live_stale_watch_lock_is_actionable() {
   [ "$status" -ne 0 ] || fail "watcher silently no-opped behind a live stale holder"
   grep -F 'heartbeat is stale' "$err" >/dev/null || fail "watcher did not explain the stale live lock"
   pass "live watcher lock with stale heartbeat is actionable"
+}
+
+test_watcher_beacon_poll_writes_informational_content() {
+  local dir state fakebin out beat pid age i fresh
+  dir=$(make_case beacon-content)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  out="$dir/watch.out"
+  beat="$state/.last-watcher-beat"
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_POLL=0.5 \
+    FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 FM_GUARD_GRACE=60 \
+    "$WATCH" > "$out" &
+  pid=$!
+  i=0
+  while [ "$i" -lt 120 ]; do
+    [ -s "$beat" ] && break
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.05
+    i=$((i + 1))
+  done
+  [ -s "$beat" ] || { kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; fail "watcher poll did not leave a non-empty beacon"; }
+  age=$(FM_STATE_OVERRIDE="$state" bash -c '. "$1"; fm_path_age "$2"' _ "$LIB" "$beat")
+  [ "$age" -lt 10 ] || { kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; fail "beacon mtime is not fresh after poll (age ${age}s)"; }
+  FM_HOME="$dir" FM_STATE_OVERRIDE="$state" bash -c '
+    . "$1"
+    fm_watcher_healthy "$2" "$3" 60 "$4"
+  ' _ "$LIB" "$state" "$WATCH" "$dir" \
+    || { kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; fail "fm_watcher_healthy rejected a non-empty fresh beacon"; }
+  fresh=$(FM_STATE_OVERRIDE="$state" bash -c '
+    . "$1"
+    fm_supervision_status "$2" 60
+    printf "%s" "$FM_SUP_WATCHER_FRESH"
+  ' _ "$SUP_LIB" "$state")
+  [ "$fresh" = true ] \
+    || { kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; fail "fm_supervision_status did not treat a non-empty fresh beacon as fresh"; }
+  printf 'stale informational line pid=1\n' > "$beat"
+  if [ "$(uname)" = Darwin ]; then
+    touch -mt 200001010000 "$beat"
+  else
+    touch -m -d '2000-01-01' "$beat"
+  fi
+  [ -s "$beat" ] || fail "beacon lost non-empty content during stale setup"
+  age=$(FM_STATE_OVERRIDE="$state" bash -c '. "$1"; fm_path_age "$2"' _ "$LIB" "$beat")
+  [ "$age" -ge 60 ] || fail "stale beacon setup did not leave an old mtime (age ${age}s)"
+  if FM_HOME="$dir" FM_STATE_OVERRIDE="$state" bash -c '
+    . "$1"
+    fm_watcher_healthy "$2" "$3" 60 "$4"
+  ' _ "$LIB" "$state" "$WATCH" "$dir"; then
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    fail "fm_watcher_healthy accepted a non-empty stale beacon"
+  fi
+  fresh=$(FM_STATE_OVERRIDE="$state" bash -c '
+    . "$1"
+    fm_supervision_status "$2" 60
+    printf "%s" "$FM_SUP_WATCHER_FRESH"
+  ' _ "$SUP_LIB" "$state")
+  [ "$fresh" = false ] || fail "fm_supervision_status treated a non-empty stale beacon as fresh"
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  pass "a poll leaves a non-empty fresh beacon and mtime-based readers honor content independently of size"
 }
 
 test_guard_warnings() {
@@ -1132,6 +1194,7 @@ test_msys_pid_identity_uses_proc
 test_stale_watch_lock_reclaimed
 test_stale_watch_reclaim_publishes_before_clear
 test_live_stale_watch_lock_is_actionable
+test_watcher_beacon_poll_writes_informational_content
 test_guard_warnings
 test_lock_single_winner_under_concurrency
 test_lock_steals_dead_pid_lock
