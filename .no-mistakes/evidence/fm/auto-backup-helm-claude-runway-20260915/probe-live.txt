@@ -1,0 +1,1 @@
+probe=cursor-grok status=ok model=cursor-grok-4.6-high bin=/home/jason/.local/bin/cursor-agent

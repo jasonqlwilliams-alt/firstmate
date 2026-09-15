@@ -1,0 +1,86 @@
+{
+  "testing_summary": "Exercised bin/fm-backup-helm.sh condition, probe, handover, arm, and retire via the behavior test suite (11/11 pass) covering all required condition classifications (all_models <43200 true, >43200 false, exhausted_now true, unknown false, missing-Claude-provider error, Fable-exhausted/all_models-healthy false, Fable-exhausted/all_models-short true), probe ok/missing paths, handover fail-closed paths (mid-turn, failed probe, unsupported backend, missing FM_HOME, unknown lock), handover success paths (idle+lock→stow/exit/launch, released-lock→skip-slash/launch), and arm/retire lifecycle (register, duplicate refusal, failed-probe refusal, retire idempotent). Additionally verified live against real quota-axi (condition returns exit 1 correctly when Claude quota is stale/unknown) and real cursor-agent (probe returns status=ok for cursor-grok-4.6-high). No findings.",
+  "tested": [
+    "bin/fm-test-run.sh tests/fm-backup-helm.test.sh (11 test assertions, all pass)",
+    "bin/fm-backup-helm.sh probe (live against real cursor-agent, status=ok)",
+    "bin/fm-backup-helm.sh condition (live against real quota-axi, exit=1 correct when stale/unknown)",
+    "bin/fm-backup-helm.sh condition --runway-seconds 100000 (live against real quota-axi, exit=1 correct)"
+  ],
+  "artifacts": [
+    {
+      "kind": "command-output",
+      "label": "Behavior test suite output",
+      "path": "/home/jason/.no-mistakes/evidence/01M2KPYVV985RXZHX93P6D6N48/test-output.txt"
+    },
+    {
+      "kind": "command-output",
+      "label": "Live probe output",
+      "path": "/home/jason/.no-mistakes/evidence/01M2KPYVV985RXZHX93P6D6N48/probe-live.txt"
+    },
+    {
+      "kind": "command-output",
+      "label": "Live condition output",
+      "path": "/home/jason/.no-mistakes/evidence/01M2KPYVV985RXZHX93P6D6N48/condition-live.txt"
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "Trigger uses exact all_models scope, not best-scope: a Fable window at 0% must not fire the watch while all_models still has runway above 12h",
+      "result": "pass",
+      "live": false,
+      "evidence": "tests/fm-backup-helm.test.sh: quota_fable_exhausted_all_models_healthy.json (Fable 0%, all_models 100000s) → exit 1 (false). quota_fable_exhausted_all_models_short.json (Fable 0%, all_models 40000s) → exit 0 (true).",
+      "reason": "Cannot selectively exhaust Fable in real quota-axi. Behavioral fake validates the exact-scope trigger requirement that is the core user intent constraint."
+    },
+    {
+      "name": "Trigger classifies all_models runway correctly: sub-threshold fires, supra-threshold or equal does not, exhausted_now fires, unknown stays false (keeps polling), missing provider errors",
+      "result": "pass",
+      "live": true,
+      "evidence": "Tests: quota_true (40000s<43200)→0, quota_false (50000s>43200)→1, quota_exhausted→0, quota_unknown→1, quota_missing (no claude)→2, quota_at_threshold (43200=43200)→1. Live: real quota-axi (stale/unknown)→exit 1.",
+      "reason": "Exhausted_now and missing-provider paths are untested live because real Claude quota cannot be exhausted or removed in this worktree."
+    },
+    {
+      "name": "Probe verifies cursor-grok-4.6-high is in the catalog and fails closed when absent",
+      "result": "pass",
+      "live": true,
+      "evidence": "Live: bin/fm-backup-helm.sh probe → probe=cursor-grok status=ok model=cursor-grok-4.6-high. Test: fake catalog without model → exit non-zero.",
+      "reason": ""
+    },
+    {
+      "name": "Handover waits out a mid-turn Claude (never interrupts), then sends /stow -> /exit -> waits for free lock -> launches Cursor Grok with --trust --yolo without -p, never deletes lock file",
+      "result": "pass",
+      "live": false,
+      "evidence": "tests/fm-backup-helm.test.sh: busy-driver→mid-turn fail (no sends, no launch, lock intact). idle-driver→/stow recorded, /exit recorded, launch includes --trust --yolo --workspace cursor-grok-4.6-high, env vars cleared, no -p, lock preserved.",
+      "reason": "Requires real Claude pane in tmux/herdr backend, real Cursor, and real firstmate state directory."
+    },
+    {
+      "name": "Handover skips /stow and /exit when lock is already free/stale, and fails closed on unknown lock status",
+      "result": "pass",
+      "live": false,
+      "evidence": "tests/fm-backup-helm.test.sh: released lock → skips slash commands, launches directly. unknown lock → fail closed, no sends, no launch.",
+      "reason": "Requires real lock file state. Behavioral fake validates both paths."
+    },
+    {
+      "name": "Handover requires FM_HOME, refuses unsupported backends, re-probes Cursor Grok before any pane operation",
+      "result": "pass",
+      "live": false,
+      "evidence": "tests/fm-backup-helm.test.sh: unset FM_HOME→refused, --backend zellij→refused with 'tmux or herdr', missing catalog→probe fails before any pane send.",
+      "reason": "Requires real backend. Behavioral fake validates all guard conditions."
+    },
+    {
+      "name": "Arm registers backup-helm-claude-runway when-watch, fails closed if Cursor Grok is absent, duplicate arm is refused, retire is idempotent",
+      "result": "pass",
+      "live": false,
+      "evidence": "tests/fm-backup-helm.test.sh: arm→spec written, source-id matches. missing catalog→arm fails, no spec. duplicate→refused. retire→spec removed, idempotent.",
+      "reason": "Requires real fm-procevent-when.sh and firstmate state directory."
+    },
+    {
+      "name": "Stock percent-threshold quota watch is not revived: script uses when adapter, not quota adapter, and explicitly warns against it",
+      "result": "pass",
+      "live": false,
+      "evidence": "Code audit: bin/fm-backup-helm.sh and docs/backup-helm.md never call fm-procevent-quota.sh. Docs say: 'Do not arm bin/fm-procevent-quota.sh for this handover, and do not revive a retired percent-threshold Claude quota watch.'",
+      "reason": "Architectural invariant verified by reading code and docs, not a runtime-executable scenario."
+    }
+  ],
+  "verdict": "go",
+  "findings": []
+}

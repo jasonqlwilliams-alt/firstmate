@@ -1,0 +1,16 @@
+FM_TEST_BEGIN 2026-09-15T23:46:26Z tests/fm-backup-helm.test.sh family=standalone expected_gate_skip=none
+ok - condition classifies Claude all_models runway
+ok - probe fails closed without cursor-grok-4.6-high
+ok - mid-turn Claude is waited out and never interrupted
+ok - failed Cursor Grok probe refuses the handover before any pane send
+ok - unsupported backends are refused
+ok - handover requires an explicit FM_HOME
+ok - idle handover stows, exits, and launches Cursor Grok 4.6 high
+ok - already-released lock skips /stow and /exit then launches
+ok - unreadable lock status refuses the handover
+ok - arm registers the when-watch and retire cleans it up
+ok - arm fails closed when Cursor Grok is missing from the catalog
+FM_TEST_END 2026-09-15T23:46:32Z tests/fm-backup-helm.test.sh exit=0 duration_ms=6360 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=6488
+FM_TEST_SUMMARY_FAMILY family=standalone count=1 duration_ms=6360 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-backup-helm.test.sh duration_ms=6360
