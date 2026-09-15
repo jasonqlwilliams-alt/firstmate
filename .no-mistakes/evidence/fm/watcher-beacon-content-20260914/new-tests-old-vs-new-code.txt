@@ -1,0 +1,13 @@
+New beacon tests from tests/fm-watcher-lock.test.sh (target a2ec96b), run against three bin/ revisions.
+
+== bin from target a2ec96b ==
+ok - a poll leaves a non-empty fresh beacon and mtime-based readers honor content independently of size
+ok - a live watcher's beacon rewrite never reads as zero bytes
+
+== bin from base 5a4944e (zero-byte touch beacon) ==
+not ok - watcher poll did not leave a non-empty beacon
+not ok - watcher poll did not leave a non-empty beacon
+
+== bin from intermediate c4bf2d9 (truncate-then-write beacon) ==
+ok - a poll leaves a non-empty fresh beacon and mtime-based readers honor content independently of size
+not ok - size-based observer read an empty beacon 23 time(s) in 327582 samples

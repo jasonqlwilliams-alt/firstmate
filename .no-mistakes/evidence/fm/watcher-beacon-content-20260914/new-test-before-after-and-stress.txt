@@ -1,0 +1,15 @@
+# tests/fm-watcher-lock.test.sh :: test_watcher_beacon_poll_writes_informational_content
+# Run alone (harness header of the file + this one function), not the whole suite.
+
+## TARGET commit (change under test), 3 runs
+ok - a poll leaves a non-empty fresh beacon and mtime-based readers honor content independently of size   (0.39s)
+ok - a poll leaves a non-empty fresh beacon and mtime-based readers honor content independently of size   (0.39s)
+ok - a poll leaves a non-empty fresh beacon and mtime-based readers honor content independently of size   (0.38s)
+
+## Same test with WATCH pointed at the BASE commit's bin/fm-watch.sh (before the change)
+not ok - watcher poll did not leave a non-empty beacon
+exit=1
+
+## Race check for the review-round-1 fix (SIGSTOP before the stale half)
+# 40 runs, 8 at a time, while every CPU core ran a busy loop.
+stress runs under full CPU load: pass=40 fail=0

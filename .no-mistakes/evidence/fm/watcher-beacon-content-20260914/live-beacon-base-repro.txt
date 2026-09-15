@@ -1,0 +1,11 @@
+# Live reproduction: watcher liveness beacon, BASE commit (before the change)
+# Command: ROOT=<base checkout> MODE=repro bash drive-beacon-live.sh
+
+=== Arm the watcher the way an operator does: bin/fm-watch-arm.sh
+watcher: started pid=645832 (beacon fresh)
+lock holder pid=645832 (alive: yes)
+
+=== Inspect the beacon a live watcher left
+beacon: size=0 bytes, mtime age=0s, content=(empty)
+size-based outside observer: DOWN (file is zero bytes)
+fm_watcher_healthy (turn-end guard / arm primitive): HEALTHY

@@ -1,0 +1,87 @@
+=== S0 BUG REPRODUCTION (base revision): a live watcher leaves a zero-byte beacon ===
+  arm output: watcher: started pid=1377471 (beacon fresh)
+  base beacon: size=0 bytes, mtime age=1s, content=
+  PASS: base watcher alive (lock pid live)
+  PASS: base beacon is zero bytes (the reported DOWN trigger reproduces)
+  size-based observer on base (5s): samples=2224000 zero_byte_reads=2224000 missing_reads=0 distinct_contents_seen=1
+
+=== S1 arm a watcher: poll leaves a non-empty beacon with fresh mtime ===
+  arm output: watcher: started pid=1384539 (beacon fresh)
+  PASS: arm reported 'watcher: started pid=1384539 (beacon fresh)'
+  beacon: size=33 bytes, mtime age=1s, content=2026-09-15T01:55:56Z pid=1384539
+  PASS: beacon is non-empty
+  PASS: beacon mtime is fresh (<= 2s)
+  PASS: content is '<UTC ISO time> pid=<live watcher pid>'
+  PASS: content timestamp matches file mtime within 1s
+
+=== S2 later polls keep refreshing mtime and content; no temp files pile up ===
+  first : 2026-09-15T01:55:56Z pid=1384539
+  second: 2026-09-15T01:56:01Z pid=1384539
+  PASS: content advanced across polls
+  PASS: mtime advanced across polls
+  temp beacon files left in state/: 0
+  PASS: no .last-watcher-beat.* temp files left after ~6 polls
+
+=== S3 existing mtime-based readers accept the non-empty fresh beacon (task in flight) ===
+  PASS: fm-guard.sh prints no WATCHER DOWN banner
+  fm-guard.sh stderr: (silent)
+  fm-turnend-guard.sh exit=0 output=(none)
+  PASS: fm-turnend-guard.sh lets the turn end (exit 0)
+  PASS: fm_watcher_healthy accepts it
+  PASS: fm_supervision_status FM_SUP_WATCHER_FRESH=true
+  second fm-watch.sh start: exit=0 output=watcher: already running pid 1384539
+  PASS: second watcher start sees a live healthy singleton
+  re-arm output: watcher: attached pid=1384539 (beacon 0s)
+  PASS: re-arm attaches to the live watcher
+
+=== S4 ADVERSARIAL: non-empty but stale beacon (watcher frozen) still reads DOWN ===
+  beacon after freeze + backdate: size=33 bytes, mtime age=842723762s, content=2026-09-15T01:56:02Z pid=1384539
+  PASS: beacon still non-empty while stale
+  fm-guard.sh banner lines: ●  WATCHER DOWN - SUPERVISION IS OFF|●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: 842723762s ago, grace 300s).|
+  PASS: fm-guard.sh raises WATCHER DOWN despite non-empty content
+  fm-turnend-guard.sh exit=2 output=●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PASS: fm-turnend-guard.sh blocks the turn (exit 2)
+  PASS: fm_watcher_healthy rejects it
+  PASS: fm_supervision_status FM_SUP_WATCHER_FRESH=false
+  second fm-watch.sh start: exit=1 output=watcher: lock held by live pid 1384539 but heartbeat is stale for 842723762s (>300s); inspect or stop that watcher before re-arming.
+  PASS: second watcher start refuses: live pid but stale heartbeat
+  beacon after resume: size=33 bytes, mtime age=0s, content=2026-09-15T01:56:05Z pid=1384539
+  PASS: resumed watcher refreshes mtime
+  PASS: fm-guard.sh goes quiet again after recovery
+  PASS: fm-turnend-guard.sh allows the turn again (exit 0)
+
+=== S5 ADVERSARIAL: size-based observer hammers a fast-polling watcher's beacon ===
+  arm output: watcher: started pid=1388588 (beacon fresh)
+  target (rename-into-place) 20s: samples=8584000 zero_byte_reads=0 missing_reads=0 distinct_contents_seen=21
+  PASS: target: zero zero-byte reads
+  PASS: target: zero missing-file reads
+  PASS: target watcher still alive after hammer
+  temp beacon files left after ~400 fast polls: 0 (a rename in flight can show 1)
+  PASS: no temp file pile-up under fast polling (<= 1 in flight)
+  arm output: watcher: started pid=1418808 (beacon fresh)
+  control: intermediate truncate-then-write revision 20s: samples=8288000 zero_byte_reads=858 missing_reads=0 distinct_contents_seen=22
+  PASS: control: the observer does catch a truncate-then-write gap (sampler is sensitive)
+
+=== S6 ADVERSARIAL: rename or temp-file creation fails; fallback keeps mtime fresh and content intact ===
+  [mv fails] before arm: size=42 bytes, mtime age=842723810s, content=seeded line from an earlier watcher pid=1
+  arm output: watcher: started pid=1449571 (beacon fresh)
+  [mv fails] after ~6 polls: size=42 bytes, mtime age=1s, content=seeded line from an earlier watcher pid=1
+  [mv fails] shim refusals logged: 5
+  PASS: [mv fails] shim was really hit
+  PASS: [mv fails] arm still confirms 'started ... (beacon fresh)'
+  PASS: [mv fails] beacon mtime fresh via touch fallback
+  PASS: [mv fails] beacon content kept (never emptied)
+  PASS: [mv fails] failed temp files are removed (found 0)
+  PASS: [mv fails] fm_watcher_healthy accepts the live watcher
+  [mktemp fails] before arm: size=42 bytes, mtime age=842723815s, content=seeded line from an earlier watcher pid=1
+  arm output: watcher: started pid=1451767 (beacon fresh)
+  [mktemp fails] after ~6 polls: size=42 bytes, mtime age=0s, content=seeded line from an earlier watcher pid=1
+  [mktemp fails] shim refusals logged: 5
+  PASS: [mktemp fails] shim was really hit
+  PASS: [mktemp fails] arm still confirms 'started ... (beacon fresh)'
+  PASS: [mktemp fails] beacon mtime fresh via touch fallback
+  PASS: [mktemp fails] beacon content kept (never emptied)
+  PASS: [mktemp fails] failed temp files are removed (found 0)
+  PASS: [mktemp fails] fm_watcher_healthy accepts the live watcher
+
+RESULT: 42 passed, 0 failed

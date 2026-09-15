@@ -1,0 +1,23 @@
+# ADVERSARIAL live drive: size-based observer hammering the beacon while a real watcher polls every 0.05s
+# Command: ROOT=<checkout> SECONDS_TO_SAMPLE=<n> bash drive-beacon-size-sampler.sh
+
+## TARGET commit (change under test), 30s
+arm: watcher: started pid=659565 (beacon fresh)
+watcher poll: FM_POLL=0.05, sampling for 30s
+samples=11615286 distinct_beacon_writes_seen=233 zero_byte_samples=852 missing_samples=0
+size-based observer verdict: saw a zero-byte beacon 852 time(s)
+watcher alive at end: yes
+
+## BASE commit (before the change), 10s
+arm: watcher: started pid=695485 (beacon fresh)
+watcher poll: FM_POLL=0.05, sampling for 10s
+samples=3799971 distinct_beacon_writes_seen=35 zero_byte_samples=3799971 missing_samples=0
+size-based observer verdict: saw a zero-byte beacon 3799971 time(s)
+watcher alive at end: yes
+
+## Throwaway comparison copy of TARGET with the beacon written to a temp file then renamed into place (NOT part of the change), 30s
+arm: watcher: started pid=755414 (beacon fresh)
+watcher poll: FM_POLL=0.05, sampling for 30s
+samples=11337712 distinct_beacon_writes_seen=100 zero_byte_samples=0 missing_samples=0
+size-based observer verdict: NEVER saw a zero-byte beacon
+watcher alive at end: yes

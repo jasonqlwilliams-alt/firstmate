@@ -1,0 +1,57 @@
+# Live drive: watcher liveness beacon, TARGET commit (change under test)
+# Command: ROOT=<repo> MODE=full bash drive-beacon-live.sh
+# Throwaway FM_HOME under a temp dir; fake tmux on PATH; FM_POLL=1; FM_GUARD_GRACE=60; persistent supervision model.
+
+=== Arm the watcher the way an operator does: bin/fm-watch-arm.sh
+watcher: started pid=630302 (beacon fresh)
+lock holder pid=630302 (alive: yes)
+
+=== Inspect the beacon a live watcher left
+beacon: size=32 bytes, mtime age=1s, content=2026-09-15T01:35:45Z pid=630302
+size-based outside observer: UP (file non-empty)
+fm_watcher_healthy (turn-end guard / arm primitive): HEALTHY
+
+=== Wait across two more polls: content and mtime both advance
+beacon: size=32 bytes, mtime age=1s, content=2026-09-15T01:35:47Z pid=630302
+content changed across polls: yes
+content pid matches lock holder: yes
+
+=== mtime readers against the running watcher's non-empty fresh beacon
+fm_watcher_healthy (turn-end guard / arm primitive): HEALTHY
+fm_supervision_status: FM_SUP_WATCHER_FRESH=true (last beat 1s ago)
+second bin/fm-watch-arm.sh: watcher: attached pid=630302 (beacon 0s)
+watcher still alive after detaching the second arm: yes
+
+=== Freeze the watcher (SIGSTOP keeps the pid alive) and put a task in flight
+beacon: size=32 bytes, mtime age=0s, content=2026-09-15T01:35:48Z pid=630302
+bin/fm-guard.sh: (silent - supervision healthy)
+
+=== ADVERSARIAL: non-empty content but an old mtime must read DOWN
+beacon: size=36 bytes, mtime age=842722548s, content=stale informational line pid=630302
+size-based outside observer: UP (file non-empty)
+fm_watcher_healthy (turn-end guard / arm primitive): NOT HEALTHY
+fm_supervision_status: FM_SUP_WATCHER_FRESH=false (last beat 842722548s ago)
+bin/fm-guard.sh output:
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: 842722548s ago, grace 60s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--- bin/fm-watch-arm.sh against the live-but-stale holder (confirm timeout 3s):
+watcher: lock held by live pid 630302 but heartbeat is stale for 842722548s (>60s); inspect or stop that watcher before re-arming.
+watcher: FAILED - watcher cycle exited 1 without an actionable reason
+arm exit=1
+
+=== ADVERSARIAL: a zero-byte file with a fresh mtime must still read HEALTHY
+beacon: size=0 bytes, mtime age=0s, content=(empty)
+size-based outside observer: DOWN (file is zero bytes)
+fm_watcher_healthy (turn-end guard / arm primitive): HEALTHY
+fm_supervision_status: FM_SUP_WATCHER_FRESH=true (last beat 0s ago)
+bin/fm-guard.sh: (silent - supervision healthy)
+
+=== Resume the watcher: its next poll restores non-empty content and a fresh mtime
+beacon: size=32 bytes, mtime age=1s, content=2026-09-15T01:35:50Z pid=630302
+size-based outside observer: UP (file non-empty)
+fm_watcher_healthy (turn-end guard / arm primitive): HEALTHY
