@@ -390,25 +390,27 @@ test_transcript_fold_excludes_prior_conversations() {
 }
 
 test_allowlist_matcher_defaults_and_refuses_auto() {
-  fm_cursor_model_matches_pattern cursor-grok-4.5-high "$FM_CURSOR_MODEL_ALLOWLIST_DEFAULT" \
+  local default_allowlist
+  default_allowlist=$(fm_cursor_model_allowlist_default)
+  fm_cursor_model_matches_pattern cursor-grok-4.5-high "$default_allowlist" \
     || fail "default glob must match cursor-grok-4.5-high"
-  fm_cursor_model_matches_pattern cursor-grok-4.5-high-fast "$FM_CURSOR_MODEL_ALLOWLIST_DEFAULT" \
+  fm_cursor_model_matches_pattern cursor-grok-4.5-high-fast "$default_allowlist" \
     || fail "default glob must match cursor-grok-4.5-high-fast"
-  fm_cursor_model_matches_pattern composer-1.5 "$FM_CURSOR_MODEL_ALLOWLIST_DEFAULT" \
+  fm_cursor_model_matches_pattern composer-1.5 "$default_allowlist" \
     && fail "default glob must not match composer-1.5"
   fm_cursor_model_is_auto auto || fail "auto must be detected as auto"
   fm_cursor_model_is_auto AUTO || fail "AUTO must be detected as auto"
   ! fm_cursor_model_is_auto cursor-grok-4.5-high \
     || fail "a Grok id must not be classified as auto"
-  printf '%s\n' "$FM_CURSOR_MODEL_ALLOWLIST_DEFAULT" | fm_cursor_model_allowlisted cursor-grok-4.5-high \
+  printf '%s\n' "$default_allowlist" | fm_cursor_model_allowlisted cursor-grok-4.5-high \
     || fail "default glob must allowlist cursor-grok-4.5-high"
   printf '%s\n' '*' | fm_cursor_model_allowlisted auto \
     && fail "auto must stay refused even when * would match"
   printf '%s\n' 'auto' | fm_cursor_model_allowlisted auto \
     && fail "auto must stay refused even when the allowlist names it"
-  printf '%s\n' "$FM_CURSOR_MODEL_ALLOWLIST_DEFAULT" | fm_cursor_model_allowlisted '' \
+  printf '%s\n' "$default_allowlist" | fm_cursor_model_allowlisted '' \
     && fail "an empty model must not be allowlisted"
-  printf '%s\n' "$FM_CURSOR_MODEL_ALLOWLIST_DEFAULT" | fm_cursor_model_allowlisted default \
+  printf '%s\n' "$default_allowlist" | fm_cursor_model_allowlisted default \
     && fail "model=default must not be allowlisted"
   pass "cursor allowlist matcher defaults to cursor-grok-* and always refuses auto"
 }

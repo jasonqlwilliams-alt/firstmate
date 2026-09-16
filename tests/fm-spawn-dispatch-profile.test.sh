@@ -702,6 +702,7 @@ exit 0
 SH
   chmod +x "$FAKEBIN_DIR/quota-axi"
 
+  # shellcheck disable=SC2034 # read by fake quota-axi script in subprocess
   FM_FAKE_QUOTA_LOG="$CASE_DIR/quota.log" \
     out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
       --model cursor-grok-4.5-high)
