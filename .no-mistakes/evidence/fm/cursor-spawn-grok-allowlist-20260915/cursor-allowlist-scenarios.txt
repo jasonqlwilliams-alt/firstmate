@@ -1,0 +1,71 @@
+=== Cursor model allowlist: scenario-by-scenario evidence ===
+
+Environment: fm-spawn.sh driven against fake tmux, fake cursor-agent binary,
+             fake timeout, isolated git worktrees. The fake cursor-agent
+             honors FM_FAKE_CURSOR_MODELS to simulate --list-models output
+             and FM_FAKE_CURSOR_LIST_STATUS to simulate probe failures.
+
+Blocked catalog (simulated cursor-agent --list-models output):
+  auto - Auto
+  composer-1.5 - Composer 1.5
+  claude-opus-4-6-thinking - Claude Opus 4.6 Thinking
+  gpt-5.4 - GPT 5.4
+  gemini-3-1-pro - Gemini 3.1 Pro
+  cursor-grok-4.5-high - Grok 4.5 High
+
+Scenario 1: Default allowlist blocks non-Grok models
+  For each model (auto, composer-1.5, claude-opus-4-6-thinking, gpt-5.4, gemini-3-1-pro):
+    fm-spawn --model <model> --harness cursor
+    -> Refused: "is not allowed by config/cursor-model-allowlist"
+    Result: PASS (5/5)
+
+Scenario 2: Allowlisted Grok model passes
+    fm-spawn --model cursor-grok-4.5-high --harness cursor
+    -> Succeeds, launch command contains --model cursor-grok-4.5-high
+    Result: PASS
+
+Scenario 3: Omitted --model refused
+    fm-spawn --harness cursor (no --model)
+    -> Refused: "Cursor launch requires a model matching config/cursor-model-allowlist; omitting --model would let Cursor pick auto"
+    Result: PASS
+
+Scenario 4: Auto refused even when allowlist file names it
+    printf 'auto\n*\n' > config/cursor-model-allowlist
+    fm-spawn --model auto --harness cursor
+    -> Refused: "is not allowed by config/cursor-model-allowlist (default cursor-grok-*)"
+    Result: PASS
+
+Scenario 5: Custom allowlist widens; dispatch config cannot bypass
+    printf '# Captain-widened lock\ncomposer-*\n' > config/cursor-model-allowlist
+    config/crew-dispatch.json active
+    fm-spawn --harness cursor --model gpt-5.4 (via dispatch)
+    -> Refused: "cannot reintroduce them"
+    fm-spawn --harness cursor --model composer-1.5
+    -> Succeeds, launch contains --model 'composer-1.5'
+    Result: PASS (2/2)
+
+Scenario 6: Allowlist binds when catalog probe fails
+    FM_FAKE_CURSOR_LIST_STATUS=124 (timeout)
+    fm-spawn --model composer-1.5 --harness cursor
+    -> Refused: "is not allowed by config/cursor-model-allowlist"
+    Result: PASS
+
+Scenario 7: Invalid allowlist pattern refuses
+    printf 'cursor grok\n' > config/cursor-model-allowlist (space in pattern)
+    fm-spawn --model cursor-grok-4.5-high --harness cursor
+    -> Refused: "config/cursor-model-allowlist holds invalid pattern"
+    Result: PASS
+
+Scenario 8: quota-axi not consulted for cursor allowlist
+    Fake quota-axi that logs invocation installed on PATH
+    fm-spawn --model cursor-grok-4.5-high --harness cursor
+    -> Succeeds, quota-axi log is empty
+    Result: PASS
+
+Scenario 9: Secondmate inherits allowlist
+    cursor-grok-4.5-high written to primary's config/cursor-model-allowlist
+    fm-spawn --secondmate --model cursor-grok-4.5-high
+    -> Succeeds, secondmate home's config/cursor-model-allowlist byte-identical
+    Result: PASS
+
+Overall: 14/14 scenario checks passed, 0 failures
