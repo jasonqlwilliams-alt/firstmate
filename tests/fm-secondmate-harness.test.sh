@@ -589,9 +589,22 @@ test_spawn_cursor_secondmate_launches_with_its_primary_contract() {
   sm="$w/sm"
   launchlog="$w/launch.log"
   mkdir -p "$w/home/config" "$w/home/state" "$w/home/data" "$w/home/projects"
-  printf 'cursor\n' > "$w/home/config/secondmate-harness"
+  printf 'cursor cursor-grok-4.5-high\n' > "$w/home/config/secondmate-harness"
   make_seeded_home "$sm" sm
   fakebin=$(make_launch_capturing_tmux "$w/tmux")
+  cat > "$fakebin/timeout" <<'SH'
+#!/usr/bin/env bash
+shift
+exec "$@"
+SH
+  cat > "$fakebin/cursor-agent" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = --list-models ]; then
+  printf '%s\n' 'Available models' 'cursor-grok-4.5-high - Grok 4.5 High'
+fi
+exit 0
+SH
+  chmod +x "$fakebin/timeout" "$fakebin/cursor-agent"
   : > "$launchlog"
   rc=0
   PATH="$fakebin:$BASE_PATH" TMUX='' CLAUDECODE=1 \
@@ -601,18 +614,19 @@ test_spawn_cursor_secondmate_launches_with_its_primary_contract() {
     FM_SPAWN_NO_GUARD=1 FM_FAKE_LAUNCH_LOG="$launchlog" FM_FAKE_PANE_PATH="$sm" \
     "$ROOT/bin/fm-spawn.sh" sm "$sm" --secondmate >/dev/null 2>&1 || rc=$?
 
-  [ "$rc" -eq 0 ] || {
-    echo "skip: cursor executable not resolvable in this environment, so the launch could not be built"
-    return
-  }
+  [ "$rc" -eq 0 ] || fail "cursor secondmate spawn with an allowlisted model should succeed"
   meta="$w/home/state/sm.meta"
   [ "$(meta_field "$meta" harness)" = cursor ] || fail "a cursor secondmate must record its own harness"
   [ "$(meta_field "$meta" kind)" = secondmate ] || fail "a cursor secondmate must record kind=secondmate"
+  [ "$(meta_field "$meta" model)" = cursor-grok-4.5-high ] \
+    || fail "a cursor secondmate must record its allowlisted model"
   launch=$(cat "$launchlog")
   assert_contains "$launch" "--trust" \
     "a cursor secondmate must launch with --trust, or none of its project hooks load and its home has no supervision at all"
   assert_contains "$launch" "--workspace" \
     "a cursor secondmate must be pinned to its own home as the workspace"
+  assert_contains "$launch" "--model 'cursor-grok-4.5-high'" \
+    "a cursor secondmate must launch with its allowlisted model"
   assert_contains "$launch" "FM_SUPERVISION_MODEL=autoarm" \
     "cursor's stop-hook park runs the watcher only between turns, so its home must inherit the autoarm model"
   pass "Cursor is accepted for secondmates and launches with the contract its park needs"
@@ -1008,6 +1022,7 @@ new_world() {
     printf 'config/crew-harness\nconfig/secondmate-harness\nconfig/backlog-backend\n'
     printf 'config/backend\nconfig/herdr-presentation-spaces\nconfig/startup-memory-budget\n'
     printf 'config/claude-permission-mode\n'
+    printf 'config/cursor-model-allowlist\n'
   } > "$w/main/.gitignore"
   printf 'v1\n' > "$w/main/AGENTS.md"
   printf 'r1\n' > "$w/main/README.md"
@@ -1436,6 +1451,27 @@ test_claude_permission_mode_inheritance_present_and_absent() {
   expect_code 0 "$status" "claude-permission-mode absence push should succeed"
   [ -e "$w/sm/config/claude-permission-mode" ] && fail "claude-permission-mode not removed on primary absence"
   pass "B12c claude-permission-mode inheritance: present values and primary absence converge exactly"
+}
+
+test_cursor_model_allowlist_inheritance_present_and_absent() {
+  local w head out err status
+  w=$(new_world cursor-allowlist-inherit)
+  head=$(git -C "$w/main" rev-parse HEAD)
+  add_sm_worktree "$w" sm "$head"
+
+  printf 'cursor-grok-4.5-high\n' > "$w/home/config/cursor-model-allowlist"
+  err="$w/cursor-allowlist-inherit.err"
+  out=$(run_config_push "$w" 2>"$err"); status=$?
+  expect_code 0 "$status" "cursor-model-allowlist present push should succeed"
+  assert_contains "$out" "cursor-model-allowlist: pushed" "present value should report pushed"
+  [ "$(cat "$w/sm/config/cursor-model-allowlist")" = cursor-grok-4.5-high ] \
+    || fail "cursor-model-allowlist present value not pushed"
+
+  rm -f "$w/home/config/cursor-model-allowlist"
+  out=$(run_config_push "$w" 2>"$err"); status=$?
+  expect_code 0 "$status" "cursor-model-allowlist absence push should succeed"
+  [ -e "$w/sm/config/cursor-model-allowlist" ] && fail "cursor-model-allowlist not removed on primary absence"
+  pass "cursor-model-allowlist inheritance: present values and primary absence converge exactly"
 }
 
 test_backend_inheritance_present_and_absent() {
@@ -2637,6 +2673,7 @@ test_bootstrap_sweep_materializes_and_inherits_memory_default
 test_backend_inheritance_present_and_absent
 test_spawn_secondmate_claude_permission_mode_auto
 test_claude_permission_mode_inheritance_present_and_absent
+test_cursor_model_allowlist_inheritance_present_and_absent
 test_presentation_inheritance_default_on_and_opt_out
 test_bootstrap_sweep_surfaces_config_propagation_failure
 test_bootstrap_rereads_after_partial_propagation

@@ -389,6 +389,32 @@ test_transcript_fold_excludes_prior_conversations() {
   pass "cursor transcript fold: a prior conversation is excluded so a relaunch folds its own turn"
 }
 
+test_allowlist_matcher_defaults_and_refuses_auto() {
+  local default_allowlist
+  default_allowlist=$(fm_cursor_model_allowlist_default)
+  fm_cursor_model_matches_pattern cursor-grok-4.5-high "$default_allowlist" \
+    || fail "default glob must match cursor-grok-4.5-high"
+  fm_cursor_model_matches_pattern cursor-grok-4.5-high-fast "$default_allowlist" \
+    || fail "default glob must match cursor-grok-4.5-high-fast"
+  fm_cursor_model_matches_pattern composer-1.5 "$default_allowlist" \
+    && fail "default glob must not match composer-1.5"
+  fm_cursor_model_is_auto auto || fail "auto must be detected as auto"
+  fm_cursor_model_is_auto AUTO || fail "AUTO must be detected as auto"
+  ! fm_cursor_model_is_auto cursor-grok-4.5-high \
+    || fail "a Grok id must not be classified as auto"
+  printf '%s\n' "$default_allowlist" | fm_cursor_model_allowlisted cursor-grok-4.5-high \
+    || fail "default glob must allowlist cursor-grok-4.5-high"
+  printf '%s\n' '*' | fm_cursor_model_allowlisted auto \
+    && fail "auto must stay refused even when * would match"
+  printf '%s\n' 'auto' | fm_cursor_model_allowlisted auto \
+    && fail "auto must stay refused even when the allowlist names it"
+  printf '%s\n' "$default_allowlist" | fm_cursor_model_allowlisted '' \
+    && fail "an empty model must not be allowlisted"
+  printf '%s\n' "$default_allowlist" | fm_cursor_model_allowlisted default \
+    && fail "model=default must not be allowlisted"
+  pass "cursor allowlist matcher defaults to cursor-grok-* and always refuses auto"
+}
+
 test_identity_accepts_cursor_shapes_rejects_lookalikes
 test_identity_signals_diverge
 test_verify_executable_refuses_unrelated_agent
@@ -402,3 +428,4 @@ test_transcript_fold_handles_partially_appended_records
 test_transcript_fold_is_unknown_never_idle_when_unresolvable
 test_transcript_binding_matches_workspace_exactly
 test_transcript_fold_excludes_prior_conversations
+test_allowlist_matcher_defaults_and_refuses_auto

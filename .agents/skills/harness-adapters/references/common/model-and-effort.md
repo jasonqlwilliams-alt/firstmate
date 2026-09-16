@@ -27,6 +27,7 @@ A harness with no verified interactive effort flag follows the same record-and-o
 Harness identity is independent of model provider.
 `harness=pi` with `model=xai/grok-*` is Pi using xAI, not standalone Grok Build, and does not require Grok CLI login.
 `harness=cursor` with `model=cursor-grok-4.5-*` is Cursor routing a Grok model, not `harness=grok`.
+Spawn still requires that Cursor id to match `config/cursor-model-allowlist`; `docs/configuration.md` owns the lock.
 
 No script resolves credential provenance for you.
 Establish it from the tool's discovery surface and `quota-axi auth --json` per-provider sources, and show the reasoning rather than inferring it from a name.

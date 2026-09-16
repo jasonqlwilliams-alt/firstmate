@@ -548,14 +548,192 @@ test_cursor_failed_catalog_probe_does_not_block_spawn() {
 
   FM_TEST_CURSOR_LIST_STATUS=124 \
     out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-      --model cursor-catalog-unreachable)
+      --model cursor-grok-4.5-high)
   status=$?
   expect_code 0 "$status" "cursor spawn should fail open when the bounded catalog query fails"
   launch=$(cat "$LAUNCH_LOG")
-  assert_contains "$launch" "--model 'cursor-catalog-unreachable'" \
+  assert_contains "$launch" "--model 'cursor-grok-4.5-high'" \
     "failed catalog lookup incorrectly removed the requested model"
-  assert_meta_profile "$HOME_DIR/state/$id.meta" cursor cursor-catalog-unreachable default
-  pass "cursor preserves the requested model when its live catalog is unreachable"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" cursor cursor-grok-4.5-high default
+  pass "cursor preserves an allowlisted model when its live catalog is unreachable"
+}
+
+cursor_blocked_catalog() {
+  printf '%s\n' \
+    'Available models' \
+    'auto - Auto' \
+    'composer-1.5 - Composer 1.5' \
+    'claude-opus-4-6-thinking - Claude Opus 4.6 Thinking' \
+    'gpt-5.4 - GPT 5.4' \
+    'gemini-3-1-pro - Gemini 3.1 Pro' \
+    'cursor-grok-4.5-high - Grok 4.5 High'
+}
+
+test_cursor_allowlist_refuses_catalog_ids_outside_default_glob() {
+  local rec id out status model
+  id=profile-cursor-allowlist-blocked
+  rec=$(make_spawn_case profile-cursor-allowlist-blocked cursor "$id")
+  read_case_record "$rec"
+
+  for model in auto composer-1.5 claude-opus-4-6-thinking gpt-5.4 gemini-3-1-pro; do
+    : > "$LAUNCH_LOG"
+    FM_TEST_CURSOR_MODELS="$(cursor_blocked_catalog)" \
+      out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+        --model "$model")
+    status=$?
+    expect_code 1 "$status" "cursor spawn should refuse catalog id $model"
+    assert_contains "$out" "Cursor model '$model' is not allowed by config/cursor-model-allowlist" \
+      "allowlist refusal did not identify $model"
+    assert_contains "$out" "config/crew-dispatch.json cannot reintroduce" \
+      "allowlist refusal did not say dispatch config cannot bypass the lock"
+    [ ! -s "$LAUNCH_LOG" ] || fail "blocked cursor model $model must not launch"
+    [ ! -f "$HOME_DIR/state/$id.meta" ] || fail "blocked cursor model $model published a task"
+  done
+  pass "default cursor-grok-* allowlist refuses auto, Composer, Opus, GPT, and Gemini even when the catalog lists them"
+}
+
+test_cursor_allowlist_refuses_omitted_model() {
+  local rec id out status
+  id=profile-cursor-allowlist-omitted
+  rec=$(make_spawn_case profile-cursor-allowlist-omitted cursor "$id")
+  read_case_record "$rec"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 1 "$status" "cursor spawn without --model should refuse rather than let Cursor pick auto"
+  assert_contains "$out" "Cursor launch requires a model matching config/cursor-model-allowlist" \
+    "omitted-model refusal did not name the allowlist"
+  assert_contains "$out" "omitting --model would let Cursor pick auto" \
+    "omitted-model refusal did not explain the auto default"
+  [ ! -s "$LAUNCH_LOG" ] || fail "omitted cursor model must not launch"
+  pass "cursor spawn without --model is refused so Cursor cannot default to auto"
+}
+
+test_cursor_allowlist_refuses_auto_even_when_file_names_it() {
+  local rec id out status
+  id=profile-cursor-allowlist-auto-file
+  rec=$(make_spawn_case profile-cursor-allowlist-auto-file cursor "$id")
+  read_case_record "$rec"
+  printf 'auto\n*\n' > "$HOME_DIR/config/cursor-model-allowlist"
+
+  FM_TEST_CURSOR_MODELS="$(cursor_blocked_catalog)" \
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+      --model auto)
+  status=$?
+  expect_code 1 "$status" "cursor spawn should refuse auto even when the allowlist names it"
+  assert_contains "$out" "Cursor model 'auto' is not allowed by config/cursor-model-allowlist" \
+    "auto refusal did not identify the model"
+  [ ! -s "$LAUNCH_LOG" ] || fail "auto must not launch even when the allowlist file names it"
+  pass "auto is refused even when config/cursor-model-allowlist names auto or *"
+}
+
+test_cursor_allowlist_custom_file_can_widen_and_dispatch_cannot_bypass() {
+  local rec id out status launch
+  id=profile-cursor-allowlist-widen
+  rec=$(make_spawn_case profile-cursor-allowlist-widen cursor "$id")
+  read_case_record "$rec"
+  printf '# Captain-widened lock\ncomposer-*\n' > "$HOME_DIR/config/cursor-model-allowlist"
+  enable_dispatch_profile "$HOME_DIR"
+
+  FM_TEST_CURSOR_MODELS="$(cursor_blocked_catalog)" \
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+      --harness cursor --model gpt-5.4)
+  status=$?
+  expect_code 1 "$status" "dispatch-active spawn should still refuse a non-allowlisted cursor model"
+  assert_contains "$out" "config/crew-dispatch.json cannot reintroduce" \
+    "dispatch-active refusal did not say the dispatch file cannot bypass the lock"
+  [ ! -s "$LAUNCH_LOG" ] || fail "gpt-5.4 must not launch through dispatch config"
+
+  FM_TEST_CURSOR_MODELS="$(cursor_blocked_catalog)" \
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+      --harness cursor --model composer-1.5)
+  status=$?
+  expect_code 0 "$status" "a widened allowlist should permit an allowlisted catalog id: $out"
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" "--model 'composer-1.5'" \
+    "widened allowlist did not thread the requested model"
+  pass "custom allowlist widens Cursor ids; crew-dispatch.json cannot reintroduce a blocked id"
+}
+
+test_cursor_allowlist_still_binds_when_catalog_probe_fails() {
+  local rec id out status
+  id=profile-cursor-allowlist-catalog-fail
+  rec=$(make_spawn_case profile-cursor-allowlist-catalog-fail cursor "$id")
+  read_case_record "$rec"
+
+  FM_TEST_CURSOR_LIST_STATUS=124 \
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+      --model composer-1.5)
+  status=$?
+  expect_code 1 "$status" "failed catalog lookup must not skip the allowlist"
+  assert_contains "$out" "Cursor model 'composer-1.5' is not allowed by config/cursor-model-allowlist" \
+    "allowlist refusal after a failed catalog probe did not identify composer-1.5"
+  [ ! -s "$LAUNCH_LOG" ] || fail "non-allowlisted model must not launch when the catalog is unreachable"
+  pass "allowlist still refuses non-Grok ids when the live catalog probe fails"
+}
+
+test_cursor_allowlist_invalid_file_refuses() {
+  local rec id out status
+  id=profile-cursor-allowlist-invalid
+  rec=$(make_spawn_case profile-cursor-allowlist-invalid cursor "$id")
+  read_case_record "$rec"
+  printf 'cursor grok\n' > "$HOME_DIR/config/cursor-model-allowlist"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --model cursor-grok-4.5-high)
+  status=$?
+  expect_code 1 "$status" "an invalid allowlist pattern must refuse the cursor spawn"
+  assert_contains "$out" "config/cursor-model-allowlist holds invalid pattern" \
+    "invalid allowlist refusal did not name the file"
+  [ ! -s "$LAUNCH_LOG" ] || fail "invalid allowlist must not launch"
+  pass "invalid config/cursor-model-allowlist refuses before launch"
+}
+
+test_cursor_allowlist_does_not_consult_quota_axi() {
+  local rec id out status
+  id=profile-cursor-allowlist-quota
+  rec=$(make_spawn_case profile-cursor-allowlist-quota cursor "$id")
+  read_case_record "$rec"
+  cat > "$FAKEBIN_DIR/quota-axi" <<'SH'
+#!/bin/sh
+printf 'quota-axi invoked\n' >> "${FM_FAKE_QUOTA_LOG:-/dev/null}"
+printf 'cursor,all_models exhausted_now\n'
+exit 0
+SH
+  chmod +x "$FAKEBIN_DIR/quota-axi"
+
+  # shellcheck disable=SC2034 # read by fake quota-axi script in subprocess
+  FM_FAKE_QUOTA_LOG="$CASE_DIR/quota.log" \
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+      --model cursor-grok-4.5-high)
+  status=$?
+  expect_code 0 "$status" "allowlisted cursor-grok spawn should succeed while quota-axi reports exhausted: $out"
+  [ ! -s "$CASE_DIR/quota.log" ] || fail "cursor spawn consulted quota-axi: $(cat "$CASE_DIR/quota.log")"
+  pass "quota-axi cursor,all_models exhausted_now is not a spawn block for cursor-grok-*"
+}
+
+test_cursor_allowlist_inherited_by_secondmate() {
+  local rec id sm out status
+  id=cursor-allowlist-secondmate
+  rec=$(make_spawn_case "$id" cursor "$id")
+  read_case_record "$rec"
+  printf 'cursor-grok-4.5-high\n' > "$HOME_DIR/config/cursor-model-allowlist"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" \
+    --secondmate --model cursor-grok-4.5-high)
+  status=$?
+  expect_code 0 "$status" "cursor secondmate with an allowlist should spawn: $out"
+  cmp -s "$HOME_DIR/config/cursor-model-allowlist" "$sm/config/cursor-model-allowlist" \
+    || fail "secondmate did not inherit the cursor model allowlist"
+  (
+    # shellcheck source=/dev/null
+    . "$ROOT/bin/fm-config-inherit-lib.sh"
+    rm "$HOME_DIR/config/cursor-model-allowlist"
+    propagate_secondmate_inheritance "$HOME_DIR" "$sm" >/dev/null
+  ) || fail "cursor allowlist removal failed to converge"
+  [ ! -e "$sm/config/cursor-model-allowlist" ] || fail "secondmate retained a removed cursor allowlist"
+  pass "secondmate launch inherits config/cursor-model-allowlist"
 }
 
 test_opencode_threads_model_and_ignores_effort_axis() {
@@ -1366,6 +1544,14 @@ test_grok_omits_invalid_xhigh_reasoning_effort
 test_cursor_threads_model_workspace_and_omits_effort_axis
 test_cursor_refuses_model_absent_from_live_catalog
 test_cursor_failed_catalog_probe_does_not_block_spawn
+test_cursor_allowlist_refuses_catalog_ids_outside_default_glob
+test_cursor_allowlist_refuses_omitted_model
+test_cursor_allowlist_refuses_auto_even_when_file_names_it
+test_cursor_allowlist_custom_file_can_widen_and_dispatch_cannot_bypass
+test_cursor_allowlist_still_binds_when_catalog_probe_fails
+test_cursor_allowlist_invalid_file_refuses
+test_cursor_allowlist_does_not_consult_quota_axi
+test_cursor_allowlist_inherited_by_secondmate
 test_opencode_threads_model_and_ignores_effort_axis
 test_native_effort_validator_keeps_axes_separate
 test_native_pi_ultra_is_explicit_and_model_scoped

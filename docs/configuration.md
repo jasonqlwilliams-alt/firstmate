@@ -542,6 +542,31 @@ Valid files stay silent by default; with `FM_BOOTSTRAP_VERBOSE_FACTS=1`, bootstr
 Malformed JSON, an empty or malformed rule/default array, an unverified harness, or an effort value unsupported by that harness is reported as `CREW_DISPATCH: invalid config/crew-dispatch.json - ...`; missing `jq` is reported through the normal `MISSING: jq` install-consent flow.
 While the file remains present, no crewmate or scout spawn may proceed without an explicit resolved harness; malformed configuration must be reported and corrected rather than selected around.
 Secondmate homes inherit this file from the primary, so a secondmate's own crewmates apply the same dispatch profile behavior.
+A Cursor profile's `model` still has to match `config/cursor-model-allowlist` at spawn.
+
+## Cursor model allowlist (config/cursor-model-allowlist)
+
+The optional local, gitignored `config/cursor-model-allowlist` is the spawn-time lock on every Cursor worker launch: crewmates, scouts, Cursor secondmates, and control-plane relaunches alike.
+`bin/fm-spawn.sh` applies it after the live `cursor-agent --list-models` catalog check, so a catalog id that is not allowlisted is still refused.
+Absent means the default glob `cursor-grok-*`.
+`config/crew-dispatch.json` remains the choice among allowed Grok ids; editing that file cannot reintroduce Composer, Claude, Opus, Fable, GPT, Gemini, or `auto`.
+`auto`, an omitted `--model`, and `model=default` are always refused, even if a pattern would match them, because omitting the flag would let Cursor pick `auto`.
+A `quota-axi` `cursor,all_models exhausted_now` reading is not a spawn refusal for an allowlisted `cursor-grok-*` id; spawn does not consult `quota-axi`.
+The file is a captain-wide safety preference, so it is inherited into secondmate homes under the [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md) inherited-local-material contract.
+
+Create the file with one glob pattern per line.
+Blank lines and lines beginning with `#` are allowed.
+Accepted pattern characters are letters, digits, `.`, `_`, `-`, `*`, and `?`.
+An unreadable or nonregular file, a path inspection error, or an invalid pattern refuses the Cursor launch and names the file.
+A present empty file allowlists nothing.
+For example, the absent-file default is:
+
+```text
+cursor-grok-*
+```
+
+[`fm-spawn.sh --help`](../bin/fm-spawn.sh) owns the exact parsing and refusal mechanics.
+Regression coverage is in [`tests/fm-spawn-dispatch-profile.test.sh`](../tests/fm-spawn-dispatch-profile.test.sh).
 
 ## Toolchain
 

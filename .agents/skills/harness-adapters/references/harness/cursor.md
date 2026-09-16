@@ -8,8 +8,8 @@ Cross-harness provider and credential identity is owned by `references/common/mo
 | Fact | Value |
 |---|---|
 | Binary | `fm_cursor_resolve_binary` in `../../../bin/fm-cursor-lib.sh` resolves stable launcher `cursor-agent` or legacy `agent`, never `cursor`; both symlink into `~/.local/share/cursor-agent/versions/<version>/cursor-agent`, whose target auto-update replaces. |
-| Launch | Positional instructions with `--trust`, `--yolo`, optional `--model <model>`, and `--workspace <absolute-task-worktree>`, after clearing foreign primary markers. |
-| Models | Use current-account `cursor-agent --list-models` or legacy `agent --list-models`; the drifting observed list had only `cursor-grok-4.5-high` and `cursor-grok-4.5-high-fast` for Grok plus several `xhigh` ids, so choose a returned reasoning id and never assume low or medium Grok. |
+| Launch | Positional instructions with `--trust`, `--yolo`, `--model <allowlisted-id>`, and `--workspace <absolute-task-worktree>`, after clearing foreign primary markers. |
+| Models | Use current-account `cursor-agent --list-models` or legacy `agent --list-models`, then require the id to match `config/cursor-model-allowlist` (default `cursor-grok-*`; [`docs/configuration.md`](../../../../../docs/configuration.md#cursor-model-allowlist-configcursor-model-allowlist) owns the lock). The live catalog still offers Composer, Opus, Fable, GPT, Gemini, and `auto`; spawn refuses those unless the allowlist is widened. Choose a returned Grok reasoning id and never assume low or medium Grok. |
 | Busy state | `../../../bin/fm-busy-lib.sh` folds the per-conversation transcript as `cursor-transcript`: `role:user` opens and typed `turn_ended` closes success or abort, covering manual interrupt; nothing is armed or seeded, and this backend-agnostic source was identical on tmux and Herdr. |
 | Exit command | `/exit`. |
 | Interrupt | Single Escape returns the placeholder with no clear key; control makes no cancellation claim because an aborted transcript close appeared within seconds in some runs and not within twenty in others. |

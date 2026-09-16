@@ -2388,6 +2388,10 @@ test_exited_relaunch_normalizes_relative_cursor_executable() {
     mkdir -p "$dir/wt/bin"
     cat > "$dir/wt/bin/cursor-agent" <<SH
 #!/bin/sh
+if [ "\$1" = --list-models ]; then
+  printf '%s\n' 'Available models' 'cursor-grok-4.5-high - Grok 4.5 High'
+  exit 0
+fi
 printf cursor > '$dir/executable-ran'
 SH
     chmod +x "$dir/wt/bin/cursor-agent"
@@ -2395,9 +2399,9 @@ SH
     printf cursor-agent > "$dir/fake/becomes"
     printf '%s' "$dir/home" > "$dir/fake/cwd"
     if [ "$entry" = control ]; then
-      out=$(FM_FAKE_PANE_PATH='./bin:/usr/bin:/bin' run_control "$dir" rl-relative-cursor relaunch --harness cursor --note 'Use the worktree Cursor installation.'); rc=$?
+      out=$(FM_FAKE_PANE_PATH='./bin:/usr/bin:/bin' run_control "$dir" rl-relative-cursor relaunch --harness cursor --model cursor-grok-4.5-high --note 'Use the worktree Cursor installation.'); rc=$?
     else
-      out=$(FM_FAKE_PANE_PATH='./bin:/usr/bin:/bin' run_spawn "$dir" rl-relative-cursor --relaunch --harness cursor); rc=$?
+      out=$(FM_FAKE_PANE_PATH='./bin:/usr/bin:/bin' run_spawn "$dir" rl-relative-cursor --relaunch --harness cursor --model cursor-grok-4.5-high); rc=$?
     fi
     expect_code 0 "$rc" "$entry should resolve Cursor from the worktree's relative PATH: $out"
     launch=$(tail -n 1 "$dir/fake/literal")

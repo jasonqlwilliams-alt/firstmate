@@ -274,7 +274,20 @@
 #   worktree, or record exists and names the accepted values. The file is read
 #   on every spawn and relaunch, so a change reaches the next launch without a
 #   restart, and it is inherited into secondmate homes (bin/fm-config-inherit-lib.sh).
-#   Launch templates live in launch_template() below; placeholders replaced before launch:
+# Cursor model allowlist (config/cursor-model-allowlist):
+#   Spawn-time lock on every cursor launch (ship, scout, secondmate, relaunch).
+#   After the live --list-models catalog check, the requested id must match a
+#   glob from this file. Absent means the default glob cursor-grok-*. Auto,
+#   empty, and model=default are always refused, even if a pattern would match
+#   them, because omitting --model would let Cursor pick auto. A catalog id
+#   that is not allowlisted is refused, so config/crew-dispatch.json can only
+#   choose among allowed Grok ids and cannot reintroduce Composer, Claude,
+#   Opus, Fable, GPT, Gemini, or auto. quota-axi is not consulted here: a
+#   cursor,all_models exhausted_now reading is not a spawn refusal for an
+#   allowlisted cursor-grok-* id. One glob per line; blank lines and lines
+#   beginning with # are ignored. Invalid patterns or an unreadable
+#   non-regular file refuse the cursor launch. See docs/configuration.md.
+# Launch templates live in launch_template() below; placeholders replaced before launch:
 #     __BRIEF__    absolute path to data/<task-id>/brief.md
 #     __CLAUDEPERMFLAG__ the claude permission flag selected by config/claude-permission-mode
 #     __PIBIN__    quoted concrete Pi-family executable path resolved from PATH
@@ -1811,6 +1824,8 @@ launch_template() {
     # inherited CLAUDECODE cannot outrank cursor's own marker in a process that
     # only reads the environment. Cursor exposes no effort flag, so the shared
     # effort axis is deliberately omitted and stays in task metadata only.
+    # --model must pass config/cursor-model-allowlist after the live catalog
+    # check; omitting it is refused so Cursor cannot default to auto.
     cursor) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_INVOKED_AS __CURSORBIN__ --trust --yolo __MODELFLAG__--workspace __WORKTREE__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
     # gemini (Google Gemini CLI): a positional query starts the supervised
     # interactive session and auto-submits it, so the brief rides the launch
@@ -2026,14 +2041,6 @@ resolve_launch_executables() {
       # missing install a loud spawn refusal instead of a pane that dies with a
       # command-not-found the supervisor would read as a wedged worker.
       CURSOR_BIN=$(spawn_resolve_launch_binary fm_cursor_resolve_binary) || exit 1
-      if [ -n "$MODEL" ] && [ "$MODEL" != default ]; then
-        if CURSOR_MODELS=$(fm_cursor_list_models "$CURSOR_BIN"); then
-          if ! printf '%s\n' "$CURSOR_MODELS" | fm_cursor_catalog_has_model "$MODEL"; then
-            echo "error: Cursor model '$MODEL' is not available from '$CURSOR_BIN --list-models'; choose an id listed by that command or omit --model" >&2
-            exit 1
-          fi
-        fi
-      fi
       ;;
     agy)
       AGY_BIN=$(spawn_resolve_launch_binary resolve_agy_binary) || exit 1
@@ -2083,12 +2090,68 @@ if [ "$EFFORT" = ultra ]; then
     exit 1
   }
 fi
+cursor_model_allowlist_patterns() {
+  local path=$CONFIG/cursor-model-allowlist present line
+  if ! present=$(fm_config_source_present "$path"); then
+    return 1
+  fi
+  if [ "$present" = 0 ]; then
+    printf '%s\n' "$(fm_cursor_model_allowlist_default)"
+    return 0
+  fi
+  if [ ! -f "$path" ] || [ ! -r "$path" ]; then
+    echo "error: config/cursor-model-allowlist must be a readable regular file of one glob pattern per line (default cursor-grok-* when absent)" >&2
+    return 1
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ''|'#'*) continue ;;
+    esac
+    case "$line" in
+      *[[:space:]]*|*[!A-Za-z0-9._*?-]*)
+        echo "error: config/cursor-model-allowlist holds invalid pattern '$line'; use one glob per line with letters, digits, . _ - * ? only" >&2
+        return 1
+        ;;
+    esac
+    printf '%s\n' "$line"
+  done < "$path"
+}
+
+cursor_model_validate() {
+  local model=$MODEL patterns
+  if [ -n "$model" ] && [ "$model" != default ]; then
+    [ -n "${CURSOR_BIN:-}" ] || {
+      echo "error: Cursor executable was not resolved before model validation" >&2
+      return 1
+    }
+    if CURSOR_MODELS=$(fm_cursor_list_models "$CURSOR_BIN"); then
+      if ! printf '%s\n' "$CURSOR_MODELS" | fm_cursor_catalog_has_model "$model"; then
+        echo "error: Cursor model '$model' is not available from '$CURSOR_BIN --list-models'; choose an allowlisted id listed by that command" >&2
+        return 1
+      fi
+    fi
+  fi
+  patterns=$(cursor_model_allowlist_patterns) || return 1
+  if printf '%s\n' "$patterns" | fm_cursor_model_allowlisted "$model"; then
+    return 0
+  fi
+  if [ -z "$model" ] || [ "$model" = default ]; then
+    echo "error: Cursor launch requires a model matching config/cursor-model-allowlist (default cursor-grok-*); omitting --model would let Cursor pick auto" >&2
+  else
+    echo "error: Cursor model '$model' is not allowed by config/cursor-model-allowlist (default cursor-grok-*); auto and every non-matching id are refused at spawn, and config/crew-dispatch.json cannot reintroduce them" >&2
+  fi
+  return 1
+}
+
 validate_launch_models() {
   if [ "$HARNESS" = omp ]; then
     omp_model_validate "$OMP_BIN" "$MODEL" || exit 1
   fi
   if [ "$HARNESS" = agy ]; then
     agy_model_validate "$AGY_BIN" "$MODEL" || exit 1
+  fi
+  if [ "$HARNESS" = cursor ]; then
+    cursor_model_validate || exit 1
   fi
 }
 [ "$RELAUNCH" -eq 1 ] || validate_launch_models
