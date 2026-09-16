@@ -26,6 +26,7 @@
   "readmeSetupTargets": [
     "docs/configuration.md",
     "docs/wedge-alarm.md",
+    "docs/backup-helm.md",
     "docs/tmux-backend.md",
     "docs/herdr-backend.md",
     "docs/zellij-backend.md",
@@ -291,6 +292,10 @@
     {
       "path": "docs/arm-pretool-check.md",
       "audience": "maintainer-architecture"
+    },
+    {
+      "path": "docs/backup-helm.md",
+      "audience": "operator-current"
     },
     {
       "path": "docs/calm-mode-feasibility.md",
