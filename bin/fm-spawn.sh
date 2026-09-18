@@ -131,9 +131,15 @@
 #   returning a slot, so allocation cannot reuse a slot before its owner record
 #   is published. Under that same lock it writes the slot's owner claim, which is
 #   what lets teardown leave a slot reassigned since untouched; bin/fm-wake-lib.sh
-#   owns the claim and bin/fm-teardown.sh owns what it protects. A slot that
+#   owns the claim and bin/fm-teardown.sh owns what it protects.   A slot that
 #   cannot be claimed refuses the spawn rather than launching a worker whose slot
-#   could later be released out from under its successor. A spawn that aborts
+#   could later be released out from under its successor. After treehouse get
+#   settles and before this spawn claims the slot, the same cross-home record
+#   scan teardown uses for exclusivity must find no live worktree= or home=
+#   naming that path; bin/fm-wake-lib.sh owns the scan. A slot any home still
+#   records is refused rather than claimed, returned, or launched into: returning
+#   it would reset the occupying copy, and claiming it would hide that occupancy
+#   behind this task's owner file. A spawn that aborts
 #   while it still holds the allocation lock drops its own claim; an abort after
 #   metadata publication has released that lock leaves the claim in place, and
 #   the next spawn's claim replaces it.
@@ -3171,10 +3177,10 @@ case "$BACKEND" in
     # it stands up a DIFFERENT home's own workspace by design - so it asks for
     # the per-home container instead of inheriting this launcher's.
     HERDR_LABEL_HOME=$FM_HOME
-    HERDR_LAUNCHER_RELATIONSHIP=launcher-home
+    HERDR_LAUNCHER_RELATIONSHIP="launcher-home"
     if [ "$KIND" = secondmate ]; then
       HERDR_LABEL_HOME=$PROJ_ABS
-      HERDR_LAUNCHER_RELATIONSHIP=other-home
+      HERDR_LAUNCHER_RELATIONSHIP="other-home"
     fi
     HERDR_PRESENTATION_JOURNAL=$(fm_backend_herdr_projection_journal_path "$STATE" "$ID")
     HERDR_PROJECTED=0
@@ -3590,6 +3596,37 @@ relaunch_return_to_worktree() {
   fi
 }
 
+# A pool slot any live record still names is not this spawn's to take. Refusing
+# here - without claiming and without treehouse return - leaves the occupying
+# copy alone. Returning the slot would reset it; claiming it would overwrite
+# the evidence that the occupant still holds it.
+spawn_require_unrecorded_pool_slot() {  # <worktree>
+  local worktree=$1 occupants rc=0 other_id field
+  local -a names=()
+  occupants=$(fm_treehouse_slot_foreign_records "$worktree" "$STATE/$ID.meta") || rc=$?
+  case "$rc" in
+    0) ;;
+    1) return 0 ;;
+    *)
+      echo "error: could not scan live task records for Treehouse pool slot $worktree; refusing to take a slot whose occupancy cannot be proved; inspect window $T" >&2
+      return 1
+      ;;
+  esac
+  while IFS=$'\t' read -r other_id field || [ -n "$other_id" ]; do
+    [ -n "$other_id" ] || continue
+    names+=("task $other_id ($field)")
+  done <<< "$occupants"
+  if [ "${#names[@]}" -gt 0 ]; then
+    local joined
+    joined=$(IFS=', '; echo "${names[*]}")
+    echo "error: Treehouse pool slot $worktree is still recorded by $joined; refusing to claim or launch into a slot another live record still names (returning it would reset that copy); inspect window $T" >&2
+  else
+    echo "error: Treehouse pool slot $worktree occupancy could not be determined; inspect window $T" >&2
+  fi
+  echo "error: if that record's copy holds none of its work, retire it with: $FM_ROOT/bin/fm-teardown.sh <id> --retire-stale-record" >&2
+  return 1
+}
+
 relaunch_require_slot_claim() {  # <refusal-point>
   fm_treehouse_slot_owner_state "$WT" "$ID"
   case "$FM_TREEHOUSE_SLOT_OWNER" in
@@ -3702,6 +3739,7 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   # Written under the Treehouse project lock held from before slot allocation
   # through metadata publication, so no other spawn or return sees a half-claim.
   if fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
+    spawn_require_unrecorded_pool_slot "$WT" || exit 1
     if ! fm_treehouse_slot_owner_claim "$WT" "$ID" "$FM_HOME"; then
       echo "error: could not claim Treehouse pool slot $WT for task $ID; refusing to launch a worker whose slot cannot later be proved to be its own; inspect window $T" >&2
       exit 1

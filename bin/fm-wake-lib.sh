@@ -1152,8 +1152,8 @@ fm_task_set_lock_path() {  # <state-dir>
 # the walk at the current home, which is the correct answer rather than an
 # error: the parent lives on another machine, so its filesystem can neither hold
 # nor be observed by a lock taken here, and a remote-seeded home is itself the
-# top of the local tree that bin/fm-teardown.sh's collect_local_firstmate_states
-# enumerates (that walk already skips remote registry entries for the same
+# top of the local tree that fm_treehouse_collect_owner_states enumerates (that
+# walk already skips remote registry entries for the same
 # reason). Refusing a remote binding instead made every operation anchored here
 # fail closed inside a remote secondmate home and its local descendants.
 #
@@ -1327,6 +1327,118 @@ fm_treehouse_slot_owner_release() {  # <worktree> <task-id>
   [ "$FM_TREEHOUSE_SLOT_OWNER" = mine ] || return 0
   marker=$(fm_treehouse_slot_owner_marker "$worktree") || return 0
   rm -f "$marker" 2>/dev/null || true
+}
+
+# Canonical existing directory, or failure when the path is missing. Occupancy
+# and exclusivity compare physical paths so a symlink into a pool slot still
+# matches the checkout treehouse handed out.
+fm_treehouse_canonical_dir() {  # <path>
+  local target=$1
+  [ -n "$target" ] || return 1
+  [ -d "$target" ] || return 1
+  CDPATH='' cd -- "$target" 2>/dev/null && pwd -P
+}
+
+_fm_treehouse_require_secondmate_registry() {
+  command -v secondmate_registry_parse_line >/dev/null 2>&1 && return 0
+  # shellcheck source=bin/fm-secondmate-registry-lib.sh
+  . "$FM_WAKE_LIB_DIR/fm-secondmate-registry-lib.sh"
+}
+
+# Every local Firstmate state directory this machine can see from <record-state>:
+# that home, its local root, and each locally registered descendant. Remote
+# registry entries are skipped - their filesystem is not here. Sets
+# FM_TREEHOUSE_OWNER_STATES. A malformed or unreadable registry, or an
+# unavailable local child home, prints REFUSED and returns 1 so callers fail
+# closed rather than missing a live occupant.
+fm_treehouse_collect_owner_states() {  # <record-state>
+  local record_state=$1 root home reg line child known existing i=0
+  local -a homes
+  FM_TREEHOUSE_OWNER_STATES=("$record_state")
+  root=$(fm_firstmate_root_home "$FM_HOME") || {
+    echo "REFUSED: cannot resolve the root Firstmate home; nothing was changed" >&2
+    return 1
+  }
+  homes=("$root")
+  while [ "$i" -lt "${#homes[@]}" ]; do
+    home=${homes[$i]}
+    i=$((i + 1))
+    known=0
+    for existing in "${FM_TREEHOUSE_OWNER_STATES[@]}"; do
+      [ "$existing" != "$home/state" ] || known=1
+    done
+    [ "$known" = 1 ] || FM_TREEHOUSE_OWNER_STATES+=("$home/state")
+    reg="$home/data/secondmates.md"
+    [ ! -e "$reg" ] && [ ! -L "$reg" ] && continue
+    [ -f "$reg" ] && [ ! -L "$reg" ] || {
+      echo "REFUSED: local Firstmate registry is unsafe at $reg; nothing was changed" >&2
+      return 1
+    }
+    _fm_treehouse_require_secondmate_registry || {
+      echo "REFUSED: local Firstmate registry parser is unavailable; nothing was changed" >&2
+      return 1
+    }
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        "- "*)
+          secondmate_registry_parse_line "$line" || {
+            echo "REFUSED: malformed local Firstmate registry entry in $reg; nothing was changed" >&2
+            return 1
+          }
+          [ "$SECONDMATE_REGISTRY_REMOTE" -eq 0 ] || continue
+          child=$(fm_treehouse_canonical_dir "$SECONDMATE_REGISTRY_HOME") || {
+            echo "REFUSED: registered local Firstmate home is unavailable: $SECONDMATE_REGISTRY_HOME; nothing was changed" >&2
+            return 1
+          }
+          known=0
+          for existing in "${homes[@]}"; do
+            [ "$existing" != "$child" ] || known=1
+          done
+          [ "$known" = 1 ] || homes+=("$child")
+          ;;
+      esac
+    done < "$reg"
+  done
+}
+
+# Last `key=` value in a meta file, empty when absent. Occupancy must not depend
+# on bin/fm-backend.sh being sourced.
+_fm_treehouse_meta_field() {  # <meta-file> <key>
+  local meta=$1 key=$2 line value=''
+  [ -f "$meta" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      "$key="*) value=${line#*=} ;;
+    esac
+  done < "$meta" 2>/dev/null || true
+  printf '%s' "$value"
+}
+
+# Print every OTHER live record that names <worktree> as worktree= or home=.
+# Each line is "<task-id><TAB><field>". <exclude-meta> is this task's own
+# record, which may not exist yet during spawn. Returns 0 when at least one
+# foreign record exists, 1 when none do, and 2 when the home scan cannot be
+# trusted.
+fm_treehouse_slot_foreign_records() {  # <worktree> <exclude-meta>
+  local worktree=$1 exclude_meta=$2 slot state_dir other other_id field other_path other_slot found=0
+  slot=$(fm_treehouse_canonical_dir "$worktree") || return 1
+  fm_treehouse_collect_owner_states "$(dirname "$exclude_meta")" || return 2
+  for state_dir in "${FM_TREEHOUSE_OWNER_STATES[@]}"; do
+    for other in "$state_dir"/*.meta; do
+      [ -f "$other" ] && [ ! -L "$other" ] || continue
+      [ "$other" != "$exclude_meta" ] || continue
+      other_id=$(basename "$other" .meta)
+      for field in worktree home; do
+        other_path=$(_fm_treehouse_meta_field "$other" "$field")
+        [ -n "$other_path" ] || continue
+        other_slot=$(fm_treehouse_canonical_dir "$other_path") || continue
+        [ "$other_slot" = "$slot" ] || continue
+        printf '%s\t%s\n' "$other_id" "$field"
+        found=1
+      done
+    done
+  done
+  [ "$found" = 1 ]
 }
 
 fm_failure_episode_reset() {

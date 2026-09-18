@@ -55,9 +55,15 @@ claim_pool_slot() {  # <case> <task-id> [home]
 
 run_case() {  # <case> <id>
   local dir=$1 id=$2
+  run_teardown "$dir" "$id" --force
+}
+
+run_teardown() {  # <case> <id> [args...]
+  local dir=$1 id=$2
+  shift 2
   FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
   FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
-    "$TEARDOWN" "$id" --force
+    "$TEARDOWN" "$id" "$@"
 }
 
 assert_refused_without_mutation() {  # <case> <id> <description>
@@ -503,6 +509,125 @@ test_reused_pool_slot_refuses_before_touching_the_other_task() {
     || fail "teardown reached the runtime on a slot held by a secondmate home: $(cat "$dir/runtime.log")"
 
   pass "fm-teardown: a pool slot named by a second task record is never returned, killed, or reset"
+}
+
+test_retire_stale_record_drops_the_unheld_copy_without_touching_the_slot() {
+  local dir id=stale-task other=live-task worker rc
+
+  dir=$(make_case slot-retire-stale)
+  mark_case_as_treehouse_pool "$dir"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  fm_write_meta "$dir/home/state/$other.meta" \
+    "window=firstmate:fm-$other" "endpoint_task_id=$other" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  claim_pool_slot "$dir" "$other" "$dir/home"
+  ( cd "$dir/worktree" && exec sleep 30 ) &
+  worker=$!
+
+  set +e
+  run_teardown "$dir" "$id" --force --retire-stale-record \
+    > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || fail "retiring a stale colliding record failed: $(cat "$dir/stderr")"
+  kill -0 "$worker" 2>/dev/null || fail "stale-record retire killed the worker in the shared slot"
+  assert_absent "$dir/home/state/$id.meta" "stale-record retire left the stale task's record"
+  assert_present "$dir/home/state/$other.meta" "stale-record retire removed the live task's record"
+  assert_present "$dir/worktree/sentinel" "stale-record retire reset the shared slot"
+  assert_present "$dir/pool/1/.fm-slot-owner" "stale-record retire removed the live task's slot claim"
+  assert_contains "$(cat "$dir/pool/1/.fm-slot-owner")" "task=$other" \
+    "stale-record retire rewrote the live task's slot claim"
+  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "stale-record retire returned the shared slot: $(cat "$dir/runtime.log")"
+  kill "$worker" 2>/dev/null || true
+  wait "$worker" 2>/dev/null || true
+
+  : > "$dir/runtime.log"
+  run_case "$dir" "$other" > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "teardown of the remaining sole record after stale retire failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/$other.meta" "the remaining record was not removed after stale retire"
+  grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "the remaining record did not return its slot after stale retire: $(cat "$dir/runtime.log")"
+
+  dir=$(make_case slot-retire-stale-force-alone-still-refuses)
+  mark_case_as_treehouse_pool "$dir"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  fm_write_meta "$dir/home/state/$other.meta" \
+    "window=firstmate:fm-$other" "endpoint_task_id=$other" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  claim_pool_slot "$dir" "$other" "$dir/home"
+  set +e
+  run_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "--force without --retire-stale-record returned a colliding slot"
+  assert_present "$dir/home/state/$id.meta" "--force alone removed the stale record"
+  assert_present "$dir/worktree/sentinel" "--force alone reset the colliding slot"
+  assert_contains "$(cat "$dir/stderr")" "--retire-stale-record" \
+    "the collision refusal should name the supported retire flag"
+
+  dir=$(make_case slot-retire-stale-owner-claim)
+  mark_case_as_treehouse_pool "$dir"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  fm_write_meta "$dir/home/state/$other.meta" \
+    "window=firstmate:fm-$other" "endpoint_task_id=$other" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  claim_pool_slot "$dir" "$id" "$dir/home"
+  set +e
+  run_teardown "$dir" "$id" --force --retire-stale-record \
+    > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "--retire-stale-record retired the record that still owns the slot claim"
+  assert_present "$dir/home/state/$id.meta" "owner-claim retire removed the claiming record"
+  assert_present "$dir/worktree/sentinel" "owner-claim retire reset the slot"
+  assert_contains "$(cat "$dir/stderr")" "still owns the slot claim" \
+    "owner-claim refusal should say this record still holds the slot"
+
+  dir=$(make_case slot-retire-stale-checked-out)
+  mark_case_as_treehouse_pool "$dir"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  fm_write_meta "$dir/home/state/$other.meta" \
+    "window=firstmate:fm-$other" "endpoint_task_id=$other" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  claim_pool_slot "$dir" "$other" "$dir/home"
+  git -C "$dir/worktree" checkout -q -b "fm/$id"
+  set +e
+  run_teardown "$dir" "$id" --force --retire-stale-record \
+    > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "--retire-stale-record retired a record whose copy has fm/$id checked out"
+  assert_present "$dir/home/state/$id.meta" "checked-out retire removed the stale record"
+  assert_present "$dir/worktree/sentinel" "checked-out retire reset the slot"
+  assert_contains "$(cat "$dir/stderr")" "fm/$id" \
+    "checked-out refusal should name this task's branch"
+
+  dir=$(make_case slot-retire-stale-no-collision)
+  mark_case_as_treehouse_pool "$dir"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  claim_pool_slot "$dir" "$other" "$dir/other-home"
+  set +e
+  run_teardown "$dir" "$id" --force --retire-stale-record \
+    > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "--retire-stale-record ran without a colliding record"
+  assert_present "$dir/home/state/$id.meta" "no-collision retire removed the only record"
+  assert_contains "$(cat "$dir/stderr")" "not named by any other live record" \
+    "no-collision refusal should send the caller to ordinary teardown"
+
+  pass "fm-teardown --retire-stale-record drops an unheld colliding record and never returns the slot"
 }
 
 test_cross_home_pool_slot_collision_refuses() {
@@ -982,6 +1107,7 @@ test_recorded_process_identity_cleanup_is_exact
 test_isolated_tmux_invalid_and_valid_cleanup
 test_bare_relative_origin_shares_project_lock_with_clone
 test_reused_pool_slot_refuses_before_touching_the_other_task
+test_retire_stale_record_drops_the_unheld_copy_without_touching_the_slot
 test_cross_home_pool_slot_collision_refuses
 test_sole_slot_record_still_tears_down
 test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot
