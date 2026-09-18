@@ -3177,10 +3177,10 @@ case "$BACKEND" in
     # it stands up a DIFFERENT home's own workspace by design - so it asks for
     # the per-home container instead of inheriting this launcher's.
     HERDR_LABEL_HOME=$FM_HOME
-    HERDR_LAUNCHER_RELATIONSHIP=launcher-home
+    HERDR_LAUNCHER_RELATIONSHIP="launcher-home"
     if [ "$KIND" = secondmate ]; then
       HERDR_LABEL_HOME=$PROJ_ABS
-      HERDR_LAUNCHER_RELATIONSHIP=other-home
+      HERDR_LAUNCHER_RELATIONSHIP="other-home"
     fi
     HERDR_PRESENTATION_JOURNAL=$(fm_backend_herdr_projection_journal_path "$STATE" "$ID")
     HERDR_PROJECTED=0
@@ -3601,7 +3601,8 @@ relaunch_return_to_worktree() {
 # copy alone. Returning the slot would reset it; claiming it would overwrite
 # the evidence that the occupant still holds it.
 spawn_require_unrecorded_pool_slot() {  # <worktree>
-  local worktree=$1 occupants rc=0 other_id field names=''
+  local worktree=$1 occupants rc=0 other_id field
+  local -a names=()
   occupants=$(fm_treehouse_slot_foreign_records "$worktree" "$STATE/$ID.meta") || rc=$?
   case "$rc" in
     0) ;;
@@ -3613,9 +3614,15 @@ spawn_require_unrecorded_pool_slot() {  # <worktree>
   esac
   while IFS=$'\t' read -r other_id field || [ -n "$other_id" ]; do
     [ -n "$other_id" ] || continue
-    names="${names:+$names, }task $other_id ($field)"
+    names+=("task $other_id ($field)")
   done <<< "$occupants"
-  echo "error: Treehouse pool slot $worktree is still recorded by $names; refusing to claim or launch into a slot another live record still names (returning it would reset that copy); inspect window $T" >&2
+  if [ "${#names[@]}" -gt 0 ]; then
+    local joined
+    joined=$(IFS=', '; echo "${names[*]}")
+    echo "error: Treehouse pool slot $worktree is still recorded by $joined; refusing to claim or launch into a slot another live record still names (returning it would reset that copy); inspect window $T" >&2
+  else
+    echo "error: Treehouse pool slot $worktree occupancy could not be determined; inspect window $T" >&2
+  fi
   echo "error: if that record's copy holds none of its work, retire it with: $FM_ROOT/bin/fm-teardown.sh <id> --retire-stale-record" >&2
   return 1
 }
