@@ -79,7 +79,13 @@
 # cleanup step, teardown verifies record exclusivity: no OTHER task record in
 # this home or any locally registered Firstmate home may name the same live path
 # in its worktree= or home=. One live path with two task records is the reuse
-# collision itself, whichever record is stale.
+# collision itself, whichever record is stale. Ordinary teardown still refuses
+# that collision rather than returning the slot, even with --force.
+# --retire-stale-record is the supported way to drop ONE of those records when
+# this copy does not currently have `fm/<id>` checked out: it reuses the
+# reassigned-slot cleanup (this record's endpoint, status, records, checks,
+# backlog) and leaves the slot - processes, copy, claim, and the other record -
+# untouched. Hand-editing the record is not a supported path.
 # That scan alone cannot prove THIS record is the current owner, because the task
 # that took the slot next may leave no record it can reach - its own worker may
 # have exited and its record been cleaned up, or it may live in a home this
@@ -150,10 +156,19 @@
 # releases its durable treehouse lease so the pool slot is freed,
 # never left leased forever. If the treehouse return fails, teardown leaves the
 # leased home and state in place instead of hiding a still-held lease.
-# Usage: fm-teardown.sh <task-id> [--force] [--legacy-record]
+# Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--retire-stale-record]
 #   --force skips ordinary-task dirty and landed-work checks, skips scout report
 #   checks, and discards secondmate child work for kind=secondmate. Only use it
 #   when the captain has explicitly said to discard the work.
+#   --retire-stale-record is the supported retire of a colliding pool-slot
+#   record whose copy no longer has that task's `fm/<id>` branch checked out.
+#   Ordinary teardown still refuses to return a slot another live record names,
+#   even with --force; this flag never returns, resets, or reclaims the slot,
+#   never removes another task's claim, and is not a substitute for editing
+#   state/<id>.meta by hand. It refuses when this record still owns the slot
+#   claim, when no other record names the slot, when the copy currently has
+#   this task's branch checked out, when the claim cannot be read, or when the
+#   path is not a live pool slot. --force does not lift those refusals.
 #   --legacy-record accepts a task record that predates the spawn_gen field:
 #   teardown then proceeds only when the recorded endpoint is confirmed dead or
 #   agent-less (bin/fm-backend.sh's recovery-grade classifier), and without
@@ -293,11 +308,13 @@ fi
 ID=$1
 FORCE=
 LEGACY_RECORD_GIVEN=0
+RETIRE_STALE_RECORD=0
 shift
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --force) FORCE=--force ;;
     --legacy-record) LEGACY_RECORD_GIVEN=1 ;;
+    --retire-stale-record) RETIRE_STALE_RECORD=1 ;;
     *)
       echo "error: invalid teardown request" >&2
       exit 2
@@ -2099,74 +2116,22 @@ teardown_live_slot_path() {
   canonical_existing_dir "$WT"
 }
 
-collect_local_firstmate_states() {
-  local record_state=$1 root home reg line child known existing i=0
-  local -a homes
-  TREEHOUSE_OWNER_STATES=("$record_state")
-  root=$(fm_firstmate_root_home "$FM_HOME") || {
-    echo "REFUSED: cannot resolve the root Firstmate home; nothing was changed" >&2
-    return 1
-  }
-  homes=("$root")
-  while [ "$i" -lt "${#homes[@]}" ]; do
-    home=${homes[$i]}
-    i=$((i + 1))
-    known=0
-    for existing in "${TREEHOUSE_OWNER_STATES[@]}"; do
-      [ "$existing" != "$home/state" ] || known=1
-    done
-    [ "$known" = 1 ] || TREEHOUSE_OWNER_STATES+=("$home/state")
-    reg="$home/data/secondmates.md"
-    [ ! -e "$reg" ] && [ ! -L "$reg" ] && continue
-    [ -f "$reg" ] && [ ! -L "$reg" ] || {
-      echo "REFUSED: local Firstmate registry is unsafe at $reg; nothing was changed" >&2
-      return 1
-    }
-    while IFS= read -r line || [ -n "$line" ]; do
-      case "$line" in
-        "- "*)
-          secondmate_registry_parse_line "$line" || {
-            echo "REFUSED: malformed local Firstmate registry entry in $reg; nothing was changed" >&2
-            return 1
-          }
-          [ "$SECONDMATE_REGISTRY_REMOTE" -eq 0 ] || continue
-          child=$(canonical_existing_dir "$SECONDMATE_REGISTRY_HOME") || {
-            echo "REFUSED: registered local Firstmate home is unavailable: $SECONDMATE_REGISTRY_HOME; nothing was changed" >&2
-            return 1
-          }
-          known=0
-          for existing in "${homes[@]}"; do
-            [ "$existing" != "$child" ] || known=1
-          done
-          [ "$known" = 1 ] || homes+=("$child")
-          ;;
-      esac
-    done < "$reg"
-  done
-}
-
 require_exclusive_worktree_slot_record() {
-  local record_meta=$1 record_id=$2 record_state=$3 worktree=$4
-  local slot state_dir other other_id field other_path other_slot
+  local record_meta=$1 record_id=$2 worktree=$4
+  local slot holders rc=0 other_id field
   slot=$(canonical_existing_dir "$worktree") || return 0
-  collect_local_firstmate_states "$record_state" || return 1
-  for state_dir in "${TREEHOUSE_OWNER_STATES[@]}"; do
-    for other in "$state_dir"/*.meta; do
-      [ -f "$other" ] && [ ! -L "$other" ] || continue
-      [ "$other" != "$record_meta" ] || continue
-      other_id=$(basename "$other" .meta)
-      for field in worktree home; do
-        other_path=$(fm_meta_get "$other" "$field")
-        [ -n "$other_path" ] || continue
-        other_slot=$(canonical_existing_dir "$other_path") || continue
-        [ "$other_slot" = "$slot" ] || continue
-        echo "REFUSED: task $record_id's recorded worktree $slot is also task $other_id's recorded $field." >&2
-        echo "Returning that pool slot would kill $other_id's processes and reset its copy, so nothing was changed - not even with --force." >&2
-        echo "Reconcile whichever record is wrong (bin/fm-crew-state.sh $record_id; bin/fm-crew-state.sh $other_id), then re-run teardown." >&2
-        return 1
-      done
-    done
-  done
+  holders=$(fm_treehouse_slot_foreign_records "$slot" "$record_meta") || rc=$?
+  case "$rc" in
+    0) ;;
+    1) return 0 ;;
+    *) return 1 ;;
+  esac
+  IFS=$'\t' read -r other_id field <<< "$holders"
+  echo "REFUSED: task $record_id's recorded worktree $slot is also task $other_id's recorded $field." >&2
+  echo "Returning that pool slot would kill $other_id's processes and reset its copy, so nothing was changed - not even with --force." >&2
+  echo "If this record's copy holds none of its work, retire it with: $SCRIPT_DIR/fm-teardown.sh $record_id --retire-stale-record" >&2
+  echo "Inspect both with bin/fm-crew-state.sh $record_id and bin/fm-crew-state.sh $other_id." >&2
+  return 1
 }
 
 require_exclusive_task_worktree_slot() {
@@ -2235,6 +2200,68 @@ require_owned_task_worktree_slot() {
       ;;
   esac
   return 1
+}
+
+# True when this pool copy currently has `fm/<id>` checked out. Linked
+# worktrees share refs, so a leftover branch in the common git dir is not
+# evidence that THIS copy holds the work; the checked-out branch is.
+teardown_copy_holds_task_work() {  # <worktree> <task-id>
+  local worktree=$1 id=$2 head
+  [ -d "$worktree" ] || return 1
+  head=$(git -C "$worktree" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  [ "$head" = "fm/$id" ]
+}
+
+# Explicit retire of a colliding record that is not the live slot owner.
+# Leaves the slot, the other record, and the slot claim untouched.
+require_retire_stale_slot_record() {
+  local slot holders rc=0 other_id field marker
+  [ "$KIND" != secondmate ] || {
+    echo "REFUSED: --retire-stale-record is for a colliding crewmate pool-slot record, not a secondmate home." >&2
+    return 1
+  }
+  slot=$(teardown_live_slot_path) || {
+    echo "REFUSED: task $ID has no live Treehouse pool slot to reconcile; --retire-stale-record does not apply." >&2
+    return 1
+  }
+  holders=$(fm_treehouse_slot_foreign_records "$slot" "$META") || rc=$?
+  case "$rc" in
+    0) ;;
+    1)
+      echo "REFUSED: task $ID's recorded worktree $slot is not named by any other live record; use ordinary teardown." >&2
+      return 1
+      ;;
+    *) return 1 ;;
+  esac
+  fm_treehouse_slot_owner_state "$slot" "$ID"
+  case "$FM_TREEHOUSE_SLOT_OWNER" in
+    mine)
+      echo "REFUSED: task $ID still owns the slot claim on $slot; --retire-stale-record is for the record that no longer holds the slot. Retire the other record, then tear this one down ordinarily." >&2
+      return 1
+      ;;
+    other|absent) ;;
+    *)
+      marker=$(fm_treehouse_slot_owner_marker "$slot" 2>/dev/null) || marker="beside $slot"
+      echo "REFUSED: task $ID's recorded worktree $slot carries a slot-owner claim that cannot be read, so the slot cannot be proved not to still be this task's; nothing was changed - not even with --force." >&2
+      echo "Inspect or repair the claim file at $marker (task= and home= lines), then re-run." >&2
+      return 1
+      ;;
+  esac
+  if teardown_copy_holds_task_work "$slot" "$ID"; then
+    echo "REFUSED: task $ID's copy at $slot currently has fm/$ID checked out, so it still holds this task's work; nothing was changed - not even with --force." >&2
+    return 1
+  fi
+  TEARDOWN_SLOT_REASSIGNED=1
+  if [ "$FM_TREEHOUSE_SLOT_OWNER" = other ]; then
+    TEARDOWN_SLOT_REASSIGNED_TO=$FM_TREEHOUSE_SLOT_OWNER_ID
+    TEARDOWN_SLOT_REASSIGNED_HOME=$FM_TREEHOUSE_SLOT_OWNER_HOME
+  else
+    IFS=$'\t' read -r other_id field <<< "$holders"
+    TEARDOWN_SLOT_REASSIGNED_TO=$other_id
+    TEARDOWN_SLOT_REASSIGNED_HOME=
+    : "$field"
+  fi
+  echo "warning: task $ID's recorded worktree $slot is also task $TEARDOWN_SLOT_REASSIGNED_TO's recorded path and this copy does not have fm/$ID checked out; the slot is left untouched and only $ID's own cleanup runs." >&2
 }
 
 teardown_owns_worktree() {
@@ -3060,8 +3087,12 @@ remove_secondmate_registry_entry() {
   return "$rc"
 }
 
-require_exclusive_task_worktree_slot || exit 1
-require_owned_task_worktree_slot || exit 1
+if [ "$RETIRE_STALE_RECORD" = 1 ]; then
+  require_retire_stale_slot_record || exit 1
+else
+  require_exclusive_task_worktree_slot || exit 1
+  require_owned_task_worktree_slot || exit 1
+fi
 
 validate_pr_poll_cleanup "$STATE" "$ID" || exit 1
 

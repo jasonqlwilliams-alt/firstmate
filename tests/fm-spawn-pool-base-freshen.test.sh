@@ -743,8 +743,70 @@ test_pool_slot_claim_follows_the_spawn_outcome() {
   pass "a Treehouse slot claim names the launched task, refuses when unclaimable, and is dropped by a locked abort"
 }
 
+# treehouse get can hand back a slot a live record still names once process
+# leases are gone. Spawn must refuse that slot before claiming it.
+test_pool_slot_recorded_by_another_task_is_not_taken() {
+  local rec id=pool-slot-occupant-r1 occupant=already-there out status before claim
+
+  rec=$(make_case slot-occupied "$id")
+  read_case_record "$rec"
+  lay_out_as_pool_slot
+  before=$(git -C "$POOL_DIR" rev-parse HEAD)
+  fm_write_meta "$HOME_DIR/state/$occupant.meta" \
+    "window=firstmate:fm-$occupant" "endpoint_task_id=$occupant" \
+    "worktree=$POOL_DIR" "project=$PROJECT_DIR" "kind=scout"
+  printf 'task=%s\nhome=%s\n' "$occupant" "$HOME_DIR" > "$SLOT_CLAIM"
+  claim=$(cat "$SLOT_CLAIM")
+  mkdir -p "$CASE_DIR/other-slot"
+  fm_write_meta "$HOME_DIR/state/neighbour.meta" \
+    "window=firstmate:fm-neighbour" "endpoint_task_id=neighbour" \
+    "worktree=$CASE_DIR/other-slot" "project=$PROJECT_DIR" "kind=scout"
+
+  out=$(run_spawn "$id" --scout)
+  status=$?
+  [ "$status" -ne 0 ] || fail "spawn launched into a pool slot another live record still names"$'\n'"$out"
+  assert_contains "$out" "$occupant" \
+    "spawn did not name the task that still records the slot"
+  assert_contains "$out" "--retire-stale-record" \
+    "spawn did not point at the supported stale-record retire"
+  [ ! -e "$HOME_DIR/state/$id.meta" ] || fail "spawn published a record for an occupied slot"
+  [ "$(cat "$SLOT_CLAIM")" = "$claim" ] \
+    || fail "spawn overwrote the occupying task's slot claim: $(cat "$SLOT_CLAIM")"
+  [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before" ] \
+    || fail "spawn moved the occupied slot's HEAD"
+  assert_present "$HOME_DIR/state/$occupant.meta" "spawn removed the occupying record"
+  assert_present "$POOL_DIR/README.md" "spawn reset the occupying copy"
+
+  rec=$(make_case slot-occupied-cross-home "$id")
+  read_case_record "$rec"
+  lay_out_as_pool_slot
+  before=$(git -C "$POOL_DIR" rev-parse HEAD)
+  mkdir -p "$CASE_DIR/mate/state" "$CASE_DIR/mate/data"
+  printf '%s\n' "- mate - fixture (home: $CASE_DIR/mate; scope: test; projects: project; added 2026-01-01)" \
+    > "$HOME_DIR/data/secondmates.md"
+  fm_write_meta "$CASE_DIR/mate/state/$occupant.meta" \
+    "window=firstmate:fm-$occupant" "endpoint_task_id=$occupant" \
+    "worktree=$POOL_DIR" "project=$PROJECT_DIR" "kind=scout"
+  printf 'task=%s\nhome=%s\n' "$occupant" "$CASE_DIR/mate" > "$SLOT_CLAIM"
+  claim=$(cat "$SLOT_CLAIM")
+
+  out=$(run_spawn "$id" --scout)
+  status=$?
+  [ "$status" -ne 0 ] || fail "spawn launched into a pool slot a secondmate home still records"$'\n'"$out"
+  assert_contains "$out" "$occupant" \
+    "cross-home spawn did not name the task that still records the slot"
+  [ ! -e "$HOME_DIR/state/$id.meta" ] || fail "cross-home spawn published a record for an occupied slot"
+  [ "$(cat "$SLOT_CLAIM")" = "$claim" ] \
+    || fail "cross-home spawn overwrote the occupying task's slot claim"
+  [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before" ] \
+    || fail "cross-home spawn moved the occupied slot's HEAD"
+
+  pass "fm-spawn refuses a pool slot any live record still names, without claiming or resetting it"
+}
+
 test_remote_seeded_home_spawns_from_treehouse_pool
 test_pool_slot_claim_follows_the_spawn_outcome
+test_pool_slot_recorded_by_another_task_is_not_taken
 test_linked_spawning_home_rejects_primary_before_refresh
 test_stale_pool_base_refreshes_before_branching
 test_non_main_default_branch_refreshes_before_branching
