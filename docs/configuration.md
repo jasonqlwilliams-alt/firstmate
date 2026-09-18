@@ -276,6 +276,18 @@ Firstmate writes one URGENT-ALERT packet there when `bin/fm-captain-hold.sh hold
 The file is not inherited by secondmate homes: the path is machine-local, and an absent, empty, or unreadable file, or a value that is not an absolute path, is a silent no-op so homes without Packet Router stay unaffected.
 `bin/fm-urgent-alert.sh` is the single owner of the read, packet shape, and best-effort write; a configured inbox that is missing or cannot take the packet prints one `actionable:` stderr line, and packet write failure never fails the hold.
 The first non-comment, non-blank line is the directory path.
+The same inbox path is the Eleusis publish plane for `bin/fm-system-state-card.sh`: when configured, that generator drops a named-C: packet asking Eleusis to write Packet Router `Evidence/SYSTEM_STATE.md`.
+`bin/fm-urgent-alert.sh` remains the owner of URGENT-ALERT packets; the system-state script header owns its own packet shape and no-op when the inbox is absent.
+
+## Generated system-state card (data/system-state.md)
+
+`data/system-state.md` is a home-local, gitignored, generated overlay of live revisions, runtime flags, copied routing text, active holds, the SoT map, and recent 7-day changes.
+It is not hand-edited, is not part of the startup-memory budget, and is not dumped into the session-start context digest.
+`bin/fm-session-start.sh` prints one `SYSTEM_STATE:` pointer line.
+`bin/fm-system-state-card.sh` owns generation, TTL, probes, local inherit into secondmate homes listed in `data/secondmates.md`, and the Eleusis named-C: publish packet.
+Agents load `system-state-card` and read this card instead of browsing Atlas or `C:\continuum-system` for those facts.
+Vault prose and Northstar stay on their own owners.
+The script header and `--help` own flags, probe URLs, and packet fields.
 
 ## Trace context propagation (config/trace-context / FM_TRACE_CONTEXT)
 

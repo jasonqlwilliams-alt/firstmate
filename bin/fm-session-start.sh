@@ -52,8 +52,9 @@
 #   7. network checks - the result of the deferred network stage started back at
 #                       step 1, harvested WITHOUT waiting for it.
 #   8. context digest - data/projects.md, data/secondmates.md, data/captain.md,
-#                       data/captain-shared.md, data/learnings.md: read-only,
-#                       always safe, always runs.
+#                       data/captain-shared.md, data/learnings.md, plus one
+#                       SYSTEM_STATE pointer line (not the card body):
+#                       read-only, always safe, always runs.
 #   9. closing reminder - prints the context-specific watcher next step; this
 #                       script points back to the emitted harness supervision
 #                       block and deliberately never arms the watcher itself.
@@ -804,6 +805,8 @@ Everything below is printed in full for this session start: every state/*.meta,
 a compact data/backlog.md listing, a bounded tail of every state/*.status,
 data/projects.md, data/secondmates.md, data/captain.md, data/captain-shared.md,
 and data/learnings.md.
+A one-line SYSTEM_STATE pointer also prints; it is not a dump of
+data/system-state.md.
 Do NOT re-read any of them after reading this digest, and do NOT bulk-read
 data/backlog.md or state/*.status: re-reading everything defeats the entire
 point of this command.
@@ -938,6 +941,11 @@ print_file_or_absent "$DATA/secondmates.md" "data/secondmates.md"
 print_file_or_absent "$DATA/captain.md" "data/captain.md"
 print_file_or_absent "$DATA/captain-shared.md" "data/captain-shared.md (shared, main-authoritative, read-only in secondmate homes)"
 print_file_or_absent "$DATA/learnings.md" "data/learnings.md"
+# One-line pointer only: do not dump data/system-state.md into this digest.
+# bin/fm-system-state-card.sh --pointer owns the line and never probes the network.
+subsection "data/system-state.md (pointer)"
+"$SCRIPT_DIR/fm-system-state-card.sh" --pointer 2>/dev/null \
+  || printf 'SYSTEM_STATE: data/system-state.md status=unavailable (load system-state-card; do not browse Atlas for live rev/hold/routing)\n'
 
 # --- 9. closing reminder -----------------------------------------------
 stage next-step

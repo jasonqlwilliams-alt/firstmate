@@ -744,6 +744,8 @@ EOF
 
   assert_contains "$out" "data/secondmates.md" "digest did not label the secondmates.md section"
   assert_contains "$out" "data/learnings.md" "digest did not label the learnings.md section"
+  assert_contains "$out" "SYSTEM_STATE:" "digest did not print the SYSTEM_STATE pointer"
+  assert_contains "$out" "status=absent" "digest pointer did not report an absent card"
 
   # Exactly four context ABSENT markers (secondmates.md, captain-shared.md,
   # learnings.md; backlog.md is covered by its own test) - and the

@@ -250,6 +250,10 @@
       "audience": "agent-runtime"
     },
     {
+      "path": ".agents/skills/system-state-card/SKILL.md",
+      "audience": "agent-runtime"
+    },
+    {
       "path": ".agents/skills/updatefirstmate/SKILL.md",
       "audience": "agent-runtime"
     },
