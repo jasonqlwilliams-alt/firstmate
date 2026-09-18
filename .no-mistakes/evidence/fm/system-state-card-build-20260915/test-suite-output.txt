@@ -1,0 +1,10 @@
+ok - pointer reports absent when data/system-state.md is missing
+ok - generate writes a bounded card with scout section order and copied routing
+ok - pointer reports stale vs fresh from generated_at and TTL
+/tmp/fm-system-state-card.m9uIMz/publish/router/inbox/new/pkt-system-state-20260918T220000.md
+ok - Eleusis packet and local secondmate inherit publish the same card
+ok - unconfigured Packet Router inbox is a silent no-op
+ok - --stdout --no-write prints a card without touching data/
+ok - --pointer refuses generate flags
+ok - do-not-browse survives when earlier sections would overflow the line cap
+# fm-system-state-card.test.sh: all assertions passed

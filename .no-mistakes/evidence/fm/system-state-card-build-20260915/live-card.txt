@@ -1,0 +1,63 @@
+=== LIVE PROBE CARD ===
+# SYSTEM_STATE
+version: 2026-09-18T23:00:07Z
+generated_at: 2026-09-18T23:00:07Z
+ttl: 60m
+generator: bin/fm-system-state-card.sh host=testhost
+sha256: be59ad240cad0cca904f1ac36da4735d03726ee43d847e0e79fb96699cc53e23
+
+## Live revisions
+continuum_health: revision=603c02f06663edc9a92e00272b7ae319bf6ea7df status=ok env=production
+s_head: 603c02f06663edc9a92e00272b7ae319bf6ea7df 2026-09-13 15:28:43 -0700 feat(api): expose running revision on /health and serve favicon.ico (#95)
+continuum_main_git: unavailable
+ui_bundle: index-B6eyd8Ib.js,index-BbyJgfat.js,index-DwmII1T1.js,index-DxBdTRwZ.js
+rakazo_health: revision=fffd562a4675924f76d69ba60d5b38f661b6505c
+rakazo_git: unavailable
+firstmate: 2845542bdb2d8160bdd0355b5ed1f251383b60bf 2026-09-18 15:41:54 -0700 feat(bin): generate a TTL 60m SYSTEM_STATE card from live probes
+vault_commit: 96f54bdba274b6b2f1663776d0bd211473c70c30 2026-09-03 19:04:41 -0700
+
+## Runtime flags
+globalHold: false
+jobs: unavailable
+tent_http: 404
+rakazo_ui_http: 200
+URGENT_CAPTAIN_ALERTS_ENABLED: unavailable
+
+## Routing and model rules
+### config/crew-dispatch.json
+unavailable (absent)
+### config/secondmate-harness
+unavailable (absent)
+### data/captain-shared.md Provider routing
+unavailable (absent)
+
+## Active holds and freezes
+unavailable (no backlog)
+secondmates: count=0 ids=absent
+
+## Where each SoT lives
+runtime_s: /mnt/s/continuum-main exists
+vault_c: /mnt/c/continuum-system exists
+packet_router: /mnt/c/Continuum/_PacketRouter exists
+firstmate_data: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M2VBME97WD2Q0B11GPTR5B32/data exists
+rakazo_instructions: bots.instructions (Postgres; pointer only)
+northstar: /mnt/c/continuum-system/01_Charter/Northstar.md absent
+secrets: 1Password
+seats: eleusis=rakazo-eleusis,meridian=rakazo-meridian,argon=rakazo-argon,chronicle=rakazo-chronicle,flux=rakazo-flux,thor=rakazo-thor,spur=rakazo-spur,qa=rakazo-qa
+
+## Recent changes (7d)
+continuum-main: unavailable
+continuum-ui: unavailable
+rakazo: unavailable
+firstmate:
+  2845542 feat(bin): generate a TTL 60m SYSTEM_STATE card from live probes
+  6627a72 fix(bin): refuse occupied pool slots at spawn and add guarded stale-record retire (#15)
+  587919a feat(bin): lock Cursor launches to a configurable Grok model allowlist (#14)
+  79fde83 feat(bin): arm a Claude all_models runway watch that starts Cursor Grok 4.6 high (#13)
+  b9529ce fix(bin): keep the watcher liveness beacon non-empty (#11)
+packet_router: - 2026-09-15T07:02:51-07:00 | end-48h-grok-composer-window | CAPTAIN-ANSWER | Jason in helm: "no" - Continuum P4+P5 does not go back to all-Fa...
+## Do-not-browse
+For live rev/hold/routing facts, stop; do not walk C:\continuum-system.
+Vault is SOPs. Northstar is outcomes. This card is the live overlay.
+=== POINTER (absent) ===
+SYSTEM_STATE: data/system-state.md status=absent (run bin/fm-system-state-card.sh; (load system-state-card; do not browse Atlas for live rev/hold/routing))

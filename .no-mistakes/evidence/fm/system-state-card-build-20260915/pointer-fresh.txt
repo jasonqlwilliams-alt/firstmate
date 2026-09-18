@@ -1,0 +1,1 @@
+SYSTEM_STATE: data/system-state.md status=fresh generated_at=2026-09-18T23:00:15Z age=0m ttl=60m sha256=be59ad240cad0cca904f1ac36da4735d03726ee43d847e0e79fb96699cc53e23 (load system-state-card; do not browse Atlas for live rev/hold/routing)

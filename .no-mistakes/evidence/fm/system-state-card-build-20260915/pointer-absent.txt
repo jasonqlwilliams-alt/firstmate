@@ -1,0 +1,1 @@
+SYSTEM_STATE: data/system-state.md status=absent (run bin/fm-system-state-card.sh; (load system-state-card; do not browse Atlas for live rev/hold/routing))
