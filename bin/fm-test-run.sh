@@ -362,6 +362,7 @@ family_for_basename() {
     fm-send-inbox.test.sh|fm-spawn-batch.test.sh|\
     fm-spawn-dispatch-profile.test.sh|fm-claude-trust.test.sh|\
     fm-trace-context-spawn.test.sh|fm-spawn-worktree-settle.test.sh|\
+    fm-pi-system-vault-reviewer.test.sh|\
     fm-teardown-endpoint-safety.test.sh)
       printf '%s\n' backend-dispatch
       ;;
@@ -726,6 +727,7 @@ tests/fm-pi-branch-extension.test.sh 22239
 tests/fm-pi-branch-live-e2e.test.sh 56
 tests/fm-pi-branch-responsiveness-live-e2e.test.sh 21
 tests/fm-pi-primary-live-e2e.test.sh 20
+tests/fm-pi-system-vault-reviewer.test.sh 45000
 tests/fm-pi-watch-extension.test.sh 42970
 tests/fm-pi-windows-shell-invocation.test.sh 5121
 tests/fm-pr-check-security.test.sh 172215
@@ -1504,6 +1506,10 @@ families_for_changed_path() {
       printf '%s\n' backend-dispatch
       printf '%s\n' pure-contract-unit
       ;;
+    bin/fm-pi-system-vault-reviewer.sh)
+      printf '%s\n' backend-dispatch
+      printf '%s\n' "__script__:fm-pi-system-vault-reviewer.test.sh"
+      ;;
     bin/fm-task-inbox-lib.sh)
       # The steering-inbox record/doorbell/ladder owner: fm-send's data plane
       # (backend-dispatch), the watcher's re-ring check (watcher-wake-lock),
@@ -1535,6 +1541,10 @@ families_for_changed_path() {
     bin/fm-system-state-card.sh)
       printf '%s\n' "__script__:fm-system-state-card.test.sh"
       printf '%s\n' session-bootstrap
+      ;;
+    .agents/skills/system-vault-reviewer/*)
+      printf '%s\n' backend-dispatch
+      printf '%s\n' "__script__:fm-pi-system-vault-reviewer.test.sh"
       ;;
     .agents/skills/quota-array-dispatch/SKILL.md)
       printf '%s\n' pure-contract-unit

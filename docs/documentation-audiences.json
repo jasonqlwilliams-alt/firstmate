@@ -254,6 +254,18 @@
       "audience": "agent-runtime"
     },
     {
+      "path": ".agents/skills/system-vault-reviewer/SKILL.md",
+      "audience": "agent-runtime"
+    },
+    {
+      "path": ".agents/skills/system-vault-reviewer/prompt.md",
+      "audience": "agent-runtime"
+    },
+    {
+      "path": ".agents/skills/system-vault-reviewer/reviewer/SKILL.md",
+      "audience": "agent-runtime"
+    },
+    {
       "path": ".agents/skills/updatefirstmate/SKILL.md",
       "audience": "agent-runtime"
     },

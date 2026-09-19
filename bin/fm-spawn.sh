@@ -2,7 +2,7 @@
 # Spawn a direct report: a crewmate in a treehouse or Orca worktree, or a
 # secondmate in its isolated firstmate home.
 # Usage: fm-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>]
-#        fm-spawn.sh <task-id> <project-dir> --scout [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>]
+#        fm-spawn.sh <task-id> <project-dir> --scout [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--pi-posture system-vault-review]
 #        fm-spawn.sh <task-id> [<firstmate-home>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] --secondmate
 #   --mode and --yolo are this task's delivery contract, REQUIRED for every ship
 #   spawn and refused on --scout and --secondmate spawns. Firstmate resolves both
@@ -162,6 +162,16 @@
 #   a failed or inconclusive probe omits it so older Pi versions remain launchable.
 #   A missing selected executable refuses before endpoint creation, and pi-signed
 #   never falls back to pi.
+#   --pi-posture system-vault-review is the Continuum system-vault review-only Pi
+#   harness. It is scout-only on pi or pi-signed, refused for ships, secondmates,
+#   raw launch commands, and every other adapter. bin/fm-pi-system-vault-reviewer.sh
+#   owns the pinned model, tool allowlist, prompt, reviewer skill, Fable/Hugging
+#   Face refusals, catalog check, and receipt JSON. When the flag is set and
+#   --model or --effort is omitted, spawn applies that pin and xhigh. A relaunch
+#   restores pi_posture= from task meta when the flag is omitted. The generated
+#   command keeps the Firstmate-owned -e turn-end extension and otherwise disables
+#   skill, prompt-template, context-file, and extension discovery, and ignores
+#   project-local files (--no-approve).
 #   For omp (Oh My Pi), fm-spawn resolves the `omp` executable from PATH once and
 #   refuses when it is absent. Every omp launch clears the foreign harness
 #   markers (omp publishes none of its own), sets the Firstmate-owned
@@ -239,7 +249,7 @@
 # Batch dispatch: pass one or more `id=repo` pairs instead of a single <id> <project>, e.g.
 #     fm-spawn.sh fix-a-k3=projects/foo add-b-q7=projects/bar [--scout]
 #   Each pair re-execs this script in single-task mode, so the single path stays the only
-#   source of truth; shared --scout/--harness/--model/--effort/--backend/--mode/--yolo
+#   source of truth; shared --scout/--harness/--model/--effort/--backend/--mode/--yolo/--pi-posture
 #   applies to every pair. A ship batch therefore carries one delivery contract, and each
 #   pair still checks it against its own brief; a batch spanning modes is two invocations.
 #   If config/crew-dispatch.json exists, shared --harness is required for crewmate
@@ -298,6 +308,7 @@
 #     __CLAUDEPERMFLAG__ the claude permission flag selected by config/claude-permission-mode
 #     __PIBIN__    quoted concrete Pi-family executable path resolved from PATH
 #     __PITUIMODE__ optional --tui-mode regular when that executable advertises it
+#     __PIPOSTURE__ optional review-only Pi flags from --pi-posture system-vault-review
 #     __TURNEND__  absolute path to state/<task-id>.turn-ended (for harnesses whose
 #                  turn-end signal rides the launch command, e.g. codex -c notify=[...])
 #     __PIEXT__    absolute path to state/<task-id>.pi-ext.ts (pi turn-end extension,
@@ -570,6 +581,9 @@ BACKEND_SET=0
 MODE_SET=0
 YOLO_SET=0
 TRACEPARENT_SET=0
+PI_POSTURE=
+PI_POSTURE_SET=0
+PI_POSTURE_FLAGS=
 RELAUNCH=0
 POS=()
 want_value=
@@ -586,6 +600,7 @@ for a in "$@"; do
       mode) MODE=$a; MODE_SET=1 ;;
       yolo) YOLO=$a; YOLO_SET=1 ;;
       traceparent) TRACEPARENT_ARG=$a; TRACEPARENT_SET=1 ;;
+      pi-posture) PI_POSTURE=$a; PI_POSTURE_SET=1 ;;
       *) echo "error: internal parser state for --$want_value" >&2; exit 1 ;;
     esac
     want_value=
@@ -609,6 +624,8 @@ for a in "$@"; do
     --yolo=*) YOLO=${a#--yolo=}; YOLO_SET=1 ;;
     --traceparent) want_value=traceparent ;;
     --traceparent=*) TRACEPARENT_ARG=${a#--traceparent=}; TRACEPARENT_SET=1 ;;
+    --pi-posture) want_value=pi-posture ;;
+    --pi-posture=*) PI_POSTURE=${a#--pi-posture=}; PI_POSTURE_SET=1 ;;
     *) POS+=("$a") ;;
   esac
 done
@@ -620,6 +637,11 @@ done
 [ "$MODE_SET" -eq 0 ] || [ -n "$MODE" ] || { echo "error: --mode requires a non-empty value" >&2; exit 1; }
 [ "$YOLO_SET" -eq 0 ] || [ -n "$YOLO" ] || { echo "error: --yolo requires a non-empty value" >&2; exit 1; }
 [ "$TRACEPARENT_SET" -eq 0 ] || [ -n "$TRACEPARENT_ARG" ] || { echo "error: --traceparent requires a non-empty value" >&2; exit 1; }
+[ "$PI_POSTURE_SET" -eq 0 ] || [ -n "$PI_POSTURE" ] || { echo "error: --pi-posture requires a non-empty value" >&2; exit 1; }
+if [ "$PI_POSTURE_SET" -eq 1 ] && [ "$PI_POSTURE" != system-vault-review ]; then
+  echo "error: --pi-posture must be system-vault-review (got '$PI_POSTURE')" >&2
+  exit 1
+fi
 # A parent-delivered carrier replaces this home's own resolution, so it is
 # refused unless it is a secondmate spawn carrying a strictly valid W3C value.
 # Nothing else may reach the pane's TRACEPARENT export.
@@ -1236,6 +1258,7 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
   # spanning several modes is two invocations rather than a silent mixed dispatch.
   [ "$MODE_SET" -eq 0 ] || shared_args+=(--mode "$MODE")
   [ "$YOLO_SET" -eq 0 ] || shared_args+=(--yolo "$YOLO")
+  [ "$PI_POSTURE_SET" -eq 0 ] || shared_args+=(--pi-posture "$PI_POSTURE")
   for pair in "${POS[@]}"; do
     case "$pair" in
       *=*) : ;;
@@ -1431,6 +1454,10 @@ if [ "$RELAUNCH" -eq 1 ]; then
   [ -n "$KIND" ] || KIND=ship
   MODE=$(fm_meta_get "$RELAUNCH_META" mode)
   YOLO=$(fm_meta_get "$RELAUNCH_META" yolo)
+  if [ "$PI_POSTURE_SET" -eq 0 ]; then
+    PI_POSTURE=$(fm_meta_get "$RELAUNCH_META" pi_posture)
+    [ -z "$PI_POSTURE" ] || PI_POSTURE_SET=1
+  fi
   RELAUNCH_WT=$(fm_meta_get "$RELAUNCH_META" worktree)
   [ -n "$RELAUNCH_WT" ] && [ -d "$RELAUNCH_WT" ] || {
     echo "error: task $ID's recorded worktree '${RELAUNCH_WT:-none}' is missing; refusing to relaunch without the local copy its work lives in" >&2
@@ -1761,9 +1788,9 @@ launch_template() {
     pi|pi-signed)
       printf '%s' '__PIBIN____PITUIMODE__'
       if [ "$kind" = secondmate ]; then
-        printf '%s' ' __MODELFLAG____EFFORTFLAG__-e __PITURNEND__ -e __PIWATCH__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
+        printf '%s' ' __MODELFLAG____EFFORTFLAG____PIPOSTURE__-e __PITURNEND__ -e __PIWATCH__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
       else
-        printf '%s' ' __MODELFLAG____EFFORTFLAG__-e __PIEXT__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
+        printf '%s' ' __MODELFLAG____EFFORTFLAG____PIPOSTURE__-e __PIEXT__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
       fi
       ;;
     # omp (Oh My Pi), a Pi fork. Same one-positional-brief, --model, --thinking,
@@ -2003,6 +2030,40 @@ if [ "$KIND" = secondmate ] && [ "$HARNESS" = agy ]; then
   exit 1
 fi
 
+if [ -n "$PI_POSTURE" ]; then
+  if [ "$PI_POSTURE" != system-vault-review ]; then
+    echo "error: --pi-posture must be system-vault-review (got '$PI_POSTURE')" >&2
+    exit 1
+  fi
+  if [ "$RAW_LAUNCH" = 1 ]; then
+    echo "error: --pi-posture system-vault-review requires the canonical --harness pi or pi-signed launch, not a raw launch command" >&2
+    exit 1
+  fi
+  if [ "$KIND" != scout ]; then
+    echo "error: --pi-posture system-vault-review is scout-only; a ship would open a PR and a secondmate is not a review worker" >&2
+    exit 1
+  fi
+  case "$HARNESS" in
+    pi|pi-signed) ;;
+    *)
+      echo "error: --pi-posture system-vault-review requires --harness pi or pi-signed (got '$HARNESS')" >&2
+      exit 1
+      ;;
+  esac
+  if [ "$MODEL_SET" -eq 0 ] || [ -z "$MODEL" ] || [ "$MODEL" = default ]; then
+    MODEL=$("$SCRIPT_DIR/fm-pi-system-vault-reviewer.sh" model) || exit 1
+    MODEL_SET=1
+  fi
+  if [ "$EFFORT_SET" -eq 0 ] || [ -z "$EFFORT" ] || [ "$EFFORT" = default ]; then
+    EFFORT=xhigh
+    EFFORT_SET=1
+  fi
+  # Fable and Hugging Face are refused here so a relaunch, which skips
+  # validate_launch_models, cannot sneak either id past the posture.
+  "$SCRIPT_DIR/fm-pi-system-vault-reviewer.sh" check-model --model "$MODEL" || exit 1
+  PI_POSTURE_FLAGS=$("$SCRIPT_DIR/fm-pi-system-vault-reviewer.sh" spawn-flags --root "$FM_ROOT") || exit 1
+fi
+
 resolve_launch_executables() {
   if [ "$RAW_LAUNCH" -eq 1 ] && [ "$RELAUNCH" -eq 1 ]; then
     RAW_BIN=$(resolve_relaunch_executable_token "$RAW_EXECUTABLE") || {
@@ -2158,6 +2219,9 @@ validate_launch_models() {
   fi
   if [ "$HARNESS" = cursor ]; then
     cursor_model_validate || exit 1
+  fi
+  if [ -n "$PI_POSTURE" ]; then
+    "$SCRIPT_DIR/fm-pi-system-vault-reviewer.sh" check-model --model "$MODEL" --bin "$PI_BIN" || exit 1
   fi
 }
 [ "$RELAUNCH" -eq 1 ] || validate_launch_models
@@ -4463,7 +4527,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo tasktmp model effort busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo tasktmp model effort busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx pi_posture", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -4481,6 +4545,7 @@ preserve_relaunch_meta() {
   echo "tasktmp=$TASK_TMP"
   echo "model=${MODEL:-default}"
   echo "effort=${EFFORT:-default}"
+  [ -z "$PI_POSTURE" ] || echo "pi_posture=$PI_POSTURE"
   [ -z "${BUSY_GEN:-}" ] || echo "busy_gen=$BUSY_GEN"
   echo "spawn_gen=$SPAWN_GEN"
   # Default-off writes no traceparent= line.
@@ -4652,6 +4717,7 @@ MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL") || exit 1
 LAUNCH=${LAUNCH//__MODELFLAG__/$MODELFLAG}
 LAUNCH=${LAUNCH//__EFFORTFLAG__/$EFFORTFLAG}
+LAUNCH=${LAUNCH//__PIPOSTURE__/$PI_POSTURE_FLAGS}
 LAUNCH=${LAUNCH//__CLAUDEPERMFLAG__/$CLAUDE_PERM_FLAG}
 if [ "$HARNESS" = rovo ]; then
   ROVOCONFIGOVERRIDE=$(rovo_config_override_flag "$EFFORT" "$DATA" "$STATE" "$ID") || {
