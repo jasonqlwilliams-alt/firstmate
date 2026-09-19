@@ -1,0 +1,23 @@
+Herdr family (real-herdr-gated) test results
+
+All tests run against live herdr 0.9.1 protocol 22 with treehouse v2.3.0.
+
+Tests executed:
+ 1. fm-afk-inject-herdr-e2e.test.sh       - PASS (4 tests, 62s)
+ 2. fm-afk-launch.test.sh                  - PASS (75 tests, 38s)
+ 3. fm-backend-autodetect-smoke.test.sh    - PASS (5 tests, 10s)
+ 4. fm-backend-herdr-agent-exit-shell-e2e.test.sh - PASS (2 tests, 7s)
+ 5. fm-backend-herdr-eventwait-smoke.test.sh       - PASS (3 tests, 2s)
+ 6. fm-backend-herdr-focus-flash-e2e.test.sh       - PASS (7 tests, 4s)
+ 7. fm-backend-herdr-launcher-workspace-e2e.test.sh - PASS (12 tests, 48s)
+ 8. fm-backend-herdr-presentation-e2e.test.sh       - PASS (25 tests, 514s)
+ 9. fm-backend-herdr-prune-safety-e2e.test.sh       - PASS (5 tests, 7s)
+10. fm-backend-herdr-respawn-idem-e2e.test.sh       - PASS (6 tests, 3s)
+11. fm-backend-herdr-smoke.test.sh         - PASS (19 tests, 7s)
+12. fm-backend-herdr-stale-active-tab-e2e.test.sh   - PASS (1 test, 2s)
+13. fm-backend-herdr-workspace-per-home-e2e.test.sh - PASS (10 tests, 22s)
+14. fm-control-herdr-smoke.test.sh         - PASS (10 tests, 18s)
+15. fm-herdr-attached-viewer-live-e2e.test.sh       - PASS (6 tests, 4s)
+16. fm-herdr-session-cleanup-e2e.test.sh   - PASS (3 tests, 3s)
+
+Total: 16 test scripts, 0 failed, 0 skipped

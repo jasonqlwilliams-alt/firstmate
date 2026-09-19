@@ -1,0 +1,31 @@
+{
+  "families": [
+    {
+      "count": 1,
+      "duration_ms": 81383,
+      "failed": 0,
+      "name": "standalone"
+    }
+  ],
+  "finished_at": "2026-09-19T11:34:21Z",
+  "run_id": "fm-test-run-1789817579583-4119385",
+  "scripts": [
+    {
+      "duration_ms": 81383,
+      "exit": 0,
+      "expected_gate_skip": "none",
+      "family": "standalone",
+      "gate_skip": false,
+      "gate_skip_reason": "",
+      "path": "tests/fm-spawn-pool-base-freshen.test.sh"
+    }
+  ],
+  "selection": "scripts;jobs=1",
+  "started_at": "2026-09-19T11:32:59Z",
+  "summary": {
+    "duration_ms": 81457,
+    "failed": 0,
+    "skipped_gate": 0,
+    "total": 1
+  }
+}
