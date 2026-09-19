@@ -41,6 +41,8 @@ Do not use a fresh generic spawn while the recorded worktree is unaccounted for,
 If two live records name one pool slot, do not edit either record.
 `bin/fm-teardown.sh <stale-id> --retire-stale-record` owns retiring the record whose copy no longer has that task checked out.
 Ordinary teardown still refuses to return the slot.
+If a slot's owner claim names a task with no live record, do not hand-edit the claim.
+`bin/fm-teardown.sh --release-orphaned-slot-claim <worktree>` owns dropping that orphaned claim.
 If the worktree or ownership cannot be reconciled safely, leave all state intact and report the task failed or blocked with the conflicting evidence.
 
 ## A live crewmate claiming the pipeline is dead

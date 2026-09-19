@@ -139,10 +139,16 @@
 #   naming that path; bin/fm-wake-lib.sh owns the scan. A slot any home still
 #   records is refused rather than claimed, returned, or launched into: returning
 #   it would reset the occupying copy, and claiming it would hide that occupancy
-#   behind this task's owner file. A spawn that aborts
-#   while it still holds the allocation lock drops its own claim; an abort after
-#   metadata publication has released that lock leaves the claim in place, and
-#   the next spawn's claim replaces it.
+#   behind this task's owner file. A leftover claim whose named owner is gone
+#   from this same home is recycled under that lock so later same-home slot
+#   reuse is not poisoned. A leftover that names a task from another home is
+#   refused rather than overwritten; bin/fm-teardown.sh
+#   --release-orphaned-slot-claim is the supported drop of that leftover. A
+#   spawn that aborts while it still holds the allocation lock drops its own
+#   claim; an abort after metadata publication has released that lock leaves
+#   the claim in place, so a later spawn of the same task may reclaim it, a
+#   later same-home spawn may recycle it once that task has no live record, and
+#   a spawn from another home must refuse until the leftover is released.
 #   The local root is whatever bin/fm-wake-lib.sh's
 #   fm_firstmate_root_home resolves, so a home seeded from another machine anchors
 #   that lock itself rather than failing to resolve one;
@@ -1158,9 +1164,12 @@ spawn_abort_cleanup() {
   # must not leave a claim naming a task no record describes. The release is a
   # read-then-remove, so it runs only while the project lock that wrote the
   # claim is still held (aborts before metadata publication); a later abort has
-  # already released that lock and leaves the claim for the next spawn's
-  # atomic replacement rather than racing it. The release itself never removes
-  # another task's claim.
+  # already released that lock and leaves the claim in place rather than racing
+  # a successor. A later spawn of this same task may reclaim it; a later
+  # same-home spawn may recycle it once this task has no live record; a spawn
+  # from another home must refuse until bin/fm-teardown.sh
+  # --release-orphaned-slot-claim drops the leftover. The release itself never
+  # removes another task's claim.
   if [ "$SPAWN_SLOT_CLAIMED" = 1 ] && [ -n "${WT:-}" ] \
      && [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ] \
      && fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
@@ -1168,7 +1177,7 @@ spawn_abort_cleanup() {
     if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
       fm_treehouse_slot_owner_release "$WT" "$ID" || true
     else
-      echo "warning: leaving task $ID's slot claim on $WT in place; the Treehouse project lock is no longer held, so the next spawn's claim replaces it" >&2
+      echo "warning: leaving task $ID's slot claim on $WT in place; the Treehouse project lock is no longer held, so a later spawn of $ID may reclaim it, a later same-home spawn may recycle it once $ID has no live record, and a spawn from another home must refuse until $FM_ROOT/bin/fm-teardown.sh --release-orphaned-slot-claim $WT drops the leftover claim" >&2
     fi
   fi
   if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
@@ -3660,17 +3669,48 @@ relaunch_return_to_worktree() {
   fi
 }
 
-# A pool slot any live record still names is not this spawn's to take. Refusing
-# here - without claiming and without treehouse return - leaves the occupying
-# copy alone. Returning the slot would reset it; claiming it would overwrite
-# the evidence that the occupant still holds it.
+# A pool slot any live record still names is not this spawn's to take. A
+# leftover claim whose named owner is gone from this same home is recycled
+# here under the allocation lock so later same-home slot reuse is not
+# poisoned. A leftover that names a task from another home, or a still-live
+# owner, is refused without claiming and without treehouse return. Returning
+# the slot would reset an occupying copy; claiming a foreign leftover would
+# overwrite the evidence that another home still holds it.
 spawn_require_unrecorded_pool_slot() {  # <worktree>
-  local worktree=$1 occupants rc=0 other_id field
+  local worktree=$1 occupants rc=0 recycle_rc=0 live_rc=0 other_id field marker
   local -a names=()
   occupants=$(fm_treehouse_slot_foreign_records "$worktree" "$STATE/$ID.meta") || rc=$?
   case "$rc" in
     0) ;;
-    1) return 0 ;;
+    1)
+      fm_treehouse_slot_owner_state "$worktree" "$ID"
+      case "$FM_TREEHOUSE_SLOT_OWNER" in
+        mine|absent) return 0 ;;
+        other)
+          fm_treehouse_slot_owner_recycle_same_home_gone "$worktree" "$FM_HOME" "$STATE" \
+            || recycle_rc=$?
+          case "$recycle_rc" in
+            0) return 0 ;;
+            2)
+              echo "error: could not scan live task records for Treehouse pool slot $worktree; refusing to take a slot whose occupancy cannot be proved; inspect window $T" >&2
+              return 1
+              ;;
+          esac
+          echo "error: Treehouse pool slot $worktree is claimed by task $FM_TREEHOUSE_SLOT_OWNER_ID${FM_TREEHOUSE_SLOT_OWNER_HOME:+ (home $FM_TREEHOUSE_SLOT_OWNER_HOME)}; refusing to overwrite that claim or launch into a slot another task still holds; inspect window $T" >&2
+          live_rc=0
+          fm_treehouse_slot_owner_record_live "$FM_TREEHOUSE_SLOT_OWNER_ID" "$STATE" || live_rc=$?
+          if [ "$live_rc" = 1 ]; then
+            echo "error: if that task has no live record, release the leftover claim with: $FM_ROOT/bin/fm-teardown.sh --release-orphaned-slot-claim $worktree" >&2
+          fi
+          return 1
+          ;;
+        *)
+          marker=$(fm_treehouse_slot_owner_marker "$worktree" 2>/dev/null) || marker="beside $worktree"
+          echo "error: Treehouse pool slot $worktree carries a slot-owner claim that cannot be read, so occupancy cannot be proved; inspect or repair the claim file at $marker (task= and home= lines); inspect window $T" >&2
+          return 1
+          ;;
+      esac
+      ;;
     *)
       echo "error: could not scan live task records for Treehouse pool slot $worktree; refusing to take a slot whose occupancy cannot be proved; inspect window $T" >&2
       return 1
