@@ -805,16 +805,48 @@ test_pool_slot_recorded_by_another_task_is_not_taken() {
 }
 
 # treehouse get can also hand back a slot whose leftover claim names a task
-# that no longer has a live record. Spawn must refuse that claim rather than
-# overwrite it; --release-orphaned-slot-claim is the supported drop.
-test_pool_slot_foreign_claim_without_a_record_is_not_taken() {
-  local rec id=pool-slot-orphan-claim-r1 gone=gone-owner out status before claim
+# that no longer has a live record. A same-home leftover is the ordinary
+# reuse sequence after a dead occupant is forgotten (Herdr drops the
+# presentation-anchor meta so later spawn is not poisoned). A leftover whose
+# home is not this spawn's is foreign and must be refused;
+# --release-orphaned-slot-claim is the supported drop of that leftover.
+test_pool_slot_same_home_gone_owner_claim_is_taken() {
+  local rec id=pool-slot-same-home-gone-r1 gone=gone-anchor out status
+
+  rec=$(make_case slot-same-home-gone "$id")
+  read_case_record "$rec"
+  lay_out_as_pool_slot
+  printf 'task=%s\nhome=%s\n' "$gone" "$HOME_DIR" > "$SLOT_CLAIM"
+  mkdir -p "$CASE_DIR/other-slot"
+  fm_write_meta "$HOME_DIR/state/neighbour.meta" \
+    "window=firstmate:fm-neighbour" "endpoint_task_id=neighbour" \
+    "worktree=$CASE_DIR/other-slot" "project=$PROJECT_DIR" "kind=scout"
+
+  out=$(run_spawn "$id" --scout)
+  status=$?
+  expect_code 0 "$status" "spawn should recycle a same-home leftover whose owner is gone"$'\n'"$out"
+  [ -f "$SLOT_CLAIM" ] || fail "spawn left the recycled slot unclaimed: $out"
+  grep -Fxq -- "task=$id" "$SLOT_CLAIM" \
+    || fail "spawn did not claim the recycled same-home leftover: $(cat "$SLOT_CLAIM")"
+  grep -Fxq -- "home=$HOME_DIR" "$SLOT_CLAIM" \
+    || fail "spawn did not record this home on the recycled claim: $(cat "$SLOT_CLAIM")"
+  assert_present "$HOME_DIR/state/neighbour.meta" \
+    "same-home recycle removed an unrelated live record"
+  [ -f "$HOME_DIR/state/$id.meta" ] || fail "same-home recycle did not publish the new task record"
+
+  pass "fm-spawn recycles a same-home leftover claim whose named owner is gone"
+}
+
+test_pool_slot_foreign_home_claim_without_a_record_is_not_taken() {
+  local rec id=pool-slot-orphan-claim-r1 gone=gone-owner out status before claim mate
 
   rec=$(make_case slot-orphan-claim "$id")
   read_case_record "$rec"
   lay_out_as_pool_slot
   before=$(git -C "$POOL_DIR" rev-parse HEAD)
-  printf 'task=%s\nhome=%s\n' "$gone" "$HOME_DIR" > "$SLOT_CLAIM"
+  mate="$CASE_DIR/mate"
+  mkdir -p "$mate/state" "$mate/data"
+  printf 'task=%s\nhome=%s\n' "$gone" "$mate" > "$SLOT_CLAIM"
   claim=$(cat "$SLOT_CLAIM")
   mkdir -p "$CASE_DIR/other-slot"
   fm_write_meta "$HOME_DIR/state/neighbour.meta" \
@@ -823,38 +855,38 @@ test_pool_slot_foreign_claim_without_a_record_is_not_taken() {
 
   out=$(run_spawn "$id" --scout)
   status=$?
-  [ "$status" -ne 0 ] || fail "spawn launched into a pool slot whose claim names a gone task"$'\n'"$out"
+  [ "$status" -ne 0 ] || fail "spawn launched into a pool slot whose claim names a gone foreign-home task"$'\n'"$out"
   assert_contains "$out" "$gone" \
     "spawn did not name the task that still claims the slot"
   assert_contains "$out" "--release-orphaned-slot-claim" \
-    "spawn did not point at the supported orphaned-claim release"
+    "spawn did not point at the supported leftover-claim release"
   [ ! -e "$HOME_DIR/state/$id.meta" ] || fail "spawn published a record for a slot with a foreign claim"
   [ "$(cat "$SLOT_CLAIM")" = "$claim" ] \
-    || fail "spawn overwrote the orphaned slot claim: $(cat "$SLOT_CLAIM")"
+    || fail "spawn overwrote the foreign leftover claim: $(cat "$SLOT_CLAIM")"
   [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before" ] \
-    || fail "spawn moved the orphan-claimed slot's HEAD"
-  assert_present "$POOL_DIR/README.md" "spawn reset the orphan-claimed copy"
+    || fail "spawn moved the foreign-claimed slot's HEAD"
+  assert_present "$POOL_DIR/README.md" "spawn reset the foreign-claimed copy"
 
   out=$(
     FM_HOME="$HOME_DIR" FM_ROOT_OVERRIDE="$ROOT" \
       "$ROOT/bin/fm-teardown.sh" --release-orphaned-slot-claim "$POOL_DIR" 2>&1
   )
   status=$?
-  [ "$status" -eq 0 ] || fail "releasing an orphaned slot claim failed: $out"
+  [ "$status" -eq 0 ] || fail "releasing a foreign leftover claim failed: $out"
   [ ! -e "$SLOT_CLAIM" ] && [ ! -L "$SLOT_CLAIM" ] \
-    || fail "orphaned-claim release left the leftover claim: $(cat "$SLOT_CLAIM" 2>/dev/null || true)"
+    || fail "leftover-claim release left the leftover claim: $(cat "$SLOT_CLAIM" 2>/dev/null || true)"
   [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before" ] \
-    || fail "orphaned-claim release moved the slot's HEAD"
-  assert_present "$POOL_DIR/README.md" "orphaned-claim release reset the copy"
+    || fail "leftover-claim release moved the slot's HEAD"
+  assert_present "$POOL_DIR/README.md" "leftover-claim release reset the copy"
   assert_present "$HOME_DIR/state/neighbour.meta" \
-    "orphaned-claim release removed an unrelated live record"
+    "leftover-claim release removed an unrelated live record"
 
   out=$(run_spawn "$id" --scout)
   status=$?
-  expect_code 0 "$status" "spawn after releasing the orphaned claim should launch"$'\n'"$out"
-  [ -f "$SLOT_CLAIM" ] || fail "spawn after orphaned-claim release left the slot unclaimed: $out"
+  expect_code 0 "$status" "spawn after releasing the foreign leftover should launch"$'\n'"$out"
+  [ -f "$SLOT_CLAIM" ] || fail "spawn after leftover-claim release left the slot unclaimed: $out"
   grep -Fxq -- "task=$id" "$SLOT_CLAIM" \
-    || fail "spawn after orphaned-claim release did not claim the slot: $(cat "$SLOT_CLAIM")"
+    || fail "spawn after leftover-claim release did not claim the slot: $(cat "$SLOT_CLAIM")"
 
   id='pool-slot-reclaim-own-claim-r1'
   rec=$(make_case slot-reclaim-own "$id")
@@ -867,13 +899,14 @@ test_pool_slot_foreign_claim_without_a_record_is_not_taken() {
   grep -Fxq -- "task=$id" "$SLOT_CLAIM" \
     || fail "same-task spawn did not keep its own leftover claim: $(cat "$SLOT_CLAIM")"
 
-  pass "fm-spawn refuses a foreign leftover claim, and the orphaned-claim release unblocks a later spawn"
+  pass "fm-spawn refuses a foreign leftover claim, and the leftover-claim release unblocks a later spawn"
 }
 
 test_remote_seeded_home_spawns_from_treehouse_pool
 test_pool_slot_claim_follows_the_spawn_outcome
 test_pool_slot_recorded_by_another_task_is_not_taken
-test_pool_slot_foreign_claim_without_a_record_is_not_taken
+test_pool_slot_same_home_gone_owner_claim_is_taken
+test_pool_slot_foreign_home_claim_without_a_record_is_not_taken
 test_linked_spawning_home_rejects_primary_before_refresh
 test_stale_pool_base_refreshes_before_branching
 test_non_main_default_branch_refreshes_before_branching
