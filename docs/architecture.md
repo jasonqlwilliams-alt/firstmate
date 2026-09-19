@@ -333,14 +333,15 @@ A confirmed merge leaves a durable role-routed outcome instead of living only in
 The same emitter handles a merge firstmate performed and one its poll detected, while the watcher immediately delivers the emitter's local actionable poll row.
 Teardown is fail-closed for ship worktrees: dirty worktrees refuse, and committed work must be landed before the worktree is returned.
 A pool worktree is only returned after teardown passes the slot-ownership proof: a contradictory task record or a supported live endpoint refuses without touching either task, and no discard authority relaxes that.
-A fresh spawn refuses to claim or launch into a pool slot any local home still records, rather than overwriting that occupancy.
+A fresh spawn refuses to claim or launch into a pool slot any local home still records, or whose owner claim names a foreign task including one with no live record, rather than overwriting that occupancy.
 `--retire-stale-record` is the supported retire of one colliding record whose copy does not currently have that task's branch checked out.
 It finishes only that record's cleanup and leaves the slot untouched.
-[`bin/fm-teardown.sh`](../bin/fm-teardown.sh)'s header owns the flag.
+`--release-orphaned-slot-claim` is the supported drop of a slot claim whose named owner has no live record, including when another live record is or was on the slot.
+[`bin/fm-teardown.sh`](../bin/fm-teardown.sh)'s header owns both flags.
 A slot's own owner claim, written by the spawn that takes it under the allocation lock and owned by [`bin/fm-wake-lib.sh`](../bin/fm-wake-lib.sh), covers a slot reassigned to a task that left no record the scan could reach: a claim naming a different task releases nothing - teardown warns, names the claimant, and finishes only the task's own cleanup - because Treehouse's own live process lease cannot answer ownership once the worker's exit releases it.
 Allocation and return serialize on one project lock per machine-local Firstmate tree: every home reachable through local parent links shares that lock, and a home seeded from another machine anchors its own, because a lock taken on this filesystem is neither held nor observable across that boundary.
 Before the worktree is returned, teardown concludes the task's own no-mistakes run when it is parked at a gate, including a run whose head the task copy cannot resolve - the shared runs-ledger continuation proof is the only recognition for that case, so cleanup never orphans a parked run the pipeline advanced past the submitted head.
-[`bin/fm-teardown.sh`](../bin/fm-teardown.sh)'s header owns the landed-work proofs, slot-ownership proof, stale-record retire flag, PR-discovery fallback, pre-teardown run conclusion, and stale-lock recovery procedure.
+[`bin/fm-teardown.sh`](../bin/fm-teardown.sh)'s header owns the landed-work proofs, slot-ownership proof, stale-record retire flag, orphaned-claim release flag, PR-discovery fallback, pre-teardown run conclusion, and stale-lock recovery procedure.
 [`tests/fm-teardown-endpoint-safety.test.sh`](../tests/fm-teardown-endpoint-safety.test.sh) and [`tests/fm-secondmate-safety.test.sh`](../tests/fm-secondmate-safety.test.sh) pin the slot-collision boundary, and [`tests/fm-spawn-pool-base-freshen.test.sh`](../tests/fm-spawn-pool-base-freshen.test.sh) pins spawn occupancy.
 
 ## Optional Relay

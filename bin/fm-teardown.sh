@@ -86,6 +86,11 @@
 # reassigned-slot cleanup (this record's endpoint, status, records, checks,
 # backlog) and leaves the slot - processes, copy, claim, and the other record -
 # untouched. Hand-editing the record is not a supported path.
+# --release-orphaned-slot-claim is the supported drop of a slot claim whose
+# named owner has no live record in any reachable home, including when another
+# live record is or was on the slot: it removes only that leftover claim and
+# leaves the slot, processes, copy, and every live record untouched.
+# Hand-editing `.fm-slot-owner` is not a supported path.
 # That scan alone cannot prove THIS record is the current owner, because the task
 # that took the slot next may leave no record it can reach - its own worker may
 # have exited and its record been cleaned up, or it may live in a home this
@@ -157,6 +162,7 @@
 # never left leased forever. If the treehouse return fails, teardown leaves the
 # leased home and state in place instead of hiding a still-held lease.
 # Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--retire-stale-record]
+#        fm-teardown.sh --release-orphaned-slot-claim <worktree>
 #   --force skips ordinary-task dirty and landed-work checks, skips scout report
 #   checks, and discards secondmate child work for kind=secondmate. Only use it
 #   when the captain has explicitly said to discard the work.
@@ -169,6 +175,16 @@
 #   claim, when no other record names the slot, when the copy currently has
 #   this task's branch checked out, when the claim cannot be read, or when the
 #   path is not a live pool slot. --force does not lift those refusals.
+#   --release-orphaned-slot-claim is the supported drop of a pool-slot claim
+#   whose named owner has no live record in any reachable Firstmate home. It
+#   takes the slot worktree rather than a task id, so it still works after
+#   interrupted cleanup removed that task's meta. It removes only the leftover
+#   claim: never the slot, never processes, never a live record, and never a
+#   claim whose named owner still has a .meta. It refuses when the path is not
+#   a live pool slot, when the claim cannot be read, or when the named owner
+#   still has a live record (use ordinary teardown or --retire-stale-record).
+#   --force does not apply; extra flags are refused. An already-absent claim
+#   succeeds. bin/fm-wake-lib.sh owns the claim file and the orphaned proof.
 #   --legacy-record accepts a task record that predates the spawn_gen field:
 #   teardown then proceeds only when the recorded endpoint is confirmed dead or
 #   agent-less (bin/fm-backend.sh's recovery-grade classifier), and without
@@ -301,6 +317,78 @@ SUB_HOME_PARENT_MARKER=".fm-secondmate-parent"
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
 # shellcheck source=bin/fm-nm-run-lib.sh
 . "$SCRIPT_DIR/fm-nm-run-lib.sh"
+if [ "${1:-}" = --release-orphaned-slot-claim ]; then
+  if [ "$#" -ne 2 ] || [ -z "${2:-}" ]; then
+    echo "error: invalid teardown request" >&2
+    exit 2
+  fi
+  TEARDOWN_ORPHANED_CLAIM_WT=$2
+  fm_backlog_directory_present "$STATE" "state directory" || {
+    echo "error: teardown refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
+    exit 1
+  }
+  # shellcheck source=bin/fm-wake-lib.sh
+  . "$SCRIPT_DIR/fm-wake-lib.sh"
+  teardown_release_orphaned_slot_claim() {  # <worktree>
+    local worktree=$1 slot project common marker rc=0
+    slot=$(fm_treehouse_canonical_dir "$worktree") || {
+      echo "REFUSED: --release-orphaned-slot-claim needs a live Treehouse pool worktree; ${worktree:-<missing>} is not an existing directory." >&2
+      return 1
+    }
+    common=$(git -C "$slot" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || {
+      echo "REFUSED: $slot is not a git worktree, so it is not a Treehouse pool slot; nothing was changed." >&2
+      return 1
+    }
+    common=$(CDPATH='' cd -- "$common" 2>/dev/null && pwd -P) || {
+      echo "REFUSED: cannot resolve the git common directory for $slot; nothing was changed." >&2
+      return 1
+    }
+    project=$(dirname "$common")
+    fm_treehouse_pool_slot "$project" "$slot" || {
+      echo "REFUSED: $slot is not a live Treehouse pool slot; --release-orphaned-slot-claim does not apply." >&2
+      return 1
+    }
+    TEARDOWN_ORPHANED_CLAIM_LOCK=$(fm_treehouse_project_lock_path "$project") || {
+      echo "REFUSED: cannot resolve the shared Treehouse project lock for $project; nothing was changed." >&2
+      return 1
+    }
+    fm_lock_try_acquire "$TEARDOWN_ORPHANED_CLAIM_LOCK" || {
+      echo "REFUSED: another Treehouse slot allocation or return is in progress for $project; nothing was changed." >&2
+      return 1
+    }
+    trap 'fm_lock_release "$TEARDOWN_ORPHANED_CLAIM_LOCK" || true' EXIT
+    fm_treehouse_slot_owner_state "$slot" ""
+    case "$FM_TREEHOUSE_SLOT_OWNER" in
+      absent)
+        echo "Treehouse pool slot $slot already has no owner claim." >&2
+        return 0
+        ;;
+      other) ;;
+      *)
+        marker=$(fm_treehouse_slot_owner_marker "$slot" 2>/dev/null) || marker="beside $slot"
+        echo "REFUSED: Treehouse pool slot $slot carries a slot-owner claim that cannot be read, so it cannot be proved orphaned; nothing was changed." >&2
+        echo "Inspect or repair the claim file at $marker (task= and home= lines), then re-run." >&2
+        return 1
+        ;;
+    esac
+    fm_treehouse_slot_owner_record_live "$FM_TREEHOUSE_SLOT_OWNER_ID" "$STATE" || rc=$?
+    case "$rc" in
+      1) ;;
+      0)
+        echo "REFUSED: task $FM_TREEHOUSE_SLOT_OWNER_ID still has a live record, so its claim on $slot is not orphaned; tear that task down ordinarily or retire a colliding copy with --retire-stale-record." >&2
+        return 1
+        ;;
+      *) return 1 ;;
+    esac
+    if ! fm_treehouse_slot_owner_release_orphaned "$slot" "$STATE"; then
+      echo "REFUSED: could not drop the orphaned slot claim on $slot; nothing was changed." >&2
+      return 1
+    fi
+    echo "released orphaned slot claim naming task $FM_TREEHOUSE_SLOT_OWNER_ID on $slot" >&2
+  }
+  teardown_release_orphaned_slot_claim "$TEARDOWN_ORPHANED_CLAIM_WT"
+  exit $?
+fi
 if [ "$#" -lt 1 ] || ! fm_task_id_path_safe "$1"; then
   echo "error: invalid teardown request" >&2
   exit 2

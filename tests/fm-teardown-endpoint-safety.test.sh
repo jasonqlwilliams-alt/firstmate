@@ -630,6 +630,81 @@ test_retire_stale_record_drops_the_unheld_copy_without_touching_the_slot() {
   pass "fm-teardown --retire-stale-record drops an unheld colliding record and never returns the slot"
 }
 
+test_release_orphaned_slot_claim_drops_a_claim_whose_owner_is_gone() {
+  local dir id=stale-task other=live-task gone=gone-owner worker rc claim
+
+  dir=$(make_case slot-release-orphaned-with-occupant)
+  mark_case_as_treehouse_pool "$dir"
+  fm_write_meta "$dir/home/state/$other.meta" \
+    "window=firstmate:fm-$other" "endpoint_task_id=$other" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  claim_pool_slot "$dir" "$gone" "$dir/home"
+  ( cd "$dir/worktree" && exec sleep 30 ) &
+  worker=$!
+
+  set +e
+  FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+  FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+    "$TEARDOWN" --release-orphaned-slot-claim "$dir/worktree" \
+    > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || fail "releasing an orphaned claim beside a live occupant failed: $(cat "$dir/stderr")"
+  kill -0 "$worker" 2>/dev/null || fail "orphaned-claim release killed the worker in the shared slot"
+  assert_present "$dir/home/state/$other.meta" \
+    "orphaned-claim release removed the live occupant's record"
+  assert_present "$dir/worktree/sentinel" "orphaned-claim release reset the shared slot"
+  [ ! -e "$dir/pool/1/.fm-slot-owner" ] && [ ! -L "$dir/pool/1/.fm-slot-owner" ] \
+    || fail "orphaned-claim release left the leftover claim: $(cat "$dir/pool/1/.fm-slot-owner" 2>/dev/null || true)"
+  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "orphaned-claim release returned the shared slot: $(cat "$dir/runtime.log")"
+  assert_contains "$(cat "$dir/stderr")" "$gone" \
+    "orphaned-claim release should name the gone owner"
+  kill "$worker" 2>/dev/null || true
+  wait "$worker" 2>/dev/null || true
+
+  dir=$(make_case slot-release-orphaned-owner-still-live)
+  mark_case_as_treehouse_pool "$dir"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  claim_pool_slot "$dir" "$id" "$dir/home"
+  claim=$(cat "$dir/pool/1/.fm-slot-owner")
+  set +e
+  FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+  FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+    "$TEARDOWN" --release-orphaned-slot-claim "$dir/worktree" \
+    > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "released a claim whose named owner still has a live record"
+  assert_present "$dir/home/state/$id.meta" \
+    "live-owner refusal removed the claiming record"
+  assert_present "$dir/pool/1/.fm-slot-owner" \
+    "live-owner refusal removed the live owner's claim"
+  [ "$(cat "$dir/pool/1/.fm-slot-owner")" = "$claim" ] \
+    || fail "live-owner refusal rewrote the live owner's claim: $(cat "$dir/pool/1/.fm-slot-owner")"
+  assert_present "$dir/worktree/sentinel" "live-owner refusal reset the slot"
+  assert_contains "$(cat "$dir/stderr")" "still has a live record" \
+    "live-owner refusal should say the named owner is not gone"
+
+  dir=$(make_case slot-release-orphaned-absent)
+  mark_case_as_treehouse_pool "$dir"
+  set +e
+  FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+  FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+    "$TEARDOWN" --release-orphaned-slot-claim "$dir/worktree" \
+    > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || fail "releasing an already-absent claim failed: $(cat "$dir/stderr")"
+  [ ! -e "$dir/pool/1/.fm-slot-owner" ] && [ ! -L "$dir/pool/1/.fm-slot-owner" ] \
+    || fail "absent-claim release created a claim file"
+  assert_present "$dir/worktree/sentinel" "absent-claim release reset the slot"
+
+  pass "fm-teardown --release-orphaned-slot-claim drops a gone owner's leftover claim and never returns the slot"
+}
+
 test_cross_home_pool_slot_collision_refuses() {
   local dir id=stale-task other=secondmate-task second_home second_project rc
   dir=$(make_case slot-reuse-cross-home)
@@ -1108,6 +1183,7 @@ test_isolated_tmux_invalid_and_valid_cleanup
 test_bare_relative_origin_shares_project_lock_with_clone
 test_reused_pool_slot_refuses_before_touching_the_other_task
 test_retire_stale_record_drops_the_unheld_copy_without_touching_the_slot
+test_release_orphaned_slot_claim_drops_a_claim_whose_owner_is_gone
 test_cross_home_pool_slot_collision_refuses
 test_sole_slot_record_still_tears_down
 test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot

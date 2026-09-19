@@ -2585,7 +2585,7 @@ STATE="$FM_HOME/state"
 . "$(cat "$CASE/wake-lib")"
 lock=$(cat "$CASE/project-lock")
 fm_lock_try_acquire "$lock"
-fm_treehouse_slot_owner_claim "$(cat "$CASE/slot-worktree")" successor "$FM_HOME"
+printf 'task=successor\nhome=%s\n' "$FM_HOME" > "$CASE/pool/1/.fm-slot-owner"
 fm_lock_release "$lock"
 SH
         chmod +x "$dir/fake/before-exit"
