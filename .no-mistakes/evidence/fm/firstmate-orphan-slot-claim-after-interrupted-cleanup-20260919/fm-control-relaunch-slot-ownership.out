@@ -1,0 +1,19 @@
+ok - fm-control relaunch: relative home and state paths share the absolute preparation directory
+ok - relaunch: pool ownership is proven under the allocation lock before entry and again before the post-stop return
+ok - fm-control relaunch: Kimi activation preserves concurrent settings, avoids unchanged config replacement, and keeps off-PATH installs
+ok - fm-control relaunch: executable paths containing & survive template substitution
+ok - fm-spawn relaunch: one resolver covers tilde, relative, bare, absolute, ampersand, and missing tokens
+ok - fm-control and fm-spawn relaunch: relative PATH entries resolve Cursor to an absolute launcher
+ok - native process PATH: argument text, other entries, and trailing strings cannot replace the environment PATH
+ok - fm-control relaunch: PATH text in live process arguments cannot select another installation
+ok - fm-control relaunch: a live pane PATH comes from the process-group leader, not same-group children
+ok - fm-control and fm-spawn relaunch: returning to the worktree precedes directory-dependent executable resolution
+ok - fm-control relaunch: shared retirement validation preserves workers with invalid token or registry inputs
+ok - fm-control relaunch: live and exited panes resolve their own executable rather than the controller installation
+ok - fm-spawn --relaunch: raw commands validate and execute the explicitly selected binary
+ok - fm-control relaunch: secondmate access and lock are proven before stop, with inheritance deferred and abort cleanup
+ok - fm-control relaunch: exited and unwinding shells return to their recorded worktree
+ok - fm-control relaunch: replacement refusals preserve the running agent, metadata, and instructions
+ok - fm-control relaunch: invalid plugin paths and unavailable executables preserve the running worker
+ok - fm-control relaunch: hook and plugin staging preserves old wiring through stop and activates functional replacements
+ok - fm-control relaunch: an exit refusal discards staged wiring and preserves the running worker
