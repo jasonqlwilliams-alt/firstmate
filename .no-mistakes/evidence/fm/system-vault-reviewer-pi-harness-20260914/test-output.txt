@@ -1,0 +1,28 @@
+=== Behavioral test suite: tests/fm-pi-system-vault-reviewer.test.sh ===
+
+ok - helper prints the pinned OpenRouter Sonnet 5 id
+ok - spawn flags are the review-only Pi tool and resource posture
+ok - spawn-flags refuses when the review prompt is absent
+ok - helper refuses Fable 5 and Hugging Face without guessing another model
+ok - catalog miss refuses; unreachable listing is not a verdict
+ok - receipt validator accepts the 2026-09-12 shape and refuses vault storage
+ok - scout spawn applies the review-only Pi posture, pin, and xhigh default
+ok - ordinary Pi scout launch is unchanged without the review posture
+ok - spawn refuses ship, non-Pi, Fable 5, Hugging Face, and unknown posture before records exist
+ok - pi-signed scout spawn applies the review-only posture
+# all fm-pi-system-vault-reviewer tests passed
+
+=== Manual validation of additional edge cases ===
+
+Test: help output          -> pass (prints usage, model pin, environment)
+Test: --help output        -> pass (same as help)
+Test: unknown command      -> exit 2 with descriptive error
+Test: missing command      -> exit 2 with "missing command"
+Test: spawn-flags --root=   -> pass (equals syntax works)
+Test: validate-receipt missing file   -> exit 1, "receipt file missing"
+Test: validate-receipt invalid JSON   -> exit 1, "receipt is not JSON"
+Test: validate-receipt empty object   -> exit 1, lists missing keys
+Test: C:\ vault report path          -> exit 1, "not a Windows vault mount"
+Test: bad sha256                     -> exit 1, "must be 64 hex characters"
+Test: bad verdict (MERGE)            -> exit 1, "must be APPROVE, REVISE, or REJECT"
+Test: mismatched formal_rounds       -> exit 1, "must equal the length of rounds"
