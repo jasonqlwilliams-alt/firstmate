@@ -3263,11 +3263,11 @@ elif [ "$RELAUNCH" -eq 1 ] && [ "$RELAUNCH_RECREATE" -eq 1 ]; then
       read -r HERDR_TAB_ID HERDR_PANE_ID <<EOF
 $HERDR_TASK_IDS
 EOF
+      T="$HERDR_SES:$HERDR_PANE_ID"
       if [ -z "$HERDR_TAB_ID" ] || [ -z "$HERDR_PANE_ID" ]; then
         echo "error: herdr did not return a tab/pane id for $W" >&2
         exit 1
       fi
-      T="$HERDR_SES:$HERDR_PANE_ID"
       ;;
     *)
       echo "error: backend '$BACKEND' cannot recreate a missing endpoint; refusing relaunch" >&2
