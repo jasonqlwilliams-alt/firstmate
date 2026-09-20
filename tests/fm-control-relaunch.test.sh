@@ -1571,7 +1571,7 @@ test_spawn_relaunch_recreates_a_missing_endpoint() {
   add_ship_task "$dir" rl-missing claude
   : > "$dir/fake/windows"
   printf 'zsh' > "$dir/fake/command"
-  out=$(TMUX= run_spawn "$dir" rl-missing --relaunch --harness claude); rc=$?
+  out=$(TMUX='' run_spawn "$dir" rl-missing --relaunch --harness claude); rc=$?
   expect_code 0 "$rc" "relaunching a missing endpoint should recreate it"$'\n'"$out"
   window_after=$(meta_field "$dir" rl-missing window)
   [ -n "$window_after" ] || fail "missing-endpoint relaunch published no endpoint"
@@ -1596,7 +1596,7 @@ test_control_relaunch_recreates_a_missing_endpoint() {
   add_ship_task "$dir" rl-missctl claude
   : > "$dir/fake/windows"
   printf 'zsh' > "$dir/fake/command"
-  out=$(TMUX= run_control "$dir" rl-missctl relaunch --note "pane was closed; continue"); rc=$?
+  out=$(TMUX='' run_control "$dir" rl-missctl relaunch --note "pane was closed; continue"); rc=$?
   expect_code 0 "$rc" "control relaunch of a missing endpoint should succeed"$'\n'"$out"
   assert_contains "$out" "relaunched rl-missctl harness=claude from=claude" \
     "the outcome should name the missing-endpoint relaunch"
