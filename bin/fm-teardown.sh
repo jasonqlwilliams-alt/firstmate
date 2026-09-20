@@ -84,8 +84,12 @@
 # --retire-stale-record is the supported way to drop ONE of those records when
 # this copy does not currently have `fm/<id>` checked out: it reuses the
 # reassigned-slot cleanup (this record's endpoint, status, records, checks,
-# backlog) and leaves the slot - processes, copy, claim, and the other record -
-# untouched. Hand-editing the record is not a supported path.
+# backlog) and leaves the slot - processes, copy, and the other record -
+# untouched. When this record still owns the slot claim but another live
+# record occupies the slot and this task's endpoint is dead or missing, it
+# transfers the claim to that occupant rather than refusing; it never kills
+# that worker, never retires that live record, and never pretends the claim
+# is orphaned. Hand-editing the record is not a supported path.
 # --release-orphaned-slot-claim is the supported drop of a slot claim whose
 # named owner has no live record in any reachable home, including when another
 # live record is or was on the slot: it removes only that leftover claim and
@@ -171,10 +175,14 @@
 #   Ordinary teardown still refuses to return a slot another live record names,
 #   even with --force; this flag never returns, resets, or reclaims the slot,
 #   never removes another task's claim, and is not a substitute for editing
-#   state/<id>.meta by hand. It refuses when this record still owns the slot
-#   claim, when no other record names the slot, when the copy currently has
-#   this task's branch checked out, when the claim cannot be read, or when the
-#   path is not a live pool slot. --force does not lift those refusals.
+#   state/<id>.meta by hand. When this record still owns the slot claim, the
+#   occupant is another live record, this copy does not have fm/<id> checked
+#   out, and this task's endpoint is dead or missing, the claim is transferred
+#   to that occupant. It refuses when no other record names the slot, when the
+#   copy currently has this task's branch checked out, when this record still
+#   owns the claim and its agent is still live, when the claim cannot be read,
+#   or when the path is not a live pool slot. --force does not lift those
+#   refusals.
 #   --release-orphaned-slot-claim is the supported drop of a pool-slot claim
 #   whose named owner has no live record in any reachable Firstmate home. It
 #   takes the slot worktree rather than a task id, so it still works after
@@ -2301,9 +2309,24 @@ teardown_copy_holds_task_work() {  # <worktree> <task-id>
 }
 
 # Explicit retire of a colliding record that is not the live slot owner.
-# Leaves the slot, the other record, and the slot claim untouched.
+# Leaves the slot, the other record, and - after any claim transfer - the
+# occupant's claim untouched.
+teardown_slot_occupant_home() {  # <task-id>
+  local other_id=$1 state_dir meta home
+  for state_dir in "${FM_TREEHOUSE_OWNER_STATES[@]}"; do
+    meta="$state_dir/$other_id.meta"
+    [ -f "$meta" ] && [ ! -L "$meta" ] || continue
+    home=$(fm_meta_get "$meta" home)
+    [ -n "$home" ] || home=$(dirname "$state_dir")
+    fm_treehouse_canonical_dir "$home" && return 0
+    printf '%s\n' "$home"
+    return 0
+  done
+  return 1
+}
+
 require_retire_stale_slot_record() {
-  local slot holders rc=0 other_id field marker
+  local slot holders rc=0 other_id field marker occupant_home
   [ "$KIND" != secondmate ] || {
     echo "REFUSED: --retire-stale-record is for a colliding crewmate pool-slot record, not a secondmate home." >&2
     return 1
@@ -2324,8 +2347,13 @@ require_retire_stale_slot_record() {
   fm_treehouse_slot_owner_state "$slot" "$ID"
   case "$FM_TREEHOUSE_SLOT_OWNER" in
     mine)
-      echo "REFUSED: task $ID still owns the slot claim on $slot; --retire-stale-record is for the record that no longer holds the slot. Retire the other record, then tear this one down ordinarily." >&2
-      return 1
+      case "$(fm_backend_agent_state "$BACKEND" "$T")" in
+        dead|missing) ;;
+        *)
+          echo "REFUSED: task $ID still owns the slot claim on $slot; --retire-stale-record is for the record that no longer holds the slot. Retire the other record, then tear this one down ordinarily." >&2
+          return 1
+          ;;
+      esac
       ;;
     other|absent) ;;
     *)
@@ -2340,6 +2368,28 @@ require_retire_stale_slot_record() {
     return 1
   fi
   TEARDOWN_SLOT_REASSIGNED=1
+  if [ "$FM_TREEHOUSE_SLOT_OWNER" = mine ]; then
+    IFS=$'\t' read -r other_id field <<< "$holders"
+    : "$field"
+    # foreign_records ran in command substitution, so rebuild the owner-state
+    # list in this shell before resolving the occupant's home.
+    fm_treehouse_collect_owner_states "$STATE" || {
+      echo "REFUSED: could not scan live task records to transfer the slot claim on $slot; nothing was changed." >&2
+      return 1
+    }
+    occupant_home=$(teardown_slot_occupant_home "$other_id") || {
+      echo "REFUSED: could not resolve occupying task $other_id's home to transfer the slot claim on $slot; nothing was changed." >&2
+      return 1
+    }
+    fm_treehouse_slot_owner_transfer "$slot" "$ID" "$other_id" "$occupant_home" || {
+      echo "REFUSED: could not transfer task $ID's slot claim on $slot to task $other_id; nothing was changed." >&2
+      return 1
+    }
+    TEARDOWN_SLOT_REASSIGNED_TO=$other_id
+    TEARDOWN_SLOT_REASSIGNED_HOME=$occupant_home
+    echo "warning: task $ID still named the slot claim on $slot but that copy is occupied by task $other_id and does not have fm/$ID checked out; the claim was transferred and only $ID's own cleanup runs." >&2
+    return 0
+  fi
   if [ "$FM_TREEHOUSE_SLOT_OWNER" = other ]; then
     TEARDOWN_SLOT_REASSIGNED_TO=$FM_TREEHOUSE_SLOT_OWNER_ID
     TEARDOWN_SLOT_REASSIGNED_HOME=$FM_TREEHOUSE_SLOT_OWNER_HOME

@@ -31,8 +31,8 @@ A recorded `harness=` is not always an exact adapter name: a task launched from 
 | Verb | Effect | Postcondition |
 | --- | --- | --- |
 | `interrupt` | Deliver the harness's verified interrupt sequence while leaving the agent running. | Delivery succeeds while the endpoint still exists and the agent is still alive where the backend can classify that; cancellation is confirmed only from an adapter-owned acknowledgement and otherwise reports `cancel=unconfirmed`. |
-| `exit` | Stop the agent, preserving the endpoint, the worktree, and every uncommitted change. | The backend's recovery-grade classifier reports the agent gone. Already-stopped is idempotent success. |
-| `relaunch` | Start a replacement for a running or exited agent in its recorded endpoint and worktree, on the exact recorded adapter or an explicitly chosen harness, model, and effort. | The new agent is alive on the recorded endpoint, and the durable record names the harness that is actually running. |
+| `exit` | Stop the agent, preserving the endpoint, the worktree, and every uncommitted change. | The backend's recovery-grade classifier reports the agent gone. Already-stopped is idempotent success, including when the recorded endpoint is authoritatively missing. |
+| `relaunch` | Start a replacement for a running or exited agent in its recorded endpoint and worktree, on the exact recorded adapter or an explicitly chosen harness, model, and effort. An authoritatively missing endpoint is recreated into the recorded worktree. | The new agent is alive on the recorded endpoint, or on a newly created endpoint when that recorded endpoint was missing, and the durable record names the harness that is actually running. |
 
 An exit that delivers lifecycle input but cannot prove the agent stopped fails with `exit=unconfirmed`, reports the observed agent state and any interrupt cancellation claim, and never claims that nothing changed.
 Interrupt never rewrites busy state as proof of its own success.
@@ -84,7 +84,7 @@ An already registered PR merge poll remains armed and authenticated across relau
    Preparation preserves the previous wiring, active busy generation, and task record.
    Apart from that Treehouse project lock, the same spawn process holds its locks and resolved launch inputs until control authorizes it to continue; the script's header owns this internal handoff.
 5. **Stop the old agent** through the `exit` verb, with its postcondition, then release the prepared launch.
-   The replacement reuses the recorded endpoint and worktree, retires the previous harness's per-task wiring, publishes the staged wiring, and activates the prepared busy generation where one was armed.
+   A missing endpoint is already-stopped. The replacement reuses the recorded endpoint when it still exists, or a newly created one when that endpoint was missing, retires the previous harness's per-task wiring, publishes the staged wiring, and activates the prepared busy generation where one was armed.
    Kimi's installer reapplies its owned hook region to the current configuration after stop, preserving unrelated edits made during preparation and leaving an unchanged configuration file untouched.
 
 Switching harness is therefore one ordinary relaunch rather than a separate mechanism.
@@ -115,8 +115,9 @@ Switching harness is therefore one ordinary relaunch rather than a separate mech
   zellij, orca, and cmux are refused rather than reported as successful blind.
 - An ambiguous or unreadable endpoint state refuses.
   Only a positively classified state acts.
-- `fm-spawn --relaunch` independently requires a positively agent-free endpoint before launch; only control's authorized preparation phase may proceed while the old agent is alive.
+- `fm-spawn --relaunch` independently requires a positively agent-free or authoritatively missing endpoint before launch; only control's authorized preparation phase may proceed while the old agent is alive.
   On tmux and Herdr, an agent-free shell outside the recorded worktree receives one `cd` to the validated recorded path and must confirm the move before launch.
+  A missing endpoint is recreated into the recorded worktree instead of adopted.
   This includes shells that unwound to the home or pool parent after the agent exited.
   A live endpoint outside that path refuses preparation before stop; shell commands are never sent to a live agent.
   The path is checked again after stop because exiting can itself unwind a subshell.

@@ -1251,7 +1251,10 @@ fm_treehouse_pool_slot() {  # <project-dir> <worktree>
 # one with no live record. A leftover claim whose named owner is gone from
 # this same home is recycled under the allocation lock so later same-home
 # slot reuse is not poisoned. bin/fm-teardown.sh --release-orphaned-slot-claim
-# is the supported drop of a leftover spawn must not take. Moving crewmate
+# is the supported drop of a leftover spawn must not take. When a still-live
+# claiming record is dead or missing and another live record occupies the
+# slot, bin/fm-teardown.sh --retire-stale-record transfers that claim to the
+# occupant. Moving crewmate
 # spawns onto the durable lease is separate follow-up work.
 #
 # The claim lives at <pool>/<slot>/.fm-slot-owner - a sibling of the repo
@@ -1404,6 +1407,32 @@ fm_treehouse_slot_owner_recycle_same_home_gone() {  # <worktree> <home> <record-
   claim_home=$(fm_treehouse_canonical_dir "${FM_TREEHOUSE_SLOT_OWNER_HOME:-}") || return 1
   [ "$spawn_home" = "$claim_home" ] || return 1
   fm_treehouse_slot_owner_release_orphaned "$worktree" "$record_state"
+}
+
+# Transfer this task's own claim to a live occupant of the same slot, so a
+# dead record does not keep pointing at a copy another worker holds.
+# Returns 0 after writing the occupant's claim. Returns 1 when this task does
+# not currently own the claim, the occupant identity is incomplete, or the
+# write fails. Callers hold the project lock.
+# bin/fm-teardown.sh --retire-stale-record is the operator path.
+fm_treehouse_slot_owner_transfer() {  # <worktree> <from-id> <to-id> <to-home>
+  local worktree=$1 from_id=$2 to_id=$3 to_home=$4 marker tmp
+  [ -n "$from_id" ] && [ -n "$to_id" ] && [ -n "$to_home" ] || return 1
+  [ "$from_id" != "$to_id" ] || return 1
+  fm_treehouse_slot_owner_state "$worktree" "$from_id"
+  [ "$FM_TREEHOUSE_SLOT_OWNER" = mine ] || return 1
+  marker=$(fm_treehouse_slot_owner_marker "$worktree") || return 1
+  if { [ -e "$marker" ] || [ -L "$marker" ]; } \
+     && { [ ! -f "$marker" ] || [ -L "$marker" ]; }; then
+    return 1
+  fi
+  tmp="$marker.tmp.${BASHPID:-$$}"
+  rm -f "$tmp" || return 1
+  {
+    printf 'task=%s\n' "$to_id"
+    printf 'home=%s\n' "$to_home"
+  } > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$marker" 2>/dev/null || { rm -f "$tmp"; return 1; }
 }
 
 # Canonical existing directory, or failure when the path is missing. Occupancy

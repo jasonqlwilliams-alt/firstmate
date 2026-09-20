@@ -28,8 +28,8 @@
 #   instruction files or a secondmate's charter.
 #        fm-spawn.sh <task-id> --relaunch [--harness <name>] [--model <name>] [--effort <level>]
 #   --relaunch launches a replacement agent for an EXISTING task into that
-#   task's own recorded endpoint and worktree instead of creating either. It is
-#   the launch half of the control plane (bin/fm-control.sh relaunch), which
+#   task's own recorded worktree, reusing the recorded endpoint when it still
+#   exists. It is the launch half of the control plane (bin/fm-control.sh relaunch), which
 #   owns the checkpoint, the progress note, stopping the previous agent, and the
 #   transaction; call fm-control rather than this flag directly unless you are
 #   deliberately re-launching an already-stopped task. Every identity axis -
@@ -38,9 +38,11 @@
 #   positional, and batch pairs are all refused alongside it; only harness,
 #   model, and effort may change, which is what makes a harness switch one
 #   ordinary relaunch. It refuses unless the recorded endpoint is positively
-#   agent-free before launch on a backend with a recovery-grade classifier (tmux
-#   or herdr), and clears the previous harness's per-task wiring before activating
-#   the new incarnation. The replacement still never starts outside the copy
+#   agent-free or authoritatively missing before launch on a backend with a
+#   recovery-grade classifier (tmux or herdr), and clears the previous harness's
+#   per-task wiring before activating the new incarnation. A missing endpoint is
+#   recreated into the recorded worktree rather than adopted, so closing a pane
+#   is not a one-way door. The replacement still never starts outside the copy
 #   holding the work: an agent-free tmux or Herdr shell outside the recorded
 #   worktree is told once to return and must confirm that path before launch.
 #   Control's internal FM_CONTROL_RELAUNCH_PREPARE directory is accepted only
@@ -591,6 +593,7 @@ PI_POSTURE=
 PI_POSTURE_SET=0
 PI_POSTURE_FLAGS=
 RELAUNCH=0
+RELAUNCH_RECREATE=0
 POS=()
 want_value=
 for a in "$@"; do
@@ -1193,6 +1196,12 @@ spawn_abort_cleanup() {
     fm_lock_release "$SPAWN_CONTROL_LOCK" || true
   fi
   [ -z "$SPAWN_META_TMP" ] || rm -f "$SPAWN_META_TMP" 2>/dev/null || true
+  if [ "$status" -ne 0 ] \
+     && [ "$RELAUNCH_RECREATE" = 1 ] \
+     && [ "${SPAWN_META_PUBLISH_STARTED:-0}" != 1 ] \
+     && [ -n "${T:-}" ] && [ -n "${BACKEND:-}" ]; then
+    fm_backend_kill "$BACKEND" "$T" 2>/dev/null || true
+  fi
   if [ "$CONFIG_INHERIT_LOCK_HELD" = 1 ]; then
     CONFIG_INHERIT_LOCK_HELD=0
     fm_lock_release "$CONFIG_INHERIT_LOCK" || true
@@ -1454,10 +1463,15 @@ if [ "$RELAUNCH" -eq 1 ]; then
     exit 1
   }
   RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET")
-  [ "$RELAUNCH_STATE" = dead ] || { [ -n "$RELAUNCH_PREPARE" ] && [ "$RELAUNCH_STATE" = alive ]; } || {
+  RELAUNCH_RECREATE=0
+  if [ "$RELAUNCH_STATE" = missing ]; then
+    RELAUNCH_RECREATE=1
+  elif [ "$RELAUNCH_STATE" = dead ] || { [ -n "$RELAUNCH_PREPARE" ] && [ "$RELAUNCH_STATE" = alive ]; }; then
+    :
+  else
     echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit)" >&2
     exit 1
-  }
+  fi
   RELAUNCH_PRIOR_HARNESS=$(fm_meta_get "$RELAUNCH_META" harness)
   KIND=$(fm_meta_get "$RELAUNCH_META" kind)
   [ -n "$KIND" ] || KIND=ship
@@ -1619,12 +1633,16 @@ spawn_pane_leader_pid() {
 }
 
 spawn_pane_launch_path() {
-  local pid attempt probe_command
-  if [ "$RELAUNCH_STATE" = dead ]; then
+  local pid attempt probe_command probe_target
+  if [ "$RELAUNCH_STATE" = dead ] || [ "$RELAUNCH_RECREATE" -eq 1 ]; then
     RELAUNCH_PATH_PROBE=$(mktemp "$STATE/.$ID.relaunch-path.XXXXXXXX") || return 1
     rm -f -- "$RELAUNCH_PATH_PROBE"
     probe_command="printf '%s\\n%s\\n' \"\$PATH\" \"\$HOME\" > $(shell_quote "$RELAUNCH_PATH_PROBE")"
-    "fm_backend_${BACKEND}_send_text_line" "$RELAUNCH_TARGET" "$probe_command" || return 1
+    # A missing endpoint was just recreated into $T; a dead pane still lives at
+    # the recorded target. Both are agent-free shells that can print PATH.
+    probe_target=$T
+    [ "$RELAUNCH_RECREATE" -eq 1 ] || probe_target=$RELAUNCH_TARGET
+    "fm_backend_${BACKEND}_send_text_line" "$probe_target" "$probe_command" || return 1
     for ((attempt = 0; attempt < 50; attempt++)); do
       if [ -f "$RELAUNCH_PATH_PROBE" ] \
         && { IFS= read -r SPAWN_LAUNCH_PATH && IFS= read -r SPAWN_LAUNCH_HOME; } < "$RELAUNCH_PATH_PROBE"; then
@@ -3206,16 +3224,56 @@ fi
 
 W="fm-$ID"
 if [ "$RELAUNCH" -eq 1 ]; then
+  # A secondmate's home already resolved WT above through the same validation a
+  # fresh secondmate spawn uses; every other kind takes the recorded worktree.
+  [ "$KIND" = secondmate ] || WT=$RELAUNCH_WT
+fi
+if [ "$RELAUNCH" -eq 1 ] && [ "$RELAUNCH_RECREATE" -eq 0 ]; then
   # Adopt the recorded endpoint instead of creating one. This is what keeps a
   # relaunch a REPLACEMENT rather than a second copy of the task: no new
   # terminal, no second worktree, and every uncommitted change left exactly
   # where the previous agent left it.
   T=$RELAUNCH_TARGET
-  # A secondmate's home already resolved WT above through the same validation a
-  # fresh secondmate spawn uses; every other kind takes the recorded worktree.
-  [ "$KIND" = secondmate ] || WT=$RELAUNCH_WT
   WT_TARGET=$T
   SES=${T%%:*}
+elif [ "$RELAUNCH" -eq 1 ] && [ "$RELAUNCH_RECREATE" -eq 1 ]; then
+  # The recorded pane is authoritatively gone. Recreate an endpoint in the
+  # recorded worktree rather than adopting a missing target, so closing a pane
+  # is not a one-way door.
+  case "$BACKEND" in
+    tmux)
+      SES=$(fm_backend_tmux_container_ensure)
+      T="$SES:$W"
+      WID=$(fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
+      WT_TARGET="$WID"
+      ;;
+    herdr)
+      HERDR_LABEL_HOME=$FM_HOME
+      HERDR_LAUNCHER_RELATIONSHIP="launcher-home"
+      if [ "$KIND" = secondmate ]; then
+        HERDR_LABEL_HOME=$PROJ_ABS
+        HERDR_LAUNCHER_RELATIONSHIP="other-home"
+      fi
+      HERDR_CONTAINER_RAW=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_container_ensure "$PROJ_ABS" "$HERDR_LAUNCHER_RELATIONSHIP") || exit 1
+      CONTAINER=${HERDR_CONTAINER_RAW%%$'\t'*}
+      HERDR_SEEDED_DEFAULT_TAB_ID=${HERDR_CONTAINER_RAW#*$'\t'}
+      HERDR_SES=${CONTAINER%%:*}
+      HERDR_WORKSPACE_ID=${CONTAINER#*:}
+      HERDR_TASK_IDS=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_create_task "$CONTAINER" "$W" "$WT" "$HERDR_SEEDED_DEFAULT_TAB_ID") || exit 1
+      read -r HERDR_TAB_ID HERDR_PANE_ID <<EOF
+$HERDR_TASK_IDS
+EOF
+      if [ -z "$HERDR_TAB_ID" ] || [ -z "$HERDR_PANE_ID" ]; then
+        echo "error: herdr did not return a tab/pane id for $W" >&2
+        exit 1
+      fi
+      T="$HERDR_SES:$HERDR_PANE_ID"
+      ;;
+    *)
+      echo "error: backend '$BACKEND' cannot recreate a missing endpoint; refusing relaunch" >&2
+      exit 1
+      ;;
+  esac
 else
 case "$BACKEND" in
   tmux)
@@ -3748,7 +3806,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     relaunch_require_slot_claim "before worktree entry or stop"
   fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
-  if [ "$RELAUNCH_STATE" = dead ]; then
+  if [ "$RELAUNCH_STATE" = dead ] || [ "$RELAUNCH_RECREATE" -eq 1 ]; then
     relaunch_return_to_worktree
   else
     relaunch_seen=$(spawn_current_path "$WT_TARGET" || true)

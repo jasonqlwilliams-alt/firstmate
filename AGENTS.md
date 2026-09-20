@@ -401,7 +401,7 @@ Tear down a ship task only after landing is confirmed.
 A teardown refusal for uncommitted or unlanded work is a stop-and-investigate result, never an obstacle to bypass.
 Never force teardown without explicit discard authority.
 When teardown refuses because two live records name one pool slot, do not edit the record.
-`bin/fm-teardown.sh <id> --retire-stale-record` owns retiring the record whose copy holds none of its work.
+`bin/fm-teardown.sh <id> --retire-stale-record` owns retiring the record whose copy holds none of its work, including when that record still names a slot another live worker occupies.
 Ordinary teardown still refuses to return the slot.
 When a pool slot's owner claim names a task with no live record, do not hand-edit the claim.
 `bin/fm-teardown.sh --release-orphaned-slot-claim <worktree>` owns dropping that orphaned claim.

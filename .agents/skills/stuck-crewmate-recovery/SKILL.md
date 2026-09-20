@@ -37,9 +37,10 @@ Do not sweep another home's endpoints or infer ownership from a matching window 
 
 Before relaunch, prove that no live agent still owns the recorded task and that the existing worktree remains available.
 Preserve its uncommitted changes and commits, keep the same task identity, and resume or relaunch the recorded harness in that existing worktree with the same brief plus a concise progress note.
+A recorded endpoint that is authoritatively missing is recreated by `bin/fm-control.sh <task-id> relaunch`; closing a pane is not a one-way door.
 Do not use a fresh generic spawn while the recorded worktree is unaccounted for, because allocating another worktree can split one task across two copies.
 If two live records name one pool slot, do not edit either record.
-`bin/fm-teardown.sh <stale-id> --retire-stale-record` owns retiring the record whose copy no longer has that task checked out.
+`bin/fm-teardown.sh <stale-id> --retire-stale-record` owns retiring the record whose copy no longer has that task checked out, including when that record still names a slot another live worker occupies: it transfers the claim to the occupant and never kills that worker.
 Ordinary teardown still refuses to return the slot.
 If a slot's owner claim names a task with no live record, do not hand-edit the claim.
 `bin/fm-teardown.sh --release-orphaned-slot-claim <worktree>` owns dropping that orphaned claim.
