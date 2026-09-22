@@ -2580,6 +2580,32 @@ if [ -n "$JSON_PATH" ]; then
   fi
 fi
 
+# The Herdr lab fleet-state tripwire reports a breach through a durable marker as
+# well as an exit status, precisely so a suite that discarded the status cannot
+# hide it. This is the later step that must check: any unacknowledged breach fails
+# the whole run, whatever the individual scripts reported.
+# bin/fm-herdr-lab-lib.sh owns the marker format and the acknowledge path, and is
+# sourced here rather than at the top because this runner is also copied standalone
+# into fixture repositories that carry no other bin/ file. A copy with no lab
+# library also has no bin/fm-herdr-lab.sh, so it can never have run a lab and has
+# no breach to miss.
+# The check reads the shared per-UID lab state directory, which is the one every
+# real-Herdr suite uses, so a simulated breach written by a fake-client unit suite
+# into its own FM_HERDR_LAB_STATE_DIR scratch root correctly does not fail the run.
+if [ -f "$ROOT/bin/fm-herdr-lab-lib.sh" ]; then
+  # shellcheck source=bin/fm-herdr-lab-lib.sh
+  . "$ROOT/bin/fm-herdr-lab-lib.sh"
+  if fm_herdr_lab_breach_list >/dev/null 2>&1; then
+    log "HERDR LAB TRIPWIRE BREACH recorded during this run; the live default Herdr session changed under a lab"
+    fm_herdr_lab_breach_list 2>/dev/null | while IFS= read -r marker; do
+      [ -n "$marker" ] || continue
+      log "  breach marker: $marker"
+    done
+    log "verify the live default session, then retire it with: bin/fm-herdr-lab.sh acknowledge <session>"
+    AGG_RC=1
+  fi
+fi
+
 if [ -n "$MAX_WALL_MS" ]; then
   printf 'FM_TEST_BUDGET max_wall_ms=%s duration_ms=%s\n' "$MAX_WALL_MS" "$RUN_DURATION"
   if [ "$RUN_DURATION" -gt "$MAX_WALL_MS" ]; then

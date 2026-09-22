@@ -1078,6 +1078,122 @@ test_workspace_ensure_other_home_ignores_the_launcher_identity() {
   pass "fm_backend_herdr_workspace_ensure: a --secondmate container resolves that home's own workspace, not the launcher's"
 }
 
+# --- lab-context session resolution ----------------------------------------
+#
+# The 2026-09-21 near miss: a lab script held its lab session in a plain shell
+# variable, never exported HERDR_SESSION, and fm_backend_herdr_session fell back
+# to the LIVE "default" session, creating a workspace in the captain's running
+# fleet. The fallback must stay for the supervisor and every ordinary spawn, so
+# these cases pin BOTH directions and prove each lab signal carries the verdict
+# on its own - a suite that lost one signal would otherwise go quietly vacuous.
+#
+# Every case runs the resolver in a real child process with a real lab-owner
+# record, and nothing here can reach a live Herdr session: no session-scoped call
+# is ever made.
+
+lab_session_resolve() {  # <state-dir> <extra-bash-prelude> -> prints the verdict
+  local state=$1 prelude=$2
+  # shellcheck disable=SC2016 # the quoted body expands inside the named shell
+  env -u HERDR_SESSION -u FM_HERDR_LAB_SHELL FM_HERDR_LAB_STATE_DIR="$state" \
+    bash -c "$prelude"'. "$0/bin/backends/herdr.sh"; fm_backend_herdr_session || printf REFUSED' \
+    "$ROOT" 2>/dev/null
+}
+
+test_session_keeps_the_ambient_default_outside_a_lab() {
+  local dir out
+  dir="$TMP_ROOT/lab-none"; mkdir -p "$dir/state"
+  out=$(lab_session_resolve "$dir/state" '')
+  [ "$out" = default ] || fail "an ordinary caller must still resolve the ambient default session, got '$out'"
+  # shellcheck disable=SC2016 # the quoted body expands inside the named shell
+  out=$(env HERDR_SESSION=fmtest FM_HERDR_LAB_STATE_DIR="$dir/state" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_session' "$ROOT")
+  [ "$out" = fmtest ] || fail "an explicit ambient session must be returned unchanged, got '$out'"
+  pass "fm_backend_herdr_session: the ambient default fallback the supervisor relies on is unchanged"
+}
+
+test_session_refuses_in_a_lab_shell_without_an_owner_record() {
+  local dir out
+  dir="$TMP_ROOT/lab-shell-only"; mkdir -p "$dir/state"
+  # Signal 1 alone: the lab helper is sourced, exactly as the incident script
+  # reached it through tests/herdr-test-safety.sh. No owner record exists.
+  # shellcheck disable=SC2016 # the prelude expands inside the resolver's own shell
+  out=$(lab_session_resolve "$dir/state" '. "$0/bin/fm-herdr-lab.sh"; ')
+  [ "$out" = REFUSED ] || fail "a shell with the lab helper sourced must not fall back to the live default session, got '$out'"
+  [ -z "$(ls -A "$dir/state" 2>/dev/null)" ] || fail "the lab-shell case unexpectedly depended on a lab record"
+  pass "fm_backend_herdr_session: a sourced lab helper alone refuses the live default fallback"
+}
+
+test_session_refuses_for_a_lab_owner_ancestor_without_a_lab_shell() {
+  local dir out
+  dir="$TMP_ROOT/lab-owner-only"; mkdir -p "$dir/state"
+  # Signal 2 alone: this process owns a lab, and the child never sources the lab
+  # helper - the scaffolded shape, which runs the helper as a subprocess.
+  FM_HERDR_LAB_STATE_DIR="$dir/state" fm_herdr_lab_owner_claim fm-lab-owner-case "$$" \
+    || fail "could not record the lab ownership fixture"
+  out=$(lab_session_resolve "$dir/state" '')
+  [ "$out" = REFUSED ] || fail "a child of a lab-owning shell must not fall back to the live default session, got '$out'"
+
+  # Releasing ownership restores the ordinary fallback, so the refusal is bound to
+  # the live lab and not to being a test.
+  FM_HERDR_LAB_STATE_DIR="$dir/state" fm_herdr_lab_owner_release fm-lab-owner-case
+  out=$(lab_session_resolve "$dir/state" '')
+  [ "$out" = default ] || fail "the fallback did not return once the lab was released, got '$out'"
+  pass "fm_backend_herdr_session: a live lab-owner ancestor alone refuses the live default fallback"
+}
+
+test_session_ignores_a_lab_owned_by_an_unrelated_process() {
+  local dir out
+  dir="$TMP_ROOT/lab-unrelated"; mkdir -p "$dir/state"
+  # A lab owned by a process that is NOT an ancestor is someone else's work. If
+  # this refused, every fleet operation on the host would break whenever a suite
+  # held a lab - the regression the ambient fallback exists to avoid.
+  sleep 30 &
+  local sibling=$!
+  FM_HERDR_LAB_STATE_DIR="$dir/state" fm_herdr_lab_owner_claim fm-lab-sibling "$sibling" \
+    || fail "could not record the unrelated-lab fixture"
+  out=$(lab_session_resolve "$dir/state" '')
+  kill "$sibling" 2>/dev/null || true
+  wait "$sibling" 2>/dev/null || true
+  [ "$out" = default ] || fail "a lab owned by an unrelated process must not change this caller's session, got '$out'"
+  FM_HERDR_LAB_STATE_DIR="$dir/state" fm_herdr_lab_owner_release fm-lab-sibling
+
+  # Pid reuse: an ancestor pid alone must not carry the refusal. This record names
+  # THIS shell, which the owner check does treat as an ancestor, but its recorded
+  # start time belongs to a different process generation.
+  FM_HERDR_LAB_STATE_DIR="$dir/state" fm_herdr_lab_owner_claim fm-lab-reused "$$" \
+    || fail "could not record the pid-reuse fixture"
+  local record="$dir/state/fm-lab-reused.owner"
+  sed 's/^start=.*/start=a different process generation/' "$record" > "$record.tmp" \
+    && mv "$record.tmp" "$record"
+  out=$(lab_session_resolve "$dir/state" '')
+  [ "$out" = default ] || fail "a lab record whose pid has been reused must not refuse, got '$out'"
+  FM_HERDR_LAB_STATE_DIR="$dir/state" fm_herdr_lab_owner_release fm-lab-reused
+  pass "fm_backend_herdr_session: a lab owned by an unrelated process or a reused pid leaves ordinary callers alone"
+}
+
+test_container_ensure_never_reaches_the_live_session_from_a_lab() {
+  local dir log resp fb status=0
+  dir="$TMP_ROOT/lab-container"; mkdir -p "$dir/responses" "$dir/state"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  printf '{"client":{"version":"0.7.1","protocol":14}}\n' > "$resp/1.out"
+  printf '{"server":{"running":true}}\n' > "$resp/2.out"
+  printf '{"result":{"workspaces":[]}}\n' > "$resp/3.out"
+  fb=$(make_herdr_fakebin "$dir")
+  FM_HERDR_LAB_STATE_DIR="$dir/state" fm_herdr_lab_owner_claim fm-lab-container-case "$$" \
+    || fail "could not record the container lab-ownership fixture"
+  # shellcheck disable=SC2016 # the quoted body expands inside the named shell
+  env -u HERDR_SESSION -u FM_HERDR_LAB_SHELL PATH="$fb:$PATH" FM_HERDR_LOG="$log" \
+    FM_HERDR_RESPONSES="$resp" FM_HERDR_SCRIPT_STATUS=1 FM_HERDR_LAB_STATE_DIR="$dir/state" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_container_ensure /tmp' "$ROOT" \
+    >/dev/null 2>&1 || status=$?
+  FM_HERDR_LAB_STATE_DIR="$dir/state" fm_herdr_lab_owner_release fm-lab-container-case
+  [ "$status" -ne 0 ] || fail "container_ensure succeeded from a lab with no session instead of refusing"
+  assert_no_grep '--session'$'\x1f''default' "$log" \
+    "container_ensure drove the live default session from a lab context"
+  assert_no_grep 'workspace'$'\x1f''create' "$log" \
+    "container_ensure created a workspace from a lab context with no session"
+  pass "fm_backend_herdr_container_ensure: refuses from a lab with no session instead of creating in the live fleet"
+}
+
 test_container_ensure_refuses_an_ambiguous_home_label() {
   local dir log resp fb out status
   dir="$TMP_ROOT/container-ambiguous"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
@@ -5308,6 +5424,11 @@ test_launcher_identity_refuses_a_workspace_missing_from_the_session
 test_workspace_ensure_prefers_the_launcher_over_the_first_label_match
 test_workspace_ensure_refuses_an_ambiguous_label_with_no_launcher
 test_workspace_ensure_other_home_ignores_the_launcher_identity
+test_session_keeps_the_ambient_default_outside_a_lab
+test_session_refuses_in_a_lab_shell_without_an_owner_record
+test_session_refuses_for_a_lab_owner_ancestor_without_a_lab_shell
+test_session_ignores_a_lab_owned_by_an_unrelated_process
+test_container_ensure_never_reaches_the_live_session_from_a_lab
 test_container_ensure_refuses_an_ambiguous_home_label
 test_container_ensure_starts_server_and_workspace
 test_server_ensure_scrubs_home_and_harness_identity

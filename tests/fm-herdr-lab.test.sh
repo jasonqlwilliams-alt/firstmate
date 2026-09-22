@@ -184,8 +184,108 @@ test_changed_default_trips_after_teardown() {
   expect_code 1 "$status" "changed default fleet state must fail teardown"
   assert_present "$TRIPWIRES/$name.fleet-state.json" "failed tripwire should retain evidence"
   printf '%s\n' '/home/test/.config/herdr/herdr.sock' > "$FAKE_STATE/default-socket"
-  rm -f "$TRIPWIRES/$name.fleet-state.json"
+  run_with_fake fm_herdr_lab_acknowledge "$name" >/dev/null \
+    || fail "the tripwire failure did not leave an acknowledgeable breach marker"
+  rm -f "$TRIPWIRES/$name.fleet-state.json" "$TRIPWIRES/$name.owner"
   pass "fm-herdr-lab: changed default fleet state is a hard failure"
+}
+
+# The 2026-09-21 near miss reached nobody because the breaching script wrapped its
+# teardown in `>/dev/null 2>&1 || true`. An exit status is the one signal a caller
+# can throw away, so the breach must also be durable.
+test_suppressed_tripwire_breach_stays_durable() {
+  local name="fm-lab-tripwire-suppressed-$$" later="fm-lab-after-breach-$$" status=0 out
+  : > "$FAKE_LOG"
+  run_with_fake fm_herdr_lab_provision "$name" || fail "suppressed-breach fixture provision failed"
+  printf '%s\n' '/changed/default.sock' > "$FAKE_STATE/default-socket"
+
+  # Verbatim incident suppression: stderr discarded, exit status discarded.
+  status=0
+  run_with_fake fm_herdr_lab_teardown "$name" >/dev/null 2>&1 || true
+  expect_code 0 "$status" "the suppression fixture must observe a clean status, as the incident did"
+  assert_present "$TRIPWIRES/$name.tripwire-breach" \
+    "a suppressed tripwire failure left no durable breach marker"
+
+  # A later step now cannot miss it: every lab operation refuses, including one
+  # for an unrelated session, and including the name command a suite would start
+  # its next lab with.
+  printf '%s\n' '/home/test/.config/herdr/herdr.sock' > "$FAKE_STATE/default-socket"
+  status=0
+  out=$(run_with_fake fm_herdr_lab_provision "$later" 2>&1) || status=$?
+  expect_code 1 "$status" "an unacknowledged breach must refuse a later provision"
+  assert_contains "$out" "unacknowledged fleet-state tripwire breach" \
+    "the refusal did not name the unacknowledged breach"
+  assert_absent "$TRIPWIRES/$later.fleet-state.json" \
+    "the refused provision still recorded a tripwire for a new lab"
+  status=0
+  run_with_fake fm_herdr_lab_name after-breach >/dev/null 2>&1 || status=$?
+  expect_code 1 "$status" "an unacknowledged breach must refuse a new lab name"
+
+  # The reporting command a later step wires in exits non-zero and prints the marker.
+  status=0
+  out=$(run_with_fake fm_herdr_lab_breaches 2>&1) || status=$?
+  expect_code 1 "$status" "breaches must exit non-zero while a breach is open"
+  assert_contains "$out" "$name" "breaches did not name the breached session"
+
+  # Acknowledging is explicit, per session, and restores normal operation.
+  status=0
+  run_with_fake fm_herdr_lab_acknowledge "$later" >/dev/null 2>&1 || status=$?
+  expect_code 1 "$status" "acknowledge must refuse a session with no recorded breach"
+  run_with_fake fm_herdr_lab_acknowledge "$name" >/dev/null \
+    || fail "acknowledge did not retire the recorded breach"
+  assert_absent "$TRIPWIRES/$name.tripwire-breach" "acknowledge left the breach marker behind"
+  run_with_fake fm_herdr_lab_breaches >/dev/null \
+    || fail "breaches still reported a breach after it was acknowledged"
+
+  rm -f "$TRIPWIRES/$name.fleet-state.json" "$TRIPWIRES/$name.owner"
+  pass "fm-herdr-lab: a suppressed tripwire breach survives as a durable marker that blocks later lab work"
+}
+
+# The lab-owner record is what lets bin/backends/herdr.sh recognize a lab caller,
+# so its lifecycle is part of this helper's contract.
+# End to end across the two files the near miss spanned: a lab provisioned by the
+# EXECUTED helper - the scaffolded shape, so the caller never carries the
+# sourced-shell signal - must be recognized by bin/backends/herdr.sh, which then
+# refuses to resolve an unset HERDR_SESSION to the live default session.
+test_provisioned_lab_is_recognized_by_the_backend() {
+  local name="fm-lab-backend-context-$$" out
+  : > "$FAKE_LOG"
+  run_with_fake "$ROOT/bin/fm-herdr-lab.sh" provision "$name" >/dev/null \
+    || fail "backend-context fixture provision failed"
+
+  # The resolver runs in a child that sources only the adapter. Its ancestors
+  # include this shell, which is the recorded lab owner.
+  # shellcheck disable=SC2016 # the quoted body expands inside the named shell
+  out=$(env -u HERDR_SESSION -u FM_HERDR_LAB_SHELL FM_HERDR_LAB_STATE_DIR="$TRIPWIRES" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_session || printf REFUSED' \
+    "$ROOT" 2>/dev/null)
+  [ "$out" = REFUSED ] \
+    || fail "a lab provisioned through the helper did not stop the adapter falling back to the live default session, got '$out'"
+
+  run_with_fake "$ROOT/bin/fm-herdr-lab.sh" teardown "$name" >/dev/null \
+    || fail "backend-context fixture teardown failed"
+  # shellcheck disable=SC2016 # the quoted body expands inside the named shell
+  out=$(env -u HERDR_SESSION -u FM_HERDR_LAB_SHELL FM_HERDR_LAB_STATE_DIR="$TRIPWIRES" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_session || printf REFUSED' \
+    "$ROOT" 2>/dev/null)
+  [ "$out" = default ] \
+    || fail "the ambient default fallback did not return after the lab was torn down, got '$out'"
+  pass "fm-herdr-lab: a provisioned lab makes the herdr adapter refuse the live default session"
+}
+
+test_lab_ownership_record_tracks_the_lab() {
+  local name="fm-lab-ownership-$$" record
+  : > "$FAKE_LOG"
+  run_with_fake fm_herdr_lab_provision "$name" || fail "ownership fixture provision failed"
+  record="$TRIPWIRES/$name.owner"
+  assert_present "$record" "provision did not record lab ownership"
+  [ "$(sed -n 's/^pid=//p' "$record" | head -n 1)" = "$$" ] \
+    || fail "a sourced helper must record the sourcing shell as the lab owner"
+  [ -n "$(sed -n 's/^start=//p' "$record" | head -n 1)" ] \
+    || fail "the ownership record has no start-time binding, so a reused pid would match"
+  run_with_fake fm_herdr_lab_teardown "$name" || fail "ownership fixture teardown failed"
+  assert_absent "$record" "a verified teardown left the lab ownership record behind"
+  pass "fm-herdr-lab: lab ownership is recorded for the asking shell and released by a verified teardown"
 }
 
 test_stopped_owned_lab_can_reprovision() {
@@ -502,6 +602,9 @@ test_refuses_unsafe_names
 test_provision_run_and_guarded_teardown
 test_missing_tripwire_blocks_destruction
 test_changed_default_trips_after_teardown
+test_suppressed_tripwire_breach_stays_durable
+test_lab_ownership_record_tracks_the_lab
+test_provisioned_lab_is_recognized_by_the_backend
 test_stopped_owned_lab_can_reprovision
 test_failed_delete_retains_tripwire
 test_timed_out_provision_cancels_late_launch
