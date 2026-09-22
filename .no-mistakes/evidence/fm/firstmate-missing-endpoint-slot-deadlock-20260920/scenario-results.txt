@@ -1,0 +1,32 @@
+
+===== RUNNING ALL SCENARIOS =====
+
+--- S1: spawn --relaunch recreates missing endpoint ---
+ok - PASS S1: spawn --relaunch recreates missing endpoint
+--- S2: control relaunch recreates missing endpoint ---
+ok - PASS S2: control relaunch recreates missing endpoint
+--- S3: exit on missing endpoint is already-stopped ---
+ok - PASS S3: exit on missing endpoint is already-stopped
+--- S4: --retire-stale-record transfers claim ---
+S4: rc=0
+S4: stdout:
+teardown dead-task complete (window firstmate:fm-dead-task; pool slot /tmp/fm-scenarios.KE7O3k/s4-28904/worktree left to task live-task (home /tmp/fm-scenarios.KE7O3k/s4-28904/home), which it was reassigned to)
+Backlog: dead-task just finished (this home keeps no markdown backlog at /tmp/fm-scenarios.KE7O3k/s4-28904/home/data/backlog.md). Update /tmp/fm-scenarios.KE7O3k/s4-28904/home/data/backlog.md - move dead-task to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+S4: stderr:
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  2 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair a missing or failed watcher cycle with the Pi tool fm_watch_arm_pi, or restart Pi with -e /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M34Y8GKFAM1D05FGMFWTYP2T/.pi/extensions/fm-primary-turnend-guard.ts -e /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M34Y8GKFAM1D05FGMFWTYP2T/.pi/extensions/fm-primary-pi-watch.ts if the extensions are not loaded.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+warning: task dead-task still named the slot claim on /tmp/fm-scenarios.KE7O3k/s4-28904/pool/1/project but that copy is occupied by task live-task and does not have fm/dead-task checked out; the claim was transferred and only dead-task's own cleanup runs.
+warning: lsof is unavailable; cannot resolve the tmux pane process group for dead-task
+S4: claim file:
+task=live-task
+home=/tmp/fm-scenarios.KE7O3k/s4-28904/home
+ok - PASS S4: claim transferred
+--- S5: alive claimer retire refuses ---
+ok - PASS S5: alive claimer retire refused
+
+===== ALL SCENARIOS PASSED =====

@@ -1,0 +1,32 @@
+=== Pre-claim ===
+task=stranded-scout
+home=/tmp/fm-cross.XZDeyS/cross/home
+=== Run --retire-stale-record (cross-home) ===
+=== rc=0 ===
+=== stdout ===
+teardown stranded-scout complete (window firstmate:fm-stranded-scout; pool slot /tmp/fm-cross.XZDeyS/cross/worktree left to task live-occupant (home /tmp/fm-cross.XZDeyS/cross/secondmate-home), which it was reassigned to)
+Backlog: stranded-scout just finished (this home keeps no markdown backlog at /tmp/fm-cross.XZDeyS/cross/home/data/backlog.md). Update /tmp/fm-cross.XZDeyS/cross/home/data/backlog.md - move stranded-scout to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+=== stderr ===
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair a missing or failed watcher cycle with the Pi tool fm_watch_arm_pi, or restart Pi with -e /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M34Y8GKFAM1D05FGMFWTYP2T/.pi/extensions/fm-primary-turnend-guard.ts -e /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M34Y8GKFAM1D05FGMFWTYP2T/.pi/extensions/fm-primary-pi-watch.ts if the extensions are not loaded.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+warning: task stranded-scout still named the slot claim on /tmp/fm-cross.XZDeyS/cross/pool/1/project but that copy is occupied by task live-occupant and does not have fm/stranded-scout checked out; the claim was transferred and only stranded-scout's own cleanup runs.
+warning: lsof is unavailable; cannot resolve the tmux pane process group for stranded-scout
+=== Post-claim ===
+task=live-occupant
+home=/tmp/fm-cross.XZDeyS/cross/secondmate-home
+=== Worker alive? ===
+yes
+=== Dead meta exists? ===
+no
+=== Occupant meta (second home) exists? ===
+yes
+=== Runtime log ===
+tmux <list-windows> <-t> <firstmate> <-F> <#{window_name}>
+tmux <display-message> <-p> <-t> <firstmate:fm-stranded-scout> <#{pane_pid}>
+tmux <kill-window> <-t> <=firstmate:=fm-stranded-scout>
+=== CROSS-HOME CLAIM TRANSFER PASSED ===
