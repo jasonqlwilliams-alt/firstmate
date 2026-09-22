@@ -1,0 +1,15 @@
+ok - delivery guard: git refuses absolute, relative, symlink and hardlink self-reference before recursion
+ok - delivery guard: gh refuses absolute, relative, symlink and hardlink self-reference before recursion
+ok - delivery guard: gh-axi refuses absolute, relative, symlink and hardlink self-reference before recursion
+ok - delivery guard: third-party origin is refused and configured fork push succeeds
+ok - delivery guard: authenticated-account mismatch fails closed before transmission
+ok - delivery guard: Git URL rewriting cannot hide an unsafe effective push target
+ok - delivery guard: no-mistakes must use the captain fork for both push and PR
+ok - delivery guard: gh-axi PR writes are refused or allowed by the same durable target
+ok - delivery guard: check-pr-body refuses routing markers, corr tokens, and local paths independently and combined
+ok - delivery guard: gh and gh-axi shims block PR body leaks before forge transmission and preserve clean stdin
+ok - delivery guard: pipeline run intent leak is refused with all three patterns and clean narrative publishes
+ok - delivery guard: an unarmed repository keeps its pre-guard push behavior
+ok - delivery guard: an explicit arm request without a policy file refuses
+ok - delivery guard: the ship contract only names the guard in a home that configures a policy
+ok - delivery guard: worker Git cannot bypass target checks with --no-verify or send-pack
