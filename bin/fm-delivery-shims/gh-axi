@@ -24,4 +24,8 @@ export FM_GITHUB_GUARD_TOOL FM_DELIVERY_GUARD_ROOT
 # shellcheck source=bin/fm-github-write-guard-lib.sh
 . "$ROOT/bin/fm-github-write-guard-lib.sh"
 fm_github_guard_check "$@" || exit $?
+if [ -n "${FM_SAVED_STDIN_FILE:-}" ] && [ -f "$FM_SAVED_STDIN_FILE" ]; then
+  exec 0< "$FM_SAVED_STDIN_FILE"
+  rm -f "$FM_SAVED_STDIN_FILE"
+fi
 exec "$REAL" "$@"

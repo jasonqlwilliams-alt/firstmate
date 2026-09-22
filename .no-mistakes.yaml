@@ -38,3 +38,9 @@ commands:
 test:
   evidence:
     store_in_repo: true
+
+# Control publication of the generated Intent section on pull requests.
+# Private routing markers, correlation tokens, and local paths in the intent must
+# not reach published PR descriptions.
+pr:
+  publish_intent: false

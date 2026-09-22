@@ -8,6 +8,7 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 GUARD="$ROOT/bin/fm-delivery-guard.sh"
+GH_SHIM="$ROOT/bin/fm-delivery-shims/gh"
 GH_AXI_SHIM="$ROOT/bin/fm-delivery-shims/gh-axi"
 GIT_SHIM="$ROOT/bin/fm-delivery-shims/git"
 TMP_ROOT=$(fm_test_tmproot fm-delivery-guard)
@@ -43,6 +44,23 @@ if [ "${1:-}" = api ]; then
   exit 0
 fi
 printf '%s\n' "$*" >> "${GH_AXI_LOG:?}"
+if [ -n "${CAPTURE_STDIN:-}" ]; then
+  cat >> "${GH_AXI_LOG:?}"
+fi
+printf 'https://github.com/captain/widgets/pull/1\n'
+SH
+cat > "$fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = api ]; then
+  [ "${GH_HOST:-}" = github.com ] || exit 3
+  case " $* " in *" --hostname "*) exit 4 ;; esac
+  printf 'api_response:\n  body: %s\n  truncated: false\n' "${FAKE_GH_ACCOUNT:-captain}"
+  exit 0
+fi
+printf '%s\n' "$*" >> "${GH_LOG:-$GH_AXI_LOG}"
+if [ -n "${CAPTURE_STDIN:-}" ]; then
+  cat >> "${GH_LOG:-$GH_AXI_LOG}"
+fi
 printf 'https://github.com/captain/widgets/pull/1\n'
 SH
   cat > "$fakebin/no-mistakes" <<'SH'
@@ -64,7 +82,7 @@ case "$*" in
 esac
 exit 2
 SH
-  chmod +x "$fakebin/gh-axi" "$fakebin/no-mistakes" "$fakebin/ssh"
+  chmod +x "$fakebin/gh-axi" "$fakebin/gh" "$fakebin/no-mistakes" "$fakebin/ssh"
 }
 
 make_repo() {  # <name>; echoes repo|home|fakebin|upstream-bare|fork-bare|gate-bare
@@ -388,6 +406,220 @@ SH
   done
 }
 
+test_check_pr_body_patterns() {
+  local dir file out rc
+  dir="$TMP_ROOT/pr-body-patterns"
+  file="$dir/body.txt"
+  mkdir -p "$dir"
+
+  # Clean body passes
+  printf '## What Changed\n- A safe change.\n' > "$file"
+  out=$("$GUARD" check-pr-body "$file" 2>&1)
+  rc=$?
+  expect_code 0 "$rc" "clean PR body should pass"
+
+  # Clean body via stdin
+  out=$(printf '## What Changed\n- A safe change.\n' | "$GUARD" check-pr-body - 2>&1)
+  rc=$?
+  expect_code 0 "$rc" "clean PR body via stdin should pass"
+
+  # Routing marker alone is refused
+  printf 'prefix [fm-from-firstmate] suffix\n' > "$file"
+  out=$("$GUARD" check-pr-body "$file" 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "routing marker should be refused"
+  assert_contains "$out" "routing marker [fm-from-firstmate]" \
+    "refusal must name the routing marker"
+
+  # Correlation token alone is refused
+  printf 'details: corr=0123456789abcdef\n' > "$file"
+  out=$("$GUARD" check-pr-body "$file" 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "correlation token should be refused"
+  assert_contains "$out" "correlation token (corr=...)" \
+    "refusal must name the correlation token"
+
+  # Local absolute path alone is refused (/home/...)
+  printf 'observed in /home/jason/work/project\n' > "$file"
+  out=$("$GUARD" check-pr-body "$file" 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "local absolute path (/home/...) should be refused"
+  assert_contains "$out" "local absolute path" \
+    "refusal must name the local absolute path"
+
+  # Local path (.treehouse) alone is refused
+  printf 'worktree at .treehouse/slot-1\n' > "$file"
+  out=$("$GUARD" check-pr-body "$file" 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "local path (.treehouse) should be refused"
+  assert_contains "$out" "local absolute path" \
+    "refusal must name the local path"
+
+  # All three leaks in one body are refused and reported together
+  printf '## Intent\n\n[fm-from-firstmate]\u2063corr=b8693aa1398acdff work in /home/jason/.treehouse/11/firstmate\n\n## What Changed\n' > "$file"
+  out=$("$GUARD" check-pr-body "$file" 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "body with all three leaks should be refused"
+  assert_contains "$out" "routing marker [fm-from-firstmate]" \
+    "composite refusal must name routing marker"
+  assert_contains "$out" "correlation token (corr=...)" \
+    "composite refusal must name correlation token"
+  assert_contains "$out" "local absolute path" \
+    "composite refusal must name local absolute path"
+
+  # All three leaks via stdin
+  out=$(printf '## Intent\n\n[fm-from-firstmate] corr=b8693aa1398acdff /home/jason\n' | "$GUARD" check-pr-body - 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "stdin with all three leaks should be refused"
+  assert_contains "$out" "routing marker [fm-from-firstmate]" \
+    "stdin refusal must name routing marker"
+  assert_contains "$out" "correlation token (corr=...)" \
+    "stdin refusal must name correlation token"
+  assert_contains "$out" "local absolute path" \
+    "stdin refusal must name local absolute path"
+
+  pass "delivery guard: check-pr-body refuses routing markers, corr tokens, and local paths independently and combined"
+}
+
+test_shims_refuse_pr_body_leaks() {
+  local rec repo home fakebin upstream fork gate out rc log_axi log_gh
+  rec=$(make_repo pr-body-shims)
+  IFS='|' read -r repo home fakebin upstream fork gate <<EOF
+$rec
+EOF
+  log_axi="$home/gh-axi.log"
+  log_gh="$home/gh.log"
+  : > "$log_axi"
+  : > "$log_gh"
+  FM_HOME="$home" GH_AXI_LOG="$log_axi" PATH="$fakebin:$PATH" "$GUARD" arm widgets "$repo" >/dev/null
+
+  # gh-axi pr create: safe body passes to real executable
+  out=$(cd "$repo" && FM_HOME="$home" GH_REPO=captain/widgets GH_AXI_LOG="$log_axi" \
+    FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
+    "$GH_AXI_SHIM" pr create --title safe --body "Safe description" 2>&1)
+  rc=$?
+  expect_code 0 "$rc" "gh-axi pr create with safe body should succeed"
+  assert_grep 'pr create --title safe --body Safe description' "$log_axi" \
+    "safe gh-axi PR did not reach the real executable"
+
+  # gh-axi pr create: leaked body with all three is refused and blocked before real executable
+  : > "$log_axi"
+  out=$(cd "$repo" && FM_HOME="$home" GH_REPO=captain/widgets GH_AXI_LOG="$log_axi" \
+    FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
+    "$GH_AXI_SHIM" pr create --title safe \
+    --body "[fm-from-firstmate] corr=b8693aa1398acdff in /home/jason/.treehouse/11" 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "gh-axi pr create with all three leaks should be refused"
+  assert_contains "$out" "routing marker [fm-from-firstmate]" \
+    "gh-axi refusal did not name the routing marker"
+  assert_contains "$out" "correlation token (corr=...)" \
+    "gh-axi refusal did not name the correlation token"
+  assert_contains "$out" "local absolute path" \
+    "gh-axi refusal did not name the local path"
+  [ ! -s "$log_axi" ] || fail "refused gh-axi PR command still reached the real executable"
+
+  # gh-axi pr edit: leaked body is refused
+  : > "$log_axi"
+  out=$(cd "$repo" && FM_HOME="$home" GH_REPO=captain/widgets GH_AXI_LOG="$log_axi" \
+    FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
+    "$GH_AXI_SHIM" pr edit 1 --body "leak with corr=fedcba9876543210" 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "gh-axi pr edit with leaked body should be refused"
+  assert_contains "$out" "correlation token (corr=...)" \
+    "gh-axi edit refusal did not name the correlation token"
+  [ ! -s "$log_axi" ] || fail "refused gh-axi pr edit still reached the real executable"
+
+  # gh pr create: safe body via -F - (stdin) passes through with stdin preserved
+  : > "$log_gh"
+  out=$(printf 'Clean stdin body\n' | (cd "$repo" && FM_HOME="$home" GH_REPO=captain/widgets GH_LOG="$log_gh" \
+    CAPTURE_STDIN=1 FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH="$fakebin/gh" PATH="$fakebin:$PATH" \
+    "$GH_SHIM" pr create --title safe -F - 2>&1))
+  rc=$?
+  expect_code 0 "$rc" "gh pr create with safe stdin body should succeed"
+  assert_grep 'pr create --title safe -F -' "$log_gh" \
+    "safe gh PR did not reach the real executable"
+  assert_grep 'Clean stdin body' "$log_gh" \
+    "real gh did not receive the buffered stdin body"
+
+  # gh pr create: leaked body via -F - (stdin) is refused and blocked
+  : > "$log_gh"
+  out=$(printf '[fm-from-firstmate] corr=0123456789abcdef /home/jason\n' | (cd "$repo" && FM_HOME="$home" \
+    GH_REPO=captain/widgets GH_LOG="$log_gh" CAPTURE_STDIN=1 \
+    FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH="$fakebin/gh" PATH="$fakebin:$PATH" \
+    "$GH_SHIM" pr create --title safe -F - 2>&1))
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "gh pr create with leaked stdin body should be refused"
+  assert_contains "$out" "routing marker [fm-from-firstmate]" \
+    "gh stdin refusal did not name routing marker"
+  assert_contains "$out" "correlation token (corr=...)" \
+    "gh stdin refusal did not name correlation token"
+  assert_contains "$out" "local absolute path" \
+    "gh stdin refusal did not name local path"
+  [ ! -s "$log_gh" ] || fail "refused gh PR command still reached the real executable"
+
+  # gh api: leaked body field is refused
+  : > "$log_gh"
+  out=$(cd "$repo" && FM_HOME="$home" GH_LOG="$log_gh" \
+    FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH="$fakebin/gh" PATH="$fakebin:$PATH" \
+    "$GH_SHIM" api /repos/captain/widgets/pulls -f title=safe -f body="leak in /home/jason" 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "gh api with leaked body should be refused"
+  assert_contains "$out" "local absolute path" \
+    "gh api refusal did not name local path"
+  [ ! -s "$log_gh" ] || fail "refused gh api command still reached the real executable"
+
+  pass "delivery guard: gh and gh-axi shims block PR body leaks before forge transmission and preserve clean stdin"
+}
+
+test_pipeline_run_intent_leak_refused_and_suppressed() {
+  local rec repo home fakebin upstream fork gate out rc log_gh intent clean_narrative leaked_body
+  rec=$(make_repo pr-pipeline-intent)
+  IFS='|' read -r repo home fakebin upstream fork gate <<EOF
+$rec
+EOF
+  log_gh="$home/gh.log"
+  : > "$log_gh"
+  FM_HOME="$home" GH_LOG="$log_gh" PATH="$fakebin:$PATH" "$GUARD" arm widgets "$repo" >/dev/null
+
+  # Intent containing all three leak patterns:
+  # 1. routing marker: [fm-from-firstmate]
+  # 2. correlation token: corr=b8693aa1398acdff
+  # 3. local absolute path: /home/jason/.treehouse/11/firstmate
+  intent="[fm-from-firstmate]\xE2\x81\xA3corr=b8693aa1398acdff task brief in /home/jason/.treehouse/11/firstmate"
+  clean_narrative=$'## What Changed\n- Autonomous bug fix without leaks.'
+
+  # 1. When the pipeline prefixes the private intent into the PR body,
+  # the delivery guard refuses the publish and blocks forge transmission.
+  leaked_body=$(printf '## Intent\n\n%b\n\n%s\n' "$intent" "$clean_narrative")
+  out=$(printf '%s' "$leaked_body" | (cd "$repo" && FM_HOME="$home" GH_REPO=captain/widgets GH_LOG="$log_gh" \
+    CAPTURE_STDIN=1 FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH="$fakebin/gh" PATH="$fakebin:$PATH" \
+    "$GH_SHIM" pr create --title "feat: widgets fix" -F - 2>&1))
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "PR publish with leaked intent body must be refused"
+  assert_contains "$out" "routing marker [fm-from-firstmate]" \
+    "refusal must name the routing marker leak"
+  assert_contains "$out" "correlation token (corr=...)" \
+    "refusal must name the correlation token leak"
+  assert_contains "$out" "local absolute path" \
+    "refusal must name the local path leak"
+  [ ! -s "$log_gh" ] || fail "refused PR publish still reached the forge"
+
+  # 2. When the intent is omitted (publish_intent: false), only the clean
+  # public narrative is published, which passes the guard and reaches the forge.
+  : > "$log_gh"
+  out=$(printf '%s' "$clean_narrative" | (cd "$repo" && FM_HOME="$home" GH_REPO=captain/widgets GH_LOG="$log_gh" \
+    CAPTURE_STDIN=1 FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH="$fakebin/gh" PATH="$fakebin:$PATH" \
+    "$GH_SHIM" pr create --title "feat: widgets fix" -F - 2>&1))
+  rc=$?
+  expect_code 0 "$rc" "PR publish with clean narrative (intent omitted) must succeed"
+  assert_grep 'pr create --title feat: widgets fix -F -' "$log_gh" \
+    "clean PR publish did not reach the forge"
+  assert_grep 'Autonomous bug fix without leaks' "$log_gh" \
+    "clean PR body content did not reach the forge"
+
+  pass "delivery guard: pipeline run intent leak is refused with all three patterns and clean narrative publishes"
+}
+
 test_shims_refuse_self_reference
 
 test_upstream_push_refuses_and_fork_push_succeeds
@@ -395,6 +627,9 @@ test_authenticated_account_mismatch_refuses
 test_effective_push_url_rewrite_refuses
 test_no_mistakes_checks_branch_and_pr_targets
 test_gh_axi_pr_write_shim_refuses_and_allows
+test_check_pr_body_patterns
+test_shims_refuse_pr_body_leaks
+test_pipeline_run_intent_leak_refused_and_suppressed
 test_unarmed_repository_pushes_anywhere
 test_arm_refuses_without_a_policy_file
 test_direct_pr_contract_is_unchanged_without_a_policy

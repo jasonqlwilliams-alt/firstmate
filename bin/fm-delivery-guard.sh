@@ -8,6 +8,7 @@
 #   fm-delivery-guard.sh arm-all
 #   fm-delivery-guard.sh check-push <repository-path> <remote-name> <effective-url>
 #   fm-delivery-guard.sh check-pr <repository-path> <target-url-or-host/owner/repo>
+#   fm-delivery-guard.sh check-pr-body [<repository-path>] <body-file>
 #   fm-delivery-guard.sh pr-target <repository-path>
 #
 # arm stores only the project key and Firstmate code/home locations in local Git
@@ -206,6 +207,45 @@ cmd_check_pr() {  # <repo> <target>
   authorize_exact_target pull-request "$target" "$FM_REPOSITORY_POLICY_FORK_ID"
 }
 
+cmd_check_pr_body() {  # [<repo>] <body-file>
+  local body_file tmp=""
+  case "$#" in
+    1) body_file=$1 ;;
+    2) body_file=$2 ;;
+    *) usage ;;
+  esac
+
+  if [ "$body_file" = "-" ]; then
+    tmp=$(mktemp "${TMPDIR:-/tmp}/fm-check-pr-body.XXXXXX") || die "cannot create temporary file for PR body check"
+    cat > "$tmp"
+    body_file=$tmp
+  elif [ ! -f "$body_file" ]; then
+    return 0
+  fi
+
+  local reasons=()
+  if grep -F -q '[fm-from-firstmate]' "$body_file"; then
+    reasons+=("routing marker [fm-from-firstmate]")
+  fi
+  if grep -E -q 'corr=[A-Fa-f0-9]{16}|corr=' "$body_file"; then
+    reasons+=("correlation token (corr=...)")
+  fi
+  if grep -E -q '(/home/|/Users/|\.treehouse)' "$body_file"; then
+    reasons+=("local absolute path")
+  fi
+
+  if [ -n "$tmp" ]; then
+    rm -f "$tmp"
+  fi
+
+  if [ "${#reasons[@]}" -gt 0 ]; then
+    local detail
+    printf -v detail '%s, ' "${reasons[@]}"
+    detail=${detail%, }
+    die "pull-request body contains private fleet internals or local paths ($detail)"
+  fi
+}
+
 cmd_pr_target() {  # <repo>
   local repo=$1 project
   project=$(repository_project "$repo") || project=
@@ -241,6 +281,10 @@ case "${1:-}" in
   check-pr)
     [ "$#" -eq 3 ] || usage
     cmd_check_pr "$2" "$3"
+    ;;
+  check-pr-body)
+    shift
+    cmd_check_pr_body "$@"
     ;;
   pr-target)
     [ "$#" -eq 2 ] || usage
