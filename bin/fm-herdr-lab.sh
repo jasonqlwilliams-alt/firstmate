@@ -61,6 +61,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   FM_HERDR_LAB_OWNER_PID=$PPID
 else
   FM_HERDR_LAB_OWNER_PID=$$
+  # shellcheck disable=SC2034 # consumed by fm_backend_herdr_lab_context in bin/backends/herdr.sh
   FM_HERDR_LAB_SHELL=1
 fi
 
