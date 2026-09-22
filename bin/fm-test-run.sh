@@ -2495,6 +2495,7 @@ else
     (
       trap - EXIT HUP INT TERM
       set +e
+      # shellcheck disable=SC2030 # intentional: each worker subshell gets its own TMPDIR
       export TMPDIR="$work/tmp"
       export TMP="$work/tmp"
       unset FM_HOME FM_STATE_OVERRIDE FM_DATA_OVERRIDE FM_ROOT_OVERRIDE \
