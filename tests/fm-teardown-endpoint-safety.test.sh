@@ -579,16 +579,66 @@ test_retire_stale_record_drops_the_unheld_copy_without_touching_the_slot() {
     "window=firstmate:fm-$other" "endpoint_task_id=$other" \
     "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
   claim_pool_slot "$dir" "$id" "$dir/home"
+  ( cd "$dir/worktree" && exec sleep 30 ) &
+  worker=$!
+
   set +e
   run_teardown "$dir" "$id" --force --retire-stale-record \
     > "$dir/stdout" 2> "$dir/stderr"
   rc=$?
   set -e
-  [ "$rc" -ne 0 ] || fail "--retire-stale-record retired the record that still owns the slot claim"
-  assert_present "$dir/home/state/$id.meta" "owner-claim retire removed the claiming record"
-  assert_present "$dir/worktree/sentinel" "owner-claim retire reset the slot"
+  [ "$rc" -eq 0 ] || fail "retiring a claiming dead record whose slot is occupied failed: $(cat "$dir/stderr")"
+  kill -0 "$worker" 2>/dev/null || fail "claiming-record retire killed the worker in the shared slot"
+  assert_absent "$dir/home/state/$id.meta" "claiming-record retire left the dead task's record"
+  assert_present "$dir/home/state/$other.meta" "claiming-record retire removed the occupying record"
+  assert_present "$dir/worktree/sentinel" "claiming-record retire reset the shared slot"
+  assert_present "$dir/pool/1/.fm-slot-owner" "claiming-record retire dropped the slot claim"
+  assert_contains "$(cat "$dir/pool/1/.fm-slot-owner")" "task=$other" \
+    "claiming-record retire did not transfer the slot claim to the occupant"
+  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "claiming-record retire returned the shared slot: $(cat "$dir/runtime.log")"
+  kill "$worker" 2>/dev/null || true
+  wait "$worker" 2>/dev/null || true
+
+  dir=$(make_case slot-retire-stale-owner-claim-alive)
+  mark_case_as_treehouse_pool "$dir"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  fm_write_meta "$dir/home/state/$other.meta" \
+    "window=firstmate:fm-$other" "endpoint_task_id=$other" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  claim_pool_slot "$dir" "$id" "$dir/home"
+  cat > "$dir/fakebin/tmux" <<SH
+#!/usr/bin/env bash
+printf 'tmux' >> "\${FM_RUNTIME_LOG:?}"
+printf ' <%s>' "\$@" >> "\${FM_RUNTIME_LOG:?}"
+printf '\\n' >> "\${FM_RUNTIME_LOG:?}"
+case "\${1:-}" in
+  list-windows) printf 'fm-$id\\n'; exit 0 ;;
+  display-message)
+    for a in "\$@"; do
+      case "\$a" in
+        *pane_current_command*) printf 'claude\\n'; exit 0 ;;
+      esac
+    done
+    printf 'fakepane\\n'; exit 0 ;;
+esac
+exit 0
+SH
+  chmod +x "$dir/fakebin/tmux"
+  set +e
+  run_teardown "$dir" "$id" --force --retire-stale-record \
+    > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "--retire-stale-record retired a claiming record whose agent is still alive"
+  assert_present "$dir/home/state/$id.meta" "alive-claimer retire removed the claiming record"
+  assert_present "$dir/worktree/sentinel" "alive-claimer retire reset the slot"
+  assert_contains "$(cat "$dir/pool/1/.fm-slot-owner")" "task=$id" \
+    "alive-claimer retire rewrote the live claimer's slot claim"
   assert_contains "$(cat "$dir/stderr")" "still owns the slot claim" \
-    "owner-claim refusal should say this record still holds the slot"
+    "alive-claimer refusal should say this record still holds the slot"
 
   dir=$(make_case slot-retire-stale-checked-out)
   mark_case_as_treehouse_pool "$dir"
@@ -628,6 +678,65 @@ test_retire_stale_record_drops_the_unheld_copy_without_touching_the_slot() {
     "no-collision refusal should send the caller to ordinary teardown"
 
   pass "fm-teardown --retire-stale-record drops an unheld colliding record and never returns the slot"
+}
+
+test_retire_stale_record_transfers_a_cross_home_claiming_dead_record() {
+  local dir id=stranded-scout other=live-occupant second_home worker rc claim
+
+  dir=$(make_case slot-retire-claiming-cross-home)
+  mark_case_as_treehouse_pool "$dir"
+  second_home="$dir/secondmate-home"
+  mkdir -p "$second_home/state" "$second_home/data"
+  printf '%s\n' "- mate - fixture (home: $second_home; scope: test; projects: project; added 2026-01-01)" \
+    > "$dir/home/data/secondmates.md"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  fm_write_meta "$second_home/state/$other.meta" \
+    "window=firstmate:fm-$other" "endpoint_task_id=$other" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  claim_pool_slot "$dir" "$id" "$dir/home"
+  claim=$(cat "$dir/pool/1/.fm-slot-owner")
+  ( cd "$dir/worktree" && exec sleep 30 ) &
+  worker=$!
+
+  set +e
+  FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+  FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+    "$TEARDOWN" --release-orphaned-slot-claim "$dir/worktree" \
+    > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "released a claim whose named owner still has a live record"
+  [ "$(cat "$dir/pool/1/.fm-slot-owner")" = "$claim" ] \
+    || fail "orphaned-claim release rewrote a still-live owner's claim"
+  assert_contains "$(cat "$dir/stderr")" "still has a live record" \
+    "orphaned-claim release should refuse a claiming record that still exists"
+
+  : > "$dir/runtime.log"
+  set +e
+  run_teardown "$dir" "$id" --force --retire-stale-record \
+    > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || fail "retiring a claiming dead record occupied by another home failed: $(cat "$dir/stderr")"
+  kill -0 "$worker" 2>/dev/null || fail "cross-home claiming-record retire killed the occupying worker"
+  assert_absent "$dir/home/state/$id.meta" "cross-home claiming-record retire left the dead record"
+  assert_present "$second_home/state/$other.meta" \
+    "cross-home claiming-record retire removed the occupying home's record"
+  assert_present "$dir/worktree/sentinel" "cross-home claiming-record retire reset the shared slot"
+  assert_contains "$(cat "$dir/pool/1/.fm-slot-owner")" "task=$other" \
+    "cross-home claiming-record retire did not transfer the claim to the occupant"
+  assert_contains "$(cat "$dir/pool/1/.fm-slot-owner")" "home=" \
+    "cross-home claiming-record retire wrote a claim without a home"
+  grep -Fq -- "home=$second_home" "$dir/pool/1/.fm-slot-owner" \
+    || fail "cross-home claiming-record retire did not name the occupant's home: $(cat "$dir/pool/1/.fm-slot-owner")"
+  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "cross-home claiming-record retire returned the shared slot: $(cat "$dir/runtime.log")"
+  kill "$worker" 2>/dev/null || true
+  wait "$worker" 2>/dev/null || true
+
+  pass "fm-teardown --retire-stale-record transfers a dead record's leftover claim to the live occupant"
 }
 
 test_release_orphaned_slot_claim_drops_a_claim_whose_owner_is_gone() {
@@ -1183,6 +1292,7 @@ test_isolated_tmux_invalid_and_valid_cleanup
 test_bare_relative_origin_shares_project_lock_with_clone
 test_reused_pool_slot_refuses_before_touching_the_other_task
 test_retire_stale_record_drops_the_unheld_copy_without_touching_the_slot
+test_retire_stale_record_transfers_a_cross_home_claiming_dead_record
 test_release_orphaned_slot_claim_drops_a_claim_whose_owner_is_gone
 test_cross_home_pool_slot_collision_refuses
 test_sole_slot_record_still_tears_down

@@ -135,6 +135,24 @@ case "${1:-}" in
     fi
     exit 0 ;;
   list-windows) [ -f "$D/windows" ] && cat "$D/windows"; exit 0 ;;
+  has-session|new-session|set-window-option) exit 0 ;;
+  new-window)
+    name=
+    cwd=
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -n) name=$2; shift 2 ;;
+        -c) cwd=$2; shift 2 ;;
+        -t|-F) shift 2 ;;
+        -dP|-d|-P) shift ;;
+        *) shift ;;
+      esac
+    done
+    [ -z "$name" ] || printf '%s\n' "$name" >> "$D/windows"
+    [ -z "$cwd" ] || printf '%s' "$cwd" > "$D/cwd"
+    printf '@recreated\n'
+    exit 0 ;;
 esac
 exit 0
 SH
@@ -1547,6 +1565,58 @@ test_spawn_relaunch_refuses_a_live_agent() {
   pass "fm-spawn --relaunch: refuses to launch a second agent into a live endpoint"
 }
 
+test_spawn_relaunch_recreates_a_missing_endpoint() {
+  local dir out rc window_after
+  dir=$(new_case missing-spawn rl-missing)
+  add_ship_task "$dir" rl-missing claude
+  : > "$dir/fake/windows"
+  printf 'zsh' > "$dir/fake/command"
+  out=$(TMUX='' run_spawn "$dir" rl-missing --relaunch --harness claude); rc=$?
+  expect_code 0 "$rc" "relaunching a missing endpoint should recreate it"$'\n'"$out"
+  window_after=$(meta_field "$dir" rl-missing window)
+  [ -n "$window_after" ] || fail "missing-endpoint relaunch published no endpoint"
+  case "$window_after" in
+    *:fm-rl-missing) ;;
+    *) fail "missing-endpoint relaunch published $window_after, not a recreated fm-rl-missing endpoint" ;;
+  esac
+  [ "$(meta_field "$dir" rl-missing worktree)" = "$dir/wt" ] \
+    || fail "missing-endpoint relaunch replaced the recorded copy"
+  grep -Fxq -- "fm-rl-missing" "$dir/fake/windows" \
+    || fail "missing-endpoint relaunch did not create a replacement window"
+  assert_grep "encode launch-brief" "$dir/fake/literal" \
+    "the replacement should have been launched into the new endpoint"
+  [ "$(cat "$dir/fake/command")" = claude ] \
+    || fail "the recreated endpoint did not launch the replacement agent"
+  pass "fm-spawn --relaunch: a missing endpoint is recreated into the recorded copy"
+}
+
+test_control_relaunch_recreates_a_missing_endpoint() {
+  local dir out rc window_after
+  dir=$(new_case missing-control rl-missctl)
+  add_ship_task "$dir" rl-missctl claude
+  : > "$dir/fake/windows"
+  printf 'zsh' > "$dir/fake/command"
+  out=$(TMUX='' run_control "$dir" rl-missctl relaunch --note "pane was closed; continue"); rc=$?
+  expect_code 0 "$rc" "control relaunch of a missing endpoint should succeed"$'\n'"$out"
+  assert_contains "$out" "relaunched rl-missctl harness=claude from=claude" \
+    "the outcome should name the missing-endpoint relaunch"
+  window_after=$(meta_field "$dir" rl-missctl window)
+  [ -n "$window_after" ] || fail "control relaunch published no endpoint"
+  case "$window_after" in
+    *:fm-rl-missctl) ;;
+    *) fail "control relaunch published $window_after, not a recreated fm-rl-missctl endpoint" ;;
+  esac
+  [ "$(meta_field "$dir" rl-missctl worktree)" = "$dir/wt" ] \
+    || fail "control relaunch replaced the recorded copy"
+  ! grep -Fq "/exit" "$dir/fake/literal" \
+    || fail "a missing endpoint must not be sent an exit command"
+  assert_grep "encode launch-brief" "$dir/fake/literal" \
+    "the replacement should have been launched into the recreated endpoint"
+  [ "$(journal_field "$dir" rl-missctl phase)" = complete ] \
+    || fail "the transaction journal should end complete"
+  pass "fm-control relaunch: a missing endpoint is recreated instead of becoming a one-way door"
+}
+
 test_spawn_relaunch_refuses_a_symlinked_task_record_before_inspection() {
   local dir meta target out rc
   dir=$(new_case symlink-meta rl37)
@@ -2788,6 +2858,8 @@ test_concurrent_relaunch_is_refused
 test_direct_spawn_relaunch_participates_in_the_lifecycle_lock
 test_promotion_participates_in_the_lifecycle_lock_before_metadata_resolution
 test_spawn_relaunch_refuses_a_live_agent
+test_spawn_relaunch_recreates_a_missing_endpoint
+test_control_relaunch_recreates_a_missing_endpoint
 test_spawn_relaunch_refuses_a_symlinked_task_record_before_inspection
 test_spawn_relaunch_keeps_its_early_meta_lock_continuous
 test_spawn_relaunch_refuses_a_pending_authoritative_close

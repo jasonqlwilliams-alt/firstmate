@@ -336,7 +336,7 @@ A pool worktree is only returned after teardown passes the slot-ownership proof:
 A fresh spawn refuses to claim or launch into a pool slot any local home still records, or whose leftover owner claim names a task from another home, rather than overwriting that occupancy.
 A leftover claim whose named owner is gone from this same home is recycled under the allocation lock so later same-home slot reuse is not poisoned.
 `--retire-stale-record` is the supported retire of one colliding record whose copy does not currently have that task's branch checked out.
-It finishes only that record's cleanup and leaves the slot untouched.
+It finishes only that record's cleanup and leaves the slot untouched, transferring the claim to a live occupant when this dead or missing record still named it.
 `--release-orphaned-slot-claim` is the supported drop of a slot claim whose named owner has no live record, including when another live record is or was on the slot.
 [`bin/fm-teardown.sh`](../bin/fm-teardown.sh)'s header owns both flags.
 A slot's own owner claim, written by the spawn that takes it under the allocation lock and owned by [`bin/fm-wake-lib.sh`](../bin/fm-wake-lib.sh), covers a slot reassigned to a task that left no record the scan could reach: a claim naming a different task releases nothing - teardown warns, names the claimant, and finishes only the task's own cleanup - because Treehouse's own live process lease cannot answer ownership once the worker's exit releases it.
