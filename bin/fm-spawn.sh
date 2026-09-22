@@ -142,14 +142,15 @@
 #   records is refused rather than claimed, returned, or launched into: returning
 #   it would reset the occupying copy, and claiming it would hide that occupancy
 #   behind this task's owner file. A leftover claim whose named owner is gone
-#   from this same home is recycled under that lock so later same-home slot
-#   reuse is not poisoned. A leftover that names a task from another home is
+#   from this same home, or whose live owner is recorded there in another
+#   worktree, is recycled under that lock so later same-home slot reuse is not
+#   poisoned. A leftover that names a task from another home is
 #   refused rather than overwritten; bin/fm-teardown.sh
 #   --release-orphaned-slot-claim is the supported drop of that leftover. A
 #   spawn that aborts while it still holds the allocation lock drops its own
 #   claim; an abort after metadata publication has released that lock leaves
 #   the claim in place, so a later spawn of the same task may reclaim it, a
-#   later same-home spawn may recycle it once that task has no live record, and
+#   later same-home spawn may recycle it once that task no longer records it, and
 #   a spawn from another home must refuse until the leftover is released.
 #   The local root is whatever bin/fm-wake-lib.sh's
 #   fm_firstmate_root_home resolves, so a home seeded from another machine anchors
@@ -1169,7 +1170,7 @@ spawn_abort_cleanup() {
   # claim is still held (aborts before metadata publication); a later abort has
   # already released that lock and leaves the claim in place rather than racing
   # a successor. A later spawn of this same task may reclaim it; a later
-  # same-home spawn may recycle it once this task has no live record; a spawn
+  # same-home spawn may recycle it once this task no longer records it; a spawn
   # from another home must refuse until bin/fm-teardown.sh
   # --release-orphaned-slot-claim drops the leftover. The release itself never
   # removes another task's claim.
@@ -1180,7 +1181,7 @@ spawn_abort_cleanup() {
     if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
       fm_treehouse_slot_owner_release "$WT" "$ID" || true
     else
-      echo "warning: leaving task $ID's slot claim on $WT in place; the Treehouse project lock is no longer held, so a later spawn of $ID may reclaim it, a later same-home spawn may recycle it once $ID has no live record, and a spawn from another home must refuse until $FM_ROOT/bin/fm-teardown.sh --release-orphaned-slot-claim $WT drops the leftover claim" >&2
+      echo "warning: leaving task $ID's slot claim on $WT in place; the Treehouse project lock is no longer held, so a later spawn of $ID may reclaim it, a later same-home spawn may recycle it once $ID no longer records it, and a spawn from another home must refuse until $FM_ROOT/bin/fm-teardown.sh --release-orphaned-slot-claim $WT drops the leftover claim" >&2
     fi
   fi
   if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
@@ -3728,10 +3729,12 @@ relaunch_return_to_worktree() {
 }
 
 # A pool slot any live record still names is not this spawn's to take. A
-# leftover claim whose named owner is gone from this same home is recycled
-# here under the allocation lock so later same-home slot reuse is not
-# poisoned. A leftover that names a task from another home, or a still-live
-# owner, is refused without claiming and without treehouse return. Returning
+# leftover claim whose named owner is gone from this same home, or whose live
+# owner is recorded there in another worktree, is recycled here under the
+# allocation lock so later same-home slot reuse is not poisoned. A leftover
+# that names a task from another home, or an owner whose record still names
+# the slot or no worktree, is refused without claiming and without treehouse
+# return. Returning
 # the slot would reset an occupying copy; claiming a foreign leftover would
 # overwrite the evidence that another home still holds it.
 spawn_require_unrecorded_pool_slot() {  # <worktree>
