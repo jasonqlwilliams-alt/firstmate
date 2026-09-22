@@ -1,0 +1,2 @@
+ok - fm-teardown --retire-stale-record drops an unheld colliding record and never returns the slot
+ok - fm-teardown --retire-stale-record transfers a dead record's leftover claim to the live occupant

@@ -1,0 +1,2 @@
+ok - fm-control exit: a missing endpoint is idempotent already-stopped success
+ok - fm-control exit: a missing endpoint is idempotent already-stopped success

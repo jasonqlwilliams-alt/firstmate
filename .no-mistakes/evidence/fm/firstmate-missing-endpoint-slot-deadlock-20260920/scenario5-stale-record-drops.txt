@@ -1,0 +1,1 @@
+ok - fm-teardown --retire-stale-record drops an unheld colliding record and never returns the slot
