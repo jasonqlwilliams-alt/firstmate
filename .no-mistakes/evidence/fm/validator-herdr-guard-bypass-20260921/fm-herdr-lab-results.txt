@@ -1,0 +1,20 @@
+ok - fm-herdr-lab: names fail closed and require the lab prefix
+ok - fm-herdr-lab: provisioning, scoped calls, guarded teardown, and fleet tripwire are deterministic
+ok - fm-herdr-lab: missing tripwire refuses teardown before any Herdr call
+ok - fm-herdr-lab: changed default fleet state is a hard failure
+ok - fm-herdr-lab: a suppressed tripwire breach survives as a durable marker that blocks later lab work
+ok - fm-herdr-lab: lab ownership is recorded for the asking shell and released by a verified teardown
+ok - fm-herdr-lab: a provisioned lab makes the herdr adapter refuse the live default session
+ok - fm-herdr-lab: an owned stopped lab can re-provision safely
+ok - fm-herdr-lab: failed deletion retains ownership until absence is confirmed
+ok - fm-herdr-lab: timed-out provisioning cancels the launch before teardown
+ok - fm-herdr-lab: the viewer attaches only to a session this lab owns
+ok - fm-herdr-lab: timed-out viewer startup cancels its exact launcher
+ok - fm-herdr-lab: startup timeout allows launcher child escalation
+ok - fm-herdr-lab: viewer start requires an identity-matched owned process
+ok - fm-herdr-lab: viewer stop signals only recorded processes and confirms the detach
+ok - fm-herdr-lab: viewer ownership requires the recorded parent
+ok - fm-herdr-lab: interrupted viewer start cancels its launcher
+ok - fm-herdr-lab: teardown refuses to destroy a session an attached viewer still holds
+ok - fm-herdr-lab: unreadable detach results fail closed on running sessions
+ok - fm-herdr-lab: the viewer launcher refuses unsafe sessions and pidfiles
