@@ -607,6 +607,37 @@ The CLI matrix was checked directly:
 All destructive verification used `bin/fm-herdr-lab.sh` with a non-default `fm-lab-` name and a byte-identical default-session tripwire.
 No ambient `herdr server stop` command is a supported test operation.
 
+### Lab-context session refusal and durable tripwire breaches
+
+Measured 2026-09-21 on Linux 6.18.33.2-microsoft-standard-WSL2 with Herdr 0.9.1 (protocol 22), the guarantee behind `fm_backend_herdr_lab_context` and `bin/fm-herdr-lab-lib.sh`.
+
+Both behaviors are decided from process, environment, and filesystem facts rather than from anything a Herdr release emits, so the portable suites are the authority and no per-harness matrix applies.
+
+```sh
+bash tests/fm-backend-herdr.test.sh
+ok - fm_backend_herdr_session: the ambient default fallback the supervisor relies on is unchanged
+ok - fm_backend_herdr_session: a sourced lab helper alone refuses the live default fallback
+ok - fm_backend_herdr_session: a live lab-owner ancestor alone refuses the live default fallback
+ok - fm_backend_herdr_session: a lab owned by an unrelated process or a reused pid leaves ordinary callers alone
+ok - fm_backend_herdr_container_ensure: refuses from a lab with no session instead of creating in the live fleet
+
+bash tests/fm-herdr-lab.test.sh
+ok - fm-herdr-lab: a suppressed tripwire breach survives as a durable marker that blocks later lab work
+ok - fm-herdr-lab: lab ownership is recorded for the asking shell and released by a verified teardown
+ok - fm-herdr-lab: a provisioned lab makes the herdr adapter refuse the live default session
+```
+
+Each lab signal was driven apart deliberately and still carried the verdict alone, and releasing the lab restored the ambient fallback, so the refusal is bound to a live lab rather than to being a test.
+
+The guarded real-client path was exercised against the same running fleet, and the live default session's workspace list was byte-identical before and after:
+
+```sh
+bash tests/fm-backend-herdr-smoke.test.sh   # exit 0, 18 real-herdr assertions
+herdr workspace list --session default      # identical before and after the run
+```
+
+The ancestor walk uses `ps -p <pid> -o ppid=` and `-o lstart=`, the same portable pair this helper already relies on for its viewer process identity.
+
 ### fm-remote server birth and login-keychain access
 
 Measured 2026-09-09 on macOS 26 (Darwin 25.6.0) aarch64 with Claude Code 2.1.266 and Herdr 0.9.0, the guarantee behind `bin/fm-remote-herdr-guard.sh` and the doctor's `herdr-server` check: login-keychain access follows the audit session a process was born into, never the launch shape or the shell.

@@ -341,7 +341,15 @@ It provisions only non-default names beginning with `fm-lab-`, appends an explic
 Immediately before every destructive call it re-queries the named session and refuses empty, missing, literal `default`, or `default:true` identities.
 Its before/after tripwire requires the live default-session snapshot to remain byte-identical.
 
-The helper's header and `--help` own exact commands.
+A failed tripwire is recorded as a durable breach marker as well as a non-zero exit status, because a caller can discard a status and a suppressed teardown once hid a real breach.
+While a breach is unacknowledged, every lab command refuses and `bin/fm-test-run.sh` fails the whole suite run naming the marker; `bin/fm-herdr-lab.sh breaches` lists open markers and `acknowledge` retires one after the live default session has been checked.
+
+Provisioning also records the shell that asked for the lab, which is what lets the adapter tell a lab caller from the supervisor.
+`fm_backend_herdr_session` keeps its ambient `HERDR_SESSION` fallback to the live `default` session, because that is the correct selection for the supervisor and every ordinary spawn.
+In a lab context it refuses instead: an unset session there means the lab lost its isolation, and the resulting command would be indistinguishable from routine fleet work.
+A lab context is recognized from either the lab helper being loaded in the calling shell or a live lab-owner record naming the caller or one of its ancestors, so neither a script that sources the helpers nor one that only runs them as a subprocess can omit its way past the check.
+
+The helper's header and `--help` own exact commands, and `bin/fm-herdr-lab-lib.sh` owns the owner-record and breach-marker formats.
 Tests use thin compatibility wrappers in `tests/herdr-test-safety.sh` and never duplicate the destructive policy.
 
 ## Active limits
@@ -369,6 +377,7 @@ tests/fm-backend-herdr-agent-exit-shell-e2e.test.sh
 tests/fm-herdr-pi-stale-registration-live-e2e.test.sh
 tests/fm-backend-herdr-eventwait-smoke.test.sh
 tests/fm-control-herdr-smoke.test.sh
+tests/fm-herdr-lab.test.sh
 tests/fm-herdr-session-cleanup.test.sh
 tests/fm-herdr-session-cleanup-e2e.test.sh
 tests/fm-herdr-attached-viewer-live-e2e.test.sh

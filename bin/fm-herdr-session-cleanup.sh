@@ -308,7 +308,12 @@ fm_herdr_session_cleanup() {
     fm_herdr_cleanup_warn 'home identity is unreadable; preserving every candidate'
     return 0
   }
-  session=$(fm_backend_herdr_session)
+  # An unresolvable session preserves every candidate: this sweep only ever
+  # removes workspaces, so declining to run is the safe outcome.
+  session=$(fm_backend_herdr_session) || {
+    fm_herdr_cleanup_warn 'session is unresolvable in a lab context; preserving every candidate'
+    return 0
+  }
   list=$(fm_backend_herdr_cli "$session" workspace list 2>/dev/null) || {
     fm_herdr_cleanup_warn "session '$session' workspace discovery failed; preserving every candidate"
     return 0

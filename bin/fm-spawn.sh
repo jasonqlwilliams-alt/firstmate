@@ -1206,7 +1206,7 @@ trap spawn_abort_cleanup EXIT
 # same session without writing any other home's state directory.
 spawn_herdr_presentation_order_lock_acquire() {
   local session=${1:-} attempt lock_path
-  [ -n "$session" ] || session=$(fm_backend_herdr_session)
+  [ -n "$session" ] || session=$(fm_backend_herdr_session) || return 1
   lock_path=$(fm_backend_herdr_presentation_session_lock_path "$session") || return 1
   HERDR_PRESENTATION_ORDER_LOCK="$lock_path"
   attempt=0
@@ -3258,7 +3258,7 @@ case "$BACKEND" in
     HERDR_PRESENTATION_JOURNAL=$(fm_backend_herdr_projection_journal_path "$STATE" "$ID")
     HERDR_PROJECTED=0
     if [ "$KIND" != secondmate ] && fm_backend_herdr_presentation_enabled "$CONFIG" "$STATE"; then
-      HERDR_SES=$(fm_backend_herdr_session)
+      HERDR_SES=$(fm_backend_herdr_session) || exit 1
       HERDR_PARENT_LABEL=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_workspace_label)
       if [ -e "$HERDR_PRESENTATION_JOURNAL" ] || [ -L "$HERDR_PRESENTATION_JOURNAL" ]; then
         fm_backend_herdr_server_ensure "$HERDR_SES" || {

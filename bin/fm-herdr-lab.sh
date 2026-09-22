@@ -11,6 +11,8 @@
 #   fm-herdr-lab.sh viewer stop <session>
 #   fm-herdr-lab.sh stop <session>
 #   fm-herdr-lab.sh teardown <session>
+#   fm-herdr-lab.sh breaches
+#   fm-herdr-lab.sh acknowledge <session>
 #
 # Session names must begin with "fm-lab-" and can never be "default".
 # The name command sanitizes the label, caps it at 16 characters, and appends
@@ -25,6 +27,13 @@
 # destructive call.
 # Provision records the running default session as a fleet-state tripwire and
 # teardown requires that record to be identical afterward.
+# A failed tripwire also writes a durable breach marker, which every later lab
+# command and every bin/fm-test-run.sh suite run refuses on, so a caller cannot
+# silence the finding by discarding an exit status. The breaches command lists
+# open markers and acknowledge retires one after the breach has been handled.
+# Provisioning records the shell that asked for the lab as its owner, which is
+# what lets bin/backends/herdr.sh refuse an unset HERDR_SESSION for a lab caller
+# instead of falling back to the live default session.
 # The viewer command attaches or detaches one real foreground Herdr client on
 # an owned lab session over a fixed 40-row by 120-column pty;
 # bin/fm-herdr-lab-viewer.py owns the pty mechanics.
@@ -35,8 +44,45 @@
 # absent; teardown refuses when that stop cannot be confirmed.
 set -u
 
+# The lab state directory, the lab-owner records, and the tripwire breach
+# markers, so this helper and bin/backends/herdr.sh cannot drift on either
+# format.
+# shellcheck source=bin/fm-herdr-lab-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fm-herdr-lab-lib.sh"
+
+# Who owns a lab this helper provisions, and whether this shell IS a lab shell.
+#
+# Both are established here, at load, from facts the loader cannot restate
+# wrongly: an EXECUTED helper was asked for a lab by its parent process, while a
+# SOURCED helper was asked by this very shell. FM_HERDR_LAB_SHELL is deliberately
+# NOT exported - it marks the lab shell and its subshells, and stops at an
+# exec'd child, which carries its own Herdr session identity instead.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  FM_HERDR_LAB_OWNER_PID=$PPID
+else
+  FM_HERDR_LAB_OWNER_PID=$$
+  # shellcheck disable=SC2034 # consumed by fm_backend_herdr_lab_context in bin/backends/herdr.sh
+  FM_HERDR_LAB_SHELL=1
+fi
+
 fm_herdr_lab_error() {
   echo "fm-herdr-lab: $*" >&2
+}
+
+# fm_herdr_lab_require_no_breach: refuse every lab operation while a tripwire
+# breach is unacknowledged. This is what makes the tripwire non-suppressible: the
+# marker outlives the exit status the breaching caller discarded, and the next lab
+# operation - in this run or a later one - stops on it.
+fm_herdr_lab_require_no_breach() {
+  local markers
+  markers=$(fm_herdr_lab_breach_list) || return 0
+  fm_herdr_lab_error "refusing every lab operation: an unacknowledged fleet-state tripwire breach is recorded"
+  printf '%s\n' "$markers" | while IFS= read -r marker; do
+    [ -n "$marker" ] || continue
+    fm_herdr_lab_error "  breach: $marker"
+  done
+  fm_herdr_lab_error "inspect the marker, verify the live default session, then retire it with: ${BASH_SOURCE[0]} acknowledge <session>"
+  return 1
 }
 
 fm_herdr_lab_validate_name() { # <session>
@@ -48,14 +94,6 @@ fm_herdr_lab_validate_name() { # <session>
     *) fm_herdr_lab_error "session name must start with 'fm-lab-' and contain only letters, digits, underscores, or dashes: $name" ;;
   esac
   return 1
-}
-
-fm_herdr_lab_state_dir() {
-  printf '%s' "${FM_HERDR_LAB_STATE_DIR:-${TMPDIR:-/tmp}/fm-herdr-lab-${UID}}"
-}
-
-fm_herdr_lab_tripwire_path() { # <session>
-  printf '%s/%s.fleet-state.json' "$(fm_herdr_lab_state_dir)" "$1"
 }
 
 fm_herdr_lab_raw() { # <session> <herdr arguments...>
@@ -91,6 +129,7 @@ fm_herdr_lab_fleet_state() { # <session>
 fm_herdr_lab_prepare() { # <session>
   local name=$1 sessions state_dir tripwire
   fm_herdr_lab_validate_name "$name" || return 1
+  fm_herdr_lab_require_no_breach || return 1
   command -v herdr >/dev/null 2>&1 || { fm_herdr_lab_error "herdr is required"; return 1; }
   command -v jq >/dev/null 2>&1 || { fm_herdr_lab_error "jq is required"; return 1; }
 
@@ -114,6 +153,14 @@ fm_herdr_lab_prepare() { # <session>
     rm -f "$tripwire"
     return 1
   }
+  # The lab is now this shell's to operate, so record it. A caller that cannot be
+  # identified is refused rather than left with a lab whose session the backend
+  # would silently resolve to the live default one.
+  fm_herdr_lab_owner_claim "$name" "$FM_HERDR_LAB_OWNER_PID" || {
+    fm_herdr_lab_error "could not record lab ownership for '$name'; refusing to hand back an unguarded lab"
+    rm -f "$tripwire"
+    return 1
+  }
 }
 
 fm_herdr_lab_refuse_if_default() { # <session>
@@ -134,6 +181,7 @@ fm_herdr_lab_cli() { # <session> <herdr arguments...>
   local name=$1 arg
   shift
   fm_herdr_lab_validate_name "$name" || return 1
+  fm_herdr_lab_require_no_breach || return 1
   [ "$#" -gt 0 ] || { fm_herdr_lab_error "run requires Herdr arguments"; return 1; }
   case "$1" in
     -*)
@@ -199,14 +247,6 @@ fm_herdr_lab_viewer_reason() { # <session>
   printf '%s' "$out" | jq -r '.result.reason // empty' 2>/dev/null
 }
 
-fm_herdr_lab_process_start() { # <pid>
-  LC_ALL=C ps -p "$1" -o lstart= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
-}
-
-fm_herdr_lab_process_parent() { # <pid>
-  LC_ALL=C ps -p "$1" -o ppid= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
-}
-
 fm_herdr_lab_viewer_recorded_value() { # <session> <key>
   local record value
   record=$(fm_herdr_lab_viewer_record_path "$1")
@@ -267,6 +307,7 @@ fm_herdr_lab_viewer_session_stopped_or_absent() { # <session>
 fm_herdr_lab_viewer_start() { # <session>
   local name=$1 record log launcher launcher_pid waited attempt reason pid interrupt_traps=0 timeout=$fm_herdr_lab_viewer_timeout_seconds
   fm_herdr_lab_validate_name "$name" || return 1
+  fm_herdr_lab_require_no_breach || return 1
   command -v herdr >/dev/null 2>&1 || { fm_herdr_lab_error "herdr is required"; return 1; }
   command -v jq >/dev/null 2>&1 || { fm_herdr_lab_error "jq is required"; return 1; }
   command -v python3 >/dev/null 2>&1 || { fm_herdr_lab_error "python3 is required for the lab viewer"; return 1; }
@@ -402,6 +443,7 @@ fm_herdr_lab_cancel_provision() { # <pid>
 fm_herdr_lab_provision() { # <session>
   local name=$1 sessions tripwire running attempt server_pid max_attempts timeout_seconds
   fm_herdr_lab_validate_name "$name" || return 1
+  fm_herdr_lab_require_no_breach || return 1
   command -v herdr >/dev/null 2>&1 || { fm_herdr_lab_error "herdr is required"; return 1; }
   command -v jq >/dev/null 2>&1 || { fm_herdr_lab_error "jq is required"; return 1; }
 
@@ -423,6 +465,12 @@ fm_herdr_lab_provision() { # <session>
       return 1
     }
     fm_herdr_lab_check_tripwire "$name" || return 1
+    # Re-provisioning an owned stopped lab hands it to whichever shell asked, so
+    # the ownership record follows rather than naming a shell that has moved on.
+    fm_herdr_lab_owner_claim "$name" "$FM_HERDR_LAB_OWNER_PID" || {
+      fm_herdr_lab_error "could not record lab ownership for '$name'; refusing to re-provision an unguarded lab"
+      return 1
+    }
   else
     fm_herdr_lab_prepare "$name" || return 1
   fi
@@ -456,11 +504,19 @@ fm_herdr_lab_check_tripwire() { # <session>
     return 1
   }
   before=$(cat "$tripwire")
-  after=$(fm_herdr_lab_fleet_state "$name") || return 1
+  after=$(fm_herdr_lab_fleet_state "$name") || {
+    # An unreadable fleet state is itself a breach: the tripwire cannot clear the
+    # live default session, and the caller must not be able to discard that.
+    fm_herdr_lab_breach_record "$name" "$before" '<unreadable>' \
+      || fm_herdr_lab_error "could not record the tripwire breach marker for '$name'"
+    return 1
+  }
   [ "$before" = "$after" ] || {
     fm_herdr_lab_error "FLEET-STATE TRIPWIRE FAILED: default session changed during lab work"
     fm_herdr_lab_error "before: $before"
     fm_herdr_lab_error "after:  $after"
+    fm_herdr_lab_breach_record "$name" "$before" "$after" \
+      || fm_herdr_lab_error "could not record the tripwire breach marker for '$name'"
     return 1
   }
 }
@@ -470,11 +526,13 @@ fm_herdr_lab_verify_tripwire() { # <session>
   fm_herdr_lab_check_tripwire "$name" || return 1
   tripwire=$(fm_herdr_lab_tripwire_path "$name")
   rm -f "$tripwire"
+  fm_herdr_lab_owner_release "$name"
 }
 
 fm_herdr_lab_stop() { # <session>
   local name=$1 tripwire
   fm_herdr_lab_validate_name "$name" || return 1
+  fm_herdr_lab_require_no_breach || return 1
   tripwire=$(fm_herdr_lab_tripwire_path "$name")
   [ -f "$tripwire" ] || {
     fm_herdr_lab_error "missing fleet-state tripwire for '$name'; refusing stop"
@@ -487,6 +545,7 @@ fm_herdr_lab_stop() { # <session>
 fm_herdr_lab_teardown() { # <session>
   local name=$1 tripwire sessions delete_status=0
   fm_herdr_lab_validate_name "$name" || return 1
+  fm_herdr_lab_require_no_breach || return 1
   tripwire=$(fm_herdr_lab_tripwire_path "$name")
   [ -f "$tripwire" ] || {
     fm_herdr_lab_error "missing fleet-state tripwire for '$name'; refusing destructive calls"
@@ -525,6 +584,8 @@ fm_herdr_lab_teardown() { # <session>
 
 fm_herdr_lab_name() { # <label>
   local label=${1:-lab}
+  # A suite must not be able to start its next lab on top of an unhandled breach.
+  fm_herdr_lab_require_no_breach || return 1
   label=$(printf '%s' "$label" | tr -cd 'a-zA-Z0-9_-' | sed 's/^[^a-zA-Z0-9]*//; s/-*$//')
   [ -n "$label" ] || label=lab
   label=${label:0:16}
@@ -533,8 +594,41 @@ fm_herdr_lab_name() { # <label>
   printf 'fm-lab-%s-%s-%s\n' "$label" "$$" "$RANDOM"
 }
 
+# fm_herdr_lab_breaches: report every unacknowledged tripwire breach. Exit 1
+# when any exists so a caller that wires this into a later step - a suite
+# summary, a CI job - fails on a breach whose exit status was discarded.
+fm_herdr_lab_breaches() {
+  local markers
+  markers=$(fm_herdr_lab_breach_list) || {
+    printf 'no unacknowledged Herdr fleet-state tripwire breaches\n'
+    return 0
+  }
+  printf 'UNACKNOWLEDGED HERDR FLEET-STATE TRIPWIRE BREACH\n'
+  printf '%s\n' "$markers" | while IFS= read -r marker; do
+    [ -n "$marker" ] || continue
+    printf -- '--- %s\n' "$marker"
+    sed 's/^/    /' "$marker" 2>/dev/null
+  done
+  return 1
+}
+
+# fm_herdr_lab_acknowledge: retire one breach marker. Deliberately per-session and
+# explicit, so clearing a breach is a decision a maintainer makes after checking
+# the live default session, never a side effect of the next lab run.
+fm_herdr_lab_acknowledge() { # <session>
+  local name=$1 marker
+  fm_herdr_lab_validate_name "$name" || return 1
+  marker=$(fm_herdr_lab_breach_path "$name")
+  [ -f "$marker" ] || {
+    fm_herdr_lab_error "no recorded tripwire breach for '$name'"
+    return 1
+  }
+  rm -f "$marker" || return 1
+  printf 'acknowledged tripwire breach for %s\n' "$name"
+}
+
 fm_herdr_lab_usage() {
-  sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 fm_herdr_lab_main() {
@@ -568,6 +662,14 @@ fm_herdr_lab_main() {
     teardown)
       [ "$#" -eq 2 ] || { fm_herdr_lab_usage >&2; return 2; }
       fm_herdr_lab_teardown "$2"
+      ;;
+    breaches)
+      [ "$#" -eq 1 ] || { fm_herdr_lab_usage >&2; return 2; }
+      fm_herdr_lab_breaches
+      ;;
+    acknowledge)
+      [ "$#" -eq 2 ] || { fm_herdr_lab_usage >&2; return 2; }
+      fm_herdr_lab_acknowledge "$2"
       ;;
     -h|--help|help)
       fm_herdr_lab_usage

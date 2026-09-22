@@ -93,6 +93,12 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 # shellcheck source=bin/fm-agent-process-lib.sh
 . "$FM_BACKEND_HERDR_ROOT/bin/fm-agent-process-lib.sh"
 
+# The Herdr lab state directory and its lab-owner records, so this adapter can
+# recognize a lab caller at the call site. bin/fm-herdr-lab-lib.sh owns both
+# formats; this adapter only reads them.
+# shellcheck source=bin/fm-herdr-lab-lib.sh
+. "$FM_BACKEND_HERDR_ROOT/bin/fm-herdr-lab-lib.sh"
+
 FM_BACKEND_HERDR_MIN_PROTOCOL=14
 # events.subscribe (the native pane.agent_status_changed push stream) and its
 # subscription_event schema first shipped at protocol 16 (verified: herdr
@@ -241,7 +247,7 @@ fm_backend_herdr_presentation_release_supported() {  # [<session>]
   FM_BACKEND_HERDR_PRESENTATION_RELEASE="an unreadable release"
   command -v herdr >/dev/null 2>&1 || return 2
   command -v jq >/dev/null 2>&1 || return 2
-  [ -n "$session" ] || session=$(fm_backend_herdr_session)
+  [ -n "$session" ] || session=$(fm_backend_herdr_session) || return 2
   status=$(fm_backend_herdr_cli "$session" status --json 2>/dev/null) || return 2
   client_protocol=$(printf '%s' "$status" | jq -r '.client.protocol // empty' 2>/dev/null) || return 2
   client_version=$(printf '%s' "$status" | jq -r '.client.version // empty' 2>/dev/null) || return 2
@@ -559,14 +565,71 @@ fm_backend_herdr_version_check() {
   return 0
 }
 
+# fm_backend_herdr_lab_context: print the signal name and return 0 when this
+# process is operating a Herdr LAB, where resolving an unset HERDR_SESSION to the
+# live "default" session would drive the captain's running fleet.
+#
+# Why a caller test rather than dropping the default (2026-09-21 near miss): a
+# generated lab script set its lab session in a plain shell variable and never
+# exported HERDR_SESSION, so fm_backend_herdr_session fell back to "default" and
+# created a workspace in the LIVE fleet session. The resulting command was
+# byte-identical to what the supervisor legitimately runs every day, so only the
+# CALLER distinguishes them - and the fallback itself must stay, because it is
+# what the supervisor and every ordinary spawn rely on.
+#
+# Two independent signals, either of which refuses, the same fail-closed shape as
+# bin/fm-gate-refuse-lib.sh. Neither can be satisfied by declining to set
+# something: signal 1 is present BECAUSE the caller loaded the lab helpers, and
+# signal 2 is present BECAUSE the caller asked bin/fm-herdr-lab.sh for a lab.
+#
+#   1. FM_HERDR_LAB_SHELL - set by bin/fm-herdr-lab.sh when it is SOURCED, so any
+#      shell that sourced it or tests/herdr-test-safety.sh carries it. Not
+#      exported, so it covers that shell and its subshells and stops at an exec'd
+#      child, which carries its own injected Herdr session identity instead.
+#   2. A live lab-owner record naming this process or one of its ancestors. This
+#      covers the scaffolded shape, which runs the helper as a SUBPROCESS and so
+#      never carries signal 1. Only the shell that asked for the lab is recorded,
+#      never its ancestors, so a sibling fleet operation under the same terminal
+#      is unaffected.
+#
+# Stated limit: a caller that sources nothing, provisions its lab from a throwaway
+# subshell whose pid is already gone, and still expects that lab escapes both
+# signals. That is deliberate circumvention, not the forgetfulness this guards.
+fm_backend_herdr_lab_context() {
+  local owned
+  if [ "${FM_HERDR_LAB_SHELL:-}" = 1 ]; then
+    printf 'the lab helper is loaded in this shell'
+    return 0
+  fi
+  if owned=$(fm_herdr_lab_owner_context); then
+    printf 'this process tree owns lab session %s' "$owned"
+    return 0
+  fi
+  return 1
+}
+
 # fm_backend_herdr_session: resolve which named herdr session this normal
 # spawn/op uses. HERDR_SESSION mirrors tmux's $TMUX ambient-selection for
 # adapter workspace/tab/pane operations: an operator (or firstmate's own
 # isolated test harness) sets it explicitly; absent means herdr's own
 # "default" session. Do not use HERDR_SESSION alone for destructive test
 # cleanup; tests/herdr-test-safety.sh documents and guards that path.
+#
+# The ambient fallback is correct for the supervisor and every ordinary spawn and
+# is unchanged. A LAB caller that reaches here with no session has lost its
+# isolation, so it is refused loudly instead of being handed the live fleet; see
+# fm_backend_herdr_lab_context above.
 fm_backend_herdr_session() {
-  printf '%s' "${HERDR_SESSION:-default}"
+  local reason
+  if [ -n "${HERDR_SESSION:-}" ]; then
+    printf '%s' "$HERDR_SESSION"
+    return 0
+  fi
+  if reason=$(fm_backend_herdr_lab_context); then
+    echo "error: HERDR_SESSION is unset in a Herdr lab context ($reason); refusing to fall back to the live 'default' session. Export HERDR_SESSION to the lab session, or route the call through bin/fm-herdr-lab.sh run." >&2
+    return 1
+  fi
+  printf '%s' default
 }
 
 # fm_backend_herdr_projection_id: generate a compact 128-bit base64url token.
@@ -1784,7 +1847,7 @@ fm_backend_herdr_launcher_identity() {  # <session>
   # borrowed from another session can silently resolve to a real but unrelated
   # workspace here. The injected socket path is the server identity herdr
   # exposes, and the session name independently binds the named session.
-  claimed_session=$(fm_backend_herdr_session)
+  claimed_session=$(fm_backend_herdr_session) || return 1
   if [ "$claimed_session" != "$session" ]; then
     echo "error: herdr launcher pane '$pane' reports session '$claimed_session' but this spawn targets session '$session'; refusing to place a worker from a cross-session parent identity" >&2
     return 1
@@ -2042,7 +2105,7 @@ fm_backend_herdr_workspace_ensure() {  # <session> <cwd> [<launcher-relationship
 fm_backend_herdr_container_ensure() {  # <cwd-for-a-fresh-workspace> [<launcher-relationship>]
   local cwd=${1:-$PWD} relationship=${2:-launcher-home} session label status
   fm_backend_herdr_version_check || return 1
-  session=$(fm_backend_herdr_session)
+  session=$(fm_backend_herdr_session) || return 1
   fm_backend_herdr_server_ensure "$session" || return 1
   fm_backend_herdr_workspace_ensure "$session" "$cwd" "$relationship" >/dev/null && status=0 || status=$?
   # A 3 already reported the exact placement it refused to guess at; adding the
@@ -2517,7 +2580,7 @@ fm_backend_herdr_projection_create_task() {  # <cwd> <workspace-label> <task-lab
   FM_BACKEND_HERDR_PROJECTION_CLEANUP_SAFE=0
 
   fm_backend_herdr_version_check || return 1
-  session=$(fm_backend_herdr_session)
+  session=$(fm_backend_herdr_session) || return 1
   fm_backend_herdr_server_ensure "$session" || return 1
   focus_before=$(fm_backend_herdr_projection_focus_snapshot "$session") || {
     echo "error: herdr presentation workspace create could not capture exact active workspace and tab; refusing a focus-unsafe projection" >&2
