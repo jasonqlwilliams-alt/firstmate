@@ -837,6 +837,61 @@ test_pool_slot_same_home_gone_owner_claim_is_taken() {
   pass "fm-spawn recycles a same-home leftover claim whose named owner is gone"
 }
 
+# Recovery can land a task in a fresh slot, leaving its old slot's claim behind
+# while the task itself stays live. Treehouse then hands that old slot to the
+# next recovery in the same home. The sibling's own record proves it moved, so
+# the leftover is recycled; the same leftover from another home stays refused.
+test_pool_slot_same_home_moved_owner_claim_is_taken() {
+  local rec id='pool-slot-same-home-moved-r1' sibling='recovered-sibling' out status moved claim mate
+
+  rec=$(make_case slot-same-home-moved "$id")
+  read_case_record "$rec"
+  lay_out_as_pool_slot
+  moved="$CASE_DIR/slots/2/project"
+  mkdir -p "$moved"
+  fm_write_meta "$HOME_DIR/state/$sibling.meta" \
+    "window=firstmate:fm-$sibling" "endpoint_task_id=$sibling" \
+    "worktree=$moved" "project=$PROJECT_DIR" "kind=scout"
+  printf 'task=%s\nhome=%s\n' "$sibling" "$HOME_DIR" > "$SLOT_CLAIM"
+
+  out=$(run_spawn "$id" --scout)
+  status=$?
+  expect_code 0 "$status" "spawn should recycle a same-home leftover whose live owner moved to another slot"$'\n'"$out"
+  grep -Fxq -- "task=$id" "$SLOT_CLAIM" \
+    || fail "spawn did not claim the moved sibling's leftover slot: $(cat "$SLOT_CLAIM")"
+  assert_grep "worktree=$POOL_DIR" "$HOME_DIR/state/$id.meta" \
+    "spawn did not publish the recycled slot as its worktree"
+  assert_grep "worktree=$moved" "$HOME_DIR/state/$sibling.meta" \
+    "same-home recycle changed the moved sibling's record"
+
+  id='pool-slot-foreign-moved-r1'
+  rec=$(make_case slot-foreign-moved "$id")
+  read_case_record "$rec"
+  lay_out_as_pool_slot
+  moved="$CASE_DIR/slots/2/project"
+  mkdir -p "$moved"
+  mate="$CASE_DIR/mate"
+  mkdir -p "$mate/state" "$mate/data"
+  printf '%s\n' "- mate - fixture (home: $mate; scope: test; projects: project; added 2026-01-01)" \
+    > "$HOME_DIR/data/secondmates.md"
+  fm_write_meta "$mate/state/$sibling.meta" \
+    "window=firstmate:fm-$sibling" "endpoint_task_id=$sibling" \
+    "worktree=$moved" "project=$PROJECT_DIR" "kind=scout"
+  printf 'task=%s\nhome=%s\n' "$sibling" "$mate" > "$SLOT_CLAIM"
+  claim=$(cat "$SLOT_CLAIM")
+
+  out=$(run_spawn "$id" --scout)
+  status=$?
+  [ "$status" -ne 0 ] || fail "spawn took a slot whose leftover claim names a moved task from another home"$'\n'"$out"
+  assert_contains "$out" "claimed by task $sibling" \
+    "spawn did not name the other home's claimant"
+  [ "$(cat "$SLOT_CLAIM")" = "$claim" ] \
+    || fail "spawn overwrote another home's leftover claim: $(cat "$SLOT_CLAIM")"
+  [ ! -e "$HOME_DIR/state/$id.meta" ] || fail "spawn published a record for another home's claimed slot"
+
+  pass "fm-spawn recycles a same-home leftover whose live owner moved, and still refuses that leftover from another home"
+}
+
 test_pool_slot_foreign_home_claim_without_a_record_is_not_taken() {
   local rec id=pool-slot-orphan-claim-r1 gone=gone-owner out status before claim mate
 
@@ -906,6 +961,7 @@ test_remote_seeded_home_spawns_from_treehouse_pool
 test_pool_slot_claim_follows_the_spawn_outcome
 test_pool_slot_recorded_by_another_task_is_not_taken
 test_pool_slot_same_home_gone_owner_claim_is_taken
+test_pool_slot_same_home_moved_owner_claim_is_taken
 test_pool_slot_foreign_home_claim_without_a_record_is_not_taken
 test_linked_spawning_home_rejects_primary_before_refresh
 test_stale_pool_base_refreshes_before_branching

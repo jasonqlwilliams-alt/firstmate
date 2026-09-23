@@ -1249,8 +1249,9 @@ fm_treehouse_pool_slot() {  # <project-dir> <worktree>
 # released by bin/fm-teardown.sh when the slot goes back to the pool. A spawn
 # refuses to overwrite a claim that names a task from another home, including
 # one with no live record. A leftover claim whose named owner is gone from
-# this same home is recycled under the allocation lock so later same-home
-# slot reuse is not poisoned. bin/fm-teardown.sh --release-orphaned-slot-claim
+# this same home, or whose live owner is recorded there in another worktree,
+# is recycled under the allocation lock so later same-home slot reuse is not
+# poisoned. bin/fm-teardown.sh --release-orphaned-slot-claim
 # is the supported drop of a leftover spawn must not take. When a still-live
 # claiming record is dead or missing and another live record occupies the
 # slot, bin/fm-teardown.sh --retire-stale-record transfers that claim to the
@@ -1268,8 +1269,8 @@ fm_treehouse_slot_owner_marker() {  # <worktree>
 }
 
 # Claim a pool slot for a task. Replaces this task's own claim or an absent
-# claim; refuses a claim that still names a different task. Same-home gone
-# leftovers are dropped by fm_treehouse_slot_owner_recycle_same_home_gone
+# claim; refuses a claim that still names a different task. Same-home gone or
+# moved leftovers are dropped by fm_treehouse_slot_owner_recycle_same_home_gone
 # before this write, under the allocation lock. The rename is atomic, so a
 # reader either sees the old claim or the new one.
 fm_treehouse_slot_owner_claim() {  # <worktree> <task-id> <home>
@@ -1384,13 +1385,17 @@ fm_treehouse_slot_owner_release_orphaned() {  # <worktree> <record-state>
   rm -f "$marker" 2>/dev/null || return 1
 }
 
-# Drop a leftover claim that names a gone owner in this same home, so a later
-# same-home spawn can take a slot Treehouse reused. Returns 0 after recycling
-# that leftover or when no claim is present. Returns 1 when the leftover is
-# not this home's gone owner (foreign home, live owner, or unreadable) and 2
-# when the home scan cannot be trusted. Callers hold the project lock.
+# Drop a leftover claim that names a gone or moved owner in this same home, so
+# a later same-home spawn can take a slot Treehouse reused. The owner is gone
+# when no reachable home has a live record for it, and moved when its record
+# in <record-state> names a different worktree, as after that task was
+# recovered into another slot. Returns 0 after recycling that leftover or when
+# no claim is present. Returns 1 when the leftover is not this home's gone or
+# moved owner (foreign home, an owner record that names this slot or no
+# worktree, or unreadable) and 2 when the home scan cannot be trusted. Callers
+# hold the project lock.
 fm_treehouse_slot_owner_recycle_same_home_gone() {  # <worktree> <home> <record-state>
-  local worktree=$1 home=$2 record_state=$3 spawn_home claim_home rc=0
+  local worktree=$1 home=$2 record_state=$3 spawn_home claim_home slot owner_meta owner_path field marker rc=0
   fm_treehouse_slot_owner_state "$worktree" ""
   case "$FM_TREEHOUSE_SLOT_OWNER" in
     absent) return 0 ;;
@@ -1399,14 +1404,24 @@ fm_treehouse_slot_owner_recycle_same_home_gone() {  # <worktree> <home> <record-
   esac
   fm_treehouse_slot_owner_record_live "$FM_TREEHOUSE_SLOT_OWNER_ID" "$record_state" || rc=$?
   case "$rc" in
-    1) ;;
-    0) return 1 ;;
+    0|1) ;;
     *) return 2 ;;
   esac
   spawn_home=$(fm_treehouse_canonical_dir "$home") || return 1
   claim_home=$(fm_treehouse_canonical_dir "${FM_TREEHOUSE_SLOT_OWNER_HOME:-}") || return 1
   [ "$spawn_home" = "$claim_home" ] || return 1
-  fm_treehouse_slot_owner_release_orphaned "$worktree" "$record_state"
+  [ "$rc" = 0 ] || { fm_treehouse_slot_owner_release_orphaned "$worktree" "$record_state"; return; }
+  slot=$(fm_treehouse_canonical_dir "$worktree") || return 1
+  owner_meta="$record_state/$FM_TREEHOUSE_SLOT_OWNER_ID.meta"
+  [ -f "$owner_meta" ] && [ ! -L "$owner_meta" ] || return 1
+  [ -n "$(_fm_treehouse_meta_field "$owner_meta" worktree)" ] || return 1
+  for field in worktree home; do
+    owner_path=$(_fm_treehouse_meta_field "$owner_meta" "$field")
+    [ -n "$owner_path" ] || continue
+    [ "$(fm_treehouse_canonical_dir "$owner_path" || true)" != "$slot" ] || return 1
+  done
+  marker=$(fm_treehouse_slot_owner_marker "$worktree") || return 1
+  rm -f "$marker" 2>/dev/null || return 1
 }
 
 # Transfer this task's own claim to a live occupant of the same slot, so a

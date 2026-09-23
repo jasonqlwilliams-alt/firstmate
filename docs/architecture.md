@@ -334,7 +334,7 @@ The same emitter handles a merge firstmate performed and one its poll detected, 
 Teardown is fail-closed for ship worktrees: dirty worktrees refuse, and committed work must be landed before the worktree is returned.
 A pool worktree is only returned after teardown passes the slot-ownership proof: a contradictory task record or a supported live endpoint refuses without touching either task, and no discard authority relaxes that.
 A fresh spawn refuses to claim or launch into a pool slot any local home still records, or whose leftover owner claim names a task from another home, rather than overwriting that occupancy.
-A leftover claim whose named owner is gone from this same home is recycled under the allocation lock so later same-home slot reuse is not poisoned.
+A leftover claim whose named owner is gone from this same home, or whose live owner is recorded there in another worktree, is recycled under the allocation lock so later same-home slot reuse is not poisoned.
 `--retire-stale-record` is the supported retire of one colliding record whose copy does not currently have that task's branch checked out.
 It finishes only that record's cleanup and leaves the slot untouched, transferring the claim to a live occupant when this dead or missing record still named it.
 `--release-orphaned-slot-claim` is the supported drop of a slot claim whose named owner has no live record, including when another live record is or was on the slot.
