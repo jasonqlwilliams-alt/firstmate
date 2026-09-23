@@ -113,6 +113,117 @@ fm_github_guard_api_is_graphql() {  # <argv...>
   return 1
 }
 
+fm_github_guard_check_pr_body() {  # <repo> <argv...>
+  local repo=$1
+  shift
+  case "${2:-}" in
+    create|edit|merge) ;;
+    *) return 0 ;;
+  esac
+
+  local want='' arg
+  local body_text='' body_text_set=0 body_file=''
+  for arg in "$@"; do
+    if [ "$want" = body ]; then
+      body_text=$arg
+      body_text_set=1
+      want=''
+      continue
+    elif [ "$want" = body_file ]; then
+      body_file=$arg
+      want=''
+      continue
+    fi
+    case "$arg" in
+      -b|--body) want=body ;;
+      --body=*) body_text=${arg#--body=}; body_text_set=1 ;;
+      -b?*) body_text=${arg#-b}; body_text_set=1 ;;
+      -F|--body-file) want=body_file ;;
+      --body-file=*) body_file=${arg#--body-file=} ;;
+      -F?*) body_file=${arg#-F} ;;
+    esac
+  done
+
+  if [ "$body_text_set" -eq 1 ]; then
+    printf '%s' "$body_text" | "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr-body "$repo" - || return $?
+  fi
+
+  if [ -n "$body_file" ]; then
+    if [ "$body_file" = "-" ]; then
+      local stdin_tmp rc
+      stdin_tmp=$(mktemp "${TMPDIR:-/tmp}/fm-delivery-stdin.XXXXXX") || {
+        printf 'REFUSED: %s cannot buffer pull-request standard input for body inspection.\n' "$FM_GITHUB_GUARD_TOOL" >&2
+        return 1
+      }
+      cat > "$stdin_tmp"
+      "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr-body "$repo" "$stdin_tmp"
+      rc=$?
+      if [ "$rc" -ne 0 ]; then
+        rm -f "$stdin_tmp"
+        return "$rc"
+      fi
+      FM_SAVED_STDIN_FILE=$stdin_tmp
+      export FM_SAVED_STDIN_FILE
+    else
+      "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr-body "$repo" "$body_file" || return $?
+    fi
+  fi
+  return 0
+}
+
+fm_github_guard_check_api_body() {  # <repo> <argv...>
+  local repo=$1
+  shift
+  local arg want='' body_text='' body_text_set=0 input_file=''
+  for arg in "$@"; do
+    if [ "$want" = field ]; then
+      case "$arg" in
+        body=*) body_text=${arg#body=}; body_text_set=1 ;;
+      esac
+      want=''
+      continue
+    elif [ "$want" = input ]; then
+      input_file=$arg
+      want=''
+      continue
+    fi
+    case "$arg" in
+      -f|--field|-F|--raw-field) want=field ;;
+      -fbody=*|--field=body=*|-Fbody=*|--raw-field=body=*)
+        body_text=${arg#*=}; body_text_set=1
+        ;;
+      --input) want=input ;;
+      --input=*) input_file=${arg#--input=} ;;
+    esac
+  done
+
+  if [ "$body_text_set" -eq 1 ]; then
+    printf '%s' "$body_text" | "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr-body "$repo" - || return $?
+  fi
+
+  if [ -n "$input_file" ]; then
+    if [ "$input_file" = "-" ]; then
+      local stdin_tmp rc
+      stdin_tmp=$(mktemp "${TMPDIR:-/tmp}/fm-delivery-api-stdin.XXXXXX") || {
+        printf 'REFUSED: %s cannot buffer API standard input for body inspection.\n' "$FM_GITHUB_GUARD_TOOL" >&2
+        return 1
+      }
+      cat > "$stdin_tmp"
+      "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr-body "$repo" "$stdin_tmp"
+      rc=$?
+      if [ "$rc" -ne 0 ]; then
+        rm -f "$stdin_tmp"
+        return "$rc"
+      fi
+      FM_SAVED_STDIN_FILE=$stdin_tmp
+      export FM_SAVED_STDIN_FILE
+    else
+      "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr-body "$repo" "$input_file" || return $?
+    fi
+  fi
+  return 0
+}
+
 fm_github_guard_check() {  # <argv...>
   local repo target api_target
   repo=$(git rev-parse --show-toplevel 2>/dev/null) || {
@@ -124,8 +235,9 @@ fm_github_guard_check() {  # <argv...>
       printf 'REFUSED: %s could not resolve the pull-request repository before writing.\n' "$FM_GITHUB_GUARD_TOOL" >&2
       return 1
     }
-    "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr "$repo" "$target"
-    return $?
+    "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr "$repo" "$target" || return $?
+    fm_github_guard_check_pr_body "$repo" "$@" || return $?
+    return 0
   fi
   if [ "${1:-}" = api ]; then
     shift
@@ -139,8 +251,9 @@ fm_github_guard_check() {  # <argv...>
       return 1
     }
     if [ -n "$api_target" ]; then
-      "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr "$repo" "$api_target"
-      return $?
+      "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr "$repo" "$api_target" || return $?
+      fm_github_guard_check_api_body "$repo" "$@" || return $?
+      return 0
     fi
   fi
   return 0
