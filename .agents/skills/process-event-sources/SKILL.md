@@ -73,7 +73,7 @@ bin/fm-backup-helm.sh arm
 ```
 
 [`docs/backup-helm.md`](../../../docs/backup-helm.md) owns the operator procedure.
-The script header owns flags, the Cursor Grok probe, and fail-closed handover mechanics.
+The script header owns flags, the successor file and probe, and fail-closed handover mechanics.
 The trigger is Claude `all_models` `usableRunwaySeconds` under 12 hours, not the quota adapter's best-scope status.
 
 For a "do X as soon as Y is true" request whose condition AND action are both genuinely exact and deterministic, register a condition->action watch instead of re-checking in conversational turns:
@@ -124,7 +124,7 @@ Two rules the commands cannot enforce for you:
 : A routine no-op an adapter positively identifies never becomes a wake at all - it is recorded as handled and stays silent, so you never see it. For Lavish that is exactly an ended session carrying nothing: a board the captain closed without saying anything. A board close carrying a real answer, and every other result, still wakes you unchanged. Never read the absence of a wake as proof a review is still open; ask the source, not the queue.
 : A Lavish wake whose source id matches `bin/fm-procevent-lavish.sh source-id "$(bin/fm-bearings-board.sh path)"` is a bearings board result; load the `bearings` skill's board-wake handling regardless of which answer kinds the result contains.
 : A `when` wake carries the watch's one terminal captured outcome and may be re-announced until handled: `bin/fm-procevent-when.sh classify <result-file>` returns `fired` (relay the success and its output); `action-failed` (relay the captured error and decide recovery); `condition-error`, `never-true`, or `rejected` (the watch stopped safely without acting - report why and decide whether to re-arm); or `ambiguous` (the action was claimed but its outcome was never captured - verify its effect manually before anything else). Every `when` outcome is terminal and the action is never retried automatically, so after handling and the generic acknowledgement above, run `bin/fm-procevent-when.sh retire <name>` to clean the watch's private records before any re-arm.
-: A `when-backup-helm-claude-runway` `fired` outcome means the Cursor Grok 4.6 high helm was launched.
+: A `when-backup-helm-claude-runway` `fired` outcome means the configured successor helm was launched.
   Do not run handover again.
   `action-failed` means Claude was left in place.
   [`docs/backup-helm.md`](../../../docs/backup-helm.md) owns the follow-up.
