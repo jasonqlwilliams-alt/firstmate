@@ -442,6 +442,9 @@ When `config/crew-dispatch.json` exists, crewmate and scout spawns require an ex
 The inherited-local-material contract is owned by [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md); its harness-relevant consequence is that a secondmate's own crewmates use the primary's dispatch profiles and static harness value.
 Those inherited values are defaults and rules only; `fm-spawn` still permits a consciously chosen explicit runtime outside the config.
 `config/secondmate-harness` is not inherited because secondmates do not launch secondmates.
+`config/backup-helm-successor` is a separate local, gitignored file naming the primary that the Claude-runway [backup helm](backup-helm.md) hands over to, in the same `<harness> [<model>] [<effort>]` shape as `config/secondmate-harness`.
+It has no default and no fallback: an absent file, a file with no successor line, or a `default` harness makes arm refuse, and [`fm-backup-helm.sh --help`](../bin/fm-backup-helm.sh) owns eligible harnesses, validation, and the arm-time probe.
+It is not inherited into secondmate homes.
 For grok, `fm-spawn.sh` installs one firstmate-owned global turn-end hook under `$GROK_HOME/hooks/`, or `~/.grok/hooks/` when `GROK_HOME` is unset, and drops a per-task `.fm-grok-turnend` pointer in the worktree, with teardown removing the task token and pointer.
 For Kimi crews, `fm-spawn.sh` runs `fm-kimi-turnend-hook.sh install`, drops a per-task `.fm-kimi-turnend` pointer in the worktree, and records the matching private registry token for teardown.
 Kimi continues to use the captain's normal Kimi home, including the existing config, skills, and memory; Firstmate does not create an isolated Kimi home.
@@ -926,7 +929,7 @@ The `when` adapter (`bin/fm-procevent-when.sh`) turns this channel into a condit
 The (condition, action) spec is stored privately under `state/when/` and hash-bound by a trust record the same way `bin/fm-check-register.sh` binds a custom check, while the spec separately binds the resolved action executable's bytes; a mutated or unregistered spec or a changed action executable is refused before the action runs.
 Every failure path - a mutated spec or action executable, a condition error past its budget, an expired deadline, a failed action, or an earlier fire whose outcome was never captured - produces a terminal captured outcome that wakes firstmate rather than a silent retry, and a durable single-fire marker claimed before the action makes restarts and re-polls unable to fire it twice.
 The adapter automates only the exact deterministic subset: anything needing judgment, and anything destructive, irreversible, or security-sensitive, keeps the ordinary check-fires-then-firstmate-decides flow, and the adapter's header and `--help` own its commands, flags, and outcome document.
-[`backup-helm.md`](backup-helm.md) owns the Claude `all_models` runway watch that starts the Cursor Grok 4.6 high primary.
+[`backup-helm.md`](backup-helm.md) owns the Claude `all_models` runway watch that hands the helm to the successor named in `config/backup-helm-successor`.
 Do not revive a retired percent-threshold quota watch for that handover.
 
 This section is the single owner of the runner's operating contract.
