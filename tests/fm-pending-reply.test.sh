@@ -29,6 +29,9 @@
 #  15. Remote parent-replies.status is not classified as wrong-home
 #  16. An escalated correlation stays retryable while undelivered, is never reset
 #      once delivered, and its delivery-unknown decision still closes on resolve
+#  17. An operator close through fm-send --resolve-key retires its escalated
+#      record on the next watcher scan, including a record last scanned by an
+#      earlier release, while a close for another request never does
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -1570,6 +1573,92 @@ test_escalated_undelivered_correlation_stays_retryable() {
   pass "an escalated correlation stays retryable only while undelivered"
 }
 
+# Escalate one delivered request for <task> the way the watcher does: the mate
+# stays silent through the request turn and the one recovery turn.
+escalate_missed_request() {  # <home> <task> <request> -> corr
+  local home=$1 task=$2 request=$3 state corr
+  state="$home/state"
+  corr=$(fm_pending_reply_create "$home" "$state" "$task" "$request") || return 1
+  fm_pending_reply_mark_delivered "$state" "$corr" || return 1
+  fm_pending_reply_mark_turn_completed "$state" "$corr" request || return 1
+  FM_PENDING_REPLY_SEND_HOOK=true fm_pending_reply_send_recovery "$state" "$corr" || return 1
+  fm_pending_reply_mark_turn_completed "$state" "$corr" recovery || return 1
+  fm_pending_reply_maybe_escalate "$state" "$corr" || return 1
+  printf '%s' "$corr"
+}
+
+# The watcher's per-poll scan, with the test's stub backend on PATH and a
+# recovery hook that delivers nothing, so the scan only reconciles records.
+watcher_scan() {  # <fakebin> <state>
+  # shellcheck disable=SC2016 # the child shell expands its own arguments
+  env PATH="$1:$PATH" FM_PENDING_REPLY_SEND_HOOK=true \
+    bash -c '. "$1/bin/fm-pending-reply-lib.sh"; fm_pending_reply_tick "$2"' _ "$ROOT" "$2"
+}
+
+test_operator_resolve_key_close_retires_escalated_record() {
+  local dir fb log home state corr other rec other_rec rc lines_before open
+  dir="$TMP_ROOT/operator-close"; mkdir -p "$dir"
+  fb=$(make_stubs "$dir"); log="$dir/send.log"
+  home=$(setup_parent operator-close)
+  state="$home/state"
+  fm_write_secondmate_meta "$state/hibit.meta" "$home/sm" "sess:fm-hibit"
+  export FM_PENDING_REPLY_NOW=9800
+  corr=$(escalate_missed_request "$home" hibit "re-read the inherited config") \
+    || fail "precondition: the missed request should escalate"
+  other=$(escalate_missed_request "$home" hibit "run your own stow pass") \
+    || fail "precondition: the second missed request should escalate"
+  rec=$(fm_pending_reply_path "$state" "$corr")
+  other_rec=$(fm_pending_reply_path "$state" "$other")
+  unset FM_PENDING_REPLY_NOW
+
+  # The live shape: one escalation line, then firstmate's own operator close.
+  run_send "$fb" "$home" "$log" hibit --resolve-key "pending-reply-$corr" \
+    "Resolved by firstmate: nothing further is needed"; rc=$?
+  expect_code 0 "$rc" "the operator close should succeed"
+  grep -F "resolved [key=pending-reply-$corr]: pending-reply-resolved: task=hibit pending-reply-id=$corr via=operator-resolve-key" \
+    "$state/hibit.status" >/dev/null \
+    || fail "precondition: fm-send should write the operator close:"$'\n'"$(cat "$state/hibit.status")"
+  if grep -F "corr=$corr" "$state/hibit.status" >/dev/null; then
+    fail "precondition: nothing but the operator close may name the request:"$'\n'"$(cat "$state/hibit.status")"
+  fi
+
+  lines_before=$(grep -c '' "$state/hibit.status")
+  watcher_scan "$fb" "$state"
+  [ "$(phase_of "$state" "$corr")" = resolved ] \
+    || fail "the operator close should retire its escalated record, got $(phase_of "$state" "$corr")"
+  [ "$(fm_pending_reply_get "$rec" resolved_via)" = operator ] \
+    || fail "resolved_via should record the operator close, got '$(fm_pending_reply_get "$rec" resolved_via)'"
+  [ -n "$(fm_pending_reply_get "$rec" escalation_closed_epoch)" ] \
+    || fail "the already-closed escalation should be recorded as closed"
+  [ "$(grep -c '' "$state/hibit.status")" = "$lines_before" ] \
+    || fail "retiring an operator-closed record must not append a second close:"$'\n'"$(cat "$state/hibit.status")"
+  [ "$(phase_of "$state" "$other")" = escalated ] \
+    || fail "a close for another request must not retire this one, got $(phase_of "$state" "$other")"
+  [ -z "$(fm_pending_reply_get "$other_rec" resolved_epoch)" ] \
+    || fail "the unrelated escalated record must stay unresolved"
+  # The operator's answer is itself a reply-bearing request with its own record,
+  # so only these two requests' decisions are asserted here.
+  open=$(status_open_decisions "$state/hibit.status" | cut -f1)
+  case "$open" in *"pending-reply-$corr"*) fail "the operator-closed decision reopened: $open" ;; esac
+  case "$open" in *"pending-reply-$other"*) : ;; *) fail "the unanswered escalation should stay open, got '$open'" ;; esac
+
+  # A record an earlier release already scanned past its operator close: its
+  # stored signature is the bare file signature, which still matches the log.
+  run_send "$fb" "$home" "$log" hibit --resolve-key "pending-reply-$other" \
+    "Closed by firstmate"; rc=$?
+  expect_code 0 "$rc" "the second operator close should succeed"
+  fm_pending_reply_set "$other_rec" parent_status_scan_signature \
+    "$(fm_pending_reply_file_signature "$state/hibit.status")"
+  watcher_scan "$fb" "$state"
+  [ "$(phase_of "$state" "$other")" = resolved ] \
+    || fail "a record last scanned under the old rules should be rescanned and retire, got $(phase_of "$state" "$other")"
+  open=$(status_open_decisions "$state/hibit.status" | cut -f1)
+  case "$open" in
+    *"pending-reply-$corr"*|*"pending-reply-$other"*) fail "an operator-closed decision is still open: $open" ;;
+  esac
+  pass "an operator --resolve-key close retires its escalated record on the next scan"
+}
+
 # --- run --------------------------------------------------------------------
 
 test_normal_correlated_reply_resolves_once
@@ -1611,5 +1700,6 @@ test_mechanical_helper_writes_parent_channel
 test_remote_parent_replies_is_not_wrong_home
 test_local_parent_replies_is_wrong_home_evidence
 test_escalated_undelivered_correlation_stays_retryable
+test_operator_resolve_key_close_retires_escalated_record
 
 printf 'ok - all pending-reply tests passed\n'
