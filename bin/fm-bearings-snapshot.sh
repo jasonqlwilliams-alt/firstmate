@@ -368,6 +368,8 @@ MODEL=$(printf '%s' "$SNAP" | jq \
   --argjson pr_rows_min_total "$PR_ROWS_MIN_TOTAL" \
   --argjson return_catchup "$RETURN_CATCHUP" \
   --argjson candidate_prs "$CANDIDATE_PRS" "$FM_LANDED_JQ_DEFS"'
+  def clean: if . == null then null else
+    (tostring | gsub("\\s+"; " ") | gsub("^\\s+|\\s+$"; "")) end;
   def trunc($n): if . == null then null else
     (tostring | gsub("\\s+"; " ") | if (length > $n) then (.[:$n] + "…") else . end) end;
   def fit($n):
@@ -415,9 +417,9 @@ MODEL=$(printf '%s' "$SNAP" | jq \
         end
       end;
   def as_gate($owner):
-    {id, title:(.title | trunc(60)),
+    {id, title:(.title | clean),
      blocked_by:((.unresolved_blocker_ids // []) | if length > 0 then join(",") else "-" end | trunc(120)),
-     reason:(hold_gate_reason | trunc(40)), owner:$owner,
+     reason:(hold_gate_reason | clean), owner:$owner,
      filed:((.since // null) | trunc(40))};
   def round_robin_landed($n):
     . as $groups
@@ -545,7 +547,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
                  elif (($return_catchup.reason // "") != "") then
                    ("catch-up retained: " +
                     ($return_catchup.reason | sub("[,;] *catch-up stays gated$"; "")))
-                 else "away-return catch-up is still open" end) | trunc(60)),
+                 else "away-return catch-up is still open" end) | clean),
          blocked_by:"-",
          reason:"away-return catch-up",
          owner:"(main)",
@@ -553,7 +555,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
      else [] end) as $return_catchup_gate
   | ((if (.main_inventory.valid == false) then
         [{id:"(main-inventory)",
-          title:((.main_inventory.reason // "main inventory invalid") | trunc(60)),
+          title:((.main_inventory.reason // "main inventory invalid") | clean),
           blocked_by:"-",
           reason:"main inventory",
           owner:"(main)",

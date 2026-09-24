@@ -2535,6 +2535,34 @@ EOF
   pass "Underway rows carry the durable task name and gates carry their filed date"
 }
 
+# A gate row whose title exceeds 60 characters and whose reason exceeds 40 must
+# survive the projection intact without clipping.
+test_gate_projection_preserves_full_title_and_reason() {
+  local home fakebin json toon long_title long_reason
+  home=$(make_home gate-full-title-reason)
+  : > "$home/data/secondmates.md"
+  long_title="A very long task title that comfortably exceeds sixty characters for testing gate projection intactness"
+  long_reason="A very long blocker reason that easily exceeds forty characters"
+  cat > "$home/data/backlog.md" <<EOF
+## In flight
+
+## Queued
+- [ ] long-gate - $long_title blocked-by: blocker-task - $long_reason (repo: firstmate) (kind: ship)
+
+## Done
+EOF
+  fakebin=$(make_fakebin "$home")
+  json=$(run "$home" "$fakebin" --json)
+  printf '%s' "$json" | jq -e --arg title "$long_title" --arg reason "$long_reason" '
+    .gates | any(.id == "long-gate" and .title == $title and .reason == $reason)
+  ' >/dev/null || fail "gate title or reason was clipped in JSON projection: $json"
+
+  toon=$(run "$home" "$fakebin")
+  assert_contains "$toon" "$long_title" "TOON projection did not preserve full gate title"
+  assert_contains "$toon" "$long_reason" "TOON projection did not preserve full gate reason"
+  pass "gate row with title >60 chars and reason >40 chars survives projection intact"
+}
+
 test_mixed_secondmate_roles_partial_state_and_captain_readiness() {
   local home fakebin hibit wheel sshhip ha canonical json
   home=$(make_home mixed-domain-regressions)
@@ -3350,6 +3378,7 @@ test_active_children_project_independent_of_home_captain_hold
 test_nameless_legacy_summary_uses_its_durable_identifier
 test_newest_filed_gates_are_selected_before_snapshot_bounds
 test_underway_and_gate_rows_carry_the_durable_name_and_filed_date
+test_gate_projection_preserves_full_title_and_reason
 test_mixed_secondmate_roles_partial_state_and_captain_readiness
 test_main_captain_readiness_matches_secondmate_projection
 test_completed_scout_report_not_pending
