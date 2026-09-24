@@ -1,0 +1,14 @@
+ok - condition classifies Claude all_models runway
+ok - probe demands a correct answer and reports why a successor does not answer
+ok - mid-turn Claude is waited out and never interrupted
+ok - a successor that does not answer refuses the handover before any pane send
+ok - handover never defaults a successor
+ok - unsupported backends are refused
+ok - handover requires an explicit FM_HOME
+ok - idle handover stows, exits, and launches the configured successor
+ok - a cursor successor keeps the proven interactive Cursor primary shape
+ok - already-released lock skips /stow and /exit then launches
+ok - unreadable lock status refuses the handover
+ok - arm refuses an unset, default, ineligible, or malformed successor by name
+ok - arm registers the when-watch and retire cleans it up
+ok - arm refuses a configured successor that does not answer
