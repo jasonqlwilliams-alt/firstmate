@@ -156,7 +156,8 @@
 # (pending-reply-* today; bin/fm-classify-lib.sh's reserved-key guard) is
 # closed with the owning library's vocabulary note
 # (fm_pending_reply_close_note_for_key / fm_pending_reply_resolved_note), so
-# the fold actually drops it; a bare answered: note is not a reserved-key
+# the fold actually drops it and the library's next scan settles the request's
+# record; a bare answered: note is not a reserved-key
 # transition and is never written for those keys. If this send cannot produce
 # a note the guard will accept, or the structural key would be lost to the
 # status-line cap, it refuses before sending and names the cause rather than

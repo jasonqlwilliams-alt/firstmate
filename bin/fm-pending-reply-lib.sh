@@ -59,7 +59,7 @@
 #                           escalation was closed again (see the escalation
 #                           lifecycle note below); empty until then
 #   resolved_epoch=
-#   resolved_via=           status | document | helper | empty
+#   resolved_via=           status | document | helper | operator | empty
 #   wrong_home_hits=        count of corr sightings under the secondmate home
 #   wrong_home_first_sighting= encoded path:line identity of the first sighting
 #   wrong_home_sightings=   comma-separated encoded path:line identities
@@ -81,6 +81,9 @@
 # fm-send --resolve-key (bin/fm-send.sh header): it must speak the close note
 # owned below (fm_pending_reply_resolved_note), because a bare answered: note is
 # not a reserved-key transition and would leave the decision open.
+# That close settles the record too: the parent-status scan reads the close of a
+# request's own reserved decision as settling it (via=operator), because the
+# note names the request as pending-reply-id= and so never matches corr=.
 #
 # Retryable undelivered escalation: a delivery-unknown escalation reports that
 # the request may never have reached the mate, so the request stays the owner's
@@ -119,6 +122,11 @@ _FM_PENDING_REPLY_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/n
 FM_PENDING_REPLY_SCHEMA='fm-pending-reply.v1'
 FM_PENDING_REPLY_CORR_RE='corr=[A-Fa-f0-9]{16}'
 FM_PENDING_REPLY_GRACE_DEFAULT=120
+# Version of the rules that decide which parent-status line settles a record.
+# A stored parent_status_scan_signature carries the version it was taken under,
+# so a record scanned under older rules is rescanned once after they change
+# instead of waiting for its status log to grow.
+FM_PENDING_REPLY_SETTLE_RULES=2
 
 fm_pending_reply_now() {
   if [ -n "${FM_PENDING_REPLY_NOW:-}" ]; then
@@ -576,13 +584,32 @@ fm_pending_reply_line_resolves() {  # <line> <corr_id>
   fm_pending_reply_text_has_corr "$line" "$corr"
 }
 
+# 0 if a status line closes <corr_id>'s own reserved escalation decision with
+# this library's close vocabulary, as fm-send --resolve-key's operator close
+# does. Structural, so an escalation line (never resolved) cannot match, and a
+# close for another request's key never matches.
+fm_pending_reply_line_closes_decision() {  # <line> <corr_id>
+  local line=$1 corr=$2 key
+  [ -n "$line" ] && [ -n "$corr" ] || return 1
+  [ "$(status_line_verb "$line")" = resolved ] || return 1
+  key=$(_fm_decision_key "$line") || return 1
+  [ "$key" = "$(fm_pending_reply_escalation_key "$corr")" ] || return 1
+  case "$(status_line_note "$line")" in
+    pending-reply-resolved:*) return 0 ;;
+  esac
+  return 1
+}
+
 # Scan a status file for a correlated resolve. Prints the matching line or empty.
-fm_pending_reply_find_resolve_line() {  # <status-file> <corr_id>
-  local status_file=$1 corr=$2 line
+# With the optional <parent> flag, the file is the record's parent status and
+# the close of the request's own decision settles it as well.
+fm_pending_reply_find_resolve_line() {  # <status-file> <corr_id> [parent]
+  local status_file=$1 corr=$2 parent=${3-} line
   [ -f "$status_file" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
     [ -n "$line" ] || continue
-    if fm_pending_reply_line_resolves "$line" "$corr"; then
+    if fm_pending_reply_line_resolves "$line" "$corr" \
+      || { [ "$parent" = parent ] && fm_pending_reply_line_closes_decision "$line" "$corr"; }; then
       printf '%s' "$line"
       return 0
     fi
@@ -671,22 +698,29 @@ _fm_pending_reply_try_resolve_locked() {  # <state-dir> <corr_id> [status-file-o
   fi
   status_file=${status_override:-$(fm_pending_reply_get "$rec" parent_status)}
   if [ -z "$status_override" ] && [ "$unconfirmed" = 0 ]; then
-    signature=$(fm_pending_reply_file_signature "$status_file")
+    signature="rules${FM_PENDING_REPLY_SETTLE_RULES}:$(fm_pending_reply_file_signature "$status_file")"
     previous=$(fm_pending_reply_get "$rec" parent_status_scan_signature)
     [ "$signature" != "$previous" ] || return 1
   fi
-  line=$(fm_pending_reply_find_resolve_line "$status_file" "$corr")
+  line=$(fm_pending_reply_find_resolve_line "$status_file" "$corr" parent)
   if [ -z "$line" ]; then
     if [ -z "$status_override" ] && [ "$unconfirmed" = 0 ]; then
       fm_pending_reply_set "$rec" parent_status_scan_signature "$signature" || return 1
     fi
     return 1
   fi
-  via=$(fm_pending_reply_resolve_via_of_line "$line")
+  if fm_pending_reply_line_closes_decision "$line" "$corr"; then
+    via=operator
+  else
+    via=$(fm_pending_reply_resolve_via_of_line "$line")
+  fi
   now=$(fm_pending_reply_now)
   fm_pending_reply_set "$rec" phase resolved || return 1
   if [ -z "$delivered" ]; then
-    fm_pending_reply_mark_delivered "$state" "$corr" "$now" || return 1
+    # A mate's report proves delivery; an operator close does not.
+    if [ "$via" != operator ]; then
+      fm_pending_reply_mark_delivered "$state" "$corr" "$now" || return 1
+    fi
     rm -f "$marker" 2>/dev/null || true
   fi
   fm_pending_reply_set "$rec" resolved_epoch "$now" || return 1
