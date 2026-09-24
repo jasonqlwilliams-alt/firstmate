@@ -55,6 +55,7 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 TARGET_HOME=${FM_HOME:?FM_HOME is required}
 CONTROL_STATE="$TARGET_HOME/state/parent-route"
 CONTROL_DATA="$TARGET_HOME/data/.parent-route"
+PARENT_STATE="${FM_STATE_OVERRIDE:-$TARGET_HOME/state}"
 REMOTE_HERDR_SESSION=fm-remote
 
 # shellcheck source=bin/fm-backend.sh
@@ -65,6 +66,10 @@ REMOTE_HERDR_SESSION=fm-remote
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
 # shellcheck source=bin/fm-task-inbox-lib.sh
 . "$SCRIPT_DIR/fm-task-inbox-lib.sh"
+# shellcheck source=bin/fm-tasks-axi-lib.sh
+. "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
+# shellcheck source=bin/fm-backlog-transition-lib.sh
+. "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
@@ -79,6 +84,18 @@ validate_home() { # <id> [allow-absent]
   marker=$(cat "$TARGET_HOME/.fm-secondmate-home")
   [ "$marker" = "$id" ] || die "remote home belongs to $marker, not $id"
   [ -f "$TARGET_HOME/AGENTS.md" ] && [ -d "$TARGET_HOME/bin" ] || die "remote home is not a Firstmate checkout"
+}
+
+is_parent_remote_secondmate() { # <id>
+  local id=$1 meta rhost
+  meta="$PARENT_STATE/$id.meta"
+  if [ -f "$meta" ] && [ ! -L "$meta" ]; then
+    rhost=$(fm_meta_get "$meta" remote_host 2>/dev/null || true)
+    if [ -n "$rhost" ]; then
+      return 0
+    fi
+  fi
+  return 1
 }
 
 meta_path() { printf '%s/%s.meta\n' "$CONTROL_STATE" "$1"; }
@@ -223,24 +240,12 @@ cmd_launch() {
 # the copy on this host is a different home's file, so letting the control plane
 # re-resolve it here would silently drift the mate onto another runtime. `default`
 # explicitly clears an absent parent pin; `-` remains its compatibility spelling.
-cmd_relaunch() {
+cmd_relaunch_local() {
   local id=$1 harness=$2 model=$3 effort=$4
   local -a control_args
 
-  validate_id "$id"
   validate_home "$id"
-  case "$harness" in
-    claude|codex|opencode|pi|pi-signed|grok|kimi|cursor) ;;
-    *) die "unverified remote secondmate harness: $harness" ;;
-  esac
-  case "$effort" in -|default|low|medium|high|xhigh|max|ultra) ;; *) die "invalid remote secondmate effort: $effort" ;; esac
-  case "$model" in *[[:space:]]*) die "invalid remote secondmate model: $model" ;; esac
-  if [ "$effort" = ultra ]; then
-    "$SCRIPT_DIR/fm-harness.sh" validate-native-effort "$harness" "$model" "$effort" || return 1
-  fi
   remote_endpoint_require "$id"
-  [ "$model" != - ] || model=default
-  [ "$effort" != - ] || effort=default
   control_args=("$id" relaunch --harness "$harness" --model "$model" --effort "$effort")
   # The same launch-boundary facts cmd_launch establishes: the endpoint lives in
   # the dedicated fm-remote session, and the parent already owns both convergence
@@ -251,6 +256,106 @@ cmd_relaunch() {
     FM_CONFIG_OVERRIDE="$TARGET_HOME/config" FM_SKIP_SECONDMATE_INHERIT=1 \
     FM_SKIP_SECONDMATE_SYNC=1 \
     "$SCRIPT_DIR/fm-control.sh" "${control_args[@]}"
+}
+
+# Relaunch a remote second mate from the PARENT home: drive the remote relaunch
+# verb across fm-on.sh, and on success write the resolved runtime back into the
+# parent endpoint record (state/<id>.meta) so recovery never relaunches onto a
+# stale provider. A failed relaunch leaves the parent record untouched.
+cmd_relaunch_parent() {
+  local id=$1 harness=$2 model=$3 effort=$4
+  local meta meta_lock out rc relaunch_line resolved_harness resolved_model resolved_effort tmp
+  local -a on_env=()
+
+  meta="$PARENT_STATE/$id.meta"
+  [ -f "$meta" ] && [ ! -L "$meta" ] || die "remote secondmate $id has no endpoint record in this home"
+  meta_lock=$(fm_meta_lock_path "$meta") || die "cannot determine metadata lock path for remote secondmate $id"
+  fm_lock_acquire_wait "$meta_lock"
+
+  on_env=(FM_HOME="$TARGET_HOME")
+  [ -z "${FM_DATA_OVERRIDE:-}" ] || on_env+=(FM_DATA_OVERRIDE="$FM_DATA_OVERRIDE")
+  if out=$(env "${on_env[@]}" "$SCRIPT_DIR/fm-on.sh" "$id" \
+    fm-remote-secondmate-control.sh relaunch \
+    "$id" "$harness" "$model" "$effort" < /dev/null 2>&1); then
+    :
+  else
+    rc=$?
+    fm_lock_release "$meta_lock"
+    [ -z "$out" ] || printf '%s\n' "$out" >&2
+    return "$rc"
+  fi
+
+  relaunch_line=$(printf '%s\n' "$out" | grep -E '^relaunched ' | tail -1)
+  if [ -z "$relaunch_line" ]; then
+    fm_lock_release "$meta_lock"
+    [ -z "$out" ] || printf '%s\n' "$out" >&2
+    die "remote secondmate $id reported success without a confirmed relaunch outcome line"
+  fi
+
+  resolved_harness=$(printf '%s\n' "$relaunch_line" | sed -n 's/^relaunched .* harness=\([^ ]*\).*/\1/p')
+  resolved_model=$(printf '%s\n' "$relaunch_line" | sed -n 's/^relaunched .* model=\([^ ]*\).*/\1/p')
+  resolved_effort=$(printf '%s\n' "$relaunch_line" | sed -n 's/^relaunched .* effort=\([^ ]*\).*/\1/p')
+
+  if [ -z "$resolved_harness" ]; then
+    fm_lock_release "$meta_lock"
+    [ -z "$out" ] || printf '%s\n' "$out" >&2
+    die "remote secondmate $id relaunch outcome line missing resolved harness: $relaunch_line"
+  fi
+
+  [ -n "$resolved_model" ] || resolved_model=default
+  [ -n "$resolved_effort" ] || resolved_effort=default
+
+  tmp="$PARENT_STATE/.$id.meta.relaunch.${BASHPID:-$$}"
+  awk -F= -v h="$resolved_harness" -v m="$resolved_model" -v e="$resolved_effort" '
+    $1 == "harness" { print "harness=" h; seen_h = 1; next }
+    $1 == "model" { print "model=" m; seen_m = 1; next }
+    $1 == "effort" { print "effort=" e; seen_e = 1; next }
+    { print }
+    END {
+      if (!seen_h) print "harness=" h
+      if (!seen_m) print "model=" m
+      if (!seen_e) print "effort=" e
+    }
+  ' "$meta" > "$tmp"
+
+  if ! fm_backlog_atomic_transition publish "$tmp" "$meta" "task record" "$PARENT_STATE"; then
+    rm -f "$tmp"
+    fm_lock_release "$meta_lock"
+    die "remote secondmate $id relaunched, but its parent record could not be updated ($FM_BACKLOG_TRANSITION_ERROR)"
+  fi
+
+  fm_lock_release "$meta_lock"
+  printf '%s\n' "$out"
+}
+
+cmd_relaunch() {
+  local id=$1 harness=$2 model=$3 effort=$4
+
+  validate_id "$id"
+  case "$harness" in
+    claude|codex|opencode|pi|pi-signed|grok|kimi|cursor) ;;
+    *) die "unverified remote secondmate harness: $harness" ;;
+  esac
+  case "$effort" in -|default|low|medium|high|xhigh|max|ultra) ;; *) die "invalid remote secondmate effort: $effort" ;; esac
+  case "$model" in *[[:space:]]*) die "invalid remote secondmate model: $model" ;; esac
+  if [ "$effort" = ultra ]; then
+    "$SCRIPT_DIR/fm-harness.sh" validate-native-effort "$harness" "$model" "$effort" || return 1
+  fi
+  [ "$model" != - ] || model=default
+  [ "$effort" != - ] || effort=default
+
+  if [ -f "$TARGET_HOME/.fm-secondmate-home" ] && [ ! -L "$TARGET_HOME/.fm-secondmate-home" ] \
+    && [ "$(cat "$TARGET_HOME/.fm-secondmate-home")" = "$id" ]; then
+    cmd_relaunch_local "$id" "$harness" "$model" "$effort"
+    return $?
+  fi
+
+  if is_parent_remote_secondmate "$id"; then
+    cmd_relaunch_parent "$id" "$harness" "$model" "$effort"
+    return $?
+  fi
+
+  validate_home "$id"
 }
 
 cmd_send() {
