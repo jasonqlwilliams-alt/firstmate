@@ -72,7 +72,7 @@ The shared no-mistakes gate refusal for fleet lifecycle entrypoints is summarize
 | `backends/cmux.sh`       | Experimental cmux session-provider adapter                                           |
 | `fm-config-push.sh`      | Push declared inherited local material to live local or remote secondmates and send the placement-specific config reread when changed |
 | `fm-delivery-guard.sh`   | Arm the shared pre-push hook and enforce configured branch, pull-request destinations, and PR body content |
-| `fm-repository-policy-lib.sh` | Parse explicit upstream/fork policy and authenticate GitHub write authority |
+| `fm-repository-policy-lib.sh` | Parse explicit upstream/fork policy, resolve GitHub repository identity from the origin remote, and authenticate GitHub write authority |
 | `fm-github-write-guard-lib.sh` | Resolve pull-request mutation targets and inspect PR body content for the spawned gh and gh-axi shims |
 | `fm-upstream-sync.sh`    | Check explicit upstreams now or when daily-due, validate, and fast-forward or stage isolated review branches |
 | `fm-project-mode.sh`     | Resolve a project's registered delivery posture from `data/projects.md` for fleet sync and home seeding |

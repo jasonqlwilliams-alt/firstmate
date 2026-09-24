@@ -274,6 +274,10 @@ fm_repository_policy_authorize_url() {  # <action> <effective-url> <expected-ide
 # Resolve the owner/repository identity for Git origin from a target directory,
 # worktree, repository, or direct origin URL.
 # Fails with a clear message on stderr if origin is unconfigured or unparseable.
+# Callers pin GitHub read-side lookups (gh/gh-axi pr view and pr list) to this
+# identity, because a bare lookup can silently resolve through the fork's parent
+# to a different repository; it must never authorize a write, which stays the
+# repository-policy.json authority. tests/fm-origin-repository.test.sh pins it.
 fm_origin_repository() {  # [<target-dir-or-repo-or-url>]
   local target=${1:-.} origin identity raw_url host
   case "$target" in
