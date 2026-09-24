@@ -92,6 +92,9 @@ SH
   # Ordinary teardown reports any final ledger outcome before removing records.
   ln -s "$ROOT/bin/fm-inactive-reconcile.sh" "$fake/bin/fm-inactive-reconcile.sh"
   ln -s "$ROOT/bin/fm-parent-channel-lib.sh" "$fake/bin/fm-parent-channel-lib.sh"
+  # fm-repository-policy-lib.sh: teardown sources it at the top level for the
+  # origin-repository identity that pins gh/gh-axi PR lookups to this project.
+  ln -s "$ROOT/bin/fm-repository-policy-lib.sh" "$fake/bin/fm-repository-policy-lib.sh"
   # fm-guard.sh: stub (teardown calls it with `|| true`).
   cat > "$fake/bin/fm-guard.sh" <<'SH'
 #!/usr/bin/env bash
@@ -189,6 +192,9 @@ SH
   ln -s "$ROOT/bin/fm-operational-input.sh" "$fake/bin/fm-operational-input.sh"
   ln -s "$ROOT/bin/fm-inactive-reconcile.sh" "$fake/bin/fm-inactive-reconcile.sh"
   ln -s "$ROOT/bin/fm-parent-channel-lib.sh" "$fake/bin/fm-parent-channel-lib.sh"
+  # fm-repository-policy-lib.sh: teardown sources it at the top level for the
+  # origin-repository identity that pins gh/gh-axi PR lookups to this project.
+  ln -s "$ROOT/bin/fm-repository-policy-lib.sh" "$fake/bin/fm-repository-policy-lib.sh"
   cat > "$fake/bin/fm-guard.sh" <<'SH'
 #!/usr/bin/env bash
 exit 0
