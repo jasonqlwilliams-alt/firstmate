@@ -270,3 +270,45 @@ fm_repository_policy_authorize_url() {  # <action> <effective-url> <expected-ide
   fm_repository_policy_authorize_identity "$action" "$actual" || return 1
   FM_REPOSITORY_POLICY_EFFECTIVE_ID=$actual
 }
+
+# Resolve the owner/repository identity for Git origin from a target directory,
+# worktree, repository, or direct origin URL.
+# Fails with a clear message on stderr if origin is unconfigured or unparseable.
+fm_origin_repository() {  # [<target-dir-or-repo-or-url>]
+  local target=${1:-.} origin identity raw_url host
+  case "$target" in
+    https://*|http://*|ssh://*|git://*|git@*:*|*@github.com:*|github.com/*)
+      origin=$target
+      ;;
+    *)
+      origin=$(git -C "$target" remote get-url origin 2>/dev/null) \
+        || origin=$(git -C "$target" config --get remote.origin.url 2>/dev/null) \
+        || {
+          printf 'error: repository %s has no configured origin remote\n' "$target" >&2
+          return 1
+        }
+      ;;
+  esac
+  identity=$(fm_repository_url_identity "$origin") || {
+    if [ "$origin" != "$target" ] || [ -d "$target" ]; then
+      raw_url=$(git -C "$target" config --get remote.origin.url 2>/dev/null) || true
+      if [ -n "$raw_url" ] && [ "$raw_url" != "$origin" ]; then
+        identity=$(fm_repository_url_identity "$raw_url") || true
+      fi
+    fi
+  }
+  if [ -z "$identity" ]; then
+    printf 'error: cannot resolve GitHub repository from origin URL: %s\n' "$origin" >&2
+    return 1
+  fi
+  host=$(fm_repository_identity_host "$identity")
+  if [ "$host" != "${GH_HOST:-github.com}" ]; then
+    printf 'error: cannot resolve GitHub repository from origin URL: %s\n' "$origin" >&2
+    return 1
+  fi
+  fm_repository_identity_owner_repo "$identity"
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  fm_origin_repository "$@"
+fi
