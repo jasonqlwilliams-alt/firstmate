@@ -897,6 +897,8 @@ test_remote_secondmate_control_relaunch_updates_parent_record() {
   unset FM_FAKE_SSH_MODE
 
   [ "$rc" -ne 0 ] || fail "failed remote relaunch must exit non-zero"
+  assert_contains "$out" "error: remote host-local relaunch failed" \
+    "failed remote relaunch must surface the remote diagnostic on the parent side"
   assert_contains "$(cat "$meta")" "harness=codex" \
     "failed remote relaunch must leave harness untouched in parent meta record"
   assert_contains "$(cat "$meta")" "model=gpt-6-astra" \

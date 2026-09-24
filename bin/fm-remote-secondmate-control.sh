@@ -56,7 +56,6 @@ TARGET_HOME=${FM_HOME:?FM_HOME is required}
 CONTROL_STATE="$TARGET_HOME/state/parent-route"
 CONTROL_DATA="$TARGET_HOME/data/.parent-route"
 PARENT_STATE="${FM_STATE_OVERRIDE:-$TARGET_HOME/state}"
-PARENT_DATA="${FM_DATA_OVERRIDE:-$TARGET_HOME/data}"
 REMOTE_HERDR_SESSION=fm-remote
 
 # shellcheck source=bin/fm-backend.sh
@@ -71,8 +70,6 @@ REMOTE_HERDR_SESSION=fm-remote
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 # shellcheck source=bin/fm-backlog-transition-lib.sh
 . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
-# shellcheck source=bin/fm-secondmate-registry-lib.sh
-. "$SCRIPT_DIR/fm-secondmate-registry-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
@@ -90,20 +87,12 @@ validate_home() { # <id> [allow-absent]
 }
 
 is_parent_remote_secondmate() { # <id>
-  local id=$1 meta reg rhost
+  local id=$1 meta rhost
   meta="$PARENT_STATE/$id.meta"
-  reg="$PARENT_DATA/secondmates.md"
   if [ -f "$meta" ] && [ ! -L "$meta" ]; then
     rhost=$(fm_meta_get "$meta" remote_host 2>/dev/null || true)
     if [ -n "$rhost" ]; then
       return 0
-    fi
-  fi
-  if [ -f "$reg" ] && [ ! -L "$reg" ]; then
-    if secondmate_registry_line_for_id "$reg" "$id" 2>/dev/null; then
-      if [ "$SECONDMATE_REGISTRY_REMOTE" -eq 1 ]; then
-        return 0
-      fi
     fi
   fi
   return 1
@@ -285,11 +274,12 @@ cmd_relaunch_parent() {
 
   on_env=(FM_HOME="$TARGET_HOME")
   [ -z "${FM_DATA_OVERRIDE:-}" ] || on_env+=(FM_DATA_OVERRIDE="$FM_DATA_OVERRIDE")
-  out=$(env "${on_env[@]}" "$SCRIPT_DIR/fm-on.sh" "$id" \
+  if out=$(env "${on_env[@]}" "$SCRIPT_DIR/fm-on.sh" "$id" \
     fm-remote-secondmate-control.sh relaunch \
-    "$id" "$harness" "$model" "$effort" < /dev/null 2>&1)
-  rc=$?
-  if [ "$rc" -ne 0 ]; then
+    "$id" "$harness" "$model" "$effort" < /dev/null 2>&1); then
+    :
+  else
+    rc=$?
     fm_lock_release "$meta_lock"
     [ -z "$out" ] || printf '%s\n' "$out" >&2
     return "$rc"
