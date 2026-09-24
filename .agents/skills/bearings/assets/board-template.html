@@ -256,7 +256,26 @@ a { color: inherit; text-decoration: none; }
   font-size: var(--fs-xs); font-weight: 800; color: var(--text-muted);
   border: 1.5px dashed var(--ink-300); border-radius: var(--radius-pill); padding: 5px 12px; width: fit-content;
 }
+button.bb-morechip { font-family: var(--font-sans); background: transparent; cursor: pointer; }
+button.bb-morechip:hover { color: var(--text-strong); border-color: var(--ink-500); }
+button.bb-morechip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .bb-empty { padding: 18px; font-size: var(--fs-sm); color: var(--text-muted); }
+
+/* ---- Charted Next "why" disclosure: the badge opens its row ---- */
+.bb-why { font-family: var(--font-sans); cursor: pointer; transition: transform 120ms, box-shadow 120ms; }
+.bb-why:hover { transform: translate(-1px, -1px); box-shadow: 3px 3px 0 var(--ink-900); }
+.bb-why:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.bb-why__caret { display: inline-grid; transition: transform 120ms; }
+.bb-why__caret svg { width: 11px; height: 11px; }
+.bb-why[aria-expanded="true"] .bb-why__caret { transform: rotate(180deg); }
+.bb-row--open { padding-bottom: 6px; }
+.bb-row--open .bb-row__title, .bb-row--open .bb-row__sub { white-space: normal; }
+/* 46px = row pad + picker column + gap, so the explanation shares the title's left edge */
+.bb-detail { display: flex; flex-direction: column; gap: 8px; padding: 2px 18px 14px 46px; }
+.bb-detail[hidden], .bb-overflow[hidden] { display: none; }
+.bb-detail__lead { margin: 0; font-size: var(--fs-sm); font-weight: 700; color: var(--text-strong); line-height: 1.4; }
+.bb-detail__text { margin: 0; font-size: var(--fs-sm); color: var(--text-body); line-height: 1.45; }
+.bb-overflow > .bb-row:first-child { border-top: 1px solid var(--border-soft); }
 
 /* ---- Charted Next dispatch picker ---- */
 /* margin:0 kills the UA default checkbox margin so picker rows and spacer rows
@@ -675,16 +694,166 @@ __FM_BEARINGS_BOARD_DATA__
     barBtn.disabled = !n;
   }
 
-  if (!chartedQueued(data.charted).length && !chartedMoreQueued) {
-    ch.appendChild(el("div", "bb-empty", "Nothing is queued."));
+  /* Charted Next explanations. Presentation only: every row's badge opens a
+     plain-language account of what the row waits for, built from nothing but
+     the payload's own reason, dispatchable flag, kind, and filed date, so the
+     captain never has to ask what "waiting" means. The snapshot leads a
+     captain hold's reason with one short structured note - "blocked-by
+     <ids>", "until <date>", or "held <N>d" - and that note is what lets the
+     board say "a date you set" or "your answer" instead of a bare badge. Task
+     ids are routing data, never captain text: any id in a reason is named by
+     the work's own title when the payload carries it, and otherwise spelled
+     out in words. */
+  var MONTHS = ["January", "February", "March", "April", "May", "June", "July",
+    "August", "September", "October", "November", "December"];
+  var WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  var CARET_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+  var knownWork = {};
+  function noteWork(id, name, where) {
+    if (typeof id === "string" && id && typeof name === "string" && name) knownWork[id] = { name: name, where: where };
   }
-  chartedOrder(data.charted).forEach(function (t) {
+  data.charted.forEach(function (t) { if (t && !isWarning(t)) noteWork(t.id, t.title, "still queued"); });
+  data.underway.forEach(function (t) { if (t) noteWork(t.id, t.name, "underway now"); });
+  data.landed.forEach(function (t) { if (t) noteWork(t.id, t.what, "recently landed"); });
+  /* a durable task id: a lowercase slug, usually carrying its YYYYMMDD stamp */
+  var ID_CHARS = "A-Za-z0-9_/-";
+  function looksLikeId(s) { return /^[a-z0-9]+(?:[-/][a-z0-9]+)+$/.test(s); }
+  var knownIds = Object.keys(knownWork).filter(looksLikeId)
+    .sort(function (a, b) { return b.length - a.length; });
+  var SLUG_ID = /\b[a-z][a-z0-9]*(?:-[a-z0-9]+)*-\d{8}(?:-[a-z0-9]+)*\b/g;
+  function spellOutId(id) {
+    return id.replace(/-\d{8}(?=-|$)/g, "").split(/[-/]/).filter(Boolean).join(" ") || "other work";
+  }
+  function quoted(s) { return "\u201c" + s + "\u201d"; }
+  function nameIdsIn(text) {
+    var out = String(text || "");
+    knownIds.forEach(function (id) {
+      var esc = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      out = out.replace(new RegExp("(^|[^" + ID_CHARS + "])" + esc + "(?![" + ID_CHARS + "])", "g"),
+        function (all, pre) { return pre + quoted(knownWork[id].name); });
+    });
+    return out.replace(SLUG_ID, function (id) { return quoted(spellOutId(id)); });
+  }
+  function blockerPhrase(id) {
+    var k = Object.prototype.hasOwnProperty.call(knownWork, id) ? knownWork[id] : null;
+    if (k) return quoted(k.name) + " (" + k.where + ")";
+    return looksLikeId(id) ? quoted(spellOutId(id)) : id;
+  }
+  /* "a,b" and "a and b" split only when every part is an id, so a blocker the
+     composer already named in words ("the hash and dedupe pass") stays whole */
+  function splitBlockers(list) {
+    var parts = list.split(/\s*,\s*/).filter(Boolean);
+    var fine = [];
+    parts.forEach(function (part) { fine = fine.concat(part.split(/\s+and\s+/)); });
+    return fine.every(looksLikeId) ? fine : parts;
+  }
+  function joinWords(items) {
+    if (items.length < 2) return items.join("");
+    return items.slice(0, -1).join(", ") + " and " + items[items.length - 1];
+  }
+  function parseReason(reason) {
+    var r = String(reason || "").trim(), m;
+    if ((m = /^blocked(?:[- ]by|\s+on)\s+(.+?)(?:\s*:\s+(.*))?$/i.exec(r))) {
+      var list = m[1], extra = 0, more = /\s*\+(\d+)\s+more\s*$/.exec(list);
+      if (more) { extra = Number(more[1]); list = list.slice(0, more.index); }
+      return { kind: "blocked", ids: splitBlockers(list), extra: extra, why: m[2] || "" };
+    }
+    if ((m = /^until\s+(\d{4}-\d{2}-\d{2})(?:T[0-9:.]+Z?)?(?:\s*:\s+(.*))?$/i.exec(r))) {
+      return { kind: "dated", date: m[1], why: m[2] || "" };
+    }
+    if ((m = /^held\s+(\d+)d\b(?:\s*:\s+(.*))?$/i.exec(r))) {
+      return { kind: "aged", days: Number(m[1]), why: m[2] || "" };
+    }
+    return { kind: r ? "other" : "none", why: r };
+  }
+  function dayOf(iso) {
+    var d = new Date(String(iso || "").slice(0, 10) + "T00:00:00Z");
+    return isNaN(d.getTime()) ? null : d;
+  }
+  var boardDay = dayOf(data.generated);
+  function longDate(d) {
+    var s = WEEKDAYS[d.getUTCDay()] + " " + d.getUTCDate() + " " + MONTHS[d.getUTCMonth()];
+    return boardDay && boardDay.getUTCFullYear() !== d.getUTCFullYear() ? s + " " + d.getUTCFullYear() : s;
+  }
+  function shortDate(d) { return d.getUTCDate() + " " + MONTHS[d.getUTCMonth()].slice(0, 3); }
+  function daysFromBoard(d) { return boardDay && d ? Math.round((d - boardDay) / 86400000) : null; }
+  function relDays(n) {
+    if (n == null) return "";
+    if (n === 0) return "today";
+    if (n === 1) return "tomorrow";
+    if (n === -1) return "yesterday";
+    return n > 1 ? "in " + n + " days" : -n + " days ago";
+  }
+  function plural(n, word) { return n + " " + word + (n === 1 ? "" : "s"); }
+
+  /* One row's badge and explanation. Warnings stay a repair notice whatever
+     their reason says, so a notice never reads as startable work. */
+  function explainCharted(t) {
+    var x = { tone: "warn", label: "waiting", summary: "", lead: "", text: "", ctx: [] };
+    var p = parseReason(t.reason);
+    if (isWarning(t)) {
+      x.tone = "danger"; x.label = "needs repair";
+      x.summary = "a records notice, not work";
+      x.lead = "This is not work, and there is nothing here to start.";
+      x.text = "It is a notice that firstmate's own records need repairing, kept on the board so it is not missed.";
+      if (p.why) x.ctx.push(["problem", nameIdsIn(p.why)]);
+    } else if (p.kind === "blocked") {
+      var names = p.ids.map(blockerPhrase);
+      if (p.extra) names.push(plural(p.extra, "other piece") + " of work");
+      var first = p.ids.length ? blockerPhrase(p.ids[0]).replace(/ \([^)]*\)$/, "") : plural(p.extra, "other piece") + " of work";
+      x.summary = "waiting for " + first + (names.length > 1 ? " and more" : "");
+      x.lead = "Waiting on other work to finish first.";
+      x.text = "It can start once " + (names.length ? joinWords(names) : "the work ahead of it") +
+        (names.length > 1 ? " are" : " is") + " done. Nothing is needed from you for this one.";
+      if (p.why) x.ctx.push(["why", nameIdsIn(p.why)]);
+    } else if (p.kind === "dated" && dayOf(p.date)) {
+      var until = dayOf(p.date), n = daysFromBoard(until);
+      x.summary = "until " + shortDate(until) + ", a date you set";
+      x.lead = "Waiting on a date you set: " + longDate(until) + (n == null ? "" : " (" + relDays(n) + ")") + ".";
+      x.text = n != null && n <= 0
+        ? "That date has arrived, so this is due back with you."
+        : "It comes back to you then. Nothing is needed from you before that.";
+      if (p.why) x.ctx.push(["why", nameIdsIn(p.why)]);
+    } else if (p.kind === "aged") {
+      x.summary = "waiting on your answer, " + plural(p.days, "day");
+      x.lead = "Waiting on your answer.";
+      x.text = "It has been held for your decision for " + plural(p.days, "day") +
+        " with no date set, so it moved down here to keep the cards above short. " +
+        "Answer it whenever you are ready, or set a date for it to come back.";
+      if (p.why) x.ctx.push(["about", nameIdsIn(p.why)]);
+    } else if (t.dispatchable) {
+      x.tone = "online"; x.label = "ready";
+      x.summary = "ready to start";
+      x.lead = "Nothing is holding this back.";
+      x.text = "Tick it and queue the dispatch order below whenever you want it started.";
+      /* a note that only restates readiness adds nothing to the lead */
+      if (p.why && !/^ready to start\b[^;:]*$/i.test(p.why)) x.ctx.push(["note", nameIdsIn(p.why)]);
+    } else if (p.kind === "other") {
+      x.summary = nameIdsIn(p.why);
+      x.lead = "Not ready to start yet.";
+      x.ctx.push(["waiting on", nameIdsIn(p.why)]);
+    } else {
+      x.summary = "no reason recorded";
+      x.lead = "Not ready to start, and no reason is recorded for why.";
+      x.text = "Ask firstmate what it is waiting on.";
+    }
+    var filed = dayOf(t.filed);
+    if (filed) {
+      var ago = daysFromBoard(filed);
+      x.ctx.push(["filed", longDate(filed) + (ago != null && ago < 0 ? " (" + relDays(ago) + ")" : "")]);
+    }
+    return x;
+  }
+
+  var whySeq = 0;
+  function addChartedRow(container, t) {
+    var x = explainCharted(t);
     var row = el("div", "bb-row");
     if (t.dispatchable && !isWarning(t)) {
       anyPickable = true;
       var pick = document.createElement("input");
       pick.type = "checkbox"; pick.className = "bb-pick"; pick.value = t.id;
-      pick.setAttribute("aria-label", "Pick " + t.id + " for dispatch");
+      pick.setAttribute("aria-label", "Pick " + quoted(t.title) + " for dispatch");
       pick.addEventListener("change", function () {
         if (pick.checked && utf8ByteLength(pickedIds().join(",")) > 512) {
           pick.checked = false;
@@ -699,23 +868,84 @@ __FM_BEARINGS_BOARD_DATA__
     }
     var main = el("div", "bb-row__main");
     main.appendChild(el("div", "bb-row__title", t.title));
-    /* second line keeps the title uncrowded in the half-width column */
-    var chSub = t.repo || t.id;
-    main.appendChild(el("div", "bb-row__sub", t.reason ? t.reason + " · " + chSub : chSub));
+    /* second line keeps the title uncrowded in the half-width column; a row
+       with no repo shows only its summary, never its routing id */
+    main.appendChild(el("div", "bb-row__sub", t.repo ? x.summary + " · " + t.repo : x.summary));
     row.appendChild(main);
-    if (isWarning(t)) row.appendChild(badge("danger", "needs repair"));
-    else if (t.reason) row.appendChild(badge("warn", "waiting"));
-    ch.appendChild(row);
-  });
+
+    var panelId = "bb-why-" + (++whySeq);
+    var panel = el("div", "bb-detail");
+    panel.id = panelId;
+    panel.hidden = true;
+    panel.appendChild(el("p", "bb-detail__lead", x.lead));
+    if (x.text) panel.appendChild(el("p", "bb-detail__text", x.text));
+    if (x.ctx.length) {
+      var ctx = el("div", "bb-ctx");
+      x.ctx.forEach(function (kv) { ctx.appendChild(ctxRow(kv[0], kv[1])); });
+      panel.appendChild(ctx);
+    }
+
+    var btn = el("button", "fm-badge fm-badge--" + x.tone + " bb-why");
+    btn.type = "button";
+    btn.setAttribute("aria-expanded", "false");
+    btn.setAttribute("aria-controls", panelId);
+    btn.title = "Show why";
+    btn.appendChild(el("span", null, x.label));
+    var caret = el("span", "bb-why__caret");
+    caret.innerHTML = CARET_SVG;
+    btn.appendChild(caret);
+    btn.addEventListener("click", function () {
+      var open = panel.hidden;
+      panel.hidden = !open;
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      row.classList.toggle("bb-row--open", open);
+    });
+    row.appendChild(btn);
+    container.appendChild(row);
+    container.appendChild(panel);
+  }
+
+  if (!chartedQueued(data.charted).length && !chartedMoreQueued) {
+    ch.appendChild(el("div", "bb-empty", "Nothing is queued."));
+  }
+  /* Queued work past the first few rows is collapsed in place behind one
+     control rather than cut off; warnings never collapse, because a repair
+     notice hidden behind "show more" is a notice missed. */
+  var CHARTED_VISIBLE = 8;
+  var queuedRows = chartedOrder(chartedQueued(data.charted));
+  queuedRows.slice(0, CHARTED_VISIBLE).forEach(function (t) { addChartedRow(ch, t); });
+  var overflowRows = queuedRows.slice(CHARTED_VISIBLE);
+  if (overflowRows.length) {
+    var overflow = el("div", "bb-overflow");
+    overflow.id = "bb-charted-overflow";
+    overflow.hidden = true;
+    overflowRows.forEach(function (t) { addChartedRow(overflow, t); });
+    ch.appendChild(overflow);
+    var showLabel = "Show " + overflowRows.length + " more queued";
+    var reveal = el("button", "bb-morechip", showLabel);
+    reveal.type = "button";
+    reveal.setAttribute("aria-expanded", "false");
+    reveal.setAttribute("aria-controls", overflow.id);
+    reveal.addEventListener("click", function () {
+      var open = overflow.hidden;
+      overflow.hidden = !open;
+      reveal.setAttribute("aria-expanded", open ? "true" : "false");
+      reveal.textContent = open ? "Show fewer" : showLabel;
+    });
+    ch.appendChild(reveal);
+  }
+  chartedOrder(data.charted.filter(isWarning)).forEach(function (t) { addChartedRow(ch, t); });
   var chartedShown = chartedQueued(data.charted).length;
   var chartedTotal = chartedShown + chartedMoreQueued;
   document.getElementById("bb-charted-sub").textContent =
     chartedMoreQueued ? "showing " + chartedShown + " of " + chartedTotal : "";
   if (chartedMoreQueued) {
-    ch.appendChild(el("span", "bb-morechip", "+" + chartedMoreQueued + " more queued - ask firstmate for the full chart"));
+    ch.appendChild(el("span", "bb-morechip", "+" + chartedMoreQueued + " more queued " +
+      (chartedMoreQueued === 1 ? "item was" : "items were") + " left out when this board was built"));
   }
   if (chartedMoreWarnings) {
-    ch.appendChild(el("span", "bb-morechip", "+" + chartedMoreWarnings + " more repair warning" + (chartedMoreWarnings === 1 ? "" : "s") + " - ask firstmate for the full chart"));
+    ch.appendChild(el("span", "bb-morechip", "+" + chartedMoreWarnings + " more repair warning" +
+      (chartedMoreWarnings === 1 ? " was" : "s were") + " left out when this board was built"));
   }
 
   if (anyPickable) {
