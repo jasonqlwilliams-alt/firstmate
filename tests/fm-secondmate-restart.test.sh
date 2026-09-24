@@ -494,13 +494,18 @@ case "${rargs[1]:-}" in
     ;;
   relaunch)
     case "${FM_FAKE_SSH_MODE:-ok}" in
+      fail-relaunch)
+        printf 'error: remote host-local relaunch failed\n' >&2
+        exit 1
+        ;;
       slow-relaunch)
         : > "$FM_FAKE_DIR/remote-relaunch-start"
         /bin/sleep 2
         : > "$FM_FAKE_DIR/remote-relaunch-end"
         ;;
     esac
-    printf 'relaunched %s\n' "${rargs[2]}"
+    printf 'relaunched %s harness=%s from=claude model=%s effort=%s backend=herdr endpoint=fm-remote:2ndmate-%s worktree=/srv/%s\n' \
+      "${rargs[2]}" "${rargs[3]}" "${rargs[4]}" "${rargs[5]}" "${rargs[2]}" "${rargs[2]}"
     ;;
 esac
 exit 0
@@ -535,6 +540,12 @@ test_remote_mate_restarts_over_the_transport_hop() {
   [ "$(grep -n '^fm-remote-secondmate-control.sh send' "$dir/ssh.log" | head -1 | cut -d: -f1)" \
      -lt "$(grep -n '^fm-remote-secondmate-control.sh relaunch' "$dir/ssh.log" | head -1 | cut -d: -f1)" ] \
     || fail "the remote mate was restarted before it was asked to persist"$'\n'"$(cat "$dir/ssh.log")"
+  assert_contains "$(cat "$dir/home/state/sm2.meta")" "harness=codex" \
+    "remote restart must update harness in parent meta record"
+  assert_contains "$(cat "$dir/home/state/sm2.meta")" "model=big-model" \
+    "remote restart must update model in parent meta record"
+  assert_contains "$(cat "$dir/home/state/sm2.meta")" "effort=high" \
+    "remote restart must update effort in parent meta record"
   pass "T6 a remote mate restarts through the host-local control plane over the fm-on hop"
 }
 
@@ -854,6 +865,48 @@ test_already_current_unprovable_mate_stays_on_the_nudge_path() {
   pass "T16 an already-current mate with an unprovable runtime keeps the honest nudge path"
 }
 
+test_remote_secondmate_control_relaunch_updates_parent_record() {
+  local dir out rc meta
+  dir=$(new_case direct-control)
+  setup_remote_case "$dir" sm2 ok
+  meta="$dir/home/state/sm2.meta"
+
+  assert_contains "$(cat "$meta")" "harness=claude" "setup should start with claude harness"
+  assert_contains "$(cat "$meta")" "model=default" "setup should start with default model"
+  assert_contains "$(cat "$meta")" "effort=default" "setup should start with default effort"
+
+  out=$(PATH="$dir/fakebin:$PATH" FM_SSH_BIN="${FM_TEST_SSH_BIN:-ssh}" \
+    FM_HOME="$dir/home" "$ROOT/bin/fm-remote-secondmate-control.sh" \
+    relaunch sm2 codex gpt-6-astra high 2>&1); rc=$?
+
+  expect_code 0 "$rc" "direct remote relaunch should succeed"$'\n'"$out"
+  assert_contains "$out" "relaunched sm2 harness=codex" \
+    "direct remote relaunch should output the confirmation line"
+
+  assert_contains "$(cat "$meta")" "harness=codex" \
+    "direct remote relaunch must update harness in parent meta record"
+  assert_contains "$(cat "$meta")" "model=gpt-6-astra" \
+    "direct remote relaunch must update model in parent meta record"
+  assert_contains "$(cat "$meta")" "effort=high" \
+    "direct remote relaunch must update effort in parent meta record"
+
+  export FM_FAKE_SSH_MODE=fail-relaunch
+  out=$(PATH="$dir/fakebin:$PATH" FM_SSH_BIN="${FM_TEST_SSH_BIN:-ssh}" \
+    FM_HOME="$dir/home" "$ROOT/bin/fm-remote-secondmate-control.sh" \
+    relaunch sm2 cursor cursor-grok-4.6-high high 2>&1); rc=$?
+  unset FM_FAKE_SSH_MODE
+
+  [ "$rc" -ne 0 ] || fail "failed remote relaunch must exit non-zero"
+  assert_contains "$(cat "$meta")" "harness=codex" \
+    "failed remote relaunch must leave harness untouched in parent meta record"
+  assert_contains "$(cat "$meta")" "model=gpt-6-astra" \
+    "failed remote relaunch must leave model untouched in parent meta record"
+  assert_contains "$(cat "$meta")" "effort=high" \
+    "failed remote relaunch must leave effort untouched in parent meta record"
+
+  pass "T17 direct remote secondmate control relaunch updates parent record and preserves on failure"
+}
+
 test_persist_gates_and_asks_only_for_open_records
 test_persist_precedes_restart
 test_arrived_answer_precedes_deadline_check
@@ -873,5 +926,6 @@ test_unpublished_worker_result_is_accounted_for
 test_result_published_while_reaping_is_honored
 test_already_current_mate_restarts_end_to_end
 test_already_current_unprovable_mate_stays_on_the_nudge_path
+test_remote_secondmate_control_relaunch_updates_parent_record
 
 echo "# all fm-secondmate-restart tests passed"

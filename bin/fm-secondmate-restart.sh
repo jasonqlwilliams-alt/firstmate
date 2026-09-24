@@ -163,8 +163,8 @@ restart_mate() {  # <array-index>
   local i=$1 id restart_out restart_rc restart_reason ran_on
   id=${IDS[$i]}
   if [ "${PLACEMENT[i]}" = remote ]; then
-    restart_out=$(FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-on.sh" "$id" \
-      fm-remote-secondmate-control.sh relaunch \
+    restart_out=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+      "$SCRIPT_DIR/fm-remote-secondmate-control.sh" relaunch \
       "$id" "${HARNESS[i]}" "${MODEL[i]:-default}" "${EFFORT[i]:-default}" < /dev/null 2>&1)
     restart_rc=$?
   else
