@@ -1,0 +1,36 @@
+ok - control-plane trailing metadata preserves armed polls while unknown lines and PR tampering fail closed
+ok - raw-byte parser accepts canonical URLs and rejects the complete adversarial matrix
+ok - GitLab merge requests are followed on any instance and never wake falsely
+ok - validated merged polls notify once and retire before the next watcher cycle
+ok - a repeat identical merged poll for an already-notified task is absorbed, never queued as a main-blocking row
+ok - a failed upward merge report keeps its poll armed for repair and retry
+ok - staged self-merge and poll interleavings are never silent
+ok - a merge detected by the poll is reported upward from a secondmate home exactly once
+ok - a different merged PR for the same task gets its own first notification
+ok - merged poll retirement preserves every persistent secondmate lifecycle artifact
+ok - queue, receipt, and every fixed-path removal crash point recover without loss or repeated execution
+ok - open/red, closed-unmerged, malformed, and forge errors remain armed until an exact merged transition
+ok - replacement, nonterminal, tampered, and custom results receive no deletion authority
+ok - queue failure and untrusted receipts preserve canonical poll evidence
+ok - GitHub and GitLab exact merged results share one retirement path
+armed: state/task-a.check.sh
+promoted task-a to ship mode=direct-PR yolo=off (teardown protection restored)
+wrote ship instructions for mode=direct-PR: /tmp/fm-pr-check-security.ljdMi8/promotion-metadata/home/data/task-a/ship-instructions.md
+next: FM_HOME=/tmp/fm-pr-check-security.ljdMi8/promotion-metadata/home bin/fm-send.sh fm-task-a "$(cat /tmp/fm-pr-check-security.ljdMi8/promotion-metadata/home/data/task-a/ship-instructions.md)"
+window=firstmate:fm-task-a
+endpoint_task_id=task-a
+worktree=/tmp/fm-pr-check-security.ljdMi8/promotion-metadata/wt
+project=/tmp/fm-pr-check-security.ljdMi8/promotion-metadata/project
+pr=https://github.com/o/r/pull/37
+pr_head=0123456789abcdef0123456789abcdef01234567
+kind=ship
+mode=direct-PR
+yolo=off
+check: /tmp/fm-pr-check-security.ljdMi8/promotion-metadata/home/state/task-a.check.sh: merged
+1790276576	1	check	merged-task-a-https://github.com/o/r/pull/37	check: merge landed: task-a https://github.com/o/r/pull/37
+ok - scout promotion preserves the registered PR poll and its durable merge notification
+ok - PR and teardown entrypoints reject invalid arguments before every side effect
+ok - valid direct and merge flows record exact metadata and reject multiline head metadata
+ok - rejected metacharacter bytes remain inert at generation and watcher time
+ok - static poll is silent except for one merged line and remains watcher-bounded
+ok - interrupted atomic preparation cleans private temporaries and publishes nothing

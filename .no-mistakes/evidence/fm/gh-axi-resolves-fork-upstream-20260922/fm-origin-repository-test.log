@@ -1,0 +1,11 @@
+ok - fm_origin_repository resolves owner/repo from HTTPS origin remote URL
+ok - fm_origin_repository resolves owner/repo from SSH origin remote URL
+ok - fm_origin_repository resolves owner/repo when insteadOf rewrites remote get-url
+ok - fm_origin_repository fails loudly with clear error when origin remote is missing
+ok - fm_origin_repository fails loudly with clear error when origin is not a GitHub repository
+warning: You appear to have cloned an empty repository.
+ok - teardown pr_number_from_branch passes explicit --repo derived from origin
+warning: You appear to have cloned an empty repository.
+ok - teardown pr_is_merged passes explicit --repo derived from origin
+warning: You appear to have cloned an empty repository.
+ok - teardown fails safely with clear error when origin repository is unparseable
