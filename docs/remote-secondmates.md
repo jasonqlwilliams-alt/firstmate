@@ -231,7 +231,12 @@ Changed live routes receive a marked instruction to re-read the transferred file
 The primary records that remote nudge before delivery and retries it during locked startup convergence after a failed send.
 Local secondmates retain their generation-specific local pointer contract; remote transfers do not copy those primary-local instruction paths.
 
-A live remote second mate is restarted with `relaunch`, which runs the ordinary [control plane](agent-control.md) on that host: the endpoint record there was written by a host-local launch and carries no remote placement, so the transaction, its checkpoint, and its postconditions are the local ones.
+A live remote second mate is restarted with `relaunch`.
+On the remote host itself `fm-remote-secondmate-control.sh relaunch` runs the ordinary [control plane](agent-control.md) as a local relaunch there, because the remote endpoint record was written by a host-local launch.
+When invoked from the parent side — either through `fm-secondmate-restart.sh` (which passes `FM_STATE_OVERRIDE` so `cmd_relaunch_parent` can find the parent's endpoint records) or directly as `fm-remote-secondmate-control.sh relaunch <id> <harness> <model> <effort>` against a parent-side record — the command drives the relaunch over `fm-on.sh` and, on success, writes the resolved runtime profile back into the parent's `state/<id>.meta`.
+Recovery therefore never relaunches onto a stale harness, model, or effort that the parent recorded before the remote relaunch happened.
+A failed relaunch leaves the parent record untouched.
+
 The primary passes `<harness> <model|default|-> <effort|default|->` explicitly, using `default` when an axis has no parent pin, because `config/secondmate-harness` is not inherited into a second mate's home and the file on that host belongs to a different home; letting the far side re-resolve it would silently move the mate onto another runtime.
 SSH exit 255 leaves completion unknown and the route preserved, exactly as every other verb here.
 
