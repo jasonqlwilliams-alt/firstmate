@@ -1,0 +1,49 @@
+{
+  "schema": "fm-bearings.v1",
+  "home": "bearings-driver.I0BJXK/home",
+  "generated": "2026-07-11T18:00:00Z",
+  "prs": "not_requested (run: /bearings include PRs)",
+  "in_flight": [],
+  "secondmates": [],
+  "secondmate_reconcile": [],
+  "decisions_open": [],
+  "landed": [],
+  "gates": [
+    {
+      "id": "long-gate",
+      "title": "A very long task title that comfortably exceeds sixty characters for testing gate projection intactness",
+      "blocked_by": "blocker-task",
+      "reason": "A very long blocker reason that easily exceeds forty characters",
+      "owner": "(main)",
+      "filed": null
+    }
+  ],
+  "reports": [],
+  "recorded_prs": [],
+  "omitted": [
+    {
+      "surface": "backlog item bodies",
+      "reveal": "--fields bodies"
+    },
+    {
+      "surface": "task paths",
+      "reveal": "--fields paths"
+    },
+    {
+      "surface": "watch/steer actions",
+      "reveal": "--fields actions"
+    },
+    {
+      "surface": "healthy endpoint detail",
+      "reveal": "--fields endpoints"
+    },
+    {
+      "surface": "full scout-report inventory",
+      "reveal": "--all-reports"
+    },
+    {
+      "surface": "live PR discovery + checks",
+      "reveal": "--include-prs"
+    }
+  ]
+}

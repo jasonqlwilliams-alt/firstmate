@@ -1,0 +1,65 @@
+{
+  "schema": "fm-bearings.v1",
+  "home": "bearings-adversarial.XXZ3SO/home",
+  "generated": "2026-07-11T18:00:00Z",
+  "prs": "not_requested (run: /bearings include PRs)",
+  "in_flight": [],
+  "secondmates": [],
+  "secondmate_reconcile": [],
+  "decisions_open": [],
+  "landed": [],
+  "gates": [
+    {
+      "id": "gate-60",
+      "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "blocked_by": "b1",
+      "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "owner": "(main)",
+      "filed": null
+    },
+    {
+      "id": "gate-61",
+      "title": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+      "blocked_by": "b1",
+      "reason": "sssssssssssssssssssssssssssssssssssssssss",
+      "owner": "(main)",
+      "filed": null
+    },
+    {
+      "id": "gate-ws",
+      "title": "Double spaced title here",
+      "blocked_by": "b1",
+      "reason": "reason with multiple spaces",
+      "owner": "(main)",
+      "filed": null
+    }
+  ],
+  "reports": [],
+  "recorded_prs": [],
+  "omitted": [
+    {
+      "surface": "backlog item bodies",
+      "reveal": "--fields bodies"
+    },
+    {
+      "surface": "task paths",
+      "reveal": "--fields paths"
+    },
+    {
+      "surface": "watch/steer actions",
+      "reveal": "--fields actions"
+    },
+    {
+      "surface": "healthy endpoint detail",
+      "reveal": "--fields endpoints"
+    },
+    {
+      "surface": "full scout-report inventory",
+      "reveal": "--all-reports"
+    },
+    {
+      "surface": "live PR discovery + checks",
+      "reveal": "--include-prs"
+    }
+  ]
+}

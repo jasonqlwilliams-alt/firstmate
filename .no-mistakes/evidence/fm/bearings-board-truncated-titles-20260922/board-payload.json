@@ -1,0 +1,21 @@
+{
+  "schema": "fm-bearings-board.v1",
+  "home": "captain-home",
+  "generated": "2026-07-11T18:00:00Z",
+  "prs_live": false,
+  "captains_call": [],
+  "underway": [],
+  "landed": [],
+  "charted": [
+    {
+      "id": "long-gate",
+      "repo": "firstmate",
+      "title": "A very long task title that comfortably exceeds sixty characters for testing gate projection intactness",
+      "reason": "A very long blocker reason that easily exceeds forty characters",
+      "dispatchable": false,
+      "filed": null
+    }
+  ],
+  "charted_more": 0,
+  "charted_warning_more": 0
+}

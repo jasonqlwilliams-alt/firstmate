@@ -1,0 +1,20 @@
+schema: fm-bearings.v1
+home: bearings-driver.I0BJXK/home
+generated: "2026-07-11T18:00:00Z"
+prs: "not_requested (run: /bearings include PRs)"
+in_flight: []
+secondmates: []
+secondmate_reconcile: []
+decisions_open: []
+landed: []
+gates[1]{id,title,blocked_by,reason,owner,filed}:
+  long-gate,A very long task title that comfortably exceeds sixty characters for testing gate projection intactness,blocker-task,A very long blocker reason that easily exceeds forty characters,(main),null
+reports: []
+recorded_prs: []
+omitted[6]{surface,reveal}:
+  backlog item bodies,"--fields bodies"
+  task paths,"--fields paths"
+  watch/steer actions,"--fields actions"
+  healthy endpoint detail,"--fields endpoints"
+  full scout-report inventory,"--all-reports"
+  live PR discovery + checks,"--include-prs"

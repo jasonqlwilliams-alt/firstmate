@@ -1,0 +1,11 @@
+board: /tmp/bearings-board-captain.jtunl1/.lavish/bearings-board.html
+session:
+  file: /tmp/bearings-board-captain.jtunl1/.lavish/bearings-board.html
+  url: "http://127.0.0.1:4387/session/8469cdc54a4e9886"
+  status: opened
+next_step: "Do not respond to the user just yet. Now you must run `lavish-axi poll /tmp/bearings-board-captain.jtunl1/.lavish/bearings-board.html`. This command long-polls until the user sends feedback or ends the session, and it stays silent the whole time - that is normal, never kill it. Layout issues the browser detects do not return this poll; they wait in the user's Layout issues inbox until the user queues them, then arrive as an ordinary tag \"layout-warnings\" prompt. Do not pass --timeout-ms during normal agent use. Keep the poll in the foreground by default and let it return the feedback directly to the agent. A background poll is allowed only through a harness-native tracked background-job facility whose completion result is guaranteed to resume or notify the same agent. Never use `nohup`, shell `&`, `disown`, redirected fire-and-forget processes, or a detached terminal without an explicit verified callback merely to keep polling alive. If the harness has no completion-aware background facility, use the foreground poll or first wire a verified wake callback into the surrounding supervisor. Do not tell the user the artifact is being monitored until that wake path is live. If the poll gets killed or times out anyway, just re-run it - queued feedback is never lost. After applying feedback, run `lavish-axi poll /tmp/bearings-board-captain.jtunl1/.lavish/bearings-board.html --agent-reply \"<message for the user>\"` without --timeout-ms to show your response in Lavish Editor and wait for more feedback. If the user ends the session, stop polling and do not reopen it by re-running `lavish-axi /tmp/bearings-board-captain.jtunl1/.lavish/bearings-board.html` unless the user asks for further review or something genuinely important needs their visual attention - deliver routine updates directly in this conversation instead. When reopening is warranted, run `lavish-axi /tmp/bearings-board-captain.jtunl1/.lavish/bearings-board.html --reopen`."
+session: live
+served: /tmp/bearings-board-captain.jtunl1/.lavish/bearings-board.html
+bound: lavish-8469cdc54a4e9886
+armed: lavish-8469cdc54a4e9886
+listening: live
