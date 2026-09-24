@@ -143,7 +143,8 @@ The production runner measured the same family at `--family pr-forge --jobs 1` i
 That is close to the family's ceiling rather than a scheduling loss: its longest script runs 198.5s, so no partition of these six can finish faster than about 2.1x.
 The family's clock is two long scripts that do not contend: `fm-pr-check-security` (198.5s) and `fm-teardown` (194.1s) each own a worker for nearly the whole run, and `fm-pr-merge` (118.5s) plus `fm-x-mode` (79.4s) fill the other two.
 `bin/fm-test-isolation-proof.sh`'s own `--list-exclusions` keeps `fm-pr-check-security` and `fm-teardown` out of the mixed PORTABLE pool, where they would share a machine with unrelated lock and forge stress.
-Admitting them inside their own family is a different question and this proof answers it: the family's six scripts are safe with each other at four workers.
+Admitting them inside their own family is a different question and this proof answers it: the six scripts it measured on 2026-09-03 are safe with each other at four workers.
+The pr-forge family has since gained `tests/fm-origin-repository.test.sh` with the origin-identity PR-resolution fix, so refresh this record with `bin/fm-test-isolation-proof.sh --pool pr-forge --jobs 4` before relying on the admission for the current seven-script membership.
 
 ### secondmate: admitted
 
