@@ -1,0 +1,15 @@
+ok - an underway row leads with the task name and still reports its run status
+ok - an underway identifier label is not replaced by run status
+ok - charted next renders the most recently filed work first
+ok - charted rows with no filed date follow the dated rows in payload order
+ok - a warning row badges needs repair and explains itself as a notice, not startable work
+ok - the charted next count counts queued work only, and still renders warnings
+ok - a warning-only board reports nothing queued and still shows the warning
+ok - omitted warnings remain separate from omitted queued work
+ok - an omitted kind renders as queued work, waiting or ready by its reason
+ok - every charted badge is a control that opens a closed explanation
+ok - work with nothing holding it reads ready, not waiting
+ok - a dated hold says it waits on a date the captain set, and when
+ok - an aged hold says it is waiting on the captain's own answer
+ok - a blocked row names the work it waits on by title or in words, never by id
+ok - overflow queued work collapses behind one control that reveals it in place, and warnings never collapse
