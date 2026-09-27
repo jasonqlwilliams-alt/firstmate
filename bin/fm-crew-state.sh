@@ -766,6 +766,14 @@ if [ "$HAVE_RUN" = 1 ]; then
       ;;
   esac
 
+  if [ "$RUN_STATE" = done ] && [ "$RUN_SOURCE" = full ]; then
+    case "$RUN_DETAIL" in
+      checks\ green:*)
+        run_pr=$(strip_quotes "$(nm_field pr)")
+        [ -z "$run_pr" ] || RUN_DETAIL="$RUN_DETAIL${SEP}run PR: $run_pr"
+        ;;
+    esac
+  fi
   emit "$RUN_STATE" run-step "$RUN_DETAIL"
 fi
 

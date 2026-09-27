@@ -1095,6 +1095,16 @@ SH
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}' >/dev/null \
     || fail "authoritative green run awaiting merge must not disagree: $out"
+  sed 's|/pull/9|/pull/10|' "$home/run.txt" > "$home/run-other-pr.txt"
+  mv "$home/run-other-pr.txt" "$home/run.txt"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
+  printf '%s' "$out" | jq -e '.tasks[0].current_state.state == "done" and .tasks[0].current_state.source == "run-step" and .tasks[0].pr.url == "https://github.com/kunchenguid/firstmate/pull/9"' >/dev/null \
+    || fail "fixture must prove a green run with the original PR still registered: $out"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
+    || fail "a green run for another PR must not exempt the registered task: $out"
+  sed 's|/pull/10|/pull/9|' "$home/run.txt" > "$home/run-registered-pr.txt"
+  mv "$home/run-registered-pr.txt" "$home/run.txt"
   # Coarse run attribution appends monitoring evidence to the same green note.
   printf 'running %s %.7s 2026-07-11 18:00\n' "$branch" "$head" > "$home/coarse.txt"
   cat > "$fakebin/no-mistakes" <<'SH'

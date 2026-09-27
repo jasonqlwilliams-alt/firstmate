@@ -1042,7 +1042,10 @@ secondmate_home_summary_json() {  # <backlog-json-file> <tasks-json-file>
          | select((.current_state.state == "done"
                    and .pr.source == "meta" and .pr.url != null
                    and ((.current_state.source == "run-step"
-                         and (.current_state.detail | startswith("checks green:")))
+                         and (.current_state.detail | startswith("checks green:"))
+                         and (.pr.url as $url | .current_state.detail
+                              | split(" · run PR: ")
+                              | if length == 2 then .[1] == $url else false end))
                         or (.current_state.source == "status-log"
                             and (.pr.url as $url | .current_state.detail
                                  | split(" · ")[0] | endswith($url + " checks green"))))) | not)
