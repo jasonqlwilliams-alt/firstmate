@@ -776,7 +776,7 @@ if [ "$HAVE_RUN" = 1 ]; then
       ;;
   esac
 
-  if [ "$RUN_STATE" = done ] && [ "$RUN_SOURCE" = full ]; then
+  if [ "$RUN_STATE" = "done" ] && [ "$RUN_SOURCE" = full ]; then
     case "$RUN_DETAIL" in
       checks\ green:*)
         [ -z "$RUN_PR" ] || RUN_DETAIL="$RUN_DETAIL${SEP}run PR: $RUN_PR"
