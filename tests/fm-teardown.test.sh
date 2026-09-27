@@ -179,6 +179,8 @@ SH
   # Clone as the project; give it a `main` branch and an origin/HEAD.
   git clone -q "$case_dir/origin.git" "$case_dir/project"
   git -C "$case_dir/project" remote set-head origin main 2>/dev/null || true
+  git -C "$case_dir/project" config remote.origin.url "https://github.com/example/repo.git"
+  git -C "$case_dir/project" config "url.$case_dir/origin.git.insteadOf" "https://github.com/example/repo.git"
   # Add a worktree on a fresh task branch; that branch is where the crewmate commits.
   git -C "$case_dir/project" worktree add -q -b fm/task-x1 "$case_dir/wt" main
 
