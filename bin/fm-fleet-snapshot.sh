@@ -95,14 +95,19 @@
 #     schemas; a live ledger or cached copy missing either declaration or declaring
 #     an unsupported version is unavailable even when it contains no captain holds.
 #     These schemas also accept v1 summaries from older producers.
+#     A done in-flight child is valid only when its attributed current run-step
+#     reports passed checks and an exact run PR URL. If task metadata registers
+#     a PR, it must match that URL; absent metadata PR does not erase current
+#     run attribution. No-checks, another PR, or a later pending run cannot
+#     inherit an older green verdict. Other terminal in-flight children remain
+#     contradictions. A validated pending-close receipt is instead disclosed
+#     as unavailable for its task generation, not as an orphan or contradiction.
 #   secondmate_landed: {records[],truncated[],unreadable[],partial[]} - the
 #     compatibility landed-work roll-up derived from secondmate_current. Readable
 #     structured homes are partial, not unreadable, when an unavailable child state
 #     or a backlog-vs-metadata inventory mismatch makes their summary incomplete;
 #     they retain independently trustworthy structured surfaces.
-#     A registered green PR awaiting merge is a healthy terminal in-flight task.
-#     Validated pending teardown remains explicitly unavailable. An inventory
-#     mismatch also keeps the home's own current classification, which only an
+#     An inventory mismatch also keeps the home's own current classification, which only an
 #     unavailable child state or an untrustworthy backlog collapses to unknown.
 #     Which closed rows a home contributes is bin/fm-landed-lib.sh's rule, shared
 #     with the bearings projection so one Recently Landed section has one owner.

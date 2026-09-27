@@ -53,9 +53,11 @@
 #      passed/checks-passed -> done, failed/cancelled -> failed. EXCEPT: while
 #      the active step is ci, `axi status` alone cannot tell "still waiting on
 #      checks" from "checks green, waiting on merge" (see nm_ci_checks_state) -
-#      a ci-step log-tail check overrides working -> done once checks read
-#      green, so a green PR is never silently read as still-validating. And a
-#      terminal FAILED run whose only failure is the ci monitor step, after
+#      a ci-step log-tail check overrides working -> done once checks pass, so
+#      a green PR is never silently read as still-validating. The
+#      "no CI checks reported - still monitoring" marker also reads done as
+#      awaiting merge, but does not claim checks green. A terminal FAILED run
+#      whose only failure is the ci monitor step, after
 #      every substantive step completed and the ci log's last marker reads
 #      checks green, also reads done (held-for-merge), never failed: a monitor
 #      whose only remaining job is to observe a human merge decision must not
