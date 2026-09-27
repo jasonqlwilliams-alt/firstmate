@@ -567,6 +567,7 @@ HAVE_RUN=0
 # the TOON field parsing entirely for this crew.
 RUN_SOURCE=full
 COARSE_STATUS=""
+COARSE_PR=""
 # Scouts and secondmates never drive a no-mistakes validation of their own
 # worktree, so skip the lookup for them and read state from pane/log directly.
 if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/null 2>&1; then
@@ -589,9 +590,11 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
       # displaces it: a terminal run with no live sibling keeps its full
       # `axi status` step and gate detail rather than degrading to the ledger.
       if ! fm_nm_run_is_active "$RUN_OUT"; then
-        live_status=$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" "$(nm_runs_list)")
+        coarse_row=$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" "$(nm_runs_list)" "" with-pr)
+        live_status=${coarse_row%%$'\t'*}
         if [ "$(fm_nm_run_status_class "$live_status")" = live ]; then
           COARSE_STATUS=$live_status
+          COARSE_PR=${coarse_row#*$'\t'}
           RUN_SOURCE=coarse
         fi
       fi
@@ -602,7 +605,9 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
       # `[ -n "$RUN_OUT" ]`: an empty/timed-out primary call means the CLI
       # itself did not respond, so retrying it immediately with a second
       # bounded call would just double the wait for no better answer.
-      COARSE_STATUS=$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" "$(nm_runs_list)")
+      coarse_row=$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" "$(nm_runs_list)" "" with-pr)
+      COARSE_STATUS=${coarse_row%%$'\t'*}
+      COARSE_PR=${coarse_row#*$'\t'}
       if [ -n "$COARSE_STATUS" ]; then
         HAVE_RUN=1
         # A branch-matching answer the strict rule rejected is this branch's
@@ -621,6 +626,11 @@ fi
 if [ "$HAVE_RUN" = 1 ]; then
   RUN_STATE=working
   RUN_DETAIL=""
+  if [ "$RUN_SOURCE" = coarse ]; then
+    RUN_PR=$COARSE_PR
+  else
+    RUN_PR=$(strip_quotes "$(nm_field pr)")
+  fi
   CI_STEP_STATUS=""
   CI_LOG_STATE=""
   RUN_STATUS=""
@@ -718,7 +728,7 @@ if [ "$HAVE_RUN" = 1 ]; then
 
   if [ "$RUN_STATE" = working ] && log_reports_ci_ready; then
     if [ "$RUN_SOURCE" = coarse ]; then
-      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR"
+      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR${SEP}run PR: $RUN_PR"
     fi
     [ -n "$CI_STEP_STATUS" ] || CI_STEP_STATUS=$(nm_effective_ci_step_status)
     if [ "$RUN_STATUS" = fixing ]; then
@@ -729,7 +739,7 @@ if [ "$HAVE_RUN" = 1 ]; then
       CI_LOG_STATE=not-ready
     fi
     if [ "$CI_LOG_STATE" != not-ready ]; then
-      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR"
+      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR${SEP}run PR: $RUN_PR"
     fi
   fi
 
@@ -769,8 +779,7 @@ if [ "$HAVE_RUN" = 1 ]; then
   if [ "$RUN_STATE" = done ] && [ "$RUN_SOURCE" = full ]; then
     case "$RUN_DETAIL" in
       checks\ green:*)
-        run_pr=$(strip_quotes "$(nm_field pr)")
-        [ -z "$run_pr" ] || RUN_DETAIL="$RUN_DETAIL${SEP}run PR: $run_pr"
+        [ -z "$RUN_PR" ] || RUN_DETAIL="$RUN_DETAIL${SEP}run PR: $RUN_PR"
         ;;
     esac
   fi
