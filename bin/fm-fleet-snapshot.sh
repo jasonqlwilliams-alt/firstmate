@@ -1050,12 +1050,10 @@ secondmate_home_summary_json() {  # <backlog-json-file> <tasks-json-file>
                             and (.pr.url as $url | .current_state.detail
                                  | split(" · ")[0] | endswith($url + " checks green"))
                             and (.pr.url as $url | .current_state.detail
-                                 | if contains(" · run still monitoring PR") then
-                                     split(" · run PR: ")
-                                     | if length == 2 then
-                                         .[1] == ($url + " · current CI green")
-                                       else false end
-                                   else true end)))) | not)
+                                 | split(" · run PR: ")
+                                 | if length == 2 then
+                                     .[1] == ($url + " · current CI green")
+                                   else false end)))) | not)
          | {id,state:.current_state.state} ]) as $terminal_in_flight
     | ([if $backlog.present != true then
           {kind:"missing_backlog",ids:[],reason:"missing structured backlog"}

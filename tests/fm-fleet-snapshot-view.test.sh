@@ -1066,8 +1066,8 @@ MD
   record_claude_idle "$home/state" terminal
   printf 'done: PR %s checks green\n' "$pr" > "$home/state/terminal.status"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
-  printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}' >/dev/null \
-    || fail "registered green task awaiting merge must not disagree: $out"
+  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
+    || fail "an old green event without an attributable run cannot exempt a task: $out"
 
   # Exercise the authoritative no-mistakes current-state path over a real repo.
   git -C "$home/projects/terminal" init -q
@@ -1116,6 +1116,7 @@ esac
 SH
   cat > "$fakebin/gh" <<'SH'
 #!/usr/bin/env bash
+touch "$FM_HOME/gh-called"
 if [ "${1:-}" = pr ] && [ "${2:-}" = view ]; then cat "$FM_HOME/pr-view.json"; fi
 SH
   chmod +x "$fakebin/gh"
@@ -1125,8 +1126,8 @@ SH
   printf '%s' "$out" | jq -e '.tasks[0].current_state.state == "done" and .tasks[0].current_state.source == "status-log" and (.tasks[0].current_state.detail | contains("run still monitoring PR"))' >/dev/null \
     || fail "fixture must prove green status with a monitoring suffix: $out"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
-  printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}' >/dev/null \
-    || fail "green task still monitored via coarse run must not disagree: $out"
+  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
+    || fail "a coarse row and old green event lack current-run green evidence: $out"
   printf 'running %s %.7s 2026-07-11 18:00 %s\n' "$branch" "$head" "${pr%9}10" > "$home/coarse.txt"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
   printf '%s' "$out" | jq -e '.tasks[0].current_state.state == "done" and .tasks[0].current_state.source == "status-log" and .tasks[0].pr.url == "https://github.com/kunchenguid/firstmate/pull/9"' >/dev/null \
@@ -1134,15 +1135,19 @@ SH
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
     || fail "a later coarse run for another PR must not inherit old green evidence: $out"
-  printf 'running %s %.7s 2026-07-11 18:00 %s\n' "$branch" "$head" "$pr" > "$home/coarse.txt"
-  printf '{"state":"OPEN","headRefOid":"%s","statusCheckRollup":[{"__typename":"CheckRun","status":"IN_PROGRESS","conclusion":null}]}\n' "$head" > "$home/pr-view.json"
+  printf 'running %s %.7s 2026-07-12 18:00 %s\ncompleted %s %.7s 2026-07-11 18:00 %s\n' \
+    "$branch" "$head" "$pr" "$branch" "$head" "$pr" > "$home/coarse.txt"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
   printf '%s' "$out" | jq -e '.tasks[0].current_state.state == "done" and .tasks[0].current_state.source == "status-log" and .tasks[0].pr.url == "https://github.com/kunchenguid/firstmate/pull/9"' >/dev/null \
-    || fail "fixture must prove the old green event remains beside pending same-PR checks: $out"
+    || fail "fixture must prove a later same-PR same-head run retains the old event: $out"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
-    || fail "pending checks on a later same-PR run must not inherit old green evidence: $out"
+    || fail "a later pending same-PR same-head run must not inherit old green evidence: $out"
+  [ ! -e "$home/gh-called" ] || fail "snapshot must not query live GitHub checks for a coarse run"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$fakebin/no-mistakes"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
+    || fail "an unavailable run must not validate an old green status event: $out"
 
   printf 'done: PR %s0 checks green\n' "$pr" > "$home/state/terminal.status"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
