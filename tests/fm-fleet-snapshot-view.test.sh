@@ -1053,7 +1053,7 @@ test_green_registered_pr_and_teardown_inventory() {
   mkdir -p "$home/projects/terminal"
   cat > "$home/data/backlog.md" <<'MD'
 ## In flight
-- [ ] terminal - Green task awaiting merge (repo: alpha) (kind: ship) (since 2026-07-11)
+- [ ] terminal - Green task awaiting merge (repo: alpha) (kind: ship) (since 2026-07-11) (hold: captain merge decision pending) (hold-kind: captain)
 
 ## Queued
 
@@ -1100,6 +1100,40 @@ SH
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}' >/dev/null \
     || fail "authoritative green run awaiting merge must not disagree: $out"
+  cat > "$home/run.txt" <<RUN
+run:
+  id: "01M3GR70EX70VVN3BP9CGPK1QC"
+  branch: $branch
+  status: running
+  head: ${head:0:8}
+  head_sha: $head
+  pr: "$pr"
+  findings: none
+  steps[9]{step,status,findings,duration_ms}:
+    intent,completed,0,32
+    rebase,completed,0,740
+    review,completed,0,99308
+    test,completed,0,209020
+    document,completed,0,68648
+    lint,completed,0,3091
+    push,completed,0,4431
+    pr,completed,0,45091
+    ci,running,0,0
+  active_steps[1]{step,status,active_for,round_active_for,last_activity,agent_pid,round}:
+    ci,running,1h30m,1h30m,"quiet 1h5m ago: log: all CI checks passed - still monitoring until merged or closed","",starting
+RUN
+  printf 'all CI checks passed - still monitoring until merged or closed\n' > "$home/ci.txt"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
+  printf '%s' "$out" | jq -e '.tasks[0].current_state.state == "done" and .tasks[0].current_state.source == "run-step" and (.tasks[0].current_state.detail | startswith("checks green:")) and .tasks[0].pr.source == "meta" and .backlog.records[0].hold_kind == "captain"' >/dev/null \
+    || fail "native-shaped current CI run must be attributed to the held task: $out"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}' >/dev/null \
+    || fail "native-shaped current green run awaiting merge must not disagree: $out"
+  if [ -n "${FM_SNAPSHOT_TEST_EVIDENCE_DIR:-}" ]; then
+    printf '%s\n' "$out" > "$FM_SNAPSHOT_TEST_EVIDENCE_DIR/scripted-native-green-summary.json"
+  fi
+  sed 's/ (hold: captain merge decision pending) (hold-kind: captain)//' "$home/data/backlog.md" > "$home/backlog-without-hold.md"
+  mv "$home/backlog-without-hold.md" "$home/data/backlog.md"
   sed 's|/pull/9|/pull/10|' "$home/run.txt" > "$home/run-other-pr.txt"
   mv "$home/run-other-pr.txt" "$home/run.txt"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
@@ -1123,6 +1157,9 @@ RUN
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
     || fail "no reported CI checks must not exempt a registered PR: $out"
+  if [ -n "${FM_SNAPSHOT_TEST_EVIDENCE_DIR:-}" ]; then
+    printf '%s\n' "$out" > "$FM_SNAPSHOT_TEST_EVIDENCE_DIR/scripted-no-checks-summary.json"
+  fi
   # Coarse run attribution appends monitoring evidence to the same green note.
   printf 'running %s %.7s 2026-07-11 18:00 %s\n' "$branch" "$head" "$pr" > "$home/coarse.txt"
   cat > "$fakebin/no-mistakes" <<'SH'
