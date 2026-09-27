@@ -198,13 +198,13 @@ fm_nm_run_is_pipeline_owned_active() {  # <toon-output>
 # Read-only: git reads resolve objects in place; custody never changes.
 fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [expected-head]
   local wt=$1 branch=$2 list=$3 expected_head=${4:-} format=${5:-status}
-  local local_full row_full row st br sha day clock pr extra year_num month_num day_num max_day pending_st='' pending_pr=''
+  local local_full row_full row st br sha day clock pr extra year_num month_num day_num max_day pending_st='' pending_pr='' pending_sha=''
   # Set only by the newest binding row when its status classifies terminal, and
   # printed when the scan ends without finding a live row for this worktree. It
   # is the sole reason the scan continues past the newest row, and every exit
   # below leaves the loop rather than returning, so a malformed older row can
   # never swallow an answer the newest row had already decided.
-  local decided='' decided_pr='' decided_exact=''
+  local decided='' decided_pr='' decided_sha='' decided_exact=''
   local_full=$(git -C "$wt" rev-parse HEAD 2>/dev/null) || return 0
   [ -n "$list" ] || return 0
   while IFS= read -r row; do
@@ -250,6 +250,7 @@ fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [ex
       fi
       decided=$st
       decided_pr=$pr
+      decided_sha=$sha
       break
     fi
     if [ -n "$pending_st" ]; then
@@ -259,6 +260,7 @@ fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [ex
       if [ "$(fm_nm_resolve_commit "$wt" "$sha")" = "$local_full" ]; then
         decided=$pending_st
         decided_pr=$pending_pr
+        decided_sha=$pending_sha
       fi
       break
     fi
@@ -275,6 +277,7 @@ fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [ex
       if fm_nm_head_matches_worktree "$wt" "$sha"; then
         decided=$st
         decided_pr=$pr
+        decided_sha=$sha
         # A live or unclassifiable word is this worktree's current answer and
         # ends the scan; only a terminal one keeps looking for a live sibling.
         if [ "$(fm_nm_run_status_class "$st")" = terminal ]; then
@@ -287,11 +290,12 @@ fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [ex
     [ "$st" = running ] || break
     pending_st=$st
     pending_pr=$pr
+    pending_sha=$sha
   done <<< "$list"
-  if [ "$format" = with-pr ]; then
-    printf '%s\t%s' "$decided" "$decided_pr"
-  else
-    printf '%s' "$decided"
-  fi
+  case "$format" in
+    with-pr-head) printf '%s\t%s\t%s' "$decided" "$decided_pr" "$decided_sha" ;;
+    with-pr) printf '%s\t%s' "$decided" "$decided_pr" ;;
+    *) printf '%s' "$decided" ;;
+  esac
   return 0
 }

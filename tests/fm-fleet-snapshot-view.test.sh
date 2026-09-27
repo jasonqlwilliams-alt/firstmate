@@ -1114,6 +1114,12 @@ case "${1:-}" in
   axi) printf 'run:\n  branch: fm/another-task\n  status: running\n' ;;
 esac
 SH
+  cat > "$fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = pr ] && [ "${2:-}" = view ]; then cat "$FM_HOME/pr-view.json"; fi
+SH
+  chmod +x "$fakebin/gh"
+  printf '{"state":"OPEN","headRefOid":"%s","statusCheckRollup":[{"__typename":"CheckRun","status":"COMPLETED","conclusion":"SUCCESS"}]}\n' "$head" > "$home/pr-view.json"
   printf 'done: PR %s checks green\n' "$pr" > "$home/state/terminal.status"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
   printf '%s' "$out" | jq -e '.tasks[0].current_state.state == "done" and .tasks[0].current_state.source == "status-log" and (.tasks[0].current_state.detail | contains("run still monitoring PR"))' >/dev/null \
@@ -1128,6 +1134,14 @@ SH
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
     || fail "a later coarse run for another PR must not inherit old green evidence: $out"
+  printf 'running %s %.7s 2026-07-11 18:00 %s\n' "$branch" "$head" "$pr" > "$home/coarse.txt"
+  printf '{"state":"OPEN","headRefOid":"%s","statusCheckRollup":[{"__typename":"CheckRun","status":"IN_PROGRESS","conclusion":null}]}\n' "$head" > "$home/pr-view.json"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
+  printf '%s' "$out" | jq -e '.tasks[0].current_state.state == "done" and .tasks[0].current_state.source == "status-log" and .tasks[0].pr.url == "https://github.com/kunchenguid/firstmate/pull/9"' >/dev/null \
+    || fail "fixture must prove the old green event remains beside pending same-PR checks: $out"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
+    || fail "pending checks on a later same-PR run must not inherit old green evidence: $out"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$fakebin/no-mistakes"
 
   printf 'done: PR %s0 checks green\n' "$pr" > "$home/state/terminal.status"

@@ -108,6 +108,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 . "$SCRIPT_DIR/fm-busy-lib.sh"
 # shellcheck source=bin/fm-nm-run-lib.sh
 . "$SCRIPT_DIR/fm-nm-run-lib.sh"
+# shellcheck source=bin/fm-timeout-lib.sh
+. "$SCRIPT_DIR/fm-timeout-lib.sh"
 
 ID=${1:-}
 [ -n "$ID" ] || { echo "usage: fm-crew-state.sh <id>" >&2; exit 2; }
@@ -545,6 +547,24 @@ nm_runs_list() {
   nm_run runs --limit "$FM_CREW_STATE_RUNS_LIMIT"
 }
 
+coarse_ci_green() {
+  local view
+  [ -n "$1" ] && [ -n "$2" ] || return 1
+  view=$(fm_run_timed 3 gh pr view "$1" --json state,headRefOid,statusCheckRollup 2>/dev/null) || return 1
+  printf '%s' "$view" | jq -e --arg head "$2" '
+    .state == "OPEN"
+    and (.headRefOid | type) == "string"
+    and (.headRefOid | startswith($head))
+    and (.statusCheckRollup | type) == "array"
+    and (.statusCheckRollup | length) > 0
+    and all(.statusCheckRollup[];
+      if .__typename == "CheckRun" then
+        .status == "COMPLETED" and (.conclusion == "SUCCESS" or .conclusion == "NEUTRAL" or .conclusion == "SKIPPED")
+      elif .__typename == "StatusContext" then .state == "SUCCESS"
+      else false end)
+  ' >/dev/null 2>&1
+}
+
 # CREW_BRANCH is empty at detached HEAD (a just-spawned crew, or a scout's
 # scratch worktree); with no branch there is no run to attribute to this crew.
 CREW_BRANCH=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
@@ -568,6 +588,7 @@ HAVE_RUN=0
 RUN_SOURCE=full
 COARSE_STATUS=""
 COARSE_PR=""
+COARSE_HEAD=""
 # Scouts and secondmates never drive a no-mistakes validation of their own
 # worktree, so skip the lookup for them and read state from pane/log directly.
 if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/null 2>&1; then
@@ -590,11 +611,13 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
       # displaces it: a terminal run with no live sibling keeps its full
       # `axi status` step and gate detail rather than degrading to the ledger.
       if ! fm_nm_run_is_active "$RUN_OUT"; then
-        coarse_row=$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" "$(nm_runs_list)" "" with-pr)
+        coarse_row=$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" "$(nm_runs_list)" "" with-pr-head)
         live_status=${coarse_row%%$'\t'*}
         if [ "$(fm_nm_run_status_class "$live_status")" = live ]; then
           COARSE_STATUS=$live_status
-          COARSE_PR=${coarse_row#*$'\t'}
+          coarse_tail=${coarse_row#*$'\t'}
+          COARSE_PR=${coarse_tail%%$'\t'*}
+          COARSE_HEAD=${coarse_tail#*$'\t'}
           RUN_SOURCE=coarse
         fi
       fi
@@ -605,9 +628,11 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
       # `[ -n "$RUN_OUT" ]`: an empty/timed-out primary call means the CLI
       # itself did not respond, so retrying it immediately with a second
       # bounded call would just double the wait for no better answer.
-      coarse_row=$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" "$(nm_runs_list)" "" with-pr)
+      coarse_row=$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" "$(nm_runs_list)" "" with-pr-head)
       COARSE_STATUS=${coarse_row%%$'\t'*}
-      COARSE_PR=${coarse_row#*$'\t'}
+      coarse_tail=${coarse_row#*$'\t'}
+      COARSE_PR=${coarse_tail%%$'\t'*}
+      COARSE_HEAD=${coarse_tail#*$'\t'}
       if [ -n "$COARSE_STATUS" ]; then
         HAVE_RUN=1
         # A branch-matching answer the strict rule rejected is this branch's
@@ -728,7 +753,9 @@ if [ "$HAVE_RUN" = 1 ]; then
 
   if [ "$RUN_STATE" = working ] && log_reports_ci_ready; then
     if [ "$RUN_SOURCE" = coarse ]; then
-      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR${SEP}run PR: $RUN_PR"
+      run_evidence=""
+      coarse_ci_green "$RUN_PR" "$COARSE_HEAD" && run_evidence="${SEP}current CI green"
+      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR${SEP}run PR: $RUN_PR$run_evidence"
     fi
     [ -n "$CI_STEP_STATUS" ] || CI_STEP_STATUS=$(nm_effective_ci_step_status)
     if [ "$RUN_STATUS" = fixing ]; then
@@ -739,7 +766,9 @@ if [ "$HAVE_RUN" = 1 ]; then
       CI_LOG_STATE=not-ready
     fi
     if [ "$CI_LOG_STATE" != not-ready ]; then
-      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR${SEP}run PR: $RUN_PR"
+      run_evidence=""
+      [ "$CI_LOG_STATE" != green ] || run_evidence="${SEP}current CI green"
+      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR${SEP}run PR: $RUN_PR$run_evidence"
     fi
   fi
 
