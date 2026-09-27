@@ -1272,10 +1272,10 @@ SH
 }
 
 test_teardown_backlog_change_during_capture_is_resampled() {
-  local home fakebin out id mode real_cp
+  local home fakebin out id snapshot_format real_cp
   real_cp=$(command -v cp)
-  for mode in --json --secondmate-home-summary; do
-    home=$(make_home "teardown-capture-$mode")
+  for snapshot_format in --json --secondmate-home-summary; do
+    home=$(make_home "teardown-capture-$snapshot_format")
     fakebin=$(make_fakebin "$home")
     cat > "$home/data/backlog.md" <<'MD'
 ## In flight
@@ -1318,10 +1318,10 @@ fi
 exec "$FM_TEST_REAL_CP" "$@"
 SH
     chmod +x "$fakebin/cp"
-    out=$(PATH="$fakebin:$PATH" FM_TEST_REAL_CP="$real_cp" FM_HOME="$home" "$SNAPSHOT" "$mode") \
+    out=$(PATH="$fakebin:$PATH" FM_TEST_REAL_CP="$real_cp" FM_HOME="$home" "$SNAPSHOT" "$snapshot_format") \
       || fail "snapshot must resample completed concurrent teardown"
     [ -f "$home/transition-observed" ] || fail "teardown interleaving was not exercised"
-    case "$mode" in
+    case "$snapshot_format" in
       --json)
         printf '%s' "$out" | jq -e '.tasks == [] and .main_inventory.valid and ([.backlog.records[].state] == ["done","done"])' >/dev/null \
           || fail "snapshot combined old backlog with new metadata: $out" ;;
