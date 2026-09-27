@@ -70,7 +70,9 @@
 #     main-home current-inventory checks shared with secondmate_home_summary_json
 #     (orphan structured in-flight ids with no state/<id>.meta, and unstructured
 #     current backlog rows). Does not invent live tasks; meta remains truth for
-#     workers. Bearings maps failures into omitted[] disclosure (and a Charted
+#     workers. Validated pending teardown is disclosed as unavailable rather
+#     than orphaned; backlog changes during observation cause a bounded resample.
+#     Bearings maps failures into omitted[] disclosure (and a Charted
 #     Next gate line) rather than silent empty Underway.
 #   secondmate_current: {records[],total,shown,truncated} - bounded current summaries
 #     for registered secondmates, selected from validated structured state inside
@@ -93,12 +95,19 @@
 #     schemas; a live ledger or cached copy missing either declaration or declaring
 #     an unsupported version is unavailable even when it contains no captain holds.
 #     These schemas also accept v1 summaries from older producers.
+#     A done in-flight child is valid only when its attributed current run-step
+#     reports passed checks and an exact run PR URL. If task metadata registers
+#     a PR, it must match that URL; absent metadata PR does not erase current
+#     run attribution. No-checks, another PR, or a later pending run cannot
+#     inherit an older green verdict. Other terminal in-flight children remain
+#     contradictions. A validated pending-close receipt is instead disclosed
+#     as unavailable for its task generation, not as an orphan or contradiction.
 #   secondmate_landed: {records[],truncated[],unreadable[],partial[]} - the
 #     compatibility landed-work roll-up derived from secondmate_current. Readable
 #     structured homes are partial, not unreadable, when an unavailable child state
 #     or a backlog-vs-metadata inventory mismatch makes their summary incomplete;
-#     they retain independently trustworthy structured surfaces. An inventory
-#     mismatch also keeps the home's own current classification, which only an
+#     they retain independently trustworthy structured surfaces.
+#     An inventory mismatch also keeps the home's own current classification, which only an
 #     unavailable child state or an untrustworthy backlog collapses to unknown.
 #     Which closed rows a home contributes is bin/fm-landed-lib.sh's rule, shared
 #     with the bearings projection so one Recently Landed section has one owner.
@@ -217,6 +226,8 @@ esac
 # shellcheck source=bin/fm-landed-lib.sh
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/fm-landed-lib.sh"  # FM_LANDED_JQ_DEFS: the shared landed selector
+# shellcheck source=bin/fm-backlog-transition-lib.sh
+. "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
 
 usage() {
   cat <<'EOF'
@@ -907,14 +918,36 @@ task_json_lines() {
   done | jq -s 'sort_by(.id)'
 }
 
-# Main-home current-inventory validity: same orphan / unstructured-current checks
-# used by secondmate_home_summary_json, without inventing live task rows.
-# Meta inventory remains the sole source of live workers; this object only
-# discloses backlog↔task inconsistency for renderers (Bearings omitted/gates).
+# A validated pending close is teardown evidence, not a missing-worker repair.
+# Keep the inventory explicitly unavailable until that transition lands. Never
+# exempt a replacement generation or trust a foreign/malformed close record.
+snapshot_pending_teardowns_json() {
+  local marker id gen current_gen captured_gen
+  for marker in "$STATE"/*.backlog-close; do
+    [ -f "$marker" ] || continue
+    id=${marker##*/}; id=${id%.backlog-close}
+    fm_backlog_close_marker_validate "$marker" "$DATA" "$id" "$STATE" || continue
+    gen=$FM_BACKLOG_CLOSE_VALIDATED_SPAWN_GEN
+    if [ -e "$STATE/$id.meta" ]; then
+      current_gen=$(meta_value "$STATE/$id.meta" spawn_gen)
+      [ "$current_gen" = "$gen" ] || continue
+    fi
+    if [ -n "$SNAPSHOT_TASK_DIR" ] && [ -f "$SNAPSHOT_TASK_DIR/$id.meta" ]; then
+      captured_gen=$(meta_value "$SNAPSHOT_TASK_DIR/$id.meta" spawn_gen)
+      [ "$captured_gen" = "$gen" ] || continue
+    fi
+    jq -n --arg id "$id" '$id'
+  done | jq -s '.'
+}
+
+# Main-home inventory shares the home summary's orphan checks. Metadata remains
+# the sole source of workers; pending teardown is disclosed as unavailable.
 main_inventory_json() {  # <backlog-json-file> <tasks-json-file>
   jq -n \
     --slurpfile backlog "$1" \
+    --argjson pending "$PENDING_TEARDOWNS_JSON" \
     --slurpfile tasks "$2" '
+    def transitioning: .id as $id | $pending | index($id) != null;
     ($backlog[0]) as $backlog
     | ($tasks[0]) as $tasks
     | ([ $backlog.records[]?
@@ -922,12 +955,15 @@ main_inventory_json() {  # <backlog-json-file> <tasks-json-file>
     | ([ $backlog.records[]?
          | select(.state == "in_flight" and .structured and .requires_child_metadata) ]) as $owned_in_flight
     | ([ $owned_in_flight[]
+         | select(transitioning | not)
          | select(.id as $id | [$tasks[].id] | index($id) | not)
          | .id ]) as $orphan_in_flight
     | (($unstructured_current | length) == 0
-       and ($orphan_in_flight | length) == 0) as $valid
+       and ($orphan_in_flight | length) == 0
+       and ($pending | length) == 0) as $valid
     | (if ($unstructured_current | length) > 0 then "unstructured current backlog row"
        elif ($orphan_in_flight | length) > 0 then "in-flight backlog item has no child metadata"
+       elif ($pending | length) > 0 then "task teardown pending: " + ($pending | join(", "))
        else null end) as $reason
     | {
         valid:$valid,
@@ -951,7 +987,9 @@ secondmate_home_summary_json() {  # <backlog-json-file> <tasks-json-file>
     --argjson decisions_n "$FM_SNAPSHOT_SECONDMATE_DECISIONS" \
     --argjson landed_n "$FM_SNAPSHOT_SECONDMATE_LANDED_PER_HOME" \
     --slurpfile backlog "$1" \
+    --argjson pending "$PENDING_TEARDOWNS_JSON" \
     --slurpfile tasks "$2" "$FM_LANDED_JQ_DEFS"'
+    def transitioning: .id as $id | $pending | index($id) != null;
     ($backlog[0]) as $backlog
     | ($tasks[0]) as $tasks
     | def trunc($n):
@@ -994,15 +1032,24 @@ secondmate_home_summary_json() {  # <backlog-json-file> <tasks-json-file>
     | ([ $tasks[] | select(.current_state.state == "unknown") ]) as $unknown_children
     | ([ $owned_in_flight[]
          | select(.requires_child_metadata)
+         | select(transitioning | not)
          | select(.id as $id | [$tasks[].id] | index($id) | not) ]) as $orphan_in_flight
     | ([ $tasks[]
          | select(.kind != "secondmate")
+         | select(transitioning | not)
          | select(.id as $id | [$owned_in_flight[].id] | index($id) | not)
          | {id,state:.current_state.state} ]) as $unowned_children
     | ([ $owned_in_flight[] as $work
          | $tasks[]
          | select(.kind != "secondmate")
+         | select(transitioning | not)
          | select(.id == $work.id and (.current_state.state == "done" or .current_state.state == "failed"))
+         | select((.current_state.state == "done"
+                   and .current_state.source == "run-step"
+                   and (.current_state.detail | startswith("checks green:"))
+                   and ((.current_state.detail | split(" · run PR: ")) as $run_pr
+                        | ($run_pr | length) == 2 and $run_pr[1] != ""
+                          and (.pr.source != "meta" or .pr.url == $run_pr[1]))) | not)
          | {id,state:.current_state.state} ]) as $terminal_in_flight
     | ([if $backlog.present != true then
           {kind:"missing_backlog",ids:[],reason:"missing structured backlog"}
@@ -1055,13 +1102,16 @@ secondmate_home_summary_json() {  # <backlog-json-file> <tasks-json-file>
        and ($unknown_children | length) == 0
        and ($orphan_in_flight | length) == 0
        and ($unowned_children | length) == 0
-       and ($terminal_in_flight | length) == 0) as $valid
+       and ($terminal_in_flight | length) == 0
+       and ($pending | length) == 0) as $valid
     | (if ($strict_invalidities | length) > 0 then $strict_invalidities[0].reason
        elif ($unknown_children | length) > 0 then
          "child current state unavailable: " + ($unknown_children | map(.id) | join(", "))
+       elif ($pending | length) > 0 then "task teardown pending: " + ($pending | join(", "))
        else null end) as $reason
     | (if ($strict_invalidities | length) > 0 then $strict_invalidities[0] | del(.reason)
        elif ($unknown_children | length) > 0 then {kind:"child_current_unavailable",ids:($unknown_children | map(.id))}
+       elif ($pending | length) > 0 then {kind:"child_current_unavailable",ids:$pending}
        else {kind:null,ids:[]} end) as $invalidity
     | (if ($valid | not)
           and (($unknown_children | length) > 0
@@ -1944,9 +1994,21 @@ scout_report_lines() {
     | jq -s 'sort_by(.id)'
 }
 
-BACKLOG_JSON=$(backlog_json) || { echo "fm-fleet-snapshot: backlog read failed" >&2; exit 1; }
-prefetch_task_current_states || { echo "fm-fleet-snapshot: task observation failed" >&2; exit 1; }
-TASKS_JSON=$(task_json_lines) || { echo "fm-fleet-snapshot: task snapshot failed" >&2; exit 1; }
+# Teardown removes metadata before closing its backlog row. If the backlog
+# changes across the observations, resample rather than compare different
+# lifecycle moments. Continuous churn remains an explicit unavailable snapshot.
+for SNAPSHOT_ATTEMPT in 1 2 3; do
+  BACKLOG_JSON=$(backlog_json) || { echo "fm-fleet-snapshot: backlog read failed" >&2; exit 1; }
+  prefetch_task_current_states || { echo "fm-fleet-snapshot: task observation failed" >&2; exit 1; }
+  TASKS_JSON=$(task_json_lines) || { echo "fm-fleet-snapshot: task snapshot failed" >&2; exit 1; }
+  PENDING_TEARDOWNS_JSON=$(snapshot_pending_teardowns_json) || { echo "fm-fleet-snapshot: teardown observation failed" >&2; exit 1; }
+  BACKLOG_AFTER_JSON=$(backlog_json) || { echo "fm-fleet-snapshot: backlog read failed" >&2; exit 1; }
+  [ "$BACKLOG_JSON" != "$BACKLOG_AFTER_JSON" ] || break
+  if [ "$SNAPSHOT_ATTEMPT" = 3 ]; then
+    echo "fm-fleet-snapshot: backlog changed during task observations; snapshot unavailable" >&2
+    exit 1
+  fi
+done
 
 JSON_TRANSPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-fleet-snapshot.XXXXXX") \
   || { echo "fm-fleet-snapshot: temporary transport directory creation failed" >&2; exit 1; }

@@ -793,7 +793,8 @@ test_ci_monitoring_no_checks_terminal_surfaces_done() {
   FM_FAKE_CI_LOGS="no CI checks reported - still monitoring until merged or closed"
   local out; out=$(run_crew_state "$d" feat-cinochecks)
   assert_contains "$out" "state: done" "terminal no-checks ci-monitor run -> done"
-  assert_contains "$out" "checks green" "terminal no-checks ci-monitor detail mentions checks green"
+  assert_contains "$out" "no CI checks reported" "terminal no-checks ci-monitor retains its own result"
+  assert_not_contains "$out" "checks green" "no reported checks do not prove a green PR"
   pass "terminal no-checks ci-monitor marker surfaces done"
 }
 

@@ -53,9 +53,11 @@
 #      passed/checks-passed -> done, failed/cancelled -> failed. EXCEPT: while
 #      the active step is ci, `axi status` alone cannot tell "still waiting on
 #      checks" from "checks green, waiting on merge" (see nm_ci_checks_state) -
-#      a ci-step log-tail check overrides working -> done once checks read
-#      green, so a green PR is never silently read as still-validating. And a
-#      terminal FAILED run whose only failure is the ci monitor step, after
+#      a ci-step log-tail check overrides working -> done once checks pass, so
+#      a green PR is never silently read as still-validating. The
+#      "no CI checks reported - still monitoring" marker also reads done as
+#      awaiting merge, but does not claim checks green. A terminal FAILED run
+#      whose only failure is the ci monitor step, after
 #      every substantive step completed and the ci log's last marker reads
 #      checks green, also reads done (held-for-merge), never failed: a monitor
 #      whose only remaining job is to observe a human merge decision must not
@@ -503,13 +505,12 @@ nm_effective_ci_step_status() {
 # never distinguishes "still waiting on checks" from "checks green, waiting on
 # merge": both read as plain `ci,running,...`. The only place that transition is
 # recorded is the ci step's own log text, e.g. "all CI checks passed - still
-# monitoring until merged or closed" or "no CI checks reported - still
 # monitoring until merged or closed" (verified against 360+ real run logs under
 # ~/.no-mistakes/logs/*/ci.log on the installed v1.32.2 binary, including the
 # actual PR #252 run). Reads the ci step's log tail via `axi logs` and scans it
 # for the MOST RECENT recognized marker (the log is append-only/chronological,
-# so the last match is current): green with nothing red after it means CI is
-# green right now, still only waiting on merge/close.
+# so the last match is current): passed checks mean CI is green right now,
+# still only waiting on merge/close.
 nm_ci_checks_state() {
   local run_id log_tail marker
   run_id=$(strip_quotes "$(nm_field id)")
@@ -520,7 +521,8 @@ nm_ci_checks_state() {
     | grep -E 'CI checks passed|no CI checks reported - still monitoring|no CI checks reported yet|checks failed|issues detected|CI checks running|base branch advanced.*re-arming CI monitor timeout' \
     | tail -1)
   case "$marker" in
-    *"checks passed"*|*"no CI checks reported - still monitoring"*) printf 'green' ;;
+    *"checks passed"*) printf 'green' ;;
+    *"no CI checks reported - still monitoring"*) printf 'no-checks' ;;
     *"no CI checks reported yet"*|*"checks failed"*|*"issues detected"*|*"CI checks running"*|*"base branch advanced"*"re-arming CI monitor timeout"*) printf 'not-ready' ;;
     *) printf 'unknown' ;;
   esac
@@ -621,6 +623,8 @@ fi
 if [ "$HAVE_RUN" = 1 ]; then
   RUN_STATE=working
   RUN_DETAIL=""
+  RUN_PR=""
+  [ "$RUN_SOURCE" != full ] || RUN_PR=$(strip_quotes "$(nm_field pr)")
   CI_STEP_STATUS=""
   CI_LOG_STATE=""
   RUN_STATUS=""
@@ -703,10 +707,16 @@ if [ "$HAVE_RUN" = 1 ]; then
         case "$CI_STEP_STATUS" in
           running)
             CI_LOG_STATE=$(nm_ci_checks_state)
-            if [ "$CI_LOG_STATE" = green ]; then
-              RUN_STATE="done"
-              RUN_DETAIL="checks green: PR ready for review (still monitoring for merge/close)"
-            fi
+            case "$CI_LOG_STATE" in
+              green)
+                RUN_STATE="done"
+                RUN_DETAIL="checks green: PR ready for review (still monitoring for merge/close)"
+                ;;
+              no-checks)
+                RUN_STATE="done"
+                RUN_DETAIL="no CI checks reported: PR awaiting merge"
+                ;;
+            esac
             ;;
           fixing)
             CI_LOG_STATE=not-ready
@@ -766,6 +776,13 @@ if [ "$HAVE_RUN" = 1 ]; then
       ;;
   esac
 
+  if [ "$RUN_STATE" = "done" ] && [ "$RUN_SOURCE" = full ]; then
+    case "$RUN_DETAIL" in
+      checks\ green:*)
+        [ -z "$RUN_PR" ] || RUN_DETAIL="$RUN_DETAIL${SEP}run PR: $RUN_PR"
+        ;;
+    esac
+  fi
   emit "$RUN_STATE" run-step "$RUN_DETAIL"
 fi
 
