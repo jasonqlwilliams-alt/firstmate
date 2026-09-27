@@ -1,0 +1,4 @@
+ok - fm-pr-check does not refresh PR head after HEAD moves
+ok - fm-pr-check records the remote PR head when the local worktree lags
+ok - fm-pr-check publishes the PR-ready line on a secondmate's parent channel once
+hostile ambient parent channel: absent after all three selected test cases

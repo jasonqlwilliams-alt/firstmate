@@ -1,0 +1,4 @@
+counterfactual with FM_HOME absent: done [key=child-pr-task-x1]: child task-x1 PR ready: https://github.com/example/repo/pull/7 mode=no-mistakes
+explicit fixture main home: armed: state/task-x1.check.sh; fixture parent channel remains at one line
+main task metadata: pr=https://github.com/example/repo/pull/8
+main home parent replies: absent; main home mate status: absent; task-state parent replies: absent
