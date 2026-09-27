@@ -1100,6 +1100,8 @@ SH
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}' >/dev/null \
     || fail "authoritative green run awaiting merge must not disagree: $out"
+  sed '/^pr=/d' "$home/state/terminal.meta" > "$home/state/rewrite"
+  mv "$home/state/rewrite" "$home/state/terminal.meta"
   cat > "$home/run.txt" <<RUN
 run:
   id: "01M3GR70EX70VVN3BP9CGPK1QC"
@@ -1124,7 +1126,7 @@ run:
 RUN
   printf 'all CI checks passed - still monitoring until merged or closed\n' > "$home/ci.txt"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
-  printf '%s' "$out" | jq -e '.tasks[0].current_state.state == "done" and .tasks[0].current_state.source == "run-step" and (.tasks[0].current_state.detail | startswith("checks green:")) and .tasks[0].pr.source == "meta" and .backlog.records[0].hold_kind == "captain"' >/dev/null \
+  printf '%s' "$out" | jq -e '.tasks[0].current_state.state == "done" and .tasks[0].current_state.source == "run-step" and (.tasks[0].current_state.detail | startswith("checks green:")) and (.tasks[0].current_state.detail | endswith("run PR: https://github.com/kunchenguid/firstmate/pull/9")) and .tasks[0].pr.source == "absent" and .tasks[0].pr.url == null and .backlog.records[0].hold_kind == "captain"' >/dev/null \
     || fail "native-shaped current CI run must be attributed to the held task: $out"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}' >/dev/null \
@@ -1132,6 +1134,13 @@ RUN
   if [ -n "${FM_SNAPSHOT_TEST_EVIDENCE_DIR:-}" ]; then
     printf '%s\n' "$out" > "$FM_SNAPSHOT_TEST_EVIDENCE_DIR/scripted-native-green-summary.json"
   fi
+  cp "$home/run.txt" "$home/run-with-pr.txt"
+  sed '/^  pr:/d' "$home/run-with-pr.txt" > "$home/run.txt"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
+    || fail "a green current run without a PR cannot exempt an unregistered task: $out"
+  mv "$home/run-with-pr.txt" "$home/run.txt"
+  printf 'pr=%s\n' "$pr" >> "$home/state/terminal.meta"
   sed 's/ (hold: captain merge decision pending) (hold-kind: captain)//' "$home/data/backlog.md" > "$home/backlog-without-hold.md"
   mv "$home/backlog-without-hold.md" "$home/data/backlog.md"
   sed 's|/pull/9|/pull/10|' "$home/run.txt" > "$home/run-other-pr.txt"
