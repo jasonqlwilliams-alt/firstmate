@@ -66,11 +66,6 @@ REMOTE_HERDR_SESSION=fm-remote
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
 # shellcheck source=bin/fm-task-inbox-lib.sh
 . "$SCRIPT_DIR/fm-task-inbox-lib.sh"
-# shellcheck source=bin/fm-tasks-axi-lib.sh
-. "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
-# shellcheck source=bin/fm-backlog-transition-lib.sh
-. "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
-
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 validate_id() { case "$1" in ''|*[!A-Za-z0-9._-]*) die "invalid secondmate id: $1" ;; esac; }
@@ -266,6 +261,13 @@ cmd_relaunch_parent() {
   local id=$1 harness=$2 model=$3 effort=$4
   local meta meta_lock out rc relaunch_line resolved_harness resolved_model resolved_effort tmp
   local -a on_env=()
+
+  # These backlog helpers are only needed on the parent-side route, which is
+  # not part of the remote host's ordinary control verbs.
+  # shellcheck source=bin/fm-tasks-axi-lib.sh
+  . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
+  # shellcheck source=bin/fm-backlog-transition-lib.sh
+  . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
 
   meta="$PARENT_STATE/$id.meta"
   [ -f "$meta" ] && [ ! -L "$meta" ] || die "remote secondmate $id has no endpoint record in this home"
