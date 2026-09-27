@@ -1045,7 +1045,7 @@ test_pr_check_does_not_refresh_stale_pr_head() {
   pr_head=$(git -C "$case_dir/wt" rev-parse HEAD)
   add_gh_pr_merged_for_head "$case_dir" "$pr_head"
 
-  FM_ROOT_OVERRIDE="$ROOT" \
+  FM_HOME="$case_dir" FM_ROOT_OVERRIDE="$ROOT" \
   FM_STATE_OVERRIDE="$case_dir/state" \
   PATH="$case_dir/fakebin:$PATH" \
     "$PR_CHECK" task-x1 https://github.com/example/repo/pull/7 >/dev/null
@@ -1053,7 +1053,7 @@ test_pr_check_does_not_refresh_stale_pr_head() {
   wt_commit_file "$case_dir" later.txt local-only "local follow-up"
   new_head=$(git -C "$case_dir/wt" rev-parse HEAD)
 
-  FM_ROOT_OVERRIDE="$ROOT" \
+  FM_HOME="$case_dir" FM_ROOT_OVERRIDE="$ROOT" \
   FM_STATE_OVERRIDE="$case_dir/state" \
   PATH="$case_dir/fakebin:$PATH" \
     "$PR_CHECK" task-x1 https://github.com/example/repo/pull/7 >/dev/null
@@ -1082,7 +1082,7 @@ test_pr_check_records_remote_head_when_local_lags() {
   pr_head=$(commit_tree_from_wt_head "$case_dir" "$local_head" "no-mistakes follow-up")
   add_gh_pr_merged_for_head "$case_dir" "$pr_head"
 
-  FM_ROOT_OVERRIDE="$ROOT" \
+  FM_HOME="$case_dir" FM_ROOT_OVERRIDE="$ROOT" \
   FM_STATE_OVERRIDE="$case_dir/state" \
   PATH="$case_dir/fakebin:$PATH" \
     "$PR_CHECK" task-x1 https://github.com/example/repo/pull/7 >/dev/null
@@ -1839,7 +1839,7 @@ configure_secondmate_home() {  # <case-dir> <local|remote> [<parent-home>]
 # with the canonical URL on the parent channel from fm-pr-check itself, once;
 # a main home publishes nothing.
 test_secondmate_pr_registration_publishes_ready_line() {
-  local case_dir pr_head channel url
+  local case_dir pr_head channel url main_home
   url=https://github.com/example/repo/pull/7
   case_dir=$(make_case mate-pr-ready)
   configure_secondmate_home "$case_dir" local "$case_dir/parent"
@@ -1865,15 +1865,22 @@ test_secondmate_pr_registration_publishes_ready_line() {
     || fail "mate-pr-ready: re-registration duplicated the ready line"
 
   case_dir=$(make_case main-pr-ready)
+  main_home="$case_dir/main-home"
+  mkdir -p "$main_home/state" "$main_home/data"
   write_meta "$case_dir" no-mistakes ship
   wt_commit_file "$case_dir" feature.txt hello "add feature"
   add_gh_pr_merged_for_head "$case_dir" "$(git -C "$case_dir/wt" rev-parse HEAD)"
-  FM_ROOT_OVERRIDE="$ROOT" FM_STATE_OVERRIDE="$case_dir/state" \
+  FM_HOME="$main_home" FM_ROOT_OVERRIDE="$ROOT" FM_STATE_OVERRIDE="$case_dir/state" \
     PATH="$case_dir/fakebin:$PATH" "$PR_CHECK" task-x1 "$url" >/dev/null 2> "$case_dir/pr-check.err" \
     || fail "main-pr-ready: fm-pr-check failed"
   ! grep -q '^actionable:' "$case_dir/pr-check.err" \
     || fail "main-pr-ready: a main home reported a channel problem"
-  [ ! -e "$case_dir/state/parent-replies.status" ] || fail "main-pr-ready: a main home wrote a parent reply"
+  [ ! -e "$main_home/state/parent-replies.status" ] \
+    || fail "main-pr-ready: a main home wrote a parent reply"
+  [ ! -e "$main_home/state/mate-x.status" ] \
+    || fail "main-pr-ready: a main home published to a parent channel"
+  [ ! -e "$case_dir/state/parent-replies.status" ] \
+    || fail "main-pr-ready: a main home wrote a parent reply to task state"
   pass "fm-pr-check publishes the PR-ready line on a secondmate's parent channel once"
 }
 
