@@ -1,0 +1,4 @@
+Remote copy has the real control script and its remote-side dependencies; both parent-only libraries are absent.
+Before fix, state rsm: exit=1; output=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M3GR70EX70VVN3BP9CGPK1QC/.remote-control-validation.8qr9nrdp/remote-root/bin/control-before.sh: line 70: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M3GR70EX70VVN3BP9CGPK1QC/.remote-control-validation.8qr9nrdp/remote-root/bin/fm-tasks-axi-lib.sh: No such file or directory
+After fix, state rsm: exit=0; output=missing
+After fix, host-local relaunch with no endpoint: exit=1; output=error: remote secondmate rsm endpoint metadata is invalid; refusing access until it is explicitly migrated
