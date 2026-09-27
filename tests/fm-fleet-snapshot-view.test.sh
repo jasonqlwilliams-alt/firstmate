@@ -1085,7 +1085,12 @@ run:
 RUN
   cat > "$fakebin/no-mistakes" <<'SH'
 #!/usr/bin/env bash
-if [ "${1:-}" = axi ] && [ "${2:-}" = status ]; then cat "$FM_HOME/run.txt"; fi
+if [ "${1:-}" = axi ]; then
+  case "${2:-}" in
+    status) cat "$FM_HOME/run.txt" ;;
+    logs) cat "$FM_HOME/ci.txt" ;;
+  esac
+fi
 SH
   printf 'working: historical event
 ' > "$home/state/terminal.status"
@@ -1103,8 +1108,21 @@ SH
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
     || fail "a green run for another PR must not exempt the registered task: $out"
-  sed 's|/pull/10|/pull/9|' "$home/run.txt" > "$home/run-registered-pr.txt"
-  mv "$home/run-registered-pr.txt" "$home/run.txt"
+  cat > "$home/run.txt" <<RUN
+run:
+  id: "no-checks-run"
+  branch: $branch
+  head: "$head"
+  status: ci
+  pr: "$pr"
+RUN
+  printf 'no CI checks reported - still monitoring until merged or closed\n' > "$home/ci.txt"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
+  printf '%s' "$out" | jq -e '.tasks[0].current_state.state == "done" and .tasks[0].current_state.source == "run-step" and (.tasks[0].current_state.detail | contains("no CI checks reported"))' >/dev/null \
+    || fail "fixture must prove the current run has no reported checks: $out"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
+    || fail "no reported CI checks must not exempt a registered PR: $out"
   # Coarse run attribution appends monitoring evidence to the same green note.
   printf 'running %s %.7s 2026-07-11 18:00 %s\n' "$branch" "$head" "$pr" > "$home/coarse.txt"
   cat > "$fakebin/no-mistakes" <<'SH'

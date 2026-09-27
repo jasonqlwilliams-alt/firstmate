@@ -1041,19 +1041,11 @@ secondmate_home_summary_json() {  # <backlog-json-file> <tasks-json-file>
          | select(.id == $work.id and (.current_state.state == "done" or .current_state.state == "failed"))
          | select((.current_state.state == "done"
                    and .pr.source == "meta" and .pr.url != null
-                   and ((.current_state.source == "run-step"
-                         and (.current_state.detail | startswith("checks green:"))
-                         and (.pr.url as $url | .current_state.detail
-                              | split(" · run PR: ")
-                              | if length == 2 then .[1] == $url else false end))
-                        or (.current_state.source == "status-log"
-                            and (.pr.url as $url | .current_state.detail
-                                 | split(" · ")[0] | endswith($url + " checks green"))
-                            and (.pr.url as $url | .current_state.detail
-                                 | split(" · run PR: ")
-                                 | if length == 2 then
-                                     .[1] == ($url + " · current CI green")
-                                   else false end)))) | not)
+                   and .current_state.source == "run-step"
+                   and (.current_state.detail | startswith("checks green:"))
+                   and (.pr.url as $url | .current_state.detail
+                        | split(" · run PR: ")
+                        | if length == 2 then .[1] == $url else false end)) | not)
          | {id,state:.current_state.state} ]) as $terminal_in_flight
     | ([if $backlog.present != true then
           {kind:"missing_backlog",ids:[],reason:"missing structured backlog"}
