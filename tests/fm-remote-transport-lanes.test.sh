@@ -58,6 +58,8 @@ cp "$ROOT/bin/fm-remote-job-lib.sh" "$ROOT/bin/fm-remote-job-worker.sh" \
   "$ROOT/bin/fm-ff-lib.sh" "$ROOT/bin/fm-secondmate-registry-lib.sh" \
   "$ROOT/bin/fm-tasks-axi-lib.sh" "$ROOT/bin/fm-backlog-transition-lib.sh" \
   "$REMOTE_ROOT/bin/"
+# The transport's remote control verbs must not load parent-only backlog libs.
+rm -f "$REMOTE_ROOT/bin/fm-tasks-axi-lib.sh" "$REMOTE_ROOT/bin/fm-backlog-transition-lib.sh"
 mkdir -p "$REMOTE_ROOT/bin/backends"
 cp "$ROOT/bin/backends/herdr.sh" "$REMOTE_ROOT/bin/backends/herdr.sh"
 printf 'fixture\n' > "$REMOTE_ROOT/AGENTS.md"
