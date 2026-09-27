@@ -1045,6 +1045,198 @@ EOF
   pass "home-summary excludes kind=secondmate from unowned_current and terminal_in_flight"
 }
 
+test_green_registered_pr_and_teardown_inventory() {
+  local home fakebin out pr head branch
+  home=$(make_home green-merge)
+  fakebin=$(make_fakebin "$home")
+  pr=https://github.com/kunchenguid/firstmate/pull/9
+  mkdir -p "$home/projects/terminal"
+  cat > "$home/data/backlog.md" <<'MD'
+## In flight
+- [ ] terminal - Green task awaiting merge (repo: alpha) (kind: ship) (since 2026-07-11)
+
+## Queued
+
+## Done
+MD
+  fm_write_meta "$home/state/terminal.meta" \
+    "window=firstmate:fm-terminal" "worktree=$home/projects/terminal" \
+    "project=alpha" "harness=claude" "kind=ship" "mode=no-mistakes" \
+    "spawn_gen=terminal-gen" "pr=$pr"
+  record_claude_idle "$home/state" terminal
+  printf 'done: PR %s checks green\n' "$pr" > "$home/state/terminal.status"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}' >/dev/null \
+    || fail "registered green task awaiting merge must not disagree: $out"
+
+  # Exercise the authoritative no-mistakes current-state path over a real repo.
+  git -C "$home/projects/terminal" init -q
+  git -C "$home/projects/terminal" -c user.name=fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m init
+  head=$(git -C "$home/projects/terminal" rev-parse HEAD)
+  branch=$(git -C "$home/projects/terminal" symbolic-ref --short HEAD)
+  cat > "$home/run.txt" <<RUN
+run:
+  id: "green-run"
+  branch: $branch
+  head: "$head"
+  status: completed
+  outcome: checks-passed
+  pr: "$pr"
+RUN
+  cat > "$fakebin/no-mistakes" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = axi ] && [ "${2:-}" = status ]; then cat "$FM_HOME/run.txt"; fi
+SH
+  printf 'working: historical event
+' > "$home/state/terminal.status"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
+  printf '%s' "$out" | jq -e '.tasks[0].current_state.state == "done" and .tasks[0].current_state.source == "run-step" and (.tasks[0].current_state.detail | startswith("checks green:"))' >/dev/null \
+    || fail "fixture must prove terminal green from its own run: $out"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}' >/dev/null \
+    || fail "authoritative green run awaiting merge must not disagree: $out"
+  # Coarse run attribution appends monitoring evidence to the same green note.
+  printf 'running %s %.7s 2026-07-11 18:00\n' "$branch" "$head" > "$home/coarse.txt"
+  cat > "$fakebin/no-mistakes" <<'SH'
+#!/usr/bin/env bash
+case "${1:-}" in
+  runs) cat "$FM_HOME/coarse.txt" ;;
+  axi) printf 'run:\n  branch: fm/another-task\n  status: running\n' ;;
+esac
+SH
+  printf 'done: PR %s checks green\n' "$pr" > "$home/state/terminal.status"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
+  printf '%s' "$out" | jq -e '.tasks[0].current_state.state == "done" and .tasks[0].current_state.source == "status-log" and (.tasks[0].current_state.detail | contains("run still monitoring PR"))' >/dev/null \
+    || fail "fixture must prove green status with a monitoring suffix: $out"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}' >/dev/null \
+    || fail "green task still monitored via coarse run must not disagree: $out"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$fakebin/no-mistakes"
+
+  printf 'done: PR %s0 checks green\n' "$pr" > "$home/state/terminal.status"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
+    || fail "a different PR in the green event must not exempt the registered task: $out"
+
+  # Remove only green evidence: a registered PR alone cannot exempt a terminal task.
+  printf 'done: implementation complete\n' > "$home/state/terminal.status"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
+    || fail "registered PR without green evidence must still disagree: $out"
+  printf 'failed: checks failed\n' > "$home/state/terminal.status"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
+    || fail "failed registered task must still disagree: $out"
+  printf 'done: PR %s checks green\n' "$pr" > "$home/state/terminal.status"
+  sed '/^pr=/d' "$home/state/terminal.meta" > "$home/state/rewrite"
+  mv "$home/state/rewrite" "$home/state/terminal.meta"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
+    || fail "historical status URL cannot substitute for PR registration: $out"
+
+  # Use the transition owner's producer, matching teardown's actual receipt.
+  (
+    . "$ROOT/bin/fm-backlog-transition-lib.sh"
+    fm_backlog_close_marker_write "$home/state" terminal "$home/data" terminal-gen --pr "$pr"
+  ) || fail "create real pending-close receipt"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"child_current_unavailable",ids:["terminal"]} and (.reason | contains("teardown pending"))' >/dev/null \
+    || fail "teardown before metadata removal must be unavailable, not contradictory: $out"
+  # A receipt belonging to another generation cannot exempt this task.
+  sed 's/terminal-gen/replaced-gen/' "$home/state/terminal.backlog-close" > "$home/state/rewrite"
+  mv "$home/state/rewrite" "$home/state/terminal.backlog-close"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
+    || fail "stale teardown generation must not hide a contradiction: $out"
+  sed 's/replaced-gen/terminal-gen/' "$home/state/terminal.backlog-close" > "$home/state/rewrite"
+  mv "$home/state/rewrite" "$home/state/terminal.backlog-close"
+  rm "$home/state/terminal.meta"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.invalidity == {kind:"child_current_unavailable",ids:["terminal"]}' >/dev/null \
+    || fail "teardown between metadata removal and backlog close must be explicit: $out"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
+  printf '%s' "$out" | jq -e '.tasks == [] and .main_inventory.valid == false and .main_inventory.orphan_in_flight == [] and (.main_inventory.reason | contains("teardown pending"))' >/dev/null \
+    || fail "main snapshot must disclose pending teardown without inventing a worker: $out"
+
+  # A malformed or foreign receipt cannot hide a genuine orphan.
+  sed "s|data=$home/data|data=$home/projects|" "$home/state/terminal.backlog-close" > "$home/state/rewrite"
+  mv "$home/state/rewrite" "$home/state/terminal.backlog-close"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.invalidity == {kind:"orphan_in_flight",ids:["terminal"]}' >/dev/null \
+    || fail "foreign teardown receipt must not hide missing metadata: $out"
+  rm "$home/state/terminal.backlog-close"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
+  printf '%s' "$out" | jq -e '.main_inventory.orphan_in_flight == ["terminal"]' >/dev/null \
+    || fail "genuine orphan must remain detectable: $out"
+  pass "green registered PR and validated pending teardown avoid false mismatches while contradictions remain visible"
+}
+
+test_teardown_backlog_change_during_capture_is_resampled() {
+  local home fakebin out id mode real_cp
+  real_cp=$(command -v cp)
+  for mode in --json --secondmate-home-summary; do
+    home=$(make_home "teardown-capture-$mode")
+    fakebin=$(make_fakebin "$home")
+    cat > "$home/data/backlog.md" <<'MD'
+## In flight
+- [ ] first - First delivery (repo: alpha) (kind: ship) (since 2026-07-11)
+- [ ] second - Second delivery (repo: alpha) (kind: ship) (since 2026-07-11)
+
+## Queued
+
+## Done
+MD
+    cat > "$home/closed.md" <<'MD'
+## In flight
+
+## Queued
+
+## Done
+- [x] first - First delivery (repo: alpha) (kind: ship) (merged 2026-07-11)
+- [x] second - Second delivery (repo: alpha) (kind: ship) (merged 2026-07-11)
+MD
+    for id in first second; do
+      fm_write_meta "$home/state/$id.meta" \
+        "window=firstmate:fm-$id" "worktree=$home/projects/$id" \
+        "project=alpha" "harness=claude" "kind=ship" "mode=no-mistakes" \
+        "spawn_gen=$id-gen"
+      (
+        . "$ROOT/bin/fm-backlog-transition-lib.sh"
+        fm_backlog_close_marker_write "$home/state" "$id" "$home/data" "$id-gen"
+      ) || fail "create teardown fixture receipt"
+    done
+    # Force the real transition ordering at the metadata capture boundary:
+    # remove metadata, close backlog rows, then retire their pending receipts.
+    cat > "$fakebin/cp" <<'SH'
+#!/usr/bin/env bash
+if [ "${2:-}" = "$FM_HOME/state/first.meta" ]; then
+  rm "$FM_HOME/state/first.meta" "$FM_HOME/state/second.meta"
+  "$FM_TEST_REAL_CP" "$FM_HOME/closed.md" "$FM_HOME/data/backlog.md"
+  rm "$FM_HOME/state/first.backlog-close" "$FM_HOME/state/second.backlog-close"
+  touch "$FM_HOME/transition-observed"
+fi
+exec "$FM_TEST_REAL_CP" "$@"
+SH
+    chmod +x "$fakebin/cp"
+    out=$(PATH="$fakebin:$PATH" FM_TEST_REAL_CP="$real_cp" FM_HOME="$home" "$SNAPSHOT" "$mode") \
+      || fail "snapshot must resample completed concurrent teardown"
+    [ -f "$home/transition-observed" ] || fail "teardown interleaving was not exercised"
+    case "$mode" in
+      --json)
+        printf '%s' "$out" | jq -e '.tasks == [] and .main_inventory.valid and ([.backlog.records[].state] == ["done","done"])' >/dev/null \
+          || fail "snapshot combined old backlog with new metadata: $out" ;;
+      *)
+        printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]} and .counts.endpoints == 0 and .counts.landed == 2' >/dev/null \
+          || fail "home summary falsely disagreed during completed teardown: $out" ;;
+    esac
+  done
+  pass "public snapshots resample backlog changes during two-task teardown"
+}
+
+test_teardown_backlog_change_during_capture_is_resampled
+
+test_green_registered_pr_and_teardown_inventory
+
 test_empty_fleet_json
 test_fixture_snapshot_json
 test_home_summary_excludes_secondmate_from_child_inventory
