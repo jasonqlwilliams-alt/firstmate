@@ -1,0 +1,4 @@
+{"case": "missing backlog", "valid": false, "invalidity": {"kind": "missing_backlog", "ids": []}, "reason": "missing structured backlog"}
+{"case": "orphan in-flight task", "valid": false, "invalidity": {"kind": "orphan_in_flight", "ids": ["task"]}, "reason": "in-flight backlog item has no child metadata: task"}
+{"case": "pending teardown receipt", "valid": false, "invalidity": {"kind": "child_current_unavailable", "ids": ["task"]}, "reason": "task teardown pending: task"}
+{"case": "orphan after receipt removed", "valid": false, "invalidity": {"kind": "orphan_in_flight", "ids": ["task"]}, "reason": "in-flight backlog item has no child metadata: task"}

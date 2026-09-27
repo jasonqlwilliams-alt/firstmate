@@ -1,0 +1,13 @@
+step: ci
+run: "01M3GR70EX70VVN3BP9CGPK1QC"
+lines: 9 total
+log[9]{line}:
+  "monitoring CI for PR #29 (timeout: 168h0m0s)..."
+  ""
+  "CI repair policy: publish a repair whose continuity with the reviewed head is provable, otherwise restart validation from Review (ci.revalidate_repairs: false)"
+  ""
+  all CI checks passed - still monitoring until merged or closed
+  ""
+  "CI checks running, waiting for results..."
+  ""
+  all CI checks passed - still monitoring until merged or closed

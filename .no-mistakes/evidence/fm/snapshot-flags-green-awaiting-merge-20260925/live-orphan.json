@@ -1,0 +1,31 @@
+{
+  "schema": "fm-secondmate-home-summary.v1",
+  "hold_classifier_schema": "fm-captain-hold-buckets.v1",
+  "generated": "2026-09-27T07:58:45Z",
+  "generated_epoch": 1790495925,
+  "home": "/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M3GRK04F7ZVTXQRYG70GPJ3G/.snapshot-live-pr29",
+  "valid": false,
+  "reason": "in-flight backlog item has no child metadata: orphan",
+  "invalidity": {
+    "kind": "orphan_in_flight",
+    "ids": [
+      "orphan"
+    ]
+  },
+  "state": "no_active_work",
+  "active_children": [],
+  "decisions_open": [],
+  "holds": [],
+  "queued": [],
+  "landed": [],
+  "endpoints": [],
+  "counts": {
+    "active_children": 0,
+    "decisions_open": 0,
+    "holds": 0,
+    "queued": 0,
+    "landed": 0,
+    "endpoints": 0
+  },
+  "omitted": []
+}

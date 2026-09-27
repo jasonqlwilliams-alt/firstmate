@@ -1,0 +1,20 @@
+run:
+  id: "01M3GR70EX70VVN3BP9CGPK1QC"
+  branch: fm/remote-control-lib-sourcing-scope-20260924
+  status: running
+  head: 5c63a329
+  head_sha: 5c63a3292b0a14a69ceaad64618c38f966a75517
+  pr: "https://github.com/jasonqlwilliams-alt/firstmate/pull/29"
+  findings: none
+  steps[9]{step,status,findings,duration_ms}:
+    intent,completed,0,32
+    rebase,completed,0,740
+    review,completed,0,99308
+    test,completed,0,209020
+    document,completed,0,68648
+    lint,completed,0,3091
+    push,completed,0,4431
+    pr,completed,0,45091
+    ci,running,0,0
+  active_steps[1]{step,status,active_for,round_active_for,last_activity,agent_pid,round}:
+    ci,running,1h32m,1h32m,"quiet 1h8m ago: log: all CI checks passed - still monitoring until merged or closed","",starting

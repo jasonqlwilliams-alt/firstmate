@@ -1,0 +1,45 @@
+{
+  "schema": "fm-secondmate-home-summary.v1",
+  "hold_classifier_schema": "fm-captain-hold-buckets.v1",
+  "generated": "2026-09-27T08:22:47Z",
+  "generated_epoch": 1790497367,
+  "home": "/tmp/fm-fleet-snapshot.CIE6PP/green-merge",
+  "valid": false,
+  "reason": "in-flight backlog item has terminal child state: terminal=done",
+  "invalidity": {
+    "kind": "terminal_in_flight",
+    "ids": [
+      "terminal"
+    ]
+  },
+  "state": "no_active_work",
+  "active_children": [],
+  "decisions_open": [],
+  "holds": [],
+  "queued": [],
+  "landed": [],
+  "endpoints": [
+    {
+      "id": "terminal",
+      "state": "done",
+      "source": "run-step",
+      "endpoint": {
+        "target": "firstmate:fm-terminal",
+        "exists": true,
+        "agent_alive": "not_checked",
+        "status": "unknown",
+        "observed_at": "2026-09-27T08:22:47Z",
+        "freshness": "fresh"
+      }
+    }
+  ],
+  "counts": {
+    "active_children": 0,
+    "decisions_open": 0,
+    "holds": 0,
+    "queued": 0,
+    "landed": 0,
+    "endpoints": 1
+  },
+  "omitted": []
+}

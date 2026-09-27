@@ -1,0 +1,39 @@
+{
+  "backlog": {
+    "id": "terminal",
+    "state": "in_flight",
+    "hold_kind": "captain"
+  },
+  "task": {
+    "id": "terminal",
+    "pr": {
+      "url": "https://github.com/jasonqlwilliams-alt/firstmate/pull/29",
+      "source": "meta"
+    },
+    "current_state": {
+      "state": "unknown",
+      "source": "pane",
+      "detail": "harness state unavailable (unknown codex-unverified)",
+      "raw": "state: unknown · source: pane · harness state unavailable (unknown codex-unverified)",
+      "observed_at": "2026-09-27T08:10:17Z",
+      "freshness": "fresh"
+    }
+  },
+  "main_inventory": {
+    "valid": true,
+    "reason": null,
+    "orphan_in_flight": [],
+    "unstructured_current_count": 0
+  }
+}
+{
+  "valid": false,
+  "invalidity": {
+    "kind": "child_current_unavailable",
+    "ids": [
+      "terminal"
+    ]
+  },
+  "reason": "child current state unavailable: terminal",
+  "state": "unknown"
+}

@@ -1,0 +1,71 @@
+{
+  "schema": "fm-secondmate-home-summary.v1",
+  "hold_classifier_schema": "fm-captain-hold-buckets.v1",
+  "generated": "2026-09-27T08:22:46Z",
+  "generated_epoch": 1790497366,
+  "home": "/tmp/fm-fleet-snapshot.CIE6PP/green-merge",
+  "valid": true,
+  "reason": null,
+  "invalidity": {
+    "kind": null,
+    "ids": []
+  },
+  "state": "externally_held",
+  "active_children": [],
+  "decisions_open": [],
+  "holds": [
+    {
+      "id": "terminal",
+      "title": "Green task awaiting merge",
+      "blocked_by": null,
+      "blocked_by_ids": [],
+      "unresolved_blocker_ids": [],
+      "reason": "captain merge decision pending",
+      "source": "backlog"
+    }
+  ],
+  "queued": [
+    {
+      "id": "terminal",
+      "title": "Green task awaiting merge",
+      "blocked_by": null,
+      "blocked_by_ids": [],
+      "unresolved_blocker_ids": [],
+      "blocked_reason": null,
+      "hold_reason": "captain merge decision pending",
+      "hold_kind": "captain",
+      "hold_until": null,
+      "hold_bucket": "aged",
+      "hold_age_days": 78,
+      "captain_actionable": false,
+      "repo": "alpha",
+      "kind": "ship",
+      "since": "2026-07-11"
+    }
+  ],
+  "landed": [],
+  "endpoints": [
+    {
+      "id": "terminal",
+      "state": "done",
+      "source": "run-step",
+      "endpoint": {
+        "target": "firstmate:fm-terminal",
+        "exists": true,
+        "agent_alive": "not_checked",
+        "status": "unknown",
+        "observed_at": "2026-09-27T08:22:46Z",
+        "freshness": "fresh"
+      }
+    }
+  ],
+  "counts": {
+    "active_children": 0,
+    "decisions_open": 0,
+    "holds": 1,
+    "queued": 1,
+    "landed": 0,
+    "endpoints": 1
+  },
+  "omitted": []
+}

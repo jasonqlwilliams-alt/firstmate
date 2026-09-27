@@ -1,0 +1,4 @@
+{"case":"missing_backlog","valid":false,"invalidity":{"kind":"missing_backlog","ids":[]},"reason":"missing structured backlog"}
+{"case":"two_orphans","valid":false,"invalidity":{"kind":"orphan_in_flight","ids":["first","second"]},"reason":"in-flight backlog item has no child metadata: first, second"}
+{"case":"two_pending_teardowns","valid":false,"invalidity":{"kind":"child_current_unavailable","ids":["first","second"]},"reason":"task teardown pending: first, second"}
+{"case":"both_teardowns_complete","valid":true,"invalidity":{"kind":null,"ids":[]},"reason":null,"landed":2}

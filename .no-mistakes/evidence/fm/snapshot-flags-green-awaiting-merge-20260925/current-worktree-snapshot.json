@@ -1,0 +1,15 @@
+{
+  "schema": "fm-fleet-snapshot.v1",
+  "backlog": {
+    "path": "/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M3GRK04F7ZVTXQRYG70GPJ3G/data/backlog.md",
+    "present": false,
+    "records": []
+  },
+  "main_inventory": {
+    "valid": true,
+    "reason": null,
+    "orphan_in_flight": [],
+    "unstructured_current_count": 0
+  },
+  "tasks": []
+}

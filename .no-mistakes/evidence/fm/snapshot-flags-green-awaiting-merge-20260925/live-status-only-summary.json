@@ -1,0 +1,45 @@
+{
+  "schema": "fm-secondmate-home-summary.v1",
+  "hold_classifier_schema": "fm-captain-hold-buckets.v1",
+  "generated": "2026-09-27T08:00:08Z",
+  "generated_epoch": 1790496008,
+  "home": "/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M3GRK04F7ZVTXQRYG70GPJ3G/.snapshot-live-pr29",
+  "valid": false,
+  "reason": "child current state unavailable: contradicted",
+  "invalidity": {
+    "kind": "child_current_unavailable",
+    "ids": [
+      "contradicted"
+    ]
+  },
+  "state": "unknown",
+  "active_children": [],
+  "decisions_open": [],
+  "holds": [],
+  "queued": [],
+  "landed": [],
+  "endpoints": [
+    {
+      "id": "contradicted",
+      "state": "unknown",
+      "source": "none",
+      "endpoint": {
+        "target": null,
+        "exists": null,
+        "agent_alive": "not_checked",
+        "status": "unknown",
+        "observed_at": "2026-09-27T08:00:08Z",
+        "freshness": "fresh"
+      }
+    }
+  ],
+  "counts": {
+    "active_children": 0,
+    "decisions_open": 0,
+    "holds": 0,
+    "queued": 0,
+    "landed": 0,
+    "endpoints": 1
+  },
+  "omitted": []
+}
