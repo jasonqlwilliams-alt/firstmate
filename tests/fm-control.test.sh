@@ -94,7 +94,10 @@ case "${1:-}" in
     payload=${1:-}
     if [ "$literal" = 1 ]; then
       printf '%s\n' "$payload" >> "$D/literal"
-      if [ -z "${FM_FAKE_NEVER_DIES:-}" ] \
+      if [ -f "$D/codex-case" ] && [ "$payload" = /quit ]; then
+        : > "$D/typed-quit"
+        [ "${FM_FAKE_CODEX_EXIT_MODE:-}" != after-literal ] || : > "$D/picker"
+      elif [ -z "${FM_FAKE_NEVER_DIES:-}" ] \
          && { [ "$payload" = /exit ] || [ "$payload" = /quit ]; }; then
         printf 'zsh' > "$D/command"
       fi
@@ -103,6 +106,20 @@ case "${1:-}" in
       esac
     else
       printf '%s\n' "$payload" >> "$D/keys"
+      if [ "$payload" = Enter ] && [ -f "$D/codex-case" ]; then
+        if [ -f "$D/picker" ] || [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = initial-picker ]; then
+          npm install -g @openai/codex
+          printf 'zsh' > "$D/command"
+        elif { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = after-first-enter ] \
+               || [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unknown-after-first-enter ] \
+               || [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unreadable-after-first-enter ]; } \
+             && [ ! -f "$D/first-enter" ]; then
+          : > "$D/first-enter"
+          : > "$D/picker"
+        elif [ -f "$D/typed-quit" ] && [ -z "${FM_FAKE_NEVER_DIES:-}" ]; then
+          printf 'zsh' > "$D/command"
+        fi
+      fi
       if [ -n "${FM_FAKE_INTERRUPT_STOPS_AGENT:-}" ] \
          && { [ "$payload" = Escape ] || [ "$payload" = C-c ]; }; then
         printf 'zsh' > "$D/command"
@@ -126,7 +143,21 @@ case "${1:-}" in
     done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
-    if [ -f "$D/pane" ]; then cat "$D/pane"; else printf '╭────╮\n│    │\n╰────╯\n'; fi
+    if [ -f "$D/codex-case" ]; then
+      if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unreadable ] \
+         || { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unreadable-after-literal ] && [ -f "$D/typed-quit" ]; } \
+         || { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unreadable-after-first-enter ] && [ -f "$D/first-enter" ]; }; then exit 1; fi
+      if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unknown ] \
+         || { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unknown-after-literal ] && [ -f "$D/typed-quit" ]; } \
+         || { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unknown-after-first-enter ] && [ -f "$D/first-enter" ]; }; then printf 'unrecognized screen\n'; exit 0; fi
+      if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = initial-picker ] || [ -f "$D/picker" ]; then
+        printf '›\n1 Update now (npm install -g)\n2 Skip\n3 Skip until next version\nEnter continue / Escape skip\n'
+      elif [ -f "$D/typed-quit" ] && [ "$(cat "$D/command")" = codex ]; then
+        printf 'Codex\n› /quit\n'
+      else
+        printf 'Codex\n›\n'
+      fi
+    elif [ -f "$D/pane" ]; then cat "$D/pane"; else printf '╭────╮\n│    │\n╰────╯\n'; fi
     exit 0 ;;
   list-windows)
     if [ -f "$D/windows" ]; then cat "$D/windows"; fi
@@ -135,6 +166,11 @@ esac
 exit 0
 SH
   chmod +x "$fb/tmux"
+  cat > "$fb/npm" <<'SH'
+#!/usr/bin/env bash
+printf 'mock-updater %s\n' "$*" >> "$FM_FAKE_DIR/updater"
+SH
+  chmod +x "$fb/npm"
   cat > "$fb/sleep" <<'SH'
 #!/usr/bin/env bash
 if [ -n "${FM_FAKE_MUSE_DISAPPEAR_BEFORE_ACK:-}" ] \
@@ -186,6 +222,7 @@ add_task() {
   } > "$home/state/$id.meta"
   printf '%s\n' "fm-$id" > "$dir/fake/windows"
   printf '%s' "$wt" > "$dir/fake/cwd"
+  [ "$harness" != codex ] || : > "$dir/fake/codex-case"
 }
 
 # run_control <case-dir> <args...>: run fm-control against the case's home with
@@ -198,6 +235,7 @@ run_control() {
     FM_FAKE_MUSE_LOG="${FM_FAKE_MUSE_LOG:-}" \
     FM_FAKE_MUSE_DISAPPEAR_BEFORE_ACK="${FM_FAKE_MUSE_DISAPPEAR_BEFORE_ACK:-}" \
     FM_FAKE_INTERRUPT_STOPS_AGENT="${FM_FAKE_INTERRUPT_STOPS_AGENT:-}" \
+    FM_FAKE_CODEX_EXIT_MODE="${FM_FAKE_CODEX_EXIT_MODE:-}" \
     "$CONTROL" "$@" 2>&1
 }
 
@@ -235,6 +273,52 @@ test_exit_types_each_harness_verified_command() {
     assert_contains "$out" "stopped t1 harness=$harness" "exit should report the stop for $harness"
   done
   pass "fm-control exit: every verified harness gets its own verified exit command"
+}
+
+# These cases model only the visible public-control boundary. The updater is
+# a private executable sentinel, never a real package manager invocation.
+test_codex_exit_refuses_update_picker_and_uncertain_composer() {
+  local mode dir out rc expected_enters meta_before gen
+  for mode in initial-picker after-literal after-first-enter unknown unreadable \
+      unknown-after-literal unreadable-after-literal \
+      unknown-after-first-enter unreadable-after-first-enter; do
+    dir=$(new_case "codex-$mode")
+    add_task "$dir" t1 codex
+    alive_as "$dir" codex
+    meta_before=$(cat "$dir/home/state/t1.meta")
+    out=$(FM_FAKE_CODEX_EXIT_MODE="$mode" run_control "$dir" t1 exit); rc=$?
+    expect_code 1 "$rc" "Codex exit must refuse $mode"$'\n'"$out"
+    assert_not_contains "$out" 'stopped t1' "Codex $mode must not report a safe exit"
+    [ ! -s "$dir/fake/updater" ] || fail "Codex $mode accepted the mock updater"
+    [ "$(cat "$dir/fake/command")" = codex ] || fail "Codex $mode changed the agent"
+    [ "$(cat "$dir/home/state/t1.meta")" = "$meta_before" ] \
+      || fail "Codex $mode changed endpoint metadata"
+    [ -d "$dir/wt-t1" ] || fail "Codex $mode removed the worktree"
+    case "$mode" in
+      initial-picker|unknown|unreadable)
+        [ ! -s "$dir/fake/literal" ] || fail "Codex $mode typed quit"
+        expected_enters=0 ;;
+      after-literal|unknown-after-literal|unreadable-after-literal)
+        [ "$(literals "$dir")" = /quit ] || fail "Codex $mode did not type exactly /quit"
+        expected_enters=0 ;;
+      after-first-enter|unknown-after-first-enter|unreadable-after-first-enter)
+        [ "$(literals "$dir")" = /quit ] || fail "Codex $mode did not type exactly /quit"
+        expected_enters=1 ;;
+    esac
+    [ "$(grep -c '^Enter$' "$dir/fake/keys" || true)" = "$expected_enters" ] \
+      || fail "Codex $mode sent a confirming or retry Enter"
+  done
+  dir=$(new_case codex-picker-busy)
+  add_task "$dir" t1 codex
+  alive_as "$dir" codex
+  gen=$("$ROOT/bin/fm-busy-event.sh" arm "$dir/home/state" t1)
+  printf 'busy_gen=%s\n' "$gen" >> "$dir/home/state/t1.meta"
+  out=$(FM_FAKE_CODEX_EXIT_MODE=initial-picker run_control "$dir" t1 exit); rc=$?
+  expect_code 1 "$rc" "Codex picker must refuse before a busy interrupt"$'\n'"$out"
+  [ ! -s "$dir/fake/keys" ] && [ ! -s "$dir/fake/literal" ] \
+    || fail "Codex picker received lifecycle input before refusal"
+  [ ! -s "$dir/fake/updater" ] || fail "Codex busy picker accepted the mock updater"
+  pass "fm-control exit: Codex picker and uncertain screen refuse before confirmation"
 }
 
 test_interrupt_sends_each_harness_verified_key() {
@@ -881,6 +965,7 @@ test_fm_send_still_marks_the_same_secondmate_task() {
 }
 
 test_exit_types_each_harness_verified_command
+test_codex_exit_refuses_update_picker_and_uncertain_composer
 test_interrupt_sends_each_harness_verified_key
 test_opencode_interrupts_twice_and_others_once
 test_unverified_harness_is_refused

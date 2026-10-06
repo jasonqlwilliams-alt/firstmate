@@ -30,6 +30,9 @@
 #              every uncommitted change. Interrupts first when the task reads
 #              busy, then submits the harness's exit command. Postcondition:
 #              the backend's recovery-grade classifier reports the agent gone.
+#              Codex requires a proven empty composer before typing /quit and
+#              refuses its global-update picker or uncertain screen before
+#              every Enter, including retries.
 #              Already-stopped is success (idempotent), including when the
 #              recorded endpoint is authoritatively missing: there is no agent
 #              to stop, and relaunch may recreate the endpoint.
@@ -467,10 +470,68 @@ retire_busy_incarnation() {
   fi
 }
 
+# codex_exit_screen_state: inspect the documented global-update picker before
+# trusting a composer verdict. A picker can leave an old prompt visible behind
+# it, so the composer alone cannot authorize a confirming Enter.
+codex_exit_screen_state() {  # -> update-picker|empty|pending|pending-unproven|unknown
+  local screen state
+  screen=$(fm_backend_capture "$BACKEND" "$T" 40 "$LABEL" 2>/dev/null) \
+    || { printf 'unknown'; return 0; }
+  [ -n "$screen" ] || { printf 'unknown'; return 0; }
+  if [[ "$screen" == *'Update now (npm install -g)'* \
+     && "$screen" == *'Skip until next version'* \
+     && "$screen" == *'Escape skip'* ]]; then
+    printf 'update-picker'
+    return 0
+  fi
+  state=$(fm_backend_composer_state "$BACKEND" "$T" "$LABEL" 2>/dev/null) \
+    || state=unknown
+  case "$state" in
+    empty|pending|pending-unproven) printf '%s' "$state" ;;
+    *) printf 'unknown' ;;
+  esac
+}
+
+# Codex exit owns its literal/Enter sequence so every Enter is preceded by a
+# fresh screen check. The other harnesses keep the normal backend submit path.
+codex_exit_submit() {  # <literal-exit-command>
+  local cmd=$1 screen state i=0
+  screen=$(codex_exit_screen_state)
+  case "$screen" in
+    update-picker) die "task $ID shows the Codex global-update picker; refusing to type $cmd or confirm its selected update" ;;
+    empty) ;;
+    *) die "task $ID's Codex composer is '$screen', not proven empty; refusing to type $cmd" ;;
+  esac
+  fm_backend_send_literal "$BACKEND" "$T" "$cmd" "$LABEL" \
+    || die "the Codex exit text could not be sent to task $ID on $BACKEND"
+  sleep 1.2
+  while [ "$i" -lt "$EXIT_RETRIES" ]; do
+    screen=$(codex_exit_screen_state)
+    case "$screen" in
+      update-picker) die "task $ID shows the Codex global-update picker after exit text; refusing a confirming Enter" ;;
+      pending) ;;
+      *) die "task $ID's Codex composer is '$screen' after exit text; refusing a confirming Enter" ;;
+    esac
+    fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null 2>&1 || true
+    i=$((i + 1))
+    sleep "$POLL"
+    screen=$(codex_exit_screen_state)
+    [ "$screen" != update-picker ] \
+      || die "task $ID shows the Codex global-update picker after Enter; refusing another Enter and not claiming a safe exit"
+    state=$(agent_state)
+    [ "$state" != dead ] || return 0
+    case "$screen" in
+      pending) ;;
+      empty) return 0 ;; # The command may be processing; wait for death below.
+      *) die "task $ID's Codex composer is '$screen' after Enter; refusing another Enter" ;;
+    esac
+  done
+}
+
 # do_exit: stop the running agent, preserving endpoint and worktree. Prints
 # `already-stopped` or `stopped`.
 do_exit() {
-  local state cmd verdict cancel interrupt_result=not-needed
+  local state cmd verdict cancel screen interrupt_result=not-needed
   require_state_verified_backend exit
   state=$(agent_state)
   case "$state" in
@@ -481,6 +542,11 @@ do_exit() {
     alive) ;;
     *) die "task $ID's endpoint reads '$state' rather than a positively classified state; refusing to send a lifecycle command into an unattributed endpoint" ;;
   esac
+  if [ "$HARNESS" = codex ]; then
+    screen=$(codex_exit_screen_state)
+    [ "$screen" != update-picker ] \
+      || die "task $ID shows the Codex global-update picker; refusing lifecycle keys and exit text"
+  fi
   # A busy agent is interrupted first before the exit command is submitted.
   case "$(busy_verdict)" in
     busy*)
@@ -505,10 +571,14 @@ do_exit() {
   # authoritative proof is the agent-state wait below. The retried Enter still
   # matters, because a slash command opens a completion popup on some TUIs that
   # swallows the first Enter.
-  verdict=$(fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" 1.2 "$LABEL") \
-    || die "the exit command could not be sent to task $ID on $BACKEND"
-  [ "$verdict" != send-failed ] \
-    || die "the exit command could not be sent to task $ID on $BACKEND"
+  if [ "$HARNESS" = codex ]; then
+    codex_exit_submit "$cmd"
+  else
+    verdict=$(fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" 1.2 "$LABEL") \
+      || die "the exit command could not be sent to task $ID on $BACKEND"
+    [ "$verdict" != send-failed ] \
+      || die "the exit command could not be sent to task $ID on $BACKEND"
+  fi
   state=$(wait_agent_state "$EXIT_WAIT" dead) || {
     die "exit-delivered $ID interrupt=$interrupt_result exit-command=delivered agent-state=$state exit=unconfirmed; the agent did not stop within ${EXIT_WAIT}s"
   }
