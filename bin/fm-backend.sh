@@ -735,9 +735,6 @@ fm_backend_send_literal() {  # <backend> <target> <text> [expected-label]
   case "$backend" in
     tmux) fm_backend_tmux_send_literal "$@" ;;
     herdr) fm_backend_herdr_send_literal "$@" ;;
-    zellij) fm_backend_zellij_send_literal "$@" ;;
-    orca) fm_backend_orca_send_literal "$@" ;;
-    cmux) fm_backend_cmux_send_literal "$@" ;;
     *) echo "error: no literal-send implementation for backend '$backend'" >&2; return 1 ;;
   esac
 }

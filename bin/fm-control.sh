@@ -474,17 +474,38 @@ retire_busy_incarnation() {
 # trusting a composer verdict. A picker can leave an old prompt visible behind
 # it, so the composer alone cannot authorize a confirming Enter.
 codex_exit_screen_state() {  # -> update-picker|empty|pending|pending-unproven|unknown
-  local screen state
-  screen=$(fm_backend_capture "$BACKEND" "$T" 40 "$LABEL" 2>/dev/null) \
-    || { printf 'unknown'; return 0; }
+  local screen plain state caps cy=
+  fm_backend_source "$BACKEND" || { printf 'unknown'; return 0; }
+  case "$BACKEND" in
+    tmux)
+      cy=$(fm_tmux_composer_cursor_row "$T") \
+        || { printf 'unknown'; return 0; }
+      case "$cy" in ''|*[!0-9]*) printf 'unknown'; return 0 ;; esac
+      screen=$(fm_tmux_composer_capture "$T") \
+        || { printf 'unknown'; return 0; }
+      caps=$(fm_tmux_composer_caps)
+      ;;
+    herdr)
+      if screen=$(fm_backend_herdr_capture_ansi "$T" "$FM_COMPOSER_CAPTURE_LINES" 2>/dev/null); then
+        caps=$(printf 'styled=1\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
+      elif screen=$(fm_backend_herdr_capture "$T" "$FM_COMPOSER_CAPTURE_LINES" 2>/dev/null); then
+        caps=$(printf 'styled=0\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
+      else
+        printf 'unknown'
+        return 0
+      fi
+      ;;
+    *) printf 'unknown'; return 0 ;;
+  esac
   [ -n "$screen" ] || { printf 'unknown'; return 0; }
-  if [[ "$screen" == *'Update now (npm install -g)'* \
-     && "$screen" == *'Skip until next version'* \
-     && "$screen" == *'Escape skip'* ]]; then
+  plain=$(printf '%s\n' "$screen" | fm_composer_strip_ansi)
+  if [[ "$plain" == *'Update now (npm install -g)'* \
+     && "$plain" == *'Skip until next version'* \
+     && "$plain" == *'Escape skip'* ]]; then
     printf 'update-picker'
     return 0
   fi
-  state=$(fm_backend_composer_state "$BACKEND" "$T" "$LABEL" 2>/dev/null) \
+  state=$(fm_composer_classify_screen "$caps" "$screen" "$cy" 2>/dev/null) \
     || state=unknown
   case "$state" in
     empty|pending|pending-unproven) printf '%s' "$state" ;;

@@ -144,6 +144,16 @@ case "${1:-}" in
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
     if [ -f "$D/codex-case" ]; then
+      if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = split-read-picker ] \
+         && [ -f "$D/typed-quit" ]; then
+        for arg in "$@"; do
+          if [ "$arg" = -e ]; then
+            : > "$D/picker"
+            printf 'Codex\n› /quit\n1 Update now (npm install -g)\n2 Skip\n3 Skip until next version\nEnter continue / Escape skip\n'
+            exit 0
+          fi
+        done
+      fi
       if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unreadable ] \
          || { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unreadable-after-literal ] && [ -f "$D/typed-quit" ]; } \
          || { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unreadable-after-first-enter ] && [ -f "$D/first-enter" ]; }; then exit 1; fi
@@ -279,7 +289,7 @@ test_exit_types_each_harness_verified_command() {
 # a private executable sentinel, never a real package manager invocation.
 test_codex_exit_refuses_update_picker_and_uncertain_composer() {
   local mode dir out rc expected_enters meta_before gen
-  for mode in initial-picker after-literal after-first-enter unknown unreadable \
+  for mode in initial-picker after-literal split-read-picker after-first-enter unknown unreadable \
       unknown-after-literal unreadable-after-literal \
       unknown-after-first-enter unreadable-after-first-enter; do
     dir=$(new_case "codex-$mode")
@@ -298,7 +308,7 @@ test_codex_exit_refuses_update_picker_and_uncertain_composer() {
       initial-picker|unknown|unreadable)
         [ ! -s "$dir/fake/literal" ] || fail "Codex $mode typed quit"
         expected_enters=0 ;;
-      after-literal|unknown-after-literal|unreadable-after-literal)
+      after-literal|split-read-picker|unknown-after-literal|unreadable-after-literal)
         [ "$(literals "$dir")" = /quit ] || fail "Codex $mode did not type exactly /quit"
         expected_enters=0 ;;
       after-first-enter|unknown-after-first-enter|unreadable-after-first-enter)
