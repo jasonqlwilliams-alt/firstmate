@@ -473,8 +473,8 @@ retire_busy_incarnation() {
 # codex_exit_screen_state: inspect the documented global-update picker before
 # trusting a composer verdict. A picker can leave an old prompt visible behind
 # it, so the composer alone cannot authorize a confirming Enter.
-codex_exit_screen_state() {  # -> update-picker|empty|pending|pending-unproven|unknown
-  local screen plain state caps cy=
+codex_exit_screen_state() {  # [expected-pending] -> update-picker|empty|pending|pending-unproven|unknown
+  local expected=${1:-} screen plain state caps cy= content plain_capture=0
   fm_backend_source "$BACKEND" || { printf 'unknown'; return 0; }
   case "$BACKEND" in
     tmux)
@@ -490,6 +490,7 @@ codex_exit_screen_state() {  # -> update-picker|empty|pending|pending-unproven|u
         caps=$(printf 'styled=1\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
       elif screen=$(fm_backend_herdr_capture "$T" "$FM_COMPOSER_CAPTURE_LINES" 2>/dev/null); then
         caps=$(printf 'styled=0\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
+        plain_capture=1
       else
         printf 'unknown'
         return 0
@@ -507,6 +508,10 @@ codex_exit_screen_state() {  # -> update-picker|empty|pending|pending-unproven|u
   fi
   state=$(fm_composer_classify_screen "$caps" "$screen" "$cy" 2>/dev/null) \
     || state=unknown
+  if [ "$state" = unknown ] && [ "$plain_capture" = 1 ] && [ -n "$expected" ]; then
+    content=$(fm_composer_extract_selected_content "$caps" "$screen" 2>/dev/null) || content=
+    [ "$content" != "$expected" ] || state=pending
+  fi
   case "$state" in
     empty|pending|pending-unproven) printf '%s' "$state" ;;
     *) printf 'unknown' ;;
@@ -527,7 +532,7 @@ codex_exit_submit() {  # <literal-exit-command>
     || die "the Codex exit text could not be sent to task $ID on $BACKEND"
   sleep 1.2
   while [ "$i" -lt "$EXIT_RETRIES" ]; do
-    screen=$(codex_exit_screen_state)
+    screen=$(codex_exit_screen_state "$cmd")
     case "$screen" in
       update-picker) die "task $ID shows the Codex global-update picker after exit text; refusing a confirming Enter" ;;
       pending) ;;
@@ -537,15 +542,14 @@ codex_exit_submit() {  # <literal-exit-command>
     i=$((i + 1))
     sleep "$POLL"
     screen=$(codex_exit_screen_state)
-    [ "$screen" != update-picker ] \
-      || die "task $ID shows the Codex global-update picker after Enter; refusing another Enter and not claiming a safe exit"
+    case "$screen" in
+      update-picker) die "task $ID shows the Codex global-update picker after Enter; safe quit unconfirmed; refusing another Enter" ;;
+      pending|empty) ;;
+      *) die "task $ID's Codex composer is '$screen' after Enter; safe quit unconfirmed; refusing another Enter" ;;
+    esac
     state=$(agent_state)
     [ "$state" != dead ] || return 0
-    case "$screen" in
-      pending) ;;
-      empty) return 0 ;; # The command may be processing; wait for death below.
-      *) die "task $ID's Codex composer is '$screen' after Enter; refusing another Enter" ;;
-    esac
+    [ "$screen" != empty ] || return 0
   done
 }
 
