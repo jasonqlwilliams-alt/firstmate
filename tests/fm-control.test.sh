@@ -223,7 +223,22 @@ case "${1:-} ${2:-}" in
     fi ;;
   'pane read')
     for arg in "$@"; do [ "$arg" != ansi ] || exit 1; done
-    if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = initial-picker ] \
+    if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = retained-picker-idle ] \
+       || [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = retained-picker-active ] \
+       || [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = retained-picker-uncertain ]; then
+      printf 'Codex\n›\n1 Update now (npm install -g)\n2 Skip\n3 Skip until next version\nEnter continue / Escape skip\n'
+      if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = retained-picker-active ]; then
+        printf 'Codex\n›\n1 Update now (npm install -g)\n2 Skip\n3 Skip until next version\nEnter continue / Escape skip\n'
+      elif [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = retained-picker-uncertain ]; then
+        printf 'unrecognized screen\n'
+      elif [ -f "$D/typed-quit" ] && [ "$(cat "$D/command")" = codex ]; then
+        printf 'Codex\n› /quit\n'
+      elif [ "$(cat "$D/command")" = zsh ]; then
+        printf '$ \n'
+      else
+        printf 'Codex\n›\n'
+      fi
+    elif [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = initial-picker ] \
        || { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = after-literal ] && [ -f "$D/typed-quit" ]; }; then
       printf 'Codex\n› /quit\n1 Update now (npm install -g)\n2 Skip\n3 Skip until next version\nEnter continue / Escape skip\n'
     elif [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = plain-uncertain-after-literal ] \
@@ -422,7 +437,8 @@ test_codex_exit_does_not_confirm_dead_after_uncertain_screen() {
 
 test_codex_exit_herdr_plain_capture() {
   local dir out rc mode expected_enters
-  for mode in idle initial-picker after-literal plain-uncertain-after-literal; do
+  for mode in idle retained-picker-idle initial-picker retained-picker-active \
+      retained-picker-uncertain after-literal plain-uncertain-after-literal; do
     dir=$(new_case "herdr-codex-$mode")
     add_task "$dir" t1 codex ship herdr session:p1
     cat >> "$dir/home/state/t1.meta" <<'META'
@@ -435,16 +451,19 @@ META
     alive_as "$dir" codex
     out=$(FM_HERDR_PS_BIN="$dir/fakebin/ps" FM_FAKE_CODEX_EXIT_MODE="$mode" run_control "$dir" t1 exit); rc=$?
     case "$mode" in
-      idle)
+      idle|retained-picker-idle)
         expect_code 1 "$rc" "Codex idle quit through Herdr plain capture must remain unconfirmed"$'\n'"$out"
         assert_contains "$out" 'process-stopped-safe-quit-unconfirmed t1' \
           "Herdr plain quit should distinguish process death from safe quit"
-        [ "$(literals "$dir")" = /quit ] || fail "Herdr plain quit did not type /quit"
+        [ "$(literals "$dir")" = /quit ] || fail "Herdr plain $mode did not type /quit"
         [ "$(cat "$dir/fake/command")" = zsh ] || fail "Herdr plain quit did not redraw a shell"
         expected_enters=1 ;;
       *)
         expect_code 1 "$rc" "Codex Herdr plain $mode must refuse"$'\n'"$out"
         assert_not_contains "$out" 'stopped t1' "Herdr plain $mode must not report stopped"
+        [ ! -s "$dir/fake/literal" ] || [ "$mode" = after-literal ] \
+          || [ "$mode" = plain-uncertain-after-literal ] \
+          || fail "Herdr plain $mode typed quit before a safe composer was shown"
         expected_enters=0 ;;
     esac
     [ "$(grep -c '^enter$' "$dir/fake/keys" || true)" = "$expected_enters" ] \

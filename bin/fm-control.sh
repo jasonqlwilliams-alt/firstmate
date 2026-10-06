@@ -475,6 +475,7 @@ retire_busy_incarnation() {
 # it, so the composer alone cannot authorize a confirming Enter.
 codex_exit_screen_state() {  # [expected-pending] -> update-picker|empty|pending|pending-unproven|unknown
   local expected=${1:-} screen plain state caps cy= content plain_capture=0
+  local picker_tail picker_before picker_row tail_state tail_caps
   fm_backend_source "$BACKEND" || { printf 'unknown'; return 0; }
   case "$BACKEND" in
     tmux)
@@ -500,11 +501,21 @@ codex_exit_screen_state() {  # [expected-pending] -> update-picker|empty|pending
   esac
   [ -n "$screen" ] || { printf 'unknown'; return 0; }
   plain=$(printf '%s\n' "$screen" | fm_composer_strip_ansi)
-  if [[ "$plain" == *'Update now (npm install -g)'* \
-     && "$plain" == *'Skip until next version'* \
-     && "$plain" == *'Escape skip'* ]]; then
-    printf 'update-picker'
-    return 0
+  if [[ "$plain" == *'Update now (npm install -g)'*'Skip until next version'*'Escape skip'* ]]; then
+    picker_tail=${plain##*'Escape skip'}
+    if [ "$BACKEND" = tmux ]; then
+      picker_before=${plain%"$picker_tail"}
+      picker_row=$(printf '%s' "$picker_before" | tr -cd '\n' | wc -c)
+      [ "$cy" -gt "$picker_row" ] || { printf 'update-picker'; return 0; }
+    else
+      tail_caps=$(printf 'styled=0\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
+      tail_state=$(fm_composer_classify_screen "$tail_caps" "$picker_tail" 2>/dev/null) || tail_state=unknown
+      if [ "$tail_state" != empty ]; then
+        [ -n "$expected" ] || { printf 'update-picker'; return 0; }
+        content=$(fm_composer_extract_selected_content "$tail_caps" "$picker_tail" 2>/dev/null) || content=
+        [ "$content" = "$expected" ] || { printf 'update-picker'; return 0; }
+      fi
+    fi
   fi
   state=$(fm_composer_classify_screen "$caps" "$screen" "$cy" 2>/dev/null) \
     || state=unknown
