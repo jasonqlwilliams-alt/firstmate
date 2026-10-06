@@ -542,13 +542,13 @@ codex_exit_submit() {  # <literal-exit-command>
     i=$((i + 1))
     sleep "$POLL"
     screen=$(codex_exit_screen_state)
+    state=$(agent_state)
+    [ "$state" != dead ] || return 0
     case "$screen" in
       update-picker) die "task $ID shows the Codex global-update picker after Enter; safe quit unconfirmed; refusing another Enter" ;;
       pending|empty) ;;
       *) die "task $ID's Codex composer is '$screen' after Enter; safe quit unconfirmed; refusing another Enter" ;;
     esac
-    state=$(agent_state)
-    [ "$state" != dead ] || return 0
     [ "$screen" != empty ] || return 0
   done
 }
@@ -580,7 +580,11 @@ do_exit() {
       case "$state" in
         dead)
           retire_busy_incarnation
-          printf 'stopped'
+          if [ "$HARNESS" = codex ]; then
+            printf 'process-stopped-safe-quit-unconfirmed'
+          else
+            printf 'stopped'
+          fi
           return 0
           ;;
         alive) interrupt_result="delivered verified=agent-alive cancel=$cancel" ;;
@@ -610,7 +614,11 @@ do_exit() {
   # The incarnation is over: retire its busy wiring so no stale record or
   # orphaned generation survives the agent that produced it.
   retire_busy_incarnation
-  printf 'stopped'
+  if [ "$HARNESS" = codex ]; then
+    printf 'process-stopped-safe-quit-unconfirmed'
+  else
+    printf 'stopped'
+  fi
 }
 
 # --- transactional relaunch -------------------------------------------------
@@ -974,6 +982,8 @@ do_relaunch() {
 
   journal_write stopping "${CHECKPOINT_LINES[@]}" "$note_line"
   exit_result=$(do_exit)
+  [ "$exit_result" != process-stopped-safe-quit-unconfirmed ] \
+    || die "task $ID's process stopped but safe quit is unconfirmed; refusing to launch the prepared replacement"
   journal_write exited "${CHECKPOINT_LINES[@]}" "$note_line" "exit_result=$exit_result"
   journal_write launching "${CHECKPOINT_LINES[@]}" "$note_line" "relaunch_tx=$RELAUNCH_TX"
   : > "$RELAUNCH_PREPARE_DIR/continue"
@@ -1024,6 +1034,7 @@ case "$VERB" in
   exit)
     result=$(do_exit)
     echo "$result $ID harness=$HARNESS backend=$BACKEND endpoint=$T worktree=$WT"
+    [ "$result" != process-stopped-safe-quit-unconfirmed ] || exit 1
     ;;
   relaunch)
     do_relaunch

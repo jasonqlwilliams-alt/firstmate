@@ -108,7 +108,8 @@ case "${1:-}" in
       printf '%s\n' "$payload" >> "$D/keys"
       if [ "$payload" = Enter ] && [ -f "$D/codex-case" ]; then
         if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = accepted-update-unreadable ] \
-           || [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = accepted-update-unknown ]; then
+           || [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = accepted-update-unknown ] \
+           || [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = accepted-update-shell ]; then
           : > "$D/accepted-update"
           npm install -g @openai/codex
           printf 'zsh' > "$D/command"
@@ -171,6 +172,8 @@ case "${1:-}" in
         printf '›\n1 Update now (npm install -g)\n2 Skip\n3 Skip until next version\nEnter continue / Escape skip\n'
       elif [ -f "$D/typed-quit" ] && [ "$(cat "$D/command")" = codex ]; then
         printf 'Codex\n› /quit\n'
+      elif [ "$(cat "$D/command")" = zsh ]; then
+        printf '$ \n'
       else
         printf 'Codex\n›\n'
       fi
@@ -228,6 +231,8 @@ case "${1:-} ${2:-}" in
       printf 'Codex\n› Try /skills\n'
     elif [ -f "$D/typed-quit" ] && [ "$(cat "$D/command")" = codex ]; then
       printf 'Codex\n› /quit\n'
+    elif [ "$(cat "$D/command")" = zsh ]; then
+      printf '$ \n'
     else
       printf 'Codex\n›\n'
     fi ;;
@@ -329,11 +334,19 @@ test_exit_types_each_harness_verified_command() {
       alive_as "$dir" "$harness"
     fi
     out=$(run_control "$dir" t1 exit); rc=$?
-    expect_code 0 "$rc" "exit on $harness should succeed"$'\n'"$out"
+    if [ "$harness" = codex ]; then
+      expect_code 1 "$rc" "Codex process death must leave safe quit unconfirmed"$'\n'"$out"
+      assert_contains "$out" 'process-stopped-safe-quit-unconfirmed t1' \
+        "Codex exit should distinguish process death from safe quit"
+      [ "$(cat "$dir/fake/command")" = zsh ] || fail "Codex did not exit to a shell"
+      [ ! -s "$dir/fake/updater" ] || fail "ordinary Codex quit selected the mock updater"
+    else
+      expect_code 0 "$rc" "exit on $harness should succeed"$'\n'"$out"
+      assert_contains "$out" "stopped t1 harness=$harness" "exit should report the stop for $harness"
+    fi
     IFS=$'\t' read -r expected key repeat clear <<< "$(verified_adapter_contract "$harness")"
     [ "$(literals "$dir")" = "$expected" ] \
       || fail "exit on $harness should type exactly '$expected', got: $(literals "$dir")"
-    assert_contains "$out" "stopped t1 harness=$harness" "exit should report the stop for $harness"
   done
   pass "fm-control exit: every verified harness gets its own verified exit command"
 }
@@ -386,14 +399,15 @@ test_codex_exit_refuses_update_picker_and_uncertain_composer() {
 
 test_codex_exit_does_not_confirm_dead_after_uncertain_screen() {
   local mode dir out rc meta_before
-  for mode in accepted-update-unreadable accepted-update-unknown; do
+  for mode in accepted-update-unreadable accepted-update-unknown accepted-update-shell; do
     dir=$(new_case "codex-$mode")
     add_task "$dir" t1 codex
     alive_as "$dir" codex
     meta_before=$(cat "$dir/home/state/t1.meta")
     out=$(FM_FAKE_CODEX_EXIT_MODE="$mode" run_control "$dir" t1 exit); rc=$?
     expect_code 1 "$rc" "Codex $mode must leave safe quit unconfirmed"$'\n'"$out"
-    assert_contains "$out" 'safe quit unconfirmed' "Codex $mode must name the uncertain result"
+    assert_contains "$out" 'process-stopped-safe-quit-unconfirmed t1' \
+      "Codex $mode must distinguish stopped process from unconfirmed safe quit"
     assert_not_contains "$out" 'stopped t1' "Codex $mode must not report a safe exit"
     [ -s "$dir/fake/updater" ] || fail "Codex $mode did not reproduce the mock update choice"
     [ "$(cat "$dir/fake/command")" = zsh ] || fail "Codex $mode did not reproduce process disappearance"
@@ -422,9 +436,11 @@ META
     out=$(FM_HERDR_PS_BIN="$dir/fakebin/ps" FM_FAKE_CODEX_EXIT_MODE="$mode" run_control "$dir" t1 exit); rc=$?
     case "$mode" in
       idle)
-        expect_code 0 "$rc" "Codex idle quit must work through Herdr plain capture"$'\n'"$out"
-        assert_contains "$out" 'stopped t1 harness=codex' "Herdr plain quit should report stopped"
+        expect_code 1 "$rc" "Codex idle quit through Herdr plain capture must remain unconfirmed"$'\n'"$out"
+        assert_contains "$out" 'process-stopped-safe-quit-unconfirmed t1' \
+          "Herdr plain quit should distinguish process death from safe quit"
         [ "$(literals "$dir")" = /quit ] || fail "Herdr plain quit did not type /quit"
+        [ "$(cat "$dir/fake/command")" = zsh ] || fail "Herdr plain quit did not redraw a shell"
         expected_enters=1 ;;
       *)
         expect_code 1 "$rc" "Codex Herdr plain $mode must refuse"$'\n'"$out"
@@ -825,14 +841,17 @@ test_relaunch_only_flags_are_rejected_on_other_verbs() {
 # --- 5. lifecycle states ----------------------------------------------------
 
 test_already_stopped_exit_is_idempotent() {
-  local dir out rc
-  dir=$(new_case idempotent)
-  add_task "$dir" t1 claude
-  alive_as "$dir" zsh
-  out=$(run_control "$dir" t1 exit); rc=$?
-  expect_code 0 "$rc" "exiting an already-stopped agent should succeed"
-  assert_contains "$out" "already-stopped t1" "the outcome should say it was already stopped"
-  [ -z "$(literals "$dir")" ] || fail "an already-stopped agent must not be sent an exit command"
+  local dir out rc harness
+  for harness in claude codex; do
+    dir=$(new_case "idempotent-$harness")
+    add_task "$dir" t1 "$harness"
+    alive_as "$dir" zsh
+    out=$(run_control "$dir" t1 exit); rc=$?
+    expect_code 0 "$rc" "exiting an already-stopped $harness agent should succeed"
+    assert_contains "$out" "already-stopped t1" "the outcome should say it was already stopped"
+    [ -z "$(literals "$dir")" ] && [ ! -s "$dir/fake/keys" ] \
+      || fail "an already-stopped $harness agent must not receive lifecycle input"
+  done
   pass "fm-control exit: an already-stopped agent is idempotent success with no bytes sent"
 }
 
