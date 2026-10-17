@@ -1,0 +1,15 @@
+Antigravity CLI 1.4.0; fresh interactive worker in an isolated git source copy.
+Workspace .agents/skills/no-mistakes/SKILL.md absent; user-level skill exists only outside AGY discovery paths.
+Generated no-mistakes ship brief read by worker. Pipeline execution was prohibited by this gate-step phase.
+
+Baseline interactive slash command:
+> Unknown command: /no-mistakes
+
+Natural-language steer after clearing the composer:
+> Follow the brief's no-mistakes fallback. Run only `no-mistakes axi run --help`, then report the exact validation-start command using the Captain's intent. Do not execute that start command or change files.
+● Bash(no-mistakes axi run --help) (ctrl+o to expand)
+  The output of no-mistakes axi run --help has been inspected.
+  • Do not pass --yes or -y.
+  • Pass --intent using only the ## Captain's intent subsection.
+  The exact validation-start command is:
+    no-mistakes axi run --intent "Validate the AGY no-mistakes trigger in this isolated project."
