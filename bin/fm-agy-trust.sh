@@ -5,7 +5,7 @@
 #
 # Usage: fm-agy-trust.sh <worktree> <project>
 #   <worktree>  the isolated task worktree this spawn launches into
-#   <project>   the primary checkout that worktree belongs to
+#   <project>   this home's project checkout for the task
 # Prints one line naming what it registered; refuses loudly on anything else.
 #
 # WHY THIS EXISTS. agy gates a folder it has never seen behind an interactive
@@ -34,9 +34,11 @@
 #
 # THE SCOPE TEST IS THE SAFETY PROPERTY, and it is STRUCTURAL rather than a
 # path policy, exactly as bin/fm-claude-trust.sh documents at length.
-# <worktree> must be a LINKED git worktree - its own git dir, sharing
-# <project>'s common dir - whose top level is exactly the resolved argument. A
-# primary checkout, a worktree of an unrelated repo, a subdirectory of a
+# <worktree> must be a LINKED git worktree whose top level is exactly the
+# resolved argument. A shared git common dir proves the ordinary case;
+# cross-clone Treehouse pool slots use fm_treehouse_cross_clone_trust_valid in
+# bin/fm-wake-lib.sh as the single owner of their additional authority check.
+# A primary checkout, a worktree of an unrelated repo, a subdirectory of a
 # worktree, a plain directory, and a home directory are each refused. Refusal
 # is a non-zero exit, never a warning and never a silent skip. Trust is a
 # grant to read, edit, and execute, so the grant must never be widened by a

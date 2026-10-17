@@ -71,7 +71,8 @@ An already registered PR merge poll remains armed and authenticated across relau
    A secondmate relaunch does not require one and never rewrites its standing charter.
 4. **Prepare the replacement** through its single owner, `bin/fm-spawn.sh --relaunch`, before stopping the old agent.
    Preparation checks launch configuration, instructions, delivery policy, backlog eligibility, recorded worktree isolation, and workspace trust.
-   A recorded Treehouse pool slot must still be claimed by this task (`mine` or `absent`) under the shared project lock before worktree re-entry or stop; that lock is released once re-entry or the live cwd check is confirmed, before the continue-marker wait.
+   A recorded Treehouse pool slot must pass task ownership (`mine` or `absent`) under the shared project lock before worktree re-entry or stop; that lock is released once re-entry or the live cwd check is confirmed, before the continue-marker wait.
+   Cross-clone Claude or AGY trust preparation also requires a same-home slot-owner claim under the authority check owned by [`bin/fm-wake-lib.sh`](../bin/fm-wake-lib.sh).
    After stop, the spawn waits for that lock again and proves the claim again before returning the shell into the slot, so a slot reassigned while the agent was stopped refuses the return; the lock is released once re-entry is confirmed.
    Executable resolution uses the pane `HOME`, `PATH`, and recorded worktree.
    An exited shell returns there before those values are captured.

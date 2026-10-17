@@ -401,6 +401,7 @@ case "$OUT" in
 esac
 [ "$(sed -n 's/^herdr_pane_id=//p' "$HOME_DIR/state/hsmoke.meta" | tail -1)" = "$PANE_ID" ] \
   || fail "stale launcher refusal mutated herdr_pane_id"
+[ "${FM_TEST_EVIDENCE:-0}" != 1 ] || printf '# evidence: stale launcher refused: %s\n' "$OUT"
 
 # 2. Foreign socket launcher must fail closed without mutating metadata.
 if OUT=$(env PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" HERDR_SESSION="$SESSION" \
@@ -415,6 +416,7 @@ case "$OUT" in
 esac
 [ "$(sed -n 's/^herdr_pane_id=//p' "$HOME_DIR/state/hsmoke.meta" | tail -1)" = "$PANE_ID" ] \
   || fail "foreign-socket refusal mutated herdr_pane_id"
+[ "${FM_TEST_EVIDENCE:-0}" != 1 ] || printf '# evidence: foreign socket refused: %s\n' "$OUT"
 
 # 3. Live launcher pane: missing worker pane is recreated in launcher workspace
 #    and re-bound to the same recorded worktree.
@@ -433,6 +435,16 @@ NEW_WS_ID=$(sed -n 's/^herdr_workspace_id=//p' "$HOME_DIR/state/hsmoke.meta" | t
   || fail "missing-endpoint Herdr relaunch placed pane in workspace '$NEW_WS_ID', expected launcher workspace '$SUP_WS'"
 [ "$(sed -n 's/^worktree=//p' "$HOME_DIR/state/hsmoke.meta" | tail -1)" = "$WT" ] \
   || fail "missing-endpoint Herdr relaunch changed the recorded worktree"
+if [ "${FM_TEST_EVIDENCE:-0}" = 1 ]; then
+  printf '# evidence begin: recreated Herdr worker endpoint\n'
+  printf 'control result: %s\n' "$OUT"
+  printf 'old pane: %s; new pane: %s; launcher workspace: %s\n' "$PANE_ID" "$NEW_PANE_ID" "$SUP_WS"
+  printf 'saved task endpoint and copy:\n'
+  sed -n '/^window=/p; /^worktree=/p; /^herdr_workspace_id=/p; /^herdr_tab_id=/p; /^herdr_pane_id=/p' "$HOME_DIR/state/hsmoke.meta"
+  printf 'Herdr pane record:\n'
+  herdr pane get "$NEW_PANE_ID" --session "$SESSION"
+  printf '# evidence end\n'
+fi
 pass "real herdr: missing-endpoint control relaunch recreates the pane in the launcher workspace while refusing stale or foreign launchers"
 
 # 4. Unset launcher: missing worker pane is recreated without leaking the dead

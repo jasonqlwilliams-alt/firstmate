@@ -5,7 +5,7 @@
 #
 # Usage: fm-claude-trust.sh <worktree> <project>
 #   <worktree>  the isolated task worktree this spawn launches into
-#   <project>   the primary checkout that worktree belongs to
+#   <project>   this home's project checkout for the task
 # Prints one line naming what it registered; refuses loudly on anything else.
 #
 # WHY THIS EXISTS. Claude Code gates a folder it has never seen behind an
@@ -20,12 +20,15 @@
 # control that reaches an interactive pane.
 #
 # THE SCOPE TEST IS THE SAFETY PROPERTY, and it is STRUCTURAL rather than a
-# path policy. <worktree> must be a LINKED git worktree - its own git dir,
-# sharing <project>'s common dir - whose top level is exactly the resolved
-# argument. Git is the ground truth, so the argument is never trusted on its
-# own word: a primary checkout (git dir == common dir), a worktree of an
-# unrelated repo, a subdirectory of a worktree, a plain directory, and a home
-# directory are each refused. Refusal is a non-zero exit, never a warning and
+# path policy. <worktree> must be a LINKED git worktree whose top level is
+# exactly the resolved argument. A shared git common dir proves the ordinary
+# case; cross-clone Treehouse pool slots use
+# fm_treehouse_cross_clone_trust_valid in bin/fm-wake-lib.sh as the single owner
+# of their additional authority check. Git is the ground truth, so the
+# argument is never trusted on its own word. A primary checkout (git dir ==
+# common dir), a worktree of an unrelated repo, a subdirectory of a worktree,
+# a plain directory, and a home directory are each refused. Refusal is a
+# non-zero exit, never a warning and
 # never a silent skip.
 #
 # The test is deliberately NOT a treehouse or orca path prefix. Treehouse's
