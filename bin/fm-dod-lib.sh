@@ -236,10 +236,11 @@ EOF
 Delivery contract: mode=no-mistakes
 The task is complete only when committed on your branch.
 When you believe it is complete, append \`done: {summary}\` to the status file and stop.
-Firstmate will then instruct you to run /no-mistakes to validate and ship a PR.
+Firstmate will then instruct you to run /no-mistakes to validate and ship a PR (or instruct you in natural language to start validation with \`no-mistakes axi\` when your harness does not load that skill).
 
 You drive no-mistakes by responding to its gates, not by implementing fixes.
 Follow the guidance no-mistakes itself provides for the mechanics: it loads when you invoke /no-mistakes, and \`no-mistakes axi run --help\` plus the \`help\` lines in each \`axi\` response are authoritative and version-matched to the installed binary.
+When \`/no-mistakes\` is not a loaded skill in your harness (for example on \`agy\`, which reads workspace \`.agents/skills/\` and \`~/.gemini/config/skills/\` rather than \`~/.agents/skills/\` or \`~/.claude/skills/\`) or when Firstmate steers you in natural language, do not invoke \`/no-mistakes\`; run \`no-mistakes axi run --help\` first, start validation directly with \`no-mistakes axi run --intent "..."\`, and drive each gate with \`no-mistakes axi status\` and \`no-mistakes axi respond\` using each response's \`help\` lines.
 When starting no-mistakes, pass \`--intent\` as only this brief's \`## Captain's intent\` subsection plus any later words the captain actually said.
 For a legacy brief with no such subsection, include only words explicitly labeled \`Captain:\`, \`Captain's words:\`, \`Captain's ask:\`, or \`Captain's intent:\`; never copy its mixed \`# Task\` wholesale. If it has no provenance-marked captain words, stop and ask firstmate instead of starting no-mistakes.
 Do not include \`## Firstmate spec\`, later Firstmate build constraints, or your own decisions and tradeoffs.
@@ -261,7 +262,7 @@ Two firstmate-specific rules layer on top of that guidance:
 - NEVER pass \`--yes\` (or \`-y\`) to \`no-mistakes axi run\` or \`no-mistakes axi respond\`. It is banned fleet-wide.
   It auto-resolves every gate including ask-user findings with no escalation, and answering your own ask-user finding is a hard rule violation.
 
-After /no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), append \`done: PR {url} checks green\` and stop. You are finished.
+After /no-mistakes reports CI green (whether driven through the skill or \`no-mistakes axi\` directly; this is the CI-ready return point - do not wait for it to keep monitoring in the background until merge), append \`done: PR {url} checks green\` and stop. You are finished.
 EOF
       ;;
     *)

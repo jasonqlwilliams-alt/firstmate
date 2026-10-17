@@ -1,6 +1,6 @@
 # agy (Antigravity CLI)
 
-Verified 2026-09-08 on Antigravity CLI 1.1.27 for crewmate and scout work only.
+Verified 2026-09-08 on Antigravity CLI 1.1.27 (skill discovery and `no-mistakes` trigger re-verified 2026-10-16 on 1.4.0) for crewmate and scout work only.
 Not verified, and not currently verifiable, as a secondmate or primary: agy has no supervision protocol under `../../../../docs/supervision-protocols/`, and this task verified only the crewmate-side launch, trust, busy state, interrupt, and exit.
 The captain's standing rule also keeps Antigravity out of owning coding, refs, merges, and deploys, so the primary and secondmate roles are exactly the shapes agy must not take.
 The router owns that task-kind boundary, and `../../../../bin/fm-spawn.sh` refuses a `--secondmate` launch on agy the same way it refuses muse, gemini, and rovo.
@@ -16,7 +16,7 @@ The router owns that task-kind boundary, and `../../../../bin/fm-spawn.sh` refus
 | Turn end | The same `Stop` hook touches `state/<id>.turn-ended`. `Stop` fires on normal turn end with `terminationReason` (`NO_TOOL_CALL` observed) and `fullyIdle`; a reply without `"decision":"continue"` lets the turn end. |
 | Exit command | `/exit` (alias `/quit`), one Enter; prints `Resume with -c (or command below):` and an `agy --conversation=<uuid>` line. |
 | Interrupt | Single Escape; renders an `Interrupted` line offering a new instruction and leaves the composer EMPTY, so no clear key. No hook fires - see "No interrupt or session-end event". |
-| Skill invocation | `/<skill>`, the Claude and Grok form; `/skills` lists what is loaded. agy reads `.agents/skills/` in its workspaces, the same directory firstmate's own repo uses. |
+| Skill invocation | `/<skill>` for loaded skills; `/skills` lists them. See "Skills and no-mistakes validation trigger" below for agy's discovery paths and the validation steer. |
 | Model flag | `--model <id>`, validated before launch against `agy models`; an unlisted id is a HARD launch failure, not an ignored flag. |
 | Effort flag | `--effort <low\|medium\|high>` only. `xhigh` and `max` are CAPPED onto `high` by the spawn rather than dropped, and the requested value is still recorded as `effort=` in task metadata. An unsupported value is a hard launch failure: `agy --effort xhigh -p hi` printed `invalid --effort "xhigh" (valid: low, medium, high)` and ran nothing. |
 | Model discovery | `agy models` prints one `<id><TAB><label>` row per model the authenticated account can use. The observed live list (Gemini 3.8/3.7/3.6 Flash at three efforts each, Gemini 3.1 Pro, Claude Sonnet 4.6, Claude Opus 4.6 Thinking, GPT-OSS 120B) is per-account and must never be hardcoded. `agy -p "/usage"` reports quota. |
@@ -70,6 +70,14 @@ This is deliberately left as is rather than widened, and the measurement is why:
 Extending the pi path to agy would therefore turn a safe `unknown` into a wrong `pending`, and `pending` is the ONE verdict that skips a steering doorbell (`../../../bin/fm-task-inbox-lib.sh`), so the "fix" would starve steering rather than improve it.
 Under `unknown` the doorbell still rings, so ordinary steering works; the practical cost is bounded to away-mode injection, which declines to type into a pane it cannot prove empty, and agy is a crewmate/scout adapter that away mode never injects into anyway.
 A real fix needs a harness-scoped glyph rule the shared classifier does not currently carry.
+
+## Skills and no-mistakes validation trigger
+
+agy discovers workspace skills from `<workspace>/.agents/skills/<name>/SKILL.md` across its `--add-dir` workspaces and user skills only from `~/.gemini/config/skills/<name>/SKILL.md` (alongside its built-in `~/.gemini/antigravity-cli/builtin/skills/`).
+It does NOT scan `~/.agents/skills/` or `~/.claude/skills/`, where `no-mistakes` installs its user skill, and `no-mistakes init` does not vendor `.agents/skills/no-mistakes` into a project.
+In a project worktree that lacks `.agents/skills/no-mistakes`, `/skills` omits `no-mistakes` and the interactive `-i` TUI slash-command parser rejects `/no-mistakes` at the composer with `> Unknown command: /no-mistakes` without firing `PreInvocation` or starting a model turn (whereas print mode `-p '/no-mistakes'` bypasses the TUI slash parser and forwards `/no-mistakes` to the model as a regular message).
+Sending bare `/no-mistakes` through `../../../bin/fm-send.sh` is doubly broken on agy: the leading `/` routes the message to the typed slash-command plane rather than `state/<id>.inbox/`, where the TUI slash parser rejects `/no-mistakes` in the composer without starting a turn (`rakazo-gemini-4-model-support-20261013`).
+Trigger `no-mistakes` validation on an agy worker with a natural-language instruction (no leading `/`) so `../../../bin/fm-send.sh` delivers it through `state/<id>.inbox/`; `../../../bin/fm-dod-lib.sh` owns the worker's direct CLI instructions.
 
 ## Detection
 

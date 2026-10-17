@@ -343,6 +343,13 @@ test_no_mistakes_dod_wording() {
   # shellcheck disable=SC2016  # single quotes are deliberate: the backticks must stay literal
   assert_grep '`help`' "$brief" \
     "no-mistakes DOD must render literal backticks around help"
+  assert_grep "or instruct you in natural language to start validation with \`no-mistakes axi\` when your harness does not load that skill" "$brief" \
+    "no-mistakes DOD must state the natural-language no-mistakes axi trigger for harnesses that do not load user skills"
+  assert_grep "When \`/no-mistakes\` is not a loaded skill in your harness (for example on \`agy\`, which reads workspace \`.agents/skills/\` and \`~/.gemini/config/skills/\` rather than \`~/.agents/skills/\` or \`~/.claude/skills/\`) or when Firstmate steers you in natural language, do not invoke \`/no-mistakes\`" "$brief" \
+    "no-mistakes DOD must explain why agy and natural-language steers bypass /no-mistakes"
+  # shellcheck disable=SC2016  # single quotes are deliberate: the backticks must stay literal
+  assert_grep 'run `no-mistakes axi run --help` first, start validation directly with `no-mistakes axi run --intent "..."`, and drive each gate with `no-mistakes axi status` and `no-mistakes axi respond`' "$brief" \
+    "no-mistakes DOD must give the direct no-mistakes axi run/status/respond sequence"
   assert_grep "pass \`--intent\` as only this brief's \`## Captain's intent\`" "$brief" \
     "no-mistakes DOD must require --intent to be the Captain's intent subsection"
   assert_grep "plus any later words the captain actually said" "$brief" \
@@ -371,7 +378,7 @@ test_no_mistakes_dod_wording() {
     "no-mistakes DOD still states the --yes ban as a preference"
   assert_no_grep "no-mistakes refuses" "$brief" \
     "no-mistakes DOD must not claim the tool itself refuses --yes"
-  pass "fm-brief.sh: no-mistakes DOD keeps its apostrophe prose and bans --yes outright"
+  pass "fm-brief.sh: no-mistakes DOD keeps its apostrophe prose, gives the direct no-mistakes axi trigger, and bans --yes outright"
 }
 
 test_ask_user_escalation_format() {
