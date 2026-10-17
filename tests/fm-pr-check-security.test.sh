@@ -2236,6 +2236,101 @@ test_gitlab_merged_poll_retires() {
   pass "GitHub and GitLab exact merged results share one retirement path"
 }
 
+test_device_renumbering_preserves_valid_poll_and_retirement_and_refuses_replacement() {
+  local dir state rc
+  if [ "$(uname)" = Darwin ]; then
+    return 0
+  fi
+
+  # Case 1: Valid poll registered before a filesystem device renumbering
+  # (e.g. WSL reboot 2096 -> 2128) keeps the same inodes, hashes, modes,
+  # single-link count, and live same-device residency on $state, and must
+  # remain valid and retire cleanly when merged.
+  dir=$(make_case device-renumber-valid-poll)
+  state="$dir/home/state"
+  write_poll_meta "$state" task-a https://github.com/o/r/pull/31
+  seed_canonical_poll "$dir" task-a https://github.com/o/r/pull/31
+  cat > "$dir/fakebin/stat" <<'SH'
+#!/usr/bin/env bash
+case " $* " in
+  *" %d "*)
+    printf '%s\n' "${FM_TEST_LIVE_DEV:-2128}"
+    exit 0
+    ;;
+esac
+exec "${FM_TEST_REAL_STAT:?}" "$@"
+SH
+  chmod +x "$dir/fakebin/stat"
+  FM_TEST_REAL_STAT="$REAL_STAT" FM_TEST_LIVE_DEV=2128 PATH="$dir/fakebin:$BASE_PATH" \
+    fm_pr_poll_artifacts_valid "$state" task-a "$POLL" \
+    || fail "valid poll was rejected after whole-filesystem st_dev renumbering"
+  set +e
+  FM_TEST_REAL_STAT="$REAL_STAT" FM_TEST_LIVE_DEV=2128 FM_TEST_GH_STATE=MERGED \
+    run_watcher_bounded "$dir/home" "$dir/fakebin" > "$dir/watch.out" 2> "$dir/watch.err"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || fail "watcher failed after st_dev renumbering: $(cat "$dir/watch.err")"
+  case "$(cat "$dir/watch.out")" in
+    check:*task-a.check.sh:*merged) ;;
+    *) fail "renumbered valid poll did not deliver merged wake: $(cat "$dir/watch.out")" ;;
+  esac
+  assert_poll_absent "$state" task-a
+
+  # Case 2: Replacement copy with identical bytes (new inode) after device
+  # renumbering must still be rejected.
+  dir=$(make_case device-renumber-replaced-inode)
+  state="$dir/home/state"
+  write_poll_meta "$state" task-a https://github.com/o/r/pull/32
+  seed_canonical_poll "$dir" task-a https://github.com/o/r/pull/32
+  cp -p "$state/task-a.pr-poll" "$state/task-a.pr-poll.copy"
+  mv -f "$state/task-a.pr-poll.copy" "$state/task-a.pr-poll"
+  cat > "$dir/fakebin/stat" <<'SH'
+#!/usr/bin/env bash
+case " $* " in
+  *" %d "*)
+    printf '%s\n' "${FM_TEST_LIVE_DEV:-2128}"
+    exit 0
+    ;;
+esac
+exec "${FM_TEST_REAL_STAT:?}" "$@"
+SH
+  chmod +x "$dir/fakebin/stat"
+  ! FM_TEST_REAL_STAT="$REAL_STAT" FM_TEST_LIVE_DEV=2128 PATH="$dir/fakebin:$BASE_PATH" \
+    fm_pr_poll_artifacts_valid "$state" task-a "$POLL" \
+    || fail "replaced sidecar with new inode was accepted after st_dev renumbering"
+
+  # Case 3: Crash-recovery retirement receipt published before device
+  # renumbering must validate and complete cleanup after st_dev changes.
+  dir=$(make_case device-renumber-retirement-recovery)
+  state="$dir/home/state"
+  write_poll_meta "$state" task-a https://github.com/o/r/pull/33
+  seed_canonical_poll "$dir" task-a https://github.com/o/r/pull/33
+  fm_pr_poll_snapshot_capture "$state" task-a "$POLL" || fail "could not snapshot renumber receipt fixture"
+  fm_pr_poll_retirement_publish "$state" task-a "$POLL" merged || fail "could not publish renumber receipt fixture"
+  cat > "$dir/fakebin/stat" <<'SH'
+#!/usr/bin/env bash
+case " $* " in
+  *" %d "*)
+    printf '%s\n' "${FM_TEST_LIVE_DEV:-2128}"
+    exit 0
+    ;;
+esac
+exec "${FM_TEST_REAL_STAT:?}" "$@"
+SH
+  chmod +x "$dir/fakebin/stat"
+  add_stop_custom_check "$dir"
+  set +e
+  FM_TEST_REAL_STAT="$REAL_STAT" FM_TEST_LIVE_DEV=2128 FM_TEST_GH_STATE=MERGED \
+    run_watcher_bounded "$dir/home" "$dir/fakebin" > "$dir/restart.out" 2> "$dir/restart.err"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || fail "renumbered retirement recovery watcher failed: $(cat "$dir/restart.err")"
+  ! grep -F 'rejected unauthenticated PR poll retirement' "$dir/restart.out" "$state/.wake-queue" >/dev/null 2>&1 \
+    || fail "renumbered valid retirement receipt was rejected"
+  assert_poll_absent "$state" task-a
+  pass "whole-filesystem st_dev renumbering preserves valid polls and retirement receipts while rejecting inode replacement"
+}
+
 if [ "${1:-}" = --promotion-poll-only ]; then
   test_promotion_preserves_armed_poll
   exit 0
@@ -2256,6 +2351,7 @@ test_external_merge_transition_retires_only_terminal_poll
 test_retirement_refuses_replacement_and_nonterminal_results
 test_retirement_queue_failure_and_receipt_tampering
 test_gitlab_merged_poll_retires
+test_device_renumbering_preserves_valid_poll_and_retirement_and_refuses_replacement
 test_promotion_preserves_armed_poll
 test_invalid_entrypoints_have_zero_side_effects
 test_valid_recording_and_merge_derivation

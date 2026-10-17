@@ -5,7 +5,7 @@
 #
 # Usage: fm-claude-trust.sh <worktree> <project>
 #   <worktree>  the isolated task worktree this spawn launches into
-#   <project>   the primary checkout that worktree belongs to
+#   <project>   this home's project checkout for the task
 # Prints one line naming what it registered; refuses loudly on anything else.
 #
 # WHY THIS EXISTS. Claude Code gates a folder it has never seen behind an
@@ -20,12 +20,15 @@
 # control that reaches an interactive pane.
 #
 # THE SCOPE TEST IS THE SAFETY PROPERTY, and it is STRUCTURAL rather than a
-# path policy. <worktree> must be a LINKED git worktree - its own git dir,
-# sharing <project>'s common dir - whose top level is exactly the resolved
-# argument. Git is the ground truth, so the argument is never trusted on its
-# own word: a primary checkout (git dir == common dir), a worktree of an
-# unrelated repo, a subdirectory of a worktree, a plain directory, and a home
-# directory are each refused. Refusal is a non-zero exit, never a warning and
+# path policy. <worktree> must be a LINKED git worktree whose top level is
+# exactly the resolved argument. A shared git common dir proves the ordinary
+# case; cross-clone Treehouse pool slots use
+# fm_treehouse_cross_clone_trust_valid in bin/fm-wake-lib.sh as the single owner
+# of their additional authority check. Git is the ground truth, so the
+# argument is never trusted on its own word. A primary checkout (git dir ==
+# common dir), a worktree of an unrelated repo, a subdirectory of a worktree,
+# a plain directory, and a home directory are each refused. Refusal is a
+# non-zero exit, never a warning and
 # never a silent skip.
 #
 # The test is deliberately NOT a treehouse or orca path prefix. Treehouse's
@@ -139,7 +142,11 @@ WT_COMMON=$(common_dir_of "$WT_REAL") || true
 
 PROJ_COMMON=$(common_dir_of "$PROJ_REAL") || true
 [ -n "$PROJ_COMMON" ] || refuse "project '$PROJ_REAL' is not inside a git repository"
-[ "$WT_COMMON" = "$PROJ_COMMON" ] || refuse "'$WT_REAL' is not a worktree of project '$PROJ_REAL'"
+if [ "$WT_COMMON" != "$PROJ_COMMON" ]; then
+  POOL_STATE="${WT_REAL%/*/*}/treehouse-state.json"
+  [ -f "$POOL_STATE" ] && [ ! -L "$POOL_STATE" ] \
+    || refuse "'$WT_REAL' is not a worktree of project '$PROJ_REAL'"
+fi
 
 # The store write needs node, and a missing interpreter refuses like every other
 # failure here. Degrading instead would launch a worker straight into the dialog
@@ -149,6 +156,16 @@ PROJ_COMMON=$(common_dir_of "$PROJ_REAL") || true
 # bin/fm-bootstrap.sh lists node in COMMON_TOOLS and reports it at setup, which is
 # where a missing tool belongs rather than as a stalled pane later.
 command -v node >/dev/null 2>&1 || refuse "node is required to record workspace trust and was not found on PATH"
+
+if [ "$WT_COMMON" != "$PROJ_COMMON" ]; then
+  CALLER_FM_HOME=${FM_HOME:-}
+  SCRIPT_DIR=${BASH_SOURCE[0]%/*}
+  [ "$SCRIPT_DIR" != "${BASH_SOURCE[0]}" ] || SCRIPT_DIR=.
+  # shellcheck source=bin/fm-wake-lib.sh
+  FM_WAKE_NO_MKDIR=1 . "$SCRIPT_DIR/fm-wake-lib.sh"
+  fm_treehouse_cross_clone_trust_valid "$PROJ_REAL" "$WT_REAL" "$CALLER_FM_HOME" \
+    || refuse "'$WT_REAL' is not a worktree of project '$PROJ_REAL'"
+fi
 
 STORE="$CONFIG_DIR_REAL/.claude.json"
 # A dotfile manager or a synced folder legitimately symlinks this store, so the

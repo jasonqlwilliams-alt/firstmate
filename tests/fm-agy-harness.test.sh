@@ -436,6 +436,63 @@ test_trust_scope_refusals_and_idempotence() {
   pass "fm-agy-trust.sh: the structural scope test holds and registration is idempotent"
 }
 
+test_cross_clone_pool_slot_provenance_and_refusals() {
+  local world upstream clone_a clone_b home_a home_b pool slot manual_wt user_home store out
+  world="$TMP_ROOT/cross-clone"
+  upstream="$world/upstream.git"
+  home_a="$world/home-a"
+  home_b="$world/home-b"
+  clone_a="$home_a/projects/repo"
+  clone_b="$home_b/projects/repo"
+  pool="$world/pool"
+  slot="$pool/1/repo"
+  manual_wt="$world/manual-wt"
+  user_home="$world/user-home"
+  store="$user_home/.gemini/antigravity-cli/settings.json"
+  mkdir -p "$home_a/projects" "$home_a/state" "$home_b/projects" "$home_b/state" "$pool/1" "$user_home"
+
+  git init --bare -b main -q "$upstream"
+  git clone -q "$upstream" "$clone_a"
+  git -C "$clone_a" -c user.name=test -c user.email=test@example.invalid commit --allow-empty -qm init
+  git -C "$clone_a" push -q -u origin main
+  git clone -q "$upstream" "$clone_b"
+  git -C "$clone_a" worktree add -q --detach "$slot" HEAD
+  git -C "$clone_a" worktree add -q --detach "$manual_wt" HEAD
+
+  # 1. Idle unleased & unclaimed cross-clone slot in pool must be refused.
+  printf '{"worktrees":[{"name":"1","path":"%s"}]}\n' "$slot" > "$pool/treehouse-state.json"
+  out=$(FM_HOME="$home_b" HOME="$user_home" "$TRUST" "$slot" "$clone_b" 2>&1)
+  expect_code 1 "$?" "an idle unleased cross-clone slot must be refused: $out"
+  assert_contains "$out" "is not a worktree of project" "idle cross-clone refusal did not name project mismatch"
+
+  # 2. Active Treehouse lease without a same-home claim is refused.
+  printf '{"worktrees":[{"name":"1","path":"%s","owner_pid":%s}]}\n' "$slot" "$$" > "$pool/treehouse-state.json"
+  out=$(FM_HOME="$home_b" HOME="$user_home" "$TRUST" "$slot" "$clone_b" 2>&1)
+  expect_code 1 "$?" "an unclaimed leased cross-clone pool slot must be refused: $out"
+  [ ! -e "$store" ] || fail "unclaimed leased cross-clone pool slot was trusted"
+
+  # 3. Same-home .fm-slot-owner claim after process lease exit is accepted.
+  rm -f "$store"
+  printf '{"worktrees":[{"name":"1","path":"%s"}]}\n' "$slot" > "$pool/treehouse-state.json"
+  printf 'task=task-b\nhome=%s\n' "$home_b" > "$pool/1/.fm-slot-owner"
+  out=$(FM_HOME="$home_b" HOME="$user_home" "$TRUST" "$slot" "$clone_b" 2>&1)
+  expect_code 0 "$?" "a same-home claimed cross-clone pool slot must be trusted: $out"
+  assert_grep "$slot" "$store" "claimed cross-clone pool slot was not trusted"
+
+  # 4. Foreign-home .fm-slot-owner claim is refused even when leased.
+  rm -f "$store"
+  printf '{"worktrees":[{"name":"1","path":"%s","owner_pid":%s}]}\n' "$slot" "$$" > "$pool/treehouse-state.json"
+  printf 'task=task-a\nhome=%s\n' "$home_a" > "$pool/1/.fm-slot-owner"
+  out=$(FM_HOME="$home_b" HOME="$user_home" "$TRUST" "$slot" "$clone_b" 2>&1)
+  expect_code 1 "$?" "a foreign-home claimed cross-clone slot must be refused: $out"
+
+  # 5. Unpooled manual linked worktree of Clone A is refused for Clone B.
+  out=$(FM_HOME="$home_b" HOME="$user_home" "$TRUST" "$manual_wt" "$clone_b" 2>&1)
+  expect_code 1 "$?" "an unpooled manual worktree of another clone must be refused: $out"
+
+  pass "fm-agy-trust.sh: accepts same-home claimed cross-clone pool slots and refuses unclaimed, foreign-claimed, or unpooled cross-clone worktrees"
+}
+
 test_detection_anchored_name_and_marker_precedence
 test_detection_marker_needs_real_ancestry
 test_tmux_liveness_classification
@@ -447,3 +504,4 @@ test_spawn_effort_is_capped_not_dropped
 test_spawn_model_validation
 test_secondmate_is_refused
 test_trust_scope_refusals_and_idempotence
+test_cross_clone_pool_slot_provenance_and_refusals

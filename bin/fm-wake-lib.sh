@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Shared durable wake queue and portable lock helpers.
 
-FM_WAKE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FM_WAKE_LIB_DIR="${BASH_SOURCE[0]%/*}"
+[ "$FM_WAKE_LIB_DIR" != "${BASH_SOURCE[0]}" ] || FM_WAKE_LIB_DIR=.
+FM_WAKE_LIB_DIR="$(cd "$FM_WAKE_LIB_DIR" && pwd)"
 FM_WAKE_DEFAULT_ROOT="$(cd "$FM_WAKE_LIB_DIR/.." && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-${FM_ROOT:-$FM_WAKE_DEFAULT_ROOT}}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
@@ -12,8 +14,8 @@ FM_LOCK_STALE_AFTER="${FM_LOCK_STALE_AFTER:-2}"
 # Resolved once at source time: fm_pid_identity and fm_path_mtime run inside 0.2s
 # confirm and 0.5s attach polls, and forking uname per call is a measurable cost on
 # the platform (Git Bash/MSYS) that already pays the highest fork price.
-_FM_UNAME=$(uname 2>/dev/null || echo unknown)
-mkdir -p "$STATE"
+_FM_UNAME=$(command -v uname >/dev/null 2>&1 && uname 2>/dev/null || echo unknown)
+[ "${FM_WAKE_NO_MKDIR:-0}" = 1 ] || mkdir -p "$STATE"
 
 # Most wake-library consumers need only queue and lock primitives, including
 # deliberately minimal recovery fixtures and remote installations.
@@ -1184,6 +1186,43 @@ fm_firstmate_root_home() {
   printf '%s\n' "$home"
 }
 
+# Resolve the canonical repository identity for a checkout or linked worktree.
+# Clones that share an origin remote resolve to that origin (with local paths
+# canonicalized), while an origin-less local repository falls back to the
+# physical parent directory of its git common dir so its primary checkout,
+# linked worktrees, and local file clones share one identity.
+fm_treehouse_repo_identity() {  # <dir>
+  local dir=$1 common common_root origin
+  [ -d "$dir" ] || return 1
+  common=$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  common=$(CDPATH='' cd -- "$common" 2>/dev/null && pwd -P) || return 1
+  common_root=${common%/*}
+  [ -n "$common_root" ] || common_root=/
+  origin=$(git -C "$dir" remote get-url origin 2>/dev/null || true)
+  if [ -n "$origin" ]; then
+    case "$origin" in
+      file:///*)
+        origin=${origin#file://}
+        [ ! -d "$origin" ] || origin=$(CDPATH='' cd -- "$origin" 2>/dev/null && pwd -P) || return 1
+        ;;
+      /*)
+        [ ! -d "$origin" ] || origin=$(CDPATH='' cd -- "$origin" 2>/dev/null && pwd -P) || return 1
+        ;;
+      *://*|*:* ) ;;
+      *)
+        if [ -d "$dir/$origin" ]; then
+          origin=$(CDPATH='' cd -- "$dir/$origin" 2>/dev/null && pwd -P) || return 1
+        elif [ -d "$common_root/$origin" ]; then
+          origin=$(CDPATH='' cd -- "$common_root/$origin" 2>/dev/null && pwd -P) || return 1
+        fi
+        ;;
+    esac
+    printf '%s\n' "$origin"
+    return 0
+  fi
+  printf '%s\n' "$common_root"
+}
+
 # The one lock serializing Treehouse slot allocation and return for a project.
 #
 # It is anchored in the local root home's state directory so that every home on
@@ -1191,44 +1230,113 @@ fm_firstmate_root_home() {
 # below it, including a remote-seeded home and its own local descendants -
 # derives the identical path. Its identity is the project's resolved origin, so
 # separate clones of one origin share a single lock; an origin-less local-only
-# project falls back to its own worktree top instead of failing to resolve.
+# project uses its git common-dir parent.
 fm_treehouse_project_lock_path() {  # <project-dir>
-  local project=$1 root origin identity hash top
+  local project=$1 root identity hash
   [ -d "$project" ] || return 1
   root=$(fm_firstmate_root_home "$FM_HOME") || return 1
-  origin=$(git -C "$project" remote get-url origin 2>/dev/null || true)
-  if [ -n "$origin" ]; then
-    case "$origin" in
-      /*) [ ! -d "$origin" ] || origin=$(CDPATH='' cd -- "$origin" 2>/dev/null && pwd -P) || return 1 ;;
-      *://*|*:* ) ;;
-      *) [ ! -d "$project/$origin" ] || origin=$(CDPATH='' cd -- "$project/$origin" 2>/dev/null && pwd -P) || return 1 ;;
-    esac
-    identity=$origin
-  else
-    top=$(git -C "$project" rev-parse --show-toplevel 2>/dev/null) || return 1
-    top=$(CDPATH='' cd -- "$top" 2>/dev/null && pwd -P) || return 1
-    identity=$top
-  fi
+  identity=$(fm_treehouse_repo_identity "$project") || return 1
   hash=$(printf '%s' "$identity" | git hash-object --stdin 2>/dev/null) || return 1
   [ -d "$root/state" ] || return 1
   printf '%s/.treehouse-project-%s.lock\n' "$root/state" "$hash"
 }
 
 # A Treehouse slot has the managed pool's fixed <pool>/<slot>/<repo> layout.
-# Require both its pool state and the same Git common directory as the recorded
-# project; an ordinary linked worktree is not evidence that Treehouse owns it.
+# When a slot was originally created from the same clone, its Git common
+# directory matches the project's directly. When Treehouse reuses a pooled slot
+# across sibling clones that share one origin (such as a secondmate home's
+# clone or a newly cut-over own clone), the slot is a linked worktree of the
+# earlier clone's common dir; accept it only when it is a linked worktree root
+# sharing the project's canonical repository identity and registered in the
+# pool's treehouse-state.json.
 fm_treehouse_pool_slot() {  # <project-dir> <worktree>
-  local project=$1 worktree=$2 slot pool state project_common slot_common
+  local project=$1 worktree=$2 slot slot_parent pool state project_common slot_common
+  local slot_top slot_git_dir project_id slot_id slot_name
   [ -d "$project" ] && [ -d "$worktree" ] || return 1
   slot=$(CDPATH='' cd -- "$worktree" 2>/dev/null && pwd -P) || return 1
-  pool=$(dirname "$(dirname "$slot")")
+  slot_parent=${slot%/*}
+  pool=${slot_parent%/*}
   state="$pool/treehouse-state.json"
   [ -f "$state" ] && [ ! -L "$state" ] || return 1
   project_common=$(git -C "$project" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
   slot_common=$(git -C "$slot" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
   project_common=$(CDPATH='' cd -- "$project_common" 2>/dev/null && pwd -P) || return 1
   slot_common=$(CDPATH='' cd -- "$slot_common" 2>/dev/null && pwd -P) || return 1
-  [ "$project_common" = "$slot_common" ]
+  if [ "$project_common" = "$slot_common" ]; then
+    return 0
+  fi
+  slot_top=$(git -C "$slot" rev-parse --show-toplevel 2>/dev/null) || return 1
+  slot_top=$(CDPATH='' cd -- "$slot_top" 2>/dev/null && pwd -P) || return 1
+  [ "$slot_top" = "$slot" ] || return 1
+  slot_git_dir=$(git -C "$slot" rev-parse --absolute-git-dir 2>/dev/null) || return 1
+  slot_git_dir=$(CDPATH='' cd -- "$slot_git_dir" 2>/dev/null && pwd -P) || return 1
+  [ "$slot_git_dir" != "$slot_common" ] || return 1
+  project_id=$(fm_treehouse_repo_identity "$project") || return 1
+  slot_id=$(fm_treehouse_repo_identity "$slot") || return 1
+  [ -n "$project_id" ] && [ "$project_id" = "$slot_id" ] || return 1
+  slot_name=${slot_parent##*/}
+  command -v node >/dev/null 2>&1 || return 1
+  node - "$state" "$slot" "$slot_name" <<'NODE' 2>/dev/null
+const fs = require("node:fs");
+const [statePath, slotReal, slotName] = process.argv.slice(2);
+try {
+  const raw = JSON.parse(fs.readFileSync(statePath, "utf8"));
+  if (!raw || typeof raw !== "object" || !Array.isArray(raw.worktrees)) process.exit(1);
+  const matched = raw.worktrees.some((entry) => {
+    if (!entry || typeof entry !== "object" || typeof entry.path !== "string") return false;
+    if (entry.name !== undefined && String(entry.name) !== slotName) return false;
+    try {
+      return fs.realpathSync(entry.path) === slotReal;
+    } catch {
+      return false;
+    }
+  });
+  process.exit(matched ? 0 : 1);
+} catch {
+  process.exit(1);
+}
+NODE
+}
+
+# Single owner for cross-clone Treehouse pool-slot workspace trust eligibility
+# (bin/fm-claude-trust.sh and bin/fm-agy-trust.sh). Beyond fm_treehouse_pool_slot
+# membership and shared repository identity, a cross-clone slot may be trusted
+# only when its .fm-slot-owner claim matches the caller's home.
+fm_treehouse_cross_clone_trust_valid() {  # <project-real> <worktree-real> [<caller-home>]
+  local proj_real=$1 wt_real=$2 caller_home=${3-} expected_home='' proj_parent proj_home
+  local slot_parent marker line claim_task='' claim_home='' claim_home_real
+  fm_treehouse_pool_slot "$proj_real" "$wt_real" || return 1
+  if [ -n "$caller_home" ]; then
+    expected_home=$(CDPATH='' cd -P -- "$caller_home" 2>/dev/null && pwd -P) || return 1
+    [ -n "$expected_home" ] || return 1
+  fi
+  proj_parent=${proj_real%/*}
+  if [ "${proj_parent##*/}" = "projects" ] && [ -d "${proj_parent%/*}/state" ]; then
+    proj_home=$(CDPATH='' cd -P -- "${proj_parent%/*}" 2>/dev/null && pwd -P) || proj_home=''
+    if [ -n "$expected_home" ] && [ -n "$proj_home" ] && [ "$expected_home" != "$proj_home" ]; then
+      return 1
+    fi
+    [ -n "$expected_home" ] || expected_home=$proj_home
+  fi
+  slot_parent=${wt_real%/*}
+  marker="$slot_parent/.fm-slot-owner"
+  [ -n "$expected_home" ] && [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      task=*)
+        [ -z "$claim_task" ] || return 1
+        claim_task=${line#task=}
+        ;;
+      home=*)
+        [ -z "$claim_home" ] || return 1
+        claim_home=${line#home=}
+        ;;
+      *) return 1 ;;
+    esac
+  done < "$marker"
+  [ -n "$claim_task" ] && [ -n "$claim_home" ] || return 1
+  claim_home_real=$(CDPATH='' cd -P -- "$claim_home" 2>/dev/null && pwd -P) || return 1
+  [ "$claim_home_real" = "$expected_home" ]
 }
 
 # Slot-owner claim: which task a Treehouse pool slot currently belongs to.

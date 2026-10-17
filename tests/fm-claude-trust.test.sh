@@ -440,6 +440,65 @@ test_claude_spawn_pretrusts_its_worktree_and_reaches_the_brief() {
   pass "fm-spawn.sh: a claude spawn pre-trusts its worktree and launches with the brief"
 }
 
+test_cross_clone_pool_slot_provenance_and_refusals() {
+  local world upstream clone_a clone_b home_a home_b pool slot manual_wt config out
+  world="$TMP_ROOT/cross-clone"
+  upstream="$world/upstream.git"
+  home_a="$world/home-a"
+  home_b="$world/home-b"
+  clone_a="$home_a/projects/repo"
+  clone_b="$home_b/projects/repo"
+  pool="$world/pool"
+  slot="$pool/1/repo"
+  manual_wt="$world/manual-wt"
+  config="$world/claude-config"
+  mkdir -p "$home_a/projects" "$home_a/state" "$home_b/projects" "$home_b/state" "$pool/1" "$config"
+
+  git init --bare -b main -q "$upstream"
+  git clone -q "$upstream" "$clone_a"
+  git -C "$clone_a" -c user.name=test -c user.email=test@example.invalid commit --allow-empty -qm init
+  git -C "$clone_a" push -q -u origin main
+  git clone -q "$upstream" "$clone_b"
+  git -C "$clone_a" worktree add -q --detach "$slot" HEAD
+  git -C "$clone_a" worktree add -q --detach "$manual_wt" HEAD
+
+  # 1. Idle unleased & unclaimed cross-clone slot in pool must be refused.
+  printf '{"worktrees":[{"name":"1","path":"%s"}]}\n' "$slot" > "$pool/treehouse-state.json"
+  out=$(FM_HOME="$home_b" run_trust "$config" "$slot" "$clone_b" "$world/user-home")
+  expect_code 1 $? "an idle unleased cross-clone slot must be refused: $out"
+  assert_contains "$out" "is not a worktree of project" "idle cross-clone refusal did not name project mismatch"
+  assert_not_trusted "$config/.claude.json" "$slot" "idle unleased cross-clone slot was trusted"
+
+  # 2. Active Treehouse lease without a same-home claim is refused.
+  printf '{"worktrees":[{"name":"1","path":"%s","owner_pid":%s}]}\n' "$slot" "$$" > "$pool/treehouse-state.json"
+  out=$(FM_HOME="$home_b" run_trust "$config" "$slot" "$clone_b" "$world/user-home")
+  expect_code 1 $? "an unclaimed leased cross-clone pool slot must be refused: $out"
+  assert_not_trusted "$config/.claude.json" "$slot" "unclaimed leased cross-clone pool slot was trusted"
+
+  # 3. Same-home .fm-slot-owner claim after process lease exit is accepted.
+  rm -f "$config/.claude.json"
+  printf '{"worktrees":[{"name":"1","path":"%s"}]}\n' "$slot" > "$pool/treehouse-state.json"
+  printf 'task=task-b\nhome=%s\n' "$home_b" > "$pool/1/.fm-slot-owner"
+  out=$(FM_HOME="$home_b" run_trust "$config" "$slot" "$clone_b" "$world/user-home")
+  expect_code 0 $? "a same-home claimed cross-clone pool slot must be trusted: $out"
+  assert_trusted "$config/.claude.json" "$slot" "claimed cross-clone pool slot was not trusted"
+
+  # 4. Foreign-home .fm-slot-owner claim is refused even when leased.
+  rm -f "$config/.claude.json"
+  printf '{"worktrees":[{"name":"1","path":"%s","owner_pid":%s}]}\n' "$slot" "$$" > "$pool/treehouse-state.json"
+  printf 'task=task-a\nhome=%s\n' "$home_a" > "$pool/1/.fm-slot-owner"
+  out=$(FM_HOME="$home_b" run_trust "$config" "$slot" "$clone_b" "$world/user-home")
+  expect_code 1 $? "a foreign-home claimed cross-clone slot must be refused: $out"
+  assert_not_trusted "$config/.claude.json" "$slot" "foreign-home claimed cross-clone slot was trusted"
+
+  # 5. Unpooled manual linked worktree of Clone A is refused for Clone B.
+  out=$(FM_HOME="$home_b" run_trust "$config" "$manual_wt" "$clone_b" "$world/user-home")
+  expect_code 1 $? "an unpooled manual worktree of another clone must be refused: $out"
+  assert_not_trusted "$config/.claude.json" "$manual_wt" "unpooled manual worktree of another clone was trusted"
+
+  pass "fm-claude-trust.sh: accepts same-home claimed cross-clone pool slots and refuses unclaimed, foreign-claimed, or unpooled cross-clone worktrees"
+}
+
 test_fresh_worktree_is_trusted
 test_registration_is_idempotent
 test_primary_checkout_is_refused
@@ -460,3 +519,4 @@ test_missing_node_is_refused
 test_scope_refusal_stays_fail_closed_without_node
 test_claude_spawn_pretrusts_its_worktree_and_reaches_the_brief
 test_refused_spawn_leaves_no_task_state
+test_cross_clone_pool_slot_provenance_and_refusals

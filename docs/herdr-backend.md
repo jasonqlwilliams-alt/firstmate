@@ -66,6 +66,7 @@ A `--secondmate` launch is the deliberate exception: it stands up that secondmat
 
 A claimed parent identity that cannot be resolved exactly stops the spawn before any worker endpoint exists, rather than falling back to a label search.
 That covers a missing or unusable socket identity, a closed or unreadable launcher pane, a pane and tab that disagree about their workspace, a workspace missing from the session, and a pane belonging to another named session or Herdr server.
+When relaunch recreates a missing task pane, it keeps the recorded worktree and places the new pane from the current launcher's verified identity, or in the home's workspace when there is no launcher pane; a stale or foreign launcher identity still refuses.
 
 Firstmate running outside Herdr entirely has no launcher workspace to inherit, so its workers use this home's own labeled workspace, created on first use.
 That path needs the home label to identify exactly one workspace: two workspaces sharing it are an unresolvable placement and refuse rather than adopting either.
