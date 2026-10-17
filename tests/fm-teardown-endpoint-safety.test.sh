@@ -1281,6 +1281,48 @@ test_own_and_absent_slot_claims_still_tear_down() {
   pass "fm-teardown: a task's own slot claim, and an unclaimed slot, both still tear down"
 }
 
+test_cross_clone_pool_slot_recognized_and_exclusivity_enforced() {
+  local dir id=secondmate-task other=primary-task second_home second_project rc
+  dir=$(make_case slot-cross-clone-exclusivity)
+  mark_case_as_treehouse_pool "$dir"
+  printf 'fixture\n' > "$dir/project/tracked"
+  git -C "$dir/project" add tracked
+  git -C "$dir/project" -c user.name=test -c user.email=test@example.invalid commit -qm fixture
+  second_home="$dir/secondmate-home"
+  second_project="$second_home/projects/project"
+  make_home "$second_home"
+  write_local_parent_record "$second_home" "$dir/home"
+  git clone -q "$dir/project" "$second_project"
+  printf '%s\n' "- mate - fixture (home: $second_home; scope: test; projects: project; added 2026-01-01)" \
+    > "$dir/home/data/secondmates.md"
+
+  # 1. Cross-clone pool slot is recognized by fm_treehouse_pool_slot for $second_project.
+  (
+    # shellcheck source=/dev/null
+    . "$ROOT/bin/fm-wake-lib.sh"
+    fm_treehouse_pool_slot "$second_project" "$dir/worktree"
+  ) || fail "fm_treehouse_pool_slot rejected a cross-clone pool slot sharing repository identity"
+
+  # 2. Teardown from $second_home (whose project=$second_project differs in common-dir from $dir/worktree)
+  # still recognizes the pool slot and refuses to return it while $dir/home's record occupies it.
+  fm_write_meta "$dir/home/state/$other.meta" \
+    "window=firstmate:fm-$other" "endpoint_task_id=$other" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  fm_write_meta "$second_home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$second_project" "kind=scout"
+  set +e
+  FM_HOME="$second_home" FM_ROOT_OVERRIDE="$ROOT" \
+  FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+    "$TEARDOWN" "$id" --force > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "cross-clone teardown returned a pool slot still held by primary home"
+  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "cross-clone teardown invoked treehouse return on a collided slot: $(cat "$dir/runtime.log")"
+  pass "fm-teardown: cross-clone pool slots are recognized and protected by slot exclusivity"
+}
+
 test_invalid_endpoint_records_refuse_before_mutation
 test_control_lock_contention_refuses_before_mutation
 test_non_pool_teardown_ignores_task_set_lock
@@ -1298,6 +1340,7 @@ test_cross_home_pool_slot_collision_refuses
 test_sole_slot_record_still_tears_down
 test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot
 test_own_and_absent_slot_claims_still_tear_down
+test_cross_clone_pool_slot_recognized_and_exclusivity_enforced
 test_recorded_endpoint_that_changed_directory_still_tears_down
 test_project_lock_anchors_at_the_local_root_across_home_layouts
 test_remote_seeded_home_returns_its_uncontested_slot

@@ -1499,9 +1499,16 @@ if [ "$RELAUNCH" -eq 1 ]; then
   fi
   if [ "$BACKEND" = herdr ]; then
     HERDR_SES=$(fm_meta_get "$RELAUNCH_META" herdr_session)
-    HERDR_WORKSPACE_ID=$(fm_meta_get "$RELAUNCH_META" herdr_workspace_id)
-    HERDR_TAB_ID=$(fm_meta_get "$RELAUNCH_META" herdr_tab_id)
-    HERDR_PANE_ID=$(fm_meta_get "$RELAUNCH_META" herdr_pane_id)
+    # The recorded ids name the task's OWN endpoint, under the very names Herdr
+    # injects into this launching process as ITS identity
+    # (fm_backend_herdr_launcher_identity). An adopted endpoint needs them; a
+    # missing one is recreated under the launcher's live workspace, so they
+    # must not overwrite that identity with the vanished pane's.
+    if [ "$RELAUNCH_RECREATE" -eq 0 ]; then
+      HERDR_WORKSPACE_ID=$(fm_meta_get "$RELAUNCH_META" herdr_workspace_id)
+      HERDR_TAB_ID=$(fm_meta_get "$RELAUNCH_META" herdr_tab_id)
+      HERDR_PANE_ID=$(fm_meta_get "$RELAUNCH_META" herdr_pane_id)
+    fi
   fi
   # With no explicit harness, a relaunch reuses the harness already recorded
   # for this task. It must NOT fall through to the fresh-spawn config

@@ -1617,6 +1617,152 @@ test_control_relaunch_recreates_a_missing_endpoint() {
   pass "fm-control relaunch: a missing endpoint is recreated instead of becoming a one-way door"
 }
 
+test_herdr_relaunch_recreates_missing_endpoint_without_confusing_worker_pane_for_launcher() {
+  local dir out rc
+  dir=$(new_case missing-herdr rl-hmiss)
+  add_ship_task "$dir" rl-hmiss claude
+  {
+    echo "window=fmses:w1:p2"
+    echo "endpoint_task_id=rl-hmiss"
+    echo "worktree=$dir/wt"
+    echo "project=$dir/proj"
+    echo "harness=claude"
+    echo "kind=ship"
+    echo "mode=no-mistakes"
+    echo "yolo=off"
+    echo "tasktmp=/tmp/fm-rl-hmiss"
+    echo "model=default"
+    echo "effort=default"
+    echo "backend=herdr"
+    echo "herdr_session=fmses"
+    echo "herdr_workspace_id=w1"
+    echo "herdr_tab_id=w1:t2"
+    echo "herdr_pane_id=w1:p2"
+  } > "$dir/home/state/rl-hmiss.meta"
+  TASK_TMPS+=("/tmp/fm-rl-hmiss")
+  cat > "$dir/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+set -u
+D=$FM_FAKE_DIR
+WT_DIR=${D%/fake}/wt
+cmd="${1:-} ${2:-}"
+case "$cmd" in
+  "status --json")
+    printf '{"client":{"version":"0.7.1","protocol":14},"server":{"running":true}}\n'
+    exit 0 ;;
+  "session list")
+    printf '{"sessions":[{"name":"fmses","running":true,"socket_path":"%s/herdr.sock"}]}\n' "$D"
+    exit 0 ;;
+  "terminal title")
+    printf '{"result":{"reason":"no_foreground_client"}}\n'
+    exit 0 ;;
+  "agent get")
+    pane=${3:-}
+    if [ "$pane" = "w2:p3" ] && [ -e "$D/herdr-launched" ]; then
+      printf '{"result":{"agent":{"agent_status":"working"}}}\n'
+      exit 0
+    fi
+    if [ "$pane" = "w2:p3" ] && [ -e "$D/herdr-created" ]; then
+      printf '{"error":{"code":"agent_not_found","message":"no agent registered for %s"}}\n' "$pane"
+      exit 1
+    fi
+    printf '{"error":{"code":"pane_not_found","message":"pane target %s not found"}}\n' "$pane"
+    exit 1 ;;
+  "pane get")
+    pane=${3:-}
+    if [ "$pane" = "w2:p1" ]; then
+      printf '{"result":{"pane":{"pane_id":"w2:p1","tab_id":"w2:t1","workspace_id":"w2","foreground_cwd":"%s"}}}\n' "$WT_DIR"
+      exit 0
+    fi
+    if [ "$pane" = "w2:p3" ] && [ -e "$D/herdr-created" ]; then
+      printf '{"result":{"pane":{"pane_id":"w2:p3","tab_id":"w2:t3","workspace_id":"w2","foreground_cwd":"%s"}}}\n' "$WT_DIR"
+      exit 0
+    fi
+    printf '{"error":{"code":"pane_not_found","message":"pane target %s not found"}}\n' "$pane"
+    exit 1 ;;
+  "tab get")
+    tab=${3:-}
+    if [ "$tab" = "w2:t1" ]; then
+      printf '{"result":{"tab":{"tab_id":"w2:t1","workspace_id":"w2"}}}\n'
+      exit 0
+    fi
+    if [ "$tab" = "w2:t3" ] && [ -e "$D/herdr-created" ]; then
+      printf '{"result":{"tab":{"tab_id":"w2:t3","workspace_id":"w2"}}}\n'
+      exit 0
+    fi
+    printf '{"error":{"code":"tab_not_found","message":"tab target %s not found"}}\n' "$tab"
+    exit 1 ;;
+  "pane process-info")
+    if [ -e "$D/herdr-launched" ]; then
+      printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"w2:p3","shell_pid":2,"foreground_processes":[{"pid":123,"name":"claude","argv":["claude"],"cmdline":"claude"}]}}}\n'
+    else
+      printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"w2:p3","shell_pid":2,"foreground_processes":[{"pid":100,"name":"bash","argv":["bash"],"cmdline":"bash"}]}}}\n'
+    fi
+    exit 0 ;;
+  "workspace list")
+    printf '{"result":{"workspaces":[{"workspace_id":"w2","label":"firstmate"}]}}\n'
+    exit 0 ;;
+  "tab list")
+    printf '{"result":{"tabs":[{"tab_id":"w2:t1","label":"super","workspace_id":"w2","pane_id":"w2:p1"}]}}\n'
+    exit 0 ;;
+  "tab create")
+    : > "$D/herdr-created"
+    printf '{"result":{"tab":{"tab_id":"w2:t3"},"root_pane":{"pane_id":"w2:p3"}}}\n'
+    exit 0 ;;
+  "pane list")
+    printf '{"result":{"panes":[{"pane_id":"w2:p1","tab_id":"w2:t1"},{"pane_id":"w2:p3","tab_id":"w2:t3"}]}}\n'
+    exit 0 ;;
+  "pane send-text"|"pane run")
+    payload=${4:-}
+    printf '%s\n' "$payload" >> "$D/literal"
+    case "$payload" in
+      'printf '*)
+        pane_path=${FM_FAKE_PANE_PATH:-$PATH}
+        ( set -C; export PATH="$pane_path"; eval "$payload" ) || exit 1
+        ;;
+      *'encode launch-brief'*) : > "$D/herdr-launched" ;;
+    esac
+    exit 0 ;;
+  "pane send-keys")
+    exit 0 ;;
+esac
+exit 0
+SH
+  chmod +x "$dir/fakebin/herdr"
+
+  # 1. Stale launcher pane refuses without mutating metadata.
+  out=$(HERDR_SESSION=fmses HERDR_PANE_ID=w99:p99 HERDR_SOCKET_PATH="$dir/fake/herdr.sock" \
+    run_control "$dir" rl-hmiss relaunch --note "stale launcher"); rc=$?
+  expect_code 1 "$rc" "relaunch from a stale Herdr launcher pane should refuse"
+  assert_contains "$out" "herdr launcher pane 'w99:p99' could not be read" \
+    "stale launcher refusal should name w99:p99"
+  [ "$(meta_field "$dir" rl-hmiss herdr_pane_id)" = "w1:p2" ] \
+    || fail "stale launcher refusal mutated herdr_pane_id"
+
+  # 2. Live launcher pane recreates the missing worker endpoint into w2:p3.
+  out=$(HERDR_SESSION=fmses HERDR_PANE_ID=w2:p1 HERDR_SOCKET_PATH="$dir/fake/herdr.sock" \
+    run_control "$dir" rl-hmiss relaunch --note "recover gone pane"); rc=$?
+  expect_code 0 "$rc" "control relaunch of a missing Herdr endpoint from live launcher should succeed"$'\n'"$out"
+  [ "$(meta_field "$dir" rl-hmiss window)" = "fmses:w2:p3" ] \
+    || fail "missing-endpoint Herdr relaunch did not publish fmses:w2:p3"
+  [ "$(meta_field "$dir" rl-hmiss herdr_workspace_id)" = "w2" ] \
+    || fail "missing-endpoint Herdr relaunch did not bind launcher workspace w2"
+  [ "$(meta_field "$dir" rl-hmiss herdr_pane_id)" = "w2:p3" ] \
+    || fail "missing-endpoint Herdr relaunch did not bind recreated pane w2:p3"
+  [ "$(meta_field "$dir" rl-hmiss worktree)" = "$dir/wt" ] \
+    || fail "missing-endpoint Herdr relaunch replaced the recorded worktree"
+
+  # 3. Unset launcher env also recreates a missing Herdr endpoint without
+  #    feeding the vanished worker pane into fm_backend_herdr_launcher_identity.
+  rm -f "$dir/fake/herdr-created" "$dir/fake/herdr-launched"
+  out=$(unset HERDR_PANE_ID HERDR_SOCKET_PATH; HERDR_SESSION=fmses \
+    run_spawn "$dir" rl-hmiss --relaunch --harness claude); rc=$?
+  expect_code 0 "$rc" "spawn relaunch of a missing Herdr endpoint without launcher env should succeed"$'\n'"$out"
+  [ "$(meta_field "$dir" rl-hmiss herdr_pane_id)" = "w2:p3" ] \
+    || fail "spawn relaunch without launcher env did not recreate w2:p3"
+  pass "fm-control/fm-spawn relaunch: Herdr missing endpoint is recreated without confusing worker pane for launcher"
+}
+
 test_spawn_relaunch_refuses_a_symlinked_task_record_before_inspection() {
   local dir meta target out rc
   dir=$(new_case symlink-meta rl37)
@@ -2860,6 +3006,7 @@ test_promotion_participates_in_the_lifecycle_lock_before_metadata_resolution
 test_spawn_relaunch_refuses_a_live_agent
 test_spawn_relaunch_recreates_a_missing_endpoint
 test_control_relaunch_recreates_a_missing_endpoint
+test_herdr_relaunch_recreates_missing_endpoint_without_confusing_worker_pane_for_launcher
 test_spawn_relaunch_refuses_a_symlinked_task_record_before_inspection
 test_spawn_relaunch_keeps_its_early_meta_lock_continuous
 test_spawn_relaunch_refuses_a_pending_authoritative_close

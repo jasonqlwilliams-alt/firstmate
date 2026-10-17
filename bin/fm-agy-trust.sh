@@ -127,12 +127,26 @@ WT_COMMON=$(common_dir_of "$WT_REAL") || true
 
 PROJ_COMMON=$(common_dir_of "$PROJ_REAL") || true
 [ -n "$PROJ_COMMON" ] || refuse "project '$PROJ_REAL' is not inside a git repository"
-[ "$WT_COMMON" = "$PROJ_COMMON" ] || refuse "'$WT_REAL' is not a worktree of project '$PROJ_REAL'"
+if [ "$WT_COMMON" != "$PROJ_COMMON" ]; then
+  POOL_STATE="${WT_REAL%/*/*}/treehouse-state.json"
+  [ -f "$POOL_STATE" ] && [ ! -L "$POOL_STATE" ] \
+    || refuse "'$WT_REAL' is not a worktree of project '$PROJ_REAL'"
+fi
 
 # The store write needs node, and a missing interpreter refuses like every other
 # failure here, for the reason bin/fm-claude-trust.sh states: degrading would
 # launch a worker straight into the dialog this registration exists to remove.
 command -v node >/dev/null 2>&1 || refuse "node is required to record workspace trust and was not found on PATH"
+
+if [ "$WT_COMMON" != "$PROJ_COMMON" ]; then
+  CALLER_FM_HOME=${FM_HOME:-}
+  SCRIPT_DIR=${BASH_SOURCE[0]%/*}
+  [ "$SCRIPT_DIR" != "${BASH_SOURCE[0]}" ] || SCRIPT_DIR=.
+  # shellcheck source=bin/fm-wake-lib.sh
+  FM_WAKE_NO_MKDIR=1 . "$SCRIPT_DIR/fm-wake-lib.sh"
+  fm_treehouse_cross_clone_trust_valid "$PROJ_REAL" "$WT_REAL" "$CALLER_FM_HOME" \
+    || refuse "'$WT_REAL' is not a worktree of project '$PROJ_REAL'"
+fi
 
 STORE="$CONFIG_DIR_REAL/settings.json"
 # A dotfile manager or a synced folder legitimately symlinks this store, so the

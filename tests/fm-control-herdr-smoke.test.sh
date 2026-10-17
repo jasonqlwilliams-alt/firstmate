@@ -57,7 +57,10 @@ herdr_forget_inherited_pane
 SESSION="fm-lab-control-smoke-$$"
 export HERDR_SESSION="$SESSION"
 SCRATCH=
+CLEANED_UP=0
 cleanup_all() {
+  [ "$CLEANED_UP" -eq 0 ] || return 0
+  CLEANED_UP=1
   [ -n "$SCRATCH" ] && rm -rf "$SCRATCH"
   herdr_safe_stop_and_delete "$SESSION"
 }
@@ -357,3 +360,92 @@ esac
 pass "real herdr: an agent that does not stop fails closed instead of being reported as stopped"
 
 fm_backend_herdr_kill "$SESSION:$PANE_ID" 2>/dev/null || true
+
+# --- missing-endpoint relaunch (RELAUNCH_RECREATE=1): recreate into recorded -
+# --- copy without confusing the missing worker pane for the launcher ---------
+STATE=$(fm_backend_agent_state herdr "$SESSION:$PANE_ID")
+[ "$STATE" = missing ] \
+  || version_fail "after closing the task pane, the endpoint reads '$STATE' rather than 'missing'"
+
+cat > "$FAKEBIN/codex" <<EOF
+#!/usr/bin/env bash
+: > "$SCRATCH/codex-launched"
+if [ "\${FM_FAKE_CODEX_STAY_ALIVE:-0}" = 1 ] && [ -n "\${HERDR_PANE_ID:-}" ] && [ -n "\${HERDR_SESSION:-}" ]; then
+  herdr pane report-agent "\$HERDR_PANE_ID" --source codex --agent codex --state busy --session "\$HERDR_SESSION" >/dev/null 2>&1 || true
+  sleep 600 &
+  child=\$!
+  trap 'kill "\$child" 2>/dev/null || true; exit 0' TERM INT HUP
+  wait "\$child"
+fi
+EOF
+chmod +x "$FAKEBIN/codex"
+
+SUP_RAW=$(herdr workspace create --label fm-supervisor --session "$SESSION") \
+  || fail "could not create launcher workspace in Herdr lab session"
+SUP_WS=$(printf '%s\n' "$SUP_RAW" | jq -r '.result.workspace.workspace_id // empty')
+SUP_PANE=$(printf '%s\n' "$SUP_RAW" | jq -r '.result.root_pane.pane_id // empty')
+SOCKET_PATH=$(fm_backend_herdr_presentation_session_socket_path "$SESSION")
+[ -n "$SUP_WS" ] && [ -n "$SUP_PANE" ] && [ -n "$SOCKET_PATH" ] \
+  || fail "could not resolve Herdr launcher workspace/pane/socket"
+
+# 1. Stale launcher pane must fail closed without mutating metadata.
+if OUT=$(env PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" HERDR_SESSION="$SESSION" \
+  HERDR_PANE_ID="w999:p999" HERDR_SOCKET_PATH="$SOCKET_PATH" \
+  FM_SPAWN_NO_GUARD=1 FM_CONTROL_POLL=0.2 FM_CONTROL_EXIT_WAIT=2 FM_CONTROL_LAUNCH_WAIT=5 \
+  "$ROOT/bin/fm-control.sh" hsmoke relaunch --harness codex --note "stale launcher check" 2>&1); then
+  fail "relaunch with a stale launcher pane should refuse: $OUT"
+fi
+case "$OUT" in
+  *"herdr launcher pane 'w999:p999' could not be read"*) : ;;
+  *) fail "stale launcher refusal should name w999:p999, got: $OUT" ;;
+esac
+[ "$(sed -n 's/^herdr_pane_id=//p' "$HOME_DIR/state/hsmoke.meta" | tail -1)" = "$PANE_ID" ] \
+  || fail "stale launcher refusal mutated herdr_pane_id"
+
+# 2. Foreign socket launcher must fail closed without mutating metadata.
+if OUT=$(env PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" HERDR_SESSION="$SESSION" \
+  HERDR_PANE_ID="$SUP_PANE" HERDR_SOCKET_PATH="$SCRATCH/foreign.sock" \
+  FM_SPAWN_NO_GUARD=1 FM_CONTROL_POLL=0.2 FM_CONTROL_EXIT_WAIT=2 FM_CONTROL_LAUNCH_WAIT=5 \
+  "$ROOT/bin/fm-control.sh" hsmoke relaunch --harness codex --note "foreign socket check" 2>&1); then
+  fail "relaunch with a foreign launcher socket should refuse: $OUT"
+fi
+case "$OUT" in
+  *"herdr launcher pane '$SUP_PANE' belongs to the server at"*) : ;;
+  *) fail "foreign-socket refusal should name launcher socket mismatch, got: $OUT" ;;
+esac
+[ "$(sed -n 's/^herdr_pane_id=//p' "$HOME_DIR/state/hsmoke.meta" | tail -1)" = "$PANE_ID" ] \
+  || fail "foreign-socket refusal mutated herdr_pane_id"
+
+# 3. Live launcher pane: missing worker pane is recreated in launcher workspace
+#    and re-bound to the same recorded worktree.
+rm -f "$SCRATCH/codex-launched"
+OUT=$(env PATH="$FAKEBIN:$PATH" FM_FAKE_CODEX_STAY_ALIVE=1 \
+  FM_HOME="$HOME_DIR" HERDR_SESSION="$SESSION" \
+  HERDR_PANE_ID="$SUP_PANE" HERDR_SOCKET_PATH="$SOCKET_PATH" \
+  FM_SPAWN_NO_GUARD=1 FM_CONTROL_POLL=0.2 FM_CONTROL_EXIT_WAIT=2 FM_CONTROL_LAUNCH_WAIT=5 \
+  "$ROOT/bin/fm-control.sh" hsmoke relaunch --harness codex --note "recreate missing pane" 2>&1) \
+  || fail "missing-endpoint Herdr relaunch from live launcher should succeed: $OUT"
+NEW_PANE_ID=$(sed -n 's/^herdr_pane_id=//p' "$HOME_DIR/state/hsmoke.meta" | tail -1)
+NEW_WS_ID=$(sed -n 's/^herdr_workspace_id=//p' "$HOME_DIR/state/hsmoke.meta" | tail -1)
+[ -n "$NEW_PANE_ID" ] && [ "$NEW_PANE_ID" != "$PANE_ID" ] \
+  || fail "missing-endpoint Herdr relaunch did not publish a recreated pane id (got '$NEW_PANE_ID')"
+[ "$NEW_WS_ID" = "$SUP_WS" ] \
+  || fail "missing-endpoint Herdr relaunch placed pane in workspace '$NEW_WS_ID', expected launcher workspace '$SUP_WS'"
+[ "$(sed -n 's/^worktree=//p' "$HOME_DIR/state/hsmoke.meta" | tail -1)" = "$WT" ] \
+  || fail "missing-endpoint Herdr relaunch changed the recorded worktree"
+pass "real herdr: missing-endpoint control relaunch recreates the pane in the launcher workspace while refusing stale or foreign launchers"
+
+# 4. Unset launcher: missing worker pane is recreated without leaking the dead
+#    worker's herdr_pane_id into fm_backend_herdr_launcher_identity.
+fm_backend_herdr_kill "$SESSION:$NEW_PANE_ID" 2>/dev/null || true
+rm -f "$SCRATCH/codex-launched"
+OUT=$(env -u HERDR_PANE_ID -u HERDR_SOCKET_PATH \
+  PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" HERDR_SESSION="$SESSION" \
+  FM_SPAWN_NO_GUARD=1 \
+  "$ROOT/bin/fm-spawn.sh" hsmoke --relaunch --harness codex 2>&1) \
+  || fail "missing-endpoint Herdr spawn relaunch without launcher env should succeed: $OUT"
+THIRD_PANE_ID=$(sed -n 's/^herdr_pane_id=//p' "$HOME_DIR/state/hsmoke.meta" | tail -1)
+[ -n "$THIRD_PANE_ID" ] && [ "$THIRD_PANE_ID" != "$NEW_PANE_ID" ] \
+  || fail "missing-endpoint Herdr spawn relaunch without launcher env did not publish a new pane id"
+fm_backend_herdr_kill "$SESSION:$THIRD_PANE_ID" 2>/dev/null || true
+pass "real herdr: missing-endpoint spawn relaunch without a launcher pane recreates cleanly"
