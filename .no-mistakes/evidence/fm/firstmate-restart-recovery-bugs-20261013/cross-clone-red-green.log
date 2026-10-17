@@ -1,0 +1,8 @@
+same claimed cross-clone slot, base commit commands:
+error: refusing to pre-register Claude trust: '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/pool/1/repo' is not a worktree of project '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/home-b/projects/repo'
+base_claude_exit=1
+error: refusing to pre-register agy trust: '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/pool/1/repo' is not a worktree of project '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/home-b/projects/repo'
+base_agy_exit=1
+same claimed cross-clone slot, changed commands:
+trusted: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/pool/1/repo
+trusted: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/pool/1/repo

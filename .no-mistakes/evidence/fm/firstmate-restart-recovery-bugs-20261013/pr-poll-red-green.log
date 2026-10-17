@@ -1,0 +1,3 @@
+live_device=2096 persisted_device=2097
+base_registration_exit=1 target_registration_exit=0
+poll_output=merged

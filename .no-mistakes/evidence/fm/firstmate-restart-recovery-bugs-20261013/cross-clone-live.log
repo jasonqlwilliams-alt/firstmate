@@ -1,0 +1,19 @@
+different Git common directories, same origin:
+/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/home-a/projects/repo/.git
+/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/home-b/projects/repo/.git
+unclaimed slot:
+error: refusing to pre-register Claude trust: '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/pool/1/repo' is not a worktree of project '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/home-b/projects/repo'
+claude_exit=1
+error: refusing to pre-register agy trust: '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/pool/1/repo' is not a worktree of project '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/home-b/projects/repo'
+agy_exit=1
+trust_files_created=no
+same-home claimed slot:
+trusted: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/pool/1/repo
+trusted: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/pool/1/repo
+claude_store_trusted=true
+agy_store_trusted=true
+foreign-home claimed slot:
+error: refusing to pre-register Claude trust: '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/pool/1/repo' is not a worktree of project '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/home-b/projects/repo'
+claude_exit=1
+error: refusing to pre-register agy trust: '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/pool/1/repo' is not a worktree of project '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-live.AGrpov/home-b/projects/repo'
+agy_exit=1

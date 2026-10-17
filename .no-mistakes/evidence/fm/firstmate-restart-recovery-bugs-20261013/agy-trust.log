@@ -1,0 +1,13 @@
+ok - fm-harness: agy detects by its anchored name, and magyar/agyd stay out
+ok - fm-harness: the agy marker is a precedence override that needs real agy ancestry
+ok - tmux liveness: agy is anchored, decoys stay out
+ok - fm-control-lib: the agy lifecycle table matches the verified mechanics
+ok - fm-busy-lib and fm-control-lib: agy's hook source is trusted only for agy, and its wiring stays out of the worktree
+ok - fm-spawn: the agy launch line clears markers, carries both workspaces, wires state-resident hooks, and pre-registers trust
+ok - fm-spawn: the agy crewmate and scout launch shapes are identical, so one live launch verifies both
+ok - fm-spawn: agy caps xhigh and max onto high while recording the requested effort verbatim
+ok - fm-spawn: an unlisted agy model refuses, while an unreadable listing passes through
+ok - fm-spawn: an agy secondmate is refused because it has no primary supervision protocol
+ok - fm-agy-trust.sh: the structural scope test holds and registration is idempotent
+warning: You appear to have cloned an empty repository.
+ok - fm-agy-trust.sh: accepts same-home claimed cross-clone pool slots and refuses unclaimed, foreign-claimed, or unpooled cross-clone worktrees

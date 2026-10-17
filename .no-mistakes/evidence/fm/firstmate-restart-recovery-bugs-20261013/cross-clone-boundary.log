@@ -1,0 +1,9 @@
+unpooled-same-origin:
+error: refusing to pre-register Claude trust: '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-boundary.9JNy7O/manual' is not a worktree of project '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-boundary.9JNy7O/home-b/projects/repo'
+error: refusing to pre-register agy trust: '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-boundary.9JNy7O/manual' is not a worktree of project '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-boundary.9JNy7O/home-b/projects/repo'
+claude_exit=1 agy_exit=1
+pooled-different-origin:
+error: refusing to pre-register Claude trust: '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-boundary.9JNy7O/pool/2/repo' is not a worktree of project '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-boundary.9JNy7O/home-b/projects/repo'
+error: refusing to pre-register agy trust: '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-boundary.9JNy7O/pool/2/repo' is not a worktree of project '/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M54HTMPEGRAK2ECBWZNR08MN/.trust-boundary.9JNy7O/home-b/projects/repo'
+claude_exit=1 agy_exit=1
+trust_files_created=no

@@ -1,0 +1,8 @@
+live_device=2096 persisted_previous_device=2097
+receipt_present_before_recovery=yes
+retirement_recovery_exit=0
+check.sh_removed=yes
+pr-poll_removed=yes
+pr-poll-registration_removed=yes
+pr-poll-retirement_removed=yes
+task_metadata_preserved=yes
