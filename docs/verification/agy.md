@@ -7,6 +7,7 @@ Every fact below was measured against a real agy on the date named; nothing here
 ## Environment
 
 Measured 2026-09-08 on Linux x86-64 (WSL2), Antigravity CLI 1.1.27, account signed in as a Google AI Ultra subscriber.
+Skill discovery and the `no-mistakes` validation trigger were measured 2026-10-16 on the same host with Antigravity CLI 1.4.0 and `no-mistakes` v1.72.0.
 
 ```
 $ agy --version
@@ -173,6 +174,41 @@ pending
 
 That second line is the measurement that keeps the pi path from being widened to agy: pi's row classifier reads agy's `>` glyph as typed content, so extending it would replace a safe `unknown` with a wrong `pending`, and `pending` is the one verdict that SKIPS a steering doorbell in `bin/fm-task-inbox-lib.sh`.
 `unknown` still rings the doorbell, so steering works; the gap is left open and documented rather than closed with a change that would break it.
+
+## Skills and no-mistakes validation trigger
+
+Measured 2026-10-16 on `/home/jason/.local/bin/agy` (`1.4.0`, ELF 64-bit Go binary) and `/home/jason/.local/bin/no-mistakes` (`v1.72.0`) with `no-mistakes` installed at `~/.agents/skills/no-mistakes` and `~/.claude/skills/no-mistakes`, and absent from `~/.gemini/config/skills/` and the isolated project workspace:
+
+```
+$ /home/jason/.local/bin/agy --version
+1.4.0
+$ /home/jason/.local/bin/no-mistakes --version
+no-mistakes v1.72.0 (9fcc865) 2026-09-08T13:12:43Z
+$ agy --dangerously-skip-permissions --add-dir <isolated-project> --add-dir <hooks-dir> --model gemini-4-argon-high --effort high -p '/skills'
+Available skills:
+- **agy-customizations**: Comprehensive guide and reference for the Antigravity Customization System...
+- **antigravity-guide**: Provides a comprehensive guide, quick reference, and sitemap for Google Antigravity (AGY)...
+- **continuum-master-librarian**: ...
+- **fable-adversarial-review**: ...
+- **internet-research-courier**: ...
+```
+
+In a supervised interactive TUI session (`agy -i` in an isolated Herdr lab pane, verified on both the authorized worker profile `--model gemini-4-argon-high --effort high` and `--model gemini-3.8-flash-high --effort high`), sending `/no-mistakes` + `Enter` to the idle composer is rejected by the client-side TUI slash-command parser without firing `PreInvocation` or starting a model turn:
+
+```
+> Unknown command: /no-mistakes
+```
+
+By contrast, non-interactive print mode (`agy -p '/no-mistakes'`) does not run the interactive TUI composer slash gate on unrecognized `/<name>` strings; it forwards `/no-mistakes` to the model as a regular user message (in one run the model guessed and invoked `no-mistakes axi run` with a fabricated `--intent`; in a second run the model replied `` `/no-mistakes` is not a built-in slash command or active custom skill/workflow in this workspace, so it was sent as a regular message. ``).
+
+Two counterfactual checks isolate the discovery rule:
+
+1. Adding `<workspace>/.agents/skills/no-mistakes/SKILL.md` to the `--add-dir` project workspace caused `-p '/skills'` to list `no-mistakes`, `-p '/no-mistakes'` to load the skill, and the interactive `-i` TUI on `--model gemini-4-argon-high --effort high` to accept `/no-mistakes` + `Enter`, fire `PreInvocation`, and start a turn (`> /no-mistakes` / `Working...`) instead of printing `> Unknown command: /no-mistakes`.
+2. Placing `.agents/skills.json` with `{"entries":[{"path":"/home/jason/.agents/skills","enabled":true}]}` in `<hooks-dir>/.agents/skills.json` did NOT cause `-p '/skills'` to discover `no-mistakes`.
+
+Because `no-mistakes init` configures only the repository gate and does not vendor `.agents/skills/no-mistakes` into project worktrees, `/no-mistakes` is unavailable in ordinary `agy` project workspaces.
+When a supervisor sends `/no-mistakes` through `bin/fm-send.sh`, the leading `/` also routes the text to the typed slash-command plane rather than `state/<id>.inbox/`, where the interactive TUI composer rejects `/no-mistakes` without starting a turn (`rakazo-gemini-4-model-support-20261013`).
+Steering in natural language (without a leading `/`) routes through `state/<id>.inbox/`, and a fresh interactive `agy` 1.4.0 worker (`--model gemini-4-argon-high --effort high`) in the same isolated project copy lacking `.agents/skills/no-mistakes` followed the updated [`bin/fm-dod-lib.sh`](../../bin/fm-dod-lib.sh) Definition of done by running `no-mistakes axi run --help` and invoking `no-mistakes axi run --intent "<Captain's intent>"` directly.
 
 ## Workspace residue
 

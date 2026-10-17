@@ -380,6 +380,9 @@ STUB
     "promoted no-mistakes worker did not receive the --yes prohibition"
   assert_grep "It is banned fleet-wide" "$payload" \
     "promoted no-mistakes worker did not receive the fleet-wide ban wording"
+  # shellcheck disable=SC2016  # single quotes are deliberate: backticks must stay literal
+  assert_grep 'run `no-mistakes axi run --help` first, start validation directly with `no-mistakes axi run --intent "..."`, and drive each gate with `no-mistakes axi status` and `no-mistakes axi respond`' "$payload" \
+    "promoted no-mistakes worker did not receive the direct no-mistakes axi validation trigger"
 
   payload="$TMP_ROOT/promote-dod/payload-promote-dod-direct-pr"
   assert_grep "supersede the scout delivery rules and report-based Definition of done" "$payload" \
