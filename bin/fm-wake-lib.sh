@@ -1192,7 +1192,7 @@ fm_firstmate_root_home() {
 # physical parent directory of its git common dir so its primary checkout,
 # linked worktrees, and local file clones share one identity.
 fm_treehouse_repo_identity() {  # <dir>
-  local dir=$1 common common_root origin top
+  local dir=$1 common common_root origin
   [ -d "$dir" ] || return 1
   common=$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
   common=$(CDPATH='' cd -- "$common" 2>/dev/null && pwd -P) || return 1
@@ -1220,13 +1220,7 @@ fm_treehouse_repo_identity() {  # <dir>
     printf '%s\n' "$origin"
     return 0
   fi
-  if [ -d "$common_root" ]; then
-    printf '%s\n' "$common_root"
-    return 0
-  fi
-  top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || return 1
-  top=$(CDPATH='' cd -- "$top" 2>/dev/null && pwd -P) || return 1
-  printf '%s\n' "$top"
+  printf '%s\n' "$common_root"
 }
 
 # The one lock serializing Treehouse slot allocation and return for a project.
@@ -1236,7 +1230,7 @@ fm_treehouse_repo_identity() {  # <dir>
 # below it, including a remote-seeded home and its own local descendants -
 # derives the identical path. Its identity is the project's resolved origin, so
 # separate clones of one origin share a single lock; an origin-less local-only
-# project falls back to its own worktree top instead of failing to resolve.
+# project uses its git common-dir parent.
 fm_treehouse_project_lock_path() {  # <project-dir>
   local project=$1 root identity hash
   [ -d "$project" ] || return 1
@@ -1307,11 +1301,10 @@ NODE
 # Single owner for cross-clone Treehouse pool-slot workspace trust eligibility
 # (bin/fm-claude-trust.sh and bin/fm-agy-trust.sh). Beyond fm_treehouse_pool_slot
 # membership and shared repository identity, a cross-clone slot may be trusted
-# only when any recorded .fm-slot-owner claim matches the caller's home AND an
-# unclaimed slot currently holds an active lease in treehouse-state.json.
+# only when its .fm-slot-owner claim matches the caller's home.
 fm_treehouse_cross_clone_trust_valid() {  # <project-real> <worktree-real> [<caller-home>]
   local proj_real=$1 wt_real=$2 caller_home=${3-} expected_home='' proj_parent proj_home
-  local slot_parent pool_state slot_name marker line claim_task='' claim_home='' claim_home_real claimed=0
+  local slot_parent marker line claim_task='' claim_home='' claim_home_real
   fm_treehouse_pool_slot "$proj_real" "$wt_real" || return 1
   if [ -n "$caller_home" ]; then
     expected_home=$(CDPATH='' cd -P -- "$caller_home" 2>/dev/null && pwd -P) || return 1
@@ -1327,67 +1320,23 @@ fm_treehouse_cross_clone_trust_valid() {  # <project-real> <worktree-real> [<cal
   fi
   slot_parent=${wt_real%/*}
   marker="$slot_parent/.fm-slot-owner"
-  if [ -e "$marker" ] || [ -L "$marker" ]; then
-    [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
-    while IFS= read -r line || [ -n "$line" ]; do
-      case "$line" in
-        task=*)
-          [ -z "$claim_task" ] || return 1
-          claim_task=${line#task=}
-          ;;
-        home=*)
-          [ -z "$claim_home" ] || return 1
-          claim_home=${line#home=}
-          ;;
-        *) return 1 ;;
-      esac
-    done < "$marker"
-    [ -n "$claim_task" ] && [ -n "$claim_home" ] || return 1
-    claim_home_real=$(CDPATH='' cd -P -- "$claim_home" 2>/dev/null && pwd -P) || return 1
-    [ -n "$claim_home_real" ] || return 1
-    if [ -n "$expected_home" ] && [ "$claim_home_real" != "$expected_home" ]; then
-      return 1
-    fi
-    claimed=1
-  fi
-  pool_state="${slot_parent%/*}/treehouse-state.json"
-  slot_name=${slot_parent##*/}
-  node - "$pool_state" "$wt_real" "$slot_name" "$claimed" <<'NODE' 2>/dev/null
-const fs = require("node:fs");
-const [statePath, wtReal, slotName, claimed] = process.argv.slice(2);
-try {
-  const raw = JSON.parse(fs.readFileSync(statePath, "utf8"));
-  if (!raw || typeof raw !== "object" || !Array.isArray(raw.worktrees)) process.exit(1);
-  const entry = raw.worktrees.find((item) => {
-    if (!item || typeof item !== "object" || typeof item.path !== "string") return false;
-    if (item.name !== undefined && String(item.name) !== slotName) return false;
-    try {
-      return fs.realpathSync(item.path) === wtReal;
-    } catch {
-      return false;
-    }
-  });
-  if (!entry) process.exit(1);
-  const pid = Number.isInteger(entry.owner_pid) && entry.owner_pid > 0 ? entry.owner_pid : 0;
-  let pidAlive = false;
-  if (pid > 0) {
-    try {
-      process.kill(pid, 0);
-      pidAlive = true;
-    } catch (err) {
-      pidAlive = Boolean(err && err.code === "EPERM");
-    }
-  }
-  const hasActiveLease =
-    entry.leased === true ||
-    pidAlive ||
-    (typeof entry.lease_holder === "string" && entry.lease_holder.length > 0);
-  if (claimed !== "1" && !hasActiveLease) process.exit(1);
-  process.exit(0);
-} catch {
-  process.exit(1);
-}
-NODE
+  [ -n "$expected_home" ] && [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      task=*)
+        [ -z "$claim_task" ] || return 1
+        claim_task=${line#task=}
+        ;;
+      home=*)
+        [ -z "$claim_home" ] || return 1
+        claim_home=${line#home=}
+        ;;
+      *) return 1 ;;
+    esac
+  done < "$marker"
+  [ -n "$claim_task" ] && [ -n "$claim_home" ] || return 1
+  claim_home_real=$(CDPATH='' cd -P -- "$claim_home" 2>/dev/null && pwd -P) || return 1
+  [ "$claim_home_real" = "$expected_home" ]
 }
 
 # Slot-owner claim: which task a Treehouse pool slot currently belongs to.

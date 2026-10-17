@@ -465,11 +465,11 @@ test_cross_clone_pool_slot_provenance_and_refusals() {
   expect_code 1 "$?" "an idle unleased cross-clone slot must be refused: $out"
   assert_contains "$out" "is not a worktree of project" "idle cross-clone refusal did not name project mismatch"
 
-  # 2. Active Treehouse lease (owner_pid alive) on cross-clone slot is accepted.
+  # 2. Active Treehouse lease without a same-home claim is refused.
   printf '{"worktrees":[{"name":"1","path":"%s","owner_pid":%s}]}\n' "$slot" "$$" > "$pool/treehouse-state.json"
   out=$(FM_HOME="$home_b" HOME="$user_home" "$TRUST" "$slot" "$clone_b" 2>&1)
-  expect_code 0 "$?" "a leased cross-clone pool slot must be trusted: $out"
-  assert_grep "$slot" "$store" "leased cross-clone pool slot was not trusted"
+  expect_code 1 "$?" "an unclaimed leased cross-clone pool slot must be refused: $out"
+  [ ! -e "$store" ] || fail "unclaimed leased cross-clone pool slot was trusted"
 
   # 3. Same-home .fm-slot-owner claim after process lease exit is accepted.
   rm -f "$store"
@@ -490,7 +490,7 @@ test_cross_clone_pool_slot_provenance_and_refusals() {
   out=$(FM_HOME="$home_b" HOME="$user_home" "$TRUST" "$manual_wt" "$clone_b" 2>&1)
   expect_code 1 "$?" "an unpooled manual worktree of another clone must be refused: $out"
 
-  pass "fm-agy-trust.sh: accepts leased or same-home claimed cross-clone pool slots and refuses idle, foreign-claimed, or unpooled cross-clone worktrees"
+  pass "fm-agy-trust.sh: accepts same-home claimed cross-clone pool slots and refuses unclaimed, foreign-claimed, or unpooled cross-clone worktrees"
 }
 
 test_detection_anchored_name_and_marker_precedence

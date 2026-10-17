@@ -469,11 +469,11 @@ test_cross_clone_pool_slot_provenance_and_refusals() {
   assert_contains "$out" "is not a worktree of project" "idle cross-clone refusal did not name project mismatch"
   assert_not_trusted "$config/.claude.json" "$slot" "idle unleased cross-clone slot was trusted"
 
-  # 2. Active Treehouse lease (owner_pid alive) on cross-clone slot is accepted.
+  # 2. Active Treehouse lease without a same-home claim is refused.
   printf '{"worktrees":[{"name":"1","path":"%s","owner_pid":%s}]}\n' "$slot" "$$" > "$pool/treehouse-state.json"
   out=$(FM_HOME="$home_b" run_trust "$config" "$slot" "$clone_b" "$world/user-home")
-  expect_code 0 $? "a leased cross-clone pool slot must be trusted: $out"
-  assert_trusted "$config/.claude.json" "$slot" "leased cross-clone pool slot was not trusted"
+  expect_code 1 $? "an unclaimed leased cross-clone pool slot must be refused: $out"
+  assert_not_trusted "$config/.claude.json" "$slot" "unclaimed leased cross-clone pool slot was trusted"
 
   # 3. Same-home .fm-slot-owner claim after process lease exit is accepted.
   rm -f "$config/.claude.json"
@@ -496,7 +496,7 @@ test_cross_clone_pool_slot_provenance_and_refusals() {
   expect_code 1 $? "an unpooled manual worktree of another clone must be refused: $out"
   assert_not_trusted "$config/.claude.json" "$manual_wt" "unpooled manual worktree of another clone was trusted"
 
-  pass "fm-claude-trust.sh: accepts leased or same-home claimed cross-clone pool slots and refuses idle, foreign-claimed, or unpooled cross-clone worktrees"
+  pass "fm-claude-trust.sh: accepts same-home claimed cross-clone pool slots and refuses unclaimed, foreign-claimed, or unpooled cross-clone worktrees"
 }
 
 test_fresh_worktree_is_trusted
