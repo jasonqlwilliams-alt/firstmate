@@ -57,11 +57,6 @@
 #   recovery_turn_seen_busy=
 #   recovery_turn_completed_epoch=
 #   escalated_epoch=
-#   delivery_episode_status_line=
-#                           parent-status line count when the latest delivery
-#                           episode began (fm_pending_reply_prepare_delivery);
-#                           an operator close only settles the record when it
-#                           was appended after that line; empty = 0 (legacy)
 #   escalation_closed_epoch=
 #                           when the durable status decision opened by that
 #                           escalation was closed again (see the escalation
@@ -95,11 +90,6 @@
 # That close settles the record too: the parent-status scan reads the close of a
 # request's own reserved decision as settling it (via=operator), because the
 # note names the request as pending-reply-id= and so never matches corr=.
-# Only a close appended after the latest delivery episode began counts: a new
-# episode (a resend after a delivery-unknown escalation) must be able to
-# escalate again, so a close from an earlier episode never settles it. Order is
-# the append-only status log's line order (delivery_episode_status_line), not
-# the [at=] stamp, because event time must never decide decision closure.
 #
 # Retryable undelivered escalation: a delivery-unknown escalation reports that
 # the request may never have reached the mate, so the request stays the owner's
@@ -157,7 +147,7 @@ FM_PENDING_REPLY_GRACE_DEFAULT=120
 # A stored parent_status_scan_signature carries the version it was taken under,
 # so a record scanned under older rules is rescanned once after they change
 # instead of waiting for its status log to grow.
-FM_PENDING_REPLY_SETTLE_RULES=2
+FM_PENDING_REPLY_SETTLE_RULES=3
 
 fm_pending_reply_now() {
   if [ -n "${FM_PENDING_REPLY_NOW:-}" ]; then
@@ -452,21 +442,7 @@ fm_pending_reply_prepare_delivery() {  # <state-dir> <corr_id>
   marker=$(fm_pending_reply_delivery_confirmation_path "$state" "$corr")
   [ -f "$marker" ] && return 0
   now=$(fm_pending_reply_now)
-  fm_pending_reply_mark_episode_start "$rec" || return 1
   fm_pending_reply_write_delivery_confirmation "$state" "$corr" attempted "$now"
-}
-
-# Record where the latest delivery episode began in the parent status log, as
-# its current line count, so an operator close from an earlier episode cannot
-# settle this one (see fm_pending_reply_find_resolve_line).
-fm_pending_reply_mark_episode_start() {  # <record>
-  local rec=$1 status_file lines=0
-  status_file=$(fm_pending_reply_get "$rec" parent_status)
-  if [ -n "$status_file" ] && [ -f "$status_file" ]; then
-    lines=$(awk 'END { print NR }' "$status_file" 2>/dev/null) || lines=0
-    case "$lines" in ''|*[!0-9]*) lines=0 ;; esac
-  fi
-  fm_pending_reply_set "$rec" delivery_episode_status_line "$lines"
 }
 
 fm_pending_reply_confirm_delivery() {  # <state-dir> <corr_id>
@@ -609,6 +585,11 @@ _fm_pending_reply_reset_known_undelivered_locked() {  # <state-dir> <corr_id>
   [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
   entry=$(cat "$marker" 2>/dev/null || true)
   case "$entry" in attempted=*) ;; *) return 1 ;; esac
+  # A resend starts a new delivery episode: closes already in the parent log
+  # settled earlier episodes and must not settle this one.
+  fm_pending_reply_set "$rec" close_floor \
+    "$(fm_pending_reply_count_decision_closes "$(fm_pending_reply_get "$rec" parent_status)" "$corr")" \
+    || return 1
   [ "$phase" = awaiting_report ] \
     || fm_pending_reply_set "$rec" phase awaiting_report || return 1
   rm -f -- "$marker"
@@ -659,23 +640,36 @@ fm_pending_reply_line_closes_decision() {  # <line> <corr_id>
 
 # Scan a status file for a correlated resolve. Prints the matching line or empty.
 # With the optional <parent> flag, the file is the record's parent status and
-# the close of the request's own decision settles it as well, but only a close
-# on a line after <episode-line> (the latest delivery episode's start).
-fm_pending_reply_find_resolve_line() {  # <status-file> <corr_id> [parent [episode-line]]
-  local status_file=$1 corr=$2 parent=${3-} episode=${4:-0} line n=0
-  case "$episode" in *[!0-9]*) episode=0 ;; esac
+# the close of the request's own decision settles it as well.
+fm_pending_reply_find_resolve_line() {  # <status-file> <corr_id> [parent] [close-floor]
+  local status_file=$1 corr=$2 parent=${3-} floor=${4:-0} line closes=0
   [ -f "$status_file" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
-    n=$((n + 1))
     [ -n "$line" ] || continue
-    if fm_pending_reply_line_resolves "$line" "$corr" \
-      || { [ "$parent" = parent ] && [ "$n" -gt "$episode" ] \
-        && fm_pending_reply_line_closes_decision "$line" "$corr"; }; then
+    if fm_pending_reply_line_resolves "$line" "$corr"; then
       printf '%s' "$line"
       return 0
     fi
+    if [ "$parent" = parent ] && fm_pending_reply_line_closes_decision "$line" "$corr"; then
+      closes=$((closes + 1))
+      # A close the operator made before the latest resend belongs to an
+      # earlier delivery episode; only a later close settles this one.
+      if [ "$closes" -gt "$floor" ]; then
+        printf '%s' "$line"
+        return 0
+      fi
+    fi
   done < "$status_file"
   return 0
+}
+
+fm_pending_reply_count_decision_closes() {  # <status-file> <corr_id>
+  local status_file=$1 corr=$2 line n=0
+  [ -f "$status_file" ] || { printf '0'; return 0; }
+  while IFS= read -r line || [ -n "$line" ]; do
+    fm_pending_reply_line_closes_decision "$line" "$corr" && n=$((n + 1))
+  done < "$status_file"
+  printf '%s' "$n"
 }
 
 fm_pending_reply_file_signature() {  # <path>
@@ -770,7 +764,7 @@ _fm_pending_reply_try_resolve_locked() {  # <state-dir> <corr_id> [status-file-o
     [ "$signature" != "$previous" ] || return 1
   fi
   line=$(fm_pending_reply_find_resolve_line "$status_file" "$corr" parent \
-    "$(fm_pending_reply_get "$rec" delivery_episode_status_line)")
+    "$(fm_pending_reply_get "$rec" close_floor)")
   if [ -z "$line" ]; then
     if [ -z "$status_override" ] && [ "$unconfirmed" = 0 ]; then
       fm_pending_reply_set "$rec" parent_status_scan_signature "$signature" || return 1
