@@ -1,117 +1,53 @@
-# agy (Antigravity CLI) adapter verification
+# Verification: the agy (Antigravity CLI) crewmate/scout adapter
 
-Active empirical evidence for the agy crewmate and scout adapter.
-Every fact below was measured against a real agy on the date named; nothing here is inferred from the vendor's documentation alone.
-[`.agents/skills/harness-adapters/references/harness/agy.md`](../../.agents/skills/harness-adapters/references/harness/agy.md) is the operating reference that consumes these facts, and [`tests/fm-agy-harness.test.sh`](../../tests/fm-agy-harness.test.sh) is the portable regression that pins the resulting logic with no agy installed.
+Active empirical facts for firstmate's agy adapter.
+The skill tree rooted at [`.agents/skills/harness-adapters/SKILL.md`](../../.agents/skills/harness-adapters/SKILL.md) owns the operating facts through [`references/harness/agy.md`](../../.agents/skills/harness-adapters/references/harness/agy.md); this record owns how they were established and what is still unproven.
 
-## Environment
+## Subject
 
-Measured 2026-09-08 on Linux x86-64 (WSL2), Antigravity CLI 1.1.27, account signed in as a Google AI Ultra subscriber.
-Skill discovery and the `no-mistakes` validation trigger were measured 2026-10-16 on the same host with Antigravity CLI 1.4.0 and `no-mistakes` v1.72.0.
+| Field | Value |
+|---|---|
+| Version | `agy 1.2.0`; the send-confirmation timing below was re-measured on `agy 1.2.1` (2026-09-12) |
+| Verified | 2026-09-10 |
+| Binary | `/home/andpod/.local/bin/agy`, an ELF 64-bit Go-compiled single executable |
+| Platform | Linux x64 (Arch, kernel 7.2.3) |
+| Backend | Herdr, in an isolated non-`default` lab session (`fm-lab-firstmate-agy-ad-*` via `bin/fm-herdr-lab.sh`); the live `default` session was unchanged throughout |
+
+Every command below ran inside the disposable firstmate task worktree or the named Herdr lab session.
+No captain fleet state was touched.
+
+## Detection: ancestry only, no marker
 
 ```
 $ agy --version
-1.1.27
-$ file /home/jason/.local/bin/agy
-ELF 64-bit LSB pie executable, x86-64 ... dynamically linked ... stripped
+1.2.0
 ```
 
-## Detection
+A live TUI's `/proc/<pid>/environ` carries no `AGY_*` or `ANTIGRAVITY_*` variable.
+It does carry `AGENT=1` and `CLAUDECODE=1`, both inherited from the launching environment, so neither is an agy identity and neither is promoted to a marker.
+Herdr's `pane process-info` for the same pane reports the foreground process as `name=agy` with `argv=["agy", ...]`, and `ps -o comm=` reports `agy`.
+`bin/fm-harness.sh` therefore matches the anchored process name `agy` alone, and the spawn clears `CLAUDECODE`, `PI_CODING_AGENT`, `GROK_AGENT`, and `FM_PI_HARNESS` at the launch boundary.
+`tests/fm-agy-harness.test.sh` pins the anchored match, the rejection of unrelated names containing the fragment, and that an inherited `CLAUDECODE` never outranks a real `agy` ancestor once the spawn clears it.
 
-`ANTIGRAVITY_AGENT=1` reaches tool subprocesses, and agy scrubs nothing it inherits.
-Both halves come from one run: a print-mode turn was asked to dump its own tool environment while launched from a Claude Code session.
-
-```
-$ agy --dangerously-skip-permissions -p 'Run exactly this shell command ...: env | sort > .../env-dump.txt ...'
-DONE.
-$ grep -E '^(ANTIGRAVITY|CLAUDECODE)' env-dump.txt
-ANTIGRAVITY_AGENT=1
-ANTIGRAVITY_AGENTAPI_EXE=/home/jason/.local/bin/agy
-ANTIGRAVITY_CONVERSATION_ID=cb762091-470e-49fe-a884-a8ba46503144
-ANTIGRAVITY_LS_ADDRESS=localhost:43441
-ANTIGRAVITY_LS_VERSION=cli-1.1.27
-ANTIGRAVITY_PROJECT_ID=default-cli-project
-ANTIGRAVITY_TRAJECTORY_ID=1be3d5ff-5016-4a1d-bbc1-dabe46d45d0a
-CLAUDECODE=1
-```
-
-The inherited `CLAUDECODE=1` in that list is why `bin/fm-harness.sh` tests agy's marker before the `CLAUDECODE` line and why `bin/fm-spawn.sh` clears foreign markers at agy's launch boundary.
-The marker is nonetheless required to appear alongside anchored `agy` ancestry, because the same `ANTIGRAVITY_*` namespace belongs to the Antigravity desktop app and IDE inside the same binary (`ANTIGRAVITY_EDITOR_READY`, `ANTIGRAVITY_EXTENSION_ACTIVATED`, `ANTIGRAVITY_SIDECAR_WEB_PORT` and others are present in it), so a terminal opened inside that app could export the name with no agy CLI running.
-
-The live process name is the bare word `agy`:
+## Launch: positional prompt-interactive with auto-submit
 
 ```
-$ ps -eo comm=,args= | grep -w agy
-agy   agy --dangerously-skip-permissions -i Reply with exactly PONG and nothing else.
+$ agy --prompt-interactive "Reply with exactly AGY_LIVE_PROBE_OK and nothing else" --model gemini-3.8-flash-low --effort low --dangerously-skip-permissions
 ```
 
-## Launch and workspace
+The brief submitted itself with no extra Enter, the turn ran, and the reply rendered in the pane.
+A second launch into the same directory answered a fresh prompt the same way, so the shape is repeatable, not a first-run accident.
+The footer rendered `Gemini 3.8 Flash · low`, proving both flags were accepted together.
 
-`-i` (`--prompt-interactive`) starts the supervised TUI and auto-submits the brief with no extra Enter; the pane rendered the reply directly under the echoed prompt.
+## Trust dialog: pre-registered before launch, gated on a busy turn as the backstop
 
-A SINGLE `--add-dir` REPLACES the workspace set rather than extending it.
-Launched from a project directory with only the firstmate-owned hook directory added, the agent's own file tool could not see the project at all:
-
-```
-$ agy --dangerously-skip-permissions --add-dir <hooks-dir> -p 'Use your file-reading tool to read README.md ...'
-TOOL-CANNOT-SEE-IT
-... failed to read file: open <hooks-dir>/README.md: no such file or directory
-```
-
-and the hook payload's `workspacePaths` carried only `<hooks-dir>`.
-Naming both restores the project and keeps the hook workspace:
+A first launch in a fresh worktree shows this dialog:
 
 ```
-$ agy --dangerously-skip-permissions --add-dir <project> --add-dir <hooks-dir> -p 'read README.md ... then run pwd'
-probe
-/.../agyprobe
-workspacePaths = ['/.../agyprobe', '/.../agyhooks']
-```
+Accessing workspace:
 
-With no `--add-dir` at all, a shell tool call runs in the launch cwd, but the model may set its own `Cwd` argument on the call, so briefs must keep naming absolute paths.
+/home/andpod/.treehouse/firstmate-7bab20/1/firstmate/agy-probe-tmp
 
-## Hooks: the turn-end and busy source
-
-agy loads `<workspace>/.agents/hooks.json` from every workspace path, including one outside the launch cwd.
-A hooks file placed only in the added hook directory fired both handlers, in print mode and again in a supervised tmux pane.
-
-The `Stop` payload observed at a normal turn end:
-
-```json
-{
-  "conversationId": "8b9d0bd7-86f0-4210-a633-62e5b26aa4d4",
-  "executionNum": 0,
-  "error": "",
-  "fullyIdle": true,
-  "modelName": "gemini-3.8-flash-high",
-  "terminationReason": "NO_TOOL_CALL",
-  "transcriptPath": "/home/jason/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript_full.jsonl",
-  "artifactDirectoryPath": "/home/jason/.gemini/antigravity-cli/brain/<id>",
-  "workspacePaths": ["<hooks-dir>", "<project>"]
-}
-```
-
-Two cautions recorded from that payload.
-`workspacePaths` order is not stable: it matched the launch order in one run and was reversed in another, so nothing may key off position.
-`fullyIdle` read `true` while a backgrounded shell task the same turn had started was still running, so it is not a reliable "everything finished" signal and firstmate does not read it.
-
-`Stop` does NOT fire on a manual interrupt.
-Escape sent mid-stream rendered `Interrupted . What should Antigravity CLI do instead?` and left the composer empty, and the hook's marker file was never recreated:
-
-```
-$ rm -f stop-hook.json ; <send Escape mid-turn> ; ls -l stop-hook.json
-ls: cannot access 'stop-hook.json': No such file or directory
-```
-
-agy also exposes no session-end event; its five hook types are `PreToolUse`, `PostToolUse`, `PreInvocation`, `PostInvocation`, and `Stop`.
-An interrupted or exited turn therefore leaves an open busy record standing, exactly as Claude's interrupt does, and the live endpoint read is what reclassifies it.
-
-## Workspace trust
-
-A fresh worktree is gated before the brief is read.
-The dialog as captured from the pane:
-
-```
 Do you trust the contents of this project?
 
 Antigravity CLI requires permission to read, edit, and execute files here.
@@ -119,64 +55,116 @@ Antigravity CLI requires permission to read, edit, and execute files here.
 > Yes, I trust this folder
   No, exit
 ```
+`agy --help` (1.2.0) lists no trust flag or pre-registration command, but agy honours a `trustedWorkspaces` entry written to `~/.gemini/antigravity-cli/settings.json` ahead of launch.
+Verified under a throwaway `HOME` holding a copy of `~/.gemini` (the real settings file was never written): a folder appended to that array by hand launched `--prompt-interactive` straight into its turn and rendered the reply with no dialog, while an unregistered sibling folder launched the same way parked on the dialog.
+agy compares the pane's logical working directory, not its resolved path: a symlinked cwd whose real path alone was registered still parked on the dialog, so `bin/fm-agy-trust.sh` records both the logical path and its resolved form when they differ.
+`bin/fm-spawn.sh` runs that helper before launch at the same point it pre-registers claude trust; the helper applies the same structural scope test (a linked worktree of the spawning project, never a primary checkout, a subdirectory, a plain directory, or the home directory), preserves every other key in the store, and writes atomically with a fingerprint check.
+A failed registration is a stderr warning rather than a refusal, because agy's dialog preselects the safe answer and the gate below can answer it.
+Two supervised Herdr runs in treehouse worktrees completed file-writing turns while the dialog was still unanswered at observation time (worker file and `done:` status line both verified on disk before Enter was ever sent to those panes).
+Isolated runs in untrusted `/tmp` directories never reached the workspace until Enter: the turn spun through exploratory tool calls in agy's own scratch directory instead, and only the queued prompt ran after the answer.
+One run left unanswered for several minutes wrote its file to agy's scratch directory instead of the workspace once finally answered.
+The mechanism behind the difference was not established; path, backend, and latency were all varied across runs without isolating a single cause.
+The spawn therefore does not depend on it: after pre-registration, `bin/fm-spawn.sh` runs a post-launch readiness gate (`agy_wait_for_working`) in the rovo/kimi launch-then-confirm shape as the backstop.
+It polls the pane capture, answers the dialog with a single Enter the first time the `Do you trust the contents of this project?` text renders, and reports success only once `fm_busy_classify` returns a busy verdict for the pane (Herdr's native `working` status or the pinned `esc to cancel` status row).
+Because Herdr's native `working` verdict is known to coexist with an unanswered dialog, the gate is strict about order: a busy verdict counts as ready only when the worktree was pre-registered before launch or the dialog has already been seen and answered; on an unregistered path it keeps polling for the dialog instead of accepting the early busy verdict.
+When the brief cannot be confirmed to run within the window (an answered dialog never turns busy, a pre-trusted pane never turns busy, or an unregistered pane never shows the dialog), the spawn fails, records `failed:` in the task status, and closes the endpoint so no orphan worker survives outside task control.
+`tests/fm-agy-harness.test.sh` covers the helper's registration and scope refusals against a throwaway store, and drives a fake pane whose dialog decision reads the store the spawn just wrote: the pre-trusted launch with no dialog, a dialog that renders anyway answered exactly once, the premature busy verdict on an unregistered path waiting for the dialog, and both fail-and-close paths.
 
-`--dangerously-skip-permissions` does not suppress it; the launch above carried that flag and still showed the dialog.
-Accepting it appended exactly the launched path to `trustedWorkspaces` in `~/.gemini/antigravity-cli/settings.json`, and the next launch in the same directory showed no dialog:
-
-```
-$ diff settings-before.json ~/.gemini/antigravity-cli/settings.json
-14c14,15
-<     "/home/jason/kun-agent-workspace"
----
->     "/home/jason/kun-agent-workspace",
->     "/.../scratchpad/agyprobe"
-```
-
-That store is a two-space pretty-printed JSON object whose other keys are `enableTelemetry` and `permissions`, which is the format [`bin/fm-agy-trust.sh`](../../bin/fm-agy-trust.sh) preserves.
-
-## Autonomy, exit, and interrupt
-
-`--dangerously-skip-permissions` auto-approved a bash tool call in a supervised pane with no gate; the busy pane rendered a braille spinner plus `Running command...` and a footer reading `esc to cancel`, against `? for shortcuts` at idle.
-
-`/exit` (alias `/quit`) plus Enter exits cleanly and prints the resume line:
+## Model and effort
 
 ```
-Resume with -c (or command below):
-agy --conversation=84436b82-9899-4eb8-83be-cad8dd909af8
+$ agy models
+Fetching available models...
+gemini-3.8-flash-high	Gemini 3.8 Flash (High)
+gemini-3.8-flash-medium	Gemini 3.8 Flash (Medium)
+gemini-3.8-flash-low	Gemini 3.8 Flash (Low)
+...
 ```
 
-## Model and effort vocabularies
-
-`agy models` reaches the account and lists ids the launch accepts.
-The listing on the measured account was Gemini 3.8, 3.7, and 3.6 Flash at three efforts each, Gemini 3.1 Pro at two, `claude-sonnet-4-6`, `claude-opus-4-6-thinking`, and `gpt-oss-120b-medium`.
-Both axes fail HARD rather than being ignored, which is why the spawn validates the model and caps the effort:
+`agy --help` documents `--effort` as `low|medium|high` and `--model` as the model for the session.
+The bare `gemini-3.8-flash` id from this home's previous config is not listed; only the suffixed `-high`, `-medium`, and `-low` variants are.
+`bin/fm-spawn.sh`'s `agy_model_validate` refuses a requested id a reachable `agy models` listing omits, and launches unvalidated with a stderr notice when the listing is unreachable.
+The listing is a remote fetch (`Fetching available models...`), so the probe runs with stdin detached under the shared hard bound from `bin/fm-timeout-lib.sh` (15 seconds by default, `FM_AGY_MODELS_TIMEOUT`; a non-positive or non-numeric value clamps back to that default, because a non-positive bound is not a bound); a stalled fetch or a sign-in prompt is cut off and falls through to the unvalidated launch instead of blocking the spawn before any pane exists.
+Both axes fail HARD rather than being ignored (measured on agy 1.1.27, 2026-09-08), which is why the spawn validates the model and CAPS `xhigh` and `max` onto `high` rather than passing them through or dropping the intent; the requested value stays verbatim in task metadata:
 
 ```
 $ agy --effort xhigh -p 'hi'
 Error: invalid model selection (--model "" --effort "xhigh"): invalid --effort "xhigh" (valid: low, medium, high)
 $ agy --model not-a-real-model -p 'hi'
 Error: invalid model selection (--model "not-a-real-model" --effort ""): model not-a-real-model is not recognized as a known model or custom model in settings
-$ agy --effort high -p 'Reply OK'
-OK
 ```
 
-## Composer classification
+Print mode (`agy -p "Reply with exactly: AGY_PRINT_PROBE_OK" --model gemini-3.8-flash-low`) returned the exact reply with exit 0 in about 8 seconds, proving the credential path without a pane.
 
-agy draws the `separated` shape - a content row between two solid horizontal rules - whose content row carries a bare `>` glyph.
-Fed a real captured idle pane, `bin/fm-composer-lib.sh` finds a valid separator pair and reaches the identity-gated verdict, which answers `unknown` because that verdict is scoped to an identity of exactly `pi`:
+## Busy state: the pinned status row, unknown on absence
+
+Mid-turn the pane rendered the status row and a spinner line at once:
 
 ```
-$ _fm_composer_scan_screen "$plain" 8
-UNSAFE=0 BOX_TOP=-1 PI_PAIR_VALID=1 PI_OPEN=7 PI_CLOSE=9 SHELL_ROW=8
-$ fm_composer_classify_screen "styled=1 cursor=1 identity=1" "$screen" 8 "pi<TAB>idle"
-pending
+⣯  Generating...
+└ Tip: When reviewing a file edit, press f to see the full diff.
+...
+esc to cancel                                                           Gemini 3.8 Flash · low
 ```
 
-That second line is the measurement that keeps the pi path from being widened to agy: pi's row classifier reads agy's `>` glyph as typed content, so extending it would replace a safe `unknown` with a wrong `pending`, and `pending` is the one verdict that SKIPS a steering doorbell in `bin/fm-task-inbox-lib.sh`.
-`unknown` still rings the doorbell, so steering works; the gap is left open and documented rather than closed with a change that would break it.
+The completed turn showed the reply, then the idle composer:
+
+```
+>
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts                                                         Gemini 3.8 Flash · low
+```
+
+`fm_busy_agy_tail_busy` and the delivery guard in `bin/fm-composer-lib.sh` match the `esc to cancel` token alone: the TUI pins that status row to the bottom of the pane for the whole turn, and the idle row replaces it with `? for shortcuts`.
+The `Generating...` spinner word is deliberately not a signal: it is a free-floating output line, so ordinary worker output such as `Generating report...` would otherwise classify an idle worker as busy or acknowledge a submit that did not land.
+No busy phase without the status row was observed live; every captured mid-turn frame carried it.
+`fm_busy_classify` reports `unknown agy-regex` when the token is absent, because a long turn can scroll the marker out of the captured tail.
+The signature is hardcoded with no environment override, so a stray variable can never change worker-state classification.
+Herdr's own registry agreed throughout: `agent get` reported `agent_status=working` mid-turn and `idle` after, so on Herdr the native verdict carries busy with no new code.
+
+## Interrupt and exit
+
+A single `Escape` sent mid-turn through `herdr pane send-keys` cancelled it and printed this row, with the composer back at idle and no repolluted text:
+
+```
+  ⎿  Interrupted · What should Antigravity CLI do instead?
+```
+
+Sending `/quit` plus Enter exited the process; the pane closed under the `exec` launch, and Herdr reported the pane gone.
+`bin/fm-control-lib.sh` records `Escape` once, no clear key, no ack source, and `/quit` for agy.
+
+## Backend liveness: Herdr recognizes agy, tmux names it
+
+```
+$ herdr agent get w2:p1 --session fm-lab-firstmate-agy-ad-1599574-8823
+{"result":{"agent":{"agent":"agy","agent_status":"idle",...,"agent_session":{"agent":"agy","kind":"id","source":"herdr:antigravity_cli",...}}}}
+```
+
+Herdr tracks agy natively (`antigravity-cli` integration, detected as `agent=agy`), so `fm_backend_herdr_pane_agent_state` returns `live` for every registered agy status and no exit-detection hardening was needed.
+The tmux adapter classifies the anchored process name `agy` as `agent` through the shared name vocabulary in `bin/fm-agent-process-lib.sh`, the muse/omp precedent for short bare-word names.
+agy stays out of the session-lock name vocabulary in `bin/fm-session-lock-lib.sh`, where the other crewmate-only adapters are also absent.
+
+## Composer: unknown by design
+
+Byte-level capture of the idle pane shows a bare unstyled `>` between two full-width `─` rules, with an unstyled `? for shortcuts` cell and a dim (`SGR 2`) model cell in the status row below.
+The shared classifier reads that bare `>` as `unknown` under the dead-shell rule, never `empty`.
+Steering still confirms delivery: the Herdr submit core leads with the native `idle`-to-`working` transition, which agy performs, and the delivery footer regex covers the tmux path.
+agy renders the busy footer late for that confirm loop - about 1.5 s after Enter for a short steer and 4-5 s for a realistic longer brief, measured live on `agy 1.2.1` (2026-09-12) against the shared budget's 3 x 0.4 s - so `bin/fm-send.sh` gives agy typed targets a longer default submit-confirm budget (20 retries, about 8 s at the default cadence); an explicit `FM_SEND_RETRIES` still wins and every other harness keeps the shared 3-retry default.
+`tests/fm-send-agy-confirm.test.sh` pins the raised default and `tests/fm-agy-harness.test.sh` pins the Herdr transition path.
+This is the cursor precedent, not a gap to patch in shared code.
+
+## Supervised task: spawn, steer, relaunch, and exit through the new path
+
+A trivial scout ran end to end through `bin/fm-spawn.sh --harness agy` against the same isolated lab session: `spawned agy-e2e1 harness=agy kind=scout` with a treehouse-provisioned worktree, `--model gemini-3.8-flash-low`, and `--effort low` all recorded in task metadata.
+The worker wrote its worktree file and appended `done: agy e2e turn complete` to its status file, which lives outside the worktree, proving prompt processing, tool execution, outside-workspace file access, and a new completion event.
+Durable steering held: a `bin/fm-send.sh` message landed in the task inbox, the worker appended the steered lines to both files, and its inbox record moved to `handled/`.
+Same-copy relaunch held: `bin/fm-control.sh relaunch --note` replaced the worker in place on the identical worktree, model, and effort, the replacement verified both prior lines intact and appended `relaunched: done`.
+Exit held: `bin/fm-control.sh exit` stopped the worker, the registry returned `agent_not_found`, and the pane remained a lone shell in the worktree with all work intact.
+No automatic quota failover was exercised or claimed; every handoff above was an explicit supervised relaunch.
 
 ## Skills and no-mistakes validation trigger
 
+This section was measured by the fork's earlier agy adapter shape, whose launch also named a firstmate-owned hook root as a second `--add-dir` and whose hooks fired `PreInvocation`; the merged adapter launches with `--prompt-interactive` and no hook root, but the skill-discovery paths and the TUI slash-parser rejection below are agy's own behavior and do not depend on that wiring.
 Measured 2026-10-16 on `/home/jason/.local/bin/agy` (`1.4.0`, ELF 64-bit Go binary) and `/home/jason/.local/bin/no-mistakes` (`v1.72.0`) with `no-mistakes` installed at `~/.agents/skills/no-mistakes` and `~/.claude/skills/no-mistakes`, and absent from `~/.gemini/config/skills/` and the isolated project workspace:
 
 ```
@@ -210,12 +198,18 @@ Because `no-mistakes init` configures only the repository gate and does not vend
 When a supervisor sends `/no-mistakes` through `bin/fm-send.sh`, the leading `/` also routes the text to the typed slash-command plane rather than `state/<id>.inbox/`, where the interactive TUI composer rejects `/no-mistakes` without starting a turn (`rakazo-gemini-4-model-support-20261013`).
 Steering in natural language (without a leading `/`) routes through `state/<id>.inbox/`, and a fresh interactive `agy` 1.4.0 worker (`--model gemini-4-argon-high --effort high`) in the same isolated project copy lacking `.agents/skills/no-mistakes` followed the updated [`bin/fm-dod-lib.sh`](../../bin/fm-dod-lib.sh) Definition of done by running `no-mistakes axi run --help` and invoking `no-mistakes axi run --intent "<Captain's intent>"` directly.
 
-## Workspace residue
+## What is still unproven
 
-None.
-After a full launch, tool call, interrupt, and exit cycle, the project directory contained only its own files; agy's transcripts and artifacts live under `~/.gemini/antigravity-cli/`.
+The unauthenticated failure mode was never observed; this host's agy runs signed in, so any auth prompt is a fail-loud credential blocker, not a handled dialog.
+`/<skill>` works only for skills agy actually loaded (see "Skills and no-mistakes validation trigger"); `no-mistakes` validation is steered in natural language.
+`--continue` and `--conversation` resume were never exercised; recovery uses deterministic relaunch from the brief on disk.
+No primary or secondmate behavior was built or tested, and none is claimed.
 
 ## Refreshing this record
 
-Re-run the commands above against the installed agy after a version bump, and run [`tests/fm-agy-harness.test.sh`](../../tests/fm-agy-harness.test.sh) for the portable half.
-A live opt-in guard in the `live-harness-optin` family does not yet exist for agy; adding one is the natural next step if agy is ever promoted beyond crewmate and scout work.
+Run the portable suite and the live guard after any agy upgrade, because the process name, marker set, trust dialog text, and rendered busy/interrupt text are all vendor-controlled surfaces that the spawn gate and the busy fallback match verbatim:
+
+```
+bin/fm-test-run.sh tests/fm-agy-harness.test.sh
+FM_AGY_SIGNALS_LIVE=1 bin/fm-test-run.sh tests/fm-agy-signals-live-e2e.test.sh
+```

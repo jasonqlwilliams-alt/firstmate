@@ -4,8 +4,10 @@
 // Pi emits session_shutdown for ordinary same-process replacements (/new, /resume,
 // /fork, reload) as well as terminal quit. This extension binds one generation per
 // session activation. Only the active live generation may start, stop, rearm, or
-// clear the arm child. An owning replacement session_start (or fresh factory bind)
-// arms its new generation without a model turn. A replacement handoff carries
+// clear the arm child. Replacement shutdown publishes a generation-bound handoff
+// phase but retains its established child until the next owning session_start (or
+// fresh factory bind) publishes a distinct active generation and commits the
+// tracked replacement arm without a model turn. A replacement handoff carries
 // actionable closes that were still pending delivery; its durable state lives at
 // state/extensions/pi-primary-watch/session-replacement-actionable.json.
 // Terminal quit leaves the final generation stopped so late callbacks cannot rearm.
@@ -17,10 +19,21 @@
 // queued while main is streaming joins the running run without ever raising
 // before_agent_start, so waiting on that event stalls every later close.
 // Consumption is tracked only so a replacement can replay a follow-up Pi had
-// not consumed. An idle main consumes at before_agent_start; a streaming main
-// consumes at the user message_start carrying the exact wake text; either
-// event finishes the pending record, and a still-unconsumed record rides the
-// replacement handoff.
+// not consumed. An idle main consumes at a prompt-bearing before_agent_start;
+// a streaming main consumes at the user message_start carrying the exact wake
+// text. A no-prompt custom trigger cannot consume it, even with equal content.
+// Either user boundary finishes the pending record, and a still-unconsumed
+// record rides the replacement handoff.
+//
+// Postures (stated once here; docs/pi-supervision-branch.md "Postures"):
+// the away-posture record state/.afk-contract is read as a file at every
+// routing decision, never inferred from chat. While it exists every
+// actionable row is offered to the branch as eligible and main is offered
+// nothing the branch can take; a wake the branch declines or cannot take
+// (a broken branch, an unresolvable or corrupt queue) and every
+// watcher-failure alarm still reach main exactly as attended, because only
+// main can repair supervision itself. Nothing else about delivery or
+// consumption changes.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -31,9 +44,10 @@ import { Box, Container, Text, type Component } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { registerFirstmateTool } from "./lib/fm-native-contract.ts";
 import {
+  afkPostureRecordPresent,
+  branchOfferForWake,
   createBranchDispatchOffer,
   FM_BRANCH_DISPATCH_EVENT,
-  scopeForUnreadWake,
 } from "./lib/fm-branch-dispatch.ts";
 import {
   type CalmPresentationState,
@@ -136,6 +150,8 @@ const armScript = `${fmRoot}/bin/fm-watch-arm.sh`;
 const marker = `${state}/.pi-watch-extension-loaded`;
 const handoffDir = `${state}/extensions/pi-primary-watch`;
 const actionableHandoff = `${handoffDir}/session-replacement-actionable.json`;
+const extensionLog = `${state}/.watch-extension.log`;
+const extensionLogMaxLines = extensionLogKeepLines();
 const extensionVersion = `sha256:${createHash("sha256").update(readFileSync(extensionFile)).digest("hex")}`;
 const retryBaseMs = positiveInteger("FM_WATCH_REARM_RETRY_BASE_MS", 250);
 const retryMaxMs = positiveInteger("FM_WATCH_REARM_RETRY_MAX_MS", 4000);
@@ -151,7 +167,6 @@ const armRetireTimeoutMs = positiveInteger("FM_WATCH_ARM_RETIRE_TIMEOUT_MS", 100
 const repairOnlyHint = "call fm_watch_arm_pi again only after a later notification says the cycle is missing, failed, or unhealthy";
 const shuttingDownMessage = "watcher: not armed - Pi session is shutting down";
 
-let nextGenerationId = 0;
 let nextHandoffId = 0;
 let activeGeneration: SessionGeneration | null = null;
 let replacementHandoff: PendingActionableClose[] | null = null;
@@ -164,6 +179,7 @@ type ReplacementCoordinator = {
   receiver: ReplacementActionableReceiver | null;
   pending: PendingActionableClose[];
   nextTokenId: number;
+  nextGenerationId: number;
   deliveries: Map<string, ActionableDeliveryClaim>;
 };
 type ReplacementCoordinatorGlobal = typeof globalThis & {
@@ -178,6 +194,7 @@ function replacementCoordinatorFor(handoff: string): ReplacementCoordinator {
     receiver: null,
     pending: [],
     nextTokenId: 0,
+    nextGenerationId: 0,
     deliveries: new Map(),
   };
   replacementCoordinators.set(handoff, created);
@@ -186,6 +203,7 @@ function replacementCoordinatorFor(handoff: string): ReplacementCoordinator {
 const replacementCoordinator = replacementCoordinatorFor(actionableHandoff);
 const armReadiness = new WeakMap<ChildProcess, Promise<boolean>>();
 const armClose = new WeakMap<ChildProcess, Promise<void>>();
+const retiringGenerations = new Set<SessionGeneration>();
 // Children the extension itself asked to exit; their close is not a failure
 // of the successor and never earns a deferred retry.
 const armRetired = new WeakSet<ChildProcess>();
@@ -196,6 +214,18 @@ function positiveInteger(name: string, fallback: number): number {
   const value = Number(process.env[name]);
   if (!Number.isFinite(value) || value <= 0) return fallback;
   return Math.floor(value);
+}
+
+// Opt-in bound for the extension diagnostic log: only a positive
+// FM_WATCH_EXTENSION_LOG_KEEP_LINES enables logging, so the default run
+// writes nothing. Unset, empty, non-numeric, zero, and negative values
+// disable the log entirely instead of falling back to a silent default.
+function extensionLogKeepLines(): number {
+  const raw = process.env.FM_WATCH_EXTENSION_LOG_KEEP_LINES;
+  if (raw === undefined || raw.trim() === "") return 0;
+  const value = Math.floor(Number(raw));
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return value;
 }
 
 function parentPid(pid: string): string {
@@ -213,6 +243,31 @@ function pidAlive(pid: string): boolean {
   }
 }
 
+// An arm child whose process is gone but whose close event has not fired yet
+// (stdio pipes still held) must not keep the single-flight slot: neither a
+// repair call nor a scheduled retry would start anything until that close
+// finally fires. Callers that gate on slot occupancy use this instead of
+// owner.child so both paths can always recover.
+
+function liveArmChild(owner: SessionGeneration): ChildProcess | null {
+  const child = owner.child;
+  if (!child) return null;
+  if (child.exitCode !== null || child.signalCode !== null) return null;
+  const pid = child.pid;
+  if (pid === undefined || !pidAlive(String(pid))) return null;
+  return child;
+}
+
+// The session lock names a local pid or, on Windows, a tagged `win:<pid>`
+// (fm_session_pid_valid in bin/fm-session-lock-lib.sh owns that shape). Native
+// Node on Windows sees Windows pids directly, so a tagged holder is compared
+// and probed by its digits. Any other value is no usable identity, "".
+function lockHolderPid(lockPid: string): string {
+  const tagged = process.platform === "win32" ? /^win:([0-9]+)$/.exec(lockPid) : null;
+  const pid = tagged ? tagged[1] : lockPid;
+  return /^[0-9]+$/.test(pid) && pid !== "1" ? pid : "";
+}
+
 function lockOwnership(): LockOwnership {
   let lockPid = "";
   try {
@@ -220,20 +275,75 @@ function lockOwnership(): LockOwnership {
   } catch {
     return "missing";
   }
-  if (!/^[0-9]+$/.test(lockPid) || lockPid === "1") return "other";
+  const holderPid = lockHolderPid(lockPid);
+  if (!holderPid) return "other";
   let pid = String(process.pid);
   for (let i = 0; i < 8; i += 1) {
-    if (pid === lockPid) return "owned";
+    if (pid === holderPid) return "owned";
     pid = parentPid(pid);
     if (!pid || pid === "1") break;
   }
-  return pidAlive(lockPid) ? "other" : "missing";
+  return pidAlive(holderPid) ? "other" : "missing";
 }
 
-function markLoaded(): void {
-  if (lockOwnership() === "other") return;
+// A Pi command started from inside the live session, such as the `pi --help`
+// capability probe in bin/fm-spawn.sh, auto-loads this extension too and passes
+// lockOwnership() through the same ancestor walk. Its pid dies at once, so the
+// marker must keep naming the live session above it (#5202). Pid equality with
+// the lock is not required because a wrapper such as pi-signed may hold the lock
+// while the extension host runs as its child.
+function markerNamesLiveAncestor(): boolean {
+  let markerPid = "";
+  try {
+    markerPid = readFileSync(marker, "utf8").split(/\r?\n/)[1] ?? "";
+  } catch {
+    return false;
+  }
+  if (!/^[0-9]+$/.test(markerPid) || markerPid === String(process.pid) || !pidAlive(markerPid)) {
+    return false;
+  }
+  let pid = String(process.pid);
+  for (let i = 0; i < 8; i += 1) {
+    pid = parentPid(pid);
+    if (!pid || pid === "1") return false;
+    if (pid === markerPid) return true;
+  }
+  return false;
+}
+
+function publishGenerationOwner(generation: SessionGeneration, phase: "active" | "handoff"): void {
+  if (lockOwnership() === "other" || markerNamesLiveAncestor()) return;
   mkdirSync(state, { recursive: true });
-  writeFileSync(marker, `${extensionVersion}\n${process.pid}\n`);
+  const temporary = `${marker}.tmp-${process.pid}-${generation.id}`;
+  writeFileSync(
+    temporary,
+    `${extensionVersion}\n${process.pid}\ngeneration=${generation.id} phase=${phase}\n`,
+    { mode: 0o600 },
+  );
+  renameSync(temporary, marker);
+}
+
+function retireGenerationOwner(generation: SessionGeneration, replacement: boolean): void {
+  let lines: string[];
+  try {
+    lines = readFileSync(marker, "utf8").trimEnd().split(/\r?\n/);
+  } catch {
+    return;
+  }
+  if (
+    lines[0] !== extensionVersion ||
+    lines[1] !== String(process.pid) ||
+    lines[2] !== `generation=${generation.id} phase=active`
+  ) return;
+  if (replacement) {
+    publishGenerationOwner(generation, "handoff");
+    return;
+  }
+  try {
+    unlinkSync(marker);
+  } catch (error) {
+    if (nodeErrorCode(error) !== "ENOENT") throw error;
+  }
 }
 
 function actionableLine(output: string): string {
@@ -268,6 +378,35 @@ function nodeErrorCode(error: unknown): string {
   return typeof error === "object" && error !== null && "code" in error
     ? String((error as { code?: unknown }).code ?? "")
     : "";
+}
+
+// Bounded diagnostic record for restore attempts, readiness timeouts, and
+// handling-confirmation targets and results. Opt-in through
+// FM_WATCH_EXTENSION_LOG_KEEP_LINES and off by default: a disabled log
+// returns before touching the filesystem, so it never creates its file.
+// Purely observational: a logging failure never changes supervision
+// behavior. docs/watcher-continuity.md owns what the arm layer already
+// records; this file is the extension side.
+function appendExtensionLog(detail: string): void {
+  if (extensionLogMaxLines <= 0) return;
+  try {
+    mkdirSync(state, { recursive: true });
+    const cleaned = detail.replace(/[\r\n\t]+/g, " ").slice(0, 512);
+    const line = `${new Date().toISOString()} pid=${process.pid} ${cleaned}`;
+    let previous = "";
+    try {
+      previous = readFileSync(extensionLog, "utf8");
+    } catch (error) {
+      if (nodeErrorCode(error) !== "ENOENT") return;
+    }
+    const joined = `${previous}${previous === "" || previous.endsWith("\n") ? "" : "\n"}${line}\n`;
+    const kept = joined.split("\n").slice(-(extensionLogMaxLines + 1)).join("\n");
+    const temporary = `${extensionLog}.tmp-${process.pid}`;
+    writeFileSync(temporary, kept, { mode: 0o600 });
+    renameSync(temporary, extensionLog);
+  } catch {
+    // Diagnostic only: never fail supervision for observability.
+  }
 }
 
 function createPendingActionable(message: string, predecessorArmPid: string): PendingActionableClose {
@@ -410,7 +549,7 @@ function classifyClose(stdout: string, stderr: string, code: number | null, sign
 
 function createGeneration(): SessionGeneration {
   return {
-    id: ++nextGenerationId,
+    id: ++replacementCoordinator.nextGenerationId,
     stopping: false,
     replacement: false,
     child: null,
@@ -434,15 +573,21 @@ function generationIsLive(generation: SessionGeneration): boolean {
   return activeGeneration === generation && !generation.stopping;
 }
 
-function stopGeneration(generation: SessionGeneration): ChildProcess | null {
+function relinquishGeneration(generation: SessionGeneration): void {
   generation.stopping = true;
   if (generation.retryTimer) clearTimeout(generation.retryTimer);
   if (generation.cleanupTimer) clearTimeout(generation.cleanupTimer);
   generation.retryTimer = null;
   generation.cleanupTimer = null;
+  if (generation.child) retiringGenerations.add(generation);
+}
+
+function stopGeneration(generation: SessionGeneration): ChildProcess | null {
+  relinquishGeneration(generation);
   const child = generation.child;
   if (child) child.kill("SIGTERM");
   generation.child = null;
+  retiringGenerations.delete(generation);
   return child;
 }
 
@@ -461,12 +606,25 @@ async function waitForGenerationChildClose(armChild: ChildProcess | null): Promi
 
 async function stopSessionGeneration(generation: SessionGeneration, replacement: boolean): Promise<void> {
   generation.replacement = replacement;
-  let persistedTokens = "";
+  retireGenerationOwner(generation, replacement);
+  if (!replacement) {
+    const child = stopGeneration(generation);
+    await waitForGenerationChildClose(child);
+    return;
+  }
+
+  // A same-process replacement has not proved its successor yet. Keep this
+  // generation's established arm child alive while transferring delivery and
+  // retry responsibility. The replacement's --restart arm retires it only
+  // after the new generation has committed its own tracked child.
+  relinquishGeneration(generation);
+  const observed = generation.child ? armPendingActionable.get(generation.child) : undefined;
+  if (observed && !generation.pendingActionables.some((item) => item.token === observed.token)) {
+    generation.pendingActionables.push(observed);
+  }
+  if (generation.pendingActionables.length === 0) return;
   try {
-    if (replacement && generation.pendingActionables.length > 0) {
-      persistReplacementHandoff(generation.pendingActionables);
-      persistedTokens = generation.pendingActionables.map((pending) => pending.token).join("\n");
-    }
+    persistReplacementHandoff(generation.pendingActionables);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     for (const pending of generation.pendingActionables) {
@@ -476,18 +634,11 @@ async function stopSessionGeneration(generation: SessionGeneration, replacement:
         message: `${pending.message}\n\nwatcher: FAILED - Pi extension could not persist a replacement-session actionable wake\n${detail}`,
       });
     }
-    throw error;
-  } finally {
-    const child = stopGeneration(generation);
-    await waitForGenerationChildClose(child);
-  }
-  const currentTokens = generation.pendingActionables.map((pending) => pending.token).join("\n");
-  if (replacement && currentTokens && currentTokens !== persistedTokens) {
-    persistReplacementHandoff(generation.pendingActionables);
   }
 }
 
 const cleanupOnProcessExit = () => {
+  for (const generation of retiringGenerations) stopGeneration(generation);
   if (activeGeneration) stopGeneration(activeGeneration);
 };
 process.once("exit", cleanupOnProcessExit);
@@ -555,6 +706,7 @@ export default function (pi: ExtensionAPI) {
   function confirmHandlingDelivery(recovery: { generation: string; watcherPid: string }): {
     ok: boolean;
     detail: string;
+    superseded?: boolean;
   } {
     try {
       const result = spawnSync(
@@ -567,6 +719,11 @@ export default function (pi: ExtensionAPI) {
         },
       );
       if (result.status === 0) return { ok: true, detail: "" };
+      if (result.status === 3) {
+        // The marker advanced past this restoration's generation mid-restore,
+        // so a newer pipeline owns the episode now: superseded, not rejected.
+        return { ok: false, detail: "", superseded: true };
+      }
       const stderr = (result.stderr || "").trim();
       return {
         ok: false,
@@ -582,52 +739,22 @@ export default function (pi: ExtensionAPI) {
   }
 
   function confirmHandlingDeliveryWithRetry(
-    owner: SessionGeneration,
     recovery: { generation: string; watcherPid: string },
-  ): { ok: boolean; detail: string } {
-    const snapshot = (): { generation: string; watcherPid: string } => {
-      const current = owner.child ? armRecovery.get(owner.child) : undefined;
-      return current ?? recovery;
-    };
-    const first = confirmHandlingDelivery(snapshot());
-    if (first.ok) return first;
-    return confirmHandlingDelivery(snapshot());
+  ): { ok: boolean; detail: string; superseded?: boolean } {
+    // Confirm the restoration's own recovery token, never a fresh snapshot of
+    // the current arm child: a successor replaced during the restore window
+    // must not turn this delivery into a false rejection, and a retry must
+    // not retire a newer healthy watcher.
+    const first = confirmHandlingDelivery(recovery);
+    if (first.ok || first.superseded) return first;
+    return confirmHandlingDelivery(recovery);
   }
 
   function offerWakeToBranch(message: string): Promise<void> | null {
-    const heartbeat = /^heartbeat($|:)/.test(message);
-    // A check-kind close (merge-confirmation polls, Relay mentions,
-    // credential/auth failures, and every other legitimately main-only
-    // class - docs/pi-supervision-branch.md) is never routed to the branch
-    // even when other currently-unread rows are individually eligible: this
-    // watcher cycle's own triggering event stays on main, exactly as before
-    // scopeForUnreadWake stopped letting a co-present check row veto the
-    // whole scan. That relaxation is what lets an UNRELATED eligible
-    // signal/stale row still reach the branch on this cycle; it must never
-    // also let a check-kind trigger itself slip past main's delivery.
-    const isCheckTrigger = /^check:/.test(message);
-    const scope = scopeForUnreadWake(state, heartbeat);
-    // A signal close containing a needs-decision status file, or a stale close
-    // for a captain-held task, gets the identical main-only treatment as a
-    // check-kind trigger. The cross-reference deliberately includes every
-    // unread decision row: until that row is read, a later signal or stale
-    // trigger for the same task stays on main. Other tasks and heartbeat
-    // handling remain independent.
-    const triggerKeys = /^signal:/.test(message)
-      ? message
-        .slice("signal:".length)
-        .split(/\s+/)
-        .filter(Boolean)
-        .map((path) => path.split("/").pop() ?? path)
-      : /^stale:/.test(message)
-        ? [message.slice("stale:".length).trim().split(/\s+/, 1)[0]].filter(Boolean)
-        : [];
-    const taskIdentity = (key: string): string =>
-      scope.taskByWakeKey[key] ?? scope.taskByWakeKey[key.replace(/^fm-/, "")] ?? key;
-    const needsDecisionTasks = new Set(scope.needsDecisionKeys.map(taskIdentity));
-    const isNeedsDecisionTrigger = triggerKeys.some((key) => needsDecisionTasks.has(taskIdentity(key)));
-    const eligible = !isCheckTrigger && !isNeedsDecisionTrigger && scope.eligible;
-    const offer = createBranchDispatchOffer(message, scope.projects, heartbeat, eligible);
+    // lib/fm-branch-dispatch.ts owns the offer rule for one close, shared with
+    // the supervision host off Pi (bin/fm-branch-dispatch.mjs offer).
+    const { scope, heartbeat, eligible, awayOnly } = branchOfferForWake(state, message, afkPostureRecordPresent(state));
+    const offer = createBranchDispatchOffer(message, scope.projects, heartbeat, eligible, awayOnly);
     pi.events?.emit?.(FM_BRANCH_DISPATCH_EVENT, offer);
     return offer.accepted ? offer.settlement : null;
   }
@@ -641,11 +768,25 @@ export default function (pi: ExtensionAPI) {
   ): Promise<boolean> {
     if (!generationIsLive(owner)) return false;
     if (recovery) {
-      const confirmed = confirmHandlingDeliveryWithRetry(owner, recovery);
-      if (!confirmed.ok) {
-        const watcherPid = recovery.watcherPid;
-        if (!pidAlive(watcherPid)) {
-          await retireArm(owner.child);
+      const confirmed = confirmHandlingDeliveryWithRetry(recovery);
+      appendExtensionLog(
+        `confirm generation=${recovery.generation} watcherPid=${recovery.watcherPid} result=${confirmed.ok ? "confirmed" : confirmed.superseded ? "superseded" : "rejected"}`,
+      );
+      // A superseded result means a newer pipeline owns this episode now: it
+      // routes like a confirmed delivery below, with no failure appended, and
+      // retires nothing.
+      if (!confirmed.ok && !confirmed.superseded) {
+        const failedPid = recovery.watcherPid;
+        const current = owner.child;
+        const currentRecovery = current ? armRecovery.get(current) : undefined;
+        if (
+          current &&
+          currentRecovery?.watcherPid === failedPid &&
+          currentRecovery?.generation === recovery.generation &&
+          !pidAlive(failedPid)
+        ) {
+          appendExtensionLog(`retire pid=${failedPid} reason=confirm-failure`);
+          await retireArm(current);
         }
         return await sendWake(owner, `${message}\n\n${confirmed.detail}`, pending);
       }
@@ -823,7 +964,7 @@ export default function (pi: ExtensionAPI) {
         // been idle.
         const deferred = owner.deferredClose;
         owner.deferredClose = null;
-        if (deferred && !owner.child && !owner.retryTimer) {
+        if (deferred && !liveArmChild(owner) && !owner.retryTimer) {
           scheduleRetry(owner, deferred.message, deferred.predecessorArmPid);
         }
       }
@@ -885,10 +1026,14 @@ export default function (pi: ExtensionAPI) {
       if (!generationIsLive(owner)) return { failure: "" };
       const replacement = startArm(owner, predecessorArmPid);
       const successorChild = owner.child;
+      appendExtensionLog(
+        `restore attempt=${attempt} predecessor=${predecessorArmPid || "none"} start=${replacement.ok ? `ok pid=${successorChild?.pid ?? "none"}` : "failed"}`,
+      );
       if (replacement.ok && successorChild && await waitForReadiness(successorChild)) {
         return { failure: "", recovery: armRecovery.get(successorChild) };
       }
       if (replacement.ok) {
+        appendExtensionLog(`restore attempt=${attempt} readiness=timeout pid=${successorChild?.pid ?? "none"}`);
         failure = "watcher: FAILED - Pi extension could not verify a ready successor watcher";
         if (!(await retireArm(successorChild))) {
           return {
@@ -904,11 +1049,12 @@ export default function (pi: ExtensionAPI) {
       if (attempt === retryLimit) break;
       await waitForRetry(attempt + 1);
     }
+    appendExtensionLog(`restore exhausted attempts=${retryLimit + 1} outcome=hand-to-main`);
     return { failure: `${failure}\nwatcher: FAILED - Pi extension could not restore watcher continuity after ${retryLimit} retries` };
   }
 
   function scheduleRetry(owner: SessionGeneration, message: string, predecessorArmPid: string): void {
-    if (!generationIsLive(owner) || owner.child || owner.retryTimer) return;
+    if (!generationIsLive(owner) || liveArmChild(owner) || owner.retryTimer) return;
     const ownership = lockOwnership();
     if (ownership !== "owned") {
       surfaceFailure(owner, `watcher: FAILED - Pi extension cannot restore continuity because this session no longer owns the lock\n${message}`);
@@ -941,8 +1087,8 @@ export default function (pi: ExtensionAPI) {
         message: "watcher: not armed - no live session holds the lock; run bin/fm-session-start.sh to reclaim it, then call fm_watch_arm_pi to re-arm",
       };
     }
-    markLoaded();
-    if (owner.child) {
+    publishGenerationOwner(owner, "active");
+    if (liveArmChild(owner)) {
       return {
         ok: true,
         message: `watcher: unchanged - Pi extension already owns an arm child; no manual re-arm needed; ${repairOnlyHint}`,
@@ -1001,11 +1147,11 @@ export default function (pi: ExtensionAPI) {
       if (reason && !armPendingActionable.has(armChild)) {
         const pending = createPendingActionable(reason, String(armChild.pid ?? ""));
         armPendingActionable.set(armChild, pending);
-        enqueuePendingActionable(owner, pending);
       }
     };
     const releaseChild = (): void => {
       if (owner.child === armChild) owner.child = null;
+      if (!owner.child) retiringGenerations.delete(owner);
     };
     armChild.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
@@ -1091,6 +1237,8 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.on?.("before_agent_start", (event) => {
+    // A custom message cannot consume a pending user wake, even with equal text.
+    if (!("prompt" in event)) return;
     consumeWake(generation, event.prompt);
   });
   pi.on?.("message_start", (event) => {
@@ -1101,7 +1249,6 @@ export default function (pi: ExtensionAPI) {
   pi.on?.("session_start", async () => {
     if (generation.stopping) generation = createGeneration();
     activateGeneration(generation);
-    markLoaded();
     if (lockOwnership() !== "owned") return;
     activateOwnedWatch(generation);
   });
@@ -1163,5 +1310,9 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  markLoaded();
+  // Pi loads project extensions before the first model turn can run the locked
+  // session-start command. Publish this generation while the lock is absent so
+  // that command can distinguish a loaded extension from a missing one; a
+  // foreign live lock still suppresses publication.
+  publishGenerationOwner(generation, "active");
 }

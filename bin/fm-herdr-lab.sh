@@ -17,7 +17,9 @@
 # Session names must begin with "fm-lab-" and can never be "default".
 # The name command sanitizes the label, caps it at 16 characters, and appends
 # process/random suffixes to keep generated socket paths short.
-# Every Herdr call made here carries a trailing --session <session>.
+# Every Herdr call made here carries --session <session>: trailing, or
+# immediately before the first -- delimiter so it stays a Herdr option instead
+# of becoming a passthrough argument such as an agent start argument.
 # The run command rejects caller-supplied --session flags, any leading option
 # before the subcommand, all session lifecycle operations, and every server
 # operation.
@@ -97,8 +99,14 @@ fm_herdr_lab_validate_name() { # <session>
 }
 
 fm_herdr_lab_raw() { # <session> <herdr arguments...>
-  local name=$1
+  local name=$1 i
   shift
+  local -a args=("$@")
+  for ((i = 0; i < ${#args[@]}; i++)); do
+    [ "${args[i]}" = -- ] || continue
+    HERDR_SESSION="$name" herdr "${args[@]:0:i}" --session "$name" "${args[@]:i}"
+    return
+  done
   HERDR_SESSION="$name" herdr "$@" --session "$name"
 }
 
@@ -192,7 +200,7 @@ fm_herdr_lab_cli() { # <session> <herdr arguments...>
   for arg in "$@"; do
     case "$arg" in
       --session|--session=*)
-        fm_herdr_lab_error "run forbids caller-supplied --session; the helper appends the lab session"
+        fm_herdr_lab_error "run forbids caller-supplied --session; the helper supplies the lab session"
         return 1
         ;;
     esac

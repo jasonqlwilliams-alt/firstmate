@@ -13,10 +13,13 @@
 # names below, and tests/fm-tmux-agent-liveness.test.sh plus
 # tests/fm-harness-liveness-drift-live-e2e.test.sh keep them honest.
 
+_FM_AGENT_PROCESS_LIB_DIR=${BASH_SOURCE[0]%/*}
+[ "$_FM_AGENT_PROCESS_LIB_DIR" != "${BASH_SOURCE[0]}" ] || _FM_AGENT_PROCESS_LIB_DIR=.
 # shellcheck source=bin/fm-session-lock-lib.sh
-. "$(dirname -- "${BASH_SOURCE[0]}")/fm-session-lock-lib.sh"
+. "${_FM_AGENT_PROCESS_LIB_DIR:-/}/fm-session-lock-lib.sh"
 # shellcheck source=bin/fm-gemini-lib.sh
-. "$(dirname -- "${BASH_SOURCE[0]}")/fm-gemini-lib.sh"
+. "${_FM_AGENT_PROCESS_LIB_DIR:-/}/fm-gemini-lib.sh"
+unset _FM_AGENT_PROCESS_LIB_DIR
 
 # fm_agent_process_classify_name: the single owner of the process-name
 # vocabulary shared by every liveness signal - `agent` for a verified harness,
@@ -39,9 +42,21 @@ fm_agent_process_classify_name() {  # <path> [argv0] -> agent|shell|other
     muse|muse-bin-*) printf 'agent' ;;
     # omp (Oh My Pi) is anchored for the same reason as muse: its live process
     # name is the bare word `omp` (verified, omp 18.1.11) and a glob would claim
-    # unrelated commands such as ompd or comp. The crewmate/scout-only agy
-    # adapter likewise uses its exact process name, never a substring match.
-    *claude*|*codex*|*opencode*|*grok*|*kimi*|*rovo*|pi|pi-signed|pi-launcher|Pi|omp|agy) printf 'agent' ;;
+    # unrelated commands such as ompd or comp.
+    *claude*|*codex*|*opencode*|*grok*|*kimi*|*rovo*|pi|pi-signed|pi-launcher|Pi|omp) printf 'agent' ;;
+    # agy (Antigravity CLI) is anchored for the same reason as muse and omp: its
+    # live process name is the bare word `agy` (verified, agy 1.2.0: a Go-compiled
+    # single binary, comm=agy with argv[0]=agy), and a glob would claim
+    # unrelated commands containing that fragment. devin is anchored the same
+    # way (verified, devin 3000.11.1: comm=devin), so a `*devin*` glob never
+    # claims an unrelated command. Command Code is anchored on its own process
+    # title (verified, Command Code 1.74.1: comm=command-code). polytoken is
+    # anchored the same way (verified, polytoken 0.8.19: a TUI pane's foreground
+    # process is comm `polytoken`, the same binary name as its per-session
+    # daemon), so a `*polytoken*` glob never claims an unrelated command.
+    # cortex (Cortex Code) is anchored too (verified, cortex 1.1.104: a
+    # Bun-compiled single binary, comm=cortex).
+    agy|devin|command-code|polytoken|cortex) printf 'agent' ;;
     zsh|bash|sh|dash|ash|ksh|mksh|tcsh|csh|fish) printf 'shell' ;;
     *)
       if fm_harness_path_name "$path" >/dev/null || fm_harness_path_name "$argv0" >/dev/null; then

@@ -18,7 +18,7 @@ fi
 
 extension_segment=${FM_EXTENSION_BINDING_SEGMENT:-all}
 case "$extension_segment" in
-  all|coordinator|early-bind|early-validation|early-handshake|early-integrity|matrix|matrix-runtime|lifecycle-flow|lifecycle-lock|lifecycle-runner|lifecycle-state|lifecycle-invocation-cleanup|remote-envelope|remote-activation|remote-lifecycle|remote-retirement|example|coordinator-fail|coordinator-wait|coordinator-stubborn|coordinator-pass|coordinator-late-pass|coordinator-scheduler-block|coordinator-scheduler-late) ;;
+  all|coordinator|early-bind|early-validation|early-handshake|early-integrity|matrix|matrix-runtime|lifecycle-flow|lifecycle-host-errors|lifecycle-order|lifecycle-lock|lifecycle-runner|lifecycle-state|lifecycle-invocation-cleanup|remote-envelope|remote-activation|remote-lifecycle|remote-retirement|example|coordinator-fail|coordinator-wait|coordinator-stubborn|coordinator-pass|coordinator-late-pass|coordinator-scheduler-block|coordinator-scheduler-late) ;;
   *) printf 'unknown extension-binding segment: %s\n' "$extension_segment" >&2; exit 64 ;;
 esac
 
@@ -59,6 +59,9 @@ crash_silent_start_pid=
 crash_silent_runner_pid=
 override_crash_start_pid=
 override_crash_runner_pid=
+order_register_pid=
+order_reconcile_pid=
+order_release=
 section_coordinator_pid=
 extension_test_cleanup() {
   [ -z "$concurrent_release" ] || touch "$concurrent_release" 2>/dev/null || true
@@ -94,6 +97,9 @@ extension_test_cleanup() {
   [ -z "$override_crash_start_pid" ] || kill -TERM "$override_crash_start_pid" 2>/dev/null || true
   [ -z "$override_crash_runner_pid" ] || kill -TERM -"$override_crash_runner_pid" 2>/dev/null || true
   [ -z "$handshake_orphan_pid" ] || kill -KILL "$handshake_orphan_pid" 2>/dev/null || true
+  [ -z "$order_release" ] || touch "$order_release" 2>/dev/null || true
+  [ -z "$order_register_pid" ] || kill -KILL "$order_register_pid" 2>/dev/null || true
+  [ -z "$order_reconcile_pid" ] || kill -TERM "$order_reconcile_pid" 2>/dev/null || true
   if [ -n "$section_coordinator_pid" ]; then
     kill -TERM "$section_coordinator_pid" 2>/dev/null || true
     wait "$section_coordinator_pid" 2>/dev/null || true
@@ -102,6 +108,8 @@ extension_test_cleanup() {
     (
       # worker.pid names the serving child; the copied remote helper stops its
       # known isolated supervisor tree so it cannot respawn during teardown.
+      # Production libraries are linted independently by fm-lint.sh.
+      # shellcheck source=/dev/null
       . "$REMOTE_ROOT/bin/fm-remote-job-lib.sh"
       fm_remote_job_stop_worker_tree "$(cat "$TMP_ROOT/remote-jobs/worker.pid")"
     ) 2>/dev/null || true
@@ -245,6 +253,9 @@ elif mode in ("replay", "replay-no-result"):
         except FileNotFoundError: prior = 0
         open(count_path, "w", encoding="utf-8").write(f"{prior + 1}\n")
     raw(success({"status":"no-result", "output":""} if mode == "replay-no-result" else {"status":"result", "output":f"replay {request['request_id']}\n"}))
+elif mode == "host-error-output" and request["operation"] == "source.poll":
+    evidence = {"schema":"firstmate.process-event-extension-error.v1", "extension_id":manifest["id"], "operation":"source.poll", "code":"package-missing"}
+    raw(success({"status":"result", "output":json.dumps(evidence, sort_keys=True, separators=(",", ":")) + "\n"}))
 elif mode.startswith("active-block|"):
     _, block_marker, block_release = mode.split("|", 2)
     write_exclusive(block_marker, f"{os.getpid()}\n")
@@ -252,7 +263,7 @@ elif mode.startswith("active-block|"):
     raw(success({"status":"result", "output":"active runner completed\n"}))
 elif request["operation"] == "source.poll": raw(success({"status":"no-result" if mode == "no-result" else "result", "output":"" if mode == "no-result" else f"external evidence: {mode}\n"}))
 elif request["operation"] == "result.classify": raw(success({"classification":"external-ready"}))
-elif request["operation"] == "result.terminal": raw(success({"value":True}))
+elif request["operation"] == "result.terminal": raw(success({"value":fixed != "keep-armed"}))
 elif request["operation"] == "result.silent":
     content = request.get("input", {}).get("content", "")
     if content == "external evidence: crash-silent\\n":
@@ -444,8 +455,9 @@ run_extension_section_lanes() {
   section_result_root=$(mktemp -d "$TMP_ROOT/section-lanes.XXXXXX") || return 1
   total=${#sections[@]}
   # Sixteen selectors are validated here. The bounded aggregate keeps its
-  # required end-to-end bind/invoke/capture/retirement, remote, and shipped
-  # example lanes; the other conformance cuts remain independently selectable.
+  # required end-to-end bind/invoke/capture/retirement, registration lock-order,
+  # remote, and shipped example lanes; the other conformance cuts remain
+  # independently selectable.
   maximum_sections=16
   maximum_concurrent=12
   [ "$total" -le "$maximum_sections" ] || return 64
@@ -557,7 +569,7 @@ if [ "$extension_segment" = all ] || [ "$extension_segment" = coordinator ]; the
     (
       trap - EXIT HUP INT
       trap 'terminate_section_lanes; exit 143' TERM
-      run_extension_section_lanes lifecycle-flow remote-lifecycle example
+      run_extension_section_lanes lifecycle-flow lifecycle-order remote-lifecycle example
     ) &
     section_coordinator_pid=$!
   fi
@@ -637,6 +649,57 @@ fi
 
 # --- permanently inert absent-registry path ---------------------------------
 if section_enabled early-bind; then
+# Exercise the executable boundary without requiring Windows: this Bash payload
+# deliberately has neither a shebang nor execute permission. Direct OS spawning
+# must fail; an explicitly selected Bash must preserve argv and failure mapping.
+SHELL_ROOT="$TMP_ROOT/lifecycle shell root"
+mkdir -p "$SHELL_ROOT/bin"
+cp "$HOST" "$SHELL_ROOT/bin/fm-extension.mjs"
+cat > "$SHELL_ROOT/bin/fm-procevent.sh" <<'SH'
+[[ -n "$BASH_VERSION" ]] || exit 98
+if [[ "${*: -1}" = reject ]]; then
+  printf 'fixture refused\n' >&2
+  exit 23
+fi
+printf '%s\n' "$@"
+SH
+chmod 600 "$SHELL_ROOT/bin/fm-procevent.sh"
+H_SHELL="$HOMES/shell"; new_home "$H_SHELL"
+# The command substitution is intentionally literal to detect shell evaluation.
+# shellcheck disable=SC2016
+literal_arg='space ; $(exit 97) *'
+for shell_command in bind retire-binding retire-transfer process-event; do
+  case "$shell_command" in
+    bind) expected=$(printf '%s\n' extension-bind bind "$literal_arg"); error_code=binding-failed ;;
+    retire-binding) expected=$(printf '%s\n' extension-retirement binding "$literal_arg"); error_code=retirement-failed ;;
+    retire-transfer) expected=$(printf '%s\n' extension-retirement transfer "$literal_arg"); error_code=retirement-failed ;;
+    process-event) expected=$(printf '%s\n' extension-process-event "$literal_arg"); error_code=process-event-failed ;;
+  esac
+  out=$(FM_HOME="$H_SHELL" node "$SHELL_ROOT/bin/fm-extension.mjs" "$shell_command" "$literal_arg") \
+    || fail "$shell_command did not launch the non-executable Bash payload"
+  [ "$out" = "$expected" ] || fail "$shell_command changed literal lifecycle argv: $out"
+  shell_rc=0
+  out=$(FM_HOME="$H_SHELL" node "$SHELL_ROOT/bin/fm-extension.mjs" "$shell_command" reject 2>&1) || shell_rc=$?
+  if [ "$shell_command" = process-event ]; then
+    [ "$shell_rc" -eq 23 ] && [ "$out" = 'fixture refused' ] \
+      || fail "process-event changed the lifecycle exit status or stderr: $shell_rc $out"
+  else
+    [ "$shell_rc" -eq 1 ] && [ "$out" = "error[$error_code]: fixture refused" ] \
+      || fail "$shell_command changed the lifecycle failure mapping: $shell_rc $out"
+  fi
+done
+pass "lifecycle wrappers use Bash without shell interpolation and preserve failure mapping"
+# POSIX resolution stays on the sanitized PATH: an exported BASH is never tried.
+exported_bash="$TMP_ROOT/exported bash"
+real_bash=$(command -v bash)
+printf '#!%s\ntouch "%s.used"\nexec "%s" "$@"\n' "$real_bash" "$exported_bash" "$real_bash" > "$exported_bash"
+chmod 700 "$exported_bash"
+out=$(BASH="$exported_bash" FM_HOME="$H_SHELL" node "$SHELL_ROOT/bin/fm-extension.mjs" process-event "$literal_arg") \
+  || fail "process-event did not launch with an exported BASH present"
+[ "$out" = "$(printf '%s\n' extension-process-event "$literal_arg")" ] || fail "process-event changed literal argv with an exported BASH: $out"
+[ ! -e "$exported_bash.used" ] || fail "POSIX lifecycle resolution tried the exported BASH"
+pass "POSIX lifecycle Bash resolution ignores an exported BASH"
+
 H_ABSENT="$HOMES/absent"
 new_home "$H_ABSENT"
 before=$(find "$H_ABSENT" -mindepth 1 -print | LC_ALL=C sort)
@@ -1020,6 +1083,141 @@ pass "a missing package executable refuses instead of falling back"
 fi
 fi
 
+# --- repeated host failures remain bounded without blocking recovery --------
+if section_enabled lifecycle-host-errors; then
+host_error_case() {
+  local shape=$1 case_root="$TMP_ROOT/host-error-$1" home package installed binding_file saved_binding
+  local source="host-error-$1" expected_code poll_count result_count command round log runner_pid result
+  local HOME XDG_STATE_HOME FM_PROCEVENT_CLAIM_ROOT PROCEVENT=$PROCEVENT
+  mkdir -p "$case_root/user-home"
+  export HOME="$case_root/user-home" XDG_STATE_HOME="$case_root/xdg"
+  export FM_PROCEVENT_CLAIM_ROOT="$XDG_STATE_HOME/firstmate/procevent-claims"
+  export FM_PROCEVENT_LAUNCH_FLOOR_SECONDS=1 FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=10
+  home="$case_root/home"; new_home "$home"
+  package="$case_root/package"
+  make_package "$package" "org.example.$shape" ext-host-error
+  bind_package "$home" "$package" ext-host-error >/dev/null || fail "cannot bind $shape fixture"
+  installed=$(binding_value "$home" "org.example.$shape" package_root)
+  binding_file="$home/config/extensions.d/org.example.$shape.json"
+  fm_test_track_procevent_home "$home" "$FM_PROCEVENT_CLAIM_ROOT"
+  FM_HOME="$home" "$PROCEVENT" register-extension ext-host-error "$source" --config-ref replay-no-result >/dev/null \
+    || fail "cannot register $shape fixture"
+  FM_HOME="$home" "$PROCEVENT" start "$source" > "$case_root/healthy.out" \
+    || fail "healthy $shape fixture failed"
+  poll_count="$home/state/extensions/org.example.$shape/request-ids"
+  [ "$(wc -l < "$poll_count" | tr -d ' ')" -eq 1 ] || fail "healthy poll did not reach adapter"
+  case "$shape" in
+    package)
+      mv "$installed" "$installed.saved"
+      expected_code='package-missing'
+      ;;
+    conflict)
+      make_package "$case_root/other-package" org.example.other ext-other
+      node -e 'const fs=require("fs"); const p=process.argv[1]; const m=JSON.parse(fs.readFileSync(p)); m.capabilities[0].adapter_names.push("ext-host-error"); fs.writeFileSync(p,JSON.stringify(m)+"\n");' \
+        "$case_root/other-package/firstmate-extension.json"
+      bind_package "$home" "$case_root/other-package" ext-other >/dev/null
+      cp "$home/config/extensions.d/org.example.other.json" "$case_root/other-binding.saved"
+      node -e 'const fs=require("fs"); const p=process.argv[1]; const b=JSON.parse(fs.readFileSync(p)); b.capabilities[0].adapter_names=["ext-host-error"]; fs.writeFileSync(p,JSON.stringify(b)+"\n");' \
+        "$home/config/extensions.d/org.example.other.json"
+      expected_code='adapter-conflict'
+      ;;
+    barrier)
+      mkdir -p "$case_root/code"
+      cp -R "$ROOT/bin" "$case_root/code/bin"
+      mv "$case_root/code/bin/fm-extension-launch-barrier.mjs" "$case_root/code/bin/fm-extension-launch-barrier.original.mjs"
+      printf '%s\n' 'await new Promise(resolve => setTimeout(resolve, 15000));' \
+        'await import("./fm-extension-launch-barrier.original.mjs");' > "$case_root/code/bin/fm-extension-launch-barrier.mjs"
+      PROCEVENT="$case_root/code/bin/fm-procevent.sh"
+      expected_code=timeout
+      ;;
+  esac
+  for round in 1 2 3 4 5; do
+    command=start
+    [ "$round" -lt 3 ] || command=reconcile
+    log="$case_root/$round.out"
+    if [ "$command" = start ]; then
+      FM_HOME="$home" "$PROCEVENT" start "$source" > "$log" 2>&1 || fail "$shape start failed: $(cat "$log")"
+    else
+      FM_HOME="$home" "$PROCEVENT" reconcile > "$log" 2>&1 || fail "$shape reconcile failed: $(cat "$log")"
+      assert_contains "$(cat "$log")" 'started=1' "$shape reconcile did not launch a recovery poll"
+    fi
+    # Reconcile confirms a launch, not completion. Wait on this private source's
+    # recorded runner and claim, so the next command exercises a settled retry.
+    for _ in $(seq 1 600); do
+      runner_pid=$(sed -n '2p' "$FM_PROCEVENT_CLAIM_ROOT/$source.claim" 2>/dev/null || true)
+      if [ ! -e "$home/state/procevent/$source.runner" ] && [ -z "$runner_pid" ]; then break; fi
+      sleep 0.05
+    done
+    [ -z "$runner_pid" ] || fail "$shape runner did not settle"
+    result_count=0
+    for result in "$home/state/procevent-inbox/$source".*.result; do
+      [ -f "$result" ] || continue
+      result_count=$((result_count + 1))
+      assert_grep "\"code\":\"$expected_code\"" "$result" "$shape captured the wrong failure"
+      assert_absent "${result%.result}.handled" "$shape retry acknowledged its earlier failure"
+    done
+    [ "$result_count" -eq 1 ] || fail "$shape retry $round allocated $result_count distinct errors"
+    [ "$(wc -l < "$poll_count" | tr -d ' ')" -eq 1 ] || fail "$shape failure entered adapter polling"
+  done
+  assert_contains "$(wake_payloads "$home")" "procevent ext-host-error $source 1" "$shape first failure was suppressed"
+  case "$shape" in
+    package) mv "$installed.saved" "$installed" ;;
+    conflict) cp "$case_root/other-binding.saved" "$home/config/extensions.d/org.example.other.json" ;;
+    barrier) mv "$case_root/code/bin/fm-extension-launch-barrier.original.mjs" "$case_root/code/bin/fm-extension-launch-barrier.mjs" ;;
+  esac
+  FM_HOME="$home" "$PROCEVENT" start "$source" > "$case_root/recovery.out" 2>&1 || fail "$shape recovery failed"
+  assert_contains "$(cat "$case_root/recovery.out")" 'no-result:' "$shape recovery did not complete"
+  [ "$(wc -l < "$poll_count" | tr -d ' ')" -eq 2 ] || fail "$shape recovery was blocked by old evidence"
+  assert_absent "$home/state/procevent-inbox/$source.2.result" "$shape recovery allocated another error"
+  assert_absent "$home/state/procevent-inbox/$source.1.handled" "$shape recovery acknowledged old evidence"
+
+  # A changed host failure retains its own durable identity.
+  saved_binding="$case_root/binding.saved"
+  mv "$binding_file" "$saved_binding"
+  FM_HOME="$home" "$PROCEVENT" start "$source" > "$case_root/changed.out" 2>&1 || fail "$shape changed poll failed"
+  assert_present "$home/state/procevent-inbox/$source.2.result" "$shape changed host failure was suppressed"
+  cmp -s "$home/state/procevent-inbox/$source.1.result" "$home/state/procevent-inbox/$source.2.result" \
+    && fail "$shape changed failure was not distinguishable"
+  mv "$saved_binding" "$binding_file"
+  pass "$shape host failures coalesce across two starts and three reconciles, with recovery and changed evidence"
+}
+for host_error_shape in package conflict barrier; do
+  host_error_case "$host_error_shape" || exit 1
+done
+
+# Adapter results may contain the host evidence schema verbatim. Their success
+# status must keep identical genuine results distinct and unhandled.
+P_IDENTICAL="$PACKAGES/identical"
+make_package "$P_IDENTICAL" org.example.identical ext-identical keep-armed
+H_IDENTICAL="$HOMES/identical"; new_home "$H_IDENTICAL"
+bind_package "$H_IDENTICAL" "$P_IDENTICAL" ext-identical >/dev/null
+FM_HOME="$H_IDENTICAL" "$PROCEVENT" register-extension ext-identical identical-source --config-ref host-error-output >/dev/null
+for _ in 1 2; do
+  FM_HOME="$H_IDENTICAL" "$PROCEVENT" start identical-source > "$TMP_ROOT/identical-start.out" \
+    || fail "identical adapter result failed"
+done
+cmp "$H_IDENTICAL/state/procevent-inbox/identical-source.1.result" "$H_IDENTICAL/state/procevent-inbox/identical-source.2.result" \
+  || fail "identical adapter fixture did not emit identical host-shaped bytes"
+assert_absent "$H_IDENTICAL/state/procevent-inbox/identical-source.1.handled" "first adapter result was acknowledged"
+assert_absent "$H_IDENTICAL/state/procevent-inbox/identical-source.2.handled" "second adapter result was acknowledged"
+pass "successful identical adapter results retain distinct sequences even with host-shaped output"
+identical_installed=$(binding_value "$H_IDENTICAL" org.example.identical package_root)
+mv "$identical_installed" "$identical_installed.saved"
+for _ in 1 2; do
+  FM_HOME="$H_IDENTICAL" "$PROCEVENT" start identical-source > "$TMP_ROOT/identical-failure.out" \
+    || fail "host failure after genuine evidence failed"
+done
+cmp "$H_IDENTICAL/state/procevent-inbox/identical-source.1.result" "$H_IDENTICAL/state/procevent-inbox/identical-source.3.result" \
+  || fail "host and genuine result fixtures did not emit identical bytes"
+assert_absent "$H_IDENTICAL/state/procevent-inbox/identical-source.4.result" "repeated host failure allocated another result"
+FM_HOME="$H_IDENTICAL" "$PROCEVENT" handled identical-source 3 >/dev/null
+FM_HOME="$H_IDENTICAL" "$PROCEVENT" start identical-source > "$TMP_ROOT/identical-after-handled.out" \
+  || fail "host failure after acknowledgement failed"
+assert_present "$H_IDENTICAL/state/procevent-inbox/identical-source.4.result" "handled host evidence suppressed a fresh failure"
+assert_absent "$H_IDENTICAL/state/procevent-inbox/identical-source.4.handled" "fresh failure inherited acknowledgement"
+pass "genuine evidence cannot suppress the first host error, and handled errors do not suppress fresh failures"
+fi
+
 # --- registration, invocation, unhandled capture, and binding retirement -----
 if section_enabled lifecycle-flow; then
 P_FLOW="$PACKAGES/flow"
@@ -1096,6 +1294,64 @@ assert_absent "$H_FLOW/config/extensions.d/org.example.flow.json" "exact local b
 assert_present "$H_FLOW/data/extensions/retired-bindings/org.example.flow/${flow_binding_digest#sha256:}.json" "local binding retirement was not reversible"
 expect_failure "no home-local extension binding" env FM_HOME="$H_FLOW" "$HOST" resolve-process-event ext-flow
 pass "local binding retirement requires its exact identity and disables invocation"
+fi
+
+# --- registration against reconcile of an unhandled extension result ---------
+# Re-registering a source while reconcile republishes its unhandled extension
+# result must not deadlock. Registration holds binding resolution open here, so
+# reconcile reaches the source before registration asks for it.
+if section_enabled lifecycle-order; then
+P_ORDER="$PACKAGES/lock-order"
+order_marker="$TMP_ROOT/lock-order.marker"
+order_release="$TMP_ROOT/lock-order.release"
+make_package "$P_ORDER" org.example.lock-order ext-lock-order "$(printf 'handshake-block\n%s\n%s' "$order_marker" "$order_release")"
+H_ORDER="$HOMES/lock-order"; new_home "$H_ORDER"
+touch "$order_release"
+bind_package "$H_ORDER" "$P_ORDER" ext-lock-order >/dev/null
+FM_HOME="$H_ORDER" "$PROCEVENT" register-extension ext-lock-order order-source --config-ref good >/dev/null
+FM_HOME="$H_ORDER" "$PROCEVENT" start order-source > "$TMP_ROOT/lock-order-start.out" 2>&1 \
+  || fail "lock-order source did not capture its result"
+assert_absent "$H_ORDER/state/procevent/order-source.source" "lock-order terminal source stayed registered"
+assert_absent "$H_ORDER/state/procevent-inbox/order-source.1.handled" "lock-order result was not left unhandled"
+rm -f "$order_marker" "$order_release"
+FM_HOME="$H_ORDER" "$PROCEVENT" register-extension ext-lock-order order-source --config-ref no-result \
+  > "$TMP_ROOT/lock-order-register.out" 2>&1 &
+order_register_pid=$!
+wait_for_file "$order_marker" || fail "lock-order registration never entered binding resolution"
+FM_HOME="$H_ORDER" "$PROCEVENT" reconcile > "$TMP_ROOT/lock-order-reconcile.out" 2>&1 &
+order_reconcile_pid=$!
+for _ in $(seq 1 200); do
+  [ -L "$FM_PROCEVENT_CLAIM_ROOT/order-source.lock" ] && break
+  sleep 0.01
+done
+[ -L "$FM_PROCEVENT_CLAIM_ROOT/order-source.lock" ] || fail "neither lock-order contender took the source lock"
+sleep 0.2
+touch "$order_release"
+order_deadline=$((SECONDS + 12))
+while kill -0 "$order_register_pid" 2>/dev/null || kill -0 "$order_reconcile_pid" 2>/dev/null; do
+  if [ "$SECONDS" -ge "$order_deadline" ]; then
+    # Killing registration lets lock recovery free reconcile for cleanup.
+    kill -KILL "$order_register_pid" 2>/dev/null || true
+    wait "$order_register_pid" 2>/dev/null || true
+    order_register_pid=
+    wait "$order_reconcile_pid" 2>/dev/null || true
+    order_reconcile_pid=
+    fail "register-extension and reconcile deadlocked on an unhandled extension result"
+  fi
+  sleep 0.05
+done
+order_register_rc=0
+wait "$order_register_pid" || order_register_rc=$?
+order_register_pid=
+wait "$order_reconcile_pid" 2>/dev/null || true
+order_reconcile_pid=
+order_release=
+[ "$order_register_rc" -eq 0 ] || fail "lock-order registration failed: $(cat "$TMP_ROOT/lock-order-register.out")"
+assert_contains "$(cat "$TMP_ROOT/lock-order-reconcile.out")" "reconciled:" "lock-order reconcile did not complete its cycle"
+order_owner=$(sed -n 's/^owner-token: //p' "$TMP_ROOT/lock-order-register.out")
+FM_HOME="$H_ORDER" "$PROCEVENT" retire order-source --if-owner "$order_owner" >/dev/null
+FM_HOME="$H_ORDER" "$PROCEVENT" handled order-source 1 >/dev/null
+pass "register-extension and reconcile of an unhandled extension result take their locks in one order"
 fi
 
 # --- registration and retirement serialization plus lock recovery -------------
@@ -1819,7 +2075,7 @@ mkdir -p "$H_REMOTE_CONTROL/data" "$H_REMOTE" "$REMOTE_ROOT/bin"
 printf 'fixture\n' > "$REMOTE_ROOT/AGENTS.md"
 for remote_file in \
   fm-extension.mjs fm-extension-launch-barrier.mjs fm-extension.sh fm-procevent.sh fm-procevent-lib.sh fm-procevent-extension-capture.pl fm-procevent-lavish.sh \
-  fm-pr-lib.sh fm-wake-lib.sh fm-remote-entrypoint.sh fm-remote-job-lib.sh \
+  fm-pr-lib.sh fm-wake-lib.sh fm-path-lib.sh fm-remote-entrypoint.sh fm-remote-job-lib.sh \
   fm-remote-job-worker.sh; do
   cp "$ROOT/bin/$remote_file" "$REMOTE_ROOT/bin/$remote_file"
 done

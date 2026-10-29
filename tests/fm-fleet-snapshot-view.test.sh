@@ -182,6 +182,11 @@ test_fixture_snapshot_json() {
       and (.actions.watch | contains("do not routinely fm-peek"))
   ' >/dev/null || fail "secondmate return-channel guidance missing"
   printf '%s' "$out" | jq -e '
+    .tasks[] | select(.id == "secondmate-task")
+    | .paths.status_log.last_event
+    | has("age_seconds") and .age_seconds == null
+  ' >/dev/null || fail "legacy event must have an explicit unknown age"
+  printf '%s' "$out" | jq -e '
     .tasks[] | select(.id == "cmux-task")
     | .backend == "cmux"
       and .paths.worktree.present == false
@@ -194,7 +199,60 @@ test_fixture_snapshot_json() {
     .backlog.records[] | select(.id == "done-task")
     | .state == "done" and .pr_url == "https://github.com/kunchenguid/firstmate/pull/7"
   ' >/dev/null || fail "done backlog PR row missing"
-  pass "fixture snapshot covers task rows, backlog rows, pointers, and stable ordering"
+
+  local line expected_age before after emitted epoch observed
+  printf 'secondmate-task\n' > "$home/secondmate-home/.fm-secondmate-home"
+  printf 'schema=fm-secondmate-parent.v1\nroute=local\nparent_home=%s\n' "$home" \
+    > "$home/secondmate-home/.fm-secondmate-parent"
+  before=$(date +%s)
+  FM_HOME="$home/secondmate-home" "$ROOT/bin/fm-secondmate-report.sh" \
+    'done' 0123456789abcdef 'audit complete' || fail "parent report failed"
+  after=$(date +%s)
+  emitted=$(tail -1 "$home/state/secondmate-task.status")
+  # shellcheck source=bin/fm-classify-lib.sh
+  . "$ROOT/bin/fm-classify-lib.sh"
+  epoch=$(status_line_at_epoch "$emitted") || fail "new parent report has unknown time"
+  [ "$epoch" -ge "$before" ] && [ "$epoch" -le "$after" ] \
+    || fail "parent report did not record emission time"
+  for line in "$emitted" 'working: legacy' 'working [at=1700000000]: timed' \
+    'working [at=1700000200]: future' 'working [at=oops]: malformed'; do
+    printf '%s\n\n' "$line" > "$home/state/secondmate-task.status"
+    # Deliberately unrelated file age must never substitute for event age.
+    touch -t 202001010000 "$home/state/secondmate-task.status"
+    expected_age=null; observed=1700000100
+    case "$line" in
+      "$emitted") expected_age=100; observed=$((epoch + 100)) ;;
+      *1700000000*) expected_age=100 ;;
+    esac
+    out=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_SNAPSHOT_NOW_EPOCH=$observed "$SNAPSHOT" --json)
+    printf '%s' "$out" | jq -e --argjson age "$expected_age" '
+      .tasks[] | select(.id == "secondmate-task")
+      | .paths.status_log.last_event
+      | has("age_seconds") and .age_seconds == $age
+        and (has("emitted_at_epoch") | not)
+    ' >/dev/null || fail "event age came from something other than the record: $line"
+    # parent_event age is the emission age; freshness is how old this snapshot's
+    # own observation of the file is, so the 2020 mtime must show up there and
+    # only there.
+    printf '%s' "$out" | jq -e --argjson age "$expected_age" '
+      .secondmate_current.records[] | select(.id == "secondmate-task")
+      | .current.state == "unknown"
+        and .parent_event.age_seconds == $age
+        and (.parent_event | has("emitted_at_epoch") | not)
+        and (.freshness.age_seconds | type) == "number"
+        and .freshness.age_seconds > 100000000
+    ' >/dev/null || fail "fallback confused event age, observation freshness, and current state: $line"
+    if [ "${FM_TEST_EVIDENCE:-0}" = 1 ]; then
+      printf '$ touch -t 202001010000 %s\n' "$home/state/secondmate-task.status"
+      printf '$ FM_HOME=%s FM_SNAPSHOT_NOW_EPOCH=%s bin/fm-fleet-snapshot.sh --json\n' "$home" "$observed"
+      printf '%s' "$out" | jq '{
+        last_event: (.tasks[] | select(.id == "secondmate-task") | .paths.status_log.last_event),
+        secondmate: (.secondmate_current.records[] | select(.id == "secondmate-task")
+          | {current, parent_event, freshness})
+      }'
+    fi
+  done
+  pass "fixture snapshot covers task rows, backlog rows, pointers, stable ordering, and emission-time event age"
 }
 
 # R1 owner contract: main_inventory discloses orphan in-flight and unstructured
@@ -893,7 +951,7 @@ test_open_decision_clears_on_keyed_resolution() {
 # must not linger as pending. Decisions come purely from the keyed fold reconciled
 # against the crew lifecycle; report prose never opens or reopens a decision.
 test_completed_scout_report_is_pointer_not_pending() {
-  local home fakebin out
+  local home fakebin out kind terminal id phase single mate single_state mate_state
   home=$(make_home completed-scout)
   mkdir -p "$home/projects/scout-wt" "$home/data/lavish-103"
   fm_write_meta "$home/state/lavish-103.meta" \
@@ -918,6 +976,55 @@ test_completed_scout_report_is_pointer_not_pending() {
       and (.hints.open_decisions | length) == 0
       and .hints.scout_report_present == true
   ' >/dev/null || fail "a completed scout report must be a pointer, not a pending decision: $out"
+
+  # Same terminal-supersession contract across ship/scout/secondmate, both snapshot
+  # modes, and reopen/resolve after cleanup.
+  home=$(make_home terminal-cleanup)
+  mkdir -p "$home/projects/task"
+  fakebin=$(make_fakebin "$home")
+  for kind in ship scout secondmate; do
+    for terminal in 'done' failed; do
+      id="$kind-$terminal"
+      fm_write_meta "$home/state/$id.meta" \
+        "window=firstmate:fm-$id" "worktree=$home/projects/task" \
+        "kind=$kind" "harness=claude"
+      record_claude_idle "$home/state" "$id"
+      printf 'blocked [key=access]: waiting\nneeds-decision [key=choice]: choose a route\n%s: final outcome\nnote: cleanup complete\n' \
+        "$terminal" > "$home/state/$id.status"
+    done
+  done
+  for phase in terminal reopened resolved; do
+    case "$phase" in
+      terminal) single='[]'; mate='["access","choice"]'; single_state=unknown; mate_state=parked ;;
+      reopened) single='["access","new-choice"]'; mate='["access","choice","new-choice"]'; single_state=parked; mate_state=parked ;;
+      resolved) single='[]'; mate='["choice"]'; single_state=unknown; mate_state=parked ;;
+    esac
+    for kind in ship scout secondmate; do
+      for terminal in 'done' failed; do
+        id="$kind-$terminal"
+        case "$phase" in
+          reopened) printf 'blocked [key=access]: reopened access\nneeds-decision [key=new-choice]: a new choice\nnote: more cleanup\n' >> "$home/state/$id.status" ;;
+          resolved) printf 'resolved [key=access]: access granted\nresolved [key=new-choice]: answered\nnote: final cleanup\n' >> "$home/state/$id.status" ;;
+        esac
+      done
+    done
+    out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
+    printf '%s' "$out" | jq -e --argjson single "$single" --argjson mate "$mate" \
+      --arg single_state "$single_state" --arg mate_state "$mate_state" '
+      .tasks | length == 6 and all(.[];
+        (.kind == "secondmate") as $persistent
+        | (.hints.open_decisions | map(.key) | sort) == (if $persistent then $mate else $single end)
+          and .current_state.state == (if $persistent then $mate_state else $single_state end)
+          and .hints.blocked_event == (if $persistent then $mate else $single end | index("access") != null)
+          and .hints.pending_decision == (if $persistent then $mate else $single end | any(. != "access")))
+    ' >/dev/null || fail "$phase snapshot revived a completed decision or lost a current one: $out"
+    out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+    printf '%s' "$out" | jq -e --argjson single "$single" --argjson mate "$mate" '
+      (.decisions_open | map({id,key}) | sort_by(.id,.key)) ==
+        (([ ("ship-done","ship-failed","scout-done","scout-failed") as $id | $single[] | {id:$id,key:.} ]
+          + [ ("secondmate-done","secondmate-failed") as $id | $mate[] | {id:$id,key:.} ]) | sort_by(.id,.key))
+    ' >/dev/null || fail "$phase home summary revived a completed decision or lost a current one: $out"
+  done
   pass "a completed scout's stale decision surfaces as a report pointer, not pending"
 }
 
@@ -1065,15 +1172,22 @@ MD
     "spawn_gen=terminal-gen" "pr=$pr"
   record_claude_idle "$home/state" terminal
   printf 'done: PR %s checks green\n' "$pr" > "$home/state/terminal.status"
-  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
-  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
-    || fail "an old green event without an attributable run cannot exempt a task: $out"
+  # The ship done gate (bin/fm-dod-lib.sh) refuses a done claim whose named
+  # head cannot be verified, so an old green event with no attributable run
+  # reads blocked: it is neither a done child nor green evidence.
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
+  printf '%s' "$out" | jq -e '.tasks[0].current_state.state != "done" and (.tasks[0].current_state.detail | startswith("checks green") | not)' >/dev/null \
+    || fail "an old green event without an attributable run cannot read as a green done child: $out"
 
   # Exercise the authoritative no-mistakes current-state path over a real repo.
   git -C "$home/projects/terminal" init -q
   git -C "$home/projects/terminal" -c user.name=fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m init
   head=$(git -C "$home/projects/terminal" rev-parse HEAD)
   branch=$(git -C "$home/projects/terminal" symbolic-ref --short HEAD)
+  # The work is published: a remote-tracking ref holds the named head, which
+  # is what the ship done gate (fm_dod_accept_ship_done) needs before a
+  # status-log done claim reads as done rather than blocked.
+  git -C "$home/projects/terminal" update-ref "refs/remotes/origin/$branch" "$head"
   cat > "$home/run.txt" <<RUN
 run:
   id: "green-run"
@@ -1083,10 +1197,21 @@ run:
   outcome: checks-passed
   pr: "$pr"
 RUN
+  # The bare `axi` run inventory (the table bin/fm-nm-run-lib.sh's
+  # fm_nm_select_run reads before `axi status --run <id>`) is derived from the
+  # same run.txt, so each rewrite below keeps the two views consistent.
   cat > "$fakebin/no-mistakes" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = axi ]; then
   case "${2:-}" in
+    "")
+      field() { sed -n "s/^  $1: \"\{0,1\}\([^\"]*\)\"\{0,1\}\$/\1/p" "$FM_HOME/run.txt" | head -1; }
+      head=$(field head_sha); [ -n "$head" ] || head=$(field head)
+      status=$(field status)
+      case "$status" in ci|fixing|awaiting_approval|fix_review) status=running ;; esac
+      printf 'count: 1 of 1 total\nruns[1]{id,branch,status,head,pr}:\n  %s,%s,%s,%s,"%s"\n' \
+        "$(field id)" "$(field branch)" "$status" "$head" "$(field pr)"
+      ;;
     status) cat "$FM_HOME/run.txt" ;;
     logs) cat "$FM_HOME/ci.txt" ;;
   esac
@@ -1161,11 +1286,14 @@ run:
 RUN
   printf 'no CI checks reported - still monitoring until merged or closed\n' > "$home/ci.txt"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
-  printf '%s' "$out" | jq -e '.tasks[0].current_state.state == "done" and .tasks[0].current_state.source == "run-step" and (.tasks[0].current_state.detail | contains("no CI checks reported"))' >/dev/null \
+  # A run whose ci log reports no checks stays working (bin/fm-crew-state.sh):
+  # nothing verified the PR, so it is neither green evidence nor a terminal
+  # in-flight contradiction.
+  printf '%s' "$out" | jq -e '.tasks[0].current_state.state == "working" and .tasks[0].current_state.source == "run-step" and (.tasks[0].current_state.detail | contains("no CI checks reported")) and (.tasks[0].current_state.detail | contains("checks green") | not)' >/dev/null \
     || fail "fixture must prove the current run has no reported checks: $out"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
-  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["terminal"]}' >/dev/null \
-    || fail "no reported CI checks must not exempt a registered PR: $out"
+  printf '%s' "$out" | jq -e '.invalidity.kind != "terminal_in_flight"' >/dev/null \
+    || fail "a working no-checks run must not read as a terminal in-flight child: $out"
   if [ -n "${FM_SNAPSHOT_TEST_EVIDENCE_DIR:-}" ]; then
     printf '%s\n' "$out" > "$FM_SNAPSHOT_TEST_EVIDENCE_DIR/scripted-no-checks-summary.json"
   fi
@@ -1333,25 +1461,24 @@ SH
   pass "public snapshots resample backlog changes during two-task teardown"
 }
 
-test_teardown_backlog_change_during_capture_is_resampled
-
-test_green_registered_pr_and_teardown_inventory
-
-test_empty_fleet_json
-test_fixture_snapshot_json
-test_home_summary_excludes_secondmate_from_child_inventory
-test_undated_captain_hold_phrasing_and_aging
-test_hold_buckets_are_total_and_text_blind
-test_main_inventory_orphan_and_unstructured_disclosure
-test_normalized_roles_and_plural_blocker_readiness
-test_event_hints_follow_reconciled_current_state
-test_open_decision_survives_later_unrelated_event
-test_secondmate_open_decision_survives_live_endpoint
-test_open_decision_transfers_to_captain_hold
-test_open_decision_clears_on_keyed_resolution
-test_completed_scout_report_is_pointer_not_pending
-test_parked_scout_decision_stays_pending
-test_scout_reports_include_teardown_reports
-test_backlog_tasks_axi_forms_and_overrides
-test_view_renders_snapshot
-test_view_renders_dead_secondmate_agent_status
+fm_test_run \
+  test_empty_fleet_json \
+  test_fixture_snapshot_json \
+  test_home_summary_excludes_secondmate_from_child_inventory \
+  test_undated_captain_hold_phrasing_and_aging \
+  test_hold_buckets_are_total_and_text_blind \
+  test_main_inventory_orphan_and_unstructured_disclosure \
+  test_normalized_roles_and_plural_blocker_readiness \
+  test_event_hints_follow_reconciled_current_state \
+  test_open_decision_survives_later_unrelated_event \
+  test_secondmate_open_decision_survives_live_endpoint \
+  test_open_decision_transfers_to_captain_hold \
+  test_open_decision_clears_on_keyed_resolution \
+  test_completed_scout_report_is_pointer_not_pending \
+  test_parked_scout_decision_stays_pending \
+  test_scout_reports_include_teardown_reports \
+  test_backlog_tasks_axi_forms_and_overrides \
+  test_view_renders_snapshot \
+  test_view_renders_dead_secondmate_agent_status \
+  test_green_registered_pr_and_teardown_inventory \
+  test_teardown_backlog_change_during_capture_is_resampled
