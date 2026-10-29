@@ -2810,6 +2810,26 @@ teardown_slot_occupant_home() {  # <task-id>
   return 1
 }
 
+# True when this record's own endpoint provably holds no agent: a raw `dead`,
+# or a `missing` the control plane's absence proof confirms gone (or dead).
+# A raw `missing` alone conflates destroyed with unreachable - a tmux window on
+# another server still reads missing here - so it is trusted no more here than
+# by relaunch or exit. Sets TEARDOWN_ABSENCE_REASON when absence is unproven.
+TEARDOWN_ABSENCE_REASON=
+teardown_own_endpoint_holds_no_agent() {
+  local state verdict
+  TEARDOWN_ABSENCE_REASON=
+  state=$(fm_backend_agent_state "$BACKEND" "$T")
+  [ "$state" != dead ] || return 0
+  fm_control_absence_recheck_applies "$BACKEND" "$state" || return 1
+  verdict=$(fm_control_endpoint_absence_verdict "$BACKEND" "$T" "$META")
+  case "${verdict%%$'\t'*}" in
+    gone|dead) return 0 ;;
+    unproven) TEARDOWN_ABSENCE_REASON=${verdict#*$'\t'} ;;
+  esac
+  return 1
+}
+
 require_retire_stale_slot_record() {
   local slot holders rc=0 other_id field marker occupant_home
   [ "$KIND" != secondmate ] || {
@@ -2832,13 +2852,14 @@ require_retire_stale_slot_record() {
   fm_treehouse_slot_owner_state "$slot" "$ID"
   case "$FM_TREEHOUSE_SLOT_OWNER" in
     mine)
-      case "$(fm_backend_agent_state "$BACKEND" "$T")" in
-        dead|missing) ;;
-        *)
+      if ! teardown_own_endpoint_holds_no_agent; then
+        if [ -n "$TEARDOWN_ABSENCE_REASON" ]; then
+          echo "REFUSED: task $ID still owns the slot claim on $slot and its endpoint reads missing, but absence is unproven: $TEARDOWN_ABSENCE_REASON. Nothing was changed." >&2
+        else
           echo "REFUSED: task $ID still owns the slot claim on $slot; --retire-stale-record is for the record that no longer holds the slot. Retire the other record, then tear this one down ordinarily." >&2
-          return 1
-          ;;
-      esac
+        fi
+        return 1
+      fi
       ;;
     other|absent) ;;
     *)

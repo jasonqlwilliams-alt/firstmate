@@ -603,6 +603,24 @@ test_reused_pool_slot_refuses_before_touching_the_other_task() {
   pass "fm-teardown: a pool slot named by a second task record is never returned, killed, or reset"
 }
 
+# A tmux fake whose server lists the task's window with only a shell in it, so
+# the record's own endpoint reads `dead` - provably agent-free - rather than
+# `missing`, which tmux can never prove absent.
+fake_tmux_dead_window() {  # <case> <task-id>
+  cat > "$1/fakebin/tmux" <<SH
+#!/usr/bin/env bash
+printf 'tmux' >> "\${FM_RUNTIME_LOG:?}"
+printf ' <%s>' "\$@" >> "\${FM_RUNTIME_LOG:?}"
+printf '\\n' >> "\${FM_RUNTIME_LOG:?}"
+case "\${1:-}" in
+  list-windows) printf 'fm-$2\\n'; exit 0 ;;
+  display-message) printf 'bash\\n'; exit 0 ;;
+esac
+exit 0
+SH
+  chmod +x "$1/fakebin/tmux"
+}
+
 test_retire_stale_record_drops_the_unheld_copy_without_touching_the_slot() {
   local dir id=stale-task other=live-task worker rc
 
@@ -659,6 +677,20 @@ test_retire_stale_record_drops_the_unheld_copy_without_touching_the_slot() {
   ( cd "$dir/worktree" && exec sleep 30 ) &
   worker=$!
 
+  # A claiming record whose tmux window merely reads missing is not proven
+  # agent-free (the window may live on another tmux server), so the retire
+  # refuses and changes nothing, as relaunch and exit do.
+  set +e
+  run_teardown "$dir" "$id" --force --retire-stale-record \
+    > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "--retire-stale-record trusted a raw tmux missing endpoint as absent"
+  assert_contains "$(cat "$dir/stderr")" "absence is unproven" \
+    "the unproven-absence refusal did not say why"
+  assert_present "$dir/home/state/$id.meta" "the refused retire removed the claiming record"
+
+  fake_tmux_dead_window "$dir" "$id"
   set +e
   run_teardown "$dir" "$id" --force --retire-stale-record \
     > "$dir/stdout" 2> "$dir/stderr"
@@ -791,6 +823,7 @@ test_retire_stale_record_transfers_a_cross_home_claiming_dead_record() {
     "orphaned-claim release should refuse a claiming record that still exists"
 
   : > "$dir/runtime.log"
+  fake_tmux_dead_window "$dir" "$id"
   set +e
   run_teardown "$dir" "$id" --force --retire-stale-record \
     > "$dir/stdout" 2> "$dir/stderr"
