@@ -2194,6 +2194,44 @@ test_same_kind_escalation_reopens_after_operator_close() {
   pass "a same-kind escalation after an operator close opens the decision again"
 }
 
+test_operator_close_after_latest_episode_settles_record() {
+  (
+    local dir fb log home state corr rec status open
+    dir="$TMP_ROOT/close-after-latest-episode"
+    mkdir -p "$dir"
+    fb=$(make_stubs "$dir")
+    log="$dir/send.log"
+    home=$(setup_parent close-after-episode)
+    state="$home/state"
+    fm_write_secondmate_meta "$state/mate.meta" "$home/sm" "sess:fm-mate"
+    export FM_PENDING_REPLY_NOW=10000
+    corr=$(fm_pending_reply_create "$home" "$state" mate "wake after lost transport")
+    rec=$(fm_pending_reply_path "$state" "$corr")
+    status="$state/mate.status"
+    fm_pending_reply_prepare_delivery "$state" "$corr" || fail "prepare failed"
+    fm_pending_reply_tick_one "$state" "$corr" unknown || fail "first tick failed"
+    [ "$(phase_of "$state" "$corr")" = escalated ] || fail "first loss should escalate"
+    # A second delivery episode begins before the operator answers.
+    fm_pending_reply_reset_known_undelivered "$state" "$corr" || fail "reset failed"
+    fm_pending_reply_prepare_delivery "$state" "$corr" || fail "retry prepare failed"
+    export FM_PENDING_REPLY_NOW=15000
+    fm_pending_reply_tick_one "$state" "$corr" unknown || fail "retry tick failed"
+    [ "$(phase_of "$state" "$corr")" = escalated ] || fail "retry should stay escalated"
+    # The operator close lands after the latest episode began: it settles.
+    run_send "$fb" "$home" "$log" mate --resolve-key "pending-reply-$corr" \
+      "Resolved by firstmate: nothing further is needed" || fail "operator close failed"
+    unset FM_PENDING_REPLY_NOW
+    watcher_scan "$fb" "$state"
+    [ "$(phase_of "$state" "$corr")" = resolved ] \
+      || fail "a close after the latest episode should settle the record, got $(phase_of "$state" "$corr")"
+    [ "$(fm_pending_reply_get "$rec" resolved_via)" = operator ] \
+      || fail "resolved_via should record the operator close, got '$(fm_pending_reply_get "$rec" resolved_via)'"
+    open=$(status_open_decisions "$status" | cut -f1)
+    case "$open" in *"pending-reply-$corr"*) fail "the settled decision is still open: $open" ;; esac
+  ) || fail "operator close after the latest delivery episode failed"
+  pass "an operator close after the latest delivery episode settles the record"
+}
+
 test_summary_keeps_accents_and_caps_by_character() {
   local out long cap_chars loc
   out=$(fm_pending_reply_summarize "não faça a correção")
@@ -2265,6 +2303,7 @@ test_local_parent_replies_is_wrong_home_evidence
 test_escalated_undelivered_correlation_stays_retryable
 test_operator_resolve_key_close_retires_escalated_record
 test_same_kind_escalation_reopens_after_operator_close
+test_operator_close_after_latest_episode_settles_record
 test_summary_keeps_accents_and_caps_by_character
 
 printf 'ok - all pending-reply tests passed\n'
