@@ -22,7 +22,7 @@ write_quota() {  # <json-file>
   cat > "$FAKEBIN/quota-axi" <<SH
 #!/usr/bin/env bash
 if [ "\${1:-}" = "--version" ]; then
-  printf 'quota-axi 0.1.29\\n'
+  printf 'quota-axi 0.1.51\\n'
   exit 0
 fi
 cat '$1'
