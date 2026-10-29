@@ -2706,14 +2706,28 @@ spawn_pane_leader_pid() {
   return 1
 }
 
+# A Herdr pane whose agent exited back to its shell reports no foreground
+# process, so there is no leader whose environment can be read; it is an idle
+# shell that can answer the send-text probe instead. Only an explicit empty
+# foreground list counts: a read failure is not proof the pane is agent-free,
+# and typing the probe into a live agent would corrupt its input.
+spawn_pane_agent_free() {
+  local info
+  [ "$BACKEND" = herdr ] || return 1
+  info=$(fm_backend_herdr_cli "$HERDR_SES" pane process-info --pane "$HERDR_PANE_ID") || return 1
+  printf '%s' "$info" | jq -e --arg pane "$HERDR_PANE_ID" '
+    .result.process_info | select(.pane_id == $pane)
+    | (.foreground_processes | type == "array" and length == 0)' >/dev/null 2>&1
+}
+
 spawn_pane_launch_path() {
   local pid attempt probe_command probe_target
-  if [ "$RELAUNCH_STATE" = dead ] || [ "$RELAUNCH_REBIND" -eq 1 ]; then
+  if [ "$RELAUNCH_STATE" = dead ] || [ "$RELAUNCH_REBIND" -eq 1 ] || spawn_pane_agent_free; then
     RELAUNCH_PATH_PROBE=$(mktemp "$STATE/.$ID.relaunch-path.XXXXXXXX") || return 1
     rm -f -- "$RELAUNCH_PATH_PROBE"
     probe_command="printf '%s\\n%s\\n' \"\$PATH\" \"\$HOME\" > $(shell_quote "$RELAUNCH_PATH_PROBE")"
-    # A missing endpoint was just recreated into $T; a dead pane still lives at
-    # the recorded target. Both are agent-free shells that can print PATH.
+    # A missing endpoint was just recreated into $T; a dead or agent-free pane
+    # still lives at the recorded target. All are shells that can print PATH.
     probe_target=$T
     [ "$RELAUNCH_REBIND" -eq 1 ] || probe_target=$RELAUNCH_TARGET
     "fm_backend_${BACKEND}_send_text_line" "$probe_target" "$probe_command" || return 1
