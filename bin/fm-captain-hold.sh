@@ -161,7 +161,11 @@
 # and no keyed status decision may be open.
 # `complete` and `verify` also read an entry that markdown Done retention moved
 # into the configured Done archive, where it counts only through a recorded
-# resolution; no other subcommand reads the archive.
+# resolution. `hold`, `answer` and `answers` read the archive only as a
+# read-only fallback when the live lookup misses: a re-hold of an archived id
+# is refused as already closed instead of minting a duplicate live task, and an
+# exact answer retry replays its parent publish idempotently. Nothing ever
+# writes to an archived row.
 # Metadata compatibility: the attestation keeps the historical
 # `decisions_reviewed=1` and `decision_keys=` keys, and an inventory entry that
 # names no existing task resolves through the legacy `<origin>-decision-<entry>`
@@ -1117,6 +1121,14 @@ command_hold() {
       [ "$existing_title" = "$title" ] || fail "existing task $id has a different title"
     fi
   else
+    # A row markdown Done retention moved into the archive is closed, not
+    # absent: re-creating it would mint a second live task with the same id.
+    hold_status=0
+    task_show_archived "$id" || hold_status=$?
+    [ "$hold_status" -ne 124 ] || exit 124
+    [ "$hold_status" -ne 0 ] \
+      || fail "task $id is already closed (Done archive); a new captain call needs its own task"
+    hold_status=0
     [ -n "$title" ] || fail "--title is required to create task $id"
     validate_one_line title "$title"
     if [ -z "$repo" ] && [ -n "$origin" ] && [ -f "$STATE/$origin.meta" ]; then
@@ -1274,6 +1286,7 @@ remove_interrupted_answer_stamp() {  # <task-id>
 
 command_answer() {
   local id=${1:-} decision_file='' release=0 show state hold_kind body outcome recorded_mode occurrence
+  local archived=0 archived_status=0
   [ "$#" -ge 1 ] || { usage >&2; exit 2; }
   shift
   while [ "$#" -gt 0 ]; do
@@ -1288,12 +1301,25 @@ command_answer() {
   load_decision "$decision_file"
   acquire_task_control_lock "$id"
   require_tasks_axi
-  task_show "$id" || fail "captain-held task $id is absent from this home's configured backlog (data directory $DATA)"
+  if ! task_show "$id"; then
+    # Read-only fallback: an answered row Done retention archived still
+    # replays an exact retry; it is never written to.
+    task_show_archived "$id" || archived_status=$?
+    [ "$archived_status" -ne 124 ] || exit 124
+    [ "$archived_status" -eq 0 ] \
+      || fail "captain-held task $id is absent from this home's configured backlog (data directory $DATA)"
+    archived=1
+  fi
   show=$TASK_SHOW_OUTPUT
   state=$(show_field "$show" state)
   hold_kind=$(show_field_value "$show" hold_kind)
   body=$(show_field "$show" body)
   if [ "$release" = 1 ]; then outcome=released; else outcome=answered; fi
+  if [ "$archived" = 1 ]; then
+    if [ "$state" != "done" ] || ! body_has_resolution_record "$body"; then
+      fail "task $id is already closed (Done archive); a new captain call needs its own task"
+    fi
+  fi
   # The occurrence the parent line names: the record about to be written is
   # one past those already in the body, and a retry names the newest one.
   occurrence=$(( $(resolution_record_count "$body") + 1 ))
@@ -1308,7 +1334,7 @@ command_answer() {
         || fail "task $id records this resolution with mode ${recorded_mode:-unknown}; it is not a captain-answer replay"
       [ "$release" = 0 ] \
         || fail "task $id records this answer with mode ${recorded_mode:-unknown}; --release cannot reopen a closed task"
-      remove_interrupted_answer_stamp "$id"
+      [ "$archived" = 1 ] || remove_interrupted_answer_stamp "$id"
       if [ "$recorded_mode" = repaired ]; then
         publish_parent_resolution_then_retire "$id" $((occurrence - 1)) "answered (repaired)"
       else
@@ -1538,6 +1564,13 @@ command_answers() {
     esac
     resolve_rc=0
     id=$(resolve_entry "$origin" "$key" 2>"$err") || resolve_rc=$?
+    if [ "$resolve_rc" = 1 ]; then
+      # Read-only fallback, as verify does: a row Done retention archived is
+      # closed, not absent, so a late keyed answer replays or is skipped as
+      # already closed below instead of being dropped as unknown.
+      resolve_rc=0
+      id=$(archived_entry "$origin" "$key") || resolve_rc=$?
+    fi
     id=${id%% *}
     if [ "$resolve_rc" = 2 ]; then
       reason=$(tr -d '\n' < "$err")
@@ -1571,7 +1604,15 @@ command_answers() {
     if [ -n "$legacy_key" ]; then
       legacy_digest=$(sha256_text "$(legacy_keyed_decision_text "$source" "$legacy_key" "$answer" "$label")")
     fi
-    task_show "$id" || { printf 'skipped: %s (absent)\n' "$id"; skipped=$((skipped + 1)); continue; }
+    if ! task_show "$id"; then
+      # Read-only fallback: an archived row only ever replays or skips below,
+      # since it is closed; nothing here writes to it.
+      resolve_rc=0
+      task_show_archived "$id" || resolve_rc=$?
+      [ "$resolve_rc" -ne 124 ] \
+        || fail "the backlog backend exceeded its Done-archive read bound reading $id"
+      [ "$resolve_rc" -eq 0 ] || { printf 'skipped: %s (absent)\n' "$id"; skipped=$((skipped + 1)); continue; }
+    fi
     show=$TASK_SHOW_OUTPUT
     state=$(show_field "$show" state)
     hold_kind=$(show_field_value "$show" hold_kind)

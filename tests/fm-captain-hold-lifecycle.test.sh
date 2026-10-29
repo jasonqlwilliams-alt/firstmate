@@ -522,6 +522,61 @@ test_verify_resolves_a_hold_pruned_into_the_archive() {
   pass "an answered captain call stays verifiable after tasks-axi archives it"
 }
 
+archive_an_answered_call() {  # <home> <id> <decision-file>
+  local home=$1 id=$2 decision=$3 i
+  tasks_in "$home" add "$id" "which option ships" >/dev/null \
+    || fail "could not create the captain call"
+  run_captain "$home" hold "$id" --reason "captain must decide" >/dev/null \
+    || fail "could not hold the captain call"
+  printf 'Ship option B.\n' > "$decision"
+  run_captain "$home" answer "$id" --decision-file "$decision" >/dev/null \
+    || fail "could not record the captain answer"
+  for i in $(seq 1 12); do
+    tasks_in "$home" add "filler-$i" "filler $i" >/dev/null || fail "could not add filler-$i"
+    tasks_in "$home" 'done' "filler-$i" >/dev/null || fail "could not close filler-$i"
+  done
+  if tasks_in "$home" show "$id" --full >/dev/null 2>&1; then
+    fail "the fixture never pruned the answered call, so this case would prove nothing"
+  fi
+  assert_grep "$id" "$home/data/done-archive.md" \
+    "the answered call did not reach the configured archive"
+}
+
+test_exact_answer_retry_replays_an_archived_hold() {
+  local home id decision out rc
+  home=$(make_home archived-answer-retry)
+  id=archived-answer-call
+  decision="$home/captain-decision.txt"
+  archive_an_answered_call "$home" "$id" "$decision"
+  rc=0
+  out=$(run_captain "$home" answer "$id" --decision-file "$decision" 2>&1) || rc=$?
+  [ "$rc" -eq 0 ] || fail "an exact answer retry on an archived hold failed: $out"
+  assert_contains "$out" "answered: $id" "the archived retry was not an idempotent replay"
+  case "$out" in *absent*) fail "an archived hold was reported absent: $out" ;; esac
+  if tasks_in "$home" show "$id" --full >/dev/null 2>&1; then
+    fail "the replay recreated the archived hold as a live task"
+  fi
+  printf 'Ship option C.\n' > "$home/other-decision.txt"
+  rc=0
+  out=$(run_captain "$home" answer "$id" --decision-file "$home/other-decision.txt" 2>&1) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a different answer replayed against an archived hold"
+  pass "an exact answer retry on an archived hold replays instead of reporting it absent"
+}
+
+test_rehold_of_an_archived_id_creates_no_duplicate() {
+  local home id out rc live
+  home=$(make_home archived-rehold)
+  id=archived-rehold-call
+  archive_an_answered_call "$home" "$id" "$home/captain-decision.txt"
+  rc=0
+  out=$(run_captain "$home" hold "$id" --title "which option ships" --reason "again" 2>&1) || rc=$?
+  [ "$rc" -ne 0 ] || fail "re-holding an archived id succeeded: $out"
+  assert_contains "$out" "already closed" "the archived re-hold was not refused as already closed"
+  live=$(grep -c -- "$id" "$home/data/backlog.md" || true)
+  [ "$live" = 0 ] || fail "re-holding an archived id created a duplicate live task ($live live rows)"
+  pass "re-holding an archived id is refused instead of creating a duplicate live task"
+}
+
 test_verify_names_the_unresolvable_legacy_id_once() {
   local fixture home scout err rc
   require_tasks_axi_beads "verify an unresolvable beads legacy id" || return 0
@@ -4869,6 +4924,8 @@ test_marker_noted_row_wins_over_a_prefix_namesake
 test_complete_accepts_a_migrated_inventory_on_beads
 test_verify_names_the_unresolvable_legacy_id_once
 test_verify_resolves_a_hold_pruned_into_the_archive
+test_exact_answer_retry_replays_an_archived_hold
+test_rehold_of_an_archived_id_creates_no_duplicate
 test_verify_resolves_a_pre_collapse_key_through_its_derived_marker
 test_captain_hold_mutations_address_the_beads_backend
 test_hold_creates_a_captain_row_when_beads_requires_due_without_custom_type
