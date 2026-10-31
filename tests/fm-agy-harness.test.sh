@@ -168,6 +168,7 @@ case "$1" in
   models)
     printf 'gemini-4-argon-high\tGemini 4 Argon (High)\n'
     printf 'gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n'
+    printf 'gemini-4+preview\tGemini 4 Preview\n'
     printf 'claude-opus-5-5\tClaude Opus 5.5\n'
     printf 'gpt-6-sol\tGPT 6 Sol\n'
     ;;
@@ -429,7 +430,7 @@ test_spawn_refuses_non_gemini_models() {
 test_spawn_allows_gemini_models() {
   local kind model n=0 id rec out status
   for kind in ship scout; do
-    for model in gemini-4-argon-high gemini-3.8-flash-high; do
+    for model in gemini-4-argon-high gemini-3.8-flash-high gemini-4+preview; do
       n=$((n + 1))
       id="agy-allow-$kind-$n"
       rec=$(make_spawn_case "allow-$kind-$n" "$id")
@@ -452,7 +453,9 @@ test_spawn_allows_gemini_models() {
 # so it is refused in favor of the canonical adapter whatever model it names.
 test_raw_agy_launch_is_refused() {
   local raw n=0 id rec out
-  for raw in "agy --model gemini-4-argon-high" "agy --model claude-opus-5-5"; do
+  for raw in "agy --model gemini-4-argon-high" "agy --model claude-opus-5-5" \
+    "env agy --model claude-opus-5-5" "sh -c 'agy --model gpt-6-sol'" \
+    "'/opt/vendor/agy' --model claude-opus-5-5" "nice \"agy\" --model gpt-6-sol"; do
     n=$((n + 1))
     id="agy-raw-$n"
     rec=$(make_spawn_case "raw-$n" "$id")
@@ -463,6 +466,11 @@ test_raw_agy_launch_is_refused() {
       "the raw agy refusal did not point at the canonical adapter"
     assert_no_agy_launch_side_effect "$HOME_DIR" "$id" "$LAUNCH_LOG" "raw agy launch '$raw'"
   done
+  rec=$(make_spawn_case raw-non-agy agy-raw-non-agy)
+  read_case_record "$rec"
+  out=$(run_scout_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" agy-raw-non-agy "$PROJ_DIR" "env custom-agent --flag")
+  expect_code 0 "$?" "a raw non-agy launch must remain allowed: $out"
+  assert_contains "$(cat "$LAUNCH_LOG")" "env custom-agent --flag" "the raw non-agy launch was not passed to the backend"
   pass "fm-spawn: a raw agy launch command is refused in favor of the canonical Gemini-only adapter"
 }
 

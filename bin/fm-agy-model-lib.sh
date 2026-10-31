@@ -16,13 +16,11 @@
 # This is a single-harness rule, not a per-harness allowlist framework; the
 # Cursor allowlist (config/cursor-model-allowlist) is a separate owner.
 
-# fm_agy_model_allowed <model>: succeed silently for an explicit gemini-* id
-# made only of the characters agy model ids use; otherwise print the refusal
-# to stderr and fail.
+# fm_agy_model_allowed <model>: succeed silently for an explicit gemini-* id;
+# otherwise print the refusal to stderr and fail.
 fm_agy_model_allowed() {
   local model=${1:-}
   case "$model" in
-    gemini-*[!A-Za-z0-9._-]*) ;;
     gemini-?*) return 0 ;;
   esac
   if [ -z "$model" ] || [ "$model" = default ]; then
@@ -30,5 +28,21 @@ fm_agy_model_allowed() {
   else
     echo "error: agy runs Gemini models only; refusing model '$model'; use the claude harness for Anthropic models or the codex harness for OpenAI models" >&2
   fi
+  return 1
+}
+
+fm_raw_launch_names_agy() {
+  local word
+  local -a words=()
+  IFS=$' \t\n' read -r -d '' -a words <<< "$1" || :
+  for word in "${words[@]}"; do
+    while [[ $word == \"* || $word == \'* ]]; do
+      word=${word:1}
+    done
+    while [[ $word == *\" || $word == *\' ]]; do
+      word=${word%?}
+    done
+    [[ ${word##*/} == agy ]] && return 0
+  done
   return 1
 }

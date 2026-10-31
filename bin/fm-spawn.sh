@@ -2076,11 +2076,11 @@ fi
 # point with the model its caller passed, so it is covered too. A raw launch
 # command naming agy would carry its model inside an opaque string this check
 # cannot vouch for, so it is refused in favor of the canonical adapter.
+if [ "$RAW_LAUNCH" -eq 1 ] && fm_raw_launch_names_agy "$LAUNCH"; then
+  echo "error: agy runs Gemini models only and must launch through the canonical adapter (--harness agy --model gemini-...), not a raw launch command whose model cannot be checked; use the claude harness for Anthropic models or the codex harness for OpenAI models" >&2
+  exit 1
+fi
 if [ "$HARNESS" = agy ]; then
-  if [ "$RAW_LAUNCH" -eq 1 ]; then
-    echo "error: agy runs Gemini models only and must launch through the canonical adapter (--harness agy --model gemini-...), not a raw launch command whose model cannot be checked; use the claude harness for Anthropic models or the codex harness for OpenAI models" >&2
-    exit 1
-  fi
   fm_agy_model_allowed "$MODEL" || exit 1
 fi
 
