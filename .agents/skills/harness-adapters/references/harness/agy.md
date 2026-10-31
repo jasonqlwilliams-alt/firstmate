@@ -10,7 +10,7 @@ The router owns that task-kind boundary, and `../../../../bin/fm-spawn.sh` refus
 | Fact | Value |
 |---|---|
 | Binary | `resolve_agy_binary` in `../../../bin/fm-spawn.sh` resolves `agy` from `PATH`, then falls back to `$HOME/.local/bin/agy`; spawning refuses if neither is executable. A single native Go executable, not a script bundle. |
-| Launch | Foreign markers cleared, then `agy --dangerously-skip-permissions --add-dir <worktree> --add-dir <hook-root> [--model] [--effort] -i <one positional brief>`. `-i` is `--prompt-interactive`: it starts the supervised TUI AND auto-submits the brief, so no launch-then-send gate is needed. |
+| Launch | Foreign markers cleared, then `agy --dangerously-skip-permissions --add-dir <worktree> --add-dir <hook-root> --model <gemini-id> [--effort] -i <one positional brief>`. `-i` is `--prompt-interactive`: it starts the supervised TUI AND auto-submits the brief, so no launch-then-send gate is needed. |
 | Workspace | agy takes its workspace set from `--add-dir`, and a SINGLE `--add-dir` REPLACES it rather than extending it - see "Two workspaces" below. Without any `--add-dir`, shell tool calls default to the launch cwd, but the model may pass its own `Cwd` argument, so briefs must keep using absolute paths. |
 | Busy state | `../../../bin/fm-busy-lib.sh` source `agy-hook`: the per-task `hooks.json` marks busy at `PreInvocation` and idle at `Stop`. Verified as a clean open/close pair in print mode AND in a supervised tmux pane. |
 | Turn end | The same `Stop` hook touches `state/<id>.turn-ended`. `Stop` fires on normal turn end with `terminationReason` (`NO_TOOL_CALL` observed) and `fullyIdle`; a reply without `"decision":"continue"` lets the turn end. |
