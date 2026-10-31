@@ -1,0 +1,3 @@
+Before: agy pid=206451 meta_sha256=855d945a645d4d8e963fdbc623163df9beaa91a65b1c74e34f534c8c9bff919f brief_sha256=dd14292b01b8181157e233580839b5edeee7271264e8301e8c9e677e0da7654e
+error: agy runs Gemini models only; refusing model 'gpt-oss-120b-medium'; use the claude harness for Anthropic models or the codex harness for OpenAI models
+exit=1 after_agy_pid=206451 meta_unchanged=yes brief_unchanged=yes journal=absent

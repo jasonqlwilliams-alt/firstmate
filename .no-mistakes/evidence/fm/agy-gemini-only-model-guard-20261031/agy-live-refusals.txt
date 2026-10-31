@@ -1,0 +1,43 @@
+CASE canonical Anthropic model
+error: agy runs Gemini models only; refusing model 'claude-opus-5-5'; use the claude harness for Anthropic models or the codex harness for OpenAI models
+exit=1 meta=absent hooks=absent
+
+CASE canonical OpenAI model
+error: agy runs Gemini models only; refusing model 'gpt-oss-120b-medium'; use the claude harness for Anthropic models or the codex harness for OpenAI models
+exit=1 meta=absent hooks=absent
+
+CASE omitted model
+error: agy runs Gemini models only and needs an explicit gemini-* model, but none was given (agy's own default model is not trusted); use the claude harness for Anthropic models or the codex harness for OpenAI models
+exit=1 meta=absent hooks=absent
+
+CASE default model
+error: agy runs Gemini models only and needs an explicit gemini-* model, but none was given (agy's own default model is not trusted); use the claude harness for Anthropic models or the codex harness for OpenAI models
+exit=1 meta=absent hooks=absent
+
+CASE empty model
+error: --model requires a non-empty value
+exit=1 meta=absent hooks=absent
+
+CASE bare gemini- prefix
+error: agy runs Gemini models only; refusing model 'gemini-'; use the claude harness for Anthropic models or the codex harness for OpenAI models
+exit=1 meta=absent hooks=absent
+
+CASE raw env wrapper
+error: agy runs Gemini models only and must launch through the canonical adapter (--harness agy --model gemini-...), not a raw launch command whose model cannot be checked; use the claude harness for Anthropic models or the codex harness for OpenAI models
+exit=1 meta=absent hooks=absent
+
+CASE raw sh -c wrapper
+error: agy runs Gemini models only and must launch through the canonical adapter (--harness agy --model gemini-...), not a raw launch command whose model cannot be checked; use the claude harness for Anthropic models or the codex harness for OpenAI models
+exit=1 meta=absent hooks=absent
+
+CASE raw path wrapper
+error: agy runs Gemini models only and must launch through the canonical adapter (--harness agy --model gemini-...), not a raw launch command whose model cannot be checked; use the claude harness for Anthropic models or the codex harness for OpenAI models
+exit=1 meta=absent hooks=absent
+
+CASE raw nice wrapper
+error: agy runs Gemini models only and must launch through the canonical adapter (--harness agy --model gemini-...), not a raw launch command whose model cannot be checked; use the claude harness for Anthropic models or the codex harness for OpenAI models
+exit=1 meta=absent hooks=absent
+
+CASE catalog-listed Anthropic model
+error: agy runs Gemini models only; refusing model 'claude-opus-5-5-high'; use the claude harness for Anthropic models or the codex harness for OpenAI models
+exit=1 meta=absent hooks=absent

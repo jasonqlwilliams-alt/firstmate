@@ -1,0 +1,11 @@
+FIRSTMATE RESULT
+spawned raw-live harness=env kind=scout window=fmses:fm-raw-live
+
+PANE
+command=sleep path=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M68T5F37KK2XD86RM6MJZ4S8/.nm-live-agy/wt pid=276521
+
+TASK RECORD
+window=fmses:fm-raw-live
+harness=env
+kind=scout
+model=default
