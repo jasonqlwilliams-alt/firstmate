@@ -544,18 +544,19 @@ Both `use` and the optional top-level `default` accept either one profile object
 The single-object form stays fully backward-compatible, and every profile needs `harness`.
 Profile `model` and `effort` fields and rule `why` are optional.
 `ultra` is native-only: the model-aware validation contract and launch mapping are owned by `bin/fm-harness.sh validate-native-effort` and `bin/fm-spawn.sh` respectively.
-An omitted model or effort means the selected harness uses its own default for that axis.
+An omitted model or effort means the selected harness uses its own default for that axis, except that an agy profile always needs an explicit Gemini model (see below).
 Every profile array is an implicit quota-aware choice resolved through `quota-array-dispatch`.
 If no dispatch rule fits, firstmate resolves `default` through the same object-or-array path before falling back to `config/crew-harness`.
 Except for `ultra`, which refuses unsupported profiles under the native-effort contract above, an effort value the chosen harness does not accept is recorded as `effort=` in task meta for traceability but omitted from the launch flags.
 Bootstrap reports unsupported harness/model/effort combinations as a `CREW_DISPATCH` diagnostic when they are visible in the file.
 agy is the one adapter that CAPS instead of omitting: it accepts only `low`, `medium`, and `high`, and an unsupported value is a hard launch failure rather than an ignored flag, so `fm-spawn.sh` maps a requested `xhigh` or `max` onto `high` while still recording the requested value verbatim in task meta.
 A profile naming it is written exactly like any other, for example `{ "harness": "agy", "model": "gemini-3.1-pro-high", "effort": "high" }`, with the model taken from `agy models` for the authenticated account.
+agy runs Gemini models only, so an agy profile must name an explicit `gemini-*` model: one with an Anthropic or OpenAI model or no model is reported as `CREW_DISPATCH: invalid`, and the spawn refuses it too, because those models belong on the `claude` and `codex` harnesses ([`bin/fm-agy-model-lib.sh`](../bin/fm-agy-model-lib.sh) owns the rule).
 Firstmate does not ship a rule routing work to agy: what work Antigravity may receive is the captain's standing decision, and this file documents only the profile shape.
 See [`docs/examples/crew-dispatch.json`](examples/crew-dispatch.json) for a starting point to copy into local `config/crew-dispatch.json`.
 When the file exists, bootstrap validates it with `jq`.
 Valid files stay silent by default; with `FM_BOOTSTRAP_VERBOSE_FACTS=1`, bootstrap emits `BOOTSTRAP_INFO: crew dispatch active config/crew-dispatch.json`, one `BOOTSTRAP_INFO:` fact per rule, and one fact for the optional default profile set.
-Malformed JSON, an empty or malformed rule/default array, an unverified harness, or an effort value unsupported by that harness is reported as `CREW_DISPATCH: invalid config/crew-dispatch.json - ...`; missing `jq` is reported through the normal `MISSING: jq` install-consent flow.
+Malformed JSON, an empty or malformed rule/default array, an unverified harness, an effort value unsupported by that harness, or an agy profile without a `gemini-*` model is reported as `CREW_DISPATCH: invalid config/crew-dispatch.json - ...`; missing `jq` is reported through the normal `MISSING: jq` install-consent flow.
 While the file remains present, no crewmate or scout spawn may proceed without an explicit resolved harness; malformed configuration must be reported and corrected rather than selected around.
 Secondmate homes inherit this file from the primary, so a secondmate's own crewmates apply the same dispatch profile behavior.
 A Cursor profile's `model` still has to match `config/cursor-model-allowlist` at spawn.

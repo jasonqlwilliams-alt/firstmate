@@ -1554,6 +1554,161 @@ test_promotion_participates_in_the_lifecycle_lock_before_metadata_resolution() {
 
 # --- 6. fm-spawn --relaunch's own refusals -----------------------------------
 
+# --- agy Gemini-only model guard ---------------------------------------------
+
+# A fake agy whose account catalog lists Anthropic and OpenAI ids beside the
+# Gemini ones, exactly as the real catalog does, so a refusal below comes from
+# the Gemini-only rule and never from catalog validation.
+add_fake_agy() {  # <case-dir>
+  cat > "$1/fakebin/agy" <<'SH'
+#!/usr/bin/env bash
+case "$1" in
+  models)
+    printf 'gemini-4-argon-high\tGemini 4 Argon (High)\n'
+    printf 'gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n'
+    printf 'claude-opus-5-5\tClaude Opus 5.5\n'
+    printf 'gpt-6-sol\tGPT 6 Sol\n'
+    ;;
+esac
+exit 0
+SH
+  chmod +x "$1/fakebin/agy"
+}
+
+set_meta_model() {  # <case-dir> <id> <model>
+  sed "s|^model=.*\$|model=$3|" "$1/home/state/$2.meta" > "$1/home/state/$2.meta.tmp"
+  mv "$1/home/state/$2.meta.tmp" "$1/home/state/$2.meta"
+}
+
+# assert_agy_relaunch_refused_before_stop <case-dir> <id> <prior-cmd> <brief-before> <meta-before> <label>
+assert_agy_relaunch_refused_before_stop() {
+  local dir=$1 id=$2 prior=$3 brief_before=$4 meta_before=$5 label=$6
+  [ "$(cat "$dir/fake/command")" = "$prior" ] || fail "$label: a refused relaunch must not stop the running agent"
+  [ ! -s "$dir/fake/literal" ] || fail "$label: a refused relaunch must send nothing: $(cat "$dir/fake/literal")"
+  [ "$(cat "$dir/home/data/$id/brief.md")" = "$brief_before" ] || fail "$label: a refused relaunch must not touch the instructions"
+  [ "$(cat "$dir/home/state/$id.meta")" = "$meta_before" ] || fail "$label: a refused relaunch must leave the record byte-identical"
+  [ ! -e "$dir/home/state/$id.control-relaunch" ] || fail "$label: a refused relaunch must open no transaction journal"
+  [ ! -e "$dir/home/state/$id.agy-hooks" ] || fail "$label: a refused relaunch must write no agy hook root"
+}
+
+test_agy_relaunch_refuses_non_gemini_models_before_stop() {
+  local model n=0 id dir out rc brief_before meta_before label
+  # Switching a running task onto agy.
+  for model in claude-opus-5-5 gpt-6-sol @none @empty; do
+    n=$((n + 1))
+    id="rl-agy-switch-$n"
+    label="switch onto agy with model $model"
+    dir=$(new_case agyswitch "$id")
+    add_ship_task "$dir" "$id" claude
+    add_fake_agy "$dir"
+    printf agy > "$dir/fake/becomes"
+    brief_before=$(cat "$dir/home/data/$id/brief.md")
+    meta_before=$(cat "$dir/home/state/$id.meta")
+    case "$model" in
+      @none) out=$(run_control "$dir" "$id" relaunch --harness agy --note "move to agy"); rc=$? ;;
+      @empty) out=$(run_control "$dir" "$id" relaunch --harness agy --model '' --note "move to agy"); rc=$? ;;
+      *) out=$(run_control "$dir" "$id" relaunch --harness agy --model "$model" --note "move to agy"); rc=$? ;;
+    esac
+    expect_code 1 "$rc" "$label must refuse"$'\n'"$out"
+    case "$model" in
+      @none) assert_contains "$out" "agy runs Gemini models only and needs an explicit gemini-* model, but none was given" "$label: refusal missing" ;;
+      @empty) assert_contains "$out" "--model requires a non-empty value" "$label: refusal missing" ;;
+      *) assert_contains "$out" "agy runs Gemini models only; refusing model '$model'" "$label: refusal missing" ;;
+    esac
+    [ "$model" = @empty ] || assert_contains "$out" "use the claude harness for Anthropic models or the codex harness for OpenAI models" \
+      "$label: the refusal did not point at each vendor's own harness"
+    assert_agy_relaunch_refused_before_stop "$dir" "$id" claude "$brief_before" "$meta_before" "$label"
+  done
+
+  # Relaunching an agy task whose record carries a non-Gemini or no model.
+  for model in claude-opus-5-5 gpt-6-sol default; do
+    n=$((n + 1))
+    id="rl-agy-same-$n"
+    label="same-harness agy relaunch with recorded model $model"
+    dir=$(new_case agysame "$id")
+    add_ship_task "$dir" "$id" agy
+    add_fake_agy "$dir"
+    set_meta_model "$dir" "$id" "$model"
+    printf agy > "$dir/fake/command"
+    printf agy > "$dir/fake/becomes"
+    brief_before=$(cat "$dir/home/data/$id/brief.md")
+    meta_before=$(cat "$dir/home/state/$id.meta")
+    out=$(run_control "$dir" "$id" relaunch --note "same runtime"); rc=$?
+    expect_code 1 "$rc" "$label must refuse"$'\n'"$out"
+    if [ "$model" = default ]; then
+      assert_contains "$out" "none was given" "$label: refusal missing"
+    else
+      assert_contains "$out" "refusing model '$model'" "$label: refusal missing"
+    fi
+    assert_agy_relaunch_refused_before_stop "$dir" "$id" agy "$brief_before" "$meta_before" "$label"
+  done
+  pass "fm-control relaunch: agy refuses Anthropic, OpenAI, empty, and omitted models before the note, the journal, or the stop"
+}
+
+test_agy_relaunch_allows_gemini_models() {
+  local dir out rc id
+  id=rl-agy-allow-1
+  dir=$(new_case agyallow "$id")
+  add_ship_task "$dir" "$id" claude
+  add_fake_agy "$dir"
+  printf agy > "$dir/fake/becomes"
+  out=$(run_control "$dir" "$id" relaunch --harness agy --model gemini-4-argon-high --note "move to agy"); rc=$?
+  expect_code 0 "$rc" "a relaunch onto agy with a Gemini model should succeed"$'\n'"$out"
+  [ "$(meta_field "$dir" "$id" harness)" = agy ] || fail "the record should follow the switch onto agy"
+  [ "$(meta_field "$dir" "$id" model)" = gemini-4-argon-high ] || fail "the Gemini model should be recorded"
+  assert_contains "$(cat "$dir/fake/literal")" "--model 'gemini-4-argon-high' " "the agy launch did not carry the Gemini model"
+
+  id=rl-agy-allow-2
+  dir=$(new_case agyallow "$id")
+  add_ship_task "$dir" "$id" agy
+  add_fake_agy "$dir"
+  set_meta_model "$dir" "$id" gemini-3.8-flash-high
+  printf agy > "$dir/fake/command"
+  printf agy > "$dir/fake/becomes"
+  out=$(run_control "$dir" "$id" relaunch --note "same runtime"); rc=$?
+  expect_code 0 "$rc" "a same-harness agy relaunch on its Gemini model should succeed"$'\n'"$out"
+  [ "$(meta_field "$dir" "$id" model)" = gemini-3.8-flash-high ] || fail "the recorded Gemini model should carry across"
+  assert_contains "$(cat "$dir/fake/literal")" "--model 'gemini-3.8-flash-high' " "the agy relaunch did not carry its Gemini model"
+  pass "fm-control relaunch: agy relaunches on explicit gemini-* models"
+}
+
+# fm-spawn --relaunch is also reachable directly; it refuses on its own,
+# before anything is sent into the endpoint.
+test_spawn_relaunch_refuses_non_gemini_agy_models() {
+  local model n=0 id dir out rc meta_before
+  for model in claude-opus-5-5 gpt-6-sol @none; do
+    n=$((n + 1))
+    id="rl-agy-spawn-$n"
+    dir=$(new_case agyspawn "$id")
+    add_ship_task "$dir" "$id" agy
+    add_fake_agy "$dir"
+    printf 'zsh' > "$dir/fake/command"
+    meta_before=$(cat "$dir/home/state/$id.meta")
+    if [ "$model" = @none ]; then
+      out=$(run_spawn "$dir" "$id" --relaunch); rc=$?
+      expect_code 1 "$rc" "a direct agy relaunch without a model must refuse"$'\n'"$out"
+      assert_contains "$out" "none was given" "the direct relaunch refusal did not say no model was given"
+    else
+      out=$(run_spawn "$dir" "$id" --relaunch --model "$model"); rc=$?
+      expect_code 1 "$rc" "a direct agy relaunch on $model must refuse"$'\n'"$out"
+      assert_contains "$out" "refusing model '$model'" "the direct relaunch refusal did not name $model"
+    fi
+    [ ! -s "$dir/fake/literal" ] || fail "a refused direct relaunch must send nothing: $(cat "$dir/fake/literal")"
+    [ "$(cat "$dir/home/state/$id.meta")" = "$meta_before" ] || fail "a refused direct relaunch must leave the record byte-identical"
+    [ ! -e "$dir/home/state/$id.agy-hooks" ] || fail "a refused direct relaunch must write no agy hook root"
+  done
+  id=rl-agy-spawn-ok
+  dir=$(new_case agyspawn "$id")
+  add_ship_task "$dir" "$id" agy
+  add_fake_agy "$dir"
+  printf 'zsh' > "$dir/fake/command"
+  printf agy > "$dir/fake/becomes"
+  out=$(run_spawn "$dir" "$id" --relaunch --model gemini-4-argon-high); rc=$?
+  expect_code 0 "$rc" "a direct agy relaunch on a Gemini model should launch"$'\n'"$out"
+  assert_contains "$(cat "$dir/fake/literal")" "--model 'gemini-4-argon-high' " "the direct agy relaunch did not carry its Gemini model"
+  pass "fm-spawn --relaunch: agy refuses non-Gemini and omitted models on its own and launches on a Gemini one"
+}
+
 test_spawn_relaunch_refuses_a_live_agent() {
   local dir out rc
   dir=$(new_case live rl15)
@@ -3003,6 +3158,9 @@ test_secondmate_checkpoint_refuses_unreadable_child_state
 test_concurrent_relaunch_is_refused
 test_direct_spawn_relaunch_participates_in_the_lifecycle_lock
 test_promotion_participates_in_the_lifecycle_lock_before_metadata_resolution
+test_agy_relaunch_refuses_non_gemini_models_before_stop
+test_agy_relaunch_allows_gemini_models
+test_spawn_relaunch_refuses_non_gemini_agy_models
 test_spawn_relaunch_refuses_a_live_agent
 test_spawn_relaunch_recreates_a_missing_endpoint
 test_control_relaunch_recreates_a_missing_endpoint

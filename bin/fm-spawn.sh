@@ -363,8 +363,10 @@
 # agy's own trustedWorkspaces store (bin/fm-agy-trust.sh) because
 # --dangerously-skip-permissions does not cover its workspace-trust dialog, and
 # validates --model against `agy models` because an unlisted model is a hard
-# launch failure. agy is crewmate/scout only and is refused for --secondmate,
-# like muse and rovo.
+# launch failure. agy runs Gemini models only: a launch without an explicit
+# gemini-* --model, or a raw agy launch command, is refused before any side
+# effect (bin/fm-agy-model-lib.sh owns that rule). agy is crewmate/scout only
+# and is refused for --secondmate, like muse and rovo.
 # cursor installs no per-task hook either: it writes state/<id>.cursor-session to
 # bind the pane to cursor's own conversation transcript (projects root, the exact
 # workspace path cursor records in .workspace-trusted, and the conversations that
@@ -560,6 +562,8 @@ fm_backlog_directory_present "$STATE" "state directory" || {
 . "$SCRIPT_DIR/fm-busy-lib.sh"
 # shellcheck source=bin/fm-cursor-lib.sh
 . "$SCRIPT_DIR/fm-cursor-lib.sh"
+# shellcheck source=bin/fm-agy-model-lib.sh
+. "$SCRIPT_DIR/fm-agy-model-lib.sh"
 # shellcheck source=bin/fm-pr-lib.sh
 . "$SCRIPT_DIR/fm-pr-lib.sh"
 # shellcheck source=bin/fm-dod-lib.sh
@@ -2063,6 +2067,21 @@ fi
 if [ "$KIND" = secondmate ] && [ "$HARNESS" = agy ]; then
   echo "error: agy is a verified crewmate/scout adapter only and cannot run a secondmate; it has no primary supervision protocol. Select a harness verified for secondmates." >&2
   exit 1
+fi
+
+# agy runs Gemini models only (bin/fm-agy-model-lib.sh owns the rule). This
+# sits after the secondmate refusal so that refusal keeps its own message, and
+# before any launch side effect. MODEL is final for an agy launch here: no
+# later step rewrites it for a crewmate or scout. A relaunch reaches this same
+# point with the model its caller passed, so it is covered too. A raw launch
+# command naming agy would carry its model inside an opaque string this check
+# cannot vouch for, so it is refused in favor of the canonical adapter.
+if [ "$HARNESS" = agy ]; then
+  if [ "$RAW_LAUNCH" -eq 1 ]; then
+    echo "error: agy runs Gemini models only and must launch through the canonical adapter (--harness agy --model gemini-...), not a raw launch command whose model cannot be checked; use the claude harness for Anthropic models or the codex harness for OpenAI models" >&2
+    exit 1
+  fi
+  fm_agy_model_allowed "$MODEL" || exit 1
 fi
 
 if [ -n "$PI_POSTURE" ]; then

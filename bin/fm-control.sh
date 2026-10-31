@@ -145,6 +145,8 @@ if [ -n "${FM_STATE_OVERRIDE:-}" ]; then FM_STATE_OVERRIDE=$STATE; fi
 . "$SCRIPT_DIR/fm-busy-lib.sh"
 # shellcheck source=bin/fm-control-lib.sh
 . "$SCRIPT_DIR/fm-control-lib.sh"
+# shellcheck source=bin/fm-agy-model-lib.sh
+. "$SCRIPT_DIR/fm-agy-model-lib.sh"
 # shellcheck source=bin/fm-pr-lib.sh
 . "$SCRIPT_DIR/fm-pr-lib.sh"
 # shellcheck source=bin/fm-wake-lib.sh
@@ -704,6 +706,12 @@ resolve_relaunch_profile() {
   fi
   if [ "$TARGET_EFFORT" = ultra ]; then
     "$SCRIPT_DIR/fm-harness.sh" validate-native-effort "$TARGET_HARNESS" "$TARGET_MODEL" "$TARGET_EFFORT" || return 1
+  fi
+  # agy runs Gemini models only (bin/fm-agy-model-lib.sh). The launch owner
+  # refuses too, but asking here keeps the refusal ahead of the progress note,
+  # the journal, and the stop, where nothing has changed yet.
+  if [ "$TARGET_HARNESS" = agy ]; then
+    fm_agy_model_allowed "$TARGET_MODEL" || exit 1
   fi
 }
 

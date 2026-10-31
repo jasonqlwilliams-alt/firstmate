@@ -171,6 +171,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 # shellcheck source=bin/fm-tasks-axi-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
+# shellcheck source=bin/fm-agy-model-lib.sh disable=SC1091
+. "$SCRIPT_DIR/fm-agy-model-lib.sh"
 # shellcheck source=bin/fm-backlog-transition-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
 # shellcheck source=bin/fm-quota-axi-lib.sh disable=SC1091
@@ -1188,6 +1190,23 @@ crew_dispatch_validate() {
   ' "$file" 2>/dev/null || true)
   if [ -n "$err" ]; then
     echo "CREW_DISPATCH: invalid config/crew-dispatch.json - $err"
+    return 0
+  fi
+  # agy runs Gemini models only (bin/fm-agy-model-lib.sh owns the rule), so a
+  # profile naming agy without a gemini-* model would hand the spawn a launch it
+  # must refuse. Report it here rather than at dispatch time. Line breaks inside
+  # a model are flattened so one value can never read as several.
+  local agy_model bad_agy=
+  while IFS= read -r agy_model; do
+    fm_agy_model_allowed "$agy_model" 2>/dev/null \
+      || bad_agy="${bad_agy:+$bad_agy, }agy:${agy_model:-<no model>}"
+  done < <(jq -r '
+    [(.rules // [])[]? | (if (.use | type) == "array" then .use[] else .use end)]
+    + (if has("default") then (if (.default | type) == "array" then .default else [.default] end) else [] end)
+    | .[] | select(.harness == "agy") | (.model // "") | gsub("[\\r\\n]"; " ")
+  ' "$file" 2>/dev/null)
+  if [ -n "$bad_agy" ]; then
+    echo "CREW_DISPATCH: invalid config/crew-dispatch.json - agy runs Gemini models only and each agy profile needs an explicit gemini-* model (use the claude harness for Anthropic models or the codex harness for OpenAI models): $bad_agy"
     return 0
   fi
   if [ "${FM_BOOTSTRAP_VERBOSE_FACTS:-0}" = 1 ]; then
