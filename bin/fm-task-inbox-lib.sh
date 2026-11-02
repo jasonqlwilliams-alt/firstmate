@@ -70,10 +70,6 @@
 # Tunables (env):
 #   FM_TASK_INBOX_GRACE_SECS   default 90; delivery-attempt grace and spacing
 #   FM_TASK_INBOX_RING_MAX     default 3; delivery attempts before escalation
-#   FM_TASK_INBOX_RING_SETTLE  default 0.3; seconds between the typed doorbell
-#                              and each recheck before its Enter
-#   FM_TASK_INBOX_RING_POLLS   default 5; Codex-pane rechecks before the Enter
-#                              is withheld
 
 _FM_TASK_INBOX_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Both dependencies are canonical lint roots in their own right. Keep them as
@@ -310,9 +306,6 @@ fm_task_inbox_doorbell_line() {  # <record-path>
 # stays unread as a stuck steer (fm_task_inbox_due_action).
 fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label] [harness]
   local backend=$1 target=$2 rec=$3 label=${4:-} harness=${5:-} line screen i=0 strict=0
-  local polls=${FM_TASK_INBOX_RING_POLLS:-5} settle=${FM_TASK_INBOX_RING_SETTLE:-0.3}
-  case "$polls" in ''|*[!0-9]*|0) polls=5 ;; esac
-  case "$settle" in ''|*[!0-9.]*|*.*.*) settle=0.3 ;; esac
   [ "$harness" != codex ] || strict=1
   case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
     dead|missing) return 3 ;;
@@ -336,7 +329,7 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label] [har
   # on every harness, and a Codex pane waits briefly for its composer to show
   # the typed doorbell.
   while :; do
-    sleep "$settle"
+    sleep 0.3
     screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" "$line" 2>/dev/null) \
       || screen=unknown
     case "$screen" in
@@ -345,7 +338,7 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label] [har
     esac
     [ "$strict" = 1 ] || break
     i=$((i + 1))
-    [ "$i" -lt "$polls" ] || return 5
+    [ "$i" -lt 5 ] || return 5
   done
   fm_backend_send_key "$backend" "$target" Enter "$label" >/dev/null 2>&1 || return 2
   return 0

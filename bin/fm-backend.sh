@@ -906,6 +906,10 @@ EOF
       verdict=pending
     fi
   fi
+  if [ "$verdict" = pending ] && [ -n "$expected" ] \
+     && ! fm_composer_holds_text "$FM_COMPOSER_SNAPSHOT_CAPS" "$FM_COMPOSER_SNAPSHOT_SCREEN" "$expected"; then
+    verdict=unknown
+  fi
   case "$verdict" in
     empty|pending|pending-unproven) printf '%s' "$verdict" ;;
     *)

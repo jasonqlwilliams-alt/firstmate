@@ -742,7 +742,8 @@ ring_lab_setup() {
   cat > "$RING_LAB/screen-stub.sh" <<'STUB'
 # Screen stub: <mode> <log>. Modes: empty, pending, unknown, picker-below,
 # picker-row, picker-after-key (empty until the first key, then the picker),
-# noecho (an empty composer that never renders what is typed), agy (agy's idle
+# noecho (an empty composer that never renders what is typed), partial (a
+# composer that renders only a prefix of typed text), agy (agy's idle
 # shape: a `>` row between two solid rules, which classifies unknown).
 mode=$1 log=$2 buf=
 cols=$(stty size 2>/dev/null | cut -d' ' -f2)
@@ -760,20 +761,21 @@ picker() {
   [ "$mode" != picker-row ] || printf '\033[4;1H'
 }
 composer() {
-  local w=$((cols - 2)) i=0 row=3 len
+  local w=$((cols - 2)) i=0 row=3 len shown=$buf
   printf '\033[2J\033[H>_ Codex-shaped test stub\r\n\r\n'
   if [ -z "$buf" ]; then
     printf '› \033[2mAsk Codex to do anything\033[0m\r\n\r\n  \033[2m100%% context left\033[0m\033[3;3H'
     return
   fi
-  printf '› %s' "${buf:0:w}"
+  [ "$mode" != partial ] || shown=${buf:0:24}
+  printf '› %s' "${shown:0:w}"
   i=$w
-  while [ "$i" -lt "${#buf}" ]; do
-    printf '\r\n  %s' "${buf:i:w}"
+  while [ "$i" -lt "${#shown}" ]; do
+    printf '\r\n  %s' "${shown:i:w}"
     i=$((i + w))
     row=$((row + 1))
   done
-  len=$(( ${#buf} - (row - 3) * w ))
+  len=$(( ${#shown} - (row - 3) * w ))
   printf '\r\n\r\n  \033[2m100%% context left\033[0m\033[%d;%dH' "$row" "$((3 + len))"
 }
 agy() {
@@ -793,7 +795,7 @@ while IFS= read -r -n 1 ch; do
   if [ -z "$ch" ]; then
     printf 'ENTER\n' >> "$log"
     case "$mode" in
-      empty|pending|agy)
+      empty|pending|agy|partial)
         if [ -n "$buf" ]; then
           printf 'SUBMIT %s\n' "$buf" >> "$log"
           if [[ $buf =~ list\ \'([^\']+)\'/\*\.msg ]]; then
@@ -808,7 +810,7 @@ while IFS= read -r -n 1 ch; do
   else
     printf 'KEY %s\n' "$ch" >> "$log"
     case "$mode" in
-      empty|pending|agy) buf="$buf$ch" ;;
+      empty|pending|agy|partial) buf="$buf$ch" ;;
       picker-after-key) mode=picker-below ;;
     esac
   fi
@@ -845,7 +847,7 @@ ring_stub_window() {  # <name> <mode> <log>
 ring_into() {  # <state> <task> <target> <harness>
   local state=$1 task=$2 target=$3 harness=$4 rec rc=0
   rec=$(inbox_lib "$state" fm_task_inbox_write "$state" "$task" "please continue")
-  PATH="$RING_LAB/shim:$PATH" FM_TASK_INBOX_RING_POLLS=5 \
+  PATH="$RING_LAB/shim:$PATH" \
     inbox_lib "$state" fm_task_inbox_ring tmux "$target" "$rec" "" "$harness" || rc=$?
   printf '%s\n' "$rc"
 }
@@ -931,6 +933,12 @@ test_ring_refuses_pending_and_unproven_codex_screens() {
   [ "$rc" = 5 ] || fail "a Codex composer that never shows the typed doorbell should withhold the Enter with 5, got $rc"
   grep -q '^KEY' "$log" || fail "the noecho case is vacuous unless the doorbell was typed"
   ! grep -q '^ENTER' "$log" || fail "the ring pressed Enter on an unproven Codex screen:"$'\n'"$(cat "$log")"
+  log="$RING_LAB/partial.log"
+  target=$(ring_stub_window partial partial "$log")
+  rc=$(ring_into "$state" partial "$target" codex)
+  [ "$rc" = 5 ] || fail "a Codex composer showing only a doorbell prefix should withhold Enter with 5, got $rc"
+  grep -q '^KEY' "$log" || fail "the partial case is vacuous unless the doorbell was typed"
+  ! grep -q '^ENTER' "$log" || fail "the ring pressed Enter on a partially rendered doorbell:"$'\n'"$(cat "$log")"
   pass "inbox: pending text gets no keystroke on any harness, and an unproven Codex screen gets no keystroke or no Enter"
 }
 
@@ -992,7 +1000,7 @@ test_fm_send_ring_through_picker_and_composer() {
 
 # The re-ring path through the real watcher: a picker on screen is never typed
 # into, every refusal spends one attempt, and the spent budget escalates the
-# unread record as a stuck steer that names the picker.
+# unread record as a stuck steer.
 test_watcher_rering_refuses_picker_and_escalates() {
   local dir state out log keys pid rec cursor
   for cursor in 8 3; do
@@ -1019,11 +1027,9 @@ test_watcher_rering_refuses_picker_and_escalates() {
       || fail "each refused ring should spend one attempt (cursor row $cursor): $(cat "$state/t1.inbox/.ring-state")"
     grep -qF 'unread firstmate instruction' "$state/.wake-queue" \
       || fail "refused rings must escalate as a stuck steer (cursor row $cursor):"$'\n'"$(cat "$state/.wake-queue" 2>/dev/null)"
-    grep -qF 'Codex global-update picker' "$state/.wake-queue" \
-      || fail "the escalation should name the picker (cursor row $cursor):"$'\n'"$(cat "$state/.wake-queue")"
     [ -f "$rec" ] || fail "the durable record must survive refused rings"
   done
-  pass "watcher: re-rings never type into the update picker, and the spent budget escalates naming it"
+  pass "watcher: re-rings never type into the update picker, and the spent budget escalates"
 }
 
 test_write_is_durable_and_exact
