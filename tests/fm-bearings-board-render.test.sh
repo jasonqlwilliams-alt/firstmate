@@ -17,6 +17,7 @@ TMP_ROOT=$(fm_test_tmproot fm-bearings-board-render)
 
 command -v jq >/dev/null 2>&1 || { echo "skip: jq not found"; exit 0; }
 command -v node >/dev/null 2>&1 || { echo "skip: node not found"; exit 0; }
+command -v python3 >/dev/null 2>&1 || { echo "skip: python3 not found"; exit 0; }
 
 make_home() {  # <name>
   local home="$TMP_ROOT/$1" fakebin
@@ -349,6 +350,260 @@ test_overflow_queued_rows_are_revealed_in_place() {
   pass "overflow queued work collapses behind one control that reveals it in place, and warnings never collapse"
 }
 
+
+# --- Companion detail page and canvas export ---------------------------------
+
+DETAIL_HARNESS="$ROOT/tests/assets/bearings-detail-harness.py"
+
+# Build the board from a full payload file, with an optional config directory,
+# and print the build output.
+build_payload() {  # <home> <payload.json> [config-dir]
+  local home=$1 data=$2 config=${3:-$1/config}
+  mkdir -p "$config"
+  PATH="$home/fakebin:$PATH" FM_HOME="$home" \
+    FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" FM_CONFIG_OVERRIDE="$config" \
+    FM_PROCEVENT_CLAIM_ROOT="$home/procevent-claims" \
+    "$BOARD" build "$data" 2>"$home/build.err" || fail "the board did not build: $(cat "$home/build.err")"
+}
+
+detail_of() {  # <home>
+  python3 -I "$DETAIL_HARNESS" detail "$1/.lavish/bearings-detail.html" \
+    || fail "the detail page could not be read"
+}
+
+# One payload carrying every kind of Charted Next and Recently Landed row the
+# detail page must spell out, with the new detail fields set and omitted.
+write_detail_payload() {  # <home>
+  mkdir -p "$1/config"
+  jq -n '{
+    schema:"fm-bearings-board.v1", home:"detail-home", generated:"2026-08-26T00:00Z",
+    prs_live:false, captains_call:[],
+    underway:[{id:"live-work", repo:"sample", name:"Rewire the ledger", state:"working", doing:"tests", kind:"ship"}],
+    charted:[
+      {id:"blocked-row", repo:"sample", title:"Ship the second step",
+       reason:"blocked-by live-work,first-step: needs the ledger", dispatchable:false,
+       filed:"2026-08-20", waits_since:"2026-08-21", owner:"(main)",
+       blockers:[{id:"live-work", title:null}, {id:"first-step", title:"Land the first step"}, {id:"gone-work"}],
+       pr_url:"https://github.com/example/sample/pull/12", report:"data/blocked-row/report.md"},
+      {id:"ready-row", repo:"sample", title:"Ready queued work", reason:"", dispatchable:true,
+       filed:"2026-08-24", owner:"mate-one"},
+      {id:"warn-row", repo:null, title:"Main inventory integrity", reason:"main inventory",
+       dispatchable:false, kind:"warning", filed:null}
+    ],
+    charted_more:2,
+    landed:[
+      {id:"landed-one", repo:"sample", what:"Shipped the board links", owner:"(main)",
+       pr_url:"https://github.com/example/sample/pull/9", filed:"2026-08-10", landed_on:"2026-08-25",
+       report:null},
+      {id:"landed-two", repo:"sample", what:"Finished the ledger scout", owner:"mate-one",
+       report:"https://example.com/reports/ledger"}
+    ]}' > "$1/payload.json"
+}
+
+test_the_detail_page_spells_out_every_charted_and_landed_row() {
+  local home out d
+  home=$(make_home detail-page)
+  write_detail_payload "$home"
+  out=$(build_payload "$home" "$home/payload.json")
+  assert_contains "$out" "detail: $home/.lavish/bearings-detail.html" "the build did not report the detail page"
+  d=$(detail_of "$home")
+  printf '%s' "$d" | jq -e --arg home "$home" '
+    def fieldset: [.fields | keys[]] | sort
+      == (["blockers","filed","owner","pr","report","since","waits-on","what"] | sort);
+    .scripts == 0
+    and (.sections.charted.items | map(.title)
+      == ["Ready queued work", "Ship the second step", "Main inventory integrity"])
+    and (.sections.landed.items | map(.title) == ["Shipped the board links", "Finished the ledger scout"])
+    and ([.sections.charted.items[], .sections.landed.items[]] | all(fieldset))
+    and (.sections.charted.items[1] | .anchor == "charted-blocked-row" and .badge == "waiting"
+      and (.fields.what.text | test("Ship the second step")) and (.fields.what.text | test("sample"))
+      and .fields["waits-on"].text == "Other work finishing first: needs the ledger"
+      and .fields.since.label == "Waiting since" and .fields.since.text == "2026-08-21"
+      and .fields.owner.text == "(main)"
+      and (.fields.blockers.text | test("Rewire the ledger live-work"))
+      and (.fields.blockers.text | test("Land the first step first-step"))
+      and (.fields.blockers.text | test("Untitled work gone-work"))
+      and .fields.report.text == ($home + "/data/blocked-row/report.md")
+      and .fields.pr.links == [{href:"https://github.com/example/sample/pull/12", text:"https://github.com/example/sample/pull/12"}]
+      and .fields.filed.text == "2026-08-20")
+    and (.sections.charted.items[0] | .badge == "ready"
+      and .fields["waits-on"].text == "Nothing, it is ready to start"
+      and .fields.since.text == "2026-08-24" and .fields.owner.text == "mate-one"
+      and .fields.blockers.text == "None" and .fields.report.text == "Not recorded"
+      and .fields.pr.text == "None recorded")
+    and (.sections.charted.items[2] | .badge == "needs repair"
+      and (.fields["waits-on"].text | test("records need repair"))
+      and .fields.filed.text == "Not recorded" and .fields.owner.text == "Not recorded")
+    and (.sections.charted.more | length == 1 and (.[0] | test("\\+2 more queued items were left out")))
+    and (.sections.landed.items[0] | .badge == "landed" and .anchor == "landed-0"
+      and .fields["waits-on"].text == "Nothing, it landed"
+      and .fields.since.label == "Landed on" and .fields.since.text == "2026-08-25"
+      and .fields.owner.text == "(main)" and .fields.filed.text == "2026-08-10"
+      and .fields.pr.links[0].href == "https://github.com/example/sample/pull/9")
+    and (.sections.landed.items[1] | .fields.since.text == "Not recorded"
+      and .fields.report.links == [{href:"https://example.com/reports/ledger", text:"https://example.com/reports/ledger"}]
+      and .fields.pr.text == "None recorded")
+  ' >/dev/null || fail "the detail page did not spell out every row and field: $d"
+  pass "the detail page shows every Charted Next and Recently Landed row with all eight facts"
+}
+
+test_the_detail_page_is_regenerated_on_every_build_and_states_empty_sections() {
+  local home d
+  home=$(make_home detail-rebuild)
+  write_detail_payload "$home"
+  build_payload "$home" "$home/payload.json" >/dev/null
+  jq '.charted = [] | .charted_more = 0 | .landed = []' "$home/payload.json" > "$home/empty.json"
+  build_payload "$home" "$home/empty.json" >/dev/null
+  d=$(detail_of "$home")
+  printf '%s' "$d" | jq -e '
+    (.sections.charted.items | length) == 0 and (.sections.landed.items | length) == 0
+      and .sections.charted.empty == "Nothing is queued."
+      and .sections.landed.empty == "No recent completions are in the current baseline."
+  ' >/dev/null || fail "a rebuild left stale rows or no empty state on the detail page: $d"
+  jq '.charted = [{id:"warn-only", repo:null, title:"Main inventory integrity",
+       reason:"main inventory", dispatchable:false, kind:"warning", filed:null}]
+     | .charted_more = 0 | .landed = []' "$home/payload.json" > "$home/warn-only.json"
+  build_payload "$home" "$home/warn-only.json" >/dev/null
+  d=$(detail_of "$home")
+  printf '%s' "$d" | jq -e '
+    .sections.charted.empty == "Nothing is queued."
+      and (.sections.charted.items | length) == 1
+      and .sections.charted.items[0].badge == "needs repair"
+  ' >/dev/null || fail "a warning-only detail page dropped its empty-queue notice or warning row: $d"
+  jq 'del(.charted[0].blockers) | .charted = [.charted[0]]' "$home/payload.json" > "$home/fallback-blockers.json"
+  build_payload "$home" "$home/fallback-blockers.json" >/dev/null
+  d=$(detail_of "$home")
+  printf '%s' "$d" | jq -e '
+    .sections.charted.items[0].fields.blockers.text
+      | (test("Rewire the ledger live-work") and test("Untitled work first-step"))
+  ' >/dev/null || fail "omitted blockers were not recovered from structured blocked-by reason: $d"
+  pass "every build regenerates the detail page, including empty sections"
+}
+
+test_the_board_links_to_the_detail_page_from_its_nav_and_both_headers() {
+  local home links
+  home=$(make_home detail-links)
+  write_detail_payload "$home"
+  build_payload "$home" "$home/payload.json" >/dev/null
+  links=$(python3 -I "$DETAIL_HARNESS" links "$home/.lavish/bearings-board.html") \
+    || fail "the board links could not be read"
+  printf '%s' "$links" | jq -e '
+    [.[] | select(.href != null and (.href | startswith("bearings-detail.html")))] as $d
+    | ($d | map({context, href}) | sort_by(.context))
+        == ([{context:"nav", href:"bearings-detail.html"},
+             {context:"Charted Next", href:"bearings-detail.html#charted"},
+             {context:"Recently Landed", href:"bearings-detail.html#landed"}] | sort_by(.context))
+      and ($d | all(.target == "_blank" and (.rel | test("noopener")) and .lavish_action == true))
+  ' >/dev/null || fail "the board does not link the detail page from its nav and both headers: $links"
+  # Relative links resolve to the sibling the build just wrote, from a file or
+  # from the Lavish artifact route that serves the board directory.
+  [ -f "$home/.lavish/bearings-detail.html" ] || fail "the linked detail page is not beside the board"
+  python3 -I "$DETAIL_HARNESS" detail "$home/.lavish/bearings-detail.html" \
+    | jq -e '.sections | has("charted") and has("landed")' >/dev/null \
+    || fail "the linked anchors do not exist on the detail page"
+  pass "the board nav and both section headers open the detail page and its section anchors"
+}
+
+test_hostile_titles_are_escaped_on_the_detail_page() {
+  local home page d hostile='</script><script>alert(1)</script><img src=x onerror=alert(2)> & "quoted"'
+  home=$(make_home detail-escape)
+  write_detail_payload "$home"
+  jq --arg h "$hostile" '
+    .charted[0].title = $h | .charted[0].reason = $h
+    | .charted[0].blockers[1].title = $h | .charted[0].owner = $h
+    | .charted[0].report = $h | .landed[0].what = $h' "$home/payload.json" > "$home/hostile.json"
+  build_payload "$home" "$home/hostile.json" >/dev/null
+  page="$home/.lavish/bearings-detail.html"
+  d=$(detail_of "$home")
+  printf '%s' "$d" | jq -e --arg h "$hostile" '
+    .scripts == 0
+      and (.sections.charted.items | any(.title == $h and (.fields.blockers.text | contains($h))
+        and .fields.owner.text == $h and (.fields["waits-on"].text | contains($h))))
+      and (.sections.landed.items[0].title == $h)
+      and ([.sections[].items[].fields[].links[]] | all(.href | startswith("https://")))
+  ' >/dev/null || fail "hostile text did not survive as inert text on the detail page: $d"
+  if grep -qF '<img src=x' "$page" || grep -qiF '<script' "$page"; then
+    fail "hostile markup reached the detail page unescaped"
+  fi
+  pass "hostile titles, notes, and paths render as inert text on the detail page"
+}
+
+test_the_canvas_export_is_off_when_unconfigured() {
+  local home out canvas_dir
+  home=$(make_home canvas-off)
+  write_detail_payload "$home"
+  canvas_dir="$home/canvases"
+  mkdir -p "$canvas_dir"
+  out=$(build_payload "$home" "$home/payload.json")
+  assert_contains "$out" "canvas: off" "an unconfigured build did not report the export off"
+  : > "$home/config/bearings-canvas-dir"
+  out=$(build_payload "$home" "$home/payload.json")
+  assert_contains "$out" "canvas: off" "an empty config did not keep the export off"
+  printf '%s/missing\n' "$home" > "$home/config/bearings-canvas-dir"
+  out=$(build_payload "$home" "$home/payload.json")
+  assert_contains "$out" "canvas: off (configured directory does not exist" "a missing directory did not keep the export off"
+  [ ! -e "$home/missing" ] || fail "the export created the missing configured directory"
+  [ -z "$(find "$canvas_dir" "$home/.lavish" -name '*.canvas.tsx' -print)" ] \
+    || fail "an off export still wrote a canvas"
+  pass "the canvas export writes nothing when its directory is unset, empty, or missing"
+}
+
+test_the_canvas_export_writes_exactly_one_file_in_its_directory() {
+  # shellcheck disable=SC2016
+  local home out dir after file hostile='</script>`${alert(1)}` {"x"} <b>bold</b> [spoof](javascript:alert(1))'
+  home=$(make_home canvas-on)
+  write_detail_payload "$home"
+  jq --arg h "$hostile" '.charted[0].title = $h | .landed[0].what = $h' "$home/payload.json" > "$home/hostile.json"
+  mkdir -p "$home/canvases"
+  dir=$(cd "$home/canvases" && pwd -P)
+  printf '# canvas export\n%s\n' "$dir" > "$home/config/bearings-canvas-dir"
+  out=$(build_payload "$home" "$home/hostile.json")
+  file="$dir/bearings-detail.canvas.tsx"
+  assert_contains "$out" "canvas: $file" "the build did not report the canvas it wrote"
+  [ "$(find "$dir" -mindepth 1 | wc -l | tr -d ' ')" = 1 ] || fail "the export did not write exactly one file: $(ls -A "$dir")"
+  after=$(find "$home" -name '*.tsx' ! -path "$home/canvases/*" -print)
+  [ -z "$after" ] || fail "the export wrote outside its directory: $after"
+  # The embedded data is the same detail model the page renders, as one JSON
+  # literal with angle brackets escaped, so hostile text stays inert data.
+  node -e '
+    const src = require("fs").readFileSync(process.argv[1], "utf8");
+    const m = src.match(/const DETAIL: Detail =\n([\s\S]*?)\n;\n/);
+    if (!m) { console.error("no data literal"); process.exit(1); }
+    if (/[<>]/.test(m[1])) { console.error("unescaped angle bracket in JSON literal"); process.exit(1); }
+    const d = JSON.parse(m[1]);
+    const h = process.argv[2];
+    const ok = d.charted.some((i) => i.title === h) && d.landed[0].title === h
+      && d.charted.length === 3 && d.landed.length === 2
+      && !/dangerouslySetInnerHTML/.test(src);
+    process.exit(ok ? 0 : 1);
+  ' "$file" "$hostile" || fail "the canvas does not carry the detail rows as inert data"
+  out=$(build_payload "$home" "$home/payload.json")
+  [ "$(find "$dir" -mindepth 1 | wc -l | tr -d ' ')" = 1 ] || fail "a rebuild left extra files in the canvas directory"
+  pass "a configured export writes exactly one canvas file, inside its directory, with inert data"
+}
+
+test_the_canvas_export_never_follows_a_planted_link_out_of_its_directory() {
+  local home out dir outside outside_dir
+  home=$(make_home canvas-link)
+  write_detail_payload "$home"
+  dir="$home/canvases"; outside="$home/outside.tsx"; outside_dir="$home/outside-dir"
+  mkdir -p "$dir" "$outside_dir"
+  printf 'keep\n' > "$outside"
+  ln -s "$outside" "$dir/bearings-detail.canvas.tsx"
+  printf '%s\n' "$dir" > "$home/config/bearings-canvas-dir"
+  out=$(build_payload "$home" "$home/payload.json")
+  [ "$(cat "$outside")" = keep ] || fail "the export wrote through a planted link"
+  assert_contains "$(cat "$home/build.err")" "canvas-export-failed" "the refused export was not reported"
+  [ -f "$home/.lavish/bearings-board.html" ] || fail "a refused canvas export stopped the board"
+
+  ln -s "$outside_dir" "$home/canvases-symlink"
+  printf '%s\n' "$home/canvases-symlink" > "$home/config/bearings-canvas-dir"
+  out=$(build_payload "$home" "$home/payload.json")
+  [ -z "$(ls -A "$outside_dir")" ] || fail "the export followed a symlinked canvas directory"
+  assert_contains "$(cat "$home/build.err")" "configured directory is a symlink" "the symlinked directory refusal was not reported"
+  pass "the canvas export refuses a planted link rather than writing outside its directory"
+}
+
 test_an_underway_row_leads_with_the_task_name_and_keeps_its_run_status
 test_an_underway_identifier_label_is_not_replaced_by_run_status
 test_charted_next_reads_newest_filed_first
@@ -364,3 +619,10 @@ test_a_date_the_captain_set_is_explained_as_their_date
 test_a_long_held_answer_says_it_waits_on_the_captain
 test_a_blocked_row_names_the_blocking_work_in_words_never_by_id
 test_overflow_queued_rows_are_revealed_in_place
+test_the_detail_page_spells_out_every_charted_and_landed_row
+test_the_detail_page_is_regenerated_on_every_build_and_states_empty_sections
+test_the_board_links_to_the_detail_page_from_its_nav_and_both_headers
+test_hostile_titles_are_escaped_on_the_detail_page
+test_the_canvas_export_is_off_when_unconfigured
+test_the_canvas_export_writes_exactly_one_file_in_its_directory
+test_the_canvas_export_never_follows_a_planted_link_out_of_its_directory

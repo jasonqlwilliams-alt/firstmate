@@ -86,6 +86,7 @@ config/repository-policy.json  optional primary-authoritative explicit upstream/
 config/cmux-socket-password  optional cmux control-socket password; LOCAL, gitignored; read fresh on every cmux CLI call and passed through without ever overriding an operator's own ambient CMUX_SOCKET_PASSWORD when absent (docs/cmux-backend.md "Setup")
 config/wedge-alarm  optional away-mode wedge-alarm active-alert directives; LOCAL, gitignored; absent means auto (macOS Notification Center when available); see docs/wedge-alarm.md
 config/packet-router-inbox  optional absolute path to this home's Packet Router inbox/new directory for halt-progress URGENT-ALERT packets and generated SYSTEM_STATE publish; LOCAL, gitignored, and not inherited; absent means no packet is written; see docs/configuration.md "Packet Router inbox"
+config/bearings-canvas-dir  optional absolute directory path where bin/fm-bearings-board.sh build also exports bearings-detail.canvas.tsx; LOCAL, gitignored, and not inherited; unset, empty, or missing directory means off; see docs/configuration.md "Bearings detail canvas export"
 config/watched-tools.json  optional list of the tools this home depends on, read by the update check armed with bin/fm-tool-update-check.sh; LOCAL, gitignored, firstmate-maintained but human-editable, and NOT inherited by secondmate homes; see docs/configuration.md "Watched tool updates"
 config/x-mode.env    generated Relay watcher cadence; LOCAL, gitignored; source before arming watcher when present
 data/                personal fleet records; LOCAL, gitignored as a whole

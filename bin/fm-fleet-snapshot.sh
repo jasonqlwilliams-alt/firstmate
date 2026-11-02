@@ -1027,7 +1027,8 @@ secondmate_home_summary_json() {  # <backlog-json-file> <tasks-json-file>
             hold_kind:((.hold_kind // null) | if . == null then null else trunc(40) end),
             pr_url:((.pr_url // null) | if . == null then null else trunc(500) end),
             report_path:((.report_path // null) | if . == null then null else trunc(500) end),
-            local_note:((.local_note // null) | if . == null then null else trunc(120) end),completion} ]
+            local_note:((.local_note // null) | if . == null then null else trunc(120) end),
+            since:((.since // null) | if . == null then null else trunc(40) end),completion} ]
        | sort_by([(.completion.date // ""), .id]) | reverse) as $landed_all
     | ([ $tasks[] | select(.current_state.state == "unknown") ]) as $unknown_children
     | ([ $owned_in_flight[]
@@ -1145,9 +1146,12 @@ secondmate_home_summary_json() {  # <backlog-json-file> <tasks-json-file>
           hold_until:((.hold_until // null) | if . == null then null else trunc(40) end),
           hold_bucket:(.hold_bucket // null),
           hold_age_days:(.hold_age_days // null),
+          hold_set:((.hold_set // null) | if . == null then null else trunc(40) end),
           captain_actionable:(.captain_actionable // false),
           repo:((.repo // null) | if . == null then null else trunc(120) end),
           kind:((.kind // null) | if . == null then null else trunc(40) end),
+          pr_url:((.pr_url // null) | if . == null then null else trunc(500) end),
+          report_path:((.report_path // null) | if . == null then null else trunc(500) end),
           since:((.since // null) | if . == null then null else trunc(40) end)}]
           | ((map(select(.captain_actionable != true)) | newest_filed_first)
              + (map(select(.captain_actionable == true)) | newest_filed_first))

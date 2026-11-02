@@ -2535,6 +2535,74 @@ EOF
   pass "Underway rows carry the durable task name and gates carry their filed date"
 }
 
+# The board detail page reads every Charted Next and Recently Landed fact from
+# this projection: blockers by title, the date a gate has waited since, and each
+# row's report and PR links, so they must be projected rather than scraped.
+test_gates_and_landed_carry_detail_page_facts() {
+  local home mate fakebin json toon
+  home=$(make_home detail-facts)
+  : > "$home/data/secondmates.md"
+  mate="$TMP_ROOT/detail-facts-mate-home"
+  make_valid_secondmate_home detail-mate "$mate"
+  append_secondmate_registry "$home" detail-mate "$mate"
+  cat > "$home/data/backlog.md" <<'EOF'
+## In flight
+
+## Queued
+- [ ] upstream-work - Land the upstream schema change (repo: firstmate) (kind: ship) (since 2026-07-02)
+- [ ] waiting-gate - Waits on the schema change (blocked-by: missing-work) blocked-by: upstream-work - needs the new schema (repo: firstmate) (kind: ship) (since 2026-07-03)
+- [ ] held-gate - Deferred captain call (repo: firstmate) (kind: captain) (since 2026-06-20) (hold: revisit with the captain) (hold-kind: captain) (hold-until: 2026-08-01)
+  Captain hold set: 2026-07-05T09:30:00Z
+
+## Done
+- [x] shipped-work - Ship the board links (repo: firstmate) (kind: ship) (since 2026-07-01) (merged 2026-07-09) https://github.com/example/firstmate/pull/41
+- [x] scouted-work - Investigate the ledger (repo: firstmate) (kind: scout) (since 2026-06-30) (reported 2026-07-08) data/scouted-work/report.md
+EOF
+  mkdir -p "$home/data/scouted-work" "$home/data/held-gate"
+  printf '# report\n' > "$home/data/scouted-work/report.md"
+  printf '# held report\n' > "$home/data/held-gate/report.md"
+  fm_write_meta "$home/state/waiting-gate.meta" \
+    "window=firstmate:fm-waiting-gate" "project=firstmate" "harness=claude" \
+    "kind=ship" "pr=https://github.com/example/firstmate/pull/42"
+  cat > "$mate/data/backlog.md" <<'EOF'
+## In flight
+
+## Queued
+- [ ] mate-first - First mate-side step (repo: sample) (kind: ship) (since 2026-07-04)
+- [ ] mate-second - Second mate-side step https://github.com/example/sample/pull/8 data/mate-second/report.md blocked-by: mate-first (repo: sample) (kind: ship) (since 2026-07-06)
+
+## Done
+- [x] mate-shipped - Mate-side delivery (repo: sample) (kind: ship) (since 2026-07-02) (merged 2026-07-10) https://github.com/example/sample/pull/7
+EOF
+  fakebin=$(make_fakebin "$home")
+  json=$(run "$home" "$fakebin" --json)
+  printf '%s' "$json" | jq -e --arg home "$home" '
+    (.gates | any(.id == "waiting-gate" and .waits_since == "2026-07-03" and .owner == "(main)"
+      and .pr_url == "https://github.com/example/firstmate/pull/42" and .report == null))
+      and (.gates | any(.id == "held-gate" and .filed == "2026-06-20"
+        and .waits_since == "2026-07-05T09:30:00Z"
+        and .report == ($home + "/data/held-gate/report.md") and .pr_url == null))
+      and (.gates | any(.id == "mate-second" and .owner == "detail-mate" and .waits_since == "2026-07-06"
+        and .pr_url == "https://github.com/example/sample/pull/8"
+        and .report == "data/mate-second/report.md"))
+      and ([.gate_blockers[] | select(.gate == "waiting-gate")]
+        == [{gate:"waiting-gate", owner:"(main)", id:"missing-work", title:null},
+            {gate:"waiting-gate", owner:"(main)", id:"upstream-work", title:"Land the upstream schema change"}])
+      and ([.gate_blockers[] | select(.gate == "mate-second")]
+        == [{gate:"mate-second", owner:"detail-mate", id:"mate-first", title:"First mate-side step"}])
+      and (.landed | any(.id == "shipped-work" and .filed == "2026-07-01" and .landed_on == "2026-07-09"
+        and .pr_url == "https://github.com/example/firstmate/pull/41" and .report == null))
+      and (.landed | any(.id == "scouted-work" and .landed_on == "2026-07-08"
+        and .report == "data/scouted-work/report.md" and .pr_url == null))
+      and (.landed | any(.id == "mate-shipped" and .owner == "detail-mate" and .filed == "2026-07-02"
+        and .landed_on == "2026-07-10"))
+  ' >/dev/null || fail "gates or landed rows lack the detail page facts: $json"
+  toon=$(run "$home" "$fakebin")
+  assert_contains "$toon" "gate_blockers[" "TOON did not render the gate blocker table"
+  assert_contains "$toon" "Land the upstream schema change" "TOON did not carry the blocker title"
+  pass "gates carry waits-since and blockers by title, and landed rows carry their dates and links"
+}
+
 # A gate row whose title exceeds 60 characters and whose reason exceeds 40 must
 # survive the projection intact without clipping.
 test_gate_projection_preserves_full_title_and_reason() {
@@ -3378,6 +3446,7 @@ test_active_children_project_independent_of_home_captain_hold
 test_nameless_legacy_summary_uses_its_durable_identifier
 test_newest_filed_gates_are_selected_before_snapshot_bounds
 test_underway_and_gate_rows_carry_the_durable_name_and_filed_date
+test_gates_and_landed_carry_detail_page_facts
 test_gate_projection_preserves_full_title_and_reason
 test_mixed_secondmate_roles_partial_state_and_captain_readiness
 test_main_captain_readiness_matches_secondmate_projection

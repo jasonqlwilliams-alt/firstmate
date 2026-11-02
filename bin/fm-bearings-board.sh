@@ -14,7 +14,13 @@
 # build      Validate the payload, drop the Captain's Call cards whose subject
 #            already landed, give every surviving decision card the standard
 #            reconcile choice, and inject the result into a fresh copy of the
-#            shipped template at the stable board path. Establish the Lavish
+#            shipped template at the stable board path. From those same
+#            reconciled payload bytes, render the static sibling detail page
+#            ($FM_HOME/.lavish/bearings-detail.html) for Charted Next and
+#            Recently Landed, and - when config/bearings-canvas-dir names an
+#            existing absolute directory - export the same detail model as one
+#            self-contained Cursor Canvas file (bearings-detail.canvas.tsx)
+#            inside that directory. Establish the Lavish
 #            session on that board and PROVE it is live BEFORE binding and
 #            arming its answer source, so a registered poll can never race a
 #            session that does not exist or attach to one that has ended.
@@ -22,8 +28,8 @@
 #            precedes arm, so the board can never produce an answer that has
 #            nowhere to go (captain-hold-lifecycle's ordering rule, enforced
 #            here rather than left to agent memory). Output starts with
-#            `board: <path>`, then includes lavish-axi's session output and
-#            the remaining status:
+#            `board: <path>`, `detail: <path>`, and `canvas: <path> | off ...`,
+#            then includes lavish-axi's session output and the remaining status:
 #              session: live | reopened
 #              served: <path>
 #              bound: <source-id>
@@ -78,12 +84,29 @@
 # that date with a UTC timestamp) the template orders the section by, newest
 # first; a row with no comparable date keeps its payload order after every dated
 # row. Anything else in that field refuses rather than sorting on garbage.
+# For the companion detail page and optional canvas export, a Charted Next row
+# MAY also carry `waits_since` (same date/timestamp rule as `filed`), `owner`
+# (nullable string), `blockers` (nullable array of `{id, title?}` objects with
+# non-empty `id` and nullable string `title`), `report` (nullable string path or
+# URL), and `pr_url` (nullable https URL). A Recently Landed row MAY likewise
+# carry `filed`, `landed_on` (same date/timestamp rule), and `report` beside its
+# optional `pr_url` and `subject`.
 #
 # The board path is stable - $FM_HOME/.lavish/bearings-board.html - so a
 # re-invocation rebuilds the same file in place, which keeps the same Lavish
-# session URL and the same canonical process-event source id. Injection escapes
+# session URL and the same canonical process-event source id. Its companion
+# detail page lives beside it at $FM_HOME/.lavish/bearings-detail.html so
+# relative links from the board resolve identically over file:// and through the
+# Lavish session's sibling asset route. Injection escapes
 # every `<` in the compact JSON as the \u003c string escape, so a payload string
 # containing "</script>" can never terminate the data block early.
+#
+# Optional Cursor Canvas export is controlled by local, gitignored
+# config/bearings-canvas-dir (docs/configuration.md "Bearings detail canvas
+# export"): when unset, empty, relative, or naming a missing directory, the
+# export is off and writes nothing; when it names an existing non-symlink
+# absolute directory, build atomically writes bearings-detail.canvas.tsx inside
+# that directory only and never fails the board build if the export is refused.
 #
 # FM_BEARINGS_BOARD_TEMPLATE overrides the shipped template path (tests only).
 set -eu
@@ -95,6 +118,14 @@ FM_HOME="${FM_HOME:-$FM_ROOT}"
 TEMPLATE="${FM_BEARINGS_BOARD_TEMPLATE:-$SCRIPT_DIR/../.agents/skills/bearings/assets/board-template.html}"
 PLACEHOLDER='__FM_BEARINGS_BOARD_DATA__'
 BOARD_SCHEMA=fm-bearings-board.v1
+# The detail page and canvas templates ship beside the board template.
+DETAIL_TEMPLATE="${TEMPLATE%/*}/detail-template.html"
+DETAIL_PLACEHOLDER='__FM_BEARINGS_DETAIL_BODY__'
+DETAIL_NAME=bearings-detail.html
+CANVAS_TEMPLATE="${TEMPLATE%/*}/detail-canvas-template.tsx"
+CANVAS_PLACEHOLDER='__FM_BEARINGS_DETAIL_MODEL__'
+CANVAS_NAME=bearings-detail.canvas.tsx
+CONFIG_DIR="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 
 usage() {
   awk '
@@ -125,11 +156,20 @@ validate_payload() {  # <data.json>
         then try ((fromdateiso8601 | strftime("%Y-%m-%dT%H:%M:%SZ")) == $filed) catch false
         else try (((. + "T00:00:00Z") | fromdateiso8601 | strftime("%Y-%m-%d")) == $filed) catch false
         end);
-    def optional_filed:
-      (has("filed") | not) or (.filed == null) or (.filed | valid_filed);
+    def optional_date($name):
+      (has($name) | not) or (.[$name] == null) or (.[$name] | valid_filed);
+    def optional_filed: optional_date("filed");
+    def optional_nullable_string($name):
+      (has($name) | not) or (.[$name] == null) or (.[$name] | type == "string");
+    def optional_blockers:
+      (has("blockers") | not) or (.blockers == null)
+      or (.blockers | type == "array"
+        and all(.[]; type == "object" and (.id | nonempty_string)
+          and ((has("title") | not) or (.title == null) or (.title | type == "string"))));
     def optional_string($name): (has($name) | not) or (.[$name] | type == "string");
     def optional_https_url($name):
       (has($name) | not)
+      or (.[$name] == null)
       or (.[$name]
         | type == "string"
           and test("^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?(?:[/?#][^[:space:]]*)?$"));
@@ -176,13 +216,21 @@ validate_payload() {  # <data.json>
       type == "object" and repo_marker and (.id | nonempty_string)
       and (.what | nonempty_string) and (.owner | nonempty_string)
       and optional_https_url("pr_url")
-      and optional_subject;
+      and optional_subject
+      and optional_filed
+      and optional_date("landed_on")
+      and optional_nullable_string("report");
     def charted_item:
       type == "object" and repo_marker and (.id | slug(128))
       and (.title | nonempty_string) and (.reason | type == "string")
       and (.dispatchable | type == "boolean")
       and ((has("kind") | not) or (.kind == "queued" or .kind == "warning"))
       and optional_filed
+      and optional_date("waits_since")
+      and optional_nullable_string("owner")
+      and optional_blockers
+      and optional_nullable_string("report")
+      and optional_https_url("pr_url")
       and (if .kind == "warning" then .dispatchable == false else true end);
     type == "object"
     and (.schema == $schema)
@@ -277,6 +325,294 @@ effective_payload() {  # <data.json> <dest.json>
     ]' "$data" > "$dest" || return 1
 }
 
+# --- Companion detail page and canvas export ---------------------------------
+# Both render one normalized detail model, derived here from the same effective
+# payload the board carries, so the page, the canvas, and the board can never
+# disagree about a row. Every title, note, and path stays text: the page escapes
+# it with @html, and the canvas embeds the model as a JSON literal that its
+# component renders only as React text children.
+
+# The detail model: every Charted Next row in board order (queued work newest
+# filed first, then repair notices) and every Recently Landed row in payload
+# order, each with the same eight facts.
+detail_model() {  # <effective.json> <home-dir>
+  jq --arg home_dir "$2" '
+    def isowarn: .kind == "warning";
+    def board_order:
+      to_entries
+      | ([.[] | select((.value.filed | type) == "string" and (.value.filed | length) > 0)]
+          | sort_by([.value.filed, -.key]) | reverse)
+        + [.[] | select(((.value.filed | type) == "string" and (.value.filed | length) > 0) | not)]
+      | map(.value);
+    def nz: if . == null or . == "" then null else . end;
+    def cap($re): (capture($re) // null);
+    def valid_day:
+      type == "string"
+      and (try (((. + "T00:00:00Z") | fromdateiso8601 | strftime("%Y-%m-%d")) == .) catch false);
+    def looks_like_id: type == "string" and test("^[a-z0-9]+(?:[-/][a-z0-9]+)+$");
+    def parse_blocker_ids($list):
+      ($list | sub("\\s*\\+[0-9]+\\s+more\\s*$"; "")) as $trimmed
+      | ($trimmed | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))) as $parts
+      | ([ $parts[] | split(" and ") | map(gsub("^\\s+|\\s+$"; "")) | .[] | select(length > 0) ]) as $fine
+      | if ($fine | length) > 0 and all($fine[]; looks_like_id) then $fine else $parts end;
+    def unique_anchors($prefix):
+      reduce .[] as $item
+        ({seen: {}, out: []};
+         ($prefix + $item.id) as $base
+         | ((.seen[$base] // 0) + 1) as $n
+         | .seen[$base] = $n
+         | .out += [$item + {anchor: (if $n == 1 then $base else ($base + "-" + ($n | tostring)) end)}])
+      | .out;
+    def known_titles:
+      [ (.charted[] | select(isowarn | not) | {key: .id, value: .title}),
+        (.underway[] | {key: .id, value: .name}),
+        (.landed[] | {key: .id, value: .what}) ]
+      | map(select((.key | type) == "string" and (.value | type) == "string")) | from_entries;
+    def report_fields:
+      (.report | nz) as $r
+      | (.owner | nz) as $o
+      | {report: $r,
+         report_url: (if $r != null and ($r | test("^https://[^[:space:]]+$")) then $r else null end),
+         report_path: (if $r == null or ($r | test("^https://")) then null
+                       elif ($r | startswith("/")) or ($o != null and $o != "(main)") then $r
+                       else ($home_dir + "/" + $r) end)};
+    def row_status_and_waits:
+      (.reason // "" | tostring | gsub("^\\s+|\\s+$"; "")) as $r
+      | ($r | cap("^(?:[Bb][Ll][Oo][Cc][Kk][Ee][Dd](?:[- ][Bb][Yy]|\\s+[Oo][Nn]))\\s+(?<list>.+?)(?:\\s*:\\s+(?<rest>.*))?$")) as $b
+      | ($r | cap("^[Uu][Nn][Tt][Ii][Ll]\\s+(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2})(?:T[0-9:.]+Z?)?(?:\\s*:\\s+(?<rest>.*))?$")) as $u
+      | ($r | cap("^[Hh][Ee][Ll][Dd]\\s+(?<n>[0-9]+)d\\b(?:\\s*:\\s+(?<rest>.*))?$")) as $h
+      | if isowarn then
+          {status: "needs repair",
+           waits_on: ("Nothing to start: a notice that the fleet records need repair"
+             + (if $r != "" then " (" + $r + ")" else "" end)),
+           parsed_ids: []}
+        elif $b != null then
+          {status: "waiting",
+           waits_on: ("Other work finishing first" + (if ($b.rest // "") != "" then ": " + $b.rest else "" end)),
+           parsed_ids: parse_blocker_ids($b.list)}
+        elif $u != null and ($u.d | valid_day) then
+          {status: "waiting",
+           waits_on: ("A date you set: " + $u.d + (if ($u.rest // "") != "" then " - " + $u.rest else "" end)),
+           parsed_ids: []}
+        elif $h != null then
+          {status: "waiting",
+           waits_on: ("Your answer, held " + $h.n + (if $h.n == "1" then " day" else " days" end)
+             + (if ($h.rest // "") != "" then " - " + $h.rest else "" end)),
+           parsed_ids: []}
+        elif .dispatchable then
+          {status: "ready",
+           waits_on: ("Nothing, it is ready to start"
+             + (if $r != "" and (($r | test("^[Rr][Ee][Aa][Dd][Yy] [Tt][Oo] [Ss][Tt][Aa][Rr][Tt]\\b[^;:]*$")) | not)
+                then " (" + $r + ")" else "" end)),
+           parsed_ids: []}
+        elif $r == "" then
+          {status: "waiting", waits_on: "No reason recorded", parsed_ids: []}
+        else
+          {status: "waiting", waits_on: $r, parsed_ids: []}
+        end;
+    . as $p
+    | known_titles as $titles
+    | {schema: "fm-bearings-detail.v1",
+       home: $p.home,
+       generated: $p.generated,
+       charted_more: ($p.charted_more // 0),
+       charted_warning_more: ($p.charted_warning_more // 0),
+       charted: (
+         [ (($p.charted | map(select(isowarn | not)) | board_order)
+             + ($p.charted | map(select(isowarn)) | board_order))[]
+           | row_status_and_waits as $sw
+           | {section: "charted",
+              id, repo: (.repo | nz), title,
+              status: $sw.status,
+              waits_on: $sw.waits_on,
+              since_label: "Waiting since",
+              since: (.waits_since // .filed | nz),
+              owner: (.owner | nz),
+              blockers: (if .blockers != null then
+                           [.blockers[] | {id, title: ((.title | nz) // $titles[.id] // null)}]
+                         else
+                           [$sw.parsed_ids[] | {id: ., title: ($titles[.] // null)}]
+                         end),
+              pr_url: (.pr_url | nz),
+              filed: (.filed | nz)} + report_fields ]
+         | unique_anchors("charted-")),
+       landed: [
+         $p.landed | to_entries[] | .key as $i | .value
+         | {section: "landed",
+            anchor: ("landed-" + ($i | tostring)),
+            id, repo: (.repo | nz), title: .what,
+            status: "landed",
+            waits_on: "Nothing, it landed",
+            since_label: "Landed on",
+            since: (.landed_on | nz),
+            owner: (.owner | nz),
+            blockers: [],
+            pr_url: (.pr_url | nz),
+            filed: (.filed | nz)} + report_fields ]}
+  ' "$1"
+}
+
+# Render the detail page body from the model. Every string is @html-escaped;
+# the only attribute values are fixed anchors and validated https URLs.
+render_detail_body() {  # <model.json>
+  jq -r '
+    def e: tostring | @html;
+    def or_text($none): if . == null then "<span class=\"dt-none\">" + $none + "</span>" else e end;
+    def link: "<a href=\"" + e + "\" target=\"_blank\" rel=\"noopener\">" + e + "</a>";
+    def field($key; $label; $value):
+      "<div class=\"dt-field\" data-field=\"" + $key + "\"><dt>" + $label + "</dt><dd>" + $value + "</dd></div>";
+    def tone: {"ready": "online", "waiting": "warn", "needs repair": "danger", "landed": "online"}[.] // "warn";
+    def blockers_html:
+      if (.blockers | length) == 0 then "<span class=\"dt-none\">None</span>"
+      else "<ul class=\"dt-blockers\">"
+        + ([.blockers[] | "<li><span class=\"dt-blocker__title\">"
+            + (.title | or_text("Untitled work"))
+            + "</span> <code class=\"dt-id\">" + (.id | e) + "</code></li>"] | join(""))
+        + "</ul>" end;
+    def report_html:
+      if .report_url != null then (.report_url | link)
+      elif .report_path != null then "<code class=\"dt-path\">" + (.report_path | e) + "</code>"
+      else "<span class=\"dt-none\">Not recorded</span>" end;
+    def item:
+      "<article class=\"dt-item\" id=\"" + (.anchor | e) + "\" data-section=\"" + .section + "\">"
+      + "<header class=\"dt-item__head\"><h3 class=\"dt-item__title\">" + (.title | e) + "</h3>"
+      + "<span class=\"fm-badge fm-badge--" + (.status | tone) + "\">" + (.status | e) + "</span></header>"
+      + "<dl class=\"dt-fields\">"
+      + field("what"; "What it is"; (.title | e) + (if .repo then " <span class=\"dt-repo\">" + (.repo | e) + "</span>" else "" end))
+      + field("waits-on"; "Waits on"; .waits_on | e)
+      + field("since"; .since_label; .since | or_text("Not recorded"))
+      + field("owner"; "Owner"; .owner | or_text("Not recorded"))
+      + field("blockers"; "Blockers"; blockers_html)
+      + field("report"; "Report"; report_html)
+      + field("pr"; "PR"; if .pr_url != null then (.pr_url | link) else "<span class=\"dt-none\">None recorded</span>" end)
+      + field("filed"; "Filed"; .filed | or_text("Not recorded"))
+      + "</dl></article>";
+    def more($n; $what):
+      if $n > 0 then "<p class=\"dt-more\">+" + ($n | tostring) + " more " + $what
+        + (if $n == 1 then " was" else " were" end) + " left out when this board was built.</p>" else "" end;
+    . as $m
+    | "<header class=\"dt-nav\"><div class=\"dt-nav__inner\"><span class=\"dt-brand\">bearings</span>"
+      + "<span class=\"dt-nav__title\">Charted Next and Recently Landed in detail</span>"
+      + "<nav class=\"dt-nav__links\"><a href=\"#charted\">Charted Next</a><a href=\"#landed\">Recently Landed</a></nav>"
+      + "</div></header>"
+      + "<main class=\"dt-main\">"
+      + "<p class=\"dt-intro\">Every Charted Next and Recently Landed row on the bearings board, with what each waits on, since when, who owns it, and its links. Rebuilt with the board at <span class=\"dt-mono\">" + ($m.generated | e) + "</span>.</p>"
+      + "<section class=\"dt-section\" id=\"charted\"><h2 class=\"dt-section__title\">Charted Next</h2>"
+      + (if ([ $m.charted[] | select(.status != "needs repair") ] | length) == 0 and $m.charted_more == 0
+         then "<p class=\"dt-empty\">Nothing is queued.</p>" else "" end)
+      + ([$m.charted[] | item] | join(""))
+      + more($m.charted_more; "queued " + (if $m.charted_more == 1 then "item" else "items" end))
+      + more($m.charted_warning_more; "repair " + (if $m.charted_warning_more == 1 then "warning" else "warnings" end))
+      + "</section>"
+      + "<section class=\"dt-section\" id=\"landed\"><h2 class=\"dt-section__title\">Recently Landed</h2>"
+      + (if ($m.landed | length) == 0 then "<p class=\"dt-empty\">No recent completions are in the current baseline.</p>" else ([$m.landed[] | item] | join("")) end)
+      + "</section></main>"
+  ' "$1"
+}
+
+# Inject <content-file> in place of the one <placeholder> line of <template>
+# into a fresh private file beside <dest>, then publish it atomically.
+publish_from_template() {  # <template> <placeholder> <content-file> <dest>
+  local template=$1 placeholder=$2 content=$3 dest=$4 tmp
+  [ -f "$template" ] && [ ! -L "$template" ] || { printf 'template is missing: %s\n' "$template" >&2; return 1; }
+  [ "$(grep -cxF "$placeholder" "$template")" -eq 1 ] \
+    || { printf 'template does not carry exactly one slot: %s\n' "$template" >&2; return 1; }
+  tmp=$(umask 077; mktemp "${dest%/*}/.detail.XXXXXX") || return 1
+  if ! FM_SLOT_FILE="$content" FM_PLACEHOLDER="$placeholder" perl -pe '
+        BEGIN { local $/; open(my $fh, "<", $ENV{FM_SLOT_FILE}) or die; $slot = <$fh>; chomp $slot; }
+        if ($_ eq "$ENV{FM_PLACEHOLDER}\n") { $_ = "$slot\n"; }' "$template" > "$tmp" \
+     || grep -qxF "$placeholder" "$tmp" \
+     || ! chmod 0600 "$tmp" \
+     || ! perl -e 'rename($ARGV[0], $ARGV[1]) or exit 1' "$tmp" "$dest"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+}
+
+# The optional canvas directory: the first non-comment, non-blank line of
+# config/bearings-canvas-dir. Prints nothing when the export is off.
+canvas_dir() {
+  local file="$CONFIG_DIR/bearings-canvas-dir" line
+  [ -f "$file" ] && [ ! -L "$file" ] && [ -r "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line#"${line%%[![:space:]]*}"}
+    line=${line%"${line##*[![:space:]]}"}
+    [ -n "$line" ] || continue
+    case "$line" in \#*) continue ;; esac
+    printf '%s' "$line"
+    return 0
+  done < "$file"
+}
+
+# Export the detail model as one self-contained Cursor Canvas file in the
+# configured directory, or report why it was skipped. Never fails the build:
+# the canvas is an optional mirror and the board is already published.
+export_canvas() {  # <model.json>
+  local model=$1 dir clean_dir real dest literal
+  dir=$(canvas_dir)
+  if [ -z "$dir" ]; then
+    printf 'canvas: off\n'
+    return 0
+  fi
+  case "$dir" in
+    /*) ;;
+    *) printf 'canvas: off (config/bearings-canvas-dir is not an absolute path)\n'; return 0 ;;
+  esac
+  clean_dir=${dir%/}
+  [ -n "$clean_dir" ] || clean_dir=/
+  if [ -L "$clean_dir" ]; then
+    printf 'canvas-export-failed: configured directory is a symlink: %s\n' "$dir" >&2
+    return 0
+  fi
+  if [ ! -d "$clean_dir" ]; then
+    printf 'canvas: off (configured directory does not exist: %s)\n' "$dir"
+    return 0
+  fi
+  real=$(board_realpath "$clean_dir") || { printf 'canvas-export-failed: cannot resolve %s\n' "$dir" >&2; return 0; }
+  dest="$real/$CANVAS_NAME"
+  if [ -L "$dest" ] || { [ -e "$dest" ] && [ ! -f "$dest" ]; }; then
+    printf 'canvas-export-failed: %s is not a regular file; refusing to replace it\n' "$dest" >&2
+    return 0
+  fi
+  literal=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-bearings-canvas.XXXXXX") \
+    || { printf 'canvas-export-failed: cannot stage the canvas data\n' >&2; return 0; }
+  # A JSON literal is a valid TypeScript expression. Angle brackets and
+  # U+2028/2029 are escaped so no parser reads markup or line breaks in strings.
+  if ! jq '.' "$model" \
+    | perl -CS -pe 's/</\\u003c/g; s/>/\\u003e/g; s/\x{2028}/\\u2028/g; s/\x{2029}/\\u2029/g' > "$literal"; then
+    rm -f -- "$literal"
+    printf 'canvas-export-failed: cannot encode the canvas data\n' >&2
+    return 0
+  fi
+  if ! publish_from_template "$CANVAS_TEMPLATE" "$CANVAS_PLACEHOLDER" "$literal" "$dest"; then
+    rm -f -- "$literal"
+    printf 'canvas-export-failed: cannot write %s\n' "$dest" >&2
+    return 0
+  fi
+  rm -f -- "$literal"
+  printf 'canvas: %s\n' "$dest"
+}
+
+publish_detail() {  # <effective.json> <board>
+  local effective=$1 board=$2 model body dest
+  dest="${board%/*}/$DETAIL_NAME"
+  model=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-bearings-detail.XXXXXX") || fail "cannot stage the detail model"
+  body=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-bearings-detail-body.XXXXXX") \
+    || { rm -f -- "$model"; fail "cannot stage the detail page"; }
+  if ! detail_model "$effective" "$FM_HOME" > "$model" || ! render_detail_body "$model" > "$body"; then
+    rm -f -- "$model" "$body"
+    fail "cannot render the detail page"
+  fi
+  if ! publish_from_template "$DETAIL_TEMPLATE" "$DETAIL_PLACEHOLDER" "$body" "$dest"; then
+    rm -f -- "$model" "$body"
+    fail "cannot publish the detail page"
+  fi
+  rm -f -- "$body"
+  printf 'detail: %s\n' "$dest"
+  export_canvas "$model"
+  rm -f -- "$model"
+}
+
 command_build() {
   local data=${1-} board json tmp sid extracted effective owner version pre_reopen_owner
   [ "$#" -eq 1 ] || { usage >&2; exit 2; }
@@ -294,8 +630,11 @@ command_build() {
     rm -f -- "$effective"
     fail "cannot reconcile the board payload against landed work"
   fi
-  json=$(jq -c . "$effective") || { rm -f -- "$effective"; fail "cannot compact the board data"; }
-  rm -f -- "$effective"
+  # The staged payload outlives the board publish: the detail page and the
+  # canvas export render from these same bytes.
+  BUILD_STAGED=$effective
+  trap 'rm -f -- "$BUILD_STAGED"' EXIT
+  json=$(jq -c . "$effective") || fail "cannot compact the board data"
   # `<` never appears in JSON syntax outside strings, so escaping every
   # occurrence keeps the payload valid JSON while making </script> inert.
   json=${json//</\\u003c}
@@ -324,6 +663,9 @@ command_build() {
     fail "cannot publish the board"
   fi
   printf 'board: %s\n' "$board"
+  publish_detail "$effective" "$board"
+  rm -f -- "$effective"
+  trap - EXIT
 
   command -v lavish-axi >/dev/null 2>&1 || fail "lavish-axi is not installed"
   sid=$("$SCRIPT_DIR/fm-procevent-lavish.sh" source-id "$board") \
