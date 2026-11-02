@@ -458,6 +458,23 @@ EOF
   set -- FM_HOME="$home" FAKE_GIT_REMOTE_ROOT="${repo%/repo}" GH_AXI_LOG="$home/gh.log" PATH="$fakebin:$PATH"
   local fixture_env=("$@")
 
+  git -C "$repo" config alias.ship "-c include.path=$inc push"
+  git -C "$repo" branch -q control-alias
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$real_git" ship origin control-alias 2>&1); rc=$?
+  expect_code 0 "$rc" "real Git should honor the option-leading push alias and skip the managed hook: $out"
+  remote_has_branch "$upstream" control-alias || fail "the option-leading alias control push did not land"
+  git -C "$repo" branch -q bypass-alias
+  out=$(cd "$repo" && env "${fixture_env[@]}" FM_REAL_GIT="$real_git" "$GIT_SHIM" ship origin bypass-alias 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "guarded git should refuse the option-leading alias hooks-path bypass"
+  assert_contains "$out" "instead of the Firstmate managed hooks at $managed" \
+    "the option-leading alias refusal was not explicit"
+  ! remote_has_branch "$upstream" bypass-alias || fail "the refused option-leading alias still landed"
+  git -C "$repo" config alias.ship '-c core.editor=true push'
+  git -C "$repo" branch -q fork-alias
+  out=$(cd "$repo" && env "${fixture_env[@]}" FM_REAL_GIT="$real_git" "$GIT_SHIM" ship fork fork-alias 2>&1); rc=$?
+  expect_code 0 "$rc" "a safe option-leading alias should push through the managed hook: $out"
+  remote_has_branch "$fork" fork-alias || fail "the safe option-leading alias did not land on the fork"
+
   out=$(push_branch_via shim "$repo" "$real_git" plain "${fixture_env[@]}" --); rc=$?
   [ "$rc" -ne 0 ] || fail "an ordinary guarded push to the upstream should be refused by the managed hook"
   assert_contains "$out" "branch-push would write to github.com/upstream/widgets" \
@@ -541,6 +558,36 @@ SH
   ! remote_has_branch "$upstream" race || fail "a racing config rewrite still landed its branch on the upstream"
   git -C "$repo" config --local core.hooksPath "$managed"
   pass "delivery guard: worker Git refuses included, rewritten, and racing hooks-path bypasses in an armed repository"
+}
+
+test_git_shim_ignores_leftover_hooks_directory_in_unarmed_repo() {
+  local dir repo remote managed real_git out rc
+  dir="$TMP_ROOT/unarmed-leftover-hooks"
+  repo="$dir/repo"
+  remote="$dir/remote.git"
+  real_git=${FM_REAL_GIT:-$(command -v git)}
+  fm_git_init_commit "$repo"
+  git init -q --bare "$remote"
+  git -C "$repo" remote add origin "$remote"
+  managed="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)/firstmate-hooks"
+  mkdir -p "$managed"
+  out=$(push_branch_via shim "$repo" "$real_git" leftover --); rc=$?
+  expect_code 0 "$rc" "an unarmed repository with a leftover managed directory should push normally: $out"
+  remote_has_branch "$remote" leftover || fail "an unarmed repository's push did not land"
+  pass "delivery guard: a leftover hooks directory alone does not arm a repository"
+}
+
+test_git_shim_passes_push_help_outside_repository() {
+  local dir real_git expected actual expected_rc actual_rc
+  dir="$TMP_ROOT/push-help-outside-repository"
+  real_git=${FM_REAL_GIT:-$(command -v git)}
+  mkdir -p "$dir"
+  expected=$(cd "$dir" && "$real_git" push -h 2>&1); expected_rc=$?
+  actual=$(cd "$dir" && FM_REAL_GIT="$real_git" "$GIT_SHIM" push -h 2>&1); actual_rc=$?
+  expect_code "$expected_rc" "$actual_rc" "the shim changed git push -h's exit status outside a repository: $actual"
+  [ "$actual" = "$expected" ] || fail "the shim changed git push -h's output outside a repository"
+  assert_contains "$actual" "usage: git push" "git push -h did not show usage outside a repository"
+  pass "delivery guard: git push help outside a repository reaches real Git"
 }
 
 # Every bash entered through the shim (including exec and alias lookup) reads
@@ -819,3 +866,5 @@ test_direct_pr_contract_is_unchanged_without_a_policy
 test_git_shim_blocks_hook_bypasses
 test_git_shim_refuses_hooks_path_override_in_any_case
 test_git_shim_refuses_effective_hooks_path_bypasses
+test_git_shim_ignores_leftover_hooks_directory_in_unarmed_repo
+test_git_shim_passes_push_help_outside_repository
