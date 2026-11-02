@@ -105,7 +105,6 @@
 #   FM_CONTROL_PREPARE_WAIT      preparation deadline before any stop (90)
 #   FM_CONTROL_LAUNCH_WAIT       dead->alive wait after a relaunch (90)
 #   FM_CONTROL_EXIT_RETRIES      Enter retries for the exit command (3)
-#   FM_CONTROL_CODEX_QUIT_WAIT   Codex process-exit wait after each exit Enter (15)
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -163,7 +162,6 @@ SETTLE_WAIT=${FM_CONTROL_SETTLE_WAIT:-5}
 EXIT_WAIT=${FM_CONTROL_EXIT_WAIT:-30}
 LAUNCH_WAIT=${FM_CONTROL_LAUNCH_WAIT:-90}
 EXIT_RETRIES=${FM_CONTROL_EXIT_RETRIES:-3}
-CODEX_QUIT_WAIT=${FM_CONTROL_CODEX_QUIT_WAIT:-15}
 
 die() {  # <message>
   echo "error: $1" >&2
@@ -549,7 +547,7 @@ codex_exit_screen_state() {  # [expected-pending] -> update-picker|empty|pending
 # Codex exit owns its literal/Enter sequence so every Enter is preceded by a
 # fresh screen check. The other harnesses keep the normal backend submit path.
 codex_exit_submit() {  # <literal-exit-command>
-  local cmd=$1 screen state i=0 waited
+  local cmd=$1 screen state i=0 waited uncertain_seen
   screen=$(codex_exit_screen_state)
   case "$screen" in
     update-picker) die "task $ID shows the Codex global-update picker; refusing to type $cmd or confirm its selected update" ;;
@@ -573,6 +571,7 @@ codex_exit_submit() {  # <literal-exit-command>
     # refuses outright, a still-pending composer goes back to the retry's own
     # screen check, and an uncertain screen never earns another Enter.
     waited=0
+    uncertain_seen=0
     while :; do
       sleep "$POLL"
       waited=$(awk -v w="$waited" -v p="$POLL" 'BEGIN{printf "%.3f", w + p}')
@@ -581,11 +580,15 @@ codex_exit_submit() {  # <literal-exit-command>
       [ "$state" != dead ] || return 0
       case "$screen" in
         update-picker) die "task $ID shows the Codex global-update picker after Enter; safe quit unconfirmed; refusing another Enter" ;;
-        empty) return 0 ;;
-        pending) break ;;
+        empty) [ "$uncertain_seen" = 1 ] || return 0 ;;
+        pending) [ "$uncertain_seen" = 1 ] || break ;;
+        *) uncertain_seen=1 ;;
       esac
-      awk -v w="$waited" -v t="$CODEX_QUIT_WAIT" 'BEGIN{exit !(w < t)}' \
-        || die "task $ID's Codex composer is '$screen' after Enter; safe quit unconfirmed; refusing another Enter"
+      if ! awk -v w="$waited" -v t="$EXIT_WAIT" 'BEGIN{exit !(w < t)}'; then
+        [ "$uncertain_seen" = 0 ] \
+          || die "task $ID's Codex composer became uncertain after Enter; safe quit unconfirmed; refusing another Enter"
+        die "task $ID's Codex composer is '$screen' after Enter; safe quit unconfirmed; refusing another Enter"
+      fi
     done
   done
 }

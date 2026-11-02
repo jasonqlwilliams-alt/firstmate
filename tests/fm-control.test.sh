@@ -128,6 +128,9 @@ case "${1:-}" in
              && [ ! -f "$D/first-enter" ]; then
           : > "$D/first-enter"
           : > "$D/picker"
+        elif [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = transient-unknown-then-pending ] \
+             && [ ! -f "$D/first-enter" ]; then
+          : > "$D/first-enter"
         elif [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = slow-exit ] && [ -f "$D/typed-quit" ]; then
           printf '4' > "$D/quitting"
         elif [ -f "$D/typed-quit" ] && [ -z "${FM_FAKE_NEVER_DIES:-}" ]; then
@@ -212,6 +215,15 @@ case "${1:-}" in
          || { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unknown-after-literal ] && [ -f "$D/typed-quit" ]; } \
          || { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unknown-after-first-enter ] && [ -f "$D/first-enter" ]; } \
          || { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = accepted-update-unknown ] && [ -f "$D/accepted-update" ]; }; then printf 'unrecognized screen\n'; exit 0; fi
+      if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = transient-unknown-then-pending ] \
+         && [ -f "$D/first-enter" ]; then
+        if [ ! -f "$D/uncertain-capture" ]; then
+          : > "$D/uncertain-capture"
+          printf 'unrecognized screen\n'
+          exit 0
+        fi
+        : > "$D/returned-pending"
+      fi
       if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = initial-picker ] || [ -f "$D/picker" ]; then
         printf '›\n'; codex_picker
       elif [ -f "$D/typed-quit" ] && [ "$(cat "$D/command")" = codex ]; then
@@ -364,7 +376,7 @@ run_control() {
   local dir=$1; shift
   env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
     FM_CONTROL_POLL=0.01 FM_CONTROL_SETTLE_WAIT=0.05 \
-    FM_CONTROL_EXIT_WAIT=0.05 FM_CONTROL_LAUNCH_WAIT=0.05 FM_CONTROL_CODEX_QUIT_WAIT=0.2 \
+    FM_CONTROL_EXIT_WAIT=0.05 FM_CONTROL_LAUNCH_WAIT=0.05 \
     FM_FAKE_MUSE_LOG="${FM_FAKE_MUSE_LOG:-}" \
     FM_FAKE_MUSE_DISAPPEAR_BEFORE_ACK="${FM_FAKE_MUSE_DISAPPEAR_BEFORE_ACK:-}" \
     FM_FAKE_INTERRUPT_STOPS_AGENT="${FM_FAKE_INTERRUPT_STOPS_AGENT:-}" \
@@ -487,6 +499,29 @@ test_codex_exit_does_not_confirm_dead_after_uncertain_screen() {
     [ -d "$dir/wt-t1" ] || fail "Codex $mode removed the worktree"
   done
   pass "fm-control exit: process death cannot confirm an uncertain Codex submission"
+}
+
+test_codex_exit_does_not_retry_after_transient_uncertainty() {
+  local dir out rc meta_before
+  dir=$(new_case codex-transient-unknown)
+  add_task "$dir" t1 codex
+  alive_as "$dir" codex
+  meta_before=$(cat "$dir/home/state/t1.meta")
+  out=$(FM_FAKE_CODEX_EXIT_MODE=transient-unknown-then-pending \
+    FM_FAKE_NEVER_DIES=1 run_control "$dir" t1 exit); rc=$?
+  expect_code 1 "$rc" "Codex transient uncertainty must refuse retry"$'\n'"$out"
+  assert_contains "$out" 'composer became uncertain after Enter' \
+    "Codex transient uncertainty must retain its uncertain-screen result"
+  [ -f "$dir/fake/returned-pending" ] \
+    || fail "Codex transient uncertainty did not later expose a pending composer"
+  [ "$(literals "$dir")" = /quit ] || fail "Codex transient uncertainty did not type exactly /quit"
+  [ "$(grep -c '^Enter$' "$dir/fake/keys" || true)" = 1 ] \
+    || fail "Codex transient uncertainty retried Enter after a pending read"
+  [ "$(cat "$dir/fake/command")" = codex ] || fail "Codex transient uncertainty stopped the mock process"
+  [ "$(cat "$dir/home/state/t1.meta")" = "$meta_before" ] \
+    || fail "Codex transient uncertainty changed endpoint metadata"
+  [ -d "$dir/wt-t1" ] || fail "Codex transient uncertainty removed the worktree"
+  pass "fm-control exit: transient uncertainty cannot earn a retry Enter"
 }
 
 # A live Codex 0.162.1 quit restores the terminal at once and keeps its process
@@ -1219,6 +1254,7 @@ test_fm_send_still_marks_the_same_secondmate_task() {
 test_exit_types_each_harness_verified_command
 test_codex_exit_refuses_update_picker_and_uncertain_composer
 test_codex_exit_does_not_confirm_dead_after_uncertain_screen
+test_codex_exit_does_not_retry_after_transient_uncertainty
 test_codex_exit_herdr_plain_capture
 test_codex_exit_waits_for_a_slow_quit
 test_codex_exit_tmux_retained_picker_history
