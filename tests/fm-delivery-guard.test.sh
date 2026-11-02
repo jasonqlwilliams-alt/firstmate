@@ -360,6 +360,83 @@ SH
   pass "delivery guard: worker Git cannot bypass target checks with --no-verify or send-pack"
 }
 
+remote_has_branch() {  # <bare-remote> <branch>
+  git --git-dir="$1" show-ref --verify --quiet "refs/heads/$2"
+}
+
+# Pushes a new <branch> from <repo> through the guarded shim or straight through
+# the real Git, with optional environment assignments and leading Git options.
+push_branch_via() {  # <shim|real> <repo> <real-git> <branch> [VAR=value ...] -- [git option ...]
+  local via=$1 repo=$2 real_git=$3 branch=$4 entry
+  local envs=()
+  shift 4
+  while [ "$#" -gt 0 ] && [ "$1" != -- ]; do envs+=("$1"); shift; done
+  [ "$#" -eq 0 ] || shift
+  entry=$GIT_SHIM
+  [ "$via" = shim ] || entry=$real_git
+  git -C "$repo" branch -q "$branch"
+  (cd "$repo" && env ${envs[@]+"${envs[@]}"} FM_REAL_GIT="$real_git" "$entry" "$@" push origin "$branch" 2>&1)
+}
+
+# Git folds config section and variable names to lowercase, so Core.HooksPath
+# empties the hook directory exactly like core.hooksPath. Each spelling first
+# proves real Git honors it, so the shim refusal that follows is load-bearing.
+test_git_shim_refuses_hooks_path_override_in_any_case() {
+  local dir repo remote empty real_git form key n=0 out rc
+  dir="$TMP_ROOT/git-shim-hooks-path-case"
+  repo="$dir/repo"
+  remote="$dir/remote.git"
+  empty="$dir/empty-hooks"
+  real_git=${FM_REAL_GIT:-$(command -v git)}
+  fm_git_init_commit "$repo"
+  git init -q --bare "$remote"
+  git -C "$repo" remote add origin "$remote"
+  mkdir -p "$dir/hooks" "$empty"
+  cat > "$dir/hooks/pre-push" <<'SH'
+#!/bin/sh
+[ -z "${ALLOW_PUSH:-}" ] || exit 0
+printf 'PRE-PUSH HOOK REFUSED\n' >&2
+exit 1
+SH
+  chmod +x "$dir/hooks/pre-push"
+  git -C "$repo" config core.hooksPath "$dir/hooks"
+
+  out=$(push_branch_via shim "$repo" "$real_git" plain --); rc=$?
+  [ "$rc" -ne 0 ] || fail "an ordinary guarded push should be refused by the refusing pre-push hook"
+  assert_contains "$out" "PRE-PUSH HOOK REFUSED" "an ordinary guarded push did not run the pre-push hook"
+  ! remote_has_branch "$remote" plain || fail "a push the pre-push hook refused still landed"
+  out=$(push_branch_via shim "$repo" "$real_git" allowed ALLOW_PUSH=1 --); rc=$?
+  expect_code 0 "$rc" "an ordinary guarded push the hook allows should succeed: $out"
+  remote_has_branch "$remote" allowed || fail "an allowed ordinary guarded push did not land"
+  out=$(push_branch_via shim "$repo" "$real_git" unrelated ALLOW_PUSH=1 -- -c Core.Editor=true); rc=$?
+  expect_code 0 "$rc" "an unrelated mixed-case config override must not be refused: $out"
+  remote_has_branch "$remote" unrelated || fail "a push with an unrelated config override did not land"
+
+  for form in c config-env config-env-joined config-count config-parameters; do
+    for key in core.hooksPath Core.HooksPath CORE.HOOKSPATH; do
+      n=$((n + 1))
+      case "$form" in
+        c) set -- -- -c "$key=$empty" ;;
+        config-env) set -- FM_EMPTY_HOOKS="$empty" -- --config-env "$key=FM_EMPTY_HOOKS" ;;
+        config-env-joined) set -- FM_EMPTY_HOOKS="$empty" -- "--config-env=$key=FM_EMPTY_HOOKS" ;;
+        config-count) set -- GIT_CONFIG_COUNT=1 "GIT_CONFIG_KEY_0=$key" "GIT_CONFIG_VALUE_0=$empty" -- ;;
+        config-parameters) set -- "GIT_CONFIG_PARAMETERS='$key'='$empty'" -- ;;
+      esac
+      out=$(push_branch_via real "$repo" "$real_git" "control-$n" "$@"); rc=$?
+      expect_code 0 "$rc" "real Git should honor the $form $key override and skip the refusing hook: $out"
+      remote_has_branch "$remote" "control-$n" \
+        || fail "real Git did not land the $form $key control push, so its refusal proves nothing"
+      out=$(push_branch_via shim "$repo" "$real_git" "override-$n" "$@"); rc=$?
+      [ "$rc" -ne 0 ] || fail "guarded git should refuse the $form $key override"
+      assert_contains "$out" "cannot override the Firstmate pre-push hook" \
+        "the $form $key refusal was not explicit"
+      ! remote_has_branch "$remote" "override-$n" \
+        || fail "the refused $form $key override still landed its branch on the remote"
+    done
+  done
+  pass "delivery guard: worker Git refuses a core.hooksPath override in any letter case through every config form"
+}
+
 # Every bash entered through the shim (including exec and alias lookup) reads
 # this test-only startup file. A missing guard reaches at most four levels and
 # exits 97; it cannot consume the host process table. No time-based kill race.
@@ -634,3 +711,4 @@ test_unarmed_repository_pushes_anywhere
 test_arm_refuses_without_a_policy_file
 test_direct_pr_contract_is_unchanged_without_a_policy
 test_git_shim_blocks_hook_bypasses
+test_git_shim_refuses_hooks_path_override_in_any_case

@@ -16,6 +16,18 @@ fi
   exit 1
 }
 
+# Git folds config section and variable names to lowercase, so Core.HooksPath
+# and every other spelling name the same key as core.hooksPath. Match those
+# keys without regard to case; nocasematch keeps stock macOS Bash 3.2 working.
+matches_hooks_path() {  # <text> <glob written in lowercase>
+  local matched=1
+  shopt -s nocasematch
+  # shellcheck disable=SC2053 # the second operand is deliberately a glob
+  [[ $1 == $2 ]] && matched=0
+  shopt -u nocasematch
+  return "$matched"
+}
+
 args=("$@")
 command_name=
 command_index=-1
@@ -24,15 +36,11 @@ i=0
 while [ "$i" -lt "${#args[@]}" ]; do
   arg=${args[$i]}
   case "$arg" in
-    -c)
-      [ $((i + 1)) -ge "${#args[@]}" ] \
-        || case "${args[$((i + 1))]}" in core.hooksPath=*) hook_override=1 ;; esac
-      i=$((i + 2))
-      continue
-      ;;
-    --config-env)
-      [ $((i + 1)) -ge "${#args[@]}" ] \
-        || case "${args[$((i + 1))]}" in core.hooksPath=*) hook_override=1 ;; esac
+    -c|--config-env)
+      if [ $((i + 1)) -lt "${#args[@]}" ] \
+        && matches_hooks_path "${args[$((i + 1))]}" 'core.hookspath=*'; then
+        hook_override=1
+      fi
       i=$((i + 2))
       continue
       ;;
@@ -40,12 +48,17 @@ while [ "$i" -lt "${#args[@]}" ]; do
       i=$((i + 2))
       continue
       ;;
-    -ccore.hooksPath=*|--config-env=core.hooksPath=*)
+    -ccore.hooksPath=*)
       hook_override=1
       i=$((i + 1))
       continue
       ;;
-    --git-dir=*|--work-tree=*|--namespace=*|--super-prefix=*|--config-env=*|--exec-path=*|--*)
+    --config-env=*)
+      matches_hooks_path "${arg#--config-env=}" 'core.hookspath=*' && hook_override=1
+      i=$((i + 1))
+      continue
+      ;;
+    --git-dir=*|--work-tree=*|--namespace=*|--super-prefix=*|--exec-path=*|--*)
       i=$((i + 1))
       continue
       ;;
@@ -83,15 +96,13 @@ if [ "$command_index" -ge 0 ] && [ -n "$command_name" ] \
 fi
 
 if [ "$resolved_command" = push ]; then
-  case "${GIT_CONFIG_PARAMETERS:-}" in
-    *core.hooksPath*) hook_override=1 ;;
-  esac
+  matches_hooks_path "${GIT_CONFIG_PARAMETERS:-}" '*core.hookspath*' && hook_override=1
   config_count=${GIT_CONFIG_COUNT:-0}
   case "$config_count" in ''|*[!0-9]*) config_count=0 ;; esac
   i=0
   while [ "$i" -lt "$config_count" ]; do
     config_key_name="GIT_CONFIG_KEY_$i"
-    [ "${!config_key_name:-}" != core.hooksPath ] || hook_override=1
+    matches_hooks_path "${!config_key_name:-}" core.hookspath && hook_override=1
     i=$((i + 1))
   done
   if [ "$hook_override" -eq 1 ]; then
