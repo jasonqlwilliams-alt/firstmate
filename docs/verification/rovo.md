@@ -30,7 +30,7 @@ Rovo CLI: 202609.1.2
 `fm-spawn.sh` builds `env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS <rovo-bin> run --yolo <model/effort flags>` - BARE, with no positional brief - wrapped by the shared `env -u CURSOR_AGENT -u CURSOR_INVOKED_AS` prefix every non-cursor harness gets.
 The brief is then typed in after the TUI comes up, the same launch-then-send shape kimi uses, through the same shared readers (`fm_backend_capture`, `fm_backend_composer_state`, `fm_backend_send_text_submit`):
 
-1. `rovo_wait_for_ready` polls for the `Welcome to Rovo!` banner (primary) or a composer-empty verdict (weaker fallback, see the composer-ghost-text gap below).
+1. `rovo_wait_for_ready` polls for the `Welcome to Rovo!` banner (primary) or a composer-empty verdict (weaker fallback, because this spawn read lacks the Rovo harness fact described below).
 2. The pointer `Read the brief at <absolute-path> and follow it exactly.` is submitted via `fm_backend_send_text_submit`.
 3. `rovo_wait_for_delivery` confirms composer-empty AND either the echoed `Read the brief at` text or a nonzero `Context:` percentage (`context:[^%]*[1-9][^%]*%`, tolerant of the footer's bar glyph but anchored before the `%` so the `.../922K` denominator cannot false-positive).
 
@@ -66,7 +66,7 @@ Enter to queue, Ctrl+Enter to steer
 This is a rendered-tail fallback exactly like Grok's, not a semantic source: rovo's `eventHooks` (`~/.rovo/config.yml`) fire at tool granularity (`on_tool_start`/`on_tool_end`) only, never at turn-end, so no writer is armed and none is seeded.
 Grok was previously the only rendered-text arm the redesigned busy contract allowed; this task extends that same documented exception to rovo, scoped to `harness=rovo` exactly like Grok is scoped to `harness=grok`, and neither can classify the other (`tests/fm-rovo-harness.test.sh`'s isolation case).
 
-## Composer ghost text: measured, deliberately left unfixed
+## Composer ghost text: measured, scoped to rovo panes
 
 A live idle-composer capture over a raw PTY located the inline placeholder chip inside the actual bordered content row, not merely in a suggestion list below it:
 
@@ -77,11 +77,14 @@ row 12  ╰───────────────────────
 ```
 
 Real typed text in the same row, captured separately, renders at `38;2;206;207;210` (luminance ~207).
-Both values sit above `bin/fm-composer-lib.sh`'s default `FM_COMPOSER_GHOST_LUMA_MAX` of 128, so `fm_composer_strip_ghost` leaves the placeholder unstripped and a fresh rovo composer can misclassify as `pending` rather than `empty`.
+Both values sit above `bin/fm-composer-lib.sh`'s fleet-wide `FM_COMPOSER_GHOST_LUMA_MAX` of 128, so a read without the Rovo harness fact keeps the placeholder and can read an idle composer as `pending` rather than `empty`.
 Raising the shared default was considered and rejected: muse's own real, must-not-be-stripped prompt glyph measures luminance ~149.9 (`muse.md`), below rovo's ghost luminance of ~163, so no single global threshold can keep muse's glyph real while dropping rovo's ghost chip.
-This is recorded as a known gap rather than patched, because the safe fix needs a harness-scoped signal the shared composer classifier does not carry today, and a threshold change risks regressing muse's already-credentialed behavior for a rovo-scoped fix.
-The blast radius is bounded to composer-emptiness consumers such as steering delivery, which already retries through the doorbell ladder on a non-`empty` read.
-It does not block readiness: readiness leads with the `Welcome to Rovo!` banner, so the ghost chip is never the deciding signal there. Delivery, however, requires composer-empty as one conjunct (alongside the echoed pointer or a nonzero `Context:` percentage), and on the herdr backend this conjunct may fail to settle within its poll window (the composer read non-empty even mid-turn in the live herdr run below), so `rovo_wait_for_delivery` can fail the gate and tear the pane down there. tmux delivery is separately verified working (see the tmux backend-liveness section below). This is a known limitation whose fix is tracked as a separate follow-up, not fixed in this change.
+The shipped fix is harness-scoped: a composer read carrying the recorded harness `rovo` strips truecolor below a fixed ceiling of 185, between the two measured values, and every other harness keeps the fleet-wide ceiling (`bin/fm-composer-lib.sh` "ROVO PLACEHOLDER CHIP").
+The steering doorbell carries the recorded harness on every read, so an idle rovo composer reads `empty` and a Rovo pane is held to the same proven-empty doorbell rule as a Codex pane (`bin/fm-task-inbox-lib.sh`).
+`tests/fm-composer-lib.test.sh` pins the recorded screens portably (tmux with the cursor on the chip row and cursorless Herdr: idle reads `empty`, a typed line and the chip plus typed text read `pending`, the same chip without the harness fact reads `pending`, and muse's glyph-coloured input stays `pending`), and `tests/fm-task-inbox.test.sh` drives the doorbell into a rovo-shaped stub pane under real tmux.
+The live refresh is the rovo case in `tests/fm-composer-matrix-live-e2e.test.sh` (`FM_COMPOSER_MATRIX_LIVE=1`), which launches rovo bare and requires the idle composer to read `empty` and a typed, never-submitted line to read `pending`; it has not yet been run against an installed rovo, so the luminance values above remain the governing live evidence until it is.
+The spawn gates read the composer without the harness fact, so for them the chip still reads non-empty.
+It does not block readiness: readiness leads with the `Welcome to Rovo!` banner, so the ghost chip is never the deciding signal there. Delivery, however, requires composer-empty as one conjunct (alongside the echoed pointer or a nonzero `Context:` percentage), and on the herdr backend this conjunct may fail to settle within its poll window (the composer read non-empty even mid-turn in the live herdr run below), so `rovo_wait_for_delivery` can fail the gate and tear the pane down there. tmux delivery is separately verified working (see the tmux backend-liveness section below). This remains a known limitation tracked as a separate follow-up.
 
 ## Interrupt: confirmed under real tmux
 

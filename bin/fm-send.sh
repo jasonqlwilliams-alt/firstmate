@@ -51,7 +51,7 @@
 # bin/fm-task-inbox-lib.sh owns the record format, the doorbell line, and the
 # re-ring ladder, including the ring's per-harness screen gate (the Codex
 # update picker and pending composer text are refused on every harness, and a
-# Codex pane also needs a proven-empty composer); a refused ring prints a
+# Codex or Rovo pane also needs a proven-empty composer); a refused ring prints a
 # notice, and the watcher retries an ordinary record before escalating it. No
 # composer verdict is delivery proof on this plane, and a failed or refused
 # ring never fails the send.
@@ -1012,11 +1012,11 @@ else
     ring_rc=0
     fm_task_inbox_ring "$TARGET_BACKEND" "$T" "$INBOX_RECORD" "$EXPECTED_LABEL" "$TARGET_HARNESS" || ring_rc=$?
     case "$ring_rc" in
-      1) echo "fm-send: doorbell not typed because $T's composer holds pending text or, on a Codex pane, is not proven empty; the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2 ;;
+      1) echo "fm-send: doorbell not typed because $T's composer holds pending text or, on a Codex or Rovo pane, is not proven empty; the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2 ;;
       2) echo "fm-send: doorbell did not reach $T; the steer is durably recorded at $INBOX_RECORD and the watcher will re-ring" >&2 ;;
       3) echo "fm-send: doorbell not typed because the agent in $T has exited; the steer is durably recorded at $INBOX_RECORD for recovery (stuck-crewmate-recovery), and the watcher will not re-ring a dead pane" >&2 ;;
       4) echo "fm-send: no doorbell Enter sent because $T shows the Codex global-update picker (never confirm it; Escape skips the update); the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2 ;;
-      5) echo "fm-send: doorbell typed into $T but its Enter was withheld because the Codex composer did not prove it holds the doorbell; the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2 ;;
+      5) echo "fm-send: doorbell typed into $T but its Enter was withheld because the composer did not prove it holds the doorbell; the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2 ;;
     esac
     exit 0
   fi

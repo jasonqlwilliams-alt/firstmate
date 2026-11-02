@@ -885,12 +885,20 @@ fm_backend_composer_classify_snapshot() {  # <backend> <target>
 # plain (styled=0) capture, where a glyph row with trailing text reads unknown,
 # a composer holding exactly that text reads pending, and on a cursorless
 # capture it also proves picker rows above it are retained history.
+# [harness] is the pane's recorded harness; when it is a plain token it rides
+# into the snapshot's capability facts as harness=<name>, so the classifier
+# can apply that harness's own placeholder rule (bin/fm-composer-lib.sh
+# "ROVO PLACEHOLDER CHIP").
 # Callers: the steering-inbox doorbell (bin/fm-task-inbox-lib.sh) and Codex
 # exit (bin/fm-control.sh).
-fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending]
-  local backend=$1 target=$2 label=${3:-} expected=${4:-} picker verdict kv styled=0
+fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness]
+  local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} picker verdict kv styled=0
   fm_backend_composer_snapshot "$backend" "$target" "$label" || { printf 'unknown'; return 0; }
   [ -n "$FM_COMPOSER_SNAPSHOT_SCREEN" ] || { printf 'unknown'; return 0; }
+  case "$harness" in
+    ''|*[!a-z0-9-]*) ;;
+    *) FM_COMPOSER_SNAPSHOT_CAPS="$FM_COMPOSER_SNAPSHOT_CAPS"$'\n'"harness=$harness" ;;
+  esac
   picker=$(fm_composer_update_picker_scan "$FM_COMPOSER_SNAPSHOT_CAPS" \
     "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR" "$expected")
   [ "$picker" != active ] || { printf 'update-picker'; return 0; }
