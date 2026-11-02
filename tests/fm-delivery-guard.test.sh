@@ -437,6 +437,181 @@ SH
   pass "delivery guard: worker Git refuses a core.hooksPath override in any letter case through every config form"
 }
 
+# In an armed repository the shim checks the hooks directory Git actually
+# resolves, so an included file or a rewritten repository config that empties
+# the hook is refused too. Each bypass first proves real Git honors it and lands
+# on the upstream the managed hook refuses, so the shim refusal is load-bearing.
+test_git_shim_refuses_effective_hooks_path_bypasses() {
+  local rec repo home fakebin upstream fork gate real_git managed empty inc quoted_inc racing case n=0 out rc
+  rec=$(make_repo effective-hooks-path)
+  IFS='|' read -r repo home fakebin upstream fork gate <<EOF
+$rec
+EOF
+  FM_HOME="$home" GH_AXI_LOG="$home/gh.log" PATH="$fakebin:$PATH" "$GUARD" arm widgets "$repo" >/dev/null \
+    || fail "guard arm failed for the effective hooks-path fixture"
+  real_git=${FM_REAL_GIT:-$(command -v git)}
+  managed="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)/firstmate-hooks"
+  empty="${repo%/repo}/empty-hooks"
+  inc="${repo%/repo}/hooks-path.cfg"
+  quoted_inc="${repo%/repo}/hooks path.cfg"
+  mkdir -p "$empty"
+  printf '[core]\n\thooksPath = %s\n' "$empty" > "$inc"
+  printf '[core]\n\thooksPath = %s\n' "$empty" > "$quoted_inc"
+  set -- FM_HOME="$home" FAKE_GIT_REMOTE_ROOT="${repo%/repo}" GH_AXI_LOG="$home/gh.log" PATH="$fakebin:$PATH"
+  local fixture_env=("$@")
+
+  git -C "$repo" config alias.ship "-c include.path=$inc push"
+  git -C "$repo" branch -q control-alias
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$real_git" ship origin control-alias 2>&1); rc=$?
+  expect_code 0 "$rc" "real Git should honor the option-leading push alias and skip the managed hook: $out"
+  remote_has_branch "$upstream" control-alias || fail "the option-leading alias control push did not land"
+  git -C "$repo" branch -q bypass-alias
+  out=$(cd "$repo" && env "${fixture_env[@]}" FM_REAL_GIT="$real_git" "$GIT_SHIM" ship origin bypass-alias 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "guarded git should refuse the option-leading alias hooks-path bypass"
+  assert_contains "$out" "instead of the Firstmate managed hooks at $managed" \
+    "the option-leading alias refusal was not explicit"
+  ! remote_has_branch "$upstream" bypass-alias || fail "the refused option-leading alias still landed"
+  git -C "$repo" config alias.ship "-c \"include.path=$quoted_inc\" push"
+  git -C "$repo" branch -q control-quoted-alias
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$real_git" ship origin control-quoted-alias 2>&1); rc=$?
+  expect_code 0 "$rc" "real Git should honor the quoted option-leading alias and skip the managed hook: $out"
+  remote_has_branch "$upstream" control-quoted-alias || fail "the quoted alias control push did not land"
+  git -C "$repo" branch -q bypass-quoted-alias
+  out=$(cd "$repo" && env "${fixture_env[@]}" FM_REAL_GIT="$real_git" "$GIT_SHIM" ship origin bypass-quoted-alias 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "guarded git should refuse the quoted option-leading alias hooks-path bypass"
+  assert_contains "$out" "instead of the Firstmate managed hooks at $managed" \
+    "the quoted option-leading alias refusal was not explicit"
+  ! remote_has_branch "$upstream" bypass-quoted-alias || fail "the refused quoted alias still landed"
+  git -C "$repo" config alias.ship '-c core.editor=true push'
+  git -C "$repo" branch -q fork-alias
+  out=$(cd "$repo" && env "${fixture_env[@]}" FM_REAL_GIT="$real_git" "$GIT_SHIM" ship fork fork-alias 2>&1); rc=$?
+  expect_code 0 "$rc" "a safe option-leading alias should push through the managed hook: $out"
+  remote_has_branch "$fork" fork-alias || fail "the safe option-leading alias did not land on the fork"
+
+  out=$(push_branch_via shim "$repo" "$real_git" plain "${fixture_env[@]}" --); rc=$?
+  [ "$rc" -ne 0 ] || fail "an ordinary guarded push to the upstream should be refused by the managed hook"
+  assert_contains "$out" "branch-push would write to github.com/upstream/widgets" \
+    "an ordinary guarded push did not run the managed pre-push hook"
+  ! remote_has_branch "$upstream" plain || fail "a push the managed hook refused still landed"
+  git -C "$repo" branch -q fork-plain
+  out=$(cd "$repo" && env "${fixture_env[@]}" FM_REAL_GIT="$real_git" "$GIT_SHIM" push fork fork-plain 2>&1); rc=$?
+  expect_code 0 "$rc" "an ordinary guarded push to the configured fork should succeed: $out"
+  remote_has_branch "$fork" fork-plain || fail "an allowed ordinary guarded push did not land on the fork"
+
+  for case in include-c include-config-env include-config-count include-config-parameters include-if \
+    repo-set repo-unset repo-include worktree-set; do
+    n=$((n + 1))
+    set -- "${fixture_env[@]}"
+    case "$case" in
+      include-c) set -- "$@" -- -c "include.path=$inc" ;;
+      include-config-env) set -- "$@" FM_HOOKS_INCLUDE="$inc" -- --config-env include.path=FM_HOOKS_INCLUDE ;;
+      include-config-count) set -- "$@" GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=include.path "GIT_CONFIG_VALUE_0=$inc" -- ;;
+      include-config-parameters) set -- "$@" "GIT_CONFIG_PARAMETERS='include.path'='$inc'" -- ;;
+      include-if) set -- "$@" -- -c "includeIf.gitdir:/.path=$inc" ;;
+      repo-set) git -C "$repo" config --local core.hooksPath "$empty"; set -- "$@" -- ;;
+      repo-unset) git -C "$repo" config --local --unset core.hooksPath; set -- "$@" -- ;;
+      repo-include) git -C "$repo" config --local include.path "$inc"; set -- "$@" -- ;;
+      worktree-set)
+        git -C "$repo" config --local extensions.worktreeConfig true
+        git -C "$repo" config --worktree core.hooksPath "$empty"
+        set -- "$@" --
+        ;;
+    esac
+    out=$(push_branch_via real "$repo" "$real_git" "control-$n" "$@"); rc=$?
+    expect_code 0 "$rc" "real Git should honor the $case bypass and skip the managed hook: $out"
+    remote_has_branch "$upstream" "control-$n" \
+      || fail "real Git did not land the $case control push, so its refusal proves nothing"
+    out=$(push_branch_via shim "$repo" "$real_git" "bypass-$n" "$@"); rc=$?
+    [ "$rc" -ne 0 ] || fail "guarded git should refuse the $case bypass"
+    assert_contains "$out" "instead of the Firstmate managed hooks at $managed" "the $case refusal was not explicit"
+    ! remote_has_branch "$upstream" "bypass-$n" \
+      || fail "the refused $case bypass still landed its branch on the upstream"
+    case "$case" in
+      repo-set|repo-unset) git -C "$repo" config --local core.hooksPath "$managed" ;;
+      repo-include) git -C "$repo" config --local --unset include.path ;;
+      worktree-set) git -C "$repo" config --worktree --unset core.hooksPath ;;
+    esac
+  done
+
+  # An equivalent spelling of the managed directory still runs the managed hook.
+  git -C "$repo" config --local core.hooksPath "$managed/."
+  out=$(push_branch_via shim "$repo" "$real_git" equivalent "${fixture_env[@]}" --); rc=$?
+  [ "$rc" -ne 0 ] || fail "an equivalent managed spelling must still run the refusing managed hook"
+  assert_contains "$out" "branch-push would write to github.com/upstream/widgets" \
+    "an equivalent managed spelling was refused by the shim instead of reaching the managed hook"
+  git -C "$repo" branch -q fork-equivalent
+  out=$(cd "$repo" && env "${fixture_env[@]}" FM_REAL_GIT="$real_git" "$GIT_SHIM" push fork fork-equivalent 2>&1); rc=$?
+  expect_code 0 "$rc" "an equivalent managed spelling should still allow the configured fork: $out"
+  remote_has_branch "$fork" fork-equivalent || fail "an equivalent managed spelling did not land on the fork"
+  git -C "$repo" config --local core.hooksPath "$managed"
+
+  # A config rewrite after the shim's check but before Git reads its config is
+  # outranked by the pinned managed hooks path, so the managed hook still runs.
+  racing="${repo%/repo}/racing-git"
+  cat > "$racing" <<SH
+#!/bin/sh
+case " \$* " in *" push "*) "$real_git" -C "$repo" config --local core.hooksPath "$empty" ;; esac
+exec "$real_git" "\$@"
+SH
+  chmod +x "$racing"
+  out=$(push_branch_via real "$repo" "$racing" control-race "${fixture_env[@]}" --); rc=$?
+  expect_code 0 "$rc" "a config rewrite just before Git reads its config should skip the managed hook: $out"
+  remote_has_branch "$upstream" control-race || fail "the racing control push did not land, so its refusal proves nothing"
+  git -C "$repo" config --local core.hooksPath "$managed"
+  out=$(push_branch_via shim "$repo" "$racing" race "${fixture_env[@]}" --); rc=$?
+  [ "$rc" -ne 0 ] || fail "guarded git should keep the managed hook when config is rewritten after its check"
+  assert_contains "$out" "branch-push would write to github.com/upstream/widgets" \
+    "the pinned managed hook did not run after a racing config rewrite"
+  ! remote_has_branch "$upstream" race || fail "a racing config rewrite still landed its branch on the upstream"
+  git -C "$repo" config --local core.hooksPath "$managed"
+  pass "delivery guard: worker Git refuses included, rewritten, and racing hooks-path bypasses in an armed repository"
+}
+
+test_git_shim_allows_quoted_non_push_alias() {
+  local dir repo real_git expected actual expected_rc actual_rc
+  dir="$TMP_ROOT/quoted-non-push-alias"
+  repo="$dir/repo"
+  real_git=${FM_REAL_GIT:-$(command -v git)}
+  fm_git_init_commit "$repo"
+  git -C "$repo" config alias.pretty '-c "color.ui=always" log --oneline -1'
+  expected=$(cd "$repo" && "$real_git" pretty 2>&1); expected_rc=$?
+  actual=$(cd "$repo" && FM_REAL_GIT="$real_git" "$GIT_SHIM" pretty 2>&1); actual_rc=$?
+  expect_code "$expected_rc" "$actual_rc" "the shim changed a quoted non-push alias's exit status: $actual"
+  [ "$actual" = "$expected" ] || fail "the shim changed a quoted non-push alias's output"
+  assert_contains "$actual" "initial" "the quoted non-push alias did not show history"
+  pass "delivery guard: a quoted non-push alias reaches real Git unchanged"
+}
+
+test_git_shim_ignores_leftover_hooks_directory_in_unarmed_repo() {
+  local dir repo remote managed real_git out rc
+  dir="$TMP_ROOT/unarmed-leftover-hooks"
+  repo="$dir/repo"
+  remote="$dir/remote.git"
+  real_git=${FM_REAL_GIT:-$(command -v git)}
+  fm_git_init_commit "$repo"
+  git init -q --bare "$remote"
+  git -C "$repo" remote add origin "$remote"
+  managed="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)/firstmate-hooks"
+  mkdir -p "$managed"
+  out=$(push_branch_via shim "$repo" "$real_git" leftover --); rc=$?
+  expect_code 0 "$rc" "an unarmed repository with a leftover managed directory should push normally: $out"
+  remote_has_branch "$remote" leftover || fail "an unarmed repository's push did not land"
+  pass "delivery guard: a leftover hooks directory alone does not arm a repository"
+}
+
+test_git_shim_passes_push_help_outside_repository() {
+  local dir real_git expected actual expected_rc actual_rc
+  dir="$TMP_ROOT/push-help-outside-repository"
+  real_git=${FM_REAL_GIT:-$(command -v git)}
+  mkdir -p "$dir"
+  expected=$(cd "$dir" && "$real_git" push -h 2>&1); expected_rc=$?
+  actual=$(cd "$dir" && FM_REAL_GIT="$real_git" "$GIT_SHIM" push -h 2>&1); actual_rc=$?
+  expect_code "$expected_rc" "$actual_rc" "the shim changed git push -h's exit status outside a repository: $actual"
+  [ "$actual" = "$expected" ] || fail "the shim changed git push -h's output outside a repository"
+  assert_contains "$actual" "usage: git push" "git push -h did not show usage outside a repository"
+  pass "delivery guard: git push help outside a repository reaches real Git"
+}
+
 # Every bash entered through the shim (including exec and alias lookup) reads
 # this test-only startup file. A missing guard reaches at most four levels and
 # exits 97; it cannot consume the host process table. No time-based kill race.
@@ -712,3 +887,7 @@ test_arm_refuses_without_a_policy_file
 test_direct_pr_contract_is_unchanged_without_a_policy
 test_git_shim_blocks_hook_bypasses
 test_git_shim_refuses_hooks_path_override_in_any_case
+test_git_shim_refuses_effective_hooks_path_bypasses
+test_git_shim_allows_quoted_non_push_alias
+test_git_shim_ignores_leftover_hooks_directory_in_unarmed_repo
+test_git_shim_passes_push_help_outside_repository

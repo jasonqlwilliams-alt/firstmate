@@ -95,6 +95,7 @@ install_guard() {  # <project> <repo>; installs a fail-closed hook without trust
   local project=$1 repo=$2 top common managed configured previous
   top=$(repository_top "$repo") || die "not a Git worktree: $repo"
   common=$(repository_common_dir "$top") || die "cannot resolve the shared Git directory for $top"
+  # bin/fm-delivery-shims/git derives this same path to verify each worker push.
   managed="$common/firstmate-hooks"
   configured=$(git -C "$top" config --local --get core.hooksPath 2>/dev/null || true)
   previous=$(git -C "$top" config --local --get firstmate.previousHooksPath 2>/dev/null || true)
