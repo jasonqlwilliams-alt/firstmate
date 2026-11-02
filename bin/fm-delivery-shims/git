@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Guarded worker entrypoint for Git. The repository pre-push hook owns target
-# authorization; this shim prevents Git's explicit hook-bypass path and the
-# lower-level send-pack command from stepping around that boundary.
+# authorization; this shim refuses hook bypasses and pins the effective managed
+# hooks path for armed pushes, including push aliases with leading Git options.
 set -u
 
 REAL=${FM_REAL_GIT:-}
@@ -208,9 +208,9 @@ esac
 # and submodule pushes inherit it through GIT_CONFIG_PARAMETERS, so a guarded
 # push nested inside a hook is refused by the environment check above.
 #
-# A repository counts as armed while any firstmate.* key arming writes is
-# present. A worker that deletes all of them, or
-# rewrites the managed hook itself, steps outside what a PATH shim can enforce.
+# A repository counts as armed while any Firstmate arming marker is present.
+# Deleting every marker or rewriting the managed hook itself is outside what a
+# PATH shim can enforce.
 pinned_hooks=
 if [ "$resolved_command" = push ]; then
   common=$("$REAL" "${effective_prefix[@]}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common=

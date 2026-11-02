@@ -83,9 +83,9 @@ The hook checks Git's effective push URL rather than assuming a remote name.
 For a `no-mistakes` proxy push, it also reads the tool's reported fork branch destination and upstream PR destination and requires both to equal `forkPushUrl` before the local gate receives objects.
 Spawned workers in an armed home receive guarded `gh` and `gh-axi` command shims that apply the same repository and account check to pull-request and REST repository writes and refuse GraphQL calls whose mutation destination cannot be proven, plus a guarded `git` shim that refuses `--no-verify` and `send-pack` hook bypasses.
 The `git` shim also checks `core.hooksPath` without regard to key capitalization in separate `-c` arguments, both `--config-env` forms, and `GIT_CONFIG_*` environment overrides.
-In an armed repository it also asks Git for the hooks directory each push actually resolves, including included files and rewritten repository config, refuses unless that is the managed hooks directory, and pins that directory for the push so a later config edit cannot redirect it.
+In an armed repository it also asks Git for the hooks directory each push actually resolves, including included files, rewritten repository config, and leading options in push aliases; it refuses unless that is the managed hooks directory and pins that directory for the push so a later config edit cannot redirect it.
 A worker that deletes every arming marker or rewrites the managed hook itself is beyond what a command shim can enforce.
-Every allowed operation prints a `DELIVERY TARGET` line naming the project, action, repository, and authenticated account before it writes; every mismatch exits nonzero with a `REFUSED` line naming the unsafe target.
+Every allowed guarded write prints a `DELIVERY TARGET` line naming the project, action, repository, and authenticated account before it writes; every target mismatch exits nonzero with a `REFUSED` line naming the unsafe target.
 
 `bin/fm-upstream-sync.sh check [<project>]` performs an on-demand check, and `scheduled [<project>]` applies the due interval.
 The locked deferred network stage invokes the scheduled form at session start; repeated invocations before the interval are silent.
