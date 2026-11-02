@@ -72,7 +72,7 @@ parse_command() {
 }
 
 split_alias_words() {
-  local value=$1 token= quote= char i=0
+  local value=$1 token='' quote='' char i=0 backslash=$'\\'
   alias_words=()
   while [ "$i" -lt "${#value}" ]; do
     char=${value:$i:1}
@@ -87,7 +87,7 @@ split_alias_words() {
     elif [ -n "$quote" ] && [ "$char" = "$quote" ]; then
       quote=
     else
-      if [ "$char" = '\' ] && [ "$quote" != "'" ]; then
+      if [ "$char" = "$backslash" ] && [ "$quote" != "'" ]; then
         i=$((i + 1))
         [ "$i" -lt "${#value}" ] || return 1
         char=${value:$i:1}
@@ -101,7 +101,7 @@ split_alias_words() {
 }
 
 args=("$@")
-parse_command "${args[@]}"
+parse_command ${args[@]+"${args[@]}"}
 command_name=$parsed_command
 command_index=$parsed_index
 hook_override=$parsed_hook_override
@@ -138,14 +138,14 @@ if [ "$command_index" -ge 0 ] && [ -n "$command_name" ] \
         fi
         exec "$REAL" "$@"
       fi
-      parse_command "${alias_words[@]}"
+      parse_command ${alias_words[@]+"${alias_words[@]}"}
       case "$parsed_command" in
         push|send-pack)
           resolved_command=$parsed_command
           alias_command_index=$parsed_index
           if [ "$parsed_index" -gt 0 ]; then
             alias_options=("${alias_words[@]:0:$parsed_index}")
-            effective_prefix+=("${alias_options[@]}")
+            effective_prefix+=(${alias_options[@]+"${alias_options[@]}"})
           fi
           [ "$parsed_hook_override" -eq 0 ] || hook_override=1
           ;;
@@ -172,7 +172,7 @@ fi
 
 case "$resolved_command" in
   push)
-    for arg in "${args[@]}"; do
+    for arg in ${args[@]+"${args[@]}"}; do
       if [ "$arg" = --no-verify ]; then
         printf 'REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.\n' >&2
         exit 1
@@ -213,14 +213,14 @@ esac
 # PATH shim can enforce.
 pinned_hooks=
 if [ "$resolved_command" = push ]; then
-  common=$("$REAL" "${effective_prefix[@]}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common=
+  common=$("$REAL" ${effective_prefix[@]+"${effective_prefix[@]}"} rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common=
   if [ -z "$common" ]; then
     exec "$REAL" "$@"
   fi
   managed="$common/firstmate-hooks"
   armed=0
   marker_rc=0
-  "$REAL" "${effective_prefix[@]}" config --local --get-regexp \
+  "$REAL" ${effective_prefix[@]+"${effective_prefix[@]}"} config --local --get-regexp \
     '^firstmate\.(projectname|guardroot|guardhome|previoushookspath)$' >/dev/null 2>&1 || marker_rc=$?
   case "$marker_rc" in
     0) armed=1 ;;
@@ -231,7 +231,7 @@ if [ "$resolved_command" = push ]; then
       ;;
   esac
   if [ "$armed" -eq 1 ]; then
-    effective=$("$REAL" "${effective_prefix[@]}" rev-parse --path-format=absolute --git-path hooks 2>/dev/null) || effective=
+    effective=$("$REAL" ${effective_prefix[@]+"${effective_prefix[@]}"} rev-parse --path-format=absolute --git-path hooks 2>/dev/null) || effective=
     if [ -z "$effective" ] || [ ! -d "$managed" ] || [ ! "$effective" -ef "$managed" ]; then
       printf 'REFUSED: git push would run hooks from %s instead of the Firstmate managed hooks at %s; restore core.hooksPath to the managed directory.\n' \
         "${effective:-<unresolved>}" "$managed" >&2
@@ -243,7 +243,7 @@ fi
 
 if [ -n "$pinned_hooks" ]; then
   if [ "${#alias_options[@]}" -gt 0 ]; then
-    exec "$REAL" "${effective_prefix[@]}" -c "core.hooksPath=$pinned_hooks" \
+    exec "$REAL" ${effective_prefix[@]+"${effective_prefix[@]}"} -c "core.hooksPath=$pinned_hooks" \
       "${alias_words[@]:$alias_command_index}" "${args[@]:$((command_index + 1))}"
   fi
   exec "$REAL" "${args[@]:0:$command_index}" -c "core.hooksPath=$pinned_hooks" "${args[@]:$command_index}"
