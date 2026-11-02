@@ -1,0 +1,10 @@
+real Git with included empty hooks | exit=0 | remote branch landed=yes
+To /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M6D80Q6KS6PTFA0QHKPPMNEN/.tmp-effective-hooks-live-1465603/remote.git
+ * [new branch]      control-include -> control-include
+shim with included empty hooks | exit=1 | remote branch landed=no
+REFUSED: git push would run hooks from /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M6D80Q6KS6PTFA0QHKPPMNEN/.tmp-effective-hooks-live-1465603/empty-hooks instead of the Firstmate managed hooks at /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M6D80Q6KS6PTFA0QHKPPMNEN/.tmp-effective-hooks-live-1465603/repo/.git/firstmate-hooks; restore core.hooksPath to the managed directory.
+shim after repository hooksPath rewrite | exit=1 | remote branch landed=no
+REFUSED: git push would run hooks from /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M6D80Q6KS6PTFA0QHKPPMNEN/.tmp-effective-hooks-live-1465603/empty-hooks instead of the Firstmate managed hooks at /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M6D80Q6KS6PTFA0QHKPPMNEN/.tmp-effective-hooks-live-1465603/repo/.git/firstmate-hooks; restore core.hooksPath to the managed directory.
+shim with option-leading push alias | exit=1 | remote branch landed=no
+REFUSED: git push would run hooks from /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M6D80Q6KS6PTFA0QHKPPMNEN/.tmp-effective-hooks-live-1465603/empty-hooks instead of the Firstmate managed hooks at /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M6D80Q6KS6PTFA0QHKPPMNEN/.tmp-effective-hooks-live-1465603/repo/.git/firstmate-hooks; restore core.hooksPath to the managed directory.
+shim quoted non-push alias | exit=0 | output=[33m6a10aba[m initial
