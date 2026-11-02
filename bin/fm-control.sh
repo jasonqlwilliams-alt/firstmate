@@ -30,6 +30,14 @@
 #              every uncommitted change. Interrupts first when the task reads
 #              busy, then submits the harness's exit command. Postcondition:
 #              the backend's recovery-grade classifier reports the agent gone.
+#              Codex requires a proven empty composer before typing /quit and
+#              refuses its global-update picker or uncertain screen before
+#              every Enter, including retries. After each Enter it waits,
+#              bounded and without further input, for the Codex process to
+#              exit, because an accepted /quit keeps it running for seconds.
+#              A Codex process stopped after lifecycle input returns nonzero
+#              with process-stopped-safe-quit-unconfirmed; death alone does not
+#              prove a safe quit, and relaunch does not start its replacement.
 #              Already-stopped is success (idempotent), including when the
 #              recorded endpoint is authoritatively missing: there is no agent
 #              to stop, and relaunch may recreate the endpoint.
@@ -467,10 +475,132 @@ retire_busy_incarnation() {
   fi
 }
 
-# do_exit: stop the running agent, preserving endpoint and worktree. Prints
-# `already-stopped` or `stopped`.
+# codex_exit_screen_state: inspect the documented global-update picker before
+# trusting a composer verdict. A picker can leave an old prompt visible behind
+# it, so the composer alone cannot authorize a confirming Enter. The picker is
+# recognized by the vendor's own rows and key hint (codex-rs/tui/src/
+# update_prompt.rs): "Update now (runs `<update command>`)", "Skip until next
+# version", and "enter continue · esc skip".
+codex_exit_screen_state() {  # [expected-pending] -> update-picker|empty|pending|pending-unproven|unknown
+  local expected=${1:-} screen plain state caps cy='' content plain_capture=0 picker_below=0
+  local picker_tail picker_before picker_row tail_state tail_caps
+  fm_backend_source "$BACKEND" || { printf 'unknown'; return 0; }
+  case "$BACKEND" in
+    tmux)
+      cy=$(fm_tmux_composer_cursor_row "$T") \
+        || { printf 'unknown'; return 0; }
+      case "$cy" in ''|*[!0-9]*) printf 'unknown'; return 0 ;; esac
+      screen=$(fm_tmux_composer_capture "$T") \
+        || { printf 'unknown'; return 0; }
+      caps=$(fm_tmux_composer_caps)
+      ;;
+    herdr)
+      if screen=$(fm_backend_herdr_capture_ansi "$T" "$FM_COMPOSER_CAPTURE_LINES" 2>/dev/null); then
+        caps=$(printf 'styled=1\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
+      elif screen=$(fm_backend_herdr_capture "$T" "$FM_COMPOSER_CAPTURE_LINES" 2>/dev/null); then
+        caps=$(printf 'styled=0\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
+        plain_capture=1
+      else
+        printf 'unknown'
+        return 0
+      fi
+      ;;
+    *) printf 'unknown'; return 0 ;;
+  esac
+  [ -n "$screen" ] || { printf 'unknown'; return 0; }
+  plain=$(printf '%s\n' "$screen" | fm_composer_strip_ansi)
+  if [[ "$plain" == *'Update now (runs '*'Skip until next version'*'esc skip'* ]]; then
+    picker_tail=${plain##*'esc skip'}
+    if [ "$BACKEND" = tmux ]; then
+      picker_before=${plain%"$picker_tail"}
+      picker_row=$(printf '%s' "$picker_before" | tr -cd '\n' | wc -c)
+      [ "$cy" -gt "$picker_row" ] || { printf 'update-picker'; return 0; }
+      # The live picker parks the cursor on a blank row below its key hint, so
+      # a cursor below the picker proves retained history only when it rests on
+      # a composer the classifier recognizes.
+      picker_below=1
+    else
+      tail_caps=$(printf 'styled=0\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
+      tail_state=$(fm_composer_classify_screen "$tail_caps" "$picker_tail" 2>/dev/null) || tail_state=unknown
+      if [ "$tail_state" != empty ]; then
+        [ -n "$expected" ] || { printf 'update-picker'; return 0; }
+        content=$(fm_composer_extract_selected_content "$tail_caps" "$picker_tail" 2>/dev/null) || content=
+        [ "$content" = "$expected" ] || { printf 'update-picker'; return 0; }
+      fi
+    fi
+  fi
+  state=$(fm_composer_classify_screen "$caps" "$screen" "$cy" 2>/dev/null) \
+    || state=unknown
+  if [ "$state" = unknown ] && [ "$plain_capture" = 1 ] && [ -n "$expected" ]; then
+    content=$(fm_composer_extract_selected_content "$caps" "$screen" 2>/dev/null) || content=
+    [ "$content" != "$expected" ] || state=pending
+  fi
+  case "$state" in
+    empty|pending|pending-unproven) printf '%s' "$state" ;;
+    *)
+      if [ "$picker_below" = 1 ]; then
+        printf 'update-picker'
+      else
+        printf 'unknown'
+      fi
+      ;;
+  esac
+}
+
+# Codex exit owns its literal/Enter sequence so every Enter is preceded by a
+# fresh screen check. The other harnesses keep the normal backend submit path.
+codex_exit_submit() {  # <literal-exit-command>
+  local cmd=$1 screen state i=0 waited uncertain_seen
+  screen=$(codex_exit_screen_state)
+  case "$screen" in
+    update-picker) die "task $ID shows the Codex global-update picker; refusing to type $cmd or confirm its selected update" ;;
+    empty) ;;
+    *) die "task $ID's Codex composer is '$screen', not proven empty; refusing to type $cmd" ;;
+  esac
+  fm_backend_send_literal "$BACKEND" "$T" "$cmd" "$LABEL" \
+    || die "the Codex exit text could not be sent to task $ID on $BACKEND"
+  sleep 1.2
+  while [ "$i" -lt "$EXIT_RETRIES" ]; do
+    screen=$(codex_exit_screen_state "$cmd")
+    case "$screen" in
+      update-picker) die "task $ID shows the Codex global-update picker after exit text; refusing a confirming Enter" ;;
+      pending) ;;
+      *) die "task $ID's Codex composer is '$screen' after exit text; refusing a confirming Enter" ;;
+    esac
+    fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null 2>&1 || true
+    i=$((i + 1))
+    # An accepted /quit restores the terminal while Codex keeps shutting down
+    # for seconds, so wait, bounded, for the process to exit. An update picker
+    # refuses outright, a still-pending composer goes back to the retry's own
+    # screen check, and an uncertain screen never earns another Enter.
+    waited=0
+    uncertain_seen=0
+    while :; do
+      sleep "$POLL"
+      waited=$(awk -v w="$waited" -v p="$POLL" 'BEGIN{printf "%.3f", w + p}')
+      screen=$(codex_exit_screen_state)
+      state=$(agent_state)
+      [ "$state" != dead ] || return 0
+      case "$screen" in
+        update-picker) die "task $ID shows the Codex global-update picker after Enter; safe quit unconfirmed; refusing another Enter" ;;
+        empty) [ "$uncertain_seen" = 1 ] || return 0 ;;
+        pending) [ "$uncertain_seen" = 1 ] || break ;;
+        *) uncertain_seen=1 ;;
+      esac
+      if ! awk -v w="$waited" -v t="$EXIT_WAIT" 'BEGIN{exit !(w < t)}'; then
+        [ "$uncertain_seen" = 0 ] \
+          || die "task $ID's Codex composer became uncertain after Enter; safe quit unconfirmed; refusing another Enter"
+        die "task $ID's Codex composer is '$screen' after Enter; safe quit unconfirmed; refusing another Enter"
+      fi
+    done
+  done
+}
+
+# do_exit: stop the running agent, preserving endpoint and worktree. Returns
+# `already-stopped`, `stopped`, or Codex's
+# `process-stopped-safe-quit-unconfirmed` after lifecycle input.
 do_exit() {
-  local state cmd verdict cancel interrupt_result=not-needed
+  local state cmd verdict cancel screen interrupt_result=not-needed
   require_state_verified_backend exit
   state=$(agent_state)
   case "$state" in
@@ -481,6 +611,11 @@ do_exit() {
     alive) ;;
     *) die "task $ID's endpoint reads '$state' rather than a positively classified state; refusing to send a lifecycle command into an unattributed endpoint" ;;
   esac
+  if [ "$HARNESS" = codex ]; then
+    screen=$(codex_exit_screen_state)
+    [ "$screen" != update-picker ] \
+      || die "task $ID shows the Codex global-update picker; refusing lifecycle keys and exit text"
+  fi
   # A busy agent is interrupted first before the exit command is submitted.
   case "$(busy_verdict)" in
     busy*)
@@ -489,7 +624,11 @@ do_exit() {
       case "$state" in
         dead)
           retire_busy_incarnation
-          printf 'stopped'
+          if [ "$HARNESS" = codex ]; then
+            printf 'process-stopped-safe-quit-unconfirmed'
+          else
+            printf 'stopped'
+          fi
           return 0
           ;;
         alive) interrupt_result="delivered verified=agent-alive cancel=$cancel" ;;
@@ -505,17 +644,25 @@ do_exit() {
   # authoritative proof is the agent-state wait below. The retried Enter still
   # matters, because a slash command opens a completion popup on some TUIs that
   # swallows the first Enter.
-  verdict=$(fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" 1.2 "$LABEL") \
-    || die "the exit command could not be sent to task $ID on $BACKEND"
-  [ "$verdict" != send-failed ] \
-    || die "the exit command could not be sent to task $ID on $BACKEND"
+  if [ "$HARNESS" = codex ]; then
+    codex_exit_submit "$cmd"
+  else
+    verdict=$(fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" 1.2 "$LABEL") \
+      || die "the exit command could not be sent to task $ID on $BACKEND"
+    [ "$verdict" != send-failed ] \
+      || die "the exit command could not be sent to task $ID on $BACKEND"
+  fi
   state=$(wait_agent_state "$EXIT_WAIT" dead) || {
     die "exit-delivered $ID interrupt=$interrupt_result exit-command=delivered agent-state=$state exit=unconfirmed; the agent did not stop within ${EXIT_WAIT}s"
   }
   # The incarnation is over: retire its busy wiring so no stale record or
   # orphaned generation survives the agent that produced it.
   retire_busy_incarnation
-  printf 'stopped'
+  if [ "$HARNESS" = codex ]; then
+    printf 'process-stopped-safe-quit-unconfirmed'
+  else
+    printf 'stopped'
+  fi
 }
 
 # --- transactional relaunch -------------------------------------------------
@@ -879,6 +1026,8 @@ do_relaunch() {
 
   journal_write stopping "${CHECKPOINT_LINES[@]}" "$note_line"
   exit_result=$(do_exit)
+  [ "$exit_result" != process-stopped-safe-quit-unconfirmed ] \
+    || die "task $ID's process stopped but safe quit is unconfirmed; refusing to launch the prepared replacement"
   journal_write exited "${CHECKPOINT_LINES[@]}" "$note_line" "exit_result=$exit_result"
   journal_write launching "${CHECKPOINT_LINES[@]}" "$note_line" "relaunch_tx=$RELAUNCH_TX"
   : > "$RELAUNCH_PREPARE_DIR/continue"
@@ -929,6 +1078,7 @@ case "$VERB" in
   exit)
     result=$(do_exit)
     echo "$result $ID harness=$HARNESS backend=$BACKEND endpoint=$T worktree=$WT"
+    [ "$result" != process-stopped-safe-quit-unconfirmed ] || exit 1
     ;;
   relaunch)
     do_relaunch

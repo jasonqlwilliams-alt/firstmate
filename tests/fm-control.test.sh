@@ -80,6 +80,12 @@ make_tmux_stub() {  # <dir> -> echoes fakebin dir
 #!/usr/bin/env bash
 set -u
 D=$FM_FAKE_DIR
+codex_picker() {  # the live picker's rows (codex-rs/tui/src/update_prompt.rs, Codex 0.157.1-0.162.1)
+  printf '%s\n' '  Update available · 0.162.1 → 0.999.0' \
+    '  Release notes: https://github.com/openai/codex/releases/latest' '' \
+    '› 1. Update now (runs `npm install -g @openai/codex`)' '  2. Skip' \
+    '  3. Skip until next version' '' '  enter continue · esc skip'
+}
 case "${1:-}" in
   send-keys)
     shift
@@ -94,7 +100,10 @@ case "${1:-}" in
     payload=${1:-}
     if [ "$literal" = 1 ]; then
       printf '%s\n' "$payload" >> "$D/literal"
-      if [ -z "${FM_FAKE_NEVER_DIES:-}" ] \
+      if [ -f "$D/codex-case" ] && [ "$payload" = /quit ]; then
+        : > "$D/typed-quit"
+        [ "${FM_FAKE_CODEX_EXIT_MODE:-}" != after-literal ] || : > "$D/picker"
+      elif [ -z "${FM_FAKE_NEVER_DIES:-}" ] \
          && { [ "$payload" = /exit ] || [ "$payload" = /quit ]; }; then
         printf 'zsh' > "$D/command"
       fi
@@ -103,6 +112,31 @@ case "${1:-}" in
       esac
     else
       printf '%s\n' "$payload" >> "$D/keys"
+      if [ "$payload" = Enter ] && [ -f "$D/codex-case" ]; then
+        if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = accepted-update-unreadable ] \
+           || [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = accepted-update-unknown ] \
+           || [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = accepted-update-shell ]; then
+          : > "$D/accepted-update"
+          npm install -g @openai/codex
+          printf 'zsh' > "$D/command"
+        elif [ -f "$D/picker" ] || [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = initial-picker ]; then
+          npm install -g @openai/codex
+          printf 'zsh' > "$D/command"
+        elif { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = after-first-enter ] \
+               || [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unknown-after-first-enter ] \
+               || [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unreadable-after-first-enter ]; } \
+             && [ ! -f "$D/first-enter" ]; then
+          : > "$D/first-enter"
+          : > "$D/picker"
+        elif [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = transient-unknown-then-pending ] \
+             && [ ! -f "$D/first-enter" ]; then
+          : > "$D/first-enter"
+        elif [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = slow-exit ] && [ -f "$D/typed-quit" ]; then
+          printf '4' > "$D/quitting"
+        elif [ -f "$D/typed-quit" ] && [ -z "${FM_FAKE_NEVER_DIES:-}" ]; then
+          printf 'zsh' > "$D/command"
+        fi
+      fi
       if [ -n "${FM_FAKE_INTERRUPT_STOPS_AGENT:-}" ] \
          && { [ "$payload" = Escape ] || [ "$payload" = C-c ]; }; then
         printf 'zsh' > "$D/command"
@@ -119,14 +153,87 @@ case "${1:-}" in
   display-message)
     for a in "$@"; do
       case "$a" in
-        *cursor_y*) printf '1\n'; exit 0 ;;
+        *cursor_y*)
+          case "${FM_FAKE_CODEX_EXIT_MODE:-}" in
+            picker-cursor-below) printf '13\n' ;;
+            retained-picker-idle) printf '9\n' ;;
+            *) printf '1\n' ;;
+          esac
+          exit 0 ;;
         *pane_current_command*) cat "$D/command"; printf '\n'; exit 0 ;;
         *pane_current_path*) cat "$D/cwd"; printf '\n'; exit 0 ;;
       esac
     done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
-    if [ -f "$D/pane" ]; then cat "$D/pane"; else printf '╭────╮\n│    │\n╰────╯\n'; fi
+    if [ -f "$D/codex-case" ]; then
+      if [ -f "$D/quitting" ]; then
+        # The live TUI restores the terminal at once, then exits about five
+        # seconds later; each capture here stands for one poll of that wait.
+        n=$(( $(cat "$D/quitting") - 1 ))
+        printf 'fixture$ codex\nSession ID: 01a19a0c-3606-7463-88f9-ecdcb516aa1d\n'
+        if [ "$n" -le 0 ]; then
+          rm -f "$D/quitting"
+          printf 'zsh' > "$D/command"
+          printf 'fixture$ \n'
+        else
+          printf '%s' "$n" > "$D/quitting"
+        fi
+        exit 0
+      fi
+      if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = picker-cursor-below ]; then
+        codex_picker
+        printf '\n\n\n\n\n\n'
+        exit 0
+      fi
+      if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = retained-picker-idle ]; then
+        codex_picker
+        if [ "$(cat "$D/command")" = zsh ]; then
+          printf '$ \n'
+        elif [ -f "$D/typed-quit" ]; then
+          printf 'Codex\n› /quit\n'
+        else
+          printf 'Codex\n›\n'
+        fi
+        exit 0
+      fi
+      if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = split-read-picker ] \
+         && [ -f "$D/typed-quit" ]; then
+        for arg in "$@"; do
+          if [ "$arg" = -e ]; then
+            : > "$D/picker"
+            printf 'Codex\n› /quit\n'; codex_picker
+            exit 0
+          fi
+        done
+      fi
+      if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unreadable ] \
+         || { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unreadable-after-literal ] && [ -f "$D/typed-quit" ]; } \
+         || { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unreadable-after-first-enter ] && [ -f "$D/first-enter" ]; } \
+         || { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = accepted-update-unreadable ] && [ -f "$D/accepted-update" ]; }; then exit 1; fi
+      if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unknown ] \
+         || { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unknown-after-literal ] && [ -f "$D/typed-quit" ]; } \
+         || { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = unknown-after-first-enter ] && [ -f "$D/first-enter" ]; } \
+         || { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = accepted-update-unknown ] && [ -f "$D/accepted-update" ]; }; then printf 'unrecognized screen\n'; exit 0; fi
+      if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = transient-unknown-then-pending ] \
+         && [ -f "$D/first-enter" ]; then
+        if [ ! -f "$D/uncertain-capture" ]; then
+          : > "$D/uncertain-capture"
+          printf 'unrecognized screen\n'
+          exit 0
+        fi
+        : > "$D/returned-pending"
+      fi
+      if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = initial-picker ] || [ -f "$D/picker" ]; then
+        printf '›\n'; codex_picker
+      elif [ -f "$D/typed-quit" ] && [ "$(cat "$D/command")" = codex ]; then
+        printf 'Codex\n› /quit\n'
+      elif [ "$(cat "$D/command")" = zsh ]; then
+        printf '$ \n'
+      else
+        printf 'Codex\n›\n'
+      fi
+    elif [ -f "$D/pane" ]; then cat "$D/pane"; else printf '╭────╮\n│    │\n╰────╯\n'; fi
     exit 0 ;;
   list-windows)
     if [ -f "$D/windows" ]; then cat "$D/windows"; fi
@@ -135,6 +242,11 @@ esac
 exit 0
 SH
   chmod +x "$fb/tmux"
+  cat > "$fb/npm" <<'SH'
+#!/usr/bin/env bash
+printf 'mock-updater %s\n' "$*" >> "$FM_FAKE_DIR/updater"
+SH
+  chmod +x "$fb/npm"
   cat > "$fb/sleep" <<'SH'
 #!/usr/bin/env bash
 if [ -n "${FM_FAKE_MUSE_DISAPPEAR_BEFORE_ACK:-}" ] \
@@ -147,6 +259,75 @@ exit 0
 SH
   chmod +x "$fb/sleep"
   printf '%s\n' "$fb"
+}
+
+make_herdr_stub() {
+  local fb="$1/fakebin"
+  cat > "$fb/herdr" <<'SH'
+#!/usr/bin/env bash
+set -u
+D=$FM_FAKE_DIR
+codex_picker() {  # the live picker's rows (codex-rs/tui/src/update_prompt.rs, Codex 0.157.1-0.162.1)
+  printf '%s\n' '  Update available · 0.162.1 → 0.999.0' \
+    '  Release notes: https://github.com/openai/codex/releases/latest' '' \
+    '› 1. Update now (runs `npm install -g @openai/codex`)' '  2. Skip' \
+    '  3. Skip until next version' '' '  enter continue · esc skip'
+}
+case "${1:-} ${2:-}" in
+  'status --json') printf '%s\n' '{"client":{"protocol":20,"version":"test"},"server":{"running":true,"protocol":20,"version":"test"}}' ;;
+  'pane get') printf '%s\n' '{"result":{"pane":{"pane_id":"p1"}}}' ;;
+  'agent get') printf '%s\n' '{"result":{"agent":{"agent_status":"idle"}}}' ;;
+  'pane process-info')
+    if [ "$(cat "$D/command")" = codex ]; then
+      printf '%s\n' '{"result":{"type":"pane_process_info","process_info":{"pane_id":"p1","shell_pid":12345,"foreground_processes":[{"pid":23456,"name":"codex","argv":["codex"],"cmdline":"codex"}]}}}'
+    else
+      printf '%s\n' '{"result":{"type":"pane_process_info","process_info":{"pane_id":"p1","shell_pid":12345,"foreground_processes":[{"pid":12345,"name":"zsh","argv":["zsh"],"cmdline":"zsh"}]}}}'
+    fi ;;
+  'pane read')
+    for arg in "$@"; do [ "$arg" != ansi ] || exit 1; done
+    if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = retained-picker-idle ] \
+       || [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = retained-picker-active ] \
+       || [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = retained-picker-uncertain ]; then
+      printf 'Codex\n›\n'; codex_picker
+      if [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = retained-picker-active ]; then
+        printf 'Codex\n›\n'; codex_picker
+      elif [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = retained-picker-uncertain ]; then
+        printf 'unrecognized screen\n'
+      elif [ -f "$D/typed-quit" ] && [ "$(cat "$D/command")" = codex ]; then
+        printf 'Codex\n› /quit\n'
+      elif [ "$(cat "$D/command")" = zsh ]; then
+        printf '$ \n'
+      else
+        printf 'Codex\n›\n'
+      fi
+    elif [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = initial-picker ] \
+       || { [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = after-literal ] && [ -f "$D/typed-quit" ]; }; then
+      printf 'Codex\n› /quit\n'; codex_picker
+    elif [ "${FM_FAKE_CODEX_EXIT_MODE:-}" = plain-uncertain-after-literal ] \
+         && [ -f "$D/typed-quit" ]; then
+      printf 'Codex\n› Try /skills\n'
+    elif [ -f "$D/typed-quit" ] && [ "$(cat "$D/command")" = codex ]; then
+      printf 'Codex\n› /quit\n'
+    elif [ "$(cat "$D/command")" = zsh ]; then
+      printf '$ \n'
+    else
+      printf 'Codex\n›\n'
+    fi ;;
+  'pane send-text')
+    printf '%s\n' "$4" >> "$D/literal"
+    [ "$4" != /quit ] || : > "$D/typed-quit" ;;
+  'pane send-keys')
+    printf '%s\n' "$4" >> "$D/keys"
+    [ "$4" != enter ] || printf 'zsh' > "$D/command" ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$fb/herdr"
+  cat > "$fb/ps" <<'SH'
+#!/usr/bin/env bash
+printf '12345 1 zsh\n'
+SH
+  chmod +x "$fb/ps"
 }
 
 # new_case <name> -> echoes a case dir holding home/, fake/, and fakebin.
@@ -186,6 +367,7 @@ add_task() {
   } > "$home/state/$id.meta"
   printf '%s\n' "fm-$id" > "$dir/fake/windows"
   printf '%s' "$wt" > "$dir/fake/cwd"
+  [ "$harness" != codex ] || : > "$dir/fake/codex-case"
 }
 
 # run_control <case-dir> <args...>: run fm-control against the case's home with
@@ -198,6 +380,7 @@ run_control() {
     FM_FAKE_MUSE_LOG="${FM_FAKE_MUSE_LOG:-}" \
     FM_FAKE_MUSE_DISAPPEAR_BEFORE_ACK="${FM_FAKE_MUSE_DISAPPEAR_BEFORE_ACK:-}" \
     FM_FAKE_INTERRUPT_STOPS_AGENT="${FM_FAKE_INTERRUPT_STOPS_AGENT:-}" \
+    FM_FAKE_CODEX_EXIT_MODE="${FM_FAKE_CODEX_EXIT_MODE:-}" \
     "$CONTROL" "$@" 2>&1
 }
 
@@ -228,13 +411,198 @@ test_exit_types_each_harness_verified_command() {
       alive_as "$dir" "$harness"
     fi
     out=$(run_control "$dir" t1 exit); rc=$?
-    expect_code 0 "$rc" "exit on $harness should succeed"$'\n'"$out"
+    if [ "$harness" = codex ]; then
+      expect_code 1 "$rc" "Codex process death must leave safe quit unconfirmed"$'\n'"$out"
+      assert_contains "$out" 'process-stopped-safe-quit-unconfirmed t1' \
+        "Codex exit should distinguish process death from safe quit"
+      [ "$(cat "$dir/fake/command")" = zsh ] || fail "Codex did not exit to a shell"
+      [ ! -s "$dir/fake/updater" ] || fail "ordinary Codex quit selected the mock updater"
+    else
+      expect_code 0 "$rc" "exit on $harness should succeed"$'\n'"$out"
+      assert_contains "$out" "stopped t1 harness=$harness" "exit should report the stop for $harness"
+    fi
     IFS=$'\t' read -r expected key repeat clear <<< "$(verified_adapter_contract "$harness")"
     [ "$(literals "$dir")" = "$expected" ] \
       || fail "exit on $harness should type exactly '$expected', got: $(literals "$dir")"
-    assert_contains "$out" "stopped t1 harness=$harness" "exit should report the stop for $harness"
   done
   pass "fm-control exit: every verified harness gets its own verified exit command"
+}
+
+# These cases model only the visible public-control boundary. The updater is
+# a private executable sentinel, never a real package manager invocation.
+test_codex_exit_refuses_update_picker_and_uncertain_composer() {
+  local mode dir out rc expected_enters meta_before gen
+  for mode in initial-picker picker-cursor-below after-literal split-read-picker after-first-enter \
+      unknown unreadable unknown-after-literal unreadable-after-literal \
+      unknown-after-first-enter unreadable-after-first-enter; do
+    dir=$(new_case "codex-$mode")
+    add_task "$dir" t1 codex
+    alive_as "$dir" codex
+    meta_before=$(cat "$dir/home/state/t1.meta")
+    out=$(FM_FAKE_CODEX_EXIT_MODE="$mode" run_control "$dir" t1 exit); rc=$?
+    expect_code 1 "$rc" "Codex exit must refuse $mode"$'\n'"$out"
+    assert_not_contains "$out" 'stopped t1' "Codex $mode must not report a safe exit"
+    [ ! -s "$dir/fake/updater" ] || fail "Codex $mode accepted the mock updater"
+    [ "$(cat "$dir/fake/command")" = codex ] || fail "Codex $mode changed the agent"
+    [ "$(cat "$dir/home/state/t1.meta")" = "$meta_before" ] \
+      || fail "Codex $mode changed endpoint metadata"
+    [ -d "$dir/wt-t1" ] || fail "Codex $mode removed the worktree"
+    case "$mode" in
+      initial-picker|picker-cursor-below|unknown|unreadable)
+        [ ! -s "$dir/fake/literal" ] || fail "Codex $mode typed quit"
+        expected_enters=0 ;;
+      after-literal|split-read-picker|unknown-after-literal|unreadable-after-literal)
+        [ "$(literals "$dir")" = /quit ] || fail "Codex $mode did not type exactly /quit"
+        expected_enters=0 ;;
+      after-first-enter|unknown-after-first-enter|unreadable-after-first-enter)
+        [ "$(literals "$dir")" = /quit ] || fail "Codex $mode did not type exactly /quit"
+        expected_enters=1 ;;
+    esac
+    [ "$(grep -c '^Enter$' "$dir/fake/keys" || true)" = "$expected_enters" ] \
+      || fail "Codex $mode sent a confirming or retry Enter"
+    case "$mode" in
+      initial-picker|picker-cursor-below|after-literal|split-read-picker|after-first-enter)
+        assert_contains "$out" 'global-update picker' "Codex $mode must refuse as the update picker" ;;
+    esac
+  done
+  dir=$(new_case codex-picker-busy)
+  add_task "$dir" t1 codex
+  alive_as "$dir" codex
+  gen=$("$ROOT/bin/fm-busy-event.sh" arm "$dir/home/state" t1)
+  printf 'busy_gen=%s\n' "$gen" >> "$dir/home/state/t1.meta"
+  out=$(FM_FAKE_CODEX_EXIT_MODE=initial-picker run_control "$dir" t1 exit); rc=$?
+  expect_code 1 "$rc" "Codex picker must refuse before a busy interrupt"$'\n'"$out"
+  [ ! -s "$dir/fake/keys" ] && [ ! -s "$dir/fake/literal" ] \
+    || fail "Codex picker received lifecycle input before refusal"
+  [ ! -s "$dir/fake/updater" ] || fail "Codex busy picker accepted the mock updater"
+  pass "fm-control exit: Codex picker and uncertain screen refuse before confirmation"
+}
+
+test_codex_exit_does_not_confirm_dead_after_uncertain_screen() {
+  local mode dir out rc meta_before
+  for mode in accepted-update-unreadable accepted-update-unknown accepted-update-shell; do
+    dir=$(new_case "codex-$mode")
+    add_task "$dir" t1 codex
+    alive_as "$dir" codex
+    meta_before=$(cat "$dir/home/state/t1.meta")
+    out=$(FM_FAKE_CODEX_EXIT_MODE="$mode" run_control "$dir" t1 exit); rc=$?
+    expect_code 1 "$rc" "Codex $mode must leave safe quit unconfirmed"$'\n'"$out"
+    assert_contains "$out" 'process-stopped-safe-quit-unconfirmed t1' \
+      "Codex $mode must distinguish stopped process from unconfirmed safe quit"
+    assert_not_contains "$out" 'stopped t1' "Codex $mode must not report a safe exit"
+    [ -s "$dir/fake/updater" ] || fail "Codex $mode did not reproduce the mock update choice"
+    [ "$(cat "$dir/fake/command")" = zsh ] || fail "Codex $mode did not reproduce process disappearance"
+    [ "$(grep -c '^Enter$' "$dir/fake/keys" || true)" = 1 ] \
+      || fail "Codex $mode retried Enter after the uncertain screen"
+    [ "$(cat "$dir/home/state/t1.meta")" = "$meta_before" ] \
+      || fail "Codex $mode changed endpoint metadata"
+    [ -d "$dir/wt-t1" ] || fail "Codex $mode removed the worktree"
+  done
+  pass "fm-control exit: process death cannot confirm an uncertain Codex submission"
+}
+
+test_codex_exit_does_not_retry_after_transient_uncertainty() {
+  local dir out rc meta_before
+  dir=$(new_case codex-transient-unknown)
+  add_task "$dir" t1 codex
+  alive_as "$dir" codex
+  meta_before=$(cat "$dir/home/state/t1.meta")
+  out=$(FM_FAKE_CODEX_EXIT_MODE=transient-unknown-then-pending \
+    FM_FAKE_NEVER_DIES=1 run_control "$dir" t1 exit); rc=$?
+  expect_code 1 "$rc" "Codex transient uncertainty must refuse retry"$'\n'"$out"
+  assert_contains "$out" 'composer became uncertain after Enter' \
+    "Codex transient uncertainty must retain its uncertain-screen result"
+  [ -f "$dir/fake/returned-pending" ] \
+    || fail "Codex transient uncertainty did not later expose a pending composer"
+  [ "$(literals "$dir")" = /quit ] || fail "Codex transient uncertainty did not type exactly /quit"
+  [ "$(grep -c '^Enter$' "$dir/fake/keys" || true)" = 1 ] \
+    || fail "Codex transient uncertainty retried Enter after a pending read"
+  [ "$(cat "$dir/fake/command")" = codex ] || fail "Codex transient uncertainty stopped the mock process"
+  [ "$(cat "$dir/home/state/t1.meta")" = "$meta_before" ] \
+    || fail "Codex transient uncertainty changed endpoint metadata"
+  [ -d "$dir/wt-t1" ] || fail "Codex transient uncertainty removed the worktree"
+  pass "fm-control exit: transient uncertainty cannot earn a retry Enter"
+}
+
+# A live Codex 0.162.1 quit restores the terminal at once and keeps its process
+# running for about five seconds before the shell returns.
+test_codex_exit_waits_for_a_slow_quit() {
+  local dir out rc meta_before
+  dir=$(new_case codex-slow-exit)
+  add_task "$dir" t1 codex
+  alive_as "$dir" codex
+  meta_before=$(cat "$dir/home/state/t1.meta")
+  out=$(FM_FAKE_CODEX_EXIT_MODE=slow-exit run_control "$dir" t1 exit); rc=$?
+  expect_code 1 "$rc" "a slow ordinary Codex quit must leave safe quit unconfirmed"$'\n'"$out"
+  assert_contains "$out" 'process-stopped-safe-quit-unconfirmed t1' \
+    "a slow ordinary Codex quit should be reported once its process stops"
+  [ "$(literals "$dir")" = /quit ] || fail "slow Codex quit did not type exactly /quit"
+  [ "$(grep -c '^Enter$' "$dir/fake/keys" || true)" = 1 ] \
+    || fail "slow Codex quit sent another Enter while the process was shutting down"
+  [ ! -e "$dir/fake/quitting" ] || fail "slow Codex quit returned before its process exited"
+  [ "$(cat "$dir/fake/command")" = zsh ] || fail "slow Codex quit did not reach a shell"
+  [ ! -s "$dir/fake/updater" ] || fail "slow Codex quit selected the mock updater"
+  [ "$(cat "$dir/home/state/t1.meta")" = "$meta_before" ] \
+    || fail "slow Codex quit changed endpoint metadata"
+  [ -d "$dir/wt-t1" ] || fail "slow Codex quit removed the worktree"
+  pass "fm-control exit: a slow Codex quit is awaited without another Enter"
+}
+
+# A dismissed picker can stay visible above the current composer; the composer
+# under the tmux cursor proves that history, so ordinary quit still proceeds.
+test_codex_exit_tmux_retained_picker_history() {
+  local dir out rc
+  dir=$(new_case codex-tmux-retained-picker)
+  add_task "$dir" t1 codex
+  alive_as "$dir" codex
+  out=$(FM_FAKE_CODEX_EXIT_MODE=retained-picker-idle run_control "$dir" t1 exit); rc=$?
+  expect_code 1 "$rc" "Codex quit below retained picker history must stay unconfirmed"$'\n'"$out"
+  assert_contains "$out" 'process-stopped-safe-quit-unconfirmed t1' \
+    "retained picker history must not block ordinary Codex quit"
+  [ "$(literals "$dir")" = /quit ] || fail "retained picker history case did not type /quit"
+  [ "$(grep -c '^Enter$' "$dir/fake/keys" || true)" = 1 ] \
+    || fail "retained picker history case sent an unexpected Enter"
+  [ ! -s "$dir/fake/updater" ] || fail "retained picker history case accepted the mock updater"
+  pass "fm-control exit: retained picker history above a current tmux composer allows quit"
+}
+
+test_codex_exit_herdr_plain_capture() {
+  local dir out rc mode expected_enters
+  for mode in idle retained-picker-idle initial-picker retained-picker-active \
+      retained-picker-uncertain after-literal plain-uncertain-after-literal; do
+    dir=$(new_case "herdr-codex-$mode")
+    add_task "$dir" t1 codex ship herdr session:p1
+    cat >> "$dir/home/state/t1.meta" <<'META'
+herdr_session=session
+herdr_workspace_id=w1
+herdr_tab_id=t1
+herdr_pane_id=p1
+META
+    make_herdr_stub "$dir"
+    alive_as "$dir" codex
+    out=$(FM_HERDR_PS_BIN="$dir/fakebin/ps" FM_FAKE_CODEX_EXIT_MODE="$mode" run_control "$dir" t1 exit); rc=$?
+    case "$mode" in
+      idle|retained-picker-idle)
+        expect_code 1 "$rc" "Codex idle quit through Herdr plain capture must remain unconfirmed"$'\n'"$out"
+        assert_contains "$out" 'process-stopped-safe-quit-unconfirmed t1' \
+          "Herdr plain quit should distinguish process death from safe quit"
+        [ "$(literals "$dir")" = /quit ] || fail "Herdr plain $mode did not type /quit"
+        [ "$(cat "$dir/fake/command")" = zsh ] || fail "Herdr plain quit did not redraw a shell"
+        expected_enters=1 ;;
+      *)
+        expect_code 1 "$rc" "Codex Herdr plain $mode must refuse"$'\n'"$out"
+        assert_not_contains "$out" 'stopped t1' "Herdr plain $mode must not report stopped"
+        [ ! -s "$dir/fake/literal" ] || [ "$mode" = after-literal ] \
+          || [ "$mode" = plain-uncertain-after-literal ] \
+          || fail "Herdr plain $mode typed quit before a safe composer was shown"
+        expected_enters=0 ;;
+    esac
+    [ "$(grep -c '^enter$' "$dir/fake/keys" || true)" = "$expected_enters" ] \
+      || fail "Herdr plain $mode sent an unexpected Enter"
+    [ ! -s "$dir/fake/updater" ] || fail "Herdr plain $mode accepted the mock updater"
+    [ -d "$dir/wt-t1" ] || fail "Herdr plain $mode removed the worktree"
+  done
+  pass "fm-control exit: Herdr plain capture preserves narrow Codex quit"
 }
 
 test_interrupt_sends_each_harness_verified_key() {
@@ -623,14 +991,17 @@ test_relaunch_only_flags_are_rejected_on_other_verbs() {
 # --- 5. lifecycle states ----------------------------------------------------
 
 test_already_stopped_exit_is_idempotent() {
-  local dir out rc
-  dir=$(new_case idempotent)
-  add_task "$dir" t1 claude
-  alive_as "$dir" zsh
-  out=$(run_control "$dir" t1 exit); rc=$?
-  expect_code 0 "$rc" "exiting an already-stopped agent should succeed"
-  assert_contains "$out" "already-stopped t1" "the outcome should say it was already stopped"
-  [ -z "$(literals "$dir")" ] || fail "an already-stopped agent must not be sent an exit command"
+  local dir out rc harness
+  for harness in claude codex; do
+    dir=$(new_case "idempotent-$harness")
+    add_task "$dir" t1 "$harness"
+    alive_as "$dir" zsh
+    out=$(run_control "$dir" t1 exit); rc=$?
+    expect_code 0 "$rc" "exiting an already-stopped $harness agent should succeed"
+    assert_contains "$out" "already-stopped t1" "the outcome should say it was already stopped"
+    [ -z "$(literals "$dir")" ] && [ ! -s "$dir/fake/keys" ] \
+      || fail "an already-stopped $harness agent must not receive lifecycle input"
+  done
   pass "fm-control exit: an already-stopped agent is idempotent success with no bytes sent"
 }
 
@@ -881,6 +1252,12 @@ test_fm_send_still_marks_the_same_secondmate_task() {
 }
 
 test_exit_types_each_harness_verified_command
+test_codex_exit_refuses_update_picker_and_uncertain_composer
+test_codex_exit_does_not_confirm_dead_after_uncertain_screen
+test_codex_exit_does_not_retry_after_transient_uncertainty
+test_codex_exit_herdr_plain_capture
+test_codex_exit_waits_for_a_slow_quit
+test_codex_exit_tmux_retained_picker_history
 test_interrupt_sends_each_harness_verified_key
 test_opencode_interrupts_twice_and_others_once
 test_unverified_harness_is_refused

@@ -726,6 +726,19 @@ fm_backend_send_key() {  # <backend> <target> <key> [expected-label]
   esac
 }
 
+# fm_backend_send_literal: type text without submitting it. Lifecycle callers
+# use this seam when they must inspect the screen before any confirming Enter.
+fm_backend_send_literal() {  # <backend> <target> <text> [expected-label]
+  local backend=$1
+  shift
+  fm_backend_source "$backend" || return 1
+  case "$backend" in
+    tmux) fm_backend_tmux_send_literal "$@" ;;
+    herdr) fm_backend_herdr_send_literal "$@" ;;
+    *) echo "error: no literal-send implementation for backend '$backend'" >&2; return 1 ;;
+  esac
+}
+
 # fm_backend_send_text_submit: type text once, then submit and verify,
 # retrying only the submission (never retyping). Echoes the backend's
 # proof-carrying verdict; callers require exact empty for confirmed delivery.
