@@ -49,10 +49,12 @@
 # dead or missing endpoint directly to recovery without typing. An explicit
 # fire-and-forget record is excluded from that ladder.
 # bin/fm-task-inbox-lib.sh owns the record format, the doorbell line, and the
-# re-ring ladder. The composer pre-check before the ring is ADVISORY only: when
-# the composer visibly holds pending text the ring is skipped with a notice and
-# the watcher re-rings an ordinary record later; no composer verdict is
-# delivery proof on this plane, and a failed ring never fails the send.
+# re-ring ladder, including the ring's per-harness screen gate (the Codex
+# update picker and pending composer text are refused on every harness, and a
+# Codex pane also needs a proven-empty composer); a refused ring prints a
+# notice, and the watcher retries an ordinary record before escalating it. No
+# composer verdict is delivery proof on this plane, and a failed or refused
+# ring never fails the send.
 #
 # TYPED - the LOCAL text that must reach the terminal itself: a harness-native
 # invocation (a leading "/", or a leading "$" to a codex target) must reach
@@ -1008,11 +1010,13 @@ else
     # because the watcher owns loss detection from here, either through its
     # bounded re-ring ladder or direct unavailable-endpoint recovery.
     ring_rc=0
-    fm_task_inbox_ring "$TARGET_BACKEND" "$T" "$INBOX_RECORD" "$EXPECTED_LABEL" || ring_rc=$?
+    fm_task_inbox_ring "$TARGET_BACKEND" "$T" "$INBOX_RECORD" "$EXPECTED_LABEL" "$TARGET_HARNESS" || ring_rc=$?
     case "$ring_rc" in
-      1) echo "fm-send: doorbell skipped (composer visibly holds pending text); the steer is durably recorded at $INBOX_RECORD and the watcher will re-ring" >&2 ;;
+      1) echo "fm-send: doorbell not typed because $T's composer holds pending text or, on a Codex pane, is not proven empty; the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2 ;;
       2) echo "fm-send: doorbell did not reach $T; the steer is durably recorded at $INBOX_RECORD and the watcher will re-ring" >&2 ;;
       3) echo "fm-send: doorbell not typed because the agent in $T has exited; the steer is durably recorded at $INBOX_RECORD for recovery (stuck-crewmate-recovery), and the watcher will not re-ring a dead pane" >&2 ;;
+      4) echo "fm-send: no doorbell Enter sent because $T shows the Codex global-update picker (never confirm it; Escape skips the update); the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2 ;;
+      5) echo "fm-send: doorbell typed into $T but its Enter was withheld because the Codex composer did not prove it holds the doorbell; the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2 ;;
     esac
     exit 0
   fi

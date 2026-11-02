@@ -728,3 +728,58 @@ test_queued_enter_verdict_does_not_convert_other_states() {
 test_queued_enter_verdict_busy_pending_is_empty
 test_queued_enter_verdict_idle_pending_stays_pending
 test_queued_enter_verdict_does_not_convert_other_states
+
+# The guarded doorbell's post-typing proof on a plain (styled=0) capture: the
+# composer holds exactly what was typed even when the line wrapped, and does
+# not hold a different line.
+test_holds_text_survives_wrapping() {
+  local caps typed screen
+  caps=$(printf 'styled=0\ncursor=0\nidentity=0\nrows=20')
+  typed=": Firstmate instruction waiting: list '/tmp/x/state/t1.inbox'/*.msg and act"
+  screen=$(printf '%s\n' 'agent header' '' "› : Firstmate instruction waiting: list '/tmp/x/sta" \
+    "  te/t1.inbox'/*.msg and act")
+  fm_composer_holds_text "$caps" "$screen" "$typed" \
+    || fail "a wrapped composer holding exactly the typed line should prove it"
+  screen=$(printf '%s\n' 'agent header' '' \
+    '› : Firstmate instruction waiting: list' \
+    "  '/tmp/x/state/t1.inbox'/*.msg and act")
+  fm_composer_holds_text "$caps" "$screen" "$typed" \
+    || fail "a space at a wrap boundary should still prove the typed line"
+  screen=$(printf '%s\n' 'agent header' '' \
+    "› : Firstmate instruction waiting: list '/tmp/xa/sta" \
+    "  te/t1.inbox'/*.msg and act")
+  fm_composer_holds_text "$caps" "$screen" \
+    ": Firstmate instruction waiting: list '/tmp/x a/sta te/t1.inbox'/*.msg and act" \
+    && fail "a missing interior path space must not prove the doorbell"
+  fm_composer_holds_text "$caps" "$screen" ": Firstmate instruction waiting: list '/tmp/y'" \
+    && fail "a composer holding other text must not prove the typed line"
+  fm_composer_holds_text "$caps" "$screen" "" \
+    && fail "empty expected text must never prove anything"
+  pass "fm_composer_holds_text: a wrapped typed line is proven, other text is not"
+}
+
+# The update-picker recognizer on cursorless captures: picker rows with nothing
+# proven below are the live picker, while a proven-empty composer or exactly the
+# caller's typed text below them makes the rows retained history.
+test_update_picker_scan_cursorless() {
+  local caps picker out
+  caps=$(printf 'styled=0\ncursor=0\nidentity=0\nrows=20')
+  # shellcheck disable=SC2016
+  picker=$(printf '%s\n' '  Update available · 0.162.1 → 0.999.0' '' \
+    '› 1. Update now (runs `npm install -g @openai/codex`)' '  2. Skip' \
+    '  3. Skip until next version' '' '  enter continue · esc skip')
+  out=$(fm_composer_update_picker_scan "$caps" "$picker")
+  [ "$out" = active ] || fail "a bare picker should be active, got $out"
+  out=$(fm_composer_update_picker_scan "$caps" "$picker"$'\nCodex\n›')
+  [ "$out" = retained ] || fail "a proven-empty composer below the picker should make it retained, got $out"
+  out=$(fm_composer_update_picker_scan "$caps" "$picker"$'\nCodex\n› /quit')
+  [ "$out" = active ] || fail "unproven text below the picker must keep it active, got $out"
+  out=$(fm_composer_update_picker_scan "$caps" "$picker"$'\nCodex\n› /quit' '' /quit)
+  [ "$out" = retained ] || fail "exactly the typed text below the picker should make it retained, got $out"
+  out=$(fm_composer_update_picker_scan "$caps" $'Codex\n›')
+  [ "$out" = none ] || fail "a screen without picker rows should be none, got $out"
+  pass "fm_composer_update_picker_scan: cursorless picker is active unless a proven composer follows it"
+}
+
+test_holds_text_survives_wrapping
+test_update_picker_scan_cursorless

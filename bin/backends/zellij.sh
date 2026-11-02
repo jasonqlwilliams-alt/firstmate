@@ -522,18 +522,25 @@ fm_backend_zellij_composer_capture() {  # <target> [expected-label]
 # unconditional-exit-0 CLI quirk (file header) yields an empty dump, which
 # classifies unknown - never a confirmation.
 fm_backend_zellij_composer_state() {  # <target> [expected-label] -> empty|pending|pending-unproven|unknown
-  local target=$1 expected_label=${2:-} cap caps verdict
+  fm_backend_zellij_composer_snapshot "$1" "${2:-}" || { printf 'unknown'; return 0; }
+  fm_composer_classify_snapshot_no_identity
+}
+
+# fm_backend_zellij_composer_snapshot: one composer capture into the snapshot
+# globals (bin/fm-composer-lib.sh "Composer SNAPSHOT"), styled first and the
+# plain dump as the styled=0 fallback; fails when both captures fail.
+fm_backend_zellij_composer_snapshot() {  # <target> [expected-label]
+  local target=$1 expected_label=${2:-} cap styled
   if cap=$(fm_backend_zellij_composer_capture "$target" "$expected_label"); then
-    caps=$(printf 'styled=1\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
+    styled=1
   elif cap=$(fm_backend_zellij_capture "$target" "$FM_COMPOSER_CAPTURE_LINES" "$expected_label") && [ -n "$cap" ]; then
-    caps=$(printf 'styled=0\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
+    styled=0
   else
-    printf 'unknown'
-    return 0
+    return 1
   fi
-  verdict=$(fm_composer_classify_screen "$caps" "$cap")
-  [ "$verdict" != need-identity ] || verdict=unknown
-  printf '%s' "$verdict"
+  FM_COMPOSER_SNAPSHOT_SCREEN=$cap
+  FM_COMPOSER_SNAPSHOT_CURSOR=
+  FM_COMPOSER_SNAPSHOT_CAPS=$(printf 'styled=%s\ncursor=0\nidentity=0\nrows=%s' "$styled" "$FM_COMPOSER_CAPTURE_LINES")
 }
 
 fm_backend_zellij_composer_content() {  # <target> [expected-label]

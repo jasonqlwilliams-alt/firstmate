@@ -10,8 +10,9 @@
 #   2. Multi-line steers are legal and round-trip byte-exact.
 #   3. A re-send enqueues a NEW sequence and still never retypes a payload,
 #      so the terminal can never truncate, garble, or duplicate a steer.
-#   4. The composer pre-check is advisory: visibly pending text skips the ring
-#      with a notice, and the steer is still durably sent (exit 0).
+#   4. Visibly pending composer text refuses the ring with a notice, and the
+#      steer is still durably sent (exit 0) for the watcher to retry and then
+#      escalate.
 #   5. A failed doorbell is still a sent steer (exit 0, record durable): the
 #      watcher's re-ring ladder owns delivery from the record on.
 #   6. Carve-outs keep the typed plane: a leading "/" (any harness), a leading
@@ -171,8 +172,8 @@ test_pending_composer_skips_ring_advisorily() {
   expect_code 0 "$rc" "a skipped ring is still a sent steer"
   [ -f "$dir/home/state/t1.inbox/001.msg" ] || fail "the steer was not recorded"
   [ ! -s "$dir/send.log" ] || fail "a visibly pending composer should skip the ring:"$'\n'"$(cat "$dir/send.log")"
-  assert_contains "$(cat "$err")" "watcher will re-ring" \
-    "the skip notice should point at the re-ring"
+  assert_contains "$(cat "$err")" "watcher will retry, then escalate" \
+    "the refusal notice should point at the retry and escalation"
   pass "fm-send inbox: a visibly pending composer skips the ring, and the steer stays durably sent"
 }
 

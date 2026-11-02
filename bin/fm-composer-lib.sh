@@ -1153,8 +1153,8 @@ _fm_composer_select_cursorless() {
   [ -n "$FM_COMPOSER_SELECTED_KIND" ]
 }
 
-fm_composer_extract_selected_content() {  # <caps> <screen>
-  local caps=$1 screen=$2 styled=0 kv plain row raw content glyph joined='' footer_re prompt_row=-1
+fm_composer_extract_selected_content() {  # <caps> <screen> [rows]
+  local caps=$1 screen=$2 rows=${3:-} styled=0 kv plain row raw content glyph joined='' footer_re prompt_row=-1
   local leading_blank=1 placeholder_position=0 prompt_is_shell=0
   footer_re=${FM_COMPOSER_LEFTBAR_FOOTER_RE:-$FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT}
   while IFS= read -r kv; do
@@ -1223,10 +1223,19 @@ EOF
       row=$((row + 1))
       continue
     fi
-    joined="${joined}${joined:+ }$content"
+    if [ "$rows" = rows ]; then
+      [ -z "$joined" ] || joined+=$'\n'
+      joined+=$content
+    else
+      joined="${joined}${joined:+ }$content"
+    fi
     row=$((row + 1))
   done
-  printf '%s\n' "$joined" | LC_ALL=C awk '{$1=$1; printf "%s", $0}'
+  if [ "$rows" = rows ]; then
+    printf '%s' "$joined"
+  else
+    printf '%s\n' "$joined" | LC_ALL=C awk '{$1=$1; printf "%s", $0}'
+  fi
 }
 
 fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity]
@@ -1334,6 +1343,102 @@ EOF
         "$FM_COMPOSER_SELECTED_FIRST" "$FM_COMPOSER_SELECTED_LAST"
       ;;
   esac
+}
+
+# Composer SNAPSHOT: one capture of a composer read, held in three globals so
+# a caller can run more than one judgment against the same screen. An
+# adapter's `*_composer_snapshot` sets them (call it without command
+# substitution; it fails when the capture fails) and its composer verdict is
+# its classification of that snapshot; bin/fm-backend.sh's
+# fm_backend_guarded_composer_state is the caller that needs both halves.
+#   FM_COMPOSER_SNAPSHOT_SCREEN  the captured screen (styled when caps say so)
+#   FM_COMPOSER_SNAPSHOT_CAPS    the capability descriptor for that capture
+#   FM_COMPOSER_SNAPSHOT_CURSOR  the cursor row, or empty without cursor=1
+
+# fm_composer_classify_snapshot_no_identity: the verdict for the snapshot on a
+# backend with no agent-identity probe, so an identity-dependent shape (pi's
+# separated pair) stays unknown.
+fm_composer_classify_snapshot_no_identity() {
+  local verdict
+  verdict=$(fm_composer_classify_screen "$FM_COMPOSER_SNAPSHOT_CAPS" \
+    "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR")
+  [ "$verdict" != need-identity ] || verdict=unknown
+  printf '%s' "$verdict"
+}
+
+# fm_composer_holds_text: 0 when the selected composer's extracted content is
+# exactly <text>, allowing one optional space where displayed rows meet.
+# This is how a caller that just typed <text> proves the composer holds it on
+# a plain (styled=0) capture, where a glyph row with trailing text otherwise
+# reads unknown because ghost text cannot be told apart from typed text.
+fm_composer_holds_text() {  # <caps> <screen> <text>
+  local content remaining row first=1
+  remaining=$3
+  [ -n "$remaining" ] || return 1
+  content=$(fm_composer_extract_selected_content "$1" "$2" rows 2>/dev/null) || return 1
+  [ -n "$content" ] || return 1
+  while IFS= read -r row; do
+    if [ "$first" = 0 ]; then
+      remaining=${remaining# }
+    fi
+    case "$remaining" in
+      "$row"*) remaining=${remaining#"$row"} ;;
+      *) return 1 ;;
+    esac
+    first=0
+  done <<< "$content"
+  [ -z "$remaining" ]
+}
+
+# fm_composer_update_picker_scan: recognize Codex's global-update picker, the
+# modal whose confirming Enter runs a global `npm install` of Codex. It is
+# recognized by the vendor's own rows and key hint (codex-rs/tui/src/
+# update_prompt.rs, Codex 0.157.1-0.162.1): "Update now (runs `<update
+# command>`)", "Skip until next version", and "enter continue · esc skip". A
+# picker can leave an old prompt visible behind it, so no composer verdict
+# alone may authorize a keystroke while these rows are on screen. Prints one
+# of:
+#   none      the picker's rows are not on the screen
+#   active    the picker is the live screen; never type or press Enter
+#   below     cursor capture only: the cursor sits below the key hint; the
+#             live picker parks it on a blank row there, so this is retained
+#             history only when the same snapshot's composer verdict is a
+#             recognized composer (empty, pending, or pending-unproven)
+#   retained  cursorless capture only: what follows the key hint is a proven
+#             empty composer, or holds exactly <expected-text>, so the rows
+#             are stale history above a live composer
+# Single owner of this recognition; bin/fm-backend.sh's
+# fm_backend_guarded_composer_state composes it with the adapter's verdict.
+fm_composer_update_picker_scan() {  # <caps> <screen> [cursor_row] [expected-text]
+  local caps=$1 screen=$2 cy=${3:-} expected=${4:-} cursor=0 kv plain tail before row
+  local tail_caps tail_state
+  while IFS= read -r kv; do
+    [ "$kv" != cursor=1 ] || cursor=1
+  done <<EOF
+$caps
+EOF
+  [ "$cursor" = 1 ] || cy=''
+  plain=$(printf '%s\n' "$screen" | fm_composer_strip_ansi)
+  case "$plain" in
+    *'Update now (runs '*'Skip until next version'*'esc skip'*) ;;
+    *) printf 'none'; return 0 ;;
+  esac
+  tail=${plain##*'esc skip'}
+  if [ -n "$cy" ]; then
+    case "$cy" in *[!0-9]*) printf 'active'; return 0 ;; esac
+    before=${plain%"$tail"}
+    row=$(printf '%s' "$before" | tr -cd '\n' | wc -c)
+    if [ "$cy" -gt "$row" ]; then printf 'below'; else printf 'active'; fi
+    return 0
+  fi
+  tail_caps=$(printf 'styled=0\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
+  tail_state=$(fm_composer_classify_screen "$tail_caps" "$tail" 2>/dev/null) || tail_state=unknown
+  if [ "$tail_state" = empty ] \
+     || { [ -n "$expected" ] && fm_composer_holds_text "$tail_caps" "$tail" "$expected"; }; then
+    printf 'retained'
+  else
+    printf 'active'
+  fi
 }
 
 # fm_composer_submit_retry_core: the ONE verify-and-retry-Enter submit loop

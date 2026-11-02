@@ -735,6 +735,9 @@ fm_backend_send_literal() {  # <backend> <target> <text> [expected-label]
   case "$backend" in
     tmux) fm_backend_tmux_send_literal "$@" ;;
     herdr) fm_backend_herdr_send_literal "$@" ;;
+    zellij) fm_backend_zellij_send_literal "$@" ;;
+    orca) fm_backend_orca_send_literal "$@" ;;
+    cmux) fm_backend_cmux_send_literal "$@" ;;
     *) echo "error: no literal-send implementation for backend '$backend'" >&2; return 1 ;;
   esac
 }
@@ -834,6 +837,88 @@ fm_backend_composer_state() {  # <backend> <target> [expected-label] -> empty|pe
     cmux) fm_backend_cmux_composer_state "$@" ;;
     zellij) fm_backend_zellij_composer_state "$@" ;;
     *) printf 'unknown' ;;
+  esac
+}
+
+# fm_backend_composer_snapshot: one composer capture of <target> into the
+# snapshot globals (bin/fm-composer-lib.sh "Composer SNAPSHOT"). Call it
+# without command substitution; it fails when the capture fails.
+fm_backend_composer_snapshot() {  # <backend> <target> [expected-label]
+  local backend=$1
+  shift
+  FM_COMPOSER_SNAPSHOT_SCREEN=
+  FM_COMPOSER_SNAPSHOT_CAPS=
+  FM_COMPOSER_SNAPSHOT_CURSOR=
+  fm_backend_source "$backend" || return 1
+  case "$backend" in
+    tmux) fm_tmux_composer_snapshot "$1" ;;
+    herdr) fm_backend_herdr_composer_snapshot "$1" ;;
+    zellij) fm_backend_zellij_composer_snapshot "$@" ;;
+    orca) fm_backend_orca_composer_snapshot "$1" ;;
+    cmux) fm_backend_cmux_composer_snapshot "$@" ;;
+    *) return 1 ;;
+  esac
+}
+
+# fm_backend_composer_classify_snapshot: the backend's own composer verdict for
+# the current snapshot, identical to what fm_backend_composer_state would have
+# answered for that capture.
+fm_backend_composer_classify_snapshot() {  # <backend> <target>
+  case "$1" in
+    tmux) fm_tmux_composer_classify_snapshot "$2" ;;
+    herdr) fm_backend_herdr_composer_classify_snapshot "$2" ;;
+    zellij|orca|cmux) fm_composer_classify_snapshot_no_identity ;;
+    *) printf 'unknown' ;;
+  esac
+}
+
+# fm_backend_guarded_composer_state: the composer verdict a caller must have
+# before it types into a pane or presses a confirming Enter there. It reads ONE
+# capture, refuses Codex's global-update picker on it first
+# (fm_composer_update_picker_scan in bin/fm-composer-lib.sh; its confirming
+# Enter runs a global `npm install` of Codex), and only then trusts the
+# backend's own composer verdict for that same capture, so a picker that
+# appears between two reads can never borrow an earlier read's verdict.
+# Prints update-picker, or the composer verdict otherwise:
+# empty|pending|pending-unproven|unknown, where an unreadable capture is
+# unknown. <expected-pending> is the exact text the caller just typed: on a
+# plain (styled=0) capture, where a glyph row with trailing text reads unknown,
+# a composer holding exactly that text reads pending, and on a cursorless
+# capture it also proves picker rows above it are retained history.
+# Callers: the steering-inbox doorbell (bin/fm-task-inbox-lib.sh) and Codex
+# exit (bin/fm-control.sh).
+fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending]
+  local backend=$1 target=$2 label=${3:-} expected=${4:-} picker verdict kv styled=0
+  fm_backend_composer_snapshot "$backend" "$target" "$label" || { printf 'unknown'; return 0; }
+  [ -n "$FM_COMPOSER_SNAPSHOT_SCREEN" ] || { printf 'unknown'; return 0; }
+  picker=$(fm_composer_update_picker_scan "$FM_COMPOSER_SNAPSHOT_CAPS" \
+    "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR" "$expected")
+  [ "$picker" != active ] || { printf 'update-picker'; return 0; }
+  verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target")
+  if [ "$verdict" = unknown ] && [ -n "$expected" ]; then
+    while IFS= read -r kv; do
+      [ "$kv" != styled=1 ] || styled=1
+    done <<EOF
+$FM_COMPOSER_SNAPSHOT_CAPS
+EOF
+    if [ "$styled" = 0 ] \
+       && fm_composer_holds_text "$FM_COMPOSER_SNAPSHOT_CAPS" "$FM_COMPOSER_SNAPSHOT_SCREEN" "$expected"; then
+      verdict=pending
+    fi
+  fi
+  if [ "$verdict" = pending ] && [ -n "$expected" ] \
+     && ! fm_composer_holds_text "$FM_COMPOSER_SNAPSHOT_CAPS" "$FM_COMPOSER_SNAPSHOT_SCREEN" "$expected"; then
+    verdict=unknown
+  fi
+  case "$verdict" in
+    empty|pending|pending-unproven) printf '%s' "$verdict" ;;
+    *)
+      if [ "$picker" = below ]; then
+        printf 'update-picker'
+      else
+        printf 'unknown'
+      fi
+      ;;
   esac
 }
 
