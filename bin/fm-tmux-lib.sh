@@ -138,10 +138,28 @@ EOF
 # it (a pi separator pair under the cursor), so the common read never pays
 # for the process probe.
 fm_tmux_composer_state() {  # <target> -> empty|pending|pending-unproven|unknown
-  local target=$1 cy pane verdict identity
-  cy=$(fm_tmux_composer_cursor_row "$target") || { printf 'unknown'; return 0; }
-  case "$cy" in ''|*[!0-9]*) printf 'unknown'; return 0 ;; esac
-  pane=$(fm_tmux_composer_capture "$target") || { printf 'unknown'; return 0; }
+  fm_tmux_composer_snapshot "$1" || { printf 'unknown'; return 0; }
+  fm_tmux_composer_classify_snapshot "$1"
+}
+
+# fm_tmux_composer_snapshot: the cursor row and styled screen of one composer
+# read, into the snapshot globals (bin/fm-composer-lib.sh "Composer
+# SNAPSHOT"); fails when either read fails or the cursor row is not numeric.
+fm_tmux_composer_snapshot() {  # <target>
+  local cy pane
+  cy=$(fm_tmux_composer_cursor_row "$1") || return 1
+  case "$cy" in ''|*[!0-9]*) return 1 ;; esac
+  pane=$(fm_tmux_composer_capture "$1") || return 1
+  FM_COMPOSER_SNAPSHOT_CURSOR=$cy
+  FM_COMPOSER_SNAPSHOT_SCREEN=$pane
+  FM_COMPOSER_SNAPSHOT_CAPS=$(fm_tmux_composer_caps)
+}
+
+# fm_tmux_composer_classify_snapshot: the tmux composer verdict for the
+# snapshot taken from <target>, which supplies the lazy identity probe and the
+# Cursor process check below.
+fm_tmux_composer_classify_snapshot() {  # <target>
+  local target=$1 cy=$FM_COMPOSER_SNAPSHOT_CURSOR pane=$FM_COMPOSER_SNAPSHOT_SCREEN verdict identity
   verdict=$(fm_composer_classify_screen "$(fm_tmux_composer_caps)" "$pane" "$cy")
   if [ "$verdict" = need-identity ]; then
     if ! identity=$(fm_tmux_composer_identity "$target") || [ -z "$identity" ]; then

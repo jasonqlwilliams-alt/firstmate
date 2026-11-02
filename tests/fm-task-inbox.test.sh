@@ -52,8 +52,11 @@ inbox_lib() {  # <state> <function> [args...]
 }
 
 # A fake tmux for the watcher cases: capture-pane replays FM_FAKE_TMUX_CAPTURE,
-# display-message yields a numeric cursor row, and every literal send-keys is
-# logged to FM_SEND_LOG so a doorbell ring is observable. With
+# display-message yields a numeric cursor row (FM_FAKE_TMUX_CURSOR, default 1),
+# every literal send-keys is logged to FM_SEND_LOG so a doorbell ring is
+# observable, and every named key to FM_KEY_LOG. With FM_FAKE_TMUX_TYPED set,
+# the pane behaves like a composer that renders what was typed: a literal send
+# shows as a `›` row holding that text on the cursor row until Enter clears it. With
 # FM_FAKE_TMUX_AGENT set, the inventory lists window fm-t1 and its
 # #{pane_current_command} answers with that value, so `zsh` makes
 # fm_backend_tmux_agent_state read the pane as a dead bare shell.
@@ -76,22 +79,28 @@ case "${1:-}" in
     done
     if [ "$literal" = 1 ]; then
       printf '%s\n' "${1:-}" >> "${FM_SEND_LOG:-/dev/null}"
+      [ -z "${FM_FAKE_TMUX_TYPED:-}" ] || printf '%s' "${1:-}" > "$FM_FAKE_TMUX_TYPED"
       if [ -n "${FM_ACK_RECORD:-}" ] && [ -f "$FM_ACK_RECORD" ]; then
         mv "$FM_ACK_RECORD" "${FM_ACK_RECORD%/*}/handled/"
       fi
+    else
+      printf '%s\n' "${1:-}" >> "${FM_KEY_LOG:-/dev/null}"
+      [ "${1:-}" != Enter ] || [ -z "${FM_FAKE_TMUX_TYPED:-}" ] || rm -f "$FM_FAKE_TMUX_TYPED"
     fi
     exit 0 ;;
   display-message)
     for a in "$@"; do
       case "$a" in
-        *cursor_y*) printf '1\n'; exit 0 ;;
+        *cursor_y*) printf '%s\n' "${FM_FAKE_TMUX_CURSOR:-1}"; exit 0 ;;
         *pane_current_command*) [ -z "${FM_FAKE_TMUX_AGENT:-}" ] || { printf '%s\n' "$FM_FAKE_TMUX_AGENT"; exit 0; } ;;
         *pane_tty*) [ -z "${FM_FAKE_TMUX_AGENT:-}" ] || { printf '\n'; exit 0; } ;;
       esac
     done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
-    if [ -n "${FM_FAKE_TMUX_CAPTURE:-}" ] && [ -f "$FM_FAKE_TMUX_CAPTURE" ]; then
+    if [ -n "${FM_FAKE_TMUX_TYPED:-}" ] && [ -s "$FM_FAKE_TMUX_TYPED" ]; then
+      printf 'fake agent\n› %s\n' "$(cat "$FM_FAKE_TMUX_TYPED")"
+    elif [ -n "${FM_FAKE_TMUX_CAPTURE:-}" ] && [ -f "$FM_FAKE_TMUX_CAPTURE" ]; then
       cat "$FM_FAKE_TMUX_CAPTURE"
     else
       printf '╭────╮\n│    │\n╰────╯\n'
@@ -113,7 +122,7 @@ watch_bg() {  # <state> <fakebin> <out> [extra env assignments...]
     FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
     FM_FAKE_CREW_STATE='state: working · source: run-step · validating (running)' \
     FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
-    FM_TASK_INBOX_GRACE_SECS=1 \
+    FM_TASK_INBOX_GRACE_SECS=1 FM_FAKE_TMUX_TYPED="${state%/*}/typed" \
     env "$@" "$WATCH" > "$out" 2>/dev/null &
 }
 
@@ -267,12 +276,13 @@ test_ring_skips_dead_agent() {
   [ -f "$rec" ] || fail "skipping a missing endpoint must leave the durable record in place"
   rc=0
   PATH="$dir/fakebin:$PATH" FM_SEND_LOG="$log" FM_FAKE_TMUX_AGENT=claude \
+    FM_FAKE_TMUX_TYPED="$dir/typed" \
     inbox_lib "$state" fm_task_inbox_ring tmux sess:fm-t1 "$rec" fm-t1 || rc=$?
   [ "$rc" = 0 ] || fail "a live agent should still be rung, got $rc"
   grep -qF 'Firstmate instruction waiting' "$log" || fail "a live agent did not receive the doorbell"
   : > "$log"
   rc=0
-  PATH="$dir/fakebin:$PATH" FM_SEND_LOG="$log" \
+  PATH="$dir/fakebin:$PATH" FM_SEND_LOG="$log" FM_FAKE_TMUX_TYPED="$dir/typed" \
     inbox_lib "$state" fm_task_inbox_ring tmux sess:fm-t1 "$rec" fm-t1 || rc=$?
   [ "$rc" = 0 ] || fail "an endpoint the classifier cannot see should still be rung, got $rc"
   grep -qF 'Firstmate instruction waiting' "$log" || fail "an unclassifiable endpoint did not receive the doorbell"
@@ -692,6 +702,284 @@ test_watcher_dead_pane_ignores_stale_busy_state() {
   pass "watcher: dead-pane recovery overrides stale busy state"
 }
 
+# --- incident regressions: the ring against real screens ---------------------
+#
+# A doorbell Enter once confirmed Codex's global-update picker and broke the
+# shared Codex install: the plain composer read that screen as unknown (cursor
+# below the rows) or pending (cursor on the selection row), and the ring typed
+# into both. These cases rebuild that screen, using the picker rows recorded in
+# tests/fm-control.test.sh, in a REAL private tmux server (-L) and drive the real
+# ring and the real fm-send through it. The screens are drawn by a bash stub
+# launched through a `codex`-named symlink to bash, so the pane's foreground
+# process reads as a live agent without any harness running. The stub logs
+# every byte it receives (KEY), every Enter (ENTER), and every submitted line
+# (SUBMIT), and on a submitted doorbell it acknowledges like a worker by moving
+# the inbox records into handled/.
+RING_TMUX=
+RING_SOCKET="fm-inbox-ring-$$"
+RING_LAB=
+
+ring_lab_cleanup() {
+  [ -z "$RING_TMUX" ] || "$RING_TMUX" -L "$RING_SOCKET" kill-server >/dev/null 2>&1 || true
+  fm_test_cleanup
+}
+
+ring_lab_setup() {
+  local bash_bin
+  [ -z "$RING_LAB" ] || return 0
+  RING_TMUX=$(command -v tmux) || fail "the ring regressions need tmux"
+  bash_bin=$(command -v bash)
+  trap ring_lab_cleanup EXIT
+  RING_LAB="$TMP_ROOT/ring-lab"
+  mkdir -p "$RING_LAB/shim" "$RING_LAB/bin"
+  printf '#!/usr/bin/env bash\nexec "%s" -L "%s" "$@"\n' "$RING_TMUX" "$RING_SOCKET" > "$RING_LAB/shim/tmux"
+  chmod +x "$RING_LAB/shim/tmux"
+  ln -s "$bash_bin" "$RING_LAB/bin/codex"
+  cat > "$RING_LAB/screen-stub.sh" <<'STUB'
+# Screen stub: <mode> <log>. Modes: empty, pending, unknown, picker-below,
+# picker-row, picker-after-key (empty until the first key, then the picker),
+# noecho (an empty composer that never renders what is typed).
+mode=$1 log=$2 buf=
+cols=$(stty size 2>/dev/null | cut -d' ' -f2)
+case "$cols" in ''|*[!0-9]*) cols=80 ;; esac
+old=$(stty -g 2>/dev/null || true)
+stty -echo -icanon min 1 time 0 2>/dev/null || true
+trap '[ -z "$old" ] || stty "$old" 2>/dev/null' EXIT
+[ "$mode" != pending ] || buf='half typed words'
+picker() {
+  printf '\033[2J\033[H'
+  printf '%s\r\n' '  Update available · 0.162.1 → 0.999.0' \
+    '  Release notes: https://github.com/openai/codex/releases/latest' '' \
+    '› 1. Update now (runs `npm install -g @openai/codex`)' '  2. Skip' \
+    '  3. Skip until next version' '' '  enter continue · esc skip'
+  [ "$mode" != picker-row ] || printf '\033[4;1H'
+}
+composer() {
+  local w=$((cols - 2)) i=0 row=3 len
+  printf '\033[2J\033[H>_ Codex-shaped test stub\r\n\r\n'
+  if [ -z "$buf" ]; then
+    printf '› \033[2mAsk Codex to do anything\033[0m\r\n\r\n  \033[2m100%% context left\033[0m\033[3;3H'
+    return
+  fi
+  printf '› %s' "${buf:0:w}"
+  i=$w
+  while [ "$i" -lt "${#buf}" ]; do
+    printf '\r\n  %s' "${buf:i:w}"
+    i=$((i + w))
+    row=$((row + 1))
+  done
+  len=$(( ${#buf} - (row - 3) * w ))
+  printf '\r\n\r\n  \033[2m100%% context left\033[0m\033[%d;%dH' "$row" "$((3 + len))"
+}
+draw() {
+  case "$mode" in
+    picker-below|picker-row) picker ;;
+    unknown) printf '\033[2J\033[H  Loading your session\r\n\r\n' ;;
+    *) composer ;;
+  esac
+}
+draw
+while IFS= read -r -n 1 ch; do
+  if [ -z "$ch" ]; then
+    printf 'ENTER\n' >> "$log"
+    case "$mode" in
+      empty|pending)
+        if [ -n "$buf" ]; then
+          printf 'SUBMIT %s\n' "$buf" >> "$log"
+          if [[ $buf =~ list\ \'([^\']+)\'/\*\.msg ]]; then
+            for f in "${BASH_REMATCH[1]}"/*.msg; do
+              [ -e "$f" ] && mv "$f" "${BASH_REMATCH[1]}/handled/"
+            done
+          fi
+          buf=
+        fi
+        ;;
+    esac
+  else
+    printf 'KEY %s\n' "$ch" >> "$log"
+    case "$mode" in
+      empty|pending) buf="$buf$ch" ;;
+      picker-after-key) mode=picker-below ;;
+    esac
+  fi
+  draw
+done
+STUB
+  "$RING_TMUX" -L "$RING_SOCKET" new-session -d -s ring -x 200 -y 40
+}
+
+# Start one stub window and wait until its screen is drawn. Echoes its target.
+ring_stub_window() {  # <name> <mode> <log>
+  local name=$1 mode=$2 log=$3 i=0 marker
+  : > "$log"
+  "$RING_TMUX" -L "$RING_SOCKET" new-window -d -t ring: -n "$name" -- \
+    "$RING_LAB/bin/codex" "$RING_LAB/screen-stub.sh" "$mode" "$log"
+  case "$mode" in
+    picker-below|picker-row) marker='esc skip' ;;
+    unknown) marker='Loading your session' ;;
+    *) marker='context left' ;;
+  esac
+  while [ "$i" -lt 100 ]; do
+    "$RING_TMUX" -L "$RING_SOCKET" capture-pane -p -t "ring:$name" 2>/dev/null | grep -qF "$marker" && break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  [ "$i" -lt 100 ] || fail "the $mode stub never drew its screen"
+  printf 'ring:%s\n' "$name"
+}
+
+# Ring one fresh record into a stub window through the real library. Prints
+# the ring's return code.
+ring_into() {  # <state> <task> <target>
+  local state=$1 task=$2 target=$3 rec rc=0
+  rec=$(inbox_lib "$state" fm_task_inbox_write "$state" "$task" "please continue")
+  PATH="$RING_LAB/shim:$PATH" FM_TASK_INBOX_RING_POLLS=5 \
+    inbox_lib "$state" fm_task_inbox_ring tmux "$target" "$rec" "" || rc=$?
+  printf '%s\n' "$rc"
+}
+
+test_ring_refuses_the_codex_update_picker() {
+  local state target log rc mode
+  ring_lab_setup
+  state="$TMP_ROOT/ring-picker/state"
+  mkdir -p "$state"
+  for mode in picker-below picker-row; do
+    log="$RING_LAB/$mode.log"
+    target=$(ring_stub_window "$mode" "$mode" "$log")
+    rc=$(ring_into "$state" "$mode" "$target")
+    sleep 0.3
+    [ "$rc" = 4 ] || fail "the ring should refuse the update picker ($mode) with 4, got $rc"
+    [ ! -s "$log" ] || fail "the ring typed into the update picker ($mode):"$'\n'"$(cat "$log")"
+    [ -f "$state/$mode.inbox/001.msg" ] || fail "a refused ring must leave the durable record ($mode)"
+  done
+  pass "inbox: the ring refuses Codex's update picker, cursor below the rows or on the selection row, with nothing typed and no Enter"
+}
+
+test_ring_refuses_a_picker_that_appears_while_typing() {
+  local state target log rc
+  ring_lab_setup
+  state="$TMP_ROOT/ring-picker-late/state"
+  mkdir -p "$state"
+  log="$RING_LAB/picker-after-key.log"
+  target=$(ring_stub_window late picker-after-key "$log")
+  rc=$(ring_into "$state" t1 "$target")
+  sleep 0.3
+  [ "$rc" = 4 ] || fail "a picker that appears after the empty-composer check should stop the ring with 4, got $rc"
+  grep -q '^KEY' "$log" || fail "the case is vacuous unless the doorbell was typed before the picker appeared"
+  ! grep -q '^ENTER' "$log" || fail "the ring pressed Enter into the picker:"$'\n'"$(cat "$log")"
+  pass "inbox: a picker that appears after the composer check stops the ring before its Enter"
+}
+
+test_ring_still_delivers_into_an_empty_composer() {
+  local state target log rc
+  ring_lab_setup
+  state="$TMP_ROOT/ring-empty/state"
+  mkdir -p "$state"
+  log="$RING_LAB/empty.log"
+  target=$(ring_stub_window empty empty "$log")
+  rc=$(ring_into "$state" t1 "$target")
+  [ "$rc" = 0 ] || fail "the ring should deliver into a proven-empty composer, got $rc"
+  local i=0
+  while [ "$i" -lt 50 ] && [ -e "$state/t1.inbox/001.msg" ]; do sleep 0.1; i=$((i + 1)); done
+  [ "$(grep -c '^ENTER' "$log")" = 1 ] || fail "the ring should press exactly one Enter:"$'\n'"$(cat "$log")"
+  grep -qF "SUBMIT : Firstmate instruction waiting: list '$state/t1.inbox'/*.msg" "$log" \
+    || fail "the stub never received the doorbell line:"$'\n'"$(cat "$log")"
+  [ -f "$state/t1.inbox/handled/001.msg" ] || fail "the delivered doorbell was not acted on"
+  pass "inbox: an ordinary empty composer still receives the doorbell and exactly one Enter"
+}
+
+test_ring_refuses_pending_and_unknown_screens() {
+  local state target log rc mode
+  ring_lab_setup
+  state="$TMP_ROOT/ring-unproven/state"
+  mkdir -p "$state"
+  for mode in pending unknown; do
+    log="$RING_LAB/$mode.log"
+    target=$(ring_stub_window "$mode" "$mode" "$log")
+    rc=$(ring_into "$state" "$mode" "$target")
+    sleep 0.3
+    [ "$rc" = 1 ] || fail "the ring should refuse a $mode screen with 1, got $rc"
+    [ ! -s "$log" ] || fail "the ring typed into a $mode screen:"$'\n'"$(cat "$log")"
+  done
+  log="$RING_LAB/noecho.log"
+  target=$(ring_stub_window noecho noecho "$log")
+  rc=$(ring_into "$state" noecho "$target")
+  sleep 0.3
+  [ "$rc" = 5 ] || fail "a composer that never shows the typed doorbell should withhold the Enter with 5, got $rc"
+  grep -q '^KEY' "$log" || fail "the noecho case is vacuous unless the doorbell was typed"
+  ! grep -q '^ENTER' "$log" || fail "the ring pressed Enter on an unproven screen:"$'\n'"$(cat "$log")"
+  pass "inbox: a pending or unknown screen gets no keystroke, and an unproven composer after typing gets no Enter"
+}
+
+# The incident path end to end: the real fm-send rings into the stub picker
+# and types nothing, while the same send into an empty composer is delivered
+# and acknowledged.
+test_fm_send_ring_through_picker_and_composer() {
+  local home target log err
+  ring_lab_setup
+  home="$TMP_ROOT/ring-send/home"
+  mkdir -p "$home/state"
+  log="$RING_LAB/send-picker.log"
+  target=$(ring_stub_window send-picker picker-below "$log")
+  fm_write_meta "$home/state/p1.meta" "window=$target" "backend=tmux" "kind=ship" "harness=codex"
+  err="$TMP_ROOT/ring-send/picker.err"
+  PATH="$RING_LAB/shim:$PATH" FM_HOME="$home" \
+    "$ROOT/bin/fm-send.sh" p1 "please continue" >/dev/null 2>"$err" \
+    || fail "a send refused at the picker is still a durably sent steer:"$'\n'"$(cat "$err")"
+  sleep 0.3
+  [ ! -s "$log" ] || fail "fm-send typed into the update picker:"$'\n'"$(cat "$log")"
+  [ -f "$home/state/p1.inbox/001.msg" ] || fail "fm-send did not record the steer"
+  assert_contains "$(cat "$err")" "Codex global-update picker" "fm-send should say why no Enter was sent"
+  log="$RING_LAB/send-empty.log"
+  target=$(ring_stub_window send-empty empty "$log")
+  fm_write_meta "$home/state/e1.meta" "window=$target" "backend=tmux" "kind=ship" "harness=codex"
+  PATH="$RING_LAB/shim:$PATH" FM_HOME="$home" \
+    "$ROOT/bin/fm-send.sh" e1 "please continue" >/dev/null 2>"$err" \
+    || fail "a send into an empty composer should succeed:"$'\n'"$(cat "$err")"
+  local i=0
+  while [ "$i" -lt 50 ] && [ -e "$home/state/e1.inbox/001.msg" ]; do sleep 0.1; i=$((i + 1)); done
+  [ -f "$home/state/e1.inbox/handled/001.msg" ] \
+    || fail "fm-send's doorbell into an empty composer was not acted on:"$'\n'"$(cat "$log")"
+  [ "$(grep -c '^ENTER' "$log")" = 1 ] || fail "fm-send should press exactly one Enter:"$'\n'"$(cat "$log")"
+  pass "fm-send: the incident's picker gets no keystroke, and an empty composer still gets the doorbell"
+}
+
+# The re-ring path through the real watcher: a picker on screen is never typed
+# into, every refusal spends one attempt, and the spent budget escalates the
+# unread record as a stuck steer that names the picker.
+test_watcher_rering_refuses_picker_and_escalates() {
+  local dir state out log keys pid rec cursor
+  for cursor in 8 3; do
+    dir=$(setup_watch_case "picker-rering-$cursor")
+    state="$dir/state"; out="$dir/watch.out"; log="$dir/send.log"; keys="$dir/keys.log"
+    : > "$log"; : > "$keys"
+    # The backticks are the vendor's literal row text, not an expansion.
+    # shellcheck disable=SC2016
+    printf '%s\n' '  Update available · 0.162.1 → 0.999.0' \
+      '  Release notes: https://github.com/openai/codex/releases/latest' '' \
+      '› 1. Update now (runs `npm install -g @openai/codex`)' '  2. Skip' \
+      '  3. Skip until next version' '' '  enter continue · esc skip' '' > "$dir/picker.capture"
+    rec=$(inbox_lib "$state" fm_task_inbox_write "$state" t1 "please continue")
+    age_path "$rec"
+    watch_bg "$state" "$dir/fakebin" "$out" \
+      FM_SEND_LOG="$log" FM_KEY_LOG="$keys" FM_FAKE_TMUX_CAPTURE="$dir/picker.capture" \
+      FM_FAKE_TMUX_CURSOR="$cursor" FM_TASK_INBOX_RING_MAX=2
+    pid=$!
+    wait_watcher_gone "$pid" 200 \
+      || { kill "$pid" 2>/dev/null; fail "the watcher never escalated refused picker rings (cursor row $cursor)"; }
+    [ ! -s "$log" ] || fail "the watcher typed into the picker (cursor row $cursor):"$'\n'"$(cat "$log")"
+    [ ! -s "$keys" ] || fail "the watcher sent a key into the picker (cursor row $cursor):"$'\n'"$(cat "$keys")"
+    [ "$(cut -f2 "$state/t1.inbox/.ring-state")" = 2 ] \
+      || fail "each refused ring should spend one attempt (cursor row $cursor): $(cat "$state/t1.inbox/.ring-state")"
+    grep -qF 'unread firstmate instruction' "$state/.wake-queue" \
+      || fail "refused rings must escalate as a stuck steer (cursor row $cursor):"$'\n'"$(cat "$state/.wake-queue" 2>/dev/null)"
+    grep -qF 'Codex global-update picker' "$state/.wake-queue" \
+      || fail "the escalation should name the picker (cursor row $cursor):"$'\n'"$(cat "$state/.wake-queue")"
+    [ -f "$rec" ] || fail "the durable record must survive refused rings"
+  done
+  pass "watcher: re-rings never type into the update picker, and the spent budget escalates naming it"
+}
+
 test_write_is_durable_and_exact
 test_doorbell_is_a_shell_noop
 test_doorbell_rejects_terminal_controls
@@ -712,3 +1000,9 @@ test_watcher_surfaces_unwritable_ladder
 test_watcher_escalates_once_after_budget
 test_watcher_dead_pane_escalates_once_without_ringing
 test_watcher_dead_pane_ignores_stale_busy_state
+test_ring_refuses_the_codex_update_picker
+test_ring_refuses_a_picker_that_appears_while_typing
+test_ring_still_delivers_into_an_empty_composer
+test_ring_refuses_pending_and_unknown_screens
+test_fm_send_ring_through_picker_and_composer
+test_watcher_rering_refuses_picker_and_escalates

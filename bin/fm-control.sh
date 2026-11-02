@@ -475,76 +475,11 @@ retire_busy_incarnation() {
   fi
 }
 
-# codex_exit_screen_state: inspect the documented global-update picker before
-# trusting a composer verdict. A picker can leave an old prompt visible behind
-# it, so the composer alone cannot authorize a confirming Enter. The picker is
-# recognized by the vendor's own rows and key hint (codex-rs/tui/src/
-# update_prompt.rs): "Update now (runs `<update command>`)", "Skip until next
-# version", and "enter continue · esc skip".
+# codex_exit_screen_state: the shared guarded composer verdict
+# (fm_backend_guarded_composer_state in bin/fm-backend.sh, which owns the Codex
+# global-update picker recognition) for this task's endpoint.
 codex_exit_screen_state() {  # [expected-pending] -> update-picker|empty|pending|pending-unproven|unknown
-  local expected=${1:-} screen plain state caps cy='' content plain_capture=0 picker_below=0
-  local picker_tail picker_before picker_row tail_state tail_caps
-  fm_backend_source "$BACKEND" || { printf 'unknown'; return 0; }
-  case "$BACKEND" in
-    tmux)
-      cy=$(fm_tmux_composer_cursor_row "$T") \
-        || { printf 'unknown'; return 0; }
-      case "$cy" in ''|*[!0-9]*) printf 'unknown'; return 0 ;; esac
-      screen=$(fm_tmux_composer_capture "$T") \
-        || { printf 'unknown'; return 0; }
-      caps=$(fm_tmux_composer_caps)
-      ;;
-    herdr)
-      if screen=$(fm_backend_herdr_capture_ansi "$T" "$FM_COMPOSER_CAPTURE_LINES" 2>/dev/null); then
-        caps=$(printf 'styled=1\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
-      elif screen=$(fm_backend_herdr_capture "$T" "$FM_COMPOSER_CAPTURE_LINES" 2>/dev/null); then
-        caps=$(printf 'styled=0\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
-        plain_capture=1
-      else
-        printf 'unknown'
-        return 0
-      fi
-      ;;
-    *) printf 'unknown'; return 0 ;;
-  esac
-  [ -n "$screen" ] || { printf 'unknown'; return 0; }
-  plain=$(printf '%s\n' "$screen" | fm_composer_strip_ansi)
-  if [[ "$plain" == *'Update now (runs '*'Skip until next version'*'esc skip'* ]]; then
-    picker_tail=${plain##*'esc skip'}
-    if [ "$BACKEND" = tmux ]; then
-      picker_before=${plain%"$picker_tail"}
-      picker_row=$(printf '%s' "$picker_before" | tr -cd '\n' | wc -c)
-      [ "$cy" -gt "$picker_row" ] || { printf 'update-picker'; return 0; }
-      # The live picker parks the cursor on a blank row below its key hint, so
-      # a cursor below the picker proves retained history only when it rests on
-      # a composer the classifier recognizes.
-      picker_below=1
-    else
-      tail_caps=$(printf 'styled=0\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
-      tail_state=$(fm_composer_classify_screen "$tail_caps" "$picker_tail" 2>/dev/null) || tail_state=unknown
-      if [ "$tail_state" != empty ]; then
-        [ -n "$expected" ] || { printf 'update-picker'; return 0; }
-        content=$(fm_composer_extract_selected_content "$tail_caps" "$picker_tail" 2>/dev/null) || content=
-        [ "$content" = "$expected" ] || { printf 'update-picker'; return 0; }
-      fi
-    fi
-  fi
-  state=$(fm_composer_classify_screen "$caps" "$screen" "$cy" 2>/dev/null) \
-    || state=unknown
-  if [ "$state" = unknown ] && [ "$plain_capture" = 1 ] && [ -n "$expected" ]; then
-    content=$(fm_composer_extract_selected_content "$caps" "$screen" 2>/dev/null) || content=
-    [ "$content" != "$expected" ] || state=pending
-  fi
-  case "$state" in
-    empty|pending|pending-unproven) printf '%s' "$state" ;;
-    *)
-      if [ "$picker_below" = 1 ]; then
-        printf 'update-picker'
-      else
-        printf 'unknown'
-      fi
-      ;;
-  esac
+  fm_backend_guarded_composer_state "$BACKEND" "$T" "$LABEL" "${1:-}"
 }
 
 # Codex exit owns its literal/Enter sequence so every Enter is preceded by a

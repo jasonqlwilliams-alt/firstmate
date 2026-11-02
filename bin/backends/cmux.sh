@@ -552,11 +552,18 @@ fm_backend_cmux_composer_caps() {
 # never here. cmux has no identity probe, so the classifier's identity
 # sentinel resolves to unknown.
 fm_backend_cmux_composer_state() {  # <target> [expected-label] -> empty|pending|pending-unproven|unknown
-  local cap verdict
-  cap=$(fm_backend_cmux_composer_capture "$1" "${2:-}") || { printf 'unknown'; return 0; }
-  verdict=$(fm_composer_classify_screen "$(fm_backend_cmux_composer_caps)" "$cap")
-  [ "$verdict" != need-identity ] || verdict=unknown
-  printf '%s' "$verdict"
+  fm_backend_cmux_composer_snapshot "$1" "${2:-}" || { printf 'unknown'; return 0; }
+  fm_composer_classify_snapshot_no_identity
+}
+
+# fm_backend_cmux_composer_snapshot: one composer capture into the snapshot
+# globals (bin/fm-composer-lib.sh "Composer SNAPSHOT").
+fm_backend_cmux_composer_snapshot() {  # <target> [expected-label]
+  local cap
+  cap=$(fm_backend_cmux_composer_capture "$1" "${2:-}") || return 1
+  FM_COMPOSER_SNAPSHOT_SCREEN=$cap
+  FM_COMPOSER_SNAPSHOT_CURSOR=
+  FM_COMPOSER_SNAPSHOT_CAPS=$(fm_backend_cmux_composer_caps)
 }
 
 # fm_backend_cmux_send_text_submit: type <text> into <target> once (raw,

@@ -425,13 +425,14 @@ inbox_steer_escalate_unavailable() {  # <window> <task> <record>
 # as that same stale wake exactly once. If the attempt's ladder write fails while
 # its record remains unhandled, that unwritable state surfaces through the same
 # stale path instead of silently re-ringing forever; acknowledgement or teardown
-# still makes the race quiet. The attempt is data-plane typing or a
-# composer-protected skip, never a wake, so normal retries keep the watcher
-# blocking. Runs for secondmates
+# still makes the race quiet. The attempt is data-plane typing or a refusal
+# by the ring's screen gate (bin/fm-task-inbox-lib.sh fm_task_inbox_ring),
+# never a wake, so normal retries keep the watcher blocking; the escalation
+# names the screen the gate last refused. Runs for secondmates
 # too: their pane-staleness exemption is about quiet panes being healthy,
 # while an unacknowledged instruction past the ladder is a stuck steer.
 inbox_steer_check() {  # <window> <task>
-  local w=$1 task=$2 action verb rec count tail40 reason ring_rc backend agent_state
+  local w=$1 task=$2 action verb rec count tail40 reason ring_rc backend agent_state screen refusal
   action=$(fm_task_inbox_due_action "$STATE" "$task") || return 0
   verb=${action%% *}
   [ "$verb" != quiet ] || return 0
@@ -477,7 +478,14 @@ inbox_steer_check() {  # <window> <task>
       triage_log "steer-inbox delivery attempt: $task ${rec##*/} result=$ring_rc"
       ;;
     escalate)
-      reason="stale: $w (unread firstmate instruction: $rec still unhandled after $count doorbell delivery attempts with an idle pane; inspect the worker)"
+      screen=$(fm_backend_guarded_composer_state "$backend" "$w" "$(window_label "$w")" 2>/dev/null) \
+        || screen=unknown
+      case "$screen" in
+        empty) refusal= ;;
+        update-picker) refusal="; the pane shows the Codex global-update picker, so the doorbell was refused - never confirm it with Enter (Escape skips the update)" ;;
+        *) refusal="; the pane reads '$screen', not a proven-empty composer, so the doorbell was refused" ;;
+      esac
+      reason="stale: $w (unread firstmate instruction: $rec still unhandled after $count doorbell delivery attempts with an idle pane$refusal; inspect the worker)"
       if [ ! -d "${rec%/*}" ] || [ ! -f "$rec" ]; then
         fm_task_inbox_due_action "$STATE" "$task" >/dev/null || true
         return 0

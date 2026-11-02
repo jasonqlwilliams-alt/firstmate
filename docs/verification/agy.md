@@ -172,8 +172,8 @@ $ fm_composer_classify_screen "styled=1 cursor=1 identity=1" "$screen" 8 "pi<TAB
 pending
 ```
 
-That second line is the measurement that keeps the pi path from being widened to agy: pi's row classifier reads agy's `>` glyph as typed content, so extending it would replace a safe `unknown` with a wrong `pending`, and `pending` is the one verdict that SKIPS a steering doorbell in `bin/fm-task-inbox-lib.sh`.
-`unknown` still rings the doorbell, so steering works; the gap is left open and documented rather than closed with a change that would break it.
+That second line is the measurement that keeps the pi path from being widened to agy: pi's row classifier reads agy's `>` glyph as typed content, so extending it would replace a safe `unknown` with a wrong `pending`.
+Neither verdict earns a steering doorbell any longer: the ring in `bin/fm-task-inbox-lib.sh` types only into a proven-empty composer, so until a harness-scoped rule proves agy's idle composer `empty`, every steer to an agy worker is refused at the pane and escalates as stuck after the ladder.
 
 ## Skills and no-mistakes validation trigger
 

@@ -3152,16 +3152,32 @@ fm_backend_herdr_composer_identity() {  # <target> -> "<agent>\t<status>"
 # pair below every other candidate), preserving this adapter's original
 # consult-only-when-needed behavior.
 fm_backend_herdr_composer_state() {  # <target> -> empty|pending|pending-unproven|unknown
-  local target=$1 cap caps verdict identity
-  fm_backend_herdr_parse_target "$target" || { printf 'unknown'; return 0; }
+  fm_backend_herdr_composer_snapshot "$1" || { printf 'unknown'; return 0; }
+  fm_backend_herdr_composer_classify_snapshot "$1"
+}
+
+# fm_backend_herdr_composer_snapshot: one composer capture into the snapshot
+# globals (bin/fm-composer-lib.sh "Composer SNAPSHOT"), ANSI first and plain
+# as the styled=0 fallback; fails when the target or both captures fail.
+fm_backend_herdr_composer_snapshot() {  # <target>
+  local target=$1 cap styled
+  fm_backend_herdr_parse_target "$target" || return 1
   if cap=$(fm_backend_herdr_capture_ansi "$target" "$FM_COMPOSER_CAPTURE_LINES" 2>/dev/null); then
-    caps=$(printf 'styled=1\ncursor=0\nidentity=1\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
+    styled=1
   elif cap=$(fm_backend_herdr_capture "$target" "$FM_COMPOSER_CAPTURE_LINES"); then
-    caps=$(printf 'styled=0\ncursor=0\nidentity=1\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
+    styled=0
   else
-    printf 'unknown'
-    return 0
+    return 1
   fi
+  FM_COMPOSER_SNAPSHOT_SCREEN=$cap
+  FM_COMPOSER_SNAPSHOT_CURSOR=
+  FM_COMPOSER_SNAPSHOT_CAPS=$(printf 'styled=%s\ncursor=0\nidentity=1\nrows=%s' "$styled" "$FM_COMPOSER_CAPTURE_LINES")
+}
+
+# fm_backend_herdr_composer_classify_snapshot: the herdr composer verdict for
+# the snapshot taken from <target>, which supplies the lazy identity probe.
+fm_backend_herdr_composer_classify_snapshot() {  # <target>
+  local target=$1 cap=$FM_COMPOSER_SNAPSHOT_SCREEN caps=$FM_COMPOSER_SNAPSHOT_CAPS verdict identity
   verdict=$(fm_composer_classify_screen "$caps" "$cap")
   if [ "$verdict" = need-identity ]; then
     if ! identity=$(fm_backend_herdr_composer_identity "$target" 2>/dev/null) || [ -z "$identity" ]; then

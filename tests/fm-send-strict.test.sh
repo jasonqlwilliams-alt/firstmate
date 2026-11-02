@@ -33,6 +33,13 @@ case "${1:-}" in
       esac
     done
     printf 'send-keys target=%s literal=%s arg=%s\n' "$target" "$literal" "${1:-}" >> "$FM_TMUX_LOG"
+    # The pane renders typed text on its composer row until Enter clears it,
+    # like a real composer, so the doorbell's post-typing recheck can pass.
+    if [ "$literal" = 1 ]; then
+      printf '%s' "${1:-}" > "$FM_TMUX_LOG.typed"
+    elif [ "${1:-}" = Enter ]; then
+      rm -f "$FM_TMUX_LOG.typed"
+    fi
     # FM_FAKE_TMUX_SEND_KEY_FAIL names one key whose delivery fails, so the
     # --key exit contract can be driven both ways from the same stub.
     if [ "$literal" = 0 ] && [ -n "${FM_FAKE_TMUX_SEND_KEY_FAIL:-}" ] \
@@ -57,7 +64,11 @@ case "${1:-}" in
     printf '%%1\n'
     exit 0 ;;
   capture-pane)
-    printf '╭────╮\n│    │\n╰────╯\n'
+    if [ -s "$FM_TMUX_LOG.typed" ]; then
+      printf 'fake agent\n› %s\n' "$(cat "$FM_TMUX_LOG.typed")"
+    else
+      printf '╭────╮\n│    │\n╰────╯\n'
+    fi
     exit 0 ;;
   list-windows)
     printf 'foreign:%s\nfm-mpf-lane-m8\nfm-lane-ok\n' "${FM_FAKE_TMUX_WINDOW:-fm-lost}"

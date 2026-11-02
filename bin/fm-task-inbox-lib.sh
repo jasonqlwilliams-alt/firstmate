@@ -46,8 +46,10 @@
 #
 # Re-ring ladder (fm_task_inbox_due_action): an unhandled message older than
 # FM_TASK_INBOX_GRACE_SECS is due one delivery attempt per grace period; an
-# attempt may ring or be skipped to protect proven pending composer text. After
-# FM_TASK_INBOX_RING_MAX attempts without an acknowledgement it escalates. The
+# attempt may ring or be refused by fm_task_inbox_ring's screen gate (pending
+# text, an unproven or unknown screen, or the Codex update picker), and every
+# refusal counts as an attempt. After FM_TASK_INBOX_RING_MAX attempts without
+# an acknowledgement it escalates. The
 # caller owns the busy and recovery-grade endpoint checks: a busy pane waits,
 # while a positively dead or missing endpoint skips delivery and the ladder and
 # escalates directly. This library owns only the schedule and escalation marker.
@@ -68,6 +70,9 @@
 # Tunables (env):
 #   FM_TASK_INBOX_GRACE_SECS   default 90; delivery-attempt grace and spacing
 #   FM_TASK_INBOX_RING_MAX     default 3; delivery attempts before escalation
+#   FM_TASK_INBOX_RING_SETTLE  default 0.3; seconds between the typed doorbell
+#                              and each recheck before its Enter
+#   FM_TASK_INBOX_RING_POLLS   default 5; rechecks before the Enter is withheld
 
 _FM_TASK_INBOX_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Both dependencies are canonical lint roots in their own right. Keep them as
@@ -268,42 +273,71 @@ fm_task_inbox_doorbell_line() {  # <record-path>
     "$quoted" "$quoted"
 }
 
-# Ring the doorbell, best-effort: one endpoint-liveness pre-check, one advisory
-# composer pre-check, then the backend's submit machinery with a minimal retry
-# budget, verdict discarded.
-# Returns 0 rang, 1 skipped because the composer PROVENLY holds pending text
-# (the watcher re-rings later), 2 the backend send failed, 3 skipped because
-# the endpoint is positively dead or missing (nothing typed; recovery owns the
-# record). No return value is delivery proof; the acknowledgement move is the
-# only delivery signal.
-# The skip is deliberately narrow: only an exact `pending` verdict defers,
-# because there our Enter could submit someone's real half-typed content.
-# `pending-unproven` and `unknown` still ring - the worst outcome is a garbled
-# CONSTANT line the worker recovers semantically, while skipping on ambiguous
-# verdicts would starve a harness whose idle screen the classifier cannot
-# positively identify (that classifier is advisory here by design).
+# Ring the doorbell, best-effort, and only into a composer proven empty:
+# one endpoint-liveness pre-check, one guarded screen read
+# (fm_backend_guarded_composer_state in bin/fm-backend.sh, which refuses
+# Codex's global-update picker before it trusts any composer verdict), the
+# literal doorbell text, then a second guarded read that must prove the
+# composer now holds that text, and exactly one Enter.
+# Returns:
+#   0 rang: typed, rechecked, one Enter sent
+#   1 refused before typing: the screen is not a proven-empty composer
+#     (pending text, an ambiguous container, or an unknown screen)
+#   2 the backend send failed
+#   3 the endpoint is positively dead or missing (nothing typed; recovery owns
+#     the record)
+#   4 refused: the Codex global-update picker is on screen; no Enter was sent
+#     (nothing was typed when the picker was seen before typing)
+#   5 typed, but the composer never proved it holds the doorbell, so the Enter
+#     was withheld
+# No return value is delivery proof; the acknowledgement move is the only
+# delivery signal, and every refusal leaves the durable record for the ladder.
+# Why the read is a gate rather than advice: a doorbell Enter once confirmed
+# Codex's update picker, which the plain composer read as unknown (or pending,
+# with the cursor on the selection row), and the resulting interrupted global
+# install broke the shared Codex. Typing is refused as well, because keys typed
+# into a modal can act on it. A screen the classifier cannot prove is an empty
+# composer gets no keystroke at all; the watcher's ladder counts each refusal
+# as an attempt and escalates the unread record as a stuck steer
+# (fm_task_inbox_due_action), so a harness whose idle screen never classifies
+# empty is surfaced rather than silently starved.
 fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
-  local backend=$1 target=$2 rec=$3 label=${4:-} line cstate verdict
+  local backend=$1 target=$2 rec=$3 label=${4:-} line screen i=0
+  local polls=${FM_TASK_INBOX_RING_POLLS:-5} settle=${FM_TASK_INBOX_RING_SETTLE:-0.3}
+  case "$polls" in ''|*[!0-9]*|0) polls=5 ;; esac
+  case "$settle" in ''|*[!0-9.]*|*.*.*) settle=0.3 ;; esac
   case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
     dead|missing) return 3 ;;
   esac
   if ! line=$(fm_task_inbox_doorbell_line "$rec"); then
     return 2
   fi
-  cstate=$(fm_backend_composer_state "$backend" "$target" "$label" 2>/dev/null) || cstate=unknown
-  case "$cstate" in
-    pending) return 1 ;;
+  screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" 2>/dev/null) || screen=unknown
+  case "$screen" in
+    empty) ;;
+    update-picker) return 4 ;;
+    *) return 1 ;;
   esac
   # Accepted residual race: terminal input and Enter are separate delivery
   # steps, so an agent exiting after the liveness check could leave a bare
   # shell only a suffix; the `: ` prefix protects complete lines only. Do not
   # add process-bound atomic delivery here unless an incident reopens this.
-  if ! verdict=$(fm_backend_send_text_submit "$backend" "$target" "$line" 1 0.4 0.3 "$label" 2>/dev/null); then
-    return 2
-  fi
-  # The verdict is read only to report a failed keystroke; every other value
-  # (empty, pending, unknown, ...) is deliberately ignored, never proof.
-  [ "$verdict" != send-failed ] || return 2
+  fm_backend_send_literal "$backend" "$target" "$line" "$label" >/dev/null 2>&1 || return 2
+  # The render of the typed line may take a moment; poll briefly for it. Only
+  # a composer proven to hold the doorbell earns the Enter, and the picker
+  # appearing meanwhile stops the attempt at once.
+  while :; do
+    sleep "$settle"
+    screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" "$line" 2>/dev/null) \
+      || screen=unknown
+    case "$screen" in
+      pending) break ;;
+      update-picker) return 4 ;;
+    esac
+    i=$((i + 1))
+    [ "$i" -lt "$polls" ] || return 5
+  done
+  fm_backend_send_key "$backend" "$target" Enter "$label" >/dev/null 2>&1 || return 2
   return 0
 }
 
@@ -392,9 +426,10 @@ EOF
   printf 'ring %s' "$oldest"
 }
 
-# Advance the ladder after a delivery attempt. A failed ring or a composer-
-# protected skip still consumes budget so neither an unreadable pane nor a
-# permanently blocked composer can retry silently forever. A positively dead or
+# Advance the ladder after a delivery attempt. A failed ring or a refused one
+# (fm_task_inbox_ring returns 1, 4, or 5) still consumes budget, so neither an
+# unreadable or unproven screen, a parked update picker, nor a permanently
+# blocked composer can retry silently forever. A positively dead or
 # missing endpoint never enters the ladder: the watcher escalates it directly.
 # A concurrently removed inbox is a successful no-op; otherwise failure means
 # the caller must surface the unwritable ladder while the record remains

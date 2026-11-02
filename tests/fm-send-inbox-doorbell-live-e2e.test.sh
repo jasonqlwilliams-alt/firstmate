@@ -94,11 +94,12 @@ launch_cmd() {  # <name>
 
 # Wait for the harness to look steerable. 0 = the composer classified a
 # proven empty; 2 = the readiness budget expired without an empty verdict but
-# also without a pending one. The caller proceeds on 2 with a note, because
-# that mirrors production exactly: the send path's composer check is ADVISORY
-# and skips only on visibly pending text, so a harness whose idle screen the
-# classifier cannot positively identify still gets its doorbell (the composer
-# matrix guard, not this one, owns re-proving the classifier per release).
+# also without a pending one. The caller fails that harness on 2, because that
+# mirrors production exactly: the ring types only into a proven-empty composer
+# (bin/fm-task-inbox-lib.sh), so a harness whose idle screen the classifier
+# cannot positively identify never receives its doorbell and every steer to it
+# escalates as stuck (the composer matrix guard owns re-proving the classifier
+# per release).
 wait_ready() {  # <window>
   local win=$1 i=0 budget=60 verdict dismissed=0 screen
   while [ "$i" -lt "$budget" ]; do
@@ -141,7 +142,13 @@ check_harness_doorbell() {  # <name>
     tmux -L "$SOCKET" kill-window -t "$SESSION:$win" 2>/dev/null || true
     return 0
   fi
-  [ "$ready_rc" -eq 0 ] || note "$name ($version): idle composer never classified empty; proceeding as production does (advisory check skips only on pending)"
+  if [ "$ready_rc" -ne 0 ]; then
+    FAILED=1
+    printf 'not ok - %s (%s): idle composer never classified empty, so the ring refuses its doorbell and every steer escalates as stuck\n' "$name" "$version" >&2
+    tmux -L "$SOCKET" capture-pane -p -t "$SESSION:$win" 2>/dev/null | grep '[^[:space:]]' | tail -6 | sed 's/^/#   /' >&2
+    tmux -L "$SOCKET" kill-window -t "$SESSION:$win" 2>/dev/null || true
+    return 0
+  fi
   printf 'window=%s:%s\nkind=ship\nharness=%s\n' "$SESSION" "$win" "$name" > "$home/state/$task.meta"
   if ! FM_HOME="$home" FM_ROOT_OVERRIDE="$home" "$ROOT/bin/fm-send.sh" "$task" \
     "Firstmate live check: run exactly this shell command now: touch $acted - then follow the mv instruction you were given for this message. Reply with one short line." \

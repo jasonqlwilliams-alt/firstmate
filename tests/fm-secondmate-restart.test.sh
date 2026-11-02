@@ -63,6 +63,7 @@ case "${1:-}" in
     payload=${1:-}
     if [ "$literal" = 1 ]; then
       printf '%s\n' "$payload" >> "$D/literal"
+      printf '%s' "$payload" > "$D/typed"
       case "$payload" in
         /exit|/quit)
           if [ -e "$D/remote-relaunch-start" ] && [ ! -e "$D/remote-relaunch-end" ]; then
@@ -92,6 +93,7 @@ case "${1:-}" in
       esac
     else
       printf '%s\n' "$payload" >> "$D/keys"
+      [ "$payload" != Enter ] || rm -f "$D/typed"
     fi
     exit 0 ;;
   display-message)
@@ -109,7 +111,11 @@ case "${1:-}" in
       prev=$a
     done
     printf 'fakepane\n'; exit 0 ;;
-  capture-pane) printf '> \n'; exit 0 ;;
+  capture-pane)
+    # An agent composer on the cursor row: empty at rest, holding typed text
+    # until Enter clears it, so the doorbell's screen gate can prove both.
+    printf 'fake agent\n› %s\n' "$(cat "$D/typed" 2>/dev/null)"
+    exit 0 ;;
   list-windows) [ -f "$D/windows" ] && cat "$D/windows"; exit 0 ;;
 esac
 exit 0
