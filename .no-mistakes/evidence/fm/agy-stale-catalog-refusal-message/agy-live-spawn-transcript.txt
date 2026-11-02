@@ -1,0 +1,24 @@
+Real agy catalog examples:
+gemini-4-argon-high	Gemini 4 Argon (High)
+claude-opus-5-5-high	Claude Opus 5.5 (High)
+tmux windows before: @0
+
+unknown-gemini
+command: fm-spawn.sh agy-live-q1 <isolated-project> --scout --harness agy --backend tmux --model gemini-no-such-model
+exit: 1
+output: error: agy model 'gemini-no-such-model' is not listed by 'agy models' for this account; choose a listed gemini-* id
+task record: absent; tmux windows unchanged: yes
+
+omitted-model
+command: fm-spawn.sh agy-live-q2 <isolated-project> --scout --harness agy --backend tmux
+exit: 1
+output: error: agy runs Gemini models only and needs an explicit gemini-* model, but none was given (agy's own default model is not trusted); use the claude harness for Anthropic models or the codex harness for OpenAI models
+task record: absent; tmux windows unchanged: yes
+
+catalog-listed-non-gemini
+command: fm-spawn.sh agy-live-q3 <isolated-project> --scout --harness agy --backend tmux --model claude-opus-5-5-high
+exit: 1
+output: error: agy runs Gemini models only; refusing model 'claude-opus-5-5-high'; use the claude harness for Anthropic models or the codex harness for OpenAI models
+task record: absent; tmux windows unchanged: yes
+
+Result: all three real CLI scenarios matched expected behavior.
