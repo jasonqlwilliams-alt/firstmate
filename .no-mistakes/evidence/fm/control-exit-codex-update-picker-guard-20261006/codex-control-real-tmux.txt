@@ -1,0 +1,192 @@
+Real tmux synthetic-worker verification; updater is displayed text only.
+tmux=tmux 3.7c
+
+CASE picker harness=codex screen=picker
+initial pane:
+Codex
+›
+  Update available · 0.162.1 → 0.999.0
+  Release notes: https://github.com/openai/codex/releases/latest
+
+› 1. Update now (runs `npm install -g @openai/codex`)
+  2. Skip
+  3. Skip until next version
+
+  enter continue · esc skip
+
+
+
+
+
+
+control rc=1 output=error: task picker shows the Codex global-update picker; refusing lifecycle keys and exit text
+input bytes (hex)=
+agent-state=alive endpoint-count=1 worktree-file=preserve me
+CHECK picker status: pass (1)
+CHECK picker input: pass ()
+CHECK picker endpoint: pass (1)
+CHECK picker refusal: pass (error:)
+
+CASE unknown harness=codex screen=unknown
+initial pane:
+Codex
+›
+
+unrecognized screen
+
+
+
+
+
+
+
+
+
+
+
+
+control rc=1 output=error: task unknown's Codex composer is 'unknown', not proven empty; refusing to type /quit
+input bytes (hex)=
+agent-state=alive endpoint-count=1 worktree-file=preserve me
+CHECK unknown status: pass (1)
+CHECK unknown input: pass ()
+CHECK unknown endpoint: pass (1)
+CHECK unknown refusal: pass (error:)
+
+CASE after_literal harness=codex screen=after-literal
+initial pane:
+Codex
+›
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+control rc=1 output=error: task after_literal shows the Codex global-update picker after exit text; refusing a confirming Enter
+input bytes (hex)=2f 71 75 69 74
+agent-state=alive endpoint-count=1 worktree-file=preserve me
+CHECK after_literal status: pass (1)
+CHECK after_literal input: pass (2f 71 75 69 74)
+CHECK after_literal endpoint: pass (1)
+CHECK after_literal refusal: pass (error:)
+
+CASE idle harness=codex screen=idle
+initial pane:
+Codex
+›
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+control rc=1 output=process-stopped-safe-quit-unconfirmed idle harness=codex backend=tmux endpoint=fm-control-lab:fm-idle worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M6D2MDEMY86TFMCMXHYJY4D6/.codex-control-live/worktree
+input bytes (hex)=2f 71 75 69 74 0a
+agent-state=dead endpoint-count=1 worktree-file=preserve me
+CHECK idle status: pass (1)
+CHECK idle input: pass (2f 71 75 69 74 0a)
+CHECK idle endpoint: pass (1)
+CHECK idle unconfirmed: pass (process-stopped-safe-quit-unconfirmed)
+
+CASE retained harness=codex screen=retained
+initial pane:
+Codex
+›
+  Update available · 0.162.1 → 0.999.0
+  Release notes: https://github.com/openai/codex/releases/latest
+
+› 1. Update now (runs `npm install -g @openai/codex`)
+  2. Skip
+  3. Skip until next version
+
+  enter continue · esc skip
+Codex
+›
+
+
+
+
+control rc=1 output=process-stopped-safe-quit-unconfirmed retained harness=codex backend=tmux endpoint=fm-control-lab:fm-retained worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M6D2MDEMY86TFMCMXHYJY4D6/.codex-control-live/worktree
+input bytes (hex)=2f 71 75 69 74 0a
+agent-state=dead endpoint-count=1 worktree-file=preserve me
+CHECK retained status: pass (1)
+CHECK retained input: pass (2f 71 75 69 74 0a)
+CHECK retained endpoint: pass (1)
+CHECK retained unconfirmed: pass (process-stopped-safe-quit-unconfirmed)
+
+CASE uncertain_enter harness=codex screen=uncertain-after-enter
+initial pane:
+Codex
+›
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+control rc=1 output=error: task uncertain_enter's Codex composer became uncertain after Enter; safe quit unconfirmed; refusing another Enter
+input bytes (hex)=2f 71 75 69 74 0a
+agent-state=alive endpoint-count=1 worktree-file=preserve me
+CHECK uncertain_enter status: pass (1)
+CHECK uncertain_enter input: pass (2f 71 75 69 74 0a)
+CHECK uncertain_enter endpoint: pass (1)
+CHECK uncertain_enter refusal: pass (error:)
+
+CASE claude_idle harness=claude screen=idle
+initial pane:
+Claude
+❯
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+control rc=0 output=stopped claude_idle harness=claude backend=tmux endpoint=fm-control-lab:fm-claude_idle worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M6D2MDEMY86TFMCMXHYJY4D6/.codex-control-live/worktree
+input bytes (hex)=2f 65 78 69 74 0a
+agent-state=dead endpoint-count=1 worktree-file=preserve me
+CHECK claude_idle status: pass (0)
+CHECK claude_idle input: pass (2f 65 78 69 74 0a)
+CHECK claude_idle endpoint: pass (1)
+CHECK claude_idle normal-stop: pass (stopped)
+
+CASE already dead Codex
+control rc=0 output=already-stopped idle harness=codex backend=tmux endpoint=fm-control-lab:fm-idle worktree=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M6D2MDEMY86TFMCMXHYJY4D6/.codex-control-live/worktree
+CHECK already-dead status: pass (0)
+CHECK already-dead result: pass (already-stopped)
+CHECK already-dead input: pass (2f 71 75 69 74 0a)
+
+VERDICT failures=0

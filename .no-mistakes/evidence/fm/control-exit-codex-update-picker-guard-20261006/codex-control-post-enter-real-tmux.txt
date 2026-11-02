@@ -1,0 +1,38 @@
+
+CASE picker-after-enter
+control rc=1 output=error: task picker_after_enter shows the Codex global-update picker after Enter; safe quit unconfirmed; refusing another Enter
+input bytes (hex)=2f 71 75 69 74 0a
+agent-state=alive worktree-file=retained
+final pane:
+Update available
+
+› 1. Update now (runs `npm install -g @openai/codex`)
+  2. Skip
+  3. Skip until next version
+
+  enter continue · esc skip
+
+
+
+
+
+
+CASE unknown-then-pending
+control rc=1 output=error: task unknown_then_pending's Codex composer became uncertain after Enter; safe quit unconfirmed; refusing another Enter
+input bytes (hex)=2f 71 75 69 74 0a
+agent-state=alive worktree-file=retained
+final pane:
+Codex
+› /quit
+
+
+
+
+
+
+
+
+
+
+
+VERDICT failures=0
