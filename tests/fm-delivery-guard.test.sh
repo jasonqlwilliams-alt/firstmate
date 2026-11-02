@@ -437,6 +437,112 @@ SH
   pass "delivery guard: worker Git refuses a core.hooksPath override in any letter case through every config form"
 }
 
+# In an armed repository the shim checks the hooks directory Git actually
+# resolves, so an included file or a rewritten repository config that empties
+# the hook is refused too. Each bypass first proves real Git honors it and lands
+# on the upstream the managed hook refuses, so the shim refusal is load-bearing.
+test_git_shim_refuses_effective_hooks_path_bypasses() {
+  local rec repo home fakebin upstream fork gate real_git managed empty inc racing case n=0 out rc
+  rec=$(make_repo effective-hooks-path)
+  IFS='|' read -r repo home fakebin upstream fork gate <<EOF
+$rec
+EOF
+  FM_HOME="$home" GH_AXI_LOG="$home/gh.log" PATH="$fakebin:$PATH" "$GUARD" arm widgets "$repo" >/dev/null \
+    || fail "guard arm failed for the effective hooks-path fixture"
+  real_git=${FM_REAL_GIT:-$(command -v git)}
+  managed="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)/firstmate-hooks"
+  empty="${repo%/repo}/empty-hooks"
+  inc="${repo%/repo}/hooks-path.cfg"
+  mkdir -p "$empty"
+  printf '[core]\n\thooksPath = %s\n' "$empty" > "$inc"
+  set -- FM_HOME="$home" FAKE_GIT_REMOTE_ROOT="${repo%/repo}" GH_AXI_LOG="$home/gh.log" PATH="$fakebin:$PATH"
+  local fixture_env=("$@")
+
+  out=$(push_branch_via shim "$repo" "$real_git" plain "${fixture_env[@]}" --); rc=$?
+  [ "$rc" -ne 0 ] || fail "an ordinary guarded push to the upstream should be refused by the managed hook"
+  assert_contains "$out" "branch-push would write to github.com/upstream/widgets" \
+    "an ordinary guarded push did not run the managed pre-push hook"
+  ! remote_has_branch "$upstream" plain || fail "a push the managed hook refused still landed"
+  git -C "$repo" branch -q fork-plain
+  out=$(cd "$repo" && env "${fixture_env[@]}" FM_REAL_GIT="$real_git" "$GIT_SHIM" push fork fork-plain 2>&1); rc=$?
+  expect_code 0 "$rc" "an ordinary guarded push to the configured fork should succeed: $out"
+  remote_has_branch "$fork" fork-plain || fail "an allowed ordinary guarded push did not land on the fork"
+
+  for case in include-c include-config-env include-config-count include-config-parameters include-if \
+    repo-set repo-unset repo-include worktree-set missing-hook; do
+    n=$((n + 1))
+    set -- "${fixture_env[@]}"
+    case "$case" in
+      include-c) set -- "$@" -- -c "include.path=$inc" ;;
+      include-config-env) set -- "$@" FM_HOOKS_INCLUDE="$inc" -- --config-env include.path=FM_HOOKS_INCLUDE ;;
+      include-config-count) set -- "$@" GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=include.path "GIT_CONFIG_VALUE_0=$inc" -- ;;
+      include-config-parameters) set -- "$@" "GIT_CONFIG_PARAMETERS='include.path'='$inc'" -- ;;
+      include-if) set -- "$@" -- -c "includeIf.gitdir:/.path=$inc" ;;
+      repo-set) git -C "$repo" config --local core.hooksPath "$empty"; set -- "$@" -- ;;
+      repo-unset) git -C "$repo" config --local --unset core.hooksPath; set -- "$@" -- ;;
+      repo-include) git -C "$repo" config --local include.path "$inc"; set -- "$@" -- ;;
+      worktree-set)
+        git -C "$repo" config --local extensions.worktreeConfig true
+        git -C "$repo" config --worktree core.hooksPath "$empty"
+        set -- "$@" --
+        ;;
+      missing-hook) mv "$managed/pre-push" "$managed/pre-push.moved"; set -- "$@" -- ;;
+    esac
+    out=$(push_branch_via real "$repo" "$real_git" "control-$n" "$@"); rc=$?
+    expect_code 0 "$rc" "real Git should honor the $case bypass and skip the managed hook: $out"
+    remote_has_branch "$upstream" "control-$n" \
+      || fail "real Git did not land the $case control push, so its refusal proves nothing"
+    out=$(push_branch_via shim "$repo" "$real_git" "bypass-$n" "$@"); rc=$?
+    [ "$rc" -ne 0 ] || fail "guarded git should refuse the $case bypass"
+    if [ "$case" = missing-hook ]; then
+      assert_contains "$out" "managed pre-push hook is missing" "the $case refusal was not explicit"
+    else
+      assert_contains "$out" "instead of the Firstmate managed hooks at $managed" "the $case refusal was not explicit"
+    fi
+    ! remote_has_branch "$upstream" "bypass-$n" \
+      || fail "the refused $case bypass still landed its branch on the upstream"
+    case "$case" in
+      repo-set|repo-unset) git -C "$repo" config --local core.hooksPath "$managed" ;;
+      repo-include) git -C "$repo" config --local --unset include.path ;;
+      worktree-set) git -C "$repo" config --worktree --unset core.hooksPath ;;
+      missing-hook) mv "$managed/pre-push.moved" "$managed/pre-push" ;;
+    esac
+  done
+
+  # An equivalent spelling of the managed directory still runs the managed hook.
+  git -C "$repo" config --local core.hooksPath "$managed/."
+  out=$(push_branch_via shim "$repo" "$real_git" equivalent "${fixture_env[@]}" --); rc=$?
+  [ "$rc" -ne 0 ] || fail "an equivalent managed spelling must still run the refusing managed hook"
+  assert_contains "$out" "branch-push would write to github.com/upstream/widgets" \
+    "an equivalent managed spelling was refused by the shim instead of reaching the managed hook"
+  git -C "$repo" branch -q fork-equivalent
+  out=$(cd "$repo" && env "${fixture_env[@]}" FM_REAL_GIT="$real_git" "$GIT_SHIM" push fork fork-equivalent 2>&1); rc=$?
+  expect_code 0 "$rc" "an equivalent managed spelling should still allow the configured fork: $out"
+  remote_has_branch "$fork" fork-equivalent || fail "an equivalent managed spelling did not land on the fork"
+  git -C "$repo" config --local core.hooksPath "$managed"
+
+  # A config rewrite after the shim's check but before Git reads its config is
+  # outranked by the pinned managed hooks path, so the managed hook still runs.
+  racing="${repo%/repo}/racing-git"
+  cat > "$racing" <<SH
+#!/bin/sh
+case " \$* " in *" push "*) "$real_git" -C "$repo" config --local core.hooksPath "$empty" ;; esac
+exec "$real_git" "\$@"
+SH
+  chmod +x "$racing"
+  out=$(push_branch_via real "$repo" "$racing" control-race "${fixture_env[@]}" --); rc=$?
+  expect_code 0 "$rc" "a config rewrite just before Git reads its config should skip the managed hook: $out"
+  remote_has_branch "$upstream" control-race || fail "the racing control push did not land, so its refusal proves nothing"
+  git -C "$repo" config --local core.hooksPath "$managed"
+  out=$(push_branch_via shim "$repo" "$racing" race "${fixture_env[@]}" --); rc=$?
+  [ "$rc" -ne 0 ] || fail "guarded git should keep the managed hook when config is rewritten after its check"
+  assert_contains "$out" "branch-push would write to github.com/upstream/widgets" \
+    "the pinned managed hook did not run after a racing config rewrite"
+  ! remote_has_branch "$upstream" race || fail "a racing config rewrite still landed its branch on the upstream"
+  git -C "$repo" config --local core.hooksPath "$managed"
+  pass "delivery guard: worker Git refuses included, rewritten, and racing hooks-path bypasses in an armed repository"
+}
+
 # Every bash entered through the shim (including exec and alias lookup) reads
 # this test-only startup file. A missing guard reaches at most four levels and
 # exits 97; it cannot consume the host process table. No time-based kill race.
@@ -712,3 +818,4 @@ test_arm_refuses_without_a_policy_file
 test_direct_pr_contract_is_unchanged_without_a_policy
 test_git_shim_blocks_hook_bypasses
 test_git_shim_refuses_hooks_path_override_in_any_case
+test_git_shim_refuses_effective_hooks_path_bypasses
