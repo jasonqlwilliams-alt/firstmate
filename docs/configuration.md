@@ -1223,7 +1223,6 @@ FM_COMPOSER_IDLE_RE=    # optional fleet-wide idle-placeholder regex override (b
 FM_COMPOSER_CAPTURE_LINES=20   # fleet-wide bound for tail-capture composer reads; tmux instead supplies its bounded visible pane, while the other adapters use this small window so stale scrollback banners stay out of the candidate set
 FM_COMPOSER_PI_MAX_LINES=8     # fleet-wide: maximum rows admitted between Pi's identity-corroborated separator pair; taller or ambiguous candidates stay unknown
 FM_COMPOSER_GHOST_LUMA_MAX=128   # fleet-wide: max perceived luminance (0.299R+0.587G+0.114B, 0-255) for a TRUECOLOR foreground to count as de-emphasised ghost/placeholder text and be stripped; dim/faint (SGR 2) is stripped regardless. Assumes a dark terminal theme (bin/fm-composer-lib.sh's fm_composer_strip_ghost, used by styled tmux, herdr, and Zellij reads)
-FM_COMPOSER_ROVO_GHOST_LUMA_MAX=185   # rovo panes only: the ghost ceiling a composer read carrying the recorded harness rovo uses instead, so rovo's idle placeholder chip (~163) strips while its typed text (~207) stays; never below FM_COMPOSER_GHOST_LUMA_MAX (bin/fm-composer-lib.sh "ROVO PLACEHOLDER CHIP")
 GROK_HOME=              # optional Grok config home for firstmate's global grok turn-end hook; defaults to ~/.grok
 FM_SEND_RETRIES=3       # fm-send typed-plane Enter-retry attempts after typing the line once
 FM_SEND_SLEEP=0.4       # seconds between fm-send typed-plane submit checks

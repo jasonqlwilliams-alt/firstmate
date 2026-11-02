@@ -266,11 +266,14 @@ test_matrix_rovo_placeholder_chip_is_harness_scoped() {
   [ "$out" = 'Summarize my open tasks' ] || fail "without the harness fact the chip is content, got '$out'"
   fm_composer_holds_text "$rovo_herdr" "$both" hi \
     || fail "a rovo composer holding the chip plus typed text should hold exactly the typed text"
-  # A malformed or lower rovo override never drops below the fleet ceiling.
-  out=$(FM_COMPOSER_ROVO_GHOST_LUMA_MAX=nonsense fm_composer_ghost_luma_for_caps "$rovo_herdr")
-  [ "$out" = 185 ] || fail "a malformed rovo ceiling should fall back to 185, got '$out'"
-  out=$(FM_COMPOSER_ROVO_GHOST_LUMA_MAX=100 fm_composer_ghost_luma_for_caps "$rovo_herdr")
-  [ "$out" = 128 ] || fail "the rovo ceiling must never fall below the fleet ceiling, got '$out'"
+  FM_COMPOSER_ROVO_GHOST_LUMA_MAX=208 assert_screen \
+    "rovo typed text with the former unsafe override" pending "$rovo_herdr" "$typed_screen"
+  FM_COMPOSER_ROVO_GHOST_LUMA_MAX=208 assert_screen \
+    "rovo chip plus typed text with the former unsafe override" pending "$rovo_tmux" "$both" 2
+  FM_COMPOSER_GHOST_LUMA_MAX=208 assert_screen \
+    "rovo typed text under a raised fleet ceiling" pending "$rovo_herdr" "$typed_screen"
+  out=$(FM_COMPOSER_GHOST_LUMA_MAX=208 fm_composer_extract_selected_content "$rovo_herdr" "$typed_screen")
+  [ "$out" = 'fix the login bug' ] || fail "rovo typed text must remain extractable, got '$out'"
   pass "matrix: rovo's placeholder chip reads empty only on a rovo pane, and typed text stays pending"
 }
 

@@ -98,9 +98,8 @@
 # 38;2;206;207;210, luminance ~207 (docs/verification/rovo.md). The chip sits
 # above the fleet-wide ghost threshold, and that threshold cannot rise to meet
 # it because muse's real `⟩` glyph sits at ~150. So the rovo ceiling is scoped:
-# only caps carrying harness=rovo strip truecolor below
-# FM_COMPOSER_ROVO_GHOST_LUMA_MAX (default 185, between the two measured
-# values; never below the fleet-wide ceiling), and every other harness keeps
+# only caps carrying harness=rovo strip truecolor below 185, between the two
+# measured values, and every other harness keeps
 # the fleet-wide ceiling unchanged. fm_composer_ghost_luma_for_caps owns that
 # choice, and each classifier entry point applies it.
 #
@@ -188,16 +187,14 @@ fm_composer_normalize_trim_var() {  # <varname>
 }
 
 # fm_composer_ghost_luma_for_caps: the ghost-text luminance ceiling for one
-# capture: the fleet-wide FM_COMPOSER_GHOST_LUMA_MAX, raised to
-# FM_COMPOSER_ROVO_GHOST_LUMA_MAX only when <caps> carry harness=rovo (header
-# "ROVO PLACEHOLDER CHIP"). A malformed override falls back to its default.
+# capture: 185 when <caps> carry harness=rovo (header "ROVO PLACEHOLDER CHIP"),
+# otherwise the fleet-wide FM_COMPOSER_GHOST_LUMA_MAX.
 fm_composer_ghost_luma_for_caps() {  # <caps> -> ceiling on stdout
-  local caps=$1 kv luma=${FM_COMPOSER_GHOST_LUMA_MAX:-128} rovo=${FM_COMPOSER_ROVO_GHOST_LUMA_MAX:-185}
+  local caps=$1 kv luma=${FM_COMPOSER_GHOST_LUMA_MAX:-128}
   case "$luma" in ''|*[!0-9]*) luma=128 ;; esac
   while IFS= read -r kv; do
     if [ "$kv" = harness=rovo ]; then
-      case "$rovo" in ''|*[!0-9]*) rovo=185 ;; esac
-      [ "$rovo" -le "$luma" ] || luma=$rovo
+      luma=185
     fi
   done <<EOF
 $caps
