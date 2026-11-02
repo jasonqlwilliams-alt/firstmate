@@ -32,7 +32,9 @@
 #              the backend's recovery-grade classifier reports the agent gone.
 #              Codex requires a proven empty composer before typing /quit and
 #              refuses its global-update picker or uncertain screen before
-#              every Enter, including retries.
+#              every Enter, including retries. After each Enter it waits,
+#              bounded and without further input, for the Codex process to
+#              exit, because an accepted /quit keeps it running for seconds.
 #              Already-stopped is success (idempotent), including when the
 #              recorded endpoint is authoritatively missing: there is no agent
 #              to stop, and relaunch may recreate the endpoint.
@@ -103,6 +105,7 @@
 #   FM_CONTROL_PREPARE_WAIT      preparation deadline before any stop (90)
 #   FM_CONTROL_LAUNCH_WAIT       dead->alive wait after a relaunch (90)
 #   FM_CONTROL_EXIT_RETRIES      Enter retries for the exit command (3)
+#   FM_CONTROL_CODEX_QUIT_WAIT   Codex process-exit wait after each exit Enter (15)
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -160,6 +163,7 @@ SETTLE_WAIT=${FM_CONTROL_SETTLE_WAIT:-5}
 EXIT_WAIT=${FM_CONTROL_EXIT_WAIT:-30}
 LAUNCH_WAIT=${FM_CONTROL_LAUNCH_WAIT:-90}
 EXIT_RETRIES=${FM_CONTROL_EXIT_RETRIES:-3}
+CODEX_QUIT_WAIT=${FM_CONTROL_CODEX_QUIT_WAIT:-15}
 
 die() {  # <message>
   echo "error: $1" >&2
@@ -472,9 +476,12 @@ retire_busy_incarnation() {
 
 # codex_exit_screen_state: inspect the documented global-update picker before
 # trusting a composer verdict. A picker can leave an old prompt visible behind
-# it, so the composer alone cannot authorize a confirming Enter.
+# it, so the composer alone cannot authorize a confirming Enter. The picker is
+# recognized by the vendor's own rows and key hint (codex-rs/tui/src/
+# update_prompt.rs): "Update now (runs `<update command>`)", "Skip until next
+# version", and "enter continue · esc skip".
 codex_exit_screen_state() {  # [expected-pending] -> update-picker|empty|pending|pending-unproven|unknown
-  local expected=${1:-} screen plain state caps cy= content plain_capture=0
+  local expected=${1:-} screen plain state caps cy='' content plain_capture=0 picker_below=0
   local picker_tail picker_before picker_row tail_state tail_caps
   fm_backend_source "$BACKEND" || { printf 'unknown'; return 0; }
   case "$BACKEND" in
@@ -501,12 +508,16 @@ codex_exit_screen_state() {  # [expected-pending] -> update-picker|empty|pending
   esac
   [ -n "$screen" ] || { printf 'unknown'; return 0; }
   plain=$(printf '%s\n' "$screen" | fm_composer_strip_ansi)
-  if [[ "$plain" == *'Update now (npm install -g)'*'Skip until next version'*'Escape skip'* ]]; then
-    picker_tail=${plain##*'Escape skip'}
+  if [[ "$plain" == *'Update now (runs '*'Skip until next version'*'esc skip'* ]]; then
+    picker_tail=${plain##*'esc skip'}
     if [ "$BACKEND" = tmux ]; then
       picker_before=${plain%"$picker_tail"}
       picker_row=$(printf '%s' "$picker_before" | tr -cd '\n' | wc -c)
       [ "$cy" -gt "$picker_row" ] || { printf 'update-picker'; return 0; }
+      # The live picker parks the cursor on a blank row below its key hint, so
+      # a cursor below the picker proves retained history only when it rests on
+      # a composer the classifier recognizes.
+      picker_below=1
     else
       tail_caps=$(printf 'styled=0\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
       tail_state=$(fm_composer_classify_screen "$tail_caps" "$picker_tail" 2>/dev/null) || tail_state=unknown
@@ -525,14 +536,20 @@ codex_exit_screen_state() {  # [expected-pending] -> update-picker|empty|pending
   fi
   case "$state" in
     empty|pending|pending-unproven) printf '%s' "$state" ;;
-    *) printf 'unknown' ;;
+    *)
+      if [ "$picker_below" = 1 ]; then
+        printf 'update-picker'
+      else
+        printf 'unknown'
+      fi
+      ;;
   esac
 }
 
 # Codex exit owns its literal/Enter sequence so every Enter is preceded by a
 # fresh screen check. The other harnesses keep the normal backend submit path.
 codex_exit_submit() {  # <literal-exit-command>
-  local cmd=$1 screen state i=0
+  local cmd=$1 screen state i=0 waited
   screen=$(codex_exit_screen_state)
   case "$screen" in
     update-picker) die "task $ID shows the Codex global-update picker; refusing to type $cmd or confirm its selected update" ;;
@@ -551,16 +568,25 @@ codex_exit_submit() {  # <literal-exit-command>
     esac
     fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null 2>&1 || true
     i=$((i + 1))
-    sleep "$POLL"
-    screen=$(codex_exit_screen_state)
-    state=$(agent_state)
-    [ "$state" != dead ] || return 0
-    case "$screen" in
-      update-picker) die "task $ID shows the Codex global-update picker after Enter; safe quit unconfirmed; refusing another Enter" ;;
-      pending|empty) ;;
-      *) die "task $ID's Codex composer is '$screen' after Enter; safe quit unconfirmed; refusing another Enter" ;;
-    esac
-    [ "$screen" != empty ] || return 0
+    # An accepted /quit restores the terminal while Codex keeps shutting down
+    # for seconds, so wait, bounded, for the process to exit. An update picker
+    # refuses outright, a still-pending composer goes back to the retry's own
+    # screen check, and an uncertain screen never earns another Enter.
+    waited=0
+    while :; do
+      sleep "$POLL"
+      waited=$(awk -v w="$waited" -v p="$POLL" 'BEGIN{printf "%.3f", w + p}')
+      screen=$(codex_exit_screen_state)
+      state=$(agent_state)
+      [ "$state" != dead ] || return 0
+      case "$screen" in
+        update-picker) die "task $ID shows the Codex global-update picker after Enter; safe quit unconfirmed; refusing another Enter" ;;
+        empty) return 0 ;;
+        pending) break ;;
+      esac
+      awk -v w="$waited" -v t="$CODEX_QUIT_WAIT" 'BEGIN{exit !(w < t)}' \
+        || die "task $ID's Codex composer is '$screen' after Enter; safe quit unconfirmed; refusing another Enter"
+    done
   done
 }
 
