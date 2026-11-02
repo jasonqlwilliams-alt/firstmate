@@ -740,6 +740,17 @@ test_holds_text_survives_wrapping() {
     "  te/t1.inbox'/*.msg and act")
   fm_composer_holds_text "$caps" "$screen" "$typed" \
     || fail "a wrapped composer holding exactly the typed line should prove it"
+  screen=$(printf '%s\n' 'agent header' '' \
+    '› : Firstmate instruction waiting: list' \
+    "  '/tmp/x/state/t1.inbox'/*.msg and act")
+  fm_composer_holds_text "$caps" "$screen" "$typed" \
+    || fail "a space at a wrap boundary should still prove the typed line"
+  screen=$(printf '%s\n' 'agent header' '' \
+    "› : Firstmate instruction waiting: list '/tmp/xa/sta" \
+    "  te/t1.inbox'/*.msg and act")
+  fm_composer_holds_text "$caps" "$screen" \
+    ": Firstmate instruction waiting: list '/tmp/x a/sta te/t1.inbox'/*.msg and act" \
+    && fail "a missing interior path space must not prove the doorbell"
   fm_composer_holds_text "$caps" "$screen" ": Firstmate instruction waiting: list '/tmp/y'" \
     && fail "a composer holding other text must not prove the typed line"
   fm_composer_holds_text "$caps" "$screen" "" \

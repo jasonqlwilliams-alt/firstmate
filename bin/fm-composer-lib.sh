@@ -1153,8 +1153,8 @@ _fm_composer_select_cursorless() {
   [ -n "$FM_COMPOSER_SELECTED_KIND" ]
 }
 
-fm_composer_extract_selected_content() {  # <caps> <screen>
-  local caps=$1 screen=$2 styled=0 kv plain row raw content glyph joined='' footer_re prompt_row=-1
+fm_composer_extract_selected_content() {  # <caps> <screen> [rows]
+  local caps=$1 screen=$2 rows=${3:-} styled=0 kv plain row raw content glyph joined='' footer_re prompt_row=-1
   local leading_blank=1 placeholder_position=0 prompt_is_shell=0
   footer_re=${FM_COMPOSER_LEFTBAR_FOOTER_RE:-$FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT}
   while IFS= read -r kv; do
@@ -1223,10 +1223,19 @@ EOF
       row=$((row + 1))
       continue
     fi
-    joined="${joined}${joined:+ }$content"
+    if [ "$rows" = rows ]; then
+      [ -z "$joined" ] || joined+=$'\n'
+      joined+=$content
+    else
+      joined="${joined}${joined:+ }$content"
+    fi
     row=$((row + 1))
   done
-  printf '%s\n' "$joined" | LC_ALL=C awk '{$1=$1; printf "%s", $0}'
+  if [ "$rows" = rows ]; then
+    printf '%s' "$joined"
+  else
+    printf '%s\n' "$joined" | LC_ALL=C awk '{$1=$1; printf "%s", $0}'
+  fi
 }
 
 fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity]
@@ -1358,18 +1367,27 @@ fm_composer_classify_snapshot_no_identity() {
 }
 
 # fm_composer_holds_text: 0 when the selected composer's extracted content is
-# exactly <text>, compared with every whitespace run removed from both sides
-# because a wrapped row joins back with an extra space at each wrap point.
+# exactly <text>, allowing one optional space where displayed rows meet.
 # This is how a caller that just typed <text> proves the composer holds it on
 # a plain (styled=0) capture, where a glyph row with trailing text otherwise
 # reads unknown because ghost text cannot be told apart from typed text.
 fm_composer_holds_text() {  # <caps> <screen> <text>
-  local content want
-  want=$(printf '%s' "$3" | LC_ALL=C tr -d '[:space:]')
-  [ -n "$want" ] || return 1
-  content=$(fm_composer_extract_selected_content "$1" "$2" 2>/dev/null) || return 1
-  content=$(printf '%s' "$content" | LC_ALL=C tr -d '[:space:]')
-  [ "$content" = "$want" ]
+  local content remaining row first=1
+  remaining=$3
+  [ -n "$remaining" ] || return 1
+  content=$(fm_composer_extract_selected_content "$1" "$2" rows 2>/dev/null) || return 1
+  [ -n "$content" ] || return 1
+  while IFS= read -r row; do
+    if [ "$first" = 0 ]; then
+      remaining=${remaining# }
+    fi
+    case "$remaining" in
+      "$row"*) remaining=${remaining#"$row"} ;;
+      *) return 1 ;;
+    esac
+    first=0
+  done <<< "$content"
+  [ -z "$remaining" ]
 }
 
 # fm_composer_update_picker_scan: recognize Codex's global-update picker, the
