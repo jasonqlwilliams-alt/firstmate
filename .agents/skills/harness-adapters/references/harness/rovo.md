@@ -47,7 +47,7 @@ That fleet-wide ceiling must not rise to catch the chip, because muse's real pro
 Instead, a composer read that carries the recorded harness `rovo` applies a fixed rovo-only ceiling of 185, between the two measured values, so the chip reads `empty` while typed text still reads `pending`; `../../../bin/fm-composer-lib.sh` "ROVO PLACEHOLDER CHIP" owns the rule.
 The steering doorbell passes the recorded harness on every read, and a Rovo pane, like a Codex pane, gets the doorbell only on a proven-empty composer and its Enter only once the composer proves it holds the doorbell (`../../../bin/fm-task-inbox-lib.sh` owns that gate).
 The spawn readiness and delivery gates above read the composer without the harness fact, so for them the idle chip still reads non-empty.
-It does not block the launch-then-send gates: readiness leads with the `Welcome to Rovo!` banner (not composer-empty), and while the delivery gate does require composer-empty as one conjunct, it runs while rovo is actively processing the just-delivered brief - the placeholder chip renders only at idle rest, not mid-turn - so the composer reads genuinely empty during the delivery window.
+Readiness leads with the `Welcome to Rovo!` banner, while delivery still depends on composer-empty and may fail to settle on Herdr; [`docs/verification/rovo.md`](../../../../../docs/verification/rovo.md) records that backend limitation.
 
 ## Interrupt: confirmed under real tmux
 

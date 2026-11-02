@@ -30,7 +30,7 @@ Rovo CLI: 202609.1.2
 `fm-spawn.sh` builds `env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS <rovo-bin> run --yolo <model/effort flags>` - BARE, with no positional brief - wrapped by the shared `env -u CURSOR_AGENT -u CURSOR_INVOKED_AS` prefix every non-cursor harness gets.
 The brief is then typed in after the TUI comes up, the same launch-then-send shape kimi uses, through the same shared readers (`fm_backend_capture`, `fm_backend_composer_state`, `fm_backend_send_text_submit`):
 
-1. `rovo_wait_for_ready` polls for the `Welcome to Rovo!` banner (primary) or a composer-empty verdict (weaker fallback, see the composer-ghost-text gap below).
+1. `rovo_wait_for_ready` polls for the `Welcome to Rovo!` banner (primary) or a composer-empty verdict (weaker fallback, because this spawn read lacks the Rovo harness fact described below).
 2. The pointer `Read the brief at <absolute-path> and follow it exactly.` is submitted via `fm_backend_send_text_submit`.
 3. `rovo_wait_for_delivery` confirms composer-empty AND either the echoed `Read the brief at` text or a nonzero `Context:` percentage (`context:[^%]*[1-9][^%]*%`, tolerant of the footer's bar glyph but anchored before the `%` so the `.../922K` denominator cannot false-positive).
 
@@ -77,7 +77,7 @@ row 12  ╰───────────────────────
 ```
 
 Real typed text in the same row, captured separately, renders at `38;2;206;207;210` (luminance ~207).
-Both values sit above `bin/fm-composer-lib.sh`'s fleet-wide `FM_COMPOSER_GHOST_LUMA_MAX` of 128, so the fleet-wide ghost strip keeps the placeholder and an idle rovo composer reads `pending` rather than `empty`.
+Both values sit above `bin/fm-composer-lib.sh`'s fleet-wide `FM_COMPOSER_GHOST_LUMA_MAX` of 128, so a read without the Rovo harness fact keeps the placeholder and can read an idle composer as `pending` rather than `empty`.
 Raising the shared default was considered and rejected: muse's own real, must-not-be-stripped prompt glyph measures luminance ~149.9 (`muse.md`), below rovo's ghost luminance of ~163, so no single global threshold can keep muse's glyph real while dropping rovo's ghost chip.
 The shipped fix is harness-scoped: a composer read carrying the recorded harness `rovo` strips truecolor below a fixed ceiling of 185, between the two measured values, and every other harness keeps the fleet-wide ceiling (`bin/fm-composer-lib.sh` "ROVO PLACEHOLDER CHIP").
 The steering doorbell carries the recorded harness on every read, so an idle rovo composer reads `empty` and a Rovo pane is held to the same proven-empty doorbell rule as a Codex pane (`bin/fm-task-inbox-lib.sh`).

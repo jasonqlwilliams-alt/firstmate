@@ -3660,9 +3660,9 @@ rovo_wait_for_ready() {
     # same primary evidence kimi's own 'Welcome to Kimi Code!' match uses. The
     # composer-empty fallback is WEAKER for rovo than for kimi: rovo's idle
     # composer renders an inline placeholder chip (luminance ~163, above the
-    # ghost-strip threshold) that bin/fm-composer-lib.sh does not currently strip
-    # (see the deliberately-unfixed composer-ghost gap in rovo.md), so it can read
-    # non-empty - hence the banner is the primary signal.
+    # fleet-wide ghost-strip threshold). This spawn read has no recorded-harness
+    # fact, so the Rovo-scoped rule does not strip it and it can read non-empty;
+    # hence the banner is the primary signal.
     if printf '%s\n' "$pane" | grep -Fq 'Welcome to Rovo!' \
        || rovo_composer_is_empty; then
       return 0
