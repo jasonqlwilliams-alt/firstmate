@@ -1,0 +1,30 @@
+# claude pane tail at failure:
+#    Accessing workspace:
+#    /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M6DR9HM50HK7VT7RC7NVP1VQ
+#    Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not, take a moment to review what's in this folder first.
+#    Claude Code'll be able to read, edit, and execute files here.
+#    Security guide
+#    ❯ No, exit
+#      Yes, I trust this folder
+#    Enter to confirm · Esc to cancel
+not ok - claude (2.1.316 (Claude Code)): idle composer never classified empty (last verdict: pending)
+ok - codex (codex-cli 0.166.0): real idle composer classifies empty
+# harness absent, not verified here: opencode
+# pi pane tail at failure:
+#    This allows pi to load .pi settings and resources, install missing project packages, and execute project extensions.
+#    → Trust
+#      Trust parent folder (/home/jason/.no-mistakes/worktrees/e95238b70e4e)
+#      Trust (this session only)
+#      Do not trust
+#      Do not trust (this session only)
+#    ↑↓ navigate  enter select  escape/ctrl+c cancel
+#   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+not ok - pi (0.84.1): idle composer never classified empty (last verdict: unknown)
+# grok pane tail at failure:
+not ok - grok (grok 1.0.50 (c58f321264ba) [stable]): idle composer never classified empty (last verdict: unknown)
+# harness absent, not verified here: kimi
+# harness absent, not verified here: muse
+# harness absent, not verified here: rovo
+ok - strict posture live: a blank shell row classifies unknown and injection defers
+# harness absent, not verified here: zellij (false-positive regression not exercised)
+not ok - live composer-matrix guard observed failures above

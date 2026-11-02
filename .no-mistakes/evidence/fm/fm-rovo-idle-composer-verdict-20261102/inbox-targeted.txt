@@ -1,0 +1,29 @@
+ok - inbox: a steer is written durably and round-trips byte-exact with a self-describing doorbell
+ok - inbox: a hostile-path doorbell executes as a no-op in bare shells
+ok - inbox: terminal-control paths are rejected without typing
+ok - inbox: the ring skips dead or missing endpoints and still rings live or unclassifiable endpoints
+ok - inbox: the idempotent enqueue dedups an exact re-run onto the same record, handled or not
+ok - inbox: idempotent enqueue follows a record concurrently moved to handled
+ok - inbox: the handled mv is the idempotent ack and sequences are never reissued
+ok - inbox: concurrent writers serialize on the sequence lock and lose nothing
+ok - inbox: a writer retries when a competing lock vanishes after its failed claim
+ok - inbox: ladder bookkeeping ignores a concurrently removed inbox
+ok - inbox: fire-and-forget records stay durable and outside the ladder
+ok - inbox: the re-ring ladder paces by grace, escalates once, and resets on ack
+ok - watcher: an unhandled aged message on an idle pane re-rings without waking firstmate, and the ack silences it
+ok - watcher: a busy pane just waits - the record is durable and no doorbell is typed
+ok - watcher: a healthy or empty inbox stays completely silent
+ok - watcher: acknowledgement silences an unwritable ladder without a stale wake
+ok - watcher: unwritable ladder bookkeeping surfaces a stale wake after the doorbell
+ok - watcher: a spent ring budget emits exactly one ordinary stale wake for recovery
+ok - watcher: a positively dead pane is never typed into and surfaces exactly one stale wake
+ok - watcher: dead-pane recovery overrides stale busy state
+ok - inbox: the ring refuses Codex's update picker on every harness, cursor below the rows or on the selection row, with nothing typed and no Enter
+ok - inbox: a picker that appears after the composer check stops the ring before its Enter on every harness
+ok - inbox: an ordinary empty composer still receives the doorbell and exactly one Enter
+ok - inbox: pending text gets no keystroke on any harness, and an unproven Codex screen gets no keystroke or no Enter
+ok - inbox: an agy-shaped unknown idle screen still receives the doorbell and one Enter
+ok - inbox: an idle rovo composer's placeholder chip reads empty and receives the doorbell with one Enter
+ok - inbox: a rovo pane holding typed text or an unproven screen gets no keystroke
+ok - fm-send: the incident's picker gets no keystroke, and an empty composer still gets the doorbell
+ok - watcher: re-rings never type into the update picker, and the spent budget escalates
