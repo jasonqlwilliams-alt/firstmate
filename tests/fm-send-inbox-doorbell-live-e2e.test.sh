@@ -94,12 +94,11 @@ launch_cmd() {  # <name>
 
 # Wait for the harness to look steerable. 0 = the composer classified a
 # proven empty; 2 = the readiness budget expired without an empty verdict but
-# also without a pending one. The caller fails that harness on 2, because that
-# mirrors production exactly: the ring types only into a proven-empty composer
-# (bin/fm-task-inbox-lib.sh), so a harness whose idle screen the classifier
-# cannot positively identify never receives its doorbell and every steer to it
-# escalates as stuck (the composer matrix guard owns re-proving the classifier
-# per release).
+# also without a pending one. The caller mirrors production's per-harness ring
+# gate (bin/fm-task-inbox-lib.sh) on 2: Codex fails, because its doorbell
+# needs a proven-empty composer, while any other harness proceeds with a note,
+# because its ring still fires on an unidentified idle screen (the composer
+# matrix guard, not this one, owns re-proving the classifier per release).
 wait_ready() {  # <window>
   local win=$1 i=0 budget=60 verdict dismissed=0 screen
   while [ "$i" -lt "$budget" ]; do
@@ -142,7 +141,9 @@ check_harness_doorbell() {  # <name>
     tmux -L "$SOCKET" kill-window -t "$SESSION:$win" 2>/dev/null || true
     return 0
   fi
-  if [ "$ready_rc" -ne 0 ]; then
+  if [ "$ready_rc" -ne 0 ] && [ "$name" != codex ]; then
+    note "$name ($version): idle composer never classified empty; proceeding as production does (only a Codex pane needs a proven-empty composer)"
+  elif [ "$ready_rc" -ne 0 ]; then
     FAILED=1
     printf 'not ok - %s (%s): idle composer never classified empty, so the ring refuses its doorbell and every steer escalates as stuck\n' "$name" "$version" >&2
     tmux -L "$SOCKET" capture-pane -p -t "$SESSION:$win" 2>/dev/null | grep '[^[:space:]]' | tail -6 | sed 's/^/#   /' >&2
@@ -173,7 +174,7 @@ check_harness_doorbell() {  # <name>
     # message so a doorbell swallowed by a startup or update modal recovers
     # exactly as the production re-ring ladder recovers it.
     if [ "$i" -eq $((TIMEOUT / 2)) ] && [ -f "$rec" ]; then
-      fm_task_inbox_ring tmux "$SESSION:$win" "$rec" || true
+      fm_task_inbox_ring tmux "$SESSION:$win" "$rec" "" "$name" || true
       note "$name ($version): re-rang the doorbell once (watcher's role) at ${i}s"
     fi
     sleep 1

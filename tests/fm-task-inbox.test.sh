@@ -709,9 +709,12 @@ test_watcher_dead_pane_ignores_stale_busy_state() {
 # below the rows) or pending (cursor on the selection row), and the ring typed
 # into both. These cases rebuild that screen, using the picker rows recorded in
 # tests/fm-control.test.sh, in a REAL private tmux server (-L) and drive the real
-# ring and the real fm-send through it. The screens are drawn by a bash stub
-# launched through a `codex`-named symlink to bash, so the pane's foreground
-# process reads as a live agent without any harness running. The stub logs
+# ring and the real fm-send through it. The ring's gate is per harness: the
+# picker and pending text are refused on every harness, a Codex pane also needs
+# a proven-empty composer, and any other harness still rings on an unknown
+# screen. The screens are drawn by a bash stub launched through a `codex`- or
+# `agy`-named symlink to bash, so the pane's foreground process reads as a live
+# agent without any harness running. The stub logs
 # every byte it receives (KEY), every Enter (ENTER), and every submitted line
 # (SUBMIT), and on a submitted doorbell it acknowledges like a worker by moving
 # the inbox records into handled/.
@@ -735,10 +738,12 @@ ring_lab_setup() {
   printf '#!/usr/bin/env bash\nexec "%s" -L "%s" "$@"\n' "$RING_TMUX" "$RING_SOCKET" > "$RING_LAB/shim/tmux"
   chmod +x "$RING_LAB/shim/tmux"
   ln -s "$bash_bin" "$RING_LAB/bin/codex"
+  ln -s "$bash_bin" "$RING_LAB/bin/agy"
   cat > "$RING_LAB/screen-stub.sh" <<'STUB'
 # Screen stub: <mode> <log>. Modes: empty, pending, unknown, picker-below,
 # picker-row, picker-after-key (empty until the first key, then the picker),
-# noecho (an empty composer that never renders what is typed).
+# noecho (an empty composer that never renders what is typed), agy (agy's idle
+# shape: a `>` row between two solid rules, which classifies unknown).
 mode=$1 log=$2 buf=
 cols=$(stty size 2>/dev/null | cut -d' ' -f2)
 case "$cols" in ''|*[!0-9]*) cols=80 ;; esac
@@ -771,10 +776,15 @@ composer() {
   len=$(( ${#buf} - (row - 3) * w ))
   printf '\r\n\r\n  \033[2m100%% context left\033[0m\033[%d;%dH' "$row" "$((3 + len))"
 }
+agy() {
+  local rule='────────────────────────────────────────'
+  printf '\033[2J\033[HAntigravity test stub\r\n\r\n%s\r\n>\r\n%s\r\n  ? for shortcuts\033[4;2H' "$rule" "$rule"
+}
 draw() {
   case "$mode" in
     picker-below|picker-row) picker ;;
     unknown) printf '\033[2J\033[H  Loading your session\r\n\r\n' ;;
+    agy) agy ;;
     *) composer ;;
   esac
 }
@@ -783,7 +793,7 @@ while IFS= read -r -n 1 ch; do
   if [ -z "$ch" ]; then
     printf 'ENTER\n' >> "$log"
     case "$mode" in
-      empty|pending)
+      empty|pending|agy)
         if [ -n "$buf" ]; then
           printf 'SUBMIT %s\n' "$buf" >> "$log"
           if [[ $buf =~ list\ \'([^\']+)\'/\*\.msg ]]; then
@@ -798,7 +808,7 @@ while IFS= read -r -n 1 ch; do
   else
     printf 'KEY %s\n' "$ch" >> "$log"
     case "$mode" in
-      empty|pending) buf="$buf$ch" ;;
+      empty|pending|agy) buf="$buf$ch" ;;
       picker-after-key) mode=picker-below ;;
     esac
   fi
@@ -810,13 +820,15 @@ STUB
 
 # Start one stub window and wait until its screen is drawn. Echoes its target.
 ring_stub_window() {  # <name> <mode> <log>
-  local name=$1 mode=$2 log=$3 i=0 marker
+  local name=$1 mode=$2 log=$3 i=0 marker agent=codex
   : > "$log"
+  [ "$mode" != agy ] || agent=agy
   "$RING_TMUX" -L "$RING_SOCKET" new-window -d -t ring: -n "$name" -- \
-    "$RING_LAB/bin/codex" "$RING_LAB/screen-stub.sh" "$mode" "$log"
+    "$RING_LAB/bin/$agent" "$RING_LAB/screen-stub.sh" "$mode" "$log"
   case "$mode" in
     picker-below|picker-row) marker='esc skip' ;;
     unknown) marker='Loading your session' ;;
+    agy) marker='for shortcuts' ;;
     *) marker='context left' ;;
   esac
   while [ "$i" -lt 100 ]; do
@@ -828,46 +840,50 @@ ring_stub_window() {  # <name> <mode> <log>
   printf 'ring:%s\n' "$name"
 }
 
-# Ring one fresh record into a stub window through the real library. Prints
-# the ring's return code.
-ring_into() {  # <state> <task> <target>
-  local state=$1 task=$2 target=$3 rec rc=0
+# Ring one fresh record into a stub window through the real library, as the
+# recorded harness. Prints the ring's return code.
+ring_into() {  # <state> <task> <target> <harness>
+  local state=$1 task=$2 target=$3 harness=$4 rec rc=0
   rec=$(inbox_lib "$state" fm_task_inbox_write "$state" "$task" "please continue")
   PATH="$RING_LAB/shim:$PATH" FM_TASK_INBOX_RING_POLLS=5 \
-    inbox_lib "$state" fm_task_inbox_ring tmux "$target" "$rec" "" || rc=$?
+    inbox_lib "$state" fm_task_inbox_ring tmux "$target" "$rec" "" "$harness" || rc=$?
   printf '%s\n' "$rc"
 }
 
 test_ring_refuses_the_codex_update_picker() {
-  local state target log rc mode
+  local state target log rc mode harness
   ring_lab_setup
   state="$TMP_ROOT/ring-picker/state"
   mkdir -p "$state"
   for mode in picker-below picker-row; do
-    log="$RING_LAB/$mode.log"
-    target=$(ring_stub_window "$mode" "$mode" "$log")
-    rc=$(ring_into "$state" "$mode" "$target")
-    sleep 0.3
-    [ "$rc" = 4 ] || fail "the ring should refuse the update picker ($mode) with 4, got $rc"
-    [ ! -s "$log" ] || fail "the ring typed into the update picker ($mode):"$'\n'"$(cat "$log")"
-    [ -f "$state/$mode.inbox/001.msg" ] || fail "a refused ring must leave the durable record ($mode)"
+    for harness in codex agy; do
+      log="$RING_LAB/$mode-$harness.log"
+      target=$(ring_stub_window "$mode-$harness" "$mode" "$log")
+      rc=$(ring_into "$state" "$mode-$harness" "$target" "$harness")
+      sleep 0.3
+      [ "$rc" = 4 ] || fail "the ring should refuse the update picker ($mode, $harness) with 4, got $rc"
+      [ ! -s "$log" ] || fail "the ring typed into the update picker ($mode, $harness):"$'\n'"$(cat "$log")"
+      [ -f "$state/$mode-$harness.inbox/001.msg" ] || fail "a refused ring must leave the durable record ($mode, $harness)"
+    done
   done
-  pass "inbox: the ring refuses Codex's update picker, cursor below the rows or on the selection row, with nothing typed and no Enter"
+  pass "inbox: the ring refuses Codex's update picker on every harness, cursor below the rows or on the selection row, with nothing typed and no Enter"
 }
 
 test_ring_refuses_a_picker_that_appears_while_typing() {
-  local state target log rc
+  local state target log rc harness
   ring_lab_setup
   state="$TMP_ROOT/ring-picker-late/state"
   mkdir -p "$state"
-  log="$RING_LAB/picker-after-key.log"
-  target=$(ring_stub_window late picker-after-key "$log")
-  rc=$(ring_into "$state" t1 "$target")
-  sleep 0.3
-  [ "$rc" = 4 ] || fail "a picker that appears after the empty-composer check should stop the ring with 4, got $rc"
-  grep -q '^KEY' "$log" || fail "the case is vacuous unless the doorbell was typed before the picker appeared"
-  ! grep -q '^ENTER' "$log" || fail "the ring pressed Enter into the picker:"$'\n'"$(cat "$log")"
-  pass "inbox: a picker that appears after the composer check stops the ring before its Enter"
+  for harness in codex claude; do
+    log="$RING_LAB/picker-after-key-$harness.log"
+    target=$(ring_stub_window "late-$harness" picker-after-key "$log")
+    rc=$(ring_into "$state" "late-$harness" "$target" "$harness")
+    sleep 0.3
+    [ "$rc" = 4 ] || fail "a picker that appears after the empty-composer check should stop the ring with 4 ($harness), got $rc"
+    grep -q '^KEY' "$log" || fail "the case is vacuous unless the doorbell was typed before the picker appeared ($harness)"
+    ! grep -q '^ENTER' "$log" || fail "the ring pressed Enter into the picker ($harness):"$'\n'"$(cat "$log")"
+  done
+  pass "inbox: a picker that appears after the composer check stops the ring before its Enter on every harness"
 }
 
 test_ring_still_delivers_into_an_empty_composer() {
@@ -877,7 +893,7 @@ test_ring_still_delivers_into_an_empty_composer() {
   mkdir -p "$state"
   log="$RING_LAB/empty.log"
   target=$(ring_stub_window empty empty "$log")
-  rc=$(ring_into "$state" t1 "$target")
+  rc=$(ring_into "$state" t1 "$target" codex)
   [ "$rc" = 0 ] || fail "the ring should deliver into a proven-empty composer, got $rc"
   local i=0
   while [ "$i" -lt 50 ] && [ -e "$state/t1.inbox/001.msg" ]; do sleep 0.1; i=$((i + 1)); done
@@ -888,7 +904,7 @@ test_ring_still_delivers_into_an_empty_composer() {
   pass "inbox: an ordinary empty composer still receives the doorbell and exactly one Enter"
 }
 
-test_ring_refuses_pending_and_unknown_screens() {
+test_ring_refuses_pending_and_unproven_codex_screens() {
   local state target log rc mode
   ring_lab_setup
   state="$TMP_ROOT/ring-unproven/state"
@@ -896,19 +912,49 @@ test_ring_refuses_pending_and_unknown_screens() {
   for mode in pending unknown; do
     log="$RING_LAB/$mode.log"
     target=$(ring_stub_window "$mode" "$mode" "$log")
-    rc=$(ring_into "$state" "$mode" "$target")
+    rc=$(ring_into "$state" "$mode" "$target" codex)
     sleep 0.3
-    [ "$rc" = 1 ] || fail "the ring should refuse a $mode screen with 1, got $rc"
-    [ ! -s "$log" ] || fail "the ring typed into a $mode screen:"$'\n'"$(cat "$log")"
+    [ "$rc" = 1 ] || fail "the ring should refuse a $mode Codex screen with 1, got $rc"
+    [ ! -s "$log" ] || fail "the ring typed into a $mode Codex screen:"$'\n'"$(cat "$log")"
   done
+  # Pending text is protected on every harness.
+  log="$RING_LAB/pending-agy.log"
+  target=$(ring_stub_window pending-agy pending "$log")
+  rc=$(ring_into "$state" pending-agy "$target" agy)
+  sleep 0.3
+  [ "$rc" = 1 ] || fail "the ring should refuse pending composer text on any harness with 1, got $rc"
+  [ ! -s "$log" ] || fail "the ring typed into pending composer text:"$'\n'"$(cat "$log")"
   log="$RING_LAB/noecho.log"
   target=$(ring_stub_window noecho noecho "$log")
-  rc=$(ring_into "$state" noecho "$target")
+  rc=$(ring_into "$state" noecho "$target" codex)
   sleep 0.3
-  [ "$rc" = 5 ] || fail "a composer that never shows the typed doorbell should withhold the Enter with 5, got $rc"
+  [ "$rc" = 5 ] || fail "a Codex composer that never shows the typed doorbell should withhold the Enter with 5, got $rc"
   grep -q '^KEY' "$log" || fail "the noecho case is vacuous unless the doorbell was typed"
-  ! grep -q '^ENTER' "$log" || fail "the ring pressed Enter on an unproven screen:"$'\n'"$(cat "$log")"
-  pass "inbox: a pending or unknown screen gets no keystroke, and an unproven composer after typing gets no Enter"
+  ! grep -q '^ENTER' "$log" || fail "the ring pressed Enter on an unproven Codex screen:"$'\n'"$(cat "$log")"
+  pass "inbox: pending text gets no keystroke on any harness, and an unproven Codex screen gets no keystroke or no Enter"
+}
+
+# The other harnesses keep ringing on an unknown screen until their idle
+# verdicts are proven: agy's real idle shape classifies unknown, and its
+# doorbell must still be typed, submitted once, and acted on.
+test_ring_still_rings_an_agy_shaped_unknown_screen() {
+  local state target log rc verdict i=0
+  ring_lab_setup
+  state="$TMP_ROOT/ring-agy/state"
+  mkdir -p "$state"
+  log="$RING_LAB/agy.log"
+  target=$(ring_stub_window agy agy "$log")
+  verdict=$(PATH="$RING_LAB/shim:$PATH" bash -c '. "$1"; fm_backend_composer_state tmux "$2"' _ \
+    "$ROOT/bin/fm-backend.sh" "$target")
+  [ "$verdict" = unknown ] || fail "the case is vacuous unless agy's idle shape classifies unknown, got $verdict"
+  rc=$(ring_into "$state" t1 "$target" agy)
+  [ "$rc" = 0 ] || fail "an agy pane on an unknown idle screen should still be rung, got $rc"
+  while [ "$i" -lt 50 ] && [ -e "$state/t1.inbox/001.msg" ]; do sleep 0.1; i=$((i + 1)); done
+  [ "$(grep -c '^ENTER' "$log")" = 1 ] || fail "the agy ring should press exactly one Enter:"$'\n'"$(cat "$log")"
+  grep -qF "SUBMIT : Firstmate instruction waiting: list '$state/t1.inbox'/*.msg" "$log" \
+    || fail "the agy stub never received the doorbell line:"$'\n'"$(cat "$log")"
+  [ -f "$state/t1.inbox/handled/001.msg" ] || fail "the agy doorbell was not acted on"
+  pass "inbox: an agy-shaped unknown idle screen still receives the doorbell and one Enter"
 }
 
 # The incident path end to end: the real fm-send rings into the stub picker
@@ -1003,6 +1049,7 @@ test_watcher_dead_pane_ignores_stale_busy_state
 test_ring_refuses_the_codex_update_picker
 test_ring_refuses_a_picker_that_appears_while_typing
 test_ring_still_delivers_into_an_empty_composer
-test_ring_refuses_pending_and_unknown_screens
+test_ring_refuses_pending_and_unproven_codex_screens
+test_ring_still_rings_an_agy_shaped_unknown_screen
 test_fm_send_ring_through_picker_and_composer
 test_watcher_rering_refuses_picker_and_escalates

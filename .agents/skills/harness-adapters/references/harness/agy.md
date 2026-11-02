@@ -68,8 +68,8 @@ A refusal blocks the spawn rather than launching a worker that would park before
 agy draws the `separated` shape the shared classifier already knows, but its content row carries a bare `>` glyph rather than pi's blank row.
 The shared classifier answers `unknown` for an idle agy composer, because `_fm_composer_pi_verdict` in `../../../bin/fm-composer-lib.sh` is gated on an identity of exactly `pi`.
 This is deliberately left as is rather than widened, and the measurement is why: fed a real captured agy pane, pi's own row classifier returns `pending`, because the `>` glyph reads as typed content.
-Extending the pi path to agy would therefore turn a safe `unknown` into a wrong `pending`, which is no better.
-The cost is real for steering: the doorbell ring types only into a proven-empty composer (`../../../bin/fm-task-inbox-lib.sh`), so an agy worker never receives its doorbell, and each steer escalates as stuck after the ladder, where firstmate must deliver it by hand.
+Extending the pi path to agy would therefore turn a safe `unknown` into a wrong `pending`, and `pending` is the ONE composer verdict that skips a steering doorbell on a non-Codex pane (`../../../bin/fm-task-inbox-lib.sh`), so the "fix" would starve steering rather than improve it.
+Under `unknown` the doorbell still rings on an agy pane, because only a Codex pane requires a proven-empty composer, so ordinary steering works; the practical cost is bounded to away-mode injection, which declines to type into a pane it cannot prove empty, and agy is a crewmate/scout adapter that away mode never injects into anyway.
 A real fix needs a harness-scoped glyph rule the shared classifier does not currently carry.
 
 ## Skills and no-mistakes validation trigger

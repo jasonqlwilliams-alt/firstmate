@@ -426,9 +426,9 @@ inbox_steer_escalate_unavailable() {  # <window> <task> <record>
 # its record remains unhandled, that unwritable state surfaces through the same
 # stale path instead of silently re-ringing forever; acknowledgement or teardown
 # still makes the race quiet. The attempt is data-plane typing or a refusal
-# by the ring's screen gate (bin/fm-task-inbox-lib.sh fm_task_inbox_ring),
-# never a wake, so normal retries keep the watcher blocking; the escalation
-# names the screen the gate last refused. Runs for secondmates
+# by the ring's per-harness screen gate (bin/fm-task-inbox-lib.sh
+# fm_task_inbox_ring), never a wake, so normal retries keep the watcher
+# blocking; the escalation names a screen the gate refuses. Runs for secondmates
 # too: their pane-staleness exemption is about quiet panes being healthy,
 # while an unacknowledged instruction past the ladder is a stuck steer.
 inbox_steer_check() {  # <window> <task>
@@ -459,7 +459,7 @@ inbox_steer_check() {  # <window> <task>
   case "$verb" in
     ring)
       ring_rc=0
-      fm_task_inbox_ring "$backend" "$w" "$rec" "$(window_label "$w")" || ring_rc=$?
+      fm_task_inbox_ring "$backend" "$w" "$rec" "$(window_label "$w")" "$(window_harness "$w")" || ring_rc=$?
       if [ "$ring_rc" -eq 3 ]; then
         inbox_steer_escalate_unavailable "$w" "$task" "$rec"
         return 0
@@ -480,10 +480,15 @@ inbox_steer_check() {  # <window> <task>
     escalate)
       screen=$(fm_backend_guarded_composer_state "$backend" "$w" "$(window_label "$w")" 2>/dev/null) \
         || screen=unknown
+      refusal=
       case "$screen" in
-        empty) refusal= ;;
         update-picker) refusal="; the pane shows the Codex global-update picker, so the doorbell was refused - never confirm it with Enter (Escape skips the update)" ;;
-        *) refusal="; the pane reads '$screen', not a proven-empty composer, so the doorbell was refused" ;;
+        pending) refusal="; the composer holds pending text, so the doorbell was refused" ;;
+        empty) ;;
+        *)
+          [ "$(window_harness "$w")" != codex ] \
+            || refusal="; the Codex pane reads '$screen', not a proven-empty composer, so the doorbell was refused"
+          ;;
       esac
       reason="stale: $w (unread firstmate instruction: $rec still unhandled after $count doorbell delivery attempts with an idle pane$refusal; inspect the worker)"
       if [ ! -d "${rec%/*}" ] || [ ! -f "$rec" ]; then

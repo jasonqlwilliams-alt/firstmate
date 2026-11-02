@@ -10,9 +10,9 @@
 #   2. Multi-line steers are legal and round-trip byte-exact.
 #   3. A re-send enqueues a NEW sequence and still never retypes a payload,
 #      so the terminal can never truncate, garble, or duplicate a steer.
-#   4. The ring types only into a proven-empty composer: visibly pending text
-#      refuses the ring with a notice, and the steer is still durably sent
-#      (exit 0) for the watcher to retry and then escalate.
+#   4. Visibly pending composer text refuses the ring with a notice, and the
+#      steer is still durably sent (exit 0) for the watcher to retry and then
+#      escalate.
 #   5. A failed doorbell is still a sent steer (exit 0, record durable): the
 #      watcher's re-ring ladder owns delivery from the record on.
 #   6. Carve-outs keep the typed plane: a leading "/" (any harness), a leading
@@ -39,10 +39,8 @@ TMP_ROOT=$(fm_test_tmproot fm-send-inbox)
 TMP_ROOT=$(cd "$TMP_ROOT" && pwd)
 
 # Stub tmux: logs literal typed text to FM_SEND_LOG and lets the submit and
-# composer paths reach clean verdicts: typed text shows on the composer row
-# until Enter clears it, like a real composer. FM_FAKE_TMUX_COMPOSER=pending
-# renders a composer visibly holding text; FM_FAKE_TMUX_SEND_FAIL=1 fails
-# send-keys.
+# composer paths reach clean verdicts. FM_FAKE_TMUX_COMPOSER=pending renders a
+# composer visibly holding text; FM_FAKE_TMUX_SEND_FAIL=1 fails send-keys.
 make_stubs() {  # <dir> -> echoes fakebin dir
   local dir=$1 fb="$1/fakebin"
   mkdir -p "$fb"
@@ -63,18 +61,13 @@ case "${1:-}" in
     done
     if [ "$literal" = 1 ]; then
       printf '%s\n' "${1:-}" >> "$FM_SEND_LOG"
-      [ -z "${FM_FAKE_TMUX_TYPED:-}" ] || printf '%s' "${1:-}" > "$FM_FAKE_TMUX_TYPED"
-    elif [ "${1:-}" = Enter ] && [ -n "${FM_FAKE_TMUX_TYPED:-}" ]; then
-      rm -f "$FM_FAKE_TMUX_TYPED"
     fi
     exit 0 ;;
   display-message)
     for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
-    if [ -n "${FM_FAKE_TMUX_TYPED:-}" ] && [ -s "$FM_FAKE_TMUX_TYPED" ]; then
-      printf 'fake agent\n› %s\n' "$(cat "$FM_FAKE_TMUX_TYPED")"
-    elif [ "${FM_FAKE_TMUX_COMPOSER:-}" = pending ]; then
+    if [ "${FM_FAKE_TMUX_COMPOSER:-}" = pending ]; then
       printf '╭──────────────╮\n│ leftover txt │\n╰──────────────╯\n'
     else
       printf '╭────╮\n│    │\n╰────╯\n'
@@ -112,10 +105,8 @@ run_send() {  # <case-dir> <err-file> [env...] -- <fm-send args...>
   done
   shift
   : > "$dir/send.log"
-  rm -f "$dir/typed"
   env PATH="$dir/fakebin:$PATH" \
     FM_ROOT_OVERRIDE="$dir/home" FM_HOME="$dir/home" FM_SEND_LOG="$dir/send.log" \
-    FM_FAKE_TMUX_TYPED="$dir/typed" \
     FM_SEND_SETTLE=0 ${envs[@]+"${envs[@]}"} \
     "$SEND" "$@" >/dev/null 2>"$err"
 }
@@ -174,16 +165,16 @@ test_resend_enqueues_new_sequence() {
   pass "fm-send inbox: a re-send is a new durable record, never a retyped payload"
 }
 
-test_pending_composer_refuses_ring() {
+test_pending_composer_skips_ring_advisorily() {
   local dir err rc
   dir=$(setup_case pendingskip); err="$dir/send.err"
   run_send "$dir" "$err" FM_FAKE_TMUX_COMPOSER=pending -- t1 "steer past a stuck composer"; rc=$?
-  expect_code 0 "$rc" "a refused ring is still a sent steer"
+  expect_code 0 "$rc" "a skipped ring is still a sent steer"
   [ -f "$dir/home/state/t1.inbox/001.msg" ] || fail "the steer was not recorded"
-  [ ! -s "$dir/send.log" ] || fail "a visibly pending composer should refuse the ring:"$'\n'"$(cat "$dir/send.log")"
+  [ ! -s "$dir/send.log" ] || fail "a visibly pending composer should skip the ring:"$'\n'"$(cat "$dir/send.log")"
   assert_contains "$(cat "$err")" "watcher will retry, then escalate" \
     "the refusal notice should point at the retry and escalation"
-  pass "fm-send inbox: a visibly pending composer refuses the ring, and the steer stays durably sent"
+  pass "fm-send inbox: a visibly pending composer skips the ring, and the steer stays durably sent"
 }
 
 test_failed_ring_is_still_sent() {
@@ -351,7 +342,7 @@ test_unwritable_inbox_fails_loudly() {
 test_text_steer_rides_inbox
 test_multiline_steer_is_legal
 test_resend_enqueues_new_sequence
-test_pending_composer_refuses_ring
+test_pending_composer_skips_ring_advisorily
 test_failed_ring_is_still_sent
 test_harness_invocations_stay_typed
 test_explicit_target_stays_typed
