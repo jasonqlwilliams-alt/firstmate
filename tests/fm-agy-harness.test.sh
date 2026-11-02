@@ -345,6 +345,8 @@ test_spawn_model_validation() {
   status=$?
   expect_code 1 "$status" "a model the account cannot see must refuse rather than launch a pane that dies"
   assert_contains "$out" "is not listed by 'agy models' for this account" "refusal did not name the listing evidence"
+  assert_contains "$out" "choose a listed gemini-* id" "refusal did not ask for a listed gemini-* id"
+  assert_not_contains "$out" "omit --model" "refusal must not advise omitting --model"
   assert_absent "$HOME_DIR/state/$id.meta" "a refused spawn must publish no record"
 
   rec=$(make_spawn_case model-unreadable agy-model-unreadable-q6 no-listing)

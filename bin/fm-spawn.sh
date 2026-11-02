@@ -1775,7 +1775,7 @@ agy_model_validate() {  # <agy-bin> <model>
   if printf '%s\n' "$listing" | cut -f1 | grep -qxF -- "$model"; then
     return 0
   fi
-  echo "error: agy model '$model' is not listed by 'agy models' for this account; choose a listed id or omit --model" >&2
+  echo "error: agy model '$model' is not listed by 'agy models' for this account; choose a listed gemini-* id" >&2
   return 1
 }
 
