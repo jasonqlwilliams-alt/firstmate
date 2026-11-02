@@ -1,0 +1,28 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Firstmate doorbell picker evidence</title><style>body{background:#10141a;color:#e6edf3;font:16px system-ui;margin:0;padding:32px;max-width:1100px}h1{font-size:26px;margin:0 0 8px}p{color:#a9b5c4;line-height:1.5}section{background:#191f28;border:1px solid #334051;border-radius:12px;padding:24px;margin:24px 0;overflow:auto}pre{font:15px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}.note{color:#a9b5c4;font-size:14px}</style><h1>Doorbell at the Codex update picker</h1><p>Actual private tmux pane capture and Firstmate CLI output from a bash screen stub. No Codex binary was launched.</p><section><h2>Terminal screen before send</h2><pre>  Update available · 0.162.1 → 0.999.0
+  Release notes: https://github.com/openai/codex/releases/latest
+
+› 1. Update now (runs `npm install -g @openai/codex`)
+  2. Skip
+  3. Skip until next version
+
+  enter continue · esc skip</pre></section><section><h2>Observed sends and inbox outcomes</h2><pre>●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell &amp; for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+fm-send: no doorbell Enter sent because ring:picker shows the Codex global-update picker (never confirm it; Escape skips the update); the steer is durably recorded at /home/jason/.no-mistakes/evidence/01M6DMYNE6YGKGM5Q18X606594/manual-ring/home/state/p1.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+terminal keys received: 0
+unhandled record: present
+EMPTY COMPOSER SEND:
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+Enter count: 1
+SUBMIT : Firstmate instruction waiting: list &#x27;/home/jason/.no-mistakes/evidence/01M6DMYNE6YGKGM5Q18X606594/manual-ring/home/state/e1.inbox&#x27;/*.msg and, in numeric order, read and act on each, then mv each handled file to &#x27;/home/jason/.no-mistakes/evidence/01M6DMYNE6YGKGM5Q18X606594/manual-ring/home/state/e1.inbox&#x27;/handled/.
+handled record: present
+MISSING INTERIOR SPACE AFTER TYPING:
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+fm-send: doorbell typed into ring:missing but its Enter was withheld because the Codex composer did not prove it holds the doorbell; the steer is durably recorded at /home/jason/.no-mistakes/evidence/01M6DMYNE6YGKGM5Q18X606594/manual-ring/home/state/m1.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+typed key count: 317
+Enter count: 0
+unhandled record: present</pre></section><p class="note">The picker received zero keys. A proven empty composer received one Enter and acknowledged the record. A composer displaying a doorbell with a missing interior space received the text but no Enter.</p></html>

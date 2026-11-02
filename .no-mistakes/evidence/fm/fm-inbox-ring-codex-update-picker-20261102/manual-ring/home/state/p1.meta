@@ -1,0 +1,4 @@
+window=ring:picker
+backend=tmux
+kind=ship
+harness=codex

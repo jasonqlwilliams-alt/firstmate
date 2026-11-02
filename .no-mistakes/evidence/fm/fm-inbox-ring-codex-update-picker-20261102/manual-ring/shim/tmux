@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec "/usr/bin/tmux" -L "fm-ring-evidence-3994169" "$@"

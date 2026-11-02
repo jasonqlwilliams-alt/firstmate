@@ -1,0 +1,4 @@
+window=ring:missing
+backend=tmux
+kind=ship
+harness=codex
