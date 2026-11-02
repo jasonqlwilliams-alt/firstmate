@@ -221,6 +221,78 @@ test_matrix_muse_truecolor_glyph_survives_signal_loss() {
   pass "matrix: muse's ⟩ reads empty everywhere and survives losing the styled-glyph signal"
 }
 
+# rovo_box_screen <content-row-body> <plain-width>: rovo's bordered composer
+# as recorded live (docs/verification/rovo.md): a rounded box whose one
+# content row carries <content-row-body>, padded to the box width, with the
+# readiness banner above and a blank row plus footer below.
+rovo_box_screen() {
+  local body=$1 len=$2 width=40 rule pad
+  rule=$(printf '─%.0s' $(seq 1 "$width"))
+  pad=$((width - 1 - len))
+  printf 'Welcome to Rovo!\n╭%s╮\n│ %s%*s│\n╰%s╯\n\n  Context: 0%%' \
+    "$rule" "$body" "$pad" '' "$rule"
+}
+
+test_matrix_rovo_placeholder_chip_is_harness_scoped() {
+  # Real idle rovo fills its box with an inline suggestion chip at truecolor
+  # 38;2;162;163;165 (luminance ~163); real typed text is 38;2;206;207;210
+  # (luminance ~207). Both sit above the fleet-wide 128 ghost ceiling, so only
+  # the rovo-scoped ceiling may strip the chip.
+  local chip typed idle typed_screen both rovo_tmux rovo_herdr out
+  chip="${ESC}[38;2;162;163;165mSummarize my open tasks${ESC}[39m"
+  typed="${ESC}[38;2;206;207;210mfix the login bug${ESC}[39m"
+  idle=$(rovo_box_screen "$chip" 23)
+  typed_screen=$(rovo_box_screen "$typed" 17)
+  both=$(rovo_box_screen "$chip ${ESC}[38;2;206;207;210mhi${ESC}[39m" 26)
+  rovo_tmux="$CAPS_TMUX"$'\nharness=rovo'
+  rovo_herdr="$CAPS_STYLED"$'\nharness=rovo'
+  # tmux parks the cursor on the chip row (row 2); herdr is cursorless.
+  assert_screen "rovo idle on tmux" empty "$rovo_tmux" "$idle" 2
+  assert_screen "rovo idle on herdr" empty "$rovo_herdr" "$idle"
+  assert_screen "rovo idle on zellij" empty "$CAPS_STYLED_NOID"$'\nharness=rovo' "$idle"
+  assert_screen "rovo typed line on tmux" pending "$rovo_tmux" "$typed_screen" 2
+  assert_screen "rovo typed line on herdr" pending "$rovo_herdr" "$typed_screen"
+  assert_screen "rovo chip plus typed text on tmux" pending "$rovo_tmux" "$both" 2
+  assert_screen "rovo chip plus typed text on herdr" pending "$rovo_herdr" "$both"
+  # The divergence that keeps this case honest: without the recorded harness
+  # the same idle chip is real text, on every backend.
+  assert_screen "rovo chip without the harness fact on tmux" pending "$CAPS_TMUX" "$idle" 2
+  assert_screen "rovo chip without the harness fact on herdr" pending "$CAPS_STYLED" "$idle"
+  assert_screen "rovo chip under another harness" pending "$CAPS_STYLED"$'\nharness=muse' "$idle"
+  # Content extraction (the doorbell's post-type proof) applies the same rule.
+  out=$(fm_composer_extract_selected_content "$rovo_herdr" "$idle")
+  [ -z "$out" ] || fail "rovo's idle chip should extract as no content, got '$out'"
+  out=$(fm_composer_extract_selected_content "$CAPS_STYLED" "$idle")
+  [ "$out" = 'Summarize my open tasks' ] || fail "without the harness fact the chip is content, got '$out'"
+  fm_composer_holds_text "$rovo_herdr" "$both" hi \
+    || fail "a rovo composer holding the chip plus typed text should hold exactly the typed text"
+  # A malformed or lower rovo override never drops below the fleet ceiling.
+  out=$(FM_COMPOSER_ROVO_GHOST_LUMA_MAX=nonsense fm_composer_ghost_luma_for_caps "$rovo_herdr")
+  [ "$out" = 185 ] || fail "a malformed rovo ceiling should fall back to 185, got '$out'"
+  out=$(FM_COMPOSER_ROVO_GHOST_LUMA_MAX=100 fm_composer_ghost_luma_for_caps "$rovo_herdr")
+  [ "$out" = 128 ] || fail "the rovo ceiling must never fall below the fleet ceiling, got '$out'"
+  pass "matrix: rovo's placeholder chip reads empty only on a rovo pane, and typed text stays pending"
+}
+
+test_matrix_muse_unchanged_by_rovo_scope() {
+  # Muse's real `⟩` glyph sits at luminance ~149.9, inside the band the rovo
+  # ceiling strips. On a muse pane (or with no harness fact) the fleet ceiling
+  # still applies, so a typed run in that same colour stays real input.
+  local glyph screen typed out
+  glyph="${ESC}[0m${ESC}[38;2;90;160;255m⟩${ESC}[0m"
+  screen=$'── Voice input (⌥ + v to start) ─────\n'"$glyph"
+  typed=$'── Voice input (⌥ + v to start) ─────\n'"$glyph ${ESC}[38;2;90;160;255mrun the tests${ESC}[0m"
+  out=$(fm_composer_ghost_luma_for_caps "$CAPS_STYLED"$'\nharness=muse')
+  [ "$out" = 128 ] || fail "a muse pane must keep the fleet ghost ceiling, got '$out'"
+  assert_screen "muse idle with its harness fact on tmux" empty "$CAPS_TMUX"$'\nharness=muse' "$screen" 1
+  assert_screen "muse idle with its harness fact on herdr" empty "$CAPS_STYLED"$'\nharness=muse' "$screen"
+  assert_screen "muse glyph-coloured typed text with its harness fact" pending \
+    "$CAPS_STYLED"$'\nharness=muse' "$typed"
+  assert_screen "muse glyph-coloured typed text with no harness fact" pending "$CAPS_STYLED" "$typed"
+  assert_screen "muse glyph-coloured typed text on tmux" pending "$CAPS_TMUX"$'\nharness=muse' "$typed" 1
+  pass "matrix: muse's glyph-coloured input still reads pending outside a rovo pane"
+}
+
 test_matrix_cursor_reverse_video_placeholder_remnant() {
   # Real idle cursor-agent (2026.08.11-e8db854), captured byte-for-byte from a
   # live pane: the `→ ` glyph and the placeholder tail are dim (SGR 2), but the
@@ -678,6 +750,8 @@ test_real_text_is_pending
 test_matrix_claude_bare_nbsp_row
 test_matrix_codex_dim_hint_row
 test_matrix_muse_truecolor_glyph_survives_signal_loss
+test_matrix_rovo_placeholder_chip_is_harness_scoped
+test_matrix_muse_unchanged_by_rovo_scope
 test_matrix_cursor_reverse_video_placeholder_remnant
 test_matrix_herdr_halfblock_rule_bounds_bare_wrap
 test_matrix_omp_status_row_bounds_bare_composer

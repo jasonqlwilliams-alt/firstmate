@@ -36,6 +36,11 @@
 #               Pi's blank separated composer provable; with identity=0 that
 #               shape stays `unknown`.
 #   rows=<n>    the capture's bounded row count (informational).
+#   harness=<name>  the pane's RECORDED harness, appended by a caller that
+#               knows it (bin/fm-backend.sh's fm_backend_guarded_composer_state);
+#               adapters never infer it. Only harness-scoped placeholder rules
+#               read it (see "ROVO PLACEHOLDER CHIP" below); absent, every
+#               harness gets the fleet-wide rules.
 #
 # THE STRICT BLANK-ROW RULE (captain decision blank-row-injection-posture,
 # 2026-08-09): a blank or otherwise unidentified input row with no positive
@@ -86,6 +91,18 @@
 # content": it drops every de-emphasized run - dim/faint (SGR 2) AND a
 # dark/muted TRUECOLOR foreground - and keeps only normal-intensity,
 # normally-coloured text.
+#
+# ROVO PLACEHOLDER CHIP: rovo fills its idle bordered composer row with an
+# inline suggestion chip (`Summarize my open tasks`) in truecolor
+# 38;2;162;163;165, luminance ~163, while real typed text in the same row is
+# 38;2;206;207;210, luminance ~207 (docs/verification/rovo.md). The chip sits
+# above the fleet-wide ghost threshold, and that threshold cannot rise to meet
+# it because muse's real `⟩` glyph sits at ~150. So the rovo ceiling is scoped:
+# only caps carrying harness=rovo strip truecolor below
+# FM_COMPOSER_ROVO_GHOST_LUMA_MAX (default 185, between the two measured
+# values; never below the fleet-wide ceiling), and every other harness keeps
+# the fleet-wide ceiling unchanged. fm_composer_ghost_luma_for_caps owns that
+# choice, and each classifier entry point applies it.
 #
 # UNICODE WHITESPACE (issue #1988; open PRs #1995/#2047 target the same
 # defect and #1995's naming is adopted here so the implementations converge):
@@ -170,6 +187,24 @@ fm_composer_normalize_trim_var() {  # <varname>
   printf -v "$__fmnt_name" '%s' "$__fmnt_text"
 }
 
+# fm_composer_ghost_luma_for_caps: the ghost-text luminance ceiling for one
+# capture: the fleet-wide FM_COMPOSER_GHOST_LUMA_MAX, raised to
+# FM_COMPOSER_ROVO_GHOST_LUMA_MAX only when <caps> carry harness=rovo (header
+# "ROVO PLACEHOLDER CHIP"). A malformed override falls back to its default.
+fm_composer_ghost_luma_for_caps() {  # <caps> -> ceiling on stdout
+  local caps=$1 kv luma=${FM_COMPOSER_GHOST_LUMA_MAX:-128} rovo=${FM_COMPOSER_ROVO_GHOST_LUMA_MAX:-185}
+  case "$luma" in ''|*[!0-9]*) luma=128 ;; esac
+  while IFS= read -r kv; do
+    if [ "$kv" = harness=rovo ]; then
+      case "$rovo" in ''|*[!0-9]*) rovo=185 ;; esac
+      [ "$rovo" -le "$luma" ] || luma=$rovo
+    fi
+  done <<EOF
+$caps
+EOF
+  printf '%s' "$luma"
+}
+
 # fm_composer_strip_ghost: the ONE fleet-wide ANSI-aware extractor of "real typed
 # content" from a captured, styled composer row. Reads the styled line on stdin
 # (from `tmux capture-pane -e`, `herdr pane read --format ansi`, or
@@ -189,6 +224,8 @@ fm_composer_normalize_trim_var() {  # <varname>
 #     no fleet harness uses it for ghost text, so it is kept (real text wins:
 #     under-stripping merely defers, which the max-defer alarm surfaces, while
 #     over-stripping would inject over real input).
+#     A classifier entry point scopes a per-harness ceiling by shadowing
+#     FM_COMPOSER_GHOST_LUMA_MAX with fm_composer_ghost_luma_for_caps.
 # Raising FM_COMPOSER_GHOST_LUMA_MAX is not free: muse draws its `⟩` prompt glyph
 # in truecolor 38;2;90;160;255, luminance ~149.9 (verified, muse 0.1.0-R708.1),
 # the tightest margin over the 128 default in the fleet. Above ~150 that glyph is
@@ -1155,7 +1192,11 @@ _fm_composer_select_cursorless() {
 
 fm_composer_extract_selected_content() {  # <caps> <screen> [rows]
   local caps=$1 screen=$2 rows=${3:-} styled=0 kv plain row raw content glyph joined='' footer_re prompt_row=-1
-  local leading_blank=1 placeholder_position=0 prompt_is_shell=0
+  local leading_blank=1 placeholder_position=0 prompt_is_shell=0 luma
+  # Shadow the ghost ceiling for this capture's harness; read the inherited
+  # value before the shadow exists.
+  luma=$(fm_composer_ghost_luma_for_caps "$caps")
+  local FM_COMPOSER_GHOST_LUMA_MAX=$luma
   footer_re=${FM_COMPOSER_LEFTBAR_FOOTER_RE:-$FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT}
   while IFS= read -r kv; do
     [ "$kv" = styled=1 ] && styled=1
@@ -1240,7 +1281,11 @@ EOF
 
 fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity]
   local caps=$1 screen=$2 cy=${3:-} identity=${4:-}
-  local styled=0 cursor=0 has_identity=0 kv plain
+  local styled=0 cursor=0 has_identity=0 kv plain luma
+  # Shadow the ghost ceiling for this capture's harness; read the inherited
+  # value before the shadow exists.
+  luma=$(fm_composer_ghost_luma_for_caps "$caps")
+  local FM_COMPOSER_GHOST_LUMA_MAX=$luma
   while IFS= read -r kv; do
     case "$kv" in
       styled=1) styled=1 ;;

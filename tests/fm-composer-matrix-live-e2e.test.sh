@@ -8,7 +8,9 @@
 # REAL harnesses: a stub can only confirm the assumption already written into
 # the stub. This guard launches every INSTALLED verified harness idle in an
 # isolated tmux server and requires the real fm_tmux_composer_state to reach
-# `empty`, failing loudly with the harness name and version. It also proves:
+# `empty` (rovo through the guarded read carrying its recorded harness, plus a
+# typed-but-unsubmitted line reading `pending`), failing loudly with the
+# harness name and version. It also proves:
 #   - the strict blank-row posture live: a plain shell pane with a blank
 #     cursor row must classify unknown and defer injection;
 #   - the zellij false-positive regression live (when zellij is installed): a
@@ -65,6 +67,8 @@ chmod +x "$SHIM_DIR/tmux"
 PATH="$SHIM_DIR:$PATH"
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-tmux-lib.sh"
+# shellcheck source=/dev/null
+. "$ROOT/bin/fm-backend.sh"
 
 tmux -L "$SOCKET" new-session -d -s "$SESSION" -x 220 -y 50 -c "$ROOT"
 
@@ -122,6 +126,56 @@ for h in claude codex opencode pi grok kimi muse; do
     note "harness absent, not verified here: $h"
   fi
 done
+
+# --- 1b. Rovo: the placeholder chip reads empty only on a rovo pane ---------
+# Rovo's idle box holds an inline suggestion chip that the fleet-wide ghost
+# ceiling keeps, so rovo is read through the guarded composer read with its
+# recorded harness (bin/fm-backend.sh), exactly as the steering doorbell reads
+# it. Typed text (never submitted) must then read pending, and is erased
+# before the pane closes. Launched bare, so no prompt is submitted.
+check_rovo_idle_and_typed() {
+  local win=hx-rovo verdict='' i=0 budget=${FM_COMPOSER_MATRIX_LIVE_POLLS:-45} version
+  version=$(harness_version rovo)
+  tmux -L "$SOCKET" new-window -d -t "$SESSION:" -n "$win" -c "$ROOT" -- rovo run \
+    || fail "rovo ($version): could not launch in the isolated tmux server"
+  while [ "$i" -lt "$budget" ]; do
+    verdict=$(fm_backend_guarded_composer_state tmux "$SESSION:$win" '' '' rovo)
+    [ "$verdict" = empty ] && break
+    i=$((i + 1))
+    sleep 1
+  done
+  if [ "$verdict" != empty ]; then
+    printf '# rovo pane tail at failure:\n' >&2
+    tmux -L "$SOCKET" capture-pane -p -t "$SESSION:$win" 2>/dev/null \
+      | grep '[^[:space:]]' | tail -8 | sed 's/^/#   /' >&2
+    FAILED=1
+    printf 'not ok - rovo (%s): idle composer never classified empty on a rovo pane (last verdict: %s)\n' \
+      "$version" "${verdict:-unreadable}" >&2
+  else
+    tmux -L "$SOCKET" send-keys -t "$SESSION:$win" -l 'composer probe' 2>/dev/null || true
+    i=0
+    while [ "$i" -lt 10 ]; do
+      sleep 0.5
+      verdict=$(fm_backend_guarded_composer_state tmux "$SESSION:$win" '' 'composer probe' rovo)
+      [ "$verdict" = pending ] && break
+      i=$((i + 1))
+    done
+    if [ "$verdict" = pending ]; then
+      CHECKED=$((CHECKED + 1))
+      pass "rovo ($version): idle composer classifies empty and typed text pending on a rovo pane"
+    else
+      FAILED=1
+      printf 'not ok - rovo (%s): typed text never classified pending (last verdict: %s)\n' \
+        "$version" "${verdict:-unreadable}" >&2
+    fi
+  fi
+  tmux -L "$SOCKET" kill-window -t "$SESSION:$win" 2>/dev/null || true
+}
+if command -v rovo >/dev/null 2>&1; then
+  check_rovo_idle_and_typed
+else
+  note "harness absent, not verified here: rovo"
+fi
 
 # --- 2. The strict blank-row posture, live ----------------------------------
 # A plain shell pane parked on a blank line between two rules (the audit's
