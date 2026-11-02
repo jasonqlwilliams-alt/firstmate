@@ -1,0 +1,32 @@
+
+CASE ordinary shim push
+exit=1
+PRE-PUSH HOOK REFUSED
+error: failed to push some refs to '/tmp/tmp.eUIhNJEP0f/remote.git'
+remote_ref=absent
+
+CASE real Git mixed-case bypass control
+exit=0
+To /tmp/tmp.eUIhNJEP0f/remote.git
+ * [new branch]      HEAD -> control
+remote_ref=present
+
+CASE shim mixed-case -c override
+exit=1
+REFUSED: git push cannot override the Firstmate pre-push hook configuration.
+remote_ref=absent
+
+CASE shim mixed-case --config-env override
+exit=1
+REFUSED: git push cannot override the Firstmate pre-push hook configuration.
+remote_ref=absent
+
+CASE shim uppercase GIT_CONFIG_COUNT override
+exit=1
+REFUSED: git push cannot override the Firstmate pre-push hook configuration.
+remote_ref=absent
+
+CASE shim mixed-case GIT_CONFIG_PARAMETERS override
+exit=1
+REFUSED: git push cannot override the Firstmate pre-push hook configuration.
+remote_ref=absent
