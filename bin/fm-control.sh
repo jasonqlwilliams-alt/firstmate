@@ -35,6 +35,9 @@
 #              every Enter, including retries. After each Enter it waits,
 #              bounded and without further input, for the Codex process to
 #              exit, because an accepted /quit keeps it running for seconds.
+#              A Codex process stopped after lifecycle input returns nonzero
+#              with process-stopped-safe-quit-unconfirmed; death alone does not
+#              prove a safe quit, and relaunch does not start its replacement.
 #              Already-stopped is success (idempotent), including when the
 #              recorded endpoint is authoritatively missing: there is no agent
 #              to stop, and relaunch may recreate the endpoint.
@@ -593,8 +596,9 @@ codex_exit_submit() {  # <literal-exit-command>
   done
 }
 
-# do_exit: stop the running agent, preserving endpoint and worktree. Prints
-# `already-stopped` or `stopped`.
+# do_exit: stop the running agent, preserving endpoint and worktree. Returns
+# `already-stopped`, `stopped`, or Codex's
+# `process-stopped-safe-quit-unconfirmed` after lifecycle input.
 do_exit() {
   local state cmd verdict cancel screen interrupt_result=not-needed
   require_state_verified_backend exit

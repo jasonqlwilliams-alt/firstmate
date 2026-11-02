@@ -35,6 +35,9 @@ A recorded `harness=` is not always an exact adapter name: a task launched from 
 | `relaunch` | Start a replacement for a running or exited agent in its recorded endpoint and worktree, on the exact recorded adapter or an explicitly chosen harness, model, and effort. An authoritatively missing endpoint is recreated into the recorded worktree. | The new agent is alive on the recorded endpoint, or on a newly created endpoint when that recorded endpoint was missing, and the durable record names the harness that is actually running. |
 
 An exit that delivers lifecycle input but cannot prove the agent stopped fails with `exit=unconfirmed`, reports the observed agent state and any interrupt cancellation claim, and never claims that nothing changed.
+On tmux and Herdr, Codex exit types `/quit` only when the current composer is proven empty.
+It refuses an active global-update picker or an uncertain screen before typing, before each confirming or retry Enter, and after Enter without sending another Enter; a dismissed picker retained above a proven current composer does not block ordinary quit.
+If a capture becomes uncertain after Enter, a later pending read does not permit a retry; exit waits for process death only within `FM_CONTROL_EXIT_WAIT`.
 Codex exit also returns nonzero with `process-stopped-safe-quit-unconfirmed` when the process stops after lifecycle input, because process death and a shell redraw cannot distinguish an ordinary `/quit` from accepting the global-update picker.
 This includes an ordinary successful `/quit`: the endpoint and worktree remain available, but the result does not certify a safe quit.
 A subsequent exit against an already dead Codex process remains idempotent `already-stopped`; it does not retroactively certify the earlier quit.
@@ -145,6 +148,6 @@ The empirical basis for each adapter's value is the `harness-adapters` skill's v
 
 ## Verification
 
-- `tests/fm-control.test.sh` - the adapter contract for every verified harness, the backend capability matrix, exact-id scoping, the closed verb list, the busy, idle, dead, and idempotent lifecycle cases, and marker non-regression, all against a stubbed session provider.
+- `tests/fm-control.test.sh` - the adapter contract for every verified harness, the backend capability matrix, exact-id scoping, the closed verb list, the busy, idle, dead, and idempotent lifecycle cases, Codex picker and uncertain-screen refusals, slow quit and shell redraw, retained picker history, Herdr plain capture fallback, and marker non-regression, all against a stubbed session provider.
 - `tests/fm-control-relaunch.test.sh` - the relaunch transaction, preparation refusals, exited-shell recovery, registered merge-poll continuity, and rollback; [runtime verification](verification/runtime-backends.md) records the reusable evidence.
 - `tests/fm-control-herdr-smoke.test.sh` - the second state-verified backend against the real herdr binary, on an isolated throwaway lab session.
