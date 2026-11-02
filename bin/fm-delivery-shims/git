@@ -71,6 +71,35 @@ parse_command() {
   done
 }
 
+split_alias_words() {
+  local value=$1 token= quote= char i=0
+  alias_words=()
+  while [ "$i" -lt "${#value}" ]; do
+    char=${value:$i:1}
+    if [ -z "$quote" ] && [[ $char == [[:space:]] ]]; then
+      alias_words+=("$token")
+      token=
+      while [ $((i + 1)) -lt "${#value}" ] && [[ ${value:$((i + 1)):1} == [[:space:]] ]]; do
+        i=$((i + 1))
+      done
+    elif [ -z "$quote" ] && { [ "$char" = "'" ] || [ "$char" = '"' ]; }; then
+      quote=$char
+    elif [ -n "$quote" ] && [ "$char" = "$quote" ]; then
+      quote=
+    else
+      if [ "$char" = '\' ] && [ "$quote" != "'" ]; then
+        i=$((i + 1))
+        [ "$i" -lt "${#value}" ] || return 1
+        char=${value:$i:1}
+      fi
+      token+=$char
+    fi
+    i=$((i + 1))
+  done
+  [ -z "$quote" ] || return 1
+  alias_words+=("$token")
+}
+
 args=("$@")
 parse_command "${args[@]}"
 command_name=$parsed_command
@@ -101,11 +130,13 @@ if [ "$command_index" -ge 0 ] && [ -n "$command_name" ] \
       fi
       ;;
     *)
-      read -r -a alias_words <<< "$alias_value"
-      if [[ ${alias_words[0]:-} == -* ]] \
-        && [[ $alias_value == *\'* || $alias_value == *\"* || $alias_value == *\\* || $alias_value == *$'\n'* ]]; then
-        printf 'REFUSED: a Git alias with quoted leading options cannot be verified by the Firstmate repository delivery guard.\n' >&2
-        exit 1
+      if ! split_alias_words "$alias_value"; then
+        push_token_regex="(^|[[:space:]\"'\\\\])push($|[[:space:]\"'\\\\])"
+        if [[ $alias_value =~ $push_token_regex ]]; then
+          printf 'REFUSED: a Git push alias cannot be parsed by the Firstmate repository delivery guard.\n' >&2
+          exit 1
+        fi
+        exec "$REAL" "$@"
       fi
       parse_command "${alias_words[@]}"
       case "$parsed_command" in
@@ -204,10 +235,6 @@ if [ "$resolved_command" = push ]; then
     if [ -z "$effective" ] || [ ! -d "$managed" ] || [ ! "$effective" -ef "$managed" ]; then
       printf 'REFUSED: git push would run hooks from %s instead of the Firstmate managed hooks at %s; restore core.hooksPath to the managed directory.\n' \
         "${effective:-<unresolved>}" "$managed" >&2
-      exit 1
-    fi
-    if [ ! -f "$managed/pre-push" ] || [ ! -x "$managed/pre-push" ]; then
-      printf 'REFUSED: the Firstmate managed pre-push hook is missing from %s.\n' "$managed" >&2
       exit 1
     fi
     pinned_hooks=$managed

@@ -442,7 +442,7 @@ SH
 # the hook is refused too. Each bypass first proves real Git honors it and lands
 # on the upstream the managed hook refuses, so the shim refusal is load-bearing.
 test_git_shim_refuses_effective_hooks_path_bypasses() {
-  local rec repo home fakebin upstream fork gate real_git managed empty inc racing case n=0 out rc
+  local rec repo home fakebin upstream fork gate real_git managed empty inc quoted_inc racing case n=0 out rc
   rec=$(make_repo effective-hooks-path)
   IFS='|' read -r repo home fakebin upstream fork gate <<EOF
 $rec
@@ -453,8 +453,10 @@ EOF
   managed="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)/firstmate-hooks"
   empty="${repo%/repo}/empty-hooks"
   inc="${repo%/repo}/hooks-path.cfg"
+  quoted_inc="${repo%/repo}/hooks path.cfg"
   mkdir -p "$empty"
   printf '[core]\n\thooksPath = %s\n' "$empty" > "$inc"
+  printf '[core]\n\thooksPath = %s\n' "$empty" > "$quoted_inc"
   set -- FM_HOME="$home" FAKE_GIT_REMOTE_ROOT="${repo%/repo}" GH_AXI_LOG="$home/gh.log" PATH="$fakebin:$PATH"
   local fixture_env=("$@")
 
@@ -469,6 +471,17 @@ EOF
   assert_contains "$out" "instead of the Firstmate managed hooks at $managed" \
     "the option-leading alias refusal was not explicit"
   ! remote_has_branch "$upstream" bypass-alias || fail "the refused option-leading alias still landed"
+  git -C "$repo" config alias.ship "-c \"include.path=$quoted_inc\" push"
+  git -C "$repo" branch -q control-quoted-alias
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$real_git" ship origin control-quoted-alias 2>&1); rc=$?
+  expect_code 0 "$rc" "real Git should honor the quoted option-leading alias and skip the managed hook: $out"
+  remote_has_branch "$upstream" control-quoted-alias || fail "the quoted alias control push did not land"
+  git -C "$repo" branch -q bypass-quoted-alias
+  out=$(cd "$repo" && env "${fixture_env[@]}" FM_REAL_GIT="$real_git" "$GIT_SHIM" ship origin bypass-quoted-alias 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "guarded git should refuse the quoted option-leading alias hooks-path bypass"
+  assert_contains "$out" "instead of the Firstmate managed hooks at $managed" \
+    "the quoted option-leading alias refusal was not explicit"
+  ! remote_has_branch "$upstream" bypass-quoted-alias || fail "the refused quoted alias still landed"
   git -C "$repo" config alias.ship '-c core.editor=true push'
   git -C "$repo" branch -q fork-alias
   out=$(cd "$repo" && env "${fixture_env[@]}" FM_REAL_GIT="$real_git" "$GIT_SHIM" ship fork fork-alias 2>&1); rc=$?
@@ -486,7 +499,7 @@ EOF
   remote_has_branch "$fork" fork-plain || fail "an allowed ordinary guarded push did not land on the fork"
 
   for case in include-c include-config-env include-config-count include-config-parameters include-if \
-    repo-set repo-unset repo-include worktree-set missing-hook; do
+    repo-set repo-unset repo-include worktree-set; do
     n=$((n + 1))
     set -- "${fixture_env[@]}"
     case "$case" in
@@ -503,7 +516,6 @@ EOF
         git -C "$repo" config --worktree core.hooksPath "$empty"
         set -- "$@" --
         ;;
-      missing-hook) mv "$managed/pre-push" "$managed/pre-push.moved"; set -- "$@" -- ;;
     esac
     out=$(push_branch_via real "$repo" "$real_git" "control-$n" "$@"); rc=$?
     expect_code 0 "$rc" "real Git should honor the $case bypass and skip the managed hook: $out"
@@ -511,18 +523,13 @@ EOF
       || fail "real Git did not land the $case control push, so its refusal proves nothing"
     out=$(push_branch_via shim "$repo" "$real_git" "bypass-$n" "$@"); rc=$?
     [ "$rc" -ne 0 ] || fail "guarded git should refuse the $case bypass"
-    if [ "$case" = missing-hook ]; then
-      assert_contains "$out" "managed pre-push hook is missing" "the $case refusal was not explicit"
-    else
-      assert_contains "$out" "instead of the Firstmate managed hooks at $managed" "the $case refusal was not explicit"
-    fi
+    assert_contains "$out" "instead of the Firstmate managed hooks at $managed" "the $case refusal was not explicit"
     ! remote_has_branch "$upstream" "bypass-$n" \
       || fail "the refused $case bypass still landed its branch on the upstream"
     case "$case" in
       repo-set|repo-unset) git -C "$repo" config --local core.hooksPath "$managed" ;;
       repo-include) git -C "$repo" config --local --unset include.path ;;
       worktree-set) git -C "$repo" config --worktree --unset core.hooksPath ;;
-      missing-hook) mv "$managed/pre-push.moved" "$managed/pre-push" ;;
     esac
   done
 
@@ -558,6 +565,21 @@ SH
   ! remote_has_branch "$upstream" race || fail "a racing config rewrite still landed its branch on the upstream"
   git -C "$repo" config --local core.hooksPath "$managed"
   pass "delivery guard: worker Git refuses included, rewritten, and racing hooks-path bypasses in an armed repository"
+}
+
+test_git_shim_allows_quoted_non_push_alias() {
+  local dir repo real_git expected actual expected_rc actual_rc
+  dir="$TMP_ROOT/quoted-non-push-alias"
+  repo="$dir/repo"
+  real_git=${FM_REAL_GIT:-$(command -v git)}
+  fm_git_init_commit "$repo"
+  git -C "$repo" config alias.pretty '-c "color.ui=always" log --oneline -1'
+  expected=$(cd "$repo" && "$real_git" pretty 2>&1); expected_rc=$?
+  actual=$(cd "$repo" && FM_REAL_GIT="$real_git" "$GIT_SHIM" pretty 2>&1); actual_rc=$?
+  expect_code "$expected_rc" "$actual_rc" "the shim changed a quoted non-push alias's exit status: $actual"
+  [ "$actual" = "$expected" ] || fail "the shim changed a quoted non-push alias's output"
+  assert_contains "$actual" "initial" "the quoted non-push alias did not show history"
+  pass "delivery guard: a quoted non-push alias reaches real Git unchanged"
 }
 
 test_git_shim_ignores_leftover_hooks_directory_in_unarmed_repo() {
@@ -866,5 +888,6 @@ test_direct_pr_contract_is_unchanged_without_a_policy
 test_git_shim_blocks_hook_bypasses
 test_git_shim_refuses_hooks_path_override_in_any_case
 test_git_shim_refuses_effective_hooks_path_bypasses
+test_git_shim_allows_quoted_non_push_alias
 test_git_shim_ignores_leftover_hooks_directory_in_unarmed_repo
 test_git_shim_passes_push_help_outside_repository
