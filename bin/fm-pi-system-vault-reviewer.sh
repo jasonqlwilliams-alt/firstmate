@@ -217,7 +217,7 @@ cmd_check_model() {
   if printf '%s\n' "$listing" | catalog_has_model "$model"; then
     return 0
   fi
-  fail_check "model '$model' is not listed by '$bin --list-models'; choose a listed id or omit --model to use $PINNED_MODEL"
+  fail_check "model '$model' is not listed by '$bin --list-models'; choose a listed id"
 }
 
 cmd_validate_receipt() {
