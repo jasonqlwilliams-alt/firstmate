@@ -191,7 +191,9 @@ printf '%s\n' "$(basename -- "$(ps -o comm= -p "$$" 2>/dev/null || true)")" > "$
 printf '%s\n' "$?" > "$work/unisolated.rc"
 # Isolated path: detach `$shell_bin` while this enclosing `agy` process remains
 # alive until the isolated run completes.
-/bin/bash "$helpers/launch.sh" "$helpers/worker.sh" "$work" "$shell_bin" "$@"
+rc=0
+/bin/bash "$helpers/launch.sh" "$helpers/worker.sh" "$work" "$shell_bin" "$@" || rc=$?
+exit "$rc"
 SH
   "$agy_bin" "$work/enclosing.sh" "$helpers" "$work" "$shell_bin" "$@"
 }
