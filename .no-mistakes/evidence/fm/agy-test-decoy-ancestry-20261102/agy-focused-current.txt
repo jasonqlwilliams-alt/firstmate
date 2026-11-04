@@ -1,0 +1,34 @@
+ok - fm-harness: agy detects by its anchored name, and isolated magyar/agyd stay out even under a live agy parent
+ok - fm-harness: the agy marker is a precedence override that needs real agy ancestry
+CASE named-decoy-agyd
+enclosing: pid=3118102 comm=agy
+unisolated: rc=0 out=agy
+isolated: rc=0 out=unknown
+isolated ancestry:
+1	3118302	3118286	bash
+2	3118286	193	agyd
+3	193	1	systemd
+CASE named-decoy-magyar
+enclosing: pid=3117703 comm=agy
+unisolated: rc=0 out=agy
+isolated: rc=0 out=unknown
+isolated ancestry:
+1	3117855	3117842	bash
+2	3117842	193	magyar
+3	193	1	systemd
+CASE marker-neg-claude
+enclosing: pid=3118772 comm=agy
+unisolated: rc=0 out=agy
+isolated: rc=0 out=claude
+isolated ancestry:
+1	3118917	3118895	bash
+2	3118895	193	bash
+3	193	1	systemd
+CASE marker-neg-gemini
+enclosing: pid=3119227 comm=agy
+unisolated: rc=0 out=agy
+isolated: rc=0 out=gemini
+isolated ancestry:
+1	3119342	3119332	bash
+2	3119332	193	bash
+3	193	1	systemd
