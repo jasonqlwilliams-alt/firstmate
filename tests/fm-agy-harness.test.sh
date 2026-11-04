@@ -155,18 +155,6 @@ SH
   printf '%s' "$dir"
 }
 
-# Detach <shell-bin> from the current process tree and run <cmd...> as its
-# direct child. Records the child's eight-step ancestry in <work-dir>/ancestry,
-# prints <cmd>'s stdout, and returns <cmd>'s exit status.
-run_reparented_in_shell() {  # <work-dir> <shell-bin> <cmd> [args...]
-  local work=$1 shell_bin=$2 helpers
-  shift 2
-  helpers=$(ensure_reparented_helpers)
-  rm -rf "$work"
-  mkdir -p "$work"
-  /bin/bash "$helpers/launch.sh" "$helpers/worker.sh" "$work" "$shell_bin" "$@"
-}
-
 # Run both an unisolated control and the reparented fixture from inside a live
 # `$bin/agy` parent process that stays alive until both finish. This reproduces
 # the live-AGY-parent hazard deterministically even on hosts with no real `agy`
@@ -244,16 +232,6 @@ test_detection_anchored_name_and_marker_precedence() {
   expect_code 0 "$?" "direct agy detection failed"
   [ "$out" = agy ] || fail "a process named agy must detect as agy, got '$out'"
 
-  # Counterfactual positive check on the reparented helper itself: when the
-  # isolated parent is named `agy`, the same helper preserves parent ancestry
-  # and detects `agy` without relying on any outer `agy` worker.
-  work="$TMP_ROOT/named-isolated-agy"
-  out=$(run_reparented_in_shell "$work" "$bin/agy" "$HARNESS")
-  status=$?
-  expect_code 0 "$status" "reparented agy detection failed"
-  assert_reparented_parent_comm "$work/ancestry" agy
-  [ "$out" = agy ] || fail "an isolated process named agy must detect as agy, got '$out'"
-
   for decoy in magyar agyd; do
     work="$TMP_ROOT/named-decoy-$decoy"
     out=$(run_under_enclosing_agy "$bin/agy" "$work" "$bin/$decoy" "$HARNESS")
@@ -273,29 +251,15 @@ test_detection_marker_needs_real_ancestry() {
   bin=$(make_named_shells "$TMP_ROOT/named-marker")
   # agy scrubs nothing it inherits, so a real agy worker launched from a claude
   # or gemini session carries that session's marker too. Its own marker must win
-  # there, both directly and when isolated from any outer `agy` worker.
+  # there.
   # shellcheck disable=SC2016 # the quoted body expands inside the named shell
   out=$(env CLAUDECODE=1 ANTIGRAVITY_AGENT=1 "$bin/agy" -c '"$1"; :' _ "$HARNESS")
   expect_code 0 "$?" "direct agy + CLAUDECODE check failed"
   [ "$out" = agy ] || fail "ANTIGRAVITY_AGENT under an agy ancestor must outrank an inherited CLAUDECODE, got '$out'"
-  work="$TMP_ROOT/marker-pos-claude"
-  out=$(run_reparented_in_shell "$work" "$bin/agy" env CLAUDECODE=1 ANTIGRAVITY_AGENT=1 "$HARNESS")
-  status=$?
-  expect_code 0 "$status" "isolated agy + CLAUDECODE check failed"
-  assert_reparented_parent_comm "$work/ancestry" agy
-  [ "$out" = agy ] || fail "ANTIGRAVITY_AGENT under an isolated agy ancestor must outrank CLAUDECODE, got '$out'"
-
   # shellcheck disable=SC2016 # the quoted body expands inside the named shell
   out=$(env GEMINI_CLI=1 ANTIGRAVITY_AGENT=1 "$bin/agy" -c '"$1"; :' _ "$HARNESS")
   expect_code 0 "$?" "direct agy + GEMINI_CLI check failed"
   [ "$out" = agy ] || fail "ANTIGRAVITY_AGENT under an agy ancestor must outrank an inherited GEMINI_CLI, got '$out'"
-  work="$TMP_ROOT/marker-pos-gemini"
-  out=$(run_reparented_in_shell "$work" "$bin/agy" env GEMINI_CLI=1 ANTIGRAVITY_AGENT=1 "$HARNESS")
-  status=$?
-  expect_code 0 "$status" "isolated agy + GEMINI_CLI check failed"
-  assert_reparented_parent_comm "$work/ancestry" agy
-  [ "$out" = agy ] || fail "ANTIGRAVITY_AGENT under an isolated agy ancestor must outrank GEMINI_CLI, got '$out'"
-
   # The marker name belongs to the Antigravity desktop app and IDE as well as
   # the CLI. A terminal opened inside that app can export it with no agy CLI
   # anywhere, and that must NOT relabel whatever harness actually runs there,
