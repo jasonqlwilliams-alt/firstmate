@@ -57,6 +57,7 @@ set -u
 
 # shellcheck source=tests/lib.sh disable=SC1091
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+unset FM_HOME FM_ROOT_OVERRIDE FM_STATE_OVERRIDE FM_DATA_OVERRIDE FM_CONFIG_OVERRIDE
 fm_git_identity fmtest fmtest@example.invalid
 
 TEARDOWN="$ROOT/bin/fm-teardown.sh"
@@ -80,7 +81,7 @@ make_case() {
   local name=$1 case_dir fakebin
   case_dir="$TMP_ROOT/$name"
   fakebin="$case_dir/fakebin"
-  mkdir -p "$case_dir/state" "$case_dir/config" "$case_dir/data" "$fakebin"
+  mkdir -p "$case_dir/state" "$case_dir/config" "$case_dir/data" "$case_dir/home/state" "$fakebin"
 
   # Mocks for the post-check teardown steps. Refuse logic exits before these
   # run; the ALLOW cases need them so the script can complete cleanly.
@@ -626,7 +627,7 @@ run_teardown() {
   # FM_DATA_OVERRIDE is pinned to the case dir because teardown closes this
   # home's backlog item itself; without it $DATA would resolve to the real
   # repo's own home and a test could mutate live records.
-  FM_ROOT_OVERRIDE="$ROOT" \
+  FM_HOME="${FM_HOME:-$case_dir/home}" FM_ROOT_OVERRIDE="$ROOT" \
   FM_STATE_OVERRIDE="$case_dir/state" \
   FM_DATA_OVERRIDE="$case_dir/data" \
   FM_CONFIG_OVERRIDE="$case_dir/config" \
@@ -2313,7 +2314,7 @@ SH
   [ ! -s "$thlog" ] || fail "herdr-child-preflight: refusal returned work before child preflight"
   [ ! -e "$closed" ] || fail "herdr-child-preflight: refusal attempted a child close"
   assert_grep "nothing was changed" "$case_dir/stderr" \
-    "herdr-child-preflight: refusal did not explain its non-mutating boundary"
+    "herdr-child-preflight: refusal did not explain its non-mutating boundary: $(cat "$case_dir/stderr")"
   pass "forced secondmate teardown preflights every Herdr child before cleanup mutation"
 }
 
@@ -3674,6 +3675,252 @@ EOF
     "abort-then-reap-then-remove-order: the leaked process was not yet reaped when the worktree return ran"
   pass "the run abort and the leaked-process reap both complete before the destructive worktree return"
 }
+
+# Canned transport with an inert, real process birth identity; the opt-in lab
+# below proves these shell/cwd assumptions against a real Herdr pane as well.
+configure_keep_pane_case() {
+  local case_dir=$1
+  write_meta "$case_dir" local-only ship
+  configure_flat_herdr_teardown_case "$case_dir"
+  mkdir -p "$case_dir/pool/1"
+  git -C "$case_dir/project" worktree move "$case_dir/wt" "$case_dir/pool/1/project"
+  ln -s pool/1/project "$case_dir/wt"
+  printf '{}\n' > "$case_dir/pool/treehouse-state.json"
+  printf 'task=task-x1\nhome=%s\n' "$case_dir" > "$case_dir/pool/1/.fm-slot-owner"
+  printf 'harness=codex\n' >> "$case_dir/state/task-x1.meta"
+  cat > "$case_dir/fakebin/keep-ps" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  '-axo pid=,ppid=')
+    printf '%s 1\n' "$FM_KEEP_PID"
+    [ "${FM_KEEP_MODE:-}" != child ] || printf '999999 %s\n' "$FM_KEEP_PID"
+    ;;
+  *) printf 'S\n' ;;
+esac
+SH
+  cat > "$case_dir/fakebin/lsof" <<'SH'
+#!/usr/bin/env bash
+printf 'p%s\n' "$FM_KEEP_PID"
+if [ -f "$FM_KEEP_CASE/detached" ]; then printf 'n/\n'; else printf 'n%s/wt\n' "$FM_KEEP_CASE"; fi
+SH
+  cat > "$case_dir/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+set -u
+printf '%s\n' "$*" >> "$FM_KEEP_CASE/herdr.log"
+case "${1:-} ${2:-}" in
+  'session list') printf '{"sessions":[{"name":"default","running":true,"socket_path":"%s/herdr.sock"}]}\n' "$FM_KEEP_CASE" ;;
+  'status --json') printf '{"server":{"running":true}}\n' ;;
+  'pane close') : > "$FM_KEEP_CASE/closed" ;;
+  'pane get')
+    if [ -f "$FM_KEEP_CASE/closed" ] || [ "${FM_KEEP_MODE:-}" = missing ]; then
+      printf '{"error":{"code":"pane_not_found"}}\n'; exit 1
+    fi
+    if [ "${FM_KEEP_MODE:-}" = unknown ]; then printf 'not-json\n'; exit 0; fi
+    printf '{"result":{"pane":{"pane_id":"wG:pQ","workspace_id":"wG","tab_id":"wG:tQ"}}}\n'
+    ;;
+  'pane process-info')
+    name=bash
+    [ "${FM_KEEP_MODE:-}" != alive ] || name=node
+    printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"wG:pQ","shell_pid":%s,"foreground_process_group_id":%s,"foreground_processes":[{"pid":%s,"name":"%s","argv0":"%s"}]}}}\n' "$FM_KEEP_PID" "$FM_KEEP_PID" "$FM_KEEP_PID" "$name" "$name"
+    ;;
+  'pane run')
+    [ "${3:-}" = wG:pQ ] && [ "${4:-}" = 'cd /' ] || exit 9
+    [ "${FM_KEEP_MODE:-}" != detach-fails ] || exit 1
+    : > "$FM_KEEP_CASE/detached"
+    ;;
+  'workspace list') printf '{"result":{"workspaces":[{"workspace_id":"wG","label":"task · p:AbCdEfGhIjKlMnOpQrStUv"}]}}\n' ;;
+  'agent get') printf '{"error":{"code":"agent_not_found"}}\n'; exit 1 ;;
+esac
+SH
+  cat > "$case_dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FM_KEEP_CASE/treehouse.log"
+[ "${FM_KEEP_MODE:-}" != return-fails ] || exit 1
+[ "${FM_KEEP_MODE:-}" != lost-after-return ] || : > "$FM_KEEP_CASE/closed"
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/keep-ps" "$case_dir/fakebin/herdr" "$case_dir/fakebin/lsof" "$case_dir/fakebin/treehouse"
+}
+
+run_keep_pane_case() {
+  local case_dir=$1; shift
+  FM_KEEP_CASE="$case_dir" FM_KEEP_PID="$KEEP_TEST_PID" \
+    FM_HERDR_PS_BIN="$case_dir/fakebin/keep-ps" FM_BACKEND_HERDR_IDLE_SHELL_PROOF_POLLS=1 \
+    run_teardown "$case_dir" "$@"
+}
+
+test_keep_pane_retirement() {
+  local case_dir mode rc before show
+  sleep 300 &
+  KEEP_TEST_PID=$!
+  trap 'kill "$KEEP_TEST_PID" 2>/dev/null || true; fm_test_cleanup' EXIT
+
+  case_dir=$(make_case keep-pane-success)
+  configure_keep_pane_case "$case_dir"
+  seed_backlog_in_flight "$case_dir"
+  printf 'version=1\ntask_id=task-x1\nprojection_id=AbCdEfGhIjKlMnOpQrStUv\n' > "$case_dir/state/task-x1.herdr-presentation"
+  run_keep_pane_case "$case_dir" --keep-pane > "$case_dir/out" 2> "$case_dir/err" \
+    || fail "keep-pane retirement failed: $(cat "$case_dir/err")"
+  assert_absent "$case_dir/closed" "keep-pane closed the exact pane"
+  assert_present "$case_dir/detached" "keep-pane returned copy before shell detach"
+  assert_present "$case_dir/treehouse.log" "keep-pane did not return the copy"
+  assert_absent "$case_dir/pool/1/.fm-slot-owner" "keep-pane leaked its slot claim"
+  assert_absent "$case_dir/state/task-x1.meta" "keep-pane leaked task metadata"
+  assert_absent "$case_dir/state/task-x1.herdr-presentation" "keep-pane leaked a correlated journal"
+  [ "$(backlog_row_state "$case_dir")" = "done" ] || fail "keep-pane failed backlog close"
+  assert_grep 'pane default:wG:pQ preserved' "$case_dir/out" "keep-pane did not report preservation"
+  pass "keep-pane retires a landed task and its own slot with exact pane survival and shell detachment"
+
+  # Counterfactual: the identical finished task without the option closes.
+  case_dir=$(make_case keep-pane-counterfactual)
+  configure_keep_pane_case "$case_dir"
+  run_keep_pane_case "$case_dir" > "$case_dir/out" 2> "$case_dir/err" \
+    || fail "default cleanup failed: $(cat "$case_dir/err")"
+  assert_present "$case_dir/closed" "counterfactual: default cleanup unexpectedly kept the pane"
+  assert_absent "$case_dir/state/task-x1.meta" "default cleanup retained metadata"
+  pass "counterfactual: pane survival fails without keep-pane; default cleanup still closes"
+
+  for mode in dirty unlanded alive child missing unknown wrong-task wrong-incarnation collision foreign-claim detach-fails; do
+    case_dir=$(make_case "keep-pane-$mode")
+    configure_keep_pane_case "$case_dir"
+    seed_backlog_in_flight "$case_dir"
+    case "$mode" in
+      dirty) printf 'unfinished\n' > "$case_dir/wt/dirty.txt" ;;
+      unlanded) wt_commit_file "$case_dir" unlanded.txt work ;;
+      wrong-task) sed -i.bak 's/^endpoint_task_id=.*/endpoint_task_id=another-task/' "$case_dir/state/task-x1.meta" ;;
+      wrong-incarnation) printf 'spawn_gen=duplicate\n' >> "$case_dir/state/task-x1.meta" ;;
+      collision) cp "$case_dir/state/task-x1.meta" "$case_dir/state/other-task.meta" ;;
+      foreign-claim) printf 'task=another-task\nhome=%s\n' "$case_dir" > "$case_dir/pool/1/.fm-slot-owner" ;;
+    esac
+    before=$(cat "$case_dir/state/task-x1.meta")
+    rc=0
+    FM_KEEP_MODE="$mode" run_keep_pane_case "$case_dir" --keep-pane > "$case_dir/out" 2> "$case_dir/err" || rc=$?
+    [ "$rc" -ne 0 ] || fail "keep-pane $mode unexpectedly succeeded"
+    [ "$(cat "$case_dir/state/task-x1.meta")" = "$before" ] || fail "keep-pane $mode changed record"
+    assert_absent "$case_dir/closed" "keep-pane $mode closed pane"
+    assert_absent "$case_dir/treehouse.log" "keep-pane $mode returned copy"
+    [ "$(backlog_row_state "$case_dir")" = in_flight ] || fail "keep-pane $mode closed backlog"
+  done
+  pass "keep-pane refuses dirty/unlanded work, running or ambiguous endpoints, incarnation drift and slot ownership conflicts before return"
+
+  for mode in return-fails lost-after-return; do
+    case_dir=$(make_case "keep-pane-$mode")
+    configure_keep_pane_case "$case_dir"
+    seed_backlog_in_flight "$case_dir"
+    rc=0
+    FM_KEEP_MODE="$mode" run_keep_pane_case "$case_dir" --keep-pane > "$case_dir/out" 2> "$case_dir/err" || rc=$?
+    [ "$rc" -ne 0 ] || fail "keep-pane $mode unexpectedly succeeded"
+    assert_present "$case_dir/state/task-x1.meta" "keep-pane $mode lost endpoint record"
+    assert_present "$case_dir/state/task-x1.backlog-close" "keep-pane $mode lost durable transition"
+    [ "$(backlog_row_state "$case_dir")" = in_flight ] || fail "keep-pane $mode closed backlog"
+  done
+  pass "keep-pane retains records and replayable backlog transition on return or pane-survival failure"
+
+  case_dir=$(make_case keep-pane-captain-call)
+  configure_keep_pane_case "$case_dir"
+  seed_backlog_in_flight "$case_dir"
+  FM_HOME="$case_dir" FM_ROOT_OVERRIDE="$ROOT" "$ROOT/bin/fm-captain-hold.sh" hold task-x1 --reason 'Choose the follow-up' >/dev/null \
+    || fail "could not seed captain call"
+  run_keep_pane_case "$case_dir" --keep-pane > "$case_dir/out" 2> "$case_dir/err" \
+    || fail "keep-pane captain call cleanup failed: $(cat "$case_dir/err")"
+  show=$(tasks-axi show task-x1 --full --file "$case_dir/data/backlog.md")
+  printf '%s\n' "$show" | grep -F 'hold_kind: captain' >/dev/null || fail "keep-pane dropped captain call"
+  [ "$(backlog_row_state "$case_dir")" = queued ] || fail "keep-pane closed captain call"
+  assert_absent "$case_dir/closed" "captain call cleanup closed pane"
+  pass "keep-pane retires worker records while retaining the open captain call"
+
+  for mode in tmux scout secondmate force legacy stale; do
+    case_dir=$(make_case "keep-pane-unsupported-$mode")
+    configure_keep_pane_case "$case_dir"
+    case "$mode" in
+      tmux) sed -i.bak 's/backend=herdr/backend=tmux/' "$case_dir/state/task-x1.meta" ;;
+      scout|secondmate) sed -i.bak "s/kind=ship/kind=$mode/" "$case_dir/state/task-x1.meta" ;;
+    esac
+    rc=0
+    case "$mode" in
+      force) run_keep_pane_case "$case_dir" --keep-pane --force > "$case_dir/out" 2> "$case_dir/err" || rc=$? ;;
+      legacy) run_keep_pane_case "$case_dir" --keep-pane --legacy-record > "$case_dir/out" 2> "$case_dir/err" || rc=$? ;;
+      stale) run_keep_pane_case "$case_dir" --keep-pane --retire-stale-record > "$case_dir/out" 2> "$case_dir/err" || rc=$? ;;
+      *) run_keep_pane_case "$case_dir" --keep-pane > "$case_dir/out" 2> "$case_dir/err" || rc=$? ;;
+    esac
+    [ "$rc" -ne 0 ] || fail "keep-pane accepted unsupported $mode"
+    assert_present "$case_dir/state/task-x1.meta" "unsupported $mode lost record"
+    assert_absent "$case_dir/herdr.log" "unsupported $mode contacted endpoint"
+    assert_absent "$case_dir/treehouse.log" "unsupported $mode returned copy"
+  done
+  pass "keep-pane explicitly refuses unsupported kinds, backends and discard/legacy/stale combinations"
+  kill "$KEEP_TEST_PID" 2>/dev/null || true
+  wait "$KEEP_TEST_PID" 2>/dev/null || true
+  trap fm_test_cleanup EXIT
+}
+
+# Token-free real lifecycle proof. Every Herdr call, including calls from the
+# candidate teardown, routes through the named lab helper and fleet tripwire.
+test_keep_pane_lab() (
+  [ "${FM_TEARDOWN_KEEP_PANE_LAB:-0}" = 1 ] || return 0
+  command -v lsof >/dev/null 2>&1 || fail "keep-pane lab requires lsof"
+  local case_dir out ws tab pane shell_pid after rc=0 original_path=$PATH
+  case_dir=$(make_case keep-pane-real-lab)
+  configure_keep_pane_case "$case_dir"
+  rm -f "$case_dir/fakebin/lsof" "$case_dir/fakebin/keep-ps"
+  HERDR_LAB_HELPER=${HERDR_LAB_HELPER:-$ROOT/bin/fm-herdr-lab.sh}
+  HERDR_LAB_SESSION=$("$HERDR_LAB_HELPER" name teardown-keep-pane-option-20261102) || fail "lab name refused"
+  export HERDR_LAB_HELPER HERDR_LAB_SESSION
+  trap 'env PATH="$original_path" "$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION" || exit 1' EXIT
+  "$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION" || fail "lab provisioning refused"
+  lab_keep() { env PATH="$original_path" "$HERDR_LAB_HELPER" run "$HERDR_LAB_SESSION" "$@"; }
+  out=$(lab_keep status --json) || fail "lab status unavailable"
+  printf 'Herdr keep-pane lab version: %s\n' "$(printf '%s' "$out" | jq -r '.client.version // .server.version // "unknown"')"
+  out=$(lab_keep workspace create --cwd "$case_dir/wt" --label keep-pane-lab --no-focus) || fail "lab workspace create failed"
+  ws=$(printf '%s' "$out" | jq -er '.result.workspace.workspace_id') || fail "missing lab workspace"
+  tab=$(printf '%s' "$out" | jq -er '.result.tab.tab_id') || fail "missing lab tab"
+  pane=$(printf '%s' "$out" | jq -er '.result.root_pane.pane_id') || fail "missing lab pane"
+  lab_keep pane run "$pane" 'exec bash --noprofile --norc -i' >/dev/null || fail "lab shell launch failed"
+  sleep 0.5
+  shell_pid=$(lab_keep pane process-info --pane "$pane" | jq -er '.result.process_info.shell_pid') || fail "lab shell identity missing"
+  cat > "$case_dir/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+set -eu
+args=("$@")
+last=$((${#args[@]} - 1)); flag=$((last - 1))
+[ "$flag" -ge 0 ] && [ "${args[$flag]}" = --session ] && [ "${args[$last]}" = "$HERDR_LAB_SESSION" ] || exit 9
+unset 'args[last]' 'args[flag]'
+for arg in "${args[@]}"; do case "$arg" in --session|--session=*) exit 9 ;; esac; done
+exec env PATH="$FM_KEEP_LAB_PATH" "$HERDR_LAB_HELPER" run "$HERDR_LAB_SESSION" "${args[@]}"
+SH
+  chmod +x "$case_dir/fakebin/herdr"
+  fm_write_meta "$case_dir/state/task-x1.meta" \
+    "window=$HERDR_LAB_SESSION:$pane" 'endpoint_task_id=task-x1' \
+    "worktree=$case_dir/wt" "project=$case_dir/project" 'kind=ship' \
+    'mode=local-only' 'harness=codex' 'backend=herdr' 'spawn_gen=keep-pane-lab' \
+    "herdr_session=$HERDR_LAB_SESSION" "herdr_workspace_id=$ws" "herdr_tab_id=$tab" "herdr_pane_id=$pane"
+  seed_backlog_in_flight "$case_dir"
+  FM_KEEP_LAB_PATH="$original_path" FM_KEEP_CASE="$case_dir" \
+    run_teardown "$case_dir" --keep-pane > "$case_dir/out" 2> "$case_dir/err" || rc=$?
+  [ "$rc" = 0 ] || fail "real keep-pane retirement failed: $(cat "$case_dir/err")"
+  after=$(lab_keep pane process-info --pane "$pane" | jq -er '.result.process_info.shell_pid') || fail "real pane disappeared"
+  [ "$after" = "$shell_pid" ] || fail "real pane shell was replaced"
+  lsof -a -p "$shell_pid" -d cwd -Fn | grep -Fx 'n/' >/dev/null || fail "real surviving shell still in returned copy"
+  assert_absent "$case_dir/state/task-x1.meta" "real keep-pane metadata survived"
+  assert_absent "$case_dir/pool/1/.fm-slot-owner" "real keep-pane slot claim survived"
+  [ "$(backlog_row_state "$case_dir")" = "done" ] || fail "real keep-pane backlog remained open"
+  pass "real Herdr lab: keep-pane retires records and slot while the identical pane and detached shell survive"
+  # Reset only the disposable fixture branch/record for the default-path
+  # counterfactual; the real endpoint is still exactly the retained lab pane.
+  write_meta "$case_dir" local-only ship
+  sed -i.bak "s|^window=.*|window=$HERDR_LAB_SESSION:$pane|" "$case_dir/state/task-x1.meta"
+  printf 'backend=herdr\nherdr_session=%s\nherdr_workspace_id=%s\nherdr_tab_id=%s\nherdr_pane_id=%s\n' "$HERDR_LAB_SESSION" "$ws" "$tab" "$pane" >> "$case_dir/state/task-x1.meta"
+  FM_KEEP_LAB_PATH="$original_path" FM_KEEP_CASE="$case_dir" \
+    run_teardown "$case_dir" > "$case_dir/default.out" 2> "$case_dir/default.err" \
+    || fail "real default cleanup failed: $(cat "$case_dir/default.err")"
+  out=$(lab_keep pane get "$pane" 2>&1) || true
+  [ "$(printf '%s' "$out" | jq -r '.error.code')" = pane_not_found ] || fail "real counterfactual did not close pane"
+  pass "real Herdr lab counterfactual: default retirement closes the previously preserved exact pane"
+)
+
+test_keep_pane_retirement
+test_keep_pane_lab
+[ "${FM_TEARDOWN_KEEP_PANE_ONLY:-0}" != 1 ] || exit 0
 
 test_local_only_fork_remote_allows
 test_teardown_closes_the_backlog_item_itself

@@ -216,6 +216,10 @@ A Herdr pane id contains a colon, so the adapter splits `window=` on the first c
 The recorded pane is the operational fast path.
 Workspace and tab ids support verification and cleanup but are not inferred from mutable labels during normal operation.
 
+Ordinary Herdr ship tasks can retire their records and pool allocation while retaining the exact pane through the explicit opt-in owned by [`fm-teardown.sh`](../bin/fm-teardown.sh).
+The command's header and help own shutdown prerequisites, shell detachment, supported limits and refusal behavior.
+The focused regression and token-free real-lab entry point are recorded in [runtime backend verification](verification/runtime-backends.md#pane-preserving-retirement).
+
 ## Current transport behavior
 
 The adapter starts and polls a named server before workspace, tab, pane, or agent calls.
