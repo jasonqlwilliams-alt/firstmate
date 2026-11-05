@@ -144,12 +144,12 @@
 # Orca tasks use the same safety checks, then close the recorded terminal and
 # remove the recorded worktree through `orca worktree rm`; teardown never guesses
 # an Orca target from ambient CLI state.
-# A Herdr presentation journal never authorizes cleanup. Teardown still closes
+# A Herdr presentation journal never authorizes cleanup. Default teardown closes
 # only the exact task pane from ordinary endpoint metadata and never calls
-# `workspace close`. It retires the non-authoritative journal only when a
-# read-only token correlation agrees with that endpoint and pane closure (or
-# explicit --keep-pane retirement) is confirmed. Otherwise the journal stays
-# quarantined for manual inspection.
+# `workspace close`. The explicit --keep-pane path leaves that pane open.
+# A non-authoritative journal is retired only after read-only token correlation
+# agrees with that endpoint and the selected close or keep proof succeeds.
+# Otherwise the journal stays quarantined for manual inspection.
 # Projected closes share the presentation-order lock, refuse to close the
 # captain's active tab, and restore the exact response-derived pre-close tab
 # if Herdr's last-pane cleanup focuses an unrelated neighboring workspace.
@@ -174,7 +174,7 @@
 #   children, unknown/missing endpoints, absent lsof, non-Herdr backends,
 #   scouts, secondmates, recovery records, legacy records, stale-record retire
 #   and --force are refused. Dirty and unlanded-work checks remain mandatory.
-#   The same pane and shell birth identity must survive through record removal;
+#   The same pane and shell birth identity are reverified before record removal;
 #   failure retains the records for retry. A correlated presentation journal
 #   is retired without closing, renaming, moving or adopting its workspace.
 #        fm-teardown.sh --release-orphaned-slot-claim <worktree>
