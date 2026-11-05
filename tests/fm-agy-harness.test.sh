@@ -47,8 +47,9 @@ set -u
 # bin/fm-harness.sh checks verified ENV markers before ancestry. A suite run
 # from inside Cursor, Claude, Pi, Grok, or agy itself inherits those markers,
 # which would outrank the fake ancestry the detection cases set up. Drop the
-# ambient markers so the asserted verdict does not depend on which harness
-# launched the suite.
+# ambient markers here; the negative ancestry cases below also reparent their
+# shells so an enclosing `agy` process cannot satisfy their premise through the
+# parent walk.
 unset CLAUDECODE PI_CODING_AGENT FM_PI_HARNESS GROK_AGENT CURSOR_AGENT CURSOR_INVOKED_AS \
   ATLASSIAN_AGENT_TYPE ROVODEV_CLI GEMINI_CLI ANTIGRAVITY_AGENT FM_OMP_HARNESS
 
@@ -74,40 +75,211 @@ make_named_shells() {  # <dir> -> echoes <bindir>
 
 # --- 1. Detection ------------------------------------------------------------
 
+# Write the worker and launcher scripts that detach a named shell from the
+# caller's process tree via an exiting intermediate launcher. Neither a live
+# enclosing `agy` worker nor the synthetic `$bin/agy` parent used below can
+# remain in `bin/fm-harness.sh`'s eight-parent walk. Waiting for
+# `ppid != launcher` rather than `ppid == 1` handles Linux session subreapers
+# (such as WSL Relay or systemd --user) as well as PID 1 on macOS and Linux.
+ensure_reparented_helpers() {  # -> echoes <launcher-script>
+  local dir="$TMP_ROOT/reparent-helpers"
+  if [ ! -f "$dir/launch.sh" ]; then
+    mkdir -p "$dir"
+    cat > "$dir/worker.sh" <<'SH'
+set -u
+launcher=$1
+work=$2
+shift 2
+printf '%s\n' "$$" > "$work/pid"
+i=0
+ppid=
+while [ "$i" -lt 200 ]; do
+  ppid=$(ps -o ppid= -p "$$" 2>/dev/null | tr -d '[:space:]')
+  [ -n "$ppid" ] && [ "$ppid" != "$launcher" ] && break
+  sleep 0.05
+  i=$((i + 1))
+done
+if [ -z "$ppid" ] || [ "$ppid" = "$launcher" ]; then
+  printf 'reparenting timed out: pid=%s ppid=%s launcher=%s\n' "$$" "${ppid:-}" "$launcher" > "$work/err"
+  printf '125\n' > "$work/rc.tmp"
+  mv "$work/rc.tmp" "$work/rc"
+  exit 125
+fi
+# Snapshot the eight-parent chain from a child at the same depth as fm-harness.sh
+# while this named shell remains alive as its immediate parent.
+/bin/bash -c '
+  set -u
+  pid=$$
+  for step in 1 2 3 4 5 6 7 8; do
+    comm=$(ps -o comm= -p "$pid" 2>/dev/null || true)
+    [ -n "$comm" ] || break
+    ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d "[:space:]" || true)
+    printf "%s\t%s\t%s\t%s\n" "$step" "$pid" "$ppid" "$(basename -- "$comm")"
+    [ -n "$ppid" ] && [ "$ppid" -gt 1 ] || break
+    pid=$ppid
+  done
+' > "$work/ancestry"
+"$@" > "$work/out" 2> "$work/err"
+rc=$?
+printf '%s\n' "$rc" > "$work/rc.tmp"
+mv "$work/rc.tmp" "$work/rc"
+SH
+    cat > "$dir/launch.sh" <<'SH'
+set -u
+worker=$1
+work=$2
+shell_bin=$3
+shift 3
+/bin/bash -c '
+  shell_bin=$1
+  worker=$2
+  work=$3
+  shift 3
+  "$shell_bin" "$worker" "$$" "$work" "$@" </dev/null >/dev/null 2>&1 &
+' _ "$shell_bin" "$worker" "$work" "$@"
+i=0
+while [ "$i" -lt 200 ] && [ ! -f "$work/rc" ]; do
+  sleep 0.05
+  i=$((i + 1))
+done
+if [ ! -f "$work/rc" ]; then
+  pid=$(tr -d '[:space:]' < "$work/pid" 2>/dev/null || true)
+  [ -z "$pid" ] || kill "$pid" 2>/dev/null || true
+  printf 'reparented shell %s timed out: %s\n' "$shell_bin" "$(cat "$work/err" 2>/dev/null || true)" >&2
+  exit 124
+fi
+cat "$work/out"
+exit "$(tr -d '[:space:]' < "$work/rc")"
+SH
+  fi
+  printf '%s' "$dir"
+}
+
+# Run both an unisolated control and the reparented fixture from inside a live
+# `$bin/agy` parent process that stays alive until both finish. This reproduces
+# the live-AGY-parent hazard deterministically even on hosts with no real `agy`
+# installed, while proving the reparented child escapes that still-live parent.
+run_under_enclosing_agy() {  # <agy-bin> <work-dir> <shell-bin> <cmd> [args...]
+  local agy_bin=$1 work=$2 shell_bin=$3 helpers
+  shift 3
+  helpers=$(ensure_reparented_helpers)
+  rm -rf "$work"
+  mkdir -p "$work"
+  cat > "$work/enclosing.sh" <<'SH'
+set -u
+helpers=$1
+work=$2
+shell_bin=$3
+shift 3
+printf '%s\n' "$$" > "$work/enclosing.pid"
+printf '%s\n' "$(basename -- "$(ps -o comm= -p "$$" 2>/dev/null || true)")" > "$work/enclosing.comm"
+# Unisolated control: running directly under this live agy parent inherits its
+# ancestry. Trailing `:` keeps bash from exec-replacing `$shell_bin`.
+"$shell_bin" -c '"$@"; :' _ "$@" > "$work/unisolated.out" 2> "$work/unisolated.err"
+printf '%s\n' "$?" > "$work/unisolated.rc"
+# Isolated path: detach `$shell_bin` while this enclosing `agy` process remains
+# alive until the isolated run completes.
+rc=0
+/bin/bash "$helpers/launch.sh" "$helpers/worker.sh" "$work" "$shell_bin" "$@" || rc=$?
+exit "$rc"
+SH
+  "$agy_bin" "$work/enclosing.sh" "$helpers" "$work" "$shell_bin" "$@"
+}
+
+assert_reparented_parent_comm() {  # <ancestry-file> <expected-comm>
+  local file=$1 want=$2 got
+  [ -s "$file" ] || fail "missing reparented ancestry snapshot '$file'"
+  got=$(awk -F '\t' '$1 == "2" { print $4; exit }' "$file")
+  [ "$got" = "$want" ] \
+    || fail "reparented probe must still run directly under '$want' (non-vacuous parent), got '${got:-<none>}':
+$(cat "$file")"
+}
+
+assert_ancestry_excludes_agy() {  # <work-dir> <label>
+  local work=$1 label=$2 enclosing_pid=
+  local ancestry="$work/ancestry"
+  [ -s "$ancestry" ] || fail "$label: missing ancestry snapshot"
+  if [ -f "$work/enclosing.pid" ]; then
+    enclosing_pid=$(tr -d '[:space:]' < "$work/enclosing.pid")
+    [ -n "$enclosing_pid" ] || fail "$label: empty enclosing agy pid"
+  fi
+  if ! awk -F '\t' -v enc="$enclosing_pid" '
+    $4 == "agy" { bad = 1 }
+    enc != "" && $2 == enc { bad = 1 }
+    END { exit(bad ? 1 : 0) }
+  ' "$ancestry"; then
+    fail "$label: isolated fixture ancestry still includes enclosing agy (enclosing_pid=${enclosing_pid:-none}):
+$(cat "$ancestry")"
+  fi
+}
+
+assert_enclosing_agy_was_active() {  # <work-dir> <label>
+  local work=$1 label=$2 enc_comm uniso_rc uniso_out
+  enc_comm=$(tr -d '[:space:]' < "$work/enclosing.comm" 2>/dev/null || true)
+  [ "$enc_comm" = agy ] \
+    || fail "$label: enclosing fixture parent must have comm=agy, got '${enc_comm:-<none>}'"
+  uniso_rc=$(tr -d '[:space:]' < "$work/unisolated.rc" 2>/dev/null || printf '1')
+  uniso_out=$(cat "$work/unisolated.out" 2>/dev/null || true)
+  [ "$uniso_rc" = 0 ] && [ "$uniso_out" = agy ] \
+    || fail "$label: unisolated child under enclosing agy must detect agy (proving the parent hazard is live), got rc=$uniso_rc out='$uniso_out'"
+}
+
 test_detection_anchored_name_and_marker_precedence() {
-  local bin out decoy
+  local bin out status decoy work
   bin=$(make_named_shells "$TMP_ROOT/named")
   # shellcheck disable=SC2016 # the quoted body expands inside the named shell
   out=$("$bin/agy" -c '"$1"; :' _ "$HARNESS")
+  expect_code 0 "$?" "direct agy detection failed"
   [ "$out" = agy ] || fail "a process named agy must detect as agy, got '$out'"
+
   for decoy in magyar agyd; do
-    # shellcheck disable=SC2016 # the quoted body expands inside the named shell
-    out=$("$bin/$decoy" -c '"$1"; :' _ "$HARNESS")
-    [ "$out" != agy ] || fail "'$decoy' merely contains agy and must not detect as agy"
+    work="$TMP_ROOT/named-decoy-$decoy"
+    out=$(run_under_enclosing_agy "$bin/agy" "$work" "$bin/$decoy" "$HARNESS")
+    status=$?
+    expect_code 0 "$status" "reparented decoy '$decoy' failed"
+    assert_enclosing_agy_was_active "$work" "decoy $decoy"
+    assert_ancestry_excludes_agy "$work" "decoy $decoy"
+    assert_reparented_parent_comm "$work/ancestry" "$decoy"
+    [ -n "$out" ] && [ "$out" != agy ] \
+      || fail "'$decoy' merely contains agy and must not detect as agy, got '$out'"
   done
-  pass "fm-harness: agy detects by its anchored name, and magyar/agyd stay out"
+  pass "fm-harness: agy detects by its anchored name, and isolated magyar/agyd stay out even under a live agy parent"
 }
 
 test_detection_marker_needs_real_ancestry() {
-  local bin out
+  local bin out status work
   bin=$(make_named_shells "$TMP_ROOT/named-marker")
   # agy scrubs nothing it inherits, so a real agy worker launched from a claude
   # or gemini session carries that session's marker too. Its own marker must win
   # there.
   # shellcheck disable=SC2016 # the quoted body expands inside the named shell
   out=$(env CLAUDECODE=1 ANTIGRAVITY_AGENT=1 "$bin/agy" -c '"$1"; :' _ "$HARNESS")
+  expect_code 0 "$?" "direct agy + CLAUDECODE check failed"
   [ "$out" = agy ] || fail "ANTIGRAVITY_AGENT under an agy ancestor must outrank an inherited CLAUDECODE, got '$out'"
   # shellcheck disable=SC2016 # the quoted body expands inside the named shell
   out=$(env GEMINI_CLI=1 ANTIGRAVITY_AGENT=1 "$bin/agy" -c '"$1"; :' _ "$HARNESS")
+  expect_code 0 "$?" "direct agy + GEMINI_CLI check failed"
   [ "$out" = agy ] || fail "ANTIGRAVITY_AGENT under an agy ancestor must outrank an inherited GEMINI_CLI, got '$out'"
   # The marker name belongs to the Antigravity desktop app and IDE as well as
   # the CLI. A terminal opened inside that app can export it with no agy CLI
-  # anywhere, and that must NOT relabel whatever harness actually runs there.
-  # shellcheck disable=SC2016 # the quoted body expands inside the named shell
-  out=$(env CLAUDECODE=1 ANTIGRAVITY_AGENT=1 bash -c '"$1"; :' _ "$HARNESS")
+  # anywhere, and that must NOT relabel whatever harness actually runs there,
+  # even when this suite itself runs under an enclosing `agy` process.
+  work="$TMP_ROOT/marker-neg-claude"
+  out=$(run_under_enclosing_agy "$bin/agy" "$work" /bin/bash env CLAUDECODE=1 ANTIGRAVITY_AGENT=1 "$HARNESS")
+  status=$?
+  expect_code 0 "$status" "isolated leaked marker + CLAUDECODE check failed"
+  assert_enclosing_agy_was_active "$work" "leaked ANTIGRAVITY_AGENT + CLAUDECODE"
+  assert_ancestry_excludes_agy "$work" "leaked ANTIGRAVITY_AGENT + CLAUDECODE"
+  assert_reparented_parent_comm "$work/ancestry" bash
   [ "$out" = claude ] || fail "a leaked ANTIGRAVITY_AGENT without an agy ancestor must not relabel a claude worker, got '$out'"
-  # shellcheck disable=SC2016 # the quoted body expands inside the named shell
-  out=$(env GEMINI_CLI=1 ANTIGRAVITY_AGENT=1 bash -c '"$1"; :' _ "$HARNESS")
+
+  work="$TMP_ROOT/marker-neg-gemini"
+  out=$(run_under_enclosing_agy "$bin/agy" "$work" /bin/bash env GEMINI_CLI=1 ANTIGRAVITY_AGENT=1 "$HARNESS")
+  status=$?
+  expect_code 0 "$status" "isolated leaked marker + GEMINI_CLI check failed"
+  assert_enclosing_agy_was_active "$work" "leaked ANTIGRAVITY_AGENT + GEMINI_CLI"
+  assert_ancestry_excludes_agy "$work" "leaked ANTIGRAVITY_AGENT + GEMINI_CLI"
+  assert_reparented_parent_comm "$work/ancestry" bash
   [ "$out" = gemini ] || fail "a leaked ANTIGRAVITY_AGENT without an agy ancestor must not relabel a gemini worker, got '$out'"
   pass "fm-harness: the agy marker is a precedence override that needs real agy ancestry"
 }
