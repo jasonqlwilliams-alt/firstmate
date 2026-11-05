@@ -164,15 +164,42 @@ test_helper_catalog_miss_refuses_and_unreachable_is_not_a_verdict() {
   make_reviewer_pi "$fakebin"
 
   status=0
+  out=$("$REVIEWER" check-model 2>&1) || status=$?
+  expect_code 2 "$status" "bare check-model should fail usage"
+  assert_contains "$out" "check-model requires --model" "bare check-model did not report the required flag"
+
+  status=0
+  out=$("$REVIEWER" check-model --bin "$fakebin/pi" 2>&1) || status=$?
+  expect_code 2 "$status" "check-model without --model should fail usage"
+  assert_contains "$out" "check-model requires --model" "missing --model did not report the required flag"
+
+  status=0
+  out=$("$REVIEWER" check-model --model 2>&1) || status=$?
+  expect_code 2 "$status" "check-model with dangling --model should fail usage"
+  assert_contains "$out" "--model requires a value" "dangling --model did not report the missing value"
+
+  status=0
+  out=$("$REVIEWER" check-model --model= --bin "$fakebin/pi" 2>&1) || status=$?
+  expect_code 2 "$status" "check-model with empty --model= should fail usage"
+  assert_contains "$out" "check-model requires --model" "empty --model= did not report the required flag"
+
+  status=0
+  out=$("$REVIEWER" check-model --model "$PIN" --bin "$fakebin/pi" 2>&1) || status=$?
+  expect_code 0 "$status" "listed explicit model should pass catalog validation: $out"
+  assert_equals "" "$out" "listed explicit model should emit no warning or error"
+
+  status=0
   out=$("$REVIEWER" check-model --model 'openrouter/anthropic/claude-sonnet-4.6' --bin "$fakebin/pi" 2>&1) || status=$?
   expect_code 1 "$status" "unlisted model should be refused when the catalog is readable"
-  assert_contains "$out" "not listed" "catalog miss did not name the listing"
+  assert_contains "$out" "is not listed by '$fakebin/pi --list-models'" "catalog miss did not name the listing command"
+  assert_contains "$out" "choose a listed id" "catalog miss did not give actionable listed-id guidance"
+  assert_not_contains "$out" "omit --model" "catalog miss must not advise omitting --model"
 
   status=0
   out=$(FM_FAKE_PI_LIST_STATUS=1 "$REVIEWER" check-model --model "$PIN" --bin "$fakebin/pi" 2>&1) || status=$?
   expect_code 0 "$status" "unreachable catalog should not block the pin"
   assert_contains "$out" "unreachable" "unreachable catalog did not report uncertainty"
-  pass "catalog miss refuses; unreachable listing is not a verdict"
+  pass "check-model enforces explicit --model, accepts listed ids, refuses unlisted ids without omit advice, and tolerates unreachable listings"
 }
 
 test_receipt_accepts_shape_and_rejects_vault_report() {
