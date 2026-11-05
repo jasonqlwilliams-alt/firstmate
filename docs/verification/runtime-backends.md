@@ -1039,7 +1039,7 @@ Refresh the focused fixtures and token-free real Herdr proof through the ordinar
 
 ```sh
 bin/fm-test-run.sh tests/fm-teardown.test.sh tests/fm-teardown-endpoint-safety.test.sh tests/fm-captain-hold-lifecycle.test.sh
-FM_TEARDOWN_KEEP_PANE_ONLY=1 FM_TEARDOWN_KEEP_PANE_LAB=1 bin/fm-test-run.sh tests/fm-teardown.test.sh
+FM_TEARDOWN_KEEP_PANE_LAB=1 bin/fm-test-run.sh tests/fm-teardown.test.sh
 ```
 
 The lab uses the named-session helper and default-session tripwire, with an inert shell and a disposable pool fixture.
