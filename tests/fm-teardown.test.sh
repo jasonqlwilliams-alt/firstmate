@@ -3918,7 +3918,7 @@ test_keep_pane_retirement() {
 test_keep_pane_lab() (
   [ "${FM_TEARDOWN_KEEP_PANE_LAB:-0}" = 1 ] || return 0
   command -v lsof >/dev/null 2>&1 || fail "keep-pane lab requires lsof"
-  local case_dir out ws tab pane shell_pid after rc=0 original_path=$PATH
+  local case_dir out ws tab pane shell_pid after rc=0 original_path=$PATH arg mode duplicate_ws landed_head
   case_dir=$(make_case keep-pane-real-lab)
   configure_keep_pane_case "$case_dir"
   rm -f "$case_dir/fakebin/lsof" "$case_dir/fakebin/keep-ps"
@@ -3930,7 +3930,7 @@ test_keep_pane_lab() (
   lab_keep() { env PATH="$original_path" "$HERDR_LAB_HELPER" run "$HERDR_LAB_SESSION" "$@"; }
   out=$(lab_keep status --json) || fail "lab status unavailable"
   printf 'Herdr keep-pane lab version: %s\n' "$(printf '%s' "$out" | jq -r '.client.version // .server.version // "unknown"')"
-  out=$(lab_keep workspace create --cwd "$case_dir/wt" --label keep-pane-lab --no-focus) || fail "lab workspace create failed"
+  out=$(lab_keep workspace create --cwd "$case_dir/wt" --label '└ task-x1 · p:AbCdEfGhIjKlMnOpQrStUv' --no-focus) || fail "lab workspace create failed"
   ws=$(printf '%s' "$out" | jq -er '.result.workspace.workspace_id') || fail "missing lab workspace"
   tab=$(printf '%s' "$out" | jq -er '.result.tab.tab_id') || fail "missing lab tab"
   pane=$(printf '%s' "$out" | jq -er '.result.root_pane.pane_id') || fail "missing lab pane"
@@ -3948,14 +3948,77 @@ for arg in "${args[@]}"; do case "$arg" in --session|--session=*) exit 9 ;; esac
 exec env PATH="$FM_KEEP_LAB_PATH" "$HERDR_LAB_HELPER" run "$HERDR_LAB_SESSION" "${args[@]}"
 SH
   chmod +x "$case_dir/fakebin/herdr"
-  fm_write_meta "$case_dir/state/task-x1.meta" \
-    "window=$HERDR_LAB_SESSION:$pane" 'endpoint_task_id=task-x1' \
-    "worktree=$case_dir/wt" "project=$case_dir/project" 'kind=ship' \
-    'mode=local-only' 'harness=codex' 'backend=herdr' 'spawn_gen=keep-pane-lab' \
-    "herdr_session=$HERDR_LAB_SESSION" "herdr_workspace_id=$ws" "herdr_tab_id=$tab" "herdr_pane_id=$pane"
-  seed_backlog_in_flight "$case_dir"
-  FM_KEEP_LAB_PATH="$original_path" FM_KEEP_CASE="$case_dir" \
-    run_teardown "$case_dir" --keep-pane > "$case_dir/out" 2> "$case_dir/err" || rc=$?
+  lab_seed_task() {
+    fm_write_meta "$case_dir/state/task-x1.meta" \
+      "window=$HERDR_LAB_SESSION:$pane" 'endpoint_task_id=task-x1' \
+      "worktree=$case_dir/wt" "project=$case_dir/project" 'kind=ship' \
+      'mode=local-only' 'harness=codex' 'backend=herdr' 'spawn_gen=keep-pane-lab' \
+      "herdr_session=$HERDR_LAB_SESSION" "herdr_workspace_id=$ws" "herdr_tab_id=$tab" "herdr_pane_id=$pane"
+    printf 'task=task-x1\nhome=%s\n' "$case_dir" > "$case_dir/pool/1/.fm-slot-owner"
+    seed_backlog_in_flight "$case_dir"
+  }
+  lab_retire() {
+    FM_KEEP_LAB_PATH="$original_path" FM_KEEP_CASE="$case_dir" run_teardown "$case_dir" "$@"
+  }
+  lab_seed_task
+
+  for arg in --force --legacy-record --retire-stale-record; do
+    rc=0
+    lab_retire --keep-pane "$arg" > "$case_dir/out" 2> "$case_dir/err" || rc=$?
+    [ "$rc" = 2 ] || fail "real cleanup accepted --keep-pane with $arg"
+    assert_present "$case_dir/state/task-x1.meta" "option refusal retired task identity"
+    [ "$(lab_keep pane process-info --pane "$pane" | jq -r '.result.process_info.shell_pid')" = "$shell_pid" ] \
+      || fail "option refusal replaced the real pane shell"
+  done
+  pass "real cleanup CLI refuses incompatible keep-pane options without touching its pane"
+
+  landed_head=$(git -C "$case_dir/wt" rev-parse HEAD)
+  wt_commit_file "$case_dir" unlanded.txt work
+  rc=0
+  lab_retire --keep-pane > "$case_dir/out" 2> "$case_dir/err" || rc=$?
+  [ "$rc" -ne 0 ] || fail "real keep-pane accepted unlanded work"
+  assert_present "$case_dir/state/task-x1.meta" "unlanded refusal retired task identity"
+  git -C "$case_dir/wt" reset --hard "$landed_head" >/dev/null
+  sed -i.bak 's/^endpoint_task_id=.*/endpoint_task_id=another-task/' "$case_dir/state/task-x1.meta"
+  rc=0
+  lab_retire --keep-pane > "$case_dir/out" 2> "$case_dir/err" || rc=$?
+  [ "$rc" -ne 0 ] || fail "real keep-pane accepted an unverified endpoint"
+  assert_present "$case_dir/state/task-x1.meta" "unverified endpoint refusal retired task identity"
+  sed -i.bak 's/^endpoint_task_id=.*/endpoint_task_id=task-x1/' "$case_dir/state/task-x1.meta"
+  [ "$(lab_keep pane process-info --pane "$pane" | jq -r '.result.process_info.shell_pid')" = "$shell_pid" ] \
+    || fail "safety refusals replaced the real pane shell"
+  pass "real Herdr pane survives unlanded-work and unverified-endpoint refusals"
+
+  for mode in journal-unreadable journal-mismatch journal-ambiguous journal-remove-fails; do
+    printf 'version=1\ntask_id=task-x1\nprojection_id=AbCdEfGhIjKlMnOpQrStUv\n' > "$case_dir/state/task-x1.herdr-presentation"
+    case "$mode" in
+      journal-unreadable)
+        printf 'projection_id=AbCdEfGhIjKlMnOpQrStUv\n' >> "$case_dir/state/task-x1.herdr-presentation" ;;
+      journal-mismatch)
+        printf 'version=1\ntask_id=task-x1\nprojection_id=AbCdEfGhIjKlMnOpQrStUx\n' > "$case_dir/state/task-x1.herdr-presentation" ;;
+      journal-ambiguous)
+        out=$(lab_keep workspace create --cwd "$case_dir/project" --label 'copy · p:AbCdEfGhIjKlMnOpQrStUv' --no-focus) \
+          || fail "could not create ambiguous lab workspace"
+        duplicate_ws=$(printf '%s' "$out" | jq -er '.result.workspace.workspace_id') \
+          || fail "missing ambiguous lab workspace id" ;;
+    esac
+    rc=0
+    FM_KEEP_MODE="$mode" lab_retire --keep-pane > "$case_dir/out" 2> "$case_dir/err" || rc=$?
+    [ "$rc" -ne 0 ] || fail "real keep-pane accepted $mode"
+    assert_present "$case_dir/state/task-x1.herdr-presentation" "$mode removed an unretired journal"
+    assert_present "$case_dir/state/task-x1.meta" "$mode retired task identity"
+    [ "$(lab_keep pane process-info --pane "$pane" | jq -r '.result.process_info.shell_pid')" = "$shell_pid" ] \
+      || fail "$mode replaced the real pane shell"
+    if [ "$mode" = journal-ambiguous ]; then
+      lab_keep workspace rename "$duplicate_ws" unrelated >/dev/null || fail "could not clear lab ambiguity"
+    fi
+    rm -f "$case_dir/state/task-x1.herdr-presentation"
+  done
+  rm -f "$case_dir/state/task-x1.backlog-close"
+  pass "real Herdr journal failures retain task identity and the exact pane"
+
+  rc=0
+  lab_retire --keep-pane > "$case_dir/out" 2> "$case_dir/err" || rc=$?
   [ "$rc" = 0 ] || fail "real keep-pane retirement failed: $(cat "$case_dir/err")"
   after=$(lab_keep pane process-info --pane "$pane" | jq -er '.result.process_info.shell_pid') || fail "real pane disappeared"
   [ "$after" = "$shell_pid" ] || fail "real pane shell was replaced"
@@ -3964,13 +4027,20 @@ SH
   assert_absent "$case_dir/pool/1/.fm-slot-owner" "real keep-pane slot claim survived"
   [ "$(backlog_row_state "$case_dir")" = "done" ] || fail "real keep-pane backlog remained open"
   pass "real Herdr lab: keep-pane retires records and slot while the identical pane and detached shell survive"
+  lab_seed_task
+  sed -i.bak 's/^herdr_workspace_id=.*/herdr_workspace_id=stale-workspace/' "$case_dir/state/task-x1.meta"
+  printf 'version=1\ntask_id=task-x1\nprojection_id=AbCdEfGhIjKlMnOpQrStUv\n' > "$case_dir/state/task-x1.herdr-presentation"
+  lab_retire --keep-pane > "$case_dir/out" 2> "$case_dir/err" \
+    || fail "real stale-workspace retirement failed: $(cat "$case_dir/err")"
+  assert_absent "$case_dir/state/task-x1.herdr-presentation" "real stale-workspace journal survived"
+  assert_absent "$case_dir/state/task-x1.meta" "real stale-workspace task identity survived"
+  [ "$(lab_keep pane process-info --pane "$pane" | jq -r '.result.process_info.shell_pid')" = "$shell_pid" ] \
+    || fail "real stale-workspace retirement replaced the pane shell"
+  pass "real Herdr stale-workspace journal retires without closing the pane"
   # Reset only the disposable fixture branch/record for the default-path
   # counterfactual; the real endpoint is still exactly the retained lab pane.
-  write_meta "$case_dir" local-only ship
-  sed -i.bak "s|^window=.*|window=$HERDR_LAB_SESSION:$pane|" "$case_dir/state/task-x1.meta"
-  printf 'backend=herdr\nherdr_session=%s\nherdr_workspace_id=%s\nherdr_tab_id=%s\nherdr_pane_id=%s\n' "$HERDR_LAB_SESSION" "$ws" "$tab" "$pane" >> "$case_dir/state/task-x1.meta"
-  FM_KEEP_LAB_PATH="$original_path" FM_KEEP_CASE="$case_dir" \
-    run_teardown "$case_dir" > "$case_dir/default.out" 2> "$case_dir/default.err" \
+  lab_seed_task
+  lab_retire > "$case_dir/default.out" 2> "$case_dir/default.err" \
     || fail "real default cleanup failed: $(cat "$case_dir/default.err")"
   out=$(lab_keep pane get "$pane" 2>&1) || true
   [ "$(printf '%s' "$out" | jq -r '.error.code')" = pane_not_found ] || fail "real counterfactual did not close pane"
@@ -3978,7 +4048,7 @@ SH
 )
 
 test_keep_pane_retirement
-test_keep_pane_lab
+test_keep_pane_lab || fail "real Herdr keep-pane lab failed"
 
 test_local_only_fork_remote_allows
 test_teardown_closes_the_backlog_item_itself
