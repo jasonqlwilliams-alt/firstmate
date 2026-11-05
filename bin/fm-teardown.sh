@@ -338,12 +338,6 @@ SUB_HOME_PARENT_MARKER=".fm-secondmate-parent"
 . "$SCRIPT_DIR/fm-nm-run-lib.sh"
 # shellcheck source=bin/fm-repository-policy-lib.sh
 . "$SCRIPT_DIR/fm-repository-policy-lib.sh"
-case "${1:-}" in
-  -h|--help)
-    sed -n '/^# Usage:/,/^# Transient /p' "$0" | sed '$d; s/^# \{0,1\}//'
-    exit 0
-    ;;
-esac
 if [ "${1:-}" = --release-orphaned-slot-claim ]; then
   if [ "$#" -ne 2 ] || [ -z "${2:-}" ]; then
     echo "error: invalid teardown request" >&2
@@ -3049,6 +3043,27 @@ teardown_kept_shell_sample() {
   [ "$(printf '%s\n' "$cwd" | sed -n 's/^n//p')" = / ]
 }
 
+teardown_keep_pane_journal_correlates() {
+  local pane workspace tab home journal_home
+  fm_backend_herdr_projection_journal_snapshot "$HERDR_PRESENTATION_JOURNAL" "$ID" || return 1
+  pane=$(fm_backend_herdr_cli "$TEARDOWN_HERDR_SESSION" pane get "$TEARDOWN_HERDR_PANE" 2>/dev/null) || return 1
+  workspace=$(printf '%s' "$pane" | jq -er --arg pane "$TEARDOWN_HERDR_PANE" \
+    '.result.pane | select(.pane_id == $pane) | .workspace_id | select(type == "string" and length > 0)' 2>/dev/null) || return 1
+  tab=$(printf '%s' "$pane" | jq -er --arg pane "$TEARDOWN_HERDR_PANE" \
+    '.result.pane | select(.pane_id == $pane) | .tab_id | select(type == "string" and length > 0)' 2>/dev/null) || return 1
+  if [ "$FM_BACKEND_HERDR_JOURNAL_VERSION" = 2 ]; then
+    home=$(fm_backend_herdr_projection_home_identity "$FM_HOME") || return 1
+    journal_home=$(fm_backend_herdr_projection_home_identity "$FM_BACKEND_HERDR_JOURNAL_HOME") || return 1
+    [ "$journal_home" = "$home" ] \
+      && [ "$FM_BACKEND_HERDR_JOURNAL_SESSION" = "$TEARDOWN_HERDR_SESSION" ] \
+      && [ "$FM_BACKEND_HERDR_JOURNAL_WORKSPACE_ID" = "$workspace" ] \
+      && [ "$FM_BACKEND_HERDR_JOURNAL_TAB_ID" = "$tab" ] \
+      && [ "$FM_BACKEND_HERDR_JOURNAL_PANE_ID" = "$TEARDOWN_HERDR_PANE" ] || return 1
+  fi
+  fm_backend_herdr_projection_endpoint_matches_journal \
+    "$TEARDOWN_HERDR_SESSION" "$workspace" "$HERDR_PRESENTATION_JOURNAL" "$ID"
+}
+
 teardown_prepare_kept_pane() {
   local attempt=0
   if ! declare -F fm_backend_herdr_pane_idle_shell_pid >/dev/null 2>&1 \
@@ -3476,6 +3491,15 @@ if [ "$BACKEND" = herdr ]; then
 fi
 if [ "$KEEP_PANE" = 1 ]; then
   teardown_prepare_kept_pane || exit 1
+  HERDR_PRESENTATION_JOURNAL="$STATE/$ID.herdr-presentation"
+  KEEP_PANE_JOURNAL_PRESENT=0
+  if [ -e "$HERDR_PRESENTATION_JOURNAL" ] || [ -L "$HERDR_PRESENTATION_JOURNAL" ]; then
+    KEEP_PANE_JOURNAL_PRESENT=1
+    teardown_keep_pane_journal_correlates || {
+      echo "REFUSED: --keep-pane cannot correlate this task's presentation journal with its exact pane; retaining task records and copy." >&2
+      exit 1
+    }
+  fi
 fi
 
 BACKLOG_CLOSED=0
@@ -3634,7 +3658,7 @@ HERDR_PRESENTATION_JOURNAL="$STATE/$ID.herdr-presentation"
 HERDR_PRESENTATION_RETIRE_CANDIDATE=0
 HERDR_PRESENTATION_SESSION=
 HERDR_PRESENTATION_PANE=
-if [ "$BACKEND" = herdr ] \
+if [ "$BACKEND" = herdr ] && [ "$KEEP_PANE" != 1 ] \
    && { [ -e "$HERDR_PRESENTATION_JOURNAL" ] || [ -L "$HERDR_PRESENTATION_JOURNAL" ]; }; then
   fm_backend_source herdr || true
   HERDR_PRESENTATION_SESSION=$(meta_value "$META" herdr_session)
@@ -3683,7 +3707,7 @@ elif [ "$BACKEND" != orca ]; then
   fm_backend_kill "$BACKEND" "$T" "$(meta_value "$META" zellij_tab_id)" "fm-$ID" 2>/dev/null || true
 fi
 if [ "$KEEP_PANE" = 1 ]; then
-  : # The correlated journal is retired only after the record transition lands.
+  :
 elif [ "$HERDR_PRESENTATION_RETIRE_CANDIDATE" = 1 ]; then
   if [ "$(fm_backend_herdr_pane_agent_state "$HERDR_PRESENTATION_SESSION" "$HERDR_PRESENTATION_PANE")" = dead ]; then
     rm -f "$HERDR_PRESENTATION_JOURNAL"
@@ -3773,6 +3797,15 @@ if [ "$KEEP_PANE" = 1 ]; then
     echo "REFUSED: --keep-pane lost proof of its surviving detached shell before record retirement; retaining the task record and pending backlog transition." >&2
     exit 1
   }
+  if [ "$KEEP_PANE_JOURNAL_PRESENT" = 1 ]; then
+    if ! teardown_keep_pane_journal_correlates \
+       || ! rm -f "$HERDR_PRESENTATION_JOURNAL" \
+       || [ -e "$HERDR_PRESENTATION_JOURNAL" ] \
+       || [ -L "$HERDR_PRESENTATION_JOURNAL" ]; then
+      echo "REFUSED: --keep-pane could not verify retirement of its exact presentation journal; retaining task record and pending backlog transition." >&2
+      exit 1
+    fi
+  fi
 fi
 if [ "$BACKLOG_CLOSED" = 1 ]; then
   BACKLOG_CLOSE_MARKER=$(fm_backlog_close_marker_path "$STATE" "$ID") || exit 1
@@ -3799,9 +3832,6 @@ else
     echo "error: $ID's endpoint and local copy are cleaned up, but its task record could not be removed ($FM_BACKLOG_TRANSITION_ERROR)" >&2
     exit 1
   fi
-fi
-if [ "$KEEP_PANE" = 1 ] && [ "$HERDR_PRESENTATION_RETIRE_CANDIDATE" = 1 ]; then
-  rm -f "$HERDR_PRESENTATION_JOURNAL"
 fi
 fm_lock_release "$META_LOCK"
 META_LOCK_HELD=0

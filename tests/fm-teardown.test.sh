@@ -69,6 +69,8 @@ REAL_PS_FOR_TEST=$(command -v ps)
 export REAL_PS_FOR_TEST
 REAL_LSOF_FOR_TEST=$(command -v lsof)
 export REAL_LSOF_FOR_TEST
+REAL_RM_FOR_TEST=$(command -v rm)
+export REAL_RM_FOR_TEST
 
 # Build a fresh sandbox for one test case. Sets up:
 #   $CASE/state/        - firstmate state dir (with a fresh watcher beacon)
@@ -3728,7 +3730,15 @@ case "${1:-} ${2:-}" in
     [ "${FM_KEEP_MODE:-}" != detach-fails ] || exit 1
     : > "$FM_KEEP_CASE/detached"
     ;;
-  'workspace list') printf '{"result":{"workspaces":[{"workspace_id":"wG","label":"task · p:AbCdEfGhIjKlMnOpQrStUv"}]}}\n' ;;
+  'workspace list')
+    if [ "${FM_KEEP_MODE:-}" = journal-ambiguous ]; then
+      printf '{"result":{"workspaces":[{"workspace_id":"wG","label":"└ task-x1 · p:AbCdEfGhIjKlMnOpQrStUv"},{"workspace_id":"wH","label":"other · p:AbCdEfGhIjKlMnOpQrStUv"}]}}\n'
+    elif [ "${FM_KEEP_MODE:-}" = journal-mismatch ]; then
+      printf '{"result":{"workspaces":[{"workspace_id":"wH","label":"└ task-x1 · p:AbCdEfGhIjKlMnOpQrStUv"}]}}\n'
+    else
+      printf '{"result":{"workspaces":[{"workspace_id":"wG","label":"└ task-x1 · p:AbCdEfGhIjKlMnOpQrStUv"}]}}\n'
+    fi
+    ;;
   'agent get') printf '{"error":{"code":"agent_not_found"}}\n'; exit 1 ;;
 esac
 SH
@@ -3740,6 +3750,16 @@ printf '%s\n' "$*" >> "$FM_KEEP_CASE/treehouse.log"
 exit 0
 SH
   chmod +x "$case_dir/fakebin/keep-ps" "$case_dir/fakebin/herdr" "$case_dir/fakebin/lsof" "$case_dir/fakebin/treehouse"
+  cat > "$case_dir/fakebin/rm" <<'SH'
+#!/usr/bin/env bash
+if [ "${FM_KEEP_MODE:-}" = journal-remove-fails ]; then
+  for arg in "$@"; do
+    [ "$arg" != "$FM_KEEP_CASE/state/task-x1.herdr-presentation" ] || exit 1
+  done
+fi
+exec "$REAL_RM_FOR_TEST" "$@"
+SH
+  chmod +x "$case_dir/fakebin/rm"
 }
 
 run_keep_pane_case() {
@@ -3758,7 +3778,8 @@ test_keep_pane_retirement() {
   case_dir=$(make_case keep-pane-success)
   configure_keep_pane_case "$case_dir"
   seed_backlog_in_flight "$case_dir"
-  printf 'version=1\ntask_id=task-x1\nprojection_id=AbCdEfGhIjKlMnOpQrStUv\n' > "$case_dir/state/task-x1.herdr-presentation"
+  printf 'version=2\ntask_id=task-x1\nprojection_id=AbCdEfGhIjKlMnOpQrStUv\nhome=%s\nsession=default\nworkspace_id=wG\ntab_id=wG:tQ\npane_id=wG:pQ\nparent_workspace_id=wH\nparent_label=parent\nworkspace_label=└ task-x1 · p:AbCdEfGhIjKlMnOpQrStUv\ntask_label=fm-task-x1\n' \
+    "$case_dir/home" > "$case_dir/state/task-x1.herdr-presentation"
   run_keep_pane_case "$case_dir" --keep-pane > "$case_dir/out" 2> "$case_dir/err" \
     || fail "keep-pane retirement failed: $(cat "$case_dir/err")"
   assert_absent "$case_dir/closed" "keep-pane closed the exact pane"
@@ -3770,6 +3791,44 @@ test_keep_pane_retirement() {
   [ "$(backlog_row_state "$case_dir")" = "done" ] || fail "keep-pane failed backlog close"
   assert_grep 'pane default:wG:pQ preserved' "$case_dir/out" "keep-pane did not report preservation"
   pass "keep-pane retires a landed task and its own slot with exact pane survival and shell detachment"
+
+  case_dir=$(make_case keep-pane-stale-workspace)
+  configure_keep_pane_case "$case_dir"
+  seed_backlog_in_flight "$case_dir"
+  sed -i.bak 's/^herdr_workspace_id=.*/herdr_workspace_id=wStale/' "$case_dir/state/task-x1.meta"
+  printf 'version=1\ntask_id=task-x1\nprojection_id=AbCdEfGhIjKlMnOpQrStUv\n' > "$case_dir/state/task-x1.herdr-presentation"
+  run_keep_pane_case "$case_dir" --keep-pane > "$case_dir/out" 2> "$case_dir/err" \
+    || fail "keep-pane stale workspace failed: $(cat "$case_dir/err")"
+  assert_absent "$case_dir/state/task-x1.herdr-presentation" "stale workspace left an actionable journal"
+  assert_absent "$case_dir/state/task-x1.meta" "stale workspace left the task record"
+  assert_absent "$case_dir/closed" "stale workspace closed the pane"
+  pass "keep-pane retires its exact journal when the recorded workspace id is stale"
+
+  for mode in journal-ambiguous journal-mismatch journal-unreadable journal-wrong-pane journal-remove-fails; do
+    case_dir=$(make_case "keep-pane-$mode")
+    configure_keep_pane_case "$case_dir"
+    seed_backlog_in_flight "$case_dir"
+    printf 'version=1\ntask_id=task-x1\nprojection_id=AbCdEfGhIjKlMnOpQrStUv\n' > "$case_dir/state/task-x1.herdr-presentation"
+    if [ "$mode" = journal-unreadable ]; then
+      printf 'projection_id=AbCdEfGhIjKlMnOpQrStUv\n' >> "$case_dir/state/task-x1.herdr-presentation"
+    elif [ "$mode" = journal-wrong-pane ]; then
+      printf 'version=2\ntask_id=task-x1\nprojection_id=AbCdEfGhIjKlMnOpQrStUv\nhome=%s\nsession=default\nworkspace_id=wG\ntab_id=wG:tQ\npane_id=wG:pOther\nparent_workspace_id=wH\nparent_label=parent\nworkspace_label=└ task-x1 · p:AbCdEfGhIjKlMnOpQrStUv\ntask_label=fm-task-x1\n' \
+        "$case_dir/home" > "$case_dir/state/task-x1.herdr-presentation"
+    fi
+    rc=0
+    FM_KEEP_MODE="$mode" run_keep_pane_case "$case_dir" --keep-pane > "$case_dir/out" 2> "$case_dir/err" || rc=$?
+    [ "$rc" -ne 0 ] || fail "keep-pane $mode unexpectedly succeeded"
+    assert_present "$case_dir/state/task-x1.herdr-presentation" "keep-pane $mode removed an unretired journal"
+    assert_present "$case_dir/state/task-x1.meta" "keep-pane $mode removed its task identity"
+    assert_absent "$case_dir/closed" "keep-pane $mode closed a pane"
+    [ "$(backlog_row_state "$case_dir")" = in_flight ] || fail "keep-pane $mode closed backlog"
+    if [ "$mode" = journal-remove-fails ]; then
+      assert_present "$case_dir/treehouse.log" "keep-pane journal removal failure did not reach retirement"
+    else
+      assert_absent "$case_dir/treehouse.log" "keep-pane $mode returned copy before correlation"
+    fi
+  done
+  pass "keep-pane refuses ambiguous, invalid, or unretirable journals without losing task identity"
 
   # Counterfactual: the identical finished task without the option closes.
   case_dir=$(make_case keep-pane-counterfactual)
@@ -3920,7 +3979,6 @@ SH
 
 test_keep_pane_retirement
 test_keep_pane_lab
-[ "${FM_TEARDOWN_KEEP_PANE_ONLY:-0}" != 1 ] || exit 0
 
 test_local_only_fork_remote_allows
 test_teardown_closes_the_backlog_item_itself
