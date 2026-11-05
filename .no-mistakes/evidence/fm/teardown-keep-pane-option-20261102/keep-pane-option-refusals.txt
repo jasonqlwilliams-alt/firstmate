@@ -1,0 +1,9 @@
+request: fm-teardown.sh task-x1 --keep-pane --force
+exit: 2
+response: REFUSED: --keep-pane cannot be combined with --force, --legacy-record or --retire-stale-record.
+request: fm-teardown.sh task-x1 --keep-pane --legacy-record
+exit: 2
+response: REFUSED: --keep-pane cannot be combined with --force, --legacy-record or --retire-stale-record.
+request: fm-teardown.sh task-x1 --keep-pane --retire-stale-record
+exit: 2
+response: REFUSED: --keep-pane cannot be combined with --force, --legacy-record or --retire-stale-record.
