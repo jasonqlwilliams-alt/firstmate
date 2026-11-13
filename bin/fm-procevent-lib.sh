@@ -28,6 +28,14 @@
 # acknowledgement can still repeat the effect on replay. Never describe this
 # runner as at-least-once, no-loss, or lossless, and never claim generic
 # exactly-once effects from the handled acknowledgement alone.
+# Pending-result workset: procevent-inbox/.pending/<id>.<sequence> contains
+# empty markers published before each result commits and removed only after
+# its handled acknowledgement commits. The original result, adapter, and handled
+# marker stay at their original paths. A missing .pending/.ready-v1 causes one
+# legacy rebuild without clearing concurrent captures. Later reconciles enumerate
+# only this workset, independent of handled history; a failed rebuild falls back
+# to the legacy scan so index storage cannot suppress delivery. Unhandled results remain
+# eligible even when their source is offline or no longer registered.
 
 # Machine-wide claim root. Homes can share one underlying source store, so the
 # "one owner per canonical source" rule cannot live inside a single home.
@@ -1092,6 +1100,10 @@ fm_procevent_capture() {
     rm -f -- "$tmp" "$adapter_dest" "$extension_tmp"
     return 1
   fi
+  if ! fm_procevent_pending_add "$inbox" "$id.$seq"; then
+    rm -f -- "$tmp" "$adapter_dest" "$extension_dest"
+    return 1
+  fi
   if ! mv -f -- "$tmp" "$dest"; then
     rm -f -- "$tmp" "$adapter_dest"
     [ -z "$extension_dest" ] || rm -f -- "$extension_dest"
@@ -1104,6 +1116,37 @@ fm_procevent_capture() {
   fi
 }
 
+# Membership is published before the result commit, so a concurrent one-time
+# rebuild cannot lose a new capture. A precommit marker without a result is inert.
+fm_procevent_pending_add() {  # <inbox> <id.sequence>
+  local pending="$1/.pending" marker="$1/.pending/$2"
+  [ ! -L "$pending" ] && [ ! -L "$marker" ] || return 1
+  (umask 077; mkdir -p "$pending") || return 1
+  [ -f "$marker" ] && return 0
+  (umask 077; set -C; : > "$marker") 2>/dev/null \
+    || { [ -f "$marker" ] && [ ! -L "$marker" ]; }
+}
+
+fm_procevent_pending_remove() {  # <inbox> <id.sequence>
+  [ ! -L "$1/.pending" ] || return 1
+  rm -f -- "$1/.pending/$2"
+}
+
+fm_procevent_pending_prepare() {  # <inbox>
+  local inbox=$1 result base
+  [ ! -L "$inbox/.pending" ] && [ ! -L "$inbox/.pending/.ready-v1" ] || return 1
+  [ -f "$inbox/.pending/.ready-v1" ] && return 0
+  (umask 077; mkdir -p "$inbox/.pending") || return 1
+  for result in "$inbox"/*.result; do
+    [ -f "$result" ] && [ ! -L "$result" ] || continue
+    [ -e "${result%.result}.handled" ] && continue
+    base=${result##*/}
+    fm_procevent_pending_add "$inbox" "${base%.result}" || return 1
+  done
+  (umask 077; set -C; : > "$inbox/.pending/.ready-v1") 2>/dev/null \
+    || { [ -f "$inbox/.pending/.ready-v1" ] && [ ! -L "$inbox/.pending/.ready-v1" ]; }
+}
+
 # fm_procevent_pending <state>
 # Print every durably captured result that has no durable handled
 # acknowledgement yet, oldest first. A result stays here - and so remains
@@ -1112,12 +1155,26 @@ fm_procevent_capture() {
 # it; this is what makes a restart between publication and handling recover
 # instead of silently losing the result.
 fm_procevent_pending() {
-  local state=$1 inbox result base seq
+  local state=$1 inbox result base seq candidate scan_dir indexed=1
   inbox=$(fm_procevent_inbox_dir "$state")
   [ -d "$inbox" ] || return 0
-  for result in "$inbox"/*.result; do
+  scan_dir="$inbox/.pending"
+  if ! fm_procevent_pending_prepare "$inbox"; then
+    scan_dir=$inbox
+    indexed=0
+  fi
+  for candidate in "$scan_dir"/*; do
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] || continue
+    if [ "$indexed" = 1 ]; then
+      result="$inbox/${candidate##*/}.result"
+    else
+      case "$candidate" in *.result) result=$candidate ;; *) continue ;; esac
+    fi
     [ -f "$result" ] && [ ! -L "$result" ] || continue
-    [ -e "${result%.result}.handled" ] && continue
+    if [ -e "${result%.result}.handled" ]; then
+      [ "$indexed" != 1 ] || fm_procevent_pending_remove "$inbox" "${candidate##*/}" || true
+      continue
+    fi
     base=${result%.result}
     seq=${base##*.}
     case "$seq" in ''|*[!0-9]*) continue ;; esac
@@ -1185,10 +1242,14 @@ fm_procevent_mark_handled() {
   fi
   if ln "$tmp" "$marker" 2>/dev/null; then
     rm -f -- "$tmp"
+    fm_procevent_pending_remove "$inbox" "$id.$seq" || true
     return 0
   fi
   rm -f -- "$tmp"
-  [ -f "$marker" ] && [ ! -L "$marker" ] && return 1
+  if [ -f "$marker" ] && [ ! -L "$marker" ]; then
+    fm_procevent_pending_remove "$inbox" "$id.$seq" || true
+    return 1
+  fi
   return 2
 }
 

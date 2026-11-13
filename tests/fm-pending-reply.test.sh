@@ -32,6 +32,8 @@
 #  17. An operator close through fm-send --resolve-key retires its escalated
 #      record on the next watcher scan, including a record last scanned by an
 #      earlier release, while a close for another request never does
+#  18. Settled history adds no per-record helper processes or locks to a tick,
+#      while an unfinished escalation close is still retried
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -1659,8 +1661,125 @@ test_operator_resolve_key_close_retires_escalated_record() {
   pass "an operator --resolve-key close retires its escalated record on the next scan"
 }
 
+# Count real external helper invocations rather than elapsed wall time: host
+# load must not make this regression flaky, and forks/locks caused the stall.
+counted_pending_tick() {  # <state> <log>
+  (
+    local scan_commands=$2
+    # shellcheck disable=SC2329
+    grep() { printf 'grep\n' >> "$scan_commands"; command grep "$@"; }
+    # shellcheck disable=SC2329
+    basename() { printf 'basename\n' >> "$scan_commands"; command basename "$@"; }
+    # shellcheck disable=SC2329
+    dirname() { printf 'dirname\n' >> "$scan_commands"; command dirname "$@"; }
+    # shellcheck disable=SC2329
+    mkdir() { printf 'mkdir\n' >> "$scan_commands"; command mkdir "$@"; }
+    # shellcheck disable=SC2329
+    uname() { printf 'uname\n' >> "$scan_commands"; command uname "$@"; }
+    fm_pending_reply_tick "$1"
+  )
+}
+
+test_resolved_history_adds_no_tick_helper_work() {
+  local home state dir corr rec i baseline loaded small_seconds large_seconds probe
+  local TIMEFORMAT='%R'
+  home=$(setup_parent resolved-history)
+  state="$home/state"
+  dir="$state/pending-replies"
+  corr=$(fm_pending_reply_create "$home" "$state" mate "still awaiting delivery")
+  rec=$(fm_pending_reply_path "$state" "$corr")
+  cp "$rec" "$home/open.before"
+  for ((i = 0; i < 3000; i++)); do
+    if [ "$i" -eq 50 ]; then
+      fm_pending_reply_tick "$state" || fail "small legacy workset rebuild failed"
+      : > "$home/commands"
+      small_seconds=$({ time for ((probe = 0; probe < 3; probe++)); do
+        counted_pending_tick "$state" "$home/commands"
+      done; } 2>&1)
+      baseline=$(wc -l < "$home/commands")
+      [ "$baseline" -gt 0 ] || fail "the helper-work probe did not observe the open record"
+    fi
+    printf -v corr '%016x' "$i"
+    # Cover never-escalated legacy records (no closure field), empty escalation
+    # fields, and escalations whose close was durably completed.
+    printf 'schema=%s\ncorr_id=%s\ntask_id=mate\nphase=resolved\nresolved_epoch=1\n' \
+      "$FM_PENDING_REPLY_SCHEMA" "$corr" > "$dir/$corr"
+    case "$((i % 3))" in
+      1) printf 'escalated_epoch=\nescalation_closed_epoch=\n' >> "$dir/$corr" ;;
+      2) printf 'escalated_epoch=1\nescalation_closed_epoch=2\n' >> "$dir/$corr" ;;
+    esac
+  done
+  cp "$dir/$corr" "$home/resolved.before"
+  # Rebuild from the larger legacy history once, then compare ordinary ticks.
+  rm "$dir/.active/.ready-v1"
+  fm_pending_reply_tick "$state" || fail "large legacy workset rebuild failed"
+  : > "$home/commands"
+  large_seconds=$({ time for ((probe = 0; probe < 3; probe++)); do
+    counted_pending_tick "$state" "$home/commands"
+  done; } 2>&1)
+  loaded=$(wc -l < "$home/commands")
+  [ "$loaded" -eq "$baseline" ] \
+    || fail "resolved history increased tick helper work: $baseline -> $loaded"
+  awk -v small="$small_seconds" -v large="$large_seconds" \
+    'BEGIN { exit !(large <= 3 * small + 1) }' \
+    || fail "settled history scaled tick time: 50=$small_seconds seconds, 3000=$large_seconds seconds"
+  printf 'tick cost (three polls): 50 resolved=%ss; 3000 resolved=%ss\n' "$small_seconds" "$large_seconds"
+  [ ! -e "$dir/.active/$corr" ] || fail "settled record remained in the active workset"
+  cmp -s "$rec" "$home/open.before" || fail "undelivered open record changed"
+  cmp -s "$dir/$corr" "$home/resolved.before" || fail "settled history changed"
+  [ ! -e "$state/mate.status" ] || fail "settled history emitted a status event"
+  # A repeated or late correlated reply still finds the original record and
+  # returns the same already-resolved verdict, without a new status transition.
+  fm_pending_reply_try_resolve "$state" "$corr" || fail "late reply lost its resolved correlation"
+  [ ! -e "$state/mate.status" ] || fail "late reply reopened a settled request"
+  pass "3000 settled records add no tick helper processes, locks, or status work"
+}
+
+test_tick_retries_resolved_escalation_close() {
+  local home state corr rec before
+  home=$(setup_parent resolved-close-retry)
+  state="$home/state"
+  export FM_PENDING_REPLY_NOW=9900
+  corr=$(escalate_missed_request "$home" mate "close must retry")
+  rec=$(fm_pending_reply_path "$state" "$corr")
+  # Durable state left by an interrupted resolution or a failed close append.
+  fm_pending_reply_set "$rec" phase resolved
+  fm_pending_reply_set "$rec" resolved_epoch 9900
+  fm_pending_reply_set "$rec" resolved_via status
+  [ -n "$(status_open_decisions "$state/mate.status")" ] || fail "fixture escalation is not open"
+  fm_pending_reply_tick "$state"
+  [ -n "$(fm_pending_reply_get "$rec" escalation_closed_epoch)" ] || fail "tick skipped an unfinished close"
+  [ -z "$(status_open_decisions "$state/mate.status")" ] || fail "tick left the escalation open"
+  before=$(wc -l < "$state/mate.status")
+  fm_pending_reply_tick "$state"
+  [ "$(wc -l < "$state/mate.status")" -eq "$before" ] || fail "tick repeated a finished close"
+  pass "resolved records with an unfinished escalation close remain retryable"
+}
+
+test_unavailable_index_preserves_pending_work() {
+  local home state corr rec
+  home=$(setup_parent index-unavailable)
+  state="$home/state"
+  corr=$(fm_pending_reply_create "$home" "$state" mate "index must not suppress reply")
+  fm_pending_reply_mark_delivered "$state" "$corr"
+  rec=$(fm_pending_reply_path "$state" "$corr")
+  printf 'done [corr=%s]: correlated reply\n' "$corr" > "$state/mate.status"
+  mv "$state/pending-replies/.active" "$home/active.saved"
+  : > "$state/pending-replies/.active"
+  fm_pending_reply_tick "$state" 2>/dev/null
+  [ "$(fm_pending_reply_get "$rec" phase)" = resolved ] || fail "index failure suppressed reply resolution"
+  rm "$state/pending-replies/.active"
+  mv "$home/active.saved" "$state/pending-replies/.active"
+  fm_pending_reply_tick "$state"
+  [ ! -e "$state/pending-replies/.active/$corr" ] || fail "restored index retained settled work"
+  pass "an unavailable pending index preserves resolution through the legacy scan"
+}
+
 # --- run --------------------------------------------------------------------
 
+test_unavailable_index_preserves_pending_work
+test_resolved_history_adds_no_tick_helper_work
+test_tick_retries_resolved_escalation_close
 test_normal_correlated_reply_resolves_once
 test_completed_turn_no_report_triggers_one_recovery
 test_recovery_attempt_is_never_reinjected

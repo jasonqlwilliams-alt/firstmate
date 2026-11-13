@@ -84,6 +84,15 @@
 # That close settles the record too: the parent-status scan reads the close of a
 # request's own reserved decision as settling it (via=operator), because the
 # note names the request as pending-reply-id= and so never matches corr=.
+# Tick workset: pending-replies/.active/<record-name> contains one empty marker
+# per record still requiring reconciliation. Creation publishes the marker
+# before the record; resolution removes it under the existing correlation lock
+# only after any escalation close is durable. Records remain at their original
+# paths for late replies and repeat resolution. A missing .active/.ready-v1
+# triggers one legacy rebuild, using builtin field reads without clearing
+# concurrent publications. Settled history is never opened or enumerated on
+# subsequent ticks. If rebuilding fails, the legacy scan preserves liveness.
+# No retention, new lock, or second correlation store is added.
 #
 # Retryable undelivered escalation: a delivery-unknown escalation reports that
 # the request may never have reached the mate, so the request stays the owner's
@@ -156,6 +165,47 @@ fm_pending_reply_dir() {  # <state-dir>
 
 fm_pending_reply_path() {  # <state-dir> <corr_id>
   printf '%s/%s' "$(fm_pending_reply_dir "$1")" "$2"
+}
+
+# Add before publishing a new record so even a concurrent legacy rebuild
+# cannot miss it. Empty markers carry membership only, never record contents.
+fm_pending_reply_activate() {  # <record-path>
+  local rec=$1 active="${1%/*}/.active"
+  [ ! -L "$active" ] && [ ! -L "$active/${rec##*/}" ] || return 1
+  (umask 077; mkdir -p "$active" && : > "$active/${rec##*/}")
+}
+
+# Upgrade legacy homes once. Only the watcher calls this; concurrent creators
+# add their own markers before publishing records, and nothing clears the set.
+fm_pending_reply_active_prepare() {  # <record-directory>
+  local dir=$1 rec phase escalated closed line
+  [ ! -L "$dir/.active" ] || return 1
+  [ ! -L "$dir/.active/.ready-v1" ] || return 1
+  [ -f "$dir/.active/.ready-v1" ] && return 0
+  (umask 077; mkdir -p "$dir/.active") || return 1
+  for rec in "$dir"/*; do
+    [ -f "$rec" ] || continue
+    phase='' escalated='' closed=''
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        phase=*) phase=${line#*=} ;;
+        escalated_epoch=*) escalated=${line#*=} ;;
+        escalation_closed_epoch=*) closed=${line#*=} ;;
+      esac
+    done 2>/dev/null < "$rec" || phase=unknown
+    if [ "$phase" = resolved ] && { [ -z "$escalated" ] || [ -n "$closed" ]; }; then
+      continue
+    fi
+    (umask 077; : > "$dir/.active/${rec##*/}") || return 1
+  done
+  (umask 077; : > "$dir/.active/.ready-v1")
+}
+
+# Settlement callers hold the correlation lock; an undelivered discard removes
+# its marker after deleting its own record. Settled records stay at their paths.
+_fm_pending_reply_deactivate() {  # <record-path>
+  [ ! -L "${1%/*}/.active" ] || return 1
+  rm -f -- "${1%/*}/.active/${1##*/}"
 }
 
 # Privacy-safe correlation id: 16 lowercase hex chars (64 bits of entropy).
@@ -360,6 +410,7 @@ wrong_home_scan_signature=
 grace_secs=$(fm_pending_reply_grace_secs)
 EOF
   chmod 600 "$tmp" 2>/dev/null || true
+  fm_pending_reply_activate "$rec" || { rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$rec" || return 1
   printf '%s' "$corr"
 }
@@ -567,7 +618,8 @@ fm_pending_reply_discard_undelivered() {  # <state-dir> <corr_id>
   [ -z "$delivered" ] || return 1
   marker=$(fm_pending_reply_delivery_confirmation_path "$state" "$corr")
   rm -f "$marker" 2>/dev/null || true
-  rm -f "$rec"
+  rm -f "$rec" || return 1
+  _fm_pending_reply_deactivate "$rec"
 }
 
 # 0 if a status line is a correlated acknowledgement for <corr_id>.
@@ -1180,9 +1232,9 @@ _fm_pending_reply_close_escalation_locked() {  # <state-dir> <corr_id>
   [ -f "$rec" ] || return 1
   [ "$(fm_pending_reply_get "$rec" phase)" = resolved ] || return 0
   escalated=$(fm_pending_reply_get "$rec" escalated_epoch)
-  [ -n "$escalated" ] || return 0
+  [ -n "$escalated" ] || { _fm_pending_reply_deactivate "$rec"; return $?; }
   closed=$(fm_pending_reply_get "$rec" escalation_closed_epoch)
-  [ -z "$closed" ] || return 0
+  [ -z "$closed" ] || { _fm_pending_reply_deactivate "$rec"; return $?; }
   parent_status=$(fm_pending_reply_get "$rec" parent_status)
   [ -n "$parent_status" ] || return 1
   escalation=$(fm_pending_reply_escalation_line "$parent_status" "$rec" "$corr")
@@ -1214,7 +1266,8 @@ $(status_open_decisions "$parent_status")
 EOF
   fi
   now=$(fm_pending_reply_now)
-  fm_pending_reply_set "$rec" escalation_closed_epoch "$now"
+  fm_pending_reply_set "$rec" escalation_closed_epoch "$now" || return 1
+  _fm_pending_reply_deactivate "$rec"
 }
 
 # Escalate once after a missed recovery report or failed delivery outcome.
@@ -1464,27 +1517,29 @@ fm_pending_reply_tick_one() {  # <state-dir> <corr_id> <busy_state> [secondmate-
   return 0
 }
 
-# Scan every pending record for this parent state. Safe to call every poll.
+# Scan the active workset for this parent state. Safe to call every poll.
 # Never scrapes secondmate conversation; uses only parent status, backend busy
 # state, and optional secondmate-home wrong-home path checks.
 fm_pending_reply_tick() {  # <state-dir>
-  local state=$1 dir rec corr task_id phase delivered meta backend target label busy sm_home harness remote_host
+  local state=$1 dir scan_dir rec candidate corr task_id phase delivered meta backend target label busy sm_home harness remote_host
   local observation observation_task found i
   local -a observation_tasks=() observation_values=()
   dir=$(fm_pending_reply_dir "$state")
   [ -d "$dir" ] || return 0
-  for rec in "$dir"/*; do
+  scan_dir="$dir/.active"
+  # An unavailable index must not suppress existing delivery/recovery work.
+  fm_pending_reply_active_prepare "$dir" || scan_dir=$dir
+  for candidate in "$scan_dir"/*; do
+    [ -f "$candidate" ] || continue
+    case "${candidate##*/}" in .*) continue ;; esac
+    rec="$dir/${candidate##*/}"
     [ -f "$rec" ] || continue
-    case "$(basename "$rec")" in
-      .*) continue ;;
-    esac
     corr=$(fm_pending_reply_get "$rec" corr_id)
-    [ -n "$corr" ] || corr=$(basename "$rec")
+    [ -n "$corr" ] || corr=${rec##*/}
     task_id=$(fm_pending_reply_get "$rec" task_id)
     phase=$(fm_pending_reply_get "$rec" phase)
     if [ "$phase" = resolved ]; then
-      # Cheap no-op unless an escalation for this record is still open; this is
-      # the retry that makes the close converge after a transient write failure.
+      # Retry unfinished closes; successful settlement retires the marker.
       fm_pending_reply_close_escalation "$state" "$corr" || true
       continue
     fi
