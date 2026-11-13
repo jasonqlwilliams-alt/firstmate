@@ -1775,8 +1775,49 @@ test_unavailable_index_preserves_pending_work() {
   pass "an unavailable pending index preserves resolution through the legacy scan"
 }
 
+test_late_legacy_records_reconcile_and_escalate() {
+  local home state dir staging replied escalated
+  home=$(setup_parent late-legacy)
+  state="$home/state"
+  dir="$state/pending-replies"
+  staging="$home/old-writer"
+  mkdir -p "$dir" "$staging"
+  fm_pending_reply_tick "$state" || fail "the empty workset did not become ready"
+  [ -f "$dir/.active/.ready-v1" ] || fail "the workset was not ready before the old writer"
+
+  replied=$(FM_PENDING_REPLY_DIR_OVERRIDE="$staging" \
+    fm_pending_reply_create "$home" "$state" mate "late correlated reply")
+  FM_PENDING_REPLY_DIR_OVERRIDE="$staging" \
+    fm_pending_reply_mark_delivered "$state" "$replied" || fail "late reply delivery setup failed"
+  printf 'done [corr=%s]: reply after upgrade\n' "$replied" > "$state/mate.status"
+
+  escalated=$(FM_PENDING_REPLY_DIR_OVERRIDE="$staging" \
+    fm_pending_reply_create "$home" "$state" mate "late missed request")
+  FM_PENDING_REPLY_DIR_OVERRIDE="$staging" \
+    fm_pending_reply_mark_delivered "$state" "$escalated" || fail "late escalation delivery setup failed"
+  FM_PENDING_REPLY_DIR_OVERRIDE="$staging" \
+    fm_pending_reply_mark_turn_completed "$state" "$escalated" request \
+    || fail "late escalation turn setup failed"
+  FM_PENDING_REPLY_DIR_OVERRIDE="$staging" FM_PENDING_REPLY_SEND_HOOK=false \
+    fm_pending_reply_send_recovery "$state" "$escalated" && fail "failed recovery fixture unexpectedly delivered"
+  [ "$(FM_PENDING_REPLY_DIR_OVERRIDE="$staging" phase_of "$state" "$escalated")" = recovery_failed ] \
+    || fail "failed recovery fixture was not ready for escalation"
+
+  mv "$staging/$replied" "$dir/$replied"
+  mv "$staging/$escalated" "$dir/$escalated"
+  [ ! -e "$dir/.active/$replied" ] && [ ! -e "$dir/.active/$escalated" ] \
+    || fail "the old writer unexpectedly published workset markers"
+  fm_pending_reply_tick "$state" || fail "late legacy records failed to reconcile"
+  [ "$(phase_of "$state" "$replied")" = resolved ] || fail "late legacy reply was not reconciled"
+  [ "$(phase_of "$state" "$escalated")" = escalated ] || fail "late legacy miss was not escalated"
+  [ -e "$dir/.active/$escalated" ] || fail "the unresolved late record left the workset"
+  [ ! -e "$dir/.active/$replied" ] || fail "the resolved late record remained active"
+  pass "late legacy records reconcile and escalate after workset readiness"
+}
+
 # --- run --------------------------------------------------------------------
 
+test_late_legacy_records_reconcile_and_escalate
 test_unavailable_index_preserves_pending_work
 test_resolved_history_adds_no_tick_helper_work
 test_tick_retries_resolved_escalation_close

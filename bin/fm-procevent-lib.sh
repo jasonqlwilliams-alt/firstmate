@@ -40,6 +40,9 @@
 
 # Machine-wide claim root. Homes can share one underlying source store, so the
 # "one owner per canonical source" rule cannot live inside a single home.
+# shellcheck source=bin/fm-workset-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fm-workset-lib.sh"
+
 fm_procevent_claim_root() {
   printf '%s\n' "${FM_PROCEVENT_CLAIM_ROOT:-${XDG_STATE_HOME:-$HOME/.local/state}/firstmate/procevent-claims}"
 }
@@ -1134,17 +1137,15 @@ fm_procevent_pending_remove() {  # <inbox> <id.sequence>
 }
 
 fm_procevent_pending_prepare() {  # <inbox>
-  local inbox=$1 result base checked
+  local inbox=$1 result base checked rc
   checked="$inbox/.pending/.legacy-checked"
-  [ ! -L "$inbox/.pending" ] && [ ! -L "$inbox/.pending/.ready-v1" ] \
-    && [ ! -L "$checked" ] || return 1
-  (umask 077; mkdir -p "$inbox/.pending") || return 1
-  [ ! -e "$checked" ] || [ -f "$checked" ] || return 1
-  if [ -f "$inbox/.pending/.ready-v1" ] && [ -f "$checked" ] \
-    && [ ! "$inbox" -nt "$checked" ]; then
-    return 0
+  if fm_workset_scan_due "$inbox" "$inbox/.pending"; then
+    :
+  else
+    rc=$?
+    [ "$rc" -eq 1 ] && return 0
+    return 1
   fi
-  (umask 077; touch "$checked") || return 1
   for result in "$inbox"/*.result; do
     [ -f "$result" ] && [ ! -L "$result" ] || continue
     [ -e "${result%.result}.handled" ] && continue

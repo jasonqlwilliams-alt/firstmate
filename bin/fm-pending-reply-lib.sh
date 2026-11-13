@@ -90,8 +90,8 @@
 # only after any escalation close is durable. Records remain at their original
 # paths for late replies and repeat resolution. A missing .active/.ready-v1
 # triggers one legacy rebuild, using builtin field reads without clearing
-# concurrent publications. Settled history is never opened or enumerated on
-# subsequent ticks. If rebuilding fails, the legacy scan preserves liveness.
+# concurrent publications. Later ticks rescan settled history only after the
+# record directory changes. If rebuilding fails, the legacy scan preserves liveness.
 # No retention, new lock, or second correlation store is added.
 #
 # Retryable undelivered escalation: a delivery-unknown escalation reports that
@@ -127,6 +127,8 @@ _FM_PENDING_REPLY_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/n
 . "$_FM_PENDING_REPLY_LIB_DIR/fm-tmux-lib.sh"
 # shellcheck source=bin/fm-classify-lib.sh
 . "$_FM_PENDING_REPLY_LIB_DIR/fm-classify-lib.sh"
+# shellcheck source=bin/fm-workset-lib.sh
+. "$_FM_PENDING_REPLY_LIB_DIR/fm-workset-lib.sh"
 
 FM_PENDING_REPLY_SCHEMA='fm-pending-reply.v1'
 FM_PENDING_REPLY_CORR_RE='corr=[A-Fa-f0-9]{16}'
@@ -178,11 +180,14 @@ fm_pending_reply_activate() {  # <record-path>
 # Upgrade legacy homes once. Only the watcher calls this; concurrent creators
 # add their own markers before publishing records, and nothing clears the set.
 fm_pending_reply_active_prepare() {  # <record-directory>
-  local dir=$1 rec phase escalated closed line
-  [ ! -L "$dir/.active" ] || return 1
-  [ ! -L "$dir/.active/.ready-v1" ] || return 1
-  [ -f "$dir/.active/.ready-v1" ] && return 0
-  (umask 077; mkdir -p "$dir/.active") || return 1
+  local dir=$1 rec marker phase escalated closed line rc
+  if fm_workset_scan_due "$dir" "$dir/.active"; then
+    :
+  else
+    rc=$?
+    [ "$rc" -eq 1 ] && return 0
+    return 1
+  fi
   for rec in "$dir"/*; do
     [ -f "$rec" ] || continue
     phase='' escalated='' closed=''
@@ -196,9 +201,19 @@ fm_pending_reply_active_prepare() {  # <record-directory>
     if [ "$phase" = resolved ] && { [ -z "$escalated" ] || [ -n "$closed" ]; }; then
       continue
     fi
-    (umask 077; : > "$dir/.active/${rec##*/}") || return 1
+    marker="$dir/.active/${rec##*/}"
+    if [ -L "$marker" ]; then
+      rm -f -- "$dir/.active/.legacy-checked"
+      return 1
+    fi
+    [ -f "$marker" ] && continue
+    (umask 077; set -C; : > "$marker") 2>/dev/null \
+      || { [ -f "$marker" ] && [ ! -L "$marker" ]; } \
+      || { rm -f -- "$dir/.active/.legacy-checked"; return 1; }
   done
-  (umask 077; : > "$dir/.active/.ready-v1")
+  [ ! -f "$dir/.active/.ready-v1" ] || return 0
+  (umask 077; : > "$dir/.active/.ready-v1") \
+    || { rm -f -- "$dir/.active/.legacy-checked"; return 1; }
 }
 
 # Settlement callers hold the correlation lock; an undelivered discard removes
