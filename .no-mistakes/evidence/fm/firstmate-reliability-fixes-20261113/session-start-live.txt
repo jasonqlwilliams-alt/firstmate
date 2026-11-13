@@ -1,0 +1,7 @@
+session-start exit=0 elapsed_seconds=13
+SESSION START - <worktree>/.live-session-home
+- [ ] demo - Recover active worker (repo: demo) (kind: ship)
+NETWORK CHECKS
+NEXT STEP
+deferred wait exit=0
+home-summary schema=fm-secondmate-home-summary.v1
