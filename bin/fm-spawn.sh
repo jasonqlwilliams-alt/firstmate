@@ -1036,6 +1036,7 @@ SPAWN_SLOT_ACQUIRED=0
 SPAWN_SLOT_CLAIMED=0
 SPAWN_SLOT_BASE=
 SPAWN_SLOT_LEASE_ID=
+SPAWN_SLOT_ACQUIRE_FILE=
 RELAUNCH_REPLACEMENT_PENDING=0
 RELAUNCH_REPLACEMENT_BUSY_GEN=
 RELAUNCH_REPLACEMENT_HARNESS=
@@ -1256,6 +1257,7 @@ spawn_abort_cleanup() {
     CONFIG_INHERIT_LOCK_HELD=0
     fm_lock_release "$CONFIG_INHERIT_LOCK" || true
   fi
+  [ -z "$SPAWN_SLOT_ACQUIRE_FILE" ] || rm -f -- "$SPAWN_SLOT_ACQUIRE_FILE" 2>/dev/null || true
   return "$status"
 }
 trap spawn_abort_cleanup EXIT
@@ -3877,11 +3879,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   # Check legacy or lost leases before get can reset any reusable slot.
   fm_treehouse_require_recorded_leases "$PROJ_ABS" "$STATE" || exit 1
-  SPAWN_SLOT_BASE=$(git -C "$PROJ_ABS" rev-parse --verify HEAD 2>/dev/null || true)
+  SPAWN_SLOT_ACQUIRE_FILE=$(umask 077; mktemp "$STATE/.$ID.treehouse-acquire.XXXXXX") || exit 1
   # A process lease ends with the shell, while a task record can remain held.
   # Acquire durably and enter that exact path in the existing pane shell.
   # shellcheck disable=SC2016 # Expansion belongs to the destination pane shell.
-  spawn_send_text_line "$WT_TARGET" "$(printf 'fm_acquired_slot=$(treehouse get --lease --lease-holder %q) && cd -- "$fm_acquired_slot"' "$ID")"
+  spawn_send_text_line "$WT_TARGET" "fm_acquired_slot=\$(treehouse get --lease --lease-holder $(printf '%q' "$ID")) && fm_acquired_base=\$(git -C \"\$fm_acquired_slot\" rev-parse --verify HEAD) && printf '%s\n%s\n' \"\$fm_acquired_slot\" \"\$fm_acquired_base\" > $(printf '%q' "$SPAWN_SLOT_ACQUIRE_FILE") && cd -- \"\$fm_acquired_slot\""
 
   # Wait for the acquired path: the pane's cwd moves from project to worktree.
   # Target the stable window id, not the name: if the name is ever lost (e.g. an
@@ -3942,6 +3944,13 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
 
   if fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
     SPAWN_SLOT_ACQUIRED=1
+    if [ -f "$SPAWN_SLOT_ACQUIRE_FILE" ] && [ ! -L "$SPAWN_SLOT_ACQUIRE_FILE" ]; then
+      SPAWN_SLOT_ACQUIRE_PATH=$(sed -n '1p' "$SPAWN_SLOT_ACQUIRE_FILE")
+      if [ -n "$SPAWN_SLOT_ACQUIRE_PATH" ] \
+         && [ "$(fm_treehouse_canonical_dir "$SPAWN_SLOT_ACQUIRE_PATH" || true)" = "$(fm_treehouse_canonical_dir "$WT" || true)" ]; then
+        SPAWN_SLOT_BASE=$(sed -n '2p' "$SPAWN_SLOT_ACQUIRE_FILE")
+      fi
+    fi
     SPAWN_SLOT_LEASE_ID=$(jq -er --arg slot "$WT" --arg holder "$ID" '
       [.worktrees[] | select(.path == $slot and .leased == true and .lease_holder == $holder)]
       | if length == 1 then .[0].lease_id else empty end
@@ -3966,7 +3975,17 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   fi
 fi
 if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ]; then
+  if [ "$SPAWN_SLOT_ACQUIRED" = 1 ] && [ -n "$SPAWN_SLOT_BASE" ]; then
+    current_slot_head=$(git -C "$WT" rev-parse --verify HEAD 2>/dev/null || true)
+    if [ "$current_slot_head" != "$SPAWN_SLOT_BASE" ]; then
+      echo "error: acquired Treehouse slot $WT gained a commit before base refresh; refusing to launch" >&2
+      exit 1
+    fi
+  fi
   freshen_spawn_worktree_base "$WT" || exit 1
+  if [ "$SPAWN_SLOT_ACQUIRED" = 1 ] && [ -n "$SPAWN_SLOT_BASE" ]; then
+    SPAWN_SLOT_BASE=$(git -C "$WT" rev-parse --verify HEAD 2>/dev/null) || exit 1
+  fi
 fi
 
 # Pre-register Claude's workspace trust for the worktree, at the first point the
