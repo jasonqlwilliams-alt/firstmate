@@ -71,9 +71,16 @@ check_tuple() { # <kind> <tuple-json>
   m=$(jq -r '.model // ""' <<< "$2")
   e=$(jq -r '.effort // ""' <<< "$2")
   case "$1" in
-    helm|backup_helm|secondmates) "$SCRIPT_DIR/fm-harness.sh" primary-eligible "$h" || return 1 ;;
+    helm) "$SCRIPT_DIR/fm-harness.sh" primary-eligible "$h" || return 1 ;;
+    backup_helm) "$SCRIPT_DIR/fm-backup-helm.sh" validate-successor "$h" "${m:-default}" "${e:-default}" || return 1 ;;
+    secondmates) "$SCRIPT_DIR/fm-harness.sh" secondmate-eligible "$h" || return 1 ;;
   esac
-  "$SCRIPT_DIR/fm-harness.sh" validate-native-effort "$h" "$m" "$e" || return 1
+  if [ "$1" != backup_helm ]; then
+    jq -e -n -L "$SCRIPT_DIR" --arg h "$h" --arg m "$m" --arg e "$e" '
+      import "fm-dispatch-effort" as dispatch;
+      dispatch::effort_ok($h; $m; (if $e == "" then null else $e end))
+    ' >/dev/null || return 1
+  fi
   case "$h" in
     agy) fm_agy_model_allowed "$m" || return 1 ;;
     cursor)
@@ -223,7 +230,7 @@ command_apply() {
   PUBLISHING=0
   apply_cleanup
   trap - EXIT HUP INT TERM
-  printf 'helm-handover: use the primary launch procedure with %s; live helm unchanged\n' "$(jq -c '.roles.helm' "$data")"
+  printf 'helm-handover: NOT applied; running helm unchanged. Use the primary launch procedure with %s\n' "$(jq -c '.roles.helm' "$data")"
   "$SCRIPT_DIR/fm-config-push.sh" || fail "lineup saved, but secondmate propagation failed"
   if jq -e '.restart_secondmates == true' "$data" >/dev/null; then
     ids=$(jq -r '.restart_ids[]' "$data")

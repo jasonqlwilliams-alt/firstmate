@@ -330,8 +330,14 @@ primary_eligible() {
   return 1
 }
 
+secondmate_eligible() {
+  [ "${1:-}" = kimi ] && return 0
+  primary_eligible "$@"
+}
+
 case "${1:-}" in
   primary-eligible) shift; primary_eligible "$@" ;;
+  secondmate-eligible) shift; secondmate_eligible "$@" ;;
   validate-native-effort) shift; validate_native_effort "$@" ;;
   crew) resolve_crew ;;
   secondmate) resolve_secondmate ;;

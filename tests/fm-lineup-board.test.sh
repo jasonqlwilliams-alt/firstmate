@@ -96,6 +96,14 @@ for bad in agy cursor primary; do
   jq "$filter" "$TMP_ROOT/board.json" > "$TMP_ROOT/bad.json"
   refuse build "offered $bad fence violation"
 done
+for filter in \
+  '.rows[1].options += [{harness:"claude"}]' \
+  '.rows[1].options += [{harness:"codex",effort:"max"}]' \
+  '.rows[-1].options += [{harness:"opencode",effort:"high"}]' \
+  '.rows[-1].options += [{harness:"kimi",effort:"low"}]'; do
+  jq "$filter" "$TMP_ROOT/board.json" > "$TMP_ROOT/bad.json"
+  refuse build 'unsupported successor or effort option'
+done
 [ ! -e "$FM_HOME/.lavish/model-lineup.html" ] || fail 'refused build published board'
 # Every resolved role and profile, including later array candidates, is checked.
 for filter in \
@@ -103,7 +111,12 @@ for filter in \
   '.dispatch.default={harness:"cursor",model:"auto"}' \
   '.roles.helm={harness:"agy",model:"gemini-fixture"}' \
   '.roles.backup_helm={harness:"gemini"}' \
+  '.roles.backup_helm={harness:"claude"}' \
+  '.roles.backup_helm={harness:"codex",effort:"max"}' \
   '.roles.secondmates={harness:"muse"}' \
+  '.roles.helm={harness:"kimi"}' \
+  '.roles.secondmates={harness:"kimi",effort:"high"}' \
+  '.dispatch.default={harness:"opencode",effort:"high"}' \
   '.roles.helm={harness:"pi",model:"fixture",effort:"ultra"}' \
   '.fallback_arrays=true | .dispatch.default=[.dispatch.default,{harness:"cursor",model:"wrong"}]'; do
   jq "$filter" "$TMP_ROOT/apply.json" > "$TMP_ROOT/bad.json"
@@ -133,6 +146,9 @@ if grep -q '<' "$TMP_ROOT/extracted.json"; then fail 'unescaped HTML in payload'
 sid=$("$FIXTURE/bin/fm-procevent-lavish.sh" source-id "$page")
 grep -qF "register lavish $sid -- $FIXTURE/bin/fm-procevent-lavish.sh poll $page" "$CALL_LOG" || fail 'did not arm through adapter'
 pass 'safe JSON injection and canonical Lavish wake arming'
+jq '.rows[2].options += [{harness:"kimi",model:"kimi-fixture"}]' "$TMP_ROOT/board.json" > "$TMP_ROOT/kimi-board.json"
+"$BOARD" build "$TMP_ROOT/kimi-board.json" > "$TMP_ROOT/build.out"
+pass 'Kimi secondmate option is offered'
 # An ended session must reopen; a session that stays ended never arms.
 : > "$FM_HOME/ended"
 "$BOARD" build "$TMP_ROOT/board.json" > "$TMP_ROOT/build.out"
@@ -172,8 +188,12 @@ pass 'real adapter read preserves all selected tuples and typed instructions'
 grep -q '^propagate ' "$CALL_LOG" || fail 'did not propagate'
 if grep -q '^restart ' "$CALL_LOG"; then fail 'restarted by default'; fi
 jq -e '.rules[0].when=="Fixture tasks" and .rules[0].why=="Retained provenance"' "$FM_HOME/config/crew-dispatch.json" >/dev/null || fail 'lost provenance'
-grep -q '^helm-handover:' "$TMP_ROOT/apply.out" || fail 'missing helm instruction'
+grep -q '^helm-handover: NOT applied; running helm unchanged. Use the primary launch procedure with ' "$TMP_ROOT/apply.out" || fail 'missing explicit helm handover notice'
 pass 'apply propagates, preserves provenance, and leaves restart off'
+jq '.roles.secondmates={harness:"kimi",model:"kimi-fixture"}' "$TMP_ROOT/apply.json" > "$TMP_ROOT/kimi-apply.json"
+"$BOARD" apply "$TMP_ROOT/kimi-apply.json" > "$TMP_ROOT/apply.out"
+[ "$(cat "$FM_HOME/config/secondmate-harness")" = 'kimi kimi-fixture' ] || fail 'Kimi secondmate selection was not published'
+pass 'Kimi remains selectable for secondmates'
 cp "$FM_HOME/config/crew-dispatch.json" "$TMP_ROOT/before-dispatch"
 cp "$FM_HOME/config/secondmate-harness" "$TMP_ROOT/before-secondmates"
 cp "$FM_HOME/config/backup-helm-successor" "$TMP_ROOT/before-backup"

@@ -1121,25 +1121,9 @@ crew_dispatch_validate() {
     echo "CREW_DISPATCH: invalid config/crew-dispatch.json - malformed JSON"
     return 0
   fi
-  err=$(jq -r '
+  err=$(jq -r -L "$SCRIPT_DIR" '
+    import "fm-dispatch-effort" as dispatch;
     def verified($h): ["claude","codex","opencode","pi","pi-signed","grok","kimi","cursor","muse","rovo","omp","agy"] | index($h);
-    def effort_ok($h; $m; $e):
-      if $e == null then true
-      elif ($e | type) != "string" then false
-      elif $e == "ultra" then (($h == "pi" or $h == "pi-signed") and (($m | type) == "string") and ($m | startswith("codex-native/")) and ($m | length) > 13)
-      elif $h == "claude" then (["low","medium","high","xhigh","max"] | index($e))
-      elif $h == "codex" then (["low","medium","high","xhigh"] | index($e))
-      elif $h == "grok" then (["low","medium","high"] | index($e))
-      elif $h == "pi" or $h == "pi-signed" or $h == "omp" then (["low","medium","high","xhigh","max"] | index($e))
-      elif $h == "muse" then (["low","medium","high","xhigh","max"] | index($e))
-      elif $h == "rovo" then (["low","medium","high","max"] | index($e))
-      # agy accepts only low|medium|high natively; bin/fm-spawn.sh caps xhigh and
-      # max onto high rather than dropping the intent, so all five are valid to
-      # request here.
-      elif $h == "agy" then (["low","medium","high","xhigh","max"] | index($e))
-      elif $h == "opencode" or $h == "kimi" or $h == "cursor" then false
-      else true
-      end;
     def profiles($value):
       if ($value | type) == "array" then $value
       elif ($value | type) == "object" then [$value]
@@ -1156,7 +1140,7 @@ crew_dispatch_validate() {
       | map({h: .harness, m: .model, e: .effort})
       | map(select(.e != null))
       | map(select((.h | type) == "string" and verified(.h)))
-      | map(select(. as $p | effort_ok($p.h; $p.m; $p.e) | not))
+      | map(select(. as $p | dispatch::effort_ok($p.h; $p.m; $p.e) | not))
       | map("\(.h):\(.e)")
       | unique;
     if type != "object" then "top-level value must be an object"

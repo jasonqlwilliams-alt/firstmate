@@ -11,6 +11,7 @@
 #   fm-backup-helm.sh arm [options]
 #   fm-backup-helm.sh condition [options]
 #   fm-backup-helm.sh probe [--harness <h> [--model <m>] [--effort <e>]]
+#   fm-backup-helm.sh validate-successor <harness> <model-or-default> <effort-or-default>
 #   fm-backup-helm.sh handover --harness <h> --backend <tmux|herdr> --target <target> [options]
 #   fm-backup-helm.sh retire
 #   fm-backup-helm.sh source-id
@@ -58,6 +59,7 @@
 #            the idle bound expires.
 # retire     Retire the when-watch. Idempotent.
 # source-id  Print the canonical when-watch source id.
+# validate-successor  Check one candidate without probing or changing state.
 #
 # Arm options, before any frozen handover flags:
 #   --backend <tmux|herdr>   freeze this backend instead of discovering it
@@ -781,6 +783,14 @@ cmd_arm() {
 
 case "${1-}" in
   arm) shift; cmd_arm "$@" ;;
+  validate-successor)
+    shift
+    [ "$#" -eq 3 ] || die "validate-successor needs harness, model, and effort"
+    SUCCESSOR_HARNESS=$1 SUCCESSOR_MODEL=$2 SUCCESSOR_EFFORT=$3
+    [ "$SUCCESSOR_MODEL" != default ] || SUCCESSOR_MODEL=
+    [ "$SUCCESSOR_EFFORT" != default ] || SUCCESSOR_EFFORT=
+    validate_successor
+    ;;
   condition) shift; cmd_condition "$@" ;;
   probe) shift; cmd_probe "$@" ;;
   handover) shift; cmd_handover "$@" ;;

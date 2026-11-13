@@ -18,7 +18,7 @@ The board uses the Firstmate design tokens from the shipped Bearings board.
 
 1. Read the active home's dispatch configuration and role pins, and identify the live helm through `bin/fm-harness.sh` and its launch metadata.
    Read all existing dispatch rules, including their `when` and `why`, and the default; do not substitute a fixed list of tiers for the home's own rules.
-   When no dispatch file exists, compose clearly labeled task tiers from the home's accepted dispatch needs, with explicit natural-language conditions, and a default.
+   When no dispatch rules exist, show the roles and default only.
    Resolve inherited secondmate defaults through `bin/fm-harness.sh` and display the effective current tuple, explaining the inheritance in the reason.
    Show unset only when no effective choice exists, such as an unconfigured backup successor; suggest a concrete valid tuple before applying.
 2. Load `quota-array-dispatch` and use its procedure to compute suggestions for every row from one fresh `quota-axi` snapshot.
@@ -43,10 +43,10 @@ Each entry's task field is a board row id, so the board groups the evidence by t
 A missing cache, missing exact model match, or missing task match means `no public score`.
 Never transfer a related model's score or invent a number for a preview, alias, or unlisted model.
 
-On `/lineup refresh-benchmarks`, dispatch read-only research against primary benchmark publishers and model vendors, using the home's normal research dispatch procedure.
+During ordinary `/lineup` preparation, research the offered models against primary benchmark publishers and model vendors using the home's normal research dispatch procedure.
 The research deliverable names exact evaluated model ids, benchmark versions, scores and units in benchmark labels, source URLs, and as-of dates.
 Verify those sources and write only supported entries into the private cache; unsupported models retain no score.
-Rebuild the board after updating the cache.
+Refresh supported cache entries before building the board.
 Do not ship a real benchmark snapshot, a provider mapping, or operator-specific routing values in tracked files.
 
 ## Handle the board wake
