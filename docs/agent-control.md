@@ -38,6 +38,7 @@ An exit that delivers lifecycle input but cannot prove the agent stopped fails w
 On tmux and Herdr, a positively identified Codex sign-in screen uses `TERM` on one verified native Codex foreground process and returns `stopped-sign-in` after the backend proves the agent stopped.
 It sends no keys or text, rechecks screen and endpoint ownership plus process birth identity before signalling, and refuses if any observation changes or cannot identify exactly one native process.
 The [Codex adapter reference](../.agents/skills/harness-adapters/references/harness/codex.md) owns the authentication screen facts.
+The [authentication verification record](verification/runtime-backends.md#codex-authentication-stop-regression) links the captured-screen regression and the explicitly opt-in live guard.
 This same exit path permits `relaunch` to proceed past sign-in; unreadable and unattributed endpoints remain refused.
 Other Codex exits type `/quit` only when the current composer is proven empty.
 It refuses an active global-update picker or an uncertain screen before typing, before each confirming or retry Enter, and after Enter without sending another Enter; a dismissed picker retained above a proven current composer does not block ordinary quit.

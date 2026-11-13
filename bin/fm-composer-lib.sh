@@ -1609,18 +1609,30 @@ _fm_composer_pi_verdict() {  # <screen> <styled> <has_identity> <identity>
 }
 
 # Positive identification of Codex's initial authentication choice screen.
-# This is a stop-only verdict, never permission to type. Require the welcome,
-# authentication explanation, numbered choices and current continue footer;
-# retained sign-in text above another screen or composer does not qualify.
+# This is a stop-only verdict, never permission to type. The welcome and chooser
+# explanation independently identify the context; require either alongside the
+# complete authentication choices and current continue footer. A later screen
+# or footer cannot reuse authentication text retained above it.
 fm_composer_codex_signin_screen() {  # <styled-screen>
   printf '%s\n' "$1" | fm_composer_strip_ansi | LC_ALL=C awk '
-    { sub(/\r$/, ""); sub(/^[ \t]+/, ""); sub(/[ \t]+$/, "") }
-    /^Welcome to Codex([ ,\[].*)?$/ { welcome=NR }
+    { sub(/\r$/, ""); sub(/^[ \t]+/, ""); sub(/[ \t]+$/, ""); recognized=0 }
+    /^Welcome to Codex([ ,\[].*)?$/ {
+      welcome=NR; explanation=0; first=0; device=0; alternative=0; provider=0; another=0; footer=0; unknown=0
+    }
     /^Sign in with ChatGPT to use Codex as part of your paid plan/ { explanation=NR }
-    /^[›❯> ]*1[.)] +Sign in with ChatGPT$/ { first=NR }
-    /^[›❯> ]*[23][.)] +(Sign in with Device Code|Provide your own API key|Sign in with an API key)$/ { alternative=NR }
-    NF { last=NR; footer=($0 ~ /^Press [Ee]nter to continue$/) }
-    END { exit !(welcome && explanation > welcome && first > explanation &&
-                 alternative > first && last > alternative && footer) }
+    /^Choose how you want to use Codex\.$/ { explanation=NR }
+    /^[›❯> ]*1[.)] +Sign in with ChatGPT$/ { first=NR; recognized=1 }
+    /^[›❯> ]*2[.)] +Sign in with Device Code$/ { device=NR; alternative=NR; recognized=1 }
+    /^[›❯> ]*[23][.)] +(Provide your own API key|Sign in with an API key)$/ { alternative=NR; recognized=1 }
+    /^[›❯> ]*3[.)] +Sign in another way$/ { another=NR; recognized=1 }
+    /^Use an API key or another provider$/ { if (another > device) provider=NR }
+    /^[›❯> ]*[0-9]+[.)] +/ { if (!recognized) unknown=1 }
+    /^Press [Ee]nter to continue$/ { if (!footer) footer=NR }
+    NF { last=NR }
+    END { exit !((welcome || explanation) &&
+                 (!welcome || welcome < first) && (!explanation || explanation < first) &&
+                 first && !unknown && footer == last &&
+                 ((!another && alternative > first && footer > alternative) ||
+                  (device > first && another > device && provider > another && footer > provider))) }
   '
 }

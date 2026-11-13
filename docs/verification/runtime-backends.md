@@ -1833,6 +1833,12 @@ Claude Code 2.1.267 passed two consecutive accelerated quiet-lease lifecycle run
 
 ## Codex authentication stop regression
 
-On 2026-11-13 with tmux 3.7c and GCC 16.2.1, the portable regression `bin/fm-test-run.sh tests/fm-control-codex-signin.test.sh` exercised a compiled sign-in stub in isolated tmux endpoints without launching a vendor harness.
-It reported `ok - sign-in control sent no keys and preserved terminal endpoints`; it also checked refusal of update, unknown, retained-history, incomplete and wrong-process screens, and survival of an unrelated Codex-named process.
-This verifies process targeting and the captured-style screen contract, not a live vendor authentication flow.
+On 2026-11-13, a single no-input capture with codex-cli 0.167.2, an empty `CODEX_HOME`, a throwaway cwd and a private tmux socket supplied the current chooser fixture.
+The portable regression `bin/fm-test-run.sh tests/fm-control-codex-signin.test.sh` renders that fixture and the legacy wording with compiled stand-ins, using tmux 3.7c and GCC 16.2.1.
+It reports `ok - captured legacy/current sign-in screens and independent signals stop without keys; uncertain screens remain protected`.
+It verifies the loss of either context signal separately, refuses update, unknown, retained-history, repeated-footer, incomplete and wrong-process screens, and preserves an unrelated Codex-named process.
+
+The complete live stop check is `FM_CODEX_SIGNIN_LIVE=1 bin/fm-test-run.sh tests/fm-codex-signin-live-e2e.test.sh`.
+It is explicitly opt-in despite spending no model tokens because an accidental key at the update picker has broken a global installation.
+Its header owns isolation, no-input enforcement, exact-PID cleanup and optional private capture mechanics.
+The updated guard has been exercised with compiled stand-ins; the single live capture above predates the classifier update and does not claim a post-update live stop result.

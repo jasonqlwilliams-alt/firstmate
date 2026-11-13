@@ -7,7 +7,7 @@ Verified on 2026-06-11 with codex-cli 0.139.0 unless a fact gives a newer versio
 | Fact | Value |
 |---|---|
 | Busy state | Unknown until a semantic source is live-verified: the app-server turn lifecycle is unreachable for a pane worker, and project lifecycle hooks did not fire for a Firstmate-launched worker. |
-| Sign-in screen | The initial authentication screen requires the Codex welcome, paid-plan explanation, numbered ChatGPT and device-code or API-key choices, and a final Enter-to-continue footer; this is a stop-only screen with no keys, using the process path owned by [`docs/agent-control.md`](../../../../../docs/agent-control.md). |
+| Sign-in screen | Legacy and codex-cli 0.167.2 choosers use the recognized numbered ChatGPT and device-code or API/provider choices plus the final Enter-to-continue footer; the welcome and chooser explanation are independent context signals, either sufficient with the complete choices; this is a stop-only screen with no keys, using the process path owned by [`docs/agent-control.md`](../../../../../docs/agent-control.md). |
 | Exit command | `/quit`; its slash popup needs about one second before Enter; [`docs/agent-control.md`](../../../../../docs/agent-control.md) owns guarded submission and the exit result. |
 | Interrupt | Single Escape. |
 | Skill invocation | `$<skill>`, for example `$no-mistakes`; `/<skill>` is Claude-only and Codex rejects it as "Unrecognized command". |
