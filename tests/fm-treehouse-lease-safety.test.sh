@@ -41,6 +41,29 @@ if [ "${1:-}" = send-keys ]; then
     case "$arg" in
       *'treehouse get'*)
         (cd "$FM_TEST_PROJECT" && eval "$arg" && pwd > "$FM_TEST_CWD") || exit 1
+        case "${FM_TEST_ABORT_MODE:-}" in
+          clean) git -C "$(cat "$FM_TEST_CWD")" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*' ;;
+          modified) printf 'keep this work\n' > "$(cat "$FM_TEST_CWD")/preserved.txt" ;;
+          committed)
+            slot=$(cat "$FM_TEST_CWD")
+            printf 'keep this commit\n' > "$slot/preserved.txt"
+            git -C "$slot" add preserved.txt
+            git -C "$slot" -c user.name=test -c user.email=test@example.invalid commit -qm preserved
+            git -C "$slot" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+            ;;
+          recorded)
+            slot=$(cat "$FM_TEST_CWD")
+            printf 'worktree=%s\n' "$slot" > "$FM_TEST_HOME/state/occupant.meta"
+            git -C "$slot" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+            ;;
+          foreign-holder)
+            slot=$(cat "$FM_TEST_CWD")
+            state="${slot%/*/*}/treehouse-state.json"
+            jq --arg slot "$slot" '(.worktrees[] | select(.path == $slot)).lease_holder = "someone-else"' "$state" > "$state.next"
+            mv "$state.next" "$state"
+            git -C "$slot" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+            ;;
+        esac
         ;;
     esac
   done
@@ -111,3 +134,43 @@ expect_code 0 "$rc" "durable lease repair did not unblock allocation: $out"
 assert_present "$SLOT/preserved.txt" 'repair or later allocation reset the preserved copy'
 [ "$(cat "$FM_TEST_CWD")" != "$SLOT" ] || fail 'allocation reused the repaired lease'
 pass 'missing state refuses safely, and state-only lease repair permits a different slot'
+
+for abort_mode in clean modified committed recorded foreign-holder; do
+  CASE_ROOT="$TMP_ROOT/abort-$abort_mode"
+  HOME_DIR="$CASE_ROOT/home"
+  PROJECT="$CASE_ROOT/project"
+  mkdir -p "$HOME_DIR" "$CASE_ROOT/user" "$CASE_ROOT/state"
+  fm_git_init_commit "$PROJECT"
+  fm_test_spawn_home "$HOME_DIR" codex
+  printf 'tmux\n' > "$HOME_DIR/config/backend"
+  export TREEHOUSE_ROOT="$CASE_ROOT/pool" XDG_CONFIG_HOME="$CASE_ROOT/user/.config" XDG_STATE_HOME="$CASE_ROOT/state"
+  export FM_TEST_PROJECT="$PROJECT" FM_TEST_CWD="$CASE_ROOT/cwd" FM_TEST_TREEHOUSE_CALLS="$CASE_ROOT/treehouse-calls" FM_TEST_ABORT_MODE="$abort_mode" FM_TEST_HOME="$HOME_DIR"
+  out=$(run_spawn "abort-$abort_mode"); rc=$?
+  [ "$rc" -ne 0 ] || fail "the $abort_mode abort fixture unexpectedly launched"
+  SLOT=$(cat "$FM_TEST_CWD")
+  POOL_STATE="${SLOT%/*/*}/treehouse-state.json"
+  [ ! -e "$HOME_DIR/state/abort-$abort_mode.meta" ] || fail "the $abort_mode abort published a task record"
+  if [ "$abort_mode" = clean ]; then
+    assert_contains "$out" 'could not fetch origin' 'the clean abort missed its intended failure'
+    jq -e --arg slot "$SLOT" '.worktrees | any(.[]; .path == $slot and (.leased // false) == false)' "$POOL_STATE" >/dev/null \
+      || fail 'a clean failed spawn stranded its durable lease'
+    pass 'clean failed spawn returns its own Treehouse lease'
+  else
+    case "$abort_mode" in
+      modified|committed) assert_present "$SLOT/preserved.txt" 'modified failed spawn discarded work' ;;
+      recorded) assert_present "$HOME_DIR/state/occupant.meta" 'occupying record was lost' ;;
+    esac
+    if [ "$abort_mode" = committed ]; then
+      [ -z "$(git -C "$SLOT" status --porcelain)" ] || fail 'committed fixture still has uncommitted work'
+      [ "$(git -C "$SLOT" rev-parse HEAD)" != "$(git -C "$PROJECT" rev-parse HEAD)" ] \
+        || fail 'committed fixture did not advance past the spawn base'
+    fi
+    holder="abort-$abort_mode"
+    [ "$abort_mode" != foreign-holder ] || holder=someone-else
+    jq -e --arg slot "$SLOT" --arg holder "$holder" '.worktrees | any(.[]; .path == $slot and .leased == true and .lease_holder == $holder)' "$POOL_STATE" >/dev/null \
+      || fail 'modified failed spawn released its durable lease'
+    assert_contains "$out" 'treehouse return --force' 'modified abort omitted the recovery command'
+    assert_contains "$out" "$SLOT" 'modified abort omitted the held slot path'
+    pass "$abort_mode failed spawn keeps its lease and prints recovery command"
+  fi
+done

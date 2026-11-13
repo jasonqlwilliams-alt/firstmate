@@ -1032,7 +1032,10 @@ SPAWN_TASK_SET_LOCK=
 SPAWN_TASK_SET_LOCK_HELD=0
 SPAWN_TREEHOUSE_PROJECT_LOCK=
 SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
+SPAWN_SLOT_ACQUIRED=0
 SPAWN_SLOT_CLAIMED=0
+SPAWN_SLOT_BASE=
+SPAWN_SLOT_LEASE_ID=
 RELAUNCH_REPLACEMENT_PENDING=0
 RELAUNCH_REPLACEMENT_BUSY_GEN=
 RELAUNCH_REPLACEMENT_HARNESS=
@@ -1068,8 +1071,41 @@ parse_orca_worktree_result() {
   fi
 }
 
+spawn_abort_return_untouched_slot() {
+  local slot_state head status record_rc=0
+  [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ] || return 1
+  [ -n "$SPAWN_SLOT_BASE" ] && [ -n "$SPAWN_SLOT_LEASE_ID" ] || return 1
+  [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ] || return 1
+  fm_treehouse_pool_slot "$PROJ_ABS" "$WT" || return 1
+  fm_treehouse_slot_owner_state "$WT" "$ID"
+  case "$SPAWN_SLOT_CLAIMED:$FM_TREEHOUSE_SLOT_OWNER" in
+    1:mine) [ "$FM_TREEHOUSE_SLOT_OWNER_HOME" = "$FM_HOME" ] || return 1 ;;
+    0:absent) ;;
+    *) return 1 ;;
+  esac
+  fm_treehouse_slot_foreign_records "$WT" "$STATE/$ID.meta" >/dev/null 2>&1 || record_rc=$?
+  [ "$record_rc" = 1 ] || return 1
+  head=$(git -C "$WT" rev-parse --verify HEAD 2>/dev/null) || return 1
+  [ "$head" = "$SPAWN_SLOT_BASE" ] || return 1
+  git -C "$WT" symbolic-ref -q HEAD >/dev/null 2>&1 && return 1
+  status=$(git -C "$WT" status --porcelain --ignored --untracked-files=all 2>/dev/null) || return 1
+  [ -z "$status" ] || return 1
+  slot_state="${WT%/*/*}/treehouse-state.json"
+  [ -f "$slot_state" ] && [ ! -L "$slot_state" ] || return 1
+  jq -e --arg slot "$WT" --arg holder "$ID" --arg lease "$SPAWN_SLOT_LEASE_ID" '
+    .worktrees | map(select(.path == $slot))
+    | length == 1 and .[0].leased == true
+      and .[0].lease_holder == $holder and .[0].lease_id == $lease
+  ' "$slot_state" >/dev/null 2>&1 || return 1
+  treehouse return --force --if-lease-id "$SPAWN_SLOT_LEASE_ID" "$WT" >&2 || return 1
+  jq -e --arg slot "$WT" '
+    .worktrees | map(select(.path == $slot))
+    | length == 1 and .[0].leased != true
+  ' "$slot_state" >/dev/null 2>&1
+}
+
 spawn_abort_cleanup() {
-  local status=$? staged_file
+  local status=$? staged_file return_cmd
   [ -z "$RELAUNCH_PATH_PROBE" ] || rm -f -- "$RELAUNCH_PATH_PROBE" || true
   for staged_file in "${RELAUNCH_WIRING_FILES[@]:-}"; do
     [ -z "$staged_file" ] || rm -f -- "$staged_file" || true
@@ -1178,14 +1214,23 @@ spawn_abort_cleanup() {
   # from another home must refuse until bin/fm-teardown.sh
   # --release-orphaned-slot-claim drops the leftover. The release itself never
   # removes another task's claim.
-  if [ "$SPAWN_SLOT_CLAIMED" = 1 ] && [ -n "${WT:-}" ] \
-     && [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ] \
-     && fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
-    SPAWN_SLOT_CLAIMED=0
-    if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
-      fm_treehouse_slot_owner_release "$WT" "$ID" || true
-    else
-      echo "warning: leaving task $ID's slot claim on $WT in place; the Treehouse project lock is no longer held, so a later spawn of $ID may reclaim it, a later same-home spawn may recycle it once $ID no longer records it, and a spawn from another home must refuse until $FM_ROOT/bin/fm-teardown.sh --release-orphaned-slot-claim $WT drops the leftover claim" >&2
+  if [ "$SPAWN_SLOT_ACQUIRED" = 1 ] && [ -n "${WT:-}" ] \
+     && [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ]; then
+    if ! spawn_abort_return_untouched_slot; then
+      if [ -n "$SPAWN_SLOT_LEASE_ID" ]; then
+        printf -v return_cmd 'treehouse return --force --if-lease-id %q %q' "$SPAWN_SLOT_LEASE_ID" "$WT"
+      else
+        printf -v return_cmd 'treehouse return --force --if-lease-holder %q %q' "$ID" "$WT"
+      fi
+      printf 'warning: keeping Treehouse lease for aborted task %s at %s; inspect the slot before running: %s\n' "$ID" "$WT" "$return_cmd" >&2
+    fi
+    if [ "$SPAWN_SLOT_CLAIMED" = 1 ]; then
+      SPAWN_SLOT_CLAIMED=0
+      if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
+        fm_treehouse_slot_owner_release "$WT" "$ID" || true
+      else
+        echo "warning: leaving task $ID's slot claim on $WT in place; the Treehouse project lock is no longer held, so a later spawn of $ID may reclaim it, a later same-home spawn may recycle it once $ID no longer records it, and a spawn from another home must refuse until $FM_ROOT/bin/fm-teardown.sh --release-orphaned-slot-claim $WT drops the leftover claim" >&2
+      fi
     fi
   fi
   if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
@@ -3832,6 +3877,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   # Check legacy or lost leases before get can reset any reusable slot.
   fm_treehouse_require_recorded_leases "$PROJ_ABS" "$STATE" || exit 1
+  SPAWN_SLOT_BASE=$(git -C "$PROJ_ABS" rev-parse --verify HEAD 2>/dev/null || true)
   # A process lease ends with the shell, while a task record can remain held.
   # Acquire durably and enter that exact path in the existing pane shell.
   # shellcheck disable=SC2016 # Expansion belongs to the destination pane shell.
@@ -3892,6 +3938,15 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   if [ -z "$WT" ]; then
     echo "error: treehouse get did not enter an isolated worktree within 60s (last seen '${last_seen:-none}': $last_reason; spawning project '$PROJ_ABS'); inspect window $T" >&2
     exit 1
+  fi
+
+  if fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
+    SPAWN_SLOT_ACQUIRED=1
+    SPAWN_SLOT_LEASE_ID=$(jq -er --arg slot "$WT" --arg holder "$ID" '
+      [.worktrees[] | select(.path == $slot and .leased == true and .lease_holder == $holder)]
+      | if length == 1 then .[0].lease_id else empty end
+      | select(type == "string" and length > 0)
+    ' "${WT%/*/*}/treehouse-state.json" 2>/dev/null) || SPAWN_SLOT_LEASE_ID=
   fi
 
   validate_spawn_worktree "treehouse get" "$T"
