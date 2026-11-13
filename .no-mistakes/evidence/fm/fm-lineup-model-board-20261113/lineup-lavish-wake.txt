@@ -1,0 +1,21 @@
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: form#lineup-form
+tag: choice
+text:
+| Apply model lineup
+| {"schema":"fm-lineup-answer.v1","generated":"2026-11-12T00:00:00Z","rows":[{"id":"helm","kind":"helm","picks":[{"harness":"codex","model":"gpt-6.1-sol","effort":"high"}]},{"id":"backup_helm","kind":"backup_helm","picks":[{"harness":"codex","model":"gpt-6.1-sol","effort":"high"}]},{"id":"secondmates","kind":"secondmates","picks":[{"harness":"codex"}]},{"id":"default","kind":"default","picks":[{"harness":"codex"},{"harness":"codex","model":"gpt-6.1-sol","effort":"high"}]}],"fallback_arrays":true,"restart_secondmates":false,"instructions":"Keep backup successor as Codex; do not restart second mates."}
+END ANNOTATIONS
+END LAVISH RESULT (1 of 1)

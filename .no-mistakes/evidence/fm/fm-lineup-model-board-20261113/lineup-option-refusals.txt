@@ -1,0 +1,14 @@
+refused offered agy_wrong; published board unchanged
+error: agy runs Gemini models only; refusing model 'wrong'; use the claude harness for Anthropic models or the codex harness for OpenAI models
+fm-lineup-board: refused default tuple: {"harness":"agy","model":"wrong"}
+refused offered cursor_wrong; published board unchanged
+error: Cursor model not-allowlisted is refused by config/cursor-model-allowlist
+fm-lineup-board: refused default tuple: {"harness":"cursor","model":"not-allowlisted"}
+refused offered primary_agy; published board unchanged
+error: agy is not a verified primary harness
+fm-lineup-board: refused helm tuple: {"harness":"agy","model":"gemini-pro"}
+refused offered backup_claude; published board unchanged
+error: claude cannot be the backup helm successor: the handover exists because Claude's runway is running out
+fm-lineup-board: refused backup_helm tuple: {"harness":"claude"}
+refused offered effort_wrong; published board unchanged
+fm-lineup-board: refused default tuple: {"harness":"opencode","effort":"high"}

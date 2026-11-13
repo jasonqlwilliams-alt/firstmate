@@ -1,0 +1,6 @@
+changed: config/crew-dispatch.json
+changed: config/secondmate-harness
+changed: config/backup-helm-successor
+helm-handover: NOT applied; running helm unchanged. Use the primary launch procedure with {"harness":"codex","model":"gpt-6.1-sol","effort":"high"}
+config-push: no live secondmate homes found
+restart-secondmates: off

@@ -1,0 +1,13 @@
+refused backup_claude; all three config files unchanged
+error: claude cannot be the backup helm successor: the handover exists because Claude's runway is running out
+fm-lineup-board: refused backup_helm tuple: {"harness":"claude"}
+refused agy_wrong; all three config files unchanged
+error: agy runs Gemini models only; refusing model 'wrong'; use the claude harness for Anthropic models or the codex harness for OpenAI models
+fm-lineup-board: refused rule tuple: {"harness":"agy","model":"wrong"}
+refused cursor_wrong; all three config files unchanged
+error: Cursor model not-allowlisted is refused by config/cursor-model-allowlist
+fm-lineup-board: refused rule tuple: {"harness":"cursor","model":"not-allowlisted"}
+refused effort_wrong; all three config files unchanged
+fm-lineup-board: refused rule tuple: {"harness":"opencode","effort":"high"}
+refused unresolved_instructions; all three config files unchanged
+fm-lineup-board: invalid apply payload

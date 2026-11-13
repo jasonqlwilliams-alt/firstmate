@@ -1,0 +1,21 @@
+{
+  "before": {
+    "title": "Firstmate model lineup",
+    "rows": 4,
+    "lavish": true,
+    "defaultRestart": false,
+    "defaultFallback": false,
+    "noPublicScore": true
+  },
+  "selection": {
+    "helm": "codex / gpt-6.1-sol / high",
+    "defaultPicks": [
+      "codex / default model / default effort",
+      "codex / gpt-6.1-sol / high"
+    ],
+    "fallback": true,
+    "restart": false,
+    "instructions": "Keep backup successor as Codex; do not restart second mates."
+  },
+  "submit": "Sent to Firstmate for resolution and validation."
+}
