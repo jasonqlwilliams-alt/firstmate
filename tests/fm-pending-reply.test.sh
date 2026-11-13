@@ -1807,6 +1807,11 @@ test_late_legacy_records_reconcile_and_escalate() {
   mv "$staging/$escalated" "$dir/$escalated"
   [ ! -e "$dir/.active/$replied" ] && [ ! -e "$dir/.active/$escalated" ] \
     || fail "the old writer unexpectedly published workset markers"
+  # Simulate a watcher stopped after noticing the changed directory but
+  # before it folded either legacy record into the active workset.
+  bash -c '. "$1"; fm_workset_scan_due "$2" "$3"' _ \
+    "$ROOT/bin/fm-workset-lib.sh" "$dir" "$dir/.active" \
+    || fail "the interrupted legacy scan did not start"
   fm_pending_reply_tick "$state" || fail "late legacy records failed to reconcile"
   [ "$(phase_of "$state" "$replied")" = resolved ] || fail "late legacy reply was not reconciled"
   [ "$(phase_of "$state" "$escalated")" = escalated ] || fail "late legacy miss was not escalated"

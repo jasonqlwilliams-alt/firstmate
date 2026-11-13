@@ -1137,8 +1137,7 @@ fm_procevent_pending_remove() {  # <inbox> <id.sequence>
 }
 
 fm_procevent_pending_prepare() {  # <inbox>
-  local inbox=$1 result base checked rc
-  checked="$inbox/.pending/.legacy-checked"
+  local inbox=$1 result base rc
   if fm_workset_scan_due "$inbox" "$inbox/.pending"; then
     :
   else
@@ -1151,11 +1150,14 @@ fm_procevent_pending_prepare() {  # <inbox>
     [ -e "${result%.result}.handled" ] && continue
     base=${result##*/}
     fm_procevent_pending_add "$inbox" "${base%.result}" \
-      || { rm -f -- "$checked"; return 1; }
+      || { fm_workset_scan_abort; return 1; }
   done
-  [ ! -f "$inbox/.pending/.ready-v1" ] || return 0
-  (umask 077; set -C; : > "$inbox/.pending/.ready-v1") 2>/dev/null \
-    || { [ -f "$inbox/.pending/.ready-v1" ] && [ ! -L "$inbox/.pending/.ready-v1" ]; }
+  if [ ! -f "$inbox/.pending/.ready-v1" ]; then
+    (umask 077; set -C; : > "$inbox/.pending/.ready-v1") 2>/dev/null \
+      || { [ -f "$inbox/.pending/.ready-v1" ] && [ ! -L "$inbox/.pending/.ready-v1" ]; } \
+      || { fm_workset_scan_abort; return 1; }
+  fi
+  fm_workset_scan_complete "$inbox/.pending"
 }
 
 # fm_procevent_pending <state>

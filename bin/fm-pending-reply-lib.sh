@@ -203,17 +203,19 @@ fm_pending_reply_active_prepare() {  # <record-directory>
     fi
     marker="$dir/.active/${rec##*/}"
     if [ -L "$marker" ]; then
-      rm -f -- "$dir/.active/.legacy-checked"
+      fm_workset_scan_abort
       return 1
     fi
     [ -f "$marker" ] && continue
     (umask 077; set -C; : > "$marker") 2>/dev/null \
       || { [ -f "$marker" ] && [ ! -L "$marker" ]; } \
-      || { rm -f -- "$dir/.active/.legacy-checked"; return 1; }
+      || { fm_workset_scan_abort; return 1; }
   done
-  [ ! -f "$dir/.active/.ready-v1" ] || return 0
-  (umask 077; : > "$dir/.active/.ready-v1") \
-    || { rm -f -- "$dir/.active/.legacy-checked"; return 1; }
+  if [ ! -f "$dir/.active/.ready-v1" ]; then
+    (umask 077; : > "$dir/.active/.ready-v1") \
+      || { fm_workset_scan_abort; return 1; }
+  fi
+  fm_workset_scan_complete "$dir/.active"
 }
 
 # Settlement callers hold the correlation lock; an undelivered discard removes
