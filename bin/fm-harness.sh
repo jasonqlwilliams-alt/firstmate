@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Detect the agent harness this process tree runs on.
 # Usage: fm-harness.sh                  print own harness: claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|unknown
+#        fm-harness.sh primary-eligible <harness>
+#                                        Exit 0 for a verified primary harness.
 #        fm-harness.sh crew             print the effective CREWMATE harness
 #                                        (config/crew-harness; "default" resolves to own)
 #        fm-harness.sh secondmate       print the harness the PRIMARY uses to launch
@@ -319,7 +321,23 @@ validate_native_effort() {
   return 1
 }
 
+# Primary eligibility follows the supported supervision protocols.
+primary_eligible() {
+  case "${1:-}" in
+    claude|codex|opencode|pi|pi-signed|grok|cursor|omp) return 0 ;;
+  esac
+  echo "error: ${1:-<unset>} is not a verified primary harness" >&2
+  return 1
+}
+
+secondmate_eligible() {
+  [ "${1:-}" = kimi ] && return 0
+  primary_eligible "$@"
+}
+
 case "${1:-}" in
+  primary-eligible) shift; primary_eligible "$@" ;;
+  secondmate-eligible) shift; secondmate_eligible "$@" ;;
   validate-native-effort) shift; validate_native_effort "$@" ;;
   crew) resolve_crew ;;
   secondmate) resolve_secondmate ;;

@@ -144,7 +144,7 @@ fm_cursor_catalog_has_model() {  # <model>
 }
 
 # Spawn-time Cursor model allowlist. config/cursor-model-allowlist is the lock;
-# its absent-file default is this glob. bin/fm-spawn.sh owns file parsing.
+# its absent-file default is this glob. fm_cursor_model_allowlist_patterns owns file parsing.
 FM_CURSOR_MODEL_ALLOWLIST_DEFAULT='cursor-grok-*'
 
 fm_cursor_model_allowlist_default() {
@@ -286,5 +286,32 @@ fm_cursor_process_matches() {  # <comm> <args> [argv0]
   # its install path.
   case "$comm" in */*) fm_cursor_path_is_cursor "$comm" && return 0 ;; esac
   return 1
+}
+
+fm_cursor_model_allowlist_patterns() {  # <config-dir>; caller sources fm-config-inherit-lib.sh
+  local path=$1/cursor-model-allowlist present line
+  if ! present=$(fm_config_source_present "$path"); then
+    return 1
+  fi
+  if [ "$present" = 0 ]; then
+    printf '%s\n' "$(fm_cursor_model_allowlist_default)"
+    return 0
+  fi
+  if [ ! -f "$path" ] || [ ! -r "$path" ]; then
+    echo "error: config/cursor-model-allowlist must be a readable regular file of one glob pattern per line (default cursor-grok-* when absent)" >&2
+    return 1
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ''|'#'*) continue ;;
+    esac
+    case "$line" in
+      *[[:space:]]*|*[!A-Za-z0-9._*?-]*)
+        echo "error: config/cursor-model-allowlist holds invalid pattern '$line'; use one glob per line with letters, digits, . _ - * ? only" >&2
+        return 1
+        ;;
+    esac
+    printf '%s\n' "$line"
+  done < "$path"
 }
 

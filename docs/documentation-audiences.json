@@ -126,6 +126,14 @@
       "audience": "agent-runtime"
     },
     {
+      "path": ".agents/skills/lineup/SKILL.md",
+      "audience": "agent-runtime"
+    },
+    {
+      "path": ".agents/skills/models/SKILL.md",
+      "audience": "agent-runtime"
+    },
+    {
       "path": ".agents/skills/bootstrap-diagnostics/SKILL.md",
       "audience": "agent-runtime"
     },

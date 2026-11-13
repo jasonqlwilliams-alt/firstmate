@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Firstmate model lineup</title>
+<style>
+/* Firstmate palette and typography, matching the shipped Bearings board. */
+@import url("https://fonts.googleapis.com/css2?family=Chango&family=Jost:wght@400;500;600;700&display=swap");
+:root{--paper:#f6ecd3;--white:#fffdf7;--ink:#241c14;--muted:#6f5e46;--line:#ddc89c;--rust:#c0452a;--navy:#2a3656;--sea:#2f6b4f;--gold:#f0d38c}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.5 Jost,system-ui,sans-serif}main{max-width:1280px;margin:auto;padding:36px 20px 70px}h1{font:2.2rem Chango,Georgia,serif;margin:0}h2{margin:0 0 12px;color:var(--navy)}p{margin:8px 0}small,.muted{color:var(--muted)}section{margin:24px 0;background:var(--white);border:1px solid var(--line);border-radius:12px;padding:22px;min-width:0}button,select,textarea{font:inherit;border:1px solid var(--line);border-radius:6px;padding:8px;background:var(--white);color:var(--ink);max-width:100%}button{cursor:pointer;font-weight:600}button.primary{background:var(--rust);color:var(--white);border-color:var(--ink);box-shadow:3px 3px 0 var(--ink)}button:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--gold)}.quotas{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px}.quota{padding:14px;border:1px solid var(--line);border-radius:8px;min-width:0;overflow-wrap:anywhere}.quota strong{display:block;color:var(--sea);font-size:1.4rem}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;table-layout:fixed}th,td{text-align:left;padding:14px 10px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}th{font-size:.9rem;color:var(--muted)}td select{width:100%}th:first-child{width:16%}th:nth-child(2){width:22%}th:nth-child(3){width:30%}th:nth-child(4){width:32%}.pick{font-weight:600}.reason{font-size:.95rem;margin:6px 0 10px}.controls{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0}.fallback{display:flex;gap:4px;margin-top:6px;align-items:center}.fallback select{min-width:0;flex:1}.fallback button{padding:4px 7px}.fallbacks[hidden]{display:none}.benchmarks th{width:auto}.benchmarks a{color:var(--navy);text-decoration:underline}.benchmarks td{font-size:.95rem}textarea{width:100%;min-height:130px;display:block;margin:10px 0}label{cursor:pointer}#status{color:var(--sea);font-weight:600;min-height:1.5em}.warning{color:var(--rust)}@media(max-width:760px){main{padding:22px 12px}section{padding:14px}#lineup,#lineup tbody,#lineup tr,#lineup td{display:block;width:100%}#lineup thead{display:none}#lineup tr{border-bottom:2px solid var(--navy);padding:10px 0}#lineup td{border:0;padding:8px 0}#lineup td:before{content:attr(data-label);display:block;font-size:.85rem;color:var(--muted)}.benchmarks{min-width:600px}}
+</style>
+</head>
+<body>
+<main>
+<header><h1>Model lineup</h1><p>Choose a harness, model, and effort for every role and task tier.</p><p class="muted" id="generated"></p></header>
+<section aria-labelledby="quota-title"><h2 id="quota-title">Provider headroom</h2><div id="quotas" class="quotas"></div><p class="muted">Snapshot at board creation. Suggestions are the invoking agent's judgment; headroom can change before apply.</p></section>
+<form id="lineup-form" data-lavish-question="lineup">
+<section aria-labelledby="picks-title"><h2 id="picks-title">Current and suggested picks</h2><p>Each selectable tuple includes harness, model, and effort. Suggestions include a reason; choose one or keep the current pick.</p>
+<div class="controls"><label><input type="checkbox" id="fallback-arrays"> Emit ordered fallback arrays for dispatch tiers</label><label><input type="checkbox" id="restart-secondmates"> Restart running second mates after applying</label></div>
+<p class="muted">Restart is off by default. A helm choice produces a handover instruction.</p>
+<div class="table-wrap"><table id="lineup"><thead><tr><th>Role / tier</th><th>Current</th><th>Agent suggestion</th><th>Your selection</th></tr></thead><tbody id="rows"></tbody></table></div></section>
+<section aria-labelledby="benchmark-title"><h2 id="benchmark-title">Public benchmarks by task type</h2><p class="muted">Reference evidence, with a source and an as-of date for each score. No public score means no verified cache entry for this model and task type.</p><div class="table-wrap"><table class="benchmarks"><thead><tr><th>Task type</th><th>Harness / model</th><th>Benchmark / score</th><th>Source / as of</th></tr></thead><tbody id="benchmarks"></tbody></table></div></section>
+<section aria-labelledby="instructions-title"><h2 id="instructions-title">Instructions</h2><label for="instructions">Write exceptions, dates, constraints, or other routing instructions.</label><textarea id="instructions" placeholder="Your written instructions take precedence over dropdown picks."></textarea><p class="muted">Firstmate resolves these words before validating the lineup. A refused combination changes no config.</p><button type="submit" class="primary">Apply lineup</button><p id="status" role="status" aria-live="polite"></p></section>
+</form>
+</main>
+<script id="lineup-data" type="application/json">
+__FM_LINEUP_DATA__
+</script>
+<script>
+(function () {
+  "use strict";
+  const data = JSON.parse(document.getElementById("lineup-data").textContent);
+  const el = (tag, text, cls) => { const node=document.createElement(tag); if(text!==undefined)node.textContent=text; if(cls)node.className=cls; return node; };
+  const describe = p => [p.harness,p.model||"default model",p.effort||"default effort"].join(" / ");
+  const same = (a,b) => a.harness===b.harness && a.model===b.model && a.effort===b.effort;
+  document.getElementById("generated").textContent="As of " + data.generated;
+  const quotas=document.getElementById("quotas");
+  if(!data.quotas.length)quotas.append(el("p","Quota snapshot unavailable; no headroom assumed."));
+  data.quotas.forEach(q=>{const card=el("div",undefined,"quota");card.append(el("b",q.provider),el("strong",q.headroom),el("p","Reset: "+q.reset),el("p","Runway: "+q.runway),el("p","Spend priority: "+q.spend_priority));if(q.attention)card.append(el("p",q.attention,"warning"));quotas.append(card);});
+  const states=[];
+  const arrays=document.getElementById("fallback-arrays");
+  data.rows.forEach(row=>{
+    const tr=el("tr");
+    const cells=["Role / tier","Current","Agent suggestion","Your selection"].map(label=>{const td=el("td");td.dataset.label=label;tr.append(td);return td;});
+    cells[0].append(el("strong",row.label));
+    cells[1].append(el("p",row.current.length?row.current.map(describe).join(" → "):"Unset"));
+    cells[2].append(el("div",row.suggested.map(describe).join(" → "),"pick"),el("p",row.reason,"reason"));
+    const indices=profiles=>profiles.map(p=>row.options.findIndex(o=>same(p,o))).filter(i=>i>=0);
+    let picks=indices(row.current);if(!picks.length)picks=indices(row.suggested);
+    const state={row,picks};states.push(state);
+    const selection=el("div"), fallbacks=el("div",undefined,"fallbacks");
+    const crew=row.kind==="rule"||row.kind==="default";
+    function selectAt(position){
+      const select=el("select");select.setAttribute("aria-label",row.label+(position?" fallback "+position:" primary pick"));
+      row.options.forEach((p,i)=>{const opt=el("option",describe(p));opt.value=String(i);select.append(opt);});
+      select.value=String(state.picks[position]);select.addEventListener("change",()=>{state.picks[position]=Number(select.value);});return select;
+    }
+    function render(){
+      selection.replaceChildren(selectAt(0));fallbacks.replaceChildren();
+      if(crew){
+        state.picks.slice(1).forEach((_,i)=>{const pos=i+1, line=el("div",undefined,"fallback");line.append(selectAt(pos));
+          const up=el("button","↑");up.type="button";up.setAttribute("aria-label","Move fallback earlier");up.onclick=()=>{[state.picks[pos-1],state.picks[pos]]=[state.picks[pos],state.picks[pos-1]];render();};
+          const remove=el("button","Remove");remove.type="button";remove.onclick=()=>{state.picks.splice(pos,1);render();};line.append(up,remove);fallbacks.append(line);
+        });
+        const add=el("button","Add fallback");add.type="button";add.onclick=()=>{state.picks.push(0);render();};fallbacks.append(add);fallbacks.hidden=!arrays.checked;selection.append(fallbacks);
+      }
+    }
+    const use=el("button","Use suggestion");use.type="button";use.onclick=()=>{state.picks=indices(row.suggested);render();};
+    const reset=el("button","Reset to current");reset.type="button";reset.disabled=!indices(row.current).length;reset.onclick=()=>{state.picks=indices(row.current);render();};
+    cells[2].append(use);cells[3].append(selection,reset);render();
+    arrays.addEventListener("change",()=>{if(crew)fallbacks.hidden=!arrays.checked;});
+    document.getElementById("rows").append(tr);
+  });
+  const bench=document.getElementById("benchmarks");
+  data.rows.forEach(row=>{
+    const seen=new Set();row.options.forEach(p=>{
+      const identity=p.harness+"\n"+(p.model||"");if(seen.has(identity))return;seen.add(identity);
+      const scores=data.benchmarks.filter(b=>b.harness===p.harness && b.model===p.model && b.task===row.id);
+      (scores.length?scores:[null]).forEach(b=>{const tr=el("tr");tr.append(el("td",row.label),el("td",p.harness+" / "+(p.model||"default model")),el("td",b?b.benchmark+": "+b.score:"no public score"));
+        const source=el("td");if(b){const link=el("a","Source");link.href=b.source;link.target="_blank";link.rel="noopener noreferrer";source.append(link,el("p","As of "+b.as_of));}else source.textContent="No verified entry";tr.append(source);bench.append(tr);
+      });
+    });
+  });
+  document.getElementById("lineup-form").addEventListener("submit",ev=>{
+    ev.preventDefault();const status=document.getElementById("status");
+    if(!window.lavish || !window.lavish.queuePrompt || !window.lavish.sendQueuedPrompts){status.textContent="Open this page in Lavish to apply your lineup.";return;}
+    const submission={schema:"fm-lineup-answer.v1",generated:data.generated,rows:states.map(s=>({id:s.row.id,kind:s.row.kind,rule_index:s.row.rule_index,when:s.row.when,picks:((s.row.kind==="rule"||s.row.kind==="default")&&arrays.checked?s.picks:s.picks.slice(0,1)).map(i=>s.row.options[i])})),fallback_arrays:arrays.checked,restart_secondmates:document.getElementById("restart-secondmates").checked,instructions:document.getElementById("instructions").value};
+    window.lavish.queuePrompt("Apply this lineup after resolving the written instructions.\n"+JSON.stringify(submission),{tag:"choice",text:"Apply model lineup\n"+JSON.stringify(submission),element:ev.currentTarget,queueKey:"lineup",data:submission});
+    window.lavish.sendQueuedPrompts();status.textContent="Sent to Firstmate for resolution and validation.";
+  });
+})();
+</script>
+</body>
+</html>
