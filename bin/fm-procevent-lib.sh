@@ -33,7 +33,8 @@
 # its handled acknowledgement commits. The original result, adapter, and handled
 # marker stay at their original paths. A missing .pending/.ready-v1 causes one
 # legacy rebuild without clearing concurrent captures. Later reconciles enumerate
-# only this workset, independent of handled history; a failed rebuild falls back
+# this workset and rescan legacy results only when the inbox directory changes;
+# a failed rebuild falls back
 # to the legacy scan so index storage cannot suppress delivery. Unhandled results remain
 # eligible even when their source is offline or no longer registered.
 
@@ -1133,16 +1134,25 @@ fm_procevent_pending_remove() {  # <inbox> <id.sequence>
 }
 
 fm_procevent_pending_prepare() {  # <inbox>
-  local inbox=$1 result base
-  [ ! -L "$inbox/.pending" ] && [ ! -L "$inbox/.pending/.ready-v1" ] || return 1
-  [ -f "$inbox/.pending/.ready-v1" ] && return 0
+  local inbox=$1 result base checked
+  checked="$inbox/.pending/.legacy-checked"
+  [ ! -L "$inbox/.pending" ] && [ ! -L "$inbox/.pending/.ready-v1" ] \
+    && [ ! -L "$checked" ] || return 1
   (umask 077; mkdir -p "$inbox/.pending") || return 1
+  [ ! -e "$checked" ] || [ -f "$checked" ] || return 1
+  if [ -f "$inbox/.pending/.ready-v1" ] && [ -f "$checked" ] \
+    && [ ! "$inbox" -nt "$checked" ]; then
+    return 0
+  fi
+  (umask 077; touch "$checked") || return 1
   for result in "$inbox"/*.result; do
     [ -f "$result" ] && [ ! -L "$result" ] || continue
     [ -e "${result%.result}.handled" ] && continue
     base=${result##*/}
-    fm_procevent_pending_add "$inbox" "${base%.result}" || return 1
+    fm_procevent_pending_add "$inbox" "${base%.result}" \
+      || { rm -f -- "$checked"; return 1; }
   done
+  [ ! -f "$inbox/.pending/.ready-v1" ] || return 0
   (umask 077; set -C; : > "$inbox/.pending/.ready-v1") 2>/dev/null \
     || { [ -f "$inbox/.pending/.ready-v1" ] && [ ! -L "$inbox/.pending/.ready-v1" ]; }
 }

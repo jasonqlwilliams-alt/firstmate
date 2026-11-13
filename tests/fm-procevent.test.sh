@@ -164,8 +164,6 @@ hold_source_lock_then_handle() {  # <home> <source-id> <sequence> <ready-file> <
   HOLDER_PID=$!
 }
 
-# FM_PROCEVENT_HISTORY_ONLY=1 runs just the retained-result regression without
-# starting polling children; the default also runs the complete runner suite.
 test_handled_result_history() {
 # Retained results from offline/unregistered sources are common. Reconcile
 # must skip handled history before payload/adapter reads, yet keep publishing
@@ -233,7 +231,29 @@ pass "3000 handled results add no reconcile payload/adapter reads, including off
 }
 
 test_handled_result_history
-[ "${FM_PROCEVENT_HISTORY_ONLY:-0}" != 1 ] || exit 0
+
+HLEGACY="$TMP_ROOT/late-legacy-result"; new_home "$HLEGACY"
+mkdir -p "$HLEGACY/state/procevent-inbox"
+out=$(pe "$HLEGACY" reconcile)
+assert_contains "$out" "published=0" "the legacy inbox starts with no result"
+assert_present "$HLEGACY/state/procevent-inbox/.pending/.ready-v1" "the workset is ready before the old runner finishes"
+printf 'late legacy result\n' > "$HLEGACY/state/procevent-inbox/old-runner.7.result"
+printf 'lavish\n' > "$HLEGACY/state/procevent-inbox/old-runner.7.adapter"
+chmod 0600 "$HLEGACY/state/procevent-inbox/old-runner.7.result" "$HLEGACY/state/procevent-inbox/old-runner.7.adapter"
+mkdir "$HLEGACY/state/.wake-queue"
+out=$(pe "$HLEGACY" reconcile)
+assert_contains "$out" "published=0" "the first wake cannot publish while the queue path is unavailable"
+assert_present "$HLEGACY/state/procevent-inbox/.pending/old-runner.7" "the late unmarked result joins the workset despite a failed wake"
+assert_absent "$HLEGACY/state/procevent-inbox/old-runner.7.handled" "a failed wake does not acknowledge the legacy result"
+rmdir "$HLEGACY/state/.wake-queue"
+out=$(pe "$HLEGACY" reconcile)
+assert_contains "$out" "published=1" "the late legacy result is announced after the first wake fails"
+assert_contains "$(wake_payloads "$HLEGACY")" "procevent lavish old-runner 7" "the late result preserves its source and sequence"
+mv "$HLEGACY/state/.wake-queue" "$HLEGACY/state/.wake-queue.drained"
+out=$(pe "$HLEGACY" reconcile)
+assert_contains "$out" "published=1" "the late legacy result is reannounced until handled"
+assert_contains "$(wake_payloads "$HLEGACY")" "procevent lavish old-runner 7" "the repeat wake retains its identity"
+pass "late pre-upgrade results remain discoverable and reannounced"
 
 # --- inert with nothing configured ------------------------------------------
 IDLE="$TMP_ROOT/idle"; mkdir -p "$IDLE"
