@@ -144,11 +144,12 @@
 # Orca tasks use the same safety checks, then close the recorded terminal and
 # remove the recorded worktree through `orca worktree rm`; teardown never guesses
 # an Orca target from ambient CLI state.
-# A Herdr presentation journal never authorizes cleanup. Teardown still closes
+# A Herdr presentation journal never authorizes cleanup. Default teardown closes
 # only the exact task pane from ordinary endpoint metadata and never calls
-# `workspace close`. It retires the non-authoritative journal only when a
-# read-only token correlation agrees with that endpoint and pane closure is
-# confirmed. Otherwise the journal stays quarantined for manual inspection.
+# `workspace close`. The explicit --keep-pane path leaves that pane open.
+# A non-authoritative journal is retired only after read-only token correlation
+# agrees with that endpoint and the selected close or keep proof succeeds.
+# Otherwise the journal stays quarantined for manual inspection.
 # Projected closes share the presentation-order lock, refuse to close the
 # captain's active tab, and restore the exact response-derived pre-close tab
 # if Herdr's last-pane cleanup focuses an unrelated neighboring workspace.
@@ -165,7 +166,17 @@
 # releases its durable treehouse lease so the pool slot is freed,
 # never left leased forever. If the treehouse return fails, teardown leaves the
 # leased home and state in place instead of hiding a still-held lease.
-# Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--retire-stale-record]
+# Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--retire-stale-record] [--keep-pane]
+#   --keep-pane retires an ordinary Herdr ship task while leaving its exact
+#   pane open. Stop its worker with fm-control.sh <task-id> exit first: cleanup
+#   requires the existing strict lone idle shell proof, then clears shell
+#   input and moves that shell to / before returning its copy. Nested shells,
+#   children, unknown/missing endpoints, absent lsof, non-Herdr backends,
+#   scouts, secondmates, recovery records, legacy records, stale-record retire
+#   and --force are refused. Dirty and unlanded-work checks remain mandatory.
+#   The same pane and shell birth identity are reverified before record removal;
+#   failure retains the records for retry. A correlated presentation journal
+#   is retired without closing, renaming, moving or adopting its workspace.
 #        fm-teardown.sh --release-orphaned-slot-claim <worktree>
 #   --force skips ordinary-task dirty and landed-work checks, skips scout report
 #   checks, and discards secondmate child work for kind=secondmate. Only use it
@@ -407,12 +418,14 @@ ID=$1
 FORCE=
 LEGACY_RECORD_GIVEN=0
 RETIRE_STALE_RECORD=0
+KEEP_PANE=0
 shift
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --force) FORCE=--force ;;
     --legacy-record) LEGACY_RECORD_GIVEN=1 ;;
     --retire-stale-record) RETIRE_STALE_RECORD=1 ;;
+    --keep-pane) KEEP_PANE=1 ;;
     *)
       echo "error: invalid teardown request" >&2
       exit 2
@@ -420,6 +433,11 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+if [ "$KEEP_PANE" = 1 ] \
+   && { [ -n "$FORCE" ] || [ "$LEGACY_RECORD_GIVEN" = 1 ] || [ "$RETIRE_STALE_RECORD" = 1 ]; }; then
+  echo "REFUSED: --keep-pane cannot be combined with --force, --legacy-record or --retire-stale-record." >&2
+  exit 2
+fi
 fm_backlog_directory_present "$STATE" "state directory" || {
   echo "error: teardown refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
   exit 1
@@ -538,6 +556,20 @@ fm_backlog_record_present "$META" "task record" "$STATE" || {
 TEARDOWN_META_KIND=$(fm_meta_get "$META" kind)
 [ -n "$TEARDOWN_META_KIND" ] || TEARDOWN_META_KIND=ship
 TEARDOWN_CLEANUP_RECOVERY=$(fm_meta_get "$META" cleanup_recovery)
+if [ "$KEEP_PANE" = 1 ]; then
+  if [ "$TEARDOWN_META_KIND" != ship ] || [ "$(fm_meta_get "$META" backend)" != herdr ] \
+     || [ -n "$TEARDOWN_CLEANUP_RECOVERY" ] || [ -n "$(fm_meta_get "$META" remote_host)" ]; then
+    echo "REFUSED: --keep-pane supports only ordinary local Herdr ship tasks." >&2
+    exit 1
+  fi
+  fm_backlog_meta_spawn_gen "$META" "$STATE" || {
+    echo "REFUSED: --keep-pane requires an exact spawned incarnation." >&2
+    exit 1
+  }
+  case "$FM_BACKLOG_META_SPAWN_GEN" in
+    legacy-*) echo "REFUSED: --keep-pane does not accept legacy incarnations." >&2; exit 1 ;;
+  esac
+fi
 TEARDOWN_META_SPAWN_GEN=
 TEARDOWN_LEGACY_PENDING=0
 TEARDOWN_LEGACY_ACCEPTED=0
@@ -2097,6 +2129,10 @@ reap_task_worktree_processes() {  # <label> <dir>...
     fi
     pids=$TASK_PIDS
     [ -n "$pids" ] || return 0
+    if [ "$KEEP_PANE" = 1 ] && task_pid_list_contains "$pids" "$KEPT_SHELL_PID"; then
+      echo "REFUSED: the preserved shell returned to the task copy; refusing to reap it or return the copy." >&2
+      return 1
+    fi
     tracked_pids=()
     tracked_identities=()
     while IFS= read -r pid; do
@@ -2993,6 +3029,81 @@ FMEOF
   return 1
 }
 
+# Reuse the backend's strict shell proof, not agent registration or rendered
+# output. Lifecycle shutdown stays with fm-control; this path sends no agent
+# commands. Birth identity and kernel cwd bind the surviving shell across the
+# copy return, so a replacement pane/process cannot satisfy retirement.
+teardown_kept_shell_sample() {
+  local pid cwd
+  [ "$(fm_backend_herdr_pane_presence_state "$TEARDOWN_HERDR_SESSION" "$TEARDOWN_HERDR_PANE")" = present ] || return 1
+  pid=$(fm_backend_herdr_pane_idle_shell_pid "$TEARDOWN_HERDR_SESSION" "$TEARDOWN_HERDR_PANE") || return 1
+  [ "$pid" = "$KEPT_SHELL_PID" ] || return 1
+  task_process_identity_matches "$pid" "$KEPT_SHELL_IDENTITY" || return 1
+  cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null) || return 1
+  [ "$(printf '%s\n' "$cwd" | sed -n 's/^n//p')" = / ]
+}
+
+teardown_keep_pane_journal_correlates() {
+  local pane workspace tab home journal_home
+  fm_backend_herdr_projection_journal_snapshot "$HERDR_PRESENTATION_JOURNAL" "$ID" || return 1
+  pane=$(fm_backend_herdr_cli "$TEARDOWN_HERDR_SESSION" pane get "$TEARDOWN_HERDR_PANE" 2>/dev/null) || return 1
+  workspace=$(printf '%s' "$pane" | jq -er --arg pane "$TEARDOWN_HERDR_PANE" \
+    '.result.pane | select(.pane_id == $pane) | .workspace_id | select(type == "string" and length > 0)' 2>/dev/null) || return 1
+  tab=$(printf '%s' "$pane" | jq -er --arg pane "$TEARDOWN_HERDR_PANE" \
+    '.result.pane | select(.pane_id == $pane) | .tab_id | select(type == "string" and length > 0)' 2>/dev/null) || return 1
+  if [ "$FM_BACKEND_HERDR_JOURNAL_VERSION" = 2 ]; then
+    home=$(fm_backend_herdr_projection_home_identity "$FM_HOME") || return 1
+    journal_home=$(fm_backend_herdr_projection_home_identity "$FM_BACKEND_HERDR_JOURNAL_HOME") || return 1
+    [ "$journal_home" = "$home" ] \
+      && [ "$FM_BACKEND_HERDR_JOURNAL_SESSION" = "$TEARDOWN_HERDR_SESSION" ] \
+      && [ "$FM_BACKEND_HERDR_JOURNAL_WORKSPACE_ID" = "$workspace" ] \
+      && [ "$FM_BACKEND_HERDR_JOURNAL_TAB_ID" = "$tab" ] \
+      && [ "$FM_BACKEND_HERDR_JOURNAL_PANE_ID" = "$TEARDOWN_HERDR_PANE" ] || return 1
+  fi
+  fm_backend_herdr_projection_endpoint_matches_journal \
+    "$TEARDOWN_HERDR_SESSION" "$workspace" "$HERDR_PRESENTATION_JOURNAL" "$ID"
+}
+
+teardown_prepare_kept_pane() {
+  local attempt=0
+  if ! declare -F fm_backend_herdr_pane_idle_shell_pid >/dev/null 2>&1 \
+     || [ "$(fm_backend_herdr_pane_presence_state "$TEARDOWN_HERDR_SESSION" "$TEARDOWN_HERDR_PANE")" != present ]; then
+    echo "REFUSED: --keep-pane requires an exactly present pane and the strict shell-proof machinery; retaining task records." >&2
+    return 1
+  fi
+  command -v lsof >/dev/null 2>&1 || {
+    echo "REFUSED: --keep-pane requires lsof to verify the surviving shell's cwd and reap worktree processes." >&2
+    return 1
+  }
+  KEPT_SHELL_PID=$(fm_backend_herdr_pane_idle_shell_pid "$TEARDOWN_HERDR_SESSION" "$TEARDOWN_HERDR_PANE") || {
+    echo "REFUSED: --keep-pane requires a lone idle shell in the exact pane; stop the worker with fm-control.sh $ID exit first. Nested shells, children and unknown state are unsupported." >&2
+    return 1
+  }
+  KEPT_SHELL_IDENTITY=$(task_process_identity "$KEPT_SHELL_PID") || {
+    echo "REFUSED: --keep-pane cannot bind the idle shell's process birth identity; retaining task records." >&2
+    return 1
+  }
+  if teardown_kept_shell_sample; then return 0; fi
+  # Clear any partially typed shell line before submitting the fixed command.
+  # No caller-controlled text or worktree path is executed in this pane.
+  if ! { [ "$(fm_backend_herdr_pane_idle_shell_pid "$TEARDOWN_HERDR_SESSION" "$TEARDOWN_HERDR_PANE")" = "$KEPT_SHELL_PID" ] \
+    && task_process_identity_matches "$KEPT_SHELL_PID" "$KEPT_SHELL_IDENTITY" \
+    && [ "$(fm_backend_herdr_pane_presence_state "$TEARDOWN_HERDR_SESSION" "$TEARDOWN_HERDR_PANE")" = present ] \
+    && fm_backend_herdr_cli "$TEARDOWN_HERDR_SESSION" pane send-keys "$TEARDOWN_HERDR_PANE" ctrl+c >/dev/null \
+    && fm_backend_herdr_cli "$TEARDOWN_HERDR_SESSION" pane send-keys "$TEARDOWN_HERDR_PANE" ctrl+u >/dev/null \
+    && fm_backend_herdr_cli "$TEARDOWN_HERDR_SESSION" pane run "$TEARDOWN_HERDR_PANE" 'cd /' >/dev/null; }; then
+      echo "REFUSED: --keep-pane could not detach the verified idle shell; retaining task records." >&2
+      return 1
+  fi
+  while [ "$attempt" -lt 30 ]; do
+    teardown_kept_shell_sample && return 0
+    sleep 0.1
+    attempt=$((attempt + 1))
+  done
+  echo "REFUSED: --keep-pane could not prove the same idle shell moved to /; retaining task records and copy." >&2
+  return 1
+}
+
 teardown_herdr_require_prerequisites() {  # <task-id>
   local task_id=$1 prerequisite
   if ! fm_backend_source herdr; then
@@ -3342,6 +3453,13 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ] &&
   ORCA_PATH_MATCH_VERIFIED=1
 fi
 
+if [ "$KEEP_PANE" = 1 ]; then
+  if ! teardown_owns_worktree || ! inspectable_git_worktree "$WT"; then
+    echo "REFUSED: --keep-pane requires this task's own inspectable worktree." >&2
+    exit 1
+  fi
+fi
+
 if teardown_owns_worktree && [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
   if validate_worktree_teardown_safety; then
     :
@@ -3370,6 +3488,18 @@ if [ "$BACKEND" = herdr ]; then
   fm_backend_herdr_parse_target "$T" || exit 1
   TEARDOWN_HERDR_SESSION=$FM_BACKEND_HERDR_SESSION
   TEARDOWN_HERDR_PANE=$FM_BACKEND_HERDR_PANE
+fi
+if [ "$KEEP_PANE" = 1 ]; then
+  teardown_prepare_kept_pane || exit 1
+  HERDR_PRESENTATION_JOURNAL="$STATE/$ID.herdr-presentation"
+  KEEP_PANE_JOURNAL_PRESENT=0
+  if [ -e "$HERDR_PRESENTATION_JOURNAL" ] || [ -L "$HERDR_PRESENTATION_JOURNAL" ]; then
+    KEEP_PANE_JOURNAL_PRESENT=1
+    teardown_keep_pane_journal_correlates || {
+      echo "REFUSED: --keep-pane cannot correlate this task's presentation journal with its exact pane; retaining task records and copy." >&2
+      exit 1
+    }
+  fi
 fi
 
 BACKLOG_CLOSED=0
@@ -3490,6 +3620,12 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
 elif [ "$KIND" != secondmate ] && ! teardown_owns_worktree; then
   :
 elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
+  if [ "$KEEP_PANE" = 1 ]; then
+    teardown_kept_shell_sample || {
+      echo "REFUSED: the preserved pane is no longer a verified detached shell; retaining the copy and records." >&2
+      exit 1
+    }
+  fi
   branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
   if [ "$branch" != "HEAD" ]; then
     if git -C "$WT" checkout --detach -q 2>/dev/null; then
@@ -3522,7 +3658,7 @@ HERDR_PRESENTATION_JOURNAL="$STATE/$ID.herdr-presentation"
 HERDR_PRESENTATION_RETIRE_CANDIDATE=0
 HERDR_PRESENTATION_SESSION=
 HERDR_PRESENTATION_PANE=
-if [ "$BACKEND" = herdr ] \
+if [ "$BACKEND" = herdr ] && [ "$KEEP_PANE" != 1 ] \
    && { [ -e "$HERDR_PRESENTATION_JOURNAL" ] || [ -L "$HERDR_PRESENTATION_JOURNAL" ]; }; then
   fm_backend_source herdr || true
   HERDR_PRESENTATION_SESSION=$(meta_value "$META" herdr_session)
@@ -3539,7 +3675,12 @@ if [ "$BACKEND" = herdr ] \
   fi
 fi
 
-if [ "$HERDR_PRESENTATION_RETIRE_CANDIDATE" = 1 ]; then
+if [ "$KEEP_PANE" = 1 ]; then
+  teardown_kept_shell_sample || {
+    echo "REFUSED: --keep-pane could not confirm the exact pane and detached shell survived copy return; retaining every durable task record." >&2
+    exit 1
+  }
+elif [ "$HERDR_PRESENTATION_RETIRE_CANDIDATE" = 1 ]; then
   # The presentation lock was acquired before the worktree return above; a
   # contended lock already refused this teardown while everything was intact.
   if teardown_herdr_session_lock_held "$HERDR_PRESENTATION_SESSION"; then
@@ -3565,7 +3706,9 @@ elif [ "$BACKEND" = herdr ]; then
 elif [ "$BACKEND" != orca ]; then
   fm_backend_kill "$BACKEND" "$T" "$(meta_value "$META" zellij_tab_id)" "fm-$ID" 2>/dev/null || true
 fi
-if [ "$HERDR_PRESENTATION_RETIRE_CANDIDATE" = 1 ]; then
+if [ "$KEEP_PANE" = 1 ]; then
+  :
+elif [ "$HERDR_PRESENTATION_RETIRE_CANDIDATE" = 1 ]; then
   if [ "$(fm_backend_herdr_pane_agent_state "$HERDR_PRESENTATION_SESSION" "$HERDR_PRESENTATION_PANE")" = dead ]; then
     rm -f "$HERDR_PRESENTATION_JOURNAL"
   else
@@ -3575,13 +3718,14 @@ elif [ "$BACKEND" = herdr ] \
      && { [ -e "$HERDR_PRESENTATION_JOURNAL" ] || [ -L "$HERDR_PRESENTATION_JOURNAL" ]; }; then
   echo "warning: herdr presentation journal for $ID remains quarantined; no workspace cleanup was attempted" >&2
 fi
-# A refused, skipped, or failed Herdr close must never erase a live task's
+# An ordinary refused, skipped, or failed Herdr close must never erase a live task's
 # durable endpoint identity: unless the exact pane is confirmed gone, retain
 # every record and stop before any removal below so a later rerun can retry
 # the locked close. Only a structured not-found proves the pane gone; unknown
 # presence, missing or malformed endpoint identity, and missing confirmation
-# machinery all refuse.
-if [ "$BACKEND" = herdr ]; then
+# machinery all refuse. The explicit kept-pane path uses its survival proof
+# above instead.
+if [ "$BACKEND" = herdr ] && [ "$KEEP_PANE" != 1 ]; then
   fm_backend_source herdr || true
   if ! declare -F fm_backend_herdr_endpoint_confirmed_gone >/dev/null 2>&1; then
     echo "error: herdr endpoint confirmation is unavailable for $ID; retaining every durable task record" >&2
@@ -3648,6 +3792,21 @@ rm -rf "$STATE/$ID.agy-hooks"
 # racing the same id stays serialized exactly as it was before. A captain-held
 # row takes the retain transition here instead of the close: same record, same
 # ordering, the row returns to Queued with its deliverable recorded.
+if [ "$KEEP_PANE" = 1 ]; then
+  teardown_kept_shell_sample || {
+    echo "REFUSED: --keep-pane lost proof of its surviving detached shell before record retirement; retaining the task record and pending backlog transition." >&2
+    exit 1
+  }
+  if [ "$KEEP_PANE_JOURNAL_PRESENT" = 1 ]; then
+    if ! teardown_keep_pane_journal_correlates \
+       || ! rm -f "$HERDR_PRESENTATION_JOURNAL" \
+       || [ -e "$HERDR_PRESENTATION_JOURNAL" ] \
+       || [ -L "$HERDR_PRESENTATION_JOURNAL" ]; then
+      echo "REFUSED: --keep-pane could not verify retirement of its exact presentation journal; retaining task record and pending backlog transition." >&2
+      exit 1
+    fi
+  fi
+fi
 if [ "$BACKLOG_CLOSED" = 1 ]; then
   BACKLOG_CLOSE_MARKER=$(fm_backlog_close_marker_path "$STATE" "$ID") || exit 1
   if ! fm_backlog_atomic_transition "$BACKLOG_TRANSITION" "$STATE/$ID.meta" "$BACKLOG_CLOSE_MARKER" \
@@ -3684,7 +3843,9 @@ fi
 if [ -d "$STATE" ]; then
   "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
 fi
-if [ "$TEARDOWN_LEGACY_ACCEPTED" = 1 ]; then
+if [ "$KEEP_PANE" = 1 ]; then
+  echo "teardown $ID complete (pane $T preserved with stopped worker, shell detached to /, worktree $WT returned)"
+elif [ "$TEARDOWN_LEGACY_ACCEPTED" = 1 ]; then
   echo "teardown $ID complete (window $T, worktree $WT, legacy record accepted without spawn_gen: endpoint $TEARDOWN_LEGACY_ENDPOINT, incarnation $TEARDOWN_META_SPAWN_GEN)"
 elif teardown_owns_worktree; then
   echo "teardown $ID complete (window $T, worktree $WT)"

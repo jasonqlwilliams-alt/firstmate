@@ -1032,6 +1032,29 @@ ok - forced secondmate teardown retains Herdr child identity until exact pane di
 ok - forced teardown retains a nested secondmate home and its grandchild's Herdr identity when the grandchild close is unconfirmed
 ```
 
+### Pane-preserving retirement
+
+`bin/fm-teardown.sh` owns pane-preserving retirement and its supported limits.
+Refresh the focused fixtures and token-free real Herdr proof through the ordinary test runner:
+
+```sh
+bin/fm-test-run.sh tests/fm-teardown.test.sh tests/fm-teardown-endpoint-safety.test.sh tests/fm-captain-hold-lifecycle.test.sh
+FM_TEARDOWN_KEEP_PANE_LAB=1 bin/fm-test-run.sh tests/fm-teardown.test.sh
+```
+
+The lab uses the named-session helper and default-session tripwire, with an inert shell and a disposable pool fixture.
+It verifies actual pane and shell survival, kernel cwd detachment, task record removal and slot-claim release; pool return is a fixture executable, not a production pool operation.
+It also retires the same real pane without the option to prove the default close behavior.
+The portable fixtures additionally cover dirty/unlanded refusal, endpoint and incarnation ambiguity, slot collisions, failed return, lost-pane refusal, presentation-journal retirement, durable backlog transitions and open captain-call retention.
+
+Verified on 2026-11-05 with Herdr 0.9.5, lsof 4.99.7 and a bash shell on Linux:
+
+```text
+Herdr keep-pane lab version: 0.9.5
+ok - real Herdr lab: keep-pane retires records and slot while the identical pane and detached shell survive
+ok - real Herdr lab counterfactual: default retirement closes the previously preserved exact pane
+```
+
 ### Composer and operational input
 
 Real captures verified these active distinctions:
