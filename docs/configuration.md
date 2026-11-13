@@ -516,6 +516,17 @@ Regression coverage executes emitted launch commands with synthetic nonsecret va
 
 Every claude launch's inline `--settings` JSON also carries `"attribution":{"commit":"","pr":"","sessionUrl":false}`, so a spawned worker never writes a Co-Authored-By trailer, Claude-Session link, or generated-with line into a commit or PR body regardless of which settings scopes end up loaded.
 
+## Interactive model lineup
+
+Ask Firstmate for `/lineup` or its `/models` alias to open a Lavish board showing live provider headroom, current and suggested picks for the helm, backup successor, second mates, each existing dispatch rule and the default, and verified public benchmarks by task with sources and dates.
+The suggestions come from Firstmate's quota-aware judgment; models without matching public evidence appear as `no public score`.
+You can override any offered pick, request ordered fallback arrays for dispatch, and enter written instructions that take precedence over the dropdowns.
+Applying saves the resolved dispatch profiles, secondmate pin, and backup successor in this home's gitignored `config/`, propagates inherited settings to second mates, and reports the changes; invalid picks are refused before publication.
+Restarting running second mates is optional and off by default.
+The helm pick is reported as a handover instruction and does not switch the running helm.
+Changing the backup successor does not change an already armed Claude-runway watch; [backup helm](backup-helm.md#arm) owns its re-arm procedure.
+[`fm-lineup-board.sh --help`](../bin/fm-lineup-board.sh) owns the exact board payload, private benchmark cache, validation, and apply contract.
+
 ## Crew dispatch profiles (config/crew-dispatch.json)
 
 `config/crew-dispatch.json` is an optional local, gitignored file containing natural-language rules that firstmate reads before dispatching a crewmate or scout.
