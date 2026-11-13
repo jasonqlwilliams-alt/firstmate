@@ -668,7 +668,7 @@ PATH="$FAKEBIN:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$COST_HOME" \
 jq -e --arg home "$COST_HOME" '
   .schema == "fm-secondmate-home-summary.v1"
   and .home == $home
-  and .counts.active_children == 32
+  and .counts.endpoints == 32
   and any(.decisions_open[]; .key == "cost-gate")
 ' "$COST_HOME/state/home-summary.json" >/dev/null \
   || fail "the accumulated home published a ledger missing its open decision"

@@ -2639,6 +2639,25 @@ test_populated_summary_startup_budget() {
   make_fake_ps_claude "$fakebin"
   fm_fake_exit0 "$fakebin" herdr
   printf 'tmux\n' > "$home/config/backend"
+  printf 'manual\n' > "$home/config/backlog-backend"
+  make_fake_tasks_axi_compact "$fakebin"
+  mv "$fakebin/tasks-axi" "$fakebin/tasks-axi-base"
+  cat > "$fakebin/tasks-axi" <<'SHTASKS'
+#!/usr/bin/env bash
+case "$*" in
+  list*'--state in_flight'*)
+    printf 'count: 32\ntasks[32]{id,state,kind,repo,title,blocked_by,hold_kind,hold_reason}:\n'
+    for i in $(seq 1 32); do
+      kind=ship; [ "$i" -le 24 ] || kind=secondmate
+      printf '  child-%s,in_flight,%s,firstmate,Fixture worker,none,none,none\n' "$i" "$kind"
+    done
+    ;;
+  list*) printf 'count: 0\ntasks[0]{id,state,kind,repo,title,blocked_by,hold_kind,hold_reason}:\n' ;;
+  ready*) printf 'count: 0\nready[0]{id,state,kind,repo,title}:\nready_public_followups: 0 delivery-ready obligations\n' ;;
+  *) exec "$(dirname "$0")/tasks-axi-base" "$@" ;;
+esac
+SHTASKS
+  chmod +x "$fakebin/tasks-axi"
   mkdir -p "$home/projects/task"
   fm_git_init_commit "$home/projects/task"
   printf '## In flight\n' > "$home/data/backlog.md"
@@ -2661,6 +2680,8 @@ PYFIXTURE
   out=$(FM_FAKE_HARNESS_PID="$SESSION_START_TEST_HARNESS_PID" run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
   elapsed=$((SECONDS-started))
   assert_not_contains "$out" '●  STARTUP TRUNCATED' 'populated-home startup exhausted its default bound'
+  assert_contains "$out" 'OPEN DECISIONS (still open' 'populated-home startup lost its decision presentation'
+  assert_not_contains "$out" 'error: bootstrap cannot access' 'populated-home backlog setup is invalid'
   assert_contains "$out" 'data/learnings.md' 'populated-home startup lost its context digest'
   [ "$elapsed" -lt 120 ] || fail "populated-home startup took ${elapsed}s"
   FM_HOME="$home" FM_ROOT_OVERRIDE="$root" PATH="$fakebin:$BASE_PATH" \
@@ -2670,6 +2691,8 @@ PYFIXTURE
   pass "populated-home startup completes its digest in ${elapsed}s inside the default bound"
 }
 
+# Measure startup before the other cases accumulate detached fixture workers.
+test_populated_summary_startup_budget
 test_context_digest_absent_empty_present
 test_lock_refusal_read_only_path
 test_lock_write_failure_read_only_path
@@ -2724,5 +2747,3 @@ test_agents_baseline_requires_sha256_and_successful_completion
 test_reemit_keeps_repair_ownership_with_the_lock_holder
 
 echo "# fm-session-start.test.sh: all assertions passed"
-
-test_populated_summary_startup_budget
