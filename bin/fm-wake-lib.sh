@@ -1667,7 +1667,7 @@ fm_treehouse_slot_foreign_records() {  # <worktree> <exclude-meta>
 # every reachable local home, including held and exited tasks: metadata, rather
 # than a running process, is the preservation boundary. This reads state only.
 fm_treehouse_require_recorded_leases() {  # <project> <record-state>
-  local project=$1 record_state=$2 state_dir meta field path slot pool slot_name project_identity slot_identity
+  local project=$1 record_state=$2 state_dir meta field path slot pool state slot_name project_identity slot_identity
   project_identity=$(fm_treehouse_repo_identity "$project") || return 1
   fm_treehouse_collect_owner_states "$record_state" || return 1
   for state_dir in "${FM_TREEHOUSE_OWNER_STATES[@]}"; do
@@ -1682,9 +1682,12 @@ fm_treehouse_require_recorded_leases() {  # <project> <record-state>
         [ -n "$path" ] || continue
         slot=$(fm_treehouse_canonical_dir "$path") || continue
         pool=${slot%/*}; slot_name=${pool##*/}; pool=${pool%/*}
-        if ! fm_treehouse_pool_slot "$project" "$slot"; then
-          # A missing or malformed state file must not hide a recorded pool
-          # slot. Recognize its numeric slot layout and repository identity.
+        state="$pool/treehouse-state.json"
+        if [ -f "$state" ] && [ ! -L "$state" ] \
+           && jq -e '.worktrees | type == "array"' "$state" >/dev/null 2>&1; then
+          jq -e --arg slot "$slot" '.worktrees | any(.[]; .path == $slot)' "$state" >/dev/null 2>&1 || continue
+          fm_treehouse_pool_slot "$project" "$slot" || continue
+        else
           case "$slot_name" in ''|*[!0-9]*) continue ;; esac
           slot_identity=$(fm_treehouse_repo_identity "$slot") || {
             echo "REFUSED: cannot verify recorded Treehouse-shaped path $slot before allocation; inspect task $(basename "$meta" .meta)" >&2
@@ -1692,10 +1695,10 @@ fm_treehouse_require_recorded_leases() {  # <project> <record-state>
           }
           [ "$slot_identity" = "$project_identity" ] || continue
         fi
-        if [ -L "$pool/treehouse-state.json" ] || ! jq -e --arg slot "$slot" '
+        if [ -L "$state" ] || ! jq -e --arg slot "$slot" '
           .worktrees | map(select(.path == $slot))
           | length == 1 and .[0].leased == true
-        ' "$pool/treehouse-state.json" >/dev/null 2>&1; then
+        ' "$state" >/dev/null 2>&1; then
           echo "REFUSED: Treehouse pool slot $slot is still recorded by task $(basename "$meta" .meta) ($field) but lacks a durable lease; refusing allocation before Treehouse can reset that copy" >&2
           echo "Repair its lease with the state-only treehouse lease command, or retire a stale record with fm-teardown.sh <id> --retire-stale-record; no allocation was sent" >&2
           return 1

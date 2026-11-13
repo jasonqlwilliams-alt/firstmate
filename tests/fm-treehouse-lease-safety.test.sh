@@ -67,6 +67,17 @@ jq -e --arg slot "$SLOT" '.worktrees | any(.[]; .path == $slot and .leased == tr
 next=$(cd "$PROJECT" && HOME="$TMP_ROOT/user" "$TREEHOUSE_BIN" get --lease --no-fetch --lease-holder next) || fail 'counterfactual durable get failed'
 [ "$next" != "$SLOT" ] || fail 'Treehouse reused the durable slot after the stub shell exited'
 pass 'durable spawn acquisition survives shell exit and is excluded by real Treehouse'
+ORCA_WT="$TMP_ROOT/orca/1/project"
+git -C "$PROJECT" worktree add -q --detach "$ORCA_WT" HEAD || fail 'could not create Orca worktree fixture'
+printf '{"worktrees":[]}\n' > "$TMP_ROOT/orca/treehouse-state.json"
+printf 'backend=orca\nworktree=%s\nproject=%s\n' "$ORCA_WT" "$PROJECT" > "$HOME_DIR/state/orca.meta"
+calls=$(wc -l < "$FM_TEST_TREEHOUSE_CALLS")
+out=$(run_spawn with-orca); rc=$?
+expect_code 0 "$rc" "Orca worktree record blocked Treehouse allocation: $out"
+[ "$(wc -l < "$FM_TEST_TREEHOUSE_CALLS")" -gt "$calls" ] || fail 'Orca counterexample never reached Treehouse allocation'
+[ "$(cat "$FM_TEST_CWD")" != "$ORCA_WT" ] || fail 'Treehouse allocated the Orca worktree'
+assert_present "$HOME_DIR/state/orca.meta" 'spawn changed the Orca task record'
+pass 'unregistered Orca worktree in the same Git repository does not block Treehouse allocation'
 # Simulate the observed legacy/lost lease in isolated state only.
 jq --arg slot "$SLOT" '(.worktrees[] | select(.path == $slot)) |= (.leased = false | del(.lease_id,.lease_holder,.leased_at))' "$POOL_STATE" > "$TMP_ROOT/state-next"
 mv "$TMP_ROOT/state-next" "$POOL_STATE"
