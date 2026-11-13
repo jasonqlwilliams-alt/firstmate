@@ -150,13 +150,13 @@ STARTED=1
 "$TMUX_BIN" -S "$SOCKET" new-window -d -t signin -n fm-signin-live \
   -c "$TMP_ROOT/work" /bin/bash --noprofile --norc "$TMP_ROOT/launch" \
   || fail "$VERSION: private Codex window failed"
-i=0; previous=''; screen=''
+i=0; screen=''
 while [ "$i" -lt 100 ]; do
   screen=$("$TMUX_BIN" -S "$SOCKET" capture-pane -p -t "$TARGET") || fail "$VERSION: capture failed"
-  case "$screen" in
-    *[![:space:]]*) [ "$screen" != "$previous" ] || break ;;
-  esac
-  previous=$screen
+  # Startup diagnostics can hold the same pane content for several frames
+  # before Codex paints the chooser. Wait for the screen we need to exercise,
+  # without sending any terminal input to advance an unexpected screen.
+  fm_composer_codex_signin_screen "$screen" && break
   sleep 0.2; i=$((i+1))
 done
 if [ -n "${FM_CODEX_SIGNIN_CAPTURE:-}" ]; then

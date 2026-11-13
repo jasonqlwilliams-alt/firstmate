@@ -147,9 +147,13 @@
 #   poisoned. A leftover that names a task from another home is
 #   refused rather than overwritten; bin/fm-teardown.sh
 #   --release-orphaned-slot-claim is the supported drop of that leftover. A
-#   spawn that aborts while it still holds the allocation lock drops its own
-#   claim; an abort after metadata publication has released that lock leaves
-#   the claim in place, so a later spawn of the same task may reclaim it, a
+#   spawn that aborts before publishing a record, after identifying its acquired
+#   slot, returns the lease only when the slot is untouched and the lease and
+#   claim still match. A modified or uncertain slot keeps its lease for
+#   inspected recovery. While
+#   the allocation lock is held, abort drops this spawn's own claim. An abort
+#   after metadata publication has released that lock leaves the claim in
+#   place, so a later spawn of the same task may reclaim it, a
 #   later same-home spawn may recycle it once that task no longer records it, and
 #   a spawn from another home must refuse until the leftover is released.
 #   The local root is whatever bin/fm-wake-lib.sh's
@@ -1205,12 +1209,12 @@ spawn_abort_cleanup() {
     SPAWN_META_LOCK_HELD=0
     fm_lock_release "$SPAWN_META_LOCK" || true
   fi
-  # A spawn that aborts after claiming its slot but before its record survives
-  # must not leave a claim naming a task no record describes. The release is a
+  # Before removing its claim, an aborted spawn returns only the exact lease it
+  # took on an untouched, unrecorded slot. Otherwise it retains the lease and
+  # prints a guarded return command for inspection. Claim release is a
   # read-then-remove, so it runs only while the project lock that wrote the
-  # claim is still held (aborts before metadata publication); a later abort has
-  # already released that lock and leaves the claim in place rather than racing
-  # a successor. A later spawn of this same task may reclaim it; a later
+  # claim is still held; a later abort leaves the claim rather than racing a
+  # successor. A later spawn of this same task may reclaim it; a later
   # same-home spawn may recycle it once this task no longer records it; a spawn
   # from another home must refuse until bin/fm-teardown.sh
   # --release-orphaned-slot-claim drops the leftover. The release itself never

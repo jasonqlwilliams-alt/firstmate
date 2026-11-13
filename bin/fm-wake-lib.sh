@@ -1342,8 +1342,8 @@ fm_treehouse_cross_clone_trust_valid() {  # <project-real> <worktree-real> [<cal
 # Slot-owner claim: which task a Treehouse pool slot currently belongs to.
 #
 # Treehouse's durable leases protect secondmate homes and worker slots until
-# return, even after their processes exit. A lease alone does not bind a slot
-# to a Firstmate task or prove that teardown may return it. Firstmate keeps
+# return, even after their processes exit. A lease holder label alone cannot
+# prove which home and task record may return the slot. Firstmate keeps
 # its own claim too: one file naming the task that took the slot, written by
 # bin/fm-spawn.sh under the same project lock that allocates the slot and
 # released by bin/fm-teardown.sh when the slot goes back to the pool. A spawn
@@ -1355,8 +1355,7 @@ fm_treehouse_cross_clone_trust_valid() {  # <project-real> <worktree-real> [<cal
 # is the supported drop of a leftover spawn must not take. When a still-live
 # claiming record is dead or missing and another live record occupies the
 # slot, bin/fm-teardown.sh --retire-stale-record transfers that claim to the
-# occupant. Moving crewmate
-# spawns onto the durable lease is separate follow-up work.
+# occupant.
 #
 # The claim lives at <pool>/<slot>/.fm-slot-owner - a sibling of the repo
 # checkout rather than a file inside it - so claiming a slot can never dirty the
