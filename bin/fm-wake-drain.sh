@@ -403,7 +403,9 @@ EOF
 print_unread_status_section() {
   local snapshot=${1:-} unread task line shown=0
 
-  if [ -n "$snapshot" ]; then
+  if [ "$#" -ge 2 ]; then
+    unread=$2
+  elif [ -n "$snapshot" ]; then
     unread=$(scan_unread_surface_snapshot "$STATE" "$snapshot") || return 1
   else
     unread=$(scan_unread_surface_lines "$STATE") || return 1
@@ -549,13 +551,15 @@ EOF
 }
 
 print_status_sections() {
-  local snapshot=${1:-} fully_presented=${2:-} acknowledged prepared
+  local snapshot=${1:-} fully_presented=${2:-} acknowledged prepared unread informational
   if [ -z "$snapshot" ]; then snapshot=$(status_presentation_snapshot "$STATE") || return 1; fi
   [ -n "$snapshot" ] || return 0
-  acknowledged=$(status_acknowledge_presented_snapshot "$STATE" "$snapshot" "$fully_presented") || return 1
+  unread=$(scan_unread_surface_snapshot "$STATE" "$snapshot") || return 1
+  informational=$(printf '%s\n' "$unread" | cut -f1) || return 1
+  acknowledged=$(status_acknowledge_presented_snapshot "$STATE" "$snapshot" "$fully_presented" "$informational") || return 1
   prepared=$(mktemp "$STATE/.status-presentation.prepared.XXXXXX") || return 1
   if ! {
-    print_unread_status_section "$snapshot" \
+    print_unread_status_section "$snapshot" "$unread" \
       && print_status_outcome_backstop_section "$snapshot" \
       && print_open_decisions_section "$snapshot" \
       && print_record_divergence_section

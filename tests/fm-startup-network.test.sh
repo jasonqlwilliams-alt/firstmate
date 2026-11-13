@@ -705,7 +705,9 @@ $rec
 EOF
   printf '%s\n' $$ > "$home/state/.lock"
 
-  FM_STARTUP_NETWORK_TIMEOUT=1 FM_SESSION_START_TIMEOUT=2 \
+  # Leave setup headroom before the deliberate 20-second sweep stall; a
+  # one-second bound can expire before the fixture records its first sample.
+  FM_STARTUP_NETWORK_TIMEOUT=5 FM_SESSION_START_TIMEOUT=2 \
     FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_SLEEP=20 \
     FM_FAKE_TIMING_PHASE=secondmate-liveness FM_FAKE_TIMING_DETAIL='mate-a@host-one' \
     run_stage "$home" "$root" run --locked 1
@@ -713,7 +715,7 @@ EOF
   [ "$(sed -n 's/^state=//p' "$home/state/.startup-network.status")" = timeout ] \
     || fail "the bounded run did not record itself as timed out"
   report_out=$(run_stage "$home" "$root" report)
-  assert_contains "$report_out" "hit the 1s bound" "the bound stopped being reported"
+  assert_contains "$report_out" "hit the 5s bound" "the bound stopped being reported"
   assert_contains "$report_out" "secondmate-liveness mate-a@host-one" \
     "a timed-out run discarded the partial timings its sweeps had already recorded"
   pass "fm-startup-network: a timed-out run still publishes the partial timings it recorded"
@@ -780,3 +782,61 @@ test_timings_are_published_and_only_the_on_demand_report_prints_them
 test_a_bounded_run_still_publishes_the_timings_it_managed_to_record
 test_the_timing_artifact_cannot_carry_a_command_line_or_forge_records
 echo "# fm-startup-network.test.sh: all assertions passed"
+
+# A best-effort side-band publication must still expose failure through the
+# deferred report and ordinary wake transport, rather than implying freshness.
+test_summary_failure_is_reported() {
+  local rec home root log report claimant
+  rec=$(new_world summary-failure)
+  IFS='|' read -r home root log <<< "$rec"
+  printf '%s\n' $$ > "$home/state/.lock"
+  rm "$root/bin/fm-home-summary-refresh.sh"
+  cat > "$root/bin/fm-home-summary-refresh.sh" <<'SHFAIL'
+#!/usr/bin/env bash
+printf 'fixture summary deadline exceeded\n' >&2
+exit 124
+SHFAIL
+  chmod +x "$root/bin/fm-home-summary-refresh.sh"
+  sleep 30 &
+  claimant=$!
+  FM_SESSION_START_TIMEOUT=4 FM_FAKE_BOOTSTRAP_LOG="$log" \
+    run_stage "$home" "$root" start --locked 1 --harvest-pid "$claimant" >/dev/null
+  await_worker_record "$home"
+  run_stage "$home" "$root" wait 30 >/dev/null || fail 'summary failure did not publish a report'
+  kill "$claimant" 2>/dev/null || true
+  wait "$claimant" 2>/dev/null || true
+  report=$(run_stage "$home" "$root" report)
+  assert_contains "$report" 'HOME_SUMMARY: deferred publication failed' 'summary failure was swallowed'
+  assert_contains "$report" 'fixture summary deadline exceeded' 'summary producer diagnostic was lost'
+  wait_for_startup_network_wake "$home" || fail 'late summary failure did not wake'
+  pass 'fm-startup-network: summary publication failure is durable and wakes'
+}
+test_summary_failure_is_reported
+
+test_summary_publishes_before_a_sweep_exhausts_its_deadline() {
+  local rec home root log report
+  rec=$(new_world summary-before-sweep-timeout)
+  IFS='|' read -r home root log <<< "$rec"
+  printf '%s\n' $$ > "$home/state/.lock"
+  rm "$root/bin/fm-home-summary-refresh.sh"
+  cat > "$root/bin/fm-home-summary-refresh.sh" <<'SHSUMMARY'
+#!/usr/bin/env bash
+sleep 3
+printf 'published\n' > "$FM_HOME/state/home-summary.json"
+SHSUMMARY
+  chmod +x "$root/bin/fm-home-summary-refresh.sh"
+
+  FM_HOME_SUMMARY_TIMEOUT=5 FM_STARTUP_NETWORK_TIMEOUT=2 \
+    FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_SLEEP=20 \
+    run_stage "$home" "$root" run --locked 1
+
+  [ "$(cat "$home/state/home-summary.json" 2>/dev/null)" = published ] \
+    || fail 'a timed-out sweep starved home-summary publication'
+  [ "$(sed -n 's/^state=//p' "$home/state/.startup-network.status")" = timeout ] \
+    || fail 'the sweep did not exhaust its own deadline'
+  report=$(run_stage "$home" "$root" report)
+  assert_contains "$report" 'NETWORK_CHECKS: hit the 2s bound' \
+    'the sweep timeout was not reported after summary publication'
+  pass 'fm-startup-network: summary publishes before a slow sweep exhausts its deadline'
+}
+test_summary_publishes_before_a_sweep_exhausts_its_deadline

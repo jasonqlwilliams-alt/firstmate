@@ -46,7 +46,8 @@ What remains is still not individually bounded - tool version probes, the backlo
 The shared timeout owner falls back to a pure-Bash process-group watchdog when timeout, gtimeout, and perl are unavailable, so no supported host runs the digest unbounded.
 Because the child streams into the native transport as it runs, everything emitted before the bound was hit is retained for delivery; the parent then prints a `STARTUP TRUNCATED` banner naming the stage that did not finish and the stages that were therefore never emitted, and still exits 0.
 The registered hook timeouts sit above that budget so the harness never preempts the banner.
-The deferred startup stage deliberately runs in its own process group under its own deadline, so a truncated digest neither kills the network checks and inactive-outcome scan it was not waiting for nor orphans unbounded network work.
+The deferred startup stage runs in its own process group; a locked start publishes the home summary there under its own `FM_HOME_SUMMARY_TIMEOUT` bound before the separately bounded network checks and inactive-outcome scan.
+A truncated digest neither kills that work nor orphans unbounded network work.
 
 ## Shared wrapper and safety
 
