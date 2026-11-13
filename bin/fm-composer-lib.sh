@@ -1607,3 +1607,20 @@ _fm_composer_pi_verdict() {  # <screen> <styled> <has_identity> <identity>
     *) printf 'unknown' ;;
   esac
 }
+
+# Positive identification of Codex's initial authentication choice screen.
+# This is a stop-only verdict, never permission to type. Require the welcome,
+# authentication explanation, numbered choices and current continue footer;
+# retained sign-in text above another screen or composer does not qualify.
+fm_composer_codex_signin_screen() {  # <styled-screen>
+  printf '%s\n' "$1" | fm_composer_strip_ansi | LC_ALL=C awk '
+    { sub(/\r$/, ""); sub(/^[ \t]+/, ""); sub(/[ \t]+$/, "") }
+    /^Welcome to Codex([ ,\[].*)?$/ { welcome=NR }
+    /^Sign in with ChatGPT to use Codex as part of your paid plan/ { explanation=NR }
+    /^[›❯> ]*1[.)] +Sign in with ChatGPT$/ { first=NR }
+    /^[›❯> ]*[23][.)] +(Sign in with Device Code|Provide your own API key|Sign in with an API key)$/ { alternative=NR }
+    NF { last=NR; footer=($0 ~ /^Press [Ee]nter to continue$/) }
+    END { exit !(welcome && explanation > welcome && first > explanation &&
+                 alternative > first && last > alternative && footer) }
+  '
+}

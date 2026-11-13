@@ -1341,18 +1341,10 @@ fm_treehouse_cross_clone_trust_valid() {  # <project-real> <worktree-real> [<cal
 
 # Slot-owner claim: which task a Treehouse pool slot currently belongs to.
 #
-# Treehouse can record ownership durably: `treehouse get --lease --lease-holder`
-# reserves a slot under a label until `treehouse return --if-lease-holder`
-# releases it, and Firstmate uses exactly that for secondmate homes
-# (bin/fm-home-seed.sh). Crewmate spawns do not take that path: they acquire
-# their slot through the interactive pane-driven `treehouse get`, whose state
-# entry is a live process lease (owner_pid plus owner_started_at, and `treehouse
-# status` reports in-use from the processes actually running under the path).
-# That answers "is anything running here", never "which task owns this", and it
-# is released by the very event that makes a task record stale - the worker
-# exiting - so a slot whose lease has lapsed reads identical whether it is still
-# this task's or has since been handed to another one. Firstmate therefore keeps
-# its own claim on top: one file naming the task that took the slot, written by
+# Treehouse's durable leases protect secondmate homes and worker slots until
+# return, even after their processes exit. A lease alone does not bind a slot
+# to a Firstmate task or prove that teardown may return it. Firstmate keeps
+# its own claim too: one file naming the task that took the slot, written by
 # bin/fm-spawn.sh under the same project lock that allocates the slot and
 # released by bin/fm-teardown.sh when the slot goes back to the pool. A spawn
 # refuses to overwrite a claim that names a task from another home, including
@@ -1668,6 +1660,49 @@ fm_treehouse_slot_foreign_records() {  # <worktree> <exclude-meta>
     done
   done
   [ "$found" = 1 ]
+}
+
+# Refuse allocation before Treehouse can reset a recorded slot whose durable
+# lease is missing. Callers hold the project's allocation/return lock. Inspect
+# every reachable local home, including held and exited tasks: metadata, rather
+# than a running process, is the preservation boundary. This reads state only.
+fm_treehouse_require_recorded_leases() {  # <project> <record-state>
+  local project=$1 record_state=$2 state_dir meta field path slot pool slot_name project_identity slot_identity
+  project_identity=$(fm_treehouse_repo_identity "$project") || return 1
+  fm_treehouse_collect_owner_states "$record_state" || return 1
+  for state_dir in "${FM_TREEHOUSE_OWNER_STATES[@]}"; do
+    for meta in "$state_dir"/*.meta; do
+      [ -e "$meta" ] || [ -L "$meta" ] || continue
+      [ -f "$meta" ] && [ ! -L "$meta" ] && [ -r "$meta" ] || {
+        echo "REFUSED: cannot inspect task record $meta before Treehouse allocation" >&2
+        return 1
+      }
+      for field in worktree home; do
+        path=$(_fm_treehouse_meta_field "$meta" "$field")
+        [ -n "$path" ] || continue
+        slot=$(fm_treehouse_canonical_dir "$path") || continue
+        pool=${slot%/*}; slot_name=${pool##*/}; pool=${pool%/*}
+        if ! fm_treehouse_pool_slot "$project" "$slot"; then
+          # A missing or malformed state file must not hide a recorded pool
+          # slot. Recognize its numeric slot layout and repository identity.
+          case "$slot_name" in ''|*[!0-9]*) continue ;; esac
+          slot_identity=$(fm_treehouse_repo_identity "$slot") || {
+            echo "REFUSED: cannot verify recorded Treehouse-shaped path $slot before allocation; inspect task $(basename "$meta" .meta)" >&2
+            return 1
+          }
+          [ "$slot_identity" = "$project_identity" ] || continue
+        fi
+        if [ -L "$pool/treehouse-state.json" ] || ! jq -e --arg slot "$slot" '
+          .worktrees | map(select(.path == $slot))
+          | length == 1 and .[0].leased == true
+        ' "$pool/treehouse-state.json" >/dev/null 2>&1; then
+          echo "REFUSED: Treehouse pool slot $slot is still recorded by task $(basename "$meta" .meta) ($field) but lacks a durable lease; refusing allocation before Treehouse can reset that copy" >&2
+          echo "Repair its lease with the state-only treehouse lease command, or retire a stale record with fm-teardown.sh <id> --retire-stale-record; no allocation was sent" >&2
+          return 1
+        fi
+      done
+    done
+  done
 }
 
 fm_failure_episode_reset() {

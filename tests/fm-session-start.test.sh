@@ -727,8 +727,11 @@ EOF
   : > "$home/data/captain.md"
   # secondmates.md, captain-shared.md, and learnings.md deliberately absent
 
-  out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+  out=$(FM_FAKE_HARNESS_PID="$SESSION_START_TEST_HARNESS_PID" run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
 
+  FM_HOME="$home" FM_ROOT_OVERRIDE="$root" PATH="$fakebin:$BASE_PATH" \
+    "$ROOT/bin/fm-startup-network.sh" wait 30 >/dev/null \
+    || fail "deferred startup did not finish summary publication"
   jq -e --arg home "$home" '
     .schema == "fm-secondmate-home-summary.v1"
     and .home == $home
@@ -2625,6 +2628,48 @@ EOF
   pass "session start rejects Pi loaded markers from previous sessions"
 }
 
+# The summary used to consume its full deadline before startup could reach the
+# digest. Exercise accumulated history with many local workers and secondmates,
+# using the real producer and default startup bound, never a live home.
+test_populated_summary_startup_budget() {
+  local rec root home fakebin i kind out started elapsed
+  rec=$(new_world populated-summary)
+  IFS='|' read -r root home fakebin <<< "$rec"
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_claude "$fakebin"
+  fm_fake_exit0 "$fakebin" herdr
+  printf 'tmux\n' > "$home/config/backend"
+  mkdir -p "$home/projects/task"
+  fm_git_init_commit "$home/projects/task"
+  printf '## In flight\n' > "$home/data/backlog.md"
+  python3 - "$home" <<'PYFIXTURE'
+import pathlib, sys
+home = pathlib.Path(sys.argv[1])
+for i in range(1, 33):
+    kind = "ship" if i <= 24 else "secondmate"
+    (home / "state" / f"child-{i}.meta").write_text(
+        f"window=fixture:fm-child-{i}\nkind={kind}\nharness=codex\n"
+        f"worktree={home}/projects/task\nmode=no-mistakes\nspawn_gen=fixture.{i}\n")
+    (home / "state" / f"child-{i}.status").write_text(
+        "".join("working: " + "validation progress and pending checks " * 40 + str(n) + "\n"
+                for n in range(300)) + "needs-decision [key=fixture-choice]: preserve this decision\n")
+    with (home / "data/backlog.md").open("a") as f:
+        f.write(f"- [ ] child-{i} - Fixture worker (repo: firstmate) (kind: {kind}) (since 2026-11-01)\n")
+PYFIXTURE
+  printf '\n## Queued\n\n## Done\n' >> "$home/data/backlog.md"
+  started=$SECONDS
+  out=$(FM_FAKE_HARNESS_PID="$SESSION_START_TEST_HARNESS_PID" run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+  elapsed=$((SECONDS-started))
+  assert_not_contains "$out" '●  STARTUP TRUNCATED' 'populated-home startup exhausted its default bound'
+  assert_contains "$out" 'data/learnings.md' 'populated-home startup lost its context digest'
+  [ "$elapsed" -lt 120 ] || fail "populated-home startup took ${elapsed}s"
+  FM_HOME="$home" FM_ROOT_OVERRIDE="$root" PATH="$fakebin:$BASE_PATH" \
+    "$ROOT/bin/fm-startup-network.sh" wait 90 >/dev/null || fail 'deferred publication did not finish'
+  jq -e '.schema == "fm-secondmate-home-summary.v1" and (.decisions_open | length) > 0' \
+    "$home/state/home-summary.json" >/dev/null || fail 'deferred summary lost its decisions'
+  pass "populated-home startup completes its digest in ${elapsed}s inside the default bound"
+}
+
 test_context_digest_absent_empty_present
 test_lock_refusal_read_only_path
 test_lock_write_failure_read_only_path
@@ -2679,3 +2724,5 @@ test_agents_baseline_requires_sha256_and_successful_completion
 test_reemit_keeps_repair_ownership_with_the_lock_holder
 
 echo "# fm-session-start.test.sh: all assertions passed"
+
+test_populated_summary_startup_budget

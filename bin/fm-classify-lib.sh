@@ -156,6 +156,9 @@ status_is_terminal_verb() {
 status_is_captain_relevant() {
   local line=$1 verb
   [ -n "$line" ] || return 1
+  # Ordinary untagged progress dominates accumulated home history. These exact
+  # prefixes are already non-actionable under every classifier configuration.
+  case "${line%%:*}" in working|resolved|captain-held) return 1 ;; esac
   status_is_paused "$line" && return 1
   verb=$(status_line_verb "$line")
   case "$verb" in
@@ -191,6 +194,10 @@ status_is_paused() {  # <status-line>
 status_is_captain_held() {  # <status-line>
   local line=$1 verb
   [ -n "$line" ] || return 1
+  case "${line%%:*}" in
+    "${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}") return 0 ;;
+    working|resolved|done|failed) return 1 ;;
+  esac
   verb=$(status_line_verb "$line")
   [ "$verb" = "${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}" ]
 }
@@ -465,6 +472,17 @@ _fm_is_pending_reply_escalation() {  # <key> <note>
   esac
 }
 
+# Cheap superset filter before the fold's command substitutions. Ordinary
+# progress history cannot change a decision set. Keep every candidate prefix,
+# including correlation tokens and custom closing verbs, for the exact parser.
+_fm_decision_may_transition() {  # <line> <resolve-verb> <held-verb>
+  local prefix=${1%%:*}
+  case "$prefix" in
+    *needs-decision*|*blocked*|*"$2"*|*"$3"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 _fm_decision_fold_line() {  # <open-set> <status-line> <resolve-verb> <held-verb>
   local open=$1 line=$2 resolve=$3 held=$4 verb key note
   # Blank-line guard. A `case` glob answers "does this line hold any non-space
@@ -513,6 +531,7 @@ status_open_decisions() {  # <status-file>
   resolve=${FM_CLASSIFY_RESOLVE_VERB:-$FM_CLASSIFY_RESOLVE_VERB_DEFAULT}
   held=${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}
   while IFS= read -r line || [ -n "$line" ]; do
+    _fm_decision_may_transition "$line" "$resolve" "$held" || continue
     open=$(_fm_decision_fold_line "$open" "$line" "$resolve" "$held")
   done < "$f"
   printf '%s' "$open"
@@ -573,6 +592,7 @@ status_key_closing_verb() {  # <status-file> <key>
   while IFS= read -r line || [ -n "$line" ]; do
     was=0
     _fm_open_set_has "$open" "$want" && was=1
+    _fm_decision_may_transition "$line" "$resolve" "$held" || continue
     open=$(_fm_decision_fold_line "$open" "$line" "$resolve" "$held")
     if [ "$was" = 1 ] && ! _fm_open_set_has "$open" "$want"; then
       verb=$(status_line_verb "$line")
@@ -847,6 +867,7 @@ status_open_decisions_incremental() {  # <status-file> [<captured-end-offset>]
     resolve=${FM_CLASSIFY_RESOLVE_VERB:-$FM_CLASSIFY_RESOLVE_VERB_DEFAULT}
     held=${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}
     while IFS= read -r line || [ -n "$line" ]; do
+      _fm_decision_may_transition "$line" "$resolve" "$held" || continue
       open=$(_fm_decision_fold_line "$open" "$line" "$resolve" "$held")
     done < "$chunk_file"
     rm -f "$chunk_file"
@@ -1471,10 +1492,11 @@ status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>]
 status_line_is_unread_surface() {  # <status-line>
   local line=$1 verb key note resolve held prefix
   [ -n "$line" ] || return 1
-  verb=$(status_line_verb "$line")
-  [ "$verb" = note ] && return 0
   resolve=${FM_CLASSIFY_RESOLVE_VERB:-$FM_CLASSIFY_RESOLVE_VERB_DEFAULT}
   held=${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}
+  case "${line%%:*}" in *note*|*"$resolve"*|*"$held"*) ;; *) return 1 ;; esac
+  verb=$(status_line_verb "$line")
+  [ "$verb" = note ] && return 0
   case "$verb" in
     "$resolve"|"$held") ;;
     *) return 1 ;;
@@ -1640,6 +1662,7 @@ _fm_status_open_decision_origins() {  # <status-file>
   held=${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}
   while IFS= read -r line || [ -n "$line" ]; do
     number=$((number + 1))
+    _fm_decision_may_transition "$line" "$resolve" "$held" || continue
     after=$(_fm_decision_fold_line "$open" "$line" "$resolve" "$held")
     key=$(_fm_decision_key "$line") || { open=$after; continue; }
     verb=$(status_line_verb "$line")

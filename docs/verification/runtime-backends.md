@@ -1830,3 +1830,9 @@ A throwaway scout was spawned through `bin/fm-spawn.sh --scout --harness omp --m
 
 Claude Code 2.1.267 passed two consecutive accelerated quiet-lease lifecycle runs on Linux on 2026-09-10.
 [Supervision verification](supervision.md#claude-quiet-lease-renewal-2026-09-10) owns the exact commands, output, singleton and acknowledgement checks, and the distinction between accelerated proof and live-session activation.
+
+## Codex authentication stop regression
+
+On 2026-11-13 with tmux 3.7c and GCC 16.2.1, the portable regression `bin/fm-test-run.sh tests/fm-control-codex-signin.test.sh` exercised a compiled sign-in stub in isolated tmux endpoints without launching a vendor harness.
+It reported `ok - sign-in control sent no keys and preserved terminal endpoints`; it also checked refusal of update, unknown, retained-history, incomplete and wrong-process screens, and survival of an unrelated Codex-named process.
+This verifies process targeting and the captured-style screen contract, not a live vendor authentication flow.

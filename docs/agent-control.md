@@ -35,7 +35,11 @@ A recorded `harness=` is not always an exact adapter name: a task launched from 
 | `relaunch` | Start a replacement for a running or exited agent in its recorded endpoint and worktree, on the exact recorded adapter or an explicitly chosen harness, model, and effort. An authoritatively missing endpoint is recreated into the recorded worktree. | The new agent is alive on the recorded endpoint, or on a newly created endpoint when that recorded endpoint was missing, and the durable record names the harness that is actually running. |
 
 An exit that delivers lifecycle input but cannot prove the agent stopped fails with `exit=unconfirmed`, reports the observed agent state and any interrupt cancellation claim, and never claims that nothing changed.
-On tmux and Herdr, Codex exit types `/quit` only when the current composer is proven empty.
+On tmux and Herdr, a positively identified Codex sign-in screen uses `TERM` on one verified native Codex foreground process and returns `stopped-sign-in` after the backend proves the agent stopped.
+It sends no keys or text, rechecks screen and endpoint ownership plus process birth identity before signalling, and refuses if any observation changes or cannot identify exactly one native process.
+The [Codex adapter reference](../.agents/skills/harness-adapters/references/harness/codex.md) owns the authentication screen facts.
+This same exit path permits `relaunch` to proceed past sign-in; unreadable and unattributed endpoints remain refused.
+Other Codex exits type `/quit` only when the current composer is proven empty.
 It refuses an active global-update picker or an uncertain screen before typing, before each confirming or retry Enter, and after Enter without sending another Enter; a dismissed picker retained above a proven current composer does not block ordinary quit.
 If a capture becomes uncertain after Enter, a later pending read does not permit a retry; exit waits for process death only within `FM_CONTROL_EXIT_WAIT`.
 Codex exit also returns nonzero with `process-stopped-safe-quit-unconfirmed` when the process stops after lifecycle input, because process death and a shell redraw cannot distinguish an ordinary `/quit` from accepting the global-update picker.

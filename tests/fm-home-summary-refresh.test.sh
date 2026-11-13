@@ -652,15 +652,23 @@ with open(sys.argv[1], "w") as handle:
         handle.write(f"working: {note}({i})\n")
     handle.write("needs-decision [key=cost-gate]: which base to rebuild from\n")
 PY
+for cost_index in $(seq 2 32); do
+  cp "$COST_HOME/state/cost-task.meta" "$COST_HOME/state/cost-$cost_index.meta"
+  cp "$COST_HOME/state/cost-task.status" "$COST_HOME/state/cost-$cost_index.status"
+  sed -i.bak "/^## Queued/i\\
+- [ ] cost-$cost_index - Fixture worker (repo: firstmate) (kind: ship) (since 2026-08-28)" "$COST_HOME/data/backlog.md"
+  rm -f "$COST_HOME/data/backlog.md.bak"
+done
 PATH="$FAKEBIN:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$COST_HOME" \
   FM_SNAPSHOT_NOW="$NOW_ONE" FM_SNAPSHOT_NOW_EPOCH="$EPOCH_ONE" \
-  FM_HOME_SUMMARY_TIMEOUT=30 "$WRITER" --best-effort \
+  FM_HOME_SUMMARY_TIMEOUT=45 "$WRITER" --best-effort \
   || fail "accumulated-home publication changed the best-effort caller result"
 [ -f "$COST_HOME/state/home-summary.json" ] \
-  || fail "an accumulated home did not publish within a 30-second deadline: $(cat "$COST_HOME/state/.home-summary-refresh.log" 2>/dev/null)"
+  || fail "an accumulated home did not publish within a 45-second deadline: $(cat "$COST_HOME/state/.home-summary-refresh.log" 2>/dev/null)"
 jq -e --arg home "$COST_HOME" '
   .schema == "fm-secondmate-home-summary.v1"
   and .home == $home
+  and .counts.active_children == 32
   and any(.decisions_open[]; .key == "cost-gate")
 ' "$COST_HOME/state/home-summary.json" >/dev/null \
   || fail "the accumulated home published a ledger missing its open decision"

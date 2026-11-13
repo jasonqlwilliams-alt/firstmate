@@ -3830,9 +3830,14 @@ if [ "$RELAUNCH" -eq 1 ]; then
   validate_launch_models
   resolve_additional_launch_executables
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
-  spawn_send_text_line "$WT_TARGET" 'treehouse get'
+  # Check legacy or lost leases before get can reset any reusable slot.
+  fm_treehouse_require_recorded_leases "$PROJ_ABS" "$STATE" || exit 1
+  # A process lease ends with the shell, while a task record can remain held.
+  # Acquire durably and enter that exact path in the existing pane shell.
+  # shellcheck disable=SC2016 # Expansion belongs to the destination pane shell.
+  spawn_send_text_line "$WT_TARGET" "$(printf 'fm_acquired_slot=$(treehouse get --lease --lease-holder %q) && cd -- "$fm_acquired_slot"' "$ID")"
 
-  # Wait for the treehouse subshell: the pane's cwd moves from the project to the worktree.
+  # Wait for the acquired path: the pane's cwd moves from project to worktree.
   # Target the stable window id, not the name: if the name is ever lost (e.g. an
   # automatic-rename slips through), display-message -t <bad-name> falls back to the
   # active client's window, which would misread firstmate's OWN pane path as the
@@ -3845,7 +3850,7 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   # A single read that already looks isolated is not proof the pane settled
   # there: on some tmux/WSL setups a brand-new window's pane_current_path
   # transiently reports an unrelated stale path (seen live as another real git
-  # checkout entirely) before the shell catches up with treehouse get's cd. That
+  # checkout entirely) before the shell enters the durably acquired path. That
   # stale path passes spawn_worktree_isolated too (it resolves to a real,
   # distinct worktree top-level), so accepting it on one read alone silently
   # records the wrong worktree= in state/<id>.meta. Require two consecutive
@@ -3891,16 +3896,9 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
 
   validate_spawn_worktree "treehouse get" "$T"
 
-  # Claim the pool slot for this task. The interactive `treehouse get` sent to
-  # the pane above records only a process lease (Treehouse's durable
-  # `get --lease --lease-holder`, which bin/fm-home-seed.sh uses for secondmate
-  # homes, is not this path), so Treehouse cannot say which task a slot belongs
-  # to once that task's worker exits - and that is exactly when the slot is
-  # handed on and this task's worktree= line goes stale. The claim is what lets
-  # bin/fm-teardown.sh leave a slot that has since been reassigned untouched, so
-  # a slot that cannot be claimed is refused here, at the cheapest point, rather
-  # than launching a worker whose slot teardown could later release out from
-  # under its successor.
+  # The durable lease prevents future allocation after the worker exits.
+  # The task claim additionally protects teardown from returning a slot whose
+  # ownership changed, and is checked against every local live record.
   # Written under the Treehouse project lock held from before slot allocation
   # through metadata publication, so no other spawn or return sees a half-claim.
   if fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then

@@ -780,3 +780,33 @@ test_timings_are_published_and_only_the_on_demand_report_prints_them
 test_a_bounded_run_still_publishes_the_timings_it_managed_to_record
 test_the_timing_artifact_cannot_carry_a_command_line_or_forge_records
 echo "# fm-startup-network.test.sh: all assertions passed"
+
+# A best-effort side-band publication must still expose failure through the
+# deferred report and ordinary wake transport, rather than implying freshness.
+test_summary_failure_is_reported() {
+  local rec home root log report claimant
+  rec=$(new_world summary-failure)
+  IFS='|' read -r home root log <<< "$rec"
+  printf '%s\n' $$ > "$home/state/.lock"
+  rm "$root/bin/fm-home-summary-refresh.sh"
+  cat > "$root/bin/fm-home-summary-refresh.sh" <<'SHFAIL'
+#!/usr/bin/env bash
+printf 'fixture summary deadline exceeded\n' >&2
+exit 124
+SHFAIL
+  chmod +x "$root/bin/fm-home-summary-refresh.sh"
+  sleep 30 &
+  claimant=$!
+  FM_SESSION_START_TIMEOUT=4 FM_FAKE_BOOTSTRAP_LOG="$log" \
+    run_stage "$home" "$root" start --locked 1 --harvest-pid "$claimant" >/dev/null
+  await_worker_record "$home"
+  run_stage "$home" "$root" wait 30 >/dev/null || fail 'summary failure did not publish a report'
+  kill "$claimant" 2>/dev/null || true
+  wait "$claimant" 2>/dev/null || true
+  report=$(run_stage "$home" "$root" report)
+  assert_contains "$report" 'HOME_SUMMARY: deferred publication failed' 'summary failure was swallowed'
+  assert_contains "$report" 'fixture summary deadline exceeded' 'summary producer diagnostic was lost'
+  wait_for_startup_network_wake "$home" || fail 'late summary failure did not wake'
+  pass 'fm-startup-network: summary publication failure is durable and wakes'
+}
+test_summary_failure_is_reported
