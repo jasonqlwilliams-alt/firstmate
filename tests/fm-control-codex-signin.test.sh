@@ -37,6 +37,12 @@ static void render(const char *path, const char *mode) {
     if (!strcmp(mode, "legacy-two-choice") && strstr(line, "3. Provide your own API key")) {
       fputs("  2. Provide your own API key\r\n", stdout); continue;
     }
+    if (!strcmp(mode, "legacy-api-alias") && strstr(line, "3. Provide your own API key")) {
+      fputs("  3. Sign in with an API key\r\n", stdout); continue;
+    }
+    if (!strcmp(mode, "current-hybrid") && strstr(line, "3. Sign in another way")) {
+      fputs("  3. Provide your own API key\r\n", stdout);
+    }
     if ((strstr(mode, "no-brand") || !strcmp(mode, "no-context")) && strstr(line, "Welcome to Codex")) continue;
     if ((strstr(mode, "no-explanation") || !strcmp(mode, "no-context")) &&
         (strstr(line, "Sign in with ChatGPT to use Codex as part") || strstr(line, "Choose how you want to use Codex"))) continue;
@@ -91,13 +97,13 @@ stub_command() {
   "$(stub_command codex sentinel-pid sentinel-keys legacy "$ROOT/tests/fixtures/codex-signin-legacy.screen")" || fail 'tmux fixture failed'
 "$TMUX_BIN" -f /dev/null -L "$SOCKET" set-option -g automatic-rename off
 "$TMUX_BIN" -f /dev/null -L "$SOCKET" set-option -g allow-rename off
-for mode in legacy legacy-two-choice current legacy-no-brand current-no-brand legacy-no-explanation current-no-explanation no-context unknown unknown-choice update history history-footer missing-choice wrong-process; do
+for mode in legacy current legacy-two-choice legacy-api-alias current-hybrid legacy-no-brand current-no-brand legacy-no-explanation current-no-explanation no-context unknown unknown-choice update history history-footer missing-choice wrong-process; do
   target=fixture:fm-signin
   binary=codex
   fixture="$ROOT/tests/fixtures/codex-signin-legacy.screen"
   case "$mode" in current*|no-context) fixture="$ROOT/tests/fixtures/codex-signin-0.167.2.screen" ;; esac
   expected_stop=0
-  case "$mode" in legacy|legacy-two-choice|current|*-no-brand|*-no-explanation) expected_stop=1 ;; esac
+  case "$mode" in legacy|current) expected_stop=1 ;; esac
   if [ "$mode" = wrong-process ]; then
     cp "$TMP_ROOT/bin/codex" "$TMP_ROOT/bin/claude"
     binary=claude
@@ -110,19 +116,26 @@ for mode in legacy legacy-two-choice current legacy-no-brand current-no-brand le
   [ -s "$TMP_ROOT/pid" ] || fail 'stub never rendered its screen'
   pid=$(cat "$TMP_ROOT/pid")
   case "$mode" in
-    legacy-two-choice|*-no-brand|*-no-explanation|no-context)
+    legacy-two-choice|legacy-api-alias|current-hybrid|*-no-brand|*-no-explanation|no-context)
       i=0; observed=''
       while [ "$i" -lt 100 ]; do
         observed=$("$TMUX_BIN" -f /dev/null -L "$SOCKET" capture-pane -p -t "$target")
         case "$observed" in *'Press Enter to continue'*|*'Press enter to continue'*) break ;; esac
         sleep 0.1; i=$((i+1))
       done
-      if [ "$mode" = legacy-two-choice ]; then
-        assert_contains "$observed" '2. Provide your own API key' 'two-choice fixture did not render its API alternative'
-        assert_not_contains "$observed" 'Sign in with Device Code' 'two-choice fixture retained its device alternative'
-      else
-        assert_contains "$observed" 'Sign in with Device Code' 'signal-blinding fixture did not render its choices'
-      fi
+      case "$mode" in
+        legacy-two-choice)
+          assert_contains "$observed" '2. Provide your own API key' 'two-choice fixture did not render its API alternative'
+          assert_not_contains "$observed" 'Sign in with Device Code' 'two-choice fixture retained its device alternative'
+          ;;
+        legacy-api-alias)
+          assert_contains "$observed" '3. Sign in with an API key' 'alias fixture did not render its API choice'
+          ;;
+        current-hybrid)
+          assert_contains "$observed" '3. Provide your own API key' 'hybrid fixture did not render its extra choice'
+          ;;
+        *) assert_contains "$observed" 'Sign in with Device Code' 'signal-blinding fixture did not render its choices' ;;
+      esac
       case "$mode" in
         *-no-brand|no-context) assert_not_contains "$observed" 'Welcome to Codex' 'brand signal was not actually blinded' ;;
         *) assert_contains "$observed" 'Welcome to Codex' 'independent brand signal was lost' ;;
@@ -156,7 +169,7 @@ for mode in legacy legacy-two-choice current legacy-no-brand current-no-brand le
   "$TMUX_BIN" -f /dev/null -L "$SOCKET" kill-window -t "$target"
   rm -f "$TMP_ROOT/pid" "$TMP_ROOT/keys"
 done
-pass 'captured legacy/current sign-in screens and independent signals stop without keys; uncertain screens remain protected'
+pass 'captured sign-in screens stop without keys; single-signal and unsupported screens are refused'
 
 # Exercise the live guard itself with a compiled stand-in. No installed vendor
 # CLI is reached, including if its opt-in policy regresses.
