@@ -812,3 +812,31 @@ SHFAIL
   pass 'fm-startup-network: summary publication failure is durable and wakes'
 }
 test_summary_failure_is_reported
+
+test_summary_publishes_before_a_sweep_exhausts_its_deadline() {
+  local rec home root log report
+  rec=$(new_world summary-before-sweep-timeout)
+  IFS='|' read -r home root log <<< "$rec"
+  printf '%s\n' $$ > "$home/state/.lock"
+  rm "$root/bin/fm-home-summary-refresh.sh"
+  cat > "$root/bin/fm-home-summary-refresh.sh" <<'SHSUMMARY'
+#!/usr/bin/env bash
+sleep 3
+printf 'published\n' > "$FM_HOME/state/home-summary.json"
+SHSUMMARY
+  chmod +x "$root/bin/fm-home-summary-refresh.sh"
+
+  FM_HOME_SUMMARY_TIMEOUT=5 FM_STARTUP_NETWORK_TIMEOUT=2 \
+    FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_SLEEP=20 \
+    run_stage "$home" "$root" run --locked 1
+
+  [ "$(cat "$home/state/home-summary.json" 2>/dev/null)" = published ] \
+    || fail 'a timed-out sweep starved home-summary publication'
+  [ "$(sed -n 's/^state=//p' "$home/state/.startup-network.status")" = timeout ] \
+    || fail 'the sweep did not exhaust its own deadline'
+  report=$(run_stage "$home" "$root" report)
+  assert_contains "$report" 'NETWORK_CHECKS: hit the 2s bound' \
+    'the sweep timeout was not reported after summary publication'
+  pass 'fm-startup-network: summary publishes before a slow sweep exhausts its deadline'
+}
+test_summary_publishes_before_a_sweep_exhausts_its_deadline
