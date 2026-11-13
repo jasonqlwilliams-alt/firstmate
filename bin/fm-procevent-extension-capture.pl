@@ -258,6 +258,21 @@ write_all($extension_file, join("\n", "schema=fm-procevent-extension-owner.v1", 
 close($extension_file) or fail("cannot close extension evidence");
 publish_new($adapter_tmp, "$prefix.adapter");
 publish_new($extension_tmp, "$prefix.extension");
+# Publish workset membership before the result commit, in the pinned inbox.
+# Refuse redirected directories or markers rather than following symlinks.
+mkdir('.pending', 0700) unless -e '.pending' || -l '.pending';
+sysopen(my $pending_dir, '.pending', O_RDONLY | O_NOFOLLOW) or fail('cannot pin pending workset');
+my @pending_stat = stat($pending_dir);
+@pending_stat && -d _ && $pending_stat[4] == $<
+  && ($pending_stat[2] & 07777) == 0700 or fail('unsafe pending workset');
+chdir($pending_dir) or fail('cannot enter pending workset');
+my $pending_marker = $prefix;
+if (!sysopen(my $pending, $pending_marker, O_CREAT | O_EXCL | O_NOFOLLOW | O_WRONLY, 0600)) {
+  my @marker_stat = lstat($pending_marker);
+  @marker_stat && -f _ && !-l _ && $marker_stat[4] == $<
+    && ($marker_stat[2] & 07777) == 0600 or fail('unsafe pending marker');
+}
+chdir($inbox_dir) or fail('cannot return to inbox directory');
 publish_new($result_tmp, "$prefix.result");
 my @inbox_stat = stat($inbox_dir);
 my @result_stat = stat("$prefix.result");
