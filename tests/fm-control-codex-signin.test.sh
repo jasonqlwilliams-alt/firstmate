@@ -173,7 +173,7 @@ pass 'captured sign-in screens stop without keys; single-signal and unsupported 
 
 # Exercise the live guard itself with a compiled stand-in. No installed vendor
 # CLI is reached, including if its opt-in policy regresses.
-GUARD="$ROOT/tests/fm-codex-signin-live-e2e.test.sh"
+GUARD=tests/fm-codex-signin-live-e2e.test.sh
 mkdir -p "$TMP_ROOT/guard-bin" "$TMP_ROOT/guard-user"
 cp "$TMP_ROOT/bin/codex" "$TMP_ROOT/guard-bin/codex"
 guard_out=$(env -u FM_LIVE -u FM_CODEX_SIGNIN_LIVE \
@@ -181,6 +181,7 @@ guard_out=$(env -u FM_LIVE -u FM_CODEX_SIGNIN_LIVE \
   FM_SIGNIN_GUARD_PID="$TMP_ROOT/guard-default.pid" \
   "$ROOT/bin/fm-test-run.sh" "$GUARD") || fail 'default live guard did not skip'
 assert_contains "$guard_out" 'skip: live: opt-in' 'live guard became default-on'
+assert_not_contains "$guard_out" "$ROOT" 'default guard output exposed the repository path'
 [ ! -e "$TMP_ROOT/guard-default.pid" ] || fail 'default guard launched its stand-in'
 for guard_mode in legacy current update crash; do
   fixture="$ROOT/tests/fixtures/codex-signin-legacy.screen"
@@ -193,6 +194,7 @@ for guard_mode in legacy current update crash; do
     FM_CODEX_SIGNIN_CAPTURE="$TMP_ROOT/guard-$guard_mode.screen" \
     "$ROOT/bin/fm-test-run.sh" "$GUARD" 2>&1) || rc=$?
   printf '%s guard exit=%s\n%s\n' "$guard_mode" "$rc" "$guard_out"
+  assert_not_contains "$guard_out" "$ROOT" 'nested guard output exposed the repository path'
   [ ! -s "$TMP_ROOT/guard-$guard_mode.keys" ] || fail 'live guard sent input to stand-in'
   [ -s "$TMP_ROOT/guard-$guard_mode.screen" ] || fail 'live guard omitted requested capture'
   if [ "$guard_mode" = update ]; then

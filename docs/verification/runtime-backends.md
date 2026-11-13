@@ -1835,8 +1835,8 @@ Claude Code 2.1.267 passed two consecutive accelerated quiet-lease lifecycle run
 
 On 2026-11-13, a single no-input capture with codex-cli 0.167.2, an empty `CODEX_HOME`, a throwaway cwd and a private tmux socket supplied the current chooser fixture.
 The portable regression `bin/fm-test-run.sh tests/fm-control-codex-signin.test.sh` renders that fixture and the legacy wording with compiled stand-ins, using tmux 3.7c and GCC 16.2.1.
-It reports `ok - captured legacy/current sign-in screens and independent signals stop without keys; uncertain screens remain protected`.
-It verifies the loss of either context signal separately, refuses update, unknown, retained-history, repeated-footer, incomplete and wrong-process screens, and preserves an unrelated Codex-named process.
+It reports `ok - captured sign-in screens stop without keys; single-signal and unsupported screens are refused`.
+It requires both context signals and only the captured legacy and current choice layouts; it refuses two-choice, API-key alias, mixed-choice, update, unknown, retained-history, repeated-footer, incomplete and wrong-process screens, and preserves an unrelated Codex-named process.
 
 The complete live stop check is `FM_CODEX_SIGNIN_LIVE=1 bin/fm-test-run.sh tests/fm-codex-signin-live-e2e.test.sh`.
 It is explicitly opt-in despite spending no model tokens because an accidental key at the update picker has broken a global installation.
