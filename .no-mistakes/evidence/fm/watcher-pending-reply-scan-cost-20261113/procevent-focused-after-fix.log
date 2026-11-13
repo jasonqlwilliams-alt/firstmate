@@ -1,0 +1,3 @@
+reconcile cost: 50 handled=1.193s; 3000 handled=1.301s
+ok - 3000 handled results add no reconcile payload/adapter reads, including offline sources
+ok - late pre-upgrade results remain discoverable and reannounced

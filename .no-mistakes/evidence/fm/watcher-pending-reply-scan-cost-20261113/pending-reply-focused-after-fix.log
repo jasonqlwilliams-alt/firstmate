@@ -1,0 +1,5 @@
+ok - late legacy records reconcile and escalate after workset readiness
+ok - an unavailable pending index preserves resolution through the legacy scan
+tick cost (three polls): 50 resolved=1.225s; 3000 resolved=1.856s
+ok - 3000 settled records add no tick helper processes, locks, or status work
+ok - resolved records with an unfinished escalation close remain retryable
