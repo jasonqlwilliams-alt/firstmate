@@ -742,6 +742,30 @@ HERDR_LAB_HELPER=bin/fm-herdr-lab.sh \
 
 Observed guarantee: a restored no-agent tab was replaced create-before-close, while a registered live agent caused refusal.
 
+### Secondmate endpoint ownership and batch recovery
+
+Verified on 2026-11-14 with Herdr 0.9.5 on Linux, using registered fake agents and stubbed launch screens in a guarded named lab session.
+The test drives the real bootstrap sweep and spawn task-set lock; it launches no harness CLI.
+
+```sh
+bin/fm-test-run.sh tests/fm-secondmate-herdr-identity-e2e.test.sh tests/fm-secondmate-liveness.test.sh
+```
+
+Observed output:
+
+```text
+Herdr secondmate identity lab version: 0.9.5
+ok - bootstrap replaces both another secondmate and a non-secondmate recycled route
+ok - one bootstrap sweep recovers every missing secondmate without lock contention
+ok - failed recovery releases the sweep lock for the next secondmate
+ok - Herdr home binding: canonical creation cwd owns identity; foreign is missing, unreadable is preserved
+```
+
+The lab checks that foreign agents survive, matching ownership retains its route, unreadable home identity produces a diagnostic and preserves its route, and every successful replacement records a pane created in its own home.
+The portable fixture separately varies creation cwd, foreground cwd, symlink aliases, malformed responses, wrong echoed pane ids, and failed reads across live, agent-less, and stale-registration states.
+The default-session fleet tripwire is verified at teardown.
+This check depends on backend cwd metadata rather than harness-specific names or rendered titles, so its ownership rule is common to all supported local Herdr secondmate harnesses.
+
 ### Launcher workspace placement
 
 Herdr exports its pane identity into every process it manages, checked on 2026-07-30 against Herdr 0.7.5 protocol 17 inside a guarded lab pane:

@@ -986,7 +986,7 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
 # pane-presence read and prints exactly one of:
 #   alive      - a verified harness agent is running.
 #   dead       - the endpoint exists but confidently has no agent.
-#   missing    - the recorded endpoint is authoritatively absent.
+#   missing    - the recorded endpoint is absent or belongs to another home.
 #   ambiguous  - the endpoint exists but its process cannot be attributed.
 #   unreadable - a target or inventory read failed or contradicted itself.
 #   unverified - this backend has no recovery classifier.
@@ -1001,12 +1001,22 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
 # `missing` only in this recovery-grade view. Zellij remains unverified because
 # its secondmate ghost-tab and agent-process recovery path has not been
 # empirically validated. Orca and cmux do not support secondmate spawns.
-fm_backend_agent_state() {  # <backend> <target>
+# An optional expected-home binds Herdr secondmate recovery to the pane's
+# structural home identity (bin/backends/herdr.sh); a confirmed foreign pane
+# means `missing`, while an unavailable identity means `unreadable`.
+# Other callers retain the process-only verdict.
+fm_backend_agent_state() {  # <backend> <target> [<expected-home>]
   local backend=$1 target=$2
   fm_backend_source "$backend" || { printf 'unverified'; return 0; }
   case "$backend" in
     tmux) fm_backend_tmux_agent_state "$target" ;;
-    herdr) fm_backend_herdr_agent_state "$target" ;;
+    herdr)
+      if [ "$#" -ge 3 ]; then
+        fm_backend_herdr_agent_state "$target" "$3"
+      else
+        fm_backend_herdr_agent_state "$target"
+      fi
+      ;;
     *) printf 'unverified' ;;
   esac
 }

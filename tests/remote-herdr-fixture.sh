@@ -83,22 +83,26 @@ case "${1:-} ${2:-}" in
     if [ "$(jq_state -r --arg p "$pane" '[.tabs[]|select(.pane_id==$p)]|length')" = 0 ]; then
       printf '{"error":{"code":"pane_not_found","message":"%s"}}\n' "$pane"
     else
-      printf '{"result":{"pane":{"pane_id":"%s"}}}\n' "$pane"
+      jq_state --arg p "$pane" '{result:{pane:([.tabs[]|select(.pane_id==$p)|{pane_id:.pane_id,cwd:.cwd}][0])}}'
     fi
     ;;
   "pane close")
     jq_state --arg p "${3:-}" \
       '.tabs |= [.[]|select(.pane_id != $p)]
        | .typed |= with_entries(select(.key != $p))
-       | .working |= with_entries(select(.key != $p))' | save ;;
+       | .working |= with_entries(select(.key != $p))
+       | .composer |= with_entries(select(.key != $p))' | save ;;
   "pane send-text")
     [ ! -f "$SEND_FAIL" ] || exit 1
-    jq_state --arg p "${3:-}" '.typed[$p] = true' | save ;;
+    jq_state --arg p "${3:-}" --arg line "${4:-}" '.typed[$p] = true | .composer[$p] = $line' | save ;;
   "pane send-keys")
     [ ! -f "$SEND_FAIL" ] || exit 1
-    jq_state --arg p "${3:-}" '.typed[$p] = true | .working[$p] = true' | save ;;
-  "pane read") printf '\n' ;;
+    jq_state --arg p "${3:-}" '.typed[$p] = true | .working[$p] = true | del(.composer[$p])' | save ;;
+  "pane read")
+    line=$(jq_state -r --arg p "${3:-}" '.composer[$p] // empty')
+    if [ -n "$line" ]; then printf '› %s\n' "$line"; else printf '╭────╮\n│    │\n╰────╯\n'; fi ;;
   "pane process-info")
+    [ "$(jq_state -r --arg p "$pane" '.unreadable_process[$p] // false')" != true ] || exit 1
     printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"%s","shell_pid":%s,"foreground_process_group_id":%s,"foreground_processes":[{"pid":%s,"name":"codex","argv0":"codex","argv":["codex"],"cmdline":"codex"}]}}}\n' \
       "$pane" "$$" "$$" "$$" ;;
   "agent get")
@@ -124,5 +128,5 @@ SH
 # reset_remote_herdr_fixture <state>: return the fake host to "no workspaces,
 # tabs, or panes", which is what a test means by "the previous endpoint is gone".
 reset_remote_herdr_fixture() { # <state>
-  printf '{"next":1,"workspaces":[],"tabs":[],"typed":{},"working":{}}\n' > "$1"
+  printf '{"next":1,"workspaces":[],"tabs":[],"typed":{},"working":{},"composer":{}}\n' > "$1"
 }

@@ -2407,6 +2407,27 @@ fm_backend_herdr_server_running_state() {  # <session>
   ' 2>/dev/null || printf 'unknown'
 }
 
+# fm_backend_herdr_pane_home_state: match|mismatch|unreadable for a recorded
+# secondmate home. Creation cwd is intentional: secondmates launch directly in
+# their home, while foreground_cwd can change as the agent works on projects.
+# Canonicalize both directories so symlink aliases are equivalent. A failed,
+# malformed, missing, or unresolvable identity never confirms either ownership
+# or absence. Pane/workspace labels and recycled endpoint ids prove neither.
+fm_backend_herdr_pane_home_state() {  # <session> <pane> <expected-home>
+  local session=$1 pane=$2 home=$3 info cwd expected actual
+  case "$home" in /*) ;; *) printf 'unreadable'; return 0 ;; esac
+  expected=$(cd -- "$home" 2>/dev/null && pwd -P) || { printf 'unreadable'; return 0; }
+  info=$(fm_backend_herdr_cli "$session" pane get "$pane" 2>/dev/null) || {
+    printf 'unreadable'; return 0;
+  }
+  cwd=$(printf '%s' "$info" | jq -er --arg pane "$pane" '
+    select(.error == null) | .result.pane
+    | select(.pane_id == $pane) | .cwd | select(type == "string" and startswith("/"))
+  ' 2>/dev/null) || { printf 'unreadable'; return 0; }
+  actual=$(cd -- "$cwd" 2>/dev/null && pwd -P) || { printf 'unreadable'; return 0; }
+  if [ "$actual" = "$expected" ]; then printf 'match'; else printf 'mismatch'; fi
+}
+
 # fm_backend_herdr_agent_state: recovery-grade state for the same session-start
 # sweep as the tmux classifier. It reuses the husk classifier rather than
 # creating a second Herdr state machine: a structurally gone pane is `missing`,
@@ -2428,20 +2449,30 @@ fm_backend_herdr_server_running_state() {  # <session>
 # on exactly the reads they refused on before. A server that is running, or
 # whose state cannot itself be read, still yields `unreadable` here too: absence
 # is claimed only from positive evidence of it.
-fm_backend_herdr_agent_state() {  # <target>
-  local target=$1
+fm_backend_herdr_agent_state() {  # <target> [<expected-home>]
+  local target=$1 state
   fm_backend_herdr_parse_target "$target" || { printf 'unreadable'; return 0; }
   case "$(fm_backend_herdr_pane_agent_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE")" in
-    dead) printf 'missing' ;;
-    no-agent|stale-agent) printf 'dead' ;;
-    live) printf 'alive' ;;
+    dead) state=missing ;;
+    no-agent|stale-agent) state=dead ;;
+    live) state=alive ;;
     *)
       case "$(fm_backend_herdr_server_running_state "$FM_BACKEND_HERDR_SESSION")" in
-        stopped) printf 'missing' ;;
-        *) printf 'unreadable' ;;
+        stopped) state=missing ;;
+        *) state=unreadable ;;
       esac
       ;;
   esac
+  # Check ownership before licensing a kill of a shell-only endpoint as well as
+  # before accepting a live one. A foreign pane must survive recovery intact.
+  if [ "$#" -ge 2 ] && [ "$state" != missing ]; then
+    case "$(fm_backend_herdr_pane_home_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE" "$2")" in
+      match) ;;
+      mismatch) state=missing ;;
+      *) state=unreadable ;;
+    esac
+  fi
+  printf '%s' "$state"
 }
 
 # Backward-compatible three-state view for callers that only need a yes/no

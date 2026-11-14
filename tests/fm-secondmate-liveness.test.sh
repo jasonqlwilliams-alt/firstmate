@@ -165,7 +165,7 @@ test_herdr_agent_state_preserves_husk_classifier() {
   for row in 'dead missing' 'no-agent dead' 'live alive' 'unknown unreadable'; do
     pane_state=${row%% *}
     expected=${row#* }
-    out=$(FM_TEST_PANE_STATE="$pane_state" bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_pane_agent_state() { printf "%s" "$FM_TEST_PANE_STATE"; }; fm_backend_herdr_agent_state "sess:p1"' "$ROOT")
+    out=$(FM_TEST_PANE_STATE="$pane_state" bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_pane_agent_state() { printf "%s" "$FM_TEST_PANE_STATE"; }; fm_backend_herdr_server_running_state() { printf "unknown"; }; fm_backend_herdr_agent_state "sess:p1"' "$ROOT")
     [ "$out" = "$expected" ] || fail "Herdr pane state $pane_state should map to $expected, got '$out'"
   done
 
@@ -540,6 +540,52 @@ test_sweep_noop_with_no_secondmate_meta() {
   pass "sweep: a silent no-op with no kind=secondmate meta present (a secondmate home's own natural scoping)"
 }
 
+test_herdr_secondmate_home_binding() {
+  local expected foreign alias state shape out
+  expected="$TMP_ROOT/expected-home"
+  foreign="$TMP_ROOT/foreign-home"
+  alias="$TMP_ROOT/home-alias"
+  mkdir -p "$expected" "$foreign"
+  ln -s "$expected" "$alias"
+  for state in live no-agent stale-agent; do
+    for shape in match alias foreign empty malformed wrong-pane error; do
+      out=$(FM_TEST_HOME="$expected" FM_TEST_ALIAS="$alias" FM_TEST_FOREIGN="$foreign" \
+        FM_TEST_SHAPE="$shape" FM_TEST_PANE_STATE="$state" bash -c '
+          . "$1/bin/fm-backend.sh"
+          fm_backend_source herdr
+          fm_backend_herdr_pane_agent_state() { printf "%s" "$FM_TEST_PANE_STATE"; }
+          fm_backend_herdr_cli() {
+            local cwd=$FM_TEST_HOME pane=p1
+            case "$FM_TEST_SHAPE" in
+              alias) cwd=$FM_TEST_ALIAS ;;
+              foreign) cwd=$FM_TEST_FOREIGN ;;
+              empty) cwd= ;;
+              malformed) printf "not json"; return ;;
+              wrong-pane) pane=p2 ;;
+              error) printf "{\"error\":{\"code\":\"unavailable\"}}"; return 1 ;;
+            esac
+            jq -nc --arg cwd "$cwd" --arg pane "$pane" --arg foreground "$FM_TEST_FOREIGN" \
+              "{result:{pane:{pane_id:\$pane,cwd:\$cwd,foreground_cwd:\$foreground}}}"
+          }
+          fm_backend_agent_state herdr sess:p1 "$FM_TEST_HOME"
+        ' _ "$ROOT")
+      case "$shape" in
+        match|alias)
+          if [ "$state" = live ]; then
+            [ "$out" = alive ] || fail "matching $shape home lost its live agent: $out"
+          else
+            [ "$out" = dead ] || fail "matching $shape shell should remain recoverable: $out"
+          fi
+          ;;
+        foreign) [ "$out" = missing ] || fail "foreign $state endpoint must be missing, never killed or accepted alive: $out" ;;
+        *) [ "$out" = unreadable ] || fail "unreadable $shape identity must preserve endpoint: $out" ;;
+      esac
+    done
+  done
+  pass "Herdr home binding: canonical creation cwd owns identity; foreign is missing, unreadable is preserved"
+}
+
+test_herdr_secondmate_home_binding
 test_tmux_agent_state_classifies
 test_tmux_agent_state_rejects_malformed_targets_before_probe
 test_herdr_agent_state_preserves_husk_classifier

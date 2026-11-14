@@ -727,13 +727,29 @@ secondmate_liveness_one_timed() {  # <meta> <id> <label>
   fm_timing_record secondmate liveness "$__fm_timing_stamp" "$label"
 }
 
+# Probes stay concurrent, but recovery spawns share the home's fail-fast
+# task-set lock. Serialize just these spawns inside this sweep, leaving spawn's
+# refusal against an unrelated teardown intact. A subshell-owned lock and EXIT
+# trap release on both success and failure; sequential fallback needs no lock.
+secondmate_recovery_spawn() (
+  local lock=
+  if [ -n "${FM_BOOTSTRAP_PARALLEL_DIR:-}" ]; then
+    # shellcheck source=bin/fm-wake-lib.sh disable=SC1091
+    . "$SCRIPT_DIR/fm-wake-lib.sh"
+    lock="$FM_BOOTSTRAP_PARALLEL_DIR/respawn.lock"
+    fm_lock_acquire_wait "$lock" || return 1
+    trap 'fm_lock_release "$lock"' EXIT
+  fi
+  FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$1" --secondmate
+)
+
 # One secondmate's liveness check. Split out of the sweep so each is individually
 # timed; every `return` here was a `continue` in the loop and means exactly the
 # same thing - move on to the next secondmate. Respawned ids are recorded through
 # secondmate_note_respawned so a concurrent sweep can collect them after wait.
 secondmate_liveness_one() {  # <meta> <id>
   local meta=$1 id=$2
-  local window harness backend target agent_state out cause remote_host remote_rc readiness_reason route_out remote_backend
+  local window harness backend target agent_state out cause remote_host remote_rc readiness_reason route_out remote_backend expected_home
   window=$(fm_meta_get "$meta" window)
   [ -n "$window" ] || return 0
   harness=$(fm_meta_get "$meta" harness)
@@ -753,7 +769,7 @@ secondmate_liveness_one() {  # <meta> <id>
       echo "SECONDMATE_LIVENESS: secondmate $id: skipped: remote readiness failed on $remote_host: $readiness_reason"
       return 0
     fi
-    if out=$("$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh state "$id" < /dev/null 2>/dev/null); then
+    if out=$("$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh state "$id" --bound-home < /dev/null 2>/dev/null); then
       remote_rc=0
     else
       remote_rc=$?
@@ -791,7 +807,7 @@ secondmate_liveness_one() {  # <meta> <id>
         ;;
       dead|missing)
         cause="remote endpoint $agent_state on its configured host"
-        if out=$(FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$id" --secondmate 2>&1); then
+        if out=$(secondmate_recovery_spawn "$id" 2>&1); then
           secondmate_note_respawned "$id"
           report_relaunch "$id" "$cause" "host=$remote_host"
         else
@@ -808,7 +824,19 @@ secondmate_liveness_one() {  # <meta> <id>
   backend=$(fm_backend_of_meta "$meta")
   target=$(fm_backend_target_of_meta "$meta")
   [ -n "$target" ] || target="$window"
-  agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null) || agent_state=unreadable
+  expected_home=$(fm_meta_get "$meta" home)
+  [ -n "$expected_home" ] || expected_home=$(fm_meta_get "$meta" worktree)
+  if [ "$backend" = herdr ] && [ -z "$expected_home" ]; then
+    if secondmate_registry_validate_bindings "$DATA/secondmates.md" resolve_path "$id" \
+      && [ "$SECONDMATE_REGISTRY_MATCH_REMOTE" -eq 0 ]; then
+      expected_home=$SECONDMATE_REGISTRY_MATCH_HOME
+    fi
+  fi
+  if [ "$backend" = herdr ] && [ -z "$expected_home" ]; then
+    agent_state=unreadable
+  else
+    agent_state=$(fm_backend_agent_state "$backend" "$target" "$expected_home" 2>/dev/null) || agent_state=unreadable
+  fi
   case "$harness" in
     claude|codex|opencode|pi|pi-signed|grok|kimi|omp) ;;
     *)
@@ -828,7 +856,7 @@ secondmate_liveness_one() {  # <meta> <id>
       else
         cause="recorded endpoint confidently missing"
       fi
-      if out=$(FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$id" --secondmate 2>&1); then
+      if out=$(secondmate_recovery_spawn "$id" 2>&1); then
         secondmate_note_respawned "$id"
         report_relaunch "$id" "$cause" "backend=$backend"
       else
