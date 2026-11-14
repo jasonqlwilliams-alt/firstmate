@@ -1,0 +1,5 @@
+After four holds: {"decisions_open":4}
+After direct answer: {"decisions_open":3}
+After keyed answers: {"decisions_open":2}
+After reconcile close: {"decisions_open":1}
+After reconcile note: {"decisions_open":1,"sentinel":null}

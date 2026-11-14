@@ -1,0 +1,8 @@
+Registered watch and held child, before adversarial changes:
+{"inventory":{"valid":true,"reason":null,"orphan_in_flight":[],"unowned_current":[],"unstructured_current_count":0},"held":[{"id":"held","current_state":{"state":"unknown","source":"none","detail":"worktree gone (torn down?)","raw":"state: unknown · source: none · worktree gone (torn down?)","observed_at":"2026-11-14T13:37:37Z","freshness":"fresh"}}],"watch":[{"id":"watch","state":"in_flight"}]}
+Bearings projection including full task bodies:
+{"gates":[{"id":"plain","repo":"alpha","reason":""},{"id":"quiet","repo":"alpha","reason":""},{"id":"dated","repo":"beta","reason":"until 2099-01-01"}],"landed":[{"id":"landed","repo":"gamma"}],"quiet_body":[{"id":"quiet","body":"Requires a quiet window before starting."}]}
+Watch check changed without registration:
+{"valid":false,"reason":"in-flight backlog item has no child metadata","orphan_in_flight":["watch"],"unowned_current":[],"unstructured_current_count":0}
+Unowned child metadata added:
+{"valid":false,"reason":"in-flight backlog item has no child metadata","orphan_in_flight":["watch"],"unowned_current":["stray"],"unstructured_current_count":0}

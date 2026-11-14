@@ -1,0 +1,8 @@
+Secondmate published invalidity:
+{"valid":false,"invalidity":{"kind":"child_current_unavailable","ids":["child"]}}
+Parent Bearings reconcile row:
+[{"id":"mate","spawn_gen":"spawn-mate","host":null,"kind":"child_current_unavailable","ids":["child"]}]
+Request command result:
+requested: persisted one snapshot per target
+Persisted request payload:
+[{"id":"mate","spawn_gen":"spawn-mate","host":null,"kind":"child_current_unavailable","ids":["child"]}]

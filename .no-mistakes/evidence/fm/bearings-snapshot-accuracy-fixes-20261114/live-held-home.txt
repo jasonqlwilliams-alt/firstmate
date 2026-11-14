@@ -1,0 +1,2 @@
+Held child with unavailable current state: {"valid":true,"invalidity":{"kind":null,"ids":[]},"endpoints":[{"id":"held","state":"unknown"}]}
+Same child after removing hold kind: {"valid":false,"invalidity":{"kind":"child_current_unavailable","ids":["held"]},"endpoints":[{"id":"held","state":"unknown"}]}
