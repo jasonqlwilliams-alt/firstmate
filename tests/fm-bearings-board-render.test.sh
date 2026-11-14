@@ -424,7 +424,7 @@ test_the_detail_page_spells_out_every_charted_and_landed_row() {
       and .fields.owner.text == "(main)"
       and .fields.blockers.text == "live-work Land the first step first-step gone-work"
       and .fields.report.text == ($home + "/data/blocked row/\"&? report.md")
-      and .fields.report.links == [{href:("file://" + $home + "/data/blocked%20row/%22%26%3F%20report.md"),
+      and .fields.report.links == [{href:"bearings-reports.html#charted-blocked-row",
                                    text:($home + "/data/blocked row/\"&? report.md")}]
       and .fields.pr.links == [{href:"https://github.com/example/sample/pull/12", text:"https://github.com/example/sample/pull/12"}]
       and .fields.filed.text == "2026-08-20")
@@ -521,7 +521,7 @@ test_hostile_titles_are_escaped_on_the_detail_page() {
       and (.sections.charted.items | any(.title == $h and (.fields.blockers.text | contains($h))
         and .fields.owner.text == $h and (.fields["waits-on"].text | contains($h))))
       and (.sections.landed.items[0].title == $h)
-      and ([.sections[].items[].fields[].links[]] | all(.href | startswith("https://") or startswith("file:///")))
+      and ([.sections[].items[].fields[].links[]] | all(.href | startswith("https://") or startswith("bearings-reports.html#")))
   ' >/dev/null || fail "hostile text did not survive as inert text on the detail page: $d"
   if grep -qF '<img src=x' "$page" || grep -qiF '<script' "$page"; then
     fail "hostile markup reached the detail page unescaped"
@@ -547,6 +547,44 @@ test_remote_reports_are_plain_text_on_the_detail_page() {
         | .text == ($path + " On remote host") and .links == [])
   ' >/dev/null || fail "remote reports became local links or lost their host note: $d"
   pass "remote reports show their paths without local file links"
+}
+
+test_local_report_opens_from_the_served_detail_page() {
+  local home d href
+  home=$(make_home served-report)
+  write_detail_payload "$home"
+  printf '<script>alert(1)</script>\n' >> "$home/data/blocked row/\"&? report.md"
+  build_payload "$home" "$home/payload.json" >/dev/null
+  d=$(detail_of "$home")
+  href=$(printf '%s' "$d" | jq -r '.sections.charted.items[1].fields.report.links[0].href')
+  python3 - "$home/.lavish" "$href" <<'PY' || fail "the served detail page cannot open its local report"
+import functools
+import http.server
+import sys
+import threading
+import urllib.parse
+import urllib.request
+
+directory, href = sys.argv[1:]
+handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=directory)
+with http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    page_url = f"http://127.0.0.1:{server.server_port}/bearings-detail.html"
+    with urllib.request.urlopen(page_url) as response:
+        assert response.status == 200
+    report_url = urllib.parse.urljoin(page_url, href)
+    assert urllib.parse.urlparse(report_url).scheme == "http", report_url
+    with urllib.request.urlopen(report_url) as response:
+        assert response.status == 200
+        report = response.read()
+        assert b"A recorded report" in report
+        assert b"&lt;script&gt;alert(1)&lt;/script&gt;" in report
+        assert b"<script" not in report
+    server.shutdown()
+    thread.join()
+PY
+  pass "a local report opens over HTTP from the served detail page"
 }
 
 test_the_canvas_export_is_off_when_unconfigured() {
@@ -644,6 +682,7 @@ test_the_detail_page_is_regenerated_on_every_build_and_states_empty_sections
 test_the_board_links_to_the_detail_page_from_its_nav_and_both_headers
 test_hostile_titles_are_escaped_on_the_detail_page
 test_remote_reports_are_plain_text_on_the_detail_page
+test_local_report_opens_from_the_served_detail_page
 test_the_canvas_export_is_off_when_unconfigured
 test_the_canvas_export_writes_exactly_one_file_in_its_directory
 test_the_canvas_export_never_follows_a_planted_link_out_of_its_directory

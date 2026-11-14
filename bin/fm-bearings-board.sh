@@ -17,7 +17,9 @@
 #            shipped template at the stable board path. From those same
 #            reconciled payload bytes, render the static sibling detail page
 #            ($FM_HOME/.lavish/bearings-detail.html) for Charted Next and
-#            Recently Landed, and - when config/bearings-canvas-dir names an
+#            Recently Landed plus an escaped local report view at
+#            $FM_HOME/.lavish/bearings-reports.html, and - when
+#            config/bearings-canvas-dir names an
 #            existing absolute directory - export the same detail model as one
 #            self-contained Cursor Canvas file (bearings-detail.canvas.tsx)
 #            inside that directory. Establish the Lavish
@@ -437,7 +439,7 @@ detail_model() {  # <effective.json> <home-dir>
 }
 
 # Render the detail page body from the model. Every string is @html-escaped;
-# the only attribute values are fixed anchors and validated https URLs.
+# local reports open through the sibling HTTP-served report view.
 render_detail_body() {  # <model.json>
   jq -r '
     def e: tostring | @html;
@@ -453,13 +455,12 @@ render_detail_body() {  # <model.json>
             + ((.title // .id) | e)
             + "</span>" + (if .title == null then "" else " <code class=\"dt-id\">" + (.id | e) + "</code>" end) + "</li> "] | join(""))
         + "</ul>" end;
-    def file_href: "file://" + (split("/") | map(@uri) | join("/"));
     def report_html:
       if .report_remote and .report != null then
         "<code class=\"dt-path\">" + (.report | e) + "</code> <span class=\"dt-none\">On remote host</span>"
       elif .report_url != null then (.report_url | link)
       elif .report_path != null then
-        "<a class=\"dt-path\" href=\"" + (.report_path | file_href | e)
+        "<a class=\"dt-path\" href=\"bearings-reports.html#" + (.anchor | @uri | e)
         + "\" target=\"_blank\" rel=\"noopener\">" + (.report_path | e) + "</a>"
       else "<span class=\"dt-none\">Not recorded</span>" end;
     def item:
@@ -497,6 +498,31 @@ render_detail_body() {  # <model.json>
       + (if ($m.landed | length) == 0 then "<p class=\"dt-empty\">No recent completions are in the current baseline.</p>" else ([$m.landed[] | item] | join("")) end)
       + "</section></main>"
   ' "$1"
+}
+
+# A browser cannot navigate from an HTTP-served board to file://. Publish
+# escaped local report text as a sibling page so the detail links work through
+# the same route as the board, without executing markup from a report.
+publish_reports() {  # <model.json> <board>
+  local model=$1 dest="${2%/*}/bearings-reports.html" tmp anchor title path
+  tmp=$(umask 077; mktemp "${dest%/*}/.reports.XXXXXX") || return 1
+  {
+    printf '<!doctype html><html lang="en"><meta charset="utf-8"><title>Bearings reports</title><style>body{font:16px system-ui;max-width:80ch;margin:3rem auto;padding:0 1rem}article{margin:0 0 3rem}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><main>\n'
+    while IFS= read -r -d '' anchor && IFS= read -r -d '' title && IFS= read -r -d '' path; do
+      printf '<article id="%s"><h1>%s</h1><p>%s</p><pre>' \
+        "$(jq -nr --arg s "$anchor" '$s | @html')" \
+        "$(jq -nr --arg s "$title" '$s | @html')" \
+        "$(jq -nr --arg s "$path" '$s | @html')"
+      if [ -f "$path" ] && [ -r "$path" ]; then
+        jq -Rs -r '@html' "$path" || { rm -f -- "$tmp"; return 1; }
+      else
+        printf 'Report file is unavailable.'
+      fi
+      printf '</pre></article>\n'
+    done < <(jq -jr '(.charted + .landed)[] | select(.report_path != null) | .anchor, "\u0000", .title, "\u0000", .report_path, "\u0000"' "$model")
+    printf '</main></html>\n'
+  } > "$tmp" || { rm -f -- "$tmp"; return 1; }
+  chmod 0600 "$tmp" && mv -f -- "$tmp" "$dest" || { rm -f -- "$tmp"; return 1; }
 }
 
 # Inject <content-file> in place of the one <placeholder> line of <template>
@@ -595,6 +621,10 @@ publish_detail() {  # <effective.json> <board>
   if ! publish_from_template "$DETAIL_TEMPLATE" "$DETAIL_PLACEHOLDER" "$body" "$dest"; then
     rm -f -- "$model" "$body"
     fail "cannot publish the detail page"
+  fi
+  if ! publish_reports "$model" "$board"; then
+    rm -f -- "$model" "$body"
+    fail "cannot publish the local reports"
   fi
   rm -f -- "$body"
   printf 'detail: %s\n' "$dest"
