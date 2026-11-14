@@ -2576,7 +2576,7 @@ EOF
 EOF
   fakebin=$(make_fakebin "$home")
   json=$(run "$home" "$fakebin" --json)
-  printf '%s' "$json" | jq -e --arg home "$home" '
+  printf '%s' "$json" | jq -e --arg home "$home" --arg mate "$mate" '
     (.gates | any(.id == "waiting-gate" and .waits_since == "2026-07-03" and .owner == "(main)"
       and .pr_url == "https://github.com/example/firstmate/pull/42" and .report == null))
       and (.gates | any(.id == "held-gate" and .filed == "2026-06-20"
@@ -2584,7 +2584,7 @@ EOF
         and .report == ($home + "/data/held-gate/report.md") and .pr_url == null))
       and (.gates | any(.id == "mate-second" and .owner == "detail-mate" and .waits_since == "2026-07-06"
         and .pr_url == "https://github.com/example/sample/pull/8"
-        and .report == "data/mate-second/report.md"))
+        and .report == ($mate + "/data/mate-second/report.md")))
       and ([.gate_blockers[] | select(.gate == "waiting-gate")]
         == [{gate:"waiting-gate", owner:"(main)", id:"missing-work", title:null},
             {gate:"waiting-gate", owner:"(main)", id:"upstream-work", title:"Land the upstream schema change"}])
@@ -2601,6 +2601,31 @@ EOF
   assert_contains "$toon" "gate_blockers[" "TOON did not render the gate blocker table"
   assert_contains "$toon" "Land the upstream schema change" "TOON did not carry the blocker title"
   pass "gates carry waits-since and blockers by title, and landed rows carry their dates and links"
+}
+
+test_secondmate_blocker_title_survives_queued_cap() {
+  local home mate fakebin json n
+  home=$(make_home capped-blocker-title)
+  : > "$home/data/secondmates.md"
+  mate="$TMP_ROOT/capped-blocker-mate-home"
+  make_valid_secondmate_home capped-mate "$mate"
+  append_secondmate_registry "$home" capped-mate "$mate"
+  printf '## In flight\n\n## Queued\n' > "$mate/data/backlog.md"
+  printf '%s\n' '- [ ] old-blocker - Original blocking work (repo: sample) (kind: ship) (since 2026-07-01)' >> "$mate/data/backlog.md"
+  for n in $(seq 2 21); do
+    printf -- '- [ ] mate-gate-%02d - Gate %02d%s (repo: sample) (kind: ship) (since 2026-07-%02d)\n' \
+      "$n" "$n" "$(if [ "$n" -eq 21 ]; then printf ' blocked-by: old-blocker'; fi)" "$n" >> "$mate/data/backlog.md"
+  done
+  printf '\n## Done\n' >> "$mate/data/backlog.md"
+  fakebin=$(make_fakebin "$home")
+  json=$(FM_SNAPSHOT_SECONDMATE_QUEUED=20 run "$home" "$fakebin" --json)
+  printf '%s' "$json" | jq -e '
+    (.gates | any(.id == "mate-gate-21" and .owner == "capped-mate"))
+      and (.gates | any(.id == "old-blocker") | not)
+      and (.gate_blockers | any(.gate == "mate-gate-21" and .owner == "capped-mate"
+        and .id == "old-blocker" and .title == "Original blocking work"))
+  ' >/dev/null || fail "the queued cap hid the owning home blocker title: $json"
+  pass "a shown secondmate gate retains a blocker title beyond the queued cap"
 }
 
 # A gate row whose title exceeds 60 characters and whose reason exceeds 40 must
@@ -3447,6 +3472,7 @@ test_nameless_legacy_summary_uses_its_durable_identifier
 test_newest_filed_gates_are_selected_before_snapshot_bounds
 test_underway_and_gate_rows_carry_the_durable_name_and_filed_date
 test_gates_and_landed_carry_detail_page_facts
+test_secondmate_blocker_title_survives_queued_cap
 test_gate_projection_preserves_full_title_and_reason
 test_mixed_secondmate_roles_partial_state_and_captain_readiness
 test_main_captain_readiness_matches_secondmate_projection

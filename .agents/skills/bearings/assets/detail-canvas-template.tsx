@@ -91,7 +91,7 @@ function rowOf(item: DetailItem) {
         {item.blockers.map((b, i) => (
           <div key={`${i}:${b.id}`}>
             <Text size="small">
-              {plain(b.title ?? "Untitled work")} <Code>{b.id}</Code>
+              {plain(b.title ?? b.id)} {b.title === null ? null : <Code>{b.id}</Code>}
             </Text>
           </div>
         ))}
@@ -100,7 +100,7 @@ function rowOf(item: DetailItem) {
     item.report_url !== null ? (
       <Link href={item.report_url}>{item.report_url}</Link>
     ) : item.report_path !== null ? (
-      <Code>{item.report_path}</Code>
+      <Link href={`file://${item.report_path.split("/").map(encodeURIComponent).join("/")}`}>{plain(item.report_path)}</Link>
     ) : (
       <Text tone="tertiary" size="small">Not recorded</Text>
     ),

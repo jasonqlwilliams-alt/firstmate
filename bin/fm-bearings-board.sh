@@ -349,12 +349,6 @@ detail_model() {  # <effective.json> <home-dir>
     def valid_day:
       type == "string"
       and (try (((. + "T00:00:00Z") | fromdateiso8601 | strftime("%Y-%m-%d")) == .) catch false);
-    def looks_like_id: type == "string" and test("^[a-z0-9]+(?:[-/][a-z0-9]+)+$");
-    def parse_blocker_ids($list):
-      ($list | sub("\\s*\\+[0-9]+\\s+more\\s*$"; "")) as $trimmed
-      | ($trimmed | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))) as $parts
-      | ([ $parts[] | split(" and ") | map(gsub("^\\s+|\\s+$"; "")) | .[] | select(length > 0) ]) as $fine
-      | if ($fine | length) > 0 and all($fine[]; looks_like_id) then $fine else $parts end;
     def unique_anchors($prefix):
       reduce .[] as $item
         ({seen: {}, out: []};
@@ -363,18 +357,12 @@ detail_model() {  # <effective.json> <home-dir>
          | .seen[$base] = $n
          | .out += [$item + {anchor: (if $n == 1 then $base else ($base + "-" + ($n | tostring)) end)}])
       | .out;
-    def known_titles:
-      [ (.charted[] | select(isowarn | not) | {key: .id, value: .title}),
-        (.underway[] | {key: .id, value: .name}),
-        (.landed[] | {key: .id, value: .what}) ]
-      | map(select((.key | type) == "string" and (.value | type) == "string")) | from_entries;
     def report_fields:
       (.report | nz) as $r
-      | (.owner | nz) as $o
       | {report: $r,
-         report_url: (if $r != null and ($r | test("^https://[^[:space:]]+$")) then $r else null end),
-         report_path: (if $r == null or ($r | test("^https://")) then null
-                       elif ($r | startswith("/")) or ($o != null and $o != "(main)") then $r
+         report_url: (if $r != null and ($r | test("^(https?://|file://)[^[:space:]]+$")) then $r else null end),
+         report_path: (if $r == null or ($r | test("^(https?://|file://)")) then null
+                       elif ($r | startswith("/")) then $r
                        else ($home_dir + "/" + $r) end)};
     def row_status_and_waits:
       (.reason // "" | tostring | gsub("^\\s+|\\s+$"; "")) as $r
@@ -384,34 +372,28 @@ detail_model() {  # <effective.json> <home-dir>
       | if isowarn then
           {status: "needs repair",
            waits_on: ("Nothing to start: a notice that the fleet records need repair"
-             + (if $r != "" then " (" + $r + ")" else "" end)),
-           parsed_ids: []}
+             + (if $r != "" then " (" + $r + ")" else "" end))}
         elif $b != null then
           {status: "waiting",
-           waits_on: ("Other work finishing first" + (if ($b.rest // "") != "" then ": " + $b.rest else "" end)),
-           parsed_ids: parse_blocker_ids($b.list)}
+           waits_on: ("Other work finishing first" + (if ($b.rest // "") != "" then ": " + $b.rest else "" end))}
         elif $u != null and ($u.d | valid_day) then
           {status: "waiting",
-           waits_on: ("A date you set: " + $u.d + (if ($u.rest // "") != "" then " - " + $u.rest else "" end)),
-           parsed_ids: []}
+           waits_on: ("A date you set: " + $u.d + (if ($u.rest // "") != "" then " - " + $u.rest else "" end))}
         elif $h != null then
           {status: "waiting",
            waits_on: ("Your answer, held " + $h.n + (if $h.n == "1" then " day" else " days" end)
-             + (if ($h.rest // "") != "" then " - " + $h.rest else "" end)),
-           parsed_ids: []}
+             + (if ($h.rest // "") != "" then " - " + $h.rest else "" end))}
         elif .dispatchable then
           {status: "ready",
            waits_on: ("Nothing, it is ready to start"
              + (if $r != "" and (($r | test("^[Rr][Ee][Aa][Dd][Yy] [Tt][Oo] [Ss][Tt][Aa][Rr][Tt]\\b[^;:]*$")) | not)
-                then " (" + $r + ")" else "" end)),
-           parsed_ids: []}
+                then " (" + $r + ")" else "" end))}
         elif $r == "" then
-          {status: "waiting", waits_on: "No reason recorded", parsed_ids: []}
+          {status: "waiting", waits_on: "No reason recorded"}
         else
-          {status: "waiting", waits_on: $r, parsed_ids: []}
+          {status: "waiting", waits_on: $r}
         end;
     . as $p
-    | known_titles as $titles
     | {schema: "fm-bearings-detail.v1",
        home: $p.home,
        generated: $p.generated,
@@ -428,11 +410,7 @@ detail_model() {  # <effective.json> <home-dir>
               since_label: "Waiting since",
               since: (.waits_since // .filed | nz),
               owner: (.owner | nz),
-              blockers: (if .blockers != null then
-                           [.blockers[] | {id, title: ((.title | nz) // $titles[.id] // null)}]
-                         else
-                           [$sw.parsed_ids[] | {id: ., title: ($titles[.] // null)}]
-                         end),
+              blockers: [(.blockers // [])[] | {id, title: (.title | nz)}],
               pr_url: (.pr_url | nz),
               filed: (.filed | nz)} + report_fields ]
          | unique_anchors("charted-")),
@@ -466,12 +444,15 @@ render_detail_body() {  # <model.json>
       if (.blockers | length) == 0 then "<span class=\"dt-none\">None</span>"
       else "<ul class=\"dt-blockers\">"
         + ([.blockers[] | "<li><span class=\"dt-blocker__title\">"
-            + (.title | or_text("Untitled work"))
-            + "</span> <code class=\"dt-id\">" + (.id | e) + "</code></li>"] | join(""))
+            + ((.title // .id) | e)
+            + "</span>" + (if .title == null then "" else " <code class=\"dt-id\">" + (.id | e) + "</code>" end) + "</li> "] | join(""))
         + "</ul>" end;
+    def file_href: "file://" + (split("/") | map(@uri) | join("/"));
     def report_html:
       if .report_url != null then (.report_url | link)
-      elif .report_path != null then "<code class=\"dt-path\">" + (.report_path | e) + "</code>"
+      elif .report_path != null then
+        "<a class=\"dt-path\" href=\"" + (.report_path | file_href | e)
+        + "\" target=\"_blank\" rel=\"noopener\">" + (.report_path | e) + "</a>"
       else "<span class=\"dt-none\">Not recorded</span>" end;
     def item:
       "<article class=\"dt-item\" id=\"" + (.anchor | e) + "\" data-section=\"" + .section + "\">"

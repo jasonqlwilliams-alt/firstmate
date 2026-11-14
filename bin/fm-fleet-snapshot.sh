@@ -1014,6 +1014,8 @@ secondmate_home_summary_json() {  # <backlog-json-file> <tasks-json-file>
               (.state == "in_flight" and .current_role == "held"
                and (.id as $id
                     | any($tasks[]; .id == $id and .current_state.state == "working") | not)))) ]) as $queued_all
+    | ([ $backlog.records[]? | select(.id != null and .title != null)
+         | {key:(.id | tostring), value:.title} ] | from_entries) as $home_titles
     | ([ $queued_all[]
          | select(.captain_actionable == true)
          | {id,key:.id,verb:"captain-hold",summary:(.title | trunc(160)),
@@ -1140,6 +1142,8 @@ secondmate_home_summary_json() {  # <backlog-json-file> <tasks-json-file>
           blocked_by:((.blocked_by // null) | if . == null then null else trunc(120) end),
           blocked_by_ids:((.blocked_by_ids // []) | map(trunc(120))),
           unresolved_blocker_ids:((.unresolved_blocker_ids // []) | map(trunc(120))),
+          blockers:[(.unresolved_blocker_ids // [])[] | tostring
+            | {id:., title:(($home_titles[.] // null) | if . == null then null else trunc(120) end)}],
           blocked_reason:((.blocked_reason // null) | if . == null then null else trunc(160) end),
           hold_reason:((.hold_reason // null) | if . == null then null else trunc(160) end),
           hold_kind:((.hold_kind // null) | if . == null then null else trunc(40) end),

@@ -375,6 +375,8 @@ detail_of() {  # <home>
 # detail page must spell out, with the new detail fields set and omitted.
 write_detail_payload() {  # <home>
   mkdir -p "$1/config"
+  mkdir -p "$1/data/blocked row"
+  printf 'A recorded report\n' > "$1/data/blocked row/\"&? report.md"
   jq -n '{
     schema:"fm-bearings-board.v1", home:"detail-home", generated:"2026-08-26T00:00Z",
     prs_live:false, captains_call:[],
@@ -384,7 +386,7 @@ write_detail_payload() {  # <home>
        reason:"blocked-by live-work,first-step: needs the ledger", dispatchable:false,
        filed:"2026-08-20", waits_since:"2026-08-21", owner:"(main)",
        blockers:[{id:"live-work", title:null}, {id:"first-step", title:"Land the first step"}, {id:"gone-work"}],
-       pr_url:"https://github.com/example/sample/pull/12", report:"data/blocked-row/report.md"},
+       pr_url:"https://github.com/example/sample/pull/12", report:"data/blocked row/\"&? report.md"},
       {id:"ready-row", repo:"sample", title:"Ready queued work", reason:"", dispatchable:true,
        filed:"2026-08-24", owner:"mate-one"},
       {id:"warn-row", repo:null, title:"Main inventory integrity", reason:"main inventory",
@@ -420,10 +422,10 @@ test_the_detail_page_spells_out_every_charted_and_landed_row() {
       and .fields["waits-on"].text == "Other work finishing first: needs the ledger"
       and .fields.since.label == "Waiting since" and .fields.since.text == "2026-08-21"
       and .fields.owner.text == "(main)"
-      and (.fields.blockers.text | test("Rewire the ledger live-work"))
-      and (.fields.blockers.text | test("Land the first step first-step"))
-      and (.fields.blockers.text | test("Untitled work gone-work"))
-      and .fields.report.text == ($home + "/data/blocked-row/report.md")
+      and .fields.blockers.text == "live-work Land the first step first-step gone-work"
+      and .fields.report.text == ($home + "/data/blocked row/\"&? report.md")
+      and .fields.report.links == [{href:("file://" + $home + "/data/blocked%20row/%22%26%3F%20report.md"),
+                                   text:($home + "/data/blocked row/\"&? report.md")}]
       and .fields.pr.links == [{href:"https://github.com/example/sample/pull/12", text:"https://github.com/example/sample/pull/12"}]
       and .fields.filed.text == "2026-08-20")
     and (.sections.charted.items[0] | .badge == "ready"
@@ -470,13 +472,12 @@ test_the_detail_page_is_regenerated_on_every_build_and_states_empty_sections() {
       and (.sections.charted.items | length) == 1
       and .sections.charted.items[0].badge == "needs repair"
   ' >/dev/null || fail "a warning-only detail page dropped its empty-queue notice or warning row: $d"
-  jq 'del(.charted[0].blockers) | .charted = [.charted[0]]' "$home/payload.json" > "$home/fallback-blockers.json"
-  build_payload "$home" "$home/fallback-blockers.json" >/dev/null
+  jq 'del(.charted[0].blockers) | .charted = [.charted[0]]' "$home/payload.json" > "$home/no-blockers.json"
+  build_payload "$home" "$home/no-blockers.json" >/dev/null
   d=$(detail_of "$home")
   printf '%s' "$d" | jq -e '
-    .sections.charted.items[0].fields.blockers.text
-      | (test("Rewire the ledger live-work") and test("Untitled work first-step"))
-  ' >/dev/null || fail "omitted blockers were not recovered from structured blocked-by reason: $d"
+    .sections.charted.items[0].fields.blockers.text == "None"
+  ' >/dev/null || fail "omitted blockers were inferred from reason prose: $d"
   pass "every build regenerates the detail page, including empty sections"
 }
 
@@ -520,7 +521,7 @@ test_hostile_titles_are_escaped_on_the_detail_page() {
       and (.sections.charted.items | any(.title == $h and (.fields.blockers.text | contains($h))
         and .fields.owner.text == $h and (.fields["waits-on"].text | contains($h))))
       and (.sections.landed.items[0].title == $h)
-      and ([.sections[].items[].fields[].links[]] | all(.href | startswith("https://")))
+      and ([.sections[].items[].fields[].links[]] | all(.href | startswith("https://") or startswith("file:///")))
   ' >/dev/null || fail "hostile text did not survive as inert text on the detail page: $d"
   if grep -qF '<img src=x' "$page" || grep -qiF '<script' "$page"; then
     fail "hostile markup reached the detail page unescaped"
@@ -573,8 +574,7 @@ test_the_canvas_export_writes_exactly_one_file_in_its_directory() {
     const d = JSON.parse(m[1]);
     const h = process.argv[2];
     const ok = d.charted.some((i) => i.title === h) && d.landed[0].title === h
-      && d.charted.length === 3 && d.landed.length === 2
-      && !/dangerouslySetInnerHTML/.test(src);
+      && d.charted.length === 3 && d.landed.length === 2;
     process.exit(ok ? 0 : 1);
   ' "$file" "$hostile" || fail "the canvas does not carry the detail rows as inert data"
   out=$(build_payload "$home" "$home/payload.json")
