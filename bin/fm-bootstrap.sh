@@ -727,6 +727,22 @@ secondmate_liveness_one_timed() {  # <meta> <id> <label>
   fm_timing_record secondmate liveness "$__fm_timing_stamp" "$label"
 }
 
+# Probes stay concurrent, but recovery spawns share the home's fail-fast
+# task-set lock. Serialize just these spawns inside this sweep, leaving spawn's
+# refusal against an unrelated teardown intact. A subshell-owned lock and EXIT
+# trap release on both success and failure; sequential fallback needs no lock.
+secondmate_recovery_spawn() (
+  local lock=
+  if [ -n "${FM_BOOTSTRAP_PARALLEL_DIR:-}" ]; then
+    # shellcheck source=bin/fm-wake-lib.sh disable=SC1091
+    . "$SCRIPT_DIR/fm-wake-lib.sh"
+    lock="$FM_BOOTSTRAP_PARALLEL_DIR/respawn.lock"
+    fm_lock_acquire_wait "$lock" || return 1
+    trap 'fm_lock_release "$lock"' EXIT
+  fi
+  FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$1" --secondmate
+)
+
 # One secondmate's liveness check. Split out of the sweep so each is individually
 # timed; every `return` here was a `continue` in the loop and means exactly the
 # same thing - move on to the next secondmate. Respawned ids are recorded through
@@ -791,7 +807,7 @@ secondmate_liveness_one() {  # <meta> <id>
         ;;
       dead|missing)
         cause="remote endpoint $agent_state on its configured host"
-        if out=$(FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$id" --secondmate 2>&1); then
+        if out=$(secondmate_recovery_spawn "$id" 2>&1); then
           secondmate_note_respawned "$id"
           report_relaunch "$id" "$cause" "host=$remote_host"
         else
@@ -808,7 +824,7 @@ secondmate_liveness_one() {  # <meta> <id>
   backend=$(fm_backend_of_meta "$meta")
   target=$(fm_backend_target_of_meta "$meta")
   [ -n "$target" ] || target="$window"
-  agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null) || agent_state=unreadable
+  agent_state=$(fm_backend_agent_state "$backend" "$target" "$(fm_meta_get "$meta" home)" 2>/dev/null) || agent_state=unreadable
   case "$harness" in
     claude|codex|opencode|pi|pi-signed|grok|kimi|omp) ;;
     *)
@@ -828,7 +844,7 @@ secondmate_liveness_one() {  # <meta> <id>
       else
         cause="recorded endpoint confidently missing"
       fi
-      if out=$(FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$id" --secondmate 2>&1); then
+      if out=$(secondmate_recovery_spawn "$id" 2>&1); then
         secondmate_note_respawned "$id"
         report_relaunch "$id" "$cause" "backend=$backend"
       else
