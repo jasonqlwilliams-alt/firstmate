@@ -57,7 +57,7 @@ Board answers are acted on later under the normal authority rules; this skill's 
    The `(return-catchup)` gate is the same shape: an action-free notice that an away-return catch-up is still open, naming the blockers left to clear or the reason the catch-up was retained.
    Render it under Charted Next like any other warning row: reporting is not ordinary work, while acting on the fleet still waits for `bin/fm-afk-return.sh check` (`/afk`).
 
-2. **Record a later reconcile notification for any home whose own books disagree.**
+2. **Record a later reconcile notification for any home with inventory invalidity.**
    When the snapshot reports a secondmate home whose `invalidity` is `orphan_in_flight`, `unowned_current`, `terminal_in_flight`, or `child_current_unavailable`, that home's inventory or child current state needs reconciliation and only that home may fix it.
    Run `printf '%s\n' "$snapshot" | bin/fm-secondmate-reconcile.sh request --snapshot -` immediately after gathering the snapshot.
    This atomically records one local one-shot request per mismatched target and returns without sending, taking a mate lifecycle lock, or waiting behind a local or remote delivery queue.

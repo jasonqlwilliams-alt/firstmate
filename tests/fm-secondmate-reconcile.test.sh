@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # tests/fm-secondmate-reconcile.test.sh - the cooldown-limited reconcile ask.
 #
-# A backlog-vs-metadata inventory mismatch inside a secondmate home no longer
-# blanks that home in the fleet snapshot, so the parent asks the home that owns
-# those books to fix them. This suite pins that ask: it lands as a real durable
-# steering record, a home is asked at most once per cooldown window however
-# often the snapshot runs, a mismatch still sitting there after the window
-# earns one gentle re-nudge, and the parent never touches the mate's own files.
+# An inventory mismatch or unavailable child current state inside a secondmate
+# home keeps its independently readable surfaces in the fleet snapshot, so the
+# parent asks the owning home to reconcile it.
+# This suite pins that ask: it lands as a real durable steering record, a home is
+# asked at most once per cooldown window however often the snapshot runs, an
+# invalidity still present after the window earns one gentle re-nudge, and the
+# parent never touches the mate's own files.
 set -u
 
 # shellcheck source=tests/secondmate-helpers.sh disable=SC1091

@@ -50,10 +50,12 @@
 # posture row is reserved ahead of that ordering and bound so it always surfaces.
 #
 # Main-home inventory validity comes from the canonical snapshot's main_inventory
-# object (orphan structured in-flight without meta, unstructured current rows).
-# Bearings never invents Underway rows from backlog-only ids; it discloses those
-# gaps in omitted[] and, when invalid, a Charted Next gate line so the four-section
-# chat cannot claim an empty fleet while main current state is broken.
+# object (orphan structured in-flight without a worker or registered custom
+# check, unowned non-held child metadata, and unstructured current rows).
+# Bearings never invents Underway rows from backlog-only ids; it discloses orphan
+# and unstructured gaps in omitted[] and any invalid inventory through a Charted
+# Next gate line so the four-section chat cannot claim an empty fleet while main
+# current state is broken.
 #
 # An open away-return catch-up is disclosed the same way, as a single action-free
 # (return-catchup) gate row naming the blockers left to clear or the reason the
@@ -146,8 +148,8 @@ remote homes under one shared snapshot budget and may refresh the parent-side ca
 Default fields: schema, home, generated, prs, in_flight{id,kind,state,repo,name,doing},
   secondmates{id,state,doing,provenance,freshness,age_seconds,contradiction,reason},
   secondmate_reconcile{id,spawn_gen,host,kind,ids},
-  decisions_open{id,key,verb,summary,owner}, landed{id,what,artifact,owner},
-  gates{id,title,blocked_by,reason,owner,filed}, reports{id,path}, recorded_prs{id,url},
+  decisions_open{id,key,verb,summary,owner}, landed{id,repo,what,artifact,owner},
+  gates{id,repo,title,blocked_by,reason,owner,filed}, reports{id,path}, recorded_prs{id,url},
   unhealthy_endpoints{...} (only when non-empty), omitted{surface,reveal}.
 Default gates are selected newest filed first before their bound; undated gates
   retain input order after dated gates.

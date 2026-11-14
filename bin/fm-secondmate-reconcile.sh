@@ -11,15 +11,16 @@
 # This is a BACKSTOP, not the primary mechanism. Dispatch and completion pair
 # the backlog row with the task's record inside the one script that moves the
 # record, and each home reconciles its own books at session start
-# (bin/fm-backlog-transition-lib.sh), so what reaches here is what neither could
-# see: a home that has not restarted since it drifted, or one still running
-# older code.
+# (bin/fm-backlog-transition-lib.sh). This path also asks a home to re-check a
+# child whose current state could not be read, or an inventory mismatch that
+# persisted while its home was running.
 #
-# A backlog-vs-metadata inventory mismatch inside a secondmate home
-# (orphan_in_flight, unowned_current, terminal_in_flight, child_current_unavailable) no longer makes that
-# home unreadable: bin/fm-fleet-snapshot.sh keeps its decisions, queued, landed,
-# and live work and carries the mismatch for renderers. The books are still
-# wrong, and only the home that owns them may fix them, so the parent sends one
+# An inventory mismatch or unavailable child current state inside a secondmate
+# home (orphan_in_flight, unowned_current, terminal_in_flight, or
+# child_current_unavailable) does not make that home unreadable:
+# bin/fm-fleet-snapshot.sh keeps its decisions, queued, landed,
+# and live work and carries the invalidity for renderers. The owning home must
+# reconcile the affected child or its records, so the parent sends one
 # reconcile instruction and stops there.
 #
 # What this script owns:
