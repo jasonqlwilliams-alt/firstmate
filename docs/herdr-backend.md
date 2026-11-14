@@ -305,7 +305,7 @@ Neither the stopped-server exception nor the stale-registration verdict widens h
 Native registration still identifies Pi by name where tmux would see a generic interpreter; the process-level proof only decides whether that registration is backed by a running process.
 `tests/fm-backend-herdr-agent-exit-shell-e2e.test.sh` pins the live-Pi versus leftover-shell distinction; [`verification/runtime-backends.md`](verification/runtime-backends.md#agent-lifecycle-control) owns the versioned evidence.
 
-The session-start sweep supplies each local secondmate's recorded home to this probe; `fm_backend_herdr_pane_home_state` owns its structural identity check and conservative unreadable outcome.
+When a secondmate's home can be resolved, the session-start sweep supplies it to this probe for local and remote routes; `fm_backend_herdr_pane_home_state` owns its structural identity check and conservative unreadable outcome.
 Liveness probes remain concurrent, while recovery spawns are serialized within the sweep so they do not compete for the home's task-set lock.
 An unrelated operation holding that lock still refuses recovery rather than weakening the teardown guard.
 `tests/fm-secondmate-herdr-identity-e2e.test.sh` exercises both recycled routes and multi-home recovery in an isolated named session with fake agents and stubbed launch screens.

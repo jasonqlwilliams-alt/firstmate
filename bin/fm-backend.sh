@@ -1001,7 +1001,7 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
 # `missing` only in this recovery-grade view. Zellij remains unverified because
 # its secondmate ghost-tab and agent-process recovery path has not been
 # empirically validated. Orca and cmux do not support secondmate spawns.
-# An optional expected-home binds local Herdr secondmate recovery to the pane's
+# An optional expected-home binds Herdr secondmate recovery to the pane's
 # structural home identity (bin/backends/herdr.sh); a confirmed foreign pane
 # means `missing`, while an unavailable identity means `unreadable`.
 # Other callers retain the process-only verdict.
