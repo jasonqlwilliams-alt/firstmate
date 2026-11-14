@@ -1,0 +1,17 @@
+ok - Herdr home binding: canonical creation cwd owns identity; foreign is missing, unreadable is preserved
+ok - fm_backend_tmux_agent_state: separates live, dead, missing, ambiguous, and unreadable
+ok - fm_backend_tmux_agent_state: rejects malformed targets before probing tmux
+ok - fm_backend_herdr_agent_state: preserves missing/no-agent/live/unknown husk behavior
+ok - fm_backend_agent_state: routes tmux/Herdr and keeps Zellij unverified
+ok - sweep: a confirmed-dead secondmate endpoint is killed and respawned
+ok - sweep: an already-live secondmate is untouched and distinguishable in verbose diagnostics
+ok - sweep: an authoritatively missing Pi secondmate window is relaunched
+ok - sweep: an authoritatively missing pi-signed secondmate window is relaunched
+ok - sweep: an existing ambiguous Pi process prevents duplicate recovery
+ok - sweep: transient target unreadability never licenses recovery
+ok - sweep: failed relaunch diagnostics distinguish a confidently missing endpoint
+ok - sweep: an unverified harness blocks recovery with a concrete diagnostic
+ok - sweep: idempotent by construction - a live secondmate is never re-touched on a later run
+ok - sweep: skipped entirely under FM_BOOTSTRAP_DETECT_ONLY=1, exactly like the other mutating sweeps
+ok - sweep: a silent no-op with no kind=secondmate meta present (a secondmate home's own natural scoping)
+# all fm-secondmate-liveness tests passed

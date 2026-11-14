@@ -1,0 +1,30 @@
+ok - overlapping remote home provisioning serializes through publication and rollback
+ok - remote seed rollback preserves serialized competing routes
+ok - unknown readiness preserves its route and brief for reconciliation
+ok - remote seeding checks, repairs, and re-checks readiness, then stops on a remaining gap
+ok - remote seeding proceeds once the repair closes every gap
+ok - remote seeding provisions a supplied origin without touching the primary project tree
+ok - remote provisioning re-validates a supplied origin at the receiving host
+ok - seeding carries bitbucket, self-hosted, and scp-like origins through to the remote clone
+ok - remote seed registers the route and provisions the whole home and project clone on that host
+ok - remote inheritance rejects incomplete and superseded payload generations
+ok - mixed local and remote routes validate without migration
+ok - remote spawn launches on the remote-local backend and records a host-qualified route
+ok - startup replaces a recycled remote pane and leaves its foreign owner untouched
+ok - unreadable remote pane identity preserves the endpoint
+ok - legacy and mismatched remote endpoints fail closed before backend access
+ok - non-herdr remote endpoints are refused without changing either route
+ok - remote spawn serializes inheritance through launch publication
+ok - marked send and routed reply complete through the existing parent correlation owner
+ok - partial remote inheritance retains reread intent through bootstrap convergence
+ok - config push and bootstrap serialize remote inheritance convergence
+ok - remote inherited config retains and retries a failed live reread nudge
+ok - fleet snapshot projects mixed local and remote structured state
+ok - remote update imports and fast-forwards the persistent home on its configured host
+ok - the remote restart verb delegates to the host-local control plane and refuses before stopping anything
+ok - startup repairs remote readiness before probing without relaunching
+ok - the host-local state read steps around a stale shadowing herdr client
+ok - startup reports alive legacy backends without changing their routes
+ok - unreachable no-ledger remote state remains explicit with no local respawn or failover
+ok - remote retirement refuses child work, then removes only its own endpoint while a shared-session sibling survives
+ALL TESTS PASSED

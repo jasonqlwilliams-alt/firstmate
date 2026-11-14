@@ -1,0 +1,4 @@
+Herdr secondmate identity lab version: 0.9.5
+ok - bootstrap replaces both another secondmate and a non-secondmate recycled route
+ok - one bootstrap sweep recovers every missing secondmate without lock contention
+ok - failed recovery releases the sweep lock for the next secondmate
