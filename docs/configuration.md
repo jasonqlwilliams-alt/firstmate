@@ -286,8 +286,8 @@ The same inbox path is the Eleusis publish plane for `bin/fm-system-state-card.s
 
 The optional local, gitignored `config/bearings-canvas-dir` file enables exporting a Cursor Canvas mirror of the Bearings companion detail page whenever `bin/fm-bearings-board.sh build` runs.
 The first non-comment, non-blank line is an existing non-symlink absolute directory path on this host.
-When the file is absent, empty, unreadable, relative, or names a directory that does not exist, the export is off and writes nothing.
-When configured, `bin/fm-bearings-board.sh build` renders `bearings-detail.canvas.tsx` (mode `0600`, built on the `cursor/canvas` SDK) atomically inside that directory from the same reconciled payload as the board and its sibling detail page, and never writes outside that directory.
+When the file is absent, empty, unreadable, or symlinked, or its directory path is relative or missing, the export is off and writes nothing.
+When configured, `bin/fm-bearings-board.sh build` publishes `bearings-detail.canvas.tsx` (mode `0600`, built on the `cursor/canvas` SDK) atomically inside that directory from the same reconciled payload as the board and its sibling detail page.
 A symlinked directory or non-regular destination is refused on stderr without failing the board build.
 This file is not inherited by secondmate homes because the destination path is host- and workspace-local.
 `bin/fm-bearings-board.sh`'s header owns the build output and payload mechanics.
