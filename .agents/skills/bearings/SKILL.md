@@ -113,8 +113,8 @@ Compose the payload from the same snapshot with the same ranking judgment as the
 - Every Charted Next row copies the snapshot gate's durable filed date into `filed`, and the board orders the section by it, newest filed first.
   Follow `bin/fm-bearings-board.sh`'s payload contract for the accepted format.
   Omit it or pass null for a row with no durable filed date - the main-inventory or return-catchup warning, an unavailable secondmate home, or a queued row filed before dates were recorded - and the board keeps those rows in payload order after every dated row.
-- For the companion detail page and optional canvas export, every Charted Next row also copies `waits_since`, `owner`, `pr_url`, and `report` from its snapshot `gates` entry, plus `blockers` as the `{id, title}` entries from `gate_blockers` matching that gate's `id` and `owner`.
-  Every Recently Landed row likewise copies `filed`, `landed_on`, `pr_url`, and `report` from its snapshot `landed` entry.
+- For the companion detail page and optional canvas export, every Charted Next row also copies `waits_since`, `owner`, `pr_url`, `report`, and `report_remote` from its snapshot `gates` entry, plus `blockers` as the `{id, title}` entries from `gate_blockers` matching that gate's `id` and `owner`.
+  Every Recently Landed row likewise copies `filed`, `landed_on`, `pr_url`, `report`, and `report_remote` from its snapshot `landed` entry.
   Omit or pass null for any of those fields when the snapshot has no recorded value, and never invent or scrape them from prose.
 - Every Captain's Call item and every Underway, Recently Landed, and Charted Next row carries an explicit `repo` field. Fill it from the snapshot and task records wherever known; use null or an empty string only as the deliberate genuinely-no-repo marker, in which case the template may show the internal id. Ids otherwise stay in the payload only as the routing channel, and any prose you compose names blockers in plain words.
 

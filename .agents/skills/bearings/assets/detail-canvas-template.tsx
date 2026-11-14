@@ -31,6 +31,7 @@ type DetailItem = {
   readonly owner: string | null;
   readonly blockers: readonly Blocker[];
   readonly report: string | null;
+  readonly report_remote: boolean;
   readonly report_url: string | null;
   readonly report_path: string | null;
   readonly pr_url: string | null;
@@ -97,7 +98,12 @@ function rowOf(item: DetailItem) {
         ))}
       </Stack>
     ),
-    item.report_url !== null ? (
+    item.report_remote && item.report !== null ? (
+      <Stack gap={0}>
+        <Code>{item.report}</Code>
+        <Text tone="tertiary" size="small">On remote host</Text>
+      </Stack>
+    ) : item.report_url !== null ? (
       <Link href={item.report_url}>{item.report_url}</Link>
     ) : item.report_path !== null ? (
       <Link href={`file://${item.report_path.split("/").map(encodeURIComponent).join("/")}`}>{plain(item.report_path)}</Link>

@@ -1974,7 +1974,7 @@ secondmate_landed_from_current_json() {  # <secondmate-current-json-file> <outpu
     {records:[ $current.records[]
       | select(.provenance.selected == "structured-home") as $mate
       | $mate.landed[]
-      | . + {home:$mate.home,home_id:$mate.id}],
+      | . + {home:$mate.home,home_id:$mate.id,remote:$mate.remote}],
      truncated:[ $current.records[]
        | select(.provenance.selected == "structured-home" and (.counts.landed > (.landed | length)))
        | .home],

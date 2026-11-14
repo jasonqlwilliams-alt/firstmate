@@ -88,9 +88,9 @@
 # MAY also carry `waits_since` (same date/timestamp rule as `filed`), `owner`
 # (nullable string), `blockers` (nullable array of `{id, title?}` objects with
 # non-empty `id` and nullable string `title`), `report` (nullable string path or
-# URL), and `pr_url` (nullable https URL). A Recently Landed row MAY likewise
-# carry `filed`, `landed_on` (same date/timestamp rule), and `report` beside its
-# optional `pr_url` and `subject`.
+# URL), `report_remote` (boolean), and `pr_url` (nullable https URL). A Recently
+# Landed row MAY likewise carry `filed`, `landed_on` (same date/timestamp rule),
+# `report`, and `report_remote` beside its optional `pr_url` and `subject`.
 #
 # The board path is stable - $FM_HOME/.lavish/bearings-board.html - so a
 # re-invocation rebuilds the same file in place, which keeps the same Lavish
@@ -161,6 +161,8 @@ validate_payload() {  # <data.json>
     def optional_filed: optional_date("filed");
     def optional_nullable_string($name):
       (has($name) | not) or (.[$name] == null) or (.[$name] | type == "string");
+    def optional_boolean($name):
+      (has($name) | not) or (.[$name] | type == "boolean");
     def optional_blockers:
       (has("blockers") | not) or (.blockers == null)
       or (.blockers | type == "array"
@@ -219,7 +221,8 @@ validate_payload() {  # <data.json>
       and optional_subject
       and optional_filed
       and optional_date("landed_on")
-      and optional_nullable_string("report");
+      and optional_nullable_string("report")
+      and optional_boolean("report_remote");
     def charted_item:
       type == "object" and repo_marker and (.id | slug(128))
       and (.title | nonempty_string) and (.reason | type == "string")
@@ -230,6 +233,7 @@ validate_payload() {  # <data.json>
       and optional_nullable_string("owner")
       and optional_blockers
       and optional_nullable_string("report")
+      and optional_boolean("report_remote")
       and optional_https_url("pr_url")
       and (if .kind == "warning" then .dispatchable == false else true end);
     type == "object"
@@ -359,9 +363,11 @@ detail_model() {  # <effective.json> <home-dir>
       | .out;
     def report_fields:
       (.report | nz) as $r
-      | {report: $r,
-         report_url: (if $r != null and ($r | test("^(https?://|file://)[^[:space:]]+$")) then $r else null end),
-         report_path: (if $r == null or ($r | test("^(https?://|file://)")) then null
+      | (.report_remote == true) as $remote
+      | {report: $r, report_remote: $remote,
+         report_url: (if $remote or $r == null then null
+                      elif ($r | test("^(https?://|file://)[^[:space:]]+$")) then $r else null end),
+         report_path: (if $remote or $r == null or ($r | test("^(https?://|file://)")) then null
                        elif ($r | startswith("/")) then $r
                        else ($home_dir + "/" + $r) end)};
     def row_status_and_waits:
@@ -449,7 +455,9 @@ render_detail_body() {  # <model.json>
         + "</ul>" end;
     def file_href: "file://" + (split("/") | map(@uri) | join("/"));
     def report_html:
-      if .report_url != null then (.report_url | link)
+      if .report_remote and .report != null then
+        "<code class=\"dt-path\">" + (.report | e) + "</code> <span class=\"dt-none\">On remote host</span>"
+      elif .report_url != null then (.report_url | link)
       elif .report_path != null then
         "<a class=\"dt-path\" href=\"" + (.report_path | file_href | e)
         + "\" target=\"_blank\" rel=\"noopener\">" + (.report_path | e) + "</a>"

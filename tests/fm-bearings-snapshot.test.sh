@@ -1828,6 +1828,7 @@ test_landed_preserves_kindless_v1_summary_reports() {
       {id:"legacy-pr",title:"Merged change",report_path:"data/scout/report.md",pr_url:"https://github.com/o/r/pull/1",completion:{verb:"merged",date:"2026-09-01"}},
       {id:"legacy-local",title:"Local delivery",report_path:"data/scout/report.md",local_note:"local main",completion:{verb:"done",date:"2026-09-01"}}
     ] | .counts.landed = (.landed | length)
+      | .queued[1].report_path = "data/remote-aged/report.md"
   ' "$remote_home/state/home-summary.json" > "$remote_home/state/legacy-summary.json"
   mv "$remote_home/state/legacy-summary.json" "$remote_home/state/home-summary.json"
   for freshness in fresh cached; do
@@ -1840,6 +1841,9 @@ test_landed_preserves_kindless_v1_summary_reports() {
         {id:"legacy-pr",artifact:"https://github.com/o/r/pull/1",owner:"ledger-1"},
         {id:"legacy-report",artifact:"data/scout/report.md",owner:"ledger-1"}
       ]
+      and (.landed | all(.report == "data/scout/report.md" and .report_remote == true))
+      and (.gates | any(.id == "remote-aged" and .report == "data/remote-aged/report.md"
+        and .report_remote == true))
     ' >/dev/null || fail "kindless v1 $freshness artifacts were lost: $json"
     rm -f "$remote_home/state/home-summary.json"
     epoch=1200

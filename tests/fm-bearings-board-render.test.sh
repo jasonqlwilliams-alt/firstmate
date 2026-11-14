@@ -529,6 +529,26 @@ test_hostile_titles_are_escaped_on_the_detail_page() {
   pass "hostile titles, notes, and paths render as inert text on the detail page"
 }
 
+test_remote_reports_are_plain_text_on_the_detail_page() {
+  local home d remote_path='data/remote/<script>& report.md'
+  home=$(make_home remote-reports)
+  write_detail_payload "$home"
+  jq --arg path "$remote_path" '
+    .charted[0].report = $path | .charted[0].report_remote = true
+    | .landed[0].report = $path | .landed[0].report_remote = true
+  ' "$home/payload.json" > "$home/remote.json"
+  build_payload "$home" "$home/remote.json" >/dev/null
+  d=$(detail_of "$home")
+  printf '%s' "$d" | jq -e --arg path "$remote_path" '
+    .scripts == 0
+      and (.sections.charted.items[1].fields.report
+        | .text == ($path + " On remote host") and .links == [])
+      and (.sections.landed.items[0].fields.report
+        | .text == ($path + " On remote host") and .links == [])
+  ' >/dev/null || fail "remote reports became local links or lost their host note: $d"
+  pass "remote reports show their paths without local file links"
+}
+
 test_the_canvas_export_is_off_when_unconfigured() {
   local home out canvas_dir
   home=$(make_home canvas-off)
@@ -623,6 +643,7 @@ test_the_detail_page_spells_out_every_charted_and_landed_row
 test_the_detail_page_is_regenerated_on_every_build_and_states_empty_sections
 test_the_board_links_to_the_detail_page_from_its_nav_and_both_headers
 test_hostile_titles_are_escaped_on_the_detail_page
+test_remote_reports_are_plain_text_on_the_detail_page
 test_the_canvas_export_is_off_when_unconfigured
 test_the_canvas_export_writes_exactly_one_file_in_its_directory
 test_the_canvas_export_never_follows_a_planted_link_out_of_its_directory

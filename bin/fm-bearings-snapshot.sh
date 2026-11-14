@@ -147,8 +147,8 @@ Default fields: schema, home, generated, prs, in_flight{id,kind,state,repo,name,
   secondmates{id,state,doing,provenance,freshness,age_seconds,contradiction,reason},
   secondmate_reconcile{id,spawn_gen,host,kind,ids},
   decisions_open{id,key,verb,summary,owner},
-  landed{id,what,artifact,owner,filed,landed_on,pr_url,report},
-  gates{id,title,blocked_by,reason,owner,filed,waits_since,pr_url,report},
+  landed{id,what,artifact,owner,filed,landed_on,pr_url,report,report_remote},
+  gates{id,title,blocked_by,reason,owner,filed,waits_since,pr_url,report,report_remote},
   gate_blockers{gate,owner,id,title}, reports{id,path}, recorded_prs{id,url},
   unhealthy_endpoints{...} (only when non-empty), omitted{surface,reveal}.
 Default gates are selected newest filed first before their bound; undated gates
@@ -425,7 +425,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
   # A gate carries every unresolved blocker by title in a private _blockers
   # list, looked up in the records of the owning home; the final projection
   # moves it into the flat gate_blockers[] table so TOON stays scalar.
-  def as_gate($owner; $titles; $prs; $reports):
+  def as_gate($owner; $titles; $prs; $reports; $remote):
     {id, title:(.title | clean),
      blocked_by:((.unresolved_blocker_ids // []) | if length > 0 then join(",") else "-" end | trunc(120)),
      reason:(hold_gate_reason | clean), owner:$owner,
@@ -433,11 +433,13 @@ MODEL=$(printf '%s' "$SNAP" | jq \
      waits_since:((.hold_set // .since // null) | trunc(40)),
      pr_url:((.pr_url // $prs[.id] // null) | trunc(500)),
      report:((.report_path // $reports[.id] // null) | trunc(500)),
+     report_remote:$remote,
      _blockers:(.blockers // [(.unresolved_blocker_ids // [])[] | tostring
        | {id:., title:(($titles[.] // null) | clean | trunc(120))}])};
   def gate_shape:
     {id, title, blocked_by, reason, owner, filed,
-     waits_since:(.waits_since // null), pr_url:(.pr_url // null), report:(.report // null)};
+     waits_since:(.waits_since // null), pr_url:(.pr_url // null),
+     report:(.report // null), report_remote:(.report_remote // false)};
   def title_map: map(select(.id != null) | {key:(.id | tostring), value:(.title // .name // null)})
     | map(select(.value != null)) | from_entries;
   def resolve_report($home):
@@ -600,14 +602,14 @@ MODEL=$(printf '%s' "$SNAP" | jq \
               (.state == "in_flight" and .current_role == "held" and ($working_ids | index($record.id) | not))))
          | select(.captain_actionable != true)
          | select((.hold_bucket == null) or ($all_decisions == 0))
-         | as_gate("(main)"; $main_titles; $meta_prs; $scout_report_map) ]
+         | as_gate("(main)"; $main_titles; $meta_prs; $scout_report_map; false) ]
      + [ (.secondmate_current.records // [])[] as $m
          | select($m.provenance.selected == "structured-home")
          | $m.queued[]?
          | select(.captain_actionable != true)
          | select((.hold_bucket == null) or ($all_decisions == 0))
-         | resolve_report($m.home)
-         | as_gate($m.id; {}; {}; {}) ]) as $gates_all
+         | if $m.remote == true then . else resolve_report($m.home) end
+         | as_gate($m.id; {}; {}; {}; $m.remote == true) ]) as $gates_all
   | def filed_epoch:
       (.filed // null) as $filed
       | if ($filed | type) != "string" then null
@@ -639,7 +641,9 @@ MODEL=$(printf '%s' "$SNAP" | jq \
                             landed_on:((.completion.date // null) | trunc(40)),
                             pr_url:((.pr_url // null) | trunc(500)),
                             report:((if .home_id == "(main)" then .report_path
-                                     else (resolve_report(.home) | .report_path) end // null) | trunc(500))})),
+                                     elif .remote == true then .report_path
+                                     else (resolve_report(.home) | .report_path) end // null) | trunc(500)),
+                            report_remote:(.remote == true)})),
       gates: ($shown_gates | map(gate_shape)),
       gate_blockers: [$shown_gates[] | . as $g | (._blockers // [])[]
                       | {gate:$g.id, owner:$g.owner, id, title}],
