@@ -739,6 +739,59 @@ publish_healthy_watcher_identity "$PARENT/state" "$PARENT" "$ROOT/bin/fm-watch.s
 pass "remote spawn launches on the remote-local backend and records a host-qualified route"
 
 remote_route_meta="$REMOTE_HOME/state/parent-route/ios.meta"
+recycled_pane=$(sed -n 's/^herdr_pane_id=//p' "$remote_route_meta")
+recycled_workspace=$(jq -r --arg pane "$recycled_pane" '.tabs[] | select(.pane_id == $pane) | .workspace_id' "$HERDR_STATE")
+foreign_home="$TMP_ROOT/foreign-agent-home"
+mkdir -p "$foreign_home"
+jq --arg pane "$recycled_pane" --arg ws "$recycled_workspace" --arg home "$foreign_home" '
+  .workspaces |= map(if .workspace_id == $ws then .cwd = $home | .label = "foreign" else . end)
+  | .tabs |= map(if .pane_id == $pane then .cwd = $home | .label = "foreign" else . end)
+' "$HERDR_STATE" > "$HERDR_STATE.recycled"
+mv "$HERDR_STATE.recycled" "$HERDR_STATE"
+[ "$(remote_env "$ROOT/bin/fm-on.sh" ios fm-remote-secondmate-control.sh state ios --bound-home)" = missing ] \
+  || fail "a recycled remote pane was accepted as the secondmate"
+foreign_ring_before=$(grep -Ec '^pane send-(text|keys) .*'"$recycled_pane" "$HERDR_LOG" || true)
+remote_env "$ROOT/bin/fm-on.sh" ios fm-remote-secondmate-control.sh send ios recycled-probe >"$TMP_ROOT/recycled-send.out" 2>"$TMP_ROOT/recycled-send.err" \
+  || fail "a steer to a missing remote secondmate was not recorded"
+foreign_ring_after=$(grep -Ec '^pane send-(text|keys) .*'"$recycled_pane" "$HERDR_LOG" || true)
+[ "$foreign_ring_before" -eq "$foreign_ring_after" ] \
+  || fail "a remote steering doorbell reached the recycled pane"
+assert_grep 'doorbell not typed because' "$TMP_ROOT/recycled-send.err" \
+  "a steer to the recycled pane was not held for recovery"
+rm -rf "$REMOTE_HOME/state/parent-route/ios.inbox"
+BOOT_RECYCLED=$(remote_env "$ROOT/bin/fm-bootstrap.sh")
+assert_not_contains "$BOOT_RECYCLED" 'SECONDMATE_LIVENESS: secondmate ios: respawn failed' \
+  "startup failed to replace the recycled remote endpoint"
+new_remote_pane=$(sed -n 's/^herdr_pane_id=//p' "$remote_route_meta")
+[ -n "$new_remote_pane" ] && [ "$new_remote_pane" != "$recycled_pane" ] \
+  || fail "startup did not record a replacement remote pane"
+jq -e --arg pane "$recycled_pane" --arg home "$foreign_home" \
+  '.tabs | any(.pane_id == $pane and .cwd == $home)' "$HERDR_STATE" >/dev/null \
+  || fail "recovery changed or closed the foreign pane"
+[ "$(remote_env "$ROOT/bin/fm-on.sh" ios fm-remote-secondmate-control.sh state ios --bound-home)" = alive ] \
+  || fail "the replacement remote endpoint is not bound to its home"
+pass "startup replaces a recycled remote pane and leaves its foreign owner untouched"
+
+cp "$HERDR_STATE" "$TMP_ROOT/herdr-before-unreadable.json"
+jq --arg pane "$new_remote_pane" '.tabs |= map(if .pane_id == $pane then del(.cwd) else . end)' \
+  "$HERDR_STATE" > "$HERDR_STATE.unreadable"
+mv "$HERDR_STATE.unreadable" "$HERDR_STATE"
+[ "$(remote_env "$ROOT/bin/fm-on.sh" ios fm-remote-secondmate-control.sh state ios --bound-home)" = unreadable ] \
+  || fail "missing remote pane identity was not classified unreadable"
+unreadable_launches_before=$(grep -c '^tab create' "$HERDR_LOG" || true)
+if remote_env "$ROOT/bin/fm-on.sh" ios fm-remote-secondmate-control.sh launch ios codex - - herdr >/dev/null 2>&1; then
+  fail "launch reused a remote pane with unreadable identity"
+fi
+BOOT_UNREADABLE=$(remote_env "$ROOT/bin/fm-bootstrap.sh")
+assert_contains "$BOOT_UNREADABLE" 'SECONDMATE_LIVENESS: secondmate ios: skipped: remote endpoint state is unreadable' \
+  "startup did not preserve the unreadable remote endpoint"
+unreadable_launches_after=$(grep -c '^tab create' "$HERDR_LOG" || true)
+[ "$unreadable_launches_before" -eq "$unreadable_launches_after" ] \
+  || fail "unreadable remote identity triggered a replacement launch"
+mv "$TMP_ROOT/herdr-before-unreadable.json" "$HERDR_STATE"
+pass "unreadable remote pane identity preserves the endpoint"
+
+remote_route_meta="$REMOTE_HOME/state/parent-route/ios.meta"
 cp "$remote_route_meta" "$TMP_ROOT/remote-ios-before-default-session.meta"
 legacy_pane=$(sed -n 's/^herdr_pane_id=//p' "$remote_route_meta")
 awk -v pane="$legacy_pane" '
@@ -868,6 +921,9 @@ wait "$spawn_config_push" || fail "config push failed after serialized remote sp
   || fail "stale spawn inheritance overwrote later config convergence"
 pass "remote spawn serializes inheritance through launch publication"
 
+[ "$(remote_env "$ROOT/bin/fm-on.sh" ios fm-remote-secondmate-control.sh state ios --bound-home)" = alive ] \
+  || fail "remote endpoint lost its home binding before steering"
+
 # A normal marked parent request traverses SSH as a durable remote inbox
 # record plus a rung doorbell - the payload is never typed into the pane. An
 # ambiguous transport (the remote leg executed, then ssh exit 255) is retried
@@ -892,7 +948,7 @@ records_after_send=$(find "$REMOTE_HOME/state/parent-route/ios.inbox" -maxdepth 
 [ "$records_after_send" -eq $((records_before_send + 1)) ] \
   || fail "the retried remote steer did not dedup onto one new record, went $records_before_send -> $records_after_send"
 assert_no_grep 'report the build result' "$HERDR_LOG" "the steer payload was typed into the remote pane"
-assert_grep 'Firstmate instruction waiting' "$HERDR_LOG" "the remote doorbell never rang"
+assert_grep 'Firstmate instruction waiting' "$HERDR_LOG" "the remote doorbell never rang: $(cat "$TMP_ROOT/send.err") $(tail -15 "$HERDR_LOG")"
 CORR=$(newest_remote_inbox_corr)
 [ -n "$CORR" ] || fail "remote send did not carry a correlation token"
 assert_grep "FM_PENDING_REPLY_EXISTING_CORR=$CORR" "$TMP_ROOT/send.err" "ambiguous remote send did not print its correlation-reusing command"

@@ -769,7 +769,7 @@ secondmate_liveness_one() {  # <meta> <id>
       echo "SECONDMATE_LIVENESS: secondmate $id: skipped: remote readiness failed on $remote_host: $readiness_reason"
       return 0
     fi
-    if out=$("$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh state "$id" < /dev/null 2>/dev/null); then
+    if out=$("$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh state "$id" --bound-home < /dev/null 2>/dev/null); then
       remote_rc=0
     else
       remote_rc=$?
