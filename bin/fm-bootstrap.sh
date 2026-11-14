@@ -749,7 +749,7 @@ secondmate_recovery_spawn() (
 # secondmate_note_respawned so a concurrent sweep can collect them after wait.
 secondmate_liveness_one() {  # <meta> <id>
   local meta=$1 id=$2
-  local window harness backend target agent_state out cause remote_host remote_rc readiness_reason route_out remote_backend
+  local window harness backend target agent_state out cause remote_host remote_rc readiness_reason route_out remote_backend expected_home
   window=$(fm_meta_get "$meta" window)
   [ -n "$window" ] || return 0
   harness=$(fm_meta_get "$meta" harness)
@@ -824,7 +824,19 @@ secondmate_liveness_one() {  # <meta> <id>
   backend=$(fm_backend_of_meta "$meta")
   target=$(fm_backend_target_of_meta "$meta")
   [ -n "$target" ] || target="$window"
-  agent_state=$(fm_backend_agent_state "$backend" "$target" "$(fm_meta_get "$meta" home)" 2>/dev/null) || agent_state=unreadable
+  expected_home=$(fm_meta_get "$meta" home)
+  [ -n "$expected_home" ] || expected_home=$(fm_meta_get "$meta" worktree)
+  if [ "$backend" = herdr ] && [ -z "$expected_home" ]; then
+    if secondmate_registry_validate_bindings "$DATA/secondmates.md" resolve_path "$id" \
+      && [ "$SECONDMATE_REGISTRY_MATCH_REMOTE" -eq 0 ]; then
+      expected_home=$SECONDMATE_REGISTRY_MATCH_HOME
+    fi
+  fi
+  if [ "$backend" = herdr ] && [ -z "$expected_home" ]; then
+    agent_state=unreadable
+  else
+    agent_state=$(fm_backend_agent_state "$backend" "$target" "$expected_home" 2>/dev/null) || agent_state=unreadable
+  fi
   case "$harness" in
     claude|codex|opencode|pi|pi-signed|grok|kimi|omp) ;;
     *)

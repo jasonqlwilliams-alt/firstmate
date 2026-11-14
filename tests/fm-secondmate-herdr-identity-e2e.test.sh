@@ -115,7 +115,11 @@ sweep() {
     "$ROOT/bin/fm-bootstrap.sh" > "$TMP_ROOT/sweep.out" 2>&1
 }
 
-for id in owner collision-sm collision-primary unreadable absent-a absent-b absent-c failure-a failure-z; do make_home "$id"; done
+for id in owner collision-sm collision-primary unreadable unbound absent-a absent-b absent-c failure-a failure-z; do make_home "$id"; done
+for id in owner collision-sm collision-primary absent-a absent-b absent-c failure-a failure-z; do
+  printf -- '- %s - fixture (home: %s; scope: fixture; projects: none; added 2026-11-14)\n' \
+    "$id" "$TMP_ROOT/$id" >> "$PRIMARY/data/secondmates.md"
+done
 IFS=$'\t' read -r OWNER_PANE OWNER_WS < <(make_agent "$TMP_ROOT/owner" 2ndmate-owner)
 IFS=$'\t' read -r PRIMARY_PANE PRIMARY_WS < <(make_agent "$PRIMARY" firstmate)
 sleep 0.2
@@ -124,7 +128,15 @@ sleep 0.2
 record owner "$OWNER_PANE" "$OWNER_WS"
 record collision-sm "$OWNER_PANE" "$OWNER_WS"
 record collision-primary "$PRIMARY_PANE" "$PRIMARY_WS"
+sed "s|^home=$TMP_ROOT/collision-sm$|worktree=$TMP_ROOT/collision-sm|" \
+  "$PRIMARY/state/collision-sm.meta" > "$TMP_ROOT/collision-sm.meta"
+mv "$TMP_ROOT/collision-sm.meta" "$PRIMARY/state/collision-sm.meta"
+sed '/^home=/d' "$PRIMARY/state/collision-primary.meta" > "$TMP_ROOT/collision-primary.meta"
+mv "$TMP_ROOT/collision-primary.meta" "$PRIMARY/state/collision-primary.meta"
 record unreadable "$OWNER_PANE" "$OWNER_WS"
+record unbound "$OWNER_PANE" "$OWNER_WS"
+sed '/^home=/d' "$PRIMARY/state/unbound.meta" > "$TMP_ROOT/unbound.meta"
+mv "$TMP_ROOT/unbound.meta" "$PRIMARY/state/unbound.meta"
 mv "$TMP_ROOT/unreadable" "$TMP_ROOT/unreadable-unavailable"
 sweep
 identity_failed=0
@@ -143,8 +155,10 @@ fi
 [ "$(probe "$PRIMARY_PANE")" = alive ] || fail 'recovery killed the primary-shaped agent'
 [ "$(sed -n 's/^herdr_pane_id=//p' "$PRIMARY/state/owner.meta")" = "$OWNER_PANE" ] || fail 'matching owner was respawned'
 [ "$(sed -n 's/^herdr_pane_id=//p' "$PRIMARY/state/unreadable.meta")" = "$OWNER_PANE" ] || fail 'unreadable home identity must preserve its route'
+[ "$(sed -n 's/^herdr_pane_id=//p' "$PRIMARY/state/unbound.meta")" = "$OWNER_PANE" ] || fail 'unresolvable home must preserve its route'
 assert_contains "$(cat "$TMP_ROOT/sweep.out")" 'secondmate unreadable: skipped: endpoint probe unreadable' 'unreadable identity was not reported'
-rm "$PRIMARY/state/unreadable.meta"
+assert_contains "$(cat "$TMP_ROOT/sweep.out")" 'secondmate unbound: skipped: endpoint probe unreadable' 'unresolvable home was not reported'
+rm "$PRIMARY/state/unreadable.meta" "$PRIMARY/state/unbound.meta"
 
 # Start a separate batch of confidently absent endpoints; real fm-spawn must
 # publish all three routes during this single sweep. Remove only fixture metas
