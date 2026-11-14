@@ -753,10 +753,17 @@ __FM_BEARINGS_BOARD_DATA__
   }
   function parseReason(reason) {
     var r = String(reason || "").trim(), m;
+    if (r === "-") r = "";
+    r = r.replace(/^(blocked(?:[- ]by|\s+on)\s+)(?:blocked(?:[- ]by|\s+on)\s+)+/i, "$1");
     if ((m = /^blocked(?:[- ]by|\s+on)\s+(.+?)(?:\s*:\s+(.*))?$/i.exec(r))) {
       var list = m[1], extra = 0, more = /\s*\+(\d+)\s+more\s*$/.exec(list);
       if (more) { extra = Number(more[1]); list = list.slice(0, more.index); }
-      return { kind: "blocked", ids: splitBlockers(list), extra: extra, why: m[2] || "" };
+      var ids = splitBlockers(list), why = m[2] || "";
+      if (/^blocked(?:[- ]by|\s+on)\s+/i.test(why)) {
+        var repeated = parseReason(why);
+        if (JSON.stringify(repeated.ids) === JSON.stringify(ids) && repeated.extra === extra) why = repeated.why;
+      }
+      return { kind: "blocked", ids: ids, extra: extra, why: why };
     }
     if ((m = /^until\s+(\d{4}-\d{2}-\d{2})(?:T[0-9:.]+Z?)?(?:\s*:\s+(.*))?$/i.exec(r))) {
       return { kind: "dated", date: m[1], why: m[2] || "" };

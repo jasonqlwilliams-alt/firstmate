@@ -349,6 +349,35 @@ test_overflow_queued_rows_are_revealed_in_place() {
   pass "overflow queued work collapses behind one control that reveals it in place, and warnings never collapse"
 }
 
+test_absent_and_repeated_gate_reasons() {
+  local home out failures=0
+  home=$(make_home reason-normalization)
+  out=$(render_board "$home" '[{"id":"prep","repo":"sample","name":"Prepare release","state":"working","kind":"ship","doing":"working"}]' '[
+    {"id":"plain","repo":"sample","title":"Plain","reason":"-","dispatchable":true},
+    {"id":"repeated","repo":"sample","title":"Repeated","reason":"blocked-by prep: blocked-by prep","dispatchable":false},
+    {"id":"doubled","repo":"sample","title":"Doubled","reason":"blocked-by blocked-by prep: needs preparation","dispatchable":false},
+    {"id":"absent","repo":"sample","title":"Absent","reason":"-","dispatchable":false}
+  ]')
+  if ! printf '%s' "$out" | jq -e '.charted[0] | [.badges[].text] == ["ready"] and (.detail | contains("Nothing is holding this back")) and (.detail | contains("note -") | not)' >/dev/null; then
+    echo 'REPRO dash reason renders a dash note'
+    failures=$((failures + 1))
+  fi
+  if ! printf '%s' "$out" | jq -e '.charted[1] | (.detail | contains("Prepare release")) and (.detail | test("blocked-by|why") | not)' >/dev/null; then
+    echo 'REPRO repeated blocked-by reason leaks into explanation'
+    failures=$((failures + 1))
+  fi
+  printf '%s' "$out" | jq -e '
+    (.charted[2] | (.detail | contains("why needs preparation"))
+      and (.detail | contains("blocked by") | not)
+      and (.sub | contains("Prepare release")))
+    and (.charted[3] | .sub | startswith("no reason recorded"))
+  ' >/dev/null || fail "consecutive blocked-by prefixes or a waiting dash were not normalized: $out"
+  [ "$failures" = 0 ] || fail "$failures board reason accuracy cases reproduced"
+  pass "dash means no reason and repeated blocked-by prefix renders once"
+}
+
+test_absent_and_repeated_gate_reasons
+
 test_an_underway_row_leads_with_the_task_name_and_keeps_its_run_status
 test_an_underway_identifier_label_is_not_replaced_by_run_status
 test_charted_next_reads_newest_filed_first
