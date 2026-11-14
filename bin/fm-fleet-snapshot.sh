@@ -66,9 +66,10 @@
 #     useful return-channel supervision data; remote secondmates use "unknown"
 #     without a probe, and other tasks use "not_checked".
 #   scout_reports[]: present data/<id>/report.md pointers.
-#   main_inventory: {valid,reason,orphan_in_flight[],unstructured_current_count} -
+#   main_inventory: {valid,reason,orphan_in_flight[],unowned_current[],unstructured_current_count} -
 #     main-home current-inventory checks shared with secondmate_home_summary_json
-#     (orphan structured in-flight ids with no state/<id>.meta, and unstructured
+#     (orphan structured in-flight ids with no worker or registered custom check,
+#     unowned non-held child metadata, and unstructured
 #     current backlog rows). Does not invent live tasks; meta remains truth for
 #     workers. Validated pending teardown is disclosed as unavailable rather
 #     than orphaned; backlog changes during observation cause a bounded resample.
@@ -100,7 +101,9 @@
 #     a PR, it must match that URL; absent metadata PR does not erase current
 #     run attribution. No-checks, another PR, or a later pending run cannot
 #     inherit an older green verdict. Other terminal in-flight children remain
-#     contradictions. A validated pending-close receipt is instead disclosed
+#     contradictions unless the task has both a hold reason and hold kind. Held
+#     children stay visible but do not invalidate the home for terminal, unowned,
+#     or unknown child state. A validated pending-close receipt is instead disclosed
 #     as unavailable for its task generation, not as an orphan or contradiction.
 #   secondmate_landed: {records[],truncated[],unreadable[],partial[]} - the
 #     compatibility landed-work roll-up derived from secondmate_current. Readable
@@ -940,35 +943,66 @@ snapshot_pending_teardowns_json() {
   done | jq -s '.'
 }
 
+# Registered custom checks can own standing in-flight watches without inventing
+# worker metadata. Validate their current bytes through the watcher trust owner.
+# shellcheck source=bin/fm-pr-lib.sh
+. "$SCRIPT_DIR/fm-pr-lib.sh"
+# shellcheck source=bin/fm-check-lib.sh
+. "$SCRIPT_DIR/fm-check-lib.sh"
+registered_check_ids_json() {  # <backlog-json-file>
+  local id
+  while IFS= read -r id; do
+    fm_custom_check_registered "$STATE" "$id" || continue
+    printf '%s\n' "$id"
+  done < <(jq -r '.records[]? | select(.structured and .state == "in_flight") | .id' "$1") \
+    | jq -R -s 'split("\n") | map(select(. != ""))'
+}
+
 # Main-home inventory shares the home summary's orphan checks. Metadata remains
 # the sole source of workers; pending teardown is disclosed as unavailable.
 main_inventory_json() {  # <backlog-json-file> <tasks-json-file>
   jq -n \
     --slurpfile backlog "$1" \
     --argjson pending "$PENDING_TEARDOWNS_JSON" \
+    --argjson checks "$(registered_check_ids_json "$1")" \
     --slurpfile tasks "$2" '
     def transitioning: .id as $id | $pending | index($id) != null;
+    def held_child($backlog): .id as $id
+      | any($backlog.records[]?; .structured and .state != "done" and .id == $id
+            and .hold_reason != null and .hold_kind != null);
+    def check_owned: .id as $id | $checks | index($id) != null;
     ($backlog[0]) as $backlog
     | ($tasks[0]) as $tasks
     | ([ $backlog.records[]?
        | select((.state == "in_flight" or .state == "queued") and (.structured | not)) ]) as $unstructured_current
     | ([ $backlog.records[]?
-         | select(.state == "in_flight" and .structured and .requires_child_metadata) ]) as $owned_in_flight
+         | select(.state == "in_flight" and .structured) ]) as $owned_in_flight
     | ([ $owned_in_flight[]
+         | select(.requires_child_metadata)
+         | select(check_owned | not)
          | select(transitioning | not)
          | select(.id as $id | [$tasks[].id] | index($id) | not)
          | .id ]) as $orphan_in_flight
+    | ([ $tasks[]
+         | select(.kind != "secondmate")
+         | select(transitioning | not)
+         | select(held_child($backlog) | not)
+         | select(.id as $id | [$owned_in_flight[].id] | index($id) | not)
+         | .id ]) as $unowned_children
     | (($unstructured_current | length) == 0
        and ($orphan_in_flight | length) == 0
+       and ($unowned_children | length) == 0
        and ($pending | length) == 0) as $valid
     | (if ($unstructured_current | length) > 0 then "unstructured current backlog row"
        elif ($orphan_in_flight | length) > 0 then "in-flight backlog item has no child metadata"
+       elif ($unowned_children | length) > 0 then "live child state has no in-flight backlog item"
        elif ($pending | length) > 0 then "task teardown pending: " + ($pending | join(", "))
        else null end) as $reason
     | {
         valid:$valid,
         reason:$reason,
         orphan_in_flight:$orphan_in_flight,
+        unowned_current:$unowned_children,
         unstructured_current_count:($unstructured_current | length)
       }'
 }
@@ -988,8 +1022,13 @@ secondmate_home_summary_json() {  # <backlog-json-file> <tasks-json-file>
     --argjson landed_n "$FM_SNAPSHOT_SECONDMATE_LANDED_PER_HOME" \
     --slurpfile backlog "$1" \
     --argjson pending "$PENDING_TEARDOWNS_JSON" \
+    --argjson checks "$(registered_check_ids_json "$1")" \
     --slurpfile tasks "$2" "$FM_LANDED_JQ_DEFS"'
     def transitioning: .id as $id | $pending | index($id) != null;
+    def held_child($backlog): .id as $id
+      | any($backlog.records[]?; .structured and .state != "done" and .id == $id
+            and .hold_reason != null and .hold_kind != null);
+    def check_owned: .id as $id | $checks | index($id) != null;
     ($backlog[0]) as $backlog
     | ($tasks[0]) as $tasks
     | def trunc($n):
@@ -1023,25 +1062,30 @@ secondmate_home_summary_json() {  # <backlog-json-file> <tasks-json-file>
             hold_age_days:(.hold_age_days // null),source:"backlog"} ]) as $captain_holds_all
     | ([ $backlog.records[]? | select(landed_record)
          | {id:(.id | trunc(120)),title:(.title | trunc(120)),
+            repo:((.repo // null) | if . == null then null else trunc(120) end),
             kind:((.kind // null) | if . == null then null else trunc(40) end),
             hold_kind:((.hold_kind // null) | if . == null then null else trunc(40) end),
             pr_url:((.pr_url // null) | if . == null then null else trunc(500) end),
             report_path:((.report_path // null) | if . == null then null else trunc(500) end),
             local_note:((.local_note // null) | if . == null then null else trunc(120) end),completion} ]
        | sort_by([(.completion.date // ""), .id]) | reverse) as $landed_all
-    | ([ $tasks[] | select(.current_state.state == "unknown") ]) as $unknown_children
+    | ([ $tasks[] | select(held_child($backlog) | not)
+                    | select(.current_state.state == "unknown") ]) as $unknown_children
     | ([ $owned_in_flight[]
          | select(.requires_child_metadata)
+         | select(check_owned | not)
          | select(transitioning | not)
          | select(.id as $id | [$tasks[].id] | index($id) | not) ]) as $orphan_in_flight
     | ([ $tasks[]
          | select(.kind != "secondmate")
+         | select(held_child($backlog) | not)
          | select(transitioning | not)
          | select(.id as $id | [$owned_in_flight[].id] | index($id) | not)
          | {id,state:.current_state.state} ]) as $unowned_children
     | ([ $owned_in_flight[] as $work
          | $tasks[]
          | select(.kind != "secondmate")
+         | select(held_child($backlog) | not)
          | select(transitioning | not)
          | select(.id == $work.id and (.current_state.state == "done" or .current_state.state == "failed"))
          | select((.current_state.state == "done"

@@ -193,6 +193,10 @@
 # declined, answered, repaired) are recognized everywhere a record is read, so
 # nothing already closed needs rewriting.
 #
+# Summary ledger: hold, answer, answers, and reconcile close/note refresh through
+# fm-home-summary-refresh.sh --best-effort after the operation. Publication
+# failures never change the hold or answer result.
+#
 # Parent channel: inside a secondmate home a task held for the captain, and its
 # answer, are captain-facing facts the moment they are recorded, so `hold`
 # publishes `needs-decision [key=captain-hold-<task>-<n>]` and `answer` (and
@@ -241,6 +245,7 @@ publish_parent_hold() {  # <task-id> <occurrence> <verb> <note>
   esac
 }
 
+CAPTAIN_SUMMARY_REFRESH=0
 CAPTAIN_META_LOCK=
 CAPTAIN_META_LOCK_HELD=0
 CAPTAIN_CONTROL_LOCK=
@@ -253,6 +258,9 @@ captain_hold_cleanup() {
   if [ "$CAPTAIN_CONTROL_LOCK_HELD" = 1 ]; then
     fm_lock_release "$CAPTAIN_CONTROL_LOCK" || true
     CAPTAIN_CONTROL_LOCK_HELD=0
+  fi
+  if [ "$CAPTAIN_SUMMARY_REFRESH" = 1 ]; then
+    "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
   fi
 }
 trap captain_hold_cleanup EXIT
@@ -1501,8 +1509,8 @@ command_reconcile() {
   shift
   case "$action" in
     list)    reconcile_list "$@" ;;
-    close)   reconcile_close "$@" ;;
-    note)    reconcile_note "$@" ;;
+    close)   CAPTAIN_SUMMARY_REFRESH=1; reconcile_close "$@" ;;
+    note)    CAPTAIN_SUMMARY_REFRESH=1; reconcile_note "$@" ;;
     *) usage >&2; exit 2 ;;
   esac
 }
@@ -1956,9 +1964,9 @@ command_open() {  # <task-id> [--identity] [--distinguish-absent]
 }
 
 case "${1:-}" in
-  hold) shift; command_hold "$@" ;;
-  answer) shift; command_answer "$@" ;;
-  answers) shift; command_answers "$@" ;;
+  hold) shift; CAPTAIN_SUMMARY_REFRESH=1; command_hold "$@" ;;
+  answer) shift; CAPTAIN_SUMMARY_REFRESH=1; command_answer "$@" ;;
+  answers) shift; CAPTAIN_SUMMARY_REFRESH=1; command_answers "$@" ;;
   reconcile-requests) shift; command_reconcile_requests "$@" ;;
   bind) shift; command_bind "$@" ;;
   unbind) shift; command_unbind "$@" ;;

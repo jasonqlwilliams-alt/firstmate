@@ -1456,7 +1456,13 @@ test_perl_fallback_bounds_github_call() {
 
 write_large_fixture() {  # <home> <count>
   local home=$1 count=$2 i id
-  : > "$home/data/backlog.md"
+  # Keep the cap fixture internally consistent; orphan warnings have their own test.
+  printf '## In flight\n' > "$home/data/backlog.md"
+  i=1
+  while [ "$i" -le "$count" ]; do
+    printf -- '- [ ] dead-%s - Scout %s (repo: repo-%s) (kind: scout)\n' "$i" "$i" "$i" >> "$home/data/backlog.md"
+    i=$((i + 1))
+  done
   printf '## Queued\n' >> "$home/data/backlog.md"
   i=1
   while [ "$i" -le "$count" ]; do
@@ -3335,6 +3341,55 @@ test_a_remote_home_without_any_ledger_is_explicitly_unreadable_without_remote_co
     || fail "a no-ledger remote home triggered remote summary computation: $(cat "$parent/ledger-calls.log")"
   pass "a missing remote ledger stays explicitly unreadable without remote summary computation"
 }
+
+test_gate_and_landed_repo_and_empty_reason() {
+  local home out mate fakebin check failures=0
+  home=$(make_home accuracy-fields)
+  cat > "$home/data/backlog.md" <<'MD'
+## In flight
+## Queued
+- [ ] plain - Unblocked work (repo: alpha) (kind: ship)
+- [ ] quiet - Quiet window work (repo: alpha) (kind: ship)
+  Requires a quiet window before starting.
+- [ ] dated - No prose reason (repo: beta) (hold-kind: captain) (hold: -) (hold-until: 2099-01-01)
+## Done
+- [x] landed - Landed work (repo: gamma) (kind: ship) (merged 2026-07-10)
+MD
+  out=$(FM_HOME="$home" "$BEARINGS" --json --all-queued --fields bodies)
+  for check in \
+    '.gates[] | select(.id == "plain") | .repo == "alpha" and .reason == ""' \
+    '.gates[] | select(.id == "dated") | .reason == "until 2099-01-01"' \
+    '.landed[] | select(.id == "landed") | .repo == "gamma"'; do
+    if ! printf '%s' "$out" | jq -e "$check" >/dev/null; then
+      printf 'REPRO projection: %s\n' "$check"
+      failures=$((failures + 1))
+    fi
+  done
+  printf '%s' "$out" | jq -e '.bodies[] | select(.id == "quiet") | .body | contains("quiet window")' >/dev/null \
+    || fail "task body prerequisite is unavailable to the composer"
+  [ "$failures" = 0 ] || fail "$failures projection accuracy cases reproduced"
+  home=$(make_home accuracy-cross-home-fields)
+  fakebin=$(make_fakebin "$home")
+  write_fixture "$home"
+  mate=$(fixture_mate_home "$home")
+  cat > "$mate/data/backlog.md" <<'MD'
+## In flight
+- [ ] mate - Existing child (repo: firstmate) (kind: ship)
+## Queued
+- [ ] mate-queued - Queued work (repo: beta) (kind: ship)
+## Done
+- [x] mate-landed - Landed work (repo: gamma) (kind: ship) (merged 2026-07-10)
+MD
+  out=$(run "$home" "$fakebin" --json --all-queued)
+  printf '%s' "$out" | jq -e '
+    (.gates[] | select(.id == "mate-queued") | .repo == "beta" and .reason == "")
+    and (.landed[] | select(.id == "mate-landed") | .repo == "gamma")
+    and all(.gates[]; has("repo"))
+  ' >/dev/null || fail "cross-home repo identity was lost: $out"
+  pass "gate and landed rows carry repo across homes, absent reasons stay empty, and task body preserves quiet-window prerequisite"
+}
+
+test_gate_and_landed_repo_and_empty_reason
 
 test_task_teardown_during_metadata_capture_does_not_abort_snapshot
 test_current_state_uses_captured_status_observation

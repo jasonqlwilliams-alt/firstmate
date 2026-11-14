@@ -50,10 +50,12 @@
 # posture row is reserved ahead of that ordering and bound so it always surfaces.
 #
 # Main-home inventory validity comes from the canonical snapshot's main_inventory
-# object (orphan structured in-flight without meta, unstructured current rows).
-# Bearings never invents Underway rows from backlog-only ids; it discloses those
-# gaps in omitted[] and, when invalid, a Charted Next gate line so the four-section
-# chat cannot claim an empty fleet while main current state is broken.
+# object (orphan structured in-flight without a worker or registered custom
+# check, unowned non-held child metadata, and unstructured current rows).
+# Bearings never invents Underway rows from backlog-only ids; it discloses orphan
+# and unstructured gaps in omitted[] and any invalid inventory through a Charted
+# Next gate line so the four-section chat cannot claim an empty fleet while main
+# current state is broken.
 #
 # An open away-return catch-up is disclosed the same way, as a single action-free
 # (return-catchup) gate row naming the blockers left to clear or the reason the
@@ -146,8 +148,8 @@ remote homes under one shared snapshot budget and may refresh the parent-side ca
 Default fields: schema, home, generated, prs, in_flight{id,kind,state,repo,name,doing},
   secondmates{id,state,doing,provenance,freshness,age_seconds,contradiction,reason},
   secondmate_reconcile{id,spawn_gen,host,kind,ids},
-  decisions_open{id,key,verb,summary,owner}, landed{id,what,artifact,owner},
-  gates{id,title,blocked_by,reason,owner,filed}, reports{id,path}, recorded_prs{id,url},
+  decisions_open{id,key,verb,summary,owner}, landed{id,repo,what,artifact,owner},
+  gates{id,repo,title,blocked_by,reason,owner,filed}, reports{id,path}, recorded_prs{id,url},
   unhealthy_endpoints{...} (only when non-empty), omitted{surface,reveal}.
 Default gates are selected newest filed first before their bound; undated gates
   retain input order after dated gates.
@@ -402,9 +404,9 @@ MODEL=$(printf '%s' "$SNAP" | jq \
       ("held " + (.hold_age_days | tostring) + "d")
     else null end;
   def hold_gate_reason:
-    (.hold_reason // .blocked_reason // "-") as $base
+    ((.hold_reason // .blocked_reason // "") | clean | if . == "-" then "" else . end) as $base
     | (hold_note) as $note
-    | if $note == null then $base else ($note + ": " + $base) end;
+    | if $note == null then $base elif $base == "" then $note else ($note + ": " + $base) end;
   def hold_summary($title; $base):
     (hold_note) as $note
     | if $note == null then (($title + ": " + $base) | trunc(90))
@@ -417,7 +419,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
         end
       end;
   def as_gate($owner):
-    {id, title:(.title | clean),
+    {id, repo:(.repo // null), title:(.title | clean),
      blocked_by:((.unresolved_blocker_ids // []) | if length > 0 then join(",") else "-" end | trunc(120)),
      reason:(hold_gate_reason | clean), owner:$owner,
      filed:((.since // null) | trunc(40))};
@@ -433,7 +435,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
   | (($fl | index("actions")) != null) as $f_actions
   | (($fl | index("endpoints")) != null) as $f_endpoints
   | ([ .backlog.records[] | select(landed_record)
-       | {id, title, kind, hold_kind, pr_url, report_path, local_note, completion,
+       | {id, repo, title, kind, hold_kind, pr_url, report_path, local_note, completion,
           home:"(main)", home_id:"(main)"} ]) as $main_done
   | ((.secondmate_landed.records) // []) as $mate_done
   | ($main_done + $mate_done) as $all_landed_rows
@@ -541,7 +543,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
          | select(.hold_kind == "captain" and projected_deferred_hold) ]
      | length) as $decisions_marked_deferred
   | (if ($return_catchup.pending // false) then
-       [{id:"(return-catchup)",
+       [{id:"(return-catchup)",repo:null,
          title:((if ($return_catchup.blockers // 0) > 0 then
                    "\($return_catchup.blockers) blocker(s) to clear before ordinary work"
                  elif (($return_catchup.reason // "") != "") then
@@ -554,7 +556,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
          filed:null}]
      else [] end) as $return_catchup_gate
   | ((if (.main_inventory.valid == false) then
-        [{id:"(main-inventory)",
+        [{id:"(main-inventory)",repo:null,
           title:((.main_inventory.reason // "main inventory invalid") | clean),
           blocked_by:"-",
           reason:"main inventory",
@@ -602,7 +604,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
         | select(.reconcile_inventory != null)
         | {id, spawn_gen:(.spawn_gen // null), host:(.host // null), kind:(.reconcile_inventory.kind // null), ids:((.reconcile_inventory.ids // []) | map(select(type == "string")) | sort)} ],
       decisions_open: (if $all_decisions == 1 then $decisions_all else $decisions_all[:$decisions_n] end),
-      landed: ($done | map({id, what:(.title | trunc(70)),
+      landed: ($done | map({id, repo:(.repo // null), what:(.title | trunc(70)),
                             artifact:(landed_artifact // "-"),owner:.home_id})),
       gates: ($return_catchup_gate
               + ($gates_all | newest_filed_first
