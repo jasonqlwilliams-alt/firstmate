@@ -8,9 +8,7 @@ import {
   H2,
   Link,
   Pill,
-  Row,
   Stack,
-  Stat,
   Table,
   Text,
   type TableRowTone,
@@ -121,8 +119,6 @@ function rowOf(item: DetailItem) {
 
 export default function BearingsDetailCanvas() {
   const queued = DETAIL.charted.filter((item) => item.status !== "needs repair");
-  const ready = queued.filter((item) => item.status === "ready").length;
-  const repairs = DETAIL.charted.length - queued.length;
   return (
     <Stack gap={20} style={{ padding: 20 }}>
       <Stack gap={4}>
@@ -131,12 +127,6 @@ export default function BearingsDetailCanvas() {
           <span>From the bearings board for {DETAIL.home}, built {DETAIL.generated}.</span>
         </Text>
       </Stack>
-      <Row gap={24} wrap>
-        <Stat value={String(queued.length + DETAIL.charted_more)} label="Charted next" tone="info" />
-        <Stat value={String(ready)} label="Ready to start" tone="success" />
-        {repairs > 0 ? <Stat value={String(repairs)} label="Records needing repair" tone="danger" /> : null}
-        <Stat value={String(DETAIL.landed.length)} label="Recently landed" tone="success" />
-      </Row>
       <Stack gap={8}>
         <H2>Charted Next</H2>
         {queued.length === 0 && DETAIL.charted_more === 0 ? (
