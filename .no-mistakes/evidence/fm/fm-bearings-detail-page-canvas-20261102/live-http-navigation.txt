@@ -1,0 +1,5 @@
+Served board navigation and both section headers: bearings-detail.html, bearings-detail.html#charted, bearings-detail.html#landed
+Each board detail link returns HTTP 200; section targets exist
+Local report link: bearings-reports.html#charted-blocked-gate -> HTTP 200, escaped report content visible
+Remote report: visible path and remote-host note; no local report link
+Detail page: blocker title, waiting since, filed date, owner, and PR link visible

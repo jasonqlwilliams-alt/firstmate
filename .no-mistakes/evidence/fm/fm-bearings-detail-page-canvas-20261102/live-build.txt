@@ -1,0 +1,10 @@
+board: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M7C8NMFD5E8RNESC7BGDW87W/.test-tmp/live-home/.lavish/bearings-board.html
+detail: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M7C8NMFD5E8RNESC7BGDW87W/.test-tmp/live-home/.lavish/bearings-detail.html
+canvas: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M7C8NMFD5E8RNESC7BGDW87W/.test-tmp/live-home/canvases/bearings-detail.canvas.tsx
+session:
+  status: opened
+session: live
+served: /home/jason/.no-mistakes/worktrees/e95238b70e4e/01M7C8NMFD5E8RNESC7BGDW87W/.test-tmp/live-home/.lavish/bearings-board.html
+bound: lavish-80396ee60c7a4472
+armed: lavish-80396ee60c7a4472
+listening: live

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bearings - Charted Next and Recently Landed</title>
+<style>
+/* ============================================================
+   Bearings detail page - the board's companion, on the same
+   Firstmate Design System tokens as board-template.html.
+   Static: no script, every value is escaped at build time.
+   ============================================================ */
+@import url("https://fonts.googleapis.com/css2?family=Chango&family=Jost:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+
+:root {
+  --rust-600: #a93a1f; --rust-500: #c0452a; --rust-050: #fbece3;
+  --navy-700: #1a2238;
+  --gold-600: #b5791c; --gold-500: #e0a52e; --gold-300: #f0d38c;
+  --sea-500: #2f6b4f;
+  --paper-000: #fbf4e2; --paper-100: #f6ecd3; --paper-300: #e7d6ae;
+  --cream-line: #ddc89c;
+  --ink-900: #241c14; --ink-700: #3f3224; --ink-500: #6f5e46; --ink-300: #9c8a6c;
+  --white: #fffdf7;
+  --font-display: "Chango", "Cooper Black", Rockwell, Georgia, serif;
+  --font-sans: "Jost", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fs-h4: 1.15rem; --fs-sm: 0.9375rem; --fs-xs: 0.8125rem; --fs-2xs: 0.6875rem;
+  --ls-caps: 0.16em;
+  --radius-xs: 6px; --radius-lg: 18px;
+  --shadow-sm: 0 1px 2px rgba(36, 28, 20, 0.06), 0 4px 10px rgba(36, 28, 20, 0.06);
+  --focus-ring: 0 0 0 3px var(--gold-300);
+  --container-app: 1180px;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--font-sans); color: var(--ink-700); background: var(--paper-100);
+  line-height: 1.55; -webkit-font-smoothing: antialiased;
+}
+a { color: var(--rust-600); overflow-wrap: anywhere; }
+a:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 4px; }
+
+.fm-badge {
+  display: inline-flex; align-items: center; font-size: var(--fs-2xs); font-weight: 800; line-height: 1;
+  padding: 5px 9px 4px; text-transform: uppercase; letter-spacing: 0.07em;
+  border-radius: var(--radius-xs); border: 1.5px solid var(--ink-900);
+  box-shadow: 2px 2px 0 var(--ink-900); white-space: nowrap; flex: none;
+}
+.fm-badge--online { background: var(--sea-500); color: var(--paper-000); }
+.fm-badge--warn   { background: var(--gold-500); color: var(--navy-700); }
+.fm-badge--danger { background: var(--rust-600); color: var(--paper-000); }
+
+.dt-nav {
+  position: sticky; top: 0; z-index: 20; background: var(--paper-100);
+  border-bottom: 1px solid var(--cream-line);
+}
+.dt-nav__inner {
+  max-width: var(--container-app); margin: 0 auto; padding: 12px 28px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px;
+}
+.dt-brand { font-family: var(--font-display); font-size: 22px; color: var(--ink-900); line-height: 1; }
+.dt-nav__title { font-weight: 700; color: var(--ink-500); font-size: var(--fs-sm); flex: 1 1 auto; min-width: 0; }
+.dt-nav__links { display: flex; gap: 16px; }
+.dt-nav__links a {
+  font-weight: 800; text-transform: uppercase; letter-spacing: var(--ls-caps); font-size: var(--fs-xs);
+  text-decoration: none; white-space: nowrap;
+}
+
+.dt-main { max-width: var(--container-app); margin: 0 auto; padding: 22px 28px 72px; display: flex; flex-direction: column; gap: 26px; }
+.dt-intro { margin: 0; color: var(--ink-500); }
+.dt-mono, .dt-id, .dt-path { font-family: var(--font-mono); font-size: var(--fs-xs); }
+.dt-section { display: flex; flex-direction: column; gap: 14px; scroll-margin-top: 80px; min-width: 0; }
+.dt-section__title {
+  margin: 0; font-weight: 800; text-transform: uppercase; letter-spacing: var(--ls-caps);
+  font-size: var(--fs-xs); color: var(--rust-500);
+}
+.dt-item {
+  background: var(--white); border: 1px solid var(--cream-line); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm); padding: 16px 20px; scroll-margin-top: 80px; min-width: 0;
+}
+.dt-item:target { border-color: var(--rust-500); box-shadow: 0 0 0 2px var(--rust-050), var(--shadow-sm); }
+.dt-item__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dt-item__title { margin: 0; font-size: var(--fs-h4); color: var(--ink-900); line-height: 1.3; overflow-wrap: anywhere; min-width: 0; }
+.dt-fields {
+  margin: 12px 0 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px 24px;
+}
+.dt-field { min-width: 0; }
+.dt-field dt {
+  font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--ink-500);
+}
+.dt-field dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+.dt-field[data-field="what"], .dt-field[data-field="waits-on"], .dt-field[data-field="blockers"] { grid-column: 1 / -1; }
+.dt-repo { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-500); margin-left: 6px; }
+.dt-none { color: var(--ink-300); }
+.dt-blockers { margin: 0; padding-left: 18px; }
+.dt-id { color: var(--ink-500); }
+.dt-empty, .dt-more { margin: 0; color: var(--ink-500); }
+
+@media (max-width: 720px) {
+  .dt-nav__inner, .dt-main { padding-left: 16px; padding-right: 16px; }
+  .dt-fields { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<!-- ONE SLOT. bin/fm-bearings-board.sh build renders the escaped detail body
+     from the board payload in place of the placeholder below on every build. -->
+<header class="dt-nav"><div class="dt-nav__inner"><span class="dt-brand">bearings</span><span class="dt-nav__title">Charted Next and Recently Landed in detail</span><nav class="dt-nav__links"><a href="#charted">Charted Next</a><a href="#landed">Recently Landed</a></nav></div></header><main class="dt-main"><p class="dt-intro">Every Charted Next and Recently Landed row on the bearings board, with what each waits on, since when, who owns it, and its links. Rebuilt with the board at <span class="dt-mono">2026-11-13T00:00Z</span>.</p><section class="dt-section" id="charted"><h2 class="dt-section__title">Charted Next</h2><article class="dt-item" id="charted-blocked-gate" data-section="charted"><header class="dt-item__head"><h3 class="dt-item__title">Publish the next release</h3><span class="fm-badge fm-badge--warn">waiting</span></header><dl class="dt-fields"><div class="dt-field" data-field="what"><dt>What it is</dt><dd>Publish the next release <span class="dt-repo">sample</span></dd></div><div class="dt-field" data-field="waits-on"><dt>Waits on</dt><dd>Other work finishing first: needs the groundwork</dd></div><div class="dt-field" data-field="since"><dt>Waiting since</dt><dd>2026-11-11</dd></div><div class="dt-field" data-field="owner"><dt>Owner</dt><dd>(main)</dd></div><div class="dt-field" data-field="blockers"><dt>Blockers</dt><dd><ul class="dt-blockers"><li><span class="dt-blocker__title">Finish groundwork</span> <code class="dt-id">groundwork</code></li> </ul></dd></div><div class="dt-field" data-field="report"><dt>Report</dt><dd><a class="dt-path" href="bearings-reports.html#charted-blocked-gate" target="_blank" rel="noopener">/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M7C8NMFD5E8RNESC7BGDW87W/.test-live-bearings/data/report &amp; review.md</a></dd></div><div class="dt-field" data-field="pr"><dt>PR</dt><dd><a href="https://github.com/example/sample/pull/12" target="_blank" rel="noopener">https://github.com/example/sample/pull/12</a></dd></div><div class="dt-field" data-field="filed"><dt>Filed</dt><dd>2026-11-12</dd></div></dl></article><article class="dt-item" id="charted-remote-gate" data-section="charted"><header class="dt-item__head"><h3 class="dt-item__title">Review remote notes</h3><span class="fm-badge fm-badge--warn">waiting</span></header><dl class="dt-fields"><div class="dt-field" data-field="what"><dt>What it is</dt><dd>Review remote notes <span class="dt-repo">sample</span></dd></div><div class="dt-field" data-field="waits-on"><dt>Waits on</dt><dd>Your answer, held 2 days - waiting for answer</dd></div><div class="dt-field" data-field="since"><dt>Waiting since</dt><dd>2026-11-10</dd></div><div class="dt-field" data-field="owner"><dt>Owner</dt><dd>remote mate</dd></div><div class="dt-field" data-field="blockers"><dt>Blockers</dt><dd><span class="dt-none">None</span></dd></div><div class="dt-field" data-field="report"><dt>Report</dt><dd><code class="dt-path">data/remote/report.md</code> <span class="dt-none">On remote host</span></dd></div><div class="dt-field" data-field="pr"><dt>PR</dt><dd><span class="dt-none">None recorded</span></dd></div><div class="dt-field" data-field="filed"><dt>Filed</dt><dd>2026-11-10</dd></div></dl></article></section><section class="dt-section" id="landed"><h2 class="dt-section__title">Recently Landed</h2><article class="dt-item" id="landed-0" data-section="landed"><header class="dt-item__head"><h3 class="dt-item__title">Shipped the first release</h3><span class="fm-badge fm-badge--online">landed</span></header><dl class="dt-fields"><div class="dt-field" data-field="what"><dt>What it is</dt><dd>Shipped the first release <span class="dt-repo">sample</span></dd></div><div class="dt-field" data-field="waits-on"><dt>Waits on</dt><dd>Nothing, it landed</dd></div><div class="dt-field" data-field="since"><dt>Landed on</dt><dd>2026-11-09</dd></div><div class="dt-field" data-field="owner"><dt>Owner</dt><dd>(main)</dd></div><div class="dt-field" data-field="blockers"><dt>Blockers</dt><dd><span class="dt-none">None</span></dd></div><div class="dt-field" data-field="report"><dt>Report</dt><dd><a class="dt-path" href="bearings-reports.html#landed-0" target="_blank" rel="noopener">/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M7C8NMFD5E8RNESC7BGDW87W/.test-live-bearings/data/report &amp; review.md</a></dd></div><div class="dt-field" data-field="pr"><dt>PR</dt><dd><a href="https://github.com/example/sample/pull/9" target="_blank" rel="noopener">https://github.com/example/sample/pull/9</a></dd></div><div class="dt-field" data-field="filed"><dt>Filed</dt><dd>2026-11-05</dd></div></dl></article></section></main>
+
+</body>
+</html>

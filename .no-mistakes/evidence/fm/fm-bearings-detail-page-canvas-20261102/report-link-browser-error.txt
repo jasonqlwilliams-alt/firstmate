@@ -1,0 +1,7 @@
+console:
+## Console messages
+Showing 1-1 of 1 (Page 1 of 1).
+msgid=1 [error] Not allowed to load local resource: file:///home/jason/.no-mistakes/worktrees/e95238b70e4e/01M7C8NMFD5E8RNESC7BGDW87W/.test-tmp/live-home/data/report%20folder/result%20%26%20notes.md (0 args)
+help[2]:
+  Run `chrome-devtools-axi console-get <id>` to see a specific message
+  Run `chrome-devtools-axi console --type error` to filter by type
