@@ -102,6 +102,7 @@ case "${1:-} ${2:-}" in
     line=$(jq_state -r --arg p "${3:-}" '.composer[$p] // empty')
     if [ -n "$line" ]; then printf '› %s\n' "$line"; else printf '╭────╮\n│    │\n╰────╯\n'; fi ;;
   "pane process-info")
+    [ "$(jq_state -r --arg p "$pane" '.unreadable_process[$p] // false')" != true ] || exit 1
     printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"%s","shell_pid":%s,"foreground_process_group_id":%s,"foreground_processes":[{"pid":%s,"name":"codex","argv0":"codex","argv":["codex"],"cmdline":"codex"}]}}}\n' \
       "$pane" "$$" "$$" "$$" ;;
   "agent get")

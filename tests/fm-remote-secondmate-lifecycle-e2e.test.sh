@@ -746,8 +746,12 @@ mkdir -p "$foreign_home"
 jq --arg pane "$recycled_pane" --arg ws "$recycled_workspace" --arg home "$foreign_home" '
   .workspaces |= map(if .workspace_id == $ws then .cwd = $home | .label = "foreign" else . end)
   | .tabs |= map(if .pane_id == $pane then .cwd = $home | .label = "foreign" else . end)
+  | .unreadable_process[$pane] = true
 ' "$HERDR_STATE" > "$HERDR_STATE.recycled"
 mv "$HERDR_STATE.recycled" "$HERDR_STATE"
+if "$REMOTE_ROOT/bin/herdr" pane process-info --pane "$recycled_pane" --session fm-remote >/dev/null 2>&1; then
+  fail "the recycled remote pane process probe remained readable"
+fi
 [ "$(remote_env "$ROOT/bin/fm-on.sh" ios fm-remote-secondmate-control.sh state ios --bound-home)" = missing ] \
   || fail "a recycled remote pane was accepted as the secondmate"
 foreign_ring_before=$(grep -Ec '^pane send-(text|keys) .*'"$recycled_pane" "$HERDR_LOG" || true)
@@ -770,6 +774,8 @@ jq -e --arg pane "$recycled_pane" --arg home "$foreign_home" \
   || fail "recovery changed or closed the foreign pane"
 [ "$(remote_env "$ROOT/bin/fm-on.sh" ios fm-remote-secondmate-control.sh state ios --bound-home)" = alive ] \
   || fail "the replacement remote endpoint is not bound to its home"
+jq --arg pane "$recycled_pane" 'del(.unreadable_process[$pane])' "$HERDR_STATE" > "$HERDR_STATE.readable"
+mv "$HERDR_STATE.readable" "$HERDR_STATE"
 pass "startup replaces a recycled remote pane and leaves its foreign owner untouched"
 
 cp "$HERDR_STATE" "$TMP_ROOT/herdr-before-unreadable.json"

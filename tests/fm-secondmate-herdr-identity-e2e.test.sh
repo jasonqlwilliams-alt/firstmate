@@ -46,6 +46,8 @@ if [ "$n" -ge 2 ] && [ "${args[$((n-2))]}" = --session ]; then
 fi
 set -- "${args[@]}"
 printf '%s\n' "$*" >> "$FM_LAB_CALLS"
+if [ "$1 $2" = 'pane process-info' ] && [ "${3:-}" = --pane ] \
+  && [ "${4:-}" = "${FM_LAB_UNREADABLE_PANE:-}" ]; then exit 94; fi
 case "$1 $2" in
   'pane send-text'|'pane send-keys') exit 0 ;;
   'tab create')
@@ -138,7 +140,11 @@ record unbound "$OWNER_PANE" "$OWNER_WS"
 sed '/^home=/d' "$PRIMARY/state/unbound.meta" > "$TMP_ROOT/unbound.meta"
 mv "$TMP_ROOT/unbound.meta" "$PRIMARY/state/unbound.meta"
 mv "$TMP_ROOT/unreadable" "$TMP_ROOT/unreadable-unavailable"
+export FM_LAB_UNREADABLE_PANE=$PRIMARY_PANE
+[ "$(probe "$PRIMARY_PANE")" = unreadable ] || fail 'process-info failure did not make the agent probe unreadable'
+[ "$(probe "$PRIMARY_PANE" "$TMP_ROOT/collision-primary")" = missing ] || fail 'foreign pane with unreadable process info was not missing'
 sweep
+unset FM_LAB_UNREADABLE_PANE
 identity_failed=0
 for id in collision-sm collision-primary; do
   pane=$(sed -n 's/^herdr_pane_id=//p' "$PRIMARY/state/$id.meta")

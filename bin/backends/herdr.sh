@@ -2465,7 +2465,7 @@ fm_backend_herdr_agent_state() {  # <target> [<expected-home>]
   esac
   # Check ownership before licensing a kill of a shell-only endpoint as well as
   # before accepting a live one. A foreign pane must survive recovery intact.
-  if [ "$#" -ge 2 ] && { [ "$state" = alive ] || [ "$state" = dead ]; }; then
+  if [ "$#" -ge 2 ] && [ "$state" != missing ]; then
     case "$(fm_backend_herdr_pane_home_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE" "$2")" in
       match) ;;
       mismatch) state=missing ;;
