@@ -506,6 +506,7 @@ render_detail_body() {  # <model.json>
 publish_reports() {  # <model.json> <board>
   local model=$1 dest="${2%/*}/bearings-reports.html" tmp anchor title path
   tmp=$(umask 077; mktemp "${dest%/*}/.reports.XXXXXX") || return 1
+  # shellcheck disable=SC2094 # The output is a fresh temporary file, separate from report inputs.
   {
     printf '<!doctype html><html lang="en"><meta charset="utf-8"><title>Bearings reports</title><style>body{font:16px system-ui;max-width:80ch;margin:3rem auto;padding:0 1rem}article{margin:0 0 3rem}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><main>\n'
     while IFS= read -r -d '' anchor && IFS= read -r -d '' title && IFS= read -r -d '' path; do
@@ -522,7 +523,10 @@ publish_reports() {  # <model.json> <board>
     done < <(jq -jr '(.charted + .landed)[] | select(.report_path != null) | .anchor, "\u0000", .title, "\u0000", .report_path, "\u0000"' "$model")
     printf '</main></html>\n'
   } > "$tmp" || { rm -f -- "$tmp"; return 1; }
-  chmod 0600 "$tmp" && mv -f -- "$tmp" "$dest" || { rm -f -- "$tmp"; return 1; }
+  if ! chmod 0600 "$tmp" || ! mv -f -- "$tmp" "$dest"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
 }
 
 # Inject <content-file> in place of the one <placeholder> line of <template>
