@@ -73,11 +73,19 @@
 #        fm-startup-network.sh wait [<seconds>]
 #          Block until the report is published, up to <seconds> (default 120).
 #          For operators and tests only; a session start never waits.
+#        fm-startup-network.sh ready <lock-pid>
+#          Read-only: exit 0 only for a successfully published locked generation
+#          belonging to this live session owner. Exit 1 for incomplete work.
+#          This does not certify individual secondmate endpoint bindings.
+#        fm-startup-network.sh owner <lock-pid>
+#          Read-only: verify the generation belongs to this exact live process,
+#          independently of whether its checks have finished.
 #
 # STATE, all under this home's state/ and gitignored with it:
 #   .startup-network.status   key=value record - generation, lock_pid, state,
 #                             pid, started, finished, rc, locked, phases, and
-#                             whether the report was published. The single
+#                             lock_identity (base64 of fm_pid_identity, one line),
+#                             and whether the report was published. The single
 #                             source of truth for what ran and how it ended.
 #   .startup-network.report   the sweep output, byte for byte as
 #                             bin/fm-bootstrap.sh produced it, plus a
@@ -130,6 +138,7 @@ PUBLISH_LOCK="$STATE/.startup-network.lock"
 . "$SCRIPT_DIR/fm-timing-lib.sh"
 # fm-wake-lib.sh owns both the portable lock helpers used below and the durable
 # wake queue this stage publishes into.
+case "${1:-}" in ready|owner) FM_WAKE_NO_MKDIR=1 ;; esac
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-session-lock-lib.sh
@@ -142,6 +151,12 @@ usage() {
 status_get() {  # <key>
   [ -f "$STATUS_FILE" ] || return 0
   sed -n "s/^$1=//p" "$STATUS_FILE" 2>/dev/null | tail -1
+}
+
+lock_identity_value() {  # <pid>; encode the shared identity for this line record
+  local identity
+  identity=$(fm_pid_identity "$1") || return 1
+  printf '%s' "$identity" | base64 | tr -d '\r\n'
 }
 
 write_atomic() {  # <dest>, content on stdin
@@ -246,6 +261,7 @@ locked=$locked
 phases=$phases
 generation=$generation
 lock_pid=$lock_pid
+lock_identity=$(lock_identity_value "$lock_pid" 2>/dev/null || true)
 EOF
   then
     fm_lock_release "$PUBLISH_LOCK"
@@ -280,6 +296,7 @@ locked=$locked
 phases=$phases
 generation=$generation
 lock_pid=$lock_pid
+lock_identity=$(lock_identity_value "$lock_pid" 2>/dev/null || true)
 EOF
   then
     kill "$worker_pid" 2>/dev/null || true
@@ -413,6 +430,7 @@ locked=$locked
 phases=$phases
 generation=$generation
 lock_pid=$(status_get lock_pid)
+lock_identity=$(status_get lock_identity)
 report_published=$report_published
 EOF
   fm_lock_release "$PUBLISH_LOCK"
@@ -462,6 +480,7 @@ locked=$sweep_locked
 phases=$phases
 generation=$generation
 lock_pid=$lock_pid
+lock_identity=$(lock_identity_value "$lock_pid" 2>/dev/null || true)
 EOF
     fm_lock_release "$PUBLISH_LOCK"
   fi
@@ -591,6 +610,39 @@ print_state() {
   esac
 }
 
+cmd_owner() {
+  local owner=${1:-} identity
+  case "$owner" in ''|*[!0-9]*) return 1 ;; esac
+  [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] || return 1
+  [ "$(cat "$STATE/.lock")" = "$owner" ] && fm_harness_pid_alive "$owner" || return 1
+  [ -f "$STATUS_FILE" ] && [ ! -L "$STATUS_FILE" ] || return 1
+  identity=$(lock_identity_value "$owner") || return 1
+  awk -F= -v owner="$owner" -v identity="$identity" '
+    { n[$1]++; v[$1]=substr($0,index($0,"=")+1) }
+    END { exit !(n["lock_pid"] == 1 && n["lock_identity"] == 1 &&
+      v["lock_pid"] == owner && v["lock_identity"] == identity) }
+  ' "$STATUS_FILE"
+}
+
+cmd_ready() {
+  local owner=${1:-} identity
+  cmd_owner "$owner" || return 1
+  identity=$(lock_identity_value "$owner") || return 1
+  [ -f "$REPORT_FILE" ] && [ ! -L "$REPORT_FILE" ] || return 1
+  # Open one atomically published record once; never combine fields from two
+  # concurrent generations. Duplicate authoritative fields refuse readiness.
+  awk -F= -v owner="$owner" -v identity="$identity" '
+    { n[$1]++; v[$1]=substr($0,index($0,"=")+1) }
+    END {
+      split("generation phases lock_pid lock_identity locked state rc report_published", keys, " ")
+      for (i in keys) if (n[keys[i]] != 1) exit 1
+      exit !(v["generation"] != "" && v["phases"] == "probe,sweeps" &&
+        v["lock_pid"] == owner && v["lock_identity"] == identity && v["locked"] == "1" && v["state"] == "done" &&
+        v["rc"] == "0" && v["report_published"] == "1")
+    }
+  ' "$STATUS_FILE"
+}
+
 cmd_harvest() {  # <pid>
   local pid=$1 generation state claim_record claim_generation claim_pid
   fm_lock_acquire_wait "$PUBLISH_LOCK"
@@ -656,11 +708,13 @@ case "$MODE" in
   run) cmd_run "$LOCKED" "$LOCK_PID" "$GENERATION" ;;
   harvest) cmd_harvest "${HARVEST_PID:-}" ;;
   report) print_state; print_timings ;;
+  ready) [ "$#" -eq 1 ] || { usage >&2; exit 2; }; cmd_ready "$1" || exit $? ;;
+  owner) [ "$#" -eq 1 ] || { usage >&2; exit 2; }; cmd_owner "$1" || exit $? ;;
   wait) cmd_wait "${1:-120}" || exit $? ;;
   -h|--help) usage ;;
   *)
     printf 'fm-startup-network: unknown mode: %s\n' "${MODE:-<none>}" >&2
-    printf 'usage: fm-startup-network.sh start|run|harvest|report|wait\n' >&2
+    printf 'usage: fm-startup-network.sh start|run|harvest|report|wait|ready|owner\n' >&2
     exit 2
     ;;
 esac

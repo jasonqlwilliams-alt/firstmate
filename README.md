@@ -94,6 +94,8 @@ Then launch one of the co-primary harnesses; AGENTS.md takes over from there:
 claude
 ```
 
+For an absent primary after a host reboot, use the [primary recovery procedure](docs/primary-recovery.md).
+
 **Grok**
 
 ```sh

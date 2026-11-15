@@ -393,7 +393,7 @@ family_for_basename() {
     fm-no-mistakes-required.test.sh|fm-peek-remote.test.sh|\
     fm-pending-reply.test.sh|fm-pi-branch-extension.test.sh|\
     fm-procevent-quota.test.sh|fm-procevent-when.test.sh|fm-procevent.test.sh|\
-    fm-backup-helm.test.sh|fm-live-gate.test.sh|\
+    fm-backup-helm.test.sh|fm-primary-start.test.sh|fm-live-gate.test.sh|\
     fm-project-origin.test.sh|fm-public-followup.test.sh|fm-quota-choose.test.sh|\
     fm-remote-entrypoint.test.sh|fm-remote-secondmate-parent-binding.test.sh|\
     fm-send-remote-delivery.test.sh|fm-spawn-pool-base-freshen.test.sh|\
@@ -1410,6 +1410,13 @@ families_for_changed_path() {
       ;;
     bin/fm-backup-helm.sh|docs/backup-helm.md)
       printf '%s\n' "__script__:fm-backup-helm.test.sh"
+      ;;
+    bin/fm-primary-start.sh|bin/fm-primary-start-lib.sh|docs/primary-recovery.md|tests/primary-start-herdr-fixture.py)
+      printf '%s\n' "__script__:fm-primary-start.test.sh"
+      ;;
+    bin/fm-launch-policy-lib.sh)
+      printf '%s\n' "__script__:fm-primary-start.test.sh"
+      printf '%s\n' "__script__:fm-spawn-dispatch-profile.test.sh"
       ;;
     bin/fm-quota-choose.sh)
       printf '%s\n' "__script__:fm-quota-choose.test.sh"

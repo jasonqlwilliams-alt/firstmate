@@ -284,6 +284,8 @@ No Herdr-specific copy of that protocol exists.
 
 ## Restart and liveness behavior
 
+[Primary recovery](primary-recovery.md) owns the operator path for starting a missing helm before secondmate recovery and private layout.
+
 Stopping and restarting a named Herdr server preserves workspace, tab, pane, and label ids, but the underlying harness processes and live agent registrations do not survive.
 A restored same-labeled tab with a missing pane or no registered agent is a husk.
 Create replaces only a confidently dead or no-agent husk, creates the replacement before closing the old tab, and refuses live or unknown states.

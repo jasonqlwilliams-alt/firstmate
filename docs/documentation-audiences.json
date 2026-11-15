@@ -27,6 +27,7 @@
     "docs/configuration.md",
     "docs/wedge-alarm.md",
     "docs/backup-helm.md",
+    "docs/primary-recovery.md",
     "docs/tmux-backend.md",
     "docs/herdr-backend.md",
     "docs/zellij-backend.md",
@@ -319,6 +320,10 @@
     },
     {
       "path": "docs/backup-helm.md",
+      "audience": "operator-current"
+    },
+    {
+      "path": "docs/primary-recovery.md",
       "audience": "operator-current"
     },
     {
