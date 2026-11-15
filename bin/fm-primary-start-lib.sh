@@ -135,8 +135,6 @@ primary_discover() {
       live)
         agent=$(primary_cli agent get "$id") || primary_die "cannot inspect home agent $id"
         [ "$(printf '%s' "$agent" | jq -r '.result.agent.agent')" = claude ] || continue
-        [ "$(fm_backend_herdr_pane_process_state "$PRIMARY_SESSION" "$id")" = agent ] \
-          || primary_die "home pane $id lacks a proven harness process"
         if ! primary_owner_in_pane "$id" && ! primary_receipt_matches_pane "$id" "$ws"; then
           continue
         fi

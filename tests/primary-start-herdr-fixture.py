@@ -110,6 +110,8 @@ elif command in (["pane", "get"], ["pane", "process-info"], ["agent", "get"],
         state["submitted"] = args[3]
         if not state.get("stall"):
             pane["active"] = True
+            if state.get("launch_process"):
+                pane["process"] = state["launch_process"]
         save()
         emit({"type": "submitted"})
     else:

@@ -136,6 +136,37 @@ pass 'an unrelated home Claude is preserved while a fresh helm pane is launched'
 
 reset_world
 world "workspaces=[{\"workspace_id\":\"w1\",\"label\":\"firstmate\"}]" \
+  "panes=[{\"pane_id\":\"w1:p1\",\"workspace_id\":\"w1\",\"tab_id\":\"w1:t1\",\"terminal_id\":\"unrelated-busy\",\"cwd\":\"$HOME_FIXTURE\",\"active\":true,\"process\":\"python\"}]"
+capture ready
+expect_rc 1
+contains 'agent_detected=false'
+no_mutation
+capture start
+expect_rc 0
+python3 - <<'PY'
+import json, os
+s=json.load(open(os.environ['FM_PRIMARY_TEST_STATE']))
+rows=[json.loads(l)['args'] for l in open(os.environ['FM_PRIMARY_TEST_LOG'])]
+assert len(s['panes'])==2 and s['panes'][0]['active'] and s['panes'][0]['process']=='python'
+assert s['panes'][1]['active']
+assert [r[2] for r in rows if r[:2] in (['pane','run'],['agent','rename'])]==['w1:p2','w1:p2']
+PY
+pass 'an unrelated busy Claude is preserved while a fresh helm pane is launched'
+
+reset_world
+world launch_process='"python"'
+capture start
+expect_rc 0
+contains 'agent_detected=true'
+contains 'primary_initialized=false'
+: > "$FM_PRIMARY_TEST_LOG"
+capture start
+expect_rc 0
+no_mutation
+pass 'a terminal-bound launch receipt proves the new helm during a foreground tool'
+
+reset_world
+world "workspaces=[{\"workspace_id\":\"w1\",\"label\":\"firstmate\"}]" \
   "panes=[{\"pane_id\":\"w1:p1\",\"workspace_id\":\"w1\",\"tab_id\":\"w1:t1\",\"terminal_id\":\"recycled\",\"cwd\":\"$HOME_FIXTURE\",\"active\":true}]"
 cat > "$HOME_FIXTURE/state/.primary-start" <<EOF
 phase=launched
@@ -171,6 +202,21 @@ capture start
 expect_rc 0
 no_mutation
 pass 'a live session lock proves the exact primary pane without a launch receipt'
+
+reset_world
+world "workspaces=[{\"workspace_id\":\"w1\",\"label\":\"firstmate\"}]" \
+  "panes=[{\"pane_id\":\"w1:p1\",\"workspace_id\":\"w1\",\"tab_id\":\"w1:t1\",\"terminal_id\":\"locked-busy\",\"cwd\":\"$HOME_FIXTURE\",\"active\":true,\"process\":\"python\"}]"
+initialize_primary
+capture ready
+expect_rc 0
+contains 'agent_detected=true'
+contains 'primary_initialized=true'
+contains 'recovery_ready=true'
+: > "$FM_PRIMARY_TEST_LOG"
+capture start
+expect_rc 0
+no_mutation
+pass 'a lock-proven busy helm remains ready without another launch'
 
 reset_world
 printf 'auto\n' > "$HOME_FIXTURE/config/claude-permission-mode"
