@@ -23,6 +23,7 @@ fm_backend_source herdr
 
 PRIMARY_PANE='' PRIMARY_TAB='' PRIMARY_FOUND_WORKSPACE=
 PRIMARY_OWNER='' PRIMARY_LOCK=
+PRIMARY_LABEL=$(fm_backend_herdr_workspace_label)
 
 primary_validate_home() {
   case "$FM_HOME" in *$'\n'*|*$'\r'*|*$'\t'*) primary_die "home contains a record separator" ;; esac
@@ -206,13 +207,10 @@ primary_mates_ready() {
     case "$seen" in *"|$endpoint|"*) printf 'recovery_reason=duplicate endpoint for %s\n' "$id"; return 1 ;; esac
     seen="$seen|$endpoint|"
     [ -n "$target" ] && [ "$(fm_meta_get "$meta" remote_host)" = "$host" ] || return 1
-    # Older local classifiers silently ignore an extra expected-home argument.
-    # Never interpret such a result as home-bound readiness.
-    if ! declare -F fm_backend_herdr_pane_home_state >/dev/null; then
-      printf 'recovery_reason=home-bound secondmate recovery support is not installed\n'; return 1
-    fi
     if [ -n "$host" ]; then
-      verdict=$(fm_run_timed 15 "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh state "$id" --bound-home 2>/dev/null) || verdict=unknown
+      if ! verdict=$(fm_run_timed 15 "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh state "$id" --bound-home 2>/dev/null); then
+        printf 'recovery_reason=remote secondmate %s home-bound state check is unavailable; recovery unverified\n' "$id"; return 1
+      fi
       [ "$verdict" = alive ] || { printf 'recovery_reason=remote secondmate %s is %s\n' "$id" "$verdict"; return 1; }
       route=$(fm_run_timed 15 "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh route "$id" 2>/dev/null) || return 1
       found=$(printf '%s\n' "$route" | sed -n 's/^target=//p')
@@ -220,6 +218,9 @@ primary_mates_ready() {
         && [ "$(printf '%s\n' "$route" | sed -n 's/^backend=//p')" = "$backend" ] \
         && [ "$(printf '%s\n' "$route" | sed -n 's/^harness=//p')" = "$harness" ] || return 1
     else
+      if ! declare -F fm_backend_herdr_pane_home_state >/dev/null; then
+        printf 'recovery_reason=home-bound secondmate recovery support is not installed; recovery unverified\n'; return 1
+      fi
       [ "$backend" = herdr ] || { printf 'recovery_reason=secondmate %s has an unsupported recovery backend\n' "$id"; return 1; }
       session=$(fm_backend_meta_exact_value "$meta" herdr_session) || return 1
       mate_pane=$(fm_backend_meta_exact_value "$meta" herdr_pane_id) || return 1
@@ -361,15 +362,13 @@ primary_start() {
   primary_read_lock
   [ "$PRIMARY_LOCK" != live ] || primary_die "another primary took the lock; no command was submitted"
   primary_cli pane run "$PRIMARY_PANE" "$command" >/dev/null || primary_die "launch outcome is unknown; receipt retained, no retry"
-  deadline=$(( $(date +%s) + PRIMARY_TIMEOUT ))
+  deadline=$(( $(date +%s) + 30 ))
   while :; do
     primary_discover
     if [ -n "$PRIMARY_PANE" ]; then
       [ "$PRIMARY_PANE" = "$launch_pane" ] || primary_die "another primary appeared; submitted launch remains uncertain"
       primary_record launched "$terminal"
-      # Naming is cosmetic; a collision must not cause another agent launch.
-      # shellcheck disable=SC2153 # PRIMARY_NAME is assigned by the command parser.
-      primary_cli agent rename "$PRIMARY_PANE" "$PRIMARY_NAME" >/dev/null \
+      primary_cli agent rename "$PRIMARY_PANE" helm >/dev/null \
         || primary_die "primary was detected but naming failed; inspect it before retrying"
       primary_report || true
       return 0

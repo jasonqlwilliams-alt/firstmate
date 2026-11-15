@@ -103,6 +103,8 @@ assert argv[-1].count('Take the primary role') == 1 and 'recovery_ready=true' in
 assert 'FM_TASK_ID' in argv and 'CLAUDECODE' in argv and 'FM_ROOT_OVERRIDE' in argv
 rows=[json.loads(l)['args'] for l in open(os.environ['FM_PRIMARY_TEST_LOG'])]
 assert sum(r[:2]==['pane','run'] for r in rows)==1
+assert any(r[:2]==['workspace','create'] and r[r.index('--label')+1]=='firstmate' for r in rows)
+assert any(r[:2]==['agent','rename'] and r[-1]=='helm' for r in rows)
 assert not any(r[:2] in [['agent','prompt'],['agent','send-keys'],['pane','send-keys']] for r in rows)
 PY
 pass 'fresh boot submits one environment-bound interactive Claude launch and distinguishes initialization'
@@ -164,7 +166,7 @@ no_mutation
 pass 'an incompatible server is preserved without restart'
 
 reset_world
-world "workspaces=[{\"workspace_id\":\"w1\",\"label\":\"FirstMate\"}]" \
+world "workspaces=[{\"workspace_id\":\"w1\",\"label\":\"firstmate\"}]" \
   "panes=[{\"pane_id\":\"w1:p1\",\"workspace_id\":\"w1\",\"tab_id\":\"w1:t1\",\"terminal_id\":\"old-utility\",\"cwd\":\"$HOME_FIXTURE\",\"active\":false}]"
 capture start
 expect_rc 0
@@ -177,7 +179,7 @@ PY
 pass 'restored home workspace gets a fresh launch tab while its utility shell is preserved'
 
 reset_world
-world "workspaces=[{\"workspace_id\":\"w1\",\"label\":\"FirstMate\"}]"
+world "workspaces=[{\"workspace_id\":\"w1\",\"label\":\"firstmate\"}]"
 capture start
 expect_rc 2
 no_mutation
@@ -207,13 +209,27 @@ pass 'a lost create response retains uncertainty and prevents duplicate creation
 
 reset_world
 world stall=true
-capture start --timeout 1
+export FM_PRIMARY_TEST_DATE_COUNT="$TMP_ROOT/date-count"
+cat > "$FAKEBIN/date" <<'SH'
+#!/bin/sh
+if [ "$1" = '+%s' ]; then
+  count=$(cat "$FM_PRIMARY_TEST_DATE_COUNT" 2>/dev/null || printf 0)
+  count=$((count + 31))
+  printf '%s\n' "$count" > "$FM_PRIMARY_TEST_DATE_COUNT"
+  printf '%s\n' "$count"
+else
+  /bin/date "$@"
+fi
+SH
+chmod +x "$FAKEBIN/date"
+capture start
 expect_rc 2
 : > "$FM_PRIMARY_TEST_LOG"
-capture start --timeout 1
+capture start
 expect_rc 2
 no_mutation
 contains 'prior launch may still be queued'
+rm "$FAKEBIN/date"
 pass 'a timed-out launch is not resubmitted into its retained shell'
 
 reset_world
@@ -279,6 +295,9 @@ EOF
 capture ready
 expect_rc 1
 contains 'home-bound secondmate recovery support is not installed'
+contains 'recovery unverified'
+contains 'primary_initialized=true'
+contains 'supervision_healthy=false'
 pass 'registered missing mates and unavailable home-binding support keep layout gated'
 
 # The separate recovery change supplies this API. Model its public contract
@@ -286,7 +305,7 @@ pass 'registered missing mates and unavailable home-binding support keep layout 
 cat >> "$CODE/bin/backends/herdr.sh" <<'SH'
 fm_backend_herdr_pane_home_state() { printf '%s' "${FM_PRIMARY_TEST_HOME_STATE:-match}"; }
 SH
-world "workspaces=[{\"workspace_id\":\"w1\",\"label\":\"FirstMate\"},{\"workspace_id\":\"w2\",\"label\":\"mate\"}]" \
+world "workspaces=[{\"workspace_id\":\"w1\",\"label\":\"firstmate\"},{\"workspace_id\":\"w2\",\"label\":\"mate\"}]" \
   "panes=[{\"pane_id\":\"w1:p1\",\"workspace_id\":\"w1\",\"tab_id\":\"w1:t1\",\"terminal_id\":\"primary\",\"cwd\":\"$HOME_FIXTURE\",\"active\":true},{\"pane_id\":\"w2:p1\",\"workspace_id\":\"w2\",\"tab_id\":\"w2:t1\",\"terminal_id\":\"mate\",\"cwd\":\"$TMP_ROOT/mate\",\"active\":true}]"
 capture ready
 expect_rc 0
@@ -300,6 +319,11 @@ capture start --harness codex
 expect_rc 2
 capture start --backend tmux
 expect_rc 2
+for option in --workspace-label --agent-name --timeout; do
+  capture start "$option" unused
+  expect_rc 2
+  contains "unknown option $option"
+done
 no_mutation
 pass 'unsupported primary harnesses and backends refuse before mutation'
 
@@ -324,7 +348,7 @@ initialize_primary
 cat > "$CODE/bin/fm-on.sh" <<'SH'
 #!/bin/sh
 case "$3" in
-  state) [ "$5" = --bound-home ] || exit 2; printf '%s\n' "${FM_PRIMARY_TEST_REMOTE_STATE:-alive}" ;;
+  state) [ "${FM_PRIMARY_TEST_REMOTE_BINDING:-supported}" = supported ] && [ "$5" = --bound-home ] || exit 2; printf '%s\n' "${FM_PRIMARY_TEST_REMOTE_STATE:-alive}" ;;
   route) printf 'backend=herdr\ntarget=%s\nharness=claude\n' "${FM_PRIMARY_TEST_REMOTE_TARGET:-fm-remote:w9:p1}" ;;
   *) exit 2 ;;
 esac
@@ -340,6 +364,11 @@ remote_host=fixture-remote
 EOF
 capture ready
 expect_rc 0
+FM_PRIMARY_TEST_REMOTE_BINDING=unsupported capture ready
+expect_rc 1
+contains 'home-bound state check is unavailable; recovery unverified'
+contains 'primary_initialized=true'
+contains 'supervision_healthy=false'
 FM_PRIMARY_TEST_REMOTE_STATE=unreadable capture ready
 expect_rc 1
 FM_PRIMARY_TEST_REMOTE_TARGET=fm-remote:foreign capture ready

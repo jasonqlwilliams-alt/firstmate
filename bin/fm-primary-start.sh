@@ -3,7 +3,7 @@
 #
 # Usage:
 #   fm-primary-start.sh start --home <absolute-home> --backend herdr --session <name>
-#     --harness claude [--workspace-label FirstMate] [--agent-name helm] [--timeout 30]
+#     --harness claude
 #   fm-primary-start.sh ready --home <absolute-home> --backend herdr --session <name>
 #     --harness claude [--workspace <exact-id>]
 #
@@ -30,7 +30,7 @@
 # because the first Stop may arm it after a successful recovery turn.
 # start exits 0 once the exact primary agent is detected, 2 on refusal/timeout;
 # its output never equates agent detection with initialized/recovered/healthy.
-# --timeout bounds readiness polling after submission, not a model turn.
+# Detection polling is bounded internally after submission, not a model turn.
 # Every CLI call has an explicit trailing --session. No default session is
 # stopped, deleted, reselected, or reconfigured by this command.
 #
@@ -42,7 +42,6 @@ MODE=${1:-}
 case "$MODE" in -h|--help|help) sed -n '2,/^set -u$/p' "$0" | sed 's/^# \{0,1\}//; $d'; exit 0 ;; esac
 [ "$#" -gt 0 ] && shift
 PRIMARY_HOME='' PRIMARY_SESSION='' PRIMARY_BACKEND='' PRIMARY_HARNESS='' PRIMARY_WORKSPACE=
-PRIMARY_LABEL=FirstMate PRIMARY_NAME=helm PRIMARY_TIMEOUT=30
 primary_die() { printf 'primary-start: %s\n' "$*" >&2; exit 2; }
 while [ "$#" -gt 0 ]; do
   [ "$#" -ge 2 ] && [ -n "$2" ] || primary_die "option $1 requires a value"
@@ -52,9 +51,6 @@ while [ "$#" -gt 0 ]; do
     --backend) PRIMARY_BACKEND=$2 ;;
     --harness) PRIMARY_HARNESS=$2 ;;
     --workspace) PRIMARY_WORKSPACE=$2 ;;
-    --workspace-label) PRIMARY_LABEL=$2 ;;
-    --agent-name) PRIMARY_NAME=$2 ;;
-    --timeout) PRIMARY_TIMEOUT=$2 ;;
     *) primary_die "unknown option $1" ;;
   esac
   shift 2
@@ -64,10 +60,6 @@ case "$MODE" in start|ready) ;; *) primary_die "expected start or ready; see --h
   || primary_die "only explicit --backend herdr --harness claude is supported"
 case "$PRIMARY_HOME" in /*) ;; *) primary_die "--home must be absolute" ;; esac
 case "$PRIMARY_SESSION" in ''|*[!A-Za-z0-9_-]*) primary_die "--session must be explicit and contain only letters, digits, _ or -" ;; esac
-[[ "$PRIMARY_NAME" =~ ^[a-z][a-z0-9_-]{0,31}$ ]] || primary_die "invalid agent name"
-case "$PRIMARY_LABEL" in ''|*$'\n'*|*$'\r'*) primary_die "invalid workspace label" ;; esac
-case "$PRIMARY_TIMEOUT" in ''|*[!0-9]*|0) primary_die "timeout must be a positive integer" ;; esac
-[ "$PRIMARY_TIMEOUT" -le 300 ] || primary_die "timeout must be at most 300 seconds"
 PRIMARY_HOME=$(cd -- "$PRIMARY_HOME" 2>/dev/null && pwd -P) || primary_die "home is unavailable"
 # An operator may invoke this from another agent; ambient operational overrides
 # must not redirect even read-only checks into that agent's home.

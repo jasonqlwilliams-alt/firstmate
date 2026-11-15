@@ -13,7 +13,7 @@ Run the command from an installed Firstmate checkout, selecting the operational 
 ```sh
 bin/fm-primary-start.sh start \
   --home /absolute/path/to/firstmate --backend herdr --session default \
-  --harness claude --workspace-label FirstMate --agent-name helm
+  --harness claude
 ```
 
 The home must already be a primary checkout with its tracked Claude hooks and private state directory.
@@ -56,8 +56,8 @@ bin/fm-primary-start.sh ready \
 Readiness exits successfully for the initialized, recovered primary so it can gate a private layout.
 It performs no repairs or lifecycle actions and starts no server.
 
-The readiness check requires the shared home-bound Herdr secondmate recovery API whenever registered secondmates exist.
-An older installation without that API remains unready rather than accepting a recycled foreign pane as a recovered mate.
+Recovery verification needs the separate second-mate home-binding support whenever registered secondmates exist.
+If local binding support is absent or remote control rejects the bound-home state check, readiness reports recovery as unverified and keeps the other results independent.
 Missing, malformed, duplicate, foreign, or unreadable routes remain unready, including remote secondmates whose current binding cannot be confirmed.
 An unreachable mate can therefore defer cosmetic tabs while the primary continues supervision.
 
@@ -69,7 +69,7 @@ No watcher is needed when the home has no supervision demand.
 ## Ownership boundaries
 
 Keep any home-specific layout behind the read-only readiness gate, immediately before its first side effect.
-Private wrappers should select the home, session, label and primary profile, then delegate to the tracked command.
+Private wrappers should select the home and session, then delegate to the tracked command.
 The tracked launcher never executes private layout scripts.
 Changing private helpers or standing home preferences is a separate operation for that home's owner.
 
