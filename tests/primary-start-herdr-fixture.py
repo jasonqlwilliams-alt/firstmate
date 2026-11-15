@@ -115,6 +115,12 @@ elif command in (["pane", "get"], ["pane", "process-info"], ["agent", "get"],
         save()
         emit({"type": "submitted"})
     else:
+        if state.get("rename_fail_once"):
+            state["rename_fail_once"] = False
+            save()
+            error("simulated_rename_failure")
+        pane["agent_name"] = args[3]
+        save()
         emit({"type": "renamed"})
 else:
     raise SystemExit(f"unexpected fake command {args!r}")

@@ -312,6 +312,17 @@ primary_record() {  # <phase> [terminal-id]
   mv -f -- "$tmp" "$STATE/.primary-start" || primary_die "cannot publish launch receipt"
 }
 
+primary_finish_pending_name() {
+  local terminal
+  [ "$(fm_meta_get "$STATE/.primary-start" phase)" = detecting ] \
+    && primary_receipt_matches_pane "$PRIMARY_PANE" "$PRIMARY_FOUND_WORKSPACE" \
+    || primary_die "pending primary launch no longer matches its terminal; no agent was renamed"
+  terminal=$(fm_meta_get "$STATE/.primary-start" terminal)
+  primary_cli agent rename "$PRIMARY_PANE" helm >/dev/null \
+    || primary_die "primary was detected but naming failed; retry start to finish naming"
+  primary_record launched "$terminal"
+}
+
 primary_start() {
   local out pane terminal command prompt flag name old_terminal old_pane receipt="$STATE/.primary-start" deadline launch_pane shell_pid
   primary_read_lock
@@ -324,6 +335,10 @@ primary_start() {
   primary_discover
   if [ -n "$PRIMARY_PANE" ]; then
     if [ "$PRIMARY_LOCK" = live ]; then primary_owner_in_pane "$PRIMARY_PANE" || primary_die "another primary holds the session lock"; fi
+    if [ -f "$receipt" ] && [ ! -L "$receipt" ] \
+      && [ "$(fm_meta_get "$receipt" phase)" = detecting ]; then
+      primary_finish_pending_name
+    fi
     primary_report || true
     return 0
   fi
@@ -390,9 +405,7 @@ primary_start() {
     primary_discover
     if [ -n "$PRIMARY_PANE" ]; then
       [ "$PRIMARY_PANE" = "$launch_pane" ] || primary_die "another primary appeared; submitted launch remains uncertain"
-      primary_record launched "$terminal"
-      primary_cli agent rename "$PRIMARY_PANE" helm >/dev/null \
-        || primary_die "primary was detected but naming failed; inspect it before retrying"
+      primary_finish_pending_name
       primary_report || true
       return 0
     fi

@@ -117,6 +117,35 @@ pass 'repeated start recognizes the live home primary without sending another pr
 
 reset_world
 world "workspaces=[{\"workspace_id\":\"w1\",\"label\":\"firstmate\"}]" \
+  "panes=[{\"pane_id\":\"w1:p1\",\"workspace_id\":\"w1\",\"tab_id\":\"w1:t1\",\"terminal_id\":\"unrelated\",\"cwd\":\"$HOME_FIXTURE\",\"active\":true}]" \
+  rename_fail_once=true
+capture start
+expect_rc 2
+contains 'naming failed'
+python3 - "$HOME_FIXTURE/state/.primary-start" <<'PY'
+import sys
+fields = dict(line.split('=', 1) for line in open(sys.argv[1]).read().splitlines())
+assert fields['phase'] == 'detecting'
+PY
+capture start
+expect_rc 0
+python3 - "$HOME_FIXTURE/state/.primary-start" <<'PY'
+import json, os, shlex, sys
+s=json.load(open(os.environ['FM_PRIMARY_TEST_STATE']))
+rows=[json.loads(l)['args'] for l in open(os.environ['FM_PRIMARY_TEST_LOG'])]
+fields=dict(line.split('=', 1) for line in open(sys.argv[1]).read().splitlines())
+assert fields['phase']=='launched' and fields['pane']=='w1:p2'
+assert len(s['panes'])==2 and s['panes'][0].get('agent_name') is None
+assert s['panes'][1]['agent_name']=='helm'
+assert sum(r[:2]==['pane','run'] for r in rows)==1
+assert sum(r[:2]==['tab','create'] for r in rows)==1
+assert [r[2] for r in rows if r[:2]==['agent','rename']]==['w1:p2','w1:p2']
+assert shlex.split(s['submitted'])[-1].count('Take the primary role')==1
+PY
+pass 'retry finishes the pending helm name without relaunching or touching another agent'
+
+reset_world
+world "workspaces=[{\"workspace_id\":\"w1\",\"label\":\"firstmate\"}]" \
   "panes=[{\"pane_id\":\"w1:p1\",\"workspace_id\":\"w1\",\"tab_id\":\"w1:t1\",\"terminal_id\":\"unrelated\",\"cwd\":\"$HOME_FIXTURE\",\"active\":true}]"
 capture ready
 expect_rc 1
