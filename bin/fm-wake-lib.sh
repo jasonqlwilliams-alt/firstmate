@@ -897,14 +897,24 @@ fm_recovery_marker_reopen_announced() {
 }
 
 fm_lock_try_acquire() {
-  local lockdir=$1 pid steal cur rc steal_owner primary_owner current
+  local lockdir=$1 parent pid steal cur rc steal_owner primary_owner current
   FM_LOCK_HELD_PID=
   FM_LOCK_OWNER_DIR=
   FM_LOCK_RECOVERED_PID=
 
+  # A removed parent cannot hold a stale lock. Return to the caller's retry
+  # cadence instead of recursively chasing equally missing .steal paths.
+  parent=${lockdir%/*}
+  [ "$parent" != "$lockdir" ] || parent=.
+  [ -d "${parent:-/}" ] || return 1
+
   if fm_lock_try_create "$lockdir"; then
     return 0
   fi
+
+  # Removal can race creation, and a deleted working directory still passes
+  # the parent check for relative paths. There is no absent lock to reclaim.
+  [ -e "$lockdir" ] || [ -L "$lockdir" ] || return 1
 
   fm_current_pid current || return 1
   pid=$(cat "$lockdir/pid" 2>/dev/null || true)
@@ -996,6 +1006,8 @@ fm_lock_try_acquire() {
   return "$rc"
 }
 
+# Preserve the acquire-before-return contract even if the parent disappears:
+# retry at the ordinary 0.1s cadence, without recreating the parent directory.
 fm_lock_acquire_wait() {
   local lockdir=$1
   while ! fm_lock_try_acquire "$lockdir"; do
@@ -1053,6 +1065,7 @@ fm_lock_acquire_wait_bounded() {
   # shellcheck disable=SC2016 # Positional parameters expand in the child shell.
   if fm_run_timed "$seconds" env \
     "FM_STATE_OVERRIDE=$STATE" \
+    "FM_WAKE_NO_MKDIR=1" \
     "FM_ROOT_OVERRIDE=$FM_ROOT" \
     "FM_LOCK_STALE_AFTER=$FM_LOCK_STALE_AFTER" \
     bash -c '. "$1"; _fm_lock_acquire_wait_handoff "$2" "$3"' \

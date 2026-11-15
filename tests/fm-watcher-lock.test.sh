@@ -319,6 +319,99 @@ test_lock_single_winner_under_concurrency() {
   pass "concurrent fm_lock_try_acquire yields exactly one winner"
 }
 
+test_lock_waiter_parent_removed() {
+  local dir state
+  dir=$(make_case lock-parent-removed)
+  state="$dir/state"
+  # Bound the whole process group even if acquisition never returns. The child
+  # also reaps its waiter on every exit, before fixture cleanup removes state.
+  # shellcheck source=bin/fm-timeout-lib.sh
+  . "$ROOT/bin/fm-timeout-lib.sh"
+  cat > "$dir/parent-removed.sh" <<'SH'
+set -eu
+lib=$1
+state=$2
+dir=$3
+lock="$state/.contend.lock"
+waiter=
+cleanup() {
+  if [ -n "$waiter" ]; then
+    kill "$waiter" 2>/dev/null || true
+    wait "$waiter" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+trap 'exit 143' TERM
+. "$lib"
+fm_lock_try_acquire "$lock"
+bash -c '
+  . "$1"
+  state=$2
+  dir=$3
+  sleep() {
+    if [ -d "$state" ]; then
+      printf "held\n" >> "$dir/retries"
+    else
+      printf "missing\n" >> "$dir/retries"
+    fi
+    command sleep "$@"
+  }
+  fm_lock_acquire_wait "$state/.contend.lock"
+  rc=$?
+  printf "%s\n" "$rc" > "$dir/result"
+  [ "$rc" -eq 0 ] || exit 1
+  fm_current_pid current
+  [ "$(cat "$state/.contend.lock/pid")" = "$current" ] || exit 1
+  fm_lock_release "$state/.contend.lock"
+' _ "$lib" "$state" "$dir" &
+waiter=$!
+i=0
+until [ -s "$dir/retries" ]; do
+  [ "$i" -lt 50 ] || exit 1
+  sleep 0.1
+  i=$((i + 1))
+done
+[ ! -e "$dir/result" ]
+rm -rf "$state"
+# The nonblocking call fails, and the bounded variant must not recreate STATE
+# when it sources the library in its helper process.
+if fm_lock_try_acquire "$lock"; then exit 1; else [ "$?" -eq 1 ]; fi
+[ -z "$FM_LOCK_HELD_PID$FM_LOCK_OWNER_DIR$FM_LOCK_RECOVERED_PID" ]
+rc=0
+fm_lock_acquire_wait_bounded "$lock" 1 || rc=$?
+[ "$rc" -eq 1 ]
+[ ! -e "$state" ]
+i=0
+until [ "$(grep -c '^missing$' "$dir/retries" || true)" -ge 3 ]; do
+  [ "$i" -lt 50 ] || exit 1
+  [ ! -e "$dir/result" ]
+  [ ! -e "$state" ]
+  sleep 0.1
+  i=$((i + 1))
+done
+[ ! -e "$dir/result" ]
+[ ! -e "$state" ]
+kill -0 "$waiter"
+# Restoring only the parent must let the same waiter acquire a real lock.
+mkdir "$state"
+wait "$waiter"
+waiter=
+[ "$(cat "$dir/result")" = 0 ]
+# A relative lock in a removed working directory has the same missing parent,
+# even though a directory test on '.' still succeeds on Unix.
+mkdir "$dir/relative"
+(
+  cd "$dir/relative"
+  fm_lock_try_acquire .relative.lock
+  rm -rf "$dir/relative"
+  if fm_lock_try_acquire .relative.lock; then exit 1; else [ "$?" -eq 1 ]; fi
+)
+SH
+  FM_STATE_OVERRIDE="$state" fm_run_timed 15 bash "$dir/parent-removed.sh" "$LIB" "$state" "$dir" \
+    || fail "lock waiter spun, returned without acquisition, or recreated its missing parent"
+  pass "removed lock parent returns waiter to calm retries until parent is restored"
+}
+
 test_lock_steals_dead_pid_lock() {
   local dir state lockdir dead rc newpid
   dir=$(make_case lock-dead-steal)
@@ -1226,6 +1319,7 @@ test_msys_pid_identity_uses_proc() {
   pass "MSYS process identity uses compatible /proc fields"
 }
 
+test_lock_waiter_parent_removed
 test_singleton_start
 test_pid_identity_is_locale_invariant
 test_proc_pid_identity_ignores_wall_clock_and_detects_pid_reuse
