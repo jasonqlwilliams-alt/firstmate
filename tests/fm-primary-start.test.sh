@@ -493,23 +493,33 @@ expect_rc 0
 [ "$before" = "$(snapshot_state)" ] || fail 'ready changed private state'
 pass 'ready leaves all durable private-state bytes unchanged'
 
-# A fake live watcher uses the existing identity/fresh-beacon contract rather
-# than treating a recently touched beacon alone as supervision.
-mkdir -p "$HOME_FIXTURE/state/.watch.lock"
-printf '%s\n' "$FM_PRIMARY_TEST_PID" > "$HOME_FIXTURE/state/.watch.lock/pid"
-printf '%s\n' "$HOME_FIXTURE" > "$HOME_FIXTURE/state/.watch.lock/fm-home"
-printf '%s\n' "$HOME_FIXTURE/bin/fm-watch.sh" > "$HOME_FIXTURE/state/.watch.lock/watcher-path"
-FM_WAKE_NO_MKDIR=1 FM_HOME="$HOME_FIXTURE" bash -c '. "$1/bin/fm-wake-lib.sh"; fm_pid_identity "$2"' \
-  _ "$ROOT" "$FM_PRIMARY_TEST_PID" > "$HOME_FIXTURE/state/.watch.lock/pid-identity"
+[ ! -e "$HOME_FIXTURE/state/.watch.lock" ] || fail 'watcher lock unexpectedly exists'
 touch "$HOME_FIXTURE/state/.last-watcher-beat"
 capture ready
 expect_rc 0
 contains 'supervision_healthy=true'
-printf 'foreign-home\n' > "$HOME_FIXTURE/state/.watch.lock/fm-home"
+contains 'recovery_ready=true'
+FM_SUPERVISION_MODEL=persistent capture ready
+expect_rc 0
+contains 'supervision_healthy=true'
+pass 'Claude autoarm accepts a fresh beacon after the watcher exits'
+
+python3 - "$HOME_FIXTURE/state/.last-watcher-beat" <<'PY'
+import os, sys
+os.utime(sys.argv[1], (1, 1))
+PY
 capture ready
 expect_rc 0
 contains 'supervision_healthy=false'
-pass 'a fresh beacon needs the exact live watcher identity and home binding'
+contains 'supervision_reason=stale-beacon'
+contains 'recovery_ready=true'
+rm "$HOME_FIXTURE/state/.last-watcher-beat"
+capture ready
+expect_rc 0
+contains 'supervision_healthy=false'
+contains 'supervision_reason=stale-beacon'
+contains 'recovery_ready=true'
+pass 'stale and absent Claude autoarm evidence remain unhealthy without blocking recovery'
 
 RC=0
 FM_HOME="$TMP_ROOT/absent-home" "$CODE/bin/fm-startup-network.sh" ready "$FM_PRIMARY_TEST_PID" || RC=$?

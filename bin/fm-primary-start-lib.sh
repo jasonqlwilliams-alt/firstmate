@@ -286,8 +286,13 @@ primary_report() {
     primary_die "session lock belongs to a different or unproven primary"
   fi
   if [ "$initialized" = true ]; then
-    if ! fm_supervision_needed "$STATE" || fm_watcher_healthy "$STATE" "$FM_HOME/bin/fm-watch.sh" "$(fm_poll_derived_grace)" "$FM_HOME"; then
+    if ! fm_supervision_needed "$STATE"; then
       supervised=true
+    else
+      FM_SUPERVISION_MODEL=autoarm fm_watcher_supervision_verdict \
+        "$STATE" "$FM_HOME/bin/fm-watch.sh" "$(fm_poll_derived_grace)" "$FM_HOME" "$FM_ROOT"
+      supervised=$FM_WATCHER_VERDICT_OK
+      [ "$supervised" = true ] || printf 'supervision_reason=%s\n' "$FM_WATCHER_VERDICT_REASON"
     fi
   else
     printf 'initialization_reason=current primary has not completed native session-start\n'

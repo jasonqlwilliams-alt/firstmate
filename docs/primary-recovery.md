@@ -64,6 +64,7 @@ An unreachable mate can therefore defer cosmetic tabs while the primary continue
 `supervision_healthy` is a separate result: [Claude's emitted supervision protocol](supervision-protocols/claude.md) owns Stop-hook watcher arming and re-arming.
 The outer launcher and readiness check never arm a second watcher.
 During the first recovery turn, readiness can succeed before the first Stop arms the watcher; verify supervision health after that Stop when supervision is required.
+Under Claude autoarm, a fresh watcher beacon remains healthy during the next turn after the watcher exits; stale or absent evidence is unhealthy unless the current autoarm recovery generation proves the handoff.
 No watcher is needed when the home has no supervision demand.
 
 ## Ownership boundaries
