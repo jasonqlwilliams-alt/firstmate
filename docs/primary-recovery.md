@@ -23,7 +23,8 @@ It selects no model or effort override.
 The initial instruction is supplied once to interactive Claude; do not send another `fm` prompt after submission.
 
 The launcher reuses a running compatible Herdr server or starts a positively stopped selected server through the existing backend owner.
-It preserves other workspaces and creates a fresh launch pane in a structurally proven home workspace, or creates a new home workspace.
+It preserves other workspaces and creates a fresh launch pane only in a workspace with both the home's exact Herdr label and structural primary-home evidence, or creates a new home workspace.
+A display-renamed helm workspace is not adopted on cold boot; the launcher creates a fresh primary workspace.
 A label or old endpoint ID alone never authorizes adoption.
 An already-live primary is reported without another launch or prompt.
 It never stops, updates, deletes, moves, or reconfigures a server or pre-existing pane.

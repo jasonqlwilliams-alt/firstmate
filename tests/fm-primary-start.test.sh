@@ -154,6 +154,36 @@ PY
 pass 'an unrelated busy Claude is preserved while a fresh helm pane is launched'
 
 reset_world
+world "workspaces=[{\"workspace_id\":\"w1\",\"label\":\"personal\"}]" \
+  "panes=[{\"pane_id\":\"w1:p1\",\"workspace_id\":\"w1\",\"tab_id\":\"w1:t1\",\"terminal_id\":\"personal-agent\",\"cwd\":\"$HOME_FIXTURE\",\"active\":true}]"
+capture start
+expect_rc 0
+python3 - <<'PY'
+import json, os
+s=json.load(open(os.environ['FM_PRIMARY_TEST_STATE']))
+rows=[json.loads(l)['args'] for l in open(os.environ['FM_PRIMARY_TEST_LOG'])]
+assert s['workspaces']==[{'workspace_id':'w1','label':'personal'},{'workspace_id':'w2','label':'firstmate'}]
+assert s['panes'][0]['active'] and s['panes'][0]['terminal_id']=='personal-agent'
+assert s['panes'][1]['active'] and s['panes'][1]['workspace_id']=='w2'
+assert not any(r[:2]==['tab','create'] or r[:3]==['agent','rename','w1:p1'] for r in rows)
+PY
+pass 'a personal workspace at the primary home is not adopted'
+
+reset_world
+world "workspaces=[{\"workspace_id\":\"w1\",\"label\":\"FirstMate\"}]" \
+  "panes=[{\"pane_id\":\"w1:p1\",\"workspace_id\":\"w1\",\"tab_id\":\"w1:t1\",\"terminal_id\":\"renamed-utility\",\"cwd\":\"$HOME_FIXTURE\",\"active\":false}]"
+capture start
+expect_rc 0
+python3 - <<'PY'
+import json, os
+s=json.load(open(os.environ['FM_PRIMARY_TEST_STATE']))
+assert s['workspaces']==[{'workspace_id':'w1','label':'FirstMate'},{'workspace_id':'w2','label':'firstmate'}]
+assert not s['panes'][0]['active'] and s['panes'][1]['active']
+assert s['panes'][1]['workspace_id']=='w2'
+PY
+pass 'a display-renamed helm workspace does not collide or get adopted'
+
+reset_world
 world launch_process='"python"'
 capture start
 expect_rc 0
@@ -284,9 +314,14 @@ pass 'restored home workspace gets a fresh launch tab while its utility shell is
 reset_world
 world "workspaces=[{\"workspace_id\":\"w1\",\"label\":\"firstmate\"}]"
 capture start
-expect_rc 2
-no_mutation
-pass 'a label without structural home evidence cannot authorize workspace adoption'
+expect_rc 0
+python3 - <<'PY'
+import json, os
+s=json.load(open(os.environ['FM_PRIMARY_TEST_STATE']))
+assert s['workspaces']==[{'workspace_id':'w1','label':'firstmate'},{'workspace_id':'w2','label':'firstmate'}]
+assert len(s['panes'])==1 and s['panes'][0]['workspace_id']=='w2' and s['panes'][0]['active']
+PY
+pass 'a matching label without home evidence gets a fresh primary workspace'
 
 reset_world
 world change_terminal=true

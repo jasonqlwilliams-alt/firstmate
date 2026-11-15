@@ -114,7 +114,7 @@ primary_receipt_matches_pane() {
 }
 
 primary_discover() {
-  local panes workspaces row id ws state agent home_spaces='' labels
+  local panes workspaces row id ws state agent home_spaces=''
   PRIMARY_PANE='' PRIMARY_TAB='' PRIMARY_FOUND_WORKSPACE=
   panes=$(primary_cli pane list) || primary_die "pane inventory is unreadable"
   workspaces=$(primary_cli workspace list) || primary_die "workspace inventory is unreadable"
@@ -128,7 +128,10 @@ primary_discover() {
     ws=$(printf '%s' "$row" | jq -er '.workspace_id') || primary_die "home pane lacks a workspace"
     printf '%s' "$workspaces" | jq -e --arg ws "$ws" '[.result.workspaces[] | select(.workspace_id == $ws)] | length == 1' >/dev/null \
       || primary_die "home pane workspace is ambiguous"
-    case " $home_spaces " in *" $ws "*) ;; *) home_spaces="${home_spaces:+$home_spaces }$ws" ;; esac
+    if printf '%s' "$workspaces" | jq -e --arg ws "$ws" --arg label "$PRIMARY_LABEL" \
+      '[.result.workspaces[] | select(.workspace_id == $ws and .label == $label)] | length == 1' >/dev/null; then
+      case " $home_spaces " in *" $ws "*) ;; *) home_spaces="${home_spaces:+$home_spaces }$ws" ;; esac
+    fi
     state=$(fm_backend_herdr_pane_agent_state "$PRIMARY_SESSION" "$id")
     case "$state" in
       no-agent|stale-agent) ;;
@@ -152,13 +155,7 @@ EOF
       || primary_die "primary is outside the requested workspace"
     return 0
   fi
-  case "$home_spaces" in *' '*) primary_die "several primary-home workspaces exist; refusing to guess" ;; esac
-  PRIMARY_FOUND_WORKSPACE=$home_spaces
-  labels=$(printf '%s' "$workspaces" | jq -r --arg label "$PRIMARY_LABEL" \
-    '.result.workspaces[] | select((.label // "" | ascii_downcase) == ($label | ascii_downcase)) | .workspace_id')
-  if [ -n "$labels" ] && [ "$labels" != "$PRIMARY_FOUND_WORKSPACE" ]; then
-    primary_die "primary workspace label is duplicated or belongs to an unproven home"
-  fi
+  case "$home_spaces" in *' '*) PRIMARY_FOUND_WORKSPACE= ;; *) PRIMARY_FOUND_WORKSPACE=$home_spaces ;; esac
 }
 
 primary_owner_in_pane() {
