@@ -784,6 +784,19 @@ EOF
   claimant=$!
   fm_test_track_fixture_pid "$claimant" || exit 1
   printf '%s\n' "$claimant" >> "$FM_STARTUP_NETWORK_REAP_INFO"
+  cat > "$root/bin/late-worker.sh" <<'SH'
+#!/usr/bin/env bash
+while :; do sleep 1; done
+SH
+  cat > "$root/bin/late-parent.sh" <<'SH'
+#!/usr/bin/env bash
+trap '"$1" & printf "late-spawned\n" >> "$2"; exit 0' TERM
+printf 'ready\n' > "$3"
+while :; do sleep 1 & wait "$!"; done
+SH
+  chmod +x "$root/bin/late-worker.sh" "$root/bin/late-parent.sh"
+  "$root/bin/late-parent.sh" "$root/bin/late-worker.sh" "$FM_STARTUP_NETWORK_REAP_INFO" "$root/late-ready" &
+  while [ ! -s "$root/late-ready" ]; do sleep 0.1; done
   if ! FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_SLEEP=60 \
     run_stage "$home" "$root" start --locked 1 --harvest-pid $$; then
     printf 'start-failed\n' >> "$FM_STARTUP_NETWORK_REAP_INFO"
@@ -843,11 +856,12 @@ test_killing_the_suite_reaps_detached_fixture_processes() {
       kill -KILL "$probe" 2>/dev/null || true
       wait "$probe" 2>/dev/null || true
       root=$(sed -n '1p' "$info" 2>/dev/null || true)
-      [ -z "$root" ] || fm_test_reap_fixture_processes --only "$root"
+      [ -z "$root" ] || FM_TEST_CLEANUP_DIRS+=("$root")
       fail "the reap probe never became ready ($signal)"
     fi
     root=$(sed -n '1p' "$info")
     [ -n "$root" ] || fail "the reap probe published no fixture root"
+    FM_TEST_CLEANUP_DIRS+=("$root")
     claimant=$(sed -n '2p' "$info")
     [ -n "$claimant" ] || fail "the reap probe published no claimant PID"
     fm_test_track_fixture_pid "$claimant" || fail "could not track probe claimant"
@@ -871,9 +885,9 @@ test_killing_the_suite_reaps_detached_fixture_processes() {
       survivors=$(fixture_processes_under "$root")
     done
     if [ -n "$survivors" ] || process_is_running "$claimant"; then
-      fm_test_reap_fixture_processes --only "$root"
       fail "fixture processes outlived a $signal of the suite: $survivors claimant=$claimant"
     fi
+    grep -qx 'late-spawned' "$info" || fail "cleanup did not spawn the late worker ($signal)"
   done
   pass "fm-startup-network: killing the suite reaps detached fixture processes"
 }
