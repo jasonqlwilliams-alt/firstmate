@@ -116,6 +116,63 @@ no_mutation
 pass 'repeated start recognizes the live home primary without sending another prompt'
 
 reset_world
+world "workspaces=[{\"workspace_id\":\"w1\",\"label\":\"firstmate\"}]" \
+  "panes=[{\"pane_id\":\"w1:p1\",\"workspace_id\":\"w1\",\"tab_id\":\"w1:t1\",\"terminal_id\":\"unrelated\",\"cwd\":\"$HOME_FIXTURE\",\"active\":true}]"
+capture ready
+expect_rc 1
+contains 'agent_detected=false'
+no_mutation
+capture start
+expect_rc 0
+python3 - <<'PY'
+import json, os
+s=json.load(open(os.environ['FM_PRIMARY_TEST_STATE']))
+rows=[json.loads(l)['args'] for l in open(os.environ['FM_PRIMARY_TEST_LOG'])]
+assert len(s['panes'])==2 and all(p['active'] for p in s['panes'])
+assert s['panes'][0]['terminal_id']=='unrelated'
+assert [r[2] for r in rows if r[:2] in (['pane','run'],['agent','rename'])]==['w1:p2','w1:p2']
+PY
+pass 'an unrelated home Claude is preserved while a fresh helm pane is launched'
+
+reset_world
+world "workspaces=[{\"workspace_id\":\"w1\",\"label\":\"firstmate\"}]" \
+  "panes=[{\"pane_id\":\"w1:p1\",\"workspace_id\":\"w1\",\"tab_id\":\"w1:t1\",\"terminal_id\":\"recycled\",\"cwd\":\"$HOME_FIXTURE\",\"active\":true}]"
+cat > "$HOME_FIXTURE/state/.primary-start" <<EOF
+phase=launched
+home=$HOME_FIXTURE
+session=fixture
+workspace=w1
+pane=w1:p1
+terminal=original
+EOF
+capture ready
+expect_rc 1
+contains 'agent_detected=false'
+capture start
+expect_rc 0
+python3 - <<'PY'
+import json, os
+s=json.load(open(os.environ['FM_PRIMARY_TEST_STATE']))
+assert len(s['panes'])==2 and s['panes'][0]['active'] and s['panes'][0]['terminal_id']=='recycled'
+assert s['panes'][1]['active']
+PY
+pass 'a recycled pane id without the recorded terminal cannot prove primary identity'
+
+reset_world
+world "workspaces=[{\"workspace_id\":\"w1\",\"label\":\"firstmate\"}]" \
+  "panes=[{\"pane_id\":\"w1:p1\",\"workspace_id\":\"w1\",\"tab_id\":\"w1:t1\",\"terminal_id\":\"locked\",\"cwd\":\"$HOME_FIXTURE\",\"active\":true}]"
+initialize_primary
+capture ready
+expect_rc 0
+contains 'agent_detected=true'
+contains 'primary_initialized=true'
+: > "$FM_PRIMARY_TEST_LOG"
+capture start
+expect_rc 0
+no_mutation
+pass 'a live session lock proves the exact primary pane without a launch receipt'
+
+reset_world
 printf 'auto\n' > "$HOME_FIXTURE/config/claude-permission-mode"
 world running=false
 capture start

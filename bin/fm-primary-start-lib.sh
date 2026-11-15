@@ -94,6 +94,25 @@ primary_pane_home_matches() {  # <pane JSON> <expected-home>
   [ "$actual" = "$expected" ]
 }
 
+primary_receipt_matches_pane() {
+  local id=$1 ws=$2 receipt="$STATE/.primary-start" terminal info
+  [ -f "$receipt" ] && [ ! -L "$receipt" ] && [ -r "$receipt" ] || return 1
+  case "$(fm_meta_get "$receipt" phase)" in detecting|launched) ;; *) return 1 ;; esac
+  [ "$(fm_meta_get "$receipt" home)" = "$FM_HOME" ] \
+    && [ "$(fm_meta_get "$receipt" session)" = "$PRIMARY_SESSION" ] \
+    && [ "$(fm_meta_get "$receipt" workspace)" = "$ws" ] \
+    && [ "$(fm_meta_get "$receipt" pane)" = "$id" ] || return 1
+  terminal=$(fm_meta_get "$receipt" terminal)
+  [ -n "$terminal" ] || return 1
+  info=$(primary_cli pane get "$id") || return 1
+  printf '%s' "$info" | jq -e --arg id "$id" --arg ws "$ws" --arg terminal "$terminal" '
+    .error == null and .result.pane.pane_id == $id
+    and .result.pane.workspace_id == $ws
+    and .result.pane.terminal_id == $terminal
+  ' >/dev/null || return 1
+  primary_pane_home_matches "$(printf '%s' "$info" | jq -c '.result.pane')" "$FM_HOME"
+}
+
 primary_discover() {
   local panes workspaces row id ws state agent home_spaces='' labels
   PRIMARY_PANE='' PRIMARY_TAB='' PRIMARY_FOUND_WORKSPACE=
@@ -115,11 +134,13 @@ primary_discover() {
       no-agent|stale-agent) ;;
       live)
         agent=$(primary_cli agent get "$id") || primary_die "cannot inspect home agent $id"
-        [ "$(printf '%s' "$agent" | jq -r '.result.agent.agent')" = claude ] \
-          || primary_die "a different agent occupies primary-home pane $id"
-        [ -z "$PRIMARY_PANE" ] || primary_die "multiple live primary candidates; no agent was changed"
+        [ "$(printf '%s' "$agent" | jq -r '.result.agent.agent')" = claude ] || continue
         [ "$(fm_backend_herdr_pane_process_state "$PRIMARY_SESSION" "$id")" = agent ] \
           || primary_die "home pane $id lacks a proven harness process"
+        if ! primary_owner_in_pane "$id" && ! primary_receipt_matches_pane "$id" "$ws"; then
+          continue
+        fi
+        [ -z "$PRIMARY_PANE" ] || primary_die "multiple live primary candidates; no agent was changed"
         PRIMARY_PANE=$id PRIMARY_FOUND_WORKSPACE=$ws
         PRIMARY_TAB=$(printf '%s' "$row" | jq -er '.tab_id') || primary_die "primary tab is unreadable"
         ;;
@@ -143,13 +164,13 @@ EOF
 }
 
 primary_owner_in_pane() {
-  local info shell pid parent n=0 comm args
-  [ "$PRIMARY_LOCK" = live ] && [ -n "$PRIMARY_PANE" ] || return 1
+  local candidate=$1 info shell pid parent n=0 comm args
+  [ "$PRIMARY_LOCK" = live ] && [ -n "$candidate" ] || return 1
   comm=$(ps -p "$PRIMARY_OWNER" -o comm= 2>/dev/null) || return 1
   args=$(ps -p "$PRIMARY_OWNER" -o args= 2>/dev/null) || return 1
   fm_harness_process_matches "$comm" "$args" && [ "$FM_HARNESS_IS_CLAUDE" = 1 ] || return 1
-  info=$(primary_cli pane process-info --pane "$PRIMARY_PANE") || return 1
-  shell=$(printf '%s' "$info" | jq -er --arg p "$PRIMARY_PANE" '
+  info=$(primary_cli pane process-info --pane "$candidate") || return 1
+  shell=$(printf '%s' "$info" | jq -er --arg p "$candidate" '
     select(.result.process_info.pane_id == $p) | .result.process_info.shell_pid | select(type == "number" and . > 1)
   ') || return 1
   pid=$PRIMARY_OWNER
@@ -252,7 +273,7 @@ primary_report() {
   if [ "$PRIMARY_SERVER" = running ]; then primary_discover; fi
   [ -z "$PRIMARY_PANE" ] || detected=true
   before=$PRIMARY_OWNER
-  if primary_owner_in_pane; then
+  if primary_owner_in_pane "$PRIMARY_PANE"; then
     completion=$(cat "$STATE/.session-start-complete" 2>/dev/null || true)
     if [ ! -L "$STATE/.session-start-complete" ] && [ "$completion" = "$PRIMARY_OWNER" ] \
       && FM_WAKE_NO_MKDIR=1 "$FM_HOME/bin/fm-startup-network.sh" owner "$PRIMARY_OWNER"; then
@@ -302,7 +323,7 @@ primary_start() {
   fi
   primary_discover
   if [ -n "$PRIMARY_PANE" ]; then
-    if [ "$PRIMARY_LOCK" = live ]; then primary_owner_in_pane || primary_die "another primary holds the session lock"; fi
+    if [ "$PRIMARY_LOCK" = live ]; then primary_owner_in_pane "$PRIMARY_PANE" || primary_die "another primary holds the session lock"; fi
     primary_report || true
     return 0
   fi
@@ -320,6 +341,7 @@ primary_start() {
         [ -n "$old_terminal" ] && [ "$terminal" != "$old_terminal" ] \
           || primary_die "prior launch may still be queued; no duplicate was submitted"
         ;;
+      detecting) primary_die "prior launch may still be queued; no duplicate was submitted" ;;
       launched) ;;
       *) primary_die "malformed launch receipt" ;;
     esac
@@ -362,6 +384,7 @@ primary_start() {
   primary_read_lock
   [ "$PRIMARY_LOCK" != live ] || primary_die "another primary took the lock; no command was submitted"
   primary_cli pane run "$PRIMARY_PANE" "$command" >/dev/null || primary_die "launch outcome is unknown; receipt retained, no retry"
+  primary_record detecting "$terminal"
   deadline=$(( $(date +%s) + 30 ))
   while :; do
     primary_discover
