@@ -1,0 +1,4 @@
+unsupported backend: exit=2; output=primary-start: only explicit --backend herdr --harness claude is supported
+unsupported harness: exit=2; output=primary-start: only explicit --backend herdr --harness claude is supported
+retired option: exit=2; output=primary-start: unknown option --agent-name
+state_entries=0

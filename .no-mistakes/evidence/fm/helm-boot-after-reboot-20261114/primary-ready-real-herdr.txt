@@ -1,0 +1,12 @@
+initialization_reason=current primary has not completed native session-start
+agent_detected=false
+primary_initialized=false
+recovery_ready=false
+supervision_healthy=false
+home=/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M7EP7PYFJWP1AKGWDWCFXVA1/.primary-ready-live.a6rt0iz3
+session=default
+workspace=
+tab=
+pane=
+exit=1
+state_entries=0
