@@ -1,0 +1,3 @@
+ok - dead-pid stale lock is reclaimed by a single acquirer
+ok - live steal mutex is not reclaimed
+ok - live-held lock is not stolen

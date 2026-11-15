@@ -1,0 +1,3 @@
+bounded_rc=1
+held_pid= owner_dir= recovered_pid=
+parent_created=no

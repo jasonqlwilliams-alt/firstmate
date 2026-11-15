@@ -1,0 +1,15 @@
+ok - removed lock parent returns waiter to calm retries until parent is restored
+retry states:
+held
+missing
+missing
+missing
+missing
+missing
+missing
+missing
+missing
+missing
+missing
+waiter result: 0
+state restored: yes
