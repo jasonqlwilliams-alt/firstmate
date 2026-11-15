@@ -314,9 +314,10 @@ primary_record() {  # <phase> [terminal-id]
 
 primary_finish_pending_name() {
   local terminal
-  [ "$(fm_meta_get "$STATE/.primary-start" phase)" = detecting ] \
-    && primary_receipt_matches_pane "$PRIMARY_PANE" "$PRIMARY_FOUND_WORKSPACE" \
-    || primary_die "pending primary launch no longer matches its terminal; no agent was renamed"
+  if ! { [ "$(fm_meta_get "$STATE/.primary-start" phase)" = detecting ] \
+    && primary_receipt_matches_pane "$PRIMARY_PANE" "$PRIMARY_FOUND_WORKSPACE"; }; then
+    primary_die "pending primary launch no longer matches its terminal; no agent was renamed"
+  fi
   terminal=$(fm_meta_get "$STATE/.primary-start" terminal)
   primary_cli agent rename "$PRIMARY_PANE" helm >/dev/null \
     || primary_die "primary was detected but naming failed; retry start to finish naming"
