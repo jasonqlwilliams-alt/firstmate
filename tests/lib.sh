@@ -195,14 +195,26 @@ trap 'fm_test_cleanup; exit 143' TERM
 trap 'fm_test_cleanup; exit 129' HUP
 trap 'fm_test_cleanup; exit 131' QUIT
 
+# fm_test_track_fixture_pid <pid>
+#
+# Record fixture processes whose command lines do not include a fixture root.
+# The process identity prevents a later reused PID from being signaled.
+fm_test_track_fixture_pid() {
+  local pid=$1 identity
+  [ -n "${FM_TEST_FIXTURE_PID_REGISTRY:-}" ] || return 1
+  identity=$(fm_test_fixture_pid_identity "$pid") || return 1
+  printf '%s\t%s\n' "$pid" "$identity" >> "$FM_TEST_FIXTURE_PID_REGISTRY"
+}
+
+fm_test_fixture_pid_identity() {
+  fm_test_proc_starttime "$1" 2>/dev/null || ps -p "$1" -o lstart= 2>/dev/null
+}
+
 # fm_test_reap_fixture_processes [extra-root...]
 #
-# Signal every process this suite started under a registered fixture root, then
-# the descendants those processes have already reparented away from the suite
-# shell (a nohup worker in its own process group, and that worker's timeout
-# group). Selection is the temp-root path on the process command line, which is
-# the same identification an operator uses with ps. Nothing is selected by
-# process name, and pids outside that set are never signaled.
+# Signal registered PIDs, processes under a registered fixture root, and their
+# descendants. The root path selects detached workers; explicit PIDs cover
+# claimant processes such as plain sleep, whose command lines contain no root.
 fm_test_reap_fixture_processes() {
   local roots_file snapshot pids pid self reaper identities identity now_identity only=0
   roots_file=$(mktemp "${TMPDIR:-/tmp}/fm-test-reap-roots.XXXXXX") || return 0
@@ -221,18 +233,16 @@ fm_test_reap_fixture_processes() {
   for pid in "$@"; do
     [ -n "$pid" ] && printf '%s\n' "$pid" >> "$roots_file"
   done
-  if ! grep -q . "$roots_file" 2>/dev/null; then
-    rm -f "$roots_file"
-    return 0
-  fi
   self=$$
   reaper=${FM_TEST_REAPER_PID:-}
-  snapshot=$(mktemp "${TMPDIR:-/tmp}/fm-test-reap-ps.XXXXXX") || {
-    rm -f "$roots_file"
-    return 0
-  }
-  ps -axww -o pid=,ppid=,args= > "$snapshot" 2>/dev/null || true
-  pids=$(awk -v roots="$roots_file" -v self="$self" -v reaper="$reaper" '
+  pids=
+  if grep -q . "$roots_file" 2>/dev/null; then
+    snapshot=$(mktemp "${TMPDIR:-/tmp}/fm-test-reap-ps.XXXXXX") || {
+      rm -f "$roots_file"
+      return 0
+    }
+    ps -axww -o pid=,ppid=,args= > "$snapshot" 2>/dev/null || true
+    pids=$(awk -v roots="$roots_file" -v self="$self" -v reaper="$reaper" '
     BEGIN {
       while ((getline line < roots) > 0) {
         if (line != "") root[++nroot] = line
@@ -272,8 +282,19 @@ fm_test_reap_fixture_processes() {
       }
       for (pid in selected) print pid
     }
-  ' "$snapshot")
-  rm -f "$roots_file" "$snapshot"
+    ' "$snapshot")
+    rm -f "$snapshot"
+  fi
+  rm -f "$roots_file"
+  if [ "$only" -eq 0 ] && [ -f "${FM_TEST_FIXTURE_PID_REGISTRY:-}" ]; then
+    while IFS=$'\t' read -r pid identity; do
+      case "$pid" in ''|*[!0-9]*) continue ;; esac
+      [ "$pid" != "$self" ] && [ "$pid" != "$reaper" ] || continue
+      now_identity=$(fm_test_fixture_pid_identity "$pid" 2>/dev/null || true)
+      [ -n "$identity" ] && [ "$now_identity" = "$identity" ] || continue
+      pids="${pids}${pids:+$'\n'}${pid}"
+    done < "$FM_TEST_FIXTURE_PID_REGISTRY"
+  fi
   [ -n "$pids" ] || return 0
   identities=
   # shellcheck disable=SC2086
@@ -305,6 +326,14 @@ fm_test_proc_starttime() {
   printf '%s\n' "$line" | awk '{print $20}'
 }
 
+fm_test_owner_is_alive() {  # <pid> <identity>
+  local state identity
+  state=$(ps -p "$1" -o stat= 2>/dev/null) || return 1
+  case "$state" in ''|Z*) return 1 ;; esac
+  identity=$(fm_test_pid_identity "$1" 2>/dev/null) || return 1
+  [ "$identity" = "$2" ]
+}
+
 # fm_test_arm_fixture_reaper
 #
 # Suites that detach fixture processes (own process group, nohup) call this
@@ -314,10 +343,10 @@ fm_test_proc_starttime() {
 # waits until this shell is gone and reaps the same set.
 fm_test_arm_fixture_reaper() {
   local owner registry monitor_was_on=0
-  [ "${FM_TEST_REAPER:-0}" = 1 ] && return 0
   owner=$$
   registry=$FM_TEST_CLEANUP_REGISTRY
-  export FM_TEST_OWNER_PID=$owner
+  FM_TEST_FIXTURE_PID_REGISTRY=$(mktemp "${TMPDIR:-/tmp}/.fm-test-fixture-pids.$$.XXXXXX") || return 1
+  export FM_TEST_FIXTURE_PID_REGISTRY
   trap 'fm_test_reap_fixture_processes; fm_test_cleanup' EXIT
   trap 'fm_test_reap_fixture_processes; fm_test_cleanup; exit 130' INT
   trap 'fm_test_reap_fixture_processes; fm_test_cleanup; exit 143' TERM
@@ -329,24 +358,25 @@ fm_test_arm_fixture_reaper() {
   case $- in *m*) monitor_was_on=1 ;; esac
   set -m
   # shellcheck disable=SC2016 # $1 expands in the reaper shell, not this one.
-  FM_TEST_REAPER=1 FM_TEST_SKIP_ORPHAN_REAP=1 nohup bash -c '
+  FM_TEST_SKIP_ORPHAN_REAP=1 nohup bash -c '
     set -u
     owner=$1
     lib=$2
     registry=$3
+    owner_identity=$4
     # shellcheck source=tests/lib.sh
     . "$lib"
     own_registry=$FM_TEST_CLEANUP_REGISTRY
     trap - EXIT INT TERM HUP QUIT
     rm -f "$own_registry"
     FM_TEST_CLEANUP_REGISTRY=$registry
-    unset FM_TEST_OWNER_PID
-    while kill -0 "$owner" 2>/dev/null; do
+    while fm_test_owner_is_alive "$owner" "$owner_identity"; do
       sleep 0.2
     done
     fm_test_reap_fixture_processes
     fm_test_cleanup
-  ' _ "$owner" "$ROOT/tests/lib.sh" "$registry" >/dev/null 2>&1 &
+    rm -f "$FM_TEST_FIXTURE_PID_REGISTRY"
+  ' _ "$owner" "$ROOT/tests/lib.sh" "$registry" "$FM_TEST_OWNER_IDENTITY" >/dev/null 2>&1 &
   FM_TEST_REAPER_PID=$!
   if [ "$monitor_was_on" -eq 1 ]; then
     set -m

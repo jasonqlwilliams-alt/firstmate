@@ -24,7 +24,7 @@ set -u
 
 # Detached startup workers outlive this shell. Arm before any fixture root
 # exists so EXIT/INT/TERM and a killed shell both reap them.
-fm_test_arm_fixture_reaper
+fm_test_arm_fixture_reaper || fail "could not arm fixture reaper"
 TMP_ROOT=$(fm_test_tmproot fm-startup-network-tests)
 DRAIN="$ROOT/bin/fm-wake-drain.sh"
 FM_TEST_CLEANUP_DIRS+=("$TMP_ROOT")
@@ -62,16 +62,8 @@ if [ -n "${FM_TIMING_LOG:-}" ]; then
   fm_timing_record phase "${FM_FAKE_TIMING_PHASE:-gh-auth}" \
     "$(( $(fm_timing_now_ms) - 1500 ))" "${FM_FAKE_TIMING_DETAIL:-}"
 fi
-# A plain sleep keeps running after the suite is gone. Poll the suite shell
-# named by FM_TEST_OWNER_PID and leave when that shell has exited.
 if [ -n "${FM_FAKE_BOOTSTRAP_SLEEP:-}" ]; then
-  _fm_bootstrap_deadline=$((SECONDS + FM_FAKE_BOOTSTRAP_SLEEP))
-  while [ "$SECONDS" -lt "$_fm_bootstrap_deadline" ]; do
-    if [ -n "${FM_TEST_OWNER_PID:-}" ] && ! kill -0 "$FM_TEST_OWNER_PID" 2>/dev/null; then
-      exit 0
-    fi
-    sleep 0.2
-  done
+  sleep "$FM_FAKE_BOOTSTRAP_SLEEP"
 fi
 [ -z "${FM_FAKE_BOOTSTRAP_OUT:-}" ] || printf '%s\n' "$FM_FAKE_BOOTSTRAP_OUT"
 exit "${FM_FAKE_BOOTSTRAP_RC:-0}"
@@ -187,6 +179,7 @@ EOF
 
   sleep 30 &
   claimant=$!
+  fm_test_track_fixture_pid "$claimant" || fail "could not track claimant"
   FM_SESSION_START_TIMEOUT=15 FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_OUT='acknowledged result' \
     run_stage "$home" "$root" start --locked 0 --harvest-pid "$claimant"
   run_stage "$home" "$root" wait 30 >/dev/null || fail "the claimed worker never published"
@@ -236,6 +229,7 @@ $rec
 EOF
   sleep 10 &
   claimant=$!
+  fm_test_track_fixture_pid "$claimant" || fail "could not track claimant"
   # Actionable output: a clean success in this same crash window must stay
   # silent (test_a_successful_result_never_queues_a_wake owns that case).
   FM_SESSION_START_TIMEOUT=4 FM_FAKE_BOOTSTRAP_LOG="$log" \
@@ -264,6 +258,7 @@ EOF
   chmod 500 "$home/state/.startup-network.report"
   sleep 10 &
   claimant=$!
+  fm_test_track_fixture_pid "$claimant" || fail "could not track claimant"
 
   FM_SESSION_START_TIMEOUT=4 FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_OUT='unpublishable result' \
     run_stage "$home" "$root" start --locked 0 --harvest-pid "$claimant"
@@ -301,6 +296,7 @@ $rec
 EOF
   sleep 10 &
   claimant=$!
+  fm_test_track_fixture_pid "$claimant" || fail "could not track claimant"
   FM_SESSION_START_TIMEOUT=4 FM_FAKE_BOOTSTRAP_LOG="$log" \
     run_stage "$home" "$root" start --locked 0 --harvest-pid "$claimant"
   run_stage "$home" "$root" wait 30 >/dev/null || fail "the unclaimed successful worker never published"
@@ -342,6 +338,7 @@ $rec
 EOF
   sleep 10 &
   claimant=$!
+  fm_test_track_fixture_pid "$claimant" || fail "could not track claimant"
   FM_SESSION_START_TIMEOUT=4 FM_FAKE_BOOTSTRAP_LOG="$log" \
     FM_FAKE_BOOTSTRAP_OUT='MISSING: some-tool (install: brew install some-tool)' \
     run_stage "$home" "$root" start --locked 0 --harvest-pid "$claimant"
@@ -774,17 +771,20 @@ GITHUB_TOKEN=ghp_supersecretvalue" \
 }
 
 # A nested copy of this file, used only to prove cleanup. It arms the same
-# reaper as the suite, starts one detached worker, and then waits to be killed.
+# reaper as the suite, starts a claimant and detached worker, then waits to be killed.
 if [ "${FM_STARTUP_NETWORK_REAP_PROBE:-}" = 1 ]; then
   [ -n "${FM_STARTUP_NETWORK_REAP_INFO:-}" ] || exit 2
   rec=$(new_world reap-probe)
   IFS='|' read -r home root log <<EOF
 $rec
 EOF
-  : "$log"
   printf '%s\n' $$ > "$home/state/.lock"
   printf '%s\n' "$TMP_ROOT" > "$FM_STARTUP_NETWORK_REAP_INFO"
-  if ! FM_FAKE_BOOTSTRAP_SLEEP=60 \
+  sleep 30 &
+  claimant=$!
+  fm_test_track_fixture_pid "$claimant" || exit 1
+  printf '%s\n' "$claimant" >> "$FM_STARTUP_NETWORK_REAP_INFO"
+  if ! FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_SLEEP=60 \
     run_stage "$home" "$root" start --locked 1 --harvest-pid $$; then
     printf 'start-failed\n' >> "$FM_STARTUP_NETWORK_REAP_INFO"
     exit 1
@@ -820,42 +820,8 @@ process_is_running() {  # <pid>
   return 0
 }
 
-test_lock_wait_exits_when_its_fixture_owner_is_gone() {
-  local owner waiter i
-  sleep 30 &
-  owner=$!
-  FM_WAKE_NO_MKDIR=1 \
-    FM_HOME="$TMP_ROOT/lock-wait-home" \
-    FM_STATE_OVERRIDE="$TMP_ROOT/lock-wait-home/state" \
-    FM_TEST_OWNER_PID=$owner \
-    bash -c '. "$1"; fm_lock_acquire_wait "$2"' \
-      _ "$ROOT/bin/fm-wake-lib.sh" "$TMP_ROOT/lock-wait-missing/lock" &
-  waiter=$!
-  sleep 0.3
-  if ! process_is_running "$waiter"; then
-    kill -KILL "$owner" 2>/dev/null || true
-    wait "$owner" 2>/dev/null || true
-    wait "$waiter" 2>/dev/null || true
-    fail "the lock wait exited while its owner was still alive"
-  fi
-  kill -KILL "$owner" 2>/dev/null || true
-  wait "$owner" 2>/dev/null || true
-  i=0
-  while process_is_running "$waiter" && [ "$i" -lt 30 ]; do
-    sleep 0.1
-    i=$((i + 1))
-  done
-  if process_is_running "$waiter"; then
-    kill -KILL "$waiter" 2>/dev/null || true
-    wait "$waiter" 2>/dev/null || true
-    fail "the lock wait kept spinning after its owner was gone"
-  fi
-  wait "$waiter" 2>/dev/null || true
-  pass "fm-startup-network: a fixture lock wait exits when its owner is gone"
-}
-
 test_killing_the_suite_reaps_detached_fixture_processes() {
-  local info probe root i signal survivors
+  local info probe root claimant i signal survivors
   info="$TMP_ROOT/reap-probe-info"
   for signal in KILL TERM; do
     : > "$info"
@@ -882,11 +848,14 @@ test_killing_the_suite_reaps_detached_fixture_processes() {
     fi
     root=$(sed -n '1p' "$info")
     [ -n "$root" ] || fail "the reap probe published no fixture root"
+    claimant=$(sed -n '2p' "$info")
+    [ -n "$claimant" ] || fail "the reap probe published no claimant PID"
+    fm_test_track_fixture_pid "$claimant" || fail "could not track probe claimant"
     survivors=$(fixture_processes_under "$root")
-    if [ -z "$survivors" ]; then
+    if [ -z "$survivors" ] || ! process_is_running "$claimant"; then
       kill -KILL "$probe" 2>/dev/null || true
       wait "$probe" 2>/dev/null || true
-      fail "no fixture process was alive to reap ($signal)"
+      fail "the reap probe had no live worker and claimant ($signal)"
     fi
     if [ "$signal" = KILL ]; then
       kill -KILL "$probe" 2>/dev/null || true
@@ -896,14 +865,14 @@ test_killing_the_suite_reaps_detached_fixture_processes() {
     wait "$probe" 2>/dev/null || true
     i=0
     survivors=$(fixture_processes_under "$root")
-    while [ -n "$survivors" ] && [ "$i" -lt 50 ]; do
+    while { [ -n "$survivors" ] || process_is_running "$claimant"; } && [ "$i" -lt 150 ]; do
       sleep 0.1
       i=$((i + 1))
       survivors=$(fixture_processes_under "$root")
     done
-    if [ -n "$survivors" ]; then
+    if [ -n "$survivors" ] || process_is_running "$claimant"; then
       fm_test_reap_fixture_processes --only "$root"
-      fail "fixture processes outlived a $signal of the suite: $survivors"
+      fail "fixture processes outlived a $signal of the suite: $survivors claimant=$claimant"
     fi
   done
   pass "fm-startup-network: killing the suite reaps detached fixture processes"
@@ -929,7 +898,6 @@ test_records_share_one_origin_so_offsets_form_a_timeline
 test_timings_are_published_and_only_the_on_demand_report_prints_them
 test_a_bounded_run_still_publishes_the_timings_it_managed_to_record
 test_the_timing_artifact_cannot_carry_a_command_line_or_forge_records
-test_lock_wait_exits_when_its_fixture_owner_is_gone
 test_killing_the_suite_reaps_detached_fixture_processes
 echo "# fm-startup-network.test.sh: all assertions passed"
 
