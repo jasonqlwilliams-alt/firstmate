@@ -3894,6 +3894,63 @@ SH
   pass "cleanup refuses a ship row when its captain hold cannot be read"
 }
 
+test_hold_mutations_refresh_summary_ledger() {
+  local home id failures=0
+  home=$(make_home summary-mutations)
+  for id in single batch moot noted; do
+    run_captain "$home" hold "$id" --title "$id choice" --reason 'choose route' --repo sample >/dev/null || fail "cannot hold $id"
+  done
+  if ! jq -e '.counts.decisions_open == 4' "$home/state/home-summary.json" >/dev/null 2>&1; then
+    echo 'REPRO hold did not refresh summary'
+    failures=$((failures + 1))
+  fi
+  # Seed before each mutation to prove each public entry point refreshes.
+  FM_HOME="$home" "$ROOT/bin/fm-home-summary-refresh.sh" || fail "cannot seed summary"
+  printf 'Approved\n' > "$home/answer"
+  run_captain "$home" answer single --decision-file "$home/answer" >/dev/null || fail "answer failed"
+  if ! jq -e '.counts.decisions_open == 3' "$home/state/home-summary.json" >/dev/null; then
+    echo 'REPRO answer did not refresh summary'; failures=$((failures + 1))
+  fi
+  FM_HOME="$home" "$ROOT/bin/fm-home-summary-refresh.sh" || fail "cannot seed summary"
+  run_captain "$home" bind accuracy-board >/dev/null || fail "bind failed"
+  printf 'batch\tApproved\n' | run_captain "$home" answers --source "accuracy fixture" >/dev/null || fail "answers failed"
+  if ! jq -e '.counts.decisions_open == 2' "$home/state/home-summary.json" >/dev/null; then
+    echo 'REPRO answers did not refresh summary'; failures=$((failures + 1))
+  fi
+  request_reconciles "$home" accuracy-board moot noted || fail "cannot request reconciliation"
+  FM_HOME="$home" "$ROOT/bin/fm-home-summary-refresh.sh" || fail "cannot seed summary"
+  run_captain "$home" reconcile close moot --evidence-file "$home/answer" >/dev/null || fail "close failed"
+  if ! jq -e '.counts.decisions_open == 1' "$home/state/home-summary.json" >/dev/null; then
+    echo 'REPRO reconcile close did not refresh summary'; failures=$((failures + 1))
+  fi
+  printf '{"sentinel":true}\n' > "$home/state/home-summary.json"
+  run_captain "$home" reconcile note noted --note-file "$home/answer" >/dev/null || fail "note failed"
+  if ! jq -e '.counts.decisions_open == 1 and .sentinel == null' "$home/state/home-summary.json" >/dev/null; then
+    echo 'REPRO reconcile note did not refresh summary'; failures=$((failures + 1))
+  fi
+  # A failed publication must preserve both successful mutations and refusals.
+  cat > "$home/fakebin/mv" <<'SH'
+#!/usr/bin/env bash
+last=
+for arg in "$@"; do last=$arg; done
+case "$last" in */home-summary.json) exit 1 ;; esac
+exec /bin/mv "$@"
+SH
+  chmod +x "$home/fakebin/mv"
+  run_captain "$home" hold refresh-failure --title "Publication failure" --reason 'choose route' >/dev/null \
+    || fail "summary failure failed the hold"
+  run_captain "$home" answer refresh-failure --decision-file "$home/answer" >/dev/null \
+    || fail "summary failure failed the answer"
+  if run_captain "$home" answer absent --decision-file "$home/answer" >/dev/null 2>&1; then
+    fail "summary refresh swallowed an answer refusal"
+  fi
+  [ -s "$home/state/.home-summary-refresh.log" ] || fail "refresh failure was not recorded"
+  [ "$failures" = 0 ] || fail "$failures summary refresh cases reproduced"
+  pass "hold, answer, keyed answers and both reconcile outcomes refresh published summary"
+}
+
+test_hold_mutations_refresh_summary_ledger
+
 test_uninventoried_report_decision_refuses_completion
 test_completion_gate_attests_and_transfers
 test_answer_records_and_closes

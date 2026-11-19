@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # tests/fm-secondmate-reconcile.test.sh - the cooldown-limited reconcile ask.
 #
-# A backlog-vs-metadata inventory mismatch inside a secondmate home no longer
-# blanks that home in the fleet snapshot, so the parent asks the home that owns
-# those books to fix them. This suite pins that ask: it lands as a real durable
-# steering record, a home is asked at most once per cooldown window however
-# often the snapshot runs, a mismatch still sitting there after the window
-# earns one gentle re-nudge, and the parent never touches the mate's own files.
+# An inventory mismatch or unavailable child current state inside a secondmate
+# home keeps its independently readable surfaces in the fleet snapshot, so the
+# parent asks the owning home to reconcile it.
+# This suite pins that ask: it lands as a real durable steering record, a home is
+# asked at most once per cooldown window however often the snapshot runs, an
+# invalidity still present after the window earns one gentle re-nudge, and the
+# parent never touches the mate's own files.
 set -u
 
 # shellcheck source=tests/secondmate-helpers.sh disable=SC1091
@@ -378,14 +379,10 @@ test_a_readable_home_without_a_mismatch_is_never_asked() {
   local home mate fakebin snap out
   { read -r home; read -r mate; read -r fakebin; } < <(make_main_home quiet mate)
   snap="$home/snapshot.json"
-  write_snapshot "$snap" mate '{"kind":"child_current_unavailable","ids":["x"]}' unknown
-  out=$(run_notify "$home" "$fakebin" quiet "$snap") || fail "notify failed: $out"
-  [ "$(inbox_records "$home/state" mate)" -eq 0 ] \
-    || fail "an unavailable child state was mistaken for a books problem"
   write_snapshot "$snap" mate '{"kind":null,"ids":[]}' no_active_work
   out=$(run_notify "$home" "$fakebin" quiet "$snap") || fail "notify failed: $out"
   [ "$(inbox_records "$home/state" mate)" -eq 0 ] || fail "a healthy home was asked to reconcile"
-  pass "only a backlog-vs-metadata mismatch produces an ask"
+  pass "a healthy readable home produces no reconcile ask"
 }
 
 test_the_parent_never_changes_the_mates_own_files() {
@@ -983,6 +980,22 @@ test_bearings_request_returns_before_remote_delivery_and_supervision_sends_later
   done
   pass "Bearings records locally, returns before a delayed remote queue, and supervision delivers later"
 }
+
+test_unavailable_child_requests_and_delivers_reconcile() {
+  local home mate fakebin snap out
+  { read -r home; read -r mate; read -r fakebin; } < <(make_main_home child-unavailable mate)
+  snap="$home/snapshot.json"
+  write_snapshot "$snap" mate '{"kind":"child_current_unavailable","ids":["child"]}' unknown
+  FM_HOME="$home" "$RECONCILE" request --snapshot "$snap" >/dev/null || fail "request failed"
+  [ "$(find "$home/state/reconcile-notify" -name 'request-*.json' 2>/dev/null | wc -l | tr -d '[:space:]')" = 1 ] \
+    || fail "REPRO child_current_unavailable did not queue a reconcile request"
+  out=$(run_notify "$home" "$fakebin" child-unavailable "$snap") || fail "notify failed"
+  assert_contains "$out" 'sent: mate child_current_unavailable' "unavailable child was not sent: $out"
+  [ "$(inbox_records "$home/state" mate)" = 1 ] || fail "notification did not reach mate inbox"
+  pass "unavailable child state triggers both durable request and delivered reconciliation"
+}
+
+test_unavailable_child_requests_and_delivers_reconcile
 
 test_reconcile_request_rejects_an_unbounded_input_without_filling_storage
 test_reconcile_request_requires_one_snapshot_document

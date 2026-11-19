@@ -50,10 +50,12 @@
 # posture row is reserved ahead of that ordering and bound so it always surfaces.
 #
 # Main-home inventory validity comes from the canonical snapshot's main_inventory
-# object (orphan structured in-flight without meta, unstructured current rows).
-# Bearings never invents Underway rows from backlog-only ids; it discloses those
-# gaps in omitted[] and, when invalid, a Charted Next gate line so the four-section
-# chat cannot claim an empty fleet while main current state is broken.
+# object (orphan structured in-flight without a worker or registered custom
+# check, unowned non-held child metadata, and unstructured current rows).
+# Bearings never invents Underway rows from backlog-only ids; it discloses orphan
+# and unstructured gaps in omitted[] and any invalid inventory through a Charted
+# Next gate line so the four-section chat cannot claim an empty fleet while main
+# current state is broken.
 #
 # An open away-return catch-up is disclosed the same way, as a single action-free
 # (return-catchup) gate row naming the blockers left to clear or the reason the
@@ -408,9 +410,9 @@ MODEL=$(printf '%s' "$SNAP" | jq \
       ("held " + (.hold_age_days | tostring) + "d")
     else null end;
   def hold_gate_reason:
-    (.hold_reason // .blocked_reason // "-") as $base
+    ((.hold_reason // .blocked_reason // "") | clean | if . == "-" then "" else . end) as $base
     | (hold_note) as $note
-    | if $note == null then $base else ($note + ": " + $base) end;
+    | if $note == null then $base elif $base == "" then $note else ($note + ": " + $base) end;
   def hold_summary($title; $base):
     (hold_note) as $note
     | if $note == null then (($title + ": " + $base) | trunc(90))
@@ -568,7 +570,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
          | select(.hold_kind == "captain" and projected_deferred_hold) ]
      | length) as $decisions_marked_deferred
   | (if ($return_catchup.pending // false) then
-       [{id:"(return-catchup)",
+       [{id:"(return-catchup)",repo:null,
          title:((if ($return_catchup.blockers // 0) > 0 then
                    "\($return_catchup.blockers) blocker(s) to clear before ordinary work"
                  elif (($return_catchup.reason // "") != "") then
@@ -588,7 +590,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
   | ([ .tasks[] | select(.kind != "secondmate" and .pr.url != null and .pr.source == "meta") | {id, url:.pr.url} ]) as $recorded_prs_all
   | ([ $recorded_prs_all[] | {key:(.id | tostring), value:.url} ] | from_entries) as $meta_prs
   | ((if (.main_inventory.valid == false) then
-        [{id:"(main-inventory)",
+        [{id:"(main-inventory)",repo:null,
           title:((.main_inventory.reason // "main inventory invalid") | clean),
           blocked_by:"-",
           reason:"main inventory",

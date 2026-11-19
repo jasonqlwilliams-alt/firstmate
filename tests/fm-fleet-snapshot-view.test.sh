@@ -1053,7 +1053,7 @@ test_green_registered_pr_and_teardown_inventory() {
   mkdir -p "$home/projects/terminal"
   cat > "$home/data/backlog.md" <<'MD'
 ## In flight
-- [ ] terminal - Green task awaiting merge (repo: alpha) (kind: ship) (since 2026-07-11) (hold: captain merge decision pending) (hold-kind: captain)
+- [ ] terminal - Green task awaiting merge (repo: alpha) (kind: ship) (since 2026-07-11)
 
 ## Queued
 
@@ -1126,8 +1126,8 @@ run:
 RUN
   printf 'all CI checks passed - still monitoring until merged or closed\n' > "$home/ci.txt"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
-  printf '%s' "$out" | jq -e '.tasks[0].current_state.state == "done" and .tasks[0].current_state.source == "run-step" and (.tasks[0].current_state.detail | startswith("checks green:")) and (.tasks[0].current_state.detail | endswith("run PR: https://github.com/kunchenguid/firstmate/pull/9")) and .tasks[0].pr.source == "absent" and .tasks[0].pr.url == null and .backlog.records[0].hold_kind == "captain"' >/dev/null \
-    || fail "native-shaped current CI run must be attributed to the held task: $out"
+  printf '%s' "$out" | jq -e '.tasks[0].current_state.state == "done" and .tasks[0].current_state.source == "run-step" and (.tasks[0].current_state.detail | startswith("checks green:")) and (.tasks[0].current_state.detail | endswith("run PR: https://github.com/kunchenguid/firstmate/pull/9")) and .tasks[0].pr.source == "absent" and .tasks[0].pr.url == null and .backlog.records[0].hold_kind == null' >/dev/null \
+    || fail "native-shaped current CI run must be attributed to the task: $out"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}' >/dev/null \
     || fail "native-shaped current green run awaiting merge must not disagree: $out"
@@ -1141,8 +1141,6 @@ RUN
     || fail "a green current run without a PR cannot exempt an unregistered task: $out"
   mv "$home/run-with-pr.txt" "$home/run.txt"
   printf 'pr=%s\n' "$pr" >> "$home/state/terminal.meta"
-  sed 's/ (hold: captain merge decision pending) (hold-kind: captain)//' "$home/data/backlog.md" > "$home/backlog-without-hold.md"
-  mv "$home/backlog-without-hold.md" "$home/data/backlog.md"
   sed 's|/pull/9|/pull/10|' "$home/run.txt" > "$home/run-other-pr.txt"
   mv "$home/run-other-pr.txt" "$home/run.txt"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
@@ -1336,6 +1334,63 @@ SH
 test_teardown_backlog_change_during_capture_is_resampled
 
 test_green_registered_pr_and_teardown_inventory
+
+test_held_children_and_registered_watch_inventory() {
+  local home fakebin out state section failures=0
+  for section in 'In flight' Queued; do
+    for state in "done" failed unknown; do
+      home=$(make_home "held-${section// /-}-$state")
+      fakebin=$(make_fakebin "$home")
+      mkdir -p "$home/projects/held"
+      printf '## %s\n- [ ] held - Held work (repo: alpha) (kind: ship) (hold: choose route) (hold-kind: captain)\n\n## Done\n' "$section" > "$home/data/backlog.md"
+      fm_write_meta "$home/state/held.meta" \
+        "window=firstmate:fm-held" "worktree=$home/projects/held" \
+        "project=alpha" "harness=claude" "kind=ship" "mode=ship"
+      [ "$state" = unknown ] || {
+        record_claude_idle "$home/state" held
+        printf '%s: worker stopped\n' "$state" > "$home/state/held.status"
+      }
+      out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+      if ! printf '%s' "$out" | jq -e '.valid and ([.queued[].id] == ["held"]) and ([.endpoints[].id] == ["held"])' >/dev/null; then
+        printf 'REPRO held %s/%s: %s\n' "$section" "$state" "$(printf '%s' "$out" | jq -c '{valid,invalidity}')"
+        failures=$((failures + 1))
+      fi
+    done
+  done
+  # An incomplete hold restores the ordinary validity checks.
+  sed 's/ (hold-kind: captain)//' "$home/data/backlog.md" > "$home/row"
+  mv "$home/row" "$home/data/backlog.md"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid == false' >/dev/null || fail "an incomplete hold hid an unknown child"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
+  if ! printf '%s' "$out" | jq -e '.main_inventory.valid == false and .main_inventory.unowned_current == ["held"]' >/dev/null; then
+    echo 'REPRO primary inventory omits unowned child'
+    failures=$((failures + 1))
+  fi
+  home=$(make_home check-only-watch)
+  cat > "$home/data/backlog.md" <<'MD'
+## In flight
+- [ ] watch - Standing watch (repo: alpha) (kind: watch)
+## Queued
+## Done
+MD
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$home/state/watch.check.sh"
+  chmod 700 "$home/state/watch.check.sh"
+  FM_HOME="$home" "$ROOT/bin/fm-check-register.sh" watch >/dev/null || fail "cannot register watch fixture"
+  out=$(FM_HOME="$home" "$SNAPSHOT" --json)
+  if ! printf '%s' "$out" | jq -e '.main_inventory.valid and .main_inventory.orphan_in_flight == [] and .tasks == []' >/dev/null; then
+    echo 'REPRO check-only watch counted as orphan'
+    failures=$((failures + 1))
+  fi
+  # Registration must still match the current bytes.
+  printf '\n# changed\n' >> "$home/state/watch.check.sh"
+  out=$(FM_HOME="$home" "$SNAPSHOT" --json)
+  printf '%s' "$out" | jq -e '.main_inventory.orphan_in_flight == ["watch"]' >/dev/null || fail "untrusted check hid an orphan"
+  [ "$failures" = 0 ] || fail "$failures inventory accuracy cases reproduced"
+  pass "held children remain visible without invalidating homes; registered watch owns its in-flight row"
+}
+
+test_held_children_and_registered_watch_inventory
 
 test_empty_fleet_json
 test_fixture_snapshot_json

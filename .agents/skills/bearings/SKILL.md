@@ -57,8 +57,8 @@ Board answers are acted on later under the normal authority rules; this skill's 
    The `(return-catchup)` gate is the same shape: an action-free notice that an away-return catch-up is still open, naming the blockers left to clear or the reason the catch-up was retained.
    Render it under Charted Next like any other warning row: reporting is not ordinary work, while acting on the fleet still waits for `bin/fm-afk-return.sh check` (`/afk`).
 
-2. **Record a later reconcile notification for any home whose own books disagree.**
-   When the snapshot reports a secondmate home whose `invalidity` is `orphan_in_flight`, `unowned_current`, or `terminal_in_flight`, that home's backlog and its own task metadata disagree and only that home may fix it.
+2. **Record a later reconcile notification for any home with inventory invalidity.**
+   When the snapshot reports a secondmate home whose `invalidity` is `orphan_in_flight`, `unowned_current`, `terminal_in_flight`, or `child_current_unavailable`, that home's inventory or child current state needs reconciliation and only that home may fix it.
    Run `printf '%s\n' "$snapshot" | bin/fm-secondmate-reconcile.sh request --snapshot -` immediately after gathering the snapshot.
    This atomically records one local one-shot request per mismatched target and returns without sending, taking a mate lifecycle lock, or waiting behind a local or remote delivery queue.
    The supervision loop later claims the requests and runs the cooldown-limited fire-and-forget deliveries; the script header owns per-target coalescing, request durability, retries, cooldown, identity checks, and retirement.
@@ -105,8 +105,13 @@ Compose the payload from the same snapshot with the same ranking judgment as the
 - In lavish mode also pass the snapshot's `--all-queued` opt-in and carry every queued and warning row it returns; never truncate Charted Next yourself, because the board shows the newest queued rows and reveals the rest in place behind its own control.
   `charted_more` counts queued rows the snapshot still omitted, while `charted_warning_more` counts omitted warning rows only; keep both counts separate.
 - Every Charted Next row's badge opens into an explanation built from its `reason`, `dispatchable`, and `filed` fields, so keep each gate's reason whole, never shortened further.
-  Lead a held row's reason with its structured note - `blocked-by <ids>` from the gate's blockers, or the `until <date>` or `held <N>d` a captain hold's reason already starts with - then `: ` and the rest of the reason.
+  Lead a held row's reason with exactly one structured note - `blocked-by <ids>` from the gate's blockers, or the `until <date>` or `held <N>d` a captain hold's reason already starts with - then `: ` and any remaining reason.
+  Reuse a note already present in the snapshot reason; never prepend a second blocked-by prefix.
+  Keep the owner in its own payload field, never as a suffix inside the reason.
+  For primary-owned queued work with no blocker or prerequisite, leave `reason` empty rather than adding filler such as "queued", "owned by firstmate", or "ready to start when you want it".
   That note is how the board tells other work from a date the captain set or the captain's own pending answer, and the board names each blocker id by that work's title when the payload carries it.
+  Before setting `dispatchable: true`, read the task body from its authoritative task record and verify every prerequisite, including a quiet-window requirement, as well as its structured blockers and time gates.
+  Request the snapshot bodies field for initial context, but read the full task body when that bounded excerpt cannot establish readiness; if the body is unavailable or a prerequisite is unverified, keep `dispatchable: false`.
   Set `dispatchable: true` only on work nothing holds, which the board badges `ready` instead of `waiting`.
 - Every Underway row copies the task-identifying `in_flight.name` from the snapshot into an explicit `name` field, which the board leads with while keeping the run status on its second line.
   The snapshot command's header owns its durable-title-or-id normalization; never replace the projected label with run status or invent another label.
