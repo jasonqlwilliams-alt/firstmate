@@ -880,7 +880,8 @@ fm_backend_composer_classify_snapshot() {  # <backend> <target>
 # backend's own composer verdict for that same capture, so a picker that
 # appears between two reads can never borrow an earlier read's verdict.
 # Prints update-picker, or the composer verdict otherwise:
-# empty|pending|pending-unproven|unknown, where an unreadable capture is
+# empty|pending|pending-unproven|unknown, or sign-in for an explicitly recorded
+# Codex authentication screen (a stop-only verdict). An unreadable capture is
 # unknown. <expected-pending> is the exact text the caller just typed: on a
 # plain (styled=0) capture, where a glyph row with trailing text reads unknown,
 # a composer holding exactly that text reads pending, and on a cursorless
@@ -902,6 +903,11 @@ fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [ex
   picker=$(fm_composer_update_picker_scan "$FM_COMPOSER_SNAPSHOT_CAPS" \
     "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR" "$expected")
   [ "$picker" != active ] || { printf 'update-picker'; return 0; }
+  if [ "$harness" = codex ] && [ "$picker" != below ] \
+     && fm_composer_codex_signin_screen "$FM_COMPOSER_SNAPSHOT_SCREEN"; then
+    printf 'sign-in'
+    return 0
+  fi
   verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target")
   if [ "$verdict" = unknown ] && [ -n "$expected" ]; then
     while IFS= read -r kv; do
@@ -928,6 +934,46 @@ EOF
       fi
       ;;
   esac
+}
+
+# Resolve exactly one native Codex process in this endpoint's foreground group.
+# Used only after positive sign-in-screen identification by fm-control. Kernel
+# identity must agree with the endpoint inventory; never signal a shell, a
+# launcher identified only by arguments, an arbitrary descendant, or a group.
+fm_backend_codex_agent_pid() {  # <backend> <target>
+  local backend=$1 target=$2 pids pid comm selected='' info session pane
+  fm_backend_source "$backend" || return 1
+  [ "$(fm_backend_agent_state "$backend" "$target")" = alive ] || return 1
+  case "$backend" in
+    tmux)
+      pids=$(fm_backend_tmux_foreground_pids "$target") || return 1
+      ;;
+    herdr)
+      session=${target%%:*}; pane=${target#*:}
+      info=$(fm_backend_herdr_cli "$session" pane process-info --pane "$pane") || return 1
+      pids=$(printf '%s' "$info" | jq -er --arg pane "$pane" '
+        select(.result.type == "pane_process_info" and .result.process_info.pane_id == $pane)
+        | .result.process_info.foreground_processes[]
+        | .pid | select(type == "number" and . > 1 and floor == .)
+      ') || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  for pid in $pids; do
+    case "$pid" in ''|*[!0-9]*|0|1) return 1 ;; esac
+    comm=$(LC_ALL=C ps -p "$pid" -o comm= 2>/dev/null) || return 1
+    comm=${comm#"${comm%%[![:space:]]*}"}
+    comm=${comm%"${comm##*[![:space:]]}"}
+    case "${comm##*/}" in
+      codex|codex-rs|codex-cli)
+        [ -z "$selected" ] || return 1
+        selected=$pid
+        ;;
+    esac
+  done
+  [ -n "$selected" ] || return 1
+  [ "$(fm_backend_agent_state "$backend" "$target")" = alive ] || return 1
+  printf '%s' "$selected"
 }
 
 # fm_backend_target_exists: cheap, READ-ONLY existence check - does the

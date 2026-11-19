@@ -3075,7 +3075,7 @@ SH
 
 test_large_local_snapshot_overlaps_local_reads_without_projection_drift() {
   local home fakebin worktree serial parallel parallel_file snapshot_pid i
-  local serial_started serial_elapsed parallel_started parallel_elapsed saved
+  local serial_started serial_elapsed parallel_started parallel_elapsed saved real_jq
   home=$(make_home large-local-snapshot)
   worktree="$home/projects/shared-worktree"
   fm_git_init_commit "$worktree"
@@ -3117,10 +3117,9 @@ SH
   serial=$(FAKE_NM_DELAY=0 FM_SNAPSHOT_LOCAL_READ_CONCURRENCY=1 run "$home" "$fakebin" --json)
 
   # Serialized reads pay every worker's delay end to end while concurrent reads
-  # overlap them. Time both runs and compare, because the two pay the same
-  # composition overhead: the difference isolates the overlap this change
-  # delivers, where an absolute wall-clock budget would instead measure how
-  # loaded the host happens to be and flake on a busy runner.
+  # overlap them. Compare the complete runs: both observations and independent
+  # row composition use the configured cap. An absolute wall-clock budget would
+  # instead measure host load and flake on a busy runner.
   serial_started=$(date +%s)
   FAKE_NM_DELAY=1 FM_SNAPSHOT_LOCAL_READ_CONCURRENCY=1 \
     run "$home" "$fakebin" --json >/dev/null \
@@ -3160,7 +3159,27 @@ SH
       and ([.in_flight[].id] | sort) == ["local-1","local-2","local-3","local-4","local-5"]
       and ([.in_flight[] | select(.id == "local-1" and .kind == "ship")] | length) == 1
   ' >/dev/null || fail "large local snapshot lost a worker row: $parallel"
-  pass "large local snapshot overlaps local reads with byte-identical serial and concurrent projections"
+  # A failed parallel row must fail the public command before publishing any
+  # inventory. Make only one final task-row composition fail, after observations
+  # succeeded, and assert that the injection actually ran.
+  real_jq=$(command -v jq)
+  cat > "$fakebin/jq" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}:${2:-}:${3:-}:${4:-}" = '-n:--arg:id:local-3' ]; then
+  : > "$COMPOSE_FAILURE_MARKER"
+  exit 1
+fi
+exec "$REAL_JQ" "$@"
+SH
+  chmod +x "$fakebin/jq"
+  if REAL_JQ="$real_jq" COMPOSE_FAILURE_MARKER="$home/composition-failed" \
+    FM_SNAPSHOT_LOCAL_READ_CONCURRENCY=8 \
+    run "$home" "$fakebin" --json > "$home/failed.json" 2> "$home/failed.err"; then
+    fail "failed parallel task composition published a successful snapshot"
+  fi
+  [ -f "$home/composition-failed" ] || fail "task-row failure injection never ran"
+  [ ! -s "$home/failed.json" ] || fail "failed composition published a partial inventory"
+  pass "large local snapshot preserves serial parity and refuses a failed parallel row"
 }
 
 test_remote_ledgers_share_one_concurrent_budget_and_fall_back_to_cache() {
