@@ -284,7 +284,8 @@ No Herdr-specific copy of that protocol exists.
 
 ## Restart and liveness behavior
 
-Stopping and restarting a named Herdr server preserves workspace, tab, pane, and label ids, but the underlying harness processes and live agent registrations do not survive.
+Stopping and restarting a named Herdr server can restore workspace, tab, pane, and label ids, but the underlying harness processes and live agent registrations do not survive.
+Ids can also be reassigned after a host restart, so a recorded id alone does not establish endpoint ownership.
 A restored same-labeled tab with a missing pane or no registered agent is a husk.
 Create replaces only a confidently dead or no-agent husk, creates the replacement before closing the old tab, and refuses live or unknown states.
 This prevents closing the workspace's last tab before a replacement exists.
@@ -304,7 +305,10 @@ Neither the stopped-server exception nor the stale-registration verdict widens h
 Native registration still identifies Pi by name where tmux would see a generic interpreter; the process-level proof only decides whether that registration is backed by a running process.
 `tests/fm-backend-herdr-agent-exit-shell-e2e.test.sh` pins the live-Pi versus leftover-shell distinction; [`verification/runtime-backends.md`](verification/runtime-backends.md#agent-lifecycle-control) owns the versioned evidence.
 
-The session-start sweep uses this probe.
+When a secondmate's home can be resolved, the session-start sweep supplies it to this probe for local and remote routes; `fm_backend_herdr_pane_home_state` owns its structural identity check and conservative unreadable outcome.
+Liveness probes remain concurrent, while recovery spawns are serialized within the sweep so they do not compete for the home's task-set lock.
+An unrelated operation holding that lock still refuses recovery rather than weakening the teardown guard.
+`tests/fm-secondmate-herdr-identity-e2e.test.sh` exercises both recycled routes and multi-home recovery in an isolated named session with fake agents and stubbed launch screens.
 Mid-session secondmate agent-process liveness is not implemented because idle secondmates are deliberately exempt from stale-pane escalation and need a separate periodic identity signal.
 
 ## Push events and polling fallback

@@ -167,7 +167,8 @@ A launch after a host has drifted out of readiness fails with the doctor's own g
 Raw launch commands are not accepted for remote secondmates.
 Backends that already refuse secondmate launch, currently Orca and cmux, remain unsupported on the remote host.
 
-Startup liveness recovery relaunches a dead or missing remote second mate through this same command, so recovery passes the same readiness gate rather than a weaker one.
+Startup liveness recovery checks the remote pane against its recorded home before accepting it as alive.
+A pane proven to belong to another home is missing and the sweep attempts replacement through the same readiness-gated command; an unreadable home identity leaves the route untouched for inspection.
 
 A persistent remote route's parent metadata intentionally has no local spawn-generation marker and identifies the route by its recorded host instead.
 The Bearings inventory-reconcile hook therefore accepts these markerless routes, revalidates the sampled host at delivery, and refuses a route that changed hosts; [`fm-secondmate-reconcile.sh`](../bin/fm-secondmate-reconcile.sh) owns the exact cooldown, identity, and reporting contract.
@@ -180,6 +181,7 @@ FM_HOME=<primary-home> bin/fm-send.sh fm-<id> '<request>'
 
 The [`fm-send.sh` header](../bin/fm-send.sh) owns the exact delivery-status contract.
 A routed request is delivered as a durable record in the remote home's steering inbox plus a best-effort doorbell, never by typing the payload into the pane; exit 0 means the record durably exists.
+The remote host skips the doorbell unless the recorded pane belongs to this home and its endpoint state is `alive` or `dead`, leaving the record for recovery without contacting another agent.
 Every remote transport attempt is bounded by `FM_SEND_REMOTE_BUDGET`; that header owns the setting's default and validation contract.
 An unconfirmed SSH transport (exit 255) is retried identically once, while a budget expiry is not retried because completion is unknown; either outcome preserves this ordinary reply-bearing request's pending-reply expectation for the record that may have landed.
 If delivery remains unconfirmed, only the exact `FM_PENDING_REPLY_EXISTING_CORR=<id>` resend command printed by `fm-send` is safe to run later because it preserves the request body and lets the remote enqueue deduplicate onto the same record; a plain rerun mints a different correlation and is not idempotent.

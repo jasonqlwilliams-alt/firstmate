@@ -4,7 +4,7 @@
 # Usage:
 #   fm-remote-secondmate-control.sh launch <id> <harness> <model|-> <effort|-> herdr [traceparent]
 #   fm-remote-secondmate-control.sh relaunch <id> <harness> <model|default|-> <effort|default|->
-#   fm-remote-secondmate-control.sh state <id>
+#   fm-remote-secondmate-control.sh state <id> [--bound-home]
 #   fm-remote-secondmate-control.sh route <id>
 #   fm-remote-secondmate-control.sh send <id> <message> [fire-and-forget]
 #   fm-remote-secondmate-control.sh key <id> <key>
@@ -136,7 +136,16 @@ state_value() { # <id>; prints recovery-grade state
     printf 'unverified\n'
     return 0
   fi
-  fm_backend_agent_state "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" 2>/dev/null || printf 'unreadable\n'
+  remote_endpoint_state
+}
+
+remote_endpoint_state() {
+  local recorded_home selected_home
+  recorded_home=$(fm_backend_meta_exact_value "$REMOTE_ENDPOINT_META" worktree) || { printf 'unreadable\n'; return 0; }
+  recorded_home=$(cd -- "$recorded_home" 2>/dev/null && pwd -P) || { printf 'unreadable\n'; return 0; }
+  selected_home=$(cd -- "$TARGET_HOME" 2>/dev/null && pwd -P) || { printf 'unreadable\n'; return 0; }
+  [ "$recorded_home" = "$selected_home" ] || { printf 'unreadable\n'; return 0; }
+  fm_backend_agent_state "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "$recorded_home" 2>/dev/null || printf 'unreadable\n'
 }
 
 print_route() { # <id>
@@ -185,7 +194,7 @@ cmd_launch() {
   meta=$(meta_path "$id")
   if [ -f "$meta" ]; then
     remote_endpoint_require "$id"
-    current=$(fm_backend_agent_state "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" 2>/dev/null || printf 'unreadable\n')
+    current=$(remote_endpoint_state)
     case "$current" in
       alive)
         print_route "$id"
@@ -375,8 +384,8 @@ cmd_send() {
   fi
   # A remote steer is delivered by durable record, never by typing its payload
   # into the pane: write it into this secondmate's host-local steering inbox,
-  # then ring the constant self-describing doorbell into the recorded pane,
-  # best-effort (bin/fm-task-inbox-lib.sh owns the record and doorbell). The
+  # then ring the constant self-describing doorbell only after the home-bound
+  # endpoint check, best-effort (bin/fm-task-inbox-lib.sh owns the record and doorbell). The
   # write is idempotent - re-running the same request after an ambiguous
   # transport failure lands on the existing record instead of a duplicate - so
   # the parent may safely repeat this leg. Exit 0 once the record durably
@@ -392,6 +401,13 @@ cmd_send() {
       # The dedup landed on a record the worker already acknowledged: the
       # steer was delivered and acted on, so there is nothing to announce.
       printf 'notice: this steer was already delivered and acknowledged at %s; nothing re-rung\n' "$rec" >&2
+      return 0
+      ;;
+  esac
+  case "$(remote_endpoint_state)" in
+    alive|dead) ;;
+    *)
+      printf 'notice: doorbell not typed because %s is not confirmed in its recorded home; the steer is durably recorded at %s for recovery\n' "$REMOTE_ENDPOINT_TARGET" "$rec" >&2
       return 0
       ;;
   esac
@@ -532,7 +548,7 @@ cmd_retire() {
 case "${1:-}" in
   launch) shift; [ "$#" -ge 5 ] && [ "$#" -le 6 ] || usage; cmd_launch "$@" ;;
   relaunch) shift; [ "$#" -eq 4 ] || usage; cmd_relaunch "$@" ;;
-  state) shift; [ "$#" -eq 1 ] || usage; validate_id "$1"; validate_home "$1"; state_value "$1" ;;
+  state) shift; case "$#" in 1) ;; 2) [ "$2" = --bound-home ] || usage ;; *) usage ;; esac; validate_id "$1"; validate_home "$1"; state_value "$1" ;;
   route) shift; [ "$#" -eq 1 ] || usage; cmd_route "$1" ;;
   send) shift; [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage; cmd_send "$@" ;;
   key) shift; [ "$#" -eq 2 ] || usage; cmd_key "$@" ;;

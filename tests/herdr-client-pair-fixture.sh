@@ -46,7 +46,7 @@ SH
   cat >> "$dir/current/herdr" <<'SH'
   "pane get")
     if [ "${3:-}" = wCY:p2 ]; then
-      printf '{"id":"cli:pane:get","result":{"pane":{"agent":"claude","agent_status":"idle","pane_id":"wCY:p2","tab_id":"wCY:t2","workspace_id":"wCY"},"type":"pane_info"}}\n'
+      jq -nc --arg cwd "${FM_HOME:-}" '{id:"cli:pane:get",result:{pane:{agent:"claude",agent_status:"idle",pane_id:"wCY:p2",tab_id:"wCY:t2",workspace_id:"wCY",cwd:$cwd},type:"pane_info"}}'
     else
       printf '{"id":"cli:pane:get","error":{"code":"pane_not_found","message":"no such pane"}}\n' >&2; exit 1
     fi ;;
