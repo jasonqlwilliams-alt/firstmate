@@ -12,6 +12,9 @@ This section is the single owner of the top-level operational-home layout; produ
 The tracked code root contains the shared instruction, skill, documentation, workflow, and `bin/` surfaces, while each effective `FM_HOME` contains private operational directories.
 `data/` holds durable private fleet records such as the project and secondmate registries, captain preferences, optional shared captain preferences, learnings, backlog, briefs, scout reports, and explicitly installed content-addressed extension packages under `data/extensions/packages/`.
 `state/` holds runtime records such as task metadata, append-only status events, endpoint signals, watcher and wake-queue coordination, inactive terminal-outcome receipts under `state/terminal-outcomes/`, enabled extension working namespaces under `state/extensions/`, away-mode state, generated Relay artifacts, parent-side remote ledger copies under `state/secondmate-summary-cache/`, one-shot Bearings reconcile requests under `state/reconcile-notify/`, private secondmate config-reread generations with their retry and quarantine state, per-task steering-inbox records under `state/<id>.inbox/` (`bin/fm-task-inbox-lib.sh`), and parent-owned secondmate pending-reply records under `state/pending-replies/` (`bin/fm-pending-reply-lib.sh`).
+Resolved pending-reply records remain available for late correlated reports.
+While their directory is unchanged, watcher polls visit only records still requiring reconciliation or an escalation close; directory changes trigger legacy-record discovery so records created by pre-upgrade writers are not lost.
+`bin/fm-pending-reply-lib.sh` owns the workset and fallback mechanics.
 `config/` holds local gitignored operating choices, including explicit extension bindings under `config/extensions.d/`, and `projects/` holds the local project clones that Firstmate reads but changes only through the narrow guarded and concrete captain-approved exceptions in `AGENTS.md`.
 Untracked files and directories whose names begin with `scratchpad` are also gitignored, so temporary scratch does not make porcelain-based secondmate sync guards treat a home as dirty.
 
@@ -20,7 +23,7 @@ The producing PR and Relay helpers own the fields they append, `bin/fm-classify-
 Wake, watcher, away-mode, and Relay-specific state mechanics remain with their named scripts and reference sections rather than being duplicated into one exhaustive state tree here.
 
 `bin/fm-session-start.sh`'s header is the single owner of session-start ordering, composed commands, digest contents, and the digest's startup mechanism.
-`bin/fm-startup-network.sh`'s header owns the deferred startup stage that keeps every external-network call and the potentially slow inactive-outcome scan off that digest's blocking path, including its state files and the safety argument for running them later.
+`bin/fm-startup-network.sh`'s header owns the deferred startup stage that keeps every external-network call, the potentially slow inactive-outcome scan, and locked-start home-summary publication off that digest's blocking path, including its state files and the safety argument for running them later.
 `docs/sessionstart-nudge.md` owns the native session-open adapter tiers that run or nudge the digest command, and the source routing between them.
 `AGENTS.md` retains the run-once and read-once operator rules, lock-refusal safety, installation consent, and direct-report recovery boundaries because those facts apply at every session start.
 Ordinary dead-direct-report recovery is owned by `stuck-crewmate-recovery`, while persistent-secondmate recovery is owned by `secondmate-provisioning`.
@@ -281,6 +284,16 @@ The file is not inherited by secondmate homes: the path is machine-local, and an
 The first non-comment, non-blank line is the directory path.
 The same inbox path is the Eleusis publish plane for `bin/fm-system-state-card.sh`: when configured, that generator drops a named-C: packet asking Eleusis to write Packet Router `Evidence/SYSTEM_STATE.md`.
 `bin/fm-urgent-alert.sh` remains the owner of URGENT-ALERT packets; the system-state script header owns its own packet shape and no-op when the inbox is absent.
+
+## Bearings detail canvas export (config/bearings-canvas-dir)
+
+The optional local, gitignored `config/bearings-canvas-dir` file enables exporting a Cursor Canvas mirror of the Bearings companion detail page whenever `bin/fm-bearings-board.sh build` runs.
+The first non-comment, non-blank line is an existing non-symlink absolute directory path on this host.
+When the file is absent, empty, unreadable, or symlinked, or its directory path is relative or missing, the export is off and writes nothing.
+When configured, `bin/fm-bearings-board.sh build` publishes `bearings-detail.canvas.tsx` (mode `0600`, built on the `cursor/canvas` SDK) atomically inside that directory from the same reconciled payload as the board and its sibling detail page.
+A symlinked directory or non-regular destination is refused on stderr without failing the board build.
+This file is not inherited by secondmate homes because the destination path is host- and workspace-local.
+`bin/fm-bearings-board.sh`'s header owns the build output and payload mechanics.
 
 ## Generated system-state card (data/system-state.md)
 
@@ -961,6 +974,8 @@ A durable handled acknowledgement stops future source re-announcement, while a r
 
 Discovery is never a timer.
 Each registered source has its own child process blocking on that source, and the watcher's per-cycle `reconcile` republishes every captured result with no durable handled acknowledgement yet - regardless of any earlier publication - restarts a source whose owner is gone, and stops this home's runner when reconciliation runs after its registration disappeared unexpectedly.
+While the result inbox is unchanged, reconciliation visits the unhandled-result workset instead of scanning retained handled results; inbox changes trigger legacy-result discovery so results from pre-upgrade runners are not lost.
+`bin/fm-procevent-lib.sh` owns the workset and fallback mechanics.
 In supported steady state, a home with no registered source runs nothing, generates no state, and keeps its ordinary cadence.
 
 Whether a captured result is a routine no-op is adapter knowledge too, and the runner names no adapter-specific condition for it either.
@@ -1138,11 +1153,11 @@ FM_GUARD_READ_ONLY=0    # internal/read-only guard mode: keep alarms but suppres
 FM_GUARD_CONTINUE_LINE='This is a supervision warning only; the guarded operation WILL still run.'   # banner continuation line; fm-send.sh overrides it to name the requested message specifically
 FM_POLL=15              # seconds between watcher poll cycles
 FM_HOME_SUMMARY_INTERVAL=300   # seconds before a live watcher refreshes this home's state/home-summary.json even without a status signal; invalid or zero values use 300
-FM_HOME_SUMMARY_TIMEOUT=60     # seconds bounding the complete best-effort home-summary refresh, including lock acquisition, validation, atomic publication, and worker-side failure logging; invalid or zero values use 60
+FM_HOME_SUMMARY_TIMEOUT=60     # seconds bounding each home-summary refresh, including startup's independent deferred attempt, lock acquisition, validation, and atomic publication; invalid or zero values use 60
 FM_HOME_SUMMARY_ERROR_LOG_MAX_BYTES=65536   # approximate size cap for state/.home-summary-refresh.log before it is trimmed to the newest 200 lines; invalid or zero values use 65536
 FM_HOME_SUMMARY_FAILURE_REPORT=2   # recorded publication failures since the ledger's own last publication before session start reports a HOME_SUMMARY line; invalid or zero values use 2
 FM_SNAPSHOT_CREW_STATE_TIMEOUT=10   # seconds bounding each local per-task current-state read inside bin/fm-fleet-snapshot.sh; remote endpoint liveness is not probed on the snapshot path
-FM_SNAPSHOT_LOCAL_READ_CONCURRENCY=8   # maximum local tasks whose current-state and endpoint observations are collected concurrently during snapshot composition
+FM_SNAPSHOT_LOCAL_READ_CONCURRENCY=8   # maximum tasks observed or composed concurrently during snapshot collection
 FM_SNAPSHOT_BUDGET=5                # one total seconds budget for all concurrent remote home-ledger reads
 FM_SNAPSHOT_CACHE_DIR=$FM_HOME/state/secondmate-summary-cache   # private parent-side cache of successfully fetched remote home ledgers
 FM_SNAPSHOT_UNDATED_HOLD_AGE_DAYS=14  # floored elapsed-day threshold at which an undated captain hold (no hold-until; age from its UTC hold-set timestamp, falling back to since for legacy unstamped holds) is projected as a Charted Next gate instead of a live Captain's Call; 0 applies once the computed age is non-negative

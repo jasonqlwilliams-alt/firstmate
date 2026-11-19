@@ -848,7 +848,10 @@ test_pool_slot_same_home_moved_owner_claim_is_taken() {
   read_case_record "$rec"
   lay_out_as_pool_slot
   moved="$CASE_DIR/slots/2/project"
-  mkdir -p "$moved"
+  git -C "$PROJECT_DIR" worktree add --quiet --detach "$moved" HEAD
+  jq --arg moved "$moved" '.worktrees += [{name:"2",path:$moved,leased:true}]' \
+    "$CASE_DIR/slots/treehouse-state.json" > "$CASE_DIR/state-next"
+  mv "$CASE_DIR/state-next" "$CASE_DIR/slots/treehouse-state.json"
   fm_write_meta "$HOME_DIR/state/$sibling.meta" \
     "window=firstmate:fm-$sibling" "endpoint_task_id=$sibling" \
     "worktree=$moved" "project=$PROJECT_DIR" "kind=scout"
@@ -869,7 +872,10 @@ test_pool_slot_same_home_moved_owner_claim_is_taken() {
   read_case_record "$rec"
   lay_out_as_pool_slot
   moved="$CASE_DIR/slots/2/project"
-  mkdir -p "$moved"
+  git -C "$PROJECT_DIR" worktree add --quiet --detach "$moved" HEAD
+  jq --arg moved "$moved" '.worktrees += [{name:"2",path:$moved,leased:true}]' \
+    "$CASE_DIR/slots/treehouse-state.json" > "$CASE_DIR/state-next"
+  mv "$CASE_DIR/state-next" "$CASE_DIR/slots/treehouse-state.json"
   mate="$CASE_DIR/mate"
   mkdir -p "$mate/state" "$mate/data"
   printf '%s\n' "- mate - fixture (home: $mate; scope: test; projects: project; added 2026-01-01)" \

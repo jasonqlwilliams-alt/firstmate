@@ -1828,6 +1828,7 @@ test_landed_preserves_kindless_v1_summary_reports() {
       {id:"legacy-pr",title:"Merged change",report_path:"data/scout/report.md",pr_url:"https://github.com/o/r/pull/1",completion:{verb:"merged",date:"2026-09-01"}},
       {id:"legacy-local",title:"Local delivery",report_path:"data/scout/report.md",local_note:"local main",completion:{verb:"done",date:"2026-09-01"}}
     ] | .counts.landed = (.landed | length)
+      | .queued[1].report_path = "data/remote-aged/report.md"
   ' "$remote_home/state/home-summary.json" > "$remote_home/state/legacy-summary.json"
   mv "$remote_home/state/legacy-summary.json" "$remote_home/state/home-summary.json"
   for freshness in fresh cached; do
@@ -1840,6 +1841,9 @@ test_landed_preserves_kindless_v1_summary_reports() {
         {id:"legacy-pr",artifact:"https://github.com/o/r/pull/1",owner:"ledger-1"},
         {id:"legacy-report",artifact:"data/scout/report.md",owner:"ledger-1"}
       ]
+      and (.landed | all(.report == "data/scout/report.md" and .report_remote == true))
+      and (.gates | any(.id == "remote-aged" and .report == "data/remote-aged/report.md"
+        and .report_remote == true))
     ' >/dev/null || fail "kindless v1 $freshness artifacts were lost: $json"
     rm -f "$remote_home/state/home-summary.json"
     epoch=1200
@@ -2535,6 +2539,99 @@ EOF
   pass "Underway rows carry the durable task name and gates carry their filed date"
 }
 
+# The board detail page reads every Charted Next and Recently Landed fact from
+# this projection: blockers by title, the date a gate has waited since, and each
+# row's report and PR links, so they must be projected rather than scraped.
+test_gates_and_landed_carry_detail_page_facts() {
+  local home mate fakebin json toon
+  home=$(make_home detail-facts)
+  : > "$home/data/secondmates.md"
+  mate="$TMP_ROOT/detail-facts-mate-home"
+  make_valid_secondmate_home detail-mate "$mate"
+  append_secondmate_registry "$home" detail-mate "$mate"
+  cat > "$home/data/backlog.md" <<'EOF'
+## In flight
+
+## Queued
+- [ ] upstream-work - Land the upstream schema change (repo: firstmate) (kind: ship) (since 2026-07-02)
+- [ ] waiting-gate - Waits on the schema change (blocked-by: missing-work) blocked-by: upstream-work - needs the new schema (repo: firstmate) (kind: ship) (since 2026-07-03)
+- [ ] held-gate - Deferred captain call (repo: firstmate) (kind: captain) (since 2026-06-20) (hold: revisit with the captain) (hold-kind: captain) (hold-until: 2026-08-01)
+  Captain hold set: 2026-07-05T09:30:00Z
+
+## Done
+- [x] shipped-work - Ship the board links (repo: firstmate) (kind: ship) (since 2026-07-01) (merged 2026-07-09) https://github.com/example/firstmate/pull/41
+- [x] scouted-work - Investigate the ledger (repo: firstmate) (kind: scout) (since 2026-06-30) (reported 2026-07-08) data/scouted-work/report.md
+EOF
+  mkdir -p "$home/data/scouted-work" "$home/data/held-gate"
+  printf '# report\n' > "$home/data/scouted-work/report.md"
+  printf '# held report\n' > "$home/data/held-gate/report.md"
+  fm_write_meta "$home/state/waiting-gate.meta" \
+    "window=firstmate:fm-waiting-gate" "project=firstmate" "harness=claude" \
+    "kind=ship" "pr=https://github.com/example/firstmate/pull/42"
+  cat > "$mate/data/backlog.md" <<'EOF'
+## In flight
+
+## Queued
+- [ ] mate-first - First mate-side step (repo: sample) (kind: ship) (since 2026-07-04)
+- [ ] mate-second - Second mate-side step https://github.com/example/sample/pull/8 data/mate-second/report.md blocked-by: mate-first (repo: sample) (kind: ship) (since 2026-07-06)
+
+## Done
+- [x] mate-shipped - Mate-side delivery (repo: sample) (kind: ship) (since 2026-07-02) (merged 2026-07-10) https://github.com/example/sample/pull/7
+EOF
+  fakebin=$(make_fakebin "$home")
+  json=$(run "$home" "$fakebin" --json)
+  printf '%s' "$json" | jq -e --arg home "$home" --arg mate "$mate" '
+    (.gates | any(.id == "waiting-gate" and .waits_since == "2026-07-03" and .owner == "(main)"
+      and .pr_url == "https://github.com/example/firstmate/pull/42" and .report == null))
+      and (.gates | any(.id == "held-gate" and .filed == "2026-06-20"
+        and .waits_since == "2026-07-05T09:30:00Z"
+        and .report == ($home + "/data/held-gate/report.md") and .pr_url == null))
+      and (.gates | any(.id == "mate-second" and .owner == "detail-mate" and .waits_since == "2026-07-06"
+        and .pr_url == "https://github.com/example/sample/pull/8"
+        and .report == ($mate + "/data/mate-second/report.md")))
+      and ([.gate_blockers[] | select(.gate == "waiting-gate")]
+        == [{gate:"waiting-gate", owner:"(main)", id:"missing-work", title:null},
+            {gate:"waiting-gate", owner:"(main)", id:"upstream-work", title:"Land the upstream schema change"}])
+      and ([.gate_blockers[] | select(.gate == "mate-second")]
+        == [{gate:"mate-second", owner:"detail-mate", id:"mate-first", title:"First mate-side step"}])
+      and (.landed | any(.id == "shipped-work" and .filed == "2026-07-01" and .landed_on == "2026-07-09"
+        and .pr_url == "https://github.com/example/firstmate/pull/41" and .report == null))
+      and (.landed | any(.id == "scouted-work" and .landed_on == "2026-07-08"
+        and .report == "data/scouted-work/report.md" and .pr_url == null))
+      and (.landed | any(.id == "mate-shipped" and .owner == "detail-mate" and .filed == "2026-07-02"
+        and .landed_on == "2026-07-10"))
+  ' >/dev/null || fail "gates or landed rows lack the detail page facts: $json"
+  toon=$(run "$home" "$fakebin")
+  assert_contains "$toon" "gate_blockers[" "TOON did not render the gate blocker table"
+  assert_contains "$toon" "Land the upstream schema change" "TOON did not carry the blocker title"
+  pass "gates carry waits-since and blockers by title, and landed rows carry their dates and links"
+}
+
+test_secondmate_blocker_title_survives_queued_cap() {
+  local home mate fakebin json n
+  home=$(make_home capped-blocker-title)
+  : > "$home/data/secondmates.md"
+  mate="$TMP_ROOT/capped-blocker-mate-home"
+  make_valid_secondmate_home capped-mate "$mate"
+  append_secondmate_registry "$home" capped-mate "$mate"
+  printf '## In flight\n\n## Queued\n' > "$mate/data/backlog.md"
+  printf '%s\n' '- [ ] old-blocker - Original blocking work (repo: sample) (kind: ship) (since 2026-07-01)' >> "$mate/data/backlog.md"
+  for n in $(seq 2 21); do
+    printf -- '- [ ] mate-gate-%02d - Gate %02d%s (repo: sample) (kind: ship) (since 2026-07-%02d)\n' \
+      "$n" "$n" "$(if [ "$n" -eq 21 ]; then printf ' blocked-by: old-blocker'; fi)" "$n" >> "$mate/data/backlog.md"
+  done
+  printf '\n## Done\n' >> "$mate/data/backlog.md"
+  fakebin=$(make_fakebin "$home")
+  json=$(FM_SNAPSHOT_SECONDMATE_QUEUED=20 run "$home" "$fakebin" --json)
+  printf '%s' "$json" | jq -e '
+    (.gates | any(.id == "mate-gate-21" and .owner == "capped-mate"))
+      and (.gates | any(.id == "old-blocker") | not)
+      and (.gate_blockers | any(.gate == "mate-gate-21" and .owner == "capped-mate"
+        and .id == "old-blocker" and .title == "Original blocking work"))
+  ' >/dev/null || fail "the queued cap hid the owning home blocker title: $json"
+  pass "a shown secondmate gate retains a blocker title beyond the queued cap"
+}
+
 # A gate row whose title exceeds 60 characters and whose reason exceeds 40 must
 # survive the projection intact without clipping.
 test_gate_projection_preserves_full_title_and_reason() {
@@ -3075,7 +3172,7 @@ SH
 
 test_large_local_snapshot_overlaps_local_reads_without_projection_drift() {
   local home fakebin worktree serial parallel parallel_file snapshot_pid i
-  local serial_started serial_elapsed parallel_started parallel_elapsed saved
+  local serial_started serial_elapsed parallel_started parallel_elapsed saved real_jq
   home=$(make_home large-local-snapshot)
   worktree="$home/projects/shared-worktree"
   fm_git_init_commit "$worktree"
@@ -3117,10 +3214,9 @@ SH
   serial=$(FAKE_NM_DELAY=0 FM_SNAPSHOT_LOCAL_READ_CONCURRENCY=1 run "$home" "$fakebin" --json)
 
   # Serialized reads pay every worker's delay end to end while concurrent reads
-  # overlap them. Time both runs and compare, because the two pay the same
-  # composition overhead: the difference isolates the overlap this change
-  # delivers, where an absolute wall-clock budget would instead measure how
-  # loaded the host happens to be and flake on a busy runner.
+  # overlap them. Compare the complete runs: both observations and independent
+  # row composition use the configured cap. An absolute wall-clock budget would
+  # instead measure host load and flake on a busy runner.
   serial_started=$(date +%s)
   FAKE_NM_DELAY=1 FM_SNAPSHOT_LOCAL_READ_CONCURRENCY=1 \
     run "$home" "$fakebin" --json >/dev/null \
@@ -3160,7 +3256,27 @@ SH
       and ([.in_flight[].id] | sort) == ["local-1","local-2","local-3","local-4","local-5"]
       and ([.in_flight[] | select(.id == "local-1" and .kind == "ship")] | length) == 1
   ' >/dev/null || fail "large local snapshot lost a worker row: $parallel"
-  pass "large local snapshot overlaps local reads with byte-identical serial and concurrent projections"
+  # A failed parallel row must fail the public command before publishing any
+  # inventory. Make only one final task-row composition fail, after observations
+  # succeeded, and assert that the injection actually ran.
+  real_jq=$(command -v jq)
+  cat > "$fakebin/jq" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}:${2:-}:${3:-}:${4:-}" = '-n:--arg:id:local-3' ]; then
+  : > "$COMPOSE_FAILURE_MARKER"
+  exit 1
+fi
+exec "$REAL_JQ" "$@"
+SH
+  chmod +x "$fakebin/jq"
+  if REAL_JQ="$real_jq" COMPOSE_FAILURE_MARKER="$home/composition-failed" \
+    FM_SNAPSHOT_LOCAL_READ_CONCURRENCY=8 \
+    run "$home" "$fakebin" --json > "$home/failed.json" 2> "$home/failed.err"; then
+    fail "failed parallel task composition published a successful snapshot"
+  fi
+  [ -f "$home/composition-failed" ] || fail "task-row failure injection never ran"
+  [ ! -s "$home/failed.json" ] || fail "failed composition published a partial inventory"
+  pass "large local snapshot preserves serial parity and refuses a failed parallel row"
 }
 
 test_remote_ledgers_share_one_concurrent_budget_and_fall_back_to_cache() {
@@ -3378,6 +3494,8 @@ test_active_children_project_independent_of_home_captain_hold
 test_nameless_legacy_summary_uses_its_durable_identifier
 test_newest_filed_gates_are_selected_before_snapshot_bounds
 test_underway_and_gate_rows_carry_the_durable_name_and_filed_date
+test_gates_and_landed_carry_detail_page_facts
+test_secondmate_blocker_title_survives_queued_cap
 test_gate_projection_preserves_full_title_and_reason
 test_mixed_secondmate_roles_partial_state_and_captain_readiness
 test_main_captain_readiness_matches_secondmate_projection

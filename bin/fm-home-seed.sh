@@ -388,15 +388,26 @@ seeded_origin_url() {
 }
 
 acquire_treehouse_home() {
-  local id=$1 home
+  local id=$1 home lock rc=0
+  lock=$(fm_treehouse_project_lock_path "$FM_ROOT") || return 1
+  fm_lock_try_acquire "$lock" || {
+    echo "error: another Treehouse allocation or return is in progress; refusing to race it" >&2
+    return 1
+  }
+  if ! fm_treehouse_require_recorded_leases "$FM_ROOT" "$STATE"; then
+    fm_lock_release "$lock"
+    return 1
+  fi
   # Durably lease a firstmate worktree from the pool. The lease persists with no
   # live process and is skipped by later get/prune, so the home survives restarts
   # until teardown or rollback returns it. treehouse prints only the worktree path
   # to stdout (banners go to stderr), so command substitution captures the path.
-  home=$(cd "$FM_ROOT" && treehouse get --lease --lease-holder "$id") || {
+  home=$(cd "$FM_ROOT" && treehouse get --lease --lease-holder "$id") || rc=$?
+  fm_lock_release "$lock"
+  if [ "$rc" -ne 0 ]; then
     echo "error: treehouse get --lease failed to lease a firstmate home" >&2
     return 1
-  }
+  fi
   [ -n "$home" ] || { echo "error: treehouse get --lease did not report a firstmate home" >&2; return 1; }
   printf '%s\n' "$home"
 }

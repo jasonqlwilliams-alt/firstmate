@@ -30,7 +30,8 @@
 #              every uncommitted change. Interrupts first when the task reads
 #              busy, then submits the harness's exit command. Postcondition:
 #              the backend's recovery-grade classifier reports the agent gone.
-#              Codex requires a proven empty composer before typing /quit and
+#              Codex sign-in uses TERM on one verified native process, with no
+#              keys. Other Codex exits require an empty composer before /quit and
 #              refuses its global-update picker or uncertain screen before
 #              every Enter, including retries. After each Enter it waits,
 #              bounded and without further input, for the Codex process to
@@ -479,7 +480,7 @@ retire_busy_incarnation() {
 # (fm_backend_guarded_composer_state in bin/fm-backend.sh, which owns the Codex
 # global-update picker recognition) for this task's endpoint.
 codex_exit_screen_state() {  # [expected-pending] -> update-picker|empty|pending|pending-unproven|unknown
-  fm_backend_guarded_composer_state "$BACKEND" "$T" "$LABEL" "${1:-}"
+  fm_backend_guarded_composer_state "$BACKEND" "$T" "$LABEL" "${1:-}" codex
 }
 
 # Codex exit owns its literal/Enter sequence so every Enter is preceded by a
@@ -531,6 +532,30 @@ codex_exit_submit() {  # <literal-exit-command>
   done
 }
 
+# No input is safe at authentication. Signal one identity-verified foreground
+# Codex process only, resampling screen, endpoint ownership and process birth
+# immediately before TERM. An unreadable or changed observation refuses.
+codex_signin_exit() {
+  local pid identity current_identity current_pid state
+  pid=$(fm_backend_codex_agent_pid "$BACKEND" "$T") \
+    || die "task $ID shows Codex sign-in but its exact native process cannot be verified; refusing to signal"
+  identity=$(LC_ALL=C ps -p "$pid" -o lstart= -o comm= 2>/dev/null) \
+    || die "task $ID's Codex process identity is unreadable; refusing to signal"
+  [ -n "$identity" ] && [ "$(codex_exit_screen_state)" = sign-in ] \
+    || die "task $ID's Codex sign-in screen changed; refusing to signal"
+  current_pid=$(fm_backend_codex_agent_pid "$BACKEND" "$T") \
+    || die "task $ID's Codex endpoint identity changed; refusing to signal"
+  current_identity=$(LC_ALL=C ps -p "$pid" -o lstart= -o comm= 2>/dev/null) \
+    || die "task $ID's Codex process disappeared before signalling"
+  [ "$current_pid" = "$pid" ] && [ "$current_identity" = "$identity" ] \
+    || die "task $ID's Codex process identity changed; refusing to signal"
+  kill -TERM "$pid" 2>/dev/null || die "could not signal task $ID's verified Codex sign-in process"
+  state=$(wait_agent_state "$EXIT_WAIT" dead) \
+    || die "task $ID's Codex sign-in process received TERM but stop is unconfirmed (agent-state=$state)"
+  retire_busy_incarnation
+  printf 'stopped-sign-in'
+}
+
 # do_exit: stop the running agent, preserving endpoint and worktree. Returns
 # `already-stopped`, `stopped`, or Codex's
 # `process-stopped-safe-quit-unconfirmed` after lifecycle input.
@@ -550,6 +575,10 @@ do_exit() {
     screen=$(codex_exit_screen_state)
     [ "$screen" != update-picker ] \
       || die "task $ID shows the Codex global-update picker; refusing lifecycle keys and exit text"
+    if [ "$screen" = sign-in ]; then
+      codex_signin_exit
+      return $?
+    fi
   fi
   # A busy agent is interrupted first before the exit command is submitted.
   case "$(busy_verdict)" in
