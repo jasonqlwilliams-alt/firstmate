@@ -301,7 +301,24 @@ test_build_refuses_malformed_payloads_before_touching_the_board() {
   set +e; out=$(run_board "$home" build "$data" 2>&1); rc=$?; set -e
   [ "$rc" -ne 0 ] || fail "a non-HTTPS Landed PR URL was accepted"
 
+  for bad_detail in \
+    '.charted[0].waits_since = "yesterday"' \
+    '.charted[0].pr_url = "javascript:alert(1)"' \
+    '.charted[0].blockers = [{"id": "", "title": "missing id"}]' \
+    '.charted[0].blockers = [{"id": "ok-id", "title": 42}]' \
+    '.charted[0].owner = 42' \
+    '.charted[0].report = ["bad"]' \
+    '.landed = [{"id":"sample-landed","repo":"sample","what":"Landed","owner":"(main)","landed_on":"2026-02-29"}]' \
+    '.landed = [{"id":"sample-landed","repo":"sample","what":"Landed","owner":"(main)","filed":"not-a-date"}]' \
+    '.landed = [{"id":"sample-landed","repo":"sample","what":"Landed","owner":"(main)","report":123}]'; do
+    write_valid_payload "$data"
+    jq "$bad_detail" "$data" > "$data.tmp" && mv "$data.tmp" "$data"
+    set +e; out=$(run_board "$home" build "$data" 2>&1); rc=$?; set -e
+    [ "$rc" -ne 0 ] || fail "a malformed detail field was accepted: $bad_detail"
+  done
+
   assert_absent "$board" "a refused payload still produced a board"
+  assert_absent "$home/.lavish/bearings-detail.html" "a refused payload still produced a detail page"
   pass "build refuses malformed payloads before touching the board"
 }
 

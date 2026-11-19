@@ -16,7 +16,7 @@ Generate a complete current snapshot from the fleet's current state, so the capt
 Plain `/bearings` returns only the concise four-section chat digest.
 Only `/bearings file` writes the dated markdown report artifact and then returns the concise four-section chat digest linked to that report.
 Only `/bearings lavish` builds the interactive fleet board beside that digest, through `bin/fm-bearings-board.sh` (its header owns every board mechanic and the fm-bearings-board.v1 payload contract).
-A digest/build invocation is operationally read-only apart from observational remote-ledger cache refreshes, durable per-target reconcile-notify requests when the captured state needs them, plus the explicit per-mode artifacts: the dated report in file mode, and in lavish mode the board file plus the answer binding and source registration that `bin/fm-bearings-board.sh build` records through their own owners.
+A digest/build invocation is operationally read-only apart from observational remote-ledger cache refreshes, durable per-target reconcile-notify requests when the captured state needs them, plus the explicit per-mode artifacts: the dated report in file mode, and in lavish mode the board artifacts described by `bin/fm-bearings-board.sh` plus its answer binding and source registration.
 During that invocation it never tears down a task, merges a PR, dispatches new work, steers a worker, answers a decision, cleans up work, or mutates backlog or task state.
 Board answers are acted on later under the normal authority rules; this skill's board-wake section explicitly owns the guarded routing at that time.
 
@@ -89,8 +89,8 @@ Board answers are acted on later under the normal authority rules; this skill's 
 
 ## Lavish board mode
 
-`/bearings lavish` adds one deliverable beside the unchanged chat digest: the interactive fleet board, a myfirstmate-styled Lavish page where the captain answers Captain's Call items directly instead of replying in chat.
-`bin/fm-bearings-board.sh` owns every board mechanic - the stable board path, fm-bearings-board.v1 payload validation, template injection, live Lavish session verification and ended-session reopening, the any-origin answer binding, and listener registration - so the per-invocation work is composing the payload and running its `build`.
+`/bearings lavish` adds an interactive fleet board and its linked companion detail page beside the unchanged chat digest; the captain answers Captain's Call items on the board instead of replying in chat.
+`bin/fm-bearings-board.sh` owns every board mechanic - the stable board path, the static sibling detail page linked from the board's navigation and its Charted Next and Recently Landed headers, the optional Cursor Canvas export, fm-bearings-board.v1 payload validation, template injection, live Lavish session verification and ended-session reopening, the any-origin answer binding, and listener registration - so the per-invocation work is composing the payload and running its `build`.
 
 Compose the payload from the same snapshot with the same ranking judgment as the chat digest, plus these board rules:
 
@@ -113,6 +113,9 @@ Compose the payload from the same snapshot with the same ranking judgment as the
 - Every Charted Next row copies the snapshot gate's durable filed date into `filed`, and the board orders the section by it, newest filed first.
   Follow `bin/fm-bearings-board.sh`'s payload contract for the accepted format.
   Omit it or pass null for a row with no durable filed date - the main-inventory or return-catchup warning, an unavailable secondmate home, or a queued row filed before dates were recorded - and the board keeps those rows in payload order after every dated row.
+- For the companion detail page and optional canvas export, every Charted Next row also copies `waits_since`, `owner`, `pr_url`, `report`, and `report_remote` from its snapshot `gates` entry, plus `blockers` as the `{id, title}` entries from `gate_blockers` matching that gate's `id` and `owner`.
+  Every Recently Landed row likewise copies `filed`, `landed_on`, `pr_url`, `report`, and `report_remote` from its snapshot `landed` entry.
+  Omit or pass null for any of those fields when the snapshot has no recorded value, and never invent or scrape them from prose.
 - Every Captain's Call item and every Underway, Recently Landed, and Charted Next row carries an explicit `repo` field. Fill it from the snapshot and task records wherever known; use null or an empty string only as the deliberate genuinely-no-repo marker, in which case the template may show the internal id. Ids otherwise stay in the payload only as the routing channel, and any prose you compose names blockers in plain words.
 
 Run `build` once after composing the payload.
@@ -185,7 +188,7 @@ Rules that keep the contract unambiguous:
 
 ## Supervision discipline
 
-During a digest/build invocation, this skill changes no fleet state beyond observational remote-ledger cache refreshes, durable local per-target reconcile-notify requests, explicit report or board artifacts, binding, and source registration.
+During a digest/build invocation, this skill changes no fleet state beyond observational remote-ledger cache refreshes, durable local per-target reconcile-notify requests, the explicit artifacts described above, binding, and source registration.
 Do not tear down a task, merge a PR, dispatch queued work, steer a worker, answer a queued decision, clean up work, or mutate any other `state/` or `data/` file during that invocation.
 If the state gathered for the digest suggests an action, name it in its section and leave it to the normal lifecycle and configured authority.
 On a later board wake, this read-only invocation rule yields to "Handling a board wake" and its guarded authority for captain-selected dispatches and merges.

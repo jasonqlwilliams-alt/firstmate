@@ -146,11 +146,17 @@ remote homes under one shared snapshot budget and may refresh the parent-side ca
 Default fields: schema, home, generated, prs, in_flight{id,kind,state,repo,name,doing},
   secondmates{id,state,doing,provenance,freshness,age_seconds,contradiction,reason},
   secondmate_reconcile{id,spawn_gen,host,kind,ids},
-  decisions_open{id,key,verb,summary,owner}, landed{id,what,artifact,owner},
-  gates{id,title,blocked_by,reason,owner,filed}, reports{id,path}, recorded_prs{id,url},
+  decisions_open{id,key,verb,summary,owner},
+  landed{id,what,artifact,owner,filed,landed_on,pr_url,report,report_remote},
+  gates{id,title,blocked_by,reason,owner,filed,waits_since,pr_url,report,report_remote},
+  gate_blockers{gate,owner,id,title}, reports{id,path}, recorded_prs{id,url},
   unhealthy_endpoints{...} (only when non-empty), omitted{surface,reveal}.
 Default gates are selected newest filed first before their bound; undated gates
   retain input order after dated gates.
+A gate's waits_since is its captain-hold stamp when one is recorded, else its filed
+  date. gate_blockers names every unresolved blocker of each shown gate, keyed by
+  gate id and owner, with the blocker's title from the owning home's records (null
+  when that home's projected records do not carry it).
 landed merges this home's Done with registered secondmate homes' Done, bounded by
   a per-home cap (FM_BEARINGS_LANDED_PER_HOME) and an overall cap (FM_BEARINGS_LANDED),
   with omitted[] disclosure. Default selection is balanced across deterministic home
@@ -416,11 +422,31 @@ MODEL=$(printf '%s' "$SNAP" | jq \
            + ($base | fit($context_n - $title_n)))
         end
       end;
-  def as_gate($owner):
+  # A gate carries every unresolved blocker by title in a private _blockers
+  # list, looked up in the records of the owning home; the final projection
+  # moves it into the flat gate_blockers[] table so TOON stays scalar.
+  def as_gate($owner; $titles; $prs; $reports; $remote):
     {id, title:(.title | clean),
      blocked_by:((.unresolved_blocker_ids // []) | if length > 0 then join(",") else "-" end | trunc(120)),
      reason:(hold_gate_reason | clean), owner:$owner,
-     filed:((.since // null) | trunc(40))};
+     filed:((.since // null) | trunc(40)),
+     waits_since:((.hold_set // .since // null) | trunc(40)),
+     pr_url:((.pr_url // $prs[.id] // null) | trunc(500)),
+     report:((.report_path // $reports[.id] // null) | trunc(500)),
+     report_remote:$remote,
+     _blockers:(.blockers // [(.unresolved_blocker_ids // [])[] | tostring
+       | {id:., title:(($titles[.] // null) | clean | trunc(120))}])};
+  def gate_shape:
+    {id, title, blocked_by, reason, owner, filed,
+     waits_since:(.waits_since // null), pr_url:(.pr_url // null),
+     report:(.report // null), report_remote:(.report_remote // false)};
+  def title_map: map(select(.id != null) | {key:(.id | tostring), value:(.title // .name // null)})
+    | map(select(.value != null)) | from_entries;
+  def resolve_report($home):
+    if (.report_path | type) == "string"
+      and (.report_path | startswith("/") | not)
+      and (.report_path | test("^(https?://|file://)") | not)
+    then .report_path = ($home + "/" + .report_path) else . end;
   def round_robin_landed($n):
     . as $groups
     | [range(0; (($groups | map(length) | max) // 0)) as $i
@@ -432,8 +458,9 @@ MODEL=$(printf '%s' "$SNAP" | jq \
   | (($fl | index("paths")) != null) as $f_paths
   | (($fl | index("actions")) != null) as $f_actions
   | (($fl | index("endpoints")) != null) as $f_endpoints
+  | ((.backlog.records // []) | title_map) as $main_titles
   | ([ .backlog.records[] | select(landed_record)
-       | {id, title, kind, hold_kind, pr_url, report_path, local_note, completion,
+       | {id, title, kind, hold_kind, pr_url, report_path, local_note, completion, since,
           home:"(main)", home_id:"(main)"} ]) as $main_done
   | ((.secondmate_landed.records) // []) as $mate_done
   | ($main_done + $mate_done) as $all_landed_rows
@@ -553,6 +580,13 @@ MODEL=$(printf '%s' "$SNAP" | jq \
          owner:"(main)",
          filed:null}]
      else [] end) as $return_catchup_gate
+  | ([ .scout_reports[]
+       | . as $r
+       | select(($all_reports == 1) or (($rel_ids | index($r.id)) != null))
+       | {id, path} ]) as $reports_all
+  | ([ .scout_reports[] | {key:(.id | tostring), value:.path} ] | from_entries) as $scout_report_map
+  | ([ .tasks[] | select(.kind != "secondmate" and .pr.url != null and .pr.source == "meta") | {id, url:.pr.url} ]) as $recorded_prs_all
+  | ([ $recorded_prs_all[] | {key:(.id | tostring), value:.url} ] | from_entries) as $meta_prs
   | ((if (.main_inventory.valid == false) then
         [{id:"(main-inventory)",
           title:((.main_inventory.reason // "main inventory invalid") | clean),
@@ -568,18 +602,14 @@ MODEL=$(printf '%s' "$SNAP" | jq \
               (.state == "in_flight" and .current_role == "held" and ($working_ids | index($record.id) | not))))
          | select(.captain_actionable != true)
          | select((.hold_bucket == null) or ($all_decisions == 0))
-         | as_gate("(main)") ]
+         | as_gate("(main)"; $main_titles; $meta_prs; $scout_report_map; false) ]
      + [ (.secondmate_current.records // [])[] as $m
          | select($m.provenance.selected == "structured-home")
          | $m.queued[]?
          | select(.captain_actionable != true)
          | select((.hold_bucket == null) or ($all_decisions == 0))
-         | as_gate($m.id) ]) as $gates_all
-  | ([ .scout_reports[]
-       | . as $r
-       | select(($all_reports == 1) or (($rel_ids | index($r.id)) != null))
-       | {id, path} ]) as $reports_all
-  | ([ .tasks[] | select(.kind != "secondmate" and .pr.url != null and .pr.source == "meta") | {id, url:.pr.url} ]) as $recorded_prs_all
+         | if $m.remote == true then . else resolve_report($m.home) end
+         | as_gate($m.id; {}; {}; {}; $m.remote == true) ]) as $gates_all
   | def filed_epoch:
       (.filed // null) as $filed
       | if ($filed | type) != "string" then null
@@ -590,7 +620,10 @@ MODEL=$(printf '%s' "$SNAP" | jq \
       | sort_by((.value | filed_epoch) as $epoch
           | if $epoch == null then [1, 0, .key] else [0, -$epoch, .key] end)
       | map(.value);
-    . as $snap
+    ($return_catchup_gate
+     + ($gates_all | newest_filed_first
+        | if $all_queued == 1 then . else .[:$gates_n] end)) as $shown_gates
+  | . as $snap
   | {
       schema: "fm-bearings.v1",
       home: $home,
@@ -603,10 +636,17 @@ MODEL=$(printf '%s' "$SNAP" | jq \
         | {id, spawn_gen:(.spawn_gen // null), host:(.host // null), kind:(.reconcile_inventory.kind // null), ids:((.reconcile_inventory.ids // []) | map(select(type == "string")) | sort)} ],
       decisions_open: (if $all_decisions == 1 then $decisions_all else $decisions_all[:$decisions_n] end),
       landed: ($done | map({id, what:(.title | trunc(70)),
-                            artifact:(landed_artifact // "-"),owner:.home_id})),
-      gates: ($return_catchup_gate
-              + ($gates_all | newest_filed_first
-                 | if $all_queued == 1 then . else .[:$gates_n] end)),
+                            artifact:(landed_artifact // "-"),owner:.home_id,
+                            filed:((.since // null) | trunc(40)),
+                            landed_on:((.completion.date // null) | trunc(40)),
+                            pr_url:((.pr_url // null) | trunc(500)),
+                            report:((if .home_id == "(main)" then .report_path
+                                     elif .remote == true then .report_path
+                                     else (resolve_report(.home) | .report_path) end // null) | trunc(500)),
+                            report_remote:(.remote == true)})),
+      gates: ($shown_gates | map(gate_shape)),
+      gate_blockers: [$shown_gates[] | . as $g | (._blockers // [])[]
+                      | {gate:$g.id, owner:$g.owner, id, title}],
       reports: (if $all_reports == 1 then $reports_all else $reports_all[:$reports_n] end),
       recorded_prs: (if $all_recorded_prs == 1 then $recorded_prs_all else $recorded_prs_all[:$recorded_prs_n] end)
     }
