@@ -897,14 +897,24 @@ fm_recovery_marker_reopen_announced() {
 }
 
 fm_lock_try_acquire() {
-  local lockdir=$1 pid steal cur rc steal_owner primary_owner current
+  local lockdir=$1 parent pid steal cur rc steal_owner primary_owner current
   FM_LOCK_HELD_PID=
   FM_LOCK_OWNER_DIR=
   FM_LOCK_RECOVERED_PID=
 
+  # A removed parent cannot hold a stale lock. Return to the caller's retry
+  # cadence instead of recursively chasing equally missing .steal paths.
+  parent=${lockdir%/*}
+  [ "$parent" != "$lockdir" ] || parent=.
+  [ -d "${parent:-/}" ] || return 1
+
   if fm_lock_try_create "$lockdir"; then
     return 0
   fi
+
+  # Removal can race creation, and a deleted working directory still passes
+  # the parent check for relative paths. There is no absent lock to reclaim.
+  [ -e "$lockdir" ] || [ -L "$lockdir" ] || return 1
 
   fm_current_pid current || return 1
   pid=$(cat "$lockdir/pid" 2>/dev/null || true)
@@ -996,6 +1006,8 @@ fm_lock_try_acquire() {
   return "$rc"
 }
 
+# Preserve the acquire-before-return contract even if the parent disappears:
+# retry at the ordinary 0.1s cadence, without recreating the parent directory.
 fm_lock_acquire_wait() {
   local lockdir=$1
   while ! fm_lock_try_acquire "$lockdir"; do
@@ -1035,8 +1047,9 @@ _fm_lock_acquire_wait_handoff() {  # <lockdir> <caller-pid>
 # fm_lock_acquire_wait_bounded <lockdir> <positive-seconds>
 #
 # Bounded acquire variant. It preserves the ordinary wait/reclaim behavior
-# until fm-timeout-lib.sh's hard deadline, returns 124 when a live holder still
-# owns the lock, and leaves FM_LOCK_HELD_PID naming that holder.
+# until fm-timeout-lib.sh's hard deadline. A live holder yields 124 with
+# FM_LOCK_HELD_PID naming that holder; a lock parent still absent at the
+# deadline yields 1 without recreating the parent.
 # Use it where a caller must refuse rather than block: wake presentation, and
 # the guarded remote link clear, whose whole contract is to return a
 # reconciliation refusal instead of wedging an unattended close.
@@ -1053,6 +1066,7 @@ fm_lock_acquire_wait_bounded() {
   # shellcheck disable=SC2016 # Positional parameters expand in the child shell.
   if fm_run_timed "$seconds" env \
     "FM_STATE_OVERRIDE=$STATE" \
+    "FM_WAKE_NO_MKDIR=1" \
     "FM_ROOT_OVERRIDE=$FM_ROOT" \
     "FM_LOCK_STALE_AFTER=$FM_LOCK_STALE_AFTER" \
     bash -c '. "$1"; _fm_lock_acquire_wait_handoff "$2" "$3"' \
@@ -1341,18 +1355,10 @@ fm_treehouse_cross_clone_trust_valid() {  # <project-real> <worktree-real> [<cal
 
 # Slot-owner claim: which task a Treehouse pool slot currently belongs to.
 #
-# Treehouse can record ownership durably: `treehouse get --lease --lease-holder`
-# reserves a slot under a label until `treehouse return --if-lease-holder`
-# releases it, and Firstmate uses exactly that for secondmate homes
-# (bin/fm-home-seed.sh). Crewmate spawns do not take that path: they acquire
-# their slot through the interactive pane-driven `treehouse get`, whose state
-# entry is a live process lease (owner_pid plus owner_started_at, and `treehouse
-# status` reports in-use from the processes actually running under the path).
-# That answers "is anything running here", never "which task owns this", and it
-# is released by the very event that makes a task record stale - the worker
-# exiting - so a slot whose lease has lapsed reads identical whether it is still
-# this task's or has since been handed to another one. Firstmate therefore keeps
-# its own claim on top: one file naming the task that took the slot, written by
+# Treehouse's durable leases protect secondmate homes and worker slots until
+# return, even after their processes exit. A lease holder label alone cannot
+# prove which home and task record may return the slot. Firstmate keeps
+# its own claim too: one file naming the task that took the slot, written by
 # bin/fm-spawn.sh under the same project lock that allocates the slot and
 # released by bin/fm-teardown.sh when the slot goes back to the pool. A spawn
 # refuses to overwrite a claim that names a task from another home, including
@@ -1363,8 +1369,7 @@ fm_treehouse_cross_clone_trust_valid() {  # <project-real> <worktree-real> [<cal
 # is the supported drop of a leftover spawn must not take. When a still-live
 # claiming record is dead or missing and another live record occupies the
 # slot, bin/fm-teardown.sh --retire-stale-record transfers that claim to the
-# occupant. Moving crewmate
-# spawns onto the durable lease is separate follow-up work.
+# occupant.
 #
 # The claim lives at <pool>/<slot>/.fm-slot-owner - a sibling of the repo
 # checkout rather than a file inside it - so claiming a slot can never dirty the
@@ -1668,6 +1673,52 @@ fm_treehouse_slot_foreign_records() {  # <worktree> <exclude-meta>
     done
   done
   [ "$found" = 1 ]
+}
+
+# Refuse allocation before Treehouse can reset a recorded slot whose durable
+# lease is missing. Callers hold the project's allocation/return lock. Inspect
+# every reachable local home, including held and exited tasks: metadata, rather
+# than a running process, is the preservation boundary. This reads state only.
+fm_treehouse_require_recorded_leases() {  # <project> <record-state>
+  local project=$1 record_state=$2 state_dir meta field path slot pool state slot_name project_identity slot_identity
+  project_identity=$(fm_treehouse_repo_identity "$project") || return 1
+  fm_treehouse_collect_owner_states "$record_state" || return 1
+  for state_dir in "${FM_TREEHOUSE_OWNER_STATES[@]}"; do
+    for meta in "$state_dir"/*.meta; do
+      [ -e "$meta" ] || [ -L "$meta" ] || continue
+      [ -f "$meta" ] && [ ! -L "$meta" ] && [ -r "$meta" ] || {
+        echo "REFUSED: cannot inspect task record $meta before Treehouse allocation" >&2
+        return 1
+      }
+      for field in worktree home; do
+        path=$(_fm_treehouse_meta_field "$meta" "$field")
+        [ -n "$path" ] || continue
+        slot=$(fm_treehouse_canonical_dir "$path") || continue
+        pool=${slot%/*}; slot_name=${pool##*/}; pool=${pool%/*}
+        state="$pool/treehouse-state.json"
+        if [ -f "$state" ] && [ ! -L "$state" ] \
+           && jq -e '.worktrees | type == "array"' "$state" >/dev/null 2>&1; then
+          jq -e --arg slot "$slot" '.worktrees | any(.[]; .path == $slot)' "$state" >/dev/null 2>&1 || continue
+          fm_treehouse_pool_slot "$project" "$slot" || continue
+        else
+          case "$slot_name" in ''|*[!0-9]*) continue ;; esac
+          slot_identity=$(fm_treehouse_repo_identity "$slot") || {
+            echo "REFUSED: cannot verify recorded Treehouse-shaped path $slot before allocation; inspect task $(basename "$meta" .meta)" >&2
+            return 1
+          }
+          [ "$slot_identity" = "$project_identity" ] || continue
+        fi
+        if [ -L "$state" ] || ! jq -e --arg slot "$slot" '
+          .worktrees | map(select(.path == $slot))
+          | length == 1 and .[0].leased == true
+        ' "$state" >/dev/null 2>&1; then
+          echo "REFUSED: Treehouse pool slot $slot is still recorded by task $(basename "$meta" .meta) ($field) but lacks a durable lease; refusing allocation before Treehouse can reset that copy" >&2
+          echo "Repair its lease with the state-only treehouse lease command, or retire a stale record with fm-teardown.sh <id> --retire-stale-record; no allocation was sent" >&2
+          return 1
+        fi
+      done
+    done
+  done
 }
 
 fm_failure_episode_reset() {

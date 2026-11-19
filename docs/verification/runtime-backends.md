@@ -742,6 +742,30 @@ HERDR_LAB_HELPER=bin/fm-herdr-lab.sh \
 
 Observed guarantee: a restored no-agent tab was replaced create-before-close, while a registered live agent caused refusal.
 
+### Secondmate endpoint ownership and batch recovery
+
+Verified on 2026-11-14 with Herdr 0.9.5 on Linux, using registered fake agents and stubbed launch screens in a guarded named lab session.
+The test drives the real bootstrap sweep and spawn task-set lock; it launches no harness CLI.
+
+```sh
+bin/fm-test-run.sh tests/fm-secondmate-herdr-identity-e2e.test.sh tests/fm-secondmate-liveness.test.sh
+```
+
+Observed output:
+
+```text
+Herdr secondmate identity lab version: 0.9.5
+ok - bootstrap replaces both another secondmate and a non-secondmate recycled route
+ok - one bootstrap sweep recovers every missing secondmate without lock contention
+ok - failed recovery releases the sweep lock for the next secondmate
+ok - Herdr home binding: canonical creation cwd owns identity; foreign is missing, unreadable is preserved
+```
+
+The lab checks that foreign agents survive, matching ownership retains its route, unreadable home identity produces a diagnostic and preserves its route, and every successful replacement records a pane created in its own home.
+The portable fixture separately varies creation cwd, foreground cwd, symlink aliases, malformed responses, wrong echoed pane ids, and failed reads across live, agent-less, and stale-registration states.
+The default-session fleet tripwire is verified at teardown.
+This check depends on backend cwd metadata rather than harness-specific names or rendered titles, so its ownership rule is common to all supported local Herdr secondmate harnesses.
+
 ### Launcher workspace placement
 
 Herdr exports its pane identity into every process it manages, checked on 2026-07-30 against Herdr 0.7.5 protocol 17 inside a guarded lab pane:
@@ -1830,3 +1854,15 @@ A throwaway scout was spawned through `bin/fm-spawn.sh --scout --harness omp --m
 
 Claude Code 2.1.267 passed two consecutive accelerated quiet-lease lifecycle runs on Linux on 2026-09-10.
 [Supervision verification](supervision.md#claude-quiet-lease-renewal-2026-09-10) owns the exact commands, output, singleton and acknowledgement checks, and the distinction between accelerated proof and live-session activation.
+
+## Codex authentication stop regression
+
+On 2026-11-13, a single no-input capture with codex-cli 0.167.2, an empty `CODEX_HOME`, a throwaway cwd and a private tmux socket supplied the current chooser fixture.
+The portable regression `bin/fm-test-run.sh tests/fm-control-codex-signin.test.sh` renders that fixture and the legacy wording with compiled stand-ins, using tmux 3.7c and GCC 16.2.1.
+It reports `ok - captured sign-in screens stop without keys; single-signal and unsupported screens are refused`.
+It requires both context signals and only the captured legacy and current choice layouts; it refuses two-choice, API-key alias, mixed-choice, update, unknown, retained-history, repeated-footer, incomplete and wrong-process screens, and preserves an unrelated Codex-named process.
+
+The complete live stop check is `FM_CODEX_SIGNIN_LIVE=1 bin/fm-test-run.sh tests/fm-codex-signin-live-e2e.test.sh`.
+It is explicitly opt-in despite spending no model tokens because an accidental key at the update picker has broken a global installation.
+Its header owns isolation, no-input enforcement, exact-PID cleanup and optional private capture mechanics.
+The updated guard has been exercised with compiled stand-ins; the single live capture above predates the classifier update and does not claim a post-update live stop result.

@@ -338,3 +338,42 @@ EOF
 
 test_closing_verb_separates_resolution_from_durable_transfer
 test_closing_verb_tracks_the_last_transition_in_both_positions
+
+# Note-only consumers must not transport routine history through Bash strings,
+# while the ordinary reader keeps it available for delayed signal annotations.
+test_unread_surface_stream_preserves_capture_boundaries() {
+  local dir f endpoint raw filtered expected snapshot acknowledged
+  dir=$(case_dir unread-transport)
+  f="$dir/stream.status"
+  python3 - "$f" <<'PY'
+import sys
+with open(sys.argv[1], "w") as handle:
+    for i in range(300):
+        handle.write("working: " + "ordinary progress " * 100 + str(i) + "\n")
+    handle.write("needs-decision [key=choice]: preserve the decision\n")
+PY
+  endpoint=$(wc -c < "$f" | tr -d '[:space:]')
+  filtered=$(status_new_lines_since_cursor "$f" "$endpoint" unread-surface) \
+    || fail 'filtered status read failed'
+  [ -z "$filtered" ] || fail 'routine or decision history leaked into the informational stream'
+  snapshot=$(status_presentation_snapshot "$dir")
+  acknowledged=$(status_acknowledge_presented_snapshot "$dir" "$snapshot") \
+    || fail 'routine-only acknowledgement failed'
+  case "$acknowledged" in stream$'\t'0$'\t'*) ;; *) fail 'routine history was acknowledged before a delayed signal' ;; esac
+  printf '%s\n' 'note: informational fixture' \
+    'resolved [key=pending-reply-fixture]: pending-reply-resolved: fixture answer' >> "$f"
+  # New appends are outside the old capture even when they are informational.
+  filtered=$(status_new_lines_since_cursor "$f" "$endpoint" unread-surface) \
+    || fail 'bounded filtered read failed after append'
+  [ -z "$filtered" ] || fail 'filtered read crossed the captured endpoint'
+  expected=$(printf '%s\n' 'note: informational fixture' \
+    'resolved [key=pending-reply-fixture]: pending-reply-resolved: fixture answer')
+  filtered=$(status_new_lines_since_cursor "$f" '' unread-surface) \
+    || fail 'informational read failed after append'
+  [ "$filtered" = "$expected" ] || fail "filtered stream lost informational lines: $filtered"
+  raw=$(status_new_lines_since_cursor "$f") || fail 'default raw read failed'
+  [ "${#raw}" -gt 500000 ] || fail 'default reader dropped routine annotation history'
+  assert_contains "$raw" 'needs-decision [key=choice]' 'default reader dropped the decision'
+  pass 'informational filtering keeps raw history and captured cursor boundaries intact'
+}
+test_unread_surface_stream_preserves_capture_boundaries

@@ -164,6 +164,97 @@ hold_source_lock_then_handle() {  # <home> <source-id> <sequence> <ready-file> <
   HOLDER_PID=$!
 }
 
+test_handled_result_history() {
+# Retained results from offline/unregistered sources are common. Reconcile
+# must skip handled history before payload/adapter reads, yet keep publishing
+# an unhandled result even when its registration no longer exists.
+HHISTORY="$TMP_ROOT/handled-history"; new_home "$HHISTORY"
+mkdir -p "$HHISTORY/state/procevent-inbox" "$HHISTORY/fakebin"
+HISTORY_CAT=$(command -v cat)
+cat > "$HHISTORY/fakebin/cat" <<'SH'
+#!/usr/bin/env bash
+printf 'cat\n' >> "$FM_HISTORY_COMMANDS"
+exec "$FM_HISTORY_CAT" "$@"
+SH
+chmod +x "$HHISTORY/fakebin/cat"
+printf 'pending result\n' > "$HHISTORY/state/procevent-inbox/offline.9000.result"
+printf 'lavish\n' > "$HHISTORY/state/procevent-inbox/offline.9000.adapter"
+for ((history_i = 0; history_i < 50; history_i++)); do
+  printf 'retained payload\n' > "$HHISTORY/state/procevent-inbox/offline.$history_i.result"
+  printf 'lavish\n' > "$HHISTORY/state/procevent-inbox/offline.$history_i.adapter"
+  : > "$HHISTORY/state/procevent-inbox/offline.$history_i.handled"
+done
+FM_PROCEVENT_CLAIM_ROOT="$HHISTORY/claims" pe "$HHISTORY" reconcile >/dev/null
+: > "$HHISTORY/commands"
+history_small_seconds=$({ TIMEFORMAT='%R'; time \
+  PATH="$HHISTORY/fakebin:$PATH" FM_HISTORY_CAT="$HISTORY_CAT" \
+  FM_HISTORY_COMMANDS="$HHISTORY/commands" FM_PROCEVENT_CLAIM_ROOT="$HHISTORY/claims" \
+  pe "$HHISTORY" reconcile > "$HHISTORY/reconcile.out"; } 2>&1)
+out=$(cat "$HHISTORY/reconcile.out")
+assert_contains "$out" "published=1" "the history cost probe exercises an unhandled result"
+history_before=$(wc -l < "$HHISTORY/commands")
+[ "$history_before" -gt 0 ] || fail "the result-read probe observed no external helper work"
+for ((history_i = 50; history_i < 3000; history_i++)); do
+  printf 'retained payload\n' > "$HHISTORY/state/procevent-inbox/offline.$history_i.result"
+  printf 'lavish\n' > "$HHISTORY/state/procevent-inbox/offline.$history_i.adapter"
+  : > "$HHISTORY/state/procevent-inbox/offline.$history_i.handled"
+done
+# Exercise migration from the large retained inbox, then compare steady state.
+rm "$HHISTORY/state/procevent-inbox/.pending/.ready-v1"
+FM_PROCEVENT_CLAIM_ROOT="$HHISTORY/claims" pe "$HHISTORY" reconcile >/dev/null
+: > "$HHISTORY/commands"
+history_large_seconds=$({ TIMEFORMAT='%R'; time \
+  PATH="$HHISTORY/fakebin:$PATH" FM_HISTORY_CAT="$HISTORY_CAT" \
+  FM_HISTORY_COMMANDS="$HHISTORY/commands" FM_PROCEVENT_CLAIM_ROOT="$HHISTORY/claims" \
+  pe "$HHISTORY" reconcile > "$HHISTORY/reconcile.out"; } 2>&1)
+out=$(cat "$HHISTORY/reconcile.out")
+assert_contains "$out" "published=1" "handled history never suppresses an unhandled offline result"
+[ "$(wc -l < "$HHISTORY/commands")" -eq "$history_before" ] \
+  || fail "handled process-event history increased per-cycle external read work"
+awk -v small="$history_small_seconds" -v large="$history_large_seconds" \
+  'BEGIN { exit !(large <= 3 * small + 1) }' \
+  || fail "handled history scaled reconcile time: 50=$history_small_seconds, 3000=$history_large_seconds"
+printf 'reconcile cost: 50 handled=%ss; 3000 handled=%ss\n' "$history_small_seconds" "$history_large_seconds"
+assert_absent "$HHISTORY/state/procevent-inbox/.pending/offline.0" "handled history is absent from the workset"
+assert_present "$HHISTORY/state/procevent-inbox/.pending/offline.9000" "unhandled offline result remains indexed"
+assert_present "$HHISTORY/state/procevent-inbox/offline.0.result" "handled history stays recoverable"
+assert_absent "$HHISTORY/state/procevent-inbox/offline.9000.handled" "publication never acknowledges an unhandled result"
+# Index storage is an optimization, never authority to drop a durable wake.
+mv "$HHISTORY/state/procevent-inbox/.pending" "$HHISTORY/pending.saved"
+: > "$HHISTORY/state/procevent-inbox/.pending"
+out=$(FM_PROCEVENT_CLAIM_ROOT="$HHISTORY/claims" pe "$HHISTORY" reconcile 2>/dev/null)
+assert_contains "$out" "published=1" "an unavailable index preserves legacy publication"
+rm "$HHISTORY/state/procevent-inbox/.pending"
+mv "$HHISTORY/pending.saved" "$HHISTORY/state/procevent-inbox/.pending"
+pass "3000 handled results add no reconcile payload/adapter reads, including offline sources"
+
+}
+
+test_handled_result_history
+
+HLEGACY="$TMP_ROOT/late-legacy-result"; new_home "$HLEGACY"
+mkdir -p "$HLEGACY/state/procevent-inbox"
+out=$(pe "$HLEGACY" reconcile)
+assert_contains "$out" "published=0" "the legacy inbox starts with no result"
+assert_present "$HLEGACY/state/procevent-inbox/.pending/.ready-v1" "the workset is ready before the old runner finishes"
+printf 'late legacy result\n' > "$HLEGACY/state/procevent-inbox/old-runner.7.result"
+printf 'lavish\n' > "$HLEGACY/state/procevent-inbox/old-runner.7.adapter"
+chmod 0600 "$HLEGACY/state/procevent-inbox/old-runner.7.result" "$HLEGACY/state/procevent-inbox/old-runner.7.adapter"
+mkdir "$HLEGACY/state/.wake-queue"
+out=$(pe "$HLEGACY" reconcile)
+assert_contains "$out" "published=0" "the first wake cannot publish while the queue path is unavailable"
+assert_present "$HLEGACY/state/procevent-inbox/.pending/old-runner.7" "the late unmarked result joins the workset despite a failed wake"
+assert_absent "$HLEGACY/state/procevent-inbox/old-runner.7.handled" "a failed wake does not acknowledge the legacy result"
+rmdir "$HLEGACY/state/.wake-queue"
+out=$(pe "$HLEGACY" reconcile)
+assert_contains "$out" "published=1" "the late legacy result is announced after the first wake fails"
+assert_contains "$(wake_payloads "$HLEGACY")" "procevent lavish old-runner 7" "the late result preserves its source and sequence"
+mv "$HLEGACY/state/.wake-queue" "$HLEGACY/state/.wake-queue.drained"
+out=$(pe "$HLEGACY" reconcile)
+assert_contains "$out" "published=1" "the late legacy result is reannounced until handled"
+assert_contains "$(wake_payloads "$HLEGACY")" "procevent lavish old-runner 7" "the repeat wake retains its identity"
+pass "late pre-upgrade results remain discoverable and reannounced"
+
 # --- inert with nothing configured ------------------------------------------
 IDLE="$TMP_ROOT/idle"; mkdir -p "$IDLE"
 out=$(pe "$IDLE" list)

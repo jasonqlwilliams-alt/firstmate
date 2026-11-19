@@ -15,6 +15,8 @@
 # time, or as a durable wake when it does not. The locked startup's bounded
 # inactive-outcome scan also runs here because its local current-state reads can
 # be just as slow; that scan publishes its own findings to the durable wake queue.
+# Locked startup also publishes the home summary here, before the sweeps, so
+# sampling every worker cannot consume the blocking digest's runtime budget.
 #
 # WHAT IS PRESERVED. Nothing is dropped. bin/fm-bootstrap.sh remains the single
 # owner of every network sweep and still runs all of them, unchanged, via its
@@ -103,8 +105,8 @@
 #   .startup-network.lock     serializes publication, harvest acknowledgement,
 #                             and the wake decision.
 #
-# The whole stage is bounded by FM_STARTUP_NETWORK_TIMEOUT (default 120s), one
-# aggregate deadline covering both the inactive-outcome scan and network sweeps.
+# Reconciliation and network sweeps share FM_STARTUP_NETWORK_TIMEOUT (default
+# 120s). Home-summary publication has its own FM_HOME_SUMMARY_TIMEOUT bound.
 # Hitting the bound is reported as an actionable NETWORK_CHECKS: line, never as
 # silence. bin/fm-timeout-lib.sh remains the single owner of bounded execution.
 set -u
@@ -168,6 +170,19 @@ stage_budget() {
   printf '%s' "$budget"
 }
 
+summary_budget() {
+  local budget=${FM_HOME_SUMMARY_TIMEOUT:-60}
+  case "$budget" in ''|*[!0-9]*|0) budget=60 ;; esac
+  printf '%s' "$budget"
+}
+
+worker_budget() {
+  local budget
+  budget=$(stage_budget)
+  [ "$(status_get phases)" != probe,sweeps ] || budget=$(( budget + $(summary_budget) ))
+  printf '%s' "$budget"
+}
+
 delivery_budget() {
   local budget=${FM_SESSION_START_TIMEOUT:-120}
   case "$budget" in ''|*[!0-9]*|0) budget=120 ;; esac
@@ -189,7 +204,7 @@ worker_alive() {
   started=$(status_get started)
   age=$(age_of "$started")
   case "$age" in ''|*[!0-9]*) return 0 ;; esac
-  [ "$age" -le "$(( $(stage_budget) + 30 ))" ]
+  [ "$age" -le "$(( $(worker_budget) + 30 ))" ]
 }
 
 # The exact phase names the digest and the report use, so "what has not been
@@ -197,7 +212,7 @@ worker_alive() {
 phase_label() {  # <phases>
   case "$1" in
     probe) printf 'GitHub authentication' ;;
-    probe,sweeps) printf 'GitHub authentication, dead-secondmate relaunch, secondmate convergence, pending handoff delivery, project clone refresh with its drift reporting, and inactive terminal-outcome reconciliation' ;;
+    probe,sweeps) printf 'GitHub authentication, dead-secondmate relaunch, secondmate convergence, pending handoff delivery, project clone refresh with its drift reporting, inactive terminal-outcome reconciliation, and home-summary publication' ;;
     *) printf 'the deferred network checks' ;;
   esac
 }
@@ -485,8 +500,12 @@ EOF
       downgraded=1
     fi
   fi
-  # One aggregate deadline covers both deferred operations. The inactive scan
-  # retains its own tighter per-scan bound inside this outer bound. Findings
+  if [ "$sweep_locked" -eq 1 ]; then
+    env FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+      "$SCRIPT_DIR/fm-home-summary-refresh.sh" >>"$out" 2>&1 ||
+      printf 'HOME_SUMMARY: deferred publication failed; the prior ledger is retained; see the producer diagnostic above\n' >>"$out"
+  fi
+  # The inactive scan retains its own tighter per-scan bound. Findings
   # need no report translation: the scan writes its ordinary durable
   # inactive-outcome wakes directly. A child shell composes the two executable
   # owners only so fm_run_timed can govern them as one process group.
@@ -498,7 +517,7 @@ EOF
         script_dir=$1
         "$script_dir/fm-inactive-reconcile.sh" scan --startup >/dev/null 2>&1 || true
         exec "$script_dir/fm-bootstrap.sh"
-      ' _ "$SCRIPT_DIR" >"$out" 2>&1 || rc=$?
+      ' _ "$SCRIPT_DIR" >>"$out" 2>&1 || rc=$?
   else
     fm_run_timed "$budget" env FM_BOOTSTRAP_NETWORK=only FM_BOOTSTRAP_DETECT_ONLY=1 \
       "$SCRIPT_DIR/fm-bootstrap.sh" >"$out" 2>&1 || rc=$?
@@ -570,7 +589,7 @@ print_pending() {
   age=$(age_of "$started")
   printf 'IN PROGRESS - the deferred network checks have not finished yet.\n'
   printf 'NOT yet confirmed: %s.\n' "$(phase_label "$phases")"
-  [ -z "$age" ] || printf 'Started %ss ago, bounded at %ss.\n' "$age" "$(stage_budget)"
+  [ -z "$age" ] || printf 'Started %ss ago, bounded at %ss.\n' "$age" "$(worker_budget)"
   # shellcheck disable=SC2016  # The backticked wake name is literal digest text.
   printf 'Only a FAILED or otherwise actionable result arrives as a `check: startup-network` wake; a clean success stays silent.\n'
   printf 'The durable result is readable on demand with %s/bin/fm-startup-network.sh report; until it finishes, treat none of it as confirmed.\n' "$FM_ROOT"
