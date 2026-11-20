@@ -2,9 +2,9 @@
 # Guarded worker entrypoint for Git. The repository pre-push hook owns target
 # authorization; this shim refuses hook bypasses and pins the effective managed
 # hooks path for armed pushes, including push aliases with leading Git options.
-# Strip --no-verify from the validator's direct push with optional -o values and
-# one branch refspec to no-mistakes when its sole push URL is this checkout's
-# registered absolute local gate path. The managed hook checks the destination.
+# With the managed hook pinned, strip --no-verify from the validator's direct
+# push with no leading Git options, optional -o values, and one branch refspec
+# to no-mistakes when its sole push URL is this checkout's registered local gate.
 set -u
 
 REAL=${FM_REAL_GIT:-}
@@ -106,7 +106,7 @@ split_alias_words() {
 gate_git() (
   # GIT_CONFIG changes what `git config` reads, but does not affect `git push`.
   unset GIT_CONFIG
-  "$REAL" ${effective_prefix[@]+"${effective_prefix[@]}"} "$@"
+  "$REAL" "$@"
 )
 
 gate_config_absent() {
@@ -130,19 +130,16 @@ is_gate_push_destination() {
   "$(dirname "${BASH_SOURCE[0]}")/../fm-delivery-guard.sh" check-gate "${top%$'\n.'}" "$url"
 }
 
-prepare_gate_push() {  # <arguments after push>
+is_validator_gate_push() {  # <arguments after push>
   [ "${1:-}" = --no-verify ] || return 1
   shift
-  gate_push_args=()
   while [ "${1:-}" = -o ]; do
     [ "$#" -ge 2 ] || return 1
-    gate_push_args+=("$1" "$2")
     shift 2
   done
   [ "$#" -eq 2 ] && [ "$1" = no-mistakes ] && \
     [[ $2 =~ ^(HEAD|[0-9a-f]{40}|[0-9a-f]{64}):refs/heads/.+$ ]] || return 1
-  is_gate_push_destination >/dev/null 2>&1 || return 1
-  gate_push_args+=("$@")
+  is_gate_push_destination >/dev/null 2>&1
 }
 
 args=("$@")
@@ -217,17 +214,6 @@ fi
 
 case "$resolved_command" in
   push)
-    for arg in ${args[@]+"${args[@]}"}; do
-      if [ "$arg" = --no-verify ]; then
-        if [ "$command_name" = push ] && prepare_gate_push "${args[@]:$((command_index + 1))}"; then
-          args=("${args[@]:0:$((command_index + 1))}" "${gate_push_args[@]}")
-          set -- "${args[@]}"
-          break
-        fi
-        printf 'REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.\n' >&2
-        exit 1
-      fi
-    done
     case " ${alias_value:-} " in
       *' --no-verify '*)
         printf 'REFUSED: a Git push alias cannot disable the Firstmate repository delivery guard.\n' >&2
@@ -262,11 +248,9 @@ esac
 # Deleting every marker or rewriting the managed hook itself is outside what a
 # PATH shim can enforce.
 pinned_hooks=
-if [ "$resolved_command" = push ]; then
-  common=$("$REAL" ${effective_prefix[@]+"${effective_prefix[@]}"} rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common=
-  if [ -z "$common" ]; then
-    exec "$REAL" "$@"
-  fi
+if [ "$resolved_command" = push ] && \
+  common=$("$REAL" ${effective_prefix[@]+"${effective_prefix[@]}"} rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && \
+  [ -n "$common" ]; then
   managed="$common/firstmate-hooks"
   armed=0
   marker_rc=0
@@ -289,6 +273,20 @@ if [ "$resolved_command" = push ]; then
     fi
     pinned_hooks=$managed
   fi
+fi
+
+if [ "$resolved_command" = push ]; then
+  for arg in ${args[@]+"${args[@]}"}; do
+    [ "$arg" = --no-verify ] || continue
+    if [ "$command_index" -eq 0 ] && [ "$command_name" = push ] && [ -n "$pinned_hooks" ] && \
+      [ -f "$pinned_hooks/pre-push" ] && [ -x "$pinned_hooks/pre-push" ] && \
+      is_validator_gate_push "${args[@]:1}"; then
+      args=(push "${args[@]:2}")
+      break
+    fi
+    printf 'REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.\n' >&2
+    exit 1
+  done
 fi
 
 if [ -n "$pinned_hooks" ]; then
