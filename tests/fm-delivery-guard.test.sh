@@ -67,7 +67,7 @@ SH
 #!/usr/bin/env bash
 if [ "${1:-}" = status ]; then
   printf '    repo:  %s\n' "$PWD"
-  printf '  remote:  %s\n' "${NM_UPSTREAM:?}"
+  [ -z "${NM_UPSTREAM:-}" ] || printf '  remote:  %s\n' "$NM_UPSTREAM"
   [ -z "${NM_FORK:-}" ] || printf '    fork:  %s\n' "$NM_FORK"
   if [ -n "${NM_REGISTERED_GATE:-}" ] && [ . -ef "${NM_REGISTERED_REPO:?}" ]; then
     printf '    gate:  %s\n' "$NM_REGISTERED_GATE"
@@ -421,6 +421,15 @@ SH
     "the managed hook did not check the gate's PR destination"
   remote_has_branch "$gate" validated || fail "the guarded push did not reach the no-mistakes gate"
 
+  ln -s "$home/no-mistakes" "$home/gate-alias"
+  git -C "$repo" config remote.no-mistakes.pushurl "$home/gate-alias/repos/${gate##*/}"
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+    -o 'intent=fixture gate push' no-mistakes "$head:refs/heads/path-alias-allowed" 2>&1); rc=$?
+  expect_code 0 "$rc" "different spellings of the registered gate should allow the validator push: $out"
+  assert_contains "$out" "action=pull-request repository=github.com/captain/widgets" \
+    "the managed hook did not authorize the gate push through the path alias"
+  remote_has_branch "$gate" path-alias-allowed || fail "the push through the path alias did not reach the gate"
+
   git -C "$repo" config remote.no-mistakes.tagOpt --no-tags
   out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push \
     -o 'intent=fixture gate push' no-mistakes "$head:refs/heads/fetch-option-allowed" 2>&1); rc=$?
@@ -438,12 +447,20 @@ SH
     "the fetch-only tag option did not trigger the exception refusal: $out"
   ! remote_has_branch "$gate" fetch-option-refused || fail "the refused push reached the gate"
   git -C "$repo" config --unset remote.no-mistakes.tagOpt
+  git -C "$repo" config --unset remote.no-mistakes.pushurl
 
   out=$(cd "$repo" && env "${fixture_env[@]}" NM_UPSTREAM=https://github.com/upstream/widgets.git \
     "$GIT_SHIM" push --no-verify no-mistakes HEAD:refs/heads/refused 2>&1); rc=$?
   [ "$rc" -ne 0 ] || fail "the gate exception should preserve the hook's refusal of an unsafe PR destination"
   assert_contains "$out" "pull-request would write to github.com/upstream/widgets" \
     "the unsafe gate push did not reach the managed hook"
+
+  out=$(cd "$repo" && env "${fixture_env[@]}" NM_UPSTREAM= "$GIT_SHIM" push --no-verify \
+    -o 'intent=fixture gate push' no-mistakes "$head:refs/heads/missing-target-refused" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the managed hook should refuse when the PR target is missing"
+  assert_contains "$out" "did not report its pull-request target" \
+    "the missing PR target should reach the managed hook for authorization: $out"
+  ! remote_has_branch "$gate" missing-target-refused || fail "the push without a PR target reached the gate"
 
   for destination in fork "$gate" "file://$gate" ../home/no-mistakes/repos/gate.git; do
     out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \

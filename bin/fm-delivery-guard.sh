@@ -174,46 +174,47 @@ no_mistakes_remote_config_allowed() (
   [ "$rc" -eq 1 ]
 )
 
-read_no_mistakes_targets() {  # <repo> <effective-url>; sets NM_UPSTREAM, NM_FORK and NM_RESOLVED_GATE
-  local repo=$1 url=$2 output gate nm_home=${NM_HOME:-${HOME:+$HOME/.no-mistakes}}
-  [[ $url == /* && $url != //* && $url != *$'\n'* ]] || \
-    die "no-mistakes push destination must be an absolute local gate path"
+read_no_mistakes_status() {
+  local repo=$1 output
   command -v no-mistakes >/dev/null 2>&1 || {
-    printf 'REFUSED: no-mistakes is unavailable, so its GitHub push and PR targets cannot be verified.\n' >&2
+    printf 'REFUSED: no-mistakes is unavailable, so its gate registration cannot be verified.\n' >&2
     return 1
   }
   output=$(cd "$repo" && NO_COLOR=1 CLICOLOR_FORCE=0 no-mistakes status 2>&1) || {
     printf 'REFUSED: no-mistakes target inspection failed for %s: %s\n' "$repo" "$output" >&2
     return 1
   }
-  gate=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*gate:[[:space:]]*//p')
-  [ "$url" = "$gate" ] || die "no-mistakes push destination does not match the registered local gate for $repo"
-  NM_RESOLVED_GATE=$(perl -MCwd=realpath -MFile::Basename=basename -e '
-    my ($home, $path) = @ARGV;
-    exit 1 unless -d $home && -d $path;
+  printf '%s\n' "$output"
+}
+
+resolve_no_mistakes_gate() {
+  local repo=$1 url=$2 status=$3 gate nm_home=${NM_HOME:-${HOME:+$HOME/.no-mistakes}}
+  [[ $url == /* && $url != //* && $url != *$'\n'* ]] || \
+    die "no-mistakes push destination must be an absolute local gate path"
+  gate=$(printf '%s\n' "$status" | sed -n 's/^[[:space:]]*gate:[[:space:]]*//p')
+  [[ $gate == /* && $gate != //* && $gate != *$'\n'* ]] || \
+    die "no-mistakes did not report an absolute local gate path for $repo"
+  perl -MCwd=realpath -MFile::Basename=basename -e '
+    my ($home, $url, $gate) = @ARGV;
+    exit 1 unless -d $home && -d $url && -d $gate;
     my $root = realpath($home);
-    my $target = realpath($path);
-    exit 1 unless defined($root) && defined($target);
+    my $target = realpath($url);
+    my $registered = realpath($gate);
+    exit 1 unless defined($root) && defined($target) && defined($registered);
     $root =~ s{/$}{};
-    exit 1 unless $target eq "$root/repos/" . basename($path);
-    print $target;
-  ' -- "$nm_home" "$url") || die "no-mistakes push destination does not match the registered local gate for $repo"
-  NM_UPSTREAM=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*remote:[[:space:]]*//p' | head -1)
-  NM_FORK=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*fork:[[:space:]]*//p' | head -1)
-  [ -n "$NM_UPSTREAM" ] || {
-    printf 'REFUSED: no-mistakes did not report its pull-request target for %s.\n' "$repo" >&2
-    return 1
-  }
-  [ -n "$NM_FORK" ] || NM_FORK=$NM_UPSTREAM
+    exit 1 unless $registered eq "$root/repos/" . basename($gate) && $target eq $registered;
+    print $registered;
+  ' -- "$nm_home" "$url" "$gate" || die "no-mistakes push destination does not match the registered local gate for $repo"
 }
 
 cmd_check_gate() {
-  local repo=$1 url=$2 git_dir
+  local repo=$1 url=$2 status resolved_gate git_dir
   no_mistakes_remote_config_allowed "$repo" || die "unsupported no-mistakes remote configuration for $repo"
-  read_no_mistakes_targets "$repo" "$url" || return 1
-  if [ -e "$NM_RESOLVED_GATE/.git" ] || [ -L "$NM_RESOLVED_GATE/.git" ] || \
-    ! git_dir=$(git --git-dir="$NM_RESOLVED_GATE" rev-parse --absolute-git-dir --is-bare-repository 2>/dev/null) || \
-    [ "$git_dir" != "$NM_RESOLVED_GATE"$'\ntrue' ]; then
+  status=$(read_no_mistakes_status "$repo") || return 1
+  resolved_gate=$(resolve_no_mistakes_gate "$repo" "$url" "$status") || return 1
+  if [ -e "$resolved_gate/.git" ] || [ -L "$resolved_gate/.git" ] || \
+    ! git_dir=$(git --git-dir="$resolved_gate" rev-parse --absolute-git-dir --is-bare-repository 2>/dev/null) || \
+    [ "$git_dir" != "$resolved_gate"$'\ntrue' ]; then
     die "no-mistakes push destination is not a direct bare repository for $repo"
   fi
 }
@@ -227,14 +228,18 @@ authorize_exact_target() {  # <action> <url> <expected-identity>
 }
 
 cmd_check_push() {  # <repo> <remote-name> <effective-url>
-  local repo=$1 remote=$2 url=$3 project
+  local repo=$1 remote=$2 url=$3 project status upstream fork
   project=$(repository_project "$repo") || project=
   [ -n "$project" ] || die "repository $repo is not armed with a Firstmate project identity"
   fm_repository_policy_load "$project" || exit 1
   if [ "$remote" = no-mistakes ]; then
-    read_no_mistakes_targets "$repo" "$url" || exit 1
-    authorize_exact_target branch-push "$NM_FORK" "$FM_REPOSITORY_POLICY_FORK_ID" || exit 1
-    authorize_exact_target pull-request "$NM_UPSTREAM" "$FM_REPOSITORY_POLICY_FORK_ID" || exit 1
+    status=$(read_no_mistakes_status "$repo") || exit 1
+    resolve_no_mistakes_gate "$repo" "$url" "$status" >/dev/null || exit 1
+    upstream=$(printf '%s\n' "$status" | sed -n 's/^[[:space:]]*remote:[[:space:]]*//p' | head -1)
+    fork=$(printf '%s\n' "$status" | sed -n 's/^[[:space:]]*fork:[[:space:]]*//p' | head -1)
+    [ -n "$upstream" ] || die "no-mistakes did not report its pull-request target for $repo."
+    authorize_exact_target branch-push "${fork:-$upstream}" "$FM_REPOSITORY_POLICY_FORK_ID" || exit 1
+    authorize_exact_target pull-request "$upstream" "$FM_REPOSITORY_POLICY_FORK_ID" || exit 1
     return 0
   fi
   authorize_exact_target branch-push "$url" "$FM_REPOSITORY_POLICY_FORK_ID"
