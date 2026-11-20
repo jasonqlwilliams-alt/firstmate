@@ -101,7 +101,7 @@ FM_TEST_CLEANUP_DIRS=()
 
 fm_test_pid_identity() {
   local pid=$1
-  TZ=UTC0 FM_STATE_OVERRIDE="${TMPDIR:-/tmp}" bash -c \
+  FM_STATE_OVERRIDE="${TMPDIR:-/tmp}" bash -c \
     '. "$1"; fm_pid_identity "$2"' _ "$ROOT/bin/fm-wake-lib.sh" "$pid"
 }
 
@@ -187,7 +187,7 @@ if [ "${FM_TEST_FIXTURE_REAPER_CHILD:-0}" != 1 ]; then
     rm -f "$FM_TEST_CLEANUP_REGISTRY"
     return 1
   }
-  FM_TEST_PROCEVENT_REGISTRY=$(mktemp "${FM_TEST_REGISTRY_DIR:-${TMPDIR:-/tmp}}/.fm-test-procevent.$$.XXXXXX") || return 1
+  FM_TEST_PROCEVENT_REGISTRY=$(mktemp "${TMPDIR:-/tmp}/.fm-test-procevent.$$.XXXXXX") || return 1
 
   trap fm_test_cleanup EXIT
   trap 'fm_test_cleanup; exit 130' INT
@@ -323,7 +323,7 @@ fm_test_owner_is_alive() {  # <pid> <identity>
   local state identity
   state=$(ps -p "$1" -o stat= 2>/dev/null) || return 1
   case "$state" in ''|Z*) return 1 ;; esac
-  identity=$(fm_test_pid_identity "$1" 2>/dev/null) || return 1
+  identity=$(TZ=UTC0 fm_test_pid_identity "$1" 2>/dev/null) || return 1
   [ "$identity" = "$2" ]
 }
 
@@ -339,7 +339,8 @@ fm_test_finish_fixture_reaper() {  # <exit status>
 }
 
 fm_test_arm_fixture_reaper() {
-  local monitor_was_on=0
+  local monitor_was_on=0 owner_identity
+  owner_identity=$(TZ=UTC0 fm_test_pid_identity "$$") || return 1
   FM_TEST_FIXTURE_REAPER_DIR=$1
   FM_TEST_FIXTURE_SESSIONS="$FM_TEST_FIXTURE_REAPER_DIR/sessions"
   mkdir "$FM_TEST_FIXTURE_SESSIONS" "$FM_TEST_FIXTURE_REAPER_DIR/children" || return 1
@@ -357,7 +358,7 @@ fm_test_arm_fixture_reaper() {
     fm_test_reap_fixture_processes || exit 1
     fm_test_cleanup
     rm -rf -- "$TMPDIR"
-  ' _ "$ROOT/tests/lib.sh" "$$" "$FM_TEST_OWNER_IDENTITY" "$FM_TEST_CLEANUP_REGISTRY" \
+  ' _ "$ROOT/tests/lib.sh" "$$" "$owner_identity" "$FM_TEST_CLEANUP_REGISTRY" \
     "$FM_TEST_PROCEVENT_REGISTRY" >/dev/null 2>&1 </dev/null &
   FM_TEST_REAPER_PID=$!
   [ "$monitor_was_on" -eq 1 ] || set +m
