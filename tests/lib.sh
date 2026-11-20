@@ -82,9 +82,9 @@ pass() {
 # --- self-cleaning temp root ------------------------------------------------
 #
 # fm_test_tmproot <prefix> echoes a fresh temp dir and registers it for removal
-# on EXIT/INT/TERM. A test file that needs extra teardown (e.g. killing a
-# daemon) should define its own EXIT trap and call fm_test_cleanup from inside
-# it so registered dirs are still removed.
+# on ordinary or trapped exit. A test file that replaces the default EXIT trap
+# must arrange for fm_test_cleanup to run so registered directories are still
+# removed. For cleanup after SIGKILL, see detached fixture cleanup below.
 #
 # The call site is almost always `TMP_ROOT=$(fm_test_tmproot prefix)`, which
 # forks a subshell to capture stdout. Anything that function does to the
@@ -98,17 +98,11 @@ pass() {
 # real caller, never a subshell.
 
 FM_TEST_CLEANUP_DIRS=()
-FM_TEST_CLEANUP_REGISTRY=$(mktemp "${TMPDIR:-/tmp}/.fm-test-cleanup.$$.XXXXXX") || return 1
 
 fm_test_pid_identity() {
   local pid=$1
   FM_STATE_OVERRIDE="${TMPDIR:-/tmp}" bash -c \
     '. "$1"; fm_pid_identity "$2"' _ "$ROOT/bin/fm-wake-lib.sh" "$pid"
-}
-
-FM_TEST_OWNER_IDENTITY=$(fm_test_pid_identity "$$") || {
-  rm -f "$FM_TEST_CLEANUP_REGISTRY"
-  return 1
 }
 
 # --- process-event runner reaping -------------------------------------------
@@ -124,8 +118,6 @@ FM_TEST_OWNER_IDENTITY=$(fm_test_pid_identity "$$") || {
 # The sweep is scoped to the exact home (and its claim root when the suite uses a
 # private one). It never matches on a script or process name, which would reach
 # into another home's live runners.
-
-FM_TEST_PROCEVENT_REGISTRY=$(mktemp "${TMPDIR:-/tmp}/.fm-test-procevent.$$.XXXXXX") || return 1
 
 fm_test_track_procevent_home() {  # <home> [claim-root]
   [ -n "${1:-}" ] || return 1
@@ -189,11 +181,207 @@ fm_test_tmproot() {
   printf '%s\n' "$root"
 }
 
-trap fm_test_cleanup EXIT
-trap 'fm_test_cleanup; exit 130' INT
-trap 'fm_test_cleanup; exit 143' TERM
-trap 'fm_test_cleanup; exit 129' HUP
-trap 'fm_test_cleanup; exit 131' QUIT
+if [ "${FM_TEST_FIXTURE_REAPER_CHILD:-0}" != 1 ]; then
+  FM_TEST_CLEANUP_REGISTRY=$(mktemp "${FM_TEST_REGISTRY_DIR:-${TMPDIR:-/tmp}}/.fm-test-cleanup.$$.XXXXXX") || return 1
+  FM_TEST_OWNER_IDENTITY=$(fm_test_pid_identity "$$") || {
+    rm -f "$FM_TEST_CLEANUP_REGISTRY"
+    return 1
+  }
+  FM_TEST_PROCEVENT_REGISTRY=$(mktemp "${TMPDIR:-/tmp}/.fm-test-procevent.$$.XXXXXX") || return 1
+
+  trap fm_test_cleanup EXIT
+  trap 'fm_test_cleanup; exit 130' INT
+  trap 'fm_test_cleanup; exit 143' TERM
+  trap 'fm_test_cleanup; exit 129' HUP
+  trap 'fm_test_cleanup; exit 131' QUIT
+fi
+
+# --- detached fixture cleanup ----------------------------------------------
+#
+# Arm fm_test_arm_fixture_reaper before starting fixtures, then launch them
+# through fm_test_start_fixture or fm_test_run_fixture. The launcher records
+# the session and its anchor before executing the fixture so ownership survives
+# reparenting and process-group changes within the session.
+#
+# The detached reaper signals groups from recorded sessions with live anchors
+# using process IDs, group and session IDs, and process state. Keep the anchors
+# until the fixture groups are gone so the reaper can still verify ownership.
+# The reaper removes registered fixture roots after process cleanup succeeds.
+# The EXIT trap waits for that cleanup. After SIGKILL the reaper detects the
+# owner's exit and cleans up asynchronously.
+
+fm_test_start_fixture() {
+  local monitor_was_on=0
+  case $- in *m*) monitor_was_on=1 ;; esac
+  set +m
+  # shellcheck disable=SC2016
+  perl -MPOSIX=setsid -MFcntl=O_CREAT,O_EXCL,O_WRONLY -e '
+    my $registry = shift;
+    my $session = setsid();
+    die "setsid: $!" unless defined($session) && $session > 1;
+    pipe(my $registered, my $ready) or die "pipe: $!";
+    my $anchor = fork();
+    die "fork: $!" unless defined($anchor);
+    if (!$anchor) {
+      close $registered;
+      setpgrp(0, 0) or die "setpgrp: $!";
+      sysopen(my $record, "$registry/$session.$$", O_CREAT | O_EXCL | O_WRONLY, 0600)
+        or die "record fixture session: $!";
+      close $record;
+      close STDIN;
+      close STDOUT;
+      close STDERR;
+      print {$ready} "ready\n";
+      close $ready;
+      sleep;
+      exit;
+    }
+    close $ready;
+    exit 1 unless <$registered>;
+    close $registered;
+    exec { $ARGV[0] } @ARGV or die "exec $ARGV[0]: $!";
+  ' "$FM_TEST_FIXTURE_SESSIONS" "$@" 3<&0 <&3 3<&- &
+  FM_TEST_FIXTURE_PID=$!
+  [ "$monitor_was_on" -eq 0 ] || set -m
+  until compgen -G "$FM_TEST_FIXTURE_SESSIONS/$FM_TEST_FIXTURE_PID.*" >/dev/null; do
+    if ! kill -0 "$FM_TEST_FIXTURE_PID" 2>/dev/null; then
+      wait "$FM_TEST_FIXTURE_PID" 2>/dev/null || true
+      return 1
+    fi
+    sleep 0.02
+  done
+}
+
+fm_test_run_fixture() {
+  fm_test_start_fixture "$@" || return 1
+  wait "$FM_TEST_FIXTURE_PID"
+}
+
+fm_test_fixture_session_records() {
+  local dir=$1 child record key
+  if [ -d "$dir/sessions" ]; then
+    mv "$dir/sessions" "$dir/closed-sessions" 2>/dev/null ||
+      [ ! -d "$dir/sessions" ] || return 1
+  fi
+  for record in "$dir"/closed-sessions/*; do
+    [ -f "$record" ] || continue
+    key=${record##*/}
+    printf 'session %s %s\n' "${key%.*}" "${key##*.}"
+  done
+  for child in "$dir"/children/*; do
+    [ -d "$child" ] || continue
+    fm_test_fixture_session_records "$child" || return 1
+  done
+}
+
+fm_test_fixture_process_snapshot() {
+  local rows
+  case "$OSTYPE" in
+    darwin*)
+      rows=$(ps -ax -o pid= -o pgid= -o stat=) || return 1
+      /usr/bin/ruby -e '
+        STDIN.each_line do |row|
+          pid, pgid, state = row.split
+          next if pid.to_i <= 1 || state.start_with?("Z")
+          begin
+            puts [pid, pgid, Process.getsid(pid.to_i), state].join(" ")
+          rescue Errno::ESRCH
+          end
+        end
+      ' <<< "$rows"
+      ;;
+    *) ps -ax -o pid= -o pgid= -o sid= -o stat= ;;
+  esac
+}
+
+fm_test_reap_fixture_processes() {
+  local snapshot records groups kind pgid signal=TERM empty=0 round
+  for ((round = 0; round < 20; round++)); do
+    records=$(fm_test_fixture_session_records "$TMPDIR") || return 1
+    snapshot=$(fm_test_fixture_process_snapshot) || return 1
+    groups=$(awk '
+      $1 == "session" { anchor[$2] = $3; next }
+      $1 > 1 && $2 > 1 && $4 !~ /^Z/ && $3 in anchor {
+        session[$2] = $3
+        if ($1 == anchor[$3] && $2 == $1) owned[$3] = 1
+      }
+      END {
+        for (pgid in session) {
+          sid = session[pgid]
+          if (sid in owned) print (pgid == anchor[sid] ? "anchor" : "fixture"), pgid
+        }
+      }
+    ' <<< "$records"$'\n'"$snapshot") || return 1
+    if [[ "$groups" == *fixture* ]]; then
+      empty=0
+    elif [ "$empty" -eq 0 ]; then
+      empty=1
+      sleep 0.2
+      continue
+    else
+      [ -n "$groups" ] || return 0
+      signal=KILL
+    fi
+    while read -r kind pgid; do
+      if [ "$kind" = fixture ] || [ "$empty" -eq 1 ]; then
+        kill -s "$signal" -- "-$pgid" 2>/dev/null || true
+      fi
+    done <<< "$groups"
+    signal=KILL
+    sleep 0.2
+  done
+  return 1
+}
+
+fm_test_owner_is_alive() {  # <pid> <identity>
+  local state identity
+  state=$(ps -p "$1" -o stat= 2>/dev/null) || return 1
+  case "$state" in ''|Z*) return 1 ;; esac
+  identity=$(TZ=UTC0 fm_test_pid_identity "$1" 2>/dev/null) || return 1
+  [ "$identity" = "$2" ]
+}
+
+fm_test_finish_fixture_reaper() {  # <exit status>
+  local status=$1
+  trap '' INT TERM HUP QUIT
+  if ! rm -f -- "$FM_TEST_FIXTURE_REAPER_DIR/active" || ! wait "$FM_TEST_REAPER_PID"; then
+    printf 'not ok - fixture reaper did not finish\n' >&2
+    [ "$status" -ne 0 ] || status=1
+  fi
+  exit "$status"
+}
+
+fm_test_arm_fixture_reaper() {
+  local monitor_was_on=0 owner_identity
+  owner_identity=$(TZ=UTC0 fm_test_pid_identity "$$") || return 1
+  FM_TEST_FIXTURE_REAPER_DIR=$1
+  FM_TEST_FIXTURE_SESSIONS="$FM_TEST_FIXTURE_REAPER_DIR/sessions"
+  mkdir "$FM_TEST_FIXTURE_SESSIONS" "$FM_TEST_FIXTURE_REAPER_DIR/children" || return 1
+  : > "$FM_TEST_FIXTURE_REAPER_DIR/active" || return 1
+  case $- in *m*) monitor_was_on=1 ;; esac
+  set -m
+  # shellcheck disable=SC2016
+  TMPDIR="$FM_TEST_FIXTURE_REAPER_DIR" FM_TEST_SKIP_ORPHAN_REAP=1 FM_TEST_FIXTURE_REAPER_CHILD=1 nohup bash -c '
+    set -u
+    FM_TEST_CLEANUP_REGISTRY=$4
+    FM_TEST_PROCEVENT_REGISTRY=$5
+    . "$1" || exit 1
+    while [ -e "$TMPDIR/active" ] && fm_test_owner_is_alive "$2" "$3"; do
+      sleep 0.2
+    done
+    fm_test_reap_fixture_processes || exit 1
+    fm_test_cleanup
+    rm -rf -- "$TMPDIR"
+  ' _ "$ROOT/tests/lib.sh" "$$" "$owner_identity" "$FM_TEST_CLEANUP_REGISTRY" \
+    "$FM_TEST_PROCEVENT_REGISTRY" >/dev/null 2>&1 </dev/null &
+  FM_TEST_REAPER_PID=$!
+  [ "$monitor_was_on" -eq 1 ] || set +m
+  trap 'fm_test_finish_fixture_reaper "$?"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+  trap 'exit 131' QUIT
+}
 
 # fm_test_reap_orphans: best-effort sweep for fixture roots left behind by a
 # prior run that was killed hard enough to skip the traps above (e.g. a

@@ -17,15 +17,24 @@
 #     staying "in progress" forever
 #   - phase-aware single-flight: a covering worker is reused, while a later
 #     locked request supersedes an in-flight probe-only worker
+#
+# Running this suite requires perl on PATH and, on macOS, /usr/bin/ruby for
+# fixture session lookup.
 set -u
 
-# shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# Keep reaper records outside the runner's temporary tree, which can disappear
+# after a timeout. Executable fixtures still use the caller's TMPDIR.
+reaper_dir=$(mktemp -d "${FM_TEST_FIXTURE_CHILDREN:-/tmp}/fm-startup-network-reaper.XXXXXX") || exit 1
+export FM_TEST_FIXTURE_CHILDREN="$reaper_dir/children"
 
+# shellcheck source=tests/lib.sh
+FM_TEST_REGISTRY_DIR="$reaper_dir" . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+# Arm before building any fixture worlds. See the detached fixture cleanup
+# contract in tests/lib.sh.
+fm_test_arm_fixture_reaper "$reaper_dir" || fail "could not arm fixture reaper"
 TMP_ROOT=$(fm_test_tmproot fm-startup-network-tests)
 DRAIN="$ROOT/bin/fm-wake-drain.sh"
-FM_TEST_CLEANUP_DIRS+=("$TMP_ROOT")
-trap fm_test_cleanup EXIT
 
 # new_world <name>: an FM_HOME plus a fake code root whose bin/ is a real
 # firstmate bin/ except for fm-bootstrap.sh, which is replaced by a scriptable
@@ -34,12 +43,17 @@ trap fm_test_cleanup EXIT
 # tests/fm-bootstrap.test.sh, so pinning it here would duplicate that owner and
 # make these assertions depend on unrelated tool detection.
 new_world() {
-  local name=$1 w home root
-  w="$TMP_ROOT/$name"
+  export -f build_world
+  fm_test_run_fixture bash -uc 'build_world "$@"' _ "$1" "$TMP_ROOT" "$ROOT"
+}
+
+build_world() {
+  local name=$1 tmp_root=$2 repo_root=$3 w home root f
+  w="$tmp_root/$name"
   home="$w/home"
   root="$w/root"
   mkdir -p "$home/state" "$root/bin"
-  for f in "$ROOT"/bin/*.sh; do
+  for f in "$repo_root"/bin/*.sh; do
     ln -s "$f" "$root/bin/$(basename "$f")"
   done
   rm -f "$root/bin/fm-bootstrap.sh"
@@ -60,7 +74,9 @@ if [ -n "${FM_TIMING_LOG:-}" ]; then
   fm_timing_record phase "${FM_FAKE_TIMING_PHASE:-gh-auth}" \
     "$(( $(fm_timing_now_ms) - 1500 ))" "${FM_FAKE_TIMING_DETAIL:-}"
 fi
-[ -z "${FM_FAKE_BOOTSTRAP_SLEEP:-}" ] || sleep "$FM_FAKE_BOOTSTRAP_SLEEP"
+if [ -n "${FM_FAKE_BOOTSTRAP_SLEEP:-}" ]; then
+  sleep "$FM_FAKE_BOOTSTRAP_SLEEP"
+fi
 [ -z "${FM_FAKE_BOOTSTRAP_OUT:-}" ] || printf '%s\n' "$FM_FAKE_BOOTSTRAP_OUT"
 exit "${FM_FAKE_BOOTSTRAP_RC:-0}"
 SH
@@ -117,7 +133,7 @@ run_stage() {  # <home> <root> <args...>
   local home=$1 root=$2
   shift 2
   PATH="$root/bin:$PATH" FM_FAKE_HARNESS_PID="${FM_FAKE_HARNESS_PID_OVERRIDE:-$$}" \
-    FM_HOME="$home" FM_ROOT_OVERRIDE="$root" "$root/bin/fm-startup-network.sh" "$@"
+    FM_HOME="$home" FM_ROOT_OVERRIDE="$root" fm_test_run_fixture "$root/bin/fm-startup-network.sh" "$@"
 }
 
 wait_for_startup_network_wake() {  # <home> [tenths]
@@ -173,8 +189,8 @@ $rec
 EOF
   printf '%s\n' $$ > "$home/state/.lock"
 
-  sleep 30 &
-  claimant=$!
+  fm_test_start_fixture sleep 30 || fail "could not start claimant"
+  claimant=$FM_TEST_FIXTURE_PID
   FM_SESSION_START_TIMEOUT=15 FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_OUT='acknowledged result' \
     run_stage "$home" "$root" start --locked 0 --harvest-pid "$claimant"
   run_stage "$home" "$root" wait 30 >/dev/null || fail "the claimed worker never published"
@@ -222,8 +238,8 @@ test_a_claimant_crash_after_publish_still_queues_the_wake() {
   IFS='|' read -r home root log <<EOF
 $rec
 EOF
-  sleep 10 &
-  claimant=$!
+  fm_test_start_fixture sleep 10 || fail "could not start claimant"
+  claimant=$FM_TEST_FIXTURE_PID
   # Actionable output: a clean success in this same crash window must stay
   # silent (test_a_successful_result_never_queues_a_wake owns that case).
   FM_SESSION_START_TIMEOUT=4 FM_FAKE_BOOTSTRAP_LOG="$log" \
@@ -250,8 +266,8 @@ $rec
 EOF
   mkdir "$home/state/.startup-network.report"
   chmod 500 "$home/state/.startup-network.report"
-  sleep 10 &
-  claimant=$!
+  fm_test_start_fixture sleep 10 || fail "could not start claimant"
+  claimant=$FM_TEST_FIXTURE_PID
 
   FM_SESSION_START_TIMEOUT=4 FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_OUT='unpublishable result' \
     run_stage "$home" "$root" start --locked 0 --harvest-pid "$claimant"
@@ -287,8 +303,8 @@ test_a_successful_result_never_queues_a_wake() {
   IFS='|' read -r home root log <<EOF
 $rec
 EOF
-  sleep 10 &
-  claimant=$!
+  fm_test_start_fixture sleep 10 || fail "could not start claimant"
+  claimant=$FM_TEST_FIXTURE_PID
   FM_SESSION_START_TIMEOUT=4 FM_FAKE_BOOTSTRAP_LOG="$log" \
     run_stage "$home" "$root" start --locked 0 --harvest-pid "$claimant"
   run_stage "$home" "$root" wait 30 >/dev/null || fail "the unclaimed successful worker never published"
@@ -328,8 +344,8 @@ test_an_actionable_successful_result_still_queues_a_wake() {
   IFS='|' read -r home root log <<EOF
 $rec
 EOF
-  sleep 10 &
-  claimant=$!
+  fm_test_start_fixture sleep 10 || fail "could not start claimant"
+  claimant=$FM_TEST_FIXTURE_PID
   FM_SESSION_START_TIMEOUT=4 FM_FAKE_BOOTSTRAP_LOG="$log" \
     FM_FAKE_BOOTSTRAP_OUT='MISSING: some-tool (install: brew install some-tool)' \
     run_stage "$home" "$root" start --locked 0 --harvest-pid "$claimant"
@@ -369,12 +385,12 @@ EOF
       "$kind marker fixture unexpectedly depended on the network report"
 
     err="$home/drain.err"
-    FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$DRAIN" >/dev/null 2> "$err"
+    FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" fm_test_run_fixture "$DRAIN" >/dev/null 2> "$err"
     seq=$(sed -n 's/^WAKE_ACK_REQUIRED:.*--ack-through \([0-9][0-9]*\) --recovery-generation .*/\1/p' "$err")
     generation=$(sed -n 's/^WAKE_ACK_REQUIRED:.*--recovery-generation \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' "$err")
     [ -n "$seq" ] && [ -n "$generation" ] \
       || fail "$kind marker wake did not issue a durable acknowledgement"
-    FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$DRAIN" \
+    FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" fm_test_run_fixture "$DRAIN" \
       --ack-through "$seq" --recovery-generation "$generation" >/dev/null
     assert_no_grep 'inactive-reconcile-diagnostic:invalid-secondmate-home' "$home/state/.wake-queue" \
       "$kind marker wake could not be acknowledged"
@@ -595,7 +611,7 @@ EOF
   started=$(date +%s)
   rc=0
   out=$(PATH="$root/bin:$PATH" FM_FAKE_HARNESS_PID="$next_owner" \
-    FM_HOME="$home" FM_ROOT_OVERRIDE="$root" "$root/bin/fm-lock.sh" 2>&1) || rc=$?
+    FM_HOME="$home" FM_ROOT_OVERRIDE="$root" fm_test_run_fixture "$root/bin/fm-lock.sh" 2>&1) || rc=$?
   elapsed=$(( $(date +%s) - started ))
   [ "$rc" -ne 0 ] || fail "lock takeover succeeded while the prior sweep was mutating"
   [ "$elapsed" -lt 4 ] || fail "lock takeover blocked ${elapsed}s behind deferred network work"
@@ -606,7 +622,7 @@ EOF
 
   run_stage "$home" "$root" wait 30 >/dev/null || fail "the leased sweep never settled"
   out=$(PATH="$root/bin:$PATH" FM_FAKE_HARNESS_PID="$next_owner" \
-    FM_HOME="$home" FM_ROOT_OVERRIDE="$root" "$root/bin/fm-lock.sh" 2>&1) \
+    FM_HOME="$home" FM_ROOT_OVERRIDE="$root" fm_test_run_fixture "$root/bin/fm-lock.sh" 2>&1) \
     || fail "lock takeover still failed after the sweep released its lease"
   new_owner=$(cat "$home/state/.lock")
   assert_contains "$out" "lock acquired: harness pid $new_owner" \
@@ -761,6 +777,156 @@ GITHUB_TOKEN=ghp_supersecretvalue" \
   pass "fm-startup-network: the timing artifact cannot carry a command line or forge records"
 }
 
+reap_probe=${FM_STARTUP_NETWORK_REAP_PROBE:-}
+if [ "$reap_probe" = outer ]; then
+  TMPDIR="$TMP_ROOT" TMP="$TMP_ROOT" FM_STARTUP_NETWORK_REAP_PROBE=inner \
+    fm_test_start_fixture bash "$0" ||
+    fail "could not start inner reap probe"
+  wait "$FM_TEST_FIXTURE_PID"
+  exit $?
+fi
+
+# A nested copy of this file, used only to prove cleanup. It arms the same
+# reaper as the suite, starts a claimant and detached worker, then waits to be killed.
+if [ "$reap_probe" = 1 ] || [ "$reap_probe" = inner ]; then
+  [ -n "${FM_STARTUP_NETWORK_REAP_INFO:-}" ] || exit 2
+  rec=$(new_world reap-probe)
+  IFS='|' read -r home root log <<EOF
+$rec
+EOF
+  printf '%s\n' $$ > "$home/state/.lock"
+  printf '%s\n' "$TMP_ROOT" > "$FM_STARTUP_NETWORK_REAP_INFO"
+  fm_test_start_fixture sleep 30 || fail "could not start claimant"
+  claimant=$FM_TEST_FIXTURE_PID
+  printf '%s\n' "$claimant" "$$" >> "$FM_STARTUP_NETWORK_REAP_INFO"
+  cat > "$root/bin/late-parent.sh" <<'SH'
+#!/usr/bin/env bash
+set -m
+(
+  trap '' TERM
+  exec sleep 60
+) &
+printf '%s\n' "$$" "$!" > "$1"
+wait "$!"
+SH
+  chmod +x "$root/bin/late-parent.sh"
+  fm_test_start_fixture "$root/bin/late-parent.sh" "$root/late-ready" ||
+    fail "could not start fixture parent"
+  while [ ! -s "$root/late-ready" ]; do sleep 0.1; done
+  cat "$root/late-ready" >> "$FM_STARTUP_NETWORK_REAP_INFO"
+  if ! FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_SLEEP=60 \
+    run_stage "$home" "$root" start --locked 1 --harvest-pid $$; then
+    printf 'start-failed\n' >> "$FM_STARTUP_NETWORK_REAP_INFO"
+    exit 1
+  fi
+  worker=$(sed -n 's/^pid=//p' "$home/state/.startup-network.status")
+  printf '%s\n' "$FM_TEST_FIXTURE_PID" "$worker" ready >> "$FM_STARTUP_NETWORK_REAP_INFO"
+  wait "$claimant"
+  exit 1
+fi
+
+fixture_groups_in_sessions() {
+  local snapshot
+  snapshot=$(fm_test_fixture_process_snapshot) || return 1
+  awk -v sessions="$*" '
+    BEGIN {
+      n = split(sessions, sid, " ")
+      for (i = 1; i <= n; i++) owned[sid[i]] = 1
+    }
+    $4 !~ /^Z/ && ($3 in owned) { groups[$2] = 1 }
+    END { for (group in groups) print group }
+  ' <<< "$snapshot"
+}
+
+# kill -0 is true for a zombie, so a process that already exited still looks
+# alive until it is reaped. ps state is the distinction the assertion needs.
+process_is_running() {  # <pid>
+  local stat
+  stat=$(ps -p "$1" -o stat= 2>/dev/null || true)
+  case "$stat" in
+    ''|Z*) return 1 ;;
+  esac
+  return 0
+}
+
+test_killing_the_suite_reaps_detached_fixture_processes() {
+  local info probe_stderr runner_tmp probe root claimant inner fixture_parent sleeper parent_group sleeper_group
+  local stage_session worker i test_case mode survivors status expected
+  info="$TMP_ROOT/reap-probe-info"
+  probe_stderr="$TMP_ROOT/reap-probe-stderr"
+  runner_tmp="$TMP_ROOT/runner-tmp"
+  for test_case in timeout term outer; do
+    : > "$info"
+    mkdir "$runner_tmp"
+    mode=1
+    if [ "$test_case" = outer ]; then
+      mode=outer
+    fi
+    TMPDIR="$runner_tmp" TMP="$runner_tmp" \
+      FM_STARTUP_NETWORK_REAP_PROBE="$mode" FM_STARTUP_NETWORK_REAP_INFO="$info" \
+      fm_test_start_fixture bash "$ROOT/tests/fm-startup-network.test.sh" 2>"$probe_stderr" ||
+      fail "could not launch the reap probe ($test_case)"
+    probe=$FM_TEST_FIXTURE_PID
+    i=0
+    while [ "$i" -lt 150 ] && ! grep -qx ready "$info"; do
+      process_is_running "$probe" ||
+        fail "the reap probe exited early ($test_case): $(cat "$info" "$probe_stderr")"
+      sleep 0.1
+      i=$((i + 1))
+    done
+    grep -qx ready "$info" ||
+      fail "the reap probe never became ready ($test_case): $(cat "$probe_stderr")"
+    {
+      IFS= read -r root
+      IFS= read -r claimant
+      IFS= read -r inner
+      IFS= read -r fixture_parent
+      IFS= read -r sleeper
+      IFS= read -r stage_session
+      IFS= read -r worker
+    } < "$info"
+    case "$root" in
+      "$runner_tmp"/*) ;;
+      *) fail "the reap probe put its fixtures outside TMPDIR ($test_case): $root" ;;
+    esac
+    if ! process_is_running "$worker" || ! process_is_running "$claimant" ||
+      ! process_is_running "$inner" || ! process_is_running "$sleeper"; then
+      fail "the reap probe did not start all fixtures ($test_case)"
+    fi
+    parent_group=$(ps -p "$fixture_parent" -o pgid=)
+    sleeper_group=$(ps -p "$sleeper" -o pgid=)
+    [ -n "$parent_group" ] && [ -n "$sleeper_group" ] && [ "$parent_group" != "$sleeper_group" ] ||
+      fail "the sleeping fixture child did not have its own process group ($test_case)"
+    expected=143
+    if [ "$test_case" = timeout ]; then
+      kill -KILL "$probe"
+      rm -rf "$runner_tmp"
+      expected=137
+    else
+      kill -TERM "$probe"
+    fi
+    status=0
+    wait "$probe" 2>/dev/null || status=$?
+    [ "$status" -eq "$expected" ] || fail "the reap probe exited with $status ($test_case)"
+    i=0
+    while :; do
+      survivors=$(fixture_groups_in_sessions "$claimant" "$fixture_parent" "$stage_session") ||
+        fail "could not inspect fixture process groups ($test_case)"
+      if [ -z "$survivors" ] && ! process_is_running "$worker" && ! process_is_running "$claimant" &&
+        ! process_is_running "$inner" && ! process_is_running "$sleeper" && [ ! -d "$root" ]; then
+        break
+      fi
+      if [ "$test_case" != timeout ] || [ "$i" -ge 149 ]; then
+        fail "fixtures outlived the suite ($test_case): groups=$survivors worker=$worker claimant=$claimant suite=$inner sleeper=$sleeper $(cat "$probe_stderr")"
+      fi
+      sleep 0.1
+      i=$((i + 1))
+    done
+    rm -rf "$runner_tmp"
+  done
+  pass "fm-startup-network: timeout and interruption reap detached fixture processes"
+}
+
 test_wait_fails_without_a_published_stage
 test_start_returns_without_holding_the_callers_stdout
 test_harvest_acknowledgement_suppresses_the_wake_and_no_claim_produces_it
@@ -781,6 +947,7 @@ test_records_share_one_origin_so_offsets_form_a_timeline
 test_timings_are_published_and_only_the_on_demand_report_prints_them
 test_a_bounded_run_still_publishes_the_timings_it_managed_to_record
 test_the_timing_artifact_cannot_carry_a_command_line_or_forge_records
+test_killing_the_suite_reaps_detached_fixture_processes
 echo "# fm-startup-network.test.sh: all assertions passed"
 
 # A best-effort side-band publication must still expose failure through the
@@ -797,8 +964,8 @@ printf 'fixture summary deadline exceeded\n' >&2
 exit 124
 SHFAIL
   chmod +x "$root/bin/fm-home-summary-refresh.sh"
-  sleep 30 &
-  claimant=$!
+  fm_test_start_fixture sleep 30 || fail "could not start claimant"
+  claimant=$FM_TEST_FIXTURE_PID
   FM_SESSION_START_TIMEOUT=4 FM_FAKE_BOOTSTRAP_LOG="$log" \
     run_stage "$home" "$root" start --locked 1 --harvest-pid "$claimant" >/dev/null
   await_worker_record "$home"
