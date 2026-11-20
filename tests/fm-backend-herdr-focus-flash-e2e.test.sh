@@ -164,7 +164,7 @@ done
 [ -e "$B_SAMPLER_READY" ] || fail 'the Part B focus sampler did not start'
 : > "$B_OPERATION_ACTIVE"
 B_OUT=$(PATH="$FAKEBIN:$HERDR_ORIGINAL_PATH" FM_FLASH_CALL_LOG="$CALL_LOG" bash -c '
-  . "$1/bin/backends/herdr.sh"
+  . "$1/bin/fm-backend.sh" && fm_backend_source herdr
   fm_backend_herdr_cli() {
     local session=$1
     shift
@@ -307,7 +307,7 @@ done
 C_PROOF_POLLS=3
 C_OUT=$(PATH="$FAKEBIN:$HERDR_ORIGINAL_PATH" FM_FLASH_CALL_LOG="$C_CALL_LOG" \
   FM_BACKEND_HERDR_IDLE_SHELL_PROOF_POLLS="$C_PROOF_POLLS" bash -c '
-  . "$1/bin/backends/herdr.sh"
+  . "$1/bin/fm-backend.sh" && fm_backend_source herdr
   fm_backend_herdr_cli() {
     local session=$1
     shift
@@ -366,7 +366,7 @@ STATUS=$(lab status --json) || fail 'could not read final named-lab version evid
 LIVE_VERSION=$(printf '%s' "$STATUS" | jq -r '.client.version')
 LIVE_PROTOCOL=$(printf '%s' "$STATUS" | jq -r '.client.protocol')
 FLOOR_VERDICT=$(bash -c '
-  . "$0/bin/backends/herdr.sh"
+  . "$0/bin/fm-backend.sh" && fm_backend_source herdr
   status=0
   fm_backend_herdr_release_floor_verdict "$1" "$2" || status=$?
   printf "%s\n" "$status"
@@ -390,7 +390,7 @@ FLOOR_STATE="$TMP_ROOT/floor-state"
 mkdir -p "$FLOOR_CONFIG" "$FLOOR_STATE"
 gate_verdict() {  # <config-dir> -> on|off, warnings on stderr
   PATH="$FAKEBIN:$HERDR_ORIGINAL_PATH" HERDR_SESSION="$HERDR_LAB_SESSION" bash -c '
-    . "$0/bin/backends/herdr.sh"
+    . "$0/bin/fm-backend.sh" && fm_backend_source herdr
     if fm_backend_herdr_presentation_enabled "$1" "$2"; then printf "on\n"; else printf "off\n"; fi
   ' "$ROOT" "$1" "$FLOOR_STATE"
 }

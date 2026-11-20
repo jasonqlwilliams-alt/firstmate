@@ -1518,7 +1518,7 @@ test_backend_inheritance_present_and_absent() {
 # inheritance, so it is pinned in tests/fm-backend-herdr.test.sh instead.
 sm_presentation_verdict() {  # <config-dir> -> on|off
   bash -c '
-    . "$0/bin/backends/herdr.sh"
+    . "$0/bin/fm-backend.sh" && fm_backend_source herdr
     case "$(fm_backend_herdr_presentation_preference "$1")" in
       off) printf "off\n" ;;
       *) printf "on\n" ;;

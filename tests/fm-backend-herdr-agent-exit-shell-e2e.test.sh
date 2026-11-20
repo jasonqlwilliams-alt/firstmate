@@ -63,7 +63,7 @@ lab() { env PATH="$HERDR_ORIGINAL_PATH" "$HERDR_LAB_HELPER" run "$HERDR_LAB_SESS
 classify_pane() {  # <pane_id>
   PATH="$FAKEBIN:$HERDR_ORIGINAL_PATH" bash -c '
     set -u
-    . "$1/bin/backends/herdr.sh"
+    . "$1/bin/fm-backend.sh" && fm_backend_source herdr
     fm_backend_herdr_pane_agent_state "$2" "$3"
   ' _ "$ROOT" "$HERDR_LAB_SESSION" "$1"
 }
@@ -71,7 +71,7 @@ classify_pane() {  # <pane_id>
 classify_recovery() {  # <pane_id>
   PATH="$FAKEBIN:$HERDR_ORIGINAL_PATH" bash -c '
     set -u
-    . "$1/bin/backends/herdr.sh"
+    . "$1/bin/fm-backend.sh" && fm_backend_source herdr
     fm_backend_herdr_agent_state "$2:$3"
   ' _ "$ROOT" "$HERDR_LAB_SESSION" "$1"
 }

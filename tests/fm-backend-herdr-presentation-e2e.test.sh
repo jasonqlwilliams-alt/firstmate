@@ -480,7 +480,7 @@ projection_labels_from_log() {  # <start-line>
 
 session_presentation_lock_path() {
   PATH="$FAKEBIN:$PATH" HERDR_SESSION="$HERDR_LAB_SESSION" bash -c '
-    . "$0/bin/backends/herdr.sh"
+    . "$0/bin/fm-backend.sh" && fm_backend_source herdr
     fm_backend_herdr_presentation_session_lock_path "$1"
   ' "$ROOT" "$HERDR_LAB_SESSION"
 }
@@ -574,7 +574,7 @@ FLOOR_STATUS=$(lab status --json) || fail 'could not read the lab release for th
 FLOOR_VERSION=$(printf '%s' "$FLOOR_STATUS" | jq -r 'if .server.running then .server.version else .client.version end')
 FLOOR_PROTOCOL=$(printf '%s' "$FLOOR_STATUS" | jq -r 'if .server.running then .server.protocol else .client.protocol end')
 FLOOR_VERDICT=$(bash -c '
-  . "$0/bin/backends/herdr.sh"
+  . "$0/bin/fm-backend.sh" && fm_backend_source herdr
   status=0
   fm_backend_herdr_release_floor_verdict "$1" "$2" || status=$?
   printf "%s\n" "$status"
@@ -1384,7 +1384,7 @@ pass "real Herdr lab: multi-home exact-pane teardowns restore captain focus with
 # The duplicate case allows flat fallback only when every matching pane is
 # positively agent-free.
 # shellcheck source=/dev/null
-. "$ROOT/bin/backends/herdr.sh"
+. "$ROOT/bin/fm-backend.sh" && fm_backend_source herdr
 
 MISSING_STATE="$TMP_ROOT/missing-state"; mkdir -p "$MISSING_STATE"
 fm_backend_herdr_projection_journal_create "$MISSING_STATE" missing1 >/dev/null

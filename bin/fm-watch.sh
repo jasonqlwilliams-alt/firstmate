@@ -650,15 +650,11 @@ signal_turnend_panes_churned() {  # <file> ...
 }
 
 recorded_endpoints() {
-  local meta w task seen=
+  local meta w task
   for meta in "$STATE"/*.meta; do
     [ -e "$meta" ] || continue
     w=$(fm_backend_target_of_meta "$meta")
     [ -n "$w" ] || continue
-    case "$seen" in
-      *"|$w|"*) continue ;;
-    esac
-    seen="$seen|$w|"
     task=${meta##*/}
     printf '%s\t%s\t%s\n' "$w" "${task%.meta}" "$(fm_backend_of_meta "$meta")"
   done
@@ -1323,10 +1319,9 @@ captain_call_stale_bound() {  # <window-key> <task>
 # Both records of an ordinary crew wait bound it (see task_captain_call_open
 # above): the status line the worker declared, and the backlog hold firstmate
 # recorded once the captain took the work in hand.
-surface_nonterminal_stale() {  # <window> <hash>
-  local win=$1 h=$2 key task last declared=1 bounded=1 throttled=1 until now
+surface_nonterminal_stale() {  # <window> <task> <hash>
+  local win=$1 task=$2 h=$3 key last declared=1 bounded=1 throttled=1 until now
   key=$(window_key "$win")
-  task=$(window_to_task "$win" "$STATE")
   last=$(last_status_line "$STATE/$task.status")
   STALE_WAIT_DECLARATION=
   if status_is_paused "$last"; then
@@ -1692,7 +1687,7 @@ heartbeat_scan_finds_actionable() {
 # supervision cycle: the reader is a short-lived subprocess of THIS watcher, not
 # a second watcher, so every guard/beacon/arm/turn-end mechanism is unchanged.
 event_wait_or_sleep() {
-  local w task b session first_backend="" first_session="" rec rc
+  local w task b session first_backend="" first_session="" rec rc seen=
   local windows=()
   while IFS=$'\t' read -r w task b; do
     fm_backend_has_push "$b" || continue
@@ -1701,6 +1696,8 @@ event_wait_or_sleep() {
     # they are excluded from the fast escalation exactly as the stale loop skips
     # them.
     [ "$(fm_meta_get "$STATE/$task.meta" kind)" = secondmate ] && continue
+    fm_backend_source "$b" || continue
+    [ "$(fm_backend_herdr_matching_meta "$w" "$STATE")" = "$STATE/$task.meta" ] || continue
     session=${w%%:*}
     if [ -z "$first_backend" ]; then first_backend=$b; first_session=$session; fi
     # One socket connection covers one backend+session; a home normally has a
@@ -1709,6 +1706,8 @@ event_wait_or_sleep() {
     if [ "$b" != "$first_backend" ] || [ "$session" != "$first_session" ]; then
       continue
     fi
+    case "$seen" in *"|$w|"*) continue ;; esac
+    seen="$seen|$w|"
     windows+=("$w")
   done < <(recorded_endpoints)
 
@@ -2245,12 +2244,19 @@ EOF
     fi
     ACTIVE_CAPTAIN_HOLD_REFRESH_FAILED=1
   fi
+  seen=
   while IFS=$'\t' read -r w task backend; do
     meta="$STATE/$task.meta"
-    kind=$(fm_meta_get "$meta" kind)
     # Steering-inbox loss detection runs before the secondmate stale
     # exemption below, because a mate's steers land in an inbox too.
     inbox_steer_check "$w" "$task" "$backend"
+    if [ "$backend" = herdr ]; then
+      fm_backend_source herdr || continue
+      [ "$(fm_backend_herdr_matching_meta "$w" "$STATE")" = "$meta" ] || continue
+    fi
+    case "$seen" in *"|$w|"*) continue ;; esac
+    seen="$seen|$w|"
+    kind=$(fm_meta_get "$meta" kind)
     key=$(window_key "$w")
     last=$(last_status_line "$STATE/$task.status")
     if ! status_is_paused_or_captain_held "$last" \
@@ -2398,7 +2404,7 @@ EOF
                 handle_paused_stale "$w" "$task" "$h"
                 ;;
               *)
-                surface_nonterminal_stale "$w" "$h"
+                surface_nonterminal_stale "$w" "$task" "$h"
                 ;;
             esac
           else

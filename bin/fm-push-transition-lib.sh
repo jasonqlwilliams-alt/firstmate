@@ -145,11 +145,8 @@ handle_push_transition() {  # <backend> <session> <record>
   to=$(fm_transition_to_status "$record")
   [ -n "$pane_id" ] || { sleep 1; return; }
   window="$session:$pane_id"
-  meta=$(fm_backend_meta_for_window "$window" "$STATE") || return 0
-  if [ "$backend" = herdr ]; then
-    fm_backend_source herdr || return 0
-    FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_herdr_require_task_identity "$window" 2>/dev/null || return 0
-  fi
+  fm_backend_source "$backend" || return 0
+  meta=$(fm_backend_herdr_matching_meta "$window" "$STATE") || return 0
   task=${meta##*/}
   task=${task%.meta}
   # A declared wait already names the human this transition would report: an

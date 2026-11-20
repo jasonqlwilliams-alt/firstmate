@@ -24,8 +24,9 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 RAW_TARGET=$1
 N=${2:-40}
 
-TARGET_META=$(fm_backend_meta_for_selector "$RAW_TARGET" "$STATE" 2>/dev/null || true)
-if [ -n "$TARGET_META" ] && [ -n "$(fm_meta_get "$TARGET_META" remote_host)" ]; then
+fm_backend_resolve_selector "$RAW_TARGET" "$STATE" >/dev/null
+TARGET_META=$FM_BACKEND_RESOLVED_META
+if [ -n "$FM_BACKEND_RESOLVED_LABEL" ] && [ -n "$(fm_meta_get "$TARGET_META" remote_host)" ]; then
   REMOTE_ID=${TARGET_META##*/}
   REMOTE_ID=${REMOTE_ID%.meta}
   REMOTE_HOST=$(fm_meta_get "$TARGET_META" remote_host)
@@ -39,22 +40,9 @@ if [ -n "$TARGET_META" ] && [ -n "$(fm_meta_get "$TARGET_META" remote_host)" ]; 
   exit 0
 fi
 
-EXPECTED_LABEL=
 BACKEND=tmux
 if [ -n "$TARGET_META" ]; then
-  TASK_ID=${TARGET_META##*/}
-  EXPECTED_LABEL="fm-${TASK_ID%.meta}"
   BACKEND=$(fm_backend_of_meta "$TARGET_META")
-  T=$(fm_backend_target_of_meta "$TARGET_META") || {
-    echo "error: no backend target recorded in $TARGET_META" >&2
-    exit 1
-  }
-else
-  T=$(fm_backend_resolve_selector "$RAW_TARGET" "$STATE")
-  TARGET_META=$(fm_backend_meta_for_window "$T" "$STATE" 2>/dev/null || true)
-  if [ -n "$TARGET_META" ]; then
-    BACKEND=$(fm_backend_of_meta "$TARGET_META")
-  fi
 fi
-
-FM_BACKEND_HERDR_ENDPOINT_META="$TARGET_META" fm_backend_capture "$BACKEND" "$T" "$N" "$EXPECTED_LABEL"
+FM_BACKEND_HERDR_ENDPOINT_META="$TARGET_META" \
+  fm_backend_capture "$BACKEND" "$FM_BACKEND_RESOLVED_TARGET" "$N" "$FM_BACKEND_RESOLVED_LABEL"

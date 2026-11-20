@@ -135,9 +135,18 @@ terminal_calls="$TMP/terminal-calls"
 [ -f "$record" ] && [ ! -s "$terminal_calls" ] || fail "the watcher accessed a terminal after its task moved"
 pass "inbox_steer_check: a relaunch after liveness leaves the steer queued and forbids capture or input at its old pane"
 
+reset_state
+fm_write_meta "$STATE_DIR/a-old.meta" "window=default:wG:pQ" "backend=herdr" "herdr_terminal_id=term-old"
+fm_write_meta "$STATE_DIR/z-new.meta" "window=default:wG:pQ" "backend=herdr" "herdr_terminal_id=term-worker"
+printf 'paused: waiting on the upstream release\n' > "$STATE_DIR/a-old.status"
+handle_push_transition herdr default "$(mkrec wG:pQ blocked)"
+[ -s "$WAKE_LOG" ] || fail "the old task's pause suppressed the live worker's blocked event"
+pass "handle_push_transition: a stale record sharing the slot cannot displace the bound worker"
+
 # --- event_wait_or_sleep: secondmate windows are excluded from the pane list --
 
 reset_state
+fm_write_meta "$STATE_DIR/a-old.meta" "window=default:wG:pQ" "backend=herdr" "herdr_terminal_id=term-old"
 fm_write_meta "$STATE_DIR/tk3.meta" "window=default:wG:pQ" "backend=herdr" "kind=ship" "herdr_terminal_id=term-worker"
 fm_write_meta "$STATE_DIR/sm1.meta" "window=default:wA:pS" "backend=herdr" "kind=secondmate"
 # shellcheck disable=SC2329 # Runtime overrides called by the isolated watcher.

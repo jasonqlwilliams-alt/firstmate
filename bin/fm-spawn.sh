@@ -1131,10 +1131,14 @@ spawn_abort_cleanup() {
   fi
   if [ "$HERDR_PROJECTION_ABORT_CLEANUP" = 1 ]; then
     HERDR_PROJECTION_ABORT_CLEANUP=0
-    fm_backend_herdr_projection_cleanup_exact \
-      "$HERDR_PROJECTION_ABORT_SESSION" \
-      "$HERDR_PROJECTION_ABORT_TASK_PANE" \
-      "$HERDR_PROJECTION_ABORT_SEEDED_PANE" || true
+    fm_backend_herdr_projection_close_bound_pane \
+      "$HERDR_PROJECTION_ABORT_SESSION" "$HERDR_PROJECTION_ABORT_TASK_PANE" \
+      "$FM_BACKEND_HERDR_PROJECTION_TERMINAL_ID" || true
+    if [ -n "$HERDR_PROJECTION_ABORT_SEEDED_PANE" ]; then
+      fm_backend_herdr_projection_close_bound_pane \
+        "$HERDR_PROJECTION_ABORT_SESSION" "$HERDR_PROJECTION_ABORT_SEEDED_PANE" \
+        "$FM_BACKEND_HERDR_PROJECTION_SEEDED_TERMINAL_ID" || true
+    fi
   fi
   if [ "$HERDR_PRESENTATION_ORDER_LOCK_HELD" = 1 ]; then
     HERDR_PRESENTATION_ORDER_LOCK_HELD=0
@@ -3316,7 +3320,7 @@ elif [ "$RELAUNCH" -eq 1 ] && [ "$RELAUNCH_RECREATE" -eq 1 ]; then
       HERDR_SEEDED_DEFAULT_TAB_ID=${HERDR_CONTAINER_RAW#*$'\t'}
       HERDR_SES=${CONTAINER%%:*}
       HERDR_WORKSPACE_ID=${CONTAINER#*:}
-      HERDR_TASK_IDS=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_create_task "$CONTAINER" "$W" "$WT" \
+      HERDR_TASK_IDS=$(FM_STATE_OVERRIDE="$STATE" FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_create_task "$CONTAINER" "$W" "$WT" \
         "$HERDR_SEEDED_DEFAULT_TAB_ID" "$HERDR_CREATE_KIND") || exit 1
       read -r HERDR_TAB_ID HERDR_PANE_ID HERDR_TERMINAL_ID <<EOF
 $HERDR_TASK_IDS
@@ -3504,7 +3508,7 @@ case "$BACKEND" in
       HERDR_SEEDED_DEFAULT_TAB_ID=${HERDR_CONTAINER_RAW#*$'\t'}
       HERDR_SES=${CONTAINER%%:*}
       HERDR_WORKSPACE_ID=${CONTAINER#*:}
-      HERDR_TASK_IDS=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_create_task "$CONTAINER" "$W" "$PROJ_ABS" \
+      HERDR_TASK_IDS=$(FM_STATE_OVERRIDE="$STATE" FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_create_task "$CONTAINER" "$W" "$PROJ_ABS" \
         "$HERDR_SEEDED_DEFAULT_TAB_ID" "$HERDR_CREATE_KIND") || exit 1
       read -r HERDR_TAB_ID HERDR_PANE_ID HERDR_TERMINAL_ID <<EOF
 $HERDR_TASK_IDS

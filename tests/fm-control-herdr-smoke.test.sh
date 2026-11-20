@@ -83,11 +83,6 @@ if [ "$last" -ge 2 ] && [ "${args[$((last - 1))]}" = --session ]; then
   [ "${args[$last]}" = "$HERDR_LAB_SESSION" ] || exit 91
   unset 'args[last]' 'args[last-1]'
 fi
-if [ "${args[0]}" = --version ]; then
-  env PATH="$HERDR_ORIGINAL_PATH" "$HERDR_LAB_HELPER" run "$HERDR_LAB_SESSION" status --json \
-    | jq -er '"herdr " + .client.version'
-  exit "$?"
-fi
 exec env PATH="$HERDR_ORIGINAL_PATH" "$HERDR_LAB_HELPER" run "$HERDR_LAB_SESSION" "${args[@]}"
 SH
 chmod +x "$FAKEBIN/herdr"
@@ -179,8 +174,7 @@ pass "real herdr: exit on a pane with no registered agent is idempotent success"
 # tests/fm-backend-herdr.test.sh; this is the check that notices when the real
 # client stops answering the way that logic expects, and it names the version so
 # a release change is attributed rather than mysterious.
-HERDR_VERSION=$(herdr --version 2>&1 | head -1)
-HERDR_VERSION=${HERDR_VERSION#herdr }
+HERDR_VERSION=$(herdr status --json | jq -er '.client.version') || fail "could not read the lab client version"
 version_fail() {  # <message>
   fail "$1 [herdr $HERDR_VERSION]"
 }

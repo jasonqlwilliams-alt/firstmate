@@ -71,7 +71,7 @@ FOCUSED=$(lab workspace list | jq -er '[.result.workspaces[] | select(.focused =
 [ "$FOCUSED" = "$TAB" ] || fail "persisted focus was $FOCUSED, not the target tab $TAB"
 
 OUT=$(PATH="$FAKEBIN:$HERDR_ORIGINAL_PATH" bash -c '
-  . "$1/bin/backends/herdr.sh"
+  . "$1/bin/fm-backend.sh" && fm_backend_source herdr
   fm_backend_herdr_cli() {
     local session=$1
     shift

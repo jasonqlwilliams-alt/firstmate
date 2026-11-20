@@ -2096,7 +2096,7 @@ SH
   chmod +x "$case_dir/fakebin/treehouse"
 
   lock=$(FM_FAKE_HERDR_LOG="$log" FM_FAKE_HERDR_CLOSED="$closed" PATH="$case_dir/fakebin:$PATH" \
-    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_presentation_session_lock_path default' "$ROOT") \
+    bash -c '. "$0/bin/fm-backend.sh" && fm_backend_source herdr; fm_backend_herdr_presentation_session_lock_path default' "$ROOT") \
     || fail "herdr-orphan-refusal: could not resolve the fixture presentation lock path"
   ready="$case_dir/lock-ready"; release="$case_dir/lock-release"
   ROOT="$ROOT" LOCK="$lock" READY="$ready" RELEASE="$release" bash -c '

@@ -555,12 +555,12 @@ fm_backend_meta_for_window() {  # <target> <state-dir>
 # targets match the local records by exact window; multiple claims are
 # unreadable. An explicit endpoint outside the task inventory stays unbound.
 # A pre-binding worker record stays unreadable while its pane exists.
-fm_backend_herdr_task_identity_state() {  # <target>
-  local target=$1 meta=${FM_BACKEND_HERDR_ENDPOINT_META:-} candidate kind expected field
+fm_backend_herdr_task_identity_state() {  # <target> [binding]
+  local target=$1 detail=${2:-} meta=${FM_BACKEND_HERDR_ENDPOINT_META:-} candidate kind expected field
   fm_backend_herdr_parse_target "$target" || { printf 'unreadable'; return 0; }
   if [ "$target" = "${FM_BACKEND_HERDR_SPAWN_TARGET:-}" ]; then
     fm_backend_herdr_pane_identity_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE" \
-      terminal_id "${FM_BACKEND_HERDR_SPAWN_TERMINAL:-}"
+      terminal_id "${FM_BACKEND_HERDR_SPAWN_TERMINAL:-}" "$detail"
     return 0
   fi
   if [ -z "$meta" ]; then
@@ -595,7 +595,19 @@ fm_backend_herdr_task_identity_state() {  # <target>
     field=terminal_id
     expected=$(fm_backend_meta_exact_value "$meta" herdr_terminal_id) || expected=
   fi
-  fm_backend_herdr_pane_identity_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE" "$field" "$expected"
+  fm_backend_herdr_pane_identity_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE" "$field" "$expected" "$detail"
+}
+
+fm_backend_herdr_matching_meta() {  # <target> <state-dir>
+  local target=$1 state=$2 candidate matched=
+  for candidate in "$state"/*.meta; do
+    [ -f "$candidate" ] || continue
+    [ "$(fm_meta_get "$candidate" window)" = "$target" ] || continue
+    [ "$(FM_BACKEND_HERDR_ENDPOINT_META="$candidate" fm_backend_herdr_task_identity_state "$target")" = match ] || continue
+    [ -z "$matched" ] || return 1
+    matched=$candidate
+  done
+  [ -n "$matched" ] && printf '%s' "$matched"
 }
 
 fm_backend_herdr_require_task_identity() {  # <target> [<just-sampled-state>]
@@ -634,17 +646,6 @@ fm_backend_meta_for_selector() {  # <raw-target> <state-dir>
   local raw=$1 state=$2 id
   id=$(fm_backend_task_id_for_selector "$raw" "$state") || return 1
   printf '%s/%s.meta' "$state" "$id"
-}
-
-fm_backend_of_selector() {  # <raw-target> <resolved-target> <state-dir>
-  local raw=$1 resolved=$2 state=$3 meta
-  meta=$(fm_backend_meta_for_selector "$raw" "$state" 2>/dev/null || true)
-  [ -n "$meta" ] && { fm_backend_of_meta "$meta"; return 0; }
-  if [ -n "$resolved" ]; then
-    meta=$(fm_backend_meta_for_window "$resolved" "$state" 2>/dev/null || true)
-    [ -n "$meta" ] && { fm_backend_of_meta "$meta"; return 0; }
-  fi
-  printf 'tmux'
 }
 
 fm_backend_expected_label_of_selector() {  # <raw-target> <state-dir>
@@ -717,37 +718,47 @@ fm_backend_source() {  # <name>
 #                      metadata, then treated as an ad hoc bare window name and
 #                      resolved by searching the legacy tmux live inventory.
 fm_backend_resolve_selector() {  # <raw-target> <state-dir>
-  local raw=$1 state=$2 meta window
+  local raw=$1 state=$2 meta= target named=
   case "$raw" in
     *:*)
-      printf '%s' "$raw"
-      return 0
-      ;;
-  esac
-  meta=$(fm_backend_meta_for_selector "$raw" "$state" 2>/dev/null || true)
-  if [ -n "$meta" ]; then
-    window=$(fm_backend_target_of_meta "$meta")
-    [ -n "$window" ] || { echo "error: no backend target recorded in $meta" >&2; return 1; }
-    printf '%s' "$window"
-    return 0
-  fi
-  case "$raw" in
-    fm-*)
-      echo "error: no metadata for $raw in $state; pass session:window to target a window outside this firstmate home" >&2
-      return 1
+      target=$raw
+      meta=$(fm_backend_meta_for_window "$target" "$state" 2>/dev/null || true)
       ;;
     *)
-      meta=$(fm_backend_meta_for_window "$raw" "$state" 2>/dev/null || true)
+      meta=$(fm_backend_meta_for_selector "$raw" "$state" 2>/dev/null || true)
       if [ -n "$meta" ]; then
-        window=$(fm_backend_target_of_meta "$meta")
-        [ -n "$window" ] || { echo "error: no backend target recorded in $meta" >&2; return 1; }
-        printf '%s' "$window"
-        return 0
+        named=${meta##*/}
+        named="fm-${named%.meta}"
+      else
+        case "$raw" in
+          fm-*)
+            echo "error: no metadata for $raw in $state; pass session:window to target a window outside this firstmate home" >&2
+            return 1
+            ;;
+        esac
+        meta=$(fm_backend_meta_for_window "$raw" "$state" 2>/dev/null || true)
       fi
-      fm_backend_source tmux || return 1
-      fm_backend_tmux_resolve_bare_selector "$raw"
+      if [ -n "$meta" ]; then
+        target=$(fm_backend_target_of_meta "$meta") || {
+          if [ -z "$named" ] || [ -z "$(fm_meta_get "$meta" remote_host)" ]; then
+            echo "error: no backend target recorded in $meta" >&2
+            return 1
+          fi
+        }
+      else
+        fm_backend_source tmux || return 1
+        target=$(fm_backend_tmux_resolve_bare_selector "$raw") || return 1
+        meta=$(fm_backend_meta_for_window "$target" "$state" 2>/dev/null || true)
+      fi
       ;;
   esac
+  # shellcheck disable=SC2034
+  FM_BACKEND_RESOLVED_TARGET=$target
+  # shellcheck disable=SC2034
+  FM_BACKEND_RESOLVED_META=$meta
+  # shellcheck disable=SC2034
+  FM_BACKEND_RESOLVED_LABEL=$named
+  printf '%s' "$target"
 }
 
 # --- generic per-op dispatch -------------------------------------------------
