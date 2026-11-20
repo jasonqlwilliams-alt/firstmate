@@ -195,31 +195,124 @@ trap 'fm_test_cleanup; exit 143' TERM
 trap 'fm_test_cleanup; exit 129' HUP
 trap 'fm_test_cleanup; exit 131' QUIT
 
-fm_test_reap_fixture_processes() {  # <scope> <owner>
-  local snapshot pids pid signal=TERM empty=0 round
-  for ((round = 0; round < 12; round++)); do
-    snapshot=$(LC_ALL=C ps axeww -o pid=,stat=,command=) || return 1
-    pids=$(awk -v scope="$1" -v owner="$2" '
-      BEGIN { tag = "FM_TEST_FIXTURE_OWNER=" scope }
-      $1 > 1 && $1 != owner && $2 !~ /^Z/ {
-        for (i = 3; i <= NF; i++) {
-          if ($i == tag || index($i, tag "/") == 1) {
-            print $1
-            break
-          }
+fm_test_start_fixture() {
+  local monitor_was_on=0
+  case $- in *m*) monitor_was_on=1 ;; esac
+  set +m
+  # shellcheck disable=SC2016
+  perl -MPOSIX=setsid -MFcntl=O_CREAT,O_EXCL,O_WRONLY -e '
+    my $registry = shift;
+    my $session = setsid();
+    die "setsid: $!" unless defined($session) && $session > 1;
+    pipe(my $registered, my $ready) or die "pipe: $!";
+    my $anchor = fork();
+    die "fork: $!" unless defined($anchor);
+    if (!$anchor) {
+      close $registered;
+      setpgrp(0, 0) or die "setpgrp: $!";
+      sysopen(my $record, "$registry/$session.$$", O_CREAT | O_EXCL | O_WRONLY, 0600)
+        or die "record fixture session: $!";
+      close $record;
+      close STDIN;
+      close STDOUT;
+      close STDERR;
+      print {$ready} "ready\n";
+      close $ready;
+      sleep;
+      exit;
+    }
+    close $ready;
+    exit 1 unless <$registered>;
+    close $registered;
+    exec @ARGV or die "exec $ARGV[0]: $!";
+  ' "$FM_TEST_FIXTURE_SESSIONS" "$@" 3<&0 <&3 3<&- &
+  FM_TEST_FIXTURE_PID=$!
+  [ "$monitor_was_on" -eq 0 ] || set -m
+  until compgen -G "$FM_TEST_FIXTURE_SESSIONS/$FM_TEST_FIXTURE_PID.*" >/dev/null; do
+    if ! kill -0 "$FM_TEST_FIXTURE_PID" 2>/dev/null; then
+      wait "$FM_TEST_FIXTURE_PID" 2>/dev/null || true
+      return 1
+    fi
+    sleep 0.02
+  done
+}
+
+fm_test_run_fixture() {
+  fm_test_start_fixture "$@" || return 1
+  wait "$FM_TEST_FIXTURE_PID"
+}
+
+fm_test_fixture_session_records() {
+  local dir=$1 child record key
+  if [ -d "$dir/sessions" ]; then
+    mv "$dir/sessions" "$dir/closed-sessions" 2>/dev/null ||
+      [ ! -d "$dir/sessions" ] || return 1
+  fi
+  for record in "$dir"/closed-sessions/*; do
+    [ -f "$record" ] || continue
+    key=${record##*/}
+    printf 'session %s %s\n' "${key%.*}" "${key##*.}"
+  done
+  for child in "$dir"/children/*; do
+    [ -d "$child" ] || continue
+    fm_test_fixture_session_records "$child" || return 1
+  done
+}
+
+fm_test_fixture_process_snapshot() {
+  local rows
+  case "$OSTYPE" in
+    darwin*)
+      rows=$(ps -ax -o pid= -o pgid= -o stat=) || return 1
+      /usr/bin/ruby -e '
+        STDIN.each_line do |row|
+          pid, pgid, state = row.split
+          next if pid.to_i <= 1 || state.start_with?("Z")
+          begin
+            puts [pid, pgid, Process.getsid(pid.to_i), state].join(" ")
+          rescue Errno::ESRCH
+          end
+        end
+      ' <<< "$rows"
+      ;;
+    *) ps -ax -o pid= -o pgid= -o sid= -o stat= ;;
+  esac
+}
+
+fm_test_reap_fixture_processes() {
+  local snapshot records groups kind pgid signal=TERM empty=0 round
+  for ((round = 0; round < 20; round++)); do
+    records=$(fm_test_fixture_session_records "$TMPDIR") || return 1
+    snapshot=$(fm_test_fixture_process_snapshot) || return 1
+    groups=$(awk '
+      $1 == "session" { anchor[$2] = $3; next }
+      $1 > 1 && $2 > 1 && $4 !~ /^Z/ && $3 in anchor {
+        session[$2] = $3
+        if ($1 == anchor[$3] && $2 == $1) owned[$3] = 1
+      }
+      END {
+        for (pgid in session) {
+          sid = session[pgid]
+          if (sid in owned) print (pgid == anchor[sid] ? "anchor" : "fixture"), pgid
         }
       }
-    ' <<< "$snapshot") || return 1
-    if [ -z "$pids" ]; then
-      [ "$empty" -eq 0 ] || return 0
-      empty=1
-    else
+    ' <<< "$records"$'\n'"$snapshot") || return 1
+    if [[ "$groups" == *fixture* ]]; then
       empty=0
-      while IFS= read -r pid; do
-        kill -s "$signal" "$pid" 2>/dev/null || true
-      done <<< "$pids"
+    elif [ "$empty" -eq 0 ]; then
+      empty=1
+      sleep 0.2
+      continue
+    else
+      [ -n "$groups" ] || return 0
       signal=KILL
     fi
+    while read -r kind pgid; do
+      if [ "$kind" = fixture ] || [ "$empty" -eq 1 ]; then
+        kill -s "$signal" -- "-$pgid" 2>/dev/null || true
+      fi
+    done <<< "$groups"
+    signal=KILL
     sleep 0.2
   done
   return 1
@@ -246,10 +339,12 @@ fm_test_finish_fixture_reaper() {  # <exit status>
 
 fm_test_arm_fixture_reaper() {
   local monitor_was_on=0
+  FM_TEST_FIXTURE_SESSIONS="$TMPDIR/sessions"
+  mkdir "$FM_TEST_FIXTURE_SESSIONS" "$TMPDIR/children" || return 1
   case $- in *m*) monitor_was_on=1 ;; esac
   set -m
   # shellcheck disable=SC2016
-  FM_TEST_FIXTURE_OWNER= FM_TEST_SKIP_ORPHAN_REAP=1 nohup bash -c '
+  FM_TEST_SKIP_ORPHAN_REAP=1 nohup bash -c '
     set -u
     . "$1"
     trap - EXIT INT TERM HUP QUIT
@@ -258,11 +353,11 @@ fm_test_arm_fixture_reaper() {
     while [ ! -e "$TMPDIR/exit" ] && fm_test_owner_is_alive "$2" "$3"; do
       sleep 0.2
     done
-    fm_test_reap_fixture_processes "$6" "$2" || exit 1
+    fm_test_reap_fixture_processes || exit 1
     fm_test_cleanup
     rm -rf -- "$TMPDIR"
   ' _ "$ROOT/tests/lib.sh" "$$" "$FM_TEST_OWNER_IDENTITY" "$FM_TEST_CLEANUP_REGISTRY" \
-    "$FM_TEST_PROCEVENT_REGISTRY" "$FM_TEST_FIXTURE_OWNER" >/dev/null 2>&1 </dev/null &
+    "$FM_TEST_PROCEVENT_REGISTRY" >/dev/null 2>&1 </dev/null &
   FM_TEST_REAPER_PID=$!
   [ "$monitor_was_on" -eq 1 ] || set +m
   trap 'fm_test_finish_fixture_reaper "$?"' EXIT
