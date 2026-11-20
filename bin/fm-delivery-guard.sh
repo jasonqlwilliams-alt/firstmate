@@ -233,6 +233,14 @@ cmd_check_push() {  # <repo> <remote-name> <effective-url>
   [ -n "$project" ] || die "repository $repo is not armed with a Firstmate project identity"
   fm_repository_policy_load "$project" || exit 1
   if [ "$remote" = no-mistakes ]; then
+    if [[ $url == file:///* ]]; then
+      url=$(perl -e '
+        my ($path) = @ARGV;
+        $path =~ s/%(?!00)([0-9A-Fa-f]{2})/chr(hex($1))/ge;
+        print $path, ".";
+      ' -- "${url#file://}") || exit 1
+      url=${url%.}
+    fi
     status=$(read_no_mistakes_status "$repo") || exit 1
     resolve_no_mistakes_gate "$repo" "$url" "$status" >/dev/null || exit 1
     upstream=$(printf '%s\n' "$status" | sed -n 's/^[[:space:]]*remote:[[:space:]]*//p' | head -1)

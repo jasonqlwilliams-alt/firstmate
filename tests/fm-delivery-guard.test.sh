@@ -447,6 +447,21 @@ SH
     "the fetch-only tag option did not trigger the exception refusal: $out"
   ! remote_has_branch "$gate" fetch-option-refused || fail "the refused push reached the gate"
   git -C "$repo" config --unset remote.no-mistakes.tagOpt
+
+  git -C "$repo" config remote.no-mistakes.pushurl "file://$home/gate%2dalias/repos/${gate##*/}"
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push \
+    -o 'intent=fixture gate push' no-mistakes "$head:refs/heads/file-url-allowed" 2>&1); rc=$?
+  expect_code 0 "$rc" "an ordinary push should accept a file URL for the registered gate: $out"
+  assert_contains "$out" "action=pull-request repository=github.com/captain/widgets" \
+    "the managed hook did not authorize the gate push through its file URL"
+  remote_has_branch "$gate" file-url-allowed || fail "the push through the file URL did not reach the gate"
+
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+    -o 'intent=fixture gate push' no-mistakes "$head:refs/heads/file-url-refused" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the gate exception should require an absolute path instead of a file URL"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "the file URL did not trigger the exception refusal: $out"
+  ! remote_has_branch "$gate" file-url-refused || fail "the refused push reached the gate"
   git -C "$repo" config --unset remote.no-mistakes.pushurl
 
   out=$(cd "$repo" && env "${fixture_env[@]}" NM_UPSTREAM=https://github.com/upstream/widgets.git \
