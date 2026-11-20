@@ -330,8 +330,7 @@ fm_test_owner_is_alive() {  # <pid> <identity>
 fm_test_finish_fixture_reaper() {  # <exit status>
   local status=$1
   trap '' INT TERM HUP QUIT
-  : > "$FM_TEST_FIXTURE_REAPER_DIR/exit"
-  if ! wait "$FM_TEST_REAPER_PID"; then
+  if ! rm -f -- "$FM_TEST_FIXTURE_REAPER_DIR/active" || ! wait "$FM_TEST_REAPER_PID"; then
     printf 'not ok - fixture reaper did not finish\n' >&2
     [ "$status" -ne 0 ] || status=1
   fi
@@ -344,6 +343,7 @@ fm_test_arm_fixture_reaper() {
   FM_TEST_FIXTURE_REAPER_DIR=$1
   FM_TEST_FIXTURE_SESSIONS="$FM_TEST_FIXTURE_REAPER_DIR/sessions"
   mkdir "$FM_TEST_FIXTURE_SESSIONS" "$FM_TEST_FIXTURE_REAPER_DIR/children" || return 1
+  : > "$FM_TEST_FIXTURE_REAPER_DIR/active" || return 1
   case $- in *m*) monitor_was_on=1 ;; esac
   set -m
   # shellcheck disable=SC2016
@@ -352,7 +352,7 @@ fm_test_arm_fixture_reaper() {
     FM_TEST_CLEANUP_REGISTRY=$4
     FM_TEST_PROCEVENT_REGISTRY=$5
     . "$1" || exit 1
-    while [ ! -e "$TMPDIR/exit" ] && fm_test_owner_is_alive "$2" "$3"; do
+    while [ -e "$TMPDIR/active" ] && fm_test_owner_is_alive "$2" "$3"; do
       sleep 0.2
     done
     fm_test_reap_fixture_processes || exit 1

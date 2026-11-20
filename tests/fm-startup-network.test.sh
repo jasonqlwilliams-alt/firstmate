@@ -904,18 +904,19 @@ test_killing_the_suite_reaps_detached_fixture_processes() {
     wait "$probe" 2>/dev/null || status=$?
     [ "$status" -eq "$expected" ] || fail "the reap probe exited with $status ($test_case)"
     i=0
-    while [ "$i" -lt 150 ]; do
+    while :; do
       survivors=$(fixture_groups_in_sessions "$claimant" "$fixture_parent" "$stage_session") ||
         fail "could not inspect fixture process groups ($test_case)"
       if [ -z "$survivors" ] && ! process_is_running "$worker" && ! process_is_running "$claimant" &&
         ! process_is_running "$inner" && ! process_is_running "$sleeper" && [ ! -d "$root" ]; then
         break
       fi
+      if [ "$test_case" != timeout ] || [ "$i" -ge 149 ]; then
+        fail "fixtures outlived the suite ($test_case): groups=$survivors worker=$worker claimant=$claimant suite=$inner sleeper=$sleeper $(cat "$probe_stderr")"
+      fi
       sleep 0.1
       i=$((i + 1))
     done
-    [ "$i" -lt 150 ] ||
-      fail "fixtures outlived the suite ($test_case): groups=$survivors worker=$worker claimant=$claimant suite=$inner sleeper=$sleeper $(cat "$probe_stderr")"
     rm -rf "$runner_tmp"
   done
   pass "fm-startup-network: timeout and interruption reap detached fixture processes"
