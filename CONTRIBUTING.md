@@ -28,7 +28,7 @@ The check must continue rejecting an attestation for a different head.
 3. Initialize the gate with your fork as the push target: `no-mistakes init --fork-url git@github.com:<you>/firstmate.git` (contributing to firstmate requires **no-mistakes v1.72.0+**, the shared no-mistakes daemon version that Firstmate bootstrap enforces; without a fork, plain `no-mistakes init` still works for maintainers with push access).
 4. Optional, and recommended when your `origin` names the original author's repository rather than your own: record the original-author fetch URL, your chosen write URL, its approved owner and account, validation command, and review gates in local `config/repository-policy.json` as documented in [`docs/configuration.md`](docs/configuration.md#repository-delivery-policy-configrepository-policyjson), then run `bin/fm-delivery-guard.sh arm firstmate .`.
    The guard does nothing until that file exists.
-   Once armed, `--fork-url` alone is insufficient when `origin` is a third-party upstream, because no-mistakes opens PRs against `origin`: the guard refuses the proxy push before it receives objects unless both reported destinations match your explicit write repository.
+   When `origin` is a third-party upstream, `--fork-url` alone leaves the PR aimed at that upstream and triggers the [armed guard's proxy push refusal](docs/configuration.md#repository-delivery-policy-configrepository-policyjson).
    A fresh clone can make the fork `origin` and add the original-author repository under an explicit fetch-only name; Firstmate automation never rewrites, renames, or deletes an existing remote to obtain that layout.
 5. Commit your changes.
 6. Push through the gate instead of pushing to `origin`:
