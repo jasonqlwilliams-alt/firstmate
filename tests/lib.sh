@@ -98,17 +98,11 @@ pass() {
 # real caller, never a subshell.
 
 FM_TEST_CLEANUP_DIRS=()
-FM_TEST_CLEANUP_REGISTRY=$(mktemp "${FM_TEST_REGISTRY_DIR:-${TMPDIR:-/tmp}}/.fm-test-cleanup.$$.XXXXXX") || return 1
 
 fm_test_pid_identity() {
   local pid=$1
-  FM_STATE_OVERRIDE="${TMPDIR:-/tmp}" bash -c \
+  TZ=UTC0 FM_STATE_OVERRIDE="${TMPDIR:-/tmp}" bash -c \
     '. "$1"; fm_pid_identity "$2"' _ "$ROOT/bin/fm-wake-lib.sh" "$pid"
-}
-
-FM_TEST_OWNER_IDENTITY=$(fm_test_pid_identity "$$") || {
-  rm -f "$FM_TEST_CLEANUP_REGISTRY"
-  return 1
 }
 
 # --- process-event runner reaping -------------------------------------------
@@ -124,8 +118,6 @@ FM_TEST_OWNER_IDENTITY=$(fm_test_pid_identity "$$") || {
 # The sweep is scoped to the exact home (and its claim root when the suite uses a
 # private one). It never matches on a script or process name, which would reach
 # into another home's live runners.
-
-FM_TEST_PROCEVENT_REGISTRY=$(mktemp "${FM_TEST_REGISTRY_DIR:-${TMPDIR:-/tmp}}/.fm-test-procevent.$$.XXXXXX") || return 1
 
 fm_test_track_procevent_home() {  # <home> [claim-root]
   [ -n "${1:-}" ] || return 1
@@ -189,11 +181,20 @@ fm_test_tmproot() {
   printf '%s\n' "$root"
 }
 
-trap fm_test_cleanup EXIT
-trap 'fm_test_cleanup; exit 130' INT
-trap 'fm_test_cleanup; exit 143' TERM
-trap 'fm_test_cleanup; exit 129' HUP
-trap 'fm_test_cleanup; exit 131' QUIT
+if [ "${FM_TEST_FIXTURE_REAPER_CHILD:-0}" != 1 ]; then
+  FM_TEST_CLEANUP_REGISTRY=$(mktemp "${FM_TEST_REGISTRY_DIR:-${TMPDIR:-/tmp}}/.fm-test-cleanup.$$.XXXXXX") || return 1
+  FM_TEST_OWNER_IDENTITY=$(fm_test_pid_identity "$$") || {
+    rm -f "$FM_TEST_CLEANUP_REGISTRY"
+    return 1
+  }
+  FM_TEST_PROCEVENT_REGISTRY=$(mktemp "${FM_TEST_REGISTRY_DIR:-${TMPDIR:-/tmp}}/.fm-test-procevent.$$.XXXXXX") || return 1
+
+  trap fm_test_cleanup EXIT
+  trap 'fm_test_cleanup; exit 130' INT
+  trap 'fm_test_cleanup; exit 143' TERM
+  trap 'fm_test_cleanup; exit 129' HUP
+  trap 'fm_test_cleanup; exit 131' QUIT
+fi
 
 fm_test_start_fixture() {
   local monitor_was_on=0
@@ -224,7 +225,7 @@ fm_test_start_fixture() {
     close $ready;
     exit 1 unless <$registered>;
     close $registered;
-    exec @ARGV or die "exec $ARGV[0]: $!";
+    exec { $ARGV[0] } @ARGV or die "exec $ARGV[0]: $!";
   ' "$FM_TEST_FIXTURE_SESSIONS" "$@" 3<&0 <&3 3<&- &
   FM_TEST_FIXTURE_PID=$!
   [ "$monitor_was_on" -eq 0 ] || set -m
@@ -345,12 +346,11 @@ fm_test_arm_fixture_reaper() {
   case $- in *m*) monitor_was_on=1 ;; esac
   set -m
   # shellcheck disable=SC2016
-  TMPDIR="$FM_TEST_FIXTURE_REAPER_DIR" FM_TEST_SKIP_ORPHAN_REAP=1 nohup bash -c '
+  TMPDIR="$FM_TEST_FIXTURE_REAPER_DIR" FM_TEST_SKIP_ORPHAN_REAP=1 FM_TEST_FIXTURE_REAPER_CHILD=1 nohup bash -c '
     set -u
-    . "$1"
-    trap - EXIT INT TERM HUP QUIT
     FM_TEST_CLEANUP_REGISTRY=$4
     FM_TEST_PROCEVENT_REGISTRY=$5
+    . "$1" || exit 1
     while [ ! -e "$TMPDIR/exit" ] && fm_test_owner_is_alive "$2" "$3"; do
       sleep 0.2
     done

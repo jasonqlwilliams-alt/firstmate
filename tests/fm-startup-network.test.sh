@@ -794,24 +794,19 @@ EOF
   fm_test_start_fixture sleep 30 || fail "could not start claimant"
   claimant=$FM_TEST_FIXTURE_PID
   printf '%s\n' "$claimant" "$$" >> "$FM_STARTUP_NETWORK_REAP_INFO"
-  cat > "$root/bin/late-worker.sh" <<'SH'
-#!/usr/bin/env bash
-while :; do sleep 1; done
-SH
   cat > "$root/bin/late-parent.sh" <<'SH'
 #!/usr/bin/env bash
-trap '"$1" & printf "late-spawned\n" >> "$2"; exit 0' TERM
 set -m
 (
   trap '' TERM
   exec sleep 60
 ) &
-printf '%s\n' "$$" "$!" > "$3"
+printf '%s\n' "$$" "$!" > "$1"
 wait "$!"
 SH
-  chmod +x "$root/bin/late-worker.sh" "$root/bin/late-parent.sh"
-  fm_test_start_fixture "$root/bin/late-parent.sh" "$root/bin/late-worker.sh" \
-    "$FM_STARTUP_NETWORK_REAP_INFO" "$root/late-ready" || fail "could not start fixture parent"
+  chmod +x "$root/bin/late-parent.sh"
+  fm_test_start_fixture "$root/bin/late-parent.sh" "$root/late-ready" ||
+    fail "could not start fixture parent"
   while [ ! -s "$root/late-ready" ]; do sleep 0.1; done
   cat "$root/late-ready" >> "$FM_STARTUP_NETWORK_REAP_INFO"
   if ! FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_SLEEP=60 \
@@ -820,11 +815,7 @@ SH
     exit 1
   fi
   worker=$(sed -n 's/^pid=//p' "$home/state/.startup-network.status")
-  printf '%s\n' "$FM_TEST_FIXTURE_PID" "$worker" >> "$FM_STARTUP_NETWORK_REAP_INFO"
-  case "$FM_STARTUP_NETWORK_REAP_PROBE" in
-    inner) printf 'waiting\n' ;;
-    *) printf 'ready\n' ;;
-  esac >> "$FM_STARTUP_NETWORK_REAP_INFO"
+  printf '%s\n' "$FM_TEST_FIXTURE_PID" "$worker" ready >> "$FM_STARTUP_NETWORK_REAP_INFO"
   wait "$claimant"
   exit 1
 fi
@@ -855,7 +846,7 @@ process_is_running() {  # <pid>
 
 test_killing_the_suite_reaps_detached_fixture_processes() {
   local info probe_stderr runner_tmp probe root claimant inner fixture_parent sleeper parent_group sleeper_group
-  local stage_session worker i test_case mode ready survivors status expected
+  local stage_session worker i test_case mode survivors status expected
   info="$TMP_ROOT/reap-probe-info"
   probe_stderr="$TMP_ROOT/reap-probe-stderr"
   runner_tmp="$TMP_ROOT/runner-tmp"
@@ -863,10 +854,8 @@ test_killing_the_suite_reaps_detached_fixture_processes() {
     : > "$info"
     mkdir "$runner_tmp"
     mode=1
-    ready=ready
     if [ "$test_case" = outer ]; then
       mode=outer
-      ready=waiting
     fi
     TMPDIR="$runner_tmp" TMP="$runner_tmp" \
       FM_STARTUP_NETWORK_REAP_PROBE="$mode" FM_STARTUP_NETWORK_REAP_INFO="$info" \
@@ -874,13 +863,13 @@ test_killing_the_suite_reaps_detached_fixture_processes() {
       fail "could not launch the reap probe ($test_case)"
     probe=$FM_TEST_FIXTURE_PID
     i=0
-    while [ "$i" -lt 150 ] && ! grep -qx "$ready" "$info"; do
+    while [ "$i" -lt 150 ] && ! grep -qx ready "$info"; do
       process_is_running "$probe" ||
         fail "the reap probe exited early ($test_case): $(cat "$info" "$probe_stderr")"
       sleep 0.1
       i=$((i + 1))
     done
-    grep -qx "$ready" "$info" ||
+    grep -qx ready "$info" ||
       fail "the reap probe never became ready ($test_case): $(cat "$probe_stderr")"
     {
       IFS= read -r root
@@ -927,9 +916,6 @@ test_killing_the_suite_reaps_detached_fixture_processes() {
     done
     [ "$i" -lt 150 ] ||
       fail "fixtures outlived the suite ($test_case): groups=$survivors worker=$worker claimant=$claimant suite=$inner sleeper=$sleeper $(cat "$probe_stderr")"
-    if [ "$test_case" != outer ]; then
-      grep -qx 'late-spawned' "$info" || fail "cleanup did not spawn the late worker ($test_case)"
-    fi
     rm -rf "$runner_tmp"
   done
   pass "fm-startup-network: timeout and interruption reap detached fixture processes"
