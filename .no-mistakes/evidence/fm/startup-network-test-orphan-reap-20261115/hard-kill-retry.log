@@ -1,0 +1,10 @@
+Invocation hard-kill-retry. PID 769006. Caller TMPDIR is isolated from the fixture ownership directory.
+Probe ready inside caller TMPDIR. Live claimant 770923, suite 769006, fixture parent 770975, child 770999, stage worker 771172.
+Sleeping child PGID 770999 differs from fixture parent PGID 770975. Both share fixture SID 770975.
+Sent SIGKILL to the active suite. Removed caller TMPDIR from its original path before waiting for detached cleanup.
+Entrypoint exit -9.
+Immediately after launcher exit, live recorded fixtures: [{'pid': 770923, 'state': 'S', 'ppid': 768953, 'pgid': 770923, 'sid': 770923}, {'pid': 770975, 'state': 'S', 'ppid': 768953, 'pgid': 770975, 'sid': 770975}, {'pid': 770999, 'state': 'S', 'ppid': 770975, 'pgid': 770999, 'sid': 770975}, {'pid': 771172, 'state': 'S', 'ppid': 768953, 'pgid': 771172, 'sid': 771004}].
+All observed fixture ownership cleared within 1.14s of command exit.
+No recorded fixture or adopted descendant remains live. Fixture root and external ownership records are gone.
+
+Suite console

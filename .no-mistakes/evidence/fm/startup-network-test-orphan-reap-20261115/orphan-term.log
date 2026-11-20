@@ -1,0 +1,35 @@
+Invocation orphan-term. PID 691080. Caller TMPDIR is isolated from the fixture ownership directory.
+Probe ready inside caller TMPDIR. Live claimant 694299, suite 691080, fixture parent 694401, child 694465, stage worker 695109.
+Sleeping child PGID 694465 differs from fixture parent PGID 694401. Both share fixture SID 694401.
+Killed only the fixture parent. Before interrupting the suite, the child is still running under new PPID 683061.
+Sent TERM to the direct suite PID 691080.
+Entrypoint exit 143.
+No recorded fixture or adopted descendant remains live. Fixture root and external ownership records are gone.
+
+Suite console
+/home/jason/.no-mistakes/worktrees/e95238b70e4e/01M7X9N6S4QEW8WSXCWJZ5XVMK/tests/fm-startup-network.test.sh: line 1: 694401 Killed                     perl -MPOSIX=setsid -MFcntl=O_CREAT,O_EXCL,O_WRONLY -e '
+    my $registry = shift;
+    my $session = setsid();
+    die "setsid: $!" unless defined($session) && $session > 1;
+    pipe(my $registered, my $ready) or die "pipe: $!";
+    my $anchor = fork();
+    die "fork: $!" unless defined($anchor);
+    if (!$anchor) {
+      close $registered;
+      setpgrp(0, 0) or die "setpgrp: $!";
+      sysopen(my $record, "$registry/$session.$$", O_CREAT | O_EXCL | O_WRONLY, 0600)
+        or die "record fixture session: $!";
+      close $record;
+      close STDIN;
+      close STDOUT;
+      close STDERR;
+      print {$ready} "ready\n";
+      close $ready;
+      sleep;
+      exit;
+    }
+    close $ready;
+    exit 1 unless <$registered>;
+    close $registered;
+    exec { $ARGV[0] } @ARGV or die "exec $ARGV[0]: $!";
+  ' "$FM_TEST_FIXTURE_SESSIONS" "$@" 3<&0 0<&3 3>&-

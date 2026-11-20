@@ -1,0 +1,11 @@
+Started a separate, unrelated sleep 30 as PID 991805, the same command used for the fixture claimant.
+Invocation ownership-scope. PID 991827. Caller TMPDIR is isolated from the fixture ownership directory.
+Probe ready inside caller TMPDIR. Live claimant 993784, suite 991827, fixture parent 993901, child 993979, stage worker 994478.
+Sleeping child PGID 993979 differs from fixture parent PGID 993901. Both share fixture SID 993901.
+While active, the fixture cleanup registry is outside caller TMPDIR and the process-event registry is inside it. The detached reaper created no extra registries.
+Sent SIGTERM to the direct suite PID 991827.
+Entrypoint exit 143.
+No recorded fixture or adopted descendant remains live. Fixture root and external ownership records are gone.
+Unrelated sleep PID 991805 remains live after fixture cleanup.
+
+Suite console

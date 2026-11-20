@@ -1,0 +1,7 @@
+Invocation target-early-interrupt. PID 768990. Caller TMPDIR is isolated from the fixture ownership directory.
+Commit 774d596c: running detached worker before TERM: {'pid': 773984, 'state': 'S', 'ppid': 773526, 'pgid': 773984, 'sid': 773526}
+Suite exit 143. The same worker immediately after exit: None
+The worker, other live descendants, caller fixture root, and fixture ownership records are gone.
+
+Suite console
+ok - fm-startup-network: wait fails when no deferred stage publishes before its deadline

@@ -1,0 +1,6 @@
+Invocation base-early-interrupt. PID 709927. Caller TMPDIR is isolated from the fixture ownership directory.
+Base commit 17fb57e80: running detached worker before TERM: {'pid': 712434, 'state': 'R', 'ppid': 712311, 'pgid': 712434, 'sid': 709927}
+Base suite exit 143. The same worker immediately after exit: {'pid': 712434, 'state': 'S', 'ppid': 709874, 'pgid': 712434, 'sid': 709927}
+
+Suite console
+ok - fm-startup-network: wait fails when no deferred stage publishes before its deadline

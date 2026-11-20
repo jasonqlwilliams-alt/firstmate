@@ -1,0 +1,8 @@
+Invocation outer-term. PID 683131. Caller TMPDIR is isolated from the fixture ownership directory.
+Probe ready inside caller TMPDIR. Live claimant 685559, suite 683276, fixture parent 685658, child 685706, stage worker 686403.
+Sleeping child PGID 685706 differs from fixture parent PGID 685658. Both share fixture SID 685658.
+Sent TERM to the outer suite PID 683131.
+Entrypoint exit 143.
+No recorded fixture or adopted descendant remains live. Fixture root and external ownership records are gone.
+
+Suite console

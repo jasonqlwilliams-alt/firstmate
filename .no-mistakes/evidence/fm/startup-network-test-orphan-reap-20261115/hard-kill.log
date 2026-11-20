@@ -1,0 +1,5 @@
+Invocation hard-kill. PID 690247. Caller TMPDIR is isolated from the fixture ownership directory.
+Probe ready inside caller TMPDIR. Live claimant 693146, suite 690247, fixture parent 693238, child 693327, stage worker 694498.
+Sleeping child PGID 693327 differs from fixture parent PGID 693238. Both share fixture SID 693238.
+
+Suite console

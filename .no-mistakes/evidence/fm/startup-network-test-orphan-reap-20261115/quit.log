@@ -1,0 +1,8 @@
+Invocation quit. PID 869462. Caller TMPDIR is isolated from the fixture ownership directory.
+Probe ready inside caller TMPDIR. Live claimant 873249, suite 869462, fixture parent 873329, child 873372, stage worker 874765.
+Sleeping child PGID 873372 differs from fixture parent PGID 873329. Both share fixture SID 873329.
+Sent SIGQUIT to the direct suite PID 869462.
+Entrypoint exit 131.
+No recorded fixture or adopted descendant remains live. Fixture root and external ownership records are gone.
+
+Suite console

@@ -1,0 +1,35 @@
+Invocation success-retry. PID 768994. Caller TMPDIR is isolated from the fixture ownership directory.
+Entrypoint bin/fm-test-run.sh tests/fm-startup-network.test.sh, invoked by a checkout path containing spaces.
+FM_STARTUP_NETWORK_REAP_PROBE=0. The full selected suite must run.
+Runner exited 0. Immediately after exit, the invocation had no live descendants, caller temp roots, or ownership records.
+
+Suite console
+FM_TEST_BEGIN 2026-11-20T21:07:20Z tests/fm-startup-network.test.sh family=session-bootstrap expected_gate_skip=none
+ok - fm-startup-network: wait fails when no deferred stage publishes before its deadline
+ok - fm-startup-network: start returns immediately and never holds the caller's stdout open
+ok - fm-startup-network: exactly one of the digest and the wake reports each actionable result
+ok - fm-startup-network: a claimant crash after publication still surfaces the result
+ok - fm-startup-network: a report-publication failure is failed, diagnosed, and still wakes
+ok - fm-startup-network: silent and explicitly informational successes never queue a main-blocking wake
+ok - fm-startup-network: an actionable state=done report still queues a wake
+ok - fm-startup-network: deferred invalid secondmate markers produce durable wakes
+ok - fm-startup-network: manual callers cannot forge mutation authority
+ok - fm-startup-network: an aggregate bound turns a wedged sweep into an actionable line
+ok - fm-startup-network: an abandoned run reports as needing a rerun, never as in progress forever
+ok - fm-startup-network: locked requests supersede in-flight probe-only workers
+ok - fm-startup-network: a second start never launches a competing worker
+ok - fm-startup-network: start atomically reserves the generation harvest observes
+ok - fm-startup-network: a new lock owner gets a distinct worker generation
+ok - fm-startup-network: fleet-lock takeover cannot overlap a mutating sweep
+ok - fm-startup-network: timing records share one origin so their offsets form a timeline
+ok - fm-startup-network: timings are durable and printed only on demand
+ok - fm-startup-network: a timed-out run still publishes the partial timings it recorded
+ok - fm-startup-network: the timing artifact cannot carry a command line or forge records
+ok - fm-startup-network: timeout and interruption reap detached fixture processes
+# fm-startup-network.test.sh: all assertions passed
+ok - fm-startup-network: summary publication failure is durable and wakes
+ok - fm-startup-network: summary publishes before a slow sweep exhausts its deadline
+FM_TEST_END 2026-11-20T21:09:05Z tests/fm-startup-network.test.sh exit=0 duration_ms=105176 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=105258
+FM_TEST_SUMMARY_FAMILY family=session-bootstrap count=1 duration_ms=105176 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-startup-network.test.sh duration_ms=105176

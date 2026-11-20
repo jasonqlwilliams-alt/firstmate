@@ -1,0 +1,15 @@
+Invocation runner-timeout. PID 683126. Caller TMPDIR is isolated from the fixture ownership directory.
+Probe ready inside caller TMPDIR. Live claimant 685584, suite 683314, fixture parent 685690, child 685733, stage worker 686441.
+Sleeping child PGID 685733 differs from fixture parent PGID 685690. Both share fixture SID 685690.
+Let the actual test runner enforce its five-second per-script deadline.
+Entrypoint exit 1.
+Immediately after launcher exit, live recorded fixtures: [{'pid': 685733, 'state': 'S', 'ppid': 683071, 'pgid': 685733, 'sid': 685690}].
+No recorded fixture or adopted descendant remains live. Fixture root and external ownership records are gone.
+
+Suite console
+FM_TEST_BEGIN 2026-11-20T21:06:15Z tests/fm-startup-network.test.sh family=session-bootstrap expected_gate_skip=none
+not ok - tests/fm-startup-network.test.sh exceeded the per-script bound of 5s and was terminated
+FM_TEST_END 2026-11-20T21:06:20Z tests/fm-startup-network.test.sh exit=124 duration_ms=5024 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=1 skipped_gate=0 duration_ms=5092
+FM_TEST_SUMMARY_FAMILY family=session-bootstrap count=1 duration_ms=5024 failed=1
+FM_TEST_SLOWEST rank=1 script=tests/fm-startup-network.test.sh duration_ms=5024

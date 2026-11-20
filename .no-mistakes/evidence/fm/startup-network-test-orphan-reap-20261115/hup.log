@@ -1,0 +1,8 @@
+Invocation hup. PID 863346. Caller TMPDIR is isolated from the fixture ownership directory.
+Probe ready inside caller TMPDIR. Live claimant 866162, suite 863346, fixture parent 866266, child 866301, stage worker 866874.
+Sleeping child PGID 866301 differs from fixture parent PGID 866266. Both share fixture SID 866266.
+Sent SIGHUP to the direct suite PID 863346.
+Entrypoint exit 129.
+No recorded fixture or adopted descendant remains live. Fixture root and external ownership records are gone.
+
+Suite console
