@@ -82,9 +82,9 @@ pass() {
 # --- self-cleaning temp root ------------------------------------------------
 #
 # fm_test_tmproot <prefix> echoes a fresh temp dir and registers it for removal
-# on EXIT/INT/TERM. A test file that needs extra teardown (e.g. killing a
-# daemon) should define its own EXIT trap and call fm_test_cleanup from inside
-# it so registered dirs are still removed.
+# on ordinary or trapped exit. A test file that replaces the default EXIT trap
+# must arrange for fm_test_cleanup to run so registered directories are still
+# removed. For cleanup after SIGKILL, see detached fixture cleanup below.
 #
 # The call site is almost always `TMP_ROOT=$(fm_test_tmproot prefix)`, which
 # forks a subshell to capture stdout. Anything that function does to the
@@ -195,6 +195,20 @@ if [ "${FM_TEST_FIXTURE_REAPER_CHILD:-0}" != 1 ]; then
   trap 'fm_test_cleanup; exit 129' HUP
   trap 'fm_test_cleanup; exit 131' QUIT
 fi
+
+# --- detached fixture cleanup ----------------------------------------------
+#
+# Arm fm_test_arm_fixture_reaper before starting fixtures, then launch them
+# through fm_test_start_fixture or fm_test_run_fixture. The launcher records
+# the session and its anchor before executing the fixture so ownership survives
+# reparenting and process-group changes within the session.
+#
+# The detached reaper signals groups from recorded sessions with live anchors
+# using process IDs, group and session IDs, and process state. Keep the anchors
+# until the fixture groups are gone so the reaper can still verify ownership.
+# The reaper removes registered fixture roots after process cleanup succeeds.
+# The EXIT trap waits for that cleanup. After SIGKILL the reaper detects the
+# owner's exit and cleans up asynchronously.
 
 fm_test_start_fixture() {
   local monitor_was_on=0

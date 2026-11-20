@@ -17,16 +17,21 @@
 #     staying "in progress" forever
 #   - phase-aware single-flight: a covering worker is reused, while a later
 #     locked request supersedes an in-flight probe-only worker
+#
+# Running this suite requires perl on PATH and, on macOS, /usr/bin/ruby for
+# fixture session lookup.
 set -u
 
+# Keep reaper records outside the runner's temporary tree, which can disappear
+# after a timeout. Executable fixtures still use the caller's TMPDIR.
 reaper_dir=$(mktemp -d "${FM_TEST_FIXTURE_CHILDREN:-/tmp}/fm-startup-network-reaper.XXXXXX") || exit 1
 export FM_TEST_FIXTURE_CHILDREN="$reaper_dir/children"
 
 # shellcheck source=tests/lib.sh
 FM_TEST_REGISTRY_DIR="$reaper_dir" . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-# Detached startup workers outlive this shell. Arm before any fixture root
-# exists so EXIT/INT/TERM and a killed shell both reap them.
+# Arm before building any fixture worlds. See the detached fixture cleanup
+# contract in tests/lib.sh.
 fm_test_arm_fixture_reaper "$reaper_dir" || fail "could not arm fixture reaper"
 TMP_ROOT=$(fm_test_tmproot fm-startup-network-tests)
 DRAIN="$ROOT/bin/fm-wake-drain.sh"
