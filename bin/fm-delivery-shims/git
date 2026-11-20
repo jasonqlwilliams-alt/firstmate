@@ -103,30 +103,14 @@ split_alias_words() {
   alias_words+=("$token")
 }
 
-gate_git() (
-  # GIT_CONFIG changes what `git config` reads, but does not affect `git push`.
-  unset GIT_CONFIG
-  "$REAL" "$@"
-)
-
-gate_config_absent() {
-  local rc=0
-  gate_git config --get-all "$1" >/dev/null 2>&1 || rc=$?
-  [ "$rc" -eq 1 ]
-}
-
 is_gate_push_destination() {
   local url top
-  # A group can take precedence over a remote of the same name. A foreign VCS
-  # helper can override the transport even when a configured URL looks local.
-  gate_config_absent remotes.no-mistakes || return 1
-  gate_config_absent remote.no-mistakes.vcs || return 1
   # Keep Git's output line endings so an empty second URL stays detectable.
-  url=$(gate_git remote get-url --push --all -- no-mistakes && printf .) || return 1
+  url=$("$REAL" remote get-url --push --all -- no-mistakes && printf .) || return 1
   [[ $url == *$'\n.' ]] || return 1
   url=${url%$'\n.'}
   [[ $url == /* && $url != *$'\n'* ]] || return 1
-  top=$(gate_git rev-parse --show-toplevel && printf .) || return 1
+  top=$("$REAL" rev-parse --show-toplevel && printf .) || return 1
   "$(dirname "${BASH_SOURCE[0]}")/../fm-delivery-guard.sh" check-gate "${top%$'\n.'}" "$url"
 }
 

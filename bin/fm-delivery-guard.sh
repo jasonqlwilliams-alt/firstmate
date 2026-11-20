@@ -160,10 +160,25 @@ cmd_arm_all() {
   done < <(fm_repository_policy_projects)
 }
 
+no_mistakes_remote_config_allowed() (
+  local repo=$1 keys key rc=0
+  unset GIT_CONFIG
+  keys=$(git -C "$repo" config --name-only --get-regexp '^remote\.no-mistakes\.[^.]+$') || return 1
+  while IFS= read -r key; do
+    case "$key" in
+      remote.no-mistakes.url|remote.no-mistakes.pushurl|remote.no-mistakes.fetch) ;;
+      *) return 1 ;;
+    esac
+  done <<< "$keys"
+  git -C "$repo" config --get-all remotes.no-mistakes >/dev/null || rc=$?
+  [ "$rc" -eq 1 ]
+)
+
 read_no_mistakes_targets() {  # <repo> <effective-url>; sets NM_UPSTREAM and NM_FORK
-  local repo=$1 url=$2 output gate nm_home=${NM_HOME:-${HOME:+$HOME/.no-mistakes}}
+  local repo=$1 url=$2 output gate resolved_gate git_dir nm_home=${NM_HOME:-${HOME:+$HOME/.no-mistakes}}
   [[ $url == /* && $url != //* && $url != *$'\n'* ]] || \
     die "no-mistakes push destination must be an absolute local gate path"
+  no_mistakes_remote_config_allowed "$repo" || die "unsupported no-mistakes remote configuration for $repo"
   command -v no-mistakes >/dev/null 2>&1 || {
     printf 'REFUSED: no-mistakes is unavailable, so its GitHub push and PR targets cannot be verified.\n' >&2
     return 1
@@ -173,16 +188,21 @@ read_no_mistakes_targets() {  # <repo> <effective-url>; sets NM_UPSTREAM and NM_
     return 1
   }
   gate=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*gate:[[:space:]]*//p')
-  if [ "$url" != "$gate" ] || ! perl -MCwd=realpath -MFile::Basename=basename -e '
+  [ "$url" = "$gate" ] || die "no-mistakes push destination does not match the registered local gate for $repo"
+  resolved_gate=$(perl -MCwd=realpath -MFile::Basename=basename -e '
     my ($home, $path) = @ARGV;
     exit 1 unless -d $home && -d $path;
     my $root = realpath($home);
     my $target = realpath($path);
     exit 1 unless defined($root) && defined($target);
     $root =~ s{/$}{};
-    exit($target eq "$root/repos/" . basename($path) ? 0 : 1);
-  ' -- "$nm_home" "$url"; then
-    die "no-mistakes push destination does not match the registered local gate for $repo"
+    exit 1 unless $target eq "$root/repos/" . basename($path);
+    print $target;
+  ' -- "$nm_home" "$url") || die "no-mistakes push destination does not match the registered local gate for $repo"
+  if [ -e "$resolved_gate/.git" ] || [ -L "$resolved_gate/.git" ] || \
+    ! git_dir=$(git --git-dir="$resolved_gate" rev-parse --absolute-git-dir --is-bare-repository 2>/dev/null) || \
+    [ "$git_dir" != "$resolved_gate"$'\ntrue' ]; then
+    die "no-mistakes push destination is not a direct bare repository for $repo"
   fi
   NM_UPSTREAM=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*remote:[[:space:]]*//p' | head -1)
   NM_FORK=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*fork:[[:space:]]*//p' | head -1)

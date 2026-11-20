@@ -505,6 +505,21 @@ SH
   ! remote_has_branch "$other_gate" refused || fail "a refused push reached the other project's gate"
   ! remote_has_branch "$fork" refused || fail "a refused push reached the fork"
 
+  cat > "$fakebin/fixture-receive-pack" <<'SH'
+#!/bin/sh
+: > "${RECEIVE_PACK_MARKER:?}"
+exit 1
+SH
+  chmod +x "$fakebin/fixture-receive-pack"
+  git -C "$repo" config remote.no-mistakes.receivepack fixture-receive-pack
+  out=$(cd "$repo" && env "${fixture_env[@]}" RECEIVE_PACK_MARKER="$home/receive-pack-started" \
+    "$GIT_SHIM" push --no-verify no-mistakes HEAD:refs/heads/receiver-refused 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the gate exception should refuse a configured receive-pack override"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "the receive-pack override did not trigger the shim refusal: $out"
+  [ ! -e "$home/receive-pack-started" ] || fail "the shim started the configured receive-pack override"
+  git -C "$repo" config --unset remote.no-mistakes.receivepack
+
   mv "$gate" "$gate.saved"
   ln -s "$other_gate" "$gate"
   out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
@@ -519,6 +534,16 @@ SH
   assert_contains "$out" "does not match the registered local gate" \
     "the symlinked registered path did not trigger the managed hook refusal: $out"
   ! remote_has_branch "$other_gate" symlink-refused || fail "the symlinked push reached the other project's gate"
+
+  rm "$gate"
+  mv "$gate.saved" "$gate"
+  printf 'gitdir: %s\n' "$other_gate" > "$gate/.git"
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+    no-mistakes HEAD:refs/heads/gitfile-refused 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the gate exception should refuse a registered path with a .git pointer"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "the .git pointer did not trigger the shim refusal: $out"
+  ! remote_has_branch "$other_gate" gitfile-refused || fail "the redirected push reached the other project's gate"
   pass "delivery guard: the worker shim strips --no-verify only for a single local no-mistakes gate and runs the managed hook"
 }
 
