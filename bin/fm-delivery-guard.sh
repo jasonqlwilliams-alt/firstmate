@@ -6,6 +6,7 @@
 #   fm-delivery-guard.sh arm <project> <repository-path>
 #   fm-delivery-guard.sh arm-refuse <project> <repository-path>
 #   fm-delivery-guard.sh arm-all
+#   fm-delivery-guard.sh check-gate <repository-path> <effective-url>
 #   fm-delivery-guard.sh check-push <repository-path> <remote-name> <effective-url>
 #   fm-delivery-guard.sh check-pr <repository-path> <target-url-or-host/owner/repo>
 #   fm-delivery-guard.sh check-pr-body [<repository-path>] <body-file>
@@ -37,7 +38,7 @@ PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
 # shellcheck source=bin/fm-repository-policy-lib.sh
 . "$SCRIPT_DIR/fm-repository-policy-lib.sh"
 
-usage() { sed -n '2,30{s/^# \{0,1\}//;p;}' "$0" >&2; exit 2; }
+usage() { sed -n '2,31{s/^# \{0,1\}//;p;}' "$0" >&2; exit 2; }
 die() { printf 'REFUSED: %s\n' "$1" >&2; exit 1; }
 
 repository_top() { git -C "$1" rev-parse --show-toplevel 2>/dev/null; }
@@ -159,23 +160,63 @@ cmd_arm_all() {
   done < <(fm_repository_policy_projects)
 }
 
-read_no_mistakes_targets() {  # <repo>; sets NM_UPSTREAM and NM_FORK
+no_mistakes_remote_config_allowed() (
+  local repo=$1 keys key rc=0
+  unset GIT_CONFIG
+  keys=$(git -C "$repo" config --name-only --get-regexp '^remote\.no-mistakes\.[^.]+$') || return 1
+  while IFS= read -r key; do
+    case "$key" in
+      remote.no-mistakes.url|remote.no-mistakes.pushurl|remote.no-mistakes.fetch) ;;
+      *) return 1 ;;
+    esac
+  done <<< "$keys"
+  git -C "$repo" config --get-all remotes.no-mistakes >/dev/null || rc=$?
+  [ "$rc" -eq 1 ]
+)
+
+read_no_mistakes_status() {
   local repo=$1 output
   command -v no-mistakes >/dev/null 2>&1 || {
-    printf 'REFUSED: no-mistakes is unavailable, so its GitHub push and PR targets cannot be verified.\n' >&2
+    printf 'REFUSED: no-mistakes is unavailable, so its gate registration cannot be verified.\n' >&2
     return 1
   }
-  output=$(cd "$repo" && no-mistakes status 2>&1) || {
+  output=$(cd "$repo" && NO_COLOR=1 CLICOLOR_FORCE=0 no-mistakes status 2>&1) || {
     printf 'REFUSED: no-mistakes target inspection failed for %s: %s\n' "$repo" "$output" >&2
     return 1
   }
-  NM_UPSTREAM=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*remote:[[:space:]]*//p' | head -1)
-  NM_FORK=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*fork:[[:space:]]*//p' | head -1)
-  [ -n "$NM_UPSTREAM" ] || {
-    printf 'REFUSED: no-mistakes did not report its pull-request target for %s.\n' "$repo" >&2
-    return 1
-  }
-  [ -n "$NM_FORK" ] || NM_FORK=$NM_UPSTREAM
+  printf '%s\n' "$output"
+}
+
+resolve_no_mistakes_gate() {
+  local repo=$1 url=$2 status=$3 gate nm_home=${NM_HOME:-${HOME:+$HOME/.no-mistakes}}
+  [[ $url == /* && $url != //* && $url != *$'\n'* ]] || \
+    die "no-mistakes push destination must be an absolute local gate path"
+  gate=$(printf '%s\n' "$status" | sed -n 's/^[[:space:]]*gate:[[:space:]]*//p')
+  [[ $gate == /* && $gate != //* && $gate != *$'\n'* ]] || \
+    die "no-mistakes did not report an absolute local gate path for $repo"
+  perl -MCwd=realpath -MFile::Basename=basename -e '
+    my ($home, $url, $gate) = @ARGV;
+    exit 1 unless -d $home && -d $url && -d $gate;
+    my $root = realpath($home);
+    my $target = realpath($url);
+    my $registered = realpath($gate);
+    exit 1 unless defined($root) && defined($target) && defined($registered);
+    $root =~ s{/$}{};
+    exit 1 unless $registered eq "$root/repos/" . basename($gate) && $target eq $registered;
+    print $registered;
+  ' -- "$nm_home" "$url" "$gate" || die "no-mistakes push destination does not match the registered local gate for $repo"
+}
+
+cmd_check_gate() {
+  local repo=$1 url=$2 status resolved_gate git_dir
+  no_mistakes_remote_config_allowed "$repo" || die "unsupported no-mistakes remote configuration for $repo"
+  status=$(read_no_mistakes_status "$repo") || return 1
+  resolved_gate=$(resolve_no_mistakes_gate "$repo" "$url" "$status") || return 1
+  if [ -e "$resolved_gate/.git" ] || [ -L "$resolved_gate/.git" ] || \
+    ! git_dir=$(git --git-dir="$resolved_gate" rev-parse --absolute-git-dir --is-bare-repository 2>/dev/null) || \
+    [ "$git_dir" != "$resolved_gate"$'\ntrue' ]; then
+    die "no-mistakes push destination is not a direct bare repository for $repo"
+  fi
 }
 
 authorize_exact_target() {  # <action> <url> <expected-identity>
@@ -187,14 +228,26 @@ authorize_exact_target() {  # <action> <url> <expected-identity>
 }
 
 cmd_check_push() {  # <repo> <remote-name> <effective-url>
-  local repo=$1 remote=$2 url=$3 project
+  local repo=$1 remote=$2 url=$3 project status upstream fork
   project=$(repository_project "$repo") || project=
   [ -n "$project" ] || die "repository $repo is not armed with a Firstmate project identity"
   fm_repository_policy_load "$project" || exit 1
   if [ "$remote" = no-mistakes ]; then
-    read_no_mistakes_targets "$repo" || exit 1
-    authorize_exact_target branch-push "$NM_FORK" "$FM_REPOSITORY_POLICY_FORK_ID" || exit 1
-    authorize_exact_target pull-request "$NM_UPSTREAM" "$FM_REPOSITORY_POLICY_FORK_ID" || exit 1
+    if [[ $url == file:///* ]]; then
+      url=$(perl -e '
+        my ($path) = @ARGV;
+        $path =~ s/%(?!00)([0-9A-Fa-f]{2})/chr(hex($1))/ge;
+        print $path, ".";
+      ' -- "${url#file://}") || exit 1
+      url=${url%.}
+    fi
+    status=$(read_no_mistakes_status "$repo") || exit 1
+    resolve_no_mistakes_gate "$repo" "$url" "$status" >/dev/null || exit 1
+    upstream=$(printf '%s\n' "$status" | sed -n 's/^[[:space:]]*remote:[[:space:]]*//p' | head -1)
+    fork=$(printf '%s\n' "$status" | sed -n 's/^[[:space:]]*fork:[[:space:]]*//p' | head -1)
+    [ -n "$upstream" ] || die "no-mistakes did not report its pull-request target for $repo."
+    authorize_exact_target branch-push "${fork:-$upstream}" "$FM_REPOSITORY_POLICY_FORK_ID" || exit 1
+    authorize_exact_target pull-request "$upstream" "$FM_REPOSITORY_POLICY_FORK_ID" || exit 1
     return 0
   fi
   authorize_exact_target branch-push "$url" "$FM_REPOSITORY_POLICY_FORK_ID"
@@ -274,6 +327,10 @@ case "${1:-}" in
   arm-all)
     [ "$#" -eq 1 ] || usage
     cmd_arm_all
+    ;;
+  check-gate)
+    [ "$#" -eq 3 ] || usage
+    cmd_check_gate "$2" "$3"
     ;;
   check-push)
     [ "$#" -eq 4 ] || usage

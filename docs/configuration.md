@@ -83,8 +83,15 @@ These commands are checks only: policy never grants authority to deploy, restart
 When a policy file is present, `bin/fm-spawn.sh` calls that arming command before creating an endpoint and refuses the spawn if the policy is malformed or if a PR-based ship names a project the policy does not cover.
 When no policy file is present it arms nothing and refuses nothing.
 The hook checks Git's effective push URL rather than assuming a remote name.
-For a `no-mistakes` proxy push, it also reads the tool's reported fork branch destination and upstream PR destination and requires both to equal `forkPushUrl` before the local gate receives objects.
-Spawned workers in an armed home receive guarded `gh` and `gh-axi` command shims that apply the same repository and account check to pull-request and REST repository writes and refuse GraphQL calls whose mutation destination cannot be proven, plus a guarded `git` shim that refuses `--no-verify` and `send-pack` hook bypasses.
+For a `no-mistakes` proxy push, the hook requires the effective destination to resolve to this checkout's registered gate under `${NM_HOME:-$HOME/.no-mistakes}/repos`.
+It then requires both the reported fork branch destination and upstream PR destination to match `forkPushUrl` before the local gate receives objects.
+Spawned workers in an armed home receive guarded `gh` and `gh-axi` command shims that apply the same repository and account check to pull-request and REST repository writes and refuse GraphQL calls whose mutation destination cannot be proven.
+Their guarded `git` shim refuses `send-pack` and `--no-verify` hook bypasses.
+When no-mistakes starts validation with `git push --no-verify`, the shim strips the flag only from an armed checkout with the managed hook pinned and only for a direct push with no leading Git options, optional `-o` push options, the `no-mistakes` remote, and one branch refspec.
+Git must report a single effective push URL as an absolute filesystem path to the registered gate, which Git must open directly as a bare repository.
+This launch requires the remote configuration to use only `remote.no-mistakes.url`, `remote.no-mistakes.pushurl`, and `remote.no-mistakes.fetch`, with no `remotes.no-mistakes` group.
+The managed hook still authorizes both forge destinations, and ordinary proxy pushes can also identify the gate with a `file:///` URL.
+The [delivery guard regression tests](../tests/fm-delivery-guard.test.sh) cover the validator launch and the managed hook's refusals.
 The `git` shim also checks `core.hooksPath` without regard to key capitalization in separate `-c` arguments, both `--config-env` forms, and `GIT_CONFIG_*` environment overrides.
 In an armed repository it also asks Git for the hooks directory each push actually resolves, including included files, rewritten repository config, and leading options in push aliases; it refuses unless that is the managed hooks directory and pins that directory for the push so a later config edit cannot redirect it.
 A worker that deletes every arming marker or rewrites the managed hook itself is beyond what a command shim can enforce.

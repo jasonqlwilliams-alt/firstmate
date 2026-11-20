@@ -66,10 +66,12 @@ SH
   cat > "$fakebin/no-mistakes" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = status ]; then
-  printf '    repo:  fixture\n'
-  printf '  remote:  %s\n' "${NM_UPSTREAM:?}"
+  printf '    repo:  %s\n' "$PWD"
+  [ -z "${NM_UPSTREAM:-}" ] || printf '  remote:  %s\n' "$NM_UPSTREAM"
   [ -z "${NM_FORK:-}" ] || printf '    fork:  %s\n' "$NM_FORK"
-  printf '    gate:  fixture\n'
+  if [ -n "${NM_REGISTERED_GATE:-}" ] && [ . -ef "${NM_REGISTERED_REPO:?}" ]; then
+    printf '    gate:  %s\n' "$NM_REGISTERED_GATE"
+  fi
   exit 0
 fi
 exit 2
@@ -93,9 +95,10 @@ make_repo() {  # <name>; echoes repo|home|fakebin|upstream-bare|fork-bare|gate-b
   fakebin="$dir/fakebin"
   upstream="$dir/upstream.git"
   fork="$dir/fork.git"
-  gate="$dir/gate.git"
+  gate="$home/no-mistakes/repos/gate.git"
   fm_git_init_commit "$repo"
   git -C "$repo" branch -M main
+  mkdir -p "${gate%/*}"
   git init -q --bare "$upstream"
   git init -q --bare "$fork"
   git init -q --bare "$gate"
@@ -187,9 +190,11 @@ EOF
   log="$home/gh.log"
   git -C "$repo" remote add no-mistakes "$gate"
   FM_HOME="$home" GH_AXI_LOG="$log" PATH="$fakebin:$PATH" "$GUARD" arm widgets "$repo" >/dev/null
+  local fixture_env=(FM_HOME="$home" GH_AXI_LOG="$log" PATH="$fakebin:$PATH"
+    NM_HOME="$home/no-mistakes" NM_REGISTERED_GATE="$gate" NM_REGISTERED_REPO="$repo"
+    NM_FORK=https://github.com/captain/widgets.git)
 
-  out=$(FM_HOME="$home" GH_AXI_LOG="$log" NM_UPSTREAM=https://github.com/upstream/widgets.git \
-    NM_FORK=https://github.com/captain/widgets.git PATH="$fakebin:$PATH" \
+  out=$(env "${fixture_env[@]}" NM_UPSTREAM=https://github.com/upstream/widgets.git \
     git -C "$repo" push no-mistakes main 2>&1)
   rc=$?
   [ "$rc" -ne 0 ] || fail "no-mistakes upstream PR target should have been refused"
@@ -198,8 +203,7 @@ EOF
   git --git-dir="$gate" show-ref --verify --quiet refs/heads/main \
     && fail "refused no-mistakes push still reached the local gate"
 
-  out=$(FM_HOME="$home" GH_AXI_LOG="$log" NM_UPSTREAM=https://github.com/captain/widgets.git \
-    NM_FORK=https://github.com/captain/widgets.git PATH="$fakebin:$PATH" \
+  out=$(env "${fixture_env[@]}" NM_UPSTREAM=https://github.com/captain/widgets.git \
     git -C "$repo" push no-mistakes main 2>&1)
   rc=$?
   expect_code 0 "$rc" "no-mistakes with captain-owned branch and PR targets should reach its local gate"
@@ -328,6 +332,11 @@ test_git_shim_blocks_hook_bypasses() {
   mkdir -p "$dir"
   cat > "$fake" <<'SH'
 #!/usr/bin/env bash
+case "$1" in
+  config) exit 1 ;;
+  remote) exit 2 ;;
+  rev-parse) exit 128 ;;
+esac
 printf '%s\n' "$*" >> "${GIT_REAL_LOG:?}"
 SH
   chmod +x "$fake"
@@ -354,7 +363,7 @@ SH
   [ "$rc" -ne 0 ] || fail "guarded git should refuse an environment hook override"
   assert_contains "$out" "cannot override the Firstmate pre-push hook" \
     "environment hook-override refusal was not explicit"
-  [ ! -s "$log" ] || fail "a refused Git bypass still reached the real executable"
+  [ ! -s "$log" ] || fail "a refused Git bypass still reached a mutating Git command"
   FM_REAL_GIT="$fake" GIT_REAL_LOG="$log" "$GIT_SHIM" status
   assert_grep 'status' "$log" "ordinary Git commands did not reach the real executable"
   pass "delivery guard: worker Git cannot bypass target checks with --no-verify or send-pack"
@@ -362,6 +371,230 @@ SH
 
 remote_has_branch() {  # <bare-remote> <branch>
   git --git-dir="$1" show-ref --verify --quiet "refs/heads/$2"
+}
+
+test_git_shim_keeps_hooks_on_no_mistakes_gate_push() {
+  local rec repo home fakebin upstream fork gate other_gate real_git head destination flag out rc
+  rec=$(make_repo shim-no-mistakes-gate)
+  IFS='|' read -r repo home fakebin upstream fork gate <<EOF
+$rec
+EOF
+  other_gate="$home/no-mistakes/repos/other.git"
+  git init -q --bare "$other_gate"
+  git -C "$repo" remote add no-mistakes "$gate"
+  git --git-dir="$gate" config receive.advertisePushOptions true
+  cat > "$gate/hooks/pre-receive" <<'SH'
+#!/bin/sh
+[ "${GIT_PUSH_OPTION_COUNT:-0}" = 1 ] && [ "$GIT_PUSH_OPTION_0" = 'intent=fixture gate push' ]
+SH
+  chmod +x "$gate/hooks/pre-receive"
+  real_git=${FM_REAL_GIT:-$(command -v git)}
+  head=$(git -C "$repo" rev-parse HEAD)
+  local fixture_env=(FM_REAL_GIT="$real_git" NM_HOME="$home/no-mistakes" PATH="$fakebin:$PATH"
+    NM_REGISTERED_GATE="$gate" NM_REGISTERED_REPO="$repo"
+    FAKE_GIT_REMOTE_ROOT="${repo%/repo}" NM_UPSTREAM=https://github.com/captain/widgets.git
+    NM_FORK=https://github.com/captain/widgets.git)
+
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+    -o 'intent=fixture gate push' no-mistakes "$head:refs/heads/unarmed-refused" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the gate exception should refuse a registered but unarmed checkout"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "the unarmed checkout did not trigger the shim refusal: $out"
+  ! remote_has_branch "$gate" unarmed-refused || fail "a push from the unarmed checkout reached the gate"
+
+  FM_HOME="$home" PATH="$fakebin:$PATH" "$GUARD" arm widgets "$repo" >/dev/null \
+    || fail "guard arm failed for the no-mistakes gate fixture"
+
+  out=$(env "${fixture_env[@]}" "$GIT_SHIM" -C "$repo" push --no-verify \
+    -o 'intent=fixture gate push' no-mistakes "$head:refs/heads/leading-option-refused" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the gate exception should refuse leading Git options"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "the leading -C option did not trigger the shim refusal: $out"
+  ! remote_has_branch "$gate" leading-option-refused || fail "the push with a leading Git option reached the gate"
+
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+    -o 'intent=fixture gate push' no-mistakes "$head:refs/heads/validated" 2>&1); rc=$?
+  expect_code 0 "$rc" "the validator's gate push should succeed with its push option intact: $out"
+  assert_contains "$out" "action=branch-push repository=github.com/captain/widgets" \
+    "the managed hook did not check the gate's branch destination"
+  assert_contains "$out" "action=pull-request repository=github.com/captain/widgets" \
+    "the managed hook did not check the gate's PR destination"
+  remote_has_branch "$gate" validated || fail "the guarded push did not reach the no-mistakes gate"
+
+  ln -s "$home/no-mistakes" "$home/gate-alias"
+  git -C "$repo" config remote.no-mistakes.pushurl "$home/gate-alias/repos/${gate##*/}"
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+    -o 'intent=fixture gate push' no-mistakes "$head:refs/heads/path-alias-allowed" 2>&1); rc=$?
+  expect_code 0 "$rc" "different spellings of the registered gate should allow the validator push: $out"
+  assert_contains "$out" "action=pull-request repository=github.com/captain/widgets" \
+    "the managed hook did not authorize the gate push through the path alias"
+  remote_has_branch "$gate" path-alias-allowed || fail "the push through the path alias did not reach the gate"
+
+  git -C "$repo" config remote.no-mistakes.tagOpt --no-tags
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push \
+    -o 'intent=fixture gate push' no-mistakes "$head:refs/heads/fetch-option-allowed" 2>&1); rc=$?
+  expect_code 0 "$rc" "an ordinary gate push should allow the fetch-only tag option: $out"
+  assert_contains "$out" "action=branch-push repository=github.com/captain/widgets" \
+    "the managed hook did not check the ordinary gate push's branch destination"
+  assert_contains "$out" "action=pull-request repository=github.com/captain/widgets" \
+    "the managed hook did not check the ordinary gate push's PR destination"
+  remote_has_branch "$gate" fetch-option-allowed || fail "the ordinary push did not reach the gate"
+
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+    -o 'intent=fixture gate push' no-mistakes "$head:refs/heads/fetch-option-refused" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the gate exception should refuse a fetch-only tag option outside the allowlist"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "the fetch-only tag option did not trigger the exception refusal: $out"
+  ! remote_has_branch "$gate" fetch-option-refused || fail "the refused push reached the gate"
+  git -C "$repo" config --unset remote.no-mistakes.tagOpt
+
+  git -C "$repo" config remote.no-mistakes.pushurl "file://$home/gate%2dalias/repos/${gate##*/}"
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push \
+    -o 'intent=fixture gate push' no-mistakes "$head:refs/heads/file-url-allowed" 2>&1); rc=$?
+  expect_code 0 "$rc" "an ordinary push should accept a file URL for the registered gate: $out"
+  assert_contains "$out" "action=pull-request repository=github.com/captain/widgets" \
+    "the managed hook did not authorize the gate push through its file URL"
+  remote_has_branch "$gate" file-url-allowed || fail "the push through the file URL did not reach the gate"
+
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+    -o 'intent=fixture gate push' no-mistakes "$head:refs/heads/file-url-refused" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the gate exception should require an absolute path instead of a file URL"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "the file URL did not trigger the exception refusal: $out"
+  ! remote_has_branch "$gate" file-url-refused || fail "the refused push reached the gate"
+  git -C "$repo" config --unset remote.no-mistakes.pushurl
+
+  out=$(cd "$repo" && env "${fixture_env[@]}" NM_UPSTREAM=https://github.com/upstream/widgets.git \
+    "$GIT_SHIM" push --no-verify no-mistakes HEAD:refs/heads/refused 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the gate exception should preserve the hook's refusal of an unsafe PR destination"
+  assert_contains "$out" "pull-request would write to github.com/upstream/widgets" \
+    "the unsafe gate push did not reach the managed hook"
+
+  out=$(cd "$repo" && env "${fixture_env[@]}" NM_UPSTREAM= "$GIT_SHIM" push --no-verify \
+    -o 'intent=fixture gate push' no-mistakes "$head:refs/heads/missing-target-refused" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the managed hook should refuse when the PR target is missing"
+  assert_contains "$out" "did not report its pull-request target" \
+    "the missing PR target should reach the managed hook for authorization: $out"
+  ! remote_has_branch "$gate" missing-target-refused || fail "the push without a PR target reached the gate"
+
+  for destination in fork "$gate" "file://$gate" ../home/no-mistakes/repos/gate.git; do
+    out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+      "$destination" HEAD:refs/heads/refused 2>&1); rc=$?
+    [ "$rc" -ne 0 ] || fail "a push without the no-mistakes remote name should refuse --no-verify"
+    assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+      "the destination $destination did not trigger the shim refusal: $out"
+  done
+
+  for flag in --force --dry-run --push-option=fixture --; do
+    out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+      "$flag" no-mistakes HEAD:refs/heads/refused 2>&1); rc=$?
+    [ "$rc" -ne 0 ] || fail "the gate exception should refuse the extra flag $flag"
+    assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+      "the extra flag $flag did not trigger the shim refusal: $out"
+  done
+
+  out=$(cd "$repo" && env "${fixture_env[@]}" NM_REGISTERED_GATE= "$GIT_SHIM" \
+    push --no-verify no-mistakes HEAD:refs/heads/refused 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the gate exception should require a registered gate"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "the missing registration did not trigger the shim refusal: $out"
+
+  git -C "$repo" config remote.no-mistakes.pushurl "$other_gate"
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+    no-mistakes HEAD:refs/heads/refused 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the gate exception should refuse another project's gate"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "the other project's gate did not trigger the shim refusal: $out"
+
+  out=$(env "${fixture_env[@]}" "$real_git" -C "$repo" \
+    push no-mistakes HEAD:refs/heads/refused 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the managed hook should refuse another project's gate"
+  assert_contains "$out" "does not match the registered local gate" \
+    "the managed hook did not check Git's destination: $out"
+
+  git -C "$repo" config --unset remote.no-mistakes.pushurl
+
+  git -C "$repo" config url.git@github.com:captain/widgets.git.pushInsteadOf "$gate"
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+    no-mistakes HEAD:refs/heads/refused 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the gate remote rewritten to a forge URL must be refused"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "the rewritten remote did not trigger the shim refusal: $out"
+  git -C "$repo" config --unset url.git@github.com:captain/widgets.git.pushInsteadOf
+
+  git -C "$repo" config remotes.no-mistakes 'no-mistakes fork'
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+    no-mistakes HEAD:refs/heads/refused 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a remote group sharing the gate remote's name must be refused"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "the remote group did not trigger the shim refusal: $out"
+  git -C "$repo" config --unset remotes.no-mistakes
+
+  git -C "$repo" config remote.no-mistakes.pushurl git@github.com:captain/widgets.git
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+    no-mistakes HEAD:refs/heads/refused 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a forge push URL must be refused even on a remote named no-mistakes"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "the forge push URL did not trigger the shim refusal: $out"
+
+  git -C "$repo" config remote.no-mistakes.pushurl "$gate"
+  git -C "$repo" config --add remote.no-mistakes.pushurl git@github.com:captain/widgets.git
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+    no-mistakes HEAD:refs/heads/refused 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a remote with multiple push URLs must be refused"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "multiple push URLs did not trigger the shim refusal: $out"
+
+  git -C "$repo" config --unset-all remote.no-mistakes.pushurl
+  out=$(env "${fixture_env[@]}" "$GIT_SHIM" -C "$repo" -c core.hooksPath=/dev/null push --no-verify \
+    no-mistakes HEAD:refs/heads/refused 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a gate push must still refuse a hooks-path override"
+  assert_contains "$out" "cannot override the Firstmate pre-push hook" \
+    "a gate push with a hooks-path override did not trigger the shim refusal: $out"
+  ! remote_has_branch "$gate" refused || fail "a refused push reached the gate"
+  ! remote_has_branch "$other_gate" refused || fail "a refused push reached the other project's gate"
+  ! remote_has_branch "$fork" refused || fail "a refused push reached the fork"
+
+  cat > "$fakebin/fixture-receive-pack" <<'SH'
+#!/bin/sh
+: > "${RECEIVE_PACK_MARKER:?}"
+exit 1
+SH
+  chmod +x "$fakebin/fixture-receive-pack"
+  git -C "$repo" config remote.no-mistakes.receivepack fixture-receive-pack
+  out=$(cd "$repo" && env "${fixture_env[@]}" RECEIVE_PACK_MARKER="$home/receive-pack-started" \
+    "$GIT_SHIM" push --no-verify no-mistakes HEAD:refs/heads/receiver-refused 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the gate exception should refuse a configured receive-pack override"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "the receive-pack override did not trigger the shim refusal: $out"
+  [ ! -e "$home/receive-pack-started" ] || fail "the shim started the configured receive-pack override"
+  git -C "$repo" config --unset remote.no-mistakes.receivepack
+
+  mv "$gate" "$gate.saved"
+  ln -s "$other_gate" "$gate"
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+    no-mistakes HEAD:refs/heads/symlink-refused 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the gate exception should refuse a registered path symlinked to another gate"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "the symlinked registered path did not trigger the shim refusal: $out"
+
+  out=$(env "${fixture_env[@]}" "$real_git" -C "$repo" push \
+    no-mistakes HEAD:refs/heads/symlink-refused 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the managed hook should refuse a registered path symlinked to another gate"
+  assert_contains "$out" "does not match the registered local gate" \
+    "the symlinked registered path did not trigger the managed hook refusal: $out"
+  ! remote_has_branch "$other_gate" symlink-refused || fail "the symlinked push reached the other project's gate"
+
+  rm "$gate"
+  mv "$gate.saved" "$gate"
+  printf 'gitdir: %s\n' "$other_gate" > "$gate/.git"
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+    no-mistakes HEAD:refs/heads/gitfile-refused 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the gate exception should refuse a registered path with a .git pointer"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "the .git pointer did not trigger the shim refusal: $out"
+  ! remote_has_branch "$other_gate" gitfile-refused || fail "the redirected push reached the other project's gate"
+  pass "delivery guard: the worker shim strips --no-verify only for a single local no-mistakes gate and runs the managed hook"
 }
 
 # Pushes a new <branch> from <repo> through the guarded shim or straight through
@@ -886,6 +1119,7 @@ test_unarmed_repository_pushes_anywhere
 test_arm_refuses_without_a_policy_file
 test_direct_pr_contract_is_unchanged_without_a_policy
 test_git_shim_blocks_hook_bypasses
+test_git_shim_keeps_hooks_on_no_mistakes_gate_push
 test_git_shim_refuses_hooks_path_override_in_any_case
 test_git_shim_refuses_effective_hooks_path_bypasses
 test_git_shim_allows_quoted_non_push_alias
