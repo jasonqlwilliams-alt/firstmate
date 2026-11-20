@@ -31,6 +31,12 @@ SLEEP_LOG="$TMP/sleeps"
 wake() { printf '%s\n' "$1" >> "$WAKE_LOG"; return 0; }
 sleep() { printf 'SLEEP\n' >> "$SLEEP_LOG"; }
 
+fm_backend_source herdr || fail "could not load the Herdr adapter"
+fm_backend_herdr_cli() {
+  [ "$2 $3" = "pane get" ] || return 1
+  printf '{"result":{"pane":{"pane_id":"%s","terminal_id":"%s"}}}\n' "$4" "${live_terminal:-term-worker}"
+}
+
 reset_state() {
   rm -f "$STATE_DIR"/*.meta "$STATE_DIR"/*.status "$STATE_DIR"/.wake-queue \
     "$STATE_DIR"/.wake-queue.seq "$STATE_DIR"/.watch-triage.log \
@@ -49,7 +55,7 @@ mkrec() {  # <pane_id> <status>
 # --- handle_push_transition: enqueue + wake for a non-paused blocked crew -----
 
 reset_state
-fm_write_meta "$STATE_DIR/tk1.meta" "window=default:wG:pQ" "backend=herdr" "kind=ship"
+fm_write_meta "$STATE_DIR/tk1.meta" "window=default:wG:pQ" "backend=herdr" "kind=ship" "herdr_terminal_id=term-worker"
 handle_push_transition herdr default "$(mkrec wG:pQ blocked)"
 [ -e "$STATE_DIR/.wake-queue" ] || fail "handle_push_transition should enqueue a wake for a blocked crew"
 grep -q 'stale' "$STATE_DIR/.wake-queue" || fail "the enqueued wake must be a stale record: $(cat "$STATE_DIR/.wake-queue")"
@@ -60,7 +66,14 @@ grep -q 'herdr: agent blocked' "$STATE_DIR/.wake-queue" || fail "the stale paylo
 pass "handle_push_transition: a blocked crew enqueues a stale wake naming its window and wakes the supervisor"
 
 reset_state
-fm_write_meta "$STATE_DIR/tk1.meta" "window=default:wG:pQ" "backend=herdr" "kind=ship"
+fm_write_meta "$STATE_DIR/tk1.meta" "window=default:wG:pQ" "backend=herdr" "kind=ship" "herdr_terminal_id=term-worker"
+live_terminal=term-foreign handle_push_transition herdr default "$(mkrec wG:pQ blocked)"
+[ ! -e "$STATE_DIR/.wake-queue" ] && [ ! -s "$WAKE_LOG" ] \
+  && [ ! -e "$STATE_DIR/.herdr-escalated-default_wG_pQ" ] || fail "a recycled pane woke the supervisor or advanced dedupe"
+pass "handle_push_transition: a blocked foreign terminal cannot wake the supervisor or advance dedupe"
+
+reset_state
+fm_write_meta "$STATE_DIR/tk1.meta" "window=default:wG:pQ" "backend=herdr" "kind=ship" "herdr_terminal_id=term-worker"
 (
   # shellcheck disable=SC2329 # Runtime override called by the isolated production owner.
   fm_wake_append() { return 1; }
@@ -72,7 +85,7 @@ pass "handle_push_transition: enqueue failure cannot commit the Herdr dedupe mar
 # --- handle_push_transition: absorb (no wake, no enqueue) for a declared pause -
 
 reset_state
-fm_write_meta "$STATE_DIR/tk2.meta" "window=default:wG:pQ" "backend=herdr" "kind=ship"
+fm_write_meta "$STATE_DIR/tk2.meta" "window=default:wG:pQ" "backend=herdr" "kind=ship" "herdr_terminal_id=term-worker"
 printf 'paused: waiting on the upstream release\n' > "$STATE_DIR/tk2.status"
 handle_push_transition herdr default "$(mkrec wG:pQ blocked)"
 if [ -e "$STATE_DIR/.wake-queue" ] && grep -q 'stale' "$STATE_DIR/.wake-queue"; then
@@ -85,7 +98,7 @@ pass "handle_push_transition: a declared-pause crew is absorbed (no fast wake), 
 # --- handle_push_transition: absorb for a verified captain-held transfer -------
 
 reset_state
-fm_write_meta "$STATE_DIR/tk2h.meta" "window=default:wG:pQ" "backend=herdr" "kind=ship"
+fm_write_meta "$STATE_DIR/tk2h.meta" "window=default:wG:pQ" "backend=herdr" "kind=ship" "herdr_terminal_id=term-worker"
 printf 'captain-held [key=route]: tracked by task-decision-route\n' > "$STATE_DIR/tk2h.status"
 handle_push_transition herdr default "$(mkrec wG:pQ blocked)"
 if [ -e "$STATE_DIR/.wake-queue" ] && grep -q 'stale' "$STATE_DIR/.wake-queue"; then
@@ -95,10 +108,37 @@ fi
 grep -q 'absorbed push' "$STATE_DIR/.watch-triage.log" 2>/dev/null || fail "the captain-held absorb should be logged to the triage log"
 pass "handle_push_transition: a captain-held crew is absorbed (no fast wake), left to the poll loop's long cadence"
 
+reset_state
+fm_write_meta "$STATE_DIR/tk1.meta" "window=default:wG:pQ" "backend=herdr" "herdr_terminal_id=term-worker"
+record=$(fm_task_inbox_write "$STATE_DIR" tk1 'fixture steer') || fail "could not create a steer"
+terminal_calls="$TMP/terminal-calls"
+(
+  fm_task_inbox_due_action() { printf 'ring %s' "$record"; }
+  fm_backend_herdr_pane_agent_state() { printf 'live'; }
+  fm_backend_herdr_cli() {
+    case "$2 $3" in
+      'pane get')
+        fm_write_meta "$STATE_DIR/tk1.meta" "window=default:wG:pR" "backend=herdr" "herdr_terminal_id=term-replacement"
+        printf '{"result":{"pane":{"pane_id":"%s","terminal_id":"term-worker"}}}\n' "$4"
+        ;;
+      'status --json')
+        printf '{"server":{"running":true}}\n'
+        ;;
+      *)
+        printf '%s\n' "$*" >> "$terminal_calls"
+        ;;
+    esac
+  }
+  inbox_steer_check default:wG:pQ tk1 herdr
+)
+[ "$(fm_meta_get "$STATE_DIR/tk1.meta" window)" = default:wG:pR ] || fail "relaunch did not move the binding"
+[ -f "$record" ] && [ ! -s "$terminal_calls" ] || fail "the watcher accessed a terminal after its task moved"
+pass "inbox_steer_check: a relaunch after liveness leaves the steer queued and forbids capture or input at its old pane"
+
 # --- event_wait_or_sleep: secondmate windows are excluded from the pane list --
 
 reset_state
-fm_write_meta "$STATE_DIR/tk3.meta" "window=default:wG:pQ" "backend=herdr" "kind=ship"
+fm_write_meta "$STATE_DIR/tk3.meta" "window=default:wG:pQ" "backend=herdr" "kind=ship" "herdr_terminal_id=term-worker"
 fm_write_meta "$STATE_DIR/sm1.meta" "window=default:wA:pS" "backend=herdr" "kind=secondmate"
 # shellcheck disable=SC2329 # Runtime overrides called by the isolated watcher.
 fm_backend_events_capable() { return 0; }
@@ -111,7 +151,7 @@ case "$PANES" in *"default:wA:pS"*) fail "a kind=secondmate window must be EXCLU
 pass "event_wait_or_sleep: herdr windows go on the event pane list, but kind=secondmate endpoints are excluded"
 
 reset_state
-fm_write_meta "$STATE_DIR/tk3.meta" "window=default:wG:pQ" "backend=herdr" "kind=ship"
+fm_write_meta "$STATE_DIR/tk3.meta" "window=default:wG:pQ" "backend=herdr" "kind=ship" "herdr_terminal_id=term-worker"
 CAP_CALLS=0
 # shellcheck disable=SC2329 # Runtime overrides called by the isolated watcher.
 fm_backend_events_capable() { CAP_CALLS=$((CAP_CALLS + 1)); return 0; }
@@ -139,7 +179,7 @@ pass "event_wait_or_sleep: a home with no push-capable window is inert (sleeps P
 # --- event_wait_or_sleep: runtime failures disable the event path (fail-closed)
 
 reset_state
-fm_write_meta "$STATE_DIR/tk5.meta" "window=default:wG:pQ" "backend=herdr" "kind=ship"
+fm_write_meta "$STATE_DIR/tk5.meta" "window=default:wG:pQ" "backend=herdr" "kind=ship" "herdr_terminal_id=term-worker"
 export EVENT_CAP_FAIL_MAX=2
 # shellcheck disable=SC2329 # Runtime overrides called by the isolated watcher.
 fm_backend_events_capable() { return 0; }

@@ -3587,7 +3587,14 @@ test_projection_reclaim_refusal_matrix_is_non_mutating() {
   out=$(ROOT="$ROOT" JOURNAL="$journal" LEGACY="$legacy" HOME_A="$home" HOME_B="$other_home" MUTATIONS="$mutation_log" \
     bash -c '
       . "$ROOT/bin/backends/herdr.sh"
-      fm_backend_herdr_cli() { printf "%s\n" "$*" >> "$MUTATIONS"; return 1; }
+      fm_backend_herdr_cli() {
+        if [ "$*" = "fmtest pane get w2:p2" ]; then
+          printf "%s\n" "{\"result\":{\"pane\":{\"pane_id\":\"w2:p2\",\"terminal_id\":\"term-old\"}}}"
+          return 0
+        fi
+        printf "%s\n" "$*" >> "$MUTATIONS"
+        return 1
+      }
       run_case() {
         mode=$1; journal=$2; home=$3
         fm_backend_herdr_projection_live_binding_matches() {
@@ -3606,7 +3613,7 @@ test_projection_reclaim_refusal_matrix_is_non_mutating() {
         }
         set +e
         fm_backend_herdr_projection_reclaim_task \
-          fmtest "$journal" refusal-r1 "$home" w2 w2:t2 w2:p2 firstmate fm-refusal-r1 /tmp/project \
+          fmtest "$journal" refusal-r1 "$home" w2 w2:t2 w2:p2 firstmate fm-refusal-r1 /tmp/project term-old \
           >/dev/null 2>&1
         rc=$?
         set -e
@@ -3650,40 +3657,41 @@ test_projection_reclaim_replaces_only_exact_husk_and_advances_binding() {
   printf '%s\n' '{"result":{"panes":[{"pane_id":"w2:p2","tab_id":"w2:t2"}]}}' > "$resp/3.out"
   printf '%s\n' '{"result":{"pane":{"pane_id":"w2:p2"}}}' > "$resp/4.out"
   printf '%s\n' '{"error":{"code":"agent_not_found"}}' > "$resp/5.out"
-  printf '%s\n' "{\"result\":{\"workspaces\":[{\"workspace_id\":\"w1\",\"label\":\"firstmate\",\"focused\":true,\"active_tab_id\":\"w1:t1\"},{\"workspace_id\":\"w2\",\"label\":\"$label\",\"focused\":false,\"active_tab_id\":\"w2:t2\"}]}}" > "$resp/6.out"
-  printf '%s\n' '{"result":{"tabs":[{"tab_id":"w1:t1","focused":true}]}}' > "$resp/7.out"
-  printf '%s\n' '{"result":{"tab":{"tab_id":"w2:t3"},"root_pane":{"pane_id":"w2:p3"}}}' > "$resp/8.out"
-  cp "$resp/6.out" "$resp/9.out"
+  printf '%s\n' '{"result":{"pane":{"pane_id":"w2:p2","terminal_id":"term-old"}}}' > "$resp/6.out"
+  printf '%s\n' "{\"result\":{\"workspaces\":[{\"workspace_id\":\"w1\",\"label\":\"firstmate\",\"focused\":true,\"active_tab_id\":\"w1:t1\"},{\"workspace_id\":\"w2\",\"label\":\"$label\",\"focused\":false,\"active_tab_id\":\"w2:t2\"}]}}" > "$resp/7.out"
+  printf '%s\n' '{"result":{"tabs":[{"tab_id":"w1:t1","focused":true}]}}' > "$resp/8.out"
+  printf '%s\n' '{"result":{"tab":{"tab_id":"w2:t3"},"root_pane":{"pane_id":"w2:p3","terminal_id":"term-new"}}}' > "$resp/9.out"
   cp "$resp/7.out" "$resp/10.out"
-  printf '%s\n' '{"result":{"tab":{"tab_id":"w2:t3","workspace_id":"w2"}}}' > "$resp/11.out"
-  printf '%s\n' '{"result":{"pane":{"pane_id":"w2:p3","tab_id":"w2:t3","workspace_id":"w2"}}}' > "$resp/12.out"
-  printf '%s\n' '{"result":{"pane":{"pane_id":"w2:p2"}}}' > "$resp/13.out"
-  printf '%s\n' '{"error":{"code":"agent_not_found"}}' > "$resp/14.out"
-  cp "$resp/6.out" "$resp/15.out"
+  cp "$resp/8.out" "$resp/11.out"
+  printf '%s\n' '{"result":{"tab":{"tab_id":"w2:t3","workspace_id":"w2"}}}' > "$resp/12.out"
+  printf '%s\n' '{"result":{"pane":{"pane_id":"w2:p3","tab_id":"w2:t3","workspace_id":"w2"}}}' > "$resp/13.out"
+  printf '%s\n' '{"result":{"pane":{"pane_id":"w2:p2"}}}' > "$resp/14.out"
+  printf '%s\n' '{"error":{"code":"agent_not_found"}}' > "$resp/15.out"
   cp "$resp/7.out" "$resp/16.out"
-  printf '%s\n' '{"result":{"pane":{"pane_id":"w2:p2","tab_id":"w2:t2","workspace_id":"w2"}}}' > "$resp/17.out"
-  printf '%s\n' '{"result":{"pane":{"pane_id":"w2:p2"}}}' > "$resp/18.out"
-  printf '%s\n' '{"error":{"code":"agent_not_found"}}' > "$resp/19.out"
+  cp "$resp/8.out" "$resp/17.out"
+  printf '%s\n' '{"result":{"pane":{"pane_id":"w2:p2","tab_id":"w2:t2","workspace_id":"w2"}}}' > "$resp/18.out"
+  printf '%s\n' '{"result":{"pane":{"pane_id":"w2:p2"}}}' > "$resp/19.out"
+  printf '%s\n' '{"error":{"code":"agent_not_found"}}' > "$resp/20.out"
   # The emptying-close plan sees the replacement tab alongside the old husk
   # tab, so the husk close stays plain.
-  printf '%s\n' '{"result":{"tabs":[{"tab_id":"w2:t2","label":"fm-fm-hibit-r1"},{"tab_id":"w2:t3","label":"fm-fm-hibit-r1"}]}}' > "$resp/20.out"
-  : > "$resp/21.out"
-  printf '%s\n' '{"error":{"code":"pane_not_found"}}' > "$resp/22.out"
-  cp "$resp/6.out" "$resp/23.out"
+  printf '%s\n' '{"result":{"tabs":[{"tab_id":"w2:t2","label":"fm-fm-hibit-r1"},{"tab_id":"w2:t3","label":"fm-fm-hibit-r1"}]}}' > "$resp/21.out"
+  : > "$resp/22.out"
+  printf '%s\n' '{"error":{"code":"pane_not_found"}}' > "$resp/23.out"
   cp "$resp/7.out" "$resp/24.out"
-  printf '%s\n' '{"error":{"code":"pane_not_found"}}' > "$resp/25.out"
-  cp "$resp/1.out" "$resp/26.out"
-  printf '%s\n' '{"result":{"tabs":[{"tab_id":"w2:t3","label":"fm-fm-hibit-r1"}]}}' > "$resp/27.out"
-  printf '%s\n' '{"result":{"panes":[{"pane_id":"w2:p3","tab_id":"w2:t3"}]}}' > "$resp/28.out"
+  cp "$resp/8.out" "$resp/25.out"
+  printf '%s\n' '{"error":{"code":"pane_not_found"}}' > "$resp/26.out"
+  cp "$resp/1.out" "$resp/27.out"
+  printf '%s\n' '{"result":{"tabs":[{"tab_id":"w2:t3","label":"fm-fm-hibit-r1"}]}}' > "$resp/28.out"
+  printf '%s\n' '{"result":{"panes":[{"pane_id":"w2:p3","tab_id":"w2:t3"}]}}' > "$resp/29.out"
   fb=$(make_herdr_fakebin "$dir")
   out=$(PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
     bash -c '
       . "$0/bin/backends/herdr.sh"
       fm_backend_herdr_projection_reclaim_task \
-        fmtest "$1" fm-hibit-r1 "$2" w2 w2:t2 w2:p2 firstmate fm-fm-hibit-r1 /tmp/project || exit 1
-      printf "%s %s" "$FM_BACKEND_HERDR_PROJECTION_TAB_ID" "$FM_BACKEND_HERDR_PROJECTION_PANE_ID"
+        fmtest "$1" fm-hibit-r1 "$2" w2 w2:t2 w2:p2 firstmate fm-fm-hibit-r1 /tmp/project term-old || exit 1
+      printf "%s %s %s" "$FM_BACKEND_HERDR_PROJECTION_TAB_ID" "$FM_BACKEND_HERDR_PROJECTION_PANE_ID" "$FM_BACKEND_HERDR_PROJECTION_TERMINAL_ID"
     ' "$ROOT" "$journal" "$home") || fail "exact agent-free projection reclaim failed"
-  [ "$out" = "w2:t3 w2:p3" ] || fail "reclaim did not return exact replacement ids: $out"
+  [ "$out" = "w2:t3 w2:p3 term-new" ] || fail "reclaim did not return exact replacement ids: $out"
   [ "$(sed -n 's/^tab_id=//p' "$journal")" = w2:t3 ] \
     && [ "$(sed -n 's/^pane_id=//p' "$journal")" = w2:p3 ] \
     || fail "reclaim did not advance the journal to the replacement endpoint"
@@ -4831,7 +4839,7 @@ test_dispatch_composer_state_routes_by_backend() {
 }
 
 test_scripts_route_explicit_target_through_meta_backend() {
-  local dir state log fb neutral out identity
+  local dir state log fb neutral out identity submit_mode
   dir="$TMP_ROOT/script-explicit-target"; state="$dir/state"
   log="$dir/log"; fb="$dir/fakebin"; neutral="$dir/neutral-root"
   mkdir -p "$state" "$fb" "$neutral"
@@ -4848,9 +4856,19 @@ case "$1 $2" in
         '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"term-foreign"}}}'; exit 0 ;;
       gone) printf '%s\n' '{"error":{"code":"pane_not_found"}}' >&2; exit 1 ;;
     esac
-    printf '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"%s","foreground_cwd":"/unrelated"}}}\n' "$FM_TEST_IDENTITY"
+    identity=$FM_TEST_IDENTITY
+    if [ "${FM_TEST_SUBMIT_MODE:-}" = recycled ] && grep -q '^pane send-keys w1:p2 enter' "$FM_HERDR_LOG"; then
+      identity=term-foreign
+    fi
+    printf '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"%s","foreground_cwd":"/unrelated"}}}\n' "$identity"
     ;;
-  'agent get') printf '%s\n' '{"result":{"agent":{"agent_status":"idle"}}}' ;;
+  'agent get')
+    state=idle
+    if [ -n "${FM_TEST_SUBMIT_MODE:-}" ] && grep -q '^pane send-keys w1:p2 enter' "$FM_HERDR_LOG"; then
+      state=working
+    fi
+    printf '{"result":{"agent":{"agent_status":"%s"}}}\n' "$state"
+    ;;
   'pane process-info')
     printf '%s\n' '{"result":{"type":"pane_process_info","process_info":{"pane_id":"w1:p2","shell_pid":2,"foreground_processes":[{"pid":3,"name":"sleep","argv":["sleep","60"]}]}}}'
     ;;
@@ -4887,6 +4905,18 @@ SH
     done
 
     export FM_TEST_IDENTITY=term-worker
+    for submit_mode in matching recycled; do
+      : > "$log"
+      out=$(FM_TEST_SUBMIT_MODE="$submit_mode" FM_BACKEND_HERDR_SUBMIT_POLLS=1 FM_BACKEND_HERDR_SUBMIT_MIN_SLEEP=0 \
+        FM_BACKEND_HERDR_ENDPOINT_META="$state/worker.meta" \
+        fm_backend_send_text_submit herdr "$target" 'fixture submit' 1 0 0 2>/dev/null)
+      assert_contains "$(cat "$log")" 'pane send-keys w1:p2 enter' "$submit_mode submit did not reach Enter"
+      case "$submit_mode" in
+        matching) [ "$out" = empty ] || fail "matching native status did not confirm submit: $out" ;;
+        recycled) [ "$out" = unknown ] || fail "foreign native status confirmed submit: $out" ;;
+      esac
+    done
+    : > "$log"
     cp "$state/worker.meta" "$state/also-worker.meta"
     [ "$(fm_backend_agent_state herdr "$target")" = unreadable ] || fail "duplicate routes should be unreadable"
     rm "$state/also-worker.meta"

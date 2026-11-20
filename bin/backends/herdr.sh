@@ -2564,10 +2564,9 @@ fm_backend_herdr_agent_alive() {  # <target>
 # the safety argument). An ADOPTED workspace's caller always passes an empty
 # 4th arg, so this function never even queries for a prune candidate in that
 # case. Workers request the terminal identity from the same creation response.
-# Recreation can exclude the previously recorded pane from duplicate cleanup.
-fm_backend_herdr_create_task() {  # <container> <label> <cwd> <seeded_default_tab_id> [worker] [<previous-pane>]
+fm_backend_herdr_create_task() {  # <container> <label> <cwd> <seeded_default_tab_id> [worker]
   local container=$1 label=$2 cwd=$3 seeded_tab_id=${4:-} session wsid list dup_tabs dup dup_pane dup_tab_ids out tab_id pane_id remaining_dup_tabs
-  local worker=${5:-} previous_pane=${6:-} terminal_id preserved_tab='' identity
+  local worker=${5:-} terminal_id identity
   session=${container%%:*}
   wsid=${container#*:}
   list=$(fm_backend_herdr_cli "$session" tab list --workspace "$wsid" 2>/dev/null) || return 1
@@ -2580,10 +2579,6 @@ fm_backend_herdr_create_task() {  # <container> <label> <cwd> <seeded_default_ta
     while IFS= read -r dup; do
       [ -n "$dup" ] || continue
       dup_pane=$(fm_backend_herdr_pane_for_tab "$session" "$wsid" "$dup")
-      if [ -n "$previous_pane" ] && [ "$dup_pane" = "$previous_pane" ]; then
-        preserved_tab=$dup
-        continue
-      fi
       if [ -n "$dup_pane" ] && declare -F fm_backend_herdr_task_identity_state >/dev/null; then
         identity=$(fm_backend_herdr_task_identity_state "$session:$dup_pane")
         case "$identity" in
@@ -2630,8 +2625,8 @@ EOF
       echo "error: could not parse herdr tab list output for workspace $wsid (session $session)" >&2
       return 1
     fi
-    remaining_dup_tabs=$(printf '%s' "$list" | jq -r --arg want "$label" --arg replacement "$tab_id" --arg preserved "$preserved_tab" \
-      '.result.tabs[]? | select(.label == $want and .tab_id != $replacement and .tab_id != $preserved) | .tab_id' 2>/dev/null)
+    remaining_dup_tabs=$(printf '%s' "$list" | jq -r --arg want "$label" --arg replacement "$tab_id" \
+      '.result.tabs[]? | select(.label == $want and .tab_id != $replacement) | .tab_id' 2>/dev/null)
     remaining_dup_tabs=${remaining_dup_tabs//$'\n'/ }
     if [ -n "$remaining_dup_tabs" ]; then
       echo "error: failed to remove preexisting herdr tab(s) $remaining_dup_tabs for label '$label' in workspace $wsid (session $session)" >&2
@@ -2875,10 +2870,10 @@ fm_backend_herdr_projection_reclaim_rollback() {  # <session> <new-pane>
 # Return 0 means exact reclaim, 2 means non-mutating or exactly rolled-back
 # refusal with flat fallback permitted, and 1 means a live/unknown or
 # post-mutation uncertainty that must refuse the launch.
-fm_backend_herdr_projection_reclaim_task() {  # <session> <journal> <task-id> <home> <meta-workspace> <meta-tab> <meta-pane> <parent-label> <task-label> <cwd> [<terminal-id>]
+fm_backend_herdr_projection_reclaim_task() {  # <session> <journal> <task-id> <home> <meta-workspace> <meta-tab> <meta-pane> <parent-label> <task-label> <cwd> <terminal-id>
   local session=$1 journal=$2 id=$3 home=$4 meta_workspace=$5 meta_tab=$6 meta_pane=$7
   local parent_label=$8 task_label=$9 cwd=${10} canonical_home state focus_before active_tab out new_tab new_pane info close_status
-  local expected_terminal=${11:-} new_terminal
+  local expected_terminal=${11} new_terminal
   FM_BACKEND_HERDR_PROJECTION_TAB_ID=""
   FM_BACKEND_HERDR_PROJECTION_PANE_ID=""
   FM_BACKEND_HERDR_PROJECTION_TERMINAL_ID=""
@@ -2921,8 +2916,7 @@ fm_backend_herdr_projection_reclaim_task() {  # <session> <journal> <task-id> <h
       return 1
       ;;
   esac
-  if [ -n "$expected_terminal" ] \
-    && [ "$(fm_backend_herdr_pane_identity_state "$session" "$meta_pane" terminal_id "$expected_terminal")" != match ]; then
+  if [ "$(fm_backend_herdr_pane_identity_state "$session" "$meta_pane" terminal_id "$expected_terminal")" != match ]; then
     echo "warning: Herdr presentation terminal identity changed for $id; spawning flat without closing it" >&2
     return 2
   fi
@@ -2945,7 +2939,7 @@ fm_backend_herdr_projection_reclaim_task() {  # <session> <journal> <task-id> <h
   new_pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)
   new_terminal=$(printf '%s' "$out" | jq -r '.result.root_pane.terminal_id | strings' 2>/dev/null)
   if [ -z "$new_tab" ] || [ -z "$new_pane" ] \
-    || { [ -n "$expected_terminal" ] && ! fm_backend_herdr_terminal_id_valid "$new_terminal"; }; then
+    || ! fm_backend_herdr_terminal_id_valid "$new_terminal"; then
     fm_backend_herdr_projection_focus_restore "$session" "$focus_before" "husk replacement create" || return 1
     echo "warning: herdr presentation reclaim for $id returned ambiguous replacement ids; spawning flat" >&2
     return 2
@@ -3248,7 +3242,9 @@ fm_backend_herdr_capture_ansi() {  # <target> <lines>
 
 fm_backend_herdr_agent_identity_raw() {  # <session> <pane> -> <agent>\t<status>
   local out
+  fm_backend_herdr_check_recorded_target "$1:$2" || return 1
   out=$(fm_backend_herdr_cli "$1" agent get "$2" 2>/dev/null) || return 1
+  fm_backend_herdr_check_recorded_target "$1:$2" || return 1
   printf '%s' "$out" | jq -r '[.result.agent.agent // "", .result.agent.agent_status // ""] | @tsv' 2>/dev/null
 }
 
@@ -3412,7 +3408,8 @@ fm_backend_herdr_rendered_busy_state() {  # <target> [harness] -> busy|idle|unkn
 # through a whole turn.
 fm_backend_herdr_queued_enter_busy() {  # <target> <allow-rendered>
   local target=$1 allow_rendered=${2:-0} raw
-  raw=$(fm_backend_herdr_agent_status_raw "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE")
+  raw=$(fm_backend_herdr_agent_status_raw "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE") \
+    || { printf 'unknown'; return 0; }
   case "$raw" in
     working) printf 'busy'; return 0 ;;
   esac
@@ -3429,7 +3426,8 @@ fm_backend_herdr_send_text_submit() {  # <target> <text> <retries> <enter-sleep>
   fm_backend_herdr_parse_target "$target" || { printf 'unknown'; return 0; }
   fm_backend_herdr_send_literal "$target" "$text" || { printf 'send-failed'; return 0; }
   sleep "$settle"
-  raw_status=$(fm_backend_herdr_agent_status_raw "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE")
+  raw_status=$(fm_backend_herdr_agent_status_raw "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE") \
+    || { printf 'unknown'; return 0; }
   baseline=$(fm_backend_herdr_classify_submit_agent_status "$raw_status")
   confirm_sleep=$(fm_backend_herdr_submit_confirm_budget "$sleep_s")
   # Typing never starts a turn, so a footer read taken after the literal send
@@ -3620,8 +3618,8 @@ fm_backend_herdr_classify_submit_agent_status() {  # <raw-agent_status>
 
 # fm_backend_herdr_agent_status_raw: one `agent get` read, echoing the raw
 # agent_status string (working/idle/done/blocked/...), or empty on any
-# failure. Deliberately skips fm_backend_herdr_target_ready's server-ensure
-# round trip (an extra `status --json` call) that fm_backend_herdr_busy_state
+# agent read failure. Identity refusal returns nonzero. Deliberately skips
+# fm_backend_herdr_target_ready's server-ensure round trip (an extra `status --json` call) that fm_backend_herdr_busy_state
 # pays on every call: fm_backend_herdr_wait_for_working polls this in a tight
 # loop right after a caller has already parsed the target and confirmed the
 # server is live (e.g. fm_backend_herdr_send_text_submit, immediately after a
@@ -3629,8 +3627,10 @@ fm_backend_herdr_classify_submit_agent_status() {  # <raw-agent_status>
 # only add latency without adding safety.
 fm_backend_herdr_agent_status_raw() {  # <session> <pane_id>
   local session=$1 pane_id=$2 out
+  fm_backend_herdr_check_recorded_target "$session:$pane_id" || return 1
   out=$(fm_backend_herdr_cli "$session" agent get "$pane_id" 2>/dev/null) || { printf ''; return 0; }
-  printf '%s' "$out" | jq -r '.result.agent.agent_status // empty' 2>/dev/null
+  fm_backend_herdr_check_recorded_target "$session:$pane_id" || return 1
+  printf '%s' "$out" | jq -r '.result.agent.agent_status // empty' 2>/dev/null || true
 }
 
 # fm_backend_herdr_busy_state: semantic busy state from herdr's native
@@ -3709,7 +3709,7 @@ fm_backend_herdr_wait_for_working() {  # <session> <pane_id> <budget-seconds> <p
     if [ "$polls" -eq 1 ] || [ "$i" -gt 0 ]; then
       sleep "$interval"
     fi
-    raw=$(fm_backend_herdr_agent_status_raw "$session" "$pane_id")
+    raw=$(fm_backend_herdr_agent_status_raw "$session" "$pane_id") || { printf 'unknown'; return 0; }
     bs=$(fm_backend_herdr_classify_submit_agent_status "$raw")
     case "$bs" in
       busy) printf 'busy'; return 0 ;;
@@ -3886,9 +3886,12 @@ fm_backend_herdr_apply_transition() {  # <state_dir> <session> <record>
   local state=$1 session=$2 record=$3 pane_id to action window marker
   pane_id=$(fm_transition_pane_id "$record")
   [ -n "$pane_id" ] || return 1
+  window="$session:$pane_id"
+  if declare -F fm_backend_herdr_task_identity_state >/dev/null; then
+    [ "$(FM_STATE_OVERRIDE="$state" fm_backend_herdr_task_identity_state "$window")" = match ] || return 1
+  fi
   to=$(fm_transition_to_status "$record")
   action=$(fm_transition_policy "$to")
-  window="$session:$pane_id"
   marker=$(fm_backend_herdr_escalation_marker "$state" "$window")
   case "$action" in
     actionable)
@@ -3990,7 +3993,7 @@ fm_backend_herdr_wait_transition() {  # <session> <timeout_secs> <state_dir> <pa
       if [ -z "$pane_id" ] || [ "$pane_id" = "$w" ]; then
         continue
       fi
-      raw=$(fm_backend_herdr_agent_status_raw "$session" "$pane_id")
+      raw=$(FM_STATE_OVERRIDE="$state" fm_backend_herdr_agent_status_raw "$session" "$pane_id" 2>/dev/null) || continue
       [ -n "$raw" ] || continue
       record=$(fm_backend_herdr_normalize_event "$pane_id" "" "$raw" "")
       if hit=$(fm_backend_herdr_apply_transition "$state" "$session" "$record"); then

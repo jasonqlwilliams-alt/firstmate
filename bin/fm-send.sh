@@ -435,7 +435,7 @@ fm_send_resolve_target() {  # <raw-target>
 RAW_TARGET=$1
 fm_send_resolve_target "$RAW_TARGET" || exit 1
 T=$RESOLVED_TARGET
-if [ "$TARGET_BACKEND" = herdr ] && [ -n "$TARGET_SELECTOR" ]; then
+if [ "$TARGET_BACKEND" = herdr ] && [ -n "$TARGET_META" ]; then
   FM_BACKEND_HERDR_ENDPOINT_META=$TARGET_META
 fi
 shift

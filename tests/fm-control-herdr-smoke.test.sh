@@ -55,7 +55,7 @@ command -v jq >/dev/null 2>&1 || { echo "skip: jq not found (required by the her
 herdr_forget_inherited_pane
 
 HERDR_LAB_HELPER=${HERDR_LAB_HELPER:-$ROOT/bin/fm-herdr-lab.sh}
-SESSION=$("$HERDR_LAB_HELPER" name "${FM_CONTROL_HERDR_LAB_LABEL:-control-smoke}")
+SESSION=$("$HERDR_LAB_HELPER" name control-smoke)
 HERDR_ORIGINAL_PATH=$PATH
 export HERDR_LAB_HELPER HERDR_ORIGINAL_PATH HERDR_LAB_SESSION="$SESSION" HERDR_SESSION="$SESSION"
 SCRATCH=

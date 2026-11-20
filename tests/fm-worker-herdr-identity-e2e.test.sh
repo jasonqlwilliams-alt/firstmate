@@ -128,8 +128,9 @@ for role in worker secondmate personal; do
     fi
     assert_contains "$out" 'endpoint identity mismatch' "$role $action should explain its refusal"
   done
-  out=$(FM_ROOT_OVERRIDE="$FM_HOME" "$ROOT/bin/fm-send.sh" "$role" 'durable fixture steer' 2>&1)
-  assert_contains "$out" 'endpoint identity mismatch' "$role inbox notification should explain its refusal"
+  FM_ROOT_OVERRIDE="$FM_HOME" "$ROOT/bin/fm-send.sh" "$role" 'durable fixture steer' >/dev/null 2>&1 \
+    || fail "$role steer could not be recorded"
+  assert_contains "$(cat "$FM_HOME/state/$role.inbox/"*.msg)" 'durable fixture steer' "$role inbox did not retain the steer"
   fm_backend_kill herdr "$target" >/dev/null 2>&1 || true
   if rg -q '^pane (read|send-keys|send-text|run|close) ' "$FM_LAB_CALLS"; then
     fail "recorded access reached foreign $role: $(cat "$FM_LAB_CALLS")"
@@ -143,13 +144,9 @@ for role in worker secondmate personal; do
       fail "a fresh spawn accepted a same-label foreign terminal"
     fi
     assert_contains "$out" 'endpoint identity mismatch' 'fresh spawn should explain the conflicting terminal'
-    IFS=' ' read -r _ replacement new_terminal <<< "$(
-      fm_backend_herdr_create_task "$HERDR_LAB_SESSION:$ws" fm-worker "$TMP_ROOT/worktree" '' worker "$pane"
-    )"
-    [ -n "$new_terminal" ] && [ "$replacement" != "$pane" ] && [ "$new_terminal" != "$terminal" ] \
-      || fail "recovery did not create a separate terminal"
-    lab pane get "$pane" | jq -e --arg terminal "$terminal" '.result.pane.terminal_id == $terminal' >/dev/null \
-      || fail "creating a same-label replacement removed its foreign predecessor"
+    if rg -q '^tab (create|close) ' "$FM_LAB_CALLS"; then
+      fail "same-label refusal changed the foreign tab: $(cat "$FM_LAB_CALLS")"
+    fi
   fi
 done
 pass 'recycled worker, secondmate and personal panes are missing to recorded workers and untouched by terminal actions'
@@ -183,6 +180,7 @@ remote() {
 }
 : > "$FM_LAB_CALLS"
 [ "$(remote state remote-owner --bound-home)" = missing ] || fail 'foreign remote route passed liveness'
+[ "$(remote observe remote-owner)" = unknown ] || fail 'remote observation reported the foreign pane as its own'
 if out=$(remote capture remote-owner 20 2>&1); then fail 'remote capture succeeded on a foreign pane'; fi
 assert_contains "$out" 'endpoint identity mismatch' 'remote capture refused for the wrong reason'
 if out=$(remote key remote-owner Escape 2>&1); then fail 'remote key succeeded on a foreign pane'; fi

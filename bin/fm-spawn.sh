@@ -3198,7 +3198,11 @@ herdr_projection_existing_meta_allows_flat() {  # <meta>
     identity=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_herdr_task_identity_state "$old_target")
     case "$identity" in
       match) HERDR_RECOVERY_TERMINAL_ID=$(fm_backend_meta_exact_value "$meta" herdr_terminal_id) || return 1 ;;
-      missing|mismatch)
+      missing)
+        HERDR_RECOVERY_BACKEND=""
+        return 0
+        ;;
+      mismatch)
         echo "error: existing Herdr worker $ID has no matching terminal; use --relaunch to keep its recorded worktree" >&2
         return 1
         ;;
@@ -3312,12 +3316,8 @@ elif [ "$RELAUNCH" -eq 1 ] && [ "$RELAUNCH_RECREATE" -eq 1 ]; then
       HERDR_SEEDED_DEFAULT_TAB_ID=${HERDR_CONTAINER_RAW#*$'\t'}
       HERDR_SES=${CONTAINER%%:*}
       HERDR_WORKSPACE_ID=${CONTAINER#*:}
-      HERDR_PREVIOUS_PANE=
-      if [ "$KIND" != secondmate ] && [ "${RELAUNCH_TARGET%%:*}" = "$HERDR_SES" ]; then
-        HERDR_PREVIOUS_PANE=${RELAUNCH_TARGET#*:}
-      fi
       HERDR_TASK_IDS=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_create_task "$CONTAINER" "$W" "$WT" \
-        "$HERDR_SEEDED_DEFAULT_TAB_ID" "$HERDR_CREATE_KIND" "$HERDR_PREVIOUS_PANE") || exit 1
+        "$HERDR_SEEDED_DEFAULT_TAB_ID" "$HERDR_CREATE_KIND") || exit 1
       read -r HERDR_TAB_ID HERDR_PANE_ID HERDR_TERMINAL_ID <<EOF
 $HERDR_TASK_IDS
 EOF
@@ -3505,7 +3505,7 @@ case "$BACKEND" in
       HERDR_SES=${CONTAINER%%:*}
       HERDR_WORKSPACE_ID=${CONTAINER#*:}
       HERDR_TASK_IDS=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_create_task "$CONTAINER" "$W" "$PROJ_ABS" \
-        "$HERDR_SEEDED_DEFAULT_TAB_ID" "$HERDR_CREATE_KIND" "${HERDR_RECOVERY_PANE_ID:-}") || exit 1
+        "$HERDR_SEEDED_DEFAULT_TAB_ID" "$HERDR_CREATE_KIND") || exit 1
       read -r HERDR_TAB_ID HERDR_PANE_ID HERDR_TERMINAL_ID <<EOF
 $HERDR_TASK_IDS
 EOF

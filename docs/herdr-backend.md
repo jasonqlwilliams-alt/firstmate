@@ -290,8 +290,8 @@ Worker liveness and terminal actions use the spawn-time terminal binding owned b
 A different terminal under a recorded pane id is treated as a missing worker, including when Herdr restores a shell in the same pane slot after restarting.
 An older worker record with a still-present pane and no terminal binding is reported as unreadable and retained.
 Terminal access to these records is refused until a replacement is bound, and an explicit relaunch can create a new terminal in the recorded worktree when the previous terminal is positively gone.
-A restored same-labeled tab with a missing pane or no registered agent is a husk.
-Create replaces only a confidently dead or no-agent husk, creates the replacement before closing the old tab, and refuses live or unknown states.
+A same-labeled tab with a missing pane or no registered agent qualifies as a husk only when the pane identity check permits access.
+Create replaces only a confidently dead or no-agent husk, creates the replacement before closing the old tab, and refuses live, unknown, or foreign collisions.
 This prevents closing the workspace's last tab before a replacement exists.
 
 A registration alone never proves an agent.

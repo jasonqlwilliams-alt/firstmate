@@ -213,7 +213,8 @@ cmd_launch() {
         return 0
         ;;
       dead)
-        fm_backend_kill "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" 2>/dev/null \
+        FM_BACKEND_HERDR_ENDPOINT_META="$REMOTE_ENDPOINT_META" \
+          fm_backend_kill "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" 2>/dev/null \
           || die "could not remove the confirmed agent-less endpoint"
         ;;
       missing) ;;
@@ -466,8 +467,10 @@ cmd_observe() {
   validate_id "$id"
   validate_home "$id"
   remote_endpoint_require "$id"
+  remote_endpoint_require_home
   harness=$(fm_meta_get "$REMOTE_ENDPOINT_META" harness)
-  fm_pending_reply_backend_observation "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "fm-$id" "$harness"
+  FM_BACKEND_HERDR_ENDPOINT_META="$REMOTE_ENDPOINT_META" \
+    fm_pending_reply_backend_observation "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "fm-$id" "$harness"
   printf '\n'
 }
 

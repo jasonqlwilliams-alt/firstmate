@@ -648,20 +648,20 @@ test_watcher_never_classifies_kimi_from_its_spinner() (
   # unknown - and unknown is never working. Its moon-phase spinner is
   # deliberately not a state source: the approved redesign forbids inventing a
   # Kimi UI signature, and that glyph set is locale- and emoji-font-sensitive.
-  if window_is_busy fake "$busy_capture"; then
+  if window_is_busy fake "$busy_capture" kimi-watch tmux; then
     fail "fm-watch classified a Kimi task busy from its spinner instead of unknown"
   fi
   [ "$(fm_busy_classify tmux fake kimi kimi-watch "$state" "$busy_capture")" = "unknown kimi-unverified" ] \
     || fail "a Kimi task must classify unknown kimi-unverified"
   printf 'window=fake\nharness=codex\n' > "$state/kimi-watch.meta"
-  if window_is_busy fake "$busy_capture"; then
+  if window_is_busy fake "$busy_capture" kimi-watch tmux; then
     fail "fm-watch applied Kimi's spinner to a recorded Codex task"
   fi
   printf 'window=fake\nharness=grok\n' > "$state/kimi-watch.meta"
-  if window_is_busy fake "$busy_capture"; then
+  if window_is_busy fake "$busy_capture" kimi-watch tmux; then
     fail "Kimi's spinner classified a recorded Grok task through its isolated fallback"
   fi
-  window_is_busy fake 'Ctrl+c:cancel' \
+  window_is_busy fake 'Ctrl+c:cancel' kimi-watch tmux \
     || fail "Grok's own verified token must still classify a recorded Grok task busy"
   pass "fm-watch classifies Kimi as unknown rather than from its spinner, and Grok's fallback stays isolated"
 )
