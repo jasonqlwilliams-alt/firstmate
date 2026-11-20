@@ -38,12 +38,17 @@ DRAIN="$ROOT/bin/fm-wake-drain.sh"
 # tests/fm-bootstrap.test.sh, so pinning it here would duplicate that owner and
 # make these assertions depend on unrelated tool detection.
 new_world() {
-  local name=$1 w home root
-  w="$TMP_ROOT/$name"
+  export -f build_world
+  fm_test_run_fixture bash -uc 'build_world "$@"' _ "$1" "$TMP_ROOT" "$ROOT"
+}
+
+build_world() {
+  local name=$1 tmp_root=$2 repo_root=$3 w home root f
+  w="$tmp_root/$name"
   home="$w/home"
   root="$w/root"
   mkdir -p "$home/state" "$root/bin"
-  for f in "$ROOT"/bin/*.sh; do
+  for f in "$repo_root"/bin/*.sh; do
     ln -s "$f" "$root/bin/$(basename "$f")"
   done
   rm -f "$root/bin/fm-bootstrap.sh"
@@ -771,8 +776,8 @@ reap_probe=${FM_STARTUP_NETWORK_REAP_PROBE:-}
 if [ "$reap_probe" = outer ]; then
   FM_STARTUP_NETWORK_REAP_PROBE=inner fm_test_start_fixture bash "$0" ||
     fail "could not start inner reap probe"
-  while ! grep -qx 'ready' "$FM_STARTUP_NETWORK_REAP_INFO"; do sleep 0.1; done
-  exit 1
+  wait "$FM_TEST_FIXTURE_PID"
+  exit $?
 fi
 
 # A nested copy of this file, used only to prove cleanup. It arms the same
@@ -815,6 +820,8 @@ SH
     printf 'start-failed\n' >> "$FM_STARTUP_NETWORK_REAP_INFO"
     exit 1
   fi
+  worker=$(sed -n 's/^pid=//p' "$home/state/.startup-network.status")
+  printf '%s\n' "$FM_TEST_FIXTURE_PID" "$worker" >> "$FM_STARTUP_NETWORK_REAP_INFO"
   case "$FM_STARTUP_NETWORK_REAP_PROBE" in
     inner) printf 'waiting\n' ;;
     *) printf 'ready\n' ;;
@@ -823,20 +830,17 @@ SH
   exit 1
 fi
 
-# Processes whose command line contains the fixture root. The matcher reads the
-# root from a file so its own command line is not a false match.
-fixture_processes_under() {  # <root>
-  local root=$1 file
-  file=$(mktemp "${TMPDIR:-/tmp}/fm-startup-reap-match.XXXXXX") || return 1
-  printf '%s\n' "$root" > "$file"
-  ps -axww -o args= | awk -v file="$file" '
+fixture_groups_in_sessions() {
+  local snapshot
+  snapshot=$(fm_test_fixture_process_snapshot) || return 1
+  awk -v sessions="$*" '
     BEGIN {
-      getline root < file
-      close(file)
+      n = split(sessions, sid, " ")
+      for (i = 1; i <= n; i++) owned[sid[i]] = 1
     }
-    index($0, root) { print }
-  '
-  rm -f "$file"
+    $4 !~ /^Z/ && ($3 in owned) { groups[$2] = 1 }
+    END { for (group in groups) print group }
+  ' <<< "$snapshot"
 }
 
 # kill -0 is true for a zombie, so a waiter that already exited still looks
@@ -852,7 +856,7 @@ process_is_running() {  # <pid>
 
 test_killing_the_suite_reaps_detached_fixture_processes() {
   local info probe_stderr runner_tmp probe root claimant waiter inner fixture_parent sleeper parent_group sleeper_group
-  local i test_case mode ready survivors status expected
+  local stage_session worker i test_case mode ready survivors status expected
   info="$TMP_ROOT/reap-probe-info"
   probe_stderr="$TMP_ROOT/reap-probe-stderr"
   runner_tmp="$TMP_ROOT/runner-tmp"
@@ -886,9 +890,10 @@ test_killing_the_suite_reaps_detached_fixture_processes() {
       IFS= read -r inner
       IFS= read -r fixture_parent
       IFS= read -r sleeper
+      IFS= read -r stage_session
+      IFS= read -r worker
     } < "$info"
-    survivors=$(fixture_processes_under "$root")
-    if [ -z "$survivors" ] || ! process_is_running "$claimant" ||
+    if ! process_is_running "$worker" || ! process_is_running "$claimant" ||
       ! process_is_running "$waiter" || ! process_is_running "$inner" ||
       ! process_is_running "$sleeper"; then
       fail "the reap probe did not start all fixtures ($test_case)"
@@ -911,8 +916,9 @@ test_killing_the_suite_reaps_detached_fixture_processes() {
     rm -rf "$runner_tmp"
     i=0
     while [ "$i" -lt 150 ]; do
-      survivors=$(fixture_processes_under "$root")
-      if [ -z "$survivors" ] && ! process_is_running "$claimant" &&
+      survivors=$(fixture_groups_in_sessions "$claimant" "$waiter" "$fixture_parent" "$stage_session") ||
+        fail "could not inspect fixture process groups ($test_case)"
+      if [ -z "$survivors" ] && ! process_is_running "$worker" && ! process_is_running "$claimant" &&
         ! process_is_running "$waiter" && ! process_is_running "$inner" &&
         ! process_is_running "$sleeper" && [ ! -d "$root" ]; then
         break
@@ -921,7 +927,7 @@ test_killing_the_suite_reaps_detached_fixture_processes() {
       i=$((i + 1))
     done
     [ "$i" -lt 150 ] ||
-      fail "fixtures outlived the suite ($test_case): $survivors claimant=$claimant waiter=$waiter suite=$inner sleeper=$sleeper $(cat "$probe_stderr")"
+      fail "fixtures outlived the suite ($test_case): groups=$survivors worker=$worker claimant=$claimant waiter=$waiter suite=$inner sleeper=$sleeper $(cat "$probe_stderr")"
     if [ "$test_case" != outer ]; then
       grep -qx 'late-spawned' "$info" || fail "cleanup did not spawn the late worker ($test_case)"
     fi
