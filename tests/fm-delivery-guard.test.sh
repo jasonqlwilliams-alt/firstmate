@@ -421,6 +421,24 @@ SH
     "the managed hook did not check the gate's PR destination"
   remote_has_branch "$gate" validated || fail "the guarded push did not reach the no-mistakes gate"
 
+  git -C "$repo" config remote.no-mistakes.tagOpt --no-tags
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push \
+    -o 'intent=fixture gate push' no-mistakes "$head:refs/heads/fetch-option-allowed" 2>&1); rc=$?
+  expect_code 0 "$rc" "an ordinary gate push should allow the fetch-only tag option: $out"
+  assert_contains "$out" "action=branch-push repository=github.com/captain/widgets" \
+    "the managed hook did not check the ordinary gate push's branch destination"
+  assert_contains "$out" "action=pull-request repository=github.com/captain/widgets" \
+    "the managed hook did not check the ordinary gate push's PR destination"
+  remote_has_branch "$gate" fetch-option-allowed || fail "the ordinary push did not reach the gate"
+
+  out=$(cd "$repo" && env "${fixture_env[@]}" "$GIT_SHIM" push --no-verify \
+    -o 'intent=fixture gate push' no-mistakes "$head:refs/heads/fetch-option-refused" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the gate exception should refuse a fetch-only tag option outside the allowlist"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "the fetch-only tag option did not trigger the exception refusal: $out"
+  ! remote_has_branch "$gate" fetch-option-refused || fail "the refused push reached the gate"
+  git -C "$repo" config --unset remote.no-mistakes.tagOpt
+
   out=$(cd "$repo" && env "${fixture_env[@]}" NM_UPSTREAM=https://github.com/upstream/widgets.git \
     "$GIT_SHIM" push --no-verify no-mistakes HEAD:refs/heads/refused 2>&1); rc=$?
   [ "$rc" -ne 0 ] || fail "the gate exception should preserve the hook's refusal of an unsafe PR destination"

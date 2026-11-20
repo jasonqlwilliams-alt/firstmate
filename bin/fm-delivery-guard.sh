@@ -174,11 +174,10 @@ no_mistakes_remote_config_allowed() (
   [ "$rc" -eq 1 ]
 )
 
-read_no_mistakes_targets() {  # <repo> <effective-url>; sets NM_UPSTREAM and NM_FORK
-  local repo=$1 url=$2 output gate resolved_gate git_dir nm_home=${NM_HOME:-${HOME:+$HOME/.no-mistakes}}
+read_no_mistakes_targets() {  # <repo> <effective-url>; sets NM_UPSTREAM, NM_FORK and NM_RESOLVED_GATE
+  local repo=$1 url=$2 output gate nm_home=${NM_HOME:-${HOME:+$HOME/.no-mistakes}}
   [[ $url == /* && $url != //* && $url != *$'\n'* ]] || \
     die "no-mistakes push destination must be an absolute local gate path"
-  no_mistakes_remote_config_allowed "$repo" || die "unsupported no-mistakes remote configuration for $repo"
   command -v no-mistakes >/dev/null 2>&1 || {
     printf 'REFUSED: no-mistakes is unavailable, so its GitHub push and PR targets cannot be verified.\n' >&2
     return 1
@@ -189,7 +188,7 @@ read_no_mistakes_targets() {  # <repo> <effective-url>; sets NM_UPSTREAM and NM_
   }
   gate=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*gate:[[:space:]]*//p')
   [ "$url" = "$gate" ] || die "no-mistakes push destination does not match the registered local gate for $repo"
-  resolved_gate=$(perl -MCwd=realpath -MFile::Basename=basename -e '
+  NM_RESOLVED_GATE=$(perl -MCwd=realpath -MFile::Basename=basename -e '
     my ($home, $path) = @ARGV;
     exit 1 unless -d $home && -d $path;
     my $root = realpath($home);
@@ -199,11 +198,6 @@ read_no_mistakes_targets() {  # <repo> <effective-url>; sets NM_UPSTREAM and NM_
     exit 1 unless $target eq "$root/repos/" . basename($path);
     print $target;
   ' -- "$nm_home" "$url") || die "no-mistakes push destination does not match the registered local gate for $repo"
-  if [ -e "$resolved_gate/.git" ] || [ -L "$resolved_gate/.git" ] || \
-    ! git_dir=$(git --git-dir="$resolved_gate" rev-parse --absolute-git-dir --is-bare-repository 2>/dev/null) || \
-    [ "$git_dir" != "$resolved_gate"$'\ntrue' ]; then
-    die "no-mistakes push destination is not a direct bare repository for $repo"
-  fi
   NM_UPSTREAM=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*remote:[[:space:]]*//p' | head -1)
   NM_FORK=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*fork:[[:space:]]*//p' | head -1)
   [ -n "$NM_UPSTREAM" ] || {
@@ -211,6 +205,17 @@ read_no_mistakes_targets() {  # <repo> <effective-url>; sets NM_UPSTREAM and NM_
     return 1
   }
   [ -n "$NM_FORK" ] || NM_FORK=$NM_UPSTREAM
+}
+
+cmd_check_gate() {
+  local repo=$1 url=$2 git_dir
+  no_mistakes_remote_config_allowed "$repo" || die "unsupported no-mistakes remote configuration for $repo"
+  read_no_mistakes_targets "$repo" "$url" || return 1
+  if [ -e "$NM_RESOLVED_GATE/.git" ] || [ -L "$NM_RESOLVED_GATE/.git" ] || \
+    ! git_dir=$(git --git-dir="$NM_RESOLVED_GATE" rev-parse --absolute-git-dir --is-bare-repository 2>/dev/null) || \
+    [ "$git_dir" != "$NM_RESOLVED_GATE"$'\ntrue' ]; then
+    die "no-mistakes push destination is not a direct bare repository for $repo"
+  fi
 }
 
 authorize_exact_target() {  # <action> <url> <expected-identity>
@@ -312,7 +317,7 @@ case "${1:-}" in
     ;;
   check-gate)
     [ "$#" -eq 3 ] || usage
-    read_no_mistakes_targets "$2" "$3"
+    cmd_check_gate "$2" "$3"
     ;;
   check-push)
     [ "$#" -eq 4 ] || usage
