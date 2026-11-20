@@ -6,6 +6,7 @@
 #   fm-delivery-guard.sh arm <project> <repository-path>
 #   fm-delivery-guard.sh arm-refuse <project> <repository-path>
 #   fm-delivery-guard.sh arm-all
+#   fm-delivery-guard.sh check-gate <repository-path> <effective-url>
 #   fm-delivery-guard.sh check-push <repository-path> <remote-name> <effective-url>
 #   fm-delivery-guard.sh check-pr <repository-path> <target-url-or-host/owner/repo>
 #   fm-delivery-guard.sh check-pr-body [<repository-path>] <body-file>
@@ -37,7 +38,7 @@ PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
 # shellcheck source=bin/fm-repository-policy-lib.sh
 . "$SCRIPT_DIR/fm-repository-policy-lib.sh"
 
-usage() { sed -n '2,30{s/^# \{0,1\}//;p;}' "$0" >&2; exit 2; }
+usage() { sed -n '2,31{s/^# \{0,1\}//;p;}' "$0" >&2; exit 2; }
 die() { printf 'REFUSED: %s\n' "$1" >&2; exit 1; }
 
 repository_top() { git -C "$1" rev-parse --show-toplevel 2>/dev/null; }
@@ -159,16 +160,30 @@ cmd_arm_all() {
   done < <(fm_repository_policy_projects)
 }
 
-read_no_mistakes_targets() {  # <repo>; sets NM_UPSTREAM and NM_FORK
-  local repo=$1 output
+read_no_mistakes_targets() {  # <repo> <effective-url>; sets NM_UPSTREAM and NM_FORK
+  local repo=$1 url=$2 output gate nm_home=${NM_HOME:-${HOME:+$HOME/.no-mistakes}}
+  [[ $url == /* && $url != //* && $url != *$'\n'* ]] || \
+    die "no-mistakes push destination must be an absolute local gate path"
   command -v no-mistakes >/dev/null 2>&1 || {
     printf 'REFUSED: no-mistakes is unavailable, so its GitHub push and PR targets cannot be verified.\n' >&2
     return 1
   }
-  output=$(cd "$repo" && no-mistakes status 2>&1) || {
+  output=$(cd "$repo" && NO_COLOR=1 CLICOLOR_FORCE=0 no-mistakes status 2>&1) || {
     printf 'REFUSED: no-mistakes target inspection failed for %s: %s\n' "$repo" "$output" >&2
     return 1
   }
+  gate=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*gate:[[:space:]]*//p')
+  if [ "$url" != "$gate" ] || ! perl -MCwd=realpath -e '
+    my ($home, $path) = @ARGV;
+    exit 1 unless -d $home && -d $path;
+    my $root = realpath($home);
+    my $target = realpath($path);
+    exit 1 unless defined($root) && defined($target);
+    $root =~ s{/$}{};
+    exit(index($target, "$root/repos/") == 0 ? 0 : 1);
+  ' -- "$nm_home" "$url"; then
+    die "no-mistakes push destination does not match the registered local gate for $repo"
+  fi
   NM_UPSTREAM=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*remote:[[:space:]]*//p' | head -1)
   NM_FORK=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*fork:[[:space:]]*//p' | head -1)
   [ -n "$NM_UPSTREAM" ] || {
@@ -192,7 +207,7 @@ cmd_check_push() {  # <repo> <remote-name> <effective-url>
   [ -n "$project" ] || die "repository $repo is not armed with a Firstmate project identity"
   fm_repository_policy_load "$project" || exit 1
   if [ "$remote" = no-mistakes ]; then
-    read_no_mistakes_targets "$repo" || exit 1
+    read_no_mistakes_targets "$repo" "$url" || exit 1
     authorize_exact_target branch-push "$NM_FORK" "$FM_REPOSITORY_POLICY_FORK_ID" || exit 1
     authorize_exact_target pull-request "$NM_UPSTREAM" "$FM_REPOSITORY_POLICY_FORK_ID" || exit 1
     return 0
@@ -274,6 +289,10 @@ case "${1:-}" in
   arm-all)
     [ "$#" -eq 1 ] || usage
     cmd_arm_all
+    ;;
+  check-gate)
+    [ "$#" -eq 3 ] || usage
+    read_no_mistakes_targets "$2" "$3"
     ;;
   check-push)
     [ "$#" -eq 4 ] || usage

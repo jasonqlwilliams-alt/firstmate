@@ -2,8 +2,9 @@
 # Guarded worker entrypoint for Git. The repository pre-push hook owns target
 # authorization; this shim refuses hook bypasses and pins the effective managed
 # hooks path for armed pushes, including push aliases with leading Git options.
-# For a direct push to a single resolved local gate under ${NM_HOME:-$HOME/.no-mistakes}/repos,
-# strip --no-verify so the push runs with the normal hook checks.
+# Strip --no-verify from the validator's direct push with optional -o values and
+# one branch refspec to no-mistakes when its sole push URL is this checkout's
+# registered absolute local gate path. The managed hook checks the destination.
 set -u
 
 REAL=${FM_REAL_GIT:-}
@@ -114,107 +115,34 @@ gate_config_absent() {
   [ "$rc" -eq 1 ]
 }
 
-gate_literal_has_no_rewrite() (
-  set -o pipefail
-  { gate_git config --null --get-regexp '^url\..*\.(insteadof|pushinsteadof)$' || [ "$?" -eq 1 ]; } |
-    perl -0e '
-      my ($url) = @ARGV;
-      while (defined(my $entry = <STDIN>)) {
-        chomp $entry;
-        my (undef, $prefix) = split /\n/, $entry, 2;
-        exit 1 if !defined($prefix) || index($url, $prefix) == 0;
-      }
-    ' -- "$1"
-)
-
-is_gate_push_destination() {  # <explicit push destination>
-  local destination=$1 home=${NM_HOME:-${HOME:+$HOME/.no-mistakes}}
-  local url path top rc=0
-  [ -n "$home" ] && [ -n "$destination" ] && [[ $destination != *$'\n'* ]] || return 1
+is_gate_push_destination() {
+  local url top
   # A group can take precedence over a remote of the same name. A foreign VCS
   # helper can override the transport even when a configured URL looks local.
-  gate_config_absent "remotes.$destination" || return 1
-  gate_config_absent "remote.$destination.vcs" || return 1
+  gate_config_absent remotes.no-mistakes || return 1
+  gate_config_absent remote.no-mistakes.vcs || return 1
   # Keep Git's output line endings so an empty second URL stays detectable.
-  url=$(gate_git remote get-url --push --all -- "$destination" 2>/dev/null && printf .) || rc=$?
-  case "$rc" in
-    0)
-      [[ $url == *$'\n.' ]] || return 1
-      url=${url%$'\n.'}
-      ;;
-    2)
-      # get-url does not recognize literals or remotes defined only outside
-      # repository config. Treat the argument as literal only without either
-      # remote configuration or a rewrite that could change its destination.
-      gate_config_absent "remote.$destination.url" || return 1
-      gate_config_absent "remote.$destination.pushurl" || return 1
-      gate_literal_has_no_rewrite "$destination" || return 1
-      url=$destination
-      ;;
-    *) return 1 ;;
-  esac
-  case "$url" in
-    ''|*$'\n'*) return 1 ;;  # Missing URL or multiple destinations.
-    file:///*)
-      path=${url#file://}
-      case "$path" in *%*|//*) return 1 ;; esac
-      ;;
-    *:*|//*) return 1 ;;
-    *) path=$url ;;
-  esac
-  case "$path" in
-    /*) ;;
-    *)
-      # Git runs push from the worktree root, including with leading -C.
-      top=$(gate_git rev-parse --show-toplevel && printf .) || return 1
-      path="${top%$'\n.'}/$path"
-      ;;
-  esac
-  perl -MCwd=realpath -e '
-    my ($home, $path) = @ARGV;
-    exit 1 unless -d $home && -d $path;
-    my $root = realpath($home);
-    my $target = realpath($path);
-    exit 1 unless defined($root) && defined($target);
-    $root =~ s{/$}{};
-    exit(index($target, "$root/repos/") == 0 ? 0 : 1);
-  ' -- "$home" "$path"
+  url=$(gate_git remote get-url --push --all -- no-mistakes && printf .) || return 1
+  [[ $url == *$'\n.' ]] || return 1
+  url=${url%$'\n.'}
+  [[ $url == /* && $url != *$'\n'* ]] || return 1
+  top=$(gate_git rev-parse --show-toplevel && printf .) || return 1
+  "$(dirname "${BASH_SOURCE[0]}")/../fm-delivery-guard.sh" check-gate "${top%$'\n.'}" "$url"
 }
 
 prepare_gate_push() {  # <arguments after push>
-  local arg destination='' stripped=0 positional=0
+  [ "${1:-}" = --no-verify ] || return 1
+  shift
   gate_push_args=()
-  while [ "$#" -gt 0 ]; do
-    arg=$1
-    shift
-    case "$arg" in
-      --no-verify) stripped=1; continue ;;
-      -o|--push-option)
-        [ "$#" -gt 0 ] || return 1
-        gate_push_args+=("$arg" "$1")
-        shift
-        continue
-        ;;
-      --)
-        [ "$positional" -ne 0 ] || destination=${1:-}
-        gate_push_args+=("$arg" "$@")
-        break
-        ;;
-      # Accept exact options with known arity. Other forms (including --repo
-      # and abbreviated options) leave the destination or hook ambiguous.
-      -f|--force|--force-with-lease|--force-with-lease=*|-n|--dry-run|--porcelain|\
-      -q|--quiet|-v|--verbose|-u|--set-upstream|--atomic|--push-option=*) ;;
-      -*) return 1 ;;
-      *)
-        if [ "$positional" -eq 0 ]; then
-          destination=$arg
-          positional=1
-        fi
-        ;;
-    esac
-    gate_push_args+=("$arg")
+  while [ "${1:-}" = -o ]; do
+    [ "$#" -ge 2 ] || return 1
+    gate_push_args+=("$1" "$2")
+    shift 2
   done
-  [ "$stripped" -eq 1 ] && is_gate_push_destination "$destination"
+  [ "$#" -eq 2 ] && [ "$1" = no-mistakes ] && \
+    [[ $2 =~ ^(HEAD|[0-9a-f]{40}|[0-9a-f]{64}):refs/heads/.+$ ]] || return 1
+  is_gate_push_destination >/dev/null 2>&1 || return 1
+  gate_push_args+=("$@")
 }
 
 args=("$@")
