@@ -549,6 +549,67 @@ fm_backend_meta_for_window() {  # <target> <state-dir>
   return 1
 }
 
+# The live Herdr binding is distinct from durable metadata validation above.
+# Callers holding a selected record can scope FM_BACKEND_HERDR_ENDPOINT_META
+# to an operation, including the remote host's parent-route record. Bare
+# targets match the local records by exact window; multiple claims are
+# unreadable. An explicit endpoint outside the task inventory stays unbound.
+# A pre-binding worker record stays unreadable while its pane exists.
+fm_backend_herdr_task_identity_state() {  # <target>
+  local target=$1 meta=${FM_BACKEND_HERDR_ENDPOINT_META:-} candidate kind expected field
+  fm_backend_herdr_parse_target "$target" || { printf 'unreadable'; return 0; }
+  if [ "$target" = "${FM_BACKEND_HERDR_SPAWN_TARGET:-}" ]; then
+    fm_backend_herdr_pane_identity_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE" \
+      terminal_id "${FM_BACKEND_HERDR_SPAWN_TERMINAL:-}"
+    return 0
+  fi
+  if [ -z "$meta" ]; then
+    for candidate in "${FM_STATE_OVERRIDE:-$FM_HOME/state}"/*.meta; do
+      [ -f "$candidate" ] || continue
+      [ "$(fm_meta_get "$candidate" window)" = "$target" ] || continue
+      [ "$(fm_backend_of_meta "$candidate")" = herdr ] || continue
+      [ -z "$(fm_meta_get "$candidate" remote_host)" ] || continue
+      [ -z "$meta" ] || { printf 'unreadable'; return 0; }
+      meta=$candidate
+    done
+    [ -n "$meta" ] || { printf 'unbound'; return 0; }
+  fi
+  [ -f "$meta" ] && [ ! -L "$meta" ] \
+    && [ "$(fm_backend_of_meta "$meta")" = herdr ] \
+    && [ -z "$(fm_meta_get "$meta" remote_host)" ] \
+    && [ "$(fm_backend_meta_exact_value "$meta" window)" = "$target" ] || {
+    printf 'unreadable'
+    return 0
+  }
+  kind=ship
+  if grep -q '^kind=' "$meta"; then
+    kind=$(fm_backend_meta_exact_value "$meta" kind) || { printf 'unreadable'; return 0; }
+  fi
+  if [ "$kind" = secondmate ]; then
+    field=cwd
+    expected=$(fm_backend_meta_exact_value "$meta" worktree) || expected=
+    if [ -z "$expected" ] && ! grep -q '^worktree=' "$meta"; then
+      expected=$(fm_backend_meta_exact_value "$meta" home) || expected=
+    fi
+  else
+    field=terminal_id
+    expected=$(fm_backend_meta_exact_value "$meta" herdr_terminal_id) || expected=
+  fi
+  fm_backend_herdr_pane_identity_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE" "$field" "$expected"
+}
+
+fm_backend_herdr_require_task_identity() {  # <target> [<just-sampled-state>]
+  local state=${2:-}
+  [ -n "$state" ] || state=$(fm_backend_herdr_task_identity_state "$1")
+  case "$state" in
+    match|unbound) return 0 ;;
+    mismatch) echo "error: Herdr endpoint identity mismatch at $1; refusing access to a foreign pane" >&2 ;;
+    missing) echo "error: Herdr endpoint $1 is missing; refusing access" >&2 ;;
+    *) echo "error: Herdr endpoint identity is unreadable at $1; refusing access and preserving the task record" >&2 ;;
+  esac
+  return 1
+}
+
 fm_backend_task_id_for_selector() {  # <raw-target> <state-dir>
   local raw=$1 state=$2 id
   case "$raw" in
@@ -983,8 +1044,8 @@ fm_backend_codex_agent_pid() {  # <backend> <target>
 # server as a side effect via fm_backend_herdr_server_ensure - fine for an
 # operation that is about to use the pane, wrong for a passive liveness
 # probe). A gone tmux window or an unqueryable herdr pane (server down, pane
-# closed), missing zellij pane, or unreadable Orca terminal simply fails, which
-# IS "does not exist" for this purpose.
+# closed), missing zellij pane, or unreadable Orca terminal simply fails.
+# Herdr reports status 2 for an unreadable recorded identity.
 # Mirrors fm-crew-state.sh's pane_readable check; exists here as one shared
 # primitive so callers that only need a fast alive/dead read (recovery
 # digests, the session-start fleet digest) do not re-derive it inline.
@@ -995,7 +1056,14 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
       tmux display-message -p -t "$target" '#{pane_id}' >/dev/null 2>&1
       ;;
     herdr)
-      fm_backend_source herdr || return 1
+      fm_backend_source herdr || return 2
+      # Return 2 when recorded identity is unreadable, distinct from absence.
+      case "$(fm_backend_herdr_task_identity_state "$target")" in
+        match) return 0 ;;
+        missing|mismatch) return 1 ;;
+        unbound) ;;
+        *) return 2 ;;
+      esac
       session=${target%%:*}
       pane=${target#*:}
       [ -n "$session" ] && [ -n "$pane" ] && [ "$pane" != "$target" ] || return 1
@@ -1032,7 +1100,7 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
 # pane-presence read and prints exactly one of:
 #   alive      - a verified harness agent is running.
 #   dead       - the endpoint exists but confidently has no agent.
-#   missing    - the recorded endpoint is absent or belongs to another home.
+#   missing    - the recorded endpoint is absent or the pane is foreign.
 #   ambiguous  - the endpoint exists but its process cannot be attributed.
 #   unreadable - a target or inventory read failed or contradicted itself.
 #   unverified - this backend has no recovery classifier.
@@ -1050,7 +1118,8 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
 # An optional expected-home binds Herdr secondmate recovery to the pane's
 # structural home identity (bin/backends/herdr.sh); a confirmed foreign pane
 # means `missing`, while an unavailable identity means `unreadable`.
-# Other callers retain the process-only verdict.
+# Without an explicit home, Herdr also verifies the recorded task identity, if
+# any. An ad hoc endpoint outside the task inventory keeps the process verdict.
 fm_backend_agent_state() {  # <backend> <target> [<expected-home>]
   local backend=$1 target=$2
   fm_backend_source "$backend" || { printf 'unverified'; return 0; }

@@ -3035,7 +3035,7 @@ FMEOF
 # copy return, so a replacement pane/process cannot satisfy retirement.
 teardown_kept_shell_sample() {
   local pid cwd
-  [ "$(fm_backend_herdr_pane_presence_state "$TEARDOWN_HERDR_SESSION" "$TEARDOWN_HERDR_PANE")" = present ] || return 1
+  fm_backend_herdr_require_task_identity "$T" || return 1
   pid=$(fm_backend_herdr_pane_idle_shell_pid "$TEARDOWN_HERDR_SESSION" "$TEARDOWN_HERDR_PANE") || return 1
   [ "$pid" = "$KEPT_SHELL_PID" ] || return 1
   task_process_identity_matches "$pid" "$KEPT_SHELL_IDENTITY" || return 1
@@ -3089,9 +3089,9 @@ teardown_prepare_kept_pane() {
   if ! { [ "$(fm_backend_herdr_pane_idle_shell_pid "$TEARDOWN_HERDR_SESSION" "$TEARDOWN_HERDR_PANE")" = "$KEPT_SHELL_PID" ] \
     && task_process_identity_matches "$KEPT_SHELL_PID" "$KEPT_SHELL_IDENTITY" \
     && [ "$(fm_backend_herdr_pane_presence_state "$TEARDOWN_HERDR_SESSION" "$TEARDOWN_HERDR_PANE")" = present ] \
-    && fm_backend_herdr_cli "$TEARDOWN_HERDR_SESSION" pane send-keys "$TEARDOWN_HERDR_PANE" ctrl+c >/dev/null \
-    && fm_backend_herdr_cli "$TEARDOWN_HERDR_SESSION" pane send-keys "$TEARDOWN_HERDR_PANE" ctrl+u >/dev/null \
-    && fm_backend_herdr_cli "$TEARDOWN_HERDR_SESSION" pane run "$TEARDOWN_HERDR_PANE" 'cd /' >/dev/null; }; then
+    && fm_backend_herdr_send_key "$T" ctrl+c \
+    && fm_backend_herdr_send_key "$T" ctrl+u \
+    && fm_backend_herdr_send_text_line "$T" 'cd /'; }; then
       echo "REFUSED: --keep-pane could not detach the verified idle shell; retaining task records." >&2
       return 1
   fi
@@ -3134,19 +3134,18 @@ teardown_herdr_require_prerequisites() {  # <task-id>
 }
 
 teardown_herdr_preflight_target() {  # <target> <task-id>
-  local target=$1 task_id=$2 session pane presence lock_path verified_lock_path lock_session held_path attempt
+  local target=$1 task_id=$2 session identity lock_path verified_lock_path lock_session held_path attempt
   teardown_herdr_require_prerequisites "$task_id" || return 1
   if ! fm_backend_herdr_parse_target "$target"; then
     echo "error: herdr endpoint $target for $task_id could not be parsed exactly; nothing was changed - repair the endpoint metadata and rerun teardown" >&2
     return 1
   fi
   session=$FM_BACKEND_HERDR_SESSION
-  pane=$FM_BACKEND_HERDR_PANE
-  presence=$(fm_backend_herdr_pane_presence_state "$session" "$pane")
-  case "$presence" in
-    dead|present) ;;
+  identity=$(fm_backend_herdr_task_identity_state "$target")
+  case "$identity" in
+    missing|match) ;;
     *)
-      echo "error: herdr endpoint $target for $task_id has ambiguous structured presence; nothing was changed - restore reliable endpoint inspection and rerun teardown" >&2
+      echo "error: Herdr endpoint $target for $task_id has identity '$identity'; refusing teardown and preserving the task record and copy" >&2
       return 1
       ;;
   esac
@@ -3202,7 +3201,7 @@ preflight_firstmate_home_herdr_children() {  # <home>
     child_backend=$FM_BACKEND_VALIDATED_BACKEND
     child_target=$FM_BACKEND_VALIDATED_TARGET
     if [ "$child_backend" = herdr ]; then
-      teardown_herdr_preflight_target "$child_target" "$child_id" || return 1
+      FM_BACKEND_HERDR_ENDPOINT_META="$child_meta" teardown_herdr_preflight_target "$child_target" "$child_id" || return 1
     fi
     child_kind=$(meta_value "$child_meta" kind)
     [ -n "$child_kind" ] || child_kind=ship
@@ -3245,7 +3244,8 @@ cleanup_firstmate_home_children() {
           echo "error: herdr session presentation lock is not held for child $child_id; retaining that child's durable identity records and stopping forced cleanup" >&2
           return 1
         fi
-        fm_backend_herdr_kill_serialized "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE" 2>/dev/null || true
+        FM_BACKEND_HERDR_ENDPOINT_META="$child_meta" \
+          fm_backend_herdr_kill_serialized "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE" 2>/dev/null || true
         if ! fm_backend_herdr_endpoint_confirmed_gone "$child_t"; then
           echo "error: herdr pane $child_t for child $child_id is not confirmed gone; retaining that child's durable identity records and stopping forced cleanup" >&2
           return 1
@@ -3364,7 +3364,7 @@ if [ "$KIND" = secondmate ]; then
     validate_firstmate_home_children_removal "$HOME_PATH" || exit 1
     preflight_descendant_treehouse_slots || exit 1
     if [ "$BACKEND" = herdr ]; then
-      teardown_herdr_preflight_target "$T" "$ID" || exit 1
+      FM_BACKEND_HERDR_ENDPOINT_META="$META" teardown_herdr_preflight_target "$T" "$ID" || exit 1
     fi
     preflight_firstmate_home_herdr_children "$HOME_PATH" || exit 1
   fi
@@ -3480,10 +3480,12 @@ fi
 # returned or erased: a contended lock refuses here while the isolated copy,
 # every durable record, and the endpoint are all still intact for a plain
 # rerun. An unresolvable lock path (for example an unreachable server) also
-# refuses before any destructive step.
+# refuses before any destructive step. A foreign or unreadable terminal
+# preserves the task record and worktree.
 TEARDOWN_HERDR_SESSION=
 TEARDOWN_HERDR_PANE=
 if [ "$BACKEND" = herdr ]; then
+  FM_BACKEND_HERDR_ENDPOINT_META=$META
   teardown_herdr_preflight_target "$T" "$ID" || exit 1
   fm_backend_herdr_parse_target "$T" || exit 1
   TEARDOWN_HERDR_SESSION=$FM_BACKEND_HERDR_SESSION

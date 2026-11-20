@@ -310,6 +310,9 @@ fm_task_inbox_doorbell_line() {  # <record-path>
 fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label] [harness]
   local backend=$1 target=$2 rec=$3 label=${4:-} harness=${5:-} line screen i=0 strict=0
   case "$harness" in codex|rovo) strict=1 ;; esac
+  if [ "$backend" = herdr ]; then
+    fm_backend_source herdr && fm_backend_herdr_require_task_identity "$target" || return 2
+  fi
   case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
     dead|missing) return 3 ;;
   esac

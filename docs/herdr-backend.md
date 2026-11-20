@@ -145,7 +145,7 @@ If lock, snapshot, pane identity, or restoration is ambiguous, default cleanup w
 Recovery is deliberately conservative and presentation-only.
 An existing journal suppresses another projected create.
 Before any recovery mutation, Firstmate holds both the task spawn lock and the named-session presentation lock.
-A same-identity version 2 binding may replace one exact agent-free restart husk in place only when the physical home, session, metadata endpoint, unique token match, workspace shape and labels, parent identity and placement, and non-target focus snapshot all agree.
+A version 2 binding may replace one exact agent-free husk in place only when the recorded terminal still matches and the physical home, session, metadata endpoint, unique token match, workspace shape and labels, parent identity and placement, and non-target focus snapshot all agree.
 The replacement tab and pane are created and verified before the old pane is rechecked and closed, then the journal advances atomically to the replacement endpoint before metadata publication.
 The reclaim path never moves, closes, deletes, or renames a workspace and never touches a parent, sibling, captain, or foreign pane.
 A failed replacement rolls back only the exact response-derived new pane when focus-safe verification permits it.
@@ -286,6 +286,10 @@ No Herdr-specific copy of that protocol exists.
 
 Stopping and restarting a named Herdr server can restore workspace, tab, pane, and label ids, but the underlying harness processes and live agent registrations do not survive.
 Ids can also be reassigned after a host restart, so a recorded id alone does not establish endpoint ownership.
+Worker liveness and terminal actions use the spawn-time terminal binding owned by `fm_backend_herdr_task_identity_state` in [`bin/fm-backend.sh`](../bin/fm-backend.sh).
+A different terminal under a recorded pane id is treated as a missing worker, including when Herdr restores a shell in the same pane slot after restarting.
+An older worker record with a still-present pane and no terminal binding is reported as unreadable and retained.
+Terminal access to these records is refused until a replacement is bound, and an explicit relaunch can create a new terminal in the recorded worktree when the previous terminal is positively gone.
 A restored same-labeled tab with a missing pane or no registered agent is a husk.
 Create replaces only a confidently dead or no-agent husk, creates the replacement before closing the old tab, and refuses live or unknown states.
 This prevents closing the workspace's last tab before a replacement exists.
@@ -299,8 +303,9 @@ The response shape the adapter parses (`result.type` of `pane_process_info`, `pr
 A server response below 0.9.0 has not been measured for this parse.
 An unreadable or unparseable process view reads `unknown`, which refuses lifecycle verbs and recovery rather than trusting the registration.
 
-The generic Herdr agent-liveness probe reuses that pane classifier, then applies one recovery-only exception.
-A structurally gone pane or a pane read from a session positively reported as having no running server becomes `missing`, a restored agent-less shell and a stale registration over a shell-only pane both become `dead`, a registered agent with a live process becomes `alive`, and every other unexpected read becomes `unreadable`.
+The generic Herdr agent-liveness probe reuses that pane classifier and also checks any task binding.
+A structurally gone pane, a session positively reported as having no running server, or a confirmed foreign terminal is `missing`.
+A matching agent-less shell or stale registration over a shell-only pane is `dead`, a matching registered agent with a live process is `alive`, and an unreadable probe or binding is `unreadable`.
 Neither the stopped-server exception nor the stale-registration verdict widens husk detection or any close authority; those paths still refuse an unreadable pane, and a `stale-agent` pane is reused by recovery, never closed as a husk, because the shell it holds may be a nested worktree shell.
 Native registration still identifies Pi by name where tmux would see a generic interpreter; the process-level proof only decides whether that registration is backed by a running process.
 `tests/fm-backend-herdr-agent-exit-shell-e2e.test.sh` pins the live-Pi versus leftover-shell distinction; [`verification/runtime-backends.md`](verification/runtime-backends.md#agent-lifecycle-control) owns the versioned evidence.

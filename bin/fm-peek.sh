@@ -3,6 +3,7 @@
 # Usage: fm-peek.sh <target> [lines=40]
 #   <target> may be an exact task id, a legacy fm-<id> task label resolved
 #   through this home's state/<id>.meta, or an explicit backend target.
+# A recorded Herdr pane must pass fm-backend.sh's live identity check.
 # A selector whose meta records remote_host= is a remote secondmate: its pane
 # lives on that host, so the capture routes over fm-on.sh to the host-local
 # capture (fm-remote-secondmate-control.sh), clamped to that command's
@@ -43,4 +44,4 @@ T=$(fm_backend_resolve_selector "$RAW_TARGET" "$STATE")
 BACKEND=$(fm_backend_of_selector "$RAW_TARGET" "$T" "$STATE")
 EXPECTED_LABEL=$(fm_backend_expected_label_of_selector "$RAW_TARGET" "$STATE")
 
-fm_backend_capture "$BACKEND" "$T" "$N" "$EXPECTED_LABEL"
+FM_BACKEND_HERDR_ENDPOINT_META="$REMOTE_META" fm_backend_capture "$BACKEND" "$T" "$N" "$EXPECTED_LABEL"

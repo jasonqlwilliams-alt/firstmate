@@ -609,6 +609,23 @@ The CLI matrix was checked directly:
 All destructive verification used `bin/fm-herdr-lab.sh` with a non-default `fm-lab-` name and a byte-identical default-session tripwire.
 No ambient `herdr server stop` command is a supported test operation.
 
+### Worker terminal identity
+
+Measured 2026-11-20 with Herdr 0.9.5 (protocol 22).
+The recorded field is also present in the [Herdr 0.7.1 pane schema](https://github.com/herdrdev/herdr/blob/v0.7.1/src/api/schema/panes.rs#L330) used by the tab creation response.
+
+```text
+bin/fm-test-run.sh tests/fm-worker-herdr-identity-e2e.test.sh
+Herdr worker identity lab version: 0.9.5
+ok - recycled worker, secondmate and personal panes are missing to recorded workers and untouched by terminal actions
+ok - matching worker liveness and actions survive a changed foreground cwd
+ok - host-side remote capture, key and send refuse the recycled endpoint by home identity
+ok - a restored layout keeps pane ids but changes the worker terminal identity
+```
+
+The guarded lab closes and recreates a named session to recycle exact pane ids, then separately checks normal layout restoration after a guarded stop.
+The test uses inert processes and verifies the running default session at teardown.
+
 ### Lab-context session refusal and durable tripwire breaches
 
 Measured 2026-09-21 on Linux 6.18.33.2-microsoft-standard-WSL2 with Herdr 0.9.1 (protocol 22), the guarantee behind `fm_backend_herdr_lab_context` and `bin/fm-herdr-lab-lib.sh`.

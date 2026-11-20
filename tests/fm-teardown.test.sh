@@ -1990,7 +1990,7 @@ test_herdr_teardown_clears_escalation_marker() {
     'herdr_session=default' \
     'herdr_workspace_id=wG' \
     'herdr_tab_id=wG:tQ' \
-    'herdr_pane_id=wG:pQ' >> "$case_dir/state/task-x1.meta"
+    'herdr_pane_id=wG:pQ' 'herdr_terminal_id=term-task' >> "$case_dir/state/task-x1.meta"
   # A reachable session whose exact pane is already structurally gone: the
   # locked close is a no-op and the record gate sees a confirmed-gone pane.
   cat > "$case_dir/fakebin/herdr" <<SH
@@ -2024,7 +2024,7 @@ configure_flat_herdr_teardown_case() {  # <case-dir>
     'herdr_session=default' \
     'herdr_workspace_id=wG' \
     'herdr_tab_id=wG:tQ' \
-    'herdr_pane_id=wG:pQ' >> "$case_dir/state/task-x1.meta"
+    'herdr_pane_id=wG:pQ' 'herdr_terminal_id=term-task' >> "$case_dir/state/task-x1.meta"
   cat > "$case_dir/fakebin/herdr" <<SH
 #!/usr/bin/env bash
 set -u
@@ -2065,7 +2065,7 @@ case "\${1:-} \${2:-}" in
       printf '%s\n' '{"error":{"code":"pane_not_found"}}' >&2
       exit 1
     fi
-    printf '%s\n' '{"result":{"pane":{"pane_id":"wG:pQ","tab_id":"wG:tQ","workspace_id":"wG"}}}'
+    printf '%s\n' '{"result":{"pane":{"pane_id":"wG:pQ","tab_id":"wG:tQ","workspace_id":"wG","terminal_id":"term-task"}}}'
     ;;
   "agent get")
     printf '%s\n' '{"error":{"code":"agent_not_found"}}' >&2
@@ -2169,7 +2169,7 @@ test_herdr_flat_teardown_refuses_records_on_unparseable_presence() {
     || fail "herdr-garbage-presence: ambiguous presence erased the durable endpoint metadata"
   [ -e "$case_dir/state/task-x1.status" ] \
     || fail "herdr-garbage-presence: ambiguous presence erased the task status record"
-  assert_grep "ambiguous structured presence" "$case_dir/stderr" \
+  assert_grep "identity 'unreadable'" "$case_dir/stderr" \
     "herdr-garbage-presence: the ambiguity refusal was not explained visibly"
   pass "herdr flat teardown never erases records when pane presence is unparseable"
 }
@@ -2256,7 +2256,7 @@ configure_secondmate_with_herdr_child() {  # <case-dir>
     "herdr_session=childsession" \
     "herdr_workspace_id=wC" \
     "herdr_tab_id=wC:t1" \
-    "herdr_pane_id=wC:p1"
+    "herdr_pane_id=wC:p1" "herdr_terminal_id=term-task"
   : > "$home/state/child-herdr.status"
   : > "$home/state/child-herdr.turn-ended"
   cat > "$case_dir/fakebin/herdr" <<SH
@@ -2281,7 +2281,7 @@ case "\${1:-} \${2:-}" in
         exit 1
       fi
     else
-      printf '%s\n' '{"result":{"pane":{"pane_id":"wC:p1","tab_id":"wC:t1","workspace_id":"wC"}}}'
+      printf '%s\n' '{"result":{"pane":{"pane_id":"wC:p1","tab_id":"wC:t1","workspace_id":"wC","terminal_id":"term-task"}}}'
     fi
     ;;
   "pane close") : > "\${FM_FAKE_HERDR_CLOSED:?}" ;;
@@ -2460,7 +2460,7 @@ configure_nested_secondmate_with_herdr_grandchild() {  # <case-dir>
     "herdr_session=grandchildsession" \
     "herdr_workspace_id=wG" \
     "herdr_tab_id=wG:t1" \
-    "herdr_pane_id=wG:p1"
+    "herdr_pane_id=wG:p1" "herdr_terminal_id=term-task"
   : > "$nested_home/state/grandchild-herdr.status"
   : > "$nested_home/state/grandchild-herdr.turn-ended"
   cat > "$case_dir/fakebin/herdr" <<SH
@@ -2476,7 +2476,7 @@ case "\${1:-} \${2:-}" in
     if [ -e "\${FM_FAKE_HERDR_CLOSED:?}" ]; then
       printf '%s\n' 'not-json'
     else
-      printf '%s\n' '{"result":{"pane":{"pane_id":"wG:p1","tab_id":"wG:t1","workspace_id":"wG"}}}'
+      printf '%s\n' '{"result":{"pane":{"pane_id":"wG:p1","tab_id":"wG:t1","workspace_id":"wG","terminal_id":"term-task"}}}'
     fi
     ;;
   "pane close") : > "\${FM_FAKE_HERDR_CLOSED:?}" ;;
@@ -2521,7 +2521,7 @@ configure_herdr_projection_teardown_case() {  # <case-dir>
     'herdr_session=fmtest' \
     'herdr_workspace_id=w1' \
     'herdr_tab_id=w1:t2' \
-    'herdr_pane_id=w1:p2' >> "$case_dir/state/task-x1.meta"
+    'herdr_pane_id=w1:p2' 'herdr_terminal_id=term-task' >> "$case_dir/state/task-x1.meta"
   printf '%s\n' \
     'version=1' \
     'task_id=task-x1' \
@@ -2568,7 +2568,7 @@ case "${1:-} ${2:-}" in
       printf '%s\n' '{"error":{"code":"pane_not_found"}}' >&2
       exit 1
     fi
-    printf '%s\n' '{"result":{"pane":{"pane_id":"w1:p2","tab_id":"w1:t2","workspace_id":"w1"}}}'
+    printf '%s\n' '{"result":{"pane":{"pane_id":"w1:p2","tab_id":"w1:t2","workspace_id":"w1","terminal_id":"term-task"}}}'
     ;;
   "tab get")
     printf '%s\n' '{"result":{"tab":{"tab_id":"w2:t2","workspace_id":"w2"}}}'
@@ -3718,7 +3718,7 @@ case "${1:-} ${2:-}" in
       printf '{"error":{"code":"pane_not_found"}}\n'; exit 1
     fi
     if [ "${FM_KEEP_MODE:-}" = unknown ]; then printf 'not-json\n'; exit 0; fi
-    printf '{"result":{"pane":{"pane_id":"wG:pQ","workspace_id":"wG","tab_id":"wG:tQ"}}}\n'
+    printf '{"result":{"pane":{"pane_id":"wG:pQ","workspace_id":"wG","tab_id":"wG:tQ","terminal_id":"term-task"}}}\n'
     ;;
   'pane process-info')
     name=bash
@@ -3953,7 +3953,8 @@ SH
       "window=$HERDR_LAB_SESSION:$pane" 'endpoint_task_id=task-x1' \
       "worktree=$case_dir/wt" "project=$case_dir/project" 'kind=ship' \
       'mode=local-only' 'harness=codex' 'backend=herdr' 'spawn_gen=keep-pane-lab' \
-      "herdr_session=$HERDR_LAB_SESSION" "herdr_workspace_id=$ws" "herdr_tab_id=$tab" "herdr_pane_id=$pane"
+      "herdr_session=$HERDR_LAB_SESSION" "herdr_workspace_id=$ws" "herdr_tab_id=$tab" "herdr_pane_id=$pane" \
+      "herdr_terminal_id=$(lab_keep pane get "$pane" | jq -er '.result.pane.terminal_id')"
     printf 'task=task-x1\nhome=%s\n' "$case_dir" > "$case_dir/pool/1/.fm-slot-owner"
     seed_backlog_in_flight "$case_dir"
   }

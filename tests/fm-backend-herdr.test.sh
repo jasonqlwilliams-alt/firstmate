@@ -4831,38 +4831,74 @@ test_dispatch_composer_state_routes_by_backend() {
 }
 
 test_scripts_route_explicit_target_through_meta_backend() {
-  local dir state log resp fb neutral out
-  dir="$TMP_ROOT/script-explicit-target"; state="$dir/state"; mkdir -p "$state" "$dir/responses"
-  log="$dir/log"; resp="$dir/responses"; : > "$log"
-  neutral="$dir/neutral-root"; mkdir -p "$neutral"
-  fm_write_meta "$state/herdr-stale.meta" "window=default:w1:p2" "backend=herdr"
+  local dir state log fb neutral out identity
+  dir="$TMP_ROOT/script-explicit-target"; state="$dir/state"
+  log="$dir/log"; fb="$dir/fakebin"; neutral="$dir/neutral-root"
+  mkdir -p "$state" "$fb" "$neutral"
+  fm_write_meta "$state/worker.meta" "window=fmtest:w1:p2" "backend=herdr" "herdr_terminal_id=term-worker"
   touch "$state/.last-watcher-beat"
-  printf 'captured herdr pane\n' > "$resp/1.out"
-  fb=$(make_herdr_fakebin "$dir")
-  cat > "$fb/tmux" <<'SH'
+  cat > "$fb/herdr" <<'SH'
 #!/usr/bin/env bash
-set -u
-printf 'tmux should not be used for a metadata-matched herdr target\n' >&2
-exit 42
+set -eu
+case "$1 $2" in
+  'pane get')
+    case "$FM_TEST_IDENTITY" in
+      malformed) printf '%s\n' 'broken reply'; exit 0 ;;
+      ambiguous) printf '%s\n' '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"term-worker"}}}' \
+        '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"term-foreign"}}}'; exit 0 ;;
+      gone) printf '%s\n' '{"error":{"code":"pane_not_found"}}' >&2; exit 1 ;;
+    esac
+    printf '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"%s","foreground_cwd":"/unrelated"}}}\n' "$FM_TEST_IDENTITY"
+    ;;
+  'agent get') printf '%s\n' '{"result":{"agent":{"agent_status":"idle"}}}' ;;
+  'pane process-info')
+    printf '%s\n' '{"result":{"type":"pane_process_info","process_info":{"pane_id":"w1:p2","shell_pid":2,"foreground_processes":[{"pid":3,"name":"sleep","argv":["sleep","60"]}]}}}'
+    ;;
+  'pane read') printf '%s\n' "$*" >> "$FM_HERDR_LOG"; printf '%s\n' 'captured worker' ;;
+  'pane send-keys'|'pane send-text'|'pane run'|'pane close') printf '%s\n' "$*" >> "$FM_HERDR_LOG" ;;
+  *) exit 42 ;;
+esac
 SH
-  chmod +x "$fb/tmux"
+  chmod +x "$fb/herdr"
+  local PATH="$fb:$PATH"
+  (
+    export PATH FM_ROOT_OVERRIDE="$neutral" FM_HOME="$neutral" FM_STATE_OVERRIDE="$state"
+    export FM_HERDR_LOG="$log" FM_TEST_IDENTITY=term-worker
+    export HERDR_SESSION=fmtest
+    . "$ROOT/bin/fm-backend.sh"
+    local target=fmtest:w1:p2
+    [ "$(fm_backend_agent_state herdr "$target")" = alive ] || fail "matching worker should be alive"
+    out=$("$ROOT/bin/fm-peek.sh" "$target" 5 2>/dev/null)
+    [ "$out" = 'captured worker' ] || fail "explicit metadata-matched target did not capture: $out"
+    "$ROOT/bin/fm-send.sh" worker --key Escape >/dev/null 2>&1 || fail "matching key failed"
+    assert_contains "$(cat "$log")" 'pane send-keys w1:p2 escape' "matching key did not reach Herdr"
 
-  out=$( PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral" FM_STATE_OVERRIDE="$state" \
-    FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
-    "$ROOT/bin/fm-peek.sh" default:w1:p2 5 2>/dev/null )
-  [ "$out" = "captured herdr pane" ] || fail "fm-peek did not capture through herdr for an explicit metadata-matched target, got '$out'"
-  assert_contains "$(cat "$log")" $'\x1f''pane'$'\x1f''read'$'\x1f''w1:p2' \
-    "fm-peek did not route the explicit stale target through herdr capture"
+    for identity in term-foreign malformed ambiguous gone; do
+      export FM_TEST_IDENTITY=$identity
+      : > "$log"
+      case "$identity" in
+        term-foreign|gone) [ "$(fm_backend_agent_state herdr "$target")" = missing ] || fail "$identity should be missing" ;;
+        *) [ "$(fm_backend_agent_state herdr "$target")" = unreadable ] || fail "$identity should be unreadable" ;;
+      esac
+      if out=$("$ROOT/bin/fm-peek.sh" worker 5 2>&1); then fail "$identity was captured"; fi
+      if out=$("$ROOT/bin/fm-send.sh" "$target" --key Escape 2>&1); then fail "$identity accepted keys"; fi
+      if out=$("$ROOT/bin/fm-send.sh" worker /test 2>&1); then fail "$identity accepted typed text"; fi
+      [ ! -s "$log" ] || fail "$identity reached a terminal action: $(cat "$log")"
+    done
 
-  : > "$log"
-  PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral" FM_HOME="$neutral" FM_STATE_OVERRIDE="$state" \
-    FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
-    "$ROOT/bin/fm-send.sh" default:w1:p2 --key Escape >/dev/null 2>&1
-  expect_code 0 $? "fm-send --key should route an explicit metadata-matched target through herdr"
-  assert_contains "$(cat "$log")" $'\x1f''pane'$'\x1f''send-keys'$'\x1f''w1:p2'$'\x1f''escape' \
-    "fm-send did not route the explicit stale target through herdr send-key"
+    export FM_TEST_IDENTITY=term-worker
+    cp "$state/worker.meta" "$state/also-worker.meta"
+    [ "$(fm_backend_agent_state herdr "$target")" = unreadable ] || fail "duplicate routes should be unreadable"
+    rm "$state/also-worker.meta"
 
-  pass "fm-peek/fm-send: explicit stale targets matching metadata use the recorded backend"
+    printf 'window=%s\nbackend=herdr\n' "$target" > "$state/worker.meta"
+    [ "$(fm_backend_agent_state herdr "$target")" = unreadable ] || fail "legacy worker was adopted from its pane id"
+    if out=$("$ROOT/bin/fm-peek.sh" worker 5 2>&1); then fail "legacy worker was captured"; fi
+    assert_contains "$out" 'identity is unreadable' "legacy worker refusal must explain the missing identity"
+    [ ! -s "$log" ] || fail "legacy worker reached terminal access"
+  ) || fail "recorded Herdr worker checks failed"
+
+  pass "Herdr recorded worker liveness, capture, keys and typed send share terminal identity"
 }
 
 # --- workspace lifecycle: reuse, no orphans, default-tab pruning -------------
