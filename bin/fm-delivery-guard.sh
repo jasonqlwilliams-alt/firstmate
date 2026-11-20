@@ -173,14 +173,14 @@ read_no_mistakes_targets() {  # <repo> <effective-url>; sets NM_UPSTREAM and NM_
     return 1
   }
   gate=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*gate:[[:space:]]*//p')
-  if [ "$url" != "$gate" ] || ! perl -MCwd=realpath -e '
+  if [ "$url" != "$gate" ] || ! perl -MCwd=realpath -MFile::Basename=basename -e '
     my ($home, $path) = @ARGV;
     exit 1 unless -d $home && -d $path;
     my $root = realpath($home);
     my $target = realpath($path);
     exit 1 unless defined($root) && defined($target);
     $root =~ s{/$}{};
-    exit(index($target, "$root/repos/") == 0 ? 0 : 1);
+    exit($target eq "$root/repos/" . basename($path) ? 0 : 1);
   ' -- "$nm_home" "$url"; then
     die "no-mistakes push destination does not match the registered local gate for $repo"
   fi

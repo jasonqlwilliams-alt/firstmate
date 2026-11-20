@@ -486,6 +486,21 @@ SH
   ! remote_has_branch "$gate" refused || fail "a refused push reached the gate"
   ! remote_has_branch "$other_gate" refused || fail "a refused push reached the other project's gate"
   ! remote_has_branch "$fork" refused || fail "a refused push reached the fork"
+
+  mv "$gate" "$gate.saved"
+  ln -s "$other_gate" "$gate"
+  out=$(env "${fixture_env[@]}" "$GIT_SHIM" -C "$repo" push --no-verify \
+    no-mistakes HEAD:refs/heads/symlink-refused 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the gate exception should refuse a registered path symlinked to another gate"
+  assert_contains "$out" "cannot bypass the Firstmate repository delivery guard" \
+    "the symlinked registered path did not trigger the shim refusal: $out"
+
+  out=$(env "${fixture_env[@]}" "$real_git" -C "$repo" push \
+    no-mistakes HEAD:refs/heads/symlink-refused 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "the managed hook should refuse a registered path symlinked to another gate"
+  assert_contains "$out" "does not match the registered local gate" \
+    "the symlinked registered path did not trigger the managed hook refusal: $out"
+  ! remote_has_branch "$other_gate" symlink-refused || fail "the symlinked push reached the other project's gate"
   pass "delivery guard: the worker shim strips --no-verify only for a single local no-mistakes gate and runs the managed hook"
 }
 
