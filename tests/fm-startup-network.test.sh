@@ -20,14 +20,14 @@
 set -u
 
 reaper_dir=$(mktemp -d "${FM_TEST_FIXTURE_CHILDREN:-/tmp}/fm-startup-network-reaper.XXXXXX") || exit 1
-export TMPDIR="$reaper_dir" TMP="$reaper_dir" FM_TEST_FIXTURE_CHILDREN="$reaper_dir/children"
+export FM_TEST_FIXTURE_CHILDREN="$reaper_dir/children"
 
 # shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+FM_TEST_REGISTRY_DIR="$reaper_dir" . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # Detached startup workers outlive this shell. Arm before any fixture root
 # exists so EXIT/INT/TERM and a killed shell both reap them.
-fm_test_arm_fixture_reaper || fail "could not arm fixture reaper"
+fm_test_arm_fixture_reaper "$reaper_dir" || fail "could not arm fixture reaper"
 TMP_ROOT=$(fm_test_tmproot fm-startup-network-tests)
 DRAIN="$ROOT/bin/fm-wake-drain.sh"
 
@@ -774,7 +774,8 @@ GITHUB_TOKEN=ghp_supersecretvalue" \
 
 reap_probe=${FM_STARTUP_NETWORK_REAP_PROBE:-}
 if [ "$reap_probe" = outer ]; then
-  FM_STARTUP_NETWORK_REAP_PROBE=inner fm_test_start_fixture bash "$0" ||
+  TMPDIR="$TMP_ROOT" TMP="$TMP_ROOT" FM_STARTUP_NETWORK_REAP_PROBE=inner \
+    fm_test_start_fixture bash "$0" ||
     fail "could not start inner reap probe"
   wait "$FM_TEST_FIXTURE_PID"
   exit $?
@@ -792,9 +793,7 @@ EOF
   printf '%s\n' "$TMP_ROOT" > "$FM_STARTUP_NETWORK_REAP_INFO"
   fm_test_start_fixture sleep 30 || fail "could not start claimant"
   claimant=$FM_TEST_FIXTURE_PID
-  fm_test_start_fixture sleep 45 || fail "could not start waiter"
-  waiter=$FM_TEST_FIXTURE_PID
-  printf '%s\n' "$claimant" "$waiter" "$$" >> "$FM_STARTUP_NETWORK_REAP_INFO"
+  printf '%s\n' "$claimant" "$$" >> "$FM_STARTUP_NETWORK_REAP_INFO"
   cat > "$root/bin/late-worker.sh" <<'SH'
 #!/usr/bin/env bash
 while :; do sleep 1; done
@@ -826,7 +825,7 @@ SH
     inner) printf 'waiting\n' ;;
     *) printf 'ready\n' ;;
   esac >> "$FM_STARTUP_NETWORK_REAP_INFO"
-  wait "$waiter"
+  wait "$claimant"
   exit 1
 fi
 
@@ -843,7 +842,7 @@ fixture_groups_in_sessions() {
   ' <<< "$snapshot"
 }
 
-# kill -0 is true for a zombie, so a waiter that already exited still looks
+# kill -0 is true for a zombie, so a process that already exited still looks
 # alive until it is reaped. ps state is the distinction the assertion needs.
 process_is_running() {  # <pid>
   local stat
@@ -855,7 +854,7 @@ process_is_running() {  # <pid>
 }
 
 test_killing_the_suite_reaps_detached_fixture_processes() {
-  local info probe_stderr runner_tmp probe root claimant waiter inner fixture_parent sleeper parent_group sleeper_group
+  local info probe_stderr runner_tmp probe root claimant inner fixture_parent sleeper parent_group sleeper_group
   local stage_session worker i test_case mode ready survivors status expected
   info="$TMP_ROOT/reap-probe-info"
   probe_stderr="$TMP_ROOT/reap-probe-stderr"
@@ -886,16 +885,18 @@ test_killing_the_suite_reaps_detached_fixture_processes() {
     {
       IFS= read -r root
       IFS= read -r claimant
-      IFS= read -r waiter
       IFS= read -r inner
       IFS= read -r fixture_parent
       IFS= read -r sleeper
       IFS= read -r stage_session
       IFS= read -r worker
     } < "$info"
+    case "$root" in
+      "$runner_tmp"/*) ;;
+      *) fail "the reap probe put its fixtures outside TMPDIR ($test_case): $root" ;;
+    esac
     if ! process_is_running "$worker" || ! process_is_running "$claimant" ||
-      ! process_is_running "$waiter" || ! process_is_running "$inner" ||
-      ! process_is_running "$sleeper"; then
+      ! process_is_running "$inner" || ! process_is_running "$sleeper"; then
       fail "the reap probe did not start all fixtures ($test_case)"
     fi
     parent_group=$(ps -p "$fixture_parent" -o pgid=)
@@ -913,24 +914,23 @@ test_killing_the_suite_reaps_detached_fixture_processes() {
     status=0
     wait "$probe" 2>/dev/null || status=$?
     [ "$status" -eq "$expected" ] || fail "the reap probe exited with $status ($test_case)"
-    rm -rf "$runner_tmp"
     i=0
     while [ "$i" -lt 150 ]; do
-      survivors=$(fixture_groups_in_sessions "$claimant" "$waiter" "$fixture_parent" "$stage_session") ||
+      survivors=$(fixture_groups_in_sessions "$claimant" "$fixture_parent" "$stage_session") ||
         fail "could not inspect fixture process groups ($test_case)"
       if [ -z "$survivors" ] && ! process_is_running "$worker" && ! process_is_running "$claimant" &&
-        ! process_is_running "$waiter" && ! process_is_running "$inner" &&
-        ! process_is_running "$sleeper" && [ ! -d "$root" ]; then
+        ! process_is_running "$inner" && ! process_is_running "$sleeper" && [ ! -d "$root" ]; then
         break
       fi
       sleep 0.1
       i=$((i + 1))
     done
     [ "$i" -lt 150 ] ||
-      fail "fixtures outlived the suite ($test_case): groups=$survivors worker=$worker claimant=$claimant waiter=$waiter suite=$inner sleeper=$sleeper $(cat "$probe_stderr")"
+      fail "fixtures outlived the suite ($test_case): groups=$survivors worker=$worker claimant=$claimant suite=$inner sleeper=$sleeper $(cat "$probe_stderr")"
     if [ "$test_case" != outer ]; then
       grep -qx 'late-spawned' "$info" || fail "cleanup did not spawn the late worker ($test_case)"
     fi
+    rm -rf "$runner_tmp"
   done
   pass "fm-startup-network: timeout and interruption reap detached fixture processes"
 }

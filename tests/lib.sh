@@ -98,7 +98,7 @@ pass() {
 # real caller, never a subshell.
 
 FM_TEST_CLEANUP_DIRS=()
-FM_TEST_CLEANUP_REGISTRY=$(mktemp "${TMPDIR:-/tmp}/.fm-test-cleanup.$$.XXXXXX") || return 1
+FM_TEST_CLEANUP_REGISTRY=$(mktemp "${FM_TEST_REGISTRY_DIR:-${TMPDIR:-/tmp}}/.fm-test-cleanup.$$.XXXXXX") || return 1
 
 fm_test_pid_identity() {
   local pid=$1
@@ -125,7 +125,7 @@ FM_TEST_OWNER_IDENTITY=$(fm_test_pid_identity "$$") || {
 # private one). It never matches on a script or process name, which would reach
 # into another home's live runners.
 
-FM_TEST_PROCEVENT_REGISTRY=$(mktemp "${TMPDIR:-/tmp}/.fm-test-procevent.$$.XXXXXX") || return 1
+FM_TEST_PROCEVENT_REGISTRY=$(mktemp "${FM_TEST_REGISTRY_DIR:-${TMPDIR:-/tmp}}/.fm-test-procevent.$$.XXXXXX") || return 1
 
 fm_test_track_procevent_home() {  # <home> [claim-root]
   [ -n "${1:-}" ] || return 1
@@ -329,7 +329,7 @@ fm_test_owner_is_alive() {  # <pid> <identity>
 fm_test_finish_fixture_reaper() {  # <exit status>
   local status=$1
   trap '' INT TERM HUP QUIT
-  : > "$TMPDIR/exit"
+  : > "$FM_TEST_FIXTURE_REAPER_DIR/exit"
   if ! wait "$FM_TEST_REAPER_PID"; then
     printf 'not ok - fixture reaper did not finish\n' >&2
     [ "$status" -ne 0 ] || status=1
@@ -339,12 +339,13 @@ fm_test_finish_fixture_reaper() {  # <exit status>
 
 fm_test_arm_fixture_reaper() {
   local monitor_was_on=0
-  FM_TEST_FIXTURE_SESSIONS="$TMPDIR/sessions"
-  mkdir "$FM_TEST_FIXTURE_SESSIONS" "$TMPDIR/children" || return 1
+  FM_TEST_FIXTURE_REAPER_DIR=$1
+  FM_TEST_FIXTURE_SESSIONS="$FM_TEST_FIXTURE_REAPER_DIR/sessions"
+  mkdir "$FM_TEST_FIXTURE_SESSIONS" "$FM_TEST_FIXTURE_REAPER_DIR/children" || return 1
   case $- in *m*) monitor_was_on=1 ;; esac
   set -m
   # shellcheck disable=SC2016
-  FM_TEST_SKIP_ORPHAN_REAP=1 nohup bash -c '
+  TMPDIR="$FM_TEST_FIXTURE_REAPER_DIR" FM_TEST_SKIP_ORPHAN_REAP=1 nohup bash -c '
     set -u
     . "$1"
     trap - EXIT INT TERM HUP QUIT
