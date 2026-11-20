@@ -1,0 +1,251 @@
+Official validator status binary and a dedicated registration database with no running daemon.
+Push transport is restricted to local Git repositories. GitHub use is read-only account lookup.
+no-mistakes version v1.106.1 (5732d1e) 2026-10-31T05:16:02Z
+git version 2.55.0
+    repo:  $LAB/checkout
+  remote:  https://github.com/jasonqlwilliams-alt/delivery-guard-fixture.git
+    fork:  https://github.com/jasonqlwilliams-alt/delivery-guard-fixture.git
+    gate:  $LAB/validator/repos/widgets.git
+  daemon:  ○ stopped
+
+  no active run
+
+== 1. Registered but unarmed checkout cannot use the exception ==
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/unarmed 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/unarmed
+sibling.git has no refs/heads/unarmed
+Git Trace2 recorded no dispatched push
+armed: project=widgets repository=$LAB/checkout push=github.com/jasonqlwilliams-alt/delivery-guard-fixture upstream=github.com/upstream/delivery-guard-fixture
+
+== 2. Base refuses the launch; target authorizes it and delivers the commit and options ==
+
+$ base-git push --no-verify -o intent=delivery\ guard\ live\ test -o skip=ci no-mistakes 5a2a91cfe515b3d06b723c817b0eb2412a3f3d72:refs/heads/launch-by-sha 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/launch-by-sha
+sibling.git has no refs/heads/launch-by-sha
+Git Trace2 recorded no dispatched push
+
+$ git push --no-verify -o intent=delivery\ guard\ live\ test -o skip=ci no-mistakes 5a2a91cfe515b3d06b723c817b0eb2412a3f3d72:refs/heads/launch-by-sha 
+DELIVERY TARGET: project=widgets action=branch-push repository=github.com/jasonqlwilliams-alt/delivery-guard-fixture account=jasonqlwilliams-alt
+DELIVERY TARGET: project=widgets action=pull-request repository=github.com/jasonqlwilliams-alt/delivery-guard-fixture account=jasonqlwilliams-alt
+To $LAB/validator/repos/widgets.git
+ * [new branch]      5a2a91cfe515b3d06b723c817b0eb2412a3f3d72 -> launch-by-sha
+exit=0
+Receiver ref refs/heads/launch-by-sha = 5a2a91cfe515b3d06b723c817b0eb2412a3f3d72 (matches submitted commit)
+10:48:36.606085 pkt-line.c:85           packet: receive-pack< intent=delivery guard live test
+10:48:36.606088 pkt-line.c:85           packet: receive-pack< skip=ci
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/launch-by-head 
+DELIVERY TARGET: project=widgets action=branch-push repository=github.com/jasonqlwilliams-alt/delivery-guard-fixture account=jasonqlwilliams-alt
+DELIVERY TARGET: project=widgets action=pull-request repository=github.com/jasonqlwilliams-alt/delivery-guard-fixture account=jasonqlwilliams-alt
+To $LAB/validator/repos/widgets.git
+ * [new branch]      HEAD -> launch-by-head
+exit=0
+Receiver ref refs/heads/launch-by-head = 5a2a91cfe515b3d06b723c817b0eb2412a3f3d72 (matches submitted commit)
+
+== 3. Only the exact invocation qualifies, with the managed hook pinned ==
+
+$ git -C $LAB/checkout push --no-verify no-mistakes HEAD:refs/heads/leading-option 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/leading-option
+sibling.git has no refs/heads/leading-option
+Git Trace2 recorded no dispatched push
+
+$ git push --no-verify --dry-run no-mistakes HEAD:refs/heads/non-validator-flag 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/non-validator-flag
+sibling.git has no refs/heads/non-validator-flag
+Git Trace2 recorded no dispatched push
+
+$ git push --no-verify --force no-mistakes HEAD:refs/heads/force-option 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/force-option
+sibling.git has no refs/heads/force-option
+Git Trace2 recorded no dispatched push
+
+$ git -c core.hooksPath=/dev/null push --no-verify no-mistakes HEAD:refs/heads/hook-override 
+REFUSED: git push cannot override the Firstmate pre-push hook configuration.
+exit=1
+widgets.git has no refs/heads/hook-override
+sibling.git has no refs/heads/hook-override
+Git Trace2 recorded no dispatched push
+
+$ git launch no-mistakes HEAD:refs/heads/push-alias 
+REFUSED: a Git push alias cannot disable the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/push-alias
+sibling.git has no refs/heads/push-alias
+Git Trace2 recorded no dispatched push
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/missing-hook 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/missing-hook
+sibling.git has no refs/heads/missing-hook
+Git Trace2 recorded no dispatched push
+
+== 4. The managed hook refuses an unauthorized branch or PR target, before refs can change ==
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/unauthorized-branch 
+REFUSED: branch-push would write to github.com/upstream/delivery-guard-fixture, but project widgets permits only github.com/jasonqlwilliams-alt/delivery-guard-fixture.
+error: failed to push some refs to '$LAB/validator/repos/widgets.git'
+exit=1
+widgets.git has no refs/heads/unauthorized-branch
+sibling.git has no refs/heads/unauthorized-branch
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/unauthorized-pr 
+DELIVERY TARGET: project=widgets action=branch-push repository=github.com/jasonqlwilliams-alt/delivery-guard-fixture account=jasonqlwilliams-alt
+REFUSED: pull-request would write to github.com/upstream/delivery-guard-fixture, but project widgets permits only github.com/jasonqlwilliams-alt/delivery-guard-fixture.
+error: failed to push some refs to '$LAB/validator/repos/widgets.git'
+exit=1
+widgets.git has no refs/heads/unauthorized-pr
+sibling.git has no refs/heads/unauthorized-pr
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/no-pr-target 
+REFUSED: no-mistakes did not report its pull-request target for $LAB/checkout.
+error: failed to push some refs to '$LAB/validator/repos/widgets.git'
+exit=1
+widgets.git has no refs/heads/no-pr-target
+sibling.git has no refs/heads/no-pr-target
+
+== 5. Bypass flags fail for forge remotes, unregistered checkouts, and ambiguous push targets ==
+
+$ git push --no-verify fork HEAD:refs/heads/direct-forge 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/direct-forge
+sibling.git has no refs/heads/direct-forge
+Git Trace2 recorded no dispatched push
+
+$ git push --no-verify $LAB/validator/repos/widgets.git HEAD:refs/heads/unnamed-gate 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/unnamed-gate
+sibling.git has no refs/heads/unnamed-gate
+Git Trace2 recorded no dispatched push
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/named-forge 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/named-forge
+sibling.git has no refs/heads/named-forge
+Git Trace2 recorded no dispatched push
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/forge-rewrite 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/forge-rewrite
+sibling.git has no refs/heads/forge-rewrite
+Git Trace2 recorded no dispatched push
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/multiple-destinations 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/multiple-destinations
+sibling.git has no refs/heads/multiple-destinations
+Git Trace2 recorded no dispatched push
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/group-setting 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/group-setting
+sibling.git has no refs/heads/group-setting
+Git Trace2 recorded no dispatched push
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/unregistered 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/unregistered
+sibling.git has no refs/heads/unregistered
+Git Trace2 recorded no dispatched push
+
+== 6. Wrong gates, symlinks, Git pointers, and receiver overrides cannot grant the exception ==
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/wrong-gate 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/wrong-gate
+sibling.git has no refs/heads/wrong-gate
+Git Trace2 recorded no dispatched push
+
+$ git push no-mistakes HEAD:refs/heads/ordinary-wrong-gate 
+REFUSED: no-mistakes push destination does not match the registered local gate for $LAB/checkout
+error: failed to push some refs to '$LAB/validator/repos/sibling.git'
+exit=1
+widgets.git has no refs/heads/ordinary-wrong-gate
+sibling.git has no refs/heads/ordinary-wrong-gate
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/symlink-to-sibling 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/symlink-to-sibling
+sibling.git has no refs/heads/symlink-to-sibling
+Git Trace2 recorded no dispatched push
+
+$ git push no-mistakes HEAD:refs/heads/ordinary-symlink-to-sibling 
+REFUSED: no-mistakes push destination does not match the registered local gate for $LAB/checkout
+error: failed to push some refs to '$LAB/validator/repos/widgets.git'
+exit=1
+widgets.git.saved has no refs/heads/ordinary-symlink-to-sibling
+sibling.git has no refs/heads/ordinary-symlink-to-sibling
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/gitfile-redirect 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/gitfile-redirect
+sibling.git has no refs/heads/gitfile-redirect
+Git Trace2 recorded no dispatched push
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/receiver-override 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/receiver-override
+sibling.git has no refs/heads/receiver-override
+Git Trace2 recorded no dispatched push
+
+== 7. Equivalent paths work, and ordinary pushes retain file URLs and fetch-only settings ==
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/equivalent-local-path 
+DELIVERY TARGET: project=widgets action=branch-push repository=github.com/jasonqlwilliams-alt/delivery-guard-fixture account=jasonqlwilliams-alt
+DELIVERY TARGET: project=widgets action=pull-request repository=github.com/jasonqlwilliams-alt/delivery-guard-fixture account=jasonqlwilliams-alt
+To $LAB/gate-alias/repos/widgets.git
+ * [new branch]      HEAD -> equivalent-local-path
+exit=0
+Receiver ref refs/heads/equivalent-local-path = 5a2a91cfe515b3d06b723c817b0eb2412a3f3d72 (matches submitted commit)
+
+$ git push no-mistakes HEAD:refs/heads/ordinary-with-tagopt 
+DELIVERY TARGET: project=widgets action=branch-push repository=github.com/jasonqlwilliams-alt/delivery-guard-fixture account=jasonqlwilliams-alt
+DELIVERY TARGET: project=widgets action=pull-request repository=github.com/jasonqlwilliams-alt/delivery-guard-fixture account=jasonqlwilliams-alt
+To $LAB/gate-alias/repos/widgets.git
+ * [new branch]      HEAD -> ordinary-with-tagopt
+exit=0
+Receiver ref refs/heads/ordinary-with-tagopt = 5a2a91cfe515b3d06b723c817b0eb2412a3f3d72 (matches submitted commit)
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/validator-with-tagopt 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/validator-with-tagopt
+sibling.git has no refs/heads/validator-with-tagopt
+Git Trace2 recorded no dispatched push
+
+$ git push no-mistakes HEAD:refs/heads/ordinary-with-file-url 
+DELIVERY TARGET: project=widgets action=branch-push repository=github.com/jasonqlwilliams-alt/delivery-guard-fixture account=jasonqlwilliams-alt
+DELIVERY TARGET: project=widgets action=pull-request repository=github.com/jasonqlwilliams-alt/delivery-guard-fixture account=jasonqlwilliams-alt
+To file://$LAB/gate%2dalias/repos/widgets.git
+ * [new branch]      HEAD -> ordinary-with-file-url
+exit=0
+Receiver ref refs/heads/ordinary-with-file-url = 5a2a91cfe515b3d06b723c817b0eb2412a3f3d72 (matches submitted commit)
+
+$ git push --no-verify no-mistakes HEAD:refs/heads/validator-with-file-url 
+REFUSED: git push --no-verify cannot bypass the Firstmate repository delivery guard.
+exit=1
+widgets.git has no refs/heads/validator-with-file-url
+sibling.git has no refs/heads/validator-with-file-url
+Git Trace2 recorded no dispatched push
