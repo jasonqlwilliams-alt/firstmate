@@ -255,6 +255,24 @@ dirty_status() {
   fi
 }
 
+ff_check_checkout() {
+  local dir=$1 label=$2 default=$3 allow_detached=$4 ignore_seed_marker=$5 cur
+  cur=$(git -C "$dir" symbolic-ref --short HEAD 2>/dev/null || echo "")
+  if [ -z "$cur" ] && [ "$allow_detached" != yes ]; then
+    echo "$label: skipped: detached HEAD, expected $default"
+    return 1
+  fi
+  if [ -n "$cur" ] && [ "$cur" != "$default" ]; then
+    echo "$label: skipped: on $cur, expected $default"
+    return 1
+  fi
+  if [ -n "$(dirty_status "$dir" "$ignore_seed_marker")" ]; then
+    echo "$label: skipped: dirty working tree"
+    return 1
+  fi
+  return 0
+}
+
 # List this home's LIVE secondmate direct reports from state/<id>.meta records.
 # The meta file is the liveness signal; data/secondmates.md is only the fallback
 # for durable fields such as home= when an older/incomplete meta lacks them.
@@ -308,7 +326,7 @@ ff_target() {
     return 0
   fi
 
-  local default base cur instr local_rev base_rev before after out
+  local default base instr local_rev base_rev before after out
   default=$(default_branch "$dir") || {
     echo "$label: skipped: cannot determine default branch"
     return 0
@@ -334,20 +352,7 @@ ff_target() {
     return 0
   fi
 
-  cur=$(git -C "$dir" symbolic-ref --short HEAD 2>/dev/null || echo "")
-  if [ -z "$cur" ] && [ "$allow_detached" != yes ]; then
-    echo "$label: skipped: detached HEAD, expected $default"
-    return 0
-  fi
-  if [ -n "$cur" ] && [ "$cur" != "$default" ]; then
-    echo "$label: skipped: on $cur, expected $default"
-    return 0
-  fi
-
-  if [ -n "$(dirty_status "$dir" "$ignore_seed_marker")" ]; then
-    echo "$label: skipped: dirty working tree"
-    return 0
-  fi
+  ff_check_checkout "$dir" "$label" "$default" "$allow_detached" "$ignore_seed_marker" || return 0
 
   local_rev=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || {
     echo "$label: skipped: cannot read HEAD"
@@ -371,6 +376,7 @@ ff_target() {
   before=$(git -C "$dir" rev-parse --short HEAD)
   if declare -F fm_ff_before_advance >/dev/null; then
     fm_ff_before_advance "$dir" "$label" || true
+    ff_check_checkout "$dir" "$label" "$default" "$allow_detached" "$ignore_seed_marker" || return 0
   fi
   if ! out=$(git -C "$dir" merge --ff-only "$base" 2>&1); then
     echo "$label: skipped: fast-forward failed: $(first_line "$out")"

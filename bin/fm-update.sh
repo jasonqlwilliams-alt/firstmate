@@ -172,7 +172,6 @@ if [ -f "$SECONDMATES_MD" ]; then
       if ! remote_warnings=$("$SCRIPT_DIR/fm-on.sh" "$id" \
         fm-remote-secondmate-control.sh update-check "$id" < /dev/null 2>&1); then
         printf 'warning: remote secondmate %s: could not check for pre-binding Herdr workers before update. Older updaters lack this check. Workers first detected during the update are reported after any fast-forward. See the manual recovery procedure in docs/herdr-backend.md.\n' "$id" >&2
-        remote_warnings=
       elif [ -n "$remote_warnings" ]; then
         printf 'remote secondmate %s on %s:\n%s\n' "$id" "$SECONDMATE_REGISTRY_HOST" "$remote_warnings" >&2
       fi
@@ -181,10 +180,8 @@ if [ -f "$SECONDMATES_MD" ]; then
       while IFS= read -r line_out; do
         case "$line_out" in
           warning:*'pre-binding Herdr worker'*)
-            if ! grep -Fxq -- "$line_out" <<< "$remote_warnings"; then
-              printf 'remote secondmate %s on %s (reported after the update job and any fast-forward): %s\n' \
-                "$id" "$SECONDMATE_REGISTRY_HOST" "$line_out" >&2
-            fi
+            printf 'remote secondmate %s on %s (reported after the update job and any fast-forward): %s\n' \
+              "$id" "$SECONDMATE_REGISTRY_HOST" "$line_out" >&2
             ;;
           'synced: '*|'current: '*) remote_result=$line_out ;;
           *) remote_failure=${remote_failure:-$line_out} ;;

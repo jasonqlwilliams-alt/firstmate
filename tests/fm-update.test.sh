@@ -326,13 +326,11 @@ EOF
 
   out=$(FM_TEST_REMOTE_PREFLIGHT=1 "${remote_update[@]}" 2> "$w/fake/update.stderr")
   assert_contains "$out" "remote secondmate sm1: updated on remote-mac" "remote job started before the preflight warning reached stderr"
-  [ "$(grep -c 'worker record remote-worker points to existing pane' "$w/fake/update.stderr")" -eq 1 ] ||
-    fail "remote update repeated the preflight warning"
   assert_contains "$(cat "$w/fake/update.stderr")" \
-    "(reported after the update job and any fast-forward): warning: remote home: pre-binding Herdr worker record new-worker points to existing pane test:w1:p-new" \
-    "the successful update did not report that the new warning arrived after the fast-forward"
+    "(reported after the update job and any fast-forward): warning: remote home: pre-binding Herdr worker record remote-worker points to existing pane test:w1:p-remote" \
+    "the successful update did not identify the warning returned by the update job"
   assert_contains "$out" "restart-secondmates: fm-sm1" "remote diagnostic displaced the update verdict"
-  pass "Remote preflight warnings are surfaced before the update job without duplicating diagnostics"
+  pass "Remote preflight and update warnings are surfaced with their timing"
 
   out=$(FM_TEST_REMOTE_PREFLIGHT=1 FM_TEST_REMOTE_DIRTY=1 "${remote_update[@]}" 2> "$w/fake/update.stderr")
   out+=$'\n'$(cat "$w/fake/update.stderr")
@@ -341,8 +339,6 @@ EOF
   assert_contains "$out" \
     "(reported after the update job and any fast-forward): warning: remote home: pre-binding Herdr worker record new-worker points to existing pane test:w1:p-new" \
     "the failed update did not identify the warning first detected during the job"
-  [ "$(printf '%s\n' "$out" | grep -c 'worker record remote-worker points to existing pane')" -eq 1 ] ||
-    fail "failed remote update repeated the preflight warning"
   assert_contains "$out" "restart-secondmates: none" "failed remote update triggered a restart"
   pass "Remote update warnings preserve the sync refusal"
 
@@ -380,6 +376,12 @@ set -eu
 case "$*" in
   'pane get w1:p-main-live --session update-herdr'|'pane get w1:p-home-live --session update-herdr')
     printf '%s\n' "$3" >> "$FM_FAKE_DIR/herdr-calls"
+    if [ "${FM_TEST_PROBE_CHECKOUT_CHANGES:-0}" = 1 ]; then
+      case "$3" in
+        w1:p-main-live) "$FM_TEST_REAL_GIT" -C "$FM_ROOT_OVERRIDE" checkout -qb probe-branch ;;
+        w1:p-home-live) printf 'edit during Herdr probe\n' >> "${FM_ROOT_OVERRIDE%/*}/sm1/AGENTS.md" ;;
+      esac
+    fi
     printf '{"result":{"pane":{"pane_id":"%s","foreground_cwd":"/unrelated","agent":null}}}\n' "$3"
     ;;
   'pane get w1:p-missing --session update-herdr')
@@ -456,6 +458,22 @@ SH
     fail "remote update accepted a dirty code root"
   fi
   assert_contains "$out" "firstmate: skipped: dirty working tree" "the host lost the code-root refusal"
+
+  git -C "$w/main" restore -- AGENTS.md
+  local main_before home_before
+  main_before=$(git -C "$w/main" rev-parse HEAD)
+  home_before=$(git -C "$w/sm1" rev-parse HEAD)
+  bump_origin "$w" readme
+  out=$("${update_env[@]}" FM_HOME="$w/home" FM_TEST_PROBE_CHECKOUT_CHANGES=1 \
+    "$UPDATE" 2> "$w/fake/update.stderr")
+  assert_contains "$out" "firstmate: skipped: on probe-branch, expected main" "branch change during the probe was missed"
+  assert_contains "$out" "secondmate sm1: skipped: dirty working tree" "edit during the probe was missed"
+  assert_contains "$out" "restart-secondmates: none" "a skipped home was queued for restart"
+  assert_contains "$out" "nudge-secondmates: none" "a skipped home was queued for a nudge"
+  [ "$(git -C "$w/main" rev-parse probe-branch)" = "$main_before" ] || fail "the new branch advanced"
+  [ "$(git -C "$w/sm1" rev-parse HEAD)" = "$home_before" ] || fail "the newly dirty checkout advanced"
+  assert_contains "$(cat "$w/sm1/AGENTS.md")" "edit during Herdr probe" "the new edit was lost"
+  pass "The updater skips checkouts that change branches or become dirty during the Herdr probe"
 }
 
 # --- T4: dirty secondmate is skipped, its edit preserved -------------------
