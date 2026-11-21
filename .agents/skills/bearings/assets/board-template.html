@@ -76,6 +76,10 @@ a { color: inherit; text-decoration: none; }
 .fm-badge--info    { background: var(--ocean-500); color: var(--paper-000); }
 .fm-badge--neutral { background: var(--paper-000); color: var(--ink-900); }
 .fm-badge--solid   { background: var(--rust-500); color: var(--paper-000); }
+.fm-badge--tier-1  { background: #fde4e1; color: #872624; }
+.fm-badge--tier-2  { background: #ffedc2; color: #6b4100; }
+.fm-badge--tier-3  { background: #e2effb; color: #214e78; }
+.fm-badge--tier-4  { background: #ebecef; color: #454952; }
 
 /* ---- fm-btn ---- */
 .fm-btn {
@@ -288,7 +292,29 @@ button.bb-morechip:focus-visible { outline: none; box-shadow: var(--focus-ring);
 .bb-detail__text { margin: 0; font-size: var(--fs-sm); color: var(--text-body); line-height: 1.45; }
 .bb-overflow > .bb-row:first-child { border-top: 1px solid var(--border-soft); }
 
-/* ---- Charted Next dispatch picker ---- */
+/* ---- Charted Next controls ---- */
+.bb-charted-sort {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 9px 18px;
+  border-bottom: 1px solid var(--border-soft); font-size: var(--fs-xs); font-weight: 700;
+}
+.bb-charted-sort[hidden] { display: none; }
+.bb-charted-select {
+  font: inherit; color: var(--text-strong); background: var(--surface-card);
+  max-width: 100%; min-width: 0; padding: 4px 6px;
+  border: 1px solid var(--ink-500); border-radius: var(--radius-xs);
+}
+.bb-charted-select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.bb-row__tier { margin-top: 7px; white-space: normal; }
+.bb-assign { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; font-size: var(--fs-xs); }
+.bb-assign__queue {
+  padding: 5px 8px; border: 1px solid var(--ink-500); background: var(--surface-card);
+  color: var(--text-strong); white-space: normal; max-width: 100%;
+}
+.bb-assign__queue:hover { background: var(--paper-100); }
+.bb-assign__status { flex-basis: 100%; color: var(--text-strong); }
+.bb-assign__status:empty { position: absolute; }
+.bb-charted-queue + .bb-row { border-top: 1px solid var(--border-soft); }
+
 /* margin:0 kills the UA default checkbox margin so picker rows and spacer rows
    share one text left edge */
 .bb-pick { accent-color: var(--rust-500); width: 16px; height: 16px; flex: none; cursor: pointer; margin: 0; }
@@ -364,6 +390,13 @@ button.bb-morechip:focus-visible { outline: none; box-shadow: var(--focus-ring);
       </span>
     </div>
     <div class="fm-card fm-card--warm">
+      <label class="bb-charted-sort" id="bb-charted-sort" hidden>
+        Sort by
+        <select class="bb-charted-select" id="bb-charted-sort-select" aria-label="Sort Charted Next">
+          <option value="tier">Priority tier</option>
+          <option value="filed">Newest filed</option>
+        </select>
+      </label>
       <div class="bb-rows" id="bb-charted"></div>
       <div class="bb-dispatch" id="bb-dispatch" hidden>
         <span class="bb-dispatch__count" id="bb-dispatch-count">nothing picked</span>
@@ -487,6 +520,7 @@ __FM_BEARINGS_BOARD_DATA__
   }
   var chartedMoreQueued = data.charted_more || 0;
   var chartedMoreWarnings = data.charted_warning_more || 0;
+  var continuumAgents = data.continuum_agents || [];
   function utf8ByteLength(text) { return new TextEncoder().encode(text).length; }
   var CHECK_SVG = '<svg class="fm-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
 
@@ -868,8 +902,51 @@ __FM_BEARINGS_BOARD_DATA__
     return x;
   }
 
+  var TIER_LABELS = ["", "Tier 1 · Urgent", "Tier 2 · Time-sensitive", "Tier 3 · Current", "Tier 4 · Backlog"];
+  function assignmentForm(t) {
+    var form = el("form", "bb-assign");
+    var select = el("select", "bb-charted-select bb-assign__agent");
+    select.required = true;
+    select.setAttribute("aria-label", "Continuum agent for " + t.title);
+    var placeholder = el("option", null, "Choose Continuum agent");
+    placeholder.value = "";
+    select.appendChild(placeholder);
+    continuumAgents.forEach(function (agent) {
+      var option = el("option", null, agent.label);
+      option.value = agent.id;
+      select.appendChild(option);
+    });
+    form.appendChild(select);
+
+    var button = el("button", "fm-btn bb-assign__queue", "Queue assignment");
+    button.type = "submit";
+    form.appendChild(button);
+    var status = el("span", "bb-assign__status");
+    status.setAttribute("role", "status");
+    form.appendChild(status);
+
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var agent = continuumAgents.find(function (a) { return a.id === select.value; });
+      if (!agent) return;
+      if (!window.lavish || typeof window.lavish.queuePrompt !== "function") {
+        status.textContent = "Open this board in Lavish to queue an assignment.";
+        return;
+      }
+      var owner = t.owner || null;
+      window.lavish.queuePrompt(
+        "Request help meeting this item's start conditions.",
+        { tag: "choice", text: t.title + " → " + agent.label, element: form,
+          queueKey: JSON.stringify(["assign-continuum-agent", t.id, owner]),
+          data: { schema: "fm-bearings-assignment.v1", question: t.id, owner: owner, agent: agent.id } }
+      );
+      status.textContent = "Assignment queued.";
+    });
+    return form;
+  }
+
   var whySeq = 0;
-  function addChartedRow(container, t) {
+  function chartedRow(t) {
     var x = explainCharted(t);
     var row = el("div", "bb-row");
     if (t.dispatchable && !isWarning(t)) {
@@ -894,6 +971,12 @@ __FM_BEARINGS_BOARD_DATA__
     /* second line keeps the title uncrowded in the half-width column; a row
        with no repo shows only its summary, never its routing id */
     main.appendChild(el("div", "bb-row__sub", t.repo ? x.summary + " · " + t.repo : x.summary));
+    if (!isWarning(t) && t.tier) {
+      var tier = badge("tier-" + t.tier, TIER_LABELS[t.tier]);
+      tier.classList.add("bb-row__tier");
+      main.appendChild(tier);
+    }
+    if (!isWarning(t) && continuumAgents.length) main.appendChild(assignmentForm(t));
     row.appendChild(main);
 
     var panelId = "bb-why-" + (++whySeq);
@@ -924,8 +1007,7 @@ __FM_BEARINGS_BOARD_DATA__
       row.classList.toggle("bb-row--open", open);
     });
     row.appendChild(btn);
-    container.appendChild(row);
-    container.appendChild(panel);
+    return [row, panel];
   }
 
   if (!chartedQueued(data.charted).length && !chartedMoreQueued) {
@@ -936,15 +1018,16 @@ __FM_BEARINGS_BOARD_DATA__
      notice hidden behind "show more" is a notice missed. */
   var CHARTED_VISIBLE = 8;
   var queuedRows = chartedOrder(chartedQueued(data.charted));
-  queuedRows.slice(0, CHARTED_VISIBLE).forEach(function (t) { addChartedRow(ch, t); });
-  var overflowRows = queuedRows.slice(CHARTED_VISIBLE);
-  if (overflowRows.length) {
-    var overflow = el("div", "bb-overflow");
-    overflow.id = "bb-charted-overflow";
-    overflow.hidden = true;
-    overflowRows.forEach(function (t) { addChartedRow(overflow, t); });
+  var entries = queuedRows.map(function (t) { return { tier: t.tier, nodes: chartedRow(t) }; });
+  var visibleQueue = el("div", "bb-charted-queue");
+  var overflow = el("div", "bb-overflow");
+  overflow.id = "bb-charted-overflow";
+  overflow.hidden = true;
+  if (entries.length) ch.appendChild(visibleQueue);
+  var overflowCount = entries.length - CHARTED_VISIBLE;
+  if (overflowCount > 0) {
     ch.appendChild(overflow);
-    var showLabel = "Show " + overflowRows.length + " more queued";
+    var showLabel = "Show " + overflowCount + " more queued";
     var reveal = el("button", "bb-morechip", showLabel);
     reveal.type = "button";
     reveal.setAttribute("aria-expanded", "false");
@@ -957,7 +1040,25 @@ __FM_BEARINGS_BOARD_DATA__
     });
     ch.appendChild(reveal);
   }
-  chartedOrder(data.charted.filter(isWarning)).forEach(function (t) { addChartedRow(ch, t); });
+  function orderQueue(sortBy) {
+    var ordered = entries.slice();
+    if (sortBy === "tier") {
+      ordered.sort(function (a, b) { return (a.tier || 5) - (b.tier || 5); });
+    }
+    ordered.forEach(function (entry, i) {
+      var container = i < CHARTED_VISIBLE ? visibleQueue : overflow;
+      entry.nodes.forEach(function (node) { container.appendChild(node); });
+    });
+  }
+  var hasTiers = entries.some(function (entry) { return entry.tier != null; });
+  var sortBy = document.getElementById("bb-charted-sort-select");
+  document.getElementById("bb-charted-sort").hidden = !hasTiers;
+  sortBy.value = hasTiers ? "tier" : "filed";
+  sortBy.addEventListener("change", function () { orderQueue(sortBy.value); });
+  orderQueue(sortBy.value);
+  chartedOrder(data.charted.filter(isWarning)).forEach(function (t) {
+    chartedRow(t).forEach(function (node) { ch.appendChild(node); });
+  });
   var chartedShown = chartedQueued(data.charted).length;
   var chartedTotal = chartedShown + chartedMoreQueued;
   document.getElementById("bb-charted-sub").textContent =

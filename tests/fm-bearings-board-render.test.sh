@@ -59,13 +59,15 @@ SH
 
 # Build the board from <underway-json> plus <charted-json> and return what the
 # renderer produced.
-render_board() {  # <home> <underway-json> <charted-json> [charted_more] [charted_warning_more] [landed-json]
+render_board() {  # <home> <underway-json> <charted-json> [charted_more] [charted_warning_more] [landed-json] [agents-json]
   local home=$1 underway=$2 charted=$3 more=${4:-0} warning_more=${5:-0} landed=${6:-'[]'} data="$1/payload.json"
-  jq -n --argjson underway "$underway" --argjson charted "$charted" --argjson landed "$landed" \
+  local agents=${7:-null}
+  jq -n --argjson underway "$underway" --argjson charted "$charted" --argjson landed "$landed" --argjson agents "$agents" \
     --argjson more "$more" --argjson warning_more "$warning_more" '{
     schema:"fm-bearings-board.v1", home:"render-home", generated:"2026-08-26T00:00Z",
     prs_live:false, captains_call:[], underway:$underway, landed:$landed,
-    charted:$charted, charted_more:$more, charted_warning_more:$warning_more}' > "$data"
+    charted:$charted, charted_more:$more, charted_warning_more:$warning_more}
+    | if $agents == null then . else .continuum_agents = $agents end' > "$data"
   PATH="$home/fakebin:$PATH" FM_HOME="$home" \
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
     FM_PROCEVENT_CLAIM_ROOT="$home/procevent-claims" \
@@ -214,6 +216,8 @@ test_charted_next_reads_newest_filed_first() {
   ]')
   printf '%s' "$out" | jq -e '
     [.charted[] | .title] == ["Filed in August", "Filed in July", "Filed in June"]
+      and all(.charted[]; .tier == null and .agents == [])
+      and .sort == null and .requests == []
   ' >/dev/null || fail "charted next was not ordered newest filed first: $out"
   pass "charted next renders the most recently filed work first"
 }
@@ -230,6 +234,79 @@ test_charted_rows_without_a_filed_date_follow_the_dated_rows_in_payload_order() 
     [.charted[] | .title] == ["Dated", "Undated one", "Undated two"]
   ' >/dev/null || fail "undated charted rows did not keep a stable trailing order: $out"
   pass "charted rows with no filed date follow the dated rows in payload order"
+}
+
+test_charted_next_sorts_four_labeled_tiers_and_keeps_warnings_unranked() {
+  local home rows out
+  home=$(make_home charted-tiers)
+  rows=$(jq -nc '[
+    {title:"Older urgent",tier:2,filed:"2026-08-01"},
+    {title:"Warning",kind:"warning",filed:"2026-08-26"},
+    {title:"Backlog",tier:4,filed:"2026-08-24"},
+    {title:"Urgent",tier:1},
+    {title:"Legacy",filed:"2026-08-25"},
+    {title:"Current",tier:3,filed:"2026-08-20"},
+    {title:"Recently filed urgent",tier:2,filed:"2026-08-14"}
+  ] | to_entries | map(.value + {id:("item-" + (.key|tostring)),repo:"test",reason:"",dispatchable:false})')
+  out=$(render_board "$home" '[]' "$rows" 0 0 '[]' '[]')
+  printf '%s' "$out" | jq -e '
+    [.charted[].title] == ["Urgent","Recently filed urgent","Older urgent","Current","Backlog","Legacy","Warning"]
+    and [.charted[].tier.tone] == ["tier-1","tier-2","tier-2","tier-3","tier-4",null,null]
+    and [.charted[].tier.text] == [
+      "Tier 1 · Urgent","Tier 2 · Time-sensitive","Tier 2 · Time-sensitive","Tier 3 · Current","Tier 4 · Backlog",null,null]
+    and .sort.selected == "tier"
+    and [.sort.byFiled[].title] == ["Legacy","Backlog","Current","Recently filed urgent","Older urgent","Urgent","Warning"]
+    and [.sort.byTier[].title] == [.charted[].title]
+    and all(.charted[]; .agents == [] and .opens)
+  ' >/dev/null || fail "the Charted Next sorter did not preserve ranks, dates, or disclosures: $out"
+  pass "Charted Next labels all four tiers and switches between tier and filed order"
+}
+
+test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path() {
+  local home out capture adapter assignments answers
+  home=$(make_home charted-agent)
+  adapter="$ROOT/bin/fm-procevent-lavish.sh"
+  capture="$home/captured-result"
+  out=$(render_board "$home" '[]' '[
+    {"id":"gated-one","repo":"sample","title":"Gated one","reason":"blocked by prep","dispatchable":false,"owner":"mate-one"},
+    {"id":"gated-two","repo":"sample","title":"Gated two","reason":"blocked by prep","dispatchable":false},
+    {"id":"warning","repo":null,"title":"Warning","reason":"home unavailable","dispatchable":false,"kind":"warning"}
+  ]' 0 0 '[]' '[{"id":"helper-one","label":"Helper One"},{"id":"helper-two","label":"Helper Two"}]')
+  printf '%s' "$out" | jq -e '
+    .charted as $rows
+    | [$rows[0].agents[].label] == ["Helper One","Helper Two"]
+      and $rows[1].agents == $rows[0].agents
+      and $rows[2].agents == []
+      and ($rows[0].pickable | not)
+      and (.requests | length) == 1
+      and (.requests[0] | .tag == "choice" and
+        .data == {schema:"fm-bearings-assignment.v1",question:"gated-one",owner:"mate-one",agent:"helper-two"})
+  ' >/dev/null || fail "the helper selection did not queue one structured board answer: $out"
+
+  # Frame the browser event the way Lavish presents a captured poll, alongside
+  # a normal answer for the same id, a replaced selection, and invalid inputs.
+  printf '%s' "$out" | jq -r '
+    .requests[0] as $request
+    | [($request | .data.agent = "helper-one"),$request,
+      {tag:"choice",text:"Ordinary answer",prompt:"Answer",data:{
+        schema:"fm-bearings-answer.v1",question:$request.data.question,selection:"yes",note:""}},
+      ($request | .data.owner = null),
+      ($request | .data.agent = "invalid/agent"),
+      ($request | .data.agent = 42),
+      ($request | .tag = "message" | .data.agent = "helper-one")] as $rows
+    | "session:\n  status: feedback\nprompts[\($rows | length)]{tag,text,prompt}:",
+      ($rows[] | "  " + ([.tag,.text,(.prompt + "\n\nContext data:\n" + (.data | tojson))] | map(@json) | join(",")))
+  ' > "$capture"
+  assignments=$("$adapter" assignments "$capture") || fail "assignment capture could not be read"
+  printf '%s\n' "$assignments" | jq -se '
+    . == [{question:"gated-one",owner:"mate-one",agent:"helper-two"},
+      {question:"gated-one",owner:null,agent:"helper-two"}]
+  ' >/dev/null || fail "assignment projection lost the task, owner, or selected agent: $assignments"
+  answers=$("$adapter" answers "$capture") || fail "ordinary capture could not be read"
+  [ "$answers" = $'gated-one\tyes\tOrdinary answer' ] ||
+    fail "helper selection entered the keyed-answer intake: $answers"
+  [ -z "$("$adapter" reconciles "$capture")" ] || fail "helper selection entered the reconciliation intake"
+  pass "roster selections reach the supervisor as structured answers outside both hold intakes"
 }
 
 test_every_charted_badge_opens_its_row() {
@@ -666,6 +743,8 @@ test_an_underway_row_leads_with_the_task_name_and_keeps_its_run_status
 test_an_underway_identifier_label_is_not_replaced_by_run_status
 test_charted_next_reads_newest_filed_first
 test_charted_rows_without_a_filed_date_follow_the_dated_rows_in_payload_order
+test_charted_next_sorts_four_labeled_tiers_and_keeps_warnings_unranked
+test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path
 test_a_warning_row_reads_as_a_repair_not_as_queued_work
 test_warnings_are_excluded_from_the_charted_next_count
 test_a_board_of_only_warnings_still_reports_nothing_queued

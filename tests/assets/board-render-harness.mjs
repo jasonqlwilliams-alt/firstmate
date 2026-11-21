@@ -7,7 +7,7 @@
 //   { stats:[{n,label}], underway:[{title,sub,badges}],
 //     charted:[{title,sub,badges,pickable,collapsed,detail,detailHidden,opens}],
 //     revealed:[<charted rows after every reveal control is clicked>],
-//     reveal:[{text,after}], empty, more, error }
+//     reveal:[{text,after}], sort, requests, empty, more, error }
 // A charted badge is {tone,text,expands}; `opens` records whether clicking the
 // row's badge showed its explanation, and `detail` is that explanation's text.
 import { readFileSync } from "node:fs";
@@ -40,14 +40,23 @@ class Node {
       contains: (c) => this.className.split(/\s+/).includes(c),
     };
   }
-  click() { (this.listeners.click || []).forEach((fn) => fn({ preventDefault() {} })); }
+  trigger(type) { (this.listeners[type] || []).forEach((fn) => fn({ preventDefault() {} })); }
+  click() { this.trigger("click"); }
   get textContent() {
     return this.children.length
       ? this.children.map((c) => c.textContent).join("")
       : this._text;
   }
   set textContent(v) { this._text = String(v); this.children = []; }
-  appendChild(n) { n.parentNode = this; this.children.push(n); return n; }
+  appendChild(n) {
+    if (n.parentNode) {
+      const siblings = n.parentNode.children;
+      siblings.splice(siblings.indexOf(n), 1);
+    }
+    n.parentNode = this;
+    this.children.push(n);
+    return n;
+  }
   setAttribute(k, v) { this.attributes[k] = v; }
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
   querySelectorAll(sel) {
@@ -90,7 +99,14 @@ globalThis.document = {
     return byId.get(id);
   },
 };
-globalThis.window = {};
+const requests = [];
+globalThis.window = {
+  lavish: {
+    queuePrompt(prompt, { tag, text, queueKey, data }) {
+      requests.push({ prompt, tag, text, queueKey, data });
+    },
+  },
+};
 globalThis.TextEncoder = TextEncoder;
 
 const script = html.slice(html.indexOf("<script>") + "<script>".length, html.lastIndexOf("</script>"));
@@ -120,7 +136,9 @@ const stats = strip.children.map((t) => ({
 const rowNodes = (container, collapsed = false) => {
   const out = [];
   container.children.forEach((c, i) => {
-    if (hasClass(c, "bb-overflow")) out.push(...rowNodes(c, collapsed || c.hidden));
+    if (hasClass(c, "bb-overflow") || hasClass(c, "bb-charted-queue")) {
+      out.push(...rowNodes(c, collapsed || c.hidden));
+    }
     else if (hasClass(c, "bb-row")) {
       const next = container.children[i + 1];
       out.push({ row: c, detail: next && hasClass(next, "bb-detail") ? next : null, collapsed });
@@ -131,10 +149,14 @@ const rowNodes = (container, collapsed = false) => {
 const rowsOf = (container) =>
   rowNodes(container).map(({ row, detail, collapsed }) => {
     const main = row.children.find((c) => c.className.includes("bb-row__main"));
+    const tier = main?.children.find((c) => hasClass(c, "bb-row__tier"));
+    const agents = main?.querySelectorAll(".bb-assign__agent")[0];
     return {
       title: main?.children.find((c) => c.className.includes("bb-row__title"))?.textContent ?? "",
       sub: main?.children.find((c) => c.className.includes("bb-row__sub"))?.textContent ?? "",
       badges: badgesOf(row),
+      tier: tier ? badgesOf(main).find((b) => b.text === tier.textContent) : null,
+      agents: agents ? agents.children.filter((o) => o.value).map((o) => ({ id: o.value, label: o.textContent })) : [],
       pickable: row.children.some((c) => c.className.includes("bb-pick") && !c.className.includes("spacer")),
       collapsed,
       detail: detail ? textOf(detail) : "",
@@ -161,6 +183,27 @@ const reveal = revealButtons.map((b) => {
   return { text, after: b.textContent };
 });
 const revealed = rowsOf(ch);
+const sort = byId.get("bb-charted-sort");
+const sorter = byId.get("bb-charted-sort-select");
+let sorted = null;
+if (sort && !sort.hidden) {
+  const selected = sorter.value;
+  sorter.value = "filed";
+  sorter.trigger("change");
+  const byFiled = rowsOf(ch);
+  sorter.value = "tier";
+  sorter.trigger("change");
+  sorted = { selected, byFiled, byTier: rowsOf(ch) };
+}
+const assignment = ch.querySelectorAll(".bb-assign")[0];
+if (assignment) {
+  const agents = assignment.querySelectorAll(".bb-assign__agent")[0];
+  assignment.trigger("submit");
+  agents.value = "not-on-the-roster";
+  assignment.trigger("submit");
+  agents.value = agents.children.at(-1).value;
+  assignment.trigger("submit");
+}
 // A fail-closed render replaces the page body instead of the board sections, so
 // surface it rather than reporting an empty board as a successful render.
 const errorText = [...byId.entries()]
@@ -173,4 +216,4 @@ const more = ch.children
   .map((c) => c.textContent);
 
 process.stdout.write(
-  JSON.stringify({ stats, underway, charted, revealed, reveal, empty, more, error: errorText }) + "\n");
+  JSON.stringify({ stats, underway, charted, revealed, reveal, sort: sorted, requests, empty, more, error: errorText }) + "\n");
