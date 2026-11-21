@@ -16,8 +16,8 @@
 #
 # classify   Print the lifecycle state a handler should act on: feedback, ended,
 #            waiting, missing, or unknown.
-# read       Print a structured presentation of one already-captured result so a
-#            handler consumes every queued item without grepping the raw file.
+# read       Present the decoded items from an already-captured result without
+#            requiring the handler to grep the raw file.
 #            It is read-only over the capture: it does not arm, poll, or change
 #            what Lavish delivered. The session-ending freeform message
 #            (tag=message) is its own labeled field, printed first and distinct
@@ -69,17 +69,21 @@
 #
 # `answers` is this adapter's half of the generic keyed-answer contract in
 # bin/fm-procevent.sh. It reports what the captain actually chose, as
-# `<task-id>\t<answer>\t<label>` lines, and stops there. It maps nothing to a
+# `<task-id>\t<answer>\t<label>[\t<mode>]` lines. The optional mode relays the
+# card's declared `done` or `release`. The adapter maps nothing to a
 # task, records no decision, and closes nothing: a captain answer is not special
 # to Lavish, so every rule about what a keyed answer DOES belongs to the one
 # intake in bin/fm-captain-hold.sh, which the runner feeds. A Lavish review is
 # just an ephemeral discussion format that happens to carry answers.
 #
-# Only rows tagged `choice` are read. A freeform captain message is prose that may
-# contain anything, and must never be able to forge a decision key.
+# Choice extractors require the `choice` tag so a freeform captain message
+# cannot forge a decision key.
 #
-# `read` is the presentation command summarized above; keyed intake remains
-# the separate `answers` contract described here.
+# `read`, `answers`, `reconciles`, and `assignments` share a decoder for tabular
+# and expanded TOON prompt blocks. Choice extractors use `prompts` only, while
+# `read` also accepts `feedback`. Malformed or truncated rows are excluded from
+# the projections. `read` marks feedback without a prompt or feedback block as
+# incomplete, distinguishing it from an explicitly empty block.
 #
 # `assignments` reads Charted Next helper requests from choice context with
 # schema fm-bearings-assignment.v1, `question` (task id), `owner` (non-blank
@@ -419,12 +423,6 @@ cmd_silent() {
   [ "$content_rc" -eq 1 ]
 }
 
-# Read each projection of structured choice context from the same Lavish rows.
-# Print `key<TAB>answer<TAB>label[<TAB>mode]` for each ordinary answer the
-# captain submitted in a captured result; the optional mode column relays the
-# card's declared close mode (`done` or `release`) to the keyed-answer intake. The published response frames queued feedback as
-# either a tabular array or an expanded array when a prompt has nested fields.
-# Only `choice` rows enter keyed intake. A freeform `message` is captain prose.
 # An answer that does not carry both a slug-shaped `question`
 # and the versioned `selection` and `note` fields inside its `Context data:` block
 # is skipped. A time-limited rollout branch accepts the old question/answer
