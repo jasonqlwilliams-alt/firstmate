@@ -1274,7 +1274,7 @@ SH
 # The same cancelled run stays a contradiction with no recorded PR, or when
 # the recorded head is a different commit.
 test_cancelled_open_pr_matching_head_is_not_terminal_in_flight() {
-  local home fakebin out pr head branch other_head state expected_state poll route
+  local home fakebin out pr head branch other_head failed_head rebased_head state expected_state poll route want_state want_source
   home=$(make_home cancelled-open-pr)
   fakebin=$(make_fakebin "$home")
   pr=https://github.com/kunchenguid/firstmate/pull/46
@@ -1286,6 +1286,15 @@ test_cancelled_open_pr_matching_head_is_not_terminal_in_flight() {
   other_head=0123456789abcdef0123456789abcdef01234567
   if git -C "$home/projects/cancelled" cat-file -e "${other_head:0:8}^{commit}" 2>/dev/null; then
     fail "pipeline head must be absent from the local checkout"
+  fi
+  failed_head=abcdef0123456789abcdef0123456789abcdef01
+  if git -C "$home/projects/cancelled" cat-file -e "${failed_head:0:8}^{commit}" 2>/dev/null; then
+    fail "failed retry head must be absent from the local checkout"
+  fi
+  rebased_head=$(git -C "$home/projects/cancelled" -c user.name=fixture -c user.email=fixture@example.invalid \
+    commit-tree 'HEAD^{tree}' -m 'independent rebased head') || fail "could not create the rebased fixture commit"
+  if git -C "$home/projects/cancelled" merge-base --is-ancestor "$head" "$rebased_head"; then
+    fail "the rebased fixture head must diverge from the task head"
   fi
   cat > "$home/data/backlog.md" <<'MD'
 ## In flight
@@ -1308,7 +1317,13 @@ RUN
 #!/usr/bin/env bash
 case "$*" in
   "axi status") cat "$FM_HOME/run.txt" ;;
-  "runs --limit "*) [ ! -f "$FM_HOME/runs.txt" ] || cat "$FM_HOME/runs.txt" ;;
+  "runs --limit "*)
+    if [ "${FM_TEST_SLOW_RUNS:-0}" = 1 ]; then
+      printf 'started\n' > "$FM_HOME/slow-runs"
+      sleep 6
+    fi
+    [ ! -f "$FM_HOME/runs.txt" ] || cat "$FM_HOME/runs.txt"
+    ;;
 esac
 SH
   chmod +x "$fakebin/no-mistakes"
@@ -1495,6 +1510,39 @@ RUN
     and .endpoints[0].state == "failed" and .endpoints[0].source == "run-step"' >/dev/null \
     || fail "a retry that failed after the status read must not inherit a cancellation exemption: $out"
 
+  record_claude_idle "$state" cancelled
+  for route in idle bound; do
+    case "$route" in
+      idle)
+        want_state=done
+        want_source=status-log
+        ;;
+      bound)
+        want_state=failed
+        want_source=run-step
+        sed "s/^pr_head=.*/pr_head=$head/" "$state/cancelled.meta" > "$state/rewrite"
+        mv "$state/rewrite" "$state/cancelled.meta"
+        cat > "$home/run.txt" <<RUN
+run:
+  id: "cancelled-local"
+  branch: $branch
+  head: "${head:0:8}"
+  head_sha: "$head"
+  outcome: cancelled
+  pr: "$pr"
+RUN
+        ;;
+    esac
+    printf 'failed %s %s 2026-07-11 13:00\n' "$branch" "${failed_head:0:8}" > "$home/runs.txt"
+    out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+    printf '%s' "$out" | jq -e --arg state "$want_state" --arg source "$want_source" '
+      .invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}
+        and .endpoints[0].state == $state and .endpoints[0].source == $source' >/dev/null \
+      || fail "an unfetched failed retry must block cancellation evidence via $route: $out"
+  done
+  sed "s/^pr_head=.*/pr_head=$other_head/" "$state/cancelled.meta" > "$state/rewrite"
+  mv "$state/rewrite" "$state/cancelled.meta"
+
   cat > "$home/run.txt" <<RUN
 run:
   id: "pipeline-retry"
@@ -1516,7 +1564,7 @@ RUN
 
   printf 'cancelled %s %s 2026-07-11 12:00 %s\nrunning %s %s 2026-07-11 11:00\n' \
     "$branch" "${head:0:8}" "$pr" "$branch" "${head:0:8}" > "$home/runs.txt"
-  for route in full ledger anchor direct newest; do
+  for route in full ledger anchor rebased direct newest; do
     case "$route" in
       full)
         cat > "$home/run.txt" <<RUN
@@ -1532,6 +1580,20 @@ RUN
       anchor)
         printf 'running %s %s 2026-07-11 13:00\ncancelled %s %s 2026-07-11 12:00 %s\n' \
           "$branch" "${other_head:0:8}" "$branch" "${head:0:8}" "$pr" > "$home/runs.txt"
+        ;;
+      rebased)
+        cat > "$home/run.txt" <<RUN
+run:
+  id: "rebased-retry"
+  branch: $branch
+  head: "${rebased_head:0:8}"
+  head_sha: "$rebased_head"
+  status: running
+branch_sync:
+  state: pipeline_owned
+RUN
+        printf 'running %s %s 2026-07-11 13:00\ncancelled %s %s 2026-07-11 12:00 %s\n' \
+          "$branch" "${rebased_head:0:8}" "$branch" "${head:0:8}" "$pr" > "$home/runs.txt"
         ;;
       direct)
         cat > "$home/run.txt" <<RUN
@@ -1550,6 +1612,14 @@ RUN
     out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
     printf '%s' "$out" | jq -e '.valid and .endpoints[0].state == "done" and .endpoints[0].source == "status-log"' >/dev/null \
       || fail "the stale green event must leave the worker verdict visible without making the home invalid via $route: $out"
+    if [ "$route" = direct ]; then
+      out=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_TEST_SLOW_RUNS=1 FM_SNAPSHOT_CREW_STATE_TIMEOUT=3 \
+        FM_CREW_STATE_NM_TIMEOUT=10 "$SNAPSHOT" --secondmate-home-summary)
+      [ -s "$home/slow-runs" ] || fail "the fixture must reach the optional ledger lookup"
+      printf '%s' "$out" | jq -e '.invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}
+        and .endpoints[0].state == "done" and .endpoints[0].source == "status-log"' >/dev/null \
+        || fail "an evidence timeout must preserve the worker verdict without granting the exemption: $out"
+    fi
   done
   printf 'done: PR https://github.com/kunchenguid/firstmate/pull/45 checks green\n' > "$state/cancelled.status"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)

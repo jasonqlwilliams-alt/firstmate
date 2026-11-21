@@ -131,11 +131,15 @@ FM_CREW_STATE_RUNS_LIMIT=${FM_CREW_STATE_RUNS_LIMIT:-200}
 case "$FM_CREW_STATE_RUNS_LIMIT" in ''|*[!0-9]*) FM_CREW_STATE_RUNS_LIMIT=200 ;; esac
 SEP=' · '
 
-# Emit the one canonical line and exit 0. Detail is optional.
-emit() {  # <state> <source> [detail] [summary-evidence]
+print_state() {  # <state> <source> [detail]
   local line="state: $1${SEP}source: $2"
   [ -n "${3:-}" ] && line="$line${SEP}$3"
   printf '%s\n' "$line"
+}
+
+# Emit the canonical line and exit 0. Detail is optional.
+emit() {  # <state> <source> [detail] [summary-evidence]
+  print_state "$1" "$2" "${3:-}"
   if [ -n "${4:-}" ]; then
     printf '%s\n' "$4"
   fi
@@ -349,19 +353,21 @@ log_reports_registered_pr_green() {
 }
 
 emit_ci_ready() {
-  local evidence='' selected_head
+  local selected_head
+  print_state done status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR"
   if log_reports_registered_pr_green; then
     if [ "$LEDGER_READ" = 0 ]; then
       selected_head=$(strip_quotes "$(nm_field head_sha)")
       [ -n "$selected_head" ] || selected_head=$(strip_quotes "$(nm_field head)")
       [ -z "$selected_head" ] || nm_read_ledger_status "$selected_head"
     fi
-    if [ "$LEDGER_MATCHING_PR" = retry-pr ] \
-      || { [ "$LEDGER_STATUS" = running ] && [ -n "$FULL_MATCHING_PR$LEDGER_MATCHING_PR" ]; }; then
-      evidence=live-retry-green
+    if [ "$LEDGER_PR_EVIDENCE" != terminal-conflict ] \
+      && { [ "$LEDGER_PR_EVIDENCE" = retry-pr ] \
+        || { [ "$LEDGER_STATUS" = running ] && [ -n "$FULL_MATCHING_PR$LEDGER_PR_EVIDENCE" ]; }; }; then
+      printf '%s\n' live-retry-green
     fi
   fi
-  emit done status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR" "$evidence"
+  exit 0
 }
 
 # 0 when a status-log line reports positive daemon socket failure rather than a
@@ -569,7 +575,7 @@ nm_ci_checks_state() {
 # The same reader is also consulted when `axi status` DID bind this branch's run
 # but that run is terminal, to find a live sibling run for this worktree.
 nm_read_ledger_status() {
-  IFS='|' read -r LEDGER_STATUS LEDGER_MATCHING_PR <<< "$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" \
+  IFS='|' read -r LEDGER_STATUS LEDGER_PR_EVIDENCE <<< "$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" \
     "$(nm_run runs --limit "$FM_CREW_STATE_RUNS_LIMIT")" "${1:-}" \
     "$SUMMARY_PR" "$SUMMARY_PR_HEAD")"
   LEDGER_READ=1
@@ -616,7 +622,7 @@ full_cancelled=
 full_bound=0
 LEDGER_READ=0
 LEDGER_STATUS=
-LEDGER_MATCHING_PR=
+LEDGER_PR_EVIDENCE=
 # Scouts and secondmates never drive a no-mistakes validation of their own
 # worktree, so skip the lookup for them and read state from pane/log directly.
 if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/null 2>&1; then
@@ -841,9 +847,10 @@ if [ "$HAVE_RUN" = 1 ]; then
   evidence=''
   case "$RUN_DETAIL" in
     "run cancelled"|"run cancelled${SEP}"*)
-      if [ "$RUN_SOURCE" = coarse ] && [ -n "$LEDGER_MATCHING_PR" ]; then
+      if [ "$RUN_SOURCE" = coarse ] && [ "$LEDGER_PR_EVIDENCE" = matching-pr ]; then
         evidence="cancelled-row|$SUMMARY_PR_HEAD"
-      elif [ "$RUN_SOURCE" = full ] && [ "$full_bound" = 1 ] && [ -n "$FULL_MATCHING_PR" ]; then
+      elif [ "$RUN_SOURCE" = full ] && [ "$full_bound" = 1 ] && [ -n "$FULL_MATCHING_PR" ] \
+        && [ "$LEDGER_PR_EVIDENCE" != terminal-conflict ]; then
         case "$LEDGER_STATUS" in
           ''|cancelled)
             run_id=$(strip_quotes "$(nm_field id)")
@@ -945,8 +952,8 @@ if [ -n "$LOG_VERB" ]; then
   LOG_STATE=$(map_log_state "$LOG_LINE")
   if [ "$LOG_STATE" != unknown ]; then
     evidence=''
-    if log_reports_registered_pr_green \
-      && { [ -n "$FULL_MATCHING_PR" ] || { [ -z "$full_cancelled" ] && [ -n "$LEDGER_MATCHING_PR" ]; }; }; then
+    if [ "$LEDGER_PR_EVIDENCE" != terminal-conflict ] && log_reports_registered_pr_green \
+      && { [ -n "$FULL_MATCHING_PR" ] || { [ -z "$full_cancelled" ] && [ "$LEDGER_PR_EVIDENCE" = matching-pr ]; }; }; then
       evidence=cancelled-pr-green
     fi
     emit "$LOG_STATE" status-log "$(status_line_note "$LOG_LINE")" "$evidence"
