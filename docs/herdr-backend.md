@@ -217,7 +217,7 @@ herdr_pane_id=<pane-id>
 ```
 
 A Herdr pane id contains a colon, so the adapter splits `window=` on the first colon only.
-Ship and scout records also carry `herdr_terminal_id=` from the tab creation response.
+New ship and scout records also carry `herdr_terminal_id=` from the tab creation response.
 The [live endpoint checks](#restart-and-liveness-behavior) determine whether the recorded pane still belongs to the task.
 Workspace and tab ids support verification and cleanup but are not inferred from mutable labels during normal operation.
 
@@ -227,14 +227,16 @@ The focused regression and token-free real-lab entry point are recorded in [runt
 
 ### Manual recovery for pre-binding workers
 
-An explicit Firstmate update warns before advancing a local checkout whose pre-binding worker records point to existing panes.
-Remote secondmate updates, older updaters, bootstrap, and spawn-time sync can advance a home without this warning.
+During an explicit Firstmate update, the updater warns when pre-binding Herdr ship or scout records in a local home point to confirmed existing panes.
+The check runs before the fetch and fast-forward eligibility checks, so an advisory warning can also appear for an already-current or skipped checkout.
+Remote secondmate updates, older updaters, bootstrap, and spawn-time sync skip this check.
+The [updater regression](../tests/fm-update.test.sh) covers warning timing, local scope, and preservation of worker records.
 
-A local ship or scout record created before terminal binding may lack `herdr_terminal_id=`, leaving its pane unreadable to normal worker commands.
-Recover it on the host that owns the pane using the following checks.
+For a [pre-binding worker with an unreadable pane](#restart-and-liveness-behavior), apply the following checks on the host that owns the pane.
 For a worker supervised by a remote secondmate, perform these checks on the remote host against the worker record in that secondmate's home.
 
-1. Locate the affected home's `state/<task>.meta`, or the exact state directory used by the update if it supplied `FM_STATE_OVERRIDE`.
+1. Locate the affected home's `state/<task>.meta` and set `meta` to its path and `task` to its task ID.
+   If the affected home ran the explicit update with `FM_STATE_OVERRIDE`, use the state directory selected by that override.
    Confirm that it belongs to the intended local Herdr ship or scout and has no `herdr_terminal_id=` line.
    Stop for a secondmate record, any `remote_host=` line, or any existing terminal binding.
 2. In Bash, source `bin/fm-backend.sh` from the updated checkout and require `fm_backend_validate_task_endpoint "$meta" "$task"` to succeed for the selected file and exact task ID, with `FM_BACKEND_VALIDATED_BACKEND` equal to `herdr`.
@@ -330,6 +332,7 @@ The adapter applies the recorded binding when the caller selects a task record, 
 A newly created pane uses its own terminal id during launch, including when a new secondmate takes a pane id still claimed by a worker record.
 Secondmates start directly in their home, so subsequent task-selected access uses the canonical pane creation directory, including for [remote endpoint operations](remote-secondmates.md#normal-operation).
 An older worker record with a still-present pane and no recorded terminal id is unreadable and retained.
+See [manual recovery for pre-binding workers](#manual-recovery-for-pre-binding-workers) for eligibility and required checks.
 Capture, key and text delivery, and terminal close require a match when a binding is supplied.
 Capture rechecks that binding before returning output.
 Herdr mutations use a separate request from the identity check, leaving a race if the server restarts and reuses the pane id between requests.
