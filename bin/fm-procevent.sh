@@ -9,7 +9,7 @@
 #   fm-procevent.sh start <source-id>
 #   fm-procevent.sh reconcile
 #   fm-procevent.sh classify <result-file>
-#   fm-procevent.sh handled <source-id> <sequence>
+#   fm-procevent.sh handled <source-id> <sequence> [--assignments-resolved]
 #   fm-procevent.sh retire <source-id> [--if-absent|--if-matches <adapter> -- <argv>...|--if-owner <registration-token>]
 #   fm-procevent.sh sweep-home [--preflight]
 #   fm-procevent.sh binding-retirement-preflight <binding-digest>
@@ -78,6 +78,9 @@
 #            twice. Until this is called, the result stays eligible for
 #            bounded re-announcement on every reconcile. Marking a result
 #            handled does not retire its source registration or claim.
+#            Bearings results with decoded helper requests require
+#            --assignments-resolved after the supervisor resolves every
+#            request under the Bearings skill's trusted-chat procedure.
 # retire     Drop a registration, stop a runner this home owns, release the claim.
 #            Idempotent, and still the supported explicit path after a source has
 #            already retired itself on its adapter's terminal verdict. Existing
@@ -1635,12 +1638,35 @@ cmd_classify() {
   "$script" classify "$result"
 }
 
+check_handled_assignments() {  # <source-id> <sequence>
+  local id=$1 seq=$2 result board board_id assignments
+  local adapter="$SCRIPT_DIR/fm-procevent-lavish.sh"
+  result="$(fm_procevent_inbox_dir "$STATE")/$id.$seq.result"
+  [ "$(fm_procevent_result_adapter "$result")" = lavish ] || return 0
+  board=$(FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-bearings-board.sh" path) || return 1
+  board_id=$("$adapter" source-id "$board" 2>/dev/null) || return 0
+  [ "$id" = "$board_id" ] || return 0
+  assignments=$("$adapter" assignments "$result") || return 1
+  [ -n "$assignments" ] || return 0
+  printf '%s\n' "$assignments" >&2
+  printf 'error: Bearings helper requests are pending. Follow the Bearings skill and seek confirmation for eligible requests in trusted chat before acknowledging this wake.\n' >&2
+  return 1
+}
+
 cmd_handled() {
   local id=${1-} seq=${2-} status
+  if [ "$#" -ne 2 ] && { [ "$#" -ne 3 ] || [ "$3" != --assignments-resolved ]; }; then
+    usage
+  fi
   fm_procevent_source_id_valid "$id" || die "source id must be path-safe: $id"
   case "$seq" in ''|*[!0-9]*) die "sequence must be a nonnegative integer: $seq" ;; esac
   owner_lease_refresh
   fm_procevent_source_lock_acquire "$id" || die "cannot lock source: $id"
+  if [ "$#" -eq 2 ] && ! fm_procevent_is_handled "$STATE" "$id" "$seq" &&
+      ! check_handled_assignments "$id" "$seq"; then
+    fm_procevent_source_lock_release "$id"
+    return 1
+  fi
   fm_procevent_mark_handled "$STATE" "$id" "$seq"
   status=$?
   fm_procevent_source_lock_release "$id"

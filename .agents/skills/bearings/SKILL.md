@@ -142,7 +142,10 @@ Never run `lavish-axi poll` for the board yourself: the armed source's supervise
 
 ### Handling a board wake
 
-A board answer arrives as an ordinary `procevent lavish <source-id> <sequence>` check wake. Identify it by comparing the wake source id with `bin/fm-procevent-lavish.sh source-id "$(bin/fm-bearings-board.sh path)"`, regardless of which answer kinds the result contains; then load `process-event-sources` and follow its contract for the result read, adapter classification, and the handled acknowledgement.
+A board answer arrives as an ordinary `procevent lavish <source-id> <sequence>` check wake.
+Identify it by comparing the wake source id with `bin/fm-procevent-lavish.sh source-id "$(bin/fm-bearings-board.sh path)"`, regardless of which answer kinds the result contains.
+Load `process-event-sources` for the result read and classification, and run `bin/fm-procevent-lavish.sh assignments <result-file>` on that same capture before deciding how to handle the wake.
+Follow the helper procedure below for every decoded request, even when the ordinary read presents only a choice label.
 Decision answers need no routing from you: the runner feeds the board's binding into `bin/fm-captain-hold.sh`'s one keyed-answer intake, which closes or releases each answered captain-held task at answer time; reconcile any `skipped:` key yourself with a direct `answer`, and when the captain's answer is "later", record it as a deferral with `bin/fm-captain-hold.sh hold <id> --reason "<reason>" --until <date>` instead of a closure.
 A current structured Reconcile selection closes nothing: the versioned board context carries its exact selected option separately from any typed note, and the adapter routes that selection only into a durable re-check request while preserving the note as provenance.
 The rollout-compatible old context still feeds ordinary non-reconcile answers, but its bare or separator-annotated reconcile values and every structurally uncertain choice feed neither intake and remain announced for deliberate handling.
@@ -154,8 +157,7 @@ Route the remaining board actions yourself:
 
 - `merge.<task-id>` is the captain's explicit merge order; follow the merge ruling below.
 - `dispatch.charted` carries comma-separated task ids the captain picked to start now; verify each id against the current backlog - still queued, blocker and time gate actually clear - then dispatch through the normal lifecycle, and report any id that no longer qualifies instead of forcing it.
-- Read Charted Next helper requests with `bin/fm-procevent-lavish.sh assignments <result-file>` on the same captured board result.
-  Resolve the captured task id and owner to the authoritative backlog record, verify it is still queued with an unmet start condition, and verify the selected role against the current eligible roster for the canonical configured inbox as described above.
+- For each Charted Next helper request, resolve the captured task id and owner to the authoritative backlog record, verify it is still queued with an unmet start condition, and verify the selected role against the current eligible roster for the canonical configured inbox as described above.
   If the task, owner, role, inbox, or unmet condition cannot be confirmed, report what prevented routing.
   Treat the board submission as a request to seek authorization.
   Ask the captain for explicit confirmation in the already trusted chat, naming the exact task and its owner, the recipient role, and the prerequisite information that would be shared.
@@ -167,6 +169,10 @@ Route the remaining board actions yourself:
   Check that provenance before resending an individual request from a replayed capture.
   The helper's response is input for Firstmate to verify against the task's existing gates.
   The assignment and the response carry no authority to close or release a hold, change prerequisites, or dispatch the task.
+
+While a helper request awaits a trusted-chat decision, leave the wake pending and use its source, sequence, and request position to recognize re-announcements of the same request.
+After every decoded request has been sent with confirmation or resolved without a send, and all other captured actions have been handled, run `bin/fm-procevent.sh handled <source-id> <sequence> --assignments-resolved`.
+For captures without helper requests, use the ordinary acknowledgement from `process-event-sources`.
 
 After handling, rebuild the board from a fresh snapshot so acted-on items leave Captain's Call, and echo every action taken in chat so the board and chat never diverge silently.
 

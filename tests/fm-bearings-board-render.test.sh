@@ -341,6 +341,53 @@ test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path
   pass "roster role requests survive both Lavish formats outside the hold intakes"
 }
 
+test_charted_helper_wake_requires_explicit_resolution() (
+  fm_test_require_lavish_codec "Bearings helper wake acknowledgement" || return 0
+  export FM_HOME="$TMP_ROOT/helper-wake" FM_STATE_OVERRIDE="$TMP_ROOT/helper-wake/state"
+  export FM_PROCEVENT_CLAIM_ROOT="$FM_HOME/procevent-claims"
+  local board sid capture result output rc=0
+  local runner="$ROOT/bin/fm-procevent.sh" adapter="$ROOT/bin/fm-procevent-lavish.sh"
+  fm_test_track_procevent_home "$FM_HOME" "$FM_PROCEVENT_CLAIM_ROOT"
+  mkdir -p "$FM_HOME/.lavish" "$FM_STATE_OVERRIDE"
+  board=$("$BOARD" path) || fail "could not locate the canonical board"
+  : > "$board"
+  sid=$("$adapter" source-id "$board") || fail "could not identify the canonical board source"
+  capture="$FM_HOME/poll-response"
+  cat > "$capture" <<'EOF'
+session:
+  status: feedback
+prompts[1]{uid,prompt,selector,tag,text}:
+  1,"Request help\n\nContext data:\n{\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"export-check\",\"owner\":\"(main)\",\"agent\":\"rakazo\"}",form,choice,"Confirm export prerequisite → rakazo"
+next_step: Review the feedback
+EOF
+  "$runner" register lavish "$sid" -- /bin/cat "$capture" >/dev/null ||
+    fail "could not register the captured poll response"
+  "$runner" start "$sid" >/dev/null || fail "could not capture the helper selection"
+  result="$FM_STATE_OVERRIDE/procevent-inbox/$sid.1.result"
+  output=$("$adapter" read "$result") || fail "could not read the captured result"
+  assert_contains "$output" "complete: yes" "the helper capture should be complete"
+  output=$("$adapter" assignments "$result") || fail "could not decode the helper request"
+  printf '%s\n' "$output" | jq -se '. == [{question:"export-check",owner:"(main)",agent:"rakazo"}]' >/dev/null ||
+    fail "the captured result did not contain the expected helper request"
+
+  output=$("$runner" handled "$sid" 1 2>&1) || rc=$?
+  assert_equals 1 "$rc" "plain acknowledgement retired a pending helper request: $output"
+  assert_absent "${result%.result}.handled" "the pending helper wake was marked handled"
+  assert_contains "$output" "trusted chat" "the refused acknowledgement did not direct the supervisor to confirmation"
+  printf '%s\n' "$output" | jq -Rse '
+    split("\n") | map(fromjson?) | . == [{question:"export-check",owner:"(main)",agent:"rakazo"}]
+  ' >/dev/null || fail "the refused acknowledgement did not surface the decoded helper request"
+
+  output=$("$runner" handled "$sid" 1 --assignments-resolved) || fail "could not acknowledge explicit resolution"
+  assert_equals "handled: $sid 1" "$output" "explicit resolution did not acknowledge the wake"
+  assert_equals "already-handled: $sid 1" "$("$runner" handled "$sid" 1)" "resolution was not idempotent"
+
+  printf 'session:\n  status: feedback\nprompts: []\nnext_step: Review the feedback\n' > "$capture"
+  "$runner" start "$sid" >/dev/null || fail "could not capture ordinary board feedback"
+  assert_equals "handled: $sid 2" "$("$runner" handled "$sid" 2)" "ordinary board feedback needs no explicit resolution"
+  pass "a Bearings helper wake stays pending until explicitly resolved"
+)
+
 test_incomplete_lavish_rows_do_not_reach_choice_intake() {
   local capture adapter view assignments rc
   fm_test_require_lavish_codec "Bearings partial capture decoding" || return 0
@@ -868,6 +915,7 @@ test_charted_next_reads_newest_filed_first
 test_charted_rows_without_a_filed_date_follow_the_dated_rows_in_payload_order
 test_charted_next_sorts_four_labeled_tiers_and_keeps_warnings_unranked
 test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path
+test_charted_helper_wake_requires_explicit_resolution
 test_incomplete_lavish_rows_do_not_reach_choice_intake
 test_feedback_requires_a_declared_prompt_block
 test_a_warning_row_reads_as_a_repair_not_as_queued_work
