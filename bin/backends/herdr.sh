@@ -2514,7 +2514,7 @@ EOF
 }
 
 fm_backend_herdr_husk_close_allowed() {  # <session> <pane>
-  local session=$1 pane=$2 target="$1:$2" candidate meta= identity
+  local session=$1 pane=$2 target="$1:$2" candidate meta='' identity
   for candidate in "${FM_STATE_OVERRIDE:-$FM_HOME/state}"/*.meta; do
     [ -f "$candidate" ] || continue
     [ "$(fm_meta_get "$candidate" window)" = "$target" ] || continue
