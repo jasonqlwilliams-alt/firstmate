@@ -437,9 +437,10 @@ finish_concurrent_recovery() {  # <id> <home> <project> <status> <old-pane> <log
   [ "$status" -ne 0 ] || return 0
   grep -Fq "could not acquire its session lock; refusing a concurrent resume" "$log.err" \
     || fail "concurrent recovery for $id failed unexpectedly: $(cat "$log.err")"
-  [ "$(sed -n 's/^herdr_pane_id=//p' "$home/state/$id.meta")" = "$old_pane" ] \
-    && lab pane get "$old_pane" >/dev/null \
-    || fail "lock refusal changed the original endpoint for $id"
+  if [ "$(sed -n 's/^herdr_pane_id=//p' "$home/state/$id.meta")" != "$old_pane" ] \
+    || ! lab pane get "$old_pane" >/dev/null; then
+    fail "lock refusal changed the original endpoint for $id"
+  fi
   spawn_task "$id" "$home" "$project" > "$log.out" 2> "$log.err" \
     || fail "recovery retry for $id after lock release failed: $(cat "$log.err")"
 }

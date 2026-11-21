@@ -714,7 +714,7 @@ fm_backend_source() {  # <name>
 #                      metadata, then treated as an ad hoc bare window name and
 #                      resolved by searching the legacy tmux live inventory.
 fm_backend_resolve_selector() {  # <raw-target> <state-dir>
-  local raw=$1 state=$2 meta= target named=
+  local raw=$1 state=$2 meta='' target named=''
   case "$raw" in
     *:*)
       target=$raw
