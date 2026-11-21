@@ -590,22 +590,26 @@ fm_backend_herdr_task_identity_state() {  # <target> [binding]
 # The explicit updater needs only to know whether a legacy record still
 # points to an existing pane. Presence does not establish worker ownership.
 fm_backend_herdr_warn_prebinding_workers() {  # <state-dir> <home-label>
-  local state=$1 label=$2 meta id target presence
+  local state=$1 label=$2 meta id target session pane presence
   for meta in "$state"/*.meta; do
-    if [ ! -f "$meta" ] || [ -L "$meta" ] || ! grep -Fxq 'backend=herdr' "$meta" ||
+    if [ ! -f "$meta" ] || [ -L "$meta" ] || [ "$(fm_backend_meta_exact_value "$meta" backend)" != herdr ] ||
       grep -Eq '^(remote_host=|herdr_terminal_id=|kind=secondmate$)' "$meta"; then
       continue
     fi
     case "$(fm_meta_get "$meta" kind)" in ''|ship|scout) ;; *) continue ;; esac
     id=${meta##*/}
     id=${id%.meta}
-    if ! fm_backend_validate_task_endpoint "$meta" "$id" 2>/dev/null ||
-      ! fm_backend_source herdr || ! fm_backend_herdr_parse_target "$FM_BACKEND_VALIDATED_TARGET"; then
+    if ! session=$(fm_backend_meta_exact_value "$meta" herdr_session) ||
+      ! pane=$(fm_backend_meta_exact_value "$meta" herdr_pane_id) ||
+      ! target=$(fm_backend_meta_exact_value "$meta" window) ||
+      [ "$target" != "$session:$pane" ] ||
+      ! fm_backend_endpoint_atom_valid "$session" ||
+      ! fm_backend_endpoint_atom_valid "${pane//:/_}" ||
+      ! fm_backend_source herdr; then
       printf 'warning: %s: could not check pre-binding Herdr worker %s\n' "$label" "$id" >&2
       continue
     fi
-    target=$FM_BACKEND_VALIDATED_TARGET
-    presence=$(fm_backend_herdr_pane_presence_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE") || presence=unknown
+    presence=$(fm_backend_herdr_pane_presence_state "$session" "$pane") || presence=unknown
     case "$presence" in
       present)
         printf 'warning: %s: pre-binding Herdr worker record %s points to existing pane %s. Pane ownership still needs verification. See the manual recovery procedure in docs/herdr-backend.md.\n' \

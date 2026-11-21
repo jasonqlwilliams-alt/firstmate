@@ -239,19 +239,20 @@ Recover it on the host that owns the pane using the following checks.
    Confirm that it belongs to the intended local Herdr ship or scout and has no `herdr_terminal_id=` line.
    Stop for a secondmate record, any `remote_host=` line, or any existing terminal binding.
 2. In Bash, source `bin/fm-backend.sh` from the updated checkout and require `fm_backend_validate_task_endpoint "$meta" "$task"` to succeed for the selected file and exact task ID, with `FM_BACKEND_VALIDATED_BACKEND` equal to `herdr`.
-   A record that lacks an exact `endpoint_task_id=` binding fails this check and is ineligible for this procedure.
-   Keep `FM_BACKEND_VALIDATED_TARGET` as the target and take the session and pane from the validated `herdr_session=` and `herdr_pane_id=` fields.
-   Query the exact pane using `herdr pane get "$pane" --session "$session"`.
+   An update warning can identify older records that lack an exact `endpoint_task_id=` binding, which makes them ineligible for manual adoption.
+   Set `target=$FM_BACKEND_VALIDATED_TARGET` and take the session and pane from the validated `herdr_session=` and `herdr_pane_id=` fields.
+   Load the adapter with `fm_backend_source herdr` and query the exact pane using `fm_backend_herdr_cli "$session" pane get "$pane"`.
    Confirm the returned pane ID and verify that `foreground_cwd` resolves to the same directory as the record's `worktree=`.
-   Load the adapter with `fm_backend_source herdr` and check the returned terminal ID with `fm_backend_herdr_terminal_id_valid "$terminal_id"`.
+   Check the returned terminal ID with `fm_backend_herdr_terminal_id_valid "$terminal_id"`.
    The pane's creation `cwd` is insufficient for this check.
-3. For a live agent, require both `herdr agent get "$pane" --session "$session"` confirming the record's `harness=` and positive evidence from the pane's process tree that the matching agent process is still running there.
-   Use `herdr pane process-info --pane "$pane" --session "$session"` and the host process table to inspect the foreground process group and the pane shell's descendants.
-   For an exited agent, establish from those processes that the agent has exited and that there is no replacement agent, then require this task's own launch line in `herdr pane read "$pane" --source recent --lines 200 --session "$session"`.
+3. For a live agent, require both `fm_backend_herdr_cli "$session" agent get "$pane"` confirming the record's `harness=` and positive evidence from the pane's process tree that the matching agent process is still running there.
+   Use `fm_backend_herdr_cli "$session" pane process-info --pane "$pane"` and the host process table to inspect the foreground process group and the pane shell's descendants.
+   For an exited agent, establish from those processes that the agent has exited and that there is no replacement agent, then require this task's own launch line in the retained scrollback.
+   Start with `fm_backend_herdr_cli "$session" pane read "$pane" --source recent --lines 200` and increase `--lines` as needed to search the full retained scrollback.
    A generic launch line or a matching pane label does not prove ownership.
 4. With the affected home and state directory selected, source `bin/fm-wake-lib.sh`, get the lock path with `fm_meta_lock_path "$meta"`, and acquire it with `fm_lock_try_acquire "$lock"`.
    Hold this lock in the same shell through the final reread and append.
-   Reread the regular record under the lock and repeat the endpoint, pane, foreground directory, agent evidence, and terminal ID checks.
+   Reread the regular record under the lock and repeat steps 2 and 3, reading enough scrollback to verify the same launch line for an exited agent.
    Leave the record untouched if the record or evidence changed, if the lock or any proof is unavailable, or if any evidence is mismatched or ambiguous.
    Once all checks pass and the record still ends with a newline and has no `herdr_terminal_id=` line, append exactly one line with `printf 'herdr_terminal_id=%s\n' "$terminal_id" >> "$meta"`.
    Release the lock with `fm_lock_release "$lock"` after the append or on abandoning the edit.

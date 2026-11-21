@@ -187,10 +187,6 @@ if [ -f "$SECONDMATES_MD" ]; then
             fi
             ;;
           'synced: '*|'current: '*) remote_result=$line_out ;;
-          'firstmate: skipped: '*) remote_failure=$line_out ;;
-          'error: '*)
-            case "$remote_failure" in 'firstmate: skipped: '*) ;; *) remote_failure=$line_out ;; esac
-            ;;
           *) remote_failure=${remote_failure:-$line_out} ;;
         esac
       done <<< "$remote_out"

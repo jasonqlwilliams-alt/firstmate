@@ -278,9 +278,9 @@ case "${rargs[1]:-}" in
         'error: remote secondmate home sync skipped: dirty working tree' >&2
       exit 1
     fi
-    if [ "${FM_TEST_REMOTE_DIRTY:-0}" = legacy-root ]; then
-      printf '%s\n' 'firstmate: skipped: dirty working tree' \
-        'error: remote code root did not complete a safe origin update' >&2
+    if [ "${FM_TEST_REMOTE_DIRTY:-0}" = root-error ]; then
+      printf '%s\n' 'error: could not read remote code root' \
+        'error: remote code root update failed' >&2
       exit 1
     fi
     printf 'synced: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
@@ -346,9 +346,9 @@ EOF
   assert_contains "$out" "restart-secondmates: none" "failed remote update triggered a restart"
   pass "Remote update warnings preserve the sync refusal"
 
-  out=$(FM_TEST_REMOTE_DIRTY=legacy-root "${remote_update[@]}" 2>&1)
-  assert_contains "$out" "remote secondmate sm1: skipped on remote-mac: firstmate: skipped: dirty working tree" \
-    "the legacy host's final error obscured the code-root refusal"
+  out=$(FM_TEST_REMOTE_DIRTY=root-error "${remote_update[@]}" 2>&1)
+  assert_contains "$out" "remote secondmate sm1: skipped on remote-mac: error: could not read remote code root" \
+    "the final error obscured the code-root refusal"
   assert_contains "$out" "restart-secondmates: none" "refused code-root update triggered a restart"
 }
 
@@ -364,9 +364,10 @@ test_current_updater_warns_about_prebinding_workers() {
   for id in main-live home-live missing bound remote secondmate; do
     state="$w/home/state"
     [ "$id" != home-live ] || state="$w/sm1/state"
-    fm_write_meta "$state/$id.meta" "window=update-herdr:w1:p-$id" "endpoint_task_id=$id" \
+    fm_write_meta "$state/$id.meta" "window=update-herdr:w1:p-$id" \
       "backend=herdr" "kind=ship" "harness=claude" "worktree=$w/seed" "project=$w/seed" \
       "herdr_session=update-herdr" "herdr_workspace_id=w1" "herdr_tab_id=w1:t1" "herdr_pane_id=w1:p-$id"
+    [ "$id" = main-live ] || printf 'endpoint_task_id=%s\n' "$id" >> "$state/$id.meta"
   done
   printf 'herdr_terminal_id=term-bound\n' >> "$w/home/state/bound.meta"
   printf 'remote_host=another-host\n' >> "$w/home/state/remote.meta"
@@ -454,8 +455,7 @@ SH
     "$ROOT/bin/fm-remote-secondmate-control.sh" update sm1 2>&1); then
     fail "remote update accepted a dirty code root"
   fi
-  assert_contains "$out" "error: remote code root update skipped: dirty working tree" \
-    "the host's final error lost the code-root refusal"
+  assert_contains "$out" "firstmate: skipped: dirty working tree" "the host lost the code-root refusal"
 }
 
 # --- T4: dirty secondmate is skipped, its edit preserved -------------------
