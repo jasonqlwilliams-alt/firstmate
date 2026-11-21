@@ -1511,9 +1511,9 @@ status_open_decisions_cursor_offset() {  # <status-file>
 # changed status identity reads the current file from offset 0; malformed or
 # unreadable cursor state fails the scan. Symlinks and unreadable status files
 # print nothing.
-status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|unread-surface]
-  local f=$1 captured_end=${2:-} surface=${3:-all} cf offset size actual_size chunk_file filtered_file line rc=0
-  case "$surface" in all|unread-surface) ;; *) return 1 ;; esac
+status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|unread-surface|warning-offset]
+  local f=$1 captured_end=${2:-} surface=${3:-all} cf offset size actual_size chunk_file filtered_file line boundary rc=0
+  case "$surface" in all|unread-surface|warning-offset) ;; *) return 1 ;; esac
   [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || return 0
   cf=$(_fm_open_decisions_cursor_path "$f")
   chunk_file="$cf.unread.$$"
@@ -1532,16 +1532,20 @@ status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|
   [ "$offset" -lt "$size" ] || return 0
   _fm_status_read_span "$f" "$offset" "$((size - offset))" > "$chunk_file" 2>/dev/null \
     || { rm -f "$chunk_file"; return 1; }
-  if [ "$surface" = unread-surface ]; then
+  if [ "$surface" != all ]; then
     # A cheap superset filter keeps wide routine lines out of Bash entirely.
     # The exact classifier below remains authoritative for every candidate.
     # ENVIRON preserves literal override bytes rather than awk -v escapes.
     filtered_file="$chunk_file.filtered"
     if ! FM_STATUS_SURFACE_RESOLVE="${FM_CLASSIFY_RESOLVE_VERB:-$FM_CLASSIFY_RESOLVE_VERB_DEFAULT}" \
       FM_STATUS_SURFACE_HELD="${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}" \
-      LC_ALL=C awk '
+      LC_ALL=C awk -v mode="$surface" -v position="$offset" '
         { prefix=$0; sub(/:.*/, "", prefix)
-          if (index(prefix, "note") || index(prefix, "needs-decision") ||
+          decision = index(prefix, "needs-decision")
+          if (mode == "warning-offset") {
+            if (decision) printf "%.0f\t%s\n", position, $0
+            position += length($0) + 1
+          } else if (index(prefix, "note") || decision ||
               index(prefix, ENVIRON["FM_STATUS_SURFACE_RESOLVE"]) ||
               index(prefix, ENVIRON["FM_STATUS_SURFACE_HELD"])) print }
       ' "$chunk_file" > "$filtered_file"; then
@@ -1554,6 +1558,14 @@ status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|
     fi
   fi
   while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$surface" = warning-offset ]; then
+      boundary=${line%%$'\t'*}
+      line=${line#*$'\t'}
+      [ "$(status_line_verb "$line")" = needs-decision ] || continue
+      status_line_is_unread_surface "$line" || continue
+      printf '%s\n' "$boundary" || rc=1
+      break
+    fi
     case "$line" in
       *[![:space:]]*)
         if [ "$surface" = unread-surface ] && ! status_line_is_unread_surface "$line"; then
@@ -1631,18 +1643,11 @@ EOF
 }
 
 status_branch_presentation_snapshot() {  # <state> <task-and-endpoint-snapshot>
-  local state=$1 snapshot=$2 task endpoint ident file lines line
+  local state=$1 snapshot=$2 task endpoint ident boundary
   while IFS=$'\t' read -r task endpoint ident; do
     [ -n "$task" ] || continue
-    file="$state/$task.status"
-    lines=$(status_new_lines_since_cursor "$file" "$endpoint" unread-surface) || return 1
-    while IFS= read -r line; do
-      [ -n "$line" ] || continue
-      [ "$(status_line_verb "$line")" = needs-decision ] || continue
-      endpoint=$(status_presentation_cursor_offset "$file") || return 1
-      break
-    done <<< "$lines"
-    printf '%s\t%s\t%s\n' "$task" "$endpoint" "$ident" || return 1
+    boundary=$(status_new_lines_since_cursor "$state/$task.status" "$endpoint" warning-offset) || return 1
+    printf '%s\t%s\t%s\n' "$task" "${boundary:-$endpoint}" "$ident" || return 1
   done <<< "$snapshot"
 }
 

@@ -192,7 +192,8 @@ Host-side capture, key delivery, pending-reply observation, and inbox doorbells 
 An unreachable or unreadable remote read is unknown, not evidence that the endpoint is dead.
 
 Marked requests keep the existing correlation contract.
-The remote charter appends replies to `state/parent-replies.status` in the remote home.
+The remote charter appends directly to `state/parent-replies.status` in the remote home and can report even when the home skips its pre-launch sync.
+The parent drain warns on rejected reserved-key decisions from this relay, as it does for Rovo's native status appends.
 The remote home's own outcome publishers append there too, through the channel contract in `bin/fm-parent-channel-lib.sh` ([secondmate-parent-channel.md](secondmate-parent-channel.md)).
 A process-event source performs a non-destructive, cursor-anchored delta read, fetches only referenced `data/*.md` documents through the confined reader, mirrors every content-bearing line at most once into the primary status channel, and does not carry blank separators.
 The channel carries the mate's status and decision model: an uncorrelated progress line and a newly raised `needs-decision` travel the same path as a correlated answer, and reach the parent's open-decision fold identically.

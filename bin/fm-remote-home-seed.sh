@@ -146,8 +146,8 @@ TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-remote-home-seed.XXXXXX") || die "cannot cre
 REG_EXISTED=0
 [ -f "$REG" ] && { cp "$REG" "$TMP/registry.before"; REG_EXISTED=1; }
 
-# Keep the parent charter as its durable source and publish a remote copy with
-# the remote secondmate home's status writer and append-only relay log.
+# Keep the parent charter as its durable source, but publish a remote copy whose
+# status path is the remote append-only relay log rather than a local Mac path.
 PARENT_STATUS="$STATE/$ID.status"
 case "$PARENT_STATUS" in
   /*) ;;
@@ -162,18 +162,26 @@ esac
 REMOTE_STATUS="$REMOTE_HOME/state/parent-replies.status"
 PARENT_STATUS_SH=$(fm_brief_shell_quote "$PARENT_STATUS")
 REMOTE_STATUS_SH=$(fm_brief_shell_quote "$REMOTE_STATUS")
-REMOTE_APPEND_SH=$(fm_brief_shell_quote "$REMOTE_HOME/bin/fm-status-append.sh")
-APPEND_SUFFIX="/bin/fm-status-append.sh' $PARENT_STATUS_SH "
 while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in
-    "   \`"*"$APPEND_SUFFIX"*)
-      line="   \`$REMOTE_APPEND_SH $REMOTE_STATUS_SH ${line#*"$APPEND_SUFFIX"}"
-      ;;
     *"$PARENT_STATUS_SH"*) line=${line//"$PARENT_STATUS_SH"/"$REMOTE_STATUS_SH"} ;;
     *) line=${line//"$PARENT_STATUS"/"$REMOTE_STATUS"} ;;
   esac
   printf '%s\n' "$line"
-done < "$BRIEF" > "$TMP/charter.remote"
+done < "$BRIEF" | FM_SECONDMATE_STATUS_INTRO="$FM_SECONDMATE_STATUS_INTRO" \
+  FM_BRIEF_STATUS_RESERVED_KEY_RULE="$FM_BRIEF_STATUS_RESERVED_KEY_RULE" \
+  FM_REMOTE_STATUS_COMMAND="   \`echo \"{state}: {one short line}\" >> $REMOTE_STATUS_SH\`" awk '
+    /^# / { escalation = ($0 == "# Escalation to main firstmate") }
+    escalation && $0 == ENVIRON["FM_SECONDMATE_STATUS_INTRO"] {
+      print
+      if ((getline command) <= 0) next
+      if ((getline rule) <= 0) { print command; next }
+      if (rule == "   " ENVIRON["FM_BRIEF_STATUS_RESERVED_KEY_RULE"]) print ENVIRON["FM_REMOTE_STATUS_COMMAND"]
+      else { print command; print rule }
+      next
+    }
+    { print }
+  ' > "$TMP/charter.remote"
 
 PROJECTS_CSV=
 : > "$TMP/project.records"

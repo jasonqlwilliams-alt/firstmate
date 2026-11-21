@@ -578,7 +578,7 @@ print_status_sections() {
 
 print_status_presentation() {  # [<deduped-raw-rows>]
   local rows=${1:-} lock="$STATE/.status-presentation-lock" snapshot presentable annotation_manifest fully_presented='' rc=0
-  local lock_rc holder_pid
+  local lock_rc holder_pid pre_fold
   if fm_lock_acquire_wait_bounded "$lock" "$PRESENTATION_LOCK_TIMEOUT"; then
     :
   else
@@ -596,6 +596,13 @@ print_status_presentation() {  # [<deduped-raw-rows>]
     printf 'STATUS PRESENTATION INCOMPLETE: status snapshot could not be read.\n'
     rc=1
   }
+  if [ "$rc" -eq 0 ] && [ -n "$snapshot" ] \
+    && [ ! -e "$STATE/.status-presentation-cursor" ] && [ ! -L "$STATE/.status-presentation-cursor" ]; then
+    if ! pre_fold=$(status_acknowledge_presented_snapshot "$STATE" "$snapshot" '' '') \
+      || ! status_commit_presentation_snapshot "$STATE" "$pre_fold"; then
+      rc=1
+    fi
+  fi
   presentable=$snapshot
   if [ "$rc" -eq 0 ] && [ "$ACTOR" = branch ]; then
     presentable=$(status_branch_presentation_snapshot "$STATE" "$snapshot") || rc=1

@@ -212,29 +212,16 @@ FM_SECONDMATE_CHARTER='Own iOS delivery on the build Mac.' \
   >/dev/null || fail "real remote secondmate seeding failed"
 
 assert_absent "$REMOTE_HOME/bin/fm-status-append.sh" "the seeded home unexpectedly had the writer before sync"
-PUBLISHER="$TMP_ROOT/firstmate-publisher"
-git clone -q -- "$REMOTE_ORIGIN" "$PUBLISHER" || fail "could not clone the updated checkout fixture"
-cp -p "$ROOT/bin/fm-status-append.sh" "$PUBLISHER/bin/fm-status-append.sh" || fail "could not stage the writer fixture"
-git -C "$PUBLISHER" add bin/fm-status-append.sh || fail "could not stage the updated checkout"
-git -C "$PUBLISHER" -c user.name=Test -c user.email=test@example.com commit -qm 'add status writer' \
-  || fail "could not commit the updated checkout"
-git -C "$PUBLISHER" push -q origin main || fail "could not publish the updated checkout"
-git -C "$REMOTE_HOME" remote set-url origin "$REMOTE_ORIGIN" || fail "could not set the home's sync source"
-writer_commit=$(git -C "$PUBLISHER" rev-parse HEAD) || fail "could not resolve the updated checkout"
-remote_env "$ROOT/bin/fm-on.sh" ios fm-remote-secondmate-control.sh sync ios "$writer_commit" \
-  >/dev/null || fail "could not sync the remote secondmate home"
-assert_absent "$REMOTE_ROOT/bin/fm-status-append.sh" "sync unexpectedly updated the host checkout"
-
-status_command=$(sed -n 's/^   `\(.*\) "{state}: {one short line}"`$/\1/p' "$REMOTE_HOME/data/charter.md")
+status_command=$(sed -n 's/^   `\(.*"{state}: {one short line}".*\)`$/\1/p' "$REMOTE_HOME/data/charter.md")
 [ -n "$status_command" ] || fail "the remote charter has no runnable status command"
-bash -c 'expected_writer=$1; shift
-set -- '"$status_command"' "$1"
-[ "$1" = "$expected_writer" ] && exec "$@"' _ "$REMOTE_HOME/bin/fm-status-append.sh" 'done: remote report delivered' \
-  || fail "the remote charter could not report using the synced home"
+status_template='"{state}: {one short line}"'
+status_argument='"$1"'
+(cd "$REMOTE_HOME" && bash -c "${status_command//"$status_template"/"$status_argument"}" _ 'done: remote report delivered') \
+  || fail "the remote charter could not report before sync"
 cmp -s "$REMOTE_HOME/state/parent-replies.status" <(printf 'done: remote report delivered\n') \
   || fail "the report did not land in the remote relay log"
 assert_absent "$PARENT/state/ios.status" "the remote charter wrote to the originating host's log"
-pass "the provisioned charter writes to the relay log with the writer available only in the synced home"
+pass "the provisioned charter writes to the relay log before sync"
 
 # --- the durable record itself: the fundamental part of the fix -------------
 assert_present "$REMOTE_HOME/.fm-secondmate-parent" \

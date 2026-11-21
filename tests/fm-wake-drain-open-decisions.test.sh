@@ -310,7 +310,7 @@ test_branch_leaves_folded_decisions_unread_for_main() {
 
   printf 'note: already read\n' > "$state/direct.status"
   FM_STATE_OVERRIDE="$state" "$DRAIN" > /dev/null || fail "main could not present the earlier note"
-  printf 'working: continuing branch work\n' >> "$state/direct.status"
+  printf 'working: continuing branch work\n\nnote: résumé ready for branch\n' >> "$state/direct.status"
   printf 'working: unrelated branch work\n' > "$state/routine.status"
   append_wake "$state" signal direct.status 'signal: direct' || fail "could not queue the direct branch row"
   append_wake "$state" signal routine.status 'signal: routine' || fail "could not queue the routine branch row"
@@ -318,13 +318,16 @@ test_branch_leaves_folded_decisions_unread_for_main() {
   FM_STATE_OVERRIDE="$state" "$grant" publish reserved-warning 1 2 || fail "could not publish branch grant"
 
   printf 'needs-decision [key=pending-reply-direct]: choose a color\n' >> "$state/direct.status"
-  printf 'needs-decision: [key=pending-reply-note] choose a shape\nnote: decision context\n' > "$state/fleet.status"
+  printf 'note: fleet context before decision\nneeds-decision: [key=pending-reply-note] choose a shape\nnote: decision context\n' > "$state/fleet.status"
   append_wake "$state" signal direct.status 'signal: direct decision' || fail "could not queue the main direct row"
   append_wake "$state" signal fleet.status 'signal: fleet decision' || fail "could not queue the main fleet row"
 
   FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=branch "$DRAIN" > "$branch_out" 2> "$dir/branch.err" \
     || fail "branch drain failed: $(cat "$dir/branch.err")"
   grep -Fq 'routine.status: working: unrelated branch work' "$branch_out" || fail "the routine branch annotation was suppressed"
+  grep -Fq 'direct.status: working: continuing branch work' "$branch_out" || fail "the granted same-task annotation was suppressed"
+  grep -Fxq 'direct note: résumé ready for branch' "$branch_out" || fail "the earlier same-task note was suppressed"
+  grep -Fxq 'fleet note: fleet context before decision' "$branch_out" || fail "the earlier fleet note was suppressed"
   if grep -Eq 'folded reserved-prefix|choose a color|choose a shape|decision context' "$branch_out"; then
     fail "the branch presented status reserved for main: $(cat "$branch_out")"
   fi
@@ -337,10 +340,45 @@ test_branch_leaves_folded_decisions_unread_for_main() {
     || fail "branch fleet receipt consumed the main warning: $(cat "$main_out")"
   grep -Fq 'direct.status: needs-decision [key=pending-reply-direct]: choose a color' "$main_out" \
     || fail "branch direct receipt consumed the main annotation: $(cat "$main_out")"
-  if grep -Fq 'already read' "$main_out"; then
-    fail "branch moved the presentation cursor backward: $(cat "$main_out")"
+  if grep -Eq 'already read|continuing branch work|ready for branch|fleet context before decision' "$main_out"; then
+    fail "main replayed status already presented before the warning: $(cat "$main_out")"
   fi
   pass "the branch preserves folded decisions and their annotations for main"
+}
+
+test_first_drain_output_failure_leaves_warning_for_main() {
+  local actor dir state grant fakebin real_cat
+  real_cat=$(command -v cat)
+  grant="$ROOT/bin/fm-wake-grant.sh"
+  for actor in main branch; do
+    dir=$(make_case "failed-first-$actor")
+    state="$dir/state"
+    fakebin=$(fm_fakebin "$dir/fake")
+    cat > "$fakebin/cat" <<SH
+#!/usr/bin/env bash
+case "\${1:-}" in
+  "$state"/.status-presentation.prepared.*) touch "$dir/rejected"; exit 1 ;;
+esac
+exec "$real_cat" "\$@"
+SH
+    chmod +x "$fakebin/cat"
+    printf 'needs-decision [key=pending-reply-retry]: choose a color\n' > "$state/retry.status"
+    if [ "$actor" = branch ]; then
+      printf 'working: unrelated granted work\n' > "$state/routine.status"
+      append_wake "$state" signal routine.status 'signal: routine' || fail "could not queue branch row"
+      FM_STATE_OVERRIDE="$state" "$grant" activate "$$" retry-warning || fail "could not activate branch owner"
+      FM_STATE_OVERRIDE="$state" "$grant" publish retry-warning 1 || fail "could not publish branch grant"
+    fi
+
+    PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR="$actor" "$DRAIN" \
+      > "$dir/failed.out" 2> "$dir/failed.err" || fail "first $actor drain changed its compatibility exit"
+    [ -f "$dir/rejected" ] || fail "first $actor drain did not reach the failed output consumer"
+    FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=main "$DRAIN" > "$dir/retry.out" 2> "$dir/retry.err" \
+      || fail "main retry after $actor failed: $(cat "$dir/retry.err")"
+    grep -Fxq 'warning: task=retry key=pending-reply-retry folded reserved-prefix needs-decision' "$dir/retry.out" \
+      || fail "the first $actor drain lost the warning when delivery failed: $(cat "$dir/retry.out")"
+  done
+  pass "a first drain with failed output leaves the folded warning unread for main"
 }
 
 test_status_append_refuses_reserved_key_before_write() {
@@ -409,6 +447,7 @@ test_status_append_refuses_reserved_key_before_write() {
 
 test_folded_reserved_needs_decision_warns_once_per_line
 test_branch_leaves_folded_decisions_unread_for_main
+test_first_drain_output_failure_leaves_warning_for_main
 test_drain_warning_follows_the_reserved_prefix_list
 test_status_append_refuses_reserved_key_before_write
 test_buried_decision_still_surfaces

@@ -2553,8 +2553,8 @@ json_escape() {
 # the process is running. rovo's bash tool is NOT covered by this grant and
 # stays confined to the worktree regardless (confirmed live) - the standard
 # crewmate flow's `bin/fm-status-append.sh` is outside its bash boundary.
-# The grant covers rovo's native file-tool append, the one supported route
-# that bypasses write-time validation and relies on the drain warning.
+# The grant covers rovo's native file-tool append, which relies on the drain
+# warning for reserved-key decisions.
 # --config-override itself is single-value (a second occurrence silently
 # discards the first, confirmed live), so this is the ONE place that must
 # also fold in agent.efficiencyLevel when a supported effort was requested.

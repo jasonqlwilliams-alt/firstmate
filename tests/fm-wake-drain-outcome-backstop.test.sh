@@ -260,7 +260,7 @@ test_receipt_commit_failure_repeats_the_already_presented_backstop() {
   cat > "$fakebin/mv" <<SH
 #!/usr/bin/env bash
 for arg in "\$@"; do last=\$arg; done
-if [ "\${last:-}" = "$state/.status-presentation-cursor" ]; then exit 1; fi
+if [ "\${last:-}" = "$state/.status-presentation-cursor" ] && [ -e "\$last" ]; then exit 1; fi
 exec "$real_mv" "\$@"
 SH
   chmod +x "$fakebin/mv"

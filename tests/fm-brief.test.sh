@@ -917,18 +917,22 @@ test_status_protocol_uses_guarded_writer() {
   local home id brief count status command
   home="$TMP_ROOT/worker's home"
   mkdir -p "$home/data" "$home/state"
-  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" ship-key some-proj --mode direct-PR >/dev/null
-  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" scout-key some-proj --scout >/dev/null
-  FM_HOME="$home" FM_SECONDMATE_CHARTER='Supervise assigned work.' \
-    "$ROOT/bin/fm-brief.sh" mate-key --secondmate --no-projects >/dev/null
+  (
+    cd "$ROOT" || exit 1
+    unset FM_HOME
+    export FM_ROOT_OVERRIDE=. FM_DATA_OVERRIDE="$home/data" FM_STATE_OVERRIDE="$home/state"
+    bin/fm-brief.sh ship-key some-proj --mode direct-PR >/dev/null &&
+      bin/fm-brief.sh scout-key some-proj --scout >/dev/null &&
+      FM_SECONDMATE_CHARTER='Supervise assigned work.' bin/fm-brief.sh mate-key --secondmate --no-projects >/dev/null
+  ) || fail "could not scaffold with a relative root"
   for id in ship-key scout-key mate-key; do
     brief="$home/data/$id/brief.md"
     status="$home/state/$id.status"
     command=$(sed -n 's/^   `\(.*\) "{state}: {one short line}"`$/\1/p' "$brief")
     [ -n "$command" ] || fail "status protocol has no runnable command in $brief"
-    bash -c "$command"' "$1"' _ 'done: report delivered' \
+    (cd "$home" && bash -c "$command"' "$1"' _ 'done: report delivered') \
       || fail "the $id status command could not append an ordinary report"
-    if bash -c "$command"' "$1"' _ 'needs-decision [key=pending-reply-color]: choose blue or green' 2>"$home/append.err"; then
+    if (cd "$home" && bash -c "$command"' "$1"' _ 'needs-decision [key=pending-reply-color]: choose blue or green') 2>"$home/append.err"; then
       fail "the $id status command accepted a reserved key"
     fi
     assert_grep 'reserved prefix' "$home/append.err" "the $id status command refused the report for the wrong reason"

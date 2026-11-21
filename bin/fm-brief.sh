@@ -110,8 +110,8 @@ resolve_directory_input() {
   printf '%s\n' "$resolved"
 }
 
-FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-FM_HOME=$(resolve_directory_input FM_HOME "${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}") || exit 1
+FM_ROOT=$(resolve_directory_input FM_ROOT_OVERRIDE "${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}") || exit 1
+FM_HOME=$(resolve_directory_input FM_HOME "${FM_HOME:-$FM_ROOT}") || exit 1
 if [ -n "${FM_DATA_OVERRIDE:-}" ]; then
   DATA=$(resolve_directory_input FM_DATA_OVERRIDE "$FM_DATA_OVERRIDE") || exit 1
 else
@@ -198,8 +198,6 @@ fi
 
 STATUS_FILE=$(fm_brief_shell_quote "$STATE/$ID.status")
 STATUS_APPEND_BIN=$(fm_brief_shell_quote "$FM_ROOT/bin/fm-status-append.sh")
-# shellcheck disable=SC2016  # single quotes are deliberate: the backticks are literal brief text, not scaffold-time expansion
-STATUS_RESERVED_KEY_RULE='A `[key=<slug>]` on that line must not start with a prefix reserved by `bin/fm-classify-lib.sh`; the append command names that prefix and refuses, and you pick another key.'
 INBOX_DIR=$(fm_brief_shell_quote "$STATE/$ID.inbox")
 LIVE_STATE_SECTION="For live revisions, holds, or routing, read \`$DATA/system-state.md\` (skill \`system-state-card\`). Do not walk Atlas or \`C:\\continuum-system\` for those facts."
 
@@ -274,7 +272,7 @@ A request relayed to you by the main firstmate is tagged with a leading \`$FM_FR
 When a message carries that marker, do the work, then respond via the STATUS/ESCALATION path below, never only in this chat: the main firstmate does not read your chat, so a chat-only reply is lost.
 Marked requests also carry a privacy-safe \`corr=<id>\` token after the marker; include that exact token in your parent status reply (or in the status pointer to a detailed doc) so the parent can correlate the answer.
 Optional helper: \`bin/fm-secondmate-report.sh <verb> <corr_id> <note>\` appends that correlated line to the parent channel itself - do not pass a status path, and do not write a hand path under this home.
-You can also include the same \`corr=<id>\` in the line passed to the guarded status command below.
+You can also include the same \`corr=<id>\` on the status line below.
 For a terse result, a status line is the whole answer.
 For a detailed answer (an investigation, a plan, an audit), write it to a doc under your home's \`data/\` and append a status line that points to that doc - the scout-report pattern - so the main firstmate is woken and can read it.
 Before treating an investigation or visual review as complete, load \`captain-hold-lifecycle\` from this home's \`.agents/skills/\` and pass its shared completion gate.
@@ -285,9 +283,9 @@ $INBOX_SECTION
 
 # Escalation to main firstmate
 Handle routine work yourself.
-Report only true captain-relevant outcomes or a declared external wait by appending one line:
+$FM_SECONDMATE_STATUS_INTRO
    \`$STATUS_APPEND_BIN $STATUS_FILE "{state}: {one short line}"\`
-   $STATUS_RESERVED_KEY_RULE
+   $FM_BRIEF_STATUS_RESERVED_KEY_RULE
 States: working, needs-decision, blocked, $PAUSED_VERB, done, failed.
 Use \`$PAUSED_VERB: {why}\` (distinct from \`blocked:\`) only when your domain is deliberately idling on a known external wait you expect to clear on its own, naming when it clears with \`until <YYYY-MM-DDTHH:MMZ>\` (UTC) when you know; use \`blocked:\` when you are stuck and need firstmate to act.
 Use this only for material phase changes, a captain decision, a real blocker, a failure, work ready for review, or work you landed.
@@ -389,7 +387,7 @@ $LIVE_STATE_SECTION
 3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
 4. Report status by appending one line:
    \`$STATUS_APPEND_BIN $STATUS_FILE "{state}: {one short line}"\`
-   $STATUS_RESERVED_KEY_RULE
+   $FM_BRIEF_STATUS_RESERVED_KEY_RULE
    States: working, needs-decision, blocked, $PAUSED_VERB, done, failed.
    Each append wakes firstmate, so report sparingly: only phase changes a supervisor
    would act on and the needs-decision/blocked/paused/done/failed states. No step-by-step
@@ -482,7 +480,7 @@ $RULE1
 3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
 4. Report status by appending one line:
    \`$STATUS_APPEND_BIN $STATUS_FILE "{state}: {one short line}"\`
-   $STATUS_RESERVED_KEY_RULE
+   $FM_BRIEF_STATUS_RESERVED_KEY_RULE
    States: working, needs-decision, blocked, $PAUSED_VERB, done, failed.
    Each append wakes firstmate, so report sparingly: only phase changes a supervisor
    would act on (setup done, bug reproduced, fix implemented, validation passed) and the

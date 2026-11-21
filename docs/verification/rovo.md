@@ -31,7 +31,7 @@ Rovo CLI: 202609.1.2
 The brief is then typed in after the TUI comes up, the same launch-then-send shape kimi uses, through the same shared readers (`fm_backend_capture`, `fm_backend_composer_state`, `fm_backend_send_text_submit`):
 
 1. `rovo_wait_for_ready` polls for the `Welcome to Rovo!` banner (primary) or a composer-empty verdict (weaker fallback, because this spawn read lacks the Rovo harness fact described below).
-2. The pointer `Read the brief at <absolute-path> and follow it exactly.` is submitted via `fm_backend_send_text_submit`.
+2. `fm_backend_send_text_submit` sends the absolute brief path and directs Rovo to append status through its native file tool, using the brief's status format and key rules.
 3. `rovo_wait_for_delivery` confirms composer-empty AND either the echoed `Read the brief at` text or a nonzero `Context:` percentage (`context:[^%]*[1-9][^%]*%`, tolerant of the footer's bar glyph but anchored before the `%` so the `.../922K` denominator cannot false-positive).
 
 Each gate fails the spawn loudly (a `failed:` line in the task status file) if it never resolves, so a never-ready or silently-dropped delivery is a visible spawn failure rather than a half-wired pane.
@@ -51,7 +51,9 @@ so it can only gate a bare (no-message) launch, and this adapter always delivers
 
 Bare `rovo run --yolo`, driven over a raw PTY, was confirmed to: render the `Welcome to Rovo!` readiness banner; accept the typed pointer and act on it (a brief instructing a real `sleep 25` bash tool call drove the `Rovo is thinking` busy line); accept a mid-tool-call Escape that printed `Agent cancelled` (see the interrupt section); and exit cleanly on `/exit` with the `Run rovo --restore <id> to resume your conversation` hint. `tests/fm-rovo-signals-live-e2e.test.sh` is that end-to-end guard.
 
-`tests/fm-rovo-harness.test.sh` pins the portable half against a stateful fake `tmux` and a fake `rovo` binary (no real network or credentials): the launch command is bare (`run --yolo`, no positional brief, no `--startup-receipt`); the pointer typed after readiness is exactly `Read the brief at <absolute-path> and follow it exactly.`; delivery confirms via the context-percentage or echoed-pointer signal; a never-ready fake screen fails the spawn loudly; a dropped-submit fake screen fails the spawn loudly; and the model/effort flags, marker-clearing, missing-binary refusal before any pane exists, and crew/scout-only secondmate refusal all hold.
+`tests/fm-rovo-harness.test.sh` uses a stateful `tmux` fixture and a fake `rovo` binary.
+It checks the bare launch, the brief path and native append instruction sent after readiness, and the delivery signals.
+It also covers readiness and delivery failures, model and effort flags, marker clearing, missing-binary refusal, and the crew/scout-only restriction.
 
 ## Busy state: the "Rovo is thinking" fallback
 
