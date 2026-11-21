@@ -101,8 +101,12 @@
 #     reports passed checks and an exact run PR URL. If task metadata registers
 #     a PR, it must match that URL; absent metadata PR does not erase current
 #     run attribution. No-checks, another PR, or a later pending run cannot
-#     inherit an older green verdict. Other terminal in-flight children remain
-#     contradictions unless the task has both a hold reason and hold kind. Held
+#     inherit an older green verdict. A cancelled run-step is not a terminal
+#     contradiction when metadata records that PR and the run's resolved head
+#     equals pr.recorded_head. A cancelled run with no recorded PR, or a
+#     different head, stays a contradiction. Other terminal in-flight children
+#     remain contradictions unless the task has both a hold reason and hold
+#     kind. Held
 #     children stay visible but do not invalidate the home for terminal, unowned,
 #     or unknown child state. A validated pending-close receipt is instead disclosed
 #     as unavailable for its task generation, not as an orphan or contradiction.
@@ -739,7 +743,7 @@ prefetch_task_current_states() {
 task_json_one() {  # <captured-meta>
   local meta=$1 original_meta id kind harness mode yolo project worktree home projects spawn_gen backend target status_log report_path
   local remote_host remote_root current_file endpoint_file observation_line
-  local pr pr_source event_json current_json endpoint_exists agent_alive meta_json status_json report_json worktree_json home_json
+  local pr pr_head pr_source event_json current_json endpoint_exists agent_alive meta_json status_json report_json worktree_json home_json
   local last_event_raw current_state current_source pending_decision blocked_event report_present=0 pr_from_status
   local open_decisions_tsv open_decisions_json
 
@@ -768,6 +772,8 @@ task_json_one() {  # <captured-meta>
   status_log="$SNAPSHOT_TASK_DIR/$id.status"
   report_path="$SNAPSHOT_TASK_DIR/$id.report"
   pr=$(meta_value "$meta" pr)
+  pr_head=$(meta_value "$meta" pr_head)
+  fm_pr_head_valid "$pr_head" || pr_head=
   pr_source=meta
   if [ -z "$pr" ]; then
     pr_from_status=$(first_pr_url_in_file "$status_log" || true)
@@ -859,6 +865,7 @@ task_json_one() {  # <captured-meta>
     --arg remote_host "$remote_host" \
     --arg remote_root "$remote_root" \
     --arg pr "$pr" \
+    --arg pr_head "$pr_head" \
     --arg pr_source "$pr_source" \
     --arg agent_alive "$agent_alive" \
     --arg observed_at "$SNAPSHOT_NOW" \
@@ -898,7 +905,8 @@ task_json_one() {  # <captured-meta>
                 elif $agent_alive == "alive" or $agent_alive == "dead" then $agent_alive
                 else "unknown" end),
         observed_at:$observed_at,freshness:"fresh"},
-      pr:{url:($pr | if . == "" then null else . end),source:$pr_source},
+      pr:{url:($pr | if . == "" then null else . end),source:$pr_source,
+          recorded_head:(if $pr_head == "" then null else $pr_head end)},
       hints:{
         pending_decision:$pending_decision,
         blocked_event:$blocked_event,
@@ -1057,6 +1065,16 @@ secondmate_home_summary_json() {  # <backlog-json-file> <tasks-json-file>
     --argjson checks "$(registered_check_ids_json "$1")" \
     --slurpfile tasks "$2" "$FM_LANDED_JQ_DEFS"'
     def transitioning: .id as $id | $pending | index($id) != null;
+    def cancelled_run_head:
+      if .current_state.state == "failed"
+         and .current_state.source == "run-step"
+         and ((.current_state.detail // "") | startswith("run cancelled"))
+      then
+        ((.current_state.detail // "") | split(" · run head: ")) as $parts
+        | if ($parts | length) < 2 then ""
+          else ($parts[1] | split(" · ")[0])
+          end
+      else "" end;
     def held_child($backlog): .id as $id
       | any($backlog.records[]?; .structured and .state != "done" and .id == $id
             and .hold_reason != null and .hold_kind != null);
@@ -1123,12 +1141,17 @@ secondmate_home_summary_json() {  # <backlog-json-file> <tasks-json-file>
          | select(held_child($backlog) | not)
          | select(transitioning | not)
          | select(.id == $work.id and (.current_state.state == "done" or .current_state.state == "failed"))
-         | select((.current_state.state == "done"
+         | select(((.current_state.state == "done"
                    and .current_state.source == "run-step"
                    and (.current_state.detail | startswith("checks green:"))
                    and ((.current_state.detail | split(" · run PR: ")) as $run_pr
                         | ($run_pr | length) == 2 and $run_pr[1] != ""
-                          and (.pr.source != "meta" or .pr.url == $run_pr[1]))) | not)
+                          and (.pr.source != "meta" or .pr.url == $run_pr[1])))
+                 or ((cancelled_run_head) as $run_head
+                     | $run_head != ""
+                       and .pr.source == "meta"
+                       and (.pr.url // "") != ""
+                       and (.pr.recorded_head // "") == $run_head)) | not)
          | {id,state:.current_state.state} ]) as $terminal_in_flight
     | ([if $backlog.present != true then
           {kind:"missing_backlog",ids:[],reason:"missing structured backlog"}

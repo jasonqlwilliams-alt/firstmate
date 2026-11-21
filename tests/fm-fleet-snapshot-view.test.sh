@@ -1269,6 +1269,101 @@ SH
   pass "green registered PR and validated pending teardown avoid false mismatches while contradictions remain visible"
 }
 
+# A validation run cancelled by a daemon restart is still in flight when the
+# task's recorded pull request is open and its head is the recorded PR head.
+# The same cancelled run stays a contradiction with no recorded PR, or when
+# the recorded head is a different commit.
+test_cancelled_open_pr_matching_head_is_not_terminal_in_flight() {
+  local home fakebin out pr head branch other_head
+  home=$(make_home cancelled-open-pr)
+  fakebin=$(make_fakebin "$home")
+  pr=https://github.com/kunchenguid/firstmate/pull/46
+  mkdir -p "$home/projects/cancelled"
+  git -C "$home/projects/cancelled" init -q
+  git -C "$home/projects/cancelled" -c user.name=fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m init
+  head=$(git -C "$home/projects/cancelled" rev-parse HEAD)
+  branch=$(git -C "$home/projects/cancelled" symbolic-ref --short HEAD)
+  other_head=0123456789abcdef0123456789abcdef01234567
+  [ "$other_head" != "$head" ] || fail "mismatch head collided with the fixture commit"
+  cat > "$home/data/backlog.md" <<'MD'
+## In flight
+- [ ] cancelled - Cancelled validation with an open pull request (repo: alpha) (kind: ship) (since 2026-07-11)
+
+## Queued
+
+## Done
+MD
+  cat > "$home/run.txt" <<RUN
+run:
+  id: "cancelled-run"
+  branch: $branch
+  head: "$head"
+  status: cancelled
+  outcome: cancelled
+  pr: "$pr"
+RUN
+  cat > "$fakebin/no-mistakes" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = axi ] && [ "${2:-}" = status ]; then
+  cat "$FM_HOME/run.txt"
+fi
+SH
+  chmod +x "$fakebin/no-mistakes"
+  printf 'working: validation interrupted by a restart\n' > "$home/state/cancelled.status"
+  fm_write_meta "$home/state/cancelled.meta" \
+    "window=firstmate:fm-cancelled" \
+    "worktree=$home/projects/cancelled" \
+    "project=alpha" \
+    "harness=claude" \
+    "kind=ship" \
+    "mode=no-mistakes" \
+    "pr=$pr" \
+    "pr_head=$head"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
+  printf '%s' "$out" | jq -e '
+    .tasks[0].current_state.state == "failed"
+      and .tasks[0].current_state.source == "run-step"
+      and (.tasks[0].current_state.detail | startswith("run cancelled"))
+      and .tasks[0].pr.source == "meta"
+      and .tasks[0].pr.url == "https://github.com/kunchenguid/firstmate/pull/46"
+  ' >/dev/null || fail "fixture must prove a cancelled run on the recorded pull request: $out"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid == true and .invalidity == {kind:null,ids:[]}' >/dev/null \
+    || fail "cancelled run with an open recorded PR at the recorded head must not be terminal in flight: $out"
+
+  fm_write_meta "$home/state/cancelled.meta" \
+    "window=firstmate:fm-cancelled" \
+    "worktree=$home/projects/cancelled" \
+    "project=alpha" \
+    "harness=claude" \
+    "kind=ship" \
+    "mode=no-mistakes"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}' >/dev/null \
+    || fail "cancelled run with no open recorded PR must stay terminal in flight: $out"
+
+  fm_write_meta "$home/state/cancelled.meta" \
+    "window=firstmate:fm-cancelled" \
+    "worktree=$home/projects/cancelled" \
+    "project=alpha" \
+    "harness=claude" \
+    "kind=ship" \
+    "mode=no-mistakes" \
+    "pr=$pr" \
+    "pr_head=$other_head"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
+  printf '%s' "$out" | jq -e '
+    .tasks[0].current_state.state == "failed"
+      and .tasks[0].current_state.source == "run-step"
+      and (.tasks[0].current_state.detail | startswith("run cancelled"))
+      and .tasks[0].pr.url == "https://github.com/kunchenguid/firstmate/pull/46"
+  ' >/dev/null || fail "fixture must prove the cancelled run still attributes when the recorded head differs: $out"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}' >/dev/null \
+    || fail "cancelled run whose head does not match the recorded PR head must stay terminal in flight: $out"
+  pass "cancelled run with an open recorded PR at the recorded head is not terminal in flight"
+}
+
 test_teardown_backlog_change_during_capture_is_resampled() {
   local home fakebin out id snapshot_format real_cp
   real_cp=$(command -v cp)
@@ -1334,6 +1429,7 @@ SH
 test_teardown_backlog_change_during_capture_is_resampled
 
 test_green_registered_pr_and_teardown_inventory
+test_cancelled_open_pr_matching_head_is_not_terminal_in_flight
 
 test_held_children_and_registered_watch_inventory() {
   local home fakebin out state section failures=0

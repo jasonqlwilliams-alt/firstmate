@@ -50,7 +50,9 @@
 #      the ledger has been asked whether a live sibling run exists.
 #      The run-step is AUTHORITATIVE: running/fixing -> working, ci -> working,
 #      awaiting_approval/fix_review -> parked (with gate findings), terminal
-#      passed/checks-passed -> done, failed/cancelled -> failed. EXCEPT: while
+#      passed/checks-passed -> done, failed/cancelled -> failed. A cancelled
+#      detail is `run cancelled`, plus `run head: <full sha>` when that
+#      attributed head resolves in the worktree. EXCEPT: while
 #      the active step is ci, `axi status` alone cannot tell "still waiting on
 #      checks" from "checks green, waiting on merge" (see nm_ci_checks_state) -
 #      a ci-step log-tail check overrides working -> done once checks pass, so
@@ -570,6 +572,7 @@ HAVE_RUN=0
 # the TOON field parsing entirely for this crew.
 RUN_SOURCE=full
 COARSE_STATUS=""
+COARSE_HEAD=""
 # Scouts and secondmates never drive a no-mistakes validation of their own
 # worktree, so skip the lookup for them and read state from pane/log directly.
 if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/null 2>&1; then
@@ -605,7 +608,12 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
       # `[ -n "$RUN_OUT" ]`: an empty/timed-out primary call means the CLI
       # itself did not respond, so retrying it immediately with a second
       # bounded call would just double the wait for no better answer.
-      COARSE_STATUS=$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" "$(nm_runs_list)")
+      coarse_runs_list=$(nm_runs_list)
+      FM_NM_RUNS_STATUS=
+      FM_NM_RUNS_ATTRIBUTED_HEAD=
+      fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" "$coarse_runs_list" >/dev/null
+      COARSE_STATUS=$FM_NM_RUNS_STATUS
+      COARSE_HEAD=$FM_NM_RUNS_ATTRIBUTED_HEAD
       if [ -n "$COARSE_STATUS" ]; then
         HAVE_RUN=1
         # A branch-matching answer the strict rule rejected is this branch's
@@ -781,6 +789,21 @@ if [ "$HAVE_RUN" = 1 ]; then
     case "$RUN_DETAIL" in
       checks\ green:*)
         [ -z "$RUN_PR" ] || RUN_DETAIL="$RUN_DETAIL${SEP}run PR: $RUN_PR"
+        ;;
+    esac
+  fi
+  if [ "$RUN_STATE" = failed ]; then
+    case "$RUN_DETAIL" in
+      "run cancelled"|"run cancelled${SEP}"*)
+        if [ "$RUN_SOURCE" = coarse ]; then
+          cancelled_head=$COARSE_HEAD
+        else
+          cancelled_head=$(fm_nm_resolve_commit "$WT" "$(strip_quotes "$(nm_field head)")")
+        fi
+        if [ -n "$cancelled_head" ]; then
+          cancelled_rest=${RUN_DETAIL#run cancelled}
+          RUN_DETAIL="run cancelled${SEP}run head: ${cancelled_head}${cancelled_rest}"
+        fi
         ;;
     esac
   fi
