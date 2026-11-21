@@ -626,6 +626,15 @@ snapshot_task_generation_is_current() {  # <captured-meta> <id>
   fi
 }
 
+snapshot_pr_registrations_are_current() {
+  local captured_meta current_meta
+  for captured_meta in "${SNAPSHOT_TASK_METAS[@]:-}"; do
+    [ -n "$captured_meta" ] || continue
+    current_meta="$STATE/${captured_meta##*/}"
+    [ "$(meta_value "$captured_meta" pr)" = "$(meta_value "$current_meta" pr)" ] || return 1
+  done
+}
+
 prefetch_task_observations() {  # <meta> <id>
   local meta=$1 id=$2 remote_host current_file endpoint_file current_pid='' current_rc=0
   local status_log status_capture report_path report_capture
@@ -2118,9 +2127,15 @@ for SNAPSHOT_ATTEMPT in 1 2 3; do
   TASKS_JSON=$(task_json_lines) || { echo "fm-fleet-snapshot: task snapshot failed" >&2; exit 1; }
   PENDING_TEARDOWNS_JSON=$(snapshot_pending_teardowns_json) || { echo "fm-fleet-snapshot: teardown observation failed" >&2; exit 1; }
   BACKLOG_AFTER_JSON=$(backlog_json) || { echo "fm-fleet-snapshot: backlog read failed" >&2; exit 1; }
-  [ "$BACKLOG_JSON" != "$BACKLOG_AFTER_JSON" ] || break
+  if [ "$BACKLOG_JSON" != "$BACKLOG_AFTER_JSON" ]; then
+    SNAPSHOT_CHANGE="backlog changed"
+  elif [ "$OUTPUT_MODE" = secondmate-home-summary ] && ! snapshot_pr_registrations_are_current; then
+    SNAPSHOT_CHANGE="PR registration changed"
+  else
+    break
+  fi
   if [ "$SNAPSHOT_ATTEMPT" = 3 ]; then
-    echo "fm-fleet-snapshot: backlog changed during task observations; snapshot unavailable" >&2
+    printf 'fm-fleet-snapshot: %s during task observations; snapshot unavailable\n' "$SNAPSHOT_CHANGE" >&2
     exit 1
   fi
 done
