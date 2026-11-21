@@ -56,9 +56,13 @@ function hasEndFrame(decode, lines, lifecycle) {
       const response = decode(lines.join('\n'), { strict: true });
       return response.code === 'NOT_FOUND' && typeof response.error === 'string';
     }
-    const footer = lines.at(-1);
-    if (!footer?.startsWith('next_step: ')) return false;
-    return typeof decode(footer, { strict: true }).next_step === 'string';
+    const start = lines.findIndex(line => line.startsWith('next_step: '));
+    if (start < 0) return false;
+    const footer = lines.slice(start);
+    if (footer.length > 2 || (footer.length === 2 && !footer[1].startsWith('dom_snapshot: '))) return false;
+    const response = decode(footer.join('\n'), { strict: true });
+    return typeof response.next_step === 'string' &&
+      (footer.length === 1 || typeof response.dom_snapshot === 'string');
   } catch {
     return false;
   }

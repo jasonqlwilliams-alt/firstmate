@@ -2730,6 +2730,34 @@ printf 'session:\n  status: feedback\n' > "$READ"
 assert_submission "$READ" unknown 0 no '' ''
 pass "an explicit empty prompt list is distinguishable from a missing header"
 
+# Lavish 0.1.61 live polls emit a quoted, newline-escaped DOM snapshot after
+# next_step for tabular, mixed, and artifact-failure feedback.
+SNAPSHOT='dom_snapshot: "uid=1 main \"Release review\"\n  uid=2 button \"Approve\""'
+TABLE_WITH_SNAPSHOT="$TMP_ROOT/table-with-snapshot.toon"
+LIST_WITH_SNAPSHOT="$TMP_ROOT/list-with-snapshot.toon"
+sed '/^dom_snapshot:/d' "$TABLE_CAPTURE" > "$TABLE_WITH_SNAPSHOT"
+sed '/^dom_snapshot:/d' "$LIST_CAPTURE" > "$LIST_WITH_SNAPSHOT"
+printf '%s\n' "$SNAPSHOT" >> "$TABLE_WITH_SNAPSHOT"
+printf '%s\n' "$SNAPSHOT" >> "$LIST_WITH_SNAPSHOT"
+assert_submission "$TABLE_WITH_SNAPSHOT" 2 2 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+assert_submission "$LIST_WITH_SNAPSHOT" 3 3 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+cat > "$READ" <<'EOF'
+session:
+  status: feedback
+prompts: []
+artifact_failures[1]{kind,detail,severity}:
+  artifact-asset-unavailable,<img> could not load /fixture/missing.png,fatal
+next_step: Repair the artifact.
+dom_snapshot: ""
+EOF
+assert_submission "$READ" 0 0 yes '' ''
+printf '%s\n' 'unexpected: Extra footer field' >> "$READ"
+assert_submission "$READ" 0 0 no '' '' 0
+cp "$LIST_WITH_SNAPSHOT" "$READ"
+printf '%s\n' "$SNAPSHOT" >> "$READ"
+assert_submission "$READ" 3 3 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
+pass "live poll footer accepts exactly one complete trailing snapshot"
+
 printf 'session:\n  status: feedback\nprompts: []' > "$READ"
 assert_submission "$READ" 0 0 no '' ''
 printf 'session:\n  status: feedback\nprompts[1]{text}:\n  "Legacy annotation"' > "$READ"
@@ -2740,7 +2768,10 @@ assert_submission "$READ" 3 3 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
 printf 'session:\n  status: waiting\nnext_step: Partial' > "$READ"
 assert_submission "$READ" 0 0 no '' ''
 sed '/^dom_snapshot:/d' "$LIST_CAPTURE" > "$READ"
-printf 'dom_snapshot: ""\n' >> "$READ"
+printf '%s\n' 'dom_snapshot: "uid=1 main' >> "$READ"
+assert_submission "$READ" 3 3 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
+sed '/^dom_snapshot:/d' "$LIST_CAPTURE" > "$READ"
+printf '%s' "$SNAPSHOT" >> "$READ"
 assert_submission "$READ" 3 3 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
 pass "legacy EOF fragments stay incomplete while verified choices remain available"
 
@@ -2874,6 +2905,8 @@ grep -Fxq 'capture-tail=nssx' "${CLIPPED%.result}.adapter" \
 CLIPPED=$(capture_prefix list-cut-after-attachments "$LIST_CAPTURE" '32,32,screenshot.png')
 assert_submission "$CLIPPED" 3 3 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
 CLIPPED=$(capture_prefix list-cut-in-footer "$LIST_CAPTURE" 'next_st')
+assert_submission "$CLIPPED" 3 3 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
+CLIPPED=$(capture_prefix list-cut-in-snapshot "$LIST_WITH_SNAPSHOT" 'uid=1 main')
 assert_submission "$CLIPPED" 3 3 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
 CLIPPED=$(capture_prefix list-cut-in-attachment "$LIST_CAPTURE" '32,32,screenshot.pn')
 assert_submission "$CLIPPED" 3 2 no '' ''
