@@ -39,7 +39,7 @@
 #      in bin/fm-nm-run-lib.sh).
 #      A run head whose commit object the task copy never fetched (the pipeline
 #      committed its fix round in its own checkout) cannot be verified locally;
-#      the ordinary read recognizes it only as a provable pipeline-owned continuation -
+#      that row is recognized only as a provable pipeline-owned continuation -
 #      the branch's ACTIVE newest ledger row, anchored by the row immediately
 #      before it having ended at exactly this worktree's head - so an active fix
 #      round never reads as an older failed run (rule owned by
@@ -343,6 +343,11 @@ log_reports_ci_ready() {
   esac
 }
 
+log_reports_green_for_cancelled_pr() {
+  [ -n "$MATCHING_PR" ] && [ "$LOG_VERB" = done ] \
+    && [ "$(status_line_note "$LOG_LINE")" = "PR $SUMMARY_PR checks green" ]
+}
+
 # 0 when a status-log line reports positive daemon socket failure rather than a
 # client-side timeout or generic unreachability.
 log_reports_daemon_socket_down() {  # <line>
@@ -566,6 +571,18 @@ nm_run_head_matches_worktree() {
   fm_nm_head_matches_worktree "$WT" "$run_head"
 }
 
+nm_cancelled_run_matches_registered_pr() {
+  local run_head run_pr
+  run_pr=$(strip_quotes "$(nm_field pr)")
+  run_head=$(printf '%s\n' "$RUN_OUT" | sed -n 's/^[[:space:]]*\(head_sha:.*\)/\1/p' | head -1)
+  if [ -n "$run_head" ]; then
+    [ "$run_pr" = "$SUMMARY_PR" ] && [ "$SUMMARY_PR_HEAD" = "$(strip_quotes "${run_head#head_sha:}")" ]
+  else
+    fm_nm_run_matches_registered_pr "$WT" "$run_pr" "$(strip_quotes "$(nm_field head)")" \
+      "$SUMMARY_PR" "$SUMMARY_PR_HEAD"
+  fi
+}
+
 HAVE_RUN=0
 # RUN_SOURCE distinguishes the two ways HAVE_RUN=1 can happen: "full" means
 # $RUN_OUT is real `axi status` TOON with step/gate detail (including a
@@ -578,6 +595,7 @@ COARSE_STATUS=""
 SUMMARY_PR=${FM_CREW_STATE_SUMMARY_PR:-}
 SUMMARY_PR_HEAD=${FM_CREW_STATE_SUMMARY_PR_HEAD:-}
 MATCHING_PR=
+full_cancelled=
 # Scouts and secondmates never drive a no-mistakes validation of their own
 # worktree, so skip the lookup for them and read state from pane/log directly.
 if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/null 2>&1; then
@@ -587,12 +605,8 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
     if [ -n "$SUMMARY_PR" ] && [ "$run_branch" = "$CREW_BRANCH" ]; then
       run_outcome=$(strip_quotes "$(nm_field outcome)")
       if [ "$run_outcome" = cancelled ] || { [ -z "$run_outcome" ] && [ "$(strip_quotes "$(nm_field status)")" = cancelled ]; }; then
-        run_head=$(strip_quotes "$(nm_field head_sha)")
-        [ -n "$run_head" ] || run_head=$(strip_quotes "$(nm_field head)")
-        if fm_nm_run_matches_registered_pr "$WT" "$(strip_quotes "$(nm_field pr)")" \
-            "$run_head" "$SUMMARY_PR" "$SUMMARY_PR_HEAD"; then
-          MATCHING_PR=matching-pr
-        fi
+        full_cancelled=1
+        nm_cancelled_run_matches_registered_pr && MATCHING_PR=matching-pr
       fi
     fi
     # Head equality, or the pipeline-owned-active exemption: while the
@@ -600,7 +614,7 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
     # authoritative and the lane head need not be a git object here
     # (fm_nm_run_is_pipeline_owned_active in bin/fm-nm-run-lib.sh).
     if [ -n "$run_branch" ] && [ "$run_branch" = "$CREW_BRANCH" ] \
-      && { [ -n "$MATCHING_PR" ] || nm_run_head_matches_worktree || fm_nm_run_is_pipeline_owned_active "$RUN_OUT"; }; then
+      && { nm_run_head_matches_worktree || fm_nm_run_is_pipeline_owned_active "$RUN_OUT"; }; then
       HAVE_RUN=1
       # Live-over-terminal (bin/fm-nm-run-lib.sh). Bare `axi status` answers
       # with the most-recently-touched run, which after a pipeline crash is the
@@ -611,10 +625,10 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
       # displaces it: a terminal run with no live sibling keeps its full
       # `axi status` step and gate detail rather than degrading to the ledger.
       if ! fm_nm_run_is_active "$RUN_OUT"; then
-        read -r live_status _ <<< "$(nm_ledger_status)"
+        IFS='|' read -r live_status ledger_matching_pr <<< "$(nm_ledger_status)"
         if [ "$(fm_nm_run_status_class "$live_status")" = live ]; then
           COARSE_STATUS=$live_status
-          MATCHING_PR=
+          [ -n "$full_cancelled" ] || MATCHING_PR=$ledger_matching_pr
           RUN_SOURCE=coarse
         fi
       fi
@@ -625,13 +639,15 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
       # `[ -n "$RUN_OUT" ]`: an empty/timed-out primary call means the CLI
       # itself did not respond, so retrying it immediately with a second
       # bounded call would just double the wait for no better answer.
-      read -r COARSE_STATUS MATCHING_PR <<< "$(nm_ledger_status)"
+      IFS='|' read -r COARSE_STATUS ledger_matching_pr <<< "$(nm_ledger_status)"
+      [ -n "$full_cancelled" ] || MATCHING_PR=$ledger_matching_pr
       if [ -n "$COARSE_STATUS" ]; then
         HAVE_RUN=1
         # A branch-matching answer the strict rule rejected is this branch's
         # own current run once the ledger proves the pipeline-owned
         # continuation, so its axi TOON is the authoritative run detail.
-        if [ "$run_branch" != "$CREW_BRANCH" ] || [ -n "$MATCHING_PR" ]; then
+        if [ "$run_branch" != "$CREW_BRANCH" ] \
+          || { [ "$COARSE_STATUS" = running ] && [ -n "$full_cancelled" ] && [ -n "$MATCHING_PR" ]; }; then
           RUN_SOURCE=coarse
         fi
       fi
@@ -747,7 +763,7 @@ if [ "$HAVE_RUN" = 1 ]; then
     fi
   fi
 
-  if [ "$RUN_STATE" = working ] && log_reports_ci_ready; then
+  if [ "$RUN_STATE" = working ] && log_reports_ci_ready && ! log_reports_green_for_cancelled_pr; then
     if [ "$RUN_SOURCE" = coarse ]; then
       emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR"
     fi
@@ -804,7 +820,10 @@ if [ "$HAVE_RUN" = 1 ]; then
         ;;
     esac
   fi
-  [ "$RUN_STATE" = failed ] || MATCHING_PR=
+  case "$RUN_DETAIL" in
+    "run cancelled"|"run cancelled${SEP}"*) ;;
+    *) MATCHING_PR= ;;
+  esac
   emit "$RUN_STATE" run-step "$RUN_DETAIL" "$MATCHING_PR"
 fi
 
@@ -893,7 +912,8 @@ fi
 if [ -n "$LOG_VERB" ]; then
   LOG_STATE=$(map_log_state "$LOG_LINE")
   if [ "$LOG_STATE" != unknown ]; then
-    emit "$LOG_STATE" status-log "$(status_line_note "$LOG_LINE")"
+    log_reports_green_for_cancelled_pr || MATCHING_PR=
+    emit "$LOG_STATE" status-log "$(status_line_note "$LOG_LINE")" "$MATCHING_PR"
   fi
 fi
 

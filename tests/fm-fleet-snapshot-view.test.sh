@@ -1274,7 +1274,7 @@ SH
 # The same cancelled run stays a contradiction with no recorded PR, or when
 # the recorded head is a different commit.
 test_cancelled_open_pr_matching_head_is_not_terminal_in_flight() {
-  local home fakebin out pr head branch other_head state expected_state poll
+  local home fakebin out pr head branch other_head state expected_state poll route
   home=$(make_home cancelled-open-pr)
   fakebin=$(make_fakebin "$home")
   pr=https://github.com/kunchenguid/firstmate/pull/46
@@ -1378,9 +1378,19 @@ run:
 RUN
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}
-    and .endpoints[0].state == "failed" and .endpoints[0].source == "run-step"' >/dev/null \
-    || fail "a matching cancelled full-status run must bind without a local head object: $out"
+    and .endpoints[0].state == "done" and .endpoints[0].source == "status-log"' >/dev/null \
+    || fail "unfetched full-status cancellation must exempt the stale event and preserve worker attribution: $out"
   cp "$home/run.txt" "$home/matching-run.txt"
+  sed "s/^  head_sha:.*/  head_sha: \"${other_head:0:8}\"/" "$home/matching-run.txt" > "$home/run.txt"
+  printf 'cancelled %s %s 2026-07-11 12:00 %s\n' "$branch" "${other_head:0:8}" "$pr" > "$home/runs.txt"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}' >/dev/null \
+    || fail "an abbreviated full head_sha must not exempt the cancelled run: $out"
+  rm -f "$home/runs.txt"
+  sed '/^  head_sha:/d' "$home/matching-run.txt" > "$home/run.txt"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid' >/dev/null \
+    || fail "the abbreviated display head must remain usable when head_sha is absent: $out"
   sed 's|/pull/46|/pull/45|' "$home/matching-run.txt" > "$home/run.txt"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}' >/dev/null \
@@ -1402,21 +1412,20 @@ RUN
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}' >/dev/null \
     || fail "the matching PR merge record must end the exemption: $out"
+  "$ROOT/bin/fm-busy-event.sh" arm "$state" cancelled --state busy >/dev/null \
+    || fail "could not mark the fixture worker busy"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid and .endpoints[0].state == "working" and .endpoints[0].source == "pane"' >/dev/null \
+    || fail "a cancelled unfetched run for a merged PR must leave a busy worker visible: $out"
+  record_claude_idle "$state" cancelled
   rm -f "$state/cancelled.pr-poll-merge-notified"
 
   printf 'run:\n  branch: another-task\n' > "$home/run.txt"
   printf 'cancelled %s %s 2026-07-11 12:00 %s\n' "$branch" "${other_head:0:8}" "$pr" > "$home/runs.txt"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}
-    and .endpoints[0].state == "failed" and .endpoints[0].source == "run-step"' >/dev/null \
-    || fail "the cancellation in the ledger must bind without a local head object: $out"
-  printf 'running %s %s 2026-07-11 11:00\n' "$branch" "${head:0:8}" >> "$home/runs.txt"
-  printf 'working: following the live validation\n' > "$state/cancelled.status"
-  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
-  printf '%s' "$out" | jq -e '.valid and .endpoints[0].state == "working" and .endpoints[0].source == "run-step"' >/dev/null \
-    || fail "the live sibling must outrank the cancelled ledger row: $out"
-  printf 'cancelled %s %s 2026-07-11 12:00 %s\n' "$branch" "${other_head:0:8}" "$pr" > "$home/runs.txt"
-  printf 'done: PR %s checks green\n' "$pr" > "$state/cancelled.status"
+    and .endpoints[0].state == "done" and .endpoints[0].source == "status-log"' >/dev/null \
+    || fail "unfetched ledger cancellation must exempt the stale event and preserve worker attribution: $out"
 
   poll="$ROOT/bin/fm-pr-poll.sh"
   (
@@ -1429,6 +1438,56 @@ RUN
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}' >/dev/null \
     || fail "a matching PR poll retirement receipt must end the exemption: $out"
+  "$ROOT/bin/fm-busy-event.sh" arm "$state" cancelled --state busy >/dev/null \
+    || fail "could not mark the fixture worker busy"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid and .endpoints[0].state == "working" and .endpoints[0].source == "pane"' >/dev/null \
+    || fail "an unfetched cancelled ledger row must leave a busy worker visible: $out"
+
+  printf 'running %s %s 2026-07-11 13:00\n' "$branch" "${head:0:8}" > "$home/runs.txt"
+  cat > "$home/run.txt" <<RUN
+run:
+  branch: $branch
+  head: "${other_head:0:8}"
+  head_sha: "$other_head"
+  outcome: cancelled
+  pr: "$pr"
+RUN
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid and .endpoints[0].state == "working" and .endpoints[0].source == "run-step"' >/dev/null \
+    || fail "a live ledger result must outrank an unfetched full cancellation and its stale green event: $out"
+
+  sed "s/^pr_head=.*/pr_head=$head/" "$state/cancelled.meta" > "$state/rewrite"
+  mv "$state/rewrite" "$state/cancelled.meta"
+  printf 'cancelled %s %s 2026-07-11 12:00 %s\nrunning %s %s 2026-07-11 11:00\n' \
+    "$branch" "${head:0:8}" "$pr" "$branch" "${head:0:8}" > "$home/runs.txt"
+  for route in full ledger anchor; do
+    case "$route" in
+      full)
+        cat > "$home/run.txt" <<RUN
+run:
+  branch: $branch
+  head: "$head"
+  head_sha: "$head"
+  outcome: cancelled
+  pr: "$pr"
+RUN
+        ;;
+      ledger) printf 'run:\n  branch: another-task\n' > "$home/run.txt" ;;
+      anchor)
+        printf 'running %s %s 2026-07-11 13:00\ncancelled %s %s 2026-07-11 12:00 %s\n' \
+          "$branch" "${other_head:0:8}" "$branch" "${head:0:8}" "$pr" > "$home/runs.txt"
+        ;;
+    esac
+    out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+    printf '%s' "$out" | jq -e '.valid and .endpoints[0].state == "working" and .endpoints[0].source == "run-step"' >/dev/null \
+      || fail "the stale green event must yield to the live run via $route: $out"
+  done
+  printf 'done: PR https://github.com/kunchenguid/firstmate/pull/45 checks green\n' > "$state/cancelled.status"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}
+    and .endpoints[0].state == "done" and .endpoints[0].source == "status-log"' >/dev/null \
+    || fail "matching cancellation evidence must not suppress a green event for another PR: $out"
   pass "cancelled run with an open recorded PR at the recorded head is not terminal in flight"
 }
 
