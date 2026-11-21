@@ -399,13 +399,14 @@ adapter_autohandle() {  # <adapter> <source-id> <result-file>
 # leave the capture untouched and still announced, because this never
 # acknowledges anything (see the keyed-answer note in the header).
 feed_keyed_answers() {  # <adapter> <source-id> <result-file>
-  local adapter=$1 id=$2 result=$3 script origin seq
+  local adapter=$1 id=$2 result=$3 script origin seq rows
   script=$(adapter_script "$adapter")
   [ -f "$script" ] && [ ! -L "$script" ] || return 1
   origin=$("$SCRIPT_DIR/fm-captain-hold.sh" binding "$id" 2>/dev/null) || return 1
   [ -n "$origin" ] || return 1
   seq=$(fm_procevent_result_sequence "$result") || return 1
-  "$script" answers "$result" 2>/dev/null \
+  rows=$("$script" answers "$result" 2>/dev/null) || return 1
+  printf '%s\n' "$rows" \
     | "$SCRIPT_DIR/fm-captain-hold.sh" answers "$origin" \
         --source "the captured result $id sequence $seq" >/dev/null 2>&1
 }

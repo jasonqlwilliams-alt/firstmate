@@ -365,7 +365,14 @@ test_build_injects_binds_then_arms() {
 }
 
 test_registration_cannot_consume_before_any_origin_binding() {
-  local home data runtime origin key hold board sid show
+  local home data runtime origin key hold board sid show toon_module
+  toon_module=${FM_TEST_LAVISH_TOON_MODULE:-}
+  if [ -z "$toon_module" ]; then
+    toon_module=$(node --no-global-search-paths -p 'require("node:module")
+      .createRequire(require("node:fs").realpathSync(process.argv[1]))
+      .resolve("@toon-format/toon")' "$(command -v lavish-axi)") \
+      || fail "the Bearings fixture needs the installed TOON module or FM_TEST_LAVISH_TOON_MODULE"
+  fi
   home=$(make_home order-proof)
   data="$home/payload.json"
   runtime="$home/runtime"
@@ -430,7 +437,8 @@ EOF
 SH
   chmod +x "$home/fakebin/lavish-axi"
 
-  PATH="$home/fakebin:$PATH" FM_ROOT_OVERRIDE="$runtime" FM_HOME="$home" \
+  PATH="$home/fakebin:$PATH" FM_TEST_LAVISH_TOON_MODULE="$toon_module" \
+    FM_ROOT_OVERRIDE="$runtime" FM_HOME="$home" \
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
     FM_PROCEVENT_CLAIM_ROOT="$home/procevent-claims" \
     FM_BEARINGS_BOARD_TEMPLATE="$ROOT/.agents/skills/bearings/assets/board-template.html" \

@@ -3,13 +3,11 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-async function installedDecoder(lavish) {
+function resolveInstalledToon(lavish) {
   const entry = realpathSync(lavish);
   const sdk = join(dirname(entry), '../node_modules/axi-sdk-js/package.json');
   const resolve = createRequire(existsSync(sdk) ? realpathSync(sdk) : entry).resolve;
-  const toon = await import(pathToFileURL(resolve('@toon-format/toon')).href);
-  if (typeof toon.decode !== 'function' || typeof toon.encode !== 'function') throw new Error('Missing TOON codec');
-  return toon;
+  return resolve('@toon-format/toon');
 }
 
 function recoverLegacyProse(line, fields, encode) {
@@ -48,8 +46,6 @@ function decodePrompt(decode, header, item) {
   try {
     const row = decode(`${header}\n${item.join('\n')}`, { strict: true }).prompts[0];
     if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
-    if (Object.hasOwn(row, 'target') &&
-        (!row.target || typeof row.target !== 'object' || Array.isArray(row.target))) return null;
     const fields = {};
     for (const key of ['uid', 'prompt', 'selector', 'tag', 'text']) {
       if (['string', 'number', 'boolean'].includes(typeof row[key])) fields[key] = String(row[key]);
@@ -135,11 +131,16 @@ function capturePrompts(toon, raw, tail, lifecycle, projection, result) {
 
 const [lavish, path, tail, lifecycle, projection] = process.argv.slice(2);
 const result = { kind: null, declared: null, rows: [], malformed: 0, complete: false, truncated: !!tail };
+const testModule = process.env.FM_TEST_LAVISH_TOON_MODULE;
 let toon;
 try {
-  toon = await installedDecoder(lavish);
+  const modulePath = testModule || resolveInstalledToon(lavish);
+  const codec = await import(pathToFileURL(modulePath).href);
+  if (typeof codec.decode !== 'function' || typeof codec.encode !== 'function') throw new Error('Missing TOON codec');
+  toon = codec;
 } catch {
-  result.error = 'cannot resolve @toon-format/toon from lavish-axi on PATH';
+  result.error = testModule ? 'cannot load @toon-format/toon from FM_TEST_LAVISH_TOON_MODULE'
+    : 'cannot resolve @toon-format/toon from lavish-axi on PATH';
 }
 if (toon) capturePrompts(toon, readFileSync(path, 'utf8'), tail, lifecycle, projection, result);
 process.stdout.write(JSON.stringify(result));

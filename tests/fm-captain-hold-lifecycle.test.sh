@@ -1571,6 +1571,9 @@ test_bound_channel_answers_close_at_answer_time() {
 
   artifact="$home/data/$id/review.html"
   printf '<h1>Sample eval proposal</h1>\n' > "$artifact"
+  if [ -n "${FM_TEST_LAVISH_TOON_MODULE:-}" ]; then
+    fm_fake_exit0 "$home/fakebin" lavish-axi
+  fi
   sid=$(run_lavish "$home" source-id "$artifact") || fail "could not derive the review source id"
   run_captain "$home" bind "$sid" >/dev/null \
     || fail "could not bind the review source to the keyed-answer intake"

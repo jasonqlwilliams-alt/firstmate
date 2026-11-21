@@ -2700,10 +2700,6 @@ sed '/text: Re-check host/d' "$LIST_CAPTURE" > "$LEGACY_LIST"
 assert_submission "$LEGACY_LIST" 3 2 no "$SHIPPED_ANSWER" ''
 pass "legacy list captures reject an unbounded final item and choices missing text"
 
-sed 's/^    target:$/    target[1]{type}:/' "$LIST_CAPTURE" > "$READ"
-assert_submission "$READ" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
-pass "list prompts require an object boundary for nested targets"
-
 cat > "$READ" <<'EOF'
 session:
   status: feedback
@@ -2720,18 +2716,34 @@ pass "legacy tabular prose recovery is limited to presentation"
 
 MISSING_TOON_BIN=$(fm_fakebin "$TMP_ROOT/no-toon")
 fm_fake_exit0 "$MISSING_TOON_BIN" lavish-axi
-out=$(PATH="$MISSING_TOON_BIN:$PATH" "$LAVISH_ADAPTER" read "$LIST_CAPTURE")
+out=$(PATH="$MISSING_TOON_BIN:$PATH" FM_TEST_LAVISH_TOON_MODULE='' "$LAVISH_ADAPTER" read "$LIST_CAPTURE")
 assert_contains "$out" "complete: no" "missing TOON library was reported complete"
 assert_contains "$out" "capture_error: unreadable: cannot resolve @toon-format/toon" \
   "missing TOON library was reported as an empty capture"
 for projection in answers reconciles; do
-  if PATH="$MISSING_TOON_BIN:$PATH" "$LAVISH_ADAPTER" "$projection" "$LIST_CAPTURE" >"$TMP_ROOT/rows" 2>"$TMP_ROOT/incomplete"; then
+  if PATH="$MISSING_TOON_BIN:$PATH" FM_TEST_LAVISH_TOON_MODULE='' \
+    "$LAVISH_ADAPTER" "$projection" "$LIST_CAPTURE" >"$TMP_ROOT/rows" 2>"$TMP_ROOT/incomplete"; then
     fail "$projection treated the missing TOON library as success"
   fi
   [ ! -s "$TMP_ROOT/rows" ] || fail "$projection produced choices without a TOON decoder"
   assert_grep 'unreadable and incomplete Lavish prompt capture' "$TMP_ROOT/incomplete" "$projection hid the missing decoder"
 done
 pass "missing Lavish TOON dependency reports an unreadable capture"
+
+DECODE_FAILURE_HOME="$TMP_ROOT/hdecode-failure"; new_home "$DECODE_FAILURE_HOME"
+FM_HOME="$DECODE_FAILURE_HOME" "$ROOT/bin/fm-captain-hold.sh" bind decode-failure >/dev/null \
+  || fail "could not bind the decoder failure source"
+pe_register "$DECODE_FAILURE_HOME" lavish decode-failure -- /bin/cat "$LIST_CAPTURE" >/dev/null \
+  || fail "could not register the decoder failure source"
+out=$(FM_TEST_LAVISH_TOON_MODULE="$TMP_ROOT/missing-codec.mjs" pe "$DECODE_FAILURE_HOME" start decode-failure) \
+  || fail "the runner failed to capture undecodable feedback"
+assert_not_contains "$out" "answers-fed:" "the keyed intake reported success after decoder failure"
+assert_not_contains "$out" "reconciles-fed:" "the reconcile intake reported success after decoder failure"
+assert_contains "$(wake_payloads "$DECODE_FAILURE_HOME")" "procevent lavish decode-failure 1" \
+  "decoder failure suppressed the captured feedback wake"
+failure_result=$(first_result "$DECODE_FAILURE_HOME" decode-failure) || fail "decoder failure lost the capture"
+assert_absent "${failure_result%.result}.handled" "the undecodable result was acknowledged"
+pass "decoder failure leaves bound feedback pending without reporting intake success"
 
 CLIPPED_HOME="$TMP_ROOT/hclipped"; new_home "$CLIPPED_HOME"
 fm_test_track_procevent_home "$CLIPPED_HOME"
