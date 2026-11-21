@@ -1,0 +1,24 @@
+Private Herdr 0.9.5 (protocol 22)
+# Herdr pane presence, sampled before teardown
+$ herdr pane get w3:p2
+{"error":{"code":"pane_not_found","message":"pane w3:p2 not found"},"id":"cli:pane:get"}
+$ herdr pane get w2:p2
+{"error":{"code":"pane_not_found","message":"pane w2:p2 not found"},"id":"cli:pane:get"}
+# Herdr focus and mutation transcript within the two aborted spawns
+workspace-create	w1/w1:t2	w1/w1:t2	└ abort-b · p:A3hFBWxXvoKcJg8BsEfp6w
+tab-create	w1/w1:t2	w1/w1:t2	fm-abort-b
+pane-close	w1/w1:t2	w1/w1:t2	w2:p1
+workspace-create	w1/w1:t2	w1/w1:t2	└ abort-a · p:U7CS7eE5IUM_14lSbXx1wA
+tab-create	w1/w1:t2	w1/w1:t2	fm-abort-a
+pane-close	w1/w1:t2	w1/w1:t2	w3:p1
+# Original Firstmate errors
+warning: {run-worktree}/.identity-test/runs/projection-abort/tmp/fm-herdr-presentation.UPFcvM/home/data/abort-a/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: treehouse get did not enter an isolated worktree within 60s (last seen '{run-worktree}/.identity-test/runs/projection-abort/tmp/fm-herdr-presentation.UPFcvM/post-create-abort-control/not-a-worktree': it is not a readable directory; spawning project '{run-worktree}/.identity-test/runs/projection-abort/tmp/fm-herdr-presentation.UPFcvM/project'); inspect window fm-lab-fm-herdr-present-48-24964:w3:p2
+error: Herdr endpoint fm-lab-fm-herdr-present-48-24964:w3:p1 is missing; refusing access
+warning: {run-worktree}/.identity-test/runs/projection-abort/tmp/fm-herdr-presentation.UPFcvM/home/data/abort-b/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: treehouse get did not enter an isolated worktree within 60s (last seen '{run-worktree}/.identity-test/runs/projection-abort/tmp/fm-herdr-presentation.UPFcvM/post-create-abort-control/not-a-worktree': it is not a readable directory; spawning project '{run-worktree}/.identity-test/runs/projection-abort/tmp/fm-herdr-presentation.UPFcvM/project'); inspect window fm-lab-fm-herdr-present-48-24964:w2:p2
+error: Herdr endpoint fm-lab-fm-herdr-present-48-24964:w2:p1 is missing; refusing access
+# Final focus
+w1/w1:t2Selected command exited 0
+Disposable default server exited 0
+All disposable Herdr processes exited

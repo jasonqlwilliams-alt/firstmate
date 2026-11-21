@@ -1,0 +1,20 @@
+Private Herdr 0.9.5 (protocol 22)
+FM_TEST_BEGIN 2026-11-20T23:58:12Z tests/fm-backend-herdr-presentation-e2e.test.sh family=real-herdr-gated expected_gate_skip=herdr
+ok - real Herdr lab: an opted-out spawn retains the Stage 1 Herdr command sequence with zero ordering calls
+ok - real Herdr lab: a home that configured nothing is projected by default on herdr 0.9.5
+ok - real Herdr lab: every projected create, task-tab create, seeded prune, and move preserves active workspace and tab
+ok - real Herdr lab: persisted-focused seeded prune proceeds when no live client is attached
+ok - real Herdr lab: bounded lock contention warns and falls back flat without projection or focus drift
+not ok - workspace order was not firstmate, stable primary block, secondmates: firstmate
+2ndmate-alpha
+2ndmate-bravo
+└ shape · p:TEooVWmc-3S21PJ-NG-rtg
+└ order-b · p:b2MCTLyXBMDzV8pdPN8ifw
+└ order-a · p:ay5XPpvpWPK8H-bBqBXdhw
+FM_TEST_END 2026-11-21T00:02:10Z tests/fm-backend-herdr-presentation-e2e.test.sh exit=1 duration_ms=237424 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=1 skipped_gate=0 duration_ms=237545
+FM_TEST_SUMMARY_FAMILY family=real-herdr-gated count=1 duration_ms=237424 failed=1
+FM_TEST_SLOWEST rank=1 script=tests/fm-backend-herdr-presentation-e2e.test.sh duration_ms=237424
+Selected command exited 1
+Disposable default server exited 0
+All disposable Herdr processes exited

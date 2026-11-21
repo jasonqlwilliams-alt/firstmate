@@ -1,0 +1,54 @@
+Private Herdr 0.9.5 (protocol 22)
+# Legacy task remains unavailable until ownership can be established
+$ bin/fm-peek.sh legacy 50
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: Herdr endpoint identity is unreadable at fm-lab-manual-identity-32-10850:w1:p2; refusing access and preserving the task record
+$ bin/fm-crew-state.sh legacy
+state: unknown · source: none · backend unreachable (herdr endpoint state: unreadable)
+$ bin/fm-send.sh legacy "fixture instruction after pane close"
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+fm-send: doorbell not typed because the agent in fm-lab-manual-identity-32-10850:w1:p2 has exited; the steer is durably recorded at {run-worktree}/.identity-test/runs/manual-short/tmp/identity-manual.YitNyp/local/state/legacy.inbox/001.msg for recovery (stuck-crewmate-recovery), and the watcher will not re-ring a dead pane
+
+# Firstmate capture with a restart at the Herdr read boundary
+$ bin/fm-peek.sh ordinary 60
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+expected live scrollback: 7fb318
+Recorded pane=w1:p3 terminal=term_660be150b910f3
+$ bin/fm-peek.sh ordinary 60
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+error: Herdr endpoint identity mismatch at fm-lab-manual-identity-32-10850:w1:p3; refusing access to a foreign pane
+{
+  "pane_id": "w1:p3",
+  "terminal_id": "term_660be151a6cdb2"
+}
+The real Herdr read contained the synthetic replacement marker. Firstmate returned no capture bytes.
+
+# Watcher escalates durable steering for the old task
+$ bin/fm-send.sh ordinary "watcher fixture instruction"
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+fm-send: doorbell not typed because the agent in fm-lab-manual-identity-32-10850:w1:p3 has exited; the steer is durably recorded at {run-worktree}/.identity-test/runs/manual-short/tmp/identity-manual.YitNyp/watch-inbox/state/ordinary.inbox/001.msg for recovery (stuck-crewmate-recovery), and the watcher will not re-ring a dead pane
+$ bin/fm-watch.sh
+stale: fm-lab-manual-identity-32-10850:w1:p3 (unread firstmate instruction: {run-worktree}/.identity-test/runs/manual-short/tmp/identity-manual.YitNyp/watch-inbox/state/ordinary.inbox/001.msg is unhandled and the worker's agent has exited or its endpoint is missing, so the doorbell was not typed; recover the worker)
+{"pane_id":"w1:p3","agent_status":"idle"}
+{"pane_id":"w1:p4","agent_status":"blocked"}
+
+# Watcher uses the matching worker when two records claim a pane
+$ bin/fm-watch.sh
+$ herdr pane report-agent w1:p3 --state blocked
+stale: fm-lab-manual-identity-32-10850:w1:p3 (herdr: agent blocked - waiting on human, escalated immediately, not via wedge timer)
+1795219381	1	stale	fm-lab-manual-identity-32-10850:w1:p3	stale: fm-lab-manual-identity-32-10850:w1:p3 (herdr: agent blocked - waiting on human, escalated immediately, not via wedge timer)
+Selected command exited 0
+Disposable default server exited 0
+All disposable Herdr processes exited

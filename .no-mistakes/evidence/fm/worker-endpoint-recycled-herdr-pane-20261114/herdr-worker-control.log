@@ -1,0 +1,92 @@
+Private Herdr 0.9.5 (protocol 22)
+FM_TEST_BEGIN 2026-11-20T23:53:59Z tests/fm-worker-herdr-identity-e2e.test.sh family=real-herdr-gated expected_gate_skip=herdr
+Herdr worker identity lab version: 0.9.5
+ok - recycled worker, secondmate and personal panes are missing to recorded workers and untouched by terminal actions
+ok - matching worker liveness and actions survive a changed foreground cwd
+ok - host-side remote capture, key and send refuse the recycled endpoint by home identity
+ok - a restored layout keeps pane ids but changes the worker terminal identity
+FM_TEST_END 2026-11-20T23:54:48Z tests/fm-worker-herdr-identity-e2e.test.sh exit=0 duration_ms=49754 gate_skip=false
+FM_TEST_BEGIN 2026-11-20T23:54:48Z tests/fm-control-herdr-smoke.test.sh family=real-herdr-gated expected_gate_skip=herdr
+ok - real herdr: exit on a pane with no registered agent is idempotent success
+ok - real herdr 0.9.5: a gone session reads recoverable while a live pane and a malformed target do not
+warning: {run-worktree}/.identity-test/tmp/fm-control-herdr.aCUDt8/home/data/hsmoke/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+# evidence begin: real Herdr exited-shell recovery
+$ bin/fm-spawn.sh hsmoke --relaunch --harness codex
+spawned hsmoke harness=codex kind=ship mode=no-mistakes yolo=off window=fm-lab-control-smoke-3425401-3743:w1:p2 worktree={run-worktree}/.identity-test/tmp/fm-control-herdr.aCUDt8/wt
+pane cwd={run-worktree}/.identity-test/tmp/fm-control-herdr.aCUDt8/wt
+saved task metadata:
+window=fm-lab-control-smoke-3425401-3743:w1:p2
+endpoint_task_id=hsmoke
+worktree={run-worktree}/.identity-test/tmp/fm-control-herdr.aCUDt8/wt
+project={run-worktree}/.identity-test/tmp/fm-control-herdr.aCUDt8/proj
+harness=codex
+kind=ship
+mode=no-mistakes
+yolo=off
+tasktmp=/tmp/fm-hsmoke
+model=default
+effort=default
+spawn_gen=s1795218900.3429448.28714
+backend=herdr
+herdr_session=fm-lab-control-smoke-3425401-3743
+herdr_workspace_id=w1
+herdr_tab_id=w1:t2
+herdr_pane_id=w1:p2
+herdr_terminal_id=term_660bdf83fb6942
+actual pane output:
+[jason@Lights wt]$ export PATH={run-worktree}/.identity-tes
+t/tmp/fm-control-herdr.aCUDt8/fakebin:$PATH
+[jason@Lights wt]$ cd -- {run-worktree}/.identity-test/tmp/
+fm-control-herdr.aCUDt8/proj
+[jason@Lights proj]$ cd -- '{run-worktree}/.identity-test/t
+mp/fm-control-herdr.aCUDt8/wt'
+[jason@Lights wt]$ printf '%s\n%s\n' "$PATH" "$HOME" > '{run-worktree}
+D4ZGEQFW5CX/.identity-test/tmp/fm-control-herdr.aCUDt8/home/state/.hsmoke.relaunch-path.bOu1Ymqn'
+[jason@Lights wt]$ export GOTMPDIR=/tmp/fm-hsmoke/gotmp
+[jason@Lights wt]$ export FM_TASK_ID=hsmoke
+[jason@Lights wt]$ unset TRACEPARENT; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI '~/.no-mistakes/
+worktrees/e95238b70e4e/01M7XHJ405AGBWXD4ZGEQFW5CX/.identity-test/tmp/fm-control-herdr.aCUDt8/fakebin/codex' --dangerous
+ly-bypass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch '{run-worktree}
+M7XHJ405AGBWXD4ZGEQFW5CX/.identity-test/tmp/fm-control-herdr.aCUDt8/home/state/hsmoke.turn-ended'\"]" "$('~/.
+no-mistakes/worktrees/e95238b70e4e/01M7XHJ405AGBWXD4ZGEQFW5CX/bin/fm-operational-input.sh' encode launch-brief < '/home
+/jason/.no-mistakes/worktrees/e95238b70e4e/01M7XHJ405AGBWXD4ZGEQFW5CX/.identity-test/tmp/fm-control-herdr.aCUDt8/home/d
+ata/hsmoke/launch-brief.md')"
+[jason@Lights wt]$
+# evidence end
+ok - real herdr: a drifted agent-free shell returns to its worktree and reuses the same endpoint
+ok - real herdr: interrupt refuses when herdr's own agent registry reports no agent
+ok - real herdr: interrupt delivers the harness's key and proves the agent survived it
+ok - real herdr: no control verb removed the endpoint or the task's local copy
+not ok - a registration over a shell-only pane reads 'no-agent' rather than 'stale-agent' [herdr 0.9.5]
+# evidence: failed real Herdr pane
+[jason@Lights wt]$ export PATH={run-worktree}/.identity-tes
+t/tmp/fm-control-herdr.aCUDt8/fakebin:$PATH
+[jason@Lights wt]$ cd -- {run-worktree}/.identity-test/tmp/
+fm-control-herdr.aCUDt8/proj
+[jason@Lights proj]$ cd -- '{run-worktree}/.identity-test/t
+mp/fm-control-herdr.aCUDt8/wt'
+[jason@Lights wt]$ printf '%s\n%s\n' "$PATH" "$HOME" > '{run-worktree}
+D4ZGEQFW5CX/.identity-test/tmp/fm-control-herdr.aCUDt8/home/state/.hsmoke.relaunch-path.bOu1Ymqn'
+[jason@Lights wt]$ export GOTMPDIR=/tmp/fm-hsmoke/gotmp
+[jason@Lights wt]$ export FM_TASK_ID=hsmoke
+[jason@Lights wt]$ unset TRACEPARENT; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI '~/.no-mistakes/
+worktrees/e95238b70e4e/01M7XHJ405AGBWXD4ZGEQFW5CX/.identity-test/tmp/fm-control-herdr.aCUDt8/fakebin/codex' --dangerous
+ly-bypass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch '{run-worktree}
+M7XHJ405AGBWXD4ZGEQFW5CX/.identity-test/tmp/fm-control-herdr.aCUDt8/home/state/hsmoke.turn-ended'\"]" "$('~/.
+no-mistakes/worktrees/e95238b70e4e/01M7XHJ405AGBWXD4ZGEQFW5CX/bin/fm-operational-input.sh' encode launch-brief < '/home
+/jason/.no-mistakes/worktrees/e95238b70e4e/01M7XHJ405AGBWXD4ZGEQFW5CX/.identity-test/tmp/fm-control-herdr.aCUDt8/home/d
+ata/hsmoke/launch-brief.md')"
+[jason@Lights wt]$ {run-worktree}/.identity-test/tmp/fm-con
+trol-herdr.aCUDt8/agentbin/claude 900
+^[Terminated                 {run-worktree}/.identity-test/
+tmp/fm-control-herdr.aCUDt8/agentbin/claude 900
+[jason@Lights wt]$ ^C
+[jason@Lights wt]${"id":"cli:pane:process_info","result":{"process_info":{"foreground_process_group_id":3427301,"foreground_processes":[{"argv":["/bin/bash"],"cmdline":"/bin/bash","cwd":"{run-worktree}/.identity-test/tmp/fm-control-herdr.aCUDt8/wt","name":"bash","pid":3427301}],"pane_id":"w1:p2","shell_pid":3427301},"type":"pane_process_info"}}
+FM_TEST_END 2026-11-20T23:55:06Z tests/fm-control-herdr-smoke.test.sh exit=1 duration_ms=17248 gate_skip=false
+FM_TEST_SUMMARY total=2 failed=1 skipped_gate=0 duration_ms=67130
+FM_TEST_SUMMARY_FAMILY family=real-herdr-gated count=2 duration_ms=67002 failed=1
+FM_TEST_SLOWEST rank=1 script=tests/fm-worker-herdr-identity-e2e.test.sh duration_ms=49754
+FM_TEST_SLOWEST rank=2 script=tests/fm-control-herdr-smoke.test.sh duration_ms=17248
+Selected command exited 1
+Disposable default server exited 0
+All disposable Herdr processes exited

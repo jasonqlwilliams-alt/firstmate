@@ -1,0 +1,31 @@
+Private Herdr 0.9.5 (protocol 22)
+FM_TEST_BEGIN 2026-11-21T00:27:16Z tests/fm-backend-herdr-presentation-e2e.test.sh family=real-herdr-gated expected_gate_skip=herdr
+ok - real Herdr lab: an opted-out spawn retains the Stage 1 Herdr command sequence with zero ordering calls
+ok - real Herdr lab: a home that configured nothing is projected by default on herdr 0.9.5
+ok - real Herdr lab: every projected create, task-tab create, seeded prune, and move preserves active workspace and tab
+ok - real Herdr lab: persisted-focused seeded prune proceeds when no live client is attached
+ok - real Herdr lab: bounded lock contention warns and falls back flat without projection or focus drift
+ok - real Herdr lab: concurrent primary workers form one stable contiguous block without active workspace/tab drift
+ok - real Herdr lab: forced workspace.move failure leaves a successful worker in default order with a warning and no cleanup
+ok - real Herdr lab: concurrent post-create abort cleanup stays serialized with exact focus restoration
+ok - real Herdr lab: Treehouse commands and metadata shape are byte-identical except for endpoint IDs and spawn incarnation
+ok - real Herdr lab: exact task-pane close removes the projected workspace with no unrestored wrong-focus interval
+ok - real Herdr lab: concurrent projected cleanup is serialized and leaves active workspace/tab unchanged
+ok - real Herdr lab: three repeated concurrent create/order/cleanup waves have zero active workspace or tab drift
+ok - real Herdr lab: the primary presentation setting inherits into real secondmate homes
+ok - real Herdr lab: primary and two secondmate homes each own a top-level contiguous child block
+ok - real Herdr lab: concurrent primary/A/B spawns preserve parent order and exact focus
+ok - real Herdr lab: session lock contention from a secondmate home falls back flat with no journal
+ok - real Herdr lab: Hi Bit and Wheelhouse-style same-terminal reclaims preserve one nested space with exact focus and idempotence
+not ok - cross-home restart fixture failed: warning: /tmp/isolated-lab/tmp/fm-herdr-presentation.gR8Wgn/home-2ndmate-alpha/data/wheel-child-resume/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: Treehouse pool slot /tmp/isolated-lab/home/.treehouse/recovery-project-8ec2e6/1/recovery-project is claimed by task wheelhouse-healing-r1 (home /tmp/isolated-lab/tmp/fm-herdr-presentation.gR8Wgn/home); refusing to overwrite that claim or launch into a slot another task still holds; inspect window fm-lab-fm-herdr-present-68-11151:wV:p2
+error: if that task has no live record, release the leftover claim with: {run-worktree}/bin/fm-teardown.sh --release-orphaned-slot-claim /tmp/isolated-lab/home/.treehouse/recovery-project-8ec2e6/1/recovery-project
+error: Herdr endpoint fm-lab-fm-herdr-present-68-11151:wV:p1 is missing; refusing access
+warning: keeping Treehouse lease for aborted task wheel-child-resume at /tmp/isolated-lab/home/.treehouse/recovery-project-8ec2e6/1/recovery-project; inspect the slot before running: treehouse return --force --if-lease-holder wheel-child-resume /tmp/isolated-lab/home/.treehouse/recovery-project-8ec2e6/1/recovery-project
+FM_TEST_END 2026-11-21T00:37:31Z tests/fm-backend-herdr-presentation-e2e.test.sh exit=1 duration_ms=615353 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=1 skipped_gate=0 duration_ms=615552
+FM_TEST_SUMMARY_FAMILY family=real-herdr-gated count=1 duration_ms=615353 failed=1
+FM_TEST_SLOWEST rank=1 script=tests/fm-backend-herdr-presentation-e2e.test.sh duration_ms=615353
+Selected command exited 1
+Disposable default server exited 0
+All disposable Herdr processes exited

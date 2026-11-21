@@ -1,0 +1,31 @@
+Private Herdr 0.9.5 (protocol 22)
+spawned absence-identity harness=sh kind=ship mode=no-mistakes yolo=off window=fm-lab-fm-herdr-present-48-11862:w2:p2 worktree={run-worktree}/.identity-test/runs/projection-absence/home/.treehouse/recovery-project-bfa974/1/recovery-project
+{"workspace_id":"w2","pane_id":"w2:p2","terminal_id":"term_660be17c334ff4"}
+$ herdr pane close w2:p2
+{"id":"cli:pane:close","result":{"type":"ok"}}
+{"error":{"code":"pane_not_found","message":"pane w2:p2 not found"},"id":"cli:pane:get"}
+$ bin/fm-spawn.sh absence-identity <synthetic-project> <inert-command> --mode no-mistakes --yolo off --backend herdr
+spawned absence-identity harness=sh kind=ship mode=no-mistakes yolo=off window=fm-lab-fm-herdr-present-48-11862:w1:p3 worktree={run-worktree}/.identity-test/runs/projection-absence/home/.treehouse/recovery-project-bfa974/2/recovery-project
+warning: {run-worktree}/.identity-test/runs/projection-absence/tmp/fm-herdr-presentation.zsgK9C/home/data/absence-identity/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+warning: no exact herdr presentation token match for absence-identity; leaving any stale space untouched and spawning flat
+{"workspace_id":"w1","pane_id":"w1:p3","terminal_id":"term_660be18380c0e5"}
+$ bin/fm-teardown.sh absence-identity --force
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  2 task(s) in flight, but no live watcher process holds this home lock (last beat: 19s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+warning: lsof is unavailable; cannot resolve a process-group fallback for herdr task absence-identity
+🌳 Terminated lingering processes: bash (4878), sh (6305), sleep (6307)
+🌳 Worktree returned to pool.
+warning: herdr presentation journal for absence-identity remains quarantined; no workspace cleanup was attempted
+WARNING: watcher still down (same stale episode; last beat: 26s ago, grace 300s) - full banner already printed this episode.
+{run-worktree}/.identity-test/runs/projection-absence/tmp/fm-herdr-presentation.zsgK9C/recovery-project: already current
+teardown absence-identity complete (window fm-lab-fm-herdr-present-48-11862:w1:p3, worktree {run-worktree}/.identity-test/runs/projection-absence/home/.treehouse/recovery-project-bfa974/2/recovery-project)
+Backlog: absence-identity just finished (this home keeps no markdown backlog at {run-worktree}/.identity-test/runs/projection-absence/tmp/fm-herdr-presentation.zsgK9C/home/data/backlog.md). Update {run-worktree}/.identity-test/runs/projection-absence/tmp/fm-herdr-presentation.zsgK9C/home/data/backlog.md - move absence-identity to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+{"workspace_id":"w1","label":"firstmate"}
+Selected command exited 0
+Disposable default server exited 0
+All disposable Herdr processes exited

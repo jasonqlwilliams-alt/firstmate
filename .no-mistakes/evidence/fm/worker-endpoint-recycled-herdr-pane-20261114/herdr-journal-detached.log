@@ -1,0 +1,40 @@
+Private Herdr 0.9.5 (protocol 22)
+Treehouse v2.0.1
+warning: {run-worktree}/.identity-test/runs/journal-detached/tmp/fm-herdr-presentation.klRbWj/home/data/shape/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+spawned shape harness=sh kind=ship mode=no-mistakes yolo=off window=fm-lab-fm-herdr-present-46-10706:w4:p2 worktree={run-worktree}/.identity-test/runs/journal-detached/home/.treehouse/project-b452f8/2/project
+{"pane_id":"w4:p2","terminal_id":"term_660be4a5776df6","foreground_cwd":"{run-worktree}/.identity-test/runs/journal-detached/home/.treehouse/project-b452f8/2/project"}
+[{"workspace_id":"w1","label":"firstmate","focused":false},{"workspace_id":"w4","label":"└ shape · p:EZkxfuVPsNRyKdFmD9Z_JA","focused":false},{"workspace_id":"w2","label":"2ndmate-alpha","focused":false},{"workspace_id":"w3","label":"2ndmate-bravo","focused":true}]
+version=2
+task_id=shape
+projection_id=EZkxfuVPsNRyKdFmD9Z_JA
+home={run-worktree}/.identity-test/runs/journal-detached/tmp/fm-herdr-presentation.klRbWj/home
+session=fm-lab-fm-herdr-present-46-10706
+workspace_id=w4
+tab_id=w4:t2
+pane_id=w4:p2
+parent_workspace_id=w1
+parent_label=firstmate
+workspace_label=└ shape · p:EZkxfuVPsNRyKdFmD9Z_JA
+task_label=fm-shape
+{"pane_id":"w4:p2","terminal_id":"term_660be4a5776df6","foreground_cwd":"{run-worktree}/.identity-test/runs/journal-detached/tmp/fm-herdr-presentation.klRbWj/project"}
+$ bin/fm-teardown.sh shape --force
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  2 task(s) in flight, but no live watcher process holds this home lock (last beat: 18s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+warning: lsof is unavailable; cannot resolve a process-group fallback for herdr task shape
+🌳 Worktree returned to pool.
+WARNING: watcher still down (same stale episode; last beat: 94s ago, grace 300s) - full banner already printed this episode.
+{run-worktree}/.identity-test/runs/journal-detached/tmp/fm-herdr-presentation.klRbWj/project: already current
+teardown shape complete (window fm-lab-fm-herdr-present-46-10706:w4:p2, worktree {run-worktree}/.identity-test/runs/journal-detached/home/.treehouse/project-b452f8/2/project)
+Backlog: shape just finished (this home keeps no markdown backlog at {run-worktree}/.identity-test/runs/journal-detached/tmp/fm-herdr-presentation.klRbWj/home/data/backlog.md). Update {run-worktree}/.identity-test/runs/journal-detached/tmp/fm-herdr-presentation.klRbWj/home/data/backlog.md - move shape to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+{"error":{"code":"pane_not_found","message":"pane w4:p2 not found"},"id":"cli:pane:get"}
+{"error":{"code":"workspace_not_found","message":"workspace w4 not found"},"id":"cli:workspace:get"}
+{"pane_id":"w3:p1","terminal_id":"term_660be4a47043f4"}
+Presentation journal retired and sibling focus retained.
+Selected command exited 0
+Disposable default server exited 0
+All disposable Herdr processes exited
