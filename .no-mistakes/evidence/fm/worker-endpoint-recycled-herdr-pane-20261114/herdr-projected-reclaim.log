@@ -1,0 +1,7 @@
+Reclaimed fm-hibit-resume-r1 in workspace w4, pane w4:p2 -> w4:p3, focus w3/w3:t1
+spawned fm-hibit-resume-r1 harness=sh kind=ship mode=no-mistakes yolo=off window=fm-lab-fm-herdr-present-255487-7102:w4:p3 worktree={run-worktree}/.gate-herdr/r.F4k/home/.treehouse/recovery-project-5fd665/2/recovery-project
+{"pane_id":"w4:p3","terminal_id":"term_660c0a5531fbd7","workspace_id":"w4"}
+Reclaimed wheelhouse-healing-r1 in workspace w5, pane w5:p2 -> w5:p3, focus w3/w3:t1
+spawned wheelhouse-healing-r1 harness=sh kind=ship mode=no-mistakes yolo=off window=fm-lab-fm-herdr-present-255487-7102:w5:p3 worktree={run-worktree}/.gate-herdr/r.F4k/home/.treehouse/recovery-project-5fd665/2/recovery-project
+{"pane_id":"w5:p3","terminal_id":"term_660c0a7f058bab","workspace_id":"w5"}
+ok - real Herdr lab: Hi Bit and Wheelhouse-style same-terminal reclaims preserve one nested space with exact focus and idempotence

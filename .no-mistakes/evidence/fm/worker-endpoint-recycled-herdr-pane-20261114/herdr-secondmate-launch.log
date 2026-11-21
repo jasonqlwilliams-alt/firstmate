@@ -1,0 +1,16 @@
+$ fm-spawn.sh mate <isolated-secondmate-home> <inert-command> --secondmate --backend herdr
+spawned mate harness=sh kind=secondmate mode=secondmate yolo=off window=fm-lab-secondmate-spawn-412568-2260:w1:p2 worktree={run-worktree}/.gate-herdr/r.7Tf/tmp/home-2ndmate-mate
+Old worker record referred to w1:p2 with terminal term_660c0a9dffb8c2.
+{"pane_id":"w1:p2","terminal_id":"term_660c0a9f3f34d2"}
+
+$ fm-peek.sh mate 60
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  2 task(s) in flight, but no live watcher process holds this home lock (last beat: 3s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECOND_MATE_RUNNING_521
+WARNING: watcher still down (same stale episode; last beat: 3s ago, grace 300s) - full banner already printed this episode.
+error: Herdr endpoint identity mismatch at fm-lab-secondmate-spawn-412568-2260:w1:p2; refusing access to a foreign pane

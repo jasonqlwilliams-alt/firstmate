@@ -1,0 +1,6 @@
+Sandbox Herdr recycled pane w1:p1, valid worker pane w2:p1
+$ FM_HOME=<sandbox> bin/fm-watch.sh
+{"pane_id":"w1:p1","agent_status":"blocked"}
+Blocked foreign pane after a completed watcher cycle. Wake queue empty.
+stale: fm-lab-watch-binding-321906-7423:w2:p1 (herdr: agent blocked - waiting on human, escalated immediately, not via wedge timer)
+1795230400	1	stale	fm-lab-watch-binding-321906-7423:w2:p1	stale: fm-lab-watch-binding-321906-7423:w2:p1 (herdr: agent blocked - waiting on human, escalated immediately, not via wedge timer)
