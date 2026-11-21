@@ -101,9 +101,10 @@
 #     reports passed checks and an exact run PR URL. If task metadata registers
 #     a PR, it must match that URL; absent metadata PR does not erase current
 #     run attribution. No-checks, another PR, or a later pending run cannot
-#     inherit an older green verdict. A cancelled run is exempt when its PR
-#     and head match the task's registration and local records show no merge
-#     for that PR. This read uses no forge queries, so it cannot distinguish an
+#     inherit an older green verdict. A validation-run cancellation is exempt
+#     when the latest done event reports checks green for the registered PR
+#     and local records show no merge for that PR.
+#     This read uses no forge queries, so it cannot distinguish an
 #     open PR from one closed without merging. Other terminal in-flight children
 #     remain contradictions unless the task has both a hold reason and hold kind. Held
 #     children stay visible but do not invalidate the home for terminal, unowned,
@@ -324,19 +325,9 @@ last_nonempty_line() {  # <file>
 # snapshot without limit. Remote secondmate endpoint liveness is never read here.
 # A local read that hits the bound folds to state unknown.
 crew_state_json() {  # <id> [<captured-meta>] [<captured-status>]
-  local id=$1 captured_meta=${2:-} captured_status=${3:-} raw rest state source detail sep evidence
-  local pr='' pr_head='' terminal_exempt=false
-  if [ "$OUTPUT_MODE" = secondmate-home-summary ]; then
-    pr=$(meta_value "$captured_meta" pr)
-    pr_head=$(meta_value "$captured_meta" pr_head)
-    if ! fm_pr_head_valid "$pr_head" || ! fm_pr_url_parse "$pr"; then
-      pr=''
-      pr_head=''
-    fi
-  fi
+  local id=$1 captured_meta=${2:-} captured_status=${3:-} raw rest state source detail sep
   raw=$(
-    FM_CREW_STATE_SUMMARY_PR="$pr" FM_CREW_STATE_SUMMARY_PR_HEAD="$pr_head" \
-      fm_run_timed "$FM_SNAPSHOT_CREW_STATE_TIMEOUT" \
+    fm_run_timed "$FM_SNAPSHOT_CREW_STATE_TIMEOUT" \
       env FM_ROOT_OVERRIDE="$FM_ROOT" \
       FM_HOME="$FM_HOME" \
       FM_STATE_OVERRIDE="$STATE" \
@@ -347,7 +338,6 @@ crew_state_json() {  # <id> [<captured-meta>] [<captured-status>]
       FM_CONFIG_OVERRIDE="$CONFIG" \
       "$SCRIPT_DIR/fm-crew-state.sh" "$id" 2>/dev/null || true
   )
-  evidence=${raw#*$'\n'}
   raw=$(printf '%s\n' "$raw" | head -1)
   sep=' · '
   state=unknown
@@ -364,22 +354,8 @@ crew_state_json() {  # <id> [<captured-meta>] [<captured-status>]
       esac
       ;;
   esac
-  if [ -n "$pr" ]; then
-    case "$state:$source:$evidence" in
-      done:status-log:live-retry-green) terminal_exempt=true ;;
-      done:status-log:cancelled-pr-green|failed:run-step:cancelled-run\|?*\|"$pr_head"|failed:run-step:cancelled-row\|"$pr_head")
-        if ! fm_pr_poll_merge_already_notified "$STATE" "$id" \
-            "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" \
-          && ! { fm_pr_poll_retirement_receipt_valid "$STATE" "$id" && [ "$FM_PR_RETIRE_URL" = "$pr" ]; }; then
-          terminal_exempt=true
-        fi
-        ;;
-    esac
-  fi
   jq -n --arg raw "$raw" --arg state "$state" --arg source "$source" --arg detail "$detail" \
-    --argjson terminal_exempt "$terminal_exempt" '
-    {state:$state,source:$source,detail:$detail,raw:$raw}
-    + if $terminal_exempt then {terminal_exempt:true} else {} end'
+    '{state:$state,source:$source,detail:$detail,raw:$raw}'
 }
 
 status_event_json() {  # <observed-status-log> [<contract-path>]
@@ -764,11 +740,26 @@ prefetch_task_current_states() {
   fi
 }
 
+snapshot_pr_awaiting_merge() {  # <id> <registered-pr> <captured-status>
+  local id=$1 pr=$2 status_log=$3 line last_done=''
+  [ -f "$status_log" ] && fm_pr_url_parse "$pr" || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      *done*:*) [ "$(status_line_verb "$line")" != done ] || last_done=$line ;;
+    esac
+  done < "$status_log"
+  [ "$(status_line_note "$last_done")" = "PR $pr checks green" ] || return 1
+  ! fm_pr_poll_merge_already_notified "$STATE" "$id" \
+      "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" \
+    && ! { fm_pr_poll_retirement_receipt_valid "$STATE" "$id" && [ "$FM_PR_RETIRE_URL" = "$pr" ]; }
+}
+
 task_json_one() {  # <captured-meta>
   local meta=$1 original_meta id kind harness mode yolo project worktree home projects spawn_gen backend target status_log report_path
   local remote_host remote_root current_file endpoint_file observation_line
   local pr pr_source event_json current_json endpoint_exists agent_alive meta_json status_json report_json worktree_json home_json
-  local last_event_raw current_state current_source pending_decision blocked_event report_present=0 pr_from_status
+  local last_event_raw current_state current_source current_detail pending_decision blocked_event report_present=0 pr_from_status
+  local cancelled_pr_awaiting_merge=false
   local open_decisions_tsv open_decisions_json
 
   id=${meta##*/}; id=${id%.meta}
@@ -812,9 +803,19 @@ task_json_one() {  # <captured-meta>
   }
   event_json=$(status_event_json "$status_log" "$STATE/$id.status")
   last_event_raw=$(printf '%s' "$event_json" | jq -r '.last_event.raw // ""')
-  read -r current_state current_source < <(
-    printf '%s' "$current_json" | jq -r '[.state // "", .source // ""] | @tsv'
+  read -r current_state current_source current_detail < <(
+    printf '%s' "$current_json" | jq -r '[.state // "", .source // "", .detail // ""] | @tsv'
   )
+  if [ "$OUTPUT_MODE" = secondmate-home-summary ] && [ "$pr_source" = meta ] \
+    && [ "$current_state" = failed ] && [ "$current_source" = run-step ]; then
+    case "$current_detail" in
+      'run cancelled'|'run cancelled · '*)
+        if snapshot_pr_awaiting_merge "$id" "$pr" "$status_log"; then
+          cancelled_pr_awaiting_merge=true
+        fi
+        ;;
+    esac
+  fi
 
   # Durable keyed open-decision set: fold the WHOLE status stream
   # (fm-classify-lib.sh's status_open_decisions) so a later unrelated event can
@@ -902,6 +903,7 @@ task_json_one() {  # <captured-meta>
     --argjson pending_decision "$(bool_json "$pending_decision")" \
     --argjson blocked_event "$(bool_json "$blocked_event")" \
     --argjson report_present "$(bool_json "$report_present")" \
+    --argjson cancelled_pr_awaiting_merge "$cancelled_pr_awaiting_merge" \
     '{
       id:$id,
       kind:$kind,
@@ -944,7 +946,7 @@ task_json_one() {  # <captured-meta>
            steer:"bin/fm-send.sh fm-\($id) \u0027<instruction>\u0027",
            return_channel_note:null}
         end)
-    }'
+    } + (if $cancelled_pr_awaiting_merge then {cancelled_pr_awaiting_merge:true} else {} end)'
 }
 
 # Independent row composition uses the same cap as the preceding observations.
@@ -1151,7 +1153,7 @@ secondmate_home_summary_json() {  # <backlog-json-file> <tasks-json-file>
          | select(held_child($backlog) | not)
          | select(transitioning | not)
          | select(.id == $work.id and (.current_state.state == "done" or .current_state.state == "failed"))
-         | select(.current_state.terminal_exempt != true)
+         | select(.cancelled_pr_awaiting_merge != true)
          | select((.current_state.state == "done"
                    and .current_state.source == "run-step"
                    and (.current_state.detail | startswith("checks green:"))
