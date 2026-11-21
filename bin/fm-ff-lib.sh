@@ -377,15 +377,16 @@ ff_target() {
     echo "$label: skipped: fast-forward failed: $(first_line "$out")"
     return 0
   fi
+  merged_rev=$base_rev
   if [ "$phase" = final ] &&
     { ! merged_rev=$(git -C "$dir" rev-parse --verify --quiet HEAD 2>/dev/null) ||
       [ "$merged_rev" != "$base_rev" ]; }; then
-    echo "$label: skipped: could not confirm HEAD at $base after fast-forward"
+    echo "$label: skipped: could not confirm HEAD at $base after fast-forward (HEAD ${merged_rev:-unreadable}, expected $base_rev)"
     return 0
   fi
-  instr=$(changed_instr "$dir" "$local_rev" "$base_rev")
+  instr=$(changed_instr "$dir" "$local_rev" "$merged_rev")
   before=$(git -C "$dir" rev-parse --short "$local_rev")
-  after=$(git -C "$dir" rev-parse --short "$base_rev")
+  after=$(git -C "$dir" rev-parse --short "$merged_rev")
   FF_STATUS="updated"
   FF_INSTR="$instr"
   if [ -n "$instr" ]; then

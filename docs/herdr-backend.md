@@ -244,14 +244,15 @@ For a worker supervised by a remote secondmate, perform these checks on the remo
    Confirm the returned pane ID and verify that `foreground_cwd` resolves to the same directory as the record's `worktree=`.
    Check the returned terminal ID with `fm_backend_herdr_terminal_id_valid "$terminal_id"`.
    The pane's creation `cwd` is insufficient for this check.
-3. For a live agent, require both `fm_backend_herdr_cli "$session" agent get "$pane"` confirming the record's `harness=` and positive evidence from the pane's process tree that the matching agent process is still running there.
-   Use `fm_backend_herdr_cli "$session" pane process-info --pane "$pane"` and the host process table to inspect the foreground process group and the pane shell's descendants.
-   For an exited agent, establish from those processes that the agent has exited and that there is no replacement agent, then require this task's own launch line in the retained scrollback.
+3. Require this task's own launch line in the retained scrollback for both live and exited agents.
    Start with `fm_backend_herdr_cli "$session" pane read "$pane" --source recent --lines 200` and increase `--lines` as needed to search the full retained scrollback.
-   A generic launch line or a matching pane label does not prove ownership.
+   For a live agent, require both `fm_backend_herdr_cli "$session" agent get "$pane"` confirming the record's `harness=` and positive process evidence that the agent from that launch is still running in the pane.
+   Use `fm_backend_herdr_cli "$session" pane process-info --pane "$pane"` and the host process table to inspect the foreground process group and the pane shell's descendants.
+   For an exited agent, establish from those processes that the agent has exited and that there is no replacement agent.
+   Stop if the launch line is missing, generic, or could belong to a different task or agent.
 4. With the affected home and state directory selected, source `bin/fm-wake-lib.sh`, get the lock path with `fm_meta_lock_path "$meta"`, and acquire it with `fm_lock_try_acquire "$lock"`.
    Hold this lock in the same shell through the final reread and append.
-   Reread the regular record under the lock and repeat steps 2 and 3, reading enough scrollback to verify the same launch line for an exited agent.
+   Reread the regular record under the lock and repeat steps 2 and 3, including verification of the same task-specific launch line.
    Leave the record untouched if the record or evidence changed, if the lock or any proof is unavailable, or if any evidence is mismatched or ambiguous.
    Once all checks pass and the record still ends with a newline and has no `herdr_terminal_id=` line, append exactly one line with `printf 'herdr_terminal_id=%s\n' "$terminal_id" >> "$meta"`.
    Release the lock with `fm_lock_release "$lock"` after the append or on abandoning the edit.

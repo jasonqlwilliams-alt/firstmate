@@ -343,6 +343,8 @@ case "$*" in
           "$FM_TEST_REAL_GIT" -C "${FM_ROOT_OVERRIDE%/*}/sm1" merge -q --ff-only origin/main
           ;;
       esac
+    elif [ "${FM_TEST_PROBE_ADVANCE_REFS:-0}" = primary-current ] && [ "$3" = w1:p-main-live ]; then
+      "$FM_TEST_REAL_GIT" -C "$FM_ROOT_OVERRIDE" merge -q --ff-only origin/main
     fi
     printf '{"result":{"pane":{"pane_id":"%s","foreground_cwd":"/unrelated","agent":null}}}\n' "$3"
     ;;
@@ -421,6 +423,12 @@ SH
   assert_contains "$out" "restart-secondmates: fm-sm1" "the already-current secondmate was not queued for restart"
   pass "The updater uses the commits visible after the Herdr probe"
 
+  bump_origin "$w" instr
+  out=$("${update_env[@]}" FM_HOME="$w/home" FM_TEST_PROBE_ADVANCE_REFS=primary-current \
+    "$UPDATE" 2> "$w/fake/update.stderr")
+  assert_contains "$out" "firstmate: already current" "concurrent primary update was not reported as current"
+  assert_contains "$out" "reread-firstmate: yes" "instructions changed by the concurrent primary update were missed"
+
   bump_origin "$w" readme
   printf 'instructions advanced by concurrent update\n' >> "$w/seed/AGENTS.md"
   git -C "$w/seed" commit -qam 'concurrent instruction advance'
@@ -432,8 +440,9 @@ SH
   for checkout in main sm1; do
     [ "$(git -C "$w/$checkout" rev-parse HEAD)" = "$concurrent_tip" ] || fail "concurrent advance did not reach $checkout"
   done
-  assert_contains "$out" "firstmate: skipped: could not confirm HEAD at origin/main after fast-forward" "primary reported a stale merge target"
-  assert_contains "$out" "secondmate sm1: skipped: could not confirm HEAD at origin/main after fast-forward" "secondmate reported a stale merge target"
+  assert_contains "$out" "firstmate: skipped: could not confirm HEAD at origin/main after fast-forward (HEAD $concurrent_tip," "primary did not report its observed HEAD"
+  assert_contains "$out" "secondmate sm1: skipped: could not confirm HEAD at origin/main after fast-forward (HEAD $concurrent_tip," "secondmate did not report its observed HEAD"
+  assert_contains "$out" "reread-firstmate: yes" "changed primary instructions were missed after a skipped result"
   assert_contains "$out" "restart-secondmates: none" "a home past the target was queued for restart"
   assert_contains "$out" "nudge-secondmates: none" "a home past the target was queued for a nudge"
   pass "A successful merge command requires the expected HEAD before reporting an advance"
