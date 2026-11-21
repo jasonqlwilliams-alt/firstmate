@@ -158,7 +158,9 @@ $ cat out.txt
 I can't run that command because it modifies a file outside the workspace. If you provide a workspace-relative path, I can run the equivalent command there - would you like to do that?
 ```
 
-This matters because the standard crewmate contract's literal status line is a bash `echo ... >> status_file` command. Given that exact literal instruction, rovo recovered on its own by falling back to its native file tool for the same append, and succeeded, preserving the file's existing content:
+This check gave rovo the crewmate status instruction of that day, a bash `echo ... >> status_file` command.
+The brief now names `bin/fm-status-append.sh` for that append, which is the same outside-worktree bash write this check confined.
+Given that exact literal instruction, rovo recovered on its own by falling back to its native file tool for the same append, and succeeded, preserving the file's existing content:
 
 ```
 $ echo "existing: prior" > "$LAB/outside/status2.txt"

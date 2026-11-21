@@ -215,6 +215,138 @@ test_over_long_decision_note_is_capped_with_a_marker() {
   pass "an over-long open decision is cut to its per-item budget with the shared truncation marker"
 }
 
+test_folded_reserved_needs_decision_warns_once_per_line() {
+  local dir state out warns
+  dir=$(make_case folded-reserved)
+  state="$dir/state"
+  out="$dir/drain.out"
+  {
+    printf 'needs-decision [key=pending-reply-abc123]: which color should the button be\n'
+    printf 'needs-decision: [key=pending-reply-colon] which shape\n'
+    printf 'needs-decision [key=api-shape]: pick REST or RPC\n'
+    printf 'needs-decision [key=pending-reply-owner1]: pending-reply-missed: task=t pending-reply-id=owner1 request=ok\n'
+    printf 'blocked [key=pending-reply-foreign]: shipping is blocked on infra\n'
+  } > "$state/task-fold.status"
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed on a folded reserved needs-decision"
+
+  warns=$(grep -cF 'folded reserved-prefix needs-decision' "$out" || true)
+  [ "$warns" = 2 ] || fail "expected one warning per folded needs-decision, got $warns: $(cat "$out")"
+  grep -F 'warning: task=task-fold key=pending-reply-abc123 folded reserved-prefix needs-decision' "$out" >/dev/null \
+    || fail "the documented-position reserved needs-decision was not warned: $(cat "$out")"
+  grep -F 'warning: task=task-fold key=pending-reply-colon folded reserved-prefix needs-decision' "$out" >/dev/null \
+    || fail "the colon-first reserved needs-decision was not warned: $(cat "$out")"
+  if grep -F 'which color should the button be' "$out" >/dev/null; then
+    fail "a folded reserved needs-decision was listed: $(cat "$out")"
+  fi
+  if grep -F 'which shape' "$out" >/dev/null; then
+    fail "a colon-first folded reserved needs-decision was listed: $(cat "$out")"
+  fi
+  grep -F 'task-fold [key=api-shape] needs-decision: pick REST or RPC' "$out" >/dev/null \
+    || fail "an ordinary decision was dropped alongside the warning: $(cat "$out")"
+  grep -F 'pending-reply-id=owner1' "$out" >/dev/null \
+    || fail "the owner's own reserved-prefix decision was not listed: $(cat "$out")"
+  if grep -F 'folded reserved-prefix' "$out" | grep -F 'pending-reply-owner1' >/dev/null; then
+    fail "the owner's own reserved-prefix line was warned: $(cat "$out")"
+  fi
+  if grep -F 'folded reserved-prefix' "$out" | grep -F 'pending-reply-foreign' >/dev/null; then
+    fail "a reserved-prefix blocked line was warned: $(cat "$out")"
+  fi
+  if grep -F 'folded reserved-prefix' "$out" | grep -F 'api-shape' >/dev/null; then
+    fail "an ordinary decision was warned: $(cat "$out")"
+  fi
+  pass "a folded reserved-prefix needs-decision is warned once per line and not listed"
+}
+
+test_drain_warning_follows_the_reserved_prefix_list() {
+  local dir state out
+  dir=$(make_case custom-prefix)
+  state="$dir/state"
+  out="$dir/drain.out"
+  {
+    printf 'needs-decision [key=secret-abc]: keep this quiet\n'
+    printf 'needs-decision [key=pending-reply-abc123]: which color should the button be\n'
+    printf 'needs-decision [key=secret-owned]: secret-held: owner vocabulary\n'
+  } > "$state/task-custom.status"
+
+  FM_CLASSIFY_RESERVED_KEY_PREFIXES='secret-' FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" \
+    || fail "drain failed under a custom reserved-prefix list"
+
+  grep -F 'warning: task=task-custom key=secret-abc folded reserved-prefix needs-decision' "$out" >/dev/null \
+    || fail "the configured reserved prefix was not warned: $(cat "$out")"
+  if grep -F 'keep this quiet' "$out" >/dev/null; then
+    fail "a needs-decision in the configured reserved namespace was listed: $(cat "$out")"
+  fi
+  grep -F 'task-custom [key=pending-reply-abc123] needs-decision: which color should the button be' "$out" >/dev/null \
+    || fail "a prefix outside the configured list was folded: $(cat "$out")"
+  if grep -F 'folded reserved-prefix' "$out" | grep -F 'pending-reply-abc123' >/dev/null; then
+    fail "a prefix outside the configured list was warned: $(cat "$out")"
+  fi
+  grep -F 'secret-held: owner vocabulary' "$out" >/dev/null \
+    || fail "the configured namespace owner's own line was not listed: $(cat "$out")"
+  if grep -F 'folded reserved-prefix' "$out" | grep -F 'secret-owned' >/dev/null; then
+    fail "the configured namespace owner's own line was warned: $(cat "$out")"
+  fi
+  pass "the drain warning uses the reserved-prefix list instead of a copied prefix"
+}
+
+test_status_append_refuses_reserved_key_before_write() {
+  local dir status err rc
+  dir=$(make_case status-append)
+  status="$dir/state/task.status"
+  err="$dir/append.err"
+  APPEND="$ROOT/bin/fm-status-append.sh"
+
+  "$APPEND" "$status" 'needs-decision [key=pending-reply-abc123]: which color should the button be' \
+    >/dev/null 2>"$err"; rc=$?
+  [ "$rc" -ne 0 ] || fail "a reserved-prefix key should be refused"
+  assert_contains "$(cat "$err")" "reserved prefix 'pending-reply-'" "the refusal should name the reserved prefix"
+  assert_contains "$(cat "$err")" "pick another key" "the refusal should tell the worker to pick another key"
+  assert_contains "$(cat "$err")" "bin/fm-classify-lib.sh" "the refusal should point at the prefix owner"
+  [ ! -e "$status" ] || fail "a refused append still created the status file: $(cat "$status")"
+
+  printf 'working: already here\n' > "$status"
+  "$APPEND" "$status" 'needs-decision: [key=pending-reply-colon] which shape' >/dev/null 2>"$err"; rc=$?
+  [ "$rc" -ne 0 ] || fail "a colon-first reserved key should be refused"
+  [ "$(cat "$status")" = "working: already here" ] || fail "a refused append changed the status file: $(cat "$status")"
+
+  "$APPEND" "$status" 'working [key=pending-reply-phase]: still reserved' >/dev/null 2>"$err"; rc=$?
+  [ "$rc" -ne 0 ] || fail "a reserved key on a non-decision verb should still be refused"
+  [ "$(cat "$status")" = "working: already here" ] || fail "a refused working line changed the status file: $(cat "$status")"
+
+  "$APPEND" "$status" 'needs-decision [key=pending-reply-abc123]: pending-reply-missed: copied vocabulary' \
+    >/dev/null 2>"$err"; rc=$?
+  [ "$rc" -ne 0 ] || fail "a worker line that copies the owner's vocabulary should still be refused"
+  [ "$(cat "$status")" = "working: already here" ] || fail "a vocabulary copy was written: $(cat "$status")"
+
+  "$APPEND" "$status" 'needs-decision [key=api-shape]: pick REST or RPC' \
+    || fail "an ordinary key should append"
+  grep -F 'needs-decision [key=api-shape]: pick REST or RPC' "$status" >/dev/null \
+    || fail "the ordinary decision was not appended: $(cat "$status")"
+
+  "$APPEND" "$status" 'needs-decision [key=pending-reply]: hyphen is part of the prefix' \
+    || fail "a key that does not start with the reserved prefix should append"
+  grep -F 'needs-decision [key=pending-reply]: hyphen is part of the prefix' "$status" >/dev/null \
+    || fail "a non-matching key was not appended: $(cat "$status")"
+
+  FM_CLASSIFY_RESERVED_KEY_PREFIXES='secret-' \
+    "$APPEND" "$status" 'needs-decision [key=secret-abc]: keep this quiet' >/dev/null 2>"$err"; rc=$?
+  [ "$rc" -ne 0 ] || fail "a key in the configured reserved list should be refused"
+  assert_contains "$(cat "$err")" "reserved prefix 'secret-'" "the refusal should name the configured prefix"
+  if grep -F 'secret-abc' "$status" >/dev/null; then
+    fail "a refused configured prefix was written: $(cat "$status")"
+  fi
+  FM_CLASSIFY_RESERVED_KEY_PREFIXES='secret-' \
+    "$APPEND" "$status" 'needs-decision [key=pending-reply-abc123]: which color should the button be' \
+    || fail "a prefix outside the configured list should append"
+  grep -F 'needs-decision [key=pending-reply-abc123]: which color should the button be' "$status" >/dev/null \
+    || fail "a prefix outside the configured list was not appended: $(cat "$status")"
+  pass "the status append helper refuses a reserved prefix before it writes"
+}
+
+test_folded_reserved_needs_decision_warns_once_per_line
+test_drain_warning_follows_the_reserved_prefix_list
+test_status_append_refuses_reserved_key_before_write
 test_buried_decision_still_surfaces
 test_over_long_decision_note_is_capped_with_a_marker
 test_explicit_resolution_closes_it

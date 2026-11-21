@@ -3,7 +3,8 @@
 # optionally acknowledge handled records,
 # annotate every unread line for validated signal status keys, surface unread
 # informational status lines, latest captain-facing statuses not covered by a
-# newer branch outcome, OPEN DECISIONS, and captain-call record divergence,
+# newer branch outcome, folded reserved-prefix needs-decision warnings,
+# OPEN DECISIONS, and captain-call record divergence,
 # then assert liveness.
 #
 # Keep sequence-bound row consumption independent from generation-bound episode
@@ -428,6 +429,42 @@ EOF
   [ "$shown" -gt 0 ] || return 0
 }
 
+# One warning per needs-decision the fold rejects because its key starts with a
+# reserved prefix. The owner's own line in that namespace speaks the prefix
+# vocabulary and is not warned. Names the task and the key. Prints nothing when
+# every needs-decision is listable. bin/fm-classify-lib.sh owns the prefix list.
+_warn_folded_reserved_needs_decisions() {  # <task> <span>
+  local task=$1 span=$2 line key
+  [ -n "$span" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    [ "$(status_line_verb "$line")" = needs-decision ] || continue
+    key=$(_fm_decision_key "$line") || continue
+    _fm_decision_key_transition_allowed "$key" "$(status_line_note "$line")" && continue
+    printf 'warning: task=%s key=%s folded reserved-prefix needs-decision\n' "$task" "$key" || return 1
+  done <<EOF
+$span
+EOF
+}
+
+print_folded_reserved_needs_decision_warnings() {  # <snapshot>
+  local snapshot=$1 task endpoint ident f raw span
+  while IFS=$(printf '\t') read -r task endpoint ident; do
+    [ -n "$task" ] || continue
+    [ -n "$ident" ] || continue
+    case "$endpoint" in
+      ''|*[!0-9]*|0) continue ;;
+    esac
+    f="$STATE/$task.status"
+    [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || continue
+    raw=$(_fm_status_read_span "$f" 0 "$endpoint") || return 1
+    span=$(printf '%s\n' "$raw" | grep -F 'needs-decision' || true)
+    _warn_folded_reserved_needs_decisions "$task" "$span" || return 1
+  done <<EOF
+$snapshot
+EOF
+}
+
 # Print the consolidated OPEN DECISIONS section: every still-open
 # needs-decision/blocked, fleet-wide, folded from the durable status logs by
 # fm-classify-lib.sh's status_open_decisions fold (via its cursor-backed
@@ -561,6 +598,7 @@ print_status_sections() {
   if ! {
     print_unread_status_section "$snapshot" "$unread" \
       && print_status_outcome_backstop_section "$snapshot" \
+      && print_folded_reserved_needs_decision_warnings "$snapshot" \
       && print_open_decisions_section "$snapshot" \
       && print_record_divergence_section
   } > "$prepared"; then

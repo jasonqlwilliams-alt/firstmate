@@ -452,22 +452,31 @@ EOF
 # consumer-side rule on purpose - it protects local and remote writers
 # identically, and it can never fail a whole delta or wedge a stream the way a
 # writer-side rejection would.
+# The fold stays that consumer-side rule. bin/fm-status-append.sh refuses a
+# reserved prefix before a worker line is written, and bin/fm-wake-drain.sh
+# warns when a needs-decision in that namespace is folded instead of listed.
 FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT='pending-reply-'
+
+# Print the reserved prefix <key> starts with. Return 1 when <key> is not reserved.
+# FM_CLASSIFY_RESERVED_KEY_PREFIXES is the one list; callers must not copy it.
+fm_classify_reserved_key_prefix() {  # <key>
+  local key=$1 prefix
+  for prefix in ${FM_CLASSIFY_RESERVED_KEY_PREFIXES:-$FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT}; do
+    case "$key" in
+      "$prefix"*) printf '%s' "$prefix"; return 0 ;;
+    esac
+  done
+  return 1
+}
 
 # 0 when <key> is not reserved, or is reserved and <note> speaks its vocabulary.
 _fm_decision_key_transition_allowed() {  # <key> <note>
   local key=$1 note=$2 prefix
-  for prefix in ${FM_CLASSIFY_RESERVED_KEY_PREFIXES:-$FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT}; do
-    case "$key" in
-      "$prefix"*)
-        case "$note" in
-          "$prefix"*:*) return 0 ;;
-          *) return 1 ;;
-        esac
-        ;;
-    esac
-  done
-  return 0
+  prefix=$(fm_classify_reserved_key_prefix "$key") || return 0
+  case "$note" in
+    "$prefix"*:*) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 _fm_is_pending_reply_escalation() {  # <key> <note>

@@ -2552,7 +2552,7 @@ json_escape() {
 # through --config-override since there is no per-session escalation once
 # the process is running. rovo's bash tool is NOT covered by this grant and
 # stays confined to the worktree regardless (confirmed live) - the standard
-# crewmate flow's literal `echo ... >> status file` bash line therefore still
+# crewmate flow's `bin/fm-status-append.sh` status line therefore still
 # fails under rovo, but the worker recovers by falling back to its own file
 # tools for the same append (confirmed live), which the grant below does cover.
 # --config-override itself is single-value (a second occurrence silently
