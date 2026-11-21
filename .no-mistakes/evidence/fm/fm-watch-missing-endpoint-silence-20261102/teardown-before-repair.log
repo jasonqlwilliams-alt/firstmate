@@ -1,0 +1,19 @@
+Target commit c105877 before the repair. The retryable metadata unlink failure produced sequence 2 after sequence 1 was acknowledged.
+
+test:supervisor
+stale: test:fm-retire (the recorded endpoint is gone)
+1795302825	1	stale	test:fm-retire	stale: test:fm-retire (the recorded endpoint is gone)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 3201839.1795302825.bS7gVO
+
+$ bin/fm-teardown.sh retire (injected failure of the final metadata unlink)
+teardown: reaping leaked worktree process group for retire: 3194433
+error: retire's endpoint and local copy are cleaned up, but its task record could not be removed (task record could not be removed at <fixture>/retire/home/state/retire.meta)
+error: retire's endpoint and local copy are cleaned up, but its task record could not be removed (task record could not be removed at <fixture>/retire/home/state/retire.meta)
+Watcher completed a later poll (beacon 1795302830)
+stale: test:fm-retire (the recorded endpoint is gone)
+Watcher completed a later poll (beacon 1795302830)
+
+The failed retirement left the original metadata live and the watcher repeated the acknowledged loss
+1795302831	2	stale	test:fm-retire	stale: test:fm-retire (the recorded endpoint is gone)
+Final watcher/daemon exit 0
+Scenario exit 1

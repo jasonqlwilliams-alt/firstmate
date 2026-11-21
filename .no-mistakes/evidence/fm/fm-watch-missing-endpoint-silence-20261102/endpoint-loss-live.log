@@ -1,0 +1,235 @@
+Local Firstmate watcher and away-daemon evidence
+tmux 3.7c and Herdr 0.9.5, isolated homes and synthetic task records.
+A watcher intentionally stopped with SIGTERM exits 1. Each scenario reports its own exit status.
+
+--- Ordinary tmux window closure, acknowledged wake and same-name relaunch ---
+$ tmux kill-window -t test:fm-ordinary
+test:supervisor
+
+Base watcher observing the closed window for two polls
+Watcher completed a later poll (beacon 1795302826)
+Watcher completed a later poll (beacon 1795302827)
+Watcher stopped for cleanup (exit 1)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 3209433.1795302827.V5hIsD
+
+Changed watcher observing the same closed window
+stale: test:fm-ordinary (the recorded endpoint is gone)
+1795302830	1	stale	test:fm-ordinary	stale: test:fm-ordinary (the recorded endpoint is gone)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 3219533.1795302830.1ZqQxp
+Watcher completed a later poll (beacon 1795302832)
+Watcher completed a later poll (beacon 1795302834)
+Watcher stopped for cleanup (exit 1)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 3232796.1795302834.PW2TGF
+
+A second incarnation used the same target name and closed before the next capture
+test:supervisor
+stale: test:fm-ordinary (the recorded endpoint is gone)
+1795302837	2	stale	test:fm-ordinary	stale: test:fm-ordinary (the recorded endpoint is gone)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 3240652.1795302837.co3OIi
+Scenario exit 0
+
+--- Captain-held tmux window closure and pause cleanup ---
+Live status declaration
+captain-held: awaiting a decision
+signal: <fixture>/held/home/state/held.status
+1795302826	2	signal	held.status	needs-decision: <fixture>/held/home/state/held.status
+wake annotation: latest wake-EVENT observed at drain, not current state: held.status: captain-held: awaiting a decision
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 3203455.1795302826.KHQU1h
+Present before close: <fixture>/held/home/state/.paused-test_fm-held
+
+$ tmux kill-window -t test:fm-held
+test:supervisor
+stale: test:fm-held (the recorded endpoint is gone)
+1795302832	3	stale	test:fm-held	stale: test:fm-held (the recorded endpoint is gone)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 3225858.1795302832.RwZ8xl
+Watcher completed a later poll (beacon 1795302834)
+Watcher completed a later poll (beacon 1795302836)
+Absent after close and later polls: .paused-test_fm-held
+Absent after close and later polls: .paused-rechecked-test_fm-held
+Absent after close and later polls: .paused-resurfaced-test_fm-held
+captain-held: awaiting a decision
+Final watcher/daemon exit 1
+Scenario exit 0
+
+--- Real backlog hold, tmux window closure and pause cleanup ---
+ok: added parked (ship) -> Queued
+task:
+  id: parked
+  title: Synthetic backlog hold
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+  hold_kind: "-"
+  hold_until: "-"
+  kind: ship
+  repo: "-"
+  priority: "-"
+  created: 2026-11-21
+  closed: "-"
+  deps: none
+  links: none
+  body: ""
+help[2]:
+  - Run `tasks-axi start parked` to move it to in flight
+  - Run `tasks-axi block parked --by <other>` to record a dependency
+ok: hold parked -> held (captain)
+task:
+  id: parked
+  title: Synthetic backlog hold
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: yes
+  hold_reason: Pending a captain decision
+  hold_kind: captain
+  hold_until: "-"
+  kind: ship
+  repo: "-"
+  priority: "-"
+  created: 2026-11-21
+  closed: "-"
+  deps: none
+  links: none
+  body: ""
+help[2]:
+  - Run `tasks-axi unhold parked` to resume dispatch
+  - Run `tasks-axi ready --include-held` to review paused work
+count: 1
+tasks[1]{id,state,kind,repo,title,hold_kind}:
+  parked,queued,ship,"-",Synthetic backlog hold,captain
+help[1]:
+  - Run `tasks-axi show <id>` for full notes on a task
+Present before close: <fixture>/backlog/home/state/.paused-test_fm-parked
+
+$ tmux kill-window -t test:fm-parked
+test:supervisor
+stale: test:fm-parked (the recorded endpoint is gone)
+1795302829	1	stale	test:fm-parked	stale: test:fm-parked (the recorded endpoint is gone)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 3214846.1795302829.ClOWqO
+Watcher completed a later poll (beacon 1795302832)
+Watcher completed a later poll (beacon 1795302834)
+Absent after close and later polls: .paused-test_fm-parked
+Absent after close and later polls: .paused-rechecked-test_fm-parked
+Absent after close and later polls: .paused-resurfaced-test_fm-parked
+count: 1
+tasks[1]{id,state,kind,repo,title,hold_kind}:
+  parked,queued,ship,"-",Synthetic backlog hold,captain
+help[1]:
+  - Run `tasks-axi show <id>` for full notes on a task
+Final watcher/daemon exit 1
+Scenario exit 0
+
+--- Away-daemon handling and later housekeeping after paused tmux window closure ---
+Daemon tracked live pause: <fixture>/away/home/state/.subsuper-paused-paused
+
+$ tmux kill-window -t test:fm-paused
+test:supervisor
+
+Away-daemon escalation buffer
+test:fm-paused (the recorded endpoint is gone)
+
+One escalation remained after later housekeeping, with an empty wake queue and no pause marker
+[2026-11-21T15:13:53-0800] escalate: stale: test:fm-paused (the recorded endpoint is gone) -> test:fm-paused (the recorded endpoint is gone)
+paused: waiting for an external dependency
+Final watcher/daemon exit 0
+Scenario exit 0
+
+--- Herdr pane closure, durable wake and acknowledgement ---
+Private Herdr session inventory
+{"name":"default","running":false,"default":true}
+{"name":"fm-lab-loss-3193822","running":true,"default":false}
+{"pane_id":"w1:p1","terminal_id":"term_660d18313688c1"}
+{"pane_id":"w1:p2","terminal_id":"term_660d18313ea472"}
+
+$ herdr --session fm-lab-loss-3193822 pane close w1:p1
+{"id":"cli:pane:close","result":{"type":"ok"}}
+{"pane_id":"w1:p2","terminal_id":"term_660d18313ea472"}
+stale: fm-lab-loss-3193822:w1:p1 (the recorded endpoint is gone)
+1795302827	1	stale	fm-lab-loss-3193822:w1:p1	stale: fm-lab-loss-3193822:w1:p1 (the recorded endpoint is gone)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 3209555.1795302827.HQdwm9
+Watcher completed a later poll (beacon 1795302830)
+Watcher completed a later poll (beacon 1795302832)
+Final watcher/daemon exit 1
+{"session":{"default":false,"name":"fm-lab-loss-3193822","running":false,"session_dir":".endpoint-test/herdr/xdg/herdr/sessions/fm-lab-loss-3193822","socket_path":".endpoint-test/herdr/xdg/herdr/sessions/fm-lab-loss-3193822/herdr.sock"},"stopped":true}
+Herdr server exit 0
+{"deleted":true,"session":{"default":false,"name":"fm-lab-loss-3193822","running":false,"session_dir":".endpoint-test/herdr/xdg/herdr/sessions/fm-lab-loss-3193822","socket_path":".endpoint-test/herdr/xdg/herdr/sessions/fm-lab-loss-3193822/herdr.sock"}}
+Scenario exit 0
+
+--- Unreadable tmux endpoint probe followed by confirmed closure ---
+Watcher completed a later poll (beacon 1795302755)
+Watcher completed a later poll (beacon 1795302757)
+
+Injected transient capture and inventory failures while the real endpoint exists
+capture-pane -p -t test:fm-guarded -S -40
+list-windows -t test -F #{window_name}
+test:supervisor
+test:fm-guarded
+
+Watcher kept polling with an empty durable queue
+test:supervisor
+stale: test:fm-guarded (the recorded endpoint is gone)
+1795302758	1	stale	test:fm-guarded	stale: test:fm-guarded (the recorded endpoint is gone)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 3034714.1795302758.22HfJZ
+Scenario exit 0
+
+--- In-flight tmux absence probe during same-name relaunch ---
+test:supervisor
+
+Actual tmux inventory sampled while the old window was absent
+supervisor
+
+Replacement metadata published under its task lock while the old observation was in flight
+window=test:fm-race
+backend=tmux
+kind=ship
+harness=codex
+spawn_gen=replacement
+mode=local-only
+project=<fixture>/race/project
+worktree=<fixture>/race/already-absent-worktree
+Watcher completed a later poll (beacon 1795302755)
+Watcher completed a later poll (beacon 1795302757)
+
+No wake or endpoint-loss record was created from the superseded observation
+
+The replacement now closes
+test:supervisor
+stale: test:fm-race (the recorded endpoint is gone)
+1795302758	1	stale	test:fm-race	stale: test:fm-race (the recorded endpoint is gone)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 3034701.1795302758.sqGNqq
+Scenario exit 0
+
+--- Failed teardown and retry during an in-flight tmux absence probe ---
+test:supervisor
+stale: test:fm-retire (the recorded endpoint is gone)
+1795302991	1	stale	test:fm-retire	stale: test:fm-retire (the recorded endpoint is gone)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 3659419.1795302991.G0I6Lu
+
+$ bin/fm-teardown.sh retire (injected failure of the final metadata unlink)
+teardown: reaping leaked worktree process group for retire: 3656820
+error: retire's endpoint and local copy are cleaned up, but its task record could not be removed (task record could not be removed at <fixture>/retire/home/state/retire.meta)
+error: retire's endpoint and local copy are cleaned up, but its task record could not be removed (task record could not be removed at <fixture>/retire/home/state/retire.meta)
+Watcher completed a later poll (beacon 1795302994)
+Watcher completed a later poll (beacon 1795302996)
+
+Original task record and acknowledged loss marker survived failed teardown. No duplicate was queued.
+Watcher stopped for cleanup (exit 1)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 3673405.1795302996.wc0J0e
+
+Actual tmux inventory sampled while the old window was absent
+supervisor
+
+$ bin/fm-teardown.sh retire
+teardown: reaping leaked worktree process group for retire: 3675537
+teardown retire complete (window test:fm-retire, worktree <fixture>/retire/already-absent-worktree)
+Backlog: retire just finished (this home keeps no markdown backlog at <fixture>/retire/home/data/backlog.md). Update <fixture>/retire/home/data/backlog.md - move retire to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+
+Successful teardown removed the task record and its loss marker.
+Watcher completed a later poll (beacon 1795303002)
+Watcher completed a later poll (beacon 1795303003)
+
+No wake or endpoint-loss record was created from the superseded observation
+Final watcher/daemon exit 1
+Scenario exit 0
