@@ -1270,7 +1270,7 @@ SH
 }
 
 test_cancelled_run_with_registered_green_pr_is_not_terminal_in_flight() {
-  local home fakebin out pr other_pr head branch state note poll
+  local home fakebin out pr other_pr head branch state note poll real_env
   home=$(make_home cancelled-open-pr)
   fakebin=$(make_fakebin "$home")
   pr=https://github.com/kunchenguid/firstmate/pull/46
@@ -1311,6 +1311,15 @@ SH
   printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}
     and .endpoints[0].state == "failed" and .endpoints[0].source == "run-step"' >/dev/null \
     || fail "the latest done event for the registered PR must exempt only the terminal classification: $out"
+
+  printf 'blocked: waiting for guidance\n' >> "$state/cancelled.status"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
+  printf '%s' "$out" | jq -e '.tasks[0].current_state.detail == "run cancelled · status-log superseded (run failed)"' >/dev/null \
+    || fail "the cancelled validation must supersede the blocked event in the fixture: $out"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}
+    and .endpoints[0].state == "failed" and .endpoints[0].source == "run-step"' >/dev/null \
+    || fail "a cancelled validation that supersedes a blocked event must also be exempt: $out"
 
   cp "$state/cancelled.meta" "$home/recorded-meta"
   sed '/^pr=/d' "$home/recorded-meta" > "$state/cancelled.meta"
@@ -1359,6 +1368,26 @@ SH
   printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}' >/dev/null \
     || fail "the matching PR retirement receipt must end the exemption: $out"
   rm -f "$state/cancelled.pr-poll-retirement"
+
+  real_env=$(command -v env)
+  cat > "$fakebin/env" <<'SH'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  case "$arg" in
+    */fm-crew-state.sh)
+      printf '%s\n' 'state: failed · source: run-step · run cancelled · unrelated note'
+      exit 0
+      ;;
+  esac
+done
+exec "$FM_TEST_REAL_ENV" "$@"
+SH
+  chmod +x "$fakebin/env"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_TEST_REAL_ENV="$real_env" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}
+    and .endpoints[0].state == "failed" and .endpoints[0].source == "run-step"' >/dev/null \
+    || fail "an unsupported cancellation detail must stay terminal in flight: $out"
+  rm -f "$fakebin/env"
 
   sed 's/: cancelled$/: failed/' "$home/run.txt" > "$home/failed-run.txt"
   mv "$home/failed-run.txt" "$home/run.txt"

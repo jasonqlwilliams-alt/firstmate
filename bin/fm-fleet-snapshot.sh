@@ -803,13 +803,13 @@ task_json_one() {  # <captured-meta>
   }
   event_json=$(status_event_json "$status_log" "$STATE/$id.status")
   last_event_raw=$(printf '%s' "$event_json" | jq -r '.last_event.raw // ""')
-  read -r current_state current_source current_detail < <(
+  IFS=$'\t' read -r current_state current_source current_detail < <(
     printf '%s' "$current_json" | jq -r '[.state // "", .source // "", .detail // ""] | @tsv'
   )
   if [ "$OUTPUT_MODE" = secondmate-home-summary ] && [ "$pr_source" = meta ] \
     && [ "$current_state" = failed ] && [ "$current_source" = run-step ]; then
     case "$current_detail" in
-      'run cancelled'|'run cancelled · '*)
+      'run cancelled'|'run cancelled · status-log superseded (run failed)')
         if snapshot_pr_awaiting_merge "$id" "$pr" "$status_log"; then
           cancelled_pr_awaiting_merge=true
         fi
