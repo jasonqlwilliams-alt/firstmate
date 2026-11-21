@@ -79,6 +79,51 @@ pass() {
   printf 'ok - %s\n' "$1"
 }
 
+fm_test_lavish_toon_module() {
+  if [ -n "${FM_TEST_LAVISH_CODEC_PATH:-}" ]; then
+    printf '%s\n' "$FM_TEST_LAVISH_CODEC_PATH"
+    return
+  fi
+  local lavish
+  lavish=$(command -v lavish-axi) || return 1
+  node --no-global-search-paths --experimental-import-meta-resolve --input-type=module - \
+    "$ROOT/bin/fm-procevent-lavish-codec.mjs" "$lavish" <<'JS'
+import { pathToFileURL } from 'node:url';
+const { resolveInstalledToon } = await import(pathToFileURL(process.argv[2]).href);
+console.log(resolveInstalledToon(process.argv[3]));
+JS
+}
+
+fm_test_require_lavish_codec() {
+  local codec
+  if command -v node >/dev/null 2>&1 &&
+     codec=$(fm_test_lavish_toon_module 2>/dev/null) && [ -f "$codec" ]; then
+    return 0
+  fi
+  [ -z "${FM_TEST_LAVISH_CODEC_PATH:-}" ] || fail "cannot use the configured Lavish test codec"
+  printf 'skip: %s requires Node.js and the Lavish TOON codec\n' "$1"
+  return 1
+}
+
+fm_test_attach_lavish_codec() {
+  local modules="$1/node_modules" codec
+  codec=$(fm_test_lavish_toon_module) || return 1
+  [ -f "$codec" ] || return 1
+  mkdir -p "$modules/axi-sdk-js" "$modules/@toon-format/toon" &&
+    printf '{"exports":"./index.mjs"}\n' > "$modules/axi-sdk-js/package.json" &&
+    : > "$modules/axi-sdk-js/index.mjs" &&
+    printf '{"exports":"./index.mjs"}\n' > "$modules/@toon-format/toon/package.json" &&
+    ln -s "$codec" "$modules/@toon-format/toon/index.mjs"
+}
+
+fm_test_prepend_lavish_fixture() {
+  [ -n "${FM_TEST_LAVISH_CODEC_PATH:-}" ] || return 0
+  local fakebin
+  fakebin=$(fm_fakebin "$1") && fm_fake_exit0 "$fakebin" lavish-axi &&
+    fm_test_attach_lavish_codec "$fakebin" || return 1
+  export PATH="$fakebin:$PATH"
+}
+
 # --- self-cleaning temp root ------------------------------------------------
 #
 # fm_test_tmproot <prefix> echoes a fresh temp dir and registers it for removal

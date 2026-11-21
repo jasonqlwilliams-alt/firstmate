@@ -15,15 +15,17 @@
 #
 # classify   Print the lifecycle state a handler should act on: feedback, ended,
 #            waiting, missing, or unknown.
-# read       Print a structured presentation of one already-captured result so a
-#            handler consumes every queued item without grepping the raw file.
+# read       Print a structured presentation of recoverable items from one
+#            capture.
 #            It is read-only over the capture: it does not arm, poll, or change
 #            what Lavish delivered. The session-ending freeform message
 #            (tag=message) is its own labeled field, printed first and distinct
 #            from per-element annotations. Declared and presented item counts,
 #            plus a completeness verdict, follow before all annotations so a
-#            partial read is obvious. Each annotation retains its element uid,
-#            selector, tag, and text. A non-choice freeform comment (`prompt`)
+#            partial read is obvious. A missing block in a feedback result has
+#            an unknown declared count. Size-limited results report incomplete
+#            and include every recoverable prompt. Each annotation retains its
+#            element uid, selector, tag, and text. A non-choice comment (`prompt`)
 #            is printed as its own field even when a selector is also present
 #            and even when that comment matches the element text, so typed
 #            words are never dropped. Choice Context data is not a comment.
@@ -43,23 +45,8 @@
 #            is the generic no-op contract bin/fm-procevent.sh calls, and the
 #            only place Lavish's notion of "nothing was said" is decided.
 #
-# AN EMPTY BOARD CLOSE IS NOT NEWS, and that is what `silent` exists to say.
-# Closing a review surface that carried nothing is the single most common Lavish
-# result: the captain reads a board, says nothing, and closes it. Announcing that
-# put a wake in front of the handler whose entire content was that nothing
-# happened. `silent` therefore holds one narrow, positively-determined shape -
-# a session this adapter classifies `ended` that carries no queued content block
-# at all - and every other result stays announced.
-#
-# Deliberately narrow, in both directions. A `Send & End` close carrying the
-# captain's actual answer arrives as `status: feedback` with `session_ended`, so
-# it classifies `feedback`, never `ended`, and is announced exactly as before; so
-# is any `ended` result that still carries a `prompts` or `feedback` block, which
-# the published poll is not expected to produce but which must never be dropped
-# on that expectation. A `waiting` session, a `missing` one, an `unknown` or
-# unreadable result, and any error all stay announced, because none of them
-# positively proves nothing was said. Silence is only ever an absence this
-# adapter can see in the result, never an absence it assumes.
+# See "Process-to-event sources" in docs/configuration.md for the operating
+# contract for silencing an empty board close.
 #
 # This adapter is deliberately thin. It owns only what is specific to Lavish:
 # canonical source identity, the argv for the currently published poll command,
@@ -68,19 +55,25 @@
 #
 # `answers` is this adapter's half of the generic keyed-answer contract in
 # bin/fm-procevent.sh. It reports what the captain actually chose, as
-# `<task-id>\t<answer>\t<label>` lines, and stops there. It maps nothing to a
+# `<task-id>\t<answer>\t<label>[\t<mode>]` lines. It maps nothing to a
 # task, records no decision, and closes nothing: a captain answer is not special
 # to Lavish, so every rule about what a keyed answer DOES belongs to the one
 # intake in bin/fm-captain-hold.sh, which the runner feeds. A Lavish review is
 # just an ephemeral discussion format that happens to carry answers.
 #
-# Only rows tagged `choice` are read. A freeform captain message is prose that may
-# contain anything, and must never be able to forge a decision key.
+# Choice commands use only rows tagged `choice`. Freeform captain messages
+# must never be able to forge a decision key.
 #
-# `read` is the presentation command summarized above; keyed intake remains
-# the separate `answers` contract described here.
+# `read`, `answers`, and `reconciles` use the same TOON decoder, including for
+# tabular and list prompts. Node.js loads the codec used by lavish-axi on PATH.
+# `read` exits 0 for a complete capture or 3 for an incomplete capture, with
+# recoverable rows in either case. Legacy tabular prose recovery is for display.
+# The choice commands exit 0 for a complete prompt block or a complete
+# no-feedback response. If only the prompt block is complete, the commands
+# write eligible choices to stdout and warn on stderr. If neither condition
+# holds, they exit 3 without choice rows. An unreadable capture yields exit 1.
 #
-# It wraps ONLY the currently published interface, verified against 0.1.45:
+# The listener uses the published poll command, verified against 0.1.45:
 #   Usage: lavish-axi poll <html-file> [--agent-reply "..."]
 # and that command "long-polls indefinitely" server-side. The adapter therefore
 # runs the plain blocking form with no timeout flag, so results arrive as real
@@ -124,7 +117,7 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 . "$SCRIPT_DIR/fm-procevent-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
-usage() { sed -n '2,111p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"; exit 2; }
 
 # Canonical identity is physical, not the path string: Lavish itself keys a
 # session on the realpath of the artifact, so two names for one file are one
@@ -362,62 +355,43 @@ cmd_terminal() {
   return 1
 }
 
-# Whether a completed result carries any queued content block at all. The
-# published response frames content as a top-level `prompts[N]{...}:` or
-# `feedback[N]{...}:` header whose rows are INDENTED, so this anchors on column
-# zero: an indented payload line is captain-supplied text and must never be able
-# to forge - or, here, to hide behind - a content header. Any recognized block
-# is content regardless of its declared count, while a malformed top-level
-# prompts or feedback header makes the result indeterminate.
-#
-# 0 = content present, 1 = provably no content, anything else = the check did
-# not complete. The caller must distinguish those three, because "the check
-# failed" is never proof that nothing was said.
-result_has_queued_content() {  # <result-file>
-  awk '
-    /^(prompts|feedback)\[[0-9]+\]\{[^}]*\}:[[:space:]]*$/ {
-      verdict = "present"
-      exit
-    }
-    /^(prompts|feedback)/ {
-      verdict = "indeterminate"
-      exit
-    }
-    END {
-      if (verdict == "present") exit 0
-      if (verdict == "indeterminate") exit 2
-      exit 1
-    }
-  ' "$1"
-}
-
-# Whether a captured result is a routine no-op the runner should record without
-# announcing, for the generic runner's silence seam. Lavish's notion of "nothing
-# was said" lives here and nowhere else: an ended session carrying no queued
-# content block is a board the captain closed without saying anything, and the
-# handler learns nothing from being told. Anything else - a real answer, a
-# missing or waiting session, an unreadable result - is announced.
+# The lifecycle marker alone cannot prove an empty close. A cutoff after
+# `status: ended` could hide a content block, so silence needs a complete capture.
 cmd_silent() {
-  local file=${1-} content_rc
+  local file=${1-}
   [ -n "$file" ] || usage
   [ -f "$file" ] && [ ! -L "$file" ] || die "result file does not exist: $file"
   [ "$(cmd_classify "$file")" = ended ] || return 1
-  result_has_queued_content "$file"
-  content_rc=$?
-  # Only a completed check that proved the result carries nothing declares
-  # silence; a check that could not complete announces, like every other
-  # uncertainty here.
-  [ "$content_rc" -eq 1 ]
+  decode_lavish_capture "$file" ended silent | perl -MJSON::PP -e '
+    local $/;
+    my $capture = decode_json(<STDIN>);
+    exit($capture->{complete} && !defined $capture->{kind} ? 0 : 1);
+  '
+}
+
+
+capture_tail() {
+  fm_procevent_result_owner_field "$1" capture-tail 2>/dev/null || true
+}
+
+decode_lavish_capture() {
+  local file=$1 lifecycle=$2 projection=$3 lavish tail
+  lavish=$(command -v lavish-axi) || lavish=''
+  tail=$(capture_tail "$file")
+  if command -v node >/dev/null 2>&1; then
+    node --no-global-search-paths --experimental-import-meta-resolve "$SCRIPT_DIR/fm-procevent-lavish-decode.mjs" \
+      "$lavish" "$file" "$tail" "$lifecycle" "$projection" && return
+    printf '{"rows":[],"malformed":0,"error":"Lavish capture decoder failed"}\n'
+  else
+    printf '{"rows":[],"malformed":0,"error":"Node.js not found on PATH"}\n'
+  fi
 }
 
 # Print `key<TAB>answer<TAB>label[<TAB>mode]` for each non-reconcile structured choice the
 # captain submitted in a captured result; the optional mode column relays the
-# card's declared close mode (`done` or `release`) to the keyed-answer intake. The published response frames queued feedback as
-# a `prompts[N]{field,...}:` header followed by exactly N indented CSV rows whose
-# quoted fields carry JSON-style escapes, so this reads the declared field ORDER
-# rather than assuming a fixed column, and takes only rows whose `tag` field is
-# `choice`. A freeform `message` row is captain prose and is deliberately never a
-# source of decision keys. A row that does not carry both a slug-shaped `question`
+# card's declared close mode (done or release) to the keyed-answer intake.
+# Only decoded prompts tagged choice can provide decision keys.
+# A row that does not carry both a slug-shaped `question`
 # and the versioned `selection` and `note` fields inside its `Context data:` block
 # is skipped. A time-limited rollout branch accepts the old question/answer
 # shape only for ordinary answers and rejects its bare or annotated reconcile
@@ -429,46 +403,33 @@ cmd_choice_rows() {
   local selection=$1 file=${2-}
   [ -n "$file" ] || usage
   [ -f "$file" ] && [ ! -L "$file" ] || die "result file does not exist: $file"
-  perl -MJSON::PP -e '
-    use strict; use warnings;
+  decode_lavish_capture "$file" "$(cmd_classify "$file")" "$selection" | perl -MJSON::PP -e '
     my ($selection, $path) = @ARGV;
-    open my $fh, "<", $path or exit 1;
-    my (@fields, $want, @rows);
-    while (my $line = <$fh>) {
-      if (!@fields) {
-        next unless $line =~ /^prompts\[(\d+)\]\{([^}]*)\}:\s*$/;
-        ($want, @fields) = ($1, split /,/, $2);
-        next;
-      }
-      last unless $line =~ /^\s/;
-      last if @rows >= $want;
-      chomp $line;
-      push @rows, $line;
+    local $/;
+    my $capture = decode_json(<STDIN>);
+    if ($capture->{error}) {
+      warn "unreadable and incomplete Lavish prompt capture: $path ($capture->{error})\n";
+      exit 1;
     }
-    close $fh;
+    unless ($capture->{complete} || $capture->{prompts_complete}) {
+      warn "incomplete Lavish prompt capture: $path\n";
+      exit 3;
+    }
+    warn "incomplete Lavish prompt capture: $path (prompt block complete)\n"
+      unless $capture->{complete};
+    binmode STDOUT, ":encoding(UTF-8)" or die "cannot set UTF-8 output: $!\n";
+    exit 0 unless ($capture->{kind} // "") eq "prompts";
     my %seen;
     my @choices;
-    for my $row (@rows) {
-      $row =~ s/^\s+//;
-      my @vals;
-      while (length $row) {
-        if ($row =~ s/^"((?:[^"\\]|\\.)*)"//) {
-          my $v = $1;
-          $v =~ s/\\(.)/$1 eq "n" ? "\n" : $1 eq "t" ? "\t" : $1 eq "r" ? "\r" : $1/ge;
-          push @vals, $v;
-        } else {
-          $row =~ s/^([^,]*)//;
-          push @vals, $1;
-        }
-        last unless $row =~ s/^,//;
-      }
-      my %f;
-      $f{$fields[$_]} = $vals[$_] for 0 .. $#fields;
+    for my $row (@{ $capture->{rows} }) {
+      my %f = %$row;
       next unless defined $f{tag} && $f{tag} eq "choice";
       my $prompt = $f{prompt};
-      next unless defined $prompt && $prompt =~ /Context data:\s*(\{.*\})/s;
+      next unless defined $prompt;
+      my $start = rindex($prompt, "\nContext data:") + 1;
+      next unless substr($prompt, $start) =~ /\AContext data:\s*(\{.*\})\s*\z/s;
       my $ctx = $1;
-      my $data = eval { decode_json($ctx) };
+      my $data = eval { JSON::PP->new->decode($ctx) };
       next unless ref($data) eq "HASH";
       my ($key, $selected, $note, $answer, $legacy);
       if (defined($data->{schema}) && !ref($data->{schema})
@@ -550,58 +511,14 @@ cmd_read() {
   [ -f "$file" ] && [ ! -L "$file" ] || die "result file does not exist: $file"
   lifecycle=$(cmd_classify "$file")
   session_ended=$(session_field "$file" session_ended)
-  perl -e '
-    use strict; use warnings;
-    my ($path, $lifecycle, $session_ended) = @ARGV;
-    open my $fh, "<", $path or exit 1;
-    my (@fields, $want, @rows);
-    while (my $line = <$fh>) {
-      if (!@fields) {
-        next unless $line =~ /^(?:prompts|feedback)\[(\d+)\]\{([^}]*)\}:\s*$/;
-        ($want, @fields) = ($1, split /,/, $2);
-        next;
-      }
-      last unless $line =~ /^\s/;
-      last if defined($want) && @rows >= $want;
-      chomp $line;
-      push @rows, $line;
-    }
-    close $fh;
-    $want = 0 unless defined $want;
-    my @parsed;
-    my $malformed = 0;
-    for my $row (@rows) {
-      $row =~ s/^\s+//;
-      my @vals;
-      while (length $row) {
-        if ($row =~ s/^"((?:[^"\\]|\\.)*)"//) {
-          push @vals, $1;
-        } else {
-          $row =~ s/^([^,]*)//;
-          push @vals, $1;
-        }
-        last unless $row =~ s/^,//;
-      }
-      if (@vals > @fields) {
-        my ($preserve) = grep { $fields[$_] eq "prompt" } 0 .. $#fields;
-        ($preserve) = grep { $fields[$_] eq "text" } 0 .. $#fields unless defined $preserve;
-        if (defined $preserve) {
-          my $count = @vals - @fields + 1;
-          my @parts = splice @vals, $preserve, $count;
-          splice @vals, $preserve, 0, join(",", @parts);
-        }
-      }
-      if (@vals != @fields) {
-        $malformed++;
-        next;
-      }
-      s/\\(.)/$1 eq "n" ? "\n" : $1 eq "t" ? "\t" : $1 eq "r" ? "\r" : $1/ge for @vals;
-      my %f;
-      $f{$fields[$_]} = $vals[$_] for 0 .. $#fields;
-      push @parsed, \%f;
-    }
+  decode_lavish_capture "$file" "$lifecycle" read | perl -MJSON::PP -e '
+    my ($lifecycle, $session_ended) = @ARGV;
+    local $/;
+    my $capture = decode_json(<STDIN>);
+    binmode STDOUT, ":encoding(UTF-8)" or die "cannot set UTF-8 output: $!\n";
+    my $want = $capture->{declared} // "unknown";
+    my @parsed = @{ $capture->{rows} };
     my $presented = scalar @parsed;
-    my $complete = ($presented == $want && !$malformed) ? "yes" : "no";
     my @messages;
     my @annotations;
     for my $f (@parsed) {
@@ -638,8 +555,10 @@ cmd_read() {
     print "\n";
     print "declared_items: $want\n";
     print "presented_items: $presented\n";
-    print "malformed_items: $malformed\n";
-    print "complete: $complete\n";
+    print "malformed_items: $capture->{malformed}\n";
+    print "complete: ", ($capture->{complete} ? "yes" : "no"), "\n";
+    print "capture_truncated: yes\n" if $capture->{truncated};
+    print "capture_error: unreadable: $capture->{error}\n" if $capture->{error};
     print "lifecycle: $lifecycle\n";
     print "session_ended: ", (length $session_ended ? $session_ended : "(unset)"), "\n";
     print "annotation_count: ", scalar(@annotations), "\n";
@@ -672,7 +591,8 @@ cmd_read() {
       print "ANNOTATIONS: (none)\n";
     }
     print "END LAVISH RESULT ($presented of $want)\n";
-  ' "$file" "$lifecycle" "$session_ended"
+    exit($capture->{error} ? 1 : $capture->{complete} ? 0 : 3);
+  ' "$lifecycle" "$session_ended"
 }
 
 case "${1-}" in

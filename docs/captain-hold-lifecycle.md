@@ -58,7 +58,7 @@ A key that names no task, names a task that is not captain-held, or names a task
 
 Two channels feed that one intake today, and both are ordinary callers rather than special cases.
 `bin/fm-send.sh --resolve-key` is the chat channel: its status-log close for a key the status log still owns is owned by that script's header, and a key the status log no longer owns is resolved to a still-open captain-held task - the key as a task id, then the legacy derived identity - and fed as one keyed line.
-`bin/fm-procevent.sh` is the captured-result channel: after capture, a bound built-in source has its result passed to `bin/fm-procevent-<adapter>.sh answers <result-file>` and whatever that prints is piped into the intake, so any built-in adapter with an `answers` command works and the runner names no adapter, parses no result, and carries no decision rule.
+`bin/fm-procevent.sh` is the captured-result channel described in the [process-event operating contract](configuration.md#process-to-event-sources-stateprocevent).
 Trusted external process-event adapters intentionally expose no answer operation and cannot feed this authority-bearing intake; [`extension-bindings.md`](extension-bindings.md#trust-boundary) owns that boundary.
 `bin/fm-procevent-lavish.sh answers` is one such adapter command; it reads only rows tagged `choice`, relays a card's declared close mode, and can never let freeform captain prose forge a task id or a mode.
 
@@ -75,9 +75,8 @@ Board request creation uses a separate captured-source seam.
 The board emits `fm-bearings-answer.v1` context with the slug-shaped selected option and freeform note in separate fields, so annotating Reconcile cannot turn it into an ordinary answer value.
 `bin/fm-procevent-lavish.sh answers` emits an exact non-reconcile selection, or a bare note when no option was selected, while `reconciles` emits only task ids whose structured selection is Reconcile and carries their notes as request provenance.
 Current rows require the versioned shape and the `choice` tag; a time-limited rollout branch accepts ordinary answers from the old question/answer shape but refuses its bare and separator-annotated reconcile values from both intakes because those rows do not separate the selected option from its note.
-Every other structurally uncertain capture feeds neither intake, remains announced, and cannot forge a task id from freeform prose.
-The adapter-agnostic runner pipes reconcile rows into `reconcile-requests` only for a bound source, and that intake verifies the named binding again before it creates anything.
-Failures remain best-effort and never acknowledge or suppress the captured result.
+The [process-event operating contract](configuration.md#process-to-event-sources-stateprocevent) owns prompt-block completeness and announcement on projection failure.
+The `reconcile-requests` intake verifies the named binding again before creating a request.
 What this captured-source intake records is a durable reconcile request under `state/reconcile-requests/`, one private record per task, carrying the requesting provenance and a UTC timestamp.
 The record exists so the obligation to re-check cannot be lost between the wake that carried the answer and the turn that acts on it.
 It is idempotent per task: repeating a reconcile keeps one request and its original timestamp.

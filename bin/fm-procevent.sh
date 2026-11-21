@@ -155,14 +155,13 @@
 # once, by bin/fm-captain-hold.sh's keyed-answer intake, and reaching it must not
 # depend on an agent remembering. So after capture, a bound source
 # has its result passed to
-# `bin/fm-procevent-<adapter>.sh answers <result-file>`, and whatever that prints
-# is piped straight into that one intake. The adapter reports only what the
-# captain chose; the intake owns every rule about what happens next. This runner
-# names no adapter, parses no result, and knows no decision rule, so a future
-# built-in source needs nothing here beyond an `answers` command and a binding.
+# `bin/fm-procevent-<adapter>.sh answers <result-file>`. Exit 0 authorizes the
+# runner to forward its stdout to the intake, which owns decision semantics.
 # Reconcile selections use the parallel `reconciles` adapter command and the
 # binding-verified `reconcile-requests` intake, never the keyed-answer value.
 # External binding responses never enter either authority-bearing intake.
+# For a bound Lavish source, `start` prints an incomplete-capture diagnostic
+# and exits 1 if either choice command fails.
 #
 # Feeding is deliberately independent of handling: it never acknowledges a result
 # and never suppresses a wake. Recording the captain's answer is transcription,
@@ -392,35 +391,27 @@ adapter_autohandle() {  # <adapter> <source-id> <result-file>
   "$script" autohandle "$id" "$seq" "$result" >/dev/null 2>&1
 }
 
-# Pass a bound source's captured result to the one keyed-answer intake. The
-# adapter turns its own format into keyed lines; the intake owns everything those
-# lines mean. Silenced and best-effort exactly like the seams above: an unbound
-# source, an adapter with no `answers` command, and a failure on either side all
-# leave the capture untouched and still announced, because this never
-# acknowledges anything (see the keyed-answer note in the header).
-feed_keyed_answers() {  # <adapter> <source-id> <result-file>
-  local adapter=$1 id=$2 result=$3 script origin seq
+# Buffer the projection so a command that fails after writing output cannot
+# feed partial rows into either intake.
+feed_captured_choices() {  # <adapter> <source-id> <result-file> <answers|reconciles>
+  local adapter=$1 id=$2 result=$3 projection=$4 script origin seq rows
+  local -a intake
   script=$(adapter_script "$adapter")
   [ -f "$script" ] && [ ! -L "$script" ] || return 1
   origin=$("$SCRIPT_DIR/fm-captain-hold.sh" binding "$id" 2>/dev/null) || return 1
   [ -n "$origin" ] || return 1
   seq=$(fm_procevent_result_sequence "$result") || return 1
-  "$script" answers "$result" 2>/dev/null \
-    | "$SCRIPT_DIR/fm-captain-hold.sh" answers "$origin" \
-        --source "the captured result $id sequence $seq" >/dev/null 2>&1
-}
-
-feed_reconcile_requests() {  # <adapter> <source-id> <result-file>
-  local adapter=$1 id=$2 result=$3 script origin seq rows
-  script=$(adapter_script "$adapter")
-  [ -f "$script" ] && [ ! -L "$script" ] || return 1
-  origin=$("$SCRIPT_DIR/fm-captain-hold.sh" binding "$id" 2>/dev/null) || return 1
-  [ -n "$origin" ] || return 1
-  seq=$(fm_procevent_result_sequence "$result") || return 1
-  rows=$("$script" reconciles "$result" 2>/dev/null) || return 1
+  rows=$("$script" "$projection" "$result" 2>/dev/null) || {
+    [ "$adapter" != lavish ] || return 3
+    return 1
+  }
+  case "$projection" in
+    answers) intake=(answers "$origin") ;;
+    reconciles) intake=(reconcile-requests --source-id "$id") ;;
+  esac
   printf '%s\n' "$rows" \
-    | "$SCRIPT_DIR/fm-captain-hold.sh" reconcile-requests \
-        --source-id "$id" --source "the captured result $id sequence $seq" >/dev/null 2>&1
+    | "$SCRIPT_DIR/fm-captain-hold.sh" "${intake[@]}" \
+        --source "the captured result $id sequence $seq" >/dev/null 2>&1 || return 1
 }
 
 read_adapter() {  # <source-id>
@@ -723,6 +714,7 @@ cmd_start_public() {
 cmd_start() {
   local id=${1-} adapter out rc claimed bound_rc published_capture=0 handled_capture=0 self_announcing=0
   local extension_owner=0 extension_load_state extension_sequence='' extension_request_id=''
+  local projection projection_failed=0
   fm_procevent_source_id_valid "$id" || die "source id must be path-safe: $id"
   require_runner_group
   fm_procevent_source_lock_acquire "$id" || die "cannot lock source: $id"
@@ -859,7 +851,7 @@ cmd_start() {
   fi
   # Built-in adapters do not run the extension capture helper, so keep this
   # sentinel defined while sharing the no-result branch below under `set -u`.
-  local truncated=0 capture_state='' durable='' reservation_terminal='' reservation_silent=''
+  local truncated=0 capture_state='' durable='' reservation_terminal='' reservation_silent='' capture_tail=''
   fm_procevent_launch_floor_wait "$STATE" "$id" "$CLAIM_REG_IDENTITY" "$launch_floor"
   case "$?" in
     0) ;;
@@ -944,11 +936,13 @@ EOF
     rm -f -- "$launch_ready"
     fm_procevent_source_lock_release "$id" \
       || die "cannot release the source launch boundary: $id"
-    perl -e '
+    capture_tail=$(perl -e '
       use strict;
       use warnings;
-      my $limit = shift;
+      my ($limit, $adapter) = @ARGV;
+      open my $out, ">&=3" or exit 2;
       my ($written, $truncated) = (0, 0);
+      my $tail = "";
       while (1) {
         my $count = sysread(STDIN, my $buffer, 65536);
         exit 2 unless defined $count;
@@ -958,16 +952,27 @@ EOF
         if ($take > 0) {
           my $offset = 0;
           while ($offset < $take) {
-            my $count_written = syswrite(STDOUT, $buffer, $take - $offset, $offset);
+            my $count_written = syswrite($out, $buffer, $take - $offset, $offset);
             exit 2 unless defined $count_written;
             $offset += $count_written;
           }
           $written += $take;
         }
-        $truncated = 1 if $take < $count;
+        if ($take < $count) {
+          $truncated = 1;
+          if ($adapter eq "lavish" && length($tail) < 4) {
+            $tail .= substr($buffer, $take, 4 - length($tail));
+          }
+        }
       }
+      # Retain only framing: one possible newline and enough indentation to
+      # tell a new prompt (two spaces) from a field within one (four spaces).
+      # Mask every non-framing byte before handing it to the capture owner.
+      $tail =~ s/[^ \n]/x/g;
+      $tail =~ tr/ \n/sn/;
+      print $tail;
       exit($truncated ? 3 : 0);
-    ' "$MAX_OUTPUT_BYTES" <&4 > "$out"
+    ' "$MAX_OUTPUT_BYTES" "$adapter" <&4 3>"$out")
     bound_rc=$?
     exec 4<&-
     wait "$launch_pid"
@@ -996,7 +1001,7 @@ EOF
   if [ "$extension_owner" -eq 1 ]; then
     :
   else
-    durable=$(fm_procevent_capture "$STATE" "$id" "$adapter" "$out") \
+    durable=$(FM_PROCEVENT_CAPTURE_TAIL="$capture_tail" fm_procevent_capture "$STATE" "$id" "$adapter" "$out") \
       || { rm -f -- "$out"; die "cannot durably capture the result"; }
   fi
   [ "$extension_owner" -eq 1 ] || rm -f -- "$out"
@@ -1005,13 +1010,14 @@ EOF
 
   # Independent of publication and acknowledgement, so it runs once per capture
   # for every adapter and cannot change what the handler receives.
-  if [ "$extension_owner" -eq 0 ] \
-    && feed_reconcile_requests "$adapter" "$id" "$durable"; then
-    printf 'reconciles-fed: %s\n' "$id"
-  fi
-  if [ "$extension_owner" -eq 0 ] \
-    && feed_keyed_answers "$adapter" "$id" "$durable"; then
-    printf 'answers-fed: %s\n' "$id"
+  if [ "$extension_owner" -eq 0 ]; then
+    for projection in reconciles answers; do
+      feed_captured_choices "$adapter" "$id" "$durable" "$projection"
+      case "$?" in
+        0) printf '%s-fed: %s\n' "$projection" "$id" ;;
+        3) projection_failed=1 ;;
+      esac
+    done
   fi
 
   # A self-announcing adapter's autohandle announces through its own durable
@@ -1062,6 +1068,10 @@ EOF
   if [ "$extension_owner" -eq 1 ]; then
     fm_procevent_claim_capture_reservation_remove_locked || true
     exec 6<&-
+  fi
+  if [ "$projection_failed" -ne 0 ]; then
+    printf 'incomplete Lavish prompt capture: %s\n' "$durable" >&2
+    return 1
   fi
 }
 
