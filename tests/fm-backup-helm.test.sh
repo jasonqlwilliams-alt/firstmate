@@ -470,3 +470,72 @@ successor "$HFAIL" 'pi-signed'
 arm_refused "$HFAIL" "did not answer its probe" "uninstalled successor"
 assert_grep "status=unavailable" "$TMP_ROOT/arm-refused.out" "arm reports the missing executable"
 pass "arm refuses a configured successor that does not answer"
+
+test_herdr_handover_at_reused_pane() {
+  (
+    home="$TMP_ROOT/h-herdr-reused"
+    new_home "$home"
+    successor "$home" pi
+    write_quota "$quota_true"
+    printf '%s\n' 'backend=herdr' 'kind=ship' 'window=helm-fixture:w7:p2' \
+      'herdr_terminal_id=term-dead-worker' > "$home/state/old-worker.meta"
+
+    # A real, inert process supplies the live session lock without a harness.
+    cp "$(command -v sleep)" "$FAKEBIN/claude-fixture"
+    "$FAKEBIN/claude-fixture" 60 &
+    holder=$!
+    trap 'kill "$holder" 2>/dev/null || true; wait "$holder" 2>/dev/null || true' EXIT
+    printf '%s\n' "$holder" > "$home/state/.lock"
+    export FM_HELM_TEST_IO="$home/herdr-io" FM_HELM_TEST_LOCK="$home/state/.lock"
+    cat > "$FAKEBIN/herdr" <<'SH'
+#!/usr/bin/env bash
+set -eu
+[ "${@: -2:1}" = --session ] && [ "${@: -1}" = helm-fixture ] || exit 42
+case "$1 $2" in
+  'status --json') printf '%s\n' '{"server":{"running":true}}'; exit 0 ;;
+esac
+[ "$3" = w7:p2 ] || exit 42
+printf '%s\n' "$*" >> "$FM_HELM_TEST_IO"
+case "$1 $2" in
+  'pane get')
+    printf '%s\n' '{"result":{"pane":{"pane_id":"w7:p2","terminal_id":"term-supervisor"}}}' ;;
+  'pane read') printf '%s\n' '❯ ' ;;
+  'pane send-text') printf '%s\n' "$4" > "$FM_HELM_TEST_IO.composer" ;;
+  'pane send-keys')
+    [ "$4" = enter ] || exit 42
+    [ "$(cat "$FM_HELM_TEST_IO.composer")" != /exit ] || rm -f -- "$FM_HELM_TEST_LOCK"
+    touch "$FM_HELM_TEST_IO.working" ;;
+  'agent get')
+    status=idle
+    if [ -f "$FM_HELM_TEST_IO.working" ]; then
+      status=working
+      rm -f -- "$FM_HELM_TEST_IO.working"
+    fi
+    printf '{"result":{"agent":{"agent_status":"%s"}}}\n' "$status" ;;
+  *) exit 42 ;;
+esac
+SH
+    chmod +x "$FAKEBIN/herdr"
+    export FM_HOME="$home" FM_BACKUP_HELM_DRIVER='' FM_BACKEND_HERDR_CLIENT_SESSION=''
+    export FM_STATE_OVERRIDE='' FM_SUPERVISOR_TARGET='' FM_SUPERVISOR_BACKEND='' TMUX_PANE=''
+    export HERDR_ENV=1 HERDR_SESSION=helm-fixture HERDR_PANE_ID=w7:p2
+    out=$(helm arm --workspace "$home" --interval 0.1 --stable 1 --action-timeout 30) ||
+      fail "could not arm the fixture: $out"
+    assert_contains "$out" "target: helm-fixture:w7:p2" "arm did not select the supervisor pane"
+    out=$(PATH="$FAKEBIN:$PATH" "$ROOT/bin/fm-procevent-when.sh" run when-backup-helm-claude-runway) ||
+      fail "could not run the registered handover: $out"
+    assert_contains "$out" "status: fired" "handover failed: $out"
+    assert_grep 'pane get w7:p2 --session helm-fixture' "$FM_HELM_TEST_IO" "handover checks the live supervisor pane"
+    assert_grep 'agent get w7:p2 --session helm-fixture' "$FM_HELM_TEST_IO" "handover checks native busy state"
+    grep -Eq '^pane read w7:p2 .*--lines [0-9]+ --session' "$FM_HELM_TEST_IO" ||
+      fail "handover did not read the busy fallback"
+    assert_grep '--format ansi --session helm-fixture' "$FM_HELM_TEST_IO" "handover checks the composer"
+    assert_grep 'pane send-text w7:p2 /stow ' "$FM_HELM_TEST_IO" "handover submits stow"
+    assert_grep 'pane send-text w7:p2 /exit ' "$FM_HELM_TEST_IO" "handover submits exit"
+    assert_grep 'pane send-text w7:p2 cd -- ' "$FM_HELM_TEST_IO" "handover submits the successor launch"
+    helm retire >/dev/null 2>&1 || fail "fixture watch was not retired"
+  ) || fail "backup helm handover from a recycled Herdr pane"
+  pass "armed Herdr handover reaches the live supervisor when a dead worker claimed its pane ID"
+}
+
+test_herdr_handover_at_reused_pane
