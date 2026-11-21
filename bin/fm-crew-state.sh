@@ -110,6 +110,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 . "$SCRIPT_DIR/fm-busy-lib.sh"
 # shellcheck source=bin/fm-nm-run-lib.sh
 . "$SCRIPT_DIR/fm-nm-run-lib.sh"
+# shellcheck source=bin/fm-pr-lib.sh
+. "$SCRIPT_DIR/fm-pr-lib.sh"
 
 ID=${1:-}
 [ -n "$ID" ] || { echo "usage: fm-crew-state.sh <id>" >&2; exit 2; }
@@ -131,11 +133,14 @@ FM_CREW_STATE_RUNS_LIMIT=${FM_CREW_STATE_RUNS_LIMIT:-200}
 case "$FM_CREW_STATE_RUNS_LIMIT" in ''|*[!0-9]*) FM_CREW_STATE_RUNS_LIMIT=200 ;; esac
 SEP=' · '
 
-# Emit the one canonical line and exit 0. Detail is optional.
-emit() {  # <state> <source> [detail]
+# Emit the canonical line before optional summary evidence can hit a timeout.
+emit() {  # <state> <source> [detail] [cancellation|retry]
   local line="state: $1${SEP}source: $2"
   [ -n "${3:-}" ] && line="$line${SEP}$3"
   printf '%s\n' "$line"
+  if [ -n "${4:-}" ] && [ -n "$SUMMARY_PR_HEAD" ] && nm_summary_cancellation_matches "$4"; then
+    printf '%s\n' 'matching-cancellation'
+  fi
   exit 0
 }
 
@@ -561,6 +566,70 @@ nm_run_head_matches_worktree() {
   fm_nm_head_matches_worktree "$WT" "$run_head"
 }
 
+# Match a validated ledger abbreviation to the full head. A resolved
+# abbreviation must name that exact commit, even if the prefixes agree.
+nm_summary_ledger_head_matches() {  # <ledger-head> <full-head>
+  local resolved
+  [[ "$2" == "$1"* ]] || return 1
+  resolved=$(fm_nm_resolve_commit "$WT" "$1")
+  [ "$resolved" = "$2" ] || { [ -z "$resolved" ] && [ -z "$(fm_nm_resolve_commit "$WT" "$2")" ]; }
+}
+
+nm_summary_cancellation_matches() {  # <cancellation|retry>
+  local newest_status newest_head newest_pr previous_status previous_head previous_pr run_head
+  if [ "$RUNS_READ" = 0 ]; then
+    # Only direct live status can reach here without an existing ledger read.
+    [ "$(status_line_note "$LOG_LINE")" = "PR $SUMMARY_PR checks green" ] || return 1
+    RUNS_OUT=$(nm_runs_list)
+  fi
+  {
+    read -r newest_status newest_head newest_pr
+    read -r previous_status previous_head previous_pr
+  } <<< "$(fm_nm_runs_recent_rows "$CREW_BRANCH" "$RUNS_OUT")"
+
+  # A terminal successor supersedes older cancellation evidence even when
+  # full status still reports the earlier run.
+  case "$newest_status" in
+    ''|running) ;;
+    cancelled)
+      [ -z "$newest_pr" ] || [ "$newest_pr" = "$SUMMARY_PR" ] || return 1
+      nm_summary_ledger_head_matches "$newest_head" "$SUMMARY_PR_HEAD" || return 1
+      ;;
+    *) return 1 ;;
+  esac
+
+  if [ "$1" = cancellation ]; then
+    if [ "$RUN_SOURCE" = coarse ]; then
+      [ "$newest_status" = cancelled ] && [ "$newest_pr" = "$SUMMARY_PR" ]
+    else
+      [ -z "$RUN_PR" ] || [ "$RUN_PR" = "$SUMMARY_PR" ] || return 1
+      run_head=$(strip_quotes "$(nm_field head_sha)")
+      if [ -z "$run_head" ]; then
+        run_head=$(fm_nm_resolve_commit "$WT" "$(strip_quotes "$(nm_field head)")")
+      fi
+      [ "$run_head" = "$SUMMARY_PR_HEAD" ]
+    fi
+    return
+  fi
+
+  # A coarse running verdict can come from a live sibling behind the newest
+  # cancelled row. Otherwise require the live retry and its immediate predecessor.
+  if [ "$RUN_SOURCE" = coarse ] && [ "$newest_status" = cancelled ]; then
+    [ "$newest_pr" = "$SUMMARY_PR" ]
+    return
+  fi
+  [ "$newest_status" = running ] && [ "$previous_status" = cancelled ] \
+    && [ "$previous_pr" = "$SUMMARY_PR" ] \
+    && nm_summary_ledger_head_matches "$previous_head" "$SUMMARY_PR_HEAD" || return 1
+  if [ "$RUN_SOURCE" = full ]; then
+    run_head=$(strip_quotes "$(nm_field head_sha)")
+    [ -n "$run_head" ] || run_head=$(strip_quotes "$(nm_field head)")
+    case "$run_head" in ''|*[!a-f0-9]*) return 1 ;; esac
+    [ "${#run_head}" -ge 7 ] \
+      && [[ "$run_head" == "$newest_head"* || "$newest_head" == "$run_head"* ]]
+  fi
+}
+
 HAVE_RUN=0
 # RUN_SOURCE distinguishes the two ways HAVE_RUN=1 can happen: "full" means
 # $RUN_OUT is real `axi status` TOON with step/gate detail (including a
@@ -570,6 +639,17 @@ HAVE_RUN=0
 # the TOON field parsing entirely for this crew.
 RUN_SOURCE=full
 COARSE_STATUS=""
+RUNS_READ=0
+RUNS_OUT=
+SUMMARY_PR=
+SUMMARY_PR_HEAD=
+if [ "${FM_CREW_STATE_SUMMARY_EVIDENCE:-0}" = 1 ]; then
+  SUMMARY_PR=$(meta_value pr)
+  if [ -n "$SUMMARY_PR" ]; then
+    SUMMARY_PR_HEAD=$(meta_value pr_head)
+    fm_pr_head_valid "$SUMMARY_PR_HEAD" || SUMMARY_PR_HEAD=
+  fi
+fi
 # Scouts and secondmates never drive a no-mistakes validation of their own
 # worktree, so skip the lookup for them and read state from pane/log directly.
 if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/null 2>&1; then
@@ -592,7 +672,9 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
       # displaces it: a terminal run with no live sibling keeps its full
       # `axi status` step and gate detail rather than degrading to the ledger.
       if ! fm_nm_run_is_active "$RUN_OUT"; then
-        live_status=$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" "$(nm_runs_list)")
+        RUNS_OUT=$(nm_runs_list)
+        RUNS_READ=1
+        live_status=$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" "$RUNS_OUT")
         if [ "$(fm_nm_run_status_class "$live_status")" = live ]; then
           COARSE_STATUS=$live_status
           RUN_SOURCE=coarse
@@ -605,7 +687,9 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
       # `[ -n "$RUN_OUT" ]`: an empty/timed-out primary call means the CLI
       # itself did not respond, so retrying it immediately with a second
       # bounded call would just double the wait for no better answer.
-      COARSE_STATUS=$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" "$(nm_runs_list)")
+      RUNS_OUT=$(nm_runs_list)
+      RUNS_READ=1
+      COARSE_STATUS=$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" "$RUNS_OUT")
       if [ -n "$COARSE_STATUS" ]; then
         HAVE_RUN=1
         # A branch-matching answer the strict rule rejected is this branch's
@@ -729,7 +813,7 @@ if [ "$HAVE_RUN" = 1 ]; then
 
   if [ "$RUN_STATE" = working ] && log_reports_ci_ready; then
     if [ "$RUN_SOURCE" = coarse ]; then
-      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR"
+      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR" retry
     fi
     [ -n "$CI_STEP_STATUS" ] || CI_STEP_STATUS=$(nm_effective_ci_step_status)
     if [ "$RUN_STATUS" = fixing ]; then
@@ -740,7 +824,7 @@ if [ "$HAVE_RUN" = 1 ]; then
       CI_LOG_STATE=not-ready
     fi
     if [ "$CI_LOG_STATE" != not-ready ]; then
-      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR"
+      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR" retry
     fi
   fi
 
@@ -754,6 +838,8 @@ if [ "$HAVE_RUN" = 1 ]; then
   # call are contradicted only when the run reports recent
   # activity; the answer is then to steer the crew to reattach without touching
   # the shared daemon.
+  cancellation_evidence=
+  [ "$RUN_DETAIL" != 'run cancelled' ] || cancellation_evidence=cancellation
   case "$LOG_VERB" in
     needs-decision|blocked)
       if [ "$LOG_VERB" = blocked ] \
@@ -784,7 +870,7 @@ if [ "$HAVE_RUN" = 1 ]; then
         ;;
     esac
   fi
-  emit "$RUN_STATE" run-step "$RUN_DETAIL"
+  emit "$RUN_STATE" run-step "$RUN_DETAIL" "$cancellation_evidence"
 fi
 
 # --- fallback: no run attributed to this crew ------------------------------

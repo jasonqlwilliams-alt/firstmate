@@ -1270,7 +1270,7 @@ SH
 }
 
 test_cancelled_run_with_registered_green_pr_is_not_terminal_in_flight() {
-  local home fakebin out pr other_pr head branch state note poll real_env
+  local home fakebin out pr other_pr head rebased_head unfetched_head branch state note poll real_env failures=0
   home=$(make_home cancelled-open-pr)
   fakebin=$(make_fakebin "$home")
   pr=https://github.com/kunchenguid/firstmate/pull/46
@@ -1281,6 +1281,8 @@ test_cancelled_run_with_registered_green_pr_is_not_terminal_in_flight() {
   git -C "$home/projects/cancelled" -c user.name=fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m init
   head=$(git -C "$home/projects/cancelled" rev-parse HEAD)
   branch=$(git -C "$home/projects/cancelled" symbolic-ref --short HEAD)
+  rebased_head=$(git -C "$home/projects/cancelled" -c user.name=fixture -c user.email=fixture@example.invalid \
+    commit-tree 'HEAD^{tree}' -m 'independent rebased head') || fail "create diverged retry head"
   cat > "$home/data/backlog.md" <<'MD'
 ## In flight
 - [ ] cancelled - Cancelled validation awaiting merge (repo: alpha) (kind: ship) (since 2026-07-11)
@@ -1295,22 +1297,108 @@ run:
   head: "$head"
   status: cancelled
   outcome: cancelled
+  pr: "$pr"
 RUN
   cat > "$fakebin/no-mistakes" <<'SH'
 #!/usr/bin/env bash
-if [ "$*" = "axi status" ]; then
-  cat "$FM_HOME/run.txt"
-fi
+case "$*" in
+  'axi status') cat "$FM_HOME/run.txt" ;;
+  'runs --limit '*)
+    if [ "${FM_TEST_DELAY_RUNS:-0}" = 1 ]; then
+      printf 'started\n' > "$FM_HOME/delayed-runs"
+      exec sleep 3
+    fi
+    [ ! -f "$FM_HOME/runs.txt" ] || cat "$FM_HOME/runs.txt" ;;
+esac
 SH
   chmod +x "$fakebin/no-mistakes"
   fm_write_meta "$state/cancelled.meta" \
     "window=firstmate:fm-cancelled" "worktree=$home/projects/cancelled" \
-    "project=alpha" "harness=claude" "kind=ship" "mode=no-mistakes" "pr=$pr"
+    "project=alpha" "harness=claude" "kind=ship" "mode=no-mistakes" "pr=$pr" "pr_head=$head"
   printf 'done [key=validation]: PR %s checks green\nworking: checking fallout\n' "$pr" > "$state/cancelled.status"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}
     and .endpoints[0].state == "failed" and .endpoints[0].source == "run-step"' >/dev/null \
     || fail "the latest done event for the registered PR must exempt only the terminal classification: $out"
+
+  # The summary contract requires a matching recorded head and preserves the
+  # worker verdict across a cancellation, an active retry, and a newer failure.
+  cp "$state/cancelled.meta" "$home/recorded-meta"
+  sed "s/^pr_head=.*/pr_head=$rebased_head/" "$home/recorded-meta" > "$state/cancelled.meta"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  if ! printf '%s' "$out" | jq -e '.invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}
+    and .endpoints[0].state == "failed" and .endpoints[0].source == "run-step"' >/dev/null; then
+    printf 'mismatched registered head: %s\n' "$(jq -c '{valid,invalidity,endpoints}' <<< "$out")" >&2
+    failures=$((failures + 1))
+  fi
+  mv "$home/recorded-meta" "$state/cancelled.meta"
+  cp "$home/run.txt" "$home/cancelled-run.txt"
+  printf 'done: PR %s checks green\n' "$pr" > "$state/cancelled.status"
+  cat > "$home/run.txt" <<RUN
+run:
+  branch: $branch
+  head: "${rebased_head:0:8}"
+  head_sha: "$rebased_head"
+  status: running
+branch_sync:
+  state: pipeline_owned
+RUN
+  printf 'running %s %s 2026-07-11 13:00\ncancelled %s %s 2026-07-11 12:00 %s\n' \
+    "$branch" "${rebased_head:0:8}" "$branch" "${head:0:8}" "$pr" > "$home/runs.txt"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  if ! printf '%s' "$out" | jq -e '.valid and .endpoints[0].state == "done"
+    and .endpoints[0].source == "status-log"' >/dev/null; then
+    printf 'live rebased retry: %s\n' "$(jq -c '{valid,invalidity,endpoints}' <<< "$out")" >&2
+    failures=$((failures + 1))
+  fi
+  # The merge marker applies to retry evidence too, and a timed-out evidence
+  # read still leaves the already selected worker verdict visible.
+  (
+    . "$ROOT/bin/fm-pr-lib.sh"
+    fm_pr_poll_merge_mark_notified "$state" cancelled github github.com kunchenguid/firstmate 46
+  ) || fail "record merge during a running retry"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}
+    and .endpoints[0].state == "done" and .endpoints[0].source == "status-log"' >/dev/null \
+    || fail "a merged PR must end the live retry exemption: $out"
+  rm "$state/cancelled.pr-poll-merge-notified"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_TEST_DELAY_RUNS=1 FM_SNAPSHOT_CREW_STATE_TIMEOUT=2 \
+    FM_CREW_STATE_NM_TIMEOUT=3 \
+    "$SNAPSHOT" --secondmate-home-summary)
+  [ -s "$home/delayed-runs" ] || fail "retry did not reach the optional ledger query"
+  printf '%s' "$out" | jq -e '.invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}
+    and .endpoints[0].state == "done" and .endpoints[0].source == "status-log"' >/dev/null \
+    || fail "a timed-out ledger query must preserve the worker verdict: $out"
+  mv "$home/cancelled-run.txt" "$home/run.txt"
+  printf 'failed %s %s 2026-07-11 13:00\ncancelled %s %s 2026-07-11 12:00 %s\n' \
+    "$branch" "${head:0:8}" "$branch" "${head:0:8}" "$pr" > "$home/runs.txt"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  if ! printf '%s' "$out" | jq -e '.invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}
+    and .endpoints[0].state == "failed" and .endpoints[0].source == "run-step"' >/dev/null; then
+    printf 'newer failed retry: %s\n' "$(jq -c '{valid,invalidity,endpoints}' <<< "$out")" >&2
+    failures=$((failures + 1))
+  fi
+  [ "$failures" = 0 ] || fail "$failures cancellation or retry summary cases failed"
+
+  # A running ledger row at the checkout head can attribute full status for
+  # the same branch even when the selected cancelled commit is unfetched.
+  unfetched_head=0123456789abcdef0123456789abcdef01234567
+  if git -C "$home/projects/cancelled" cat-file -e "$unfetched_head^{commit}" 2>/dev/null; then
+    fail "the selected cancellation fixture must be unfetched"
+  fi
+  cp "$home/run.txt" "$home/cancelled-run.txt"
+  cp "$state/cancelled.meta" "$home/recorded-meta"
+  sed "s/^  head:.*/  head: \"${unfetched_head:0:8}\"/" "$home/cancelled-run.txt" > "$home/run.txt"
+  printf '  head_sha: "%s"\n' "$unfetched_head" >> "$home/run.txt"
+  sed "s/^pr_head=.*/pr_head=$unfetched_head/" "$home/recorded-meta" > "$state/cancelled.meta"
+  printf 'running %s %s 2026-07-11 13:00\n' "$branch" "${head:0:8}" > "$home/runs.txt"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid and .endpoints[0].state == "failed"
+    and .endpoints[0].source == "run-step"' >/dev/null \
+    || fail "a selected matching cancellation with a running ledger row must stay in flight: $out"
+  mv "$home/cancelled-run.txt" "$home/run.txt"
+  mv "$home/recorded-meta" "$state/cancelled.meta"
+  rm "$home/runs.txt"
 
   printf 'blocked: waiting for guidance\n' >> "$state/cancelled.status"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
@@ -1322,6 +1410,10 @@ SH
     || fail "a cancelled validation that supersedes a blocked event must also be exempt: $out"
 
   cp "$state/cancelled.meta" "$home/recorded-meta"
+  sed '/^pr_head=/d' "$home/recorded-meta" > "$state/cancelled.meta"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}' >/dev/null \
+    || fail "a registered PR without a recorded head must leave the cancellation terminal: $out"
   sed '/^pr=/d' "$home/recorded-meta" > "$state/cancelled.meta"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}' >/dev/null \
@@ -1375,7 +1467,7 @@ SH
 for arg in "$@"; do
   case "$arg" in
     */fm-crew-state.sh)
-      printf '%s\n' 'state: failed · source: run-step · run cancelled · unrelated note'
+      printf '%s\n' 'state: failed · source: run-step · run cancelled · unrelated note' 'matching-cancellation'
       exit 0
       ;;
   esac

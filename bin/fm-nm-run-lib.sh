@@ -197,15 +197,28 @@ fm_nm_run_is_pipeline_owned_active() {  # <toon-output>
 # sibling the newest terminal word is still what is printed.
 # Read-only: git reads resolve objects in place; custody never changes.
 fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [expected-head]
+  fm_nm_read_runs "$@"
+}
+
+# The summary also needs the newest two validated same-branch rows as
+# evidence. Reading these rows does not attribute either one to a worktree.
+fm_nm_runs_recent_rows() {  # <branch> <runs-list-output>
+  fm_nm_read_runs '' "$1" "$2" '' recent
+}
+
+fm_nm_read_runs() {  # <worktree> <branch> <runs-list-output> [expected-head] [recent]
   local wt=$1 branch=$2 list=$3 expected_head=${4:-}
   local local_full row_full row st br sha day clock pr extra year_num month_num day_num max_day pending_st=''
+  local read_mode=${5:-status} recent_count=0
   # Set only by the newest binding row when its status classifies terminal, and
   # printed when the scan ends without finding a live row for this worktree. It
   # is the sole reason the scan continues past the newest row, and every exit
   # below leaves the loop rather than returning, so a malformed older row can
   # never swallow an answer the newest row had already decided.
   local decided='' decided_exact=''
-  local_full=$(git -C "$wt" rev-parse HEAD 2>/dev/null) || return 0
+  if [ "$read_mode" = status ]; then
+    local_full=$(git -C "$wt" rev-parse HEAD 2>/dev/null) || return 0
+  fi
   [ -n "$list" ] || return 0
   while IFS= read -r row; do
     row=$(fm_nm_trim "$row")
@@ -237,6 +250,12 @@ fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [ex
     esac
     [ "$day_num" -ge 1 ] && [ "$day_num" -le "$max_day" ] || break
     [ "$br" = "$branch" ] || continue
+    if [ "$read_mode" = recent ]; then
+      printf '%s %s %s\n' "$st" "$sha" "$pr"
+      recent_count=$((recent_count + 1))
+      [ "$recent_count" -lt 2 ] || break
+      continue
+    fi
     if [ -n "$decided" ]; then
       # Live-over-terminal: the newest row bound to this worktree but is a
       # terminal record, so the older rows are searched for a live run that
