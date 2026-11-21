@@ -294,6 +294,152 @@ EOF
   pass "T3e a legacy remote advance still restarts the live remote mate"
 }
 
+test_current_updater_warns_about_prebinding_workers() {
+  command -v jq >/dev/null 2>&1 || { echo "skip: jq not found for pre-binding Herdr worker warnings"; return; }
+  local w id state out real_git warnings original_records checkout
+  w=$(new_world prebinding)
+  real_git=$(command -v git)
+  add_sm "$w" sm1
+  mkdir -p "$w/sm1/state"
+  # The seed predates the real ignore rules. Keep fixture state untracked.
+  printf '/state/\n' >> "$(git -C "$w/main" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
+  for id in main-live home-live missing unreadable unusable bound remote secondmate kindless ambiguous-kind; do
+    state="$w/home/state"
+    [ "$id" != home-live ] || state="$w/sm1/state"
+    fm_write_meta "$state/$id.meta" "window=update-herdr:w1:p-$id" \
+      "backend=herdr" "harness=claude" "worktree=$w/seed" "project=$w/seed" \
+      "herdr_session=update-herdr" "herdr_workspace_id=w1" "herdr_tab_id=w1:t1" "herdr_pane_id=w1:p-$id"
+    case "$id" in
+      home-live) printf 'kind=scout\n' ;;
+      secondmate) printf 'kind=secondmate\n' ;;
+      kindless) ;;
+      ambiguous-kind) printf 'kind=ship\nkind=scout\n' ;;
+      *) printf 'kind=ship\n' ;;
+    esac >> "$state/$id.meta"
+    [ "$id" = main-live ] || printf 'endpoint_task_id=%s\n' "$id" >> "$state/$id.meta"
+  done
+  printf 'herdr_pane_id=w1:p-ambiguous\n' >> "$w/home/state/unusable.meta"
+  printf 'herdr_terminal_id=term-bound\n' >> "$w/home/state/bound.meta"
+  printf 'remote_host=another-host\n' >> "$w/home/state/remote.meta"
+  original_records=$(cksum "$w/home/state/"*.meta "$w/sm1/state/home-live.meta")
+  cat > "$w/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+set -eu
+case "$*" in
+  'pane get w1:p-main-live --session update-herdr'|'pane get w1:p-home-live --session update-herdr')
+    printf '%s\n' "$3" >> "$FM_FAKE_DIR/herdr-calls"
+    if [ "${FM_TEST_PROBE_CHECKOUT_CHANGES:-0}" = 1 ]; then
+      case "$3" in
+        w1:p-main-live) "$FM_TEST_REAL_GIT" -C "$FM_ROOT_OVERRIDE" checkout -qb probe-branch ;;
+        w1:p-home-live) printf 'edit during Herdr probe\n' >> "${FM_ROOT_OVERRIDE%/*}/sm1/AGENTS.md" ;;
+      esac
+    fi
+    if [ "${FM_TEST_PROBE_ADVANCE_REFS:-0}" = 1 ]; then
+      case "$3" in
+        w1:p-main-live)
+          "$FM_TEST_REAL_GIT" -C "${FM_ROOT_OVERRIDE%/*}/seed" push -q origin main
+          "$FM_TEST_REAL_GIT" -C "$FM_ROOT_OVERRIDE" fetch -q origin
+          ;;
+        w1:p-home-live)
+          "$FM_TEST_REAL_GIT" -C "${FM_ROOT_OVERRIDE%/*}/sm1" merge -q --ff-only origin/main
+          ;;
+      esac
+    fi
+    printf '{"result":{"pane":{"pane_id":"%s","foreground_cwd":"/unrelated","agent":null}}}\n' "$3"
+    ;;
+  'pane get w1:p-missing --session update-herdr')
+    printf '%s\n' "$3" >> "$FM_FAKE_DIR/herdr-calls"
+    printf '%s\n' '{"error":{"code":"pane_not_found"}}' >&2; exit 1 ;;
+  'pane get w1:p-unreadable --session update-herdr')
+    printf '%s\n' "$3" >> "$FM_FAKE_DIR/herdr-calls"
+    printf '%s\n' '{"error":{"code":"server_not_running"}}' >&2; exit 1 ;;
+  *) printf 'unexpected:%s\n' "$*" >> "$FM_FAKE_DIR/herdr-calls"; exit 92 ;;
+esac
+SH
+  cat > "$w/fakebin/git" <<'SH'
+#!/usr/bin/env bash
+set -eu
+if [ "${FM_REMOTE_JOB_ACTIVE:-}" != 1 ] &&
+  [ "${1:-}" = -C ] && [ "${3:-}" = merge ] && [ "${4:-}" = --ff-only ]; then
+  case "${2##*/}" in
+    main) label=firstmate; id=main-live ;;
+    sm1) label="secondmate sm1"; id=home-live ;;
+    *) exit 92 ;;
+  esac
+  grep -Fq "warning: $label: pre-binding Herdr worker record $id points to existing pane update-herdr:w1:p-$id. Pane ownership still needs verification." "$FM_FAKE_DIR/update.stderr" ||
+    { printf 'warning was absent at the fast-forward for %s\n' "$label" >&2; exit 93; }
+fi
+exec "$FM_TEST_REAL_GIT" "$@"
+SH
+  chmod +x "$w/fakebin/herdr" "$w/fakebin/git"
+  local -a update_env=(env "PATH=$w/fakebin:$PATH" "FM_FAKE_DIR=$w/fake"
+    "FM_TEST_REAL_GIT=$real_git" "FM_ROOT_OVERRIDE=$w/main")
+  bump_origin "$w" readme
+  out=$("${update_env[@]}" FM_HOME="$w/home" "$UPDATE" 2> "$w/fake/update.stderr")
+  warnings=$(cat "$w/fake/update.stderr")
+  assert_contains "$warnings" "warning: firstmate: pre-binding Herdr worker record main-live points to existing pane update-herdr:w1:p-main-live" "primary warning missing"
+  assert_contains "$warnings" "warning: secondmate sm1: pre-binding Herdr worker record home-live points to existing pane update-herdr:w1:p-home-live" "secondmate warning missing"
+  assert_not_contains "$warnings" " missing" "a missing pane produced a worker warning"
+  assert_not_contains "$warnings" " unreadable" "an inconclusive pane query produced a worker warning"
+  assert_not_contains "$warnings" " unusable" "ambiguous pane metadata produced a worker warning"
+  assert_contains "$warnings" "manual recovery procedure in docs/herdr-backend.md" "warning omitted the recovery procedure"
+  assert_contains "$out" "firstmate: updated " "warning blocked primary update"
+  assert_contains "$out" "secondmate sm1: updated " "warning blocked secondmate update"
+  [ "$(cat "$w/fake/herdr-calls")" = $'w1:p-main-live\nw1:p-missing\nw1:p-unreadable\nw1:p-home-live' ] ||
+    fail "update did not use read-only Herdr probes before advancing each checkout"
+  [ "$(cksum "$w/home/state/"*.meta "$w/sm1/state/home-live.meta")" = "$original_records" ] ||
+    fail "update warning changed the worker records"
+  pass "Pre-binding Herdr warnings precede both local fast-forwards and leave records intact"
+
+  add_sm "$w" sm2
+  mkdir -p "$w/main/state" "$w/sm2/state"
+  mv "$w/home/state/sm2.meta" "$w/main/state/sm2.meta"
+  cp "$w/home/state/main-live.meta" "$w/main/state/main-live.meta"
+  cp "$w/sm1/state/home-live.meta" "$w/sm2/state/home-live.meta"
+  : > "$w/fake/herdr-calls"
+  bump_origin "$w" readme
+  local remote_tip
+  remote_tip=$(git -C "$w/seed" rev-parse HEAD)
+  out=$("${update_env[@]}" FM_HOME="$w/sm1" FM_REMOTE_JOB_ACTIVE=1 \
+    "$ROOT/bin/fm-remote-secondmate-control.sh" update sm1 2>&1)
+  [ "$out" = "synced: $remote_tip instr=" ] || fail "remote update changed its success response: $out"
+  [ ! -s "$w/fake/herdr-calls" ] || fail "remote update probed pre-binding Herdr workers"
+  for checkout in main sm1 sm2; do
+    [ "$(git -C "$w/$checkout" rev-parse HEAD)" = "$remote_tip" ] || fail "remote update missed $checkout"
+  done
+  pass "Remote update advances its homes without probing Herdr or changing the verdict"
+
+  bump_origin "$w" readme
+  printf 'instructions published during probe\n' >> "$w/seed/AGENTS.md"
+  git -C "$w/seed" commit -qam 'refresh instructions'
+  local expected_tip
+  expected_tip=$(git -C "$w/seed" rev-parse HEAD)
+  out=$("${update_env[@]}" FM_HOME="$w/home" FM_TEST_PROBE_ADVANCE_REFS=1 \
+    "$UPDATE" 2> "$w/fake/update.stderr")
+  [ "$(git -C "$w/main" rev-parse HEAD)" = "$expected_tip" ] || fail "primary missed the newly fetched target"
+  assert_contains "$out" "(instructions changed: AGENTS.md)" "update reported the instruction diff from the old target"
+  assert_contains "$out" "reread-firstmate: yes" "the newly fetched instructions were not queued for re-read"
+  [ "$(git -C "$w/sm1" rev-parse HEAD)" = "$expected_tip" ] || fail "concurrent secondmate advance did not reach the target"
+  assert_contains "$out" "secondmate sm1: already current" "a concurrent fast-forward was reported as a new update"
+  assert_contains "$out" "restart-secondmates: fm-sm1" "the already-current secondmate was not queued for restart"
+  pass "The updater uses the commits visible after the Herdr probe"
+
+  local main_before home_before
+  main_before=$(git -C "$w/main" rev-parse HEAD)
+  home_before=$(git -C "$w/sm1" rev-parse HEAD)
+  bump_origin "$w" readme
+  out=$("${update_env[@]}" FM_HOME="$w/home" FM_TEST_PROBE_CHECKOUT_CHANGES=1 \
+    "$UPDATE" 2> "$w/fake/update.stderr")
+  assert_contains "$out" "firstmate: skipped: on probe-branch, expected main" "branch change during the probe was missed"
+  assert_contains "$out" "secondmate sm1: skipped: dirty working tree" "edit during the probe was missed"
+  assert_contains "$out" "restart-secondmates: none" "a skipped home was queued for restart"
+  assert_contains "$out" "nudge-secondmates: none" "a skipped home was queued for a nudge"
+  [ "$(git -C "$w/main" rev-parse probe-branch)" = "$main_before" ] || fail "the new branch advanced"
+  [ "$(git -C "$w/sm1" rev-parse HEAD)" = "$home_before" ] || fail "the newly dirty checkout advanced"
+  assert_contains "$(cat "$w/sm1/AGENTS.md")" "edit during Herdr probe" "the new edit was lost"
+  pass "The updater skips checkouts that change branches or become dirty during the Herdr probe"
+}
+
 # --- T4: dirty secondmate is skipped, its edit preserved -------------------
 test_dirty_secondmate_skipped() {
   local w out
@@ -477,6 +623,7 @@ test_bin_only_advance_restarts
 test_unprovable_runtime_gets_fallback_nudge
 test_dead_secondmate_gets_no_action
 test_legacy_remote_advance_restarts
+test_current_updater_warns_about_prebinding_workers
 test_dirty_secondmate_skipped
 test_diverged_secondmate_skipped
 test_already_current_secondmate_still_restarts

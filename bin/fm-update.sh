@@ -23,6 +23,7 @@
 # It does NOT re-read AGENTS.md or nudge secondmates itself - those are LLM /
 # tmux actions the skill performs. The script's job is the safe git mechanics
 # plus a parseable summary telling the caller what to do next:
+#   - advisory pre-binding Herdr worker warnings for local homes on stderr
 #   - one status line per target (updated/already current/skipped)
 #   - reread-firstmate: yes|no    (did the running firstmate's instructions change)
 #   - restart-secondmates: fm-<id>...|none (every live secondmate this pass left
@@ -73,6 +74,15 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   exit 0
 fi
 [ $# -eq 0 ] || { usage; exit 1; }
+
+if [ "${FM_REMOTE_JOB_ACTIVE:-}" != 1 ]; then
+  # shellcheck disable=SC2329 # Called by the fast-forward library.
+  fm_ff_before_advance() {  # <checkout> <label>
+    local state="$1/state"
+    [ "$2" != firstmate ] || state=$STATE
+    fm_backend_herdr_warn_prebinding_workers "$state" "$2"
+  }
+fi
 
 # --- main firstmate repo ---------------------------------------------------
 

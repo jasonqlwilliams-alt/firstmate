@@ -306,6 +306,10 @@ ff_target() {
     return 0
   fi
 
+  if declare -F fm_ff_before_advance >/dev/null; then
+    fm_ff_before_advance "$dir" "$label" || true
+  fi
+
   local default base cur instr local_rev base_rev before after out
   default=$(default_branch "$dir") || {
     echo "$label: skipped: cannot determine default branch"
