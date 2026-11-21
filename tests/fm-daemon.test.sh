@@ -2618,6 +2618,60 @@ test_discover_supervisor_target_herdr() {
   pass "discover_supervisor_target: override > TMUX_PANE > herdr '<session>:<pane-id>' composition > firstmate:0 fallback"
 }
 
+test_daemon_herdr_reused_supervisor_pane() {
+  (
+    dir=$(make_supercase supervisor-reused-pane)
+    state="$dir/state"
+    target=supervisor-fixture:w1:p2
+    fm_write_meta "$state/old-worker.meta" "window=$target" "backend=herdr" "herdr_terminal_id=term-old-worker"
+    afk_enter "$state"
+    printf 'fixture escalation\n' > "$state/.subsuper-escalations"
+    cat > "$dir/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+set -eu
+[ "${@: -2:1}" = --session ] && [ "${@: -1}" = supervisor-fixture ] || exit 42
+case "$1 $2" in
+  'status --json') printf '%s\n' '{"server":{"running":true}}'; exit 0 ;;
+esac
+[ "$3" = w1:p2 ] || exit 42
+case "$1 $2" in
+  'pane get')
+    printf '%s\n' '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"term-supervisor"}}}' ;;
+  'pane read') printf '%s\n' '╭─────╮' '│ >   │' '╰─────╯' ;;
+  'pane send-text') printf '%s\n' "$4" > "$FM_TEST_SUPERVISOR_SENT" ;;
+  'pane send-keys') [ "$4" = enter ] && touch "$FM_TEST_SUPERVISOR_SENT.enter" ;;
+  'agent get')
+    status=idle
+    [ ! -f "$FM_TEST_SUPERVISOR_SENT.enter" ] || status=working
+    printf '{"result":{"agent":{"agent_status":"%s"}}}\n' "$status" ;;
+  *) exit 42 ;;
+esac
+SH
+    chmod +x "$dir/fakebin/herdr"
+    export FM_HOME="$dir" FM_STATE_OVERRIDE="$state"
+    export FM_TEST_SUPERVISOR_SENT="$dir/sent" FM_BACKEND_HERDR_CLIENT_SESSION=
+    export FM_SUPERVISOR_BACKEND=herdr FM_SUPERVISOR_TARGET="$target"
+    PATH="$dir/fakebin:$PATH" FM_ESCALATE_BATCH_SECS=0 FM_MAX_DEFER_SECS=0 \
+      FM_INJECT_CONFIRM_RETRIES=1 FM_INJECT_CONFIRM_SLEEP=0 \
+      FM_BACKEND_HERDR_SUBMIT_MIN_SLEEP=0 "$DAEMON" > "$dir/daemon.out" 2>&1 &
+    daemon_pid=$!
+    trap 'kill "$daemon_pid" 2>/dev/null || true; wait_for_exit "$daemon_pid" 100 || true' EXIT
+    for ((sample = 0; sample < 150; sample++)); do
+      [ -f "$FM_TEST_SUPERVISOR_SENT.enter" ] && [ ! -s "$state/.subsuper-escalations" ] && break
+      is_live_non_zombie "$daemon_pid" || break
+      sleep 0.1
+    done
+    [ -f "$FM_TEST_SUPERVISOR_SENT.enter" ] && [ ! -s "$state/.subsuper-escalations" ] ||
+      fail "away daemon did not deliver to the live supervisor: $(cat "$dir/daemon.out" "$state/.supervise-daemon.log")"
+    assert_contains "$(cat "$FM_TEST_SUPERVISOR_SENT")" "fixture escalation" "wrong input sent to the supervisor"
+    if out=$(PATH="$dir/fakebin:$PATH" "$ROOT/bin/fm-peek.sh" "$target" 2>&1); then
+      fail "literal worker selector exposed the supervisor pane"
+    fi
+    assert_contains "$out" "Herdr endpoint identity mismatch" "literal worker selector did not check the stale binding"
+  ) || fail "supervisor recovery with a reused Herdr pane ID"
+  pass "away daemon delivers to a supervisor at a reused pane ID while a literal worker selector refuses access"
+}
+
 test_pane_is_busy_herdr_native_busy_state() {
   local dir
   dir=$(make_supercase primary-herdr-busy)
@@ -2897,6 +2951,7 @@ test_fm_send_exits_nonzero_on_initial_send_failure
 test_fm_send_exits_nonzero_on_unproven_submit
 test_discover_supervisor_backend_precedence
 test_discover_supervisor_target_herdr
+test_daemon_herdr_reused_supervisor_pane
 test_pane_is_busy_herdr_native_busy_state
 test_primary_busy_guard_is_harness_scoped
 test_pane_is_busy_defaults_to_tmux_when_backend_omitted

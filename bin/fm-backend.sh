@@ -551,8 +551,10 @@ fm_backend_meta_for_window() {  # <target> <state-dir>
 
 # The live Herdr binding is distinct from durable metadata validation above.
 # Callers holding a selected record can scope FM_BACKEND_HERDR_ENDPOINT_META
-# to an operation, including the remote host's parent-route record. Without a
-# selected record, the guard looks up the exact target in the local inventory.
+# to an operation, including the remote host's parent-route record. A caller
+# acting on the supervisor can scope FM_BACKEND_HERDR_SUPERVISOR_TARGET to
+# keep that exact target independent of inventory claims. Other targets
+# without a selected record are looked up in the local inventory.
 # Multiple claims are unreadable. A target outside the inventory is unbound.
 # A pre-binding worker record stays unreadable while its pane exists.
 fm_backend_herdr_task_identity_state() {  # <target> [binding]
@@ -564,6 +566,10 @@ fm_backend_herdr_task_identity_state() {  # <target> [binding]
     return 0
   fi
   if [ -z "$meta" ]; then
+    if [ "$target" = "${FM_BACKEND_HERDR_SUPERVISOR_TARGET:-}" ]; then
+      printf 'unbound'
+      return 0
+    fi
     for candidate in "${FM_STATE_OVERRIDE:-$FM_HOME/state}"/*.meta; do
       [ -f "$candidate" ] || continue
       [ "$(fm_meta_get "$candidate" window)" = "$target" ] || continue
