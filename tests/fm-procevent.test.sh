@@ -755,6 +755,7 @@ pass "one Send & End yields exactly one captured result, automatic retirement, a
 # result is captured and recorded handled without ever being announced. Driven
 # through the adapter's own arm command and the real runner, so registration,
 # capture, the silence verdict, and retirement all run for real.
+if fm_test_require_lavish_codec "quiet Lavish board capture"; then
 HEMPTY="$TMP_ROOT/hempty"; new_home "$HEMPTY"
 EMPTY_BIN=$(fm_fakebin "$TMP_ROOT/lavish-empty-stub")
 cat > "$EMPTY_BIN/lavish-axi" <<'SH'
@@ -798,6 +799,7 @@ sleep 0.3
 assert_absent "$HEMPTY/state/procevent/$quiet_id.source" \
   "an empty board close still retires its ended source"
 pass "an empty board close is captured and recorded handled without ever waking the captain"
+fi
 
 # The other half of the same contract, on the same real path: a close that
 # carries what the captain actually said must still reach him. Same runner, same
@@ -2289,6 +2291,10 @@ printf 'garbage that is not a session block\n' > "$TRM"
 printf 'session:\n  file: /a.html\n  status: feedback\nfeedback[1]{text}:\n  session_ended: true\nnext_step: Review the submission.\n' > "$TRM"
 "$ROOT/bin/fm-procevent-lavish.sh" terminal "$TRM" \
   && fail "prompt payload text was read as a session-level terminal marker"
+pass "the adapter owns which Lavish results end a source, and payload text cannot forge one"
+
+SIL="$TMP_ROOT/silent-verdict"
+if fm_test_require_lavish_codec "Lavish capture reading, choices, and silence"; then
 rc=0
 out=$("$ROOT/bin/fm-procevent-lavish.sh" read "$TRM") || rc=$?
 assert_equals 3 "$rc" "legacy single-column recovery hid the incomplete verdict"
@@ -2296,12 +2302,11 @@ assert_contains "$out" "complete: no" "legacy single-column recovery certified m
 assert_contains "$out" "malformed_items: 1" "single-column recovery hid a malformed row"
 assert_contains "$out" "presented_items: 1" "read dropped legacy single-column feedback"
 assert_contains "$out" "| session_ended: true" "read changed the literal colon in legacy feedback"
-pass "the adapter owns which Lavish results end a source, and payload text cannot forge one"
+pass "read preserves legacy single-column feedback while reporting an incomplete capture"
 
 # The adapter, not the runner, decides which Lavish results are routine no-ops
 # the runner should record without announcing. Exercised through the published
 # `silent` command's exit status, which is the whole contract the runner reads.
-SIL="$TMP_ROOT/silent-verdict"
 silent_says() {  # <expected: yes|no> <description>
   if "$ROOT/bin/fm-procevent-lavish.sh" silent "$SIL" >/dev/null 2>&1; then
     [ "$1" = yes ] || fail "silent suppressed a result that must reach the handler: $2"
@@ -2731,13 +2736,13 @@ printf 'session:\n  status: feedback\nprompts[1]{text}:\n  "Legacy annotation"' 
 assert_submission "$READ" 1 1 no '' ''
 sed '/^next_step:/d' "$LIST_CAPTURE" > "$READ"
 printf 'next_step: Review the sub' >> "$READ"
-assert_submission "$READ" 3 3 no '' ''
+assert_submission "$READ" 3 3 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
 printf 'session:\n  status: waiting\nnext_step: Partial' > "$READ"
 assert_submission "$READ" 0 0 no '' ''
 sed '/^dom_snapshot:/d' "$LIST_CAPTURE" > "$READ"
 printf 'dom_snapshot: ""\n' >> "$READ"
-assert_submission "$READ" 3 3 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
-pass "legacy EOF fragments stay incomplete and the modern footer stays readable"
+assert_submission "$READ" 3 3 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
+pass "legacy EOF fragments stay incomplete while verified choices remain available"
 
 WAITING_CAPTURE="$TMP_ROOT/waiting.toon"
 printf 'session:\n  status: waiting\nnext_step: Wait for feedback.\n' > "$WAITING_CAPTURE"
@@ -2851,7 +2856,7 @@ capture_prefix() {  # <id> <fixture> <last retained literal substring> [<start-s
 }
 
 CLIPPED=$(capture_prefix table-cut-after-row "$TABLE_CAPTURE" 'choice,Re-check host')
-assert_submission "$CLIPPED" 2 2 no '' ''
+assert_submission "$CLIPPED" 2 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
 assert_contains "$("$LAVISH_ADAPTER" read "$CLIPPED")" "capture_truncated: yes" \
   "a complete prompts block hid truncation of the capture itself"
 CLIPPED=$(capture_prefix table-cut-in-field "$TABLE_CAPTURE" 'choice,Re-che')
@@ -2860,16 +2865,15 @@ CLIPPED=$(capture_prefix table-cut-after-block "$TABLE_CAPTURE" '  Fixture artif
 assert_submission "$CLIPPED" 2 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
 CLIPPED=$(capture_prefix table-cut-in-field-after-block "$TABLE_CAPTURE" 'artifact_failures[1]{detail}:')
 assert_submission "$CLIPPED" 2 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
+CLIPPED=$(capture_prefix table-cut-in-key-after-block "$TABLE_CAPTURE" 'artifact_failures[1]')
+assert_submission "$CLIPPED" 2 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
 CLIPPED=$(capture_prefix list-cut-after-choice "$LIST_CAPTURE" 'text: Re-check host')
 assert_submission "$CLIPPED" 3 2 no '' ''
 grep -Fxq 'capture-tail=nssx' "${CLIPPED%.result}.adapter" \
   || fail "the capture sidecar did not retain exactly the four framing bytes"
 CLIPPED=$(capture_prefix list-cut-after-attachments "$LIST_CAPTURE" '32,32,screenshot.png')
-assert_submission "$CLIPPED" 3 3 no '' ''
-LATE_SNAPSHOT="$TMP_ROOT/list-late-snapshot.toon"
-sed '/^dom_snapshot:/d' "$LIST_CAPTURE" > "$LATE_SNAPSHOT"
-printf 'dom_snapshot: "A trailing snapshot with more content"\n' >> "$LATE_SNAPSHOT"
-CLIPPED=$(capture_prefix list-cut-in-snapshot "$LATE_SNAPSHOT" 'dom_snapshot: "A trailing snapshot')
+assert_submission "$CLIPPED" 3 3 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
+CLIPPED=$(capture_prefix list-cut-in-footer "$LIST_CAPTURE" 'next_st')
 assert_submission "$CLIPPED" 3 3 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
 CLIPPED=$(capture_prefix list-cut-in-attachment "$LIST_CAPTURE" '32,32,screenshot.pn')
 assert_submission "$CLIPPED" 3 2 no '' ''
@@ -2887,6 +2891,7 @@ assert_absent "${CLIPPED%.result}.handled" "the bound incomplete capture was ack
 CLIPPED=$(capture_prefix waiting-cut-after-status "$WAITING_CAPTURE" 'status: waiting')
 assert_submission "$CLIPPED" unknown 0 no '' ''
 pass "runner cutoffs preserve complete rows and report missing or clipped prompt data"
+fi
 
 # The runner's silence seam is generic and closed by default: an adapter with no
 # `silent` command must keep announcing, so adding the seam changed nothing for

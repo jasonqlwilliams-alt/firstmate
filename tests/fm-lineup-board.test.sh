@@ -14,7 +14,11 @@ export FM_HOME="$TMP_ROOT/home" FM_ROOT_OVERRIDE="$FIXTURE"
 export FM_CONFIG_OVERRIDE="$FM_HOME/config" FM_STATE_OVERRIDE="$FM_HOME/state" FM_DATA_OVERRIDE="$FM_HOME/data"
 export CALL_LOG="$TMP_ROOT/calls"
 FAKEBIN=$(fm_fakebin "$TMP_ROOT")
-fm_test_attach_lavish_codec "$FAKEBIN" || fail "the Lineup fixture needs the Lavish codec"
+LAVISH_READ=0
+if fm_test_require_lavish_codec "reading a Lineup board capture"; then
+  fm_test_attach_lavish_codec "$FAKEBIN" || fail "the Lineup fixture needs the Lavish codec"
+  LAVISH_READ=1
+fi
 export PATH="$FAKEBIN:$PATH"
 BOARD="$FIXTURE/bin/fm-lineup-board.sh"
 # Keep the real Lavish adapter (including canonical identity and arm argv).
@@ -168,21 +172,23 @@ jq -e '.scores | contains("Fixture only: 12.5") and contains("no public score")'
 jq -e '.defaultRestart == false and .defaultFallback == false and .sent == 1 and .answer.instructions == "Typed override\nwith every character ✓" and .answer.rows[0].picks[0].harness == "codex"' "$TMP_ROOT/render.json" >/dev/null || fail 'submission defaults or typed instructions lost'
 pass 'rendered benchmark evidence, missing scores, defaults, and full typed submission'
 # Exercise the real adapter presentation, not only the browser's queued data.
-node - "$TMP_ROOT/render.json" > "$TMP_ROOT/result" <<'JS'
+if [ "$LAVISH_READ" -eq 1 ]; then
+  node - "$TMP_ROOT/render.json" > "$TMP_ROOT/result" <<'JS'
 const fs=require("fs"), c=JSON.parse(fs.readFileSync(process.argv[2],"utf8")).capture;
 console.log('session:\n  status: feedback\n  session_ended: false\nprompts[1]{uid,prompt,selector,tag,text}:');
 console.log('  '+[JSON.stringify("1"),JSON.stringify(c.prompt),JSON.stringify("form"),c.tag,JSON.stringify(c.text)].join(","));
 console.log('next_step: Review the submission.');
 JS
-"$FIXTURE/bin/fm-procevent-lavish.sh" read "$TMP_ROOT/result" > "$TMP_ROOT/presented"
-node - "$TMP_ROOT/presented" "$TMP_ROOT/render.json" <<'JS'
+  "$FIXTURE/bin/fm-procevent-lavish.sh" read "$TMP_ROOT/result" > "$TMP_ROOT/presented"
+  node - "$TMP_ROOT/presented" "$TMP_ROOT/render.json" <<'JS'
 const fs=require("fs"),assert=require("assert");
 const lines=fs.readFileSync(process.argv[2],"utf8").split("\n");
 const row=lines.find(line=>line.startsWith('| {"schema":"fm-lineup-answer.v1"'));
 assert(row,"Adapter read hid the lineup submission");
 assert.deepStrictEqual(JSON.parse(row.slice(2)),JSON.parse(fs.readFileSync(process.argv[3],"utf8")).answer);
 JS
-pass 'real adapter read preserves all selected tuples and typed instructions'
+  pass 'real adapter read preserves all selected tuples and typed instructions'
+fi
 
 # Successful apply preserves provenance and never restarts by default.
 : > "$CALL_LOG"

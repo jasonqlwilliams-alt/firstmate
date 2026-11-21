@@ -366,6 +366,7 @@ test_build_injects_binds_then_arms() {
 
 test_registration_cannot_consume_before_any_origin_binding() {
   local home data runtime origin key hold board sid show
+  fm_test_require_lavish_codec "Bearings bound answer intake" || return 0
   home=$(make_home order-proof)
   data="$home/payload.json"
   runtime="$home/runtime"

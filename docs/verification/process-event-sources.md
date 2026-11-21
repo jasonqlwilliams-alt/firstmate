@@ -155,6 +155,8 @@ Exercised by `tests/fm-procevent.test.sh` against a fake blocking source whose c
 | independent homes | two homes bind the same package id/version to different content-addressed absolute paths and independently capture results and extension state, with no cross-home fallback or result path |
 
 The Lavish capture cases were verified on 2026-11-20 with Perl 5.42.2 on Linux 6.18.58.1.
+To run those cases locally, use Node.js with `lavish-axi` on PATH and its installed TOON dependency.
+CI supplies the codec through `FM_TEST_LAVISH_CODEC_PATH`.
 
 ```text
 $ bin/fm-test-run.sh fm-procevent.test.sh

@@ -1535,6 +1535,7 @@ test_secondmate_reconcile_publishes_before_request_retirement() {
 # forge nothing, and a replayed capture is idempotent.
 test_bound_channel_answers_close_at_answer_time() {
   local home id sid artifact result out show rc
+  fm_test_require_lavish_codec "captain hold bound answer and reconcile intake" || return 0
   home=$(make_home channel-answer-closure)
   id=sample-eval-proposal
   mkdir -p "$home/data/$id"
@@ -2258,6 +2259,7 @@ test_legacy_identities_keep_working() {
 # on its own while the chain as a whole delivered nothing.
 test_board_answer_reaches_the_keyed_answer_intake() {
   local home sid stub cap out queue show
+  fm_test_require_lavish_codec "captain hold intake from a clipped Lavish capture" || return 0
   home=$(make_home board-channel)
   sid=lavish-b0a4d0000000f1e2
   fm_test_track_procevent_home "$home" "$home/procevent-claims"
@@ -2279,11 +2281,11 @@ cat <<'OUT'
 session:
   status: feedback
   session_ended: false
+dom_snapshot: ""
 prompts[2]{tag,text,prompt}:
   "choice","Take the north route","Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"sample-board-call\",\"selection\":\"north\",\"note\":\"\"}"
   "choice","Re-check the sample route","Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"sample-board-reconcile\",\"selection\":\"reconcile\",\"note\":\"check the map\"}"
 next_step: Review the submission.
-dom_snapshot: "A trailing snapshot with more content"
 OUT
 SH
   chmod +x "$stub"
@@ -2293,8 +2295,8 @@ SH
   run_captain "$home" bind "$sid" >/dev/null \
     || fail "could not bind the board source to the keyed-answer intake"
 
-  cap=$("$stub" | sed '/^dom_snapshot:/s/.*/dom_snapshot: "A trailing/' | wc -c)
-  cap=$((cap))
+  cap=$("$stub" | sed '/^next_step:/s/.*/next_st/' | wc -c)
+  cap=$((cap - 1))
   out=$(FM_PROCEVENT_MAX_OUTPUT_BYTES="$cap" run_procevent "$home" start "$sid" 2>&1) \
     || fail "the board source runner did not complete: $out"
   assert_contains "$out" "truncated: $sid at $cap bytes" \

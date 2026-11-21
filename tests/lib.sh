@@ -94,6 +94,17 @@ console.log(resolveInstalledToon(process.argv[3]));
 JS
 }
 
+fm_test_require_lavish_codec() {
+  local codec
+  if command -v node >/dev/null 2>&1 &&
+     codec=$(fm_test_lavish_toon_module 2>/dev/null) && [ -f "$codec" ]; then
+    return 0
+  fi
+  [ -z "${FM_TEST_LAVISH_CODEC_PATH:-}" ] || fail "cannot use the configured Lavish test codec"
+  printf 'skip: %s requires Node.js and the Lavish TOON codec\n' "$1"
+  return 1
+}
+
 fm_test_attach_lavish_codec() {
   local modules="$1/node_modules" codec
   codec=$(fm_test_lavish_toon_module) || return 1

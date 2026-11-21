@@ -56,11 +56,9 @@ function hasEndFrame(decode, lines, lifecycle) {
       const response = decode(lines.join('\n'), { strict: true });
       return response.code === 'NOT_FOUND' && typeof response.error === 'string';
     }
-    const footer = lines.slice(lines.at(-1)?.startsWith('dom_snapshot: ') ? -2 : -1);
-    if (!footer[0]?.startsWith('next_step: ')) return false;
-    const response = decode(footer.join('\n'), { strict: true });
-    return typeof response.next_step === 'string' &&
-      (footer.length === 1 || typeof response.dom_snapshot === 'string');
+    const footer = lines.at(-1);
+    if (!footer?.startsWith('next_step: ')) return false;
+    return typeof decode(footer, { strict: true }).next_step === 'string';
   } catch {
     return false;
   }
@@ -122,7 +120,7 @@ function capturePrompts(toon, raw, tail, lifecycle, projection, result) {
         if (fields) record();
       }
       if (outerBoundary) break;
-      terminated = result.truncated && topLevelField.test(partial);
+      terminated = /^\S/.test(partial) || (partial === '' && tail.startsWith('x'));
       if (fields) {
         if (!result.truncated && /(?:^  |,)"(?:[^"\\]|\\.)*"$/.test(partial)) {
           item = [partial];
@@ -131,8 +129,8 @@ function capturePrompts(toon, raw, tail, lifecycle, projection, result) {
       } else {
         const spaces = /^ */.exec(partial)[0].length;
         const boundary = 's'.repeat(Math.min(spaces, 3)) + (partial.length > spaces ? 'x' : tail);
-        if (/^(?:\S|  -(?: |$))/.test(partial) ||
-            (result.truncated && /^(?:x|ssx|$)/.test(boundary))) record();
+        if (terminated || /^  -(?: |$)/.test(partial) ||
+            (result.truncated && /^(?:ssx|$)/.test(boundary))) record();
       }
       break;
     }
