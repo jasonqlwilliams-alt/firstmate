@@ -2570,6 +2570,135 @@ assert_contains "$out" "SESSION-ENDING MESSAGE: (none)" \
 assert_contains "$out" "ANNOTATIONS: (none)" "an empty board close invented annotations"
 pass "read distinguishes a feedback capture from an ended-with-nothing close"
 
+
+# Both fixtures use the shapes emitted by the TOON encoder. Exercise the
+# same three public projections with complete responses and real runner caps.
+LAVISH_ADAPTER="$ROOT/bin/fm-procevent-lavish.sh"
+TABLE_CAPTURE="$TMP_ROOT/tabular-submission.toon"
+LIST_CAPTURE="$TMP_ROOT/list-submission.toon"
+cat > "$TABLE_CAPTURE" <<'EOF'
+session:
+  status: feedback
+  session_ended: true
+dom_snapshot: ""
+prompts[2]{uid,prompt,selector,tag,text}:
+  a,"Context data: {\"question\":\"ship-call\",\"answer\":\"go\"}","",choice,Ship
+  b,"Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"check-call\",\"selection\":\"reconcile\",\"note\":\"Re-check host\"}","",choice,Re-check host
+artifact_failures[1]{detail}:
+  Fixture artifact failure.
+next_step: Review the submission.
+EOF
+cat > "$LIST_CAPTURE" <<'EOF'
+session:
+  status: feedback
+  session_ended: true
+dom_snapshot: ""
+prompts[3]:
+  - uid: a
+    prompt: "Context data: {\"question\":\"ship-call\",\"answer\":\"go\"}"
+    selector: ""
+    tag: choice
+    text: Ship
+  - uid: b
+    prompt: "Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"check-call\",\"selection\":\"reconcile\",\"note\":\"Re-check host\"}"
+    selector: ""
+    tag: choice
+    text: Re-check host
+  - uid: c
+    prompt: Fix this layout issue the browser detected.
+    selector: main > button
+    tag: layout-warnings
+    text: "Layout issue: 1 selected"
+    target:
+      type: layout-warnings
+      artifact_revision: 9
+      warnings[1]{id,selector,status,overflow_px}:
+        lw-1,main > button,open,4
+next_step: Review the submission.
+EOF
+
+assert_submission() {  # <capture> <declared> <presented> <complete> <answers> <reconciles>
+  local capture=$1 declared=$2 presented=$3 complete=$4 want_answers=$5 want_reconciles=$6
+  local report output errors="$TMP_ROOT/submission-diagnostic"
+  report=$("$LAVISH_ADAPTER" read "$capture") || fail "read failed for $capture"
+  grep -Fxq "declared_items: $declared" <<< "$report" || fail "$capture: wrong declared count"
+  grep -Fxq "presented_items: $presented" <<< "$report" || fail "$capture: wrong presented count"
+  grep -Fxq "complete: $complete" <<< "$report" || fail "$capture: wrong completeness verdict"
+  output=$("$LAVISH_ADAPTER" answers "$capture" 2>"$errors") || fail "answers failed for $capture"
+  [ "$output" = "$want_answers" ] || fail "$capture: wrong ordinary answers: $output"
+  if [ "$complete" = no ]; then
+    assert_grep 'incomplete Lavish prompt capture' "$errors" "$capture: answers did not warn"
+  else
+    [ ! -s "$errors" ] || fail "$capture: unexpected answer warning"
+  fi
+  output=$("$LAVISH_ADAPTER" reconciles "$capture" 2>"$errors") || fail "reconciles failed for $capture"
+  [ "$output" = "$want_reconciles" ] || fail "$capture: wrong reconcile answers: $output"
+  if [ "$complete" = no ]; then
+    assert_grep 'incomplete Lavish prompt capture' "$errors" "$capture: reconciles did not warn"
+  else
+    [ ! -s "$errors" ] || fail "$capture: unexpected reconcile warning"
+  fi
+}
+SHIPPED_ANSWER=$'ship-call\tgo\tShip'
+RECHECK_ANSWER=$'check-call\tRe-check host'
+assert_submission "$TABLE_CAPTURE" 2 2 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+assert_submission "$LIST_CAPTURE" 3 3 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+out=$("$LAVISH_ADAPTER" read "$LIST_CAPTURE")
+assert_contains "$out" "element_selector: main > button" "nested-target annotation lost its selector"
+assert_contains "$out" "| Fix this layout issue the browser detected." "nested-target annotation lost its comment"
+pass "tabular and nested-target list submissions feed the same answer and reconcile projections"
+
+printf 'session:\n  status: feedback\nprompts: []\n' > "$READ"
+assert_submission "$READ" 0 0 yes '' ''
+printf 'session:\n  status: feedback\nprompts[0]:\n' > "$READ"
+assert_submission "$READ" 0 0 yes '' ''
+printf 'session:\n  status: feedback\n' > "$READ"
+assert_submission "$READ" unknown 0 no '' ''
+pass "an explicit empty prompt list is distinguishable from a missing header"
+
+CLIPPED_HOME="$TMP_ROOT/hclipped"; new_home "$CLIPPED_HOME"
+fm_test_track_procevent_home "$CLIPPED_HOME"
+capture_prefix() {  # <id> <fixture> <last retained literal substring>
+  local id=$1 fixture=$2 through=$3 cap capture start_output
+  cap=$(perl -e '
+    my $needle = shift;
+    binmode STDIN;
+    my $bytes = do { local $/; <STDIN> };
+    my $offset = index($bytes, $needle);
+    die "missing or repeated cutoff fixture marker\n"
+      if $offset < 0 || index($bytes, $needle, $offset + 1) >= 0;
+    print $offset + length($needle);
+  ' "$through" < "$fixture") || fail "could not size the cutoff for $id"
+  pe_register "$CLIPPED_HOME" lavish "$id" -- /bin/cat "$fixture" >/dev/null \
+    || fail "could not register cutoff fixture $id"
+  start_output=$(FM_PROCEVENT_MAX_OUTPUT_BYTES="$cap" pe "$CLIPPED_HOME" start "$id" 2>&1) \
+    || fail "could not capture $id: $start_output"
+  assert_contains "$start_output" "truncated: $id at $cap bytes" "$id did not hit the real output cap"
+  capture=$(first_result "$CLIPPED_HOME" "$id") || fail "no captured result for $id"
+  cmp -s "$capture" <(head -c "$cap" "$fixture") || fail "$id changed or exceeded the bounded prefix"
+  printf '%s\n' "$capture"
+}
+
+CLIPPED=$(capture_prefix table-cut-after-row "$TABLE_CAPTURE" 'choice,Re-check host')
+assert_submission "$CLIPPED" 2 2 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+assert_contains "$("$LAVISH_ADAPTER" read "$CLIPPED")" "capture_truncated: yes" \
+  "a complete prompts block hid truncation of the capture itself"
+CLIPPED=$(capture_prefix table-cut-in-field "$TABLE_CAPTURE" 'choice,Re-che')
+assert_submission "$CLIPPED" 2 1 no "$SHIPPED_ANSWER" ''
+CLIPPED=$(capture_prefix table-cut-after-block "$TABLE_CAPTURE" '  Fixture artifact')
+assert_submission "$CLIPPED" 2 2 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+CLIPPED=$(capture_prefix list-cut-after-choice "$LIST_CAPTURE" 'text: Re-check host')
+assert_submission "$CLIPPED" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+CLIPPED=$(capture_prefix list-cut-after-target "$LIST_CAPTURE" 'lw-1,main > button,open,4')
+assert_submission "$CLIPPED" 3 3 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+CLIPPED=$(capture_prefix list-cut-in-target "$LIST_CAPTURE" 'lw-1,main > bu')
+assert_submission "$CLIPPED" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+CLIPPED=$(capture_prefix list-cut-before-target "$LIST_CAPTURE" $'text: "Layout issue: 1 selected"\n')
+assert_submission "$CLIPPED" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+CLIPPED=$(capture_prefix list-cut-before-header "$LIST_CAPTURE" 'dom_snapshot: ""')
+assert_submission "$CLIPPED" unknown 0 no '' ''
+pass "runner cutoffs preserve complete rows and report missing or clipped prompt data"
+
 # The runner's silence seam is generic and closed by default: an adapter with no
 # `silent` command must keep announcing, so adding the seam changed nothing for
 # every adapter that has no notion of a no-op.

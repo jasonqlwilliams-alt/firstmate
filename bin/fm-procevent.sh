@@ -859,7 +859,7 @@ cmd_start() {
   fi
   # Built-in adapters do not run the extension capture helper, so keep this
   # sentinel defined while sharing the no-result branch below under `set -u`.
-  local truncated=0 capture_state='' durable='' reservation_terminal='' reservation_silent=''
+  local truncated=0 capture_state='' durable='' reservation_terminal='' reservation_silent='' capture_tail=''
   fm_procevent_launch_floor_wait "$STATE" "$id" "$CLAIM_REG_IDENTITY" "$launch_floor"
   case "$?" in
     0) ;;
@@ -944,11 +944,13 @@ EOF
     rm -f -- "$launch_ready"
     fm_procevent_source_lock_release "$id" \
       || die "cannot release the source launch boundary: $id"
-    perl -e '
+    capture_tail=$(perl -e '
       use strict;
       use warnings;
-      my $limit = shift;
+      my ($limit, $adapter) = @ARGV;
+      open my $out, ">&=3" or exit 2;
       my ($written, $truncated) = (0, 0);
+      my $tail = "";
       while (1) {
         my $count = sysread(STDIN, my $buffer, 65536);
         exit 2 unless defined $count;
@@ -958,16 +960,27 @@ EOF
         if ($take > 0) {
           my $offset = 0;
           while ($offset < $take) {
-            my $count_written = syswrite(STDOUT, $buffer, $take - $offset, $offset);
+            my $count_written = syswrite($out, $buffer, $take - $offset, $offset);
             exit 2 unless defined $count_written;
             $offset += $count_written;
           }
           $written += $take;
         }
-        $truncated = 1 if $take < $count;
+        if ($take < $count) {
+          $truncated = 1;
+          if ($adapter eq "lavish" && length($tail) < 5) {
+            $tail .= substr($buffer, $take, 5 - length($tail));
+          }
+        }
       }
+      # Retain only framing: one possible newline and enough indentation to
+      # tell a new prompt (two spaces) from a field within one (four spaces).
+      # Mask every non-framing byte before handing it to the capture owner.
+      $tail =~ s/[^ \n]/x/g;
+      $tail =~ tr/ \n/sn/;
+      print $tail;
       exit($truncated ? 3 : 0);
-    ' "$MAX_OUTPUT_BYTES" <&4 > "$out"
+    ' "$MAX_OUTPUT_BYTES" "$adapter" <&4 3>"$out")
     bound_rc=$?
     exec 4<&-
     wait "$launch_pid"
@@ -996,7 +1009,7 @@ EOF
   if [ "$extension_owner" -eq 1 ]; then
     :
   else
-    durable=$(fm_procevent_capture "$STATE" "$id" "$adapter" "$out") \
+    durable=$(FM_PROCEVENT_CAPTURE_TAIL="$capture_tail" fm_procevent_capture "$STATE" "$id" "$adapter" "$out") \
       || { rm -f -- "$out"; die "cannot durably capture the result"; }
   fi
   [ "$extension_owner" -eq 1 ] || rm -f -- "$out"

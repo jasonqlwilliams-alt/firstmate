@@ -136,6 +136,7 @@ Exercised by `tests/fm-procevent.test.sh` against a fake blocking source whose c
 | source-only supervision | a registered source with no task metadata trips the shared predicate and general guard |
 | argv integrity | an argument containing spaces survives as one argument, a shell-looking argument is passed literally with no interpretation, and an unrepresentable newline is rejected at registration |
 | bounded output | output beyond `FM_PROCEVENT_MAX_OUTPUT_BYTES` is drained while only the bound is staged, then truncated and captured |
+| Lavish prompt decoding at the output bound | `tests/fm-procevent.test.sh` feeds captured TOON fixtures through the runner and all three prompt projections, checking identical choices across tabular and nested-target batches, exact byte-limited prefixes, complete rows at a clipped newline, rejected partial fields and nested targets, and a distinct verdict for an absent prompt header |
 | condition->action single-fire and trust | `tests/fm-procevent-when.test.sh` drives the public `when` adapter and generic runner with real commands, proving stable true fires once, a claimed fire restarts as ambiguous without a second action, concurrent arms publish one complete watch, and mutated specs or action executables are refused before execution |
 | condition->action terminal outcomes | the same suite proves flapping true polls do not fire, action failure, condition error budget, deadline expiry, and a true poll completing after its deadline each produce the expected terminal captured result without an unsafe action |
 | condition->action process bounds | the same suite proves action timeout terminates descendants and command-output staging remains within `FM_WHEN_OUTPUT_TAIL_BYTES` while the command runs |
@@ -152,6 +153,15 @@ Exercised by `tests/fm-procevent.test.sh` against a fake blocking source whose c
 | complete external adapter path | the shipped external `file-signal` package is copied outside the Git project, explicitly bound with its required artifact-reference consent, discovered, verified, registered with one file reference, started through the generic runner, completed by a real file appearance, durably captured, published through the existing bounded event, classified through its immutable package identity, left unhandled, and terminally retired |
 | owner-matched replacement safety | two registrations for the same external source receive distinct owner tokens; unconditional external retirement and the first token cannot retire the replacement, the replacement token can, bounded home sweep derives and uses that exact token, and legacy built-in registrations retain unconditional behavior plus exact `--if-matches` retirement |
 | independent homes | two homes bind the same package id/version to different content-addressed absolute paths and independently capture results and extension state, with no cross-home fallback or result path |
+
+The Lavish capture cases were verified on 2026-11-20 with Perl 5.42.2 on Linux 6.18.58.1.
+
+```text
+$ bin/fm-test-run.sh fm-procevent.test.sh
+ok - tabular and nested-target list submissions feed the same answer and reconcile projections
+ok - an explicit empty prompt list is distinguishable from a missing header
+ok - runner cutoffs preserve complete rows and report missing or clipped prompt data
+```
 
 Run the focused external-binding evidence and the live Bearings session guard with:
 

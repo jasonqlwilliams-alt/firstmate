@@ -22,8 +22,10 @@
 #            (tag=message) is its own labeled field, printed first and distinct
 #            from per-element annotations. Declared and presented item counts,
 #            plus a completeness verdict, follow before all annotations so a
-#            partial read is obvious. Each annotation retains its element uid,
-#            selector, tag, and text. A non-choice freeform comment (`prompt`)
+#            partial read is obvious. A missing block in a feedback result has
+#            an unknown declared count. A size-limited result can have a complete
+#            prompts block and still report capture_truncated. Each annotation
+#            retains its element uid, selector, tag, and text. A non-choice freeform comment (`prompt`)
 #            is printed as its own field even when a selector is also present
 #            and even when that comment matches the element text, so typed
 #            words are never dropped. Choice Context data is not a comment.
@@ -79,6 +81,9 @@
 #
 # `read` is the presentation command summarized above; keyed intake remains
 # the separate `answers` contract described here.
+# All three decode the same captured TOON prompts block, including tabular
+# and list representations. The answer commands warn on incomplete prompt
+# capture and emit every complete choice they can recover.
 #
 # It wraps ONLY the currently published interface, verified against 0.1.45:
 #   Usage: lavish-axi poll <html-file> [--agent-reply "..."]
@@ -124,7 +129,7 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 . "$SCRIPT_DIR/fm-procevent-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
-usage() { sed -n '2,111p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"; exit 2; }
 
 # Canonical identity is physical, not the path string: Lavish itself keys a
 # session on the realpath of the artifact, so two names for one file are one
@@ -363,8 +368,8 @@ cmd_terminal() {
 }
 
 # Whether a completed result carries any queued content block at all. The
-# published response frames content as a top-level `prompts[N]{...}:` or
-# `feedback[N]{...}:` header whose rows are INDENTED, so this anchors on column
+# published response frames content with a top-level prompts or feedback array
+# whose rows are indented, so this anchors on column
 # zero: an indented payload line is captain-supplied text and must never be able
 # to forge - or, here, to hide behind - a content header. Any recognized block
 # is content regardless of its declared count, while a malformed top-level
@@ -375,7 +380,7 @@ cmd_terminal() {
 # failed" is never proof that nothing was said.
 result_has_queued_content() {  # <result-file>
   awk '
-    /^(prompts|feedback)\[[0-9]+\]\{[^}]*\}:[[:space:]]*$/ {
+    /^(prompts|feedback)(\[[0-9]+\](\{[^}]*\})?:|: \[\])[[:space:]]*$/ {
       verdict = "present"
       exit
     }
@@ -401,7 +406,7 @@ cmd_silent() {
   local file=${1-} content_rc
   [ -n "$file" ] || usage
   [ -f "$file" ] && [ ! -L "$file" ] || die "result file does not exist: $file"
-  [ "$(cmd_classify "$file")" = ended ] || return 1
+  [ "$(cmd_classify "$file")" = ended ] && [ -z "$(capture_tail "$file")" ] || return 1
   result_has_queued_content "$file"
   content_rc=$?
   # Only a completed check that proved the result carries nothing declares
@@ -410,14 +415,173 @@ cmd_silent() {
   [ "$content_rc" -eq 1 ]
 }
 
+
+# The shared decoder returns the block name, declared count, decoded row maps,
+# and completeness for every projection. Keep nested fields inside their list
+# item: their contents can never supply a top-level prompt, tag, or label.
+# shellcheck disable=SC2016 # The shared program is Perl source.
+LAVISH_CAPTURE_DECODER='
+  use strict; use warnings;
+
+  sub toon_scalar {
+    my ($value) = @_;
+    if ($value =~ /^"/) {
+      return undef unless $value =~ /\A"(?:[^"\\]|\\.)*"\z/;
+      my $decoded = eval { decode_json("[$value]")->[0] };
+      return $@ ? undef : Encode::encode_utf8($decoded);
+    }
+    # Older captures also used AXI escapes in unquoted prose.
+    $value =~ s/\\(.)/$1 eq "n" ? "\n" : $1 eq "t" ? "\t" : $1 eq "r" ? "\r" : $1/ge;
+    return $value;
+  }
+
+  sub table_row {
+    my ($line, $fields, $terminated) = @_;
+    my @tokens;
+    while (1) {
+      if ($line =~ s/\A("(?:[^"\\]|\\.)*")(?=,|\z)// ||
+          $line =~ s/\A((?!")[^,]*)//) {
+        push @tokens, $1;
+      } else {
+        return;
+      }
+      last if $line eq "";
+      return unless $line =~ s/\A,//;
+    }
+    # Without a physical newline only a closing quote can delimit a legacy
+    # final scalar. For capped results the runner supplies the real boundary.
+    return if !$terminated && (@tokens != @$fields || $tokens[-1] !~ /^"/);
+    if (@tokens > @$fields) {
+      my ($index) = grep { $fields->[$_] eq "prompt" } 0 .. $#$fields;
+      ($index) = grep { $fields->[$_] eq "text" } 0 .. $#$fields unless defined $index;
+      return unless defined $index;
+      my @parts = splice @tokens, $index, @tokens - @$fields + 1;
+      return if grep { /^"/ } @parts;
+      splice @tokens, $index, 0, join(",", @parts);
+    }
+    return unless @tokens == @$fields;
+    my @values = map { toon_scalar($_) } @tokens;
+    return if grep { !defined } @values;
+    my %row;
+    @row{@$fields} = @values;
+    return \%row;
+  }
+
+  sub list_row {
+    my ($lines) = @_;
+    my %row;
+    my %seen;
+    my $nested = 0;
+    for my $line (@$lines) {
+      # A nested target is opaque to these projections. Its indentation
+      # keeps it in the record until the next sibling or outer block.
+      next if $nested && $line =~ /\A {6,}\S/;
+      return unless $line =~ /\A(?:  - |    )([A-Za-z_][A-Za-z_0-9-]*)(.*)\z/;
+      my ($key, $value) = ($1, $2);
+      return if $seen{$key}++;
+      $nested = $value =~ /\A(?:\[[0-9]+\](?:\{[^}]+\})?)?:\z/;
+      next if $nested;
+      return unless $value =~ s/\A: //;
+      $value = toon_scalar($value);
+      return unless defined $value;
+      $row{$key} = $value;
+    }
+    return keys(%seen) ? \%row : undef;
+  }
+
+  sub decode_lavish_capture {
+    my ($path, $tail, $lifecycle) = @_;
+    open my $fh, "<", $path or die "cannot read Lavish capture: $!\n";
+    binmode $fh;
+    my $raw = do { local $/; <$fh> } // "";
+    close $fh or die "cannot close Lavish capture: $!\n";
+    my $truncated = length($tail) > 0;
+    $raw .= "\n" if $tail =~ s/\An//;
+    my @lines = split /\n/, $raw, -1;
+    my $partial = pop(@lines) // "";
+    s/\r\z// for @lines;
+    # The first partial or omitted line can end the previous list row even
+    # though none of its values are available. Only use indentation here.
+    my ($spaces, $content) = $partial =~ /\A( *)(.*)\z/s;
+    my $boundary = ("s" x length($spaces)) . (length($content) ? "x" : $tail);
+
+    my ($kind, $want, $fields);
+    my (@rows, @item);
+    my $malformed = 0;
+    my $record_row = sub {
+      my ($row) = @_;
+      if ($row && @rows + $malformed < $want) {
+        push @rows, $row;
+      } else {
+        $malformed++;
+      }
+    };
+    my $finish_item = sub {
+      return unless @item;
+      $record_row->(shift() ? list_row(\@item) : undef);
+      @item = ();
+    };
+    for my $line (@lines) {
+      if (!defined $kind) {
+        if ($line =~ /\A(prompts|feedback)\[([0-9]+)\](?:\{([^}]*)\})?: *\z/) {
+          ($kind, $want) = ($1, $2);
+          $fields = [split /,/, $3, -1] if defined($3) && length($3);
+        } elsif ($line =~ /\A(prompts|feedback): \[\] *\z/) {
+          ($kind, $want) = ($1, 0);
+        }
+        next;
+      }
+      next if $line =~ /\A *\z/;
+      if ($line !~ /\A /) {
+        $finish_item->(1);
+        $boundary = "";
+        $partial = "";
+        last;
+      }
+      if ($fields) {
+        my $row = $line =~ s/\A {2}(?! )// ? table_row($line, $fields, 1) : undef;
+        $record_row->($row);
+      } elsif ($line =~ /\A  -(?: |\z)/) {
+        $finish_item->(1);
+        @item = ($line);
+      } elsif (@item) {
+        push @item, $line;
+      } else {
+        $malformed++;
+      }
+    }
+    if (defined $kind) {
+      $finish_item->($boundary !~ /\Asss/);
+      if ($partial =~ /\A /) {
+        if ($fields && !$truncated && $partial =~ s/\A {2}(?! )//) {
+          $record_row->(table_row($partial, $fields, 0));
+        } elsif ($fields || $boundary =~ /\Ass(?:x|\z)/) {
+          $malformed++;
+        }
+      }
+    } elsif (!$truncated && $partial =~ /\A(prompts|feedback)(?:\[0\]:|: \[\]) *\z/) {
+      ($kind, $want) = ($1, 0);
+    } elsif ($lifecycle eq "ended" && !$truncated && $partial eq ""
+        && !grep { /\A(?:prompts|feedback)/ } @lines) {
+      $want = 0;
+    }
+    return {
+      kind => $kind, declared => $want, rows => \@rows, malformed => $malformed,
+      complete => defined($want) && @rows == $want && !$malformed,
+      truncated => $truncated
+    };
+  }
+'
+
+capture_tail() {
+  fm_procevent_result_owner_field "$1" capture-tail 2>/dev/null || true
+}
+
 # Print `key<TAB>answer<TAB>label[<TAB>mode]` for each non-reconcile structured choice the
 # captain submitted in a captured result; the optional mode column relays the
-# card's declared close mode (`done` or `release`) to the keyed-answer intake. The published response frames queued feedback as
-# a `prompts[N]{field,...}:` header followed by exactly N indented CSV rows whose
-# quoted fields carry JSON-style escapes, so this reads the declared field ORDER
-# rather than assuming a fixed column, and takes only rows whose `tag` field is
-# `choice`. A freeform `message` row is captain prose and is deliberately never a
-# source of decision keys. A row that does not carry both a slug-shaped `question`
+# card's declared close mode (done or release) to the keyed-answer intake.
+# Only decoded prompts tagged choice can provide decision keys.
+# A row that does not carry both a slug-shaped `question`
 # and the versioned `selection` and `note` fields inside its `Context data:` block
 # is skipped. A time-limited rollout branch accepts the old question/answer
 # shape only for ordinary answers and rejects its bare or annotated reconcile
@@ -429,41 +593,15 @@ cmd_choice_rows() {
   local selection=$1 file=${2-}
   [ -n "$file" ] || usage
   [ -f "$file" ] && [ ! -L "$file" ] || die "result file does not exist: $file"
-  perl -MJSON::PP -e '
-    use strict; use warnings;
-    my ($selection, $path) = @ARGV;
-    open my $fh, "<", $path or exit 1;
-    my (@fields, $want, @rows);
-    while (my $line = <$fh>) {
-      if (!@fields) {
-        next unless $line =~ /^prompts\[(\d+)\]\{([^}]*)\}:\s*$/;
-        ($want, @fields) = ($1, split /,/, $2);
-        next;
-      }
-      last unless $line =~ /^\s/;
-      last if @rows >= $want;
-      chomp $line;
-      push @rows, $line;
-    }
-    close $fh;
+  perl -MJSON::PP -MEncode -e "$LAVISH_CAPTURE_DECODER" -e '
+    my ($selection, $path, $tail, $lifecycle) = @ARGV;
+    my $capture = decode_lavish_capture($path, $tail, $lifecycle);
+    warn "incomplete Lavish prompt capture: $path\n" unless $capture->{complete};
+    exit 0 unless ($capture->{kind} // "") eq "prompts";
     my %seen;
     my @choices;
-    for my $row (@rows) {
-      $row =~ s/^\s+//;
-      my @vals;
-      while (length $row) {
-        if ($row =~ s/^"((?:[^"\\]|\\.)*)"//) {
-          my $v = $1;
-          $v =~ s/\\(.)/$1 eq "n" ? "\n" : $1 eq "t" ? "\t" : $1 eq "r" ? "\r" : $1/ge;
-          push @vals, $v;
-        } else {
-          $row =~ s/^([^,]*)//;
-          push @vals, $1;
-        }
-        last unless $row =~ s/^,//;
-      }
-      my %f;
-      $f{$fields[$_]} = $vals[$_] for 0 .. $#fields;
+    for my $row (@{ $capture->{rows} }) {
+      my %f = %$row;
       next unless defined $f{tag} && $f{tag} eq "choice";
       my $prompt = $f{prompt};
       next unless defined $prompt && $prompt =~ /Context data:\s*(\{.*\})/s;
@@ -530,7 +668,7 @@ cmd_choice_rows() {
         ? "$choice->{key}\t$choice->{answer}\t$choice->{label}\t$choice->{mode}\n"
         : "$choice->{key}\t$choice->{answer}\t$choice->{label}\n";
     }
-  ' "$selection" "$file"
+  ' "$selection" "$file" "$(capture_tail "$file")" "$(cmd_classify "$file")"
 }
 
 cmd_answers() { cmd_choice_rows answers "$@"; }
@@ -550,58 +688,12 @@ cmd_read() {
   [ -f "$file" ] && [ ! -L "$file" ] || die "result file does not exist: $file"
   lifecycle=$(cmd_classify "$file")
   session_ended=$(session_field "$file" session_ended)
-  perl -e '
-    use strict; use warnings;
-    my ($path, $lifecycle, $session_ended) = @ARGV;
-    open my $fh, "<", $path or exit 1;
-    my (@fields, $want, @rows);
-    while (my $line = <$fh>) {
-      if (!@fields) {
-        next unless $line =~ /^(?:prompts|feedback)\[(\d+)\]\{([^}]*)\}:\s*$/;
-        ($want, @fields) = ($1, split /,/, $2);
-        next;
-      }
-      last unless $line =~ /^\s/;
-      last if defined($want) && @rows >= $want;
-      chomp $line;
-      push @rows, $line;
-    }
-    close $fh;
-    $want = 0 unless defined $want;
-    my @parsed;
-    my $malformed = 0;
-    for my $row (@rows) {
-      $row =~ s/^\s+//;
-      my @vals;
-      while (length $row) {
-        if ($row =~ s/^"((?:[^"\\]|\\.)*)"//) {
-          push @vals, $1;
-        } else {
-          $row =~ s/^([^,]*)//;
-          push @vals, $1;
-        }
-        last unless $row =~ s/^,//;
-      }
-      if (@vals > @fields) {
-        my ($preserve) = grep { $fields[$_] eq "prompt" } 0 .. $#fields;
-        ($preserve) = grep { $fields[$_] eq "text" } 0 .. $#fields unless defined $preserve;
-        if (defined $preserve) {
-          my $count = @vals - @fields + 1;
-          my @parts = splice @vals, $preserve, $count;
-          splice @vals, $preserve, 0, join(",", @parts);
-        }
-      }
-      if (@vals != @fields) {
-        $malformed++;
-        next;
-      }
-      s/\\(.)/$1 eq "n" ? "\n" : $1 eq "t" ? "\t" : $1 eq "r" ? "\r" : $1/ge for @vals;
-      my %f;
-      $f{$fields[$_]} = $vals[$_] for 0 .. $#fields;
-      push @parsed, \%f;
-    }
+  perl -MJSON::PP -MEncode -e "$LAVISH_CAPTURE_DECODER" -e '
+    my ($path, $lifecycle, $session_ended, $tail) = @ARGV;
+    my $capture = decode_lavish_capture($path, $tail, $lifecycle);
+    my $want = $capture->{declared} // "unknown";
+    my @parsed = @{ $capture->{rows} };
     my $presented = scalar @parsed;
-    my $complete = ($presented == $want && !$malformed) ? "yes" : "no";
     my @messages;
     my @annotations;
     for my $f (@parsed) {
@@ -638,8 +730,9 @@ cmd_read() {
     print "\n";
     print "declared_items: $want\n";
     print "presented_items: $presented\n";
-    print "malformed_items: $malformed\n";
-    print "complete: $complete\n";
+    print "malformed_items: $capture->{malformed}\n";
+    print "complete: ", ($capture->{complete} ? "yes" : "no"), "\n";
+    print "capture_truncated: yes\n" if $capture->{truncated};
     print "lifecycle: $lifecycle\n";
     print "session_ended: ", (length $session_ended ? $session_ended : "(unset)"), "\n";
     print "annotation_count: ", scalar(@annotations), "\n";
@@ -672,7 +765,7 @@ cmd_read() {
       print "ANNOTATIONS: (none)\n";
     }
     print "END LAVISH RESULT ($presented of $want)\n";
-  ' "$file" "$lifecycle" "$session_ended"
+  ' "$file" "$lifecycle" "$session_ended" "$(capture_tail "$file")"
 }
 
 case "${1-}" in

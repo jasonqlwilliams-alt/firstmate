@@ -1028,6 +1028,8 @@ fm_procevent_capture_reservation_remove_claim() {  # <state> <claim-token>
 # before it returns successfully. Extension captures retain immutable package
 # identity beside the legacy adapter sidecar, so later classification cannot
 # silently move to a replacement binding.
+# FM_PROCEVENT_CAPTURE_TAIL is optional Lavish boundary metadata, written into
+# that same sidecar before the result is committed. The raw result stays bounded.
 fm_procevent_capture() {
   local state=$1 id=$2 adapter=$3 src=$4 extension_id=${5-} extension_version=${6-}
   local capability_version=${7-} package_digest=${8-} binding_digest=${9-}
@@ -1079,7 +1081,15 @@ fm_procevent_capture() {
       || { rm -f -- "$tmp" "$adapter_tmp"; return 1; }
   fi
   if ! cat "$src" > "$tmp"; then rm -f -- "$tmp" "$adapter_tmp" "$extension_tmp"; return 1; fi
-  if ! printf '%s\n' "$adapter" > "$adapter_tmp"; then rm -f -- "$tmp" "$adapter_tmp" "$extension_tmp"; return 1; fi
+  if ! {
+    printf '%s\n' "$adapter" &&
+    if [ "$adapter" = lavish ] && [ -n "${FM_PROCEVENT_CAPTURE_TAIL:-}" ]; then
+      printf 'capture-tail=%s\n' "$FM_PROCEVENT_CAPTURE_TAIL"
+    fi
+  } > "$adapter_tmp"; then
+    rm -f -- "$tmp" "$adapter_tmp" "$extension_tmp"
+    return 1
+  fi
   if [ "$#" -eq 9 ] && ! {
     printf 'schema=fm-procevent-extension-owner.v1\n'
     printf 'extension_id=%s\n' "$extension_id"
@@ -1279,17 +1289,28 @@ fm_procevent_result_sequence() {
   printf '%s\n' "${base##*.}"
 }
 
-fm_procevent_result_adapter() {
-  local result=$1 adapter_file="${1%.result}.adapter" adapter extra
+fm_procevent_result_owner_field() {  # <result-path> <adapter|capture-tail>
+  local result=$1 field=$2 adapter_file="${1%.result}.adapter" adapter tail='' extra=''
   [ -f "$result" ] && [ ! -L "$result" ] || return 1
   [ -f "$adapter_file" ] && [ ! -L "$adapter_file" ] || return 1
   {
-    IFS= read -r adapter \
-      && ! IFS= read -r extra
+    IFS= read -r adapter || return 1
+    if IFS= read -r tail; then
+      [ "$adapter" = lavish ] && [[ "$tail" =~ ^capture-tail=[nsx]{1,5}$ ]] || return 1
+      ! IFS= read -r extra && [ -z "$extra" ] || return 1
+    else
+      [ -z "$tail" ] || return 1
+    fi
   } < "$adapter_file" || return 1
-  [ -z "$extra" ] || return 1
   fm_procevent_adapter_valid "$adapter" || return 1
-  printf '%s\n' "$adapter"
+  case "$field" in
+    adapter) printf '%s\n' "$adapter" ;;
+    capture-tail) printf '%s\n' "${tail#capture-tail=}" ;;
+  esac
+}
+
+fm_procevent_result_adapter() {
+  fm_procevent_result_owner_field "$1" adapter
 }
 
 # Load immutable extension identity for one captured result.
