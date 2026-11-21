@@ -402,15 +402,7 @@ EOF
 # when the fold later advances the cursor. Prints nothing when nothing is
 # unread, which is the common case.
 print_unread_status_section() {
-  local snapshot=${1:-} unread task line key shown=0
-
-  if [ "$#" -ge 2 ]; then
-    unread=$2
-  elif [ -n "$snapshot" ]; then
-    unread=$(scan_unread_surface_snapshot "$STATE" "$snapshot") || return 1
-  else
-    unread=$(scan_unread_surface_lines "$STATE") || return 1
-  fi
+  local unread=$1 task line key shown=0
   [ -n "$unread" ] || return 0
 
   while IFS=$(printf '\t') read -r task line; do
@@ -556,15 +548,13 @@ EOF
 }
 
 print_status_sections() {
-  local snapshot=${1:-} fully_presented=${2:-} acknowledged prepared unread informational
-  if [ -z "$snapshot" ]; then snapshot=$(status_presentation_snapshot "$STATE") || return 1; fi
-  [ -n "$snapshot" ] || return 0
-  unread=$(scan_unread_surface_snapshot "$STATE" "$snapshot") || return 1
+  local snapshot=$1 presentable=$2 fully_presented=$3 acknowledged prepared unread informational
+  unread=$(scan_unread_surface_snapshot "$STATE" "$presentable") || return 1
   informational=$(printf '%s\n' "$unread" | cut -f1) || return 1
-  acknowledged=$(status_acknowledge_presented_snapshot "$STATE" "$snapshot" "$fully_presented" "$informational") || return 1
+  acknowledged=$(status_acknowledge_presented_snapshot "$STATE" "$presentable" "$fully_presented" "$informational") || return 1
   prepared=$(mktemp "$STATE/.status-presentation.prepared.XXXXXX") || return 1
   if ! {
-    print_unread_status_section "$snapshot" "$unread" \
+    print_unread_status_section "$unread" \
       && print_status_outcome_backstop_section "$snapshot" \
       && print_open_decisions_section "$snapshot" \
       && print_record_divergence_section
@@ -587,7 +577,7 @@ print_status_sections() {
 }
 
 print_status_presentation() {  # [<deduped-raw-rows>]
-  local rows=${1:-} lock="$STATE/.status-presentation-lock" snapshot annotation_manifest fully_presented='' rc=0
+  local rows=${1:-} lock="$STATE/.status-presentation-lock" snapshot presentable annotation_manifest fully_presented='' rc=0
   local lock_rc holder_pid
   if fm_lock_acquire_wait_bounded "$lock" "$PRESENTATION_LOCK_TIMEOUT"; then
     :
@@ -606,14 +596,18 @@ print_status_presentation() {  # [<deduped-raw-rows>]
     printf 'STATUS PRESENTATION INCOMPLETE: status snapshot could not be read.\n'
     rc=1
   }
-  if [ "$rc" -eq 0 ] && [ -n "$rows" ]; then
-    fm_wake_print_annotations "$rows" "$snapshot" || rc=1
+  presentable=$snapshot
+  if [ "$rc" -eq 0 ] && [ "$ACTOR" = branch ]; then
+    presentable=$(status_branch_presentation_snapshot "$STATE" "$snapshot") || rc=1
+  fi
+  if [ "$rc" -eq 0 ] && [ -n "$snapshot" ] && [ -n "$rows" ]; then
+    fm_wake_print_annotations "$rows" "$presentable" || rc=1
     if [ "$rc" -eq 0 ]; then
       annotation_manifest=$(fm_wake_annotation_manifest "$rows") || rc=1
       fully_presented=$(printf '%s\n' "$annotation_manifest" | awk -F '\t' '$2 == "direct" { sub(/\.status$/, "", $1); print $1 }') || rc=1
     fi
   fi
-  if [ "$rc" -eq 0 ] && [ -n "$snapshot" ]; then print_status_sections "$snapshot" "$fully_presented" || rc=1; fi
+  if [ "$rc" -eq 0 ] && [ -n "$snapshot" ]; then print_status_sections "$snapshot" "$presentable" "$fully_presented" || rc=1; fi
   fm_lock_release "$lock"
   return "$rc"
 }

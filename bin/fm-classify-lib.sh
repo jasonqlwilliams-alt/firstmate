@@ -1630,6 +1630,22 @@ $snapshot
 EOF
 }
 
+status_branch_presentation_snapshot() {  # <state> <task-and-endpoint-snapshot>
+  local state=$1 snapshot=$2 task endpoint ident file lines line
+  while IFS=$'\t' read -r task endpoint ident; do
+    [ -n "$task" ] || continue
+    file="$state/$task.status"
+    lines=$(status_new_lines_since_cursor "$file" "$endpoint" unread-surface) || return 1
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      [ "$(status_line_verb "$line")" = needs-decision ] || continue
+      endpoint=$(status_presentation_cursor_offset "$file") || return 1
+      break
+    done <<< "$lines"
+    printf '%s\t%s\t%s\n' "$task" "$endpoint" "$ident" || return 1
+  done <<< "$snapshot"
+}
+
 # Fold material routed-work phases in the same keyed event stream.
 # A working or declared-pause event opens or replaces one phase for its key.
 # A later done, failed, needs-decision, blocked, or resolved event carrying that

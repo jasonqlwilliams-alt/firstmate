@@ -147,7 +147,7 @@ REG_EXISTED=0
 [ -f "$REG" ] && { cp "$REG" "$TMP/registry.before"; REG_EXISTED=1; }
 
 # Keep the parent charter as its durable source and publish a remote copy with
-# the remote checkout's status writer and the remote append-only relay log.
+# the remote secondmate home's status writer and append-only relay log.
 PARENT_STATUS="$STATE/$ID.status"
 case "$PARENT_STATUS" in
   /*) ;;
@@ -162,7 +162,7 @@ esac
 REMOTE_STATUS="$REMOTE_HOME/state/parent-replies.status"
 PARENT_STATUS_SH=$(fm_brief_shell_quote "$PARENT_STATUS")
 REMOTE_STATUS_SH=$(fm_brief_shell_quote "$REMOTE_STATUS")
-REMOTE_APPEND_SH=$(fm_brief_shell_quote "$REMOTE_ROOT/bin/fm-status-append.sh")
+REMOTE_APPEND_SH=$(fm_brief_shell_quote "$REMOTE_HOME/bin/fm-status-append.sh")
 APPEND_SUFFIX="/bin/fm-status-append.sh' $PARENT_STATUS_SH "
 while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in

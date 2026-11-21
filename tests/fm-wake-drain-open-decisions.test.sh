@@ -300,6 +300,49 @@ test_drain_warning_follows_the_reserved_prefix_list() {
   pass "the drain warning uses the reserved-prefix list instead of a copied prefix"
 }
 
+test_branch_leaves_folded_decisions_unread_for_main() {
+  local dir state branch_out main_out grant
+  dir=$(make_case branch-warning)
+  state="$dir/state"
+  branch_out="$dir/branch.out"
+  main_out="$dir/main.out"
+  grant="$ROOT/bin/fm-wake-grant.sh"
+
+  printf 'note: already read\n' > "$state/direct.status"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > /dev/null || fail "main could not present the earlier note"
+  printf 'working: continuing branch work\n' >> "$state/direct.status"
+  printf 'working: unrelated branch work\n' > "$state/routine.status"
+  append_wake "$state" signal direct.status 'signal: direct' || fail "could not queue the direct branch row"
+  append_wake "$state" signal routine.status 'signal: routine' || fail "could not queue the routine branch row"
+  FM_STATE_OVERRIDE="$state" "$grant" activate "$$" reserved-warning || fail "could not activate branch owner"
+  FM_STATE_OVERRIDE="$state" "$grant" publish reserved-warning 1 2 || fail "could not publish branch grant"
+
+  printf 'needs-decision [key=pending-reply-direct]: choose a color\n' >> "$state/direct.status"
+  printf 'needs-decision: [key=pending-reply-note] choose a shape\nnote: decision context\n' > "$state/fleet.status"
+  append_wake "$state" signal direct.status 'signal: direct decision' || fail "could not queue the main direct row"
+  append_wake "$state" signal fleet.status 'signal: fleet decision' || fail "could not queue the main fleet row"
+
+  FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=branch "$DRAIN" > "$branch_out" 2> "$dir/branch.err" \
+    || fail "branch drain failed: $(cat "$dir/branch.err")"
+  grep -Fq 'routine.status: working: unrelated branch work' "$branch_out" || fail "the routine branch annotation was suppressed"
+  if grep -Eq 'folded reserved-prefix|choose a color|choose a shape|decision context' "$branch_out"; then
+    fail "the branch presented status reserved for main: $(cat "$branch_out")"
+  fi
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$main_out" 2> "$dir/main.err" \
+    || fail "main drain failed: $(cat "$dir/main.err")"
+  grep -Fq 'warning: task=direct key=pending-reply-direct folded reserved-prefix needs-decision' "$main_out" \
+    || fail "branch direct receipt consumed the main warning: $(cat "$main_out")"
+  grep -Fq 'warning: task=fleet key=pending-reply-note folded reserved-prefix needs-decision' "$main_out" \
+    || fail "branch fleet receipt consumed the main warning: $(cat "$main_out")"
+  grep -Fq 'direct.status: needs-decision [key=pending-reply-direct]: choose a color' "$main_out" \
+    || fail "branch direct receipt consumed the main annotation: $(cat "$main_out")"
+  if grep -Fq 'already read' "$main_out"; then
+    fail "branch moved the presentation cursor backward: $(cat "$main_out")"
+  fi
+  pass "the branch preserves folded decisions and their annotations for main"
+}
+
 test_status_append_refuses_reserved_key_before_write() {
   local dir status err rc APPEND
   dir=$(make_case status-append)
@@ -365,6 +408,7 @@ test_status_append_refuses_reserved_key_before_write() {
 }
 
 test_folded_reserved_needs_decision_warns_once_per_line
+test_branch_leaves_folded_decisions_unread_for_main
 test_drain_warning_follows_the_reserved_prefix_list
 test_status_append_refuses_reserved_key_before_write
 test_buried_decision_still_surfaces

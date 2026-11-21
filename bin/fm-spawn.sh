@@ -5105,7 +5105,7 @@ if [ "$HARNESS" = rovo ]; then
     rovo_spawn_fail "rovo did not show a verified ready signal before brief delivery in window $T"
     exit 1
   fi
-  ROVO_POINTER="Read the brief at $BRIEF_REAL and follow it exactly."
+  ROVO_POINTER="Read the brief at $BRIEF_REAL and carry out its instructions. For each status report, use your native file tool to append one line to $STATE_REAL/$ID.status. Follow the brief's status format and key rules."
   ROVO_SUBMIT_RETRIES=${FM_ROVO_SUBMIT_RETRIES:-3}
   ROVO_SUBMIT_SLEEP=${FM_ROVO_SUBMIT_SLEEP:-${FM_ROVO_POLL_INTERVAL:-0.5}}
   ROVO_SUBMIT_SETTLE=${FM_ROVO_SUBMIT_SETTLE:-0}

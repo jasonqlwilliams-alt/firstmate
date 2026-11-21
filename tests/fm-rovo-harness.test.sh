@@ -39,7 +39,8 @@ fake_screen() {
       printf 'Context: | 0.0%% 0/922K\n╭────────────────────────────────╮\n│ > Read the brief and follow it │\n│                                │\n╰────────────────────────────────╯\n'
       ;;
     delivered)
-      printf 'Read the brief at %s and follow it exactly.\nContext: | 3.3%% 30.1K/922K\n╭────────────────────────────────╮\n│ >                              │\n╰────────────────────────────────╯\n' "$FM_FAKE_BRIEF_REAL"
+      tail -1 "$FM_FAKE_POINTER_LOG"
+      printf 'Context: | 3.3%% 30.1K/922K\n╭────────────────────────────────╮\n│ >                              │\n╰────────────────────────────────╯\n'
       ;;
     *)
       printf 'shell starting\n$ \n'
@@ -171,7 +172,6 @@ run_spawn() {
     FM_FAKE_POINTER_LOG="$case_dir/pointer.log" \
     FM_FAKE_ROVO_STATE="$case_dir/rovo.state" \
     FM_FAKE_TMUX_CALL_LOG="$case_dir/tmux-calls.log" \
-    FM_FAKE_BRIEF_REAL="$(cd "$home/data/$id" && pwd -P)/launch-brief.md" \
     FM_FAKE_ROVO_READY="${FM_FAKE_ROVO_READY:-yes}" \
     FM_FAKE_ROVO_DELIVERY="${FM_FAKE_ROVO_DELIVERY:-yes}" \
     FM_ROVO_READY_POLLS=3 FM_ROVO_DELIVERY_POLLS=3 FM_ROVO_POLL_INTERVAL=0 \
@@ -205,9 +205,13 @@ test_rovo_launch_then_send_is_verified() {
   assert_not_contains "$launch" "turn-ended" "rovo launch embedded a turn-end path it does not own"
 
   brief_real="$(cd "$HOME_DIR/data/$id" && pwd -P)/launch-brief.md"
+  state_real=$(cd "$HOME_DIR/state" && pwd -P)
   pointer=$(cat "$CASE_DIR/pointer.log")
-  [ "$pointer" = "Read the brief at $brief_real and follow it exactly." ] \
-    || fail "rovo pointer was not the exact absolute-path-only instruction: $pointer"
+  assert_contains "$pointer" "Read the brief at $brief_real" "rovo did not receive the launch brief path"
+  assert_contains "$pointer" "use your native file tool to append one line to $state_real/$id.status" \
+    "rovo did not receive the native append instruction for its granted status file"
+  assert_contains "$pointer" "Follow the brief's status format and key rules" \
+    "the native append instruction did not preserve the brief's status format and key rules"
 
   meta="$HOME_DIR/state/$id.meta"
   assert_grep 'model=auto' "$meta" "rovo meta lost the requested model"
@@ -220,7 +224,6 @@ test_rovo_launch_then_send_is_verified() {
   # this task's brief directory, steering inbox, and status file - otherwise
   # the standard instructions/steering/status/report loop cannot work.
   data_real=$(cd "$HOME_DIR/data/$id" && pwd -P)
-  state_real=$(cd "$HOME_DIR/state" && pwd -P)
   assert_contains "$launch" "allowedExternalPaths" \
     "rovo launch did not grant allowedExternalPaths for this task's home paths"
   assert_contains "$launch" "$data_real" \
