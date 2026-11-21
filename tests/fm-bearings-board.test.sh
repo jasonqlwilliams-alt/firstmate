@@ -794,9 +794,46 @@ test_build_refuses_a_nondecision_reconcile_value() {
   pass "build reserves reconcile across non-decision cards"
 }
 
+test_build_checks_charted_tiers_and_the_continuum_roster() {
+  local home base data edit out
+  home=$(make_home tier-validation)
+  base="$home/base.json"
+  data="$home/payload.json"
+  write_valid_payload "$base"
+
+  while IFS= read -r edit; do
+    jq "$edit" "$base" > "$data" || fail "invalid test fixture: $edit"
+    if out=$(run_board "$home" build "$data" 2>&1); then
+      fail "build accepted invalid tier or agent data: $edit"
+    fi
+    assert_contains "$out" "fm-bearings-board.v1" "the payload refusal did not name the contract: $out"
+    assert_absent "$home/.lavish/bearings-board.html" "a refused payload still produced a board"
+  done <<'EOF'
+.charted[0].tier = null
+.charted[0].tier = "1"
+.charted[0].tier = 1.5
+.charted[0].tier = 0
+.charted[0].tier = 5
+.charted[0] += {kind:"warning", dispatchable:false, tier:1}
+.continuum_agents = null
+.continuum_agents = {id:"agent-1", label:"Agent One"}
+.continuum_agents = [{id:"agent/1", label:"Agent One"}]
+.continuum_agents = [{id:"agent-1\n", label:"Agent One"}]
+.continuum_agents = [{id:"agent-1", label:"  "}]
+.continuum_agents = [{id:"agent-1"}]
+.continuum_agents = [{id:"agent-1", label:"Agent One"}, {id:"agent-1", label:"Agent Two"}]
+EOF
+
+  jq '.charted[0].tier = 1 | .continuum_agents = [{id:"agent-1", label:"Agent One"}]' "$base" > "$data" ||
+    fail "invalid supported fixture"
+  run_board "$home" build "$data" >/dev/null || fail "build refused a valid tier and roster"
+  pass "build validates Charted Next tiers and agent ids and labels before publication"
+}
+
 test_path_is_stable_and_home_scoped
 test_build_refuses_malformed_payloads_before_touching_the_board
 test_charted_kind_is_optional_and_accepts_both_values
+test_build_checks_charted_tiers_and_the_continuum_roster
 test_build_injects_binds_then_arms
 test_registration_cannot_consume_before_any_origin_binding
 test_build_does_not_bind_or_arm_when_session_start_fails

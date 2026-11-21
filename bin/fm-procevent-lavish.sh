@@ -8,6 +8,7 @@
 #   fm-procevent-lavish.sh silent <result-file>
 #   fm-procevent-lavish.sh answers <result-file>
 #   fm-procevent-lavish.sh reconciles <result-file>
+#   fm-procevent-lavish.sh assignments <result-file>
 #   fm-procevent-lavish.sh read <result-file>
 #   fm-procevent-lavish.sh source-id <artifact.html>
 #   fm-procevent-lavish.sh retire <artifact.html>
@@ -80,6 +81,13 @@
 # `read` is the presentation command summarized above; keyed intake remains
 # the separate `answers` contract described here.
 #
+# `assignments` reads Charted Next helper requests from choice context with
+# schema fm-bearings-assignment.v1, `question` (task id), `owner` (home string or
+# null), and `agent` (roster id). Both ids use the 1-128 character ASCII slug
+# shape. It prints one JSON object per task/owner, keeping the last valid
+# selection in the capture. Assignments reach neither keyed intake. The
+# Bearings skill owns the supervisor's routing of the captured request.
+#
 # It wraps ONLY the currently published interface, verified against 0.1.45:
 #   Usage: lavish-axi poll <html-file> [--agent-reply "..."]
 # and that command "long-polls indefinitely" server-side. The adapter therefore
@@ -124,7 +132,7 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 . "$SCRIPT_DIR/fm-procevent-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
-usage() { sed -n '2,111p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "${BASH_SOURCE[0]}"; exit 2; }
 
 # Canonical identity is physical, not the path string: Lavish itself keys a
 # session on the realpath of the artifact, so two names for one file are one
@@ -410,7 +418,8 @@ cmd_silent() {
   [ "$content_rc" -eq 1 ]
 }
 
-# Print `key<TAB>answer<TAB>label[<TAB>mode]` for each non-reconcile structured choice the
+# Read each projection of structured choice context from the same Lavish rows.
+# Print `key<TAB>answer<TAB>label[<TAB>mode]` for each ordinary answer the
 # captain submitted in a captured result; the optional mode column relays the
 # card's declared close mode (`done` or `release`) to the keyed-answer intake. The published response frames queued feedback as
 # a `prompts[N]{field,...}:` header followed by exactly N indented CSV rows whose
@@ -448,6 +457,9 @@ cmd_choice_rows() {
     close $fh;
     my %seen;
     my @choices;
+    my $slug = qr/\A[A-Za-z0-9._-]{1,128}\z/;
+    # JSON numbers can match a slug regex after Perl stringifies them.
+    my $is_string = sub { defined($_[0]) && !ref($_[0]) && encode_json([$_[0]]) =~ /\A\["/ };
     for my $row (@rows) {
       $row =~ s/^\s+//;
       my @vals;
@@ -470,6 +482,18 @@ cmd_choice_rows() {
       my $ctx = $1;
       my $data = eval { decode_json($ctx) };
       next unless ref($data) eq "HASH";
+      if ($selection eq "assignments") {
+        next unless ($data->{schema} // "") eq "fm-bearings-assignment.v1";
+        my ($task, $owner, $agent) = @{$data}{qw(question owner agent)};
+        next unless $is_string->($task) && $task =~ $slug;
+        next unless exists($data->{owner}) && (!defined($owner) || $is_string->($owner));
+        next unless $is_string->($agent) && $agent =~ $slug;
+        my $identity = encode_json([$task, $owner]);
+        if (defined $seen{$identity}) { $choices[$seen{$identity}] = undef }
+        $seen{$identity} = scalar @choices;
+        push @choices, { question => $task, owner => $owner, agent => $agent };
+        next;
+      }
       my ($key, $selected, $note, $answer, $legacy);
       if (defined($data->{schema}) && !ref($data->{schema})
           && $data->{schema} eq "fm-bearings-answer.v1") {
@@ -478,7 +502,7 @@ cmd_choice_rows() {
         $note = $data->{note};
         next if !defined($key) || ref($key) || !defined($selected) || ref($selected)
           || !defined($note) || ref($note);
-        next unless $selected eq "" || $selected =~ /\A[A-Za-z0-9._-]{1,128}\z/;
+        next unless $selected eq "" || $selected =~ $slug;
         next unless length($note) <= 512;
         next unless length($selected) || length($note);
         $answer = length($selected) ? $selected : $note;
@@ -498,7 +522,7 @@ cmd_choice_rows() {
       } else {
         next;
       }
-      next unless $key =~ /\A[A-Za-z0-9._-]{1,128}\z/;
+      next unless $key =~ $slug;
       my $mode = "";
       if (exists $data->{close}) {
         next if !defined($data->{close}) || ref($data->{close})
@@ -516,6 +540,10 @@ cmd_choice_rows() {
       };
     }
     for my $choice (grep { defined } @choices) {
+      if ($selection eq "assignments") {
+        print encode_json($choice), "\n";
+        next;
+      }
       if ($selection eq "reconciles") {
         next if $choice->{legacy};
         if ($choice->{selection} eq "reconcile") {
@@ -535,6 +563,7 @@ cmd_choice_rows() {
 
 cmd_answers() { cmd_choice_rows answers "$@"; }
 cmd_reconciles() { cmd_choice_rows reconciles "$@"; }
+cmd_assignments() { cmd_choice_rows assignments "$@"; }
 
 # Present one already-captured result for a handler. Body lines are prefixed
 # so a captain-supplied string cannot forge a section label. The session-ending
@@ -685,6 +714,7 @@ case "${1-}" in
   silent)    shift; cmd_silent "$@" ;;
   answers)   shift; cmd_answers "$@" ;;
   reconciles) shift; cmd_reconciles "$@" ;;
+  assignments) shift; cmd_assignments "$@" ;;
   read)      shift; cmd_read "$@" ;;
   ''|-h|--help|help) usage ;;
   *) die "unknown command: $1" ;;

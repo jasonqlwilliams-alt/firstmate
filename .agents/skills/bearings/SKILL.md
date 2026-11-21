@@ -102,7 +102,8 @@ Compose the payload from the same snapshot with the same ranking judgment as the
 - Card `type` (decision, merge, credential) is your composing judgment from the row's content; no backlog field types a card for you.
 - When the card's task is a captain-gated WORK item (the answer should free it to proceed rather than complete it), set the card's `close: "release"` so the answer lifts the hold instead of closing the task; question-shaped items omit it.
 - A Charted Next row's optional `kind` separates work from alarms: omit it (or set `"queued"`) for real queued work, and set `"warning"` on every action-free fleet-integrity notice - the `(main-inventory)` gate, the `(return-catchup)` gate, an unavailable secondmate home, and an inventory-mismatch repair notice. The board badges a warning row `needs repair`, explains it as a notice rather than work when opened, never collapses it, and leaves it out of the Charted Next count, so those rows never read as dispatchable queued work.
-- In lavish mode also pass the snapshot's `--all-queued` opt-in and carry every queued and warning row it returns; never truncate Charted Next yourself, because the board shows the newest queued rows and reveals the rest in place behind its own control.
+- In lavish mode also pass the snapshot's `--all-queued` opt-in and carry every queued and warning row it returns.
+  The board reveals overflow in place.
   `charted_more` counts queued rows the snapshot still omitted, while `charted_warning_more` counts omitted warning rows only; keep both counts separate.
 - Every Charted Next row's badge opens into an explanation built from its `reason`, `dispatchable`, and `filed` fields, so keep each gate's reason whole, never shortened further.
   Lead a held row's reason with exactly one structured note - `blocked-by <ids>` from the gate's blockers, or the `until <date>` or `held <N>d` a captain hold's reason already starts with - then `: ` and any remaining reason.
@@ -115,9 +116,15 @@ Compose the payload from the same snapshot with the same ranking judgment as the
   Set `dispatchable: true` only on work nothing holds, which the board badges `ready` instead of `waiting`.
 - Every Underway row copies the task-identifying `in_flight.name` from the snapshot into an explicit `name` field, which the board leads with while keeping the run status on its second line.
   The snapshot command's header owns its durable-title-or-id normalization; never replace the projected label with run status or invent another label.
-- Every Charted Next row copies the snapshot gate's durable filed date into `filed`, and the board orders the section by it, newest filed first.
+- Every Charted Next row copies the snapshot gate's durable filed date into `filed`.
   Follow `bin/fm-bearings-board.sh`'s payload contract for the accepted format.
-  Omit it or pass null for a row with no durable filed date - the main-inventory or return-catchup warning, an unavailable secondmate home, or a queued row filed before dates were recorded - and the board keeps those rows in payload order after every dated row.
+  Omit it or pass null when no durable filed date is recorded.
+- Assign `tier` to every queued work row using the urgency and currency matrix in the payload contract in `bin/fm-bearings-board.sh`.
+  Read due dates, the hold kind and any recorded hold-until, and reverse blockers from the current authoritative records.
+  Use the filed date and latest recorded substantive activity for currency, such as a progress update or a changed prerequisite, excluding snapshot refreshes and board views.
+  Unknown inputs contribute no signal, and warnings receive no tier.
+- Populate `continuum_agents` with the current Packet Router recipients eligible to help with start conditions, using the verified routing id and display label for each.
+  Use the `system-state-card` skill for current routing and omit the roster or leave it empty when eligibility or routing cannot be verified.
 - For the companion detail page and optional canvas export, every Charted Next row also copies `waits_since`, `owner`, `pr_url`, `report`, and `report_remote` from its snapshot `gates` entry, plus `blockers` as the `{id, title}` entries from `gate_blockers` matching that gate's `id` and `owner`.
   Every Recently Landed row likewise copies `filed`, `landed_on`, `pr_url`, `report`, and `report_remote` from its snapshot `landed` entry.
   Omit or pass null for any of those fields when the snapshot has no recorded value, and never invent or scrape them from prose.
@@ -138,10 +145,17 @@ Verify the call's latest state, then retire the request through `bin/fm-captain-
 Both outcomes refuse without that pending board-created request, and `bin/fm-captain-hold.sh reconcile list` names every request still outstanding.
 A remote-secondmate card whose task is absent from the main backlog remains on the board unchanged, but its reconcile request is refused in the main home until the separately tracked owner-aware routing follow-up can query and mutate the authoritative secondmate home; handle the announced capture without claiming that a request or reconciliation succeeded.
 `captain-hold-lifecycle` owns why a reconcile may never be recorded as the captain's answer.
-Route the non-decision keys yourself:
+Route the remaining board actions yourself:
 
 - `merge.<task-id>` is the captain's explicit merge order; follow the merge ruling below.
 - `dispatch.charted` carries comma-separated task ids the captain picked to start now; verify each id against the current backlog - still queued, blocker and time gate actually clear - then dispatch through the normal lifecycle, and report any id that no longer qualifies instead of forcing it.
+- Read Charted Next helper selections with `bin/fm-procevent-lavish.sh assignments <result-file>` on the same captured board result.
+  Resolve the captured task id and owner to the authoritative backlog record, verify it is still queued with an unmet start condition, and verify the selected routing id against the current eligible Packet Router roster.
+  If the task, owner, agent, or unmet condition cannot be confirmed, report what prevented routing.
+  For a verified selection, use the established Continuum Packet Router route to send the chosen agent a request for help with the specific current prerequisites and to return evidence or recommendations.
+  Include the source id and sequence with the task identity in the request provenance and check for an existing request before re-sending a replayed capture.
+  The helper's response is input for Firstmate to verify against the task's existing gates.
+  The assignment and the response carry no authority to close or release a hold, change prerequisites, or dispatch the task.
 
 After handling, rebuild the board from a fresh snapshot so acted-on items leave Captain's Call, and echo every action taken in chat so the board and chat never diverge silently.
 

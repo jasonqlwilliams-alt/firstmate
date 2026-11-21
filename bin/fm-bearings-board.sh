@@ -83,9 +83,26 @@
 # Every Underway row likewise carries a non-empty `name`: the durable task name
 # when known, otherwise its durable identifier.
 # A Charted Next row MAY carry `filed`, the durable filed date (YYYY-MM-DD, or
-# that date with a UTC timestamp) the template orders the section by, newest
-# first; a row with no comparable date keeps its payload order after every dated
-# row. Anything else in that field refuses rather than sorting on garbage.
+# YYYY-MM-DDTHH:MM:SSZ). Newest-filed order puts undated rows after dated rows
+# and retains payload order on ties.
+# A queued row MAY carry `tier`, an integer from 1 (highest) through 4. The
+# composer classifies real work using the UTC day of `generated`:
+#   Current: the latest verified filed or substantive activity date is within
+#   the last 30 calendar days (today through 29 days ago).
+#   Urgent: a recorded due date or hold-until falls on or before the seventh
+#   day after generation, or verified active work is blocked by this item.
+# Use only recorded dates and verified signals. The four tiers are:
+#   1: urgent and current.
+#   2: urgent with stale or unknown activity and filing dates.
+#   3: current with no urgency signal.
+#   4: all remaining queued work.
+# Tier order is the default when any tier is supplied, ties use newest-filed
+# order, and unranked work follows ranked work. Warnings carry no tier.
+# Optional top-level `continuum_agents` is an array of {id, label} objects:
+# unique 1-128 character ASCII slug ids (letters, digits, dots, underscores,
+# hyphens) and non-blank display labels. An omitted or empty roster hides
+# assignment controls; warnings never offer them. The assignment answer
+# format is owned by fm-procevent-lavish.sh.
 # For the companion detail page and optional canvas export, a Charted Next row
 # MAY also carry `waits_since` (same date/timestamp rule as `filed`), `owner`
 # (nullable string), `blockers` (nullable array of `{id, title?}` objects with
@@ -147,7 +164,7 @@ board_path() { printf '%s/.lavish/bearings-board.html\n' "$FM_HOME"; }
 validate_payload() {  # <data.json>
   jq -e --arg schema "$BOARD_SCHEMA" '
     def nonempty_string: type == "string" and length > 0;
-    def slug($max): type == "string" and test("^[A-Za-z0-9._-]{1," + ($max | tostring) + "}$");
+    def slug($max): type == "string" and test("\\A[A-Za-z0-9._-]{1," + ($max | tostring) + "}\\z");
     def repo_marker: has("repo") and (.repo == null or (.repo | type == "string"));
     def name_marker: has("name") and (.name | nonempty_string);
     def valid_filed:
@@ -216,6 +233,13 @@ validate_payload() {  # <data.json>
     def underway_item:
       type == "object" and repo_marker and name_marker and (.id | nonempty_string)
       and (.state | nonempty_string) and (.doing | nonempty_string) and (.kind | nonempty_string);
+    def optional_continuum_agents:
+      (has("continuum_agents") | not)
+      or (.continuum_agents | type == "array"
+        and all(.[]; type == "object"
+          and (.id | slug(128))
+          and (.label | type == "string" and test("[^[:space:]]")))
+        and ([.[].id] | length == (unique | length)));
     def landed_item:
       type == "object" and repo_marker and (.id | nonempty_string)
       and (.what | nonempty_string) and (.owner | nonempty_string)
@@ -230,6 +254,8 @@ validate_payload() {  # <data.json>
       and (.title | nonempty_string) and (.reason | type == "string")
       and (.dispatchable | type == "boolean")
       and ((has("kind") | not) or (.kind == "queued" or .kind == "warning"))
+      and ((has("tier") | not)
+        or (.kind != "warning" and (.tier == 1 or .tier == 2 or .tier == 3 or .tier == 4)))
       and optional_filed
       and optional_date("waits_since")
       and optional_nullable_string("owner")
@@ -247,6 +273,7 @@ validate_payload() {  # <data.json>
     and (.underway | type == "array")
     and (.landed | type == "array")
     and (.charted | type == "array")
+    and optional_continuum_agents
     and ((has("charted_more") | not)
       or ((.charted_more | type == "number") and (.charted_more >= 0) and (.charted_more | floor == .)))
     and ((has("charted_warning_more") | not)
@@ -338,9 +365,8 @@ effective_payload() {  # <data.json> <dest.json>
 # it with @html, and the canvas embeds the model as a JSON literal that its
 # component renders only as React text children.
 
-# The detail model: every Charted Next row in board order (queued work newest
-# filed first, then repair notices) and every Recently Landed row in payload
-# order, each with the same eight facts.
+# The detail model uses newest-filed order within queued work and repair
+# notices, followed by Recently Landed in payload order.
 detail_model() {  # <effective.json> <home-dir>
   jq --arg home_dir "$2" '
     def isowarn: .kind == "warning";
