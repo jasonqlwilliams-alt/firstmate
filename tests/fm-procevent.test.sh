@@ -2580,15 +2580,15 @@ pass "read distinguishes a feedback capture from an ended-with-nothing close"
 LAVISH_ADAPTER="$ROOT/bin/fm-procevent-lavish.sh"
 TABLE_CAPTURE="$TMP_ROOT/tabular-submission.toon"
 LIST_CAPTURE="$TMP_ROOT/list-submission.toon"
-CHOICE_LABEL=$'Section 1:\fSection 2'
+CHOICE_LABEL=$'Section 1:\fSection 2 café'
 sed "s/SHIP_LABEL/$CHOICE_LABEL/" > "$TABLE_CAPTURE" <<'EOF'
 session:
   status: feedback
   session_ended: true
 dom_snapshot: ""
 prompts[2]{uid,prompt,selector,tag,text}:
-  a,"Context data: {\"question\":\"ship-call\",\"answer\":\"go\"}","",choice,"SHIP_LABEL"
-  b,"Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"check-call\",\"selection\":\"reconcile\",\"note\":\"Re-check host\"}","",choice,Re-check host
+  a,"Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"ship-call\",\"selection\":\"\",\"note\":\"Ship café\"}","",choice,"SHIP_LABEL"
+  b,"Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"check-call\",\"selection\":\"reconcile\",\"note\":\"Re-check café\"}","",choice,Re-check host
 artifact_failures[1]{detail}:
   Fixture artifact failure.
 next_step: Review the submission.
@@ -2600,12 +2600,12 @@ session:
 dom_snapshot: ""
 prompts[3]:
   - uid: a
-    prompt: "Context data: {\"question\":\"ship-call\",\"answer\":\"go\"}"
+    prompt: "Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"ship-call\",\"selection\":\"\",\"note\":\"Ship café\"}"
     selector: ""
     tag: choice
     text: "SHIP_LABEL"
   - uid: b
-    prompt: "Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"check-call\",\"selection\":\"reconcile\",\"note\":\"Re-check host\"}"
+    prompt: "Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"check-call\",\"selection\":\"reconcile\",\"note\":\"Re-check café\"}"
     selector: ""
     tag: choice
     text: Re-check host
@@ -2619,6 +2619,8 @@ prompts[3]:
       artifact_revision: 9
       warnings[1]{id,selector,status,overflow_px}:
         lw-1,main > button,open,4
+    attachments[1]{id,type,path,mime,bytes,width,height,name}:
+      attachment-42.png,image,/fixture/attachment-42.png,image/png,512,32,32,screenshot.png
 next_step: Review the submission.
 EOF
 
@@ -2644,8 +2646,8 @@ assert_submission() {  # <capture> <declared> <presented> <complete> <answers> <
     [ ! -s "$errors" ] || fail "$capture: unexpected reconcile warning"
   fi
 }
-SHIPPED_ANSWER=$'ship-call\tgo\tSection 1: Section 2'
-RECHECK_ANSWER=$'check-call\tRe-check host'
+SHIPPED_ANSWER=$'ship-call\tShip café\tSection 1: Section 2 café'
+RECHECK_ANSWER=$'check-call\tRe-check café'
 assert_submission "$TABLE_CAPTURE" 2 2 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 assert_submission "$LIST_CAPTURE" 3 3 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 ESCAPED_TABLE="$TMP_ROOT/escaped-table.toon"
@@ -2702,6 +2704,35 @@ sed 's/^    target:$/    target[1]{type}:/' "$LIST_CAPTURE" > "$READ"
 assert_submission "$READ" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 pass "list prompts require an object boundary for nested targets"
 
+cat > "$READ" <<'EOF'
+session:
+  status: feedback
+prompts[1]{tag,prompt,text}:
+  choice,Context data: {\"question\":\"legacy-prose\",\"answer\":\"go\"},Legacy label
+EOF
+assert_contains "$(read_out)" "| Legacy label" "read lost legacy unquoted tabular prose"
+for projection in answers reconciles; do
+  out=$("$LAVISH_ADAPTER" "$projection" "$READ" 2>"$TMP_ROOT/incomplete") || fail "$projection failed"
+  [ -z "$out" ] || fail "$projection recovered a choice from malformed legacy prose"
+  assert_grep 'incomplete Lavish prompt capture' "$TMP_ROOT/incomplete" "$projection hid the malformed prompt"
+done
+pass "legacy tabular prose recovery is limited to presentation"
+
+MISSING_TOON_BIN=$(fm_fakebin "$TMP_ROOT/no-toon")
+fm_fake_exit0 "$MISSING_TOON_BIN" lavish-axi
+out=$(PATH="$MISSING_TOON_BIN:$PATH" "$LAVISH_ADAPTER" read "$LIST_CAPTURE")
+assert_contains "$out" "complete: no" "missing TOON library was reported complete"
+assert_contains "$out" "capture_error: unreadable: cannot resolve @toon-format/toon" \
+  "missing TOON library was reported as an empty capture"
+for projection in answers reconciles; do
+  if PATH="$MISSING_TOON_BIN:$PATH" "$LAVISH_ADAPTER" "$projection" "$LIST_CAPTURE" >"$TMP_ROOT/rows" 2>"$TMP_ROOT/incomplete"; then
+    fail "$projection treated the missing TOON library as success"
+  fi
+  [ ! -s "$TMP_ROOT/rows" ] || fail "$projection produced choices without a TOON decoder"
+  assert_grep 'unreadable and incomplete Lavish prompt capture' "$TMP_ROOT/incomplete" "$projection hid the missing decoder"
+done
+pass "missing Lavish TOON dependency reports an unreadable capture"
+
 CLIPPED_HOME="$TMP_ROOT/hclipped"; new_home "$CLIPPED_HOME"
 fm_test_track_procevent_home "$CLIPPED_HOME"
 capture_prefix() {  # <id> <fixture> <last retained literal substring>
@@ -2726,17 +2757,19 @@ capture_prefix() {  # <id> <fixture> <last retained literal substring>
 }
 
 CLIPPED=$(capture_prefix table-cut-after-row "$TABLE_CAPTURE" 'choice,Re-check host')
-assert_submission "$CLIPPED" 2 2 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+assert_submission "$CLIPPED" 2 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 assert_contains "$("$LAVISH_ADAPTER" read "$CLIPPED")" "capture_truncated: yes" \
   "a complete prompts block hid truncation of the capture itself"
 CLIPPED=$(capture_prefix table-cut-in-field "$TABLE_CAPTURE" 'choice,Re-che')
 assert_submission "$CLIPPED" 2 1 no "$SHIPPED_ANSWER" ''
 CLIPPED=$(capture_prefix table-cut-after-block "$TABLE_CAPTURE" '  Fixture artifact')
-assert_submission "$CLIPPED" 2 2 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+assert_submission "$CLIPPED" 2 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 CLIPPED=$(capture_prefix list-cut-after-choice "$LIST_CAPTURE" 'text: Re-check host')
 assert_submission "$CLIPPED" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
-CLIPPED=$(capture_prefix list-cut-after-target "$LIST_CAPTURE" 'lw-1,main > button,open,4')
-assert_submission "$CLIPPED" 3 3 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+CLIPPED=$(capture_prefix list-cut-after-attachments "$LIST_CAPTURE" '32,32,screenshot.png')
+assert_submission "$CLIPPED" 3 3 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+CLIPPED=$(capture_prefix list-cut-in-attachment "$LIST_CAPTURE" '32,32,screenshot.pn')
+assert_submission "$CLIPPED" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 CLIPPED=$(capture_prefix list-cut-in-target "$LIST_CAPTURE" 'lw-1,main > bu')
 assert_submission "$CLIPPED" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 CLIPPED=$(capture_prefix list-cut-before-target "$LIST_CAPTURE" $'text: "Layout issue: 1 selected"\n')

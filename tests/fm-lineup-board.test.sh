@@ -14,6 +14,7 @@ export FM_HOME="$TMP_ROOT/home" FM_ROOT_OVERRIDE="$FIXTURE"
 export FM_CONFIG_OVERRIDE="$FM_HOME/config" FM_STATE_OVERRIDE="$FM_HOME/state" FM_DATA_OVERRIDE="$FM_HOME/data"
 export CALL_LOG="$TMP_ROOT/calls"
 FAKEBIN=$(fm_fakebin "$TMP_ROOT")
+REAL_TOOL_PATH=$PATH
 export PATH="$FAKEBIN:$PATH"
 BOARD="$FIXTURE/bin/fm-lineup-board.sh"
 # Keep the real Lavish adapter (including canonical identity and arm argv).
@@ -172,7 +173,7 @@ const fs=require("fs"), c=JSON.parse(fs.readFileSync(process.argv[2],"utf8")).ca
 console.log('session:\n  status: feedback\n  session_ended: false\nprompts[1]{uid,prompt,selector,tag,text}:');
 console.log('  '+[JSON.stringify("1"),JSON.stringify(c.prompt),JSON.stringify("form"),c.tag,JSON.stringify(c.text)].join(","));
 JS
-"$FIXTURE/bin/fm-procevent-lavish.sh" read "$TMP_ROOT/result" > "$TMP_ROOT/presented"
+PATH="$REAL_TOOL_PATH" "$FIXTURE/bin/fm-procevent-lavish.sh" read "$TMP_ROOT/result" > "$TMP_ROOT/presented"
 node - "$TMP_ROOT/presented" "$TMP_ROOT/render.json" <<'JS'
 const fs=require("fs"),assert=require("assert");
 const lines=fs.readFileSync(process.argv[2],"utf8").split("\n");

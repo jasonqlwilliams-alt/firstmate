@@ -118,6 +118,8 @@ jobs:
           set -eu
           npm install -g tasks-axi
           tasks-axi --version
+      - name: Install Lavish for capture decoding tests
+        run: npm install -g lavish-axi@0.1.46
       - name: Run portable parallel shard 2
         run: |
           set -eu
@@ -177,6 +179,8 @@ jobs:
           set -eu
           npm install -g tasks-axi
           tasks-axi --version
+      - name: Install Lavish for capture decoding tests
+        run: npm install -g lavish-axi@0.1.46
       # The Pi extension tests read the installed Pi package's own types and
       # runtime, so without it they gate-skip and pass silently. It is a public
       # npm package and needs no credential, so CI can hold the real thing.
