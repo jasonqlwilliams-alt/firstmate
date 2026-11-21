@@ -223,9 +223,9 @@ fetch_once() {
 # (.agents/skills/), and its tooling (bin/). Public skills/ is installer-facing
 # and intentionally not part of this watched instruction surface.
 changed_instr() {
-  local dir=$1 from=$2 to=$3 p out=""
+  local dir=$1 base=$2 p out=""
   for p in AGENTS.md bin .agents/skills; do
-    if ! git -C "$dir" diff --quiet "$from" "$to" -- "$p" 2>/dev/null; then
+    if ! git -C "$dir" diff --quiet HEAD "$base" -- "$p" 2>/dev/null; then
       out="$out${out:+, }$p"
     fi
   done
@@ -253,24 +253,6 @@ dirty_status() {
   else
     git -C "$dir" status --porcelain 2>/dev/null | head -1
   fi
-}
-
-ff_check_checkout() {
-  local dir=$1 label=$2 default=$3 allow_detached=$4 ignore_seed_marker=$5 cur
-  cur=$(git -C "$dir" symbolic-ref --short HEAD 2>/dev/null || echo "")
-  if [ -z "$cur" ] && [ "$allow_detached" != yes ]; then
-    echo "$label: skipped: detached HEAD, expected $default"
-    return 1
-  fi
-  if [ -n "$cur" ] && [ "$cur" != "$default" ]; then
-    echo "$label: skipped: on $cur, expected $default"
-    return 1
-  fi
-  if [ -n "$(dirty_status "$dir" "$ignore_seed_marker")" ]; then
-    echo "$label: skipped: dirty working tree"
-    return 1
-  fi
-  return 0
 }
 
 # List this home's LIVE secondmate direct reports from state/<id>.meta records.
@@ -308,8 +290,6 @@ live_secondmate_meta_records() {
 #                  it is skipped rather than fetched.
 # Guards are identical in both modes: ff-only (never force/merge/stash); skip a
 # dirty, diverged, or wrong-branch target and leave its work untouched.
-# An optional fm_ff_before_advance <dir> <label> hook reports advisory
-# diagnostics after the guards pass and before the merge.
 FF_STATUS=""
 FF_INSTR=""
 ff_target() {
@@ -326,7 +306,11 @@ ff_target() {
     return 0
   fi
 
-  local default base phase instr local_rev base_rev merged_rev before after out
+  if declare -F fm_ff_before_advance >/dev/null; then
+    fm_ff_before_advance "$dir" "$label" || true
+  fi
+
+  local default base cur instr local_rev base_rev before after out
   default=$(default_branch "$dir") || {
     echo "$label: skipped: cannot determine default branch"
     return 0
@@ -347,46 +331,51 @@ ff_target() {
     base="$base_mode"
   fi
 
-  for phase in initial final; do
-    base_rev=$(git -C "$dir" rev-parse --verify --quiet "$base^{commit}") || {
-      echo "$label: skipped: $base does not exist"
-      return 0
-    }
-    ff_check_checkout "$dir" "$label" "$default" "$allow_detached" "$ignore_seed_marker" || return 0
-    local_rev=$(git -C "$dir" rev-parse --verify --quiet HEAD 2>/dev/null) || {
-      echo "$label: skipped: cannot read HEAD"
-      return 0
-    }
-    if [ "$local_rev" = "$base_rev" ]; then
-      FF_STATUS="current"
-      echo "$label: already current"
-      return 0
-    fi
-    if ! git -C "$dir" merge-base --is-ancestor "$local_rev" "$base_rev" 2>/dev/null; then
-      echo "$label: skipped: diverged from $base"
-      return 0
-    fi
+  if ! git -C "$dir" rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+    echo "$label: skipped: $base does not exist"
+    return 0
+  fi
 
-    if [ "$phase" = final ] || ! declare -F fm_ff_before_advance >/dev/null; then
-      break
-    fi
-    fm_ff_before_advance "$dir" "$label" || true
-  done
+  cur=$(git -C "$dir" symbolic-ref --short HEAD 2>/dev/null || echo "")
+  if [ -z "$cur" ] && [ "$allow_detached" != yes ]; then
+    echo "$label: skipped: detached HEAD, expected $default"
+    return 0
+  fi
+  if [ -n "$cur" ] && [ "$cur" != "$default" ]; then
+    echo "$label: skipped: on $cur, expected $default"
+    return 0
+  fi
 
-  if ! out=$(git -C "$dir" merge --ff-only "$base_rev" 2>&1); then
+  if [ -n "$(dirty_status "$dir" "$ignore_seed_marker")" ]; then
+    echo "$label: skipped: dirty working tree"
+    return 0
+  fi
+
+  local_rev=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || {
+    echo "$label: skipped: cannot read HEAD"
+    return 0
+  }
+  base_rev=$(git -C "$dir" rev-parse "$base" 2>/dev/null) || {
+    echo "$label: skipped: cannot read $base"
+    return 0
+  }
+  if [ "$local_rev" = "$base_rev" ]; then
+    FF_STATUS="current"
+    echo "$label: already current"
+    return 0
+  fi
+  if ! git -C "$dir" merge-base --is-ancestor HEAD "$base" 2>/dev/null; then
+    echo "$label: skipped: diverged from $base"
+    return 0
+  fi
+
+  instr=$(changed_instr "$dir" "$base")
+  before=$(git -C "$dir" rev-parse --short HEAD)
+  if ! out=$(git -C "$dir" merge --ff-only "$base" 2>&1); then
     echo "$label: skipped: fast-forward failed: $(first_line "$out")"
     return 0
   fi
-  merged_rev=$base_rev
-  if [ "$phase" = final ] &&
-    { ! merged_rev=$(git -C "$dir" rev-parse --verify --quiet HEAD 2>/dev/null) ||
-      [ "$merged_rev" != "$base_rev" ]; }; then
-    echo "$label: skipped: could not confirm HEAD at $base after fast-forward (HEAD ${merged_rev:-unreadable}, expected $base_rev)"
-    return 0
-  fi
-  instr=$(changed_instr "$dir" "$local_rev" "$merged_rev")
-  before=$(git -C "$dir" rev-parse --short "$local_rev")
-  after=$(git -C "$dir" rev-parse --short "$merged_rev")
+  after=$(git -C "$dir" rev-parse --short HEAD)
   FF_STATUS="updated"
   FF_INSTR="$instr"
   if [ -n "$instr" ]; then

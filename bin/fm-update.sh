@@ -87,17 +87,8 @@ fi
 # --- main firstmate repo ---------------------------------------------------
 
 reread_firstmate="no"
-firstmate_before=
-if [ "${FM_REMOTE_JOB_ACTIVE:-}" != 1 ]; then
-  firstmate_before=$(git -C "$FM_ROOT" rev-parse --verify --quiet HEAD 2>/dev/null) || firstmate_before=
-fi
 ff_target "$FM_ROOT" "firstmate" origin no no
-if [ "${FM_REMOTE_JOB_ACTIVE:-}" = 1 ]; then
-  [ -z "$FF_INSTR" ] || reread_firstmate="yes"
-elif [ -n "$firstmate_before" ] &&
-  firstmate_after=$(git -C "$FM_ROOT" rev-parse --verify --quiet HEAD 2>/dev/null) &&
-  [ "$firstmate_before" != "$firstmate_after" ] &&
-  [ -n "$(changed_instr "$FM_ROOT" "$firstmate_before" "$firstmate_after")" ]; then
+if [ "$FF_STATUS" = "updated" ] && [ -n "$FF_INSTR" ]; then
   reread_firstmate="yes"
 fi
 

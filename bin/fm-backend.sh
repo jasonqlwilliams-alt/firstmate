@@ -606,20 +606,12 @@ fm_backend_herdr_warn_prebinding_workers() {  # <state-dir> <home-label>
       ! fm_backend_endpoint_atom_valid "$session" ||
       ! fm_backend_endpoint_atom_valid "${pane//:/_}" ||
       ! fm_backend_source herdr; then
-      printf 'warning: %s: could not check pre-binding Herdr worker %s\n' "$label" "$id" >&2
       continue
     fi
-    presence=$(fm_backend_herdr_pane_presence_state "$session" "$pane") || presence=unknown
-    case "$presence" in
-      present)
-        printf 'warning: %s: pre-binding Herdr worker record %s points to existing pane %s. Pane ownership still needs verification. See the manual recovery procedure in docs/herdr-backend.md.\n' \
-          "$label" "$id" "$target" >&2
-        ;;
-      dead) ;;
-      *)
-        printf 'warning: %s: could not check the pane (%s) of pre-binding Herdr worker %s\n' "$label" "$target" "$id" >&2
-        ;;
-    esac
+    presence=$(fm_backend_herdr_pane_presence_state "$session" "$pane") || continue
+    [ "$presence" = present ] || continue
+    printf 'warning: %s: pre-binding Herdr worker record %s points to existing pane %s. Pane ownership still needs verification. See the manual recovery procedure in docs/herdr-backend.md.\n' \
+      "$label" "$id" "$target" >&2
   done
   return 0
 }

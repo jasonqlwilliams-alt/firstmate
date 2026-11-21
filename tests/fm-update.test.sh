@@ -303,7 +303,7 @@ test_current_updater_warns_about_prebinding_workers() {
   mkdir -p "$w/sm1/state"
   # The seed predates the real ignore rules. Keep fixture state untracked.
   printf '/state/\n' >> "$(git -C "$w/main" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
-  for id in main-live home-live missing bound remote secondmate kindless ambiguous-kind; do
+  for id in main-live home-live missing unreadable unusable bound remote secondmate kindless ambiguous-kind; do
     state="$w/home/state"
     [ "$id" != home-live ] || state="$w/sm1/state"
     fm_write_meta "$state/$id.meta" "window=update-herdr:w1:p-$id" \
@@ -318,6 +318,7 @@ test_current_updater_warns_about_prebinding_workers() {
     esac >> "$state/$id.meta"
     [ "$id" = main-live ] || printf 'endpoint_task_id=%s\n' "$id" >> "$state/$id.meta"
   done
+  printf 'herdr_pane_id=w1:p-ambiguous\n' >> "$w/home/state/unusable.meta"
   printf 'herdr_terminal_id=term-bound\n' >> "$w/home/state/bound.meta"
   printf 'remote_host=another-host\n' >> "$w/home/state/remote.meta"
   original_records=$(cksum "$w/home/state/"*.meta "$w/sm1/state/home-live.meta")
@@ -343,14 +344,15 @@ case "$*" in
           "$FM_TEST_REAL_GIT" -C "${FM_ROOT_OVERRIDE%/*}/sm1" merge -q --ff-only origin/main
           ;;
       esac
-    elif [ "${FM_TEST_PROBE_ADVANCE_REFS:-0}" = primary-current ] && [ "$3" = w1:p-main-live ]; then
-      "$FM_TEST_REAL_GIT" -C "$FM_ROOT_OVERRIDE" merge -q --ff-only origin/main
     fi
     printf '{"result":{"pane":{"pane_id":"%s","foreground_cwd":"/unrelated","agent":null}}}\n' "$3"
     ;;
   'pane get w1:p-missing --session update-herdr')
     printf '%s\n' "$3" >> "$FM_FAKE_DIR/herdr-calls"
     printf '%s\n' '{"error":{"code":"pane_not_found"}}' >&2; exit 1 ;;
+  'pane get w1:p-unreadable --session update-herdr')
+    printf '%s\n' "$3" >> "$FM_FAKE_DIR/herdr-calls"
+    printf '%s\n' '{"error":{"code":"server_not_running"}}' >&2; exit 1 ;;
   *) printf 'unexpected:%s\n' "$*" >> "$FM_FAKE_DIR/herdr-calls"; exit 92 ;;
 esac
 SH
@@ -366,9 +368,6 @@ if [ "${FM_REMOTE_JOB_ACTIVE:-}" != 1 ] &&
   esac
   grep -Fq "warning: $label: pre-binding Herdr worker record $id points to existing pane update-herdr:w1:p-$id. Pane ownership still needs verification." "$FM_FAKE_DIR/update.stderr" ||
     { printf 'warning was absent at the fast-forward for %s\n' "$label" >&2; exit 93; }
-  if [ -n "${FM_TEST_CONCURRENT_TIP:-}" ]; then
-    "$FM_TEST_REAL_GIT" -C "$2" merge -q --ff-only "$FM_TEST_CONCURRENT_TIP"
-  fi
 fi
 exec "$FM_TEST_REAL_GIT" "$@"
 SH
@@ -381,10 +380,12 @@ SH
   assert_contains "$warnings" "warning: firstmate: pre-binding Herdr worker record main-live points to existing pane update-herdr:w1:p-main-live" "primary warning missing"
   assert_contains "$warnings" "warning: secondmate sm1: pre-binding Herdr worker record home-live points to existing pane update-herdr:w1:p-home-live" "secondmate warning missing"
   assert_not_contains "$warnings" " missing" "a missing pane produced a worker warning"
+  assert_not_contains "$warnings" " unreadable" "an inconclusive pane query produced a worker warning"
+  assert_not_contains "$warnings" " unusable" "ambiguous pane metadata produced a worker warning"
   assert_contains "$warnings" "manual recovery procedure in docs/herdr-backend.md" "warning omitted the recovery procedure"
   assert_contains "$out" "firstmate: updated " "warning blocked primary update"
   assert_contains "$out" "secondmate sm1: updated " "warning blocked secondmate update"
-  [ "$(cat "$w/fake/herdr-calls")" = $'w1:p-main-live\nw1:p-missing\nw1:p-home-live' ] ||
+  [ "$(cat "$w/fake/herdr-calls")" = $'w1:p-main-live\nw1:p-missing\nw1:p-unreadable\nw1:p-home-live' ] ||
     fail "update did not use read-only Herdr probes before advancing each checkout"
   [ "$(cksum "$w/home/state/"*.meta "$w/sm1/state/home-live.meta")" = "$original_records" ] ||
     fail "update warning changed the worker records"
@@ -422,30 +423,6 @@ SH
   assert_contains "$out" "secondmate sm1: already current" "a concurrent fast-forward was reported as a new update"
   assert_contains "$out" "restart-secondmates: fm-sm1" "the already-current secondmate was not queued for restart"
   pass "The updater uses the commits visible after the Herdr probe"
-
-  bump_origin "$w" instr
-  out=$("${update_env[@]}" FM_HOME="$w/home" FM_TEST_PROBE_ADVANCE_REFS=primary-current \
-    "$UPDATE" 2> "$w/fake/update.stderr")
-  assert_contains "$out" "firstmate: already current" "concurrent primary update was not reported as current"
-  assert_contains "$out" "reread-firstmate: yes" "instructions changed by the concurrent primary update were missed"
-
-  bump_origin "$w" readme
-  printf 'instructions advanced by concurrent update\n' >> "$w/seed/AGENTS.md"
-  git -C "$w/seed" commit -qam 'concurrent instruction advance'
-  local concurrent_tip
-  concurrent_tip=$(git -C "$w/seed" rev-parse HEAD)
-  git -C "$w/main" fetch -q --no-tags "$w/seed" "$concurrent_tip"
-  out=$("${update_env[@]}" FM_HOME="$w/home" FM_TEST_CONCURRENT_TIP="$concurrent_tip" \
-    "$UPDATE" 2> "$w/fake/update.stderr")
-  for checkout in main sm1; do
-    [ "$(git -C "$w/$checkout" rev-parse HEAD)" = "$concurrent_tip" ] || fail "concurrent advance did not reach $checkout"
-  done
-  assert_contains "$out" "firstmate: skipped: could not confirm HEAD at origin/main after fast-forward (HEAD $concurrent_tip," "primary did not report its observed HEAD"
-  assert_contains "$out" "secondmate sm1: skipped: could not confirm HEAD at origin/main after fast-forward (HEAD $concurrent_tip," "secondmate did not report its observed HEAD"
-  assert_contains "$out" "reread-firstmate: yes" "changed primary instructions were missed after a skipped result"
-  assert_contains "$out" "restart-secondmates: none" "a home past the target was queued for restart"
-  assert_contains "$out" "nudge-secondmates: none" "a home past the target was queued for a nudge"
-  pass "A successful merge command requires the expected HEAD before reporting an advance"
 
   local main_before home_before
   main_before=$(git -C "$w/main" rev-parse HEAD)
