@@ -48,8 +48,9 @@
 #     paused: external wait or a verified captain-held transfer, per
 #     fm-classify-lib.sh's combined predicate - instead gets its own longer
 #     PAUSE_RESURFACE_SECS recheck, never a wedge escalation, whether its pane
-#     reads idle or busy; only a status append that stops declaring the wait
-#     ends that routing. A captain-held transfer is not rechecked at all while
+#     reads idle or busy. For the endpoint-loss exception see
+#     docs/watcher-continuity.md#recorded-endpoint-loss.
+#     A captain-held transfer is not rechecked at all while
 #     the away-posture record (state/.afk-contract) exists: nobody is there to
 #     answer it, and the return brief lists it.
 #     Crewmates are autonomous, so a delayed stale response does not stall a
@@ -1100,8 +1101,8 @@ housekeeping() {  # <state>
   # pane busy - a worker parked on a long foreground call it keeps live for as long
   # as the wait lasts - so reading busy as "the crew resumed" retires the window of
   # exactly the declaration that needs it. The crew's own latest status line is the
-  # authority, and the loop head above already drops the marker the moment that line
-  # stops declaring the wait.
+  # authority for the declaration. Earlier reconciliation also drops the marker
+  # when a confirmed loss still matches this recorded endpoint.
   pause_secs=${FM_PAUSE_RESURFACE_SECS:-$FM_PAUSE_RESURFACE_SECS_DEFAULT}
   for marker in "$state"/.subsuper-paused-*; do
     [ -e "$marker" ] || continue

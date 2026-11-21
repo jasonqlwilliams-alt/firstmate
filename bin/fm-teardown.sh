@@ -495,6 +495,15 @@ DESCENDANT_TASK_IDS=()
 DESCENDANT_TASK_KINDS=()
 DESCENDANT_TASK_HOMES=()
 DESCENDANT_TREEHOUSE_LOCK_PATHS=()
+teardown_release_meta_lock() {
+  [ "$META_LOCK_HELD" = 1 ] || return 0
+  # A failed retirement can leave a live record that still needs loss deduplication.
+  if [ ! -e "$META" ] && [ ! -L "$META" ]; then
+    rm -f "$STATE/$ID.missing-endpoint" || true
+  fi
+  fm_lock_release "$META_LOCK" || true
+  META_LOCK_HELD=0
+}
 teardown_release_locks() {
   local status=$? i
   if declare -F teardown_release_herdr_locks >/dev/null 2>&1; then
@@ -516,10 +525,7 @@ teardown_release_locks() {
     fm_lock_release "$LOCAL_REGISTRY_LOCK" || true
     LOCAL_REGISTRY_LOCK=
   fi
-  if [ "$META_LOCK_HELD" = 1 ]; then
-    fm_lock_release "$META_LOCK" || true
-    META_LOCK_HELD=0
-  fi
+  teardown_release_meta_lock
   if [ "$CONTROL_LOCK_HELD" = 1 ]; then
     fm_lock_release "$CONTROL_LOCK" || true
     CONTROL_LOCK_HELD=0
@@ -3778,7 +3784,6 @@ rm -f "$STATE/$ID.turn-ended" "$STATE/$ID.progress" \
   "$STATE/$ID.control-relaunch" "$STATE/$ID.control-relaunch.meta-prior" \
   "$STATE/$ID.control-relaunch.brief-prior" "$STATE/$ID.control-relaunch.note" \
   "$STATE/$ID.reconcile-nudged" "$STATE/$ID.gemini-settings.json" \
-  "$STATE/$ID.missing-endpoint" \
   "$STATE/.$ID.branch-outcome-index"
 # The steering inbox (bin/fm-task-inbox-lib.sh) is runtime state for the
 # retired endpoint; teardown only runs after landing is confirmed, so any
@@ -3815,8 +3820,7 @@ if [ "$BACKLOG_CLOSED" = 1 ]; then
   BACKLOG_CLOSE_MARKER=$(fm_backlog_close_marker_path "$STATE" "$ID") || exit 1
   if ! fm_backlog_atomic_transition "$BACKLOG_TRANSITION" "$STATE/$ID.meta" "$BACKLOG_CLOSE_MARKER" \
       "$DATA" "$ID" "$STATE" "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}"; then
-    fm_lock_release "$META_LOCK"
-    META_LOCK_HELD=0
+    teardown_release_meta_lock
     if [ "$BACKLOG_TRANSITION" = retain ]; then
       echo "error: $ID's endpoint and local copy are cleaned up, but its captain-held backlog item could not be returned to Queued atomically ($FM_BACKLOG_TRANSITION_ERROR); the pending retention is recorded and the next session start retries it" >&2
     else
@@ -3831,14 +3835,12 @@ elif [ "$KIND" = secondmate ] && [ ! -e "$STATE" ] && [ ! -L "$STATE" ]; then
   :
 else
   if ! fm_backlog_atomic_transition remove "$STATE/$ID.meta" "task record" "$STATE"; then
-    fm_lock_release "$META_LOCK"
-    META_LOCK_HELD=0
+    teardown_release_meta_lock
     echo "error: $ID's endpoint and local copy are cleaned up, but its task record could not be removed ($FM_BACKLOG_TRANSITION_ERROR)" >&2
     exit 1
   fi
 fi
-fm_lock_release "$META_LOCK"
-META_LOCK_HELD=0
+teardown_release_meta_lock
 if [ "$KIND" != scout ] && [ "$KIND" != secondmate ] && [ "$MODE" != local-only ]; then
   "$FM_ROOT/bin/fm-fleet-sync.sh" "$PROJ" || true
 fi

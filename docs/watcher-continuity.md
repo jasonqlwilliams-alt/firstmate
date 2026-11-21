@@ -56,6 +56,16 @@ No adapter starts a replacement with shell `&`.
 
 The turn-end guard remains the final backstop rather than the normal continuity mechanism and cooperates with the auto-arm in its `--claude` mode.
 
+## Recorded endpoint loss
+
+When pane polling cannot read a local task's recorded endpoint and the backend confirms it is missing, the watcher clears pause tracking and queues `stale: <window> (the recorded endpoint is gone)` once for that recorded endpoint.
+tmux and Herdr supply the required missing verdict, and a secondmate enters this poll path only while its latest status declares `paused:` or `captain-held:`.
+The report is keyed to the recorded backend, target, and spawn generation, so a relaunch can report a fresh loss even when it reuses the target.
+A successful capture also re-arms the report, and teardown keeps the loss record until it retires the task record.
+Where the away daemon runs, it routes the loss to its escalation digest and keeps pause tracking cleared while the loss still matches the current endpoint, even if the wait remains declared.
+
+The [backend verification record](verification/runtime-backends.md#recorded-endpoint-loss) covers tmux and Herdr.
+
 ## Foreground checkpoint boundary
 
 Codex and the unknown-harness foreground fallback run one bounded watcher cycle through `bin/fm-watch-checkpoint.sh`.

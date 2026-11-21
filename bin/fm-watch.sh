@@ -65,9 +65,8 @@
 #                          interrupt, signal, or restart of the worker or its
 #                          tool process.
 #   stale: <window> (the recorded endpoint is gone)
-#                          a failed pane read was confirmed as a missing
-#                          local endpoint; clears pause tracking and reports
-#                          once per recorded endpoint incarnation
+#                          confirmed loss of the recorded local endpoint;
+#                          see docs/watcher-continuity.md#recorded-endpoint-loss
 #   stale: <window> (unread firstmate instruction: ...)
 #                          the steering-inbox ladder spent its delivery-attempt
 #                          budget on an idle pane without an acknowledgement
@@ -2298,10 +2297,9 @@ EOF
       && [ -e "$STATE/.paused-$key" ]; then
       clear_pause_tracking "$key"
     fi
-    # An idle secondmate endpoint is healthy by design, so a mate is admitted to
-    # the pane-stale path ONLY to serve a status-declared wait's bounded
-    # re-surface. This gate reads the shared predicate rather than the pause verb
-    # alone so it includes a declared `captain-held` status. A hold recorded only
+    # An idle secondmate endpoint is healthy by design, so only a status-declared
+    # wait admits a mate to the pane-stale path. The shared predicate includes
+    # a declared `captain-held` status. A hold recorded only
     # in the backlog while the mate still says `working:` or `done:` is outside
     # this guard: reaching it would require backlog reads for windows this gate
     # deliberately skips, putting that read on the ordinary poll hot path.

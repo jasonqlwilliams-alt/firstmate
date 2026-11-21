@@ -1147,6 +1147,8 @@ The same poll path was verified in an isolated Herdr 0.9.5 lab with a task recor
 After `bin/fm-herdr-lab.sh run "$session" pane close "$pane"`, `bin/fm-watch.sh` printed `stale: <window> (the recorded endpoint is gone)` and queued one stale wake.
 After `bin/fm-wake-drain.sh` and the printed acknowledgement command, the re-armed watcher stayed quiet on later polls.
 Guarded Herdr teardown verified the unchanged default-session tripwire.
+[`tests/fm-wake-daemon-lifecycle-e2e.test.sh`](../../tests/fm-wake-daemon-lifecycle-e2e.test.sh) covers the away-daemon escalation and later pause reconciliation.
+[`tests/fm-teardown.test.sh`](../../tests/fm-teardown.test.sh) covers retaining the loss record after failed task retirement and removing it on a successful retry.
 
 ### Agent lifecycle control
 
