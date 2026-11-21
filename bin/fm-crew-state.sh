@@ -132,12 +132,12 @@ case "$FM_CREW_STATE_RUNS_LIMIT" in ''|*[!0-9]*) FM_CREW_STATE_RUNS_LIMIT=200 ;;
 SEP=' · '
 
 # Emit the one canonical line and exit 0. Detail is optional.
-emit() {  # <state> <source> [detail] [matching-pr]
+emit() {  # <state> <source> [detail] [summary-evidence]
   local line="state: $1${SEP}source: $2"
   [ -n "${3:-}" ] && line="$line${SEP}$3"
   printf '%s\n' "$line"
-  if [ "${4:-}" = matching-pr ]; then
-    printf '%s\n' matching-pr
+  if [ -n "${4:-}" ]; then
+    printf '%s\n' "$4"
   fi
   exit 0
 }
@@ -343,9 +343,25 @@ log_reports_ci_ready() {
   esac
 }
 
-log_reports_green_for_cancelled_pr() {
-  [ -n "$MATCHING_PR" ] && [ "$LOG_VERB" = done ] \
+log_reports_registered_pr_green() {
+  [ -n "$SUMMARY_PR" ] && [ "$LOG_VERB" = done ] \
     && [ "$(status_line_note "$LOG_LINE")" = "PR $SUMMARY_PR checks green" ]
+}
+
+emit_ci_ready() {
+  local evidence='' selected_head
+  if log_reports_registered_pr_green; then
+    if [ "$LEDGER_READ" = 0 ]; then
+      selected_head=$(strip_quotes "$(nm_field head_sha)")
+      [ -n "$selected_head" ] || selected_head=$(strip_quotes "$(nm_field head)")
+      [ -z "$selected_head" ] || nm_read_ledger_status "$selected_head"
+    fi
+    if [ "$LEDGER_MATCHING_PR" = retry-pr ] \
+      || { [ "$LEDGER_STATUS" = running ] && [ -n "$FULL_MATCHING_PR$LEDGER_MATCHING_PR" ]; }; then
+      evidence=live-retry-green
+    fi
+  fi
+  emit done status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR" "$evidence"
 }
 
 # 0 when a status-log line reports positive daemon socket failure rather than a
@@ -552,10 +568,11 @@ nm_ci_checks_state() {
 # answer as current), so both attribution routes share one rule.
 # The same reader is also consulted when `axi status` DID bind this branch's run
 # but that run is terminal, to find a live sibling run for this worktree.
-nm_ledger_status() {
-  fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" \
-    "$(nm_run runs --limit "$FM_CREW_STATE_RUNS_LIMIT")" "" \
-    "$SUMMARY_PR" "$SUMMARY_PR_HEAD"
+nm_read_ledger_status() {
+  IFS='|' read -r LEDGER_STATUS LEDGER_MATCHING_PR <<< "$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" \
+    "$(nm_run runs --limit "$FM_CREW_STATE_RUNS_LIMIT")" "${1:-}" \
+    "$SUMMARY_PR" "$SUMMARY_PR_HEAD")"
+  LEDGER_READ=1
 }
 
 # CREW_BRANCH is empty at detached HEAD (a just-spawned crew, or a scout's
@@ -594,8 +611,12 @@ RUN_SOURCE=full
 COARSE_STATUS=""
 SUMMARY_PR=${FM_CREW_STATE_SUMMARY_PR:-}
 SUMMARY_PR_HEAD=${FM_CREW_STATE_SUMMARY_PR_HEAD:-}
-MATCHING_PR=
+FULL_MATCHING_PR=
 full_cancelled=
+full_bound=0
+LEDGER_READ=0
+LEDGER_STATUS=
+LEDGER_MATCHING_PR=
 # Scouts and secondmates never drive a no-mistakes validation of their own
 # worktree, so skip the lookup for them and read state from pane/log directly.
 if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/null 2>&1; then
@@ -606,7 +627,7 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
       run_outcome=$(strip_quotes "$(nm_field outcome)")
       if [ "$run_outcome" = cancelled ] || { [ -z "$run_outcome" ] && [ "$(strip_quotes "$(nm_field status)")" = cancelled ]; }; then
         full_cancelled=1
-        nm_cancelled_run_matches_registered_pr && MATCHING_PR=matching-pr
+        nm_cancelled_run_matches_registered_pr && FULL_MATCHING_PR=matching-pr
       fi
     fi
     # Head equality, or the pipeline-owned-active exemption: while the
@@ -616,6 +637,7 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
     if [ -n "$run_branch" ] && [ "$run_branch" = "$CREW_BRANCH" ] \
       && { nm_run_head_matches_worktree || fm_nm_run_is_pipeline_owned_active "$RUN_OUT"; }; then
       HAVE_RUN=1
+      full_bound=1
       # Live-over-terminal (bin/fm-nm-run-lib.sh). Bare `axi status` answers
       # with the most-recently-touched run, which after a pipeline crash is the
       # dead run sitting at this worktree's exact commit while the live run
@@ -625,10 +647,9 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
       # displaces it: a terminal run with no live sibling keeps its full
       # `axi status` step and gate detail rather than degrading to the ledger.
       if ! fm_nm_run_is_active "$RUN_OUT"; then
-        IFS='|' read -r live_status ledger_matching_pr <<< "$(nm_ledger_status)"
-        if [ "$(fm_nm_run_status_class "$live_status")" = live ]; then
-          COARSE_STATUS=$live_status
-          [ -n "$full_cancelled" ] || MATCHING_PR=$ledger_matching_pr
+        nm_read_ledger_status
+        if [ "$(fm_nm_run_status_class "$LEDGER_STATUS")" = live ]; then
+          COARSE_STATUS=$LEDGER_STATUS
           RUN_SOURCE=coarse
         fi
       fi
@@ -639,17 +660,14 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
       # `[ -n "$RUN_OUT" ]`: an empty/timed-out primary call means the CLI
       # itself did not respond, so retrying it immediately with a second
       # bounded call would just double the wait for no better answer.
-      IFS='|' read -r COARSE_STATUS ledger_matching_pr <<< "$(nm_ledger_status)"
-      [ -n "$full_cancelled" ] || MATCHING_PR=$ledger_matching_pr
+      nm_read_ledger_status
+      COARSE_STATUS=$LEDGER_STATUS
       if [ -n "$COARSE_STATUS" ]; then
         HAVE_RUN=1
         # A branch-matching answer the strict rule rejected is this branch's
         # own current run once the ledger proves the pipeline-owned
         # continuation, so its axi TOON is the authoritative run detail.
-        if [ "$run_branch" != "$CREW_BRANCH" ] \
-          || { [ "$COARSE_STATUS" = running ] && [ -n "$full_cancelled" ] && [ -n "$MATCHING_PR" ]; }; then
-          RUN_SOURCE=coarse
-        fi
+        [ "$run_branch" = "$CREW_BRANCH" ] || RUN_SOURCE=coarse
       fi
     fi
   fi
@@ -763,9 +781,9 @@ if [ "$HAVE_RUN" = 1 ]; then
     fi
   fi
 
-  if [ "$RUN_STATE" = working ] && log_reports_ci_ready && ! log_reports_green_for_cancelled_pr; then
+  if [ "$RUN_STATE" = working ] && log_reports_ci_ready; then
     if [ "$RUN_SOURCE" = coarse ]; then
-      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR"
+      emit_ci_ready
     fi
     [ -n "$CI_STEP_STATUS" ] || CI_STEP_STATUS=$(nm_effective_ci_step_status)
     if [ "$RUN_STATUS" = fixing ]; then
@@ -776,7 +794,7 @@ if [ "$HAVE_RUN" = 1 ]; then
       CI_LOG_STATE=not-ready
     fi
     if [ "$CI_LOG_STATE" != not-ready ]; then
-      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR"
+      emit_ci_ready
     fi
   fi
 
@@ -820,11 +838,25 @@ if [ "$HAVE_RUN" = 1 ]; then
         ;;
     esac
   fi
+  evidence=''
   case "$RUN_DETAIL" in
-    "run cancelled"|"run cancelled${SEP}"*) ;;
-    *) MATCHING_PR= ;;
+    "run cancelled"|"run cancelled${SEP}"*)
+      if [ "$RUN_SOURCE" = coarse ] && [ -n "$LEDGER_MATCHING_PR" ]; then
+        evidence="cancelled-row|$SUMMARY_PR_HEAD"
+      elif [ "$RUN_SOURCE" = full ] && [ "$full_bound" = 1 ] && [ -n "$FULL_MATCHING_PR" ]; then
+        case "$LEDGER_STATUS" in
+          ''|cancelled)
+            run_id=$(strip_quotes "$(nm_field id)")
+            case "$run_id" in
+              ''|*[!A-Za-z0-9_-]*) ;;
+              *) evidence="cancelled-run|$run_id|$SUMMARY_PR_HEAD" ;;
+            esac
+            ;;
+        esac
+      fi
+      ;;
   esac
-  emit "$RUN_STATE" run-step "$RUN_DETAIL" "$MATCHING_PR"
+  emit "$RUN_STATE" run-step "$RUN_DETAIL" "$evidence"
 fi
 
 # --- fallback: no run attributed to this crew ------------------------------
@@ -912,8 +944,12 @@ fi
 if [ -n "$LOG_VERB" ]; then
   LOG_STATE=$(map_log_state "$LOG_LINE")
   if [ "$LOG_STATE" != unknown ]; then
-    log_reports_green_for_cancelled_pr || MATCHING_PR=
-    emit "$LOG_STATE" status-log "$(status_line_note "$LOG_LINE")" "$MATCHING_PR"
+    evidence=''
+    if log_reports_registered_pr_green \
+      && { [ -n "$FULL_MATCHING_PR" ] || { [ -z "$full_cancelled" ] && [ -n "$LEDGER_MATCHING_PR" ]; }; }; then
+      evidence=cancelled-pr-green
+    fi
+    emit "$LOG_STATE" status-log "$(status_line_note "$LOG_LINE")" "$evidence"
   fi
 fi
 

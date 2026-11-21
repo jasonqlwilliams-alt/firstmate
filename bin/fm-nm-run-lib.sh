@@ -173,8 +173,8 @@ fm_nm_run_matches_registered_pr() {  # <worktree> <run-pr> <run-head> <registere
 # runs-listing subcommand - verified against the installed CLI). Prints the
 # status word of the branch's CURRENT run row, or nothing when the ledger
 # cannot prove attribution. For a home summary, optional registered PR and
-# head $5 and $6 report cancellation evidence separately as "|matching-pr"
-# after the status. When optional expected head $4 is supplied, its
+# head $5 and $6 report cancellation evidence separately after the status.
+# When optional expected head $4 is supplied, its
 # abbreviated commit identity must match the newest row. The branch's NEWEST
 # row alone decides; older rows are history and never answer for the present:
 #   - newest row's head resolves and matches the worktree (fm_nm_head_matches_worktree):
@@ -251,7 +251,7 @@ fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [ex
     esac
     [ "$day_num" -ge 1 ] && [ "$day_num" -le "$max_day" ] || break
     [ "$br" = "$branch" ] || continue
-    if [ -n "$decided" ]; then
+    if [ -n "$decided" ] && [ "$decided" != running ]; then
       # Live-over-terminal: the newest row bound to this worktree but is a
       # terminal record, so the older rows are searched for a live run that
       # binds to the same worktree by the same head rule. Only such a row
@@ -265,7 +265,7 @@ fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [ex
       decided=$st
       break
     fi
-    if [ -z "$pending_st" ] && [ -n "$expected_head" ]; then
+    if [ -z "$decided$pending_st" ] && [ -n "$expected_head" ]; then
       case "$expected_head" in *[!A-Fa-f0-9]*|'') break ;; esac
       [ "${#expected_head}" -ge 7 ] && [ "${#expected_head}" -le 40 ] || break
       case "$expected_head" in
@@ -274,11 +274,15 @@ fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [ex
       esac
     fi
     row_full=$(fm_nm_resolve_commit "$wt" "$sha")
-    if [ "$st" = cancelled ] && { [ -z "$pending_st" ] || [ "$row_full" = "$local_full" ]; } \
-      && fm_nm_run_matches_registered_pr \
+    if [ "$st" = cancelled ] && fm_nm_run_matches_registered_pr \
         "$wt" "$pr" "${row_full:-$sha}" "$registered_pr" "$registered_head"; then
-      matching_pr=1
+      if [ -z "$pending_st" ] || [ "$row_full" = "$local_full" ]; then
+        matching_pr=matching-pr
+      elif [ -n "$expected_head" ]; then
+        matching_pr=retry-pr
+      fi
     fi
+    [ "$decided" != running ] || break
     if [ -n "$pending_st" ]; then
       # This is the row immediately older than the active unresolvable row:
       # the only admissible anchor, and only exact head equality proves the
@@ -297,6 +301,9 @@ fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [ex
           [ "$row_full" != "$local_full" ] || decided_exact=1
           continue
         fi
+        if [ "$st" = running ] && [ -n "$registered_pr" ]; then
+          continue
+        fi
       fi
       break
     fi
@@ -305,7 +312,7 @@ fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [ex
   done <<< "$list"
   printf '%s' "$decided"
   if [ -n "$matching_pr" ]; then
-    printf '|matching-pr'
+    printf '|%s' "$matching_pr"
   fi
   return 0
 }

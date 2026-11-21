@@ -324,8 +324,8 @@ last_nonempty_line() {  # <file>
 # snapshot without limit. Remote secondmate endpoint liveness is never read here.
 # A local read that hits the bound folds to state unknown.
 crew_state_json() {  # <id> [<captured-meta>] [<captured-status>]
-  local id=$1 captured_meta=${2:-} captured_status=${3:-} raw rest state source detail sep
-  local pr='' pr_head='' cancelled_registered_pr=false
+  local id=$1 captured_meta=${2:-} captured_status=${3:-} raw rest state source detail sep evidence
+  local pr='' pr_head='' terminal_exempt=false
   if [ "$OUTPUT_MODE" = secondmate-home-summary ]; then
     pr=$(meta_value "$captured_meta" pr)
     pr_head=$(meta_value "$captured_meta" pr_head)
@@ -335,25 +335,19 @@ crew_state_json() {  # <id> [<captured-meta>] [<captured-status>]
     fi
   fi
   raw=$(
-    fm_run_timed "$FM_SNAPSHOT_CREW_STATE_TIMEOUT" \
+    FM_CREW_STATE_SUMMARY_PR="$pr" FM_CREW_STATE_SUMMARY_PR_HEAD="$pr_head" \
+      fm_run_timed "$FM_SNAPSHOT_CREW_STATE_TIMEOUT" \
       env FM_ROOT_OVERRIDE="$FM_ROOT" \
       FM_HOME="$FM_HOME" \
       FM_STATE_OVERRIDE="$STATE" \
       FM_CREW_STATE_META_OVERRIDE="$captured_meta" \
       FM_CREW_STATE_STATUS_OVERRIDE="$captured_status" \
-      FM_CREW_STATE_SUMMARY_PR="$pr" \
-      FM_CREW_STATE_SUMMARY_PR_HEAD="$pr_head" \
       FM_DATA_OVERRIDE="$DATA" \
       FM_PROJECTS_OVERRIDE="$PROJECTS" \
       FM_CONFIG_OVERRIDE="$CONFIG" \
       "$SCRIPT_DIR/fm-crew-state.sh" "$id" 2>/dev/null || true
   )
-  if [ -n "$pr" ] && [[ "$raw" == *$'\n'matching-pr ]] \
-    && ! fm_pr_poll_merge_already_notified "$STATE" "$id" \
-        "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" \
-    && ! { fm_pr_poll_retirement_receipt_valid "$STATE" "$id" && [ "$FM_PR_RETIRE_URL" = "$pr" ]; }; then
-    cancelled_registered_pr=true
-  fi
+  evidence=${raw#*$'\n'}
   raw=$(printf '%s\n' "$raw" | head -1)
   sep=' · '
   state=unknown
@@ -370,10 +364,22 @@ crew_state_json() {  # <id> [<captured-meta>] [<captured-status>]
       esac
       ;;
   esac
+  if [ -n "$pr" ]; then
+    case "$state:$source:$evidence" in
+      done:status-log:live-retry-green) terminal_exempt=true ;;
+      done:status-log:cancelled-pr-green|failed:run-step:cancelled-run\|?*\|"$pr_head"|failed:run-step:cancelled-row\|"$pr_head")
+        if ! fm_pr_poll_merge_already_notified "$STATE" "$id" \
+            "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" \
+          && ! { fm_pr_poll_retirement_receipt_valid "$STATE" "$id" && [ "$FM_PR_RETIRE_URL" = "$pr" ]; }; then
+          terminal_exempt=true
+        fi
+        ;;
+    esac
+  fi
   jq -n --arg raw "$raw" --arg state "$state" --arg source "$source" --arg detail "$detail" \
-    --argjson cancelled_registered_pr "$cancelled_registered_pr" '
+    --argjson terminal_exempt "$terminal_exempt" '
     {state:$state,source:$source,detail:$detail,raw:$raw}
-    + if $cancelled_registered_pr then {cancelled_registered_pr:true} else {} end'
+    + if $terminal_exempt then {terminal_exempt:true} else {} end'
 }
 
 status_event_json() {  # <observed-status-log> [<contract-path>]
@@ -1145,7 +1151,7 @@ secondmate_home_summary_json() {  # <backlog-json-file> <tasks-json-file>
          | select(held_child($backlog) | not)
          | select(transitioning | not)
          | select(.id == $work.id and (.current_state.state == "done" or .current_state.state == "failed"))
-         | select(.current_state.cancelled_registered_pr != true)
+         | select(.current_state.terminal_exempt != true)
          | select((.current_state.state == "done"
                    and .current_state.source == "run-step"
                    and (.current_state.detail | startswith("checks green:"))

@@ -1331,7 +1331,28 @@ SH
   ' >/dev/null || fail "fixture must prove a cancelled run on the recorded pull request: $out"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$ROOT/bin/fm-crew-state.sh" cancelled)
   [ "$out" = "$expected_state" ] || fail "default crew state exposed cancellation evidence: $out"
-  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  cat > "$fakebin/timeout" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *'/fm-crew-state.sh cancelled')
+    if [ "${FM_CREW_STATE_SUMMARY_PR:-}" = "$FIXTURE_PR" ] &&
+       [ "${FM_CREW_STATE_SUMMARY_PR_HEAD:-}" = "$FIXTURE_HEAD" ]; then
+      case "$*" in
+        *"$FIXTURE_PR"*|*"$FIXTURE_HEAD"*) ;;
+        *) printf 'inherited\n' > "$FM_HOME/timeout-observation" ;;
+      esac
+    fi
+    ;;
+esac
+[ "$1" != -k ] || shift 2
+shift
+exec "$@"
+SH
+  chmod +x "$fakebin/timeout"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" FIXTURE_PR="$pr" FIXTURE_HEAD="$head" \
+    FM_TIMEOUT_MECHANISM_OVERRIDE= "$SNAPSHOT" --secondmate-home-summary)
+  [ -s "$home/timeout-observation" ] || fail "private PR metadata must reach the timeout wrapper through its environment"
+  rm -f "$fakebin/timeout"
   printf '%s' "$out" | jq -e '.valid == true and .invalidity == {kind:null,ids:[]}' >/dev/null \
     || fail "cancelled run with an open recorded PR at the recorded head must not be terminal in flight: $out"
 
@@ -1443,10 +1464,12 @@ RUN
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid and .endpoints[0].state == "working" and .endpoints[0].source == "pane"' >/dev/null \
     || fail "an unfetched cancelled ledger row must leave a busy worker visible: $out"
+  rm -f "$state/cancelled.pr-poll-retirement"
 
   printf 'running %s %s 2026-07-11 13:00\n' "$branch" "${head:0:8}" > "$home/runs.txt"
   cat > "$home/run.txt" <<RUN
 run:
+  id: "cancelled-unfetched"
   branch: $branch
   head: "${other_head:0:8}"
   head_sha: "$other_head"
@@ -1454,14 +1477,46 @@ run:
   pr: "$pr"
 RUN
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
-  printf '%s' "$out" | jq -e '.valid and .endpoints[0].state == "working" and .endpoints[0].source == "run-step"' >/dev/null \
-    || fail "a live ledger result must outrank an unfetched full cancellation and its stale green event: $out"
+  printf '%s' "$out" | jq -e '.invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}
+    and .endpoints[0].state == "failed" and .endpoints[0].source == "run-step"' >/dev/null \
+    || fail "an unfetched full cancellation must not change the ordinary worker verdict: $out"
 
   sed "s/^pr_head=.*/pr_head=$head/" "$state/cancelled.meta" > "$state/rewrite"
   mv "$state/rewrite" "$state/cancelled.meta"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.endpoints[0].state == "failed" and .endpoints[0].source == "run-step"' >/dev/null \
+    || fail "changing only the registered PR head must preserve the worker verdict: $out"
+  sed "s/^pr_head=.*/pr_head=$other_head/" "$state/cancelled.meta" > "$state/rewrite"
+  mv "$state/rewrite" "$state/cancelled.meta"
+  printf 'failed %s %s 2026-07-11 13:00\ncancelled %s %s 2026-07-11 12:00 %s\n' \
+    "$branch" "${head:0:8}" "$branch" "${other_head:0:8}" "$pr" > "$home/runs.txt"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}
+    and .endpoints[0].state == "failed" and .endpoints[0].source == "run-step"' >/dev/null \
+    || fail "a retry that failed after the status read must not inherit a cancellation exemption: $out"
+
+  cat > "$home/run.txt" <<RUN
+run:
+  id: "pipeline-retry"
+  branch: $branch
+  head: "${other_head:0:8}"
+  head_sha: "$other_head"
+  status: running
+branch_sync:
+  state: pipeline_owned
+RUN
+  printf 'running %s %s 2026-07-11 13:00\ncancelled %s %s 2026-07-11 12:00 %s\n' \
+    "$branch" "${other_head:0:8}" "$branch" "${other_head:0:8}" "$pr" > "$home/runs.txt"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid and .endpoints[0].state == "done" and .endpoints[0].source == "status-log"' >/dev/null \
+    || fail "a directly selected pipeline retry must use its predecessor evidence even with an unfetched head: $out"
+
+  sed "s/^pr_head=.*/pr_head=$head/" "$state/cancelled.meta" > "$state/rewrite"
+  mv "$state/rewrite" "$state/cancelled.meta"
+
   printf 'cancelled %s %s 2026-07-11 12:00 %s\nrunning %s %s 2026-07-11 11:00\n' \
     "$branch" "${head:0:8}" "$pr" "$branch" "${head:0:8}" > "$home/runs.txt"
-  for route in full ledger anchor; do
+  for route in full ledger anchor direct newest; do
     case "$route" in
       full)
         cat > "$home/run.txt" <<RUN
@@ -1478,10 +1533,23 @@ RUN
         printf 'running %s %s 2026-07-11 13:00\ncancelled %s %s 2026-07-11 12:00 %s\n' \
           "$branch" "${other_head:0:8}" "$branch" "${head:0:8}" "$pr" > "$home/runs.txt"
         ;;
+      direct)
+        cat > "$home/run.txt" <<RUN
+run:
+  id: "live-retry"
+  branch: $branch
+  head: "$head"
+  head_sha: "$head"
+  status: running
+RUN
+        printf 'running %s %s 2026-07-11 13:00\ncancelled %s %s 2026-07-11 12:00 %s\n' \
+          "$branch" "${head:0:8}" "$branch" "${head:0:8}" "$pr" > "$home/runs.txt"
+        ;;
+      newest) printf 'run:\n  branch: another-task\n' > "$home/run.txt" ;;
     esac
     out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
-    printf '%s' "$out" | jq -e '.valid and .endpoints[0].state == "working" and .endpoints[0].source == "run-step"' >/dev/null \
-      || fail "the stale green event must yield to the live run via $route: $out"
+    printf '%s' "$out" | jq -e '.valid and .endpoints[0].state == "done" and .endpoints[0].source == "status-log"' >/dev/null \
+      || fail "the stale green event must leave the worker verdict visible without making the home invalid via $route: $out"
   done
   printf 'done: PR https://github.com/kunchenguid/firstmate/pull/45 checks green\n' > "$state/cancelled.status"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
