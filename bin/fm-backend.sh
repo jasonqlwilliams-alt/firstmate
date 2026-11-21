@@ -587,6 +587,35 @@ fm_backend_herdr_task_identity_state() {  # <target> [binding]
   fm_backend_herdr_pane_identity_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE" "$field" "$expected" "$detail"
 }
 
+# The explicit updater needs only to know whether a legacy record still
+# points to an existing pane. Presence does not establish worker ownership.
+fm_backend_herdr_warn_prebinding_workers() {  # <state-dir> <home-label>
+  local state=$1 label=$2 meta id target session pane presence
+  for meta in "$state"/*.meta; do
+    if [ ! -f "$meta" ] || [ -L "$meta" ] || [ "$(fm_backend_meta_exact_value "$meta" backend)" != herdr ] ||
+      grep -Eq '^(remote_host=|herdr_terminal_id=)' "$meta"; then
+      continue
+    fi
+    case "$(fm_backend_meta_exact_value "$meta" kind)" in ship|scout) ;; *) continue ;; esac
+    id=${meta##*/}
+    id=${id%.meta}
+    if ! session=$(fm_backend_meta_exact_value "$meta" herdr_session) ||
+      ! pane=$(fm_backend_meta_exact_value "$meta" herdr_pane_id) ||
+      ! target=$(fm_backend_meta_exact_value "$meta" window) ||
+      [ "$target" != "$session:$pane" ] ||
+      ! fm_backend_endpoint_atom_valid "$session" ||
+      ! fm_backend_endpoint_atom_valid "${pane//:/_}" ||
+      ! fm_backend_source herdr; then
+      continue
+    fi
+    presence=$(fm_backend_herdr_pane_presence_state "$session" "$pane") || continue
+    [ "$presence" = present ] || continue
+    printf 'warning: %s: pre-binding Herdr worker record %s points to existing pane %s. Pane ownership still needs verification. See the manual recovery procedure in docs/herdr-backend.md.\n' \
+      "$label" "$id" "$target" >&2
+  done
+  return 0
+}
+
 fm_backend_herdr_matching_meta() {  # <target> <state-dir>
   local target=$1 state=$2 candidate matched=
   for candidate in "$state"/*.meta; do

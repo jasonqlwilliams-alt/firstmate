@@ -217,13 +217,48 @@ herdr_pane_id=<pane-id>
 ```
 
 A Herdr pane id contains a colon, so the adapter splits `window=` on the first colon only.
-Ship and scout records also carry `herdr_terminal_id=` from the tab creation response.
+New ship and scout records also carry `herdr_terminal_id=` from the tab creation response.
 The [live endpoint checks](#restart-and-liveness-behavior) determine whether the recorded pane still belongs to the task.
 Workspace and tab ids support verification and cleanup but are not inferred from mutable labels during normal operation.
 
 Ordinary Herdr ship tasks can retire their records and any owned pool slot while retaining the exact pane through the explicit `--keep-pane` opt-in owned by [`fm-teardown.sh`](../bin/fm-teardown.sh).
 The command's header owns shutdown prerequisites, shell detachment, supported limits and refusal behavior.
 The focused regression and token-free real-lab entry point are recorded in [runtime backend verification](verification/runtime-backends.md#pane-preserving-retirement).
+
+### Manual recovery for pre-binding workers
+
+During an explicit Firstmate update, the updater warns when pre-binding Herdr ship or scout records in a local home point to confirmed existing panes.
+The check runs before the fetch and fast-forward eligibility checks, so an advisory warning can also appear for an already-current or skipped checkout.
+Remote secondmate updates, older updaters, bootstrap, and spawn-time sync skip this check.
+The [updater regression](../tests/fm-update.test.sh) covers warning timing, local scope, and preservation of worker records.
+
+For a [pre-binding worker with an unreadable pane](#restart-and-liveness-behavior), apply the following checks on the host that owns the pane.
+For a worker supervised by a remote secondmate, perform these checks on the remote host against the worker record in that secondmate's home.
+
+1. Locate the affected home's `state/<task>.meta` and set `meta` to its path and `task` to its task ID.
+   If the affected home ran the explicit update with `FM_STATE_OVERRIDE`, use the state directory selected by that override.
+   Confirm that it belongs to the intended local Herdr ship or scout and has no `herdr_terminal_id=` line.
+   Stop for a secondmate record, any `remote_host=` line, or any existing terminal binding.
+2. In Bash, source `bin/fm-backend.sh` from the updated checkout and require `fm_backend_validate_task_endpoint "$meta" "$task"` to succeed for the selected file and exact task ID, with `FM_BACKEND_VALIDATED_BACKEND` equal to `herdr`.
+   An update warning can identify older records that lack an exact `endpoint_task_id=` binding, which makes them ineligible for manual adoption.
+   Set `target=$FM_BACKEND_VALIDATED_TARGET` and take the session and pane from the validated `herdr_session=` and `herdr_pane_id=` fields.
+   Load the adapter with `fm_backend_source herdr` and query the exact pane using `fm_backend_herdr_cli "$session" pane get "$pane"`.
+   Confirm the returned pane ID and verify that `foreground_cwd` resolves to the same directory as the record's `worktree=`.
+   Check the returned terminal ID with `fm_backend_herdr_terminal_id_valid "$terminal_id"`.
+   The pane's creation `cwd` is insufficient for this check.
+3. Require this task's own launch line in the retained scrollback for both live and exited agents.
+   Start with `fm_backend_herdr_cli "$session" pane read "$pane" --source recent --lines 200` and increase `--lines` as needed to search the full retained scrollback.
+   For a live agent, require both `fm_backend_herdr_cli "$session" agent get "$pane"` confirming the record's `harness=` and positive process evidence that the agent from that launch is still running in the pane.
+   Use `fm_backend_herdr_cli "$session" pane process-info --pane "$pane"` and the host process table to inspect the foreground process group and the pane shell's descendants.
+   For an exited agent, establish from those processes that the agent has exited and that there is no replacement agent.
+   Stop if the launch line is missing, generic, or could belong to a different task or agent.
+4. With the affected home and state directory selected, source `bin/fm-wake-lib.sh`, get the lock path with `fm_meta_lock_path "$meta"`, and acquire it with `fm_lock_try_acquire "$lock"`.
+   Hold this lock in the same shell through the final reread and append.
+   Reread the regular record under the lock and repeat steps 2 and 3, including verification of the same task-specific launch line.
+   Leave the record untouched if the record or evidence changed, if the lock or any proof is unavailable, or if any evidence is mismatched or ambiguous.
+   Once all checks pass and the record still ends with a newline and has no `herdr_terminal_id=` line, append exactly one line with `printf 'herdr_terminal_id=%s\n' "$terminal_id" >> "$meta"`.
+   Release the lock with `fm_lock_release "$lock"` after the append or on abandoning the edit.
+5. Run `FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_herdr_task_identity_state "$target"` and require it to print `match`.
 
 ## Current transport behavior
 
@@ -297,6 +332,7 @@ The adapter applies the recorded binding when the caller selects a task record, 
 A newly created pane uses its own terminal id during launch, including when a new secondmate takes a pane id still claimed by a worker record.
 Secondmates start directly in their home, so subsequent task-selected access uses the canonical pane creation directory, including for [remote endpoint operations](remote-secondmates.md#normal-operation).
 An older worker record with a still-present pane and no recorded terminal id is unreadable and retained.
+See [manual recovery for pre-binding workers](#manual-recovery-for-pre-binding-workers) for eligibility and required checks.
 Capture, key and text delivery, and terminal close require a match when a binding is supplied.
 Capture rechecks that binding before returning output.
 Herdr mutations use a separate request from the identity check, leaving a race if the server restarts and reuses the pane id between requests.
