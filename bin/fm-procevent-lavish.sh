@@ -83,8 +83,8 @@
 # the separate `answers` contract described here.
 # All three decode the same captured TOON prompts block, including tabular
 # and list representations. Decoding uses Node.js and the TOON library from the
-# lavish-axi installation on PATH. The answer commands warn on incomplete
-# capture and emit every complete choice they can recover.
+# lavish-axi installation on PATH. Incomplete captures exit 3 after emitting
+# any recovered output. An unreadable capture exits 1.
 #
 # It wraps ONLY the currently published interface, verified against 0.1.45:
 #   Usage: lavish-axi poll <html-file> [--agent-reply "..."]
@@ -426,7 +426,7 @@ decode_lavish_capture() {
   lavish=$(command -v lavish-axi) || lavish=''
   tail=$(capture_tail "$file")
   if command -v node >/dev/null 2>&1; then
-    node --no-global-search-paths "$SCRIPT_DIR/fm-procevent-lavish-decode.mjs" \
+    node --no-global-search-paths --experimental-import-meta-resolve "$SCRIPT_DIR/fm-procevent-lavish-decode.mjs" \
       "$lavish" "$file" "$tail" "$lifecycle" "$projection" && return
     printf '{"rows":[],"malformed":0,"error":"Lavish capture decoder failed"}\n'
   else
@@ -460,7 +460,8 @@ cmd_choice_rows() {
     }
     warn "incomplete Lavish prompt capture: $path\n" unless $capture->{complete};
     binmode STDOUT, ":encoding(UTF-8)" or die "cannot set UTF-8 output: $!\n";
-    exit 0 unless ($capture->{kind} // "") eq "prompts";
+    my $status = $capture->{complete} ? 0 : 3;
+    exit $status unless ($capture->{kind} // "") eq "prompts";
     my %seen;
     my @choices;
     for my $row (@{ $capture->{rows} }) {
@@ -531,6 +532,7 @@ cmd_choice_rows() {
         ? "$choice->{key}\t$choice->{answer}\t$choice->{label}\t$choice->{mode}\n"
         : "$choice->{key}\t$choice->{answer}\t$choice->{label}\n";
     }
+    exit $status;
   ' "$selection" "$file"
 }
 
@@ -631,6 +633,7 @@ cmd_read() {
       print "ANNOTATIONS: (none)\n";
     }
     print "END LAVISH RESULT ($presented of $want)\n";
+    exit($capture->{error} ? 1 : $capture->{complete} ? 0 : 3);
   ' "$lifecycle" "$session_ended"
 }
 

@@ -79,6 +79,21 @@ pass() {
   printf 'ok - %s\n' "$1"
 }
 
+fm_test_lavish_toon_module() {
+  if [ -n "${FM_TEST_LAVISH_TOON_MODULE:-}" ]; then
+    printf '%s\n' "$FM_TEST_LAVISH_TOON_MODULE"
+    return
+  fi
+  local lavish
+  lavish=$(command -v lavish-axi) || return 1
+  node --no-global-search-paths --experimental-import-meta-resolve --input-type=module - \
+    "$ROOT/bin/fm-procevent-lavish-codec.mjs" "$lavish" <<'JS'
+import { pathToFileURL } from 'node:url';
+const { resolveInstalledToon } = await import(pathToFileURL(process.argv[2]).href);
+console.log(resolveInstalledToon(process.argv[3]));
+JS
+}
+
 # --- self-cleaning temp root ------------------------------------------------
 #
 # fm_test_tmproot <prefix> echoes a fresh temp dir and registers it for removal

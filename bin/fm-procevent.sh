@@ -398,30 +398,30 @@ adapter_autohandle() {  # <adapter> <source-id> <result-file>
 # source, an adapter with no `answers` command, and a failure on either side all
 # leave the capture untouched and still announced, because this never
 # acknowledges anything (see the keyed-answer note in the header).
-feed_keyed_answers() {  # <adapter> <source-id> <result-file>
-  local adapter=$1 id=$2 result=$3 script origin seq rows
+feed_captured_choices() {  # <adapter> <source-id> <result-file> <answers|reconciles>
+  local adapter=$1 id=$2 result=$3 projection=$4 script origin seq rows status=0 intake_status=0
+  local -a intake
   script=$(adapter_script "$adapter")
   [ -f "$script" ] && [ ! -L "$script" ] || return 1
   origin=$("$SCRIPT_DIR/fm-captain-hold.sh" binding "$id" 2>/dev/null) || return 1
   [ -n "$origin" ] || return 1
   seq=$(fm_procevent_result_sequence "$result") || return 1
-  rows=$("$script" answers "$result" 2>/dev/null) || return 1
+  rows=$("$script" "$projection" "$result" 2>/dev/null) || status=$?
+  case "$adapter:$status" in
+    *:0) ;;
+    lavish:3) [ -n "$rows" ] || return 3 ;;
+    lavish:*) return 3 ;;
+    *) return 1 ;;
+  esac
+  case "$projection" in
+    answers) intake=(answers "$origin") ;;
+    reconciles) intake=(reconcile-requests --source-id "$id") ;;
+  esac
   printf '%s\n' "$rows" \
-    | "$SCRIPT_DIR/fm-captain-hold.sh" answers "$origin" \
-        --source "the captured result $id sequence $seq" >/dev/null 2>&1
-}
-
-feed_reconcile_requests() {  # <adapter> <source-id> <result-file>
-  local adapter=$1 id=$2 result=$3 script origin seq rows
-  script=$(adapter_script "$adapter")
-  [ -f "$script" ] && [ ! -L "$script" ] || return 1
-  origin=$("$SCRIPT_DIR/fm-captain-hold.sh" binding "$id" 2>/dev/null) || return 1
-  [ -n "$origin" ] || return 1
-  seq=$(fm_procevent_result_sequence "$result") || return 1
-  rows=$("$script" reconciles "$result" 2>/dev/null) || return 1
-  printf '%s\n' "$rows" \
-    | "$SCRIPT_DIR/fm-captain-hold.sh" reconcile-requests \
-        --source-id "$id" --source "the captured result $id sequence $seq" >/dev/null 2>&1
+    | "$SCRIPT_DIR/fm-captain-hold.sh" "${intake[@]}" \
+        --source "the captured result $id sequence $seq" >/dev/null 2>&1 || intake_status=1
+  [ "$status" -eq 0 ] || return "$status"
+  return "$intake_status"
 }
 
 read_adapter() {  # <source-id>
@@ -724,6 +724,7 @@ cmd_start_public() {
 cmd_start() {
   local id=${1-} adapter out rc claimed bound_rc published_capture=0 handled_capture=0 self_announcing=0
   local extension_owner=0 extension_load_state extension_sequence='' extension_request_id=''
+  local projection projection_failed=0
   fm_procevent_source_id_valid "$id" || die "source id must be path-safe: $id"
   require_runner_group
   fm_procevent_source_lock_acquire "$id" || die "cannot lock source: $id"
@@ -1019,13 +1020,14 @@ EOF
 
   # Independent of publication and acknowledgement, so it runs once per capture
   # for every adapter and cannot change what the handler receives.
-  if [ "$extension_owner" -eq 0 ] \
-    && feed_reconcile_requests "$adapter" "$id" "$durable"; then
-    printf 'reconciles-fed: %s\n' "$id"
-  fi
-  if [ "$extension_owner" -eq 0 ] \
-    && feed_keyed_answers "$adapter" "$id" "$durable"; then
-    printf 'answers-fed: %s\n' "$id"
+  if [ "$extension_owner" -eq 0 ]; then
+    for projection in reconciles answers; do
+      feed_captured_choices "$adapter" "$id" "$durable" "$projection"
+      case "$?" in
+        0) printf '%s-fed: %s\n' "$projection" "$id" ;;
+        3) projection_failed=1 ;;
+      esac
+    done
   fi
 
   # A self-announcing adapter's autohandle announces through its own durable
@@ -1076,6 +1078,10 @@ EOF
   if [ "$extension_owner" -eq 1 ]; then
     fm_procevent_claim_capture_reservation_remove_locked || true
     exec 6<&-
+  fi
+  if [ "$projection_failed" -ne 0 ] && [ "$handled_capture" -eq 0 ]; then
+    printf 'incomplete Lavish prompt capture: %s\n' "$durable" >&2
+    return 1
   fi
 }
 

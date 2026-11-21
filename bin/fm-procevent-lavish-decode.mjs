@@ -1,14 +1,6 @@
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-
-function resolveInstalledToon(lavish) {
-  const entry = realpathSync(lavish);
-  const sdk = join(dirname(entry), '../node_modules/axi-sdk-js/package.json');
-  const resolve = createRequire(existsSync(sdk) ? realpathSync(sdk) : entry).resolve;
-  return resolve('@toon-format/toon');
-}
+import { resolveInstalledToon } from './fm-procevent-lavish-codec.mjs';
 
 function recoverLegacyProse(line, fields, encode) {
   if (!/^  \S/.test(line)) return line;
@@ -35,7 +27,8 @@ function recoverLegacyProse(line, fields, encode) {
   const escapes = { n: '\n', t: '\t', r: '\r' };
   for (const [field, value] of tokens.entries()) {
     if (!['text', 'prompt'].includes(fields[field]) || value.startsWith('"')) continue;
-    if ((overflow > 0 && field === index) || value.includes('\\')) {
+    if ((overflow > 0 && field === index) || value.includes('\\') ||
+        (fields.length === 1 && value.includes(':'))) {
       tokens[field] = encode(value.replace(/\\(.)/g, (_, escaped) => escapes[escaped] ?? escaped));
     }
   }

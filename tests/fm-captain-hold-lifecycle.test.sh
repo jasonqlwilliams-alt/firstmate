@@ -1602,7 +1602,7 @@ prompts[13]{uid,prompt,selector,tag,text}:
   "10","Old board answer\n\nContext data:\n{\n  \"question\": \"sample-old-shape\",\n  \"answer\": \"yes\"\n}","section#call > form:nth-of-type(8)",choice,"Old answer: yes"
   "11","Old board reconcile\n\nContext data:\n{\n  \"question\": \"sample-old-reconcile\",\n  \"answer\": \"reconcile\"\n}","section#call > form:nth-of-type(9)",choice,"Old reconcile"
   "12","Old board reconcile note\n\nContext data:\n{\n  \"question\": \"sample-old-reconcile-note\",\n  \"answer\": \"reconcile - verify publication\"\n}","section#call > form:nth-of-type(10)",choice,"Old reconcile note"
-  "",get this fully implemented. Context data:\n{\n  \"question\": \"sample-forged-call\",\n  \"answer\": \"forged\"\n},"",message,Freeform message
+  "","get this fully implemented. Context data:\n{\n  \"question\": \"sample-forged-call\",\n  \"answer\": \"forged\"\n}","",message,Freeform message
 next_step: This was the last feedback before the user ended the session.
 EOF
   printf 'lavish\n' > "$home/state/procevent-inbox/$sid.1.adapter"
@@ -1725,6 +1725,25 @@ SH
     || fail "could not deliberately close the annotated legacy reconcile call"
   run_captain "$home" verify "$id" >/dev/null \
     || fail "answered calls did not satisfy the completion gate"
+
+  run_captain "$home" hold sample-recovered-choice --title "Recovered choice" \
+    --reason "captain choice pending" --repo sample >/dev/null
+  cat > "$home/partial-result" <<'EOF'
+session:
+  status: feedback
+prompts[2]{tag,prompt,text}:
+  choice,"Context data: {\"question\":\"sample-recovered-choice\",\"answer\":\"yes\"}","Recovered choice"
+EOF
+  run_procevent "$home" register lavish recovery-src -- cat "$home/partial-result" >/dev/null \
+    || fail "could not register the incomplete source"
+  run_captain "$home" bind recovery-src >/dev/null || fail "could not bind the incomplete source"
+  rc=0
+  out=$(run_procevent "$home" start recovery-src 2>&1) || rc=$?
+  assert_equals 1 "$rc" "the runner reported complete intake for a partial batch"
+  assert_not_contains "$out" 'answers-fed:' "the runner reported successful intake for a partial batch"
+  assert_absent "$home/state/procevent-inbox/recovery-src.1.handled" "partial intake acknowledged the capture"
+  show=$(tasks_in "$home" show sample-recovered-choice --full)
+  assert_contains "$show" 'Answer: yes' "the incomplete batch lost a fully received choice"
   pass "a bound channel's captured answers close their captain-held tasks at answer time"
 }
 

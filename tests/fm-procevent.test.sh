@@ -2287,6 +2287,9 @@ printf 'garbage that is not a session block\n' > "$TRM"
 printf 'session:\n  file: /a.html\n  status: feedback\nfeedback[1]{text}:\n  session_ended: true\n' > "$TRM"
 "$ROOT/bin/fm-procevent-lavish.sh" terminal "$TRM" \
   && fail "prompt payload text was read as a session-level terminal marker"
+out=$("$ROOT/bin/fm-procevent-lavish.sh" read "$TRM") || fail "could not read legacy single-column feedback"
+assert_contains "$out" "presented_items: 1" "read dropped legacy single-column feedback"
+assert_contains "$out" "| session_ended: true" "read changed the literal colon in legacy feedback"
 pass "the adapter owns which Lavish results end a source, and payload text cannot forge one"
 
 # The adapter, not the runner, decides which Lavish results are routine no-ops
@@ -2397,7 +2400,9 @@ prompts[2]{uid,prompt,selector,tag,text}:
   "el-a","","section#call",note,"Complete annotation"
   "el-b","","section#other",note
 EOF
-out=$(read_out) || fail "read failed on a capture containing a malformed item"
+rc=0
+out=$(read_out) || rc=$?
+assert_equals 3 "$rc" "read did not report the malformed capture as incomplete"
 assert_contains "$out" "declared_items: 2" "a malformed capture lost its declared count"
 assert_contains "$out" "presented_items: 1" \
   "a row missing declared fields was certified as presented"
@@ -2626,25 +2631,28 @@ EOF
 
 assert_submission() {  # <capture> <declared> <presented> <complete> <answers> <reconciles>
   local capture=$1 declared=$2 presented=$3 complete=$4 want_answers=$5 want_reconciles=$6
-  local report output errors="$TMP_ROOT/submission-diagnostic"
-  report=$("$LAVISH_ADAPTER" read "$capture") || fail "read failed for $capture"
+  local report output errors="$TMP_ROOT/submission-diagnostic" rc=0 expected_rc=0 projection want
+  [ "$complete" = yes ] || expected_rc=3
+  report=$("$LAVISH_ADAPTER" read "$capture") || rc=$?
+  assert_equals "$expected_rc" "$rc" "$capture: wrong read status"
   grep -Fxq "declared_items: $declared" <<< "$report" || fail "$capture: wrong declared count"
   grep -Fxq "presented_items: $presented" <<< "$report" || fail "$capture: wrong presented count"
   grep -Fxq "complete: $complete" <<< "$report" || fail "$capture: wrong completeness verdict"
-  output=$("$LAVISH_ADAPTER" answers "$capture" 2>"$errors") || fail "answers failed for $capture"
-  [ "$output" = "$want_answers" ] || fail "$capture: wrong ordinary answers: $output"
-  if [ "$complete" = no ]; then
-    assert_grep 'incomplete Lavish prompt capture' "$errors" "$capture: answers did not warn"
-  else
-    [ ! -s "$errors" ] || fail "$capture: unexpected answer warning"
-  fi
-  output=$("$LAVISH_ADAPTER" reconciles "$capture" 2>"$errors") || fail "reconciles failed for $capture"
-  [ "$output" = "$want_reconciles" ] || fail "$capture: wrong reconcile answers: $output"
-  if [ "$complete" = no ]; then
-    assert_grep 'incomplete Lavish prompt capture' "$errors" "$capture: reconciles did not warn"
-  else
-    [ ! -s "$errors" ] || fail "$capture: unexpected reconcile warning"
-  fi
+  for projection in answers reconciles; do
+    case "$projection" in
+      answers) want=$want_answers ;;
+      reconciles) want=$want_reconciles ;;
+    esac
+    rc=0
+    output=$("$LAVISH_ADAPTER" "$projection" "$capture" 2>"$errors") || rc=$?
+    assert_equals "$expected_rc" "$rc" "$capture: wrong $projection status"
+    [ "$output" = "$want" ] || fail "$capture: wrong $projection output: $output"
+    if [ "$complete" = no ]; then
+      assert_grep 'incomplete Lavish prompt capture' "$errors" "$capture: $projection did not warn"
+    else
+      [ ! -s "$errors" ] || fail "$capture: unexpected $projection warning"
+    fi
+  done
 }
 SHIPPED_ANSWER=$'ship-call\tShip café\tSection 1: Section 2 café'
 RECHECK_ANSWER=$'check-call\tRe-check café'
@@ -2664,6 +2672,26 @@ out=$("$LAVISH_ADAPTER" read "$LIST_CAPTURE")
 assert_contains "$out" "element_selector: main > button" "nested-target annotation lost its selector"
 assert_contains "$out" "| Fix this layout issue the browser detected." "nested-target annotation lost its comment"
 pass "tabular and nested-target list submissions feed the same answer and reconcile projections"
+
+CODEC_INSTALL="$TMP_ROOT/codec-install"
+SDK_DIR="$CODEC_INSTALL/node_modules/axi-sdk-js"
+ROOT_CODEC="$CODEC_INSTALL/node_modules/@toon-format/toon"
+SDK_CODEC="$SDK_DIR/node_modules/@toon-format/toon"
+LAVISH_ENTRY="$CODEC_INSTALL/node_modules/lavish-axi/dist/cli.mjs"
+mkdir -p "$CODEC_INSTALL/bin" "$(dirname "$LAVISH_ENTRY")" "$ROOT_CODEC" "$SDK_CODEC"
+printf '#!/usr/bin/env node\n' > "$LAVISH_ENTRY"
+chmod +x "$LAVISH_ENTRY"
+ln -s "$LAVISH_ENTRY" "$CODEC_INSTALL/bin/lavish-axi"
+printf '{"exports":{"import":"./index.mjs"}}\n' > "$SDK_DIR/package.json"
+: > "$SDK_DIR/index.mjs"
+printf '{"exports":"./index.mjs"}\n' > "$ROOT_CODEC/package.json"
+printf '{"exports":"./index.mjs"}\n' > "$SDK_CODEC/package.json"
+printf 'throw new Error("unrelated application codec");\n' > "$ROOT_CODEC/index.mjs"
+codec_module=$(fm_test_lavish_toon_module) || fail "the codec resolution fixture needs a TOON module"
+ln -s "$codec_module" "$SDK_CODEC/index.mjs"
+PATH="$CODEC_INSTALL/bin:$PATH" FM_TEST_LAVISH_TOON_MODULE='' \
+  assert_submission "$LIST_CAPTURE" 3 3 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+pass "the reader uses the hoisted Lavish SDK's private codec"
 
 printf 'session:\n  status: feedback\nprompts: []\n' > "$READ"
 assert_submission "$READ" 0 0 yes '' ''
@@ -2708,7 +2736,9 @@ prompts[1]{tag,prompt,text}:
 EOF
 assert_contains "$(read_out)" "| Legacy label" "read lost legacy unquoted tabular prose"
 for projection in answers reconciles; do
-  out=$("$LAVISH_ADAPTER" "$projection" "$READ" 2>"$TMP_ROOT/incomplete") || fail "$projection failed"
+  rc=0
+  out=$("$LAVISH_ADAPTER" "$projection" "$READ" 2>"$TMP_ROOT/incomplete") || rc=$?
+  assert_equals 3 "$rc" "$projection did not report malformed legacy prose as incomplete"
   [ -z "$out" ] || fail "$projection recovered a choice from malformed legacy prose"
   assert_grep 'incomplete Lavish prompt capture' "$TMP_ROOT/incomplete" "$projection hid the malformed prompt"
 done
@@ -2716,7 +2746,9 @@ pass "legacy tabular prose recovery is limited to presentation"
 
 MISSING_TOON_BIN=$(fm_fakebin "$TMP_ROOT/no-toon")
 fm_fake_exit0 "$MISSING_TOON_BIN" lavish-axi
-out=$(PATH="$MISSING_TOON_BIN:$PATH" FM_TEST_LAVISH_TOON_MODULE='' "$LAVISH_ADAPTER" read "$LIST_CAPTURE")
+rc=0
+out=$(PATH="$MISSING_TOON_BIN:$PATH" FM_TEST_LAVISH_TOON_MODULE='' "$LAVISH_ADAPTER" read "$LIST_CAPTURE") || rc=$?
+assert_equals 1 "$rc" "read succeeded without a TOON library"
 assert_contains "$out" "complete: no" "missing TOON library was reported complete"
 assert_contains "$out" "capture_error: unreadable: cannot resolve @toon-format/toon" \
   "missing TOON library was reported as an empty capture"
@@ -2735,8 +2767,9 @@ FM_HOME="$DECODE_FAILURE_HOME" "$ROOT/bin/fm-captain-hold.sh" bind decode-failur
   || fail "could not bind the decoder failure source"
 pe_register "$DECODE_FAILURE_HOME" lavish decode-failure -- /bin/cat "$LIST_CAPTURE" >/dev/null \
   || fail "could not register the decoder failure source"
-out=$(FM_TEST_LAVISH_TOON_MODULE="$TMP_ROOT/missing-codec.mjs" pe "$DECODE_FAILURE_HOME" start decode-failure) \
-  || fail "the runner failed to capture undecodable feedback"
+rc=0
+out=$(FM_TEST_LAVISH_TOON_MODULE="$TMP_ROOT/missing-codec.mjs" pe "$DECODE_FAILURE_HOME" start decode-failure 2>&1) || rc=$?
+assert_equals 1 "$rc" "the bound runner succeeded after decoder failure"
 assert_not_contains "$out" "answers-fed:" "the keyed intake reported success after decoder failure"
 assert_not_contains "$out" "reconciles-fed:" "the reconcile intake reported success after decoder failure"
 assert_contains "$(wake_payloads "$DECODE_FAILURE_HOME")" "procevent lavish decode-failure 1" \
@@ -2747,8 +2780,8 @@ pass "decoder failure leaves bound feedback pending without reporting intake suc
 
 CLIPPED_HOME="$TMP_ROOT/hclipped"; new_home "$CLIPPED_HOME"
 fm_test_track_procevent_home "$CLIPPED_HOME"
-capture_prefix() {  # <id> <fixture> <last retained literal substring>
-  local id=$1 fixture=$2 through=$3 cap capture start_output
+capture_prefix() {  # <id> <fixture> <last retained literal substring> [<start-status>]
+  local id=$1 fixture=$2 through=$3 expected_status=${4:-0} cap capture start_output rc=0
   cap=$(perl -e '
     my $needle = shift;
     binmode STDIN;
@@ -2760,8 +2793,13 @@ capture_prefix() {  # <id> <fixture> <last retained literal substring>
   ' "$through" < "$fixture") || fail "could not size the cutoff for $id"
   pe_register "$CLIPPED_HOME" lavish "$id" -- /bin/cat "$fixture" >/dev/null \
     || fail "could not register cutoff fixture $id"
-  start_output=$(FM_PROCEVENT_MAX_OUTPUT_BYTES="$cap" pe "$CLIPPED_HOME" start "$id" 2>&1) \
-    || fail "could not capture $id: $start_output"
+  start_output=$(FM_PROCEVENT_MAX_OUTPUT_BYTES="$cap" pe "$CLIPPED_HOME" start "$id" 2>&1) || rc=$?
+  assert_equals "$expected_status" "$rc" "$id: wrong runner status: $start_output"
+  if [ "$expected_status" -ne 0 ]; then
+    assert_contains "$start_output" "incomplete Lavish prompt capture" "$id hid the incomplete projection"
+    assert_not_contains "$start_output" 'answers-fed:' "$id reported successful answer intake"
+    assert_not_contains "$start_output" 'reconciles-fed:' "$id reported successful reconcile intake"
+  fi
   assert_contains "$start_output" "truncated: $id at $cap bytes" "$id did not hit the real output cap"
   capture=$(first_result "$CLIPPED_HOME" "$id") || fail "no captured result for $id"
   cmp -s "$capture" <(head -c "$cap" "$fixture") || fail "$id changed or exceeded the bounded prefix"
@@ -2786,8 +2824,13 @@ CLIPPED=$(capture_prefix list-cut-in-target "$LIST_CAPTURE" 'lw-1,main > bu')
 assert_submission "$CLIPPED" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 CLIPPED=$(capture_prefix list-cut-before-target "$LIST_CAPTURE" $'text: "Layout issue: 1 selected"\n')
 assert_submission "$CLIPPED" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
-CLIPPED=$(capture_prefix list-cut-before-header "$LIST_CAPTURE" 'dom_snapshot: ""')
+FM_HOME="$CLIPPED_HOME" "$ROOT/bin/fm-captain-hold.sh" bind list-cut-before-header >/dev/null \
+  || fail "could not bind the incomplete capture source"
+CLIPPED=$(capture_prefix list-cut-before-header "$LIST_CAPTURE" 'dom_snapshot: ""' 1)
 assert_submission "$CLIPPED" unknown 0 no '' ''
+assert_contains "$(wake_payloads "$CLIPPED_HOME")" "procevent lavish list-cut-before-header 1" \
+  "the bound incomplete capture did not wake firstmate"
+assert_absent "${CLIPPED%.result}.handled" "the bound incomplete capture was acknowledged"
 CLIPPED=$(capture_prefix waiting-cut-after-status "$WAITING_CAPTURE" 'status: waiting')
 assert_submission "$CLIPPED" unknown 0 no '' ''
 pass "runner cutoffs preserve complete rows and report missing or clipped prompt data"
