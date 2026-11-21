@@ -1107,8 +1107,8 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
 # An optional expected-home binds Herdr secondmate recovery to the pane's
 # structural home identity (bin/backends/herdr.sh); a confirmed foreign pane
 # means `missing`, while an unavailable identity means `unreadable`.
-# Without an explicit home, Herdr also verifies the recorded task identity, if
-# any. An ad hoc endpoint outside the task inventory keeps the process verdict.
+# Without an explicit home, Herdr uses the binding supplied by the caller.
+# fm_backend_herdr_task_identity_state owns binding selection for this path.
 fm_backend_agent_state() {  # <backend> <target> [<expected-home>]
   local backend=$1 target=$2
   fm_backend_source "$backend" || { printf 'unverified'; return 0; }

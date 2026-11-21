@@ -4,11 +4,10 @@
 #   <target> may be an exact task id, a legacy fm-<id> task label resolved
 #   through this home's state/<id>.meta, or an explicit backend target.
 # A recorded Herdr pane must pass fm-backend.sh's live identity check.
-# A selector whose meta records remote_host= is a remote secondmate: its pane
-# lives on that host, so the capture routes over fm-on.sh to the host-local
-# capture (fm-remote-secondmate-control.sh), clamped to that command's
-# 100-line cap. An unreachable host or unreadable endpoint fails loudly naming
-# the host; the local backend adapters are never asked to read a remote target.
+# Select a remote secondmate by task id or label. Its recorded remote_host=
+# routes the read over fm-on.sh to fm-remote-secondmate-control.sh, clamped to
+# that command's 100-line cap. An unreachable host or unreadable endpoint
+# fails loudly naming the host.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

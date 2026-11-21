@@ -625,6 +625,7 @@ ok - a restored layout keeps pane ids but changes the worker terminal identity
 
 The guarded lab closes and recreates a named session to recycle exact pane ids, then separately checks normal layout restoration after a guarded stop.
 The test uses inert processes and verifies the running default session at teardown.
+The portable fixture in [`tests/fm-daemon.test.sh`](../../tests/fm-daemon.test.sh#L2621) exercises supervisor delivery when a stale worker record claims the same pane id, then checks that a literal `fm-peek.sh` selector for that id refuses access through the worker's binding.
 
 ### Lab-context session refusal and durable tripwire breaches
 

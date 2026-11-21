@@ -291,10 +291,11 @@ No Herdr-specific copy of that protocol exists.
 Stopping and restarting a named Herdr server can restore workspace, tab, pane, and label ids, but the underlying harness processes and live agent registrations do not survive.
 Ids can also be reassigned after a host restart, so a recorded id alone does not establish endpoint ownership.
 `fm_backend_herdr_task_identity_state` in [`bin/fm-backend.sh`](../bin/fm-backend.sh) owns the live binding used for worker liveness and terminal access.
+The adapter applies that binding when the caller supplies a selected task record or a terminal identity from the current spawn.
 It checks the recorded worker terminal even after the shell changes directory into the worktree.
 Secondmates launch directly in their home, so their binding uses the canonical pane creation directory, including for [remote endpoint operations](remote-secondmates.md#normal-operation).
 An older worker record with a still-present pane and no recorded terminal id is unreadable and retained.
-Recorded endpoints require a matching binding for capture, key and text delivery, and terminal close.
+Capture, key and text delivery, and terminal close require a match when a binding is supplied.
 Capture rechecks that binding before returning output.
 Herdr mutations use a separate request from the identity check, leaving a race if the server restarts and reuses the pane id between requests.
 An ordinary steer can still record its instruction in the task inbox when the doorbell cannot reach the terminal.
@@ -349,6 +350,8 @@ There is still one watcher process; the event reader is a bounded child of that 
 The away daemon supports tmux and Herdr supervisor panes only.
 It refuses Zellij, Orca, and cmux as supervisor backends rather than applying the wrong transport.
 For Herdr, target existence, native state, capture, composer state, and verified submit all route through the shared backend dispatcher and the explicit named-session CLI owner.
+The daemon addresses the supervisor pane directly, so it can deliver escalations even when a stale worker record names the same pane id.
+The [runtime backend verification](verification/runtime-backends.md#worker-terminal-identity) links to the regression for supervisor delivery and task-selected access at the same pane id.
 The pane-independent max-defer alert is configured in [`wedge-alarm.md`](wedge-alarm.md).
 
 Harnesses with native tracked background execution can run the daemon in their terminal.

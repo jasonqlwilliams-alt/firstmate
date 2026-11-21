@@ -2452,27 +2452,10 @@ fm_backend_herdr_pane_home_state() {  # <session> <pane> <expected-home>
   case "$state" in missing) printf 'unreadable' ;; *) printf '%s' "$state" ;; esac
 }
 
-# fm_backend_herdr_agent_state: recovery-grade state for the same session-start
-# sweep as the tmux classifier. It reuses the husk classifier rather than
-# creating a second Herdr state machine: a structurally gone pane is `missing`,
-# a confirmed agent-less pane is `dead` - whether nothing is registered or a
-# registration lingers over a shell-only pane (stale-agent, issue #4115) - a
-# registered agent with a live process is `alive`, and an unexpected or failed
-# API read is `unreadable`.
-#
-# One exception to that last case, and it is deliberately made HERE rather than
-# in the husk classifier: a read can fail because the recorded session's server
-# is not running at all, which is authoritative absence for every pane in that
-# session rather than an ambiguous answer about one of them. Treating it as
-# `unreadable` stranded tasks with no sanctioned recovery (issue #4091), so a
-# positively stopped server reads `missing` instead.
-#
-# Only this recovery-grade read is widened. fm_backend_herdr_pane_agent_state
-# and the presence classifier under it stay strict, so husk detection, duplicate
-# prevention, rollback, and teardown - which can DESTROY things - keep refusing
-# on exactly the reads they refused on before. A server that is running, or
-# whose state cannot itself be read, still yields `unreadable` here too: absence
-# is claimed only from positive evidence of it.
+# fm_backend_agent_state in bin/fm-backend.sh owns the recovery-grade contract.
+# A positively stopped server authorizes endpoint recreation (issue #4091).
+# Keep that proof here so the husk and presence classifiers still require
+# their own positive evidence before allowing destructive cleanup.
 fm_backend_herdr_agent_state() {  # <target> [<expected-home>]
   local target=$1 state identity
   fm_backend_herdr_parse_target "$target" || { printf 'unreadable'; return 0; }

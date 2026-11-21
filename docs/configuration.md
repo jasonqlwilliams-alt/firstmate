@@ -239,9 +239,9 @@ A zellij task additionally records `zellij_session=`, `zellij_tab_id=`, and `zel
 An Orca task additionally records `orca_worktree_id=` and `terminal=`, with `window=fm-<id>` kept as the shared firstmate alias.
 A cmux task additionally records `cmux_workspace_id=` and `cmux_surface_id=`.
 `fm-peek.sh` and `fm-send.sh` share the task lookup in `fm-backend.sh`, while `fm-crew-state.sh` takes a task id directly.
-A selector containing `:` is passed through as an explicit backend endpoint escape hatch.
+A selector containing `:` specifies a backend endpoint directly, with an exact lookup against recorded endpoints.
 Otherwise an exact task id matching `state/<id>.meta` wins before the legacy `fm-<id>` label fallback, so task ids that themselves start with `fm-` route to their own metadata instead of being stripped.
-A metadata-routed selector returns the recorded backend target (`terminal=` for Orca, otherwise `window=`), and a matching explicit target can select the same metadata and its [Herdr endpoint binding](herdr-backend.md#restart-and-liveness-behavior).
+A task selector uses the recorded backend target (`terminal=` for Orca, otherwise `window=`), and either form uses the [Herdr endpoint binding](herdr-backend.md#restart-and-liveness-behavior) when it selects a Herdr record.
 Use a task selector for secondmate routing and its message marker.
 These five sentences are the single owner of the task-selector vocabulary; backend guides and other documents point here instead of restating the resolution order.
 `fm-teardown.sh <id>` takes a task id directly and validates the complete metadata-only endpoint identity before any runtime dispatch or cleanup mutation.
