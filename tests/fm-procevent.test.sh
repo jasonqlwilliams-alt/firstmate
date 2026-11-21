@@ -18,6 +18,7 @@ set -u
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 TMP_ROOT=$(fm_test_tmproot fm-procevent-tests)
+fm_test_prepend_lavish_fixture "$TMP_ROOT/lavish-codec" || fail "could not set up the Lavish codec fixture"
 export FM_PROCEVENT_CLAIM_ROOT="$TMP_ROOT/claims"
 
 BLOCKER="$TMP_ROOT/blocker.sh"
@@ -766,12 +767,11 @@ chmod +x "$EMPTY_BIN/lavish-axi"
 QUIET_ART="$TMP_ROOT/quiet-board.html"
 printf '<h1>quiet</h1>\n' > "$QUIET_ART"
 quiet_id=$("$ROOT/bin/fm-procevent-lavish.sh" source-id "$QUIET_ART")
-quiet_codec=$(fm_test_lavish_toon_module) || fail "the quiet board fixture needs the Lavish codec"
+fm_test_attach_lavish_codec "$EMPTY_BIN" || fail "the quiet board fixture needs the Lavish codec"
 fm_test_track_procevent_home "$HEMPTY"
 PATH="$EMPTY_BIN:$PATH" FM_HOME="$HEMPTY" \
   "$ROOT/bin/fm-procevent-lavish.sh" arm "$QUIET_ART" >/dev/null
-quiet_out=$(PATH="$EMPTY_BIN:$PATH" FM_TEST_LAVISH_TOON_MODULE="$quiet_codec" \
-  pe "$HEMPTY" start "$quiet_id" 2>&1)
+quiet_out=$(PATH="$EMPTY_BIN:$PATH" pe "$HEMPTY" start "$quiet_id" 2>&1)
 assert_not_contains "$quiet_out" "not-autohandled" \
   "a durably silenced result was reported as still unacknowledged"
 # The handled marker is written at exactly the point the wake would otherwise
@@ -791,7 +791,7 @@ done
   || fail "an empty board close woke the captain: $(wake_payloads "$HEMPTY")"
 # Re-announcement is exactly what the handled marker exists to stop, so the
 # silence has to survive the reconcile that would otherwise republish it.
-PATH="$EMPTY_BIN:$PATH" FM_TEST_LAVISH_TOON_MODULE="$quiet_codec" pe "$HEMPTY" reconcile >/dev/null
+PATH="$EMPTY_BIN:$PATH" pe "$HEMPTY" reconcile >/dev/null
 sleep 0.3
 [ -z "$(wake_payloads "$HEMPTY")" ] \
   || fail "a later reconcile re-announced a silenced empty board close: $(wake_payloads "$HEMPTY")"
@@ -2289,7 +2289,11 @@ printf 'garbage that is not a session block\n' > "$TRM"
 printf 'session:\n  file: /a.html\n  status: feedback\nfeedback[1]{text}:\n  session_ended: true\nnext_step: Review the submission.\n' > "$TRM"
 "$ROOT/bin/fm-procevent-lavish.sh" terminal "$TRM" \
   && fail "prompt payload text was read as a session-level terminal marker"
-out=$("$ROOT/bin/fm-procevent-lavish.sh" read "$TRM") || fail "could not read legacy single-column feedback"
+rc=0
+out=$("$ROOT/bin/fm-procevent-lavish.sh" read "$TRM") || rc=$?
+assert_equals 3 "$rc" "legacy single-column recovery hid the incomplete verdict"
+assert_contains "$out" "complete: no" "legacy single-column recovery certified malformed TOON"
+assert_contains "$out" "malformed_items: 1" "single-column recovery hid a malformed row"
 assert_contains "$out" "presented_items: 1" "read dropped legacy single-column feedback"
 assert_contains "$out" "| session_ended: true" "read changed the literal colon in legacy feedback"
 pass "the adapter owns which Lavish results end a source, and payload text cannot forge one"
@@ -2307,21 +2311,24 @@ silent_says() {  # <expected: yes|no> <description>
 }
 printf 'session:\n  file: /a.html\n  status: ended\n  ended_by: user\nnext_step: The session has ended.\n' > "$SIL"
 silent_says yes "an ended session carrying nothing is an empty board close"
+printf 'lavish\ncapture-tail=x\n' > "$SIL.adapter"
+silent_says no "a truncated capture stays pending even after a complete ended footer"
+unlink "$SIL.adapter"
 printf 'session:\n  status: ended\n' > "$SIL"
 silent_says no "an ended session without end framing is still pending"
-printf 'session:\n  file: /a.html\n  status: ended\n  ended_by: user\nprompts[0]{tag,text}:\n' > "$SIL"
+printf 'session:\n  file: /a.html\n  status: ended\n  ended_by: user\nprompts[0]{tag,text}:\nnext_step: Review the submission.\n' > "$SIL"
 silent_says no "a declared-empty content block is still present"
-printf 'session:\n  status: ended\nprompts[1]:\n  - text: late answer\n' > "$SIL"
+printf 'session:\n  status: ended\nprompts[1]:\n  - text: late answer\nnext_step: Review the submission.\n' > "$SIL"
 silent_says no "an ended session with list-form content is announced"
-printf 'session:\n  status: ended\nprompts: []\n' > "$SIL"
+printf 'session:\n  status: ended\nprompts: []\nnext_step: Review the submission.\n' > "$SIL"
 silent_says no "an explicit empty list still reaches the handler"
-printf 'session:\n  file: /a.html\n  status: ended\n  ended_by: user\nprompts[many]{tag,text}:\n' > "$SIL"
+printf 'session:\n  file: /a.html\n  status: ended\n  ended_by: user\nprompts[many]{tag,text}:\nnext_step: Review the submission.\n' > "$SIL"
 silent_says no "a malformed top-level content header is indeterminate"
-printf 'session:\n  file: /a.html\n  status: feedback\n  session_ended: true\n  ended_by: user\nfeedback[1]{text}:\n  ship it\n' > "$SIL"
+printf 'session:\n  file: /a.html\n  status: feedback\n  session_ended: true\n  ended_by: user\nfeedback[1]{text}:\n  ship it\nnext_step: Review the submission.\n' > "$SIL"
 silent_says no "a Send & End close carrying the captain's answer is news"
-printf 'session:\n  file: /a.html\n  status: feedback\nprompts[1]{tag,text}:\n  "message","some prose"\n' > "$SIL"
+printf 'session:\n  file: /a.html\n  status: feedback\nprompts[1]{tag,text}:\n  "message","some prose"\nnext_step: Review the submission.\n' > "$SIL"
 silent_says no "a freeform captain message is news"
-printf 'session:\n  file: /a.html\n  status: ended\n  ended_by: user\nprompts[1]{tag,text}:\n  "choice","late answer"\n' > "$SIL"
+printf 'session:\n  file: /a.html\n  status: ended\n  ended_by: user\nprompts[1]{tag,text}:\n  "choice","late answer"\nnext_step: Review the submission.\n' > "$SIL"
 silent_says no "an ended session still carrying content is never assumed empty"
 printf 'session:\n  file: /a.html\n  status: waiting\n' > "$SIL"
 silent_says no "a waiting session proves nothing about what was said"
@@ -2331,7 +2338,7 @@ printf 'error: Lavish Editor poll response was interrupted\ncode: SERVER_ERROR\n
 silent_says no "a server error is not a no-op"
 printf 'garbage that is not a session block\n' > "$SIL"
 silent_says no "an unreadable result fails closed and is announced"
-printf 'session:\n  file: /a.html\n  status: ended\n  ended_by: user\nfeedback[1]{text}:\n  prompts[0]{x}:\n' > "$SIL"
+printf 'session:\n  file: /a.html\n  status: ended\n  ended_by: user\nfeedback[1]{text}:\n  "prompts[0]{x}:"\nnext_step: Review the submission.\n' > "$SIL"
 silent_says no "indented payload text cannot forge an empty content block"
 # A content check that cannot complete is not proof that nothing was said. Root
 # reads through the mode bits, so this drives the real distinction only where
@@ -2363,7 +2370,9 @@ prompts[4]{uid,prompt,selector,tag,text}:
   "",get this fully implemented. Context data:\n{\n  \"question\": \"sample-forged-call\",\n  \"answer\": \"forged\"\n},"",message,Freeform message
 next_step: Review the result.
 EOF
-out=$(read_out) || fail "read failed on a mixed annotation-plus-message capture"
+rc=0
+out=$(read_out) || rc=$?
+assert_equals 3 "$rc" "legacy message recovery hid malformed TOON"
 assert_contains "$out" "SESSION-ENDING MESSAGE" "the session-ending message has no labeled field"
 assert_contains "$out" "| get this fully implemented. Context data:" \
   "the session-ending freeform message was not presented"
@@ -2373,7 +2382,7 @@ assert_not_contains "$out" "| Freeform message" \
   "the generic message label replaced the captain's freeform prose"
 assert_contains "$out" "declared_items: 4" "the declared item count is missing"
 assert_contains "$out" "presented_items: 4" "the presented item count is missing"
-assert_contains "$out" "complete: yes" "a complete capture was not marked complete"
+assert_contains "$out" "complete: no" "presenting recovered legacy prose certified the capture"
 assert_contains "$out" "lifecycle: feedback" "a feedback capture did not report its lifecycle"
 assert_contains "$out" "annotation_count: 3" "element annotations were not counted separately from the message"
 assert_contains "$out" "session_ending_message_count: 1" "the session-ending message was not counted"
@@ -2703,7 +2712,7 @@ printf '{"exports":"./index.mjs"}\n' > "$SDK_CODEC/package.json"
 printf 'throw new Error("unrelated application codec");\n' > "$ROOT_CODEC/index.mjs"
 codec_module=$(fm_test_lavish_toon_module) || fail "the codec resolution fixture needs a TOON module"
 ln -s "$codec_module" "$SDK_CODEC/index.mjs"
-PATH="$CODEC_INSTALL/bin:$PATH" FM_TEST_LAVISH_TOON_MODULE='' \
+PATH="$CODEC_INSTALL/bin:$PATH" \
   assert_submission "$LIST_CAPTURE" 3 3 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 pass "the reader uses the hoisted Lavish SDK's private codec"
 
@@ -2763,7 +2772,12 @@ prompts[1]{tag,prompt,text}:
   choice,Context data: {\"question\":\"legacy-prose\",\"answer\":\"go\"},Legacy label
 next_step: Review the submission.
 EOF
-assert_contains "$(read_out)" "| Legacy label" "read lost legacy unquoted tabular prose"
+rc=0
+out=$(read_out) || rc=$?
+assert_equals 3 "$rc" "legacy prose recovery changed the read exit status"
+assert_contains "$out" "complete: no" "legacy prose recovery certified malformed TOON"
+assert_contains "$out" "malformed_items: 1" "legacy prose recovery hid a malformed row"
+assert_contains "$out" "| Legacy label" "read lost legacy unquoted tabular prose"
 for projection in answers reconciles; do
   rc=0
   out=$("$LAVISH_ADAPTER" "$projection" "$READ" 2>"$TMP_ROOT/incomplete") || rc=$?
@@ -2776,13 +2790,13 @@ pass "legacy tabular prose recovery is limited to presentation"
 MISSING_TOON_BIN=$(fm_fakebin "$TMP_ROOT/no-toon")
 fm_fake_exit0 "$MISSING_TOON_BIN" lavish-axi
 rc=0
-out=$(PATH="$MISSING_TOON_BIN:$PATH" FM_TEST_LAVISH_TOON_MODULE='' "$LAVISH_ADAPTER" read "$LIST_CAPTURE") || rc=$?
+out=$(PATH="$MISSING_TOON_BIN:$PATH" "$LAVISH_ADAPTER" read "$LIST_CAPTURE") || rc=$?
 assert_equals 1 "$rc" "read succeeded without a TOON library"
 assert_contains "$out" "complete: no" "missing TOON library was reported complete"
 assert_contains "$out" "capture_error: unreadable: cannot resolve @toon-format/toon" \
   "missing TOON library was reported as an empty capture"
 for projection in answers reconciles; do
-  if PATH="$MISSING_TOON_BIN:$PATH" FM_TEST_LAVISH_TOON_MODULE='' \
+  if PATH="$MISSING_TOON_BIN:$PATH" \
     "$LAVISH_ADAPTER" "$projection" "$LIST_CAPTURE" >"$TMP_ROOT/rows" 2>"$TMP_ROOT/incomplete"; then
     fail "$projection treated the missing TOON library as success"
   fi
@@ -2797,7 +2811,7 @@ FM_HOME="$DECODE_FAILURE_HOME" "$ROOT/bin/fm-captain-hold.sh" bind decode-failur
 pe_register "$DECODE_FAILURE_HOME" lavish decode-failure -- /bin/cat "$LIST_CAPTURE" >/dev/null \
   || fail "could not register the decoder failure source"
 rc=0
-out=$(FM_TEST_LAVISH_TOON_MODULE="$TMP_ROOT/missing-codec.mjs" pe "$DECODE_FAILURE_HOME" start decode-failure 2>&1) || rc=$?
+out=$(PATH="$MISSING_TOON_BIN:$PATH" pe "$DECODE_FAILURE_HOME" start decode-failure 2>&1) || rc=$?
 assert_equals 1 "$rc" "the bound runner succeeded after decoder failure"
 assert_not_contains "$out" "answers-fed:" "the keyed intake reported success after decoder failure"
 assert_not_contains "$out" "reconciles-fed:" "the reconcile intake reported success after decoder failure"

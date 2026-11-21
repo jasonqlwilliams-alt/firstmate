@@ -378,7 +378,7 @@ cmd_silent() {
   local file=${1-}
   [ -n "$file" ] || usage
   [ -f "$file" ] && [ ! -L "$file" ] || die "result file does not exist: $file"
-  [ "$(cmd_classify "$file")" = ended ] && [ -z "$(capture_tail "$file")" ] || return 1
+  [ "$(cmd_classify "$file")" = ended ] || return 1
   decode_lavish_capture "$file" ended silent | perl -MJSON::PP -e '
     local $/;
     my $capture = decode_json(<STDIN>);

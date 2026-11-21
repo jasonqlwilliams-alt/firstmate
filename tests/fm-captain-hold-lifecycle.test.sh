@@ -18,6 +18,7 @@ TASKS_AXI_BIN=$(command -v tasks-axi || true)
 
 command -v jq >/dev/null 2>&1 || { echo "skip: jq not found"; exit 0; }
 command -v tasks-axi >/dev/null 2>&1 || { echo "skip: tasks-axi not found"; exit 0; }
+fm_test_prepend_lavish_fixture "$TMP_ROOT/lavish-codec" || fail "could not set up the Lavish codec fixture"
 
 make_home() {  # <name>
   local home="$TMP_ROOT/$1" fakebin
@@ -1571,9 +1572,6 @@ test_bound_channel_answers_close_at_answer_time() {
 
   artifact="$home/data/$id/review.html"
   printf '<h1>Sample eval proposal</h1>\n' > "$artifact"
-  if [ -n "${FM_TEST_LAVISH_TOON_MODULE:-}" ]; then
-    fm_fake_exit0 "$home/fakebin" lavish-axi
-  fi
   sid=$(run_lavish "$home" source-id "$artifact") || fail "could not derive the review source id"
   run_captain "$home" bind "$sid" >/dev/null \
     || fail "could not bind the review source to the keyed-answer intake"

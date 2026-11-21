@@ -80,6 +80,7 @@ function capturePrompts(toon, raw, tail, lifecycle, projection, result) {
   }
 
   const header = /^(prompts|feedback)\[(\d+)\](\{[^}]+\})?: *$/;
+  let seen = 0;
   for (const [index, line] of lines.entries()) {
     const match = header.exec(line);
     if (match && (match[1] === 'prompts' || match[3])) {
@@ -90,13 +91,17 @@ function capturePrompts(toon, raw, tail, lifecycle, projection, result) {
       const fields = match[3]?.slice(1, -1).split(',');
       const single = `prompts[1]${match[3] ?? ''}:`;
       let item = [];
-      let seen = 0;
       const record = () => {
         if (!item.length) return;
-        if (fields && projection === 'read') item[0] = recoverLegacyProse(item[0], fields, toon.encode);
-        const row = seen++ < count ? decodePrompt(toon.decode, single, item) : null;
-        if (row) result.rows.push(row);
-        else result.malformed++;
+        const withinCount = ++seen <= count;
+        const row = withinCount ? decodePrompt(toon.decode, single, item) : null;
+        if (!row) result.malformed++;
+        let displayed = row;
+        if (withinCount && fields && projection === 'read') {
+          const recovered = recoverLegacyProse(item[0], fields, toon.encode);
+          if (recovered !== item[0]) displayed = decodePrompt(toon.decode, single, [recovered]) ?? row;
+        }
+        if (displayed) result.rows.push(displayed);
         item = [];
       };
 
@@ -136,21 +141,19 @@ function capturePrompts(toon, raw, tail, lifecycle, projection, result) {
   if (result.declared === null && !result.truncated &&
       ['ended', 'waiting', 'missing'].includes(lifecycle) &&
       ![...lines, partial].some(line => /^(?:prompts|feedback)/.test(line))) result.declared = 0;
-  result.complete = framed && result.rows.length === result.declared && !result.malformed;
+  result.complete = framed && seen === result.declared && !result.malformed;
 }
 
 const [lavish, path, tail, lifecycle, projection] = process.argv.slice(2);
 const result = { kind: null, declared: null, rows: [], malformed: 0, complete: false, truncated: !!tail };
-const testModule = process.env.FM_TEST_LAVISH_TOON_MODULE;
 let toon;
 try {
-  const modulePath = testModule || resolveInstalledToon(lavish);
+  const modulePath = resolveInstalledToon(lavish);
   const codec = await import(pathToFileURL(modulePath).href);
   if (typeof codec.decode !== 'function' || typeof codec.encode !== 'function') throw new Error('Missing TOON codec');
   toon = codec;
 } catch {
-  result.error = testModule ? 'cannot load @toon-format/toon from FM_TEST_LAVISH_TOON_MODULE'
-    : 'cannot resolve @toon-format/toon from lavish-axi on PATH';
+  result.error = 'cannot resolve @toon-format/toon from lavish-axi on PATH';
 }
 if (toon) capturePrompts(toon, readFileSync(path, 'utf8'), tail, lifecycle, projection, result);
 process.stdout.write(JSON.stringify(result));

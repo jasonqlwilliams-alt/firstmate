@@ -80,8 +80,8 @@ pass() {
 }
 
 fm_test_lavish_toon_module() {
-  if [ -n "${FM_TEST_LAVISH_TOON_MODULE:-}" ]; then
-    printf '%s\n' "$FM_TEST_LAVISH_TOON_MODULE"
+  if [ -n "${FM_TEST_LAVISH_CODEC_PATH:-}" ]; then
+    printf '%s\n' "$FM_TEST_LAVISH_CODEC_PATH"
     return
   fi
   local lavish
@@ -92,6 +92,25 @@ import { pathToFileURL } from 'node:url';
 const { resolveInstalledToon } = await import(pathToFileURL(process.argv[2]).href);
 console.log(resolveInstalledToon(process.argv[3]));
 JS
+}
+
+fm_test_attach_lavish_codec() {
+  local modules="$1/node_modules" codec
+  codec=$(fm_test_lavish_toon_module) || return 1
+  [ -f "$codec" ] || return 1
+  mkdir -p "$modules/axi-sdk-js" "$modules/@toon-format/toon" &&
+    printf '{"exports":"./index.mjs"}\n' > "$modules/axi-sdk-js/package.json" &&
+    : > "$modules/axi-sdk-js/index.mjs" &&
+    printf '{"exports":"./index.mjs"}\n' > "$modules/@toon-format/toon/package.json" &&
+    ln -s "$codec" "$modules/@toon-format/toon/index.mjs"
+}
+
+fm_test_prepend_lavish_fixture() {
+  [ -n "${FM_TEST_LAVISH_CODEC_PATH:-}" ] || return 0
+  local fakebin
+  fakebin=$(fm_fakebin "$1") && fm_fake_exit0 "$fakebin" lavish-axi &&
+    fm_test_attach_lavish_codec "$fakebin" || return 1
+  export PATH="$fakebin:$PATH"
 }
 
 # --- self-cleaning temp root ------------------------------------------------
