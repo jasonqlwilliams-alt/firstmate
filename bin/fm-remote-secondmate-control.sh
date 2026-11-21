@@ -528,8 +528,7 @@ cmd_update() {
   local id=$1 update_out root_status
   validate_id "$id"
   validate_home "$id"
-  if ! update_out=$(FM_HOME="$FM_ROOT" FM_ROOT_OVERRIDE="$FM_ROOT" \
-    FM_STATE_OVERRIDE="$FM_ROOT/state" "$SCRIPT_DIR/fm-update.sh"); then
+  if ! update_out=$(FM_HOME="$FM_ROOT" FM_ROOT_OVERRIDE="$FM_ROOT" "$SCRIPT_DIR/fm-update.sh"); then
     [ -z "$update_out" ] || printf '%s\n' "$update_out" >&2
     die "remote code root update failed"
   fi
@@ -553,7 +552,7 @@ cmd_update() {
 cmd_update_check() {
   validate_id "$1"
   validate_home "$1"
-  fm_backend_herdr_warn_prebinding_workers "$FM_ROOT/state" firstmate
+  fm_backend_herdr_warn_prebinding_workers "${FM_STATE_OVERRIDE:-$FM_ROOT/state}" firstmate
   fm_backend_herdr_warn_prebinding_workers "$TARGET_HOME/state" 'remote home'
 }
 

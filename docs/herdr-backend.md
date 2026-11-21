@@ -228,27 +228,34 @@ The focused regression and token-free real-lab entry point are recorded in [runt
 ### Manual recovery for pre-binding workers
 
 Only an explicit Firstmate update whose updater already includes the check warns about pre-binding records that point to existing panes.
-The remote preflight reports pane claims visible before it sends the update job, and warnings first detected within that job can reach the caller after the fast-forward.
+Remote preflight takes a snapshot of the remote code root and secondmate home before submitting the update job.
+If a worker appears after preflight and is first detected during the update job, its warning reaches the caller after any fast-forward because the transport buffers output until the job finishes.
 Older updaters, bootstrap, spawn-time sync, and remote startup sync can advance a home without this warning.
 
 A local ship or scout record created before terminal binding may lack `herdr_terminal_id=`, leaving its pane unreadable to normal worker commands.
 Recover it on the host that owns the pane using the following checks.
 
 1. Locate the affected home's `state/<task>.meta`, or the exact state directory used by the update if it supplied `FM_STATE_OVERRIDE`.
-   Confirm `backend=herdr`, the record belongs to the intended task, and it has no `herdr_terminal_id=` line.
-   Stop for a secondmate record, a remote route, or any existing terminal binding.
-2. Take the session and pane from `herdr_session=` and `herdr_pane_id=`, and confirm that they agree with `window=`.
+   Confirm that it belongs to the intended local Herdr ship or scout and has no `herdr_terminal_id=` line.
+   Stop for a secondmate record, any `remote_host=` line, or any existing terminal binding.
+2. In Bash, source `bin/fm-backend.sh` from the updated checkout and require `fm_backend_validate_task_endpoint "$meta" "$task"` to succeed for the selected file and exact task ID, with `FM_BACKEND_VALIDATED_BACKEND` equal to `herdr`.
+   A record that lacks an exact `endpoint_task_id=` binding fails this check and is ineligible for this procedure.
+   Keep `FM_BACKEND_VALIDATED_TARGET` as the target and take the session and pane from the validated `herdr_session=` and `herdr_pane_id=` fields.
    Query the exact pane using `herdr pane get "$pane" --session "$session"`.
-   Confirm the returned pane ID and a nonempty `terminal_id`, and verify that `foreground_cwd` resolves to the same directory as the record's `worktree=`.
+   Confirm the returned pane ID and verify that `foreground_cwd` resolves to the same directory as the record's `worktree=`.
+   Load the adapter with `fm_backend_source herdr` and check the returned terminal ID with `fm_backend_herdr_terminal_id_valid "$terminal_id"`.
    The pane's creation `cwd` is insufficient for this check.
-3. Verify that Herdr reports a running agent matching the record's `harness=`.
-   Herdr can retain a registration after an agent exits, so inspect the foreground processes with `herdr pane process-info --pane "$pane" --session "$session"` if the reported agent may be stale.
-   For an exited agent, use `herdr pane read "$pane" --source recent --lines 200 --session "$session"` and require scrollback showing this task's own launch line and its exit, with no replacement agent.
+3. For a live agent, require both `herdr agent get "$pane" --session "$session"` confirming the record's `harness=` and positive evidence from the pane's process tree that the matching agent process is still running there.
+   Use `herdr pane process-info --pane "$pane" --session "$session"` and the host process table to inspect the foreground process group and the pane shell's descendants.
+   For an exited agent, establish from those processes that the agent has exited and that there is no replacement agent, then require this task's own launch line in `herdr pane read "$pane" --source recent --lines 200 --session "$session"`.
    A generic launch line or a matching pane label does not prove ownership.
-4. Recheck the pane, foreground directory, agent evidence, and terminal ID immediately before editing.
-   Leave the record untouched when any check is missing, mismatched, ambiguous, or has changed.
-   Once all checks pass, add exactly one `herdr_terminal_id=<verified terminal id>` line to a copy of the unchanged record in the same directory, preserve its permissions, and rename the copy over the original as one atomic replacement.
-   Check the result by running `bin/fm-crew-state.sh <task>` with the affected home's `FM_HOME` and intended state directory selected.
+4. With the affected home and state directory selected, source `bin/fm-wake-lib.sh`, get the lock path with `fm_meta_lock_path "$meta"`, and acquire it with `fm_lock_try_acquire "$lock"`.
+   Hold this lock in the same shell through the final reread and append.
+   Reread the regular record under the lock and repeat the endpoint, pane, foreground directory, agent evidence, and terminal ID checks.
+   Leave the record untouched if the record or evidence changed, if the lock or any proof is unavailable, or if any evidence is mismatched or ambiguous.
+   Once all checks pass and the record still ends with a newline and has no `herdr_terminal_id=` line, append exactly one line with `printf 'herdr_terminal_id=%s\n' "$terminal_id" >> "$meta"`.
+   Release the lock with `fm_lock_release "$lock"` after the append or on abandoning the edit.
+5. Run `FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_herdr_task_identity_state "$target"` and require it to print `match`.
 
 ## Current transport behavior
 

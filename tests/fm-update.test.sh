@@ -328,7 +328,9 @@ EOF
   assert_contains "$out" "remote secondmate sm1: updated on remote-mac" "remote job started before the preflight warning reached stderr"
   [ "$(grep -c 'worker record remote-worker points to existing pane' "$w/fake/update.stderr")" -eq 1 ] ||
     fail "remote update repeated the preflight warning"
-  assert_contains "$(cat "$w/fake/update.stderr")" "worker record new-worker points to existing pane test:w1:p-new" "the successful update swallowed a warning first detected during the update"
+  assert_contains "$(cat "$w/fake/update.stderr")" \
+    "(reported after the update job and any fast-forward): warning: remote home: pre-binding Herdr worker record new-worker points to existing pane test:w1:p-new" \
+    "the successful update did not report that the new warning arrived after the fast-forward"
   assert_contains "$out" "restart-secondmates: fm-sm1" "remote diagnostic displaced the update verdict"
   pass "Remote preflight warnings are surfaced before the update job without duplicating diagnostics"
 
@@ -336,7 +338,9 @@ EOF
   out+=$'\n'$(cat "$w/fake/update.stderr")
   assert_contains "$out" "remote secondmate sm1: skipped on remote-mac: error: remote secondmate home sync skipped: dirty working tree" \
     "the remote warning obscured the refusal"
-  assert_contains "$out" "worker record new-worker points to existing pane test:w1:p-new" "the failed update swallowed a new warning"
+  assert_contains "$out" \
+    "(reported after the update job and any fast-forward): warning: remote home: pre-binding Herdr worker record new-worker points to existing pane test:w1:p-new" \
+    "the failed update did not identify the warning first detected during the job"
   [ "$(printf '%s\n' "$out" | grep -c 'worker record remote-worker points to existing pane')" -eq 1 ] ||
     fail "failed remote update repeated the preflight warning"
   assert_contains "$out" "restart-secondmates: none" "failed remote update triggered a restart"
@@ -418,17 +422,32 @@ SH
     fail "update warning changed the worker records"
   pass "Pre-binding Herdr warnings precede both local fast-forwards and leave records intact"
 
+  local override_state="$w/fake/code-root-state"
+  mkdir -p "$override_state"
+  cp "$w/home/state/main-live.meta" "$override_state/main-live.meta"
   : > "$w/fake/herdr-calls"
+  out=$("${update_env[@]}" FM_HOME="$w/sm1" FM_STATE_OVERRIDE="$override_state" \
+    "$ROOT/bin/fm-remote-secondmate-control.sh" update-check sm1 2>&1)
+  assert_contains "$out" "warning: firstmate: pre-binding Herdr worker record main-live points to existing pane" \
+    "host-local remote preflight ignored the caller's state override"
+  [ "$(cat "$w/fake/herdr-calls")" = $'w1:p-main-live\nw1:p-home-live' ] || fail "remote preflight probed an unexpected pane"
+
+  : > "$w/fake/herdr-calls"
+  bump_origin "$w" readme
+  out=$("${update_env[@]}" FM_HOME="$w/sm1" FM_STATE_OVERRIDE="$override_state" FM_TEST_SECOND_MATE_LABEL="remote home" \
+    "$ROOT/bin/fm-remote-secondmate-control.sh" update sm1 2> "$w/fake/update.stderr")
+  warnings=$(cat "$w/fake/update.stderr")
+  assert_contains "$warnings" "warning: firstmate: pre-binding Herdr worker record main-live points to existing pane update-herdr:w1:p-main-live" "remote update ignored the caller's state override"
+  assert_contains "$warnings" "warning: remote home: pre-binding Herdr worker record home-live points to existing pane update-herdr:w1:p-home-live" "remote update missed the host-local worker record"
+  assert_contains "$out" 'synced: ' "remote warning blocked the fast-forward"
+  [ "$(cat "$w/fake/herdr-calls")" = $'w1:p-main-live\nw1:p-home-live' ] || fail "remote update probed an unexpected pane"
+
   mkdir -p "$w/main/state"
   cp "$w/home/state/main-live.meta" "$w/main/state/main-live.meta"
   bump_origin "$w" readme
   out=$("${update_env[@]}" FM_HOME="$w/sm1" FM_TEST_SECOND_MATE_LABEL="remote home" \
     "$ROOT/bin/fm-remote-secondmate-control.sh" update sm1 2> "$w/fake/update.stderr")
-  warnings=$(cat "$w/fake/update.stderr")
-  assert_contains "$warnings" "warning: firstmate: pre-binding Herdr worker record main-live points to existing pane update-herdr:w1:p-main-live" "remote update missed the code-root worker record"
-  assert_contains "$warnings" "warning: remote home: pre-binding Herdr worker record home-live points to existing pane update-herdr:w1:p-home-live" "remote update missed the host-local worker record"
-  assert_contains "$out" 'synced: ' "remote warning blocked the fast-forward"
-  [ "$(cat "$w/fake/herdr-calls")" = $'w1:p-main-live\nw1:p-home-live' ] || fail "remote update probed an unexpected pane"
+  assert_contains "$out" 'synced: ' "remote update without a state override failed"
 
   printf 'uncommitted local edit\n' >> "$w/main/AGENTS.md"
   if out=$("${update_env[@]}" FM_HOME="$w/sm1" \
