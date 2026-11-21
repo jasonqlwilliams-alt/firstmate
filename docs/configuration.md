@@ -959,6 +959,7 @@ A long-polling external process is registered as a *source* through its adapter,
 `bin/fm-procevent.sh` owns the generic contract; built-in adapters retain their tracked `bin/fm-procevent-<adapter>.sh` commands, while an explicitly bound external adapter routes through the trusted host contract above.
 `bin/fm-procevent-lavish.sh` is the first built-in adapter and wraps only the currently published `lavish-axi poll` interface.
 Its answer and presentation commands share a decoder for tabular and list-form TOON captures, including mixed batches with nested targets.
+The bound answer and reconcile feeds can use a verified prompt block even if a later field was clipped.
 See the adapter's `--help` for how it reports missing and partial prompt blocks.
 That adapter, and only that adapter, retries the one exact transient response a cut-short listener returns while its marks remain available (`error: Lavish Editor poll response was interrupted` with `code: SERVER_ERROR`), up to 12 times with poll starts at least 5 seconds apart, so an internal retry never reaches the runner as a captured result.
 This start-to-start governor is a no-op after a normally blocking poll but caps an immediately returning poll under the shipped defaults independently of the owner lease and registration launch pacing.

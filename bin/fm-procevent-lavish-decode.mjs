@@ -79,14 +79,16 @@ function capturePrompts(toon, raw, tail, lifecycle, projection, result) {
     partial = '';
   }
 
-  const header = /^(prompts|feedback)\[(\d+)\](\{[^}]+\})?: *$/;
+  const header = /^(?:(prompts|feedback)\[(\d+)\](\{[^}]+\})?:|prompts: \[\]) *$/;
+  const topLevelField = /^[A-Za-z_][\w.-]*(?:\[\d+\](?:\{[^}]+\})?)?:/;
   let seen = 0;
+  let terminated = false;
   for (const [index, line] of lines.entries()) {
     const match = header.exec(line);
-    if (match && (match[1] === 'prompts' || match[3])) {
-      const count = Number(match[2]);
+    if (match && (match[1] !== 'feedback' || match[3])) {
+      const count = Number(match[2] ?? 0);
       if (!Number.isSafeInteger(count)) break;
-      result.kind = match[1];
+      result.kind = match[1] ?? 'prompts';
       result.declared = count;
       const fields = match[3]?.slice(1, -1).split(',');
       const single = `prompts[1]${match[3] ?? ''}:`;
@@ -112,6 +114,7 @@ function capturePrompts(toon, raw, tail, lifecycle, projection, result) {
         if (!body.startsWith(' ')) {
           record();
           outerBoundary = true;
+          terminated = topLevelField.test(body);
           break;
         }
         if (!fields && /^  -(?: |$)/.test(body)) record();
@@ -119,6 +122,7 @@ function capturePrompts(toon, raw, tail, lifecycle, projection, result) {
         if (fields) record();
       }
       if (outerBoundary) break;
+      terminated = result.truncated && topLevelField.test(partial);
       if (fields) {
         if (!result.truncated && /(?:^  |,)"(?:[^"\\]|\\.)*"$/.test(partial)) {
           item = [partial];
@@ -132,16 +136,13 @@ function capturePrompts(toon, raw, tail, lifecycle, projection, result) {
       }
       break;
     }
-    if (/^prompts: \[\] *$/.test(line)) {
-      result.kind = 'prompts';
-      result.declared = 0;
-      break;
-    }
   }
   if (result.declared === null && !result.truncated &&
       ['ended', 'waiting', 'missing'].includes(lifecycle) &&
       ![...lines, partial].some(line => /^(?:prompts|feedback)/.test(line))) result.declared = 0;
-  result.complete = framed && seen === result.declared && !result.malformed;
+  const rowsComplete = seen === result.declared && !result.malformed;
+  result.prompts_complete = result.kind !== null && terminated && rowsComplete;
+  result.complete = framed && (result.kind === null ? rowsComplete : result.prompts_complete);
 }
 
 const [lavish, path, tail, lifecycle, projection] = process.argv.slice(2);

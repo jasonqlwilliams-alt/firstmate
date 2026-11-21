@@ -2628,12 +2628,12 @@ session:
 dom_snapshot: ""
 prompts[3]:
   - uid: a
-    prompt: "Context data: {example}\n\nContext data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"ship-call\",\"selection\":\"\",\"note\":\"Ship café Context data: {example}\"}"
+    prompt: "Typed note:\nContext data: {example}\n\nContext data:\n{\n  \"schema\":\"fm-bearings-answer.v1\",\"question\":\"ship-call\",\"selection\":\"\",\"note\":\"Ship café Context data: {example}\"\n}"
     selector: ""
     tag: choice
     text: "SHIP_LABEL"
   - uid: b
-    prompt: "Context data: {example}\n\nContext data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"check-call\",\"selection\":\"reconcile\",\"note\":\"Re-check café Context data: {example}\"}"
+    prompt: "Typed note:\nContext data: {example}\n\nContext data:\n{\n  \"schema\":\"fm-bearings-answer.v1\",\"question\":\"check-call\",\"selection\":\"reconcile\",\"note\":\"Re-check café Context data: {example}\"\n}"
     selector: ""
     tag: choice
     text: Re-check host
@@ -2652,7 +2652,7 @@ prompts[3]:
 next_step: Review the submission.
 EOF
 
-assert_submission() {  # <capture> <declared> <presented> <complete> <answers> <reconciles>
+assert_submission() {  # <capture> <declared> <presented> <complete> <answers> <reconciles> [<choice-status>]
   local capture=$1 declared=$2 presented=$3 complete=$4 want_answers=$5 want_reconciles=$6
   local report output errors="$TMP_ROOT/submission-diagnostic" rc=0 expected_rc=0 projection want
   [ "$complete" = yes ] || expected_rc=3
@@ -2661,6 +2661,7 @@ assert_submission() {  # <capture> <declared> <presented> <complete> <answers> <
   grep -Fxq "declared_items: $declared" <<< "$report" || fail "$capture: wrong declared count"
   grep -Fxq "presented_items: $presented" <<< "$report" || fail "$capture: wrong presented count"
   grep -Fxq "complete: $complete" <<< "$report" || fail "$capture: wrong completeness verdict"
+  expected_rc=${7:-$expected_rc}
   for projection in answers reconciles; do
     case "$projection" in
       answers) want=$want_answers ;;
@@ -2856,13 +2857,20 @@ assert_contains "$("$LAVISH_ADAPTER" read "$CLIPPED")" "capture_truncated: yes" 
 CLIPPED=$(capture_prefix table-cut-in-field "$TABLE_CAPTURE" 'choice,Re-che')
 assert_submission "$CLIPPED" 2 1 no '' ''
 CLIPPED=$(capture_prefix table-cut-after-block "$TABLE_CAPTURE" '  Fixture artifact')
-assert_submission "$CLIPPED" 2 2 no '' ''
+assert_submission "$CLIPPED" 2 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
+CLIPPED=$(capture_prefix table-cut-in-field-after-block "$TABLE_CAPTURE" 'artifact_failures[1]{detail}:')
+assert_submission "$CLIPPED" 2 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
 CLIPPED=$(capture_prefix list-cut-after-choice "$LIST_CAPTURE" 'text: Re-check host')
 assert_submission "$CLIPPED" 3 2 no '' ''
 grep -Fxq 'capture-tail=nssx' "${CLIPPED%.result}.adapter" \
   || fail "the capture sidecar did not retain exactly the four framing bytes"
 CLIPPED=$(capture_prefix list-cut-after-attachments "$LIST_CAPTURE" '32,32,screenshot.png')
 assert_submission "$CLIPPED" 3 3 no '' ''
+LATE_SNAPSHOT="$TMP_ROOT/list-late-snapshot.toon"
+sed '/^dom_snapshot:/d' "$LIST_CAPTURE" > "$LATE_SNAPSHOT"
+printf 'dom_snapshot: "A trailing snapshot with more content"\n' >> "$LATE_SNAPSHOT"
+CLIPPED=$(capture_prefix list-cut-in-snapshot "$LATE_SNAPSHOT" 'dom_snapshot: "A trailing snapshot')
+assert_submission "$CLIPPED" 3 3 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER" 0
 CLIPPED=$(capture_prefix list-cut-in-attachment "$LIST_CAPTURE" '32,32,screenshot.pn')
 assert_submission "$CLIPPED" 3 2 no '' ''
 CLIPPED=$(capture_prefix list-cut-in-target "$LIST_CAPTURE" 'lw-1,main > bu')

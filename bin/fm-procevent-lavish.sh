@@ -83,8 +83,10 @@
 # the separate `answers` contract described here.
 # All three decode the same captured TOON prompts block, including tabular
 # and list representations. Decoding uses Node.js and the TOON library from the
-# lavish-axi installation on PATH. Incomplete captures exit 3. Only read
-# presents recovered rows from an incomplete capture. An unreadable capture exits 1.
+# lavish-axi installation on PATH. Read exits 3 for an incomplete capture and
+# presents recovered rows. Choice commands exit 3 unless the prompt block is
+# complete or the capture contains a complete no-feedback response. An
+# unreadable capture exits 1.
 #
 # It wraps ONLY the currently published interface, verified against 0.1.45:
 #   Usage: lavish-axi poll <html-file> [--agent-reply "..."]
@@ -428,10 +430,12 @@ cmd_choice_rows() {
       warn "unreadable and incomplete Lavish prompt capture: $path ($capture->{error})\n";
       exit 1;
     }
-    unless ($capture->{complete}) {
+    unless ($capture->{complete} || $capture->{prompts_complete}) {
       warn "incomplete Lavish prompt capture: $path\n";
       exit 3;
     }
+    warn "incomplete Lavish prompt capture: $path (prompt block complete)\n"
+      unless $capture->{complete};
     binmode STDOUT, ":encoding(UTF-8)" or die "cannot set UTF-8 output: $!\n";
     exit 0 unless ($capture->{kind} // "") eq "prompts";
     my %seen;
@@ -440,7 +444,9 @@ cmd_choice_rows() {
       my %f = %$row;
       next unless defined $f{tag} && $f{tag} eq "choice";
       my $prompt = $f{prompt};
-      next unless defined $prompt && $prompt =~ /\A(?:.*\n)?Context data:\s*(\{.*\})\s*\z/s;
+      next unless defined $prompt;
+      my $start = rindex($prompt, "\nContext data:") + 1;
+      next unless substr($prompt, $start) =~ /\AContext data:\s*(\{.*\})\s*\z/s;
       my $ctx = $1;
       my $data = eval { JSON::PP->new->decode($ctx) };
       next unless ref($data) eq "HASH";

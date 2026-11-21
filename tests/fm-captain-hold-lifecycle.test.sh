@@ -2257,7 +2257,7 @@ test_legacy_identities_keep_working() {
 # firstmate to look, and the recorded answer - because each of those was intact
 # on its own while the chain as a whole delivered nothing.
 test_board_answer_reaches_the_keyed_answer_intake() {
-  local home sid stub out queue show
+  local home sid stub cap out queue show
   home=$(make_home board-channel)
   sid=lavish-b0a4d0000000f1e2
   fm_test_track_procevent_home "$home" "$home/procevent-claims"
@@ -2265,6 +2265,9 @@ test_board_answer_reaches_the_keyed_answer_intake() {
   run_captain "$home" hold sample-board-call --title "Choose the sample board route" \
     --reason "captain board route choice pending" --repo sample >/dev/null \
     || fail "could not register the board call"
+  run_captain "$home" hold sample-board-reconcile --title "Re-check the sample route" \
+    --reason "captain board route check pending" --repo sample >/dev/null \
+    || fail "could not register the reconcile call"
 
   # One published Lavish poll response carrying the captain's structured answer,
   # in the shape the adapter's own reader parses: a declared field order, an
@@ -2276,9 +2279,11 @@ cat <<'OUT'
 session:
   status: feedback
   session_ended: false
-prompts[1]{tag,text,prompt}:
+prompts[2]{tag,text,prompt}:
   "choice","Take the north route","Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"sample-board-call\",\"selection\":\"north\",\"note\":\"\"}"
+  "choice","Re-check the sample route","Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"sample-board-reconcile\",\"selection\":\"reconcile\",\"note\":\"check the map\"}"
 next_step: Review the submission.
+dom_snapshot: "A trailing snapshot with more content"
 OUT
 SH
   chmod +x "$stub"
@@ -2288,11 +2293,17 @@ SH
   run_captain "$home" bind "$sid" >/dev/null \
     || fail "could not bind the board source to the keyed-answer intake"
 
-  out=$(run_procevent "$home" start "$sid" 2>&1) \
+  cap=$("$stub" | sed '/^dom_snapshot:/s/.*/dom_snapshot: "A trailing/' | wc -c)
+  cap=$((cap))
+  out=$(FM_PROCEVENT_MAX_OUTPUT_BYTES="$cap" run_procevent "$home" start "$sid" 2>&1) \
     || fail "the board source runner did not complete: $out"
+  assert_contains "$out" "truncated: $sid at $cap bytes" \
+    "the board capture did not hit the output cap: $out"
   assert_contains "$out" "$sid.1.result" "the board answer was never durably captured: $out"
   assert_contains "$out" "answers-fed: $sid" \
     "the captured board answer never reached the keyed-answer intake: $out"
+  assert_contains "$out" "reconciles-fed: $sid" \
+    "the captured reconcile choice never reached intake: $out"
 
   queue=$(cat "$home/state/.wake-queue" 2>/dev/null || true)
   assert_contains "$queue" "check: procevent lavish $sid 1" \
@@ -2303,7 +2314,10 @@ SH
   assert_contains "$show" "north" "the board answer lost the captain's selection"
   assert_contains "$show" "the captured result $sid sequence 1" \
     "the recorded answer did not name the board result that carried it"
-  pass "a board answer reaches the keyed-answer intake and wakes firstmate"
+  out=$(run_captain "$home" reconcile list)
+  assert_contains "$out" "sample-board-reconcile" "the clipped capture lost the reconcile request"
+  assert_contains "$out" "captain note: check the map" "the reconcile request lost the captain's note"
+  pass "a complete board prompt block reaches both intakes and wakes firstmate"
 }
 
 # The intake is channel-agnostic, so chat must reach it the same way a captured
