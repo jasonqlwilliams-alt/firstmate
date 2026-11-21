@@ -275,7 +275,7 @@ codex_picker() {  # the live picker's rows (codex-rs/tui/src/update_prompt.rs, C
 }
 case "${1:-} ${2:-}" in
   'status --json') printf '%s\n' '{"client":{"protocol":20,"version":"test"},"server":{"running":true,"protocol":20,"version":"test"}}' ;;
-  'pane get') printf '%s\n' '{"result":{"pane":{"pane_id":"p1"}}}' ;;
+  'pane get') printf '%s\n' '{"result":{"pane":{"pane_id":"p1","terminal_id":"term-codex"}}}' ;;
   'agent get') printf '%s\n' '{"result":{"agent":{"agent_status":"idle"}}}' ;;
   'pane process-info')
     if [ "$(cat "$D/command")" = codex ]; then
@@ -577,6 +577,7 @@ herdr_session=session
 herdr_workspace_id=w1
 herdr_tab_id=t1
 herdr_pane_id=p1
+herdr_terminal_id=term-codex
 META
     make_herdr_stub "$dir"
     alive_as "$dir" codex

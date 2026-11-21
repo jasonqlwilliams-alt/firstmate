@@ -686,6 +686,7 @@ stale_window_is_busy() {  # <window> <state>
   harness=$(task_window_harness "$win" "$state")
   task=$(window_to_task "$win" "$state")
   label="fm-$task"
+  local FM_BACKEND_HERDR_ENDPOINT_META="$state/$task.meta"
   tail40=$(fm_backend_capture "$backend" "$win" 40 "$label" 2>/dev/null) || return 2
   verdict=$(fm_busy_classify "$backend" "$win" "$harness" "$task" "$state" "$tail40")
   [ "${verdict%% *}" = busy ]

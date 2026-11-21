@@ -1793,6 +1793,7 @@ test_herdr_relaunch_recreates_missing_endpoint_without_confusing_worker_pane_for
     echo "herdr_workspace_id=w1"
     echo "herdr_tab_id=w1:t2"
     echo "herdr_pane_id=w1:p2"
+    echo "herdr_terminal_id=term-old"
   } > "$dir/home/state/rl-hmiss.meta"
   TASK_TMPS+=("/tmp/fm-rl-hmiss")
   cat > "$dir/fakebin/herdr" <<'SH'
@@ -1830,7 +1831,7 @@ case "$cmd" in
       exit 0
     fi
     if [ "$pane" = "w2:p3" ] && [ -e "$D/herdr-created" ]; then
-      printf '{"result":{"pane":{"pane_id":"w2:p3","tab_id":"w2:t3","workspace_id":"w2","foreground_cwd":"%s"}}}\n' "$WT_DIR"
+      printf '{"result":{"pane":{"pane_id":"w2:p3","tab_id":"w2:t3","workspace_id":"w2","terminal_id":"term-new","foreground_cwd":"%s"}}}\n' "$WT_DIR"
       exit 0
     fi
     printf '{"error":{"code":"pane_not_found","message":"pane target %s not found"}}\n' "$pane"
@@ -1862,7 +1863,7 @@ case "$cmd" in
     exit 0 ;;
   "tab create")
     : > "$D/herdr-created"
-    printf '{"result":{"tab":{"tab_id":"w2:t3"},"root_pane":{"pane_id":"w2:p3"}}}\n'
+    printf '{"result":{"tab":{"tab_id":"w2:t3"},"root_pane":{"pane_id":"w2:p3","terminal_id":"term-new"}}}\n'
     exit 0 ;;
   "pane list")
     printf '{"result":{"panes":[{"pane_id":"w2:p1","tab_id":"w2:t1"},{"pane_id":"w2:p3","tab_id":"w2:t3"}]}}\n'
@@ -1904,6 +1905,8 @@ SH
     || fail "missing-endpoint Herdr relaunch did not bind launcher workspace w2"
   [ "$(meta_field "$dir" rl-hmiss herdr_pane_id)" = "w2:p3" ] \
     || fail "missing-endpoint Herdr relaunch did not bind recreated pane w2:p3"
+  [ "$(meta_field "$dir" rl-hmiss herdr_terminal_id)" = term-new ] \
+    || fail "missing-endpoint Herdr relaunch did not publish the replacement terminal identity"
   [ "$(meta_field "$dir" rl-hmiss worktree)" = "$dir/wt" ] \
     || fail "missing-endpoint Herdr relaunch replaced the recorded worktree"
 

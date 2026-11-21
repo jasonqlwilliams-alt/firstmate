@@ -7,6 +7,8 @@
 #   target. fm-send refuses unresolved guesses rather than falling back to a
 #   tmux window search, because a "successful" send to the wrong endpoint is
 #   worse than a loud failure.
+# Recorded Herdr targets use fm-backend.sh's live identity check before
+# terminal access. A durable inbox send can still enqueue without a ring.
 # Special keys instead of text: fm-send.sh <target> --key Enter
 # Key support is backend-specific: tmux/herdr support Escape, Enter, and C-c;
 # Orca currently supports Enter and C-c only, and rejects Escape.
@@ -433,6 +435,9 @@ fm_send_resolve_target() {  # <raw-target>
 RAW_TARGET=$1
 fm_send_resolve_target "$RAW_TARGET" || exit 1
 T=$RESOLVED_TARGET
+if [ "$TARGET_BACKEND" = herdr ] && [ -n "$TARGET_META" ]; then
+  FM_BACKEND_HERDR_ENDPOINT_META=$TARGET_META
+fi
 shift
 
 # Supervision lease guard: a steer is overlap territory between the two Pi

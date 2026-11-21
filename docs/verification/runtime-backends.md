@@ -609,6 +609,26 @@ The CLI matrix was checked directly:
 All destructive verification used `bin/fm-herdr-lab.sh` with a non-default `fm-lab-` name and a byte-identical default-session tripwire.
 No ambient `herdr server stop` command is a supported test operation.
 
+### Worker terminal identity
+
+Measured 2026-11-20 with Herdr 0.9.5 (protocol 22).
+The recorded field is also present in the [Herdr 0.7.1 pane schema](https://github.com/herdrdev/herdr/blob/v0.7.1/src/api/schema/panes.rs#L330) used by the tab creation response.
+
+```text
+bin/fm-test-run.sh tests/fm-worker-herdr-identity-e2e.test.sh
+Herdr worker identity lab version: 0.9.5
+ok - recycled worker, secondmate and personal panes are missing to recorded workers and untouched by terminal actions
+ok - matching worker liveness and actions survive a changed foreground cwd
+ok - host-side remote capture, key and send refuse the recycled endpoint by home identity
+ok - a restored layout keeps pane ids but changes the worker terminal identity
+```
+
+The guarded lab closes and recreates a named session to recycle exact pane ids, then separately checks normal layout restoration after a guarded stop.
+The test uses inert processes and verifies the running default session at teardown.
+The portable fixture in [`tests/fm-daemon.test.sh`](../../tests/fm-daemon.test.sh#L2621) exercises supervisor delivery when a stale worker record claims the same pane id, then checks that a literal `fm-peek.sh` selector for that id refuses access through the worker's binding.
+The fixture in [`tests/fm-backup-helm.test.sh`](../../tests/fm-backup-helm.test.sh#L474) exercises arming and completing a Herdr handover at a supervisor pane claimed by a dead worker's record.
+The fixture in [`tests/fm-secondmate-harness.test.sh`](../../tests/fm-secondmate-harness.test.sh#L467) checks that a fresh local secondmate can launch at a recycled pane id while the old worker record is still present.
+
 ### Lab-context session refusal and durable tripwire breaches
 
 Measured 2026-09-21 on Linux 6.18.33.2-microsoft-standard-WSL2 with Herdr 0.9.1 (protocol 22), the guarantee behind `fm_backend_herdr_lab_context` and `bin/fm-herdr-lab-lib.sh`.
@@ -733,14 +753,15 @@ HERDR_LAB_HELPER=bin/fm-herdr-lab.sh \
 
 Observed guarantee: a pre-existing captain-owned workspace with a seed-shaped tab was adopted for routing but its tab was never eligible for prune because the current create call did not return that seed id.
 
-Restart-husk replacement is owned by:
+Replacement of unbound same-label husks after restart is exercised by:
 
 ```sh
 HERDR_LAB_HELPER=bin/fm-herdr-lab.sh \
   tests/fm-backend-herdr-respawn-idem-e2e.test.sh
 ```
 
-Observed guarantee: a restored no-agent tab was replaced create-before-close, while a registered live agent caused refusal.
+In this adapter fixture, which creates tabs without task records, a restored no-agent tab was replaced create-before-close, while a registered live agent caused refusal.
+The [worker terminal identity lab](#worker-terminal-identity) covers the recorded-worker collision case.
 
 ### Secondmate endpoint ownership and batch recovery
 
@@ -870,6 +891,9 @@ ok - real Herdr lab: concurrent cross-home recoveries replace exact husks under 
 ok - real Herdr lab: missing, renamed, and duplicate tokens trigger zero destructive or adoptive calls, and live duplicate risk refuses launch
 ok - real Herdr lab validation completed on Herdr 0.7.5 with the default-session tripwire intact
 ```
+
+This result predates terminal-id checks for projection reclaim.
+The current projection test exercises reclaim after stopping the worker while keeping its terminal, and the [worker terminal identity lab](#worker-terminal-identity) exercises a full Herdr server restart.
 
 The projection suite ran again on 2026-08-04 against Herdr 0.8.0 protocol 19 for the default-on flip, where an absent `config/herdr-presentation-spaces` enables the projection and the value `off` opts out; since 2026-08-05 an absent file enables the projection only at or above the 0.8.0 floor recorded under "Presentation version floor" below, and `on` is the explicit opt-in that survives the floor:
 
@@ -1146,7 +1170,8 @@ For Pi on Herdr 0.9.0, `herdr agent get` reflects whether the agent process rema
 A Pi launched as a child of the pane shell (not via `exec`) that then `/quit`s or is SIGKILL'd leaves the pane and shell in place, and `agent get` returns `agent_not_found`.
 A sibling live idle Pi stays `agent=pi` with `agent_status=idle`.
 `fm_backend_herdr_pane_agent_state` maps that `agent_not_found` leftover shell to `no-agent` and `fm_backend_herdr_agent_state` maps it to `dead` (relaunch-allowed), while the live idle pane stays `alive`.
-`herdr pane get` `.agent_status` can still read `idle` after the occupant is gone; liveness is `agent get`, never that pane field.
+`herdr pane get` can still show `agent_status=idle` after the occupant is gone, so this guard reads the registration with `herdr agent get`.
+See the [current Herdr liveness contract](../herdr-backend.md#restart-and-liveness-behavior) for the checks applied to task-selected endpoints.
 
 ```sh
 tests/fm-backend-herdr-agent-exit-shell-e2e.test.sh

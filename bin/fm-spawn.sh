@@ -96,6 +96,9 @@
 #   outside herdr has no workspace to inherit and uses this home's own labeled
 #   workspace, which must then match exactly one. --secondmate is the deliberate
 #   exception: it stands up that secondmate home's own workspace.
+#   Herdr worker metadata records herdr_terminal_id from the tab creation
+#   response. The identity follows the terminal into its isolated worktree
+#   and is refreshed when relaunch creates a replacement.
 #   Herdr additionally uses a presentation-only layout by default when the
 #   selected client and running server meet the Herdr 0.8.0 floor. The local
 #   config/herdr-presentation-spaces file can say off to disable it or on to
@@ -104,12 +107,11 @@
 #   then creates a disposable
 #   workspace containing only the ordinary task pane. A successful clean create
 #   upgrades its attempt journal with exact home, session, workspace, tab, pane,
-#   parent, and label bindings. On a same-identity restart, that complete binding
-#   plus authoritative metadata may replace one exact agent-free husk in place.
+#   parent, and label bindings. That complete binding plus a matching worker
+#   terminal may replace one exact agent-free husk in place.
 #   The journal, visible token, and labels alone are never endpoint or ownership
-#   authority, and every ambiguous recovery stays on the flat fallback after
-#   duplicate-agent risk is independently absent. Treehouse allocation and task
-#   metadata are unchanged.
+#   authority. See docs/herdr-backend.md "Presentation spaces" for the flat
+#   fallback and refusal conditions.
 #   A clean projected create or exact resume makes one bounded attempt to hold
 #   the one session-scoped presentation-order lock (keyed by named session plus
 #   canonical socket, outside any home's state/) through launch handoff. Lock
@@ -1129,10 +1131,14 @@ spawn_abort_cleanup() {
   fi
   if [ "$HERDR_PROJECTION_ABORT_CLEANUP" = 1 ]; then
     HERDR_PROJECTION_ABORT_CLEANUP=0
-    fm_backend_herdr_projection_cleanup_exact \
-      "$HERDR_PROJECTION_ABORT_SESSION" \
-      "$HERDR_PROJECTION_ABORT_TASK_PANE" \
-      "$HERDR_PROJECTION_ABORT_SEEDED_PANE" || true
+    fm_backend_herdr_projection_close_bound_pane \
+      "$HERDR_PROJECTION_ABORT_SESSION" "$HERDR_PROJECTION_ABORT_TASK_PANE" \
+      "$FM_BACKEND_HERDR_PROJECTION_TERMINAL_ID" || true
+    if [ -n "$HERDR_PROJECTION_ABORT_SEEDED_PANE" ]; then
+      fm_backend_herdr_projection_close_bound_pane \
+        "$HERDR_PROJECTION_ABORT_SESSION" "$HERDR_PROJECTION_ABORT_SEEDED_PANE" \
+        "$FM_BACKEND_HERDR_PROJECTION_SEEDED_TERMINAL_ID" || true
+    fi
   fi
   if [ "$HERDR_PRESENTATION_ORDER_LOCK_HELD" = 1 ]; then
     HERDR_PRESENTATION_ORDER_LOCK_HELD=0
@@ -1499,7 +1505,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: backend '$BACKEND' has no recovery-grade agent-state classifier, so a relaunch cannot prove the previous agent exited; refusing rather than risking two agents in one endpoint" >&2
     exit 1
   }
-  RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET")
+  RELAUNCH_STATE=$(FM_BACKEND_HERDR_ENDPOINT_META="$RELAUNCH_META" fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET")
   RELAUNCH_RECREATE=0
   if [ "$RELAUNCH_STATE" = missing ]; then
     RELAUNCH_RECREATE=1
@@ -1541,9 +1547,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
     # missing one is recreated under the launcher's live workspace, so they
     # must not overwrite that identity with the vanished pane's.
     if [ "$RELAUNCH_RECREATE" -eq 0 ]; then
+      FM_BACKEND_HERDR_ENDPOINT_META=$RELAUNCH_META
       HERDR_WORKSPACE_ID=$(fm_meta_get "$RELAUNCH_META" herdr_workspace_id)
       HERDR_TAB_ID=$(fm_meta_get "$RELAUNCH_META" herdr_tab_id)
       HERDR_PANE_ID=$(fm_meta_get "$RELAUNCH_META" herdr_pane_id)
+      HERDR_TERMINAL_ID=$(fm_meta_get "$RELAUNCH_META" herdr_terminal_id)
     fi
   fi
   # With no explicit harness, a relaunch reuses the harness already recorded
@@ -3147,11 +3155,12 @@ herdr_projection_meta_field_exact() {  # <meta> <key>
 # dead or agent-free endpoint before token inspection may allow flat fallback.
 # Exact Herdr fields are retained for the narrower version 2 reclaim path.
 herdr_projection_existing_meta_allows_flat() {  # <meta>
-  local meta=$1 old_backend old_target old_session old_pane old_state target_session target_pane
+  local meta=$1 old_backend old_target old_session old_pane old_state target_session target_pane identity
   HERDR_RECOVERY_BACKEND=""
   HERDR_RECOVERY_WORKSPACE_ID=""
   HERDR_RECOVERY_TAB_ID=""
   HERDR_RECOVERY_PANE_ID=""
+  HERDR_RECOVERY_TERMINAL_ID=""
   old_backend=$(fm_backend_of_meta "$meta")
   old_target=$(fm_backend_target_of_meta "$meta")
   [ -n "$old_target" ] || {
@@ -3191,6 +3200,22 @@ herdr_projection_existing_meta_allows_flat() {  # <meta>
       echo "error: existing herdr endpoint for $ID could not be inspected; refusing duplicate launch" >&2
       return 1
     }
+    identity=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_herdr_task_identity_state "$old_target")
+    case "$identity" in
+      match) HERDR_RECOVERY_TERMINAL_ID=$(fm_backend_meta_exact_value "$meta" herdr_terminal_id) || return 1 ;;
+      missing)
+        HERDR_RECOVERY_BACKEND=""
+        return 0
+        ;;
+      mismatch)
+        echo "error: existing Herdr worker $ID has no matching terminal; use --relaunch to keep its recorded worktree" >&2
+        return 1
+        ;;
+      *)
+        echo "error: existing Herdr endpoint identity for $ID is unreadable; preserving the current task record" >&2
+        return 1
+        ;;
+    esac
     old_state=$(fm_backend_herdr_pane_agent_state "$old_session" "$old_pane")
     case "$old_state" in
       # A stale registration over a shell-only pane is agent-free for RECOVERY
@@ -3292,8 +3317,9 @@ elif [ "$RELAUNCH" -eq 1 ] && [ "$RELAUNCH_RECREATE" -eq 1 ]; then
       HERDR_SEEDED_DEFAULT_TAB_ID=${HERDR_CONTAINER_RAW#*$'\t'}
       HERDR_SES=${CONTAINER%%:*}
       HERDR_WORKSPACE_ID=${CONTAINER#*:}
-      HERDR_TASK_IDS=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_create_task "$CONTAINER" "$W" "$WT" "$HERDR_SEEDED_DEFAULT_TAB_ID") || exit 1
-      read -r HERDR_TAB_ID HERDR_PANE_ID <<EOF
+      HERDR_TASK_IDS=$(FM_STATE_OVERRIDE="$STATE" FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_create_task "$CONTAINER" "$W" "$WT" \
+        "$HERDR_SEEDED_DEFAULT_TAB_ID" bound) || exit 1
+      read -r HERDR_TAB_ID HERDR_PANE_ID HERDR_TERMINAL_ID <<EOF
 $HERDR_TASK_IDS
 EOF
       T="$HERDR_SES:$HERDR_PANE_ID"
@@ -3370,7 +3396,7 @@ case "$BACKEND" in
           FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_projection_reclaim_task \
             "$HERDR_SES" "$HERDR_PRESENTATION_JOURNAL" "$ID" "$HERDR_LABEL_HOME" \
             "$HERDR_RECOVERY_WORKSPACE_ID" "$HERDR_RECOVERY_TAB_ID" "$HERDR_RECOVERY_PANE_ID" \
-            "$HERDR_PARENT_LABEL" "$W" "$PROJ_ABS"
+            "$HERDR_PARENT_LABEL" "$W" "$PROJ_ABS" "$HERDR_RECOVERY_TERMINAL_ID"
           HERDR_RECLAIM_STATUS=$?
           set -e
           case "$HERDR_RECLAIM_STATUS" in
@@ -3380,6 +3406,7 @@ case "$BACKEND" in
               HERDR_SEEDED_DEFAULT_TAB_ID=""
               HERDR_TAB_ID=$FM_BACKEND_HERDR_PROJECTION_TAB_ID
               HERDR_PANE_ID=$FM_BACKEND_HERDR_PROJECTION_PANE_ID
+              HERDR_TERMINAL_ID=$FM_BACKEND_HERDR_PROJECTION_TERMINAL_ID
               HERDR_PROJECTION_ABORT_CLEANUP=1
               HERDR_PROJECTION_ABORT_SESSION=$HERDR_SES
               HERDR_PROJECTION_ABORT_TASK_PANE=$HERDR_PANE_ID
@@ -3439,6 +3466,7 @@ case "$BACKEND" in
             HERDR_SEEDED_DEFAULT_TAB_ID=$FM_BACKEND_HERDR_PROJECTION_SEEDED_TAB_ID
             HERDR_TAB_ID=$FM_BACKEND_HERDR_PROJECTION_TAB_ID
             HERDR_PANE_ID=$FM_BACKEND_HERDR_PROJECTION_PANE_ID
+            HERDR_TERMINAL_ID=$FM_BACKEND_HERDR_PROJECTION_TERMINAL_ID
             HERDR_PROJECTION_ABORT_CLEANUP=1
             HERDR_PROJECTION_ABORT_SESSION=$HERDR_SES
             HERDR_PROJECTION_ABORT_TASK_PANE=$HERDR_PANE_ID
@@ -3477,8 +3505,9 @@ case "$BACKEND" in
       HERDR_SEEDED_DEFAULT_TAB_ID=${HERDR_CONTAINER_RAW#*$'\t'}
       HERDR_SES=${CONTAINER%%:*}
       HERDR_WORKSPACE_ID=${CONTAINER#*:}
-      HERDR_TASK_IDS=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_create_task "$CONTAINER" "$W" "$PROJ_ABS" "$HERDR_SEEDED_DEFAULT_TAB_ID") || exit 1
-      read -r HERDR_TAB_ID HERDR_PANE_ID <<EOF
+      HERDR_TASK_IDS=$(FM_STATE_OVERRIDE="$STATE" FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_create_task "$CONTAINER" "$W" "$PROJ_ABS" \
+        "$HERDR_SEEDED_DEFAULT_TAB_ID" bound) || exit 1
+      read -r HERDR_TAB_ID HERDR_PANE_ID HERDR_TERMINAL_ID <<EOF
 $HERDR_TASK_IDS
 EOF
     fi
@@ -3538,6 +3567,16 @@ EOF
     T="$ORCA_TERMINAL"
     ;;
 esac
+fi
+if [ "$BACKEND" = herdr ] && { [ "$RELAUNCH" -eq 0 ] || [ "$RELAUNCH_RECREATE" -eq 1 ]; }; then
+  fm_backend_herdr_terminal_id_valid "${HERDR_TERMINAL_ID:-}" || {
+    echo "error: Herdr task $ID has no readable terminal identity; refusing launch" >&2
+    exit 1
+  }
+  # Use the creation binding until the replacement record is published. This
+  # also covers a new terminal that happens to reuse the old record's pane id.
+  FM_BACKEND_HERDR_SPAWN_TARGET=$T
+  FM_BACKEND_HERDR_SPAWN_TERMINAL=$HERDR_TERMINAL_ID
 fi
 if [ "$KIND" = secondmate ] && [ "$RELAUNCH" -eq 0 ]; then
   FM_INHERITABLE_CONFIG=trace-context \
@@ -4685,7 +4724,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo tasktmp model effort busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx pi_posture", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo tasktmp model effort busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id herdr_terminal_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx pi_posture", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -4716,6 +4755,7 @@ preserve_relaunch_meta() {
     echo "herdr_workspace_id=$HERDR_WORKSPACE_ID"
     echo "herdr_tab_id=$HERDR_TAB_ID"
     echo "herdr_pane_id=$HERDR_PANE_ID"
+    [ "$KIND" = secondmate ] || echo "herdr_terminal_id=$HERDR_TERMINAL_ID"
   fi
   if [ "$BACKEND" = zellij ]; then
     echo "zellij_session=$ZELLIJ_SES"

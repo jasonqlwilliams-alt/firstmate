@@ -72,7 +72,7 @@ probe_client() {  # <binary-dir> -> "<version>\t<protocol>"
 
 floor_verdict() {  # <protocol> <version> -> above|below|indeterminate
   bash -c '
-    . "$0/bin/backends/herdr.sh"
+    . "$0/bin/fm-backend.sh" && fm_backend_source herdr
     status=0
     fm_backend_herdr_release_floor_verdict "$1" "$2" || status=$?
     case "$status" in

@@ -3,11 +3,11 @@
 # Usage: fm-peek.sh <target> [lines=40]
 #   <target> may be an exact task id, a legacy fm-<id> task label resolved
 #   through this home's state/<id>.meta, or an explicit backend target.
-# A selector whose meta records remote_host= is a remote secondmate: its pane
-# lives on that host, so the capture routes over fm-on.sh to the host-local
-# capture (fm-remote-secondmate-control.sh), clamped to that command's
-# 100-line cap. An unreachable host or unreadable endpoint fails loudly naming
-# the host; the local backend adapters are never asked to read a remote target.
+# A recorded Herdr pane must pass fm-backend.sh's live identity check.
+# Select a remote secondmate by task id or label. Its recorded remote_host=
+# routes the read over fm-on.sh to fm-remote-secondmate-control.sh, clamped to
+# that command's 100-line cap. An unreachable host or unreadable endpoint
+# fails loudly naming the host.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,11 +23,12 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 RAW_TARGET=$1
 N=${2:-40}
 
-REMOTE_META=$(fm_backend_meta_for_selector "$RAW_TARGET" "$STATE" 2>/dev/null || true)
-if [ -n "$REMOTE_META" ] && [ -n "$(fm_meta_get "$REMOTE_META" remote_host)" ]; then
-  REMOTE_ID=${REMOTE_META##*/}
+fm_backend_resolve_selector "$RAW_TARGET" "$STATE" >/dev/null
+TARGET_META=$FM_BACKEND_RESOLVED_META
+if [ -n "$FM_BACKEND_RESOLVED_LABEL" ] && [ -n "$(fm_meta_get "$TARGET_META" remote_host)" ]; then
+  REMOTE_ID=${TARGET_META##*/}
   REMOTE_ID=${REMOTE_ID%.meta}
-  REMOTE_HOST=$(fm_meta_get "$REMOTE_META" remote_host)
+  REMOTE_HOST=$(fm_meta_get "$TARGET_META" remote_host)
   case "$N" in ''|*[!0-9]*|0) N=40 ;; esac
   [ "$N" -le 100 ] || N=100
   if ! FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-on.sh" "$REMOTE_ID" \
@@ -38,9 +39,9 @@ if [ -n "$REMOTE_META" ] && [ -n "$(fm_meta_get "$REMOTE_META" remote_host)" ]; 
   exit 0
 fi
 
-T=$(fm_backend_resolve_selector "$RAW_TARGET" "$STATE")
-
-BACKEND=$(fm_backend_of_selector "$RAW_TARGET" "$T" "$STATE")
-EXPECTED_LABEL=$(fm_backend_expected_label_of_selector "$RAW_TARGET" "$STATE")
-
-fm_backend_capture "$BACKEND" "$T" "$N" "$EXPECTED_LABEL"
+BACKEND=tmux
+if [ -n "$TARGET_META" ]; then
+  BACKEND=$(fm_backend_of_meta "$TARGET_META")
+fi
+FM_BACKEND_HERDR_ENDPOINT_META="$TARGET_META" \
+  fm_backend_capture "$BACKEND" "$FM_BACKEND_RESOLVED_TARGET" "$N" "$FM_BACKEND_RESOLVED_LABEL"

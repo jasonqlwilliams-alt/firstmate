@@ -105,7 +105,7 @@ assert_focus_switch_fired() { # <label>
 # Drive one real adapter entry point with the shim on PATH.
 drive() { # <function> <argument...>
   PATH="$FAKEBIN:$ORIGINAL_PATH" bash -c '
-    . "$1/bin/backends/herdr.sh"
+    . "$1/bin/fm-backend.sh" && fm_backend_source herdr
     fm_backend_herdr_cli() {
       local session=$1
       shift
@@ -232,8 +232,10 @@ lab tab list --workspace "$WS_SEVEN" \
 lab tab focus "$TAB_SEVEN_SEEDED" >/dev/null || fail "could not focus the seeded tab"
 [ "$(focused_tab)" = "$TAB_SEVEN_SEEDED" ] || fail "scenario 7 did not start focused on the seeded tab"
 
+SEED_TERMINAL=$(lab pane get "$PANE_SEVEN_SEEDED" | jq -er '.result.pane.terminal_id') \
+  || fail "could not read the seeded terminal identity"
 OUT=$(drive fm_backend_herdr_workspace_prune_seeded_default_tab \
-  "$LAB_SESSION" "$WS_SEVEN" "$TAB_SEVEN_SEEDED" focus-preserving)
+  "$LAB_SESSION" "$WS_SEVEN" "$TAB_SEVEN_SEEDED" focus-preserving "$PANE_SEVEN_SEEDED" "$SEED_TERMINAL")
 STATUS=$?
 [ "$STATUS" -ne 0 ] || fail "the seeded prune did not refuse the tab a live viewer was watching: $OUT"
 assert_contains "$OUT" "target is the captain's active tab" \

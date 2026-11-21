@@ -18,7 +18,9 @@
 # Herdr backend in the dedicated fm-remote session, so launch refuses any other
 # selection rather than reading this home's config/backend. The interactive
 # default session remains for the user's work.
-# fm-spawn/fm-send/fm-teardown keep owning the local endpoint mechanics.
+# fm-spawn and fm-teardown own local task creation and retirement.
+# Key, capture, observation and the send doorbell use fm-backend.sh's live
+# Herdr binding against the validated host-local parent-route metadata.
 # The home's own workers keep their ordinary backend selection.
 # bin/fm-remote-doctor.sh owns that host's readiness for Herdr.
 # docs/remote-secondmates.md owns why.
@@ -139,13 +141,23 @@ state_value() { # <id>; prints recovery-grade state
   remote_endpoint_state
 }
 
-remote_endpoint_state() {
+remote_endpoint_home() {
   local recorded_home selected_home
-  recorded_home=$(fm_backend_meta_exact_value "$REMOTE_ENDPOINT_META" worktree) || { printf 'unreadable\n'; return 0; }
-  recorded_home=$(cd -- "$recorded_home" 2>/dev/null && pwd -P) || { printf 'unreadable\n'; return 0; }
-  selected_home=$(cd -- "$TARGET_HOME" 2>/dev/null && pwd -P) || { printf 'unreadable\n'; return 0; }
-  [ "$recorded_home" = "$selected_home" ] || { printf 'unreadable\n'; return 0; }
+  recorded_home=$(fm_backend_meta_exact_value "$REMOTE_ENDPOINT_META" worktree) || return 1
+  recorded_home=$(cd -- "$recorded_home" 2>/dev/null && pwd -P) || return 1
+  selected_home=$(cd -- "$TARGET_HOME" 2>/dev/null && pwd -P) || return 1
+  [ "$recorded_home" = "$selected_home" ] || return 1
+  printf '%s' "$recorded_home"
+}
+
+remote_endpoint_state() {
+  local recorded_home
+  recorded_home=$(remote_endpoint_home) || { printf 'unreadable\n'; return 0; }
   fm_backend_agent_state "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "$recorded_home" 2>/dev/null || printf 'unreadable\n'
+}
+
+remote_endpoint_require_home() {
+  remote_endpoint_home >/dev/null || die "remote secondmate endpoint identity is unreadable for $REMOTE_ENDPOINT_TARGET; recorded home does not resolve to $TARGET_HOME"
 }
 
 print_route() { # <id>
@@ -201,7 +213,8 @@ cmd_launch() {
         return 0
         ;;
       dead)
-        fm_backend_kill "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" 2>/dev/null \
+        FM_BACKEND_HERDR_ENDPOINT_META="$REMOTE_ENDPOINT_META" \
+          fm_backend_kill "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" 2>/dev/null \
           || die "could not remove the confirmed agent-less endpoint"
         ;;
       missing) ;;
@@ -411,7 +424,8 @@ cmd_send() {
       return 0
       ;;
   esac
-  fm_task_inbox_ring "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "$rec" "fm-$id" \
+  FM_BACKEND_HERDR_ENDPOINT_META="$REMOTE_ENDPOINT_META" \
+    fm_task_inbox_ring "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "$rec" "fm-$id" \
     "$(fm_meta_get "$REMOTE_ENDPOINT_META" harness)" || ring_rc=$?
   case "$ring_rc" in
     1) printf 'notice: doorbell not typed because the composer in %s holds pending text or, on a Codex or Rovo pane, is not proven empty; the steer is durably recorded at %s\n' "$REMOTE_ENDPOINT_TARGET" "$rec" >&2 ;;
@@ -427,8 +441,9 @@ cmd_key() {
   validate_id "$id"
   validate_home "$id"
   remote_endpoint_require "$id"
-  FM_HOME="$TARGET_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" FM_STATE_OVERRIDE="$TARGET_HOME/state" \
-    "$SCRIPT_DIR/fm-send.sh" "$REMOTE_ENDPOINT_TARGET" --key "$key"
+  remote_endpoint_require_home
+  FM_BACKEND_HERDR_ENDPOINT_META="$REMOTE_ENDPOINT_META" \
+    fm_backend_send_key "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "$key" "fm-$id"
 }
 
 cmd_capture() {
@@ -438,7 +453,13 @@ cmd_capture() {
   case "$lines" in ''|*[!0-9]*|0) die "capture line count must be positive" ;; esac
   [ "$lines" -le 100 ] || die "capture line count exceeds 100"
   remote_endpoint_require "$id"
-  fm_backend_capture "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "$lines" "fm-$id" | head -c 65536
+  remote_endpoint_require_home
+  local capture_rc
+  FM_BACKEND_HERDR_ENDPOINT_META="$REMOTE_ENDPOINT_META" \
+    fm_backend_capture "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "$lines" "fm-$id" | head -c 65536
+  capture_rc=${PIPESTATUS[0]}
+  [ "$capture_rc" -eq 141 ] || return "$capture_rc"
+  return 0
 }
 
 cmd_observe() {
@@ -446,8 +467,10 @@ cmd_observe() {
   validate_id "$id"
   validate_home "$id"
   remote_endpoint_require "$id"
+  remote_endpoint_require_home
   harness=$(fm_meta_get "$REMOTE_ENDPOINT_META" harness)
-  fm_pending_reply_backend_observation "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "fm-$id" "$harness"
+  FM_BACKEND_HERDR_ENDPOINT_META="$REMOTE_ENDPOINT_META" \
+    fm_pending_reply_backend_observation "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "fm-$id" "$harness"
   printf '\n'
 }
 

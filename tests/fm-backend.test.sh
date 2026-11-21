@@ -566,14 +566,16 @@ test_resolve_selector_three_forms() {
 
   [ "$(fm_backend_resolve_selector 'dotfiles-d6' "$state")" = "default:wA:p2" ] \
     || fail "bare non-fm task id should resolve through exact metadata"
-  [ "$(fm_backend_of_selector 'dotfiles-d6' 'default:wA:p2' "$state")" = herdr ] \
+  fm_backend_resolve_selector 'dotfiles-d6' "$state" >/dev/null || fail "could not resolve dotfiles-d6"
+  [ "$(fm_backend_of_meta "$FM_BACKEND_RESOLVED_META")" = herdr ] \
     || fail "bare non-fm task id should use its recorded backend"
   [ "$(fm_backend_expected_label_of_selector 'dotfiles-d6' "$state")" = "fm-dotfiles-d6" ] \
     || fail "bare non-fm task id should report the spawned fm-<id> label"
 
   [ "$(fm_backend_resolve_selector 'fm-turnend-all-harnesses-v9' "$state")" = "default:wB:p3" ] \
     || fail "exact fm-* task id should resolve through its exact metadata"
-  [ "$(fm_backend_of_selector 'fm-turnend-all-harnesses-v9' 'default:wB:p3' "$state")" = herdr ] \
+  fm_backend_resolve_selector 'fm-turnend-all-harnesses-v9' "$state" >/dev/null || fail "could not resolve fm-turnend-all-harnesses-v9"
+  [ "$(fm_backend_of_meta "$FM_BACKEND_RESOLVED_META")" = herdr ] \
     || fail "exact fm-* task id should use exact metadata without stripping fm-"
   [ "$(fm_backend_expected_label_of_selector 'fm-turnend-all-harnesses-v9' "$state")" = "fm-fm-turnend-all-harnesses-v9" ] \
     || fail "exact fm-* task id should report the spawned fm-<id> label"
@@ -608,7 +610,7 @@ SH
   pass "fm_backend_resolve_selector: session:window literal, exact task id first, legacy fm-<id> label fallback, ad hoc bare name via tmux list-windows"
 }
 
-test_backend_of_selector_matches_explicit_target_meta() {
+test_resolve_selector_retains_metadata() {
   local state=$TMP_ROOT/backend-selector-state
   mkdir -p "$state"
   fm_write_meta "$state/herdr-task.meta" "window=default:w1:p2" "backend=herdr"
@@ -618,11 +620,14 @@ test_backend_of_selector_matches_explicit_target_meta() {
   fm_write_meta "$state/custom-window-task.meta" "window=custom-window"
   fm_write_meta "$state/orca-task.meta" "window=fm-orca-task" "terminal=term-orca-task" "backend=orca"
 
-  [ "$(fm_backend_of_selector 'dotfiles-d6' 'default:wA:p2' "$state")" = herdr ] \
+  fm_backend_resolve_selector 'dotfiles-d6' "$state" >/dev/null || fail "could not resolve dotfiles-d6"
+  [ "$(fm_backend_of_meta "$FM_BACKEND_RESOLVED_META")" = herdr ] \
     || fail "bare non-fm task id selector should use its recorded backend"
-  [ "$(fm_backend_of_selector 'fm-turnend-all-harnesses-v9' 'default:wB:p3' "$state")" = herdr ] \
+  fm_backend_resolve_selector 'fm-turnend-all-harnesses-v9' "$state" >/dev/null || fail "could not resolve fm-turnend-all-harnesses-v9"
+  [ "$(fm_backend_of_meta "$FM_BACKEND_RESOLVED_META")" = herdr ] \
     || fail "exact fm-* task id selector should use exact metadata before legacy stripping"
-  [ "$(fm_backend_of_selector 'fm-herdr-task' 'default:w1:p2' "$state")" = herdr ] \
+  fm_backend_resolve_selector 'fm-herdr-task' "$state" >/dev/null || fail "could not resolve fm-herdr-task"
+  [ "$(fm_backend_of_meta "$FM_BACKEND_RESOLVED_META")" = herdr ] \
     || fail "legacy fm-<id> selector should use its recorded backend"
   [ "$(fm_backend_resolve_selector 'fm-orca-task' "$state")" = term-orca-task ] \
     || fail "Orca fm-<id> selector should resolve to terminal=, not window="
@@ -630,16 +635,21 @@ test_backend_of_selector_matches_explicit_target_meta() {
     || fail "raw Orca terminal selector should resolve through metadata"
   [ "$(fm_backend_resolve_selector 'custom-window' "$state")" = custom-window ] \
     || fail "raw window selector matching metadata should not require tmux fallback"
-  [ "$(fm_backend_of_selector 'term-orca-task' 'term-orca-task' "$state")" = orca ] \
+  fm_backend_resolve_selector 'term-orca-task' "$state" >/dev/null || fail "could not resolve term-orca-task"
+  [ "$(fm_backend_of_meta "$FM_BACKEND_RESOLVED_META")" = orca ] \
     || fail "matching an explicit Orca terminal handle should inherit metadata backend"
-  [ "$(fm_backend_of_selector 'default:w1:p2' 'default:w1:p2' "$state")" = herdr ] \
+  fm_backend_resolve_selector 'default:w1:p2' "$state" >/dev/null || fail "could not resolve default:w1:p2"
+  [ "$FM_BACKEND_RESOLVED_TARGET" = default:w1:p2 ] && [ "$FM_BACKEND_RESOLVED_META" = "$state/herdr-task.meta" ] \
+    && [ -z "$FM_BACKEND_RESOLVED_LABEL" ] \
     || fail "explicit backend target matching metadata should use that task's backend"
-  [ "$(fm_backend_of_selector 'firstmate:fm-tmux-task' 'firstmate:fm-tmux-task' "$state")" = tmux ] \
+  fm_backend_resolve_selector 'firstmate:fm-tmux-task' "$state" >/dev/null || fail "could not resolve firstmate:fm-tmux-task"
+  [ "$(fm_backend_of_meta "$FM_BACKEND_RESOLVED_META")" = tmux ] \
     || fail "explicit tmux-shaped target with absent backend= should default to tmux"
-  [ "$(fm_backend_of_selector 'manual:outside' 'manual:outside' "$state")" = tmux ] \
+  fm_backend_resolve_selector 'manual:outside' "$state" >/dev/null || fail "could not resolve manual:outside"
+  [ "$(fm_backend_of_meta "$FM_BACKEND_RESOLVED_META")" = tmux ] \
     || fail "explicit target with no matching metadata should keep the tmux compatibility default"
 
-  pass "fm_backend_of_selector: exact task ids, legacy fm-<id> labels, and matching explicit targets inherit metadata backend"
+  pass "fm_backend_resolve_selector: exact task ids, legacy fm-<id> labels, and matching explicit targets inherit metadata backend"
 }
 
 # --- old vs new: fm-send.sh --------------------------------------------------
@@ -1151,7 +1161,7 @@ test_backend_source_shell_portable
 test_backend_validate_spawn_accepts_orca
 test_meta_get_and_backend_of_meta
 test_resolve_selector_three_forms
-test_backend_of_selector_matches_explicit_target_meta
+test_resolve_selector_retains_metadata
 test_send_tmux_contract
 test_peek_conformance_old_vs_new
 test_spawn_symlinked_project_prefix_avoids_false_refusal

@@ -453,9 +453,9 @@ case "${1:-} ${2:-}" in
   "pane get")
     pane=${3:-}
     if [ "$pane" = p-new ] && [ -e "$spawned" ]; then
-      printf '%s\n' '{"result":{"pane":{"pane_id":"p-new","tab_id":"t-new","workspace_id":"ws1"}}}'
+      printf '{"result":{"pane":{"pane_id":"p-new","tab_id":"t-new","workspace_id":"ws1","cwd":"%s"}}}\n' "${state%/*}/secondmate-$mate_id"
     elif [ "$pane" = p-old ] && [ ! -e "$killed" ]; then
-      printf '%s\n' '{"result":{"pane":{"pane_id":"p-old","tab_id":"t-old","workspace_id":"ws1"}}}'
+      printf '{"result":{"pane":{"pane_id":"p-old","tab_id":"t-old","workspace_id":"ws1","cwd":"%s"}}}\n' "${state%/*}/secondmate-$mate_id"
     else
       printf '%s\n' '{"error":{"code":"pane_not_found"}}' >&2
       exit 1
@@ -493,7 +493,11 @@ make_fake_herdr() {
 #!/usr/bin/env bash
 set -u
 if [ "\${1:-}" = pane ] && [ "\${2:-}" = get ]; then
-  [ "\${3:-}" = "$live" ] && exit 0
+  if [ "\${3:-}" = "$live" ]; then
+    printf '%s\n' '{"result":{"pane":{"pane_id":"$live","terminal_id":"term-live"}}}'
+    exit 0
+  fi
+  printf '%s\n' '{"error":{"code":"pane_not_found"}}'
   exit 1
 fi
 exit 1
@@ -1357,7 +1361,7 @@ EOF
   make_fake_ps_claude "$fakebin"
   make_fake_herdr "$fakebin" "p-live"
 
-  printf 'window=sess:p-live\nkind=ship\nbackend=herdr\n' > "$home/state/task-live.meta"
+  printf 'window=sess:p-live\nkind=ship\nbackend=herdr\nherdr_terminal_id=term-live\n' > "$home/state/task-live.meta"
   printf 'window=sess:p-dead\nkind=ship\nbackend=herdr\n' > "$home/state/task-dead.meta"
 
   out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH")

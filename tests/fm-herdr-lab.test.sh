@@ -257,7 +257,7 @@ test_provisioned_lab_is_recognized_by_the_backend() {
   # include this shell, which is the recorded lab owner.
   # shellcheck disable=SC2016 # the quoted body expands inside the named shell
   out=$(env -u HERDR_SESSION -u FM_HERDR_LAB_SHELL FM_HERDR_LAB_STATE_DIR="$TRIPWIRES" \
-    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_session || printf REFUSED' \
+    bash -c '. "$0/bin/fm-backend.sh" && fm_backend_source herdr; fm_backend_herdr_session || printf REFUSED' \
     "$ROOT" 2>/dev/null)
   [ "$out" = REFUSED ] \
     || fail "a lab provisioned through the helper did not stop the adapter falling back to the live default session, got '$out'"
@@ -266,7 +266,7 @@ test_provisioned_lab_is_recognized_by_the_backend() {
     || fail "backend-context fixture teardown failed"
   # shellcheck disable=SC2016 # the quoted body expands inside the named shell
   out=$(env -u HERDR_SESSION -u FM_HERDR_LAB_SHELL FM_HERDR_LAB_STATE_DIR="$TRIPWIRES" \
-    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_session || printf REFUSED' \
+    bash -c '. "$0/bin/fm-backend.sh" && fm_backend_source herdr; fm_backend_herdr_session || printf REFUSED' \
     "$ROOT" 2>/dev/null)
   [ "$out" = default ] \
     || fail "the ambient default fallback did not return after the lab was torn down, got '$out'"

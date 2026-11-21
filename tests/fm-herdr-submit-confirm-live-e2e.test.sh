@@ -69,7 +69,7 @@ chmod +x "$FAKEBIN/herdr"
 export PATH="$FAKEBIN:$ORIGINAL_PATH"
 
 # shellcheck source=/dev/null
-. "$ROOT/bin/backends/herdr.sh"
+. "$ROOT/bin/fm-backend.sh" && fm_backend_source herdr
 
 lab() { env PATH="$ORIGINAL_PATH" "$LAB_HELPER" run "$SESSION" "$@"; }
 WS_JSON=$(lab workspace create --cwd "$ROOT" --label fm-submitlive --no-focus) \

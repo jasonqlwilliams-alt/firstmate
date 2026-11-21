@@ -464,6 +464,70 @@ spawn_secondmate() {
 
 meta_harness() { grep '^harness=' "$1" 2>/dev/null | tail -1 | cut -d= -f2-; }
 
+test_herdr_secondmate_launch_at_reused_pane() {
+  local world primary mate fakebin pane log out
+  world="$TMP_ROOT/herdr-secondmate-reused"
+  primary="$world/primary"
+  mate="$world/mate"
+  log="$world/herdr.log"
+  pane=secondmate-fixture:w4:p7
+  mkdir -p "$primary"/{state,data,config,projects}
+  make_seeded_home "$mate" mate
+  fakebin=$(fm_fakebin "$world")
+  fm_write_meta "$primary/state/old-worker.meta" "window=$pane" 'backend=herdr' 'kind=ship' \
+    'herdr_terminal_id=term-dead-worker'
+  cat > "$fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+set -eu
+if [ "$#" -ne 2 ]; then
+  [ "${@: -2:1}" = --session ] && [ "${@: -1}" = secondmate-fixture ] || exit 42
+fi
+case "$1 $2" in
+  'status --json')
+    printf '%s\n' '{"client":{"protocol":16,"version":"0.7.5"},"server":{"running":true,"protocol":16}}' ;;
+  'workspace list')
+    printf '%s\n' '{"result":{"workspaces":[{"workspace_id":"w4","label":"2ndmate-mate"}]}}' ;;
+  'tab list') printf '%s\n' '{"result":{"tabs":[]}}' ;;
+  'tab create')
+    printf '%s\n' '{"result":{"tab":{"tab_id":"w4:t7"},"root_pane":{"pane_id":"w4:p7","terminal_id":"term-new-mate"}}}' ;;
+  'pane get')
+    [ "$3" = w4:p7 ] || exit 42
+    jq -n --arg cwd "$FM_TEST_MATE_HOME" \
+      '{result:{pane:{pane_id:"w4:p7",terminal_id:"term-new-mate",cwd:$cwd}}}' ;;
+  'pane run'|'pane send-text')
+    [ "$3" = w4:p7 ] || exit 42
+    printf '%s\n' "$4" >> "$FM_TEST_MATE_LAUNCH_LOG" ;;
+  'pane send-keys')
+    [ "$3" = w4:p7 ] && [ "$4" = enter ] || exit 42
+    printf 'key: %s\n' "$4" >> "$FM_TEST_MATE_LAUNCH_LOG" ;;
+  *) exit 42 ;;
+esac
+SH
+  chmod +x "$fakebin/herdr"
+  (
+    local PATH="$fakebin:$BASE_PATH"
+    export PATH FM_HOME="$primary" FM_ROOT_OVERRIDE="$ROOT" FM_STATE_OVERRIDE="$primary/state"
+    export FM_CONFIG_OVERRIDE="$primary/config" FM_DATA_OVERRIDE="$primary/data" FM_PROJECTS_OVERRIDE="$primary/projects"
+    export FM_TEST_MATE_HOME="$mate" FM_TEST_MATE_LAUNCH_LOG="$log"
+    export HERDR_SESSION=secondmate-fixture FM_BACKEND_HERDR_CLIENT_SESSION='' FM_BACKEND_HERDR_ENDPOINT_META=''
+    export FM_SPAWN_NO_GUARD=1 FM_SKIP_SECONDMATE_INHERIT=1 FM_TRACE_CONTEXT=off
+    out=$("$ROOT/bin/fm-spawn.sh" mate "$mate" "sh -c 'echo fixture-secondmate-launch'" --secondmate --backend herdr 2>&1) ||
+      fail "fresh secondmate was refused at the reused pane: $out"
+    grep -Fxq "window=$pane" "$primary/state/mate.meta" || fail "secondmate did not record the reused pane ID"
+    grep -Fxq 'herdr_terminal_id=term-dead-worker' "$primary/state/old-worker.meta" || fail "spawn rewrote the stale worker record"
+    assert_grep 'fixture-secondmate-launch' "$log" "the secondmate launch command never reached the replacement terminal"
+    assert_grep 'key: enter' "$log" "the secondmate launch command was never submitted"
+    # Creation and its recorded endpoint each have explicit identity. A raw
+    # presence check still addresses the same live pane with neither record.
+    . "$ROOT/bin/fm-backend.sh"
+    fm_backend_target_exists herdr "$pane" || fail "unselected presence read borrowed a stale or ambiguous task binding"
+    if FM_BACKEND_HERDR_ENDPOINT_META="$primary/state/old-worker.meta" fm_backend_target_exists herdr "$pane"; then
+      fail "the old worker record accepted the new secondmate pane"
+    fi
+  ) || fail "fresh local secondmate launch at a recycled Herdr pane ID"
+  pass "fresh local secondmate launches at a worker's recycled pane ID without ambiguous binding"
+}
+
 # Split active: crew-harness=claude + secondmate-harness=codex. The secondmate
 # AGENT launches on codex; its own crewmates inherit claude; secondmate-harness
 # does not flow into the home.
@@ -1518,7 +1582,7 @@ test_backend_inheritance_present_and_absent() {
 # inheritance, so it is pinned in tests/fm-backend-herdr.test.sh instead.
 sm_presentation_verdict() {  # <config-dir> -> on|off
   bash -c '
-    . "$0/bin/backends/herdr.sh"
+    . "$0/bin/fm-backend.sh" && fm_backend_source herdr
     case "$(fm_backend_herdr_presentation_preference "$1")" in
       off) printf "off\n" ;;
       *) printf "on\n" ;;
@@ -2649,6 +2713,7 @@ test_secondmate_model_effort_tokens
 test_pi_signed_detection_and_session_lock_identity
 test_dash_leading_process_names_are_basename_operands
 test_propagate_lib
+test_herdr_secondmate_launch_at_reused_pane
 test_spawn_split_and_inherit
 test_spawn_backward_compat_crew_fallback
 test_spawn_bare_backward_compat
