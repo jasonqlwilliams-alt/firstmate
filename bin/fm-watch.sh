@@ -64,6 +64,10 @@
 #                          for human inspection only - never an automatic
 #                          interrupt, signal, or restart of the worker or its
 #                          tool process.
+#   stale: <window> (the recorded endpoint is gone)
+#                          a failed pane read was confirmed as a missing
+#                          local endpoint; clears pause tracking and reports
+#                          once per recorded endpoint incarnation
 #   stale: <window> (unread firstmate instruction: ...)
 #                          the steering-inbox ladder spent its delivery-attempt
 #                          budget on an idle pane without an acknowledgement
@@ -1135,6 +1139,24 @@ clear_pause_tracking() {  # <window-key>
   local key=$1
   clear_pause_state "$key"
   clear_stale_hash_tracking "$key"
+}
+
+report_missing_endpoint() {  # <backend> <window> <meta> <window-key> <marker>
+  local backend=$1 win=$2 meta=$3 key=$4 marker=$5 state incarnation reason
+  [ -f "$meta" ] && [ -z "$(fm_meta_get "$meta" remote_host)" ] || return 0
+  state=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
+    fm_backend_agent_state "$backend" "$win" 2>/dev/null) || return 0
+  [ "$state" = missing ] || return 0
+  clear_pause_tracking "$key"
+
+  # A relaunch can reuse a window name without the watcher seeing it live.
+  # Legacy records still re-arm when the target changes or capture succeeds.
+  incarnation="$backend:$win"$'\t'"$(fm_meta_get "$meta" spawn_gen)"$'\t'"$(fm_meta_get "$meta" herdr_terminal_id)"
+  [ "$(cat "$marker" 2>/dev/null || true)" != "$incarnation" ] || return 0
+  reason="stale: $win (the recorded endpoint is gone)"
+  fm_wake_append stale "$win" "$reason" || exit 1
+  printf '%s\n' "$incarnation" > "$marker" || exit 1
+  wake "$reason"
 }
 
 # Reconcile a declared pause, captain-held status, or active captain backlog hold
@@ -2252,7 +2274,8 @@ EOF
     inbox_steer_check "$w" "$task" "$backend"
     if [ "$backend" = herdr ]; then
       fm_backend_source herdr || continue
-      [ "$(fm_backend_herdr_matching_meta "$w" "$STATE")" = "$meta" ] || continue
+      herdr_meta=$(fm_backend_herdr_matching_meta "$w" "$STATE") || herdr_meta=
+      [ -z "$herdr_meta" ] || [ "$herdr_meta" = "$meta" ] || continue
     fi
     case "$seen" in *"|$w|"*) continue ;; esac
     seen="$seen|$w|"
@@ -2274,8 +2297,16 @@ EOF
     if [ "$kind" = secondmate ] && ! status_is_paused_or_captain_held "$last"; then
       continue
     fi
-    tail40=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
-      fm_backend_capture "$backend" "$w" 40 "fm-$task" 2>/dev/null) || continue
+    missing_marker="$STATE/$task.missing-endpoint"
+    # Herdr capture requires a unique live binding. A closed pane cannot
+    # satisfy that guard, but the recovery classifier can confirm its loss.
+    if { [ "$backend" = herdr ] && [ -z "$herdr_meta" ]; } \
+      || ! tail40=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
+        fm_backend_capture "$backend" "$w" 40 "fm-$task" 2>/dev/null); then
+      report_missing_endpoint "$backend" "$w" "$meta" "$key" "$missing_marker"
+      continue
+    fi
+    [ ! -e "$missing_marker" ] || rm -f "$missing_marker"
     h=$(printf '%s' "$tail40" | hash_pane)
     hf="$STATE/.hash-$key"
     cf="$STATE/.count-$key"
