@@ -382,6 +382,17 @@ case "$*" in
         w1:p-home-live) printf 'edit during Herdr probe\n' >> "${FM_ROOT_OVERRIDE%/*}/sm1/AGENTS.md" ;;
       esac
     fi
+    if [ "${FM_TEST_PROBE_ADVANCE_REFS:-0}" = 1 ]; then
+      case "$3" in
+        w1:p-main-live)
+          "$FM_TEST_REAL_GIT" -C "${FM_ROOT_OVERRIDE%/*}/seed" push -q origin main
+          "$FM_TEST_REAL_GIT" -C "$FM_ROOT_OVERRIDE" fetch -q origin
+          ;;
+        w1:p-home-live)
+          "$FM_TEST_REAL_GIT" -C "${FM_ROOT_OVERRIDE%/*}/sm1" merge -q --ff-only origin/main
+          ;;
+      esac
+    fi
     printf '{"result":{"pane":{"pane_id":"%s","foreground_cwd":"/unrelated","agent":null}}}\n' "$3"
     ;;
   'pane get w1:p-missing --session update-herdr')
@@ -460,6 +471,21 @@ SH
   assert_contains "$out" "firstmate: skipped: dirty working tree" "the host lost the code-root refusal"
 
   git -C "$w/main" restore -- AGENTS.md
+  bump_origin "$w" readme
+  printf 'instructions published during probe\n' >> "$w/seed/AGENTS.md"
+  git -C "$w/seed" commit -qam 'refresh instructions'
+  local expected_tip
+  expected_tip=$(git -C "$w/seed" rev-parse HEAD)
+  out=$("${update_env[@]}" FM_HOME="$w/home" FM_TEST_PROBE_ADVANCE_REFS=1 \
+    "$UPDATE" 2> "$w/fake/update.stderr")
+  [ "$(git -C "$w/main" rev-parse HEAD)" = "$expected_tip" ] || fail "primary missed the newly fetched target"
+  assert_contains "$out" "(instructions changed: AGENTS.md)" "update reported the instruction diff from the old target"
+  assert_contains "$out" "reread-firstmate: yes" "the newly fetched instructions were not queued for re-read"
+  [ "$(git -C "$w/sm1" rev-parse HEAD)" = "$expected_tip" ] || fail "concurrent secondmate advance did not reach the target"
+  assert_contains "$out" "secondmate sm1: already current" "a concurrent fast-forward was reported as a new update"
+  assert_contains "$out" "restart-secondmates: fm-sm1" "the already-current secondmate was not queued for restart"
+  pass "The updater uses the commits visible after the Herdr probe"
+
   local main_before home_before
   main_before=$(git -C "$w/main" rev-parse HEAD)
   home_before=$(git -C "$w/sm1" rev-parse HEAD)
