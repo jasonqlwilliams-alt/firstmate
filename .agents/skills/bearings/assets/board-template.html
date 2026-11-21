@@ -933,14 +933,12 @@ __FM_BEARINGS_BOARD_DATA__
         status.textContent = "Open this board in Lavish to queue an assignment.";
         return;
       }
-      var owner = t.owner || null;
       window.lavish.queuePrompt(
         "Request help meeting this item's start conditions.",
         { tag: "choice", text: t.title + " → " + agent.label, element: form,
-          queueKey: JSON.stringify(["assign-continuum-agent", t.id, owner]),
-          data: { schema: "fm-bearings-assignment.v1", question: t.id, owner: owner, agent: agent.id } }
+          queueKey: JSON.stringify(["assign-continuum-agent", t.id, t.owner]),
+          data: { schema: "fm-bearings-assignment.v1", question: t.id, owner: t.owner, agent: agent.id } }
       );
-      status.textContent = "Assignment queued.";
     });
     return form;
   }
@@ -971,12 +969,12 @@ __FM_BEARINGS_BOARD_DATA__
     /* second line keeps the title uncrowded in the half-width column; a row
        with no repo shows only its summary, never its routing id */
     main.appendChild(el("div", "bb-row__sub", t.repo ? x.summary + " · " + t.repo : x.summary));
-    if (!isWarning(t) && t.tier) {
+    if (t.tier != null) {
       var tier = badge("tier-" + t.tier, TIER_LABELS[t.tier]);
       tier.classList.add("bb-row__tier");
       main.appendChild(tier);
     }
-    if (!isWarning(t) && continuumAgents.length) main.appendChild(assignmentForm(t));
+    if (t.assignment_eligible && continuumAgents.length) main.appendChild(assignmentForm(t));
     row.appendChild(main);
 
     var panelId = "bb-why-" + (++whySeq);
@@ -1042,15 +1040,15 @@ __FM_BEARINGS_BOARD_DATA__
   }
   function orderQueue(sortBy) {
     var ordered = entries.slice();
-    if (sortBy === "tier") {
-      ordered.sort(function (a, b) { return (a.tier || 5) - (b.tier || 5); });
+    if (hasTiers && sortBy === "tier") {
+      ordered.sort(function (a, b) { return a.tier - b.tier; });
     }
     ordered.forEach(function (entry, i) {
       var container = i < CHARTED_VISIBLE ? visibleQueue : overflow;
       entry.nodes.forEach(function (node) { container.appendChild(node); });
     });
   }
-  var hasTiers = entries.some(function (entry) { return entry.tier != null; });
+  var hasTiers = entries.length > 0 && entries[0].tier != null;
   var sortBy = document.getElementById("bb-charted-sort-select");
   document.getElementById("bb-charted-sort").hidden = !hasTiers;
   sortBy.value = hasTiers ? "tier" : "filed";
