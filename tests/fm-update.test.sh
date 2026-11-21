@@ -283,11 +283,10 @@ case "${rargs[1]:-}" in
         'error: remote code root update failed' >&2
       exit 1
     fi
-    printf 'synced: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
     if [ "${FM_TEST_REMOTE_PREFLIGHT:-0}" = 1 ]; then
-      # Remote job transport emits the mutation's warnings after its stdout.
-      printf '%s\n' "$preflight_warning" "$update_warning" >&2
+      printf '%s\n' "$preflight_warning" "$update_warning"
     fi
+    printf 'synced: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
     ;;
   state) printf 'alive\n' ;;
   *) exit 91 ;;
@@ -357,18 +356,23 @@ test_current_updater_warns_about_prebinding_workers() {
   mkdir -p "$w/sm1/state"
   # The seed predates the real ignore rules. Keep fixture state untracked.
   printf '/state/\n' >> "$(git -C "$w/main" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
-  for id in main-live home-live missing bound remote secondmate; do
+  for id in main-live home-live missing bound remote secondmate kindless ambiguous-kind; do
     state="$w/home/state"
     [ "$id" != home-live ] || state="$w/sm1/state"
     fm_write_meta "$state/$id.meta" "window=update-herdr:w1:p-$id" \
-      "backend=herdr" "kind=ship" "harness=claude" "worktree=$w/seed" "project=$w/seed" \
+      "backend=herdr" "harness=claude" "worktree=$w/seed" "project=$w/seed" \
       "herdr_session=update-herdr" "herdr_workspace_id=w1" "herdr_tab_id=w1:t1" "herdr_pane_id=w1:p-$id"
+    case "$id" in
+      home-live) printf 'kind=scout\n' ;;
+      secondmate) printf 'kind=secondmate\n' ;;
+      kindless) ;;
+      ambiguous-kind) printf 'kind=ship\nkind=scout\n' ;;
+      *) printf 'kind=ship\n' ;;
+    esac >> "$state/$id.meta"
     [ "$id" = main-live ] || printf 'endpoint_task_id=%s\n' "$id" >> "$state/$id.meta"
   done
   printf 'herdr_terminal_id=term-bound\n' >> "$w/home/state/bound.meta"
   printf 'remote_host=another-host\n' >> "$w/home/state/remote.meta"
-  sed 's/^kind=ship$/kind=secondmate/' "$w/home/state/secondmate.meta" > "$w/fake/secondmate.meta"
-  mv "$w/fake/secondmate.meta" "$w/home/state/secondmate.meta"
   original_records=$(cksum "$w/home/state/"*.meta "$w/sm1/state/home-live.meta")
   cat > "$w/fakebin/herdr" <<'SH'
 #!/usr/bin/env bash
@@ -396,6 +400,7 @@ case "$*" in
     printf '{"result":{"pane":{"pane_id":"%s","foreground_cwd":"/unrelated","agent":null}}}\n' "$3"
     ;;
   'pane get w1:p-missing --session update-herdr')
+    printf '%s\n' "$3" >> "$FM_FAKE_DIR/herdr-calls"
     printf '%s\n' '{"error":{"code":"pane_not_found"}}' >&2; exit 1 ;;
   *) printf 'unexpected:%s\n' "$*" >> "$FM_FAKE_DIR/herdr-calls"; exit 92 ;;
 esac
@@ -409,7 +414,9 @@ if [ "${1:-}" = -C ] && [ "${3:-}" = merge ] && [ "${4:-}" = --ff-only ]; then
     sm1) label=${FM_TEST_SECOND_MATE_LABEL:-secondmate sm1}; id=home-live ;;
     *) exit 92 ;;
   esac
-  grep -Fq "warning: $label: pre-binding Herdr worker record $id points to existing pane update-herdr:w1:p-$id. Pane ownership still needs verification." "$FM_FAKE_DIR/update.stderr" ||
+  warning_log=update.stderr
+  [ "${FM_TEST_SECOND_MATE_LABEL:-}" != 'remote home' ] || warning_log=update.stdout
+  grep -Fq "warning: $label: pre-binding Herdr worker record $id points to existing pane update-herdr:w1:p-$id. Pane ownership still needs verification." "$FM_FAKE_DIR/$warning_log" ||
     { printf 'warning was absent at the fast-forward for %s\n' "$label" >&2; exit 93; }
 fi
 exec "$FM_TEST_REAL_GIT" "$@"
@@ -427,10 +434,11 @@ SH
   warnings=$(cat "$w/fake/update.stderr")
   assert_contains "$warnings" "warning: firstmate: pre-binding Herdr worker record main-live points to existing pane update-herdr:w1:p-main-live" "primary warning missing"
   assert_contains "$warnings" "warning: secondmate sm1: pre-binding Herdr worker record home-live points to existing pane update-herdr:w1:p-home-live" "secondmate warning missing"
+  assert_not_contains "$warnings" " missing" "a missing pane produced a worker warning"
   assert_contains "$warnings" "manual recovery procedure in docs/herdr-backend.md" "warning omitted the recovery procedure"
   assert_contains "$out" "firstmate: updated " "warning blocked primary update"
   assert_contains "$out" "secondmate sm1: updated " "warning blocked secondmate update"
-  [ "$(cat "$w/fake/herdr-calls")" = $'w1:p-main-live\nw1:p-home-live' ] ||
+  [ "$(cat "$w/fake/herdr-calls")" = $'w1:p-main-live\nw1:p-missing\nw1:p-home-live' ] ||
     fail "update did not use read-only Herdr probes before advancing each checkout"
   [ "$(cksum "$w/home/state/"*.meta "$w/sm1/state/home-live.meta")" = "$original_records" ] ||
     fail "update warning changed the worker records"
@@ -448,20 +456,23 @@ SH
 
   : > "$w/fake/herdr-calls"
   bump_origin "$w" readme
-  out=$("${update_env[@]}" FM_HOME="$w/sm1" FM_STATE_OVERRIDE="$override_state" FM_TEST_SECOND_MATE_LABEL="remote home" \
-    "$ROOT/bin/fm-remote-secondmate-control.sh" update sm1 2> "$w/fake/update.stderr")
-  warnings=$(cat "$w/fake/update.stderr")
-  assert_contains "$warnings" "warning: firstmate: pre-binding Herdr worker record main-live points to existing pane update-herdr:w1:p-main-live" "remote update ignored the caller's state override"
-  assert_contains "$warnings" "warning: remote home: pre-binding Herdr worker record home-live points to existing pane update-herdr:w1:p-home-live" "remote update missed the host-local worker record"
-  assert_contains "$out" 'synced: ' "remote warning blocked the fast-forward"
+  "${update_env[@]}" FM_HOME="$w/sm1" FM_STATE_OVERRIDE="$override_state" FM_TEST_SECOND_MATE_LABEL="remote home" \
+    "$ROOT/bin/fm-remote-secondmate-control.sh" update sm1 > "$w/fake/update.stdout" 2> "$w/fake/update.stderr"
+  out=$(cat "$w/fake/update.stdout" "$w/fake/update.stderr")
+  assert_contains "$out" "warning: firstmate: pre-binding Herdr worker record main-live points to existing pane update-herdr:w1:p-main-live" "remote update ignored the caller's state override"
+  assert_contains "$out" "warning: remote home: pre-binding Herdr worker record home-live points to existing pane update-herdr:w1:p-home-live" "remote update missed the host-local worker record"
+  assert_contains "$(printf '%s\n' "$out" | tail -1)" 'synced: ' "the older controller could not read the advance verdict"
   [ "$(cat "$w/fake/herdr-calls")" = $'w1:p-main-live\nw1:p-home-live' ] || fail "remote update probed an unexpected pane"
 
   mkdir -p "$w/main/state"
   cp "$w/home/state/main-live.meta" "$w/main/state/main-live.meta"
   bump_origin "$w" readme
-  out=$("${update_env[@]}" FM_HOME="$w/sm1" FM_TEST_SECOND_MATE_LABEL="remote home" \
-    "$ROOT/bin/fm-remote-secondmate-control.sh" update sm1 2> "$w/fake/update.stderr")
-  assert_contains "$out" 'synced: ' "remote update without a state override failed"
+  git -C "$w/main" fetch -q origin
+  git -C "$w/sm1" merge -q --ff-only origin/main
+  "${update_env[@]}" FM_HOME="$w/sm1" FM_TEST_SECOND_MATE_LABEL="remote home" \
+    "$ROOT/bin/fm-remote-secondmate-control.sh" update sm1 > "$w/fake/update.stdout" 2> "$w/fake/update.stderr"
+  out=$(cat "$w/fake/update.stdout" "$w/fake/update.stderr")
+  assert_contains "$(printf '%s\n' "$out" | tail -1)" 'current: ' "the older controller could not read the already-current verdict"
 
   printf 'uncommitted local edit\n' >> "$w/main/AGENTS.md"
   if out=$("${update_env[@]}" FM_HOME="$w/sm1" \

@@ -528,7 +528,7 @@ cmd_update() {
   local id=$1 update_out root_status
   validate_id "$id"
   validate_home "$id"
-  if ! update_out=$(FM_HOME="$FM_ROOT" FM_ROOT_OVERRIDE="$FM_ROOT" "$SCRIPT_DIR/fm-update.sh"); then
+  if ! update_out=$(FM_HOME="$FM_ROOT" FM_ROOT_OVERRIDE="$FM_ROOT" "$SCRIPT_DIR/fm-update.sh" 2>&3); then
     [ -z "$update_out" ] || printf '%s\n' "$update_out" >&2
     die "remote code root update failed"
   fi
@@ -542,10 +542,10 @@ cmd_update() {
   esac
   # shellcheck disable=SC2329 # Called by ff_target for this update's sync.
   fm_ff_before_advance() {
-    fm_backend_herdr_warn_prebinding_workers "$1/state" "$2"
+    fm_backend_herdr_warn_prebinding_workers "$1/state" "$2" 2>&3
   }
   cmd_sync "$id"
-}
+} 3>&1
 
 # Read-only preflight for a transport that buffers the main job's output.
 cmd_update_check() {

@@ -593,10 +593,10 @@ fm_backend_herdr_warn_prebinding_workers() {  # <state-dir> <home-label>
   local state=$1 label=$2 meta id target session pane presence
   for meta in "$state"/*.meta; do
     if [ ! -f "$meta" ] || [ -L "$meta" ] || [ "$(fm_backend_meta_exact_value "$meta" backend)" != herdr ] ||
-      grep -Eq '^(remote_host=|herdr_terminal_id=|kind=secondmate$)' "$meta"; then
+      grep -Eq '^(remote_host=|herdr_terminal_id=)' "$meta"; then
       continue
     fi
-    case "$(fm_meta_get "$meta" kind)" in ''|ship|scout) ;; *) continue ;; esac
+    case "$(fm_backend_meta_exact_value "$meta" kind)" in ship|scout) ;; *) continue ;; esac
     id=${meta##*/}
     id=${id%.meta}
     if ! session=$(fm_backend_meta_exact_value "$meta" herdr_session) ||
