@@ -1,0 +1,19 @@
+Original launch retained, with a different agent of the same harness running in the same worktree
+{"pane_id":"w4:p1","cwd":"{run-worktree}/.h/work","foreground_cwd":"{run-worktree}/.h/work","terminal_id":"term_660c471d6a7424"}
+herdr-test> cd {run-worktree}/.h/work && codex --fixture-task original-worker --exit
+{"foreground_process_group_id":1679048,"foreground_processes":[{"cwd":"{run-worktree}/.h/work","name":"codex","pid":1679048}],"pane_id":"w4:p1","shell_pid":1678778}
+{"agent":"codex","agent_status":"idle","cwd":"{run-worktree}/.h/work","focused":false,"foreground_cwd":"{run-worktree}/.h/work","pane_id":"w4:p1","revision":2,"state_change_seq":3,"tab_id":"w4:t1","terminal_id":"term_660c471d6a7424","terminal_title":"@Lights:{run-worktree}/.h/work","terminal_title_stripped":"@Lights:{run-worktree}/.h/work","workspace_id":"w4"}
+Process from host process table
+1679048 1678778 1679048 /bin/bash {run-worktree}/.h/tools/codex --fixture-task unrelated-agent
+Refused: live process lacks the task-specific launch argument for original-worker
+
+The record names the pane creation directory. Herdr now reports a different foreground directory.
+{"pane_id":"w4:p1","cwd":"{run-worktree}/.h/other"}
+{"pane_id":"w4:p1","cwd":"{run-worktree}/.h/work","foreground_cwd":"{run-worktree}/.h/work","terminal_id":"term_660c471d6a7424"}
+Refused: foreground directory differs from recorded worktree {run-worktree}/.h/other
+
+Remote parent-side and secondmate records
+Refused at record scope: remote route or already bound
+Refused at record scope: kind=secondmate
+
+All four records remain byte-for-byte identical.

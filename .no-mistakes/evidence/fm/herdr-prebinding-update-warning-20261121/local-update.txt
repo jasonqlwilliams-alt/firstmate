@@ -1,0 +1,47 @@
+$ FM_HOME=<disposable-supervisor> FM_STATE_OVERRIDE=<disposable-state> bin/fm-update.sh
+
+firstmate: updated 829d909..b2470ad (instructions changed: AGENTS.md)
+secondmate local-mate: updated 829d909..b2470ad (instructions changed: AGENTS.md)
+reread-firstmate: yes
+restart-secondmates: none
+nudge-secondmates: none
+
+Warnings from stderr at each Git HEAD transaction
+Git transaction prepared for primary
+Old HEAD: 829d909e08f7ff093cfafc39604b2685ab7da035
+Pending HEAD: b2470adb9de20075ebe8bc3216ddb3e2426a6f89
+warning: firstmate: pre-binding Herdr worker record live-worker points to existing pane default:w1:p1. Pane ownership still needs verification. See the manual recovery procedure in docs/herdr-backend.md.
+Git transaction prepared for local-mate
+Old HEAD: 829d909e08f7ff093cfafc39604b2685ab7da035
+Pending HEAD: b2470adb9de20075ebe8bc3216ddb3e2426a6f89
+warning: firstmate: pre-binding Herdr worker record live-worker points to existing pane default:w1:p1. Pane ownership still needs verification. See the manual recovery procedure in docs/herdr-backend.md.
+warning: secondmate local-mate: pre-binding Herdr worker record mate-worker points to existing pane default:w2:p1. Pane ownership still needs verification. See the manual recovery procedure in docs/herdr-backend.md.
+
+Final Git HEADs
+primary: b2470adb9de20075ebe8bc3216ddb3e2426a6f89
+local-mate: b2470adb9de20075ebe8bc3216ddb3e2426a6f89
+origin: b2470adb9de20075ebe8bc3216ddb3e2426a6f89
+
+Read-only Herdr requests made by Firstmate
+pane get w5:p1 --session default
+pane get w1:p1 --session default
+pane get w2:p1 --session default
+
+Exact stderr
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  6 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+warning: firstmate: pre-binding Herdr worker record live-worker points to existing pane default:w1:p1. Pane ownership still needs verification. See the manual recovery procedure in docs/herdr-backend.md.
+warning: secondmate local-mate: pre-binding Herdr worker record mate-worker points to existing pane default:w2:p1. Pane ownership still needs verification. See the manual recovery procedure in docs/herdr-backend.md.
+
+All local metadata hashes are identical before and after.
+
+Live Herdr response for the closed pane
+{"error":{"code":"pane_not_found","message":"pane w5:p1 not found"},"id":"cli:pane:get"}
+
+Inputs whose records produced no warning
+closed-pane (gone), bound-worker (terminal ID), off-host (remote_host), mate-record (secondmate), ambiguous (two pane IDs), symlink (symlink).

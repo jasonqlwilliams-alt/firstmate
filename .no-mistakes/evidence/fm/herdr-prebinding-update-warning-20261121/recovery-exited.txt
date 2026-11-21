@@ -1,0 +1,36 @@
+$ fm-peek.sh exited-worker 20 (before binding)
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  2 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: Herdr endpoint identity is unreadable at default:w3:p1; refusing access and preserving the task record
+
+First pass of documented evidence checks
+{"pane_id":"w3:p1","cwd":"{run-worktree}/.h/work","foreground_cwd":"{run-worktree}/.h/work","terminal_id":"term_660c471d690773"}
+herdr-test> cd {run-worktree}/.h/work && codex --fixture-task exited-worker --exit
+{"foreground_process_group_id":1678750,"foreground_processes":[{"argv":["/bin/bash"],"cmdline":"/bin/bash","cwd":"{run-worktree}/.h/work","name":"bash","pid":1678750}],"pane_id":"w3:p1","shell_pid":1678750}
+    PID    PPID    PGID COMMAND
+1678750 1678321 1678750 /bin/bash
+    PID    PPID    PGID COMMAND
+
+Repeat evidence checks while holding .meta-exited-worker.lock
+{"pane_id":"w3:p1","cwd":"{run-worktree}/.h/work","foreground_cwd":"{run-worktree}/.h/work","terminal_id":"term_660c471d690773"}
+herdr-test> cd {run-worktree}/.h/work && codex --fixture-task exited-worker --exit
+{"foreground_process_group_id":1678750,"foreground_processes":[{"argv":["/bin/bash"],"cmdline":"/bin/bash","cwd":"{run-worktree}/.h/work","name":"bash","pid":1678750}],"pane_id":"w3:p1","shell_pid":1678750}
+    PID    PPID    PGID COMMAND
+1678750 1678321 1678750 /bin/bash
+    PID    PPID    PGID COMMAND
+herdr_terminal_id=term_660c471d690773
+
+$ FM_BACKEND_HERDR_ENDPOINT_META=<worker record> fm_backend_herdr_task_identity_state default:w3:p1
+match
+
+$ fm-peek.sh exited-worker 20 (after binding)
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+herdr-test> cd {run-worktree}/.h/work && codex --fixture-task exited-worker --exit
+Inert Codex fixture started for task exited-worker
+Inert Codex fixture exited for task exited-worker
+herdr-test>

@@ -1,0 +1,28 @@
+$ fm-peek.sh live-worker 20 (before binding)
+WARNING: watcher still down (same stale episode; last beat: 3s ago, grace 300s) - full banner already printed this episode.
+error: Herdr endpoint identity is unreadable at default:w1:p1; refusing access and preserving the task record
+
+First pass of documented evidence checks
+{"pane_id":"w1:p1","cwd":"{run-worktree}/.h/work","foreground_cwd":"{run-worktree}/.h/work","terminal_id":"term_660c471d4d0391"}
+herdr-test> cd {run-worktree}/.h/work && codex --fixture-task live-worker
+{"foreground_process_group_id":1678915,"foreground_processes":[{"cwd":"{run-worktree}/.h/work","name":"codex","pid":1678915}],"pane_id":"w1:p1","shell_pid":1678525}
+{"agent":"codex","agent_status":"idle","cwd":"{run-worktree}/.h/work","focused":true,"foreground_cwd":"{run-worktree}/.h/work","pane_id":"w1:p1","revision":1,"state_change_seq":1,"tab_id":"w1:t1","terminal_id":"term_660c471d4d0391","terminal_title":"@Lights:{run-worktree}/.h/other","terminal_title_stripped":"@Lights:{run-worktree}/.h/other","workspace_id":"w1"}
+Process from host process table
+1678915 1678525 1678915 /bin/bash {run-worktree}/.h/tools/codex --fixture-task live-worker
+
+Repeat evidence checks while holding .meta-live-worker.lock
+{"pane_id":"w1:p1","cwd":"{run-worktree}/.h/work","foreground_cwd":"{run-worktree}/.h/work","terminal_id":"term_660c471d4d0391"}
+herdr-test> cd {run-worktree}/.h/work && codex --fixture-task live-worker
+{"foreground_process_group_id":1678915,"foreground_processes":[{"cwd":"{run-worktree}/.h/work","name":"codex","pid":1678915}],"pane_id":"w1:p1","shell_pid":1678525}
+{"agent":"codex","agent_status":"idle","cwd":"{run-worktree}/.h/work","focused":true,"foreground_cwd":"{run-worktree}/.h/work","pane_id":"w1:p1","revision":1,"state_change_seq":1,"tab_id":"w1:t1","terminal_id":"term_660c471d4d0391","terminal_title":"@Lights:{run-worktree}/.h/other","terminal_title_stripped":"@Lights:{run-worktree}/.h/other","workspace_id":"w1"}
+Process from host process table
+1678915 1678525 1678915 /bin/bash {run-worktree}/.h/tools/codex --fixture-task live-worker
+herdr_terminal_id=term_660c471d4d0391
+
+$ FM_BACKEND_HERDR_ENDPOINT_META=<worker record> fm_backend_herdr_task_identity_state default:w1:p1
+match
+
+$ fm-peek.sh live-worker 20 (after binding)
+WARNING: watcher still down (same stale episode; last beat: 3s ago, grace 300s) - full banner already printed this episode.
+herdr-test> cd {run-worktree}/.h/work && codex --fixture-task live-worker
+Inert Codex fixture started for task live-worker

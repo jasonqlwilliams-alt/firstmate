@@ -1,0 +1,15 @@
+Remote entry command staged to the real Firstmate Linux job worker, using disposable Git repositories and Herdr records
+$ fm-remote-secondmate-control.sh update remote-mate
+
+remote-update (exit 0) stdout
+synced: b2470adb9de20075ebe8bc3216ddb3e2426a6f89 instr=AGENTS.md
+stderr bytes: 0
+
+remote-current (exit 0) stdout
+current: b2470adb9de20075ebe8bc3216ddb3e2426a6f89
+stderr bytes: 0
+
+Herdr CLI requests during both remote commands: 0
+remote-code HEAD: b2470adb9de20075ebe8bc3216ddb3e2426a6f89
+remote-mate HEAD: b2470adb9de20075ebe8bc3216ddb3e2426a6f89
+remote-extra HEAD: b2470adb9de20075ebe8bc3216ddb3e2426a6f89
