@@ -1,0 +1,1149 @@
+$ git rev-parse HEAD
+5d1c91ed325e0fb4fdcd3e28565ace7bd321e023
+$ lavish-axi --version
+[exit 0]
+0.1.61
+$ node --version
+[exit 0]
+v22.23.2
+$ lavish-axi server --port 50843
+
+## intact-table
+$ bin/fm-captain-hold.sh hold sample-ship --title 'Approve the release' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-ship
+$ bin/fm-captain-hold.sh hold sample-check --title 'Re-check the deploy host' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-check
+$ lavish-axi {run-worktree}/.phase-lavish/primary-retry/intact-table.html --no-open --no-gate
+[exit 0]
+session:
+  file: {run-worktree}/.phase-lavish/primary-retry/intact-table.html
+  url: "http://127.0.0.1:50843/session/9cdfff56a754a01f?no-gate=1"
+  status: opened
+next_step: [open-session guidance omitted]
+$ bin/fm-procevent-lavish.sh source-id {run-worktree}/.phase-lavish/primary-retry/intact-table.html
+[exit 0]
+lavish-9cdfff56a754a01f
+$ bin/fm-captain-hold.sh bind lavish-9cdfff56a754a01f
+[exit 0]
+bound: lavish-9cdfff56a754a01f -> (any)
+$ bin/fm-procevent-lavish.sh arm {run-worktree}/.phase-lavish/primary-retry/intact-table.html
+[exit 0]
+registered: lavish-9cdfff56a754a01f (lavish)
+armed: lavish-9cdfff56a754a01f
+artifact: {run-worktree}/.phase-lavish/primary-retry/intact-table.html
+$ bin/fm-procevent.sh start lavish-9cdfff56a754a01f
+$ node {run-worktree}/.phase-lavish/browser.mjs 'http://127.0.0.1:50843/session/9cdfff56a754a01f?no-gate=1' table ~/.no-mistakes/evidence/01M7Y8XYE4BM2KDDXYR69JNBAT/lavish-target-mixed-board.png
+[exit 0]
+Review UI loaded
+Queued both choice cards
+Feedback sent through Lavish UI, HTTP 200
+Submitted tags and labels: [["choice","Approve the release",null],["choice","Re-check the deploy host",null]]
+Disposable Chromium closed.
+[collector exit 0]
+reconciles-fed: lavish-9cdfff56a754a01f
+answers-fed: lavish-9cdfff56a754a01f
+captured: {run-worktree}/.phase-lavish/primary-retry/intact-table/state/procevent-inbox/lavish-9cdfff56a754a01f.1.result
+not-autohandled: lavish-9cdfff56a754a01f (left for the handler; still unacknowledged)
+Captured 2687 bytes, ending with newline: True. Sidecar: 'lavish'
+Top-level TOON fields: session -> prompts[2]{uid,prompt,selector,tag,text} -> next_step -> dom_snapshot
+$ bin/fm-procevent-lavish.sh read {run-worktree}/.phase-lavish/primary-retry/intact-table/state/procevent-inbox/lavish-9cdfff56a754a01f.1.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 2
+malformed_items: 0
+complete: no
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 2
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 2
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+ANNOTATION 2 of 2
+element_uid: 2
+element_selector: section#recheck
+tag: choice
+text:
+| Re-check the deploy host
+END ANNOTATIONS
+END LAVISH RESULT (2 of 2)
+$ bin/fm-procevent-lavish.sh answers {run-worktree}/.phase-lavish/primary-retry/intact-table/state/procevent-inbox/lavish-9cdfff56a754a01f.1.result
+[exit 0]
+sample-ship	ship	Approve the release
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-retry/intact-table/state/procevent-inbox/lavish-9cdfff56a754a01f.1.result (prompt block complete)
+$ bin/fm-procevent-lavish.sh reconciles {run-worktree}/.phase-lavish/primary-retry/intact-table/state/procevent-inbox/lavish-9cdfff56a754a01f.1.result
+[exit 0]
+sample-check
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-retry/intact-table/state/procevent-inbox/lavish-9cdfff56a754a01f.1.result (prompt block complete)
+$ bin/fm-tasks-axi.sh show sample-ship --full
+[exit 0]
+task:
+  id: sample-ship
+  title: Approve the release
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: Waiting for synthetic review
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: "-"
+  closed: 2026-11-21
+  deps: none
+  links: none
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: ce30fa0a13388ba307df46c1347dd44997b85d392c859166e92157d77849b758\nResolution mode: answered\n\nCaptain decision:\nCaptain answered this call through the captured result lavish-9cdfff56a754a01f sequence 1.\nTask: sample-ship\nAnswer: ship\nAnswer as shown to the captain: Approve the release"
+$ bin/fm-captain-hold.sh reconcile list
+[exit 0]
+sample-check	requested=2026-11-21T08:38:56Z	source=the captured result lavish-9cdfff56a754a01f sequence 1
+reconcile-requests: 1
+Durable wake: 1795250338	1	check	procevent:lavish-9cdfff56a754a01f:1	check: procevent lavish lavish-9cdfff56a754a01f 1
+Mismatch: read exit: expected 0, got 3
+Mismatch: read completeness: expected True, got False
+Mismatch: answers incomplete diagnostic: expected False, got True
+Mismatch: reconciles incomplete diagnostic: expected False, got True
+Result: fail
+$ bin/fm-procevent-lavish.sh retire {run-worktree}/.phase-lavish/primary-retry/intact-table.html
+[exit 0]
+retired: lavish-9cdfff56a754a01f
+
+## intact-mixed
+$ bin/fm-captain-hold.sh hold sample-ship --title 'Approve the release' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-ship
+$ bin/fm-captain-hold.sh hold sample-check --title 'Re-check the deploy host' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-check
+$ lavish-axi {run-worktree}/.phase-lavish/primary-retry/intact-mixed.html --no-open --no-gate
+[exit 0]
+session:
+  file: {run-worktree}/.phase-lavish/primary-retry/intact-mixed.html
+  url: "http://127.0.0.1:50843/session/2fd933baa59b6448?no-gate=1"
+  status: opened
+next_step: [open-session guidance omitted]
+$ bin/fm-procevent-lavish.sh source-id {run-worktree}/.phase-lavish/primary-retry/intact-mixed.html
+[exit 0]
+lavish-2fd933baa59b6448
+$ bin/fm-captain-hold.sh bind lavish-2fd933baa59b6448
+[exit 0]
+bound: lavish-2fd933baa59b6448 -> (any)
+$ bin/fm-procevent-lavish.sh arm {run-worktree}/.phase-lavish/primary-retry/intact-mixed.html
+[exit 0]
+registered: lavish-2fd933baa59b6448 (lavish)
+armed: lavish-2fd933baa59b6448
+artifact: {run-worktree}/.phase-lavish/primary-retry/intact-mixed.html
+$ bin/fm-procevent.sh start lavish-2fd933baa59b6448
+$ node {run-worktree}/.phase-lavish/browser.mjs 'http://127.0.0.1:50843/session/2fd933baa59b6448?no-gate=1' mixed ~/.no-mistakes/evidence/01M7Y8XYE4BM2KDDXYR69JNBAT/lavish-target-mixed-board.png
+[exit 0]
+Review UI loaded
+Queued both choice cards
+Layout audit: 200 1060 [ 'page-horizontal-overflow' ]
+Selected a browser-detected layout issue and queued the fix.
+Feedback sent through Lavish UI, HTTP 200
+Submitted tags and labels: [["choice","Approve the release",null],["choice","Re-check the deploy host",null],["layout-warnings","Layout issue: 1 selected","layout-warnings"]]
+Disposable Chromium closed.
+[collector exit 0]
+reconciles-fed: lavish-2fd933baa59b6448
+answers-fed: lavish-2fd933baa59b6448
+captured: {run-worktree}/.phase-lavish/primary-retry/intact-mixed/state/procevent-inbox/lavish-2fd933baa59b6448.1.result
+not-autohandled: lavish-2fd933baa59b6448 (left for the handler; still unacknowledged)
+Captured 4448 bytes, ending with newline: True. Sidecar: 'lavish'
+Top-level TOON fields: session -> prompts[3] -> next_step -> dom_snapshot
+$ bin/fm-procevent-lavish.sh read {run-worktree}/.phase-lavish/primary-retry/intact-mixed/state/procevent-inbox/lavish-2fd933baa59b6448.1.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 3
+presented_items: 3
+malformed_items: 0
+complete: no
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 3
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 3
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+ANNOTATION 2 of 3
+element_uid: 2
+element_selector: section#recheck
+tag: choice
+text:
+| Re-check the deploy host
+ANNOTATION 3 of 3
+element_uid: 
+element_selector: 
+tag: layout-warnings
+text:
+| Layout issue: 1 selected
+prompt:
+| Fix this layout issue the browser detected in this artifact:
+| 1. [77fef98a29a9cda9] Page scrolls sideways - The page is 2235px wider than the 1060px viewport, so content sits off-screen. Target: html. Viewport: Desktop (1060px). Status: Queued for fix.
+| 
+| Apply every listed fix in one pass before saving so the review refreshes once. A queued layout issue is a repair request, not a resolved issue: Lavish only marks it resolved after a newer artifact load and a complete diagnostic pass for the same viewport no longer detects it.
+END ANNOTATIONS
+END LAVISH RESULT (3 of 3)
+$ bin/fm-procevent-lavish.sh answers {run-worktree}/.phase-lavish/primary-retry/intact-mixed/state/procevent-inbox/lavish-2fd933baa59b6448.1.result
+[exit 0]
+sample-ship	ship	Approve the release
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-retry/intact-mixed/state/procevent-inbox/lavish-2fd933baa59b6448.1.result (prompt block complete)
+$ bin/fm-procevent-lavish.sh reconciles {run-worktree}/.phase-lavish/primary-retry/intact-mixed/state/procevent-inbox/lavish-2fd933baa59b6448.1.result
+[exit 0]
+sample-check	Host example: Context data: {"probe":"sample"}
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-retry/intact-mixed/state/procevent-inbox/lavish-2fd933baa59b6448.1.result (prompt block complete)
+$ bin/fm-tasks-axi.sh show sample-ship --full
+[exit 0]
+task:
+  id: sample-ship
+  title: Approve the release
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: Waiting for synthetic review
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: "-"
+  closed: 2026-11-21
+  deps: none
+  links: none
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: c2b898de701832ef7b8e81e7e9c4d10374a606619a7c6f3470ba801c49ae8700\nResolution mode: answered\n\nCaptain decision:\nCaptain answered this call through the captured result lavish-2fd933baa59b6448 sequence 1.\nTask: sample-ship\nAnswer: ship\nAnswer as shown to the captain: Approve the release"
+$ bin/fm-captain-hold.sh reconcile list
+[exit 0]
+sample-check	requested=2026-11-21T08:39:05Z	source=the captured result lavish-2fd933baa59b6448 sequence 1; captain note: Host example: Context data: {"probe":"sample"}
+reconcile-requests: 1
+Durable wake: 1795250348	1	check	procevent:lavish-2fd933baa59b6448:1	check: procevent lavish lavish-2fd933baa59b6448 1
+Mismatch: read exit: expected 0, got 3
+Mismatch: read completeness: expected True, got False
+Mismatch: answers incomplete diagnostic: expected False, got True
+Mismatch: reconciles incomplete diagnostic: expected False, got True
+Result: fail
+$ bin/fm-procevent-lavish.sh retire {run-worktree}/.phase-lavish/primary-retry/intact-mixed.html
+[exit 0]
+retired: lavish-2fd933baa59b6448
+
+## explicit-empty
+$ lavish-axi {run-worktree}/.phase-lavish/primary-retry/explicit-empty.html --no-open --no-gate
+[exit 0]
+session:
+  file: {run-worktree}/.phase-lavish/primary-retry/explicit-empty.html
+  url: "http://127.0.0.1:50843/session/0099f0bc13132c42?no-gate=1"
+  status: opened
+next_step: [open-session guidance omitted]
+$ bin/fm-procevent-lavish.sh source-id {run-worktree}/.phase-lavish/primary-retry/explicit-empty.html
+[exit 0]
+lavish-0099f0bc13132c42
+$ bin/fm-procevent-lavish.sh arm {run-worktree}/.phase-lavish/primary-retry/explicit-empty.html
+[exit 0]
+registered: lavish-0099f0bc13132c42 (lavish)
+armed: lavish-0099f0bc13132c42
+artifact: {run-worktree}/.phase-lavish/primary-retry/explicit-empty.html
+$ bin/fm-procevent.sh start lavish-0099f0bc13132c42
+$ node {run-worktree}/.phase-lavish/browser.mjs 'http://127.0.0.1:50843/session/0099f0bc13132c42?no-gate=1' empty ~/.no-mistakes/evidence/01M7Y8XYE4BM2KDDXYR69JNBAT/lavish-target-mixed-board.png
+[exit 1]
+Missing fixture image HTTP status: 404
+Layout audit: 200 1060 []
+Disposable Chromium closed.
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+
+page.waitForResponse: Timeout 12000ms exceeded while waiting for event "response"
+    at {run-worktree}/.phase-lavish/browser.mjs:29:25 {
+  log: [],
+  name: 'TimeoutError'
+}
+
+Node.js v22.23.2
+$ bin/fm-procevent-lavish.sh retire {run-worktree}/.phase-lavish/primary-retry/explicit-empty.html
+[exit 0]
+retired: lavish-0099f0bc13132c42
+
+## Tear down
+$ lavish-axi stop --port 50843
+[exit 0]
+server:
+  status: stopped
+  port: 50843
+Disposable Lavish server exited with status 0.
+Results: {'intact-table': 'fail', 'intact-mixed': 'fail'}
+$ git rev-parse HEAD
+5d1c91ed325e0fb4fdcd3e28565ace7bd321e023
+$ lavish-axi --version
+[exit 0]
+0.1.61
+$ node --version
+[exit 0]
+v22.23.2
+$ lavish-axi server --port 32775
+Retry after moving the missing-image request after the artifact SDK has initialized. The tabular and mixed buffers are the current-run captures above.
+
+## explicit-empty
+$ lavish-axi {run-worktree}/.phase-lavish/primary-resume/explicit-empty.html --no-open --no-gate
+[exit 0]
+session:
+  file: {run-worktree}/.phase-lavish/primary-resume/explicit-empty.html
+  url: "http://127.0.0.1:32775/session/c9b507589714989b?no-gate=1"
+  status: opened
+next_step: [open-session guidance omitted]
+$ bin/fm-procevent-lavish.sh source-id {run-worktree}/.phase-lavish/primary-resume/explicit-empty.html
+[exit 0]
+lavish-c9b507589714989b
+$ bin/fm-procevent-lavish.sh arm {run-worktree}/.phase-lavish/primary-resume/explicit-empty.html
+[exit 0]
+registered: lavish-c9b507589714989b (lavish)
+armed: lavish-c9b507589714989b
+artifact: {run-worktree}/.phase-lavish/primary-resume/explicit-empty.html
+$ bin/fm-procevent.sh start lavish-c9b507589714989b
+$ node {run-worktree}/.phase-lavish/browser.mjs 'http://127.0.0.1:32775/session/c9b507589714989b?no-gate=1' empty ~/.no-mistakes/evidence/01M7Y8XYE4BM2KDDXYR69JNBAT/lavish-target-mixed-board.png
+[exit 0]
+Missing fixture image HTTP status: 404
+Lavish received the browser artifact failure, HTTP 200
+Disposable Chromium closed.
+[collector exit 0]
+captured: {run-worktree}/.phase-lavish/primary-resume/explicit-empty/state/procevent-inbox/lavish-c9b507589714989b.1.result
+not-autohandled: lavish-c9b507589714989b (left for the handler; still unacknowledged)
+Captured 2206 bytes, ending with newline: True. Sidecar: 'lavish'
+Top-level TOON fields: session -> prompts -> artifact_failures[1]{kind,detail,severity} -> next_step -> dom_snapshot
+$ bin/fm-procevent-lavish.sh read {run-worktree}/.phase-lavish/primary-resume/explicit-empty/state/procevent-inbox/lavish-c9b507589714989b.1.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 0
+presented_items: 0
+malformed_items: 0
+complete: no
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+session_ending_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of 0)
+$ bin/fm-procevent-lavish.sh answers {run-worktree}/.phase-lavish/primary-resume/explicit-empty/state/procevent-inbox/lavish-c9b507589714989b.1.result
+[exit 0]
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/explicit-empty/state/procevent-inbox/lavish-c9b507589714989b.1.result (prompt block complete)
+$ bin/fm-procevent-lavish.sh reconciles {run-worktree}/.phase-lavish/primary-resume/explicit-empty/state/procevent-inbox/lavish-c9b507589714989b.1.result
+[exit 0]
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/explicit-empty/state/procevent-inbox/lavish-c9b507589714989b.1.result (prompt block complete)
+Durable wake: 1795250399	1	check	procevent:lavish-c9b507589714989b:1	check: procevent lavish lavish-c9b507589714989b 1
+Mismatch: read exit: expected 0, got 3
+Mismatch: read completeness: expected True, got False
+Mismatch: answers incomplete diagnostic: expected False, got True
+Mismatch: reconciles incomplete diagnostic: expected False, got True
+Result: fail
+$ bin/fm-procevent-lavish.sh retire {run-worktree}/.phase-lavish/primary-resume/explicit-empty.html
+[exit 0]
+retired: lavish-c9b507589714989b
+
+## table-row-boundary
+Replay of actual current-run Lavish poll stdout through Firstmate's normal capture limit.
+$ bin/fm-captain-hold.sh hold sample-ship --title 'Approve the release' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-ship
+$ bin/fm-captain-hold.sh hold sample-check --title 'Re-check the deploy host' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-check
+FM_PROCEVENT_MAX_OUTPUT_BYTES=643; original length 2687 bytes.
+$ bin/fm-captain-hold.sh bind table-row-boundary
+[exit 0]
+bound: table-row-boundary -> (any)
+$ bin/fm-procevent.sh register lavish table-row-boundary -- /bin/cat {run-worktree}/.phase-lavish/primary-resume/table-row-boundary/poll-stdout.toon
+[exit 0]
+registered: table-row-boundary (lavish)
+$ bin/fm-procevent.sh start table-row-boundary
+[exit 0]
+reconciles-fed: table-row-boundary
+answers-fed: table-row-boundary
+captured: {run-worktree}/.phase-lavish/primary-resume/table-row-boundary/state/procevent-inbox/table-row-boundary.1.result
+truncated: table-row-boundary at 643 bytes
+not-autohandled: table-row-boundary (left for the handler; still unacknowledged)
+Captured 643 bytes, ending with newline: False. Sidecar: 'lavish\ncapture-tail=nxxx'
+Top-level TOON fields: session -> prompts[2]{uid,prompt,selector,tag,text}
+$ bin/fm-procevent-lavish.sh read {run-worktree}/.phase-lavish/primary-resume/table-row-boundary/state/procevent-inbox/table-row-boundary.1.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 2
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 2
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 2
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+ANNOTATION 2 of 2
+element_uid: 2
+element_selector: section#recheck
+tag: choice
+text:
+| Re-check the deploy host
+END ANNOTATIONS
+END LAVISH RESULT (2 of 2)
+$ bin/fm-procevent-lavish.sh answers {run-worktree}/.phase-lavish/primary-resume/table-row-boundary/state/procevent-inbox/table-row-boundary.1.result
+[exit 0]
+sample-ship	ship	Approve the release
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/table-row-boundary/state/procevent-inbox/table-row-boundary.1.result (prompt block complete)
+$ bin/fm-procevent-lavish.sh reconciles {run-worktree}/.phase-lavish/primary-resume/table-row-boundary/state/procevent-inbox/table-row-boundary.1.result
+[exit 0]
+sample-check
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/table-row-boundary/state/procevent-inbox/table-row-boundary.1.result (prompt block complete)
+$ bin/fm-tasks-axi.sh show sample-ship --full
+[exit 0]
+task:
+  id: sample-ship
+  title: Approve the release
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: Waiting for synthetic review
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: "-"
+  closed: 2026-11-21
+  deps: none
+  links: none
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: 45978e8f6ca134aae04b127e55a93fe12bc5d6e99daf49281075e912e5375d71\nResolution mode: answered\n\nCaptain decision:\nCaptain answered this call through the captured result table-row-boundary sequence 1.\nTask: sample-ship\nAnswer: ship\nAnswer as shown to the captain: Approve the release"
+$ bin/fm-captain-hold.sh reconcile list
+[exit 0]
+sample-check	requested=2026-11-21T08:40:05Z	source=the captured result table-row-boundary sequence 1
+reconcile-requests: 1
+Durable wake: 1795250407	1	check	procevent:table-row-boundary:1	check: procevent lavish table-row-boundary 1
+Result: pass
+$ bin/fm-procevent.sh retire table-row-boundary
+[exit 0]
+retired: table-row-boundary
+
+## partial-next-key
+Replay of actual current-run Lavish poll stdout through Firstmate's normal capture limit.
+$ bin/fm-captain-hold.sh hold sample-ship --title 'Approve the release' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-ship
+$ bin/fm-captain-hold.sh hold sample-check --title 'Re-check the deploy host' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-check
+FM_PROCEVENT_MAX_OUTPUT_BYTES=1879; original length 4448 bytes.
+$ bin/fm-captain-hold.sh bind partial-next-key
+[exit 0]
+bound: partial-next-key -> (any)
+$ bin/fm-procevent.sh register lavish partial-next-key -- /bin/cat {run-worktree}/.phase-lavish/primary-resume/partial-next-key/poll-stdout.toon
+[exit 0]
+registered: partial-next-key (lavish)
+$ bin/fm-procevent.sh start partial-next-key
+[exit 0]
+reconciles-fed: partial-next-key
+answers-fed: partial-next-key
+captured: {run-worktree}/.phase-lavish/primary-resume/partial-next-key/state/procevent-inbox/partial-next-key.1.result
+truncated: partial-next-key at 1879 bytes
+not-autohandled: partial-next-key (left for the handler; still unacknowledged)
+Captured 1879 bytes, ending with newline: False. Sidecar: 'lavish\ncapture-tail=xxxx'
+Top-level TOON fields: session -> prompts[3]
+$ bin/fm-procevent-lavish.sh read {run-worktree}/.phase-lavish/primary-resume/partial-next-key/state/procevent-inbox/partial-next-key.1.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 3
+presented_items: 3
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 3
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 3
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+ANNOTATION 2 of 3
+element_uid: 2
+element_selector: section#recheck
+tag: choice
+text:
+| Re-check the deploy host
+ANNOTATION 3 of 3
+element_uid: 
+element_selector: 
+tag: layout-warnings
+text:
+| Layout issue: 1 selected
+prompt:
+| Fix this layout issue the browser detected in this artifact:
+| 1. [77fef98a29a9cda9] Page scrolls sideways - The page is 2235px wider than the 1060px viewport, so content sits off-screen. Target: html. Viewport: Desktop (1060px). Status: Queued for fix.
+| 
+| Apply every listed fix in one pass before saving so the review refreshes once. A queued layout issue is a repair request, not a resolved issue: Lavish only marks it resolved after a newer artifact load and a complete diagnostic pass for the same viewport no longer detects it.
+END ANNOTATIONS
+END LAVISH RESULT (3 of 3)
+$ bin/fm-procevent-lavish.sh answers {run-worktree}/.phase-lavish/primary-resume/partial-next-key/state/procevent-inbox/partial-next-key.1.result
+[exit 0]
+sample-ship	ship	Approve the release
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/partial-next-key/state/procevent-inbox/partial-next-key.1.result (prompt block complete)
+$ bin/fm-procevent-lavish.sh reconciles {run-worktree}/.phase-lavish/primary-resume/partial-next-key/state/procevent-inbox/partial-next-key.1.result
+[exit 0]
+sample-check	Host example: Context data: {"probe":"sample"}
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/partial-next-key/state/procevent-inbox/partial-next-key.1.result (prompt block complete)
+$ bin/fm-tasks-axi.sh show sample-ship --full
+[exit 0]
+task:
+  id: sample-ship
+  title: Approve the release
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: Waiting for synthetic review
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: "-"
+  closed: 2026-11-21
+  deps: none
+  links: none
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: 0863b8113c58f75b4170ab13a84a82d982391b95758618d3adec710197f6705f\nResolution mode: answered\n\nCaptain decision:\nCaptain answered this call through the captured result partial-next-key sequence 1.\nTask: sample-ship\nAnswer: ship\nAnswer as shown to the captain: Approve the release"
+$ bin/fm-captain-hold.sh reconcile list
+[exit 0]
+sample-check	requested=2026-11-21T08:40:13Z	source=the captured result partial-next-key sequence 1; captain note: Host example: Context data: {"probe":"sample"}
+reconcile-requests: 1
+Durable wake: 1795250417	1	check	procevent:partial-next-key:1	check: procevent lavish partial-next-key 1
+Result: pass
+$ bin/fm-procevent.sh retire partial-next-key
+[exit 0]
+retired: partial-next-key
+
+## partial-snapshot
+Replay of actual current-run Lavish poll stdout through Firstmate's normal capture limit.
+$ bin/fm-captain-hold.sh hold sample-ship --title 'Approve the release' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-ship
+$ bin/fm-captain-hold.sh hold sample-check --title 'Re-check the deploy host' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-check
+FM_PROCEVENT_MAX_OUTPUT_BYTES=3779; original length 4448 bytes.
+$ bin/fm-captain-hold.sh bind partial-snapshot
+[exit 0]
+bound: partial-snapshot -> (any)
+$ bin/fm-procevent.sh register lavish partial-snapshot -- /bin/cat {run-worktree}/.phase-lavish/primary-resume/partial-snapshot/poll-stdout.toon
+[exit 0]
+registered: partial-snapshot (lavish)
+$ bin/fm-procevent.sh start partial-snapshot
+[exit 0]
+reconciles-fed: partial-snapshot
+answers-fed: partial-snapshot
+captured: {run-worktree}/.phase-lavish/primary-resume/partial-snapshot/state/procevent-inbox/partial-snapshot.1.result
+truncated: partial-snapshot at 3779 bytes
+not-autohandled: partial-snapshot (left for the handler; still unacknowledged)
+Captured 3779 bytes, ending with newline: False. Sidecar: 'lavish\ncapture-tail=xxsx'
+Top-level TOON fields: session -> prompts[3] -> next_step -> dom_snapshot
+$ bin/fm-procevent-lavish.sh read {run-worktree}/.phase-lavish/primary-resume/partial-snapshot/state/procevent-inbox/partial-snapshot.1.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 3
+presented_items: 3
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 3
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 3
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+ANNOTATION 2 of 3
+element_uid: 2
+element_selector: section#recheck
+tag: choice
+text:
+| Re-check the deploy host
+ANNOTATION 3 of 3
+element_uid: 
+element_selector: 
+tag: layout-warnings
+text:
+| Layout issue: 1 selected
+prompt:
+| Fix this layout issue the browser detected in this artifact:
+| 1. [77fef98a29a9cda9] Page scrolls sideways - The page is 2235px wider than the 1060px viewport, so content sits off-screen. Target: html. Viewport: Desktop (1060px). Status: Queued for fix.
+| 
+| Apply every listed fix in one pass before saving so the review refreshes once. A queued layout issue is a repair request, not a resolved issue: Lavish only marks it resolved after a newer artifact load and a complete diagnostic pass for the same viewport no longer detects it.
+END ANNOTATIONS
+END LAVISH RESULT (3 of 3)
+$ bin/fm-procevent-lavish.sh answers {run-worktree}/.phase-lavish/primary-resume/partial-snapshot/state/procevent-inbox/partial-snapshot.1.result
+[exit 0]
+sample-ship	ship	Approve the release
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/partial-snapshot/state/procevent-inbox/partial-snapshot.1.result (prompt block complete)
+$ bin/fm-procevent-lavish.sh reconciles {run-worktree}/.phase-lavish/primary-resume/partial-snapshot/state/procevent-inbox/partial-snapshot.1.result
+[exit 0]
+sample-check	Host example: Context data: {"probe":"sample"}
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/partial-snapshot/state/procevent-inbox/partial-snapshot.1.result (prompt block complete)
+$ bin/fm-tasks-axi.sh show sample-ship --full
+[exit 0]
+task:
+  id: sample-ship
+  title: Approve the release
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: Waiting for synthetic review
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: "-"
+  closed: 2026-11-21
+  deps: none
+  links: none
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: 663cb89514c1a1fc75a5172d05c4c21a5ad7ba6cb1b9a3146f98da05a95cd570\nResolution mode: answered\n\nCaptain decision:\nCaptain answered this call through the captured result partial-snapshot sequence 1.\nTask: sample-ship\nAnswer: ship\nAnswer as shown to the captain: Approve the release"
+$ bin/fm-captain-hold.sh reconcile list
+[exit 0]
+sample-check	requested=2026-11-21T08:40:24Z	source=the captured result partial-snapshot sequence 1; captain note: Host example: Context data: {"probe":"sample"}
+reconcile-requests: 1
+Durable wake: 1795250427	1	check	procevent:partial-snapshot:1	check: procevent lavish partial-snapshot 1
+Result: pass
+$ bin/fm-procevent.sh retire partial-snapshot
+[exit 0]
+retired: partial-snapshot
+
+## partial-choice-label
+Replay of actual current-run Lavish poll stdout through Firstmate's normal capture limit.
+$ bin/fm-captain-hold.sh hold sample-ship --title 'Approve the release' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-ship
+$ bin/fm-captain-hold.sh hold sample-check --title 'Re-check the deploy host' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-check
+FM_PROCEVENT_MAX_OUTPUT_BYTES=628; original length 2687 bytes.
+$ bin/fm-captain-hold.sh bind partial-choice-label
+[exit 0]
+bound: partial-choice-label -> (any)
+$ bin/fm-procevent.sh register lavish partial-choice-label -- /bin/cat {run-worktree}/.phase-lavish/primary-resume/partial-choice-label/poll-stdout.toon
+[exit 0]
+registered: partial-choice-label (lavish)
+$ bin/fm-procevent.sh start partial-choice-label
+[exit 1]
+captured: {run-worktree}/.phase-lavish/primary-resume/partial-choice-label/state/procevent-inbox/partial-choice-label.1.result
+truncated: partial-choice-label at 628 bytes
+not-autohandled: partial-choice-label (left for the handler; still unacknowledged)
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/partial-choice-label/state/procevent-inbox/partial-choice-label.1.result
+Captured 628 bytes, ending with newline: False. Sidecar: 'lavish\ncapture-tail=xxxs'
+Top-level TOON fields: session -> prompts[2]{uid,prompt,selector,tag,text}
+$ bin/fm-procevent-lavish.sh read {run-worktree}/.phase-lavish/primary-resume/partial-choice-label/state/procevent-inbox/partial-choice-label.1.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 1
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+END ANNOTATIONS
+END LAVISH RESULT (1 of 2)
+$ bin/fm-procevent-lavish.sh answers {run-worktree}/.phase-lavish/primary-resume/partial-choice-label/state/procevent-inbox/partial-choice-label.1.result
+[exit 3]
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/partial-choice-label/state/procevent-inbox/partial-choice-label.1.result
+$ bin/fm-procevent-lavish.sh reconciles {run-worktree}/.phase-lavish/primary-resume/partial-choice-label/state/procevent-inbox/partial-choice-label.1.result
+[exit 3]
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/partial-choice-label/state/procevent-inbox/partial-choice-label.1.result
+$ bin/fm-tasks-axi.sh show sample-ship --full
+[exit 0]
+task:
+  id: sample-ship
+  title: Approve the release
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: yes
+  hold_reason: Waiting for synthetic review
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: 2026-11-21
+  closed: "-"
+  deps: none
+  links: none
+  body: "Captain hold set: 2026-11-21T08:40:28Z"
+$ bin/fm-captain-hold.sh reconcile list
+[exit 0]
+reconcile-requests: 0
+Durable wake: 1795250432	1	check	procevent:partial-choice-label:1	check: procevent lavish partial-choice-label 1
+Result: pass
+$ bin/fm-procevent.sh retire partial-choice-label
+[exit 0]
+retired: partial-choice-label
+
+## partial-nested-target
+Replay of actual current-run Lavish poll stdout through Firstmate's normal capture limit.
+$ bin/fm-captain-hold.sh hold sample-ship --title 'Approve the release' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-ship
+$ bin/fm-captain-hold.sh hold sample-check --title 'Re-check the deploy host' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-check
+FM_PROCEVENT_MAX_OUTPUT_BYTES=1592; original length 4448 bytes.
+$ bin/fm-captain-hold.sh bind partial-nested-target
+[exit 0]
+bound: partial-nested-target -> (any)
+$ bin/fm-procevent.sh register lavish partial-nested-target -- /bin/cat {run-worktree}/.phase-lavish/primary-resume/partial-nested-target/poll-stdout.toon
+[exit 0]
+registered: partial-nested-target (lavish)
+$ bin/fm-procevent.sh start partial-nested-target
+[exit 1]
+captured: {run-worktree}/.phase-lavish/primary-resume/partial-nested-target/state/procevent-inbox/partial-nested-target.1.result
+truncated: partial-nested-target at 1592 bytes
+not-autohandled: partial-nested-target (left for the handler; still unacknowledged)
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/partial-nested-target/state/procevent-inbox/partial-nested-target.1.result
+Captured 1592 bytes, ending with newline: False. Sidecar: 'lavish\ncapture-tail=xsxx'
+Top-level TOON fields: session -> prompts[3]
+$ bin/fm-procevent-lavish.sh read {run-worktree}/.phase-lavish/primary-resume/partial-nested-target/state/procevent-inbox/partial-nested-target.1.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 3
+presented_items: 2
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 2
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 2
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+ANNOTATION 2 of 2
+element_uid: 2
+element_selector: section#recheck
+tag: choice
+text:
+| Re-check the deploy host
+END ANNOTATIONS
+END LAVISH RESULT (2 of 3)
+$ bin/fm-procevent-lavish.sh answers {run-worktree}/.phase-lavish/primary-resume/partial-nested-target/state/procevent-inbox/partial-nested-target.1.result
+[exit 3]
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/partial-nested-target/state/procevent-inbox/partial-nested-target.1.result
+$ bin/fm-procevent-lavish.sh reconciles {run-worktree}/.phase-lavish/primary-resume/partial-nested-target/state/procevent-inbox/partial-nested-target.1.result
+[exit 3]
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/partial-nested-target/state/procevent-inbox/partial-nested-target.1.result
+$ bin/fm-tasks-axi.sh show sample-ship --full
+[exit 0]
+task:
+  id: sample-ship
+  title: Approve the release
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: yes
+  hold_reason: Waiting for synthetic review
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: 2026-11-21
+  closed: "-"
+  deps: none
+  links: none
+  body: "Captain hold set: 2026-11-21T08:40:33Z"
+$ bin/fm-captain-hold.sh reconcile list
+[exit 0]
+reconcile-requests: 0
+Durable wake: 1795250437	1	check	procevent:partial-nested-target:1	check: procevent lavish partial-nested-target 1
+Result: pass
+$ bin/fm-procevent.sh retire partial-nested-target
+[exit 0]
+retired: partial-nested-target
+
+## partial-prompt-header
+Replay of actual current-run Lavish poll stdout through Firstmate's normal capture limit.
+$ bin/fm-captain-hold.sh hold sample-ship --title 'Approve the release' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-ship
+$ bin/fm-captain-hold.sh hold sample-check --title 'Re-check the deploy host' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-check
+FM_PROCEVENT_MAX_OUTPUT_BYTES=162; original length 4448 bytes.
+$ bin/fm-captain-hold.sh bind partial-prompt-header
+[exit 0]
+bound: partial-prompt-header -> (any)
+$ bin/fm-procevent.sh register lavish partial-prompt-header -- /bin/cat {run-worktree}/.phase-lavish/primary-resume/partial-prompt-header/poll-stdout.toon
+[exit 0]
+registered: partial-prompt-header (lavish)
+$ bin/fm-procevent.sh start partial-prompt-header
+[exit 1]
+captured: {run-worktree}/.phase-lavish/primary-resume/partial-prompt-header/state/procevent-inbox/partial-prompt-header.1.result
+truncated: partial-prompt-header at 162 bytes
+not-autohandled: partial-prompt-header (left for the handler; still unacknowledged)
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/partial-prompt-header/state/procevent-inbox/partial-prompt-header.1.result
+Captured 162 bytes, ending with newline: False. Sidecar: 'lavish\ncapture-tail=xxxx'
+Top-level TOON fields: session
+$ bin/fm-procevent-lavish.sh read {run-worktree}/.phase-lavish/primary-resume/partial-prompt-header/state/procevent-inbox/partial-prompt-header.1.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: unknown
+presented_items: 0
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+session_ending_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of unknown)
+$ bin/fm-procevent-lavish.sh answers {run-worktree}/.phase-lavish/primary-resume/partial-prompt-header/state/procevent-inbox/partial-prompt-header.1.result
+[exit 3]
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/partial-prompt-header/state/procevent-inbox/partial-prompt-header.1.result
+$ bin/fm-procevent-lavish.sh reconciles {run-worktree}/.phase-lavish/primary-resume/partial-prompt-header/state/procevent-inbox/partial-prompt-header.1.result
+[exit 3]
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/partial-prompt-header/state/procevent-inbox/partial-prompt-header.1.result
+$ bin/fm-tasks-axi.sh show sample-ship --full
+[exit 0]
+task:
+  id: sample-ship
+  title: Approve the release
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: yes
+  hold_reason: Waiting for synthetic review
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: 2026-11-21
+  closed: "-"
+  deps: none
+  links: none
+  body: "Captain hold set: 2026-11-21T08:40:38Z"
+$ bin/fm-captain-hold.sh reconcile list
+[exit 0]
+reconcile-requests: 0
+Durable wake: 1795250441	1	check	procevent:partial-prompt-header:1	check: procevent lavish partial-prompt-header 1
+Result: pass
+$ bin/fm-procevent.sh retire partial-prompt-header
+[exit 0]
+retired: partial-prompt-header
+
+## legacy-empty-eof
+Captured 171 bytes, ending with newline: False. Sidecar: 'lavish'
+Top-level TOON fields: session -> prompts
+$ bin/fm-procevent-lavish.sh read {run-worktree}/.phase-lavish/primary-resume/legacy-empty-eof/legacy.1.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 0
+presented_items: 0
+malformed_items: 0
+complete: no
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+session_ending_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of 0)
+$ bin/fm-procevent-lavish.sh answers {run-worktree}/.phase-lavish/primary-resume/legacy-empty-eof/legacy.1.result
+[exit 3]
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/legacy-empty-eof/legacy.1.result
+$ bin/fm-procevent-lavish.sh reconciles {run-worktree}/.phase-lavish/primary-resume/legacy-empty-eof/legacy.1.result
+[exit 3]
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/legacy-empty-eof/legacy.1.result
+Result: pass
+
+## legacy-partial-footer
+Captured 1911 bytes, ending with newline: False. Sidecar: 'lavish'
+Top-level TOON fields: session -> prompts[3] -> next_step
+$ bin/fm-procevent-lavish.sh read {run-worktree}/.phase-lavish/primary-resume/legacy-partial-footer/legacy.1.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 3
+presented_items: 3
+malformed_items: 0
+complete: no
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 3
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 3
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+ANNOTATION 2 of 3
+element_uid: 2
+element_selector: section#recheck
+tag: choice
+text:
+| Re-check the deploy host
+ANNOTATION 3 of 3
+element_uid: 
+element_selector: 
+tag: layout-warnings
+text:
+| Layout issue: 1 selected
+prompt:
+| Fix this layout issue the browser detected in this artifact:
+| 1. [77fef98a29a9cda9] Page scrolls sideways - The page is 2235px wider than the 1060px viewport, so content sits off-screen. Target: html. Viewport: Desktop (1060px). Status: Queued for fix.
+| 
+| Apply every listed fix in one pass before saving so the review refreshes once. A queued layout issue is a repair request, not a resolved issue: Lavish only marks it resolved after a newer artifact load and a complete diagnostic pass for the same viewport no longer detects it.
+END ANNOTATIONS
+END LAVISH RESULT (3 of 3)
+$ bin/fm-procevent-lavish.sh answers {run-worktree}/.phase-lavish/primary-resume/legacy-partial-footer/legacy.1.result
+[exit 0]
+sample-ship	ship	Approve the release
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/legacy-partial-footer/legacy.1.result (prompt block complete)
+$ bin/fm-procevent-lavish.sh reconciles {run-worktree}/.phase-lavish/primary-resume/legacy-partial-footer/legacy.1.result
+[exit 0]
+sample-check	Host example: Context data: {"probe":"sample"}
+incomplete Lavish prompt capture: {run-worktree}/.phase-lavish/primary-resume/legacy-partial-footer/legacy.1.result (prompt block complete)
+Result: pass
+
+## diagnostic-footer-control
+Captured 3704 bytes, ending with newline: True. Sidecar: 'lavish'
+Top-level TOON fields: session -> prompts[3] -> next_step
+$ bin/fm-procevent-lavish.sh read {run-worktree}/.phase-lavish/primary-resume/diagnostic-footer-control/legacy.1.result
+[exit 0]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 3
+presented_items: 3
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 3
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 3
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+ANNOTATION 2 of 3
+element_uid: 2
+element_selector: section#recheck
+tag: choice
+text:
+| Re-check the deploy host
+ANNOTATION 3 of 3
+element_uid: 
+element_selector: 
+tag: layout-warnings
+text:
+| Layout issue: 1 selected
+prompt:
+| Fix this layout issue the browser detected in this artifact:
+| 1. [77fef98a29a9cda9] Page scrolls sideways - The page is 2235px wider than the 1060px viewport, so content sits off-screen. Target: html. Viewport: Desktop (1060px). Status: Queued for fix.
+| 
+| Apply every listed fix in one pass before saving so the review refreshes once. A queued layout issue is a repair request, not a resolved issue: Lavish only marks it resolved after a newer artifact load and a complete diagnostic pass for the same viewport no longer detects it.
+END ANNOTATIONS
+END LAVISH RESULT (3 of 3)
+$ bin/fm-procevent-lavish.sh answers {run-worktree}/.phase-lavish/primary-resume/diagnostic-footer-control/legacy.1.result
+[exit 0]
+sample-ship	ship	Approve the release
+$ bin/fm-procevent-lavish.sh reconciles {run-worktree}/.phase-lavish/primary-resume/diagnostic-footer-control/legacy.1.result
+[exit 0]
+sample-check	Host example: Context data: {"probe":"sample"}
+Result: pass
+
+## Tear down
+$ lavish-axi stop --port 32775
+[exit 0]
+server:
+  status: stopped
+  port: 32775
+Disposable Lavish server exited with status 0.
+Results: {'intact-table': 'fail', 'intact-mixed': 'fail', 'explicit-empty': 'fail', 'table-row-boundary': 'pass', 'partial-next-key': 'pass', 'partial-snapshot': 'pass', 'partial-choice-label': 'pass', 'partial-nested-target': 'pass', 'partial-prompt-header': 'pass', 'legacy-empty-eof': 'pass', 'legacy-partial-footer': 'pass', 'diagnostic-footer-control': 'pass'}
+
+## Lavish 0.1.46 tabular comparison
+The equivalent synthetic approval and reconcile submission ran against the installed Lavish 0.1.46. Its poll output placed dom_snapshot before prompts and left next_step last.
+$ bin/fm-captain-hold.sh hold sample-ship --title 'Approve the release' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-ship
+$ bin/fm-captain-hold.sh hold sample-check --title 'Re-check the deploy host' --reason 'Waiting for synthetic review' --repo sample
+[exit 0]
+sample-check
+$ lavish-axi {run-worktree}/.phase-lavish/intact-table.html --no-open --no-gate
+[exit 0]
+session:
+  file: {run-worktree}/.phase-lavish/intact-table.html
+  url: "http://127.0.0.1:44391/session/c5bddb8504b58357?no-gate=1"
+  status: opened
+next_step: [open-session guidance omitted]
+$ bin/fm-procevent-lavish.sh source-id {run-worktree}/.phase-lavish/intact-table.html
+[exit 0]
+lavish-c5bddb8504b58357
+$ bin/fm-captain-hold.sh bind lavish-c5bddb8504b58357
+[exit 0]
+bound: lavish-c5bddb8504b58357 -> (any)
+$ bin/fm-procevent-lavish.sh arm {run-worktree}/.phase-lavish/intact-table.html
+[exit 0]
+registered: lavish-c5bddb8504b58357 (lavish)
+armed: lavish-c5bddb8504b58357
+artifact: {run-worktree}/.phase-lavish/intact-table.html
+$ bin/fm-procevent.sh start lavish-c5bddb8504b58357
+$ node {run-worktree}/.phase-lavish/browser.mjs 'http://127.0.0.1:44391/session/c5bddb8504b58357?no-gate=1' table ~/.no-mistakes/evidence/01M7Y8XYE4BM2KDDXYR69JNBAT/lavish-target-mixed-board.png
+[exit 0]
+Feedback sent through Lavish UI, HTTP 200
+Submitted tags and labels: [["choice","Approve the release",null],["choice","Re-check the deploy host",null]]
+Disposable Chromium closed.
+[collector exit 0]
+reconciles-fed: lavish-c5bddb8504b58357
+answers-fed: lavish-c5bddb8504b58357
+captured: {run-worktree}/.phase-lavish/intact-table/state/procevent-inbox/lavish-c5bddb8504b58357.1.result
+not-autohandled: lavish-c5bddb8504b58357 (left for the handler; still unacknowledged)
+Captured 2564 bytes, ending with newline: True. Sidecar: 'lavish'
+Top-level TOON fields: session -> dom_snapshot -> prompts[2]{uid,prompt,selector,tag,text} -> next_step
+$ bin/fm-procevent-lavish.sh read {run-worktree}/.phase-lavish/intact-table/state/procevent-inbox/lavish-c5bddb8504b58357.1.result
+[exit 0]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 2
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 2
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 2
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+ANNOTATION 2 of 2
+element_uid: 2
+element_selector: section#recheck
+tag: choice
+text:
+| Re-check the deploy host
+END ANNOTATIONS
+END LAVISH RESULT (2 of 2)
+$ bin/fm-procevent-lavish.sh answers {run-worktree}/.phase-lavish/intact-table/state/procevent-inbox/lavish-c5bddb8504b58357.1.result
+[exit 0]
+sample-ship	ship	Approve the release
+$ bin/fm-procevent-lavish.sh reconciles {run-worktree}/.phase-lavish/intact-table/state/procevent-inbox/lavish-c5bddb8504b58357.1.result
+[exit 0]
+sample-check
+$ bin/fm-tasks-axi.sh show sample-ship --full
+[exit 0]
+task:
+  id: sample-ship
+  title: Approve the release
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: Waiting for synthetic review
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: "-"
+  closed: 2026-11-21
+  deps: none
+  links: none
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: 990cc2b6c9d78d54170158781d8e5ebbdff51a17c2b99679d3ebfde1fbd1949f\nResolution mode: answered\n\nCaptain decision:\nCaptain answered this call through the captured result lavish-c5bddb8504b58357 sequence 1.\nTask: sample-ship\nAnswer: ship\nAnswer as shown to the captain: Approve the release"
+$ bin/fm-captain-hold.sh reconcile list
+[exit 0]
+sample-check	requested=2026-11-21T08:36:19Z	source=the captured result lavish-c5bddb8504b58357 sequence 1
+reconcile-requests: 1
+Durable wake: 1795250182	1	check	procevent:lavish-c5bddb8504b58357:1	check: procevent lavish lavish-c5bddb8504b58357 1
+Result: pass
+$ bin/fm-procevent-lavish.sh retire {run-worktree}/.phase-lavish/intact-table.html
+[exit 0]
+retired: lavish-c5bddb8504b58357
+
+
+## Supplemental targeted checks
+
+$ bin/fm-test-run.sh --jobs 1 --per-script-timeout-secs 90 tests/fm-lineup-board.test.sh
+Isolated PATH contained Node and tasks-axi with no Lavish codec.
+skip: reading a Lineup board capture requires Node.js and the Lavish TOON codec
+fm-test-run: gate skip: tests/fm-lineup-board.test.sh: reading a Lineup board capture requires Node.js and the Lavish TOON codec
+FM_TEST_END 2026-11-21T08:34:46Z tests/fm-lineup-board.test.sh exit=0 duration_ms=18810 gate_skip=true
+
+$ unshare --user --map-current-user --pid --fork --mount-proc python3 .phase-lavish/reap.py bin/fm-test-run.sh --jobs 1 --per-script-timeout-secs 480 tests/fm-procevent.test.sh
+The first run stopped in the post-TERM fixture. The isolated retry used the published 0.1.61 codec.
+not ok - the post-TERM reuse fixture did not start
+FM_TEST_END 2026-11-21T08:38:32Z tests/fm-procevent.test.sh exit=1 duration_ms=226010 gate_skip=false
+ok - runner cutoffs preserve complete rows and report missing or clipped prompt data
+FM_TEST_END 2026-11-21T08:45:13Z tests/fm-procevent.test.sh exit=0 duration_ms=267824 gate_skip=false

@@ -1,0 +1,757 @@
+Local Lavish 0.1.61, axi-sdk-js 0.1.14, TOON 2.3.1, Chromium headless. All board inputs and task data are disposable.
+
+# Browser submission and durable Firstmate intake
+
+## Browser capture: table
+$ bin/fm-procevent-lavish.sh arm .lavish-live-test/table.html
+[exit 0]
+registered: lavish-941fb7d773ab5a21 (lavish)
+armed: lavish-941fb7d773ab5a21
+artifact: .lavish-live-test/table.html
+$ node .lavish-live-test/browser-test.mjs http://127.0.0.1:39135/session/941fb7d773ab5a21 table mixed-lavish-board.png
+[exit 0]
+Sent through Lavish UI: choice, choice
+$ bin/fm-procevent.sh start lavish-941fb7d773ab5a21
+[exit 0]
+reconciles-fed: lavish-941fb7d773ab5a21
+answers-fed: lavish-941fb7d773ab5a21
+captured: .lavish-live-test/fm-table/state/procevent-inbox/lavish-941fb7d773ab5a21.1.result
+not-autohandled: lavish-941fb7d773ab5a21 (left for the handler; still unacknowledged)
+$ tasks-axi show sample-ship --full
+[exit 0]
+task:
+  id: sample-ship
+  title: Approve the release
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: Awaiting release approval
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: "-"
+  closed: 2026-11-21
+  deps: none
+  links: none
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: 4feed85012fefbe67a65cf31a80acac0af9c86ad20df40f0dd3506aa6525adb1\nResolution mode: answered\n\nCaptain decision:\nCaptain answered this call through the captured result lavish-941fb7d773ab5a21 sequence 1.\nTask: sample-ship\nAnswer: ship\nAnswer as shown to the captain: Approve the release"
+$ bin/fm-captain-hold.sh reconcile list
+[exit 0]
+sample-check	requested=2026-11-21T08:03:06Z	source=the captured result lavish-941fb7d773ab5a21 sequence 1; captain note: Confirm host health
+reconcile-requests: 1
+Serialized prompt header: ['prompts[2]{uid,prompt,selector,tag,text}:']
+
+## Browser capture: mixed
+$ bin/fm-procevent-lavish.sh arm .lavish-live-test/board.html
+[exit 0]
+registered: lavish-70247091aa95d61f (lavish)
+armed: lavish-70247091aa95d61f
+artifact: .lavish-live-test/board.html
+$ node .lavish-live-test/browser-test.mjs http://127.0.0.1:39135/session/70247091aa95d61f mixed mixed-lavish-board.png
+[exit 0]
+Lavish queued a nested layout target with 1 browser-detected warning(s).
+Sent through Lavish UI: choice, choice, layout-warnings
+$ bin/fm-procevent.sh start lavish-70247091aa95d61f
+[exit 0]
+reconciles-fed: lavish-70247091aa95d61f
+answers-fed: lavish-70247091aa95d61f
+captured: .lavish-live-test/fm-mixed/state/procevent-inbox/lavish-70247091aa95d61f.1.result
+not-autohandled: lavish-70247091aa95d61f (left for the handler; still unacknowledged)
+$ tasks-axi show sample-ship --full
+[exit 0]
+task:
+  id: sample-ship
+  title: Approve the release
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: Awaiting release approval
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: "-"
+  closed: 2026-11-21
+  deps: none
+  links: none
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: 17ff805cc6b55d9e43ee329fae2526f1daf98075cb04a0776af4fadc43169111\nResolution mode: answered\n\nCaptain decision:\nCaptain answered this call through the captured result lavish-70247091aa95d61f sequence 1.\nTask: sample-ship\nAnswer: ship\nAnswer as shown to the captain: Approve the release"
+$ bin/fm-captain-hold.sh reconcile list
+[exit 0]
+sample-check	requested=2026-11-21T08:03:16Z	source=the captured result lavish-70247091aa95d61f sequence 1; captain note: Confirm host health
+reconcile-requests: 1
+Serialized prompt header: ['prompts[3]:']
+
+
+# Explicit empty list from a browser-reported missing local image
+
+## Browser capture: broken
+$ bin/fm-procevent-lavish.sh arm .lavish-live-test/broken.html
+[exit 0]
+registered: lavish-da61a6da8e9ed0ab (lavish)
+armed: lavish-da61a6da8e9ed0ab
+artifact: .lavish-live-test/broken.html
+$ node .lavish-live-test/browser-test.mjs http://127.0.0.1:40443/session/da61a6da8e9ed0ab broken mixed-lavish-board.png
+[exit 0]
+Browser reported a missing local image to Lavish.
+$ bin/fm-procevent.sh start lavish-da61a6da8e9ed0ab
+[exit 0]
+captured: .lavish-live-test/fm-broken/state/procevent-inbox/lavish-da61a6da8e9ed0ab.1.result
+not-autohandled: lavish-da61a6da8e9ed0ab (left for the handler; still unacknowledged)
+Serialized prompt header: ['prompts: []']
+$ .lavish-live-test/node_modules/.bin/lavish-axi stop --port 40443
+[exit 0]
+server:
+  status: stopped
+  port: 40443
+Lavish foreground server exit: 0
+
+# Original regression on base 1d174e1
+$ .lavish-live-test/base/bin/fm-procevent-lavish.sh read .lavish-live-test/mixed.toon
+[exit 0]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 0
+presented_items: 0
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+session_ending_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of 0)
+$ .lavish-live-test/base/bin/fm-procevent-lavish.sh answers .lavish-live-test/mixed.toon
+[exit 0]
+$ .lavish-live-test/base/bin/fm-procevent-lavish.sh reconciles .lavish-live-test/mixed.toon
+[exit 0]
+
+# Target 5d1c91e under intact and clipped real poll responses
+
+## Browser submits tabular choices
+Actual top-level TOON field order: session, prompts[2]{uid,prompt,selector,tag,text}, next_step, dom_snapshot
+$ bin/fm-procevent-lavish.sh read .lavish-live-test/table.toon
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 2
+malformed_items: 0
+complete: no
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 2
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 2
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+ANNOTATION 2 of 2
+element_uid: 2
+element_selector: section#check
+tag: choice
+text:
+| Re-check the deploy host
+END ANNOTATIONS
+END LAVISH RESULT (2 of 2)
+$ bin/fm-procevent-lavish.sh answers .lavish-live-test/table.toon
+[exit 0]
+sample-ship	ship	Approve the release
+incomplete Lavish prompt capture: .lavish-live-test/table.toon (prompt block complete)
+$ bin/fm-procevent-lavish.sh reconciles .lavish-live-test/table.toon
+[exit 0]
+sample-check	Confirm host health
+incomplete Lavish prompt capture: .lavish-live-test/table.toon (prompt block complete)
+Observed failure: expected read exit 0 and complete: yes, got read exit 3
+
+## Browser submits mixed choices and a nested layout target
+Actual top-level TOON field order: session, prompts[3], next_step, dom_snapshot
+$ bin/fm-procevent-lavish.sh read .lavish-live-test/mixed.toon
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 3
+presented_items: 3
+malformed_items: 0
+complete: no
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 3
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 3
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+ANNOTATION 2 of 3
+element_uid: 2
+element_selector: section#check
+tag: choice
+text:
+| Re-check the deploy host
+ANNOTATION 3 of 3
+element_uid: 
+element_selector: 
+tag: layout-warnings
+text:
+| Layout issue: 1 selected
+prompt:
+| Fix this layout issue the browser detected in this artifact:
+| 1. [77fef98a29a9cda9] Page scrolls sideways - The page is 1574px wider than the 1080px viewport, so content sits off-screen. Target: html. Viewport: Desktop (1080px). Status: Queued for fix.
+| 
+| Apply every listed fix in one pass before saving so the review refreshes once. A queued layout issue is a repair request, not a resolved issue: Lavish only marks it resolved after a newer artifact load and a complete diagnostic pass for the same viewport no longer detects it.
+END ANNOTATIONS
+END LAVISH RESULT (3 of 3)
+$ bin/fm-procevent-lavish.sh answers .lavish-live-test/mixed.toon
+[exit 0]
+sample-ship	ship	Approve the release
+incomplete Lavish prompt capture: .lavish-live-test/mixed.toon (prompt block complete)
+$ bin/fm-procevent-lavish.sh reconciles .lavish-live-test/mixed.toon
+[exit 0]
+sample-check	Confirm host health
+incomplete Lavish prompt capture: .lavish-live-test/mixed.toon (prompt block complete)
+Observed failure: expected read exit 0 and complete: yes, got read exit 3
+
+## Tabular cut after the final complete row
+FM_PROCEVENT_MAX_OUTPUT_BYTES=770, original poll payload table.toon, 3004 bytes
+$ bin/fm-procevent.sh start cut-after-table-row
+[exit 0]
+reconciles-fed: cut-after-table-row
+answers-fed: cut-after-table-row
+captured: .lavish-live-test/fm-cut-after-table-row/state/procevent-inbox/cut-after-table-row.1.result
+truncated: cut-after-table-row at 770 bytes
+not-autohandled: cut-after-table-row (left for the handler; still unacknowledged)
+Durable wake: 1795248295	1	check	procevent:cut-after-table-row:1	check: procevent lavish cut-after-table-row 1
+$ tasks-axi show sample-ship --full
+[exit 0]
+task:
+  id: sample-ship
+  title: Approve the release
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: Awaiting release approval
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: "-"
+  closed: 2026-11-21
+  deps: none
+  links: none
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: 2889543dcbf34462d36e847d1a2c678af8fdffc42b78398fff8b141ea4c8d143\nResolution mode: answered\n\nCaptain decision:\nCaptain answered this call through the captured result cut-after-table-row sequence 1.\nTask: sample-ship\nAnswer: ship\nAnswer as shown to the captain: Approve the release"
+$ bin/fm-captain-hold.sh reconcile list
+[exit 0]
+sample-check	requested=2026-11-21T08:04:53Z	source=the captured result cut-after-table-row sequence 1; captain note: Confirm host health
+reconcile-requests: 1
+$ bin/fm-procevent-lavish.sh read .lavish-live-test/fm-cut-after-table-row/state/procevent-inbox/cut-after-table-row.1.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 2
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 2
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 2
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+ANNOTATION 2 of 2
+element_uid: 2
+element_selector: section#check
+tag: choice
+text:
+| Re-check the deploy host
+END ANNOTATIONS
+END LAVISH RESULT (2 of 2)
+$ bin/fm-procevent-lavish.sh answers .lavish-live-test/fm-cut-after-table-row/state/procevent-inbox/cut-after-table-row.1.result
+[exit 0]
+sample-ship	ship	Approve the release
+incomplete Lavish prompt capture: .lavish-live-test/fm-cut-after-table-row/state/procevent-inbox/cut-after-table-row.1.result (prompt block complete)
+$ bin/fm-procevent-lavish.sh reconciles .lavish-live-test/fm-cut-after-table-row/state/procevent-inbox/cut-after-table-row.1.result
+[exit 0]
+sample-check	Confirm host health
+incomplete Lavish prompt capture: .lavish-live-test/fm-cut-after-table-row/state/procevent-inbox/cut-after-table-row.1.result (prompt block complete)
+
+## List cut after the last nested field and inside the following key
+FM_PROCEVENT_MAX_OUTPUT_BYTES=1794, original poll payload mixed.toon, 4454 bytes
+$ bin/fm-procevent.sh start cut-in-following-key
+[exit 0]
+reconciles-fed: cut-in-following-key
+answers-fed: cut-in-following-key
+captured: .lavish-live-test/fm-cut-in-following-key/state/procevent-inbox/cut-in-following-key.1.result
+truncated: cut-in-following-key at 1794 bytes
+not-autohandled: cut-in-following-key (left for the handler; still unacknowledged)
+Durable wake: 1795248302	1	check	procevent:cut-in-following-key:1	check: procevent lavish cut-in-following-key 1
+$ tasks-axi show sample-ship --full
+[exit 0]
+task:
+  id: sample-ship
+  title: Approve the release
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: Awaiting release approval
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: "-"
+  closed: 2026-11-21
+  deps: none
+  links: none
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: bc0bfcb0384ddb478984d7c5bb0a6446ab39f8d549e24cae1dd4fabaf8d9c956\nResolution mode: answered\n\nCaptain decision:\nCaptain answered this call through the captured result cut-in-following-key sequence 1.\nTask: sample-ship\nAnswer: ship\nAnswer as shown to the captain: Approve the release"
+$ bin/fm-captain-hold.sh reconcile list
+[exit 0]
+sample-check	requested=2026-11-21T08:05:00Z	source=the captured result cut-in-following-key sequence 1; captain note: Confirm host health
+reconcile-requests: 1
+$ bin/fm-procevent-lavish.sh read .lavish-live-test/fm-cut-in-following-key/state/procevent-inbox/cut-in-following-key.1.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 3
+presented_items: 3
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 3
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 3
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+ANNOTATION 2 of 3
+element_uid: 2
+element_selector: section#check
+tag: choice
+text:
+| Re-check the deploy host
+ANNOTATION 3 of 3
+element_uid: 
+element_selector: 
+tag: layout-warnings
+text:
+| Layout issue: 1 selected
+prompt:
+| Fix this layout issue the browser detected in this artifact:
+| 1. [77fef98a29a9cda9] Page scrolls sideways - The page is 1574px wider than the 1080px viewport, so content sits off-screen. Target: html. Viewport: Desktop (1080px). Status: Queued for fix.
+| 
+| Apply every listed fix in one pass before saving so the review refreshes once. A queued layout issue is a repair request, not a resolved issue: Lavish only marks it resolved after a newer artifact load and a complete diagnostic pass for the same viewport no longer detects it.
+END ANNOTATIONS
+END LAVISH RESULT (3 of 3)
+$ bin/fm-procevent-lavish.sh answers .lavish-live-test/fm-cut-in-following-key/state/procevent-inbox/cut-in-following-key.1.result
+[exit 0]
+sample-ship	ship	Approve the release
+incomplete Lavish prompt capture: .lavish-live-test/fm-cut-in-following-key/state/procevent-inbox/cut-in-following-key.1.result (prompt block complete)
+$ bin/fm-procevent-lavish.sh reconciles .lavish-live-test/fm-cut-in-following-key/state/procevent-inbox/cut-in-following-key.1.result
+[exit 0]
+sample-check	Confirm host health
+incomplete Lavish prompt capture: .lavish-live-test/fm-cut-in-following-key/state/procevent-inbox/cut-in-following-key.1.result (prompt block complete)
+
+## List cut later in the DOM snapshot
+FM_PROCEVENT_MAX_OUTPUT_BYTES=3602, original poll payload mixed.toon, 4454 bytes
+$ bin/fm-procevent.sh start cut-in-dom
+[exit 0]
+reconciles-fed: cut-in-dom
+answers-fed: cut-in-dom
+captured: .lavish-live-test/fm-cut-in-dom/state/procevent-inbox/cut-in-dom.1.result
+truncated: cut-in-dom at 3602 bytes
+not-autohandled: cut-in-dom (left for the handler; still unacknowledged)
+Durable wake: 1795248309	1	check	procevent:cut-in-dom:1	check: procevent lavish cut-in-dom 1
+$ tasks-axi show sample-ship --full
+[exit 0]
+task:
+  id: sample-ship
+  title: Approve the release
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: Awaiting release approval
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: "-"
+  closed: 2026-11-21
+  deps: none
+  links: none
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: 65916ff02ac81b497250728265256410c052e3893cb8f758ddb5251c4e3f7a91\nResolution mode: answered\n\nCaptain decision:\nCaptain answered this call through the captured result cut-in-dom sequence 1.\nTask: sample-ship\nAnswer: ship\nAnswer as shown to the captain: Approve the release"
+$ bin/fm-captain-hold.sh reconcile list
+[exit 0]
+sample-check	requested=2026-11-21T08:05:07Z	source=the captured result cut-in-dom sequence 1; captain note: Confirm host health
+reconcile-requests: 1
+$ bin/fm-procevent-lavish.sh read .lavish-live-test/fm-cut-in-dom/state/procevent-inbox/cut-in-dom.1.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 3
+presented_items: 3
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 3
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 3
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+ANNOTATION 2 of 3
+element_uid: 2
+element_selector: section#check
+tag: choice
+text:
+| Re-check the deploy host
+ANNOTATION 3 of 3
+element_uid: 
+element_selector: 
+tag: layout-warnings
+text:
+| Layout issue: 1 selected
+prompt:
+| Fix this layout issue the browser detected in this artifact:
+| 1. [77fef98a29a9cda9] Page scrolls sideways - The page is 1574px wider than the 1080px viewport, so content sits off-screen. Target: html. Viewport: Desktop (1080px). Status: Queued for fix.
+| 
+| Apply every listed fix in one pass before saving so the review refreshes once. A queued layout issue is a repair request, not a resolved issue: Lavish only marks it resolved after a newer artifact load and a complete diagnostic pass for the same viewport no longer detects it.
+END ANNOTATIONS
+END LAVISH RESULT (3 of 3)
+$ bin/fm-procevent-lavish.sh answers .lavish-live-test/fm-cut-in-dom/state/procevent-inbox/cut-in-dom.1.result
+[exit 0]
+sample-ship	ship	Approve the release
+incomplete Lavish prompt capture: .lavish-live-test/fm-cut-in-dom/state/procevent-inbox/cut-in-dom.1.result (prompt block complete)
+$ bin/fm-procevent-lavish.sh reconciles .lavish-live-test/fm-cut-in-dom/state/procevent-inbox/cut-in-dom.1.result
+[exit 0]
+sample-check	Confirm host health
+incomplete Lavish prompt capture: .lavish-live-test/fm-cut-in-dom/state/procevent-inbox/cut-in-dom.1.result (prompt block complete)
+
+## Table cut inside an unquoted choice label
+FM_PROCEVENT_MAX_OUTPUT_BYTES=768, original poll payload table.toon, 3004 bytes
+$ bin/fm-procevent.sh start cut-in-choice-label
+[exit 1]
+captured: .lavish-live-test/fm-cut-in-choice-label/state/procevent-inbox/cut-in-choice-label.1.result
+truncated: cut-in-choice-label at 768 bytes
+not-autohandled: cut-in-choice-label (left for the handler; still unacknowledged)
+incomplete Lavish prompt capture: .lavish-live-test/fm-cut-in-choice-label/state/procevent-inbox/cut-in-choice-label.1.result
+Durable wake: 1795248314	1	check	procevent:cut-in-choice-label:1	check: procevent lavish cut-in-choice-label 1
+$ tasks-axi show sample-ship --full
+[exit 0]
+task:
+  id: sample-ship
+  title: Approve the release
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: yes
+  hold_reason: Awaiting release approval
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: 2026-11-21
+  closed: "-"
+  deps: none
+  links: none
+  body: "Captain hold set: 2026-11-21T08:05:11Z"
+$ bin/fm-captain-hold.sh reconcile list
+[exit 0]
+reconcile-requests: 0
+$ bin/fm-procevent-lavish.sh read .lavish-live-test/fm-cut-in-choice-label/state/procevent-inbox/cut-in-choice-label.1.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 1
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+END ANNOTATIONS
+END LAVISH RESULT (1 of 2)
+$ bin/fm-procevent-lavish.sh answers .lavish-live-test/fm-cut-in-choice-label/state/procevent-inbox/cut-in-choice-label.1.result
+[exit 3]
+incomplete Lavish prompt capture: .lavish-live-test/fm-cut-in-choice-label/state/procevent-inbox/cut-in-choice-label.1.result
+$ bin/fm-procevent-lavish.sh reconciles .lavish-live-test/fm-cut-in-choice-label/state/procevent-inbox/cut-in-choice-label.1.result
+[exit 3]
+incomplete Lavish prompt capture: .lavish-live-test/fm-cut-in-choice-label/state/procevent-inbox/cut-in-choice-label.1.result
+
+## List cut inside the nested layout target
+FM_PROCEVENT_MAX_OUTPUT_BYTES=1716, original poll payload mixed.toon, 4454 bytes
+$ bin/fm-procevent.sh start cut-in-target
+[exit 1]
+captured: .lavish-live-test/fm-cut-in-target/state/procevent-inbox/cut-in-target.1.result
+truncated: cut-in-target at 1716 bytes
+not-autohandled: cut-in-target (left for the handler; still unacknowledged)
+incomplete Lavish prompt capture: .lavish-live-test/fm-cut-in-target/state/procevent-inbox/cut-in-target.1.result
+Durable wake: 1795248318	1	check	procevent:cut-in-target:1	check: procevent lavish cut-in-target 1
+$ tasks-axi show sample-ship --full
+[exit 0]
+task:
+  id: sample-ship
+  title: Approve the release
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: yes
+  hold_reason: Awaiting release approval
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: 2026-11-21
+  closed: "-"
+  deps: none
+  links: none
+  body: "Captain hold set: 2026-11-21T08:05:15Z"
+$ bin/fm-captain-hold.sh reconcile list
+[exit 0]
+reconcile-requests: 0
+$ bin/fm-procevent-lavish.sh read .lavish-live-test/fm-cut-in-target/state/procevent-inbox/cut-in-target.1.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 3
+presented_items: 2
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 2
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 2
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+ANNOTATION 2 of 2
+element_uid: 2
+element_selector: section#check
+tag: choice
+text:
+| Re-check the deploy host
+END ANNOTATIONS
+END LAVISH RESULT (2 of 3)
+$ bin/fm-procevent-lavish.sh answers .lavish-live-test/fm-cut-in-target/state/procevent-inbox/cut-in-target.1.result
+[exit 3]
+incomplete Lavish prompt capture: .lavish-live-test/fm-cut-in-target/state/procevent-inbox/cut-in-target.1.result
+$ bin/fm-procevent-lavish.sh reconciles .lavish-live-test/fm-cut-in-target/state/procevent-inbox/cut-in-target.1.result
+[exit 3]
+incomplete Lavish prompt capture: .lavish-live-test/fm-cut-in-target/state/procevent-inbox/cut-in-target.1.result
+
+## Browser artifact failure yields an explicit empty prompt list
+Actual top-level TOON field order: session, prompts, artifact_failures[1]{kind,detail,severity}, next_step, dom_snapshot
+$ bin/fm-procevent-lavish.sh read .lavish-live-test/broken.toon
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 0
+presented_items: 0
+malformed_items: 0
+complete: no
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+session_ending_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of 0)
+$ bin/fm-procevent-lavish.sh answers .lavish-live-test/broken.toon
+[exit 0]
+incomplete Lavish prompt capture: .lavish-live-test/broken.toon (prompt block complete)
+$ bin/fm-procevent-lavish.sh reconciles .lavish-live-test/broken.toon
+[exit 0]
+incomplete Lavish prompt capture: .lavish-live-test/broken.toon (prompt block complete)
+Observed failure: expected read exit 0 and complete: yes, got read exit 3
+
+## Cap lands inside the prompt header
+FM_PROCEVENT_MAX_OUTPUT_BYTES=144, original poll payload mixed.toon, 4454 bytes
+$ bin/fm-procevent.sh start cut-before-header
+[exit 1]
+captured: .lavish-live-test/fm-cut-before-header/state/procevent-inbox/cut-before-header.1.result
+truncated: cut-before-header at 144 bytes
+not-autohandled: cut-before-header (left for the handler; still unacknowledged)
+incomplete Lavish prompt capture: .lavish-live-test/fm-cut-before-header/state/procevent-inbox/cut-before-header.1.result
+Durable wake: 1795248323	1	check	procevent:cut-before-header:1	check: procevent lavish cut-before-header 1
+$ tasks-axi show sample-ship --full
+[exit 0]
+task:
+  id: sample-ship
+  title: Approve the release
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: yes
+  hold_reason: Awaiting release approval
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: 2026-11-21
+  closed: "-"
+  deps: none
+  links: none
+  body: "Captain hold set: 2026-11-21T08:05:20Z"
+$ bin/fm-captain-hold.sh reconcile list
+[exit 0]
+reconcile-requests: 0
+$ bin/fm-procevent-lavish.sh read .lavish-live-test/fm-cut-before-header/state/procevent-inbox/cut-before-header.1.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: unknown
+presented_items: 0
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+session_ending_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of unknown)
+$ bin/fm-procevent-lavish.sh answers .lavish-live-test/fm-cut-before-header/state/procevent-inbox/cut-before-header.1.result
+[exit 3]
+incomplete Lavish prompt capture: .lavish-live-test/fm-cut-before-header/state/procevent-inbox/cut-before-header.1.result
+$ bin/fm-procevent-lavish.sh reconciles .lavish-live-test/fm-cut-before-header/state/procevent-inbox/cut-before-header.1.result
+[exit 3]
+incomplete Lavish prompt capture: .lavish-live-test/fm-cut-before-header/state/procevent-inbox/cut-before-header.1.result
+
+## Legacy capture ends without newline immediately after the empty list
+$ bin/fm-procevent-lavish.sh read .lavish-live-test/legacy-empty-eof.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 0
+presented_items: 0
+malformed_items: 0
+complete: no
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+session_ending_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of 0)
+$ bin/fm-procevent-lavish.sh answers .lavish-live-test/legacy-empty-eof.result
+[exit 3]
+incomplete Lavish prompt capture: .lavish-live-test/legacy-empty-eof.result
+$ bin/fm-procevent-lavish.sh reconciles .lavish-live-test/legacy-empty-eof.result
+[exit 3]
+incomplete Lavish prompt capture: .lavish-live-test/legacy-empty-eof.result
+
+## Legacy capture ends inside the footer after all list rows
+$ bin/fm-procevent-lavish.sh read .lavish-live-test/legacy-clipped-footer.result
+[exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 3
+presented_items: 3
+malformed_items: 0
+complete: no
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 3
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 3
+element_uid: 1
+element_selector: section#ship
+tag: choice
+text:
+| Approve the release
+ANNOTATION 2 of 3
+element_uid: 2
+element_selector: section#check
+tag: choice
+text:
+| Re-check the deploy host
+ANNOTATION 3 of 3
+element_uid: 
+element_selector: 
+tag: layout-warnings
+text:
+| Layout issue: 1 selected
+prompt:
+| Fix this layout issue the browser detected in this artifact:
+| 1. [77fef98a29a9cda9] Page scrolls sideways - The page is 1574px wider than the 1080px viewport, so content sits off-screen. Target: html. Viewport: Desktop (1080px). Status: Queued for fix.
+| 
+| Apply every listed fix in one pass before saving so the review refreshes once. A queued layout issue is a repair request, not a resolved issue: Lavish only marks it resolved after a newer artifact load and a complete diagnostic pass for the same viewport no longer detects it.
+END ANNOTATIONS
+END LAVISH RESULT (3 of 3)
+$ bin/fm-procevent-lavish.sh answers .lavish-live-test/legacy-clipped-footer.result
+[exit 0]
+sample-ship	ship	Approve the release
+incomplete Lavish prompt capture: .lavish-live-test/legacy-clipped-footer.result (prompt block complete)
+$ bin/fm-procevent-lavish.sh reconciles .lavish-live-test/legacy-clipped-footer.result
+[exit 0]
+sample-check	Confirm host health
+incomplete Lavish prompt capture: .lavish-live-test/legacy-clipped-footer.result (prompt block complete)
+
+## Scenario results
+fail - Browser submits tabular choices
+fail - Browser submits mixed choices and a nested layout target
+pass - Tabular cut after the final complete row
+pass - List cut after the last nested field and inside the following key
+pass - List cut later in the DOM snapshot
+pass - Table cut inside an unquoted choice label
+pass - List cut inside the nested layout target
+fail - Browser artifact failure yields an explicit empty prompt list
+pass - Cap lands inside the prompt header
+pass - Legacy capture ends without newline immediately after the empty list
+pass - Legacy capture ends inside the footer after all list rows

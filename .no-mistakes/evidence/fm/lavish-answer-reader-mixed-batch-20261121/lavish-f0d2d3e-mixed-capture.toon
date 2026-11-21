@@ -1,0 +1,26 @@
+session:
+  file: {run-worktree}/.lavish-phase/live-u4o8v2a9/mixed/release-review.html
+  status: feedback
+prompts[3]:
+  - uid: "1"
+    prompt: "Approve the release\nTyped note: Release example: Context data: {\"example\":\"café\"}\n\nContext data:\n{\n  \"schema\": \"fm-bearings-answer.v1\",\n  \"question\": \"sample-ship\",\n  \"selection\": \"ship\",\n  \"note\": \"Release example: Context data: {\\\"example\\\":\\\"café\\\"}\"\n}"
+    selector: section#ship
+    tag: choice
+    text: Approve the release
+  - uid: "2"
+    prompt: "Re-check the deploy host\nTyped note: Host example: Context data: {\"probe\":\"sample\"}\n\nContext data:\n{\n  \"schema\": \"fm-bearings-answer.v1\",\n  \"question\": \"sample-check\",\n  \"selection\": \"reconcile\",\n  \"note\": \"Host example: Context data: {\\\"probe\\\":\\\"sample\\\"}\"\n}"
+    selector: section#recheck
+    tag: choice
+    text: Re-check the deploy host
+  - uid: ""
+    prompt: "Fix this layout issue the browser detected in this artifact:\n1. [3c1763f2f51ad3ec] Page scrolls sideways - The page is 1664px wider than the 200px viewport, so content sits off-screen. Target: html. Viewport: Mobile (200px). Status: Queued for fix.\n\nApply every listed fix in one pass before saving so the review refreshes once. A queued layout issue is a repair request, not a resolved issue: Lavish only marks it resolved after a newer artifact load and a complete diagnostic pass for the same viewport no longer detects it."
+    selector: ""
+    tag: layout-warnings
+    text: "Layout issue: 1 selected"
+    target:
+      type: layout-warnings
+      warnings[1]{id,rule,selector,component,axis,overflow_px,viewport_class,viewport_width,status,last_seen_at}:
+        3c1763f2f51ad3ec,page-horizontal-overflow,html,html,horizontal,1664,mobile,200,queued,"2026-11-21T08:59:06.787Z"
+      artifact_revision: 1
+next_step: "Apply the requested changes to {run-worktree}/.lavish-phase/live-u4o8v2a9/mixed/release-review.html. This feedback includes layout issues the user selected from the Lavish Layout issues inbox (tag \"layout-warnings\"): the target lists the exact warning ids and targets. Apply every listed fix in one pass before saving so the user's review refreshes once. Queueing is a repair request, not a resolution - Lavish only marks a warning resolved after a newer artifact load and a complete check at the same viewport no longer detects it. Do not respond to the user just yet. Now you must run `lavish-axi poll {run-worktree}/.lavish-phase/live-u4o8v2a9/mixed/release-review.html --agent-reply \"<message for the user>\"` without --timeout-ms unless the user ended the session. The poll waits silently until the user sends more feedback or ends the session - never kill it. Keep the poll in the foreground by default and let it return the feedback directly to the agent. A background poll is allowed only through a harness-native tracked background-job facility whose completion result is guaranteed to resume or notify the same agent. Never use `nohup`, shell `&`, `disown`, redirected fire-and-forget processes, or a detached terminal without an explicit verified callback merely to keep polling alive. If the harness has no completion-aware background facility, use the foreground poll or first wire a verified wake callback into the surrounding supervisor. Do not tell the user the artifact is being monitored until that wake path is live. If the poll gets killed or times out before feedback arrives, re-run it - feedback remains queued until delivery. Poll delivery consumes the response, so read it completely."
+dom_snapshot: "uid=3 body \"Release review Release approval Approve the release Deploy host Re-check the dep\"\n  uid=4 main \"Release review Release approval Approve the release Deploy host Re-check the dep\"\n    uid=5 h1 \"Release review\"\n    uid=1 section \"Release approval Approve the release\"\n      uid=6 h2 \"Release approval\"\n      uid=7 button \"Approve the release\"\n    uid=2 section \"Deploy host Re-check the deploy host\"\n      uid=8 h2 \"Deploy host\"\n      uid=9 button \"Re-check the deploy host\"\n    uid=10 div \"Layout test area wider than the review panel\"\n  uid=11 script \"const choices = [['ship', 'sample-ship', 'ship', 'Release example: Context data:\"\n  uid=12 script"
