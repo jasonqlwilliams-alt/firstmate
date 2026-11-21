@@ -380,7 +380,7 @@ cmd_terminal() {
 # failed" is never proof that nothing was said.
 result_has_queued_content() {  # <result-file>
   awk '
-    /^(prompts|feedback)(\[[0-9]+\](\{[^}]*\})?:|: \[\])[[:space:]]*$/ {
+    /^(prompts|feedback)\[[0-9]+\]\{[^}]*\}:[[:space:]]*$/ {
       verdict = "present"
       exit
     }
@@ -406,7 +406,11 @@ cmd_silent() {
   local file=${1-} content_rc
   [ -n "$file" ] || usage
   [ -f "$file" ] && [ ! -L "$file" ] || die "result file does not exist: $file"
-  [ "$(cmd_classify "$file")" = ended ] && [ -z "$(capture_tail "$file")" ] || return 1
+  [ "$(cmd_classify "$file")" = ended ] || return 1
+  case "$(capture_tail "$file")" in
+    ''|eof) ;;
+    *) return 1 ;;
+  esac
   result_has_queued_content "$file"
   content_rc=$?
   # Only a completed check that proved the result carries nothing declares
@@ -486,6 +490,7 @@ LAVISH_CAPTURE_DECODER='
       return unless defined $value;
       $row{$key} = $value;
     }
+    return if ($row{tag} // "") eq "choice" && !exists $row{text};
     return keys(%seen) ? \%row : undef;
   }
 
@@ -495,8 +500,8 @@ LAVISH_CAPTURE_DECODER='
     binmode $fh;
     my $raw = do { local $/; <$fh> } // "";
     close $fh or die "cannot close Lavish capture: $!\n";
-    my $truncated = length($tail) > 0;
-    $raw .= "\n" if $tail =~ s/\An//;
+    my $truncated = length($tail) > 0 && $tail ne "eof";
+    $raw .= "\n" if $tail eq "eof" || $tail =~ s/\An//;
     my @lines = split /\n/, $raw, -1;
     my $partial = pop(@lines) // "";
     s/\r\z// for @lines;
@@ -523,11 +528,11 @@ LAVISH_CAPTURE_DECODER='
     };
     for my $line (@lines) {
       if (!defined $kind) {
-        if ($line =~ /\A(prompts|feedback)\[([0-9]+)\](?:\{([^}]*)\})?: *\z/) {
+        if ($line =~ /\A(prompts|feedback)\[([0-9]+)\]\{([^}]+)\}: *\z/) {
           ($kind, $want) = ($1, $2);
-          $fields = [split /,/, $3, -1] if defined($3) && length($3);
-        } elsif ($line =~ /\A(prompts|feedback): \[\] *\z/) {
-          ($kind, $want) = ($1, 0);
+          $fields = [split /,/, $3, -1];
+        } elsif ($line =~ /\Aprompts(?:\[([0-9]+)\]:|: \[\]) *\z/) {
+          ($kind, $want) = ("prompts", $1 // 0);
         }
         next;
       }
@@ -551,7 +556,9 @@ LAVISH_CAPTURE_DECODER='
       }
     }
     if (defined $kind) {
-      $finish_item->($boundary !~ /\Asss/);
+      my $item_ended = $truncated ? $boundary !~ /\Asss/ :
+        $tail eq "eof" || $partial =~ /\A(?:\S|  -(?: |\z))/;
+      $finish_item->($item_ended);
       if ($partial =~ /\A /) {
         if ($fields && !$truncated && $partial =~ s/\A {2}(?! )//) {
           $record_row->(table_row($partial, $fields, 0));
@@ -559,8 +566,8 @@ LAVISH_CAPTURE_DECODER='
           $malformed++;
         }
       }
-    } elsif (!$truncated && $partial =~ /\A(prompts|feedback)(?:\[0\]:|: \[\]) *\z/) {
-      ($kind, $want) = ($1, 0);
+    } elsif (!$truncated && $partial =~ /\Aprompts(?:\[0\]:|: \[\]) *\z/) {
+      ($kind, $want) = ("prompts", 0);
     } elsif ($lifecycle eq "ended" && !$truncated && $partial eq ""
         && !grep { /\A(?:prompts|feedback)/ } @lines) {
       $want = 0;

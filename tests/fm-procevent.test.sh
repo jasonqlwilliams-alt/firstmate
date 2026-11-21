@@ -2304,6 +2304,10 @@ printf 'session:\n  file: /a.html\n  status: ended\n  ended_by: user\n' > "$SIL"
 silent_says yes "an ended session carrying nothing is an empty board close"
 printf 'session:\n  file: /a.html\n  status: ended\n  ended_by: user\nprompts[0]{tag,text}:\n' > "$SIL"
 silent_says no "a declared-empty content block is still present"
+printf 'session:\n  status: ended\nprompts[1]:\n  - text: late answer\n' > "$SIL"
+silent_says no "an ended session with list-form content is announced"
+printf 'session:\n  status: ended\nprompts: []\n' > "$SIL"
+silent_says no "an explicit empty list still reaches the handler"
 printf 'session:\n  file: /a.html\n  status: ended\n  ended_by: user\nprompts[many]{tag,text}:\n' > "$SIL"
 silent_says no "a malformed top-level content header is indeterminate"
 printf 'session:\n  file: /a.html\n  status: feedback\n  session_ended: true\n  ended_by: user\nfeedback[1]{text}:\n  ship it\n' > "$SIL"
@@ -2656,6 +2660,24 @@ printf 'session:\n  status: feedback\n' > "$READ"
 assert_submission "$READ" unknown 0 no '' ''
 pass "an explicit empty prompt list is distinguishable from a missing header"
 
+printf 'session:\n  status: feedback\nfeedback[1]:\n  - text: unsupported\n' > "$READ"
+assert_submission "$READ" unknown 0 no '' ''
+printf 'session:\n  status: feedback\nfeedback: []\n' > "$READ"
+assert_submission "$READ" unknown 0 no '' ''
+printf 'session:\n  status: feedback\nfeedback[0]:' > "$READ"
+assert_submission "$READ" unknown 0 no '' ''
+pass "the feedback alias is limited to legacy tabular captures"
+
+LEGACY_LIST="$TMP_ROOT/legacy-list.result"
+printf 'lavish\n' > "${LEGACY_LIST%.result}.adapter"
+sed '/warnings\[1\].*:/q' "$LIST_CAPTURE" > "$LEGACY_LIST"
+assert_submission "$LEGACY_LIST" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+sed '/tag: choice/q' "$LIST_CAPTURE" > "$LEGACY_LIST"
+assert_submission "$LEGACY_LIST" 3 0 no '' ''
+sed '/text: Re-check host/d' "$LIST_CAPTURE" > "$LEGACY_LIST"
+assert_submission "$LEGACY_LIST" 3 2 no "$SHIPPED_ANSWER" ''
+pass "legacy list captures reject an unbounded final item and choices missing text"
+
 CLIPPED_HOME="$TMP_ROOT/hclipped"; new_home "$CLIPPED_HOME"
 fm_test_track_procevent_home "$CLIPPED_HOME"
 capture_prefix() {  # <id> <fixture> <last retained literal substring>
@@ -2698,6 +2720,18 @@ assert_submission "$CLIPPED" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 CLIPPED=$(capture_prefix list-cut-before-header "$LIST_CAPTURE" 'dom_snapshot: ""')
 assert_submission "$CLIPPED" unknown 0 no '' ''
 pass "runner cutoffs preserve complete rows and report missing or clipped prompt data"
+
+EOF_LIST="$TMP_ROOT/list-at-eof.toon"
+printf '%s' "$(sed '/^next_step:/d' "$LIST_CAPTURE")" > "$EOF_LIST"
+pe_register "$CLIPPED_HOME" lavish list-at-eof -- /bin/cat "$EOF_LIST" >/dev/null \
+  || fail "could not register list-at-eof"
+pe "$CLIPPED_HOME" start list-at-eof >/dev/null || fail "could not capture list-at-eof"
+COMPLETE=$(first_result "$CLIPPED_HOME" list-at-eof) || fail "no captured result for list-at-eof"
+cmp -s "$COMPLETE" "$EOF_LIST" || fail "list-at-eof changed the captured bytes"
+assert_submission "$COMPLETE" 3 3 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+assert_not_contains "$("$LAVISH_ADAPTER" read "$COMPLETE")" "capture_truncated:" \
+  "a complete capture was reported truncated"
+pass "a complete runner capture can end at the final nested value"
 
 # The runner's silence seam is generic and closed by default: an adapter with no
 # `silent` command must keep announcing, so adding the seam changed nothing for
