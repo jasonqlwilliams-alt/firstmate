@@ -1,0 +1,2 @@
+Lavish 0.1.46 with local Chromium. All tasks and roles are synthetic.
+PASS  separate submissions in one poll

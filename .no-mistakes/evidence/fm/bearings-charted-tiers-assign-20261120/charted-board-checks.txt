@@ -1,0 +1,11 @@
+Lavish 0.1.46 with local Chromium. All tasks and roles are synthetic.
+Four rendered badge colors: {"Tier 1 · Urgent":"rgb(253, 228, 225)","Tier 2 · Time-sensitive":"rgb(255, 237, 194)","Tier 3 · Current":"rgb(226, 239, 251)","Tier 4 · Backlog":"rgb(235, 236, 239)"}
+PASS  ranked board
+Build rejected ownerless request and preserved the served board.
+Build rejected unranked request and preserved the served board.
+Build rejected ready request and preserved the served board.
+Build rejected out-of-range tier and preserved the served board.
+Unranked legacy board rendered in newest-filed order without helper or tier controls.
+PASS  picker and legacy guards
+Both synthetic router inboxes stayed empty. The task backlog remained byte-for-byte unchanged.
+PASS  assignment to Firstmate

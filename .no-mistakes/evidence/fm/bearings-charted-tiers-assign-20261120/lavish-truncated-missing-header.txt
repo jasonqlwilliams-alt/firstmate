@@ -1,0 +1,27 @@
+Lavish version 0.1.46
+Runner event: 1795237652	8	check	procevent:lavish-449eacfc1250814d:1	check: procevent lavish lavish-449eacfc1250814d 1
+Wire header: (missing)
+
+$ bin/fm-procevent-lavish.sh read <captured-result>
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: (missing)
+presented_items: 0
+malformed_items: 0
+complete: no
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+session_ending_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of (missing))
+
+$ bin/fm-procevent-lavish.sh assignments <captured-result>
+(no output)
+
+$ bin/fm-procevent-lavish.sh answers <captured-result>
+(no output)
+
+$ bin/fm-procevent-lavish.sh reconciles <captured-result>
+(no output)

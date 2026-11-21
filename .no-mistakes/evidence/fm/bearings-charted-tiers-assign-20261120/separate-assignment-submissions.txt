@@ -1,0 +1,41 @@
+Lavish version 0.1.46
+Runner event: 1795237553	1	check	procevent:lavish-63452a877f766ba9:1	check: procevent lavish lavish-63452a877f766ba9 1
+Wire header: prompts[2]{uid,prompt,selector,tag,text}:
+
+$ bin/fm-procevent-lavish.sh read <captured-result>
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 2
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 2
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 2
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(3) > div > form
+tag: choice
+text:
+| Confirm export prerequisite → grokbot
+ANNOTATION 2 of 2
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(3) > div > form
+tag: choice
+text:
+| Confirm export prerequisite → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (2 of 2)
+
+$ bin/fm-procevent-lavish.sh assignments <captured-result>
+{"agent":"grokbot","owner":"(main)","question":"export-check"}
+{"agent":"rakazo","owner":"(main)","question":"export-check"}
+
+$ bin/fm-procevent-lavish.sh answers <captured-result>
+(no output)
+
+$ bin/fm-procevent-lavish.sh reconciles <captured-result>
+(no output)

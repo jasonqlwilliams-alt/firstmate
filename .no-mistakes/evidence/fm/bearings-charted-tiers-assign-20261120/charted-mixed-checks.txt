@@ -1,0 +1,5 @@
+Lavish 0.1.46 with local Chromium. All tasks and roles are synthetic.
+PASS  mixed feedback
+The real runner limited the nested-target result to 6766 bytes.
+The real runner limited the missing-header result to 4835 bytes.
+PASS  truncated result guards

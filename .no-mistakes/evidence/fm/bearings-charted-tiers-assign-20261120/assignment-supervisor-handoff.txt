@@ -1,0 +1,34 @@
+Lavish version 0.1.46
+Runner event: 1795237656	1	check	procevent:lavish-ab797f693fdd71eb:1	check: procevent lavish lavish-ab797f693fdd71eb 1
+Wire header: prompts[1]{uid,prompt,selector,tag,text}:
+
+$ bin/fm-procevent-lavish.sh read <captured-result>
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(3) > div > form
+tag: choice
+text:
+| Confirm export prerequisite → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (1 of 1)
+
+$ bin/fm-procevent-lavish.sh assignments <captured-result>
+{"question":"export-check","owner":"(main)","agent":"rakazo"}
+
+$ bin/fm-procevent-lavish.sh answers <captured-result>
+(no output)
+
+$ bin/fm-procevent-lavish.sh reconciles <captured-result>
+(no output)
