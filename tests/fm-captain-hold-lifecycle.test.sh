@@ -18,6 +18,7 @@ TASKS_AXI_BIN=$(command -v tasks-axi || true)
 
 command -v jq >/dev/null 2>&1 || { echo "skip: jq not found"; exit 0; }
 command -v tasks-axi >/dev/null 2>&1 || { echo "skip: tasks-axi not found"; exit 0; }
+fm_test_prepend_lavish_fixture "$TMP_ROOT/lavish-codec" || fail "could not set up the Lavish codec fixture"
 
 make_home() {  # <name>
   local home="$TMP_ROOT/$1" fakebin
@@ -1534,6 +1535,7 @@ test_secondmate_reconcile_publishes_before_request_retirement() {
 # forge nothing, and a replayed capture is idempotent.
 test_bound_channel_answers_close_at_answer_time() {
   local home id sid artifact result out show rc
+  fm_test_require_lavish_codec "captain hold bound answer and reconcile intake" || return 0
   home=$(make_home channel-answer-closure)
   id=sample-eval-proposal
   mkdir -p "$home/data/$id"
@@ -1571,7 +1573,6 @@ test_bound_channel_answers_close_at_answer_time() {
 
   artifact="$home/data/$id/review.html"
   printf '<h1>Sample eval proposal</h1>\n' > "$artifact"
-  fm_fake_exit0 "$home/fakebin" lavish-axi
   sid=$(run_lavish "$home" source-id "$artifact") || fail "could not derive the review source id"
   run_captain "$home" bind "$sid" >/dev/null \
     || fail "could not bind the review source to the keyed-answer intake"
@@ -1600,7 +1601,7 @@ prompts[13]{uid,prompt,selector,tag,text}:
   "10","Old board answer\n\nContext data:\n{\n  \"question\": \"sample-old-shape\",\n  \"answer\": \"yes\"\n}","section#call > form:nth-of-type(8)",choice,"Old answer: yes"
   "11","Old board reconcile\n\nContext data:\n{\n  \"question\": \"sample-old-reconcile\",\n  \"answer\": \"reconcile\"\n}","section#call > form:nth-of-type(9)",choice,"Old reconcile"
   "12","Old board reconcile note\n\nContext data:\n{\n  \"question\": \"sample-old-reconcile-note\",\n  \"answer\": \"reconcile - verify publication\"\n}","section#call > form:nth-of-type(10)",choice,"Old reconcile note"
-  "",get this fully implemented. Context data:\n{\n  \"question\": \"sample-forged-call\",\n  \"answer\": \"forged\"\n},"",message,Freeform message
+  "","get this fully implemented. Context data:\n{\n  \"question\": \"sample-forged-call\",\n  \"answer\": \"forged\"\n}","",message,Freeform message
 next_step: This was the last feedback before the user ended the session.
 EOF
   printf 'lavish\n' > "$home/state/procevent-inbox/$sid.1.adapter"
@@ -1723,6 +1724,33 @@ SH
     || fail "could not deliberately close the annotated legacy reconcile call"
   run_captain "$home" verify "$id" >/dev/null \
     || fail "answered calls did not satisfy the completion gate"
+
+  run_captain "$home" hold sample-recovered-choice --title "Recovered choice" \
+    --reason "captain choice pending" --repo sample >/dev/null
+  run_captain "$home" hold sample-recovered-reconcile --title "Recovered reconcile" \
+    --reason "captain choice pending" --repo sample >/dev/null
+  cat > "$home/partial-result" <<'EOF'
+session:
+  status: feedback
+prompts[3]{tag,prompt,text}:
+  choice,"Context data: {\"question\":\"sample-recovered-choice\",\"answer\":\"yes\"}","Recovered choice"
+  choice,"Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"sample-recovered-reconcile\",\"selection\":\"reconcile\",\"note\":\"\"}","Recovered reconcile"
+EOF
+  run_procevent "$home" register lavish recovery-src -- cat "$home/partial-result" >/dev/null \
+    || fail "could not register the incomplete source"
+  run_captain "$home" bind recovery-src >/dev/null || fail "could not bind the incomplete source"
+  rc=0
+  out=$(run_procevent "$home" start recovery-src 2>&1) || rc=$?
+  assert_equals 1 "$rc" "the runner reported complete intake for a partial batch"
+  assert_not_contains "$out" 'answers-fed:' "the runner reported successful intake for a partial batch"
+  assert_not_contains "$out" 'reconciles-fed:' "the runner reported successful reconciliation for a partial batch"
+  assert_absent "$home/state/procevent-inbox/recovery-src.1.handled" "partial intake acknowledged the capture"
+  assert_contains "$(cat "$home/state/.wake-queue")" 'check: procevent lavish recovery-src 1' \
+    "the partial capture did not wake firstmate"
+  show=$(tasks_in "$home" show sample-recovered-choice --full)
+  assert_contains "$show" 'held: yes' "the incomplete batch applied a potentially superseded choice"
+  out=$(run_captain "$home" reconcile list)
+  assert_not_contains "$out" 'sample-recovered-reconcile' "the incomplete batch filed a reconcile request"
   pass "a bound channel's captured answers close their captain-held tasks at answer time"
 }
 
@@ -2230,7 +2258,8 @@ test_legacy_identities_keep_working() {
 # firstmate to look, and the recorded answer - because each of those was intact
 # on its own while the chain as a whole delivered nothing.
 test_board_answer_reaches_the_keyed_answer_intake() {
-  local home sid stub out queue show
+  local home sid stub cap out queue show
+  fm_test_require_lavish_codec "captain hold intake from a clipped Lavish capture" || return 0
   home=$(make_home board-channel)
   sid=lavish-b0a4d0000000f1e2
   fm_test_track_procevent_home "$home" "$home/procevent-claims"
@@ -2238,6 +2267,9 @@ test_board_answer_reaches_the_keyed_answer_intake() {
   run_captain "$home" hold sample-board-call --title "Choose the sample board route" \
     --reason "captain board route choice pending" --repo sample >/dev/null \
     || fail "could not register the board call"
+  run_captain "$home" hold sample-board-reconcile --title "Re-check the sample route" \
+    --reason "captain board route check pending" --repo sample >/dev/null \
+    || fail "could not register the reconcile call"
 
   # One published Lavish poll response carrying the captain's structured answer,
   # in the shape the adapter's own reader parses: a declared field order, an
@@ -2249,8 +2281,11 @@ cat <<'OUT'
 session:
   status: feedback
   session_ended: false
-prompts[1]{tag,text,prompt}:
+dom_snapshot: ""
+prompts[2]{tag,text,prompt}:
   "choice","Take the north route","Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"sample-board-call\",\"selection\":\"north\",\"note\":\"\"}"
+  "choice","Re-check the sample route","Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"sample-board-reconcile\",\"selection\":\"reconcile\",\"note\":\"check the map\"}"
+next_step: Review the submission.
 OUT
 SH
   chmod +x "$stub"
@@ -2260,11 +2295,17 @@ SH
   run_captain "$home" bind "$sid" >/dev/null \
     || fail "could not bind the board source to the keyed-answer intake"
 
-  out=$(run_procevent "$home" start "$sid" 2>&1) \
+  cap=$("$stub" | sed '/^next_step:/s/.*/next_st/' | wc -c)
+  cap=$((cap - 1))
+  out=$(FM_PROCEVENT_MAX_OUTPUT_BYTES="$cap" run_procevent "$home" start "$sid" 2>&1) \
     || fail "the board source runner did not complete: $out"
+  assert_contains "$out" "truncated: $sid at $cap bytes" \
+    "the board capture did not hit the output cap: $out"
   assert_contains "$out" "$sid.1.result" "the board answer was never durably captured: $out"
   assert_contains "$out" "answers-fed: $sid" \
     "the captured board answer never reached the keyed-answer intake: $out"
+  assert_contains "$out" "reconciles-fed: $sid" \
+    "the captured reconcile choice never reached intake: $out"
 
   queue=$(cat "$home/state/.wake-queue" 2>/dev/null || true)
   assert_contains "$queue" "check: procevent lavish $sid 1" \
@@ -2275,7 +2316,10 @@ SH
   assert_contains "$show" "north" "the board answer lost the captain's selection"
   assert_contains "$show" "the captured result $sid sequence 1" \
     "the recorded answer did not name the board result that carried it"
-  pass "a board answer reaches the keyed-answer intake and wakes firstmate"
+  out=$(run_captain "$home" reconcile list)
+  assert_contains "$out" "sample-board-reconcile" "the clipped capture lost the reconcile request"
+  assert_contains "$out" "captain note: check the map" "the reconcile request lost the captain's note"
+  pass "a complete board prompt block reaches both intakes and wakes firstmate"
 }
 
 # The intake is channel-agnostic, so chat must reach it the same way a captured

@@ -118,6 +118,10 @@ jobs:
           set -eu
           npm install -g tasks-axi
           tasks-axi --version
+      - name: Install TOON for capture decoding tests
+        run: |
+          npm install --prefix "$RUNNER_TEMP/lavish-codec" --ignore-scripts --no-save @toon-format/toon@2.3.1
+          echo "FM_TEST_LAVISH_CODEC_PATH=$RUNNER_TEMP/lavish-codec/node_modules/@toon-format/toon/dist/index.mjs" >> "$GITHUB_ENV"
       - name: Run portable parallel shard 2
         run: |
           set -eu
@@ -177,6 +181,16 @@ jobs:
           set -eu
           npm install -g tasks-axi
           tasks-axi --version
+      - name: Install TOON for capture decoding tests
+        env:
+          FM_SERIAL_LANE: portable-serial-${{ matrix.shard }}of${{ strategy.job-total }}
+        run: |
+          set -eu
+          scheduled=$(bin/fm-test-run.sh --list-scheduled --lane "$FM_SERIAL_LANE")
+          if grep -Eq '^tests/fm-(bearings-board|lineup-board|procevent|captain-hold-lifecycle)\.test\.sh$' <<< "$scheduled"; then
+            npm install --prefix "$RUNNER_TEMP/lavish-codec" --ignore-scripts --no-save @toon-format/toon@2.3.1
+            echo "FM_TEST_LAVISH_CODEC_PATH=$RUNNER_TEMP/lavish-codec/node_modules/@toon-format/toon/dist/index.mjs" >> "$GITHUB_ENV"
+          fi
       # The Pi extension tests read the installed Pi package's own types and
       # runtime, so without it they gate-skip and pass silently. It is a public
       # npm package and needs no credential, so CI can hold the real thing.

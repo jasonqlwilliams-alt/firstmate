@@ -366,6 +366,7 @@ test_build_injects_binds_then_arms() {
 
 test_registration_cannot_consume_before_any_origin_binding() {
   local home data runtime origin key hold board sid show
+  fm_test_require_lavish_codec "Bearings bound answer intake" || return 0
   home=$(make_home order-proof)
   data="$home/payload.json"
   runtime="$home/runtime"
@@ -426,11 +427,14 @@ session:
   session_ended: false
 prompts[1]{uid,prompt,selector,tag,text}:
   "2","Order proof: yes\\n\\nContext data:\\n{\\n  \\"schema\\": \\"fm-bearings-answer.v1\\",\\n  \\"question\\": \\"$ORDER_PROOF_HOLD\\",\\n  \\"selection\\": \\"yes\\",\\n  \\"note\\": \\"\\"\\n}","form",choice,"Order proof: yes"
+next_step: Review the submission.
 EOF
 SH
   chmod +x "$home/fakebin/lavish-axi"
 
-  PATH="$home/fakebin:$PATH" FM_ROOT_OVERRIDE="$runtime" FM_HOME="$home" \
+  fm_test_attach_lavish_codec "$home/fakebin" || fail "the Bearings fixture needs the Lavish codec"
+  PATH="$home/fakebin:$PATH" \
+    FM_ROOT_OVERRIDE="$runtime" FM_HOME="$home" \
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
     FM_PROCEVENT_CLAIM_ROOT="$home/procevent-claims" \
     FM_BEARINGS_BOARD_TEMPLATE="$ROOT/.agents/skills/bearings/assets/board-template.html" \
