@@ -225,6 +225,31 @@ Ordinary Herdr ship tasks can retire their records and any owned pool slot while
 The command's header owns shutdown prerequisites, shell detachment, supported limits and refusal behavior.
 The focused regression and token-free real-lab entry point are recorded in [runtime backend verification](verification/runtime-backends.md#pane-preserving-retirement).
 
+### Manual recovery for pre-binding workers
+
+Only an explicit Firstmate update whose updater already includes the check warns about pre-binding records that point to existing panes.
+The remote preflight reports pane claims visible before it sends the update job, and warnings first detected within that job can reach the caller after the fast-forward.
+Older updaters, bootstrap, spawn-time sync, and remote startup sync can advance a home without this warning.
+
+A local ship or scout record created before terminal binding may lack `herdr_terminal_id=`, leaving its pane unreadable to normal worker commands.
+Recover it on the host that owns the pane using the following checks.
+
+1. Locate the affected home's `state/<task>.meta`, or the exact state directory used by the update if it supplied `FM_STATE_OVERRIDE`.
+   Confirm `backend=herdr`, the record belongs to the intended task, and it has no `herdr_terminal_id=` line.
+   Stop for a secondmate record, a remote route, or any existing terminal binding.
+2. Take the session and pane from `herdr_session=` and `herdr_pane_id=`, and confirm that they agree with `window=`.
+   Query the exact pane using `herdr pane get "$pane" --session "$session"`.
+   Confirm the returned pane ID and a nonempty `terminal_id`, and verify that `foreground_cwd` resolves to the same directory as the record's `worktree=`.
+   The pane's creation `cwd` is insufficient for this check.
+3. Verify that Herdr reports a running agent matching the record's `harness=`.
+   Herdr can retain a registration after an agent exits, so inspect the foreground processes with `herdr pane process-info --pane "$pane" --session "$session"` if the reported agent may be stale.
+   For an exited agent, use `herdr pane read "$pane" --source recent --lines 200 --session "$session"` and require scrollback showing this task's own launch line and its exit, with no replacement agent.
+   A generic launch line or a matching pane label does not prove ownership.
+4. Recheck the pane, foreground directory, agent evidence, and terminal ID immediately before editing.
+   Leave the record untouched when any check is missing, mismatched, ambiguous, or has changed.
+   Once all checks pass, add exactly one `herdr_terminal_id=<verified terminal id>` line to a copy of the unchanged record in the same directory, preserve its permissions, and rename the copy over the original as one atomic replacement.
+   Check the result by running `bin/fm-crew-state.sh <task>` with the affected home's `FM_HOME` and intended state directory selected.
+
 ## Current transport behavior
 
 Launch and unbound terminal access can start a named server.

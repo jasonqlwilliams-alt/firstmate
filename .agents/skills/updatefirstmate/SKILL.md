@@ -40,6 +40,7 @@ This touches only the firstmate repo and its own worktrees, never anything under
    bin/fm-update.sh
    ```
    It fast-forwards this firstmate repo's default branch from origin, then updates every registered local or remote secondmate home through its placement-specific guarded path.
+   Surface any pre-binding Herdr worker warnings to the captain and point to the [manual recovery procedure and warning limits](../../../docs/herdr-backend.md#manual-recovery-for-pre-binding-workers).
    It prints one status line per target (`updated <old>..<new>` / `already current` / `skipped: <reason>`), followed by three action lines that tell you exactly what to do next:
    - `reread-firstmate: yes|no`
    - `restart-secondmates: fm-<id>...|none`

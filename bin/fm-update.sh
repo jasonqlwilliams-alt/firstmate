@@ -23,6 +23,7 @@
 # It does NOT re-read AGENTS.md or nudge secondmates itself - those are LLM /
 # tmux actions the skill performs. The script's job is the safe git mechanics
 # plus a parseable summary telling the caller what to do next:
+#   - advisory pre-binding Herdr worker warnings on stderr
 #   - one status line per target (updated/already current/skipped)
 #   - reread-firstmate: yes|no    (did the running firstmate's instructions change)
 #   - restart-secondmates: fm-<id>...|none (every live secondmate this pass left
@@ -73,6 +74,13 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   exit 0
 fi
 [ $# -eq 0 ] || { usage; exit 1; }
+
+# shellcheck disable=SC2329 # Called by the fast-forward library.
+fm_ff_before_advance() {  # <checkout> <label>
+  local state="$1/state"
+  [ "$2" != firstmate ] || state=$STATE
+  fm_backend_herdr_warn_prebinding_workers "$state" "$2"
+}
 
 # --- main firstmate repo ---------------------------------------------------
 
@@ -159,8 +167,33 @@ if [ -f "$SECONDMATES_MD" ]; then
     id=$SECONDMATE_REGISTRY_ID
     home=$SECONDMATE_REGISTRY_HOME
     if [ "$SECONDMATE_REGISTRY_REMOTE" -eq 1 ]; then
-      if remote_out=$("$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh update "$id" < /dev/null 2>&1); then
-        remote_result=$(printf '%s\n' "$remote_out" | tail -1)
+      # The remote job transport publishes diagnostics only upon completion,
+      # so check both remote homes before sending the mutating update job.
+      if ! remote_warnings=$("$SCRIPT_DIR/fm-on.sh" "$id" \
+        fm-remote-secondmate-control.sh update-check "$id" < /dev/null 2>&1); then
+        printf 'warning: remote secondmate %s: could not check for pre-binding Herdr workers before update. Older updaters lack this check. See the manual recovery procedure in docs/herdr-backend.md.\n' "$id" >&2
+        remote_warnings=
+      elif [ -n "$remote_warnings" ]; then
+        printf 'remote secondmate %s on %s:\n%s\n' "$id" "$SECONDMATE_REGISTRY_HOST" "$remote_warnings" >&2
+      fi
+      remote_rc=0 remote_result='' remote_failure=''
+      remote_out=$("$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh update "$id" < /dev/null 2>&1) || remote_rc=$?
+      while IFS= read -r line_out; do
+        case "$line_out" in
+          warning:*'pre-binding Herdr worker'*)
+            if ! grep -Fxq -- "$line_out" <<< "$remote_warnings"; then
+              printf 'remote secondmate %s on %s: %s\n' "$id" "$SECONDMATE_REGISTRY_HOST" "$line_out" >&2
+            fi
+            ;;
+          'synced: '*|'current: '*) remote_result=$line_out ;;
+          'firstmate: skipped: '*) remote_failure=$line_out ;;
+          'error: '*)
+            case "$remote_failure" in 'firstmate: skipped: '*) ;; *) remote_failure=$line_out ;; esac
+            ;;
+          *) remote_failure=${remote_failure:-$line_out} ;;
+        esac
+      done <<< "$remote_out"
+      if [ "$remote_rc" -eq 0 ]; then
         case "$remote_result" in
           synced:*)
             remote_detail=${remote_result#synced: }
@@ -196,7 +229,7 @@ if [ -f "$SECONDMATES_MD" ]; then
           *) echo "remote secondmate $id: skipped on $SECONDMATE_REGISTRY_HOST: malformed update result" >&2 ;;
         esac
       else
-        echo "remote secondmate $id: skipped on $SECONDMATE_REGISTRY_HOST: ${remote_out%%$'\n'*}" >&2
+        echo "remote secondmate $id: skipped on $SECONDMATE_REGISTRY_HOST: ${remote_failure:-update exited $remote_rc}" >&2
       fi
     else
       process_secondmate "$id" "$home" "" origin yes

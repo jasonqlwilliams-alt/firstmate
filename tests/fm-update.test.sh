@@ -262,8 +262,33 @@ argv_b64=$4
 decode() { printf '%s' "$1" | base64 --decode 2>/dev/null || printf '%s' "$1" | base64 -D; }
 rargs=()
 while IFS= read -r -d '' a; do rargs+=("$a"); done < <(decode "$argv_b64")
+preflight_warning='warning: remote home: pre-binding Herdr worker record remote-worker points to existing pane test:w1:p-remote. Pane ownership still needs verification.'
+update_warning='warning: remote home: pre-binding Herdr worker record new-worker points to existing pane test:w1:p-new. Pane ownership still needs verification.'
 case "${rargs[1]:-}" in
-  update) printf 'synced: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' ;;
+  update-check)
+    [ "${FM_TEST_REMOTE_PREFLIGHT:-0}" = 1 ] || exit 64
+    printf '%s\n' "$preflight_warning" >&2
+    ;;
+  update)
+    if [ "${FM_TEST_REMOTE_PREFLIGHT:-0}" = 1 ]; then
+      grep -Fxq "$preflight_warning" "$FM_FAKE_DIR/update.stderr" || exit 92
+    fi
+    if [ "${FM_TEST_REMOTE_DIRTY:-0}" = 1 ]; then
+      printf '%s\n' "$preflight_warning" "$update_warning" \
+        'error: remote secondmate home sync skipped: dirty working tree' >&2
+      exit 1
+    fi
+    if [ "${FM_TEST_REMOTE_DIRTY:-0}" = legacy-root ]; then
+      printf '%s\n' 'firstmate: skipped: dirty working tree' \
+        'error: remote code root did not complete a safe origin update' >&2
+      exit 1
+    fi
+    printf 'synced: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
+    if [ "${FM_TEST_REMOTE_PREFLIGHT:-0}" = 1 ]; then
+      # Remote job transport emits the mutation's warnings after its stdout.
+      printf '%s\n' "$preflight_warning" "$update_warning" >&2
+    fi
+    ;;
   state) printf 'alive\n' ;;
   *) exit 91 ;;
 esac
@@ -283,15 +308,135 @@ EOF
   printf -- '- sm1 - remote domain (host: remote-mac; root: /srv/fm; home: /srv/sm1; scope: things; projects: p; added 2026-09-03)\n' \
     > "$w/home/data/secondmates.md"
 
-  out=$(FM_TEST_SSH_BIN="$fake_ssh" run_update "$w")
+  local -a remote_update=(env "PATH=$w/fakebin:$PATH" "FM_FAKE_DIR=$w/fake" "FM_SSH_BIN=$fake_ssh"
+    "FM_ROOT_OVERRIDE=$w/main" "FM_HOME=$w/home" "$UPDATE")
+  out=$("${remote_update[@]}" 2>&1)
 
   assert_contains "$out" "remote secondmate sm1: updated on remote-mac" \
     "the legacy remote advance was not accepted"
+  assert_contains "$out" "Older updaters lack this check." \
+    "the unavailable remote preflight did not disclose the warning boundary"
+  assert_contains "$out" "manual recovery procedure in docs/herdr-backend.md" \
+    "the unavailable remote preflight did not identify the recovery procedure"
   assert_contains "$out" "restart-secondmates: fm-sm1" \
     "a live remote mate on the new tip must restart even when the host reports no instruction diff"
   assert_contains "$out" "nudge-secondmates: none" \
     "a restarted remote mate must not also be steered"
   pass "T3e a legacy remote advance still restarts the live remote mate"
+
+  out=$(FM_TEST_REMOTE_PREFLIGHT=1 "${remote_update[@]}" 2> "$w/fake/update.stderr")
+  assert_contains "$out" "remote secondmate sm1: updated on remote-mac" "remote job started before the preflight warning reached stderr"
+  [ "$(grep -c 'worker record remote-worker points to existing pane' "$w/fake/update.stderr")" -eq 1 ] ||
+    fail "remote update repeated the preflight warning"
+  assert_contains "$(cat "$w/fake/update.stderr")" "worker record new-worker points to existing pane test:w1:p-new" "the successful update swallowed a warning first detected during the update"
+  assert_contains "$out" "restart-secondmates: fm-sm1" "remote diagnostic displaced the update verdict"
+  pass "Remote preflight warnings are surfaced before the update job without duplicating diagnostics"
+
+  out=$(FM_TEST_REMOTE_PREFLIGHT=1 FM_TEST_REMOTE_DIRTY=1 "${remote_update[@]}" 2> "$w/fake/update.stderr")
+  out+=$'\n'$(cat "$w/fake/update.stderr")
+  assert_contains "$out" "remote secondmate sm1: skipped on remote-mac: error: remote secondmate home sync skipped: dirty working tree" \
+    "the remote warning obscured the refusal"
+  assert_contains "$out" "worker record new-worker points to existing pane test:w1:p-new" "the failed update swallowed a new warning"
+  [ "$(printf '%s\n' "$out" | grep -c 'worker record remote-worker points to existing pane')" -eq 1 ] ||
+    fail "failed remote update repeated the preflight warning"
+  assert_contains "$out" "restart-secondmates: none" "failed remote update triggered a restart"
+  pass "Remote update warnings preserve the sync refusal"
+
+  out=$(FM_TEST_REMOTE_DIRTY=legacy-root "${remote_update[@]}" 2>&1)
+  assert_contains "$out" "remote secondmate sm1: skipped on remote-mac: firstmate: skipped: dirty working tree" \
+    "the legacy host's final error obscured the code-root refusal"
+  assert_contains "$out" "restart-secondmates: none" "refused code-root update triggered a restart"
+}
+
+test_current_updater_warns_about_prebinding_workers() {
+  command -v jq >/dev/null 2>&1 || { echo "skip: jq not found for pre-binding Herdr worker warnings"; return; }
+  local w id state out real_git warnings original_records
+  w=$(new_world prebinding)
+  real_git=$(command -v git)
+  add_sm "$w" sm1
+  mkdir -p "$w/sm1/state"
+  # The seed predates the real ignore rules. Keep fixture state untracked.
+  printf '/state/\n' >> "$(git -C "$w/main" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
+  for id in main-live home-live missing bound remote secondmate; do
+    state="$w/home/state"
+    [ "$id" != home-live ] || state="$w/sm1/state"
+    fm_write_meta "$state/$id.meta" "window=update-herdr:w1:p-$id" "endpoint_task_id=$id" \
+      "backend=herdr" "kind=ship" "harness=claude" "worktree=$w/seed" "project=$w/seed" \
+      "herdr_session=update-herdr" "herdr_workspace_id=w1" "herdr_tab_id=w1:t1" "herdr_pane_id=w1:p-$id"
+  done
+  printf 'herdr_terminal_id=term-bound\n' >> "$w/home/state/bound.meta"
+  printf 'remote_host=another-host\n' >> "$w/home/state/remote.meta"
+  sed 's/^kind=ship$/kind=secondmate/' "$w/home/state/secondmate.meta" > "$w/fake/secondmate.meta"
+  mv "$w/fake/secondmate.meta" "$w/home/state/secondmate.meta"
+  original_records=$(cksum "$w/home/state/"*.meta "$w/sm1/state/home-live.meta")
+  cat > "$w/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+set -eu
+case "$*" in
+  'pane get w1:p-main-live --session update-herdr'|'pane get w1:p-home-live --session update-herdr')
+    printf '%s\n' "$3" >> "$FM_FAKE_DIR/herdr-calls"
+    printf '{"result":{"pane":{"pane_id":"%s","foreground_cwd":"/unrelated","agent":null}}}\n' "$3"
+    ;;
+  'pane get w1:p-missing --session update-herdr')
+    printf '%s\n' '{"error":{"code":"pane_not_found"}}' >&2; exit 1 ;;
+  *) printf 'unexpected:%s\n' "$*" >> "$FM_FAKE_DIR/herdr-calls"; exit 92 ;;
+esac
+SH
+  cat > "$w/fakebin/git" <<'SH'
+#!/usr/bin/env bash
+set -eu
+if [ "${1:-}" = -C ] && [ "${3:-}" = merge ] && [ "${4:-}" = --ff-only ]; then
+  case "${2##*/}" in
+    main) label=firstmate; id=main-live ;;
+    sm1) label=${FM_TEST_SECOND_MATE_LABEL:-secondmate sm1}; id=home-live ;;
+    *) exit 92 ;;
+  esac
+  grep -Fq "warning: $label: pre-binding Herdr worker record $id points to existing pane update-herdr:w1:p-$id. Pane ownership still needs verification." "$FM_FAKE_DIR/update.stderr" ||
+    { printf 'warning was absent at the fast-forward for %s\n' "$label" >&2; exit 93; }
+fi
+exec "$FM_TEST_REAL_GIT" "$@"
+SH
+  chmod +x "$w/fakebin/herdr" "$w/fakebin/git"
+  local -a update_env=(env "PATH=$w/fakebin:$PATH" "FM_FAKE_DIR=$w/fake"
+    "FM_TEST_REAL_GIT=$real_git" "FM_ROOT_OVERRIDE=$w/main")
+  bump_origin "$w" readme
+  out=$("${update_env[@]}" FM_HOME="$w/sm1" \
+    "$ROOT/bin/fm-remote-secondmate-control.sh" update-check sm1 2>&1)
+  assert_contains "$out" "warning: remote home: pre-binding Herdr worker record home-live points to existing pane update-herdr:w1:p-home-live" "host-local remote preflight missed the worker record"
+  [ "$(cat "$w/fake/herdr-calls")" = 'w1:p-home-live' ] || fail "remote preflight probed an unexpected pane"
+  : > "$w/fake/herdr-calls"
+  out=$("${update_env[@]}" FM_HOME="$w/home" "$UPDATE" 2> "$w/fake/update.stderr")
+  warnings=$(cat "$w/fake/update.stderr")
+  assert_contains "$warnings" "warning: firstmate: pre-binding Herdr worker record main-live points to existing pane update-herdr:w1:p-main-live" "primary warning missing"
+  assert_contains "$warnings" "warning: secondmate sm1: pre-binding Herdr worker record home-live points to existing pane update-herdr:w1:p-home-live" "secondmate warning missing"
+  assert_contains "$warnings" "manual recovery procedure in docs/herdr-backend.md" "warning omitted the recovery procedure"
+  assert_contains "$out" "firstmate: updated " "warning blocked primary update"
+  assert_contains "$out" "secondmate sm1: updated " "warning blocked secondmate update"
+  [ "$(cat "$w/fake/herdr-calls")" = $'w1:p-main-live\nw1:p-home-live' ] ||
+    fail "update did not use read-only Herdr probes before advancing each checkout"
+  [ "$(cksum "$w/home/state/"*.meta "$w/sm1/state/home-live.meta")" = "$original_records" ] ||
+    fail "update warning changed the worker records"
+  pass "Pre-binding Herdr warnings precede both local fast-forwards and leave records intact"
+
+  : > "$w/fake/herdr-calls"
+  mkdir -p "$w/main/state"
+  cp "$w/home/state/main-live.meta" "$w/main/state/main-live.meta"
+  bump_origin "$w" readme
+  out=$("${update_env[@]}" FM_HOME="$w/sm1" FM_TEST_SECOND_MATE_LABEL="remote home" \
+    "$ROOT/bin/fm-remote-secondmate-control.sh" update sm1 2> "$w/fake/update.stderr")
+  warnings=$(cat "$w/fake/update.stderr")
+  assert_contains "$warnings" "warning: firstmate: pre-binding Herdr worker record main-live points to existing pane update-herdr:w1:p-main-live" "remote update missed the code-root worker record"
+  assert_contains "$warnings" "warning: remote home: pre-binding Herdr worker record home-live points to existing pane update-herdr:w1:p-home-live" "remote update missed the host-local worker record"
+  assert_contains "$out" 'synced: ' "remote warning blocked the fast-forward"
+  [ "$(cat "$w/fake/herdr-calls")" = $'w1:p-main-live\nw1:p-home-live' ] || fail "remote update probed an unexpected pane"
+
+  printf 'uncommitted local edit\n' >> "$w/main/AGENTS.md"
+  if out=$("${update_env[@]}" FM_HOME="$w/sm1" \
+    "$ROOT/bin/fm-remote-secondmate-control.sh" update sm1 2>&1); then
+    fail "remote update accepted a dirty code root"
+  fi
+  assert_contains "$out" "error: remote code root update skipped: dirty working tree" \
+    "the host's final error lost the code-root refusal"
 }
 
 # --- T4: dirty secondmate is skipped, its edit preserved -------------------
@@ -477,6 +622,7 @@ test_bin_only_advance_restarts
 test_unprovable_runtime_gets_fallback_nudge
 test_dead_secondmate_gets_no_action
 test_legacy_remote_advance_restarts
+test_current_updater_warns_about_prebinding_workers
 test_dirty_secondmate_skipped
 test_diverged_secondmate_skipped
 test_already_current_secondmate_still_restarts

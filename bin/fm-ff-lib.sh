@@ -290,6 +290,8 @@ live_secondmate_meta_records() {
 #                  it is skipped rather than fetched.
 # Guards are identical in both modes: ff-only (never force/merge/stash); skip a
 # dirty, diverged, or wrong-branch target and leave its work untouched.
+# An optional fm_ff_before_advance <dir> <label> hook reports advisory
+# diagnostics after the guards pass and before the merge.
 FF_STATUS=""
 FF_INSTR=""
 ff_target() {
@@ -367,6 +369,9 @@ ff_target() {
 
   instr=$(changed_instr "$dir" "$base")
   before=$(git -C "$dir" rev-parse --short HEAD)
+  if declare -F fm_ff_before_advance >/dev/null; then
+    fm_ff_before_advance "$dir" "$label" || true
+  fi
   if ! out=$(git -C "$dir" merge --ff-only "$base" 2>&1); then
     echo "$label: skipped: fast-forward failed: $(first_line "$out")"
     return 0
