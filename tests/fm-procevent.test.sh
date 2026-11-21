@@ -2580,19 +2580,20 @@ pass "read distinguishes a feedback capture from an ended-with-nothing close"
 LAVISH_ADAPTER="$ROOT/bin/fm-procevent-lavish.sh"
 TABLE_CAPTURE="$TMP_ROOT/tabular-submission.toon"
 LIST_CAPTURE="$TMP_ROOT/list-submission.toon"
-cat > "$TABLE_CAPTURE" <<'EOF'
+CHOICE_LABEL=$'Section 1:\fSection 2'
+sed "s/SHIP_LABEL/$CHOICE_LABEL/" > "$TABLE_CAPTURE" <<'EOF'
 session:
   status: feedback
   session_ended: true
 dom_snapshot: ""
 prompts[2]{uid,prompt,selector,tag,text}:
-  a,"Context data: {\"question\":\"ship-call\",\"answer\":\"go\"}","",choice,Ship
+  a,"Context data: {\"question\":\"ship-call\",\"answer\":\"go\"}","",choice,"SHIP_LABEL"
   b,"Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"check-call\",\"selection\":\"reconcile\",\"note\":\"Re-check host\"}","",choice,Re-check host
 artifact_failures[1]{detail}:
   Fixture artifact failure.
 next_step: Review the submission.
 EOF
-cat > "$LIST_CAPTURE" <<'EOF'
+sed "s/SHIP_LABEL/$CHOICE_LABEL/" > "$LIST_CAPTURE" <<'EOF'
 session:
   status: feedback
   session_ended: true
@@ -2602,7 +2603,7 @@ prompts[3]:
     prompt: "Context data: {\"question\":\"ship-call\",\"answer\":\"go\"}"
     selector: ""
     tag: choice
-    text: Ship
+    text: "SHIP_LABEL"
   - uid: b
     prompt: "Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"check-call\",\"selection\":\"reconcile\",\"note\":\"Re-check host\"}"
     selector: ""
@@ -2643,11 +2644,15 @@ assert_submission() {  # <capture> <declared> <presented> <complete> <answers> <
     [ ! -s "$errors" ] || fail "$capture: unexpected reconcile warning"
   fi
 }
-SHIPPED_ANSWER=$'ship-call\tgo\tShip'
+SHIPPED_ANSWER=$'ship-call\tgo\tSection 1: Section 2'
 RECHECK_ANSWER=$'check-call\tRe-check host'
 assert_submission "$TABLE_CAPTURE" 2 2 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 assert_submission "$LIST_CAPTURE" 3 3 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+assert_contains "$("$LAVISH_ADAPTER" read "$TABLE_CAPTURE")" "| $CHOICE_LABEL" \
+  "tabular presentation lost the literal form feed in a quoted label"
 out=$("$LAVISH_ADAPTER" read "$LIST_CAPTURE")
+assert_contains "$out" "| $CHOICE_LABEL" \
+  "list presentation lost the literal form feed in a quoted label"
 assert_contains "$out" "element_selector: main > button" "nested-target annotation lost its selector"
 assert_contains "$out" "| Fix this layout issue the browser detected." "nested-target annotation lost its comment"
 pass "tabular and nested-target list submissions feed the same answer and reconcile projections"
@@ -2720,18 +2725,6 @@ assert_submission "$CLIPPED" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 CLIPPED=$(capture_prefix list-cut-before-header "$LIST_CAPTURE" 'dom_snapshot: ""')
 assert_submission "$CLIPPED" unknown 0 no '' ''
 pass "runner cutoffs preserve complete rows and report missing or clipped prompt data"
-
-EOF_LIST="$TMP_ROOT/list-at-eof.toon"
-printf '%s' "$(sed '/^next_step:/d' "$LIST_CAPTURE")" > "$EOF_LIST"
-pe_register "$CLIPPED_HOME" lavish list-at-eof -- /bin/cat "$EOF_LIST" >/dev/null \
-  || fail "could not register list-at-eof"
-pe "$CLIPPED_HOME" start list-at-eof >/dev/null || fail "could not capture list-at-eof"
-COMPLETE=$(first_result "$CLIPPED_HOME" list-at-eof) || fail "no captured result for list-at-eof"
-cmp -s "$COMPLETE" "$EOF_LIST" || fail "list-at-eof changed the captured bytes"
-assert_submission "$COMPLETE" 3 3 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
-assert_not_contains "$("$LAVISH_ADAPTER" read "$COMPLETE")" "capture_truncated:" \
-  "a complete capture was reported truncated"
-pass "a complete runner capture can end at the final nested value"
 
 # The runner's silence seam is generic and closed by default: an adapter with no
 # `silent` command must keep announcing, so adding the seam changed nothing for

@@ -978,7 +978,7 @@ EOF
       # Mask every non-framing byte before handing it to the capture owner.
       $tail =~ s/[^ \n]/x/g;
       $tail =~ tr/ \n/sn/;
-      print($truncated || $adapter ne "lavish" ? $tail : "eof");
+      print $tail;
       exit($truncated ? 3 : 0);
     ' "$MAX_OUTPUT_BYTES" "$adapter" <&4 3>"$out")
     bound_rc=$?

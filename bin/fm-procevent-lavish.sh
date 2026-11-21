@@ -406,11 +406,7 @@ cmd_silent() {
   local file=${1-} content_rc
   [ -n "$file" ] || usage
   [ -f "$file" ] && [ ! -L "$file" ] || die "result file does not exist: $file"
-  [ "$(cmd_classify "$file")" = ended ] || return 1
-  case "$(capture_tail "$file")" in
-    ''|eof) ;;
-    *) return 1 ;;
-  esac
+  [ "$(cmd_classify "$file")" = ended ] && [ -z "$(capture_tail "$file")" ] || return 1
   result_has_queued_content "$file"
   content_rc=$?
   # Only a completed check that proved the result carries nothing declares
@@ -429,10 +425,8 @@ LAVISH_CAPTURE_DECODER='
 
   sub toon_scalar {
     my ($value) = @_;
-    if ($value =~ /^"/) {
-      return undef unless $value =~ /\A"(?:[^"\\]|\\.)*"\z/;
-      my $decoded = eval { decode_json("[$value]")->[0] };
-      return $@ ? undef : Encode::encode_utf8($decoded);
+    if ($value =~ /\A"/) {
+      return undef unless $value =~ s/\A"((?:[^"\\]|\\[ntr"\\])*)"\z/$1/;
     }
     # Older captures also used AXI escapes in unquoted prose.
     $value =~ s/\\(.)/$1 eq "n" ? "\n" : $1 eq "t" ? "\t" : $1 eq "r" ? "\r" : $1/ge;
@@ -500,8 +494,8 @@ LAVISH_CAPTURE_DECODER='
     binmode $fh;
     my $raw = do { local $/; <$fh> } // "";
     close $fh or die "cannot close Lavish capture: $!\n";
-    my $truncated = length($tail) > 0 && $tail ne "eof";
-    $raw .= "\n" if $tail eq "eof" || $tail =~ s/\An//;
+    my $truncated = length($tail) > 0;
+    $raw .= "\n" if $tail =~ s/\An//;
     my @lines = split /\n/, $raw, -1;
     my $partial = pop(@lines) // "";
     s/\r\z// for @lines;
@@ -557,7 +551,7 @@ LAVISH_CAPTURE_DECODER='
     }
     if (defined $kind) {
       my $item_ended = $truncated ? $boundary !~ /\Asss/ :
-        $tail eq "eof" || $partial =~ /\A(?:\S|  -(?: |\z))/;
+        $partial =~ /\A(?:\S|  -(?: |\z))/;
       $finish_item->($item_ended);
       if ($partial =~ /\A /) {
         if ($fields && !$truncated && $partial =~ s/\A {2}(?! )//) {
@@ -600,7 +594,7 @@ cmd_choice_rows() {
   local selection=$1 file=${2-}
   [ -n "$file" ] || usage
   [ -f "$file" ] && [ ! -L "$file" ] || die "result file does not exist: $file"
-  perl -MJSON::PP -MEncode -e "$LAVISH_CAPTURE_DECODER" -e '
+  perl -MJSON::PP -e "$LAVISH_CAPTURE_DECODER" -e '
     my ($selection, $path, $tail, $lifecycle) = @ARGV;
     my $capture = decode_lavish_capture($path, $tail, $lifecycle);
     warn "incomplete Lavish prompt capture: $path\n" unless $capture->{complete};
@@ -695,7 +689,7 @@ cmd_read() {
   [ -f "$file" ] && [ ! -L "$file" ] || die "result file does not exist: $file"
   lifecycle=$(cmd_classify "$file")
   session_ended=$(session_field "$file" session_ended)
-  perl -MJSON::PP -MEncode -e "$LAVISH_CAPTURE_DECODER" -e '
+  perl -e "$LAVISH_CAPTURE_DECODER" -e '
     my ($path, $lifecycle, $session_ended, $tail) = @ARGV;
     my $capture = decode_lavish_capture($path, $tail, $lifecycle);
     my $want = $capture->{declared} // "unknown";
