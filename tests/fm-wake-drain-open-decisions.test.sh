@@ -225,6 +225,7 @@ test_folded_reserved_needs_decision_warns_once_per_line() {
     printf 'needs-decision: [key=pending-reply-colon] which shape\n'
     printf 'needs-decision [key=api-shape]: pick REST or RPC\n'
     printf 'needs-decision [key=pending-reply-owner1]: pending-reply-missed: task=t pending-reply-id=owner1 request=ok\n'
+    printf 'note: résumé context before the blocker\n'
     printf 'blocked [key=pending-reply-foreign]: shipping is blocked on infra\n'
   } > "$state/task-fold.status"
 
@@ -254,12 +255,18 @@ test_folded_reserved_needs_decision_warns_once_per_line() {
   if grep -F 'folded reserved-prefix' "$out" | grep -F 'api-shape' >/dev/null; then
     fail "an ordinary decision was warned: $(cat "$out")"
   fi
+  grep -Fxq 'task-fold note: résumé context before the blocker' "$out" || fail "the unrelated drain omitted the later note"
+  if grep -Fq 'shipping is blocked on infra' "$out"; then
+    fail "the unrelated drain displayed the blocker without its task signal: $(cat "$out")"
+  fi
 
   append_wake "$state" signal task-fold.status 'signal: task-fold' || fail "could not queue the delayed wake"
   FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed on the delayed task signal"
   grep -Fq $'\tsignal\ttask-fold.status\t' "$out" || fail "the delayed task wake was not presented"
-  if grep -Eq 'which color should the button be|which shape' "$out"; then
-    fail "the delayed task signal replayed an already presented question: $(cat "$out")"
+  grep -Fq 'task-fold.status: blocked [key=pending-reply-foreign]: shipping is blocked on infra' "$out" \
+    || fail "the warning receipt consumed the later blocker's delayed annotation: $(cat "$out")"
+  if grep -Eq 'which color should the button be|which shape|résumé context' "$out"; then
+    fail "the delayed task signal replayed already presented status: $(cat "$out")"
   fi
 
   printf 'needs-decision [key=button-color]: which color should the button be\n' >> "$state/task-fold.status"

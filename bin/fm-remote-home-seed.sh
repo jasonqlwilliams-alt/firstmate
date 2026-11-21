@@ -128,9 +128,9 @@ BRIEF_CREATED=0
 if [ ! -f "$BRIEF" ]; then
   [ -n "${FM_SECONDMATE_CHARTER:-}" ] || die "no filled charter at $BRIEF; set FM_SECONDMATE_CHARTER or scaffold one first"
   if [ "$NO_PROJECTS" -eq 1 ]; then
-    "$SCRIPT_DIR/fm-brief.sh" "$ID" --secondmate --remote --no-projects >/dev/null
+    "$SCRIPT_DIR/fm-brief.sh" "$ID" --secondmate --no-projects >/dev/null
   else
-    "$SCRIPT_DIR/fm-brief.sh" "$ID" --secondmate --remote "${PROJECT_NAMES[@]}" >/dev/null
+    "$SCRIPT_DIR/fm-brief.sh" "$ID" --secondmate "${PROJECT_NAMES[@]}" >/dev/null
   fi
   BRIEF_CREATED=1
 fi
@@ -149,25 +149,9 @@ REG_EXISTED=0
 # Keep the parent charter as its durable source, but publish a remote copy whose
 # status path is the remote append-only relay log rather than a local Mac path.
 PARENT_STATUS="$STATE/$ID.status"
-case "$PARENT_STATUS" in
-  /*) ;;
-  *)
-    if [ -n "${FM_STATE_OVERRIDE:-}" ]; then
-      PARENT_STATUS="$(CDPATH='' cd -- "$STATE" && pwd -P)/$ID.status"
-    else
-      PARENT_STATUS="$(CDPATH='' cd -- "$FM_HOME" && pwd -P)/state/$ID.status"
-    fi
-    ;;
-esac
 REMOTE_STATUS="$REMOTE_HOME/state/parent-replies.status"
-PARENT_STATUS_SH=$(fm_brief_shell_quote "$PARENT_STATUS")
-REMOTE_STATUS_SH=$(fm_brief_shell_quote "$REMOTE_STATUS")
 while IFS= read -r line || [ -n "$line" ]; do
-  case "$line" in
-    *"$PARENT_STATUS_SH"*) line=${line//"$PARENT_STATUS_SH"/"$REMOTE_STATUS_SH"} ;;
-    *) line=${line//"$PARENT_STATUS"/"$REMOTE_STATUS"} ;;
-  esac
-  printf '%s\n' "$line"
+  printf '%s\n' "${line//"$PARENT_STATUS"/"$REMOTE_STATUS"}"
 done < "$BRIEF" > "$TMP/charter.remote"
 
 PROJECTS_CSV=

@@ -120,13 +120,11 @@ A file at `~/.local/bin/fm-remote-entrypoint.sh` that is not Firstmate's own sym
 
 ## Provision a route
 
-Create and fill the charter with `bin/fm-brief.sh <id> --secondmate --remote {<project>...|--no-projects}`, then run:
+Create and fill the normal secondmate charter first, then run:
 
 ```sh
 bin/fm-remote-home-seed.sh <id> <ssh-alias> <remote-root> <remote-home> {<project>[=<origin-url>]...|--no-projects}
 ```
-
-If you supply `FM_SECONDMATE_CHARTER` directly to the seed command and no brief exists, the seed selects the remote scaffold automatically.
 
 `<remote-root>` is the remote Firstmate code clone that supplies tracked scripts.
 `<remote-home>` is a separate absolute path for the persistent secondmate home and must not overlap the code root.
@@ -194,8 +192,7 @@ Host-side capture, key delivery, pending-reply observation, and inbox doorbells 
 An unreachable or unreadable remote read is unknown, not evidence that the endpoint is dead.
 
 Marked requests keep the existing correlation contract.
-The remote charter appends directly to `state/parent-replies.status` in the remote home and can report even when the home skips its pre-launch sync.
-The parent drain warns on rejected reserved-key decisions from this relay, as it does for Rovo's native status appends.
+The remote charter appends replies to `state/parent-replies.status` in the remote home.
 The remote home's own outcome publishers append there too, through the channel contract in `bin/fm-parent-channel-lib.sh` ([secondmate-parent-channel.md](secondmate-parent-channel.md)).
 A process-event source performs a non-destructive, cursor-anchored delta read, fetches only referenced `data/*.md` documents through the confined reader, mirrors every content-bearing line at most once into the primary status channel, and does not carry blank separators.
 The channel carries the mate's status and decision model: an uncorrelated progress line and a newly raised `needs-decision` travel the same path as a correlated answer, and reach the parent's open-decision fold identically.

@@ -14,7 +14,7 @@
 # PR instead of shipping a new one).
 # Usage: fm-brief.sh <task-id> <repo-name> --mode <no-mistakes|direct-PR|local-only> [--herdr-lab]
 #        fm-brief.sh <task-id> <repo-name> --scout [--herdr-lab]
-#        fm-brief.sh <task-id> --secondmate [--remote] {<project>...|--no-projects}
+#        fm-brief.sh <task-id> --secondmate {<project>...|--no-projects}
 #   --scout writes the scout contract instead: the deliverable is a report at
 #   data/<task-id>/report.md (no branch, no push, no PR) and the worktree is scratch.
 #   It offers the Lavish review loop only when `fm-bootstrap.sh lavish-compatible`
@@ -58,8 +58,8 @@
 # declared-external-wait verb (FM_CLASSIFY_PAUSED_VERB, default "paused") from
 # "blocked:": pause for a known external wait expected to clear on its own,
 # blocked when firstmate must act.
-# The guarded status writer refuses a key prefix reserved by the classifier.
-# For a charter intended for remote seeding, --remote selects the direct append.
+# The guarded status writer in ship and scout briefs refuses a key prefix
+# reserved by the classifier.
 # Every scaffold also carries the steering-inbox receive-and-ack section:
 # process state/<id>.inbox/*.msg in order and acknowledge each by moving it to
 # handled/ (record, doorbell, and ladder owned by bin/fm-task-inbox-lib.sh).
@@ -94,8 +94,6 @@ esac
 . "$SCRIPT_DIR/fm-classify-lib.sh"
 # shellcheck source=bin/fm-dod-lib.sh
 . "$SCRIPT_DIR/fm-dod-lib.sh"
-# shellcheck source=bin/fm-secondmate-charter-lib.sh
-. "$SCRIPT_DIR/fm-secondmate-charter-lib.sh"
 PAUSED_VERB=${FM_CLASSIFY_PAUSED_VERB:-$FM_CLASSIFY_PAUSED_VERB_DEFAULT}
 
 resolve_directory_input() {
@@ -123,7 +121,6 @@ else
   STATE="$FM_HOME/state"
 fi
 KIND=ship
-REMOTE=0
 HERDR_LAB=0
 NO_PROJECTS=0
 MODE=
@@ -145,7 +142,6 @@ for a in "$@"; do
   case "$a" in
     --scout) KIND=scout ;;
     --secondmate) KIND=secondmate ;;
-    --remote) REMOTE=1 ;;
     --herdr-lab) HERDR_LAB=1 ;;
     --no-projects) NO_PROJECTS=1 ;;
     --mode) want_value=mode ;;
@@ -158,10 +154,6 @@ for a in "$@"; do
   esac
 done
 [ -z "$want_value" ] || { echo "error: --$want_value requires a value" >&2; exit 1; }
-if [ "$REMOTE" -eq 1 ] && [ "$KIND" != secondmate ]; then
-  echo "error: --remote applies only to secondmate charters" >&2
-  exit 1
-fi
 
 # Ship delivery mode is an explicit per-task decision (AGENTS.md section 7). A
 # missing or invalid value stops the scaffold rather than silently defaulting.
@@ -202,15 +194,14 @@ if [ "$KIND" = ship ] && [ "$MODE" = no-mistakes ]; then
   ASK_USER_BLOCK=$(fm_ask_user_escalation_block "$DATA" "$ID")
 fi
 
-STATUS_FILE=$(fm_brief_shell_quote "$STATE/$ID.status")
-if [ "$REMOTE" -eq 1 ]; then
-  STATUS_PROTOCOL="   \`echo \"{state}: {one short line}\" >> $STATUS_FILE\`"
-else
-  STATUS_APPEND_BIN=$(fm_brief_shell_quote "$FM_ROOT/bin/fm-status-append.sh")
-  STATUS_PROTOCOL="   \`$STATUS_APPEND_BIN $STATUS_FILE \"{state}: {one short line}\"\`
-   A \`[key=<slug>]\` on that line must not start with a prefix reserved by \`bin/fm-classify-lib.sh\`. The append command names the prefix, refuses the line, and asks you to pick another key."
-fi
-INBOX_DIR=$(fm_brief_shell_quote "$STATE/$ID.inbox")
+shell_quote() {
+  printf "'"
+  printf '%s' "$1" | sed "s/'/'\\\\''/g"
+  printf "'"
+}
+
+STATUS_FILE=$(shell_quote "$STATE/$ID.status")
+INBOX_DIR=$(shell_quote "$STATE/$ID.inbox")
 LIVE_STATE_SECTION="For live revisions, holds, or routing, read \`$DATA/system-state.md\` (skill \`system-state-card\`). Do not walk Atlas or \`C:\\continuum-system\` for those facts."
 
 # The receive-and-ack half of the steering-inbox contract, included in every
@@ -284,7 +275,7 @@ A request relayed to you by the main firstmate is tagged with a leading \`$FM_FR
 When a message carries that marker, do the work, then respond via the STATUS/ESCALATION path below, never only in this chat: the main firstmate does not read your chat, so a chat-only reply is lost.
 Marked requests also carry a privacy-safe \`corr=<id>\` token after the marker; include that exact token in your parent status reply (or in the status pointer to a detailed doc) so the parent can correlate the answer.
 Optional helper: \`bin/fm-secondmate-report.sh <verb> <corr_id> <note>\` appends that correlated line to the parent channel itself - do not pass a status path, and do not write a hand path under this home.
-You can also include the same \`corr=<id>\` on the status line below.
+A plain \`echo\` that includes the same \`corr=<id>\` on this parent channel is equally valid; do not depend on the helper being present.
 For a terse result, a status line is the whole answer.
 For a detailed answer (an investigation, a plan, an audit), write it to a doc under your home's \`data/\` and append a status line that points to that doc - the scout-report pattern - so the main firstmate is woken and can read it.
 Before treating an investigation or visual review as complete, load \`captain-hold-lifecycle\` from this home's \`.agents/skills/\` and pass its shared completion gate.
@@ -296,7 +287,7 @@ $INBOX_SECTION
 # Escalation to main firstmate
 Handle routine work yourself.
 Report only true captain-relevant outcomes or a declared external wait by appending one line:
-$STATUS_PROTOCOL
+   \`echo "{state}: {one short line}" >> $STATUS_FILE\`
 States: working, needs-decision, blocked, $PAUSED_VERB, done, failed.
 Use \`$PAUSED_VERB: {why}\` (distinct from \`blocked:\`) only when your domain is deliberately idling on a known external wait you expect to clear on its own, naming when it clears with \`until <YYYY-MM-DDTHH:MMZ>\` (UTC) when you know; use \`blocked:\` when you are stuck and need firstmate to act.
 Use this only for material phase changes, a captain decision, a real blocker, a failure, work ready for review, or work you landed.
@@ -327,9 +318,12 @@ exit 0
 fi
 
 REPO=${POS[1]}
+STATUS_APPEND_BIN=$(shell_quote "$FM_ROOT/bin/fm-status-append.sh")
+STATUS_PROTOCOL="   \`$STATUS_APPEND_BIN $STATUS_FILE \"{state}: {one short line}\"\`
+   A \`[key=<slug>]\` on that line must not start with a prefix reserved by \`bin/fm-classify-lib.sh\`. The append command names the prefix, refuses the line, and asks you to pick another key."
 
 if [ "$HERDR_LAB" -eq 1 ]; then
-HERDR_LAB_HELPER=$(fm_brief_shell_quote "$FM_ROOT/bin/fm-herdr-lab.sh")
+HERDR_LAB_HELPER=$(shell_quote "$FM_ROOT/bin/fm-herdr-lab.sh")
 # shellcheck disable=SC2016  # single quotes are deliberate: these lines are literal brief text whose backtick-wrapped $(...) and "$HERDR_LAB_SESSION" snippets must reach the reading agent verbatim, not expand at scaffold time; only the '"$VAR"' break-outs interpolate.
 HERDR_SECTION=$(printf '%s\n' \
 '# Herdr isolation - HARD SAFETY CONTRACT' \

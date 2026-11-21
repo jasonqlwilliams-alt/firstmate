@@ -115,8 +115,7 @@ pass "remote provisioning publishes durable parent state before its completion m
 # --- the remote host's tracked code root, real git repos, one project --------
 (
   cd "$ROOT" || exit
-  tar --exclude=.git --exclude=.no-mistakes --exclude=data --exclude=state --exclude=config \
-    --exclude=fm-status-append.sh -cf - .
+  tar --exclude=.git --exclude=.no-mistakes --exclude=data --exclude=state --exclude=config -cf - .
 ) | (cd "$REMOTE_ROOT" && tar -xf -)
 install_remote_herdr_fixture "$REMOTE_ROOT" "$HERDR_STATE" "$HERDR_LOG" \
   "$TMP_ROOT/herdr-send-fail" "$TMP_ROOT/herdr.sock"
@@ -207,26 +206,8 @@ remote_env() {
 
 FM_SECONDMATE_CHARTER='Own iOS delivery on the build Mac.' \
   FM_SECONDMATE_SCOPE='iOS implementation and Xcode validation' \
-  remote_env env FM_ROOT_OVERRIDE="$ROOT" \
-  "$ROOT/bin/fm-remote-home-seed.sh" ios remote-mac "$REMOTE_ROOT" "$REMOTE_HOME" alpha \
+  remote_env "$ROOT/bin/fm-remote-home-seed.sh" ios remote-mac "$REMOTE_ROOT" "$REMOTE_HOME" alpha \
   >/dev/null || fail "real remote secondmate seeding failed"
-
-assert_absent "$REMOTE_HOME/bin/fm-status-append.sh" "the seeded home unexpectedly had the writer before sync"
-status_command=$(sed -n 's/^   `\(.*"{state}: {one short line}".*\)`$/\1/p' "$REMOTE_HOME/data/charter.md")
-[ -n "$status_command" ] || fail "the remote charter has no runnable status command"
-status_template='"{state}: {one short line}"'
-status_argument='"$1"'
-(cd "$REMOTE_HOME" && bash -c "${status_command//"$status_template"/"$status_argument"}" _ 'done: remote report delivered') \
-  || fail "the remote charter could not report before sync"
-(cd "$REMOTE_HOME" && FM_CLASSIFY_RESERVED_KEY_PREFIXES=pending-reply- \
-  bash -c "${status_command//"$status_template"/"$status_argument"}" _ \
-  'needs-decision [key=pending-reply-remote]: choose a remote date') \
-  || fail "the direct remote relay incorrectly required a guarded writer"
-cmp -s "$REMOTE_HOME/state/parent-replies.status" <(printf '%s\n' 'done: remote report delivered' \
-  'needs-decision [key=pending-reply-remote]: choose a remote date') \
-  || fail "the report did not land in the remote relay log"
-assert_absent "$PARENT/state/ios.status" "the remote charter wrote to the originating host's log"
-pass "the provisioned charter writes to the relay log before sync"
 
 # --- the durable record itself: the fundamental part of the fix -------------
 assert_present "$REMOTE_HOME/.fm-secondmate-parent" \

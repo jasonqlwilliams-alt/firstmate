@@ -687,7 +687,7 @@ test_secondmate_directory_paths_are_absolute_and_output_is_stable() {
   )
   cmp -s "$baseline" "$brief" \
     || fail "relative FM_HOME changed charter bytes compared with the same absolute home"
-  assert_grep "'$home/state/relative-home.status'" "$brief" \
+  assert_grep ">> '$home/state/relative-home.status'" "$brief" \
     "relative FM_HOME did not render an absolute secondmate status path"
 
   brief="$home/data/relative-state/brief.md"
@@ -703,7 +703,7 @@ test_secondmate_directory_paths_are_absolute_and_output_is_stable() {
   )
   cmp -s "$baseline" "$brief" \
     || fail "relative FM_STATE_OVERRIDE changed charter bytes compared with the same absolute state directory"
-  assert_grep "'$state_override/relative-state.status'" "$brief" \
+  assert_grep ">> '$state_override/relative-state.status'" "$brief" \
     "relative FM_STATE_OVERRIDE did not render an absolute secondmate status path"
 
   brief="$data_override/relative-data/brief.md"
@@ -719,7 +719,7 @@ test_secondmate_directory_paths_are_absolute_and_output_is_stable() {
   )
   cmp -s "$baseline" "$brief" \
     || fail "relative FM_DATA_OVERRIDE changed charter bytes compared with the same absolute data directory"
-  assert_grep "'$home/state/relative-data.status'" "$brief" \
+  assert_grep ">> '$home/state/relative-data.status'" "$brief" \
     "relative FM_DATA_OVERRIDE changed the absolute default status path"
 
   err="$root/unresolved.err"
@@ -922,10 +922,9 @@ test_status_protocol_uses_guarded_writer() {
     unset FM_HOME
     export FM_ROOT_OVERRIDE=. FM_DATA_OVERRIDE="$home/data" FM_STATE_OVERRIDE="$home/state"
     bin/fm-brief.sh ship-key some-proj --mode direct-PR >/dev/null &&
-      bin/fm-brief.sh scout-key some-proj --scout >/dev/null &&
-      FM_SECONDMATE_CHARTER='Supervise assigned work.' bin/fm-brief.sh mate-key --secondmate --no-projects >/dev/null
+      bin/fm-brief.sh scout-key some-proj --scout >/dev/null
   ) || fail "could not scaffold with a relative root"
-  for id in ship-key scout-key mate-key; do
+  for id in ship-key scout-key; do
     brief="$home/data/$id/brief.md"
     status="$home/state/$id.status"
     command=$(sed -n 's/^   `\(.*\) "{state}: {one short line}"`$/\1/p' "$brief")
@@ -944,7 +943,7 @@ test_status_protocol_uses_guarded_writer() {
     count=$(grep -cF 'bin/fm-classify-lib.sh' "$brief")
     [ "$count" = 1 ] || fail "reserved-prefix owner should be named once in $brief, found $count"
   done
-  pass "fm-brief: ship, scout, and secondmate commands append ordinary status and refuse reserved keys"
+  pass "fm-brief: ship and scout commands append ordinary status and refuse reserved keys"
 }
 
 test_status_protocol_uses_guarded_writer

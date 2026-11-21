@@ -1325,38 +1325,36 @@ EOF
   return "$rc"
 }
 
-# Optional informational IDs must describe the same captured snapshot. A drain
+# Optional unread endpoints must describe the same captured snapshot. A drain
 # can reuse the rows it is about to present instead of scanning every span twice.
 # The caller still commits only after output succeeds, with identity revalidation.
-status_acknowledge_presented_snapshot() {  # <state> <snapshot> [<fully-presented-task-ids>] [<informational-task-ids>]
-  local state=$1 snapshot=$2 fully_presented=${3:-} informational=${4-} prepared=0
-  local task endpoint ident f offset lines safe
-  [ "$#" -lt 4 ] || prepared=1
+status_acknowledge_presented_snapshot() {  # <state> <snapshot> [<fully-presented-task-ids>] [<task-and-unread-endpoint-rows>]
+  local state=$1 snapshot=$2 fully_presented=${3:-} unread_ends=${4-}
+  local task endpoint ident f offset records receipt_task receipt_end
   while IFS=$(printf '\t') read -r task endpoint ident; do
     [ -n "$task" ] || continue
-    safe=false
     case "
 $fully_presented
-" in *$'\n'"$task"$'\n'*) safe=true ;; esac
-    if [ "$prepared" -eq 1 ]; then
-      case "
-$informational
-" in *$'\n'"$task"$'\n'*) safe=true ;; esac
-    fi
-    if [ "$safe" = false ]; then
-      f="$state/$task.status"
-      offset=$(status_presentation_cursor_offset "$f") || return 1
-      if [ "$prepared" -eq 0 ]; then
-        lines=$(status_new_lines_since_cursor "$f" "$endpoint" unread-surface) || return 1
-        # Once any unread-surface line in this span is presented fleet-wide, the
-        # contiguous cursor may advance through the captured endpoint. Routine
-        # lines remain unacknowledged only while they are the sole unread content,
-        # preserving delayed signal annotations without replaying a handled note
-        # that happened to follow a routine line.
-        if [ -n "$lines" ]; then safe=true; fi
-      fi
-      if [ "$safe" = false ]; then endpoint=$offset; fi
-    fi
+" in
+      *$'\n'"$task"$'\n'*) ;;
+      *)
+        f="$state/$task.status"
+        offset=
+        if [ "$#" -ge 4 ]; then
+          while IFS=$'\t' read -r receipt_task receipt_end; do
+            [ "$receipt_task" = "$task" ] || continue
+            offset=$receipt_end
+            break
+          done <<< "$unread_ends"
+        else
+          records=$(status_new_lines_since_cursor "$f" "$endpoint" unread-records) || return 1
+          records=${records##*$'\n'}
+          offset=${records%%$'\t'*}
+        fi
+        if [ -z "$offset" ]; then offset=$(status_presentation_cursor_offset "$f") || return 1; fi
+        endpoint=$offset
+        ;;
+    esac
     printf '%s\t%s\t%s\n' "$task" "$endpoint" "$ident" || return 1
   done <<EOF
 $snapshot
@@ -1511,9 +1509,9 @@ status_open_decisions_cursor_offset() {  # <status-file>
 # changed status identity reads the current file from offset 0; malformed or
 # unreadable cursor state fails the scan. Symlinks and unreadable status files
 # print nothing.
-status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|unread-surface|warning-offset]
+status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|unread-surface|unread-records|warning-offset]
   local f=$1 captured_end=${2:-} surface=${3:-all} cf offset size actual_size chunk_file filtered_file line boundary rc=0
-  case "$surface" in all|unread-surface|warning-offset) ;; *) return 1 ;; esac
+  case "$surface" in all|unread-surface|unread-records|warning-offset) ;; *) return 1 ;; esac
   [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || return 0
   cf=$(_fm_open_decisions_cursor_path "$f")
   chunk_file="$cf.unread.$$"
@@ -1539,15 +1537,20 @@ status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|
     filtered_file="$chunk_file.filtered"
     if ! FM_STATUS_SURFACE_RESOLVE="${FM_CLASSIFY_RESOLVE_VERB:-$FM_CLASSIFY_RESOLVE_VERB_DEFAULT}" \
       FM_STATUS_SURFACE_HELD="${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}" \
-      LC_ALL=C awk -v mode="$surface" -v position="$offset" '
+      LC_ALL=C awk -v mode="$surface" -v position="$offset" -v endpoint="$size" '
         { prefix=$0; sub(/:.*/, "", prefix)
           decision = index(prefix, "needs-decision")
+          line_end = position + length($0) + 1
           if (mode == "warning-offset") {
             if (decision) printf "%.0f\t%s\n", position, $0
-            position += length($0) + 1
           } else if (index(prefix, "note") || decision ||
               index(prefix, ENVIRON["FM_STATUS_SURFACE_RESOLVE"]) ||
-              index(prefix, ENVIRON["FM_STATUS_SURFACE_HELD"])) print }
+              index(prefix, ENVIRON["FM_STATUS_SURFACE_HELD"])) {
+            if (mode == "unread-records") printf "%.0f\t", (line_end < endpoint ? line_end : endpoint)
+            print
+          }
+          position = line_end
+        }
       ' "$chunk_file" > "$filtered_file"; then
       rm -f "$chunk_file" "$filtered_file"
       return 1
@@ -1568,9 +1571,10 @@ status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|
     fi
     case "$line" in
       *[![:space:]]*)
-        if [ "$surface" = unread-surface ] && ! status_line_is_unread_surface "$line"; then
-          continue
-        fi
+        case "$surface" in
+          unread-surface) status_line_is_unread_surface "$line" || continue ;;
+          unread-records) status_line_is_unread_surface "${line#*$'\t'}" || continue ;;
+        esac
         printf '%s\n' "$line" || { rc=1; break; }
         ;;
     esac
@@ -1629,7 +1633,7 @@ scan_unread_surface_snapshot() {  # <state> <task-and-endpoint-snapshot>
   while IFS=$(printf '\t') read -r task endpoint ident; do
     [ -n "$task" ] || continue
     f="$state/$task.status"
-    lines=$(status_new_lines_since_cursor "$f" "$endpoint" unread-surface) || return 1
+    lines=$(status_new_lines_since_cursor "$f" "$endpoint" unread-records) || return 1
     [ -n "$lines" ] || continue
     while IFS= read -r line; do
       [ -n "$line" ] || continue

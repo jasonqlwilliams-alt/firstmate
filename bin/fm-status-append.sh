@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # fm-status-append.sh - append one worker status line.
 #
-# The brief scaffold names this helper as the status-line writer
-# (bin/fm-brief.sh). A key that starts with a prefix reserved by
+# Ship and scout briefs (bin/fm-brief.sh) and bin/fm-secondmate-report.sh
+# use this writer. A key that starts with a prefix reserved by
 # bin/fm-classify-lib.sh is refused before any byte is written: the error
 # names that prefix and tells the worker to pick another key. The reserved
 # prefix list stays in that library; this script only asks it.

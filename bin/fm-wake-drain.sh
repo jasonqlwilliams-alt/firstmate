@@ -402,10 +402,10 @@ EOF
 # when the fold later advances the cursor. Prints nothing when nothing is
 # unread, which is the common case.
 print_unread_status_section() {
-  local unread=$1 task line key question shown=0
+  local unread=$1 task _endpoint line key question shown=0
   [ -n "$unread" ] || return 0
 
-  while IFS=$(printf '\t') read -r task line; do
+  while IFS=$'\t' read -r task _endpoint line; do
     [ -n "$task" ] || continue
     [ -n "$line" ] || continue
     if [ "$shown" -eq 0 ]; then
@@ -549,10 +549,10 @@ EOF
 }
 
 print_status_sections() {
-  local snapshot=$1 presentable=$2 fully_presented=$3 acknowledged prepared unread informational
+  local snapshot=$1 presentable=$2 fully_presented=$3 acknowledged prepared unread unread_ends
   unread=$(scan_unread_surface_snapshot "$STATE" "$presentable") || return 1
-  informational=$(printf '%s\n' "$unread" | cut -f1) || return 1
-  acknowledged=$(status_acknowledge_presented_snapshot "$STATE" "$presentable" "$fully_presented" "$informational") || return 1
+  unread_ends=$(printf '%s\n' "$unread" | awk -F '\t' 'NF >= 3 { end[$1] = $2 } END { for (task in end) print task "\t" end[task] }') || return 1
+  acknowledged=$(status_acknowledge_presented_snapshot "$STATE" "$presentable" "$fully_presented" "$unread_ends") || return 1
   prepared=$(mktemp "$STATE/.status-presentation.prepared.XXXXXX") || return 1
   if ! {
     print_unread_status_section "$unread" \

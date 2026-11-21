@@ -3,7 +3,7 @@
 #
 # A secondmate answering a marked from-firstmate request must report on the
 # parent status channel with the request's corr=<id> token. This helper uses
-# bin/fm-status-append.sh, the same writer as the charter's status command.
+# the guarded bin/fm-status-append.sh writer.
 #
 # The write destination is mechanical: this helper never takes a status path.
 # It resolves the parent channel through fm_parent_channel_destination

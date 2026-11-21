@@ -5,6 +5,9 @@ Each row is one purpose clause only: the script's own header comment is the auth
 If you have changed away from the firstmate home in an interactive shell, invoke these scripts by absolute path through the repo's `bin/` directory; the scripts self-locate internally after they start.
 The shared no-mistakes gate refusal for fleet lifecycle entrypoints is summarized in [architecture.md](architecture.md#no-mistakes-gate-authority-boundary), while `docs/sessionstart-nudge.md` covers the silent session-open hook use; `fm-gate-refuse-lib.sh`'s header owns its exact contract.
 
+Ship and scout briefs and the correlated secondmate report helper use the guarded status writer.
+Direct appends from local and remote secondmate charters, Rovo's native file tool, and saved briefs that use the older append command rely on the drain warning for folded reserved-key decisions.
+
 | Script                   | Purpose                                                                              |
 | ------------------------ | ------------------------------------------------------------------------------------ |
 | `fm-session-start.sh`    | Compose lock, bootstrap, and wake drain into the single ordered session-start digest |
