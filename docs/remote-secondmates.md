@@ -120,11 +120,13 @@ A file at `~/.local/bin/fm-remote-entrypoint.sh` that is not Firstmate's own sym
 
 ## Provision a route
 
-Create and fill the normal secondmate charter first, then run:
+Create and fill the charter with `bin/fm-brief.sh <id> --secondmate --remote {<project>...|--no-projects}`, then run:
 
 ```sh
 bin/fm-remote-home-seed.sh <id> <ssh-alias> <remote-root> <remote-home> {<project>[=<origin-url>]...|--no-projects}
 ```
+
+If you supply `FM_SECONDMATE_CHARTER` directly to the seed command and no brief exists, the seed selects the remote scaffold automatically.
 
 `<remote-root>` is the remote Firstmate code clone that supplies tracked scripts.
 `<remote-home>` is a separate absolute path for the persistent secondmate home and must not overlap the code root.

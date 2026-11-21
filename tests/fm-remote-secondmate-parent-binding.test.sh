@@ -218,7 +218,12 @@ status_template='"{state}: {one short line}"'
 status_argument='"$1"'
 (cd "$REMOTE_HOME" && bash -c "${status_command//"$status_template"/"$status_argument"}" _ 'done: remote report delivered') \
   || fail "the remote charter could not report before sync"
-cmp -s "$REMOTE_HOME/state/parent-replies.status" <(printf 'done: remote report delivered\n') \
+(cd "$REMOTE_HOME" && FM_CLASSIFY_RESERVED_KEY_PREFIXES=pending-reply- \
+  bash -c "${status_command//"$status_template"/"$status_argument"}" _ \
+  'needs-decision [key=pending-reply-remote]: choose a remote date') \
+  || fail "the direct remote relay incorrectly required a guarded writer"
+cmp -s "$REMOTE_HOME/state/parent-replies.status" <(printf '%s\n' 'done: remote report delivered' \
+  'needs-decision [key=pending-reply-remote]: choose a remote date') \
   || fail "the report did not land in the remote relay log"
 assert_absent "$PARENT/state/ios.status" "the remote charter wrote to the originating host's log"
 pass "the provisioned charter writes to the relay log before sync"

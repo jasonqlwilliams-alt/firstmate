@@ -402,7 +402,7 @@ EOF
 # when the fold later advances the cursor. Prints nothing when nothing is
 # unread, which is the common case.
 print_unread_status_section() {
-  local unread=$1 task line key shown=0
+  local unread=$1 task line key question shown=0
   [ -n "$unread" ] || return 0
 
   while IFS=$(printf '\t') read -r task line; do
@@ -413,7 +413,8 @@ print_unread_status_section() {
     fi
     if [ "$(status_line_verb "$line")" = needs-decision ]; then
       key=$(_fm_decision_key "$line") || return 1
-      printf 'warning: task=%s key=%s folded reserved-prefix needs-decision\n' "$task" "$key" || return 1
+      question=$(status_line_note "$line") || return 1
+      printf 'warning: task=%s key=%s folded reserved-prefix needs-decision: %s\n' "$task" "$key" "$question" || return 1
     else
       printf '%s %s\n' "$task" "$line" || return 1
     fi

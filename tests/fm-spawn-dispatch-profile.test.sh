@@ -9,6 +9,7 @@ set -u
 
 # shellcheck source=tests/fixtures.sh
 . "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
+unset FM_CLASSIFY_RESERVED_KEY_PREFIXES
 
 SPAWN="$ROOT/bin/fm-spawn.sh"
 TMP_ROOT=$(fm_test_tmproot fm-spawn-dispatch-profile)
@@ -131,7 +132,7 @@ test_no_profile_keeps_claude_profile_defaults() {
   assert_meta_profile "$HOME_DIR/state/$id.meta" claude default default
 
   launch=$(cat "$LAUNCH_LOG")
-  expected="env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false CLAUDE_CODE_SEND_FEEDBACK=0 claude --dangerously-skip-permissions --settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' \"\$('${ROOT}/bin/fm-operational-input.sh' encode launch-brief < '$HOME_DIR/data/$id/launch-brief.md')\""
+  expected=$(claude_expected_launch "$HOME_DIR" "$id" --dangerously-skip-permissions)
   [ "$launch" = "$expected" ] || fail "no-profile claude launch did not use the canonical launch kind"$'\n'"expected: $expected"$'\n'"actual:   $launch"
   pass "no --model/--effort records defaults and types the claude launch instructions"
 }
@@ -380,7 +381,8 @@ test_active_dispatch_profile_allows_raw_launch_command() {
   assert_contains "$out" "spawned $id harness=custom-agent" "spawn did not report raw command harness"
   assert_meta_profile "$HOME_DIR/state/$id.meta" custom-agent default default
   launch=$(cat "$LAUNCH_LOG")
-  [ "$launch" = "custom-agent --flag" ] || fail "raw launch command changed"$'\n'"actual: $launch"
+  [ "$launch" = "export FM_CLASSIFY_RESERVED_KEY_PREFIXES='pending-reply-'; custom-agent --flag" ] \
+    || fail "raw launch command changed"$'\n'"actual: $launch"
   pass "active crew-dispatch profile allows the raw launch-command escape hatch"
 }
 
@@ -1101,6 +1103,7 @@ test_active_dispatch_profile_does_not_block_secondmate_launch() {
 # No developer environment or credential values are inspected by these probes.
 test_launch_environment_allowlist() {
   local setting rec id out status probe result expected launch value pane_shell pane_path
+  local status_file
   # shellcheck disable=SC2016
   value='synthetic value; $(touch SHOULD_NOT_EXIST) `false` "quoted"'
   for setting in absent missing-config enabled empty; do
@@ -1113,14 +1116,18 @@ test_launch_environment_allowlist() {
       empty) : > "$HOME_DIR/config/launch-env-allowlist" ;;
     esac
     probe="$CASE_DIR/probe.sh"
+    status_file="$CASE_DIR/worker.status"
     cat > "$probe" <<'SH'
 #!/bin/sh
+if "$1" "$2" 'needs-decision [key=ops-release]: choose a date' 2>"$2.err"; then exit 1; fi
+grep -Fq "reserved prefix 'ops-'" "$2.err" || exit 1
+"$1" "$2" 'needs-decision [key=stale-release]: plan the rollout' || exit 1
 printf '%s\n' "${FM_TEST_AMBIENT_SENTINEL-unset}" "${FM_TEST_ALLOWED-unset}" \
   "${FM_TEST_EMPTY-unset}" "${FM_TEST_UNSET-unset}" "$HOME" "$PATH" "$TERM" "$TMUX" "$GOTMPDIR"
 SH
-    out=$(FM_TEST_AMBIENT_SENTINEL=synthetic-unrelated \
+    out=$(FM_TEST_AMBIENT_SENTINEL=synthetic-unrelated FM_CLASSIFY_RESERVED_KEY_PREFIXES='pending-reply- ops-' \
       run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
-      "$id" "$PROJ_DIR" --harness "/bin/sh '$probe'")
+      "$id" "$PROJ_DIR" --harness "/bin/sh '$probe' '$ROOT/bin/fm-status-append.sh' '$status_file'")
     status=$?
     expect_code 0 "$status" "allowlist=$setting spawn should succeed: $out"
     launch=$(cat "$LAUNCH_LOG")
@@ -1130,8 +1137,10 @@ SH
         TMUX=synthetic-pane GOTMPDIR=/synthetic/gotmp \
         "$pane_shell" -c "printf %s \"\$PATH\"") \
         || fail "could not read $pane_shell startup PATH"
+      : > "$status_file"
       result=$(env -i HOME="$HOME_DIR/user-home" PATH=/usr/bin:/bin TERM=xterm \
       TMUX=synthetic-pane GOTMPDIR=/synthetic/gotmp \
+      FM_CLASSIFY_RESERVED_KEY_PREFIXES=stale- \
       FM_TEST_AMBIENT_SENTINEL=synthetic-unrelated FM_TEST_ALLOWED="$value" FM_TEST_EMPTY='' \
       "$pane_shell" -c "$launch") || fail "allowlist=$setting emitted launch failed in $pane_shell"
       case "$setting" in
@@ -1141,6 +1150,8 @@ SH
       esac
       expected="$expected"$'\n'"$HOME_DIR/user-home"$'\n'"$pane_path"$'\nxterm\nsynthetic-pane\n/synthetic/gotmp'
       [ "$result" = "$expected" ] || fail "allowlist=$setting worker environment mismatch: $result"
+      cmp -s "$status_file" <(printf 'needs-decision [key=stale-release]: plan the rollout\n') \
+        || fail "allowlist=$setting did not use the launching supervisor's status key policy"
     done
     pass "allowlist=$setting preserves the operational floor and filters only when opted in"
   done
@@ -1206,7 +1217,8 @@ test_launch_environment_inherited_by_secondmate() {
   printf 'FM_TEST_ALLOWED\n' > "$HOME_DIR/config/launch-env-allowlist"
   sm="$CASE_DIR/secondmate-home"
   make_seeded_secondmate_home "$sm" "$id"
-  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
+  out=$(FM_CLASSIFY_RESERVED_KEY_PREFIXES='pending-reply- ops-' \
+    run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
   status=$?
   expect_code 0 "$status" "secondmate with an allowlist should spawn: $out"
   cmp -s "$HOME_DIR/config/launch-env-allowlist" "$sm/config/launch-env-allowlist" \
@@ -1214,12 +1226,13 @@ test_launch_environment_inherited_by_secondmate() {
   cat > "$FAKEBIN_DIR/codex" <<'SH'
 #!/bin/sh
 printf '%s\n' "${FM_TEST_AMBIENT_SENTINEL-unset}" "$FM_TEST_ALLOWED" "$FM_HOME" "${FM_STATE_OVERRIDE-unset}"
+printf '%s\n' "${FM_CLASSIFY_RESERVED_KEY_PREFIXES-unset}"
 SH
   chmod +x "$FAKEBIN_DIR/codex"
   result=$(env -i HOME="$HOME_DIR/user-home" PATH="$FAKEBIN_DIR:$PATH" \
     FM_TEST_AMBIENT_SENTINEL=synthetic-unrelated FM_TEST_ALLOWED=synthetic-provider \
     /bin/sh -c "$(cat "$LAUNCH_LOG")") || fail "secondmate's emitted command failed"
-  [ "$result" = "unset"$'\nsynthetic-provider\n'"$sm" ] \
+  [ "$result" = "unset"$'\nsynthetic-provider\n'"$sm"$'\n\npending-reply- ops-' ] \
     || fail "secondmate's environment lost filtering or explicit home assignments: $result"
   # Exercise the same inheritance owner used by local and remote transfers;
   # removal must restore absence downstream as well as copying an opt-in.
@@ -1386,7 +1399,7 @@ SH
 # permission flag, and any other token refuses before endpoint or metadata.
 claude_expected_launch() {  # <home> <id> <permission-flag>
   local home=$1 id=$2 flag=$3
-  printf '%s' "env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false CLAUDE_CODE_SEND_FEEDBACK=0 claude $flag --settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' \"\$('${ROOT}/bin/fm-operational-input.sh' encode launch-brief < '$home/data/$id/launch-brief.md')\""
+  printf '%s' "export FM_CLASSIFY_RESERVED_KEY_PREFIXES='pending-reply-'; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false CLAUDE_CODE_SEND_FEEDBACK=0 claude $flag --settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' \"\$('${ROOT}/bin/fm-operational-input.sh' encode launch-brief < '$home/data/$id/launch-brief.md')\""
 }
 
 test_claude_permission_mode_bypass_matches_absent_launch() {

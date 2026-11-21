@@ -128,9 +128,9 @@ BRIEF_CREATED=0
 if [ ! -f "$BRIEF" ]; then
   [ -n "${FM_SECONDMATE_CHARTER:-}" ] || die "no filled charter at $BRIEF; set FM_SECONDMATE_CHARTER or scaffold one first"
   if [ "$NO_PROJECTS" -eq 1 ]; then
-    "$SCRIPT_DIR/fm-brief.sh" "$ID" --secondmate --no-projects >/dev/null
+    "$SCRIPT_DIR/fm-brief.sh" "$ID" --secondmate --remote --no-projects >/dev/null
   else
-    "$SCRIPT_DIR/fm-brief.sh" "$ID" --secondmate "${PROJECT_NAMES[@]}" >/dev/null
+    "$SCRIPT_DIR/fm-brief.sh" "$ID" --secondmate --remote "${PROJECT_NAMES[@]}" >/dev/null
   fi
   BRIEF_CREATED=1
 fi
@@ -168,20 +168,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     *) line=${line//"$PARENT_STATUS"/"$REMOTE_STATUS"} ;;
   esac
   printf '%s\n' "$line"
-done < "$BRIEF" | FM_SECONDMATE_STATUS_INTRO="$FM_SECONDMATE_STATUS_INTRO" \
-  FM_BRIEF_STATUS_RESERVED_KEY_RULE="$FM_BRIEF_STATUS_RESERVED_KEY_RULE" \
-  FM_REMOTE_STATUS_COMMAND="   \`echo \"{state}: {one short line}\" >> $REMOTE_STATUS_SH\`" awk '
-    /^# / { escalation = ($0 == "# Escalation to main firstmate") }
-    escalation && $0 == ENVIRON["FM_SECONDMATE_STATUS_INTRO"] {
-      print
-      if ((getline command) <= 0) next
-      if ((getline rule) <= 0) { print command; next }
-      if (rule == "   " ENVIRON["FM_BRIEF_STATUS_RESERVED_KEY_RULE"]) print ENVIRON["FM_REMOTE_STATUS_COMMAND"]
-      else { print command; print rule }
-      next
-    }
-    { print }
-  ' > "$TMP/charter.remote"
+done < "$BRIEF" > "$TMP/charter.remote"
 
 PROJECTS_CSV=
 : > "$TMP/project.records"

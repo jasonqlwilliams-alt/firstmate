@@ -3,10 +3,6 @@
 # Source only. FM_SECONDMATE_CHARTER and FM_SECONDMATE_SCOPE remain explicit
 # caller overrides; otherwise the named sections in the filled brief are used.
 
-FM_SECONDMATE_STATUS_INTRO='Report only true captain-relevant outcomes or a declared external wait by appending one line:'
-# shellcheck disable=SC2016
-FM_BRIEF_STATUS_RESERVED_KEY_RULE='A `[key=<slug>]` on that line must not start with a prefix reserved by `bin/fm-classify-lib.sh`; the append command names that prefix and refuses, and you pick another key.'
-
 fm_brief_shell_quote() {
   printf "'"
   printf '%s' "$1" | sed "s/'/'\\\\''/g"

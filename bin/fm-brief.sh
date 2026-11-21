@@ -14,7 +14,7 @@
 # PR instead of shipping a new one).
 # Usage: fm-brief.sh <task-id> <repo-name> --mode <no-mistakes|direct-PR|local-only> [--herdr-lab]
 #        fm-brief.sh <task-id> <repo-name> --scout [--herdr-lab]
-#        fm-brief.sh <task-id> --secondmate {<project>...|--no-projects}
+#        fm-brief.sh <task-id> --secondmate [--remote] {<project>...|--no-projects}
 #   --scout writes the scout contract instead: the deliverable is a report at
 #   data/<task-id>/report.md (no branch, no push, no PR) and the worktree is scratch.
 #   It offers the Lavish review loop only when `fm-bootstrap.sh lavish-compatible`
@@ -58,8 +58,8 @@
 # declared-external-wait verb (FM_CLASSIFY_PAUSED_VERB, default "paused") from
 # "blocked:": pause for a known external wait expected to clear on its own,
 # blocked when firstmate must act.
-# The status line is appended by bin/fm-status-append.sh, which refuses a key
-# prefix reserved by bin/fm-classify-lib.sh.
+# The guarded status writer refuses a key prefix reserved by the classifier.
+# For a charter intended for remote seeding, --remote selects the direct append.
 # Every scaffold also carries the steering-inbox receive-and-ack section:
 # process state/<id>.inbox/*.msg in order and acknowledge each by moving it to
 # handled/ (record, doorbell, and ladder owned by bin/fm-task-inbox-lib.sh).
@@ -123,6 +123,7 @@ else
   STATE="$FM_HOME/state"
 fi
 KIND=ship
+REMOTE=0
 HERDR_LAB=0
 NO_PROJECTS=0
 MODE=
@@ -144,6 +145,7 @@ for a in "$@"; do
   case "$a" in
     --scout) KIND=scout ;;
     --secondmate) KIND=secondmate ;;
+    --remote) REMOTE=1 ;;
     --herdr-lab) HERDR_LAB=1 ;;
     --no-projects) NO_PROJECTS=1 ;;
     --mode) want_value=mode ;;
@@ -156,6 +158,10 @@ for a in "$@"; do
   esac
 done
 [ -z "$want_value" ] || { echo "error: --$want_value requires a value" >&2; exit 1; }
+if [ "$REMOTE" -eq 1 ] && [ "$KIND" != secondmate ]; then
+  echo "error: --remote applies only to secondmate charters" >&2
+  exit 1
+fi
 
 # Ship delivery mode is an explicit per-task decision (AGENTS.md section 7). A
 # missing or invalid value stops the scaffold rather than silently defaulting.
@@ -197,7 +203,13 @@ if [ "$KIND" = ship ] && [ "$MODE" = no-mistakes ]; then
 fi
 
 STATUS_FILE=$(fm_brief_shell_quote "$STATE/$ID.status")
-STATUS_APPEND_BIN=$(fm_brief_shell_quote "$FM_ROOT/bin/fm-status-append.sh")
+if [ "$REMOTE" -eq 1 ]; then
+  STATUS_PROTOCOL="   \`echo \"{state}: {one short line}\" >> $STATUS_FILE\`"
+else
+  STATUS_APPEND_BIN=$(fm_brief_shell_quote "$FM_ROOT/bin/fm-status-append.sh")
+  STATUS_PROTOCOL="   \`$STATUS_APPEND_BIN $STATUS_FILE \"{state}: {one short line}\"\`
+   A \`[key=<slug>]\` on that line must not start with a prefix reserved by \`bin/fm-classify-lib.sh\`. The append command names the prefix, refuses the line, and asks you to pick another key."
+fi
 INBOX_DIR=$(fm_brief_shell_quote "$STATE/$ID.inbox")
 LIVE_STATE_SECTION="For live revisions, holds, or routing, read \`$DATA/system-state.md\` (skill \`system-state-card\`). Do not walk Atlas or \`C:\\continuum-system\` for those facts."
 
@@ -283,9 +295,8 @@ $INBOX_SECTION
 
 # Escalation to main firstmate
 Handle routine work yourself.
-$FM_SECONDMATE_STATUS_INTRO
-   \`$STATUS_APPEND_BIN $STATUS_FILE "{state}: {one short line}"\`
-   $FM_BRIEF_STATUS_RESERVED_KEY_RULE
+Report only true captain-relevant outcomes or a declared external wait by appending one line:
+$STATUS_PROTOCOL
 States: working, needs-decision, blocked, $PAUSED_VERB, done, failed.
 Use \`$PAUSED_VERB: {why}\` (distinct from \`blocked:\`) only when your domain is deliberately idling on a known external wait you expect to clear on its own, naming when it clears with \`until <YYYY-MM-DDTHH:MMZ>\` (UTC) when you know; use \`blocked:\` when you are stuck and need firstmate to act.
 Use this only for material phase changes, a captain decision, a real blocker, a failure, work ready for review, or work you landed.
@@ -386,8 +397,7 @@ $LIVE_STATE_SECTION
 2. Stay inside this worktree; the only files you may write outside it are the report and the status file below.
 3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
 4. Report status by appending one line:
-   \`$STATUS_APPEND_BIN $STATUS_FILE "{state}: {one short line}"\`
-   $FM_BRIEF_STATUS_RESERVED_KEY_RULE
+$STATUS_PROTOCOL
    States: working, needs-decision, blocked, $PAUSED_VERB, done, failed.
    Each append wakes firstmate, so report sparingly: only phase changes a supervisor
    would act on and the needs-decision/blocked/paused/done/failed states. No step-by-step
@@ -479,8 +489,7 @@ $RULE1
 2. Stay inside this worktree; modify nothing outside it.
 3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
 4. Report status by appending one line:
-   \`$STATUS_APPEND_BIN $STATUS_FILE "{state}: {one short line}"\`
-   $FM_BRIEF_STATUS_RESERVED_KEY_RULE
+$STATUS_PROTOCOL
    States: working, needs-decision, blocked, $PAUSED_VERB, done, failed.
    Each append wakes firstmate, so report sparingly: only phase changes a supervisor
    would act on (setup done, bug reproduced, fix implemented, validation passed) and the

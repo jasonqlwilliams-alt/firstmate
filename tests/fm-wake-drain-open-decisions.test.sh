@@ -228,19 +228,18 @@ test_folded_reserved_needs_decision_warns_once_per_line() {
     printf 'blocked [key=pending-reply-foreign]: shipping is blocked on infra\n'
   } > "$state/task-fold.status"
 
+  printf 'working: unrelated task\n' > "$state/other.status"
+  append_wake "$state" signal other.status 'signal: unrelated task' || fail "could not queue the unrelated wake"
   FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed on a folded reserved needs-decision"
 
   warns=$(grep -cF 'folded reserved-prefix needs-decision' "$out" || true)
   [ "$warns" = 2 ] || fail "expected one warning per folded needs-decision, got $warns: $(cat "$out")"
-  grep -F 'warning: task=task-fold key=pending-reply-abc123 folded reserved-prefix needs-decision' "$out" >/dev/null \
-    || fail "the documented-position reserved needs-decision was not warned: $(cat "$out")"
-  grep -F 'warning: task=task-fold key=pending-reply-colon folded reserved-prefix needs-decision' "$out" >/dev/null \
-    || fail "the colon-first reserved needs-decision was not warned: $(cat "$out")"
-  if grep -F 'which color should the button be' "$out" >/dev/null; then
-    fail "a folded reserved needs-decision was listed: $(cat "$out")"
-  fi
-  if grep -F 'which shape' "$out" >/dev/null; then
-    fail "a colon-first folded reserved needs-decision was listed: $(cat "$out")"
+  grep -Fxq 'warning: task=task-fold key=pending-reply-abc123 folded reserved-prefix needs-decision: which color should the button be' "$out" \
+    || fail "the unrelated drain lost the documented-position question: $(cat "$out")"
+  grep -Fxq 'warning: task=task-fold key=pending-reply-colon folded reserved-prefix needs-decision: which shape' "$out" \
+    || fail "the unrelated drain lost the colon-first question: $(cat "$out")"
+  if grep -Eq '^task-fold \[key=pending-reply-(abc123|colon)\] needs-decision:' "$out"; then
+    fail "a folded reserved needs-decision appeared in OPEN DECISIONS: $(cat "$out")"
   fi
   grep -F 'task-fold [key=api-shape] needs-decision: pick REST or RPC' "$out" >/dev/null \
     || fail "an ordinary decision was dropped alongside the warning: $(cat "$out")"
@@ -254,6 +253,13 @@ test_folded_reserved_needs_decision_warns_once_per_line() {
   fi
   if grep -F 'folded reserved-prefix' "$out" | grep -F 'api-shape' >/dev/null; then
     fail "an ordinary decision was warned: $(cat "$out")"
+  fi
+
+  append_wake "$state" signal task-fold.status 'signal: task-fold' || fail "could not queue the delayed wake"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed on the delayed task signal"
+  grep -Fq $'\tsignal\ttask-fold.status\t' "$out" || fail "the delayed task wake was not presented"
+  if grep -Eq 'which color should the button be|which shape' "$out"; then
+    fail "the delayed task signal replayed an already presented question: $(cat "$out")"
   fi
 
   printf 'needs-decision [key=button-color]: which color should the button be\n' >> "$state/task-fold.status"
@@ -282,10 +288,10 @@ test_drain_warning_follows_the_reserved_prefix_list() {
   FM_CLASSIFY_RESERVED_KEY_PREFIXES='secret-' FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" \
     || fail "drain failed under a custom reserved-prefix list"
 
-  grep -F 'warning: task=task-custom key=secret-abc folded reserved-prefix needs-decision' "$out" >/dev/null \
-    || fail "the configured reserved prefix was not warned: $(cat "$out")"
-  if grep -F 'keep this quiet' "$out" >/dev/null; then
-    fail "a needs-decision in the configured reserved namespace was listed: $(cat "$out")"
+  grep -Fxq 'warning: task=task-custom key=secret-abc folded reserved-prefix needs-decision: keep this quiet' "$out" \
+    || fail "the configured reserved prefix was not warned with its question: $(cat "$out")"
+  if grep -Fq 'task-custom [key=secret-abc] needs-decision:' "$out"; then
+    fail "a needs-decision in the configured reserved namespace appeared in OPEN DECISIONS: $(cat "$out")"
   fi
   grep -F 'task-custom [key=pending-reply-abc123] needs-decision: which color should the button be' "$out" >/dev/null \
     || fail "a prefix outside the configured list was folded: $(cat "$out")"
@@ -375,7 +381,7 @@ SH
     [ -f "$dir/rejected" ] || fail "first $actor drain did not reach the failed output consumer"
     FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=main "$DRAIN" > "$dir/retry.out" 2> "$dir/retry.err" \
       || fail "main retry after $actor failed: $(cat "$dir/retry.err")"
-    grep -Fxq 'warning: task=retry key=pending-reply-retry folded reserved-prefix needs-decision' "$dir/retry.out" \
+    grep -Fxq 'warning: task=retry key=pending-reply-retry folded reserved-prefix needs-decision: choose a color' "$dir/retry.out" \
       || fail "the first $actor drain lost the warning when delivery failed: $(cat "$dir/retry.out")"
   done
   pass "a first drain with failed output leaves the folded warning unread for main"

@@ -50,6 +50,7 @@ bin/fm-brief.sh <id> --secondmate {<project>...|--no-projects}
 ```
 
 The scaffold writes a charter brief instead of a task brief.
+For a remote route, use the remote scaffold described in [Provision a route](../../../docs/remote-secondmates.md#provision-a-route).
 Set `FM_SECONDMATE_CHARTER='<charter>'` to fill the charter text and `FM_SECONDMATE_SCOPE='<scope>'` when the routing scope differs.
 If you scaffold without `FM_SECONDMATE_CHARTER`, replace the `{TASK}` placeholder before seeding.
 Pass `--no-projects` instead of a project list to scaffold a project-less charter for a domain whose subject is the firstmate repo itself, whose home is a firstmate worktree and whose crews take pooled worktrees of the same repo.
