@@ -83,8 +83,8 @@
 # the separate `answers` contract described here.
 # All three decode the same captured TOON prompts block, including tabular
 # and list representations. Decoding uses Node.js and the TOON library from the
-# lavish-axi installation on PATH. Incomplete captures exit 3 after emitting
-# any recovered output. An unreadable capture exits 1.
+# lavish-axi installation on PATH. Incomplete captures exit 3. Only read
+# presents recovered rows from an incomplete capture. An unreadable capture exits 1.
 #
 # It wraps ONLY the currently published interface, verified against 0.1.45:
 #   Usage: lavish-axi poll <html-file> [--agent-reply "..."]
@@ -368,35 +368,6 @@ cmd_terminal() {
   return 1
 }
 
-# Whether a completed result carries any queued content block at all. The
-# published response frames content with a top-level prompts or feedback array
-# whose rows are indented, so this anchors on column
-# zero: an indented payload line is captain-supplied text and must never be able
-# to forge - or, here, to hide behind - a content header. Any recognized block
-# is content regardless of its declared count, while a malformed top-level
-# prompts or feedback header makes the result indeterminate.
-#
-# 0 = content present, 1 = provably no content, anything else = the check did
-# not complete. The caller must distinguish those three, because "the check
-# failed" is never proof that nothing was said.
-result_has_queued_content() {  # <result-file>
-  awk '
-    /^(prompts|feedback)\[[0-9]+\]\{[^}]*\}:[[:space:]]*$/ {
-      verdict = "present"
-      exit
-    }
-    /^(prompts|feedback)/ {
-      verdict = "indeterminate"
-      exit
-    }
-    END {
-      if (verdict == "present") exit 0
-      if (verdict == "indeterminate") exit 2
-      exit 1
-    }
-  ' "$1"
-}
-
 # Whether a captured result is a routine no-op the runner should record without
 # announcing, for the generic runner's silence seam. Lavish's notion of "nothing
 # was said" lives here and nowhere else: an ended session carrying no queued
@@ -404,16 +375,15 @@ result_has_queued_content() {  # <result-file>
 # handler learns nothing from being told. Anything else - a real answer, a
 # missing or waiting session, an unreadable result - is announced.
 cmd_silent() {
-  local file=${1-} content_rc
+  local file=${1-}
   [ -n "$file" ] || usage
   [ -f "$file" ] && [ ! -L "$file" ] || die "result file does not exist: $file"
   [ "$(cmd_classify "$file")" = ended ] && [ -z "$(capture_tail "$file")" ] || return 1
-  result_has_queued_content "$file"
-  content_rc=$?
-  # Only a completed check that proved the result carries nothing declares
-  # silence; a check that could not complete announces, like every other
-  # uncertainty here.
-  [ "$content_rc" -eq 1 ]
+  decode_lavish_capture "$file" ended silent | perl -MJSON::PP -e '
+    local $/;
+    my $capture = decode_json(<STDIN>);
+    exit($capture->{complete} && !defined $capture->{kind} ? 0 : 1);
+  '
 }
 
 
@@ -458,17 +428,19 @@ cmd_choice_rows() {
       warn "unreadable and incomplete Lavish prompt capture: $path ($capture->{error})\n";
       exit 1;
     }
-    warn "incomplete Lavish prompt capture: $path\n" unless $capture->{complete};
+    unless ($capture->{complete}) {
+      warn "incomplete Lavish prompt capture: $path\n";
+      exit 3;
+    }
     binmode STDOUT, ":encoding(UTF-8)" or die "cannot set UTF-8 output: $!\n";
-    my $status = $capture->{complete} ? 0 : 3;
-    exit $status unless ($capture->{kind} // "") eq "prompts";
+    exit 0 unless ($capture->{kind} // "") eq "prompts";
     my %seen;
     my @choices;
     for my $row (@{ $capture->{rows} }) {
       my %f = %$row;
       next unless defined $f{tag} && $f{tag} eq "choice";
       my $prompt = $f{prompt};
-      next unless defined $prompt && $prompt =~ /Context data:\s*(\{.*\})/s;
+      next unless defined $prompt && $prompt =~ /\A(?:.*\n)?Context data:\s*(\{.*\})\s*\z/s;
       my $ctx = $1;
       my $data = eval { JSON::PP->new->decode($ctx) };
       next unless ref($data) eq "HASH";
@@ -532,7 +504,6 @@ cmd_choice_rows() {
         ? "$choice->{key}\t$choice->{answer}\t$choice->{label}\t$choice->{mode}\n"
         : "$choice->{key}\t$choice->{answer}\t$choice->{label}\n";
     }
-    exit $status;
   ' "$selection" "$file"
 }
 

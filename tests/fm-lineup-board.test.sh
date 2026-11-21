@@ -172,6 +172,7 @@ node - "$TMP_ROOT/render.json" > "$TMP_ROOT/result" <<'JS'
 const fs=require("fs"), c=JSON.parse(fs.readFileSync(process.argv[2],"utf8")).capture;
 console.log('session:\n  status: feedback\n  session_ended: false\nprompts[1]{uid,prompt,selector,tag,text}:');
 console.log('  '+[JSON.stringify("1"),JSON.stringify(c.prompt),JSON.stringify("form"),c.tag,JSON.stringify(c.text)].join(","));
+console.log('next_step: Review the submission.');
 JS
 PATH="$REAL_TOOL_PATH" "$FIXTURE/bin/fm-procevent-lavish.sh" read "$TMP_ROOT/result" > "$TMP_ROOT/presented"
 node - "$TMP_ROOT/presented" "$TMP_ROOT/render.json" <<'JS'

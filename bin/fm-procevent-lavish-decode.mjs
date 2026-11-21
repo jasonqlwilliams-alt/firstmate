@@ -50,6 +50,22 @@ function decodePrompt(decode, header, item) {
   }
 }
 
+function hasEndFrame(decode, lines, lifecycle) {
+  try {
+    if (lifecycle === 'missing') {
+      const response = decode(lines.join('\n'), { strict: true });
+      return response.code === 'NOT_FOUND' && typeof response.error === 'string';
+    }
+    const footer = lines.slice(lines.at(-1)?.startsWith('dom_snapshot: ') ? -2 : -1);
+    if (!footer[0]?.startsWith('next_step: ')) return false;
+    const response = decode(footer.join('\n'), { strict: true });
+    return typeof response.next_step === 'string' &&
+      (footer.length === 1 || typeof response.dom_snapshot === 'string');
+  } catch {
+    return false;
+  }
+}
+
 function capturePrompts(toon, raw, tail, lifecycle, projection, result) {
   if (tail.startsWith('n')) {
     raw += '\n';
@@ -57,6 +73,7 @@ function capturePrompts(toon, raw, tail, lifecycle, projection, result) {
   }
   const lines = raw.split(/\r?\n/);
   let partial = lines.pop();
+  const framed = !result.truncated && partial === '' && hasEndFrame(toon.decode, lines, lifecycle);
   if (!result.truncated && /^prompts(?:\[0\]:|: \[\]) *$/.test(partial)) {
     lines.push(partial);
     partial = '';
@@ -119,7 +136,7 @@ function capturePrompts(toon, raw, tail, lifecycle, projection, result) {
   if (result.declared === null && !result.truncated &&
       ['ended', 'waiting', 'missing'].includes(lifecycle) &&
       ![...lines, partial].some(line => /^(?:prompts|feedback)/.test(line))) result.declared = 0;
-  result.complete = !result.truncated && result.rows.length === result.declared && !result.malformed;
+  result.complete = framed && result.rows.length === result.declared && !result.malformed;
 }
 
 const [lavish, path, tail, lifecycle, projection] = process.argv.slice(2);

@@ -1728,11 +1728,14 @@ SH
 
   run_captain "$home" hold sample-recovered-choice --title "Recovered choice" \
     --reason "captain choice pending" --repo sample >/dev/null
+  run_captain "$home" hold sample-recovered-reconcile --title "Recovered reconcile" \
+    --reason "captain choice pending" --repo sample >/dev/null
   cat > "$home/partial-result" <<'EOF'
 session:
   status: feedback
-prompts[2]{tag,prompt,text}:
+prompts[3]{tag,prompt,text}:
   choice,"Context data: {\"question\":\"sample-recovered-choice\",\"answer\":\"yes\"}","Recovered choice"
+  choice,"Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"sample-recovered-reconcile\",\"selection\":\"reconcile\",\"note\":\"\"}","Recovered reconcile"
 EOF
   run_procevent "$home" register lavish recovery-src -- cat "$home/partial-result" >/dev/null \
     || fail "could not register the incomplete source"
@@ -1741,9 +1744,14 @@ EOF
   out=$(run_procevent "$home" start recovery-src 2>&1) || rc=$?
   assert_equals 1 "$rc" "the runner reported complete intake for a partial batch"
   assert_not_contains "$out" 'answers-fed:' "the runner reported successful intake for a partial batch"
+  assert_not_contains "$out" 'reconciles-fed:' "the runner reported successful reconciliation for a partial batch"
   assert_absent "$home/state/procevent-inbox/recovery-src.1.handled" "partial intake acknowledged the capture"
+  assert_contains "$(cat "$home/state/.wake-queue")" 'check: procevent lavish recovery-src 1' \
+    "the partial capture did not wake firstmate"
   show=$(tasks_in "$home" show sample-recovered-choice --full)
-  assert_contains "$show" 'Answer: yes' "the incomplete batch lost a fully received choice"
+  assert_contains "$show" 'held: yes' "the incomplete batch applied a potentially superseded choice"
+  out=$(run_captain "$home" reconcile list)
+  assert_not_contains "$out" 'sample-recovered-reconcile' "the incomplete batch filed a reconcile request"
   pass "a bound channel's captured answers close their captain-held tasks at answer time"
 }
 
@@ -2272,6 +2280,7 @@ session:
   session_ended: false
 prompts[1]{tag,text,prompt}:
   "choice","Take the north route","Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"sample-board-call\",\"selection\":\"north\",\"note\":\"\"}"
+next_step: Review the submission.
 OUT
 SH
   chmod +x "$stub"

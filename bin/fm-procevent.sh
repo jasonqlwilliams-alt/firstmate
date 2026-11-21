@@ -399,29 +399,24 @@ adapter_autohandle() {  # <adapter> <source-id> <result-file>
 # leave the capture untouched and still announced, because this never
 # acknowledges anything (see the keyed-answer note in the header).
 feed_captured_choices() {  # <adapter> <source-id> <result-file> <answers|reconciles>
-  local adapter=$1 id=$2 result=$3 projection=$4 script origin seq rows status=0 intake_status=0
+  local adapter=$1 id=$2 result=$3 projection=$4 script origin seq rows
   local -a intake
   script=$(adapter_script "$adapter")
   [ -f "$script" ] && [ ! -L "$script" ] || return 1
   origin=$("$SCRIPT_DIR/fm-captain-hold.sh" binding "$id" 2>/dev/null) || return 1
   [ -n "$origin" ] || return 1
   seq=$(fm_procevent_result_sequence "$result") || return 1
-  rows=$("$script" "$projection" "$result" 2>/dev/null) || status=$?
-  case "$adapter:$status" in
-    *:0) ;;
-    lavish:3) [ -n "$rows" ] || return 3 ;;
-    lavish:*) return 3 ;;
-    *) return 1 ;;
-  esac
+  rows=$("$script" "$projection" "$result" 2>/dev/null) || {
+    [ "$adapter" != lavish ] || return 3
+    return 1
+  }
   case "$projection" in
     answers) intake=(answers "$origin") ;;
     reconciles) intake=(reconcile-requests --source-id "$id") ;;
   esac
   printf '%s\n' "$rows" \
     | "$SCRIPT_DIR/fm-captain-hold.sh" "${intake[@]}" \
-        --source "the captured result $id sequence $seq" >/dev/null 2>&1 || intake_status=1
-  [ "$status" -eq 0 ] || return "$status"
-  return "$intake_status"
+        --source "the captured result $id sequence $seq" >/dev/null 2>&1 || return 1
 }
 
 read_adapter() {  # <source-id>
@@ -970,8 +965,8 @@ EOF
         }
         if ($take < $count) {
           $truncated = 1;
-          if ($adapter eq "lavish" && length($tail) < 5) {
-            $tail .= substr($buffer, $take, 5 - length($tail));
+          if ($adapter eq "lavish" && length($tail) < 4) {
+            $tail .= substr($buffer, $take, 4 - length($tail));
           }
         }
       }
@@ -1079,7 +1074,7 @@ EOF
     fm_procevent_claim_capture_reservation_remove_locked || true
     exec 6<&-
   fi
-  if [ "$projection_failed" -ne 0 ] && [ "$handled_capture" -eq 0 ]; then
+  if [ "$projection_failed" -ne 0 ]; then
     printf 'incomplete Lavish prompt capture: %s\n' "$durable" >&2
     return 1
   fi

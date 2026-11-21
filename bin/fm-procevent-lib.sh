@@ -1296,7 +1296,7 @@ fm_procevent_result_owner_field() {  # <result-path> <adapter|capture-tail>
   {
     IFS= read -r adapter || return 1
     if IFS= read -r tail; then
-      [ "$adapter" = lavish ] && [[ "$tail" =~ ^capture-tail=[nsx]{1,5}$ ]] || return 1
+      [ "$adapter" = lavish ] && [[ "$tail" =~ ^capture-tail=[nsx]{1,4}$ ]] || return 1
       ! IFS= read -r extra && [ -z "$extra" ] || return 1
     else
       [ -z "$tail" ] || return 1

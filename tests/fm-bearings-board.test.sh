@@ -428,6 +428,7 @@ session:
   session_ended: false
 prompts[1]{uid,prompt,selector,tag,text}:
   "2","Order proof: yes\\n\\nContext data:\\n{\\n  \\"schema\\": \\"fm-bearings-answer.v1\\",\\n  \\"question\\": \\"$ORDER_PROOF_HOLD\\",\\n  \\"selection\\": \\"yes\\",\\n  \\"note\\": \\"\\"\\n}","form",choice,"Order proof: yes"
+next_step: Review the submission.
 EOF
 SH
   chmod +x "$home/fakebin/lavish-axi"

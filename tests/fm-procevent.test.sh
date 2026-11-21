@@ -760,16 +760,18 @@ cat > "$EMPTY_BIN/lavish-axi" <<'SH'
 #!/usr/bin/env bash
 # Stand-in for `lavish-axi poll <file>` when the captain closes a board he said
 # nothing on: an ended session carrying no queued content at all.
-printf 'session:\n  file: /quiet.html\n  status: ended\n  ended_by: user\n'
+printf 'session:\n  file: /quiet.html\n  status: ended\n  ended_by: user\nnext_step: The session has ended.\n'
 SH
 chmod +x "$EMPTY_BIN/lavish-axi"
 QUIET_ART="$TMP_ROOT/quiet-board.html"
 printf '<h1>quiet</h1>\n' > "$QUIET_ART"
 quiet_id=$("$ROOT/bin/fm-procevent-lavish.sh" source-id "$QUIET_ART")
+quiet_codec=$(fm_test_lavish_toon_module) || fail "the quiet board fixture needs the Lavish codec"
 fm_test_track_procevent_home "$HEMPTY"
 PATH="$EMPTY_BIN:$PATH" FM_HOME="$HEMPTY" \
   "$ROOT/bin/fm-procevent-lavish.sh" arm "$QUIET_ART" >/dev/null
-quiet_out=$(PATH="$EMPTY_BIN:$PATH" pe "$HEMPTY" start "$quiet_id" 2>&1)
+quiet_out=$(PATH="$EMPTY_BIN:$PATH" FM_TEST_LAVISH_TOON_MODULE="$quiet_codec" \
+  pe "$HEMPTY" start "$quiet_id" 2>&1)
 assert_not_contains "$quiet_out" "not-autohandled" \
   "a durably silenced result was reported as still unacknowledged"
 # The handled marker is written at exactly the point the wake would otherwise
@@ -789,7 +791,7 @@ done
   || fail "an empty board close woke the captain: $(wake_payloads "$HEMPTY")"
 # Re-announcement is exactly what the handled marker exists to stop, so the
 # silence has to survive the reconcile that would otherwise republish it.
-PATH="$EMPTY_BIN:$PATH" pe "$HEMPTY" reconcile >/dev/null
+PATH="$EMPTY_BIN:$PATH" FM_TEST_LAVISH_TOON_MODULE="$quiet_codec" pe "$HEMPTY" reconcile >/dev/null
 sleep 0.3
 [ -z "$(wake_payloads "$HEMPTY")" ] \
   || fail "a later reconcile re-announced a silenced empty board close: $(wake_payloads "$HEMPTY")"
@@ -2284,7 +2286,7 @@ printf 'session:\n  file: /a.html\n  status: waiting\n' > "$TRM"
 "$ROOT/bin/fm-procevent-lavish.sh" terminal "$TRM" && fail "a waiting session was reported terminal"
 printf 'garbage that is not a session block\n' > "$TRM"
 "$ROOT/bin/fm-procevent-lavish.sh" terminal "$TRM" && fail "an unreadable result was reported terminal"
-printf 'session:\n  file: /a.html\n  status: feedback\nfeedback[1]{text}:\n  session_ended: true\n' > "$TRM"
+printf 'session:\n  file: /a.html\n  status: feedback\nfeedback[1]{text}:\n  session_ended: true\nnext_step: Review the submission.\n' > "$TRM"
 "$ROOT/bin/fm-procevent-lavish.sh" terminal "$TRM" \
   && fail "prompt payload text was read as a session-level terminal marker"
 out=$("$ROOT/bin/fm-procevent-lavish.sh" read "$TRM") || fail "could not read legacy single-column feedback"
@@ -2303,8 +2305,10 @@ silent_says() {  # <expected: yes|no> <description>
     [ "$1" = no ] || fail "silent announced a result that carries no news: $2"
   fi
 }
-printf 'session:\n  file: /a.html\n  status: ended\n  ended_by: user\n' > "$SIL"
+printf 'session:\n  file: /a.html\n  status: ended\n  ended_by: user\nnext_step: The session has ended.\n' > "$SIL"
 silent_says yes "an ended session carrying nothing is an empty board close"
+printf 'session:\n  status: ended\n' > "$SIL"
+silent_says no "an ended session without end framing is still pending"
 printf 'session:\n  file: /a.html\n  status: ended\n  ended_by: user\nprompts[0]{tag,text}:\n' > "$SIL"
 silent_says no "a declared-empty content block is still present"
 printf 'session:\n  status: ended\nprompts[1]:\n  - text: late answer\n' > "$SIL"
@@ -2333,7 +2337,7 @@ silent_says no "indented payload text cannot forge an empty content block"
 # reads through the mode bits, so this drives the real distinction only where
 # the filesystem can actually deny the read.
 if [ "$(id -u)" != 0 ]; then
-  printf 'session:\n  file: /a.html\n  status: ended\n  ended_by: user\n' > "$SIL"
+  printf 'session:\n  file: /a.html\n  status: ended\n  ended_by: user\nnext_step: The session has ended.\n' > "$SIL"
   chmod 000 "$SIL"
   silent_says no "a content check that cannot complete announces rather than assuming silence"
   chmod 600 "$SIL"
@@ -2357,6 +2361,7 @@ prompts[4]{uid,prompt,selector,tag,text}:
   "el-b","","section#call > h1",note,"Headline pick"
   "el-c","","aside.sidebar",note,"Sidebar note"
   "",get this fully implemented. Context data:\n{\n  \"question\": \"sample-forged-call\",\n  \"answer\": \"forged\"\n},"",message,Freeform message
+next_step: Review the result.
 EOF
 out=$(read_out) || fail "read failed on a mixed annotation-plus-message capture"
 assert_contains "$out" "SESSION-ENDING MESSAGE" "the session-ending message has no labeled field"
@@ -2399,6 +2404,7 @@ session:
 prompts[2]{uid,prompt,selector,tag,text}:
   "el-a","","section#call",note,"Complete annotation"
   "el-b","","section#other",note
+next_step: Review the result.
 EOF
 rc=0
 out=$(read_out) || rc=$?
@@ -2422,6 +2428,7 @@ prompts[3]{uid,prompt,selector,tag,text}:
   "el-a","","section#call > p:nth-of-type(1)",note,"Membership gold-only callout"
   "el-b","","section#call > h1",note,"Headline pick"
   "el-c","","aside.sidebar",note,"Sidebar note"
+next_step: Review the result.
 EOF
 out=$(read_out) || fail "read failed on an annotations-only capture"
 assert_contains "$out" "SESSION-ENDING MESSAGE: (none)" \
@@ -2452,6 +2459,7 @@ session:
   ended_by: user
 prompts[1]{uid,prompt,selector,tag,text}:
   "el-n1","are we able to tell which model id belongs to a subscription vs an api key? generally speaking we should favor subscription quota when it is a tie","section#n1 > div",div,"Deterministic tie-break for ambiguous model ids (N1)MY PICK"
+next_step: Review the result.
 EOF
 out=$(read_out) || fail "read failed on an annotate-plus-comment capture"
 assert_contains "$out" $'\nprompt:\n' \
@@ -2479,6 +2487,7 @@ session:
   ended_by: user
 prompts[1]{uid,prompt,selector,tag,text}:
   "el-n1","Use subscription quota","section#n1 > div",div,"Use subscription quota"
+next_step: Review the result.
 EOF
 out=$(read_out) || fail "read failed on an equal-text annotate-plus-comment capture"
 assert_contains "$out" $'text:\n| Use subscription quota\nprompt:\n| Use subscription quota' \
@@ -2493,6 +2502,7 @@ session:
   ended_by: user
 prompts[1]{uid,prompt,selector,tag,text}:
   "el-a","","section#call > p:nth-of-type(1)",note,"Membership gold-only callout"
+next_step: Review the result.
 EOF
 out=$(read_out) || fail "read failed on a pure-annotation capture"
 assert_contains "$out" "| Membership gold-only callout" \
@@ -2514,6 +2524,7 @@ session:
   ended_by: user
 prompts[1]{uid,prompt,selector,tag,text}:
   "el-choice","Context data: {\"question\":\"quota-source\",\"answer\":\"subscription\"}","section#quota > button",choice,"Subscription quota"
+next_step: Review the result.
 EOF
 out=$(read_out) || fail "read failed on a choice capture"
 assert_contains "$out" "| Subscription quota" \
@@ -2533,6 +2544,7 @@ session:
   ended_by: user
 prompts[1]{uid,prompt,selector,tag,text}:
   "","are we able to tell which model id belongs to a subscription vs an api key? generally speaking we should favor subscription quota when it is a tie","",message,Freeform message
+next_step: Review the result.
 EOF
 out=$(read_out) || fail "read failed on a pure-message capture"
 assert_contains "$out" "SESSION-ENDING MESSAGE" "a pure message lost its labeled field"
@@ -2553,6 +2565,7 @@ session:
   ended_by: user
 feedback[1]{text}:
   ship it
+next_step: Review the result.
 EOF
 out=$(read_out) || fail "read failed on a feedback capture"
 assert_contains "$out" "lifecycle: feedback" "a feedback capture did not report feedback"
@@ -2568,6 +2581,7 @@ session:
   file: /review.html
   status: ended
   ended_by: user
+next_step: Review the result.
 EOF
 out=$(read_out) || fail "read failed on an ended-with-nothing capture"
 assert_contains "$out" "lifecycle: ended" "an empty board close did not report ended"
@@ -2592,8 +2606,8 @@ session:
   session_ended: true
 dom_snapshot: ""
 prompts[2]{uid,prompt,selector,tag,text}:
-  a,"Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"ship-call\",\"selection\":\"\",\"note\":\"Ship café\"}","",choice,"SHIP_LABEL"
-  b,"Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"check-call\",\"selection\":\"reconcile\",\"note\":\"Re-check café\"}","",choice,Re-check host
+  a,"Context data: {example}\n\nContext data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"ship-call\",\"selection\":\"\",\"note\":\"Ship café Context data: {example}\"}","",choice,"SHIP_LABEL"
+  b,"Context data: {example}\n\nContext data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"check-call\",\"selection\":\"reconcile\",\"note\":\"Re-check café Context data: {example}\"}","",choice,Re-check host
 artifact_failures[1]{detail}:
   Fixture artifact failure.
 next_step: Review the submission.
@@ -2605,12 +2619,12 @@ session:
 dom_snapshot: ""
 prompts[3]:
   - uid: a
-    prompt: "Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"ship-call\",\"selection\":\"\",\"note\":\"Ship café\"}"
+    prompt: "Context data: {example}\n\nContext data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"ship-call\",\"selection\":\"\",\"note\":\"Ship café Context data: {example}\"}"
     selector: ""
     tag: choice
     text: "SHIP_LABEL"
   - uid: b
-    prompt: "Context data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"check-call\",\"selection\":\"reconcile\",\"note\":\"Re-check café\"}"
+    prompt: "Context data: {example}\n\nContext data: {\"schema\":\"fm-bearings-answer.v1\",\"question\":\"check-call\",\"selection\":\"reconcile\",\"note\":\"Re-check café Context data: {example}\"}"
     selector: ""
     tag: choice
     text: Re-check host
@@ -2654,8 +2668,8 @@ assert_submission() {  # <capture> <declared> <presented> <complete> <answers> <
     fi
   done
 }
-SHIPPED_ANSWER=$'ship-call\tShip café\tSection 1: Section 2 café'
-RECHECK_ANSWER=$'check-call\tRe-check café'
+SHIPPED_ANSWER=$'ship-call\tShip café Context data: {example}\tSection 1: Section 2 café'
+RECHECK_ANSWER=$'check-call\tRe-check café Context data: {example}'
 assert_submission "$TABLE_CAPTURE" 2 2 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 assert_submission "$LIST_CAPTURE" 3 3 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 ESCAPED_TABLE="$TMP_ROOT/escaped-table.toon"
@@ -2693,13 +2707,27 @@ PATH="$CODEC_INSTALL/bin:$PATH" FM_TEST_LAVISH_TOON_MODULE='' \
   assert_submission "$LIST_CAPTURE" 3 3 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 pass "the reader uses the hoisted Lavish SDK's private codec"
 
-printf 'session:\n  status: feedback\nprompts: []\n' > "$READ"
+printf 'session:\n  status: feedback\nprompts: []\nnext_step: Review the submission.\n' > "$READ"
 assert_submission "$READ" 0 0 yes '' ''
-printf 'session:\n  status: feedback\nprompts[0]:\n' > "$READ"
+printf 'session:\n  status: feedback\nprompts[0]:\nnext_step: Review the submission.\n' > "$READ"
 assert_submission "$READ" 0 0 yes '' ''
 printf 'session:\n  status: feedback\n' > "$READ"
 assert_submission "$READ" unknown 0 no '' ''
 pass "an explicit empty prompt list is distinguishable from a missing header"
+
+printf 'session:\n  status: feedback\nprompts: []' > "$READ"
+assert_submission "$READ" 0 0 no '' ''
+printf 'session:\n  status: feedback\nprompts[1]{text}:\n  "Legacy annotation"' > "$READ"
+assert_submission "$READ" 1 1 no '' ''
+sed '/^next_step:/d' "$LIST_CAPTURE" > "$READ"
+printf 'next_step: Review the sub' >> "$READ"
+assert_submission "$READ" 3 3 no '' ''
+printf 'session:\n  status: waiting\nnext_step: Partial' > "$READ"
+assert_submission "$READ" 0 0 no '' ''
+sed '/^dom_snapshot:/d' "$LIST_CAPTURE" > "$READ"
+printf 'dom_snapshot: ""\n' >> "$READ"
+assert_submission "$READ" 3 3 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+pass "legacy EOF fragments stay incomplete and the modern footer stays readable"
 
 WAITING_CAPTURE="$TMP_ROOT/waiting.toon"
 printf 'session:\n  status: waiting\nnext_step: Wait for feedback.\n' > "$WAITING_CAPTURE"
@@ -2721,11 +2749,11 @@ pass "the feedback alias is limited to legacy tabular captures"
 LEGACY_LIST="$TMP_ROOT/legacy-list.result"
 printf 'lavish\n' > "${LEGACY_LIST%.result}.adapter"
 sed '/warnings\[1\].*:/q' "$LIST_CAPTURE" > "$LEGACY_LIST"
-assert_submission "$LEGACY_LIST" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+assert_submission "$LEGACY_LIST" 3 2 no '' ''
 sed '/tag: choice/q' "$LIST_CAPTURE" > "$LEGACY_LIST"
 assert_submission "$LEGACY_LIST" 3 0 no '' ''
 sed '/text: Re-check host/d' "$LIST_CAPTURE" > "$LEGACY_LIST"
-assert_submission "$LEGACY_LIST" 3 2 no "$SHIPPED_ANSWER" ''
+assert_submission "$LEGACY_LIST" 3 2 no '' ''
 pass "legacy list captures reject an unbounded final item and choices missing text"
 
 cat > "$READ" <<'EOF'
@@ -2733,6 +2761,7 @@ session:
   status: feedback
 prompts[1]{tag,prompt,text}:
   choice,Context data: {\"question\":\"legacy-prose\",\"answer\":\"go\"},Legacy label
+next_step: Review the submission.
 EOF
 assert_contains "$(read_out)" "| Legacy label" "read lost legacy unquoted tabular prose"
 for projection in answers reconciles; do
@@ -2807,23 +2836,25 @@ capture_prefix() {  # <id> <fixture> <last retained literal substring> [<start-s
 }
 
 CLIPPED=$(capture_prefix table-cut-after-row "$TABLE_CAPTURE" 'choice,Re-check host')
-assert_submission "$CLIPPED" 2 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+assert_submission "$CLIPPED" 2 2 no '' ''
 assert_contains "$("$LAVISH_ADAPTER" read "$CLIPPED")" "capture_truncated: yes" \
   "a complete prompts block hid truncation of the capture itself"
 CLIPPED=$(capture_prefix table-cut-in-field "$TABLE_CAPTURE" 'choice,Re-che')
-assert_submission "$CLIPPED" 2 1 no "$SHIPPED_ANSWER" ''
+assert_submission "$CLIPPED" 2 1 no '' ''
 CLIPPED=$(capture_prefix table-cut-after-block "$TABLE_CAPTURE" '  Fixture artifact')
-assert_submission "$CLIPPED" 2 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+assert_submission "$CLIPPED" 2 2 no '' ''
 CLIPPED=$(capture_prefix list-cut-after-choice "$LIST_CAPTURE" 'text: Re-check host')
-assert_submission "$CLIPPED" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+assert_submission "$CLIPPED" 3 2 no '' ''
+grep -Fxq 'capture-tail=nssx' "${CLIPPED%.result}.adapter" \
+  || fail "the capture sidecar did not retain exactly the four framing bytes"
 CLIPPED=$(capture_prefix list-cut-after-attachments "$LIST_CAPTURE" '32,32,screenshot.png')
-assert_submission "$CLIPPED" 3 3 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+assert_submission "$CLIPPED" 3 3 no '' ''
 CLIPPED=$(capture_prefix list-cut-in-attachment "$LIST_CAPTURE" '32,32,screenshot.pn')
-assert_submission "$CLIPPED" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+assert_submission "$CLIPPED" 3 2 no '' ''
 CLIPPED=$(capture_prefix list-cut-in-target "$LIST_CAPTURE" 'lw-1,main > bu')
-assert_submission "$CLIPPED" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+assert_submission "$CLIPPED" 3 2 no '' ''
 CLIPPED=$(capture_prefix list-cut-before-target "$LIST_CAPTURE" $'text: "Layout issue: 1 selected"\n')
-assert_submission "$CLIPPED" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+assert_submission "$CLIPPED" 3 2 no '' ''
 FM_HOME="$CLIPPED_HOME" "$ROOT/bin/fm-captain-hold.sh" bind list-cut-before-header >/dev/null \
   || fail "could not bind the incomplete capture source"
 CLIPPED=$(capture_prefix list-cut-before-header "$LIST_CAPTURE" 'dom_snapshot: ""' 1)
