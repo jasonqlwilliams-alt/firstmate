@@ -101,8 +101,9 @@ Compose the payload from the same snapshot with the same ranking judgment as the
 - Decision cards carry agent-authored copy: a short noun-phrase title, one-line `about` and `decide` context rows, and option labels with hints, with the recommended option marked.
 - Card `type` (decision, merge, credential) is your composing judgment from the row's content; no backlog field types a card for you.
 - When the card's task is a captain-gated WORK item (the answer should free it to proceed rather than complete it), set the card's `close: "release"` so the answer lifts the hold instead of closing the task; question-shaped items omit it.
-- A Charted Next row's optional `kind` separates work from alarms: omit it (or set `"queued"`) for real queued work, and set `"warning"` on every action-free fleet-integrity notice - the `(main-inventory)` gate, the `(return-catchup)` gate, an unavailable secondmate home, and an inventory-mismatch repair notice. The board badges a warning row `needs repair`, explains it as a notice rather than work when opened, never collapses it, and leaves it out of the Charted Next count, so those rows never read as dispatchable queued work.
-- In lavish mode also pass the snapshot's `--all-queued` opt-in and carry every queued and warning row it returns.
+- A Charted Next row's optional `kind` separates work from alarms: omit it (or set `"queued"`) for work rows, including active work with a hold, and set `"warning"` on every action-free fleet-integrity notice - the `(main-inventory)` gate, the `(return-catchup)` gate, an unavailable secondmate home, and an inventory-mismatch repair notice.
+  The board badges a warning row `needs repair`, explains it as a notice rather than work when opened, never collapses it, and leaves it out of the Charted Next count.
+- In lavish mode also pass the snapshot's `--all-queued` opt-in and carry every work and warning row it returns.
   The board reveals overflow in place.
   `charted_more` counts queued rows the snapshot still omitted, while `charted_warning_more` counts omitted warning rows only; keep both counts separate.
 - Every Charted Next row's badge opens into an explanation built from its `reason`, `dispatchable`, and `filed` fields, so keep each gate's reason whole, never shortened further.
@@ -119,16 +120,16 @@ Compose the payload from the same snapshot with the same ranking judgment as the
 - Every Charted Next row copies the snapshot gate's durable filed date into `filed`.
   Follow `bin/fm-bearings-board.sh`'s payload contract for the accepted format.
   Omit it or pass null when no durable filed date is recorded.
-- Assign `tier` to every queued work row using the urgency and currency matrix in the payload contract in `bin/fm-bearings-board.sh`.
+- Assign `tier` to every non-warning Charted Next row using the urgency and currency matrix in the payload contract in `bin/fm-bearings-board.sh`, including active work with blocked, dated, or aged holds in the main and secondmate homes.
   Read due dates, the hold kind and any recorded hold-until, and reverse blockers from the current authoritative records.
   Use the filed date and latest recorded substantive activity for currency, such as a progress update or a changed prerequisite, excluding snapshot refreshes and board views.
   Unknown inputs contribute no signal, and warnings receive no tier.
 - Set `assignment_eligible: true` only when the authoritative backlog for the snapshot gate's owner confirms the task is still queued with a specific unmet start condition.
   Leave it false or omit it when the state or condition is unknown, including for ready work, active work with a deferred hold, and repair notices.
-- Populate `continuum_agents` from the role column of the Packet Router registry's `registry/SEATS.md`, including only verified recipient roles eligible to help with start conditions.
-  Read the registry directly under the configured Packet Router root (see `FM_SYSTEM_STATE_PACKET_ROUTER_ROOT` in `bin/fm-system-state-card.sh`).
-  Use the role as the id and optionally show its current hand in the display label for information.
-  Leave the roster absent or empty if the registry or eligible routes cannot be verified.
+- Resolve this home's `config/packet-router-inbox` setting to its canonical existing `inbox/new` directory.
+  Read `registry/SEATS.md` directly under the root that contains that `inbox`.
+  Populate `continuum_agents` with eligible recipient ids from the role column alone.
+  Leave the roster absent or empty if the inbox, its registry, or eligible routes cannot be verified.
 - For the companion detail page and optional canvas export, every Charted Next row also copies `waits_since`, `owner`, `pr_url`, `report`, and `report_remote` from its snapshot `gates` entry, plus `blockers` as the `{id, title}` entries from `gate_blockers` matching that gate's `id` and `owner`.
   Every Recently Landed row likewise copies `filed`, `landed_on`, `pr_url`, `report`, and `report_remote` from its snapshot `landed` entry.
   Omit or pass null for any of those fields when the snapshot has no recorded value, and never invent or scrape them from prose.
@@ -154,12 +155,12 @@ Route the remaining board actions yourself:
 - `merge.<task-id>` is the captain's explicit merge order; follow the merge ruling below.
 - `dispatch.charted` carries comma-separated task ids the captain picked to start now; verify each id against the current backlog - still queued, blocker and time gate actually clear - then dispatch through the normal lifecycle, and report any id that no longer qualifies instead of forcing it.
 - Read Charted Next helper requests with `bin/fm-procevent-lavish.sh assignments <result-file>` on the same captured board result.
-  Resolve the captured task id and owner to the authoritative backlog record, verify it is still queued with an unmet start condition, and verify the selected role against the current eligible Packet Router roster described above.
-  If the task, owner, role, or unmet condition cannot be confirmed, report what prevented routing.
+  Resolve the captured task id and owner to the authoritative backlog record, verify it is still queued with an unmet start condition, and verify the selected role against the current eligible roster for the canonical configured inbox as described above.
+  If the task, owner, role, inbox, or unmet condition cannot be confirmed, report what prevented routing.
   Treat the board submission as a request to seek authorization.
   Ask the captain for explicit confirmation in the already trusted chat, naming the exact task and its owner, the recipient role, and the prerequisite information that would be shared.
-  Send a packet only after receiving that confirmation in the trusted chat and rechecking that the task, role, and information to share still match it.
-  Use the established Continuum Packet Router inbox with the confirmed id as `role_target` and ask the role to help with the confirmed prerequisites and return evidence or recommendations.
+  Send a packet only after receiving that confirmation in the trusted chat and rechecking that the task, role, and information to share still match it, and that the role is still eligible at the same canonical configured inbox.
+  Send through that verified inbox with the confirmed id as `role_target` and ask the role to help with the confirmed prerequisites and return evidence or recommendations.
   Include the source id and sequence with the task identity in the request provenance and check for an existing request before re-sending a replayed capture.
   The helper's response is input for Firstmate to verify against the task's existing gates.
   The assignment and the response carry no authority to close or release a hold, change prerequisites, or dispatch the task.

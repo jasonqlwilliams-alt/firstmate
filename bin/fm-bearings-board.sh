@@ -85,9 +85,10 @@
 # A Charted Next row MAY carry `filed`, the durable filed date (YYYY-MM-DD, or
 # YYYY-MM-DDTHH:MM:SSZ). Newest-filed order puts undated rows after dated rows
 # and retains payload order on ties.
-# A ranked payload gives every queued row a `tier`, an integer from 1
-# (highest) through 4. An unranked payload omits every tier. The
-# composer classifies real work using the UTC day of `generated`:
+# A ranked payload gives every non-warning Charted Next row a `tier`, an
+# integer from 1 (highest) through 4, including active work with a hold.
+# An unranked legacy payload omits every tier. The composer classifies work
+# using the UTC day of `generated`:
 #   Current: the latest verified filed or substantive activity date is within
 #   the last 30 calendar days (today through 29 days ago).
 #   Urgent: a recorded due date or hold-until falls on or before the seventh
@@ -96,12 +97,12 @@
 #   1: urgent and current.
 #   2: urgent with stale or unknown activity and filing dates.
 #   3: current with no urgency signal.
-#   4: all remaining queued work.
+#   4: all remaining work.
 # Ranked boards default to tier order with ties sorted by newest filed date.
 # Warnings carry no tier.
-# Optional top-level `continuum_agents` is an array of {id, label} objects:
-# unique 1-128 character ASCII slug ids (letters, digits, dots, underscores,
-# hyphens) and non-blank display labels. The id is the Packet Router role.
+# Optional top-level `continuum_agents` is an array of unique Packet Router
+# role ids, displayed verbatim. Each is a 1-128 character ASCII slug (letters,
+# digits, dots, underscores, hyphens).
 # The assignment control requires a roster and a Charted Next row with
 # `assignment_eligible: true` (verified queued work with an unmet start
 # condition), `dispatchable: false`, and a non-blank `owner`. Warnings never
@@ -240,10 +241,9 @@ validate_payload() {  # <data.json>
     def optional_continuum_agents:
       (has("continuum_agents") | not)
       or (.continuum_agents | type == "array"
-        and all(.[]; type == "object"
-          and (.id | slug(128))
-          and (.label | nonblank_string))
-        and ([.[].id] | length == (unique | length)));
+        and all(.[]; slug(128))
+        and (length == (unique | length)));
+    def charted_work: .kind != "warning";
     def landed_item:
       type == "object" and repo_marker and (.id | nonempty_string)
       and (.what | nonempty_string) and (.owner | nonempty_string)
@@ -259,10 +259,10 @@ validate_payload() {  # <data.json>
       and (.dispatchable | type == "boolean")
       and ((has("kind") | not) or (.kind == "queued" or .kind == "warning"))
       and ((has("tier") | not)
-        or (.kind != "warning" and (.tier == 1 or .tier == 2 or .tier == 3 or .tier == 4)))
+        or (charted_work and (.tier == 1 or .tier == 2 or .tier == 3 or .tier == 4)))
       and optional_boolean("assignment_eligible")
       and (if .assignment_eligible then
-        .kind != "warning" and .dispatchable == false and (.owner | nonblank_string)
+        charted_work and .dispatchable == false and (.owner | nonblank_string)
         else true end)
       and optional_filed
       and optional_date("waits_since")
@@ -290,7 +290,7 @@ validate_payload() {  # <data.json>
     and ([.underway[] | underway_item] | all)
     and ([.landed[] | landed_item] | all)
     and ([.charted[] | charted_item] | all)
-    and (.charted | map(select(.kind != "warning"))
+    and (.charted | map(select(charted_work))
       | all(.[]; has("tier")) or all(.[]; has("tier") | not))
   ' "$1" >/dev/null
 }

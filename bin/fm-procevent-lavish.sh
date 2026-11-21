@@ -442,6 +442,7 @@ cmd_result() {
   fi
   perl -MJSON::PP -e '
     use strict; use warnings;
+    my $quoted = qr/"((?:[^"\\]|\\.)*)"/;
 
     sub unescape {
       my ($value) = @_;
@@ -453,7 +454,8 @@ cmd_result() {
       my ($row, @fields) = @_;
       my @vals;
       while (length $row) {
-        if ($row =~ s/^"((?:[^"\\]|\\.)*)"//) {
+        if ($row =~ /\A"/) {
+          return unless $row =~ s/\A$quoted(?=,|\z)//;
           push @vals, $1;
         } else {
           $row =~ s/^([^,]*)//;
@@ -483,10 +485,14 @@ cmd_result() {
 
     sub list_field {
       my ($row, $field) = @_;
-      return unless $field =~ /\A(uid|prompt|selector|tag|text): (.*)\z/;
+      return 1 unless $field =~ /\A(uid|prompt|selector|tag|text): (.*)\z/;
       my ($key, $value) = ($1, $2);
-      $value = unescape($1) if $value =~ /\A"((?:[^"\\]|\\.)*)"\z/;
+      if ($value =~ /\A"/) {
+        return unless $value =~ /\A$quoted\z/;
+        $value = unescape($1);
+      }
       $row->{$key} = $value;
+      return 1;
     }
 
     sub result_rows {
@@ -501,23 +507,26 @@ cmd_result() {
         my @list_rows;
         while ($line = <$fh>) {
           last if $line =~ /\A\S/;
-          $line =~ s/\r?\n\z//;
+          my $terminated = $line =~ s/\r?\n\z//;
           if (defined $columns) {
             next unless $line =~ /\A  (.*)\z/;
             last if @parsed + $malformed >= $want;
-            my $row = tabular_row($1, @fields);
+            my $row = $terminated ? tabular_row($1, @fields) : undef;
             if ($row) { push @parsed, $row }
             else { $malformed++ }
           } elsif ($line =~ /\A  -(?: (.*))?\z/) {
             last if @list_rows >= $want;
             push @list_rows, {};
-            list_field($list_rows[-1], $1 // "");
-          } elsif (@list_rows && $line =~ /\A    (\S.*)\z/) {
-            list_field($list_rows[-1], $1);
+            $list_rows[-1] = undef unless $terminated && list_field($list_rows[-1], $1 // "");
+          } elsif (@list_rows && $list_rows[-1]) {
+            $list_rows[-1] = undef if !$terminated
+              || ($line =~ /\A    (\S.*)\z/ && !list_field($list_rows[-1], $1));
           }
         }
         for my $row (@list_rows) {
-          if (%$row) { push @parsed, $row }
+          if ($row && !grep { !exists $row->{$_} } qw(uid prompt selector tag text)) {
+            push @parsed, $row;
+          }
           else { $malformed++ }
         }
         last;

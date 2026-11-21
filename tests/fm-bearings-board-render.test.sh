@@ -240,25 +240,25 @@ test_charted_next_sorts_four_labeled_tiers_and_keeps_warnings_unranked() {
   local home rows out
   home=$(make_home charted-tiers)
   rows=$(jq -nc '[
-    {title:"Older urgent",tier:2,filed:"2026-08-01"},
+    {title:"Active dated hold",tier:2,filed:"2026-07-20",reason:"until 2026-08-27",owner:"(main)"},
     {title:"Warning",kind:"warning",filed:"2026-08-26"},
-    {title:"Backlog",tier:4,filed:"2026-08-24"},
+    {title:"Active aged hold",tier:4,filed:"2026-07-01",reason:"held 56d",owner:"(main)"},
     {title:"Urgent",tier:1},
-    {title:"Current",tier:3,filed:"2026-08-20"},
-    {title:"Recently filed urgent",tier:2,filed:"2026-08-14"}
-  ] | to_entries | map(.value + {id:("item-" + (.key|tostring)),repo:"test",reason:"",dispatchable:false})')
+    {title:"Active blocked hold",tier:3,filed:"2026-08-20",reason:"blocked-by prep",owner:"mate-one"},
+    {title:"Newer urgent item",tier:2,filed:"2026-07-25"}
+  ] | to_entries | map({id:("item-" + (.key|tostring)),repo:"test",reason:"",dispatchable:false} + .value)')
   out=$(render_board "$home" '[]' "$rows" 0 0 '[]' '[]')
   printf '%s' "$out" | jq -e '
-    [.charted[].title] == ["Urgent","Recently filed urgent","Older urgent","Current","Backlog","Warning"]
+    [.charted[].title] == ["Urgent","Newer urgent item","Active dated hold","Active blocked hold","Active aged hold","Warning"]
     and [.charted[].tier.tone] == ["tier-1","tier-2","tier-2","tier-3","tier-4",null]
     and [.charted[].tier.text] == [
       "Tier 1 · Urgent","Tier 2 · Time-sensitive","Tier 2 · Time-sensitive","Tier 3 · Current","Tier 4 · Backlog",null]
     and .sort.selected == "tier"
-    and [.sort.byFiled[].title] == ["Backlog","Current","Recently filed urgent","Older urgent","Urgent","Warning"]
+    and [.sort.byFiled[].title] == ["Active blocked hold","Newer urgent item","Active dated hold","Active aged hold","Urgent","Warning"]
     and [.sort.byTier[].title] == [.charted[].title]
     and all(.charted[]; .agents == [] and .opens)
   ' >/dev/null || fail "the Charted Next sorter did not preserve ranks, dates, or disclosures: $out"
-  pass "Charted Next labels all four tiers and switches between tier and filed order"
+  pass "Charted Next ranks active holds with queued work in both sort modes"
 }
 
 test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path() {
@@ -273,10 +273,10 @@ test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path
     {"id":"ready","repo":"sample","title":"Ready","reason":"ready to start","dispatchable":true,"owner":"(main)"},
     {"id":"legacy","repo":"sample","title":"Legacy","reason":"blocked by prep","dispatchable":false},
     {"id":"warning","repo":null,"title":"Warning","reason":"home unavailable","dispatchable":false,"kind":"warning"}
-  ]' 0 0 '[]' '[{"id":"spur","label":"Spur"},{"id":"eleusis","label":"Eleusis (current hand: rakazo-eleusis)"}]')
+  ]' 0 0 '[]' '["spur","eleusis"]')
   printf '%s' "$out" | jq -e '
     .charted as $rows
-    | [$rows[0].agents[].label] == ["Spur","Eleusis (current hand: rakazo-eleusis)"]
+    | $rows[0].agents == [{id:"spur",label:"spur"},{id:"eleusis",label:"eleusis"}]
       and $rows[1].agents == $rows[0].agents
       and all($rows[2:][]; .agents == [])
       and ($rows[0].pickable | not)
@@ -284,7 +284,7 @@ test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path
       and .assignmentStatus.queued == ""
       and .assignmentStatus.unavailable == "Open this board in Lavish to queue an assignment."
       and (.requests | length) == 1
-      and (.requests[0] | .tag == "choice" and
+      and (.requests[0] | .tag == "choice" and .text == "Gated one → eleusis" and
         .data == {schema:"fm-bearings-assignment.v1",question:"gated-one",owner:"mate-one",agent:"eleusis"})
   ' >/dev/null || fail "the helper selection did not queue one structured board answer: $out"
 
@@ -307,11 +307,11 @@ test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path
       | map(.prompt += ("\n\nContext data:\n" + (.data | tojson)))
       | "session:\n  status: feedback",
         (if $format == "tabular" then
-          "prompts[\(length)]{tag,text,prompt}:",
-          (.[] | "  " + ([.tag,.text,.prompt] | map(@json) | join(",")))
+          "prompts[\(length)]{uid,prompt,selector,tag,text}:",
+          (.[] | "  " + (["request",.prompt,"form",.tag,.text] | map(@json) | join(",")))
         else
           "prompts[\(length + 1)]:",
-          (.[] | "  - tag: \(.tag)\n    text: \(.text | @json)\n    prompt: \(.prompt | @json)"),
+          (.[] | "  - uid: request\n    prompt: \(.prompt | @json)\n    selector: form\n    tag: \(.tag)\n    text: \(.text | @json)"),
           "  - uid: layout\n    target:\n      tag: choice\n      warnings[1]{id,selector}:\n        fix-1,body\n    selector: body\n    tag: layout-warnings\n    text: Layout fix\n    prompt: Fix the overflow."
         end),
         "next_step: Review the feedback"
@@ -334,6 +334,52 @@ test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path
     fi
   done
   pass "roster role requests survive both Lavish formats outside the hold intakes"
+}
+
+test_incomplete_lavish_rows_do_not_reach_choice_intake() {
+  local capture adapter view assignments
+  adapter="$ROOT/bin/fm-procevent-lavish.sh"
+  cat > "$TMP_ROOT/partial-expanded" <<'EOF'
+session:
+  status: feedback
+prompts[2]:
+  - uid: kept
+    prompt: "Context data: {\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"kept\",\"owner\":\"(main)\",\"agent\":\"spur\"}"
+    selector: form
+    tag: choice
+    text: Kept assignment
+  - uid: cut-off
+EOF
+  cat > "$TMP_ROOT/partial-expanded-value" <<'EOF'
+session:
+  status: feedback
+prompts[2]:
+  - uid: kept
+    prompt: "Context data: {\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"kept\",\"owner\":\"(main)\",\"agent\":\"spur\"}"
+    selector: form
+    tag: choice
+    text: Kept assignment
+  - uid: cut-off
+    prompt: "Context data: {\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"cut-off\",\"owner\":\"(main)\",\"agent\":\"spur\"}"
+    selector: form
+    tag: choice
+    text: "Incomplete
+EOF
+  cat > "$TMP_ROOT/partial-tabular" <<'EOF'
+session:
+  status: feedback
+prompts[2]{uid,prompt,selector,tag,text}:
+  kept,"Context data: {\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"kept\",\"owner\":\"(main)\",\"agent\":\"spur\"}",form,choice,Kept assignment
+  cut-off,"Context data: {\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"cut-off\",\"owner\":\"(main)\",\"agent\":\"spur\"}",form,choice,"Incomplete
+EOF
+  for capture in "$TMP_ROOT"/partial-*; do
+    view=$("$adapter" read "$capture") || fail "partial capture could not be presented"
+    assert_contains "$view" $'declared_items: 2\npresented_items: 1\nmalformed_items: 1\ncomplete: no' "partial capture was certified complete: $capture"
+    assignments=$("$adapter" assignments "$capture") || fail "partial capture could not be read"
+    printf '%s\n' "$assignments" | jq -se '. == [{question:"kept",owner:"(main)",agent:"spur"}]' >/dev/null ||
+      fail "partial capture did not isolate the complete assignment: $assignments"
+  done
+  pass "partial expanded and tabular rows are reported and excluded from choice intake"
 }
 
 test_every_charted_badge_opens_its_row() {
@@ -772,6 +818,7 @@ test_charted_next_reads_newest_filed_first
 test_charted_rows_without_a_filed_date_follow_the_dated_rows_in_payload_order
 test_charted_next_sorts_four_labeled_tiers_and_keeps_warnings_unranked
 test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path
+test_incomplete_lavish_rows_do_not_reach_choice_intake
 test_a_warning_row_reads_as_a_repair_not_as_queued_work
 test_warnings_are_excluded_from_the_charted_next_count
 test_a_board_of_only_warnings_still_reports_nothing_queued

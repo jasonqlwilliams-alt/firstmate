@@ -817,8 +817,8 @@ test_build_checks_charted_tiers_and_the_continuum_roster() {
 .charted[0].tier = 0
 .charted[0].tier = 5
 .charted[0] += {kind:"warning", dispatchable:false, tier:1}
-.charted |= [.[0] + {tier:1}, .[0] + {id:"other"}]
-.charted |= [.[0], .[0] + {id:"other", tier:4}]
+.charted |= [.[0] + {tier:1}, .[0] + {id:"active", reason:"until 2026-08-27", dispatchable:false}]
+.charted |= [.[0] + {id:"active", reason:"until 2026-08-27", dispatchable:false}, .[0] + {tier:4}]
 .charted[0] += {assignment_eligible:"true", dispatchable:false, owner:"(main)"}
 .charted[0] += {assignment_eligible:true, dispatchable:true, owner:"(main)"}
 .charted[0] += {assignment_eligible:true, dispatchable:false, kind:"warning", owner:"(main)"}
@@ -826,16 +826,17 @@ test_build_checks_charted_tiers_and_the_continuum_roster() {
 .charted[0] += {assignment_eligible:true, dispatchable:false, owner:null}
 .charted[0] += {assignment_eligible:true, dispatchable:false, owner:" "}
 .continuum_agents = null
-.continuum_agents = {id:"agent-1", label:"Agent One"}
-.continuum_agents = [{id:"agent/1", label:"Agent One"}]
-.continuum_agents = [{id:"agent-1\n", label:"Agent One"}]
-.continuum_agents = [{id:"agent-1", label:"  "}]
-.continuum_agents = [{id:"agent-1"}]
-.continuum_agents = [{id:"agent-1", label:"Agent One"}, {id:"agent-1", label:"Agent Two"}]
+.continuum_agents = "eleusis"
+.continuum_agents = ["agent/1"]
+.continuum_agents = ["agent-1\n"]
+.continuum_agents = ["  "]
+.continuum_agents = [7]
+.continuum_agents = [{id:"eleusis", label:"Eleusis"}]
+.continuum_agents = ["eleusis", "eleusis"]
 EOF
 
   jq '.charted[0] += {tier:1, assignment_eligible:true, dispatchable:false, owner:"(main)"}
-      | .continuum_agents = [{id:"eleusis", label:"Eleusis (current hand: rakazo-eleusis)"}]' "$base" > "$data" ||
+      | .continuum_agents = ["eleusis"]' "$base" > "$data" ||
     fail "invalid supported fixture"
   run_board "$home" build "$data" >/dev/null || fail "build refused a valid tier and roster"
   [ -z "$(ls -A "$home/router/inbox/new")" ] || fail "building with a roster wrote a router packet"

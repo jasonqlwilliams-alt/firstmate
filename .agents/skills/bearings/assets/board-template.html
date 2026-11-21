@@ -911,9 +911,9 @@ __FM_BEARINGS_BOARD_DATA__
     var placeholder = el("option", null, "Choose Continuum agent");
     placeholder.value = "";
     select.appendChild(placeholder);
-    continuumAgents.forEach(function (agent) {
-      var option = el("option", null, agent.label);
-      option.value = agent.id;
+    continuumAgents.forEach(function (role) {
+      var option = el("option", null, role);
+      option.value = role;
       select.appendChild(option);
     });
     form.appendChild(select);
@@ -927,17 +927,17 @@ __FM_BEARINGS_BOARD_DATA__
 
     form.addEventListener("submit", function (ev) {
       ev.preventDefault();
-      var agent = continuumAgents.find(function (a) { return a.id === select.value; });
-      if (!agent) return;
+      var role = select.value;
+      if (!continuumAgents.includes(role)) return;
       if (!window.lavish || typeof window.lavish.queuePrompt !== "function") {
         status.textContent = "Open this board in Lavish to queue an assignment.";
         return;
       }
       window.lavish.queuePrompt(
         "Request help meeting this item's start conditions.",
-        { tag: "choice", text: t.title + " → " + agent.label, element: form,
+        { tag: "choice", text: t.title + " → " + role, element: form,
           queueKey: JSON.stringify(["assign-continuum-agent", t.id, t.owner]),
-          data: { schema: "fm-bearings-assignment.v1", question: t.id, owner: t.owner, agent: agent.id } }
+          data: { schema: "fm-bearings-assignment.v1", question: t.id, owner: t.owner, agent: role } }
       );
     });
     return form;
