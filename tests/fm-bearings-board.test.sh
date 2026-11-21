@@ -819,12 +819,13 @@ test_build_checks_charted_tiers_and_the_continuum_roster() {
 .charted[0] += {kind:"warning", dispatchable:false, tier:1}
 .charted |= [.[0] + {tier:1}, .[0] + {id:"active", reason:"until 2026-08-27", dispatchable:false}]
 .charted |= [.[0] + {id:"active", reason:"until 2026-08-27", dispatchable:false}, .[0] + {tier:4}]
-.charted[0] += {assignment_eligible:"true", dispatchable:false, owner:"(main)"}
-.charted[0] += {assignment_eligible:true, dispatchable:true, owner:"(main)"}
+.charted[0] += {tier:1, assignment_eligible:"true", dispatchable:false, owner:"(main)"}
+.charted[0] += {tier:1, assignment_eligible:true, dispatchable:true, owner:"(main)"}
 .charted[0] += {assignment_eligible:true, dispatchable:false, kind:"warning", owner:"(main)"}
-.charted[0] += {assignment_eligible:true, dispatchable:false} | del(.charted[0].owner)
-.charted[0] += {assignment_eligible:true, dispatchable:false, owner:null}
-.charted[0] += {assignment_eligible:true, dispatchable:false, owner:" "}
+.charted[0] += {tier:1, assignment_eligible:true, dispatchable:false} | del(.charted[0].owner)
+.charted[0] += {tier:1, assignment_eligible:true, dispatchable:false, owner:null}
+.charted[0] += {tier:1, assignment_eligible:true, dispatchable:false, owner:" "}
+.charted[0] += {assignment_eligible:true, dispatchable:false, owner:"(main)"} | .continuum_agents = ["eleusis"]
 .continuum_agents = null
 .continuum_agents = "eleusis"
 .continuum_agents = ["agent/1"]

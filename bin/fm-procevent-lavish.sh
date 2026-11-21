@@ -84,8 +84,8 @@
 # `assignments` reads Charted Next helper requests from choice context with
 # schema fm-bearings-assignment.v1, `question` (task id), `owner` (non-blank
 # home string), and `agent` (Packet Router role id). Both ids use the ASCII slug
-# shape of 1-128 characters. It prints one JSON object per task/owner, keeping
-# the last valid selection in the capture. Assignments reach neither keyed intake. The
+# shape of 1-128 characters. It prints one JSON object per valid submission in
+# capture order. Assignments reach neither keyed intake. The
 # Bearings skill owns the supervisor's routing of the captured request.
 #
 # It wraps ONLY the currently published interface, verified against 0.1.45:
@@ -372,7 +372,8 @@ cmd_terminal() {
 
 # Whether a completed result carries any queued content block at all. The
 # published response frames content as a top-level `prompts[N]:` or
-# `feedback[N]:` header with optional tabular fields. Rows are indented, so this anchors on column
+# `feedback[N]:` header with optional tabular fields, or an explicit empty
+# array. Rows are indented, so this anchors on column
 # zero: an indented payload line is captain-supplied text and must never be able
 # to forge - or, here, to hide behind - a content header. Any recognized block
 # is content regardless of its declared count, while a malformed top-level
@@ -383,7 +384,7 @@ cmd_terminal() {
 # failed" is never proof that nothing was said.
 result_has_queued_content() {  # <result-file>
   awk '
-    /^(prompts|feedback)\[[0-9]+\](\{[^}]*\})?:[[:space:]]*$/ {
+    /^(prompts|feedback)(\[[0-9]+\](\{[^}]*\})?:[[:space:]]*|:[[:space:]]+\[\][[:space:]]*)$/ {
       verdict = "present"
       exit
     }
@@ -497,32 +498,45 @@ cmd_result() {
 
     sub result_rows {
       my ($fh, $selection) = @_;
-      my ($want, $malformed, @parsed) = (0, 0);
+      my ($want, $malformed, @parsed) = (undef, 0);
       while (my $line = <$fh>) {
-        next unless $line =~ /\A(prompts|feedback)\[(\d+)\](?:\{([^}]*)\})?:[ \t]*\r?\n?\z/;
-        my ($kind, $count, $columns) = ($1, $2, $3);
-        next if $kind eq "feedback" && $selection ne "read";
-        $want = $count;
+        next unless $line =~ /\A(prompts|feedback)(?=:|\[)/;
+        next if $1 eq "feedback" && $selection ne "read";
+        if ($line =~ /\A(?:prompts|feedback):[ \t]+\[\][ \t]*\r?\n\z/) {
+          $want = 0;
+          last;
+        }
+        if ($line !~ /\A(?:prompts|feedback)\[(\d+)\](?:\{([^}]*)\})?:[ \t]*\r?\n\z/) {
+          $malformed++;
+          last;
+        }
+        my $columns;
+        ($want, $columns) = ($1, $2);
         my @fields = defined($columns) ? split(/,/, $columns) : ();
         my @list_rows;
+        my $list_closed;
         while ($line = <$fh>) {
-          last if $line =~ /\A\S/;
+          if ($line =~ /\A\S/) {
+            $list_closed = 1;
+            last;
+          }
           my $terminated = $line =~ s/\r?\n\z//;
           if (defined $columns) {
             next unless $line =~ /\A  (.*)\z/;
-            last if @parsed + $malformed >= $want;
-            my $row = $terminated ? tabular_row($1, @fields) : undef;
+            my $row = $terminated && @parsed + $malformed < $want
+              ? tabular_row($1, @fields) : undef;
             if ($row) { push @parsed, $row }
             else { $malformed++ }
           } elsif ($line =~ /\A  -(?: (.*))?\z/) {
-            last if @list_rows >= $want;
             push @list_rows, {};
-            $list_rows[-1] = undef unless $terminated && list_field($list_rows[-1], $1 // "");
+            $list_rows[-1] = undef unless @list_rows <= $want && $terminated
+              && list_field($list_rows[-1], $1 // "");
           } elsif (@list_rows && $list_rows[-1]) {
             $list_rows[-1] = undef if !$terminated
               || ($line =~ /\A    (\S.*)\z/ && !list_field($list_rows[-1], $1));
           }
         }
+        $list_rows[-1] = undef if @list_rows && !$list_closed;
         for my $row (@list_rows) {
           if ($row && !grep { !exists $row->{$_} } qw(uid prompt selector tag text)) {
             push @parsed, $row;
@@ -554,10 +568,7 @@ cmd_result() {
           next unless $is_string->($task) && $task =~ $slug;
           next unless $is_string->($owner) && $owner =~ /\S/;
           next unless $is_string->($agent) && $agent =~ $slug;
-          my $identity = encode_json([$task, $owner]);
-          if (defined $seen{$identity}) { $choices[$seen{$identity}] = undef }
-          $seen{$identity} = scalar @choices;
-          push @choices, { question => $task, owner => $owner, agent => $agent };
+          print encode_json({ question => $task, owner => $owner, agent => $agent }), "\n";
           next;
         }
         my ($key, $selected, $note, $answer, $legacy);
@@ -606,10 +617,6 @@ cmd_result() {
         };
       }
       for my $choice (grep { defined } @choices) {
-        if ($selection eq "assignments") {
-          print encode_json($choice), "\n";
-          next;
-        }
         if ($selection eq "reconciles") {
           next if $choice->{legacy};
           if ($choice->{selection} eq "reconcile") {
@@ -640,7 +647,10 @@ cmd_result() {
     sub print_result {
       my ($want, $malformed, $parsed, $lifecycle, $session_ended) = @_;
       my $presented = scalar @$parsed;
-      my $complete = ($presented == $want && !$malformed) ? "yes" : "no";
+      my $no_feedback = $lifecycle =~ /\A(?:ended|waiting|missing)\z/;
+      my $declared = $want // ($no_feedback && !$malformed ? 0 : "(missing)");
+      my $complete = !$malformed && (defined($want) ? $presented == $want : $no_feedback)
+        ? "yes" : "no";
       my @messages;
       my @annotations;
       for my $f (@$parsed) {
@@ -665,7 +675,7 @@ cmd_result() {
         print "SESSION-ENDING MESSAGE: (none)\n";
       }
       print "\n";
-      print "declared_items: $want\n";
+      print "declared_items: $declared\n";
       print "presented_items: $presented\n";
       print "malformed_items: $malformed\n";
       print "complete: $complete\n";
@@ -700,7 +710,7 @@ cmd_result() {
       } else {
         print "ANNOTATIONS: (none)\n";
       }
-      print "END LAVISH RESULT ($presented of $want)\n";
+      print "END LAVISH RESULT ($presented of $declared)\n";
     }
 
     my ($selection, $path, $lifecycle, $session_ended) = @ARGV;

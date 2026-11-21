@@ -267,11 +267,11 @@ test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path
   adapter="$ROOT/bin/fm-procevent-lavish.sh"
   capture="$home/captured-result"
   out=$(render_board "$home" '[]' '[
-    {"id":"gated-one","repo":"sample","title":"Gated one","reason":"blocked by prep","dispatchable":false,"owner":"mate-one","assignment_eligible":true},
-    {"id":"gated-two","repo":"sample","title":"Gated two","reason":"blocked by prep","dispatchable":false,"owner":"(main)","assignment_eligible":true},
-    {"id":"active-hold","repo":"sample","title":"Active hold","reason":"until 2026-09-02","dispatchable":false,"owner":"(main)","assignment_eligible":false},
-    {"id":"ready","repo":"sample","title":"Ready","reason":"ready to start","dispatchable":true,"owner":"(main)"},
-    {"id":"legacy","repo":"sample","title":"Legacy","reason":"blocked by prep","dispatchable":false},
+    {"id":"gated-one","repo":"sample","title":"Gated one","reason":"blocked by prep","tier":1,"dispatchable":false,"owner":"mate-one","assignment_eligible":true},
+    {"id":"gated-two","repo":"sample","title":"Gated two","reason":"blocked by prep","tier":2,"dispatchable":false,"owner":"(main)","assignment_eligible":true},
+    {"id":"active-hold","repo":"sample","title":"Active hold","reason":"until 2026-09-02","tier":2,"dispatchable":false,"owner":"(main)","assignment_eligible":false},
+    {"id":"ready","repo":"sample","title":"Ready","reason":"ready to start","tier":3,"dispatchable":true,"owner":"(main)"},
+    {"id":"waiting","repo":"sample","title":"Waiting","reason":"blocked by prep","tier":4,"dispatchable":false},
     {"id":"warning","repo":null,"title":"Warning","reason":"home unavailable","dispatchable":false,"kind":"warning"}
   ]' 0 0 '[]' '["spur","eleusis"]')
   printf '%s' "$out" | jq -e '
@@ -285,6 +285,7 @@ test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path
       and .assignmentStatus.unavailable == "Open this board in Lavish to queue an assignment."
       and (.requests | length) == 1
       and (.requests[0] | .tag == "choice" and .text == "Gated one → eleusis" and
+        (.queueKey | fromjson) == ["assign-continuum-agent","gated-one","mate-one"] and
         .data == {schema:"fm-bearings-assignment.v1",question:"gated-one",owner:"mate-one",agent:"eleusis"})
   ' >/dev/null || fail "the helper selection did not queue one structured board answer: $out"
 
@@ -292,7 +293,7 @@ test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path
   for format in tabular expanded; do
     printf '%s' "$out" | jq --arg format "$format" -r '
       .requests[0] as $request
-      | [($request | .data.agent = "spur"),$request,
+      | [($request | .data.agent = "spur"),$request,$request,
         ($request | .data.owner = "(main)" | .data.agent = "spur"),
         {tag:"choice",text:"Ordinary answer",prompt:"Answer",data:{
           schema:"fm-bearings-answer.v1",question:$request.data.question,selection:"yes",note:""}},
@@ -318,7 +319,9 @@ test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path
     ' > "$capture"
     assignments=$("$adapter" assignments "$capture") || fail "assignment capture could not be read"
     printf '%s\n' "$assignments" | jq -se '
-      . == [{question:"gated-one",owner:"mate-one",agent:"eleusis"},
+      . == [{question:"gated-one",owner:"mate-one",agent:"spur"},
+        {question:"gated-one",owner:"mate-one",agent:"eleusis"},
+        {question:"gated-one",owner:"mate-one",agent:"eleusis"},
         {question:"gated-one",owner:"(main)",agent:"spur"}]
     ' >/dev/null || fail "$format assignment projection returned unexpected requests: $assignments"
     answers=$("$adapter" answers "$capture") || fail "ordinary capture could not be read"
@@ -372,6 +375,25 @@ prompts[2]{uid,prompt,selector,tag,text}:
   kept,"Context data: {\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"kept\",\"owner\":\"(main)\",\"agent\":\"spur\"}",form,choice,Kept assignment
   cut-off,"Context data: {\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"cut-off\",\"owner\":\"(main)\",\"agent\":\"spur\"}",form,choice,"Incomplete
 EOF
+  cat > "$TMP_ROOT/partial-target" <<'EOF'
+session:
+  status: feedback
+prompts[2]:
+  - uid: kept
+    prompt: "Context data: {\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"kept\",\"owner\":\"(main)\",\"agent\":\"spur\"}"
+    selector: form
+    tag: choice
+    text: Kept assignment
+  - uid: cut-off
+    prompt: "Context data: {\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"cut-off\",\"owner\":\"(main)\",\"agent\":\"spur\"}"
+    selector: form
+    tag: choice
+    text: Cut-off assignment
+    target:
+      type: layout-warnings
+      warnings[2]{id,selector}:
+        fix-1,body
+EOF
   for capture in "$TMP_ROOT"/partial-*; do
     view=$("$adapter" read "$capture") || fail "partial capture could not be presented"
     assert_contains "$view" $'declared_items: 2\npresented_items: 1\nmalformed_items: 1\ncomplete: no' "partial capture was certified complete: $capture"
@@ -380,6 +402,21 @@ EOF
       fail "partial capture did not isolate the complete assignment: $assignments"
   done
   pass "partial expanded and tabular rows are reported and excluded from choice intake"
+}
+
+test_feedback_requires_a_declared_prompt_block() {
+  local capture adapter view
+  capture="$TMP_ROOT/feedback-frame"
+  adapter="$ROOT/bin/fm-procevent-lavish.sh"
+  printf 'session:\n  status: feedback\ndom_snapshot: ""\n' > "$capture"
+  view=$("$adapter" read "$capture") || fail "capture before the prompt header could not be presented"
+  assert_contains "$view" "declared_items: (missing)" "missing prompt block appeared empty"
+  assert_contains "$view" "complete: no" "feedback without a prompt header appeared complete"
+
+  printf 'prompts: []\nnext_step: Review the feedback\n' >> "$capture"
+  view=$("$adapter" read "$capture") || fail "feedback with an empty array could not be presented"
+  assert_contains "$view" $'declared_items: 0\npresented_items: 0\nmalformed_items: 0\ncomplete: yes' +    "explicit empty Lavish prompt array did not produce a complete empty view"
+  pass "Lavish feedback distinguishes an explicit empty array from a missing prompt block"
 }
 
 test_every_charted_badge_opens_its_row() {
@@ -819,6 +856,7 @@ test_charted_rows_without_a_filed_date_follow_the_dated_rows_in_payload_order
 test_charted_next_sorts_four_labeled_tiers_and_keeps_warnings_unranked
 test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path
 test_incomplete_lavish_rows_do_not_reach_choice_intake
+test_feedback_requires_a_declared_prompt_block
 test_a_warning_row_reads_as_a_repair_not_as_queued_work
 test_warnings_are_excluded_from_the_charted_next_count
 test_a_board_of_only_warnings_still_reports_nothing_queued
