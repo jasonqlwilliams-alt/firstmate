@@ -626,6 +626,8 @@ ok - a restored layout keeps pane ids but changes the worker terminal identity
 The guarded lab closes and recreates a named session to recycle exact pane ids, then separately checks normal layout restoration after a guarded stop.
 The test uses inert processes and verifies the running default session at teardown.
 The portable fixture in [`tests/fm-daemon.test.sh`](../../tests/fm-daemon.test.sh#L2621) exercises supervisor delivery when a stale worker record claims the same pane id, then checks that a literal `fm-peek.sh` selector for that id refuses access through the worker's binding.
+The fixture in [`tests/fm-backup-helm.test.sh`](../../tests/fm-backup-helm.test.sh#L474) exercises arming and completing a Herdr handover at a supervisor pane claimed by a dead worker's record.
+The fixture in [`tests/fm-secondmate-harness.test.sh`](../../tests/fm-secondmate-harness.test.sh#L467) checks that a fresh local secondmate can launch at a recycled pane id while the old worker record is still present.
 
 ### Lab-context session refusal and durable tripwire breaches
 
@@ -1168,7 +1170,8 @@ For Pi on Herdr 0.9.0, `herdr agent get` reflects whether the agent process rema
 A Pi launched as a child of the pane shell (not via `exec`) that then `/quit`s or is SIGKILL'd leaves the pane and shell in place, and `agent get` returns `agent_not_found`.
 A sibling live idle Pi stays `agent=pi` with `agent_status=idle`.
 `fm_backend_herdr_pane_agent_state` maps that `agent_not_found` leftover shell to `no-agent` and `fm_backend_herdr_agent_state` maps it to `dead` (relaunch-allowed), while the live idle pane stays `alive`.
-`herdr pane get` `.agent_status` can still read `idle` after the occupant is gone; liveness is `agent get`, never that pane field.
+`herdr pane get` can still show `agent_status=idle` after the occupant is gone, so this guard reads the registration with `herdr agent get`.
+See the [current Herdr liveness contract](../herdr-backend.md#restart-and-liveness-behavior) for the checks applied to task-selected endpoints.
 
 ```sh
 tests/fm-backend-herdr-agent-exit-shell-e2e.test.sh

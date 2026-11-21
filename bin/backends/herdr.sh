@@ -2866,9 +2866,9 @@ fm_backend_herdr_projection_reclaim_rollback() {  # <session> <new-pane> <termin
 # terminal still matches the worker record inside its original workspace.
 # The caller holds the session presentation lock and has already established
 # that flat fallback is safe across every token match.
-# Return 0 means exact reclaim, 2 means non-mutating or exactly rolled-back
-# refusal with flat fallback permitted, and 1 means a live/unknown or
-# post-mutation uncertainty that must refuse the launch.
+# Return 0 means exact reclaim, 2 permits flat fallback, and 1 refuses launch.
+# See docs/herdr-backend.md "Presentation spaces" for the limits of recovery
+# when a terminal check or create response leaves the replacement unverified.
 fm_backend_herdr_projection_reclaim_task() {  # <session> <journal> <task-id> <home> <meta-workspace> <meta-tab> <meta-pane> <parent-label> <task-label> <cwd> <terminal-id>
   local session=$1 journal=$2 id=$3 home=$4 meta_workspace=$5 meta_tab=$6 meta_pane=$7
   local parent_label=$8 task_label=$9 cwd=${10} canonical_home state focus_before active_tab out new_tab new_pane info close_status

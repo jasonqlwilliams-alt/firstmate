@@ -152,8 +152,10 @@ The replacement tab and pane are created and verified before the old pane is rec
 The reclaim path never moves, closes, deletes, or renames a workspace and never touches a parent, sibling, captain, or foreign pane.
 A failed replacement rolls back only the new pane whose terminal matches the create response, when focus-safe verification permits it.
 Version 1 journals, missing panes, duplicate or absent tokens, renamed or detached spaces, mismatched journal associations, active target tabs, and ambiguous focus fall back flat without mutating the old projection when duplicate-agent risk is positively absent.
-A live or unreadable recorded or token-matched endpoint refuses duplicate launch.
-A recorded pane occupied by a different terminal also refuses ordinary projection recovery and directs the operator to relaunch in the recorded worktree.
+Before in-place reclaim begins, a live or unreadable recorded or token-matched endpoint refuses duplicate launch.
+A different terminal found in the recorded pane during that initial check also refuses ordinary projection recovery and directs the operator to relaunch in the recorded worktree.
+If the recorded terminal stops matching or becomes unreadable during reclaim, the terminal check can lead to a flat launch without closing that pane.
+An incomplete replacement create response can leave an unverified tab in the projection while launch proceeds flat after focus is restored.
 
 Locked session start has one narrower cleanup for a restored projected child that is no longer current task state.
 It runs only when the current home has at least one ordinary presentation journal and considers only that home; a primary never recursively sweeps a secondmate home.
@@ -291,9 +293,9 @@ No Herdr-specific copy of that protocol exists.
 Stopping and restarting a named Herdr server can restore workspace, tab, pane, and label ids, but the underlying harness processes and live agent registrations do not survive.
 Ids can also be reassigned after a host restart, so a recorded id alone does not establish endpoint ownership.
 `fm_backend_herdr_task_identity_state` in [`bin/fm-backend.sh`](../bin/fm-backend.sh) owns the live binding used for worker liveness and terminal access.
-The adapter applies that binding when the caller supplies a selected task record or a terminal identity from the current spawn.
-It checks the recorded worker terminal even after the shell changes directory into the worktree.
-Secondmates launch directly in their home, so their binding uses the canonical pane creation directory, including for [remote endpoint operations](remote-secondmates.md#normal-operation).
+The adapter applies the recorded binding when the caller selects a task record, and a worker's binding follows its terminal into the worktree.
+A newly created pane uses its own terminal id during launch, including when a new secondmate takes a pane id still claimed by a worker record.
+Secondmates start directly in their home, so subsequent task-selected access uses the canonical pane creation directory, including for [remote endpoint operations](remote-secondmates.md#normal-operation).
 An older worker record with a still-present pane and no recorded terminal id is unreadable and retained.
 Capture, key and text delivery, and terminal close require a match when a binding is supplied.
 Capture rechecks that binding before returning output.
@@ -350,8 +352,8 @@ There is still one watcher process; the event reader is a bounded child of that 
 The away daemon supports tmux and Herdr supervisor panes only.
 It refuses Zellij, Orca, and cmux as supervisor backends rather than applying the wrong transport.
 For Herdr, target existence, native state, capture, composer state, and verified submit all route through the shared backend dispatcher and the explicit named-session CLI owner.
-The daemon addresses the supervisor pane directly, so it can deliver escalations even when a stale worker record names the same pane id.
-The [runtime backend verification](verification/runtime-backends.md#worker-terminal-identity) links to the regression for supervisor delivery and task-selected access at the same pane id.
+The away daemon and backup helm address the supervisor pane directly, so both can reach it even when a stale worker record names the same pane id.
+The [runtime backend verification](verification/runtime-backends.md#worker-terminal-identity) links to the regressions for direct supervisor access, task-selected access, and secondmate launch at a recycled pane id.
 The pane-independent max-defer alert is configured in [`wedge-alarm.md`](wedge-alarm.md).
 
 Harnesses with native tracked background execution can run the daemon in their terminal.
