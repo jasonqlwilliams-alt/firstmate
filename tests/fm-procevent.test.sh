@@ -2648,11 +2648,17 @@ SHIPPED_ANSWER=$'ship-call\tgo\tSection 1: Section 2'
 RECHECK_ANSWER=$'check-call\tRe-check host'
 assert_submission "$TABLE_CAPTURE" 2 2 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 assert_submission "$LIST_CAPTURE" 3 3 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
-assert_contains "$("$LAVISH_ADAPTER" read "$TABLE_CAPTURE")" "| $CHOICE_LABEL" \
-  "tabular presentation lost the literal form feed in a quoted label"
+ESCAPED_TABLE="$TMP_ROOT/escaped-table.toon"
+ESCAPED_LIST="$TMP_ROOT/escaped-list.toon"
+perl -pe 's/\f/\\u000c/g' "$TABLE_CAPTURE" > "$ESCAPED_TABLE"
+perl -pe 's/\f/\\u000c/g' "$LIST_CAPTURE" > "$ESCAPED_LIST"
+assert_submission "$ESCAPED_TABLE" 2 2 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+assert_submission "$ESCAPED_LIST" 3 3 yes "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+for capture in "$TABLE_CAPTURE" "$LIST_CAPTURE" "$ESCAPED_TABLE" "$ESCAPED_LIST"; do
+  assert_contains "$("$LAVISH_ADAPTER" read "$capture")" "| $CHOICE_LABEL" \
+    "$capture did not preserve the form feed in a quoted label"
+done
 out=$("$LAVISH_ADAPTER" read "$LIST_CAPTURE")
-assert_contains "$out" "| $CHOICE_LABEL" \
-  "list presentation lost the literal form feed in a quoted label"
 assert_contains "$out" "element_selector: main > button" "nested-target annotation lost its selector"
 assert_contains "$out" "| Fix this layout issue the browser detected." "nested-target annotation lost its comment"
 pass "tabular and nested-target list submissions feed the same answer and reconcile projections"
@@ -2664,6 +2670,15 @@ assert_submission "$READ" 0 0 yes '' ''
 printf 'session:\n  status: feedback\n' > "$READ"
 assert_submission "$READ" unknown 0 no '' ''
 pass "an explicit empty prompt list is distinguishable from a missing header"
+
+WAITING_CAPTURE="$TMP_ROOT/waiting.toon"
+printf 'session:\n  status: waiting\nnext_step: Wait for feedback.\n' > "$WAITING_CAPTURE"
+assert_submission "$WAITING_CAPTURE" 0 0 yes '' ''
+printf 'error: No active Lavish Editor session for this file\ncode: NOT_FOUND\n' > "$READ"
+assert_submission "$READ" 0 0 yes '' ''
+printf 'error: Poll failed\ncode: SERVER_ERROR\n' > "$READ"
+assert_submission "$READ" unknown 0 no '' ''
+pass "intact waiting and missing sessions report zero queued prompts"
 
 printf 'session:\n  status: feedback\nfeedback[1]:\n  - text: unsupported\n' > "$READ"
 assert_submission "$READ" unknown 0 no '' ''
@@ -2682,6 +2697,10 @@ assert_submission "$LEGACY_LIST" 3 0 no '' ''
 sed '/text: Re-check host/d' "$LIST_CAPTURE" > "$LEGACY_LIST"
 assert_submission "$LEGACY_LIST" 3 2 no "$SHIPPED_ANSWER" ''
 pass "legacy list captures reject an unbounded final item and choices missing text"
+
+sed 's/^    target:$/    target[1]{type}:/' "$LIST_CAPTURE" > "$READ"
+assert_submission "$READ" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
+pass "list prompts require an object boundary for nested targets"
 
 CLIPPED_HOME="$TMP_ROOT/hclipped"; new_home "$CLIPPED_HOME"
 fm_test_track_procevent_home "$CLIPPED_HOME"
@@ -2723,6 +2742,8 @@ assert_submission "$CLIPPED" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 CLIPPED=$(capture_prefix list-cut-before-target "$LIST_CAPTURE" $'text: "Layout issue: 1 selected"\n')
 assert_submission "$CLIPPED" 3 2 no "$SHIPPED_ANSWER" "$RECHECK_ANSWER"
 CLIPPED=$(capture_prefix list-cut-before-header "$LIST_CAPTURE" 'dom_snapshot: ""')
+assert_submission "$CLIPPED" unknown 0 no '' ''
+CLIPPED=$(capture_prefix waiting-cut-after-status "$WAITING_CAPTURE" 'status: waiting')
 assert_submission "$CLIPPED" unknown 0 no '' ''
 pass "runner cutoffs preserve complete rows and report missing or clipped prompt data"
 
