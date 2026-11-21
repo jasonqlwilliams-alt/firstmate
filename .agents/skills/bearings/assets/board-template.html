@@ -507,9 +507,6 @@ __FM_BEARINGS_BOARD_DATA__
      so every count of queued work excludes them. */
   function isWarning(t) { return t && t.kind === "warning"; }
   function chartedQueued(rows) { return (rows || []).filter(function (t) { return !isWarning(t); }); }
-  /* Charted Next reads newest filed first, so the most recently filed upcoming
-     work is at the top. ISO filed dates compare as text; a row with no
-     comparable date keeps its payload order after every dated row. */
   function chartedOrder(rows) {
     var dated = [], undated = [];
     (rows || []).forEach(function (t) {

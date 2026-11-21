@@ -286,11 +286,13 @@ See [`wedge-alarm.md`](wedge-alarm.md) for the current channel reference, [`veri
 
 The optional local, gitignored `config/packet-router-inbox` file is this home's absolute path to a Packet Router `inbox/new` directory.
 Firstmate writes one URGENT-ALERT packet there when `bin/fm-captain-hold.sh hold --urgent-alert` records a live halt-progress captain call, so Spur can ping the captain.
-The file is not inherited by secondmate homes: the path is machine-local, and an absent, empty, or unreadable file, or a value that is not an absolute path, is a silent no-op so homes without Packet Router stay unaffected.
+Secondmate homes configure their own machine-local path.
+For URGENT-ALERT packets, an absent, empty, or unreadable file or a non-absolute path is a silent no-op.
 `bin/fm-urgent-alert.sh` is the single owner of the read, packet shape, and best-effort write; a configured inbox that is missing or cannot take the packet prints one `actionable:` stderr line, and packet write failure never fails the hold.
 The first non-comment, non-blank line is the directory path.
 The same inbox path is the Eleusis publish plane for `bin/fm-system-state-card.sh`: when configured, that generator drops a named-C: packet asking Eleusis to write Packet Router `Evidence/SYSTEM_STATE.md`.
 `bin/fm-urgent-alert.sh` remains the owner of URGENT-ALERT packets; the system-state script header owns its own packet shape and no-op when the inbox is absent.
+To enable [Charted Next helper requests](../README.md#built-in-skills), configure an existing inbox whose Packet Router seat registry lists a verifiable recipient role.
 
 ## Bearings detail canvas export (config/bearings-canvas-dir)
 

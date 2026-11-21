@@ -187,7 +187,7 @@ jobs:
         run: |
           set -eu
           scheduled=$(bin/fm-test-run.sh --list-scheduled --lane "$FM_SERIAL_LANE")
-          if grep -Eq '^tests/fm-(bearings-board|lineup-board|procevent|captain-hold-lifecycle)\.test\.sh$' <<< "$scheduled"; then
+          if grep -Eq '^tests/fm-(bearings-board(-render)?|lineup-board|procevent|captain-hold-lifecycle)\.test\.sh$' <<< "$scheduled"; then
             npm install --prefix "$RUNNER_TEMP/lavish-codec" --ignore-scripts --no-save @toon-format/toon@2.3.1
             echo "FM_TEST_LAVISH_CODEC_PATH=$RUNNER_TEMP/lavish-codec/node_modules/@toon-format/toon/dist/index.mjs" >> "$GITHUB_ENV"
           fi

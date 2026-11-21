@@ -66,7 +66,8 @@
 # must never be able to forge a decision key.
 #
 # `read`, `answers`, `reconciles`, and `assignments` use the same TOON decoder,
-# including for tabular and list prompts. Node.js loads the codec used by lavish-axi on PATH.
+# including for tabular and list prompts. Node.js loads the codec used by
+# lavish-axi on PATH.
 # `read` exits 0 for a complete capture or 3 for an incomplete capture, with
 # recoverable rows in either case. Legacy tabular prose recovery is for display.
 # `answers` and `reconciles` exit 0 for a complete prompt block or a complete
