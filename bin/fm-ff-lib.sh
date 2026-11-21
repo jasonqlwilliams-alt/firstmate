@@ -326,7 +326,7 @@ ff_target() {
     return 0
   fi
 
-  local default base phase instr local_rev base_rev before after out
+  local default base phase instr local_rev base_rev merged_rev before after out
   default=$(default_branch "$dir") || {
     echo "$label: skipped: cannot determine default branch"
     return 0
@@ -375,6 +375,12 @@ ff_target() {
 
   if ! out=$(git -C "$dir" merge --ff-only "$base_rev" 2>&1); then
     echo "$label: skipped: fast-forward failed: $(first_line "$out")"
+    return 0
+  fi
+  if [ "$phase" = final ] &&
+    { ! merged_rev=$(git -C "$dir" rev-parse --verify --quiet HEAD 2>/dev/null) ||
+      [ "$merged_rev" != "$base_rev" ]; }; then
+    echo "$label: skipped: could not confirm HEAD at $base after fast-forward"
     return 0
   fi
   instr=$(changed_instr "$dir" "$local_rev" "$base_rev")

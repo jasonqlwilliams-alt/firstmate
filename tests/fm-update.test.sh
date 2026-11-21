@@ -364,6 +364,9 @@ if [ "${FM_REMOTE_JOB_ACTIVE:-}" != 1 ] &&
   esac
   grep -Fq "warning: $label: pre-binding Herdr worker record $id points to existing pane update-herdr:w1:p-$id. Pane ownership still needs verification." "$FM_FAKE_DIR/update.stderr" ||
     { printf 'warning was absent at the fast-forward for %s\n' "$label" >&2; exit 93; }
+  if [ -n "${FM_TEST_CONCURRENT_TIP:-}" ]; then
+    "$FM_TEST_REAL_GIT" -C "$2" merge -q --ff-only "$FM_TEST_CONCURRENT_TIP"
+  fi
 fi
 exec "$FM_TEST_REAL_GIT" "$@"
 SH
@@ -417,6 +420,23 @@ SH
   assert_contains "$out" "secondmate sm1: already current" "a concurrent fast-forward was reported as a new update"
   assert_contains "$out" "restart-secondmates: fm-sm1" "the already-current secondmate was not queued for restart"
   pass "The updater uses the commits visible after the Herdr probe"
+
+  bump_origin "$w" readme
+  printf 'instructions advanced by concurrent update\n' >> "$w/seed/AGENTS.md"
+  git -C "$w/seed" commit -qam 'concurrent instruction advance'
+  local concurrent_tip
+  concurrent_tip=$(git -C "$w/seed" rev-parse HEAD)
+  git -C "$w/main" fetch -q --no-tags "$w/seed" "$concurrent_tip"
+  out=$("${update_env[@]}" FM_HOME="$w/home" FM_TEST_CONCURRENT_TIP="$concurrent_tip" \
+    "$UPDATE" 2> "$w/fake/update.stderr")
+  for checkout in main sm1; do
+    [ "$(git -C "$w/$checkout" rev-parse HEAD)" = "$concurrent_tip" ] || fail "concurrent advance did not reach $checkout"
+  done
+  assert_contains "$out" "firstmate: skipped: could not confirm HEAD at origin/main after fast-forward" "primary reported a stale merge target"
+  assert_contains "$out" "secondmate sm1: skipped: could not confirm HEAD at origin/main after fast-forward" "secondmate reported a stale merge target"
+  assert_contains "$out" "restart-secondmates: none" "a home past the target was queued for restart"
+  assert_contains "$out" "nudge-secondmates: none" "a home past the target was queued for a nudge"
+  pass "A successful merge command requires the expected HEAD before reporting an advance"
 
   local main_before home_before
   main_before=$(git -C "$w/main" rev-parse HEAD)
