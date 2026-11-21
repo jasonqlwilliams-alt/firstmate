@@ -244,18 +244,17 @@ test_charted_next_sorts_four_labeled_tiers_and_keeps_warnings_unranked() {
     {title:"Warning",kind:"warning",filed:"2026-08-26"},
     {title:"Backlog",tier:4,filed:"2026-08-24"},
     {title:"Urgent",tier:1},
-    {title:"Legacy",filed:"2026-08-25"},
     {title:"Current",tier:3,filed:"2026-08-20"},
     {title:"Recently filed urgent",tier:2,filed:"2026-08-14"}
   ] | to_entries | map(.value + {id:("item-" + (.key|tostring)),repo:"test",reason:"",dispatchable:false})')
   out=$(render_board "$home" '[]' "$rows" 0 0 '[]' '[]')
   printf '%s' "$out" | jq -e '
-    [.charted[].title] == ["Urgent","Recently filed urgent","Older urgent","Current","Backlog","Legacy","Warning"]
-    and [.charted[].tier.tone] == ["tier-1","tier-2","tier-2","tier-3","tier-4",null,null]
+    [.charted[].title] == ["Urgent","Recently filed urgent","Older urgent","Current","Backlog","Warning"]
+    and [.charted[].tier.tone] == ["tier-1","tier-2","tier-2","tier-3","tier-4",null]
     and [.charted[].tier.text] == [
-      "Tier 1 · Urgent","Tier 2 · Time-sensitive","Tier 2 · Time-sensitive","Tier 3 · Current","Tier 4 · Backlog",null,null]
+      "Tier 1 · Urgent","Tier 2 · Time-sensitive","Tier 2 · Time-sensitive","Tier 3 · Current","Tier 4 · Backlog",null]
     and .sort.selected == "tier"
-    and [.sort.byFiled[].title] == ["Legacy","Backlog","Current","Recently filed urgent","Older urgent","Urgent","Warning"]
+    and [.sort.byFiled[].title] == ["Backlog","Current","Recently filed urgent","Older urgent","Urgent","Warning"]
     and [.sort.byTier[].title] == [.charted[].title]
     and all(.charted[]; .agents == [] and .opens)
   ' >/dev/null || fail "the Charted Next sorter did not preserve ranks, dates, or disclosures: $out"
@@ -263,50 +262,78 @@ test_charted_next_sorts_four_labeled_tiers_and_keeps_warnings_unranked() {
 }
 
 test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path() {
-  local home out capture adapter assignments answers
+  local home out capture adapter assignments answers format view
   home=$(make_home charted-agent)
   adapter="$ROOT/bin/fm-procevent-lavish.sh"
   capture="$home/captured-result"
   out=$(render_board "$home" '[]' '[
-    {"id":"gated-one","repo":"sample","title":"Gated one","reason":"blocked by prep","dispatchable":false,"owner":"mate-one"},
-    {"id":"gated-two","repo":"sample","title":"Gated two","reason":"blocked by prep","dispatchable":false},
+    {"id":"gated-one","repo":"sample","title":"Gated one","reason":"blocked by prep","dispatchable":false,"owner":"mate-one","assignment_eligible":true},
+    {"id":"gated-two","repo":"sample","title":"Gated two","reason":"blocked by prep","dispatchable":false,"owner":"(main)","assignment_eligible":true},
+    {"id":"active-hold","repo":"sample","title":"Active hold","reason":"until 2026-09-02","dispatchable":false,"owner":"(main)","assignment_eligible":false},
+    {"id":"ready","repo":"sample","title":"Ready","reason":"ready to start","dispatchable":true,"owner":"(main)"},
+    {"id":"legacy","repo":"sample","title":"Legacy","reason":"blocked by prep","dispatchable":false},
     {"id":"warning","repo":null,"title":"Warning","reason":"home unavailable","dispatchable":false,"kind":"warning"}
-  ]' 0 0 '[]' '[{"id":"helper-one","label":"Helper One"},{"id":"helper-two","label":"Helper Two"}]')
+  ]' 0 0 '[]' '[{"id":"spur","label":"Spur"},{"id":"eleusis","label":"Eleusis (current hand: rakazo-eleusis)"}]')
   printf '%s' "$out" | jq -e '
     .charted as $rows
-    | [$rows[0].agents[].label] == ["Helper One","Helper Two"]
+    | [$rows[0].agents[].label] == ["Spur","Eleusis (current hand: rakazo-eleusis)"]
       and $rows[1].agents == $rows[0].agents
-      and $rows[2].agents == []
+      and all($rows[2:][]; .agents == [])
       and ($rows[0].pickable | not)
+      and $rows[3].pickable
+      and .assignmentStatus.queued == ""
+      and .assignmentStatus.unavailable == "Open this board in Lavish to queue an assignment."
       and (.requests | length) == 1
       and (.requests[0] | .tag == "choice" and
-        .data == {schema:"fm-bearings-assignment.v1",question:"gated-one",owner:"mate-one",agent:"helper-two"})
+        .data == {schema:"fm-bearings-assignment.v1",question:"gated-one",owner:"mate-one",agent:"eleusis"})
   ' >/dev/null || fail "the helper selection did not queue one structured board answer: $out"
 
-  # Frame the browser event the way Lavish presents a captured poll, alongside
-  # a normal answer for the same id, a replaced selection, and invalid inputs.
-  printf '%s' "$out" | jq -r '
-    .requests[0] as $request
-    | [($request | .data.agent = "helper-one"),$request,
-      {tag:"choice",text:"Ordinary answer",prompt:"Answer",data:{
-        schema:"fm-bearings-answer.v1",question:$request.data.question,selection:"yes",note:""}},
-      ($request | .data.owner = null),
-      ($request | .data.agent = "invalid/agent"),
-      ($request | .data.agent = 42),
-      ($request | .tag = "message" | .data.agent = "helper-one")] as $rows
-    | "session:\n  status: feedback\nprompts[\($rows | length)]{tag,text,prompt}:",
-      ($rows[] | "  " + ([.tag,.text,(.prompt + "\n\nContext data:\n" + (.data | tojson))] | map(@json) | join(",")))
-  ' > "$capture"
-  assignments=$("$adapter" assignments "$capture") || fail "assignment capture could not be read"
-  printf '%s\n' "$assignments" | jq -se '
-    . == [{question:"gated-one",owner:"mate-one",agent:"helper-two"},
-      {question:"gated-one",owner:null,agent:"helper-two"}]
-  ' >/dev/null || fail "assignment projection lost the task, owner, or selected agent: $assignments"
-  answers=$("$adapter" answers "$capture") || fail "ordinary capture could not be read"
-  [ "$answers" = $'gated-one\tyes\tOrdinary answer' ] ||
-    fail "helper selection entered the keyed-answer intake: $answers"
-  [ -z "$("$adapter" reconciles "$capture")" ] || fail "helper selection entered the reconciliation intake"
-  pass "roster selections reach the supervisor as structured answers outside both hold intakes"
+  # Lavish poll uses an expanded TOON array for prompts with a layout target.
+  for format in tabular expanded; do
+    printf '%s' "$out" | jq --arg format "$format" -r '
+      .requests[0] as $request
+      | [($request | .data.agent = "spur"),$request,
+        ($request | .data.owner = "(main)" | .data.agent = "spur"),
+        {tag:"choice",text:"Ordinary answer",prompt:"Answer",data:{
+          schema:"fm-bearings-answer.v1",question:$request.data.question,selection:"yes",note:""}},
+        {tag:"choice",text:"Reconcile",prompt:"Reconcile",data:{
+          schema:"fm-bearings-answer.v1",question:"recheck",selection:"reconcile",note:"still open"}},
+        ($request | .data.owner = null),
+        ($request | .data.owner = "  "),
+        ($request | del(.data.owner)),
+        ($request | .data.agent = "invalid/agent"),
+        ($request | .data.agent = 42),
+        ($request | .tag = "message" | .data.agent = "spur")]
+      | map(.prompt += ("\n\nContext data:\n" + (.data | tojson)))
+      | "session:\n  status: feedback",
+        (if $format == "tabular" then
+          "prompts[\(length)]{tag,text,prompt}:",
+          (.[] | "  " + ([.tag,.text,.prompt] | map(@json) | join(",")))
+        else
+          "prompts[\(length + 1)]:",
+          (.[] | "  - tag: \(.tag)\n    text: \(.text | @json)\n    prompt: \(.prompt | @json)"),
+          "  - uid: layout\n    target:\n      tag: choice\n      warnings[1]{id,selector}:\n        fix-1,body\n    selector: body\n    tag: layout-warnings\n    text: Layout fix\n    prompt: Fix the overflow."
+        end),
+        "next_step: Review the feedback"
+    ' > "$capture"
+    assignments=$("$adapter" assignments "$capture") || fail "assignment capture could not be read"
+    printf '%s\n' "$assignments" | jq -se '
+      . == [{question:"gated-one",owner:"mate-one",agent:"eleusis"},
+        {question:"gated-one",owner:"(main)",agent:"spur"}]
+    ' >/dev/null || fail "$format assignment projection returned unexpected requests: $assignments"
+    answers=$("$adapter" answers "$capture") || fail "ordinary capture could not be read"
+    [ "$answers" = $'gated-one\tyes\tOrdinary answer' ] ||
+      fail "$format assignment entered the keyed-answer intake: $answers"
+    [ "$("$adapter" reconciles "$capture")" = $'recheck\tstill open' ] ||
+      fail "$format reconciliation did not isolate its own choice"
+    view=$("$adapter" read "$capture") || fail "$format capture could not be presented"
+    assert_contains "$view" "complete: yes" "$format presentation lost a prompt"
+    if [ "$format" = expanded ]; then
+      assert_contains "$view" $'element_uid: layout\nelement_selector: body\ntag: layout-warnings' "nested target obscured the layout prompt"
+      assert_contains "$view" "| Fix the overflow." "layout instructions were lost"
+    fi
+  done
+  pass "roster role requests survive both Lavish formats outside the hold intakes"
 }
 
 test_every_charted_badge_opens_its_row() {

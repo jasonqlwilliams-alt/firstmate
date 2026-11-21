@@ -196,13 +196,19 @@ if (sort && !sort.hidden) {
   sorted = { selected, byFiled, byTier: rowsOf(ch) };
 }
 const assignment = ch.querySelectorAll(".bb-assign")[0];
+let assignmentStatus = null;
 if (assignment) {
   const agents = assignment.querySelectorAll(".bb-assign__agent")[0];
+  const status = assignment.querySelectorAll(".bb-assign__status")[0];
   assignment.trigger("submit");
   agents.value = "not-on-the-roster";
   assignment.trigger("submit");
   agents.value = agents.children.at(-1).value;
   assignment.trigger("submit");
+  const queued = status.textContent;
+  delete window.lavish;
+  assignment.trigger("submit");
+  assignmentStatus = { queued, unavailable: status.textContent };
 }
 // A fail-closed render replaces the page body instead of the board sections, so
 // surface it rather than reporting an empty board as a successful render.
@@ -216,4 +222,4 @@ const more = ch.children
   .map((c) => c.textContent);
 
 process.stdout.write(
-  JSON.stringify({ stats, underway, charted, revealed, reveal, sort: sorted, requests, empty, more, error: errorText }) + "\n");
+  JSON.stringify({ stats, underway, charted, revealed, reveal, sort: sorted, requests, assignmentStatus, empty, more, error: errorText }) + "\n");

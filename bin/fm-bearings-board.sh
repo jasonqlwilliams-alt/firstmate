@@ -85,7 +85,8 @@
 # A Charted Next row MAY carry `filed`, the durable filed date (YYYY-MM-DD, or
 # YYYY-MM-DDTHH:MM:SSZ). Newest-filed order puts undated rows after dated rows
 # and retains payload order on ties.
-# A queued row MAY carry `tier`, an integer from 1 (highest) through 4. The
+# A ranked payload gives every queued row a `tier`, an integer from 1
+# (highest) through 4. An unranked payload omits every tier. The
 # composer classifies real work using the UTC day of `generated`:
 #   Current: the latest verified filed or substantive activity date is within
 #   the last 30 calendar days (today through 29 days ago).
@@ -96,13 +97,15 @@
 #   2: urgent with stale or unknown activity and filing dates.
 #   3: current with no urgency signal.
 #   4: all remaining queued work.
-# Tier order is the default when any tier is supplied, ties use newest-filed
-# order, and unranked work follows ranked work. Warnings carry no tier.
+# Ranked boards default to tier order with ties sorted by newest filed date.
+# Warnings carry no tier.
 # Optional top-level `continuum_agents` is an array of {id, label} objects:
 # unique 1-128 character ASCII slug ids (letters, digits, dots, underscores,
-# hyphens) and non-blank display labels. An omitted or empty roster hides
-# assignment controls; warnings never offer them. The assignment answer
-# format is owned by fm-procevent-lavish.sh.
+# hyphens) and non-blank display labels. The id is the Packet Router role.
+# The assignment control requires a roster and a Charted Next row with
+# `assignment_eligible: true` (verified queued work with an unmet start
+# condition), `dispatchable: false`, and a non-blank `owner`. Warnings never
+# qualify. The assignment request format is owned by fm-procevent-lavish.sh.
 # For the companion detail page and optional canvas export, a Charted Next row
 # MAY also carry `waits_since` (same date/timestamp rule as `filed`), `owner`
 # (nullable string), `blockers` (nullable array of `{id, title?}` objects with
@@ -164,6 +167,7 @@ board_path() { printf '%s/.lavish/bearings-board.html\n' "$FM_HOME"; }
 validate_payload() {  # <data.json>
   jq -e --arg schema "$BOARD_SCHEMA" '
     def nonempty_string: type == "string" and length > 0;
+    def nonblank_string: type == "string" and test("[^[:space:]]");
     def slug($max): type == "string" and test("\\A[A-Za-z0-9._-]{1," + ($max | tostring) + "}\\z");
     def repo_marker: has("repo") and (.repo == null or (.repo | type == "string"));
     def name_marker: has("name") and (.name | nonempty_string);
@@ -238,7 +242,7 @@ validate_payload() {  # <data.json>
       or (.continuum_agents | type == "array"
         and all(.[]; type == "object"
           and (.id | slug(128))
-          and (.label | type == "string" and test("[^[:space:]]")))
+          and (.label | nonblank_string))
         and ([.[].id] | length == (unique | length)));
     def landed_item:
       type == "object" and repo_marker and (.id | nonempty_string)
@@ -256,6 +260,10 @@ validate_payload() {  # <data.json>
       and ((has("kind") | not) or (.kind == "queued" or .kind == "warning"))
       and ((has("tier") | not)
         or (.kind != "warning" and (.tier == 1 or .tier == 2 or .tier == 3 or .tier == 4)))
+      and optional_boolean("assignment_eligible")
+      and (if .assignment_eligible then
+        .kind != "warning" and .dispatchable == false and (.owner | nonblank_string)
+        else true end)
       and optional_filed
       and optional_date("waits_since")
       and optional_nullable_string("owner")
@@ -282,6 +290,8 @@ validate_payload() {  # <data.json>
     and ([.underway[] | underway_item] | all)
     and ([.landed[] | landed_item] | all)
     and ([.charted[] | charted_item] | all)
+    and (.charted | map(select(.kind != "warning"))
+      | all(.[]; has("tier")) or all(.[]; has("tier") | not))
   ' "$1" >/dev/null
 }
 

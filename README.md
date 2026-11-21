@@ -200,7 +200,8 @@ Bearings invocation examples:
 - `/bearings file` replaces today's `data/status-report-<YYYY-MM-DD>.md` from scratch and links it from the four-section chat digest.
 - `/bearings file include PRs` combines the dated report with live PR enrichment.
 - `/bearings lavish` builds the interactive fleet board and its linked detail page for Charted Next and Recently Landed, showing each row's owner, waits, blockers, filed date, and recorded report and PR links.
-  Charted Next can sort queued work by four priority tiers and queue a request for a listed Continuum agent to help meet an item's start conditions.
+  Charted Next can sort work by four priority tiers and queue a request for a Continuum helper role on eligible waiting tasks.
+  Firstmate asks for confirmation in chat before sending the request to the Packet Router.
   Reports held on remote secondmate hosts show their paths without local links.
   See [configuration](docs/configuration.md#bearings-detail-canvas-export-configbearings-canvas-dir) to enable the optional Cursor Canvas export.
 

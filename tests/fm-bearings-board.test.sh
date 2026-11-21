@@ -800,6 +800,8 @@ test_build_checks_charted_tiers_and_the_continuum_roster() {
   base="$home/base.json"
   data="$home/payload.json"
   write_valid_payload "$base"
+  mkdir -p "$home/config" "$home/router/inbox/new"
+  printf '%s\n' "$home/router/inbox/new" > "$home/config/packet-router-inbox"
 
   while IFS= read -r edit; do
     jq "$edit" "$base" > "$data" || fail "invalid test fixture: $edit"
@@ -815,6 +817,14 @@ test_build_checks_charted_tiers_and_the_continuum_roster() {
 .charted[0].tier = 0
 .charted[0].tier = 5
 .charted[0] += {kind:"warning", dispatchable:false, tier:1}
+.charted |= [.[0] + {tier:1}, .[0] + {id:"other"}]
+.charted |= [.[0], .[0] + {id:"other", tier:4}]
+.charted[0] += {assignment_eligible:"true", dispatchable:false, owner:"(main)"}
+.charted[0] += {assignment_eligible:true, dispatchable:true, owner:"(main)"}
+.charted[0] += {assignment_eligible:true, dispatchable:false, kind:"warning", owner:"(main)"}
+.charted[0] += {assignment_eligible:true, dispatchable:false} | del(.charted[0].owner)
+.charted[0] += {assignment_eligible:true, dispatchable:false, owner:null}
+.charted[0] += {assignment_eligible:true, dispatchable:false, owner:" "}
 .continuum_agents = null
 .continuum_agents = {id:"agent-1", label:"Agent One"}
 .continuum_agents = [{id:"agent/1", label:"Agent One"}]
@@ -824,10 +834,13 @@ test_build_checks_charted_tiers_and_the_continuum_roster() {
 .continuum_agents = [{id:"agent-1", label:"Agent One"}, {id:"agent-1", label:"Agent Two"}]
 EOF
 
-  jq '.charted[0].tier = 1 | .continuum_agents = [{id:"agent-1", label:"Agent One"}]' "$base" > "$data" ||
+  jq '.charted[0] += {tier:1, assignment_eligible:true, dispatchable:false, owner:"(main)"}
+      | .continuum_agents = [{id:"eleusis", label:"Eleusis (current hand: rakazo-eleusis)"}]' "$base" > "$data" ||
     fail "invalid supported fixture"
   run_board "$home" build "$data" >/dev/null || fail "build refused a valid tier and roster"
-  pass "build validates Charted Next tiers and agent ids and labels before publication"
+  [ -z "$(ls -A "$home/router/inbox/new")" ] || fail "building with a roster wrote a router packet"
+  assert_absent "$home/data/system-state.md" "building with a roster wrote a SYSTEM_STATE card"
+  pass "build checks ranks and assignment eligibility without publishing router packets or cards"
 }
 
 test_path_is_stable_and_home_scoped
