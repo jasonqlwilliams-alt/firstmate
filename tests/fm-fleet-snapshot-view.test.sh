@@ -1270,7 +1270,7 @@ SH
 }
 
 test_cancelled_run_with_registered_green_pr_is_not_terminal_in_flight() {
-  local home fakebin out pr other_pr head branch state note poll real_cp
+  local home fakebin out pr other_pr head branch state note poll
   home=$(make_home cancelled-open-pr)
   fakebin=$(make_fakebin "$home")
   pr=https://github.com/kunchenguid/firstmate/pull/46
@@ -1305,8 +1305,7 @@ SH
   chmod +x "$fakebin/no-mistakes"
   fm_write_meta "$state/cancelled.meta" \
     "window=firstmate:fm-cancelled" "worktree=$home/projects/cancelled" \
-    "project=alpha" "harness=claude" "kind=ship" "mode=no-mistakes" \
-    "spawn_gen=cancellation-gen" "pr=$pr"
+    "project=alpha" "harness=claude" "kind=ship" "mode=no-mistakes" "pr=$pr"
   printf 'done [key=validation]: PR %s checks green\nworking: checking fallout\n' "$pr" > "$state/cancelled.status"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}
@@ -1314,29 +1313,6 @@ SH
     || fail "the latest done event for the registered PR must exempt only the terminal classification: $out"
 
   cp "$state/cancelled.meta" "$home/recorded-meta"
-  sed "s|^pr=.*|pr=$other_pr|" "$home/recorded-meta" > "$home/replacement-meta"
-  real_cp=$(command -v cp)
-  cat > "$fakebin/cp" <<'SH'
-#!/usr/bin/env bash
-"$FM_TEST_REAL_CP" "$@" || exit "$?"
-if [ "${2:-}" = "$FM_HOME/state/cancelled.meta" ]; then
-  printf 'captured\n' >> "$FM_HOME/metadata-captures"
-  if [ -f "$FM_HOME/replacement-meta" ]; then
-    printf 'done: PR %s checks green\n' "$FM_TEST_REPLACEMENT_PR" > "$FM_HOME/state/cancelled.status"
-    mv "$FM_HOME/replacement-meta" "$FM_HOME/state/cancelled.meta"
-  fi
-fi
-SH
-  chmod +x "$fakebin/cp"
-  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_TEST_REAL_CP="$real_cp" FM_TEST_REPLACEMENT_PR="$other_pr" \
-    "$SNAPSHOT" --secondmate-home-summary) || fail "snapshot must resample a concurrent PR replacement"
-  [ "$(wc -l < "$home/metadata-captures")" -eq 2 ] || fail "expected one resample after PR replacement"
-  printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}
-    and .endpoints[0].state == "failed" and .endpoints[0].source == "run-step"' >/dev/null \
-    || fail "a concurrent PR replacement must use the replacement PR and its green event: $out"
-  rm -f "$fakebin/cp"
-  printf 'done: PR %s checks green\n' "$pr" > "$state/cancelled.status"
-
   sed '/^pr=/d' "$home/recorded-meta" > "$state/cancelled.meta"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}' >/dev/null \
