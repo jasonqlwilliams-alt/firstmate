@@ -1,0 +1,10 @@
+Disposable XDG config, runtime, logs, and Firstmate fixture roots are workspace-local.
+$ bash tests/fm-worker-herdr-identity-e2e.test.sh
+Herdr worker identity lab version: 0.9.5
+ok - recycled worker, secondmate and personal panes are missing to recorded workers and untouched by terminal actions
+ok - matching worker liveness and actions survive a changed foreground cwd
+ok - host-side remote capture, key and send refuse the recycled endpoint by home identity
+ok - a restored layout keeps pane ids but changes the worker terminal identity
+Command exit status: 0
+No named lab sessions left running.
+Isolated tripwire server exit status: 0

@@ -1,0 +1,47 @@
+Disposable XDG config, runtime, logs, and Firstmate fixture roots are workspace-local.
+$ bash .endpoint-live/supervisor-check.sh
+Herdr restarted. Pane w1:p1 retained its ID. Old worker terminal term_660c13043b2271; live supervisor terminal term_660c13049cc111.
+{"pane_id":"w1:p1","agent_status":"idle"}
+
+$ pre-follow-up (226db0d) bin/fm-supervise-daemon.sh
+error: supervisor target 'fm-lab-supervisor-3184130-12301:w1:p1' does not resolve to a herdr pane; set FM_SUPERVISOR_TARGET
+Pre-follow-up daemon exit status: 1
+
+$ bin/fm-peek.sh old-worker 20
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  Away mode owns watcher supervision; load /afk and ensure the daemon is running instead of starting normal supervision directly.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: Herdr endpoint identity mismatch at fm-lab-supervisor-3184130-12301:w1:p1; refusing access to a foreign pane
+Exit status: 1
+
+$ bin/fm-send.sh old-worker --key Escape
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: Herdr endpoint identity mismatch at fm-lab-supervisor-3184130-12301:w1:p1; refusing access to a foreign pane
+error: key 'Escape' not sent to fm-lab-supervisor-3184130-12301:w1:p1 (herdr send failed; tried meta={run-worktree}/.endpoint-live/t/fm-supervisor.HsnqxB/home/state/old-worker.meta; backend=from-meta)
+Exit status: 1
+
+$ bin/fm-peek.sh fm-lab-supervisor-3184130-12301:w1:p1 20
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: Herdr endpoint identity mismatch at fm-lab-supervisor-3184130-12301:w1:p1; refusing access to a foreign pane
+Exit status: 1
+
+$ bin/fm-send.sh fm-lab-supervisor-3184130-12301:w1:p1 --key Escape
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: Herdr endpoint identity mismatch at fm-lab-supervisor-3184130-12301:w1:p1; refusing access to a foreign pane
+error: key 'Escape' not sent to fm-lab-supervisor-3184130-12301:w1:p1 (herdr send failed; tried explicit target 'fm-lab-supervisor-3184130-12301:w1:p1' matched {run-worktree}/.endpoint-live/t/fm-supervisor.HsnqxB/home/state/old-worker.meta; backend=herdr)
+Exit status: 1
+
+$ target (08d6dd4) bin/fm-supervise-daemon.sh
+[2026-11-20T19:45:15-0800] startup failed: target 'fm-lab-supervisor-3184130-12301:w1:p1' not found (backend=herdr)
+[2026-11-20T19:45:16-0800] daemon starting (pid 3186043); target=fm-lab-supervisor-3184130-12301:w1:p1; target_source=FM_SUPERVISOR_TARGET; backend=herdr; backend_source=FM_SUPERVISOR_BACKEND; afk=on; inject_skip='heartbeat'; stale_escalate=240s; batch=0s
+Exact submitted input read from the supervisor terminal:
+⁣FIRSTMATE_OP: v1 away-supervisor: Supervisor escalate (1 event(s)): Synthetic pending wake SUPERVISOR-RECYCLE-20261120 (pre-read; re-arm not needed — watcher daemon-managed)
+Remaining bytes in the pending escalation buffer: 0
+Target daemon shutdown exit status: 0
+Command exit status: 0
+No named lab sessions left running.
+Isolated tripwire server exit status: 0
