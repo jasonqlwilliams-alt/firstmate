@@ -227,13 +227,12 @@ The focused regression and token-free real-lab entry point are recorded in [runt
 
 ### Manual recovery for pre-binding workers
 
-Only an explicit Firstmate update whose updater already includes the check warns about pre-binding records that point to existing panes.
-Remote preflight takes a snapshot of the remote code root and secondmate home before submitting the update job.
-If a worker appears after preflight and is first detected during the update job, its warning reaches the caller after any fast-forward because the transport buffers output until the job finishes.
-Older updaters, bootstrap, spawn-time sync, and remote startup sync can advance a home without this warning.
+An explicit Firstmate update warns before advancing a local checkout whose pre-binding worker records point to existing panes.
+Remote secondmate updates, older updaters, bootstrap, and spawn-time sync can advance a home without this warning.
 
 A local ship or scout record created before terminal binding may lack `herdr_terminal_id=`, leaving its pane unreadable to normal worker commands.
 Recover it on the host that owns the pane using the following checks.
+For a worker supervised by a remote secondmate, perform these checks on the remote host against the worker record in that secondmate's home.
 
 1. Locate the affected home's `state/<task>.meta`, or the exact state directory used by the update if it supplied `FM_STATE_OVERRIDE`.
    Confirm that it belongs to the intended local Herdr ship or scout and has no `herdr_terminal_id=` line.

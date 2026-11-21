@@ -11,7 +11,6 @@
 #   fm-remote-secondmate-control.sh capture <id> [lines]
 #   fm-remote-secondmate-control.sh observe <id>
 #   fm-remote-secondmate-control.sh sync <id> [<parent-commit>]
-#   fm-remote-secondmate-control.sh update-check <id>
 #   fm-remote-secondmate-control.sh update <id>
 #   fm-remote-secondmate-control.sh retire <id> [--force]
 #
@@ -509,7 +508,7 @@ cmd_sync() {
     || die "remote home could not import $commit from this host's Firstmate copy or the home's origin; run /updatefirstmate to refresh this host's copy, or push that commit first"
   # ff_target publishes its verdict in FF_STATUS, so it must run in THIS shell.
   report=$(mktemp "${TMPDIR:-/tmp}/fm-remote-sync.XXXXXX") || die "cannot stage the sync report"
-  ff_target "$TARGET_HOME" "remote home" "$commit" yes yes > "$report"
+  ff_target "$TARGET_HOME" "remote home" "$commit" yes yes > "$report" 2>&1
   out=$(cat "$report")
   rm -f "$report"
   case "$FF_STATUS" in
@@ -528,7 +527,8 @@ cmd_update() {
   local id=$1 update_out root_status
   validate_id "$id"
   validate_home "$id"
-  if ! update_out=$(FM_HOME="$FM_ROOT" FM_ROOT_OVERRIDE="$FM_ROOT" "$SCRIPT_DIR/fm-update.sh" 2>&3); then
+  if ! update_out=$(FM_HOME="$FM_ROOT" FM_ROOT_OVERRIDE="$FM_ROOT" \
+    "$SCRIPT_DIR/fm-update.sh" 2>&1); then
     [ -z "$update_out" ] || printf '%s\n' "$update_out" >&2
     die "remote code root update failed"
   fi
@@ -540,19 +540,7 @@ cmd_update() {
       die "remote code root did not complete a safe origin update"
       ;;
   esac
-  # shellcheck disable=SC2329 # Called by ff_target for this update's sync.
-  fm_ff_before_advance() {
-    fm_backend_herdr_warn_prebinding_workers "$1/state" "$2" 2>&3
-  }
   cmd_sync "$id"
-} 3>&1
-
-# Read-only preflight for a transport that buffers the main job's output.
-cmd_update_check() {
-  validate_id "$1"
-  validate_home "$1"
-  fm_backend_herdr_warn_prebinding_workers "${FM_STATE_OVERRIDE:-$FM_ROOT/state}" firstmate
-  fm_backend_herdr_warn_prebinding_workers "$TARGET_HOME/state" 'remote home'
 }
 
 cmd_retire() {
@@ -591,7 +579,6 @@ case "${1:-}" in
   observe) shift; [ "$#" -eq 1 ] || usage; cmd_observe "$@" ;;
   sync) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_sync "$@" ;;
   update) shift; [ "$#" -eq 1 ] || usage; cmd_update "$@" ;;
-  update-check) shift; [ "$#" -eq 1 ] || usage; cmd_update_check "$@" ;;
   retire) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_retire "$@" ;;
   ''|-h|--help|help) usage ;;
   *) die "unknown command: $1" ;;
