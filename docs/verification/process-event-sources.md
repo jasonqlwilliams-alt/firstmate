@@ -35,7 +35,7 @@ code: VALIDATION_ERROR   # exit 2
 Exit 2 with `VALIDATION_ERROR` is positive proof the subcommand does not exist, because the word is parsed as a filename.
 Note that `lavish-axi <anything> --help` exits 0 for any argument, including a nonsense subcommand, so a `--help` exit code can never be used as a capability probe.
 
-The adapter depends on none of this: it uses only the published poll shape above.
+The listener registers the published poll command shown above.
 
 ## Why an ended Lavish review is terminal
 
@@ -57,15 +57,11 @@ That is why the adapter's terminal verdict covers a `feedback` response carrying
 
 ## Why an empty board close is silent
 
-The same published lifecycle above is the whole basis for the `silent` verdict, so no new source knowledge was needed.
 `Send & End` delivers the captain's final feedback once as a `feedback` response carrying `session_ended`, and every poll after it returns an empty ended session.
 A board the captain closes without saying anything therefore produces exactly one `ended` response carrying no queued content block, and announcing it put a wake in front of the handler whose entire content was that nothing happened.
 
-The verdict is confined to that one shape and fails closed everywhere else.
-A `Send & End` close carrying the captain's own answer classifies `feedback`, never `ended`, so it is announced unchanged; so is any `ended` result that still carries a `prompts` or `feedback` block, which this lifecycle is not expected to produce but which must never be dropped on that expectation.
-A `waiting` session, a `missing` one, an `unknown` or unreadable result, and every error stay announced, because none of them positively proves nothing was said.
-The content check anchors on column zero for the same reason the terminal check reads the leading `session:` block: content headers are top-level and their rows are indented, so captain-supplied payload text can neither forge a content block nor hide behind a fake empty one.
-Any recognized block counts as present even when its declared count is zero, and a malformed top-level `prompts` or `feedback` header is indeterminate and therefore announced.
+The [process-event operating contract](../configuration.md#process-to-event-sources-stateprocevent) owns the silence rule.
+The regression cases below verify that indented payload text cannot stand in for a top-level content header and that a truncated response cannot establish an empty close.
 
 ## The loss limitation this runner cannot close
 
@@ -99,7 +95,7 @@ Exercised by `tests/fm-procevent.test.sh` against a fake blocking source whose c
 | generic built-in keyed-answer feed | `tests/fm-captain-hold-lifecycle.test.sh` drives a bound built-in source through the real runner with a fixture adapter that only prints keyed lines, proving any bound built-in channel reaches the one keyed-answer intake: named captain-held tasks close at capture time, a card-declared release mode frees held work, keys naming no captain-held task skip, freeform prose forges nothing, matching answer-and-mode replays are idempotent while mode mismatches refuse, an unbound source closes nothing, and capture remains independent of the handler wake. |
 | structured reconcile feed | The same suite drives the optional `reconciles` adapter seam through the real runner and proves only a bound captured source can create a request; the ordinary keyed-answer and chat paths refuse the reserved value without closing or creating a request, versioned selection stays separate from its note, rollout-compatible ordinary legacy answers still pass, and legacy reconcile-shaped values feed neither intake. |
 | adapter-owned silence verdict | an armed Lavish source driven against a stand-in poll that returns an empty ended session captures its result, records it durably handled, appends no wake, and stays silent through a later `reconcile` that would otherwise republish it, while still retiring its ended source; the same real path with a `Send & End` response carrying the captain's choice still publishes its `check` wake and is left unacknowledged for the handler |
-| silence fails closed | the adapter's published `silent` command suppresses only an `ended` session with no queued content block, and announces a real answer, freeform prose, any recognized content block regardless of its declared count, a malformed top-level content header, a `waiting` or `missing` session, a server error, an unreadable result, and indented payload text imitating an empty content block; the `remote-reply` and `when` adapters, which implement no `silent` command, announce every result |
+| silence fails closed | direct `silent` cases cover a complete empty close, missing end framing, a cutoff after an otherwise complete footer, recognized content blocks including an explicit empty list, malformed headers, answers and prose, non-ended and unreadable responses, and indented text imitating a header; the suite also exercises `remote-reply` and `when`, which implement no silence verdict |
 | terminal retirement preserves the result | the retired source's captured output, its announced event, its handled acknowledgement, and later explicit `retire` all still behave normally |
 | registration-generation retirement | an old terminal runner preserves a concurrently replaced registration and releases ownership so the replacement runs independently; injected registration-removal failure retains a terminal claim, performs no second poll, and completes idempotently once removal recovers; a live owner retiring its own terminal source mid-capture tolerates only its transient reservation-removal failure and still removes the registration under exact ownership |
 | one `Send & End`, one result | an armed Lavish source driven against a stand-in for the published poll, which delivers the final `session_ended` feedback once and empty ended sessions afterward, polls exactly once, captures exactly one result, publishes one distinct event, and retires itself |
@@ -137,6 +133,8 @@ Exercised by `tests/fm-procevent.test.sh` against a fake blocking source whose c
 | argv integrity | an argument containing spaces survives as one argument, a shell-looking argument is passed literally with no interpretation, and an unrepresentable newline is rejected at registration |
 | bounded output | output beyond `FM_PROCEVENT_MAX_OUTPUT_BYTES` is drained while only the bound is staged, then truncated and captured |
 | Lavish prompt decoding at the output bound | `tests/fm-procevent.test.sh` feeds captured TOON fixtures through the runner and all three prompt projections, checking identical choices across tabular and nested-target batches, exact byte-limited prefixes, complete rows at a clipped newline, rejected partial fields and nested targets, and a distinct verdict for an absent prompt header |
+| Lavish trailing snapshot | the same suite reproduces Lavish 0.1.61's `dom_snapshot` after `next_step` for tabular, mixed, and explicit-empty feedback, then checks that clipping the snapshot leaves the capture incomplete while a verified prompt block remains usable |
+| bound Lavish intake at a cutoff | `tests/fm-captain-hold-lifecycle.test.sh` checks that both intakes receive choices when the cap falls after a verified prompt block, while a partial batch leaves the task held and creates no reconcile request |
 | condition->action single-fire and trust | `tests/fm-procevent-when.test.sh` drives the public `when` adapter and generic runner with real commands, proving stable true fires once, a claimed fire restarts as ambiguous without a second action, concurrent arms publish one complete watch, and mutated specs or action executables are refused before execution |
 | condition->action terminal outcomes | the same suite proves flapping true polls do not fire, action failure, condition error budget, deadline expiry, and a true poll completing after its deadline each produce the expected terminal captured result without an unsafe action |
 | condition->action process bounds | the same suite proves action timeout terminates descendants and command-output staging remains within `FM_WHEN_OUTPUT_TAIL_BYTES` while the command runs |
@@ -154,9 +152,11 @@ Exercised by `tests/fm-procevent.test.sh` against a fake blocking source whose c
 | owner-matched replacement safety | two registrations for the same external source receive distinct owner tokens; unconditional external retirement and the first token cannot retire the replacement, the replacement token can, bounded home sweep derives and uses that exact token, and legacy built-in registrations retain unconditional behavior plus exact `--if-matches` retirement |
 | independent homes | two homes bind the same package id/version to different content-addressed absolute paths and independently capture results and extension state, with no cross-home fallback or result path |
 
-The Lavish capture cases were verified on 2026-11-20 with Perl 5.42.2 on Linux 6.18.58.1.
-To run those cases locally, use Node.js with `lavish-axi` on PATH and its installed TOON dependency.
-CI supplies the codec through `FM_TEST_LAVISH_CODEC_PATH`.
+The codec-dependent cases skip on local runs without Node.js or a resolvable Lavish TOON codec.
+For the focused command, make the [Lavish capture prerequisites](../configuration.md#process-to-event-sources-stateprocevent) available or set `FM_TEST_LAVISH_CODEC_PATH` to an installed TOON module with Node.js available.
+CI supplies the pinned codec through that variable in jobs running the affected suites.
+
+The following output was recorded on 2026-11-20 with Perl 5.42.2 on Linux 6.18.58.1.
 
 ```text
 $ bin/fm-test-run.sh fm-procevent.test.sh

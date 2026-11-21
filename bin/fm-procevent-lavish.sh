@@ -15,8 +15,8 @@
 #
 # classify   Print the lifecycle state a handler should act on: feedback, ended,
 #            waiting, missing, or unknown.
-# read       Print a structured presentation of one already-captured result so a
-#            handler consumes every queued item without grepping the raw file.
+# read       Print a structured presentation of recoverable items from one
+#            capture.
 #            It is read-only over the capture: it does not arm, poll, or change
 #            what Lavish delivered. The session-ending freeform message
 #            (tag=message) is its own labeled field, printed first and distinct
@@ -25,7 +25,7 @@
 #            partial read is obvious. A missing block in a feedback result has
 #            an unknown declared count. Size-limited results report incomplete
 #            and include every recoverable prompt. Each annotation retains its
-#            element uid, selector, tag, and text. A non-choice freeform comment (`prompt`)
+#            element uid, selector, tag, and text. A non-choice comment (`prompt`)
 #            is printed as its own field even when a selector is also present
 #            and even when that comment matches the element text, so typed
 #            words are never dropped. Choice Context data is not a comment.
@@ -45,23 +45,8 @@
 #            is the generic no-op contract bin/fm-procevent.sh calls, and the
 #            only place Lavish's notion of "nothing was said" is decided.
 #
-# AN EMPTY BOARD CLOSE IS NOT NEWS, and that is what `silent` exists to say.
-# Closing a review surface that carried nothing is the single most common Lavish
-# result: the captain reads a board, says nothing, and closes it. Announcing that
-# put a wake in front of the handler whose entire content was that nothing
-# happened. `silent` therefore holds one narrow, positively-determined shape -
-# a session this adapter classifies `ended` that carries no queued content block
-# at all - and every other result stays announced.
-#
-# Deliberately narrow, in both directions. A `Send & End` close carrying the
-# captain's actual answer arrives as `status: feedback` with `session_ended`, so
-# it classifies `feedback`, never `ended`, and is announced exactly as before; so
-# is any `ended` result that still carries a `prompts` or `feedback` block, which
-# the published poll is not expected to produce but which must never be dropped
-# on that expectation. A `waiting` session, a `missing` one, an `unknown` or
-# unreadable result, and any error all stay announced, because none of them
-# positively proves nothing was said. Silence is only ever an absence this
-# adapter can see in the result, never an absence it assumes.
+# See "Process-to-event sources" in docs/configuration.md for the operating
+# contract for silencing an empty board close.
 #
 # This adapter is deliberately thin. It owns only what is specific to Lavish:
 # canonical source identity, the argv for the currently published poll command,
@@ -70,25 +55,25 @@
 #
 # `answers` is this adapter's half of the generic keyed-answer contract in
 # bin/fm-procevent.sh. It reports what the captain actually chose, as
-# `<task-id>\t<answer>\t<label>` lines, and stops there. It maps nothing to a
+# `<task-id>\t<answer>\t<label>[\t<mode>]` lines. It maps nothing to a
 # task, records no decision, and closes nothing: a captain answer is not special
 # to Lavish, so every rule about what a keyed answer DOES belongs to the one
 # intake in bin/fm-captain-hold.sh, which the runner feeds. A Lavish review is
 # just an ephemeral discussion format that happens to carry answers.
 #
-# Only rows tagged `choice` are read. A freeform captain message is prose that may
-# contain anything, and must never be able to forge a decision key.
+# Choice commands use only rows tagged `choice`. Freeform captain messages
+# must never be able to forge a decision key.
 #
-# `read` is the presentation command summarized above; keyed intake remains
-# the separate `answers` contract described here.
-# All three decode the same captured TOON prompts block, including tabular
-# and list representations. Decoding uses Node.js and the TOON library from the
-# lavish-axi installation on PATH. Read exits 3 for an incomplete capture and
-# presents recovered rows. Choice commands exit 3 unless the prompt block is
-# complete or the capture contains a complete no-feedback response. An
-# unreadable capture exits 1.
+# `read`, `answers`, and `reconciles` use the same TOON decoder, including for
+# tabular and list prompts. Node.js loads the codec used by lavish-axi on PATH.
+# `read` exits 0 for a complete capture or 3 for an incomplete capture, with
+# recoverable rows in either case. Legacy tabular prose recovery is for display.
+# The choice commands exit 0 for a complete prompt block or a complete
+# no-feedback response. If only the prompt block is complete, the commands
+# write eligible choices to stdout and warn on stderr. If neither condition
+# holds, they exit 3 without choice rows. An unreadable capture yields exit 1.
 #
-# It wraps ONLY the currently published interface, verified against 0.1.45:
+# The listener uses the published poll command, verified against 0.1.45:
 #   Usage: lavish-axi poll <html-file> [--agent-reply "..."]
 # and that command "long-polls indefinitely" server-side. The adapter therefore
 # runs the plain blocking form with no timeout flag, so results arrive as real
@@ -370,12 +355,8 @@ cmd_terminal() {
   return 1
 }
 
-# Whether a captured result is a routine no-op the runner should record without
-# announcing, for the generic runner's silence seam. Lavish's notion of "nothing
-# was said" lives here and nowhere else: an ended session carrying no queued
-# content block is a board the captain closed without saying anything, and the
-# handler learns nothing from being told. Anything else - a real answer, a
-# missing or waiting session, an unreadable result - is announced.
+# The lifecycle marker alone cannot prove an empty close. A cutoff after
+# `status: ended` could hide a content block, so silence needs a complete capture.
 cmd_silent() {
   local file=${1-}
   [ -n "$file" ] || usage

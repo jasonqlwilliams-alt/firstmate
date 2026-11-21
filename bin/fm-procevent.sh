@@ -155,14 +155,13 @@
 # once, by bin/fm-captain-hold.sh's keyed-answer intake, and reaching it must not
 # depend on an agent remembering. So after capture, a bound source
 # has its result passed to
-# `bin/fm-procevent-<adapter>.sh answers <result-file>`, and whatever that prints
-# is piped straight into that one intake. The adapter reports only what the
-# captain chose; the intake owns every rule about what happens next. This runner
-# names no adapter, parses no result, and knows no decision rule, so a future
-# built-in source needs nothing here beyond an `answers` command and a binding.
+# `bin/fm-procevent-<adapter>.sh answers <result-file>`. Exit 0 authorizes the
+# runner to forward its stdout to the intake, which owns decision semantics.
 # Reconcile selections use the parallel `reconciles` adapter command and the
 # binding-verified `reconcile-requests` intake, never the keyed-answer value.
 # External binding responses never enter either authority-bearing intake.
+# For a bound Lavish source, `start` prints an incomplete-capture diagnostic
+# and exits 1 if either choice command fails.
 #
 # Feeding is deliberately independent of handling: it never acknowledges a result
 # and never suppresses a wake. Recording the captain's answer is transcription,
@@ -392,12 +391,8 @@ adapter_autohandle() {  # <adapter> <source-id> <result-file>
   "$script" autohandle "$id" "$seq" "$result" >/dev/null 2>&1
 }
 
-# Pass a bound source's captured result to the one keyed-answer intake. The
-# adapter turns its own format into keyed lines; the intake owns everything those
-# lines mean. Silenced and best-effort exactly like the seams above: an unbound
-# source, an adapter with no `answers` command, and a failure on either side all
-# leave the capture untouched and still announced, because this never
-# acknowledges anything (see the keyed-answer note in the header).
+# Buffer the projection so a command that fails after writing output cannot
+# feed partial rows into either intake.
 feed_captured_choices() {  # <adapter> <source-id> <result-file> <answers|reconciles>
   local adapter=$1 id=$2 result=$3 projection=$4 script origin seq rows
   local -a intake

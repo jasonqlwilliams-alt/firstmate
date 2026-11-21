@@ -957,13 +957,15 @@ Never run the registered blocking source command directly in a conversational tu
 
 A long-polling external process is registered as a *source* through its adapter, whose header and `--help` own the commands and flags.
 `bin/fm-procevent.sh` owns the generic contract; built-in adapters retain their tracked `bin/fm-procevent-<adapter>.sh` commands, while an explicitly bound external adapter routes through the trusted host contract above.
-`bin/fm-procevent-lavish.sh` is the first built-in adapter and wraps only the currently published `lavish-axi poll` interface.
-Its answer and presentation commands share a decoder for tabular and list-form TOON captures, including mixed batches with nested targets.
-The bound answer and reconcile feeds can use a verified prompt block even if a later field was clipped.
-See the adapter's `--help` for how it reports missing and partial prompt blocks.
+`bin/fm-procevent-lavish.sh` wraps the published `lavish-axi poll` interface.
+Reading a capture requires Node.js and a `lavish-axi` installation on `PATH` with its TOON dependency available.
+The reader presents recoverable prompts from tabular and list-form captures, including mixed batches with nested targets.
+An explicit empty prompt block declares zero prompts, while a feedback capture missing its prompt header is incomplete and has an unknown declared count.
+The adapter's `--help` owns the reader's output and exit statuses.
 That adapter, and only that adapter, retries the one exact transient response a cut-short listener returns while its marks remain available (`error: Lavish Editor poll response was interrupted` with `code: SERVER_ERROR`), up to 12 times with poll starts at least 5 seconds apart, so an internal retry never reaches the runner as a captured result.
 This start-to-start governor is a no-op after a normally blocking poll but caps an immediately returning poll under the shipped defaults independently of the owner lease and registration launch pacing.
-Real feedback, ended and missing sessions, any other `SERVER_ERROR`, and that same interruption still standing once the bound is spent are all captured and announced normally; `FM_LAVISH_POLL_RETRY_DELAY` is a bounded 1 to 60 second test override for the interval only, and the runner itself stays adapter-agnostic.
+Real feedback, ended and missing sessions, any other `SERVER_ERROR`, and interruptions that exhaust the retry limit follow ordinary capture and announcement rules.
+`FM_LAVISH_POLL_RETRY_DELAY` is a bounded 1 to 60 second test override for the interval only.
 An already-armed Lavish source keeps its registered listener command until it is retired and armed again, so re-arm a live board once to adopt this retry policy.
 
 The `when` adapter (`bin/fm-procevent-when.sh`) turns this channel into a condition->action primitive: it registers a deterministic condition and a deterministic action once, its blocking child polls the condition without waking firstmate, and a stable true fires the action at most once before one terminal outcome is durably captured and published as a wake that remains eligible for re-announcement until handled.
@@ -992,9 +994,10 @@ Whether a captured result is a routine no-op is adapter knowledge too, and the r
 Before publishing, the runner asks the immutable captured owner through the built-in `silent` command or external `result.silent` operation and treats exit 0 as the only silence verdict: the result is recorded as durably handled and never announced, so it neither wakes a handler now nor returns on a later reconcile.
 A missing command, an error, any other exit, or a silence the runner cannot durably record all publish the `check` wake exactly as before, so an adapter with no notion of a no-op needs no change and an unknown or degraded result always reaches its handler.
 For built-ins, silence remains independent of the keyed-answer feed below: suppressing an announcement never suppresses the captain's own answer.
-For Lavish that verdict covers exactly one shape - a session the adapter classifies `ended` that carries no queued content block at all, which is a review surface closed with nothing said.
-Any recognized top-level `prompts` or `feedback` block counts as content regardless of its declared count, and a malformed header makes the result indeterminate rather than empty.
-A `Send & End` close carrying the captain's answer arrives as `status: feedback` with `session_ended`, so it classifies `feedback` and is announced unchanged, as is any `ended` result that still carries content, and every `waiting`, `missing`, `unknown`, or unreadable result.
+Lavish suppresses a wake only for a complete `ended` capture with no queued content block.
+A top-level `prompts` block or legacy tabular `feedback` block counts as content even if it explicitly declares zero prompts.
+A clipped capture or a malformed content header leaves the result eligible for announcement.
+A `Send & End` close carrying the captain's answer arrives as `status: feedback` with `session_ended` and still wakes the handler.
 
 Whether a captured result ends its source is adapter knowledge, never the runner's.
 After capture - and after initial `check` publication for the default ordering - the runner asks the immutable captured owner through the built-in `terminal` command or external `result.terminal` operation and retires the registration on exit 0 alone, dropping only the exact registration generation captured by its claim and releasing that claim only after removal succeeds under one source boundary; a missing command, an error, or any other exit keeps the source armed, so an adapter with no notion of ending needs no change.
@@ -1012,12 +1015,15 @@ The remote-secondmate reply adapter declares itself self-announcing: a captured 
 
 Keyed captain answers from built-in adapters use one more seam of the same kind, and the runner still decides nothing about them.
 Some built-in sources carry the captain's answer to a captain-held task, and what such an answer means is owned once by `bin/fm-captain-hold.sh`'s keyed-answer intake rather than by any channel.
-A built-in source bound with `bin/fm-captain-hold.sh bind` therefore has each captured result passed to `bin/fm-procevent-<adapter>.sh answers <result-file>`, and whatever that prints is piped straight into that intake.
+A built-in source bound with `bin/fm-captain-hold.sh bind` has each captured result passed to the adapter's `answers` command, and the runner forwards its output to the intake after the command succeeds.
 A binding can select one decision origin or the script's cross-origin mode; the command header owns the exact forms and key interpretation.
-The built-in adapter reports only what the captain chose; the intake owns every rule about what happens next, so the runner names no adapter, parses no result, and carries no decision rule, and a future built-in answer source needs nothing here beyond an `answers` command and a binding.
+The built-in adapter reports what the captain chose, and the intake decides what happens next.
 The reserved Reconcile selection uses the parallel optional `reconciles` adapter command and binding-verified `reconcile-requests` intake rather than entering keyed answers; [`captain-hold-lifecycle.md`](captain-hold-lifecycle.md#reconcile-re-check-reality-never-a-blind-close) owns those semantics.
+Lavish can feed both intakes from a verified complete prompt block even when a later field is clipped and the reader reports an incomplete capture.
+An incomplete prompt block withholds both feeds because a missing later prompt could supersede a recovered choice.
 Feeding is independent of handling: it never acknowledges a result and never suppresses a wake, because recording the answer or request is transcription while acting on it is firstmate's judgement.
 An unbound built-in source, a built-in adapter without the corresponding command, and a failure on either side all leave the capture untouched and still announced.
+If a bound Lavish choice command fails, an attached runner reports the incomplete capture and exits nonzero after preserving the ordinary wake path.
 External binding responses never enter either authority-bearing intake.
 
 Ownership is machine-wide per canonical source, because separate homes can share one underlying source store.
@@ -1102,7 +1108,8 @@ A value this command cannot use is refused by name before anything is launched, 
 `FM_PROCEVENT_MAX_OUTPUT_BYTES` (default 1048576) bounds a single captured result while the source runs; oversized output is drained but truncated with a stderr notice rather than staged or published whole or dropped.
 For Lavish, the runner also persists a bounded framing hint beside the captured prefix so the adapter can recover complete rows at the cutoff without publishing bytes from the discarded fields.
 
-The runner proves exactly one durability boundary: output that reached the runner is stored at mode `0600` before any event referencing it is published, and a captured result with no durable handled acknowledgement remains eligible for bounded re-announcement across any number of drains and restarts, not only the crash window right after capture.
+The runner stores the bounded result at mode `0600` before any event references it.
+A captured result with no durable handled acknowledgement remains eligible for bounded re-announcement across any number of drains and restarts.
 `bin/fm-procevent.sh handled <source-id> <sequence>` is the only thing that stops re-announcement: a generation-keyed, private, path-safe, durable, and idempotent acknowledgement that atomically checks and deduplicates by the exact source and sequence, so a paired effect gated on its first-time-vs-repeat report is never authorized twice.
 Default and fallback `check` publication is still best-effort, so the same source and sequence can repeat even before any restart; handlers deduplicate that identity rather than assuming a wake is unique.
 The runner proves nothing about the source side, and the handled acknowledgement proves nothing about a paired external effect performed before it: a crash between that effect and the acknowledgement call can still repeat the effect on replay, so this is never a generic exactly-once guarantee.
