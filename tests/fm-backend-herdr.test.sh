@@ -4959,7 +4959,8 @@ SH
     . "$ROOT/bin/fm-backend.sh"
     fm_backend_source herdr || fail "could not load the Herdr adapter"
     local target=fmtest:w1:p2
-    [ "$(fm_backend_agent_state herdr "$target")" = alive ] || fail "matching worker should be alive"
+    [ "$(FM_BACKEND_HERDR_ENDPOINT_META="$state/worker.meta" fm_backend_agent_state herdr "$target")" = alive ] ||
+      fail "matching worker should be alive"
     out=$("$ROOT/bin/fm-peek.sh" "$target" 5 2>/dev/null)
     [ "$out" = 'captured worker' ] || fail "explicit metadata-matched target did not capture: $out"
     "$ROOT/bin/fm-send.sh" worker --key Escape >/dev/null 2>&1 || fail "matching key failed"
@@ -4972,7 +4973,8 @@ SH
     [ -z "$out" ] || fail "peek printed the rejected capture"
     assert_contains "$(cat "$log")" 'pane read' "recycle fixture did not reach capture"
     : > "$log"
-    if out=$(FM_TEST_READ_RECYCLES=1 fm_backend_herdr_capture_ansi "$target" 5 2>/dev/null); then
+    if out=$(FM_TEST_READ_RECYCLES=1 FM_BACKEND_HERDR_ENDPOINT_META="$state/worker.meta" \
+      fm_backend_herdr_capture_ansi "$target" 5 2>/dev/null); then
       fail "ANSI capture accepted data across a terminal replacement"
     fi
     [ -z "$out" ] || fail "ANSI capture printed the rejected capture"
@@ -4989,9 +4991,10 @@ SH
     for identity in term-foreign malformed ambiguous gone; do
       export FM_TEST_IDENTITY=$identity
       : > "$log"
+      out=$(FM_BACKEND_HERDR_ENDPOINT_META="$state/worker.meta" fm_backend_agent_state herdr "$target")
       case "$identity" in
-        term-foreign|gone) [ "$(fm_backend_agent_state herdr "$target")" = missing ] || fail "$identity should be missing" ;;
-        *) [ "$(fm_backend_agent_state herdr "$target")" = unreadable ] || fail "$identity should be unreadable" ;;
+        term-foreign|gone) [ "$out" = missing ] || fail "$identity should be missing" ;;
+        *) [ "$out" = unreadable ] || fail "$identity should be unreadable" ;;
       esac
       if out=$("$ROOT/bin/fm-peek.sh" worker 5 2>&1); then fail "$identity was captured"; fi
       if out=$("$ROOT/bin/fm-send.sh" "$target" --key Escape 2>&1); then fail "$identity accepted keys"; fi
@@ -5013,11 +5016,12 @@ SH
     done
     : > "$log"
     cp "$state/worker.meta" "$state/also-worker.meta"
-    [ "$(fm_backend_agent_state herdr "$target")" = unreadable ] || fail "duplicate routes should be unreadable"
+    [ "$(fm_backend_agent_state herdr "$target")" = alive ] || fail "unbound target should be independent of duplicate records"
     rm "$state/also-worker.meta"
 
     printf 'window=%s\nbackend=herdr\n' "$target" > "$state/worker.meta"
-    [ "$(fm_backend_agent_state herdr "$target")" = unreadable ] || fail "legacy worker was adopted from its pane id"
+    [ "$(FM_BACKEND_HERDR_ENDPOINT_META="$state/worker.meta" fm_backend_agent_state herdr "$target")" = unreadable ] ||
+      fail "legacy worker was adopted from its pane id"
     if out=$("$ROOT/bin/fm-peek.sh" worker 5 2>&1); then fail "legacy worker was captured"; fi
     assert_contains "$out" 'identity is unreadable' "legacy worker refusal must explain the missing identity"
     [ ! -s "$log" ] || fail "legacy worker reached terminal access"

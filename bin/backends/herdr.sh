@@ -2531,11 +2531,19 @@ EOF
 }
 
 fm_backend_herdr_husk_close_allowed() {  # <session> <pane>
-  local session=$1 pane=$2 identity
-  identity=$(fm_backend_herdr_task_identity_state "$session:$pane")
+  local session=$1 pane=$2 target="$1:$2" candidate meta= identity
+  for candidate in "${FM_STATE_OVERRIDE:-$FM_HOME/state}"/*.meta; do
+    [ -f "$candidate" ] || continue
+    [ "$(fm_meta_get "$candidate" window)" = "$target" ] || continue
+    [ "$(fm_backend_of_meta "$candidate")" = herdr ] || continue
+    [ -z "$(fm_meta_get "$candidate" remote_host)" ] || continue
+    [ -z "$meta" ] || { fm_backend_herdr_require_task_identity "$target" unreadable; return 1; }
+    meta=$candidate
+  done
+  identity=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_herdr_task_identity_state "$target")
   case "$identity" in
     match|unbound|missing) ;;
-    *) fm_backend_herdr_require_task_identity "$session:$pane" "$identity"; return 1 ;;
+    *) fm_backend_herdr_require_task_identity "$target" "$identity"; return 1 ;;
   esac
   fm_backend_herdr_tab_is_husk "$session" "$pane"
 }
@@ -2574,10 +2582,10 @@ fm_backend_herdr_husk_close_allowed() {  # <session> <pane>
 # fm_backend_herdr_workspace_prune_seeded_default_tab for the incident and
 # the safety argument). An ADOPTED workspace's caller always passes an empty
 # 4th arg, so this function never even queries for a prune candidate in that
-# case. Workers request the terminal identity from the same creation response.
-fm_backend_herdr_create_task() {  # <container> <label> <cwd> <seeded_default_tab_id> [worker]
+# case. Bound callers request the terminal identity from the same creation response.
+fm_backend_herdr_create_task() {  # <container> <label> <cwd> <seeded_default_tab_id> [bound]
   local container=$1 label=$2 cwd=$3 seeded_tab_id=${4:-} session wsid list dup_tabs dup binding out tab_id pane_id remaining_dup_tabs
-  local worker=${5:-} terminal_id i
+  local binding_mode=${5:-} terminal_id i
   local dup_tab_ids=() dup_bindings=()
   session=${container%%:*}
   wsid=${container#*:}
@@ -2607,10 +2615,10 @@ EOF
     echo "error: could not parse tab/pane id from herdr tab create output" >&2
     return 1
   fi
-  if [ "$worker" = worker ]; then
+  if [ "$binding_mode" = bound ]; then
     terminal_id=$(printf '%s' "$out" | jq -er '.result.root_pane.terminal_id | select(type == "string")' 2>/dev/null) || terminal_id=
     fm_backend_herdr_terminal_id_valid "$terminal_id" || {
-      echo "error: Herdr worker tab creation did not return a readable terminal identity; refusing launch" >&2
+      echo "error: Herdr task tab creation did not return a readable terminal identity; refusing launch" >&2
       return 1
     }
   fi
@@ -2640,7 +2648,7 @@ EOF
     fi
   fi
   printf '%s %s' "$tab_id" "$pane_id"
-  [ "$worker" != worker ] || printf ' %s' "$terminal_id"
+  [ "$binding_mode" != bound ] || printf ' %s' "$terminal_id"
 }
 
 # fm_backend_herdr_projection_create_task: create one disposable presentation

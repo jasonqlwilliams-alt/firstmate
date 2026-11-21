@@ -2664,6 +2664,8 @@ SH
     [ -f "$FM_TEST_SUPERVISOR_SENT.enter" ] && [ ! -s "$state/.subsuper-escalations" ] ||
       fail "away daemon did not deliver to the live supervisor: $(cat "$dir/daemon.out" "$state/.supervise-daemon.log")"
     assert_contains "$(cat "$FM_TEST_SUPERVISOR_SENT")" "fixture escalation" "wrong input sent to the supervisor"
+    PATH="$dir/fakebin:$PATH" fm_backend_target_exists herdr "$target" ||
+      fail "a direct Herdr presence check applied the stale worker's binding"
     if out=$(PATH="$dir/fakebin:$PATH" "$ROOT/bin/fm-peek.sh" "$target" 2>&1); then
       fail "literal worker selector exposed the supervisor pane"
     fi

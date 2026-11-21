@@ -125,7 +125,7 @@ CONTAINER_RAW=$(fm_backend_herdr_container_ensure "$WT") || fail "container_ensu
 CONTAINER=${CONTAINER_RAW%%$'\t'*}
 SEEDED_TAB_ID=${CONTAINER_RAW#*$'\t'}
 WORKSPACE_ID=${CONTAINER#*:}
-TASK_IDS=$(fm_backend_herdr_create_task "$CONTAINER" "fm-hsmoke" "$WT" "$SEEDED_TAB_ID" worker) \
+TASK_IDS=$(fm_backend_herdr_create_task "$CONTAINER" "fm-hsmoke" "$WT" "$SEEDED_TAB_ID" bound) \
   || fail "create_task failed"
 read -r TAB_ID PANE_ID TERMINAL_ID <<EOF
 $TASK_IDS

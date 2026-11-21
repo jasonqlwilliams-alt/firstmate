@@ -58,7 +58,7 @@ make_worker() {  # <label> <creation-cwd> -> <workspace> <tab> <pane> <terminal>
   local label=$1 cwd=$2 ws created
   created=$(lab workspace create --cwd "$cwd" --label "$label" --no-focus) || return 1
   ws=$(jq -er '.result.workspace.workspace_id' <<< "$created") || return 1
-  created=$(fm_backend_herdr_create_task "$HERDR_LAB_SESSION:$ws" "fm-$label" "$cwd" '' worker) || return 1
+  created=$(fm_backend_herdr_create_task "$HERDR_LAB_SESSION:$ws" "fm-$label" "$cwd" '' bound) || return 1
   printf '%s %s\n' "$ws" "$created"
 }
 
@@ -111,12 +111,13 @@ for role in worker secondmate personal; do
   [ "$(fm_meta_get "$meta" herdr_terminal_id)" != "$terminal" ] || fail "lab did not change terminal identity"
   start_stub "$pane" "$terminal" "$cwd" "$role"
   target="$HERDR_LAB_SESSION:$pane"
-  [ "$(FM_STATE_OVERRIDE="$TMP_ROOT/no-records" fm_backend_agent_state herdr "$target")" = alive ] \
+  [ "$(fm_backend_agent_state herdr "$target")" = alive ] \
     || fail "foreign $role must be a live agent in the unbound view"
 
   : > "$FM_LAB_CALLS"
   cp "$meta" "$TMP_ROOT/record"
-  [ "$(fm_backend_agent_state herdr "$target")" = missing ] || fail "$role was accepted as the recorded worker"
+  [ "$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_agent_state herdr "$target")" = missing ] ||
+    fail "$role was accepted as the recorded worker"
   for action in peek key text; do
     case "$action" in
       peek) args=(fm-peek.sh "$role" 20) ;;
@@ -131,16 +132,16 @@ for role in worker secondmate personal; do
   FM_ROOT_OVERRIDE="$FM_HOME" "$ROOT/bin/fm-send.sh" "$role" 'durable fixture steer' >/dev/null 2>&1 \
     || fail "$role steer could not be recorded"
   assert_contains "$(cat "$FM_HOME/state/$role.inbox/"*.msg)" 'durable fixture steer' "$role inbox did not retain the steer"
-  fm_backend_kill herdr "$target" >/dev/null 2>&1 || true
+  FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_kill herdr "$target" >/dev/null 2>&1 || true
   if rg -q '^pane (read|send-keys|send-text|run|close) ' "$FM_LAB_CALLS"; then
     fail "recorded access reached foreign $role: $(cat "$FM_LAB_CALLS")"
   fi
-  [ "$(FM_STATE_OVERRIDE="$TMP_ROOT/no-records" fm_backend_agent_state herdr "$target")" = alive ] \
+  [ "$(fm_backend_agent_state herdr "$target")" = alive ] \
     || fail "foreign $role was harmed by recovery"
   cmp -s "$meta" "$TMP_ROOT/record" || fail "record changed for $role"
   [ "$(cat "$TMP_ROOT/worktree/sentinel")" = 'unlanded fixture' ] || fail "the worktree changed"
   if [ "$role" = worker ]; then
-    if out=$(fm_backend_herdr_create_task "$HERDR_LAB_SESSION:$ws" fm-worker "$TMP_ROOT/worktree" '' worker 2>&1); then
+    if out=$(fm_backend_herdr_create_task "$HERDR_LAB_SESSION:$ws" fm-worker "$TMP_ROOT/worktree" '' bound 2>&1); then
       fail "a fresh spawn accepted a same-label foreign terminal"
     fi
     assert_contains "$out" 'endpoint identity mismatch' 'fresh spawn should explain the conflicting terminal'
@@ -160,7 +161,8 @@ info=$(lab pane get "$pane")
 jq -e --arg moved "$TMP_ROOT/worktree" --arg terminal "$terminal" \
   '.result.pane | .terminal_id == $terminal and .foreground_cwd == $moved' <<< "$info" >/dev/null \
   || fail "healthy fixture did not diverge from its creation cwd: $info"
-[ "$(fm_backend_agent_state herdr "$HERDR_LAB_SESSION:$pane")" = alive ] || fail "real worker lost its route after changing cwd"
+[ "$(FM_BACKEND_HERDR_ENDPOINT_META="$FM_HOME/state/healthy.meta" fm_backend_agent_state herdr "$HERDR_LAB_SESSION:$pane")" = alive ] ||
+  fail "real worker lost its route after changing cwd"
 out=$(FM_ROOT_OVERRIDE="$FM_HOME" "$ROOT/bin/fm-peek.sh" healthy 20 2>"$TMP_ROOT/peek.err") \
   || fail "matching worker capture failed after cwd change: $(cat "$TMP_ROOT/peek.err")"
 assert_contains "$out" 'stub healthy' 'matching capture should include the inert stub output'
@@ -207,6 +209,6 @@ env PATH="$HERDR_ORIGINAL_PATH" "$HERDR_LAB_HELPER" stop "$HERDR_LAB_SESSION" >/
 env PATH="$HERDR_ORIGINAL_PATH" "$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION"
 restored=$(lab pane get "$pane" | jq -er '.result.pane.terminal_id')
 [ "$restored" != "$terminal" ] || fail 'restored layout did not change its terminal id'
-[ "$(fm_backend_agent_state herdr "$HERDR_LAB_SESSION:$pane")" = missing ] \
+[ "$(FM_BACKEND_HERDR_ENDPOINT_META="$FM_HOME/state/healthy.meta" fm_backend_agent_state herdr "$HERDR_LAB_SESSION:$pane")" = missing ] \
   || fail 'restored layout borrowed the previous worker terminal binding'
 pass 'a restored layout keeps pane ids but changes the worker terminal identity'

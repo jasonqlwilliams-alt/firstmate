@@ -551,35 +551,18 @@ fm_backend_meta_for_window() {  # <target> <state-dir>
 
 # The live Herdr binding is distinct from durable metadata validation above.
 # Callers holding a selected record can scope FM_BACKEND_HERDR_ENDPOINT_META
-# to an operation, including the remote host's parent-route record. A caller
-# acting on the supervisor can scope FM_BACKEND_HERDR_SUPERVISOR_TARGET to
-# keep that exact target independent of inventory claims. Other targets
-# without a selected record are looked up in the local inventory.
-# Multiple claims are unreadable. A target outside the inventory is unbound.
+# to an operation, including the remote host's parent-route record.
+# Other targets are unbound unless the caller supplies a spawn binding.
 # A pre-binding worker record stays unreadable while its pane exists.
 fm_backend_herdr_task_identity_state() {  # <target> [binding]
-  local target=$1 detail=${2:-} meta=${FM_BACKEND_HERDR_ENDPOINT_META:-} candidate kind expected field
+  local target=$1 detail=${2:-} meta=${FM_BACKEND_HERDR_ENDPOINT_META:-} kind expected field
   fm_backend_herdr_parse_target "$target" || { printf 'unreadable'; return 0; }
   if [ "$target" = "${FM_BACKEND_HERDR_SPAWN_TARGET:-}" ]; then
     fm_backend_herdr_pane_identity_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE" \
       terminal_id "${FM_BACKEND_HERDR_SPAWN_TERMINAL:-}" "$detail"
     return 0
   fi
-  if [ -z "$meta" ]; then
-    if [ "$target" = "${FM_BACKEND_HERDR_SUPERVISOR_TARGET:-}" ]; then
-      printf 'unbound'
-      return 0
-    fi
-    for candidate in "${FM_STATE_OVERRIDE:-$FM_HOME/state}"/*.meta; do
-      [ -f "$candidate" ] || continue
-      [ "$(fm_meta_get "$candidate" window)" = "$target" ] || continue
-      [ "$(fm_backend_of_meta "$candidate")" = herdr ] || continue
-      [ -z "$(fm_meta_get "$candidate" remote_host)" ] || continue
-      [ -z "$meta" ] || { printf 'unreadable'; return 0; }
-      meta=$candidate
-    done
-    [ -n "$meta" ] || { printf 'unbound'; return 0; }
-  fi
+  [ -n "$meta" ] || { printf 'unbound'; return 0; }
   [ -f "$meta" ] && [ ! -L "$meta" ] \
     && [ "$(fm_backend_of_meta "$meta")" = herdr ] \
     && [ -z "$(fm_meta_get "$meta" remote_host)" ] \

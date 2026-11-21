@@ -1547,6 +1547,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     # missing one is recreated under the launcher's live workspace, so they
     # must not overwrite that identity with the vanished pane's.
     if [ "$RELAUNCH_RECREATE" -eq 0 ]; then
+      FM_BACKEND_HERDR_ENDPOINT_META=$RELAUNCH_META
       HERDR_WORKSPACE_ID=$(fm_meta_get "$RELAUNCH_META" herdr_workspace_id)
       HERDR_TAB_ID=$(fm_meta_get "$RELAUNCH_META" herdr_tab_id)
       HERDR_PANE_ID=$(fm_meta_get "$RELAUNCH_META" herdr_pane_id)
@@ -3280,10 +3281,6 @@ if [ -e "$STATE/$ID.backlog-close" ] || [ -L "$STATE/$ID.backlog-close" ]; then
 fi
 
 W="fm-$ID"
-# Herdr workers bind their endpoint to the terminal ID returned by tab
-# creation, before any worktree entry or harness launch.
-HERDR_CREATE_KIND=
-[ "$KIND" = secondmate ] || HERDR_CREATE_KIND=worker
 if [ "$RELAUNCH" -eq 1 ]; then
   # A secondmate's home already resolved WT above through the same validation a
   # fresh secondmate spawn uses; every other kind takes the recorded worktree.
@@ -3321,7 +3318,7 @@ elif [ "$RELAUNCH" -eq 1 ] && [ "$RELAUNCH_RECREATE" -eq 1 ]; then
       HERDR_SES=${CONTAINER%%:*}
       HERDR_WORKSPACE_ID=${CONTAINER#*:}
       HERDR_TASK_IDS=$(FM_STATE_OVERRIDE="$STATE" FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_create_task "$CONTAINER" "$W" "$WT" \
-        "$HERDR_SEEDED_DEFAULT_TAB_ID" "$HERDR_CREATE_KIND") || exit 1
+        "$HERDR_SEEDED_DEFAULT_TAB_ID" bound) || exit 1
       read -r HERDR_TAB_ID HERDR_PANE_ID HERDR_TERMINAL_ID <<EOF
 $HERDR_TASK_IDS
 EOF
@@ -3509,7 +3506,7 @@ case "$BACKEND" in
       HERDR_SES=${CONTAINER%%:*}
       HERDR_WORKSPACE_ID=${CONTAINER#*:}
       HERDR_TASK_IDS=$(FM_STATE_OVERRIDE="$STATE" FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_create_task "$CONTAINER" "$W" "$PROJ_ABS" \
-        "$HERDR_SEEDED_DEFAULT_TAB_ID" "$HERDR_CREATE_KIND") || exit 1
+        "$HERDR_SEEDED_DEFAULT_TAB_ID" bound) || exit 1
       read -r HERDR_TAB_ID HERDR_PANE_ID HERDR_TERMINAL_ID <<EOF
 $HERDR_TASK_IDS
 EOF
@@ -3571,9 +3568,9 @@ EOF
     ;;
 esac
 fi
-if [ "$BACKEND" = herdr ] && [ "$KIND" != secondmate ]; then
+if [ "$BACKEND" = herdr ] && { [ "$RELAUNCH" -eq 0 ] || [ "$RELAUNCH_RECREATE" -eq 1 ]; }; then
   fm_backend_herdr_terminal_id_valid "${HERDR_TERMINAL_ID:-}" || {
-    echo "error: Herdr worker $ID has no readable terminal identity; refusing launch" >&2
+    echo "error: Herdr task $ID has no readable terminal identity; refusing launch" >&2
     exit 1
   }
   # Use the creation binding until the replacement record is published. This

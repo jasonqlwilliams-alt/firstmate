@@ -1111,7 +1111,7 @@ MODE=$(grep '^mode=' "$META" | cut -d= -f2- || true)
 # passed, immediately before the close marker binds to it, so any refusal
 # leaves the record byte-identical.
 if [ "$TEARDOWN_LEGACY_PENDING" = 1 ]; then
-  TEARDOWN_LEGACY_ENDPOINT=$(fm_backend_agent_state "$BACKEND" "$T")
+  TEARDOWN_LEGACY_ENDPOINT=$(FM_BACKEND_HERDR_ENDPOINT_META="$META" fm_backend_agent_state "$BACKEND" "$T")
   case "$TEARDOWN_LEGACY_ENDPOINT" in
     dead|missing) ;;
     *)
@@ -2387,7 +2387,7 @@ require_retire_stale_slot_record() {
   fm_treehouse_slot_owner_state "$slot" "$ID"
   case "$FM_TREEHOUSE_SLOT_OWNER" in
     mine)
-      case "$(fm_backend_agent_state "$BACKEND" "$T")" in
+      case "$(FM_BACKEND_HERDR_ENDPOINT_META="$META" fm_backend_agent_state "$BACKEND" "$T")" in
         dead|missing) ;;
         *)
           echo "REFUSED: task $ID still owns the slot claim on $slot; --retire-stale-record is for the record that no longer holds the slot. Retire the other record, then tear this one down ordinarily." >&2
