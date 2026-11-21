@@ -2552,9 +2552,9 @@ json_escape() {
 # through --config-override since there is no per-session escalation once
 # the process is running. rovo's bash tool is NOT covered by this grant and
 # stays confined to the worktree regardless (confirmed live) - the standard
-# crewmate flow's `bin/fm-status-append.sh` status line therefore still
-# fails under rovo, but the worker recovers by falling back to its own file
-# tools for the same append (confirmed live), which the grant below does cover.
+# crewmate flow's `bin/fm-status-append.sh` is outside its bash boundary.
+# The grant covers rovo's native file-tool append, the one supported route
+# that bypasses write-time validation and relies on the drain warning.
 # --config-override itself is single-value (a second occurrence silently
 # discards the first, confirmed live), so this is the ONE place that must
 # also fold in agent.efficiencyLevel when a supported effort was requested.

@@ -159,7 +159,7 @@ I can't run that command because it modifies a file outside the workspace. If yo
 ```
 
 This check gave rovo the crewmate status instruction of that day, a bash `echo ... >> status_file` command.
-The brief now names `bin/fm-status-append.sh` for that append, which is the same outside-worktree bash write this check confined.
+The current brief names `bin/fm-status-append.sh`, whose status destination is also outside the worktree.
 Given that exact literal instruction, rovo recovered on its own by falling back to its native file tool for the same append, and succeeded, preserving the file's existing content:
 
 ```

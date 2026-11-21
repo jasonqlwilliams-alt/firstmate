@@ -206,8 +206,20 @@ remote_env() {
 
 FM_SECONDMATE_CHARTER='Own iOS delivery on the build Mac.' \
   FM_SECONDMATE_SCOPE='iOS implementation and Xcode validation' \
-  remote_env "$ROOT/bin/fm-remote-home-seed.sh" ios remote-mac "$REMOTE_ROOT" "$REMOTE_HOME" alpha \
+  remote_env env FM_ROOT_OVERRIDE="$ROOT" \
+  "$ROOT/bin/fm-remote-home-seed.sh" ios remote-mac "$REMOTE_ROOT" "$REMOTE_HOME" alpha \
   >/dev/null || fail "real remote secondmate seeding failed"
+
+status_command=$(sed -n 's/^   `\(.*\) "{state}: {one short line}"`$/\1/p' "$REMOTE_HOME/data/charter.md")
+[ -n "$status_command" ] || fail "the remote charter has no runnable status command"
+bash -c 'expected_writer=$1; shift
+set -- '"$status_command"' "$1"
+[ "$1" = "$expected_writer" ] && exec "$@"' _ "$REMOTE_ROOT/bin/fm-status-append.sh" 'done: remote report delivered' \
+  || fail "the remote charter could not report using the remote checkout"
+cmp -s "$REMOTE_HOME/state/parent-replies.status" <(printf 'done: remote report delivered\n') \
+  || fail "the report did not land in the remote relay log"
+assert_absent "$PARENT/state/ios.status" "the remote charter wrote to the originating host's log"
+pass "the provisioned charter runs the remote checkout's writer against the remote relay log"
 
 # --- the durable record itself: the fundamental part of the fix -------------
 assert_present "$REMOTE_HOME/.fm-secondmate-parent" \

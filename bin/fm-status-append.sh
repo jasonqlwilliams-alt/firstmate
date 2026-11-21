@@ -23,12 +23,15 @@ usage() {
 }
 
 case "${1:-}" in
-  -h|--help) usage; exit 0 ;;
+  --help) usage; exit 0 ;;
 esac
 
 [ "$#" -eq 2 ] || { usage >&2; exit 2; }
 file=$1
 line=$2
+case "$line" in
+  *$'\n'*) echo "error: status append requires one line without embedded newlines" >&2; exit 1 ;;
+esac
 [ -n "$file" ] || { echo "error: status file path is empty" >&2; exit 1; }
 if [ -L "$file" ]; then
   echo "error: refusing to append through a symlink: $file" >&2

@@ -94,6 +94,8 @@ esac
 . "$SCRIPT_DIR/fm-classify-lib.sh"
 # shellcheck source=bin/fm-dod-lib.sh
 . "$SCRIPT_DIR/fm-dod-lib.sh"
+# shellcheck source=bin/fm-secondmate-charter-lib.sh
+. "$SCRIPT_DIR/fm-secondmate-charter-lib.sh"
 PAUSED_VERB=${FM_CLASSIFY_PAUSED_VERB:-$FM_CLASSIFY_PAUSED_VERB_DEFAULT}
 
 resolve_directory_input() {
@@ -194,17 +196,11 @@ if [ "$KIND" = ship ] && [ "$MODE" = no-mistakes ]; then
   ASK_USER_BLOCK=$(fm_ask_user_escalation_block "$DATA" "$ID")
 fi
 
-shell_quote() {
-  printf "'"
-  printf '%s' "$1" | sed "s/'/'\\\\''/g"
-  printf "'"
-}
-
-STATUS_FILE=$(shell_quote "$STATE/$ID.status")
-STATUS_APPEND_BIN=$(shell_quote "$FM_ROOT/bin/fm-status-append.sh")
+STATUS_FILE=$(fm_brief_shell_quote "$STATE/$ID.status")
+STATUS_APPEND_BIN=$(fm_brief_shell_quote "$FM_ROOT/bin/fm-status-append.sh")
 # shellcheck disable=SC2016  # single quotes are deliberate: the backticks are literal brief text, not scaffold-time expansion
 STATUS_RESERVED_KEY_RULE='A `[key=<slug>]` on that line must not start with a prefix reserved by `bin/fm-classify-lib.sh`; the append command names that prefix and refuses, and you pick another key.'
-INBOX_DIR=$(shell_quote "$STATE/$ID.inbox")
+INBOX_DIR=$(fm_brief_shell_quote "$STATE/$ID.inbox")
 LIVE_STATE_SECTION="For live revisions, holds, or routing, read \`$DATA/system-state.md\` (skill \`system-state-card\`). Do not walk Atlas or \`C:\\continuum-system\` for those facts."
 
 # The receive-and-ack half of the steering-inbox contract, included in every
@@ -278,7 +274,7 @@ A request relayed to you by the main firstmate is tagged with a leading \`$FM_FR
 When a message carries that marker, do the work, then respond via the STATUS/ESCALATION path below, never only in this chat: the main firstmate does not read your chat, so a chat-only reply is lost.
 Marked requests also carry a privacy-safe \`corr=<id>\` token after the marker; include that exact token in your parent status reply (or in the status pointer to a detailed doc) so the parent can correlate the answer.
 Optional helper: \`bin/fm-secondmate-report.sh <verb> <corr_id> <note>\` appends that correlated line to the parent channel itself - do not pass a status path, and do not write a hand path under this home.
-A plain \`echo\` that includes the same \`corr=<id>\` on this parent channel is equally valid; do not depend on the helper being present.
+You can also include the same \`corr=<id>\` in the line passed to the guarded status command below.
 For a terse result, a status line is the whole answer.
 For a detailed answer (an investigation, a plan, an audit), write it to a doc under your home's \`data/\` and append a status line that points to that doc - the scout-report pattern - so the main firstmate is woken and can read it.
 Before treating an investigation or visual review as complete, load \`captain-hold-lifecycle\` from this home's \`.agents/skills/\` and pass its shared completion gate.
@@ -324,7 +320,7 @@ fi
 REPO=${POS[1]}
 
 if [ "$HERDR_LAB" -eq 1 ]; then
-HERDR_LAB_HELPER=$(shell_quote "$FM_ROOT/bin/fm-herdr-lab.sh")
+HERDR_LAB_HELPER=$(fm_brief_shell_quote "$FM_ROOT/bin/fm-herdr-lab.sh")
 # shellcheck disable=SC2016  # single quotes are deliberate: these lines are literal brief text whose backtick-wrapped $(...) and "$HERDR_LAB_SESSION" snippets must reach the reading agent verbatim, not expand at scaffold time; only the '"$VAR"' break-outs interpolate.
 HERDR_SECTION=$(printf '%s\n' \
 '# Herdr isolation - HARD SAFETY CONTRACT' \

@@ -395,14 +395,14 @@ EOF
   fi
 }
 
-# Print still-unread informational status lines (note: answers and pending-reply
-# resolutions) that the OPEN DECISIONS fold never carries. Uses the same
-# cursor-backed unread span as the annotation path, and runs on every drain -
+# Print still-unread status lines and warnings the OPEN DECISIONS fold never
+# carries. Uses the same cursor-backed unread span as the annotation path and
+# runs on every drain -
 # including the empty-queue fast path - so a buried answer cannot be swallowed
 # when the fold later advances the cursor. Prints nothing when nothing is
 # unread, which is the common case.
 print_unread_status_section() {
-  local snapshot=${1:-} unread task line shown=0
+  local snapshot=${1:-} unread task line key shown=0
 
   if [ "$#" -ge 2 ]; then
     unread=$2
@@ -416,53 +416,21 @@ print_unread_status_section() {
   while IFS=$(printf '\t') read -r task line; do
     [ -n "$task" ] || continue
     [ -n "$line" ] || continue
-    line="$task $line"
     if [ "$shown" -eq 0 ]; then
       printf 'UNREAD STATUS (new since last drain, not re-printed after this presentation):\n' || return 1
     fi
-    printf '%s\n' "$line" || return 1
+    if [ "$(status_line_verb "$line")" = needs-decision ]; then
+      key=$(_fm_decision_key "$line") || return 1
+      printf 'warning: task=%s key=%s folded reserved-prefix needs-decision\n' "$task" "$key" || return 1
+    else
+      printf '%s %s\n' "$task" "$line" || return 1
+    fi
     shown=$((shown + 1))
   done <<EOF
 $unread
 EOF
 
   [ "$shown" -gt 0 ] || return 0
-}
-
-# One warning per needs-decision the fold rejects because its key starts with a
-# reserved prefix. The owner's own line in that namespace speaks the prefix
-# vocabulary and is not warned. Names the task and the key. Prints nothing when
-# every needs-decision is listable. bin/fm-classify-lib.sh owns the prefix list.
-_warn_folded_reserved_needs_decisions() {  # <task> <span>
-  local task=$1 span=$2 line key
-  [ -n "$span" ] || return 0
-  while IFS= read -r line || [ -n "$line" ]; do
-    [ -n "$line" ] || continue
-    [ "$(status_line_verb "$line")" = needs-decision ] || continue
-    key=$(_fm_decision_key "$line") || continue
-    _fm_decision_key_transition_allowed "$key" "$(status_line_note "$line")" && continue
-    printf 'warning: task=%s key=%s folded reserved-prefix needs-decision\n' "$task" "$key" || return 1
-  done <<EOF
-$span
-EOF
-}
-
-print_folded_reserved_needs_decision_warnings() {  # <snapshot>
-  local snapshot=$1 task endpoint ident f raw span
-  while IFS=$(printf '\t') read -r task endpoint ident; do
-    [ -n "$task" ] || continue
-    [ -n "$ident" ] || continue
-    case "$endpoint" in
-      ''|*[!0-9]*|0) continue ;;
-    esac
-    f="$STATE/$task.status"
-    [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || continue
-    raw=$(_fm_status_read_span "$f" 0 "$endpoint") || return 1
-    span=$(printf '%s\n' "$raw" | grep -F 'needs-decision' || true)
-    _warn_folded_reserved_needs_decisions "$task" "$span" || return 1
-  done <<EOF
-$snapshot
-EOF
 }
 
 # Print the consolidated OPEN DECISIONS section: every still-open
@@ -598,7 +566,6 @@ print_status_sections() {
   if ! {
     print_unread_status_section "$snapshot" "$unread" \
       && print_status_outcome_backstop_section "$snapshot" \
-      && print_folded_reserved_needs_decision_warnings "$snapshot" \
       && print_open_decisions_section "$snapshot" \
       && print_record_divergence_section
   } > "$prepared"; then

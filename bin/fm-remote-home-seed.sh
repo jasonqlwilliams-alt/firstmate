@@ -146,12 +146,33 @@ TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-remote-home-seed.XXXXXX") || die "cannot cre
 REG_EXISTED=0
 [ -f "$REG" ] && { cp "$REG" "$TMP/registry.before"; REG_EXISTED=1; }
 
-# Keep the parent charter as its durable source, but publish a remote copy whose
-# status path is the remote append-only relay log rather than a local Mac path.
+# Keep the parent charter as its durable source and publish a remote copy with
+# the remote checkout's status writer and the remote append-only relay log.
 PARENT_STATUS="$STATE/$ID.status"
+case "$PARENT_STATUS" in
+  /*) ;;
+  *)
+    if [ -n "${FM_STATE_OVERRIDE:-}" ]; then
+      PARENT_STATUS="$(CDPATH='' cd -- "$STATE" && pwd -P)/$ID.status"
+    else
+      PARENT_STATUS="$(CDPATH='' cd -- "$FM_HOME" && pwd -P)/state/$ID.status"
+    fi
+    ;;
+esac
 REMOTE_STATUS="$REMOTE_HOME/state/parent-replies.status"
+PARENT_STATUS_SH=$(fm_brief_shell_quote "$PARENT_STATUS")
+REMOTE_STATUS_SH=$(fm_brief_shell_quote "$REMOTE_STATUS")
+REMOTE_APPEND_SH=$(fm_brief_shell_quote "$REMOTE_ROOT/bin/fm-status-append.sh")
+APPEND_SUFFIX="/bin/fm-status-append.sh' $PARENT_STATUS_SH "
 while IFS= read -r line || [ -n "$line" ]; do
-  printf '%s\n' "${line//"$PARENT_STATUS"/"$REMOTE_STATUS"}"
+  case "$line" in
+    "   \`"*"$APPEND_SUFFIX"*)
+      line="   \`$REMOTE_APPEND_SH $REMOTE_STATUS_SH ${line#*"$APPEND_SUFFIX"}"
+      ;;
+    *"$PARENT_STATUS_SH"*) line=${line//"$PARENT_STATUS_SH"/"$REMOTE_STATUS_SH"} ;;
+    *) line=${line//"$PARENT_STATUS"/"$REMOTE_STATUS"} ;;
+  esac
+  printf '%s\n' "$line"
 done < "$BRIEF" > "$TMP/charter.remote"
 
 PROJECTS_CSV=

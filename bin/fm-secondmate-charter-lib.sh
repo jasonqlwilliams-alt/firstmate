@@ -3,6 +3,12 @@
 # Source only. FM_SECONDMATE_CHARTER and FM_SECONDMATE_SCOPE remain explicit
 # caller overrides; otherwise the named sections in the filled brief are used.
 
+fm_brief_shell_quote() {
+  printf "'"
+  printf '%s' "$1" | sed "s/'/'\\\\''/g"
+  printf "'"
+}
+
 normalize_registry_text() {
   awk '
     {

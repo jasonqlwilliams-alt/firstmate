@@ -255,6 +255,16 @@ test_folded_reserved_needs_decision_warns_once_per_line() {
   if grep -F 'folded reserved-prefix' "$out" | grep -F 'api-shape' >/dev/null; then
     fail "an ordinary decision was warned: $(cat "$out")"
   fi
+
+  printf 'needs-decision [key=button-color]: which color should the button be\n' >> "$state/task-fold.status"
+  printf 'note: unrelated delivery\n' > "$state/other.status"
+  append_wake "$state" signal other.status 'note: unrelated delivery' || fail "could not queue the unrelated wake"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed after the decision was reissued"
+  if grep -F 'folded reserved-prefix needs-decision' "$out" >/dev/null; then
+    fail "the unrelated drain replayed a presented warning: $(cat "$out")"
+  fi
+  grep -F 'task-fold [key=button-color] needs-decision: which color should the button be' "$out" >/dev/null \
+    || fail "the reissued decision did not surface with its ordinary key: $(cat "$out")"
   pass "a folded reserved-prefix needs-decision is warned once per line and not listed"
 }
 
@@ -291,11 +301,21 @@ test_drain_warning_follows_the_reserved_prefix_list() {
 }
 
 test_status_append_refuses_reserved_key_before_write() {
-  local dir status err rc
+  local dir status err rc APPEND
   dir=$(make_case status-append)
   status="$dir/state/task.status"
   err="$dir/append.err"
   APPEND="$ROOT/bin/fm-status-append.sh"
+
+  "$APPEND" --help >/dev/null || fail "the documented --help option did not succeed"
+  if "$APPEND" -h >/dev/null 2>&1; then
+    fail "the undocumented -h option still succeeds"
+  fi
+  if "$APPEND" "$status" $'working: reviewing\nneeds-decision [key=pending-reply-color]: choose blue' 2>"$err"; then
+    fail "the status append helper accepted more than one physical line"
+  fi
+  assert_contains "$(cat "$err")" 'requires one line' "the multiline refusal should name the line contract"
+  [ ! -e "$status" ] || fail "a refused multiline append still created the status file"
 
   "$APPEND" "$status" 'needs-decision [key=pending-reply-abc123]: which color should the button be' \
     >/dev/null 2>"$err"; rc=$?
