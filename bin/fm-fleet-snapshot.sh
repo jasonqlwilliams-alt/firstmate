@@ -61,7 +61,8 @@
 #     fm-classify-lib.sh's authoritative status_open_decisions fold and reconciled
 #     against current_state; hints.pending_decision and hints.blocked_event are
 #     booleans derived from that set.
-#     endpoint.exists is the cheap local backend endpoint-presence read.
+#     endpoint.exists reflects the local backend presence read. A foreign
+#     Herdr pane is absent for the task. An unreadable Herdr binding is null.
 #     endpoint.agent_alive is populated for local secondmates only, where it is
 #     useful return-channel supervision data; remote secondmates use "unknown"
 #     without a probe, and other tasks use "not_checked".

@@ -18,9 +18,9 @@
 # Herdr backend in the dedicated fm-remote session, so launch refuses any other
 # selection rather than reading this home's config/backend. The interactive
 # default session remains for the user's work.
-# fm-spawn/fm-send/fm-teardown keep owning the local endpoint mechanics.
-# Key, capture, and the send doorbell use fm-backend.sh's live Herdr binding
-# against the validated host-local parent-route metadata.
+# fm-spawn and fm-teardown own local task creation and retirement.
+# Key, capture, observation and the send doorbell use fm-backend.sh's live
+# Herdr binding against the validated host-local parent-route metadata.
 # The home's own workers keep their ordinary backend selection.
 # bin/fm-remote-doctor.sh owns that host's readiness for Herdr.
 # docs/remote-secondmates.md owns why.

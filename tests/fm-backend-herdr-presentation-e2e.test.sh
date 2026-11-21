@@ -139,7 +139,20 @@ if [ "${1:-} ${2:-}" = "pane get" ] && [ -d "$ACTIVE_SEEDED_CONTROL" ] \
 fi
 before=
 [ -z "$mutation" ] || before=$(focus_snapshot || printf ambiguous/ambiguous)
-if out=$(env PATH="$HERDR_ORIGINAL_PATH" "$HERDR_LAB_HELPER" run "$HERDR_LAB_SESSION" "$@"); then
+abort_task_dir=
+if [ "${1:-} ${2:-}" = "pane get" ] && [ -d "$POST_CREATE_ABORT_CONTROL" ]; then
+  for task_dir in "$POST_CREATE_ABORT_CONTROL"/abort-*; do
+    [ -d "$task_dir" ] || continue
+    [ "${3:-}" = "$(cat "$task_dir/task-pane" 2>/dev/null || true)" ] || continue
+    abort_task_dir=$task_dir
+    break
+  done
+fi
+if out=$(
+  # Herdr can report pane_not_found on stderr.
+  [ -z "$abort_task_dir" ] || exec 2>&1
+  env PATH="$HERDR_ORIGINAL_PATH" "$HERDR_LAB_HELPER" run "$HERDR_LAB_SESSION" "$@"
+); then
   status=0
 else
   status=$?
@@ -172,13 +185,15 @@ if [ "$status" -eq 0 ] && [ "$mutation" = tab-create ]; then
       ;;
   esac
 fi
-if [ "$status" -eq 0 ] && [ "${1:-} ${2:-}" = "pane get" ] && [ -d "$POST_CREATE_ABORT_CONTROL" ]; then
-  for task_dir in "$POST_CREATE_ABORT_CONTROL"/abort-*; do
-    [ -d "$task_dir" ] || continue
-    [ "${3:-}" = "$(cat "$task_dir/task-pane" 2>/dev/null || true)" ] || continue
+if [ -n "$abort_task_dir" ]; then
+  if [ "$status" -eq 0 ]; then
     out=$(printf '%s' "$out" | jq --arg cwd "$POST_CREATE_ABORT_CONTROL/not-a-worktree" '.result.pane.foreground_cwd = $cwd')
-    break
-  done
+  elif [ ! -e "$abort_task_dir/pane-gone" ] \
+    && printf '%s' "$out" | jq -e '.error.code == "pane_not_found" and .result == null' >/dev/null 2>&1; then
+    # The exact pane can disappear either through a close request or after its shell exits.
+    printf 'abort-pane-gone\t\t\t%s\n' "$3" >> "$FOCUS_AUDIT_LOG"
+    : > "$abort_task_dir/pane-gone"
+  fi
 fi
 if [ -n "$mutation" ]; then
   after=$(focus_snapshot || printf ambiguous/ambiguous)
@@ -417,6 +432,18 @@ finish_concurrent_spawn() {  # <id> <status> <stdout> <stderr>
     || fail "projected spawn $id retry failed after task-set publication completed: $(cat "$err")"
 }
 
+finish_concurrent_recovery() {  # <id> <home> <project> <status> <old-pane> <log-prefix>
+  local id=$1 home=$2 project=$3 status=$4 old_pane=$5 log=$6
+  [ "$status" -ne 0 ] || return 0
+  grep -Fq "could not acquire its session lock; refusing a concurrent resume" "$log.err" \
+    || fail "concurrent recovery for $id failed unexpectedly: $(cat "$log.err")"
+  [ "$(sed -n 's/^herdr_pane_id=//p' "$home/state/$id.meta")" = "$old_pane" ] \
+    && lab pane get "$old_pane" >/dev/null \
+    || fail "lock refusal changed the original endpoint for $id"
+  spawn_task "$id" "$home" "$project" > "$log.out" 2> "$log.err" \
+    || fail "recovery retry for $id after lock release failed: $(cat "$log.err")"
+}
+
 finish_concurrent_expected_abort() {  # <id> <status> <stdout> <stderr>
   local id=$1 status=$2 out=$3 err=$4
   [ "$status" -ne 0 ] || fail "post-create abort fixture $id unexpectedly succeeded"
@@ -431,6 +458,41 @@ spawn_secondmate_task() {
   local id=$1 home=$2
   FM_GATE_REFUSE_BYPASS=1 FM_SPAWN_NO_GUARD=1 FM_HOME="$HOME_DIR" FM_ROOT_OVERRIDE="$ROOT" \
     "$ROOT/bin/fm-spawn.sh" "$id" "$home" "sh -c 'while :; do sleep 60; done'" --secondmate --backend herdr
+}
+
+stop_fixture_worker() {  # <meta> <pane>
+  local meta=$1 pane=$2 expected i
+  expected=$(sed -n 's/^herdr_terminal_id=//p' "$meta")
+  [ -n "$expected" ] || fail "fixture metadata has no terminal ID"
+  lab pane get "$pane" | jq -e --arg pane "$pane" --arg terminal "$expected" \
+    '.result.pane | .pane_id == $pane and .terminal_id == $terminal' >/dev/null \
+    || fail "refusing to interrupt a pane other than the inert worker fixture"
+  lab pane send-keys "$pane" ctrl+c >/dev/null || fail "could not stop the inert worker fixture"
+  for ((i=0; i<50; i++)); do
+    if lab pane process-info --pane "$pane" | jq -e \
+      '.result.process_info.foreground_processes | all(.name != "sleep" and ((.cmdline // "") | contains("while :") | not))' >/dev/null; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  fail "inert worker remained in its foreground process group"
+}
+
+prepare_projected_teardown() {  # <meta> <pane>
+  local meta=$1 pane=$2 project command i
+  project=$(sed -n 's/^project=//p' "$meta")
+  [ -d "$project" ] || fail "fixture project directory is unavailable"
+  stop_fixture_worker "$meta" "$pane"
+  # Keep the pane alive through Treehouse return so Firstmate can correlate and close it.
+  printf -v command 'cd -- %q' "$project"
+  lab pane run "$pane" "$command" >/dev/null || fail "could not move the fixture shell to its project"
+  for ((i=0; i<50; i++)); do
+    if lab pane get "$pane" | jq -e --arg cwd "$project" '.result.pane.foreground_cwd == $cwd' >/dev/null; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  fail "fixture shell did not leave its worktree"
 }
 
 teardown_task() {  # <id> <home>
@@ -504,6 +566,7 @@ assert_no_projection_mutation_since() {  # <line-count> <case-name>
 HOME_DIR="$TMP_ROOT/home"
 PROJECT_DIR="$TMP_ROOT/project"
 RECOVERY_PROJECT_DIR="$TMP_ROOT/recovery-project"
+ALPHA_RECOVERY_PROJECT_DIR="$TMP_ROOT/alpha-recovery-project"
 BRAVO_RECOVERY_PROJECT_DIR="$TMP_ROOT/bravo-recovery-project"
 mkdir -p "$HOME_DIR/state" "$HOME_DIR/config" \
   "$HOME_DIR/data/anchor" "$HOME_DIR/data/shape" \
@@ -530,6 +593,7 @@ write_ship_brief "$HOME_DIR" lock-contended 'Projection lock contention fixture.
 write_ship_brief "$HOME_DIR" default-on 'Projection default-on fixture.'
 make_project "$PROJECT_DIR"
 make_project "$RECOVERY_PROJECT_DIR"
+make_project "$ALPHA_RECOVERY_PROJECT_DIR"
 make_project "$BRAVO_RECOVERY_PROJECT_DIR"
 
 # Keep one ordinary primary task live so the durable firstmate workspace is
@@ -862,12 +926,12 @@ ABORT_B_PANE=$(cat "$POST_CREATE_ABORT_CONTROL/abort-b/task-pane")
 ABORT_SEQUENCE=$(sed -n "$((ABORT_FOCUS_START + 1)),\$p" "$FOCUS_AUDIT_LOG" | awk -F '\t' -v a="$ABORT_A_PANE" -v b="$ABORT_B_PANE" '
   $1 == "workspace-create" && $4 ~ /^└ abort-a · p:/ { print "create-a" }
   $1 == "workspace-create" && $4 ~ /^└ abort-b · p:/ { print "create-b" }
-  $1 == "pane-close" && $4 == a { print "close-a" }
-  $1 == "pane-close" && $4 == b { print "close-b" }
+  $1 == "abort-pane-gone" && $4 == a { print "gone-a" }
+  $1 == "abort-pane-gone" && $4 == b { print "gone-b" }
 ')
 case "$ABORT_SEQUENCE" in
-  $'create-a\nclose-a\ncreate-b\nclose-b'|$'create-b\nclose-b\ncreate-a\nclose-a') ;;
-  *) fail "concurrent post-create abort cleanup interleaved outside the presentation lock: $ABORT_SEQUENCE" ;;
+  $'create-a\ngone-a\ncreate-b\ngone-b'|$'create-b\ngone-b\ncreate-a\ngone-a') ;;
+  *) fail "post-create abort cleanup did not remove each exact pane before the next create: $ABORT_SEQUENCE" ;;
 esac
 ABORT_UNRESTORED=$(sed -n "$((ABORT_FOCUS_START + 1)),\$p" "$FOCUS_AUDIT_LOG" | awk -F '\t' -v a="$ABORT_A_PANE" -v b="$ABORT_B_PANE" '
   ($1 == "workspace-create" || $1 == "tab-create" || $1 == "workspace-move" || ($1 == "pane-close" && $4 != a && $4 != b)) && $2 != $3 { print }
@@ -889,6 +953,7 @@ rm -rf "$POST_CREATE_ABORT_CONTROL"
 rm -f "$HOME_DIR/state/abort-a.herdr-presentation" "$HOME_DIR/state/abort-b.herdr-presentation"
 pass "real Herdr lab: concurrent post-create abort cleanup stays serialized with exact focus restoration"
 
+prepare_projected_teardown "$ON_META" "$PROJECTED_PANE"
 SHAPE_CLEANUP_AUDIT_START=$(focus_audit_line_count)
 teardown_task shape "$HOME_DIR" > "$TMP_ROOT/on-teardown.out" 2> "$TMP_ROOT/on-teardown.err" \
   || fail "projected teardown failed: $(cat "$TMP_ROOT/on-teardown.err")"
@@ -1174,23 +1239,6 @@ pass "real Herdr lab: session lock contention from a secondmate home falls back 
 # Exact reclaim replaces the agent-free husk of a terminal we can still
 # identify. A full Herdr server restart creates new terminal IDs, which the
 # worker identity E2E covers separately.
-stop_fixture_worker() {  # <meta> <pane>
-  local meta=$1 pane=$2 expected i
-  expected=$(sed -n 's/^herdr_terminal_id=//p' "$meta")
-  [ -n "$expected" ] || fail "fixture metadata has no terminal ID"
-  lab pane get "$pane" | jq -e --arg pane "$pane" --arg terminal "$expected" \
-    '.result.pane | .pane_id == $pane and .terminal_id == $terminal' >/dev/null \
-    || fail "refusing to interrupt a pane other than the inert worker fixture"
-  lab pane send-keys "$pane" ctrl+c >/dev/null || fail "could not stop the inert worker fixture"
-  for ((i=0; i<50; i++)); do
-    if lab pane process-info --pane "$pane" | jq -e \
-      '.result.process_info.foreground_processes | all(.name != "sleep" and ((.cmdline // "") | contains("while :") | not))' >/dev/null; then
-      return 0
-    fi
-    sleep 0.1
-  done
-  fail "inert worker remained in its foreground process group"
-}
 for RESTART_ID in fm-hibit-resume-r1 wheelhouse-healing-r1; do
   spawn_task "$RESTART_ID" "$HOME_DIR" "$RECOVERY_PROJECT_DIR" > "$TMP_ROOT/$RESTART_ID-first.out" 2> "$TMP_ROOT/$RESTART_ID-first.err" \
     || fail "$RESTART_ID fixture's projected spawn failed: $(cat "$TMP_ROOT/$RESTART_ID-first.err")"
@@ -1249,6 +1297,7 @@ for RESTART_ID in fm-hibit-resume-r1 wheelhouse-healing-r1; do
     fi
   fi
 
+  prepare_projected_teardown "$RESTART_META" "$NEW_RESTART_PANE"
   teardown_task "$RESTART_ID" "$HOME_DIR" > "$TMP_ROOT/$RESTART_ID-teardown.out" 2> "$TMP_ROOT/$RESTART_ID-teardown.err" \
     || fail "$RESTART_ID teardown after reclaim failed: $(cat "$TMP_ROOT/$RESTART_ID-teardown.err")"
   [ ! -e "$HOME_DIR/state/$RESTART_ID.herdr-presentation" ] \
@@ -1259,10 +1308,11 @@ done
 pass "real Herdr lab: Hi Bit and Wheelhouse-style same-terminal reclaims preserve one nested space with exact focus and idempotence"
 
 # A secondmate child binds and reclaims only inside its own home and parent.
+# Use its own pool because returning a primary fixture lease can leave a Firstmate claim.
 CROSS_RESTART_ID=wheel-child-resume
 mkdir -p "$SECOND_HOME_A/data/$CROSS_RESTART_ID"
 write_ship_brief "$SECOND_HOME_A" "$CROSS_RESTART_ID" 'Cross-home restart fixture.'
-spawn_task "$CROSS_RESTART_ID" "$SECOND_HOME_A" "$RECOVERY_PROJECT_DIR" > "$TMP_ROOT/cross-restart-first.out" 2> "$TMP_ROOT/cross-restart-first.err" \
+spawn_task "$CROSS_RESTART_ID" "$SECOND_HOME_A" "$ALPHA_RECOVERY_PROJECT_DIR" > "$TMP_ROOT/cross-restart-first.out" 2> "$TMP_ROOT/cross-restart-first.err" \
   || fail "cross-home restart fixture failed: $(cat "$TMP_ROOT/cross-restart-first.err")"
 CROSS_RESTART_META="$SECOND_HOME_A/state/$CROSS_RESTART_ID.meta"
 CROSS_OLD_WT=$(remember_meta_worktree "$CROSS_RESTART_META")
@@ -1275,7 +1325,7 @@ CROSS_BOUND_HOME=$(grep '^home=' "$SECOND_HOME_A/state/$CROSS_RESTART_ID.herdr-p
 [ ! -e "$HOME_DIR/state/$CROSS_RESTART_ID.herdr-presentation" ] \
   || fail "cross-home restart published a journal in the primary home"
 stop_fixture_worker "$CROSS_RESTART_META" "$CROSS_OLD_PANE"
-spawn_task "$CROSS_RESTART_ID" "$SECOND_HOME_A" "$RECOVERY_PROJECT_DIR" > "$TMP_ROOT/cross-restart-resume.out" 2> "$TMP_ROOT/cross-restart-resume.err" \
+spawn_task "$CROSS_RESTART_ID" "$SECOND_HOME_A" "$ALPHA_RECOVERY_PROJECT_DIR" > "$TMP_ROOT/cross-restart-resume.out" 2> "$TMP_ROOT/cross-restart-resume.err" \
   || fail "cross-home same-identity reclaim failed: $(cat "$TMP_ROOT/cross-restart-resume.err")"
 CROSS_NEW_WT=$(remember_meta_worktree "$CROSS_RESTART_META")
 CROSS_NEW_WSID=$(grep '^herdr_workspace_id=' "$CROSS_RESTART_META" | cut -d= -f2-)
@@ -1319,8 +1369,13 @@ spawn_task "$PRIMARY_WAVE_ID" "$HOME_DIR" "$RECOVERY_PROJECT_DIR" > "$TMP_ROOT/p
 PRIMARY_WAVE_PID=$!
 spawn_task "$BRAVO_WAVE_ID" "$SECOND_HOME_B" "$BRAVO_RECOVERY_PROJECT_DIR" > "$TMP_ROOT/bravo-wave-resume.out" 2> "$TMP_ROOT/bravo-wave-resume.err" &
 BRAVO_WAVE_PID=$!
-wait "$PRIMARY_WAVE_PID" || fail "concurrent primary recovery failed: $(cat "$TMP_ROOT/primary-wave-resume.err")"
-wait "$BRAVO_WAVE_PID" || fail "concurrent secondmate recovery failed: $(cat "$TMP_ROOT/bravo-wave-resume.err")"
+# A contender whose bounded wait expires must preserve its husk until it can retry.
+if wait "$PRIMARY_WAVE_PID"; then PRIMARY_WAVE_STATUS=0; else PRIMARY_WAVE_STATUS=$?; fi
+if wait "$BRAVO_WAVE_PID"; then BRAVO_WAVE_STATUS=0; else BRAVO_WAVE_STATUS=$?; fi
+finish_concurrent_recovery "$PRIMARY_WAVE_ID" "$HOME_DIR" "$RECOVERY_PROJECT_DIR" \
+  "$PRIMARY_WAVE_STATUS" "$PRIMARY_WAVE_OLD_PANE" "$TMP_ROOT/primary-wave-resume"
+finish_concurrent_recovery "$BRAVO_WAVE_ID" "$SECOND_HOME_B" "$BRAVO_RECOVERY_PROJECT_DIR" \
+  "$BRAVO_WAVE_STATUS" "$BRAVO_WAVE_OLD_PANE" "$TMP_ROOT/bravo-wave-resume"
 PRIMARY_WAVE_NEW_WT=$(remember_meta_worktree "$PRIMARY_WAVE_META")
 BRAVO_WAVE_NEW_WT=$(remember_meta_worktree "$BRAVO_WAVE_META")
 PRIMARY_WAVE_NEW_PANE=$(grep '^herdr_pane_id=' "$PRIMARY_WAVE_META" | cut -d= -f2-)

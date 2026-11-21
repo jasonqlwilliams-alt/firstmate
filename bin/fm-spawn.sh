@@ -110,8 +110,8 @@
 #   parent, and label bindings. That complete binding plus a matching worker
 #   terminal may replace one exact agent-free husk in place.
 #   The journal, visible token, and labels alone are never endpoint or ownership
-#   authority, and every ambiguous recovery stays on the flat fallback after
-#   duplicate-agent risk is independently absent.
+#   authority. See docs/herdr-backend.md "Presentation spaces" for the flat
+#   fallback and refusal conditions.
 #   A clean projected create or exact resume makes one bounded attempt to hold
 #   the one session-scoped presentation-order lock (keyed by named session plus
 #   canonical socket, outside any home's state/) through launch handoff. Lock

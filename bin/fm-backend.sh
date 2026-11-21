@@ -551,9 +551,9 @@ fm_backend_meta_for_window() {  # <target> <state-dir>
 
 # The live Herdr binding is distinct from durable metadata validation above.
 # Callers holding a selected record can scope FM_BACKEND_HERDR_ENDPOINT_META
-# to an operation, including the remote host's parent-route record. Bare
-# targets match the local records by exact window; multiple claims are
-# unreadable. An explicit endpoint outside the task inventory stays unbound.
+# to an operation, including the remote host's parent-route record. Without a
+# selected record, the guard looks up the exact target in the local inventory.
+# Multiple claims are unreadable. A target outside the inventory is unbound.
 # A pre-binding worker record stays unreadable while its pane exists.
 fm_backend_herdr_task_identity_state() {  # <target> [binding]
   local target=$1 detail=${2:-} meta=${FM_BACKEND_HERDR_ENDPOINT_META:-} candidate kind expected field
@@ -701,16 +701,12 @@ fm_backend_source() {  # <name>
   esac
 }
 
-# fm_backend_resolve_selector: resolve a raw fm-send.sh/fm-peek.sh style
-# selector to a live session-provider target. Four forms, in order:
+# fm_backend_resolve_selector: resolve a raw fm-peek.sh selector and retain
+# any selected task record for the backend's live checks. Four forms, in order:
 #   target with ":"   used as-is (the escape hatch for a window/pane outside
-#                      this firstmate home) - backend-independent, a literal string.
+#                      this firstmate home), with an exact metadata lookup.
 #   exact task id      routed through <state-dir>/<id>.meta's backend target
-#                      (`window=` normally, `terminal=` for Orca) -
-#                      backend-independent, a stored value, NOT re-verified
-#                      against a live backend inventory (matches today's
-#                      behavior: tmux window names can be trusted from meta
-#                      without a live re-check).
+#                      (`window=` normally, `terminal=` for Orca).
 #   "fm-<id>"          legacy task window label fallback routed through
 #                      <state-dir>/<id>.meta when no exact
 #                      <state-dir>/fm-<id>.meta exists.
@@ -1049,17 +1045,10 @@ fm_backend_codex_agent_pid() {  # <backend> <target>
 }
 
 # fm_backend_target_exists: cheap, READ-ONLY existence check - does the
-# recorded TARGET endpoint still exist on BACKEND? Never starts a server or
-# session: for herdr this deliberately queries the pane directly instead of
-# going through fm_backend_herdr_target_ready (which auto-starts the herdr
-# server as a side effect via fm_backend_herdr_server_ensure - fine for an
-# operation that is about to use the pane, wrong for a passive liveness
-# probe). A gone tmux window or an unqueryable herdr pane (server down, pane
-# closed), missing zellij pane, or unreadable Orca terminal simply fails.
-# Herdr reports status 2 for an unreadable recorded identity.
-# Mirrors fm-crew-state.sh's pane_readable check; exists here as one shared
-# primitive so callers that only need a fast alive/dead read (recovery
-# digests, the session-start fleet digest) do not re-derive it inline.
+# recorded TARGET endpoint still exist on BACKEND? This probe never starts a
+# server or session. For a bound Herdr target, status 0 means the pane matches,
+# status 1 means it is missing or foreign, and status 2 means its identity
+# could not be determined. Unbound Herdr targets use a direct presence read.
 fm_backend_target_exists() {  # <backend> <target> [expected-label]
   local backend=$1 target=$2 expected_label=${3:-} session pane
   case "$backend" in

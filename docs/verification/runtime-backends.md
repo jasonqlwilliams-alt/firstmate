@@ -750,14 +750,15 @@ HERDR_LAB_HELPER=bin/fm-herdr-lab.sh \
 
 Observed guarantee: a pre-existing captain-owned workspace with a seed-shaped tab was adopted for routing but its tab was never eligible for prune because the current create call did not return that seed id.
 
-Restart-husk replacement is owned by:
+Replacement of unbound same-label husks after restart is exercised by:
 
 ```sh
 HERDR_LAB_HELPER=bin/fm-herdr-lab.sh \
   tests/fm-backend-herdr-respawn-idem-e2e.test.sh
 ```
 
-Observed guarantee: a restored no-agent tab was replaced create-before-close, while a registered live agent caused refusal.
+In this adapter fixture, which creates tabs without task records, a restored no-agent tab was replaced create-before-close, while a registered live agent caused refusal.
+The [worker terminal identity lab](#worker-terminal-identity) covers the recorded-worker collision case.
 
 ### Secondmate endpoint ownership and batch recovery
 
@@ -887,6 +888,9 @@ ok - real Herdr lab: concurrent cross-home recoveries replace exact husks under 
 ok - real Herdr lab: missing, renamed, and duplicate tokens trigger zero destructive or adoptive calls, and live duplicate risk refuses launch
 ok - real Herdr lab validation completed on Herdr 0.7.5 with the default-session tripwire intact
 ```
+
+This result predates terminal-id checks for projection reclaim.
+The current projection test exercises reclaim after stopping the worker while keeping its terminal, and the [worker terminal identity lab](#worker-terminal-identity) exercises a full Herdr server restart.
 
 The projection suite ran again on 2026-08-04 against Herdr 0.8.0 protocol 19 for the default-on flip, where an absent `config/herdr-presentation-spaces` enables the projection and the value `off` opts out; since 2026-08-05 an absent file enables the projection only at or above the 0.8.0 floor recorded under "Presentation version floor" below, and `on` is the explicit opt-in that survives the floor:
 
