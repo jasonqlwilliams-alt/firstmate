@@ -365,6 +365,15 @@ fm_backend_target_of_meta() {  # <meta-file>
   [ -n "$window" ] && printf '%s' "$window"
 }
 
+fm_backend_endpoint_incarnation() {
+  local meta=$1 generation backend target
+  [ -f "$meta" ] || return 1
+  generation=$(fm_meta_get "$meta" spawn_gen)
+  backend=$(fm_backend_of_meta "$meta")
+  target=$(fm_backend_target_of_meta "$meta") || return 1
+  printf '%s:%s\t%s' "$backend" "$target" "$generation"
+}
+
 # fm_backend_validate_task_endpoint: validate a task cleanup record entirely
 # from its durable metadata before any runtime command or cleanup mutation.
 # The validation binds the exact task id, selected backend, target, project,

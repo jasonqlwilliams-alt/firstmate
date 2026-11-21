@@ -525,12 +525,16 @@ clear_pause_tracking() {  # <window> <state>
 }
 
 reconcile_pause_tracking() {  # <window> <state> <last-status-line>
-  local win=$1 state=$2 last=$3 task key marker watcher_key
+  local win=$1 state=$2 last=$3 task key marker watcher_key incarnation
   task=$(window_to_task "$win" "$state")
   key=$(_stale_key "$task")
   marker="$state/.subsuper-paused-$key"
   watcher_key=$(_stale_key "$win")
-  if status_is_paused_or_captain_held "$last"; then
+  if [ -s "$state/$task.missing-endpoint" ] \
+    && incarnation=$(fm_backend_endpoint_incarnation "$state/$task.meta") \
+    && [ "$incarnation" = "$(cat "$state/$task.missing-endpoint" 2>/dev/null)" ]; then
+    clear_pause_tracking "$win" "$state"
+  elif status_is_paused_or_captain_held "$last"; then
     stale_marker_remove "$win" "$state"
     pause_marker_record "$win" "$state"
   elif [ -e "$marker" ] || [ -e "$state/.paused-$watcher_key" ]; then
@@ -1352,6 +1356,10 @@ handle_wake() {  # <reason> <state>
                 *) arg="${reason#signal: }" ;;
               esac
               decision=$(FM_STATUS_SPAN_ENDPOINT_FILE="$capture" classify_signal "$arg" "$state") ;;
+    stale:\ *" ($FM_RECORDED_ENDPOINT_GONE)")
+              kind=stale; arg=${reason#stale: }
+              decision="escalate|$arg"
+              arg=${arg%" ($FM_RECORDED_ENDPOINT_GONE)"} ;;
     stale:*)  kind=stale; arg="${reason#stale: }"; stale_detail="${arg#"$arg"}"
               case "$arg" in *" ("*) stale_detail="${arg#*" ("}"; arg="${arg%% \(*}" ;; esac
               task=$(window_to_task "$arg" "$state")
@@ -1433,8 +1441,8 @@ handle_wake() {  # <reason> <state>
       # wedge stale marker, so a pane that transitioned working->declared-wait is not
       # still wedge-aged. Only stale produces this action.
       if [ "$kind" = "stale" ]; then
-        stale_marker_remove "$arg" "$state"
-        pause_marker_record "$arg" "$state"
+        last=$(last_status_line "$state/$task.status")
+        reconcile_pause_tracking "$arg" "$state" "$last"
       fi
       log "self-handle (paused): $reason -> $distilled"
       ;;

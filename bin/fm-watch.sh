@@ -1142,20 +1142,31 @@ clear_pause_tracking() {  # <window-key>
 }
 
 report_missing_endpoint() {  # <backend> <window> <meta> <window-key> <marker>
-  local backend=$1 win=$2 meta=$3 key=$4 marker=$5 state incarnation reason
-  [ -f "$meta" ] && [ -z "$(fm_meta_get "$meta" remote_host)" ] || return 0
+  local backend=$1 win=$2 meta=$3 key=$4 marker=$5 state incarnation lock reason status=0
+  [ -z "$(fm_meta_get "$meta" remote_host)" ] || return 0
+  incarnation=$(fm_backend_endpoint_incarnation "$meta") || return 0
+  case "$incarnation" in "$backend:$win"$'\t'*) ;; *) return 0 ;; esac
   state=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
     fm_backend_agent_state "$backend" "$win" 2>/dev/null) || return 0
   [ "$state" = missing ] || return 0
+  lock=$(fm_meta_lock_path "$meta") || return 0
+  fm_lock_try_acquire "$lock" || return 0
+  if [ "$incarnation" != "$(fm_backend_endpoint_incarnation "$meta")" ]; then
+    fm_lock_release "$lock"
+    return 0
+  fi
   clear_pause_tracking "$key"
 
   # A relaunch can reuse a window name without the watcher seeing it live.
   # Legacy records still re-arm when the target changes or capture succeeds.
-  incarnation="$backend:$win"$'\t'"$(fm_meta_get "$meta" spawn_gen)"$'\t'"$(fm_meta_get "$meta" herdr_terminal_id)"
-  [ "$(cat "$marker" 2>/dev/null || true)" != "$incarnation" ] || return 0
-  reason="stale: $win (the recorded endpoint is gone)"
-  fm_wake_append stale "$win" "$reason" || exit 1
-  printf '%s\n' "$incarnation" > "$marker" || exit 1
+  if [ "$(cat "$marker" 2>/dev/null || true)" = "$incarnation" ]; then
+    fm_lock_release "$lock"
+    return 0
+  fi
+  reason="stale: $win ($FM_RECORDED_ENDPOINT_GONE)"
+  { fm_wake_append stale "$win" "$reason" && printf '%s\n' "$incarnation" > "$marker"; } || status=1
+  fm_lock_release "$lock"
+  [ "$status" -eq 0 ] || exit 1
   wake "$reason"
 }
 
