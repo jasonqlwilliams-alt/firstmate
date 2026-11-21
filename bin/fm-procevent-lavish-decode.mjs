@@ -39,10 +39,12 @@ function decodePrompt(decode, header, item) {
   try {
     const row = decode(`${header}\n${item.join('\n')}`, { strict: true }).prompts[0];
     if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
+    const promptFields = ['uid', 'prompt', 'selector', 'tag', 'text'];
     const fields = {};
-    for (const key of ['uid', 'prompt', 'selector', 'tag', 'text']) {
+    for (const key of promptFields) {
       if (['string', 'number', 'boolean'].includes(typeof row[key])) fields[key] = String(row[key]);
     }
+    if (!header.includes('{') && promptFields.some(key => !Object.hasOwn(fields, key))) return null;
     if (fields.tag === 'choice' && !Object.hasOwn(fields, 'text')) return null;
     return fields;
   } catch {

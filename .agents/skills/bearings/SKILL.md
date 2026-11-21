@@ -161,7 +161,8 @@ Route the remaining board actions yourself:
   Ask the captain for explicit confirmation in the already trusted chat, naming the exact task and its owner, the recipient role, and the prerequisite information that would be shared.
   Send a packet only after receiving that confirmation in the trusted chat and rechecking that the task, role, and information to share still match it, and that the role is still eligible at the same canonical configured inbox.
   Send through that verified inbox with the confirmed id as `role_target` and ask the role to help with the confirmed prerequisites and return evidence or recommendations.
-  Include the source id and sequence with the task identity in the request provenance and check for an existing request before re-sending a replayed capture.
+  Include the source id, sequence, and request's position in the `assignments` output with the task identity in its provenance.
+  Check that provenance before resending an individual request from a replayed capture.
   The helper's response is input for Firstmate to verify against the task's existing gates.
   The assignment and the response carry no authority to close or release a hold, change prerequisites, or dispatch the task.
 

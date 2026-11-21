@@ -105,8 +105,8 @@
 # digits, dots, underscores, hyphens).
 # The assignment control requires a roster and a Charted Next row with
 # `assignment_eligible: true` (verified queued work with an unmet start
-# condition), `dispatchable: false`, and a non-blank `owner`. Warnings never
-# qualify. The assignment request format is owned by fm-procevent-lavish.sh.
+# condition), a tier, `dispatchable: false`, and a non-blank `owner`.
+# The assignment request format is owned by fm-procevent-lavish.sh.
 # For the companion detail page and optional canvas export, a Charted Next row
 # MAY also carry `waits_since` (same date/timestamp rule as `filed`), `owner`
 # (nullable string), `blockers` (nullable array of `{id, title?}` objects with
@@ -262,7 +262,7 @@ validate_payload() {  # <data.json>
         or (charted_work and (.tier == 1 or .tier == 2 or .tier == 3 or .tier == 4)))
       and optional_boolean("assignment_eligible")
       and (if .assignment_eligible then
-        charted_work and .dispatchable == false and (.owner | nonblank_string)
+        charted_work and has("tier") and .dispatchable == false and (.owner | nonblank_string)
         else true end)
       and optional_filed
       and optional_date("waits_since")
