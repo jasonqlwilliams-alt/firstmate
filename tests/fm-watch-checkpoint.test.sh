@@ -175,8 +175,9 @@ SH
   [ ! -s "$home/state/.wake-queue" ] || fail "acknowledged wake remains queued"
   deadline=$((SECONDS + 20))
   until [ -f "$close_gate/ready" ]; do
-    [ "$SECONDS" -lt "$deadline" ] && kill -0 "$child" 2>/dev/null \
-      || fail "older checkpoint never reached a quiet close ($(cat "$home/successor.out"))"
+    if [ "$SECONDS" -ge "$deadline" ] || ! kill -0 "$child" 2>/dev/null; then
+      fail "older checkpoint never reached a quiet close ($(cat "$home/successor.out"))"
+    fi
     sleep 0.1
   done
   status=0

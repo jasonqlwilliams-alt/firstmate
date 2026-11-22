@@ -227,8 +227,11 @@ between_checkpoints=false
 checkpoint_record="$STATE/.last-checkpoint-return"
 if [ "$watcher_healthy" = false ] && [ "$READ_ONLY" -eq 0 ] && [ -f "$checkpoint_record" ] && [ -s "$checkpoint_record" ] \
   && checkpoint_session=$(fm_codex_checkpoint_session "$STATE") \
-  && checkpoint_return_age=$(fm_guard_checkpoint_age "$checkpoint_record" "$checkpoint_session" "$watcher_down_reason" \
-    2>/dev/null < "$checkpoint_record") \
+  && checkpoint_return_age=$(
+    # shellcheck disable=SC2094 # The helper only reads the receipt.
+    fm_guard_checkpoint_age "$checkpoint_record" "$checkpoint_session" "$watcher_down_reason" \
+      2>/dev/null < "$checkpoint_record"
+  ) \
   && [ ! -e "$STATE/.watch.lock" ] && [ ! -L "$STATE/.watch.lock" ] \
   && [ "$checkpoint_return_age" -ge 0 ] && [ "$checkpoint_return_age" -lt "$GRACE" ]; then
   between_checkpoints=true
