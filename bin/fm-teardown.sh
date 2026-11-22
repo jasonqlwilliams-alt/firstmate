@@ -285,14 +285,16 @@
 #     already removed it). reap_task_worktree_processes uses `lsof -a -d cwd`
 #     to find processes under the owned worktree and the recorded tasktmp,
 #     which can be shared between homes. On Linux without lsof it uses
-#     `/proc/<pid>/cwd` for the owned worktree only.
+#     `/proc/<pid>/cwd` for the owned worktree only. On other hosts without
+#     lsof, teardown can only attempt to reap the tmux pane's process group.
 #     Both scans can identify only processes whose working directory is readable.
 #     Both scans are bounded by process count and exclude teardown and its
 #     ancestors. Teardown sends TERM, then KILL after a short grace period
 #     to any survivor whose process identity and task cwd still match.
 #     Do not launch cleanup from inside the task copy through a wrapper that detaches and exits.
-#     Hosts that hide part of teardown's ancestry cause it to refuse when
-#     either cwd scan finds a match. No matches is a silent no-op.
+#     A failed cwd scan stops cleanup before copy return. Hosts that hide
+#     part of teardown's ancestry cause it to refuse when either cwd scan
+#     finds a match. No matches is a silent no-op.
 #   Fix 3 - sweep abandoned remote job workers. A remote job worker started
 #     from a worktree's own bin/ outlives that worktree's removal without
 #     being reachable by Fix 2, because its working directory is wherever it
@@ -2205,12 +2207,7 @@ reap_task_backend_process_group() {  # <label>
   fi
 }
 
-# Reap eligible cwd matches under the owned worktree and, with lsof, tasktmp
-# before either is removed. TERM
-# first, then KILL after a short grace period for anything still alive; a
-# process that exits on its own between the two passes is simply absent from
-# the recheck. Without lsof, Linux uses /proc and other hosts use the backend
-# process-group fallback. A cwd scan error refuses before destructive teardown.
+# See Fix 2 in the script header for scanner scope and refusal rules.
 reap_task_worktree_processes() {  # <label> <owned-worktree> <tasktmp>
   local label=$1 worktree=$2 tasktmp=$3 scanner pids pid identity current_pids i pass=1 max_passes=3
   local -a tracked_pids tracked_identities remaining_pids remaining_identities
