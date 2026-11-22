@@ -19,8 +19,8 @@
 # The mark is advisory to loss reporting only. It never reads or changes the
 # task's copy, branch, or work, and relaunch, cleanup, the landed-work checks,
 # backlog holds, and decision records ignore it. bin/fm-teardown.sh removes it
-# with the task record. A remote secondmate or secondmate record is refused:
-# neither reaches the local loss report this mark governs.
+# with the task record. Park marks apply only to local ordinary tasks.
+# Existing secondmate reporting rules still apply.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,7 +35,7 @@ fm_refuse_if_gate_agent
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
 # shellcheck source=bin/fm-wake-lib.sh
-. "$SCRIPT_DIR/fm-wake-lib.sh"
+FM_WAKE_NO_MKDIR=1 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-lease-lib.sh
 . "$SCRIPT_DIR/fm-lease-lib.sh"
 
@@ -51,6 +51,7 @@ case "$ACTION" in mark|clear) ;; *) usage ;; esac
 
 META="$STATE/$ID.meta"
 MARK="$STATE/$ID.parked-retained"
+[ -d "$STATE" ] || { echo "error: no task record for $ID" >&2; exit 1; }
 LOCK=$(fm_meta_lock_path "$META") || { echo "error: could not resolve the task record lock" >&2; exit 1; }
 CONTROL_LOCK="$STATE/.control-$ID.lock"
 TMP=
@@ -65,12 +66,12 @@ cleanup() {
   fm_lease_guard_release || true
 }
 trap cleanup EXIT
-fm_lock_try_acquire "$CONTROL_LOCK" || refuse_busy
+fm_lock_try_acquire "$CONTROL_LOCK" same-owner || refuse_busy
 [ -f "$META" ] && [ ! -L "$META" ] || { echo "error: no task record for $ID" >&2; exit 1; }
 INCARNATION=$(fm_backend_endpoint_park_identity "$META") || INCARNATION=
 fm_lock_release "$CONTROL_LOCK"
 fm_lease_guard "$ID" "park $ACTION (fm-park-retained)"
-fm_lock_try_acquire "$CONTROL_LOCK" || refuse_busy
+fm_lock_try_acquire "$CONTROL_LOCK" same-owner || refuse_busy
 fm_lock_acquire_wait "$LOCK"
 
 if [ ! -f "$META" ] || [ -L "$META" ] \

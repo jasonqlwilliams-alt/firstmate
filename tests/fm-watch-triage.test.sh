@@ -2331,6 +2331,7 @@ test_missing_tmux_endpoint_surfaces_once() (
 # task still raises the ordinary loss wake.
 test_parked_retained_copy_suppresses_endpoint_loss() (
   local tmux_bin socket dir state window out pid='' park_pid='' wt before after park lock rc tries control_lock lease_lock task action
+  local saved_mark owner representation real_cat
   tmux_bin=$(command -v tmux) || { echo "skip: tmux is required for the parked endpoint regression"; return 0; }
   park="$ROOT/bin/fm-park-retained.sh"
   socket="fm-watch-parked-$$-$RANDOM"
@@ -2358,11 +2359,18 @@ test_parked_retained_copy_suppresses_endpoint_loss() (
   lease_task() { FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=main "$ROOT/bin/fm-lease.sh" "$@"; }
 
   rc=0
-  park_task > "$dir/park.out" 2>&1 || rc=$?
+  FM_HOME="$dir/absent-home" FM_STATE_OVERRIDE= "$park" > "$dir/park.out" 2>&1 || rc=$?
   [ "$rc" -eq 2 ] || fail "park without arguments exited $rc"
+  assert_absent "$dir/absent-home" "park usage created a missing home"
   grep -Fq 'fm-park-retained.sh <task-id> mark' "$dir/park.out" \
     && grep -Fq 'fm-park-retained.sh <task-id> clear' "$dir/park.out" \
     || fail "park usage did not show both operations: $(cat "$dir/park.out")"
+  for action in mark clear; do
+    rc=0
+    FM_HOME="$dir/absent-home" FM_STATE_OVERRIDE= "$park" nosuch "$action" > "$dir/park.out" 2>&1 || rc=$?
+    [ "$rc" -eq 1 ] || fail "$action without a task home exited $rc"
+    assert_absent "$dir/absent-home" "refused $action created a missing home"
+  done
 
   fm_write_meta "$state/remote.meta" 'window=parked:fm-remote' kind=ship remote_host=fixture-host spawn_gen=first
   fm_write_meta "$state/mate.meta" 'window=parked:fm-mate' kind=secondmate spawn_gen=first
@@ -2456,6 +2464,8 @@ test_parked_retained_copy_suppresses_endpoint_loss() (
     fail "mark accepted a backend that cannot confirm a missing endpoint"
   fi
   rm -f "$state/other.meta"
+  mkdir "$state/.control-held.lock" || fail "could not stage a stale control lock"
+  dead_pid > "$state/.control-held.lock/pid"
   park_task held mark > "$dir/park.out" 2>&1 || fail "marking failed: $(cat "$dir/park.out")"
   expect_quiet marked
   # Clearing the mark restores the alarm for the same lost endpoint.
@@ -2465,6 +2475,7 @@ test_parked_retained_copy_suppresses_endpoint_loss() (
   # A mark from an earlier incarnation does not silence a relaunched worker's loss.
   close_worker again ''
   park_task again mark > "$dir/park.out" 2>&1 || fail "legacy marking failed: $(cat "$dir/park.out")"
+  saved_mark=$(cat "$state/again.parked-retained") || fail "could not save the original park mark"
   printf 'spawn_gen=legacy-20261122T000000Z-123\n' >> "$state/again.meta"
   expect_quiet teardown-stamp
 
@@ -2515,6 +2526,39 @@ SH
   [ "$rc" -eq 1 ] || fail "mark after replacement publication and overlapping release exited $rc: $(cat "$dir/park.out")"
   rm -f "$control_lock/pid" "$lease_lock/pid" "$lock/pid"
   rmdir "$control_lock" "$lease_lock" "$lock" || fail "mark selected a worker before the relaunch finished"
+
+  cat > "$dir/lock-bin/cat" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = "$FM_TEST_CONTROL_LOCK/pid" ] && [ -f "$1" ]; then
+  if [ -L "$FM_TEST_CONTROL_LOCK" ]; then
+    unlink "$FM_TEST_CONTROL_LOCK" || exit 1
+  fi
+  rm -f "$FM_TEST_RELAUNCH_OWNER/pid"
+  rmdir "$FM_TEST_RELAUNCH_OWNER" || exit 1
+fi
+exec "$FM_TEST_REAL_CAT" "$@"
+SH
+  chmod +x "$dir/lock-bin/cat"
+  real_cat=$(command -v cat) || fail "could not resolve cat for the relaunch fixture"
+  for representation in directory symlink; do
+    owner=$control_lock
+    if [ "$representation" = symlink ]; then
+      owner="$control_lock.owner.fixture"
+      ln -s "$owner" "$control_lock" || fail "could not stage the relaunch lock symlink"
+    fi
+    mkdir "$owner" || fail "could not stage a live relaunch lock"
+    printf '%s\n' "$$" > "$owner/pid"
+    rc=0
+    PATH="$dir/lock-bin:$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" \
+      FM_TEST_CONTROL_LOCK="$control_lock" FM_TEST_RELAUNCH_OWNER="$owner" \
+      FM_TEST_REAL_CAT="$real_cat" "$park" again mark > "$dir/park.out" 2>&1 &
+    park_pid=$!
+    wait_for_exit "$park_pid" 100 || rc=$?
+    park_pid=''
+    [ ! -e "$owner" ] && [ ! -L "$control_lock" ] || fail "relaunch did not release its $representation lock during acquisition"
+    [ "$rc" -eq 1 ] || fail "mark continued after the relaunch released its $representation lock: $(cat "$dir/park.out")"
+    [ "$(cat "$state/again.parked-retained")" = "$saved_mark" ] || fail "mark replaced the original worker's mark"
+  done
   expect_loss relaunched
   ack_parked || fail "[relaunched] could not acknowledge the loss wake"
   open_worker again fourth

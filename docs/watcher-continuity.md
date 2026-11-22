@@ -64,7 +64,8 @@ The report is keyed to the recorded backend, target, and spawn generation, so a 
 A successful capture also re-arms the report, and teardown keeps the loss record until it retires the task record.
 The wake keeps its window key for routing and has a separate deduplication identity, so the drain presents both the endpoint loss and any ordinary stale wake for that window, collapsing repeated loss rows to one.
 After handling both wakes, use the drain's [printed acknowledgement](#recovery-episode-acknowledgement) to retire them.
-After deliberately closing a task's worker window and retaining its isolated copy, use `bin/fm-park-retained.sh <task-id> mark` to silence this report for the confirmed missing endpoint without touching the copy or its work.
+After deliberately closing a local ordinary task's worker window and retaining its isolated copy, use `bin/fm-park-retained.sh <task-id> mark` to silence this report for the confirmed missing endpoint without touching the copy or its work.
+Existing secondmate reporting rules still apply.
 `bin/fm-park-retained.sh <task-id> clear` restores normal reporting eligibility with the existing loss deduplication.
 A loss notification queued before marking is still presented and acknowledged once through the normal wake acknowledgement, and no further loss notification is raised while the mark matches.
 A relaunch or resume records a new incarnation, so an older mark stops applying and the resumed worker's loss alerts again; the script header owns the mark's format.
