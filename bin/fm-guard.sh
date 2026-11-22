@@ -25,6 +25,12 @@
 # per distinct down-episode in this FM_HOME (keyed to the failing condition, not
 # the beacon mtime, which a healthy between-turns watcher advances every poll);
 # later guarded commands in the same episode print a one-line reminder instead.
+# Between foreground checkpoints: when bin/fm-watch-checkpoint.sh recorded a
+# confirmed clean close (state/.last-checkpoint-return, bound to the current
+# attended Codex session) younger than grace, and the watcher lock is unheld,
+# the guard prints one factual NOTICE instead of the banner, claims no episode,
+# and clears an announced one. A quiet close also requires a fresh beacon; a
+# verified wake close does not. Anything else alarms as usual.
 # Episode state lives only under state/.guard-watcher-stale-banner (volatile,
 # bounded). Independent alarms (queued wakes, worktree tangle) are never
 # suppressed by that dedup. Normal wake handling (watcher briefly down between a
