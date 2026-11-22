@@ -109,10 +109,10 @@ check_profiles() { # <board|apply> <file>
 }
 command_build() {
   local reopen= data board tmp json sid owner cache
-  case "${1-}" in
-    --reopen) reopen=$1; shift ;;
-    --*) fail "expected build [--reopen] <file.json>" ;;
-  esac
+  if [ "${1-}" = --reopen ]; then
+    reopen=$1
+    shift
+  fi
   [ "$#" -eq 1 ] || fail "expected build [--reopen] <file.json>"
   data=$1
   [ -f "$data" ] || fail "input file is missing"
@@ -145,7 +145,7 @@ command_build() {
   if [ "$BOARD_SESSION_REOPENED" = 1 ]; then
     "$SCRIPT_DIR/fm-procevent-lavish.sh" retire "$board" >/dev/null || fail "cannot retire pre-reopen source"
   fi
-  board_session_open_before_arm "$board" || fail "session ended before arm"
+  lavish_session_listed_open "$(board_realpath "$board")" +    || fail "the board Lavish session is not listed open immediately before arming"
   owner=$(source_owner "$sid")
   if [ -n "$owner" ]; then
     printf 'already-armed: %s\n' "$sid"

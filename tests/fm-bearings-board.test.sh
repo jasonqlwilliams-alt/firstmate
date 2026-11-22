@@ -613,6 +613,7 @@ test_build_leaves_a_user_ended_session_closed() {
   rc=$?
   set -e
   [ "$rc" -eq 0 ] || fail "a user-ended session crashed the build (exit $rc): $out"
+  assert_contains "$out" "session: closed" "the build did not report a closed session: $out"
   assert_contains "$out" "the user closed this board" \
     "the build did not say the user closed the board: $out"
   assert_contains "$out" "--reopen" \
@@ -696,7 +697,7 @@ test_build_reopens_when_an_opened_session_ends_before_listing() {
   pass "an explicit --reopen recovers a session that ends between establish and listing"
 }
 
-test_build_reports_a_browser_close_before_either_listing() {
+test_build_refuses_to_arm_after_a_browser_close_during_build() {
   local listing home data board out sid
   for listing in 1 2; do
     home=$(make_home "browser-close-before-list-$listing")
@@ -704,8 +705,9 @@ test_build_reports_a_browser_close_before_either_listing() {
     board="$home/.lavish/bearings-board.html"
     write_valid_payload "$data"
     printf '%s\n' "$listing" > "$home/lavish-state/end-before-list"
-    out=$(run_board "$home" build "$data" 2>&1) \
-      || fail "build failed after a browser close before listing $listing: $out"
+    if out=$(run_board "$home" build "$data" 2>&1); then
+      fail "build accepted a missing open listing after the browser close: $out"
+    fi
     [ -e "$home/lavish-state/user-ended" ] && [ ! -s "$home/lavish-state/open" ] \
       || fail "build did not leave the board closed after listing $listing"
     [ "$(grep -Fc -- "$board" "$home/lavish-state/calls")" -eq 1 ] \
@@ -713,15 +715,19 @@ test_build_reports_a_browser_close_before_either_listing() {
     if grep -q -- '--reopen' "$home/lavish-state/calls"; then
       fail "build called lavish-axi --reopen without being asked"
     fi
-    assert_contains "$out" "the board closed during the build" \
-      "build did not report the browser close before listing $listing: $out"
+    assert_contains "$out" "refusing to arm a poll" \
+      "build did not report the liveness failure before listing $listing: $out"
+    case "$out" in
+      *"session: closed"*|*"the user closed this board"*)
+        fail "build inferred a browser close from listing $listing: $out" ;;
+    esac
     sid=$(run_lavish_source_id "$home" "$board")
     ! run_decisions "$home" binding "$sid" >/dev/null 2>&1 \
       || fail "build bound the board after a browser close before listing $listing"
     ! run_procevent "$home" list | awk 'NR > 1 { print $1 }' | grep -Fxq "$sid" \
       || fail "build armed the board after a browser close before listing $listing"
   done
-  pass "build reports a browser close before either listing and leaves the board unarmed"
+  pass "build refuses to arm when the browser closes before either listing"
 }
 
 test_build_refuses_to_arm_when_the_session_stays_ended() {
@@ -985,7 +991,7 @@ test_build_refuses_a_template_without_exactly_one_slot
 test_build_reopens_a_session_the_captain_ended
 test_build_leaves_a_user_ended_session_closed
 test_build_reopens_when_an_opened_session_ends_before_listing
-test_build_reports_a_browser_close_before_either_listing
+test_build_refuses_to_arm_after_a_browser_close_during_build
 test_build_refuses_to_arm_when_the_session_stays_ended
 test_build_starts_a_listener_for_an_already_armed_board
 test_build_drops_decision_cards_whose_subject_already_landed

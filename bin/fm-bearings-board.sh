@@ -53,13 +53,12 @@
 # reporting `status: user-ended` with the same session id, so exit status alone
 # cannot tell a live board from a dead one. build requires the server's fresh
 # session listing to show the canonical board open before it binds or arms.
-# A plain attach reporting user-ended or a session observed to close during
-# the build yields the closed outcome above (exit 0). Other non-open outcomes
-# exit 1 and are not armed. After an explicit reopen it retires the pre-reopen
-# source generation through the guarded adapter path, arms a fresh registration,
-# and accepts only the replacement listener as live. A registered live board with no live owner
-# also gets a replacement before build returns, because `already-armed` is not
-# the same fact as `listening`.
+# A plain attach reporting user-ended yields the closed outcome above (exit 0).
+# Other non-open outcomes exit 1 and are not armed. After an explicit reopen
+# it retires the pre-reopen source generation through the guarded adapter path,
+# arms a fresh registration, and accepts only the replacement listener as live.
+# A registered live board with no live owner also gets a replacement before
+# build returns, because `already-armed` is not the same fact as `listening`.
 #
 # CAPTAIN'S CALL HYGIENE. A decision card is dropped when its work item, PR, or
 # structured artifact/version subject appears among the payload's own landed
@@ -681,10 +680,10 @@ publish_detail() {  # <effective.json> <board>
 
 command_build() {
   local reopen=
-  case "${1-}" in
-    --reopen) reopen=$1; shift ;;
-    --*) usage >&2; exit 2 ;;
-  esac
+  if [ "${1-}" = --reopen ]; then
+    reopen=$1
+    shift
+  fi
   local data=${1-} board json tmp sid extracted effective owner version pre_reopen_owner
   [ "$#" -eq 1 ] || { usage >&2; exit 2; }
   command -v jq >/dev/null 2>&1 || fail "jq is required"
@@ -747,7 +746,7 @@ command_build() {
     "$SCRIPT_DIR/fm-procevent-lavish.sh" retire "$board" >/dev/null \
       || fail "cannot retire the pre-reopen source generation (observed owner: ${pre_reopen_owner:-none})"
   fi
-  if ! board_session_open_before_arm "$board"; then
+  if ! lavish_session_listed_open "$(board_realpath "$board")"; then
     version=$(lavish-axi --version 2>/dev/null | tr -d '[:space:]')
     fail "the board Lavish session is not listed open immediately before arming (lavish-axi ${version:-version-unknown}); refusing to arm a poll on observed state not-open"
   fi
