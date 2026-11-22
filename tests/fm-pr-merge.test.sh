@@ -2601,6 +2601,32 @@ test_github_zero_checks_refuse_and_allow_zero_checks_waives() {
   pass "fm-pr-merge refuses a head with no checks unless --allow-zero-checks waives it"
 }
 
+test_github_zero_checks_queue_retry_requires_explicit_waiver() {
+  local case_dir merge_status rc head
+  head=a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2
+  for merge_status in 0 1; do
+    case_dir=$(make_case "github-zero-checks-queue-retry-$merge_status")
+    mkdir -p "$case_dir/wt"
+    add_gh_mocks "$case_dir" "$head"
+    write_github_no_checks_json "$case_dir" "$head"
+    write_github_outcome "$case_dir" OPEN false false main
+    printf 'merge_method=REBASE\n' > "$case_dir/github-rules"
+    printf '%s\n' "$merge_status" > "$case_dir/github-merge-rc"
+
+    rc=0
+    run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/95 \
+      --allow-zero-checks > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+
+    expect_code 1 "$rc" "github-zero-checks-queue-retry-$merge_status: an unproved merge must fail"
+    assert_logged_gh_merge "$case_dir" 95 example/repo --squash
+    assert_grep '--attended-override -- --auto --rebase' "$case_dir/stderr" \
+      "github-zero-checks-queue-retry-$merge_status: retry guidance omitted the queue flags"
+    assert_grep 'if the head has no checks at retry time, explicitly add --allow-zero-checks before -- while attended' "$case_dir/stderr" \
+      "github-zero-checks-queue-retry-$merge_status: retry guidance omitted the waiver requirement"
+  done
+  pass "fm-pr-merge says when to supply the zero-check waiver again for a queue retry"
+}
+
 test_allow_zero_checks_is_attended_only() {
   local case_dir rc head
   head=a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
@@ -2686,4 +2712,5 @@ test_away_grant_does_not_bypass_red_or_identity
 test_unreadable_away_record_refuses_merge
 test_allow_red_refused_on_gitlab
 test_github_zero_checks_refuse_and_allow_zero_checks_waives
+test_github_zero_checks_queue_retry_requires_explicit_waiver
 test_allow_zero_checks_is_attended_only

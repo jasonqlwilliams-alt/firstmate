@@ -35,7 +35,7 @@
 # gh-axi view could not prove the outcome either.
 # If the pull request remains open and the base branch has an effective
 # merge_queue rule, the refusal names the queue's configured merge method and
-# the exact --attended-override -- --auto --<method> retry flags, unless the caller already passed
+# its required --auto --<method> forge flags, unless the caller already passed
 # that method with --auto to a merge command that returned success, in which
 # case it reports instead that the accepted request has not entered the queue
 # and the queue state has to be re-checked.
@@ -824,8 +824,6 @@ require_released_captain_hold() {
 FM_PR_MERGE_AUTHORITY=
 require_away_merge_grant() {
   local yolo grants grant
-  FM_PR_MERGE_AUTHORITY=
-  fm_afk_contract_present "$STATE" || return 0
   if ! FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
     "$SCRIPT_DIR/fm-afk-contract.sh" validate >/dev/null 2>&1; then
     echo "error: PR merge refused - the away-posture record could not be read; nothing was merged" >&2
@@ -853,12 +851,14 @@ EOF
 }
 
 require_current_away_authority() {
+  FM_PR_MERGE_AUTHORITY=
+  fm_afk_contract_present "$STATE" || return 0
   require_away_merge_grant || return 1
-  if fm_afk_contract_present "$STATE" && [ "${#ALLOW_RED[@]}" -gt 0 ]; then
+  if [ "${#ALLOW_RED[@]}" -gt 0 ]; then
     echo "error: --allow-red is attended-only; while the away-posture record exists the green check is absolute" >&2
     return 2
   fi
-  if fm_afk_contract_present "$STATE" && [ "$ALLOW_ZERO_CHECKS" = true ]; then
+  if [ "$ALLOW_ZERO_CHECKS" = true ]; then
     echo "error: --allow-zero-checks is attended-only; while the away-posture record exists the green check is absolute" >&2
     return 2
   fi
@@ -933,6 +933,9 @@ github_report_queue_rules() {
       else
         printf 'error: base branch %s requires the merge queue; retry with: %s %s %s --attended-override -- --auto --%s\n' \
           "$FM_PR_GITHUB_BASE" "$0" "$ID" "$URL" "$queue_method" >&2
+        if [ "$ALLOW_ZERO_CHECKS" = true ]; then
+          printf 'error: if the head has no checks at retry time, explicitly add --allow-zero-checks before -- while attended\n' >&2
+        fi
       fi
       ;;
     conflicting)
