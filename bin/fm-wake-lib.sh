@@ -2335,11 +2335,9 @@ fm_wake_restore_queue() {
   fi
 }
 
-# Presentation dedup keeps the newest row per kind and key, with two identity
-# refinements: every heartbeat collapses to one, and a recorded-endpoint-loss
-# stale (docs/watcher-continuity.md#recorded-endpoint-loss) keeps its own
-# identity beside the ordinary stale wakes for the same window, so neither hides
-# the other. Rows and their window-based keys are never rewritten.
+# Presentation generally keeps the newest row per kind and key and groups all
+# heartbeats together. See docs/watcher-continuity.md#recorded-endpoint-loss for
+# the stale-wake exception. Deduplication leaves the durable queue unchanged.
 fm_wake_print_deduped() {
   local file=$1
   _fm_wake_require_classify

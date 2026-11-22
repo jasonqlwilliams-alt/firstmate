@@ -67,6 +67,7 @@ After handling both wakes, use the drain's [printed acknowledgement](#recovery-e
 Where the away daemon runs, it routes the loss to its escalation digest and keeps pause tracking cleared while the loss still matches the current endpoint, even if the wait remains declared.
 
 The [backend verification record](verification/runtime-backends.md#recorded-endpoint-loss) covers tmux and Herdr.
+The [drain regression](../tests/fm-watch-triage.test.sh) exercises both wake sequence orders.
 
 ## Foreground checkpoint boundary
 
@@ -126,7 +127,7 @@ An acknowledgement whose cutoff removes none of the actor's rows while a present
 If a branch offer loses the claim race to main, it rejects its settlement so the watcher retains the actionable close until Pi accepts its main follow-up.
 [`pi-supervision-branch.md`](pi-supervision-branch.md#components-and-their-owners) owns branch eligibility, mixed-queue dispatch, the pre-drain recheck, and heartbeat's all-or-nothing rule.
 A check-kind row is main-owned in every mode, including a heartbeat review, so it is never part of a branch claim and never defers one; main is woken for it on that check's own triggering close.
-`fm-wake-drain.sh` never reclassifies a row itself: it filters the queue to the current actor's opaque claim before same-key deduplication, then presents and acknowledges only that actor-local view.
+`fm-wake-drain.sh` filters the queue using the current actor's existing opaque claim before [presentation deduplication](#recorded-endpoint-loss), then presents and acknowledges only that actor-local view.
 A missing or empty branch snapshot is refused loudly rather than read as "nothing eligible", because reaching the drain without the non-empty handoff promised by the extension is a wiring bug.
 Because branch claims contain no check-kind rows, a branch acknowledgement skips check-specific receipt scans.
 `tests/fm-wake-queue.test.sh`'s mixed-queue actor, stale-acknowledgement remedy, and presentation-deadline tests drive the real scripts: branch acknowledgement cannot swallow a main row, a concurrent main turn cannot present or acknowledge an active branch grant, a no-op stale acknowledgement names the current presented wake's exact command, live-holder presentation contention stays bounded and retriable, and acknowledgement locking remains blocking.
