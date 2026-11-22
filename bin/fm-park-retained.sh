@@ -56,21 +56,17 @@ refuse_path() {
   exit 1
 }
 
-fm_backlog_directory_present "$STATE" "state directory" || refuse_path "$FM_BACKLOG_TRANSITION_ERROR"
-STATE_DIR=$(fm_backlog_canonical_existing "$STATE") || refuse_path "cannot resolve state directory at $STATE"
-STATE_ROUTE=$(CDPATH='' cd -L -- "$STATE" 2>/dev/null && pwd -L) || refuse_path "cannot normalize state directory at $STATE"
-FM_HOME=$(CDPATH='' cd -L -- "$FM_HOME" 2>/dev/null && pwd -L) || refuse_path "cannot resolve the selected home"
+HOME_ROUTE=$FM_HOME
+STATE_ROUTE=$STATE
+FM_HOME=$(CDPATH='' cd -P -- "$HOME_ROUTE" 2>/dev/null && pwd -P) \
+  || refuse_path "cannot resolve the selected home at $HOME_ROUTE"
+fm_backlog_directory_present "$STATE_ROUTE" "state directory" || refuse_path "$FM_BACKLOG_TRANSITION_ERROR"
+STATE=$(CDPATH='' cd -P -- "$STATE_ROUTE" 2>/dev/null && pwd -P) \
+  || refuse_path "cannot resolve state directory at $STATE_ROUTE"
 case "$STATE" in
-  /*) ;;
-  *)
-    HOME_DIR=$(fm_backlog_canonical_existing "$FM_HOME") || refuse_path "cannot resolve home directory at $FM_HOME"
-    case "$STATE_DIR" in
-      "$HOME_DIR"|"${HOME_DIR%/}"/*) ;;
-      *) refuse_path "relative state directory resolves outside this home at $STATE" ;;
-    esac
-    ;;
+  "$FM_HOME"|"${FM_HOME%/}"/*) ;;
+  *) refuse_path "state directory resolves outside this home at $STATE_ROUTE" ;;
 esac
-STATE=$STATE_DIR
 FM_STATE_OVERRIDE=$STATE
 
 META="$STATE/$ID.meta"
@@ -83,10 +79,12 @@ refuse_busy() {
   exit 1
 }
 require_task_record() {
+  [ "$(CDPATH='' cd -P -- "$HOME_ROUTE" 2>/dev/null && pwd -P)" = "$FM_HOME" ] \
+    || refuse_path "home directory changed at $HOME_ROUTE"
   fm_backlog_directory_present "$STATE_ROUTE" "state directory" || refuse_path "$FM_BACKLOG_TRANSITION_ERROR"
-  [ "$(fm_backlog_canonical_existing "$STATE_ROUTE")" = "$STATE" ] \
+  [ "$(CDPATH='' cd -P -- "$STATE_ROUTE" 2>/dev/null && pwd -P)" = "$STATE" ] \
     || refuse_path "state directory changed at $STATE_ROUTE"
-  fm_backlog_record_present "$META" "task record" "$STATE_ROUTE" || refuse_path "$FM_BACKLOG_TRANSITION_ERROR"
+  fm_backlog_record_present "$META" "task record" "$STATE" || refuse_path "$FM_BACKLOG_TRANSITION_ERROR"
 }
 cleanup() {
   [ -z "$TMP" ] || rm -f -- "$TMP" || true
@@ -115,7 +113,7 @@ fi
   || { echo "error: $ID is placed on a remote host; its endpoint loss is not reported here" >&2; exit 1; }
 [ "$(fm_meta_get "$META" kind)" != secondmate ] \
   || { echo "error: $ID is a secondmate; park marks apply to ordinary tasks only" >&2; exit 1; }
-if { [ -e "$MARK" ] || [ -L "$MARK" ]; } && ! fm_backlog_record_present "$MARK" "park mark" "$STATE_ROUTE"; then
+if { [ -e "$MARK" ] || [ -L "$MARK" ]; } && ! fm_backlog_record_present "$MARK" "park mark" "$STATE"; then
   refuse_path "$FM_BACKLOG_TRANSITION_ERROR"
 fi
 

@@ -67,6 +67,7 @@ After handling both wakes, use the drain's [printed acknowledgement](#recovery-e
 After deliberately closing a local ordinary task's worker window and retaining its isolated copy, use `bin/fm-park-retained.sh <task-id> mark` to silence this report for the confirmed missing endpoint without touching the copy or its work.
 Existing secondmate reporting rules still apply.
 `bin/fm-park-retained.sh <task-id> clear` restores normal reporting eligibility with the existing loss deduplication.
+Both commands require the state directory to resolve within the selected Firstmate home, including when `FM_STATE_OVERRIDE` selects an alternate directory.
 A loss notification queued before marking is still presented and acknowledged once through the normal wake acknowledgement, and no further loss notification is raised while the mark matches.
 A relaunch or resume records a new incarnation, so an older mark stops applying and the resumed worker's loss alerts again; the script header owns the mark's format.
 Where the away daemon runs, it routes the loss to its escalation digest and keeps pause tracking cleared while the loss still matches the current endpoint, even if the wait remains declared.

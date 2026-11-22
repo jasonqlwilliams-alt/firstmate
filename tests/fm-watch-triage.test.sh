@@ -2636,7 +2636,7 @@ SH
   chmod +x "$dir/bin/tmux" "$dir/bin/ln"
 
   for action in mark clear; do
-    for redirect in state ancestor relative-ancestor relative-foreign record mark after-lock; do
+    for redirect in state ancestor relative-ancestor relative-foreign absolute-traversal absolute-foreign record mark after-lock; do
       home="$dir/$action-$redirect"
       state="$home/state"
       marker="$state/task.parked-retained"
@@ -2652,6 +2652,8 @@ SH
           [ "$redirect" = ancestor ] || state=indirect/state
           ;;
         relative-foreign) state=../foreign/state ;;
+        absolute-traversal) state="$home/../foreign/state" ;;
+        absolute-foreign) state="$foreign" ;;
         record)
           mkdir "$state" && ln -s "$foreign/task.meta" "$state/task.meta" \
             || fail "could not redirect the task record"
@@ -2675,7 +2677,7 @@ SH
       wait_for_exit "$pid" 100 || rc=$?
       pid=''
       case "$redirect" in
-        state|ancestor|relative-*|record) assert_absent "$lock_probe" "$action attempted a lifecycle lock for the redirected $redirect" ;;
+        state|ancestor|relative-*|absolute-*|record) assert_absent "$lock_probe" "$action attempted a lifecycle lock for the redirected $redirect" ;;
         after-lock) assert_present "$swapped" "$action never reached the metadata lock handoff" ;;
       esac
       [ "$rc" -eq 1 ] || fail "$action accepted the $redirect redirect (exit $rc): $(cat "$home/command.out")"
@@ -2690,7 +2692,7 @@ test_parked_herdr_endpoint_does_not_hide_recycled_target_loss() (
   local dir state target=parked-test:w1:p2 pid=''
   dir=$(fm_test_tmproot fm-watch-parked-herdr) || fail "could not create the Herdr park fixture"
   trap '[ -z "$pid" ] || reap "$pid"' EXIT
-  state="$dir/home/state"
+  state="$dir/home/runtime-state"
   mkdir -p "$state" "$dir/bin"
   cat > "$dir/bin/herdr" <<'SH'
 #!/usr/bin/env bash
