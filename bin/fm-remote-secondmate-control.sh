@@ -463,7 +463,7 @@ cmd_capture() {
 }
 
 cmd_observe() {
-  local id=$1 harness
+  local id=$1 harness screen
   validate_id "$id"
   validate_home "$id"
   remote_endpoint_require "$id"
@@ -471,9 +471,11 @@ cmd_observe() {
   harness=$(fm_meta_get "$REMOTE_ENDPOINT_META" harness)
   if [ "${2:-}" = --exit-dialog ]; then
     [ "$(fm_control_harness_family "$harness")" = claude ] || return 0
-    FM_BACKEND_HERDR_ENDPOINT_META="$REMOTE_ENDPOINT_META" fm_backend_guarded_composer_state \
-      "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "fm-$id" '' claude
-    printf '\n'
+    screen=$(FM_BACKEND_HERDR_ENDPOINT_META="$REMOTE_ENDPOINT_META" fm_backend_guarded_composer_state \
+      "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "fm-$id" '' claude)
+    if [ "$screen" = exit-confirm ]; then
+      printf 'exit-confirm\n'
+    fi
     return 0
   fi
   FM_BACKEND_HERDR_ENDPOINT_META="$REMOTE_ENDPOINT_META" \

@@ -305,15 +305,22 @@ case "$1 $2" in
     case " $* " in *' --format ansi '*) styled=1 ;; esac
     case "$phase" in
       dialog)
-        [ "$FM_DIALOG_MODE:$styled" != doorbell-after-long:1 ] || exit 1
+        [ "$FM_DIALOG_MODE:$styled" != doorbell-after-long-plain:1 ] || exit 1
         while IFS= read -r line; do
           case "$styled:$line" in
             1:*❯*) printf '\033[1m%s\033[0m\n' "$line" ;;
             *) printf '%s\n' "$line" ;;
           esac
-        done < "$FM_DIALOG_FIXTURE"
+        done < <(
+          case " $* " in
+            *' --source visible '*) cat "$FM_DIALOG_FIXTURE" ;;
+            *) tail -n 3 "$FM_DIALOG_FIXTURE" ;;
+          esac
+        )
         ;;
       typed|retry) printf 'Claude\n\033[1m❯ /exit\033[0m\n' ;;
+      picker) printf 'Update now (runs npm install)\nSkip until next version\nesc skip\n' ;;
+      unreadable) exit 1 ;;
       stopped) printf '$ \n' ;;
       *) printf 'Claude\n❯ \n' ;;
     esac
@@ -349,10 +356,11 @@ fm_write_meta "$meta" 'backend=herdr' 'window=fixture:p1' 'endpoint_task_id=exit
   'herdr_session=fixture' 'herdr_workspace_id=w1' 'herdr_tab_id=t1' 'herdr_pane_id=p1' 'herdr_terminal_id=term-claude'
 export FM_DIALOG_HOME="$TMP_ROOT/worktree"
 for mode in dialog long-dialog picker-history dialog-unreadable dialog-after-typing dialog-after-failed-enter \
-    retry retry-failure enter-failure single-stop doorbell-before doorbell-after doorbell-after-long doorbell-before-picker; do
+    retry retry-failure enter-failure single-stop doorbell-before doorbell-before-picker \
+    doorbell-after doorbell-after-long doorbell-after-long-plain; do
   export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/herdr-$mode"
   case "$mode" in
-    long-dialog|doorbell-after-long) export FM_DIALOG_FIXTURE="$TMP_ROOT/long.screen" ;;
+    long-dialog|doorbell-after-long*) export FM_DIALOG_FIXTURE="$TMP_ROOT/long.screen" ;;
     picker-history|doorbell-before-picker) export FM_DIALOG_FIXTURE="$TMP_ROOT/picker-history.screen" ;;
     *) export FM_DIALOG_FIXTURE="$FIXTURE" ;;
   esac
@@ -459,14 +467,44 @@ assert_absent "$FM_DIALOG_HOME/state/parent-route/exitdialog.inbox" 'remote rest
 assert_absent "$FM_DIALOG_CASE/input" 'remote restart sent terminal input into the dialog'
 pass 'remote restart observes the already-open dialog on its bound host and reports the mate unreached'
 
+for phase in dialog composer typed picker unreadable; do
+  printf '%s\n' "$phase" > "$FM_DIALOG_CASE/phase"
+  PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$FM_DIALOG_HOME" \
+    "$ROOT/bin/fm-remote-secondmate-control.sh" observe exitdialog --exit-dialog > "$FM_DIALOG_CASE/observation" \
+    || fail "remote exit-dialog observation failed on $phase"
+  case "$phase" in
+    dialog)
+      [ "$(cat "$FM_DIALOG_CASE/observation")" = exit-confirm ] || fail 'remote observation did not report the exact dialog'
+      ;;
+    *)
+      [ ! -s "$FM_DIALOG_CASE/observation" ] || fail "remote exit-dialog observation leaked a verdict on $phase"
+      ;;
+  esac
+done
+out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$FM_DIALOG_HOME" \
+  "$ROOT/bin/fm-remote-secondmate-control.sh" observe exitdialog) || fail 'ordinary remote observation failed'
+[ "$out" = idle ] || fail "ordinary remote observation did not report the native idle state: $out"
+pass 'remote exit-dialog observation emits only a positive match'
+
 cat > "$TMP_ROOT/bin/viewport-stub" <<'SH'
 #!/usr/bin/env bash
 set -eu
+viewport() {
+  if [ "${FM_DIALOG_PHASE:-}" = after ] && [ ! -s "$FM_DIALOG_CASE/input" ]; then
+    printf 'Claude\n❯ \n'
+  else
+    cat "$FM_DIALOG_FIXTURE"
+  fi
+}
+
 case "${0##*/}:$1" in
   cmux:list-panes) printf '%s\n' '{"panes":[{"surface_ids":["surface"]}]}' ;;
   cmux:read-screen)
     if [ "$FM_DIALOG_MODE" = peek ]; then printf '%s\n' "$*" >> "$FM_DIALOG_CASE/reads"; fi
-    jq -n --rawfile screen "$FM_DIALOG_FIXTURE" '{text: $screen}'
+    case " $* " in
+      *' --scrollback '*) viewport | tail -n 3 ;;
+      *) viewport ;;
+    esac | jq -Rs '{text: .}'
     ;;
   zellij:list-sessions) printf 'fixture\n' ;;
   zellij:--session)
@@ -474,9 +512,9 @@ case "${0##*/}:$1" in
       list-panes) printf '%s\n' '[{"id":1,"is_plugin":false}]' ;;
       dump-screen)
         case "$FM_DIALOG_MODE: $* " in zellij-plain:*' --ansi '*) exit 1 ;; esac
-        cat "$FM_DIALOG_FIXTURE"
+        viewport
         ;;
-      paste|send-keys) printf '%s\n' "$4" >> "$FM_DIALOG_CASE/input" ;;
+      paste|send-keys) printf '%s\n' "$*" >> "$FM_DIALOG_CASE/input" ;;
       *) exit 1 ;;
     esac
     ;;
@@ -485,37 +523,47 @@ case "${0##*/}:$1" in
       read)
         if [ "$FM_DIALOG_MODE" = peek ]; then printf '%s\n' "$*" >> "$FM_DIALOG_CASE/reads"; fi
         if [ "$5" = --screen ]; then
-          jq -n --rawfile screen "$FM_DIALOG_FIXTURE" '{result:{terminal:{source:"screen",tail:($screen|split("\n"))}}}'
+          viewport | jq -Rs '{result:{terminal:{source:"screen",tail:split("\n")}}}'
         else
           case "$6" in ''|*[!0-9]*) exit 2 ;; esac
-          tail -n "$6" "$FM_DIALOG_FIXTURE" | jq -Rs '{result:{terminal:{source:"stream",tail:split("\n")}}}'
+          viewport | tail -n "$6" | jq -Rs '{result:{terminal:{source:"stream",tail:split("\n")}}}'
         fi
         ;;
-      send) printf '%s\n' "$2" >> "$FM_DIALOG_CASE/input"; printf '%s\n' '{"ok":true}' ;;
+      send) printf '%s\n' "$*" >> "$FM_DIALOG_CASE/input"; printf '%s\n' '{"ok":true}' ;;
       *) exit 1 ;;
     esac
     ;;
-  cmux:send|cmux:send-key) printf '%s\n' "$1" >> "$FM_DIALOG_CASE/input" ;;
+  cmux:send|cmux:send-key) printf '%s\n' "$*" >> "$FM_DIALOG_CASE/input" ;;
   *) exit 1 ;;
 esac
 SH
 chmod +x "$TMP_ROOT/bin/viewport-stub"
 for backend in cmux zellij orca; do ln -s viewport-stub "$TMP_ROOT/bin/$backend"; done
 for mode in cmux zellij zellij-plain orca; do
-  export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/capture-$mode"
-  mkdir "$FM_DIALOG_CASE"
+  export FM_DIALOG_MODE="$mode"
   case "$mode" in
     cmux) backend=cmux; target=workspace:surface ;;
     zellij*) backend=zellij; target=fixture:1 ;;
     orca) backend=orca; target=term-claude ;;
   esac
-  rec="$FM_DIALOG_CASE/001.msg"
-  printf 'schema=fm-task-inbox.v1\n--\nreview the open records\n' > "$rec"
-  rc=0
-  PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" bash -c '. "$1"; fm_task_inbox_ring "$2" "$3" "$4" "" claude' \
-    _ "$ROOT/bin/fm-task-inbox-lib.sh" "$backend" "$target" "$rec" || rc=$?
-  expect_code 1 "$rc" "$mode should block the doorbell on a dialog with 26 task rows"
-  assert_absent "$FM_DIALOG_CASE/input" "$mode sent terminal input to the long dialog"
+  for when in before after; do
+    export FM_DIALOG_CASE="$TMP_ROOT/capture-$mode-$when"
+    mkdir "$FM_DIALOG_CASE"
+    rec="$FM_DIALOG_CASE/001.msg"
+    printf 'schema=fm-task-inbox.v1\n--\nreview the open records\n' > "$rec"
+    rc=0
+    PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_DIALOG_PHASE="$when" \
+      bash -c '. "$1"; fm_task_inbox_ring "$2" "$3" "$4" "" claude' \
+      _ "$ROOT/bin/fm-task-inbox-lib.sh" "$backend" "$target" "$rec" || rc=$?
+    if [ "$when" = before ]; then
+      expect_code 1 "$rc" "$mode should block typing when the long dialog is already open"
+      assert_absent "$FM_DIALOG_CASE/input" "$mode typed into the long dialog"
+    else
+      expect_code 5 "$rc" "$mode should withhold Enter when the long dialog appears after typing"
+      assert_contains "$(cat "$FM_DIALOG_CASE/input")" 'Firstmate instruction waiting' "$mode did not type the doorbell"
+      [ "$(wc -l < "$FM_DIALOG_CASE/input")" -eq 1 ] || fail "$mode sent another write after the dialog opened"
+    fi
+  done
 done
 pass 'cmux, styled and plain Zellij, and Orca refuse doorbell input into a long Claude dialog'
 
