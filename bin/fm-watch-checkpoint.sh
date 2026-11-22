@@ -51,10 +51,13 @@ attempt_record='' output_dir=''
 trap '[ -z "$attempt_record" ] || rm -f -- "$attempt_record"; [ -z "$output_dir" ] || rm -rf -- "$output_dir"' EXIT
 if [ -n "$checkpoint_session" ]; then
   rm -f -- "$RETURN_RECORD" || exit 1
-  attempt_record=$(mktemp "$RETURN_RECORD.XXXXXX") || exit 1
-  exec 3>"$attempt_record" || exit 1
-  mv -f -- "$attempt_record" "$RETURN_RECORD" || exit 1
-  attempt_record=
+  if { attempt_record=$(mktemp "$RETURN_RECORD.XXXXXX") \
+    && exec 3>"$attempt_record" \
+    && mv -f -- "$attempt_record" "$RETURN_RECORD"; } 2>/dev/null; then
+    attempt_record=
+  else
+    checkpoint_session=
+  fi
 fi
 
 case "$SECONDS_ARG" in
@@ -65,11 +68,22 @@ esac
 output_dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-watch-checkpoint.XXXXXX") || exit 1
 OUT="$output_dir/out"
 ERR="$output_dir/err"
-export FM_WATCH_CHECKPOINT_CLOSE="$output_dir/close"
+export FM_WATCH_CHECKPOINT_CLOSE=''
+if [ -n "$checkpoint_session" ]; then
+  FM_WATCH_CHECKPOINT_CLOSE="$output_dir/close"
+fi
+
+kill_after=${FM_SIGNAL_GRACE:-5}
+case "$kill_after" in
+  *[!0-9]*) kill_after=5 ;;
+  *[1-9]*) ;;
+  *) kill_after=5 ;;
+esac
 
 run_with_perl_timeout() {
   perl -e '
     my $seconds = shift;
+    my $grace = shift;
     my $pid = fork;
     die "fork failed\n" unless defined $pid;
     if (!$pid) {
@@ -79,7 +93,6 @@ run_with_perl_timeout() {
     }
     local $SIG{ALRM} = sub {
       kill "TERM", -$pid;
-      my $grace = $ENV{FM_SIGNAL_GRACE} || 5;
       local $SIG{ALRM} = sub {
         kill "KILL", -$pid;
         waitpid $pid, 0;
@@ -93,51 +106,54 @@ run_with_perl_timeout() {
     waitpid $pid, 0;
     alarm 0;
     exit($? >> 8);
-  ' "$SECONDS_ARG" "$SCRIPT_DIR/fm-watch.sh"
+  ' "$SECONDS_ARG" "$kill_after" "$SCRIPT_DIR/fm-watch.sh"
 }
 
 {
   if command -v timeout >/dev/null 2>&1; then
-    timeout "$SECONDS_ARG" "$SCRIPT_DIR/fm-watch.sh"
+    timeout -k "$kill_after" "$SECONDS_ARG" "$SCRIPT_DIR/fm-watch.sh"
   elif command -v gtimeout >/dev/null 2>&1; then
-    gtimeout "$SECONDS_ARG" "$SCRIPT_DIR/fm-watch.sh"
+    gtimeout -k "$kill_after" "$SECONDS_ARG" "$SCRIPT_DIR/fm-watch.sh"
   else
     run_with_perl_timeout
   fi
 } 3>&- >"$OUT" 2>"$ERR"
 RC=$?
-close=$(cat "$FM_WATCH_CHECKPOINT_CLOSE" 2>/dev/null || true)
+close=''
+if [ -n "$FM_WATCH_CHECKPOINT_CLOSE" ]; then
+  close=$(cat "$FM_WATCH_CHECKPOINT_CLOSE" 2>/dev/null || true)
+fi
 
 record_clean_return() {
-  [ -z "$checkpoint_session" ] || printf '%s %s\n' "$close" "$checkpoint_session" >&3
+  printf '%s %s\n' "$close" "$checkpoint_session" 2>/dev/null >&3 || true
 }
 
 # Exit codes and output keep the checkpoint contract above; a confirmed clean
 # close from the watcher only decides whether the return record is written.
 if grep -E '^(signal:|stale:|check:|heartbeat($|:))' "$OUT" >/dev/null 2>&1; then
-  cat "$OUT"
-  [ ! -s "$ERR" ] || cat "$ERR" >&2
+  cat "$OUT" || exit 1
+  [ ! -s "$ERR" ] || cat "$ERR" >&2 || exit 1
   if [ "$close" = wake ]; then
-    record_clean_return || exit 1
+    record_clean_return
   fi
   exit 0
 fi
 
 if grep -E '^watcher: already running' "$OUT" "$ERR" >/dev/null 2>&1; then
-  [ ! -s "$OUT" ] || cat "$OUT"
-  [ ! -s "$ERR" ] || cat "$ERR" >&2
+  [ ! -s "$OUT" ] || cat "$OUT" || exit 1
+  [ ! -s "$ERR" ] || cat "$ERR" >&2 || exit 1
   echo "checkpoint: watcher is already running outside this foreground checkpoint" >&2
   exit 1
 fi
 
 if [ "$RC" -eq 124 ]; then
+  printf 'checkpoint: no actionable wake within %ss\n' "$SECONDS_ARG" || exit 1
   if [ "$close" = quiet ]; then
-    record_clean_return || exit 1
+    record_clean_return
   fi
-  printf 'checkpoint: no actionable wake within %ss\n' "$SECONDS_ARG"
   exit 124
 fi
 
-[ ! -s "$OUT" ] || cat "$OUT"
-[ ! -s "$ERR" ] || cat "$ERR" >&2
+[ ! -s "$OUT" ] || cat "$OUT" || exit 1
+[ ! -s "$ERR" ] || cat "$ERR" >&2 || exit 1
 exit "$RC"

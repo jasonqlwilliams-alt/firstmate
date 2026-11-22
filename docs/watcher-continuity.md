@@ -95,7 +95,7 @@ A recent beacon after the checkpoint has returned does not prove that a watcher 
 Conversely, a running checkpoint wrapper or child PID does not prove complete lock publication, matching identity, or a fresh beacon: a suspended or stalled watcher can remain alive while polling has stopped.
 Inspect those facts at the warning's timestamp before classifying an alarm during a foreground call.
 After a clean return in the current attended Codex session, the guard describes the unheld watcher lock as an expected gap and clears any watcher-down episode.
-A quiet return requires a fresh beacon, while a verified actionable wake can explain the gap before the watcher writes its first beacon.
+A quiet return requires a completed monitoring scan and a fresh beacon, while a verified actionable wake can explain the gap before the watcher writes its first beacon.
 The gap expires after the guard grace, and a failed successor or a retained lock triggers the usual alarm ([`fm-guard.sh`](../bin/fm-guard.sh) owns the rule).
 An unacknowledged `state/.watcher-down` generation alone does not cause a watcher-health alarm; queued wakes have their own independent warning.
 

@@ -219,7 +219,7 @@ fm_supervision_model() {
 }
 
 fm_codex_checkpoint_session() {
-  local state=$1 pid identity
+  local state=$1 pid identity digest
   [ -f "$state/.lock" ] && [ ! -L "$state/.lock" ] || return 1
   [ ! -e "$state/.afk" ] && [ ! -e "$state/.afk-contract" ] || return 1
   [ "$("$FM_WAKE_LIB_DIR/fm-harness.sh")" = codex ] || return 1
@@ -229,7 +229,16 @@ fm_codex_checkpoint_session() {
   pid=$(fm_harness_ancestry_pid) || return 1
   [ "$(cat "$state/.lock" 2>/dev/null)" = "$pid" ] || return 1
   identity=$(fm_pid_identity "$pid") || return 1
-  printf '%s %s\n' "$pid" "$identity"
+  if command -v shasum >/dev/null 2>&1; then
+    digest=$(printf '%s' "$identity" | shasum -a 256) || return 1
+  elif command -v sha256sum >/dev/null 2>&1; then
+    digest=$(printf '%s' "$identity" | sha256sum) || return 1
+  else
+    return 1
+  fi
+  digest=${digest%% *}
+  [ -n "$digest" ] || return 1
+  printf '%s %s\n' "$pid" "$digest"
 }
 
 # Pi primary supervision evidence. The Pi extensions record, in their state

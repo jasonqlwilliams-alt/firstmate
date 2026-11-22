@@ -1551,7 +1551,7 @@ FM_CHECK_SIGNAL_PENDING=
 FM_PR_POLL_CLOSED_STAGE=
 WATCHER_CHECKPOINT_CLOSE=${FM_WATCH_CHECKPOINT_CLOSE:-}
 unset FM_WATCH_CHECKPOINT_CLOSE
-WATCHER_CHECKPOINT_POLLING=0
+WATCHER_CHECKPOINT_SCANNED=0
 WATCHER_CHECKPOINT_INTERRUPTED=0
 
 watcher_interrupted() {
@@ -1952,7 +1952,7 @@ watcher_cleanup() {
     && [ "$cleanup_status" -eq 0 ] && [ ! -e "$WATCH_LOCK" ] && [ ! -L "$WATCH_LOCK" ]; then
     if [ "$exit_status" -eq 0 ] && [ -n "${FM_WATCH_DELIVERED_REASON:-}" ]; then
       printf 'wake\n' > "$WATCHER_CHECKPOINT_CLOSE"
-    elif [ "$WATCHER_CHECKPOINT_INTERRUPTED" -eq 1 ] && [ "$WATCHER_CHECKPOINT_POLLING" -eq 1 ]; then
+    elif [ "$WATCHER_CHECKPOINT_INTERRUPTED" -eq 1 ] && [ "$WATCHER_CHECKPOINT_SCANNED" -eq 1 ]; then
       printf 'quiet\n' > "$WATCHER_CHECKPOINT_CLOSE"
     fi
   fi
@@ -2035,9 +2035,7 @@ while :; do
     || ! printf '%s pid=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$WATCHER_PID" > "$beat_tmp" \
     || ! mv -f -- "$beat_tmp" "$STATE/.last-watcher-beat"; then
     [ -z "$beat_tmp" ] || rm -f -- "$beat_tmp"
-    touch "$STATE/.last-watcher-beat" && WATCHER_CHECKPOINT_POLLING=1
-  else
-    WATCHER_CHECKPOINT_POLLING=1
+    touch "$STATE/.last-watcher-beat"
   fi
 
   if [ "$(age_of "$STATE/home-summary.json")" -ge "$HOME_SUMMARY_INTERVAL" ]; then
@@ -2626,5 +2624,6 @@ EOF
 
   # Terminal wait: a bounded native-event wait for push-capable homes (herdr),
   # else the blind poll sleep. See event_wait_or_sleep.
+  WATCHER_CHECKPOINT_SCANNED=1
   event_wait_or_sleep
 done
