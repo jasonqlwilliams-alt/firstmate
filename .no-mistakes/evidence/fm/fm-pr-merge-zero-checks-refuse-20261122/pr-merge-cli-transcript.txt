@@ -1,0 +1,368 @@
+Real Firstmate CLI and gh version 2.100.0 (2026-09-04)
+Synthetic PRs served by an in-process HTTPS forge on loopback. No external forge traffic.
+
+=== standing-authority ===
+
+Standing authority with an empty head rollup (yolo)
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/90
+[stdout]
+armed: state/task-gate.check.sh
+[stderr, with watcher advisory omitted]
+error: refusing to merge https://github.com/gate/example/pull/90
+  - the pull request has no checks at head 91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b, so nothing is green; an attended --allow-zero-checks waives this
+Exit status: 1
+Loopback forge: {"head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "request": "read PR metadata"}
+Loopback forge: {"checks": [], "draft": false, "head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "null_rollup": true, "request": "read head checks"}
+Final forge state: OPEN, queued=false
+Poll armed: True
+Recorded metadata: pr=https://github.com/gate/example/pull/90
+Recorded metadata: pr_head=91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Confirmed-merge notification recorded: False
+
+Standing authority with an empty head rollup (grant)
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/91
+[stdout]
+armed: state/task-gate.check.sh
+[stderr, with watcher advisory omitted]
+error: refusing to merge https://github.com/gate/example/pull/91
+  - the pull request has no checks at head 91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b, so nothing is green; an attended --allow-zero-checks waives this
+Exit status: 1
+Loopback forge: {"head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "request": "read PR metadata"}
+Loopback forge: {"checks": [], "draft": false, "head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "null_rollup": false, "request": "read head checks"}
+Final forge state: OPEN, queued=false
+Poll armed: True
+Recorded metadata: pr=https://github.com/gate/example/pull/91
+Recorded metadata: pr_head=91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Confirmed-merge notification recorded: False
+PASS (standing-authority)
+
+=== attended ===
+
+Attended operator explicitly waives an empty head rollup
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/92 --allow-zero-checks
+[stdout]
+armed: state/task-gate.check.sh
+verified: https://github.com/gate/example/pull/92 is merged (state=MERGED, merged=true, isInMergeQueue=false)
+[stderr, with watcher advisory omitted]
+verified: https://github.com/gate/example/pull/92 is open and mergeable, with no checks, waived by --allow-zero-checks, at head 91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Exit status: 0
+Loopback forge: {"head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "request": "read PR metadata"}
+Loopback forge: {"checks": [], "draft": false, "head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "null_rollup": true, "request": "read head checks"}
+Loopback forge: {"queued": false, "request": "read outcome", "state": "OPEN"}
+Loopback forge: {"input": {"expectedHeadOid": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "mergeMethod": "SQUASH", "pullRequestId": "PR_gate"}, "request": "mergePullRequest"}
+Loopback forge: {"queued": false, "request": "read outcome", "state": "MERGED"}
+Final forge state: MERGED, queued=false
+Poll armed: True
+Recorded metadata: pr=https://github.com/gate/example/pull/92
+Recorded metadata: pr_head=91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Confirmed-merge notification recorded: True
+PASS (attended)
+
+=== green ===
+
+A checked green PR still merges without a waiver
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/93
+[stdout]
+armed: state/task-gate.check.sh
+verified: https://github.com/gate/example/pull/93 is merged (state=MERGED, merged=true, isInMergeQueue=false)
+[stderr, with watcher advisory omitted]
+verified: https://github.com/gate/example/pull/93 is open and mergeable, with every required check green at head 91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Exit status: 0
+Loopback forge: {"head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "request": "read PR metadata"}
+Loopback forge: {"checks": [["ci", "COMPLETED", "SUCCESS"]], "draft": false, "head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "null_rollup": false, "request": "read head checks"}
+Loopback forge: {"queued": false, "request": "read outcome", "state": "OPEN"}
+Loopback forge: {"input": {"expectedHeadOid": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "mergeMethod": "SQUASH", "pullRequestId": "PR_gate"}, "request": "mergePullRequest"}
+Loopback forge: {"queued": false, "request": "read outcome", "state": "MERGED"}
+Final forge state: MERGED, queued=false
+Poll armed: True
+Recorded metadata: pr=https://github.com/gate/example/pull/93
+Recorded metadata: pr_head=91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Confirmed-merge notification recorded: True
+PASS (green)
+
+=== waiver-limits ===
+
+The zero-check waiver leaves the red guard in place
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/94 --allow-zero-checks
+[stdout]
+armed: state/task-gate.check.sh
+[stderr, with watcher advisory omitted]
+error: refusing to merge https://github.com/gate/example/pull/94
+  - check 'lint' is not green
+error: these checks are not green: lint
+Exit status: 1
+Loopback forge: {"head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "request": "read PR metadata"}
+Loopback forge: {"checks": [["lint", "COMPLETED", "FAILURE"]], "draft": false, "head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "null_rollup": false, "request": "read head checks"}
+Final forge state: OPEN, queued=false
+Poll armed: True
+Recorded metadata: pr=https://github.com/gate/example/pull/94
+Recorded metadata: pr_head=91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Confirmed-merge notification recorded: False
+
+The zero-check waiver leaves the pending guard in place
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/95 --allow-zero-checks
+[stdout]
+armed: state/task-gate.check.sh
+[stderr, with watcher advisory omitted]
+error: refusing to merge https://github.com/gate/example/pull/95
+  - check 'ci' is not green
+error: these checks are not green: ci
+Exit status: 1
+Loopback forge: {"head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "request": "read PR metadata"}
+Loopback forge: {"checks": [["ci", "IN_PROGRESS", null]], "draft": false, "head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "null_rollup": false, "request": "read head checks"}
+Final forge state: OPEN, queued=false
+Poll armed: True
+Recorded metadata: pr=https://github.com/gate/example/pull/95
+Recorded metadata: pr_head=91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Confirmed-merge notification recorded: False
+
+The zero-check waiver leaves the draft guard in place
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/96 --allow-zero-checks
+[stdout]
+armed: state/task-gate.check.sh
+[stderr, with watcher advisory omitted]
+error: refusing to merge https://github.com/gate/example/pull/96
+  - the pull request is a draft
+Exit status: 1
+Loopback forge: {"head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "request": "read PR metadata"}
+Loopback forge: {"checks": [], "draft": true, "head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "null_rollup": false, "request": "read head checks"}
+Final forge state: OPEN, queued=false
+Poll armed: True
+Recorded metadata: pr=https://github.com/gate/example/pull/96
+Recorded metadata: pr_head=91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Confirmed-merge notification recorded: False
+PASS (waiver-limits)
+
+=== away ===
+
+Away mode is already active with standing grant authority
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/97 --allow-zero-checks
+[stderr, with watcher advisory omitted]
+error: --allow-zero-checks is attended-only; while the away-posture record exists the green check is absolute
+Exit status: 2
+Loopback forge: no requests
+Final forge state: OPEN, queued=false
+Poll armed: False
+Confirmed-merge notification recorded: False
+
+Away mode is already active with standing yolo authority
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/98 --allow-zero-checks
+[stderr, with watcher advisory omitted]
+error: --allow-zero-checks is attended-only; while the away-posture record exists the green check is absolute
+Exit status: 2
+Loopback forge: no requests
+Final forge state: OPEN, queued=false
+Poll armed: False
+Confirmed-merge notification recorded: False
+PASS (away)
+
+=== late-away ===
+
+Away record published after the grant read before-recording with --allow-zero-checks
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/100 --allow-zero-checks
+[stderr, with watcher advisory omitted]
+error: --allow-zero-checks is attended-only; while the away-posture record exists the green check is absolute
+Exit status: 2
+Loopback forge: no requests
+Final forge state: OPEN, queued=false
+Test schedule: published a valid away contract after the grant read before-recording.
+Poll armed: False
+Confirmed-merge notification recorded: False
+
+Away record published after the grant read before-recording with --allow-red
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/100 --allow-red lint
+[stderr, with watcher advisory omitted]
+error: --allow-red is attended-only; while the away-posture record exists the green check is absolute
+Exit status: 2
+Loopback forge: no requests
+Final forge state: OPEN, queued=false
+Test schedule: published a valid away contract after the grant read before-recording.
+Poll armed: False
+Confirmed-merge notification recorded: False
+
+Away record published after the grant read before-merge with --allow-zero-checks
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/101 --allow-zero-checks
+[stdout]
+armed: state/task-gate.check.sh
+[stderr, with watcher advisory omitted]
+verified: https://github.com/gate/example/pull/101 is open and mergeable, with no checks, waived by --allow-zero-checks, at head 91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+error: --allow-zero-checks is attended-only; while the away-posture record exists the green check is absolute
+Exit status: 2
+Loopback forge: {"head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "request": "read PR metadata"}
+Loopback forge: {"checks": [], "draft": false, "head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "null_rollup": false, "request": "read head checks"}
+Final forge state: OPEN, queued=false
+Test schedule: published a valid away contract after the grant read before-merge.
+Poll armed: True
+Recorded metadata: pr=https://github.com/gate/example/pull/101
+Recorded metadata: pr_head=91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Confirmed-merge notification recorded: False
+
+Away record published after the grant read before-merge with --allow-red
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/101 --allow-red lint
+[stdout]
+armed: state/task-gate.check.sh
+[stderr, with watcher advisory omitted]
+verified: https://github.com/gate/example/pull/101 is open and mergeable, with every required check green at head 91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+error: --allow-red is attended-only; while the away-posture record exists the green check is absolute
+Exit status: 2
+Loopback forge: {"head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "request": "read PR metadata"}
+Loopback forge: {"checks": [["lint", "COMPLETED", "FAILURE"]], "draft": false, "head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "null_rollup": false, "request": "read head checks"}
+Final forge state: OPEN, queued=false
+Test schedule: published a valid away contract after the grant read before-merge.
+Poll armed: True
+Recorded metadata: pr=https://github.com/gate/example/pull/101
+Recorded metadata: pr_head=91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Confirmed-merge notification recorded: False
+PASS (late-away)
+
+=== queue-retry ===
+
+Queue-protected head with no checks, first request outcome: open
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/104 --allow-zero-checks
+[stdout]
+armed: state/task-gate.check.sh
+[stderr, with watcher advisory omitted]
+verified: https://github.com/gate/example/pull/104 is open and mergeable, with no checks, waived by --allow-zero-checks, at head 91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+error: GitHub merge outcome was not successful: state=OPEN, merged=false, isInMergeQueue=false
+error: base branch main requires the merge queue; retry with: bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/104 --attended-override -- --auto --rebase
+error: if the head has no checks at retry time, explicitly add --allow-zero-checks before -- while attended
+Exit status: 1
+Loopback forge: {"head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "request": "read PR metadata"}
+Loopback forge: {"checks": [], "draft": false, "head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "null_rollup": false, "request": "read head checks"}
+Loopback forge: {"queued": false, "request": "read outcome", "state": "OPEN"}
+Loopback forge: {"input": {"expectedHeadOid": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "mergeMethod": "SQUASH", "pullRequestId": "PR_gate"}, "request": "mergePullRequest"}
+Loopback forge: {"queued": false, "request": "read outcome", "state": "OPEN"}
+Loopback forge: {"merge_queue_method": "REBASE", "request": "read branch rules"}
+Final forge state: OPEN, queued=false
+Poll armed: True
+Recorded metadata: pr=https://github.com/gate/example/pull/104
+Recorded metadata: pr_head=91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Confirmed-merge notification recorded: False
+
+Retry the same head with queue flags alone
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/104 --attended-override -- --auto --rebase
+[stdout]
+armed: state/task-gate.check.sh
+[stderr, with watcher advisory omitted]
+error: refusing to merge https://github.com/gate/example/pull/104
+  - the pull request has no checks at head 91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b, so nothing is green; an attended --allow-zero-checks waives this
+Exit status: 1
+Loopback forge: {"head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "request": "read PR metadata"}
+Loopback forge: {"checks": [], "draft": false, "head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "null_rollup": false, "request": "read head checks"}
+Final forge state: OPEN, queued=false
+Poll armed: True
+Recorded metadata: pr=https://github.com/gate/example/pull/104
+Recorded metadata: pr_head=91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Confirmed-merge notification recorded: False
+
+Retry with the renewed attended waiver and configured queue flags
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/104 --attended-override --allow-zero-checks -- --auto --rebase
+[stdout]
+armed: state/task-gate.check.sh
+verified: https://github.com/gate/example/pull/104 is queued (state=OPEN, merged=false, isInMergeQueue=true)
+[stderr, with watcher advisory omitted]
+verified: https://github.com/gate/example/pull/104 is open and mergeable, with no checks, waived by --allow-zero-checks, at head 91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Exit status: 0
+Loopback forge: {"head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "request": "read PR metadata"}
+Loopback forge: {"checks": [], "draft": false, "head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "null_rollup": false, "request": "read head checks"}
+Loopback forge: {"queued": false, "request": "read outcome", "state": "OPEN"}
+Loopback forge: {"input": {"expectedHeadOid": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "mergeMethod": "REBASE", "pullRequestId": "PR_gate"}, "request": "mergePullRequest"}
+Loopback forge: {"queued": true, "request": "read outcome", "state": "OPEN"}
+Final forge state: OPEN, queued=true
+Poll armed: True
+Recorded metadata: pr=https://github.com/gate/example/pull/104
+Recorded metadata: pr_head=91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Confirmed-merge notification recorded: False
+
+Queue-protected head with no checks, first request outcome: error
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/105 --allow-zero-checks
+[stdout]
+armed: state/task-gate.check.sh
+[stderr, with watcher advisory omitted]
+verified: https://github.com/gate/example/pull/105 is open and mergeable, with no checks, waived by --allow-zero-checks, at head 91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+GraphQL: Direct merge rejected by queue policy
+error: GitHub merge outcome was not successful: state=OPEN, merged=false, isInMergeQueue=false
+error: base branch main requires the merge queue; retry with: bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/105 --attended-override -- --auto --rebase
+error: if the head has no checks at retry time, explicitly add --allow-zero-checks before -- while attended
+Exit status: 1
+Loopback forge: {"head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "request": "read PR metadata"}
+Loopback forge: {"checks": [], "draft": false, "head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "null_rollup": false, "request": "read head checks"}
+Loopback forge: {"queued": false, "request": "read outcome", "state": "OPEN"}
+Loopback forge: {"input": {"expectedHeadOid": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "mergeMethod": "SQUASH", "pullRequestId": "PR_gate"}, "request": "mergePullRequest"}
+Loopback forge: {"queued": false, "request": "read outcome", "state": "OPEN"}
+Loopback forge: {"merge_queue_method": "REBASE", "request": "read branch rules"}
+Final forge state: OPEN, queued=false
+Poll armed: True
+Recorded metadata: pr=https://github.com/gate/example/pull/105
+Recorded metadata: pr_head=91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Confirmed-merge notification recorded: False
+PASS (queue-retry)
+
+=== option-scope ===
+
+Valued waiver forms are rejected at the CLI
+$ bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/106 --allow-zero-checks=yes
+[stderr, with watcher advisory omitted]
+error: --allow-zero-checks takes no value
+Exit status: 2
+Loopback forge: no requests
+Final forge state: OPEN, queued=false
+Poll armed: False
+Confirmed-merge notification recorded: False
+
+GitLab URL cannot use the GitHub waiver
+$ bin/fm-pr-merge.sh task-gate https://gitlab.example/gate/example/-/merge_requests/7 --allow-zero-checks
+[stderr, with watcher advisory omitted]
+error: --allow-zero-checks does not apply to GitLab, where a merge already requires the head pipeline to have succeeded
+Exit status: 2
+Loopback forge: no requests
+Final forge state: OPEN, queued=false
+Poll armed: False
+Confirmed-merge notification recorded: False
+PASS (option-scope)
+
+=== earlier-revisions ===
+
+Regression reproduction on the base revision with standing yolo authority
+$ 0464e0e2: bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/108
+[stdout]
+armed: state/task-gate.check.sh
+verified: https://github.com/gate/example/pull/108 is merged (state=MERGED, merged=true, isInMergeQueue=false)
+[stderr, with watcher advisory omitted]
+verified: https://github.com/gate/example/pull/108 is open and mergeable, with every required check green at head 91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Exit status: 0
+Loopback forge: {"head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "request": "read PR metadata"}
+Loopback forge: {"checks": [], "draft": false, "head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "null_rollup": false, "request": "read head checks"}
+Loopback forge: {"queued": false, "request": "read outcome", "state": "OPEN"}
+Loopback forge: {"input": {"expectedHeadOid": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "mergeMethod": "SQUASH", "pullRequestId": "PR_gate"}, "request": "mergePullRequest"}
+Loopback forge: {"queued": false, "request": "read outcome", "state": "MERGED"}
+Final forge state: MERGED, queued=false
+Poll armed: True
+Recorded metadata: pr=https://github.com/gate/example/pull/108
+Recorded metadata: pr_head=91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Confirmed-merge notification recorded: True
+
+Regression reproduction on the earlier review revision
+
+Away record published after the grant read before-merge with --allow-zero-checks
+$ a856ee67: bin/fm-pr-merge.sh task-gate https://github.com/gate/example/pull/101 --allow-zero-checks
+[stdout]
+armed: state/task-gate.check.sh
+verified: https://github.com/gate/example/pull/101 is merged (state=MERGED, merged=true, isInMergeQueue=false)
+[stderr, with watcher advisory omitted]
+verified: https://github.com/gate/example/pull/101 is open and mergeable, with no checks, waived by --allow-zero-checks, at head 91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Exit status: 0
+Loopback forge: {"head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "request": "read PR metadata"}
+Loopback forge: {"checks": [], "draft": false, "head": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "null_rollup": false, "request": "read head checks"}
+Loopback forge: {"queued": false, "request": "read outcome", "state": "OPEN"}
+Loopback forge: {"input": {"expectedHeadOid": "91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b", "mergeMethod": "SQUASH", "pullRequestId": "PR_gate"}, "request": "mergePullRequest"}
+Loopback forge: {"queued": false, "request": "read outcome", "state": "MERGED"}
+Final forge state: MERGED, queued=false
+Test schedule: published a valid away contract after the grant read before-merge.
+Poll armed: True
+Recorded metadata: pr=https://github.com/gate/example/pull/101
+Recorded metadata: pr_head=91e6b56ef01b9ec0dec1b33e5c5eb8514ef4174b
+Confirmed-merge notification recorded: True
+PASS (earlier-revisions)
+
+Loopback server stopped.
