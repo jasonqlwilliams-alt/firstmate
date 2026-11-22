@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Tests for bounded foreground watcher checkpoints used by Codex supervision.
+# Each test that exports runs in its own subshell, so its exports stay deliberately local.
+# shellcheck disable=SC2030,SC2031
 set -u
 
 # shellcheck source=tests/lib.sh

@@ -94,6 +94,8 @@ Under this foreground model the pull guard requires the same home, watcher path,
 A recent beacon after the checkpoint has returned does not prove that a watcher remains alive.
 Conversely, a running checkpoint wrapper or child PID does not prove complete lock publication, matching identity, or a fresh beacon: a suspended or stalled watcher can remain alive while polling has stopped.
 Inspect those facts at the warning's timestamp before classifying an alarm during a foreground call.
+The guard still reports the post-return interval's missing watcher, but presents it as the expected gap between foreground checkpoints rather than supervision being off, and it does not open a watcher-down episode, so no repeating "still down" reminder follows.
+That presentation lasts only while a clean return is younger than the guard grace and the missing watcher is the only failing fact; a failed checkpoint, a next checkpoint overdue past grace, or a stale beacon still prints the full alarm ([`fm-guard.sh`](../bin/fm-guard.sh) owns the rule, and [`tests/fm-watch-checkpoint.test.sh`](../tests/fm-watch-checkpoint.test.sh) covers it).
 An unacknowledged `state/.watcher-down` generation alone does not cause a watcher-health alarm; queued wakes have their own independent warning.
 
 A successful demonstration of a foreground wake, durable acknowledgement, and model-issued successor proves that sequence only.
