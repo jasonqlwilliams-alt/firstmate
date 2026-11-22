@@ -110,7 +110,13 @@ case "${1:-}" in
     done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane) printf '> \n'; exit 0 ;;
-  list-windows) [ -f "$D/windows" ] && cat "$D/windows"; exit 0 ;;
+  list-windows)
+    [ -f "$D/windows" ] || exit 0
+    case "${*: -1}" in
+      $'#{window_name}\t#{pane_id}') awk '{ printf "%s\t%%%d\n", $0, NR }' "$D/windows" ;;
+      *) cat "$D/windows" ;;
+    esac
+    exit 0 ;;
 esac
 exit 0
 SH
