@@ -62,10 +62,19 @@ make_case() {
 #!/usr/bin/env bash
 set -u
 if [ "${1:-}" = "list-windows" ]; then
+  # The exact-window reads ask for ids alongside names.
+  case "$*" in *window_id*) _ids=1 ;; *) _ids=0 ;; esac
   if [ -n "${FM_FAKE_TMUX_WINDOWS:-}" ]; then
-    printf '%s\n' "$FM_FAKE_TMUX_WINDOWS"
+    _names=$FM_FAKE_TMUX_WINDOWS
   elif [ -n "${FM_FAKE_TMUX_WINDOW:-}" ]; then
-    printf '%s\n' "${FM_FAKE_TMUX_WINDOW#*:}"
+    _names=${FM_FAKE_TMUX_WINDOW#*:}
+  else
+    exit 0
+  fi
+  if [ "$_ids" = 1 ]; then
+    printf '%s\n' "$_names" | awk '{ print "@" NR " " $0 }'
+  else
+    printf '%s\n' "$_names"
   fi
   exit 0
 fi
@@ -175,7 +184,12 @@ case "${1:-}" in
     [ "$_print" = 1 ] && printf 'fakepane\n'
     exit 0 ;;
   list-windows)
-    [ -n "${FM_FAKE_TMUX_WINDOW:-}" ] && printf '%s\n' "$FM_FAKE_TMUX_WINDOW"
+    [ -n "${FM_FAKE_TMUX_WINDOW:-}" ] || exit 0
+    # The exact-window reads ask for ids alongside names.
+    case "$*" in
+      *window_id*) printf '@1 %s\n' "${FM_FAKE_TMUX_WINDOW#*:}" ;;
+      *) printf '%s\n' "$FM_FAKE_TMUX_WINDOW" ;;
+    esac
     exit 0 ;;
   capture-pane)
     # Honor a single-line band capture (-S N -E M, both non-negative) for the
@@ -263,7 +277,8 @@ case "${1:-}" in
     [ "$print" = 1 ] && printf 'fakepane\n'
     exit 0 ;;
   capture-pane) cat "$COMPOSER" 2>/dev/null; exit 0 ;;
-  list-windows) exit 0 ;;
+  # The exact-window reads confirm the window in this inventory.
+  list-windows) printf '@1 win\n'; exit 0 ;;
   send-keys)
     shift
     text=""; is_enter=0; lit=0

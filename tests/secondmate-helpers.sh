@@ -34,20 +34,25 @@ case "${1:-}" in
     session=
     prev=
     for arg in "$@"; do
-      if [ "$prev" = -t ]; then session=$arg; break; fi
+      if [ "$prev" = -t ]; then session=${arg#=}; break; fi
       prev=$arg
     done
+    # The exact-window reads ask for ids alongside names.
+    case "$*" in *window_id*) ids=1 ;; *) ids=0 ;; esac
+    n=0
     while IFS= read -r recorded; do
       [ -n "$recorded" ] || continue
+      n=$((n + 1))
       if [ -z "$session" ]; then
         printf '%s\n' "$recorded"
         continue
       fi
       case "$recorded" in
-        "$session":*) printf '%s\n' "${recorded#*:}" ;;
-        *:*) ;;
-        *) printf '%s\n' "$recorded" ;;
+        "$session":*) name=${recorded#*:} ;;
+        *:*) continue ;;
+        *) name=$recorded ;;
       esac
+      if [ "$ids" = 1 ]; then printf '@%s %s\n' "$n" "$name"; else printf '%s\n' "$name"; fi
     done <<EOF
 ${FM_FAKE_TMUX_WINDOW:-}
 EOF
