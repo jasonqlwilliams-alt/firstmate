@@ -39,7 +39,10 @@ fm_refuse_if_gate_agent
 # shellcheck source=bin/fm-lease-lib.sh
 . "$SCRIPT_DIR/fm-lease-lib.sh"
 
-usage() { sed -n '4,6p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() {
+  sed -n '/^# Usage:$/,/^#$/ { /^#$/d; s/^# //; p; }' "$0" >&2
+  exit 2
+}
 
 [ "$#" -eq 2 ] || usage
 ID=$1 ACTION=$2
@@ -48,9 +51,6 @@ case "$ACTION" in mark|clear) ;; *) usage ;; esac
 
 META="$STATE/$ID.meta"
 MARK="$STATE/$ID.parked-retained"
-[ -f "$META" ] && [ ! -L "$META" ] || { echo "error: no task record for $ID" >&2; exit 1; }
-INCARNATION=$(fm_backend_endpoint_park_identity "$META") || INCARNATION=
-
 LOCK=$(fm_meta_lock_path "$META") || { echo "error: could not resolve the task record lock" >&2; exit 1; }
 CONTROL_LOCK="$STATE/.control-$ID.lock"
 TMP=
@@ -64,10 +64,11 @@ cleanup() {
   fm_lock_release "$CONTROL_LOCK" || true
   fm_lease_guard_release || true
 }
-if fm_pid_alive "$(cat "$CONTROL_LOCK/pid" 2>/dev/null || true)"; then
-  refuse_busy
-fi
 trap cleanup EXIT
+fm_lock_try_acquire "$CONTROL_LOCK" || refuse_busy
+[ -f "$META" ] && [ ! -L "$META" ] || { echo "error: no task record for $ID" >&2; exit 1; }
+INCARNATION=$(fm_backend_endpoint_park_identity "$META") || INCARNATION=
+fm_lock_release "$CONTROL_LOCK"
 fm_lease_guard "$ID" "park $ACTION (fm-park-retained)"
 fm_lock_try_acquire "$CONTROL_LOCK" || refuse_busy
 fm_lock_acquire_wait "$LOCK"

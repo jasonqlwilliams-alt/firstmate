@@ -1159,7 +1159,7 @@ report_missing_endpoint() {  # <backend> <window> <meta> <window-key> <marker>
   # A parked task whose copy is deliberately retained expects this loss.
   if fm_backend_endpoint_parked_retained "$meta"; then
     fm_lock_release "$lock"
-    return 0
+    return 1
   fi
 
   # A relaunch can reuse a window name without the watcher seeing it live.
@@ -2308,7 +2308,6 @@ EOF
       [ -z "$herdr_meta" ] || [ "$herdr_meta" = "$meta" ] || continue
     fi
     case "$seen" in *"|$w|"*) continue ;; esac
-    seen="$seen|$w|"
     kind=$(fm_meta_get "$meta" kind)
     key=$(window_key "$w")
     last=$(last_status_line "$STATE/$task.status")
@@ -2324,6 +2323,7 @@ EOF
     # this guard: reaching it would require backlog reads for windows this gate
     # deliberately skips, putting that read on the ordinary poll hot path.
     if [ "$kind" = secondmate ] && ! status_is_paused_or_captain_held "$last"; then
+      seen="$seen|$w|"
       continue
     fi
     missing_marker="$STATE/$task.missing-endpoint"
@@ -2332,9 +2332,11 @@ EOF
     if { [ "$backend" = herdr ] && [ -z "$herdr_meta" ]; } \
       || ! tail40=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
         fm_backend_capture "$backend" "$w" 40 "fm-$task" 2>/dev/null); then
-      report_missing_endpoint "$backend" "$w" "$meta" "$key" "$missing_marker"
+      report_missing_endpoint "$backend" "$w" "$meta" "$key" "$missing_marker" || continue
+      seen="$seen|$w|"
       continue
     fi
+    seen="$seen|$w|"
     [ ! -e "$missing_marker" ] || rm -f "$missing_marker"
     h=$(printf '%s' "$tail40" | hash_pane)
     hf="$STATE/.hash-$key"

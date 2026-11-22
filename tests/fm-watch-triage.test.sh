@@ -2357,6 +2357,13 @@ test_parked_retained_copy_suppresses_endpoint_loss() (
   park_task() { PATH="$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" "$park" "$@"; }
   lease_task() { FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=main "$ROOT/bin/fm-lease.sh" "$@"; }
 
+  rc=0
+  park_task > "$dir/park.out" 2>&1 || rc=$?
+  [ "$rc" -eq 2 ] || fail "park without arguments exited $rc"
+  grep -Fq 'fm-park-retained.sh <task-id> mark' "$dir/park.out" \
+    && grep -Fq 'fm-park-retained.sh <task-id> clear' "$dir/park.out" \
+    || fail "park usage did not show both operations: $(cat "$dir/park.out")"
+
   expect_quiet() {
     local label=$1 poll
     watch_parked & pid=$!
@@ -2470,25 +2477,30 @@ test_parked_retained_copy_suppresses_endpoint_loss() (
 
   control_lock="$state/.control-again.lock"
   lease_lock="$state/.fm-lease-command.lock"
-  rm -f "$dir/park-waiting"
+  rm -f "$dir/lock-bin/sleep"
   mkdir "$control_lock" "$lease_lock" "$lock" || fail "could not hold the relaunch fixture locks"
   printf '%s\n' "$$" | tee "$control_lock/pid" "$lease_lock/pid" > "$lock/pid"
   sed 's/^spawn_gen=.*/spawn_gen=third/' "$state/again.meta" > "$state/.again-replacement" \
     && mv "$state/.again-replacement" "$state/again.meta" || fail "could not stage the new record during relaunch"
-  PATH="$dir/lock-bin:$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=main \
+  cat > "$dir/release-on-selection" <<'SH'
+trap '
+  if [ "${INCARNATION:-}" = "$FM_TEST_REPLACEMENT" ] && [ -f "$FM_TEST_CONTROL_LOCK/pid" ]; then
+    rm -f "$FM_TEST_CONTROL_LOCK/pid" "$FM_TEST_LEASE_LOCK/pid" "$FM_TEST_META_LOCK/pid"
+    rmdir "$FM_TEST_CONTROL_LOCK" "$FM_TEST_LEASE_LOCK" "$FM_TEST_META_LOCK"
+  fi
+' DEBUG
+SH
+  PATH="$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=main \
+    FM_TEST_CONTROL_LOCK="$control_lock" FM_TEST_LEASE_LOCK="$lease_lock" FM_TEST_META_LOCK="$lock" \
+    FM_TEST_REPLACEMENT="tmux:$window"$'\tthird' BASH_ENV="$dir/release-on-selection" \
     "$park" again mark > "$dir/park.out" 2>&1 &
   park_pid=$!
-  for ((tries=0; tries<100; tries++)); do
-    if [ -e "$dir/park-waiting" ] || ! is_live_non_zombie "$park_pid"; then break; fi
-    sleep 0.1
-  done
-  [ "$tries" -lt 100 ] || fail "mark neither refused nor waited during relaunch"
-  rm -f "$control_lock/pid" "$lease_lock/pid" "$lock/pid"
-  rmdir "$control_lock" "$lease_lock" "$lock" || fail "could not release the relaunch fixture locks"
   rc=0
   wait_for_exit "$park_pid" 100 || rc=$?
   park_pid=''
-  [ "$rc" -eq 1 ] || fail "mark after replacement publication exited $rc: $(cat "$dir/park.out")"
+  [ "$rc" -eq 1 ] || fail "mark after replacement publication and overlapping release exited $rc: $(cat "$dir/park.out")"
+  rm -f "$control_lock/pid" "$lease_lock/pid" "$lock/pid"
+  rmdir "$control_lock" "$lease_lock" "$lock" || fail "mark selected a worker before the relaunch finished"
   expect_loss relaunched
   ack_parked || fail "[relaunched] could not acknowledge the loss wake"
 
@@ -2496,6 +2508,38 @@ test_parked_retained_copy_suppresses_endpoint_loss() (
   [ "$before" = "$after" ] || fail "the park mark changed the retained copy"
   park_task nosuch mark > "$dir/park.out" 2>&1 && fail "marking an unknown task succeeded"
   pass "real tmux: a parked retained-copy mark silences only its own incarnation's endpoint loss"
+)
+
+test_parked_herdr_endpoint_does_not_hide_recycled_target_loss() (
+  local dir state target=parked-test:w1:p2 pid=''
+  dir=$(fm_test_tmproot fm-watch-parked-herdr) || fail "could not create the Herdr park fixture"
+  trap '[ -z "$pid" ] || reap "$pid"' EXIT
+  state="$dir/home/state"
+  mkdir -p "$state" "$dir/bin"
+  cat > "$dir/bin/herdr" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'pane get w1:p2 --session parked-test') printf '%s\n' '{"error":{"code":"pane_not_found"}}' ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$dir/bin/herdr"
+  export PATH="$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state"
+  fm_write_meta "$state/a-parked.meta" "window=$target" backend=herdr kind=ship \
+    herdr_terminal_id=retained-terminal spawn_gen=retained-generation
+  "$ROOT/bin/fm-park-retained.sh" a-parked mark >/dev/null || fail "could not mark the closed Herdr worker"
+  fm_write_meta "$state/z-unmarked.meta" "window=$target" backend=herdr kind=ship \
+    herdr_terminal_id=replacement-terminal spawn_gen=replacement-generation
+
+  FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$dir/watch.out" &
+  pid=$!
+  wait_for_exit "$pid" 100 || fail "the unmarked Herdr worker's loss did not wake the watcher: $(cat "$dir/watch.out")"
+  pid=''
+  grep -Fxq "stale: $target (the recorded endpoint is gone)" "$dir/watch.out" \
+    || fail "unexpected watcher output: $(cat "$dir/watch.out")"
+  assert_present "$state/z-unmarked.missing-endpoint" "loss did not belong to the unmarked worker"
+  assert_absent "$state/a-parked.missing-endpoint" "loss was also recorded for the parked worker"
+  pass "a park mark leaves a recycled Herdr target eligible for an unmarked worker's loss"
 )
 
 test_backlog_hold_suppresses_only_an_agentless_lane() {
@@ -5394,6 +5438,7 @@ test_exited_declared_pause_is_bounded_but_live_gate_surfaces
 test_missing_tmux_endpoint_surfaces_once || exit 1
 test_endpoint_loss_and_ordinary_stale_are_presented_independently || exit 1
 test_parked_retained_copy_suppresses_endpoint_loss || exit 1
+test_parked_herdr_endpoint_does_not_hide_recycled_target_loss || exit 1
 test_backlog_hold_suppresses_only_an_agentless_lane
 test_absorbed_replacement_wait_does_not_inherit_the_old_throttle
 test_live_declared_wait_churn_honors_the_resurface_throttle
