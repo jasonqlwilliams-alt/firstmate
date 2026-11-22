@@ -258,12 +258,17 @@ fm_session_lock_held_live() {  # <lock-file>
   fm_session_lock_owner_alive "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START"
 }
 
-# Publish owner pid $2 (with its start time when readable) as lock file $1 by
-# writing a same-directory temporary file and renaming it into place.
-fm_session_lock_write() {  # <lock-file> <pid>
+# Publish owner pid $2 as lock file $1 by writing a same-directory temporary
+# file and renaming it into place. The start token is $3 when given (empty writes
+# the legacy pid-only record), else read now from fm_pid_start_time.
+fm_session_lock_write() {  # <lock-file> <pid> [<start>]
   local lock=$1 pid=$2 start tmp
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
-  start=$(fm_pid_start_time "$pid") || start=''
+  if [ "$#" -ge 3 ]; then
+    start=$3
+  else
+    start=$(fm_pid_start_time "$pid") || start=''
+  fi
   tmp=$(mktemp "${lock%/*}/.lock-write.XXXXXX" 2>/dev/null) || return 1
   if { printf '%s\n' "$pid"; [ -z "$start" ] || printf 'start=%s\n' "$start"; } > "$tmp" 2>/dev/null \
     && mv -f "$tmp" "$lock" 2>/dev/null; then

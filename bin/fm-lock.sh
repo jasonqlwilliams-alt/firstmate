@@ -99,7 +99,7 @@ if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
     exit 1
   fi
 fi
-if ! fm_session_lock_write "$LOCK" "$me"; then
+if ! fm_session_lock_write "$LOCK" "$me" "$me_start"; then
   echo "error: cannot write session lock; operate read-only until resolved" >&2
   exit 1
 fi
