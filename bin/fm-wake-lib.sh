@@ -218,6 +218,20 @@ fm_supervision_model() {
   esac
 }
 
+fm_codex_checkpoint_session() {
+  local state=$1 pid identity
+  [ -f "$state/.lock" ] && [ ! -L "$state/.lock" ] || return 1
+  [ ! -e "$state/.afk" ] && [ ! -e "$state/.afk-contract" ] || return 1
+  [ "$("$FM_WAKE_LIB_DIR/fm-harness.sh")" = codex ] || return 1
+  [ "$(fm_supervision_model)" = persistent ] || return 1
+  # shellcheck source=bin/fm-session-lock-lib.sh
+  . "$FM_WAKE_LIB_DIR/fm-session-lock-lib.sh"
+  pid=$(fm_harness_ancestry_pid) || return 1
+  [ "$(cat "$state/.lock" 2>/dev/null)" = "$pid" ] || return 1
+  identity=$(fm_pid_identity "$pid") || return 1
+  printf '%s %s\n' "$pid" "$identity"
+}
+
 # Pi primary supervision evidence. The Pi extensions record, in their state
 # markers, the exact build they loaded and the session process that loaded it, so
 # "a live Pi session owns supervision" is provable from durable state without a

@@ -10,6 +10,14 @@ set -u
 CHECKPOINT="$ROOT/bin/fm-watch-checkpoint.sh"
 TMP_ROOT=$(fm_test_tmproot fm-watch-checkpoint)
 
+if [ "${FM_CHECKPOINT_TEST_HARNESS:-0}" != 1 ]; then
+  ln -s /bin/bash "$TMP_ROOT/codex" || exit 1
+  unset CLAUDECODE CURSOR_AGENT CURSOR_INVOKED_AS GEMINI_CLI PI_CODING_AGENT GROK_AGENT FM_OMP_HARNESS ANTIGRAVITY_AGENT
+  # shellcheck disable=SC2016
+  FM_CHECKPOINT_TEST_HARNESS=1 "$TMP_ROOT/codex" -c '"$@"; status=$?; exit "$status"' _ "$0" "$@"
+  exit $?
+fi
+
 make_home() {
   local name=$1 home
   home="$TMP_ROOT/$name"
@@ -23,9 +31,9 @@ test_quiet_checkpoint_exits_124_cleanly() {
   out="$home/out.txt"
   err="$home/err.txt"
   status=0
-  FM_HOME="$home" FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 "$CHECKPOINT" --seconds 1 >"$out" 2>"$err" || status=$?
-  expect_code 124 "$status" "quiet checkpoint exit"
-  assert_contains "$(cat "$out")" "checkpoint: no actionable wake within 1s" "quiet checkpoint line missing"
+  FM_HOME="$home" FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 "$CHECKPOINT" --seconds 3 >"$out" 2>"$err" || status=$?
+  expect_code 124 "$status" "quiet checkpoint exit ($(cat "$err"))"
+  assert_contains "$(cat "$out")" "checkpoint: no actionable wake within 3s" "quiet checkpoint line missing"
   assert_absent "$home/state/.watch.lock/pid" "watch lock pid survived quiet checkpoint timeout"
   pass "quiet checkpoint exits 124 with a clean checkpoint line and no live lock"
 }
@@ -89,6 +97,7 @@ test_foreground_wake_acknowledgement_and_owned_successor() (
   export FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_ROOT_OVERRIDE="$home"
   export FM_POLL=1 FM_SIGNAL_GRACE=0 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999
   export FM_SUPERVISION_MODEL=persistent
+  "$ROOT/bin/fm-lock.sh" >/dev/null || fail "fixture could not acquire the fleet lock"
   # Read the production health interface against watcher-written state only.
   # shellcheck source=bin/fm-wake-lib.sh
   . "$ROOT/bin/fm-wake-lib.sh"
@@ -140,10 +149,15 @@ test_foreground_wake_acknowledgement_and_owned_successor() (
     || fail "generation-bound acknowledgement failed"
   [ ! -s "$home/state/.wake-queue" ] || fail "acknowledged wake remains queued"
   status=0
+  TMPDIR="$home/missing" "$CHECKPOINT" --seconds 2 >/dev/null 2>&1 || status=$?
+  expect_code 1 "$status" "overlapping attempt failed during setup"
+  status=0
   wait "$child" || status=$?
   child=''
   expect_code 124 "$status" "quiet caller-owned successor exit"
   assert_absent "$home/state/.watch.lock/pid" "quiet successor left a polling process behind"
+  guard_output=$("$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$guard_output" 'WATCHER DOWN' "older checkpoint return superseded a newer failed attempt"
   pass "foreground wake is durable, caller owns its successor, and pending recovery does not falsify live health"
 )
 
@@ -152,16 +166,18 @@ test_foreground_wake_acknowledgement_and_owned_successor() (
 # must not print the watcher-down alarm or leave a repeating "still down"
 # reminder across cycles. A missing or failed cycle must still alarm.
 test_normal_checkpoint_return_is_not_a_watcher_down_alarm() (
-  local home out cycle seq gen guard_output record
+  local home out cycle seq gen guard_output record status
   home=$(make_home checkpoint-return-gap)
   export FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_ROOT_OVERRIDE="$home"
   export FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999
   export FM_SUPERVISION_MODEL=persistent
   record="$home/state/.last-checkpoint-return"
+  "$ROOT/bin/fm-lock.sh" >/dev/null || fail "fixture could not acquire the fleet lock"
   printf 'kind=ship\n' > "$home/state/demo.meta"
   for cycle in 1 2 3; do
-    "$CHECKPOINT" --seconds 2 >/dev/null 2>&1
-    assert_present "$record" "cycle $cycle: a clean return left no return record"
+    status=0
+    "$CHECKPOINT" --seconds 2 >"$home/checkpoint.log" 2>&1 || status=$?
+    expect_code 124 "$status" "cycle $cycle quiet deadline ($(cat "$home/checkpoint.log"))"
     out=$("$ROOT/bin/fm-wake-drain.sh" 2>&1)
     assert_not_contains "$out" 'WATCHER DOWN' "cycle $cycle: a normal checkpoint return printed the watcher-down alarm"
     assert_not_contains "$out" 'watcher still down' "cycle $cycle: a fresh beat after a normal return printed 'watcher still down'"
@@ -172,29 +188,140 @@ test_normal_checkpoint_return_is_not_a_watcher_down_alarm() (
   done
   assert_absent "$home/state/.guard-watcher-stale-banner" "a normal return claimed a watcher-down episode"
 
-  # Same missing watcher, but no clean return explains it: full alarm, then reminder.
-  rm -f "$record"
+  status=0
+  TMPDIR="$home/missing" "$CHECKPOINT" --seconds 2 >/dev/null 2>&1 || status=$?
+  expect_code 1 "$status" "successor could not create its output directory"
   guard_output=$("$ROOT/bin/fm-guard.sh" 2>&1)
   assert_contains "$guard_output" 'WATCHER DOWN' "a missing watcher with no clean return was not alarmed"
   assert_contains "$guard_output" 'no live watcher process' "the alarm lost its missing-watcher cause"
   guard_output=$("$ROOT/bin/fm-guard.sh" 2>&1)
   assert_contains "$guard_output" 'watcher still down' "the announced episode lost its reminder"
 
-  # A later clean return ends that episode; an overdue next checkpoint re-alarms.
-  : > "$record"
+  status=0
+  "$CHECKPOINT" --seconds 2 >/dev/null 2>&1 || status=$?
+  expect_code 124 "$status" "quiet successor after a failed start"
   guard_output=$("$ROOT/bin/fm-guard.sh" 2>&1)
   assert_not_contains "$guard_output" 'watcher still down' "a clean return did not end the announced episode"
+  assert_contains "$guard_output" 'between foreground checkpoints' "quiet successor did not explain the gap"
+
+  mkdir "$home/state/.watch.lock"
+  printf 'invalid pid\n' > "$home/state/.watch.lock/pid"
+  guard_output=$("$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$guard_output" 'WATCHER DOWN' "a retained invalid lock inherited the expected gap"
+  rm -r "$home/state/.watch.lock"
+  guard_output=$("$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$guard_output" 'between foreground checkpoints' "released lock did not restore the expected gap"
+
+  guard_output=$(FM_SUPERVISION_MODEL=autoarm "$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_not_contains "$guard_output" 'WATCHER DOWN' "auto-arm model alarmed a mid-turn gap"
+  assert_not_contains "$guard_output" 'between foreground checkpoints' "auto-arm model printed the foreground-checkpoint note"
+
+  guard_output=$(FM_GUARD_READ_ONLY=1 "$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$guard_output" 'WATCHER DOWN' "read-only guard inherited the attended exception"
+  assert_not_contains "$guard_output" 'between foreground checkpoints' "read-only guard printed the owning session's checkpoint notice"
+
   fm_touch_epoch "$(( $(date +%s) - 400 ))" "$record"
   guard_output=$("$ROOT/bin/fm-guard.sh" 2>&1)
   assert_contains "$guard_output" 'WATCHER DOWN' "an overdue next checkpoint was not alarmed"
   assert_not_contains "$guard_output" 'between foreground checkpoints' "an overdue return still read as the expected gap"
 
-  # The auto-arm model stays silent in the same state, as before.
-  : > "$record"
-  guard_output=$(FM_SUPERVISION_MODEL=autoarm "$ROOT/bin/fm-guard.sh" 2>&1)
-  assert_not_contains "$guard_output" 'WATCHER DOWN' "auto-arm model alarmed a mid-turn gap"
-  assert_not_contains "$guard_output" 'between foreground checkpoints' "auto-arm model printed the foreground-checkpoint note"
   pass "a normal foreground checkpoint return is not reported as supervision off, while a missing or overdue cycle still alarms"
+)
+
+test_timed_out_startup_is_a_failed_checkpoint() (
+  local home status=0 output
+  home=$(make_home blocked-startup)
+  export FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_ROOT_OVERRIDE="$home"
+  export FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999
+  "$ROOT/bin/fm-lock.sh" >/dev/null || fail "fixture could not acquire the fleet lock"
+  printf 'kind=ship\n' > "$home/state/demo.meta"
+  "$CHECKPOINT" --seconds 2 >/dev/null 2>&1 || status=$?
+  expect_code 124 "$status" "initial quiet checkpoint"
+  mkdir "$home/state/.wake-queue.lock"
+  printf '%s\n' "$$" > "$home/state/.wake-queue.lock/pid"
+  status=0
+  output=$("$CHECKPOINT" --seconds 2 2>&1) || status=$?
+  expect_code 1 "$status" "startup timeout ($output)"
+  assert_present "$home/state/.watch.lock/pid" "watcher did not reach the blocked recovery startup"
+  assert_not_contains "$output" 'no actionable wake within' "startup timeout looked like a quiet checkpoint"
+  output=$("$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$output" 'WATCHER DOWN' "startup timeout suppressed the guard alarm"
+  pass "a deadline during recovery startup leaves the guard alarm active"
+)
+
+test_actionable_close_before_first_beacon() (
+  local home status=0 output rm_bin
+  home=$(make_home early-wake)
+  export FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_ROOT_OVERRIDE="$home"
+  "$ROOT/bin/fm-lock.sh" >/dev/null || fail "fixture could not acquire the fleet lock"
+  printf 'kind=ship\n' > "$home/state/demo.meta"
+  printf 'invalid retirement receipt\n' > "$home/state/demo.pr-poll-retirement"
+  output=$("$CHECKPOINT" --seconds 8 2>&1) || status=$?
+  expect_code 0 "$status" "startup wake ($output)"
+  assert_contains "$output" 'rejected unauthenticated PR poll retirement receipts' "watcher did not deliver the startup wake"
+  assert_absent "$home/state/.last-watcher-beat" "startup wake unexpectedly published a beacon"
+  output=$("$ROOT/bin/fm-wake-drain.sh" 2>&1)
+  assert_contains "$output" 'between foreground checkpoints' "verified startup wake did not explain the missing watcher"
+  assert_not_contains "$output" 'WATCHER DOWN' "verified startup wake alarmed without a beacon"
+  assert_not_contains "$output" 'start the next checkpoint' "guard notice instructs the reader to re-arm"
+
+  rm_bin=$(command -v rm)
+  mkdir "$home/bin"
+  cat > "$home/bin/rm" <<'SH'
+#!/usr/bin/env bash
+[ "${2:-}" != "$FM_STATE_OVERRIDE/.watch.lock" ] || exit 1
+exec "$FM_TEST_REAL_RM" "$@"
+SH
+  chmod +x "$home/bin/rm"
+  status=0
+  output=$(PATH="$home/bin:$PATH" FM_TEST_REAL_RM="$rm_bin" "$CHECKPOINT" --seconds 8 2>&1) || status=$?
+  expect_code 1 "$status" "startup wake with failed lock cleanup ($output)"
+  assert_contains "$output" 'rejected unauthenticated PR poll retirement receipts' "cleanup failure test never delivered the wake"
+  assert_present "$home/state/.watch.lock/pid" "cleanup failure did not retain a lock"
+  output=$("$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$output" 'WATCHER DOWN' "wake with a retained lock suppressed the guard alarm"
+  pass "an early wake explains a beacon-less gap only after successful lock release"
+)
+
+test_replacement_and_away_handoff_cannot_reuse_return() (
+  local home status=0 output contract
+  home=$(make_home checkpoint-session)
+  export FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_ROOT_OVERRIDE="$home"
+  export FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999
+  printf 'kind=ship\n' > "$home/state/demo.meta"
+  ln -s /bin/bash "$home/codex"
+  # shellcheck disable=SC2016
+  "$home/codex" -c '"$1" >/dev/null || exit 1; "$2" --seconds 2; status=$?; exit "$status"' _ \
+    "$ROOT/bin/fm-lock.sh" "$CHECKPOINT" >/dev/null 2>&1 || status=$?
+  expect_code 124 "$status" "predecessor checkpoint"
+  "$ROOT/bin/fm-lock.sh" >/dev/null || fail "replacement could not acquire the fleet lock"
+  output=$("$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$output" 'WATCHER DOWN' "replacement Codex session inherited the predecessor's checkpoint"
+  status=0
+  output=$("$CHECKPOINT" --seconds 4 2>&1) || status=$?
+  expect_code 0 "$status" "replacement recovery checkpoint ($output)"
+  assert_contains "$output" 'check: rearm-resurface' "replacement did not deliver the unacknowledged recovery episode"
+  output=$("$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$output" 'between foreground checkpoints' "replacement's own checkpoint did not explain the gap"
+  output=$(GROK_AGENT=1 "$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$output" 'WATCHER DOWN' "Grok supervision inherited a Codex checkpoint"
+  output=$("$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$output" 'between foreground checkpoints' "Codex lost its valid return after another protocol checked the guard"
+
+  contract="$ROOT/bin/fm-afk-contract.sh"
+  "$contract" propose >/dev/null || fail "could not propose away posture"
+  "$contract" confirm >/dev/null || fail "could not confirm away posture"
+  status=0
+  FM_SUPERVISOR_TARGET=fixture FM_SUPERVISOR_BACKEND=unsupported \
+    "$ROOT/bin/fm-afk-launch.sh" start >/dev/null 2>&1 || status=$?
+  expect_code 1 "$status" "failed daemon launch"
+  assert_absent "$home/state/.afk" "failed daemon launch left an active daemon flag"
+  output=$("$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$output" 'WATCHER DOWN' "failed away-daemon launch inherited a Codex checkpoint"
+  "$contract" archive >/dev/null || fail "could not close away posture"
+  output=$("$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$output" 'watcher still down' "return from away reused the pre-away checkpoint"
+  pass "replacement sessions and away supervision require their own monitoring cycle"
 )
 
 test_quiet_checkpoint_exits_124_cleanly
@@ -203,3 +330,6 @@ test_registered_check_uses_preserved_watcher_environment
 test_existing_singleton_watcher_is_not_success
 test_foreground_wake_acknowledgement_and_owned_successor
 test_normal_checkpoint_return_is_not_a_watcher_down_alarm
+test_timed_out_startup_is_a_failed_checkpoint
+test_actionable_close_before_first_beacon
+test_replacement_and_away_handoff_cannot_reuse_return

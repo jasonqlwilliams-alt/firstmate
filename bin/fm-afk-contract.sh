@@ -857,6 +857,7 @@ fm_afk_contract_cmd_archive() {
     return 1
   fi
   target=$(fm_afk_contract_archive_target "$record") || return 1
+  rm -f "$FM_AFK_CONTRACT_STATE/.last-checkpoint-return" || return 1
   mv "$record" "$target" || return 1
   printf '%s\n' "$target"
 }

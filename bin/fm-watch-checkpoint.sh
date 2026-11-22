@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 # Run one bounded foreground watcher checkpoint for harnesses that should not
 # rely on background-task completion to wake the model.
-# A clean return (actionable wake or quiet deadline) touches
-# state/.last-checkpoint-return after the watcher has released its lock, and
-# every checkpoint removes that record before starting its watcher, so the record
-# exists only in the interval between a clean return and the next checkpoint.
-# bin/fm-guard.sh owns how that record changes its watcher-down presentation.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,6 +9,9 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 RETURN_RECORD="$STATE/.last-checkpoint-return"
 SECONDS_ARG=${FM_CODEX_WATCH_CHECKPOINT:-180}
+
+# shellcheck source=bin/fm-wake-lib.sh
+FM_WAKE_NO_MKDIR=1 . "$SCRIPT_DIR/fm-wake-lib.sh"
 
 usage() {
   cat <<'EOF'
@@ -48,24 +46,26 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+checkpoint_session=$(fm_codex_checkpoint_session "$STATE") || checkpoint_session=
+attempt_record= output_dir=
+trap '[ -z "$attempt_record" ] || rm -f -- "$attempt_record"; [ -z "$output_dir" ] || rm -rf -- "$output_dir"' EXIT
+if [ -n "$checkpoint_session" ]; then
+  rm -f -- "$RETURN_RECORD" || exit 1
+  attempt_record=$(mktemp "$RETURN_RECORD.XXXXXX") || exit 1
+  exec 3>"$attempt_record" || exit 1
+  mv -f -- "$attempt_record" "$RETURN_RECORD" || exit 1
+  attempt_record=
+fi
+
 case "$SECONDS_ARG" in
   ''|*[!0-9]*) echo "error: --seconds must be a positive integer" >&2; exit 2 ;;
   0) echo "error: --seconds must be greater than zero" >&2; exit 2 ;;
 esac
 
-OUT=$(mktemp "${TMPDIR:-/tmp}/fm-watch-checkpoint.out.XXXXXX") || exit 1
-ERR=$(mktemp "${TMPDIR:-/tmp}/fm-watch-checkpoint.err.XXXXXX") || {
-  rm -f "$OUT"
-  exit 1
-}
-trap 'rm -f "$OUT" "$ERR"' EXIT
-
-record_clean_return() {
-  [ -d "$STATE" ] || return 0
-  date +%s > "$RETURN_RECORD" 2>/dev/null || true
-}
-
-rm -f "$RETURN_RECORD" 2>/dev/null || true
+output_dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-watch-checkpoint.XXXXXX") || exit 1
+OUT="$output_dir/out"
+ERR="$output_dir/err"
+export FM_WATCH_CHECKPOINT_CLOSE="$output_dir/close"
 
 run_with_perl_timeout() {
   perl -e '
@@ -96,25 +96,21 @@ run_with_perl_timeout() {
   ' "$SECONDS_ARG" "$SCRIPT_DIR/fm-watch.sh"
 }
 
-set +e
-if command -v timeout >/dev/null 2>&1; then
-  timeout "$SECONDS_ARG" "$SCRIPT_DIR/fm-watch.sh" >"$OUT" 2>"$ERR"
-  RC=$?
-elif command -v gtimeout >/dev/null 2>&1; then
-  gtimeout "$SECONDS_ARG" "$SCRIPT_DIR/fm-watch.sh" >"$OUT" 2>"$ERR"
-  RC=$?
-else
-  run_with_perl_timeout >"$OUT" 2>"$ERR"
-  RC=$?
-fi
-set -e
+{
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$SECONDS_ARG" "$SCRIPT_DIR/fm-watch.sh"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$SECONDS_ARG" "$SCRIPT_DIR/fm-watch.sh"
+  else
+    run_with_perl_timeout
+  fi
+} 3>&- >"$OUT" 2>"$ERR"
+RC=$?
+close=$(cat "$FM_WATCH_CHECKPOINT_CLOSE" 2>/dev/null || true)
 
-if grep -E '^(signal:|stale:|check:|heartbeat($|:))' "$OUT" >/dev/null 2>&1; then
-  record_clean_return
-  cat "$OUT"
-  [ ! -s "$ERR" ] || cat "$ERR" >&2
-  exit 0
-fi
+record_clean_return() {
+  [ -z "$checkpoint_session" ] || printf '%s %s\n' "$close" "$checkpoint_session" >&3
+}
 
 if grep -E '^watcher: already running' "$OUT" "$ERR" >/dev/null 2>&1; then
   [ ! -s "$OUT" ] || cat "$OUT"
@@ -123,12 +119,20 @@ if grep -E '^watcher: already running' "$OUT" "$ERR" >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ "$RC" -eq 124 ]; then
-  record_clean_return
+if [ "$close" = quiet ] && [ "$RC" -eq 124 ]; then
+  record_clean_return || exit 1
   printf 'checkpoint: no actionable wake within %ss\n' "$SECONDS_ARG"
   exit 124
 fi
 
 [ ! -s "$OUT" ] || cat "$OUT"
 [ ! -s "$ERR" ] || cat "$ERR" >&2
+if [ "$close" = wake ] && { [ "$RC" -eq 0 ] || [ "$RC" -eq 124 ]; }; then
+  record_clean_return || exit 1
+  exit 0
+fi
+if [ "$RC" -eq 0 ] || [ "$RC" -eq 124 ]; then
+  echo "watcher: FAILED - checkpoint did not confirm a clean close" >&2
+  exit 1
+fi
 exit "$RC"

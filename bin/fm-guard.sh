@@ -25,13 +25,6 @@
 # per distinct down-episode in this FM_HOME (keyed to the failing condition, not
 # the beacon mtime, which a healthy between-turns watcher advances every poll);
 # later guarded commands in the same episode print a one-line reminder instead.
-# Under the persistent model, the interval after a clean foreground checkpoint
-# return (bin/fm-watch-checkpoint.sh owns state/.last-checkpoint-return) is an
-# expected gap, not a lapse: while that record is younger than grace and the
-# only failing fact is no-watcher, the guard prints one calm line that still
-# names the missing watcher, claims no episode, and ends any announced episode,
-# because a checkpoint ran since; past grace, or for any other failure, the
-# full banner applies unchanged.
 # Episode state lives only under state/.guard-watcher-stale-banner (volatile,
 # bounded). Independent alarms (queued wakes, worktree tangle) are never
 # suppressed by that dedup. Normal wake handling (watcher briefly down between a
@@ -210,18 +203,20 @@ fi
 # bordered banner FIRST so it reads as an alarm, not a buried stderr line. Later
 # calls in the same episode get a one-line reminder only.
 between_checkpoints=false
-if [ "$watcher_healthy" = false ] && [ "$watcher_down_reason" = no-watcher ] \
-  && [ "$(fm_supervision_model)" = persistent ]; then
-  checkpoint_return_age=$(fm_path_age "$STATE/.last-checkpoint-return")
-  case "$checkpoint_return_age" in
-    ''|*[!0-9]*) ;;
-    *) [ "$checkpoint_return_age" -lt "$GRACE" ] && between_checkpoints=true ;;
-  esac
+checkpoint_record="$STATE/.last-checkpoint-return"
+if [ "$watcher_healthy" = false ] && [ "$READ_ONLY" -eq 0 ] && [ -s "$checkpoint_record" ] \
+  && checkpoint_session=$(fm_codex_checkpoint_session "$STATE") \
+  && IFS=' ' read -r checkpoint_close return_session < "$checkpoint_record" \
+  && [ "$return_session" = "$checkpoint_session" ] \
+  && { [ "$checkpoint_close" = wake ] || { [ "$checkpoint_close" = quiet ] && [ "$watcher_down_reason" = no-watcher ]; }; } \
+  && [ ! -e "$STATE/.watch.lock" ] && [ ! -L "$STATE/.watch.lock" ]; then
+  checkpoint_return_age=$(fm_path_age "$checkpoint_record")
+  [ "$checkpoint_return_age" -ge 0 ] && [ "$checkpoint_return_age" -lt "$GRACE" ] && between_checkpoints=true
 fi
 
 if [ "$between_checkpoints" = true ]; then
-  [ "$READ_ONLY" -eq 1 ] || fm_guard_clear_stale_banner
-  printf 'NOTICE: between foreground checkpoints - no live watcher process holds this home lock since the last checkpoint returned %ss ago; start the next checkpoint after handling its result.\n' \
+  fm_guard_clear_stale_banner
+  printf 'NOTICE: between foreground checkpoints - no live watcher process holds this home lock since the last checkpoint returned %ss ago.\n' \
     "$checkpoint_return_age" >&2
 elif [ "$watcher_healthy" = false ]; then
   episode_key=$(fm_guard_stale_episode_key "$watcher_down_reason")
