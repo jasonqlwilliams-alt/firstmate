@@ -241,9 +241,9 @@ test_timed_out_startup_is_a_failed_checkpoint() (
   printf '%s\n' "$$" > "$home/state/.wake-queue.lock/pid"
   status=0
   output=$("$CHECKPOINT" --seconds 2 2>&1) || status=$?
-  expect_code 1 "$status" "startup timeout ($output)"
+  expect_code 124 "$status" "startup timeout keeps the checkpoint deadline exit ($output)"
   assert_present "$home/state/.watch.lock/pid" "watcher did not reach the blocked recovery startup"
-  assert_not_contains "$output" 'no actionable wake within' "startup timeout looked like a quiet checkpoint"
+  [ ! -s "$home/state/.last-checkpoint-return" ] || fail "startup timeout recorded a clean return"
   output=$("$ROOT/bin/fm-guard.sh" 2>&1)
   assert_contains "$output" 'WATCHER DOWN' "startup timeout suppressed the guard alarm"
   pass "a deadline during recovery startup leaves the guard alarm active"
@@ -275,7 +275,8 @@ SH
   chmod +x "$home/bin/rm"
   status=0
   output=$(PATH="$home/bin:$PATH" FM_TEST_REAL_RM="$rm_bin" "$CHECKPOINT" --seconds 8 2>&1) || status=$?
-  expect_code 1 "$status" "startup wake with failed lock cleanup ($output)"
+  expect_code 0 "$status" "startup wake with failed lock cleanup keeps the wake exit ($output)"
+  [ ! -s "$home/state/.last-checkpoint-return" ] || fail "wake with failed lock cleanup recorded a clean return"
   assert_contains "$output" 'rejected unauthenticated PR poll retirement receipts' "cleanup failure test never delivered the wake"
   assert_present "$home/state/.watch.lock/pid" "cleanup failure did not retain a lock"
   output=$("$ROOT/bin/fm-guard.sh" 2>&1)
