@@ -60,14 +60,18 @@ The turn-end guard remains the final backstop rather than the normal continuity 
 
 When the backend confirms that a local task's recorded endpoint is missing, the watcher clears pause tracking.
 The watcher queues `stale: <window> (the recorded endpoint is gone)` once for that recorded endpoint unless a matching [retained-copy park mark](#parking-a-task-with-its-copy-retained) suppresses the report.
-The presence verdict comes from `fm_backend_endpoint_state` in [`fm-backend.sh`](../bin/fm-backend.sh), which treats an unavailable or inconclusive inventory as unreadable and leaves it quiet.
-The watcher cannot confirm Zellij endpoint loss because the session named in the record may have been renamed or replaced.
-The watcher uses Zellij's separate presence check for idle secondmates and treats a changed tab title as unreadable.
-The watcher treats failed cmux captures as unreadable because a surface can move to another workspace while its recorded workspace stays open and empty.
-The watcher cannot confirm Orca endpoint loss because a recorded handle can go stale while its terminal survives.
-cmux can miss a surface loss when another surface remains in the same workspace.
-Routine polling checks local idle secondmate presence without capturing their screens and skips local endpoint probes for remote mates.
-A present mate enters the pane-stale path only while its latest status declares `paused:` or `captain-held:`.
+Routine polling checks local idle secondmate presence without capturing their screens and skips recorded-endpoint polling for remote mates.
+A secondmate enters the pane-stale path only while its latest status declares `paused:` or `captain-held:`.
+A backlog hold alone leaves the secondmate on the idle polling path.
+
+The presence check in [`fm-backend.sh`](../bin/fm-backend.sh) returns `unreadable` when the evidence is inconclusive, and the watcher stays quiet.
+tmux and Herdr can confirm loss on an idle presence check or after a failed screen capture.
+For Zellij, an idle presence check can verify the recorded pane against its expected tab title.
+A missing pane or a changed title is inconclusive because the recorded session may have been renamed or replaced.
+Failed screen captures on Zellij, cmux, and Orca stay quiet in recorded-endpoint monitoring.
+A cmux surface can move out of its recorded workspace, and a successful capture can read another surface in that workspace.
+An Orca terminal can survive after its recorded handle goes stale.
+
 The report is keyed to the recorded backend, target, and spawn generation, so a relaunch can report a fresh loss even when it reuses the target.
 A successful capture or a positive presence verdict re-arms the report, and teardown keeps the loss record until it retires the task record.
 The wake keeps its window key for routing and has a separate deduplication identity, so the drain presents both the endpoint loss and any ordinary stale wake for that window, collapsing repeated loss rows to one.
@@ -75,12 +79,13 @@ After handling both wakes, use the drain's [printed acknowledgement](#recovery-e
 Where the away daemon runs, it routes the loss to its escalation digest and keeps pause tracking cleared while the loss still matches the current endpoint, even if the wait remains declared.
 
 The [backend verification record](verification/runtime-backends.md#recorded-endpoint-loss) covers tmux and Herdr.
-The [watcher triage regressions](../tests/fm-watch-triage.test.sh) exercise both wake sequence orders, marking, clearing, a lost idle secondmate, Zellij presence verdicts, and quiet capture failures on cmux and Orca.
+The [watcher triage regressions](../tests/fm-watch-triage.test.sh) cover wake ordering, park marks, idle secondmate polling, Zellij presence verdicts, and quiet capture failures on the experimental backends.
 
 ### Parking a task with its copy retained
 
 After deliberately closing a local ordinary task's worker window and retaining its isolated copy, use the `mark` action in [`fm-park-retained.sh`](../bin/fm-park-retained.sh) for that task.
-Marking requires the backend to confirm that the recorded endpoint is missing, and both park actions leave the copy and its work intact.
+Marking requires a recovery-grade `missing` verdict, currently available only on tmux and Herdr.
+Both park actions leave the copy and its work intact.
 Secondmates follow the reporting rule above.
 A loss wake queued before marking remains pending until [normal wake acknowledgement](#per-actor-acknowledgement).
 When resuming, use `clear` to remove the mark, including after the worker is running again.

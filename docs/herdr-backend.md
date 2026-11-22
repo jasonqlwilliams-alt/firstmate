@@ -367,7 +367,7 @@ When a secondmate's home can be resolved, the session-start sweep supplies it to
 Liveness probes remain concurrent, while recovery spawns are serialized within the sweep so they do not compete for the home's task-set lock.
 An unrelated operation holding that lock still refuses recovery rather than weakening the teardown guard.
 `tests/fm-secondmate-herdr-identity-e2e.test.sh` exercises both recycled routes and multi-home recovery in an isolated named session with fake agents and stubbed launch screens.
-Mid-session secondmate agent-process liveness is not implemented because idle secondmates are deliberately exempt from stale-pane escalation and need a separate periodic identity signal.
+The [watcher guide](watcher-continuity.md#recorded-endpoint-loss) covers mid-session endpoint presence checks for local secondmates.
 
 ## Push events and polling fallback
 

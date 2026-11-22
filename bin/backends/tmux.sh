@@ -257,12 +257,10 @@ fm_backend_tmux_foreground_argv0s() {  # <target>
 }
 
 # See docs/tmux-backend.md "Agent liveness probe" for the empirical basis.
-# Tmux silently falls back to the active window when a
-# named target is absent, so the exact recorded window must appear in a
-# successful session inventory before its foreground command can be trusted.
+# Check the exact recorded session and window because implicit tmux target
+# resolution can select a different window when the recorded one is absent.
 # An omitted window or a definitive missing-session/server response is
-# `missing`; any other inventory or pane read failure is `unreadable`, so a
-# transient tmux problem never licenses a duplicate.
+# `missing`. Other inventory failures are `unreadable`.
 fm_backend_tmux_endpoint_state() {  # <target>
   local target=$1 session window windows inventory_status
   case "$target" in
