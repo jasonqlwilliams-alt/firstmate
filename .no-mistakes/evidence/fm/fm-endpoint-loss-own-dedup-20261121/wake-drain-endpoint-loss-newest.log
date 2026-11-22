@@ -1,0 +1,69 @@
+Scenario endpoint-loss-newest in a disposable Firstmate home with synthetic task metadata
+Real private tmux server, 80x24 grid.
+$ bin/fm-watch.sh
+stale: dedup:fm-lost
+exit 0
+$ tmux kill-window -t dedup:fm-lost   # synthetic incarnation first
+$ FM_WATCH_HANDLING_SUCCESSOR=1 bin/fm-watch.sh
+stale: dedup:fm-lost (the recorded endpoint is gone)
+exit 0
+$ tmux kill-window -t dedup:fm-lost   # synthetic incarnation second
+$ FM_WATCH_HANDLING_SUCCESSOR=1 bin/fm-watch.sh
+stale: dedup:fm-lost (the recorded endpoint is gone)
+exit 0
+
+BASE ccd19a2f, same queue bytes. Reproduces the missing notification.
+Durable queue before drain (epoch, sequence, kind, key, payload)
+1795359870	1	stale	dedup:fm-lost	stale: dedup:fm-lost
+1795359871	2	stale	dedup:fm-lost	stale: dedup:fm-lost (the recorded endpoint is gone)
+1795359871	3	stale	dedup:fm-lost	stale: dedup:fm-lost (the recorded endpoint is gone)
+$ bin/fm-wake-drain.sh
+1795359871	3	stale	dedup:fm-lost	stale: dedup:fm-lost (the recorded endpoint is gone)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 3356715.1795359872.8b7PNl
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  After draining queued wakes, repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+exit 0
+Durable queue after presentation matches the pre-drain bytes.
+$ bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 3356715.1795359872.8b7PNl
+exit 0
+Durable queue after acknowledgement is empty.
+$ bin/fm-wake-drain.sh
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+exit 0
+No acknowledged rows were presented again.
+
+TARGET b1277ab3. Both notifications, newest row per identity.
+Durable queue before drain (epoch, sequence, kind, key, payload)
+1795359870	1	stale	dedup:fm-lost	stale: dedup:fm-lost
+1795359871	2	stale	dedup:fm-lost	stale: dedup:fm-lost (the recorded endpoint is gone)
+1795359871	3	stale	dedup:fm-lost	stale: dedup:fm-lost (the recorded endpoint is gone)
+$ bin/fm-wake-drain.sh
+1795359870	1	stale	dedup:fm-lost	stale: dedup:fm-lost
+1795359871	3	stale	dedup:fm-lost	stale: dedup:fm-lost (the recorded endpoint is gone)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 3354701.1795359870.xtUY8b
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  After draining queued wakes, repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+exit 0
+Durable queue after presentation matches the pre-drain bytes.
+$ bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 3354701.1795359870.xtUY8b
+exit 0
+Durable queue after acknowledgement is empty.
+$ bin/fm-wake-drain.sh
+WARNING: watcher still down (same stale episode; last beat: 2s ago, grace 300s) - full banner already printed this episode.
+exit 0
+No acknowledged rows were presented again.
+Private tmux server stopped (exit 0).
+
+PASS
