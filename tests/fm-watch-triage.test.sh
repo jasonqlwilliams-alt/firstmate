@@ -2382,6 +2382,7 @@ SH
   ack_stopped_cycle "$state" || fail "could not acknowledge the fixture watcher stop"
 
   "$dir/bin/tmux" kill-session -t =mates || fail "could not close the recorded second mate session"
+  # shellcheck disable=SC2016 # The child shell expands $0 and $1.
   recovery_state=$(env "${watch_env[@]}" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state tmux "$1"' "$ROOT" "$window")
   [ "$recovery_state" = missing ] || fail "recovery read '$recovery_state' for the closed session"
   env "${watch_env[@]}" "$WATCH" > "$out" & pid=$!
