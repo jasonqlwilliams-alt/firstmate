@@ -1129,6 +1129,7 @@ fm_pr_poll_registration_cleanup_valid() {
 fm_pr_poll_registration_remove() {
   local state=$1 id=$2 template=$3 check device
   fm_pr_poll_registration_cleanup_valid "$state" "$id" || return 1
+  fm_pr_poll_retirement_recover_one "$state" "$id" "$template" || return 1
   check="$state/$id.check.sh"
   if [ -f "$check" ] && [ ! -L "$check" ]; then
     [ -d "$state" ] && [ ! -L "$state" ] || return 1

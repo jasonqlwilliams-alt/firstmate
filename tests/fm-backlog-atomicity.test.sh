@@ -2104,16 +2104,25 @@ test_recovery_retry_preserves_incomplete_cleanup_warning() {
 }
 
 test_recovery_finishes_a_close_for_the_same_meta_incarnation() {
-  local case_dir id out state url
+  local case_dir id out state url historical_poll
   id=atomic-heal-same-incarnation-b11
   case_dir=$(make_home heal-same-incarnation)
   add_item "$case_dir" "$id"
   start_item "$case_dir" "$id"
-  write_task_meta "$case_dir" "$id" ship no-mistakes "spawn_gen=spawn-one"
-  state="$(home_of "$case_dir")/state"
   url=https://github.com/example/repo/pull/11
-  FM_HOME="$(home_of "$case_dir")" PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-pr-check.sh" "$id" "$url" >/dev/null \
-    || fail "could not register the interrupted task's poll"
+  write_task_meta "$case_dir" "$id" ship no-mistakes "spawn_gen=spawn-one" "pr=$url"
+  state="$(home_of "$case_dir")/state"
+  historical_poll="$case_dir/historical-fm-pr-poll.sh"
+  cp "$ROOT/bin/fm-pr-poll.sh" "$historical_poll"
+  printf '\n' >> "$historical_poll"
+  (
+    # shellcheck source=bin/fm-pr-lib.sh
+    . "$ROOT/bin/fm-pr-lib.sh"
+    fm_pr_poll_prepare "$state" "$id" github "$url" github.com example/repo 11 "$historical_poll" \
+      && fm_pr_poll_publish_prepared \
+      && fm_pr_poll_snapshot_capture "$state" "$id" "$historical_poll" \
+      && fm_pr_poll_retirement_publish "$state" "$id" "$historical_poll" merged
+  ) || fail "could not seed the interrupted task's pre-update merge receipt"
   ( umask 077
     printf '%s\n' "$url" > "$state/$id.pr-poll-closed"
     printf '%s\n' https://github.com/example/repo/pull/12 > "$state/.$id.pr-poll-closed.ABC123"
@@ -2130,6 +2139,8 @@ test_recovery_finishes_a_close_for_the_same_meta_incarnation() {
     "session start retained the completed incarnation's close marker"
   assert_absent "$state/$id.pr-poll-registration" "session start retained the retired task's registration"
   assert_absent "$state/$id.check.sh" "session start retained the retired task's canonical PR check"
+  assert_absent "$state/$id.pr-poll" "session start retained the retired task's PR sidecar"
+  assert_absent "$state/$id.pr-poll-retirement" "session start stranded the retired task's merge receipt"
   assert_absent "$state/$id.pr-poll-closed" "session start retained the retired task's closure evidence"
   assert_absent "$state/.$id.pr-poll-closed.ABC123" "session start retained the retired task's staged closure"
   pass "session start finishes a close for the matching meta incarnation"
