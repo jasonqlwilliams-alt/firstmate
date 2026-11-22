@@ -658,12 +658,11 @@ backlog_row_state() {
 
 # Build the teardown test's executable search path without lsof, regardless of
 # whether the host installs it in /usr/bin, /usr/sbin, or a package-manager bin.
-make_path_without_lsof() {  # <case-dir> [excluded-tool]
-  local path_dir="$1/path-without-lsof" excluded_tool=${2:-} cmd resolved
+make_path_without_lsof() {  # <case-dir>
+  local path_dir="$1/path-without-lsof" cmd resolved
   mkdir -p "$path_dir"
   for cmd in awk bash basename cat chmod cp cut date dirname env find git grep head hostname id jq ln \
-    mkdir mktemp mv od perl ps readlink realpath rm sed sh sha256sum shasum sleep sort stat tail timeout tr uname wc xargs; do
-    [ "$cmd" != "$excluded_tool" ] || continue
+    mkdir mktemp mv perl ps readlink realpath rm sed sh sha256sum shasum sleep sort stat tail timeout tr uname wc xargs; do
     resolved=$(command -v "$cmd" 2>/dev/null) || continue
     case "$resolved" in /*) ln -sf "$resolved" "$path_dir/$cmd" ;; esac
   done
@@ -3430,11 +3429,13 @@ test_lsof_absent_reaps_detached_linux_process() (
   case_dir=$(make_case "lsof-absent-detached-reap-café-$visibility")
   write_meta "$case_dir" no-mistakes ship
   land_shippable_commit "$case_dir"
-  path_without_lsof=$(make_path_without_lsof "$case_dir" perl)
-  if PATH="$case_dir/fakebin:$path_without_lsof" command -v lsof >/dev/null 2>&1 \
-     || PATH="$case_dir/fakebin:$path_without_lsof" command -v perl >/dev/null 2>&1; then
-    fail 'lsof-absent-detached-reap: fixture path unexpectedly exposes lsof or perl'
+  path_without_lsof=$(make_path_without_lsof "$case_dir")
+  if PATH="$case_dir/fakebin:$path_without_lsof" command -v lsof >/dev/null 2>&1; then
+    fail 'lsof-absent-detached-reap: fixture path unexpectedly exposes lsof'
   fi
+  printf '#!/usr/bin/env bash\nQUOTING_STYLE=shell-always exec %q "$@"\n' \
+    "$path_without_lsof/stat" > "$case_dir/fakebin/stat"
+  chmod +x "$case_dir/fakebin/stat"
   if [ "$visibility" = hidden ]; then
     export FM_TEST_HIDDEN_ANCESTOR=$$
     hide_teardown_ancestor "$case_dir"
@@ -3486,7 +3487,7 @@ test_lsof_absent_reaps_detached_linux_process() (
   kill -0 "$tmp_pid" 2>/dev/null || fail 'lsof-absent-detached-reap: cleanup signalled a process in tasktmp'
   kill -0 "$sibling_pid" 2>/dev/null || fail 'lsof-absent-detached-reap: sibling process was killed'
   assert_absent "$case_dir/tasktmp" 'lsof-absent-detached-reap: cleanup left the tasktmp directory'
-  pass "Linux teardown without lsof or perl scopes reaping to its owned worktree ($visibility ancestry)"
+  pass "Linux teardown without lsof scopes reaping to its owned worktree ($visibility ancestry)"
 )
 
 test_hidden_intermediate_parent_refuses_reap() (
@@ -4077,11 +4078,13 @@ test_keep_pane_without_lsof() (
   case_dir=$(make_case keep-pane-no-lsof)
   configure_keep_pane_case "$case_dir"
   rm -f "$case_dir/fakebin/lsof"
-  path_without_lsof=$(make_path_without_lsof "$case_dir" perl)
-  if PATH="$case_dir/fakebin:$path_without_lsof" command -v lsof >/dev/null 2>&1 \
-     || PATH="$case_dir/fakebin:$path_without_lsof" command -v perl >/dev/null 2>&1; then
-    fail 'keep-pane-no-lsof: fixture path unexpectedly exposes lsof or perl'
+  path_without_lsof=$(make_path_without_lsof "$case_dir")
+  if PATH="$case_dir/fakebin:$path_without_lsof" command -v lsof >/dev/null 2>&1; then
+    fail 'keep-pane-no-lsof: fixture path unexpectedly exposes lsof'
   fi
+  printf '#!/usr/bin/env bash\n[ "${1:-}" != -e ] || exit 1\nexec %q "$@"\n' \
+    "$path_without_lsof/readlink" > "$case_dir/fakebin/readlink"
+  chmod +x "$case_dir/fakebin/readlink"
   cat > "$case_dir/fakebin/treehouse" <<'SH'
 #!/usr/bin/env bash
 set -eu
@@ -4136,7 +4139,7 @@ SH
   assert_absent "$case_dir/closed" 'keep-pane-no-lsof: cleanup closed the exact pane'
   assert_present "$case_dir/return-verified" 'keep-pane-no-lsof: cleanup did not return the worktree after reaping and detaching'
   assert_absent "$case_dir/state/task-x1.meta" 'keep-pane-no-lsof: cleanup retained task metadata'
-  pass 'Linux keep-pane cleanup without lsof or perl detaches the shell and reaps the leak before returning the worktree'
+  pass 'Linux keep-pane cleanup without lsof detaches the shell and reaps the leak before returning the worktree'
 )
 
 test_keep_pane_retirement() {

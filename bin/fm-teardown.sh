@@ -2066,15 +2066,17 @@ EOF
 }
 
 proc_pids_with_cwd_under() {  # <resolved-worktree>
-  local dir=$1 entry link pid
-  QUOTING_STYLE=literal stat --printf='%N\0' -- /proc/self/cwd >/dev/null 2>&1 || return 1
+  local dir=$1 link cwd pid
+  [ -r /proc ] && find /proc/self/cwd -maxdepth 0 -printf '%l' >/dev/null 2>&1 || return 1
   set -o pipefail
-  printf '%s\0' /proc/[0-9]*/cwd |
-    { QUOTING_STYLE=literal xargs -0 stat --printf='%N\0' -- 2>/dev/null || [ "$?" -eq 123 ]; } |
-    while IFS= read -r -d '' entry; do
-      link=${entry%%" -> "*}
-      case "$entry" in
-        "$link -> $dir"|"$link -> $dir/"*)
+  { find /proc -mindepth 1 -maxdepth 2 -ignore_readdir_race \
+      \( ! -path '/proc/[0-9]*' -prune \) -o \
+      \( -name cwd -type l -printf '%p\0%l\0' \) 2>/dev/null || [ "$?" -eq 1 ]; } |
+    while IFS= read -r -d '' link; do
+      IFS= read -r -d '' cwd || return 1
+      [ -n "$cwd" ] || continue
+      case "$cwd" in
+        "$dir"|"$dir/"*)
           pid=${link#/proc/}
           printf '%s\n' "${pid%/cwd}"
           ;;
