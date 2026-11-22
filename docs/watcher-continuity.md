@@ -58,12 +58,15 @@ The turn-end guard remains the final backstop rather than the normal continuity 
 
 ## Recorded endpoint loss
 
-When pane polling cannot read a local task's recorded endpoint and the backend confirms it is missing, the watcher clears pause tracking.
+When the backend confirms that a local task's recorded endpoint is missing, the watcher clears pause tracking.
 The watcher queues `stale: <window> (the recorded endpoint is gone)` once for that recorded endpoint unless a matching [retained-copy park mark](#parking-a-task-with-its-copy-retained) suppresses the report.
-The missing verdict comes from `fm_backend_endpoint_state` in [`fm-backend.sh`](../bin/fm-backend.sh): tmux and Herdr supply it from their recovery classifier, while Zellij, cmux, and Orca confirm absence only from a successful inventory and read a failed probe as unreadable, which never reports loss.
-Presence is checked before the idle-secondmate exemption, so a local secondmate whose window is gone reports its loss, while a present idle mate enters the pane-stale path only while its latest status declares `paused:` or `captain-held:`.
+The presence verdict comes from `fm_backend_endpoint_state` in [`fm-backend.sh`](../bin/fm-backend.sh), which treats an unavailable or inconclusive inventory as unreadable and leaves it quiet.
+Zellij requires a readable pane inventory from the recorded session, cmux requires the recorded workspace to appear in the current window inventory, and a stale Orca handle is unreadable because it can change while its terminal survives.
+cmux can miss a surface loss when another surface remains in the same workspace.
+Routine polling checks local idle secondmate presence without capturing their screens and skips local endpoint probes for remote mates.
+A present mate enters the pane-stale path only while its latest status declares `paused:` or `captain-held:`.
 The report is keyed to the recorded backend, target, and spawn generation, so a relaunch can report a fresh loss even when it reuses the target.
-A successful capture also re-arms the report, and teardown keeps the loss record until it retires the task record.
+A successful capture or a positive presence verdict re-arms the report, and teardown keeps the loss record until it retires the task record.
 The wake keeps its window key for routing and has a separate deduplication identity, so the drain presents both the endpoint loss and any ordinary stale wake for that window, collapsing repeated loss rows to one.
 After handling both wakes, use the drain's [printed acknowledgement](#recovery-episode-acknowledgement) to retire them.
 Where the away daemon runs, it routes the loss to its escalation digest and keeps pause tracking cleared while the loss still matches the current endpoint, even if the wait remains declared.

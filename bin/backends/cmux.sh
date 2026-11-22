@@ -431,52 +431,29 @@ fm_backend_cmux_target_ready() {  # <target> [expected-label]
   fm_backend_cmux_surface_exists "$FM_BACKEND_CMUX_WORKSPACE" "$FM_BACKEND_CMUX_SURFACE"
 }
 
-# fm_backend_cmux_endpoint_state: tri-state presence read for one recorded
-# target, owned by bin/fm-backend.sh's fm_backend_endpoint_state contract and
-# mirroring fm_backend_cmux_target_ready's label-refresh rules. Prints
-# `missing` only when a successful workspace or pane inventory proves the
-# endpoint gone (or its workspace now carries another task's title),
-# `unreadable` when the socket or any inventory read fails or cannot be
-# parsed, and `unverified` when the endpoint is present.
-fm_backend_cmux_endpoint_state() {  # <target> [expected-label]
-  local expected_label=${2:-} expected_title workspaces title wsid panes
+# See bin/fm-backend.sh's fm_backend_endpoint_state contract.
+fm_backend_cmux_endpoint_state() {  # <target> <expected-label>
+  local expected_label=${2:-} workspaces workspace panes
+  [ -n "$expected_label" ] || { printf 'unreadable'; return 0; }
   fm_backend_cmux_parse_target "$1" || { printf 'unreadable'; return 0; }
   workspaces=$(fm_backend_cmux_cli workspace list --json --id-format uuids 2>/dev/null) \
     || { printf 'unreadable'; return 0; }
-  printf '%s' "$workspaces" | jq -e '.workspaces | type == "array"' >/dev/null 2>&1 \
+  workspace=$(printf '%s' "$workspaces" | jq -ers --arg id "$FM_BACKEND_CMUX_WORKSPACE" \
+    --arg title "$(fm_backend_cmux_scoped_title "$expected_label")" '
+      select(length == 1) | .[0].workspaces
+      | select(type == "array" and all(.[]; (.id | type == "string" and length > 0) and (.title | type == "string")))
+      | map(select(.id == $id)) | select(length == 1)
+      | if .[0].title == $title then "match" else "missing" end
+    ' 2>/dev/null) || { printf 'unreadable'; return 0; }
+  [ "$workspace" = match ] || { printf '%s' "$workspace"; return 0; }
+  panes=$(fm_backend_cmux_cli list-panes --workspace "$FM_BACKEND_CMUX_WORKSPACE" --json --id-format uuids 2>/dev/null) \
     || { printf 'unreadable'; return 0; }
-  wsid=$FM_BACKEND_CMUX_WORKSPACE
-  title=$(printf '%s' "$workspaces" | jq -r --arg id "$wsid" \
-    '[.workspaces[] | select(.id == $id) | .title][0] // empty' 2>/dev/null)
-  if [ -n "$expected_label" ]; then
-    expected_title=$(fm_backend_cmux_scoped_title "$expected_label")
-    if [ -z "$title" ]; then
-      wsid=$(printf '%s' "$workspaces" | jq -r --arg want "$expected_title" \
-        '[.workspaces[] | select(.title == $want) | .id][0] // empty' 2>/dev/null)
-      [ -n "$wsid" ] || { printf 'missing'; return 0; }
-    elif [ "$title" != "$expected_title" ]; then
-      printf 'missing'
-      return 0
-    fi
-  elif ! printf '%s' "$workspaces" | jq -e --arg id "$wsid" \
-    '[.workspaces[] | select(.id == $id)] | length > 0' >/dev/null 2>&1; then
-    printf 'missing'
-    return 0
-  fi
-  panes=$(fm_backend_cmux_cli list-panes --workspace "$wsid" --json --id-format uuids 2>/dev/null) \
-    || { printf 'unreadable'; return 0; }
-  printf '%s' "$panes" | jq -e '.panes | type == "array"' >/dev/null 2>&1 \
-    || { printf 'unreadable'; return 0; }
-  if [ -n "$expected_label" ]; then
-    # target_ready refreshes a stale surface to the workspace's first one.
-    printf '%s' "$panes" | jq -e '[.panes[] | .surface_ids // [] | .[]] | length > 0' >/dev/null 2>&1 \
-      && { printf 'unverified'; return 0; }
-  elif printf '%s' "$panes" | jq -e --arg s "$FM_BACKEND_CMUX_SURFACE" \
-    '[.panes[] | select(.surface_ids // [] | index($s))] | length > 0' >/dev/null 2>&1; then
-    printf 'unverified'
-    return 0
-  fi
-  printf 'missing'
+  printf '%s' "$panes" | jq -ers '
+    select(length == 1) | .[0].panes
+    | select(type == "array" and all(.[]; .surface_ids
+        | type == "array" and all(.[]; type == "string" and length > 0)))
+    | if any(.[]; .surface_ids | length > 0) then "present" else "missing" end
+  ' 2>/dev/null || printf 'unreadable'
 }
 
 # fm_backend_cmux_current_path: the live foreground process's cwd, or empty on

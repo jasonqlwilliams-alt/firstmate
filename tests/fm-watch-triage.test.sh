@@ -2334,10 +2334,23 @@ test_missing_secondmate_endpoint_surfaces_once() (
   dir=$(fm_test_tmproot fm-watch-mate-gone) || fail "could not create the second mate endpoint fixture"
   trap '[ -z "$pid" ] || reap "$pid"; "$tmux_bin" -L "$socket" kill-server 2>/dev/null || true' EXIT
   mkdir -p "$dir/bin"
-  printf '#!/usr/bin/env bash\nexec %q -L %q "$@"\n' "$tmux_bin" "$socket" > "$dir/bin/tmux"
+  {
+    printf '#!/usr/bin/env bash\n'
+    cat <<'SH'
+for arg in "$@"; do
+  case "$arg" in
+    remote|remote:*) printf '%s\n' "$*" >> "$FM_FAKE_ROUTE_ERRORS" ;;
+  esac
+done
+if [ "$1" = capture-pane ]; then
+  printf '%s\n' "$*" >> "$FM_FAKE_ROUTE_ERRORS"
+fi
+SH
+    printf 'exec %q -L %q "$@"\n' "$tmux_bin" "$socket"
+  } > "$dir/bin/tmux"
   chmod +x "$dir/bin/tmux"
   state="$dir/home/state"; out="$dir/home/watch.out"
-  watch_env=(PATH="$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state"
+  watch_env=(PATH="$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_FAKE_ROUTE_ERRORS="$dir/route-errors"
     FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999
     FM_PAUSE_RESURFACE_SECS=999999 FM_STALE_ESCALATE_SECS=999999)
   mkdir -p "$state"
@@ -2346,17 +2359,21 @@ test_missing_secondmate_endpoint_surfaces_once() (
   "$dir/bin/tmux" new-window -d -t mates: -n fm-mate -- bash --noprofile --norc -i \
     || fail "could not create the second mate fixture window"
   printf 'window=%s\nbackend=tmux\nkind=secondmate\nharness=codex\nspawn_gen=first\n' "$window" > "$state/mate.meta"
+  printf 'window=remote:peer\nbackend=tmux\nkind=secondmate\nremote_host=another-host\n' > "$state/peer.meta"
   printf 'working: idle under the parent\n' > "$state/mate.status"
   env "${watch_env[@]}" "$WATCH" > "$out" & pid=$!
   wait_for_exit "$pid" 150 || fail "the second mate status did not surface: $(cat "$out")"
   pid=''
   ack_stopped_cycle "$state" || fail "could not acknowledge the second mate status signal"
 
+  printf 'tmux:%s\tfirst\n' "$window" > "$state/mate.missing-endpoint"
   env "${watch_env[@]}" "$WATCH" > "$out" & pid=$!
   for poll in 1 2 3; do
     wait_poll_cycle "$state" "$pid" || fail "a live idle second mate was not quiet on poll $poll: $(cat "$out")"
   done
   [ ! -s "$state/.wake-queue" ] || fail "a live idle second mate enqueued a wake: $(cat "$state/.wake-queue")"
+  [ ! -e "$state/mate.missing-endpoint" ] || fail "the live idle mate did not re-arm endpoint loss"
+  [ ! -s "$dir/route-errors" ] || fail "idle secondmate polling read a screen or a remote endpoint: $(cat "$dir/route-errors")"
   reap "$pid"; pid=''
   ack_stopped_cycle "$state" || fail "could not acknowledge the fixture watcher stop"
 
@@ -2379,99 +2396,141 @@ test_missing_secondmate_endpoint_surfaces_once() (
   pass "real tmux: a closed idle second mate window raises one loss wake while a live idle mate stays quiet"
 )
 
-# Install stateless fake Zellij, cmux, and Orca CLIs whose endpoint inventory
-# answers from FM_FAKE_ENDPOINT: "missing" reads successfully without the
-# recorded endpoint, "unreadable" fails the read itself.
 install_fake_experimental_backends() {  # <fakebin>
   local fakebin=$1
   mkdir -p "$fakebin"
+  node -e '
+const tag = require("crypto").createHash("sha256").update(process.argv[1]).digest("hex").slice(0, 8);
+process.stdout.write("fm-firstmate-" + tag + "-lost");
+' "$(cd "${FM_ROOT_OVERRIDE:-$ROOT}" && pwd -P)" > "$fakebin/scoped-title" || return 1
   cat > "$fakebin/zellij" <<'SH'
 #!/usr/bin/env bash
-case "${FM_FAKE_ENDPOINT:-}" in
-  unreadable) echo "zellij: could not reach the server" >&2; exit 2 ;;
-  no-sessions) echo "No active zellij sessions found."; exit 1 ;;
+case "$*" in
+  --version) echo "zellij 0.44.0"; exit 0 ;;
+  "list-sessions --short --no-formatting")
+    case "$FM_FAKE_ENDPOINT" in
+      omitted-session) echo "another-session"; exit 0 ;;
+      no-sessions) echo "No active zellij sessions found." >&2; exit 1 ;;
+    esac
+    echo "lab"; exit 0
+    ;;
+  "--session lab action list-panes --json")
+    [ "$ZELLIJ_SESSION_NAME" = lab ] || exit 3
+    case "$FM_FAKE_ENDPOINT" in
+      missing) echo '[{"id":1,"tab_id":1,"is_plugin":false}]' ;;
+      bad-pane) echo '[{"id":7,"tab_id":1}]' ;;
+      unreadable|omitted-session|no-sessions|resurrectable) exit 1 ;;
+      *) echo '[{"id":7,"tab_id":1,"is_plugin":false}]' ;;
+    esac
+    exit 0
+    ;;
+  "--session lab action list-tabs --json")
+    [ "$ZELLIJ_SESSION_NAME" = lab ] || exit 3
+    case "$FM_FAKE_ENDPOINT" in
+      foreign) echo '[{"tab_id":1,"name":"fm-elsewhere"}]' ;;
+      bad-tab) echo '[{"tab_id":1,"name":7}]' ;;
+      tab-not-listed) echo '[{"tab_id":2,"name":"fm-elsewhere"}]' ;;
+      legacy) echo '[{"tab_id":1,"name":"fm-lost"}]' ;;
+      duplicate-legacy) echo '[{"tab_id":1,"name":"fm-lost"},{"tab_id":2,"name":"fm-lost"}]' ;;
+      *) printf '[{"tab_id":1,"name":"%s"}]\n' "$(cat "${0%/*}/scoped-title")" ;;
+    esac
+    exit 0
+    ;;
 esac
-pane=1
-[ "${FM_FAKE_ENDPOINT:-}" != present ] && [ "${FM_FAKE_ENDPOINT:-}" != foreign ] || pane=7
-for a in "$@"; do
-  case "$a" in
-    --version) echo "zellij 0.44.0"; exit 0 ;;
-    list-sessions) echo "lab"; exit 0 ;;
-    list-panes) printf '[{"id":%s,"tab_id":1,"is_plugin":false}]\n' "$pane"; exit 0 ;;
-    list-tabs) printf '[{"tab_id":1,"name":"%s"}]\n' "${FM_FAKE_TAB_NAME:-someone-else}"; exit 0 ;;
-  esac
-done
-exit 1
+printf 'zellij %s\n' "$*" >> "${0%/*}/route-errors"
+exit 3
 SH
   cat > "$fakebin/cmux" <<'SH'
 #!/usr/bin/env bash
-case "${FM_FAKE_ENDPOINT:-}" in
-  unreadable) echo "Error: Socket not found" >&2; exit 1 ;;
-esac
-case "${1:-}" in
+case "$*" in
   version) echo "cmux 0.64.0"; exit 0 ;;
   ping) echo "PONG"; exit 0 ;;
-  workspace) echo '{"workspaces":[{"id":"ws-other","title":"other"}]}'; exit 0 ;;
-  list-panes) echo '{"panes":[{"surface_ids":["sf-other"]}]}'; exit 0 ;;
+  "workspace list --json --id-format uuids")
+    case "$FM_FAKE_ENDPOINT" in
+      unreadable) echo "Error: Socket not found" >&2; exit 1 ;;
+      out-of-window) echo '{"workspaces":[{"id":"ws-other","title":"other"}]}' ;;
+      bad-workspace) echo '{"workspaces":[{"id":"ws-gone"}]}' ;;
+      foreign) echo '{"workspaces":[{"id":"ws-gone","title":"other"}]}' ;;
+      *) printf '{"workspaces":[{"id":"ws-gone","title":"%s"}]}\n' "$(cat "${0%/*}/scoped-title")" ;;
+    esac
+    exit 0
+    ;;
+  "list-panes --workspace ws-gone --json --id-format uuids")
+    case "$FM_FAKE_ENDPOINT" in
+      bad-pane) echo '{"panes":[{}]}' ;;
+      bad-surface) echo '{"panes":[{"surface_ids":[false]}]}' ;;
+      missing) echo '{"panes":[]}' ;;
+      *) echo '{"panes":[{"surface_ids":["sf-gone"]}]}' ;;
+    esac
+    exit 0
+    ;;
 esac
-exit 1
+printf 'cmux %s\n' "$*" >> "${0%/*}/route-errors"
+exit 3
 SH
   cat > "$fakebin/orca" <<'SH'
 #!/usr/bin/env bash
-case "${1:-}" in
-  status) echo '{"ok":true,"result":{"runtime":{"reachable":true,"state":"ready"}}}'; exit 0 ;;
+case "$*" in
+  "terminal read --terminal term-gone --limit 40 --json"|"terminal show --terminal term-gone --json")
+    case "$FM_FAKE_ENDPOINT" in
+      unreadable) echo "orca: runtime unreachable" >&2; exit 1 ;;
+      stale) echo '{"ok":false,"error":{"code":"terminal_handle_stale"}}'; exit 1 ;;
+    esac
+    ;;
+  "terminal show --terminal term-live --json")
+    case "$FM_FAKE_ENDPOINT" in
+      present) echo '{"ok":true,"result":{"terminal":{"handle":"term-live"}}}'; exit 0 ;;
+      wrong-handle) echo '{"ok":true,"result":{"terminal":{"handle":"someone-else"}}}'; exit 0 ;;
+      bad-envelope) echo '{"result":{"terminal":{"handle":"term-live"}}}'; exit 0 ;;
+      bad-result) echo '{"ok":true,"result":{}}'; exit 0 ;;
+      bad-error) echo '{"ok":false,"error":{"code":["terminal_handle_stale"]}}'; exit 0 ;;
+      other-error) echo '{"ok":false,"error":{"code":"timeout"}}'; exit 1 ;;
+    esac
+    ;;
+  "status --json") echo '{"ok":true,"result":{"runtime":{"reachable":true,"state":"ready"}}}'; exit 0 ;;
 esac
-case "${FM_FAKE_ENDPOINT:-}" in
-  unreadable) echo "orca: runtime unreachable" >&2; exit 1 ;;
-  other-error) echo '{"ok":false,"error":{"code":"timeout","message":"read timed out"}}'; exit 1 ;;
-  present) echo '{"ok":true,"result":{"text":"idle"}}'; exit 0 ;;
-esac
-echo '{"ok":false,"error":{"code":"terminal_handle_stale","message":"terminal handle stale"}}'
-exit 1
+printf 'orca %s\n' "$*" >> "${0%/*}/route-errors"
+exit 3
 SH
   chmod +x "$fakebin/zellij" "$fakebin/cmux" "$fakebin/orca"
 }
 
-# On the experimental runtimes the watcher may report loss only for an endpoint
-# the runtime confirms is gone; a probe that cannot read the runtime proves
-# nothing and must stay silent.
 test_experimental_backend_endpoint_loss_requires_confirmed_absence() (
-  local dir state fakebin out pid='' backend target mode poll watch_env
+  local dir state fakebin out pid='' backend target mode poll watch_env modes
   command -v jq >/dev/null 2>&1 || { echo "skip: jq is required by the Zellij and cmux adapters"; return 0; }
   command -v node >/dev/null 2>&1 || { echo "skip: node is required by the Orca adapter"; return 0; }
   dir=$(fm_test_tmproot fm-watch-experimental-gone) || fail "could not create the experimental endpoint fixture"
   trap '[ -z "$pid" ] || reap "$pid"' EXIT
   fakebin="$dir/fakebin"
-  install_fake_experimental_backends "$fakebin"
+  install_fake_experimental_backends "$fakebin" || fail "could not install the experimental backend fixtures"
   for backend in zellij cmux orca; do
     case "$backend" in
-      zellij) target="lab:7" ;;
-      cmux) target="ws-gone:sf-gone" ;;
-      orca) target="term-gone" ;;
+      zellij) target="lab:7"; modes=(unreadable missing) ;;
+      cmux) target="ws-gone:sf-gone"; modes=(unreadable out-of-window missing) ;;
+      orca) target="term-gone"; modes=(unreadable stale) ;;
     esac
-    for mode in unreadable missing; do
+    for mode in "${modes[@]}"; do
       state="$dir/$backend-$mode/state"; out="$dir/$backend-$mode/watch.out"
       watch_env=(PATH="$fakebin:$PATH" FM_HOME="$dir/$backend-$mode" FM_STATE_OVERRIDE="$state"
         FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999
         FM_PAUSE_RESURFACE_SECS=999999 FM_STALE_ESCALATE_SECS=999999)
       mkdir -p "$state"
+      touch "$state/home-summary.json"
       if [ "$backend" = orca ]; then
         printf 'window=fm-lost\nterminal=%s\nbackend=orca\nkind=ship\nharness=codex\nspawn_gen=first\n' "$target" > "$state/lost.meta"
       else
         printf 'window=%s\nbackend=%s\nkind=ship\nharness=codex\nspawn_gen=first\n' "$target" "$backend" > "$state/lost.meta"
       fi
-      if [ "$mode" = unreadable ]; then
-        env "${watch_env[@]}" FM_FAKE_ENDPOINT=unreadable "$WATCH" > "$out" & pid=$!
+      env "${watch_env[@]}" FM_FAKE_ENDPOINT="$mode" "$WATCH" > "$out" & pid=$!
+      if [ "$mode" != missing ]; then
         for poll in 1 2; do
           wait_poll_cycle "$state" "$pid" 600 \
-            || fail "[$backend] the watcher did not stay quiet through poll $poll on an unreadable probe (alive=$(kill -0 "$pid" 2>/dev/null && echo yes || echo no)): $(cat "$out")"
+            || fail "[$backend/$mode] the watcher did not stay quiet through poll $poll (alive=$(kill -0 "$pid" 2>/dev/null && echo yes || echo no)): $(cat "$out")"
         done
         reap "$pid"; pid=''
-        ! grep -Fq "(the recorded endpoint is gone)" "$out" \
-          || fail "[$backend] an unreadable endpoint probe was reported as a lost endpoint: $(cat "$out")"
-        [ ! -e "$state/lost.missing-endpoint" ] || fail "[$backend] an unreadable probe recorded a loss"
+        [ ! -s "$state/.wake-queue" ] || fail "[$backend/$mode] an inconclusive probe enqueued a wake"
+        [ ! -e "$state/lost.missing-endpoint" ] || fail "[$backend/$mode] an inconclusive probe recorded a loss"
       else
-        env "${watch_env[@]}" FM_FAKE_ENDPOINT=missing "$WATCH" > "$out" & pid=$!
         wait_for_exit "$pid" 150 || fail "[$backend] a confirmed-missing endpoint did not wake the watcher: $(cat "$out")"
         pid=''
         grep -Fxq "stale: $target (the recorded endpoint is gone)" "$out" \
@@ -2479,46 +2538,49 @@ test_experimental_backend_endpoint_loss_requires_confirmed_absence() (
         awk -F '\t' -v window="$target" '$3 == "stale" && $4 == window { n++ } END { exit(n != 1) }' "$state/.wake-queue" \
           || fail "[$backend] expected exactly one durable loss wake"
       fi
+      [ ! -s "$fakebin/route-errors" ] || fail "unexpected watcher backend route: $(cat "$fakebin/route-errors")"
     done
-    pass "$backend: the watcher reports a confirmed-missing endpoint and stays silent on an unreadable probe"
+    pass "$backend: the watcher queues loss only for confirmed absence"
   done
 )
 
-# The backend boundary keeps the presence verdicts apart: only a successful
-# inventory that omits the endpoint, or proves it belongs to another task,
-# reads `missing`; a present endpoint and every failed read never do.
 test_experimental_backend_endpoint_state_boundary() (
-  local dir fakebin got scoped
-  command -v jq >/dev/null 2>&1 || { echo "skip: jq is required by the Zellij adapter"; return 0; }
+  local dir fakebin mode
+  command -v jq >/dev/null 2>&1 || { echo "skip: jq is required by the Zellij and cmux adapters"; return 0; }
   command -v node >/dev/null 2>&1 || { echo "skip: node is required by the Orca adapter"; return 0; }
   dir=$(fm_test_tmproot fm-endpoint-state-boundary) || fail "could not create the boundary fixture"
   fakebin="$dir/fakebin"
-  install_fake_experimental_backends "$fakebin"
-  endpoint_state() {  # <mode> <backend> <target> [label] [tab-name]
-    PATH="$fakebin:$PATH" FM_FAKE_ENDPOINT=$1 FM_FAKE_TAB_NAME=${5:-} FM_HOME="$dir" \
-      bash -c '. "$0/bin/fm-backend.sh"; fm_backend_endpoint_state "$1" "$2" "$3"' "$ROOT" "$2" "$3" "${4:-}"
+  install_fake_experimental_backends "$fakebin" || fail "could not install the experimental backend fixtures"
+  expect_endpoint_state() {  # <verdict> <mode> <backend> <target> [label]
+    local got
+    got=$(PATH="$fakebin:$PATH" FM_FAKE_ENDPOINT=$2 FM_HOME="$dir" \
+      bash -c '. "$0/bin/fm-backend.sh"; fm_backend_endpoint_state "$1" "$2" "$3"' "$ROOT" "$3" "$4" "${5:-}")
+    [ "$got" = "$1" ] || fail "[$3/$2] expected $1 for $4, got '$got'"
+    [ ! -s "$fakebin/route-errors" ] || fail "unexpected backend route: $(cat "$fakebin/route-errors")"
   }
-  scoped=$(FM_HOME="$dir" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_source zellij; fm_backend_zellij_scoped_title fm-lost' "$ROOT")
-  [ -n "$scoped" ] || fail "could not compute the scoped Zellij tab title"
-  got=$(endpoint_state present zellij lab:7 fm-lost "$scoped")
-  [ "$got" = unverified ] || fail "a present Zellij pane read '$got'"
-  got=$(endpoint_state foreign zellij lab:7 fm-lost "fm-elsewhere")
-  [ "$got" = missing ] || fail "a Zellij pane in another task's tab read '$got'"
-  got=$(endpoint_state no-sessions zellij lab:7 fm-lost)
-  [ "$got" = missing ] || fail "an empty Zellij session inventory read '$got'"
-  got=$(endpoint_state unreadable zellij lab:7 fm-lost)
-  [ "$got" = unreadable ] || fail "a failed Zellij inventory read '$got'"
-  got=$(endpoint_state present orca orca term-live)
-  [ "$got" = unverified ] || fail "a readable Orca terminal read '$got'"
-  got=$(endpoint_state other-error orca term-live)
-  [ "$got" = unreadable ] || fail "an untyped Orca read failure read '$got'"
-  got=$(endpoint_state missing orca term-gone)
-  [ "$got" = missing ] || fail "a stale Orca terminal handle read '$got'"
-  got=$(endpoint_state missing cmux ws-gone:sf-gone fm-lost)
-  [ "$got" = missing ] || fail "a cmux workspace absent from a readable inventory read '$got'"
-  got=$(endpoint_state unreadable cmux ws-gone:sf-gone fm-lost)
-  [ "$got" = unreadable ] || fail "an unreachable cmux socket read '$got'"
-  pass "experimental backends: endpoint presence separates confirmed absence from unreadable probes"
+  expect_endpoint_state present present zellij lab:7 fm-lost
+  expect_endpoint_state present legacy zellij lab:7 fm-lost
+  expect_endpoint_state missing foreign zellij lab:7 fm-lost
+  expect_endpoint_state missing missing zellij lab:7 fm-lost
+  for mode in unreadable omitted-session no-sessions resurrectable bad-pane bad-tab tab-not-listed duplicate-legacy; do
+    expect_endpoint_state unreadable "$mode" zellij lab:7 fm-lost
+  done
+  expect_endpoint_state unreadable present zellij lab:7
+
+  expect_endpoint_state present present cmux ws-gone:sf-gone fm-lost
+  expect_endpoint_state missing missing cmux ws-gone:sf-gone fm-lost
+  expect_endpoint_state missing foreign cmux ws-gone:sf-gone fm-lost
+  for mode in unreadable out-of-window bad-workspace bad-pane bad-surface; do
+    expect_endpoint_state unreadable "$mode" cmux ws-gone:sf-gone fm-lost
+  done
+  expect_endpoint_state unreadable present cmux ws-gone:sf-gone
+
+  expect_endpoint_state present present orca term-live
+  expect_endpoint_state unreadable stale orca term-gone
+  for mode in wrong-handle bad-envelope bad-result bad-error other-error; do
+    expect_endpoint_state unreadable "$mode" orca term-live
+  done
+  pass "experimental backends: only matching, readable endpoint evidence establishes presence or loss"
 )
 
 # A parked task whose worker window was deliberately closed while its isolated

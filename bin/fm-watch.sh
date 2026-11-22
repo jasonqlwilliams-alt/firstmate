@@ -656,8 +656,9 @@ recorded_endpoints() {
   local meta w task
   for meta in "$STATE"/*.meta; do
     [ -e "$meta" ] || continue
+    [ -z "$(fm_meta_get "$meta" remote_host)" ] || continue
     w=$(fm_backend_target_of_meta "$meta")
-    [ -n "$w" ] || continue
+    case "$w" in ''|remote:*) continue ;; esac
     task=${meta##*/}
     printf '%s\t%s\t%s\n' "$w" "${task%.meta}" "$(fm_backend_of_meta "$meta")"
   done
@@ -1140,7 +1141,7 @@ clear_pause_tracking() {  # <window-key>
   clear_stale_hash_tracking "$key"
 }
 
-report_missing_endpoint() {  # <backend> <window> <meta> <window-key> <marker>
+check_recorded_endpoint() {  # <backend> <window> <meta> <window-key> <marker>
   local backend=$1 win=$2 meta=$3 key=$4 marker=$5 state incarnation lock reason status=0 label
   [ -z "$(fm_meta_get "$meta" remote_host)" ] || return 0
   label=${meta##*/}
@@ -1149,10 +1150,19 @@ report_missing_endpoint() {  # <backend> <window> <meta> <window-key> <marker>
   case "$incarnation" in "$backend:$win"$'\t'*) ;; *) return 0 ;; esac
   state=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
     fm_backend_endpoint_state "$backend" "$win" "$label" 2>/dev/null) || return 0
-  [ "$state" = missing ] || return 0
+  case "$state" in
+    missing) ;;
+    present) [ -e "$marker" ] || return 0 ;;
+    *) return 0 ;;
+  esac
   lock=$(fm_meta_lock_path "$meta") || return 0
   fm_lock_try_acquire "$lock" || return 0
   if [ "$incarnation" != "$(fm_backend_endpoint_incarnation "$meta")" ]; then
+    fm_lock_release "$lock"
+    return 0
+  fi
+  if [ "$state" = present ]; then
+    rm -f "$marker"
     fm_lock_release "$lock"
     return 0
   fi
@@ -2333,19 +2343,6 @@ EOF
       clear_pause_tracking "$key"
     fi
     missing_marker="$STATE/$task.missing-endpoint"
-    # Endpoint presence is read before the idle-secondmate exemption below, so
-    # a mate whose recorded window is gone reports its loss like any task.
-    # Herdr capture requires a unique live binding. A closed pane cannot
-    # satisfy that guard, but the recovery classifier can confirm its loss.
-    if { [ "$backend" = herdr ] && [ -z "$herdr_meta" ]; } \
-      || ! tail40=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
-        fm_backend_capture "$backend" "$w" 40 "fm-$task" 2>/dev/null); then
-      report_missing_endpoint "$backend" "$w" "$meta" "$key" "$missing_marker" || continue
-      seen="$seen|$w|"
-      continue
-    fi
-    seen="$seen|$w|"
-    [ ! -e "$missing_marker" ] || rm -f "$missing_marker"
     # An idle secondmate endpoint is healthy by design, so only a status-declared
     # wait admits a mate to the pane-stale path. The shared predicate includes
     # a declared `captain-held` status. A hold recorded only
@@ -2353,8 +2350,21 @@ EOF
     # this guard: reaching it would require backlog reads for windows this gate
     # deliberately skips, putting that read on the ordinary poll hot path.
     if [ "$kind" = secondmate ] && ! status_is_paused_or_captain_held "$last"; then
+      check_recorded_endpoint "$backend" "$w" "$meta" "$key" "$missing_marker" || continue
+      seen="$seen|$w|"
       continue
     fi
+    # Herdr capture requires a unique live binding. A closed pane cannot
+    # satisfy that guard.
+    if { [ "$backend" = herdr ] && [ -z "$herdr_meta" ]; } \
+      || ! tail40=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
+        fm_backend_capture "$backend" "$w" 40 "fm-$task" 2>/dev/null); then
+      check_recorded_endpoint "$backend" "$w" "$meta" "$key" "$missing_marker" || continue
+      seen="$seen|$w|"
+      continue
+    fi
+    seen="$seen|$w|"
+    [ ! -e "$missing_marker" ] || rm -f "$missing_marker"
     h=$(printf '%s' "$tail40" | hash_pane)
     hf="$STATE/.hash-$key"
     cf="$STATE/.count-$key"
