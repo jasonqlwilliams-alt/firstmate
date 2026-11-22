@@ -310,7 +310,7 @@ printf '%s\n' "$FM_PRIMARY_TEST_PID" > "$HOME_FIXTURE/state/.lock"
 capture start
 expect_rc 2
 no_mutation
-[ "$(cat "$HOME_FIXTURE/state/.lock")" = "$FM_PRIMARY_TEST_PID" ] || fail 'lock changed'
+[ "$(sed -n '1p' "$HOME_FIXTURE/state/.lock")" = "$FM_PRIMARY_TEST_PID" ] || fail 'lock changed'
 pass 'a live harness lock without a matching primary refuses and preserves ownership'
 
 reset_world

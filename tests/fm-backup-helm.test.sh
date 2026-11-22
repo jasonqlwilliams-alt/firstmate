@@ -241,7 +241,7 @@ assert_grep "mid-turn" "$TMP_ROOT/midturn.err" "mid-turn refusal names the wait"
 [ ! -s "$SEND_LOG" ] || fail "mid-turn refusal must not send /stow or /exit"
 [ ! -s "$LAUNCH_LOG" ] || fail "mid-turn refusal must not launch the successor"
 assert_present "$H/state/.lock" "mid-turn refusal must leave the session lock file"
-assert_equals "$(cat "$H/state/.lock")" "999999" "mid-turn refusal must not rewrite the lock"
+assert_equals "$(sed -n '1p' "$H/state/.lock")" "999999" "mid-turn refusal must not rewrite the lock"
 pass "mid-turn Claude is waited out and never interrupted"
 
 set_mode pi invoice

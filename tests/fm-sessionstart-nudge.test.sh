@@ -316,7 +316,7 @@ test_run_clear_rejects_previous_owner_completion() {
     "clear treated a previous session's completion as current"
   assert_not_contains "$out" "$REEMIT_BANNER" \
     "clear skipped startup sweeps completed only by a previous session"
-  [ "$(cat "$root/state/.lock")" != "$previous_pid" ] \
+  [ "$(sed -n '1p' "$root/state/.lock")" != "$previous_pid" ] \
     || fail "the recovery startup did not replace the previous session's stale lock"
   pass "run wrapper: clear accepts completion only from the current harness"
 }

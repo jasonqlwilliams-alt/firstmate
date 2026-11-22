@@ -281,7 +281,7 @@ test_reclaims_stale_session_lock_before_arming() {
       ' 2>&1); status=$?
   expect_code 2 "$status" "a dead recorded session owner must be reclaimed before the actionable rewake"
   expected_owner=$(cat "$dir/state/expected-owner")
-  actual_owner=$(cat "$dir/state/.lock")
+  actual_owner=$(sed -n '1p' "$dir/state/.lock")
   [ "$actual_owner" = "$expected_owner" ] || fail "stale session lock was not claimed by the current harness: expected $expected_owner, got $actual_owner"
   [ -e "$dir/state/arm-ran" ] || fail "hook did not arm after reclaiming the stale session lock"
   [ "$(epoch_outcome "$dir")" = rewake ] || fail "stale-lock recovery must record outcome=rewake"
@@ -299,7 +299,7 @@ test_inert_when_lock_held_by_other_harness() {
   other=$!
   printf '%s\n' "$other" > "$dir/state/.lock"
   out=$(printf '%s\n' '{"session_id":"s"}' | FM_HOME="$dir" "$FAKE_CLAUDE" -c '"$FM_HOME/bin/fm-claude-stop-autoarm.sh"' 2>&1); status=$?
-  owner_after=$(cat "$dir/state/.lock")
+  owner_after=$(sed -n '1p' "$dir/state/.lock")
   kill "$other" 2>/dev/null || true
   wait "$other" 2>/dev/null || true
   expect_code 0 "$status" "hook must stay inert when another live harness holds the session lock"
@@ -334,7 +334,7 @@ test_stale_lock_recovery_preserves_afk_and_need_gates() {
   write_arm_fixture "$afk_dir" actionable
   out=$(printf '%s\n' '{"session_id":"stale-afk"}' | FM_HOME="$afk_dir" "$FAKE_CLAUDE" -c '"$FM_HOME/bin/fm-claude-stop-autoarm.sh"' 2>&1); status=$?
   expect_code 0 "$status" "a stale owner must not widen the AFK gate"
-  [ "$(cat "$afk_dir/state/.lock")" = 9999999 ] || fail "AFK stale lock was reclaimed despite away ownership"
+  [ "$(sed -n '1p' "$afk_dir/state/.lock")" = 9999999 ] || fail "AFK stale lock was reclaimed despite away ownership"
   [ ! -e "$afk_dir/state/arm-ran" ] || fail "stale AFK home armed"
 
   idle_dir=$(make_primary_dir "$TMP_ROOT/stale-idle")
@@ -342,7 +342,7 @@ test_stale_lock_recovery_preserves_afk_and_need_gates() {
   write_arm_fixture "$idle_dir" actionable
   out=$(printf '%s\n' '{"session_id":"stale-idle"}' | FM_HOME="$idle_dir" "$FAKE_CLAUDE" -c '"$FM_HOME/bin/fm-claude-stop-autoarm.sh"' 2>&1); status=$?
   expect_code 0 "$status" "a stale owner must not widen the supervision-need gate"
-  [ "$(cat "$idle_dir/state/.lock")" = 9999999 ] || fail "idle stale lock was reclaimed without supervision need"
+  [ "$(sed -n '1p' "$idle_dir/state/.lock")" = 9999999 ] || fail "idle stale lock was reclaimed without supervision need"
   [ ! -e "$idle_dir/state/arm-ran" ] || fail "stale idle home armed"
   pass "auto-arm: stale-owner recovery leaves the AFK and supervision-need gates unchanged"
 }
@@ -369,7 +369,7 @@ test_resolves_outermost_claude_pid_in_nested_bgspare_chain() {
         "
       ' 2>&1); status=$?
   inner_pid=$(cat "$dir/state/inner-pid" 2>/dev/null || true)
-  lock_pid=$(cat "$dir/state/.lock" 2>/dev/null || true)
+  lock_pid=$(sed -n '1p' "$dir/state/.lock" 2>/dev/null || true)
   [ -n "$inner_pid" ] && [ "$inner_pid" != "$lock_pid" ] \
     || fail "test setup did not produce a genuine two-hop claude chain: inner=$inner_pid lock=$lock_pid"
   expect_code 2 "$status" "a nested contiguous claude ancestry must resolve to the outer lock-owning pid and arm"
@@ -406,7 +406,7 @@ test_actionable_close_rewakes_with_reason() {
   assert_contains "$out" "bin/fm-wake-drain.sh" "rewake must direct the drain-first protocol"
   assert_contains "$out" "do NOT run bin/fm-watch-arm.sh" "rewake must forbid a duplicate model re-arm"
   [ "$(epoch_outcome "$dir")" = rewake ] || fail "epoch must record outcome=rewake, got: $(epoch_outcome "$dir")"
-  [ "$(epoch_field "$dir" session_pid)" = "$(cat "$dir/state/.lock")" ] \
+  [ "$(epoch_field "$dir" session_pid)" = "$(sed -n '1p' "$dir/state/.lock")" ] \
     || fail "rewake epoch must bind the lock-owning Claude session"
   [ "$(epoch_field "$dir" recovery_generation)" = fixture-generation ] \
     || fail "rewake epoch must bind the watcher recovery generation"
@@ -1275,7 +1275,7 @@ SH
       expect_code 2 "$status" "quiet live demand needs an owned renewal"
       assert_contains "$out" 'check: claude-lease-renewal' "lease maintenance reason"
       grep -q '^pending:handling:' "$dir/state/.watcher-down" || fail "renewal did not publish an acknowledgeable handling episode"
-      assert_grep "session_pid=$(cat "$dir/state/.lock")" "$dir/state/.claude-autoarm-epoch" \
+      assert_grep "session_pid=$(sed -n '1p' "$dir/state/.lock")" "$dir/state/.claude-autoarm-epoch" \
         "renewal did not bind the current owning session"
       assert_grep "recovery_generation=$(sed 's/.*://' "$dir/state/.watcher-down")" \
         "$dir/state/.claude-autoarm-epoch" "renewal did not bind its handling generation"
