@@ -1,0 +1,110 @@
+Firstmate child summary publication and parent reconciliation
+Base cc894b4484338491327a4123ca0da68fd456a137
+Target 8f447eb5052644e58381c6859181a0830facac55
+
+Local only. Firstmate and tmux are real processes. A read-only test adapter
+supplies synthetic external no-mistakes status and ledger records.
+The PR and all status/merge records are synthetic; no forge was contacted.
+
+firstmate:fm-cancelled 100x30
+firstmate:fm-fixture-mate 100x30
+Run/worktree head 440d6799278f16b78fca23187257522c6dd86fa4
+Recorded PR head   a4b56be9bb056350ce6791f2a41bb3d99155a100
+PR https://github.com/example-fleet/sample/pull/46
+
+## A0. Base reproduces the false reconcile request
+$ FM_HOME=<secondmate> bin/fm-crew-state.sh cancelled
+state: failed · source: run-step · run cancelled
+$ FM_HOME=<secondmate> bin/fm-fleet-snapshot.sh --json [selected task fields]
+{"id": "cancelled", "current_state": {"state": "failed", "source": "run-step", "detail": "run cancelled", "raw": "state: failed · source: run-step · run cancelled", "observed_at": "2026-11-22T00:53:09Z", "freshness": "fresh"}, "pr": {"url": "https://github.com/example-fleet/sample/pull/46", "source": "meta"}}
+$ FM_HOME=<secondmate> bin/fm-home-summary-refresh.sh
+state/home-summary.json [selected fields]
+{"valid": false, "reason": "in-flight backlog item has terminal child state: cancelled=failed", "invalidity": {"kind": "terminal_in_flight", "ids": ["cancelled"]}, "endpoints": [{"id": "cancelled", "state": "failed", "source": "run-step", "endpoint": {"target": "firstmate:fm-cancelled", "exists": true, "agent_alive": "not_checked", "status": "unknown", "observed_at": "2026-11-22T00:53:09Z", "freshness": "fresh"}}]}
+$ FM_HOME=<parent> bin/fm-fleet-snapshot.sh --json [secondmate record fields]
+{"id": "fixture-mate", "current": {"state": "no_active_work", "reason": "structured home state invalid: in-flight backlog item has terminal child state: cancelled=failed"}, "reconcile_inventory": {"kind": "terminal_in_flight", "ids": ["cancelled"]}, "provenance": {"selected": "structured-home", "structured_home": "{run-worktree}/.fl-6r5ddsif/m", "summary_source": "local-ledger", "summary_valid": false, "trust": "partial-structured", "parent_event_role": "historical-only"}}
+$ FM_HOME=<parent> bin/fm-secondmate-reconcile.sh request --snapshot <fleet.json>
+requested: <parent>/state/reconcile-notify/request-7eb7d94e998a65fc921cea693faa752403a29da1d0e76811aa2bf5300e1cf67e.json
+
+## A1. Target accepts a matching PR with a different recorded head
+$ FM_HOME=<secondmate> bin/fm-crew-state.sh cancelled
+state: failed · source: run-step · run cancelled
+$ FM_HOME=<secondmate> bin/fm-fleet-snapshot.sh --json [selected task fields]
+{"id": "cancelled", "current_state": {"state": "failed", "source": "run-step", "detail": "run cancelled", "raw": "state: failed · source: run-step · run cancelled", "observed_at": "2026-11-22T00:53:11Z", "freshness": "fresh"}, "pr": {"url": "https://github.com/example-fleet/sample/pull/46", "source": "meta"}}
+$ FM_HOME=<secondmate> bin/fm-home-summary-refresh.sh
+state/home-summary.json [selected fields]
+{"valid": true, "reason": null, "invalidity": {"kind": null, "ids": []}, "endpoints": [{"id": "cancelled", "state": "failed", "source": "run-step", "endpoint": {"target": "firstmate:fm-cancelled", "exists": true, "agent_alive": "not_checked", "status": "unknown", "observed_at": "2026-11-22T00:53:12Z", "freshness": "fresh"}}]}
+$ FM_HOME=<parent> bin/fm-fleet-snapshot.sh --json [secondmate record fields]
+{"id": "fixture-mate", "current": {"state": "no_active_work", "reason": null}, "reconcile_inventory": {"kind": null, "ids": []}, "provenance": {"selected": "structured-home", "structured_home": "{run-worktree}/.fl-6r5ddsif/m", "summary_source": "local-ledger", "summary_valid": true, "trust": "complete", "parent_event_role": "historical-only"}}
+$ FM_HOME=<parent> bin/fm-secondmate-reconcile.sh request --snapshot <fleet.json>
+not-needed
+
+## B. Target accepts cancellation that superseded a blocked event
+$ FM_HOME=<secondmate> bin/fm-crew-state.sh cancelled
+state: failed · source: run-step · run cancelled · status-log superseded (run failed)
+$ FM_HOME=<secondmate> bin/fm-fleet-snapshot.sh --json [selected task fields]
+{"id": "cancelled", "current_state": {"state": "failed", "source": "run-step", "detail": "run cancelled · status-log superseded (run failed)", "raw": "state: failed · source: run-step · run cancelled · status-log superseded (run failed)", "observed_at": "2026-11-22T00:53:14Z", "freshness": "fresh"}, "pr": {"url": "https://github.com/example-fleet/sample/pull/46", "source": "meta"}}
+$ FM_HOME=<secondmate> bin/fm-home-summary-refresh.sh
+state/home-summary.json [selected fields]
+{"valid": true, "reason": null, "invalidity": {"kind": null, "ids": []}, "endpoints": [{"id": "cancelled", "state": "failed", "source": "run-step", "endpoint": {"target": "firstmate:fm-cancelled", "exists": true, "agent_alive": "not_checked", "status": "unknown", "observed_at": "2026-11-22T00:53:14Z", "freshness": "fresh"}}]}
+
+## C1. A green status event cannot replace PR registration
+$ FM_HOME=<secondmate> bin/fm-crew-state.sh cancelled
+state: failed · source: run-step · run cancelled · status-log superseded (run failed)
+$ FM_HOME=<secondmate> bin/fm-home-summary-refresh.sh
+state/home-summary.json [selected fields]
+{"valid": false, "reason": "in-flight backlog item has terminal child state: cancelled=failed", "invalidity": {"kind": "terminal_in_flight", "ids": ["cancelled"]}, "endpoints": [{"id": "cancelled", "state": "failed", "source": "run-step", "endpoint": {"target": "firstmate:fm-cancelled", "exists": true, "agent_alive": "not_checked", "status": "unknown", "observed_at": "2026-11-22T00:53:15Z", "freshness": "fresh"}}]}
+
+## C2. A newer done event for another PR disqualifies the older green event
+$ FM_HOME=<secondmate> bin/fm-crew-state.sh cancelled
+state: failed · source: run-step · run cancelled
+$ FM_HOME=<secondmate> bin/fm-home-summary-refresh.sh
+state/home-summary.json [selected fields]
+{"valid": false, "reason": "in-flight backlog item has terminal child state: cancelled=failed", "invalidity": {"kind": "terminal_in_flight", "ids": ["cancelled"]}, "endpoints": [{"id": "cancelled", "state": "failed", "source": "run-step", "endpoint": {"target": "firstmate:fm-cancelled", "exists": true, "agent_alive": "not_checked", "status": "unknown", "observed_at": "2026-11-22T00:53:16Z", "freshness": "fresh"}}]}
+
+## C3. A same-PR done event without green checks keeps the contradiction
+$ FM_HOME=<secondmate> bin/fm-crew-state.sh cancelled
+state: failed · source: run-step · run cancelled
+$ FM_HOME=<secondmate> bin/fm-home-summary-refresh.sh
+state/home-summary.json [selected fields]
+{"valid": false, "reason": "in-flight backlog item has terminal child state: cancelled=failed", "invalidity": {"kind": "terminal_in_flight", "ids": ["cancelled"]}, "endpoints": [{"id": "cancelled", "state": "failed", "source": "run-step", "endpoint": {"target": "firstmate:fm-cancelled", "exists": true, "agent_alive": "not_checked", "status": "unknown", "observed_at": "2026-11-22T00:53:17Z", "freshness": "fresh"}}]}
+
+## D1. A merge-notified marker for another PR does not disqualify this PR
+$ FM_HOME=<secondmate> bin/fm-crew-state.sh cancelled
+state: failed · source: run-step · run cancelled
+$ FM_HOME=<secondmate> bin/fm-home-summary-refresh.sh
+state/home-summary.json [selected fields]
+{"valid": true, "reason": null, "invalidity": {"kind": null, "ids": []}, "endpoints": [{"id": "cancelled", "state": "failed", "source": "run-step", "endpoint": {"target": "firstmate:fm-cancelled", "exists": true, "agent_alive": "not_checked", "status": "unknown", "observed_at": "2026-11-22T00:53:18Z", "freshness": "fresh"}}]}
+
+## D2. A merge-notified marker for the registered PR ends the exemption
+$ FM_HOME=<secondmate> bin/fm-crew-state.sh cancelled
+state: failed · source: run-step · run cancelled
+$ FM_HOME=<secondmate> bin/fm-home-summary-refresh.sh
+state/home-summary.json [selected fields]
+{"valid": false, "reason": "in-flight backlog item has terminal child state: cancelled=failed", "invalidity": {"kind": "terminal_in_flight", "ids": ["cancelled"]}, "endpoints": [{"id": "cancelled", "state": "failed", "source": "run-step", "endpoint": {"target": "firstmate:fm-cancelled", "exists": true, "agent_alive": "not_checked", "status": "unknown", "observed_at": "2026-11-22T00:53:19Z", "freshness": "fresh"}}]}
+
+## D3. A retirement receipt for another PR does not disqualify this PR
+$ FM_HOME=<secondmate> bin/fm-crew-state.sh cancelled
+state: failed · source: run-step · run cancelled
+$ FM_HOME=<secondmate> bin/fm-home-summary-refresh.sh
+state/home-summary.json [selected fields]
+{"valid": true, "reason": null, "invalidity": {"kind": null, "ids": []}, "endpoints": [{"id": "cancelled", "state": "failed", "source": "run-step", "endpoint": {"target": "firstmate:fm-cancelled", "exists": true, "agent_alive": "not_checked", "status": "unknown", "observed_at": "2026-11-22T00:53:21Z", "freshness": "fresh"}}]}
+
+## D4. A matching retirement receipt ends the exemption without a merge marker
+$ FM_HOME=<secondmate> bin/fm-crew-state.sh cancelled
+state: failed · source: run-step · run cancelled
+$ FM_HOME=<secondmate> bin/fm-home-summary-refresh.sh
+state/home-summary.json [selected fields]
+{"valid": false, "reason": "in-flight backlog item has terminal child state: cancelled=failed", "invalidity": {"kind": "terminal_in_flight", "ids": ["cancelled"]}, "endpoints": [{"id": "cancelled", "state": "failed", "source": "run-step", "endpoint": {"target": "firstmate:fm-cancelled", "exists": true, "agent_alive": "not_checked", "status": "unknown", "observed_at": "2026-11-22T00:53:23Z", "freshness": "fresh"}}]}
+
+## E. An ordinary validation failure still queues reconciliation
+$ FM_HOME=<secondmate> bin/fm-crew-state.sh cancelled
+state: failed · source: run-step · run failed
+$ FM_HOME=<secondmate> bin/fm-fleet-snapshot.sh --json [selected task fields]
+{"id": "cancelled", "current_state": {"state": "failed", "source": "run-step", "detail": "run failed", "raw": "state: failed · source: run-step · run failed", "observed_at": "2026-11-22T00:53:24Z", "freshness": "fresh"}, "pr": {"url": "https://github.com/example-fleet/sample/pull/46", "source": "meta"}}
+$ FM_HOME=<secondmate> bin/fm-home-summary-refresh.sh
+state/home-summary.json [selected fields]
+{"valid": false, "reason": "in-flight backlog item has terminal child state: cancelled=failed", "invalidity": {"kind": "terminal_in_flight", "ids": ["cancelled"]}, "endpoints": [{"id": "cancelled", "state": "failed", "source": "run-step", "endpoint": {"target": "firstmate:fm-cancelled", "exists": true, "agent_alive": "not_checked", "status": "unknown", "observed_at": "2026-11-22T00:53:24Z", "freshness": "fresh"}}]}
+$ FM_HOME=<parent> bin/fm-fleet-snapshot.sh --json [secondmate record fields]
+{"id": "fixture-mate", "current": {"state": "no_active_work", "reason": "structured home state invalid: in-flight backlog item has terminal child state: cancelled=failed"}, "reconcile_inventory": {"kind": "terminal_in_flight", "ids": ["cancelled"]}, "provenance": {"selected": "structured-home", "structured_home": "{run-worktree}/.fl-6r5ddsif/m", "summary_source": "local-ledger", "summary_valid": false, "trust": "partial-structured", "parent_event_role": "historical-only"}}
+$ FM_HOME=<parent> bin/fm-secondmate-reconcile.sh request --snapshot <fleet.json>
+requested: <parent>/state/reconcile-notify/request-7eb7d94e998a65fc921cea693faa752403a29da1d0e76811aa2bf5300e1cf67e.json
