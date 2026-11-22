@@ -47,7 +47,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 checkpoint_session=$(fm_codex_checkpoint_session "$STATE") || checkpoint_session=
-attempt_record= output_dir=
+attempt_record='' output_dir=''
 trap '[ -z "$attempt_record" ] || rm -f -- "$attempt_record"; [ -z "$output_dir" ] || rm -rf -- "$output_dir"' EXIT
 if [ -n "$checkpoint_session" ]; then
   rm -f -- "$RETURN_RECORD" || exit 1
@@ -112,6 +112,17 @@ record_clean_return() {
   [ -z "$checkpoint_session" ] || printf '%s %s\n' "$close" "$checkpoint_session" >&3
 }
 
+# Exit codes and output keep the checkpoint contract above; a confirmed clean
+# close from the watcher only decides whether the return record is written.
+if grep -E '^(signal:|stale:|check:|heartbeat($|:))' "$OUT" >/dev/null 2>&1; then
+  cat "$OUT"
+  [ ! -s "$ERR" ] || cat "$ERR" >&2
+  if [ "$close" = wake ]; then
+    record_clean_return || exit 1
+  fi
+  exit 0
+fi
+
 if grep -E '^watcher: already running' "$OUT" "$ERR" >/dev/null 2>&1; then
   [ ! -s "$OUT" ] || cat "$OUT"
   [ ! -s "$ERR" ] || cat "$ERR" >&2
@@ -119,20 +130,14 @@ if grep -E '^watcher: already running' "$OUT" "$ERR" >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ "$close" = quiet ] && [ "$RC" -eq 124 ]; then
-  record_clean_return || exit 1
+if [ "$RC" -eq 124 ]; then
+  if [ "$close" = quiet ]; then
+    record_clean_return || exit 1
+  fi
   printf 'checkpoint: no actionable wake within %ss\n' "$SECONDS_ARG"
   exit 124
 fi
 
 [ ! -s "$OUT" ] || cat "$OUT"
 [ ! -s "$ERR" ] || cat "$ERR" >&2
-if [ "$close" = wake ] && { [ "$RC" -eq 0 ] || [ "$RC" -eq 124 ]; }; then
-  record_clean_return || exit 1
-  exit 0
-fi
-if [ "$RC" -eq 0 ] || [ "$RC" -eq 124 ]; then
-  echo "watcher: FAILED - checkpoint did not confirm a clean close" >&2
-  exit 1
-fi
 exit "$RC"
