@@ -639,12 +639,12 @@ do_exit() {
       return $?
     fi
   fi
-  if [ "$HARNESS" = claude ] && [ "$(claude_exit_screen_state)" = exit-confirm ]; then
-    claude_exit_dialog_refusal not-needed not-sent "$state"
-  fi
   # A busy agent is interrupted first before the exit command is submitted.
   case "$(busy_verdict)" in
     busy*)
+      if [ "$HARNESS" = claude ] && [ "$(claude_exit_screen_state)" = exit-confirm ]; then
+        claude_exit_dialog_refusal not-needed not-sent "$state"
+      fi
       cancel=$(deliver_interrupt) || return $?
       state=$(agent_state)
       case "$state" in

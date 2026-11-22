@@ -26,24 +26,21 @@ control_bin="$TMP_ROOT/control/bin"
 mkdir -p "$control_bin"
 for entry in "$ROOT/bin/"*; do
   case "${entry##*/}" in
-    fm-send.sh|fm-spawn.sh) ;;
+    fm-spawn.sh) ;;
     *) ln -s "$entry" "$control_bin/${entry##*/}" ;;
   esac
 done
-cat > "$control_bin/fm-send.sh" <<'SH'
+cat > "$TMP_ROOT/ack-doorbell.sh" <<'SH'
 #!/usr/bin/env bash
 set -eu
-"$FM_ROOT_OVERRIDE/bin/fm-send.sh" "$@"
-if [ -n "${FM_PENDING_REPLY_EXISTING_CORR:-}" ]; then
-  . "$FM_ROOT_OVERRIDE/bin/fm-task-inbox-lib.sh"
-  inbox="$FM_STATE_OVERRIDE/$1.inbox"
-  request=$(fm_task_inbox_body "$inbox/001.msg")
-  [[ "$request" =~ corr=([0-9a-f]{16}) ]] || exit 1
-  corr=${BASH_REMATCH[1]}
-  mv "$inbox/001.msg" "$inbox/handled/001.msg"
-  "$FM_ROOT_OVERRIDE/bin/fm-status-append.sh" "$FM_STATE_OVERRIDE/$1.status" \
-    "done [corr=$corr]: open work written down"
-fi
+root=$1 state=$2
+. "$root/bin/fm-task-inbox-lib.sh"
+inbox="$state/exitdialog.inbox"
+request=$(fm_task_inbox_body "$inbox/001.msg")
+[[ "$request" =~ corr=([0-9a-f]{16}) ]] || exit 1
+corr=${BASH_REMATCH[1]}
+mv "$inbox/001.msg" "$inbox/handled/001.msg"
+"$root/bin/fm-status-append.sh" "$state/exitdialog.status" "done [corr=$corr]: open work written down"
 SH
 cat > "$control_bin/fm-spawn.sh" <<'SH'
 #!/usr/bin/env bash
@@ -51,7 +48,7 @@ cat > "$control_bin/fm-spawn.sh" <<'SH'
 while [ ! -f "$FM_CONTROL_RELAUNCH_PREPARE/continue" ]; do sleep 0.05; done
 exit 1
 SH
-chmod +x "$control_bin/fm-send.sh" "$control_bin/fm-spawn.sh"
+chmod +x "$TMP_ROOT/ack-doorbell.sh" "$control_bin/fm-spawn.sh"
 ORIGINAL_PATH=$PATH
 TMUX_BIN=$(command -v tmux)
 SOCKET="fm-claude-exit-$$"
@@ -86,6 +83,7 @@ cat > "$TMP_ROOT/stub.c" <<'C'
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
 static const char *mode;
@@ -122,12 +120,12 @@ static void dialog(const char *path) {
 }
 int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--version")) { puts("claude fixture"); return 0; }
-  if (argc < 5) return 2;
+  if (argc != 8) return 2;
   const char *pid_path = argv[1], *keys_path = argv[2], *screen = argv[4];
   mode = argv[3];
   struct termios t;
   if (tcgetattr(0, &t) == 0) { t.c_lflag &= ~(ICANON | ECHO); t.c_iflag &= ~ICRNL; tcsetattr(0, TCSANOW, &t); }
-  char buf[256] = ""; size_t n = 0; int in_dialog = 0; char c;
+  char buf[4096] = ""; size_t n = 0; int in_dialog = 0; char c;
   if (!strcmp(mode, "initial-dialog")) { in_dialog = 1; dialog(screen); } else composer(buf);
   FILE *f = fopen(pid_path, "w"); if (!f) return 2;
   fprintf(f, "%d\n", getpid()); fclose(f);
@@ -145,6 +143,15 @@ int main(int argc, char **argv) {
         if (!strcmp(mode, "plain")) return 0;
         in_dialog = 1; dialog(screen); continue;
       }
+      if (!strncmp(buf, ": Firstmate instruction waiting: list ", sizeof(": Firstmate instruction waiting: list ") - 1)) {
+        int status;
+        pid_t child = fork();
+        if (child == 0) {
+          execl(argv[5], argv[5], argv[6], argv[7], (char *)NULL);
+          _exit(127);
+        }
+        if (child < 0 || waitpid(child, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) return 2;
+      }
       n = 0; buf[0] = 0; composer(buf); continue;
     }
     if (n + 1 < sizeof(buf)) { buf[n++] = c; buf[n] = 0; }
@@ -156,22 +163,26 @@ C
 cc -o "$TMP_ROOT/bin/claude" "$TMP_ROOT/stub.c" || fail 'could not compile the Claude stand-in'
 cat > "$TMP_ROOT/bin/tmux" <<EOF
 #!/usr/bin/env bash
+if [ "\${FM_DIALOG_DROP_ENTER:-0}" = 1 ] && [ "\$1" = send-keys ] && [ "\${*: -1}" = Enter ]; then
+  exit 0
+fi
 exec "$TMUX_BIN" -f /dev/null -L "$SOCKET" "\$@"
 EOF
 chmod +x "$TMP_ROOT/bin/tmux"
-stub_command() {  # <mode>
-  local mode=$1 screen=$FIXTURE
+stub_command() {  # <mode> [state-dir]
+  local mode=$1 screen=$FIXTURE state=${2:-"$TMP_ROOT/home/state"}
   case "$mode" in
     picker-history) screen="$TMP_ROOT/picker-history.screen" ;;
     restart-initial|restart-clipped|initial-clipped|doorbell-clipped)
       mode=initial-dialog
       screen="$TMP_ROOT/long.screen"
       ;;
-    restart-narrow|initial-narrow|doorbell-narrow|doorbell-normal) mode=initial-dialog ;;
+    restart-narrow|initial-narrow|initial-busy|doorbell-narrow|doorbell-normal) mode=initial-dialog ;;
     exit-clipped) screen="$TMP_ROOT/long.screen" ;;
   esac
-  printf '%q %q %q %q %q; exec /bin/bash --noprofile --norc' \
-    "$TMP_ROOT/bin/claude" "$TMP_ROOT/pid" "$TMP_ROOT/keys" "$mode" "$screen"
+  printf '%q %q %q %q %q %q %q %q; exec /bin/bash --noprofile --norc' \
+    "$TMP_ROOT/bin/claude" "$TMP_ROOT/pid" "$TMP_ROOT/keys" "$mode" "$screen" \
+    "$TMP_ROOT/ack-doorbell.sh" "$ROOT" "$state"
 }
 for session in fixture short narrow; do
   width=100
@@ -193,24 +204,35 @@ run_fixture() {
 }
 
 for mode in restart-initial restart-clipped restart-narrow initial-clipped initial-narrow exit-clipped exit-narrow \
-    doorbell-normal doorbell-clipped doorbell-narrow restart exit plain initial-dialog picker-history \
+    doorbell-normal doorbell-clipped doorbell-narrow restart-unsubmitted restart exit plain initial-dialog initial-busy picker-history \
     changed-heading no-list no-stay selection-on-2 relabeled extra-choice history history-plain; do
   session=fixture
   case "$mode" in *-clipped) session=short ;; *-narrow) session=narrow ;; esac
   target="$session:fm-exitdialog"
+  state="$TMP_ROOT/home/state"
+  if [ "$mode" = restart-unsubmitted ]; then
+    state="$TMP_ROOT/unsubmitted-state"
+    mkdir -p "$state"
+  fi
   "$TMUX_BIN" -f /dev/null -L "$SOCKET" new-window -d -t "$session" -n fm-exitdialog \
-    -c "$TMP_ROOT/worktree" /bin/bash --noprofile --norc -c "$(stub_command "$mode")" \
+    -c "$TMP_ROOT/worktree" /bin/bash --noprofile --norc -c "$(stub_command "$mode" "$state")" \
     || fail 'tmux fixture failed'
   i=0
   while [ ! -s "$TMP_ROOT/pid" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done
   [ -s "$TMP_ROOT/pid" ] || fail 'stand-in never rendered its screen'
   pid=$(cat "$TMP_ROOT/pid")
-  fm_write_meta "$TMP_ROOT/home/state/exitdialog.meta" 'backend=tmux' "window=$target" \
+  fm_write_meta "$state/exitdialog.meta" 'backend=tmux' "window=$target" \
     'endpoint_task_id=exitdialog' 'harness=claude' 'kind=secondmate' \
     "worktree=$TMP_ROOT/worktree" "project=$TMP_ROOT/project"
+  if [ "$mode" = initial-busy ]; then
+    gen=$("$ROOT/bin/fm-busy-event.sh" arm "$state" exitdialog) || fail 'could not arm a busy turn'
+    printf 'busy_gen=%s\n' "$gen" >> "$state/exitdialog.meta"
+  fi
   : > "$TMP_ROOT/keys"
   rc=0
   case "$mode" in
+    restart-unsubmitted)
+      out=$(FM_STATE_OVERRIDE="$state" FM_DIALOG_DROP_ENTER=1 run_fixture fm-secondmate-restart.sh exitdialog 2>&1) || rc=$? ;;
     restart*) out=$(run_fixture fm-secondmate-restart.sh exitdialog 2>&1) || rc=$? ;;
     doorbell-*)
       rec="$TMP_ROOT/001.msg"
@@ -236,6 +258,15 @@ for mode in restart-initial restart-clipped restart-narrow initial-clipped initi
       ;;
   esac
   case "$mode" in
+    restart-unsubmitted)
+      expect_code 3 "$rc" 'the unsubmitted save request must not restart the mate'
+      assert_contains "$screen" ': Firstmate instruction waiting' 'the doorbell literal never reached the composer'
+      assert_contains "$out" 'nudged: exitdialog:' 'the restart did not take its timeout fallback'
+      assert_present "$state/exitdialog.inbox/001.msg" 'the undelivered save request must remain queued'
+      assert_absent "$state/exitdialog.status" 'the stand-in replied without a submitted doorbell'
+      [ -z "$keys" ] || fail "restart sent lifecycle input without a save reply: $keys"
+      kill -TERM "$pid"
+      ;;
     plain)
       [ "$rc" -eq 0 ] || fail "a plain exit failed: $out"
       [ "$keys" = '/ e x i t \r' ] || fail "a plain exit sent other keys: $keys"
@@ -300,7 +331,7 @@ for mode in restart-initial restart-clipped restart-narrow initial-clipped initi
   esac
   "$TMUX_BIN" -f /dev/null -L "$SOCKET" has-session -t "$session" || fail 'exit removed the terminal session'
   "$TMUX_BIN" -f /dev/null -L "$SOCKET" kill-window -t "$target"
-  rm -f "$TMP_ROOT/pid" "$TMP_ROOT/keys" "$TMP_ROOT/home/state/exitdialog.meta"
+  rm -f "$TMP_ROOT/pid" "$TMP_ROOT/keys" "$state/exitdialog.meta" "$state/exitdialog.busy-state" "$state/exitdialog.busy-gen"
 done
 pass 'tmux exit and restart leave the exact dialog untouched and report it; near misses stay unrecognized'
 

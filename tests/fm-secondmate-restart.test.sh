@@ -62,6 +62,7 @@ case "${1:-}" in
     done
     payload=${1:-}
     if [ "$literal" = 1 ]; then
+      rm -f "$D/doorbell.$target"
       printf '%s\n' "$payload" >> "$D/literal"
       case "$payload" in
         /exit|/quit)
@@ -72,26 +73,28 @@ case "${1:-}" in
           ;;
         *'encode launch-brief'*) cat "$D/becomes" > "$D/command.$target" ;;
         ': Firstmate instruction waiting: list '*)
-          printf 'doorbell\n' >> "$D/rings"
-          if [ -x "$D/on-doorbell" ]; then
-            "$D/on-doorbell" "$payload"
-          fi
-          if [ -f "$D/answer-inbox" ]; then
-            # Model the mate: read the newest instruction it was handed and
-            # report back on the parent channel, carrying the correlation token
-            # the request itself embedded.
-            inbox=$(cat "$D/answer-inbox")
-            corr=$(cat "$inbox"/*.msg 2>/dev/null \
-              | grep -oE 'corr=[0-9a-f]{16}' | head -1)
-            if [ -n "$corr" ]; then
-              printf 'done [%s]: open records written down\n' "$corr" \
-                >> "$(cat "$D/answer-status")"
-            fi
-          fi
+          printf '%s\n' "$payload" > "$D/doorbell.$target"
           ;;
       esac
     else
       printf '%s\n' "$payload" >> "$D/keys"
+      if [ "$payload" = Enter ] && [ -f "$D/doorbell.$target" ]; then
+        doorbell=$(cat "$D/doorbell.$target")
+        rm -f "$D/doorbell.$target"
+        printf 'doorbell\n' >> "$D/rings"
+        if [ -x "$D/on-doorbell" ]; then
+          "$D/on-doorbell" "$doorbell"
+        fi
+        if [ -f "$D/answer-inbox" ]; then
+          inbox=$(cat "$D/answer-inbox")
+          corr=$(cat "$inbox"/*.msg 2>/dev/null \
+            | grep -oE 'corr=[0-9a-f]{16}' | head -1)
+          if [ -n "$corr" ]; then
+            printf 'done [%s]: open records written down\n' "$corr" \
+              >> "$(cat "$D/answer-status")"
+          fi
+        fi
+      fi
     fi
     exit 0 ;;
   display-message)
