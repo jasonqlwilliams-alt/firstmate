@@ -472,7 +472,7 @@ cmd_observe() {
   if [ "${2:-}" = --exit-dialog ]; then
     [ "$(fm_control_harness_family "$harness")" = claude ] || return 0
     screen=$(FM_BACKEND_HERDR_ENDPOINT_META="$REMOTE_ENDPOINT_META" fm_backend_guarded_composer_state \
-      "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "fm-$id" '' claude)
+      "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "fm-$id" '' claude 5000)
     if [ "$screen" = exit-confirm ]; then
       printf 'exit-confirm\n'
     fi

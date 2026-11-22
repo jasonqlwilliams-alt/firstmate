@@ -160,8 +160,8 @@ if [ -n "${FM_STATE_OVERRIDE:-}" ]; then FM_STATE_OVERRIDE=$STATE; fi
 . "$SCRIPT_DIR/fm-pr-lib.sh"
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
-# shellcheck source=bin/fm-timing-lib.sh
-. "$SCRIPT_DIR/fm-timing-lib.sh"
+# shellcheck source=bin/fm-timeout-lib.sh
+. "$SCRIPT_DIR/fm-timeout-lib.sh"
 
 POLL=${FM_CONTROL_POLL:-0.5}
 SETTLE_WAIT=${FM_CONTROL_SETTLE_WAIT:-5}
@@ -587,15 +587,13 @@ claude_exit_dialog_refusal() {  # <interrupt-result> <exit-command-state> [obser
 }
 
 claude_exit_guard_input() {  # <interrupt-result> <exit-command-state> [expected-pending] [observed-agent-state]
-  case "$(claude_exit_screen_state "${3:-}")" in
-    exit-confirm) claude_exit_dialog_refusal "$1" "$2" "${4:-}" ;;
-    timeout) claude_exit_unconfirmed "$1" "$2" 'the Claude viewport read timed out' "${4:-}" ;;
-  esac
+  [ "$(claude_exit_screen_state "${3:-}")" != exit-confirm ] \
+    || claude_exit_dialog_refusal "$1" "$2" "${4:-}"
 }
 
 claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
-  local cmd=$1 interrupt_result=$2 screen state submission=typed attempts=1
-  local budget_ms poll_ms deadline remaining delay
+  local cmd=$1 interrupt_result=$2 screen state=unreadable sample submission=typed attempts=1
+  local budget_ms poll_ms deadline now remaining delay final_probe_ms probe_ms
   claude_exit_guard_input "$interrupt_result" not-sent
   fm_backend_send_literal "$BACKEND" "$T" "$cmd" "$LABEL" \
     || die "the exit command could not be sent to task $ID on $BACKEND"
@@ -605,26 +603,46 @@ claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
     submission=delivered
   fi
   read -r budget_ms poll_ms < <(awk -v wait="$EXIT_WAIT" -v poll="$POLL" 'BEGIN{printf "%.0f %.0f\n", wait * 1000, poll * 1000}')
-  deadline=$(( $(fm_timing_now_ms) + budget_ms ))
+  now=$(fm_monotonic_ms) || claude_exit_unconfirmed "$interrupt_result" "$submission" 'the exit clock is unavailable'
+  deadline=$(( now + budget_ms ))
+  final_probe_ms=$(( budget_ms / 3 ))
+  [ "$final_probe_ms" -le 1000 ] || final_probe_ms=1000
   while :; do
-    remaining=$(( deadline - $(fm_timing_now_ms) ))
-    if [ "$remaining" -gt 0 ]; then
-      delay=$poll_ms
-      [ "$delay" -le "$remaining" ] || delay=$remaining
-      sleep "$(printf '%d.%03d' "$((delay / 1000))" "$((delay % 1000))")"
-    fi
-    state=$(agent_state)
-    [ "$state" != dead ] || return 0
-    remaining=$(( deadline - $(fm_timing_now_ms) ))
+    remaining=$(( deadline - now ))
     [ "$remaining" -gt 0 ] || break
-    screen=$(claude_exit_screen_state "$cmd" "$remaining")
-    [ "$screen" != exit-confirm ] || claude_exit_dialog_refusal "$interrupt_result" "$submission" "$state"
-    if [ "$screen" = pending ] && [ "$state" = alive ] && [ "$attempts" -lt "$EXIT_RETRIES" ] \
-      && [ "$(fm_timing_now_ms)" -lt "$deadline" ]; then
-      if fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null 2>&1; then
+    delay=$(( remaining / 2 ))
+    [ "$delay" -le "$poll_ms" ] || delay=$poll_ms
+    sleep "$(fm_timeout_seconds "$delay")"
+    now=$(fm_monotonic_ms) || break
+    remaining=$(( deadline - now ))
+    [ "$remaining" -gt 0 ] || break
+
+    probe_ms=$remaining
+    if [ "$remaining" -gt "$final_probe_ms" ]; then
+      probe_ms=$(( (remaining - final_probe_ms + 1) / 2 ))
+    fi
+    [ "$probe_ms" -le 1000 ] || probe_ms=1000
+    if sample=$(fm_backend_run_timed "$probe_ms" fm_backend_agent_state "$BACKEND" "$T"); then
+      state=$sample
+      [ "$state" != dead ] || return 0
+    else
+      sample=unreadable
+    fi
+    now=$(fm_monotonic_ms) || break
+    remaining=$(( deadline - now - final_probe_ms ))
+    [ "$remaining" -gt 0 ] || continue
+    probe_ms=$remaining
+    [ "$probe_ms" -le 5000 ] || probe_ms=5000
+    screen=$(claude_exit_screen_state "$cmd" "$probe_ms")
+    [ "$screen" != exit-confirm ] || claude_exit_dialog_refusal "$interrupt_result" "$submission" "$sample"
+    now=$(fm_monotonic_ms) || break
+    remaining=$(( deadline - now - final_probe_ms ))
+    if [ "$remaining" -gt 0 ] && [ "$screen" = pending ] && [ "$sample" = alive ] && [ "$attempts" -lt "$EXIT_RETRIES" ]; then
+      if fm_backend_run_timed "$remaining" fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null; then
         submission=delivered
       fi
       attempts=$((attempts + 1))
+      now=$(fm_monotonic_ms) || break
     fi
   done
   claude_exit_unconfirmed "$interrupt_result" "$submission" "the agent did not stop within ${EXIT_WAIT}s" "$state"

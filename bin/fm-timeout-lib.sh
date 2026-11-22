@@ -125,6 +125,14 @@ fm_run_external_timeout() {
   esac
 }
 
+fm_monotonic_ms() {
+  perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e 'printf "%d\n", clock_gettime(CLOCK_MONOTONIC) * 1000'
+}
+
+fm_timeout_seconds() {  # <milliseconds>
+  printf '%d.%03d' "$(( $1 / 1000 ))" "$(( $1 % 1000 ))"
+}
+
 fm_run_timed() {  # <seconds> <command...>
   local seconds=$1
   shift

@@ -175,7 +175,7 @@ report_open_exit_dialog() {  # <id>
   else
     fm_backend_validate_task_endpoint "$meta" "$id" 2>/dev/null || return 1
     screen=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_guarded_composer_state \
-      "$FM_BACKEND_VALIDATED_BACKEND" "$FM_BACKEND_VALIDATED_TARGET" "fm-$id" '' claude 2>/dev/null) || return 1
+      "$FM_BACKEND_VALIDATED_BACKEND" "$FM_BACKEND_VALIDATED_TARGET" "fm-$id" '' claude 5000 2>/dev/null) || return 1
   fi
   [ "$screen" = exit-confirm ] || return 1
   report_unreached "$id" 'Claude is showing its background-tasks exit confirmation and needs manual recovery'

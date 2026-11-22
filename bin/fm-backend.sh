@@ -967,6 +967,16 @@ fm_backend_composer_classify_snapshot() {  # <backend> <target>
   esac
 }
 
+fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
+  local limit_ms=$1
+  shift
+  [ "$limit_ms" -gt 0 ] || return 124
+  . "$FM_BACKEND_LIB_DIR/fm-timeout-lib.sh" || return 1
+  FM_HOME="$FM_HOME" FM_ROOT="$FM_ROOT" FM_BACKEND_HERDR_ENDPOINT_META="${FM_BACKEND_HERDR_ENDPOINT_META:-}" \
+    fm_run_timed "$(fm_timeout_seconds "$limit_ms")" \
+    bash -uc '. "$1" && shift && "$@"' _ "$FM_BACKEND_LIB_DIR/fm-backend.sh" "$@" </dev/null 2>/dev/null
+)
+
 # fm_backend_guarded_composer_state: the composer verdict a caller must have
 # before it types into a pane or presses a confirming Enter there. It reads ONE
 # capture, refuses Claude's active exit confirmation or Codex's global-update picker
@@ -992,20 +1002,12 @@ fm_backend_composer_classify_snapshot() {  # <backend> <target>
 # Callers: the steering-inbox doorbell (bin/fm-task-inbox-lib.sh), and Codex
 # and Claude exit (bin/fm-control.sh).
 fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [remaining-ms]
-  local limit_ms=${6:-5000} screen rc
-  if [ "${5:-}" != claude ]; then
+  local limit_ms=${6:-} screen rc
+  if [ -z "$limit_ms" ]; then
     _fm_backend_guarded_composer_state "$@"
     return
   fi
-  [ "$limit_ms" -gt 0 ] || { printf 'timeout'; return 0; }
-  [ "$limit_ms" -le 5000 ] || limit_ms=5000
-  if screen=$(
-    . "$FM_BACKEND_LIB_DIR/fm-timeout-lib.sh" || exit 1
-    FM_HOME="$FM_HOME" FM_ROOT="$FM_ROOT" FM_BACKEND_HERDR_ENDPOINT_META="${FM_BACKEND_HERDR_ENDPOINT_META:-}" \
-      fm_run_timed "$(printf '%d.%03d' "$((limit_ms / 1000))" "$((limit_ms % 1000))")" \
-        bash -uc '. "$1" && shift && _fm_backend_guarded_composer_state "$@"' _ \
-        "$FM_BACKEND_LIB_DIR/fm-backend.sh" "$1" "$2" "${3:-}" "${4:-}" claude </dev/null 2>/dev/null
-  ); then
+  if screen=$(fm_backend_run_timed "$limit_ms" _fm_backend_guarded_composer_state "${@:1:5}"); then
     printf '%s' "${screen:-unknown}"
   else
     rc=$?

@@ -387,6 +387,10 @@ case "$1 $2" in
     jq -cn --arg cwd "$FM_DIALOG_HOME" '{result:{pane:{pane_id:"p1",terminal_id:"term-claude",cwd:$cwd}}}'
     ;;
   'agent get')
+    if [ "$phase:$FM_DIALOG_MODE" = dialog:dialog-slow-liveness ]; then
+      : > "$FM_DIALOG_CASE/liveness"
+      sleep 3
+    fi
     case "$phase" in
       stopped)
         if [ "$FM_DIALOG_MODE" = single-stop ]; then
@@ -407,6 +411,7 @@ case "$1 $2" in
     ;;
   'pane read')
     if [ "$FM_DIALOG_MODE" = peek ]; then printf '%s\n' "$*" >> "$FM_DIALOG_CASE/reads"; fi
+    if [ "$FM_DIALOG_MODE" = doorbell-slow ]; then sleep 5.5; fi
     styled=0
     case " $* " in *' --format ansi '*) styled=1 ;; esac
     case "$phase" in
@@ -433,7 +438,7 @@ case "$1 $2" in
       stalled-stop)
         printf 'read\n' >> "$FM_DIALOG_CASE/reads"
         printf 'stopped\n' > "$FM_DIALOG_CASE/phase"
-        sleep 8
+        sleep 3
         cat "$FM_DIALOG_FIXTURE"
         ;;
       picker) printf 'Update now (runs npm install)\nSkip until next version\nesc skip\n' ;;
@@ -454,6 +459,8 @@ case "$1 $2" in
     [ "$4" = enter ] || exit 0
     case "$phase:$FM_DIALOG_MODE" in
       typed:retry) printf 'retry\n' ;;
+      typed:retry-stalled) printf 'retry\n' ;;
+      retry:retry-stalled) sleep 3; printf 'stopped\n' ;;
       typed:retry-failure) printf 'retry\n'; exit 1 ;;
       typed:enter-failure) printf 'typed\n'; exit 1 ;;
       typed:dialog-after-failed-enter) printf 'dialog\n'; exit 1 ;;
@@ -473,9 +480,9 @@ fm_write_meta "$meta" 'backend=herdr' 'window=fixture:p1' 'endpoint_task_id=exit
   'harness=claude' 'kind=secondmate' "worktree=$TMP_ROOT/worktree" "project=$TMP_ROOT/project" \
   'herdr_session=fixture' 'herdr_workspace_id=w1' 'herdr_tab_id=t1' 'herdr_pane_id=p1' 'herdr_terminal_id=term-claude'
 export FM_DIALOG_HOME="$TMP_ROOT/worktree"
-for mode in dialog long-dialog picker-history dialog-unreadable dialog-after-typing dialog-after-failed-enter \
-    retry retry-failure enter-failure single-stop slow-stop stalled-stop doorbell-before doorbell-before-picker \
-    doorbell-after doorbell-after-long doorbell-after-long-plain doorbell-after-clipped; do
+for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-liveness dialog-after-typing dialog-after-failed-enter \
+    retry retry-failure retry-stalled enter-failure single-stop slow-stop stalled-stop doorbell-before doorbell-before-picker \
+    doorbell-after doorbell-after-long doorbell-after-long-plain doorbell-after-clipped doorbell-slow; do
   export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/herdr-$mode"
   case "$mode" in
     long-dialog|doorbell-after-long*) export FM_DIALOG_FIXTURE="$TMP_ROOT/long.screen" ;;
@@ -495,7 +502,11 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-after-typ
       PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
         bash -c '. "$1"; fm_task_inbox_ring herdr fixture:p1 "$2" fm-exitdialog claude-latest' \
         _ "$ROOT/bin/fm-task-inbox-lib.sh" "$rec" || rc=$?
-      if [[ "$mode" = doorbell-before* ]]; then
+      if [ "$mode" = doorbell-slow ]; then
+        expect_code 0 "$rc" 'slow composer reads should allow normal doorbell delivery'
+        assert_contains "$(cat "$FM_DIALOG_CASE/input")" 'Firstmate instruction waiting' 'the composer did not receive the doorbell text'
+        [ "$(tail -n 1 "$FM_DIALOG_CASE/input")" = enter ] || fail 'the slow composer did not receive Enter'
+      elif [[ "$mode" = doorbell-before* ]]; then
         expect_code 1 "$rc" 'the dialog should prevent typing the doorbell'
         [ ! -s "$FM_DIALOG_CASE/input" ] || fail "the doorbell wrote into the dialog: $(cat "$FM_DIALOG_CASE/input")"
       else
@@ -506,18 +517,23 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-after-typ
       continue
       ;;
   esac
-  out=$(FM_CONTROL_POLL=0.1 FM_CONTROL_EXIT_WAIT=2 FM_CONTROL_EXIT_RETRIES=3 \
+  exit_wait=2
+  [ "$mode" != enter-failure ] || exit_wait=4
+  out=$(FM_CONTROL_POLL=0.1 FM_CONTROL_EXIT_WAIT="$exit_wait" FM_CONTROL_EXIT_RETRIES=3 \
     run_fixture fm-control.sh exitdialog exit 2>&1) || rc=$?
   printf 'herdr %s exit=%s: %s\n' "$mode" "$rc" "$out"
   input=$(cat "$FM_DIALOG_CASE/input")
   case "$mode" in
-    dialog|long-dialog|picker-history|dialog-unreadable)
+    dialog|long-dialog|picker-history|dialog-unreadable|dialog-slow-liveness)
       [ "$rc" -ne 0 ] || fail 'the styled Herdr dialog reported a stopped agent'
       assert_contains "$out" 'background-tasks exit confirmation' 'the styled Herdr dialog was not recognized'
       assert_contains "$out" 'exit-delivered exitdialog' 'the dialog refusal lost the confirmed Enter'
       [ "$input" = $'/exit\nenter' ] || fail "the styled Herdr dialog received another key: $input"
       [ "$(cat "$FM_DIALOG_CASE/phase")" = dialog ] || fail 'the dialog did not stay open'
-      if [ "$mode" = dialog-unreadable ]; then
+      if [ "$mode" = dialog-slow-liveness ]; then
+        [ -f "$FM_DIALOG_CASE/liveness" ] || fail 'the slow liveness probe was never attempted'
+      fi
+      if [ "$mode" = dialog-unreadable ] || [ "$mode" = dialog-slow-liveness ]; then
         assert_contains "$out" 'agent-state=unreadable' 'the dialog refusal lost the observed liveness'
       fi
       ;;
@@ -533,6 +549,11 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-after-typ
     retry|retry-failure)
       expect_code 0 "$rc" 'Herdr should retry a swallowed Enter while the composer still holds /exit'
       [ "$input" = $'/exit\nenter\nenter' ] || fail "the proven pending command should be submitted once more: $input"
+      ;;
+    retry-stalled)
+      expect_code 1 "$rc" 'a stalled retry must return an unconfirmed exit'
+      assert_contains "$out" 'the agent did not stop within 2s' 'the stalled retry exceeded the exit budget'
+      [ "$input" = $'/exit\nenter\nenter' ] || fail "a stalled retry sent unexpected input: $input"
       ;;
     enter-failure)
       expect_code 1 "$rc" 'the exit should fail after all Enter attempts fail'
