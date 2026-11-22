@@ -2033,7 +2033,7 @@ test_external_merge_transition_retires_only_merged_poll() {
   dir=$(make_case external-merge-transition)
   state="$dir/home/state"
   url=https://github.com/o/r/pull/19
-  seed_secondmate_home "$dir"
+  printf '%s\n' mate-x > "$dir/home/.fm-secondmate-home"
   write_poll_meta "$state" task-a "$url"
   seed_canonical_poll "$dir" task-a "$url"
   add_stop_custom_check "$dir"
@@ -2059,20 +2059,21 @@ test_external_merge_transition_retires_only_merged_poll() {
     rc=$?
     set -e
     [ "$rc" -eq 0 ] || fail "$label watcher cycle failed: $(cat "$dir/$label.err")"
-    if [ "$label" = closed-unmerged ]; then
-      case "$(cat "$dir/$label.out")" in
-        check:*task-a.check.sh:*closed-unmerged) ;;
-        *) fail "closure did not wake the watcher" ;;
-      esac
-      assert_grep "closed-unmerged-task-a-$url" "$state/.wake-queue" "closure did not publish a durable wake"
-    else
-      case "$(cat "$dir/$label.out")" in check:*z-stop.check.sh:*stop-cycle) ;; *) fail "$label did not reach the control check" ;; esac
-      assert_no_grep "closed-unmerged-task-a-$url" "$state/.wake-queue" "$label published an unexpected closure wake"
-    fi
+    case "$(cat "$dir/$label.out")" in check:*z-stop.check.sh:*stop-cycle) ;; *) fail "$label did not reach the control check" ;; esac
+    assert_no_grep "$url" "$state/.wake-queue" "$label published an unexpected PR wake"
+    [ ! -e "$state/parent-replies.status" ] || fail "$label published an unexpected parent reply"
+    case "$label" in
+      closed-unmerged|duplicate-closure)
+        fm_pr_poll_outcome_recorded "$state" task-a github github.com o/r 19 closed-unmerged \
+          || fail "$label did not record closure locally with the parent channel unavailable"
+        ;;
+      *) [ ! -e "$state/task-a.pr-poll-merge-notified" ] || fail "$label recorded a PR outcome" ;;
+    esac
     [ "$(poll_artifact_snapshot "$state" task-a)" = "$before" ] || fail "$label changed the armed poll"
     ack_watcher_cycle "$state" || fail "$label control wake acknowledgement failed"
   done
 
+  seed_secondmate_home "$dir"
   rm -f "$state/z-stop.check.sh" "$state/z-stop.check-trust" "$state/.last-check"
   set +e
   FM_TEST_GH_STATE=MERGED run_watcher_bounded "$dir/home" "$dir/fakebin" > "$dir/merged.out" 2> "$dir/merged.err"
@@ -2080,13 +2081,45 @@ test_external_merge_transition_retires_only_merged_poll() {
   set -e
   [ "$rc" -eq 0 ] || fail "external merged transition failed: $(cat "$dir/merged.err")"
   case "$(cat "$dir/merged.out")" in check:*task-a.check.sh:*merged) ;; *) fail "external merge did not preserve its notification" ;; esac
-  [ "$(grep -c -F "done [key=closed-unmerged-task-a]: PR closed without merge: task-a $url" "$state/parent-replies.status")" -eq 1 ] \
-    || fail "closure did not publish exactly one upward notification"
   assert_grep "done [key=merged-task-a]: merged task-a $url" "$state/parent-replies.status" \
     "closure suppressed the later merge notification"
+  fm_pr_poll_outcome_recorded "$state" task-a github github.com o/r 19 merged \
+    || fail "merge did not replace the closure marker for the same PR"
   assert_poll_absent "$state" task-a
-  pass "closure wakes once and the poll remains armed until an exact merged transition"
+  pass "closure records locally without waking and the armed poll still reports a later merge"
 }
+
+test_stale_outcomes_preserve_current_pr_closure() (
+  local dir state old_pr current_pr rc origin outcome
+  . "$ROOT/bin/fm-merge-outcome-lib.sh"
+  dir=$(make_case stale-outcomes)
+  state="$dir/home/state"
+  old_pr=https://github.com/o/r/pull/19
+  current_pr=https://github.com/o/r/pull/20
+  write_task_meta "$dir" task-a
+  run_check_entry "$dir" task-a "$old_pr" >/dev/null || fail "could not register the original PR"
+  fm_pr_poll_snapshot_capture "$state" task-a "$POLL" || fail "could not capture the original poll"
+
+  run_check_entry "$dir" task-a "$current_pr" >/dev/null || fail "could not register the replacement PR"
+  add_stop_custom_check "$dir"
+  FM_TEST_GH_STATE=CLOSED run_watcher_bounded "$dir/home" "$dir/fakebin" >/dev/null \
+    || fail "could not poll the replacement PR"
+  fm_pr_poll_outcome_recorded "$state" task-a github github.com o/r 20 closed-unmerged \
+    || fail "the replacement PR closure was not recorded"
+
+  for origin in self poll; do
+    for outcome in merged closed-unmerged; do
+      [ "$origin:$outcome" != self:closed-unmerged ] || continue
+      rc=0
+      fm_merge_outcome_report "$dir/home" "$state" task-a "$old_pr" "$origin" '' "$outcome" || rc=$?
+      [ "$rc" -eq 4 ] || fail "$origin $outcome for the original PR survived re-registration"
+      fm_pr_poll_outcome_recorded "$state" task-a github github.com o/r 20 closed-unmerged \
+        || fail "$origin $outcome for the original PR erased the replacement closure"
+    done
+  done
+  assert_no_grep "$old_pr" "$state/.wake-queue" "stale PR outcome queued a wake"
+  pass "stale direct and polled outcomes preserve the replacement PR's closure"
+)
 
 test_retirement_refuses_replacement_and_nonterminal_results() {
   local dir state before rc replacement_check replacement_data replacement_registration replacement_meta
@@ -2365,6 +2398,7 @@ test_different_merged_pr_for_same_task_is_not_absorbed
 test_persistent_secondmate_retirement_is_poll_only
 test_retirement_crash_recovery
 test_external_merge_transition_retires_only_merged_poll
+test_stale_outcomes_preserve_current_pr_closure
 test_retirement_refuses_replacement_and_nonterminal_results
 test_retirement_queue_failure_and_receipt_tampering
 test_gitlab_merged_poll_retires

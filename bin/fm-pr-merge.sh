@@ -1059,6 +1059,10 @@ case "$outcome_rc" in
     printf 'actionable: merged %s but could not report it upward: this home has no readable secondmate identity or parent binding (.fm-secondmate-home, .fm-secondmate-parent)\n' \
       "$URL" >&2
     ;;
+  4)
+    printf 'actionable: merged %s but the task PR registration changed before its outcome was recorded\n' \
+      "$URL" >&2
+    ;;
   *)
     printf 'actionable: merged %s but could not record the outcome for supervision\n' "$URL" >&2
     ;;

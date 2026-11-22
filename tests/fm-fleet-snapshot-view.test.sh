@@ -1379,8 +1379,8 @@ SH
   out=$(TEST_PR_STATE=CLOSED FM_HOME="$home" FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=5 \
     PATH="$fakebin:$PATH" "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 15) || fail "watcher failed: $out"
   case "$out" in
-    check:*cancelled.check.sh:*closed-unmerged) ;;
-    *) fail "watcher did not surface the observed closure: $out" ;;
+    check:*z-cycle-end.check.sh:*poll-cycle-end) ;;
+    *) fail "watcher did not continue after the observed closure: $out" ;;
   esac
   [ "$(cat "$home/forge-reads")" = "pr view $pr --repo kunchenguid/firstmate --json state -q .state" ] \
     || fail "watcher did not poll the exact PR: $out"

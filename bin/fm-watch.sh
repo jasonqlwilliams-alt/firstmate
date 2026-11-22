@@ -2112,7 +2112,7 @@ while :; do
           case "$merge_outcome_rc" in
             0) ;;
             4)
-              triage_log "discarded closure observation because its canonical PR poll snapshot changed for $id"
+              triage_log "discarded PR outcome $out because its registration changed for $id"
               continue
               ;;
             *)
@@ -2120,12 +2120,11 @@ while :; do
               exit 1
               ;;
           esac
-          if [ "$out" = merged ]; then
-            retire_merged_pr_poll "$id"
-          fi
+          [ "$out" = merged ] || continue
+          retire_merged_pr_poll "$id"
           touch "$STATE/.last-check"
           if [ "$FM_MERGE_OUTCOME_ALREADY_RECORDED" = true ]; then
-            triage_log "absorbed already-recorded PR poll result $out for $id"
+            triage_log "absorbed duplicate merged PR poll result for $id"
             continue
           fi
           wake "$reason"
