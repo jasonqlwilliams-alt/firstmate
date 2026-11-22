@@ -65,7 +65,8 @@
 #                          interrupt, signal, or restart of the worker or its
 #                          tool process.
 #   stale: <window> (the recorded endpoint is gone)
-#                          confirmed loss of the recorded local endpoint;
+#                          confirmed loss of the recorded local endpoint,
+#                          silent for a task parked with bin/fm-park-retained.sh;
 #                          see docs/watcher-continuity.md#recorded-endpoint-loss
 #   stale: <window> (unread firstmate instruction: ...)
 #                          the steering-inbox ladder spent its delivery-attempt
@@ -1155,6 +1156,11 @@ report_missing_endpoint() {  # <backend> <window> <meta> <window-key> <marker>
     return 0
   fi
   clear_pause_tracking "$key"
+  # A parked task whose copy is deliberately retained expects this loss.
+  if fm_backend_endpoint_parked_retained "$meta"; then
+    fm_lock_release "$lock"
+    return 0
+  fi
 
   # A relaunch can reuse a window name without the watcher seeing it live.
   # Legacy records still re-arm when the target changes or capture succeeds.

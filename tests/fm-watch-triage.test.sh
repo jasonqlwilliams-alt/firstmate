@@ -2324,6 +2324,99 @@ test_missing_tmux_endpoint_surfaces_once() (
   done
 )
 
+# A parked task whose worker window was deliberately closed while its isolated
+# copy is kept must not keep alarming about the expected endpoint loss once the
+# park mark is recorded. The mark leaves the copy and its unlanded work alone,
+# a relaunch or an explicit clear restores the alarm, and an unmarked parked
+# task still raises the ordinary loss wake.
+test_parked_retained_copy_suppresses_endpoint_loss() (
+  local tmux_bin socket dir state window task out pid='' wt before after park
+  tmux_bin=$(command -v tmux) || { echo "skip: tmux is required for the parked endpoint regression"; return 0; }
+  park="$ROOT/bin/fm-park-retained.sh"
+  socket="fm-watch-parked-$$-$RANDOM"
+  dir=$(fm_test_tmproot fm-watch-parked) || fail "could not create the parked endpoint fixture"
+  trap '[ -z "$pid" ] || reap "$pid"; "$tmux_bin" -L "$socket" kill-server 2>/dev/null || true' EXIT
+  mkdir -p "$dir/bin"
+  printf '#!/usr/bin/env bash\nexec %q -L %q "$@"\n' "$tmux_bin" "$socket" > "$dir/bin/tmux"
+  chmod +x "$dir/bin/tmux"
+  "$dir/bin/tmux" -f /dev/null new-session -d -s parked -c "$dir" || fail "could not start the private tmux server"
+
+  state="$dir/home/state"; out="$dir/home/watch.out"
+  mkdir -p "$state"
+  wt="$dir/copy"
+  git init -q "$wt" || fail "could not create the retained copy"
+  printf 'kept work\n' > "$wt/unlanded.txt" || fail "could not write the retained work"
+  before=$(cd "$wt" && git status --porcelain && cat unlanded.txt)
+
+  watch_parked() {
+    PATH="$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" \
+      FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+      FM_PAUSE_RESURFACE_SECS=999999 FM_STALE_ESCALATE_SECS=999999 exec "$WATCH" > "$out"
+  }
+  ack_parked() { FM_HOME="$dir/home" ack_stopped_cycle "$state"; }
+  park_task() { FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" "$park" "$@"; }
+
+  # Each run closes the window, then watches. <expect> is "wake" or "quiet".
+  run_case() {  # <label> <task> <spawn-gen> <expect>
+    local label=$1 task=$2 gen=$3 expect=$4 poll
+    window="parked:fm-$task"
+    "$dir/bin/tmux" new-window -d -t parked: -n "fm-$task" -- bash --noprofile --norc -i \
+      || fail "[$label] could not create the fixture window"
+    printf 'window=%s\nbackend=tmux\nkind=ship\nharness=codex\nworktree=%s\nspawn_gen=%s\n' \
+      "$window" "$wt" "$gen" > "$state/$task.meta"
+    if [ ! -e "$state/$task.status" ]; then
+      printf 'paused: parked for later, copy retained\n' > "$state/$task.status"
+      seen_sig "$state/$task.status" > "$state/.seen-${task}_status"
+    fi
+    if [ "$label" = marked ] || [ "$label" = marked-again ]; then
+      park_task "$task" mark > "$dir/park.out" 2>&1 || fail "[$label] marking failed: $(cat "$dir/park.out")"
+    fi
+    "$dir/bin/tmux" kill-window -t "$window" || fail "[$label] could not close the fixture window"
+    if [ "$expect" = wake ]; then
+      watch_parked & pid=$!
+      wait_for_exit "$pid" 150 || fail "[$label] closing the window did not wake the watcher: $(cat "$out")"
+      pid=''
+      grep -Fxq "stale: $window (the recorded endpoint is gone)" "$out" \
+        || fail "[$label] unexpected watcher output: $(cat "$out")"
+      ack_parked || fail "[$label] could not acknowledge the loss wake"
+    else
+      watch_parked & pid=$!
+      for poll in 1 2 3; do
+        wait_poll_cycle "$state" "$pid" \
+          || fail "[$label] the parked endpoint loss alarmed on poll $poll: $(cat "$out")"
+      done
+      ! awk -F '\t' -v w="$window" '$3 == "stale" && $4 == w { found = 1 } END { exit !found }' \
+        "$state/.wake-queue" 2>/dev/null || fail "[$label] a parked loss wake was queued"
+      reap "$pid"; pid=''
+      ack_parked || fail "[$label] could not acknowledge the fixture watcher stop"
+    fi
+  }
+
+  # Reproduction: an unmarked parked task alarms on the expected loss.
+  run_case unmarked plain first wake
+  # The park mark silences the loss for this incarnation.
+  run_case marked held first quiet
+  park_task held status | grep -Fxq 'parked-retained: yes' || fail "status did not report the active mark"
+  # Clearing the mark restores the alarm for the same lost endpoint.
+  park_task held clear > "$dir/park.out" 2>&1 || fail "clearing failed: $(cat "$dir/park.out")"
+  park_task held status | grep -Fxq 'parked-retained: no' || fail "status did not report the cleared mark"
+  watch_parked & pid=$!
+  wait_for_exit "$pid" 150 || fail "[cleared] the cleared mark did not restore the loss alarm: $(cat "$out")"
+  pid=''
+  grep -Fxq "stale: parked:fm-held (the recorded endpoint is gone)" "$out" \
+    || fail "[cleared] unexpected watcher output: $(cat "$out")"
+  ack_parked || fail "[cleared] could not acknowledge the loss wake"
+  # A mark from an earlier incarnation does not silence a relaunched worker's loss.
+  run_case marked-again again first quiet
+  run_case relaunched again second wake
+  park_task again status | grep -Fxq 'parked-retained: no' || fail "a relaunch left the old mark reported as active"
+
+  after=$(cd "$wt" && git status --porcelain && cat unlanded.txt)
+  [ "$before" = "$after" ] || fail "the park mark changed the retained copy"
+  park_task nosuch mark > "$dir/park.out" 2>&1 && fail "marking an unknown task succeeded"
+  pass "real tmux: a parked retained-copy mark silences only its own incarnation's endpoint loss"
+)
+
 test_backlog_hold_suppresses_only_an_agentless_lane() {
   local dir state fakebin out capture_file held_file statusf window key pane_hash sig pid
 
@@ -5219,6 +5312,7 @@ test_nonterminal_stale_paused_absorbed_then_resurfaced
 test_exited_declared_pause_is_bounded_but_live_gate_surfaces
 test_missing_tmux_endpoint_surfaces_once || exit 1
 test_endpoint_loss_and_ordinary_stale_are_presented_independently || exit 1
+test_parked_retained_copy_suppresses_endpoint_loss || exit 1
 test_backlog_hold_suppresses_only_an_agentless_lane
 test_absorbed_replacement_wait_does_not_inherit_the_old_throttle
 test_live_declared_wait_churn_honors_the_resurface_throttle

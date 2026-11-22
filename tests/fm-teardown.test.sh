@@ -783,6 +783,34 @@ SH
   pass "teardown keeps an acknowledged endpoint loss until its task record is retired"
 }
 
+# A parked retained-copy mark only silences endpoint-loss reporting: cleanup
+# must still refuse a copy holding unlanded work, keep the mark while the task
+# record survives, and retire it with the record once the work has landed.
+test_parked_retained_mark_does_not_relax_cleanup() {
+  local case_dir mark rc
+  case_dir=$(make_case parked-retained-mark)
+  write_meta "$case_dir" local-only ship
+  mark="$case_dir/state/task-x1.parked-retained"
+  FM_STATE_OVERRIDE="$case_dir/state" "$ROOT/bin/fm-park-retained.sh" task-x1 mark > /dev/null \
+    || fail "could not mark the parked task"
+  assert_present "$mark" "the park mark was not recorded"
+  wt_commit "$case_dir" "unlanded parked work"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "parked mark: teardown should still refuse unlanded work"
+  grep -q REFUSED "$case_dir/stderr" || fail "parked mark: no REFUSED line in stderr"
+  assert_present "$mark" "a refused cleanup dropped the park mark"
+
+  git -C "$case_dir/wt" reset -q --hard HEAD~1 || fail "could not drop the fixture commit"
+  run_teardown "$case_dir" > "$case_dir/retry.out" 2>&1 \
+    || fail "teardown of the landed parked task failed: $(cat "$case_dir/retry.out")"
+  assert_absent "$mark" "cleanup kept the park mark after retiring the task record"
+  pass "a parked retained-copy mark leaves cleanup's unlanded-work refusal intact and is retired with the record"
+}
+
 test_local_only_truly_unpushed_refuses() {
   local case_dir rc
   case_dir=$(make_case truly-unpushed)
@@ -4119,6 +4147,7 @@ test_local_only_fork_remote_allows
 test_teardown_closes_the_backlog_item_itself
 test_teardown_manual_backend_leaves_the_backlog_to_the_operator
 test_endpoint_loss_marker_survives_failed_task_retirement
+test_parked_retained_mark_does_not_relax_cleanup
 test_local_only_truly_unpushed_refuses
 test_local_only_merged_to_local_main_allows
 test_no_mistakes_origin_remote_allows
