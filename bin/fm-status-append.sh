@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # fm-status-append.sh - append one worker status line.
 #
-# Ship and scout briefs (bin/fm-brief.sh) and bin/fm-secondmate-report.sh
-# use this writer. A key that starts with a prefix reserved by
+# New ship and scout briefs (bin/fm-brief.sh) and bin/fm-secondmate-report.sh
+# use this writer. An explicit key that starts with a prefix reserved by
 # bin/fm-classify-lib.sh is refused before any byte is written: the error
 # names that prefix and tells the worker to pick another key. The reserved
 # prefix list stays in that library; this script only asks it.
+# The status path must be nonempty and must not be a symlink. The status line
+# must have no embedded newline.
 #
 # Usage: fm-status-append.sh <status-file> <line>
 set -eu

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Present durable watcher wake records, retire rows no actor could ever consume,
 # optionally acknowledge handled records,
-# annotate every unread line for validated signal status keys, surface unread
-# informational status lines, latest captain-facing statuses not covered by a
-# newer branch outcome, OPEN DECISIONS, and captain-call record divergence,
-# then assert liveness.
+# annotate every unread line for validated signal status keys, warn about folded
+# reserved-key needs-decision lines, surface unread informational status lines,
+# latest captain-facing statuses not covered by a newer branch outcome, OPEN
+# DECISIONS, and captain-call record divergence, then assert liveness.
 #
 # Keep sequence-bound row consumption independent from generation-bound episode
 # retirement; docs/watcher-continuity.md owns the recovery contract.

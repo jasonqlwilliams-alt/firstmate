@@ -511,7 +511,8 @@ SSH_AUTH_SOCK
 ```
 
 Firstmate retains basic home, executable search, terminal, locale, temporary-directory, and backend routing variables, plus its explicit launch assignments, its ship and scout task marker, and enabled task trace.
-The effective reserved status-key prefixes are an explicit assignment from the launching supervisor, independent of this allowlist.
+The launcher supplies the effective [reserved status-key prefixes](../bin/fm-classify-lib.sh) independently of this allowlist.
+For a remote secondmate, the launcher uses the policy on the remote host.
 [`fm-spawn.sh --help`](../bin/fm-spawn.sh) owns the exact retained names and parsing mechanics.
 Other ambient names must be listed explicitly, including custom credential-store locations, proxy settings, and certificate overrides when required by the selected tools.
 The command shell and worker may still create their own variables.

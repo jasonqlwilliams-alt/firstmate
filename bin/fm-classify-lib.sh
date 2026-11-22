@@ -448,10 +448,9 @@ EOF
 # particular owner: a reserved key may only be opened or closed by a line whose
 # note speaks that namespace's own vocabulary, which its owner states by
 # beginning the note with a `<namespace>...:` token. A line failing that is not a
-# decision transition at all here and is folded as ordinary status. This is a
-# consumer-side rule on purpose - it protects local and remote writers
-# identically, and it can never fail a whole delta or wedge a stream the way a
-# writer-side rejection would.
+# decision transition at all here and is folded as ordinary status. The fold
+# protects the shared stream even when a report bypasses the guarded writer,
+# including direct local appends and mirrored remote appends.
 FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT='pending-reply-'
 
 # Print the reserved prefix <key> starts with. Return 1 when <key> is not reserved.
@@ -1511,11 +1510,13 @@ status_open_decisions_cursor_offset() {  # <status-file>
 # presentation offset. The optional unread-surface mode filters through the
 # informational-line classifier before transport, so routine lifetime history
 # never becomes a large command-substitution string for note-only consumers.
-# Default all preserves raw annotation and decision consumers. Does not write
-# the cursor. A missing manifest row or
-# changed status identity reads the current file from offset 0; malformed or
-# unreadable cursor state fails the scan. Symlinks and unreadable status files
-# print nothing.
+# Default all preserves raw annotation and decision consumers. Drain-surface
+# derives tagged warnings and informational rows from one read. Before the
+# presentation manifest exists, it scans warnings from byte 0 because a
+# legacy decision-fold cursor does not prove presentation. Does not write the
+# cursor. A missing manifest row or changed status identity reads the current
+# file from offset 0. Malformed or unreadable cursor state fails the scan.
+# Symlinks and unreadable status files print nothing.
 status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|unread-surface|drain-surface]
   local f=$1 captured_end=${2:-} surface=${3:-all} cf offset start size actual_size chunk_file filtered_file
   local line rc=0 manifest warnings=0 key question informational
