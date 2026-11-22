@@ -1011,11 +1011,16 @@ fm_lock_try_acquire() {
   return "$rc"
 }
 
-# Preserve the acquire-before-return contract even if the parent disappears:
-# retry at the ordinary 0.1s cadence, without recreating the parent directory.
+# Retry at the ordinary 0.1s cadence, without recreating the parent directory.
+# By default, a temporarily missing parent does not interrupt the wait.
 fm_lock_acquire_wait() {
-  local lockdir=$1
+  local lockdir=$1 mode=${2:-} parent=${1%/*}
+  [ "$parent" != "$lockdir" ] || parent=.
   while ! fm_lock_try_acquire "$lockdir"; do
+    if [ "$mode" = existing-parent ] && [ ! -d "${parent:-/}" ]; then
+      echo "error: lock directory disappeared: ${parent:-/}" >&2
+      return 1
+    fi
     sleep 0.1
   done
 }

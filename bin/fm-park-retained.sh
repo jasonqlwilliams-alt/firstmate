@@ -72,7 +72,7 @@ INCARNATION=$(fm_backend_endpoint_park_identity "$META") || INCARNATION=
 fm_lock_release "$CONTROL_LOCK"
 fm_lease_guard "$ID" "park $ACTION (fm-park-retained)"
 fm_lock_try_acquire "$CONTROL_LOCK" same-owner || refuse_busy
-fm_lock_acquire_wait "$LOCK"
+fm_lock_acquire_wait "$LOCK" existing-parent || exit 1
 
 if [ ! -f "$META" ] || [ -L "$META" ] \
    || [ "$INCARNATION" != "$(fm_backend_endpoint_park_identity "$META")" ]; then

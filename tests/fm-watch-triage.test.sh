@@ -2502,30 +2502,30 @@ test_parked_retained_copy_suppresses_endpoint_loss() (
 
   control_lock="$state/.control-again.lock"
   lease_lock="$state/.fm-lease-command.lock"
-  rm -f "$dir/lock-bin/sleep"
-  mkdir "$control_lock" "$lease_lock" "$lock" || fail "could not hold the relaunch fixture locks"
-  printf '%s\n' "$$" | tee "$control_lock/pid" "$lease_lock/pid" > "$lock/pid"
-  sed 's/^spawn_gen=.*/spawn_gen=third/' "$state/again.meta" > "$state/.again-replacement" \
-    && mv "$state/.again-replacement" "$state/again.meta" || fail "could not stage the new record during relaunch"
-  cat > "$dir/release-on-selection" <<'SH'
-trap '
-  if [ "${INCARNATION:-}" = "$FM_TEST_REPLACEMENT" ] && [ -f "$FM_TEST_CONTROL_LOCK/pid" ]; then
-    rm -f "$FM_TEST_CONTROL_LOCK/pid" "$FM_TEST_LEASE_LOCK/pid" "$FM_TEST_META_LOCK/pid"
-    rmdir "$FM_TEST_CONTROL_LOCK" "$FM_TEST_LEASE_LOCK" "$FM_TEST_META_LOCK"
-  fi
-' DEBUG
-SH
-  PATH="$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=main \
-    FM_TEST_CONTROL_LOCK="$control_lock" FM_TEST_LEASE_LOCK="$lease_lock" FM_TEST_META_LOCK="$lock" \
-    FM_TEST_REPLACEMENT="tmux:$window"$'\tthird' BASH_ENV="$dir/release-on-selection" \
+  rm -f "$dir/park-waiting"
+  mkdir "$lease_lock" || fail "could not hold the supervision lease lock"
+  printf '%s\n' "$$" > "$lease_lock/pid"
+  PATH="$dir/lock-bin:$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=main \
     "$park" again mark > "$dir/park.out" 2>&1 &
   park_pid=$!
+  for ((tries=0; tries<100; tries++)); do
+    [ ! -e "$dir/park-waiting" ] || break
+    sleep 0.1
+  done
+  [ -e "$dir/park-waiting" ] || fail "mark did not wait for the supervision lease lock"
+  mkdir "$control_lock" "$lock" || fail "could not hold the relaunch locks during the lease wait"
+  printf '%s\n' "$$" | tee "$control_lock/pid" > "$lock/pid"
+  sed 's/^spawn_gen=.*/spawn_gen=third/' "$state/again.meta" > "$state/.again-replacement" \
+    && mv "$state/.again-replacement" "$state/again.meta" || fail "could not publish the replacement during the lease wait"
+  rm -f "$control_lock/pid" "$lock/pid" "$lease_lock/pid"
+  rmdir "$lock" "$control_lock" "$lease_lock" || fail "could not finish the relaunch handoff"
   rc=0
   wait_for_exit "$park_pid" 100 || rc=$?
   park_pid=''
-  [ "$rc" -eq 1 ] || fail "mark after replacement publication and overlapping release exited $rc: $(cat "$dir/park.out")"
-  rm -f "$control_lock/pid" "$lease_lock/pid" "$lock/pid"
-  rmdir "$control_lock" "$lease_lock" "$lock" || fail "mark selected a worker before the relaunch finished"
+  [ "$rc" -eq 1 ] && grep -Fq 'recorded endpoint changed' "$dir/park.out" \
+    || fail "mark did not reject the replacement after the lease handoff: $(cat "$dir/park.out")"
+  [ "$(cat "$state/again.parked-retained")" = "$saved_mark" ] || fail "mark replaced the original worker's mark during the lease wait"
+  rm -f "$dir/lock-bin/sleep"
 
   cat > "$dir/lock-bin/cat" <<'SH'
 #!/usr/bin/env bash
@@ -2549,7 +2549,7 @@ SH
     mkdir "$owner" || fail "could not stage a live relaunch lock"
     printf '%s\n' "$$" > "$owner/pid"
     rc=0
-    PATH="$dir/lock-bin:$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" \
+    PATH="$dir/lock-bin:$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=main \
       FM_TEST_CONTROL_LOCK="$control_lock" FM_TEST_RELAUNCH_OWNER="$owner" \
       FM_TEST_REAL_CAT="$real_cat" "$park" again mark > "$dir/park.out" 2>&1 &
     park_pid=$!
@@ -2570,6 +2570,49 @@ SH
   [ "$before" = "$after" ] || fail "the park mark changed the retained copy"
   park_task nosuch mark > "$dir/park.out" 2>&1 && fail "marking an unknown task succeeded"
   pass "real tmux: a parked retained-copy mark silences only its own incarnation's endpoint loss"
+)
+
+test_park_and_lease_waits_stop_when_home_is_retired() (
+  local dir home retired action real_sleep rc pid=''
+  local -a command
+  dir=$(fm_test_tmproot fm-park-retired-home) || fail "could not create the retirement fixture"
+  trap '[ -z "$pid" ] || reap "$pid"' EXIT
+  real_sleep=$(command -v sleep) || fail "could not resolve sleep for the retirement fixture"
+  mkdir "$dir/bin"
+  cat > "$dir/bin/sleep" <<'SH'
+#!/usr/bin/env bash
+if [ -d "$FM_HOME" ]; then
+  mv "$FM_HOME" "$FM_TEST_RETIRED_HOME" || exit 1
+fi
+exec "$FM_TEST_REAL_SLEEP" "$@"
+SH
+  chmod +x "$dir/bin/sleep"
+
+  for action in mark clear claim; do
+    home="$dir/$action"
+    retired="$dir/$action-retired"
+    mkdir -p "$home/state/.fm-lease-command.lock"
+    printf '%s\n' "$$" > "$home/state/.fm-lease-command.lock/pid"
+    fm_write_meta "$home/state/task.meta" 'window=parked:fm-task' kind=ship spawn_gen=first
+    printf 'tmux:parked:fm-task\tfirst\n' > "$home/state/task.parked-retained"
+    case "$action" in
+      claim) command=("$ROOT/bin/fm-lease.sh" claim task) ;;
+      *) command=("$ROOT/bin/fm-park-retained.sh" task "$action") ;;
+    esac
+    PATH="$dir/bin:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_SUPERVISION_ACTOR=main \
+      FM_TEST_REAL_SLEEP="$real_sleep" FM_TEST_RETIRED_HOME="$retired" "${command[@]}" > "$dir/command.out" 2>&1 &
+    pid=$!
+    rc=0
+    wait_for_exit "$pid" 100 || rc=$?
+    pid=''
+    assert_present "$retired/state/.fm-lease-command.lock/pid" "$action never waited on the retiring home's lease lock"
+    [ "$rc" -eq 1 ] && grep -Fq 'lock directory disappeared' "$dir/command.out" \
+      || fail "$action did not refuse after home retirement (exit $rc): $(cat "$dir/command.out")"
+    assert_absent "$home" "$action recreated the retired home"
+    [ "$(cat "$retired/state/task.parked-retained")" = $'tmux:parked:fm-task\tfirst' ] \
+      || fail "$action changed the retired home's saved mark"
+  done
+  pass "park and lease commands stop waiting when the home is retired"
 )
 
 test_parked_herdr_endpoint_does_not_hide_recycled_target_loss() (
@@ -5500,6 +5543,7 @@ test_exited_declared_pause_is_bounded_but_live_gate_surfaces
 test_missing_tmux_endpoint_surfaces_once || exit 1
 test_endpoint_loss_and_ordinary_stale_are_presented_independently || exit 1
 test_parked_retained_copy_suppresses_endpoint_loss || exit 1
+test_park_and_lease_waits_stop_when_home_is_retired || exit 1
 test_parked_herdr_endpoint_does_not_hide_recycled_target_loss || exit 1
 test_backlog_hold_suppresses_only_an_agentless_lane
 test_absorbed_replacement_wait_does_not_inherit_the_old_throttle
