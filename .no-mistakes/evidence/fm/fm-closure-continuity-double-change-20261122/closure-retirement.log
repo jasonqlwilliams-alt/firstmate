@@ -1,0 +1,55 @@
+Retirement revokes closure evidence and stops old checks from acting on reused IDs
+
+Executed the checked-in end-to-end fixture selectors against Firstmate CLI scripts.
+
+Isolated Firstmate homes and synthetic forge inputs. External integrations were fixture-controlled.
+
+Target 106ae2becac397040b263d8e31cd999c53a3fbe4
+
+Base ccd19a2ffe3ce5ddfc9505de98d2fa48037483bb (counterfactual where shown)
+
+Target | tests/fm-pr-check-security.test.sh | test_closure_during_rearm_or_task_id_reuse
+Exit status 0
+Transition reused-legacy-id after the forge query began
+pr view https://github.com/o/r/pull/26 --repo o/r --json state -q .state
+Current PR https://github.com/o/r/pull/26
+Closure ledger absent
+check: <fixture>/tmp/fm-pr-check-security.CTm32F/watch-closure-reused-legacy-id/home/state/z-stop.check.sh: stop-cycle
+Transition reused-generated-id after the forge query began
+pr view https://github.com/o/r/pull/26 --repo o/r --json state -q .state
+Current PR https://github.com/o/r/pull/26
+Closure ledger absent
+check: <fixture>/tmp/fm-pr-check-security.CTm32F/watch-closure-reused-generated-id/home/state/z-stop.check.sh: stop-cycle
+Transition rearm after the forge query began
+pr view https://github.com/o/r/pull/26 --repo o/r --json state -q .state
+Current PR https://github.com/o/r/pull/26
+Recorded closure https://github.com/o/r/pull/26
+check: <fixture>/tmp/fm-pr-check-security.CTm32F/watch-closure-rearm/home/state/z-stop.check.sh: stop-cycle
+ok - PR closures survive a generationless re-arm and stop at teardown with or without generations
+
+Target | tests/fm-pr-check-security.test.sh | test_remote_proxy_teardown_removes_closure_evidence
+Exit status 0
+ok - remote proxy retirement revokes its check without a false unauthenticated wake
+Remote proxy teardown output
+teardown task-a complete (remote remote-mac:<fixture>/tmp/fm-pr-check-security.7QLwnY/remote-pr-closure-teardown/remote-home)
+Watcher output across retirement
+check: <fixture>/tmp/fm-pr-check-security.7QLwnY/remote-pr-closure-teardown/home/state/z-stop.check.sh: stop-cycle
+Forge calls before the replacement was armed 0
+
+Target | tests/fm-backlog-atomicity.test.sh | test_recovery_finishes_a_close_for_the_same_meta_incarnation
+Exit status 0
+ok - session start finishes a matching close despite an invalid merge receipt
+Persisted backlog row
+- [x] atomic-heal-same-incarnation-b11 - item for atomic-heal-same-incarnation-b11 (kind: ship) (done 2026-11-22)
+atomic-heal-same-incarnation-b11.pr-poll-registration absent
+atomic-heal-same-incarnation-b11.check.sh absent
+atomic-heal-same-incarnation-b11.pr-poll-closed absent
+.atomic-heal-same-incarnation-b11.pr-poll-closed.ABC123 absent
+
+Target | tests/fm-pr-check-security.test.sh | test_teardown_retires_registered_custom_check
+Exit status 0
+ok - task teardown revokes the PR registration and retires the authenticated custom check
+teardown task-a complete (window firstmate:fm-task-a, worktree <fixture>/tmp/fm-pr-check-security.rKfwn0/teardown-custom-check/missing-worktree)
+Backlog: task-a just finished (this home keeps no markdown backlog at <fixture>/tmp/fm-pr-check-security.rKfwn0/teardown-custom-check/home/data/backlog.md). Update <fixture>/tmp/fm-pr-check-security.rKfwn0/teardown-custom-check/home/data/backlog.md - move task-a to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+check: <fixture>/tmp/fm-pr-check-security.rKfwn0/teardown-custom-check/home/state/z-stop.check.sh: stop-cycle
+Forge calls after teardown 0

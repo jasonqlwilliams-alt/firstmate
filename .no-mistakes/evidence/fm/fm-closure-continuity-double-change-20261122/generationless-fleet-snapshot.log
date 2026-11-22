@@ -1,0 +1,73 @@
+Legacy task re-arms the same PR mid-read, then the forge reopens it
+
+Executed the checked-in end-to-end fixture selectors against Firstmate CLI scripts.
+
+Isolated Firstmate homes and synthetic forge inputs. External integrations were fixture-controlled.
+
+Target 106ae2becac397040b263d8e31cd999c53a3fbe4
+
+Base ccd19a2ffe3ce5ddfc9505de98d2fa48037483bb (counterfactual where shown)
+
+Target | tests/fm-fleet-snapshot-view.test.sh | test_cancelled_run_with_registered_green_pr_is_not_terminal_in_flight
+Exit status 0
+Before closure {"valid":true,"invalidity":{"kind":null,"ids":[]}}
+After watcher checkpoint, raw snapshot result {"valid":false,"invalidity":{"kind":"terminal_in_flight","ids":["cancelled"]}}
+Recorded URL https://github.com/kunchenguid/firstmate/pull/46
+After CLOSED -> OPEN on the same URL {"valid":false,"invalidity":{"kind":"terminal_in_flight","ids":["cancelled"]}}
+Closure ledger https://github.com/kunchenguid/firstmate/pull/46
+Forge state queries, first CLOSED then OPEN
+pr view https://github.com/kunchenguid/firstmate/pull/46 --repo kunchenguid/firstmate --json state -q .state
+pr view https://github.com/kunchenguid/firstmate/pull/46 --repo kunchenguid/firstmate --json state -q .state
+Forge calls during snapshot 0
+After registering a different PR {"valid":true,"invalidity":{"kind":null,"ids":[]}}
+After returning to the closed PR {"valid":false,"invalidity":{"kind":"terminal_in_flight","ids":["cancelled"]}}
+ok - a cancelled validation with a recorded green PR awaiting merge is not terminal in flight
+
+Base | tests/fm-fleet-snapshot-view.test.sh | test_cancelled_run_with_registered_green_pr_is_not_terminal_in_flight
+Exit status 1
+Before closure {"valid":true,"invalidity":{"kind":null,"ids":[]}}
+After watcher checkpoint, raw snapshot result {"valid":true,"invalidity":{"kind":null,"ids":[]}}
+Closure ledger absent
+not ok - a polled closed-unmerged PR must end the exemption: {
+  "schema": "fm-secondmate-home-summary.v1",
+  "hold_classifier_schema": "fm-captain-hold-buckets.v1",
+  "generated": "2026-11-22T17:17:15Z",
+  "generated_epoch": 1795367835,
+  "home": "<fixture>/tmp/fm-fleet-snapshot.Gl8gJ0/cancelled-open-pr",
+  "valid": true,
+  "reason": null,
+  "invalidity": {
+    "kind": null,
+    "ids": []
+  },
+  "state": "no_active_work",
+  "active_children": [],
+  "decisions_open": [],
+  "holds": [],
+  "queued": [],
+  "landed": [],
+  "endpoints": [
+    {
+      "id": "cancelled",
+      "state": "failed",
+      "source": "run-step",
+      "endpoint": {
+        "target": "firstmate:fm-cancelled",
+        "exists": true,
+        "agent_alive": "not_checked",
+        "status": "unknown",
+        "observed_at": "2026-11-22T17:17:15Z",
+        "freshness": "fresh"
+      }
+    }
+  ],
+  "counts": {
+    "active_children": 0,
+    "decisions_open": 0,
+    "holds": 0,
+    "queued": 0,
+    "landed": 0,
+    "endpoints": 1
+  },
+  "omitted": []
+}

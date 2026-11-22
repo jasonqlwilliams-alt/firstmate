@@ -1,0 +1,58 @@
+Exact PR closure across live worker relaunch and replacement registration
+
+Executed the checked-in end-to-end fixture selectors against Firstmate CLI scripts.
+
+Isolated Firstmate homes and synthetic forge inputs. External integrations were fixture-controlled.
+
+Target 106ae2becac397040b263d8e31cd999c53a3fbe4
+
+Base ccd19a2ffe3ce5ddfc9505de98d2fa48037483bb (counterfactual where shown)
+
+Target | tests/fm-control-relaunch.test.sh | test_relaunch_and_pr_replacement_during_closure
+Exit status 0
+Fixture fresh, relaunch CLI output
+warning: <fixture>/tmp/fm-control-relaunch.W0tyMh/closure-race-fresh-879/home/data/rl-close/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched rl-close harness=claude from=claude model=default effort=default backend=tmux endpoint=fmses:fm-rl-close worktree=<fixture>/tmp/fm-control-relaunch.W0tyMh/closure-race-fresh-879/wt
+Forge state query pr view https://github.com/example/repo/pull/20 --repo example/repo --json state -q .state
+Current PR https://github.com/example/repo/pull/21
+Current worker generation s1795367814.904.27791
+Watcher output check: <fixture>/tmp/fm-control-relaunch.W0tyMh/closure-race-fresh-879/home/state/z-cycle-end.check.sh: poll-cycle-end
+Recorded closure https://github.com/example/repo/pull/20
+ok - a closure survives relaunch and PR replacement during the forge read (fresh ID)
+
+Target | tests/fm-control-relaunch.test.sh | test_relaunch_and_pr_replacement_during_closure reused
+Exit status 0
+Fixture reused, relaunch CLI output
+warning: <fixture>/tmp/fm-control-relaunch.8Y8IKm/closure-race-reused-29987/home/data/rl-close/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched rl-close harness=claude from=claude model=default effort=default backend=tmux endpoint=fmses:fm-rl-close worktree=<fixture>/tmp/fm-control-relaunch.8Y8IKm/closure-race-reused-29987/wt
+Forge state query pr view https://github.com/example/repo/pull/20 --repo example/repo --json state -q .state
+Current PR https://github.com/example/repo/pull/21
+Current worker generation s1795367816.2079.18662
+Watcher output check: <fixture>/tmp/fm-control-relaunch.8Y8IKm/closure-race-reused-29987/home/state/z-cycle-end.check.sh: poll-cycle-end
+Recorded closure https://github.com/example/repo/pull/20
+ok - a closure survives relaunch and PR replacement during the forge read (reused ID)
+
+Base | tests/fm-control-relaunch.test.sh | test_relaunch_and_pr_replacement_during_closure
+Exit status 1
+Fixture fresh, relaunch CLI output
+warning: <fixture>/tmp/fm-control-relaunch.r4J3EX/closure-race-fresh-27251/home/data/rl-close/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched rl-close harness=claude from=claude model=default effort=default backend=tmux endpoint=fmses:fm-rl-close worktree=<fixture>/tmp/fm-control-relaunch.r4J3EX/closure-race-fresh-27251/wt
+Forge state query pr view https://github.com/example/repo/pull/20 --repo example/repo --json state -q .state
+Current PR https://github.com/example/repo/pull/21
+Current worker generation s1795367829.923.22969
+Watcher output check: <fixture>/tmp/fm-control-relaunch.r4J3EX/closure-race-fresh-27251/home/state/z-cycle-end.check.sh: poll-cycle-end
+Closure ledger absent
+not ok - relaunch and PR replacement lost the only observed closure for the original PR
+
+Target | tests/fm-pr-check-security.test.sh | test_polled_closures_preserve_other_pr_evidence
+Exit status 0
+ok - local closure evidence preserves exact PRs and the existing merge marker
+Closure ledger after multiple observations
+https://github.com/o/r/pull/20
+https://gitlab.example/group/subgroup/project/-/merge_requests/20
+Existing merge receipt
+fm-pr-poll-merge-notified-v1
+github
+github.com
+o/r
+19

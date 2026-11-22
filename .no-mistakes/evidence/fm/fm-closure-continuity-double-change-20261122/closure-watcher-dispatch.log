@@ -1,0 +1,55 @@
+PR closure guardrails and sibling check dispatch
+
+Executed the checked-in end-to-end fixture selectors against Firstmate CLI scripts.
+
+Isolated Firstmate homes and synthetic forge inputs. External integrations were fixture-controlled.
+
+Target 106ae2becac397040b263d8e31cd999c53a3fbe4
+
+Base ccd19a2ffe3ce5ddfc9505de98d2fa48037483bb (counterfactual where shown)
+
+Target | tests/fm-pr-check-security.test.sh | test_busy_closure_publication_keeps_normal_cadence
+Exit status 0
+ok - publication contention drops the result and preserves the normal poll cadence
+check: <fixture>/tmp/fm-pr-check-security.KYxyYX/closure-contention/home/state/z-stop.check.sh: stop-cycle
+[2026-11-22T09:17:02-0800] PR closure for task-a skipped because its metadata lock is busy
+Forge state query pr view https://github.com/o/r/pull/28 --repo o/r --json state -q .state
+Poll cadence marker present (empty timestamp file)
+
+Target | tests/fm-pr-check-security.test.sh | test_abandoned_metadata_lock_does_not_skip_the_poll
+Exit status 0
+ok - an abandoned metadata lock is left alone until closure publication
+Forge state query pr view https://github.com/o/r/pull/27 --repo o/r --json state -q .state
+Recorded closure https://github.com/o/r/pull/27
+check: <fixture>/tmp/fm-pr-check-security.wsZgsl/abandoned-closure-lock/home/state/z-stop.check.sh: stop-cycle
+
+Target | tests/fm-pr-check-security.test.sh | test_closure_stage_failure_skips_the_forge_read
+Exit status 0
+ok - a failed closure stage skips its forge read and leaves the poll armed
+check: <fixture>/tmp/fm-pr-check-security.DKVCBB/failed-closure-stage/home/state/z-stop.check.sh: stop-cycle
+[2026-11-22T09:17:04-0800] PR poll for task-a skipped because its closure stage could not be prepared
+Forge calls 0
+
+Target | tests/fm-pr-check-security.test.sh | test_closure_write_failure_does_not_stop_sibling_checks
+Exit status 0
+ok - closure write failures are logged while sibling checks continue
+check: <fixture>/tmp/fm-pr-check-security.l7nmcC/failed-pr-closure/home/state/z-stop.check.sh: stop-cycle
+[2026-11-22T09:17:04-0800] PR closure for task-a could not be recorded (rc=1)
+
+Target | tests/fm-pr-check-security.test.sh | test_concurrent_custom_replacement_is_authenticated
+Exit status 0
+ok - the watcher authenticates a custom check registered during PR poll preparation
+check: <fixture>/tmp/fm-pr-check-security.HRdCDH/concurrent-custom-replacement/home/state/task-a.check.sh: registered-replacement
+Forge calls 0
+
+Target | tests/fm-pr-check-security.test.sh | test_registered_custom_check_survives_pr_closure_setup_failure
+Exit status 0
+Fixture busy-lock, watcher output check: <fixture>/tmp/fm-pr-check-security.rGSAYw/custom-check-busy-lock/home/state/task-a.check.sh: registered-custom
+Fixture failed-stage, watcher output check: <fixture>/tmp/fm-pr-check-security.rGSAYw/custom-check-failed-stage/home/state/task-a.check.sh: registered-custom
+ok - registered custom checks run despite leftover PR registration and an unavailable closure stage
+
+Target | tests/fm-pr-check-security.test.sh | test_merged_poll_retires_once
+Exit status 0
+ok - validated merged polls notify once even with a busy metadata lock
+First watcher checkpoint check: <fixture>/tmp/fm-pr-check-security.e7PTbh/merged-retirement-once/home/state/task-a.check.sh: merged
+Second watcher checkpoint check: <fixture>/tmp/fm-pr-check-security.e7PTbh/merged-retirement-once/home/state/z-stop.check.sh: stop-cycle
