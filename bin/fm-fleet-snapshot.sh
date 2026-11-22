@@ -102,15 +102,15 @@
 #     a PR, it must match that URL; absent metadata PR does not erase current
 #     run attribution. No-checks, another PR, or a later pending run cannot
 #     inherit an older green verdict through that run-step check.
-#     An attributed cancellation or a live retry with evidence of that
-#     cancellation is excluded from terminal_in_flight when the cancellation
-#     matches the registered PR head, the latest done event reports checks green
-#     for that PR, and the PR has no matching local merge notification or
-#     merge-poll retirement receipt. A newer terminal result can supersede the
-#     cancellation evidence. The exemption affects summary validity only. It
-#     preserves the observed endpoint state and uses local records alone, so a
-#     PR closed without merging can still qualify. Regression coverage lives in
-#     tests/fm-fleet-snapshot-view.test.sh.
+#     A failed in-flight child is not a terminal contradiction when its current
+#     run-step detail is exactly "run cancelled" or
+#     "run cancelled · status-log superseded (run failed)" and four local
+#     records all hold: task metadata records a PR, that exact PR has neither a
+#     merge-notified marker nor a retirement receipt, and the task's latest
+#     done status event is "PR <that url> checks green". The check compares no
+#     heads. A PR closed without a merge record can still qualify, and a retry
+#     or a PR registered during this capture waits for the next snapshot.
+#     Regression coverage lives in tests/fm-fleet-snapshot-view.test.sh.
 #     Other terminal in-flight children remain contradictions unless the task
 #     has both a hold reason and hold kind. Held children stay visible but do
 #     not invalidate the home for terminal, unowned, or unknown child state.
@@ -329,28 +329,22 @@ last_nonempty_line() {  # <file>
 
 # A local crew-state read is bounded so one slow child cannot extend this
 # snapshot without limit. Remote secondmate endpoint liveness is never read here.
-# A local read that hits the bound before emitting its state folds to unknown.
+# A local read that hits the bound folds to state unknown.
 crew_state_json() {  # <id> [<captured-meta>] [<captured-status>]
-  local id=$1 captured_meta=${2:-} captured_status=${3:-} output raw evidence rest state source detail sep
-  local summary_evidence=0
-  [ "$OUTPUT_MODE" != secondmate-home-summary ] || summary_evidence=1
-  output=$(
+  local id=$1 captured_meta=${2:-} captured_status=${3:-} raw rest state source detail sep
+  raw=$(
     fm_run_timed "$FM_SNAPSHOT_CREW_STATE_TIMEOUT" \
       env FM_ROOT_OVERRIDE="$FM_ROOT" \
       FM_HOME="$FM_HOME" \
       FM_STATE_OVERRIDE="$STATE" \
       FM_CREW_STATE_META_OVERRIDE="$captured_meta" \
       FM_CREW_STATE_STATUS_OVERRIDE="$captured_status" \
-      FM_CREW_STATE_SUMMARY_EVIDENCE="$summary_evidence" \
       FM_DATA_OVERRIDE="$DATA" \
       FM_PROJECTS_OVERRIDE="$PROJECTS" \
       FM_CONFIG_OVERRIDE="$CONFIG" \
       "$SCRIPT_DIR/fm-crew-state.sh" "$id" 2>/dev/null || true
   )
-  {
-    IFS= read -r raw
-    IFS= read -r evidence
-  } <<< "$output"
+  raw=$(printf '%s\n' "$raw" | head -1)
   sep=' · '
   state=unknown
   source=none
@@ -367,9 +361,7 @@ crew_state_json() {  # <id> [<captured-meta>] [<captured-status>]
       ;;
   esac
   jq -n --arg raw "$raw" --arg state "$state" --arg source "$source" --arg detail "$detail" \
-    --arg evidence "$evidence" \
-    '{state:$state,source:$source,detail:$detail,raw:$raw}
-      + (if $evidence == "matching-cancellation" then {matching_cancellation:true} else {} end)'
+    '{state:$state,source:$source,detail:$detail,raw:$raw}'
 }
 
 status_event_json() {  # <observed-status-log> [<contract-path>]
@@ -773,7 +765,7 @@ task_json_one() {  # <captured-meta>
   local remote_host remote_root current_file endpoint_file observation_line
   local pr pr_source event_json current_json endpoint_exists agent_alive meta_json status_json report_json worktree_json home_json
   local last_event_raw current_state current_source current_detail pending_decision blocked_event report_present=0 pr_from_status
-  local matching_cancellation cancellation_candidate=false cancelled_pr_awaiting_merge=false
+  local cancelled_pr_awaiting_merge=false
   local open_decisions_tsv open_decisions_json
 
   id=${meta##*/}; id=${id%.meta}
@@ -817,17 +809,18 @@ task_json_one() {  # <captured-meta>
   }
   event_json=$(status_event_json "$status_log" "$STATE/$id.status")
   last_event_raw=$(printf '%s' "$event_json" | jq -r '.last_event.raw // ""')
-  IFS=$'\t' read -r current_state current_source matching_cancellation current_detail < <(
-    printf '%s' "$current_json" | jq -r '[.state, .source, (.matching_cancellation // false), .detail] | @tsv'
+  IFS=$'\t' read -r current_state current_source current_detail < <(
+    printf '%s' "$current_json" | jq -r '[.state // "", .source // "", .detail // ""] | @tsv'
   )
-  if [ "$OUTPUT_MODE" = secondmate-home-summary ]; then
-    case "$current_state:$current_source:$current_detail" in
-      'failed:run-step:run cancelled'|'failed:run-step:run cancelled · status-log superseded (run failed)'|done:status-log:*' · run still monitoring PR')
-        cancellation_candidate=true
-        if [ "$pr_source" = meta ] && [ "$matching_cancellation" = true ] \
-          && snapshot_pr_awaiting_merge "$id" "$pr" "$status_log"; then
+  if [ "$OUTPUT_MODE" = secondmate-home-summary ] \
+    && [ "$current_state" = failed ] && [ "$current_source" = run-step ] \
+    && [ "$pr_source" = meta ]; then
+    case "$current_detail" in
+      'run cancelled'|'run cancelled · status-log superseded (run failed)')
+        if snapshot_pr_awaiting_merge "$id" "$pr" "$status_log"; then
           cancelled_pr_awaiting_merge=true
-        fi ;;
+        fi
+        ;;
     esac
   fi
 
@@ -917,7 +910,6 @@ task_json_one() {  # <captured-meta>
     --argjson pending_decision "$(bool_json "$pending_decision")" \
     --argjson blocked_event "$(bool_json "$blocked_event")" \
     --argjson report_present "$(bool_json "$report_present")" \
-    --argjson cancellation_candidate "$cancellation_candidate" \
     --argjson cancelled_pr_awaiting_merge "$cancelled_pr_awaiting_merge" \
     '{
       id:$id,
@@ -937,7 +929,7 @@ task_json_one() {  # <captured-meta>
         report:$report
       },
       secondmate_projects:($projects | if . == "" then [] else split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(. != "")) end),
-      current_state:($current_state | del(.matching_cancellation) + {observed_at:$observed_at,freshness:"fresh"}),
+      current_state:($current_state + {observed_at:$observed_at,freshness:"fresh"}),
       endpoint:{target:($target | if . == "" then null else . end),exists:$endpoint_exists,agent_alive:$agent_alive,
         status:(if $endpoint_exists == false then "absent"
                 elif $agent_alive == "alive" or $agent_alive == "dead" then $agent_alive
@@ -961,8 +953,7 @@ task_json_one() {  # <captured-meta>
            steer:"bin/fm-send.sh fm-\($id) \u0027<instruction>\u0027",
            return_channel_note:null}
         end)
-    } + (if $cancellation_candidate then {cancellation_candidate:true} else {} end)
-      + (if $cancelled_pr_awaiting_merge then {cancelled_pr_awaiting_merge:true} else {} end)'
+    } + (if $cancelled_pr_awaiting_merge then {cancelled_pr_awaiting_merge:true} else {} end)'
 }
 
 # Independent row composition uses the same cap as the preceding observations.
@@ -2125,56 +2116,18 @@ scout_report_lines() {
     | jq -s 'sort_by(.id)'
 }
 
-snapshot_pr_registration() {  # <meta>
-  local line pr='' head=''
-  # Read both fields from the same atomic publication of the metadata.
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in
-      pr=*) pr=${line#pr=} ;;
-      pr_head=*) head=${line#pr_head=} ;;
-    esac
-  done 2>/dev/null < "$1" || true
-  printf '%s\n%s\n' "$pr" "$head"
-}
-
-snapshot_pr_registration_change() {
-  local candidates id
-  candidates=$(printf '%s\n' "$BACKLOG_JSON" "$TASKS_JSON" "$PENDING_TEARDOWNS_JSON" | jq -rs '
-    . as [$backlog, $tasks, $pending]
-    | ([$backlog.records[]?
-         | select(.structured and .state == "in_flight" and .current_role != "held")
-         | .id] - $pending) as $in_flight
-    | $tasks[] | select(.cancellation_candidate and .kind != "secondmate")
-    | .id as $id | select($in_flight | index($id)) | $id') || return 1
-  while IFS= read -r id; do
-    [ -n "$id" ] || continue
-    if [ "$(snapshot_pr_registration "$SNAPSHOT_TASK_DIR/$id.meta")" != \
-         "$(snapshot_pr_registration "$STATE/$id.meta")" ]; then
-      printf 'PR registration changed\n'
-      break
-    fi
-  done <<< "$candidates"
-}
-
-# Teardown removes metadata before closing its backlog row. A PR can also be
-# registered while cancellation, status log, and merge evidence are read.
-# Resample when a change could affect the inventory verdict.
+# Teardown removes metadata before closing its backlog row. If the backlog
+# changes across the observations, resample rather than compare different
+# lifecycle moments. Continuous churn remains an explicit unavailable snapshot.
 for SNAPSHOT_ATTEMPT in 1 2 3; do
   BACKLOG_JSON=$(backlog_json) || { echo "fm-fleet-snapshot: backlog read failed" >&2; exit 1; }
   prefetch_task_current_states || { echo "fm-fleet-snapshot: task observation failed" >&2; exit 1; }
   TASKS_JSON=$(task_json_lines) || { echo "fm-fleet-snapshot: task snapshot failed" >&2; exit 1; }
   PENDING_TEARDOWNS_JSON=$(snapshot_pending_teardowns_json) || { echo "fm-fleet-snapshot: teardown observation failed" >&2; exit 1; }
   BACKLOG_AFTER_JSON=$(backlog_json) || { echo "fm-fleet-snapshot: backlog read failed" >&2; exit 1; }
-  SNAPSHOT_CHANGE=
-  if [ "$BACKLOG_JSON" != "$BACKLOG_AFTER_JSON" ]; then
-    SNAPSHOT_CHANGE='backlog changed'
-  elif [ "$OUTPUT_MODE" = secondmate-home-summary ]; then
-    SNAPSHOT_CHANGE=$(snapshot_pr_registration_change) \
-      || { echo "fm-fleet-snapshot: PR registration observation failed" >&2; exit 1; }
-  fi
-  [ -n "$SNAPSHOT_CHANGE" ] || break
+  [ "$BACKLOG_JSON" != "$BACKLOG_AFTER_JSON" ] || break
   if [ "$SNAPSHOT_ATTEMPT" = 3 ]; then
-    printf 'fm-fleet-snapshot: %s during task observations; snapshot unavailable\n' "$SNAPSHOT_CHANGE" >&2
+    echo "fm-fleet-snapshot: backlog changed during task observations; snapshot unavailable" >&2
     exit 1
   fi
 done
