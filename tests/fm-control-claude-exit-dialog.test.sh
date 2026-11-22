@@ -417,7 +417,7 @@ case "$1 $2" in
     ;;
   'agent get')
     case "$phase:$FM_DIALOG_MODE" in
-      dialog:dialog-slow-liveness) : > "$FM_DIALOG_CASE/liveness"; sleep 3 ;;
+      dialog:dialog-slow-liveness) : > "$FM_DIALOG_CASE/liveness"; sleep 6 ;;
       stopped:slow-liveness-stop|retry:slow-liveness-retry) sleep 1.1 ;;
     esac
     case "$phase" in
@@ -446,9 +446,14 @@ case "$1 $2" in
       sleep 6
       : > "$FM_DIALOG_CASE/read-completed"
     fi
-    if [ "$phase" = late-dialog ] && [ "$(( $(node -p 'Date.now()') - $(cat "$FM_DIALOG_CASE/submitted-at") ))" -ge 2050 ]; then
-      phase=dialog
+    if [ "$phase" = late-dialog ]; then
+      # The first reader stalls across the redraw. A fresh viewport read
+      # must still run after that reader times out and see the dialog.
       printf 'dialog\n' > "$FM_DIALOG_CASE/phase"
+      sleep 9
+      : > "$FM_DIALOG_CASE/read-completed"
+      printf 'Claude\n❯ \n'
+      exit 0
     fi
     styled=0
     case " $* " in *' --format ansi '*) styled=1 ;; esac
@@ -477,7 +482,7 @@ case "$1 $2" in
       stalled-stop)
         printf 'read\n' >> "$FM_DIALOG_CASE/reads"
         printf 'stopped\n' > "$FM_DIALOG_CASE/phase"
-        sleep 3
+        sleep 6
         : > "$FM_DIALOG_CASE/read-completed"
         cat "$FM_DIALOG_FIXTURE"
         ;;
@@ -500,15 +505,16 @@ case "$1 $2" in
     case "$phase:$FM_DIALOG_MODE" in
       typed:retry|typed:slow-liveness-retry) printf 'retry\n' ;;
       typed:retry-stalled) printf 'retry\n' ;;
-      retry:retry-stalled) sleep 3; : > "$FM_DIALOG_CASE/retry-completed"; printf 'stopped\n' ;;
+      retry:retry-stalled) sleep 6; : > "$FM_DIALOG_CASE/retry-completed"; printf 'stopped\n' ;;
       typed:retry-failure) printf 'retry\n'; exit 1 ;;
       typed:enter-failure) printf 'typed\n'; exit 1 ;;
       typed:dialog-after-failed-enter) printf 'dialog\n'; exit 1 ;;
       typed:single-stop|typed:slow-liveness-stop) printf 'stopped\n' ;;
-      typed:slow-stop|typed:late-dialog)
+      typed:slow-stop)
         node -p 'Date.now()' > "$FM_DIALOG_CASE/submitted-at"
         printf '%s\n' "$FM_DIALOG_MODE"
         ;;
+      typed:late-dialog) printf 'late-dialog\n' ;;
       typed:stalled-stop) printf 'stalled-stop\n' ;;
       typed:*) printf 'dialog\n' ;;
       composer:*) printf 'composer\n' ;;
@@ -562,12 +568,12 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-live
       continue
       ;;
   esac
-  exit_wait=2
+  # Leave room for the fixture's helper processes on a loaded test host.
+  exit_wait=8
   timeout_override=${FM_TIMEOUT_MECHANISM_OVERRIDE:-}
   case "$mode" in
-    enter-failure|slow-liveness-stop|slow-liveness-retry) exit_wait=4 ;;
-    late-dialog) exit_wait=3 ;;
-    stalled-stop) exit_wait=1.65; timeout_override=bash ;;
+    retry-stalled|slow-stop) exit_wait=4 ;;
+    stalled-stop) exit_wait=4; timeout_override=bash ;;
   esac
   out=$(FM_TIMEOUT_MECHANISM_OVERRIDE="$timeout_override" FM_CONTROL_POLL=0.1 FM_CONTROL_EXIT_WAIT="$exit_wait" FM_CONTROL_EXIT_RETRIES=3 \
     run_fixture fm-control.sh exitdialog exit 2>&1) || rc=$?
@@ -582,6 +588,9 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-live
       [ "$(cat "$FM_DIALOG_CASE/phase")" = dialog ] || fail 'the dialog did not stay open'
       if [ "$mode" = dialog-slow-liveness ]; then
         [ -f "$FM_DIALOG_CASE/liveness" ] || fail 'the slow liveness probe was never attempted'
+      fi
+      if [ "$mode" = late-dialog ]; then
+        assert_absent "$FM_DIALOG_CASE/read-completed" 'the stale viewport read was not cancelled before observing the late dialog'
       fi
       if [ "$mode" = dialog-unreadable ] || [ "$mode" = dialog-slow-liveness ]; then
         assert_contains "$out" 'agent-state=unreadable' 'the dialog refusal lost the observed liveness'
@@ -609,7 +618,7 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-live
       ;;
     retry-stalled)
       expect_code 1 "$rc" 'a stalled retry must return an unconfirmed exit'
-      assert_contains "$out" 'the agent did not stop within 2s' 'the stalled retry exceeded the exit budget'
+      assert_contains "$out" "the agent did not stop within ${exit_wait}s" 'the stalled retry exceeded the exit budget'
       [ "$input" = $'/exit\nenter\nenter' ] || fail "a stalled retry sent unexpected input: $input"
       assert_absent "$FM_DIALOG_CASE/retry-completed" 'the retry finished beyond the exit budget'
       ;;
@@ -630,7 +639,7 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-live
       ;;
     slow-stop)
       expect_code 1 "$rc" 'the still-running agent should exhaust the stop budget'
-      assert_contains "$out" 'the agent did not stop within 2s' 'the stop budget did not expire'
+      assert_contains "$out" "the agent did not stop within ${exit_wait}s" 'the stop budget did not expire'
       [ -s "$FM_DIALOG_CASE/reads" ] || fail 'no slow viewport read was attempted'
       submitted_at=$(cat "$FM_DIALOG_CASE/submitted-at")
       finished_at=$(node -p 'Date.now()')

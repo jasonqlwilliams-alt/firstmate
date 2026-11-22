@@ -239,6 +239,7 @@ On the remote host itself `fm-remote-secondmate-control.sh relaunch` runs the or
 When invoked from the parent side — either through `fm-secondmate-restart.sh` (which passes `FM_STATE_OVERRIDE` so `cmd_relaunch_parent` can find the parent's endpoint records) or directly as `fm-remote-secondmate-control.sh relaunch <id> <harness> <model> <effort>` against a parent-side record — the command drives the relaunch over `fm-on.sh` and, on success, writes the resolved runtime profile back into the parent's `state/<id>.meta`.
 Recovery therefore never relaunches onto a stale harness, model, or effort that the parent recorded before the remote relaunch happened.
 A failed relaunch leaves the parent record untouched.
+See the [Claude exit-dialog contract](agent-control.md#claude-background-tasks-exit-confirmation) for the second-mate restart's manual recovery outcome.
 
 The primary passes `<harness> <model|default|-> <effort|default|->` explicitly, using `default` when an axis has no parent pin, because `config/secondmate-harness` is not inherited into a second mate's home and the file on that host belongs to a different home; letting the far side re-resolve it would silently move the mate onto another runtime.
 SSH exit 255 leaves completion unknown and the route preserved, exactly as every other verb here.

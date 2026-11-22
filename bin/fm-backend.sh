@@ -989,8 +989,8 @@ fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
 # Codex authentication screen (a stop-only verdict), or exit-confirm for an
 # explicitly recorded Claude pane showing the background-tasks exit
 # confirmation (fm_composer_claude_exit_confirm_screen in bin/fm-composer-lib.sh;
-# also stop-only: no caller sends it any key). An unreadable capture is
-# unknown, and a Claude read that exceeds its deadline returns timeout.
+# a stop-only verdict). An unreadable capture is unknown, and a read that
+# exceeds an explicitly supplied deadline returns timeout.
 # <expected-pending> is the exact text the caller just typed: on a
 # plain (styled=0) capture, where a glyph row with trailing text reads unknown,
 # a composer holding exactly that text reads pending, and on a cursorless
@@ -999,8 +999,8 @@ fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
 # into the snapshot's capability facts as harness=<name>, so the classifier
 # can apply that harness's own placeholder rule (bin/fm-composer-lib.sh
 # "ROVO PLACEHOLDER CHIP").
-# Callers: the steering-inbox doorbell (bin/fm-task-inbox-lib.sh), and Codex
-# and Claude exit (bin/fm-control.sh).
+# Callers include the steering-inbox doorbell, Codex and Claude exit, and
+# the second-mate restart's local and remote screen observations.
 fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [remaining-ms]
   local limit_ms=${6:-} screen rc
   if [ -z "$limit_ms" ]; then

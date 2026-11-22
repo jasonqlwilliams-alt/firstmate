@@ -28,10 +28,9 @@ _FM_SECONDMATE_RESTART_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/fm-control-lib.sh disable=SC1091
 . "$_FM_SECONDMATE_RESTART_LIB_DIR/fm-control-lib.sh"
 
-# The persist request the primary sends before it restarts anything. It is the
-# open-record half of /stow and nothing more: a restart needs the state of work
-# written down, not a memory curation pass, and bundling one would make every
-# instruction update cost far more than the reload it is paying for.
+# The persist request uses only the open-record part of /stow. Bundling a
+# memory curation pass would make every instruction update cost far more than
+# the reload it is paying for.
 # The mate answers through its parent channel, which is what resolves the
 # parent-owned reply expectation fm-send arms for a marked request; that
 # correlated answer, never the wall clock, is what releases the restart.

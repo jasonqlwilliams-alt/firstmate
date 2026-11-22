@@ -541,6 +541,15 @@ case "${rargs[1]:-}" in
         /bin/sleep 2
         : > "$FM_FAKE_DIR/remote-relaunch-end"
         ;;
+      overlap-relaunch)
+        : > "$FM_FAKE_DIR/remote-relaunch-start"
+        deadline=$((SECONDS + 15))
+        until [ -e "$FM_FAKE_DIR/local-relaunch-during-remote" ]; do
+          [ "$SECONDS" -lt "$deadline" ] || exit 1
+          /bin/sleep 0.05
+        done
+        : > "$FM_FAKE_DIR/remote-relaunch-end"
+        ;;
     esac
     printf 'relaunched %s harness=%s from=claude model=%s effort=%s backend=herdr endpoint=fm-remote:2ndmate-%s worktree=/srv/%s\n' \
       "${rargs[2]}" "${rargs[3]}" "${rargs[4]}" "${rargs[5]}" "${rargs[2]}" "${rargs[2]}"
@@ -823,7 +832,7 @@ test_lost_lifecycle_enter_cannot_complete_restart() {
 test_relaunches_do_not_block_persist_polling() {
   local dir out rc
   dir=$(new_case relaunch-polling)
-  setup_remote_case "$dir" sm1 slow-relaunch
+  setup_remote_case "$dir" sm1 overlap-relaunch
   add_local_mate "$dir" sm2
   printf -- '- sm2 - local domain (home: %s; scope: things; projects: p; added 2026-09-03)\n' \
     "$dir/sm2-home" >> "$dir/home/data/secondmates.md"

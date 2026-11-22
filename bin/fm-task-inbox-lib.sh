@@ -282,6 +282,7 @@ fm_task_inbox_doorbell_line() {  # <record-path>
 #   - Every harness: the update picker gets no keystroke and no Enter, at
 #     either read, and a composer proven to hold pending text gets nothing
 #     typed, because our Enter could submit someone's half-typed content.
+#   - For Claude's exit confirmation, see docs/agent-control.md.
 #   - A pane recorded as harness=codex or harness=rovo additionally needs a
 #     proven-empty composer before typing and a composer proven to hold the
 #     doorbell before its Enter, rechecked briefly while the typed line
@@ -331,9 +332,7 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label] [har
   # shell only a suffix; the `: ` prefix protects complete lines only. Do not
   # add process-bound atomic delivery here unless an incident reopens this.
   fm_backend_send_literal "$backend" "$target" "$line" "$label" >/dev/null 2>&1 || return 2
-  # Reread before the Enter: the picker appearing meanwhile stops the attempt
-  # on every harness, and a Codex or Rovo pane waits briefly for its composer
-  # to show the typed doorbell.
+  # Reread before Enter in case the screen changed during the literal send.
   while :; do
     sleep 0.3
     screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" "$line" "$harness" 2>/dev/null) \

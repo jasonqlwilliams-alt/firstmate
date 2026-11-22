@@ -43,10 +43,10 @@ The Claude Code 2.1.330 capture is in `../../../../../tests/fixtures/claude-exit
 - Choices `1. Exit and stop tasks`, `2. Move to background and exit`, and `3. Stay`, with the selection marker `❯` on choice 1
 - Optional final footer `Enter to confirm · Esc to cancel`
 
-Firstmate never sends a key to this dialog: Enter would stop the tasks without anyone deciding to, and the key plane cannot move the selection.
-`../../../../../bin/fm-composer-lib.sh` (`fm_composer_claude_exit_confirm_screen`) owns the recognition, and `../../../../../docs/agent-control.md` owns the response.
-The guard refuses input when the exact three choices with the marker on choice 1 form the final block on screen, including when the heading or task rows wrap or are offscreen.
-Each choice must fit on one terminal row for the guard to recognize the dialog.
+At the default selection, Enter stops the tasks.
+[`fm_composer_claude_exit_confirm_screen`](../../../../../bin/fm-composer-lib.sh) recognizes the exact three adjacent choice rows shown above, with the marker on choice 1, at the end of the visible text after allowing for the optional footer.
+Each choice must fit on one terminal row, and the heading and task rows can wrap, be clipped, or be absent.
+[Agent lifecycle control](../../../../../docs/agent-control.md#claude-background-tasks-exit-confirmation) owns the restart, exit, and steering response.
 
 ## Composer ghost
 

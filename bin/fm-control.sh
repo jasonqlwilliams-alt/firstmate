@@ -559,15 +559,10 @@ codex_signin_exit() {
   printf 'stopped-sign-in'
 }
 
-# Claude exit owns its literal/Enter sequence so no key ever reaches Claude's
-# background-tasks exit confirmation (exit-confirm from the shared guarded
-# read, fm_backend_guarded_composer_state in bin/fm-backend.sh). That dialog
-# appears instead of an exit when the session still runs background shell
-# tasks; its preselected first choice would stop them, so firstmate never
-# answers it. Exit refuses before typing, before every Enter, and while it
-# waits, reporting the exit unconfirmed at once rather than after the wait.
-# A submit Enter is retried only while the composer still proves it holds the
-# exit command, because a slash command can swallow the first Enter.
+# Claude has its own submit sequence because the generic retry loop does not
+# act on the shared reader's exit-confirm verdict. A slash command can swallow
+# the first Enter, so retries require a fresh pending verdict for /exit.
+# See docs/agent-control.md for the Claude exit and recovery contract.
 claude_exit_screen_state() {  # [expected-pending] [remaining-ms]
   fm_backend_guarded_composer_state "$BACKEND" "$T" "$LABEL" "${1:-}" claude "${2:-}"
 }

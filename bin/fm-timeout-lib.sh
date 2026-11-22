@@ -14,6 +14,8 @@
 #       Runs the command with a hard bound. Exit status is the command's own,
 #       except 124, which means the bound was hit (GNU timeout's convention,
 #       reproduced by the perl and bash fallbacks).
+#       --kill uses KILL at the deadline when a timed-out operation cannot
+#       safely continue during the normal TERM grace period.
 #
 # A non-positive bound is not a bound: `timeout 0` and the perl fallback's
 # `alarm 0` both disable the deadline, so callers must reject 0 before calling.
@@ -22,9 +24,9 @@
 # child, so a hung grandchild (a vendor CLI spawned by a wrapper script, a git
 # fetch spawned by a sweep) cannot outlive the bound. GNU/BSD `timeout` does
 # this by default because it does not run the command in the foreground process
-# group; the perl fallback does it explicitly with setpgrp plus a negative pid,
-# and the bash fallback uses monitor mode to give the bounded child its own
-# process group before signaling its negative pid.
+# group. The Perl fallback sets up the group with setpgid before arming the
+# alarm and signals it via a negative pid. The Bash fallback uses monitor
+# mode to give the bounded child its own group before signaling it.
 set -u
 
 fm_timeout_mechanism() {
