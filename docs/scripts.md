@@ -5,6 +5,11 @@ Each row is one purpose clause only: the script's own header comment is the auth
 If you have changed away from the firstmate home in an interactive shell, invoke these scripts by absolute path through the repo's `bin/` directory; the scripts self-locate internally after they start.
 The shared no-mistakes gate refusal for fleet lifecycle entrypoints is summarized in [architecture.md](architecture.md#no-mistakes-gate-authority-boundary), while `docs/sessionstart-nudge.md` covers the silent session-open hook use; `fm-gate-refuse-lib.sh`'s header owns its exact contract.
 
+New ship and scout briefs and the correlated secondmate report helper use the [guarded status writer](../bin/fm-status-append.sh), which rejects an explicit key with a reserved prefix and names that prefix in the error.
+Secondmate charter appends, Rovo's native file tool, and saved briefs with the older append command write directly to the status file.
+When the classifier folds a reserved-key `needs-decision` as ordinary status, the drain warns with the task, key, and bounded question text, even if the wake queue is empty.
+Ask the worker to reissue the question with an unreserved key so it can enter `OPEN DECISIONS`.
+
 | Script                   | Purpose                                                                              |
 | ------------------------ | ------------------------------------------------------------------------------------ |
 | `fm-session-start.sh`    | Compose lock, bootstrap, and wake drain into the single ordered session-start digest |
@@ -83,6 +88,7 @@ The shared no-mistakes gate refusal for fleet lifecycle entrypoints is summarize
 | `fm-task-inbox-lib.sh`   | Single owner of durable steering-inbox records, acknowledgement, doorbells, and the delivery-attempt ladder |
 | `fm-pending-reply-lib.sh` | Parent-owned secondmate pending-reply expectations, recovery, and keyed escalation lifecycle |
 | `fm-secondmate-report.sh` | Optional helper that resolves the parent channel itself and appends a correlated status or document-pointer report |
+| `fm-status-append.sh`    | Append one worker status line and refuse a key whose prefix `fm-classify-lib.sh` reserves |
 | `fm-extension.mjs`       | Bind, inspect, verify, and strictly invoke trusted external process-event adapter packages |
 | `fm-extension-launch-barrier.mjs` | Publish one exact static core-owned invocation group before package code runs |
 | `fm-extension.sh`        | Expose extension binding commands through the tracked shell and remote-home command boundary |

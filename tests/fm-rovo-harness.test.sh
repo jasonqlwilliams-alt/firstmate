@@ -39,7 +39,8 @@ fake_screen() {
       printf 'Context: | 0.0%% 0/922K\n╭────────────────────────────────╮\n│ > Read the brief and follow it │\n│                                │\n╰────────────────────────────────╯\n'
       ;;
     delivered)
-      printf 'Read the brief at %s and follow it exactly.\nContext: | 3.3%% 30.1K/922K\n╭────────────────────────────────╮\n│ >                              │\n╰────────────────────────────────╯\n' "$FM_FAKE_BRIEF_REAL"
+      tail -1 "$FM_FAKE_POINTER_LOG"
+      printf 'Context: | 3.3%% 30.1K/922K\n╭────────────────────────────────╮\n│ >                              │\n╰────────────────────────────────╯\n'
       ;;
     *)
       printf 'shell starting\n$ \n'
@@ -171,7 +172,6 @@ run_spawn() {
     FM_FAKE_POINTER_LOG="$case_dir/pointer.log" \
     FM_FAKE_ROVO_STATE="$case_dir/rovo.state" \
     FM_FAKE_TMUX_CALL_LOG="$case_dir/tmux-calls.log" \
-    FM_FAKE_BRIEF_REAL="$(cd "$home/data/$id" && pwd -P)/launch-brief.md" \
     FM_FAKE_ROVO_READY="${FM_FAKE_ROVO_READY:-yes}" \
     FM_FAKE_ROVO_DELIVERY="${FM_FAKE_ROVO_DELIVERY:-yes}" \
     FM_ROVO_READY_POLLS=3 FM_ROVO_DELIVERY_POLLS=3 FM_ROVO_POLL_INTERVAL=0 \
@@ -179,12 +179,40 @@ run_spawn() {
     "$SPAWN" "$id" "$proj" --harness rovo --mode no-mistakes --yolo off "$@" 2>&1
 }
 
+rovo_launch_config() {
+  local launch=$1 argv="$CASE_DIR/rovo.argv" arg config=
+  cat > "$FAKEBIN_DIR/rovo" <<'SH'
+#!/bin/sh
+printf '%s\0' "$@" > "$FM_FAKE_ROVO_ARGV"
+SH
+  chmod +x "$FAKEBIN_DIR/rovo"
+  (cd "$WT_DIR" && env -i HOME="$HOME_DIR" PATH="$FAKEBIN_DIR:$BASE_PATH" FM_FAKE_ROVO_ARGV="$argv" bash -c "$launch") \
+    || fail "could not execute the captured Rovo launch"
+  [ -s "$argv" ] || fail "the Rovo binary did not receive launch arguments"
+  while IFS= read -r -d '' arg; do
+    [ "$arg" = --config-override ] || continue
+    [ -z "$config" ] || fail "Rovo received more than one config override"
+    IFS= read -r -d '' config && [ -n "$config" ] || fail "Rovo received a config override without a value"
+  done < "$argv"
+  [ -n "$config" ] || fail "Rovo received no config override"
+  printf '%s\n' "$config"
+}
+
+assert_rovo_launch_grant() {
+  local config=$1 id=$2 brief state
+  brief=$(cd "$HOME_DIR/data/$id" && pwd -P) || fail "missing Rovo brief directory"
+  state=$(cd "$HOME_DIR/state" && pwd -P) || fail "missing Rovo state directory"
+  jq -es --arg brief "$brief" --arg inbox "$state/$id.inbox" --arg status "$state/$id.status" \
+    'length == 1 and ((.[0].toolPermissions.allowedExternalPaths | sort) == ([$brief, $inbox, $status] | sort))' \
+    <<< "$config" >/dev/null || fail "Rovo's external path grant must cover exactly its brief directory, inbox directory, and status file"
+}
+
 test_rovo_launch_then_send_is_verified() {
-  local id rec out rc launch pointer brief_real meta data_real state_real
+  local id rec out rc launch pointer brief_real meta state_real config
   id="rovo-success-z1-$$"
   rec=$(make_spawn_case success "$id")
   read_spawn_record "$rec"
-  out=$(run_spawn \
+  out=$(FM_CLASSIFY_RESERVED_KEY_PREFIXES='worker-internal- pending-reply-' run_spawn \
     "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" \
     --model auto --effort high)
   rc=$?
@@ -205,9 +233,16 @@ test_rovo_launch_then_send_is_verified() {
   assert_not_contains "$launch" "turn-ended" "rovo launch embedded a turn-end path it does not own"
 
   brief_real="$(cd "$HOME_DIR/data/$id" && pwd -P)/launch-brief.md"
+  state_real=$(cd "$HOME_DIR/state" && pwd -P)
   pointer=$(cat "$CASE_DIR/pointer.log")
-  [ "$pointer" = "Read the brief at $brief_real and follow it exactly." ] \
-    || fail "rovo pointer was not the exact absolute-path-only instruction: $pointer"
+  assert_contains "$pointer" "Read the brief at $brief_real" "rovo did not receive the launch brief path"
+  assert_contains "$pointer" "use your native file tool to append one line to $state_real/$id.status" \
+    "rovo did not receive the native append instruction for its granted status file"
+  assert_contains "$pointer" "Follow the brief's status format and key rules" \
+    "the native append instruction did not preserve the brief's status format and key rules"
+  # shellcheck disable=SC2016 # Match literal Markdown backticks.
+  assert_contains "$pointer" 'avoid these reserved key prefixes (whitespace-separated): `worker-internal- pending-reply-`' \
+    "the native append instruction did not give Rovo the configured prefix list"
 
   meta="$HOME_DIR/state/$id.meta"
   assert_grep 'model=auto' "$meta" "rovo meta lost the requested model"
@@ -215,61 +250,43 @@ test_rovo_launch_then_send_is_verified() {
   assert_not_contains "$(cat "$CASE_DIR/tmux-calls.log")" "kill-window" \
     "a successful rovo spawn must never tear down the endpoint it just delivered into"
 
-  # rovo confines every file-tool operation to its worktree by default
-  # (confirmed live), so the launch must grant allowedExternalPaths covering
-  # this task's brief directory, steering inbox, and status file - otherwise
-  # the standard instructions/steering/status/report loop cannot work.
-  data_real=$(cd "$HOME_DIR/data/$id" && pwd -P)
-  state_real=$(cd "$HOME_DIR/state" && pwd -P)
-  assert_contains "$launch" "allowedExternalPaths" \
-    "rovo launch did not grant allowedExternalPaths for this task's home paths"
-  assert_contains "$launch" "$data_real" \
-    "rovo launch's allowedExternalPaths grant omitted the brief directory"
-  assert_contains "$launch" "$state_real/$id.inbox" \
-    "rovo launch's allowedExternalPaths grant omitted the steering inbox directory"
-  assert_contains "$launch" "$state_real/$id.status" \
-    "rovo launch's allowedExternalPaths grant omitted the status file"
+  config=$(rovo_launch_config "$launch") || fail "could not capture the Rovo config override"
+  assert_rovo_launch_grant "$config" "$id"
   pass "fm-spawn: rovo launches bare, waits for readiness, and delivers its brief pointer"
 }
 
 test_rovo_effort_xhigh_is_recorded_but_omitted() {
-  local id rec out rc launch meta
+  local id rec out rc config meta
   id="rovo-xhigh-z2-$$"
   rec=$(make_spawn_case xhigh "$id")
   read_spawn_record "$rec"
-  out=$(run_spawn "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" --effort xhigh)
+  out=$(FM_CLASSIFY_RESERVED_KEY_PREFIXES='' run_spawn "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" --effort xhigh)
   rc=$?
   expect_code 0 "$rc" "rovo spawn with an unsupported effort should still succeed"
-  launch=$(cat "$CASE_DIR/launch.log")
-  assert_not_contains "$launch" "efficiencyLevel" "rovo launch set agent.efficiencyLevel for an unsupported effort value"
-  # --config-override still carries the mandatory allowedExternalPaths grant
-  # even when the requested effort is unsupported and omitted: the two ride
-  # one merged JSON object because rovo's --config-override is single-value
-  # (a second occurrence silently discards the first, confirmed live).
-  assert_contains "$launch" "allowedExternalPaths" "rovo launch dropped its allowedExternalPaths grant when effort was unsupported"
+  config=$(rovo_launch_config "$(cat "$CASE_DIR/launch.log")") || fail "could not capture the Rovo config override"
+  assert_rovo_launch_grant "$config" "$id"
+  jq -e '(.agent // {}) | has("efficiencyLevel") | not' <<< "$config" >/dev/null \
+    || fail "Rovo received an efficiencyLevel for an unsupported effort"
+  # shellcheck disable=SC2016 # Match literal Markdown backticks.
+  assert_contains "$(cat "$CASE_DIR/pointer.log")" 'avoid these reserved key prefixes (whitespace-separated): `pending-reply-`' \
+    "the native append instruction did not give Rovo the default prefix"
   meta="$HOME_DIR/state/$id.meta"
   assert_grep 'effort=xhigh' "$meta" "rovo meta did not retain the unsupported effort axis"
   pass "fm-spawn: rovo omits efficiencyLevel for xhigh but keeps its allowedExternalPaths grant, recording xhigh in task metadata"
 }
 
 test_rovo_effort_high_sets_config_override() {
-  local id rec out rc launch override_count
+  local id rec out rc config
   id="rovo-effort-z6-$$"
   rec=$(make_spawn_case effort-high "$id")
   read_spawn_record "$rec"
   out=$(run_spawn "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" --effort high)
   rc=$?
   expect_code 0 "$rc" "rovo spawn with a supported effort should succeed"
-  launch=$(cat "$CASE_DIR/launch.log")
-  assert_contains "$launch" 'efficiencyLevel' "rovo launch did not set agent.efficiencyLevel via --config-override"
-  assert_contains "$launch" '"high"' "rovo launch did not carry the requested efficiency level"
-  # Exactly one --config-override: rovo silently discards a second occurrence
-  # (confirmed live), so efficiencyLevel and the allowedExternalPaths grant
-  # must ride the same merged JSON object rather than two flags.
-  override_count=$(printf '%s' "$launch" | grep -o -- '--config-override' | wc -l | tr -d ' ')
-  [ "$override_count" = 1 ] \
-    || fail "rovo launch emitted $override_count --config-override occurrences; a second one would silently discard the first"
-  assert_contains "$launch" 'allowedExternalPaths' "rovo launch's single --config-override dropped the allowedExternalPaths grant when merging in efficiencyLevel"
+  config=$(rovo_launch_config "$(cat "$CASE_DIR/launch.log")") || fail "could not capture the Rovo config override"
+  assert_rovo_launch_grant "$config" "$id"
+  jq -e '.agent.efficiencyLevel == "high"' <<< "$config" >/dev/null \
+    || fail "Rovo did not receive the requested efficiency level in the same override as the grant"
   pass "fm-spawn: rovo's supported effort values merge into the same --config-override as its allowedExternalPaths grant"
 }
 

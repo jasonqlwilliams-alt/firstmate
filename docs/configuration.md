@@ -495,7 +495,7 @@ The [Claude adapter reference](../.agents/skills/harness-adapters/references/har
 ## Worker launch environment (config/launch-env-allowlist)
 
 The optional local, gitignored `config/launch-env-allowlist` limits the ambient environment passed to newly launched workers, scouts, and secondmates, including relaunches.
-With no file, launch behavior is unchanged: selected harness markers are cleared, while the provider, long-lived terminal daemon, and shell initialization determine which other variables reach the worker.
+With no file, the provider, long-lived terminal daemon, and shell initialization determine the ambient environment, subject to Firstmate's explicit launch assignments and harness marker clearing.
 Do not assume every worker inherits the invoking Firstmate process's current environment.
 The file is inherited into secondmate homes through the [primary-authoritative configuration contract](../.agents/skills/secondmate-provisioning/SKILL.md).
 Changes apply to subsequent launches; existing processes keep their environment.
@@ -514,6 +514,8 @@ SSH_AUTH_SOCK
 ```
 
 Firstmate retains basic home, executable search, terminal, locale, temporary-directory, and backend routing variables, plus its explicit launch assignments, its ship and scout task marker, and enabled task trace.
+The launcher supplies the effective [reserved status-key prefixes](../bin/fm-classify-lib.sh) independently of this allowlist.
+For a remote secondmate, the launcher uses the policy on the remote host.
 [`fm-spawn.sh --help`](../bin/fm-spawn.sh) owns the exact retained names and parsing mechanics.
 Other ambient names must be listed explicitly, including custom credential-store locations, proxy settings, and certificate overrides when required by the selected tools.
 The command shell and worker may still create their own variables.

@@ -58,6 +58,8 @@
 # declared-external-wait verb (FM_CLASSIFY_PAUSED_VERB, default "paused") from
 # "blocked:": pause for a known external wait expected to clear on its own,
 # blocked when firstmate must act.
+# The guarded status writer in ship and scout briefs refuses a key prefix
+# reserved by the classifier.
 # Every scaffold also carries the steering-inbox receive-and-ack section:
 # process state/<id>.inbox/*.msg in order and acknowledge each by moving it to
 # handled/ (record, doorbell, and ladder owned by bin/fm-task-inbox-lib.sh).
@@ -316,6 +318,9 @@ exit 0
 fi
 
 REPO=${POS[1]}
+STATUS_APPEND_BIN=$(shell_quote "$SCRIPT_DIR/fm-status-append.sh")
+STATUS_PROTOCOL="   \`$STATUS_APPEND_BIN $STATUS_FILE \"{state}: {one short line}\"\`
+   A \`[key=<slug>]\` on that line must not start with a prefix reserved by \`bin/fm-classify-lib.sh\`. The append command names the prefix, refuses the line, and asks you to pick another key."
 
 if [ "$HERDR_LAB" -eq 1 ]; then
 HERDR_LAB_HELPER=$(shell_quote "$FM_ROOT/bin/fm-herdr-lab.sh")
@@ -386,7 +391,7 @@ $LIVE_STATE_SECTION
 2. Stay inside this worktree; the only files you may write outside it are the report and the status file below.
 3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
 4. Report status by appending one line:
-   \`echo "{state}: {one short line}" >> $STATUS_FILE\`
+$STATUS_PROTOCOL
    States: working, needs-decision, blocked, $PAUSED_VERB, done, failed.
    Each append wakes firstmate, so report sparingly: only phase changes a supervisor
    would act on and the needs-decision/blocked/paused/done/failed states. No step-by-step
@@ -478,7 +483,7 @@ $RULE1
 2. Stay inside this worktree; modify nothing outside it.
 3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
 4. Report status by appending one line:
-   \`echo "{state}: {one short line}" >> $STATUS_FILE\`
+$STATUS_PROTOCOL
    States: working, needs-decision, blocked, $PAUSED_VERB, done, failed.
    Each append wakes firstmate, so report sparingly: only phase changes a supervisor
    would act on (setup done, bug reproduced, fix implemented, validation passed) and the

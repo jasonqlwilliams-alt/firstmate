@@ -913,6 +913,50 @@ test_worker_role_scope() {
   pass "fm-brief: scaffolds leave the worker role scope to the launch boundary and keep the secondmate contract"
 }
 
+test_status_protocol_uses_guarded_writer() {
+  local home id brief count status command
+  home="$TMP_ROOT/worker's home"
+  mkdir -p "$home/data" "$home/state"
+  (
+    cd "$ROOT" || exit 1
+    unset FM_HOME
+    export FM_ROOT_OVERRIDE=. FM_DATA_OVERRIDE="$home/data" FM_STATE_OVERRIDE="$home/state"
+    bin/fm-brief.sh ship-key some-proj --mode direct-PR --herdr-lab >/dev/null &&
+      bin/fm-brief.sh scout-key some-proj --scout --herdr-lab >/dev/null
+  ) || fail "could not scaffold with a relative root"
+  # shellcheck disable=SC2016 # Match literal Markdown backticks.
+  assert_grep '`./bin/fm-ensure-agents-md.sh .`' "$home/data/ship-key/brief.md" \
+    "the ship's project-memory instructions did not retain the relative root"
+  for id in ship-key scout-key; do
+    brief="$home/data/$id/brief.md"
+    status="$home/state/$id.status"
+    assert_grep "HERDR_LAB_HELPER='./bin/fm-herdr-lab.sh'" "$brief" \
+      "the $id Herdr instructions did not retain the relative root"
+    # shellcheck disable=SC2016 # Match literal Markdown backticks.
+    command=$(sed -n 's/^   `\(.*\) "{state}: {one short line}"`$/\1/p' "$brief")
+    [ -n "$command" ] || fail "status protocol has no runnable command in $brief"
+    (cd "$home" && FM_CLASSIFY_RESERVED_KEY_PREFIXES='pending-reply- def' bash -c "$command"' "$1"' _ 'done: report delivered') \
+      || fail "the $id status command could not append an ordinary report"
+    if (cd "$home" && bash -c "$command"' "$1"' _ 'needs-decision [key=pending-reply-color]: choose blue or green') 2>"$home/append.err"; then
+      fail "the $id status command accepted a reserved key"
+    fi
+    assert_grep 'reserved prefix' "$home/append.err" "the $id status command refused the report for the wrong reason"
+    cmp -s "$status" <(printf 'done: report delivered\n') \
+      || fail "the $id status log did not contain exactly the ordinary report"
+    assert_grep 'pick another key' "$brief" "status protocol does not tell the worker to pick another key: $brief"
+    assert_grep 'bin/fm-classify-lib.sh' "$brief" "status protocol does not point at the reserved-prefix owner: $brief"
+    assert_no_grep 'pending-reply-' "$brief" "status protocol restated the reserved-prefix list: $brief"
+    count=$(grep -cF 'bin/fm-classify-lib.sh' "$brief")
+    [ "$count" = 1 ] || fail "reserved-prefix owner should be named once in $brief, found $count"
+  done
+  (cd "$home" && FM_HOME="$home" FM_ROOT_OVERRIDE=missing-relative-root \
+    "$ROOT/bin/fm-brief.sh" charter-key --secondmate --no-projects >/dev/null) \
+    || fail "a valid charter home depends on an unrelated root override"
+  [ -s "$home/data/charter-key/brief.md" ] || fail "the charter was not written under its explicit home"
+  pass "fm-brief: ship and scout commands append ordinary status and refuse reserved keys"
+}
+
+test_status_protocol_uses_guarded_writer
 test_worker_role_scope
 test_script_parses
 test_no_heredoc_in_command_substitution

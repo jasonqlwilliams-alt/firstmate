@@ -10,6 +10,7 @@ set -u
 # the fake ancestry the detection cases set up. Drop the ambient markers so the
 # asserted verdict does not depend on which harness launched the suite.
 unset CLAUDECODE PI_CODING_AGENT FM_PI_HARNESS GROK_AGENT CURSOR_AGENT CURSOR_INVOKED_AS
+unset FM_CLASSIFY_RESERVED_KEY_PREFIXES
 
 SPAWN="$ROOT/bin/fm-spawn.sh"
 TEARDOWN="$ROOT/bin/fm-teardown.sh"
@@ -189,6 +190,22 @@ $1
 EOF
 }
 
+assert_kimi_launch() {
+  local launch=$1 binary=$2 actual expected
+  shift 2
+  cat > "$binary" <<'SH'
+#!/bin/sh
+printf '%s\n' "$0" "${FM_CLASSIFY_RESERVED_KEY_PREFIXES-unset}" \
+  "${CURSOR_AGENT-unset}" "${CURSOR_INVOKED_AS-unset}" "${GEMINI_CLI-unset}" "$@"
+SH
+  chmod +x "$binary"
+  actual=$(env -i HOME="$CASE_DIR" PATH=/usr/bin:/bin FM_CLASSIFY_RESERVED_KEY_PREFIXES=stale- \
+    CURSOR_AGENT=1 CURSOR_INVOKED_AS=cursor-agent GEMINI_CLI=1 bash -c "$launch") \
+    || fail "captured Kimi launch failed: $launch"
+  expected=$(printf '%s\n' "$binary" pending-reply- unset unset unset "$@")
+  [ "$actual" = "$expected" ] || fail "Kimi launch delivered an unexpected environment or arguments: $actual"
+}
+
 test_kimi_launch_then_send_is_verified() {
   local id rec out rc launch pointer brief_real meta task_tmp
   id="kimi-success-z1-$$"
@@ -205,11 +222,7 @@ test_kimi_launch_then_send_is_verified() {
   assert_contains "$out" "spawned $id harness=kimi" "kimi spawn did not report success"
 
   launch=$(cat "$CASE_DIR/launch.log")
-  [ "$launch" = "env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI '$FAKEBIN_DIR/kimi' --model 'kimi-code/k3' --auto" ] \
-    || fail "kimi launch did not use the absolute binary, model, and --auto only: $launch"
-  assert_not_contains "$launch" "--effort" "kimi launch emitted a nonexistent effort flag"
-  assert_not_contains "$launch" "turn-ended" "kimi launch embedded a turn-end path"
-  assert_not_contains "$launch" "__TURNEND__" "kimi launch retained a turn-end placeholder"
+  assert_kimi_launch "$launch" "$FAKEBIN_DIR/kimi" --model kimi-code/k3 --auto
 
   brief_real="$(cd "$HOME_DIR/data/$id" && pwd -P)/launch-brief.md"
   pointer=$(cat "$CASE_DIR/pointer.log")
@@ -464,8 +477,7 @@ test_kimi_falls_back_to_expanded_home_binary() {
   rc=$?
   expect_code 0 "$rc" "Kimi HOME fallback spawn should succeed"
   launch=$(cat "$CASE_DIR/launch.log")
-  [ "$launch" = "env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI '$fallback' --auto" ] \
-    || fail "Kimi fallback did not expand HOME into an absolute executable: $launch"
+  assert_kimi_launch "$launch" "$fallback" --auto
   pass "fm-spawn: Kimi fallback expands the active HOME"
 }
 

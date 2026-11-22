@@ -31,7 +31,7 @@ Rovo CLI: 202609.1.2
 The brief is then typed in after the TUI comes up, the same launch-then-send shape kimi uses, through the same shared readers (`fm_backend_capture`, `fm_backend_composer_state`, `fm_backend_send_text_submit`):
 
 1. `rovo_wait_for_ready` polls for the `Welcome to Rovo!` banner (primary) or a composer-empty verdict (weaker fallback, because this spawn read lacks the Rovo harness fact described below).
-2. The pointer `Read the brief at <absolute-path> and follow it exactly.` is submitted via `fm_backend_send_text_submit`.
+2. See the [Rovo adapter reference](../../.agents/skills/harness-adapters/references/harness/rovo.md#launch-and-readiness) for the current typed launch instructions.
 3. `rovo_wait_for_delivery` confirms composer-empty AND either the echoed `Read the brief at` text or a nonzero `Context:` percentage (`context:[^%]*[1-9][^%]*%`, tolerant of the footer's bar glyph but anchored before the `%` so the `.../922K` denominator cannot false-positive).
 
 Each gate fails the spawn loudly (a `failed:` line in the task status file) if it never resolves, so a never-ready or silently-dropped delivery is a visible spawn failure rather than a half-wired pane.
@@ -51,7 +51,10 @@ so it can only gate a bare (no-message) launch, and this adapter always delivers
 
 Bare `rovo run --yolo`, driven over a raw PTY, was confirmed to: render the `Welcome to Rovo!` readiness banner; accept the typed pointer and act on it (a brief instructing a real `sleep 25` bash tool call drove the `Rovo is thinking` busy line); accept a mid-tool-call Escape that printed `Agent cancelled` (see the interrupt section); and exit cleanly on `/exit` with the `Run rovo --restore <id> to resume your conversation` hint. `tests/fm-rovo-signals-live-e2e.test.sh` is that end-to-end guard.
 
-`tests/fm-rovo-harness.test.sh` pins the portable half against a stateful fake `tmux` and a fake `rovo` binary (no real network or credentials): the launch command is bare (`run --yolo`, no positional brief, no `--startup-receipt`); the pointer typed after readiness is exactly `Read the brief at <absolute-path> and follow it exactly.`; delivery confirms via the context-percentage or echoed-pointer signal; a never-ready fake screen fails the spawn loudly; a dropped-submit fake screen fails the spawn loudly; and the model/effort flags, marker-clearing, missing-binary refusal before any pane exists, and crew/scout-only secondmate refusal all hold.
+`tests/fm-rovo-harness.test.sh` uses a stateful `tmux` fixture and a fake `rovo` binary.
+It checks the generated launch command for the bare invocation, model flag, and marker-clearing assignments.
+It checks the brief path, status path, native append instruction, and effective reserved prefixes in the message sent after readiness.
+It also covers the delivery signals, readiness and delivery failures, effort settings, missing-binary refusal, and the crew/scout-only restriction.
 
 ## Busy state: the "Rovo is thinking" fallback
 
@@ -158,7 +161,8 @@ $ cat out.txt
 I can't run that command because it modifies a file outside the workspace. If you provide a workspace-relative path, I can run the equivalent command there - would you like to do that?
 ```
 
-This matters because the standard crewmate contract's literal status line is a bash `echo ... >> status_file` command. Given that exact literal instruction, rovo recovered on its own by falling back to its native file tool for the same append, and succeeded, preserving the file's existing content:
+The recorded check below used the earlier bash `echo ... >> status_file` instruction.
+Rovo fell back to its native file tool and preserved the file's existing content.
 
 ```
 $ echo "existing: prior" > "$LAB/outside/status2.txt"
@@ -181,8 +185,10 @@ $ ls "$LAB/outside/inbox/handled"
 ```
 
 `fm-spawn.sh`'s `rovo_config_override_flag` builds one merged JSON object per rovo launch (see "Effort and model" above for why it must be one), always granting `toolPermissions.allowedExternalPaths` for exactly three real (symlink-resolved) paths scoped to this task: the brief directory (`data/<id>/`, covering `brief.md`/`launch-brief.md`/`report.md`), the steering inbox directory (`state/<id>.inbox/`, covering every steer and its `handled/` acknowledgement), and the status file itself (`state/<id>.status`).
-`tests/fm-rovo-signals-live-e2e.test.sh` extends the launch-then-send live guard with exactly this shape end to end: a real rovo process launched with the production `--config-override` grant reads an external brief and appends to an external status file (preserving its prior content), and the same brief and status file, launched WITHOUT the grant, are left untouched while the transcript shows rovo's own refusal - proving the fix closes the gap rather than merely adding an untested flag.
-`tests/fm-rovo-harness.test.sh` pins the portable half against the fake-binary suite: the grant's three paths appear in every rovo launch (including when the requested effort is unsupported and omitted), and exactly one `--config-override` occurrence ever appears.
+`tests/fm-rovo-signals-live-e2e.test.sh` launches real Rovo with a fixture grant covering the external brief directory and status file.
+The live guard checks that Rovo follows the fixture brief and appends to the status file while preserving its existing content.
+The control case omits the grant and checks for Rovo's refusal and an untouched status file.
+`tests/fm-rovo-harness.test.sh` parses the single `--config-override` argument received by a fake Rovo binary and checks that it grants exactly those three paths with or without a supported effort setting.
 
 ## Backend liveness: tmux verified live, herdr placement verified live with a herdr-side agent-detection gap
 

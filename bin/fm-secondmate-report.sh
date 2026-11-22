@@ -2,10 +2,8 @@
 # fm-secondmate-report.sh - optional helper to append a correlated parent report.
 #
 # A secondmate answering a marked from-firstmate request must report on the
-# parent status channel with the request's corr=<id> token. This helper makes
-# that easy, but correctness must not depend on using it: a plain echo of a
-# status line that includes the same corr token is equally valid
-# (bin/fm-pending-reply-lib.sh).
+# parent status channel with the request's corr=<id> token. This helper uses
+# the guarded bin/fm-status-append.sh writer.
 #
 # The write destination is mechanical: this helper never takes a status path.
 # It resolves the parent channel through fm_parent_channel_destination
@@ -92,13 +90,12 @@ token=$(fm_pending_reply_corr_token "$CORR")
 if [ "$DOC_MODE" = 1 ]; then
   DOC_PATH=$1
   shift
-  NOTE=$*
-  if [ -n "$NOTE" ]; then
-    printf '%s [%s]: %s (%s via-helper)\n' "$VERB" "$token" "$NOTE" "$DOC_PATH" >> "$DESTINATION"
+  if [ -n "$*" ]; then
+    report="$* ($DOC_PATH via-helper)"
   else
-    printf '%s [%s]: %s (via-helper)\n' "$VERB" "$token" "$DOC_PATH" >> "$DESTINATION"
+    report="$DOC_PATH (via-helper)"
   fi
 else
-  NOTE=$*
-  printf '%s [%s]: %s (via-helper)\n' "$VERB" "$token" "$NOTE" >> "$DESTINATION"
+  report="$* (via-helper)"
 fi
+exec "$SCRIPT_DIR/fm-status-append.sh" "$DESTINATION" "$VERB [$token]: $report"

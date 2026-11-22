@@ -521,7 +521,7 @@ schema=fm-secondmate-parent.v1
 route=local
 parent_home=$parent
 EOF
-  FM_HOME="$mate" "$REPORT" "done" "$corr" "audit clean" \
+  FM_CLASSIFY_RESERVED_KEY_PREFIXES='pending-reply- def' FM_HOME="$mate" "$REPORT" "done" "$corr" "audit clean" \
     || fail "$REPORT failed writing a correlated report"
   helper_line=$(tail -1 "$state/pinned.status")
   verb=$(status_line_verb "$helper_line")
@@ -530,7 +530,7 @@ EOF
   status_is_terminal_verb "$helper_line" \
     || fail "the helper's own line is not seen as a terminal captain verb"
 
-  FM_HOME="$mate" "$REPORT" --doc needs-decision "$corr" data/x/report.md "see the report" \
+  FM_CLASSIFY_RESERVED_KEY_PREFIXES='pending-reply- def' FM_HOME="$mate" "$REPORT" --doc needs-decision "$corr" data/x/report.md "see the report" \
     || fail "$REPORT failed writing a correlated doc-pointer report"
   helper_line=$(tail -1 "$state/pinned.status")
   verb=$(status_line_verb "$helper_line")
@@ -538,6 +538,24 @@ EOF
     || fail "the classifier did not read through the helper's doc line '$helper_line' (verb=[$verb])"
 
   pass "both real correlation-token writers produce lines this classifier reads through"
+
+  cp "$state/pinned.status" "$dir/before"
+  if FM_HOME="$mate" "$REPORT" 'needs-decision [key=pending-reply-color]' "$corr" 'choose blue' 2>"$dir/error"; then
+    fail "the correlated report helper accepted a reserved key in the verb field"
+  fi
+  grep -F 'reserved prefix' "$dir/error" >/dev/null || fail "the report helper refused for the wrong reason"
+  if FM_HOME="$mate" "$REPORT" --doc needs-decision "$corr" data/x/report.md \
+    '[key=pending-reply-color] read the decision' 2>"$dir/error"; then
+    fail "the correlated document report helper accepted a reserved note-head key"
+  fi
+  grep -F 'reserved prefix' "$dir/error" >/dev/null || fail "the document helper refused for the wrong reason"
+  if FM_HOME="$mate" "$REPORT" --doc "done" "$corr" $'data/x/report.md\nneeds-decision [key=pending-reply-color]: choose blue' \
+    2>"$dir/error"; then
+    fail "the correlated document report helper accepted a multiline path"
+  fi
+  grep -F 'requires one line' "$dir/error" >/dev/null || fail "the document helper refused a multiline path for the wrong reason"
+  cmp -s "$dir/before" "$state/pinned.status" || fail "a refused report changed the parent log"
+  pass "both correlated report forms use the guarded worker writer"
 }
 
 test_tokened_opener_opens_and_tokened_closer_closes

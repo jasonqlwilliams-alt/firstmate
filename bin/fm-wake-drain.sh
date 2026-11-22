@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Present durable watcher wake records, retire rows no actor could ever consume,
 # optionally acknowledge handled records,
-# annotate every unread line for validated signal status keys, surface unread
-# informational status lines, latest captain-facing statuses not covered by a
-# newer branch outcome, OPEN DECISIONS, and captain-call record divergence,
-# then assert liveness.
+# annotate every unread line for validated signal status keys, warn about folded
+# reserved-key needs-decision lines, surface unread informational status lines,
+# latest captain-facing statuses not covered by a newer branch outcome, OPEN
+# DECISIONS, and captain-call record divergence, then assert liveness.
 #
 # Keep sequence-bound row consumption independent from generation-bound episode
 # retirement; docs/watcher-continuity.md owns the recovery contract.
@@ -550,16 +550,32 @@ EOF
   printf 'RECORD DIVERGENCE: reconcile each one - record the captain'"'"'s own words with bin/fm-captain-hold.sh answer <task> --decision-file <path>, or re-open the status decision when that resolution was not the captain'"'"'s word.\n' || return 1
 }
 
+print_folded_reserved_decision_warnings() {
+  local row task key
+  while IFS= read -r row; do
+    task=${row%%$'\t'*}
+    row=${row#*$'\t'}
+    case "$row" in warning$'\t'*) ;; *) continue ;; esac
+    row=${row#*$'\t'}
+    key=${row%%$'\t'*}
+    fm_cap_line_var "${row#*$'\t'}"
+    printf 'warning: task=%s key=%s folded reserved-prefix needs-decision: %s\n' \
+      "$task" "$key" "$FM_LINE_CAP_LINE" || return 1
+  done <<< "$1"
+}
+
 print_status_sections() {
-  local snapshot=${1:-} fully_presented=${2:-} acknowledged prepared unread informational
+  local snapshot=${1:-} fully_presented=${2:-} acknowledged prepared surface unread informational
   if [ -z "$snapshot" ]; then snapshot=$(status_presentation_snapshot "$STATE") || return 1; fi
   [ -n "$snapshot" ] || return 0
-  unread=$(scan_unread_surface_snapshot "$STATE" "$snapshot") || return 1
+  surface=$(scan_unread_surface_snapshot "$STATE" "$snapshot" drain-surface) || return 1
+  unread=$(awk -F '\t' '$2 == "status" { sub(/\tstatus\t/, "\t"); print }' <<< "$surface") || return 1
   informational=$(printf '%s\n' "$unread" | cut -f1) || return 1
   acknowledged=$(status_acknowledge_presented_snapshot "$STATE" "$snapshot" "$fully_presented" "$informational") || return 1
   prepared=$(mktemp "$STATE/.status-presentation.prepared.XXXXXX") || return 1
   if ! {
-    print_unread_status_section "$snapshot" "$unread" \
+    print_folded_reserved_decision_warnings "$surface" \
+      && print_unread_status_section "$snapshot" "$unread" \
       && print_status_outcome_backstop_section "$snapshot" \
       && print_open_decisions_section "$snapshot" \
       && print_record_divergence_section

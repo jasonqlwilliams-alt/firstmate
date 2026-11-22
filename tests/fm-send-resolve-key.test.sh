@@ -719,6 +719,38 @@ test_remote_reserved_pending_reply_key_closes_locally() {
   pass "fm-send --resolve-key: a remote secondmate reserved-key close is the same local ledger append"
 }
 
+test_worker_reserved_needs_decision_is_not_open() {
+  local dir fb log home err rc out
+  dir="$TMP_ROOT/worker-reserved"; mkdir -p "$dir"
+  fb=$(make_stubs "$dir"); log="$dir/send.log"; err="$dir/send.err"
+  home=$(setup_home worker-reserved)
+  fm_write_meta "$home/state/repro.meta" "window=sess:fm-repro" "kind=ship"
+  printf 'needs-decision [key=pending-reply-abc123]: which color should the button be\n' \
+    > "$home/state/repro.status"
+
+  out=$(drain_out "$home")
+  if printf '%s' "$out" | grep -F 'OPEN DECISIONS' >/dev/null; then
+    fail "a worker needs-decision in the reserved namespace was listed: $out"
+  fi
+  printf '%s' "$out" | grep -F 'warning: task=repro key=pending-reply-abc123 folded reserved-prefix needs-decision' >/dev/null \
+    || fail "the folded reserved needs-decision produced no drain warning: $out"
+
+  : > "$log"
+  env PATH="$fb:$PATH" \
+    FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_SEND_LOG="$log" FM_SEND_SETTLE=0 \
+    "$SEND" repro --resolve-key pending-reply-abc123 "use blue" >/dev/null 2>"$err"; rc=$?
+  [ "$rc" -ne 0 ] || fail "resolve-key should refuse a folded reserved needs-decision"
+  assert_contains "$(cat "$err")" "no open decision" "the refusal should say there is no open decision"
+  assert_contains "$(cat "$err")" "nothing was sent" "the refusal should state nothing was sent"
+  [ ! -s "$log" ] || fail "a refused answer still typed text: $(cat "$log")"
+  [ ! -d "$home/state/repro.inbox" ] || fail "a refused answer still enqueued an inbox record"
+  if grep -F 'resolved' "$home/state/repro.status" >/dev/null; then
+    fail "a refused answer still wrote a close: $(cat "$home/state/repro.status")"
+  fi
+  pass "fm-send --resolve-key: a worker reserved-prefix needs-decision is not an open decision"
+}
+
+test_worker_reserved_needs_decision_is_not_open
 test_answer_send_closes_open_decision
 test_answer_close_is_self_announced
 test_colon_first_key_position_is_answerable

@@ -400,14 +400,14 @@ status_line_note() {  # <status-line> -> text after the first colon, trimmed
   fi
   printf '%s' "$n"
 }
-_fm_decision_key() {  # <status-line> -> key slug, or "default" when no token
+_fm_decision_key() {  # <status-line> [<missing-key-value>] -> key slug or missing value (default: "default")
   local k
   if _fm_key_before_colon "$1"; then
     k=${1%%:*}
     k=${k#*\[key=}
     k=${k%%\]*}
   else
-    k=$(_fm_key_at_note_head "$1") || { printf 'default'; return 0; }
+    k=$(_fm_key_at_note_head "$1") || { printf '%s' "${2-default}"; return 0; }
   fi
   _fm_decision_slug_ok "$k" || return 1
   printf '%s' "$k"
@@ -448,26 +448,31 @@ EOF
 # particular owner: a reserved key may only be opened or closed by a line whose
 # note speaks that namespace's own vocabulary, which its owner states by
 # beginning the note with a `<namespace>...:` token. A line failing that is not a
-# decision transition at all here and is folded as ordinary status. This is a
-# consumer-side rule on purpose - it protects local and remote writers
-# identically, and it can never fail a whole delta or wedge a stream the way a
-# writer-side rejection would.
+# decision transition at all here and is folded as ordinary status. The fold
+# protects the shared stream even when a report bypasses the guarded writer,
+# including direct local appends and mirrored remote appends.
 FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT='pending-reply-'
+
+# Print the reserved prefix <key> starts with. Return 1 when <key> is not reserved.
+# FM_CLASSIFY_RESERVED_KEY_PREFIXES is the one list; callers must not copy it.
+fm_classify_reserved_key_prefix() {  # <key>
+  local key=$1 prefix
+  for prefix in ${FM_CLASSIFY_RESERVED_KEY_PREFIXES:-$FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT}; do
+    case "$key" in
+      "$prefix"*) printf '%s' "$prefix"; return 0 ;;
+    esac
+  done
+  return 1
+}
 
 # 0 when <key> is not reserved, or is reserved and <note> speaks its vocabulary.
 _fm_decision_key_transition_allowed() {  # <key> <note>
   local key=$1 note=$2 prefix
-  for prefix in ${FM_CLASSIFY_RESERVED_KEY_PREFIXES:-$FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT}; do
-    case "$key" in
-      "$prefix"*)
-        case "$note" in
-          "$prefix"*:*) return 0 ;;
-          *) return 1 ;;
-        esac
-        ;;
-    esac
-  done
-  return 0
+  prefix=$(fm_classify_reserved_key_prefix "$key") || return 0
+  case "$note" in
+    "$prefix"*:*) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 _fm_is_pending_reply_escalation() {  # <key> <note>
@@ -1505,19 +1510,28 @@ status_open_decisions_cursor_offset() {  # <status-file>
 # presentation offset. The optional unread-surface mode filters through the
 # informational-line classifier before transport, so routine lifetime history
 # never becomes a large command-substitution string for note-only consumers.
-# Default all preserves raw annotation and decision consumers. Does not write
-# the cursor. A missing manifest row or
-# changed status identity reads the current file from offset 0; malformed or
-# unreadable cursor state fails the scan. Symlinks and unreadable status files
-# print nothing.
-status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|unread-surface]
-  local f=$1 captured_end=${2:-} surface=${3:-all} cf offset size actual_size chunk_file filtered_file line rc=0
-  case "$surface" in all|unread-surface) ;; *) return 1 ;; esac
+# Default all preserves raw annotation and decision consumers. Drain-surface
+# derives tagged warnings and informational rows from one read. Before the
+# presentation manifest exists, it scans warnings from byte 0 because a
+# legacy decision-fold cursor does not prove presentation. Does not write the
+# cursor. A missing manifest row or changed status identity reads the current
+# file from offset 0. Malformed or unreadable cursor state fails the scan.
+# Symlinks and unreadable status files print nothing.
+status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|unread-surface|drain-surface]
+  local f=$1 captured_end=${2:-} surface=${3:-all} cf offset start size actual_size chunk_file filtered_file
+  local line rc=0 manifest warnings=0 key question informational
+  case "$surface" in all|unread-surface|drain-surface) ;; *) return 1 ;; esac
   [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || return 0
   cf=$(_fm_open_decisions_cursor_path "$f")
   chunk_file="$cf.unread.$$"
   offset=$(status_presentation_cursor_offset "$f") || return 1
   case "$offset" in ''|*[!0-9]*) return 1 ;; esac
+  start=$offset
+  manifest="${f%/*}/.status-presentation-cursor"
+  if [ "$surface" = drain-surface ]; then
+    warnings=1
+    if [ ! -e "$manifest" ] && [ ! -L "$manifest" ]; then start=0; fi
+  fi
   actual_size=$(_fm_status_file_size "$f") || return 1
   actual_size=${actual_size//[[:space:]]/}
   case "$actual_size" in ''|*[!0-9]*) return 1 ;; esac
@@ -1528,20 +1542,30 @@ status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|
   else
     size=$actual_size
   fi
-  [ "$offset" -lt "$size" ] || return 0
-  _fm_status_read_span "$f" "$offset" "$((size - offset))" > "$chunk_file" 2>/dev/null \
+  [ "$start" -lt "$size" ] || return 0
+  _fm_status_read_span "$f" "$start" "$((size - start))" > "$chunk_file" 2>/dev/null \
     || { rm -f "$chunk_file"; return 1; }
-  if [ "$surface" = unread-surface ]; then
+  if [ "$surface" != all ]; then
     # A cheap superset filter keeps wide routine lines out of Bash entirely.
     # The exact classifier below remains authoritative for every candidate.
     # ENVIRON preserves literal override bytes rather than awk -v escapes.
     filtered_file="$chunk_file.filtered"
     if ! FM_STATUS_SURFACE_RESOLVE="${FM_CLASSIFY_RESOLVE_VERB:-$FM_CLASSIFY_RESOLVE_VERB_DEFAULT}" \
       FM_STATUS_SURFACE_HELD="${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}" \
-      LC_ALL=C awk '
-        { prefix=$0; sub(/:.*/, "", prefix)
-          if (index(prefix, "note") || index(prefix, ENVIRON["FM_STATUS_SURFACE_RESOLVE"]) ||
-              index(prefix, ENVIRON["FM_STATUS_SURFACE_HELD"])) print }
+      LC_ALL=C awk -v warnings="$warnings" -v skip="$((offset - start))" '
+        {
+          if (warnings && $0 ~ /^[^:]*needs-decision/) print "warning\t" $0
+          if (pos + length($0) >= skip) {
+            line = pos < skip ? substr($0, skip - pos + 1) : $0
+            prefix = line; sub(/:.*/, "", prefix)
+            if (index(prefix, "note") || index(prefix, ENVIRON["FM_STATUS_SURFACE_RESOLVE"]) ||
+                index(prefix, ENVIRON["FM_STATUS_SURFACE_HELD"])) {
+              if (warnings) print "status\t" line
+              else print line
+            }
+          }
+          pos += length($0) + 1
+        }
       ' "$chunk_file" > "$filtered_file"; then
       rm -f "$chunk_file" "$filtered_file"
       return 1
@@ -1552,14 +1576,26 @@ status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|
     fi
   fi
   while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in
-      *[![:space:]]*)
-        if [ "$surface" = unread-surface ] && ! status_line_is_unread_surface "$line"; then
-          continue
-        fi
-        printf '%s\n' "$line" || { rc=1; break; }
+    case "$surface:$line" in
+      drain-surface:warning$'\t'*)
+        line=${line#*$'\t'}
+        [ "$(status_line_verb "$line")" = needs-decision ] || continue
+        key=$(_fm_decision_key "$line") || continue
+        question=$(status_line_note "$line")
+        _fm_decision_key_transition_allowed "$key" "$question" && continue
+        printf 'warning\t%s\t%s\n' "$key" "$question" || { rc=1; break; }
+        continue
         ;;
+      drain-surface:status$'\t'*) informational=${line#*$'\t'} ;;
+      unread-surface:*) informational=$line ;;
+      all:*[![:space:]]*)
+        printf '%s\n' "$line" || { rc=1; break; }
+        continue
+        ;;
+      *) continue ;;
     esac
+    status_line_is_unread_surface "$informational" || continue
+    printf '%s\n' "$line" || { rc=1; break; }
   done < "$chunk_file"
   rm -f "$chunk_file"
   return "$rc"
@@ -1615,16 +1651,16 @@ EOF
   return 0
 }
 
-scan_unread_surface_snapshot() {  # <state> <task-and-endpoint-snapshot>
-  local state=$1 snapshot=$2 task endpoint ident f lines line
+scan_unread_surface_snapshot() {  # <state> <task-and-endpoint-snapshot> [unread-surface|drain-surface]
+  local state=$1 snapshot=$2 surface=${3:-unread-surface} task endpoint ident f lines line
+  case "$surface" in unread-surface|drain-surface) ;; *) return 1 ;; esac
   while IFS=$(printf '\t') read -r task endpoint ident; do
     [ -n "$task" ] || continue
     f="$state/$task.status"
-    lines=$(status_new_lines_since_cursor "$f" "$endpoint" unread-surface) || return 1
+    lines=$(status_new_lines_since_cursor "$f" "$endpoint" "$surface") || return 1
     [ -n "$lines" ] || continue
     while IFS= read -r line; do
       [ -n "$line" ] || continue
-      status_line_is_unread_surface "$line" || continue
       printf '%s\t%s\n' "$task" "$line"
     done <<EOF
 $lines

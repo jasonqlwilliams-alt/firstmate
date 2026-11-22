@@ -289,8 +289,8 @@
 #   ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID FM_ZELLIJ_SESSION, plus the task
 #   marker FM_TASK_ID that ship and scout panes receive above.
 #   An enabled task trace also retains TRACEPARENT. Explicit Firstmate launch
-#   assignments still apply inside the filtered environment. Raw commands must
-#   be POSIX sh compatible under this opt-in; the absent-file path is unchanged.
+#   assignments, including FM_CLASSIFY_RESERVED_KEY_PREFIXES, apply with or
+#   without filtering. Raw commands must be POSIX sh compatible under this opt-in.
 #   This is an exec environment boundary, not a sandbox for the pane's startup
 #   shell, credential files, same-user processes, or later shell initialization.
 #   See docs/configuration.md for provider/Git setup and supported limits.
@@ -2552,9 +2552,9 @@ json_escape() {
 # through --config-override since there is no per-session escalation once
 # the process is running. rovo's bash tool is NOT covered by this grant and
 # stays confined to the worktree regardless (confirmed live) - the standard
-# crewmate flow's literal `echo ... >> status file` bash line therefore still
-# fails under rovo, but the worker recovers by falling back to its own file
-# tools for the same append (confirmed live), which the grant below does cover.
+# crewmate flow's `bin/fm-status-append.sh` is outside its bash boundary.
+# The grant covers rovo's native file-tool append, which relies on the drain
+# warning for reserved-key decisions.
 # --config-override itself is single-value (a second occurrence silently
 # discards the first, confirmed live), so this is the ONE place that must
 # also fold in agent.efficiencyLevel when a supported effort was requested.
@@ -4984,6 +4984,9 @@ if [ "$KIND" = secondmate ]; then
   # injected carrier and this on/off snapshot are guaranteed to agree.
   LAUNCH="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_PUBLIC_FOLLOWUP_PRIMARY_HOME=$sq_primary_home FM_HOME=$sq_home FM_TRACE_CONTEXT=$SPAWN_TRACE_EFFECTIVE FM_SUPERVISION_MODEL=$supervision_model $LAUNCH"
 fi
+_fm_wake_require_classify || exit 1
+reserved_key_prefixes=${FM_CLASSIFY_RESERVED_KEY_PREFIXES:-$FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT}
+LAUNCH="export FM_CLASSIFY_RESERVED_KEY_PREFIXES=$(shell_quote "$reserved_key_prefixes"); $LAUNCH"
 if [ -z "$SPAWN_TRACEPARENT" ] && [ "$RELAUNCH" -eq 1 ]; then
   LAUNCH="unset TRACEPARENT; $LAUNCH"
 fi
@@ -5105,7 +5108,7 @@ if [ "$HARNESS" = rovo ]; then
     rovo_spawn_fail "rovo did not show a verified ready signal before brief delivery in window $T"
     exit 1
   fi
-  ROVO_POINTER="Read the brief at $BRIEF_REAL and follow it exactly."
+  ROVO_POINTER="Read the brief at $BRIEF_REAL and carry out its instructions. For each status report, use your native file tool to append one line to $STATE_REAL/$ID.status. Follow the brief's status format and key rules. For any [key=<slug>], avoid these reserved key prefixes (whitespace-separated): \`$reserved_key_prefixes\`"
   ROVO_SUBMIT_RETRIES=${FM_ROVO_SUBMIT_RETRIES:-3}
   ROVO_SUBMIT_SLEEP=${FM_ROVO_SUBMIT_SLEEP:-${FM_ROVO_POLL_INTERVAL:-0.5}}
   ROVO_SUBMIT_SETTLE=${FM_ROVO_SUBMIT_SETTLE:-0}
