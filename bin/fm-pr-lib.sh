@@ -28,6 +28,7 @@
 # Closure evidence lives in a separate private state/<id>.pr-poll-closed file.
 # Each line is one canonical URL observed closed without merging.
 # Re-registering a poll preserves this history. Task teardown removes it.
+# A PR closure can be missed if the task metadata lock is contended and the PR reopens between polls.
 
 FM_PR_PROVIDER=
 FM_PR_URL=
@@ -1056,78 +1057,45 @@ fm_pr_poll_closed_recorded() {
 }
 
 fm_pr_poll_snapshot_prepare() {
-  local state=$1 id=$2 template=$3 lock rc=0
+  local state=$1 id=$2 template=$3 lock
   FM_PR_POLL_CLOSED_STAGE=
   fm_pr_task_id_valid "$id" || return 1
   [ -d "$state" ] && [ ! -L "$state" ] || return 1
   [ -f "$state/$id.pr-poll-registration" ] || return 1
-  lock=$(fm_meta_lock_path "$state/$id.meta") || return 1
-  fm_lock_try_acquire "$lock" || return 4
-  if fm_pr_poll_snapshot_capture "$state" "$id" "$template"; then
-    if ! FM_PR_POLL_CLOSED_STAGE=$(umask 077; mktemp "$state/.$id.pr-poll-closed.XXXXXX") \
-      || ! exec 6> "$FM_PR_POLL_CLOSED_STAGE" \
-      || ! printf '%s\n' "$FM_PR_POLL_SNAPSHOT_URL" >&6; then
-      exec 6>&-
-      [ -z "$FM_PR_POLL_CLOSED_STAGE" ] || rm -f -- "$FM_PR_POLL_CLOSED_STAGE"
-      FM_PR_POLL_CLOSED_STAGE=
-    fi
-  else
-    rc=1
-  fi
-  fm_lock_release "$lock"
-  return "$rc"
-}
-
-fm_pr_poll_closed_observe() {
-  local stage=$FM_PR_POLL_CLOSED_STAGE
-  [ -n "$stage" ] || return 1
-  FM_PR_POLL_CLOSED_STAGE=
-  if ! printf '%s\n' closed-unmerged >&6; then
-    exec 6>&-
-    rm -f -- "$stage"
-    return 1
-  fi
-  exec 6>&-
+  lock=$(fm_meta_lock_path "$state/$id.meta") || return 3
+  FM_PR_POLL_CLOSED_STAGE=$(umask 077; mktemp "$state/.$id.pr-poll-closed.XXXXXX") || return 3
+  [ ! -e "$lock" ] && [ ! -L "$lock" ] || return 3
+  fm_pr_poll_snapshot_capture "$state" "$id" "$template" || return 1
+  [ -f "$FM_PR_POLL_CLOSED_STAGE" ] && [ ! -L "$FM_PR_POLL_CLOSED_STAGE" ] || return 3
 }
 
 fm_pr_poll_record_closed() (
-  local state=$1 id=$2 stage=$3 record device lock url outcome extra tmp=
+  local state=$1 id=$2 stage=$FM_PR_POLL_CLOSED_STAGE url=$FM_PR_POLL_SNAPSHOT_URL
+  local record device lock
+  [ "$id" = "$FM_PR_POLL_SNAPSHOT_ID" ] || return 4
   fm_pr_task_id_valid "$id" || return 4
+  fm_pr_url_parse "$url" || return 1
   [ -d "$state" ] && [ ! -L "$state" ] || return 1
   [[ "$stage" == "$state/.$id.pr-poll-closed."?????? ]] || return 4
   [ -f "$stage" ] && [ ! -L "$stage" ] || return 4
   lock=$(fm_meta_lock_path "$state/$id.meta") || return 1
-  fm_lock_try_acquire "$lock" || return 4
-  trap '[ -z "$tmp" ] || rm -f -- "$tmp"; fm_lock_release "$lock"' EXIT
+  fm_lock_try_acquire "$lock" || return 3
+  trap 'fm_lock_release "$lock"' EXIT
   record="$state/$id.pr-poll-closed"
   device=$(fm_pr_file_device "$state") || return 1
   fm_pr_private_file_valid "$stage" 600 "$device" || return 4
-  {
-    IFS= read -r url && IFS= read -r outcome && [ "$outcome" = closed-unmerged ] \
-      && ! IFS= read -r extra && [ -z "$extra" ]
-  } < "$stage" || return 4
-  fm_pr_url_parse "$url" || return 4
-  if ! { [ -f "$state/$id.meta" ] \
-    && fm_pr_regular_destination_on_device_or_absent "$state/$id.meta" "$device"; }; then
-    rm -f -- "$stage" || return 1
-    return 4
-  fi
-  if fm_pr_poll_closed_recorded "$state" "$id" "$url"; then
-    rm -f -- "$stage"
-    return
-  fi
+  [ -f "$state/$id.meta" ] \
+    && fm_pr_regular_destination_on_device_or_absent "$state/$id.meta" "$device" || return 4
+  fm_pr_poll_closed_recorded "$state" "$id" "$url" && return 0
 
-  tmp=$(umask 077; mktemp "$state/.$id.pr-poll-closed.XXXXXX") || return 1
-  exec 8> "$tmp" || return 1
+  exec 8> "$stage" || return 1
   if [ -e "$record" ] || [ -L "$record" ]; then
     fm_pr_private_file_valid "$record" 600 "$device" || return 1
     cat -- "$record" >&8 || return 1
   fi
   printf '%s\n' "$url" >&8 || return 1
   fm_pr_regular_destination_on_device_or_absent "$record" "$device" || return 1
-  mv -f -- "$tmp" "$record" || return 1
-  tmp=
-  rm -f -- "$stage"
+  mv -f -- "$stage" "$record"
 )
 
 fm_pr_poll_closed_cleanup_valid() {

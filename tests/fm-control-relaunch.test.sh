@@ -522,7 +522,7 @@ SH
 
 test_relaunch_and_pr_replacement_during_closure() {
   local dir state setup=${1:-fresh} id=rl-close url=https://github.com/example/repo/pull/20
-  local replacement=https://github.com/example/repo/pull/21 out rc watcher retire i=0
+  local replacement=https://github.com/example/repo/pull/21 out rc watcher retire checksum= i=0
   dir=$(new_case "closure-race-$setup" "$id")
   state="$dir/home/state"
 
@@ -564,16 +564,17 @@ if [ "${1:-}" = -f ] && [ "${2:-}" = "$FM_HOME/state/rl-close.check.sh" ]; then
 fi
 exec "$TEST_REAL_RM" "$@"
 SH
-    cat > "$dir/pollbin/shasum" <<'SH'
+    checksum=$(command -v shasum) || checksum=$(command -v sha256sum) || fail "no supported SHA-256 tool"
+    cat > "$dir/pollbin/${checksum##*/}" <<'SH'
 #!/usr/bin/env bash
 if [ "${TEST_WATCH_CAPTURE:-0}" = 1 ] && [ "${*: -1}" = "$FM_HOME/state/rl-close.pr-poll" ] \
   && [ ! -e "$FM_HOME/replacement-armed" ]; then
   touch "$FM_HOME/capture-started"
   while [ ! -e "$FM_HOME/replacement-armed" ]; do sleep 0.05; done
 fi
-exec "$TEST_REAL_SHASUM" "$@"
+exec "$TEST_REAL_CHECKSUM" "$@"
 SH
-    chmod +x "$dir/retirebin/rm" "$dir/pollbin/shasum"
+    chmod +x "$dir/retirebin/rm" "$dir/pollbin/${checksum##*/}"
     env FM_HOME="$dir/home" FM_TEARDOWN_GUARD_DONE=1 TEST_REAL_RM="$(command -v rm)" \
       PATH="$dir/retirebin:$PATH" "$ROOT/bin/fm-teardown.sh" "$id" --force > "$dir/teardown.log" 2>&1 &
     retire=$!
@@ -605,7 +606,7 @@ SH
   touch "$state/home-summary.json"
 
   env FM_HOME="$dir/home" PATH="$dir/pollbin:/usr/bin:/bin:/usr/sbin:/sbin" \
-    TEST_WATCH_CAPTURE=1 TEST_REAL_SHASUM="$(command -v shasum)" FM_POLL=0.1 FM_CHECK_INTERVAL=300 FM_CHECK_TIMEOUT=30 \
+    TEST_WATCH_CAPTURE=1 TEST_REAL_CHECKSUM="$checksum" FM_POLL=0.1 FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=30 \
     "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 40 > "$dir/watch.log" 2>&1 &
   watcher=$!
   if [ "$setup" = reused ]; then
@@ -619,7 +620,7 @@ SH
     [ ! -e "$state/$id.meta" ] && [ ! -e "$state/$id.check.sh" ] \
       || fail "the retired task still owned the ID or its poll"
     mv "$dir/replacement.meta" "$state/$id.meta"
-    env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" TEST_REAL_SHASUM="$(command -v shasum)" \
+    env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" TEST_REAL_CHECKSUM="$checksum" \
       PATH="$dir/pollbin:$PATH" "$ROOT/bin/fm-pr-check.sh" "$id" "$url" > "$dir/register.log" 2>&1 \
       || fail "could not arm the reused ID's poll: $(cat "$dir/register.log")"
     touch "$dir/home/replacement-armed"
@@ -636,7 +637,7 @@ SH
   [ -n "$(meta_field "$dir" "$id" spawn_gen)" ] \
     && [ "$(meta_field "$dir" "$id" spawn_gen)" != s-original ] \
     || fail "the relaunch did not change the worker generation"
-  env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" TEST_REAL_SHASUM="$(command -v shasum)" PATH="$dir/pollbin:$PATH" \
+  env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" TEST_REAL_CHECKSUM="$checksum" PATH="$dir/pollbin:$PATH" \
     "$ROOT/bin/fm-pr-check.sh" "$id" "$replacement" > "$dir/register.log" 2>&1 \
     || fail "could not arm the replacement PR: $(cat "$dir/register.log")"
   touch "$dir/home/forge-release"
