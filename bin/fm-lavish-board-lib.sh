@@ -38,10 +38,10 @@ lavish_session_listed_open() {  # <canonical-board-path>
 }
 
 # Establish the board session and PROVE it is live before anything arms a poll
-# on it. The caller passes --reopen only when the user asked for the board
-# again or something urgent needs them. Without that flag this helper never
-# calls lavish-axi --reopen. A plain attach reporting user-ended exits 0 without
-# arming. Other non-open outcomes fail the build.
+# on it. The retry requires both --reopen and user-ended from the initial
+# attach. A missing open listing cannot identify why the session is unavailable.
+# A plain build whose attach reports user-ended exits 0 without arming. Other
+# non-open outcomes fail the build.
 establish_board_session() {  # <board> [--reopen]
   local board=$1 real out status version
   BOARD_SESSION_REOPENED=0
