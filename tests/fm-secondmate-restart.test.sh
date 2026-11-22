@@ -113,7 +113,14 @@ case "${1:-}" in
       prev=$a
     done
     printf 'fakepane\n'; exit 0 ;;
-  capture-pane) printf '> \n'; exit 0 ;;
+  capture-pane)
+    if [ -n "${FM_FAKE_LOCAL_EXIT_DIALOG:-}" ] && mkdir "$D/delayed-dialog" 2>/dev/null; then
+      /bin/sleep 8
+      cat "$FM_FAKE_LOCAL_EXIT_DIALOG"
+    else
+      printf '> \n'
+    fi
+    exit 0 ;;
   list-windows)
     [ -f "$D/windows" ] || exit 0
     case "${*: -1}" in
@@ -459,8 +466,8 @@ test_refused_restart_falls_back_without_claiming_a_reload() {
 # host-local command and the profile the PARENT resolved, not a local shortcut.
 # The far side also models the live mate: it answers the persist request that
 # crossed the same hop, on the parent channel, with that request's own token.
-setup_remote_case() {  # <case-dir> <id> <ssh-mode>
-  local dir=$1 id=$2 mode=$3
+setup_remote_case() {  # <case-dir> <id> <ssh-mode> [harness]
+  local dir=$1 id=$2 mode=$3 harness=${4:-claude}
   local fb="$dir/fakebin"
   mkdir -p "$dir/$id-home"
   {
@@ -468,7 +475,7 @@ setup_remote_case() {  # <case-dir> <id> <ssh-mode>
     echo "endpoint_task_id=$id"
     echo "worktree=$dir/$id-home"
     echo "project=$dir/$id-home"
-    echo "harness=claude"
+    echo "harness=$harness"
     echo "kind=secondmate"
     echo "mode=secondmate"
     echo "yolo=off"
@@ -519,9 +526,13 @@ case "${rargs[1]:-}" in
         printf 'error: remote host-local relaunch failed\n' >&2
         exit 1
         ;;
-      dialog-refusal)
+      dialog-refusal|exit-timeout)
+        reason='the agent did not stop within 30s'
+        if [ "$FM_FAKE_SSH_MODE" = dialog-refusal ]; then
+          reason='Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it'
+        fi
         printf '%s\n' 'warning: ignoring an invalid configured effort token' \
-          "error: exit-delivered ${rargs[2]} interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation" >&2
+          "error: exit-delivered ${rargs[2]} interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; $reason" >&2
         exit 1
         ;;
       slow-relaunch)
@@ -592,6 +603,19 @@ test_remote_exit_dialog_refusal_takes_priority_over_warning() {
   pass "a remote restart reports the exit dialog refusal after a warning"
 }
 
+test_remote_exit_timeout_keeps_first_diagnostic() {
+  local dir out rc
+  dir=$(new_case exit-timeout)
+  setup_remote_case "$dir" sm2 exit-timeout opencode
+
+  out=$(FM_FAKE_ANSWER_STATUS="$dir/home/state/sm2.status" run_restart "$dir" sm2); rc=$?
+
+  expect_code 3 "$rc" "an ordinary exit timeout should leave the mate unreached: $out"
+  assert_contains "$out" 'unreached: sm2: the restart outcome is unknown: warning: ignoring an invalid configured effort token' \
+    "a generic exit timeout must preserve the first diagnostic"
+  pass "a remote restart preserves diagnostic order for an ordinary exit timeout"
+}
+
 # --- T7: an unreachable host is unknown, never a claimed reload --------------
 test_unreachable_host_is_reported_unknown() {
   local dir out rc
@@ -630,6 +654,22 @@ test_slow_exit_dialog_observation_does_not_block_restart() {
   assert_contains "$out" 'restarted: sm2 (claude)' \
     "the later mate must still restart after confirming its save request"
   pass "a slow remote dialog observation does not suppress save requests or nudges"
+}
+
+test_slow_local_exit_dialog_observation_does_not_block_restart() {
+  local dir out rc
+  dir=$(new_case slow-local-exit-dialog)
+  add_local_mate "$dir" sm1
+  arm_answer "$dir" sm1
+
+  out=$(FM_FAKE_LOCAL_EXIT_DIALOG="$ROOT/tests/fixtures/claude-exit/background-tasks.screen" \
+    FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1); rc=$?
+
+  [ -d "$dir/fake/delayed-dialog" ] || fail "the local dialog probe did not reach the pane"
+  expect_code 0 "$rc" "a late dialog response must leave the save and restart available: $out"
+  assert_contains "$out" 'restarted: sm1 (claude)' \
+    "the mate must restart after confirming its save request"
+  pass "a slow local dialog observation does not suppress the restart"
 }
 
 # --- T8: a local restart lands on this home's durable pin, and says which -----
@@ -1015,8 +1055,10 @@ test_local_restart_uses_the_home_pin_and_reports_what_ran
 test_native_ultra_restart_keeps_local_and_remote_profiles
 test_remote_mate_restarts_over_the_transport_hop
 test_remote_exit_dialog_refusal_takes_priority_over_warning
+test_remote_exit_timeout_keeps_first_diagnostic
 test_unreachable_host_is_reported_unknown
 test_slow_exit_dialog_observation_does_not_block_restart
+test_slow_local_exit_dialog_observation_does_not_block_restart
 test_concurrent_reply_cannot_release_persist_gate
 test_persist_waits_are_polled_together
 test_post_stop_failure_is_reported_unreached
