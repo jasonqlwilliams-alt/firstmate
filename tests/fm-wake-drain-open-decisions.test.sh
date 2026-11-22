@@ -368,6 +368,39 @@ test_note_presents_the_captured_span() {
   pass "an informational note acknowledges the captured span"
 }
 
+test_warning_and_note_share_a_successful_span_read() {
+  local dir state status out reader offset
+  dir=$(make_case warning-note-shared-read)
+  state="$dir/state"
+  status="$state/shared.status"
+  out="$dir/drain.out"
+  reader="$dir/read-span"
+  printf 'note: already presented\n' > "$status"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > /dev/null || fail "could not prime the status receipt"
+  offset=$(LC_ALL=C wc -c < "$status" | tr -d '[:space:]')
+  printf 'needs-decision [key=pending-reply-color]: choose a color\nnote: decision context\n' >> "$status"
+
+  cat > "$reader" <<SH
+#!/usr/bin/env bash
+if [ "\$1" = "$status" ] && [ "\$2" = "$offset" ]; then
+  if [ -e "$dir/read-once" ]; then exit 1; fi
+  touch "$dir/read-once"
+fi
+exec dd if="\$1" bs=1 skip="\$2" count="\$3"
+SH
+  chmod +x "$reader"
+  FM_STATE_OVERRIDE="$state" FM_STATUS_SPAN_READER="$reader" "$DRAIN" > "$out" \
+    || fail "could not drain the shared span"
+  [ -f "$dir/read-once" ] || fail "the fault fixture did not serve the first span read"
+  grep -Fxq 'shared note: decision context' "$out" || fail "the note was omitted"
+  grep -Fxq 'warning: task=shared key=pending-reply-color folded reserved-prefix needs-decision: choose a color' "$out" \
+    || fail "the drain acknowledged a note without warning about the question from the same span"
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "could not drain after the shared presentation"
+  [ ! -s "$out" ] || fail "the accepted note receipt replayed its span: $(cat "$out")"
+  pass "a successful status span read presents both the note and its folded question"
+}
+
 test_failed_first_receipt_rename_still_prints_decisions() {
   local dir state fakebin real_mv out
   dir=$(make_case first-rename-failure)
@@ -413,7 +446,7 @@ esac
 exec "$real_cat" "\$@"
 SH
     chmod +x "$fakebin/cat"
-    printf 'needs-decision [key=pending-reply-retry]: choose a color\n' > "$state/retry.status"
+    printf 'note: outside the legacy unread span\nneeds-decision [key=pending-reply-retry]: choose a color\n' > "$state/retry.status"
     if [ "$actor" = branch ]; then
       printf 'working: unrelated granted work\n' > "$state/routine.status"
       append_wake "$state" signal routine.status 'signal: routine' || fail "could not queue branch row"
@@ -428,6 +461,9 @@ SH
       || fail "main retry after $actor failed: $(cat "$dir/retry.err")"
     grep -Fxq 'warning: task=retry key=pending-reply-retry folded reserved-prefix needs-decision: choose a color' "$dir/retry.out" \
       || fail "the first $actor drain lost the warning when delivery failed: $(cat "$dir/retry.out")"
+    if grep -Fq 'outside the legacy unread span' "$dir/retry.out"; then
+      fail "warning recovery broadened the existing unread note span: $(cat "$dir/retry.out")"
+    fi
   done
   pass "a first drain with failed output leaves the folded warning unread for main"
 }
@@ -499,6 +535,7 @@ test_status_append_refuses_reserved_key_before_write() {
 test_folded_reserved_needs_decision_warns_without_consuming_annotations
 test_unrelated_branch_drain_leaves_warning_unread_for_main
 test_note_presents_the_captured_span
+test_warning_and_note_share_a_successful_span_read
 test_failed_first_receipt_rename_still_prints_decisions
 test_first_drain_output_failure_leaves_warning_for_main
 test_drain_warning_follows_the_reserved_prefix_list

@@ -184,7 +184,7 @@ test_rovo_launch_then_send_is_verified() {
   id="rovo-success-z1-$$"
   rec=$(make_spawn_case success "$id")
   read_spawn_record "$rec"
-  out=$(run_spawn \
+  out=$(FM_CLASSIFY_RESERVED_KEY_PREFIXES='worker-internal- pending-reply-' run_spawn \
     "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" \
     --model auto --effort high)
   rc=$?
@@ -212,6 +212,8 @@ test_rovo_launch_then_send_is_verified() {
     "rovo did not receive the native append instruction for its granted status file"
   assert_contains "$pointer" "Follow the brief's status format and key rules" \
     "the native append instruction did not preserve the brief's status format and key rules"
+  assert_contains "$pointer" 'avoid these reserved key prefixes (whitespace-separated): `worker-internal- pending-reply-`' \
+    "the native append instruction did not give Rovo the configured prefix list"
 
   meta="$HOME_DIR/state/$id.meta"
   assert_grep 'model=auto' "$meta" "rovo meta lost the requested model"
@@ -240,7 +242,7 @@ test_rovo_effort_xhigh_is_recorded_but_omitted() {
   id="rovo-xhigh-z2-$$"
   rec=$(make_spawn_case xhigh "$id")
   read_spawn_record "$rec"
-  out=$(run_spawn "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" --effort xhigh)
+  out=$(FM_CLASSIFY_RESERVED_KEY_PREFIXES= run_spawn "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" --effort xhigh)
   rc=$?
   expect_code 0 "$rc" "rovo spawn with an unsupported effort should still succeed"
   launch=$(cat "$CASE_DIR/launch.log")
@@ -250,6 +252,8 @@ test_rovo_effort_xhigh_is_recorded_but_omitted() {
   # one merged JSON object because rovo's --config-override is single-value
   # (a second occurrence silently discards the first, confirmed live).
   assert_contains "$launch" "allowedExternalPaths" "rovo launch dropped its allowedExternalPaths grant when effort was unsupported"
+  assert_contains "$(cat "$CASE_DIR/pointer.log")" 'avoid these reserved key prefixes (whitespace-separated): `pending-reply-`' \
+    "the native append instruction did not give Rovo the default prefix"
   meta="$HOME_DIR/state/$id.meta"
   assert_grep 'effort=xhigh' "$meta" "rovo meta did not retain the unsupported effort axis"
   pass "fm-spawn: rovo omits efficiencyLevel for xhigh but keeps its allowedExternalPaths grant, recording xhigh in task metadata"

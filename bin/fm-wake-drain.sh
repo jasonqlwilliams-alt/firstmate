@@ -551,32 +551,24 @@ EOF
 }
 
 print_folded_reserved_decision_warnings() {
-  local snapshot=$1 task endpoint _ident lines line key question
-  while IFS=$'\t' read -r task endpoint _ident; do
-    [ -n "$task" ] || continue
-    lines=$(status_new_lines_since_cursor "$STATE/$task.status" "$endpoint" decision-candidates) || continue
-    while IFS= read -r line; do
-      [ -n "$line" ] || continue
-      [ "$(status_line_verb "$line")" = needs-decision ] || continue
-      key=$(_fm_decision_key "$line") || continue
-      question=$(status_line_note "$line")
-      if ! _fm_decision_key_transition_allowed "$key" "$question"; then
-        printf 'warning: task=%s key=%s folded reserved-prefix needs-decision: %s\n' "$task" "$key" "$question" || return 1
-      fi
-    done <<< "$lines"
-  done <<< "$snapshot"
+  awk -F '\t' '$2 == "warning" {
+    task = $1; key = $3
+    sub(/^[^\t]*\twarning\t[^\t]*\t/, "")
+    printf "warning: task=%s key=%s folded reserved-prefix needs-decision: %s\n", task, key, $0
+  }' <<< "$1"
 }
 
 print_status_sections() {
-  local snapshot=${1:-} fully_presented=${2:-} acknowledged prepared unread informational
+  local snapshot=${1:-} fully_presented=${2:-} acknowledged prepared surface unread informational
   if [ -z "$snapshot" ]; then snapshot=$(status_presentation_snapshot "$STATE") || return 1; fi
   [ -n "$snapshot" ] || return 0
-  unread=$(scan_unread_surface_snapshot "$STATE" "$snapshot") || return 1
+  surface=$(scan_unread_surface_snapshot "$STATE" "$snapshot" drain-surface) || return 1
+  unread=$(awk -F '\t' '$2 == "status" { sub(/\tstatus\t/, "\t"); print }' <<< "$surface") || return 1
   informational=$(printf '%s\n' "$unread" | cut -f1) || return 1
   acknowledged=$(status_acknowledge_presented_snapshot "$STATE" "$snapshot" "$fully_presented" "$informational") || return 1
   prepared=$(mktemp "$STATE/.status-presentation.prepared.XXXXXX") || return 1
   if ! {
-    print_folded_reserved_decision_warnings "$snapshot" \
+    print_folded_reserved_decision_warnings "$surface" \
       && print_unread_status_section "$snapshot" "$unread" \
       && print_status_outcome_backstop_section "$snapshot" \
       && print_open_decisions_section "$snapshot" \

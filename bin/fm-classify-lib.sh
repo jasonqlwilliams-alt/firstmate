@@ -1516,19 +1516,21 @@ status_open_decisions_cursor_offset() {  # <status-file>
 # changed status identity reads the current file from offset 0; malformed or
 # unreadable cursor state fails the scan. Symlinks and unreadable status files
 # print nothing.
-status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|unread-surface|decision-candidates]
-  local f=$1 captured_end=${2:-} surface=${3:-all} cf offset size actual_size chunk_file filtered_file line rc=0 manifest
-  case "$surface" in all|unread-surface|decision-candidates) ;; *) return 1 ;; esac
+status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|unread-surface|drain-surface]
+  local f=$1 captured_end=${2:-} surface=${3:-all} cf offset start size actual_size chunk_file filtered_file
+  local line rc=0 manifest warnings=0 key question informational
+  case "$surface" in all|unread-surface|drain-surface) ;; *) return 1 ;; esac
   [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || return 0
   cf=$(_fm_open_decisions_cursor_path "$f")
   chunk_file="$cf.unread.$$"
-  manifest="${f%/*}/.status-presentation-cursor"
-  if [ "$surface" = decision-candidates ] && [ ! -e "$manifest" ] && [ ! -L "$manifest" ]; then
-    offset=0
-  else
-    offset=$(status_presentation_cursor_offset "$f") || return 1
-  fi
+  offset=$(status_presentation_cursor_offset "$f") || return 1
   case "$offset" in ''|*[!0-9]*) return 1 ;; esac
+  start=$offset
+  manifest="${f%/*}/.status-presentation-cursor"
+  if [ "$surface" = drain-surface ]; then
+    warnings=1
+    if [ ! -e "$manifest" ] && [ ! -L "$manifest" ]; then start=0; fi
+  fi
   actual_size=$(_fm_status_file_size "$f") || return 1
   actual_size=${actual_size//[[:space:]]/}
   case "$actual_size" in ''|*[!0-9]*) return 1 ;; esac
@@ -1539,25 +1541,30 @@ status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|
   else
     size=$actual_size
   fi
-  [ "$offset" -lt "$size" ] || return 0
-  _fm_status_read_span "$f" "$offset" "$((size - offset))" > "$chunk_file" 2>/dev/null \
+  [ "$start" -lt "$size" ] || return 0
+  _fm_status_read_span "$f" "$start" "$((size - start))" > "$chunk_file" 2>/dev/null \
     || { rm -f "$chunk_file"; return 1; }
-  if [ "$surface" = decision-candidates ]; then
-    LC_ALL=C awk '{ prefix=$0; sub(/:.*/, "", prefix); if (index(prefix, "needs-decision")) print }' "$chunk_file" || rc=1
-    rm -f "$chunk_file"
-    return "$rc"
-  fi
-  if [ "$surface" = unread-surface ]; then
+  if [ "$surface" != all ]; then
     # A cheap superset filter keeps wide routine lines out of Bash entirely.
     # The exact classifier below remains authoritative for every candidate.
     # ENVIRON preserves literal override bytes rather than awk -v escapes.
     filtered_file="$chunk_file.filtered"
     if ! FM_STATUS_SURFACE_RESOLVE="${FM_CLASSIFY_RESOLVE_VERB:-$FM_CLASSIFY_RESOLVE_VERB_DEFAULT}" \
       FM_STATUS_SURFACE_HELD="${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}" \
-      LC_ALL=C awk '
-        { prefix=$0; sub(/:.*/, "", prefix)
-          if (index(prefix, "note") || index(prefix, ENVIRON["FM_STATUS_SURFACE_RESOLVE"]) ||
-              index(prefix, ENVIRON["FM_STATUS_SURFACE_HELD"])) print }
+      LC_ALL=C awk -v warnings="$warnings" -v skip="$((offset - start))" '
+        {
+          if (warnings && $0 ~ /^[^:]*needs-decision/) print "warning\t" $0
+          if (pos + length($0) >= skip) {
+            line = pos < skip ? substr($0, skip - pos + 1) : $0
+            prefix = line; sub(/:.*/, "", prefix)
+            if (index(prefix, "note") || index(prefix, ENVIRON["FM_STATUS_SURFACE_RESOLVE"]) ||
+                index(prefix, ENVIRON["FM_STATUS_SURFACE_HELD"])) {
+              if (warnings) print "status\t" line
+              else print line
+            }
+          }
+          pos += length($0) + 1
+        }
       ' "$chunk_file" > "$filtered_file"; then
       rm -f "$chunk_file" "$filtered_file"
       return 1
@@ -1568,14 +1575,26 @@ status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|
     fi
   fi
   while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in
-      *[![:space:]]*)
-        if [ "$surface" = unread-surface ] && ! status_line_is_unread_surface "$line"; then
-          continue
-        fi
-        printf '%s\n' "$line" || { rc=1; break; }
+    case "$surface:$line" in
+      drain-surface:warning$'\t'*)
+        line=${line#*$'\t'}
+        [ "$(status_line_verb "$line")" = needs-decision ] || continue
+        key=$(_fm_decision_key "$line") || continue
+        question=$(status_line_note "$line")
+        _fm_decision_key_transition_allowed "$key" "$question" && continue
+        printf 'warning\t%s\t%s\n' "$key" "$question" || { rc=1; break; }
+        continue
         ;;
+      drain-surface:status$'\t'*) informational=${line#*$'\t'} ;;
+      unread-surface:*) informational=$line ;;
+      all:*[![:space:]]*)
+        printf '%s\n' "$line" || { rc=1; break; }
+        continue
+        ;;
+      *) continue ;;
     esac
+    status_line_is_unread_surface "$informational" || continue
+    printf '%s\n' "$line" || { rc=1; break; }
   done < "$chunk_file"
   rm -f "$chunk_file"
   return "$rc"
@@ -1631,16 +1650,16 @@ EOF
   return 0
 }
 
-scan_unread_surface_snapshot() {  # <state> <task-and-endpoint-snapshot>
-  local state=$1 snapshot=$2 task endpoint ident f lines line
+scan_unread_surface_snapshot() {  # <state> <task-and-endpoint-snapshot> [unread-surface|drain-surface]
+  local state=$1 snapshot=$2 surface=${3:-unread-surface} task endpoint ident f lines line
+  case "$surface" in unread-surface|drain-surface) ;; *) return 1 ;; esac
   while IFS=$(printf '\t') read -r task endpoint ident; do
     [ -n "$task" ] || continue
     f="$state/$task.status"
-    lines=$(status_new_lines_since_cursor "$f" "$endpoint" unread-surface) || return 1
+    lines=$(status_new_lines_since_cursor "$f" "$endpoint" "$surface") || return 1
     [ -n "$lines" ] || continue
     while IFS= read -r line; do
       [ -n "$line" ] || continue
-      status_line_is_unread_surface "$line" || continue
       printf '%s\t%s\n' "$task" "$line"
     done <<EOF
 $lines

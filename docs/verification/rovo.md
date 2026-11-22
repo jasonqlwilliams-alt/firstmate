@@ -31,7 +31,7 @@ Rovo CLI: 202609.1.2
 The brief is then typed in after the TUI comes up, the same launch-then-send shape kimi uses, through the same shared readers (`fm_backend_capture`, `fm_backend_composer_state`, `fm_backend_send_text_submit`):
 
 1. `rovo_wait_for_ready` polls for the `Welcome to Rovo!` banner (primary) or a composer-empty verdict (weaker fallback, because this spawn read lacks the Rovo harness fact described below).
-2. `fm_backend_send_text_submit` sends the absolute brief path and directs Rovo to append status through its native file tool, using the brief's status format and key rules.
+2. `fm_backend_send_text_submit` sends the absolute brief path, lists the effective reserved key prefixes, and directs Rovo to append status through its native file tool using the brief's status format and key rules.
 3. `rovo_wait_for_delivery` confirms composer-empty AND either the echoed `Read the brief at` text or a nonzero `Context:` percentage (`context:[^%]*[1-9][^%]*%`, tolerant of the footer's bar glyph but anchored before the `%` so the `.../922K` denominator cannot false-positive).
 
 Each gate fails the spawn loudly (a `failed:` line in the task status file) if it never resolves, so a never-ready or silently-dropped delivery is a visible spawn failure rather than a half-wired pane.

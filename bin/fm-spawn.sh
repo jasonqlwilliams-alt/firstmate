@@ -4985,7 +4985,8 @@ if [ "$KIND" = secondmate ]; then
   LAUNCH="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_PUBLIC_FOLLOWUP_PRIMARY_HOME=$sq_primary_home FM_HOME=$sq_home FM_TRACE_CONTEXT=$SPAWN_TRACE_EFFECTIVE FM_SUPERVISION_MODEL=$supervision_model $LAUNCH"
 fi
 _fm_wake_require_classify || exit 1
-LAUNCH="export FM_CLASSIFY_RESERVED_KEY_PREFIXES=$(shell_quote "${FM_CLASSIFY_RESERVED_KEY_PREFIXES:-$FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT}"); $LAUNCH"
+reserved_key_prefixes=${FM_CLASSIFY_RESERVED_KEY_PREFIXES:-$FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT}
+LAUNCH="export FM_CLASSIFY_RESERVED_KEY_PREFIXES=$(shell_quote "$reserved_key_prefixes"); $LAUNCH"
 if [ -z "$SPAWN_TRACEPARENT" ] && [ "$RELAUNCH" -eq 1 ]; then
   LAUNCH="unset TRACEPARENT; $LAUNCH"
 fi
@@ -5107,7 +5108,7 @@ if [ "$HARNESS" = rovo ]; then
     rovo_spawn_fail "rovo did not show a verified ready signal before brief delivery in window $T"
     exit 1
   fi
-  ROVO_POINTER="Read the brief at $BRIEF_REAL and carry out its instructions. For each status report, use your native file tool to append one line to $STATE_REAL/$ID.status. Follow the brief's status format and key rules."
+  ROVO_POINTER="Read the brief at $BRIEF_REAL and carry out its instructions. For each status report, use your native file tool to append one line to $STATE_REAL/$ID.status. Follow the brief's status format and key rules. For any [key=<slug>], avoid these reserved key prefixes (whitespace-separated): \`$reserved_key_prefixes\`"
   ROVO_SUBMIT_RETRIES=${FM_ROVO_SUBMIT_RETRIES:-3}
   ROVO_SUBMIT_SLEEP=${FM_ROVO_SUBMIT_SLEEP:-${FM_ROVO_POLL_INTERVAL:-0.5}}
   ROVO_SUBMIT_SETTLE=${FM_ROVO_SUBMIT_SETTLE:-0}
