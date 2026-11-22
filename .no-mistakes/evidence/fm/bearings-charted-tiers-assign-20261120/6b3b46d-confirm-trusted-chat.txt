@@ -1,0 +1,8 @@
+Pi 1.5.0 / llama.cpp local Qwen3.5-9B Q4_K_M / synthetic inputs
+Source: real Lavish browser submit and durable runner capture. Pi loaded the tracked Bearings wake and process-event procedures.
+Runner event: check: procevent lavish lavish-d02dc9653bb3acc7 1
+Helper choice from deployed adapter: {"owner":"(main)","question":"export-check","agent":"rakazo"}
+Prior confirmation context seeded from the real decoded request and synthetic queued backlog: A synthetic conversation already has the following pending request from the Firstmate. May I send an advisory Packet Router note to rakazo about Confirm export prerequisite (export-check, owner (main)), asking for evidence or recommendations on obtaining export team test approval? When I asked, the authoritative data/backlog.md listed the task under Queued, blocked by approvals. The then-configured canonical router inbox in config/packet-router-inbox was delivery/inbox/new, whose corresponding role registry is delivery/registry/SEATS.md. The note uses Packet Router v1 Markdown frontmatter as documented in delivery/DISCOVERY.md. The verified provenance for this pending request is source lavish-d02dc9653bb3acc7, sequence 1, assignment position 1.
+Delivery inbox entries before confirmation: []
+Validation stopped: Connection error.
+Last observed Pi tool calls:

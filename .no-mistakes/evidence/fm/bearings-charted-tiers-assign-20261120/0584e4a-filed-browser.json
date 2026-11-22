@@ -1,0 +1,63 @@
+[
+  {
+    "title": "Ready to dispatch",
+    "tier": "Tier 3 · Current",
+    "color": "rgb(226, 239, 251)",
+    "roles": [],
+    "dispatch": true
+  },
+  {
+    "title": "Audit new sample data",
+    "tier": "Tier 3 · Current",
+    "color": "rgb(226, 239, 251)",
+    "roles": [
+      "rakazo",
+      "grokbot"
+    ],
+    "dispatch": false
+  },
+  {
+    "title": "Confirm export prerequisite",
+    "tier": "Tier 1 · Urgent",
+    "color": "rgb(253, 228, 225)",
+    "roles": [
+      "rakazo",
+      "grokbot"
+    ],
+    "dispatch": false
+  },
+  {
+    "title": "Active review with dated hold",
+    "tier": "Tier 2 · Time-sensitive",
+    "color": "rgb(255, 237, 194)",
+    "roles": [],
+    "dispatch": false
+  },
+  {
+    "title": "Verify legacy schema",
+    "tier": "Tier 2 · Time-sensitive",
+    "color": "rgb(255, 237, 194)",
+    "roles": [
+      "rakazo",
+      "grokbot"
+    ],
+    "dispatch": false
+  },
+  {
+    "title": "Draft archive plan",
+    "tier": "Tier 4 · Backlog",
+    "color": "rgb(235, 236, 239)",
+    "roles": [
+      "rakazo",
+      "grokbot"
+    ],
+    "dispatch": false
+  },
+  {
+    "title": "Inventory needs repair",
+    "tier": null,
+    "color": null,
+    "roles": [],
+    "dispatch": false
+  }
+]

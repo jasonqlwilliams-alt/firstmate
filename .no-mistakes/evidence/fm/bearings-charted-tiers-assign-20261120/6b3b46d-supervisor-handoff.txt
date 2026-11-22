@@ -1,0 +1,35 @@
+Local Lavish 0.1.46
+1795298526	1	check	procevent:lavish-d02dc9653bb3acc7:1	check: procevent lavish lavish-d02dc9653bb3acc7 1
+
+$ bin/fm-procevent-lavish.sh read <captured-result> [exit 0]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Confirm export prerequisite → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (1 of 1)
+
+$ bin/fm-procevent-lavish.sh assignments <captured-result> [exit 0]
+{"owner":"(main)","agent":"rakazo","question":"export-check"}
+
+$ bin/fm-procevent-lavish.sh answers <captured-result> [exit 0]
+(no output)
+
+$ bin/fm-procevent-lavish.sh reconciles <captured-result> [exit 0]
+(no output)
+
+Inbox counts: delivery=0 probe=0. Backlog is byte-for-byte unchanged.

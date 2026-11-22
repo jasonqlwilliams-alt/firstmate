@@ -1,0 +1,102 @@
+Isolated Pi 1.5.0 RPC against local Qwen3.5-9B CUDA in llama.cpp. All inputs and routes are synthetic.
+Pi received the verbatim shipped procedure sections applicable to this input. Filesystem and connections were restricted to the lab and its dependency runtime.
+Trusted Pi input: check: procevent lavish lavish-59ae2b77a985ab60 2
+Captured result file: state/procevent-inbox/lavish-59ae2b77a985ab60.2.result
+$ bash {"command": "bin/fm-procevent-lavish.sh read state/procevent-inbox/lavish-59ae2b77a985ab60.2.result"}
+$ bash {"command": "bin/fm-bearings-board.sh path"}
+Tool result: {run-worktree}/.bearings-live-1afa674/lab/.lavish/bearings-board.html
+
+Tool result: SESSION-ENDING MESSAGE: (none)
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: div#bb-charted > div > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Validate receiver readiness → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (1 of 1)
+
+$ bash {"command": "bin/fm-procevent-sources.sh read state/procevent-inbox/lavish-59ae2b77a985ab60.2.result"}
+$ bash {"command": "bin/fm-procevent-lavish.sh assignments state/procevent-inbox/lavish-59ae2b77a985ab60.2.result"}
+Tool result (error): /bin/bash: line 1: bin/fm-procevent-sources.sh: No such file or directory
+
+
+Command exited with code 127
+Tool result: {"owner":"(main)","question":"recent-due","agent":"rakazo"}
+
+$ bash {"command": "bin/fm-bearings-helper.sh prepare lavish-59ae2b77a985ab60 2 1"}
+Tool result: {"agent":"rakazo","backlog_data":"{run-worktree}/.bearings-live-1afa674/lab/data","blockers":"prerequisite","hold":"","inbox":"{run-worktree}/.bearings-live-1afa674/lab/delivery/inbox/new","owner":"(main)","position":"1","prerequisite":"","question":"recent-due","route_host":null,"sequence":"2","source":"lavish-59ae2b77a985ab60","title":"Validate receiver readiness","until":""}
+
+Firstmate: I've prepared the advisory Packet Router note for confirmation. Here's the plan:
+
+**Task:** Validate receiver readiness → rakazo
+**Owner:** (main)
+**Recipient:** rakazo
+**Position:** 1
+**Prerequisites:** None
+
+**Plan to send:**
+```json
+{"agent":"rakazo","backlog_data":"{run-worktree}/.bearings-live-1afa674/lab/data","blockers":"prerequisite","hold":"","inbox":"{run-worktree}/.bearings-live-1afa674/lab/delivery/inbox/new","owner":"(main)","position":"1","prerequisite":"","question":"recent-due","route_host":null,"sequence":"2","source":"lavish-59ae2b77a985ab60","title":"Validate receiver readiness","until":""}
+```
+
+**Captain, shall I send this plan to rakazo?**
+
+This wake is pending your decision.
+Pi agent settled.
+Before confirmation. Inbox events: [] handled: False backlog unchanged: True
+Trusted Pi input: Yes, I confirm sending exactly the advisory request you just described to Rakazo.
+$ bash {"command": "bin/fm-bearings-helper.sh send --confirmed '{\"agent\":\"rakazo\",\"backlog_data\":\"{run-worktree}/.bearings-live-1afa674/lab/data\",\"blockers\":\"prerequisite\",\"hold\":\"\",\"inbox\":\"{run-worktree}/.bearings-live-1afa674/lab/delivery/inbox/new\",\"owner\":\"(main)\",\"position\":\"1\",\"prerequisite\":\"\",\"question\":\"recent-due\",\"route_host\":null,\"sequence\":\"2\",\"source\":\"lavish-59ae2b77a985ab60\",\"title\":\"Validate receiver readiness\",\"until\":\"\"}'"}
+Tool result: sent: {run-worktree}/.bearings-live-1afa674/lab/delivery/inbox/new/fm-helper-lavish-59ae2b77a985ab60-2-1.md
+
+$ bash {"command": "bin/fm-procevent.sh handled lavish-59ae2b77a985ab60 2 --assignments-resolved"}
+Tool result: handled: lavish-59ae2b77a985ab60 2
+
+Firstmate: Wake acknowledged: `lavish-59ae2b77a985ab60 2`
+
+The advisory request "Validate receiver readiness → rakazo" has been sent successfully to rakazo. The wake is now resolved.
+Pi agent settled.
+After confirmation. Inbox events: [['0x100', '.fm-helper.sFPPOd'], ['0x8', '.fm-helper.sFPPOd'], ['0x2', '.fm-helper.sFPPOd'], ['0x8', '.fm-helper.sFPPOd'], ['0x100', 'fm-helper-lavish-59ae2b77a985ab60-2-1.md'], ['0x200', '.fm-helper.sFPPOd']] packets: ['fm-helper-lavish-59ae2b77a985ab60-2-1.md'] handled: True
+---
+type: continuum-packet
+schema: packet-router/v1
+kind: note
+id: fm-helper-lavish-59ae2b77a985ab60-2-1
+from: firstmate
+role_target: "rakazo"
+ask_of: "rakazo"
+created_at_pt: "2026-11-21T16:46:32"
+ttl_hours: 2
+priority: normal
+status: new
+read_only: true
+dedupe_key: "fm-helper-lavish-59ae2b77a985ab60-2-1"
+---
+
+Please send Firstmate evidence or recommendations to help meet these start conditions.
+
+Task: Validate receiver readiness (recent-due, owner (main))
+Open blockers: prerequisite
+
+Bearings request: lavish-59ae2b77a985ab60 sequence 2 assignment 1
+
+Pi child exit status: 0
+
+Independent check of the source after the supervisor finished.
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-59ae2b77a985ab60      lavish       none       0
+$ bin/fm-procevent.sh reconcile
+reconciled: published=0 started=1 stopped=0 uncertain=0 failed=0
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-59ae2b77a985ab60      lavish       live       0

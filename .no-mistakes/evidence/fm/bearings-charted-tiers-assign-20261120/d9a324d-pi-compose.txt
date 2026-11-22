@@ -1,0 +1,451 @@
+Pi 1.5.0 RPC with local Qwen3.5-9B and llama.cpp. All input and routes are synthetic.
+
+Pi input: /bearings lavish
+$ bash {"command": "bin/fm-bearings-snapshot.sh --json --all-queued --fields bodies > /tmp/snapshot.json", "timeout": 60}
+Tool result (error): /bin/bash: line 1: /tmp/snapshot.json: Permission denied
+
+
+Command exited with code 1
+$ bash {"command": "bin/fm-bearings-snapshot.sh --json --all-queued --fields bodies > snapshot.json", "timeout": 60}
+Tool result: (no output)
+$ read {"path": "snapshot.json"}
+Tool result: {
+  "schema": "fm-bearings.v1",
+  "home": ".bearings-live-d9a324d/pi-compose",
+  "generated": "2026-11-21T23:59:50Z",
+  "prs": "not_requested (run: /bearings include PRs)",
+  "in_flight": [],
+  "secondmates": [],
+  "secondmate_reconcile": [],
+  "decisions_open": [],
+  "landed": [],
+  "gates": [
+    {
+      "id": "prose",
+      "title": "Inspect access gate",
+      "blocked_by": "-",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-11-17",
+      "waits_since": "2026-11-17",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "recent",
+      "title": "Triage recent samples",
+      "blocked_by": "approval",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-11-15",
+      "waits_since": "2026-11-15",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "recent-due",
+      "title": "Confirm receiver readiness",
+      "blocked_by": "approval",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-10-23",
+      "waits_since": "2026-10-23",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "old-due",
+      "title": "Confirm sender readiness",
+      "blocked_by": "approval",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-10-22",
+      "waits_since": "2026-10-22",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "active-source",
+      "title": "Check calibration reference",
+      "blocked_by": "approval",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-10-05",
+      "waits_since": "2026-10-05",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "recent-activity",
+      "title": "Update runbook",
+      "blocked_by": "approval",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-10-05",
+      "waits_since": "2026-10-05",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "approval",
+      "title": "Review approval paperwork",
+      "blocked_by": "-",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-10-03",
+      "waits_since": "2026-10-03",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "old",
+      "title": "Archive prototypes",
+      "blocked_by": "approval",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-10-03",
+      "waits_since": "2026-10-03",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "dated-hold",
+      "title": "Wait for review window",
+      "blocked_by": "-",
+      "reason": "until 2026-11-25: review window",
+      "owner": "(main)",
+      "filed": "2026-10-01",
+      "waits_since": "2026-10-01",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "aged-hold",
+      "title": "Request planning decision",
+      "blocked_by": "-",
+      "reason": "held 51d: planning decision",
+      "owner": "(main)",
+      "filed": "2026-10-01",
+      "waits_since": "2026-10-01T00:00:00Z",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "(main-inventory)",
+      "title": "in-flight backlog item has no child metadata",
+      "blocked_by": "-",
+      "reason": "main inventory",
+      "owner": "(main)",
+      "filed": null,
+      "waits_since": null,
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    }
+  ],
+  "gate_blockers": [
+    {
+      "gate": "recent",
+      "owner": "(main)",
+      "id": "approval",
+      "title": "Review approval paperwork"
+    },
+    {
+      "gate": "recent-due",
+      "owner": "(main)",
+      "id": "approval",
+      "title": "Review approval paperwork"
+    },
+    {
+      "gate": "old-due",
+      "owner": "(main)",
+      "id": "approval",
+      "title": "Review approval paperwork"
+    },
+    {
+      "gate": "active-source",
+      "owner": "(main)",
+      "id": "approval",
+      "title": "Review approval paperwork"
+    },
+    {
+      "gate": "recent-activity",
+      "owner": "(main)",
+      "id": "approval",
+      "title": "Review approval paperwork"
+    },
+    {
+      "gate": "old",
+      "owner": "(main)",
+      "id": "approval",
+      "title": "Review approval paperwork"
+    }
+  ],
+  "reports": [],
+  "recorded_prs": [],
+  "bodies": [
+    {
+      "id": "approval",
+      "body": "- [ ]
+$ bash {"command": "bin/fm-bearings-board.sh draft snapshot.json > payload.json", "timeout": 60}
+Tool result: (no output)
+$ read {"path": "payload.json"}
+Tool result: {
+  "schema": "fm-bearings-board.v1",
+  "home": ".bearings-live-d9a324d/pi-compose",
+  "generated": "2026-11-21T23:59:50Z",
+  "prs_live": false,
+  "captains_call": [],
+  "continuum_agents": [
+    "grokbot",
+    "rakazo"
+  ],
+  "underway": [],
+  "landed": [],
+  "charted": [
+    {
+      "id": "prose",
+      "title": "Inspect access gate",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-11-17",
+      "waits_since": "2026-11-17",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false,
+      "repo": "demo",
+      "tier": 3,
+      "dispatchable": false,
+      "assignment_eligible": false,
+      "blockers": []
+    },
+    {
+      "id": "recent",
+      "title": "Triage recent samples",
+      "reason": "blocked-by approval",
+      "owner": "(main)",
+      "filed": "2026-11-15",
+      "waits_since": "2026-11-15",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false,
+      "repo": "demo",
+      "tier": 3,
+      "dispatchable": false,
+      "assignment_eligible": true,
+      "blockers": [
+        {
+          "id": "approval",
+          "title": "Review approval paperwork"
+        }
+      ]
+    },
+    {
+      "id": "recent-due",
+      "title": "Confirm receiver readiness",
+      "reason": "blocked-by approval",
+      "owner": "(main)",
+      "filed": "2026-10-23",
+      "waits_since": "2026-10-23",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false,
+      "repo": "demo",
+      "tier": 1,
+      "dispatchable": false,
+      "assignment_eligible": true,
+      "blockers": [
+        {
+          "id": "approval",
+          "title": "Review approval paperwork"
+        }
+      ]
+    },
+    {
+      "id": "old-due",
+      "title": "Confirm sender readiness",
+      "reason": "blocked-by approval",
+      "owner": "(main)",
+      "filed": "2026-10-22",
+      "waits_since": "2026-10-22",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false,
+      "repo": "demo",
+      "tier": 2,
+      "dispatchable": false,
+      "assignment_eligible": true,
+      "blockers": [
+        {
+          "id": "approval",
+          "title": "Review approval paperwork"
+        }
+      ]
+    },
+    {
+      "id": "active-source",
+      "title": "Check calibration reference",
+      "reason": "blocked-by approval",
+      "owner": "(main)",
+      "filed": "2026-10-05",
+      "waits_since": "2026-10-05",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false,
+      "repo": "demo",
+      "tier": 4,
+      "dispatchable": false,
+      "assignment_eligible": true,
+      "blockers": [
+        {
+          "id": "approval",
+          "title": "Review approval paperwork"
+        }
+      ]
+    },
+    {
+      "id": "recent-activity",
+      "title": "Update runbook",
+      "reason": "blocked-by approval",
+      "owner": "(main)",
+      "filed": "2026-10-05",
+      "waits_since": "2026-10-05",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false,
+      "repo": "demo",
+      "tier": 3,
+      "dispatchable": false,
+      "assignment_eligible": true,
+      "blockers": [
+        {
+          "id": "approval",
+          "title": "Review approval paperwork"
+        }
+      ]
+    },
+    {
+      "id": "approval",
+      "title": "Review approval paperwork",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-10-03",
+      "waits_since": "2026-10-03",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false,
+      "repo": "demo",
+      "tier": 4,
+      "dispatchable": true,
+      "assignment_eligible": false,
+      "blockers": []
+    },
+    {
+      "id": "old",
+      "title": "Archive prototypes",
+      "reason": "blocked-by approval",
+      "owner": "(main)",
+      "filed": "2026-10-03",
+      "waits_since": "2026-10-03",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false,
+      "repo": "demo",
+      "tier": 4,
+      "dispatchable": false,
+      "assignment_eligible": true,
+      "blockers": [
+        {
+          "id": "approval",
+          "title": "Review approval paperwork"
+        }
+      ]
+    },
+    {
+      "id": "dated-hold",
+      "title": "Wait for review window",
+      "reason": "until 2026-11-25: review window",
+      "owner": "(main)",
+      "filed": "2026-10-01",
+      "waits_since": "2026-10-01",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false,
+      "repo": "demo",
+      "tier": 2,
+      "dispatchable": false,
+      "assignment_eligible": false,
+      "blockers": []
+    },
+$ edit {"path": "payload.json", "edits": [{"oldText": "      \"reason\": \"blocked-by approval\",", "newText": "      \"reason\": \"blocked-by approval:\","}]}
+Tool result (error): Found 6 occurrences of the text in payload.json. The text must be unique. Please provide more context to make it unique.
+$ edit {"path": "payload.json", "edits": [{"oldText": "    {\n      \"id\": \"recent\",\n      \"title\": \"Triage recent samples\",\n      \"reason\": \"blocked-by approval\",", "newText": "    {\n      \"id\": \"recent\",\n      \"title\": \"Triage recent samples\",\n      \"reason\": \"blocked-by approval:\","}, {"oldText": "    {\n      \"id\": \"recent-due\",\n      \"title\": \"Confirm receiver readiness\",\n      \"reason\": \"blocked-by approval\",", "newText": "    {\n      \"id\": \"recent-due\",\n      \"title\": \"Confirm receiver readiness\",\n      \"reason\": \"blocked-by approval:\","}, {"oldText": "    {\n      \"id\": \"old-due\",\n      \"title\": \"Confirm sender readiness\",\n      \"reason\": \"blocked-by approval\",", "newText": "    {\n      \"id\": \"old-due\",\n      \"title\": \"Confirm sender readiness\",\n      \"reason\": \"blocked-by approval:\","}, {"oldText": "    {\n      \"id\": \"active-source\",\n      \"title\": \"Check calibration reference\",\n      \"reason\": \"blocked-by approval\",", "newText": "    {\n      \"id\": \"active-source\",\n      \"title\": \"Check calibration reference\",\n      \"reason\": \"blocked-by approval:\","}, {"oldText": "    {\n      \"id\": \"recent-activity\",\n      \"title\": \"Update runbook\",\n      \"reason\": \"blocked-by approval\",", "newText": "    {\n      \"id\": \"recent-activity\",\n      \"title\": \"Update runbook\",\n      \"reason\": \"blocked-by approval:\","}, {"oldText": "    {\n      \"id\": \"old\",\n      \"title\": \"Archive prototypes\",\n      \"reason\": \"blocked-by approval\",", "newText": "    {\n      \"id\": \"old\",\n      \"title\": \"Archive prototypes\",\n      \"reason\": \"blocked-by approval:\","}]}
+Tool result: Successfully replaced 6 block(s) in payload.json.
+$ bash {"command": "bin/fm-bearings-board.sh build payload.json", "timeout": 60}
+Tool result: board: {run-worktree}/.bearings-live-d9a324d/pi-compose/.lavish/bearings-board.html
+detail: {run-worktree}/.bearings-live-d9a324d/pi-compose/.lavish/bearings-detail.html
+canvas: off
+session:
+  file: {run-worktree}/.bearings-live-d9a324d/pi-compose/.lavish/bearings-board.html
+  url: "http://127.0.0.1:4387/session/4bb57fafe3884042"
+  status: opened
+next_step: "Do not respond to the user just yet. Now you must run `lavish-axi poll {run-worktree}/.bearings-live-d9a324d/pi-compose/.lavish/bearings-board.html`. This command long-polls until the user sends feedback, ends the session, or leaves every review window disconnected past the reconnect grace period, and it stays silent the whole time - that is normal, never kill it. Layout issues the browser detects do not return this poll; they wait in the user's Layout issues inbox until the user queues them, then arrive as an ordinary tag \"layout-warnings\" prompt. Do not pass --timeout-ms during normal agent use. Keep the poll in the foreground by default and let it return the feedback directly to the agent. A background poll is allowed only through a harness-native tracked background-job facility whose completion result is guaranteed to resume or notify the same agent. Never use `nohup`, shell `&`, `disown`, redirected fire-and-forget processes, or a detached terminal without an explicit verified callback merely to keep polling alive. If the harness has no completion-aware background facility, use the foreground poll or first wire a verified wake callback into the surrounding supervisor. Do not tell the user the artifact is being monitored until that wake path is live. If the poll gets killed or times out before feedback arrives, re-run it - feedback remains queued until delivery. Poll delivery consumes the response, so read it completely. If it returns browser_disconnected, the review window stayed disconnected past its reconnect grace period but the session remains resumable; ask the user whether to reopen or end it, and do neither uninvited. After applying feedback, run `lavish-axi poll {run-worktree}/.bearings-live-d9a324d/pi-compose/.lavish/bearings-board.html --agent-reply \"<message for the user>\"` without --timeout-ms to show a concise response in Lavish Editor and keep waiting for more feedback. If instead you are handing back a result without starting another long-poll, run `lavish-axi reply {run-worktree}/.bearings-live-d9a324d/pi-compose/.lavish/bearings-board.html --agent-reply \"<message for the user>\"` to get an acceptance receipt. Keep the reply concise. Only when a longer reply is genuinely necessary, use Markdown structure - blank-line paragraphs, `- ` / `1. ` lists, `## ` headings - so it renders scannably instead of a wall of text, and pass that body with `--agent-reply-file <path>` (`-` reads stdin) so newlines survive quoting. The Conversation panel's Markdown subset is in `lavish-axi poll --help` and README. If the user ends the session, stop polling and do not reopen it by re-running `lavish-axi {run-worktree}/.bearings-live-d9a324d/pi-compose/.lavish/bearings-board.html` unless the user asks for further review or something genuinely important needs their visual attention - deliver routine updates directly in this conversation instead. When reopening is warranted, run `lavish-axi {run-worktree}/.bearings-live-d9a324d/pi-compose/.lavish/bearings-board.html --reopen`."
+session: live
+served: {run-worktree}/.bearings-live-d9a324d/pi-compose/.lavish/bearings-board.html
+bound: lavish-4bb57fafe3884042
+armed: lavish-4bb57fafe3884042
+listening: live
+
+Firstmate: The board is now live at `http://127.0.0.1:4387/session/4bb57fafe3884042`.
+
+---
+
+## Bearings - 21 Nov 2026
+
+Fleet is quiet with no active work in flight. All main work is queued behind the approval gate, with two captain holds awaiting review window and planning decision. One integrity warning flags a backlog item missing child metadata.
+
+### Captain's Call
+
+No decisions pending. No PRs ready to merge. No credentials needed.
+
+### Recently Landed
+
+No recent completions.
+
+### Underway
+
+No active work in flight.
+
+### Charted Next
+
+- **Inspect access gate** (prose) — filed 2026-11-17 — no blocker
+- **Triage recent samples** (recent) — filed 2026-11-15 — blocked by Review approval paperwork
+- **Confirm receiver readiness** (recent-due) — filed 2026-10-23 — blocked by Review approval paperwork
+- **Confirm sender readiness** (old-due) — filed 2026-10-22 — blocked by Review approval paperwork
+- **Check calibration reference** (active-source) — filed 2026-10-05 — blocked by Review approval paperwork
+- **Update runbook** (recent-activity) — filed 2026-10-05 — blocked by Review approval paperwork
+- **Review approval paperwork** (approval) — filed 2026-10-03 — no blocker
+- **Archive prototypes** (old) — filed 2026-10-03 — blocked by Review approval paperwork
+- **Wait for review window** (dated-hold) — filed 2026-10-01 — until 2026-11-25: review window
+- **Request planning decision** (aged-hold) — filed 2026-10-01 — held 51d: planning decision
+- **in-flight backlog item has no child metadata** (main-inventory) — warning — main inventory
+
+---
+
+Report: `data/status-report-2026-11-21.md`
+Pi agent settled.
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-4bb57fafe3884042      lavish       live       0
+Charted tiers: {"recent-due": 1, "old-due": 2, "recent": 3, "old": 4, "recent-activity": 3, "dated-hold": 2}
+Delivery roles: ['grokbot', 'rakazo']
+Pi child exit status: 0

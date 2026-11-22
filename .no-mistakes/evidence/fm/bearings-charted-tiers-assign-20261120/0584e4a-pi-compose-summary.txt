@@ -1,0 +1,18 @@
+Pi 1.5.0 RPC using local llama.cpp b12617 CUDA. Model qwen35-9b, thinking low. All records and role bindings are synthetic.
+The isolated session receives the shipped Bearings procedure. The fixture restricts file and CLI access to the disposable home.
+
+Trusted RPC input: /bearings lavish
+
+First completed local Pi attempt used the live snapshot and wrote its own payload:
+$ write payload.json
+$ bash {"command": "bin/fm-bearings-board.sh build payload.json"}
+Tool result: fm-bearings-board: board data does not satisfy fm-bearings-board.v1: payload.json
+Pi agent_settled.
+Pi child exit status: 0.
+The generated payload used charted_next instead of charted, omitted the two verified roles, and ranked the current task with a near due date as Tier 2. The builder rejected the payload.
+
+The re-drive supplied the executable payload contract and shape example in the test prompt:
+$ write None
+Tool result: Tool call "write" was not executed: the response hit the output token limit, so its arguments may be truncated. Re-issue the tool call with complete arguments.
+Pi agent_settled.
+Pi child exit status: 0.

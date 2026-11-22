@@ -1,0 +1,13 @@
+Isolated Pi 1.5.0 and llama.cpp with Qwen3.5-9B. The pending request came from the real synthetic browser capture.
+The test moved the exact export-check task line from Queued to In flight, then supplied the synthetic trusted-chat approval.
+The task line remained unchanged: - [ ] export-check - Confirm export prerequisite blocked-by: approvals (repo: synthetic) (kind: ship) (since 2026-11-18)
+The router inbox and role registry reads returned the configured test ingress and active rakazo role.
+Observed commands in the final authorization turn:
+$ cat <synthetic-home>/config/packet-router-inbox
+$ cat <synthetic-home>/delivery/registry/SEATS.md
+$ <synthetic-home>/bin/fm-procevent-lavish.sh assignments /tmp/assignments_result.md
+$ <synthetic-home>/bin/fm-procevent-lavish.sh assignments <synthetic-home>/assignments_result.md
+$ ls -la <synthetic-home>/
+$ cat <synthetic-home>/assignments_result.md
+Delivery inbox entries when the test was stopped: []
+The Pi turn was stopped during workspace-local inference before a verified authoritative backlog read and settled authorization decision. An empty inbox here is an observation, not a pass.

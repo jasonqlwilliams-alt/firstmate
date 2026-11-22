@@ -1,0 +1,39 @@
+1795298548	1	check	procevent:lavish-4eebba02d74ef689:1	check: procevent lavish lavish-4eebba02d74ef689 1
+
+$ bin/fm-procevent-lavish.sh read <captured-result> [exit 0]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 2
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 2
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 2
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Confirm export prerequisite → grokbot
+ANNOTATION 2 of 2
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Confirm export prerequisite → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (2 of 2)
+
+$ bin/fm-procevent-lavish.sh assignments <captured-result> [exit 0]
+{"question":"export-check","agent":"grokbot","owner":"(main)"}
+{"question":"export-check","agent":"rakazo","owner":"(main)"}
+
+$ bin/fm-procevent-lavish.sh answers <captured-result> [exit 0]
+(no output)
+
+$ bin/fm-procevent-lavish.sh reconciles <captured-result> [exit 0]
+(no output)

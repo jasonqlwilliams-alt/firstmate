@@ -1,0 +1,114 @@
+{
+  "ranked": [
+    {
+      "title": "Validate receiver readiness",
+      "tier": "Tier 1 · Urgent",
+      "color": "rgb(253, 228, 225)",
+      "roles": [
+        "grokbot",
+        "rakazo"
+      ],
+      "startCheckbox": false
+    },
+    {
+      "title": "Validate sender readiness",
+      "tier": "Tier 2 · Time-sensitive",
+      "color": "rgb(255, 237, 194)",
+      "roles": [
+        "grokbot",
+        "rakazo"
+      ],
+      "startCheckbox": false
+    },
+    {
+      "title": "Wait for a review window",
+      "tier": "Tier 2 · Time-sensitive",
+      "color": "rgb(255, 237, 194)",
+      "roles": [],
+      "startCheckbox": false
+    },
+    {
+      "title": "Triage new samples",
+      "tier": "Tier 3 · Current",
+      "color": "rgb(226, 239, 251)",
+      "roles": [
+        "grokbot",
+        "rakazo"
+      ],
+      "startCheckbox": false
+    },
+    {
+      "title": "Review calibration samples",
+      "tier": "Tier 4 · Backlog",
+      "color": "rgb(235, 236, 239)",
+      "roles": [],
+      "startCheckbox": true
+    },
+    {
+      "title": "Archive superseded prototypes",
+      "tier": "Tier 4 · Backlog",
+      "color": "rgb(235, 236, 239)",
+      "roles": [
+        "grokbot",
+        "rakazo"
+      ],
+      "startCheckbox": false
+    }
+  ],
+  "filed": [
+    {
+      "title": "Triage new samples",
+      "tier": "Tier 3 · Current",
+      "color": "rgb(226, 239, 251)",
+      "roles": [
+        "grokbot",
+        "rakazo"
+      ],
+      "startCheckbox": false
+    },
+    {
+      "title": "Validate receiver readiness",
+      "tier": "Tier 1 · Urgent",
+      "color": "rgb(253, 228, 225)",
+      "roles": [
+        "grokbot",
+        "rakazo"
+      ],
+      "startCheckbox": false
+    },
+    {
+      "title": "Validate sender readiness",
+      "tier": "Tier 2 · Time-sensitive",
+      "color": "rgb(255, 237, 194)",
+      "roles": [
+        "grokbot",
+        "rakazo"
+      ],
+      "startCheckbox": false
+    },
+    {
+      "title": "Review calibration samples",
+      "tier": "Tier 4 · Backlog",
+      "color": "rgb(235, 236, 239)",
+      "roles": [],
+      "startCheckbox": true
+    },
+    {
+      "title": "Wait for a review window",
+      "tier": "Tier 2 · Time-sensitive",
+      "color": "rgb(255, 237, 194)",
+      "roles": [],
+      "startCheckbox": false
+    },
+    {
+      "title": "Archive superseded prototypes",
+      "tier": "Tier 4 · Backlog",
+      "color": "rgb(235, 236, 239)",
+      "roles": [
+        "grokbot",
+        "rakazo"
+      ],
+      "startCheckbox": false
+    }
+  ]
+}

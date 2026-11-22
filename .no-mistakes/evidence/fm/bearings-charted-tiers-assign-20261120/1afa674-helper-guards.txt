@@ -1,0 +1,61 @@
+$ bin/fm-bearings-helper.sh prepare <browser wake> 1 1 "Obtain written receiver approval."
+{
+  "agent": "rakazo",
+  "blockers": "prerequisite",
+  "hold": "",
+  "owner": "(main)",
+  "position": "1",
+  "prerequisite": "Obtain written receiver approval.",
+  "question": "recent-due",
+  "route_host": null,
+  "sequence": "1",
+  "source": "lavish-df6e19750293232f",
+  "title": "Validate receiver readiness",
+  "until": ""
+}
+
+Unconfirmed send command
+fm-bearings-helper: trusted-chat confirmation and the exact prepared plan are required
+
+Same recipient role at a different inbox after the confirmation plan
+fm-bearings-helper: request changed since confirmation; prepare a new plan
+
+Role retired from the delivery registry after the confirmation plan
+fm-bearings-helper: rakazo is not an eligible role at the configured inbox
+
+Task moved to In flight after the confirmation plan
+fm-bearings-helper: recent-due is no longer queued
+
+Prose prerequisite changed after the confirmation plan
+fm-bearings-helper: no verified unmet start condition for recent-due
+
+Confirmed send and retry with the unchanged task and route
+sent: fm-helper-lavish-df6e19750293232f-1-1.md
+already-sent: fm-helper-lavish-df6e19750293232f-1-1
+---
+type: continuum-packet
+schema: packet-router/v1
+kind: note
+id: fm-helper-lavish-df6e19750293232f-1-1
+from: firstmate
+role_target: "rakazo"
+ask_of: "rakazo"
+created_at_pt: "2026-11-21T16:20:46"
+ttl_hours: 2
+priority: normal
+status: new
+read_only: true
+dedupe_key: "fm-helper-lavish-df6e19750293232f-1-1"
+---
+
+Please send Firstmate evidence or recommendations to help meet these start conditions.
+
+Task: Validate receiver readiness (recent-due, owner (main))
+Open blockers: prerequisite
+Prerequisite: Obtain written receiver approval.
+
+Bearings request: lavish-df6e19750293232f sequence 1 assignment 1
+handled: lavish-df6e19750293232f 1
+reconciled: published=0 started=1 stopped=0 uncertain=0 failed=0
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-df6e19750293232f      lavish       live       0

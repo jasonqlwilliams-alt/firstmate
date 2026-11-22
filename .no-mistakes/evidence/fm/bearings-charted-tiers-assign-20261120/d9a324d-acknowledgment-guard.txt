@@ -1,0 +1,39 @@
+{"owner":"(main)","question":"recent-due","agent":"rakazo"}
+{"question":"old-due","agent":"grokbot","owner":"(main)"}
+
+$ fm-procevent.sh handled lavish-be061078dc34767c 4
+exit=1
+{"agent":"rakazo","owner":"(main)","question":"recent-due"}
+{"owner":"(main)","agent":"grokbot","question":"old-due"}
+fm-bearings-helper: Bearings helper requests require a recorded outcome before acknowledgment. Follow the Bearings skill and seek confirmation for eligible requests in trusted chat.
+
+$ fm-procevent.sh handled lavish-be061078dc34767c 4 --assignments-resolved
+exit=1
+No delivery or dismissal recorded for helper request 1.
+{"owner":"(main)","agent":"rakazo","question":"recent-due"}
+{"question":"old-due","agent":"grokbot","owner":"(main)"}
+fm-bearings-helper: Bearings helper requests require a recorded outcome before acknowledgment. Follow the Bearings skill and seek confirmation for eligible requests in trusted chat.
+Preparation included the live blocker and prose condition.
+
+$ fm-bearings-helper.sh send {"agent":"rakazo","backlog_data":"{run-worktree}/.bearings-live-d9a324d/fleet/data","blockers":"approval","hold":"","inbox":"{run-worktree}/.bearings-live-d9a324d/fleet/delivery/inbox/new","owner":"(main)","position":"1","prerequisite":"Obtain written receiver approval.","question":"recent-due","route_host":null,"sequence":"4","source":"lavish-be061078dc34767c","title":"Confirm receiver readiness","until":""}
+exit=1
+fm-bearings-helper: trusted-chat confirmation and the exact prepared plan are required
+
+$ fm-bearings-helper.sh dismiss lavish-be061078dc34767c 4 2 --ineligible
+exit=1
+fm-bearings-helper: request is eligible for confirmation
+dismissed: lavish-be061078dc34767c 4 1
+
+$ fm-procevent.sh handled lavish-be061078dc34767c 4 --assignments-resolved
+exit=1
+No delivery or dismissal recorded for helper request 2.
+{"question":"recent-due","owner":"(main)","agent":"rakazo"}
+{"agent":"grokbot","question":"old-due","owner":"(main)"}
+fm-bearings-helper: Bearings helper requests require a recorded outcome before acknowledgment. Follow the Bearings skill and seek confirmation for eligible requests in trusted chat.
+dismissed: lavish-be061078dc34767c 4 2
+handled: lavish-be061078dc34767c 4
+already-handled: lavish-be061078dc34767c 4
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-be061078dc34767c      lavish       none       3
+
+Verified the handled marker, two recorded dismissals, empty outbox and unchanged backlog.

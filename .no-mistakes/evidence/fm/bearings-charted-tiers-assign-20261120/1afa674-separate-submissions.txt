@@ -1,0 +1,36 @@
+retired: lavish-30172a172543a25a
+Two separate Send to Agent clicks issued in the same Chromium session: grokbot, then rakazo.
+bound: lavish-30172a172543a25a -> (any)
+registered: lavish-30172a172543a25a (lavish)
+armed: lavish-30172a172543a25a
+artifact: {run-worktree}/.bearings-live-1afa674/separate/.lavish/bearings-board.html
+reconciled: published=0 started=1 stopped=0 uncertain=0 failed=0
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 2
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 2
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 2
+element_uid: 1
+element_selector: div#bb-charted > div > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Validate receiver readiness → grokbot
+ANNOTATION 2 of 2
+element_uid: 1
+element_selector: div#bb-charted > div > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Validate receiver readiness → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (2 of 2)
+{"agent":"grokbot","question":"recent-due","owner":"(main)"}
+{"question":"recent-due","owner":"(main)","agent":"rakazo"}
+handled: lavish-30172a172543a25a 1

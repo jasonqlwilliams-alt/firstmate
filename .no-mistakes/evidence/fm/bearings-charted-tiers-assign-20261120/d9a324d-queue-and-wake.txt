@@ -1,0 +1,25 @@
+Selected grokbot, then rakazo for the same row before one browser Send. The browser asserted no wake or outbox entries before Send.
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Confirm receiver readiness → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (1 of 1)
+{"owner":"(main)","question":"recent-due","agent":"rakazo"}
+No keyed answers or reconciliation requests produced.
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-be061078dc34767c      lavish       none       1

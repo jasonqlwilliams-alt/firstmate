@@ -1,0 +1,108 @@
+Pi 1.5.0 RPC with local Qwen3.5-9B and llama.cpp. All input and routes are synthetic.
+Replayed the canonical encoded Pi watcher message for the real runner wake.
+
+Pi input: ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: procevent lavish lavish-035b17d41db8aef9 1
+
+Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+$ bash {"command": "cat state/procevent-inbox/lavish-035b17d41db8aef9.1.result"}
+$ bash {"command": "bin/fm-procevent-lavish.sh read state/procevent-inbox/lavish-035b17d41db8aef9.1.result"}
+$ bash {"command": "bin/fm-procevent-lavish.sh assignments state/procevent-inbox/lavish-035b17d41db8aef9.1.result"}
+Tool result: session:
+  file: {run-worktree}/.bearings-live-d9a324d/pi-wire/.lavish/bearings-board.html
+  status: feedback
+prompts[1]{uid,prompt,selector,tag,text}:
+  "1","Request help meeting this item's start conditions.\n\nContext data:\n{\n  \"schema\": \"fm-bearings-assignment.v1\",\n  \"question\": \"recent-due\",\n  \"owner\": \"(main)\",\n  \"agent\": \"rakazo\"\n}","div#bb-charted > div:nth-of-type(1) > div:nth-of-type(1) > div > form",choice,Confirm receiver readiness → rakazo
+next_step: "Apply the requested changes to {run-worktree}/.bearings-live-d9a324d/pi-wire/.lavish/bearings-board.html. Do not respond to the user just yet. If you are continuing to wait for feedback, run `lavish-axi poll {run-worktree}/.bearings-live-d9a324d/pi-wire/.lavish/bearings-board.html --agent-reply \"<message for the user>\"` without --timeout-ms to reply and keep polling. If instead you are handing back a result without starting another long-poll, run `lavish-axi reply {run-worktree}/.bearings-live-d9a324d/pi-wire/.lavish/bearings-board.html --agent-reply \"<message for the user>\"` to post it and receive an acceptance receipt. Keep the reply concise. Only when a longer reply is genuinely necessary, use Markdown structure - blank-line paragraphs, `- ` / `1. ` lists, `## ` headings - so it renders scannably instead of a wall of text, and pass that body with `--agent-reply-file <path>` (`-` reads stdin) so newlines survive quoting. The Conversation panel's Markdown subset is in `lavish-axi poll --help` and README. The poll waits silently until the user sends more feedback, ends the session, or leaves every review window disconnected past the reconnect grace period - never kill it. Keep the poll in the foreground by default and let it return the feedback directly to the agent. A background poll is allowed only through a harness-native tracked background-job facility whose completion result is guaranteed to resume or notify the same agent. Never use `nohup`, shell `&`, `disown`, redirected fire-and-forget processes, or a detached terminal without an explicit verified callback merely to keep polling alive. If the harness has no completion-aware background facility, use the foreground poll or first wire a verified wake callback into the surrounding supervisor. Do not tell the user the artifact is being monitored until that wake path is live. If the poll gets killed or times out before feedback arrives, re-run it - feedback remains queued until delivery. Poll delivery consumes the response, so read it completely. If it returns browser_disconnected, the review window stayed disconnected past its reconnect grace period but the session remains resumable; ask the user whether to reopen or end it, and do neither uninvited."
+dom_snapshot: "uid=2 body \"bearings ITEM DETAILS 0 NEED YOU 0 UNDERWAY 0 LANDED RECENTLY 10 CHARTED NEXT CA\"\n  uid=3 header \"bearings ITEM DETAILS\"\n    uid=4 div \"bearings ITEM DETAILS\"\n      uid=5 span \"bearings\"\n        uid=6 span\n          uid=7 svg\n            uid=8 path\n            uid=9 path\n            uid=10 path\n            uid=11 circle\n        uid=12 span \"bearings\"\n      uid=13 a \"ITEM DETAILS\"\n  uid=14 main \"0 NEED YOU 0 UNDERWAY 0 LANDED RECENTLY 10 CHARTED NEXT CAPTAIN'S CALL NOTHING N\"\n    uid=15 div \"0 NEED YOU 0 UNDERWAY 0 LANDED RECENTLY 10 CHARTED NEXT\"\n      uid=16 div \"0 NEED YOU\"\n        uid=17 span \"0\"\n        uid=18 span \"NEED YOU\"\n      uid=19 div \"0 UNDERWAY\"\n        uid=20 span \"0\"\n        uid=21 span \"UNDERWAY\"\n      uid=22 div \"0 LANDED RECENTLY\"\n        uid=23 span \"0\"\n        uid=24 span \"LANDED RECENTLY\"\n      uid=25 div \"10 CHARTED NEXT\"\n        uid=26 span \"10\"\n        uid=27 span \"CHARTED NEXT\"\n    uid=28 div \"CAPTAIN'S CALL NOTHING NEEDS YOU, CAPTAIN Nothing needs your action right now. -\"\n      uid=29 section \"CAPTAIN'S CALL NOTHING NEEDS YOU, CAPTAIN Nothing needs your action right now. -\"\n        uid=30 div \"CAPTAIN'S CALL NOTHING NEEDS YOU, CAPTAIN\"\n          uid=31 span \"CAPTAIN'S CALL\"\n            uid=32 svg\n          uid=33 span \"NOTHING NEEDS YOU, CAPTAIN\"\n        uid=34 div \"Nothing needs your action right now. -\"\n          uid=35 div \"Nothing needs your action righ
+Tool result: SESSION-ENDING MESSAGE: (none)
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Confirm receiver readiness → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (1 of 1)
+
+Tool result: {"question":"recent-due","owner":"(main)","agent":"rakazo"}
+
+$ bash {"command": "bin/fm-bearings-helper.sh prepare lavish-035b17d41db8aef9 1 1"}
+Tool result: Confirmation preview for rakazo:
+Task: Confirm receiver readiness (recent-due, owner (main))
+Open blockers: approval
+{"agent":"rakazo","backlog_data":"{run-worktree}/.bearings-live-d9a324d/pi-wire/data","blockers":"approval","hold":"","inbox":"{run-worktree}/.bearings-live-d9a324d/pi-wire/delivery/inbox/new","owner":"(main)","position":"1","prerequisite":"","question":"recent-due","route_host":null,"sequence":"1","source":"lavish-035b17d41db8aef9","title":"Confirm receiver readiness","until":""}
+
+Firstmate: **Charted Next helper request prepared:**
+
+**Task:** Confirm receiver readiness (recent-due, owner (main))
+**Agent:** rakazo
+**Open blockers:** approval
+
+**JSON Plan:**
+```json
+{"agent":"rakazo","backlog_data":"{run-worktree}/.bearings-live-d9a324d/pi-wire/data","blockers":"approval","hold":"","inbox":"{run-worktree}/.bearings-live-d9a324d/pi-wire/delivery/inbox/new","owner":"(main)","position":"1","prerequisite":"","question":"recent-due","route_host":null,"sequence":"1","source":"lavish-035b17d41db8aef9","title":"Confirm receiver readiness","until":""}
+```
+
+**Question:** Captain, shall I send the Packet Router note to confirm receiver readiness for rakazo? The note is pending approval blocker.
+
+Awaiting your confirmation to proceed.
+Pi agent settled.
+Before approval. Inbox events: [] packets: [] handled: False
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-035b17d41db8aef9      lavish       none       1
+Before approval checks: {'no pre-confirmation side effects': True, 'asked for confirmation': True, 'preview quoted with blocker': False}
+
+Pi input: Yes, I confirm sending the advisory note as requested to rakazo.
+$ bash {"command": "bin/fm-bearings-helper.sh send --confirmed '{\"agent\":\"rakazo\",\"backlog_data\":\"{run-worktree}/.bearings-live-d9a324d/pi-wire/data\",\"blockers\":\"approval\",\"hold\":\"\",\"inbox\":\"{run-worktree}/.bearings-live-d9a324d/pi-wire/delivery/inbox/new\",\"owner\":\"(main)\",\"position\":\"1\",\"prerequisite\":\"\",\"question\":\"recent-due\",\"route_host\":null,\"sequence\":\"1\",\"source\":\"lavish-035b17d41db8aef9\",\"title\":\"Confirm receiver readiness\",\"until\":\"\"}'"}
+Tool result: sent: {run-worktree}/.bearings-live-d9a324d/pi-wire/delivery/inbox/new/fm-helper-lavish-035b17d41db8aef9-1-1.md
+
+$ bash {"command": "bin/fm-procevent.sh handled lavish-035b17d41db8aef9 1 --assignments-resolved"}
+Tool result: handled: lavish-035b17d41db8aef9 1
+
+Firstmate: **Wake acknowledged.** Advisory note sent to rakazo for receiver readiness confirmation. The Packet Router note has been published to the delivery inbox.
+Pi agent settled.
+After approval. Inbox events: [('0x100', '.fm-helper.0TmDKj'), ('0x8', '.fm-helper.0TmDKj'), ('0x2', '.fm-helper.0TmDKj'), ('0x8', '.fm-helper.0TmDKj'), ('0x100', 'fm-helper-lavish-035b17d41db8aef9-1-1.md'), ('0x200', '.fm-helper.0TmDKj')] packets: ['fm-helper-lavish-035b17d41db8aef9-1-1.md'] handled: True
+---
+type: continuum-packet
+schema: packet-router/v1
+kind: note
+id: fm-helper-lavish-035b17d41db8aef9-1-1
+from: firstmate
+role_target: "rakazo"
+ask_of: "rakazo"
+created_at_pt: "2026-11-21T17:19:44"
+ttl_hours: 2
+priority: normal
+status: new
+read_only: true
+dedupe_key: "fm-helper-lavish-035b17d41db8aef9-1-1"
+---
+
+Please send Firstmate evidence or recommendations to help meet these start conditions.
+
+Task: Confirm receiver readiness (recent-due, owner (main))
+Open blockers: approval
+
+Bearings request: lavish-035b17d41db8aef9 sequence 1 assignment 1
+
+Pi child exit status: 0
+Traceback (most recent call last):
+  File "{run-worktree}/.bearings-live-d9a324d/pi-rpc.py", line 229, in <module>
+    assert all(line in final_before for line in details), 'Delivered details differ from the preview shown to the captain.'
+           ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Delivered details differ from the preview shown to the captain.
+Rendered preview values matched the delivered packet, including task, owner, recipient and open blocker. The original literal assertion compared the Markdown markup as well as the displayed values.
+The synthetic inbox stayed empty until explicit approval. One read-only advisory and a handled wake followed approval.
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-035b17d41db8aef9      lavish       none       0

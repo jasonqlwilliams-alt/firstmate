@@ -1,0 +1,118 @@
+Pi 1.5.0 RPC using local llama.cpp b12617 CUDA. Model qwen35-9b, thinking low. All records and role bindings are synthetic.
+The isolated session receives the shipped Bearings procedure. The fixture restricts file and CLI access to the disposable home.
+
+Trusted RPC input: /bearings lavish
+$ bash {"command": "bin/fm-bearings-snapshot.sh --json --all-queued --fields bodies", "timeout": 30}
+Tool result: {
+  "schema": "fm-bearings.v1",
+  "home": ".charted-phase-0584/compose",
+  "generated": "2026-11-21T23:48:54Z",
+  "prs": "not_requested (run: /bearings include PRs)",
+  "in_flight": [],
+  "secondmates": [],
+  "secondmate_reconcile": [],
+  "decisions_open": [],
+  "landed": [],
+  "gates": [
+    {
+      "id": "matrix-now-urgent",
+      "title": "Confirm sender readiness",
+      "blocked_by": "sample-approval",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-11-18",
+      "waits_since": "2026-11-18",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "matrix-current",
+      "title": "Triage recent benchmark summaries",
+      "blocked_by": "sample-approval",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-11-15",
+      "waits_since": "2026-11-15",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "matrix-stale-urgent",
+      "title": "Provide receiver instrumentation",
+      "blocked_by": "sample-approval",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-10-03",
+      "waits_since": "2026-10-03",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "matrix-active-hold",
+      "title": "Audit delivery screenshots",
+      "blocked_by": "-",
+      "reason": "until 2026-11-25: waiting for review window",
+      "owner": "(main)",
+      "filed": "2026-10-01",
+      "waits_since": "2026-10-01",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "sample-approval",
+      "title": "Written contract test approval",
+      "blocked_by": "-",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-09-18",
+      "waits_since": "2026-09-18",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "matrix-archive",
+      "title": "Archive old prototype logs",
+      "blocked_by": "sample-approval",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-09-18",
+      "waits_since": "2026-09-18",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    }
+  ],
+  "gate_b
+$ read {"path": "data/backlog.md"}
+Tool result: # Synthetic matrix backlog
+
+## In flight
+
+- [ ] matrix-active-hold - Audit delivery screenshots (repo: synthetic) (kind: ship) (since 2026-10-01) (hold: waiting for review window) (hold-kind: captain) (hold-until: 2026-11-25)
+
+## Queued
+
+- [ ] sample-approval - Written contract test approval (repo: synthetic) (kind: ship) (since 2026-09-18)
+- [ ] matrix-now-urgent - Confirm sender readiness blocked-by: sample-approval (repo: synthetic) (kind: ship) (since 2026-11-18)
+  Due: 2026-11-24.
+  Start condition: Obtain written contract test approval.
+- [ ] matrix-stale-urgent - Provide receiver instrumentation blocked-by: sample-approval (repo: synthetic) (kind: ship) (since 2026-10-03)
+  Due: 2026-11-27.
+  Start condition: Obtain written contract test approval.
+- [ ] matrix-current - Triage recent benchmark summaries blocked-by: sample-approval (repo: synthetic) (kind: ship) (since 2026-11-15)
+  Start condition: Obtain written contract test approval.
+- [ ] matrix-archive - Archive old prototype logs blocked-by: sample-approval (repo: synthetic) (kind: ship) (since 2026-09-18)
+  Due: 2027-01-12.
+  Start condition: Obtain written contract test approval.
+
+## Done
+
+$ write None
+Tool result: Tool call "write" was not executed: the response hit the output token limit, so its arguments may be truncated. Re-issue the tool call with complete arguments.
+Pi agent_settled.
+Pi child exit status: 0.

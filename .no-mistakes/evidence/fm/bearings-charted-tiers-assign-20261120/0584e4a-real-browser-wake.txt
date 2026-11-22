@@ -1,0 +1,65 @@
+$ browser.mjs panel (after choosing grokbot, then rakazo for the same unsent request)
+Conversation
+Request help meeting this item's start conditions. Context data: { "schema": "fm-bearings-assignment.v1", "question": "export-check", "owner": "(main)", "agent": "rakazo" }
+Send & End
+Send to Agent
+
+$ bin/fm-procevent.sh list (before Send to Agent)
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-af955ddf43651d64      lavish       live       0
+
+$ browser.mjs send (click Send to Agent)
+
+$ bin/fm-procevent-lavish.sh read <result>
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Confirm export prerequisite → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (1 of 1)
+
+$ bin/fm-procevent-lavish.sh assignments <result>
+{"agent":"rakazo","owner":"(main)","question":"export-check"}
+The answers and reconciles projections are empty.
+
+$ bin/fm-procevent.sh handled <source> 1
+{"question":"export-check","owner":"(main)","agent":"rakazo"}
+error: Bearings helper requests are pending. Follow the Bearings skill and seek confirmation for eligible requests in trusted chat before acknowledging this wake.
+Exit status 1.
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-af955ddf43651d64      lavish       live       1
+Synthetic delivery inbox empty. Backlog bytes unchanged.
+
+$ bin/fm-procevent-lavish.sh read <ordinary browser feedback>
+SESSION-ENDING MESSAGE
+| Ordinary synthetic board feedback for the supervisor.
+END SESSION-ENDING MESSAGE
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+session_ending_message_count: 1
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (1 of 1)
+
+$ bin/fm-procevent.sh handled <source> 1
+handled: lavish-8030b1209c790134 1

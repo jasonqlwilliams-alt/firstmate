@@ -1,0 +1,29 @@
+Chromium queued grokbot, then replaced the unsent choice with rakazo before clicking Send to Agent.
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: div#bb-charted > div > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Validate receiver readiness → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (1 of 1)
+{"agent":"rakazo","question":"recent-due","owner":"(main)"}
+
+$ bin/fm-procevent.sh handled <source> 1
+{"agent":"rakazo","question":"recent-due","owner":"(main)"}
+error: Bearings helper requests are pending. Follow the Bearings skill and seek confirmation for eligible requests in trusted chat before acknowledging this wake.
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-59ae2b77a985ab60      lavish       none       1
+The wake remained pending, the delivery inbox remained empty, and the backlog was unchanged.

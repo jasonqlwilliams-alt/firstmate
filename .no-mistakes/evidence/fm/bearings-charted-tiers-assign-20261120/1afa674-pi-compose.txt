@@ -1,0 +1,113 @@
+Isolated Pi 1.5.0 RPC against local Qwen3.5-4B in llama.cpp. All inputs and routes are synthetic.
+Pi received the verbatim shipped procedure sections applicable to this input. Filesystem and connections were restricted to the lab and its dependency runtime.
+Trusted Pi input: /bearings lavish
+$ bash {"command": "cd {run-worktree}/.bearings-live-1afa674/compose && bin/fm-bearings-snapshot.sh --json --all-queued --fields bodies", "timeout": 30}
+Tool result: {
+  "schema": "fm-bearings.v1",
+  "home": ".bearings-live-1afa674/compose",
+  "generated": "2026-11-21T23:59:50Z",
+  "prs": "not_requested (run: /bearings include PRs)",
+  "in_flight": [],
+  "secondmates": [],
+  "secondmate_reconcile": [],
+  "decisions_open": [],
+  "landed": [],
+  "gates": [
+    {
+      "id": "recent",
+      "title": "Triage new samples",
+      "blocked_by": "prerequisite",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-11-15",
+      "waits_since": "2026-11-15",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "recent-due",
+      "title": "Validate receiver readiness",
+      "blocked_by": "prerequisite",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-10-23",
+      "waits_since": "2026-10-23",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "stale-due",
+      "title": "Validate sender readiness",
+      "blocked_by": "prerequisite",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-10-22",
+      "waits_since": "2026-10-22",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "prerequisite",
+      "title": "Review calibration samples",
+      "blocked_by": "-",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-10-04",
+      "waits_since": "2026-10-04",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "active-window",
+      "title": "Wait for a review window",
+      "blocked_by": "-",
+      "reason": "until 2026-11-24: review window",
+      "owner": "(main)",
+      "filed": "2026-10-03",
+      "waits_since": "2026-10-03",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    }
+$ bash {"command": "cd {run-worktree}/.bearings-live-1afa674/compose && bin/fm-bearings-board.sh draft /dev/stdin > /tmp/board_payload.json", "timeout": 30}
+Tool result (error): /bin/bash: line 1: /tmp/board_payload.json: Permission denied
+
+
+Command exited with code 1
+$ bash {"command": "cd {run-worktree}/.bearings-live-1afa674/compose && bin/fm-bearings-board.sh draft", "timeout": 30}
+Tool result (error): fm-bearings-board.sh - build and arm the /bearings lavish fleet board.
+
+The board is the captain-facing interactive surface of /bearings lavish: the
+shipped template (.agents/skills/bearings/assets/board-template.html) plus one
+injected fm-bearings-board.v1 JSON payload. This script owns the mechanics so
+the invoking agent's per-run work stays "compose the JSON, run build" - the
+agent never authors board UI at invocation time.
+
+Usage:
+  fm-bearings-board.sh draft <bearings-snapshot.json>
+  fm-bearings-board.sh build <data.json>
+  fm-bearings-board.sh path
+
+draft      Print a valid board payload from a fresh fm-bearings.v1 snapshot
+           with all queued gates included. Prefill fixed fields, Charted
+           Next ranks and the delivery roster. Captain's Call card copy
+           remains the composer's responsibility. This command only reads.
+build      Validate the payload, drop the Captain's Call cards whose subject
+           already landed, give every surviving decision card the standard
+           reconcile choice, and inject the result into a fresh copy of the
+           shipped template at the stable board path. From those same
+           reconciled payload bytes, render the static sibling detail page
+           ($FM_HOME/.lavish/bearings-detail.html) for Charted Next and
+           Recently Landed plus an escaped local report view at
+           $FM_HOME/.lavish/bearings-reports.html, and - when
+           config/bearings-canvas-dir names an
+           existing absolute directory - export the same detail model as one
+           self-contained Cursor Canvas file (bearings-detail.canvas.tsx)
+           inside that directory. Establish the Lavish
+           session on that board and PROVE it is live BEFORE binding and
+           arming its answer source, so a re
+Pi child exit status: 0

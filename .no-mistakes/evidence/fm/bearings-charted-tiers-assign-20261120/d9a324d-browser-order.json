@@ -1,0 +1,124 @@
+{
+  "url": "http://127.0.0.1:4387/session/be061078dc34767c",
+  "byRank": [
+    {
+      "title": "Confirm receiver readiness",
+      "tier": "Tier 1 · Urgent",
+      "color": "rgb(135, 38, 36)",
+      "background": "rgb(253, 228, 225)",
+      "picker": [
+        "grokbot",
+        "rakazo"
+      ],
+      "ready": false
+    },
+    {
+      "title": "Confirm sender readiness",
+      "tier": "Tier 2 · Time-sensitive",
+      "color": "rgb(107, 65, 0)",
+      "background": "rgb(255, 237, 194)",
+      "picker": [
+        "grokbot",
+        "rakazo"
+      ],
+      "ready": false
+    },
+    {
+      "title": "Wait for review window",
+      "tier": "Tier 2 · Time-sensitive",
+      "color": "rgb(107, 65, 0)",
+      "background": "rgb(255, 237, 194)",
+      "picker": [],
+      "ready": false
+    },
+    {
+      "title": "Inspect access gate",
+      "tier": "Tier 3 · Current",
+      "color": "rgb(33, 78, 120)",
+      "background": "rgb(226, 239, 251)",
+      "picker": [],
+      "ready": false
+    },
+    {
+      "title": "Triage recent samples",
+      "tier": "Tier 3 · Current",
+      "color": "rgb(33, 78, 120)",
+      "background": "rgb(226, 239, 251)",
+      "picker": [
+        "grokbot",
+        "rakazo"
+      ],
+      "ready": false
+    },
+    {
+      "title": "Update runbook",
+      "tier": "Tier 3 · Current",
+      "color": "rgb(33, 78, 120)",
+      "background": "rgb(226, 239, 251)",
+      "picker": [
+        "grokbot",
+        "rakazo"
+      ],
+      "ready": false
+    },
+    {
+      "title": "Check calibration reference",
+      "tier": "Tier 4 · Backlog",
+      "color": "rgb(69, 73, 82)",
+      "background": "rgb(235, 236, 239)",
+      "picker": [
+        "grokbot",
+        "rakazo"
+      ],
+      "ready": false
+    },
+    {
+      "title": "Review approval paperwork",
+      "tier": "Tier 4 · Backlog",
+      "color": "rgb(69, 73, 82)",
+      "background": "rgb(235, 236, 239)",
+      "picker": [],
+      "ready": true
+    },
+    {
+      "title": "Archive prototypes",
+      "tier": "Tier 4 · Backlog",
+      "color": "rgb(69, 73, 82)",
+      "background": "rgb(235, 236, 239)",
+      "picker": [
+        "grokbot",
+        "rakazo"
+      ],
+      "ready": false
+    },
+    {
+      "title": "Request planning decision",
+      "tier": "Tier 4 · Backlog",
+      "color": "rgb(69, 73, 82)",
+      "background": "rgb(235, 236, 239)",
+      "picker": [],
+      "ready": false
+    },
+    {
+      "title": "in-flight backlog item has no child metadata",
+      "tier": null,
+      "color": null,
+      "background": null,
+      "picker": [],
+      "ready": false
+    }
+  ],
+  "byFiled": [
+    "Inspect access gate",
+    "Triage recent samples",
+    "Confirm receiver readiness",
+    "Confirm sender readiness",
+    "Check calibration reference",
+    "Update runbook",
+    "Review approval paperwork",
+    "Archive prototypes",
+    "Wait for review window",
+    "Request planning decision",
+    "in-flight backlog item has no child metadata"
+  ]
+}

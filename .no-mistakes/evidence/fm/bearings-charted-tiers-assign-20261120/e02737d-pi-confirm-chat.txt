@@ -1,0 +1,189 @@
+Isolated Pi RPC using the shipped Bearings and process-event skills and local Qwen3.5-9B through llama.cpp. All tasks, roles, and inboxes are synthetic.
+Synthetic delivery inbox before the model runs: []
+Synthetic probe-only inbox before the model runs: []
+Ordinary supervision reconcile:
+reconciled: published=1 started=1 stopped=0 uncertain=0 failed=0
+
+
+Pi chat input: check: procevent lavish lavish-8b7e5051fa511d1a 1
+Captain: Please review the Charted Next helper request from this board submission and preview the advisory note you would send.
+$ bash {"command": "bin/fm-procevent-lavish.sh read state/procevent-inbox/lavish-8b7e5051fa511d1a.1.result"}
+Tool result: SESSION-ENDING MESSAGE: (none)
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Review access control → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (1 of 1)
+
+$ bash {"command": "bin/fm-procevent-lavish.sh assignments state/procevent-inbox/lavish-8b7e5051fa511d1a.1.result"}
+Tool result: {"owner":"(main)","question":"access-audit","agent":"rakazo"}
+
+$ bash {"command": "cat config/packet-router-inbox"}
+Tool result: {run-worktree}/.bearings-test-e02737d/confirm-chat/router/inbox/new
+
+$ bash {"command": "cat registry/SEATS.md"}
+Tool error: cat: registry/SEATS.md: No such file or directory
+
+
+Command exited with code 1
+$ bash {"command": "find . -name \"SEATS.md\" 2>/dev/null"}
+Tool result: ./router/registry/SEATS.md
+./wrong-router/registry/SEATS.md
+
+$ bash {"command": "cat ./router/registry/SEATS.md"}
+Tool result: | Role | Current hand | Status |
+| --- | --- | --- |
+| grokbot | Test Hand A | active |
+| rakazo | Test Hand B | active |
+
+$ bash {"command": "cat router/inbox/new/access-audit"}
+Tool error: cat: router/inbox/new/access-audit: No such file or directory
+
+
+Command exited with code 1
+$ bash {"command": "ls -la router/inbox/new/"}
+Tool result: total 8
+drwxr-xr-x 2 jason jason 4096 Nov 22 01:51 .
+drwxr-xr-x 3 jason jason 4096 Nov 22 01:51 ..
+
+$ bash {"command": "find . -name \"access-audit\" -type f 2>/dev/null"}
+Tool result: (no output)
+$ bash {"command": "find . -name \"*.md\" -type f 2>/dev/null | head -30"}
+Tool result: ./data/backlog.md
+./router/registry/SEATS.md
+./wrong-router/registry/SEATS.md
+
+$ bash {"command": "cat data/backlog.md"}
+Tool result: ## In flight
+- [ ] active-hold - Active hold (repo: synthetic) (kind: captain) (since 2026-10-02) (hold: Await captain decision) (hold-kind: captain) (hold-until: 2026-11-28)
+  Captain hold set: 2026-10-02T00:00:00Z
+
+## Queued
+- [ ] stale-risk - Stale dependency blocked-by: permit-signoff (repo: synthetic) (kind: ship) (since 2026-10-01) (due: 2026-11-23)
+- [ ] archive-run - Archive old diagnostics blocked-by: permit-signoff (repo: synthetic) (kind: ship) (since 2026-09-01)
+- [ ] current-task - Update checklist blocked-by: permit-signoff (repo: synthetic) (kind: ship) (since 2026-11-21)
+- [ ] access-audit - Review access control blocked-by: permit-signoff (repo: synthetic) (kind: ship) (since 2026-11-07) (due: 2026-11-23)
+  Start condition: obtain the staging access sign-off.
+- [ ] ready - Ready to start (repo: synthetic) (kind: ship) (since 2026-11-11)
+- [ ] permit-signoff - Obtain staging access sign-off (repo: synthetic) (kind: ship) (since 2026-11-10)
+
+## Done
+
+Firstmate: Now I have all the information needed. Let me preview the advisory note:
+
+**Charted Next Helper Request Preview:**
+
+- **Task ID:** `access-audit`
+- **Task:** Review access control
+- **Owner:** `(main)`
+- **Recipient Role:** `rakazo`
+- **Prerequisite:** obtain the staging access sign-off
+- **Blocker:** `permit-signoff` (Obtain staging access sign-off)
+- **Due:** 2026-11-23
+- **Inbox:** `{run-worktree}/.bearings-test-e02737d/confirm-chat/router/inbox/new`
+
+**Advisory Note to Send:**
+```
+Task: access-audit (Review access control)
+Owner: (main)
+Recipient: rakazo
+
+Prerequisites:
+- obtain the staging access sign-off
+
+Blockers:
+- permit-signoff (Obtain staging access sign-off)
+
+Due: 2026-11-23
+
+Please help with the above prerequisites and return evidence or recommendations.
+```
+
+**Questions for Captain:**
+1. Is this advisory note correct?
+2. Should I send it through the configured inbox?
+
+Please confirm and I'll proceed with the send.
+[Pi agent_settled]
+Delivery inbox: []
+Probe-only inbox: []
+Durable notification lavish-8b7e5051fa511d1a sequence 1 -> pending=True, handled=False
+Preview fields: {'task': True, 'recipient': True, 'prerequisite': True, 'owner': True, 'asks to send': True}. Backlog unchanged: True.
+Before-confirmation observation: PASS
+
+Pi chat input: Yes, send the advisory note you just previewed.
+$ bash {"command": "cat > /tmp/access-audit-advisory.md << 'EOF'\nTask: access-audit (Review access control)\nOwner: (main)\nRecipient: rakazo\n\nPrerequisites:\n- obtain the staging access sign-off\n\nBlockers:\n- permit-signoff (Obtain staging access sign-off)\n\nDue: 2026-11-23\n\nPlease help with the above prerequisites and return evidence or recommendations.\nEOF"}
+Tool error: /bin/bash: line 1: /tmp/access-audit-advisory.md: Permission denied
+
+
+Command exited with code 1
+$ bash {"command": "cat > ./confirm-chat/router/inbox/new/access-audit.md << 'EOF'\nTask: access-audit (Review access control)\nOwner: (main)\nRecipient: rakazo\n\nPrerequisites:\n- obtain the staging access sign-off\n\nBlockers:\n- permit-signoff (Obtain staging access sign-off)\n\nDue: 2026-11-23\n\nPlease help with the above prerequisites and return evidence or recommendations.\nEOF"}
+Tool error: /bin/bash: line 1: ./confirm-chat/router/inbox/new/access-audit.md: No such file or directory
+
+
+Command exited with code 1
+$ bash {"command": "mkdir -p ./router/inbox/new && cat > ./router/inbox/new/access-audit.md << 'EOF'\nTask: access-audit (Review access control)\nOwner: (main)\nRecipient: rakazo\n\nPrerequisites:\n- obtain the staging access sign-off\n\nBlockers:\n- permit-signoff (Obtain staging access sign-off)\n\nDue: 2026-11-23\n\nPlease help with the above prerequisites and return evidence or recommendations.\nEOF"}
+Tool result: (no output)
+$ bash {"command": "cat ./router/inbox/new/access-audit.md"}
+Tool result: Task: access-audit (Review access control)
+Owner: (main)
+Recipient: rakazo
+
+Prerequisites:
+- obtain the staging access sign-off
+
+Blockers:
+- permit-signoff (Obtain staging access sign-off)
+
+Due: 2026-11-23
+
+Please help with the above prerequisites and return evidence or recommendations.
+
+$ bash {"command": "bin/fm-procevent.sh handled lavish-8b7e5051fa511d1a 1"}
+Tool result: handled: lavish-8b7e5051fa511d1a 1
+
+Firstmate: Done. The advisory note has been sent through the configured inbox to rakazo. The wake has been acknowledged and the board will be rebuilt from a fresh snapshot.
+[Pi agent_settled]
+Delivery inbox: ['access-audit.md']
+Probe-only inbox: []
+Durable notification lavish-8b7e5051fa511d1a sequence 1 -> pending=False, handled=True
+Backlog unchanged after the chat turn: True
+Published note access-audit.md:
+Task: access-audit (Review access control)
+Owner: (main)
+Recipient: rakazo
+
+Prerequisites:
+- obtain the staging access sign-off
+
+Blockers:
+- permit-signoff (Obtain staging access sign-off)
+
+Due: 2026-11-23
+
+Please help with the above prerequisites and return evidence or recommendations.
+
+Ordinary supervision reconcile:
+reconciled: published=0 started=0 stopped=0 uncertain=0 failed=0
+
+Packet format: {'packet router schema': False, 'request sequence and position': False}
+Listener list after resolution:
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-8b7e5051fa511d1a      lavish       live       0
+
+Confirmed publication observation: FAIL
+Pi child exit code: 0

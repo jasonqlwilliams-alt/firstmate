@@ -1,0 +1,15 @@
+Isolated Pi 1.5.0 RPC against local Qwen3.5-4B in llama.cpp. All inputs and routes are synthetic.
+Pi received the verbatim shipped procedure sections applicable to this input. Filesystem and connections were restricted to the lab and its dependency runtime.
+Trusted Pi input: check: procevent lavish lavish-59ae2b77a985ab60 1
+$ bash {"command": "bin/fm-procevent-lavish.sh read lavish-59ae2b77a985ab60.1.result"}
+Tool result (error): error: result file does not exist: lavish-59ae2b77a985ab60.1.result
+
+
+Command exited with code 1
+$ bash {"command": "ls -la lavish-59ae2b77a985ab60.* 2>/dev/null || echo \"no matching files\""}
+Tool result: no matching files
+
+$ bash {"command": "ls -la lavish-59ae2b77a985ab60* 2>/dev/null || echo \"no files found\""}
+Tool result: no files found
+
+Pi child exit status: 0

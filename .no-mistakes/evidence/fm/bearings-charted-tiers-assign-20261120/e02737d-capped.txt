@@ -1,0 +1,19 @@
+Actual Lavish browser Send through a Firstmate listener configured with FM_PROCEVENT_MAX_OUTPUT_BYTES=380.
+read exit=3
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: unknown
+presented_items: 0
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+session_ending_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of unknown)
+assignments exit=0, choices=empty
+answers exit=3, choices=empty
+reconciles exit=3, choices=empty

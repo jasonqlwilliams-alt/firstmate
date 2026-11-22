@@ -1,0 +1,18 @@
+Legacy board rendered in newest-filed order with no tier badges or helper controls.
+Update checklist
+Ready to start
+Review access control
+Active hold
+Stale dependency
+Archive old diagnostics
+Synthetic inventory notice
+remove one rank → exit 1, fm-bearings-board: board data does not satisfy fm-bearings-board.v1: browser/malformed.json
+unknown rank → exit 1, fm-bearings-board: board data does not satisfy fm-bearings-board.v1: browser/malformed.json
+ownerless assignment → exit 1, fm-bearings-board: board data does not satisfy fm-bearings-board.v1: browser/malformed.json
+blank assignment owner → exit 1, fm-bearings-board: board data does not satisfy fm-bearings-board.v1: browser/malformed.json
+assignment on a dispatchable row → exit 1, fm-bearings-board: board data does not satisfy fm-bearings-board.v1: browser/malformed.json
+rank a warning → exit 1, fm-bearings-board: board data does not satisfy fm-bearings-board.v1: browser/malformed.json
+duplicate role → exit 1, fm-bearings-board: board data does not satisfy fm-bearings-board.v1: browser/malformed.json
+malformed role → exit 1, fm-bearings-board: board data does not satisfy fm-bearings-board.v1: browser/malformed.json
+unranked assignment mode → exit 1, fm-bearings-board: board data does not satisfy fm-bearings-board.v1: browser/malformed.json
+The published board remained byte-identical after every refusal.

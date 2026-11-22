@@ -1,0 +1,46 @@
+$ bin/fm-procevent-lavish.sh read <actual mixed browser capture>
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 2
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 2
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 2
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(9) > div > form
+tag: choice
+text:
+| Audit new sample data → rakazo
+ANNOTATION 2 of 2
+element_uid: 
+element_selector: 
+tag: layout-warnings
+text:
+| Layout issue: 1 selected
+prompt:
+| Fix this layout issue the browser detected in this artifact:
+| 1. [d3537856007a5864] Text cut off by its container - Rendered text crosses its container's right edge by 3528px and is hidden. Target: p#synthetic-clipped-title. Viewport: Tablet / compact (800px). Status: Queued for fix.
+| 
+| Apply every listed fix in one pass before saving so the review refreshes once. A queued layout issue is a repair request, not a resolved issue: Lavish only marks it resolved after a newer artifact load and a complete diagnostic pass for the same viewport no longer detects it.
+END ANNOTATIONS
+END LAVISH RESULT (2 of 2)
+
+$ bin/fm-procevent-lavish.sh assignments <actual mixed browser capture>
+{"agent":"rakazo","question":"current-audit","owner":"(main)"}
+Answer and reconcile projections are empty.
+
+Actual wire framing:
+prompts[2]:
+    target:
+
+$ bin/fm-procevent.sh handled <source> 1 --assignments-resolved (synthetic operator resolves without sending)
+handled: lavish-61106d4899dd7c01 1
+already-handled: lavish-61106d4899dd7c01 1
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-61106d4899dd7c01      lavish       live       0

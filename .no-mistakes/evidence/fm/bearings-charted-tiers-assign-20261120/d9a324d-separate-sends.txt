@@ -1,0 +1,5 @@
+Two browser Send actions on the same item, with different selected roles:
+Sequence 1
+{"question":"recent-due","owner":"(main)","agent":"rakazo"}
+Sequence 2
+{"owner":"(main)","question":"recent-due","agent":"grokbot"}

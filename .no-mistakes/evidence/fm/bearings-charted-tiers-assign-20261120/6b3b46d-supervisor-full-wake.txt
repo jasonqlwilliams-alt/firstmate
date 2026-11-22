@@ -1,0 +1,18 @@
+Pi 1.5.0 with local Qwen3.5-9B, real browser selection and runner capture, synthetic tasks.
+The session received the canonical board and result paths, plus the tracked Bearings wake and process-event procedures.
+
+$ bin/fm-bearings-board.sh path
+$ bin/fm-procevent-lavish.sh source-id "$(bin/fm-bearings-board.sh path)"
+$ bin/fm-procevent-lavish.sh read <synthetic-home>/state/procevent-inbox/lavish-f02d9bed5c81c109.1.result
+$ bin/fm-procevent-lavish.sh classify <synthetic-home>/state/procevent-inbox/lavish-f02d9bed5c81c109.1.result
+$ bin/fm-procevent.sh handled lavish-f02d9bed5c81c109 1
+The wake has been acknowledged as handled. The feedback result indicates the board is presenting a choice prompt ("Confirm export prerequisite → rakazo") for the captain to review, but no automatic action is required from Firstmate. The board shows 6 charted next tasks waiting for dispatch, and the feedback is simply informing the captain that there's a prerequisite confirmation needed for one of them.
+
+The board state remains unchanged - no tasks were closed, merged, or dispatched. The Firstmate has processed the feedback wake and recorded it as handled.
+
+Observed result from the real acknowledgement command:
+handled: lavish-f02d9bed5c81c109 1
+
+The same capture, queried through the deployed assignment projection:
+$ bin/fm-procevent-lavish.sh assignments <captured-result>
+{"agent":"rakazo","owner":"(main)","question":"export-check"}

@@ -1,0 +1,768 @@
+Isolated Pi RPC using the shipped Bearings and process-event skills and local Qwen3.5-9B through llama.cpp. All tasks, roles, and inboxes are synthetic.
+Synthetic delivery inbox before the model runs: []
+Synthetic probe-only inbox before the model runs: []
+
+Pi chat input: /bearings lavish
+Firstmate: I'll execute the `/bearings lavish` command to generate a fleet status report with an interactive board.
+$ bash {"command": "bin/fm-bearings-snapshot.sh --json"}
+Tool result: {
+  "schema": "fm-bearings.v1",
+  "home": ".bearings-test-e02737d/compose",
+  "generated": "2026-11-22T01:50:25Z",
+  "prs": "not_requested (run: /bearings include PRs)",
+  "in_flight": [],
+  "secondmates": [],
+  "secondmate_reconcile": [],
+  "decisions_open": [],
+  "landed": [],
+  "gates": [
+    {
+      "id": "current-task",
+      "title": "Update checklist",
+      "blocked_by": "permit-signoff",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-11-21",
+      "waits_since": "2026-11-21",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "ready",
+      "title": "Ready to start",
+      "blocked_by": "-",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-11-11",
+      "waits_since": "2026-11-11",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "permit-signoff",
+      "title": "Obtain staging access sign-off",
+      "blocked_by": "-",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-11-10",
+      "waits_since": "2026-11-10",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "access-audit",
+      "title": "Review access control",
+      "blocked_by": "permit-signoff",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-11-07",
+      "waits_since": "2026-11-07",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "active-hold",
+      "title": "Active hold",
+      "blocked_by": "-",
+      "reason": "until 2026-11-28: Await captain decision",
+      "owner": "(main)",
+      "filed": "2026-10-02",
+      "waits_since": "2026-10-02T00:00:00Z",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "stale-risk",
+      "title": "Stale dependency",
+      "blocked_by": "permit-signoff",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-10-01",
+      "waits_since": "2026-10-01",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "archive-run",
+      "title": "Archive old diagnostics",
+      "blocked_by": "permit-signoff",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-09-01",
+      "waits_since": "2026-09-01",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    }
+  ],
+  "gate_blockers": [
+    {
+      "gate": "current-task",
+      "owner": "(main)",
+      "id": "permit-signoff",
+      "title": "Obtain staging access sign-off"
+    },
+    {
+      "gate": "access-audit",
+      "owner": "(main)",
+      "id": "permit-signoff",
+      "title": "Obtain staging access sign-off"
+    },
+    {
+      "gate": "stale-risk",
+      "owner": "(main)",
+      "id": "permit-signoff",
+      "title": "Obtain staging access sign-off"
+    },
+    {
+      "gate": "archive-run",
+      "owner": "(main)",
+      "id": "permit-signoff",
+      "title": "Obtain staging access sign-off"
+    }
+  ],
+  "reports": [],
+  "recorded_prs": [],
+  "omitted": [
+    {
+      "surface": "backlog item bodies",
+      "reveal": "--fields bodies"
+    },
+    {
+      "surface": "task paths",
+      "reveal": "--fields paths"
+    },
+    {
+      "surface": "watch/steer actions",
+      "reveal": "--fields actions"
+    },
+    {
+      "surface": "healthy endpoint detail",
+      "reveal": "--fields endpoints"
+    },
+    {
+      "surface": "full scout-report inventory",
+      "reveal": "--all-reports"
+    },
+    {
+      "surface": "captain holds bucketed blocked, dated, or aged: 1",
+      "reveal": "--all-decisions"
+    },
+    {
+      "surface": "live PR discovery + checks",
+      "reveal": "--include-prs"
+    }
+  ]
+}
+
+Firstmate: Now I'll build and arm the interactive fleet board:
+$ bash {"command": "bin/fm-bearings-board.sh build"}
+Tool error: fm-bearings-board.sh - build and arm the /bearings lavish fleet board.
+
+The board is the captain-facing interactive surface of /bearings lavish: the
+shipped template (.agents/skills/bearings/assets/board-template.html) plus one
+injected fm-bearings-board.v1 JSON payload. This script owns the mechanics so
+the invoking agent's per-run work stays "compose the JSON, run build" - the
+agent never authors board UI at invocation time.
+
+Usage:
+  fm-bearings-board.sh build <data.json>
+  fm-bearings-board.sh path
+
+build      Validate the payload, drop the Captain's Call cards whose subject
+           already landed, give every surviving decision card the standard
+           reconcile choice, and inject the result into a fresh copy of the
+           shipped template at the stable board path. From those same
+           reconciled payload bytes, render the static sibling detail page
+           ($FM_HOME/.lavish/bearings-detail.html) for Charted Next and
+           Recently Landed plus an escaped local report view at
+           $FM_HOME/.lavish/bearings-reports.html, and - when
+           config/bearings-canvas-dir names an
+           existing absolute directory - export the same detail model as one
+           self-contained Cursor Canvas file (bearings-detail.canvas.tsx)
+           inside that directory. Establish the Lavish
+           session on that board and PROVE it is live BEFORE binding and
+           arming its answer source, so a registered poll can never race a
+           session that does not exist or attach to one that has ended.
+           Bind to the keyed-answer intake (bin/fm-captain-hold.sh) ALWAYS
+           precedes arm, so the board can never produce an answer that has
+           nowhere to go (captain-hold-lifecycle's ordering rule, enforced
+           here rather than left to agent memory). Output starts with
+           `board: <path>`, `detail: <path>`, and `canvas: <path> | off ...`,
+           then includes lavish-axi's session output and the remaining status:
+             session: live | reopened
+             served: <path>
+             bound: <source-id>
+             armed: <source-id>            (first registration)
+             already-armed: <source-id>    (registration already present)
+             listening: <owner>            (only when a replacement was needed)
+           Every dropped card is named on stderr as a `dropped-landed-card:`
+           line, so a rebuild states what it removed instead of quietly
+           shrinking Captain's Call.
+path       Print the stable board path for this home.
+
+A LIVE SESSION IS PROVED, NEVER ASSUMED. `lavish-axi <file>` exits 0 even
+when it refuses to reopen a session the captain ended from the browser,
+reporting `status: user-ended` with the same session id, so exit status alone
+cannot tell a live board from a dead one. build requires the server's fresh
+session listing to show the canonical board open and refuses rather than
+arming an ended session. After a reopen it retires the pre-reopen source
+generation through the guarded adapter path, arms a fresh registration, and
+accepts only the replacement listener as live. A registered board with no
+live owner also gets a replacement before build returns, because
+`already-armed` is not the same fact as `listening`.
+
+CAPTAIN'S CALL HYGIENE. A decision card is dropped when its work item, PR, or
+structured artifact/version subject appears among the payload's own landed
+rows, or when `bin/fm-captain-hold.sh open` reports the task is no longer an
+open captain call. A newer published version also supersedes a version card.
+A task whose state cannot be established is kept, because a call wrongly
+hidden is worse than a card wrongly shown. Cleanup is therefore a normal
+rebuild effect rather than a committed migration or direct state mutation.
+
+THE RECONCILE CHOICE. Every decision card carries the standard `reconcile`
+option, injected here so the guarantee does not depend on the composer's
+memory, and the payload validator reserves that value across every card type.
+The validator's reservation scope must equal the adapter's reconcile
+classification scope, which is all card types because the captured payload
+carries no card type. Its meaning, and the reason it can never reach the
+keyed-answer intake as a blind close, are owned by
+docs/captain-hold-lifecycle.md.
+
+Validation is fail-closed: the payload must be valid JSON with
+schema=fm-bearings-board.v1 and every renderer-consumed field must satisfy
+the fm-bearings-board.v1 types and item invariants below. Every fleet row and
+Captain's Call item explicitly carries `repo`; the composer fills it from the
+snapshot and task records wherever known, and uses null or an empty string
+only as the deliberate genuinely-no-repo marker. In that exceptional case
+the template may display the routing id. Anything else refuses before the
+existing board is touched.
+
+Every Underway row likewise carries a non-empty `name`: the durable task name
+when known, otherwise its durable identifier
+[tool display shortened]
+Firstmate: I need to pass the snapshot data to the build command:
+$ bash {"command": "bin/fm-bearings-board.sh build < <(bin/fm-bearings-snapshot.sh --json)"}
+Tool error: fm-bearings-board.sh - build and arm the /bearings lavish fleet board.
+
+The board is the captain-facing interactive surface of /bearings lavish: the
+shipped template (.agents/skills/bearings/assets/board-template.html) plus one
+injected fm-bearings-board.v1 JSON payload. This script owns the mechanics so
+the invoking agent's per-run work stays "compose the JSON, run build" - the
+agent never authors board UI at invocation time.
+
+Usage:
+  fm-bearings-board.sh build <data.json>
+  fm-bearings-board.sh path
+
+build      Validate the payload, drop the Captain's Call cards whose subject
+           already landed, give every surviving decision card the standard
+           reconcile choice, and inject the result into a fresh copy of the
+           shipped template at the stable board path. From those same
+           reconciled payload bytes, render the static sibling detail page
+           ($FM_HOME/.lavish/bearings-detail.html) for Charted Next and
+           Recently Landed plus an escaped local report view at
+           $FM_HOME/.lavish/bearings-reports.html, and - when
+           config/bearings-canvas-dir names an
+           existing absolute directory - export the same detail model as one
+           self-contained Cursor Canvas file (bearings-detail.canvas.tsx)
+           inside that directory. Establish the Lavish
+           session on that board and PROVE it is live BEFORE binding and
+           arming its answer source, so a registered poll can never race a
+           session that does not exist or attach to one that has ended.
+           Bind to the keyed-answer intake (bin/fm-captain-hold.sh) ALWAYS
+           precedes arm, so the board can never produce an answer that has
+           nowhere to go (captain-hold-lifecycle's ordering rule, enforced
+           here rather than left to agent memory). Output starts with
+           `board: <path>`, `detail: <path>`, and `canvas: <path> | off ...`,
+           then includes lavish-axi's session output and the remaining status:
+             session: live | reopened
+             served: <path>
+             bound: <source-id>
+             armed: <source-id>            (first registration)
+             already-armed: <source-id>    (registration already present)
+             listening: <owner>            (only when a replacement was needed)
+           Every dropped card is named on stderr as a `dropped-landed-card:`
+           line, so a rebuild states what it removed instead of quietly
+           shrinking Captain's Call.
+path       Print the stable board path for this home.
+
+A LIVE SESSION IS PROVED, NEVER ASSUMED. `lavish-axi <file>` exits 0 even
+when it refuses to reopen a session the captain ended from the browser,
+reporting `status: user-ended` with the same session id, so exit status alone
+cannot tell a live board from a dead one. build requires the server's fresh
+session listing to show the canonical board open and refuses rather than
+arming an ended session. After a reopen it retires the pre-reopen source
+generation through the guarded adapter path, arms a fresh registration, and
+accepts only the replacement listener as live. A registered board with no
+live owner also gets a replacement before build returns, because
+`already-armed` is not the same fact as `listening`.
+
+CAPTAIN'S CALL HYGIENE. A decision card is dropped when its work item, PR, or
+structured artifact/version subject appears among the payload's own landed
+rows, or when `bin/fm-captain-hold.sh open` reports the task is no longer an
+open captain call. A newer published version also supersedes a version card.
+A task whose state cannot be established is kept, because a call wrongly
+hidden is worse than a card wrongly shown. Cleanup is therefore a normal
+rebuild effect rather than a committed migration or direct state mutation.
+
+THE RECONCILE CHOICE. Every decision card carries the standard `reconcile`
+option, injected here so the guarantee does not depend on the composer's
+memory, and the payload validator reserves that value across every card type.
+The validator's reservation scope must equal the adapter's reconcile
+classification scope, which is all card types because the captured payload
+carries no card type. Its meaning, and the reason it can never reach the
+keyed-answer intake as a blind close, are owned by
+docs/captain-hold-lifecycle.md.
+
+Validation is fail-closed: the payload must be valid JSON with
+schema=fm-bearings-board.v1 and every renderer-consumed field must satisfy
+the fm-bearings-board.v1 types and item invariants below. Every fleet row and
+Captain's Call item explicitly carries `repo`; the composer fills it from the
+snapshot and task records wherever known, and uses null or an empty string
+only as the deliberate genuinely-no-repo marker. In that exceptional case
+the template may display the routing id. Anything else refuses before the
+existing board is touched.
+
+Every Underway row likewise carries a non-empty `name`: the durable task name
+when known, otherwise its durable identifier
+[tool display shortened]
+Firstmate: Let me save the snapshot to a file and then pass it to the build command:
+$ bash {"command": "bin/fm-bearings-snapshot.sh --json > /tmp/snapshot.json && bin/fm-bearings-board.sh build < /tmp/snapshot.json"}
+Tool error: /bin/bash: line 1: /tmp/snapshot.json: Permission denied
+
+
+Command exited with code 1
+$ bash {"command": "bin/fm-bearings-snapshot.sh --json > {run-worktree}/.bearings-test-e02737d/compose/snapshot.json && bin/fm-bearings-board.sh build < {run-worktree}/.bearings-test-e02737d/compose/snapshot.json"}
+Tool error: fm-bearings-board.sh - build and arm the /bearings lavish fleet board.
+
+The board is the captain-facing interactive surface of /bearings lavish: the
+shipped template (.agents/skills/bearings/assets/board-template.html) plus one
+injected fm-bearings-board.v1 JSON payload. This script owns the mechanics so
+the invoking agent's per-run work stays "compose the JSON, run build" - the
+agent never authors board UI at invocation time.
+
+Usage:
+  fm-bearings-board.sh build <data.json>
+  fm-bearings-board.sh path
+
+build      Validate the payload, drop the Captain's Call cards whose subject
+           already landed, give every surviving decision card the standard
+           reconcile choice, and inject the result into a fresh copy of the
+           shipped template at the stable board path. From those same
+           reconciled payload bytes, render the static sibling detail page
+           ($FM_HOME/.lavish/bearings-detail.html) for Charted Next and
+           Recently Landed plus an escaped local report view at
+           $FM_HOME/.lavish/bearings-reports.html, and - when
+           config/bearings-canvas-dir names an
+           existing absolute directory - export the same detail model as one
+           self-contained Cursor Canvas file (bearings-detail.canvas.tsx)
+           inside that directory. Establish the Lavish
+           session on that board and PROVE it is live BEFORE binding and
+           arming its answer source, so a registered poll can never race a
+           session that does not exist or attach to one that has ended.
+           Bind to the keyed-answer intake (bin/fm-captain-hold.sh) ALWAYS
+           precedes arm, so the board can never produce an answer that has
+           nowhere to go (captain-hold-lifecycle's ordering rule, enforced
+           here rather than left to agent memory). Output starts with
+           `board: <path>`, `detail: <path>`, and `canvas: <path> | off ...`,
+           then includes lavish-axi's session output and the remaining status:
+             session: live | reopened
+             served: <path>
+             bound: <source-id>
+             armed: <source-id>            (first registration)
+             already-armed: <source-id>    (registration already present)
+             listening: <owner>            (only when a replacement was needed)
+           Every dropped card is named on stderr as a `dropped-landed-card:`
+           line, so a rebuild states what it removed instead of quietly
+           shrinking Captain's Call.
+path       Print the stable board path for this home.
+
+A LIVE SESSION IS PROVED, NEVER ASSUMED. `lavish-axi <file>` exits 0 even
+when it refuses to reopen a session the captain ended from the browser,
+reporting `status: user-ended` with the same session id, so exit status alone
+cannot tell a live board from a dead one. build requires the server's fresh
+session listing to show the canonical board open and refuses rather than
+arming an ended session. After a reopen it retires the pre-reopen source
+generation through the guarded adapter path, arms a fresh registration, and
+accepts only the replacement listener as live. A registered board with no
+live owner also gets a replacement before build returns, because
+`already-armed` is not the same fact as `listening`.
+
+CAPTAIN'S CALL HYGIENE. A decision card is dropped when its work item, PR, or
+structured artifact/version subject appears among the payload's own landed
+rows, or when `bin/fm-captain-hold.sh open` reports the task is no longer an
+open captain call. A newer published version also supersedes a version card.
+A task whose state cannot be established is kept, because a call wrongly
+hidden is worse than a card wrongly shown. Cleanup is therefore a normal
+rebuild effect rather than a committed migration or direct state mutation.
+
+THE RECONCILE CHOICE. Every decision card carries the standard `reconcile`
+option, injected here so the guarantee does not depend on the composer's
+memory, and the payload validator reserves that value across every card type.
+The validator's reservation scope must equal the adapter's reconcile
+classification scope, which is all card types because the captured payload
+carries no card type. Its meaning, and the reason it can never reach the
+keyed-answer intake as a blind close, are owned by
+docs/captain-hold-lifecycle.md.
+
+Validation is fail-closed: the payload must be valid JSON with
+schema=fm-bearings-board.v1 and every renderer-consumed field must satisfy
+the fm-bearings-board.v1 types and item invariants below. Every fleet row and
+Captain's Call item explicitly carries `repo`; the composer fills it from the
+snapshot and task records wherever known, and uses null or an empty string
+only as the deliberate genuinely-no-repo marker. In that exceptional case
+the template may display the routing id. Anything else refuses before the
+existing board is touched.
+
+Every Underway row likewise carries a non-empty `name`: the durable task name
+when known, otherwise its durable identifier
+[tool display shortened]
+Firstmate: The command is showing help text instead of executing. Let me check the script and try a different approach:
+$ bash {"command": "head -50 bin/fm-bearings-board.sh"}
+Tool result: #!/usr/bin/env bash
+# fm-bearings-board.sh - build and arm the /bearings lavish fleet board.
+#
+# The board is the captain-facing interactive surface of /bearings lavish: the
+# shipped template (.agents/skills/bearings/assets/board-template.html) plus one
+# injected fm-bearings-board.v1 JSON payload. This script owns the mechanics so
+# the invoking agent's per-run work stays "compose the JSON, run build" - the
+# agent never authors board UI at invocation time.
+#
+# Usage:
+#   fm-bearings-board.sh build <data.json>
+#   fm-bearings-board.sh path
+#
+# build      Validate the payload, drop the Captain's Call cards whose subject
+#            already landed, give every surviving decision card the standard
+#            reconcile choice, and inject the result into a fresh copy of the
+#            shipped template at the stable board path. From those same
+#            reconciled payload bytes, render the static sibling detail page
+#            ($FM_HOME/.lavish/bearings-detail.html) for Charted Next and
+#            Recently Landed plus an escaped local report view at
+#            $FM_HOME/.lavish/bearings-reports.html, and - when
+#            config/bearings-canvas-dir names an
+#            existing absolute directory - export the same detail model as one
+#            self-contained Cursor Canvas file (bearings-detail.canvas.tsx)
+#            inside that directory. Establish the Lavish
+#            session on that board and PROVE it is live BEFORE binding and
+#            arming its answer source, so a registered poll can never race a
+#            session that does not exist or attach to one that has ended.
+#            Bind to the keyed-answer intake (bin/fm-captain-hold.sh) ALWAYS
+#            precedes arm, so the board can never produce an answer that has
+#            nowhere to go (captain-hold-lifecycle's ordering rule, enforced
+#            here rather than left to agent memory). Output starts with
+#            `board: <path>`, `detail: <path>`, and `canvas: <path> | off ...`,
+#            then includes lavish-axi's session output and the remaining status:
+#              session: live | reopened
+#              served: <path>
+#              bound: <source-id>
+#              armed: <source-id>            (first registration)
+#              already-armed: <source-id>    (registration already present)
+#              listening: <owner>            (only when a replacement was needed)
+#            Every dropped card is named on stderr as a `dropped-landed-card:`
+#            line, so a rebuild states what it removed instead of quietly
+#            shrinking Captain's Call.
+# path       Print the stable board path for this home.
+#
+# A LIVE SESSION IS PROVED, NEVER ASSUMED. `lavish-axi <file>` exits 0 even
+# when it refuses to reopen a session the captain ended from the browser,
+# reporting `status: user-ended` with the same session id, so exit status alone
+# cannot tell a live board from a dead one. build requires the server's fresh
+# session listing to show the canonical board open and refuses rather than
+
+$ bash {"command": "grep -n \"case\" bin/fm-bearings-board.sh | head -20"}
+Tool result: 79:# only as the deliberate genuinely-no-repo marker. In that exceptional case
+596:    case "$line" in \#*) continue ;; esac
+612:  case "$dir" in
+775:case "${1-}" in
+
+$ bash {"command": "sed -n '775,800p' bin/fm-bearings-board.sh"}
+Tool result: case "${1-}" in
+  build) shift; command_build "$@" ;;
+  path) board_path ;;
+  -h|--help|help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac
+
+$ bash {"command": "sed -n '590,650p' bin/fm-bearings-board.sh"}
+Tool result:   local file="$CONFIG_DIR/bearings-canvas-dir" line
+  [ -f "$file" ] && [ ! -L "$file" ] && [ -r "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line#"${line%%[![:space:]]*}"}
+    line=${line%"${line##*[![:space:]]}"}
+    [ -n "$line" ] || continue
+    case "$line" in \#*) continue ;; esac
+    printf '%s' "$line"
+    return 0
+  done < "$file"
+}
+
+# Export the detail model as one self-contained Cursor Canvas file in the
+# configured directory, or report why it was skipped. Never fails the build:
+# the canvas is an optional mirror and the board is already published.
+export_canvas() {  # <model.json>
+  local model=$1 dir clean_dir real dest literal
+  dir=$(canvas_dir)
+  if [ -z "$dir" ]; then
+    printf 'canvas: off\n'
+    return 0
+  fi
+  case "$dir" in
+    /*) ;;
+    *) printf 'canvas: off (config/bearings-canvas-dir is not an absolute path)\n'; return 0 ;;
+  esac
+  clean_dir=${dir%/}
+  [ -n "$clean_dir" ] || clean_dir=/
+  if [ -L "$clean_dir" ]; then
+    printf 'canvas-export-failed: configured directory is a symlink: %s\n' "$dir" >&2
+    return 0
+  fi
+  if [ ! -d "$clean_dir" ]; then
+    printf 'canvas: off (configured directory does not exist: %s)\n' "$dir"
+    return 0
+  fi
+  real=$(board_realpath "$clean_dir") || { printf 'canvas-export-failed: cannot resolve %s\n' "$dir" >&2; return 0; }
+  dest="$real/$CANVAS_NAME"
+  if [ -L "$dest" ] || { [ -e "$dest" ] && [ ! -f "$dest" ]; }; then
+    printf 'canvas-export-failed: %s is not a regular file; refusing to replace it\n' "$dest" >&2
+    return 0
+  fi
+  literal=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-bearings-canvas.XXXXXX") \
+    || { printf 'canvas-export-failed: cannot stage the canvas data\n' >&2; return 0; }
+  # A JSON literal is a valid TypeScript expression. Angle brackets and
+  # U+2028/2029 are escaped so no parser reads markup or line breaks in strings.
+  if ! jq '.' "$model" \
+    | perl -CS -pe 's/</\\u003c/g; s/>/\\u003e/g; s/\x{2028}/\\u2028/g; s/\x{2029}/\\u2029/g' > "$literal"; then
+    rm -f -- "$literal"
+    printf 'canvas-export-failed: cannot encode the canvas data\n' >&2
+    return 0
+  fi
+  if ! publish_from_template "$CANVAS_TEMPLATE" "$CANVAS_PLACEHOLDER" "$literal" "$dest"; then
+    rm -f -- "$literal"
+    printf 'canvas-export-failed: cannot write %s\n' "$dest" >&2
+    return 0
+  fi
+  rm -f -- "$literal"
+  printf 'canvas: %s\n' "$dest"
+}
+
+
+$ bash {"command": "sed -n '400,500p' bin/fm-bearings-board.sh"}
+Tool result:          | .out += [$item + {anchor: (if $n == 1 then $base else ($base + "-" + ($n | tostring)) end)}])
+      | .out;
+    def report_fields:
+      (.report | nz) as $r
+      | (.report_remote == true) as $remote
+      | {report: $r, report_remote: $remote,
+         report_url: (if $remote or $r == null then null
+                      elif ($r | test("^(https?://|file://)[^[:space:]]+$")) then $r else null end),
+         report_path: (if $remote or $r == null or ($r | test("^(https?://|file://)")) then null
+                       elif ($r | startswith("/")) then $r
+                       else ($home_dir + "/" + $r) end)};
+    def row_status_and_waits:
+      (.reason // "" | tostring | gsub("^\\s+|\\s+$"; "")) as $r
+      | ($r | cap("^(?:[Bb][Ll][Oo][Cc][Kk][Ee][Dd](?:[- ][Bb][Yy]|\\s+[Oo][Nn]))\\s+(?<list>.+?)(?:\\s*:\\s+(?<rest>.*))?$")) as $b
+      | ($r | cap("^[Uu][Nn][Tt][Ii][Ll]\\s+(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2})(?:T[0-9:.]+Z?)?(?:\\s*:\\s+(?<rest>.*))?$")) as $u
+      | ($r | cap("^[Hh][Ee][Ll][Dd]\\s+(?<n>[0-9]+)d\\b(?:\\s*:\\s+(?<rest>.*))?$")) as $h
+      | if isowarn then
+          {status: "needs repair",
+           waits_on: ("Nothing to start: a notice that the fleet records need repair"
+             + (if $r != "" then " (" + $r + ")" else "" end))}
+        elif $b != null then
+          {status: "waiting",
+           waits_on: ("Other work finishing first" + (if ($b.rest // "") != "" then ": " + $b.rest else "" end))}
+        elif $u != null and ($u.d | valid_day) then
+          {status: "waiting",
+           waits_on: ("A date you set: " + $u.d + (if ($u.rest // "") != "" then " - " + $u.rest else "" end))}
+        elif $h != null then
+          {status: "waiting",
+           waits_on: ("Your answer, held " + $h.n + (if $h.n == "1" then " day" else " days" end)
+             + (if ($h.rest // "") != "" then " - " + $h.rest else "" end))}
+        elif .dispatchable then
+          {status: "ready",
+           waits_on: ("Nothing, it is ready to start"
+             + (if $r != "" and (($r | test("^[Rr][Ee][Aa][Dd][Yy] [Tt][Oo] [Ss][Tt][Aa][Rr][Tt]\\b[^;:]*$")) | not)
+                then " (" + $r + ")" else "" end))}
+        elif $r == "" then
+          {status: "waiting", waits_on: "No reason recorded"}
+        else
+          {status: "waiting", waits_on: $r}
+        end;
+    . as $p
+    | {schema: "fm-bearings-detail.v1",
+       home: $p.home,
+       generated: $p.generated,
+       charted_more: ($p.charted_more // 0),
+       charted_warning_more: ($p.charted_warning_more // 0),
+       charted: (
+         [ (($p.charted | map(select(isowarn | not)) | board_order)
+             + ($p.charted | map(select(isowarn)) | board_order))[]
+           | row_status_and_waits as $sw
+           | {section: "charted",
+              id, repo: (.repo | nz), title,
+              status: $sw.status,
+              waits_on: $sw.waits_on,
+              since_label: "Waiting since",
+              since: (.waits_since // .filed | nz),
+              owner: (.owner | nz),
+              blockers: [(.blockers // [])[] | {id, title: (.title | nz)}],
+              pr_url: (.pr_url | nz),
+              filed: (.filed | nz)} + report_fields ]
+         | unique_anchors("charted-")),
+       landed: [
+         $p.landed | to_entries[] | .key as $i | .value
+         | {section: "landed",
+            anchor: ("landed-" + ($i | tostring)),
+            id, repo: (.repo | nz), title: .what,
+            status: "landed",
+            waits_on: "Nothing, it landed",
+            since_label: "Landed on",
+            since: (.landed_on | nz),
+            owner: (.owner | nz),
+            blockers: [],
+            pr_url: (.pr_url | nz),
+            filed: (.filed | nz)} + report_fields ]}
+  ' "$1"
+}
+
+# Render the detail page body from the model. Every string is @html-escaped;
+# local reports open through the sibling HTTP-served report view.
+render_detail_body() {  # <model.json>
+  jq -r '
+    def e: tostring | @html;
+    def or_text($none): if . == null then "<span class=\"dt-none\">" + $none + "</span>" else e end;
+    def link: "<a href=\"" + e + "\" target=\"_blank\" rel=\"noopener\">" + e + "</a>";
+    def field($key; $label; $value):
+      "<div class=\"dt-field\" data-field=\"" + $key + "\"><dt>" + $label + "</dt><dd>" + $value + "</dd></div>";
+    def tone: {"ready": "online", "waiting": "warn", "needs repair": "danger", "landed": "online"}[.] // "warn";
+    def blockers_html:
+      if (.blockers | length) == 0 then "<span class=\"dt-none\">None</span>"
+      else "<ul class=\"dt-blockers\">"
+        + ([.blockers[] | "<li><span class=\"dt-blocker__title\">"
+            + ((.title // .id) | e)
+            + "</span>" + (if .title == null then "" else " <code class=\"dt-id\">" + (.id | e) + "</code>" end) + "</li> "] | join(""))
+        + "</ul>" end;
+    def report_html:
+      if .report_remote and .report != null then
+        "<code class=\"dt-path\">" + (.report | e) + "</code> <span class=\"dt-none\">On remote host</span>"
+[tool display shortened]
+Firstmate: Let me look at the command_build function:
+$ bash {"command": "grep -n \"command_build\" bin/fm-bearings-board.sh"}
+Tool result: 675:command_build() {
+776:  build) shift; command_build "$@" ;;
+
+$ bash {"command": "sed -n '675,775p' bin/fm-bearings-board.sh"}
+Tool result: command_build() {
+  local data=${1-} board json tmp sid extracted effective owner version pre_reopen_owner
+  [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+  command -v jq >/dev/null 2>&1 || fail "jq is required"
+  [ -f "$data" ] || fail "board data does not exist: $data"
+  jq empty "$data" 2>/dev/null || fail "board data is not valid JSON: $data"
+  validate_payload "$data" || fail "board data does not satisfy $BOARD_SCHEMA: $data"
+  [ -f "$TEMPLATE" ] && [ ! -L "$TEMPLATE" ] || fail "board template is missing: $TEMPLATE"
+  [ "$(grep -cxF "$PLACEHOLDER" "$TEMPLATE")" -eq 1 ] \
+    || fail "board template does not carry exactly one data slot: $TEMPLATE"
+
+  effective=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-bearings-payload.XXXXXX") \
+    || fail "cannot stage the board payload"
+  if ! effective_payload "$data" "$effective"; then
+    rm -f -- "$effective"
+    fail "cannot reconcile the board payload against landed work"
+  fi
+  # The staged payload outlives the board publish: the detail page and the
+  # canvas export render from these same bytes.
+  BUILD_STAGED=$effective
+  trap 'rm -f -- "$BUILD_STAGED"' EXIT
+  json=$(jq -c . "$effective") || fail "cannot compact the board data"
+  # `<` never appears in JSON syntax outside strings, so escaping every
+  # occurrence keeps the payload valid JSON while making </script> inert.
+  json=${json//</\\u003c}
+
+  board=$(board_path)
+  (umask 077; mkdir -p "${board%/*}") || fail "cannot create ${board%/*}"
+  tmp=$(umask 077; mktemp "${board%/*}/.board.XXXXXX") || fail "cannot stage the board"
+  if ! BOARD_JSON="$json" perl -pe "s/^\\Q$PLACEHOLDER\\E\$/\$ENV{BOARD_JSON}/" "$TEMPLATE" > "$tmp"; then
+    rm -f -- "$tmp"
+    fail "cannot inject the board data"
+  fi
+  if grep -qxF "$PLACEHOLDER" "$tmp"; then
+    rm -f -- "$tmp"
+    fail "the board data slot survived injection"
+  fi
+  # Round-trip the injected payload back out of the built page, so a board that
+  # would fail to parse in the browser fails here instead.
+  extracted=$(sed -n '/<script id="bearings-data" type="application\/json">/,/<\/script>/p' "$tmp" \
+    | sed '1d;$d')
+  if ! printf '%s\n' "$extracted" | jq -e --arg schema "$BOARD_SCHEMA" '.schema == $schema' >/dev/null 2>&1; then
+    rm -f -- "$tmp"
+    fail "the built board does not carry a readable $BOARD_SCHEMA payload"
+  fi
+  if ! { chmod 0600 "$tmp" && mv -f -- "$tmp" "$board"; }; then
+    rm -f -- "$tmp"
+    fail "cannot publish the board"
+  fi
+  printf 'board: %s\n' "$board"
+  publish_detail "$effective" "$board"
+  rm -f -- "$effective"
+  trap - EXIT
+
+  command -v lavish-axi >/dev/null 2>&1 || fail "lavish-axi is not installed"
+  sid=$("$SCRIPT_DIR/fm-procevent-lavish.sh" source-id "$board") \
+    || fail "cannot derive the board source id"
+  pre_reopen_owner=$(source_owner "$sid")
+  establish_board_session "$board"
+  if [ "$BOARD_SESSION_REOPENED" = 1 ]; then
+    "$SCRIPT_DIR/fm-procevent-lavish.sh" retire "$board" >/dev/null \
+      || fail "cannot retire the pre-reopen source generation (observed owner: ${pre_reopen_owner:-none})"
+  fi
+  if ! lavish_session_listed_open "$(board_realpath "$board")"; then
+    version=$(lavish-axi --version 2>/dev/null | tr -d '[:space:]')
+    fail "the board Lavish session is not listed open immediately before arming (lavish-axi ${version:-version-unknown}); refusing to arm a poll on observed state not-open"
+  fi
+  printf 'served: %s\n' "$board"
+
+  "$SCRIPT_DIR/fm-captain-hold.sh" bind "$sid" >/dev/null \
+    || fail "cannot bind the board source to the keyed-answer intake"
+  printf 'bound: %s\n' "$sid"
+
+  owner=$(source_owner "$sid")
+  if [ "$BOARD_SESSION_REOPENED" = 1 ]; then
+    "$SCRIPT_DIR/fm-procevent-lavish.sh" arm "$board" >/dev/null \
+      || fail "cannot arm a fresh board source after reopening"
+    printf 'armed: %s\n' "$sid"
+    owner=$(source_owner "$sid")
+  elif [ -n "$owner" ]; then
+    printf 'already-armed: %s\n' "$sid"
+  else
+    "$SCRIPT_DIR/fm-procevent-lavish.sh" arm "$board" >/dev/null \
+      || fail "cannot arm the board as a process-event source"
+    printf 'armed: %s\n' "$sid"
+    owner=$(source_owner "$sid")
+  fi
+  # Registered is not listening. A board whose source has no live owner gets a
+  # replacement started now rather than at the next supervision cycle, which is
+  # what keeps a rebuilt board from sitting silent behind `already-armed`.
+  if [ "$owner" != live ]; then
+    "$SCRIPT_DIR/fm-procevent.sh" reconcile >/dev/null 2>&1 || true
+    owner=$(await_source_owner "$sid")
+    if [ "$owner" != live ]; then
+      fail "source $sid is not listening after reconcile (observed owner: ${owner:-none})"
+    fi
+    printf 'listening: live\n'
+  fi
+}
+
+case "${1-}" in
+
+Firstmate: I
+[Pi agent_settled]
+Delivery inbox: []
+Probe-only inbox: []
+Pi child exit code: 0

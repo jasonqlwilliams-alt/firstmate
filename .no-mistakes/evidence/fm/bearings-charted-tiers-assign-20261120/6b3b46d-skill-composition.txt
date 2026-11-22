@@ -1,0 +1,4 @@
+Pi 1.5.0 / llama.cpp local Qwen3.5-9B Q4_K_M / synthetic inputs
+Captain: /bearings lavish
+Validation stopped: Connection error.
+Last observed Pi tool calls:

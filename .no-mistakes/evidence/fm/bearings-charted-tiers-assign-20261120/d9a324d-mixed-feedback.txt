@@ -1,0 +1,33 @@
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 2
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 2
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 2
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Confirm receiver readiness → rakazo
+ANNOTATION 2 of 2
+element_uid: 
+element_selector: 
+tag: layout-warnings
+text:
+| Layout issue: 1 selected
+prompt:
+| Fix this layout issue the browser detected in this artifact:
+| 1. [352c41bd453b9d39] Text cut off by its container - Rendered text crosses its container's right edge by 4197px and is hidden. Target: p#synthetic-clipped-title. Viewport: Desktop (1090px). Status: Queued for fix.
+| 
+| Apply every listed fix in one pass before saving so the review refreshes once. A queued layout issue is a repair request, not a resolved issue: Lavish only marks it resolved after a newer artifact load and a complete diagnostic pass for the same viewport no longer detects it.
+END ANNOTATIONS
+END LAVISH RESULT (2 of 2)
+{"question":"recent-due","owner":"(main)","agent":"rakazo"}
+No keyed answers or reconciliation requests produced.

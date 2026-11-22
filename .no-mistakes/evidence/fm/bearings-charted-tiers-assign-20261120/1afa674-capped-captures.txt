@@ -1,0 +1,59 @@
+
+Chromium sends the same assignment and layout fix with the runner cap at 5264 bytes.
+Conversation
+Request help meeting this item's start conditions. Context data: { "schema": "fm-bearings-assignment.v1", "question": "recent-due", "owner": "(main)", "agent": "rakazo" }
+Fix this layout issue the browser detected in this artifact: 1. [352c41bd453b9d39] Text cut off by its container - Rendered text crosses its container's right edge by 3493px and is hidden. Target: p#synthetic-clipped-title. Viewport: Desktop (1080px). Status: Queued for fix. Apply every listed fix in one pass before saving so the review refreshes once. A queued layout issue is a repair request, not a resolved issue: Lavish only marks it resolved after a newer artifact load and a complete diagnostic pass for the same viewport no longer detects it.
+Send & End
+Send to Agent
+
+read exit 3
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 1
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: div#bb-charted > div > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Validate receiver readiness → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (1 of 2)
+
+assignments:
+{"question":"recent-due","agent":"rakazo","owner":"(main)"}
+
+Chromium sends the same assignment and layout fix with the runner cap at 4130 bytes.
+Conversation
+Request help meeting this item's start conditions. Context data: { "schema": "fm-bearings-assignment.v1", "question": "recent-due", "owner": "(main)", "agent": "rakazo" }
+Fix this layout issue the browser detected in this artifact: 1. [352c41bd453b9d39] Text cut off by its container - Rendered text crosses its container's right edge by 3493px and is hidden. Target: p#synthetic-clipped-title. Viewport: Desktop (1080px). Status: Queued for fix. Apply every listed fix in one pass before saving so the review refreshes once. A queued layout issue is a repair request, not a resolved issue: Lavish only marks it resolved after a newer artifact load and a complete diagnostic pass for the same viewport no longer detects it.
+Send & End
+Send to Agent
+
+read exit 3
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: unknown
+presented_items: 0
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+session_ending_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of unknown)
+
+assignments:
+

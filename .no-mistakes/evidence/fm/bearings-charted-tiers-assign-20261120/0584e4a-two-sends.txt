@@ -1,0 +1,35 @@
+Chrome sent two separate requests for Verify legacy schema before the suspended poller drained them, first for grokbot and then for rakazo.
+The local polling path resumed via bin/fm-procevent-lavish.sh arm <board> and bin/fm-procevent.sh reconcile.
+
+$ bin/fm-procevent-lavish.sh read <capture>
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 2
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 2
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 2
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(5) > div > form
+tag: choice
+text:
+| Verify legacy schema → grokbot
+ANNOTATION 2 of 2
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(5) > div > form
+tag: choice
+text:
+| Verify legacy schema → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (2 of 2)
+
+$ bin/fm-procevent-lavish.sh assignments <capture>
+{"agent":"grokbot","owner":"(main)","question":"legacy-schema"}
+{"agent":"rakazo","owner":"(main)","question":"legacy-schema"}
+handled: lavish-030d5413f3d571ba 1

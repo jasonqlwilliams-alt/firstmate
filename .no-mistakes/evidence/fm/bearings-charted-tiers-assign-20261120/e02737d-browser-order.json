@@ -1,0 +1,136 @@
+[
+  {
+    "mode": "tier",
+    "sortShown": true,
+    "rows": [
+      {
+        "title": "Review access control",
+        "tier": "Tier 1 · Urgent",
+        "color": "rgb(253, 228, 225)",
+        "roles": [
+          "grokbot",
+          "rakazo"
+        ],
+        "pick": false
+      },
+      {
+        "title": "Active hold",
+        "tier": "Tier 2 · Time-sensitive",
+        "color": "rgb(255, 237, 194)",
+        "roles": [],
+        "pick": false
+      },
+      {
+        "title": "Stale dependency",
+        "tier": "Tier 2 · Time-sensitive",
+        "color": "rgb(255, 237, 194)",
+        "roles": [
+          "grokbot",
+          "rakazo"
+        ],
+        "pick": false
+      },
+      {
+        "title": "Update checklist",
+        "tier": "Tier 3 · Current",
+        "color": "rgb(226, 239, 251)",
+        "roles": [
+          "grokbot",
+          "rakazo"
+        ],
+        "pick": false
+      },
+      {
+        "title": "Ready to start",
+        "tier": "Tier 3 · Current",
+        "color": "rgb(226, 239, 251)",
+        "roles": [],
+        "pick": true
+      },
+      {
+        "title": "Archive old diagnostics",
+        "tier": "Tier 4 · Backlog",
+        "color": "rgb(235, 236, 239)",
+        "roles": [
+          "grokbot",
+          "rakazo"
+        ],
+        "pick": false
+      },
+      {
+        "title": "Synthetic inventory notice",
+        "tier": null,
+        "color": null,
+        "roles": [],
+        "pick": false
+      }
+    ]
+  },
+  {
+    "mode": "filed",
+    "sortShown": true,
+    "rows": [
+      {
+        "title": "Update checklist",
+        "tier": "Tier 3 · Current",
+        "color": "rgb(226, 239, 251)",
+        "roles": [
+          "grokbot",
+          "rakazo"
+        ],
+        "pick": false
+      },
+      {
+        "title": "Ready to start",
+        "tier": "Tier 3 · Current",
+        "color": "rgb(226, 239, 251)",
+        "roles": [],
+        "pick": true
+      },
+      {
+        "title": "Review access control",
+        "tier": "Tier 1 · Urgent",
+        "color": "rgb(253, 228, 225)",
+        "roles": [
+          "grokbot",
+          "rakazo"
+        ],
+        "pick": false
+      },
+      {
+        "title": "Active hold",
+        "tier": "Tier 2 · Time-sensitive",
+        "color": "rgb(255, 237, 194)",
+        "roles": [],
+        "pick": false
+      },
+      {
+        "title": "Stale dependency",
+        "tier": "Tier 2 · Time-sensitive",
+        "color": "rgb(255, 237, 194)",
+        "roles": [
+          "grokbot",
+          "rakazo"
+        ],
+        "pick": false
+      },
+      {
+        "title": "Archive old diagnostics",
+        "tier": "Tier 4 · Backlog",
+        "color": "rgb(235, 236, 239)",
+        "roles": [
+          "grokbot",
+          "rakazo"
+        ],
+        "pick": false
+      },
+      {
+        "title": "Synthetic inventory notice",
+        "tier": null,
+        "color": null,
+        "roles": [],
+        "pick": false
+      }
+    ]
+  }
+]

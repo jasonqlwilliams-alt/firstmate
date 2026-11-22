@@ -1,0 +1,128 @@
+{
+  "initial": [
+    {
+      "title": "Review access control",
+      "badge": "Tier 1 · Urgent",
+      "color": "rgb(253, 228, 225)",
+      "roles": [
+        "grokbot",
+        "rakazo"
+      ],
+      "dispatch": false
+    },
+    {
+      "title": "Active hold",
+      "badge": "Tier 2 · Time-sensitive",
+      "color": "rgb(255, 237, 194)",
+      "roles": [],
+      "dispatch": false
+    },
+    {
+      "title": "Stale dependency",
+      "badge": "Tier 2 · Time-sensitive",
+      "color": "rgb(255, 237, 194)",
+      "roles": [
+        "grokbot",
+        "rakazo"
+      ],
+      "dispatch": false
+    },
+    {
+      "title": "Update checklist",
+      "badge": "Tier 3 · Current",
+      "color": "rgb(226, 239, 251)",
+      "roles": [
+        "grokbot",
+        "rakazo"
+      ],
+      "dispatch": false
+    },
+    {
+      "title": "Ready to start",
+      "badge": "Tier 3 · Current",
+      "color": "rgb(226, 239, 251)",
+      "roles": [],
+      "dispatch": true
+    },
+    {
+      "title": "Archive old diagnostics",
+      "badge": "Tier 4 · Backlog",
+      "color": "rgb(235, 236, 239)",
+      "roles": [
+        "grokbot",
+        "rakazo"
+      ],
+      "dispatch": false
+    },
+    {
+      "title": "Synthetic inventory notice",
+      "badge": null,
+      "color": null,
+      "roles": [],
+      "dispatch": false
+    }
+  ],
+  "filed": [
+    {
+      "title": "Update checklist",
+      "badge": "Tier 3 · Current",
+      "color": "rgb(226, 239, 251)",
+      "roles": [
+        "grokbot",
+        "rakazo"
+      ],
+      "dispatch": false
+    },
+    {
+      "title": "Ready to start",
+      "badge": "Tier 3 · Current",
+      "color": "rgb(226, 239, 251)",
+      "roles": [],
+      "dispatch": true
+    },
+    {
+      "title": "Review access control",
+      "badge": "Tier 1 · Urgent",
+      "color": "rgb(253, 228, 225)",
+      "roles": [
+        "grokbot",
+        "rakazo"
+      ],
+      "dispatch": false
+    },
+    {
+      "title": "Active hold",
+      "badge": "Tier 2 · Time-sensitive",
+      "color": "rgb(255, 237, 194)",
+      "roles": [],
+      "dispatch": false
+    },
+    {
+      "title": "Stale dependency",
+      "badge": "Tier 2 · Time-sensitive",
+      "color": "rgb(255, 237, 194)",
+      "roles": [
+        "grokbot",
+        "rakazo"
+      ],
+      "dispatch": false
+    },
+    {
+      "title": "Archive old diagnostics",
+      "badge": "Tier 4 · Backlog",
+      "color": "rgb(235, 236, 239)",
+      "roles": [
+        "grokbot",
+        "rakazo"
+      ],
+      "dispatch": false
+    },
+    {
+      "title": "Synthetic inventory notice",
+      "badge": null,
+      "color": null,
+      "roles": [],
+      "dispatch": false
+    }
+  ]
+}

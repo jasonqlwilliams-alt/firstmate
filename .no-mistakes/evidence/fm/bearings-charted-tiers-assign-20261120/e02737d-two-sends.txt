@@ -1,0 +1,29 @@
+Two separate browser sends arrived before the same poll drained them.
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 2
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 2
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 2
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Review access control → grokbot
+ANNOTATION 2 of 2
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Review access control → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (2 of 2)
+{"question":"access-audit","owner":"(main)","agent":"grokbot"}
+{"owner":"(main)","question":"access-audit","agent":"rakazo"}

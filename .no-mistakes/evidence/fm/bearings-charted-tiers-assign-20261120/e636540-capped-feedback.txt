@@ -1,0 +1,43 @@
+Capture cap 27 bytes (missing-header)
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: unknown
+presented_items: 0
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: unknown
+session_ended: (unset)
+annotation_count: 0
+session_ending_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of unknown)
+assignments:
+incomplete Lavish prompt capture: {run-worktree}/.bearings-validation-e636540/capped-missing-header/state/procevent-inbox/lavish-75f754fd5f269fe2.1.result
+
+Capture cap 5456 bytes (torn-target)
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 1
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Review access control → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (1 of 2)
+assignments:
+{"owner":"(main)","question":"access-audit","agent":"rakazo"}
+incomplete Lavish prompt capture: {run-worktree}/.bearings-validation-e636540/capped-torn-target/state/procevent-inbox/lavish-ca52cae3394ef372.1.result

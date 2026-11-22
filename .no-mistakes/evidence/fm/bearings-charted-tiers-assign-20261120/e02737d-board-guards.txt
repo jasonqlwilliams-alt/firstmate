@@ -1,0 +1,21 @@
+A legacy payload opened in the browser in newest-filed order with no tier or helper controls.
+{"mode":"filed","sortShown":false,"rows":["Update checklist","Ready to start","Review access control","Active hold","Stale dependency","Archive old diagnostics","Synthetic inventory notice"]}
+del(.charted[0].tier) | del(.charted[0].assignment_eligible)
+exit=1 fm-bearings-board: board data does not satisfy fm-bearings-board.v1: rejected.json
+.charted[0].tier = 5
+exit=1 fm-bearings-board: board data does not satisfy fm-bearings-board.v1: rejected.json
+del(.charted[0].owner)
+exit=1 fm-bearings-board: board data does not satisfy fm-bearings-board.v1: rejected.json
+.charted[0].owner = "   "
+exit=1 fm-bearings-board: board data does not satisfy fm-bearings-board.v1: rejected.json
+.charted[0].dispatchable = true
+exit=1 fm-bearings-board: board data does not satisfy fm-bearings-board.v1: rejected.json
+.charted[6].tier = 3
+exit=1 fm-bearings-board: board data does not satisfy fm-bearings-board.v1: rejected.json
+.continuum_agents += ["grokbot"]
+exit=1 fm-bearings-board: board data does not satisfy fm-bearings-board.v1: rejected.json
+.continuum_agents = ["rakazo\n"]
+exit=1 fm-bearings-board: board data does not satisfy fm-bearings-board.v1: rejected.json
+del(.charted[].tier)
+exit=1 fm-bearings-board: board data does not satisfy fm-bearings-board.v1: rejected.json
+All malformed replacements preserved the previously published board.

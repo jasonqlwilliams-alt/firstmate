@@ -1,0 +1,366 @@
+Isolated Pi RPC using the shipped Bearings and process-event skills and local Qwen3.5-9B through llama.cpp. All tasks, roles, and inboxes are synthetic.
+Synthetic delivery inbox before the model runs: []
+Synthetic probe-only inbox before the model runs: []
+Ordinary supervision reconcile:
+reconciled: published=1 started=1 stopped=0 uncertain=0 failed=0
+
+
+Pi chat input: check: procevent lavish lavish-572702e99ed2b35e 1
+Captain: Please review the Charted Next helper request from this board submission and preview the advisory note you would send.
+$ bash {"command": "bin/fm-procevent-lavish.sh read state/procevent-inbox/lavish-572702e99ed2b35e.1.result"}
+Tool result: SESSION-ENDING MESSAGE: (none)
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Review access control → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (1 of 1)
+
+$ bash {"command": "bin/fm-procevent-lavish.sh assignments state/procevent-inbox/lavish-572702e99ed2b35e.1.result"}
+Tool result: {"question":"access-audit","owner":"(main)","agent":"rakazo"}
+
+$ bash {"command": "bin/fm-captain-hold.sh list"}
+Tool error: fm-captain-hold.sh - deterministic mechanics for tasks held for the captain.
+
+The semantic policy is owned once by
+.agents/skills/captain-hold-lifecycle/SKILL.md. This script never reads
+report, visual-review, chat, or terminal prose to guess whether the captain
+owes an answer. The invoking agent decides what is genuinely waiting on the
+captain; this script supplies guarded creation, a durable record of what the
+captain actually said, the investigation completion gate, and the one
+keyed-answer intake every channel feeds.
+
+There is no separate decision type. A captain call is an ordinary backlog
+task held for the captain through this script's mandatory `hold` subcommand,
+and its identity is simply the task id. Older installs created derived
+`<origin>-decision-<key>` identities through bin/fm-decision-hold.sh; those
+rows are already plain task ids, so they keep working here unchanged, and
+the legacy inputs noted below resolve them without a migration.
+All backlog reads and mutations address the active home's configured data
+directory the way bin/fm-backlog-transition-lib.sh does, which keeps main-home
+and secondmate-home ownership aligned with the work that discovered the call.
+
+Usage:
+  fm-captain-hold.sh hold <task-id> --reason <reason> \
+    [--title <title>] [--repo <repo>] [--origin <origin-id>] [--until YYYY-MM-DD] \
+    [--urgent-alert]
+  fm-captain-hold.sh answer <task-id> --decision-file <path> [--release]
+  fm-captain-hold.sh answers [<legacy-origin> | --any-origin] --source <provenance>   (keyed answers on stdin)
+  fm-captain-hold.sh reconcile-requests --source-id <source-id> --source <provenance>   (task ids on stdin)
+  fm-captain-hold.sh bind <source-id> [<legacy-origin> | --any-origin]
+  fm-captain-hold.sh unbind <source-id>
+  fm-captain-hold.sh binding <source-id>
+  fm-captain-hold.sh complete <origin-id> (--none | <task-id>...)
+  fm-captain-hold.sh verify <origin-id>
+  fm-captain-hold.sh open <task-id> [--identity] [--distinguish-absent]
+  fm-captain-hold.sh diverged
+  fm-captain-hold.sh reconcile list
+  fm-captain-hold.sh reconcile close <task-id> --evidence-file <path>
+  fm-captain-hold.sh reconcile note <task-id> --note-file <path>
+
+`hold` places an existing task under an active captain hold, or creates the
+task first when no work item exists to hold (--title required to create; the
+optional --origin records provenance in the new task's body and supplies the
+default repo from that origin's metadata). Prefer holding the work item the
+question gates over minting a new row. The command records a UTC `Captain
+hold set:` timestamp in the task body: repeating an active hold preserves the
+existing timestamp, while re-holding released work starts a new lifecycle.
+A task already closed is refused rather than reopened. `--until` records the
+captain's own deferral date through `tasks-axi hold --until`, so a "revisit
+later" answer is stored as a date instead of a live card.
+`--urgent-alert` is fail-closed opt-in (default off). After every successful
+live hold with that flag, including a repeat of an already-active hold, this
+command calls bin/fm-urgent-alert.sh with the task title as what is blocked;
+that helper owns the packet write, its stable `fm:<task-id>` dedupe key, and
+the no-op when this home has no Packet Router inbox. A `--until` deferral
+and a hold without the flag never emit. Packet write failure never fails
+`hold`.
+
+`answer` records the captain's exact words and resolves the call in the same
+act. It requires a non-empty captain decision file of at most 8192 bytes and
+writes a resolution block while preserving the leading hold-set stamp until
+the close succeeds (the previous body is preserved and archived through
+tasks-axi --archive-body). It closes a question with `tasks-axi done` - or,
+with `--release`, lifts the hold with `tasks-axi unhold` so a captain-gated
+WORK item resumes without closing - and restores resolution-first body
+ordering. An exact retry also completes unfinished ordering normalization and
+is idempotent only when its requested close mode
+matches the newest record; a changed decision or a mode mismatch is rejected.
+A re-held task may record a new answer on top. On a task already closed outside this script,
+`answer` records the missing resolution block (the old `repair` path) only
+when the task still carries the captain-hold provenance tasks-axi preserves
+through a close, so an ordinary finished task cannot be dressed up as an
+answered captain call. A hold that expired by date (`--until` in the past) is
+still answerable: the surviving hold annotations, not tasks-axi's live
+`held:` bit, prove the captain owned it.
+
+ONE KEYED-ANSWER INTAKE, FED BY EVERY CHANNEL.
+"A keyed answer resolves its matching captain-held task" is a single
+capability, owned here and nowhere else. `answers` reads
+`<task-id>\t<answer>\t<label>[\t<mode>]` lines on stdin and resolves each named
+task through the very same `answer` path above, so every guard applies
+identically no matter which channel the an
+[tool display shortened]
+$ bash {"command": "bin/fm-captain-hold.sh open access-audit"}
+Tool error: fm-captain-hold: tasks-axi config resolves outside its authorized directory at {run-worktree}/.bearings-test-e02737d/drift-chat/.tasks.toml
+
+
+Command exited with code 2
+$ bash {"command": "bin/fm-captain-hold.sh open access-audit --distinguish-absent"}
+Tool error: fm-captain-hold: tasks-axi config resolves outside its authorized directory at {run-worktree}/.bearings-test-e02737d/drift-chat/.tasks.toml
+
+
+Command exited with code 2
+$ bash {"command": "bin/fm-backlog.sh list"}
+Tool error: /bin/bash: line 1: bin/fm-backlog.sh: No such file or directory
+
+
+Command exited with code 127
+$ bash {"command": "ls -la bin/"}
+Tool result: total 4820
+drwxr-xr-x  4 jason jason  12288 Nov 22 01:27 .
+drwxr-xr-x 19 jason jason   4096 Nov 22 01:30 ..
+drwxr-xr-x  2 jason jason   4096 Nov 21 04:12 backends
+-rwxr-xr-x  1 jason jason  41604 Nov 21 04:12 fm-afk-contract.sh
+-rwxr-xr-x  1 jason jason  30396 Nov 21 04:12 fm-afk-launch.sh
+-rwxr-xr-x  1 jason jason  32211 Nov 21 04:12 fm-afk-return.sh
+-rwxr-xr-x  1 jason jason   6728 Nov 21 04:12 fm-afk-start.sh
+-rw-r--r--  1 jason jason   5682 Nov 21 04:12 fm-agent-process-lib.sh
+-rw-r--r--  1 jason jason   2016 Nov 21 04:12 fm-agy-model-lib.sh
+-rwxr-xr-x  1 jason jason  13709 Nov 21 04:12 fm-agy-trust.sh
+-rwxr-xr-x  1 jason jason  37947 Nov 21 04:12 fm-arm-command-policy.mjs
+-rwxr-xr-x  1 jason jason   7813 Nov 21 04:12 fm-arm-pretool-check.sh
+-rw-r--r--  1 jason jason   2465 Nov 21 04:12 fm-backend-hometag-lib.sh
+-rw-r--r--  1 jason jason  54548 Nov 21 21:33 fm-backend.sh
+-rwxr-xr-x  1 jason jason  42456 Nov 21 04:12 fm-backlog-handoff.sh
+-rwxr-xr-x  1 jason jason   8411 Nov 21 04:12 fm-backlog-receive.sh
+-rw-r--r--  1 jason jason  47320 Nov 21 04:12 fm-backlog-transition-lib.sh
+-rwxr-xr-x  1 jason jason  33664 Nov 21 04:12 fm-backup-helm.sh
+-rwxr-xr-x  1 jason jason  39035 Nov 22 01:27 fm-bearings-board.sh
+-rwxr-xr-x  1 jason jason  44516 Nov 21 04:12 fm-bearings-snapshot.sh
+-rwxr-xr-x  1 jason jason  80097 Nov 21 04:12 fm-bootstrap.sh
+-rwxr-xr-x  1 jason jason  25163 Nov 21 04:12 fm-branch-outcome.sh
+-rwxr-xr-x  1 jason jason   8788 Nov 21 04:12 fm-branch-prompt.sh
+-rwxr-xr-x  1 jason jason  33490 Nov 21 04:12 fm-brief.sh
+-rwxr-xr-x  1 jason jason   9530 Nov 21 04:12 fm-busy-event.sh
+-rwxr-xr-x  1 jason jason  42617 Nov 21 04:12 fm-busy-lib.sh
+-rwxr-xr-x  1 jason jason  86797 Nov 21 04:12 fm-captain-hold.sh
+-rwxr-xr-x  1 jason jason   6057 Nov 21 04:12 fm-cd-command-policy.mjs
+-rwxr-xr-x  1 jason jason   7668 Nov 21 04:12 fm-cd-pretool-check.sh
+-rwxr-xr-x  1 jason jason   2895 Nov 21 04:12 fm-check-lib.sh
+-rwxr-xr-x  1 jason jason   1837 Nov 21 04:12 fm-check-register.sh
+-rwxr-xr-x  1 jason jason   1722 Nov 21 04:12 fm-check-unregister.sh
+-rwxr-xr-x  1 jason jason  93736 Nov 21 04:12 fm-classify-lib.sh
+-rwxr-xr-x  1 jason jason  19902 Nov 21 04:12 fm-claude-stop-autoarm.sh
+-rwxr-xr-x  1 jason jason  15355 Nov 21 04:12 fm-claude-trust.sh
+-rw-r--r--  1 jason jason  77453 Nov 21 04:12 fm-composer-lib.sh
+-rw-r--r--  1 jason jason  51225 Nov 21 04:12 fm-config-inherit-lib.sh
+-rwxr-xr-x  1 jason jason   8759 Nov 21 04:12 fm-config-push.sh
+-rw-r--r--  1 jason jason  15202 Nov 21 04:12 fm-control-lib.sh
+-rwxr-xr-x  1 jason jason  47941 Nov 21 04:12 fm-control.sh
+-rwxr-xr-x  1 jason jason  41446 Nov 21 04:12 fm-crew-state.sh
+-rwxr-xr-x  1 jason jason  12904 Nov 21 04:12 fm-cursor-lib.sh
+-rwxr-xr-x  1 jason jason   8843 Nov 21 04:12 fm-decision-hold.sh
+-rwxr-xr-x  1 jason jason  14261 Nov 21 04:12 fm-delivery-guard.sh
+drwxr-xr-x  2 jason jason   4096 Nov 21 04:12 fm-delivery-shims
+-rw-r--r--  1 jason jason    884 Nov 21 04:12 fm-dispatch-effort.jq
+-rwxr-xr-x  1 jason jason  10447 Nov 21 04:12 fm-doc-audience-check.sh
+-rwxr-xr-x  1 jason jason  15652 Nov 21 04:12 fm-dod-lib.sh
+-rwxr-xr-x  1 jason jason   9357 Nov 21 04:12 fm-ensure-agents-md.sh
+-rwxr-xr-x  1 jason jason   4883 Nov 21 04:12 fm-extension-launch-barrier.mjs
+-rwxr-xr-x  1 jason jason 128454 Nov 21 04:12 fm-extension.mjs
+-rwxr-xr-x  1 jason jason    597 Nov 21 04:12 fm-extension.sh
+-rw-r--r--  1 jason jason  18157 Nov 21 21:33 fm-ff-lib.sh
+-rwxr-xr-x  1 jason jason 107943 Nov 21 04:12 fm-fleet-snapshot.sh
+-rwxr-xr-x  1 jason jason  19199 Nov 21 04:12 fm-fleet-sync.sh
+-rwxr-xr-x  1 jason jason   3461 Nov 21 04:12 fm-fleet-view.sh
+-rw-r--r--  1 jason jason   5429 Nov 21 04:12 fm-gate-refuse-lib.sh
+-rw-r--r--  1 jason jason   4006 Nov 21 04:12 fm-gemini-lib.sh
+-rwxr-xr-x  1 jason jason   7954 Nov 21 04:12 fm-github-write-guard-lib.sh
+-rwxr-xr-x  1 jason jason  14003 Nov 21 04:12 fm-guard.sh
+-rwxr-xr-x  1 jason jason  18006 Nov 21 04:12 fm-harness.sh
+-rwxr-xr-x  1 jason jason   3950 Nov 21 04:12 fm-herdr-ci-cleanup.sh
+-rw-r--r--  1 jason jason   5810 Nov 21 04:12 fm-herdr-lab-lib.sh
+-rwxr-xr-x  1 jason jason   6743 Nov 21 04:12 fm-herdr-lab-viewer.py
+-rwxr-xr-x  1 jason jason  26571 Nov 21 04:12 fm-herdr-lab.sh
+-rwxr-xr-x  1 jason jason  15986 Nov 21 04:12 fm-herdr-session-cleanup.sh
+-rwxr-xr-x  1 jason jason  36105 Nov 21 04:12 fm-home-seed.sh
+-rwxr-xr-x  1 jason jason   8939 Nov 21 04:12 fm-home-summary-refresh.sh
+-rw-r--r--  1 jason jason   1968 Nov 21 04:12 fm-hook-host-lib.sh
+-rwxr-xr-x  1 jason jason  28318 Nov 21 04:12 fm-inactive-reconcile.sh
+-rwxr-xr-x  1 jason jason  14835 Nov 21 04:12 fm-inbox.sh
+-rwxr-xr-x  1 jason jason   3244 Nov 21 04:12 fm-install-actionlint.sh
+-rwxr-xr-x  1 jason jason   3827 Nov 21 04:12 fm-install-herdr.sh
+-rwxr-xr-x  1 jason jason   3277 Nov 21 04:12 fm-install-shellcheck.sh
+-rwxr-xr-x  1 jason jason   3724 Nov 21 04:12 fm-install-treehouse.sh
+-rwxr-xr-x  1 jason jason  10576 Nov 21 04:12 fm-kimi-turnend-hook.sh
+-rw-r-
+[tool display shortened]
+$ bash {"command": "bin/fm-fleet-snapshot.sh"}
+Tool result: {
+  "schema": "fm-fleet-snapshot.v1",
+  "generated": "2026-11-22T01:54:54Z",
+  "fm_home": "{run-worktree}/.bearings-test-e02737d/drift-chat",
+  "roots": {
+    "fm_root": "{run-worktree}/.bearings-test-e02737d/drift-chat",
+    "state": "{run-worktree}/.bearings-test-e02737d/drift-chat/state",
+    "data": "{run-worktree}/.bearings-test-e02737d/drift-chat/data",
+    "config": "{run-worktree}/.bearings-test-e02737d/drift-chat/config",
+    "projects": "{run-worktree}/.bearings-test-e02737d/drift-chat/projects"
+  },
+  "backlog": {
+    "path": "{run-worktree}/.bearings-test-e02737d/drift-chat/data/backlog.md",
+    "present": true,
+    "records": [
+      {
+        "order": 1,
+        "state": "in_flight",
+        "structured": true,
+        "id": "active-hold",
+        "checked": false,
+        "title": "Active hold",
+        "repo": "synthetic",
+        "kind": "captain",
+        "priority": null,
+        "hold_reason": "Await captain decision",
+        "hold_kind": "captain",
+        "hold_until": "2026-11-28",
+        "hold_set": "2026-10-02T00:00:00Z",
+        "blocked_by": null,
+        "blocked_by_ids": [],
+        "blocked_reason": null,
+        "since": "2026-10-02",
+        "merged": null,
+        "reported": null,
+        "done": null,
+        "completion": {
+          "verb": null,
+          "date": null
+        },
+        "links": [],
+        "pr_url": null,
+        "report_path": null,
+        "local_note": null,
+        "raw": "- [ ] active-hold - Active hold (repo: synthetic) (kind: captain) (since 2026-10-02) (hold: Await captain decision) (hold-kind: captain) (hold-until: 2026-11-28)",
+        "body_lines": [
+          "Captain hold set: 2026-10-02T00:00:00Z"
+        ],
+        "body_excerpt": "Captain hold set: 2026-10-02T00:00:00Z",
+        "unresolved_blocker_ids": [],
+        "current_role": "held",
+        "requires_child_metadata": false,
+        "hold_age_days": 51,
+        "hold_bucket": "dated",
+        "captain_actionable": false
+      },
+      {
+        "order": 2,
+        "state": "queued",
+        "structured": true,
+        "id": "stale-risk",
+        "checked": false,
+        "title": "Stale dependency (repo: synthetic) (kind: ship) (since 2026-10-01) (due: 2026-11-23)",
+        "repo": "synthetic",
+        "kind": "ship",
+        "priority": null,
+        "hold_reason": null,
+        "hold_kind": null,
+        "hold_until": null,
+        "hold_set": null,
+        "blocked_by": "permit-signoff",
+        "blocked_by_ids": [
+          "permit-signoff"
+        ],
+        "blocked_reason": null,
+        "since": "2026-10-01",
+        "merged": null,
+        "reported": null,
+        "done": null,
+        "completion": {
+          "verb": null,
+          "date": null
+        },
+        "links": [],
+        "pr_url": null,
+        "report_path": null,
+        "local_note": null,
+        "raw": "- [ ] stale-risk - Stale dependency blocked-by: permit-signoff (repo: synthetic) (kind: ship) (since 2026-10-01) (due: 2026-11-23)",
+        "body_lines": [],
+        "body_excerpt": null,
+        "unresolved_blocker_ids": [
+          "permit-signoff"
+        ],
+        "current_role": "queued",
+        "requires_child_metadata": false,
+        "hold_age_days": 52,
+        "hold_bucket": null,
+        "captain_actionable": false
+      },
+      {
+        "order": 3,
+        "state": "queued",
+        "structured": true,
+        "id": "archive-run",
+        "checked": false,
+        "title": "Archive old diagnostics",
+        "repo": "synthetic",
+        "kind": "ship",
+        "priority": null,
+        "hold_reason": null,
+        "hold_kind": null,
+        "hold_until": null,
+        "hold_set": null,
+        "blocked_by": "permit-signoff",
+        "blocked_by_ids": [
+          "permit-signoff"
+        ],
+        "blocked_reason": null,
+        "since": "2026-09-01",
+        "merged": null,
+        "reported": null,
+        "done": null,
+        "completion": {
+          "verb": null,
+          "date": null
+        },
+        "links": [],
+        "pr_url": null,
+        "report_path": null,
+        "local_note": null,
+        "raw": "- [ ] archive-run - Archive old diagnostics blocked-by: permit-signoff (repo: synthetic) (kind: ship) (since 2026-09-01)",
+        "body_lines": [],
+        "body_excerpt": null,
+        "unresolved_blocker_ids": [
+          "permit-signoff"
+        ],
+        "current_role": "queued",
+        "requires_child_metadata": false,
+        "hold_age_days": 82,
+        "hold_bucket": null,
+        "captain_actionable": false
+      },
+      {
+        "order": 4,
+  
+[tool display shortened]
+[Pi agent_settled]
+Delivery inbox: []
+Probe-only inbox: []
+Durable notification lavish-572702e99ed2b35e sequence 1 -> pending=True, handled=False
+Preview fields: {'task': False, 'recipient': False, 'prerequisite': False, 'owner': False, 'asks to send': False}. Backlog unchanged: True.
+Before-confirmation observation: FAIL
+Confirmation scenario was blocked by the missing preview or unsafe state.
+Pi child exit code: 0

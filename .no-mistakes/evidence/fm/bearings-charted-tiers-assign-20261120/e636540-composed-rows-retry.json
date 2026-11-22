@@ -1,0 +1,51 @@
+[
+  {
+    "title": "Active hold",
+    "badge": "Tier 1 · Urgent",
+    "color": "rgb(253, 228, 225)",
+    "roles": [],
+    "dispatch": false
+  },
+  {
+    "title": "Obtain permit signoff",
+    "badge": "Tier 1 · Urgent",
+    "color": "rgb(253, 228, 225)",
+    "roles": [],
+    "dispatch": false
+  },
+  {
+    "title": "Update checklist (repo: synthetic-project)",
+    "badge": "Tier 3 · Current",
+    "color": "rgb(226, 239, 251)",
+    "roles": [],
+    "dispatch": false
+  },
+  {
+    "title": "Review access control (repo: synthetic-project)",
+    "badge": "Tier 3 · Current",
+    "color": "rgb(226, 239, 251)",
+    "roles": [],
+    "dispatch": false
+  },
+  {
+    "title": "Stale dependency (repo: synthetic-project)",
+    "badge": "Tier 3 · Current",
+    "color": "rgb(226, 239, 251)",
+    "roles": [],
+    "dispatch": false
+  },
+  {
+    "title": "Ready to start",
+    "badge": "Tier 4 · Backlog",
+    "color": "rgb(235, 236, 239)",
+    "roles": [],
+    "dispatch": false
+  },
+  {
+    "title": "Archive old diagnostics (repo: synthetic-project)",
+    "badge": "Tier 4 · Backlog",
+    "color": "rgb(235, 236, 239)",
+    "roles": [],
+    "dispatch": false
+  }
+]

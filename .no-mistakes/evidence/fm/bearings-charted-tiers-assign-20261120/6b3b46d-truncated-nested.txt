@@ -1,0 +1,31 @@
+1795298567	1	check	procevent:lavish-2d6fd1be859d9847:1	check: procevent lavish lavish-2d6fd1be859d9847 1
+
+Real runner byte limit cut the nested target.
+
+$ bin/fm-procevent-lavish.sh read <captured-result> [exit 3]
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 0
+malformed_items: 0
+complete: no
+capture_truncated: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+session_ending_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of 2)
+
+$ bin/fm-procevent-lavish.sh assignments <captured-result> [exit 0]
+(no output)
+incomplete Lavish prompt capture: <captured-result>
+
+$ bin/fm-procevent-lavish.sh answers <captured-result> [exit 3]
+(no output)
+incomplete Lavish prompt capture: <captured-result>
+
+$ bin/fm-procevent-lavish.sh reconciles <captured-result> [exit 3]
+(no output)
+incomplete Lavish prompt capture: <captured-result>

@@ -1,0 +1,55 @@
+Chromium opened an all-unranked legacy payload. The sort control stayed hidden and rows remained in newest-filed order.
+[
+  {
+    "title": "Triage new samples",
+    "tier": null,
+    "color": null,
+    "roles": [],
+    "startCheckbox": false
+  },
+  {
+    "title": "Validate receiver readiness",
+    "tier": null,
+    "color": null,
+    "roles": [],
+    "startCheckbox": false
+  },
+  {
+    "title": "Validate sender readiness",
+    "tier": null,
+    "color": null,
+    "roles": [],
+    "startCheckbox": false
+  },
+  {
+    "title": "Review calibration samples",
+    "tier": null,
+    "color": null,
+    "roles": [],
+    "startCheckbox": true
+  },
+  {
+    "title": "Wait for a review window",
+    "tier": null,
+    "color": null,
+    "roles": [],
+    "startCheckbox": false
+  },
+  {
+    "title": "Archive superseded prototypes",
+    "tier": null,
+    "color": null,
+    "roles": [],
+    "startCheckbox": false
+  }
+]
+
+$ bin/fm-bearings-board.sh build hybrid.json
+fm-bearings-board: board data does not satisfy fm-bearings-board.v1: {run-worktree}/.bearings-live-1afa674/legacy/hybrid.json
+
+$ bin/fm-bearings-board.sh build no-owner.json
+fm-bearings-board: board data does not satisfy fm-bearings-board.v1: {run-worktree}/.bearings-live-1afa674/legacy/no-owner.json
+
+$ bin/fm-bearings-board.sh build partial-ranks.json
+fm-bearings-board: board data does not satisfy fm-bearings-board.v1: {run-worktree}/.bearings-live-1afa674/legacy/partial-ranks.json
+All three invalid builds preserved the board and the empty delivery inbox.

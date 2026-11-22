@@ -1,0 +1,34 @@
+Unsent Grokbot choice replaced with Rakazo. After Send, no packet or backlog mutation.
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(1) > div > form
+tag: choice
+text:
+| Review access control → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (1 of 1)
+
+assignments:
+{"agent":"rakazo","question":"access-audit","owner":"(main)"}
+
+Plain acknowledgement exited 1:
+{"question":"access-audit","agent":"rakazo","owner":"(main)"}
+error: Bearings helper requests are pending. Follow the Bearings skill and seek confirmation for eligible requests in trusted chat before acknowledging this wake.
+
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-be9eaf448096392e      lavish       live       1
+
+Tester explicitly resolved the disposable request without delivery:
+handled: lavish-be9eaf448096392e 1

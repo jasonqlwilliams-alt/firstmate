@@ -1,0 +1,11 @@
+{"owner":"(main)","question":"recent-due","agent":"rakazo"}
+
+$ fm-bearings-helper.sh send --confirmed {"agent":"rakazo","backlog_data":"{run-worktree}/.bearings-live-d9a324d/fleet/data","blockers":"approval","hold":"","inbox":"{run-worktree}/.bearings-live-d9a324d/fleet/delivery/inbox/new","owner":"(main)","position":"1","prerequisite":"Obtain written receiver approval.","question":"recent-due","route_host":null,"sequence":"5","source":"lavish-be061078dc34767c","title":"Confirm receiver readiness","until":""}
+exit=1
+fm-bearings-helper: request changed since confirmation; prepare a new plan
+
+$ fm-bearings-helper.sh send --confirmed {"agent":"rakazo","backlog_data":"{run-worktree}/.bearings-live-d9a324d/fleet/data","blockers":"approval","hold":"","inbox":"{run-worktree}/.bearings-live-d9a324d/fleet/delivery/inbox/new","owner":"(main)","position":"1","prerequisite":"Obtain written receiver approval.","question":"recent-due","route_host":null,"sequence":"5","source":"lavish-be061078dc34767c","title":"Confirm receiver readiness","until":""}
+exit=1
+fm-bearings-helper: rakazo is not an eligible role at the configured inbox
+dismissed: lavish-be061078dc34767c 5 1
+handled: lavish-be061078dc34767c 5

@@ -1,0 +1,8 @@
+Priority order: Confirm export prerequisite | Active review with dated hold | Verify legacy schema | Ready to dispatch | Audit new sample data | Draft archive plan | Inventory needs repair
+Newest filed: Ready to dispatch | Audit new sample data | Confirm export prerequisite | Active review with dated hold | Verify legacy schema | Draft archive plan | Inventory needs repair
+Computed tier badge colors: {"Tier 1 · Urgent":"rgb(253, 228, 225)","Tier 2 · Time-sensitive":"rgb(255, 237, 194)","Tier 3 · Current":"rgb(226, 239, 251)","Tier 4 · Backlog":"rgb(235, 236, 239)"}
+Rejected ownerless build, served board preserved: fm-bearings-board: board data does not satisfy fm-bearings-board.v1: {run-worktree}/.charted-live.nzY2uF/ranked/invalid.json
+Rejected unranked build, served board preserved: fm-bearings-board: board data does not satisfy fm-bearings-board.v1: {run-worktree}/.charted-live.nzY2uF/ranked/invalid.json
+Rejected dispatchable build, served board preserved: fm-bearings-board: board data does not satisfy fm-bearings-board.v1: {run-worktree}/.charted-live.nzY2uF/ranked/invalid.json
+Rejected invalid-tier build, served board preserved: fm-bearings-board: board data does not satisfy fm-bearings-board.v1: {run-worktree}/.charted-live.nzY2uF/ranked/invalid.json
+Picker roles shown only on four eligible synthetic gated work items. Ready work, active hold and repair notice offered no picker. Missing roster hid the picker. Legacy board rendered by newest filed with no rank or picker.

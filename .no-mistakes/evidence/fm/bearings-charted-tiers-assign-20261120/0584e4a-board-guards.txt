@@ -1,0 +1,21 @@
+ownerless (exit 1, served board preserved)
+fm-bearings-board: board data does not satisfy fm-bearings-board.v1: <synthetic-lab>/ownerless.json
+ready (exit 1, served board preserved)
+fm-bearings-board: board data does not satisfy fm-bearings-board.v1: <synthetic-lab>/ready.json
+unranked (exit 1, served board preserved)
+fm-bearings-board: board data does not satisfy fm-bearings-board.v1: <synthetic-lab>/unranked.json
+warning (exit 1, served board preserved)
+fm-bearings-board: board data does not satisfy fm-bearings-board.v1: <synthetic-lab>/warning.json
+invalid-tier (exit 1, served board preserved)
+fm-bearings-board: board data does not satisfy fm-bearings-board.v1: <synthetic-lab>/invalid-tier.json
+
+Ranked board with no verified roster renders 0 assignment controls.
+
+Legacy browser order with no ranking or helper controls:
+Ready to dispatch
+Audit new sample data
+Confirm export prerequisite
+Active review with dated hold
+Verify legacy schema
+Draft archive plan
+Inventory needs repair

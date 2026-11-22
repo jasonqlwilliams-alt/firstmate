@@ -1,0 +1,22 @@
+Pi 1.5.0 RPC using local llama.cpp b12617 CUDA. Model qwen35, thinking low. All records and role bindings are synthetic.
+The isolated session receives the shipped Bearings procedure. The fixture restricts file and CLI access to the disposable home.
+
+Trusted RPC input: check: procevent lavish lavish-af955ddf43651d64 1
+$ bash {"command": "bin/fm-procevent-lavish.sh source-id \"$(bin/fm-bearings-board.sh path)\""}
+
+Assignments projection seen by Pi:
+$ bash {"command": "bin/fm-procevent-lavish.sh assignments state/procevent-inbox/lavish-af955ddf43651d64.1.result"}
+Tool result: {"agent":"rakazo","owner":"(main)","question":"export-check"}
+
+Settled supervisor response:
+Firstmate: I've analyzed the bearings board result for source `lavish-af955ddf43651d64` sequence `1`. This is a bearings board with:
+
+- **Status**: feedback
+- **Charted Next items**: 6 items queued
+- **Captain's Call**: "Nothing needs your action right now"
+
+
+Pi agent_settled.
+Pi child exit status: 0.
+
+After the turn: wake still pending and the synthetic delivery inbox was empty.

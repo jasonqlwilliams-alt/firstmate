@@ -1,0 +1,25 @@
+Changed the unsent browser selection from grokbot to rakazo, then clicked Send to Agent. No capture or packet existed before Send.
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: div#bb-charted > div:nth-of-type(1) > div:nth-of-type(5) > div > form
+tag: choice
+text:
+| Review access control → rakazo
+END ANNOTATIONS
+END LAVISH RESULT (1 of 1)
+{"owner":"(main)","question":"access-audit","agent":"rakazo"}
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-351d00e96b08ba94      lavish       live       1
+After Send, the backlog was byte-identical, both keyed projections were empty, and the delivery inbox was empty.

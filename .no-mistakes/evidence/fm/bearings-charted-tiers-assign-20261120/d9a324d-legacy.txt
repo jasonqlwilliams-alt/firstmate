@@ -1,0 +1,22 @@
+
+The legacy payload opens in Lavish with Newest filed order and no helper picker.
+{"url":"http://127.0.0.1:4387/session/93cf50a8f15cc225","legacy":["Inspect access gate","Triage recent samples","Confirm receiver readiness","Confirm sender readiness","Check calibration reference","Update runbook","Review approval paperwork","Archive prototypes","Wait for review window","Request planning decision","in-flight backlog item has no child metadata"]}
+
+del\(.continuum_agents\)\ \|\ del\(.charted\[0\].tier\)
+exit=1 fm-bearings-board: board data does not satisfy fm-bearings-board.v1: {run-worktree}/.bearings-live-d9a324d/legacy/rejected.json
+
+del\(.charted\[\].tier\)
+exit=1 fm-bearings-board: board data does not satisfy fm-bearings-board.v1: {run-worktree}/.bearings-live-d9a324d/legacy/rejected.json
+
+.charted\[0\].tier\ =\ 5
+exit=1 fm-bearings-board: board data does not satisfy fm-bearings-board.v1: {run-worktree}/.bearings-live-d9a324d/legacy/rejected.json
+
+.charted\ \|=\ map\(if\ .assignment_eligible\ then\ del\(.owner\)\ else\ .\ end\)
+exit=1 fm-bearings-board: board data does not satisfy fm-bearings-board.v1: {run-worktree}/.bearings-live-d9a324d/legacy/rejected.json
+
+.charted\ \|=\ map\(if\ .assignment_eligible\ then\ .dispatchable\ =\ true\ else\ .\ end\)
+exit=1 fm-bearings-board: board data does not satisfy fm-bearings-board.v1: {run-worktree}/.bearings-live-d9a324d/legacy/rejected.json
+
+.continuum_agents\ +=\ \[\"rakazo\"\]
+exit=1 fm-bearings-board: board data does not satisfy fm-bearings-board.v1: {run-worktree}/.bearings-live-d9a324d/legacy/rejected.json
+Every refusal preserved the previously published board.

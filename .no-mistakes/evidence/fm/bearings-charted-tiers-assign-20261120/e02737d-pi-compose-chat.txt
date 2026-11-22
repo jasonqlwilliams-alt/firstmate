@@ -1,0 +1,341 @@
+Isolated Pi RPC using the shipped Bearings and process-event skills and local Qwen3.5-9B through llama.cpp. All tasks, roles, and inboxes are synthetic.
+Synthetic delivery inbox before the model runs: []
+Synthetic probe-only inbox before the model runs: []
+
+Pi chat input: /skill:bearings lavish
+$ bash {"command": "bin/fm-bearings-snapshot.sh --json --include-prs --all-queued 2>&1"}
+Tool result: {
+  "schema": "fm-bearings.v1",
+  "home": ".bearings-test-e02737d/compose-chat",
+  "generated": "2026-11-22T01:54:15Z",
+  "prs": "checked (0 repos, 0 open)",
+  "in_flight": [],
+  "secondmates": [],
+  "secondmate_reconcile": [],
+  "decisions_open": [],
+  "landed": [],
+  "gates": [
+    {
+      "id": "current-task",
+      "title": "Update checklist",
+      "blocked_by": "permit-signoff",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-11-21",
+      "waits_since": "2026-11-21",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "ready",
+      "title": "Ready to start",
+      "blocked_by": "-",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-11-11",
+      "waits_since": "2026-11-11",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "permit-signoff",
+      "title": "Obtain staging access sign-off",
+      "blocked_by": "-",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-11-10",
+      "waits_since": "2026-11-10",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "access-audit",
+      "title": "Review access control",
+      "blocked_by": "permit-signoff",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-11-07",
+      "waits_since": "2026-11-07",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "active-hold",
+      "title": "Active hold",
+      "blocked_by": "-",
+      "reason": "until 2026-11-28: Await captain decision",
+      "owner": "(main)",
+      "filed": "2026-10-02",
+      "waits_since": "2026-10-02T00:00:00Z",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "stale-risk",
+      "title": "Stale dependency",
+      "blocked_by": "permit-signoff",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-10-01",
+      "waits_since": "2026-10-01",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "archive-run",
+      "title": "Archive old diagnostics",
+      "blocked_by": "permit-signoff",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-09-01",
+      "waits_since": "2026-09-01",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    }
+  ],
+  "gate_blockers": [
+    {
+      "gate": "current-task",
+      "owner": "(main)",
+      "id": "permit-signoff",
+      "title": "Obtain staging access sign-off"
+    },
+    {
+      "gate": "access-audit",
+      "owner": "(main)",
+      "id": "permit-signoff",
+      "title": "Obtain staging access sign-off"
+    },
+    {
+      "gate": "stale-risk",
+      "owner": "(main)",
+      "id": "permit-signoff",
+      "title": "Obtain staging access sign-off"
+    },
+    {
+      "gate": "archive-run",
+      "owner": "(main)",
+      "id": "permit-signoff",
+      "title": "Obtain staging access sign-off"
+    }
+  ],
+  "reports": [],
+  "recorded_prs": [],
+  "candidate_prs": [],
+  "omitted": [
+    {
+      "surface": "backlog item bodies",
+      "reveal": "--fields bodies"
+    },
+    {
+      "surface": "task paths",
+      "reveal": "--fields paths"
+    },
+    {
+      "surface": "watch/steer actions",
+      "reveal": "--fields actions"
+    },
+    {
+      "surface": "healthy endpoint detail",
+      "reveal": "--fields endpoints"
+    },
+    {
+      "surface": "full scout-report inventory",
+      "reveal": "--all-reports"
+    },
+    {
+      "surface": "captain holds bucketed blocked, dated, or aged: 1",
+      "reveal": "--all-decisions"
+    }
+  ]
+}
+
+$ bash {"command": "printf '%s\\n' \"$snapshot\" | bin/fm-secondmate-reconcile.sh request --snapshot - 2>&1"}
+Tool error: fm-secondmate-reconcile: input is not exactly one fm-fleet-snapshot.v1 or fm-bearings.v1 document
+
+
+Command exited with code 2
+$ bash {"command": "snapshot=$(bin/fm-bearings-snapshot.sh --json --include-prs --all-queued 2>&1); printf '%s\\n' \"$snapshot\" | bin/fm-secondmate-reconcile.sh request --snapshot - 2>&1"}
+Tool result: not-needed
+
+$ bash {"command": "bin/fm-bearings-board.sh --json --include-prs --all-queued 2>&1"}
+Tool error: fm-bearings-board.sh - build and arm the /bearings lavish fleet board.
+
+The board is the captain-facing interactive surface of /bearings lavish: the
+shipped template (.agents/skills/bearings/assets/board-template.html) plus one
+injected fm-bearings-board.v1 JSON payload. This script owns the mechanics so
+the invoking agent's per-run work stays "compose the JSON, run build" - the
+agent never authors board UI at invocation time.
+
+Usage:
+  fm-bearings-board.sh build <data.json>
+  fm-bearings-board.sh path
+
+build      Validate the payload, drop the Captain's Call cards whose subject
+           already landed, give every surviving decision card the standard
+           reconcile choice, and inject the result into a fresh copy of the
+           shipped template at the stable board path. From those same
+           reconciled payload bytes, render the static sibling detail page
+           ($FM_HOME/.lavish/bearings-detail.html) for Charted Next and
+           Recently Landed plus an escaped local report view at
+           $FM_HOME/.lavish/bearings-reports.html, and - when
+           config/bearings-canvas-dir names an
+           existing absolute directory - export the same detail model as one
+           self-contained Cursor Canvas file (bearings-detail.canvas.tsx)
+           inside that directory. Establish the Lavish
+           session on that board and PROVE it is live BEFORE binding and
+           arming its answer source, so a registered poll can never race a
+           session that does not exist or attach to one that has ended.
+           Bind to the keyed-answer intake (bin/fm-captain-hold.sh) ALWAYS
+           precedes arm, so the board can never produce an answer that has
+           nowhere to go (captain-hold-lifecycle's ordering rule, enforced
+           here rather than left to agent memory). Output starts with
+           `board: <path>`, `detail: <path>`, and `canvas: <path> | off ...`,
+           then includes lavish-axi's session output and the remaining status:
+             session: live | reopened
+             served: <path>
+             bound: <source-id>
+             armed: <source-id>            (first registration)
+             already-armed: <source-id>    (registration already present)
+             listening: <owner>            (only when a replacement was needed)
+           Every dropped card is named on stderr as a `dropped-landed-card:`
+           line, so a rebuild states what it removed instead of quietly
+           shrinking Captain's Call.
+path       Print the stable board path for this home.
+
+A LIVE SESSION IS PROVED, NEVER ASSUMED. `lavish-axi <file>` exits 0 even
+when it refuses to reopen a session the captain ended from the browser,
+reporting `status: user-ended` with the same session id, so exit status alone
+cannot tell a live board from a dead one. build requires the server's fresh
+session listing to show the canonical board open and refuses rather than
+arming an ended session. After a reopen it retires the pre-reopen source
+generation through the guarded adapter path, arms a fresh registration, and
+accepts only the replacement listener as live. A registered board with no
+live owner also gets a replacement before build returns, because
+`already-armed` is not the same fact as `listening`.
+
+CAPTAIN'S CALL HYGIENE. A decision card is dropped when its work item, PR, or
+structured artifact/version subject appears among the payload's own landed
+rows, or when `bin/fm-captain-hold.sh open` reports the task is no longer an
+open captain call. A newer published version also supersedes a version card.
+A task whose state cannot be established is kept, because a call wrongly
+hidden is worse than a card wrongly shown. Cleanup is therefore a normal
+rebuild effect rather than a committed migration or direct state mutation.
+
+THE RECONCILE CHOICE. Every decision card carries the standard `reconcile`
+option, injected here so the guarantee does not depend on the composer's
+memory, and the payload validator reserves that value across every card type.
+The validator's reservation scope must equal the adapter's reconcile
+classification scope, which is all card types because the captured payload
+carries no card type. Its meaning, and the reason it can never reach the
+keyed-answer intake as a blind close, are owned by
+docs/captain-hold-lifecycle.md.
+
+Validation is fail-closed: the payload must be valid JSON with
+schema=fm-bearings-board.v1 and every renderer-consumed field must satisfy
+the fm-bearings-board.v1 types and item invariants below. Every fleet row and
+Captain's Call item explicitly carries `repo`; the composer fills it from the
+snapshot and task records wherever known, and uses null or an empty string
+only as the deliberate genuinely-no-repo marker. In that exceptional case
+the template may display the routing id. Anything else refuses before the
+existing board is touched.
+
+Every Underway row likewise carries a non-empty `name`: the durable task name
+when known, otherwise its durable identifier
+[tool display shortened]
+$ bash {"command": "bin/fm-bearings-board.sh build < <(bin/fm-bearings-snapshot.sh --json --include-prs --all-queued 2>&1) 2>&1"}
+Tool error: fm-bearings-board.sh - build and arm the /bearings lavish fleet board.
+
+The board is the captain-facing interactive surface of /bearings lavish: the
+shipped template (.agents/skills/bearings/assets/board-template.html) plus one
+injected fm-bearings-board.v1 JSON payload. This script owns the mechanics so
+the invoking agent's per-run work stays "compose the JSON, run build" - the
+agent never authors board UI at invocation time.
+
+Usage:
+  fm-bearings-board.sh build <data.json>
+  fm-bearings-board.sh path
+
+build      Validate the payload, drop the Captain's Call cards whose subject
+           already landed, give every surviving decision card the standard
+           reconcile choice, and inject the result into a fresh copy of the
+           shipped template at the stable board path. From those same
+           reconciled payload bytes, render the static sibling detail page
+           ($FM_HOME/.lavish/bearings-detail.html) for Charted Next and
+           Recently Landed plus an escaped local report view at
+           $FM_HOME/.lavish/bearings-reports.html, and - when
+           config/bearings-canvas-dir names an
+           existing absolute directory - export the same detail model as one
+           self-contained Cursor Canvas file (bearings-detail.canvas.tsx)
+           inside that directory. Establish the Lavish
+           session on that board and PROVE it is live BEFORE binding and
+           arming its answer source, so a registered poll can never race a
+           session that does not exist or attach to one that has ended.
+           Bind to the keyed-answer intake (bin/fm-captain-hold.sh) ALWAYS
+           precedes arm, so the board can never produce an answer that has
+           nowhere to go (captain-hold-lifecycle's ordering rule, enforced
+           here rather than left to agent memory). Output starts with
+           `board: <path>`, `detail: <path>`, and `canvas: <path> | off ...`,
+           then includes lavish-axi's session output and the remaining status:
+             session: live | reopened
+             served: <path>
+             bound: <source-id>
+             armed: <source-id>            (first registration)
+             already-armed: <source-id>    (registration already present)
+             listening: <owner>            (only when a replacement was needed)
+           Every dropped card is named on stderr as a `dropped-landed-card:`
+           line, so a rebuild states what it removed instead of quietly
+           shrinking Captain's Call.
+path       Print the stable board path for this home.
+
+A LIVE SESSION IS PROVED, NEVER ASSUMED. `lavish-axi <file>` exits 0 even
+when it refuses to reopen a session the captain ended from the browser,
+reporting `status: user-ended` with the same session id, so exit status alone
+cannot tell a live board from a dead one. build requires the server's fresh
+session listing to show the canonical board open and refuses rather than
+arming an ended session. After a reopen it retires the pre-reopen source
+generation through the guarded adapter path, arms a fresh registration, and
+accepts only the replacement listener as live. A registered board with no
+live owner also gets a replacement before build returns, because
+`already-armed` is not the same fact as `listening`.
+
+CAPTAIN'S CALL HYGIENE. A decision card is dropped when its work item, PR, or
+structured artifact/version subject appears among the payload's own landed
+rows, or when `bin/fm-captain-hold.sh open` reports the task is no longer an
+open captain call. A newer published version also supersedes a version card.
+A task whose state cannot be established is kept, because a call wrongly
+hidden is worse than a card wrongly shown. Cleanup is therefore a normal
+rebuild effect rather than a committed migration or direct state mutation.
+
+THE RECONCILE CHOICE. Every decision card carries the standard `reconcile`
+option, injected here so the guarantee does not depend on the composer's
+memory, and the payload validator reserves that value across every card type.
+The validator's reservation scope must equal the adapter's reconcile
+classification scope, which is all card types because the captured payload
+carries no card type. Its meaning, and the reason it can never reach the
+keyed-answer intake as a blind close, are owned by
+docs/captain-hold-lifecycle.md.
+
+Validation is fail-closed: the payload must be valid JSON with
+schema=fm-bearings-board.v1 and every renderer-consumed field must satisfy
+the fm-bearings-board.v1 types and item invariants below. Every fleet row and
+Captain's Call item explicitly carries `repo`; the composer fills it from the
+snapshot and task records wherever known, and uses null or an empty string
+only as the deliberate genuinely-no-repo marker. In that exceptional case
+the template may display the routing id. Anything else refuses before the
+existing board is touched.
+
+Every Underway row likewise carries a non-empty `name`: the durable task name
+when known, otherwise its durable identifier
+[tool display shortened]
+[Pi agent_settled]
+Delivery inbox: []
+Probe-only inbox: []
+Pi child exit code: 0

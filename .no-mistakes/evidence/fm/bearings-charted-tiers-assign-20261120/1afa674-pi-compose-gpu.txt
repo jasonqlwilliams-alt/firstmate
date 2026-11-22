@@ -1,0 +1,179 @@
+Isolated Pi 1.5.0 RPC against local Qwen3.5-9B CUDA in llama.cpp. All inputs and routes are synthetic.
+Pi received the verbatim shipped procedure sections applicable to this input. Filesystem and connections were restricted to the lab and its dependency runtime.
+Trusted Pi input: /bearings lavish
+$ bash {"command": "bin/fm-bearings-snapshot.sh --json --all-queued --fields bodies > /tmp/snapshot.json 2>&1"}
+Tool result (error): /bin/bash: line 1: /tmp/snapshot.json: Permission denied
+
+
+Command exited with code 1
+$ bash {"command": "bin/fm-bearings-snapshot.sh --json --all-queued --fields bodies > snapshot.json 2>&1"}
+Tool result: (no output)
+$ read {"path": "snapshot.json"}
+Tool result: {
+  "schema": "fm-bearings.v1",
+  "home": ".bearings-live-1afa674/comp2",
+  "generated": "2026-11-21T23:59:50Z",
+  "prs": "not_requested (run: /bearings include PRs)",
+  "in_flight": [],
+  "secondmates": [],
+  "secondmate_reconcile": [],
+  "decisions_open": [],
+  "landed": [],
+  "gates": [
+    {
+      "id": "recent",
+      "title": "Triage new samples",
+      "blocked_by": "prerequisite",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-11-15",
+      "waits_since": "2026-11-15",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "recent-due",
+      "title": "Validate receiver readiness",
+      "blocked_by": "prerequisite",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-10-23",
+      "waits_since": "2026-10-23",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "stale-due",
+      "title": "Validate sender readiness",
+      "blocked_by": "prerequisite",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-10-22",
+      "waits_since": "2026-10-22",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "prerequisite",
+      "title": "Review calibration samples",
+      "blocked_by": "-",
+      "reason": "",
+      "owner": "(main)",
+      "filed": "2026-10-04",
+      "waits_since": "2026-10-04",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+    {
+      "id": "active-window",
+      "title": "Wait for a review window",
+      "blocked_by": "-",
+      "reason": "until 2026-11-24: review window",
+      "owner": "(main)",
+      "filed": "2026-10-03",
+      "waits_since": "2026-10-03",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false
+    },
+
+$ bash {"command": "bin/fm-bearings-board.sh draft snapshot.json > payload.json 2>&1"}
+Tool result: (no output)
+$ read {"path": "payload.json"}
+Tool result: {
+  "schema": "fm-bearings-board.v1",
+  "home": ".bearings-live-1afa674/comp2",
+  "generated": "2026-11-21T23:59:50Z",
+  "prs_live": false,
+  "captains_call": [],
+  "continuum_agents": [
+    "grokbot",
+    "rakazo"
+  ],
+  "underway": [],
+  "landed": [],
+  "charted": [
+    {
+      "id": "recent",
+      "title": "Triage new samples",
+      "reason": "blocked-by prerequisite",
+      "owner": "(main)",
+      "filed": "2026-11-15",
+      "waits_since": "2026-11-15",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false,
+      "repo": "demo",
+      "tier": 3,
+      "dispatchable": false,
+      "assignment_eligible": true,
+      "blockers": [
+        {
+          "id": "prerequisite",
+          "title": "Review calibration samples"
+        }
+      ]
+    },
+    {
+      "id": "recent-due",
+      "title": "Validate receiver readiness",
+      "reason": "blocked-by prerequisite",
+      "owner": "(main)",
+      "filed": "2026-10-23",
+      "waits_since": "2026-10-23",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false,
+      "repo": "demo",
+      "tier": 1,
+      "dispatchable": false,
+      "assignment_eligible": true,
+      "blockers": [
+        {
+          "id": "prerequisite",
+          "title": "Review calibration samples"
+        }
+      ]
+    },
+    {
+      "id": "stale-due",
+      "title": "Validate sender readiness",
+      "reason": "blocked-by prerequisite",
+      "owner": "(main)",
+      "filed": "2026-10-22",
+      "waits_since": "2026-10-22",
+      "pr_url": null,
+      "report": null,
+      "report_remote": false,
+      "repo": "demo",
+      "tier": 2,
+      "dispatchable": false,
+      "assignment_eligible": true,
+      "blockers": [
+        {
+          "id": "prerequisite",
+          "title": "Review calibration samples"
+      
+$ bash {"command": "bin/fm-bearings-board.sh build payload.json 2>&1"}
+Tool result: board: {run-worktree}/.bearings-live-1afa674/comp2/.lavish/bearings-board.html
+detail: {run-worktree}/.bearings-live-1afa674/comp2/.lavish/bearings-detail.html
+canvas: off
+session:
+  file: {run-worktree}/.bearings-live-1afa674/comp2/.lavish/bearings-board.html
+  url: "http://127.0.0.1:44873/session/5f79d1d79ff108f6"
+  status: opened
+next_step: "Do not respond to the user just yet. Now you must run `lavish-axi poll {run-worktree}/.bearings-live-1afa674/comp2/.lavish/bearings-board.html`. This command long-polls until the user sends feedback or ends the session, and it stays silent the whole time - that is normal, never kill it. Layout issues the browser detects do not return this poll; they wait in the user's Layout issues inbox until the user queues them, then arrive as an ordinary tag \"layout-warnings\" prompt. Do not pass --timeout-ms during normal agent use. Keep the poll in the foreground by default and let it return the feedback directly to the agent. A background poll is allowed only through a harness-native tracked background-job facility whose completion result is guaranteed to resume or notify the same agent. Never use `nohup`, shell `&`, `disown`, redirected fire-and-forget processes, or a detached terminal without an explicit verified callback merely to keep polling alive. If the harness has no completion-aware background facility, use the foreground poll or first wire a verified wake callback into the surrounding supervisor. Do not tell the user the artifact is being monitored until that wake path is live. If the poll get
+Pi agent settled.
+Rendered board exists: True
+Delivery inbox events: []
+Pi child exit status: 0
+
+Observed session from the isolated Lavish instance: http://127.0.0.1:44873/session/5f79d1d79ff108f6
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-5f79d1d79ff108f6      lavish       live       0
+[{"title":"Validate receiver readiness","tier":"Tier 1 · Urgent","roles":["grokbot","rakazo"]},{"title":"Validate sender readiness","tier":"Tier 2 · Time-sensitive","roles":["grokbot","rakazo"]},{"title":"Wait for a review window","tier":"Tier 2 · Time-sensitive","roles":[]},{"title":"Triage new samples","tier":"Tier 3 · Current","roles":["grokbot","rakazo"]},{"title":"Review calibration samples","tier":"Tier 4 · Backlog","roles":[]},{"title":"Archive superseded prototypes","tier":"Tier 4 · Backlog","roles":["grokbot","rakazo"]}]
+The composed board loaded in Chromium with all four model-derived tiers and the delivery roles. Both inboxes and the backlog were unchanged.

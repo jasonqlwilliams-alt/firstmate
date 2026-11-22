@@ -1,0 +1,163 @@
+Pi 1.5.0 RPC with local Qwen3.5-9B and llama.cpp. All input and routes are synthetic.
+
+Pi input: check: procevent lavish lavish-1e7a842ce3d0e61b 1
+$ read {"path": "state/procevent-inbox/lavish-1e7a842ce3d0e61b.1.result"}
+$ bash {"command": "bin/fm-procevent.sh classify state/procevent-inbox/lavish-1e7a842ce3d0e61b.1.result"}
+Tool result: session:
+  file: {run-worktree}/.bearings-live-d9a324d/pi-race/.lavish/bearings-board.html
+  status: feedback
+prompts[1]{uid,prompt,selector,tag,text}:
+  "1","Request help meeting this item's start conditions.\n\nContext data:\n{\n  \"schema\": \"fm-bearings-assignment.v1\",\n  \"question\": \"recent-due\",\n  \"owner\": \"(main)\",\n  \"agent\": \"rakazo\"\n}","div#bb-charted > div:nth-of-type(1) > div:nth-of-type(1) > div > form",choice,Confirm receiver readiness → rakazo
+next_step: "Apply the requested changes to {run-worktree}/.bearings-live-d9a324d/pi-race/.lavish/bearings-board.html. Do not respond to the user just yet. If you are continuing to wait for feedback, run `lavish-axi poll {run-worktree}/.bearings-live-d9a324d/pi-race/.lavish/bearings-board.html --agent-reply \"<message for the user>\"` without --timeout-ms to reply and keep polling. If instead you are handing back a result without starting another long-poll, run `lavish-axi reply {run-worktree}/.bearings-live-d9a324d/pi-race/.lavish/bearings-board.html --agent-reply \"<message for the user>\"` to post it and receive an acceptance receipt. Keep the reply concise. Only when a longer reply is genuinely necessary, use Markdown structure - blank-line paragraphs, `- ` / `1. ` lists, `## ` headings - so it renders scannably instead of a wall of text, and pass that body with `--agent-reply-file <path>` (`-` reads stdin) so newlines survive quoting. The Conversation panel's Markdown subset is in `lavish-axi poll --help` and README. The poll waits silently until the user sends more feedback, ends the session, or leaves every review window disconnected past the reconnect grace period - never kill it. Keep the poll in the foreground by default and let it return the feedback directly to the agent. A background poll is allowed only through a harness-native tracked background-job facility whose completion result is guaranteed to resume or notify the same agent. Never use `nohup`, shell `&`, `disown`, redirected fire-and-forget processes, or a detached terminal without an explicit verified callback merely to keep polling alive. If the harness has no completion-aware background facility, use the foreground poll or first wire a verified wake callback into the surrounding supervisor. Do not tell the user the artifact is being monitored until that wake path is live. If the poll gets killed or times out before feedback arrives, re-run it - feedback remains queued until delivery. Poll delivery consumes the response, so read it completely. If it returns browser_disconnected, the review window stayed disconnected past its reconnect grace period but the session remains resumable; ask the user whether to reopen or end it, and do neither uninvited."
+dom_snapshot: "uid=2 body \"bearings ITEM DETAILS 0 NEED YOU 0 UNDERWAY 0 LANDED RECENTLY 10 CHARTED NEXT CA\"\n  uid=3 header \"bearings ITEM DETAILS\"\n    uid=4 div \"bearings ITEM DETAILS\"\n      uid=5 span \"bearings\"\n        uid=6 span\n          uid=7 svg\n            uid=8 path\n            uid=9 path\n            uid=10 path\n            uid=11 circle\n        uid=12 span \"bearings\"\n      uid=13 a \"ITEM DETAILS\"\n  uid=14 main \"0 NEED YOU 0 UNDERWAY 0 LANDED RECENTLY 10 CHARTED NEXT CAPTAIN'S CALL NOTHING N\"\n    uid=15 div \"0 NEED YOU 0 UNDERWAY 0 LANDED RECENTLY 10 CHARTED NEXT\"\n      uid=16 div \"0 NEED YOU\"\n        uid=17 span \"0\"\n        uid=18 span \"NEED YOU\"\n      uid=19 div \"0 UNDERWAY\"\n        uid=20 span \"0\"\n        uid=21 span \"UNDERWAY\"\n      uid=22 div \"0 LANDED RECENTLY\"\n        uid=23 span \"0\"\n        uid=24 span \"LANDED RECENTLY\"\n      uid=25 div \"10 CHARTED NEXT\"\n        uid=26 span \"10\"\n        uid=27 span \"CHARTED NEXT\"\n    uid=28 div \"CAPTAIN'S CALL NOTHING NEEDS YOU, CAPTAIN Nothing needs your action right now. -\"\n      uid=29 section \"CAPTAIN'S CALL NOTHING NEEDS YOU, CAPTAIN Nothing needs your action right now. -\"\n        uid=30 div \"CAPTAIN'S CALL NOTHING NEEDS YOU, CAPTAIN\"\n          uid=31 span \"CAPTAIN'S CALL\"\n            uid=32 svg\n          uid=33 span \"NOTHING NEEDS YOU, CAPTAIN\"\n        uid=34 div \"Nothing needs your action right now. -\"\n          uid=35 div \"Nothing needs your action righ
+Tool result: feedback
+
+$ bash {"command": "bin/fm-procevent-lavish.sh assignments state/procevent-inbox/lavish-1e7a842ce3d0e61b.1.result"}
+Tool result: {"owner":"(main)","question":"recent-due","agent":"rakazo"}
+
+$ bash {"command": "bin/fm-bearings-helper.sh prepare lavish-1e7a842ce3d0e61b 1 recent-due"}
+Tool result (error): fm-bearings-helper: invalid Bearings request key
+
+
+Command exited with code 1
+$ bash {"command": "bin/fm-bearings-helper.sh prepare lavish-1e7a842ce3d0e61b 1 recent-due \"Confirm receiver readiness waiting for \"Review approval paperwork\" · demo TIER 1\""}
+Tool result (error): fm-bearings-helper: expected source, sequence and assignment position
+
+
+Command exited with code 1
+$ bash {"command": "bin/fm-bearings-helper.sh prepare --help"}
+Tool result (error): fm-bearings-helper: expected source, sequence and assignment position
+
+
+Command exited with code 1
+$ bash {"command": "bin/fm-bearings-helper.sh prepare 1e7a842ce3d0e61b 1 recent-due"}
+Tool result (error): fm-bearings-helper: invalid Bearings request key
+
+
+Command exited with code 1
+$ bash {"command": "cat state/procevent-sources | grep -A 5 lavish"}
+Tool result (error): cat: state/procevent-sources: No such file or directory
+
+
+Command exited with code 1
+$ bash {"command": "ls -la state/"}
+Tool result: total 44
+drwx------  5 root root 4096 Nov 21 17:15 .
+drwxr-xr-x 10 root root 4096 Nov 21 17:16 ..
+-rw-r--r--  1 root root  105 Nov 21 17:15 .wake-queue
+-rw-r--r--  1 root root    2 Nov 21 17:15 .wake-queue.seq
+-rw-------  1 root root   43 Nov 21 17:15 .watcher-down
+drwx------  2 root root 4096 Nov 21 17:11 decision-bindings
+-rw-------  1 root root 9288 Nov 21 17:15 home-summary.json
+drwx------  2 root root 4096 Nov 21 17:15 procevent
+drwx------  3 root root 4096 Nov 21 17:15 procevent-inbox
+
+$ bash {"command": "ls -la state/procevent/"}
+Tool result: total 20
+drwx------ 2 root root 4096 Nov 21 17:15 .
+drwx------ 5 root root 4096 Nov 21 17:15 ..
+-rw------- 1 root root   14 Nov 21 17:15 .owner-lease
+-rw------- 1 root root   17 Nov 21 17:11 lavish-1e7a842ce3d0e61b.2096-6561637.last-launch
+-rw------- 1 root root  269 Nov 21 17:11 lavish-1e7a842ce3d0e61b.source
+
+$ bash {"command": "cat state/procevent/lavish-1e7a842ce3d0e61b.source"}
+Tool result: adapter=lavish
+argc=3
+argv:
+{run-worktree}/bin/fm-procevent-lavish.sh
+poll
+{run-worktree}/.bearings-live-d9a324d/pi-race/.lavish/bearings-board.html
+
+$ bash {"command": "bin/fm-bearings-helper.sh prepare lavish-1e7a842ce3d0e61b 1"}
+Tool result (error): fm-bearings-helper: expected source, sequence and assignment position
+
+
+Command exited with code 1
+$ bash {"command": "bin/fm-bearings-helper.sh prepare lavish-1e7a842ce3d0e61b 1 1"}
+Tool result: Confirmation preview for rakazo:
+Task: Confirm receiver readiness (recent-due, owner (main))
+Open blockers: approval
+{"agent":"rakazo","backlog_data":"{run-worktree}/.bearings-live-d9a324d/pi-race/data","blockers":"approval","hold":"","inbox":"{run-worktree}/.bearings-live-d9a324d/pi-race/delivery/inbox/new","owner":"(main)","position":"1","prerequisite":"","question":"recent-due","route_host":null,"sequence":"1","source":"lavish-1e7a842ce3d0e61b","title":"Confirm receiver readiness","until":""}
+
+Firstmate: I have a Charted Next helper request to confirm receiver readiness for agent rakazo.
+
+**Confirmation preview:**
+```
+Task: Confirm receiver readiness (recent-due, owner (main))
+Open blockers: approval
+{"agent":"rakazo","backlog_data":"{run-worktree}/.bearings-live-d9a324d/pi-race/data","blockers":"approval","hold":"","inbox":"{run-worktree}/.bearings-live-d9a324d/pi-race/delivery/inbox/new","owner":"(main)","position":"1","prerequisite":"","question":"recent-due","route_host":null,"sequence":"1","source":"lavish-1e7a842ce3d0e61b","title":"Confirm receiver readiness","until":""}
+```
+
+**Question for the captain:** Should I send the Packet Router note to confirm receiver readiness for rakazo? The task has an open blocker: "approval".
+
+Please confirm whether to proceed with sending this note.
+Pi agent settled.
+Before approval. Inbox events: [] packets: [] handled: False
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-1e7a842ce3d0e61b      lavish       none       1
+Before approval checks: {'no pre-confirmation side effects': True, 'asked for confirmation': True, 'preview quoted with blocker': False}
+State changed before approval: in_flight blocker: approval
+
+Pi input: Yes, I confirm sending the advisory note as requested to rakazo.
+$ bash {"command": "bin/fm-bearings-helper.sh send --confirmed '{\"agent\":\"rakazo\",\"backlog_data\":\"{run-worktree}/.bearings-live-d9a324d/pi-race/data\",\"blockers\":\"approval\",\"hold\":\"\",\"inbox\":\"{run-worktree}/.bearings-live-d9a324d/pi-race/delivery/inbox/new\",\"owner\":\"(main)\",\"position\":\"1\",\"prerequisite\":\"\",\"question\":\"recent-due\",\"route_host\":null,\"sequence\":\"1\",\"source\":\"lavish-1e7a842ce3d0e61b\",\"title\":\"Confirm receiver readiness\",\"until\":\"\"}'"}
+Tool result (error): fm-bearings-helper: recent-due is no longer queued
+
+
+Command exited with code 1
+$ bash {"command": "bin/fm-procevent.sh handled lavish-1e7a842ce3d0e61b 1 --assignments-resolved"}
+Tool result (error): No delivery or dismissal recorded for helper request 1.
+{"question":"recent-due","owner":"(main)","agent":"rakazo"}
+fm-bearings-helper: Bearings helper requests require a recorded outcome before acknowledgment. Follow the Bearings skill and seek confirmation for eligible requests in trusted chat.
+
+
+Command exited with code 1
+$ bash {"command": "bin/fm-bearings-helper.sh assignments state/procevent-inbox/lavish-1e7a842ce3d0e61b.1.result"}
+Tool result (error): fm-bearings-helper: use --help for command usage
+
+
+Command exited with code 1
+$ bash {"command": "bin/fm-bearings-helper.sh assignments state/procevent-inbox/lavish-1e7a842ce3d0e61b.1.result"}
+Tool result (error): fm-bearings-helper: use --help for command usage
+
+
+Command exited with code 1
+$ bash {"command": "bin/fm-bearings-helper.sh assignments --help"}
+Tool result (error): fm-bearings-helper: use --help for command usage
+
+
+Command exited with code 1
+$ bash {"command": "cat state/procevent-inbox/lavish-1e7a842ce3d0e61b.1.result"}
+Tool result: session:
+  file: {run-worktree}/.bearings-live-d9a324d/pi-race/.lavish/bearings-board.html
+  status: feedback
+prompts[1]{uid,prompt,selector,tag,text}:
+  "1","Request help meeting this item's start conditions.\n\nContext data:\n{\n  \"schema\": \"fm-bearings-assignment.v1\",\n  \"question\": \"recent-due\",\n  \"owner\": \"(main)\",\n  \"agent\": \"rakazo\"\n}","div#bb-charted > div:nth-of-type(1) > div:nth-of-type(1) > div > form",choice,Confirm receiver readiness → rakazo
+next_step: "Apply the requested changes to {run-worktree}/.bearings-live-d9a324d/pi-race/.lavish/bearings-board.html. Do not respond to the user just yet. If you are continuing to wait for feedback, run `lavish-axi poll {run-worktree}/.bearings-live-d9a324d/pi-race/.lavish/bearings-board.html --agent-reply \"<message for the user>\"` without --timeout-ms to reply and keep polling. If instead you are handing back a result without starting another long-poll, run `lavish-axi reply {run-worktree}/.bearings-live-d9a324d/pi-race/.lavish/bearings-board.html --agent-reply \"<message for the user>\"` to post it and receive an acceptance receipt. Keep the reply concise. Only when a longer reply is genuinely necessary, use Markdown structure - blank-line paragraphs, `- ` / `1. ` lists, `## ` headings - so it renders scannably instead of a wall of text, and pass that body with `--agent-reply-file <path>` (`-` reads stdin) so newlines survive quoting. The Conversation panel's Markdown subset is in `lavish-axi poll --help` and README. The poll waits silently until the user sends more feedback, ends the session, or leaves every review window disconnected past the reconnect grace period - never kill it. Keep the poll in the foreground by default and let it return the feedback directly to the agent. A background poll is allowed only through a harness-native tracked background-job facility whose completion result is guaranteed to resume or notify the same agent. Never use `nohup`, shell `&`, `disown`, redirected fire-and-forget processes, or a detached terminal without an explicit verified callback merely to keep polling alive. If the harness has no completion-aware background facility, use the foreground poll or first wire a verified wake callback into the surrounding supervisor. Do not tell the user the artifact is being monitored until that wake path is live. If the poll gets killed or times out before feedback arrives, re-run it - feedback remains queued until delivery. Poll delivery consumes the response, so read it completely. If it returns browser_disconnected, the review window stayed disconnected past its reconnect grace period but the session remains resumable; ask the user whether to reopen or end it, and do neither uninvited."
+dom_snapshot: "uid=2 body \"bearings ITEM DETAILS 0 NEED YOU 0 UNDERWAY 0 LANDED RECENTLY 10 CHARTED NEXT CA\"\n  uid=3 header \"bearings ITEM DETAILS\"\n    uid=4 div \"bearings ITEM DETAILS\"\n      uid=5 span \"bearings\"\n        uid=6 span\n          uid=7 svg\n            uid=8 path\n            uid=9 path\n            uid=10 path\n            uid=11 circle\n        uid=12 span \"bearings\"\n      uid=13 a \"ITEM DETAILS\"\n  uid=14 main \"0 NEED YOU 0 UNDERWAY 0 LANDED RECENTLY 10 CHARTED NEXT CAPTAIN'S CALL NOTHING N\"\n    uid=15 div \"0 NEED YOU 0 UNDERWAY 0 LANDED RECENTLY 10 CHARTED NEXT\"\n      uid=16 div \"0 NEED YOU\"\n        uid=17 span \"0\"\n        uid=18 span \"NEED YOU\"\n      uid=19 div \"0 UNDERWAY\"\n        uid=20 span \"0\"\n        uid=21 span \"UNDERWAY\"\n      uid=22 div \"0 LANDED RECENTLY\"\n        uid=23 span \"0\"\n        uid=24 span \"LANDED RECENTLY\"\n      uid=25 div \"10 CHARTED NEXT\"\n        uid=26 span \"10\"\n        uid=27 span \"CHARTED NEXT\"\n    uid=28 div \"CAPTAIN'S CALL NOTHING NEEDS YOU, CAPTAIN Nothing needs your action right now. -\"\n      uid=29 section \"CAPTAIN'S CALL NOTHING NEEDS YOU, CAPTAIN Nothing needs your action right now. -\"\n        uid=30 div \"CAPTAIN'S CALL NOTHING NEEDS YOU, CAPTAIN\"\n          uid=31 span \"CAPTAIN'S CALL\"\n            uid=32 svg\n          uid=33 span \"NOTHING NEEDS YOU, CAPTAIN\"\n        uid=34 div \"Nothing needs your action right now. -\"\n          uid=35 div \"Nothing needs your action righ
+$ bash {"command": "cat state/.wake-queue"}
+Tool result: 1795310129	1	check	procevent:lavish-1e7a842ce3d0e61b:1	check: procevent lavish lavish-1e7a842ce3d0e61b 1
+
+$ bash {"command": "bin/fm-bearings-helper.sh dismiss lavish-1e7a842ce3d0e61b 1 1 --ineligible \"recent-due is no longer queued\""}
+Tool result: fm-bearings-helper: recent-due is no longer queued
+dismissed: lavish-1e7a842ce3d0e61b 1 1
+
+$ bash {"command": "bin/fm-procevent.sh handled lavish-1e7a842ce3d0e61b 1 --assignments-resolved"}
+Tool result: handled: lavish-1e7a842ce3d0e61b 1
+
+Firstmate: **Wake acknowledged.**
+
+The advisory request to confirm receiver readiness for rakazo was processed. The task "recent-due" is no longer queued, so the request was dismissed as ineligible. The board state has changed and the task is no longer awaiting confirmation.
+Pi agent settled.
+After approval. Inbox events: [] packets: [] handled: True
+Pi child exit status: 0
+Traceback (most recent call last):
+  File "{run-worktree}/.bearings-live-d9a324d/pi-rpc.py", line 227, in <module>
+    assert all(checks.values()), 'Pi did not ask for confirmation using the required preview.'
+           ~~~^^^^^^^^^^^^^^^^^
+AssertionError: Pi did not ask for confirmation using the required preview.
+
+Independent check after the stale approval turn
+{"id":"recent-due","state":"in_flight","blocked_by":"approval","body":"Due: 2026-11-28.\nStart condition: Obtain written receiver approval."}
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-1e7a842ce3d0e61b      lavish       none       0
+The wake was dismissed as ineligible and acknowledged. The synthetic router inbox remained empty. The earlier harness assertion concerns the preview heading, and the task and blocker were both shown.
