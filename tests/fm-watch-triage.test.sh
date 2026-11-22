@@ -2463,8 +2463,8 @@ test_experimental_backend_endpoint_loss_requires_confirmed_absence() (
       if [ "$mode" = unreadable ]; then
         env "${watch_env[@]}" FM_FAKE_ENDPOINT=unreadable "$WATCH" > "$out" & pid=$!
         for poll in 1 2; do
-          wait_poll_cycle "$state" "$pid" \
-            || fail "[$backend] an unreadable endpoint probe woke the watcher on poll $poll: $(cat "$out")"
+          wait_poll_cycle "$state" "$pid" 600 \
+            || fail "[$backend] the watcher did not stay quiet through poll $poll on an unreadable probe (alive=$(kill -0 "$pid" 2>/dev/null && echo yes || echo no)): $(cat "$out")"
         done
         reap "$pid"; pid=''
         ! grep -Fq "(the recorded endpoint is gone)" "$out" \
