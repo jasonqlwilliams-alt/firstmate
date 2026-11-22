@@ -62,7 +62,8 @@ When pane polling cannot read a local task's recorded endpoint and the backend c
 tmux and Herdr supply the required missing verdict, and a secondmate enters this poll path only while its latest status declares `paused:` or `captain-held:`.
 The report is keyed to the recorded backend, target, and spawn generation, so a relaunch can report a fresh loss even when it reuses the target.
 A successful capture also re-arms the report, and teardown keeps the loss record until it retires the task record.
-The wake keeps its window key for routing, but the drain's same-key deduplication gives it its own identity, so it and an ordinary stale wake for that window are each presented and acknowledged, while repeated loss rows still collapse to one.
+The wake keeps its window key for routing and has a separate deduplication identity, so the drain presents both the endpoint loss and any ordinary stale wake for that window, collapsing repeated loss rows to one.
+After handling both wakes, use the drain's [printed acknowledgement](#recovery-episode-acknowledgement) to retire them.
 Where the away daemon runs, it routes the loss to its escalation digest and keeps pause tracking cleared while the loss still matches the current endpoint, even if the wait remains declared.
 
 The [backend verification record](verification/runtime-backends.md#recorded-endpoint-loss) covers tmux and Herdr.

@@ -2202,11 +2202,8 @@ test_exited_declared_pause_is_bounded_but_live_gate_surfaces() {
   pass "exited declared-pause and captain-held panes use bounded pause cadence while a live decision gate still surfaces once"
 }
 
-# An ordinary stale wake and the recorded-endpoint-loss wake for the same window
-# share kind and key, so the drain must still present them as two wakes that are
-# acknowledged independently, while repeated endpoint-loss rows still collapse.
 test_endpoint_loss_and_ordinary_stale_are_presented_independently() (
-  local tmux_bin socket dir state window out err pid='' rows ordinary lost seq generation
+  local tmux_bin socket dir state window out err pid='' rows ordinary lost newest queued
   tmux_bin=$(command -v tmux) || { echo "skip: tmux is required for the endpoint-loss dedup regression"; return 0; }
   socket="fm-watch-gone-dedup-$$-$RANDOM"
   dir=$(fm_test_tmproot fm-watch-gone-dedup) || fail "could not create the endpoint-loss dedup fixture"
@@ -2231,31 +2228,28 @@ test_endpoint_loss_and_ordinary_stale_are_presented_independently() (
   wait_for_exit "$pid" 150 || fail "closing the window did not wake the watcher"
   pid=''
   grep -Fxq "$lost" "$out" || fail "unexpected watcher output: $(cat "$out")"
-  # A later ordinary stale wake for the same window, then a repeated loss row.
-  append_wake "$state" stale "$window" "$ordinary" || fail "could not queue the ordinary stale wake"
-  append_wake "$state" stale "$window" "$lost" || fail "could not queue a repeated endpoint-loss wake"
 
-  rows=$(FM_STATE_OVERRIDE="$state" "$DRAIN" 2> "$err") || fail "drain failed: $(cat "$err")"
-  printf '%s\n' "$rows" | awk -F '\t' -v w="$window" -v p="$ordinary" '$3 == "stale" && $4 == w && $5 == p { n++ } END { exit(n != 1) }' \
-    || fail "the ordinary stale wake was not presented beside the endpoint loss: $rows"
-  printf '%s\n' "$rows" | awk -F '\t' -v w="$window" -v p="$lost" '$3 == "stale" && $4 == w && $5 == p { n++ } END { exit(n != 1) }' \
-    || fail "repeated endpoint-loss wakes were not presented exactly once: $rows"
+  for newest in ordinary endpoint-loss; do
+    if [ "$newest" = ordinary ]; then
+      append_wake "$state" stale "$window" "$lost" || fail "could not queue a repeated endpoint-loss wake"
+      append_wake "$state" stale "$window" "$ordinary" || fail "could not queue the ordinary stale wake"
+    else
+      append_wake "$state" stale "$window" "$ordinary" || fail "could not queue the ordinary stale wake"
+      append_wake "$state" stale "$window" "$lost" || fail "could not queue the endpoint-loss wake"
+      append_wake "$state" stale "$window" "$lost" || fail "could not queue a repeated endpoint-loss wake"
+    fi
 
-  # Acknowledge only through the first (watcher-produced) loss row: the later
-  # ordinary stale wake must survive, and so must its presentation.
-  seq=$(awk -F '\t' -v p="$lost" '$5 == p { print $2; exit }' "$state/.wake-queue")
-  generation=$(sed -n 's/^WAKE_ACK_REQUIRED:.*--recovery-generation \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' "$err")
-  [ -n "$seq" ] && [ -n "$generation" ] || fail "drain omitted the loss row or its acknowledgement boundary"
-  FM_STATE_OVERRIDE="$state" "$DRAIN" --ack-through "$seq" --recovery-generation "$generation" 2>/dev/null \
-    || fail "could not acknowledge the first endpoint-loss wake alone"
-  rows=$(FM_STATE_OVERRIDE="$state" "$DRAIN" 2>/dev/null) || fail "re-drain failed"
-  printf '%s\n' "$rows" | awk -F '\t' -v p="$ordinary" '$5 == p { n++ } END { exit(n != 1) }' \
-    || fail "acknowledging the endpoint loss consumed the ordinary stale wake: $rows"
-  printf '%s\n' "$rows" | awk -F '\t' -v p="$lost" '$5 == p { n++ } END { exit(n != 1) }' \
-    || fail "the unacknowledged repeated endpoint loss was not presented once: $rows"
-  ack_stopped_cycle "$state" || fail "could not acknowledge the remaining wakes"
-  [ ! -s "$state/.wake-queue" ] || fail "acknowledged wakes remained queued: $(cat "$state/.wake-queue")"
-  pass "real tmux: endpoint loss and an ordinary stale wake for one window are presented and acknowledged independently"
+    queued=$(cat "$state/.wake-queue") || fail "could not read the queued wakes"
+    rows=$(FM_STATE_OVERRIDE="$state" "$DRAIN" 2> "$err") || fail "drain failed: $(cat "$err")"
+    printf '%s\n' "$rows" | awk -F '\t' -v w="$window" -v p="$ordinary" '$3 == "stale" && $4 == w && $5 == p { n++ } END { exit(n != 1) }' \
+      || fail "[$newest newest] the ordinary stale wake was not presented beside the endpoint loss: $rows"
+    printf '%s\n' "$rows" | awk -F '\t' -v w="$window" -v p="$lost" '$3 == "stale" && $4 == w && $5 == p { n++ } END { exit(n != 1) }' \
+      || fail "[$newest newest] repeated endpoint-loss wakes were not presented exactly once: $rows"
+    [ "$(cat "$state/.wake-queue")" = "$queued" ] || fail "[$newest newest] presenting the wakes changed the queue before acknowledgement"
+    ack_drain_err "$state" "$err" || fail "[$newest newest] could not acknowledge the presented wakes"
+    [ ! -s "$state/.wake-queue" ] || fail "[$newest newest] acknowledged wakes remained queued: $(cat "$state/.wake-queue")"
+  done
+  pass "real tmux: endpoint loss and ordinary stale are both presented before acknowledgement in either sequence order"
 )
 
 # An active backlog hold is a deliberate idle fact only when the recorded window
