@@ -19,9 +19,8 @@ fm_git_worktree "$TMP_ROOT/project" "$TMP_ROOT/worktree" fixture-task
 printf 'exitdialog\n' > "$TMP_ROOT/worktree/.fm-secondmate-home"
 mkdir -p "$TMP_ROOT/worktree/state"
 
-# The restart's collaborators: fm-send delivers for real, records the request
-# text it was asked to deliver, and answers as the mate would; fm-spawn
-# prepares a replacement that is never launched in these cases.
+# The real fm-send delivers the request, then the stand-in mate reads and
+# acknowledges the inbox record. The replacement stub never launches an agent.
 control_bin="$TMP_ROOT/control/bin"
 mkdir -p "$control_bin"
 for entry in "$ROOT/bin/"*; do
@@ -33,11 +32,16 @@ done
 cat > "$control_bin/fm-send.sh" <<'SH'
 #!/usr/bin/env bash
 set -eu
-printf '%s\n' "$2" > "$FM_DIALOG_REQUEST"
 "$FM_ROOT_OVERRIDE/bin/fm-send.sh" "$@"
 if [ -n "${FM_PENDING_REPLY_EXISTING_CORR:-}" ]; then
-  "$FM_ROOT_OVERRIDE/bin/fm-status-append.sh" "$FM_HOME/state/$1.status" \
-    "done [corr=$FM_PENDING_REPLY_EXISTING_CORR]: open work written down"
+  . "$FM_ROOT_OVERRIDE/bin/fm-task-inbox-lib.sh"
+  inbox="$FM_STATE_OVERRIDE/$1.inbox"
+  request=$(fm_task_inbox_body "$inbox/001.msg")
+  [[ "$request" =~ corr=([0-9a-f]{16}) ]] || exit 1
+  corr=${BASH_REMATCH[1]}
+  mv "$inbox/001.msg" "$inbox/handled/001.msg"
+  "$FM_ROOT_OVERRIDE/bin/fm-status-append.sh" "$FM_STATE_OVERRIDE/$1.status" \
+    "done [corr=$corr]: open work written down"
 fi
 SH
 cat > "$control_bin/fm-spawn.sh" <<'SH'
@@ -47,7 +51,6 @@ while [ ! -f "$FM_CONTROL_RELAUNCH_PREPARE/continue" ]; do sleep 0.05; done
 exit 1
 SH
 chmod +x "$control_bin/fm-send.sh" "$control_bin/fm-spawn.sh"
-export FM_DIALOG_REQUEST="$TMP_ROOT/request.txt"
 ORIGINAL_PATH=$PATH
 TMUX_BIN=$(command -v tmux)
 SOCKET="fm-claude-exit-$$"
@@ -60,6 +63,16 @@ cleanup() {
   exit "$rc"
 }
 trap cleanup EXIT
+
+{
+  head -n 1 "$FIXTURE"
+  for ((task=1; task<=24; task++)); do printf '   · Bash(timer %s) · running\n' "$task"; done
+  tail -n +2 "$FIXTURE"
+} > "$TMP_ROOT/long.screen"
+{
+  printf 'Update now (runs npm install)\nSkip until next version\nesc skip\n\n'
+  cat "$FIXTURE"
+} > "$TMP_ROOT/picker-history.screen"
 
 # The stand-in draws a bare Claude composer and echoes typed input. A submitted
 # /exit exits (mode plain) or draws the fixture dialog with a per-mode
@@ -145,8 +158,10 @@ exec "$TMUX_BIN" -f /dev/null -L "$SOCKET" "\$@"
 EOF
 chmod +x "$TMP_ROOT/bin/tmux"
 stub_command() {  # <mode>
+  local screen=$FIXTURE
+  [ "$1" != picker-history ] || screen="$TMP_ROOT/picker-history.screen"
   printf '%q %q %q %q %q; exec /bin/bash --noprofile --norc' \
-    "$TMP_ROOT/bin/claude" "$TMP_ROOT/pid" "$TMP_ROOT/keys" "$1" "$FIXTURE"
+    "$TMP_ROOT/bin/claude" "$TMP_ROOT/pid" "$TMP_ROOT/keys" "$1" "$screen"
 }
 "$TMUX_BIN" -f /dev/null -L "$SOCKET" new-session -d -s fixture -n sentinel \
   -c "$TMP_ROOT/worktree" /bin/bash --noprofile --norc || fail 'tmux fixture failed'
@@ -161,7 +176,7 @@ run_fixture() {
     "$control_bin/$command" "$@"
 }
 
-for mode in restart exit plain initial-dialog \
+for mode in restart exit plain initial-dialog picker-history \
     no-heading changed-heading no-list no-stay selection-on-2 relabeled extra-choice history history-plain; do
   target=fixture:fm-exitdialog
   "$TMUX_BIN" -f /dev/null -L "$SOCKET" new-window -d -t fixture -n fm-exitdialog \
@@ -175,7 +190,6 @@ for mode in restart exit plain initial-dialog \
     'endpoint_task_id=exitdialog' 'harness=claude' 'kind=secondmate' \
     "worktree=$TMP_ROOT/worktree" "project=$TMP_ROOT/project"
   : > "$TMP_ROOT/keys"
-  rm -f "$FM_DIALOG_REQUEST"
   rc=0
   if [ "$mode" = restart ]; then
     out=$(run_fixture fm-secondmate-restart.sh exitdialog 2>&1) || rc=$?
@@ -191,7 +205,7 @@ for mode in restart exit plain initial-dialog \
       [ "$keys" = '/ e x i t \r' ] || fail "a plain exit sent other keys: $keys"
       ! kill -0 "$pid" 2>/dev/null || fail 'stand-in survived a plain exit'
       ;;
-    restart|exit|initial-dialog)
+    restart|exit|initial-dialog|picker-history)
       [ "$rc" -ne 0 ] || fail "$mode reported success with the dialog open"
       assert_contains "$out" 'background-tasks exit confirmation' "$mode did not name the open dialog"
       assert_contains "$screen" '❯ 1. Exit and stop tasks' "$mode did not leave the dialog open"
@@ -199,11 +213,15 @@ for mode in restart exit plain initial-dialog \
       [ "$mode" != initial-dialog ] || expected=''
       [ "$keys" = "$expected" ] || fail "$mode expected '$expected', received '$keys'"
       kill -0 "$pid" 2>/dev/null || fail "$mode stopped the agent"
+      if [ "$mode" = picker-history ]; then
+        assert_contains "$screen" 'esc skip' 'tmux did not retain the earlier picker text'
+      fi
       if [ "$mode" = restart ]; then
         expect_code 3 "$rc" 'the restart should report the mate unreached'
         assert_contains "$out" 'unreached: exitdialog:' 'the restart did not report the mate unreached'
-        assert_present "$FM_DIALOG_REQUEST" 'the restart did not deliver its save request'
-        assert_contains "$(cat "$FM_DIALOG_REQUEST")" 'stop every background shell task you started' \
+        delivered="$TMP_ROOT/home/state/exitdialog.inbox/handled/001.msg"
+        assert_present "$delivered" 'the stand-in mate did not handle the durable save request'
+        assert_contains "$(sed '1,/^--$/d' "$delivered")" 'stop every background shell task you started' \
           'the save request did not ask the mate to stop its background tasks'
       fi
       kill -TERM "$pid"
@@ -261,11 +279,14 @@ case "$1 $2" in
     esac
     ;;
   'pane read')
+    styled=0
+    case " $* " in *' --format ansi '*) styled=1 ;; esac
     case "$phase" in
       dialog)
+        [ "$FM_DIALOG_MODE:$styled" != doorbell-after-long:1 ] || exit 1
         while IFS= read -r line; do
-          case "$line" in
-            *❯*) printf '\033[1m%s\033[0m\n' "$line" ;;
+          case "$styled:$line" in
+            1:*❯*) printf '\033[1m%s\033[0m\n' "$line" ;;
             *) printf '%s\n' "$line" ;;
           esac
         done < "$FM_DIALOG_FIXTURE"
@@ -278,7 +299,7 @@ case "$1 $2" in
   'pane send-text')
     printf '%s\n' "$4" >> "$FM_DIALOG_CASE/input"
     case "$FM_DIALOG_MODE:$4" in
-      doorbell-after:*) printf 'dialog\n' > "$FM_DIALOG_CASE/phase" ;;
+      doorbell-after*:*) printf 'dialog\n' > "$FM_DIALOG_CASE/phase" ;;
       *:/exit) printf 'typed\n' > "$FM_DIALOG_CASE/phase" ;;
     esac
     ;;
@@ -300,22 +321,28 @@ meta="$TMP_ROOT/home/state/exitdialog.meta"
 fm_write_meta "$meta" 'backend=herdr' 'window=fixture:p1' 'endpoint_task_id=exitdialog' \
   'harness=claude' 'kind=secondmate' "worktree=$TMP_ROOT/worktree" "project=$TMP_ROOT/project" \
   'herdr_session=fixture' 'herdr_workspace_id=w1' 'herdr_tab_id=t1' 'herdr_pane_id=p1' 'herdr_terminal_id=term-claude'
-export FM_DIALOG_FIXTURE="$FIXTURE" FM_DIALOG_HOME="$TMP_ROOT/worktree"
-for mode in dialog retry doorbell-before doorbell-after; do
+export FM_DIALOG_HOME="$TMP_ROOT/worktree"
+for mode in dialog long-dialog picker-history retry doorbell-before doorbell-after \
+    doorbell-after-long doorbell-before-picker; do
   export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/herdr-$mode"
+  case "$mode" in
+    long-dialog|doorbell-after-long) export FM_DIALOG_FIXTURE="$TMP_ROOT/long.screen" ;;
+    picker-history|doorbell-before-picker) export FM_DIALOG_FIXTURE="$TMP_ROOT/picker-history.screen" ;;
+    *) export FM_DIALOG_FIXTURE="$FIXTURE" ;;
+  esac
   mkdir "$FM_DIALOG_CASE"
   printf 'composer\n' > "$FM_DIALOG_CASE/phase"
   : > "$FM_DIALOG_CASE/input"
   rc=0
   case "$mode" in
     doorbell-*)
-      [ "$mode" != doorbell-before ] || printf 'dialog\n' > "$FM_DIALOG_CASE/phase"
+      case "$mode" in doorbell-before*) printf 'dialog\n' > "$FM_DIALOG_CASE/phase" ;; esac
       rec="$FM_DIALOG_CASE/001.msg"
       printf 'schema=fm-task-inbox.v1\n--\nreview the open records\n' > "$rec"
       PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
         bash -c '. "$1"; fm_task_inbox_ring herdr fixture:p1 "$2" fm-exitdialog claude-latest' \
         _ "$ROOT/bin/fm-task-inbox-lib.sh" "$rec" || rc=$?
-      if [ "$mode" = doorbell-before ]; then
+      if [[ "$mode" = doorbell-before* ]]; then
         expect_code 1 "$rc" 'the dialog should prevent typing the doorbell'
         [ ! -s "$FM_DIALOG_CASE/input" ] || fail "the doorbell wrote into the dialog: $(cat "$FM_DIALOG_CASE/input")"
       else
@@ -330,7 +357,7 @@ for mode in dialog retry doorbell-before doorbell-after; do
   printf 'herdr %s exit=%s: %s\n' "$mode" "$rc" "$out"
   input=$(cat "$FM_DIALOG_CASE/input")
   case "$mode" in
-    dialog)
+    dialog|long-dialog|picker-history)
       [ "$rc" -ne 0 ] || fail 'the styled Herdr dialog reported a stopped agent'
       assert_contains "$out" 'background-tasks exit confirmation' 'the styled Herdr dialog was not recognized'
       [ "$input" = $'/exit\nenter' ] || fail "the styled Herdr dialog received another key: $input"

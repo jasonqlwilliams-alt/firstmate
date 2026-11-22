@@ -270,7 +270,8 @@ run_restart() {  # <case-dir> <args...>
 test_persist_gates_and_asks_only_for_open_records() {
   local dir out rc request
   dir=$(new_case gate)
-  add_local_mate "$dir" sm1
+  add_local_mate "$dir" sm1 pi
+  printf 'pi' > "$dir/fake/command"
   # No answer armed: the mate never confirms its open work is written down.
   out=$(FM_TEST_PERSIST_WAIT=0 run_restart "$dir" fm-sm1); rc=$?
 
@@ -280,7 +281,8 @@ test_persist_gates_and_asks_only_for_open_records() {
   assert_not_contains "$out" "restarted: sm1" "a mate that never confirmed must not be restarted"
   assert_contains "$out" "summary: 0 of 1 restarted" "the summary must not claim a reload"
   # The agent is untouched: nothing exited, nothing relaunched.
-  assert_no_grep '^/exit$' "$dir/fake/literal" "the agent was stopped without a confirmed persist"
+  ! grep -Eq '^/(exit|quit)$' "$dir/fake/literal" \
+    || fail "the agent was stopped without a confirmed persist"
   assert_absent "$dir/home/state/sm1.control-relaunch" \
     "a restart transaction was opened without a confirmed persist"
   grep -h '^phase=' "$dir/home/state/pending-replies"/* | grep -q '^phase=awaiting_report$' \
@@ -295,6 +297,8 @@ test_persist_gates_and_asks_only_for_open_records() {
     "the request must flush an unregistered captain call"
   assert_contains "$request" "Do NOT run the memory, learnings, or captain-preference sweeps" \
     "the request must exclude the memory curation half of stow"
+  assert_not_contains "$request" "stop every background shell task" \
+    "the running Pi mate must keep its background tasks when the replacement is Claude"
   pass "T1 persist is a gate, and asks for open records and task status only"
 }
 
@@ -537,6 +541,8 @@ test_remote_mate_restarts_over_the_transport_hop() {
   [ "$relaunch_line" = "fm-remote-secondmate-control.sh relaunch sm2 codex big-model high" ] \
     || fail "the host-local relaunch did not carry the parent's resolved profile: $relaunch_line"
   # The persist request crossed the SAME hop before the restart did.
+  grep -q '^fm-remote-secondmate-control.sh send .*stop every background shell task you started' \
+    "$dir/ssh.log" || fail "the running Claude mate must get the cleanup request when the replacement is Codex"
   [ "$(grep -n '^fm-remote-secondmate-control.sh send' "$dir/ssh.log" | head -1 | cut -d: -f1)" \
      -lt "$(grep -n '^fm-remote-secondmate-control.sh relaunch' "$dir/ssh.log" | head -1 | cut -d: -f1)" ] \
     || fail "the remote mate was restarted before it was asked to persist"$'\n'"$(cat "$dir/ssh.log")"

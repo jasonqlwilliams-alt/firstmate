@@ -798,7 +798,7 @@ fm_backend_capture() {  # <backend> <target> <lines> [expected-label]
   fm_backend_source "$backend" || return 1
   case "$backend" in
     tmux) fm_backend_tmux_capture "$@" ;;
-    herdr) fm_backend_herdr_capture "$@" ;;
+    herdr) fm_backend_herdr_capture "$1" "${2:-}" ;;
     zellij) fm_backend_zellij_capture "$@" ;;
     orca) fm_backend_orca_capture "$@" ;;
     cmux) fm_backend_cmux_capture "$@" ;;
@@ -938,7 +938,7 @@ fm_backend_composer_state() {  # <backend> <target> [expected-label] -> empty|pe
 # fm_backend_composer_snapshot: one composer capture of <target> into the
 # snapshot globals (bin/fm-composer-lib.sh "Composer SNAPSHOT"). Call it
 # without command substitution; it fails when the capture fails.
-fm_backend_composer_snapshot() {  # <backend> <target> [expected-label]
+fm_backend_composer_snapshot() {  # <backend> <target> [expected-label] [herdr-lines|visible]
   local backend=$1
   shift
   FM_COMPOSER_SNAPSHOT_SCREEN=
@@ -947,10 +947,10 @@ fm_backend_composer_snapshot() {  # <backend> <target> [expected-label]
   fm_backend_source "$backend" || return 1
   case "$backend" in
     tmux) fm_tmux_composer_snapshot "$1" ;;
-    herdr) fm_backend_herdr_composer_snapshot "$1" ;;
-    zellij) fm_backend_zellij_composer_snapshot "$@" ;;
+    herdr) fm_backend_herdr_composer_snapshot "$1" "${3:-}" ;;
+    zellij) fm_backend_zellij_composer_snapshot "$1" "${2:-}" ;;
     orca) fm_backend_orca_composer_snapshot "$1" ;;
-    cmux) fm_backend_cmux_composer_snapshot "$@" ;;
+    cmux) fm_backend_cmux_composer_snapshot "$1" "${2:-}" ;;
     *) return 1 ;;
   esac
 }
@@ -969,7 +969,7 @@ fm_backend_composer_classify_snapshot() {  # <backend> <target>
 
 # fm_backend_guarded_composer_state: the composer verdict a caller must have
 # before it types into a pane or presses a confirming Enter there. It reads ONE
-# capture, refuses Codex's global-update picker on it first
+# capture, refuses Claude's active exit confirmation or Codex's global-update picker
 # (fm_composer_update_picker_scan in bin/fm-composer-lib.sh; its confirming
 # Enter runs a global `npm install` of Codex), and only then trusts the
 # backend's own composer verdict for that same capture, so a picker that
@@ -992,8 +992,20 @@ fm_backend_composer_classify_snapshot() {  # <backend> <target>
 # and Claude exit (bin/fm-control.sh).
 fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness]
   local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} picker verdict kv styled=0
-  fm_backend_composer_snapshot "$backend" "$target" "$label" || { printf 'unknown'; return 0; }
+  local herdr_lines=
+  [ "$backend:$harness" != herdr:claude ] || herdr_lines=visible
+  fm_backend_composer_snapshot "$backend" "$target" "$label" "$herdr_lines" || { printf 'unknown'; return 0; }
   [ -n "$FM_COMPOSER_SNAPSHOT_SCREEN" ] || { printf 'unknown'; return 0; }
+  if [ "$harness" = claude ]; then
+    if fm_composer_claude_exit_confirm_screen "$FM_COMPOSER_SNAPSHOT_SCREEN"; then
+      printf 'exit-confirm'
+      return 0
+    fi
+    if [ "$herdr_lines" = visible ]; then
+      FM_COMPOSER_SNAPSHOT_SCREEN=$(printf '%s\n' "$FM_COMPOSER_SNAPSHOT_SCREEN" | tail -n "$FM_COMPOSER_CAPTURE_LINES")
+      FM_COMPOSER_SNAPSHOT_CAPS=${FM_COMPOSER_SNAPSHOT_CAPS%rows=0}rows=$FM_COMPOSER_CAPTURE_LINES
+    fi
+  fi
   case "$harness" in
     ''|*[!a-z0-9-]*) ;;
     *) FM_COMPOSER_SNAPSHOT_CAPS="$FM_COMPOSER_SNAPSHOT_CAPS"$'\n'"harness=$harness" ;;
@@ -1004,11 +1016,6 @@ fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [ex
   if [ "$harness" = codex ] && [ "$picker" != below ] \
      && fm_composer_codex_signin_screen "$FM_COMPOSER_SNAPSHOT_SCREEN"; then
     printf 'sign-in'
-    return 0
-  fi
-  if [ "$harness" = claude ] && [ "$picker" != below ] \
-     && fm_composer_claude_exit_confirm_screen "$FM_COMPOSER_SNAPSHOT_SCREEN"; then
-    printf 'exit-confirm'
     return 0
   fi
   verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target")

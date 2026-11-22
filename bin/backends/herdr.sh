@@ -3212,26 +3212,30 @@ fm_backend_herdr_send_key() {  # <target> <key>
 # the composer-state guard/fallback reads around submit and injection). Workaround:
 # always request a generous fetch far above any realistic viewport height, then
 # trim to the caller's requested bound ourselves with `tail`.
-fm_backend_herdr_capture() {  # <target> <lines>
-  local lines=${2:-200} fetch out binding
+fm_backend_herdr_capture() {  # <target> <lines|visible> [format]
+  local lines=${2:-200} format=${3:-} fetch out binding
+  local -a args
   fm_backend_herdr_target_ready "$1" binding || return 1
-  case "$lines" in ''|*[!0-9]*) lines=200 ;; esac
-  fetch=$lines
-  case "$fetch" in ''|*[!0-9]*) fetch=200 ;; *) [ "$fetch" -ge 200 ] || fetch=200 ;; esac
-  out=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane read "$FM_BACKEND_HERDR_PANE" --source recent --lines "$fetch" 2>/dev/null) || return 1
+  if [ "$lines" = visible ]; then
+    args=(--source visible)
+  else
+    case "$lines" in *[!0-9]*) lines=200 ;; esac
+    fetch=$lines
+    [ "$fetch" -ge 200 ] || fetch=200
+    args=(--source recent --lines "$fetch")
+  fi
+  [ -z "$format" ] || args+=(--format "$format")
+  out=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane read "$FM_BACKEND_HERDR_PANE" "${args[@]}" 2>/dev/null) || return 1
   fm_backend_herdr_recheck_read_binding "$1" "$binding" || return 1
-  printf '%s' "$out" | tail -n "$lines"
+  if [ "$lines" = visible ]; then
+    printf '%s' "$out"
+  else
+    printf '%s' "$out" | tail -n "$lines"
+  fi
 }
 
-fm_backend_herdr_capture_ansi() {  # <target> <lines>
-  local lines=${2:-200} fetch out binding
-  fm_backend_herdr_target_ready "$1" binding || return 1
-  case "$lines" in ''|*[!0-9]*) lines=200 ;; esac
-  fetch=$lines
-  case "$fetch" in ''|*[!0-9]*) fetch=200 ;; *) [ "$fetch" -ge 200 ] || fetch=200 ;; esac
-  out=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane read "$FM_BACKEND_HERDR_PANE" --source recent --lines "$fetch" --format ansi 2>/dev/null) || return 1
-  fm_backend_herdr_recheck_read_binding "$1" "$binding" || return 1
-  printf '%s' "$out" | tail -n "$lines"
+fm_backend_herdr_capture_ansi() {  # <target> <lines|visible>
+  fm_backend_herdr_capture "$1" "${2:-200}" ansi
 }
 
 # --- herdr composer capture and capability primitives -----------------------
@@ -3279,19 +3283,19 @@ fm_backend_herdr_composer_state() {  # <target> -> empty|pending|pending-unprove
 # fm_backend_herdr_composer_snapshot: one composer capture into the snapshot
 # globals (bin/fm-composer-lib.sh "Composer SNAPSHOT"), ANSI first and plain
 # as the styled=0 fallback; fails when the target or both captures fail.
-fm_backend_herdr_composer_snapshot() {  # <target>
-  local target=$1 cap styled
+fm_backend_herdr_composer_snapshot() {  # <target> [lines|visible]
+  local target=$1 lines=${2:-$FM_COMPOSER_CAPTURE_LINES} cap styled
   fm_backend_herdr_parse_target "$target" || return 1
-  if cap=$(fm_backend_herdr_capture_ansi "$target" "$FM_COMPOSER_CAPTURE_LINES" 2>/dev/null); then
+  if cap=$(fm_backend_herdr_capture_ansi "$target" "$lines" 2>/dev/null); then
     styled=1
-  elif cap=$(fm_backend_herdr_capture "$target" "$FM_COMPOSER_CAPTURE_LINES"); then
+  elif cap=$(fm_backend_herdr_capture "$target" "$lines"); then
     styled=0
   else
     return 1
   fi
   FM_COMPOSER_SNAPSHOT_SCREEN=$cap
   FM_COMPOSER_SNAPSHOT_CURSOR=
-  FM_COMPOSER_SNAPSHOT_CAPS=$(printf 'styled=%s\ncursor=0\nidentity=1\nrows=%s' "$styled" "$FM_COMPOSER_CAPTURE_LINES")
+  FM_COMPOSER_SNAPSHOT_CAPS=$(printf 'styled=%s\ncursor=0\nidentity=1\nrows=%s' "$styled" "${lines/#visible/0}")
 }
 
 # fm_backend_herdr_composer_classify_snapshot: the herdr composer verdict for
