@@ -1647,13 +1647,8 @@ fm_composer_claude_exit_confirm_screen() {  # <styled-screen>
       if ($0 != "") last = NR
     }
     END {
-      if (row[last] != "3. Stay" || row[last-1] != "2. Move to background and exit" ||
-          row[last-2] != "❯ 1. Exit and stop tasks") exit 1
-      i = last - 3
-      while (i > 0 && row[i] == "") i--
-      task_end = i
-      while (i > 0 && row[i] ~ /^· [^[:space:]]/) i--
-      exit !(i == 0 || (i < task_end && row[i] == "The following will stop when you exit:"))
+      exit !(row[last-2] == "❯ 1. Exit and stop tasks" &&
+             row[last-1] == "2. Move to background and exit" && row[last] == "3. Stay")
     }
   '
 }

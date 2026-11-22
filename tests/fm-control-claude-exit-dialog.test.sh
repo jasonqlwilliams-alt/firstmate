@@ -167,15 +167,17 @@ stub_command() {  # <mode>
       mode=initial-dialog
       screen="$TMP_ROOT/long.screen"
       ;;
+    restart-narrow|initial-narrow|doorbell-narrow|doorbell-normal) mode=initial-dialog ;;
     exit-clipped) screen="$TMP_ROOT/long.screen" ;;
   esac
   printf '%q %q %q %q %q; exec /bin/bash --noprofile --norc' \
     "$TMP_ROOT/bin/claude" "$TMP_ROOT/pid" "$TMP_ROOT/keys" "$mode" "$screen"
 }
-for session in fixture short; do
+for session in fixture short narrow; do
+  width=100
   height=40
-  [ "$session" != short ] || height=24
-  "$TMUX_BIN" -f /dev/null -L "$SOCKET" new-session -d -s "$session" -n sentinel -x 100 -y "$height" \
+  case "$session" in short) height=24 ;; narrow) width=44 ;; esac
+  "$TMUX_BIN" -f /dev/null -L "$SOCKET" new-session -d -s "$session" -n sentinel -x "$width" -y "$height" \
     -c "$TMP_ROOT/worktree" /bin/bash --noprofile --norc || fail 'tmux fixture failed'
 done
 "$TMUX_BIN" -f /dev/null -L "$SOCKET" set-option -g automatic-rename off
@@ -190,10 +192,11 @@ run_fixture() {
     "$control_bin/$command" "$@"
 }
 
-for mode in restart-initial restart-clipped initial-clipped exit-clipped doorbell-clipped restart exit plain \
-    initial-dialog picker-history changed-heading no-list no-stay selection-on-2 relabeled extra-choice history history-plain; do
+for mode in restart-initial restart-clipped restart-narrow initial-clipped initial-narrow exit-clipped exit-narrow \
+    doorbell-normal doorbell-clipped doorbell-narrow restart exit plain initial-dialog picker-history \
+    changed-heading no-list no-stay selection-on-2 relabeled extra-choice history history-plain; do
   session=fixture
-  [[ "$mode" != *-clipped ]] || session=short
+  case "$mode" in *-clipped) session=short ;; *-narrow) session=narrow ;; esac
   target="$session:fm-exitdialog"
   "$TMUX_BIN" -f /dev/null -L "$SOCKET" new-window -d -t "$session" -n fm-exitdialog \
     -c "$TMP_ROOT/worktree" /bin/bash --noprofile --norc -c "$(stub_command "$mode")" \
@@ -209,7 +212,7 @@ for mode in restart-initial restart-clipped initial-clipped exit-clipped doorbel
   rc=0
   case "$mode" in
     restart*) out=$(run_fixture fm-secondmate-restart.sh exitdialog 2>&1) || rc=$? ;;
-    doorbell-clipped)
+    doorbell-*)
       rec="$TMP_ROOT/001.msg"
       printf 'schema=fm-task-inbox.v1\n--\nreview the open records\n' > "$rec"
       out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" bash -c '. "$1"; fm_task_inbox_ring tmux "$2" "$3" fm-exitdialog claude' \
@@ -220,44 +223,54 @@ for mode in restart-initial restart-clipped initial-clipped exit-clipped doorbel
   printf '%s exit=%s: %s\n' "$mode" "$rc" "$out"
   keys=$(od -An -c "$TMP_ROOT/keys" | tr -s ' ' | sed 's/^ //')
   screen=$("$TMUX_BIN" -f /dev/null -L "$SOCKET" capture-pane -p -t "$target" 2>/dev/null || true)
-  if [[ "$mode" = *-clipped ]]; then
-    assert_not_contains "$screen" 'The following will stop when you exit:' 'tmux did not clip the heading'
-    assert_contains "$screen" 'Bash(timer 24)' 'tmux did not retain the bottom of the task list'
-  fi
+  case "$mode" in
+    *-clipped)
+      assert_not_contains "$screen" 'The following will stop when you exit:' 'tmux did not clip the heading'
+      assert_contains "$screen" 'Bash(timer 24)' 'tmux did not retain the bottom of the task list'
+      ;;
+    *-narrow)
+      assert_contains "$screen" 'The following will stop when you exit:' 'the narrow pane lost the dialog heading'
+      assert_contains "$screen" 'Bash(while true; do sleep 300;' 'the narrow pane lost the start of the task row'
+      assert_contains "$screen" 'done) · running' 'the narrow pane lost the end of the task row'
+      assert_not_contains "$screen" 'echo tick; done) · running' 'the task row did not wrap in the narrow pane'
+      ;;
+  esac
   case "$mode" in
     plain)
       [ "$rc" -eq 0 ] || fail "a plain exit failed: $out"
       [ "$keys" = '/ e x i t \r' ] || fail "a plain exit sent other keys: $keys"
       ! kill -0 "$pid" 2>/dev/null || fail 'stand-in survived a plain exit'
       ;;
-    doorbell-clipped)
-      expect_code 1 "$rc" "the clipped dialog should prevent typing the doorbell: $out"
-      [ -z "$keys" ] || fail "the doorbell wrote into the clipped dialog: $keys"
-      assert_contains "$screen" '❯ 1. Exit and stop tasks' 'the doorbell did not leave the clipped dialog open'
+    doorbell-*)
+      expect_code 1 "$rc" "$mode should withhold the doorbell: $out"
+      [ -z "$keys" ] || fail "$mode wrote into the dialog: $keys"
+      assert_contains "$screen" '❯ 1. Exit and stop tasks' "$mode did not leave the dialog open"
       kill -0 "$pid" 2>/dev/null || fail 'the doorbell stopped the agent'
       kill -TERM "$pid"
       ;;
-    restart*|exit*|initial-*|picker-history)
+    restart*|exit*|initial-*|picker-history|changed-heading|no-list)
       [ "$rc" -ne 0 ] || fail "$mode reported success with the dialog open"
       assert_contains "$out" 'background-tasks exit confirmation' "$mode did not name the open dialog"
       assert_contains "$screen" '❯ 1. Exit and stop tasks' "$mode did not leave the dialog open"
       expected='/ e x i t \r'
-      case "$mode" in initial-*|restart-initial|restart-clipped) expected='' ;; esac
+      case "$mode" in initial-*|restart-*) expected='' ;; esac
       [ "$keys" = "$expected" ] || fail "$mode expected '$expected', received '$keys'"
       kill -0 "$pid" 2>/dev/null || fail "$mode stopped the agent"
       if [[ "$mode" = initial-* ]]; then
         assert_contains "$out" 'exit-refused exitdialog interrupt=not-needed exit-command=not-sent' \
           'the open-dialog refusal claimed the exit command was sent'
       fi
-      if [ "$mode" = picker-history ]; then
-        assert_contains "$screen" 'esc skip' 'tmux did not retain the earlier picker text'
-      fi
+      case "$mode" in
+        restart-initial) assert_contains "$screen" 'Bash(timer 24)' 'tmux did not show the long dialog' ;;
+        picker-history) assert_contains "$screen" 'esc skip' 'tmux did not retain the earlier picker text' ;;
+        changed-heading) assert_contains "$screen" 'The following unrelated processes will stop when you exit' 'heading was not changed' ;;
+        no-list) assert_not_contains "$screen" 'Bash(' 'task listing was not blinded' ;;
+      esac
       if [[ "$mode" = restart* ]]; then
         expect_code 3 "$rc" 'the restart should report the mate unreached'
         assert_contains "$out" 'unreached: exitdialog:' 'the restart did not report the mate unreached'
       fi
-      if [[ "$mode" = restart-initial || "$mode" = restart-clipped ]]; then
-        assert_contains "$screen" 'Bash(timer 24)' 'tmux did not show the long dialog'
+      if [[ "$mode" = restart-* ]]; then
         assert_absent "$TMP_ROOT/home/state/exitdialog.inbox" 'the restart queued a steer into the already-open dialog'
       elif [ "$mode" = restart ]; then
         delivered="$TMP_ROOT/home/state/exitdialog.inbox/handled/001.msg"
@@ -271,8 +284,6 @@ for mode in restart-initial restart-clipped initial-clipped exit-clipped doorbel
       # Prove each blinded element was really blinded on screen, so a near-miss
       # case cannot pass vacuously against the full dialog.
       case "$mode" in
-        changed-heading) assert_contains "$screen" 'The following unrelated processes will stop when you exit' 'heading was not changed' ;;
-        no-list) assert_not_contains "$screen" 'Bash(' 'task listing was not blinded' ;;
         no-stay) assert_not_contains "$screen" '3. Stay' 'third choice was not blinded' ;;
         selection-on-2) assert_contains "$screen" '❯ 2. Move to background and exit' 'selection did not move' ;;
         relabeled) assert_not_contains "$screen" 'Move to background and exit' 'second choice was not relabeled' ;;
