@@ -3325,29 +3325,49 @@ test_own_autonomous_run_is_left_alone() {
 }
 
 test_leaked_worktree_process_is_reaped() {
-  local case_dir rc pid
+  local case_dir rc pid cwd i survived=0
   case_dir=$(make_case leaked-process-reap)
   write_meta "$case_dir" no-mistakes ship
   land_shippable_commit "$case_dir"
 
-  # A backgrounded, disowned process rooted (by cwd) under the task's own
-  # worktree - the same shape the observed incident's leaked `go test`
-  # binaries took (reparented to init, no live task meta to attribute them
-  # to once an unpatched teardown had already run).
-  ( cd "$case_dir/wt" && exec sleep 300 ) &
+  # The sleeper is outside the task's pane, so teardown must find it by cwd.
+  # Keep it as a test-owned child so Bash can reap it after teardown kills it.
+  ( cd "$case_dir/wt" && pwd -P > "$case_dir/sleeper.cwd" && exec sleep 300 ) &
   pid=$!
-  disown
-  sleep 0.3
-  kill -0 "$pid" 2>/dev/null || fail "leaked-process-reap: setup sleeper did not start"
+  for ((i=0; i<100; i++)); do
+    [ ! -s "$case_dir/sleeper.cwd" ] || break
+    sleep 0.05
+  done
+  if ! cwd=$(cat "$case_dir/sleeper.cwd" 2>/dev/null) || [ -z "$cwd" ] || ! kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    fail "leaked-process-reap: setup sleeper did not start in the worktree"
+  fi
+
+  # Without lsof, teardown uses a separate pane process-group fallback.
+  # Supply the cwd scan for this real sleeper so this case still tests cwd reaping.
+  if [ -z "$REAL_LSOF_FOR_TEST" ]; then
+    cat > "$case_dir/fakebin/lsof" <<'SH'
+#!/usr/bin/env bash
+[ "$*" = '-a -d cwd -Fpn' ] || exit 1
+if kill -0 "$FM_TEST_LEAK_PID" 2>/dev/null; then
+  printf 'p%s\nfcwd\nn%s\n' "$FM_TEST_LEAK_PID" "$FM_TEST_LEAK_CWD"
+fi
+SH
+    chmod +x "$case_dir/fakebin/lsof"
+  fi
 
   rc=0
-  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  FM_TEST_LEAK_PID="$pid" FM_TEST_LEAK_CWD="$cwd" \
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
 
-  expect_code 0 "$rc" "leaked-process-reap: teardown should still succeed"
   if kill -0 "$pid" 2>/dev/null; then
+    survived=1
     kill -KILL "$pid" 2>/dev/null || true
-    fail "leaked-process-reap: leaked worktree process survived teardown"
   fi
+  wait "$pid" 2>/dev/null || true
+  expect_code 0 "$rc" "leaked-process-reap: teardown should still succeed"
+  [ "$survived" -eq 0 ] || fail "leaked-process-reap: leaked worktree process survived teardown"
   assert_grep "reaping leaked worktree process" "$case_dir/stderr" \
     "leaked-process-reap: teardown did not report reaping the leaked process"
   pass "a leaked descendant process rooted under the task's worktree is reaped by teardown, not left surviving"
