@@ -3446,16 +3446,17 @@ test_lsof_absent_reaps_detached_linux_process() (
     kill -KILL "$child" 2>/dev/null || true
     wait "$child" 2>/dev/null || true
   done' EXIT
-  # Each sleeper leads its own session. The in-copy sleeper ignores TERM so
-  # the test also exercises the identity and cwd recheck before KILL.
-  perl -MPOSIX -e 'POSIX::setsid() > 0 or die; $SIG{TERM} = "IGNORE"; chdir shift or die; exec "sleep", "300"' "$case_dir/cwd-alias" &
-  pid=$!
+  if [ "$visibility" = visible ]; then
+    # The in-copy sleeper ignores TERM to exercise the identity and cwd recheck before KILL.
+    perl -MPOSIX -e 'POSIX::setsid() > 0 or die; $SIG{TERM} = "IGNORE"; chdir shift or die; exec "sleep", "300"' "$case_dir/cwd-alias" &
+    pid=$!
+  fi
   perl -MPOSIX -e 'POSIX::setsid() > 0 or die; chdir shift or die; exec "sleep", "300"' "$case_dir/tasktmp" &
   tmp_pid=$!
   perl -MPOSIX -e 'POSIX::setsid() > 0 or die; chdir shift or die; exec "sleep", "300"' "$case_dir/wt0" &
   sibling_pid=$!
   for ((i=0; i<100; i++)); do
-    if [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "$case_dir/wt/nested" ] \
+    if { [ -z "$pid" ] || [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "$case_dir/wt/nested" ]; } \
        && [ "$(readlink "/proc/$tmp_pid/cwd" 2>/dev/null)" = "$case_dir/tasktmp" ] \
        && [ "$(readlink "/proc/$sibling_pid/cwd" 2>/dev/null)" = "$case_dir/wt0" ]; then
       break
@@ -3465,25 +3466,25 @@ test_lsof_absent_reaps_detached_linux_process() (
   [ "$i" -lt 100 ] || fail 'lsof-absent-detached-reap: sleepers did not enter their directories'
 
   # Both the teardown script and its calling shell have an in-copy cwd.
-  cd "$case_dir/wt" || fail 'lsof-absent-detached-reap: could not enter the worktree'
+  if [ "$visibility" = visible ]; then
+    cd "$case_dir/wt" || fail 'lsof-absent-detached-reap: could not enter the worktree'
+  fi
   PERL_UNICODE=A FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
     run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
 
   [ "$rc" -eq 0 ] || cat "$case_dir/stderr" >&2
   expect_code 0 "$rc" 'lsof-absent-detached-reap: teardown should succeed'
-  if kill -0 "$pid" 2>/dev/null; then
-    cat "$case_dir/stderr" >&2
-    fail 'lsof-absent-detached-reap: detached worktree process survived successful teardown'
+  if [ -n "$pid" ]; then
+    ! kill -0 "$pid" 2>/dev/null || fail 'lsof-absent-detached-reap: detached worktree process survived successful teardown'
+    wait "$pid" 2>/dev/null || true
+    pid=''
+    assert_grep 'force-killing leaked worktree process(es)' "$case_dir/stderr" \
+      'lsof-absent-detached-reap: teardown did not escalate after TERM'
   fi
-  wait "$pid" 2>/dev/null || true
-  pid=''
-  ! kill -0 "$tmp_pid" 2>/dev/null || fail 'lsof-absent-detached-reap: detached tasktmp process survived'
-  wait "$tmp_pid" 2>/dev/null || true
-  tmp_pid=''
+  kill -0 "$tmp_pid" 2>/dev/null || fail 'lsof-absent-detached-reap: cleanup signalled a process in tasktmp'
   kill -0 "$sibling_pid" 2>/dev/null || fail 'lsof-absent-detached-reap: sibling process was killed'
-  assert_grep 'force-killing leaked worktree process(es)' "$case_dir/stderr" \
-    'lsof-absent-detached-reap: teardown did not escalate after TERM'
-  pass "Linux teardown reaps both non-ASCII roots with PERL_UNICODE=A and preserves its caller and sibling ($visibility ancestor above caller)"
+  assert_absent "$case_dir/tasktmp" 'lsof-absent-detached-reap: cleanup left the tasktmp directory'
+  pass "Linux teardown with PERL_UNICODE=A scopes reaping to its owned worktree ($visibility ancestry)"
 )
 
 test_hidden_intermediate_parent_refuses_reap() (
@@ -3540,15 +3541,21 @@ test_reparented_teardown_preserves_original_caller() (
     printf 'skip: reparented caller fixture requires Linux\n'
     return 0
   fi
-  local case_dir leak_pid rc=0 i
-  case_dir=$(make_case reparented-teardown)
+  local visibility=$1 case_dir leak_pid rc=0 i
+  case_dir=$(make_case "reparented-teardown-$visibility")
   write_meta "$case_dir" no-mistakes ship
   land_shippable_commit "$case_dir"
   mkfifo "$case_dir/result" || fail 'reparented teardown: could not create result pipe'
+  if [ "$visibility" = hidden ]; then
+    hide_teardown_ancestor "$case_dir"
+  fi
 
   cat > "$case_dir/fakebin/lsof" <<'SH'
 #!/usr/bin/env bash
-if [ -f "$FM_TEST_REPARENT_DIR/term" ]; then
+if [ "$FM_TEST_REPARENT_VISIBILITY" = hidden ]; then
+  : > "$FM_TEST_REPARENT_DIR/release"
+fi
+if [ -f "$FM_TEST_REPARENT_DIR/release" ] || [ -f "$FM_TEST_REPARENT_DIR/term" ]; then
   for ((i=0; i<100; i++)); do
     parent=$(ps -o ppid= -p "$FM_TEST_REAP_RUNNER" | tr -d '[:space:]')
     [ -z "$parent" ] || [ "$parent" = "$FM_TEST_REAP_WRAPPER" ] || break
@@ -3583,16 +3590,19 @@ SH
     cd "$case_dir/wt" || exit 1
     exec 3<>"$case_dir/result"
     export FM_TEST_REAP_CALLER=$BASHPID FM_TEST_REAP_LEAK=$leak_pid FM_TEST_REPARENT_DIR="$case_dir"
+    export FM_TEST_REPARENT_VISIBILITY=$visibility
     (
       cd "$case_dir" || exit 1
-      export FM_TEST_REAP_WRAPPER=$BASHPID
+      export FM_TEST_REAP_WRAPPER=$BASHPID FM_TEST_HIDDEN_ANCESTOR=$BASHPID
       (
         export FM_TEST_REAP_RUNNER=$BASHPID
         run_teardown "$case_dir" || rc=$?
         printf '%s\n' "$rc" >&3
       ) &
       for ((i=0; i<300; i++)); do
-        [ ! -f "$case_dir/term" ] || exit 0
+        if [ -f "$case_dir/release" ] || [ -f "$case_dir/term" ]; then
+          exit 0
+        fi
         sleep 0.05
       done
       exit 1
@@ -3604,6 +3614,16 @@ SH
 
   assert_present "$case_dir/reparented" 'reparented teardown: parent did not change during cleanup'
   assert_present "$case_dir/caller" 'reparented teardown: cleanup signalled the original caller'
+  if [ "$visibility" = hidden ]; then
+    expect_code 1 "$rc" 'reparented teardown: hidden startup ancestry should block cleanup'
+    assert_present "$case_dir/state/task-x1.meta" 'reparented teardown: refusal retired task metadata'
+    assert_absent "$case_dir/term" 'reparented teardown: refusal came after sending TERM'
+    kill -0 "$leak_pid" 2>/dev/null || fail 'reparented teardown: refusal came after killing the leak'
+    assert_grep 'REFUSED: cannot rule out a teardown ancestor among cwd matches' "$case_dir/stderr" \
+      'reparented teardown: refusal did not report ambiguous ancestry'
+    pass 'cleanup refuses cwd matches after a hidden wrapper exits'
+    return 0
+  fi
   expect_code 0 "$rc" 'reparented teardown: cleanup should succeed'
   assert_absent "$case_dir/state/task-x1.meta" 'reparented teardown: task record survived'
   wait "$leak_pid" || fail 'reparented teardown: leak did not exit through its TERM handler'
@@ -4382,7 +4402,8 @@ test_lsof_absent_reaps_detached_linux_process visible || exit 1
 test_lsof_absent_reaps_detached_linux_process hidden || exit 1
 test_hidden_intermediate_parent_refuses_reap proc || exit 1
 test_hidden_intermediate_parent_refuses_reap lsof || exit 1
-test_reparented_teardown_preserves_original_caller || exit 1
+test_reparented_teardown_preserves_original_caller visible || exit 1
+test_reparented_teardown_preserves_original_caller hidden || exit 1
 test_keep_pane_without_lsof || exit 1
 test_keep_pane_retirement
 test_keep_pane_lab || fail "real Herdr keep-pane lab failed"

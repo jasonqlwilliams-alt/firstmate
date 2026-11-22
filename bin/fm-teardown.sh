@@ -277,18 +277,20 @@
 #     (an outcome is set) or not parked at a gate is left untouched. Idempotent:
 #     an already-aborted run reads back terminal and is skipped on retry.
 #   Fix 2 - reap leaked descendant processes. A backgrounded/disowned process
-#     started under the worktree (or its per-task tasktmp) does not receive the
+#     started under the worktree (or its recorded tasktmp) does not receive the
 #     SIGHUP/SIGTERM that closing the backend pane sends to its own foreground
 #     process group, so it survives reparented to init (observed 2026-08-03:
 #     two `go test` binaries, deadlines blown past by ~100x, pinning CPU for
 #     hours with no live task meta to attribute them to once teardown had
-#     already removed it). reap_task_worktree_processes finds every process
-#     whose CURRENT WORKING DIRECTORY is this task's own worktree or tasktmp
-#     root via `lsof -a -d cwd` or, on Linux without lsof, `/proc/<pid>/cwd`.
+#     already removed it). reap_task_worktree_processes uses `lsof -a -d cwd`
+#     to find processes under the owned worktree and the recorded tasktmp,
+#     which can be shared between homes. On Linux without lsof it uses
+#     `/proc/<pid>/cwd` for the owned worktree only.
 #     Both scans are bounded by process count and exclude teardown and its
 #     ancestors. Teardown sends TERM, then KILL after a short grace period
 #     to any survivor whose process identity and task cwd still match.
-#     The roots are unique per task. Idempotent: no matches is a silent no-op.
+#     Hosts that hide part of teardown's ancestry cause it to refuse when
+#     either cwd scan finds a match. No matches is a silent no-op.
 #   Fix 3 - sweep abandoned remote job workers. A remote job worker started
 #     from a worktree's own bin/ outlives that worktree's removal without
 #     being reachable by Fix 2, because its working directory is wherever it
@@ -441,10 +443,11 @@ fi
 
 task_reap_filter_pids() {  # <previously-protected-pids> <candidate-pids>
   local parents
+  case "$1" in 'incomplete '*) return 1 ;; esac
   parents=$(ps -axo pid=,ppid= 2>/dev/null) || return 1
   printf '%s\n%s\n' "$parents" "$2" | awk -v self="$$" -v previous="$1" '
     NF == 2 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { parent[$1] = $2 }
-    /^[0-9]+$/ { candidates[$0] = 1 }
+    /^[0-9]+$/ { candidates[$0] = 1; matched = 1 }
     END {
       split(previous, saved, " ")
       for (i in saved) excluded[saved[i]] = 1
@@ -454,20 +457,13 @@ task_reap_filter_pids() {  # <previously-protected-pids> <candidate-pids>
         excluded[cursor] = 1
         if (!(cursor in parent)) break
       }
-      complete = cursor == 0
+      if (cursor != 0) {
+        if (matched) exit 1
+        printf "incomplete "
+      }
       for (pid in excluded) printf "%s ", pid
       print ""
-      for (pid in candidates) {
-        if (pid in excluded) continue
-        if (!complete) {
-          for (cursor = pid; cursor in parent && !(cursor in ancestors); cursor = parent[cursor]) {
-            if (visited[cursor] == pid) exit 1
-            visited[cursor] = pid
-          }
-          if (!(cursor in ancestors)) exit 1
-        }
-        print pid
-      }
+      for (pid in candidates) if (!(pid in excluded)) print pid
     }
   '
 }
@@ -2068,22 +2064,18 @@ $out
 EOF
 }
 
-proc_pids_with_cwd_under() {  # <resolved-dir>...
+proc_pids_with_cwd_under() {  # <resolved-worktree>
   PERL_UNICODE=0 perl -e '
+    my ($dir) = @ARGV;
     opendir(my $proc, "/proc") or exit 1;
     defined(readlink("/proc/self/cwd")) or exit 1;
     while (defined(my $pid = readdir($proc))) {
       next unless $pid =~ /\A[0-9]+\z/;
       my $cwd = readlink("/proc/$pid/cwd");
       next unless defined($cwd);
-      for my $dir (@ARGV) {
-        if ($cwd eq $dir || index($cwd, "$dir/") == 0) {
-          print "$pid\n";
-          last;
-        }
-      }
+      print "$pid\n" if $cwd eq $dir || index($cwd, "$dir/") == 0;
     }
-  ' -- "$@"
+  ' -- "$1"
 }
 
 pids_with_cwd_under() {  # <scanner> <dir>...
@@ -2093,7 +2085,7 @@ pids_with_cwd_under() {  # <scanner> <dir>...
   # outside the task copy even if the operator invoked teardown from inside it.
   cd / || return 1
   if [ "$scanner" = /proc ]; then
-    proc_pids_with_cwd_under "$@"
+    proc_pids_with_cwd_under "$1"
   else
     lsof_pids_with_cwd_under "$@"
   fi
@@ -2203,20 +2195,21 @@ reap_task_backend_process_group() {  # <label>
   fi
 }
 
-# Reap every process rooted (by cwd) under this task's own worktree or tasktmp
-# - both unique per task and never shared - before either is removed. TERM
+# Reap eligible cwd matches under the owned worktree and, with lsof, tasktmp
+# before either is removed. TERM
 # first, then KILL after a short grace period for anything still alive; a
 # process that exits on its own between the two passes is simply absent from
 # the recheck. Without lsof, Linux uses /proc and other hosts use the backend
 # process-group fallback. A cwd scan error refuses before destructive teardown.
-reap_task_worktree_processes() {  # <label> <dir>...
-  local label=$1 scanner pids pid identity current_pids i pass=1 max_passes=3
+reap_task_worktree_processes() {  # <label> <owned-worktree> <tasktmp>
+  local label=$1 worktree=$2 tasktmp=$3 scanner pids pid identity current_pids i pass=1 max_passes=3
   local -a tracked_pids tracked_identities remaining_pids remaining_identities
-  shift
   if ! scanner=$(task_cwd_scanner); then
     reap_task_backend_process_group "$label"
     return 0
   fi
+  set -- "$worktree"
+  [ "$scanner" != lsof ] || set -- "$worktree" "$tasktmp"
   while [ "$pass" -le "$max_passes" ]; do
     task_pids_under_roots "$scanner" "$@" || return 1
     pids=$TASK_PIDS
@@ -3677,7 +3670,7 @@ if [ "$KIND" != secondmate ] && teardown_owns_worktree; then
   conclude_task_no_mistakes_run "$WT"
   reap_task_worktree_processes worktree "$WT" "$TASK_TMP"
 elif [ "$KIND" != secondmate ]; then
-  reap_task_worktree_processes tasktmp "$TASK_TMP"
+  reap_task_worktree_processes tasktmp "" "$TASK_TMP"
 fi
 
 # Fix 3 (see script header): sweep remote job workers abandoned by an already
