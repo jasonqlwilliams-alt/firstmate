@@ -257,9 +257,9 @@ test_timed_out_startup_is_a_failed_checkpoint() (
   pass "a deadline during recovery startup leaves the guard alarm active"
 )
 
-test_beacon_without_first_scan_is_a_failed_checkpoint() (
-  local home status=0 output mv_bin
-  home=$(make_home blocked-first-scan)
+test_timeout_after_first_beacon() (
+  local blocked_lock=$1 home status=0 output mv_bin
+  home=$(make_home "blocked-$blocked_lock")
   export FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_ROOT_OVERRIDE="$home"
   export FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999
   "$ROOT/bin/fm-lock.sh" >/dev/null || fail "fixture could not acquire the fleet lock"
@@ -270,21 +270,28 @@ test_beacon_without_first_scan_is_a_failed_checkpoint() (
 #!/usr/bin/env bash
 "$FM_TEST_REAL_MV" "$@" || exit $?
 if [ "${!#}" = "$FM_STATE_OVERRIDE/.last-watcher-beat" ]; then
-  mkdir "$FM_STATE_OVERRIDE/.wake-queue.lock" || exit 1
-  printf '%s\n' "$FM_TEST_LOCK_OWNER" > "$FM_STATE_OVERRIDE/.wake-queue.lock/pid"
+  mkdir "$FM_TEST_BLOCKED_LOCK" || exit 1
+  printf '%s\n' "$FM_TEST_LOCK_OWNER" > "$FM_TEST_BLOCKED_LOCK/pid"
 fi
 SH
   chmod +x "$home/bin/mv"
   output=$(PATH="$home/bin:$PATH" FM_TEST_REAL_MV="$mv_bin" FM_TEST_LOCK_OWNER="$$" \
+    FM_TEST_BLOCKED_LOCK="$home/state/$blocked_lock" \
     "$CHECKPOINT" --seconds 3 2>&1) || status=$?
-  expect_code 124 "$status" "first scan timeout keeps the checkpoint deadline exit ($output)"
+  expect_code 124 "$status" "blocked checkpoint keeps the deadline exit ($output)"
+  assert_contains "$output" 'checkpoint: no actionable wake within 3s' "blocked checkpoint lost its deadline line"
   assert_present "$home/state/.last-watcher-beat" "watcher never published its first beacon"
-  assert_present "$home/state/.wake-queue.lock/pid" "publisher never blocked the first scan"
-  assert_absent "$home/state/.watch.lock" "watcher did not release its lock"
+  assert_present "$home/state/$blocked_lock/pid" "publisher never blocked the first scan"
+  if [ "$blocked_lock" = .watcher-down.lock ]; then
+    assert_present "$home/state/.watch.lock/pid" "force-killed watcher did not retain its lock"
+  else
+    assert_absent "$home/state/.watch.lock" "watcher did not release its lock"
+  fi
+  [ ! -s "$home/state/.last-checkpoint-return" ] || fail "blocked checkpoint recorded a clean return"
   output=$("$ROOT/bin/fm-guard.sh" 2>&1)
   assert_contains "$output" 'WATCHER DOWN' "a beacon without a completed scan hid a failed cycle"
   assert_not_contains "$output" 'between foreground checkpoints' "a beacon alone certified the first scan"
-  pass "a watcher that releases its lock before completing its first scan still alarms"
+  pass "a checkpoint blocked by $blocked_lock still reports the deadline and alarms"
 )
 
 test_actionable_close_before_first_beacon() (
@@ -339,6 +346,39 @@ SH
   output=$("$ROOT/bin/fm-guard.sh" 2>&1)
   assert_contains "$output" 'WATCHER DOWN' "wake with a retained lock suppressed the guard alarm"
   pass "an early wake explains a beacon-less gap only after successful lock release"
+)
+
+test_replaced_receipt_cannot_borrow_successor_mtime() (
+  [ "$(uname -s)" = Linux ] || return 0
+  local home output record stat_bin
+  home=$(make_home replaced-receipt)
+  export FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_ROOT_OVERRIDE="$home"
+  "$ROOT/bin/fm-lock.sh" >/dev/null || fail "fixture could not acquire the fleet lock"
+  printf 'kind=ship\n' > "$home/state/demo.meta"
+  printf 'invalid retirement receipt\n' > "$home/state/demo.pr-poll-retirement"
+  "$CHECKPOINT" --seconds 8 >/dev/null 2>&1 || fail "fixture could not deliver an early wake"
+  record="$home/state/.last-checkpoint-return"
+  output=$("$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$output" 'between foreground checkpoints' "fixture never established a valid wake receipt"
+  fm_touch_epoch "$(( $(date +%s) - 400 ))" "$record"
+  : > "$record.successor"
+  stat_bin=$(command -v stat) || fail "could not locate stat for the receipt fixture"
+  mkdir "$home/bin"
+  cat > "$home/bin/stat" <<'SH'
+#!/usr/bin/env bash
+if [ "${!#}" = "$FM_TEST_RECORD" ] && [ -f "$FM_TEST_RECORD.successor" ]; then
+  mv -f -- "$FM_TEST_RECORD.successor" "$FM_TEST_RECORD" || exit 1
+fi
+exec "$FM_TEST_REAL_STAT" "$@"
+SH
+  chmod +x "$home/bin/stat"
+  output=$(PATH="$home/bin:$PATH" FM_TEST_REAL_STAT="$stat_bin" FM_TEST_RECORD="$record" \
+    "$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_absent "$record.successor" "the receipt replacement did not interleave with the guard"
+  [ -f "$record" ] && [ ! -s "$record" ] || fail "fixture did not install an empty successor receipt"
+  assert_contains "$output" 'WATCHER DOWN' "the expired wake borrowed the failed successor's fresh mtime"
+  assert_not_contains "$output" 'between foreground checkpoints' "a replaced wake receipt explained the gap"
+  pass "a guard reading an expired receipt alarms after it is replaced by an empty successor"
 )
 
 test_replacement_and_away_handoff_cannot_reuse_return() (
@@ -399,6 +439,8 @@ test_existing_singleton_watcher_is_not_success
 test_foreground_wake_acknowledgement_and_owned_successor || exit 1
 test_normal_checkpoint_return_is_not_a_watcher_down_alarm || exit 1
 test_timed_out_startup_is_a_failed_checkpoint || exit 1
-test_beacon_without_first_scan_is_a_failed_checkpoint || exit 1
+test_timeout_after_first_beacon .wake-queue.lock || exit 1
+test_timeout_after_first_beacon .watcher-down.lock || exit 1
 test_actionable_close_before_first_beacon || exit 1
+test_replaced_receipt_cannot_borrow_successor_mtime || exit 1
 test_replacement_and_away_handoff_cannot_reuse_return || exit 1

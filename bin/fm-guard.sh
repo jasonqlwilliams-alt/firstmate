@@ -145,6 +145,24 @@ fm_guard_clear_stale_banner() {
   rm -f "$STALE_BANNER_MARKER" 2>/dev/null || true
 }
 
+fm_guard_checkpoint_age() {
+  local record=$1 session=$2 reason=$3 close return_session snapshot current now
+
+  IFS=' ' read -r close return_session || return 1
+  [ "$return_session" = "$session" ] || return 1
+  [ "$close" = wake ] || { [ "$close" = quiet ] && [ "$reason" = no-watcher ]; } || return 1
+  now=$(date +%s) || return 1
+  if [ "$_FM_UNAME" = Darwin ]; then
+    snapshot=$(/usr/bin/stat -f '%d %i %m') || return 1
+    current=$(/usr/bin/stat -f '%d %i %m' "$record") || return 1
+  else
+    snapshot=$(stat -Lc '%d %i %Y' /dev/stdin) || return 1
+    current=$(stat -c '%d %i %Y' "$record") || return 1
+  fi
+  [ "$snapshot" = "$current" ] || return 1
+  printf '%s\n' "$(( now - ${snapshot##* } ))"
+}
+
 # Worktree-tangle alarm, checked FIRST and independent of in-flight tasks: the
 # firstmate PRIMARY checkout (FM_ROOT) must stay on its default branch. If a
 # crewmate's branch/commits landed here instead of in its own isolated worktree,
@@ -210,14 +228,13 @@ fi
 # calls in the same episode get a one-line reminder only.
 between_checkpoints=false
 checkpoint_record="$STATE/.last-checkpoint-return"
-if [ "$watcher_healthy" = false ] && [ "$READ_ONLY" -eq 0 ] && [ -s "$checkpoint_record" ] \
+if [ "$watcher_healthy" = false ] && [ "$READ_ONLY" -eq 0 ] && [ -f "$checkpoint_record" ] && [ -s "$checkpoint_record" ] \
   && checkpoint_session=$(fm_codex_checkpoint_session "$STATE") \
-  && IFS=' ' read -r checkpoint_close return_session < "$checkpoint_record" \
-  && [ "$return_session" = "$checkpoint_session" ] \
-  && { [ "$checkpoint_close" = wake ] || { [ "$checkpoint_close" = quiet ] && [ "$watcher_down_reason" = no-watcher ]; }; } \
-  && [ ! -e "$STATE/.watch.lock" ] && [ ! -L "$STATE/.watch.lock" ]; then
-  checkpoint_return_age=$(fm_path_age "$checkpoint_record")
-  [ "$checkpoint_return_age" -ge 0 ] && [ "$checkpoint_return_age" -lt "$GRACE" ] && between_checkpoints=true
+  && checkpoint_return_age=$(fm_guard_checkpoint_age "$checkpoint_record" "$checkpoint_session" "$watcher_down_reason" \
+    2>/dev/null < "$checkpoint_record") \
+  && [ ! -e "$STATE/.watch.lock" ] && [ ! -L "$STATE/.watch.lock" ] \
+  && [ "$checkpoint_return_age" -ge 0 ] && [ "$checkpoint_return_age" -lt "$GRACE" ]; then
+  between_checkpoints=true
 fi
 
 if [ "$between_checkpoints" = true ]; then

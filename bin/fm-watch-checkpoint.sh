@@ -73,14 +73,26 @@ if [ -n "$checkpoint_session" ]; then
   FM_WATCH_CHECKPOINT_CLOSE="$output_dir/close"
 fi
 
-kill_after=${FM_SIGNAL_GRACE:-5}
-case "$kill_after" in
-  *[!0-9]*) kill_after=5 ;;
-  *[1-9]*) ;;
-  *) kill_after=5 ;;
-esac
+run_with_coreutils_timeout() {
+  # shellcheck disable=SC2016
+  "$1" -k 5 "$SECONDS_ARG" bash -c '
+    trap ":" TERM
+    "$1"
+    status=$?
+    if [ "$status" -eq 137 ]; then
+      : > "$2"
+    fi
+    exit "$status"
+  ' _ "$SCRIPT_DIR/fm-watch.sh" "$output_dir/watcher-killed"
+}
 
 run_with_perl_timeout() {
+  local kill_after=${FM_SIGNAL_GRACE:-5}
+  case "$kill_after" in
+    *[!0-9]*) kill_after=5 ;;
+    *[1-9]*) ;;
+    *) kill_after=5 ;;
+  esac
   perl -e '
     my $seconds = shift;
     my $grace = shift;
@@ -96,7 +108,7 @@ run_with_perl_timeout() {
       local $SIG{ALRM} = sub {
         kill "KILL", -$pid;
         waitpid $pid, 0;
-        exit 124;
+        exit 137;
       };
       alarm $grace;
       waitpid $pid, 0;
@@ -111,16 +123,18 @@ run_with_perl_timeout() {
 
 {
   if command -v timeout >/dev/null 2>&1; then
-    timeout -k "$kill_after" "$SECONDS_ARG" "$SCRIPT_DIR/fm-watch.sh"
+    run_with_coreutils_timeout timeout
   elif command -v gtimeout >/dev/null 2>&1; then
-    gtimeout -k "$kill_after" "$SECONDS_ARG" "$SCRIPT_DIR/fm-watch.sh"
+    run_with_coreutils_timeout gtimeout
   else
     run_with_perl_timeout
   fi
 } 3>&- >"$OUT" 2>"$ERR"
 RC=$?
 close=''
-if [ -n "$FM_WATCH_CHECKPOINT_CLOSE" ]; then
+if [ "$RC" -eq 137 ] && [ ! -e "$output_dir/watcher-killed" ]; then
+  RC=124
+elif [ -n "$FM_WATCH_CHECKPOINT_CLOSE" ]; then
   close=$(cat "$FM_WATCH_CHECKPOINT_CLOSE" 2>/dev/null || true)
 fi
 
