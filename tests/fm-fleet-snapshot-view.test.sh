@@ -1311,6 +1311,27 @@ fi
 SH
   chmod +x "$fakebin/no-mistakes"
 
+  cat > "$fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FM_HOME/forge-reads"
+case "$*" in
+  *" --json headRefOid "*) printf '%s\n' "$TEST_PR_HEAD" ;;
+  *" --json state "*)
+    if [ -s "$FM_HOME/state-reads" ]; then
+      printf 'OPEN\n'
+    else
+      "$TEST_PR_CHECK" cancelled "$TEST_PR_URL" > "$FM_HOME/rearm.log" 2>&1 || exit 1
+      printf 'CLOSED\n'
+    fi
+    printf '%s\n' "$*" >> "$FM_HOME/state-reads"
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$fakebin/gh"
+  ln -s gh "$fakebin/gh-axi"
+  ln -s gh "$fakebin/glab"
+
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
   printf '%s' "$out" | jq -e --arg detail "run cancelled" \
     '.tasks[0].current_state.state == "failed"
@@ -1355,28 +1376,11 @@ SH
   printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}' >/dev/null \
     || fail "a recorded merge must end the exemption: $out"
   rm -f "$state/cancelled.pr-poll-merge-notified"
+  [ ! -s "$home/forge-reads" ] || fail "snapshot queried the forge before any poll"
 
-  cat > "$fakebin/gh" <<'SH'
-#!/usr/bin/env bash
-case "$*" in
-  *" --json headRefOid "*) printf '%s\n' "$TEST_PR_HEAD" ;;
-  *" --json state "*)
-    if [ -s "$FM_HOME/forge-reads" ]; then
-      printf 'OPEN\n'
-    else
-      "$TEST_PR_CHECK" cancelled "$TEST_PR_URL" > "$FM_HOME/rearm.log" 2>&1 || exit 1
-      printf 'CLOSED\n'
-    fi
-    printf '%s\n' "$*" >> "$FM_HOME/forge-reads"
-    ;;
-  *) exit 1 ;;
-esac
-SH
-  chmod +x "$fakebin/gh"
-  ln -s gh "$fakebin/gh-axi"
   cat > "$state/z-cycle-end.check.sh" <<'SH'
 #!/usr/bin/env bash
-if [ "$(wc -l < "$FM_HOME/forge-reads")" -eq 2 ]; then
+if [ "$(wc -l < "$FM_HOME/state-reads")" -eq 2 ]; then
   printf 'poll-cycle-end\n'
 fi
 SH
@@ -1389,7 +1393,7 @@ SH
   # Keep the existing checks-green event from waking the watcher between the
   # two forge polls, then put it back before observing the snapshot.
   mv "$state/cancelled.status" "$home/checks-green.status"
-  : > "$home/forge-reads"
+  : > "$home/state-reads"
   touch "$state/home-summary.json"
   out=$(TEST_PR_HEAD="$head" TEST_PR_URL="$pr" TEST_PR_CHECK="$ROOT/bin/fm-pr-check.sh" \
     FM_HOME="$home" FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=15 FM_POLL=0.1 FM_SIGNAL_GRACE=0 \
@@ -1400,7 +1404,7 @@ SH
     *) fail "watcher did not continue after the observed closure: $out" ;;
   esac
   read_command="pr view $pr --repo kunchenguid/firstmate --json state -q .state"
-  [ "$(cat "$home/forge-reads")" = "$read_command"$'\n'"$read_command" ] \
+  [ "$(cat "$home/state-reads")" = "$read_command"$'\n'"$read_command" ] \
     || fail "watcher did not poll the exact PR through its closure and reopening: $out"
   mv "$home/checks-green.status" "$state/cancelled.status"
   : > "$home/forge-reads"
@@ -1412,7 +1416,9 @@ SH
     "$ROOT/bin/fm-pr-check.sh" cancelled "$other_pr" >"$home/register.log" 2>&1 \
     || fail "could not register the replacement PR: $(cat "$home/register.log")"
   printf 'done: PR %s checks green\n' "$other_pr" > "$state/cancelled.status"
+  : > "$home/forge-reads"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  [ ! -s "$home/forge-reads" ] || fail "snapshot queried the forge for a replacement PR"
   printf '%s' "$out" | jq -e '.valid == true and .invalidity == {kind:null,ids:[]}' >/dev/null \
     || fail "a closed outcome for a different PR must preserve the exemption: $out"
 
@@ -1438,6 +1444,7 @@ run:
   status: failed
   outcome: failed
 RUN
+  : > "$home/forge-reads"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
   printf '%s' "$out" | jq -e '.tasks[0].current_state.state == "failed"
       and .tasks[0].current_state.detail == "run failed"' >/dev/null \
@@ -1445,6 +1452,7 @@ RUN
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}' >/dev/null \
     || fail "a validation failure without cancellation must stay terminal in flight: $out"
+  [ ! -s "$home/forge-reads" ] || fail "snapshot queried the forge for a failed validation"
   pass "a cancelled validation with a recorded green PR awaiting merge is not terminal in flight"
 }
 

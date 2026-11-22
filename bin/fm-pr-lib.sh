@@ -1057,14 +1057,19 @@ fm_pr_poll_closed_recorded() {
 }
 
 fm_pr_poll_snapshot_prepare() {
-  local state=$1 id=$2 template=$3 lock
+  local state=$1 id=$2 template=$3 lock pid
   FM_PR_POLL_CLOSED_STAGE=
   fm_pr_task_id_valid "$id" || return 1
   [ -d "$state" ] && [ ! -L "$state" ] || return 1
   [ -f "$state/$id.pr-poll-registration" ] || return 1
   lock=$(fm_meta_lock_path "$state/$id.meta") || return 3
   FM_PR_POLL_CLOSED_STAGE=$(umask 077; mktemp "$state/.$id.pr-poll-closed.XXXXXX") || return 3
-  [ ! -e "$lock" ] && [ ! -L "$lock" ] || return 3
+  if [ -e "$lock" ] || [ -L "$lock" ]; then
+    pid=$(cat "$lock/pid" 2>/dev/null || true)
+    if fm_pid_alive "$pid" || fm_lock_mid_acquire_is_fresh "$lock" "$pid"; then
+      return 3
+    fi
+  fi
   fm_pr_poll_snapshot_capture "$state" "$id" "$template" || return 1
   [ -f "$FM_PR_POLL_CLOSED_STAGE" ] && [ ! -L "$FM_PR_POLL_CLOSED_STAGE" ] || return 3
 }

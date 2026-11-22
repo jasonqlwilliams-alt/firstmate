@@ -2246,6 +2246,39 @@ test_closure_write_failure_does_not_stop_sibling_checks() {
   pass "closure write failures are logged while sibling checks continue"
 }
 
+test_abandoned_metadata_lock_does_not_skip_the_poll() (
+  local dir state url lock owner out
+  FM_WAKE_NO_MKDIR=1 . "$ROOT/bin/fm-wake-lib.sh"
+  dir=$(make_case abandoned-closure-lock)
+  state="$dir/home/state"
+  url=https://github.com/o/r/pull/27
+  write_poll_meta "$state" task-a "$url"
+  seed_canonical_poll "$dir" task-a "$url"
+  add_stop_custom_check "$dir"
+  FM_HOME="$dir/home" PATH="$dir/fakebin:$BASE_PATH" "$ROOT/bin/fm-inactive-reconcile.sh" scan \
+    || fail "could not prime the inactive-outcome scan before abandoning the lock"
+  touch "$state/home-summary.json"
+  lock=$(fm_meta_lock_path "$state/task-a.meta")
+  (fm_lock_try_acquire "$lock") || fail "could not leave an abandoned metadata lock"
+  owner=$(cat "$lock/pid") || fail "could not read the lock's owner"
+  ! fm_pid_alive "$owner" || fail "the metadata lock was still held by a live process"
+
+  cat > "$dir/on-state" <<'SH'
+#!/usr/bin/env bash
+[ "$(cat "$FM_HOME/state/.meta-task-a.lock/pid")" = "$TEST_ABANDONED_OWNER" ]
+SH
+  chmod 0700 "$dir/on-state"
+  out=$(FM_TEST_CHECK_INTERVAL=300 FM_TEST_GH_LOG="$dir/gh.log" FM_TEST_GH_STATE=CLOSED \
+    FM_TEST_GH_ON_STATE="$dir/on-state" TEST_ABANDONED_OWNER="$owner" \
+    run_watcher_bounded "$dir/home" "$dir/fakebin") || fail "watcher failed with an abandoned lock"
+  case "$out" in check:*z-stop.check.sh:*stop-cycle) ;; *) fail "watcher missed the sibling check: $out" ;; esac
+  [ "$(cat "$dir/gh.log")" = "pr view $url --repo o/r --json state -q .state" ] \
+    || fail "the abandoned lock suppressed the due forge read"
+  [ "$(cat "$state/task-a.pr-poll-closed")" = "$url" ] \
+    || fail "the watcher failed to record the closure after reclaiming the abandoned lock"
+  pass "an abandoned metadata lock is left alone until closure publication"
+)
+
 test_busy_closure_publication_keeps_normal_cadence() (
   local dir state url lock watcher i stage
   FM_WAKE_NO_MKDIR=1 . "$ROOT/bin/fm-wake-lib.sh"
@@ -2712,6 +2745,7 @@ test_external_merge_transition_retires_only_terminal_poll
 test_polled_closures_preserve_other_pr_evidence
 test_closure_publication_preserves_the_observed_pr
 test_closure_write_failure_does_not_stop_sibling_checks
+test_abandoned_metadata_lock_does_not_skip_the_poll
 test_busy_closure_publication_keeps_normal_cadence
 test_closure_stage_failure_skips_the_forge_read
 test_closure_cleanup_tolerates_a_stage_disappearing

@@ -522,7 +522,7 @@ SH
 
 test_relaunch_and_pr_replacement_during_closure() {
   local dir state setup=${1:-fresh} id=rl-close url=https://github.com/example/repo/pull/20
-  local replacement=https://github.com/example/repo/pull/21 out rc watcher retire checksum= i=0
+  local replacement=https://github.com/example/repo/pull/21 out rc watcher checksum= i=0
   dir=$(new_case "closure-race-$setup" "$id")
   state="$dir/home/state"
 
@@ -556,14 +556,6 @@ SH
       || fail "could not prime the inactive-outcome scan"
     mkdir -p "$dir/retirebin"
     cp "$dir/pollbin/tmux" "$dir/retirebin/tmux"
-    cat > "$dir/retirebin/rm" <<'SH'
-#!/usr/bin/env bash
-if [ "${1:-}" = -f ] && [ "${2:-}" = "$FM_HOME/state/rl-close.check.sh" ]; then
-  touch "$FM_HOME/retire-ready"
-  while [ ! -e "$FM_HOME/retire-release" ]; do sleep 0.05; done
-fi
-exec "$TEST_REAL_RM" "$@"
-SH
     checksum=$(command -v shasum) || checksum=$(command -v sha256sum) || fail "no supported SHA-256 tool"
     cat > "$dir/pollbin/${checksum##*/}" <<'SH'
 #!/usr/bin/env bash
@@ -574,30 +566,21 @@ if [ "${TEST_WATCH_CAPTURE:-0}" = 1 ] && [ "${*: -1}" = "$FM_HOME/state/rl-close
 fi
 exec "$TEST_REAL_CHECKSUM" "$@"
 SH
-    chmod +x "$dir/retirebin/rm" "$dir/pollbin/${checksum##*/}"
-    env FM_HOME="$dir/home" FM_TEARDOWN_GUARD_DONE=1 TEST_REAL_RM="$(command -v rm)" \
-      PATH="$dir/retirebin:$PATH" "$ROOT/bin/fm-teardown.sh" "$id" --force > "$dir/teardown.log" 2>&1 &
-    retire=$!
-    for ((i=0; i<200; i++)); do
-      [ ! -e "$dir/home/retire-ready" ] || break
-      sleep 0.05
-    done
-    if [ ! -e "$dir/home/retire-ready" ]; then
-      touch "$dir/home/retire-release"
-      fail "teardown did not pause before removing the old poll: $(cat "$dir/teardown.log")"
-    fi
+    chmod +x "$dir/pollbin/${checksum##*/}"
   else
     env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" PATH="$dir/pollbin:$PATH" \
       "$ROOT/bin/fm-pr-check.sh" "$id" "$url" > "$dir/register.log" 2>&1 \
       || fail "could not arm the observed PR: $(cat "$dir/register.log")"
-    touch "$dir/home/replacement-armed"
+    touch "$dir/home/capture-verified"
   fi
   printf '%s\n' "$$" > "$state/.lock"
   printf '#!/usr/bin/env bash\nexit 1\n' > "$dir/pollbin/tmux"
   cat > "$state/z-cycle-end.check.sh" <<'SH'
 #!/usr/bin/env bash
-touch "$FM_HOME/capture-started"
-while [ ! -e "$FM_HOME/replacement-armed" ]; do sleep 0.05; done
+if [ ! -e "$FM_HOME/capture-verified" ]; then
+  touch "$FM_HOME/invalidated-sweep-finished"
+  while [ ! -e "$FM_HOME/capture-verified" ]; do sleep 0.05; done
+fi
 if [ -e "$FM_HOME/forge-release" ]; then printf 'poll-cycle-end\n'; fi
 SH
   chmod 0700 "$state/z-cycle-end.check.sh"
@@ -614,9 +597,10 @@ SH
       [ ! -e "$dir/home/capture-started" ] || break
       sleep 0.05
     done
-    touch "$dir/home/retire-release"
-    [ -e "$dir/home/capture-started" ] || fail "the watcher did not enter the capture sweep"
-    wait "$retire" || fail "could not retire the previous task: $(cat "$dir/teardown.log")"
+    [ -e "$dir/home/capture-started" ] || fail "the watcher did not reach the checksum during capture"
+    env FM_HOME="$dir/home" FM_TEARDOWN_GUARD_DONE=1 PATH="$dir/retirebin:$PATH" \
+      "$ROOT/bin/fm-teardown.sh" "$id" --force > "$dir/teardown.log" 2>&1 \
+      || fail "could not retire the previous task: $(cat "$dir/teardown.log")"
     [ ! -e "$state/$id.meta" ] && [ ! -e "$state/$id.check.sh" ] \
       || fail "the retired task still owned the ID or its poll"
     mv "$dir/replacement.meta" "$state/$id.meta"
@@ -624,6 +608,13 @@ SH
       PATH="$dir/pollbin:$PATH" "$ROOT/bin/fm-pr-check.sh" "$id" "$url" > "$dir/register.log" 2>&1 \
       || fail "could not arm the reused ID's poll: $(cat "$dir/register.log")"
     touch "$dir/home/replacement-armed"
+    for ((i=0; i<200; i++)); do
+      if [ -e "$dir/home/invalidated-sweep-finished" ] || [ -e "$dir/home/forge-ready" ]; then break; fi
+      sleep 0.05
+    done
+    [ ! -s "$dir/home/forge-reads" ] || fail "the invalidated capture reached the forge"
+    [ -e "$dir/home/invalidated-sweep-finished" ] || fail "the watcher did not finish the invalidated capture sweep"
+    touch "$dir/home/capture-verified"
   fi
   i=0
   while [ ! -e "$dir/home/forge-ready" ] && [ "$i" -lt 150 ]; do
