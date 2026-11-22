@@ -2129,6 +2129,7 @@ test_recovery_finishes_a_close_for_the_same_meta_incarnation() {
   assert_absent "$state/$id.backlog-close" \
     "session start retained the completed incarnation's close marker"
   assert_absent "$state/$id.pr-poll-registration" "session start retained the retired task's registration"
+  assert_absent "$state/$id.check.sh" "session start retained the retired task's canonical PR check"
   assert_absent "$state/$id.pr-poll-closed" "session start retained the retired task's closure evidence"
   assert_absent "$state/.$id.pr-poll-closed.ABC123" "session start retained the retired task's staged closure"
   pass "session start finishes a close for the matching meta incarnation"

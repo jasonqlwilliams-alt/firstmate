@@ -2111,6 +2111,7 @@ while :; do
             "$provider" "$url" "$host" "$path" "$number" || exit 1
           out=$FM_CHECK_RESULT
         else
+          [ -e "$c" ] || [ -L "$c" ] || continue
           rejected_checks="$rejected_checks $c"
           continue
         fi

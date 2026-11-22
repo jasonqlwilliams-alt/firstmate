@@ -326,6 +326,8 @@ SUB_HOME_PARENT_MARKER=".fm-secondmate-parent"
 . "$SCRIPT_DIR/fm-gate-refuse-lib.sh"
 # shellcheck source=bin/fm-pr-lib.sh
 . "$SCRIPT_DIR/fm-pr-lib.sh"
+# shellcheck source=bin/fm-check-lib.sh
+. "$SCRIPT_DIR/fm-check-lib.sh"
 # shellcheck source=bin/fm-public-followup-lib.sh
 . "$SCRIPT_DIR/fm-public-followup-lib.sh"
 # shellcheck source=bin/fm-secondmate-registry-lib.sh
@@ -1025,7 +1027,7 @@ remote_secondmate_teardown() {
     || { echo "error: remote pending-reply cleanup failed; preserving the local route for retry" >&2; return 1; }
   handoff_wake_retire \
     || { echo "error: remote receiver wake cleanup failed; preserving the local route for retry" >&2; return 1; }
-  fm_pr_poll_registration_remove "$STATE" "$ID" || return 1
+  fm_pr_poll_registration_remove "$STATE" "$ID" "$SCRIPT_DIR/fm-pr-poll.sh" || return 1
   tmp="$SECONDMATE_REG.tmp.$$"
   grep -vE "^- $ID( |$)" "$SECONDMATE_REG" > "$tmp" || true
   mv -f -- "$tmp" "$SECONDMATE_REG"
@@ -1395,10 +1397,11 @@ remove_pr_poll_artifacts() {
   validate_pr_poll_cleanup "$state_dir" "$id" || return 1
   fm_pr_poll_retirement_recover_one "$state_dir" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" || return 1
   fm_pr_poll_merge_notified_remove "$state_dir" "$id" || return 1
-  rm -f "$state_dir/$id.check.sh" "$state_dir/$id.pr-poll" \
-    "$state_dir/$id.pr-poll-retirement" \
-    "$state_dir/$id.check-trust" || return 1
-  fm_pr_poll_registration_remove "$state_dir" "$id"
+  fm_pr_poll_registration_remove "$state_dir" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" || return 1
+  if ! fm_custom_check_registered "$state_dir" "$id"; then
+    rm -f -- "$state_dir/$id.check.sh" "$state_dir/$id.check-trust" || return 1
+  fi
+  rm -f -- "$state_dir/$id.pr-poll" "$state_dir/$id.pr-poll-retirement"
 }
 
 # Resolve the PR number for a worktree branch via gh-axi. Echoes the number on a

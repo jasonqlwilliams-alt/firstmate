@@ -29,6 +29,7 @@
 # Each line is one canonical URL observed closed without merging.
 # Re-registering a poll preserves this history. Task teardown removes it.
 # A PR closure can be missed if the task metadata lock is contended and the PR reopens between polls.
+# A PR registration command still in flight across task cleanup and ID reuse can bind the old PR to the new task.
 
 FM_PR_PROVIDER=
 FM_PR_URL=
@@ -609,6 +610,15 @@ fm_pr_poll_publish_prepared() {
   fi
 }
 
+fm_pr_poll_check_template_hash() {
+  local check=$1 template=$2 hash
+  hash=$(fm_pr_sha256 "$check") || return 1
+  if [ "$hash" != 24f73c153d68a5404ee5b4f9fc4ad6368ee8d79b43b87566591ce1e05a4112bf ]; then
+    cmp -s "$template" "$check" || return 1
+  fi
+  printf '%s\n' "$hash"
+}
+
 fm_pr_poll_artifacts_valid() {
   local state=$1 id=$2 template=$3 state_device check data registration meta data_hash template_hash
   fm_pr_task_id_valid "$id" || return 1
@@ -625,12 +635,9 @@ fm_pr_poll_artifacts_valid() {
   [ "$(fm_pr_file_link_count "$meta")" = 1 ] || return 1
   fm_pr_poll_data_parse "$data" || return 1
   data_hash=$(fm_pr_sha256 "$data") || return 1
-  template_hash=$(fm_pr_sha256 "$check") || return 1
   # Accept the pinned pre-closure shim for an otherwise valid registration.
   # The watcher executes the current repository poll with the validated data.
-  if [ "$template_hash" != 24f73c153d68a5404ee5b4f9fc4ad6368ee8d79b43b87566591ce1e05a4112bf ]; then
-    cmp -s "$template" "$check" || return 1
-  fi
+  template_hash=$(fm_pr_poll_check_template_hash "$check" "$template") || return 1
   fm_pr_poll_registration_parse "$registration" || return 1
   [ "$FM_PR_REG_ID" = "$id" ] || return 1
   [ "$FM_PR_REG_PROVIDER" = "$FM_PR_DATA_PROVIDER" ] || return 1
@@ -1120,7 +1127,16 @@ fm_pr_poll_registration_cleanup_valid() {
 }
 
 fm_pr_poll_registration_remove() {
-  local state=$1 id=$2
+  local state=$1 id=$2 template=$3 check device
   fm_pr_poll_registration_cleanup_valid "$state" "$id" || return 1
+  check="$state/$id.check.sh"
+  if [ -f "$check" ] && [ ! -L "$check" ]; then
+    [ -d "$state" ] && [ ! -L "$state" ] || return 1
+    device=$(fm_pr_file_device "$state") || return 1
+    if fm_pr_private_file_valid "$check" 600 "$device" \
+      && fm_pr_poll_check_template_hash "$check" "$template" >/dev/null; then
+      rm -f -- "$check" || return 1
+    fi
+  fi
   rm -f -- "$state/$id.pr-poll-registration" "$state/.$id.pr-poll-closed."?????? "$state/$id.pr-poll-closed"
 }

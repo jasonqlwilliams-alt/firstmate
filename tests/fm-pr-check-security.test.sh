@@ -1405,6 +1405,30 @@ SH
   pass "teardown removes safe poll artifacts and refuses directory-shaped check files without traversal"
 }
 
+test_teardown_preserves_registered_custom_check() {
+  local dir state url out
+  dir=$(make_case teardown-custom-check)
+  state="$dir/home/state"
+  url=https://github.com/o/r/pull/18
+  fm_write_meta "$state/task-a.meta" 'window=firstmate:fm-task-a' 'endpoint_task_id=task-a' \
+    "worktree=$dir/missing-worktree" "project=$dir/project" 'kind=ship' 'mode=local-only' "pr=$url"
+  seed_canonical_poll "$dir" task-a "$url"
+  printf '#!/usr/bin/env bash\nprintf "registered-custom\\n"\n' > "$state/task-a.check.sh"
+  chmod 0700 "$state/task-a.check.sh"
+  FM_HOME="$dir/home" "$REGISTER" task-a >/dev/null || fail "could not register the replacement custom check"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/fakebin/tmux"
+  chmod +x "$dir/fakebin/tmux"
+  FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" PATH="$dir/fakebin:$BASE_PATH" \
+    "$TEARDOWN" task-a --force > "$dir/teardown.out" 2> "$dir/teardown.err" \
+    || fail "teardown could not retire the task with a custom check: $(cat "$dir/teardown.err")"
+  [ ! -e "$state/task-a.pr-poll-registration" ] || fail "teardown left the old PR registration"
+  out=$(FM_TEST_GH_LOG="$dir/gh.log" run_watcher_bounded "$dir/home" "$dir/fakebin") \
+    || fail "watcher failed after task teardown"
+  case "$out" in check:*task-a.check.sh:*registered-custom) ;; *) fail "teardown suppressed the custom check: $out" ;; esac
+  [ ! -s "$dir/gh.log" ] || fail "watcher queried the forge for the preserved custom check"
+  pass "task teardown revokes the PR registration and preserves the authenticated custom check"
+}
+
 # The GitLab watch must follow a merge request exactly as the GitHub watch
 # follows a pull request, on any instance, and must never turn an unreadable
 # merge request into a merge. Its evidence against the public fixture project
@@ -2419,14 +2443,14 @@ test_closure_cleanup_tolerates_a_stage_disappearing() (
       rm -- "$stage"
       return 1
     }
-    fm_pr_poll_registration_remove "$state" task-a
+    fm_pr_poll_registration_remove "$state" task-a "$POLL"
   ) || fail "closure cleanup rejected a vanished stage"
   [ ! -e "$stage" ] || fail "the stage did not disappear during validation"
   url=https://github.com/o/r/pull/30
   record="$state/task-a.pr-poll-closed"
   (umask 077; printf '%s\n' "$url" > "$record")
   ln -s "$state/missing-target" "$stage"
-  if fm_pr_poll_registration_remove "$state" task-a; then
+  if fm_pr_poll_registration_remove "$state" task-a "$POLL"; then
     fail "closure cleanup accepted a remaining unsafe stage"
   fi
   [ -L "$stage" ] || fail "closure cleanup removed an unsafe symlink"
@@ -2440,7 +2464,7 @@ test_remote_proxy_teardown_removes_closure_evidence() (
   state="$dir/home/state"
   url=https://github.com/o/r/pull/25
   trap '
-    touch "$dir/home/create-stage" "$dir/home/finish-teardown" "$dir/home/resume-capture" "$dir/home/replacement-armed"
+    touch "$dir/home/create-stage" "$dir/home/finish-teardown" "$dir/home/resume-capture"
     [ -z "$teardown" ] || wait "$teardown" || true
     [ -z "$watcher" ] || wait "$watcher" || true
   ' EXIT
@@ -2493,20 +2517,15 @@ case "${1:-}" in
   *) exec "$TEST_REAL_MKTEMP" "$@" ;;
 esac
 SH
-  cat > "$dir/on-state" <<'SH'
-#!/usr/bin/env bash
-touch "$FM_HOME/gap-observed"
-while [ ! -e "$FM_HOME/replacement-armed" ]; do
-  [ "$SECONDS" -lt 120 ] || exit 75
-  sleep 0.05
-done
-SH
   cat > "$state/z-stop.check.sh" <<'SH'
 #!/usr/bin/env bash
-touch "$FM_HOME/gap-observed"
-printf 'stop-cycle\n'
+if [ -e "$FM_HOME/gap-observed" ]; then
+  printf 'stop-cycle\n'
+else
+  touch "$FM_HOME/gap-observed"
+fi
 SH
-  chmod +x "$dir/teardownbin/rm" "$dir/fakebin/mktemp" "$dir/on-state"
+  chmod +x "$dir/teardownbin/rm" "$dir/fakebin/mktemp"
   chmod 0700 "$state/z-stop.check.sh"
   FM_HOME="$dir/home" "$REGISTER" z-stop >/dev/null || fail "could not register the gap-cycle check"
   TEST_REAL_MKTEMP="$(command -v mktemp)" FM_HOME="$dir/home" PATH="$dir/fakebin:$BASE_PATH" \
@@ -2515,7 +2534,7 @@ SH
   touch "$state/home-summary.json"
 
   TEST_REAL_MKTEMP="$(command -v mktemp)" FM_TEST_GH_LOG="$dir/gh.log" FM_TEST_GH_STATE=CLOSED \
-    FM_TEST_GH_ON_STATE="$dir/on-state" FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=15 \
+    FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=15 FM_POLL=0.1 \
     FM_HOME="$dir/home" PATH="$dir/fakebin:$BASE_PATH" \
     "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 40 >"$dir/watch.log" 2>&1 &
   watcher=$!
@@ -2548,18 +2567,9 @@ SH
   wait "$teardown" || fail "remote proxy teardown failed: $(cat "$dir/teardown.err")"
   teardown=
   [ ! -e "$state/task-a.meta" ] || fail "remote teardown left proxy metadata"
-  [ -f "$state/task-a.check.sh" ] || fail "remote closure cleanup removed the proxy's poll"
   fm_write_meta "$state/task-a.meta" 'kind=secondmate' 'window=remote:task-a' \
     'remote_host=remote-mac' "remote_root=$dir/remote-root" "home=$dir/replacement-home" "pr=$url"
   touch "$dir/home/resume-capture"
-  for ((i=0; i<200; i++)); do
-    [ ! -e "$dir/home/gap-observed" ] || break
-    sleep 0.05
-  done
-  [ -e "$dir/home/gap-observed" ] || fail "watcher did not reach the gap cycle: $(cat "$dir/watch.log")"
-  TEST_REAL_MKTEMP="$(command -v mktemp)" run_check_entry "$dir" task-a "$url" >/dev/null \
-    || fail "could not arm the replacement proxy's poll"
-  touch "$dir/home/replacement-armed"
   wait "$watcher" || fail "watcher failed during remote teardown: $(cat "$dir/watch.log")"
   watcher=
   case "$(cat "$dir/watch.log")" in
@@ -2567,10 +2577,13 @@ SH
     *) fail "watcher did not finish the gap cycle: $(cat "$dir/watch.log")" ;;
   esac
   [ -f "$state/.last-check" ] || fail "a task skipped during retirement left the home-wide cadence overdue"
-  fm_pr_poll_artifacts_valid "$state" task-a "$POLL" || fail "replacement proxy did not retain its poll"
+  [ ! -e "$state/task-a.check.sh" ] || fail "remote teardown left the canonical check in the watcher's scan"
   [ ! -e "$state/task-a.pr-poll-closed" ] || fail "the replacement proxy inherited a stale closure"
   [ ! -s "$dir/gh.log" ] || fail "watcher polled the retired registration before the replacement was armed"
-  pass "remote proxy retirement invalidates closures through same-URL re-registration after ID reuse"
+  TEST_REAL_MKTEMP="$(command -v mktemp)" run_check_entry "$dir" task-a "$url" >/dev/null \
+    || fail "could not arm the replacement proxy's poll"
+  fm_pr_poll_artifacts_valid "$state" task-a "$POLL" || fail "replacement proxy did not retain its poll"
+  pass "remote proxy retirement revokes its check without a false unauthenticated wake"
 )
 
 test_retirement_refuses_replacement_and_nonterminal_results() {
@@ -2878,3 +2891,4 @@ test_bootstrap_leaves_unauthenticated_checks
 test_custom_snapshot_cleanup_on_signal
 test_returned_custom_check_descendants_are_drained
 test_teardown_removes_poll_artifacts
+test_teardown_preserves_registered_custom_check

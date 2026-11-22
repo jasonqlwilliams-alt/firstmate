@@ -1133,7 +1133,7 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path> <authorized-data
     cleanup_incomplete=1
     # shellcheck source=bin/fm-pr-lib.sh
     . "${BASH_SOURCE[0]%/*}/fm-pr-lib.sh"
-    fm_pr_poll_registration_remove "$state" "$id" || {
+    fm_pr_poll_registration_remove "$state" "$id" "${BASH_SOURCE[0]%/*}/fm-pr-poll.sh" || {
       FM_BACKLOG_TRANSITION_ERROR="PR poll registration and closure evidence for $id could not be removed"
       return 1
     }
