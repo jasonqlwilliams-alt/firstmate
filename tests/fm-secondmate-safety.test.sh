@@ -48,7 +48,7 @@ SH
 }
 
 test_fm_home_parameterization() {
-  local brief home_one home_two out
+  local brief home_one home_two out launch
   home_one="$TMP_ROOT/home one"
   home_two="$TMP_ROOT/home-two"
   mkdir -p "$home_one/data" "$home_one/state" "$home_two/data" "$home_two/state"
@@ -62,11 +62,19 @@ test_fm_home_parameterization() {
   FM_HOME="$home_one" "$ROOT/bin/fm-brief.sh" task-a app --mode no-mistakes >/dev/null || fail "brief scaffold failed under FM_HOME"
   brief="$home_one/data/task-a/brief.md"
   [ -f "$brief" ] || fail "brief was not written under FM_HOME/data"
-  grep -F ">> '$home_one/state/task-a.status'" "$brief" >/dev/null || fail "brief did not shell-quote FM_HOME state path"
+  launch=$(sed -n 's/^   `\(.*\) "{state}: {one short line}"`$/\1/p' "$brief")
+  [ -n "$launch" ] || fail "ship brief has no status command"
+  (cd "$home_two" && bash -c "$launch"' "$1"' _ 'done: ship report') || fail "ship status command failed"
+  cmp -s "$home_one/state/task-a.status" <(printf 'done: ship report\n') || fail "ship report did not reach its home"
+  [ ! -e "$home_two/state/task-a.status" ] || fail "ship report leaked into the scout home"
 
-  FM_HOME="$home_one" "$ROOT/bin/fm-brief.sh" task-b app --scout >/dev/null || fail "scout brief scaffold failed under FM_HOME"
-  brief="$home_one/data/task-b/brief.md"
-  grep -F ">> '$home_one/state/task-b.status'" "$brief" >/dev/null || fail "scout brief did not shell-quote FM_HOME state path"
+  FM_HOME="$home_two" "$ROOT/bin/fm-brief.sh" task-b app --scout >/dev/null || fail "scout brief scaffold failed under FM_HOME"
+  brief="$home_two/data/task-b/brief.md"
+  launch=$(sed -n 's/^   `\(.*\) "{state}: {one short line}"`$/\1/p' "$brief")
+  [ -n "$launch" ] || fail "scout brief has no status command"
+  (cd "$home_one" && bash -c "$launch"' "$1"' _ 'done: scout report') || fail "scout status command failed"
+  cmp -s "$home_two/state/task-b.status" <(printf 'done: scout report\n') || fail "scout report did not reach its home"
+  [ ! -e "$home_one/state/task-b.status" ] || fail "scout report leaked into the ship home"
 
   FM_HOME="$home_one" FM_SECONDMATE_CHARTER='ops domain' "$ROOT/bin/fm-brief.sh" task-c --secondmate app >/dev/null \
     || fail "secondmate brief scaffold failed under FM_HOME"

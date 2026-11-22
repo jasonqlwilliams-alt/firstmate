@@ -452,9 +452,6 @@ EOF
 # consumer-side rule on purpose - it protects local and remote writers
 # identically, and it can never fail a whole delta or wedge a stream the way a
 # writer-side rejection would.
-# The fold stays that consumer-side rule. bin/fm-status-append.sh refuses a
-# reserved prefix before a worker line is written, and bin/fm-wake-drain.sh
-# warns when a needs-decision in that namespace is folded instead of listed.
 FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT='pending-reply-'
 
 # Print the reserved prefix <key> starts with. Return 1 when <key> is not reserved.
@@ -1325,36 +1322,46 @@ EOF
   return "$rc"
 }
 
-# Optional unread endpoints must describe the same captured snapshot. A drain
+# Optional informational IDs must describe the same captured snapshot. A drain
 # can reuse the rows it is about to present instead of scanning every span twice.
 # The caller still commits only after output succeeds, with identity revalidation.
-status_acknowledge_presented_snapshot() {  # <state> <snapshot> [<fully-presented-task-ids>] [<task-and-unread-endpoint-rows>]
-  local state=$1 snapshot=$2 fully_presented=${3:-} unread_ends=${4-}
-  local task endpoint ident f offset records receipt_task receipt_end
+status_acknowledge_presented_snapshot() {  # <state> <snapshot> [<fully-presented-task-ids>] [<informational-task-ids>]
+  local state=$1 snapshot=$2 fully_presented=${3:-} informational=${4-} prepared=0
+  local task endpoint ident f offset lines line safe
+  [ "$#" -lt 4 ] || prepared=1
   while IFS=$(printf '\t') read -r task endpoint ident; do
     [ -n "$task" ] || continue
+    safe=false
     case "
 $fully_presented
-" in
-      *$'\n'"$task"$'\n'*) ;;
-      *)
-        f="$state/$task.status"
-        offset=
-        if [ "$#" -ge 4 ]; then
-          while IFS=$'\t' read -r receipt_task receipt_end; do
-            [ "$receipt_task" = "$task" ] || continue
-            offset=$receipt_end
-            break
-          done <<< "$unread_ends"
-        else
-          records=$(status_new_lines_since_cursor "$f" "$endpoint" unread-records) || return 1
-          records=${records##*$'\n'}
-          offset=${records%%$'\t'*}
-        fi
-        if [ -z "$offset" ]; then offset=$(status_presentation_cursor_offset "$f") || return 1; fi
-        endpoint=$offset
-        ;;
-    esac
+" in *$'\n'"$task"$'\n'*) safe=true ;; esac
+    if [ "$prepared" -eq 1 ]; then
+      case "
+$informational
+" in *$'\n'"$task"$'\n'*) safe=true ;; esac
+    fi
+    if [ "$safe" = false ]; then
+      f="$state/$task.status"
+      offset=$(status_presentation_cursor_offset "$f") || return 1
+      if [ "$prepared" -eq 0 ]; then
+        lines=$(status_new_lines_since_cursor "$f" "$endpoint" unread-surface) || return 1
+        # Once any informational line in this span is presented fleet-wide, the
+        # contiguous cursor may advance through the captured endpoint. Routine
+        # lines remain unacknowledged only while they are the sole unread content,
+        # preserving delayed signal annotations without replaying a handled note
+        # that happened to follow a routine line.
+        while IFS= read -r line || [ -n "$line" ]; do
+          case "$line" in
+            *[![:space:]]*)
+              if status_line_is_unread_surface "$line"; then safe=true; break; fi
+              ;;
+          esac
+        done <<EOF
+$lines
+EOF
+      fi
+      if [ "$safe" = false ]; then endpoint=$offset; fi
+    fi
     printf '%s\t%s\t%s\n' "$task" "$endpoint" "$ident" || return 1
   done <<EOF
 $snapshot
@@ -1509,13 +1516,18 @@ status_open_decisions_cursor_offset() {  # <status-file>
 # changed status identity reads the current file from offset 0; malformed or
 # unreadable cursor state fails the scan. Symlinks and unreadable status files
 # print nothing.
-status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|unread-surface|unread-records|warning-offset]
-  local f=$1 captured_end=${2:-} surface=${3:-all} cf offset size actual_size chunk_file filtered_file line boundary rc=0
-  case "$surface" in all|unread-surface|unread-records|warning-offset) ;; *) return 1 ;; esac
+status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|unread-surface|decision-candidates]
+  local f=$1 captured_end=${2:-} surface=${3:-all} cf offset size actual_size chunk_file filtered_file line rc=0 manifest
+  case "$surface" in all|unread-surface|decision-candidates) ;; *) return 1 ;; esac
   [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || return 0
   cf=$(_fm_open_decisions_cursor_path "$f")
   chunk_file="$cf.unread.$$"
-  offset=$(status_presentation_cursor_offset "$f") || return 1
+  manifest="${f%/*}/.status-presentation-cursor"
+  if [ "$surface" = decision-candidates ] && [ ! -e "$manifest" ] && [ ! -L "$manifest" ]; then
+    offset=0
+  else
+    offset=$(status_presentation_cursor_offset "$f") || return 1
+  fi
   case "$offset" in ''|*[!0-9]*) return 1 ;; esac
   actual_size=$(_fm_status_file_size "$f") || return 1
   actual_size=${actual_size//[[:space:]]/}
@@ -1530,27 +1542,22 @@ status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|
   [ "$offset" -lt "$size" ] || return 0
   _fm_status_read_span "$f" "$offset" "$((size - offset))" > "$chunk_file" 2>/dev/null \
     || { rm -f "$chunk_file"; return 1; }
-  if [ "$surface" != all ]; then
+  if [ "$surface" = decision-candidates ]; then
+    LC_ALL=C awk '{ prefix=$0; sub(/:.*/, "", prefix); if (index(prefix, "needs-decision")) print }' "$chunk_file" || rc=1
+    rm -f "$chunk_file"
+    return "$rc"
+  fi
+  if [ "$surface" = unread-surface ]; then
     # A cheap superset filter keeps wide routine lines out of Bash entirely.
     # The exact classifier below remains authoritative for every candidate.
     # ENVIRON preserves literal override bytes rather than awk -v escapes.
     filtered_file="$chunk_file.filtered"
     if ! FM_STATUS_SURFACE_RESOLVE="${FM_CLASSIFY_RESOLVE_VERB:-$FM_CLASSIFY_RESOLVE_VERB_DEFAULT}" \
       FM_STATUS_SURFACE_HELD="${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}" \
-      LC_ALL=C awk -v mode="$surface" -v position="$offset" -v endpoint="$size" '
+      LC_ALL=C awk '
         { prefix=$0; sub(/:.*/, "", prefix)
-          decision = index(prefix, "needs-decision")
-          line_end = position + length($0) + 1
-          if (mode == "warning-offset") {
-            if (decision) printf "%.0f\t%s\n", position, $0
-          } else if (index(prefix, "note") || decision ||
-              index(prefix, ENVIRON["FM_STATUS_SURFACE_RESOLVE"]) ||
-              index(prefix, ENVIRON["FM_STATUS_SURFACE_HELD"])) {
-            if (mode == "unread-records") printf "%.0f\t", (line_end < endpoint ? line_end : endpoint)
-            print
-          }
-          position = line_end
-        }
+          if (index(prefix, "note") || index(prefix, ENVIRON["FM_STATUS_SURFACE_RESOLVE"]) ||
+              index(prefix, ENVIRON["FM_STATUS_SURFACE_HELD"])) print }
       ' "$chunk_file" > "$filtered_file"; then
       rm -f "$chunk_file" "$filtered_file"
       return 1
@@ -1561,20 +1568,11 @@ status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|
     fi
   fi
   while IFS= read -r line || [ -n "$line" ]; do
-    if [ "$surface" = warning-offset ]; then
-      boundary=${line%%$'\t'*}
-      line=${line#*$'\t'}
-      [ "$(status_line_verb "$line")" = needs-decision ] || continue
-      status_line_is_unread_surface "$line" || continue
-      printf '%s\n' "$boundary" || rc=1
-      break
-    fi
     case "$line" in
       *[![:space:]]*)
-        case "$surface" in
-          unread-surface) status_line_is_unread_surface "$line" || continue ;;
-          unread-records) status_line_is_unread_surface "${line#*$'\t'}" || continue ;;
-        esac
+        if [ "$surface" = unread-surface ] && ! status_line_is_unread_surface "$line"; then
+          continue
+        fi
         printf '%s\n' "$line" || { rc=1; break; }
         ;;
     esac
@@ -1583,32 +1581,36 @@ status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [all|
   return "$rc"
 }
 
-# 0 for informational notes, reserved-key resolutions, or needs-decision
-# lines rejected by the reserved-key fold rule. These have no OPEN DECISIONS
-# entry to keep them visible.
+# 0 when a status line is an informational `note:` or a reserved-key
+# pending-reply resolution. Those lines never fold into OPEN DECISIONS, so the
+# drain's unread-status surface is their only guaranteed presentation.
 status_line_is_unread_surface() {  # <status-line>
-  local line=$1 verb key note resolve held
+  local line=$1 verb key note resolve held prefix
   [ -n "$line" ] || return 1
   resolve=${FM_CLASSIFY_RESOLVE_VERB:-$FM_CLASSIFY_RESOLVE_VERB_DEFAULT}
   held=${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}
-  case "${line%%:*}" in *note*|*needs-decision*|*"$resolve"*|*"$held"*) ;; *) return 1 ;; esac
+  case "${line%%:*}" in *note*|*"$resolve"*|*"$held"*) ;; *) return 1 ;; esac
   verb=$(status_line_verb "$line")
   [ "$verb" = note ] && return 0
   case "$verb" in
-    needs-decision|"$resolve"|"$held") ;;
+    "$resolve"|"$held") ;;
     *) return 1 ;;
   esac
   key=$(_fm_decision_key "$line") || return 1
   note=$(status_line_note "$line")
-  if [ "$verb" = needs-decision ]; then
-    ! _fm_decision_key_transition_allowed "$key" "$note"
-  else
-    fm_classify_reserved_key_prefix "$key" >/dev/null && _fm_decision_key_transition_allowed "$key" "$note"
-  fi
+  for prefix in ${FM_CLASSIFY_RESERVED_KEY_PREFIXES:-$FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT}; do
+    case "$key" in
+      "$prefix"*)
+        _fm_decision_key_transition_allowed "$key" "$note"
+        return
+        ;;
+    esac
+  done
+  return 1
 }
 
-# Fleet-wide unread surface: one "<task>\t<status-line>" row per matching
-# unread line, in glob (task id) order.
+# Fleet-wide unread informational lines: one "<task>\t<status-line>" row per
+# still-unread `note:` or pending-reply resolution, in glob (task id) order.
 # Prints nothing when none are unread. Directory scan rejects status symlinks
 # the same way scan_open_decisions does.
 scan_unread_surface_lines() {  # <state>
@@ -1620,6 +1622,7 @@ scan_unread_surface_lines() {  # <state>
     [ -n "$lines" ] || continue
     while IFS= read -r line; do
       [ -n "$line" ] || continue
+      status_line_is_unread_surface "$line" || continue
       printf '%s\t%s\n' "$task" "$line"
     done <<EOF
 $lines
@@ -1633,10 +1636,11 @@ scan_unread_surface_snapshot() {  # <state> <task-and-endpoint-snapshot>
   while IFS=$(printf '\t') read -r task endpoint ident; do
     [ -n "$task" ] || continue
     f="$state/$task.status"
-    lines=$(status_new_lines_since_cursor "$f" "$endpoint" unread-records) || return 1
+    lines=$(status_new_lines_since_cursor "$f" "$endpoint" unread-surface) || return 1
     [ -n "$lines" ] || continue
     while IFS= read -r line; do
       [ -n "$line" ] || continue
+      status_line_is_unread_surface "$line" || continue
       printf '%s\t%s\n' "$task" "$line"
     done <<EOF
 $lines
@@ -1644,15 +1648,6 @@ EOF
   done <<EOF
 $snapshot
 EOF
-}
-
-status_branch_presentation_snapshot() {  # <state> <task-and-endpoint-snapshot>
-  local state=$1 snapshot=$2 task endpoint ident boundary
-  while IFS=$'\t' read -r task endpoint ident; do
-    [ -n "$task" ] || continue
-    boundary=$(status_new_lines_since_cursor "$state/$task.status" "$endpoint" warning-offset) || return 1
-    printf '%s\t%s\t%s\n' "$task" "${boundary:-$endpoint}" "$ident" || return 1
-  done <<< "$snapshot"
 }
 
 # Fold material routed-work phases in the same keyed event stream.

@@ -215,17 +215,17 @@ test_over_long_decision_note_is_capped_with_a_marker() {
   pass "an over-long open decision is cut to its per-item budget with the shared truncation marker"
 }
 
-test_folded_reserved_needs_decision_warns_once_per_line() {
+test_folded_reserved_needs_decision_warns_without_consuming_annotations() {
   local dir state out warns
   dir=$(make_case folded-reserved)
   state="$dir/state"
   out="$dir/drain.out"
   {
+    printf 'blocked [key=pending-reply-credentials]: credentials unavailable\n'
     printf 'needs-decision [key=pending-reply-abc123]: which color should the button be\n'
     printf 'needs-decision: [key=pending-reply-colon] which shape\n'
     printf 'needs-decision [key=api-shape]: pick REST or RPC\n'
     printf 'needs-decision [key=pending-reply-owner1]: pending-reply-missed: task=t pending-reply-id=owner1 request=ok\n'
-    printf 'note: résumé context before the blocker\n'
     printf 'blocked [key=pending-reply-foreign]: shipping is blocked on infra\n'
   } > "$state/task-fold.status"
 
@@ -255,19 +255,17 @@ test_folded_reserved_needs_decision_warns_once_per_line() {
   if grep -F 'folded reserved-prefix' "$out" | grep -F 'api-shape' >/dev/null; then
     fail "an ordinary decision was warned: $(cat "$out")"
   fi
-  grep -Fxq 'task-fold note: résumé context before the blocker' "$out" || fail "the unrelated drain omitted the later note"
-  if grep -Fq 'shipping is blocked on infra' "$out"; then
-    fail "the unrelated drain displayed the blocker without its task signal: $(cat "$out")"
+  if grep -Eq 'credentials unavailable|shipping is blocked on infra' "$out"; then
+    fail "the unrelated drain displayed a blocker without its task signal: $(cat "$out")"
   fi
 
   append_wake "$state" signal task-fold.status 'signal: task-fold' || fail "could not queue the delayed wake"
   FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed on the delayed task signal"
   grep -Fq $'\tsignal\ttask-fold.status\t' "$out" || fail "the delayed task wake was not presented"
+  grep -Fq 'task-fold.status: blocked [key=pending-reply-credentials]: credentials unavailable' "$out" \
+    || fail "the warning consumed the earlier blocker's delayed annotation: $(cat "$out")"
   grep -Fq 'task-fold.status: blocked [key=pending-reply-foreign]: shipping is blocked on infra' "$out" \
-    || fail "the warning receipt consumed the later blocker's delayed annotation: $(cat "$out")"
-  if grep -Eq 'which color should the button be|which shape|résumé context' "$out"; then
-    fail "the delayed task signal replayed already presented status: $(cat "$out")"
-  fi
+    || fail "the warning consumed the later blocker's delayed annotation: $(cat "$out")"
 
   printf 'needs-decision [key=button-color]: which color should the button be\n' >> "$state/task-fold.status"
   printf 'note: unrelated delivery\n' > "$state/other.status"
@@ -278,7 +276,7 @@ test_folded_reserved_needs_decision_warns_once_per_line() {
   fi
   grep -F 'task-fold [key=button-color] needs-decision: which color should the button be' "$out" >/dev/null \
     || fail "the reissued decision did not surface with its ordinary key: $(cat "$out")"
-  pass "a folded reserved-prefix needs-decision is warned once per line and not listed"
+  pass "warnings preserve delayed blocker annotations and stop after the task signal"
 }
 
 test_drain_warning_follows_the_reserved_prefix_list() {
@@ -313,7 +311,7 @@ test_drain_warning_follows_the_reserved_prefix_list() {
   pass "the drain warning uses the reserved-prefix list instead of a copied prefix"
 }
 
-test_branch_leaves_folded_decisions_unread_for_main() {
+test_unrelated_branch_drain_leaves_warning_unread_for_main() {
   local dir state branch_out main_out grant
   dir=$(make_case branch-warning)
   state="$dir/state"
@@ -324,39 +322,79 @@ test_branch_leaves_folded_decisions_unread_for_main() {
   printf 'note: already read\n' > "$state/direct.status"
   FM_STATE_OVERRIDE="$state" "$DRAIN" > /dev/null || fail "main could not present the earlier note"
   printf 'working: continuing branch work\n\nnote: résumé ready for branch\n' >> "$state/direct.status"
-  printf 'working: unrelated branch work\n' > "$state/routine.status"
   append_wake "$state" signal direct.status 'signal: direct' || fail "could not queue the direct branch row"
-  append_wake "$state" signal routine.status 'signal: routine' || fail "could not queue the routine branch row"
   FM_STATE_OVERRIDE="$state" "$grant" activate "$$" reserved-warning || fail "could not activate branch owner"
-  FM_STATE_OVERRIDE="$state" "$grant" publish reserved-warning 1 2 || fail "could not publish branch grant"
+  FM_STATE_OVERRIDE="$state" "$grant" publish reserved-warning 1 || fail "could not publish branch grant"
 
-  printf 'needs-decision [key=pending-reply-direct]: choose a color\n' >> "$state/direct.status"
-  printf 'note: fleet context before decision\nneeds-decision: [key=pending-reply-note] choose a shape\nnote: decision context\n' > "$state/fleet.status"
-  append_wake "$state" signal direct.status 'signal: direct decision' || fail "could not queue the main direct row"
+  printf 'needs-decision [key=pending-reply-fleet]: choose a color\n' > "$state/fleet.status"
   append_wake "$state" signal fleet.status 'signal: fleet decision' || fail "could not queue the main fleet row"
 
   FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=branch "$DRAIN" > "$branch_out" 2> "$dir/branch.err" \
     || fail "branch drain failed: $(cat "$dir/branch.err")"
-  grep -Fq 'routine.status: working: unrelated branch work' "$branch_out" || fail "the routine branch annotation was suppressed"
-  grep -Fq 'direct.status: working: continuing branch work' "$branch_out" || fail "the granted same-task annotation was suppressed"
-  grep -Fxq 'direct note: résumé ready for branch' "$branch_out" || fail "the earlier same-task note was suppressed"
-  grep -Fxq 'fleet note: fleet context before decision' "$branch_out" || fail "the earlier fleet note was suppressed"
-  if grep -Eq 'folded reserved-prefix|choose a color|choose a shape|decision context' "$branch_out"; then
-    fail "the branch presented status reserved for main: $(cat "$branch_out")"
-  fi
+  grep -Fq 'direct.status: working: continuing branch work' "$branch_out" || fail "the granted branch annotation was suppressed"
+  grep -Fxq 'direct note: résumé ready for branch' "$branch_out" || fail "the granted branch note was suppressed"
+  grep -Fxq 'warning: task=fleet key=pending-reply-fleet folded reserved-prefix needs-decision: choose a color' "$branch_out" \
+    || fail "the branch deferred the warning: $(cat "$branch_out")"
 
   FM_STATE_OVERRIDE="$state" "$DRAIN" > "$main_out" 2> "$dir/main.err" \
     || fail "main drain failed: $(cat "$dir/main.err")"
-  grep -Fq 'warning: task=direct key=pending-reply-direct folded reserved-prefix needs-decision' "$main_out" \
-    || fail "branch direct receipt consumed the main warning: $(cat "$main_out")"
-  grep -Fq 'warning: task=fleet key=pending-reply-note folded reserved-prefix needs-decision' "$main_out" \
-    || fail "branch fleet receipt consumed the main warning: $(cat "$main_out")"
-  grep -Fq 'direct.status: needs-decision [key=pending-reply-direct]: choose a color' "$main_out" \
-    || fail "branch direct receipt consumed the main annotation: $(cat "$main_out")"
-  if grep -Eq 'already read|continuing branch work|ready for branch|fleet context before decision' "$main_out"; then
-    fail "main replayed status already presented before the warning: $(cat "$main_out")"
+  grep -Fxq 'warning: task=fleet key=pending-reply-fleet folded reserved-prefix needs-decision: choose a color' "$main_out" \
+    || fail "the unrelated branch drain consumed the main warning: $(cat "$main_out")"
+  grep -Fq 'fleet.status: needs-decision [key=pending-reply-fleet]: choose a color' "$main_out" \
+    || fail "the unrelated branch drain consumed the main annotation: $(cat "$main_out")"
+  if grep -Eq 'already read|continuing branch work|ready for branch' "$main_out"; then
+    fail "main replayed already presented branch status: $(cat "$main_out")"
   fi
-  pass "the branch preserves folded decisions and their annotations for main"
+  pass "an unrelated branch drain leaves the warning and annotation available to main"
+}
+
+test_note_presents_the_captured_span() {
+  local dir state out
+  dir=$(make_case note-receipt)
+  state="$dir/state"
+  out="$dir/drain.out"
+  printf 'note: report attached\ndone: delivered\n' > "$state/report.status"
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "empty-queue note drain failed"
+  grep -Fxq 'report note: report attached' "$out" || fail "the fleet note was omitted"
+  grep -Fxq 'report done: delivered' "$out" || fail "the terminal backstop was omitted"
+
+  append_wake "$state" signal report.status 'signal: report' || fail "could not queue the delayed report wake"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "delayed report drain failed"
+  grep -Fq $'\tsignal\treport.status\t' "$out" || fail "the delayed report wake was not presented"
+  if grep -Eq 'report attached|done: delivered' "$out"; then
+    fail "the delayed wake replayed status already presented in the note's span: $(cat "$out")"
+  fi
+  pass "an informational note acknowledges the captured span"
+}
+
+test_failed_first_receipt_rename_still_prints_decisions() {
+  local dir state fakebin real_mv out
+  dir=$(make_case first-rename-failure)
+  state="$dir/state"
+  out="$dir/drain.out"
+  fakebin=$(fm_fakebin "$dir/fake")
+  real_mv=$(command -v mv)
+  cat > "$fakebin/mv" <<SH
+#!/usr/bin/env bash
+for arg in "\$@"; do last=\$arg; done
+case "\${last:-}" in
+  "$state/.status-presentation-cursor") touch "$dir/rejected"; exit 1 ;;
+esac
+exec "$real_mv" "\$@"
+SH
+  chmod +x "$fakebin/mv"
+  printf 'needs-decision [key=api-shape]: pick REST or RPC\n' > "$state/decision.status"
+  printf 'needs-decision [key=pending-reply-color]: choose a color\n' > "$state/warning.status"
+  PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" \
+    || fail "first receipt rename failure changed the drain exit"
+  [ -f "$dir/rejected" ] || fail "the first receipt rename was never attempted"
+  grep -Fq 'OPEN DECISIONS' "$out" || fail "receipt rename failure suppressed the decisions section"
+  grep -Fxq 'decision [key=api-shape] needs-decision: pick REST or RPC' "$out" \
+    || fail "receipt rename failure suppressed the decision"
+  grep -Fxq 'warning: task=warning key=pending-reply-color folded reserved-prefix needs-decision: choose a color' "$out" \
+    || fail "receipt rename failure suppressed the warning"
+  pass "the first failed receipt rename leaves status presentation intact"
 }
 
 test_first_drain_output_failure_leaves_warning_for_main() {
@@ -458,8 +496,10 @@ test_status_append_refuses_reserved_key_before_write() {
   pass "the status append helper refuses a reserved prefix before it writes"
 }
 
-test_folded_reserved_needs_decision_warns_once_per_line
-test_branch_leaves_folded_decisions_unread_for_main
+test_folded_reserved_needs_decision_warns_without_consuming_annotations
+test_unrelated_branch_drain_leaves_warning_unread_for_main
+test_note_presents_the_captured_span
+test_failed_first_receipt_rename_still_prints_decisions
 test_first_drain_output_failure_leaves_warning_for_main
 test_drain_warning_follows_the_reserved_prefix_list
 test_status_append_refuses_reserved_key_before_write

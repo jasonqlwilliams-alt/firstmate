@@ -3,8 +3,7 @@
 # optionally acknowledge handled records,
 # annotate every unread line for validated signal status keys, surface unread
 # informational status lines, latest captain-facing statuses not covered by a
-# newer branch outcome, folded reserved-prefix needs-decision warnings,
-# OPEN DECISIONS, and captain-call record divergence,
+# newer branch outcome, OPEN DECISIONS, and captain-call record divergence,
 # then assert liveness.
 #
 # Keep sequence-bound row consumption independent from generation-bound episode
@@ -395,29 +394,32 @@ EOF
   fi
 }
 
-# Print still-unread status lines and warnings the OPEN DECISIONS fold never
-# carries. Uses the same cursor-backed unread span as the annotation path and
-# runs on every drain -
+# Print still-unread informational status lines (note: answers and pending-reply
+# resolutions) that the OPEN DECISIONS fold never carries. Uses the same
+# cursor-backed unread span as the annotation path, and runs on every drain -
 # including the empty-queue fast path - so a buried answer cannot be swallowed
 # when the fold later advances the cursor. Prints nothing when nothing is
 # unread, which is the common case.
 print_unread_status_section() {
-  local unread=$1 task _endpoint line key question shown=0
+  local snapshot=${1:-} unread task line shown=0
+
+  if [ "$#" -ge 2 ]; then
+    unread=$2
+  elif [ -n "$snapshot" ]; then
+    unread=$(scan_unread_surface_snapshot "$STATE" "$snapshot") || return 1
+  else
+    unread=$(scan_unread_surface_lines "$STATE") || return 1
+  fi
   [ -n "$unread" ] || return 0
 
-  while IFS=$'\t' read -r task _endpoint line; do
+  while IFS=$(printf '\t') read -r task line; do
     [ -n "$task" ] || continue
     [ -n "$line" ] || continue
+    line="$task $line"
     if [ "$shown" -eq 0 ]; then
       printf 'UNREAD STATUS (new since last drain, not re-printed after this presentation):\n' || return 1
     fi
-    if [ "$(status_line_verb "$line")" = needs-decision ]; then
-      key=$(_fm_decision_key "$line") || return 1
-      question=$(status_line_note "$line") || return 1
-      printf 'warning: task=%s key=%s folded reserved-prefix needs-decision: %s\n' "$task" "$key" "$question" || return 1
-    else
-      printf '%s %s\n' "$task" "$line" || return 1
-    fi
+    printf '%s\n' "$line" || return 1
     shown=$((shown + 1))
   done <<EOF
 $unread
@@ -548,14 +550,34 @@ EOF
   printf 'RECORD DIVERGENCE: reconcile each one - record the captain'"'"'s own words with bin/fm-captain-hold.sh answer <task> --decision-file <path>, or re-open the status decision when that resolution was not the captain'"'"'s word.\n' || return 1
 }
 
+print_folded_reserved_decision_warnings() {
+  local snapshot=$1 task endpoint _ident lines line key question
+  while IFS=$'\t' read -r task endpoint _ident; do
+    [ -n "$task" ] || continue
+    lines=$(status_new_lines_since_cursor "$STATE/$task.status" "$endpoint" decision-candidates) || continue
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      [ "$(status_line_verb "$line")" = needs-decision ] || continue
+      key=$(_fm_decision_key "$line") || continue
+      question=$(status_line_note "$line")
+      if ! _fm_decision_key_transition_allowed "$key" "$question"; then
+        printf 'warning: task=%s key=%s folded reserved-prefix needs-decision: %s\n' "$task" "$key" "$question" || return 1
+      fi
+    done <<< "$lines"
+  done <<< "$snapshot"
+}
+
 print_status_sections() {
-  local snapshot=$1 presentable=$2 fully_presented=$3 acknowledged prepared unread unread_ends
-  unread=$(scan_unread_surface_snapshot "$STATE" "$presentable") || return 1
-  unread_ends=$(printf '%s\n' "$unread" | awk -F '\t' 'NF >= 3 { end[$1] = $2 } END { for (task in end) print task "\t" end[task] }') || return 1
-  acknowledged=$(status_acknowledge_presented_snapshot "$STATE" "$presentable" "$fully_presented" "$unread_ends") || return 1
+  local snapshot=${1:-} fully_presented=${2:-} acknowledged prepared unread informational
+  if [ -z "$snapshot" ]; then snapshot=$(status_presentation_snapshot "$STATE") || return 1; fi
+  [ -n "$snapshot" ] || return 0
+  unread=$(scan_unread_surface_snapshot "$STATE" "$snapshot") || return 1
+  informational=$(printf '%s\n' "$unread" | cut -f1) || return 1
+  acknowledged=$(status_acknowledge_presented_snapshot "$STATE" "$snapshot" "$fully_presented" "$informational") || return 1
   prepared=$(mktemp "$STATE/.status-presentation.prepared.XXXXXX") || return 1
   if ! {
-    print_unread_status_section "$unread" \
+    print_folded_reserved_decision_warnings "$snapshot" \
+      && print_unread_status_section "$snapshot" "$unread" \
       && print_status_outcome_backstop_section "$snapshot" \
       && print_open_decisions_section "$snapshot" \
       && print_record_divergence_section
@@ -578,8 +600,8 @@ print_status_sections() {
 }
 
 print_status_presentation() {  # [<deduped-raw-rows>]
-  local rows=${1:-} lock="$STATE/.status-presentation-lock" snapshot presentable annotation_manifest fully_presented='' rc=0
-  local lock_rc holder_pid pre_fold
+  local rows=${1:-} lock="$STATE/.status-presentation-lock" snapshot annotation_manifest fully_presented='' rc=0
+  local lock_rc holder_pid
   if fm_lock_acquire_wait_bounded "$lock" "$PRESENTATION_LOCK_TIMEOUT"; then
     :
   else
@@ -597,25 +619,14 @@ print_status_presentation() {  # [<deduped-raw-rows>]
     printf 'STATUS PRESENTATION INCOMPLETE: status snapshot could not be read.\n'
     rc=1
   }
-  if [ "$rc" -eq 0 ] && [ -n "$snapshot" ] \
-    && [ ! -e "$STATE/.status-presentation-cursor" ] && [ ! -L "$STATE/.status-presentation-cursor" ]; then
-    if ! pre_fold=$(status_acknowledge_presented_snapshot "$STATE" "$snapshot" '' '') \
-      || ! status_commit_presentation_snapshot "$STATE" "$pre_fold"; then
-      rc=1
-    fi
-  fi
-  presentable=$snapshot
-  if [ "$rc" -eq 0 ] && [ "$ACTOR" = branch ]; then
-    presentable=$(status_branch_presentation_snapshot "$STATE" "$snapshot") || rc=1
-  fi
-  if [ "$rc" -eq 0 ] && [ -n "$snapshot" ] && [ -n "$rows" ]; then
-    fm_wake_print_annotations "$rows" "$presentable" || rc=1
+  if [ "$rc" -eq 0 ] && [ -n "$rows" ]; then
+    fm_wake_print_annotations "$rows" "$snapshot" || rc=1
     if [ "$rc" -eq 0 ]; then
       annotation_manifest=$(fm_wake_annotation_manifest "$rows") || rc=1
       fully_presented=$(printf '%s\n' "$annotation_manifest" | awk -F '\t' '$2 == "direct" { sub(/\.status$/, "", $1); print $1 }') || rc=1
     fi
   fi
-  if [ "$rc" -eq 0 ] && [ -n "$snapshot" ]; then print_status_sections "$snapshot" "$presentable" "$fully_presented" || rc=1; fi
+  if [ "$rc" -eq 0 ] && [ -n "$snapshot" ]; then print_status_sections "$snapshot" "$fully_presented" || rc=1; fi
   fm_lock_release "$lock"
   return "$rc"
 }
