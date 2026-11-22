@@ -134,7 +134,11 @@ case "${1:-}" in
       printf 'Welcome to Kimi Code!\ncontext: 1%% (2k/256k)\n'
     fi
     exit 0 ;;
-  list-windows) [ -f "$D/windows" ] && cat "$D/windows"; exit 0 ;;
+  # The exact-window reads ask for ids alongside names.
+  list-windows)
+    [ -f "$D/windows" ] || exit 0
+    case "$*" in *window_id*) awk '{ print "@" NR " " $0 }' "$D/windows" ;; *) cat "$D/windows" ;; esac
+    exit 0 ;;
   has-session|new-session|set-window-option) exit 0 ;;
   new-window)
     name=

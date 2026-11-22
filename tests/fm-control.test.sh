@@ -235,8 +235,11 @@ case "${1:-}" in
       fi
     elif [ -f "$D/pane" ]; then cat "$D/pane"; else printf '╭────╮\n│    │\n╰────╯\n'; fi
     exit 0 ;;
+  # The exact-window reads ask for ids alongside names.
   list-windows)
-    if [ -f "$D/windows" ]; then cat "$D/windows"; fi
+    if [ -f "$D/windows" ]; then
+      case "$*" in *window_id*) awk '{ print "@" NR " " $0 }' "$D/windows" ;; *) cat "$D/windows" ;; esac
+    fi
     exit 0 ;;
 esac
 exit 0

@@ -102,6 +102,14 @@ case "${1:-}" in
       case "$a" in
         *cursor_y*) printf '1\n'; exit 0 ;;
         *pane_current_command*)
+          # Exact-window reads arrive by window id; map it back to the name
+          # the keyed state was written under.
+          case "$target" in
+            @*)
+              wname=$(sed -n "${target#@}p" "$D/windows" 2>/dev/null)
+              for f in "$D"/command.*:"$wname"; do [ -f "$f" ] && target=${f#"$D"/command.}; done
+              ;;
+          esac
           if [ -f "$D/command.$target" ]; then cat "$D/command.$target"; else cat "$D/command"; fi
           printf '\n'; exit 0 ;;
         *pane_current_path*) cat "$D/cwd"; printf '\n'; exit 0 ;;
@@ -110,7 +118,11 @@ case "${1:-}" in
     done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane) printf '> \n'; exit 0 ;;
-  list-windows) [ -f "$D/windows" ] && cat "$D/windows"; exit 0 ;;
+  # The exact-window reads ask for ids alongside names.
+  list-windows)
+    [ -f "$D/windows" ] || exit 0
+    case "$*" in *window_id*) awk '{ print "@" NR " " $0 }' "$D/windows" ;; *) cat "$D/windows" ;; esac
+    exit 0 ;;
 esac
 exit 0
 SH

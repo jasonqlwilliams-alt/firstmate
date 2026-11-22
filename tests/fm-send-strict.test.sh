@@ -71,7 +71,11 @@ case "${1:-}" in
     fi
     exit 0 ;;
   list-windows)
-    printf 'foreign:%s\nfm-mpf-lane-m8\nfm-lane-ok\n' "${FM_FAKE_TMUX_WINDOW:-fm-lost}"
+    # The exact-window reads ask for ids alongside names.
+    case "$*" in
+      *window_id*) printf '@1 fm-mpf-lane-m8\n@2 fm-lane-ok\n' ;;
+      *) printf 'foreign:%s\nfm-mpf-lane-m8\nfm-lane-ok\n' "${FM_FAKE_TMUX_WINDOW:-fm-lost}" ;;
+    esac
     exit 0 ;;
 esac
 exit 0
