@@ -498,6 +498,12 @@ case "${FM_FAKE_SSH_MODE:-ok}" in
   unreachable) exit 255 ;;
 esac
 case "${rargs[1]:-}" in
+  observe)
+    if [ "${FM_FAKE_SSH_MODE:-ok}" = slow-exit-dialog ] && [ "${rargs[3]:-}" = --exit-dialog ]; then
+      /bin/sleep 8
+      printf 'exit-confirm\n'
+    fi
+    ;;
   send)
     # Model the live remote mate: act on the instruction and report back on the
     # parent channel, carrying the correlation token the request embedded.
@@ -579,6 +585,31 @@ test_unreachable_host_is_reported_unknown() {
   assert_contains "$out" "sm3:" "the unreachable mate must still be named"
   assert_contains "$out" "could not be delivered" "an unreachable host must be reported as undelivered, not as reloaded"
   pass "T7 an unreachable host is reported honestly instead of claimed as reloaded"
+}
+
+test_slow_exit_dialog_observation_does_not_block_restart() {
+  local dir out rc
+  dir=$(new_case slow-exit-dialog)
+  setup_remote_case "$dir" sm1 slow-exit-dialog
+  add_local_mate "$dir" sm2
+  printf -- '- sm2 - local domain (home: %s; scope: things; projects: p; added 2026-09-03)\n' \
+    "$dir/sm2-home" >> "$dir/home/data/secondmates.md"
+  arm_answer "$dir" sm2
+
+  out=$(FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1 sm2); rc=$?
+
+  expect_code 3 "$rc" "the mate without a save reply should fall back to a nudge: $out"
+  [ "$(grep -Fxc 'fm-remote-secondmate-control.sh observe sm1 --exit-dialog' "$dir/ssh.log")" -eq 2 ] \
+    || fail "the stalled remote dialog probe must run before both the save request and the fallback"
+  assert_grep 'stop every background shell task you started' "$dir/ssh.log" \
+    "the preflight timeout must allow the remote save request"
+  assert_grep 're-read your AGENTS.md' "$dir/ssh.log" \
+    "the fallback timeout must allow the remote nudge"
+  assert_contains "$out" 'nudged: sm1: it did not confirm within 0s' \
+    "a late dialog response must leave the normal fallback available"
+  assert_contains "$out" 'restarted: sm2 (claude)' \
+    "the later mate must still restart after confirming its save request"
+  pass "a slow remote dialog observation does not suppress save requests or nudges"
 }
 
 # --- T8: a local restart lands on this home's durable pin, and says which -----
@@ -964,6 +995,7 @@ test_local_restart_uses_the_home_pin_and_reports_what_ran
 test_native_ultra_restart_keeps_local_and_remote_profiles
 test_remote_mate_restarts_over_the_transport_hop
 test_unreachable_host_is_reported_unknown
+test_slow_exit_dialog_observation_does_not_block_restart
 test_concurrent_reply_cannot_release_persist_gate
 test_persist_waits_are_polled_together
 test_post_stop_failure_is_reported_unreached

@@ -170,7 +170,7 @@ report_open_exit_dialog() {  # <id>
   [ "$(fm_meta_get "$meta" kind)" = secondmate ] || return 1
   [ "$(fm_control_harness_family "$(fm_meta_get "$meta" harness)")" = claude ] || return 1
   if [ -n "$(fm_meta_get "$meta" remote_host)" ]; then
-    screen=$(fm_run_timed 30 "$SCRIPT_DIR/fm-on.sh" "$id" \
+    screen=$(fm_run_timed 5 "$SCRIPT_DIR/fm-on.sh" "$id" \
       fm-remote-secondmate-control.sh observe "$id" --exit-dialog </dev/null 2>/dev/null) || return 1
   else
     fm_backend_validate_task_endpoint "$meta" "$id" 2>/dev/null || return 1
