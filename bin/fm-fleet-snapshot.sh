@@ -107,10 +107,9 @@
 #     "run cancelled" or "run cancelled · status-log superseded (run failed)",
 #     the task metadata records a valid PR URL, the latest done status event is
 #     "PR <that url> checks green", and that PR has neither a matching local
-#     merge-notified marker nor a valid matching retirement receipt.
+#     reported PR outcome marker nor a valid matching merge retirement receipt.
 #     The exemption applies only to terminal_in_flight and uses PR identity
-#     independently of commit heads. A PR closed without a local merge record
-#     can still qualify. The next snapshot can reflect a retry or PR
+#     independently of commit heads. The next snapshot can reflect a retry or PR
 #     registration that occurs after the relevant inputs were sampled.
 #     Regression coverage lives in tests/fm-fleet-snapshot-view.test.sh.
 #     Other terminal in-flight children remain contradictions unless the task
@@ -757,7 +756,7 @@ snapshot_pr_awaiting_merge() {  # <id> <registered-pr> <captured-status>
     esac
   done < "$status_log"
   [ "$(status_line_note "$last_done")" = "PR $pr checks green" ] || return 1
-  ! fm_pr_poll_merge_already_notified "$STATE" "$id" \
+  ! fm_pr_poll_outcome_recorded "$STATE" "$id" \
       "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" \
     && ! { fm_pr_poll_retirement_receipt_valid "$STATE" "$id" && [ "$FM_PR_RETIRE_URL" = "$pr" ]; }
 }

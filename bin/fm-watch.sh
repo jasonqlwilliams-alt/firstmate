@@ -2105,18 +2105,27 @@ while :; do
       fi
       if [ -n "$out" ]; then
         reason="check: $c: $out"
-        if [ "$is_pr_poll" -eq 1 ] && [ "$out" = merged ]; then
+        if [ "$is_pr_poll" -eq 1 ] && { [ "$out" = merged ] || [ "$out" = closed-unmerged ]; }; then
           merge_outcome_rc=0
-          fm_merge_outcome_report "$FM_HOME" "$STATE" "$id" "$url" poll \
+          fm_merge_outcome_report "$FM_HOME" "$STATE" "$id" "$url" poll '' "$out" \
             || merge_outcome_rc=$?
-          if [ "$merge_outcome_rc" -ne 0 ]; then
-            triage_log "merge outcome for $id could not be recorded (rc=$merge_outcome_rc)"
-            exit 1
+          case "$merge_outcome_rc" in
+            0) ;;
+            4)
+              triage_log "discarded closure observation because its canonical PR poll snapshot changed for $id"
+              continue
+              ;;
+            *)
+              triage_log "PR outcome $out for $id could not be recorded (rc=$merge_outcome_rc)"
+              exit 1
+              ;;
+          esac
+          if [ "$out" = merged ]; then
+            retire_merged_pr_poll "$id"
           fi
-          retire_merged_pr_poll "$id"
           touch "$STATE/.last-check"
           if [ "$FM_MERGE_OUTCOME_ALREADY_RECORDED" = true ]; then
-            triage_log "absorbed duplicate merged PR poll result for $id"
+            triage_log "absorbed already-recorded PR poll result $out for $id"
             continue
           fi
           wake "$reason"

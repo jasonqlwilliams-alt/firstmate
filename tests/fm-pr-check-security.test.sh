@@ -796,17 +796,19 @@ test_static_poll_contract() {
   dir=$(make_case poll-contract)
   make_poll_fixture "$dir"
 
-  for state in OPEN CLOSED EMPTY MALFORMED; do
+  for state in OPEN EMPTY MALFORMED; do
     case "$state" in
       EMPTY) value= ;;
       MALFORMED) value='not-a-state' ;;
       *) value=$state ;;
     esac
     out=$(FM_TEST_GH_STATE="$value" run_poll "$dir")
-    [ -z "$out" ] || fail "static poll emitted for non-merged state"
+    [ -z "$out" ] || fail "static poll emitted without a recognized outcome"
   done
   out=$(FM_TEST_GH_STATE=MERGED run_poll "$dir")
   [ "$out" = merged ] || fail "static poll did not emit exactly one merged line"
+  out=$(FM_TEST_GH_STATE=CLOSED run_poll "$dir")
+  [ "$out" = closed-unmerged ] || fail "static poll did not emit exactly one closed-unmerged line"
   out=$(FM_TEST_GH_FAIL=1 run_poll "$dir")
   [ -z "$out" ] || fail "static poll emitted after gh failure"
 
@@ -842,7 +844,7 @@ test_static_poll_contract() {
   set -e
   [ "$rc" -eq 0 ] || fail "watcher did not surface merged poll"
   [ "$(grep -c '^check: .*: merged$' "$dir/watch.out")" -eq 1 ] || fail "watcher did not convert merged output into exactly one wake"
-  pass "static poll is silent except for one merged line and remains watcher-bounded"
+  pass "static poll reports each confirmed outcome once and remains watcher-bounded"
 }
 
 test_atomic_interruption_leaves_no_partial_artifact() {
@@ -1411,14 +1413,14 @@ gitlab.example
 group/subgroup/project
 7" ] || fail "published GitLab sidecar bytes were not exact"
 
-  # Only an exact merged state wakes firstmate. Every other reading, including
-  # an unreadable merge request and a changed output format, stays silent.
-  for value in opened closed locked '' not-a-state MERGED merged-but-not; do
+  for value in opened locked '' not-a-state MERGED merged-but-not; do
     out=$(FM_TEST_GLAB_STATE="$value" run_poll "$dir")
-    [ -z "$out" ] || fail "GitLab poll emitted for a non-merged state"
+    [ -z "$out" ] || fail "GitLab poll emitted without a recognized outcome"
   done
   out=$(FM_TEST_GLAB_STATE=merged run_poll "$dir")
   [ "$out" = merged ] || fail "GitLab poll did not emit exactly one merged line"
+  out=$(FM_TEST_GLAB_STATE=closed run_poll "$dir")
+  [ "$out" = closed-unmerged ] || fail "GitLab poll did not emit exactly one closed-unmerged line"
   out=$(FM_TEST_GLAB_FAIL=1 run_poll "$dir")
   [ -z "$out" ] || fail "GitLab poll emitted after a glab failure"
 
@@ -1772,7 +1774,7 @@ SH
   esac
   assert_grep "$url" "$state/.wake-queue" \
     "merge-outcome-uncommitted: drained outcome was not durably re-emitted"
-  fm_pr_poll_merge_already_notified "$state" task-a github github.com o/r 1 \
+  fm_pr_poll_outcome_recorded "$state" task-a github github.com o/r 1 merged \
     || fail "merge-outcome-uncommitted: successful retry did not commit the marker"
   assert_poll_absent "$state" task-a
   pass "staged self-merge and poll interleavings are never silent"
@@ -1853,9 +1855,9 @@ test_different_merged_pr_for_same_task_is_not_absorbed() {
   grep -F "$(printf '\tcheck\tmerged-task-a-https://github.com/o/r/pull/2\t')" \
     "$state/.wake-queue" >/dev/null 2>&1 \
     || fail "the different PR merge did not create a main-blocking wake row"
-  fm_pr_poll_merge_already_notified "$state" task-a github github.com o/r 2 \
+  fm_pr_poll_outcome_recorded "$state" task-a github github.com o/r 2 merged \
     || fail "the marker was not advanced to the different PR identity"
-  ! fm_pr_poll_merge_already_notified "$state" task-a github github.com o/r 1 \
+  ! fm_pr_poll_outcome_recorded "$state" task-a github github.com o/r 1 merged \
     || fail "the marker still matched the superseded PR identity"
   assert_poll_absent "$state" task-a
   pass "a different merged PR for the same task gets its own first notification"
@@ -2026,23 +2028,25 @@ test_retirement_crash_recovery() {
   pass "queue, receipt, and every fixed-path removal crash point recover without loss or repeated execution"
 }
 
-test_external_merge_transition_retires_only_terminal_poll() {
-  local dir state before rc label
+test_external_merge_transition_retires_only_merged_poll() {
+  local dir state before rc label url
   dir=$(make_case external-merge-transition)
   state="$dir/home/state"
-  write_poll_meta "$state" task-a https://github.com/o/r/pull/19
-  seed_canonical_poll "$dir" task-a https://github.com/o/r/pull/19
+  url=https://github.com/o/r/pull/19
+  seed_secondmate_home "$dir"
+  write_poll_meta "$state" task-a "$url"
+  seed_canonical_poll "$dir" task-a "$url"
   add_stop_custom_check "$dir"
   before=$(poll_artifact_snapshot "$state" task-a)
 
-  for label in open-green open-red closed-unmerged forge-error malformed; do
+  for label in open-green open-red forge-error malformed closed-unmerged duplicate-closure; do
     rm -f "$state/.last-check"
     set +e
     case "$label" in
       open-green|open-red)
         FM_TEST_GH_STATE=OPEN run_watcher_bounded "$dir/home" "$dir/fakebin" > "$dir/$label.out" 2> "$dir/$label.err"
         ;;
-      closed-unmerged)
+      closed-unmerged|duplicate-closure)
         FM_TEST_GH_STATE=CLOSED run_watcher_bounded "$dir/home" "$dir/fakebin" > "$dir/$label.out" 2> "$dir/$label.err"
         ;;
       forge-error)
@@ -2055,7 +2059,16 @@ test_external_merge_transition_retires_only_terminal_poll() {
     rc=$?
     set -e
     [ "$rc" -eq 0 ] || fail "$label watcher cycle failed: $(cat "$dir/$label.err")"
-    case "$(cat "$dir/$label.out")" in check:*z-stop.check.sh:*stop-cycle) ;; *) fail "$label did not reach the control check" ;; esac
+    if [ "$label" = closed-unmerged ]; then
+      case "$(cat "$dir/$label.out")" in
+        check:*task-a.check.sh:*closed-unmerged) ;;
+        *) fail "closure did not wake the watcher" ;;
+      esac
+      assert_grep "closed-unmerged-task-a-$url" "$state/.wake-queue" "closure did not publish a durable wake"
+    else
+      case "$(cat "$dir/$label.out")" in check:*z-stop.check.sh:*stop-cycle) ;; *) fail "$label did not reach the control check" ;; esac
+      assert_no_grep "closed-unmerged-task-a-$url" "$state/.wake-queue" "$label published an unexpected closure wake"
+    fi
     [ "$(poll_artifact_snapshot "$state" task-a)" = "$before" ] || fail "$label changed the armed poll"
     ack_watcher_cycle "$state" || fail "$label control wake acknowledgement failed"
   done
@@ -2067,8 +2080,12 @@ test_external_merge_transition_retires_only_terminal_poll() {
   set -e
   [ "$rc" -eq 0 ] || fail "external merged transition failed: $(cat "$dir/merged.err")"
   case "$(cat "$dir/merged.out")" in check:*task-a.check.sh:*merged) ;; *) fail "external merge did not preserve its notification" ;; esac
+  [ "$(grep -c -F "done [key=closed-unmerged-task-a]: PR closed without merge: task-a $url" "$state/parent-replies.status")" -eq 1 ] \
+    || fail "closure did not publish exactly one upward notification"
+  assert_grep "done [key=merged-task-a]: merged task-a $url" "$state/parent-replies.status" \
+    "closure suppressed the later merge notification"
   assert_poll_absent "$state" task-a
-  pass "open/red, closed-unmerged, malformed, and forge errors remain armed until an exact merged transition"
+  pass "closure wakes once and the poll remains armed until an exact merged transition"
 }
 
 test_retirement_refuses_replacement_and_nonterminal_results() {
@@ -2347,7 +2364,7 @@ test_merged_poll_reports_upward_from_a_secondmate_home_once
 test_different_merged_pr_for_same_task_is_not_absorbed
 test_persistent_secondmate_retirement_is_poll_only
 test_retirement_crash_recovery
-test_external_merge_transition_retires_only_terminal_poll
+test_external_merge_transition_retires_only_merged_poll
 test_retirement_refuses_replacement_and_nonterminal_results
 test_retirement_queue_failure_and_receipt_tampering
 test_gitlab_merged_poll_retires

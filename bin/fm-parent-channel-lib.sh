@@ -20,7 +20,7 @@
 #   - bin/fm-pr-check.sh             a registered PR-ready line carrying the
 #                                    canonical URL
 #   - bin/fm-captain-hold.sh         a task held for the captain and its answer
-#   - bin/fm-merge-outcome-lib.sh    a merged PR
+#   - bin/fm-merge-outcome-lib.sh     a merged or closed-unmerged PR
 #   - bin/fm-teardown.sh             the child's final ledger line, refusing to
 #                                    remove the child while it is undelivered
 #   - bin/fm-secondmate-report.sh     a marked request's correlated answer,

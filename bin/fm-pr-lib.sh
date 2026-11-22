@@ -618,10 +618,14 @@ fm_pr_poll_artifacts_valid() {
   fm_pr_private_file_valid "$registration" 600 "$state_device" || return 1
   [ -f "$meta" ] && [ ! -L "$meta" ] || return 1
   [ "$(fm_pr_file_link_count "$meta")" = 1 ] || return 1
-  cmp -s "$template" "$check" || return 1
   fm_pr_poll_data_parse "$data" || return 1
   data_hash=$(fm_pr_sha256 "$data") || return 1
   template_hash=$(fm_pr_sha256 "$check") || return 1
+  # A registration made with the approved merge-only template stays valid
+  # across the upgrade. The watcher executes the current repository program.
+  if [ "$template_hash" != 24f73c153d68a5404ee5b4f9fc4ad6368ee8d79b43b87566591ce1e05a4112bf ]; then
+    cmp -s "$template" "$check" || return 1
+  fi
   fm_pr_poll_registration_parse "$registration" || return 1
   [ "$FM_PR_REG_ID" = "$id" ] || return 1
   [ "$FM_PR_REG_PROVIDER" = "$FM_PR_DATA_PROVIDER" ] || return 1
@@ -960,19 +964,18 @@ fm_pr_poll_retirement_recover_all() {
   [ -z "$FM_PR_POLL_RETIREMENT_REJECTED" ]
 }
 
-# --- merge-notification canonical-identity marker ----------------------------
+# --- PR outcome canonical-identity marker -----------------------------------
 # A merged-PR poll retires (fm_pr_poll_retirement_recover_one) in the same
 # watcher cycle that detects it, which is normally enough on its own to stop a
 # duplicate detection: the check.sh is gone, so nothing re-polls it. The
 # exception is the same poll re-registered after its merge was already
 # surfaced. Its retirement state is scoped to one registration, so this marker
-# carries the canonical PR identity across registrations for the task. Only a
-# matching identity is a no-op; a different PR for the same task reaches its
-# role-routed supervision destination and replaces the marker when its first
-# outcome is published.
-fm_pr_poll_merge_marker_matches() {  # <marker> <device> <provider> <host> <path> <number>
+# carries the latest reported outcome and canonical PR identity across
+# registrations for the task. The existing on-disk merge tag still means
+# merged. Closed polls stay armed, so a later merge can replace a closure.
+fm_pr_poll_outcome_marker_matches() {  # <marker> <device> <provider> <host> <path> <number> <expected>
   local marker=$1 device=$2 expected_provider=$3 expected_host=$4 expected_path=$5 expected_number=$6
-  local version provider host path number
+  local expected=$7 version provider host path number outcome
   fm_pr_private_file_valid "$marker" 600 "$device" || return 1
   exec 8< "$marker" || return 1
   IFS= read -r version <&8 || { exec 8<&-; return 1; }
@@ -985,25 +988,36 @@ fm_pr_poll_merge_marker_matches() {  # <marker> <device> <provider> <host> <path
     return 1
   fi
   exec 8<&-
-  [ "$version" = fm-pr-poll-merge-notified-v1 ] \
+  case "$version" in
+    fm-pr-poll-merge-notified-v1) outcome=merged ;;
+    fm-pr-poll-closed-unmerged-notified-v1) outcome=closed-unmerged ;;
+    *) return 1 ;;
+  esac
+  { [ "$expected" = any ] || [ "$outcome" = "$expected" ]; } \
     && [ "$provider" = "$expected_provider" ] \
     && [ "$host" = "$expected_host" ] \
     && [ "$path" = "$expected_path" ] \
     && [ "$number" = "$expected_number" ]
 }
 
-fm_pr_poll_merge_already_notified() {  # <state> <id> <provider> <host> <path> <number>
+fm_pr_poll_outcome_recorded() {  # <state> <id> <provider> <host> <path> <number> [expected]
   local state=$1 id=$2 provider=$3 host=$4 path=$5 number=$6 marker state_device
   fm_pr_task_id_valid "$id" || return 1
   [ -d "$state" ] && [ ! -L "$state" ] || return 1
   state_device=$(fm_pr_file_device "$state") || return 1
   marker="$state/$id.pr-poll-merge-notified"
-  fm_pr_poll_merge_marker_matches "$marker" "$state_device" \
-    "$provider" "$host" "$path" "$number"
+  fm_pr_poll_outcome_marker_matches "$marker" "$state_device" \
+    "$provider" "$host" "$path" "$number" "${7:-any}"
 }
 
-fm_pr_poll_merge_mark_notified() {  # <state> <id> <provider> <host> <path> <number>
+fm_pr_poll_outcome_record() {  # <state> <id> <provider> <host> <path> <number> <outcome>
   local state=$1 id=$2 provider=$3 host=$4 path=$5 number=$6 marker tmp state_device
+  local outcome=$7 version
+  case "$outcome" in
+    merged) version=fm-pr-poll-merge-notified-v1 ;;
+    closed-unmerged) version=fm-pr-poll-closed-unmerged-notified-v1 ;;
+    *) return 1 ;;
+  esac
   fm_pr_task_id_valid "$id" || return 1
   [ -d "$state" ] && [ ! -L "$state" ] || return 1
   state_device=$(fm_pr_file_device "$state") || return 1
@@ -1012,14 +1026,14 @@ fm_pr_poll_merge_mark_notified() {  # <state> <id> <provider> <host> <path> <num
   umask 077
   tmp=$(mktemp "$state/.fm-pr-poll-merge-notified.XXXXXX") || return 1
   if ! printf '%s\n%s\n%s\n%s\n%s\n' \
-      fm-pr-poll-merge-notified-v1 "$provider" "$host" "$path" "$number" > "$tmp" \
+      "$version" "$provider" "$host" "$path" "$number" > "$tmp" \
     || ! chmod 0600 "$tmp" \
-    || ! fm_pr_poll_merge_marker_matches "$tmp" "$state_device" \
-      "$provider" "$host" "$path" "$number" \
+    || ! fm_pr_poll_outcome_marker_matches "$tmp" "$state_device" \
+      "$provider" "$host" "$path" "$number" "$outcome" \
     || ! fm_pr_regular_destination_on_device_or_absent "$marker" "$state_device" \
     || ! mv -f -- "$tmp" "$marker" \
-    || ! fm_pr_poll_merge_marker_matches "$marker" "$state_device" \
-      "$provider" "$host" "$path" "$number"; then
+    || ! fm_pr_poll_outcome_marker_matches "$marker" "$state_device" \
+      "$provider" "$host" "$path" "$number" "$outcome"; then
     rm -f -- "$tmp"
     return 1
   fi
