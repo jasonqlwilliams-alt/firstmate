@@ -1,0 +1,88 @@
+Quiet and force-killed deadlines through the actual alternate runner paths.
+The gtimeout name points to the installed GNU timeout binary. The fallback path uses installed Perl.
+Firstmate CLI with synthetic task data and isolated paths.
+Target a4f2aceab4eeaff6499a088d76c6ae1fea96da5a plus the Perl fallback fix.
+
+--- gtimeout runner ---
+
+$ bin/fm-harness.sh
+codex
+[exit 0]
+
+$ bin/fm-lock.sh
+lock acquired: harness pid 1046858
+[exit 0]
+
+$ bin/fm-watch-checkpoint.sh --seconds 5
+checkpoint: no actionable wake within 5s
+[exit 124]
+
+$ bin/fm-wake-drain.sh
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 1054736.1795390098.vItkG9
+NOTICE: between foreground checkpoints - no live watcher process holds this home lock since the last checkpoint returned 1s ago.
+[exit 0]
+
+$ bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 1054736.1795390098.vItkG9
+[no output]
+[exit 0]
+
+--- First beacon is published, then scan and cleanup are blocked ---
+
+$ env PATH=<disposable-lab>/gtimeout-home/arm-lock:<disposable-lab>/gtimeout-path FM_LOCK_OWNER=1046860 bin/fm-watch-checkpoint.sh --seconds 3
+checkpoint: no actionable wake within 3s
+[exit 124]
+[Elapsed 9s with a 3s deadline and 5s termination grace]
+
+$ bin/fm-guard.sh
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 8s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[exit 0]
+
+[Driver exit 0]
+
+--- perl runner ---
+
+$ bin/fm-harness.sh
+codex
+[exit 0]
+
+$ bin/fm-lock.sh
+lock acquired: harness pid 1071106
+[exit 0]
+
+$ bin/fm-watch-checkpoint.sh --seconds 5
+checkpoint: no actionable wake within 5s
+[exit 124]
+
+$ bin/fm-wake-drain.sh
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 1079374.1795390114.H57vSW
+NOTICE: between foreground checkpoints - no live watcher process holds this home lock since the last checkpoint returned 2s ago.
+[exit 0]
+
+$ bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 1079374.1795390114.H57vSW
+[no output]
+[exit 0]
+
+--- First beacon is published, then scan and cleanup are blocked ---
+
+$ env PATH=<disposable-lab>/perl-home/arm-lock:<disposable-lab>/perl-path FM_LOCK_OWNER=1071108 bin/fm-watch-checkpoint.sh --seconds 3
+checkpoint: no actionable wake within 3s
+[exit 124]
+[Elapsed 9s with a 3s deadline and 5s termination grace]
+
+$ bin/fm-guard.sh
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 8s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[exit 0]
+
+[Driver exit 0]

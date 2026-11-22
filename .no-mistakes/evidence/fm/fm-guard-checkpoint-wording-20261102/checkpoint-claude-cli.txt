@@ -1,0 +1,33 @@
+Claude auto-arm wake handling
+Firstmate CLI with synthetic task data and disposable harness ancestry.
+Target a4f2aceab4eeaff6499a088d76c6ae1fea96da5a
+
+--- target / claude supervision ---
+
+$ bin/fm-lock.sh
+lock acquired: harness pid 619925
+[exit 0]
+
+$ timeout -k 5 15 bin/fm-watch-arm.sh
+watcher: started pid=620333 (beacon fresh)
+signal: <disposable-lab>/claude-home/state/demo.status
+[exit 0]
+
+$ bin/fm-wake-drain.sh
+1795389802	2	signal	demo.status	signal: <disposable-lab>/claude-home/state/demo.status
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 623523.1795389802.E9FX4G
+wake annotation: latest wake-EVENT observed at drain, not current state: demo.status: done: synthetic demo job finished
+STATUS OUTCOME BACKSTOP (newest captain-facing task event has no covering branch outcome):
+demo done: synthetic demo job finished
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+[exit 0]
+
+$ bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 623523.1795389802.E9FX4G
+[no output]
+[exit 0]
+
+$ bin/fm-guard.sh
+[no output]
+[exit 0]
+
+[Driver exit 0]

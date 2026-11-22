@@ -1,0 +1,116 @@
+Three quiet deadlines and subsequent drains
+Firstmate CLI with synthetic task data and disposable harness ancestry.
+Target a4f2aceab4eeaff6499a088d76c6ae1fea96da5a
+Base 0464e0e2e12c319129f904dc936b6830c68d5a51
+
+--- target / codex supervision ---
+
+$ bin/fm-lock.sh
+lock acquired: harness pid 507277
+[exit 0]
+
+--- Quiet cycle 1 ---
+
+$ bin/fm-watch-checkpoint.sh --seconds 4
+checkpoint: no actionable wake within 4s
+[exit 124]
+
+$ bin/fm-wake-drain.sh
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 514576.1795389729.CF9Epu
+NOTICE: between foreground checkpoints - no live watcher process holds this home lock since the last checkpoint returned 1s ago.
+[exit 0]
+
+$ bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 514576.1795389729.CF9Epu
+[no output]
+[exit 0]
+
+--- Quiet cycle 2 ---
+
+$ bin/fm-watch-checkpoint.sh --seconds 4
+checkpoint: no actionable wake within 4s
+[exit 124]
+
+$ bin/fm-wake-drain.sh
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 524595.1795389735.kDo1km
+NOTICE: between foreground checkpoints - no live watcher process holds this home lock since the last checkpoint returned 0s ago.
+[exit 0]
+
+$ bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 524595.1795389735.kDo1km
+[no output]
+[exit 0]
+
+--- Quiet cycle 3 ---
+
+$ bin/fm-watch-checkpoint.sh --seconds 4
+checkpoint: no actionable wake within 4s
+[exit 124]
+
+$ bin/fm-wake-drain.sh
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 532235.1795389740.EIrvp6
+NOTICE: between foreground checkpoints - no live watcher process holds this home lock since the last checkpoint returned 1s ago.
+[exit 0]
+
+$ bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 532235.1795389740.EIrvp6
+[no output]
+[exit 0]
+
+[Driver exit 0]
+
+--- base / codex supervision ---
+
+$ bin/fm-lock.sh
+lock acquired: harness pid 534296
+[exit 0]
+
+--- Quiet cycle 1 ---
+
+$ bin/fm-watch-checkpoint.sh --seconds 4
+checkpoint: no actionable wake within 4s
+[exit 124]
+
+$ bin/fm-wake-drain.sh
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 540679.1795389746.N5UjMk
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[exit 0]
+
+$ bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 540679.1795389746.N5UjMk
+[no output]
+[exit 0]
+
+--- Quiet cycle 2 ---
+
+$ bin/fm-watch-checkpoint.sh --seconds 4
+checkpoint: no actionable wake within 4s
+[exit 124]
+
+$ bin/fm-wake-drain.sh
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 548525.1795389750.LItE4D
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+[exit 0]
+
+$ bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 548525.1795389750.LItE4D
+[no output]
+[exit 0]
+
+--- Quiet cycle 3 ---
+
+$ bin/fm-watch-checkpoint.sh --seconds 4
+checkpoint: no actionable wake within 4s
+[exit 124]
+
+$ bin/fm-wake-drain.sh
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 554713.1795389755.biRq8e
+WARNING: watcher still down (same stale episode; last beat: 2s ago, grace 300s) - full banner already printed this episode.
+[exit 0]
+
+$ bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 554713.1795389755.biRq8e
+[no output]
+[exit 0]
+
+[Driver exit 0]

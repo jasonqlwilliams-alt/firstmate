@@ -1,0 +1,81 @@
+Failed and overdue checkpoints still alarm
+Firstmate CLI with synthetic task data and disposable harness ancestry.
+Target a4f2aceab4eeaff6499a088d76c6ae1fea96da5a
+
+--- target / codex supervision ---
+
+$ bin/fm-lock.sh
+lock acquired: harness pid 565407
+[exit 0]
+
+$ bin/fm-watch-checkpoint.sh --seconds 4
+checkpoint: no actionable wake within 4s
+[exit 124]
+
+$ bin/fm-wake-drain.sh
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 572879.1795389767.RMpaem
+NOTICE: between foreground checkpoints - no live watcher process holds this home lock since the last checkpoint returned 1s ago.
+[exit 0]
+
+$ bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 572879.1795389767.RMpaem
+[no output]
+[exit 0]
+
+--- A successor cannot create its scratch directory ---
+
+$ env TMPDIR=<disposable-lab>/failure/missing bin/fm-watch-checkpoint.sh --seconds 2
+mktemp: failed to create directory via template ‘<disposable-lab>/failure/missing/fm-watch-checkpoint.XXXXXX’: No such file or directory
+[exit 1]
+
+$ bin/fm-wake-drain.sh
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 3s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[exit 0]
+
+$ bin/fm-guard.sh
+WARNING: watcher still down (same stale episode; last beat: 3s ago, grace 300s) - full banner already printed this episode.
+[exit 0]
+
+--- A subsequent verified checkpoint clears the old episode ---
+
+$ bin/fm-watch-checkpoint.sh --seconds 5
+checkpoint: no actionable wake within 5s
+[exit 124]
+
+$ bin/fm-wake-drain.sh
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 585991.1795389775.5mZ2pw
+NOTICE: between foreground checkpoints - no live watcher process holds this home lock since the last checkpoint returned 1s ago.
+[exit 0]
+
+$ bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 585991.1795389775.5mZ2pw
+[no output]
+[exit 0]
+
+--- The last return ages beyond the configured 300-second grace ---
+
+$ bin/fm-guard.sh
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 3s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[exit 0]
+
+--- First scan is blocked by a live inbox writer ---
+
+$ bin/fm-watch-checkpoint.sh --seconds 3
+checkpoint: no actionable wake within 3s
+[exit 124]
+
+$ bin/fm-guard.sh
+WARNING: watcher still down (same stale episode; last beat: 7s ago, grace 300s) - full banner already printed this episode.
+[exit 0]
+
+[Driver exit 0]

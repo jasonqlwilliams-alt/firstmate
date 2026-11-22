@@ -1,0 +1,10 @@
+Unpatched target, Perl fallback. Command: bin/fm-watch-checkpoint.sh --seconds 3
+FM_SIGNAL_GRACE=5. A synthetic watcher recovery lock blocked the first scan after the beacon.
+The checkpoint, Perl runner, and watcher were still running past the 8-second deadline and grace.
+
+    PID    PPID    PGID     SID     ELAPSED COMMAND
+ 802844  787469  757658  757658       01:06 bash
+ 803664  802844  757658  757658       01:05 perl
+ 803666  803664  803666  757658       01:05 bash
+
+Released the fixture lock after observing the overrun so all children could exit.

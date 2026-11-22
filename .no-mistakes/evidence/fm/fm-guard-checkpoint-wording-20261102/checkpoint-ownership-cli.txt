@@ -1,0 +1,129 @@
+Only the current attended Codex owner can use the last return
+Firstmate CLI with synthetic task data and disposable harness ancestry.
+Target a4f2aceab4eeaff6499a088d76c6ae1fea96da5a
+
+--- target / codex supervision ---
+
+$ bin/fm-lock.sh
+lock acquired: harness pid 594205
+[exit 0]
+
+$ bin/fm-watch-checkpoint.sh --seconds 4
+checkpoint: no actionable wake within 4s
+[exit 124]
+
+$ bin/fm-wake-drain.sh
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 602585.1795389786.1d9pjO
+NOTICE: between foreground checkpoints - no live watcher process holds this home lock since the last checkpoint returned 1s ago.
+[exit 0]
+
+$ bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 602585.1795389786.1d9pjO
+[no output]
+[exit 0]
+
+--- The first session exits ---
+
+[Driver exit 0]
+
+--- target / codex supervision ---
+
+$ bin/fm-lock.sh
+lock acquired: harness pid 605315
+[exit 0]
+
+$ bin/fm-wake-drain.sh
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 3s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[exit 0]
+
+--- The replacement completes its own checkpoint ---
+
+$ bin/fm-watch-checkpoint.sh --seconds 5
+checkpoint: no actionable wake within 5s
+[exit 124]
+
+$ bin/fm-wake-drain.sh
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 615080.1795389795.kHGHrS
+NOTICE: between foreground checkpoints - no live watcher process holds this home lock since the last checkpoint returned 1s ago.
+[exit 0]
+
+$ bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 615080.1795389795.kHGHrS
+[no output]
+[exit 0]
+
+$ env FM_GUARD_READ_ONLY=1 bin/fm-guard.sh
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 2s ago).
+●  This read-only session should report the lapse, not repair it.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  Watcher repair belongs to the session holding the fleet lock; do not drain, arm, or repair from this read-only session.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[exit 0]
+
+$ env GROK_AGENT=1 bin/fm-guard.sh
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 2s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision with bin/fm-watch-arm.sh as its own Grok tracked background task, never shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[exit 0]
+
+$ bin/fm-guard.sh
+NOTICE: between foreground checkpoints - no live watcher process holds this home lock since the last checkpoint returned 2s ago.
+[exit 0]
+
+--- Away supervision fails to start and the posture is archived ---
+
+$ bin/fm-afk-contract.sh propose
+Away posture read-back (proposed, not yet confirmed):
+  entered: 2026-11-22T23:23:17Z
+  expected return: not given
+  spend cap: 4 concurrent workers
+  merge when green (task ids): (none)
+  reach: hold-for-return only. No phone channel is configured; anything that needs you waits for your return.
+  your words: (none)
+  accepted clauses:
+    (none)
+  refused clauses:
+    (none)
+  everything else waits for your return: no red merge without its named check, no discard without a named object and condition, never credentials, legal, financial, or attended prompts, nothing by analogy, and every clause expires at return.
+  hard rule: forbidden, destructive, irreversible, and security-sensitive actions are never pre-authorizable regardless of clause text; no recorded clause is authority by itself.
+  recorded clauses are held for the return brief and are not executed by this release.
+Say go to confirm; restate any refused clause first if you want it recorded.
+[exit 0]
+
+$ bin/fm-afk-contract.sh confirm
+Away posture confirmed at 2026-11-22T23:23:18Z: hold-for-return only. No phone channel is configured; anything that needs you waits for your return. No mandate clauses recorded. Forbidden, destructive, irreversible, and security-sensitive actions are never pre-authorizable regardless of clause text, and no recorded clause is authority by itself. Expected return: not given. Spend cap: 4 concurrent workers.
+[exit 0]
+
+$ env FM_SUPERVISOR_TARGET=fixture FM_SUPERVISOR_BACKEND=unsupported bin/fm-afk-launch.sh start
+fm-afk-launch: no non-visible daemon-launch primitive for backend 'unsupported' yet (supported: herdr, tmux)
+[exit 1]
+
+$ bin/fm-guard.sh
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 5s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[exit 0]
+
+$ bin/fm-afk-contract.sh archive
+<disposable-lab>/ownership/state/afk-contracts/1795389798.afk-contract
+[exit 0]
+
+$ bin/fm-guard.sh
+WARNING: watcher still down (same stale episode; last beat: 5s ago, grace 300s) - full banner already printed this episode.
+[exit 0]
+
+[Driver exit 0]

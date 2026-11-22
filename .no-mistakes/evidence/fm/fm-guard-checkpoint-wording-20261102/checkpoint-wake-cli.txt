@@ -1,0 +1,56 @@
+Actionable checkpoint and generation-bound acknowledgement
+Firstmate CLI with synthetic task data and disposable harness ancestry.
+Target a4f2aceab4eeaff6499a088d76c6ae1fea96da5a
+
+--- target / codex supervision ---
+
+$ bin/fm-lock.sh
+lock acquired: harness pid 555368
+[exit 0]
+
+--- Synthetic completion arrives during the checkpoint ---
+
+$ bin/fm-watch-checkpoint.sh --seconds 12
+signal: <disposable-lab>/wake/state/demo.status
+[exit 0]
+
+$ bin/fm-wake-drain.sh
+1795389758	2	signal	demo.status	signal: <disposable-lab>/wake/state/demo.status
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 558884.1795389758.EBPizQ
+wake annotation: latest wake-EVENT observed at drain, not current state: demo.status: done: synthetic demo job finished
+STATUS OUTCOME BACKSTOP (newest captain-facing task event has no covering branch outcome):
+demo done: synthetic demo job finished
+NOTICE: between foreground checkpoints - no live watcher process holds this home lock since the last checkpoint returned 1s ago.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+[exit 0]
+
+$ bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 558884.1795389758.EBPizQ
+[no output]
+[exit 0]
+
+$ bin/fm-wake-drain.sh
+NOTICE: between foreground checkpoints - no live watcher process holds this home lock since the last checkpoint returned 2s ago.
+[exit 0]
+
+[Driver exit 0]
+
+--- target / codex supervision ---
+
+$ bin/fm-lock.sh
+lock acquired: harness pid 562900
+[exit 0]
+
+--- Synthetic rejected receipt wakes before the first beacon ---
+
+$ bin/fm-watch-checkpoint.sh --seconds 8
+check: rejected unauthenticated PR poll retirement receipts: <disposable-lab>/early/state/demo.pr-poll-retirement
+[exit 0]
+
+$ bin/fm-wake-drain.sh
+1795389762	1	check	pr-poll-retirement	check: rejected unauthenticated PR poll retirement receipts: <disposable-lab>/early/state/demo.pr-poll-retirement
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 564332.1795389762.ivHVvs
+NOTICE: between foreground checkpoints - no live watcher process holds this home lock since the last checkpoint returned 1s ago.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+[exit 0]
+
+[Driver exit 0]
