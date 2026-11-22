@@ -3447,6 +3447,7 @@ SH
   } > "$case_dir/fakebin/find"
   chmod +x "$case_dir/fakebin/find"
   if [ "$visibility" = hidden ]; then
+    # shellcheck disable=SC2030 # Only this fixture's child processes need this value.
     export FM_TEST_HIDDEN_ANCESTOR=$$
   fi
   configure_teardown_ancestry_ps "$case_dir"
@@ -3519,6 +3520,7 @@ test_proc_cwd_read_failure_preserves_copy() (
   done
   [ "$i" -lt 100 ] || fail 'proc-cwd-read-failure: leak did not enter the worktree'
 
+  # shellcheck disable=SC2016 # The generated readlink stub expands its own arguments.
   printf '#!/usr/bin/env bash\n[ "$1" != %q ] || exit 1\nexec %q "$@"\n' \
     "/proc/$leak_pid/cwd" "$path_without_lsof/readlink" > "$case_dir/fakebin/readlink"
   printf '#!/usr/bin/env bash\n: > %q\n' "$case_dir/returned" > "$case_dir/fakebin/treehouse"
@@ -3565,6 +3567,7 @@ SH
     cd "$case_dir/wt" || exit 1
     export FM_TEST_IN_COPY_CALLER=$BASHPID FM_TEST_LEAK_PID=$leak_pid FM_TEST_WORKTREE="$case_dir/wt"
     (
+      # shellcheck disable=SC2030,SC2031 # Only descendants of this subshell use its PID.
       export FM_TEST_HIDDEN_ANCESTOR=$BASHPID
       cd "$case_dir" || exit 1
       FM_TEARDOWN_TEST_PATH="$path_without_lsof" run_teardown "$case_dir" || exit "$?"
@@ -3640,6 +3643,7 @@ SH
     export FM_TEST_REPARENT_VISIBILITY=$visibility
     (
       cd "$case_dir" || exit 1
+      # shellcheck disable=SC2031 # This fixture exports its own wrapper PID.
       export FM_TEST_REAP_WRAPPER=$BASHPID FM_TEST_HIDDEN_ANCESTOR=$BASHPID
       (
         export FM_TEST_REAP_RUNNER=$BASHPID
@@ -4126,6 +4130,7 @@ test_keep_pane_without_lsof() (
   if PATH="$case_dir/fakebin:$path_without_lsof" command -v lsof >/dev/null 2>&1; then
     fail 'keep-pane-no-lsof: fixture path unexpectedly exposes lsof'
   fi
+  # shellcheck disable=SC2016 # The generated readlink stub expands its own arguments.
   printf '#!/usr/bin/env bash\n[ "${1:-}" != -e ] || exit 1\nexec %q "$@"\n' \
     "$path_without_lsof/readlink" > "$case_dir/fakebin/readlink"
   chmod +x "$case_dir/fakebin/readlink"
