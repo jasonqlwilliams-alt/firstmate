@@ -30,6 +30,7 @@
 # Re-registering a poll preserves this history. Task teardown removes it.
 # A PR closure can be missed if the task metadata lock is contended and the PR reopens between polls.
 # A PR registration command still in flight across task cleanup and ID reuse can bind the old PR to the new task.
+# A concurrently registered custom check can be removed if it replaces a PR check during revocation, or skipped until the next normal sweep if the prepared PR closure stage is invalidated during the replacement.
 
 FM_PR_PROVIDER=
 FM_PR_URL=
