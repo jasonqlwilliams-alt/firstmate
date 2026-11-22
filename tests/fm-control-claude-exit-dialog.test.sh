@@ -53,6 +53,7 @@ ORIGINAL_PATH=$PATH
 TMUX_BIN=$(command -v tmux)
 SOCKET="fm-claude-exit-$$"
 FIXTURE="$ROOT/tests/fixtures/claude-exit/background-tasks.screen"
+LIVE_FIXTURE="$ROOT/tests/fixtures/claude-exit/claude-2.1.330.screen"
 cleanup() {
   local rc=$?
   trap - EXIT
@@ -196,6 +197,8 @@ stub_command() {  # <mode> [state-dir]
   local mode=$1 screen=$FIXTURE state=${2:-"$TMP_ROOT/home/state"}
   case "$mode" in
     picker-history) screen="$TMP_ROOT/picker-history.screen" ;;
+    restart-live-open) mode=initial-dialog; screen="$LIVE_FIXTURE" ;;
+    restart|history-plain|extra-choice) screen="$LIVE_FIXTURE" ;;
     restart-initial|restart-clipped|initial-clipped|doorbell-clipped)
       mode=initial-dialog
       screen="$TMP_ROOT/long.screen"
@@ -226,7 +229,7 @@ run_fixture() {
     "$control_bin/$command" "$@"
 }
 
-for mode in restart-initial restart-clipped restart-narrow initial-clipped initial-narrow exit-clipped exit-narrow \
+for mode in restart-live-open restart-initial restart-clipped restart-narrow initial-clipped initial-narrow exit-clipped exit-narrow \
     doorbell-normal doorbell-clipped doorbell-narrow restart-unsubmitted restart exit plain initial-dialog initial-busy picker-history \
     changed-heading no-list no-stay selection-on-2 relabeled extra-choice history history-plain; do
   session=fixture
@@ -269,6 +272,9 @@ for mode in restart-initial restart-clipped restart-narrow initial-clipped initi
   keys=$(od -An -c "$TMP_ROOT/keys" | tr -s ' ' | sed 's/^ //')
   screen=$("$TMUX_BIN" -f /dev/null -L "$SOCKET" capture-pane -p -t "$target" 2>/dev/null || true)
   case "$mode" in
+    restart-live-open|restart|history-plain|extra-choice)
+      assert_contains "$screen" 'Enter to confirm · Esc to cancel' 'tmux did not render the captured footer'
+      ;;
     *-clipped)
       assert_not_contains "$screen" 'The following will stop when you exit:' 'tmux did not clip the heading'
       assert_contains "$screen" 'Bash(timer 24)' 'tmux did not retain the bottom of the task list'
@@ -524,6 +530,7 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-live
   export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/herdr-$mode"
   case "$mode" in
     long-dialog|doorbell-after-long*) export FM_DIALOG_FIXTURE="$TMP_ROOT/long.screen" ;;
+    doorbell-before|doorbell-after) export FM_DIALOG_FIXTURE="$LIVE_FIXTURE" ;;
     doorbell-after-clipped) export FM_DIALOG_FIXTURE="$TMP_ROOT/clipped.screen" ;;
     picker-history|doorbell-before-picker) export FM_DIALOG_FIXTURE="$TMP_ROOT/picker-history.screen" ;;
     *) export FM_DIALOG_FIXTURE="$FIXTURE" ;;
@@ -658,7 +665,7 @@ printf '%s\n' "${args[*]}" >> "$FM_DIALOG_CASE/remote"
 FM_HOME="$FM_DIALOG_HOME" "$FM_ROOT_OVERRIDE/bin/${args[0]}" "${args[@]:1}"
 SH
 chmod +x "$TMP_ROOT/bin/fake-ssh"
-export FM_DIALOG_MODE=remote-restart FM_DIALOG_CASE="$TMP_ROOT/remote-restart" FM_DIALOG_FIXTURE="$TMP_ROOT/clipped.screen"
+export FM_DIALOG_MODE=remote-restart FM_DIALOG_CASE="$TMP_ROOT/remote-restart" FM_DIALOG_FIXTURE="$LIVE_FIXTURE"
 mkdir "$FM_DIALOG_CASE" "$FM_DIALOG_HOME/bin" "$FM_DIALOG_HOME/state/parent-route"
 : > "$FM_DIALOG_HOME/AGENTS.md"
 printf 'dialog\n' > "$FM_DIALOG_CASE/phase"
@@ -678,6 +685,7 @@ assert_absent "$FM_DIALOG_HOME/state/parent-route/exitdialog.inbox" 'remote rest
 assert_absent "$FM_DIALOG_CASE/input" 'remote restart sent terminal input into the dialog'
 pass 'remote restart observes the already-open dialog on its bound host and reports the mate unreached'
 
+export FM_DIALOG_FIXTURE="$TMP_ROOT/clipped.screen"
 for phase in dialog composer typed picker unreadable; do
   printf '%s\n' "$phase" > "$FM_DIALOG_CASE/phase"
   PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$FM_DIALOG_HOME" \

@@ -35,11 +35,13 @@ The workspace-trust dialog is unaffected by the permission mode and still needs 
 ## Background-tasks exit confirmation
 
 When `/exit` lands while the session still runs background shell tasks, such as timers, Claude does not exit; it draws a confirmation instead.
-It was observed in production on 2026-11-21 and 2026-11-22 during second-mate restarts; no byte capture was retained, so the recorded shape is the observed text layout in `../../../../../tests/fixtures/claude-exit/background-tasks.screen`:
+The earlier text layout was observed during second-mate restarts on 2026-11-21 and 2026-11-22 and is recorded in `../../../../../tests/fixtures/claude-exit/background-tasks.screen`.
+The Claude Code 2.1.330 capture is in `../../../../../tests/fixtures/claude-exit/claude-2.1.330.screen`.
 
-- the heading `The following will stop when you exit:`;
-- one `· `-prefixed row per running task;
-- the three choices `1. Exit and stop tasks`, `2. Move to background and exit`, and `3. Stay`, with the selection marker `❯` on choice 1, as the last rows on screen.
+- Heading `The following will stop when you exit:`
+- List of running tasks
+- Choices `1. Exit and stop tasks`, `2. Move to background and exit`, and `3. Stay`, with the selection marker `❯` on choice 1
+- Optional final footer `Enter to confirm · Esc to cancel`
 
 Firstmate never sends a key to this dialog: Enter would stop the tasks without anyone deciding to, and the key plane cannot move the selection.
 `../../../../../bin/fm-composer-lib.sh` (`fm_composer_claude_exit_confirm_screen`) owns the recognition, and `../../../../../docs/agent-control.md` owns the response.

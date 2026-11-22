@@ -1644,9 +1644,10 @@ fm_composer_claude_exit_confirm_screen() {  # <styled-screen>
     {
       sub(/\r$/, ""); sub(/^[ \t]+/, ""); sub(/[ \t]+$/, "")
       row[NR] = $0
-      if ($0 != "") last = NR
+      if ($0 != "") { previous = last; last = NR }
     }
     END {
+      if (row[last] == "Enter to confirm · Esc to cancel") last = previous
       exit !(row[last-2] == "❯ 1. Exit and stop tasks" &&
              row[last-1] == "2. Move to background and exit" && row[last] == "3. Stay")
     }
