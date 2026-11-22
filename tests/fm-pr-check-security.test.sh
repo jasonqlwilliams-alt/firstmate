@@ -1405,7 +1405,7 @@ SH
   pass "teardown removes safe poll artifacts and refuses directory-shaped check files without traversal"
 }
 
-test_teardown_preserves_registered_custom_check() {
+test_teardown_retires_registered_custom_check() {
   local dir state url out
   dir=$(make_case teardown-custom-check)
   state="$dir/home/state"
@@ -1421,12 +1421,14 @@ test_teardown_preserves_registered_custom_check() {
   FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" PATH="$dir/fakebin:$BASE_PATH" \
     "$TEARDOWN" task-a --force > "$dir/teardown.out" 2> "$dir/teardown.err" \
     || fail "teardown could not retire the task with a custom check: $(cat "$dir/teardown.err")"
-  [ ! -e "$state/task-a.pr-poll-registration" ] || fail "teardown left the old PR registration"
+  add_stop_custom_check "$dir"
   out=$(FM_TEST_GH_LOG="$dir/gh.log" run_watcher_bounded "$dir/home" "$dir/fakebin") \
     || fail "watcher failed after task teardown"
-  case "$out" in check:*task-a.check.sh:*registered-custom) ;; *) fail "teardown suppressed the custom check: $out" ;; esac
-  [ ! -s "$dir/gh.log" ] || fail "watcher queried the forge for the preserved custom check"
-  pass "task teardown revokes the PR registration and preserves the authenticated custom check"
+  case "$out" in check:*z-stop.check.sh:*stop-cycle) ;; *) fail "unexpected wake after task teardown: $out" ;; esac
+  assert_poll_absent "$state" task-a
+  [ ! -e "$state/task-a.check-trust" ] || fail "teardown left the retired custom check's trust record"
+  [ ! -s "$dir/gh.log" ] || fail "watcher queried the forge for the retired task"
+  pass "task teardown revokes the PR registration and retires the authenticated custom check"
 }
 
 # The GitLab watch must follow a merge request exactly as the GitHub watch
@@ -2891,4 +2893,4 @@ test_bootstrap_leaves_unauthenticated_checks
 test_custom_snapshot_cleanup_on_signal
 test_returned_custom_check_descendants_are_drained
 test_teardown_removes_poll_artifacts
-test_teardown_preserves_registered_custom_check
+test_teardown_retires_registered_custom_check
