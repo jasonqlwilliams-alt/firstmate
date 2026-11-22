@@ -160,6 +160,8 @@ if [ -n "${FM_STATE_OVERRIDE:-}" ]; then FM_STATE_OVERRIDE=$STATE; fi
 . "$SCRIPT_DIR/fm-pr-lib.sh"
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
+# shellcheck source=bin/fm-timing-lib.sh
+. "$SCRIPT_DIR/fm-timing-lib.sh"
 
 POLL=${FM_CONTROL_POLL:-0.5}
 SETTLE_WAIT=${FM_CONTROL_SETTLE_WAIT:-5}
@@ -566,8 +568,8 @@ codex_signin_exit() {
 # waits, reporting the exit unconfirmed at once rather than after the wait.
 # A submit Enter is retried only while the composer still proves it holds the
 # exit command, because a slash command can swallow the first Enter.
-claude_exit_screen_state() {  # [expected-pending]
-  fm_backend_guarded_composer_state "$BACKEND" "$T" "$LABEL" "${1:-}" claude
+claude_exit_screen_state() {  # [expected-pending] [remaining-ms]
+  fm_backend_guarded_composer_state "$BACKEND" "$T" "$LABEL" "${1:-}" claude "${2:-}"
 }
 
 claude_exit_unconfirmed() {  # <interrupt-result> <exit-command-state> <reason> [observed-agent-state]
@@ -584,35 +586,48 @@ claude_exit_dialog_refusal() {  # <interrupt-result> <exit-command-state> [obser
   claude_exit_unconfirmed "$1" "$2" 'Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it' "${3:-}"
 }
 
+claude_exit_guard_input() {  # <interrupt-result> <exit-command-state> [expected-pending] [observed-agent-state]
+  case "$(claude_exit_screen_state "${3:-}")" in
+    exit-confirm) claude_exit_dialog_refusal "$1" "$2" "${4:-}" ;;
+    timeout) claude_exit_unconfirmed "$1" "$2" 'the Claude viewport read timed out' "${4:-}" ;;
+  esac
+}
+
 claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
-  local cmd=$1 interrupt_result=$2 screen state submission=typed attempts=1 waited=0
-  [ "$(claude_exit_screen_state)" != exit-confirm ] \
-    || claude_exit_dialog_refusal "$interrupt_result" not-sent
+  local cmd=$1 interrupt_result=$2 screen state submission=typed attempts=1
+  local budget_ms poll_ms deadline remaining delay
+  claude_exit_guard_input "$interrupt_result" not-sent
   fm_backend_send_literal "$BACKEND" "$T" "$cmd" "$LABEL" \
     || die "the exit command could not be sent to task $ID on $BACKEND"
   sleep 1.2
-  [ "$(claude_exit_screen_state "$cmd")" != exit-confirm ] \
-    || claude_exit_dialog_refusal "$interrupt_result" typed
+  claude_exit_guard_input "$interrupt_result" typed "$cmd"
   if fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null 2>&1; then
     submission=delivered
   fi
+  read -r budget_ms poll_ms < <(awk -v wait="$EXIT_WAIT" -v poll="$POLL" 'BEGIN{printf "%.0f %.0f\n", wait * 1000, poll * 1000}')
+  deadline=$(( $(fm_timing_now_ms) + budget_ms ))
   while :; do
-    sleep "$POLL"
+    remaining=$(( deadline - $(fm_timing_now_ms) ))
+    if [ "$remaining" -gt 0 ]; then
+      delay=$poll_ms
+      [ "$delay" -le "$remaining" ] || delay=$remaining
+      sleep "$(printf '%d.%03d' "$((delay / 1000))" "$((delay % 1000))")"
+    fi
     state=$(agent_state)
     [ "$state" != dead ] || return 0
-    screen=$(claude_exit_screen_state "$cmd")
+    remaining=$(( deadline - $(fm_timing_now_ms) ))
+    [ "$remaining" -gt 0 ] || break
+    screen=$(claude_exit_screen_state "$cmd" "$remaining")
     [ "$screen" != exit-confirm ] || claude_exit_dialog_refusal "$interrupt_result" "$submission" "$state"
-    if [ "$screen" = pending ] && [ "$state" = alive ] && [ "$attempts" -lt "$EXIT_RETRIES" ]; then
+    if [ "$screen" = pending ] && [ "$state" = alive ] && [ "$attempts" -lt "$EXIT_RETRIES" ] \
+      && [ "$(fm_timing_now_ms)" -lt "$deadline" ]; then
       if fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null 2>&1; then
         submission=delivered
       fi
       attempts=$((attempts + 1))
-      continue
     fi
-    waited=$(awk -v w="$waited" -v p="$POLL" 'BEGIN{printf "%.3f", w + p}')
-    awk -v w="$waited" -v t="$EXIT_WAIT" 'BEGIN{exit !(w < t)}' \
-      || claude_exit_unconfirmed "$interrupt_result" "$submission" "the agent did not stop within ${EXIT_WAIT}s" "$state"
   done
+  claude_exit_unconfirmed "$interrupt_result" "$submission" "the agent did not stop within ${EXIT_WAIT}s" "$state"
 }
 
 # do_exit: stop the running agent, preserving endpoint and worktree. Returns
@@ -642,8 +657,8 @@ do_exit() {
   # A busy agent is interrupted first before the exit command is submitted.
   case "$(busy_verdict)" in
     busy*)
-      if [ "$HARNESS" = claude ] && [ "$(claude_exit_screen_state)" = exit-confirm ]; then
-        claude_exit_dialog_refusal not-needed not-sent "$state"
+      if [ "$HARNESS" = claude ]; then
+        claude_exit_guard_input not-needed not-sent '' "$state"
       fi
       cancel=$(deliver_interrupt) || return $?
       state=$(agent_state)

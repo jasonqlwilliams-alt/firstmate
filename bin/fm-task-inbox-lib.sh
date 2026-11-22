@@ -323,7 +323,7 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label] [har
   case "$screen" in
     empty) ;;
     update-picker) return 4 ;;
-    exit-confirm|pending) return 1 ;;
+    exit-confirm|timeout|pending) return 1 ;;
     *) [ "$strict" = 0 ] || return 1 ;;
   esac
   # Accepted residual race: terminal input and Enter are separate delivery
@@ -340,7 +340,7 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label] [har
       || screen=unknown
     case "$screen" in
       update-picker) return 4 ;;
-      exit-confirm) return 5 ;;
+      exit-confirm|timeout) return 5 ;;
       pending) break ;;
     esac
     [ "$strict" = 1 ] || break

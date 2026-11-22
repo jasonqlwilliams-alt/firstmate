@@ -980,7 +980,8 @@ fm_backend_composer_classify_snapshot() {  # <backend> <target>
 # explicitly recorded Claude pane showing the background-tasks exit
 # confirmation (fm_composer_claude_exit_confirm_screen in bin/fm-composer-lib.sh;
 # also stop-only: no caller sends it any key). An unreadable capture is
-# unknown. <expected-pending> is the exact text the caller just typed: on a
+# unknown, and a Claude read that exceeds its deadline returns timeout.
+# <expected-pending> is the exact text the caller just typed: on a
 # plain (styled=0) capture, where a glyph row with trailing text reads unknown,
 # a composer holding exactly that text reads pending, and on a cursorless
 # capture it also proves picker rows above it are retained history.
@@ -990,7 +991,33 @@ fm_backend_composer_classify_snapshot() {  # <backend> <target>
 # "ROVO PLACEHOLDER CHIP").
 # Callers: the steering-inbox doorbell (bin/fm-task-inbox-lib.sh), and Codex
 # and Claude exit (bin/fm-control.sh).
-fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness]
+fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [remaining-ms]
+  local limit_ms=${6:-5000} screen rc
+  if [ "${5:-}" != claude ]; then
+    _fm_backend_guarded_composer_state "$@"
+    return
+  fi
+  [ "$limit_ms" -gt 0 ] || { printf 'timeout'; return 0; }
+  [ "$limit_ms" -le 5000 ] || limit_ms=5000
+  if screen=$(
+    . "$FM_BACKEND_LIB_DIR/fm-timeout-lib.sh" || exit 1
+    FM_HOME="$FM_HOME" FM_ROOT="$FM_ROOT" FM_BACKEND_HERDR_ENDPOINT_META="${FM_BACKEND_HERDR_ENDPOINT_META:-}" \
+      fm_run_timed "$(printf '%d.%03d' "$((limit_ms / 1000))" "$((limit_ms % 1000))")" \
+        bash -uc '. "$1" && shift && _fm_backend_guarded_composer_state "$@"' _ \
+        "$FM_BACKEND_LIB_DIR/fm-backend.sh" "$1" "$2" "${3:-}" "${4:-}" claude </dev/null 2>/dev/null
+  ); then
+    printf '%s' "${screen:-unknown}"
+  else
+    rc=$?
+    if [ "$rc" -eq 124 ]; then
+      printf 'timeout'
+    else
+      printf 'unknown'
+    fi
+  fi
+}
+
+_fm_backend_guarded_composer_state() {
   local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} picker verdict kv styled=0
   local capture=
   if [ "$harness" = claude ]; then

@@ -425,6 +425,17 @@ case "$1 $2" in
         )
         ;;
       typed|retry) printf 'Claude\n\033[1m❯ /exit\033[0m\n' ;;
+      slow-stop)
+        printf 'read\n' >> "$FM_DIALOG_CASE/reads"
+        sleep 0.7
+        printf 'Claude\n❯ \n'
+        ;;
+      stalled-stop)
+        printf 'read\n' >> "$FM_DIALOG_CASE/reads"
+        printf 'stopped\n' > "$FM_DIALOG_CASE/phase"
+        sleep 8
+        cat "$FM_DIALOG_FIXTURE"
+        ;;
       picker) printf 'Update now (runs npm install)\nSkip until next version\nesc skip\n' ;;
       unreadable) exit 1 ;;
       stopped) printf '$ \n' ;;
@@ -447,6 +458,7 @@ case "$1 $2" in
       typed:enter-failure) printf 'typed\n'; exit 1 ;;
       typed:dialog-after-failed-enter) printf 'dialog\n'; exit 1 ;;
       typed:single-stop) printf 'stopped\n' ;;
+      typed:slow-stop|typed:stalled-stop) printf '%s\n' "$FM_DIALOG_MODE" ;;
       typed:*) printf 'dialog\n' ;;
       composer:*) printf 'composer\n' ;;
       *) printf 'stopped\n' ;;
@@ -462,7 +474,7 @@ fm_write_meta "$meta" 'backend=herdr' 'window=fixture:p1' 'endpoint_task_id=exit
   'herdr_session=fixture' 'herdr_workspace_id=w1' 'herdr_tab_id=t1' 'herdr_pane_id=p1' 'herdr_terminal_id=term-claude'
 export FM_DIALOG_HOME="$TMP_ROOT/worktree"
 for mode in dialog long-dialog picker-history dialog-unreadable dialog-after-typing dialog-after-failed-enter \
-    retry retry-failure enter-failure single-stop doorbell-before doorbell-before-picker \
+    retry retry-failure enter-failure single-stop slow-stop stalled-stop doorbell-before doorbell-before-picker \
     doorbell-after doorbell-after-long doorbell-after-long-plain doorbell-after-clipped; do
   export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/herdr-$mode"
   case "$mode" in
@@ -494,12 +506,7 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-after-typ
       continue
       ;;
   esac
-  case "$mode" in
-    retry|retry-failure) poll=1; exit_wait=1 ;;
-    enter-failure) poll=0.1; exit_wait=0.1 ;;
-    *) poll=0.1; exit_wait=2 ;;
-  esac
-  out=$(FM_CONTROL_POLL="$poll" FM_CONTROL_EXIT_WAIT="$exit_wait" FM_CONTROL_EXIT_RETRIES=3 \
+  out=$(FM_CONTROL_POLL=0.1 FM_CONTROL_EXIT_WAIT=2 FM_CONTROL_EXIT_RETRIES=3 \
     run_fixture fm-control.sh exitdialog exit 2>&1) || rc=$?
   printf 'herdr %s exit=%s: %s\n' "$mode" "$rc" "$out"
   input=$(cat "$FM_DIALOG_CASE/input")
@@ -537,6 +544,18 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-after-typ
       expect_code 0 "$rc" 'one verified stop should complete exit'
       [ "$(cat "$FM_DIALOG_CASE/phase")" = stop-unreadable ] || fail 'the one stop sample was not consumed'
       [ "$input" = $'/exit\nenter' ] || fail "the ordinary stop sent unexpected input: $input"
+      ;;
+    slow-stop)
+      expect_code 1 "$rc" 'the still-running agent should exhaust the stop budget'
+      assert_contains "$out" 'the agent did not stop within 2s' 'the stop budget did not expire'
+      [ -s "$FM_DIALOG_CASE/reads" ] && [ "$(wc -l < "$FM_DIALOG_CASE/reads")" -le 3 ] \
+        || fail 'viewport reads did not count against the exit budget'
+      [ "$input" = $'/exit\nenter' ] || fail "a slow read triggered unexpected input: $input"
+      ;;
+    stalled-stop)
+      expect_code 0 "$rc" 'a stalled viewport read should not hide a verified stop'
+      [ -s "$FM_DIALOG_CASE/reads" ] || fail 'the stalled viewport read was never attempted'
+      [ "$input" = $'/exit\nenter' ] || fail "a stalled read triggered unexpected input: $input"
       ;;
   esac
 done

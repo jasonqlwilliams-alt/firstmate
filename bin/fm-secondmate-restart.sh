@@ -165,20 +165,17 @@ report_unreached() {  # <id> <reason>
 }
 
 report_open_exit_dialog() {  # <id>
-  local id=$1 meta="$STATE/$1.meta" screen probe_wait=5
+  local id=$1 meta="$STATE/$1.meta" screen
   [ -f "$meta" ] && [ ! -L "$meta" ] || return 1
   [ "$(fm_meta_get "$meta" kind)" = secondmate ] || return 1
   [ "$(fm_control_harness_family "$(fm_meta_get "$meta" harness)")" = claude ] || return 1
   if [ -n "$(fm_meta_get "$meta" remote_host)" ]; then
-    screen=$(fm_run_timed "$probe_wait" "$SCRIPT_DIR/fm-on.sh" "$id" \
+    screen=$(fm_run_timed 5 "$SCRIPT_DIR/fm-on.sh" "$id" \
       fm-remote-secondmate-control.sh observe "$id" --exit-dialog </dev/null 2>/dev/null) || return 1
   else
-    screen=$(fm_run_timed "$probe_wait" bash -uc '
-      . "$1" || exit 1
-      fm_backend_validate_task_endpoint "$2" "$3" || exit 1
-      FM_BACKEND_HERDR_ENDPOINT_META="$2" fm_backend_guarded_composer_state \
-        "$FM_BACKEND_VALIDATED_BACKEND" "$FM_BACKEND_VALIDATED_TARGET" "fm-$3" "" claude
-    ' _ "$SCRIPT_DIR/fm-backend.sh" "$meta" "$id" </dev/null 2>/dev/null) || return 1
+    fm_backend_validate_task_endpoint "$meta" "$id" 2>/dev/null || return 1
+    screen=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_guarded_composer_state \
+      "$FM_BACKEND_VALIDATED_BACKEND" "$FM_BACKEND_VALIDATED_TARGET" "fm-$id" '' claude 2>/dev/null) || return 1
   fi
   [ "$screen" = exit-confirm ] || return 1
   report_unreached "$id" 'Claude is showing its background-tasks exit confirmation and needs manual recovery'

@@ -148,8 +148,9 @@ SH
   cat > "$fb/sleep" <<'SH'
 #!/usr/bin/env bash
 case "${1:-}" in
-  ''|*[!0-9]*) ;;
-  *) /bin/sleep 0.01 ;;
+  1) /bin/sleep 0.01 ;;
+  0.3|1.2) ;;
+  *) exec /bin/sleep "$@" ;;
 esac
 exit 0
 SH
@@ -634,13 +635,14 @@ test_unreachable_host_is_reported_unknown() {
 test_slow_exit_dialog_observation_does_not_block_restart() {
   local dir out rc
   dir=$(new_case slow-exit-dialog)
+  rm "$dir/fakebin/sleep"
   setup_remote_case "$dir" sm1 slow-exit-dialog
   add_local_mate "$dir" sm2
   printf -- '- sm2 - local domain (home: %s; scope: things; projects: p; added 2026-09-03)\n' \
     "$dir/sm2-home" >> "$dir/home/data/secondmates.md"
   arm_answer "$dir" sm2
 
-  out=$(FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1 sm2); rc=$?
+  out=$(FM_TIMEOUT_MECHANISM_OVERRIDE=bash FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1 sm2); rc=$?
 
   expect_code 3 "$rc" "the mate without a save reply should fall back to a nudge: $out"
   [ "$(grep -Fxc 'fm-remote-secondmate-control.sh observe sm1 --exit-dialog' "$dir/ssh.log")" -eq 2 ] \
@@ -659,11 +661,12 @@ test_slow_exit_dialog_observation_does_not_block_restart() {
 test_slow_local_exit_dialog_observation_does_not_block_restart() {
   local dir out rc
   dir=$(new_case slow-local-exit-dialog)
+  rm "$dir/fakebin/sleep"
   add_local_mate "$dir" sm1
   arm_answer "$dir" sm1
 
   out=$(FM_FAKE_LOCAL_EXIT_DIALOG="$ROOT/tests/fixtures/claude-exit/background-tasks.screen" \
-    FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1); rc=$?
+    FM_TIMEOUT_MECHANISM_OVERRIDE=bash FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1); rc=$?
 
   [ -d "$dir/fake/delayed-dialog" ] || fail "the local dialog probe did not reach the pane"
   expect_code 0 "$rc" "a late dialog response must leave the save and restart available: $out"
