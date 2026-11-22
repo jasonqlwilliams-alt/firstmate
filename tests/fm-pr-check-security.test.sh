@@ -2350,6 +2350,46 @@ SH
   pass "a failed closure stage skips its forge read and leaves the poll armed"
 }
 
+test_registered_custom_check_survives_pr_closure_setup_failure() (
+  local dir state url failure lock out
+  FM_WAKE_NO_MKDIR=1 . "$ROOT/bin/fm-wake-lib.sh"
+  url=https://github.com/o/r/pull/30
+  for failure in busy-lock failed-stage; do
+    dir=$(make_case "custom-check-$failure")
+    state="$dir/home/state"
+    write_poll_meta "$state" task-a "$url"
+    seed_canonical_poll "$dir" task-a "$url"
+    printf '#!/usr/bin/env bash\nprintf "registered-custom\\n"\n' > "$state/task-a.check.sh"
+    chmod 0700 "$state/task-a.check.sh"
+    FM_HOME="$dir/home" "$REGISTER" task-a >/dev/null || fail "could not register the custom check"
+    add_stop_custom_check "$dir"
+    FM_HOME="$dir/home" PATH="$dir/fakebin:$BASE_PATH" "$ROOT/bin/fm-inactive-reconcile.sh" scan \
+      || fail "could not prime the inactive-outcome scan"
+    touch "$state/home-summary.json"
+
+    if [ "$failure" = busy-lock ]; then
+      lock=$(fm_meta_lock_path "$state/task-a.meta")
+      fm_lock_try_acquire "$lock" || fail "could not hold the metadata lock for the custom check"
+    else
+      cat > "$dir/fakebin/mktemp" <<'SH'
+#!/usr/bin/env bash
+case "$1" in */.task-a.pr-poll-closed.XXXXXX) exit 1 ;; esac
+exec "$TEST_REAL_MKTEMP" "$@"
+SH
+      chmod 0700 "$dir/fakebin/mktemp"
+    fi
+    out=$(TEST_REAL_MKTEMP="$(command -v mktemp)" FM_TEST_GH_LOG="$dir/gh.log" \
+      run_watcher_bounded "$dir/home" "$dir/fakebin") || fail "watcher failed with $failure: $out"
+    [ "$failure" != busy-lock ] || fm_lock_release "$lock"
+    case "$out" in
+      check:*task-a.check.sh:*registered-custom) ;;
+      *) fail "$failure suppressed the registered custom check: $out" ;;
+    esac
+    [ ! -s "$dir/gh.log" ] || fail "$failure sent the replacement custom check to the forge"
+  done
+  pass "registered custom checks run despite leftover PR registration and an unavailable closure stage"
+)
+
 test_closure_cleanup_tolerates_a_stage_disappearing() (
   local dir state stage
   dir=$(make_case disappearing-closure)
@@ -2748,6 +2788,7 @@ test_closure_write_failure_does_not_stop_sibling_checks
 test_abandoned_metadata_lock_does_not_skip_the_poll
 test_busy_closure_publication_keeps_normal_cadence
 test_closure_stage_failure_skips_the_forge_read
+test_registered_custom_check_survives_pr_closure_setup_failure
 test_closure_cleanup_tolerates_a_stage_disappearing
 test_remote_proxy_teardown_removes_closure_evidence
 test_retirement_refuses_replacement_and_nonterminal_results
