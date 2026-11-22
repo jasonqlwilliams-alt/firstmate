@@ -1682,6 +1682,8 @@ status_open_activities() {  # <status-file-or-dash>
   _fm_status_open_activities_stream < "$f"
 }
 
+FM_RECORDED_ENDPOINT_GONE='the recorded endpoint is gone'
+
 # task id from a recorded window target, falling back to the tmux-shaped
 # "<session>:fm-<id>" form when no metadata state is available.
 window_to_task() {

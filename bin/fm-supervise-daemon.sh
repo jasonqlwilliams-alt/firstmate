@@ -48,8 +48,9 @@
 #     paused: external wait or a verified captain-held transfer, per
 #     fm-classify-lib.sh's combined predicate - instead gets its own longer
 #     PAUSE_RESURFACE_SECS recheck, never a wedge escalation, whether its pane
-#     reads idle or busy; only a status append that stops declaring the wait
-#     ends that routing. A captain-held transfer is not rechecked at all while
+#     reads idle or busy. For the endpoint-loss exception see
+#     docs/watcher-continuity.md#recorded-endpoint-loss.
+#     A captain-held transfer is not rechecked at all while
 #     the away-posture record (state/.afk-contract) exists: nobody is there to
 #     answer it, and the return brief lists it.
 #     Crewmates are autonomous, so a delayed stale response does not stall a
@@ -525,12 +526,16 @@ clear_pause_tracking() {  # <window> <state>
 }
 
 reconcile_pause_tracking() {  # <window> <state> <last-status-line>
-  local win=$1 state=$2 last=$3 task key marker watcher_key
+  local win=$1 state=$2 last=$3 task key marker watcher_key incarnation
   task=$(window_to_task "$win" "$state")
   key=$(_stale_key "$task")
   marker="$state/.subsuper-paused-$key"
   watcher_key=$(_stale_key "$win")
-  if status_is_paused_or_captain_held "$last"; then
+  if [ -s "$state/$task.missing-endpoint" ] \
+    && incarnation=$(fm_backend_endpoint_incarnation "$state/$task.meta") \
+    && [ "$incarnation" = "$(cat "$state/$task.missing-endpoint" 2>/dev/null)" ]; then
+    clear_pause_tracking "$win" "$state"
+  elif status_is_paused_or_captain_held "$last"; then
     stale_marker_remove "$win" "$state"
     pause_marker_record "$win" "$state"
   elif [ -e "$marker" ] || [ -e "$state/.paused-$watcher_key" ]; then
@@ -1096,8 +1101,8 @@ housekeeping() {  # <state>
   # pane busy - a worker parked on a long foreground call it keeps live for as long
   # as the wait lasts - so reading busy as "the crew resumed" retires the window of
   # exactly the declaration that needs it. The crew's own latest status line is the
-  # authority, and the loop head above already drops the marker the moment that line
-  # stops declaring the wait.
+  # authority for the declaration. Earlier reconciliation also drops the marker
+  # when a confirmed loss still matches this recorded endpoint.
   pause_secs=${FM_PAUSE_RESURFACE_SECS:-$FM_PAUSE_RESURFACE_SECS_DEFAULT}
   for marker in "$state"/.subsuper-paused-*; do
     [ -e "$marker" ] || continue
@@ -1352,6 +1357,10 @@ handle_wake() {  # <reason> <state>
                 *) arg="${reason#signal: }" ;;
               esac
               decision=$(FM_STATUS_SPAN_ENDPOINT_FILE="$capture" classify_signal "$arg" "$state") ;;
+    stale:\ *" ($FM_RECORDED_ENDPOINT_GONE)")
+              kind=stale; arg=${reason#stale: }
+              decision="escalate|$arg"
+              arg=${arg%" ($FM_RECORDED_ENDPOINT_GONE)"} ;;
     stale:*)  kind=stale; arg="${reason#stale: }"; stale_detail="${arg#"$arg"}"
               case "$arg" in *" ("*) stale_detail="${arg#*" ("}"; arg="${arg%% \(*}" ;; esac
               task=$(window_to_task "$arg" "$state")
@@ -1433,8 +1442,8 @@ handle_wake() {  # <reason> <state>
       # wedge stale marker, so a pane that transitioned working->declared-wait is not
       # still wedge-aged. Only stale produces this action.
       if [ "$kind" = "stale" ]; then
-        stale_marker_remove "$arg" "$state"
-        pause_marker_record "$arg" "$state"
+        last=$(last_status_line "$state/$task.status")
+        reconcile_pause_tracking "$arg" "$state" "$last"
       fi
       log "self-handle (paused): $reason -> $distilled"
       ;;

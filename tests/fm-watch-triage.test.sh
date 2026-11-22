@@ -2208,6 +2208,72 @@ test_exited_declared_pause_is_bounded_but_live_gate_surfaces() {
 # watcher stays alive must clear that cadence on the next poll and restore the
 # ordinary stale alarm. Keeping the hold while a live agent is attached must
 # retain the wedge timer instead of borrowing the parked-lane suppression.
+test_missing_tmux_endpoint_surfaces_once() (
+  local tmux_bin socket dir state window key task out pid='' incarnation marker poll
+  tmux_bin=$(command -v tmux) || { echo "skip: tmux is required for the missing endpoint regression"; return 0; }
+  socket="fm-watch-gone-$$-$RANDOM"
+  dir=$(fm_test_tmproot fm-watch-gone) || fail "could not create the missing endpoint fixture"
+  trap '[ -z "$pid" ] || reap "$pid"; "$tmux_bin" -L "$socket" kill-server 2>/dev/null || true' EXIT
+  mkdir -p "$dir/bin"
+  printf '#!/usr/bin/env bash\nexec %q -L %q "$@"\n' "$tmux_bin" "$socket" > "$dir/bin/tmux"
+  chmod +x "$dir/bin/tmux"
+  export FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999
+  export FM_PAUSE_RESURFACE_SECS=999999 FM_STALE_ESCALATE_SECS=999999
+  "$dir/bin/tmux" -f /dev/null new-session -d -s missing -c "$dir" || fail "could not start the private tmux server"
+
+  for task in ordinary held; do
+    export FM_HOME="$dir/$task"
+    state="$FM_HOME/state"; out="$FM_HOME/watch.out"
+    export FM_STATE_OVERRIDE="$state"
+    mkdir -p "$state"
+    window="missing:fm-$task"
+    key=$(printf '%s' "$window" | tr '.:/' '___')
+    if [ "$task" = held ]; then
+      printf 'captain-held: awaiting a decision\n' > "$state/$task.status"
+    fi
+    for incarnation in first second; do
+      "$dir/bin/tmux" new-window -d -t missing: -n "fm-$task" -- bash --noprofile --norc -i \
+        || fail "could not create the $task fixture window"
+      printf 'window=%s\nbackend=tmux\nkind=ship\nharness=codex\nspawn_gen=%s\n' \
+        "$window" "$incarnation" > "$state/$task.meta"
+      if [ "$task:$incarnation" = held:first ]; then
+        PATH="$dir/bin:$PATH" "$WATCH" > "$out" & pid=$!
+        wait_for_exit "$pid" 150 || fail "the captain-held declaration did not surface: $(cat "$out")"
+        pid=''
+        ack_stopped_cycle "$state" || fail "could not acknowledge the held status signal"
+        PATH="$dir/bin:$PATH" "$WATCH" > "$out" & pid=$!
+        wait_poll_cycle "$state" "$pid" || fail "the captain-held lane did not settle: $(cat "$out")"
+        [ -e "$state/.paused-$key" ] || fail "the live fixture window did not enter pause tracking"
+        reap "$pid"; pid=''
+        ack_stopped_cycle "$state" || fail "could not acknowledge the fixture watcher stop"
+      fi
+
+      "$dir/bin/tmux" kill-window -t "$window" || fail "could not close the $task fixture window"
+      PATH="$dir/bin:$PATH" "$WATCH" > "$out" & pid=$!
+      wait_for_exit "$pid" 150 || fail "[$task, $incarnation] closing the window did not wake the watcher"
+      pid=''
+      grep -Fxq "stale: $window (the recorded endpoint is gone)" "$out" \
+        || fail "[$task, $incarnation] unexpected watcher output: $(cat "$out")"
+      awk -F '\t' -v window="$window" '$3 == "stale" && $4 == window { n++ } END { exit(n != 1) }' "$state/.wake-queue" \
+        || fail "[$task, $incarnation] expected exactly one durable stale wake"
+      for marker in paused paused-rechecked paused-resurfaced; do
+        [ ! -e "$state/.$marker-$key" ] || fail "[$task, $incarnation] missing endpoint retained $marker tracking"
+      done
+      ack_stopped_cycle "$state" || fail "could not acknowledge the missing endpoint wake"
+
+      PATH="$dir/bin:$PATH" "$WATCH" > "$out" & pid=$!
+      for poll in 1 2; do
+        wait_poll_cycle "$state" "$pid" \
+          || fail "[$task, $incarnation] missing endpoint was noisy on poll $poll: $(cat "$out")"
+      done
+      [ ! -s "$state/.wake-queue" ] || fail "[$task, $incarnation] later polls enqueued another wake"
+      reap "$pid"; pid=''
+      ack_stopped_cycle "$state" || fail "could not acknowledge the fixture watcher stop"
+    done
+    pass "real tmux: a closed $task window raises one stale wake for each recorded incarnation"
+  done
+)
+
 test_backlog_hold_suppresses_only_an_agentless_lane() {
   local dir state fakebin out capture_file held_file statusf window key pane_hash sig pid
 
@@ -5101,6 +5167,7 @@ test_afk_busy_declared_pause_ticking_pane_hands_off_once
 test_nonterminal_stale_not_working_surfaced
 test_nonterminal_stale_paused_absorbed_then_resurfaced
 test_exited_declared_pause_is_bounded_but_live_gate_surfaces
+test_missing_tmux_endpoint_surfaces_once || exit 1
 test_backlog_hold_suppresses_only_an_agentless_lane
 test_absorbed_replacement_wait_does_not_inherit_the_old_throttle
 test_live_declared_wait_churn_honors_the_resurface_throttle

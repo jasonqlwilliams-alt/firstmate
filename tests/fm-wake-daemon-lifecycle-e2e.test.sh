@@ -167,5 +167,58 @@ test_stale_pane_transient_persistent_resume() {
   pass "lifecycle: stale pane transient self-handles, persistent escalates once and clears, resumed clears quietly"
 }
 
+test_away_daemon_reports_closed_paused_window_once() (
+  local tmux_bin socket dir state win marker buffer tick current i pid=''
+  tmux_bin=$(command -v tmux) || { echo "skip: tmux is required for the away endpoint regression"; return 0; }
+  socket="fm-away-gone-$$-$RANDOM"
+  dir=$(fm_test_tmproot fm-away-gone) || fail "could not create the away endpoint fixture"
+  state="$dir/state"
+  trap 'rm -f "$state/.afk"; if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; wait_for_exit "$pid" 100 || true; fi; "$tmux_bin" -L "$socket" kill-server 2>/dev/null || true' EXIT
+  mkdir -p "$dir/bin" "$state"
+  printf '#!/usr/bin/env bash\nexec %q -L %q "$@"\n' "$tmux_bin" "$socket" > "$dir/bin/tmux"
+  chmod +x "$dir/bin/tmux"
+  "$dir/bin/tmux" -f /dev/null new-session -d -s away -n supervisor -c "$dir" \
+    || fail "could not start the private supervisor session"
+  "$dir/bin/tmux" new-window -d -t away: -n fm-paused -- bash --noprofile --norc -i \
+    || fail "could not start the paused fixture window"
+  win=away:fm-paused
+  marker="$state/.subsuper-paused-paused"
+  buffer="$state/.subsuper-escalations"
+  fm_write_meta "$state/paused.meta" "window=$win" backend=tmux kind=ship harness=codex spawn_gen=first
+  printf 'paused: waiting for an external dependency\n' > "$state/paused.status"
+  afk_enter "$state"
+  PATH="$dir/bin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" \
+    FM_SUPERVISOR_BACKEND=tmux FM_SUPERVISOR_TARGET=away:supervisor FM_INJECT_SKIP=heartbeat \
+    FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+    FM_HOUSEKEEPING_TICK=1 FM_PAUSE_RESURFACE_SECS=999999 FM_HEARTBEAT_SCAN_SECS=999999 \
+    FM_ESCALATE_BATCH_SECS=999999 FM_MAX_DEFER_SECS=0 "$DAEMON" > "$dir/daemon.out" 2>&1 & pid=$!
+
+  for ((i=0; i<150; i++)); do
+    [ -e "$marker" ] && [ -e "$state/.subsuper-last-housekeep" ] && [ ! -s "$state/.wake-queue" ] && break
+    sleep 0.1
+  done
+  [ "$i" -lt 150 ] || fail "the away daemon did not track the live pause: $(cat "$dir/daemon.out")"
+  [ ! -s "$buffer" ] || fail "the live pause unexpectedly escalated"
+  "$dir/bin/tmux" kill-window -t "$win" || fail "could not close the paused fixture window"
+
+  for ((i=0; i<150; i++)); do
+    [ -s "$buffer" ] && [ ! -s "$state/.wake-queue" ] && break
+    sleep 0.1
+  done
+  [ "$i" -lt 150 ] || fail "the away daemon did not escalate and acknowledge the closed endpoint"
+  tick=$(date +%s)
+  for ((i=0; i<150; i++)); do
+    current=$(cat "$state/.subsuper-last-housekeep")
+    [ "${current:-0}" -gt "$((tick + 1))" ] && break
+    sleep 0.1
+  done
+  [ "$i" -lt 150 ] || fail "the away daemon did not run later housekeeping"
+  [ "$(cat "$buffer")" = "$win (the recorded endpoint is gone)" ] \
+    || fail "expected exactly one endpoint-loss escalation: $(cat "$buffer")"
+  [ ! -e "$marker" ] || fail "the unchanged pause declaration restarted tracking after closure"
+  pass "away daemon escalates a closed paused window once and retires pause tracking"
+)
+
 test_routine_then_terminal_after_restart
 test_stale_pane_transient_persistent_resume
+test_away_daemon_reports_closed_paused_window_once || exit 1

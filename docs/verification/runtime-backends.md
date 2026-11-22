@@ -1140,6 +1140,16 @@ ok - real herdr: the watcher fast-path enqueues a stale wake naming the task win
 
 Polling remained active and is covered as the fallback for capability, connect, subscribe, and repeated reader failure.
 
+### Recorded endpoint loss
+
+On 2026-11-21 on Linux x86_64, `bin/fm-test-run.sh tests/fm-watch-triage.test.sh` with tmux 3.7c verified a single stale wake per recorded incarnation for ordinary and captain-held windows, and cleared the held window's pause tracking on closure.
+The same poll path was verified in an isolated Herdr 0.9.5 lab with a task record bound to a shell pane.
+After `bin/fm-herdr-lab.sh run "$session" pane close "$pane"`, `bin/fm-watch.sh` printed `stale: <window> (the recorded endpoint is gone)` and queued one stale wake.
+After `bin/fm-wake-drain.sh` and the printed acknowledgement command, the re-armed watcher stayed quiet on later polls.
+Guarded Herdr teardown verified the unchanged default-session tripwire.
+[`tests/fm-wake-daemon-lifecycle-e2e.test.sh`](../../tests/fm-wake-daemon-lifecycle-e2e.test.sh) covers the away-daemon escalation and later pause reconciliation.
+[`tests/fm-teardown.test.sh`](../../tests/fm-teardown.test.sh) covers retaining the loss record after failed task retirement and removing it on a successful retry.
+
 ### Agent lifecycle control
 
 Herdr is one of the two backends whose recovery-grade agent-state classifier the control plane may trust ([agent-control.md](../agent-control.md)), so its lifecycle gating is measured against the real binary; reverified 2026-08-08 on Herdr 0.8.0, and first measured 2026-08-02 on Herdr 0.7.5 with identical results:

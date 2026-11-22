@@ -749,6 +749,40 @@ test_teardown_manual_backend_leaves_the_backlog_to_the_operator() {
   pass "teardown honors config/backlog-backend=manual and still finishes cleanly"
 }
 
+test_endpoint_loss_marker_survives_failed_task_retirement() {
+  local case_dir meta marker recorded_loss
+  case_dir=$(make_case endpoint-loss-retirement)
+  write_meta "$case_dir" local-only ship
+  meta="$case_dir/state/task-x1.meta"
+  marker="$case_dir/state/task-x1.missing-endpoint"
+  recorded_loss=$'tmux:firstmate:fm-task-x1\tteardown-test-task-x1'
+  printf '%s\n' "$recorded_loss" > "$marker"
+
+  cat > "$case_dir/fakebin/rm" <<'SH'
+#!/usr/bin/env bash
+if [ "$#" -eq 2 ] && [ "$1" = -f ] && [ "$2" = "$FM_TEST_FAIL_META_UNLINK" ]; then
+  exit 1
+fi
+exec "$REAL_RM_FOR_TEST" "$@"
+SH
+  chmod +x "$case_dir/fakebin/rm"
+  if FM_TEST_FAIL_META_UNLINK="$meta" run_teardown "$case_dir" > "$case_dir/failed.out" 2>&1; then
+    fail "teardown succeeded despite failing to remove the task record"
+  fi
+  assert_grep 'task record could not be removed' "$case_dir/failed.out" \
+    "teardown did not reach the injected record removal failure"
+  assert_present "$meta" "failed teardown removed the task record"
+  [ "$(cat "$marker")" = "$recorded_loss" ] \
+    || fail "failed teardown lost the acknowledged endpoint-loss record"
+
+  rm -f "$case_dir/fakebin/rm"
+  run_teardown "$case_dir" > "$case_dir/retry.out" 2>&1 \
+    || fail "teardown retry failed: $(cat "$case_dir/retry.out")"
+  assert_absent "$meta" "teardown retry kept the task record"
+  assert_absent "$marker" "teardown retry kept the endpoint-loss record"
+  pass "teardown keeps an acknowledged endpoint loss until its task record is retired"
+}
+
 test_local_only_truly_unpushed_refuses() {
   local case_dir rc
   case_dir=$(make_case truly-unpushed)
@@ -4054,6 +4088,7 @@ test_keep_pane_lab || fail "real Herdr keep-pane lab failed"
 test_local_only_fork_remote_allows
 test_teardown_closes_the_backlog_item_itself
 test_teardown_manual_backend_leaves_the_backlog_to_the_operator
+test_endpoint_loss_marker_survives_failed_task_retirement
 test_local_only_truly_unpushed_refuses
 test_local_only_merged_to_local_main_allows
 test_no_mistakes_origin_remote_allows
