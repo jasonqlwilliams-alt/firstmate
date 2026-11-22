@@ -522,7 +522,7 @@ SH
 
 test_relaunch_and_pr_replacement_during_closure() {
   local dir state setup=${1:-fresh} id=rl-close url=https://github.com/example/repo/pull/20
-  local replacement=https://github.com/example/repo/pull/21 out rc watcher i=0
+  local replacement=https://github.com/example/repo/pull/21 out rc watcher retire i=0
   dir=$(new_case "closure-race-$setup" "$id")
   state="$dir/home/state"
 
@@ -543,35 +543,88 @@ case "$*" in
 esac
 SH
   chmod +x "$dir/pollbin/gh" "$dir/pollbin/tmux" "$dir/root/bin/fm-guard.sh"
+  add_ship_task "$dir" "$id" claude
+  printf 'spawn_gen=s-original\n' >> "$state/$id.meta"
   if [ "$setup" = reused ]; then
+    mv "$state/$id.meta" "$dir/replacement.meta"
     fm_write_meta "$state/$id.meta" "window=firstmate:fm-$id" "endpoint_task_id=$id" \
       "worktree=$dir/old-worktree" "project=$dir/old-project" 'kind=ship' 'mode=local-only' 'spawn_gen=s-retired'
     env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" PATH="$dir/pollbin:$PATH" \
-      "$ROOT/bin/fm-pr-check.sh" "$id" https://github.com/example/repo/pull/19 > "$dir/register.log" 2>&1 \
+      "$ROOT/bin/fm-pr-check.sh" "$id" "$url" > "$dir/register.log" 2>&1 \
       || fail "could not arm the retired task's PR: $(cat "$dir/register.log")"
-    env FM_HOME="$dir/home" FM_TEARDOWN_GUARD_DONE=1 PATH="$dir/pollbin:$PATH" \
-      "$ROOT/bin/fm-teardown.sh" "$id" --force > "$dir/teardown.log" 2>&1 \
-      || fail "could not retire the previous task: $(cat "$dir/teardown.log")"
-    [ ! -e "$state/$id.meta" ] && [ ! -e "$state/$id.check.sh" ] \
-      || fail "the retired task still owned the ID or its poll"
+    FM_HOME="$dir/home" PATH="$dir/pollbin:$PATH" "$ROOT/bin/fm-inactive-reconcile.sh" scan \
+      || fail "could not prime the inactive-outcome scan"
+    mkdir -p "$dir/retirebin"
+    cp "$dir/pollbin/tmux" "$dir/retirebin/tmux"
+    cat > "$dir/retirebin/rm" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -f ] && [ "${2:-}" = "$FM_HOME/state/rl-close.check.sh" ]; then
+  touch "$FM_HOME/retire-ready"
+  while [ ! -e "$FM_HOME/retire-release" ]; do sleep 0.05; done
+fi
+exec "$TEST_REAL_RM" "$@"
+SH
+    cat > "$dir/pollbin/shasum" <<'SH'
+#!/usr/bin/env bash
+if [ "${TEST_WATCH_CAPTURE:-0}" = 1 ] && [ "${*: -1}" = "$FM_HOME/state/rl-close.pr-poll" ] \
+  && [ ! -e "$FM_HOME/replacement-armed" ]; then
+  touch "$FM_HOME/capture-started"
+  while [ ! -e "$FM_HOME/replacement-armed" ]; do sleep 0.05; done
+fi
+exec "$TEST_REAL_SHASUM" "$@"
+SH
+    chmod +x "$dir/retirebin/rm" "$dir/pollbin/shasum"
+    env FM_HOME="$dir/home" FM_TEARDOWN_GUARD_DONE=1 TEST_REAL_RM="$(command -v rm)" \
+      PATH="$dir/retirebin:$PATH" "$ROOT/bin/fm-teardown.sh" "$id" --force > "$dir/teardown.log" 2>&1 &
+    retire=$!
+    for ((i=0; i<200; i++)); do
+      [ ! -e "$dir/home/retire-ready" ] || break
+      sleep 0.05
+    done
+    if [ ! -e "$dir/home/retire-ready" ]; then
+      touch "$dir/home/retire-release"
+      fail "teardown did not pause before removing the old poll: $(cat "$dir/teardown.log")"
+    fi
+  else
+    env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" PATH="$dir/pollbin:$PATH" \
+      "$ROOT/bin/fm-pr-check.sh" "$id" "$url" > "$dir/register.log" 2>&1 \
+      || fail "could not arm the observed PR: $(cat "$dir/register.log")"
+    touch "$dir/home/replacement-armed"
   fi
-  add_ship_task "$dir" "$id" claude
-  printf 'spawn_gen=s-original\n' >> "$state/$id.meta"
   printf '%s\n' "$$" > "$state/.lock"
   printf '#!/usr/bin/env bash\nexit 1\n' > "$dir/pollbin/tmux"
-  env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" PATH="$dir/pollbin:$PATH" \
-    "$ROOT/bin/fm-pr-check.sh" "$id" "$url" > "$dir/register.log" 2>&1 \
-    || fail "could not arm the observed PR: $(cat "$dir/register.log")"
-  printf '#!/usr/bin/env bash\nprintf "poll-cycle-end\\n"\n' > "$state/z-cycle-end.check.sh"
+  cat > "$state/z-cycle-end.check.sh" <<'SH'
+#!/usr/bin/env bash
+touch "$FM_HOME/capture-started"
+while [ ! -e "$FM_HOME/replacement-armed" ]; do sleep 0.05; done
+if [ -e "$FM_HOME/forge-release" ]; then printf 'poll-cycle-end\n'; fi
+SH
   chmod 0700 "$state/z-cycle-end.check.sh"
   FM_HOME="$dir/home" "$ROOT/bin/fm-check-register.sh" z-cycle-end >/dev/null \
     || fail "could not register the poll-cycle control check"
   touch "$state/home-summary.json"
 
   env FM_HOME="$dir/home" PATH="$dir/pollbin:/usr/bin:/bin:/usr/sbin:/sbin" \
-    FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=30 \
+    TEST_WATCH_CAPTURE=1 TEST_REAL_SHASUM="$(command -v shasum)" FM_POLL=0.1 FM_CHECK_INTERVAL=300 FM_CHECK_TIMEOUT=30 \
     "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 40 > "$dir/watch.log" 2>&1 &
   watcher=$!
+  if [ "$setup" = reused ]; then
+    for ((i=0; i<200; i++)); do
+      [ ! -e "$dir/home/capture-started" ] || break
+      sleep 0.05
+    done
+    touch "$dir/home/retire-release"
+    [ -e "$dir/home/capture-started" ] || fail "the watcher did not enter the capture sweep"
+    wait "$retire" || fail "could not retire the previous task: $(cat "$dir/teardown.log")"
+    [ ! -e "$state/$id.meta" ] && [ ! -e "$state/$id.check.sh" ] \
+      || fail "the retired task still owned the ID or its poll"
+    mv "$dir/replacement.meta" "$state/$id.meta"
+    env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" TEST_REAL_SHASUM="$(command -v shasum)" \
+      PATH="$dir/pollbin:$PATH" "$ROOT/bin/fm-pr-check.sh" "$id" "$url" > "$dir/register.log" 2>&1 \
+      || fail "could not arm the reused ID's poll: $(cat "$dir/register.log")"
+    touch "$dir/home/replacement-armed"
+  fi
+  i=0
   while [ ! -e "$dir/home/forge-ready" ] && [ "$i" -lt 150 ]; do
     sleep 0.1
     i=$((i + 1))
@@ -583,7 +636,7 @@ SH
   [ -n "$(meta_field "$dir" "$id" spawn_gen)" ] \
     && [ "$(meta_field "$dir" "$id" spawn_gen)" != s-original ] \
     || fail "the relaunch did not change the worker generation"
-  env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" PATH="$dir/pollbin:$PATH" \
+  env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" TEST_REAL_SHASUM="$(command -v shasum)" PATH="$dir/pollbin:$PATH" \
     "$ROOT/bin/fm-pr-check.sh" "$id" "$replacement" > "$dir/register.log" 2>&1 \
     || fail "could not arm the replacement PR: $(cat "$dir/register.log")"
   touch "$dir/home/forge-release"

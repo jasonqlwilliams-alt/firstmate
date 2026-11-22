@@ -1551,8 +1551,19 @@ fm_check_output_cleanup() {
 }
 
 fm_pr_closure_stage_cleanup() {
-  [ -z "$FM_PR_POLL_CLOSED_STAGE" ] || rm -f -- "$FM_PR_POLL_CLOSED_STAGE"
+  [ -n "$FM_PR_POLL_CLOSED_STAGE" ] || return 0
+  exec 6>&-
+  rm -f -- "$FM_PR_POLL_CLOSED_STAGE"
   FM_PR_POLL_CLOSED_STAGE=
+}
+
+publish_pr_closure() {
+  local id=$1 stage=$2 rc=0
+  fm_pr_poll_record_closed "$STATE" "$id" "$stage" || rc=$?
+  case "$rc" in
+    0|4) ;;
+    *) triage_log "PR closure for $id could not be recorded (rc=$rc)" ;;
+  esac
 }
 
 fm_active_check_stop() {
@@ -1589,7 +1600,7 @@ run_check_capture() {
   FM_CHECK_SIGNAL_PENDING=
   trap 'FM_CHECK_SIGNAL_PENDING=1' HUP INT TERM
   set -m
-  ( FM_CHECK_OWNED_GROUP=1 run_check_process "$@" ) > "$FM_CHECK_OUTPUT" 2>/dev/null &
+  ( FM_CHECK_OWNED_GROUP=1 run_check_process "$@" ) 6>&- > "$FM_CHECK_OUTPUT" 2>/dev/null &
   FM_ACTIVE_CHECK_PID=$!
   FM_ACTIVE_CHECK_PGID=$FM_ACTIVE_CHECK_PID
   set +m
@@ -2013,6 +2024,13 @@ while :; do
     touch "$STATE/.last-watcher-beat"
   fi
 
+  for stage in "$STATE"/.*.pr-poll-closed.??????; do
+    [ -f "$stage" ] || continue
+    id=${stage##*/}
+    id=${id#.}
+    publish_pr_closure "${id%.pr-poll-closed.??????}" "$stage"
+  done
+
   if [ "$(age_of "$STATE/home-summary.json")" -ge "$HOME_SUMMARY_INTERVAL" ]; then
     home_summary_refresh_detached
   fi
@@ -2075,6 +2093,7 @@ while :; do
   # CHECK_INTERVAL, so most cycles skip this block and fall straight through.
   if [ "$(age_of "$STATE/.last-check")" -ge "$CHECK_INTERVAL" ]; then
     rejected_checks=
+    check_deferred=0
     for c in "$STATE"/*.check.sh; do
       [ -e "$c" ] || continue
       is_pr_poll=0
@@ -2092,6 +2111,7 @@ while :; do
         poll_prepare_rc=0
         fm_pr_poll_snapshot_prepare "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" || poll_prepare_rc=$?
         if [ "$poll_prepare_rc" -eq 4 ]; then
+          check_deferred=1
           continue
         elif [ "$poll_prepare_rc" -eq 0 ]; then
           is_pr_poll=1
@@ -2115,13 +2135,12 @@ while :; do
         fi
       fi
       if [ "$is_pr_poll" -eq 1 ] && [ "$out" = closed-unmerged ]; then
-        closure_rc=0
-        fm_pr_poll_record_closed "$STATE" "$id" || closure_rc=$?
-        fm_pr_closure_stage_cleanup
-        case "$closure_rc" in
-          0|4) ;;
-          *) triage_log "PR closure for $id could not be recorded (rc=$closure_rc)" ;;
-        esac
+        stage=$FM_PR_POLL_CLOSED_STAGE
+        if fm_pr_poll_closed_observe; then
+          publish_pr_closure "$id" "$stage"
+        else
+          triage_log "PR closure for $id could not be recorded (rc=1)"
+        fi
         continue
       fi
       fm_pr_closure_stage_cleanup
@@ -2136,7 +2155,7 @@ while :; do
             exit 1
           fi
           retire_merged_pr_poll "$id"
-          touch "$STATE/.last-check"
+          [ "$check_deferred" -ne 0 ] || touch "$STATE/.last-check"
           if [ "$FM_MERGE_OUTCOME_ALREADY_RECORDED" = true ]; then
             triage_log "absorbed duplicate merged PR poll result for $id"
             continue
@@ -2144,17 +2163,17 @@ while :; do
           wake "$reason"
         fi
         fm_wake_append check "$c" "$reason" || exit 1
-        touch "$STATE/.last-check"
+        [ "$check_deferred" -ne 0 ] || touch "$STATE/.last-check"
         wake "$reason"
       fi
     done
     if [ -n "$rejected_checks" ]; then
       reason="check: rejected unauthenticated state checks:$rejected_checks"
       fm_wake_append check unauthenticated-state-checks "$reason" || exit 1
-      touch "$STATE/.last-check"
+      [ "$check_deferred" -ne 0 ] || touch "$STATE/.last-check"
       wake "$reason"
     fi
-    touch "$STATE/.last-check"
+    [ "$check_deferred" -ne 0 ] || touch "$STATE/.last-check"
   fi
 
   # On the first changed signal, linger one grace period and re-scan before

@@ -2127,7 +2127,7 @@ test_polled_closures_preserve_other_pr_evidence() {
 }
 
 test_closure_publication_preserves_the_observed_pr() (
-  local dir state url replacement transition rc
+  local dir state url replacement transition rc stage
   FM_WAKE_NO_MKDIR=1 . "$ROOT/bin/fm-wake-lib.sh"
   url=https://github.com/o/r/pull/22
   replacement=https://github.com/o/r/pull/23
@@ -2163,7 +2163,9 @@ test_closure_publication_preserves_the_observed_pr() (
     esac
 
     rc=0
-    fm_pr_poll_record_closed "$state" task-a || rc=$?
+    stage=$FM_PR_POLL_CLOSED_STAGE
+    fm_pr_poll_closed_observe || fail "could not seal the observed closure"
+    fm_pr_poll_record_closed "$state" task-a "$stage" || rc=$?
     if [ "$transition" = reused-id ]; then
       [ "$rc" -eq 4 ] || fail "the retired task's observation was accepted for a reused ID"
       [ ! -e "$state/task-a.pr-poll-closed" ] || fail "the retired task wrote closure evidence"
@@ -2245,6 +2247,103 @@ test_closure_write_failure_does_not_stop_sibling_checks() {
   [ -f "$state/task-a.check.sh" ] || fail "failed closure write disarmed the PR poll"
   pass "closure write failures are logged while sibling checks continue"
 }
+
+test_staged_closure_outlives_lock_contention() (
+  local dir state url lock watcher= beat transition i out
+  FM_WAKE_NO_MKDIR=1 . "$ROOT/bin/fm-wake-lib.sh"
+  trap '[ -z "$watcher" ] || { kill -TERM "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null; }' EXIT
+  url=https://github.com/o/r/pull/28
+  for transition in rearm reuse; do
+    dir=$(make_case "closure-contention-$transition")
+    state="$dir/home/state"
+    fm_write_meta "$state/task-a.meta" 'window=firstmate:fm-task-a' 'endpoint_task_id=task-a' \
+      "worktree=$dir/missing-worktree" "project=$dir/project" 'kind=ship' 'mode=local-only'
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/fakebin/tmux"
+    cat > "$dir/on-state" <<'SH'
+#!/usr/bin/env bash
+touch "$FM_HOME/forge-ready"
+while [ ! -e "$FM_HOME/forge-release" ]; do sleep 0.05; done
+SH
+    cat > "$state/z-stop.check.sh" <<'SH'
+#!/usr/bin/env bash
+touch "$FM_HOME/sibling-ran"
+if [ -e "$FM_HOME/stop" ]; then printf 'stop-cycle\n'; fi
+SH
+    chmod 0700 "$dir/fakebin/tmux" "$dir/on-state" "$state/z-stop.check.sh"
+    FM_HOME="$dir/home" "$REGISTER" z-stop >/dev/null || fail "could not register the sibling check"
+    run_check_entry "$dir" task-a "$url" >/dev/null || fail "could not register the original PR"
+    FM_HOME="$dir/home" PATH="$dir/fakebin:$BASE_PATH" "$ROOT/bin/fm-inactive-reconcile.sh" scan \
+      || fail "could not prime the inactive-outcome scan"
+    touch "$state/home-summary.json"
+
+    FM_HOME="$dir/home" FM_TEST_GH_LOG="$dir/gh.log" FM_TEST_GH_STATE=CLOSED FM_TEST_GH_ON_STATE="$dir/on-state" \
+      FM_CHECK_INTERVAL=300 FM_CHECK_TIMEOUT=15 FM_POLL=0.1 PATH="$dir/fakebin:$BASE_PATH" \
+      "$WATCH" > "$dir/watch.log" 2>&1 &
+    watcher=$!
+    for ((i=0; i<200; i++)); do
+      [ ! -e "$dir/home/forge-ready" ] || break
+      sleep 0.05
+    done
+    [ -e "$dir/home/forge-ready" ] || fail "the watcher did not start the forge read"
+    lock=$(fm_meta_lock_path "$state/task-a.meta")
+    fm_lock_try_acquire "$lock" || fail "the watcher held the lock across the forge read"
+    beat=$(cat "$state/.last-watcher-beat")
+    touch "$dir/home/forge-release"
+    for ((i=0; i<200; i++)); do
+      if [ -e "$dir/home/sibling-ran" ] && [ "$(cat "$state/.last-watcher-beat")" != "$beat" ]; then break; fi
+      sleep 0.05
+    done
+    [ "$i" -lt 200 ] || fail "publication contention stalled the heartbeat or sibling check"
+    [ ! -e "$state/task-a.pr-poll-closed" ] || fail "closure published while the task lock was held"
+
+    kill -TERM "$watcher" && { wait "$watcher" || true; }
+    watcher=
+    fm_lock_release "$lock"
+    if [ "$transition" = reuse ]; then
+      cp "$state/task-a.meta" "$dir/replacement.meta"
+      FM_HOME="$dir/home" FM_TEARDOWN_GUARD_DONE=1 PATH="$dir/fakebin:$BASE_PATH" \
+        "$TEARDOWN" task-a --force > "$dir/teardown.log" 2>&1 \
+        || fail "could not retire task-a: $(cat "$dir/teardown.log")"
+      mv "$dir/replacement.meta" "$state/task-a.meta"
+    fi
+    run_check_entry "$dir" task-a "$url" >/dev/null || fail "could not re-arm the PR"
+    touch "$dir/home/stop"
+    : > "$dir/gh.log"
+    out=$(FM_HOME="$dir/home" FM_TEST_GH_LOG="$dir/gh.log" FM_TEST_GH_STATE=OPEN \
+      FM_WATCH_HANDLING_SUCCESSOR=1 FM_CHECK_INTERVAL=0 FM_POLL=0.1 PATH="$dir/fakebin:$BASE_PATH" \
+      "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 15) || fail "watcher could not resume: $out"
+    case "$out" in check:*z-stop.check.sh:*stop-cycle) ;; *) fail "expected a sibling wake: $out" ;; esac
+    [ "$(cat "$dir/gh.log")" = "pr view $url --repo o/r --json state -q .state" ] \
+      || fail "watcher did not re-read the now-open PR exactly once"
+    if [ "$transition" = rearm ]; then
+      [ "$(cat "$state/task-a.pr-poll-closed")" = "$url" ] || fail "the staged closure was not recovered"
+    else
+      [ ! -e "$state/task-a.pr-poll-closed" ] || fail "the reused ID inherited a staged closure"
+    fi
+  done
+  pass "contended closure publication preserves watcher progress and survives restart only for the same task"
+)
+
+test_closure_cleanup_tolerates_a_stage_disappearing() (
+  local dir state stage
+  dir=$(make_case disappearing-closure)
+  state="$dir/home/state"
+  stage="$state/.task-a.pr-poll-closed.ABC123"
+  touch "$stage"
+  fm_pr_file_link_count() {
+    [ "$1" = "$stage" ] || return 1
+    rm -- "$stage"
+    return 1
+  }
+  fm_pr_poll_closed_remove "$state" task-a || fail "closure cleanup rejected a vanished stage"
+  [ ! -e "$stage" ] || fail "the stage did not disappear during validation"
+  mkdir "$stage"
+  if fm_pr_poll_closed_remove "$state" task-a; then
+    fail "closure cleanup accepted a remaining unsafe stage"
+  fi
+  [ -d "$stage" ] || fail "closure cleanup removed an unsafe directory"
+  pass "closure cleanup tolerates a concurrent unlink and rejects a remaining unsafe artifact"
+)
 
 test_remote_proxy_teardown_removes_closure_evidence() {
   local dir state url teardown watcher i
@@ -2619,6 +2718,8 @@ test_external_merge_transition_retires_only_terminal_poll
 test_polled_closures_preserve_other_pr_evidence
 test_closure_publication_preserves_the_observed_pr
 test_closure_write_failure_does_not_stop_sibling_checks
+test_staged_closure_outlives_lock_contention
+test_closure_cleanup_tolerates_a_stage_disappearing
 test_remote_proxy_teardown_removes_closure_evidence
 test_retirement_refuses_replacement_and_nonterminal_results
 test_retirement_queue_failure_and_receipt_tampering

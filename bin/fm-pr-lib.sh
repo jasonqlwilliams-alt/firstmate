@@ -1065,7 +1065,9 @@ fm_pr_poll_snapshot_prepare() {
   fm_lock_try_acquire "$lock" || return 4
   if fm_pr_poll_snapshot_capture "$state" "$id" "$template"; then
     if ! FM_PR_POLL_CLOSED_STAGE=$(umask 077; mktemp "$state/.$id.pr-poll-closed.XXXXXX") \
-      || ! printf '%s\n' "$FM_PR_POLL_SNAPSHOT_URL" > "$FM_PR_POLL_CLOSED_STAGE"; then
+      || ! exec 6> "$FM_PR_POLL_CLOSED_STAGE" \
+      || ! printf '%s\n' "$FM_PR_POLL_SNAPSHOT_URL" >&6; then
+      exec 6>&-
       [ -z "$FM_PR_POLL_CLOSED_STAGE" ] || rm -f -- "$FM_PR_POLL_CLOSED_STAGE"
       FM_PR_POLL_CLOSED_STAGE=
     fi
@@ -1076,25 +1078,46 @@ fm_pr_poll_snapshot_prepare() {
   return "$rc"
 }
 
+fm_pr_poll_closed_observe() {
+  local stage=$FM_PR_POLL_CLOSED_STAGE
+  [ -n "$stage" ] || return 1
+  FM_PR_POLL_CLOSED_STAGE=
+  if ! printf '%s\n' closed-unmerged >&6; then
+    exec 6>&-
+    rm -f -- "$stage"
+    return 1
+  fi
+  exec 6>&-
+}
+
 fm_pr_poll_record_closed() (
-  local state=$1 id=$2 tmp=$FM_PR_POLL_CLOSED_STAGE url=$FM_PR_POLL_SNAPSHOT_URL
-  local record device lock staged_url
-  [ "$id" = "$FM_PR_POLL_SNAPSHOT_ID" ] || return 4
-  fm_pr_task_id_valid "$id" && fm_pr_url_parse "$url" || return 1
+  local state=$1 id=$2 stage=$3 record device lock url outcome extra tmp=
+  fm_pr_task_id_valid "$id" || return 4
   [ -d "$state" ] && [ ! -L "$state" ] || return 1
-  [ -n "$tmp" ] || return 1
-  [ -f "$tmp" ] || return 4
+  [[ "$stage" == "$state/.$id.pr-poll-closed."?????? ]] || return 4
+  [ -f "$stage" ] && [ ! -L "$stage" ] || return 4
   lock=$(fm_meta_lock_path "$state/$id.meta") || return 1
-  fm_lock_acquire_wait "$lock"
-  trap 'fm_lock_release "$lock"' EXIT
+  fm_lock_try_acquire "$lock" || return 4
+  trap '[ -z "$tmp" ] || rm -f -- "$tmp"; fm_lock_release "$lock"' EXIT
   record="$state/$id.pr-poll-closed"
   device=$(fm_pr_file_device "$state") || return 1
-  fm_pr_private_file_valid "$tmp" 600 "$device" || return 4
-  IFS= read -r staged_url < "$tmp" && [ "$staged_url" = "$url" ] || return 4
-  [ -f "$state/$id.meta" ] && fm_pr_regular_destination_on_device_or_absent "$state/$id.meta" "$device" || return 4
-  [ -f "$state/$id.check.sh" ] && [ ! -L "$state/$id.check.sh" ] || return 4
-  fm_pr_poll_closed_recorded "$state" "$id" "$url" && return 0
+  fm_pr_private_file_valid "$stage" 600 "$device" || return 4
+  {
+    IFS= read -r url && IFS= read -r outcome && [ "$outcome" = closed-unmerged ] \
+      && ! IFS= read -r extra && [ -z "$extra" ]
+  } < "$stage" || return 4
+  fm_pr_url_parse "$url" || return 4
+  if ! { [ -f "$state/$id.meta" ] \
+    && fm_pr_regular_destination_on_device_or_absent "$state/$id.meta" "$device"; }; then
+    rm -f -- "$stage" || return 1
+    return 4
+  fi
+  if fm_pr_poll_closed_recorded "$state" "$id" "$url"; then
+    rm -f -- "$stage"
+    return
+  fi
 
+  tmp=$(umask 077; mktemp "$state/.$id.pr-poll-closed.XXXXXX") || return 1
   exec 8> "$tmp" || return 1
   if [ -e "$record" ] || [ -L "$record" ]; then
     fm_pr_private_file_valid "$record" 600 "$device" || return 1
@@ -1102,7 +1125,9 @@ fm_pr_poll_record_closed() (
   fi
   printf '%s\n' "$url" >&8 || return 1
   fm_pr_regular_destination_on_device_or_absent "$record" "$device" || return 1
-  mv -f -- "$tmp" "$record"
+  mv -f -- "$tmp" "$record" || return 1
+  tmp=
+  rm -f -- "$stage"
 )
 
 fm_pr_poll_closed_cleanup_valid() {
@@ -1112,7 +1137,9 @@ fm_pr_poll_closed_cleanup_valid() {
     [ -e "$artifact" ] || [ -L "$artifact" ] || continue
     [ -d "$state" ] && [ ! -L "$state" ] || return 1
     device=$(fm_pr_file_device "$state") || return 1
-    fm_pr_regular_destination_on_device_or_absent "$artifact" "$device" || return 1
+    if ! fm_pr_regular_destination_on_device_or_absent "$artifact" "$device"; then
+      [ ! -e "$artifact" ] && [ ! -L "$artifact" ] || return 1
+    fi
   done
 }
 
