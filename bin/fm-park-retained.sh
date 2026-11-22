@@ -79,16 +79,17 @@ if [ ! -f "$META" ] || [ -L "$META" ] \
   exit 1
 fi
 
+[ -z "$(fm_meta_get "$META" remote_host)" ] \
+  || { echo "error: $ID is placed on a remote host; its endpoint loss is not reported here" >&2; exit 1; }
+[ "$(fm_meta_get "$META" kind)" != secondmate ] \
+  || { echo "error: $ID is a secondmate; park marks apply to ordinary tasks only" >&2; exit 1; }
+
 if [ "$ACTION" = clear ]; then
   rm -f "$MARK"
   echo "parked-retained: no"
   exit 0
 fi
 
-[ -z "$(fm_meta_get "$META" remote_host)" ] \
-  || { echo "error: $ID is placed on a remote host; its endpoint loss is not reported here" >&2; exit 1; }
-[ "$(fm_meta_get "$META" kind)" != secondmate ] \
-  || { echo "error: $ID is a secondmate; park marks apply to ordinary tasks only" >&2; exit 1; }
 [ -n "$INCARNATION" ] \
   || { echo "error: task $ID records no endpoint to park" >&2; exit 1; }
 BACKEND=$(fm_backend_of_meta "$META")

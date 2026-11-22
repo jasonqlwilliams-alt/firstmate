@@ -2330,7 +2330,7 @@ test_missing_tmux_endpoint_surfaces_once() (
 # a relaunch or an explicit clear restores the alarm, and an unmarked parked
 # task still raises the ordinary loss wake.
 test_parked_retained_copy_suppresses_endpoint_loss() (
-  local tmux_bin socket dir state window out pid='' park_pid='' wt before after park lock rc tries control_lock lease_lock
+  local tmux_bin socket dir state window out pid='' park_pid='' wt before after park lock rc tries control_lock lease_lock task action
   tmux_bin=$(command -v tmux) || { echo "skip: tmux is required for the parked endpoint regression"; return 0; }
   park="$ROOT/bin/fm-park-retained.sh"
   socket="fm-watch-parked-$$-$RANDOM"
@@ -2363,6 +2363,20 @@ test_parked_retained_copy_suppresses_endpoint_loss() (
   grep -Fq 'fm-park-retained.sh <task-id> mark' "$dir/park.out" \
     && grep -Fq 'fm-park-retained.sh <task-id> clear' "$dir/park.out" \
     || fail "park usage did not show both operations: $(cat "$dir/park.out")"
+
+  fm_write_meta "$state/remote.meta" 'window=parked:fm-remote' kind=ship remote_host=fixture-host spawn_gen=first
+  fm_write_meta "$state/mate.meta" 'window=parked:fm-mate' kind=secondmate spawn_gen=first
+  for task in remote mate; do
+    printf 'tmux:parked:fm-%s\tfirst\n' "$task" > "$state/$task.parked-retained"
+    for action in mark clear; do
+      rc=0
+      park_task "$task" "$action" > "$dir/park.out" 2>&1 || rc=$?
+      [ "$rc" -eq 1 ] || fail "$action accepted the $task record: $(cat "$dir/park.out")"
+      [ "$(cat "$state/$task.parked-retained")" = "tmux:parked:fm-$task"$'\tfirst' ] \
+        || fail "refused $action changed the stored mark for $task"
+    done
+    rm -f "$state/$task.meta" "$state/$task.parked-retained"
+  done
 
   expect_quiet() {
     local label=$1 poll
@@ -2503,6 +2517,10 @@ SH
   rmdir "$control_lock" "$lease_lock" "$lock" || fail "mark selected a worker before the relaunch finished"
   expect_loss relaunched
   ack_parked || fail "[relaunched] could not acknowledge the loss wake"
+  open_worker again fourth
+  assert_present "$state/again.parked-retained" "fixture lost the previous incarnation's park mark"
+  park_task again clear > "$dir/park.out" 2>&1 || fail "clearing a resumed worker failed: $(cat "$dir/park.out")"
+  assert_absent "$state/again.parked-retained" "clear left a park mark on a resumed worker"
 
   after=$(cd "$wt" && git status --porcelain && cat unlanded.txt)
   [ "$before" = "$after" ] || fail "the park mark changed the retained copy"
