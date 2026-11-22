@@ -24,6 +24,10 @@
 # after its durable wake is appended.
 # The receipt binds the terminal observation to the canonical registration and
 # lets a restart finish fixed-path removal without executing state-file bytes.
+#
+# Closure evidence lives in a separate private state/<id>.pr-poll-closed file.
+# Each line is one canonical URL observed closed without merging.
+# Re-registering a poll preserves this history. Task teardown removes it.
 
 FM_PR_PROVIDER=
 FM_PR_URL=
@@ -621,6 +625,8 @@ fm_pr_poll_artifacts_valid() {
   fm_pr_poll_data_parse "$data" || return 1
   data_hash=$(fm_pr_sha256 "$data") || return 1
   template_hash=$(fm_pr_sha256 "$check") || return 1
+  # Accept the pinned pre-closure shim for an otherwise valid registration.
+  # The watcher executes the current repository poll with the validated data.
   if [ "$template_hash" != 24f73c153d68a5404ee5b4f9fc4ad6368ee8d79b43b87566591ce1e05a4112bf ]; then
     cmp -s "$template" "$check" || return 1
   fi
@@ -1068,6 +1074,8 @@ fm_pr_poll_record_closed() (
     cat -- "$record" >&8 || return 1
   fi
   printf '%s\n' "$url" >&8 || return 1
+  # Bind the completed forge read to its task generation or to the original
+  # registration if that generation has changed or is unavailable.
   [ -f "$state/$id.check.sh" ] && [ ! -L "$state/$id.check.sh" ] || return 4
   if ! { [ -n "$spawn_gen" ] && fm_backlog_meta_spawn_gen_optional "$state/$id.meta" "$state" \
       && [ "$FM_BACKLOG_META_SPAWN_GEN" = "$spawn_gen" ]; }; then

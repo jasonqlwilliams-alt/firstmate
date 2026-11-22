@@ -20,7 +20,7 @@ Ask the worker to reissue the question with an unreserved key so it can enter `O
 | `fm-startup-network.sh`  | Run session start's home-summary publication, network checks, and inactive-outcome scan off its blocking path, retaining reports and durable findings |
 | `fm-system-state-card.sh` | Generate the TTL 60m live SYSTEM_STATE card from probes, write `data/system-state.md`, and optionally publish it through Eleusis |
 | `fm-fleet-sync.sh`       | Refresh project clones with safe fast-forwards, self-heals, `STUCK:` reports, branch pruning, and bounded recovery from an orphaned `.git/packed-refs.lock` |
-| `fm-fleet-snapshot.sh`   | Print structured fleet snapshot JSON and refresh only its parent-side remote-ledger cache (schema `fm-fleet-snapshot.v1`) |
+| `fm-fleet-snapshot.sh`   | Print structured fleet snapshot JSON (schema `fm-fleet-snapshot.v1`) and refresh only its parent-side remote-ledger cache. See [secondmate home summary rules](architecture.md#registered-secondmate-current-state). |
 | `fm-home-summary-refresh.sh` | Atomically publish this home's structured summary ledger                         |
 | `fm-fleet-view.sh`       | Render the fleet snapshot as a human Markdown view                                   |
 | `fm-bearings-snapshot.sh` | Project the bounded remote-ledger fleet snapshot to compact TOON; `--include-prs` adds live GitHub enrichment |

@@ -108,9 +108,10 @@
 #     the task metadata records a valid PR URL, the latest done status event is
 #     "PR <that url> checks green", and local state has no matching closure
 #     record, merge-notified marker, or valid merge retirement receipt.
-#     The exemption applies only to terminal_in_flight and uses PR identity
-#     independently of commit heads. The next snapshot can reflect a retry or PR
-#     registration that occurs after the relevant inputs were sampled.
+#     The exemption applies only to terminal_in_flight and is decided from
+#     local evidence using PR identity independently of commit heads. The next
+#     snapshot can reflect a retry or PR registration that occurs after the
+#     relevant inputs were sampled.
 #     Regression coverage lives in tests/fm-fleet-snapshot-view.test.sh.
 #     Other terminal in-flight children remain contradictions unless the task
 #     has both a hold reason and hold kind. Held children stay visible but do
