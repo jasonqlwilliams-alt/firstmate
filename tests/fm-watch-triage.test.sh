@@ -2466,7 +2466,8 @@ test_parked_retained_copy_suppresses_endpoint_loss() (
   rm -f "$state/other.meta"
   mkdir "$state/.control-held.lock" || fail "could not stage a stale control lock"
   dead_pid > "$state/.control-held.lock/pid"
-  park_task held mark > "$dir/park.out" 2>&1 || fail "marking failed: $(cat "$dir/park.out")"
+  (cd "$dir/home" && PATH="$dir/bin:$PATH" FM_HOME=. FM_STATE_OVERRIDE=./state "$park" held mark) \
+    > "$dir/park.out" 2>&1 || fail "marking with an in-home relative override failed: $(cat "$dir/park.out")"
   expect_quiet marked
   # Clearing the mark restores the alarm for the same lost endpoint.
   park_task held clear > "$dir/park.out" 2>&1 || fail "clearing failed: $(cat "$dir/park.out")"
@@ -2563,7 +2564,8 @@ SH
   ack_parked || fail "[relaunched] could not acknowledge the loss wake"
   open_worker again fourth
   assert_present "$state/again.parked-retained" "fixture lost the previous incarnation's park mark"
-  park_task again clear > "$dir/park.out" 2>&1 || fail "clearing a resumed worker failed: $(cat "$dir/park.out")"
+  (cd "$dir/home" && PATH="$dir/bin:$PATH" FM_HOME=. FM_STATE_OVERRIDE=./state "$park" again clear) \
+    > "$dir/park.out" 2>&1 || fail "clearing a resumed worker with an in-home relative override failed: $(cat "$dir/park.out")"
   assert_absent "$state/again.parked-retained" "clear left a park mark on a resumed worker"
 
   after=$(cd "$wt" && git status --porcelain && cat unlanded.txt)
@@ -2634,7 +2636,7 @@ SH
   chmod +x "$dir/bin/tmux" "$dir/bin/ln"
 
   for action in mark clear; do
-    for redirect in state ancestor record mark after-lock; do
+    for redirect in state ancestor relative-ancestor relative-foreign record mark after-lock; do
       home="$dir/$action-$redirect"
       state="$home/state"
       marker="$state/task.parked-retained"
@@ -2644,10 +2646,12 @@ SH
       mkdir -p "$home"
       case "$redirect" in
         state) ln -s "$foreign" "$state" || fail "could not redirect the state directory" ;;
-        ancestor)
+        ancestor|relative-ancestor)
           ln -s "$dir/foreign" "$home/indirect" || fail "could not redirect a state ancestor"
           state="$home/indirect/state"
+          [ "$redirect" = ancestor ] || state=indirect/state
           ;;
+        relative-foreign) state=../foreign/state ;;
         record)
           mkdir "$state" && ln -s "$foreign/task.meta" "$state/task.meta" \
             || fail "could not redirect the task record"
@@ -2658,20 +2662,20 @@ SH
           if [ "$redirect" = mark ]; then
             ln -s "$foreign" "$marker" || fail "could not redirect the mark destination"
           else
-            swap_lock="$state/.meta-task.lock"
+            swap_lock="$(cd "$state" && pwd -P)/.meta-task.lock"
           fi
           ;;
       esac
-      PATH="$dir/bin:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$state" \
+      (cd "$home" && PATH="$dir/bin:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$state" \
         FM_TEST_REAL_LN="$real_ln" FM_TEST_FOREIGN_STATE="$foreign" \
         FM_TEST_SWAP_LOCK="$swap_lock" FM_TEST_STATE_SWAPPED="$swapped" FM_TEST_LOCK_PROBE="$lock_probe" \
-        "$ROOT/bin/fm-park-retained.sh" task "$action" > "$home/command.out" 2>&1 &
+        exec "$ROOT/bin/fm-park-retained.sh" task "$action") > "$home/command.out" 2>&1 &
       pid=$!
       rc=0
       wait_for_exit "$pid" 100 || rc=$?
       pid=''
       case "$redirect" in
-        state|ancestor|record) assert_absent "$lock_probe" "$action attempted a lifecycle lock for the redirected $redirect" ;;
+        state|ancestor|relative-*|record) assert_absent "$lock_probe" "$action attempted a lifecycle lock for the redirected $redirect" ;;
         after-lock) assert_present "$swapped" "$action never reached the metadata lock handoff" ;;
       esac
       [ "$rc" -eq 1 ] || fail "$action accepted the $redirect redirect (exit $rc): $(cat "$home/command.out")"

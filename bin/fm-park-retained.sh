@@ -51,6 +51,28 @@ ID=$1 ACTION=$2
 case "$ID" in ''|.*|*[!A-Za-z0-9._-]*) echo "error: invalid task id: $ID" >&2; exit 2 ;; esac
 case "$ACTION" in mark|clear) ;; *) usage ;; esac
 
+refuse_path() {
+  echo "error: park $ACTION refused: $1" >&2
+  exit 1
+}
+
+fm_backlog_directory_present "$STATE" "state directory" || refuse_path "$FM_BACKLOG_TRANSITION_ERROR"
+STATE_DIR=$(fm_backlog_canonical_existing "$STATE") || refuse_path "cannot resolve state directory at $STATE"
+STATE_ROUTE=$(CDPATH='' cd -L -- "$STATE" 2>/dev/null && pwd -L) || refuse_path "cannot normalize state directory at $STATE"
+FM_HOME=$(CDPATH='' cd -L -- "$FM_HOME" 2>/dev/null && pwd -L) || refuse_path "cannot resolve the selected home"
+case "$STATE" in
+  /*) ;;
+  *)
+    HOME_DIR=$(fm_backlog_canonical_existing "$FM_HOME") || refuse_path "cannot resolve home directory at $FM_HOME"
+    case "$STATE_DIR" in
+      "$HOME_DIR"|"${HOME_DIR%/}"/*) ;;
+      *) refuse_path "relative state directory resolves outside this home at $STATE" ;;
+    esac
+    ;;
+esac
+STATE=$STATE_DIR
+FM_STATE_OVERRIDE=$STATE
+
 META="$STATE/$ID.meta"
 MARK="$STATE/$ID.parked-retained"
 LOCK=$(fm_meta_lock_path "$META") || { echo "error: could not resolve the task record lock" >&2; exit 1; }
@@ -61,11 +83,10 @@ refuse_busy() {
   exit 1
 }
 require_task_record() {
-  if ! fm_backlog_directory_present "$STATE" "state directory" \
-    || ! fm_backlog_record_present "$META" "task record" "$STATE"; then
-    echo "error: park $ACTION refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
-    exit 1
-  fi
+  fm_backlog_directory_present "$STATE_ROUTE" "state directory" || refuse_path "$FM_BACKLOG_TRANSITION_ERROR"
+  [ "$(fm_backlog_canonical_existing "$STATE_ROUTE")" = "$STATE" ] \
+    || refuse_path "state directory changed at $STATE_ROUTE"
+  fm_backlog_record_present "$META" "task record" "$STATE_ROUTE" || refuse_path "$FM_BACKLOG_TRANSITION_ERROR"
 }
 cleanup() {
   [ -z "$TMP" ] || rm -f -- "$TMP" || true
@@ -94,9 +115,8 @@ fi
   || { echo "error: $ID is placed on a remote host; its endpoint loss is not reported here" >&2; exit 1; }
 [ "$(fm_meta_get "$META" kind)" != secondmate ] \
   || { echo "error: $ID is a secondmate; park marks apply to ordinary tasks only" >&2; exit 1; }
-if { [ -e "$MARK" ] || [ -L "$MARK" ]; } && ! fm_backlog_record_present "$MARK" "park mark" "$STATE"; then
-  echo "error: park $ACTION refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
-  exit 1
+if { [ -e "$MARK" ] || [ -L "$MARK" ]; } && ! fm_backlog_record_present "$MARK" "park mark" "$STATE_ROUTE"; then
+  refuse_path "$FM_BACKLOG_TRANSITION_ERROR"
 fi
 
 if [ "$ACTION" = clear ]; then
