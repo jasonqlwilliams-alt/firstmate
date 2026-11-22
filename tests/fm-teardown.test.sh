@@ -750,13 +750,18 @@ test_teardown_manual_backend_leaves_the_backlog_to_the_operator() {
 }
 
 test_endpoint_loss_marker_survives_failed_task_retirement() {
-  local case_dir meta marker recorded_loss
+  local case_dir meta marker recorded_loss mark recorded_park
   case_dir=$(make_case endpoint-loss-retirement)
   write_meta "$case_dir" local-only ship
   meta="$case_dir/state/task-x1.meta"
   marker="$case_dir/state/task-x1.missing-endpoint"
   recorded_loss=$'tmux:firstmate:fm-task-x1\tteardown-test-task-x1'
   printf '%s\n' "$recorded_loss" > "$marker"
+  mark="$case_dir/state/task-x1.parked-retained"
+  PATH="$case_dir/fakebin:$PATH" FM_HOME="$case_dir" FM_STATE_OVERRIDE="$case_dir/state" \
+    "$ROOT/bin/fm-park-retained.sh" task-x1 mark >/dev/null \
+    || fail "could not mark the parked task"
+  recorded_park=$(cat "$mark") || fail "could not read the saved park mark"
 
   cat > "$case_dir/fakebin/rm" <<'SH'
 #!/usr/bin/env bash
@@ -774,13 +779,44 @@ SH
   assert_present "$meta" "failed teardown removed the task record"
   [ "$(cat "$marker")" = "$recorded_loss" ] \
     || fail "failed teardown lost the acknowledged endpoint-loss record"
+  [ "$(cat "$mark")" = "$recorded_park" ] || fail "failed teardown lost the park mark"
 
   rm -f "$case_dir/fakebin/rm"
   run_teardown "$case_dir" > "$case_dir/retry.out" 2>&1 \
     || fail "teardown retry failed: $(cat "$case_dir/retry.out")"
   assert_absent "$meta" "teardown retry kept the task record"
   assert_absent "$marker" "teardown retry kept the endpoint-loss record"
-  pass "teardown keeps an acknowledged endpoint loss until its task record is retired"
+  assert_absent "$mark" "teardown retry kept the park mark"
+  pass "teardown keeps endpoint-loss and park records until the task record is retired"
+}
+
+# A parked retained-copy mark only silences endpoint-loss reporting: cleanup
+# must still refuse a copy holding unlanded work, keep the mark while the task
+# record survives, and retire it with the record once the work has landed.
+test_parked_retained_mark_does_not_relax_cleanup() {
+  local case_dir mark rc
+  case_dir=$(make_case parked-retained-mark)
+  write_meta "$case_dir" local-only ship
+  mark="$case_dir/state/task-x1.parked-retained"
+  PATH="$case_dir/fakebin:$PATH" FM_HOME="$case_dir" FM_STATE_OVERRIDE="$case_dir/state" \
+    "$ROOT/bin/fm-park-retained.sh" task-x1 mark > /dev/null \
+    || fail "could not mark the parked task"
+  assert_present "$mark" "the park mark was not recorded"
+  wt_commit "$case_dir" "unlanded parked work"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "parked mark: teardown should still refuse unlanded work"
+  grep -q REFUSED "$case_dir/stderr" || fail "parked mark: no REFUSED line in stderr"
+  assert_present "$mark" "a refused cleanup dropped the park mark"
+
+  git -C "$case_dir/wt" reset -q --hard HEAD~1 || fail "could not drop the fixture commit"
+  run_teardown "$case_dir" > "$case_dir/retry.out" 2>&1 \
+    || fail "teardown of the landed parked task failed: $(cat "$case_dir/retry.out")"
+  assert_absent "$mark" "cleanup kept the park mark after retiring the task record"
+  pass "a parked retained-copy mark leaves cleanup's unlanded-work refusal intact and is retired with the record"
 }
 
 test_local_only_truly_unpushed_refuses() {
@@ -4486,6 +4522,7 @@ test_local_only_fork_remote_allows
 test_teardown_closes_the_backlog_item_itself
 test_teardown_manual_backend_leaves_the_backlog_to_the_operator
 test_endpoint_loss_marker_survives_failed_task_retirement
+test_parked_retained_mark_does_not_relax_cleanup
 test_local_only_truly_unpushed_refuses
 test_local_only_merged_to_local_main_allows
 test_no_mistakes_origin_remote_allows

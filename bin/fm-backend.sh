@@ -374,6 +374,26 @@ fm_backend_endpoint_incarnation() {
   printf '%s:%s\t%s' "$backend" "$target" "$generation"
 }
 
+fm_backend_endpoint_park_identity() {  # <meta-file>
+  local incarnation
+  incarnation=$(fm_backend_endpoint_incarnation "$1") || return 1
+  case "$incarnation" in
+    *$'\t'legacy-*) incarnation="${incarnation%$'\t'legacy-*}"$'\t' ;;
+  esac
+  printf '%s' "$incarnation"
+}
+
+# The header of bin/fm-park-retained.sh owns the park mark contract.
+fm_backend_endpoint_parked_retained() {  # <meta-file>
+  local meta=$1 mark incarnation recorded
+  case "$meta" in *.meta) ;; *) return 1 ;; esac
+  mark="${meta%.meta}.parked-retained"
+  [ -f "$mark" ] && [ ! -L "$mark" ] || return 1
+  incarnation=$(fm_backend_endpoint_park_identity "$meta") || return 1
+  recorded=$(cat "$mark" 2>/dev/null) || return 1
+  [ "$recorded" = "$incarnation" ]
+}
+
 # fm_backend_validate_task_endpoint: validate a task cleanup record entirely
 # from its durable metadata before any runtime command or cleanup mutation.
 # The validation binds the exact task id, selected backend, target, project,

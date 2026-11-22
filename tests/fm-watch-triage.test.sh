@@ -27,10 +27,10 @@ DRAIN="$ROOT/bin/fm-wake-drain.sh"
 
 TMP_ROOT=$(fm_test_tmproot fm-watch-triage-tests)
 
-ack_stopped_cycle() {  # <state>
-  local state=$1 err sequence generation
+ack_stopped_cycle() {  # <state> [drain-output]
+  local state=$1 recovered=${2:-/dev/null} err sequence generation
   err="$state/.test-cycle-drain.err"
-  FM_STATE_OVERRIDE="$state" "$DRAIN" >/dev/null 2> "$err" || return 1
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$recovered" 2> "$err" || return 1
   sequence=$(sed -n 's/^WAKE_ACK_REQUIRED:.*--ack-through \([0-9][0-9]*\) --recovery-generation [A-Za-z0-9._-][A-Za-z0-9._-]*$/\1/p' "$err")
   generation=$(sed -n 's/^WAKE_ACK_REQUIRED:.*--ack-through [0-9][0-9]* --recovery-generation \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' "$err")
   rm -f "$err"
@@ -2322,6 +2322,415 @@ test_missing_tmux_endpoint_surfaces_once() (
     done
     pass "real tmux: a closed $task window raises one stale wake for each recorded incarnation"
   done
+)
+
+# A parked task whose worker window was deliberately closed while its isolated
+# copy is kept must not keep alarming about the expected endpoint loss once the
+# park mark is recorded. The mark leaves the copy and its unlanded work alone,
+# a relaunch or an explicit clear restores the alarm, and an unmarked parked
+# task still raises the ordinary loss wake.
+test_parked_retained_copy_suppresses_endpoint_loss() (
+  local tmux_bin socket dir state worker_window out pid='' park_pid='' wt before after park lock rc tries control_lock lease_lock task action
+  local saved_mark owner representation real_cat
+  tmux_bin=$(command -v tmux) || { echo "skip: tmux is required for the parked endpoint regression"; return 0; }
+  park="$ROOT/bin/fm-park-retained.sh"
+  socket="fm-watch-parked-$$-$RANDOM"
+  dir=$(fm_test_tmproot fm-watch-parked) || fail "could not create the parked endpoint fixture"
+  trap '[ -z "$park_pid" ] || reap "$park_pid"; [ -z "$pid" ] || reap "$pid"; "$tmux_bin" -L "$socket" kill-server 2>/dev/null || true' EXIT
+  mkdir -p "$dir/bin"
+  printf '#!/usr/bin/env bash\nexec %q -L %q "$@"\n' "$tmux_bin" "$socket" > "$dir/bin/tmux"
+  chmod +x "$dir/bin/tmux"
+  "$dir/bin/tmux" -f /dev/null new-session -d -s parked -c "$dir" || fail "could not start the private tmux server"
+
+  state="$dir/home/state"; out="$dir/home/watch.out"
+  mkdir -p "$state"
+  wt="$dir/copy"
+  git init -q "$wt" || fail "could not create the retained copy"
+  printf 'kept work\n' > "$wt/unlanded.txt" || fail "could not write the retained work"
+  before=$(cd "$wt" && git status --porcelain && cat unlanded.txt)
+
+  watch_parked() {
+    PATH="$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" \
+      FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+      FM_PAUSE_RESURFACE_SECS=999999 FM_STALE_ESCALATE_SECS=999999 exec "$WATCH" > "$out"
+  }
+  ack_parked() { FM_HOME="$dir/home" ack_stopped_cycle "$state" "$@"; }
+  park_task() { PATH="$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" "$park" "$@"; }
+  lease_task() { FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=main "$ROOT/bin/fm-lease.sh" "$@"; }
+
+  rc=0
+  FM_HOME="$dir/absent-home" FM_STATE_OVERRIDE='' "$park" > "$dir/park.out" 2>&1 || rc=$?
+  [ "$rc" -eq 2 ] || fail "park without arguments exited $rc"
+  assert_absent "$dir/absent-home" "park usage created a missing home"
+  if ! grep -Fq 'fm-park-retained.sh <task-id> mark' "$dir/park.out" \
+    || ! grep -Fq 'fm-park-retained.sh <task-id> clear' "$dir/park.out"; then
+    fail "park usage did not show both operations: $(cat "$dir/park.out")"
+  fi
+  for action in mark clear; do
+    rc=0
+    FM_HOME="$dir/absent-home" FM_STATE_OVERRIDE='' "$park" nosuch "$action" > "$dir/park.out" 2>&1 || rc=$?
+    [ "$rc" -eq 1 ] || fail "$action without a task home exited $rc"
+    assert_absent "$dir/absent-home" "refused $action created a missing home"
+  done
+
+  fm_write_meta "$state/remote.meta" 'window=parked:fm-remote' kind=ship remote_host=fixture-host spawn_gen=first
+  fm_write_meta "$state/mate.meta" 'window=parked:fm-mate' kind=secondmate spawn_gen=first
+  for task in remote mate; do
+    printf 'tmux:parked:fm-%s\tfirst\n' "$task" > "$state/$task.parked-retained"
+    for action in mark clear; do
+      rc=0
+      park_task "$task" "$action" > "$dir/park.out" 2>&1 || rc=$?
+      [ "$rc" -eq 1 ] || fail "$action accepted the $task record: $(cat "$dir/park.out")"
+      [ "$(cat "$state/$task.parked-retained")" = "tmux:parked:fm-$task"$'\tfirst' ] \
+        || fail "refused $action changed the stored mark for $task"
+    done
+    rm -f "$state/$task.meta" "$state/$task.parked-retained"
+  done
+
+  expect_quiet() {
+    local label=$1 poll
+    watch_parked & pid=$!
+    for poll in 1 2 3; do
+      wait_poll_cycle "$state" "$pid" \
+        || fail "[$label] the parked endpoint loss alarmed on poll $poll: $(cat "$out")"
+    done
+    ! awk -F '\t' -v w="$worker_window" '$3 == "stale" && $4 == w { found = 1 } END { exit !found }' \
+      "$state/.wake-queue" 2>/dev/null || fail "[$label] a parked loss wake was queued"
+    reap "$pid"; pid=''
+    ack_parked || fail "[$label] could not acknowledge the fixture watcher stop"
+  }
+
+  open_worker() {  # <task> <spawn-gen>
+    local task=$1 gen=$2
+    worker_window="parked:fm-$task"
+    "$dir/bin/tmux" new-window -d -t parked: -n "fm-$task" -- bash --noprofile --norc -i \
+      || fail "could not create the fixture window for $task"
+    printf 'window=%s\nbackend=tmux\nkind=ship\nharness=codex\nworktree=%s\n' \
+      "$worker_window" "$wt" > "$state/$task.meta"
+    if [ -n "$gen" ]; then
+      printf 'spawn_gen=%s\n' "$gen" >> "$state/$task.meta"
+    fi
+    if [ ! -e "$state/$task.status" ]; then
+      printf 'paused: parked for later, copy retained\n' > "$state/$task.status"
+      seen_sig "$state/$task.status" > "$state/.seen-${task}_status"
+    fi
+  }
+
+  close_worker() {  # <task> <spawn-gen>
+    open_worker "$@"
+    "$dir/bin/tmux" kill-window -t "$worker_window" || fail "could not close the fixture window for $1"
+  }
+
+  expect_loss() {
+    local label=$1
+    watch_parked & pid=$!
+    wait_for_exit "$pid" 150 || fail "[$label] the lost endpoint did not wake the watcher: $(cat "$out")"
+    pid=''
+    grep -Fxq "stale: $worker_window (the recorded endpoint is gone)" "$out" \
+      || fail "[$label] unexpected watcher output: $(cat "$out")"
+  }
+
+  # Reproduction: an unmarked parked task alarms on the expected loss.
+  close_worker plain first
+  expect_loss unmarked
+  printf '%s\n' "$$" > "$state/.lock"
+  FM_LEASE_HOLDER_PID=$$ lease_task claim plain >/dev/null || fail "main could not claim the task lease"
+  rc=0
+  FM_SUPERVISION_ACTOR=branch park_task plain mark > "$dir/park.out" 2>&1 || rc=$?
+  [ "$rc" -eq 6 ] && [ ! -e "$state/plain.parked-retained" ] \
+    || fail "the branch was able to mark a task leased by main"
+  FM_SUPERVISION_ACTOR=main park_task plain mark > "$dir/park.out" 2>&1 \
+    || fail "marking the already closed task failed: $(cat "$dir/park.out")"
+  rc=0
+  FM_SUPERVISION_ACTOR=branch park_task plain clear > "$dir/park.out" 2>&1 || rc=$?
+  [ "$rc" -eq 6 ] && [ -f "$state/plain.parked-retained" ] \
+    || fail "the branch was able to clear a task leased by main"
+  lease_task release plain || fail "main could not release the task lease"
+  rm -f "$state/.lock"
+  ack_parked "$dir/recovered" || fail "could not acknowledge the pending loss wake"
+  awk -F '\t' -v w="$worker_window" -v p="stale: $worker_window (the recorded endpoint is gone)" '
+    $3 == "stale" && $4 == w { count++; if ($5 != p) wrong_payload=1 }
+    END { exit (count != 1 || wrong_payload) }
+  ' "$dir/recovered" || fail "drain did not present exactly one pending endpoint-loss wake"
+  expect_quiet marked-after-queue
+  park_task plain clear > "$dir/park.out" 2>&1 || fail "clearing after acknowledgement failed: $(cat "$dir/park.out")"
+  expect_quiet cleared-after-acknowledgement
+
+  # The park mark silences the loss for this incarnation.
+  open_worker held first
+  if park_task held mark > "$dir/park.out" 2>&1 || [ -e "$state/held.parked-retained" ]; then
+    fail "mark accepted an open tmux window"
+  fi
+  "$dir/bin/tmux" kill-window -t "$worker_window" || fail "could not close the held worker's window"
+  printf 'window=unverified:fm-other\nbackend=zellij\nkind=ship\nspawn_gen=first\n' > "$state/other.meta"
+  if park_task other mark > "$dir/park.out" 2>&1 || [ -e "$state/other.parked-retained" ]; then
+    fail "mark accepted a backend that cannot confirm a missing endpoint"
+  fi
+  rm -f "$state/other.meta"
+  mkdir "$state/.control-held.lock" || fail "could not stage a stale control lock"
+  dead_pid > "$state/.control-held.lock/pid"
+  (cd "$dir/home" && PATH="$dir/bin:$PATH" FM_HOME=. FM_STATE_OVERRIDE=./state "$park" held mark) \
+    > "$dir/park.out" 2>&1 || fail "marking with an in-home relative override failed: $(cat "$dir/park.out")"
+  expect_quiet marked
+  # Clearing the mark restores the alarm for the same lost endpoint.
+  park_task held clear > "$dir/park.out" 2>&1 || fail "clearing failed: $(cat "$dir/park.out")"
+  expect_loss cleared
+  ack_parked || fail "[cleared] could not acknowledge the loss wake"
+  # A mark from an earlier incarnation does not silence a relaunched worker's loss.
+  close_worker again ''
+  park_task again mark > "$dir/park.out" 2>&1 || fail "legacy marking failed: $(cat "$dir/park.out")"
+  saved_mark=$(cat "$state/again.parked-retained") || fail "could not save the original park mark"
+  printf 'spawn_gen=legacy-20261122T000000Z-123\n' >> "$state/again.meta"
+  expect_quiet teardown-stamp
+
+  lock="$state/.meta-again.lock"
+  mkdir -p "$lock" "$dir/lock-bin" || fail "could not hold the replacement's metadata lock"
+  printf '%s\n' "$$" > "$lock/pid"
+  printf '#!/usr/bin/env bash\n: > %q\nexec %q "$@"\n' "$dir/park-waiting" "$(command -v sleep)" > "$dir/lock-bin/sleep"
+  chmod +x "$dir/lock-bin/sleep"
+  PATH="$dir/lock-bin:$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" \
+    "$park" again mark > "$dir/park.out" 2>&1 &
+  park_pid=$!
+  for ((tries=0; tries<100; tries++)); do
+    [ ! -e "$dir/park-waiting" ] || break
+    sleep 0.1
+  done
+  [ -e "$dir/park-waiting" ] || fail "mark never waited for the replacement's metadata lock"
+  if ! sed 's/^spawn_gen=.*/spawn_gen=second/' "$state/again.meta" > "$state/.again-replacement" \
+    || ! mv "$state/.again-replacement" "$state/again.meta"; then
+    fail "could not publish replacement metadata"
+  fi
+  if ! rm -f "$lock/pid" || ! rmdir "$lock"; then
+    fail "could not release the replacement's metadata lock"
+  fi
+  rc=0
+  wait_for_exit "$park_pid" 100 || rc=$?
+  park_pid=''
+  [ "$rc" -eq 1 ] || fail "mark racing a replacement exited $rc: $(cat "$dir/park.out")"
+
+  control_lock="$state/.control-again.lock"
+  lease_lock="$state/.fm-lease-command.lock"
+  rm -f "$dir/park-waiting"
+  mkdir "$lease_lock" || fail "could not hold the supervision lease lock"
+  printf '%s\n' "$$" > "$lease_lock/pid"
+  PATH="$dir/lock-bin:$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=main \
+    "$park" again mark > "$dir/park.out" 2>&1 &
+  park_pid=$!
+  for ((tries=0; tries<100; tries++)); do
+    [ ! -e "$dir/park-waiting" ] || break
+    sleep 0.1
+  done
+  [ -e "$dir/park-waiting" ] || fail "mark did not wait for the supervision lease lock"
+  mkdir "$control_lock" "$lock" || fail "could not hold the relaunch locks during the lease wait"
+  printf '%s\n' "$$" | tee "$control_lock/pid" > "$lock/pid"
+  if ! sed 's/^spawn_gen=.*/spawn_gen=third/' "$state/again.meta" > "$state/.again-replacement" \
+    || ! mv "$state/.again-replacement" "$state/again.meta"; then
+    fail "could not publish the replacement during the lease wait"
+  fi
+  rm -f "$control_lock/pid" "$lock/pid" "$lease_lock/pid"
+  rmdir "$lock" "$control_lock" "$lease_lock" || fail "could not finish the relaunch handoff"
+  rc=0
+  wait_for_exit "$park_pid" 100 || rc=$?
+  park_pid=''
+  if [ "$rc" -ne 1 ] || ! grep -Fq 'recorded endpoint changed' "$dir/park.out"; then
+    fail "mark did not reject the replacement after the lease handoff: $(cat "$dir/park.out")"
+  fi
+  [ "$(cat "$state/again.parked-retained")" = "$saved_mark" ] || fail "mark replaced the original worker's mark during the lease wait"
+  rm -f "$dir/lock-bin/sleep"
+
+  cat > "$dir/lock-bin/cat" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = "$FM_TEST_CONTROL_LOCK/pid" ] && [ -f "$1" ]; then
+  if [ -L "$FM_TEST_CONTROL_LOCK" ]; then
+    unlink "$FM_TEST_CONTROL_LOCK" || exit 1
+  fi
+  rm -f "$FM_TEST_RELAUNCH_OWNER/pid"
+  rmdir "$FM_TEST_RELAUNCH_OWNER" || exit 1
+fi
+exec "$FM_TEST_REAL_CAT" "$@"
+SH
+  chmod +x "$dir/lock-bin/cat"
+  real_cat=$(command -v cat) || fail "could not resolve cat for the relaunch fixture"
+  for representation in directory symlink; do
+    owner=$control_lock
+    if [ "$representation" = symlink ]; then
+      owner="$control_lock.owner.fixture"
+      ln -s "$owner" "$control_lock" || fail "could not stage the relaunch lock symlink"
+    fi
+    mkdir "$owner" || fail "could not stage a live relaunch lock"
+    printf '%s\n' "$$" > "$owner/pid"
+    rc=0
+    PATH="$dir/lock-bin:$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=main \
+      FM_TEST_CONTROL_LOCK="$control_lock" FM_TEST_RELAUNCH_OWNER="$owner" \
+      FM_TEST_REAL_CAT="$real_cat" "$park" again mark > "$dir/park.out" 2>&1 &
+    park_pid=$!
+    wait_for_exit "$park_pid" 100 || rc=$?
+    park_pid=''
+    [ ! -e "$owner" ] && [ ! -L "$control_lock" ] || fail "relaunch did not release its $representation lock during acquisition"
+    [ "$rc" -eq 1 ] || fail "mark continued after the relaunch released its $representation lock: $(cat "$dir/park.out")"
+    [ "$(cat "$state/again.parked-retained")" = "$saved_mark" ] || fail "mark replaced the original worker's mark"
+  done
+  expect_loss relaunched
+  ack_parked || fail "[relaunched] could not acknowledge the loss wake"
+  open_worker again fourth
+  assert_present "$state/again.parked-retained" "fixture lost the previous incarnation's park mark"
+  (cd "$dir/home" && PATH="$dir/bin:$PATH" FM_HOME=. FM_STATE_OVERRIDE=./state "$park" again clear) \
+    > "$dir/park.out" 2>&1 || fail "clearing a resumed worker with an in-home relative override failed: $(cat "$dir/park.out")"
+  assert_absent "$state/again.parked-retained" "clear left a park mark on a resumed worker"
+
+  after=$(cd "$wt" && git status --porcelain && cat unlanded.txt)
+  [ "$before" = "$after" ] || fail "the park mark changed the retained copy"
+  park_task nosuch mark > "$dir/park.out" 2>&1 && fail "marking an unknown task succeeded"
+  pass "real tmux: a parked retained-copy mark silences only its own incarnation's endpoint loss"
+)
+
+test_park_wait_stops_when_home_is_retired() (
+  local dir home retired action real_sleep rc pid=''
+  dir=$(fm_test_tmproot fm-park-retired-home) || fail "could not create the retirement fixture"
+  trap '[ -z "$pid" ] || reap "$pid"' EXIT
+  real_sleep=$(command -v sleep) || fail "could not resolve sleep for the retirement fixture"
+  mkdir "$dir/bin"
+  cat > "$dir/bin/sleep" <<'SH'
+#!/usr/bin/env bash
+if [ -d "$FM_HOME" ]; then
+  mv "$FM_HOME" "$FM_TEST_RETIRED_HOME" || exit 1
+fi
+exec "$FM_TEST_REAL_SLEEP" "$@"
+SH
+  chmod +x "$dir/bin/sleep"
+
+  for action in mark clear; do
+    home="$dir/$action"
+    retired="$dir/$action-retired"
+    mkdir -p "$home/state/.fm-lease-command.lock"
+    printf '%s\n' "$$" > "$home/state/.fm-lease-command.lock/pid"
+    fm_write_meta "$home/state/task.meta" 'window=parked:fm-task' kind=ship spawn_gen=first
+    printf 'tmux:parked:fm-task\tfirst\n' > "$home/state/task.parked-retained"
+    PATH="$dir/bin:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_SUPERVISION_ACTOR=main \
+      FM_TEST_REAL_SLEEP="$real_sleep" FM_TEST_RETIRED_HOME="$retired" \
+      "$ROOT/bin/fm-park-retained.sh" task "$action" > "$dir/command.out" 2>&1 &
+    pid=$!
+    rc=0
+    wait_for_exit "$pid" 100 || rc=$?
+    pid=''
+    assert_present "$retired/state/.fm-lease-command.lock/pid" "$action never waited on the retiring home's lease lock"
+    if [ "$rc" -ne 1 ] || ! grep -Fq 'lock directory disappeared' "$dir/command.out"; then
+      fail "$action did not refuse after home retirement (exit $rc): $(cat "$dir/command.out")"
+    fi
+    assert_absent "$home" "$action recreated the retired home"
+    [ "$(cat "$retired/state/task.parked-retained")" = $'tmux:parked:fm-task\tfirst' ] \
+      || fail "$action changed the retired home's saved mark"
+  done
+  pass "park mark and clear stop waiting when the home is retired"
+)
+
+test_park_refuses_redirected_records() (
+  local dir foreign home state marker redirect action real_ln swap_lock swapped lock_probe rc pid=''
+  dir=$(fm_test_tmproot fm-park-state-boundary) || fail "could not create the park boundary fixture"
+  trap '[ -z "$pid" ] || reap "$pid"' EXIT
+  real_ln=$(command -v ln) || fail "could not resolve ln for the park boundary fixture"
+  foreign="$dir/foreign/state"
+  mkdir -p "$foreign" "$dir/bin"
+  fm_write_meta "$foreign/task.meta" 'window=parked:fm-task' kind=ship spawn_gen=first
+  printf 'tmux:parked:fm-task\tretained\n' > "$foreign/task.parked-retained"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/bin/tmux"
+  cat > "$dir/bin/ln" <<'SH'
+#!/usr/bin/env bash
+case "${3:-}" in */.control-task.lock) : > "$FM_TEST_LOCK_PROBE" ;; esac
+if [ -n "$FM_TEST_SWAP_LOCK" ] && [ "${3:-}" = "$FM_TEST_SWAP_LOCK" ] && [ ! -e "$FM_TEST_STATE_SWAPPED" ]; then
+  mv "$FM_STATE_OVERRIDE" "$FM_STATE_OVERRIDE-original" || exit 1
+  "$FM_TEST_REAL_LN" -s "$FM_TEST_FOREIGN_STATE" "$FM_STATE_OVERRIDE" || exit 1
+  : > "$FM_TEST_STATE_SWAPPED"
+fi
+exec "$FM_TEST_REAL_LN" "$@"
+SH
+  chmod +x "$dir/bin/tmux" "$dir/bin/ln"
+
+  for action in mark clear; do
+    for redirect in state ancestor relative-ancestor relative-foreign absolute-traversal absolute-foreign record mark after-lock; do
+      home="$dir/$action-$redirect"
+      state="$home/state"
+      marker="$state/task.parked-retained"
+      swapped="$home/state-swapped"
+      lock_probe="$home/lock-attempted"
+      swap_lock=''
+      mkdir -p "$home"
+      case "$redirect" in
+        state) ln -s "$foreign" "$state" || fail "could not redirect the state directory" ;;
+        ancestor|relative-ancestor)
+          ln -s "$dir/foreign" "$home/indirect" || fail "could not redirect a state ancestor"
+          state="$home/indirect/state"
+          [ "$redirect" = ancestor ] || state=indirect/state
+          ;;
+        relative-foreign) state=../foreign/state ;;
+        absolute-traversal) state="$home/../foreign/state" ;;
+        absolute-foreign) state="$foreign" ;;
+        record)
+          if ! mkdir "$state" || ! ln -s "$foreign/task.meta" "$state/task.meta"; then
+            fail "could not redirect the task record"
+          fi
+          ;;
+        mark|after-lock)
+          mkdir "$state"
+          fm_write_meta "$state/task.meta" 'window=parked:fm-task' kind=ship spawn_gen=first
+          if [ "$redirect" = mark ]; then
+            ln -s "$foreign" "$marker" || fail "could not redirect the mark destination"
+          else
+            swap_lock="$(cd "$state" && pwd -P)/.meta-task.lock"
+          fi
+          ;;
+      esac
+      (cd "$home" && PATH="$dir/bin:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$state" \
+        FM_TEST_REAL_LN="$real_ln" FM_TEST_FOREIGN_STATE="$foreign" \
+        FM_TEST_SWAP_LOCK="$swap_lock" FM_TEST_STATE_SWAPPED="$swapped" FM_TEST_LOCK_PROBE="$lock_probe" \
+        exec "$ROOT/bin/fm-park-retained.sh" task "$action") > "$home/command.out" 2>&1 &
+      pid=$!
+      rc=0
+      wait_for_exit "$pid" 100 || rc=$?
+      pid=''
+      case "$redirect" in
+        state|ancestor|relative-*|absolute-*|record) assert_absent "$lock_probe" "$action attempted a lifecycle lock for the redirected $redirect" ;;
+        after-lock) assert_present "$swapped" "$action never reached the metadata lock handoff" ;;
+      esac
+      [ "$rc" -eq 1 ] || fail "$action accepted the $redirect redirect (exit $rc): $(cat "$home/command.out")"
+      [ "$(cat "$foreign/task.parked-retained")" = $'tmux:parked:fm-task\tretained' ] \
+        || fail "$action changed a foreign park mark through the $redirect redirect"
+    done
+  done
+  pass "park mark and clear refuse redirected state, task records, and marks"
+)
+
+test_parked_herdr_endpoint_does_not_hide_recycled_target_loss() (
+  local dir state target=parked-test:w1:p2 pid=''
+  dir=$(fm_test_tmproot fm-watch-parked-herdr) || fail "could not create the Herdr park fixture"
+  trap '[ -z "$pid" ] || reap "$pid"' EXIT
+  state="$dir/home/runtime-state"
+  mkdir -p "$state" "$dir/bin"
+  cat > "$dir/bin/herdr" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'pane get w1:p2 --session parked-test') printf '%s\n' '{"error":{"code":"pane_not_found"}}' ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$dir/bin/herdr"
+  fm_write_meta "$state/a-parked.meta" "window=$target" backend=herdr kind=ship \
+    herdr_terminal_id=retained-terminal spawn_gen=retained-generation
+  PATH="$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" \
+    "$ROOT/bin/fm-park-retained.sh" a-parked mark >/dev/null || fail "could not mark the closed Herdr worker"
+  fm_write_meta "$state/z-unmarked.meta" "window=$target" backend=herdr kind=ship \
+    herdr_terminal_id=replacement-terminal spawn_gen=replacement-generation
+
+  PATH="$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" \
+    FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$dir/watch.out" &
+  pid=$!
+  wait_for_exit "$pid" 100 || fail "the unmarked Herdr worker's loss did not wake the watcher: $(cat "$dir/watch.out")"
+  pid=''
+  grep -Fxq "stale: $target (the recorded endpoint is gone)" "$dir/watch.out" \
+    || fail "unexpected watcher output: $(cat "$dir/watch.out")"
+  assert_present "$state/z-unmarked.missing-endpoint" "loss did not belong to the unmarked worker"
+  assert_absent "$state/a-parked.missing-endpoint" "loss was also recorded for the parked worker"
+  pass "a park mark leaves a recycled Herdr target eligible for an unmarked worker's loss"
 )
 
 test_backlog_hold_suppresses_only_an_agentless_lane() {
@@ -5219,6 +5628,10 @@ test_nonterminal_stale_paused_absorbed_then_resurfaced
 test_exited_declared_pause_is_bounded_but_live_gate_surfaces
 test_missing_tmux_endpoint_surfaces_once || exit 1
 test_endpoint_loss_and_ordinary_stale_are_presented_independently || exit 1
+test_parked_retained_copy_suppresses_endpoint_loss || exit 1
+test_park_wait_stops_when_home_is_retired || exit 1
+test_park_refuses_redirected_records || exit 1
+test_parked_herdr_endpoint_does_not_hide_recycled_target_loss || exit 1
 test_backlog_hold_suppresses_only_an_agentless_lane
 test_absorbed_replacement_wait_does_not_inherit_the_old_throttle
 test_live_declared_wait_churn_honors_the_resurface_throttle

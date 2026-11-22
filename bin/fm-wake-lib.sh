@@ -570,12 +570,7 @@ fm_lock_mid_acquire_is_fresh() {
 }
 
 fm_lock_recheck_stale_owner() {
-  local lockdir=$1 expected_owner=$2 expected_pid=$3 actual_pid
-  if [ -n "$expected_owner" ]; then
-    fm_lock_points_to_owner "$lockdir" "$expected_owner" || return 1
-  elif [ -e "$lockdir" ] || [ -L "$lockdir" ]; then
-    [ -d "$lockdir" ] && [ ! -L "$lockdir" ] || return 1
-  fi
+  local lockdir=$1 expected_owner=$2 expected_pid=$3 mode=${4:-} actual_pid
   actual_pid=$(cat "$lockdir/pid" 2>/dev/null || true)
   [ "$actual_pid" = "$expected_pid" ] || return 1
   if fm_pid_alive "$actual_pid"; then
@@ -584,7 +579,11 @@ fm_lock_recheck_stale_owner() {
   if fm_lock_mid_acquire_is_fresh "$lockdir" "$actual_pid"; then
     return 1
   fi
-  return 0
+  if [ -n "$expected_owner" ]; then
+    fm_lock_points_to_owner "$lockdir" "$expected_owner"
+  elif [ "$mode" = same-owner ] || [ -e "$lockdir" ] || [ -L "$lockdir" ]; then
+    [ -d "$lockdir" ] && [ ! -L "$lockdir" ]
+  fi
 }
 
 FM_RECOVERY_MARKER_TOKEN=
@@ -896,8 +895,10 @@ fm_recovery_marker_reopen_announced() {
   fm_recovery_transition "$1" reopen-announced
 }
 
+# same-owner checks stale-owner recovery against the initially observed lock.
+# A disappearing lifecycle lock can mean another action just finished.
 fm_lock_try_acquire() {
-  local lockdir=$1 parent pid steal cur rc steal_owner primary_owner current
+  local lockdir=$1 mode=${2:-} parent pid steal cur rc steal_owner primary_owner='' current
   FM_LOCK_HELD_PID=
   FM_LOCK_OWNER_DIR=
   FM_LOCK_RECOVERED_PID=
@@ -915,6 +916,9 @@ fm_lock_try_acquire() {
   # Removal can race creation, and a deleted working directory still passes
   # the parent check for relative paths. There is no absent lock to reclaim.
   [ -e "$lockdir" ] || [ -L "$lockdir" ] || return 1
+  if [ "$mode" = same-owner ] && [ -L "$lockdir" ]; then
+    primary_owner=$(fm_lock_link_owner "$lockdir") || return 1
+  fi
 
   fm_current_pid current || return 1
   pid=$(cat "$lockdir/pid" 2>/dev/null || true)
@@ -971,12 +975,15 @@ fm_lock_try_acquire() {
     return 1
   fi
 
-  primary_owner=
-  if [ -L "$lockdir" ]; then
-    primary_owner=$(fm_lock_link_owner "$lockdir" 2>/dev/null || true)
+  if [ "$mode" = same-owner ]; then
+    cur=$pid
+  else
+    if [ -L "$lockdir" ]; then
+      primary_owner=$(fm_lock_link_owner "$lockdir" 2>/dev/null || true)
+    fi
+    cur=$(cat "$lockdir/pid" 2>/dev/null || true)
   fi
-  cur=$(cat "$lockdir/pid" 2>/dev/null || true)
-  if ! fm_lock_recheck_stale_owner "$lockdir" "$primary_owner" "$cur"; then
+  if ! fm_lock_recheck_stale_owner "$lockdir" "$primary_owner" "$cur" "$mode"; then
     fm_lock_release "$steal"
     FM_LOCK_HELD_PID=$(cat "$lockdir/pid" 2>/dev/null || true)
     FM_LOCK_OWNER_DIR=
@@ -1006,11 +1013,17 @@ fm_lock_try_acquire() {
   return "$rc"
 }
 
-# Preserve the acquire-before-return contract even if the parent disappears:
-# retry at the ordinary 0.1s cadence, without recreating the parent directory.
+# Retry at the ordinary 0.1s cadence, without recreating the parent directory.
+# By default, a temporarily missing parent does not interrupt the wait.
+# With existing-parent, a missing parent ends the wait with failure.
 fm_lock_acquire_wait() {
-  local lockdir=$1
+  local lockdir=$1 mode=${2:-} parent=${1%/*}
+  [ "$parent" != "$lockdir" ] || parent=.
   while ! fm_lock_try_acquire "$lockdir"; do
+    if [ "$mode" = existing-parent ] && [ ! -d "${parent:-/}" ]; then
+      echo "error: lock directory disappeared: ${parent:-/}" >&2
+      return 1
+    fi
     sleep 0.1
   done
 }

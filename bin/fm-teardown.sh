@@ -534,7 +534,7 @@ teardown_release_meta_lock() {
   [ "$META_LOCK_HELD" = 1 ] || return 0
   # A failed retirement can leave a live record that still needs loss deduplication.
   if [ ! -e "$META" ] && [ ! -L "$META" ]; then
-    rm -f "$STATE/$ID.missing-endpoint" || true
+    rm -f "$STATE/$ID.missing-endpoint" "$STATE/$ID.parked-retained" || true
   fi
   fm_lock_release "$META_LOCK" || true
   META_LOCK_HELD=0
@@ -3403,7 +3403,7 @@ cleanup_firstmate_home_children() {
       "$sub_state/$child_id.grok-turnend-token" "$sub_state/$child_id.kimi-turnend-token" \
       "$sub_state/$child_id.muse-session" "$sub_state/$child_id.muse-session-current" \
       "$sub_state/$child_id.cursor-session" "$sub_state/$child_id.reconcile-nudged" \
-      "$sub_state/$child_id.missing-endpoint" \
+      "$sub_state/$child_id.missing-endpoint" "$sub_state/$child_id.parked-retained" \
       "$sub_state/.$child_id.branch-outcome-index"
     rm -rf "$sub_state/$child_id.agy-hooks"
   done
