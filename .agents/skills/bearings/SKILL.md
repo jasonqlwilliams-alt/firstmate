@@ -90,7 +90,7 @@ Board answers are acted on later under the normal authority rules; this skill's 
 ## Lavish board mode
 
 `/bearings lavish` adds an interactive fleet board and its linked companion detail page beside the unchanged chat digest; the captain answers Captain's Call items on the board instead of replying in chat.
-`bin/fm-bearings-board.sh` owns every board mechanic - the stable board path, the static sibling detail page linked from the board's navigation and its Charted Next and Recently Landed headers, the optional Cursor Canvas export, fm-bearings-board.v1 payload validation, template injection, live Lavish session verification and ended-session reopening, the any-origin answer binding, and listener registration.
+`bin/fm-bearings-board.sh` owns every board mechanic - the stable board path, the static sibling detail page linked from the board's navigation and its Charted Next and Recently Landed headers, the optional Cursor Canvas export, fm-bearings-board.v1 payload validation, template injection, live Lavish session verification, the any-origin answer binding, and listener registration.
 
 Use the fleet snapshot as source data and compose a separate JSON file with schema `fm-bearings-board.v1`.
 Apply the same ranking judgment as the chat digest and follow these board rules:
@@ -137,7 +137,10 @@ Apply the same ranking judgment as the chat digest and follow these board rules:
 - Every Captain's Call item and every Underway, Recently Landed, and Charted Next row carries an explicit `repo` field. Fill it from the snapshot and task records wherever known; use null or an empty string only as the deliberate genuinely-no-repo marker, in which case the template may show the internal id. Ids otherwise stay in the payload only as the routing channel, and any prose you compose names blockers in plain words.
 
 Run `bin/fm-bearings-board.sh build <data.json>` once, passing the path to the composed board payload as its argument.
-Its serve-first sequence publishes the board, establishes and verifies its Lavish session with `lavish-axi`, reopens an ended session when necessary, and only then binds the answer source and proves a live polling listener; use the session URL it prints in the chat digest.
+Pass `--reopen` only when the user asked for the board again or something urgent needs them.
+A plain build leaves a board the user closed shut, says so, and does not arm its listener.
+Its serve-first sequence publishes the board, establishes and verifies its Lavish session with `lavish-axi`, and only then binds the answer source and proves a live polling listener.
+Use the session URL it prints when that session is live.
 Never bind or arm the board before its session is listed open.
 Never run `lavish-axi poll` for the board yourself: the armed source's supervised runner owns the blocking poll, and both the build and the watcher's ordinary reconcile repair a missing listener, so no conversational turn ever blocks on the board.
 

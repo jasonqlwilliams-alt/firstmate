@@ -41,12 +41,19 @@ lavish_board_live() {  # <establish output> <canonical-board-path>
 }
 
 # Establish the board session and PROVE it is live before anything arms a poll
-# on it. A session the captain ended is reopened once - the captain asked for
-# this board, which is exactly the attention `--reopen` exists for - and a
-# session that is still not live after that refuses the build rather than
-# arming a poll that can never attach.
-establish_board_session() {  # <board>
-  local board=$1 real out status version
+# on it. The caller passes --reopen only when the user asked for the board
+# again or something urgent needs them. Without that flag this helper never
+# calls lavish-axi --reopen: a session the user ended stays closed, the build
+# says so and exits 0, and nothing is armed. A session that is still not live
+# after an explicit reopen, or that is not live for any reason other than
+# user-ended, refuses the build rather than arming a poll that can never attach.
+establish_board_session() {  # <board> [--reopen]
+  local board=$1 allow_reopen=0 real out status version
+  if [ "${2-}" = --reopen ]; then
+    allow_reopen=1
+  elif [ -n "${2-}" ]; then
+    fail "unknown board session option: ${2-}"
+  fi
   BOARD_SESSION_REOPENED=0
   real=$(board_realpath "$board") || fail "cannot resolve the board path: $board"
   out=$(lavish-axi "$board") || fail "cannot establish the board Lavish session"
@@ -55,16 +62,26 @@ establish_board_session() {  # <board>
     printf 'session: live\n'
     return 0
   fi
-  out=$(lavish-axi "$board" --reopen) || fail "cannot reopen the ended board Lavish session"
-  printf '%s\n' "$out"
-  if lavish_board_live "$out" "$real"; then
-    BOARD_SESSION_REOPENED=1
-    printf 'session: reopened\n'
-    return 0
-  fi
   status=$(lavish_status_field "$out")
+  if [ "$allow_reopen" -eq 1 ]; then
+    out=$(lavish-axi "$board" --reopen) || fail "cannot reopen the ended board Lavish session"
+    printf '%s\n' "$out"
+    if lavish_board_live "$out" "$real"; then
+      BOARD_SESSION_REOPENED=1
+      printf 'session: reopened\n'
+      return 0
+    fi
+    status=$(lavish_status_field "$out")
+    version=$(lavish-axi --version 2>/dev/null | tr -d '[:space:]')
+    fail "the board Lavish session is not live after reopening it (lavish-axi ${version:-version-unknown} reported status ${status:-none}); refusing to arm a poll on an ended session"
+  fi
+  if [ "$status" = user-ended ]; then
+    printf 'session: closed\n'
+    printf 'the user closed this board; pass --reopen to %s build to open it again\n' "$(basename "$0")"
+    exit 0
+  fi
   version=$(lavish-axi --version 2>/dev/null | tr -d '[:space:]')
-  fail "the board Lavish session is not live after reopening it (lavish-axi ${version:-version-unknown} reported status ${status:-none}); refusing to arm a poll on an ended session"
+  fail "the board Lavish session is not live (lavish-axi ${version:-version-unknown} reported status ${status:-none}); refusing to arm a poll on an ended session"
 }
 
 # The OWNER column bin/fm-procevent.sh already publishes: live, none,

@@ -108,13 +108,21 @@ lavish-axi 2>/dev/null | grep -F "$BOARD," | grep -q ',open,' \
   && fail "lavish-axi ${VERSION:-version-unknown} still lists a captain-ended session as open; the board build's liveness check must be revisited"
 pass "lavish-axi ${VERSION:-version-unknown} reports a captain-ended session without reopening it and without failing"
 
-# THE BEHAVIOR UNDER GUARD: the build must not accept that, and must recover.
-out=$(run_board build "$LAB/payload.json" 2>&1) \
-  || fail "the board build refused a recoverable captain-ended session: $out"
+# THE BEHAVIOR UNDER GUARD: a plain build must not reopen a session the user
+# ended, and must not leave it listed open. Reopening is an explicit flag.
+set +e
+out=$(run_board build "$LAB/payload.json" 2>&1)
+closed_rc=$?
+set -e
+[ "$closed_rc" -eq 0 ] \
+  || fail "a user-ended session crashed the board build (exit $closed_rc): $out"
 case "$out" in
-  *"session: reopened"*) ;;
-  *) fail "the board build did not reopen the captain-ended session: $out" ;;
+  *"the user closed this board"*) ;;
+  *) fail "the board build did not say the user closed it: $out" ;;
+esac
+case "$out" in
+  *"session: reopened"*) fail "the board build reopened a session the user ended: $out" ;;
 esac
 lavish-axi 2>/dev/null | grep -F "$BOARD," | grep -q ',open,' \
-  || fail "the board build reported success while the session was still not live"
-pass "the board build reopens a captain-ended session against real lavish-axi instead of arming a dead one"
+  && fail "the board build reopened a session the user ended"
+pass "a plain board build leaves a user-ended session closed against real lavish-axi"

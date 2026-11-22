@@ -33,7 +33,10 @@ The board uses the Firstmate design tokens from the shipped Bearings board.
    A current legacy tuple may be displayed but must not be offered when it violates a fence.
    Ordered suggestions may include fallback candidates whose order you explain.
 4. Run the board script's `build` command and return its verified live session URL.
-   The script owns serving, reopening, listener proof, and process-event arming; never run a second conversational poll.
+   Pass `--reopen` only when the user asked for the board again or something urgent needs them.
+   A plain build leaves a board the user closed shut and does not arm it.
+   Do not present that result as a live session.
+   The script owns serving, listener proof, and process-event arming; never run a second conversational poll.
    Opening or rebuilding the board changes no dispatch settings.
 
 ## Benchmark evidence

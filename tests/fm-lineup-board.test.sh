@@ -154,16 +154,25 @@ pass 'safe JSON injection and canonical Lavish wake arming'
 jq '.rows[2].options += [{harness:"kimi",model:"kimi-fixture"}]' "$TMP_ROOT/board.json" > "$TMP_ROOT/kimi-board.json"
 "$BOARD" build "$TMP_ROOT/kimi-board.json" > "$TMP_ROOT/build.out"
 pass 'Kimi secondmate option is offered'
-# An ended session must reopen; a session that stays ended never arms.
+# A user-ended session stays closed unless build is asked to reopen.
+"$BOARD" --help | grep -q -- '--reopen' || fail 'help does not document --reopen'
+: > "$CALL_LOG"
 : > "$FM_HOME/ended"
 "$BOARD" build "$TMP_ROOT/board.json" > "$TMP_ROOT/build.out"
-grep -q 'session: reopened' "$TMP_ROOT/build.out" || fail 'did not reopen'
+grep -q 'the user closed this board' "$TMP_ROOT/build.out" || fail 'did not report the closed board'
+grep -q -- '--reopen' "$TMP_ROOT/build.out" || fail 'did not say how to reopen'
+if grep -q 'session: reopened' "$TMP_ROOT/build.out"; then fail 'reopened without being asked'; fi
+if grep -q -- '--reopen' "$CALL_LOG"; then fail 'called lavish-axi --reopen without being asked'; fi
+if grep -q '^register ' "$CALL_LOG"; then fail 'armed a board the user closed'; fi
+: > "$CALL_LOG"
+"$BOARD" build --reopen "$TMP_ROOT/board.json" > "$TMP_ROOT/build.out"
+grep -q 'session: reopened' "$TMP_ROOT/build.out" || fail 'did not reopen when asked'
 : > "$FM_HOME/refuse"
 : > "$CALL_LOG"
-if "$BOARD" build "$TMP_ROOT/board.json" > "$TMP_ROOT/out" 2>&1; then fail 'accepted dead session'; fi
+if "$BOARD" build --reopen "$TMP_ROOT/board.json" > "$TMP_ROOT/out" 2>&1; then fail 'accepted dead session'; fi
 if grep -q '^register ' "$CALL_LOG"; then fail 'armed ended session'; fi
 rm "$FM_HOME/refuse"
-pass 'serve-first reopen and refusal to arm an ended session'
+pass 'a plain build leaves a user-ended session closed, and an explicit reopen still refuses a session that stays ended'
 # Cache evidence is private, validated, and injected; absent evidence stays empty.
 printf '{"entries":[{"harness":"agy","model":"gemini-fixture","task":"tier.fixture","benchmark":"Fixture only","score":12.5,"source":"https://example.org/fixture","as_of":"2026-01-01"}]}\n' > "$FM_HOME/config/model-benchmarks.json"
 "$BOARD" build "$TMP_ROOT/board.json" > "$TMP_ROOT/build.out"
