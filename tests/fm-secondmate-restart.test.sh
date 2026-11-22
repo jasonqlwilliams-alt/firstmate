@@ -519,6 +519,11 @@ case "${rargs[1]:-}" in
         printf 'error: remote host-local relaunch failed\n' >&2
         exit 1
         ;;
+      dialog-refusal)
+        printf '%s\n' 'warning: ignoring an invalid configured effort token' \
+          "error: exit-delivered ${rargs[2]} interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation" >&2
+        exit 1
+        ;;
       slow-relaunch)
         : > "$FM_FAKE_DIR/remote-relaunch-start"
         /bin/sleep 2
@@ -570,6 +575,21 @@ test_remote_mate_restarts_over_the_transport_hop() {
   assert_contains "$(cat "$dir/home/state/sm2.meta")" "effort=high" \
     "remote restart must update effort in parent meta record"
   pass "T6 a remote mate restarts through the host-local control plane over the fm-on hop"
+}
+
+test_remote_exit_dialog_refusal_takes_priority_over_warning() {
+  local dir out rc
+  dir=$(new_case dialog-refusal)
+  setup_remote_case "$dir" sm2 dialog-refusal
+
+  out=$(FM_FAKE_ANSWER_STATUS="$dir/home/state/sm2.status" run_restart "$dir" sm2); rc=$?
+
+  expect_code 3 "$rc" "the remote exit dialog should leave the mate unreached: $out"
+  assert_contains "$out" 'unreached: sm2: the restart outcome is unknown: exit-delivered sm2' \
+    "the summary must include the remote relaunch refusal"
+  assert_contains "$out" 'Claude is showing its background-tasks exit confirmation' \
+    "the summary must name the dialog even when a warning came first"
+  pass "a remote restart reports the exit dialog refusal after a warning"
 }
 
 # --- T7: an unreachable host is unknown, never a claimed reload --------------
@@ -994,6 +1014,7 @@ test_refused_restart_falls_back_without_claiming_a_reload
 test_local_restart_uses_the_home_pin_and_reports_what_ran
 test_native_ultra_restart_keeps_local_and_remote_profiles
 test_remote_mate_restarts_over_the_transport_hop
+test_remote_exit_dialog_refusal_takes_priority_over_warning
 test_unreachable_host_is_reported_unknown
 test_slow_exit_dialog_observation_does_not_block_restart
 test_concurrent_reply_cannot_release_persist_gate

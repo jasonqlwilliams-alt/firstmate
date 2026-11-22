@@ -205,7 +205,9 @@ restart_mate() {  # <array-index>
     return
   fi
 
-  restart_reason=$(first_reported_line "$restart_out")
+  restart_reason=$(first_reported_line "$(printf '%s\n' "$restart_out" \
+    | grep -E '^error: exit-(refused|typed|delivered) .* exit=unconfirmed; ')")
+  [ -n "$restart_reason" ] || restart_reason=$(first_reported_line "$restart_out")
   [ -n "$restart_reason" ] || restart_reason="the restart failed without a reported reason"
   report_unreached "$id" "the restart outcome is unknown: $restart_reason"
 }

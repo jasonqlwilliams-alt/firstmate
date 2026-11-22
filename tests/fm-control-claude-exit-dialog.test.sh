@@ -15,7 +15,7 @@ command -v jq >/dev/null || { echo 'skip: jq not found'; exit 0; }
 command -v node >/dev/null || { echo 'skip: node not found'; exit 0; }
 TMP_ROOT=$(fm_test_tmproot fm-claude-exit-dialog)
 mkdir -p "$TMP_ROOT/bin" "$TMP_ROOT/home/state" "$TMP_ROOT/home/data" "$TMP_ROOT/home/config"
-printf 'claude\n' > "$TMP_ROOT/home/config/secondmate-harness"
+printf 'claude default impossible\n' > "$TMP_ROOT/home/config/secondmate-harness"
 fm_git_worktree "$TMP_ROOT/project" "$TMP_ROOT/worktree" fixture-task
 printf 'exitdialog\n' > "$TMP_ROOT/worktree/.fm-secondmate-home"
 mkdir -p "$TMP_ROOT/worktree/state"
