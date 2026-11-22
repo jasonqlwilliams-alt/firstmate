@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
 # Run one bounded foreground watcher checkpoint for harnesses that should not
 # rely on background-task completion to wake the model.
+# A clean return (actionable wake or quiet deadline) touches
+# state/.last-checkpoint-return after the watcher has released its lock, and
+# every checkpoint removes that record before starting its watcher, so the record
+# exists only in the interval between a clean return and the next checkpoint.
+# bin/fm-guard.sh owns how that record changes its watcher-down presentation.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
+STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
+RETURN_RECORD="$STATE/.last-checkpoint-return"
 SECONDS_ARG=${FM_CODEX_WATCH_CHECKPOINT:-180}
 
 usage() {
@@ -51,6 +60,13 @@ ERR=$(mktemp "${TMPDIR:-/tmp}/fm-watch-checkpoint.err.XXXXXX") || {
 }
 trap 'rm -f "$OUT" "$ERR"' EXIT
 
+record_clean_return() {
+  [ -d "$STATE" ] || return 0
+  date +%s > "$RETURN_RECORD" 2>/dev/null || true
+}
+
+rm -f "$RETURN_RECORD" 2>/dev/null || true
+
 run_with_perl_timeout() {
   perl -e '
     my $seconds = shift;
@@ -94,6 +110,7 @@ fi
 set -e
 
 if grep -E '^(signal:|stale:|check:|heartbeat($|:))' "$OUT" >/dev/null 2>&1; then
+  record_clean_return
   cat "$OUT"
   [ ! -s "$ERR" ] || cat "$ERR" >&2
   exit 0
@@ -107,6 +124,7 @@ if grep -E '^watcher: already running' "$OUT" "$ERR" >/dev/null 2>&1; then
 fi
 
 if [ "$RC" -eq 124 ]; then
+  record_clean_return
   printf 'checkpoint: no actionable wake within %ss\n' "$SECONDS_ARG"
   exit 124
 fi

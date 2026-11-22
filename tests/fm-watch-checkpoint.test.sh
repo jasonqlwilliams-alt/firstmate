@@ -145,8 +145,59 @@ test_foreground_wake_acknowledgement_and_owned_successor() (
   pass "foreground wake is durable, caller owns its successor, and pending recovery does not falsify live health"
 )
 
+# A normal return (quiet deadline here) followed by the protocol's drain is the
+# expected interval between foreground checkpoints, not a supervision lapse: it
+# must not print the watcher-down alarm or leave a repeating "still down"
+# reminder across cycles. A missing or failed cycle must still alarm.
+test_normal_checkpoint_return_is_not_a_watcher_down_alarm() (
+  local home out cycle seq gen guard_output record
+  home=$(make_home checkpoint-return-gap)
+  export FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_ROOT_OVERRIDE="$home"
+  export FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999
+  export FM_SUPERVISION_MODEL=persistent
+  record="$home/state/.last-checkpoint-return"
+  printf 'kind=ship\n' > "$home/state/demo.meta"
+  for cycle in 1 2 3; do
+    "$CHECKPOINT" --seconds 2 >/dev/null 2>&1
+    assert_present "$record" "cycle $cycle: a clean return left no return record"
+    out=$("$ROOT/bin/fm-wake-drain.sh" 2>&1)
+    assert_not_contains "$out" 'WATCHER DOWN' "cycle $cycle: a normal checkpoint return printed the watcher-down alarm"
+    assert_not_contains "$out" 'watcher still down' "cycle $cycle: a fresh beat after a normal return printed 'watcher still down'"
+    assert_contains "$out" 'between foreground checkpoints' "cycle $cycle: the post-return gap was not named"
+    seq=$(printf '%s\n' "$out" | sed -n 's/.*--ack-through \([0-9]*\) --recovery-generation .*/\1/p')
+    gen=$(printf '%s\n' "$out" | sed -n 's/.*--recovery-generation \([A-Za-z0-9._-]*\)$/\1/p')
+    [ -z "$seq" ] || "$ROOT/bin/fm-wake-drain.sh" --ack-through "$seq" --recovery-generation "$gen" >/dev/null 2>&1
+  done
+  assert_absent "$home/state/.guard-watcher-stale-banner" "a normal return claimed a watcher-down episode"
+
+  # Same missing watcher, but no clean return explains it: full alarm, then reminder.
+  rm -f "$record"
+  guard_output=$("$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$guard_output" 'WATCHER DOWN' "a missing watcher with no clean return was not alarmed"
+  assert_contains "$guard_output" 'no live watcher process' "the alarm lost its missing-watcher cause"
+  guard_output=$("$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$guard_output" 'watcher still down' "the announced episode lost its reminder"
+
+  # A later clean return ends that episode; an overdue next checkpoint re-alarms.
+  : > "$record"
+  guard_output=$("$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_not_contains "$guard_output" 'watcher still down' "a clean return did not end the announced episode"
+  fm_touch_epoch "$(( $(date +%s) - 400 ))" "$record"
+  guard_output=$("$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$guard_output" 'WATCHER DOWN' "an overdue next checkpoint was not alarmed"
+  assert_not_contains "$guard_output" 'between foreground checkpoints' "an overdue return still read as the expected gap"
+
+  # The auto-arm model stays silent in the same state, as before.
+  : > "$record"
+  guard_output=$(FM_SUPERVISION_MODEL=autoarm "$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_not_contains "$guard_output" 'WATCHER DOWN' "auto-arm model alarmed a mid-turn gap"
+  assert_not_contains "$guard_output" 'between foreground checkpoints' "auto-arm model printed the foreground-checkpoint note"
+  pass "a normal foreground checkpoint return is not reported as supervision off, while a missing or overdue cycle still alarms"
+)
+
 test_quiet_checkpoint_exits_124_cleanly
 test_signal_passes_through_and_exits_zero
 test_registered_check_uses_preserved_watcher_environment
 test_existing_singleton_watcher_is_not_success
 test_foreground_wake_acknowledgement_and_owned_successor
+test_normal_checkpoint_return_is_not_a_watcher_down_alarm
