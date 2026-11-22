@@ -325,16 +325,18 @@ Where a no-mistakes pipeline stores evidence in the repo, it publishes that PR-v
 This repo uses that setting, and its own `.no-mistakes/` directory remains local state that stays gitignored and is rejected by CI if tracked; [`configuration.md`](configuration.md) owns the setting.
 PR-based task merges go through `bin/fm-pr-merge.sh`, which records `pr=` and any available `pr_head=` through `bin/fm-pr-check.sh` before calling the forge CLI.
 The helper requires a full canonical URL and rejects malformed URLs or repo override flags before recording merge state.
-A `https://github.com/<owner>/<repo>/pull/<n>` URL requires `gh` and `jq`, is merged only after one live read confirms the pull request is open, not a draft, mergeable, conflict-free, has at least one check, and every unwaived check is green at the current head, then `gh pr merge` binds that verified head with `--match-head-commit`.
+A `https://github.com/<owner>/<repo>/pull/<n>` URL requires `gh` and `jq` to verify in one live read that the pull request is open, mergeable, out of draft, and free of conflicts.
+The helper verifies the checks in the same read, and `gh pr merge` binds the merge to the verified head with `--match-head-commit`.
 `--auto`, `--admin`, and branch-deletion flags are refused unless `--attended-override` is passed for an explicit captain instruction; that override never skips the live green check, the away-grant check, or a captain hold.
-An attended `--allow-red <check-name>` may appear once, waives only GitHub checks with that exact name, and is refused while the away-posture record exists.
-A head with no checks is never green; only an attended `--allow-zero-checks` waives that one condition, and it is likewise refused while the away-posture record exists.
+The GitHub head must have at least one check unless an attended operator passes `--allow-zero-checks`, and every unwaived check must be green.
+An attended `--allow-red <check-name>` may appear once and waives only GitHub checks with that exact name.
+The helper refuses both check waivers while the away-posture record exists, even for tasks with a merge grant or standing merge authority.
 A `https://<host>/<path>/-/merge_requests/<n>` URL (see [docs/gitlab-merge-watch.md](gitlab-merge-watch.md)) invokes `glab mr merge <n> -R https://<host>/<path>`, so the instance comes from the URL, and adds no merge-method flag because the project's own merge method applies.
 That path merges only after one live read of the merge request confirms it is open, mergeable, conflict-free, with blocking discussions resolved and a successful pipeline at the current head, and it binds the merge to that verified head; recorded metadata is never the authority for those conditions because a rebase leaves it stale.
 After either forge command returns, the script confirms the PR or MR actually landed, and only a confirmed landing records a landed outcome; a queued or unconfirmed request records none and leaves its poll armed.
 On GitLab an auto-merge-queued or unconfirmed request is reported without failing the run.
 On GitHub an outcome that is neither merged nor queued is refused loudly and non-zero, naming the observed state.
-For a base branch that requires the merge queue, the retry guidance names the configured forge flags and reminds an operator who used the zero-check waiver to supply it again if the head still has no checks.
+When the helper suggests a merge-queue retry, it names the configured forge flags and reminds an operator who used the zero-check waiver to supply it again if the head still has no checks.
 When the forge already accepted exactly those flags and the pull request still has not entered the queue, that refusal points at the queue state to re-check instead of echoing back the flags the caller just ran.
 An auto-merge request is held to the same standard: `--auto` that leaves the pull request neither merged nor queued is refused rather than reported as success.
 Every GitHub refusal states what it could not observe as plainly as what it did, so an unreadable branch-rule response, an unrecognised queue method, and a merge queue no available read can see are each named rather than left to look like a base branch with no queue at all.
