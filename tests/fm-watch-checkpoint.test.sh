@@ -92,7 +92,7 @@ test_existing_singleton_watcher_is_not_success() {
 }
 
 test_foreground_wake_acknowledgement_and_owned_successor() (
-  local home child='' attempts out guard_output drained seq generation status=0
+  local home child='' attempts out guard_output drained seq generation status=0 cat_bin close_gate deadline
   home=$(make_home owned-successor)
   export FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_ROOT_OVERRIDE="$home"
   export FM_POLL=1 FM_SIGNAL_GRACE=0 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999
@@ -103,7 +103,9 @@ test_foreground_wake_acknowledgement_and_owned_successor() (
   . "$ROOT/bin/fm-wake-lib.sh"
   printf 'kind=ship\n' > "$home/state/demo.meta"
   # Both children have bounded lifetimes and are waited even on assertion failure.
-  trap '[ -z "$child" ] || wait "$child" 2>/dev/null || true' EXIT
+  close_gate="$home/close-gate"
+  mkdir "$close_gate" "$home/bin" || fail "could not create checkpoint close gate"
+  trap ': > "$close_gate/release"; [ -z "$child" ] || wait "$child" 2>/dev/null || true' EXIT
 
   out="$home/first.out"
   "$CHECKPOINT" --seconds 12 > "$out" 2>&1 &
@@ -134,7 +136,26 @@ test_foreground_wake_acknowledgement_and_owned_successor() (
 
   # Deliberately retain the pending handling generation while the caller starts
   # its successor: an unacknowledged episode alone must not report watcher down.
-  "$CHECKPOINT" --seconds 5 > "$home/successor.out" 2>&1 &
+  cat_bin=$(command -v cat) || fail "could not locate cat for the close fixture"
+  cat > "$home/bin/cat" <<'SH'
+#!/usr/bin/env bash
+if [ "$#" -eq 1 ] && [ "$1" = "${FM_WATCH_CHECKPOINT_CLOSE:-}" ] \
+  && IFS= read -r close < "$1" && [ "$close" = quiet ]; then
+  : > "$FM_TEST_CLOSE_GATE/ready" || exit 1
+  deadline=$((SECONDS + FM_TEST_STUB_MAX_BLOCK_SECONDS))
+  until [ -f "$FM_TEST_CLOSE_GATE/release" ]; do
+    [ "$SECONDS" -lt "$deadline" ] || exit 1
+    sleep 0.1
+  done
+  "$FM_TEST_REAL_CAT" "$@" || exit $?
+  : > "$FM_TEST_CLOSE_GATE/forwarded"
+else
+  exec "$FM_TEST_REAL_CAT" "$@"
+fi
+SH
+  chmod +x "$home/bin/cat"
+  PATH="$home/bin:$PATH" FM_TEST_REAL_CAT="$cat_bin" FM_TEST_CLOSE_GATE="$close_gate" \
+    "$CHECKPOINT" --seconds 8 > "$home/successor.out" 2>&1 &
   child=$!
   attempts=0
   until fm_watcher_healthy "$home/state" "$ROOT/bin/fm-watch.sh" 300 "$home"; do
@@ -149,13 +170,21 @@ test_foreground_wake_acknowledgement_and_owned_successor() (
   "$ROOT/bin/fm-wake-drain.sh" --ack-through "$seq" --recovery-generation "$generation" \
     || fail "generation-bound acknowledgement failed"
   [ ! -s "$home/state/.wake-queue" ] || fail "acknowledged wake remains queued"
+  deadline=$((SECONDS + 20))
+  until [ -f "$close_gate/ready" ]; do
+    [ "$SECONDS" -lt "$deadline" ] && kill -0 "$child" 2>/dev/null \
+      || fail "older checkpoint never reached a quiet close ($(cat "$home/successor.out"))"
+    sleep 0.1
+  done
   status=0
   TMPDIR="$home/missing" "$CHECKPOINT" --seconds 2 >/dev/null 2>&1 || status=$?
   expect_code 1 "$status" "overlapping attempt failed during setup"
+  : > "$close_gate/release" || fail "could not release the older checkpoint"
   status=0
   wait "$child" || status=$?
   child=''
   expect_code 124 "$status" "quiet caller-owned successor exit"
+  assert_present "$close_gate/forwarded" "older checkpoint did not receive its quiet close after release"
   assert_absent "$home/state/.watch.lock/pid" "quiet successor left a polling process behind"
   guard_output=$("$ROOT/bin/fm-guard.sh" 2>&1)
   assert_contains "$guard_output" 'WATCHER DOWN' "older checkpoint return superseded a newer failed attempt"
