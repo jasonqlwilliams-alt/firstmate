@@ -286,7 +286,7 @@ while [ "$i" -lt "${#IDS[@]}" ]; do
     continue
   fi
   if report_open_exit_dialog "$id"; then
-    PLAN[i]=done
+    PLAN[i]="done"
     i=$((i + 1))
     continue
   fi
@@ -351,7 +351,7 @@ while [ "$i" -lt "${#IDS[@]}" ]; do
     persisted-pending) pending_count=$((pending_count + 1)) ;;
     fallback)
       fall_back_to_nudge "${IDS[$i]}" "${REASON[i]}"
-      PLAN[i]=done
+      PLAN[i]="done"
       ;;
   esac
   i=$((i + 1))

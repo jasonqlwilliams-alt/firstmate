@@ -972,6 +972,7 @@ fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
   shift
   [ "$limit_ms" -gt 0 ] || return 124
   . "$FM_BACKEND_LIB_DIR/fm-timeout-lib.sh" || return 1
+  # shellcheck disable=SC2016  # Expansion is deliberately deferred to the child shell.
   FM_HOME="$FM_HOME" FM_ROOT="$FM_ROOT" FM_BACKEND_HERDR_ENDPOINT_META="${FM_BACKEND_HERDR_ENDPOINT_META:-}" \
     fm_run_timed --kill "$(fm_timeout_seconds "$limit_ms")" \
     bash -uc '. "$1" && shift && "$@"' _ "$FM_BACKEND_LIB_DIR/fm-backend.sh" "$@" </dev/null 2>/dev/null
@@ -1025,8 +1026,10 @@ _fm_backend_guarded_composer_state() {
   if [ "$harness" = claude ]; then
     capture=visible
     if [ "$backend" = tmux ]; then
-      fm_backend_source tmux && target=$(fm_backend_tmux_exact_pane "$target") \
-        || { printf 'unknown'; return 0; }
+      if ! fm_backend_source tmux || ! target=$(fm_backend_tmux_exact_pane "$target"); then
+        printf 'unknown'
+        return 0
+      fi
     fi
   fi
   fm_backend_composer_snapshot "$backend" "$target" "$label" "$capture" || { printf 'unknown'; return 0; }

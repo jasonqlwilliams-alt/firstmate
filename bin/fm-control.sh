@@ -589,7 +589,7 @@ claude_exit_guard_input() {  # <interrupt-result> <exit-command-state> [expected
 }
 
 claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
-  local cmd=$1 interrupt_result=$2 screen= state=unreadable sample submission=typed attempts=1
+  local cmd=$1 interrupt_result=$2 screen='' state=unreadable sample submission=typed attempts=1
   local budget_ms poll_ms deadline now remaining delay probe_ms
   claude_exit_guard_input "$interrupt_result" not-sent
   fm_backend_send_literal "$BACKEND" "$T" "$cmd" "$LABEL" \

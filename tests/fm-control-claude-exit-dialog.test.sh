@@ -379,7 +379,7 @@ fm_write_meta "$TMP_ROOT/missing-state/exitdialog.meta" 'backend=tmux' 'window=f
 rc=0
 out=$(FM_STATE_OVERRIDE="$TMP_ROOT/missing-state" run_fixture fm-secondmate-restart.sh exitdialog 2>&1) || rc=$?
 expect_code 3 "$rc" "the missing endpoint should not restart: $out"
-assert_not_contains "$out" 'background-tasks exit confirmation' 'restart reported the neighboring window’s dialog'
+assert_not_contains "$out" 'background-tasks exit confirmation' 'restart reported the dialog from the neighboring window'
 [ ! -s "$TMP_ROOT/keys" ] || fail 'restart sent input to the neighboring window'
 
 while read -r target expected; do
