@@ -3,7 +3,8 @@ name: bearings
 description: >-
   Generate a "pick up where I left off" fleet digest from firstmate's live fleet state.
   Use when the captain invokes /bearings or asks for a bearings report, morning brief, status report, catch-up, "where did I leave off", or "what's in the works".
-  Plain /bearings is chat-only by default, /bearings file explicitly writes the dated data/status-report-<YYYY-MM-DD>.md artifact, and /bearings lavish additionally builds and arms the interactive fleet board; live PR enrichment remains opt-in and composes with the other modes.
+  Plain /bearings is chat-only by default, /bearings file writes the dated data/status-report-<YYYY-MM-DD>.md artifact, and /bearings lavish requests the interactive fleet board.
+  Live PR enrichment remains opt-in and composes with the other modes.
   Also load this skill's board-wake handling when a procevent lavish wake's source id matches the canonical source id of the stable bearings board path.
 user-invocable: true
 metadata:
@@ -24,7 +25,7 @@ Board answers are acted on later under the normal authority rules; this skill's 
 
 - Plain `/bearings` gathers a fresh bounded snapshot and renders the four-section chat digest without creating, deleting, reading, or replacing `data/status-report-<YYYY-MM-DD>.md`.
 - `/bearings file` gathers a fresh bounded snapshot, replaces today's `data/status-report-<YYYY-MM-DD>.md` from scratch, and renders the four-section chat digest with a link or path to that report.
-- `/bearings lavish` gathers a fresh bounded snapshot, rebuilds and arms the interactive fleet board (the "Lavish board mode" section below), and renders the four-section chat digest with the board's URL inside it.
+- `/bearings lavish` gathers a fresh bounded snapshot, builds the interactive fleet board as described under "Lavish board mode," and renders the four-section chat digest.
 - Treat `file` and `lavish` only as explicit invocation options in the slash command.
 - Do not treat natural-language requests such as "write a report", "save this", "persist it", "make a file", or "make a board" as file or lavish mode unless the invocation explicitly includes the standalone option.
 - When the captain asks to include PRs, pass the snapshot command's live-PR opt-in.
@@ -89,7 +90,8 @@ Board answers are acted on later under the normal authority rules; this skill's 
 
 ## Lavish board mode
 
-`/bearings lavish` adds an interactive fleet board and its linked companion detail page beside the unchanged chat digest; the captain answers Captain's Call items on the board instead of replying in chat.
+`/bearings lavish` builds an interactive fleet board and its linked companion detail page alongside the chat digest.
+When the session is live, the captain can answer Captain's Call items on the board.
 `bin/fm-bearings-board.sh` owns every board mechanic - the stable board path, the static sibling detail page linked from the board's navigation and its Charted Next and Recently Landed headers, the optional Cursor Canvas export, fm-bearings-board.v1 payload validation, template injection, live Lavish session verification, the any-origin answer binding, and listener registration.
 
 Use the fleet snapshot as source data and compose a separate JSON file with schema `fm-bearings-board.v1`.
@@ -136,13 +138,13 @@ Apply the same ranking judgment as the chat digest and follow these board rules:
   Omit or pass null for any of those fields when the snapshot has no recorded value, and never invent or scrape them from prose.
 - Every Captain's Call item and every Underway, Recently Landed, and Charted Next row carries an explicit `repo` field. Fill it from the snapshot and task records wherever known; use null or an empty string only as the deliberate genuinely-no-repo marker, in which case the template may show the internal id. Ids otherwise stay in the payload only as the routing channel, and any prose you compose names blockers in plain words.
 
-Run `bin/fm-bearings-board.sh build <data.json>` once, passing the path to the composed board payload as its argument.
-Pass `--reopen` only when the user asked for the board again or something urgent needs them.
+Run `bin/fm-bearings-board.sh build --reopen <data.json>` once for `/bearings lavish` or when an urgent matter needs the captain's attention on the board.
+Use plain `build <data.json>` for routine refreshes.
 A plain build leaves a board the user closed shut, says so, and does not arm its listener.
 Its serve-first sequence publishes the board, establishes and verifies its Lavish session with `lavish-axi`, and only then binds the answer source and proves a live polling listener.
-Use the session URL it prints when that session is live.
 Never bind or arm the board before its session is listed open.
-Never run `lavish-axi poll` for the board yourself: the armed source's supervised runner owns the blocking poll, and both the build and the watcher's ordinary reconcile repair a missing listener, so no conversational turn ever blocks on the board.
+The supervised runner owns the blocking `lavish-axi poll` command for the board.
+While the session is live, the build and the watcher's ordinary reconcile can repair a missing listener.
 
 ### Handling a board wake
 
@@ -188,9 +190,10 @@ Keep the wake pending while any decoded helper request awaits confirmation.
 After every helper request and all other captured actions have been handled, acknowledge the wake with `bin/fm-procevent.sh handled <source-id> <sequence> --assignments-resolved` if the capture contained decoded helper requests.
 For a capture without decoded helper requests, use the ordinary `handled` command in `process-event-sources` after handling all captured actions.
 Report acknowledgement only after the command succeeds with `handled:` or `already-handled:`.
-Leave the Bearings source listening for later submissions.
+Leave the supervised listener in place for later submissions while the session is live.
 
-After handling, rebuild the board from a fresh snapshot so acted-on items leave Captain's Call, and echo every action taken in chat so the board and chat never diverge silently.
+After handling, rebuild the board from a fresh snapshot with plain `build <data.json>` so acted-on items leave Captain's Call.
+Echo every action taken in chat and report a closed result if the captain ended the session.
 
 ### The merge-click ruling (captain-decided)
 
@@ -229,7 +232,8 @@ Rules that keep the contract unambiguous:
 - The chat follows `AGENTS.md` section 9 and carries one scannable line per item.
 - Detailed decisions, plans, full gate reasons, and evidence stay out of chat; file mode puts them in the report, while lavish mode puts only its payload-backed interactive detail on the board.
 - In file mode, include the report path or link inside the four-section digest without adding another heading.
-- In lavish mode, include the board URL inside the four-section digest the same way.
+- In lavish mode, include the board URL inside the four-section digest after a successful build with a verified live listener.
+- If the build reports the board closed, include that outcome in the digest.
 
 ## Tone and content rules
 

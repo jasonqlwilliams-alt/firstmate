@@ -58,7 +58,7 @@ establish_board_session() {  # <board> [--reopen]
     printf 'session: live\n'
     return 0
   fi
-  if [ "$#" -eq 2 ]; then
+  if [ "$#" -eq 2 ] && [ "$status" = user-ended ]; then
     out=$(lavish-axi "$@") || fail "cannot reopen the ended board Lavish session"
     printf '%s\n' "$out"
     if lavish_session_listed_open "$real"; then

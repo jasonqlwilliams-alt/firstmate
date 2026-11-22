@@ -680,41 +680,21 @@ test_build_leaves_a_user_ended_session_closed() {
   pass "a board build leaves a user-ended session closed and does not arm it"
 }
 
-test_build_reopens_when_an_opened_session_ends_before_listing() {
-  local home data out board sid
-  home=$(make_home establish-list-race)
-  data="$home/payload.json"
-  board="$home/.lavish/bearings-board.html"
-  write_valid_payload "$data"
-  printf '1\n' > "$home/lavish-state/end-before-list"
-  out=$(run_board "$home" build --reopen "$data") || fail "the raced session build failed: $out"
-  assert_contains "$out" "session: reopened" \
-    "the build trusted an opened response after the server no longer listed it: $out"
-  sid=$(run_lavish_source_id "$home" "$board")
-  [ -s "$home/lavish-state/open" ] || fail "the raced session was not live before arming"
-  [ "$(run_procevent "$home" list | awk -v id="$sid" 'NR > 1 && $1 == id { print $3 }')" = live ] \
-    || fail "the replacement session did not receive a live listener"
-  pass "an explicit --reopen recovers a session that ends between establish and listing"
-}
-
 test_build_refuses_to_arm_after_a_browser_close_during_build() {
   local listing home data board out sid
   for listing in 1 2; do
-    home=$(make_home "browser-close-before-list-$listing")
+    home=$(make_home "browser-close-before-list-$listing-${1:-plain}")
     data="$home/payload.json"
     board="$home/.lavish/bearings-board.html"
     write_valid_payload "$data"
     printf '%s\n' "$listing" > "$home/lavish-state/end-before-list"
-    if out=$(run_board "$home" build "$data" 2>&1); then
+    if out=$(run_board "$home" build "$@" "$data" 2>&1); then
       fail "build accepted a missing open listing after the browser close: $out"
     fi
     [ -e "$home/lavish-state/user-ended" ] && [ ! -s "$home/lavish-state/open" ] \
       || fail "build did not leave the board closed after listing $listing"
-    [ "$(grep -Fc -- "$board" "$home/lavish-state/calls")" -eq 1 ] \
-      || fail "build sent another session-opening request after the browser close"
-    if grep -q -- '--reopen' "$home/lavish-state/calls"; then
-      fail "build called lavish-axi --reopen without being asked"
-    fi
+    [ "$(grep -F -- "$board" "$home/lavish-state/calls")" = "$board" ] \
+      || fail "build did not make exactly one plain attach"
     assert_contains "$out" "refusing to arm a poll" \
       "build did not report the liveness failure before listing $listing: $out"
     case "$out" in
@@ -727,7 +707,7 @@ test_build_refuses_to_arm_after_a_browser_close_during_build() {
     ! run_procevent "$home" list | awk 'NR > 1 { print $1 }' | grep -Fxq "$sid" \
       || fail "build armed the board after a browser close before listing $listing"
   done
-  pass "build refuses to arm when the browser closes before either listing"
+  pass "a ${1:-plain} build refuses to arm when the browser closes before either listing"
 }
 
 test_build_refuses_to_arm_when_the_session_stays_ended() {
@@ -990,8 +970,8 @@ test_rebuild_is_idempotent_and_does_not_double_arm
 test_build_refuses_a_template_without_exactly_one_slot
 test_build_reopens_a_session_the_captain_ended
 test_build_leaves_a_user_ended_session_closed
-test_build_reopens_when_an_opened_session_ends_before_listing
 test_build_refuses_to_arm_after_a_browser_close_during_build
+test_build_refuses_to_arm_after_a_browser_close_during_build --reopen
 test_build_refuses_to_arm_when_the_session_stays_ended
 test_build_starts_a_listener_for_an_already_armed_board
 test_build_drops_decision_cards_whose_subject_already_landed
