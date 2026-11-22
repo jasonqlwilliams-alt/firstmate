@@ -9,7 +9,7 @@
 #   fm-remote-secondmate-control.sh send <id> <message> [fire-and-forget]
 #   fm-remote-secondmate-control.sh key <id> <key>
 #   fm-remote-secondmate-control.sh capture <id> [lines]
-#   fm-remote-secondmate-control.sh observe <id>
+#   fm-remote-secondmate-control.sh observe <id> [--exit-dialog]
 #   fm-remote-secondmate-control.sh sync <id> [<parent-commit>]
 #   fm-remote-secondmate-control.sh update <id>
 #   fm-remote-secondmate-control.sh retire <id> [--force]
@@ -469,6 +469,13 @@ cmd_observe() {
   remote_endpoint_require "$id"
   remote_endpoint_require_home
   harness=$(fm_meta_get "$REMOTE_ENDPOINT_META" harness)
+  if [ "${2:-}" = --exit-dialog ]; then
+    [ "$(fm_control_harness_family "$harness")" = claude ] || return 0
+    FM_BACKEND_HERDR_ENDPOINT_META="$REMOTE_ENDPOINT_META" fm_backend_guarded_composer_state \
+      "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "fm-$id" '' claude
+    printf '\n'
+    return 0
+  fi
   FM_BACKEND_HERDR_ENDPOINT_META="$REMOTE_ENDPOINT_META" \
     fm_pending_reply_backend_observation "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "fm-$id" "$harness"
   printf '\n'
@@ -576,7 +583,7 @@ case "${1:-}" in
   send) shift; [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage; cmd_send "$@" ;;
   key) shift; [ "$#" -eq 2 ] || usage; cmd_key "$@" ;;
   capture) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_capture "$@" ;;
-  observe) shift; [ "$#" -eq 1 ] || usage; cmd_observe "$@" ;;
+  observe) shift; case "$#" in 1) ;; 2) [ "$2" = --exit-dialog ] || usage ;; *) usage ;; esac; cmd_observe "$@" ;;
   sync) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_sync "$@" ;;
   update) shift; [ "$#" -eq 1 ] || usage; cmd_update "$@" ;;
   retire) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_retire "$@" ;;

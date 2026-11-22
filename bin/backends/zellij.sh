@@ -481,9 +481,13 @@ fm_backend_zellij_send_text_line() {  # <target> <text> [expected-label]
 # has no --lines bound, so routine 40-line-or-smaller reads use the current
 # viewport and larger explicit reads use --full scrollback, then trim locally.
 # On a very short viewport, a small read can see fewer than the requested lines.
-fm_backend_zellij_capture() {  # <target> <lines> [expected-label]
+fm_backend_zellij_capture() {  # <target> <lines|visible> [expected-label]
   fm_backend_zellij_target_ready "$1" "${3:-}" || return 1
   local lines=${2:-40} out
+  if [ "$lines" = visible ]; then
+    fm_backend_zellij_cli "$FM_BACKEND_ZELLIJ_SESSION" action dump-screen --pane-id "$FM_BACKEND_ZELLIJ_PANE" 2>/dev/null
+    return $?
+  fi
   case "$lines" in ''|*[!0-9]*) lines=40 ;; esac
   if [ "$lines" -le 40 ]; then
     out=$(fm_backend_zellij_cli "$FM_BACKEND_ZELLIJ_SESSION" action dump-screen --pane-id "$FM_BACKEND_ZELLIJ_PANE" 2>/dev/null) || return 1
@@ -505,11 +509,15 @@ fm_backend_zellij_capture() {  # <target> <lines> [expected-label]
 # fm_backend_zellij_composer_capture: bounded styled tail of the pane. When
 # --ansi is unsupported (an older zellij), the caller falls back to the plain
 # dump and a styled=0 descriptor - see fm_backend_zellij_composer_state.
-fm_backend_zellij_composer_capture() {  # <target> [expected-label]
+fm_backend_zellij_composer_capture() {  # <target> [expected-label] [visible]
   fm_backend_zellij_target_ready "$1" "${2:-}" || return 1
   local out
   out=$(fm_backend_zellij_cli "$FM_BACKEND_ZELLIJ_SESSION" action dump-screen --pane-id "$FM_BACKEND_ZELLIJ_PANE" --ansi 2>/dev/null) || return 1
   [ -n "$out" ] || return 1
+  if [ "${3:-}" = visible ]; then
+    printf '%s' "$out"
+    return 0
+  fi
   printf '%s' "$out" | tail -n "$FM_COMPOSER_CAPTURE_LINES"
 }
 
@@ -529,18 +537,18 @@ fm_backend_zellij_composer_state() {  # <target> [expected-label] -> empty|pendi
 # fm_backend_zellij_composer_snapshot: one composer capture into the snapshot
 # globals (bin/fm-composer-lib.sh "Composer SNAPSHOT"), styled first and the
 # plain dump as the styled=0 fallback; fails when both captures fail.
-fm_backend_zellij_composer_snapshot() {  # <target> [expected-label]
-  local target=$1 expected_label=${2:-} cap styled
-  if cap=$(fm_backend_zellij_composer_capture "$target" "$expected_label"); then
+fm_backend_zellij_composer_snapshot() {  # <target> [expected-label] [visible]
+  local target=$1 expected_label=${2:-} lines=${3:-$FM_COMPOSER_CAPTURE_LINES} cap styled
+  if cap=$(fm_backend_zellij_composer_capture "$target" "$expected_label" "${3:-}"); then
     styled=1
-  elif cap=$(fm_backend_zellij_capture "$target" "$FM_COMPOSER_CAPTURE_LINES" "$expected_label") && [ -n "$cap" ]; then
+  elif cap=$(fm_backend_zellij_capture "$target" "$lines" "$expected_label") && [ -n "$cap" ]; then
     styled=0
   else
     return 1
   fi
   FM_COMPOSER_SNAPSHOT_SCREEN=$cap
   FM_COMPOSER_SNAPSHOT_CURSOR=
-  FM_COMPOSER_SNAPSHOT_CAPS=$(printf 'styled=%s\ncursor=0\nidentity=0\nrows=%s' "$styled" "$FM_COMPOSER_CAPTURE_LINES")
+  FM_COMPOSER_SNAPSHOT_CAPS=$(printf 'styled=%s\ncursor=0\nidentity=0\nrows=%s' "$styled" "${lines/#visible/0}")
 }
 
 fm_backend_zellij_composer_content() {  # <target> [expected-label]

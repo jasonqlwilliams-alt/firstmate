@@ -91,6 +91,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 . "$SCRIPT_DIR/fm-secondmate-nudge-lib.sh"
 # shellcheck source=bin/fm-pending-reply-lib.sh
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
+# shellcheck source=bin/fm-timeout-lib.sh
+. "$SCRIPT_DIR/fm-timeout-lib.sh"
 
 PERSIST_WAIT=${FM_SECONDMATE_PERSIST_WAIT:-900}
 PERSIST_POLL=${FM_SECONDMATE_PERSIST_POLL:-5}
@@ -143,6 +145,9 @@ first_reported_line() {  # <text>
 # plainly which it was. A nudge is a partial reload and is never reported as more.
 fall_back_to_nudge() {  # <id> <reason>
   local id=$1 reason=$2 out
+  if report_open_exit_dialog "$id"; then
+    return 0
+  fi
   if out=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
     "$SCRIPT_DIR/fm-send.sh" "$id" "$FM_SECOND_MATE_NUDGE_MESSAGE" 2>&1); then
     nudged_count=$((nudged_count + 1))
@@ -157,6 +162,23 @@ fall_back_to_nudge() {  # <id> <reason>
 report_unreached() {  # <id> <reason>
   unreached_count=$((unreached_count + 1))
   printf 'unreached: %s: %s\n' "$1" "$2"
+}
+
+report_open_exit_dialog() {  # <id>
+  local id=$1 meta="$STATE/$1.meta" screen
+  [ -f "$meta" ] && [ ! -L "$meta" ] || return 1
+  [ "$(fm_meta_get "$meta" kind)" = secondmate ] || return 1
+  [ "$(fm_control_harness_family "$(fm_meta_get "$meta" harness)")" = claude ] || return 1
+  if [ -n "$(fm_meta_get "$meta" remote_host)" ]; then
+    screen=$(fm_run_timed 30 "$SCRIPT_DIR/fm-on.sh" "$id" \
+      fm-remote-secondmate-control.sh observe "$id" --exit-dialog </dev/null 2>/dev/null) || return 1
+  else
+    fm_backend_validate_task_endpoint "$meta" "$id" 2>/dev/null || return 1
+    screen=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_guarded_composer_state \
+      "$FM_BACKEND_VALIDATED_BACKEND" "$FM_BACKEND_VALIDATED_TARGET" "fm-$id" '' claude 2>/dev/null) || return 1
+  fi
+  [ "$screen" = exit-confirm ] || return 1
+  report_unreached "$id" 'Claude is showing its background-tasks exit confirmation and needs manual recovery'
 }
 
 restart_mate() {  # <array-index>
@@ -261,6 +283,11 @@ while [ "$i" -lt "${#IDS[@]}" ]; do
     i=$((i + 1))
     continue
   fi
+  if report_open_exit_dialog "$id"; then
+    PLAN[i]=done
+    i=$((i + 1))
+    continue
+  fi
   PLACEMENT[i]=$FM_SECONDMATE_RESTART_PLACEMENT
   HOST[i]=$FM_SECONDMATE_RESTART_HOST
   HARNESS[i]=$FM_SECONDMATE_RESTART_HARNESS
@@ -318,12 +345,13 @@ pending_count=0
 restart_active_count=0
 i=0
 while [ "$i" -lt "${#IDS[@]}" ]; do
-  if [ "${PLAN[i]}" = persisted-pending ]; then
-    pending_count=$((pending_count + 1))
-  else
-    fall_back_to_nudge "${IDS[$i]}" "${REASON[i]}"
-    PLAN[i]="done"
-  fi
+  case "${PLAN[i]}" in
+    persisted-pending) pending_count=$((pending_count + 1)) ;;
+    fallback)
+      fall_back_to_nudge "${IDS[$i]}" "${REASON[i]}"
+      PLAN[i]=done
+      ;;
+  esac
   i=$((i + 1))
 done
 

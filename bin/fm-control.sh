@@ -570,14 +570,14 @@ claude_exit_screen_state() {  # [expected-pending]
   fm_backend_guarded_composer_state "$BACKEND" "$T" "$LABEL" "${1:-}" claude
 }
 
-claude_exit_dialog_refusal() {  # <interrupt-result> <exit-command-state>
-  local verb=exit-delivered
+claude_exit_dialog_refusal() {  # <interrupt-result> <exit-command-state> [observed-agent-state]
+  local verb=exit-delivered observed=${3:+ agent-state=$3}
   [ "$2" != not-sent ] || verb=exit-refused
-  die "$verb $ID interrupt=$1 exit-command=$2 agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it"
+  die "$verb $ID interrupt=$1 exit-command=$2$observed exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it"
 }
 
 claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
-  local cmd=$1 interrupt_result=$2 screen state attempts=0 waited=0
+  local cmd=$1 interrupt_result=$2 screen state submission=typed attempts=1 waited=0
   [ "$(claude_exit_screen_state)" != exit-confirm ] \
     || claude_exit_dialog_refusal "$interrupt_result" not-sent
   fm_backend_send_literal "$BACKEND" "$T" "$cmd" "$LABEL" \
@@ -585,20 +585,22 @@ claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
   sleep 1.2
   [ "$(claude_exit_screen_state "$cmd")" != exit-confirm ] \
     || claude_exit_dialog_refusal "$interrupt_result" typed
-  fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null 2>&1 \
-    || die "the exit command could not be submitted to task $ID on $BACKEND"
-  attempts=1
+  if fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null 2>&1; then
+    submission=delivered
+  fi
   while :; do
     sleep "$POLL"
     waited=$(awk -v w="$waited" -v p="$POLL" 'BEGIN{printf "%.3f", w + p}')
     state=$(agent_state)
     [ "$state" != dead ] || return 0
     screen=$(claude_exit_screen_state "$cmd")
-    [ "$screen" != exit-confirm ] || claude_exit_dialog_refusal "$interrupt_result" delivered
+    [ "$screen" != exit-confirm ] || claude_exit_dialog_refusal "$interrupt_result" "$submission" "$state"
     awk -v w="$waited" -v t="$EXIT_WAIT" 'BEGIN{exit !(w < t)}' \
-      || die "exit-delivered $ID interrupt=$interrupt_result exit-command=delivered agent-state=$state exit=unconfirmed; the agent did not stop within ${EXIT_WAIT}s"
+      || die "exit-delivered $ID interrupt=$interrupt_result exit-command=$submission agent-state=$state exit=unconfirmed; the agent did not stop within ${EXIT_WAIT}s"
     if [ "$screen" = pending ] && [ "$state" = alive ] && [ "$attempts" -lt "$EXIT_RETRIES" ]; then
-      fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null 2>&1 || true
+      if fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null 2>&1; then
+        submission=delivered
+      fi
       attempts=$((attempts + 1))
     fi
   done
@@ -629,7 +631,7 @@ do_exit() {
     fi
   fi
   if [ "$HARNESS" = claude ] && [ "$(claude_exit_screen_state)" = exit-confirm ]; then
-    claude_exit_dialog_refusal not-needed not-sent
+    claude_exit_dialog_refusal not-needed not-sent "$state"
   fi
   # A busy agent is interrupted first before the exit command is submitted.
   case "$(busy_verdict)" in
@@ -669,9 +671,11 @@ do_exit() {
     [ "$verdict" != send-failed ] \
       || die "the exit command could not be sent to task $ID on $BACKEND"
   fi
-  state=$(wait_agent_state "$EXIT_WAIT" dead) || {
-    die "exit-delivered $ID interrupt=$interrupt_result exit-command=delivered agent-state=$state exit=unconfirmed; the agent did not stop within ${EXIT_WAIT}s"
-  }
+  if [ "$HARNESS" != claude ]; then
+    state=$(wait_agent_state "$EXIT_WAIT" dead) || {
+      die "exit-delivered $ID interrupt=$interrupt_result exit-command=delivered agent-state=$state exit=unconfirmed; the agent did not stop within ${EXIT_WAIT}s"
+    }
+  fi
   # The incarnation is over: retire its busy wiring so no stale record or
   # orphaned generation survives the agent that produced it.
   retire_busy_incarnation

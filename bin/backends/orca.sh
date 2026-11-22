@@ -196,14 +196,20 @@ fm_backend_orca_worktree_path() {
   printf '%s' "$path"
 }
 
-fm_backend_orca_capture() {  # <terminal-id> <lines>
+fm_backend_orca_capture() {  # <terminal-id> <lines|visible>
   local terminal=$1 lines=${2:-40} out
+  local -a args=(terminal read --terminal "$terminal")
   fm_backend_orca_tool_check || return 1
-  out=$(orca terminal read --terminal "$terminal" --limit "$lines" --json) || return 1
-  fm_backend_orca_json_text "$out"
+  if [ "$lines" = visible ]; then
+    args+=(--screen)
+  else
+    args+=(--limit "$lines")
+  fi
+  out=$(orca "${args[@]}" --json) || return 1
+  fm_backend_orca_json_text "$out" "$lines"
 }
 
-fm_backend_orca_json_text() {  # <json>
+fm_backend_orca_json_text() {  # <json> [lines|visible]
   printf '%s' "$1" | node -e '
 const fs = require("fs");
 const data = JSON.parse(fs.readFileSync(0, "utf8"));
@@ -213,6 +219,10 @@ if (data.ok === false) {
   process.exit(2);
 }
 const r = data.result || {};
+if (process.argv[1] === "visible" &&
+    (r.terminal?.source !== "screen" || !Array.isArray(r.terminal.tail))) {
+  process.exit(1);
+}
 if (r.terminal && Array.isArray(r.terminal.tail)) {
   process.stdout.write(r.terminal.tail.join("\n"));
 } else if (Array.isArray(r.tail)) {
@@ -220,16 +230,7 @@ if (r.terminal && Array.isArray(r.terminal.tail)) {
 } else {
   process.stdout.write(r.text || r.output || r.content || r.preview || "");
 }
-'
-}
-
-# fm_backend_orca_composer_capture: the orca composer screen - one bounded
-# tail read of the live terminal. Deliberately NOT the old 200-line
-# backward-paged read: the composer is bottom-anchored, and paging back into
-# scrollback is what let a stale startup banner (codex's bordered
-# "permissions" box) compete with - and once outrank - the live composer.
-fm_backend_orca_composer_capture() {  # <terminal-id> [expected-label]
-  fm_backend_orca_capture "$1" "$FM_COMPOSER_CAPTURE_LINES"
+' "${2:-}"
 }
 
 # fm_backend_orca_composer_caps: static capability facts, not logic (see the
@@ -237,8 +238,8 @@ fm_backend_orca_composer_capture() {  # <terminal-id> [expected-label]
 # plain text; whether it can emit ANSI is unverified (orca is not installed
 # on the verification machine), so styled stays 0 - the conservative
 # degradation - until a live capture proves otherwise.
-fm_backend_orca_composer_caps() {
-  printf 'styled=0\ncursor=0\nidentity=0\nrows=%s\n' "$FM_COMPOSER_CAPTURE_LINES"
+fm_backend_orca_composer_caps() {  # <rows>
+  printf 'styled=0\ncursor=0\nidentity=0\nrows=%s\n' "$1"
 }
 
 # fm_backend_orca_composer_state: thin adapter - capture plus capabilities in,
@@ -252,12 +253,12 @@ fm_backend_orca_composer_state() {  # <terminal-id> [expected-label] -> empty|pe
 
 # fm_backend_orca_composer_snapshot: one composer capture into the snapshot
 # globals (bin/fm-composer-lib.sh "Composer SNAPSHOT").
-fm_backend_orca_composer_snapshot() {  # <terminal-id>
-  local cap
-  cap=$(fm_backend_orca_composer_capture "$1") || return 1
+fm_backend_orca_composer_snapshot() {  # <terminal-id> [visible]
+  local cap lines=${2:-$FM_COMPOSER_CAPTURE_LINES}
+  cap=$(fm_backend_orca_capture "$1" "$lines") || return 1
   FM_COMPOSER_SNAPSHOT_SCREEN=$cap
   FM_COMPOSER_SNAPSHOT_CURSOR=
-  FM_COMPOSER_SNAPSHOT_CAPS=$(fm_backend_orca_composer_caps)
+  FM_COMPOSER_SNAPSHOT_CAPS=$(fm_backend_orca_composer_caps "${lines/#visible/0}")
 }
 
 fm_backend_orca_send_key() {  # <terminal-id> <key>

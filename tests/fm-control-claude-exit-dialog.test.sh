@@ -12,6 +12,7 @@ set -u
 command -v cc >/dev/null || { echo 'skip: cc not found'; exit 0; }
 command -v tmux >/dev/null || { echo 'skip: tmux not found'; exit 0; }
 command -v jq >/dev/null || { echo 'skip: jq not found'; exit 0; }
+command -v node >/dev/null || { echo 'skip: node not found'; exit 0; }
 TMP_ROOT=$(fm_test_tmproot fm-claude-exit-dialog)
 mkdir -p "$TMP_ROOT/bin" "$TMP_ROOT/home/state" "$TMP_ROOT/home/data" "$TMP_ROOT/home/config"
 printf 'claude\n' > "$TMP_ROOT/home/config/secondmate-harness"
@@ -158,12 +159,15 @@ exec "$TMUX_BIN" -f /dev/null -L "$SOCKET" "\$@"
 EOF
 chmod +x "$TMP_ROOT/bin/tmux"
 stub_command() {  # <mode>
-  local screen=$FIXTURE
-  [ "$1" != picker-history ] || screen="$TMP_ROOT/picker-history.screen"
+  local mode=$1 screen=$FIXTURE
+  case "$mode" in
+    picker-history) screen="$TMP_ROOT/picker-history.screen" ;;
+    restart-initial) mode=initial-dialog; screen="$TMP_ROOT/long.screen" ;;
+  esac
   printf '%q %q %q %q %q; exec /bin/bash --noprofile --norc' \
-    "$TMP_ROOT/bin/claude" "$TMP_ROOT/pid" "$TMP_ROOT/keys" "$1" "$screen"
+    "$TMP_ROOT/bin/claude" "$TMP_ROOT/pid" "$TMP_ROOT/keys" "$mode" "$screen"
 }
-"$TMUX_BIN" -f /dev/null -L "$SOCKET" new-session -d -s fixture -n sentinel \
+"$TMUX_BIN" -f /dev/null -L "$SOCKET" new-session -d -s fixture -n sentinel -x 100 -y 40 \
   -c "$TMP_ROOT/worktree" /bin/bash --noprofile --norc || fail 'tmux fixture failed'
 "$TMUX_BIN" -f /dev/null -L "$SOCKET" set-option -g automatic-rename off
 "$TMUX_BIN" -f /dev/null -L "$SOCKET" set-option -g allow-rename off
@@ -176,7 +180,7 @@ run_fixture() {
     "$control_bin/$command" "$@"
 }
 
-for mode in restart exit plain initial-dialog picker-history \
+for mode in restart-initial restart exit plain initial-dialog picker-history \
     no-heading changed-heading no-list no-stay selection-on-2 relabeled extra-choice history history-plain; do
   target=fixture:fm-exitdialog
   "$TMUX_BIN" -f /dev/null -L "$SOCKET" new-window -d -t fixture -n fm-exitdialog \
@@ -191,7 +195,7 @@ for mode in restart exit plain initial-dialog picker-history \
     "worktree=$TMP_ROOT/worktree" "project=$TMP_ROOT/project"
   : > "$TMP_ROOT/keys"
   rc=0
-  if [ "$mode" = restart ]; then
+  if [[ "$mode" = restart* ]]; then
     out=$(run_fixture fm-secondmate-restart.sh exitdialog 2>&1) || rc=$?
   else
     out=$(run_fixture fm-control.sh exitdialog exit 2>&1) || rc=$?
@@ -205,20 +209,25 @@ for mode in restart exit plain initial-dialog picker-history \
       [ "$keys" = '/ e x i t \r' ] || fail "a plain exit sent other keys: $keys"
       ! kill -0 "$pid" 2>/dev/null || fail 'stand-in survived a plain exit'
       ;;
-    restart|exit|initial-dialog|picker-history)
+    restart*|exit|initial-dialog|picker-history)
       [ "$rc" -ne 0 ] || fail "$mode reported success with the dialog open"
       assert_contains "$out" 'background-tasks exit confirmation' "$mode did not name the open dialog"
       assert_contains "$screen" '❯ 1. Exit and stop tasks' "$mode did not leave the dialog open"
       expected='/ e x i t \r'
-      [ "$mode" != initial-dialog ] || expected=''
+      case "$mode" in initial-dialog|restart-initial) expected='' ;; esac
       [ "$keys" = "$expected" ] || fail "$mode expected '$expected', received '$keys'"
       kill -0 "$pid" 2>/dev/null || fail "$mode stopped the agent"
       if [ "$mode" = picker-history ]; then
         assert_contains "$screen" 'esc skip' 'tmux did not retain the earlier picker text'
       fi
-      if [ "$mode" = restart ]; then
+      if [[ "$mode" = restart* ]]; then
         expect_code 3 "$rc" 'the restart should report the mate unreached'
         assert_contains "$out" 'unreached: exitdialog:' 'the restart did not report the mate unreached'
+      fi
+      if [ "$mode" = restart-initial ]; then
+        assert_contains "$screen" 'Bash(timer 24)' 'tmux did not show the long dialog'
+        assert_absent "$TMP_ROOT/home/state/exitdialog.inbox" 'the restart queued a steer into the already-open dialog'
+      elif [ "$mode" = restart ]; then
         delivered="$TMP_ROOT/home/state/exitdialog.inbox/handled/001.msg"
         assert_present "$delivered" 'the stand-in mate did not handle the durable save request'
         assert_contains "$(sed '1,/^--$/d' "$delivered")" 'stop every background shell task you started' \
@@ -268,13 +277,20 @@ case "$1 $2" in
     ;;
   'agent get')
     case "$phase" in
-      stopped) printf '%s\n' '{"error":{"code":"agent_not_found"}}' ;;
+      stopped)
+        if [ "$FM_DIALOG_MODE" = single-stop ]; then
+          printf 'stop-unreadable\n' > "$FM_DIALOG_CASE/phase"
+        fi
+        printf '%s\n' '{"error":{"code":"agent_not_found"}}'
+        ;;
+      stop-unreadable) exit 1 ;;
       *) printf '%s\n' '{"result":{"agent":{"agent_status":"idle"}}}' ;;
     esac
     ;;
   'pane process-info')
-    case "$phase" in
-      stopped) printf '%s\n' '{"result":{"type":"pane_process_info","process_info":{"pane_id":"p1","shell_pid":12345,"foreground_processes":[]}}}' ;;
+    case "$phase:$FM_DIALOG_MODE" in
+      stopped:*) printf '%s\n' '{"result":{"type":"pane_process_info","process_info":{"pane_id":"p1","shell_pid":12345,"foreground_processes":[]}}}' ;;
+      dialog:dialog-unreadable) exit 1 ;;
       *) printf '%s\n' '{"result":{"type":"pane_process_info","process_info":{"pane_id":"p1","shell_pid":12345,"foreground_processes":[{"pid":23456,"name":"claude","argv":["claude"],"cmdline":"claude"}]}}}' ;;
     esac
     ;;
@@ -308,6 +324,8 @@ case "$1 $2" in
     [ "$4" = enter ] || exit 0
     case "$phase:$FM_DIALOG_MODE" in
       typed:retry) printf 'retry\n' ;;
+      typed:retry-failure) printf 'retry\n'; exit 1 ;;
+      typed:single-stop) printf 'stopped\n' ;;
       typed:*) printf 'dialog\n' ;;
       composer:*) printf 'composer\n' ;;
       *) printf 'stopped\n' ;;
@@ -322,7 +340,7 @@ fm_write_meta "$meta" 'backend=herdr' 'window=fixture:p1' 'endpoint_task_id=exit
   'harness=claude' 'kind=secondmate' "worktree=$TMP_ROOT/worktree" "project=$TMP_ROOT/project" \
   'herdr_session=fixture' 'herdr_workspace_id=w1' 'herdr_tab_id=t1' 'herdr_pane_id=p1' 'herdr_terminal_id=term-claude'
 export FM_DIALOG_HOME="$TMP_ROOT/worktree"
-for mode in dialog long-dialog picker-history retry doorbell-before doorbell-after \
+for mode in dialog long-dialog picker-history dialog-unreadable retry retry-failure single-stop doorbell-before doorbell-after \
     doorbell-after-long doorbell-before-picker; do
   export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/herdr-$mode"
   case "$mode" in
@@ -357,16 +375,111 @@ for mode in dialog long-dialog picker-history retry doorbell-before doorbell-aft
   printf 'herdr %s exit=%s: %s\n' "$mode" "$rc" "$out"
   input=$(cat "$FM_DIALOG_CASE/input")
   case "$mode" in
-    dialog|long-dialog|picker-history)
+    dialog|long-dialog|picker-history|dialog-unreadable)
       [ "$rc" -ne 0 ] || fail 'the styled Herdr dialog reported a stopped agent'
       assert_contains "$out" 'background-tasks exit confirmation' 'the styled Herdr dialog was not recognized'
       [ "$input" = $'/exit\nenter' ] || fail "the styled Herdr dialog received another key: $input"
       [ "$(cat "$FM_DIALOG_CASE/phase")" = dialog ] || fail 'the dialog did not stay open'
+      if [ "$mode" = dialog-unreadable ]; then
+        assert_contains "$out" 'agent-state=unreadable' 'the dialog refusal lost the observed liveness'
+      fi
       ;;
-    retry)
+    retry|retry-failure)
       expect_code 0 "$rc" 'Herdr should retry a swallowed Enter while the composer still holds /exit'
       [ "$input" = $'/exit\nenter\nenter' ] || fail "the proven pending command should be submitted once more: $input"
+      ;;
+    single-stop)
+      expect_code 0 "$rc" 'one verified stop should complete exit'
+      [ "$(cat "$FM_DIALOG_CASE/phase")" = stop-unreadable ] || fail 'the one stop sample was not consumed'
+      [ "$input" = $'/exit\nenter' ] || fail "the ordinary stop sent unexpected input: $input"
       ;;
   esac
 done
 pass 'styled Herdr exit retries only a proven pending command, and exit and doorbell send no key to the dialog'
+
+cat > "$TMP_ROOT/bin/fake-ssh" <<'SH'
+#!/usr/bin/env bash
+set -eu
+while [ "$1" = -o ]; do shift 2; done
+shift 3
+decode() { printf '%s' "$1" | base64 --decode 2>/dev/null || printf '%s' "$1" | base64 -D; }
+args=()
+while IFS= read -r -d '' arg; do args+=("$arg"); done < <(decode "$4")
+printf '%s\n' "${args[*]}" >> "$FM_DIALOG_CASE/remote"
+FM_HOME="$FM_DIALOG_HOME" "$FM_ROOT_OVERRIDE/bin/${args[0]}" "${args[@]:1}"
+SH
+chmod +x "$TMP_ROOT/bin/fake-ssh"
+export FM_DIALOG_MODE=remote-restart FM_DIALOG_CASE="$TMP_ROOT/remote-restart" FM_DIALOG_FIXTURE="$TMP_ROOT/long.screen"
+mkdir "$FM_DIALOG_CASE" "$FM_DIALOG_HOME/bin" "$FM_DIALOG_HOME/state/parent-route"
+: > "$FM_DIALOG_HOME/AGENTS.md"
+printf 'dialog\n' > "$FM_DIALOG_CASE/phase"
+fm_write_meta "$FM_DIALOG_HOME/state/parent-route/exitdialog.meta" 'backend=herdr' 'window=fm-remote:p1' \
+  'endpoint_task_id=exitdialog' 'harness=claude' 'kind=secondmate' "worktree=$FM_DIALOG_HOME" "project=$FM_DIALOG_HOME" \
+  'herdr_session=fm-remote' 'herdr_workspace_id=w1' 'herdr_tab_id=t1' 'herdr_pane_id=p1' 'herdr_terminal_id=term-claude'
+fm_write_meta "$meta" 'window=remote:exitdialog' 'endpoint_task_id=exitdialog' 'harness=claude' \
+  'kind=secondmate' 'remote_host=fixture-host' 'remote_backend=herdr' "worktree=$FM_DIALOG_HOME" "project=$FM_DIALOG_HOME"
+printf -- '- exitdialog - fixture (host: fixture-host; root: %s; home: %s; scope: test; projects: fixture; added 2026-09-03)\n' \
+  "$ROOT" "$FM_DIALOG_HOME" > "$TMP_ROOT/home/data/secondmates.md"
+rc=0
+out=$(FM_SSH_BIN="$TMP_ROOT/bin/fake-ssh" run_fixture fm-secondmate-restart.sh exitdialog 2>&1) || rc=$?
+expect_code 3 "$rc" "the remote restart should report the mate unreached: $out"
+assert_contains "$out" 'unreached: exitdialog: Claude is showing its background-tasks exit confirmation' \
+  'the remote restart did not name the open dialog'
+assert_absent "$FM_DIALOG_HOME/state/parent-route/exitdialog.inbox" 'remote restart queued a steer into the already-open dialog'
+assert_absent "$FM_DIALOG_CASE/input" 'remote restart sent terminal input into the dialog'
+pass 'remote restart observes the already-open dialog on its bound host and reports the mate unreached'
+
+cat > "$TMP_ROOT/bin/viewport-stub" <<'SH'
+#!/usr/bin/env bash
+set -eu
+case "${0##*/}:$1" in
+  cmux:list-panes) printf '%s\n' '{"panes":[{"surface_ids":["surface"]}]}' ;;
+  cmux:read-screen) jq -n --rawfile screen "$FM_DIALOG_FIXTURE" '{text: $screen}' ;;
+  zellij:list-sessions) printf 'fixture\n' ;;
+  zellij:--session)
+    case "$4" in
+      list-panes) printf '%s\n' '[{"id":1,"is_plugin":false}]' ;;
+      dump-screen)
+        case "$FM_DIALOG_MODE: $* " in zellij-plain:*' --ansi '*) exit 1 ;; esac
+        cat "$FM_DIALOG_FIXTURE"
+        ;;
+      paste|send-keys) printf '%s\n' "$4" >> "$FM_DIALOG_CASE/input" ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  orca:terminal)
+    case "$2" in
+      read)
+        if [ "$5" = --screen ]; then
+          jq -n --rawfile screen "$FM_DIALOG_FIXTURE" '{result:{terminal:{source:"screen",tail:($screen|split("\n"))}}}'
+        else
+          tail -n "$6" "$FM_DIALOG_FIXTURE" | jq -Rs '{result:{terminal:{source:"stream",tail:split("\n")}}}'
+        fi
+        ;;
+      send) printf '%s\n' "$2" >> "$FM_DIALOG_CASE/input"; printf '%s\n' '{"ok":true}' ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  cmux:send|cmux:send-key) printf '%s\n' "$1" >> "$FM_DIALOG_CASE/input" ;;
+  *) exit 1 ;;
+esac
+SH
+chmod +x "$TMP_ROOT/bin/viewport-stub"
+for backend in cmux zellij orca; do ln -s viewport-stub "$TMP_ROOT/bin/$backend"; done
+for mode in cmux zellij zellij-plain orca; do
+  export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/capture-$mode"
+  mkdir "$FM_DIALOG_CASE"
+  case "$mode" in
+    cmux) backend=cmux; target=workspace:surface ;;
+    zellij*) backend=zellij; target=fixture:1 ;;
+    orca) backend=orca; target=term-claude ;;
+  esac
+  rec="$FM_DIALOG_CASE/001.msg"
+  printf 'schema=fm-task-inbox.v1\n--\nreview the open records\n' > "$rec"
+  rc=0
+  PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" bash -c '. "$1"; fm_task_inbox_ring "$2" "$3" "$4" "" claude' \
+    _ "$ROOT/bin/fm-task-inbox-lib.sh" "$backend" "$target" "$rec" || rc=$?
+  expect_code 1 "$rc" "$mode should block the doorbell on a dialog with 26 task rows"
+  assert_absent "$FM_DIALOG_CASE/input" "$mode sent terminal input to the long dialog"
+done
+pass 'cmux, styled and plain Zellij, and Orca refuse doorbell input into a long Claude dialog'

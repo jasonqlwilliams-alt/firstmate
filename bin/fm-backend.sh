@@ -938,7 +938,7 @@ fm_backend_composer_state() {  # <backend> <target> [expected-label] -> empty|pe
 # fm_backend_composer_snapshot: one composer capture of <target> into the
 # snapshot globals (bin/fm-composer-lib.sh "Composer SNAPSHOT"). Call it
 # without command substitution; it fails when the capture fails.
-fm_backend_composer_snapshot() {  # <backend> <target> [expected-label] [herdr-lines|visible]
+fm_backend_composer_snapshot() {  # <backend> <target> [expected-label] [visible]
   local backend=$1
   shift
   FM_COMPOSER_SNAPSHOT_SCREEN=
@@ -948,9 +948,9 @@ fm_backend_composer_snapshot() {  # <backend> <target> [expected-label] [herdr-l
   case "$backend" in
     tmux) fm_tmux_composer_snapshot "$1" ;;
     herdr) fm_backend_herdr_composer_snapshot "$1" "${3:-}" ;;
-    zellij) fm_backend_zellij_composer_snapshot "$1" "${2:-}" ;;
-    orca) fm_backend_orca_composer_snapshot "$1" ;;
-    cmux) fm_backend_cmux_composer_snapshot "$1" "${2:-}" ;;
+    zellij) fm_backend_zellij_composer_snapshot "$1" "${2:-}" "${3:-}" ;;
+    orca) fm_backend_orca_composer_snapshot "$1" "${3:-}" ;;
+    cmux) fm_backend_cmux_composer_snapshot "$1" "${2:-}" "${3:-}" ;;
     *) return 1 ;;
   esac
 }
@@ -992,18 +992,17 @@ fm_backend_composer_classify_snapshot() {  # <backend> <target>
 # and Claude exit (bin/fm-control.sh).
 fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness]
   local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} picker verdict kv styled=0
-  local herdr_lines=
-  [ "$backend:$harness" != herdr:claude ] || herdr_lines=visible
-  fm_backend_composer_snapshot "$backend" "$target" "$label" "$herdr_lines" || { printf 'unknown'; return 0; }
+  local capture=
+  [ "$harness" != claude ] || capture=visible
+  fm_backend_composer_snapshot "$backend" "$target" "$label" "$capture" || { printf 'unknown'; return 0; }
   [ -n "$FM_COMPOSER_SNAPSHOT_SCREEN" ] || { printf 'unknown'; return 0; }
   if [ "$harness" = claude ]; then
     if fm_composer_claude_exit_confirm_screen "$FM_COMPOSER_SNAPSHOT_SCREEN"; then
       printf 'exit-confirm'
       return 0
     fi
-    if [ "$herdr_lines" = visible ]; then
+    if [ "$backend" != tmux ]; then
       FM_COMPOSER_SNAPSHOT_SCREEN=$(printf '%s\n' "$FM_COMPOSER_SNAPSHOT_SCREEN" | tail -n "$FM_COMPOSER_CAPTURE_LINES")
-      FM_COMPOSER_SNAPSHOT_CAPS=${FM_COMPOSER_SNAPSHOT_CAPS%rows=0}rows=$FM_COMPOSER_CAPTURE_LINES
     fi
   fi
   case "$harness" in
