@@ -1143,7 +1143,7 @@ Polling remained active and is covered as the fallback for capability, connect, 
 
 ### Recorded endpoint loss
 
-On 2026-11-21 on Linux x86_64, `bin/fm-test-run.sh tests/fm-watch-triage.test.sh` with tmux 3.7c verified a single stale wake per recorded incarnation for ordinary and captain-held windows, and cleared the held window's pause tracking on closure.
+On 2026-11-21 on Linux x86_64, `bin/fm-test-run.sh tests/fm-watch-triage.test.sh` with tmux 3.7c verified a single stale wake per recorded incarnation for unmarked ordinary and captain-held windows, and cleared the held window's pause tracking on closure.
 The same poll path was verified in an isolated Herdr 0.9.5 lab with a task record bound to a shell pane.
 After `bin/fm-herdr-lab.sh run "$session" pane close "$pane"`, `bin/fm-watch.sh` printed `stale: <window> (the recorded endpoint is gone)` and queued one stale wake.
 After `bin/fm-wake-drain.sh` and the printed acknowledgement command, the re-armed watcher stayed quiet on later polls.

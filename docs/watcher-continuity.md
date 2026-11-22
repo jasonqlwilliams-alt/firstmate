@@ -59,7 +59,7 @@ The turn-end guard remains the final backstop rather than the normal continuity 
 ## Recorded endpoint loss
 
 When pane polling cannot read a local task's recorded endpoint and the backend confirms it is missing, the watcher clears pause tracking.
-The watcher queues `stale: <window> (the recorded endpoint is gone)` once for that recorded endpoint unless a matching retained-copy park mark suppresses the report.
+The watcher queues `stale: <window> (the recorded endpoint is gone)` once for that recorded endpoint unless a matching [retained-copy park mark](#parking-a-task-with-its-copy-retained) suppresses the report.
 tmux and Herdr supply the required missing verdict, and a secondmate enters this poll path only while its latest status declares `paused:` or `captain-held:`.
 The report is keyed to the recorded backend, target, and spawn generation, so a relaunch can report a fresh loss even when it reuses the target.
 A successful capture also re-arms the report, and teardown keeps the loss record until it retires the task record.
@@ -78,7 +78,8 @@ Secondmates follow the reporting rule above.
 A loss wake queued before marking remains pending until [normal wake acknowledgement](#per-actor-acknowledgement).
 When resuming, use `clear` to remove the mark, including after the worker is running again.
 Clearing restores reporting eligibility and preserves the existing loss deduplication, so an already reported loss stays deduplicated for that incarnation.
-A relaunch makes the old mark inapplicable to the new worker, even if the mark is still on disk.
+A park mark applies only to the worker incarnation that was marked.
+A relaunched worker or another task that reuses the same target remains eligible for loss reporting.
 
 ## Foreground checkpoint boundary
 
