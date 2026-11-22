@@ -97,15 +97,27 @@
 #     schemas; a live ledger or cached copy missing either declaration or declaring
 #     an unsupported version is unavailable even when it contains no captain holds.
 #     These schemas also accept v1 summaries from older producers.
-#     A done in-flight child is valid only when its attributed current run-step
+#     A done in-flight child can remain valid when its attributed current run-step
 #     reports passed checks and an exact run PR URL. If task metadata registers
 #     a PR, it must match that URL; absent metadata PR does not erase current
 #     run attribution. No-checks, another PR, or a later pending run cannot
-#     inherit an older green verdict. Other terminal in-flight children remain
-#     contradictions unless the task has both a hold reason and hold kind. Held
-#     children stay visible but do not invalidate the home for terminal, unowned,
-#     or unknown child state. A validated pending-close receipt is instead disclosed
-#     as unavailable for its task generation, not as an orphan or contradiction.
+#     inherit an older green verdict through that run-step check.
+#     The home summary excludes a failed in-flight child from terminal_in_flight
+#     when the selected current state comes from run-step with the exact detail
+#     "run cancelled" or "run cancelled · status-log superseded (run failed)",
+#     the task metadata records a valid PR URL, the latest done status event is
+#     "PR <that url> checks green", and that PR has neither a matching local
+#     merge-notified marker nor a valid matching retirement receipt.
+#     The exemption applies only to terminal_in_flight and uses PR identity
+#     independently of commit heads. A PR closed without a local merge record
+#     can still qualify. The next snapshot can reflect a retry or PR
+#     registration that occurs after the relevant inputs were sampled.
+#     Regression coverage lives in tests/fm-fleet-snapshot-view.test.sh.
+#     Other terminal in-flight children remain contradictions unless the task
+#     has both a hold reason and hold kind. Held children stay visible but do
+#     not invalidate the home for terminal, unowned, or unknown child state.
+#     A validated pending-close receipt is instead disclosed as unavailable for
+#     its task generation, not as an orphan or contradiction.
 #   secondmate_landed: {records[],truncated[],unreadable[],partial[]} - the
 #     compatibility landed-work roll-up derived from secondmate_current. Readable
 #     structured homes are partial, not unreadable, when an unavailable child state
@@ -736,11 +748,26 @@ prefetch_task_current_states() {
   fi
 }
 
+snapshot_pr_awaiting_merge() {  # <id> <registered-pr> <captured-status>
+  local id=$1 pr=$2 status_log=$3 line last_done=''
+  [ -f "$status_log" ] && fm_pr_url_parse "$pr" || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      *done*:*) [ "$(status_line_verb "$line")" != 'done' ] || last_done=$line ;;
+    esac
+  done < "$status_log"
+  [ "$(status_line_note "$last_done")" = "PR $pr checks green" ] || return 1
+  ! fm_pr_poll_merge_already_notified "$STATE" "$id" \
+      "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" \
+    && ! { fm_pr_poll_retirement_receipt_valid "$STATE" "$id" && [ "$FM_PR_RETIRE_URL" = "$pr" ]; }
+}
+
 task_json_one() {  # <captured-meta>
   local meta=$1 original_meta id kind harness mode yolo project worktree home projects spawn_gen backend target status_log report_path
   local remote_host remote_root current_file endpoint_file observation_line
   local pr pr_source event_json current_json endpoint_exists agent_alive meta_json status_json report_json worktree_json home_json
-  local last_event_raw current_state current_source pending_decision blocked_event report_present=0 pr_from_status
+  local last_event_raw current_state current_source current_detail pending_decision blocked_event report_present=0 pr_from_status
+  local cancelled_pr_awaiting_merge=false
   local open_decisions_tsv open_decisions_json
 
   id=${meta##*/}; id=${id%.meta}
@@ -784,9 +811,20 @@ task_json_one() {  # <captured-meta>
   }
   event_json=$(status_event_json "$status_log" "$STATE/$id.status")
   last_event_raw=$(printf '%s' "$event_json" | jq -r '.last_event.raw // ""')
-  read -r current_state current_source < <(
-    printf '%s' "$current_json" | jq -r '[.state // "", .source // ""] | @tsv'
+  IFS=$'\t' read -r current_state current_source current_detail < <(
+    printf '%s' "$current_json" | jq -r '[.state // "", .source // "", .detail // ""] | @tsv'
   )
+  if [ "$OUTPUT_MODE" = secondmate-home-summary ] \
+    && [ "$current_state" = failed ] && [ "$current_source" = run-step ] \
+    && [ "$pr_source" = meta ]; then
+    case "$current_detail" in
+      'run cancelled'|'run cancelled · status-log superseded (run failed)')
+        if snapshot_pr_awaiting_merge "$id" "$pr" "$status_log"; then
+          cancelled_pr_awaiting_merge=true
+        fi
+        ;;
+    esac
+  fi
 
   # Durable keyed open-decision set: fold the WHOLE status stream
   # (fm-classify-lib.sh's status_open_decisions) so a later unrelated event can
@@ -874,6 +912,7 @@ task_json_one() {  # <captured-meta>
     --argjson pending_decision "$(bool_json "$pending_decision")" \
     --argjson blocked_event "$(bool_json "$blocked_event")" \
     --argjson report_present "$(bool_json "$report_present")" \
+    --argjson cancelled_pr_awaiting_merge "$cancelled_pr_awaiting_merge" \
     '{
       id:$id,
       kind:$kind,
@@ -916,7 +955,7 @@ task_json_one() {  # <captured-meta>
            steer:"bin/fm-send.sh fm-\($id) \u0027<instruction>\u0027",
            return_channel_note:null}
         end)
-    }'
+    } + (if $cancelled_pr_awaiting_merge then {cancelled_pr_awaiting_merge:true} else {} end)'
 }
 
 # Independent row composition uses the same cap as the preceding observations.
@@ -1123,6 +1162,7 @@ secondmate_home_summary_json() {  # <backlog-json-file> <tasks-json-file>
          | select(held_child($backlog) | not)
          | select(transitioning | not)
          | select(.id == $work.id and (.current_state.state == "done" or .current_state.state == "failed"))
+         | select(.cancelled_pr_awaiting_merge != true)
          | select((.current_state.state == "done"
                    and .current_state.source == "run-step"
                    and (.current_state.detail | startswith("checks green:"))
