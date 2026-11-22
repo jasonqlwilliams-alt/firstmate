@@ -844,7 +844,7 @@ test_static_poll_contract() {
   set -e
   [ "$rc" -eq 0 ] || fail "watcher did not surface merged poll"
   [ "$(grep -c '^check: .*: merged$' "$dir/watch.out")" -eq 1 ] || fail "watcher did not convert merged output into exactly one wake"
-  pass "static poll is silent except for one merged line and remains watcher-bounded"
+  pass "static poll reports exact terminal outcomes and remains watcher-bounded"
 }
 
 test_atomic_interruption_leaves_no_partial_artifact() {
@@ -2079,13 +2079,13 @@ test_external_merge_transition_retires_only_terminal_poll() {
 }
 
 test_polled_closures_preserve_other_pr_evidence() {
-  local dir state url out github_pr gitlab_mr
+  local dir state url out github_pr gitlab_mr replies_before
   dir=$(make_case close-two-prs)
   state="$dir/home/state"
   github_pr=https://github.com/o/r/pull/20
   gitlab_mr=https://gitlab.example/group/subgroup/project/-/merge_requests/20
   write_task_meta "$dir" task-a
-  printf '%s\n' mate-x > "$dir/home/.fm-secondmate-home"
+  seed_secondmate_home "$dir"
   add_stop_custom_check "$dir"
   fm_pr_poll_merge_mark_notified "$state" task-a github github.com o/r 19 \
     || fail "could not seed an earlier merge notification"
@@ -2093,12 +2093,17 @@ test_polled_closures_preserve_other_pr_evidence() {
   for url in "$github_pr" "$github_pr" "$gitlab_mr"; do
     run_check_entry "$dir" task-a "$url" >/dev/null 2>"$dir/register.err" \
       || fail "could not register $url: $(cat "$dir/register.err")"
+    replies_before=$(cat "$state/parent-replies.status") || fail "PR registration did not reach the parent route"
+    case "$replies_before" in
+      *"child task-a PR ready: $url"*) ;;
+      *) fail "the parent route did not receive the ready reply for $url" ;;
+    esac
     rm -f "$state/.last-check"
     out=$(FM_TEST_GH_STATE=CLOSED FM_TEST_GLAB_STATE=closed \
       run_watcher_bounded "$dir/home" "$dir/fakebin") || fail "could not poll $url"
     case "$out" in check:*z-stop.check.sh:*stop-cycle) ;; *) fail "closure woke the watcher: $out" ;; esac
     assert_no_grep "$url" "$state/.wake-queue" "closure queued a PR wake"
-    [ ! -e "$state/parent-replies.status" ] || fail "closure wrote a parent reply"
+    [ "$(cat "$state/parent-replies.status")" = "$replies_before" ] || fail "closure changed the parent ledger"
     ack_watcher_cycle "$state" || fail "could not acknowledge the control wake"
   done
   run_check_entry "$dir" task-a "$github_pr" >/dev/null 2>"$dir/register.err" \
@@ -2110,26 +2115,101 @@ test_polled_closures_preserve_other_pr_evidence() {
   pass "local closure evidence preserves exact PRs and the existing merge marker"
 }
 
-test_closure_publication_uses_captured_task_incarnation() (
-  local dir state url rc=0
+test_closure_publication_preserves_the_observed_pr() (
+  local dir state url replacement transition rc
   . "$ROOT/bin/fm-backlog-transition-lib.sh"
-  dir=$(make_case closed-pr-rearm)
-  state="$dir/home/state"
   url=https://github.com/o/r/pull/22
-  write_task_meta "$dir" task-a
-  printf 'spawn_gen=s-current\n' >> "$state/task-a.meta"
-  run_check_entry "$dir" task-a "$url" >/dev/null || fail "could not arm the current poll"
+  replacement=https://github.com/o/r/pull/23
+  for transition in rearm relaunch replacement reused-id; do
+    dir=$(make_case "pr-closure-$transition")
+    state="$dir/home/state"
+    write_task_meta "$dir" task-a
+    printf 'spawn_gen=s-original\n' >> "$state/task-a.meta"
+    run_check_entry "$dir" task-a "$url" >/dev/null || fail "could not arm the observed poll"
+    fm_pr_poll_snapshot_capture "$state" task-a "$POLL" || fail "could not capture the observed poll"
 
-  fm_pr_poll_record_closed "$state" task-a "$url" s-prior || rc=$?
-  [ "$rc" -eq 4 ] || fail "an observation from a prior incarnation was accepted"
-  [ ! -e "$state/task-a.pr-poll-closed" ] || fail "a prior incarnation wrote closure evidence"
+    case "$transition" in
+      rearm)
+        run_check_entry "$dir" task-a "$url" >/dev/null || fail "could not re-arm the observed PR"
+        ;;
+      relaunch)
+        sed 's/^spawn_gen=.*/spawn_gen=s-relaunched/' "$state/task-a.meta" > "$dir/relaunched.meta"
+        mv "$dir/relaunched.meta" "$state/task-a.meta"
+        ;;
+      replacement)
+        run_check_entry "$dir" task-a "$replacement" >/dev/null || fail "could not register the replacement PR"
+        ;;
+      reused-id)
+        write_task_meta "$dir" task-a
+        printf 'spawn_gen=s-new-task\n' >> "$state/task-a.meta"
+        run_check_entry "$dir" task-a "$url" >/dev/null || fail "could not register the new task's PR"
+        ;;
+    esac
 
-  run_check_entry "$dir" task-a "$url" >/dev/null || fail "could not re-arm the current poll"
-  fm_pr_poll_record_closed "$state" task-a "$url" s-current \
-    || fail "re-arming the same PR discarded an observation from the current incarnation"
-  fm_pr_poll_closed_recorded "$state" task-a "$url" || fail "the re-armed PR closure was not recorded"
-  pass "closure publication accepts a re-armed PR for the captured task incarnation"
+    rc=0
+    fm_pr_poll_record_closed "$state" task-a "$POLL" s-original || rc=$?
+    if [ "$transition" = reused-id ]; then
+      [ "$rc" -eq 4 ] || fail "the retired task's observation was accepted for a reused ID"
+      [ ! -e "$state/task-a.pr-poll-closed" ] || fail "the retired task wrote closure evidence"
+    else
+      [ "$rc" -eq 0 ] || fail "$transition discarded the observed closure"
+      [ "$(cat "$state/task-a.pr-poll-closed")" = "$url" ] || fail "$transition did not record the exact observed PR"
+    fi
+  done
+  pass "closures follow the observed PR across re-arms, relaunches, and PR replacement"
 )
+
+test_closure_write_failure_does_not_stop_sibling_checks() {
+  local dir state url out
+  dir=$(make_case failed-pr-closure)
+  state="$dir/home/state"
+  url=https://github.com/o/r/pull/24
+  write_poll_meta "$state" task-a "$url"
+  seed_canonical_poll "$dir" task-a "$url"
+  mkdir "$state/task-a.pr-poll-closed"
+  add_stop_custom_check "$dir"
+
+  out=$(FM_TEST_GH_STATE=CLOSED run_watcher_bounded "$dir/home" "$dir/fakebin") \
+    || fail "failed closure write stopped the watcher"
+  case "$out" in check:*z-stop.check.sh:*stop-cycle) ;; *) fail "watcher missed the sibling check: $out" ;; esac
+  assert_grep "PR closure for task-a could not be recorded" "$state/.watch-triage.log" \
+    "closure write failure was not logged"
+  [ -f "$state/.last-check" ] || fail "failed closure write did not advance the poll cadence"
+  [ -f "$state/task-a.check.sh" ] || fail "failed closure write disarmed the PR poll"
+  pass "closure write failures are logged while sibling checks continue"
+}
+
+test_remote_proxy_teardown_removes_closure_evidence() {
+  local dir state url
+  dir=$(make_case remote-pr-closure-teardown)
+  state="$dir/home/state"
+  url=https://github.com/o/r/pull/25
+  fm_write_meta "$state/task-a.meta" 'kind=secondmate' 'window=remote:task-a' \
+    'remote_host=remote-mac' "remote_root=$dir/remote-root" "home=$dir/remote-home" "pr=$url"
+  printf '%s\n' \
+    "- task-a - Fixture mate (host: remote-mac; root: $dir/remote-root; home: $dir/remote-home; scope: tests; projects: alpha; added 2026-08-02)" \
+    > "$dir/home/data/secondmates.md"
+  seed_canonical_poll "$dir" task-a "$url"
+  (umask 077; printf '%s\n' "$url" > "$state/task-a.pr-poll-closed")
+  touch "$state/.task-a.pr-poll-closed.ABC123" "$state/.last-watcher-beat"
+  cat > "$dir/fakebin/ssh" <<'SH'
+#!/usr/bin/env bash
+while [ "${1:-}" = -o ]; do shift 2; done
+[ "$#" -eq 7 ] && [ "$1" = -- ] && [ "$2" = remote-mac ] && [ "$3" = fm-remote-entrypoint.sh ] || exit 1
+expected=$(printf '%s\0' fm-remote-secondmate-control.sh retire task-a | base64 | tr -d '\n')
+[ "$7" = "$expected" ]
+SH
+  chmod +x "$dir/fakebin/ssh"
+
+  FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" FM_SSH_BIN="$dir/fakebin/ssh" FM_PROCEVENT_CLAIM_ROOT="$dir/claims" \
+    PATH="$dir/fakebin:$BASE_PATH" "$TEARDOWN" task-a >"$dir/teardown.out" 2>"$dir/teardown.err" \
+    || fail "remote proxy teardown failed: $(cat "$dir/teardown.err")"
+  [ ! -e "$state/task-a.meta" ] || fail "remote teardown left proxy metadata"
+  [ ! -e "$state/task-a.check.sh" ] || fail "remote teardown left the proxy's poll armed"
+  [ ! -e "$state/task-a.pr-poll-closed" ] || fail "remote teardown left the proxy's closure evidence"
+  [ ! -e "$state/.task-a.pr-poll-closed.ABC123" ] || fail "remote teardown left staged closure evidence"
+  pass "remote proxy retirement clears closure evidence and disarms its PR poll"
+}
 
 test_retirement_refuses_replacement_and_nonterminal_results() {
   local dir state before rc replacement_check replacement_data replacement_registration replacement_meta
@@ -2409,7 +2489,9 @@ test_persistent_secondmate_retirement_is_poll_only
 test_retirement_crash_recovery
 test_external_merge_transition_retires_only_terminal_poll
 test_polled_closures_preserve_other_pr_evidence
-test_closure_publication_uses_captured_task_incarnation
+test_closure_publication_preserves_the_observed_pr
+test_closure_write_failure_does_not_stop_sibling_checks
+test_remote_proxy_teardown_removes_closure_evidence
 test_retirement_refuses_replacement_and_nonterminal_results
 test_retirement_queue_failure_and_receipt_tampering
 test_gitlab_merged_poll_retires

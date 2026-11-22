@@ -2082,6 +2082,11 @@ while :; do
         fi
       else
         id=$(basename "$c" .check.sh)
+        closure_gen=
+        if [ -f "$STATE/$id.pr-poll-registration" ]; then
+          closure_gen=$(fm_backlog_meta_spawn_gen_optional "$STATE/$id.meta" "$STATE" \
+            && printf '%s\n' "$FM_BACKLOG_META_SPAWN_GEN") || closure_gen=
+        fi
         if fm_pr_poll_snapshot_capture "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh"; then
           is_pr_poll=1
           provider=$FM_PR_POLL_SNAPSHOT_PROVIDER
@@ -2089,11 +2094,6 @@ while :; do
           host=$FM_PR_POLL_SNAPSHOT_HOST
           path=$FM_PR_POLL_SNAPSHOT_PATH
           number=$FM_PR_POLL_SNAPSHOT_NUMBER
-          closure_gen_valid=0
-          if closure_gen=$(fm_backlog_meta_spawn_gen_optional "$STATE/$id.meta" "$STATE" \
-            && printf '%s\n' "$FM_BACKLOG_META_SPAWN_GEN"); then
-            closure_gen_valid=1
-          fi
           run_check_capture "$SCRIPT_DIR/fm-pr-poll.sh" --validated \
             "$provider" "$url" "$host" "$path" "$number" || exit 1
           out=$FM_CHECK_RESULT
@@ -2110,17 +2110,12 @@ while :; do
       fi
       if [ -n "$out" ]; then
         if [ "$is_pr_poll" -eq 1 ] && [ "$out" = closed-unmerged ]; then
-          if [ "$closure_gen_valid" -eq 1 ]; then
-            closure_rc=0
-            fm_pr_poll_record_closed "$STATE" "$id" "$url" "$closure_gen" || closure_rc=$?
-            case "$closure_rc" in
-              0|4) ;;
-              *)
-                triage_log "PR closure for $id could not be recorded (rc=$closure_rc)"
-                exit 1
-                ;;
-            esac
-          fi
+          closure_rc=0
+          fm_pr_poll_record_closed "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" "$closure_gen" || closure_rc=$?
+          case "$closure_rc" in
+            0|4) ;;
+            *) triage_log "PR closure for $id could not be recorded (rc=$closure_rc)" ;;
+          esac
           continue
         fi
         reason="check: $c: $out"

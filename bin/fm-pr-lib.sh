@@ -1050,7 +1050,9 @@ fm_pr_poll_closed_recorded() {
 }
 
 fm_pr_poll_record_closed() (
-  local state=$1 id=$2 url=$3 spawn_gen=$4 record device tmp
+  local state=$1 id=$2 template=$3 spawn_gen=$4
+  local url=$FM_PR_POLL_SNAPSHOT_URL record device tmp
+  [ "$id" = "$FM_PR_POLL_SNAPSHOT_ID" ] || return 4
   fm_pr_task_id_valid "$id" && fm_pr_url_parse "$url" || return 1
   [ -d "$state" ] && [ ! -L "$state" ] || return 1
   record="$state/$id.pr-poll-closed"
@@ -1066,10 +1068,11 @@ fm_pr_poll_record_closed() (
     cat -- "$record" >&8 || return 1
   fi
   printf '%s\n' "$url" >&8 || return 1
-  [ -f "$state/$id.check.sh" ] && [ ! -L "$state/$id.check.sh" ] \
-    && fm_pr_metadata_identity_parse "$state/$id.meta" && [ "$FM_PR_META_URL" = "$url" ] \
-    && fm_backlog_meta_spawn_gen_optional "$state/$id.meta" "$state" \
-    && [ "$FM_BACKLOG_META_SPAWN_GEN" = "$spawn_gen" ] || return 4
+  [ -f "$state/$id.check.sh" ] && [ ! -L "$state/$id.check.sh" ] || return 4
+  if ! { [ -n "$spawn_gen" ] && fm_backlog_meta_spawn_gen_optional "$state/$id.meta" "$state" \
+      && [ "$FM_BACKLOG_META_SPAWN_GEN" = "$spawn_gen" ]; }; then
+    fm_pr_poll_snapshot_matches "$state" "$id" "$template" || return 4
+  fi
   fm_pr_regular_destination_on_device_or_absent "$record" "$device" || return 1
   if mv -f -- "$tmp" "$record"; then
     return 0
@@ -1077,3 +1080,20 @@ fm_pr_poll_record_closed() (
   [ ! -e "$tmp" ] && return 4
   return 1
 )
+
+fm_pr_poll_closed_cleanup_valid() {
+  local state=$1 id=$2 artifact device
+  fm_pr_task_id_valid "$id" || return 1
+  for artifact in "$state/$id.pr-poll-closed" "$state/.$id.pr-poll-closed."??????; do
+    [ -e "$artifact" ] || [ -L "$artifact" ] || continue
+    [ -d "$state" ] && [ ! -L "$state" ] || return 1
+    device=$(fm_pr_file_device "$state") || return 1
+    fm_pr_regular_destination_on_device_or_absent "$artifact" "$device" || return 1
+  done
+}
+
+fm_pr_poll_closed_remove() {
+  local state=$1 id=$2
+  fm_pr_poll_closed_cleanup_valid "$state" "$id" || return 1
+  rm -f -- "$state/.$id.pr-poll-closed."?????? "$state/$id.pr-poll-closed"
+}

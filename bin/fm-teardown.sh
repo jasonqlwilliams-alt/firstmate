@@ -974,6 +974,7 @@ remote_secondmate_teardown() {
     || { echo "REFUSED: remote secondmate metadata does not match its registry route" >&2; return 1; }
   handoff_wake_retire_validate || return 1
   remote_recovery_paths_validate initial || return 1
+  fm_pr_poll_closed_cleanup_valid "$STATE" "$ID" || return 1
   if [ "$FORCE" != --force ] && [ "$REMOTE_OUTBOX_PRESENT" -eq 1 ]; then
     echo "REFUSED: remote secondmate $ID still has a pending backlog outbox; deliver it or explicitly discard with --force" >&2
     return 1
@@ -1024,6 +1025,10 @@ remote_secondmate_teardown() {
     || { echo "error: remote pending-reply cleanup failed; preserving the local route for retry" >&2; return 1; }
   handoff_wake_retire \
     || { echo "error: remote receiver wake cleanup failed; preserving the local route for retry" >&2; return 1; }
+  if fm_pr_poll_artifacts_valid "$STATE" "$ID" "$SCRIPT_DIR/fm-pr-poll.sh"; then
+    rm -f -- "$STATE/$ID.check.sh" || return 1
+  fi
+  fm_pr_poll_closed_remove "$STATE" "$ID" || return 1
   tmp="$SECONDMATE_REG.tmp.$$"
   grep -vE "^- $ID( |$)" "$SECONDMATE_REG" > "$tmp" || true
   mv -f -- "$tmp" "$SECONDMATE_REG"
@@ -1358,9 +1363,10 @@ retire_busy_state() {
 validate_pr_poll_cleanup() {
   local state_dir=$1 id=$2 state_device artifact has_artifact=0
   fm_task_id_path_safe "$id" || return 0
+  fm_pr_poll_closed_cleanup_valid "$state_dir" "$id" || return 1
   for artifact in "$state_dir/$id.check.sh" "$state_dir/$id.pr-poll" \
     "$state_dir/$id.pr-poll-registration" "$state_dir/$id.pr-poll-retirement" \
-    "$state_dir/$id.check-trust" "$state_dir/$id.pr-poll-closed"; do
+    "$state_dir/$id.check-trust"; do
     [ -e "$artifact" ] || [ -L "$artifact" ] || continue
     has_artifact=1
   done
@@ -1369,7 +1375,7 @@ validate_pr_poll_cleanup() {
   state_device=$(fm_pr_file_device "$state_dir") || return 1
   for artifact in "$state_dir/$id.check.sh" "$state_dir/$id.pr-poll" \
     "$state_dir/$id.pr-poll-registration" "$state_dir/$id.pr-poll-retirement" \
-    "$state_dir/$id.check-trust" "$state_dir/$id.pr-poll-closed"; do
+    "$state_dir/$id.check-trust"; do
     [ -e "$artifact" ] || [ -L "$artifact" ] || continue
     if [ ! -f "$artifact" ] || [ -L "$artifact" ] \
       || [ "$(fm_pr_file_device "$artifact")" != "$state_device" ] \
@@ -1395,7 +1401,7 @@ remove_pr_poll_artifacts() {
   rm -f "$state_dir/$id.check.sh" "$state_dir/$id.pr-poll" \
     "$state_dir/$id.pr-poll-registration" "$state_dir/$id.pr-poll-retirement" \
     "$state_dir/$id.check-trust" || return 1
-  rm -f -- "$state_dir/.$id.pr-poll-closed."?????? "$state_dir/$id.pr-poll-closed"
+  fm_pr_poll_closed_remove "$state_dir" "$id"
 }
 
 # Resolve the PR number for a worktree branch via gh-axi. Echoes the number on a
