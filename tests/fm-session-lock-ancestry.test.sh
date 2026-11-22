@@ -381,7 +381,7 @@ lock_as_harness() {  # <home> [args...]
 }
 
 start_live_harness() {  # sets LIVE_HARNESS_PID
-  "$CODEX_FIXTURE" -c 'sleep 120; exit 0' &
+  "$CODEX_FIXTURE" -c 'sleep 120; exit 0' </dev/null >/dev/null 2>&1 &
   LIVE_HARNESS_PID=$!
   OWNER_RECORD_PIDS="${OWNER_RECORD_PIDS:-} $LIVE_HARNESS_PID"
 }
@@ -392,7 +392,10 @@ lib_start_time() {  # <pid>
 
 cleanup_owner_record() {
   local pid
-  for pid in ${OWNER_RECORD_PIDS:-}; do kill "$pid" 2>/dev/null || true; done
+  for pid in ${OWNER_RECORD_PIDS:-}; do
+    pkill -P "$pid" 2>/dev/null || true
+    kill "$pid" 2>/dev/null || true
+  done
 }
 trap 'cleanup_owner_record; fm_test_cleanup' EXIT
 
@@ -451,7 +454,7 @@ test_legacy_pid_only_record_keeps_pid_only_liveness() {
 }
 
 test_readers_never_see_an_empty_owner_line() {
-  local home reader_out i empty
+  local home reader_out reader_pid i empty
   home=$(lock_home atomic)
   reader_out="$TMP_ROOT/owner-record/atomic.reads"
   lock_as_harness "$home" >/dev/null 2>&1 || fail "seed acquisition failed"
@@ -462,10 +465,11 @@ test_readers_never_see_an_empty_owner_line() {
     done
     printf '%s\n' "$empty" > "$reader_out"
   ) &
+  reader_pid=$!
   # Each run is a new dead-owner takeover, so every iteration rewrites the record.
   for i in $(seq 1 30); do lock_as_harness "$home" >/dev/null 2>&1 || fail "takeover $i failed"; done
   : > "$home/stop-reader"
-  wait
+  wait "$reader_pid"
   empty=$(cat "$reader_out")
   [ "$empty" = 0 ] || fail "a reader saw an empty owner line $empty time(s) during rewrites"
   pass "session lock: concurrent readers never see an empty owner line during rewrites"
