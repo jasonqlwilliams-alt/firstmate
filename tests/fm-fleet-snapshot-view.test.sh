@@ -1356,6 +1356,61 @@ SH
     || fail "a recorded merge must end the exemption: $out"
   rm -f "$state/cancelled.pr-poll-merge-notified"
 
+  cat > "$fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FM_HOME/forge-reads"
+case "$*" in
+  *" --json headRefOid "*) printf '%s\n' "$TEST_PR_HEAD" ;;
+  *" --json state "*) printf '%s\n' "$TEST_PR_STATE" ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$fakebin/gh"
+  ln -s gh "$fakebin/gh-axi"
+  printf '#!/usr/bin/env bash\nprintf "poll-cycle-end\\n"\n' > "$state/z-cycle-end.check.sh"
+  chmod 0700 "$state/z-cycle-end.check.sh"
+  FM_HOME="$home" "$ROOT/bin/fm-check-register.sh" z-cycle-end >/dev/null \
+    || fail "could not register the poll-cycle control check"
+  TEST_PR_HEAD="$head" PATH="$fakebin:$PATH" FM_HOME="$home" \
+    "$ROOT/bin/fm-pr-check.sh" cancelled "$pr" >"$home/register.log" 2>&1 \
+    || fail "could not register the PR with the watcher: $(cat "$home/register.log")"
+  : > "$home/forge-reads"
+  touch "$state/home-summary.json"
+  out=$(TEST_PR_STATE=CLOSED FM_HOME="$home" FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=5 \
+    PATH="$fakebin:$PATH" "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 15) || fail "watcher failed: $out"
+  case "$out" in
+    check:*z-cycle-end.check.sh:*poll-cycle-end) ;;
+    *) fail "watcher did not continue after the observed closure: $out" ;;
+  esac
+  [ "$(cat "$home/forge-reads")" = "pr view $pr --repo kunchenguid/firstmate --json state -q .state" ] \
+    || fail "watcher did not poll the exact PR: $out"
+  : > "$home/forge-reads"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  [ ! -s "$home/forge-reads" ] || fail "snapshot queried the forge"
+  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}' >/dev/null \
+    || fail "a polled closed-unmerged PR must end the exemption: $out"
+  TEST_PR_HEAD="$head" PATH="$fakebin:$PATH" FM_HOME="$home" \
+    "$ROOT/bin/fm-pr-check.sh" cancelled "$other_pr" >"$home/register.log" 2>&1 \
+    || fail "could not register the replacement PR: $(cat "$home/register.log")"
+  printf 'done: PR %s checks green\n' "$other_pr" > "$state/cancelled.status"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  printf '%s' "$out" | jq -e '.valid == true and .invalidity == {kind:null,ids:[]}' >/dev/null \
+    || fail "a closed outcome for a different PR must preserve the exemption: $out"
+
+  TEST_PR_HEAD="$head" PATH="$fakebin:$PATH" FM_HOME="$home" \
+    "$ROOT/bin/fm-pr-check.sh" cancelled "$pr" >"$home/register.log" 2>&1 \
+    || fail "could not re-register the closed PR: $(cat "$home/register.log")"
+  printf 'done: PR %s checks green\n' "$pr" > "$state/cancelled.status"
+  : > "$home/forge-reads"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  [ ! -s "$home/forge-reads" ] || fail "snapshot queried the forge for a re-registered PR"
+  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}' >/dev/null \
+    || fail "re-registering the PR lost its recorded closure: $out"
+
+  TEST_PR_HEAD="$head" PATH="$fakebin:$PATH" FM_HOME="$home" \
+    "$ROOT/bin/fm-pr-check.sh" cancelled "$other_pr" >"$home/register.log" 2>&1 \
+    || fail "could not re-register the other PR: $(cat "$home/register.log")"
+  printf 'done: PR %s checks green\n' "$other_pr" > "$state/cancelled.status"
   cat > "$home/run.txt" <<RUN
 run:
   id: "failed-run"

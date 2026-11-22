@@ -106,12 +106,12 @@
 #     when the selected current state comes from run-step with the exact detail
 #     "run cancelled" or "run cancelled · status-log superseded (run failed)",
 #     the task metadata records a valid PR URL, the latest done status event is
-#     "PR <that url> checks green", and that PR has neither a matching local
-#     merge-notified marker nor a valid matching retirement receipt.
-#     The exemption applies only to terminal_in_flight and uses PR identity
-#     independently of commit heads. A PR closed without a local merge record
-#     can still qualify. The next snapshot can reflect a retry or PR
-#     registration that occurs after the relevant inputs were sampled.
+#     "PR <that url> checks green", and local state has no matching closure
+#     record, merge-notified marker, or valid merge retirement receipt.
+#     The exemption applies only to terminal_in_flight and is decided from
+#     local evidence using PR identity independently of commit heads. The next
+#     snapshot can reflect a retry or PR registration that occurs after the
+#     relevant inputs were sampled.
 #     Regression coverage lives in tests/fm-fleet-snapshot-view.test.sh.
 #     Other terminal in-flight children remain contradictions unless the task
 #     has both a hold reason and hold kind. Held children stay visible but do
@@ -759,7 +759,8 @@ snapshot_pr_awaiting_merge() {  # <id> <registered-pr> <captured-status>
   [ "$(status_line_note "$last_done")" = "PR $pr checks green" ] || return 1
   ! fm_pr_poll_merge_already_notified "$STATE" "$id" \
       "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" \
-    && ! { fm_pr_poll_retirement_receipt_valid "$STATE" "$id" && [ "$FM_PR_RETIRE_URL" = "$pr" ]; }
+    && ! { fm_pr_poll_retirement_receipt_valid "$STATE" "$id" && [ "$FM_PR_RETIRE_URL" = "$pr" ]; } \
+    && ! fm_pr_poll_closed_recorded "$STATE" "$id" "$pr"
 }
 
 task_json_one() {  # <captured-meta>

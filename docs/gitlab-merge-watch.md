@@ -48,12 +48,10 @@ The stored record therefore carries `provider`, `url`, `host`, `path`, and `numb
 
 ## How plain glab is invoked, and why
 
-Two things about plain `glab` were established by running it, because assuming either one would have failed silently into a permanent "not merged".
-
 First, plain `glab` has no field selector.
 `gh` reads one field with `--json state -q .state`; `glab mr view` offers only `-F, --output string  Format output as: text, json`.
 Its JSON would need a JSON processor, and `jq` is not one of firstmate's common tools, so the state is read from glab's own field output instead.
-Only an exact `merged` wakes firstmate, so a changed output format produces no wake rather than a false merge.
+The [poll script](../bin/fm-pr-poll.sh) owns the current outcome contract, and the [PR poll regression](../tests/fm-pr-check-security.test.sh) covers closed merge requests.
 
 Second, `glab` cannot take a merge request URL the way `gh pr view` can.
 That form shells out to git for the current repository, and the watcher runs in no repository:
@@ -133,7 +131,7 @@ group/subgroup/project
 70:957244
 ```
 
-Running each published poll the way the watcher does, where an empty result means the poll stayed silent and produced no wake:
+Invoking the repository poll with the validated sidecar fields produced the following results.
 
 ```
 $ fm-pr-poll.sh --validated $(tr '\n' ' ' < state/e1.pr-poll)
@@ -145,7 +143,7 @@ $ fm-pr-poll.sh --validated $(tr '\n' ' ' < state/e3.pr-poll)
 The merged fixture merge request produces exactly one `merged` line.
 The open one produces nothing, and the unreachable placeholder host produces nothing rather than a false merge.
 
-The same bytes work in the watcher's sidecar-driven mode, where the published check locates its own record:
+The published check also located its own sidecar when invoked directly during this verification.
 
 ```
 $ state/e1x.check.sh
@@ -154,7 +152,6 @@ merged
 
 ## A missing CLI produces no wake, never a false merge
 
-The poll is silent on every error by design, so a missing `glab` would otherwise be indistinguishable from a merge request that is never merged.
 With `glab` removed from `PATH`, the poll stays silent even for the merge request that is genuinely merged:
 
 ```
@@ -207,7 +204,6 @@ Neither refusal armed a poll or recorded a `pr=`, so a missing tool leaves no ha
 
 `jq` is not one of firstmate's common tools, which is why the watch poll reads glab's field output instead.
 The merge path cannot do the same: `detailed_merge_status`, `has_conflicts`, `blocking_discussions_resolved`, and the head pipeline appear only in glab's JSON.
-The poll's silence on a missing tool is safe because silence means "not merged yet"; a merge cannot be silent about it, so the requirement is reported rather than assumed.
 
 The merged half of the fixture is refused, and every failing condition is listed rather than just the first:
 
