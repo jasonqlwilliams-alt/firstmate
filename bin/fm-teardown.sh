@@ -289,6 +289,7 @@
 #     Both scans are bounded by process count and exclude teardown and its
 #     ancestors. Teardown sends TERM, then KILL after a short grace period
 #     to any survivor whose process identity and task cwd still match.
+#     Do not launch cleanup from inside the task copy through a wrapper that detaches and exits.
 #     Hosts that hide part of teardown's ancestry cause it to refuse when
 #     either cwd scan finds a match. No matches is a silent no-op.
 #   Fix 3 - sweep abandoned remote job workers. A remote job worker started
