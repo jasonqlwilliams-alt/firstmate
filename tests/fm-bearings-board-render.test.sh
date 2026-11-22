@@ -378,6 +378,70 @@ EOF
     split("\n") | map(fromjson?) | . == [{question:"export-check",owner:"(main)",agent:"rakazo"}]
   ' >/dev/null || fail "the refused acknowledgement did not surface the decoded helper request"
 
+  if command -v tasks-axi >/dev/null 2>&1; then
+    local helper="$ROOT/bin/fm-bearings-helper.sh" inbox="$FM_HOME/delivery/inbox/new" plan packet backlog
+    mkdir -p "$inbox" "$FM_HOME/delivery/registry" "$FM_HOME/config" "$FM_HOME/data"
+    printf '%s\n' "$inbox" > "$FM_HOME/config/packet-router-inbox"
+    printf '%s\n' '| Role | Current hand | State |' '| --- | --- | --- |' \
+      '| rakazo | test-hand | active |' > "$FM_HOME/delivery/registry/SEATS.md"
+    backlog="$FM_HOME/data/backlog.md"
+    cat > "$backlog" <<'EOF'
+# Fleet backlog
+
+## In flight
+
+## Queued
+- [ ] approvals - Export team approval
+- [ ] export-check - Confirm export prerequisite blocked-by: approvals
+  Start condition: Obtain written export team approval.
+## Done
+EOF
+    cp "$backlog" "$FM_HOME/queued.md"
+    plan=$("$helper" prepare "$sid" 1 1 "Obtain written export team approval.") ||
+      fail "could not prepare a confirmation for the queued task"
+    [ -z "$(ls -A "$inbox")" ] || fail "preparing a helper confirmation touched the outbound inbox"
+    assert_absent "${result%.result}.handled" "preparing a helper confirmation acknowledged the wake"
+    if "$helper" send "$plan" >/dev/null 2>&1; then
+      fail "helper sent without the explicit confirmation argument"
+    fi
+    awk '/^## Queued$/ {next}
+         /^- \[ \] approvals / {approval=$0; next}
+         /^## Done$/ {print "## Queued\n" approval}
+         {print}' "$FM_HOME/queued.md" > "$backlog"
+    if output=$("$helper" send --confirmed "$plan" 2>&1); then
+      fail "stale confirmation sent after the task moved to In flight"
+    fi
+    assert_contains "$output" "no longer queued" "stale confirmation refused for the wrong reason"
+    [ -z "$(ls -A "$inbox")" ] || fail "stale confirmation wrote to the outbound inbox"
+    cp "$FM_HOME/queued.md" "$backlog"
+    local other_router="$FM_HOME/other-router"
+    mkdir -p "$other_router/inbox/new" "$other_router/registry"
+    cp "$FM_HOME/delivery/registry/SEATS.md" "$other_router/registry/SEATS.md"
+    printf '%s\n' "$other_router/inbox/new" > "$FM_HOME/config/packet-router-inbox"
+    if output=$("$helper" send --confirmed "$plan" 2>&1); then
+      fail "confirmed request was sent after its inbox changed"
+    fi
+    assert_contains "$output" "changed since confirmation" "inbox change refused for the wrong reason"
+    [ -z "$(ls -A "$inbox")" ] && [ -z "$(ls -A "$other_router/inbox/new")" ] ||
+      fail "refused inbox change still wrote a note"
+    printf '%s\n' "$inbox" > "$FM_HOME/config/packet-router-inbox"
+    output=$("$helper" send --confirmed "$plan") || fail "confirmed helper note was not published"
+    packet="${output#sent: }"
+    [ -f "$packet" ] || fail "helper did not report a real outbound note: $output"
+    assert_contains "$(cat "$packet")" 'role_target: "rakazo"' "published note used the wrong role"
+    assert_contains "$(cat "$packet")" 'Prerequisite: Obtain written export team approval.' "published note lost the confirmed prerequisite"
+    assert_contains "$(cat "$packet")" "Bearings request: $sid sequence 1 assignment 1" "published note lost request provenance"
+    cmp "$FM_HOME/queued.md" "$backlog" || fail "sending changed the authoritative backlog"
+    assert_absent "${result%.result}.handled" "sending acknowledged the mixed-capable wake early"
+    mv "$packet" "$FM_HOME/accepted-packet.md"
+    output=$("$helper" send --confirmed "$plan") || fail "could not recognize an already-published request"
+    assert_contains "$output" "already-sent:" "replay did not find the delivery receipt"
+    [ -z "$(ls -A "$inbox")" ] || fail "replay delivered the packet again"
+    pass "helper notes require confirmation, a current queued task, and the same delivery inbox"
+  else
+    echo "skip: helper publication requires tasks-axi"
+  fi
+
   output=$("$runner" handled "$sid" 1 --assignments-resolved) || fail "could not acknowledge explicit resolution"
   assert_equals "handled: $sid 1" "$output" "explicit resolution did not acknowledge the wake"
   assert_equals "already-handled: $sid 1" "$("$runner" handled "$sid" 1)" "resolution was not idempotent"
