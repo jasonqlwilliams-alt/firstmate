@@ -431,30 +431,6 @@ fm_backend_cmux_target_ready() {  # <target> [expected-label]
   fm_backend_cmux_surface_exists "$FM_BACKEND_CMUX_WORKSPACE" "$FM_BACKEND_CMUX_SURFACE"
 }
 
-# See bin/fm-backend.sh's fm_backend_endpoint_state contract.
-fm_backend_cmux_endpoint_state() {  # <target> <expected-label>
-  local expected_label=${2:-} workspaces panes
-  [ -n "$expected_label" ] || { printf 'unreadable'; return 0; }
-  fm_backend_cmux_parse_target "$1" || { printf 'unreadable'; return 0; }
-  workspaces=$(fm_backend_cmux_cli workspace list --json --id-format uuids 2>/dev/null) \
-    || { printf 'unreadable'; return 0; }
-  printf '%s' "$workspaces" | jq -es --arg id "$FM_BACKEND_CMUX_WORKSPACE" \
-    --arg title "$(fm_backend_cmux_scoped_title "$expected_label")" '
-      select(length == 1) | .[0].workspaces
-      | select(type == "array" and all(.[]; (.id | type == "string" and length > 0) and (.title | type == "string")))
-      | map(select(.id == $id)) | length == 1 and .[0].title == $title
-    ' >/dev/null 2>&1 || { printf 'unreadable'; return 0; }
-  panes=$(fm_backend_cmux_cli list-panes --workspace "$FM_BACKEND_CMUX_WORKSPACE" --json --id-format uuids 2>/dev/null) \
-    || { printf 'unreadable'; return 0; }
-  printf '%s' "$panes" | jq -ers '
-    select(length == 1) | .[0].panes
-    | select(type == "array" and all(.[]; .surface_ids
-        | type == "array" and all(.[]; type == "string" and length > 0)))
-    | select(any(.[]; .surface_ids | length > 0))
-    | "present"
-  ' 2>/dev/null || printf 'unreadable'
-}
-
 # fm_backend_cmux_current_path: the live foreground process's cwd, or empty on
 # any error. Mirrors fm_backend_zellij_current_path's active pwd-marker-probe
 # workaround (bin/backends/zellij.sh:306-347) verbatim in spirit.

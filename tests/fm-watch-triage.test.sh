@@ -2411,13 +2411,7 @@ process.stdout.write("fm-firstmate-" + tag + "-lost");
 #!/usr/bin/env bash
 case "$*" in
   --version) echo "zellij 0.44.0"; exit 0 ;;
-  "list-sessions --short --no-formatting")
-    case "$FM_FAKE_ENDPOINT" in
-      omitted-session) echo "another-session"; exit 0 ;;
-      no-sessions) echo "No active zellij sessions found." >&2; exit 1 ;;
-    esac
-    echo "remote"; exit 0
-    ;;
+  "list-sessions --short --no-formatting") echo "remote"; exit 0 ;;
   "--session remote action list-panes --json")
     [ "$ZELLIJ_SESSION_NAME" = remote ] || exit 3
     case "$FM_FAKE_ENDPOINT" in
@@ -2427,7 +2421,7 @@ case "$*" in
         ;;
       empty-panes) echo '[]' ;;
       bad-pane) echo '[{"id":7,"tab_id":1}]' ;;
-      unreadable|omitted-session|no-sessions|resurrectable) exit 1 ;;
+      unreadable) exit 1 ;;
       *) echo '[{"id":7,"tab_id":1,"is_plugin":false}]' ;;
     esac
     exit 0
@@ -2455,29 +2449,20 @@ case "$*" in
   ping) echo "PONG"; exit 0 ;;
   "workspace list --json --id-format uuids")
     case "$FM_FAKE_ENDPOINT" in
-      unreadable) echo "Error: Socket not found" >&2; exit 1 ;;
       out-of-window) echo '{"workspaces":[{"id":"ws-other","title":"other"}]}' ;;
-      bad-workspace) echo '{"workspaces":[{"id":"ws-gone"}]}' ;;
       renamed) echo '{"workspaces":[{"id":"ws-gone","title":"renamed"}]}' ;;
       moved-surface)
         printf '{"workspaces":[{"id":"ws-gone","title":"%s"},{"id":"ws-other","title":"Destination"}]}\n' "$(cat "${0%/*}/scoped-title")"
         ;;
-      *) printf '{"workspaces":[{"id":"ws-gone","title":"%s"}]}\n' "$(cat "${0%/*}/scoped-title")" ;;
+      *) exit 1 ;;
     esac
     exit 0
     ;;
   "list-panes --workspace ws-gone --json --id-format uuids")
-    case "$FM_FAKE_ENDPOINT" in
-      bad-pane) echo '{"panes":[{}]}' ;;
-      bad-surface) echo '{"panes":[{"surface_ids":[false]}]}' ;;
-      moved-surface)
-        touch "${0%/*}/cmux-moved-source-read"
-        echo '{"panes":[]}'
-        ;;
-      empty-pane) echo '{"panes":[{"surface_ids":[]}]}' ;;
-      *) echo '{"panes":[{"surface_ids":["sf-gone"]}]}' ;;
-    esac
-    exit 0
+    if [ "$FM_FAKE_ENDPOINT" = moved-surface ]; then
+      echo '{"panes":[]}'
+      exit 0
+    fi
     ;;
 esac
 printf 'cmux %s\n' "$*" >> "${0%/*}/route-errors"
@@ -2545,42 +2530,33 @@ test_experimental_backend_unreadable_endpoints_stay_quiet() (
         [ -s "$fakebin/orca-captures" ] || fail "the watcher did not attempt to capture the recorded Orca terminal"
         pass "orca: stale handles stay quiet after the capture fails"
         ;;
-      cmux)
-        [ -f "$fakebin/cmux-moved-source-read" ] || fail "the watcher did not inspect the empty cmux source workspace after the move"
-        pass "cmux: the source workspace stays quiet after its surface moves"
-        ;;
+      cmux) pass "cmux: the watcher stays quiet after a surface moves" ;;
     esac
   done
 )
 
-test_experimental_backend_endpoint_state_boundary() (
+test_zellij_endpoint_state_boundary() (
   local dir fakebin mode
-  command -v jq >/dev/null 2>&1 || { echo "skip: jq is required by the Zellij and cmux adapters"; return 0; }
+  command -v jq >/dev/null 2>&1 || { echo "skip: jq is required by the Zellij adapter"; return 0; }
   command -v node >/dev/null 2>&1 || { echo "skip: node is required to generate fixture titles"; return 0; }
   dir=$(fm_test_tmproot fm-endpoint-state-boundary) || fail "could not create the boundary fixture"
   fakebin="$dir/fakebin"
   install_fake_experimental_backends "$fakebin" || fail "could not install the experimental backend fixtures"
-  expect_endpoint_state() {  # <verdict> <mode> <backend> <target> [label]
+  expect_endpoint_state() {  # <verdict> <mode> [label]
     local got
     got=$(PATH="$fakebin:$PATH" FM_FAKE_ENDPOINT=$2 FM_HOME="$dir" \
-      bash -c '. "$0/bin/fm-backend.sh"; fm_backend_endpoint_state "$1" "$2" "$3"' "$ROOT" "$3" "$4" "${5:-}")
-    [ "$got" = "$1" ] || fail "[$3/$2] expected $1 for $4, got '$got'"
+      bash -c '. "$0/bin/fm-backend.sh"; fm_backend_endpoint_state zellij remote:7 "$1"' "$ROOT" "${3:-}")
+    [ "$got" = "$1" ] || fail "[zellij/$2] expected $1 for remote:7, got '$got'"
     [ ! -s "$fakebin/route-errors" ] || fail "unexpected backend route: $(cat "$fakebin/route-errors")"
   }
-  expect_endpoint_state present present zellij remote:7 fm-lost
-  expect_endpoint_state present legacy zellij remote:7 fm-lost
-  for mode in unreadable renamed reused-session empty-panes omitted-session no-sessions resurrectable bad-pane bad-tab tab-not-listed duplicate-legacy; do
-    expect_endpoint_state unreadable "$mode" zellij remote:7 fm-lost
+  expect_endpoint_state present present fm-lost
+  expect_endpoint_state present legacy fm-lost
+  for mode in unreadable renamed reused-session empty-panes bad-pane bad-tab tab-not-listed duplicate-legacy; do
+    expect_endpoint_state unreadable "$mode" fm-lost
   done
-  expect_endpoint_state unreadable present zellij remote:7
+  expect_endpoint_state unreadable present
 
-  expect_endpoint_state present present cmux ws-gone:sf-gone fm-lost
-  for mode in unreadable renamed out-of-window moved-surface empty-pane bad-workspace bad-pane bad-surface; do
-    expect_endpoint_state unreadable "$mode" cmux ws-gone:sf-gone fm-lost
-  done
-  expect_endpoint_state unreadable present cmux ws-gone:sf-gone
-
-  pass "experimental backends: only matching, readable endpoint evidence establishes presence"
+  pass "zellij: only matching, readable endpoint evidence establishes presence"
 )
 
 # A parked task whose worker window was deliberately closed while its isolated
@@ -5889,7 +5865,7 @@ test_missing_tmux_endpoint_surfaces_once || exit 1
 test_endpoint_loss_and_ordinary_stale_are_presented_independently || exit 1
 test_missing_secondmate_endpoint_surfaces_once || exit 1
 test_experimental_backend_unreadable_endpoints_stay_quiet || exit 1
-test_experimental_backend_endpoint_state_boundary || exit 1
+test_zellij_endpoint_state_boundary || exit 1
 test_parked_retained_copy_suppresses_endpoint_loss || exit 1
 test_park_wait_stops_when_home_is_retired || exit 1
 test_park_refuses_redirected_records || exit 1

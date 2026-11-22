@@ -1216,7 +1216,6 @@ fm_backend_endpoint_state() {  # <backend> <target> <expected-label>
       esac
       ;;
     zellij) fm_backend_zellij_endpoint_state "$target" "$expected_label" ;;
-    cmux) fm_backend_cmux_endpoint_state "$target" "$expected_label" ;;
     *) printf 'unreadable' ;;
   esac
 }
