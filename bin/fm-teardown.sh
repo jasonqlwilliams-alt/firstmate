@@ -499,7 +499,7 @@ teardown_release_meta_lock() {
   [ "$META_LOCK_HELD" = 1 ] || return 0
   # A failed retirement can leave a live record that still needs loss deduplication.
   if [ ! -e "$META" ] && [ ! -L "$META" ]; then
-    rm -f "$STATE/$ID.missing-endpoint" || true
+    rm -f "$STATE/$ID.missing-endpoint" "$STATE/$ID.parked-retained" || true
   fi
   fm_lock_release "$META_LOCK" || true
   META_LOCK_HELD=0
@@ -3788,7 +3788,7 @@ rm -f "$STATE/$ID.turn-ended" "$STATE/$ID.progress" \
   "$STATE/$ID.control-relaunch" "$STATE/$ID.control-relaunch.meta-prior" \
   "$STATE/$ID.control-relaunch.brief-prior" "$STATE/$ID.control-relaunch.note" \
   "$STATE/$ID.reconcile-nudged" "$STATE/$ID.gemini-settings.json" \
-  "$STATE/$ID.parked-retained" "$STATE/.$ID.branch-outcome-index"
+  "$STATE/.$ID.branch-outcome-index"
 # The steering inbox (bin/fm-task-inbox-lib.sh) is runtime state for the
 # retired endpoint; teardown only runs after landing is confirmed, so any
 # leftover unhandled steer here is moot rather than unlanded work.

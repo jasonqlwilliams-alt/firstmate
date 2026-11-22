@@ -374,6 +374,15 @@ fm_backend_endpoint_incarnation() {
   printf '%s:%s\t%s' "$backend" "$target" "$generation"
 }
 
+fm_backend_endpoint_park_identity() {  # <meta-file>
+  local incarnation
+  incarnation=$(fm_backend_endpoint_incarnation "$1") || return 1
+  case "$incarnation" in
+    *$'\t'legacy-*) incarnation="${incarnation%$'\t'legacy-*}"$'\t' ;;
+  esac
+  printf '%s' "$incarnation"
+}
+
 # fm_backend_endpoint_parked_retained: 0 iff the task's park mark,
 # <state>/<id>.parked-retained written by bin/fm-park-retained.sh (which owns
 # the mark's contract), names the record's current endpoint incarnation. A
@@ -383,7 +392,7 @@ fm_backend_endpoint_parked_retained() {  # <meta-file>
   case "$meta" in *.meta) ;; *) return 1 ;; esac
   mark="${meta%.meta}.parked-retained"
   [ -f "$mark" ] && [ ! -L "$mark" ] || return 1
-  incarnation=$(fm_backend_endpoint_incarnation "$meta") || return 1
+  incarnation=$(fm_backend_endpoint_park_identity "$meta") || return 1
   recorded=$(cat "$mark" 2>/dev/null) || return 1
   [ "$recorded" = "$incarnation" ]
 }

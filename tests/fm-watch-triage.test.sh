@@ -27,10 +27,10 @@ DRAIN="$ROOT/bin/fm-wake-drain.sh"
 
 TMP_ROOT=$(fm_test_tmproot fm-watch-triage-tests)
 
-ack_stopped_cycle() {  # <state>
-  local state=$1 err sequence generation
+ack_stopped_cycle() {  # <state> [drain-output]
+  local state=$1 recovered=${2:-/dev/null} err sequence generation
   err="$state/.test-cycle-drain.err"
-  FM_STATE_OVERRIDE="$state" "$DRAIN" >/dev/null 2> "$err" || return 1
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$recovered" 2> "$err" || return 1
   sequence=$(sed -n 's/^WAKE_ACK_REQUIRED:.*--ack-through \([0-9][0-9]*\) --recovery-generation [A-Za-z0-9._-][A-Za-z0-9._-]*$/\1/p' "$err")
   generation=$(sed -n 's/^WAKE_ACK_REQUIRED:.*--ack-through [0-9][0-9]* --recovery-generation \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' "$err")
   rm -f "$err"
@@ -2330,12 +2330,12 @@ test_missing_tmux_endpoint_surfaces_once() (
 # a relaunch or an explicit clear restores the alarm, and an unmarked parked
 # task still raises the ordinary loss wake.
 test_parked_retained_copy_suppresses_endpoint_loss() (
-  local tmux_bin socket dir state window task out pid='' wt before after park
+  local tmux_bin socket dir state window out pid='' park_pid='' wt before after park lock rc tries
   tmux_bin=$(command -v tmux) || { echo "skip: tmux is required for the parked endpoint regression"; return 0; }
   park="$ROOT/bin/fm-park-retained.sh"
   socket="fm-watch-parked-$$-$RANDOM"
   dir=$(fm_test_tmproot fm-watch-parked) || fail "could not create the parked endpoint fixture"
-  trap '[ -z "$pid" ] || reap "$pid"; "$tmux_bin" -L "$socket" kill-server 2>/dev/null || true' EXIT
+  trap '[ -z "$park_pid" ] || reap "$park_pid"; [ -z "$pid" ] || reap "$pid"; "$tmux_bin" -L "$socket" kill-server 2>/dev/null || true' EXIT
   mkdir -p "$dir/bin"
   printf '#!/usr/bin/env bash\nexec %q -L %q "$@"\n' "$tmux_bin" "$socket" > "$dir/bin/tmux"
   chmod +x "$dir/bin/tmux"
@@ -2353,63 +2353,107 @@ test_parked_retained_copy_suppresses_endpoint_loss() (
       FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
       FM_PAUSE_RESURFACE_SECS=999999 FM_STALE_ESCALATE_SECS=999999 exec "$WATCH" > "$out"
   }
-  ack_parked() { FM_HOME="$dir/home" ack_stopped_cycle "$state"; }
+  ack_parked() { FM_HOME="$dir/home" ack_stopped_cycle "$state" "$@"; }
   park_task() { FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" "$park" "$@"; }
+  lease_task() { FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=main "$ROOT/bin/fm-lease.sh" "$@"; }
 
-  # Each run closes the window, then watches. <expect> is "wake" or "quiet".
-  run_case() {  # <label> <task> <spawn-gen> <expect>
-    local label=$1 task=$2 gen=$3 expect=$4 poll
+  expect_quiet() {
+    local label=$1 poll
+    watch_parked & pid=$!
+    for poll in 1 2 3; do
+      wait_poll_cycle "$state" "$pid" \
+        || fail "[$label] the parked endpoint loss alarmed on poll $poll: $(cat "$out")"
+    done
+    ! awk -F '\t' -v w="$window" '$3 == "stale" && $4 == w { found = 1 } END { exit !found }' \
+      "$state/.wake-queue" 2>/dev/null || fail "[$label] a parked loss wake was queued"
+    reap "$pid"; pid=''
+    ack_parked || fail "[$label] could not acknowledge the fixture watcher stop"
+  }
+
+  close_worker() {  # <task> <spawn-gen>
+    local task=$1 gen=$2
     window="parked:fm-$task"
     "$dir/bin/tmux" new-window -d -t parked: -n "fm-$task" -- bash --noprofile --norc -i \
-      || fail "[$label] could not create the fixture window"
-    printf 'window=%s\nbackend=tmux\nkind=ship\nharness=codex\nworktree=%s\nspawn_gen=%s\n' \
-      "$window" "$wt" "$gen" > "$state/$task.meta"
+      || fail "could not create the fixture window for $task"
+    printf 'window=%s\nbackend=tmux\nkind=ship\nharness=codex\nworktree=%s\n' \
+      "$window" "$wt" > "$state/$task.meta"
+    if [ -n "$gen" ]; then
+      printf 'spawn_gen=%s\n' "$gen" >> "$state/$task.meta"
+    fi
     if [ ! -e "$state/$task.status" ]; then
       printf 'paused: parked for later, copy retained\n' > "$state/$task.status"
       seen_sig "$state/$task.status" > "$state/.seen-${task}_status"
     fi
-    if [ "$label" = marked ] || [ "$label" = marked-again ]; then
-      park_task "$task" mark > "$dir/park.out" 2>&1 || fail "[$label] marking failed: $(cat "$dir/park.out")"
-    fi
-    "$dir/bin/tmux" kill-window -t "$window" || fail "[$label] could not close the fixture window"
-    if [ "$expect" = wake ]; then
-      watch_parked & pid=$!
-      wait_for_exit "$pid" 150 || fail "[$label] closing the window did not wake the watcher: $(cat "$out")"
-      pid=''
-      grep -Fxq "stale: $window (the recorded endpoint is gone)" "$out" \
-        || fail "[$label] unexpected watcher output: $(cat "$out")"
-      ack_parked || fail "[$label] could not acknowledge the loss wake"
-    else
-      watch_parked & pid=$!
-      for poll in 1 2 3; do
-        wait_poll_cycle "$state" "$pid" \
-          || fail "[$label] the parked endpoint loss alarmed on poll $poll: $(cat "$out")"
-      done
-      ! awk -F '\t' -v w="$window" '$3 == "stale" && $4 == w { found = 1 } END { exit !found }' \
-        "$state/.wake-queue" 2>/dev/null || fail "[$label] a parked loss wake was queued"
-      reap "$pid"; pid=''
-      ack_parked || fail "[$label] could not acknowledge the fixture watcher stop"
-    fi
+    "$dir/bin/tmux" kill-window -t "$window" || fail "could not close the fixture window for $task"
+  }
+
+  expect_loss() {
+    local label=$1
+    watch_parked & pid=$!
+    wait_for_exit "$pid" 150 || fail "[$label] the lost endpoint did not wake the watcher: $(cat "$out")"
+    pid=''
+    grep -Fxq "stale: $window (the recorded endpoint is gone)" "$out" \
+      || fail "[$label] unexpected watcher output: $(cat "$out")"
   }
 
   # Reproduction: an unmarked parked task alarms on the expected loss.
-  run_case unmarked plain first wake
+  close_worker plain first
+  expect_loss unmarked
+  printf '%s\n' "$$" > "$state/.lock"
+  FM_LEASE_HOLDER_PID=$$ lease_task claim plain >/dev/null || fail "main could not claim the task lease"
+  rc=0
+  FM_SUPERVISION_ACTOR=branch park_task plain mark > "$dir/park.out" 2>&1 || rc=$?
+  [ "$rc" -eq 6 ] && [ ! -e "$state/plain.parked-retained" ] \
+    || fail "the branch was able to mark a task leased by main"
+  FM_SUPERVISION_ACTOR=main park_task plain mark > "$dir/park.out" 2>&1 \
+    || fail "marking the already closed task failed: $(cat "$dir/park.out")"
+  rc=0
+  FM_SUPERVISION_ACTOR=branch park_task plain clear > "$dir/park.out" 2>&1 || rc=$?
+  [ "$rc" -eq 6 ] && [ -f "$state/plain.parked-retained" ] \
+    || fail "the branch was able to clear a task leased by main"
+  lease_task release plain || fail "main could not release the task lease"
+  rm -f "$state/.lock"
+  ack_parked "$dir/recovered" || fail "could not acknowledge the pending loss wake"
+  awk -F '\t' -v w="$window" '$3 == "stale" && $4 == w { count++ } END { exit (count != 1) }' \
+    "$dir/recovered" || fail "drain did not present one pending loss wake"
+  expect_quiet marked-after-queue
+
   # The park mark silences the loss for this incarnation.
-  run_case marked held first quiet
-  park_task held status | grep -Fxq 'parked-retained: yes' || fail "status did not report the active mark"
+  close_worker held first
+  park_task held mark > "$dir/park.out" 2>&1 || fail "marking failed: $(cat "$dir/park.out")"
+  expect_quiet marked
   # Clearing the mark restores the alarm for the same lost endpoint.
   park_task held clear > "$dir/park.out" 2>&1 || fail "clearing failed: $(cat "$dir/park.out")"
-  park_task held status | grep -Fxq 'parked-retained: no' || fail "status did not report the cleared mark"
-  watch_parked & pid=$!
-  wait_for_exit "$pid" 150 || fail "[cleared] the cleared mark did not restore the loss alarm: $(cat "$out")"
-  pid=''
-  grep -Fxq "stale: parked:fm-held (the recorded endpoint is gone)" "$out" \
-    || fail "[cleared] unexpected watcher output: $(cat "$out")"
+  expect_loss cleared
   ack_parked || fail "[cleared] could not acknowledge the loss wake"
   # A mark from an earlier incarnation does not silence a relaunched worker's loss.
-  run_case marked-again again first quiet
-  run_case relaunched again second wake
-  park_task again status | grep -Fxq 'parked-retained: no' || fail "a relaunch left the old mark reported as active"
+  close_worker again ''
+  park_task again mark > "$dir/park.out" 2>&1 || fail "legacy marking failed: $(cat "$dir/park.out")"
+  printf 'spawn_gen=legacy-20261122T000000Z-123\n' >> "$state/again.meta"
+  expect_quiet teardown-stamp
+
+  lock="$state/.meta-again.lock"
+  mkdir -p "$lock" "$dir/lock-bin" || fail "could not hold the replacement's metadata lock"
+  printf '%s\n' "$$" > "$lock/pid"
+  printf '#!/usr/bin/env bash\n: > %q\nexec %q "$@"\n' "$dir/park-waiting" "$(command -v sleep)" > "$dir/lock-bin/sleep"
+  chmod +x "$dir/lock-bin/sleep"
+  PATH="$dir/lock-bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" \
+    "$park" again mark > "$dir/park.out" 2>&1 &
+  park_pid=$!
+  for ((tries=0; tries<100; tries++)); do
+    [ ! -e "$dir/park-waiting" ] || break
+    sleep 0.1
+  done
+  [ -e "$dir/park-waiting" ] || fail "mark never waited for the replacement's metadata lock"
+  sed 's/^spawn_gen=.*/spawn_gen=second/' "$state/again.meta" > "$state/.again-replacement" \
+    && mv "$state/.again-replacement" "$state/again.meta" || fail "could not publish replacement metadata"
+  rm -f "$lock/pid" && rmdir "$lock" || fail "could not release the replacement's metadata lock"
+  rc=0
+  wait_for_exit "$park_pid" 100 || rc=$?
+  park_pid=''
+  [ "$rc" -eq 1 ] || fail "mark racing a replacement exited $rc: $(cat "$dir/park.out")"
+  expect_loss relaunched
+  ack_parked || fail "[relaunched] could not acknowledge the loss wake"
 
   after=$(cd "$wt" && git status --porcelain && cat unlanded.txt)
   [ "$before" = "$after" ] || fail "the park mark changed the retained copy"

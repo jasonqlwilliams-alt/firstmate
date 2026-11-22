@@ -750,13 +750,17 @@ test_teardown_manual_backend_leaves_the_backlog_to_the_operator() {
 }
 
 test_endpoint_loss_marker_survives_failed_task_retirement() {
-  local case_dir meta marker recorded_loss
+  local case_dir meta marker recorded_loss mark recorded_park
   case_dir=$(make_case endpoint-loss-retirement)
   write_meta "$case_dir" local-only ship
   meta="$case_dir/state/task-x1.meta"
   marker="$case_dir/state/task-x1.missing-endpoint"
   recorded_loss=$'tmux:firstmate:fm-task-x1\tteardown-test-task-x1'
   printf '%s\n' "$recorded_loss" > "$marker"
+  mark="$case_dir/state/task-x1.parked-retained"
+  FM_HOME="$case_dir/home" FM_STATE_OVERRIDE="$case_dir/state" "$ROOT/bin/fm-park-retained.sh" task-x1 mark >/dev/null \
+    || fail "could not mark the parked task"
+  recorded_park=$(cat "$mark") || fail "could not read the saved park mark"
 
   cat > "$case_dir/fakebin/rm" <<'SH'
 #!/usr/bin/env bash
@@ -774,13 +778,15 @@ SH
   assert_present "$meta" "failed teardown removed the task record"
   [ "$(cat "$marker")" = "$recorded_loss" ] \
     || fail "failed teardown lost the acknowledged endpoint-loss record"
+  [ "$(cat "$mark")" = "$recorded_park" ] || fail "failed teardown lost the park mark"
 
   rm -f "$case_dir/fakebin/rm"
   run_teardown "$case_dir" > "$case_dir/retry.out" 2>&1 \
     || fail "teardown retry failed: $(cat "$case_dir/retry.out")"
   assert_absent "$meta" "teardown retry kept the task record"
   assert_absent "$marker" "teardown retry kept the endpoint-loss record"
-  pass "teardown keeps an acknowledged endpoint loss until its task record is retired"
+  assert_absent "$mark" "teardown retry kept the park mark"
+  pass "teardown keeps endpoint-loss and park records until the task record is retired"
 }
 
 # A parked retained-copy mark only silences endpoint-loss reporting: cleanup

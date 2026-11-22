@@ -2008,14 +2008,19 @@ test_recovery_ignores_a_symlinked_worker_record() {
 }
 
 test_recovery_replays_a_close_an_interrupted_cleanup_left_open() {
-  local case_dir id out
+  local case_dir id out home
   id=atomic-heal-b9
   case_dir=$(make_home heal-pending-close)
+  home=$(home_of "$case_dir")
   add_item "$case_dir" "$id"
   start_item "$case_dir" "$id"
+  write_task_meta "$case_dir" "$id" ship no-mistakes "spawn_gen=spawn-heal-pr"
+  FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$ROOT/bin/fm-park-retained.sh" "$id" mark >/dev/null \
+    || fail "could not mark the task for the interrupted cleanup fixture"
   printf 'id=%s\ndata=%s\nspawn_gen=spawn-heal-pr\narg=--pr\narg=https://github.com/example/repo/pull/11\n' \
     "$id" "$(home_of "$case_dir")/data" \
     > "$(home_of "$case_dir")/state/$id.backlog-close"
+  rm -f "$home/state/$id.meta"
 
   out=$(run_bootstrap "$case_dir")
   [ "$(row_state "$case_dir" "$id")" = "done" ] \
@@ -2024,6 +2029,7 @@ test_recovery_replays_a_close_an_interrupted_cleanup_left_open() {
     "the replayed close dropped the completion link the cleanup had recorded"
   assert_absent "$(home_of "$case_dir")/state/$id.backlog-close" \
     "a replayed close left its record behind"
+  assert_absent "$home/state/$id.parked-retained" "replay left the retired task's park mark behind"
   assert_not_contains "$out" "endpoint or local copy may remain" \
     "recovery claimed incomplete cleanup without task metadata"
   pass "session start finishes a close an interrupted cleanup recorded but never landed"
