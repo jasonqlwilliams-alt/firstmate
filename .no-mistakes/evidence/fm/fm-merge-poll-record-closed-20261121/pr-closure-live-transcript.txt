@@ -1,0 +1,244 @@
+Firstmate foreground CLI against disposable homes and a localhost forge emulator.
+Forge traffic uses real gh and glab. A synthetic validation ledger supplies the cancelled run.
+
+1. A cancelled validation loses its exemption after a confirmed GitHub closure
+------------------------------------------------------------------------------
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/46
+armed: state/task-a.check.sh
+Registration used the base revision and recorded the fixture branch HEAD.
+$ fm-watch-checkpoint.sh --seconds 25
+check: cancelled/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	cancelled/state/z-cycle-end.check.sh	check: cancelled/state/z-cycle-end.check.sh: cycle-complete
+GitHub GraphQL PR #46 state -> CLOSED
+No closure record is present.
+$ fm-fleet-snapshot.sh --secondmate-home-summary
+{"valid": true, "invalidity": {"kind": null, "ids": []}}
+Local forge requests during summary: 0
+The base revision reproduces the cancelled task being treated as healthy after closure.
+$ fm-watch-checkpoint.sh --seconds 25
+check: cancelled/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	cancelled/state/z-cycle-end.check.sh	check: cancelled/state/z-cycle-end.check.sh: cycle-complete
+GitHub GraphQL PR #46 state -> OPEN
+No closure record is present.
+$ fm-fleet-snapshot.sh --secondmate-home-summary
+{"valid": true, "invalidity": {"kind": null, "ids": []}}
+Local forge requests during summary: 0
+$ fm-watch-checkpoint.sh --seconds 25
+check: cancelled/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	cancelled/state/z-cycle-end.check.sh	check: cancelled/state/z-cycle-end.check.sh: cycle-complete
+GitHub GraphQL PR #46 state -> ERROR
+No closure record is present.
+$ fm-fleet-snapshot.sh --secondmate-home-summary
+{"valid": true, "invalidity": {"kind": null, "ids": []}}
+Local forge requests during summary: 0
+$ fm-watch-checkpoint.sh --seconds 25
+check: cancelled/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	cancelled/state/z-cycle-end.check.sh	check: cancelled/state/z-cycle-end.check.sh: cycle-complete
+GitHub GraphQL PR #46 state -> closed
+No closure record is present.
+$ fm-fleet-snapshot.sh --secondmate-home-summary
+{"valid": true, "invalidity": {"kind": null, "ids": []}}
+Local forge requests during summary: 0
+$ fm-watch-checkpoint.sh --seconds 25
+check: cancelled/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	cancelled/state/z-cycle-end.check.sh	check: cancelled/state/z-cycle-end.check.sh: cycle-complete
+GitHub GraphQL PR #46 state -> CLOSED
+$ cat state/task-a.pr-poll-closed (mode 0600)
+https://github.com/o/r/pull/46
+$ fm-fleet-snapshot.sh --secondmate-home-summary
+{"valid": false, "invalidity": {"kind": "terminal_in_flight", "ids": ["task-a"]}}
+Local forge requests during summary: 0
+$ fm-fleet-snapshot.sh --secondmate-home-summary
+{"valid": false, "invalidity": {"kind": "terminal_in_flight", "ids": ["task-a"]}}
+Local forge requests during summary: 0
+
+2. GitHub and GitLab closures stay distinct and silent across re-registration
+-----------------------------------------------------------------------------
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/52
+armed: state/task-a.check.sh
+$ fm-watch-checkpoint.sh --seconds 25
+check: identities/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	identities/state/z-cycle-end.check.sh	check: identities/state/z-cycle-end.check.sh: cycle-complete
+GitHub GraphQL PR #52 state -> CLOSED
+Parent ledger is byte-for-byte unchanged since registration.
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/52
+armed: state/task-a.check.sh
+$ fm-watch-checkpoint.sh --seconds 25
+check: identities/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	identities/state/z-cycle-end.check.sh	check: identities/state/z-cycle-end.check.sh: cycle-complete
+GitHub GraphQL PR #52 state -> CLOSED
+Parent ledger is byte-for-byte unchanged since registration.
+$ fm-pr-check.sh task-a https://gitlab.example/group/subgroup/project/-/merge_requests/52
+armed: state/task-a.check.sh
+$ fm-watch-checkpoint.sh --seconds 25
+check: identities/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	identities/state/z-cycle-end.check.sh	check: identities/state/z-cycle-end.check.sh: cycle-complete
+GitLab GET /api/v4/projects/group/subgroup/project/merge_requests/52?include_diverged_commits_count=true&include_rebase_in_progress=true&render_html=true
+GitLab MR !52 state -> closed
+GitLab GET /api/v4/projects/group/subgroup/project/merge_requests/52/approval_state
+Parent ledger is byte-for-byte unchanged since registration.
+$ cat state/task-a.pr-poll-closed (mode 0600)
+https://github.com/o/r/pull/52
+https://gitlab.example/group/subgroup/project/-/merge_requests/52
+$ fm-fleet-snapshot.sh --secondmate-home-summary
+{"valid": false, "invalidity": {"kind": "terminal_in_flight", "ids": ["task-a"]}}
+Local forge requests during summary: 0
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/53
+armed: state/task-a.check.sh
+$ fm-fleet-snapshot.sh --secondmate-home-summary
+{"valid": true, "invalidity": {"kind": null, "ids": []}}
+Local forge requests during summary: 0
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/52
+armed: state/task-a.check.sh
+$ fm-watch-checkpoint.sh --seconds 25
+check: identities/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	identities/state/z-cycle-end.check.sh	check: identities/state/z-cycle-end.check.sh: cycle-complete
+GitHub GraphQL PR #52 state -> OPEN
+$ cat state/task-a.pr-poll-closed (mode 0600)
+https://github.com/o/r/pull/52
+https://gitlab.example/group/subgroup/project/-/merge_requests/52
+$ fm-fleet-snapshot.sh --secondmate-home-summary
+{"valid": false, "invalidity": {"kind": "terminal_in_flight", "ids": ["task-a"]}}
+Local forge requests during summary: 0
+
+3. An existing merge is still excluded and its notification is delivered once
+-----------------------------------------------------------------------------
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/61
+armed: state/task-a.check.sh
+$ fm-watch-checkpoint.sh --seconds 25
+check: merge/state/task-a.check.sh: merged
+$ fm-wake-drain.sh
+check	merged-task-a-https://github.com/o/r/pull/61	check: merge landed: task-a https://github.com/o/r/pull/61
+GitHub GraphQL PR #61 state -> MERGED
+done [key=merged-task-a]: merged task-a https://github.com/o/r/pull/61
+$ fm-fleet-snapshot.sh --secondmate-home-summary
+{"valid": false, "invalidity": {"kind": "terminal_in_flight", "ids": ["task-a"]}}
+Local forge requests during summary: 0
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/62
+armed: state/task-a.check.sh
+$ fm-watch-checkpoint.sh --seconds 25
+check: merge/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	merge/state/z-cycle-end.check.sh	check: merge/state/z-cycle-end.check.sh: cycle-complete
+$ cat state/task-a.pr-poll-closed (mode 0600)
+https://github.com/o/r/pull/62
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/61
+armed: state/task-a.check.sh
+$ fm-fleet-snapshot.sh --secondmate-home-summary
+{"valid": false, "invalidity": {"kind": "terminal_in_flight", "ids": ["task-a"]}}
+Local forge requests during summary: 0
+$ fm-watch-checkpoint.sh --seconds 25
+check: merge/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	merge/state/z-cycle-end.check.sh	check: merge/state/z-cycle-end.check.sh: cycle-complete
+The existing merge record is byte-for-byte unchanged. Re-arming produced only the unrelated control wake.
+
+4. An in-flight result follows its exact PR across one task transition
+----------------------------------------------------------------------
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/70
+armed: state/task-a.check.sh
+GitHub response is held during rearm.
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/70
+armed: state/task-a.check.sh
+$ fm-watch-checkpoint.sh --seconds 25
+check: transition-rearm/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	transition-rearm/state/z-cycle-end.check.sh	check: transition-rearm/state/z-cycle-end.check.sh: cycle-complete
+GitHub GraphQL PR #70 state -> CLOSED
+$ cat state/task-a.pr-poll-closed (mode 0600)
+https://github.com/o/r/pull/70
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/71
+armed: state/task-a.check.sh
+GitHub response is held during relaunch.
+Synthetic worker relaunch advances the generation and keeps the original poll armed.
+$ fm-watch-checkpoint.sh --seconds 25
+check: transition-relaunch/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	transition-relaunch/state/z-cycle-end.check.sh	check: transition-relaunch/state/z-cycle-end.check.sh: cycle-complete
+GitHub GraphQL PR #71 state -> CLOSED
+$ cat state/task-a.pr-poll-closed (mode 0600)
+https://github.com/o/r/pull/71
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/72
+armed: state/task-a.check.sh
+GitHub response is held during replacement.
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/82
+armed: state/task-a.check.sh
+$ fm-watch-checkpoint.sh --seconds 25
+check: transition-replacement/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	transition-replacement/state/z-cycle-end.check.sh	check: transition-replacement/state/z-cycle-end.check.sh: cycle-complete
+GitHub GraphQL PR #72 state -> CLOSED
+$ cat state/task-a.pr-poll-closed (mode 0600)
+https://github.com/o/r/pull/72
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/73
+armed: state/task-a.check.sh
+GitHub response is held during reused-id.
+$ fm-teardown.sh task-a --force
+teardown task-a complete (window fm-fixture:fm-task-a, worktree transition-reused-id/projects/subject)
+Backlog: task-a just finished (this home keeps no markdown backlog at transition-reused-id/data/backlog.md). Update transition-reused-id/data/backlog.md - move task-a to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/73
+armed: state/task-a.check.sh
+$ fm-watch-checkpoint.sh --seconds 25
+check: transition-reused-id/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	transition-reused-id/state/z-cycle-end.check.sh	check: transition-reused-id/state/z-cycle-end.check.sh: cycle-complete
+GitHub GraphQL PR #73 state -> CLOSED
+No closure record is present.
+
+5. An unwritable closure record leaves sibling checks active and can be retried
+-------------------------------------------------------------------------------
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/91
+armed: state/task-a.check.sh
+$ fm-watch-checkpoint.sh --seconds 25
+check: retry/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	retry/state/z-cycle-end.check.sh	check: retry/state/z-cycle-end.check.sh: cycle-complete
+[2026-11-21T23:24:41-0800] PR closure for task-a could not be recorded (rc=1)
+Poll registration remains armed and the cadence timestamp advanced.
+$ fm-watch-checkpoint.sh --seconds 25
+check: retry/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	retry/state/z-cycle-end.check.sh	check: retry/state/z-cycle-end.check.sh: cycle-complete
+$ cat state/task-a.pr-poll-closed (mode 0600)
+https://github.com/o/r/pull/91
+$ fm-fleet-snapshot.sh --secondmate-home-summary
+{"valid": false, "invalidity": {"kind": "terminal_in_flight", "ids": ["task-a"]}}
+Local forge requests during summary: 0
+
+6. Local and remote-proxy retirement clear closure evidence and keep the remote poll files
+------------------------------------------------------------------------------------------
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/94
+armed: state/task-a.check.sh
+$ fm-watch-checkpoint.sh --seconds 25
+check: retire-local-task/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	retire-local-task/state/z-cycle-end.check.sh	check: retire-local-task/state/z-cycle-end.check.sh: cycle-complete
+$ cat state/task-a.pr-poll-closed (mode 0600)
+https://github.com/o/r/pull/94
+$ fm-teardown.sh task-a --force
+teardown task-a complete (window fm-fixture:fm-task-a, worktree retire-local-task/projects/subject)
+Backlog: task-a just finished (this home keeps no markdown backlog at retire-local-task/data/backlog.md). Update retire-local-task/data/backlog.md - move task-a to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+local-task: task metadata, closure record, and pending closure stage are absent.
+The local poll files are absent.
+$ fm-pr-check.sh task-a https://github.com/o/r/pull/95
+armed: state/task-a.check.sh
+$ fm-watch-checkpoint.sh --seconds 25
+check: retire-remote-proxy/state/z-cycle-end.check.sh: cycle-complete
+$ fm-wake-drain.sh
+check	retire-remote-proxy/state/z-cycle-end.check.sh	check: retire-remote-proxy/state/z-cycle-end.check.sh: cycle-complete
+$ cat state/task-a.pr-poll-closed (mode 0600)
+https://github.com/o/r/pull/95
+$ fm-teardown.sh task-a 
+teardown task-a complete (remote remote-fixture:retire-remote-proxy/remote-home)
+Loopback remote controller reply: already-retired: task-a
+remote-proxy: task metadata, closure record, and pending closure stage are absent.
+The original remote poll files are byte-for-byte unchanged.
