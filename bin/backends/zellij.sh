@@ -302,15 +302,17 @@ fm_backend_zellij_pane_exists() {  # <session> <pane_id>
 # already-fetched JSON), so a caller whose fake-CLI fixture supplies exactly
 # one list-tabs response keeps working unchanged.
 fm_backend_zellij_tab_matches_label() {  # <session> <tab_id> <label>
-  local session=$1 tab_id=$2 label=$3 scoped tabs count
+  local session=$1 tab_id=$2 label=$3 scoped tabs
   scoped=$(fm_backend_zellij_scoped_title "$label")
-  tabs=$(fm_backend_zellij_cli "$session" action list-tabs --json 2>/dev/null)
-  printf '%s' "$tabs" | jq -e --argjson t "$tab_id" --arg want "$scoped" \
-    '[.[]? | select(.tab_id == $t and .name == $want)] | length > 0' >/dev/null 2>&1 && return 0
-  printf '%s' "$tabs" | jq -e --argjson t "$tab_id" --arg want "$label" \
-    '[.[]? | select(.tab_id == $t and .name == $want)] | length > 0' >/dev/null 2>&1 || return 1
-  count=$(printf '%s' "$tabs" | jq -r --arg want "$label" '[.[]? | select(.name == $want)] | length' 2>/dev/null)
-  [ "$count" = "1" ]
+  tabs=$(fm_backend_zellij_cli "$session" action list-tabs --json 2>/dev/null) || return 1
+  printf '%s' "$tabs" | jq -es --argjson tab "$tab_id" --arg label "$label" --arg scoped "$scoped" '
+    select(length == 1) | .[0]
+    | select(type == "array" and all(.[];
+        (.tab_id | type == "number" and . >= 0 and floor == .) and (.name | type == "string")))
+    | map(select(.tab_id == $tab)) as $matches | select($matches | length == 1)
+    | $matches[0].name == $scoped
+        or ($matches[0].name == $label and (map(select(.name == $label)) | length) == 1)
+  ' >/dev/null 2>&1
 }
 
 # fm_backend_zellij_create_task: create the task's tab (one terminal pane) in
@@ -388,7 +390,7 @@ fm_backend_zellij_target_ready() {  # <target> [expected-label]
 
 # See bin/fm-backend.sh's fm_backend_endpoint_state contract.
 fm_backend_zellij_endpoint_state() {  # <target> <expected-label>
-  local expected_label=${2:-} panes tabs tab_id
+  local expected_label=${2:-} panes tab_id
   [ -n "$expected_label" ] || { printf 'unreadable'; return 0; }
   fm_backend_zellij_parse_target "$1" || { printf 'unreadable'; return 0; }
   case "$FM_BACKEND_ZELLIJ_PANE" in *[!0-9]*) printf 'unreadable'; return 0 ;; esac
@@ -400,22 +402,14 @@ fm_backend_zellij_endpoint_state() {  # <target> <expected-label>
     | select(type == "array" and all(.[];
         (.id | numeric_id) and (.is_plugin | type == "boolean") and (.tab_id | numeric_id)))
     | map(select(.id == $pane and .is_plugin == false))
-    | if length == 0 then "missing" elif length == 1 then .[0].tab_id else empty end
+    | select(length == 1) | .[0].tab_id
   ' 2>/dev/null) \
     || { printf 'unreadable'; return 0; }
-  [ "$tab_id" != missing ] || { printf 'missing'; return 0; }
-  tabs=$(fm_backend_zellij_cli "$FM_BACKEND_ZELLIJ_SESSION" action list-tabs --json 2>/dev/null) \
-    || { printf 'unreadable'; return 0; }
-  printf '%s' "$tabs" | jq -ers --argjson tab "$tab_id" --arg label "$expected_label" \
-    --arg scoped "$(fm_backend_zellij_scoped_title "$expected_label")" '
-      select(length == 1) | .[0]
-      | select(type == "array" and all(.[];
-          (.tab_id | type == "number" and . >= 0 and floor == .) and (.name | type == "string")))
-      | map(select(.tab_id == $tab)) as $matches | select($matches | length == 1)
-      | select($matches[0].name == $scoped
-          or ($matches[0].name == $label and (map(select(.name == $label)) | length) == 1))
-      | "present"
-    ' 2>/dev/null || printf 'unreadable'
+  if fm_backend_zellij_tab_matches_label "$FM_BACKEND_ZELLIJ_SESSION" "$tab_id" "$expected_label"; then
+    printf 'present'
+  else
+    printf 'unreadable'
+  fi
 }
 
 # fm_backend_zellij_current_path: the live pane's cwd, or empty on any error.

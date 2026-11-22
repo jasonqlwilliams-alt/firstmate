@@ -2421,7 +2421,11 @@ case "$*" in
   "--session remote action list-panes --json")
     [ "$ZELLIJ_SESSION_NAME" = remote ] || exit 3
     case "$FM_FAKE_ENDPOINT" in
-      missing) echo '[{"id":1,"tab_id":1,"is_plugin":false}]' ;;
+      reused-session)
+        touch "${0%/*}/zellij-reused-session-read"
+        echo '[{"id":1,"tab_id":1,"is_plugin":false}]'
+        ;;
+      empty-panes) echo '[]' ;;
       bad-pane) echo '[{"id":7,"tab_id":1}]' ;;
       unreadable|omitted-session|no-sessions|resurrectable) exit 1 ;;
       *) echo '[{"id":7,"tab_id":1,"is_plugin":false}]' ;;
@@ -2488,7 +2492,7 @@ SH
 }
 
 test_experimental_backend_endpoint_loss_requires_confirmed_absence() (
-  local dir state fakebin out pid='' backend target mode poll watch_env modes
+  local dir state fakebin out pid='' backend target mode kind poll watch_env modes
   command -v jq >/dev/null 2>&1 || { echo "skip: jq is required by the Zellij and cmux adapters"; return 0; }
   command -v node >/dev/null 2>&1 || { echo "skip: node is required to generate fixture titles"; return 0; }
   dir=$(fm_test_tmproot fm-watch-experimental-gone) || fail "could not create the experimental endpoint fixture"
@@ -2497,7 +2501,7 @@ test_experimental_backend_endpoint_loss_requires_confirmed_absence() (
   install_fake_experimental_backends "$fakebin" || fail "could not install the experimental backend fixtures"
   for backend in zellij cmux orca; do
     case "$backend" in
-      zellij) target="remote:7"; modes=(unreadable renamed missing) ;;
+      zellij) target="remote:7"; modes=(unreadable renamed reused-session) ;;
       cmux) target="ws-gone:sf-gone"; modes=(out-of-window renamed missing) ;;
       orca) target="term-gone"; modes=(stale) ;;
     esac
@@ -2511,7 +2515,9 @@ test_experimental_backend_endpoint_loss_requires_confirmed_absence() (
       if [ "$backend" = orca ]; then
         printf 'window=fm-lost\nterminal=%s\nbackend=orca\nkind=ship\nharness=codex\nspawn_gen=first\n' "$target" > "$state/lost.meta"
       else
-        printf 'window=%s\nbackend=%s\nkind=ship\nharness=codex\nspawn_gen=first\n' "$target" "$backend" > "$state/lost.meta"
+        kind=ship
+        [ "$mode" != reused-session ] || kind=secondmate
+        printf 'window=%s\nbackend=%s\nkind=%s\nharness=codex\nspawn_gen=first\n' "$target" "$backend" "$kind" > "$state/lost.meta"
       fi
       env "${watch_env[@]}" FM_FAKE_ENDPOINT="$mode" "$WATCH" > "$out" & pid=$!
       if [ "$mode" != missing ]; then
@@ -2532,12 +2538,17 @@ test_experimental_backend_endpoint_loss_requires_confirmed_absence() (
       fi
       [ ! -s "$fakebin/route-errors" ] || fail "unexpected watcher backend route: $(cat "$fakebin/route-errors")"
     done
-    if [ "$backend" = orca ]; then
-      [ -s "$fakebin/orca-captures" ] || fail "the watcher did not attempt to capture the recorded Orca terminal"
-      pass "orca: stale handles stay quiet after the capture fails"
-    else
-      pass "$backend: the watcher queues loss only for confirmed absence"
-    fi
+    case "$backend" in
+      zellij)
+        [ -f "$fakebin/zellij-reused-session-read" ] || fail "the watcher did not inspect the Zellij session for the idle second mate"
+        pass "zellij: a reused session name stays quiet when the recorded pane is absent"
+        ;;
+      orca)
+        [ -s "$fakebin/orca-captures" ] || fail "the watcher did not attempt to capture the recorded Orca terminal"
+        pass "orca: stale handles stay quiet after the capture fails"
+        ;;
+      cmux) pass "cmux: the watcher queues loss only for confirmed absence" ;;
+    esac
   done
 )
 
@@ -2557,8 +2568,7 @@ test_experimental_backend_endpoint_state_boundary() (
   }
   expect_endpoint_state present present zellij remote:7 fm-lost
   expect_endpoint_state present legacy zellij remote:7 fm-lost
-  expect_endpoint_state missing missing zellij remote:7 fm-lost
-  for mode in unreadable renamed omitted-session no-sessions resurrectable bad-pane bad-tab tab-not-listed duplicate-legacy; do
+  for mode in unreadable renamed reused-session empty-panes omitted-session no-sessions resurrectable bad-pane bad-tab tab-not-listed duplicate-legacy; do
     expect_endpoint_state unreadable "$mode" zellij remote:7 fm-lost
   done
   expect_endpoint_state unreadable present zellij remote:7

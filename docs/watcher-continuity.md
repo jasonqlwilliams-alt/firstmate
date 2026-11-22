@@ -61,7 +61,8 @@ The turn-end guard remains the final backstop rather than the normal continuity 
 When the backend confirms that a local task's recorded endpoint is missing, the watcher clears pause tracking.
 The watcher queues `stale: <window> (the recorded endpoint is gone)` once for that recorded endpoint unless a matching [retained-copy park mark](#parking-a-task-with-its-copy-retained) suppresses the report.
 The presence verdict comes from `fm_backend_endpoint_state` in [`fm-backend.sh`](../bin/fm-backend.sh), which treats an unavailable or inconclusive inventory as unreadable and leaves it quiet.
-Zellij requires a readable pane inventory from the recorded session, and cmux requires the recorded workspace to appear in the current window inventory.
+The watcher cannot confirm Zellij endpoint loss because the session named in the record may have been renamed or replaced.
+cmux requires the recorded workspace to appear in the current window inventory.
 A listed Zellij pane or cmux workspace with a changed title is unreadable for loss reporting.
 The watcher cannot confirm Orca endpoint loss because a recorded handle can go stale while its terminal survives.
 cmux can miss a surface loss when another surface remains in the same workspace.
