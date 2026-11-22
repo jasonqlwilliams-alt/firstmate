@@ -1,74 +1,87 @@
-Synthetic retained Git copy before marking
-?? unlanded.txt
-941802fb098159329a2a4a278e8e61ee244f269b
-469d4fa3fb60dd2880fe2b12d47c9797b958de6e5510b5e2ef7e85ee2b9a56fd  -
+$ /usr/bin/tmux -S '<lab>/tmp/tmux.sock' -V
+tmux 3.7c
+Retained Git worktree before: {"branch": "fm/held", "head": "d573dad8ad91b8324eee6b522bf01548c34819f9", "status": [" M tracked", "?? unlanded"], "tracked": "46583573e0b99b2013287fd27f0a2b8248f8e1c2f53059146e673c0d0aa95ce9", "unlanded": "1d5963fbe665aa3828da71ed24018311b4a7767d2e1d67c5282d5dda5847c5d4"}
 
-Unmarked closed worker with a wake queued before marking
-$ tmux kill-window -t parked-fixture:fm-queued
-$ bin/fm-watch.sh
-stale: parked-fixture:fm-queued (the recorded endpoint is gone)
+Mark the closed worker before the watcher reports loss
+$ bin/fm-park-retained.sh held mark
+error: task held's recorded endpoint could not be confirmed missing (dead)
+exit 1
+$ /usr/bin/tmux -S '<lab>/tmp/tmux.sock' kill-window -t park-fixture:fm-held
+$ bin/fm-park-retained.sh held mark
+parked-retained: yes
+Persisted park mark: tmux:park-fixture:fm-held	first
+$ bin/fm-watch-checkpoint.sh --seconds 4
+checkpoint: no actionable wake within 4s
+exit 124
+$ bin/fm-wake-drain.sh
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 1604988.1795367024.OvJHwJ
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+$ bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 1604988.1795367024.OvJHwJ
+
+Clear the mark while the worker is still closed
+$ bin/fm-park-retained.sh held clear
+parked-retained: no
+$ bin/fm-watch-checkpoint.sh --seconds 12
+stale: park-fixture:fm-held (the recorded endpoint is gone)
+$ bin/fm-wake-drain.sh
+1795367026	1	stale	park-fixture:fm-held	stale: park-fixture:fm-held (the recorded endpoint is gone)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 1615634.1795367026.w5B4uW
+WARNING: watcher still down (same stale episode; last beat: 2s ago, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+$ bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 1615634.1795367026.w5B4uW
+
+Leave another worker unmarked, then mark after its loss is queued
+$ /usr/bin/tmux -S '<lab>/tmp/tmux.sock' kill-window -t park-fixture:fm-queued
+$ bin/fm-watch-checkpoint.sh --seconds 12
+stale: park-fixture:fm-queued (the recorded endpoint is gone)
 $ bin/fm-park-retained.sh queued mark
 parked-retained: yes
 $ bin/fm-wake-drain.sh
-1795364590	1	stale	parked-fixture:fm-queued	stale: parked-fixture:fm-queued (the recorded endpoint is gone)
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 3643894.1795364590.dO3zvN
-$ bin/fm-watch.sh
-Completed watcher polls with no wake output: 3
-$ bin/fm-wake-drain.sh
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 3648354.1795364595.HHfYXw
+1795367028	2	stale	park-fixture:fm-queued	stale: park-fixture:fm-queued (the recorded endpoint is gone)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 1623315.1795367028.2r5sBC
+WARNING: watcher still down (same stale episode; last beat: 2s ago, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+$ bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 1623315.1795367028.2r5sBC
 $ bin/fm-park-retained.sh queued clear
 parked-retained: no
-$ bin/fm-watch.sh
-Completed watcher polls with no wake output: 3
+$ bin/fm-watch-checkpoint.sh --seconds 4
+checkpoint: no actionable wake within 4s
+exit 124
 $ bin/fm-wake-drain.sh
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 3652457.1795364600.0hQHlz
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 1638989.1795367034.dUChew
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+$ bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 1638989.1795367034.dUChew
 
-Mark on a live window, then on that intentionally closed window
-$ bin/fm-park-retained.sh held mark
-error: task held's recorded endpoint could not be confirmed missing (dead)
-$ tmux kill-window -t parked-fixture:fm-held
-$ bin/fm-park-retained.sh held mark
+Reuse the same tmux window name for a replacement generation
+$ /usr/bin/tmux -S '<lab>/tmp/tmux.sock' kill-window -t park-fixture:fm-again
+$ bin/fm-park-retained.sh again mark
 parked-retained: yes
-Persisted park mark: tmux:parked-fixture:fm-held	first
-$ bin/fm-watch.sh
-Completed watcher polls with no wake output: 3
+Persisted park mark: tmux:park-fixture:fm-again	
+$ bin/fm-watch-checkpoint.sh --seconds 4
+checkpoint: no actionable wake within 4s
+exit 124
 $ bin/fm-wake-drain.sh
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 3657279.1795364606.ABLENs
-$ bin/fm-park-retained.sh held clear
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 1649869.1795367039.FyK7is
+WARNING: watcher still down (same stale episode; last beat: 2s ago, grace 300s) - full banner already printed this episode.
+$ bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 1649869.1795367039.FyK7is
+$ /usr/bin/tmux -S '<lab>/tmp/tmux.sock' kill-window -t park-fixture:fm-again
+$ bin/fm-watch-checkpoint.sh --seconds 12
+stale: park-fixture:fm-again (the recorded endpoint is gone)
+Persisted loss record: tmux:park-fixture:fm-again	replacement
+$ bin/fm-wake-drain.sh
+1795367040	3	stale	park-fixture:fm-again	stale: park-fixture:fm-again (the recorded endpoint is gone)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 1651810.1795367040.SHRHky
+WARNING: watcher still down (same stale episode; last beat: 0s ago, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+$ bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 1651810.1795367040.SHRHky
+$ bin/fm-park-retained.sh again clear
 parked-retained: no
-$ bin/fm-watch.sh
-stale: parked-fixture:fm-held (the recorded endpoint is gone)
-$ bin/fm-wake-drain.sh
-1795364607	2	stale	parked-fixture:fm-held	stale: parked-fixture:fm-held (the recorded endpoint is gone)
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 3658896.1795364607.OHCqA0
-
-Replacement with a new generation reuses the original window name
-$ tmux kill-window -t parked-fixture:fm-resumed
-$ bin/fm-park-retained.sh resumed mark
-parked-retained: yes
-$ tmux kill-window -t parked-fixture:fm-resumed
-$ bin/fm-watch.sh
-stale: parked-fixture:fm-resumed (the recorded endpoint is gone)
-Saved park mark: tmux:parked-fixture:fm-resumed	first
-New loss record: tmux:parked-fixture:fm-resumed	replacement
-$ bin/fm-wake-drain.sh
-1795364609	3	stale	parked-fixture:fm-resumed	stale: parked-fixture:fm-resumed (the recorded endpoint is gone)
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 3661021.1795364609.trv310
-$ bin/fm-park-retained.sh resumed clear
-parked-retained: no
-fm-resumed
-
-Synthetic retained Git copy after mark, clear, and watcher polls
-?? unlanded.txt
-941802fb098159329a2a4a278e8e61ee244f269b
-469d4fa3fb60dd2880fe2b12d47c9797b958de6e5510b5e2ef7e85ee2b9a56fd  -
-
-Baseline reproduction on watcher ccd19a2ff
-$ tmux kill-window -t parked-fixture:fm-baseline
-$ bin/fm-park-retained.sh baseline mark
-parked-retained: yes
-$ bin/fm-watch.sh
-stale: parked-fixture:fm-baseline (the recorded endpoint is gone)
-$ bin/fm-wake-drain.sh
-1795364778	1	stale	parked-fixture:fm-baseline	stale: parked-fixture:fm-baseline (the recorded endpoint is gone)
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 3767086.1795364778.VvLlnh
+$ /usr/bin/tmux -S '<lab>/tmp/tmux.sock' display-message -p -t park-fixture:fm-again '#{window_name}'
+fm-again
+Retained Git worktree after: {"branch": "fm/held", "head": "d573dad8ad91b8324eee6b522bf01548c34819f9", "status": [" M tracked", "?? unlanded"], "tracked": "46583573e0b99b2013287fd27f0a2b8248f8e1c2f53059146e673c0d0aa95ce9", "unlanded": "1d5963fbe665aa3828da71ed24018311b4a7767d2e1d67c5282d5dda5847c5d4"}

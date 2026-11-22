@@ -1,12 +1,43 @@
-Herdr herdr 0.9.5, workspace-local configuration and named lab fm-lab-park
-$ fm-herdr-lab.sh run fm-lab-park pane close w1:p1
+$ herdr --version
+herdr 0.9.5
+Isolated headless Herdr server is ready
+$ herdr --session fm-lab-park workspace create --cwd '<fixture>' --label 'Disposable worker'
+{"id":"cli:workspace:create","result":{"root_pane":{"agent_status":"unknown","cwd":"<fixture>","focused":true,"foreground_cwd":"<fixture>","pane_id":"w1:p1","revision":0,"scroll":{"max_offset_from_bottom":0,"offset_from_bottom":0,"viewport_rows":40},"tab_id":"w1:t1","terminal_id":"term_660e07b69d66b1","workspace_id":"w1"},"tab":{"agent_status":"unknown","focused":true,"label":"1","number":1,"pane_count":1,"tab_id":"w1:t1","workspace_id":"w1"},"type":"workspace_created","workspace":{"active_tab_id":"w1:t1","agent_status":"unknown","focused":true,"label":"Disposable worker","number":1,"pane_count":1,"tab_count":1,"workspace_id":"w1"}}}
+$ herdr --session fm-lab-park pane list
+{"id":"cli:pane:list","result":{"panes":[{"agent_status":"unknown","cwd":"<fixture>","focused":true,"foreground_cwd":"<fixture>","pane_id":"w1:p1","revision":1,"scroll":{"max_offset_from_bottom":0,"offset_from_bottom":0,"viewport_rows":40},"tab_id":"w1:t1","terminal_id":"term_660e07b69d66b1","terminal_title":"@Lights:<fixture>","terminal_title_stripped":"@Lights:<fixture>","workspace_id":"w1"}],"type":"pane_list"}}
+$ herdr --session fm-lab-park pane get w1:p1
+{"id":"cli:pane:get","result":{"pane":{"agent_status":"unknown","cwd":"<fixture>","focused":true,"foreground_cwd":"<fixture>","pane_id":"w1:p1","revision":1,"scroll":{"max_offset_from_bottom":0,"offset_from_bottom":0,"viewport_rows":40},"tab_id":"w1:t1","terminal_id":"term_660e07b69d66b1","terminal_title":"@Lights:<fixture>","terminal_title_stripped":"@Lights:<fixture>","workspace_id":"w1"},"type":"pane_info"}}
+$ herdr --session fm-lab-park pane close w1:p1
 {"id":"cli:pane:close","result":{"type":"ok"}}
+$ herdr --session fm-lab-park pane get w1:p1
 {"error":{"code":"pane_not_found","message":"pane w1:p1 not found"},"id":"cli:pane:get"}
+exit 1
 $ bin/fm-park-retained.sh a-parked mark
 parked-retained: yes
-Stored mark: herdr:fm-lab-park:w1:p1	retained-generation
-Both synthetic task records refer to the closed route fm-lab-park:w1:p1.
-$ bin/fm-watch.sh
+Persisted park mark: herdr:fm-lab-park:w1:p1	retained-generation
+$ bin/fm-watch-checkpoint.sh --seconds 4
+checkpoint: no actionable wake within 4s
+exit 124
+$ bin/fm-wake-drain.sh
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 1747513.1795367124.PcG0k5
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+$ bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 1747513.1795367124.PcG0k5
+
+Register a second, unmarked task for the same route after simulated reuse
+$ bin/fm-watch-checkpoint.sh --seconds 12
 stale: fm-lab-park:w1:p1 (the recorded endpoint is gone)
-a-parked.missing-endpoint: absent
+$ bin/fm-wake-drain.sh
+1795367125	1	stale	fm-lab-park:w1:p1	stale: fm-lab-park:w1:p1 (the recorded endpoint is gone)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 1751339.1795367125.G54trU
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+$ bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 1751339.1795367125.G54trU
+a-parked.missing-endpoint is absent
 z-unmarked.missing-endpoint: herdr:fm-lab-park:w1:p1	replacement-generation
+$ herdr --session fm-lab-park server stop

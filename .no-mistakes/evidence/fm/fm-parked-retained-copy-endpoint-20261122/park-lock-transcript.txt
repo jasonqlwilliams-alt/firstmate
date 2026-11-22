@@ -1,0 +1,17 @@
+$ /usr/bin/tmux -S '<lab>/tmp/races.sock' -V
+tmux 3.7c
+$ bin/fm-park-retained.sh race mark
+parked-retained: yes
+$ bin/fm-park-retained.sh race mark (while the lease lock is held)
+Replacement publishes a different spawn generation before releasing the lease lock.
+error: task race's recorded endpoint changed while waiting for its lock
+exit 1
+Persisted park mark: tmux:park-fixture:fm-race	original
+$ bin/fm-park-retained.sh mark mark (while the lease lock is held)
+Retire the synthetic home while the command is waiting.
+error: lock directory disappeared: <fixture>/mark/state
+exit 1
+$ bin/fm-park-retained.sh clear clear (while the lease lock is held)
+Retire the synthetic home while the command is waiting.
+error: lock directory disappeared: <fixture>/clear/state
+exit 1

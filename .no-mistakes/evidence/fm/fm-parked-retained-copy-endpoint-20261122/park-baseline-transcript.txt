@@ -1,0 +1,21 @@
+$ /usr/bin/tmux -S '<lab>/tmp/baseline.sock' -V
+tmux 3.7c
+Watcher from base dbdcdc48788ea96764542cf9e1ef2006998ffad3 with the same mark and closed tmux pane fixture
+$ /usr/bin/tmux -S '<lab>/tmp/baseline.sock' kill-window -t park-fixture:fm-baseline
+$ bin/fm-park-retained.sh baseline mark
+parked-retained: yes
+Persisted park mark: tmux:park-fixture:fm-baseline	first
+$ '<fixture>/baseline-bin/fm-watch-checkpoint.sh' --seconds 12
+stale: park-fixture:fm-baseline (the recorded endpoint is gone)
+$ bin/fm-wake-drain.sh
+1795367233	1	stale	park-fixture:fm-baseline	stale: park-fixture:fm-baseline (the recorded endpoint is gone)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 1889328.1795367233.NFNjcr
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  After draining queued wakes, use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+$ bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 1889328.1795367233.NFNjcr
