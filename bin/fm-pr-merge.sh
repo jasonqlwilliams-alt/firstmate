@@ -824,6 +824,8 @@ require_released_captain_hold() {
 FM_PR_MERGE_AUTHORITY=
 require_away_merge_grant() {
   local yolo grants grant
+  FM_PR_MERGE_AUTHORITY=
+  fm_afk_contract_present "$STATE" || return 0
   if ! FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
     "$SCRIPT_DIR/fm-afk-contract.sh" validate >/dev/null 2>&1; then
     echo "error: PR merge refused - the away-posture record could not be read; nothing was merged" >&2
@@ -851,17 +853,17 @@ EOF
 }
 
 require_current_away_authority() {
-  FM_PR_MERGE_AUTHORITY=
-  fm_afk_contract_present "$STATE" || return 0
   require_away_merge_grant || return 1
+  if [ "${#ALLOW_RED[@]}" -eq 0 ] && [ "$ALLOW_ZERO_CHECKS" != true ]; then
+    return 0
+  fi
+  fm_afk_contract_present "$STATE" || return 0
   if [ "${#ALLOW_RED[@]}" -gt 0 ]; then
     echo "error: --allow-red is attended-only; while the away-posture record exists the green check is absolute" >&2
     return 2
   fi
-  if [ "$ALLOW_ZERO_CHECKS" = true ]; then
-    echo "error: --allow-zero-checks is attended-only; while the away-posture record exists the green check is absolute" >&2
-    return 2
-  fi
+  echo "error: --allow-zero-checks is attended-only; while the away-posture record exists the green check is absolute" >&2
+  return 2
 }
 
 require_recorded_pr_identity() {

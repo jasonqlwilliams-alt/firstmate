@@ -2685,6 +2685,55 @@ test_allow_zero_checks_is_attended_only() {
   pass "fm-pr-merge keeps --allow-zero-checks attended-only and GitHub-only"
 }
 
+test_attended_waivers_refuse_away_published_after_grant_read() {
+  local case_dir checkpoint head rc waiver
+  local -a waiver_args
+  head=a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3
+  for checkpoint in before-recording before-merge; do
+    for waiver in allow-red allow-zero-checks; do
+      case_dir=$(make_case "github-$waiver-away-$checkpoint")
+      mkdir -p "$case_dir/wt"
+      add_gh_mocks "$case_dir" "$head"
+      waiver_args=("--$waiver")
+      if [ "$waiver" = allow-red ]; then
+        write_github_red_json "$case_dir" "$head" lint
+        waiver_args+=(lint)
+      else
+        write_github_no_checks_json "$case_dir" "$head"
+      fi
+      write_away_record "$case_dir" --grant task-x1
+      mv "$case_dir/state/.afk-contract" "$case_dir/staged-away-record"
+      cat > "$case_dir/bash-env" <<'SH'
+if [[ ${0##*/} == fm-pr-merge.sh ]]; then
+  function [ {
+    local status=0 staged="$FM_STATE_OVERRIDE/../staged-away-record"
+    builtin [ "$@" || status=$?
+    if [[ $status == 1 && ${1-} == -f && ${2-} == "$FM_STATE_OVERRIDE/.afk-contract" && -f $staged ]] &&
+       { [[ $FM_TEST_AWAY_PUBLICATION_CHECKPOINT == before-recording ]] ||
+         grep -q 'statusCheckRollup' "$FM_TEST_GH_LOG"; }; then
+      mv "$staged" "$2" || exit 1
+    fi
+    return "$status"
+  }
+fi
+SH
+      rc=0
+      BASH_ENV="$case_dir/bash-env" FM_TEST_AWAY_PUBLICATION_CHECKPOINT="$checkpoint" \
+        run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/96 \
+        "${waiver_args[@]}" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+
+      assert_present "$case_dir/state/.afk-contract" "the away record was never published"
+      expect_code 2 "$rc" "$waiver must be refused after away publication $checkpoint"
+      assert_grep "--$waiver is attended-only" "$case_dir/stderr" "the refusal did not name --$waiver"
+      assert_no_grep 'pr merge' "$case_dir/gh.log" "gh pr merge ran after away publication $checkpoint"
+      if [ "$checkpoint" = before-recording ]; then
+        assert_absent "$case_dir/state/task-x1.check.sh" "the merge poll was armed after away publication"
+      fi
+    done
+  done
+  pass "fm-pr-merge refuses both waivers when away mode starts after the grant read"
+}
+
 test_gitlab_head_override_args_refuse_before_recording
 test_secondmate_merge_reports_upward_once
 test_secondmate_merge_reports_on_the_local_route
@@ -2714,3 +2763,4 @@ test_allow_red_refused_on_gitlab
 test_github_zero_checks_refuse_and_allow_zero_checks_waives
 test_github_zero_checks_queue_retry_requires_explicit_waiver
 test_allow_zero_checks_is_attended_only
+test_attended_waivers_refuse_away_published_after_grant_read
