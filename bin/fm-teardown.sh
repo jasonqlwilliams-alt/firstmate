@@ -438,6 +438,41 @@ if [ "$KEEP_PANE" = 1 ] \
   echo "REFUSED: --keep-pane cannot be combined with --force, --legacy-record or --retire-stale-record." >&2
   exit 2
 fi
+
+task_reap_filter_pids() {  # <previously-protected-pids> <candidate-pids>
+  local parents
+  parents=$(ps -axo pid=,ppid= 2>/dev/null) || return 1
+  printf '%s\n%s\n' "$parents" "$2" | awk -v self="$$" -v previous="$1" '
+    NF == 2 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { parent[$1] = $2 }
+    /^[0-9]+$/ { candidates[$0] = 1 }
+    END {
+      split(previous, saved, " ")
+      for (i in saved) excluded[saved[i]] = 1
+      for (cursor = self; cursor > 0; cursor = parent[cursor]) {
+        if (cursor in ancestors) exit 1
+        ancestors[cursor] = 1
+        excluded[cursor] = 1
+        if (!(cursor in parent)) break
+      }
+      complete = cursor == 0
+      for (pid in excluded) printf "%s ", pid
+      print ""
+      for (pid in candidates) {
+        if (pid in excluded) continue
+        if (!complete) {
+          for (cursor = pid; cursor in parent && !(cursor in ancestors); cursor = parent[cursor]) {
+            if (visited[cursor] == pid) exit 1
+            visited[cursor] = pid
+          }
+          if (!(cursor in ancestors)) exit 1
+        }
+        print pid
+      }
+    }
+  '
+}
+
+TEARDOWN_REAP_PROTECTED_PIDS=$(task_reap_filter_pids "" "") || TEARDOWN_REAP_PROTECTED_PIDS=
 fm_backlog_directory_present "$STATE" "state directory" || {
   echo "error: teardown refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
   exit 1
@@ -2034,7 +2069,7 @@ EOF
 }
 
 proc_pids_with_cwd_under() {  # <resolved-dir>...
-  perl -e '
+  PERL_UNICODE=0 perl -e '
     opendir(my $proc, "/proc") or exit 1;
     defined(readlink("/proc/self/cwd")) or exit 1;
     while (defined(my $pid = readdir($proc))) {
@@ -2094,37 +2129,9 @@ task_pid_list_contains() {  # <pid-list> <pid>
   printf '%s\n' "$1" | grep -Fxq "$2"
 }
 
-task_reap_filter_pids() {  # <pid-list>
-  local parents
-  parents=$(ps -axo pid=,ppid= 2>/dev/null) || return 1
-  printf '%s\n%s\n' "$parents" "$1" | awk -v self="$$" '
-    NF == 2 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { parent[$1] = $2 }
-    /^[0-9]+$/ { candidates[$0] = 1 }
-    END {
-      for (cursor = self; cursor > 0; cursor = parent[cursor]) {
-        if (cursor in protected) exit 1
-        protected[cursor] = 1
-        if (!(cursor in parent)) break
-      }
-      complete = cursor == 0
-      for (pid in candidates) {
-        if (pid in protected) continue
-        if (!complete) {
-          for (cursor = pid; cursor in parent && !(cursor in protected); cursor = parent[cursor]) {
-            if (visited[cursor] == pid) exit 1
-            visited[cursor] = pid
-          }
-          if (!(cursor in protected)) exit 1
-        }
-        print pid
-      }
-    }
-  '
-}
-
 task_pids_under_roots() {  # <scanner> <dir>...
   TASK_PIDS=
-  local scanner=$1 dir resolved pids safe_pids
+  local scanner=$1 dir resolved pids ancestry_scan
   local -a roots=()
   shift
   for dir in "$@"; do
@@ -2141,11 +2148,15 @@ task_pids_under_roots() {  # <scanner> <dir>...
     return 1
   fi
   [ -n "$pids" ] || return 0
-  if ! safe_pids=$(task_reap_filter_pids "$pids"); then
+  if [ -z "$TEARDOWN_REAP_PROTECTED_PIDS" ] \
+     || ! ancestry_scan=$(task_reap_filter_pids "$TEARDOWN_REAP_PROTECTED_PIDS" "$pids"); then
     echo "REFUSED: cannot rule out a teardown ancestor among cwd matches for $ID; preserving the worktree/tasktmp for manual inspection or retry." >&2
     return 1
   fi
-  TASK_PIDS=$(printf '%s\n' "$safe_pids" | sort -un)
+  {
+    IFS= read -r TEARDOWN_REAP_PROTECTED_PIDS
+    TASK_PIDS=$(sort -un)
+  } <<< "$ancestry_scan"
 }
 
 reap_task_backend_process_group() {  # <label>
