@@ -42,6 +42,7 @@ FM_PR_META_URL=
 FM_PR_META_HOST=
 FM_PR_META_PATH=
 FM_PR_META_NUMBER=
+FM_PR_META_SPAWN_GEN=
 FM_PR_REG_ID=
 FM_PR_REG_PROVIDER=
 FM_PR_REG_URL=
@@ -71,6 +72,7 @@ FM_PR_POLL_EXPECT_CHECK_IDENTITY=
 FM_PR_POLL_TEMPLATE=
 FM_PR_POLL_STATE_DEVICE=
 FM_PR_POLL_SNAPSHOT_ID=
+FM_PR_POLL_SNAPSHOT_SPAWN_GEN=
 FM_PR_POLL_SNAPSHOT_PROVIDER=
 FM_PR_POLL_SNAPSHOT_URL=
 FM_PR_POLL_SNAPSHOT_HOST=
@@ -109,6 +111,22 @@ fm_task_id_path_safe() {
 fm_pr_task_id_valid() {
   local id=${1-}
   fm_task_id_path_safe "$id"
+}
+
+fm_pr_poll_lock_path() {
+  fm_pr_task_id_valid "$2" || return 1
+  printf '%s/.pr-poll-%s.lock\n' "$1" "$2"
+}
+
+fm_pr_poll_with_lock() {
+  local pr_lock pr_status=0
+  [ -d "$1" ] && [ ! -L "$1" ] || return 1
+  pr_lock=$(fm_pr_poll_lock_path "$1" "$2") || return 1
+  shift 2
+  fm_lock_acquire_wait_bounded "$pr_lock" 5 || return 1
+  "$@" || pr_status=$?
+  fm_lock_release "$pr_lock"
+  return "$pr_status"
 }
 
 fm_task_id_creation_valid() {
@@ -315,6 +333,7 @@ fm_pr_metadata_identity_parse() {
   FM_PR_META_HOST=
   FM_PR_META_PATH=
   FM_PR_META_NUMBER=
+  FM_PR_META_SPAWN_GEN=
   [ -f "$file" ] && [ ! -L "$file" ] || return 1
   [ "$(fm_pr_file_link_count "$file")" = 1 ] || return 1
   while IFS= read -r line || [ -n "$line" ]; do
@@ -340,7 +359,13 @@ fm_pr_metadata_identity_parse() {
         ;;
       x_request=*|x_request_ts=*|x_followups=*|x_platform=*|x_reply_max_chars=*)
         ;;
-      control_relaunch_tx=*|traceparent=*|decisions_reviewed=*|decision_keys=*|spawn_gen=*)
+      spawn_gen=*)
+        [ -z "$FM_PR_META_SPAWN_GEN" ] || return 1
+        value=${line#spawn_gen=}
+        case "$value" in ''|.*|*[!A-Za-z0-9._-]*) return 1 ;; esac
+        FM_PR_META_SPAWN_GEN=$value
+        ;;
+      control_relaunch_tx=*|traceparent=*|decisions_reviewed=*|decision_keys=*)
         ;;
       kind=*|mode=*|yolo=*)
         ;;
@@ -652,6 +677,7 @@ fm_pr_poll_snapshot_capture() {
   FM_PR_POLL_SNAPSHOT_REG_HASH=$(fm_pr_sha256 "$registration") || return 1
   FM_PR_POLL_SNAPSHOT_REG_IDENTITY=$(fm_pr_file_identity "$registration") || return 1
   FM_PR_POLL_SNAPSHOT_ID=$id
+  FM_PR_POLL_SNAPSHOT_SPAWN_GEN=$FM_PR_META_SPAWN_GEN
   FM_PR_POLL_SNAPSHOT_PROVIDER=$FM_PR_DATA_PROVIDER
   FM_PR_POLL_SNAPSHOT_URL=$FM_PR_DATA_URL
   FM_PR_POLL_SNAPSHOT_HOST=$FM_PR_DATA_HOST
@@ -667,6 +693,7 @@ fm_pr_poll_snapshot_matches() {
   local state=$1 id=$2 template=$3 registration reg_hash reg_identity
   [ -n "$FM_PR_POLL_SNAPSHOT_ID" ] && [ "$id" = "$FM_PR_POLL_SNAPSHOT_ID" ] || return 1
   fm_pr_poll_artifacts_valid "$state" "$id" "$template" || return 1
+  [ "$FM_PR_META_SPAWN_GEN" = "$FM_PR_POLL_SNAPSHOT_SPAWN_GEN" ] || return 1
   registration="$state/$id.pr-poll-registration"
   reg_hash=$(fm_pr_sha256 "$registration") || return 1
   reg_identity=$(fm_pr_file_identity "$registration") || return 1
@@ -956,8 +983,8 @@ fm_pr_poll_retirement_recover_all() {
   for receipt in "$state"/*.pr-poll-retirement; do
     [ -e "$receipt" ] || [ -L "$receipt" ] || continue
     id=$(basename "$receipt" .pr-poll-retirement)
-    if ! fm_pr_task_id_valid "$id" \
-      || ! fm_pr_poll_retirement_recover_one "$state" "$id" "$template"; then
+    if ! fm_pr_poll_with_lock "$state" "$id" \
+      fm_pr_poll_retirement_recover_one "$state" "$id" "$template"; then
       FM_PR_POLL_RETIREMENT_REJECTED="$FM_PR_POLL_RETIREMENT_REJECTED $receipt"
     fi
   done

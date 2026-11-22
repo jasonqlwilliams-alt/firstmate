@@ -1389,6 +1389,12 @@ validate_pr_poll_cleanup() {
 
 remove_pr_poll_artifacts() {
   local state_dir=$1 id=$2
+  [ -e "$state_dir" ] || [ -L "$state_dir" ] || return 0
+  fm_pr_poll_with_lock "$state_dir" "$id" remove_pr_poll_artifacts_locked "$state_dir" "$id"
+}
+
+remove_pr_poll_artifacts_locked() {
+  local state_dir=$1 id=$2
   validate_pr_poll_cleanup "$state_dir" "$id" || return 1
   fm_pr_poll_retirement_recover_one "$state_dir" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" || return 1
   fm_pr_poll_merge_notified_remove "$state_dir" "$id" || return 1

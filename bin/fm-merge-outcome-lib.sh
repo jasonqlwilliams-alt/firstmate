@@ -34,7 +34,23 @@ _FM_MERGE_OUTCOME_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC2034 # Public result consumed by sourcing callers.
 FM_MERGE_OUTCOME_ALREADY_RECORDED=false
 
-# fm_merge_outcome_report <home> <state> <task-id> <pr-url> <origin> [authority] [outcome]
+fm_merge_outcome_commit() {
+  local state=$1 id=$2 url=$3 origin=$4 outcome=$5 gen=$6
+  if [ "$origin" = poll ]; then
+    [ "$id" = "$FM_PR_POLL_SNAPSHOT_ID" ] && [ "$url" = "$FM_PR_POLL_SNAPSHOT_URL" ] || return 4
+    gen=$FM_PR_POLL_SNAPSHOT_SPAWN_GEN
+  fi
+  fm_pr_poll_artifacts_valid "$state" "$id" "$_FM_MERGE_OUTCOME_LIB_DIR/fm-pr-poll.sh" \
+    && [ "$FM_PR_DATA_URL" = "$url" ] && [ "$FM_PR_META_SPAWN_GEN" = "$gen" ] || return 4
+  if [ "$outcome" = closed-unmerged ] && fm_pr_poll_outcome_recorded "$state" "$id" \
+    "$FM_PR_DATA_PROVIDER" "$FM_PR_DATA_HOST" "$FM_PR_DATA_PATH" "$FM_PR_DATA_NUMBER"; then
+    return 0
+  fi
+  fm_pr_poll_outcome_record "$state" "$id" \
+    "$FM_PR_DATA_PROVIDER" "$FM_PR_DATA_HOST" "$FM_PR_DATA_PATH" "$FM_PR_DATA_NUMBER" "$outcome"
+}
+
+# fm_merge_outcome_report <home> <state> <task-id> <pr-url> <origin> [authority] [outcome] [self-spawn-gen]
 #
 # <origin> says who observed the merge, because that decides whether the
 # existing poll path also needs a local wake:
@@ -47,15 +63,15 @@ FM_MERGE_OUTCOME_ALREADY_RECORDED=false
 # untagged row because the poll path does not persist merge authority.
 # <outcome> defaults to merged. The poll records closed-unmerged locally.
 #
-# Returns 0 when the outcome is recorded (or already was), 2 on an invalid
+# Returns 0 when the merge is reported or the closure is recorded, 2 on an invalid
 # request, 3 when this home's role or parent binding cannot be read well enough
-# to route a merge, 4 when the registration no longer matches, and 1 on any
+# to route a merge, 4 when closure registration no longer matches, and 1 on any
 # other recording failure.
 fm_merge_outcome_report() {
   local home=$1 state=$2 id=$3 url=$4 origin=$5
   local authority=${6-} suffix=
-  local outcome=${7:-merged} expected
-  local self_rc=0 destination='' meta lock status=0
+  local outcome=${7:-merged} gen=${8-}
+  local self_rc=0 destination='' lock status=0
   local provider host path number
   # shellcheck disable=SC2034 # Sourced wake helpers consume these scoped globals.
   local STATE FM_WAKE_QUEUE FM_WAKE_QUEUE_LOCK
@@ -75,11 +91,9 @@ fm_merge_outcome_report() {
   [ -d "$state" ] && [ ! -L "$state" ] || return 1
 
   case "$outcome" in
-    merged) expected=merged ;;
+    merged) ;;
     closed-unmerged)
       [ "$origin" = poll ] && [ -z "$authority" ] || return 2
-      # A stale closure observation must not supersede a confirmed merge.
-      expected=any
       ;;
     *) return 2 ;;
   esac
@@ -87,47 +101,37 @@ fm_merge_outcome_report() {
   STATE=$state
   # shellcheck source=bin/fm-wake-lib.sh
   . "$_FM_MERGE_OUTCOME_LIB_DIR/fm-wake-lib.sh"
-  meta="$state/$id.meta"
-  lock=$(fm_meta_lock_path "$meta") || return 1
+  if [ "$outcome" = closed-unmerged ]; then
+    fm_pr_poll_with_lock "$state" "$id" fm_merge_outcome_commit "$state" "$id" "$url" "$origin" "$outcome" "$gen"
+    return $?
+  fi
+  destination=$(fm_parent_channel_destination "$home" "$state") || self_rc=$?
+  case "$self_rc" in
+    0) ;;
+    1) destination='' ;;
+    *) return 3 ;;
+  esac
+  lock="$state/$id.pr-poll-merge-notified.lock"
   fm_lock_acquire_wait "$lock" || return 1
-  if ! fm_pr_metadata_identity_parse "$meta" || [ "$FM_PR_META_URL" != "$url" ] \
-    || { [ "$outcome" = closed-unmerged ] \
-      && { [ "$url" != "$FM_PR_POLL_SNAPSHOT_URL" ] \
-        || ! fm_pr_poll_snapshot_matches "$state" "$id" "$_FM_MERGE_OUTCOME_LIB_DIR/fm-pr-poll.sh"; }; }; then
-    fm_lock_release "$lock"
-    return 4
-  fi
-  if [ "$outcome" = merged ]; then
-    destination=$(fm_parent_channel_destination "$home" "$state") || self_rc=$?
-    case "$self_rc" in
-      0) ;;
-      1) destination='' ;;
-      *)
-        fm_lock_release "$lock"
-        return 3
-        ;;
-    esac
-  fi
   if fm_pr_poll_outcome_recorded "$state" "$id" \
-    "$provider" "$host" "$path" "$number" "$expected"; then
+    "$provider" "$host" "$path" "$number" merged; then
     # shellcheck disable=SC2034 # Public result consumed by sourcing callers.
     FM_MERGE_OUTCOME_ALREADY_RECORDED=true
     fm_lock_release "$lock"
     return 0
   fi
 
-  if [ "$outcome" = merged ]; then
-    if [ -n "$destination" ]; then
-      fm_parent_channel_append_once "$destination" \
-        "done [key=merged-$id]: merged $id $url$suffix" || status=1
-    fi
-    if [ "$status" -eq 0 ] && { [ "$origin" = poll ] || [ -z "$destination" ]; }; then
-      fm_wake_append check "merged-$id-$url" "check: merge landed: $id $url$suffix" || status=1
-    fi
+  if [ -n "$destination" ]; then
+    fm_parent_channel_append_once "$destination" \
+      "done [key=merged-$id]: merged $id $url$suffix" || status=1
+  fi
+  if [ "$status" -eq 0 ] && { [ "$origin" = poll ] || [ -z "$destination" ]; }; then
+    fm_wake_append check "merged-$id-$url" "check: merge landed: $id $url$suffix" || status=1
   fi
   if [ "$status" -eq 0 ]; then
-    fm_pr_poll_outcome_record "$state" "$id" \
-      "$provider" "$host" "$path" "$number" "$outcome" || status=1
+    fm_pr_poll_with_lock "$state" "$id" fm_merge_outcome_commit "$state" "$id" "$url" "$origin" "$outcome" "$gen" \
+      || status=$?
+    [ "$status" -ne 4 ] || status=0
   fi
   fm_lock_release "$lock"
   return "$status"

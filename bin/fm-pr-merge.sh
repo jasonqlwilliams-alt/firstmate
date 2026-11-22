@@ -1052,15 +1052,11 @@ esac
 # outcome while its existing poll remains armed.
 outcome_rc=0
 fm_merge_outcome_report "$FM_HOME" "$STATE" "$ID" "$URL" self \
-  "${FM_PR_MERGE_AUTHORITY:-}" || outcome_rc=$?
+  "${FM_PR_MERGE_AUTHORITY:-}" merged "$MERGE_EXPECTED_SPAWN_GEN" || outcome_rc=$?
 case "$outcome_rc" in
   0) ;;
   3)
     printf 'actionable: merged %s but could not report it upward: this home has no readable secondmate identity or parent binding (.fm-secondmate-home, .fm-secondmate-parent)\n' \
-      "$URL" >&2
-    ;;
-  4)
-    printf 'actionable: merged %s but the task PR registration changed before its outcome was recorded\n' \
       "$URL" >&2
     ;;
   *)

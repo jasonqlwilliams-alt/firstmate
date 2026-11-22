@@ -2090,7 +2090,7 @@ test_external_merge_transition_retires_only_merged_poll() {
 }
 
 test_stale_outcomes_preserve_current_pr_closure() (
-  local dir state old_pr current_pr rc origin outcome
+  local dir state old_pr current_pr rc origin
   . "$ROOT/bin/fm-merge-outcome-lib.sh"
   dir=$(make_case stale-outcomes)
   state="$dir/home/state"
@@ -2107,18 +2107,79 @@ test_stale_outcomes_preserve_current_pr_closure() (
   fm_pr_poll_outcome_recorded "$state" task-a github github.com o/r 20 closed-unmerged \
     || fail "the replacement PR closure was not recorded"
 
+  rc=0
+  fm_merge_outcome_report "$dir/home" "$state" task-a "$old_pr" poll '' closed-unmerged || rc=$?
+  [ "$rc" -eq 4 ] || fail "closure for the original PR survived re-registration"
+  assert_no_grep "$old_pr" "$state/.wake-queue" "stale PR closure queued a wake"
+
   for origin in self poll; do
-    for outcome in merged closed-unmerged; do
-      [ "$origin:$outcome" != self:closed-unmerged ] || continue
-      rc=0
-      fm_merge_outcome_report "$dir/home" "$state" task-a "$old_pr" "$origin" '' "$outcome" || rc=$?
-      [ "$rc" -eq 4 ] || fail "$origin $outcome for the original PR survived re-registration"
-      fm_pr_poll_outcome_recorded "$state" task-a github github.com o/r 20 closed-unmerged \
-        || fail "$origin $outcome for the original PR erased the replacement closure"
-    done
+    ack_watcher_cycle "$state" || fail "could not acknowledge the previous wake"
+    fm_merge_outcome_report "$dir/home" "$state" task-a "$old_pr" "$origin" \
+      || fail "$origin merge for the original PR was not reported"
+    assert_grep "check: merge landed: task-a $old_pr" "$state/.wake-queue" \
+      "$origin merge for the original PR was absent from the durable wake queue"
+    fm_pr_poll_outcome_recorded "$state" task-a github github.com o/r 20 closed-unmerged \
+      || fail "$origin merge for the original PR erased the replacement closure"
   done
-  assert_no_grep "$old_pr" "$state/.wake-queue" "stale PR outcome queued a wake"
-  pass "stale direct and polled outcomes preserve the replacement PR's closure"
+  pass "direct and polled merge notices survive PR replacement without erasing its closure"
+)
+
+test_closure_survives_same_pr_rearm() (
+  local dir state url rc=0
+  . "$ROOT/bin/fm-merge-outcome-lib.sh"
+  dir=$(make_case same-pr-rearm)
+  state="$dir/home/state"
+  url=https://github.com/o/r/pull/22
+  write_task_meta "$dir" task-a
+  printf 'spawn_gen=s-old\n' >> "$state/task-a.meta"
+  run_check_entry "$dir" task-a "$url" >/dev/null || fail "could not arm the original poll"
+  fm_pr_poll_snapshot_capture "$state" task-a "$POLL" || fail "could not capture the original poll"
+
+  write_task_meta "$dir" task-a
+  printf 'spawn_gen=s-current\n' >> "$state/task-a.meta"
+  run_check_entry "$dir" task-a "$url" >/dev/null || fail "could not arm the replacement task's poll"
+  fm_merge_outcome_report "$dir/home" "$state" task-a "$url" poll '' closed-unmerged || rc=$?
+  [ "$rc" -eq 4 ] || fail "closure from a prior incarnation was accepted"
+  [ ! -e "$state/task-a.pr-poll-merge-notified" ] || fail "prior incarnation wrote an outcome marker"
+
+  fm_pr_poll_snapshot_capture "$state" task-a "$POLL" || fail "could not capture the current poll"
+  run_check_entry "$dir" task-a "$url" >/dev/null || fail "could not re-arm the current poll"
+  fm_merge_outcome_report "$dir/home" "$state" task-a "$url" poll '' closed-unmerged \
+    || fail "same-PR re-arm discarded the observed closure"
+  fm_pr_poll_outcome_recorded "$state" task-a github github.com o/r 22 closed-unmerged \
+    || fail "same-PR re-arm did not leave a durable closure"
+  pass "closure binds to the task incarnation and survives re-arming its PR"
+)
+
+test_pr_outcomes_do_not_wait_for_task_meta_lock() (
+  local dir state url lock out
+  dir=$(make_case pr-outcome-meta-lock)
+  state="$dir/home/state"
+  url=https://github.com/o/r/pull/23
+  write_poll_meta "$state" task-a "$url"
+  seed_canonical_poll "$dir" task-a "$url"
+  add_stop_custom_check "$dir"
+  local STATE=$state
+  . "$ROOT/bin/fm-wake-lib.sh"
+  lock=$(fm_meta_lock_path "$state/task-a.meta") || fail "could not resolve the task meta lock"
+  fm_lock_acquire_wait "$lock" || fail "could not hold the task meta lock"
+  trap 'fm_lock_release "$lock"' EXIT
+  export FM_INACTIVE_RECONCILE_BUDGET_SECS=1
+
+  out=$(FM_TEST_GH_STATE=CLOSED run_watcher_bounded "$dir/home" "$dir/fakebin") \
+    || fail "watcher stalled recording a closure while the task meta lock was held"
+  case "$out" in check:*z-stop.check.sh:*stop-cycle) ;; *) fail "watcher missed the sibling check: $out" ;; esac
+  fm_pr_poll_outcome_recorded "$state" task-a github github.com o/r 23 closed-unmerged \
+    || fail "held task meta lock prevented a durable closure"
+  ack_watcher_cycle "$state" || fail "could not acknowledge the sibling wake"
+  rm -f "$state/.last-check"
+  out=$(FM_TEST_GH_STATE=MERGED run_watcher_bounded "$dir/home" "$dir/fakebin") \
+    || fail "watcher stalled reporting a merge while the task meta lock was held"
+  case "$out" in check:*task-a.check.sh:*merged) ;; *) fail "watcher missed the merge: $out" ;; esac
+  fm_pr_poll_outcome_recorded "$state" task-a github github.com o/r 23 merged \
+    || fail "held task meta lock prevented a durable merge marker"
+  assert_poll_absent "$state" task-a
+  pass "the watcher records both terminal outcomes while another action holds the task meta lock"
 )
 
 test_retirement_refuses_replacement_and_nonterminal_results() {
@@ -2399,6 +2460,8 @@ test_persistent_secondmate_retirement_is_poll_only
 test_retirement_crash_recovery
 test_external_merge_transition_retires_only_merged_poll
 test_stale_outcomes_preserve_current_pr_closure
+test_closure_survives_same_pr_rearm
+test_pr_outcomes_do_not_wait_for_task_meta_lock
 test_retirement_refuses_replacement_and_nonterminal_results
 test_retirement_queue_failure_and_receipt_tampering
 test_gitlab_merged_poll_retires
