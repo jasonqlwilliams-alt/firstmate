@@ -62,28 +62,29 @@ case "${1:-}" in
     done
     payload=${1:-}
     if [ "$literal" = 1 ]; then
-      rm -f "$D/doorbell.$target"
       printf '%s\n' "$payload" >> "$D/literal"
-      case "$payload" in
-        /exit|/quit)
-          if [ -e "$D/remote-relaunch-start" ] && [ ! -e "$D/remote-relaunch-end" ]; then
-            : > "$D/local-relaunch-during-remote"
-          fi
-          printf 'zsh' > "$D/command.$target"
-          ;;
-        *'encode launch-brief'*) cat "$D/becomes" > "$D/command.$target" ;;
-        ': Firstmate instruction waiting: list '*)
-          printf '%s\n' "$payload" > "$D/doorbell.$target"
-          ;;
-      esac
-    else
-      printf '%s\n' "$payload" >> "$D/keys"
-      if [ "$payload" = Enter ] && [ -f "$D/doorbell.$target" ]; then
-        doorbell=$(cat "$D/doorbell.$target")
-        rm -f "$D/doorbell.$target"
-        printf 'doorbell\n' >> "$D/rings"
+      printf '%s\n' "$payload" > "$D/composer.$target"
+      exit 0
+    fi
+    printf '%s\n' "$payload" >> "$D/keys"
+    [ "$payload" = Enter ] && [ -f "$D/composer.$target" ] || exit 0
+    payload=$(cat "$D/composer.$target")
+    case "${FM_FAKE_DROP_SUBMIT:-}:$payload" in
+      exit:/exit|exit:/quit|launch:*'encode launch-brief'*) exit 0 ;;
+    esac
+    rm -f "$D/composer.$target"
+    printf '%s\n' "$payload" >> "$D/submitted"
+    case "$payload" in
+      /exit|/quit)
+        if [ -e "$D/remote-relaunch-start" ] && [ ! -e "$D/remote-relaunch-end" ]; then
+          : > "$D/local-relaunch-during-remote"
+        fi
+        printf 'zsh' > "$D/command.$target"
+        ;;
+      *'encode launch-brief'*) cat "$D/becomes" > "$D/command.$target" ;;
+      ': Firstmate instruction waiting: list '*)
         if [ -x "$D/on-doorbell" ]; then
-          "$D/on-doorbell" "$doorbell"
+          "$D/on-doorbell" "$payload"
         fi
         if [ -f "$D/answer-inbox" ]; then
           inbox=$(cat "$D/answer-inbox")
@@ -94,8 +95,8 @@ case "${1:-}" in
               >> "$(cat "$D/answer-status")"
           fi
         fi
-      fi
-    fi
+        ;;
+    esac
     exit 0 ;;
   display-message)
     target=
@@ -155,7 +156,7 @@ new_case() {
   printf 'claude\n' > "$dir/home/config/secondmate-harness"
   : > "$dir/fake/literal"
   : > "$dir/fake/keys"
-  : > "$dir/fake/rings"
+  : > "$dir/fake/submitted"
   printf 'claude' > "$dir/fake/command"
   printf 'claude' > "$dir/fake/becomes"
   make_stub "$dir"
@@ -325,8 +326,8 @@ test_persist_precedes_restart() {
   assert_contains "$out" "summary: 1 of 1 restarted, 0 nudged, 0 unreached" "the summary should report the reload"
   # The pane transcript orders the two phases: the instruction doorbell first,
   # the harness exit command only after it.
-  doorbell_line=$(grep -n '^: Firstmate instruction waiting: ' "$dir/fake/literal" | head -1 | cut -d: -f1)
-  exit_line=$(grep -n '^/exit$' "$dir/fake/literal" | head -1 | cut -d: -f1)
+  doorbell_line=$(grep -n '^: Firstmate instruction waiting: ' "$dir/fake/submitted" | head -1 | cut -d: -f1)
+  exit_line=$(grep -n '^/exit$' "$dir/fake/submitted" | head -1 | cut -d: -f1)
   [ -n "$doorbell_line" ] || fail "the persist request never reached the mate"
   [ -n "$exit_line" ] || fail "the mate was never stopped, so it was not restarted"
   [ "$doorbell_line" -lt "$exit_line" ] \
@@ -654,6 +655,8 @@ SH
 
   out=$(FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1); rc=$?
 
+  assert_grep "done [corr=$corr]: unrelated request answered" "$state/sm1.status" \
+    "the unrelated answer must be present before testing whether it releases the gate"
   expect_code 3 "$rc" "an unrelated concurrent answer must not release the persist gate"$'\n'"$out"
   assert_not_contains "$out" "restarted: sm1" "the unrelated answer authorized a restart"
   assert_no_grep '^/exit$' "$dir/fake/literal" "the unrelated answer stopped the mate"
@@ -671,8 +674,8 @@ test_persist_waits_are_polled_together() {
   out=$(FM_TEST_PERSIST_WAIT=3 run_restart "$dir" sm1 sm2); rc=$?
 
   expect_code 3 "$rc" "the unanswered mate should fall back after the confirmed mate restarts"$'\n'"$out"
-  exit_line=$(grep -n '^/exit$' "$dir/fake/literal" | head -1 | cut -d: -f1)
-  nudge_line=$(grep -n '^: Firstmate instruction waiting: ' "$dir/fake/literal" | tail -1 | cut -d: -f1)
+  exit_line=$(grep -n '^/exit$' "$dir/fake/submitted" | head -1 | cut -d: -f1)
+  nudge_line=$(grep -n '^: Firstmate instruction waiting: ' "$dir/fake/submitted" | tail -1 | cut -d: -f1)
   [ -n "$exit_line" ] && [ -n "$nudge_line" ] && [ "$exit_line" -lt "$nudge_line" ] \
     || fail "the first mate's timeout held the confirmed second mate behind it: $out"
   pass "T10 pending persist answers are polled as one fleet"
@@ -695,6 +698,28 @@ test_post_stop_failure_is_reported_unreached() {
   assert_contains "$out" "summary: 0 of 1 restarted, 0 nudged, 1 unreached" \
     "the summary must not claim that a stopped mate remains on older instructions with a message"
   pass "T11 post-stop restart failure is never misreported as a nudge"
+}
+
+test_lost_lifecycle_enter_cannot_complete_restart() {
+  local phase dir out rc
+  for phase in exit launch; do
+    dir=$(new_case "lost-$phase-enter")
+    add_local_mate "$dir" sm1
+    arm_answer "$dir" sm1
+    out=$(FM_FAKE_DROP_SUBMIT="$phase" run_restart "$dir" sm1); rc=$?
+
+    expect_code 3 "$rc" "losing the $phase Enter should leave the restart unconfirmed: $out"
+    assert_contains "$out" "unreached: sm1:" "losing the $phase Enter should report the mate unreached"
+    case "$phase" in
+      exit) assert_contains "$out" "the agent did not stop" "a typed /exit must leave the original agent running" ;;
+      launch)
+        assert_grep 'encode launch-brief' "$dir/fake/literal" "the launch command must have reached the pane"
+        [ "$(cat "$dir/fake/command.fmses:fm-sm1")" = zsh ] \
+          || fail "a typed launch must leave the pane stopped"
+        ;;
+    esac
+  done
+  pass "restart requires submitted exit and replacement commands"
 }
 
 # --- T12: relaunch work does not stop polling other persist answers ----------
@@ -831,8 +856,8 @@ test_already_current_mate_restarts_end_to_end() {
   assert_contains "$out" "summary: 1 of 1 restarted, 0 nudged, 0 unreached" \
     "the pass must report the reload it performed"
   # Persist strictly before replace, read off the pane transcript.
-  doorbell_line=$(grep -n '^: Firstmate instruction waiting: ' "$dir/fake/literal" | head -1 | cut -d: -f1)
-  exit_line=$(grep -n '^/exit$' "$dir/fake/literal" | head -1 | cut -d: -f1)
+  doorbell_line=$(grep -n '^: Firstmate instruction waiting: ' "$dir/fake/submitted" | head -1 | cut -d: -f1)
+  exit_line=$(grep -n '^/exit$' "$dir/fake/submitted" | head -1 | cut -d: -f1)
   [ -n "$doorbell_line" ] || fail "the persist request never reached the already-current mate"
   [ -n "$exit_line" ] || fail "the already-current mate was never stopped, so it was not restarted"
   [ "$doorbell_line" -lt "$exit_line" ] \
@@ -938,6 +963,7 @@ test_unreachable_host_is_reported_unknown
 test_concurrent_reply_cannot_release_persist_gate
 test_persist_waits_are_polled_together
 test_post_stop_failure_is_reported_unreached
+test_lost_lifecycle_enter_cannot_complete_restart
 test_relaunches_do_not_block_persist_polling
 test_unpublished_worker_result_is_accounted_for
 test_result_published_while_reaping_is_honored

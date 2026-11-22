@@ -3288,18 +3288,17 @@ fm_backend_herdr_composer_state() {  # <target> -> empty|pending|pending-unprove
 # globals (bin/fm-composer-lib.sh "Composer SNAPSHOT"), ANSI first and plain
 # as the styled=0 fallback; fails when the target or both captures fail.
 fm_backend_herdr_composer_snapshot() {  # <target> [visible]
-  local target=$1 scope=${2:-} lines=$FM_COMPOSER_CAPTURE_LINES cap styled
-  [ "$scope" != visible ] || lines=0
-  if cap=$(_fm_backend_herdr_capture "$target" "$lines" ansi "$scope" 2>/dev/null); then
+  local target=$1 scope=${2:-} cap styled
+  if cap=$(_fm_backend_herdr_capture "$target" "$FM_COMPOSER_CAPTURE_LINES" ansi "$scope" 2>/dev/null); then
     styled=1
-  elif cap=$(_fm_backend_herdr_capture "$target" "$lines" '' "$scope"); then
+  elif cap=$(_fm_backend_herdr_capture "$target" "$FM_COMPOSER_CAPTURE_LINES" '' "$scope"); then
     styled=0
   else
     return 1
   fi
   FM_COMPOSER_SNAPSHOT_SCREEN=$cap
   FM_COMPOSER_SNAPSHOT_CURSOR=
-  FM_COMPOSER_SNAPSHOT_CAPS=$(printf 'styled=%s\ncursor=0\nidentity=1\nrows=%s' "$styled" "$lines")
+  FM_COMPOSER_SNAPSHOT_CAPS=$(printf 'styled=%s\ncursor=0\nidentity=1\nrows=%s' "$styled" "$FM_COMPOSER_CAPTURE_LINES")
 }
 
 # fm_backend_herdr_composer_classify_snapshot: the herdr composer verdict for

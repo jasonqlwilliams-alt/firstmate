@@ -543,8 +543,8 @@ _fm_backend_cmux_capture() {  # <target> <lines> [expected-label] [visible]
 
 # fm_backend_cmux_composer_caps: plain-text capture capabilities (see the
 # capability model in bin/fm-composer-lib.sh).
-fm_backend_cmux_composer_caps() {  # <rows>
-  printf 'styled=0\ncursor=0\nidentity=0\nrows=%s\n' "$1"
+fm_backend_cmux_composer_caps() {
+  printf 'styled=0\ncursor=0\nidentity=0\nrows=%s\n' "$FM_COMPOSER_CAPTURE_LINES"
 }
 
 # fm_backend_cmux_composer_state: thin adapter - capture plus capabilities in,
@@ -561,12 +561,11 @@ fm_backend_cmux_composer_state() {  # <target> [expected-label] -> empty|pending
 # fm_backend_cmux_composer_snapshot: one composer capture into the snapshot
 # globals (bin/fm-composer-lib.sh "Composer SNAPSHOT").
 fm_backend_cmux_composer_snapshot() {  # <target> [expected-label] [visible]
-  local cap scope=${3:-} lines=$FM_COMPOSER_CAPTURE_LINES
-  [ "$scope" != visible ] || lines=0
-  cap=$(_fm_backend_cmux_capture "$1" "$lines" "${2:-}" "$scope") || return 1
+  local cap
+  cap=$(_fm_backend_cmux_capture "$1" "$FM_COMPOSER_CAPTURE_LINES" "${2:-}" "${3:-}") || return 1
   FM_COMPOSER_SNAPSHOT_SCREEN=$cap
   FM_COMPOSER_SNAPSHOT_CURSOR=
-  FM_COMPOSER_SNAPSHOT_CAPS=$(fm_backend_cmux_composer_caps "$lines")
+  FM_COMPOSER_SNAPSHOT_CAPS=$(fm_backend_cmux_composer_caps)
 }
 
 # fm_backend_cmux_send_text_submit: type <text> into <target> once (raw,

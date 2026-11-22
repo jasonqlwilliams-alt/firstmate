@@ -242,8 +242,8 @@ if (r.terminal && Array.isArray(r.terminal.tail)) {
 # plain text; whether it can emit ANSI is unverified (orca is not installed
 # on the verification machine), so styled stays 0 - the conservative
 # degradation - until a live capture proves otherwise.
-fm_backend_orca_composer_caps() {  # <rows>
-  printf 'styled=0\ncursor=0\nidentity=0\nrows=%s\n' "$1"
+fm_backend_orca_composer_caps() {
+  printf 'styled=0\ncursor=0\nidentity=0\nrows=%s\n' "$FM_COMPOSER_CAPTURE_LINES"
 }
 
 # fm_backend_orca_composer_state: thin adapter - capture plus capabilities in,
@@ -258,12 +258,11 @@ fm_backend_orca_composer_state() {  # <terminal-id> [expected-label] -> empty|pe
 # fm_backend_orca_composer_snapshot: one composer capture into the snapshot
 # globals (bin/fm-composer-lib.sh "Composer SNAPSHOT").
 fm_backend_orca_composer_snapshot() {  # <terminal-id> [visible]
-  local cap scope=${2:-} lines=$FM_COMPOSER_CAPTURE_LINES
-  [ "$scope" != visible ] || lines=0
-  cap=$(_fm_backend_orca_capture "$1" "$lines" "$scope") || return 1
+  local cap
+  cap=$(_fm_backend_orca_capture "$1" "$FM_COMPOSER_CAPTURE_LINES" "${2:-}") || return 1
   FM_COMPOSER_SNAPSHOT_SCREEN=$cap
   FM_COMPOSER_SNAPSHOT_CURSOR=
-  FM_COMPOSER_SNAPSHOT_CAPS=$(fm_backend_orca_composer_caps "$lines")
+  FM_COMPOSER_SNAPSHOT_CAPS=$(fm_backend_orca_composer_caps)
 }
 
 fm_backend_orca_send_key() {  # <terminal-id> <key>

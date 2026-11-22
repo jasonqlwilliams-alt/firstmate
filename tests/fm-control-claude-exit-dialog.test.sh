@@ -624,7 +624,10 @@ case "${0##*/}:$1" in
       list-panes) printf '%s\n' '[{"id":1,"is_plugin":false}]' ;;
       dump-screen)
         case "$FM_DIALOG_MODE: $* " in zellij-plain:*' --ansi '*) exit 1 ;; esac
-        viewport
+        case " $* " in
+          *' --full '*) scrollback ;;
+          *) viewport ;;
+        esac
         ;;
       paste|send-keys) printf '%s\n' "$*" >> "$FM_DIALOG_CASE/input" ;;
       *) exit 1 ;;
@@ -653,11 +656,13 @@ chmod +x "$TMP_ROOT/bin/viewport-stub"
 for backend in cmux zellij orca; do ln -s viewport-stub "$TMP_ROOT/bin/$backend"; done
 for mode in cmux zellij zellij-plain orca; do
   export FM_DIALOG_MODE="$mode"
+  capture_lines=20
   case "$mode" in
     cmux) backend=cmux; target=workspace:surface ;;
     zellij*) backend=zellij; target=fixture:1 ;;
     orca) backend=orca; target=term-claude ;;
   esac
+  [ "$mode" != zellij-plain ] || capture_lines=80
   for scenario in long:before long:after clipped:before clipped:after choices:after; do
     when=${scenario#*:}
     export FM_DIALOG_CASE="$TMP_ROOT/capture-$mode-${scenario/:/-}"
@@ -666,7 +671,7 @@ for mode in cmux zellij zellij-plain orca; do
     rec="$FM_DIALOG_CASE/001.msg"
     printf 'schema=fm-task-inbox.v1\n--\nreview the open records\n' > "$rec"
     rc=0
-    PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_DIALOG_PHASE="$when" \
+    PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_DIALOG_PHASE="$when" FM_COMPOSER_CAPTURE_LINES="$capture_lines" \
       bash -c '. "$1"; fm_task_inbox_ring "$2" "$3" "$4" "" claude' \
       _ "$ROOT/bin/fm-task-inbox-lib.sh" "$backend" "$target" "$rec" || rc=$?
     if [ "$when" = before ]; then
