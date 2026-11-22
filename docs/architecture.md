@@ -40,8 +40,10 @@ The retirement receipt makes poll cleanup safely retryable across restarts: fixe
 A registered poll and its retirement receipt can also survive a reboot that renumbers the filesystem device while their files still pass the current identity checks owned by `bin/fm-pr-lib.sh`.
 A concurrent replacement remains armed, and retirement never performs task or persistent-secondmate cleanup.
 `bin/fm-pr-lib.sh` owns the notification-marker and retirement-receipt formats plus their strict identity mechanics, [`bin/fm-merge-outcome-lib.sh`](../bin/fm-merge-outcome-lib.sh) owns role-routed publication, the local durable row, and marker ordering, and `bin/fm-watch.sh` owns immediate poll-result delivery and retirement.
-For a validated `closed-unmerged` outcome, the watcher silently records the observed PR and keeps the poll armed so it can detect a later merge.
-[`bin/fm-pr-lib.sh`](../bin/fm-pr-lib.sh) owns the closure record and its lifetime.
+A validated `closed-unmerged` result can be recorded without waking the supervisor or retiring the poll, so a later merge can still surface.
+The result belongs to the exact PR URL the watcher polled, even if the same task relaunches or re-registers its poll during the forge read.
+A recorded closure remains evidence if the PR reopens.
+The closure record, task-lifetime boundary, and recording limits are documented in [`bin/fm-pr-lib.sh`](../bin/fm-pr-lib.sh).
 No-verb wakes, such as `working:` notes and bare turn-ended signals, are benign only when every referenced task independently has positive evidence that its crew is still working: a currently attributed active no-mistakes step, or an exact busy verdict from the semantic busy-state contract, both read through `bin/fm-crew-state.sh`.
 A home that creates `config/turnend-churn-absorb` lets each eligible bare turn-ended task that lacks either authoritative proof use a third form: pane content that changed since the previous poll, compared against the same `state/.hash-*` marker the staleness backbone records, which claims no harness semantics and needs no adapter cooperation.
 That form stays opt-in because it infers execution from rendered bytes rather than from a verdict the harness vouches for, so with the flag absent triage behaves exactly as it did before ([`configuration.md`](configuration.md) "Turn-end pane-churn absorb").

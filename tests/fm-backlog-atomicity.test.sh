@@ -2111,24 +2111,36 @@ test_recovery_retry_preserves_incomplete_cleanup_warning() {
 }
 
 test_recovery_finishes_a_close_for_the_same_meta_incarnation() {
-  local case_dir id out
+  local case_dir id out state url
   id=atomic-heal-same-incarnation-b11
   case_dir=$(make_home heal-same-incarnation)
   add_item "$case_dir" "$id"
   start_item "$case_dir" "$id"
   write_task_meta "$case_dir" "$id" ship no-mistakes "spawn_gen=spawn-one"
+  state="$(home_of "$case_dir")/state"
+  url=https://github.com/example/repo/pull/11
+  FM_HOME="$(home_of "$case_dir")" PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-pr-check.sh" "$id" "$url" >/dev/null \
+    || fail "could not register the interrupted task's poll"
+  ( umask 077
+    printf '%s\n' "$url" > "$state/$id.pr-poll-closed"
+    printf '%s\n' https://github.com/example/repo/pull/12 > "$state/.$id.pr-poll-closed.ABC123"
+    printf '%s\n' fm-pr-poll-retirement-v1 > "$state/$id.pr-poll-retirement"
+  )
   printf 'id=%s\ndata=%s\nspawn_gen=spawn-one\narg=--note\narg=local%%20main\n' \
-    "$id" "$(home_of "$case_dir")/data" \
-    > "$(home_of "$case_dir")/state/$id.backlog-close"
+    "$id" "$(home_of "$case_dir")/data" > "$state/$id.backlog-close"
 
   out=$(run_bootstrap "$case_dir")
   [ "$(row_state "$case_dir" "$id")" = "done" ] \
     || fail "session start did not close the interrupted incarnation: $out"
-  assert_absent "$(home_of "$case_dir")/state/$id.meta" \
+  assert_absent "$state/$id.meta" \
     "session start retained the interrupted incarnation's meta"
-  assert_absent "$(home_of "$case_dir")/state/$id.backlog-close" \
+  assert_absent "$state/$id.backlog-close" \
     "session start retained the completed incarnation's close marker"
-  pass "session start finishes a close for the matching meta incarnation"
+  assert_absent "$state/$id.pr-poll-registration" "session start retained the retired task's registration"
+  assert_absent "$state/$id.check.sh" "session start retained the retired task's canonical PR check"
+  assert_absent "$state/$id.pr-poll-closed" "session start retained the retired task's closure evidence"
+  assert_absent "$state/.$id.pr-poll-closed.ABC123" "session start retained the retired task's staged closure"
+  pass "session start finishes a matching close despite an invalid merge receipt"
 }
 
 test_recovery_preserves_a_close_for_ambiguous_incarnation_metadata() {

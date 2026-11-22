@@ -27,7 +27,16 @@
 #
 # Closure evidence lives in a separate private state/<id>.pr-poll-closed file.
 # Each line is one canonical URL observed closed without merging.
-# Re-registering a poll preserves this history. Task teardown removes it.
+# Prepare the private closure stage before capturing the registration so task
+# retirement can invalidate an observation even during capture.
+# A missing stage skips the forge read, and publishing the result requires the
+# stage to still be present under the task metadata lock.
+# A re-arm preserves the stage and history even for metadata without a generation.
+# Full teardown, remote proxy retirement, and matching backlog-close replay
+# revoke the registration and clear stages and history before removing metadata.
+# A PR closure can be missed if the task metadata lock is contended and the PR reopens between polls.
+# A PR registration command still in flight across task cleanup and ID reuse can bind the old PR to the new task.
+# A concurrently registered custom check can be removed if it replaces a PR check during revocation, or skipped until the next normal sweep if the prepared PR closure stage is invalidated during the replacement.
 
 FM_PR_PROVIDER=
 FM_PR_URL=
@@ -608,6 +617,15 @@ fm_pr_poll_publish_prepared() {
   fi
 }
 
+fm_pr_poll_check_template_hash() {
+  local check=$1 template=$2 hash
+  hash=$(fm_pr_sha256 "$check") || return 1
+  if [ "$hash" != 24f73c153d68a5404ee5b4f9fc4ad6368ee8d79b43b87566591ce1e05a4112bf ]; then
+    cmp -s "$template" "$check" || return 1
+  fi
+  printf '%s\n' "$hash"
+}
+
 fm_pr_poll_artifacts_valid() {
   local state=$1 id=$2 template=$3 state_device check data registration meta data_hash template_hash
   fm_pr_task_id_valid "$id" || return 1
@@ -624,12 +642,9 @@ fm_pr_poll_artifacts_valid() {
   [ "$(fm_pr_file_link_count "$meta")" = 1 ] || return 1
   fm_pr_poll_data_parse "$data" || return 1
   data_hash=$(fm_pr_sha256 "$data") || return 1
-  template_hash=$(fm_pr_sha256 "$check") || return 1
   # Accept the pinned pre-closure shim for an otherwise valid registration.
   # The watcher executes the current repository poll with the validated data.
-  if [ "$template_hash" != 24f73c153d68a5404ee5b4f9fc4ad6368ee8d79b43b87566591ce1e05a4112bf ]; then
-    cmp -s "$template" "$check" || return 1
-  fi
+  template_hash=$(fm_pr_poll_check_template_hash "$check" "$template") || return 1
   fm_pr_poll_registration_parse "$registration" || return 1
   [ "$FM_PR_REG_ID" = "$id" ] || return 1
   [ "$FM_PR_REG_PROVIDER" = "$FM_PR_DATA_PROVIDER" ] || return 1
@@ -1055,53 +1070,70 @@ fm_pr_poll_closed_recorded() {
   grep -Fqx -- "$url" "$record"
 }
 
-fm_pr_poll_record_closed() (
-  local state=$1 id=$2 template=$3 spawn_gen=$4
-  local url=$FM_PR_POLL_SNAPSHOT_URL record device tmp
-  [ "$id" = "$FM_PR_POLL_SNAPSHOT_ID" ] || return 4
-  fm_pr_task_id_valid "$id" && fm_pr_url_parse "$url" || return 1
+fm_pr_poll_snapshot_prepare() {
+  local state=$1 id=$2 template=$3
+  FM_PR_POLL_CLOSED_STAGE=
+  fm_pr_task_id_valid "$id" || return 1
   [ -d "$state" ] && [ ! -L "$state" ] || return 1
+  [ -f "$state/$id.pr-poll-registration" ] || return 1
+  FM_PR_POLL_CLOSED_STAGE=$(umask 077; mktemp "$state/.$id.pr-poll-closed.XXXXXX") || FM_PR_POLL_CLOSED_STAGE=
+  fm_pr_poll_snapshot_capture "$state" "$id" "$template" || return 1
+  [ -f "$FM_PR_POLL_CLOSED_STAGE" ] && [ ! -L "$FM_PR_POLL_CLOSED_STAGE" ] || return 3
+}
+
+fm_pr_poll_record_closed() (
+  local state=$1 id=$2 stage=$FM_PR_POLL_CLOSED_STAGE url=$FM_PR_POLL_SNAPSHOT_URL
+  local record device lock
+  [ "$id" = "$FM_PR_POLL_SNAPSHOT_ID" ] || return 4
+  fm_pr_task_id_valid "$id" || return 4
+  fm_pr_url_parse "$url" || return 1
+  [ -d "$state" ] && [ ! -L "$state" ] || return 1
+  [[ "$stage" == "$state/.$id.pr-poll-closed."?????? ]] || return 4
+  [ -f "$stage" ] && [ ! -L "$stage" ] || return 4
+  lock=$(fm_meta_lock_path "$state/$id.meta") || return 1
+  fm_lock_try_acquire "$lock" || return 3
+  trap 'fm_lock_release "$lock"' EXIT
   record="$state/$id.pr-poll-closed"
   device=$(fm_pr_file_device "$state") || return 1
+  fm_pr_private_file_valid "$stage" 600 "$device" || return 4
+  [ -f "$state/$id.meta" ] \
+    && fm_pr_regular_destination_on_device_or_absent "$state/$id.meta" "$device" || return 4
   fm_pr_poll_closed_recorded "$state" "$id" "$url" && return 0
 
-  umask 077
-  tmp=$(mktemp "$state/.$id.pr-poll-closed.XXXXXX") || return 1
-  trap 'rm -f -- "$tmp"' EXIT
-  exec 8<> "$tmp" || return 1
+  exec 8> "$stage" || return 1
   if [ -e "$record" ] || [ -L "$record" ]; then
     fm_pr_private_file_valid "$record" 600 "$device" || return 1
     cat -- "$record" >&8 || return 1
   fi
   printf '%s\n' "$url" >&8 || return 1
-  # Bind the completed forge read to its task generation or to the original
-  # registration if that generation has changed or is unavailable.
-  [ -f "$state/$id.check.sh" ] && [ ! -L "$state/$id.check.sh" ] || return 4
-  if ! { [ -n "$spawn_gen" ] && fm_backlog_meta_spawn_gen_optional "$state/$id.meta" "$state" \
-      && [ "$FM_BACKLOG_META_SPAWN_GEN" = "$spawn_gen" ]; }; then
-    fm_pr_poll_snapshot_matches "$state" "$id" "$template" || return 4
-  fi
   fm_pr_regular_destination_on_device_or_absent "$record" "$device" || return 1
-  if mv -f -- "$tmp" "$record"; then
-    return 0
-  fi
-  [ ! -e "$tmp" ] && return 4
-  return 1
+  mv -f -- "$stage" "$record"
 )
 
-fm_pr_poll_closed_cleanup_valid() {
+fm_pr_poll_registration_cleanup_valid() {
   local state=$1 id=$2 artifact device
   fm_pr_task_id_valid "$id" || return 1
-  for artifact in "$state/$id.pr-poll-closed" "$state/.$id.pr-poll-closed."??????; do
+  for artifact in "$state/$id.pr-poll-registration" "$state/$id.pr-poll-closed" "$state/.$id.pr-poll-closed."??????; do
     [ -e "$artifact" ] || [ -L "$artifact" ] || continue
     [ -d "$state" ] && [ ! -L "$state" ] || return 1
     device=$(fm_pr_file_device "$state") || return 1
-    fm_pr_regular_destination_on_device_or_absent "$artifact" "$device" || return 1
+    if ! fm_pr_regular_destination_on_device_or_absent "$artifact" "$device"; then
+      [ ! -e "$artifact" ] && [ ! -L "$artifact" ] || return 1
+    fi
   done
 }
 
-fm_pr_poll_closed_remove() {
-  local state=$1 id=$2
-  fm_pr_poll_closed_cleanup_valid "$state" "$id" || return 1
-  rm -f -- "$state/.$id.pr-poll-closed."?????? "$state/$id.pr-poll-closed"
+fm_pr_poll_registration_remove() {
+  local state=$1 id=$2 template=$3 check device
+  fm_pr_poll_registration_cleanup_valid "$state" "$id" || return 1
+  check="$state/$id.check.sh"
+  if [ -f "$check" ] && [ ! -L "$check" ]; then
+    [ -d "$state" ] && [ ! -L "$state" ] || return 1
+    device=$(fm_pr_file_device "$state") || return 1
+    if fm_pr_private_file_valid "$check" 600 "$device" \
+      && fm_pr_poll_check_template_hash "$check" "$template" >/dev/null; then
+      rm -f -- "$check" || return 1
+    fi
+  fi
+  rm -f -- "$state/$id.pr-poll-registration" "$state/.$id.pr-poll-closed."?????? "$state/$id.pr-poll-closed"
 }

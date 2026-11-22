@@ -520,6 +520,148 @@ SH
   pass "fm-control relaunch: registered PR polls retain their bindings and deliver durable merge wakes with tracing off and on"
 }
 
+test_relaunch_and_pr_replacement_during_closure() {
+  local dir state setup=${1:-fresh} id=rl-close url=https://github.com/example/repo/pull/20
+  local replacement=https://github.com/example/repo/pull/21 out rc watcher='' checksum='' i=0
+  dir=$(new_case "closure-race-$setup" "$id")
+  state="$dir/home/state"
+
+  mkdir -p "$dir/root/bin" "$dir/pollbin"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/root/bin/fm-guard.sh"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/pollbin/tmux"
+  cat > "$dir/pollbin/gh" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *'--json headRefOid'*) printf '0123456789abcdef0123456789abcdef01234567\n' ;;
+  *'--json state'*)
+    printf '%s\n' "$*" >> "$FM_HOME/forge-reads"
+    touch "$FM_HOME/forge-ready"
+    while [ ! -e "$FM_HOME/forge-release" ]; do
+      [ "$SECONDS" -lt 120 ] || exit 75
+      sleep 0.05
+    done
+    printf 'CLOSED\n'
+    ;;
+  *) exit 2 ;;
+esac
+SH
+  chmod +x "$dir/pollbin/gh" "$dir/pollbin/tmux" "$dir/root/bin/fm-guard.sh"
+  add_ship_task "$dir" "$id" claude
+  printf 'spawn_gen=s-original\n' >> "$state/$id.meta"
+  if [ "$setup" = reused ]; then
+    mv "$state/$id.meta" "$dir/replacement.meta"
+    fm_write_meta "$state/$id.meta" "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+      "worktree=$dir/old-worktree" "project=$dir/old-project" 'kind=ship' 'mode=local-only' 'spawn_gen=s-retired'
+    env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" PATH="$dir/pollbin:$PATH" \
+      "$ROOT/bin/fm-pr-check.sh" "$id" "$url" > "$dir/register.log" 2>&1 \
+      || fail "could not arm the retired task's PR: $(cat "$dir/register.log")"
+    FM_HOME="$dir/home" PATH="$dir/pollbin:$PATH" "$ROOT/bin/fm-inactive-reconcile.sh" scan \
+      || fail "could not prime the inactive-outcome scan"
+    mkdir -p "$dir/retirebin"
+    cp "$dir/pollbin/tmux" "$dir/retirebin/tmux"
+    checksum=$(command -v shasum) || checksum=$(command -v sha256sum) || fail "no supported SHA-256 tool"
+    cat > "$dir/pollbin/${checksum##*/}" <<'SH'
+#!/usr/bin/env bash
+if [ "${TEST_WATCH_CAPTURE:-0}" = 1 ] && [ "${*: -1}" = "$FM_HOME/state/rl-close.pr-poll" ] \
+  && [ ! -e "$FM_HOME/replacement-armed" ]; then
+  touch "$FM_HOME/capture-started"
+  while [ ! -e "$FM_HOME/replacement-armed" ]; do
+    [ "$SECONDS" -lt 120 ] || exit 75
+    sleep 0.05
+  done
+fi
+exec "$TEST_REAL_CHECKSUM" "$@"
+SH
+    chmod +x "$dir/pollbin/${checksum##*/}"
+  else
+    env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" PATH="$dir/pollbin:$PATH" \
+      "$ROOT/bin/fm-pr-check.sh" "$id" "$url" > "$dir/register.log" 2>&1 \
+      || fail "could not arm the observed PR: $(cat "$dir/register.log")"
+    touch "$dir/home/capture-verified"
+  fi
+  printf '%s\n' "$$" > "$state/.lock"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$dir/pollbin/tmux"
+  cat > "$state/z-cycle-end.check.sh" <<'SH'
+#!/usr/bin/env bash
+if [ ! -e "$FM_HOME/capture-verified" ]; then
+  touch "$FM_HOME/invalidated-sweep-finished"
+  while [ ! -e "$FM_HOME/capture-verified" ]; do
+    [ "$SECONDS" -lt 120 ] || exit 75
+    sleep 0.05
+  done
+fi
+if [ -e "$FM_HOME/forge-release" ]; then printf 'poll-cycle-end\n'; fi
+SH
+  chmod 0700 "$state/z-cycle-end.check.sh"
+  FM_HOME="$dir/home" "$ROOT/bin/fm-check-register.sh" z-cycle-end >/dev/null \
+    || fail "could not register the poll-cycle control check"
+  touch "$state/home-summary.json"
+
+  trap '
+    touch "$dir/home/replacement-armed" "$dir/home/capture-verified" "$dir/home/forge-release"
+    [ -z "$watcher" ] || wait "$watcher" || true
+    relaunch_cleanup
+  ' EXIT
+  env FM_HOME="$dir/home" PATH="$dir/pollbin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    TEST_WATCH_CAPTURE=1 TEST_REAL_CHECKSUM="$checksum" FM_POLL=0.1 FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=30 \
+    "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 40 > "$dir/watch.log" 2>&1 &
+  watcher=$!
+  if [ "$setup" = reused ]; then
+    for ((i=0; i<200; i++)); do
+      [ ! -e "$dir/home/capture-started" ] || break
+      sleep 0.05
+    done
+    [ -e "$dir/home/capture-started" ] || fail "the watcher did not reach the checksum during capture"
+    env FM_HOME="$dir/home" FM_TEARDOWN_GUARD_DONE=1 PATH="$dir/retirebin:$PATH" \
+      "$ROOT/bin/fm-teardown.sh" "$id" --force > "$dir/teardown.log" 2>&1 \
+      || fail "could not retire the previous task: $(cat "$dir/teardown.log")"
+    [ ! -e "$state/$id.meta" ] && [ ! -e "$state/$id.check.sh" ] \
+      || fail "the retired task still owned the ID or its poll"
+    mv "$dir/replacement.meta" "$state/$id.meta"
+    env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" TEST_REAL_CHECKSUM="$checksum" \
+      PATH="$dir/pollbin:$PATH" "$ROOT/bin/fm-pr-check.sh" "$id" "$url" > "$dir/register.log" 2>&1 \
+      || fail "could not arm the reused ID's poll: $(cat "$dir/register.log")"
+    touch "$dir/home/replacement-armed"
+    for ((i=0; i<200; i++)); do
+      if [ -e "$dir/home/invalidated-sweep-finished" ] || [ -e "$dir/home/forge-ready" ]; then break; fi
+      sleep 0.05
+    done
+    [ ! -s "$dir/home/forge-reads" ] || fail "the invalidated capture reached the forge"
+    [ -e "$dir/home/invalidated-sweep-finished" ] || fail "the watcher did not finish the invalidated capture sweep"
+    touch "$dir/home/capture-verified"
+  fi
+  i=0
+  while [ ! -e "$dir/home/forge-ready" ] && [ "$i" -lt 150 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  [ -e "$dir/home/forge-ready" ] || fail "watcher did not enter the forge read: $(cat "$dir/watch.log")"
+
+  out=$(run_control "$dir" "$id" relaunch --note 'Continue checking the registered PR.'); rc=$?
+  expect_code 0 "$rc" "relaunch during a forge read should succeed"$'\n'"$out"
+  [ -n "$(meta_field "$dir" "$id" spawn_gen)" ] \
+    && [ "$(meta_field "$dir" "$id" spawn_gen)" != s-original ] \
+    || fail "the relaunch did not change the worker generation"
+  env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" TEST_REAL_CHECKSUM="$checksum" PATH="$dir/pollbin:$PATH" \
+    "$ROOT/bin/fm-pr-check.sh" "$id" "$replacement" > "$dir/register.log" 2>&1 \
+    || fail "could not arm the replacement PR: $(cat "$dir/register.log")"
+  touch "$dir/home/forge-release"
+  wait "$watcher" || fail "watcher failed during relaunch and replacement: $(cat "$dir/watch.log")"
+  trap relaunch_cleanup EXIT
+  case "$(cat "$dir/watch.log")" in
+    check:*z-cycle-end.check.sh:*poll-cycle-end) ;;
+    *) fail "watcher missed the control check: $(cat "$dir/watch.log")" ;;
+  esac
+  [ "$(cat "$dir/home/forge-reads")" = "pr view $url --repo example/repo --json state -q .state" ] \
+    || fail "watcher did not observe exactly the original PR once"
+  [ "$(meta_field "$dir" "$id" pr)" = "$replacement" ] || fail "closure changed the registered PR"
+  fm_pr_poll_artifacts_valid "$state" "$id" "$ROOT/bin/fm-pr-poll.sh" \
+    || fail "closure did not leave the replacement poll armed"
+  [ -f "$state/$id.pr-poll-closed" ] && [ "$(cat "$state/$id.pr-poll-closed")" = "$url" ] \
+    || fail "relaunch and PR replacement lost the only observed closure for the original PR"
+  pass "a closure survives relaunch and PR replacement during the forge read ($setup ID)"
+}
+
 test_relaunch_preserves_durable_task_metadata() {
   local dir out rc
   dir=$(new_case durable-meta rl19)
@@ -3119,6 +3261,8 @@ test_relaunch_from_guarded_path
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
 test_relaunch_from_linked_home_preserves_recorded_worktree
 test_relaunch_preserves_registered_merge_poll
+test_relaunch_and_pr_replacement_during_closure
+test_relaunch_and_pr_replacement_during_closure reused
 test_relaunch_preserves_durable_task_metadata
 test_relaunch_serializes_concurrent_durable_metadata_publication
 test_disabled_relaunch_clears_prior_trace_context
