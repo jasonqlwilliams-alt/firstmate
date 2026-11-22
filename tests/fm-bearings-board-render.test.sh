@@ -18,6 +18,7 @@ TMP_ROOT=$(fm_test_tmproot fm-bearings-board-render)
 command -v jq >/dev/null 2>&1 || { echo "skip: jq not found"; exit 0; }
 command -v node >/dev/null 2>&1 || { echo "skip: node not found"; exit 0; }
 command -v python3 >/dev/null 2>&1 || { echo "skip: python3 not found"; exit 0; }
+fm_test_prepend_lavish_fixture "$TMP_ROOT/lavish-codec" || fail "could not set up the Lavish codec fixture"
 
 make_home() {  # <name>
   local home="$TMP_ROOT/$1" fakebin
@@ -59,13 +60,15 @@ SH
 
 # Build the board from <underway-json> plus <charted-json> and return what the
 # renderer produced.
-render_board() {  # <home> <underway-json> <charted-json> [charted_more] [charted_warning_more] [landed-json]
+render_board() {  # <home> <underway-json> <charted-json> [charted_more] [charted_warning_more] [landed-json] [agents-json]
   local home=$1 underway=$2 charted=$3 more=${4:-0} warning_more=${5:-0} landed=${6:-'[]'} data="$1/payload.json"
-  jq -n --argjson underway "$underway" --argjson charted "$charted" --argjson landed "$landed" \
+  local agents=${7:-null}
+  jq -n --argjson underway "$underway" --argjson charted "$charted" --argjson landed "$landed" --argjson agents "$agents" \
     --argjson more "$more" --argjson warning_more "$warning_more" '{
     schema:"fm-bearings-board.v1", home:"render-home", generated:"2026-08-26T00:00Z",
     prs_live:false, captains_call:[], underway:$underway, landed:$landed,
-    charted:$charted, charted_more:$more, charted_warning_more:$warning_more}' > "$data"
+    charted:$charted, charted_more:$more, charted_warning_more:$warning_more}
+    | if $agents == null then . else .continuum_agents = $agents end' > "$data"
   PATH="$home/fakebin:$PATH" FM_HOME="$home" \
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
     FM_PROCEVENT_CLAIM_ROOT="$home/procevent-claims" \
@@ -214,6 +217,8 @@ test_charted_next_reads_newest_filed_first() {
   ]')
   printf '%s' "$out" | jq -e '
     [.charted[] | .title] == ["Filed in August", "Filed in July", "Filed in June"]
+      and all(.charted[]; .tier == null and .agents == [])
+      and .sort == null and .requests == []
   ' >/dev/null || fail "charted next was not ordered newest filed first: $out"
   pass "charted next renders the most recently filed work first"
 }
@@ -230,6 +235,248 @@ test_charted_rows_without_a_filed_date_follow_the_dated_rows_in_payload_order() 
     [.charted[] | .title] == ["Dated", "Undated one", "Undated two"]
   ' >/dev/null || fail "undated charted rows did not keep a stable trailing order: $out"
   pass "charted rows with no filed date follow the dated rows in payload order"
+}
+
+test_charted_next_sorts_four_labeled_tiers_and_keeps_warnings_unranked() {
+  local home rows out
+  home=$(make_home charted-tiers)
+  rows=$(jq -nc '[
+    {title:"Active dated hold",tier:2,filed:"2026-07-20",reason:"until 2026-08-27",owner:"(main)"},
+    {title:"Warning",kind:"warning",filed:"2026-08-26"},
+    {title:"Active aged hold",tier:4,filed:"2026-07-01",reason:"held 56d",owner:"(main)"},
+    {title:"Urgent",tier:1},
+    {title:"Active blocked hold",tier:3,filed:"2026-08-20",reason:"blocked-by prep",owner:"mate-one"},
+    {title:"Newer urgent item",tier:2,filed:"2026-07-25"}
+  ] | to_entries | map({id:("item-" + (.key|tostring)),repo:"test",reason:"",dispatchable:false} + .value)')
+  out=$(render_board "$home" '[]' "$rows" 0 0 '[]' '[]')
+  printf '%s' "$out" | jq -e '
+    [.charted[].title] == ["Urgent","Newer urgent item","Active dated hold","Active blocked hold","Active aged hold","Warning"]
+    and [.charted[].tier.tone] == ["tier-1","tier-2","tier-2","tier-3","tier-4",null]
+    and [.charted[].tier.text] == [
+      "Tier 1 · Urgent","Tier 2 · Time-sensitive","Tier 2 · Time-sensitive","Tier 3 · Current","Tier 4 · Backlog",null]
+    and .sort.selected == "tier"
+    and [.sort.byFiled[].title] == ["Active blocked hold","Newer urgent item","Active dated hold","Active aged hold","Urgent","Warning"]
+    and [.sort.byTier[].title] == [.charted[].title]
+    and all(.charted[]; .agents == [] and .opens)
+  ' >/dev/null || fail "the Charted Next sorter did not preserve ranks, dates, or disclosures: $out"
+  pass "Charted Next ranks active holds with queued work in both sort modes"
+}
+
+test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path() {
+  local home out capture adapter assignments answers format view
+  home=$(make_home charted-agent)
+  adapter="$ROOT/bin/fm-procevent-lavish.sh"
+  capture="$home/captured-result"
+  out=$(render_board "$home" '[]' '[
+    {"id":"gated-one","repo":"sample","title":"Gated one","reason":"blocked by prep","tier":1,"dispatchable":false,"owner":"mate-one","assignment_eligible":true},
+    {"id":"gated-two","repo":"sample","title":"Gated two","reason":"blocked by prep","tier":2,"dispatchable":false,"owner":"(main)","assignment_eligible":true},
+    {"id":"active-hold","repo":"sample","title":"Active hold","reason":"until 2026-09-02","tier":2,"dispatchable":false,"owner":"(main)","assignment_eligible":false},
+    {"id":"ready","repo":"sample","title":"Ready","reason":"ready to start","tier":3,"dispatchable":true,"owner":"(main)"},
+    {"id":"waiting","repo":"sample","title":"Waiting","reason":"blocked by prep","tier":4,"dispatchable":false},
+    {"id":"warning","repo":null,"title":"Warning","reason":"home unavailable","dispatchable":false,"kind":"warning"}
+  ]' 0 0 '[]' '["spur","eleusis"]')
+  printf '%s' "$out" | jq -e '
+    .charted as $rows
+    | $rows[0].agents == [{id:"spur",label:"spur"},{id:"eleusis",label:"eleusis"}]
+      and $rows[1].agents == $rows[0].agents
+      and all($rows[2:][]; .agents == [])
+      and ($rows[0].pickable | not)
+      and $rows[3].pickable
+      and .assignmentStatus.queued == ""
+      and .assignmentStatus.unavailable == "Open this board in Lavish to queue an assignment."
+      and (.requests | length) == 1
+      and (.requests[0] | .tag == "choice" and .text == "Gated one → eleusis" and
+        (.queueKey | fromjson) == ["assign-continuum-agent","gated-one","mate-one"] and
+        .data == {schema:"fm-bearings-assignment.v1",question:"gated-one",owner:"mate-one",agent:"eleusis"})
+  ' >/dev/null || fail "the helper selection did not queue one structured board answer: $out"
+
+  fm_test_require_lavish_codec "Bearings assignment capture decoding" || return 0
+  # Lavish poll uses an expanded TOON array for prompts with a layout target.
+  for format in tabular expanded; do
+    printf '%s' "$out" | jq --arg format "$format" -r '
+      .requests[0] as $request
+      | [($request | .data.agent = "spur"),$request,$request,
+        ($request | .data.owner = "(main)" | .data.agent = "spur"),
+        {tag:"choice",text:"Ordinary answer",prompt:"Answer",data:{
+          schema:"fm-bearings-answer.v1",question:$request.data.question,selection:"yes",note:""}},
+        {tag:"choice",text:"Reconcile",prompt:"Reconcile",data:{
+          schema:"fm-bearings-answer.v1",question:"recheck",selection:"reconcile",note:"still open"}},
+        ($request | .data.owner = null),
+        ($request | .data.owner = "  "),
+        ($request | del(.data.owner)),
+        ($request | .data.agent = "invalid/agent"),
+        ($request | .data.agent = 42),
+        ($request | .tag = "message" | .data.agent = "spur")]
+      | map(.prompt += ("\n\nContext data:\n" + (.data | tojson)))
+      | "session:\n  status: feedback",
+        (if $format == "tabular" then
+          "prompts[\(length)]{uid,prompt,selector,tag,text}:",
+          (.[] | "  " + (["request",.prompt,"form",.tag,.text] | map(@json) | join(",")))
+        else
+          "prompts[\(length + 1)]:",
+          (.[] | "  - uid: request\n    prompt: \(.prompt | @json)\n    selector: form\n    tag: \(.tag)\n    text: \(.text | @json)"),
+          "  - uid: layout\n    target:\n      tag: choice\n      warnings[1]{id,selector}:\n        fix-1,body\n    selector: body\n    tag: layout-warnings\n    text: Layout fix\n    prompt: Fix the overflow."
+        end),
+        "next_step: Review the feedback"
+    ' > "$capture"
+    assignments=$("$adapter" assignments "$capture") || fail "assignment capture could not be read"
+    printf '%s\n' "$assignments" | jq -se '
+      . == [{question:"gated-one",owner:"mate-one",agent:"spur"},
+        {question:"gated-one",owner:"mate-one",agent:"eleusis"},
+        {question:"gated-one",owner:"mate-one",agent:"eleusis"},
+        {question:"gated-one",owner:"(main)",agent:"spur"}]
+    ' >/dev/null || fail "$format assignment projection returned unexpected requests: $assignments"
+    answers=$("$adapter" answers "$capture") || fail "ordinary capture could not be read"
+    [ "$answers" = $'gated-one\tyes\tOrdinary answer' ] ||
+      fail "$format assignment entered the keyed-answer intake: $answers"
+    [ "$("$adapter" reconciles "$capture")" = $'recheck\tstill open' ] ||
+      fail "$format reconciliation did not isolate its own choice"
+    view=$("$adapter" read "$capture") || fail "$format capture could not be presented"
+    assert_contains "$view" "complete: yes" "$format presentation lost a prompt"
+    if [ "$format" = expanded ]; then
+      assert_contains "$view" $'element_uid: layout\nelement_selector: body\ntag: layout-warnings' "nested target obscured the layout prompt"
+      assert_contains "$view" "| Fix the overflow." "layout instructions were lost"
+    fi
+  done
+  pass "roster role requests survive both Lavish formats outside the hold intakes"
+}
+
+test_charted_helper_wake_requires_explicit_resolution() (
+  fm_test_require_lavish_codec "Bearings helper wake acknowledgement" || return 0
+  export FM_HOME="$TMP_ROOT/helper-wake" FM_STATE_OVERRIDE="$TMP_ROOT/helper-wake/state"
+  export FM_PROCEVENT_CLAIM_ROOT="$FM_HOME/procevent-claims"
+  local board sid capture result output rc=0
+  local runner="$ROOT/bin/fm-procevent.sh" adapter="$ROOT/bin/fm-procevent-lavish.sh"
+  fm_test_track_procevent_home "$FM_HOME" "$FM_PROCEVENT_CLAIM_ROOT"
+  mkdir -p "$FM_HOME/.lavish" "$FM_STATE_OVERRIDE"
+  board=$("$BOARD" path) || fail "could not locate the canonical board"
+  : > "$board"
+  sid=$("$adapter" source-id "$board") || fail "could not identify the canonical board source"
+  capture="$FM_HOME/poll-response"
+  cat > "$capture" <<'EOF'
+session:
+  status: feedback
+prompts[1]{uid,prompt,selector,tag,text}:
+  1,"Request help\n\nContext data:\n{\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"export-check\",\"owner\":\"(main)\",\"agent\":\"rakazo\"}",form,choice,"Confirm export prerequisite → rakazo"
+next_step: Review the feedback
+EOF
+  "$runner" register lavish "$sid" -- /bin/cat "$capture" >/dev/null ||
+    fail "could not register the captured poll response"
+  "$runner" start "$sid" >/dev/null || fail "could not capture the helper selection"
+  result="$FM_STATE_OVERRIDE/procevent-inbox/$sid.1.result"
+  output=$("$adapter" read "$result") || fail "could not read the captured result"
+  assert_contains "$output" "complete: yes" "the helper capture should be complete"
+  output=$("$adapter" assignments "$result") || fail "could not decode the helper request"
+  printf '%s\n' "$output" | jq -se '. == [{question:"export-check",owner:"(main)",agent:"rakazo"}]' >/dev/null ||
+    fail "the captured result did not contain the expected helper request"
+
+  output=$("$runner" handled "$sid" 1 2>&1) || rc=$?
+  assert_equals 1 "$rc" "plain acknowledgement retired a pending helper request: $output"
+  assert_absent "${result%.result}.handled" "the pending helper wake was marked handled"
+  assert_contains "$output" "trusted chat" "the refused acknowledgement did not direct the supervisor to confirmation"
+  printf '%s\n' "$output" | jq -Rse '
+    split("\n") | map(fromjson?) | . == [{question:"export-check",owner:"(main)",agent:"rakazo"}]
+  ' >/dev/null || fail "the refused acknowledgement did not surface the decoded helper request"
+
+  output=$("$runner" handled "$sid" 1 --assignments-resolved) || fail "could not acknowledge explicit resolution"
+  assert_equals "handled: $sid 1" "$output" "explicit resolution did not acknowledge the wake"
+  assert_equals "already-handled: $sid 1" "$("$runner" handled "$sid" 1)" "resolution was not idempotent"
+
+  printf 'session:\n  status: feedback\nprompts: []\nnext_step: Review the feedback\n' > "$capture"
+  "$runner" start "$sid" >/dev/null || fail "could not capture ordinary board feedback"
+  assert_equals "handled: $sid 2" "$("$runner" handled "$sid" 2)" "ordinary board feedback needs no explicit resolution"
+  pass "a Bearings helper wake stays pending until explicitly resolved"
+)
+
+test_incomplete_lavish_rows_do_not_reach_choice_intake() {
+  local capture adapter view assignments rc
+  fm_test_require_lavish_codec "Bearings partial capture decoding" || return 0
+  adapter="$ROOT/bin/fm-procevent-lavish.sh"
+  cat > "$TMP_ROOT/partial-expanded" <<'EOF'
+session:
+  status: feedback
+prompts[2]:
+  - uid: kept
+    prompt: "Context data: {\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"kept\",\"owner\":\"(main)\",\"agent\":\"spur\"}"
+    selector: form
+    tag: choice
+    text: Kept assignment
+  - uid: cut-off
+    prompt: "Context data: {\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"cut-off\",\"owner\":\"(main)\",\"agent\":\"spur\"}"
+    tag: choice
+    text: Missing selector
+next_step: Review the feedback
+EOF
+  cat > "$TMP_ROOT/partial-expanded-value" <<'EOF'
+session:
+  status: feedback
+prompts[2]:
+  - uid: kept
+    prompt: "Context data: {\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"kept\",\"owner\":\"(main)\",\"agent\":\"spur\"}"
+    selector: form
+    tag: choice
+    text: Kept assignment
+  - uid: cut-off
+    prompt: "Context data: {\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"cut-off\",\"owner\":\"(main)\",\"agent\":\"spur\"}"
+    selector: form
+    tag: choice
+    text: "Incomplete
+EOF
+  cat > "$TMP_ROOT/partial-tabular" <<'EOF'
+session:
+  status: feedback
+prompts[2]{uid,prompt,selector,tag,text}:
+  kept,"Context data: {\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"kept\",\"owner\":\"(main)\",\"agent\":\"spur\"}",form,choice,Kept assignment
+  cut-off,"Context data: {\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"cut-off\",\"owner\":\"(main)\",\"agent\":\"spur\"}",form,choice,"Incomplete
+EOF
+  cat > "$TMP_ROOT/partial-target" <<'EOF'
+session:
+  status: feedback
+prompts[2]:
+  - uid: kept
+    prompt: "Context data: {\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"kept\",\"owner\":\"(main)\",\"agent\":\"spur\"}"
+    selector: form
+    tag: choice
+    text: Kept assignment
+  - uid: cut-off
+    prompt: "Context data: {\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"cut-off\",\"owner\":\"(main)\",\"agent\":\"spur\"}"
+    selector: form
+    tag: choice
+    text: Cut-off assignment
+    target:
+      type: layout-warnings
+      warnings[2]{id,selector}:
+        fix-1,body
+EOF
+  for capture in "$TMP_ROOT"/partial-*; do
+    rc=0
+    view=$("$adapter" read "$capture") || rc=$?
+    assert_equals 3 "$rc" "partial capture did not report an incomplete read: $capture"
+    assert_contains "$view" $'declared_items: 2\npresented_items: 1' "partial capture did not isolate the complete row: $capture"
+    assert_contains "$view" "complete: no" "partial capture was certified complete: $capture"
+    assignments=$("$adapter" assignments "$capture") || fail "partial capture could not be read"
+    printf '%s\n' "$assignments" | jq -se '. == [{question:"kept",owner:"(main)",agent:"spur"}]' >/dev/null ||
+      fail "partial capture did not isolate the complete assignment: $assignments"
+  done
+  pass "partial expanded and tabular rows are reported and excluded from choice intake"
+}
+
+test_feedback_requires_a_declared_prompt_block() {
+  local capture adapter view rc=0
+  fm_test_require_lavish_codec "Bearings prompt block framing" || return 0
+  capture="$TMP_ROOT/feedback-frame"
+  adapter="$ROOT/bin/fm-procevent-lavish.sh"
+  printf 'session:\n  status: feedback\ndom_snapshot: ""\n' > "$capture"
+  view=$("$adapter" read "$capture") || rc=$?
+  assert_equals 3 "$rc" "capture without a prompt header did not report an incomplete read"
+  assert_contains "$view" "declared_items: unknown" "missing prompt block appeared empty"
+  assert_contains "$view" "complete: no" "feedback without a prompt header appeared complete"
+
+  printf 'prompts: []\nnext_step: Review the feedback\n' >> "$capture"
+  view=$("$adapter" read "$capture") || fail "feedback with an empty array could not be presented"
+  assert_contains "$view" $'declared_items: 0\npresented_items: 0\nmalformed_items: 0\ncomplete: yes' \
+    "explicit empty Lavish prompt array did not produce a complete empty view"
+  pass "Lavish feedback distinguishes an explicit empty array from a missing prompt block"
 }
 
 test_every_charted_badge_opens_its_row() {
@@ -666,6 +913,11 @@ test_an_underway_row_leads_with_the_task_name_and_keeps_its_run_status
 test_an_underway_identifier_label_is_not_replaced_by_run_status
 test_charted_next_reads_newest_filed_first
 test_charted_rows_without_a_filed_date_follow_the_dated_rows_in_payload_order
+test_charted_next_sorts_four_labeled_tiers_and_keeps_warnings_unranked
+test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path
+test_charted_helper_wake_requires_explicit_resolution
+test_incomplete_lavish_rows_do_not_reach_choice_intake
+test_feedback_requires_a_declared_prompt_block
 test_a_warning_row_reads_as_a_repair_not_as_queued_work
 test_warnings_are_excluded_from_the_charted_next_count
 test_a_board_of_only_warnings_still_reports_nothing_queued

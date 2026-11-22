@@ -90,9 +90,10 @@ Board answers are acted on later under the normal authority rules; this skill's 
 ## Lavish board mode
 
 `/bearings lavish` adds an interactive fleet board and its linked companion detail page beside the unchanged chat digest; the captain answers Captain's Call items on the board instead of replying in chat.
-`bin/fm-bearings-board.sh` owns every board mechanic - the stable board path, the static sibling detail page linked from the board's navigation and its Charted Next and Recently Landed headers, the optional Cursor Canvas export, fm-bearings-board.v1 payload validation, template injection, live Lavish session verification and ended-session reopening, the any-origin answer binding, and listener registration - so the per-invocation work is composing the payload and running its `build`.
+`bin/fm-bearings-board.sh` owns every board mechanic - the stable board path, the static sibling detail page linked from the board's navigation and its Charted Next and Recently Landed headers, the optional Cursor Canvas export, fm-bearings-board.v1 payload validation, template injection, live Lavish session verification and ended-session reopening, the any-origin answer binding, and listener registration.
 
-Compose the payload from the same snapshot with the same ranking judgment as the chat digest, plus these board rules:
+Use the fleet snapshot as source data and compose a separate JSON file with schema `fm-bearings-board.v1`.
+Apply the same ranking judgment as the chat digest and follow these board rules:
 
 - A Captain's Call decision key is the captain-held TASK ID from `decisions_open` (legacy `<origin>-decision-<key>` rows are already task ids); a merge card's key is `merge.<task-id>`; the Charted Next dispatch picker's key is `dispatch.charted`.
 - Before carding a hold, check that its SUBJECT has not already landed, and omit it when it has. `build` drops a card whose task or PR appears in the payload's own landed rows, and one whose task is no longer an open captain call. When a hold waits on one specific PR, put that PR in the card's `pr_url`. When it concerns a published version, put the artifact and numeric three-part version in the card's structured `subject`; landed rows for releases carry the same identity, and a matching or newer version drops the card. Identity matching is structured only, so verify any subject without one of these identities against current reality before carding it.
@@ -101,8 +102,10 @@ Compose the payload from the same snapshot with the same ranking judgment as the
 - Decision cards carry agent-authored copy: a short noun-phrase title, one-line `about` and `decide` context rows, and option labels with hints, with the recommended option marked.
 - Card `type` (decision, merge, credential) is your composing judgment from the row's content; no backlog field types a card for you.
 - When the card's task is a captain-gated WORK item (the answer should free it to proceed rather than complete it), set the card's `close: "release"` so the answer lifts the hold instead of closing the task; question-shaped items omit it.
-- A Charted Next row's optional `kind` separates work from alarms: omit it (or set `"queued"`) for real queued work, and set `"warning"` on every action-free fleet-integrity notice - the `(main-inventory)` gate, the `(return-catchup)` gate, an unavailable secondmate home, and an inventory-mismatch repair notice. The board badges a warning row `needs repair`, explains it as a notice rather than work when opened, never collapses it, and leaves it out of the Charted Next count, so those rows never read as dispatchable queued work.
-- In lavish mode also pass the snapshot's `--all-queued` opt-in and carry every queued and warning row it returns; never truncate Charted Next yourself, because the board shows the newest queued rows and reveals the rest in place behind its own control.
+- A Charted Next row's optional `kind` separates work from alarms: omit it (or set `"queued"`) for work rows, including active work with a hold, and set `"warning"` on every action-free fleet-integrity notice - the `(main-inventory)` gate, the `(return-catchup)` gate, an unavailable secondmate home, and an inventory-mismatch repair notice.
+  The board badges a warning row `needs repair`, explains it as a notice rather than work when opened, never collapses it, and leaves it out of the Charted Next count.
+- In lavish mode also pass the snapshot's `--all-queued` opt-in and carry every work and warning row it returns.
+  The board reveals overflow in place.
   `charted_more` counts queued rows the snapshot still omitted, while `charted_warning_more` counts omitted warning rows only; keep both counts separate.
 - Every Charted Next row's badge opens into an explanation built from its `reason`, `dispatchable`, and `filed` fields, so keep each gate's reason whole, never shortened further.
   Lead a held row's reason with exactly one structured note - `blocked-by <ids>` from the gate's blockers, or the `until <date>` or `held <N>d` a captain hold's reason already starts with - then `: ` and any remaining reason.
@@ -115,22 +118,37 @@ Compose the payload from the same snapshot with the same ranking judgment as the
   Set `dispatchable: true` only on work nothing holds, which the board badges `ready` instead of `waiting`.
 - Every Underway row copies the task-identifying `in_flight.name` from the snapshot into an explicit `name` field, which the board leads with while keeping the run status on its second line.
   The snapshot command's header owns its durable-title-or-id normalization; never replace the projected label with run status or invent another label.
-- Every Charted Next row copies the snapshot gate's durable filed date into `filed`, and the board orders the section by it, newest filed first.
+- Every Charted Next row copies the snapshot gate's durable filed date into `filed`.
   Follow `bin/fm-bearings-board.sh`'s payload contract for the accepted format.
-  Omit it or pass null for a row with no durable filed date - the main-inventory or return-catchup warning, an unavailable secondmate home, or a queued row filed before dates were recorded - and the board keeps those rows in payload order after every dated row.
+  Omit it or pass null when no durable filed date is recorded.
+- Assign `tier` to every non-warning Charted Next row using the urgency and currency matrix in the payload contract in `bin/fm-bearings-board.sh`, including active work with blocked, dated, or aged holds in the main and secondmate homes.
+  Read due dates, the hold kind and any recorded hold-until, and reverse blockers from the current authoritative records.
+  Use the filed date and latest recorded substantive activity for currency, such as a progress update or a changed prerequisite, excluding snapshot refreshes and board views.
+  Unknown inputs contribute no signal, and warnings receive no tier.
+- Set `assignment_eligible: true` only when the authoritative backlog for the snapshot gate's owner confirms the task is still queued with a specific unmet start condition.
+  Leave it false or omit it when the state or condition is unknown, including for ready work, active work with a deferred hold, and repair notices.
+- Resolve this home's `config/packet-router-inbox` setting to its canonical existing `inbox/new` directory.
+  Read `registry/SEATS.md` directly under the root that contains that `inbox`.
+  Populate `continuum_agents` with eligible recipient ids from the role column alone.
+  Leave the roster absent or empty if the inbox, its registry, or eligible routes cannot be verified.
 - For the companion detail page and optional canvas export, every Charted Next row also copies `waits_since`, `owner`, `pr_url`, `report`, and `report_remote` from its snapshot `gates` entry, plus `blockers` as the `{id, title}` entries from `gate_blockers` matching that gate's `id` and `owner`.
   Every Recently Landed row likewise copies `filed`, `landed_on`, `pr_url`, `report`, and `report_remote` from its snapshot `landed` entry.
   Omit or pass null for any of those fields when the snapshot has no recorded value, and never invent or scrape them from prose.
 - Every Captain's Call item and every Underway, Recently Landed, and Charted Next row carries an explicit `repo` field. Fill it from the snapshot and task records wherever known; use null or an empty string only as the deliberate genuinely-no-repo marker, in which case the template may show the internal id. Ids otherwise stay in the payload only as the routing channel, and any prose you compose names blockers in plain words.
 
-Run `build` once after composing the payload.
+Run `bin/fm-bearings-board.sh build <data.json>` once, passing the path to the composed board payload as its argument.
 Its serve-first sequence publishes the board, establishes and verifies its Lavish session with `lavish-axi`, reopens an ended session when necessary, and only then binds the answer source and proves a live polling listener; use the session URL it prints in the chat digest.
 Never bind or arm the board before its session is listed open.
 Never run `lavish-axi poll` for the board yourself: the armed source's supervised runner owns the blocking poll, and both the build and the watcher's ordinary reconcile repair a missing listener, so no conversational turn ever blocks on the board.
 
 ### Handling a board wake
 
-A board answer arrives as an ordinary `procevent lavish <source-id> <sequence>` check wake. Identify it by comparing the wake source id with `bin/fm-procevent-lavish.sh source-id "$(bin/fm-bearings-board.sh path)"`, regardless of which answer kinds the result contains; then load `process-event-sources` and follow its contract for the result read, adapter classification, and the handled acknowledgement.
+A board answer arrives as an ordinary `procevent lavish <source-id> <sequence>` check wake.
+Identify it by comparing the wake source id with `bin/fm-procevent-lavish.sh source-id "$(bin/fm-bearings-board.sh path)"`, regardless of which answer kinds the result contains.
+Load `process-event-sources` for the result read, adapter classification, and handled acknowledgement.
+Run `bin/fm-procevent-lavish.sh assignments <result-file>` on the same captured result before deciding whether to acknowledge the wake.
+Handle every decoded helper request, even when the ordinary read shows only a choice label.
+
 Decision answers need no routing from you: the runner feeds the board's binding into `bin/fm-captain-hold.sh`'s one keyed-answer intake, which closes or releases each answered captain-held task at answer time; reconcile any `skipped:` key yourself with a direct `answer`, and when the captain's answer is "later", record it as a deferral with `bin/fm-captain-hold.sh hold <id> --reason "<reason>" --until <date>` instead of a closure.
 A current structured Reconcile selection closes nothing: the versioned board context carries its exact selected option separately from any typed note, and the adapter routes that selection only into a durable re-check request while preserving the note as provenance.
 The rollout-compatible old context still feeds ordinary non-reconcile answers, but its bare or separator-annotated reconcile values and every structurally uncertain choice feed neither intake and remain announced for deliberate handling.
@@ -138,10 +156,36 @@ Verify the call's latest state, then retire the request through `bin/fm-captain-
 Both outcomes refuse without that pending board-created request, and `bin/fm-captain-hold.sh reconcile list` names every request still outstanding.
 A remote-secondmate card whose task is absent from the main backlog remains on the board unchanged, but its reconcile request is refused in the main home until the separately tracked owner-aware routing follow-up can query and mutate the authoritative secondmate home; handle the announced capture without claiming that a request or reconciliation succeeded.
 `captain-hold-lifecycle` owns why a reconcile may never be recorded as the captain's answer.
-Route the non-decision keys yourself:
+Route the remaining board actions yourself:
 
 - `merge.<task-id>` is the captain's explicit merge order; follow the merge ruling below.
 - `dispatch.charted` carries comma-separated task ids the captain picked to start now; verify each id against the current backlog - still queued, blocker and time gate actually clear - then dispatch through the normal lifecycle, and report any id that no longer qualifies instead of forcing it.
+
+#### Charted Next helper requests
+
+For each helper request, resolve the captured task id and owner to the authoritative backlog record, verify it is still queued with an unmet start condition, and verify the selected role against the current eligible roster for the canonical configured inbox as described above.
+If the task, owner, role, inbox, or unmet condition cannot be confirmed, report what prevented routing.
+Treat the board submission as a request to seek authorization.
+Preview the advisory note in trusted chat with the exact task, owner, recipient role, and prerequisite information to be shared, including any open blocker.
+Ask whether to send that note and end the turn with the wake pending.
+Wait for a separate explicit confirmation from the captain in trusted chat before publishing.
+Keep any drafts or pending confirmation state private and outside the delivery inbox.
+After receiving that confirmation in the trusted chat, check the task again in the owner's authoritative backlog immediately before sending.
+Send only if the task is still queued with a specific unmet start condition, the task, owner, role, and information to share still match the confirmation, and the role is still eligible at the same canonical configured inbox.
+If any check fails, report what prevented routing and skip the send.
+Firstmate sends the confirmed advisory note through that verified inbox with the confirmed id as `role_target`, asking the role to help with the confirmed prerequisites and return evidence or recommendations.
+Include the source id, sequence, and request's position in the `assignments` output with the task identity in its provenance.
+Check that provenance before resending an individual request from a replayed capture.
+The helper's response is input for Firstmate to verify against the task's existing gates.
+The assignment and the response carry no authority to close or release a hold, change prerequisites, or dispatch the task.
+
+#### Acknowledge the board wake
+
+Keep the wake pending while any decoded helper request awaits confirmation.
+After every helper request and all other captured actions have been handled, acknowledge the wake with `bin/fm-procevent.sh handled <source-id> <sequence> --assignments-resolved` if the capture contained decoded helper requests.
+For a capture without decoded helper requests, use the ordinary `handled` command in `process-event-sources` after handling all captured actions.
+Report acknowledgement only after the command succeeds with `handled:` or `already-handled:`.
+Leave the Bearings source listening for later submissions.
 
 After handling, rebuild the board from a fresh snapshot so acted-on items leave Captain's Call, and echo every action taken in chat so the board and chat never diverge silently.
 

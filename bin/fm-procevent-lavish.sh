@@ -8,6 +8,7 @@
 #   fm-procevent-lavish.sh silent <result-file>
 #   fm-procevent-lavish.sh answers <result-file>
 #   fm-procevent-lavish.sh reconciles <result-file>
+#   fm-procevent-lavish.sh assignments <result-file>
 #   fm-procevent-lavish.sh read <result-file>
 #   fm-procevent-lavish.sh source-id <artifact.html>
 #   fm-procevent-lavish.sh retire <artifact.html>
@@ -64,14 +65,26 @@
 # Choice commands use only rows tagged `choice`. Freeform captain messages
 # must never be able to forge a decision key.
 #
-# `read`, `answers`, and `reconciles` use the same TOON decoder, including for
-# tabular and list prompts. Node.js loads the codec used by lavish-axi on PATH.
+# `read`, `answers`, `reconciles`, and `assignments` use the same TOON decoder,
+# including for tabular and list prompts. Node.js loads the codec used by
+# lavish-axi on PATH.
+# Expanded list rows must supply scalar `uid`, `prompt`, `selector`, `tag`, and
+# `text` fields.
 # `read` exits 0 for a complete capture or 3 for an incomplete capture, with
 # recoverable rows in either case. Legacy tabular prose recovery is for display.
-# The choice commands exit 0 for a complete prompt block or a complete
+# `answers` and `reconciles` exit 0 for a complete prompt block or a complete
 # no-feedback response. If only the prompt block is complete, the commands
 # write eligible choices to stdout and warn on stderr. If neither condition
 # holds, they exit 3 without choice rows. An unreadable capture yields exit 1.
+#
+# `assignments` prints one JSON object per decoded Charted Next helper request,
+# in capture order, including recoverable requests from incomplete captures.
+# It exits 0 after decoding, with a warning on stderr for incomplete captures,
+# or 1 on a capture or decoder error. Use `read` for the completeness verdict.
+# The fm-bearings-assignment.v1 context contains `question` (task id), `owner`
+# (non-blank home string), and `agent` (Packet Router role id). Both ids are
+# ASCII slugs of 1-128 characters. This command feeds neither hold intake.
+# The Bearings skill owns the supervisor's routing of the captured request.
 #
 # The listener uses the published poll command, verified against 0.1.45:
 #   Usage: lavish-axi poll <html-file> [--agent-reply "..."]
@@ -413,14 +426,17 @@ cmd_choice_rows() {
     }
     unless ($capture->{complete} || $capture->{prompts_complete}) {
       warn "incomplete Lavish prompt capture: $path\n";
-      exit 3;
+      exit 3 unless $selection eq "assignments";
+    } elsif (!$capture->{complete}) {
+      warn "incomplete Lavish prompt capture: $path (prompt block complete)\n";
     }
-    warn "incomplete Lavish prompt capture: $path (prompt block complete)\n"
-      unless $capture->{complete};
     binmode STDOUT, ":encoding(UTF-8)" or die "cannot set UTF-8 output: $!\n";
     exit 0 unless ($capture->{kind} // "") eq "prompts";
     my %seen;
     my @choices;
+    my $slug = qr/\A[A-Za-z0-9._-]{1,128}\z/;
+    # JSON numbers can match a slug regex after Perl stringifies them.
+    my $is_string = sub { defined($_[0]) && !ref($_[0]) && encode_json([$_[0]]) =~ /\A\["/ };
     for my $row (@{ $capture->{rows} }) {
       my %f = %$row;
       next unless defined $f{tag} && $f{tag} eq "choice";
@@ -431,6 +447,15 @@ cmd_choice_rows() {
       my $ctx = $1;
       my $data = eval { JSON::PP->new->decode($ctx) };
       next unless ref($data) eq "HASH";
+      if ($selection eq "assignments") {
+        next unless ($data->{schema} // "") eq "fm-bearings-assignment.v1";
+        my ($task, $owner, $agent) = @{$data}{qw(question owner agent)};
+        next unless $is_string->($task) && $task =~ $slug;
+        next unless $is_string->($owner) && $owner =~ /\S/;
+        next unless $is_string->($agent) && $agent =~ $slug;
+        print JSON::PP->new->encode({ question => $task, owner => $owner, agent => $agent }), "\n";
+        next;
+      }
       my ($key, $selected, $note, $answer, $legacy);
       if (defined($data->{schema}) && !ref($data->{schema})
           && $data->{schema} eq "fm-bearings-answer.v1") {
@@ -605,6 +630,7 @@ case "${1-}" in
   silent)    shift; cmd_silent "$@" ;;
   answers)   shift; cmd_answers "$@" ;;
   reconciles) shift; cmd_reconciles "$@" ;;
+  assignments) shift; cmd_choice_rows assignments "$@" ;;
   read)      shift; cmd_read "$@" ;;
   ''|-h|--help|help) usage ;;
   *) die "unknown command: $1" ;;
