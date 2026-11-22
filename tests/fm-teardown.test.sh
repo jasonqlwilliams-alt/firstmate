@@ -3406,16 +3406,18 @@ test_leaked_tasktmp_process_is_reaped() {
   pass "a leaked descendant process rooted under the task's per-task tasktmp is reaped by teardown too"
 }
 
-hide_teardown_ancestor() {
+configure_teardown_ancestry_ps() {
   local case_dir=$1
   cat > "$case_dir/fakebin/ps" <<'SH'
 #!/usr/bin/env bash
 set -o pipefail
-if [ "$*" = '-axo pid=,ppid=' ]; then
-  "$REAL_PS_FOR_TEST" "$@" | awk -v hidden="$FM_TEST_HIDDEN_ANCESTOR" '$1 != hidden'
-else
-  exec "$REAL_PS_FOR_TEST" "$@"
-fi
+case "$*" in
+  '-axo pid=,ppid=') exit 1 ;;
+  '-A -o pid= -o ppid=')
+    "$REAL_PS_FOR_TEST" "$@" | awk -v hidden="${FM_TEST_HIDDEN_ANCESTOR:-}" '$1 != hidden'
+    ;;
+  *) exec "$REAL_PS_FOR_TEST" "$@" ;;
+esac
 SH
   chmod +x "$case_dir/fakebin/ps"
 }
@@ -3446,8 +3448,8 @@ SH
   chmod +x "$case_dir/fakebin/find"
   if [ "$visibility" = hidden ]; then
     export FM_TEST_HIDDEN_ANCESTOR=$$
-    hide_teardown_ancestor "$case_dir"
   fi
+  configure_teardown_ancestry_ps "$case_dir"
 
   mkdir -p "$case_dir/wt/$nested" "$case_dir/$sibling" "$case_dir/tasktmp"
   printf 'tasktmp=%s\n' "$case_dir/tasktmp" >> "$case_dir/state/task-x1.meta"
@@ -3498,6 +3500,40 @@ SH
   pass "Linux teardown without lsof scopes reaping to its owned worktree ($visibility ancestry)"
 )
 
+test_proc_cwd_read_failure_preserves_copy() (
+  if [ "$(uname -s)" != Linux ]; then
+    printf 'skip: unreadable /proc cwd fixture requires Linux\n'
+    return 0
+  fi
+  local case_dir path_without_lsof rc=0 leak_pid i
+  case_dir=$(make_case proc-cwd-read-failure)
+  write_meta "$case_dir" no-mistakes ship
+  land_shippable_commit "$case_dir"
+  path_without_lsof=$(make_path_without_lsof "$case_dir")
+  ( cd "$case_dir/wt" && exec sleep 300 ) &
+  leak_pid=$!
+  trap 'kill -KILL "$leak_pid" 2>/dev/null || true; wait "$leak_pid" 2>/dev/null || true' EXIT
+  for ((i=0; i<100; i++)); do
+    [[ ! "/proc/$leak_pid/cwd" -ef "$case_dir/wt" ]] || break
+    sleep 0.05
+  done
+  [ "$i" -lt 100 ] || fail 'proc-cwd-read-failure: leak did not enter the worktree'
+
+  printf '#!/usr/bin/env bash\n[ "$1" != %q ] || exit 1\nexec %q "$@"\n' \
+    "/proc/$leak_pid/cwd" "$path_without_lsof/readlink" > "$case_dir/fakebin/readlink"
+  printf '#!/usr/bin/env bash\n: > %q\n' "$case_dir/returned" > "$case_dir/fakebin/treehouse"
+  chmod +x "$case_dir/fakebin/readlink"
+
+  FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  expect_code 1 "$rc" 'proc-cwd-read-failure: cleanup should refuse'
+  assert_grep '(/proc failed)' "$case_dir/stderr" 'proc-cwd-read-failure: missing scan refusal'
+  assert_present "$case_dir/state/task-x1.meta" 'proc-cwd-read-failure: cleanup retired task metadata'
+  assert_absent "$case_dir/returned" 'proc-cwd-read-failure: cleanup returned the worktree'
+  kill -0 "$leak_pid" 2>/dev/null || fail 'proc-cwd-read-failure: cleanup signalled the leak'
+  pass 'a failed cwd read for a live directory refuses teardown'
+)
+
 test_hidden_intermediate_parent_refuses_reap() (
   if [ "$(uname -s)" != Linux ]; then
     printf 'skip: hidden parent fixture requires Linux\n'
@@ -3507,7 +3543,7 @@ test_hidden_intermediate_parent_refuses_reap() (
   case_dir=$(make_case "reap-hidden-parent-$scanner")
   write_meta "$case_dir" no-mistakes ship
   land_shippable_commit "$case_dir"
-  hide_teardown_ancestor "$case_dir"
+  configure_teardown_ancestry_ps "$case_dir"
   path_without_lsof=$(make_path_without_lsof "$case_dir")
   if [ "$scanner" = lsof ]; then
     cat > "$case_dir/fakebin/lsof" <<'SH'
@@ -3558,7 +3594,7 @@ test_reparented_teardown_preserves_original_caller() (
   land_shippable_commit "$case_dir"
   mkfifo "$case_dir/result" || fail 'reparented teardown: could not create result pipe'
   if [ "$visibility" = hidden ]; then
-    hide_teardown_ancestor "$case_dir"
+    configure_teardown_ancestry_ps "$case_dir"
   fi
 
   cat > "$case_dir/fakebin/lsof" <<'SH'
@@ -4432,6 +4468,7 @@ SH
 test_leaked_worktree_process_is_reaped
 test_lsof_absent_reaps_detached_linux_process visible || exit 1
 test_lsof_absent_reaps_detached_linux_process hidden || exit 1
+test_proc_cwd_read_failure_preserves_copy || exit 1
 test_hidden_intermediate_parent_refuses_reap proc || exit 1
 test_hidden_intermediate_parent_refuses_reap lsof || exit 1
 test_reparented_teardown_preserves_original_caller visible || exit 1

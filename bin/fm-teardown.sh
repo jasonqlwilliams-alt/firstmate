@@ -445,7 +445,7 @@ fi
 task_reap_filter_pids() {  # <previously-protected-pids> <candidate-pids>
   local parents
   case "$1" in 'incomplete '*) return 1 ;; esac
-  parents=$(ps -axo pid=,ppid= 2>/dev/null) || return 1
+  parents=$(ps -A -o pid= -o ppid= 2>/dev/null) || return 1
   printf '%s\n%s\n' "$parents" "$2" | awk -v self="$$" -v previous="$1" '
     NF == 2 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { parent[$1] = $2 }
     /^[0-9]+$/ { candidates[$0] = 1; matched = 1 }
@@ -2034,6 +2034,10 @@ task_cwd_scanner() {
   fi
 }
 
+task_cwd_is_under_root() {  # <root> <cwd>
+  [ "$1" = "$2" ] || path_is_ancestor_of "$1" "$2"
+}
+
 # Use a single cwd listing, without lsof's recursive +D file-tree walk.
 lsof_pids_with_cwd_under() {  # <resolved-dir>...
   local dir out pid path line
@@ -2051,7 +2055,7 @@ lsof_pids_with_cwd_under() {  # <resolved-dir>...
         [ -n "$pid" ] || return 1
         path=${line#n}
         for dir in "$@"; do
-          if [ "$path" = "$dir" ] || path_is_ancestor_of "$dir" "$path"; then
+          if task_cwd_is_under_root "$dir" "$path"; then
             printf '%s\n' "$pid"
             break
           fi
@@ -2073,10 +2077,13 @@ proc_pids_with_cwd_under() {  # <resolved-worktree>
   for proc; do
     pid=${proc##*/}
     case "$pid" in *[!0-9]*) continue ;; esac
-    cwd=$(readlink "$proc/cwd" 2>/dev/null && printf '.') || continue
-    case "${cwd%$'\n.'}" in
-      "$dir"|"$dir/"*) printf '%s\n' "$pid" ;;
-    esac
+    if ! cwd=$(readlink "$proc/cwd" 2>/dev/null && printf '.'); then
+      [ ! -d "$proc/cwd" ] || return 1
+      continue
+    fi
+    if task_cwd_is_under_root "$dir" "${cwd%$'\n.'}"; then
+      printf '%s\n' "$pid"
+    fi
   done
 }
 
