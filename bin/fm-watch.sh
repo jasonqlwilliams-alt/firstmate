@@ -2350,7 +2350,9 @@ EOF
     # this guard: reaching it would require backlog reads for windows this gate
     # deliberately skips, putting that read on the ordinary poll hot path.
     if [ "$kind" = secondmate ] && ! status_is_paused_or_captain_held "$last"; then
-      check_recorded_endpoint "$backend" "$w" "$meta" "$key" "$missing_marker" || continue
+      if [ "$backend" != herdr ] || [ "$herdr_meta" != "$meta" ] || [ -e "$missing_marker" ]; then
+        check_recorded_endpoint "$backend" "$w" "$meta" "$key" "$missing_marker" || continue
+      fi
       seen="$seen|$w|"
       continue
     fi

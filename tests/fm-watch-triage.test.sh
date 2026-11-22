@@ -2362,6 +2362,8 @@ SH
     || fail "could not start the similarly named tmux session"
   printf 'window=%s\nbackend=tmux\nkind=secondmate\nharness=codex\nspawn_gen=first\n' "$window" > "$state/mate.meta"
   printf 'window=remote:peer\nbackend=tmux\nkind=secondmate\nremote_host=another-host\n' > "$state/peer.meta"
+  printf 'paused: awaiting an upstream release\n' > "$state/peer.status"
+  seen_sig "$state/peer.status" > "$state/.seen-peer_status"
   printf 'working: idle under the parent\n' > "$state/mate.status"
   env "${watch_env[@]}" "$WATCH" > "$out" & pid=$!
   wait_for_exit "$pid" 150 || fail "the second mate status did not surface: $(cat "$out")"
@@ -2398,6 +2400,43 @@ SH
   [ ! -s "$state/.wake-queue" ] || fail "later polls re-reported the lost second mate"
   reap "$pid"; pid=''
   pass "real tmux: closing the recorded session raises one loss wake despite a similarly named live session"
+)
+
+test_idle_herdr_secondmate_reuses_identity_read() (
+  local dir state trace target=idle-mates:w1:p2 pid=''
+  command -v jq >/dev/null 2>&1 || { echo "skip: jq is required by the Herdr adapter"; return 0; }
+  dir=$(fm_test_tmproot fm-watch-idle-herdr) || fail "could not create the idle Herdr fixture"
+  trap '[ -z "$pid" ] || reap "$pid"' EXIT
+  state="$dir/home/state"; trace="$dir/pane-reads"
+  mkdir -p "$state" "$dir/bin"
+  touch "$state/home-summary.json"
+  cat > "$dir/bin/herdr" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'pane get w1:p2 --session idle-mates')
+    if beat=$(cat "$FM_STATE_OVERRIDE/.last-watcher-beat" 2>/dev/null); then
+      printf '%s\n' "$beat" >> "$FM_FAKE_HERDR_PANE_READS"
+    fi
+    jq -n --arg cwd "$FM_HOME" '{result:{pane:{pane_id:"w1:p2",cwd:$cwd}}}'
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$dir/bin/herdr"
+  fm_write_meta "$state/mate.meta" "window=$target" backend=herdr kind=secondmate "worktree=$dir/home" spawn_gen=first
+  PATH="$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_FAKE_HERDR_PANE_READS="$trace" \
+    FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$dir/watch.out" &
+  pid=$!
+  wait_poll_cycle "$state" "$pid" || fail "the idle Herdr mate did not stay quiet: $(cat "$dir/watch.out")"
+  [ -s "$trace" ] || fail "the watcher never read the idle mate's Herdr pane identity"
+  awk 'seen[$0]++ { exit 1 }' "$trace" || fail "the watcher repeated an idle Herdr identity read within a poll"
+
+  printf 'herdr:%s\tfirst\n' "$target" > "$state/mate.missing-endpoint"
+  wait_poll_cycle "$state" "$pid" || fail "the Herdr mate did not stay quiet with a loss marker: $(cat "$dir/watch.out")"
+  [ ! -e "$state/mate.missing-endpoint" ] || fail "the live idle Herdr mate did not re-arm endpoint loss"
+  [ ! -s "$state/.wake-queue" ] || fail "the live idle Herdr mate enqueued a wake"
+  reap "$pid"; pid=''
+  pass "herdr: a live idle second mate reuses its identity read and clears an existing loss marker"
 )
 
 install_fake_experimental_backends() {  # <fakebin>
@@ -5881,6 +5920,7 @@ test_exited_declared_pause_is_bounded_but_live_gate_surfaces
 test_missing_tmux_endpoint_surfaces_once || exit 1
 test_endpoint_loss_and_ordinary_stale_are_presented_independently || exit 1
 test_missing_secondmate_endpoint_surfaces_once || exit 1
+test_idle_herdr_secondmate_reuses_identity_read || exit 1
 test_experimental_backend_unreadable_endpoints_stay_quiet || exit 1
 test_zellij_endpoint_state_boundary || exit 1
 test_parked_retained_copy_suppresses_endpoint_loss || exit 1
