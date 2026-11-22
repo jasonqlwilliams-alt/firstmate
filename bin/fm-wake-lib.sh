@@ -2335,13 +2335,19 @@ fm_wake_restore_queue() {
   fi
 }
 
+# Presentation generally keeps the newest row per kind and key and groups all
+# heartbeats together. See docs/watcher-continuity.md#recorded-endpoint-loss for
+# the stale-wake exception. Deduplication leaves the durable queue unchanged.
 fm_wake_print_deduped() {
   local file=$1
-  awk -F '\t' '
+  _fm_wake_require_classify
+  awk -F '\t' -v gone="$FM_RECORDED_ENDPOINT_GONE" '
     NF >= 5 {
       dedupe = $3 SUBSEP $4
       if ($3 == "heartbeat") {
         dedupe = "heartbeat"
+      } else if ($3 == "stale" && $5 == "stale: " $4 " (" gone ")") {
+        dedupe = dedupe SUBSEP "endpoint-gone"
       }
       if (!(dedupe in seen)) {
         order[++count] = dedupe
