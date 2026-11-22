@@ -48,6 +48,7 @@ This includes an ordinary successful `/quit`: the endpoint and worktree remain a
 A subsequent exit against an already dead Codex process remains idempotent `already-stopped`; it does not retroactively certify the earlier quit.
 Claude exit never sends a key to Claude's background-tasks exit confirmation, which Claude draws instead of exiting while the session still runs background shell tasks.
 Exit checks for that exact dialog before typing `/exit`, before each Enter, and while it waits, and on sight reports the exit unconfirmed with the dialog named, so the second-mate restart reports that mate unreached; the restart's save request asks the mate to stop its own background tasks first, so the dialog normally never appears.
+If a backend probe stalls, the restart may report a timeout without naming the dialog.
 The steering doorbell refuses that dialog with its existing refusal outcomes, and the [Claude adapter reference](../.agents/skills/harness-adapters/references/harness/claude.md#background-tasks-exit-confirmation) owns the screen facts.
 A Claude submit Enter is retried only while the composer still proves it holds `/exit`.
 Interrupt never rewrites busy state as proof of its own success.

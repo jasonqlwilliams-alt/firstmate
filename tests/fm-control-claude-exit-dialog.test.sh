@@ -62,6 +62,29 @@ cleanup() {
 }
 trap cleanup EXIT
 
+if command -v perl >/dev/null 2>&1; then
+  cat > "$TMP_ROOT/DelayForkChild.pm" <<'PL'
+package DelayForkChild;
+BEGIN {
+  *CORE::GLOBAL::fork = sub () {
+    my $pid = CORE::fork();
+    select undef, undef, undef, 0.5 if defined($pid) && $pid == 0;
+    return $pid;
+  };
+}
+1;
+PL
+  rc=0
+  out=$(PERL5LIB="$TMP_ROOT" PERL5OPT=-MDelayForkChild bash -c '
+    . "$1"
+    fm_timeout_mechanism() { printf "perl\n"; }
+    fm_run_timed --kill 0.05 touch "$2"
+  ' _ "$ROOT/bin/fm-timeout-lib.sh" "$TMP_ROOT/late-timeout-child") || rc=$?
+  expect_code 124 "$rc" "Perl must report expiry while its child is starting: $out"
+  assert_absent "$TMP_ROOT/late-timeout-child" 'the Perl timeout allowed its child to act after expiry'
+  pass 'Perl timeout cancels the child even when it is delayed before exec'
+fi
+
 {
   head -n 1 "$FIXTURE"
   for ((task=1; task<=24; task++)); do printf '   · Bash(timer %s) · running\n' "$task"; done

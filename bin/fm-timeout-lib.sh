@@ -150,8 +150,27 @@ fm_run_timed() {  # [--kill] <seconds> <command...>
     timeout) fm_run_external_timeout timeout "$seconds" "$signal" "$@" ;;
     gtimeout) fm_run_external_timeout gtimeout "$seconds" "$signal" "$@" ;;
     perl)
-      perl -MTime::HiRes=alarm -e 'my ($t, $signal) = splice @ARGV, 0, 2; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0); exec @ARGV } local $SIG{ALRM} = sub { kill $signal, -$pid; if ($signal eq "TERM") { select undef, undef, undef, 0.2; kill "KILL", -$pid; } exit 124 }; alarm $t; waitpid $pid, 0; exit($? >> 8)' \
-        "$seconds" "$signal" "$@"
+      perl -MTime::HiRes=alarm -MPOSIX=setpgid -MErrno=EACCES,ESRCH -e '
+        my ($timeout, $signal) = splice @ARGV, 0, 2;
+        my $pid = fork;
+        die "fork failed: $!" unless defined $pid;
+        if (!$pid) {
+          defined setpgid(0, 0) or die "child setpgid failed: $!";
+          exec @ARGV or die "exec failed: $!";
+        }
+        defined setpgid($pid, $pid) or $! == EACCES or $! == ESRCH or die "parent setpgid failed: $!";
+        local $SIG{ALRM} = sub {
+          kill $signal, -$pid;
+          if ($signal eq "TERM") {
+            select undef, undef, undef, 0.2;
+            kill "KILL", -$pid;
+          }
+          exit 124;
+        };
+        alarm $timeout;
+        waitpid $pid, 0;
+        exit($? >> 8);
+      ' "$seconds" "$signal" "$@"
       ;;
     bash) fm_run_bash_timeout "$seconds" "$signal" "$@" ;;
     *) return 124 ;;

@@ -1479,6 +1479,7 @@ families_for_changed_path() {
       printf '%s\n' secondmate
       printf '%s\n' watcher-wake-lock
       printf '%s\n' "__script__:fm-procevent-quota.test.sh"
+      printf '%s\n' "__script__:fm-control-claude-exit-dialog.test.sh"
       ;;
     bin/fm-delivery-guard.sh|bin/fm-upstream-sync.sh|bin/fm-repository-policy-lib.sh|bin/fm-github-write-guard-lib.sh|\
     bin/fm-delivery-shims/*)
