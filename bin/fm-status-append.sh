@@ -38,15 +38,9 @@ if [ -L "$file" ]; then
   exit 1
 fi
 
-key=
-if parsed=$(_fm_decision_key "$line"); then
-  key=$parsed
-fi
-if [ -n "$key" ]; then
-  if prefix=$(fm_classify_reserved_key_prefix "$key"); then
-    echo "error: key '$key' starts with reserved prefix '$prefix' owned by bin/fm-classify-lib.sh; pick another key" >&2
-    exit 1
-  fi
+if key=$(_fm_decision_key "$line" '') && [ -n "$key" ] && prefix=$(fm_classify_reserved_key_prefix "$key"); then
+  echo "error: key '$key' starts with reserved prefix '$prefix' owned by bin/fm-classify-lib.sh; pick another key" >&2
+  exit 1
 fi
 
 printf '%s\n' "$line" >> "$file"

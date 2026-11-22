@@ -215,6 +215,32 @@ test_over_long_decision_note_is_capped_with_a_marker() {
   pass "an over-long open decision is cut to its per-item budget with the shared truncation marker"
 }
 
+test_folded_question_warning_caps_the_question() {
+  local dir state out warning question prefix
+  dir=$(make_case long-warning)
+  state="$dir/state"
+  out="$dir/drain.out"
+  {
+    printf 'needs-decision [key=pending-reply-color]: choose a color'
+    printf ' plus %0400d' 0
+    printf ' hidden tail\n'
+  } > "$state/long-question.status"
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed on a long folded question"
+  prefix='warning: task=long-question key=pending-reply-color folded reserved-prefix needs-decision: '
+  warning=$(grep -F "$prefix" "$out") || fail "warning omitted its task or key"
+  question=${warning#"$prefix"}
+  case "$question" in
+    'choose a color'*' [truncated]') ;;
+    *) fail "warning lost the start of the question or its truncation marker: $warning" ;;
+  esac
+  [ "${#question}" -le 220 ] || fail "warning question exceeded the per-line cap"
+  if grep -Eq 'hidden tail|OPEN DECISIONS' "$out"; then
+    fail "the drain printed beyond the warning's question cap or exposed the folded decision: $(cat "$out")"
+  fi
+  pass "the folded warning preserves task and key and caps the displayed question"
+}
+
 test_folded_reserved_needs_decision_warns_without_consuming_annotations() {
   local dir state out warns
   dir=$(make_case folded-reserved)
@@ -532,7 +558,34 @@ test_status_append_refuses_reserved_key_before_write() {
   pass "the status append helper refuses a reserved prefix before it writes"
 }
 
+test_reserved_default_prefix_only_rejects_a_stated_key() {
+  local dir state status APPEND line
+  local FM_CLASSIFY_RESERVED_KEY_PREFIXES='pending-reply- def'
+  export FM_CLASSIFY_RESERVED_KEY_PREFIXES
+  dir=$(make_case stated-key)
+  state="$dir/state"
+  status="$state/task.status"
+  APPEND="$ROOT/bin/fm-status-append.sh"
+
+  "$APPEND" "$status" 'done: delivered' || fail "a synthetic default key blocked an unkeyed report"
+  "$APPEND" "$status" 'needs-decision: choose a color' || fail "an unkeyed decision was refused by the writer"
+  for line in 'done [key=default]: delivered' 'done: [key=default] delivered'; do
+    if "$APPEND" "$status" "$line" 2>"$dir/error"; then
+      fail "the writer accepted a stated default key: $line"
+    fi
+    assert_contains "$(cat "$dir/error")" "reserved prefix 'def'" "the writer did not name the reserved prefix"
+  done
+  cmp -s "$status" <(printf 'done: delivered\nneeds-decision: choose a color\n') \
+    || fail "the writer altered the log when refusing a stated key"
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$dir/drain.out" || fail "drain failed on an unkeyed decision"
+  grep -Fxq 'warning: task=task key=default folded reserved-prefix needs-decision: choose a color' "$dir/drain.out" \
+    || fail "the fold lost its synthetic default key"
+  pass "the write guard distinguishes a stated default key from the fold's fallback"
+}
+
 test_folded_reserved_needs_decision_warns_without_consuming_annotations
+test_folded_question_warning_caps_the_question
 test_unrelated_branch_drain_leaves_warning_unread_for_main
 test_note_presents_the_captured_span
 test_warning_and_note_share_a_successful_span_read
@@ -540,6 +593,7 @@ test_failed_first_receipt_rename_still_prints_decisions
 test_first_drain_output_failure_leaves_warning_for_main
 test_drain_warning_follows_the_reserved_prefix_list
 test_status_append_refuses_reserved_key_before_write
+test_reserved_default_prefix_only_rejects_a_stated_key
 test_buried_decision_still_surfaces
 test_over_long_decision_note_is_capped_with_a_marker
 test_explicit_resolution_closes_it

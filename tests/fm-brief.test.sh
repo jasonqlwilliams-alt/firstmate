@@ -921,15 +921,19 @@ test_status_protocol_uses_guarded_writer() {
     cd "$ROOT" || exit 1
     unset FM_HOME
     export FM_ROOT_OVERRIDE=. FM_DATA_OVERRIDE="$home/data" FM_STATE_OVERRIDE="$home/state"
-    bin/fm-brief.sh ship-key some-proj --mode direct-PR >/dev/null &&
-      bin/fm-brief.sh scout-key some-proj --scout >/dev/null
+    bin/fm-brief.sh ship-key some-proj --mode direct-PR --herdr-lab >/dev/null &&
+      bin/fm-brief.sh scout-key some-proj --scout --herdr-lab >/dev/null
   ) || fail "could not scaffold with a relative root"
+  assert_grep '`./bin/fm-ensure-agents-md.sh .`' "$home/data/ship-key/brief.md" \
+    "the ship's project-memory instructions did not retain the relative root"
   for id in ship-key scout-key; do
     brief="$home/data/$id/brief.md"
     status="$home/state/$id.status"
+    assert_grep "HERDR_LAB_HELPER='./bin/fm-herdr-lab.sh'" "$brief" \
+      "the $id Herdr instructions did not retain the relative root"
     command=$(sed -n 's/^   `\(.*\) "{state}: {one short line}"`$/\1/p' "$brief")
     [ -n "$command" ] || fail "status protocol has no runnable command in $brief"
-    (cd "$home" && bash -c "$command"' "$1"' _ 'done: report delivered') \
+    (cd "$home" && FM_CLASSIFY_RESERVED_KEY_PREFIXES='pending-reply- def' bash -c "$command"' "$1"' _ 'done: report delivered') \
       || fail "the $id status command could not append an ordinary report"
     if (cd "$home" && bash -c "$command"' "$1"' _ 'needs-decision [key=pending-reply-color]: choose blue or green') 2>"$home/append.err"; then
       fail "the $id status command accepted a reserved key"
@@ -943,6 +947,10 @@ test_status_protocol_uses_guarded_writer() {
     count=$(grep -cF 'bin/fm-classify-lib.sh' "$brief")
     [ "$count" = 1 ] || fail "reserved-prefix owner should be named once in $brief, found $count"
   done
+  (cd "$home" && FM_HOME="$home" FM_ROOT_OVERRIDE=missing-relative-root \
+    "$ROOT/bin/fm-brief.sh" charter-key --secondmate --no-projects >/dev/null) \
+    || fail "a valid charter home depends on an unrelated root override"
+  [ -s "$home/data/charter-key/brief.md" ] || fail "the charter was not written under its explicit home"
   pass "fm-brief: ship and scout commands append ordinary status and refuse reserved keys"
 }
 

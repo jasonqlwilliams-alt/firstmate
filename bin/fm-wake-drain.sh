@@ -551,11 +551,17 @@ EOF
 }
 
 print_folded_reserved_decision_warnings() {
-  awk -F '\t' '$2 == "warning" {
-    task = $1; key = $3
-    sub(/^[^\t]*\twarning\t[^\t]*\t/, "")
-    printf "warning: task=%s key=%s folded reserved-prefix needs-decision: %s\n", task, key, $0
-  }' <<< "$1"
+  local row task key
+  while IFS= read -r row; do
+    task=${row%%$'\t'*}
+    row=${row#*$'\t'}
+    case "$row" in warning$'\t'*) ;; *) continue ;; esac
+    row=${row#*$'\t'}
+    key=${row%%$'\t'*}
+    fm_cap_line_var "${row#*$'\t'}"
+    printf 'warning: task=%s key=%s folded reserved-prefix needs-decision: %s\n' \
+      "$task" "$key" "$FM_LINE_CAP_LINE" || return 1
+  done <<< "$1"
 }
 
 print_status_sections() {

@@ -108,8 +108,8 @@ resolve_directory_input() {
   printf '%s\n' "$resolved"
 }
 
-FM_ROOT=$(resolve_directory_input FM_ROOT_OVERRIDE "${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}") || exit 1
-FM_HOME=$(resolve_directory_input FM_HOME "${FM_HOME:-$FM_ROOT}") || exit 1
+FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+FM_HOME=$(resolve_directory_input FM_HOME "${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}") || exit 1
 if [ -n "${FM_DATA_OVERRIDE:-}" ]; then
   DATA=$(resolve_directory_input FM_DATA_OVERRIDE "$FM_DATA_OVERRIDE") || exit 1
 else
@@ -318,7 +318,7 @@ exit 0
 fi
 
 REPO=${POS[1]}
-STATUS_APPEND_BIN=$(shell_quote "$FM_ROOT/bin/fm-status-append.sh")
+STATUS_APPEND_BIN=$(shell_quote "$SCRIPT_DIR/fm-status-append.sh")
 STATUS_PROTOCOL="   \`$STATUS_APPEND_BIN $STATUS_FILE \"{state}: {one short line}\"\`
    A \`[key=<slug>]\` on that line must not start with a prefix reserved by \`bin/fm-classify-lib.sh\`. The append command names the prefix, refuses the line, and asks you to pick another key."
 

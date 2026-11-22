@@ -400,14 +400,14 @@ status_line_note() {  # <status-line> -> text after the first colon, trimmed
   fi
   printf '%s' "$n"
 }
-_fm_decision_key() {  # <status-line> -> key slug, or "default" when no token
+_fm_decision_key() {  # <status-line> [<missing-key-value>] -> key slug or missing value (default: "default")
   local k
   if _fm_key_before_colon "$1"; then
     k=${1%%:*}
     k=${k#*\[key=}
     k=${k%%\]*}
   else
-    k=$(_fm_key_at_note_head "$1") || { printf 'default'; return 0; }
+    k=$(_fm_key_at_note_head "$1") || { printf '%s' "${2-default}"; return 0; }
   fi
   _fm_decision_slug_ok "$k" || return 1
   printf '%s' "$k"

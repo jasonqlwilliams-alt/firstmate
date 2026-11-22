@@ -521,7 +521,7 @@ schema=fm-secondmate-parent.v1
 route=local
 parent_home=$parent
 EOF
-  FM_HOME="$mate" "$REPORT" "done" "$corr" "audit clean" \
+  FM_CLASSIFY_RESERVED_KEY_PREFIXES='pending-reply- def' FM_HOME="$mate" "$REPORT" "done" "$corr" "audit clean" \
     || fail "$REPORT failed writing a correlated report"
   helper_line=$(tail -1 "$state/pinned.status")
   verb=$(status_line_verb "$helper_line")
@@ -530,7 +530,7 @@ EOF
   status_is_terminal_verb "$helper_line" \
     || fail "the helper's own line is not seen as a terminal captain verb"
 
-  FM_HOME="$mate" "$REPORT" --doc needs-decision "$corr" data/x/report.md "see the report" \
+  FM_CLASSIFY_RESERVED_KEY_PREFIXES='pending-reply- def' FM_HOME="$mate" "$REPORT" --doc needs-decision "$corr" data/x/report.md "see the report" \
     || fail "$REPORT failed writing a correlated doc-pointer report"
   helper_line=$(tail -1 "$state/pinned.status")
   verb=$(status_line_verb "$helper_line")
