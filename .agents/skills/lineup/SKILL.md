@@ -32,8 +32,12 @@ The board uses the Firstmate design tokens from the shipped Bearings board.
    Use the board script's existing validators to preflight eligibility; a refusal is a request to fix the offered catalog, never permission to weaken a fence.
    A current legacy tuple may be displayed but must not be offered when it violates a fence.
    Ordered suggestions may include fallback candidates whose order you explain.
-4. Run the board script's `build` command and return its verified live session URL.
-   The script owns serving, reopening, listener proof, and process-event arming; never run a second conversational poll.
+4. Run `bin/fm-lineup-board.sh build --reopen <payload.json>` for `/lineup`, `/models`, an explicit request to see the lineup board, or an urgent matter needing the captain's attention on the board.
+   Use plain `build <payload.json>` for routine refreshes.
+   A plain build leaves a board the user closed shut and does not arm it.
+   Return the session URL after a successful build with a verified live listener.
+   If the build reports the board closed, share that outcome in chat.
+   The script owns serving, listener proof, and process-event arming; never run a second conversational poll.
    Opening or rebuilding the board changes no dispatch settings.
 
 ## Benchmark evidence
@@ -66,7 +70,8 @@ Invalid combinations are refused and reported, never replaced silently with your
 Refresh catalog and eligibility evidence at apply time; the board's old options are evidence of what was offered, not authority to bypass a changed allowlist.
 
 Compose the final resolved apply payload using the live canonical dispatch object, not board text as configuration authority.
-Map rule rows by index only after comparing their captured exact `when` condition to the live configuration; rebuild a stale board rather than overwriting newer changes.
+Map rule rows by index only after comparing their captured exact `when` condition to the live configuration.
+If the board is stale, refresh it with plain `build <payload.json>` and stop before applying.
 Preserve all existing fields except selected `use` profiles and the default.
 Honor the explicit fallback-array choice; when off, emit single profile objects.
 Include the original typed instructions and a plain explanation of how you resolved them whenever they are nonblank.
@@ -79,4 +84,4 @@ It rechecks fences, preserves provenance, publishes the three config files, prop
 Do not manually duplicate propagation or restart mechanics.
 Report the profile changes, any helm handover instruction, restart outcome, and any propagation failure faithfully.
 Persist standing or dated instructions through the existing captain-preference and process-event workflows where applicable; do not describe a dated rule as automatically expiring unless its expiry has actually been armed.
-Acknowledge the captured event after handling, then rebuild from fresh state so Current reflects the saved lineup.
+Acknowledge the captured event after handling, then rebuild from fresh state with plain `build <payload.json>` so Current reflects the saved lineup.

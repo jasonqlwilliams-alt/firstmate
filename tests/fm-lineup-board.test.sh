@@ -149,21 +149,37 @@ sed -n '/<script id="lineup-data" type="application\/json">/,/<\/script>/p' "$pa
 jq -e '.rows[-1].reason == "</script><script>bad()</script> & unicode ✓" and .benchmarks == []' "$TMP_ROOT/extracted.json" >/dev/null || fail 'JSON injection round trip failed'
 if grep -q '<' "$TMP_ROOT/extracted.json"; then fail 'unescaped HTML in payload'; fi
 sid=$("$FIXTURE/bin/fm-procevent-lavish.sh" source-id "$page")
-grep -qF "register lavish $sid -- $FIXTURE/bin/fm-procevent-lavish.sh poll $page" "$CALL_LOG" || fail 'did not arm through adapter'
+register_call="register lavish $sid -- $FIXTURE/bin/fm-procevent-lavish.sh poll $page"
+grep -Fxq "$register_call" "$CALL_LOG" || fail 'did not arm through adapter'
 pass 'safe JSON injection and canonical Lavish wake arming'
 jq '.rows[2].options += [{harness:"kimi",model:"kimi-fixture"}]' "$TMP_ROOT/board.json" > "$TMP_ROOT/kimi-board.json"
 "$BOARD" build "$TMP_ROOT/kimi-board.json" > "$TMP_ROOT/build.out"
 pass 'Kimi secondmate option is offered'
-# An ended session must reopen; a session that stays ended never arms.
+# A user-ended session stays closed unless build is asked to reopen.
+"$BOARD" --help | grep -q -- '--reopen' || fail 'help does not document --reopen'
+: > "$CALL_LOG"
 : > "$FM_HOME/ended"
 "$BOARD" build "$TMP_ROOT/board.json" > "$TMP_ROOT/build.out"
-grep -q 'session: reopened' "$TMP_ROOT/build.out" || fail 'did not reopen'
+grep -q 'the user closed this board' "$TMP_ROOT/build.out" || fail 'did not report the closed board'
+grep -q -- '--reopen' "$TMP_ROOT/build.out" || fail 'did not say how to reopen'
+if grep -q 'session: reopened' "$TMP_ROOT/build.out"; then fail 'reopened without being asked'; fi
+if grep -q -- '--reopen' "$CALL_LOG"; then fail 'called lavish-axi --reopen without being asked'; fi
+if grep -q '^register ' "$CALL_LOG"; then fail 'armed a board the user closed'; fi
+: > "$CALL_LOG"
+"$BOARD" build --reopen "$TMP_ROOT/board.json" > "$TMP_ROOT/build.out"
+grep -q 'session: reopened' "$TMP_ROOT/build.out" || fail 'did not reopen when asked'
+lavish-axi | grep -Fq "  $page,open," || fail 'Lavish did not list the reopened board as open'
+listener_calls=$(sed -n -e '/^retire /p' -e '/^register /p' "$CALL_LOG")
+[ "$listener_calls" = "$(printf '%s\n' "retire $sid" "$register_call")" ] \
+  || fail "reopen did not retire and then register the same source: $listener_calls"
+"$FIXTURE/bin/fm-procevent.sh" list | grep -Fxq "$sid lavish live" \
+  || fail 'the reopened board source is not live'
 : > "$FM_HOME/refuse"
 : > "$CALL_LOG"
-if "$BOARD" build "$TMP_ROOT/board.json" > "$TMP_ROOT/out" 2>&1; then fail 'accepted dead session'; fi
+if "$BOARD" build --reopen "$TMP_ROOT/board.json" > "$TMP_ROOT/out" 2>&1; then fail 'accepted dead session'; fi
 if grep -q '^register ' "$CALL_LOG"; then fail 'armed ended session'; fi
 rm "$FM_HOME/refuse"
-pass 'serve-first reopen and refusal to arm an ended session'
+pass 'plain builds leave user-ended boards closed, explicit reopens replace the listener, and refused reopens never register one'
 # Cache evidence is private, validated, and injected; absent evidence stays empty.
 printf '{"entries":[{"harness":"agy","model":"gemini-fixture","task":"tier.fixture","benchmark":"Fixture only","score":12.5,"source":"https://example.org/fixture","as_of":"2026-01-01"}]}\n' > "$FM_HOME/config/model-benchmarks.json"
 "$BOARD" build "$TMP_ROOT/board.json" > "$TMP_ROOT/build.out"

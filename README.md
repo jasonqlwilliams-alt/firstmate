@@ -193,6 +193,9 @@ Claude and grok use the slash form shown here; codex uses the same names with `$
 | `/updatefirstmate` | Fast-forward the running firstmate and its secondmates, then persist and restart every live mate successfully left on the target commit - including already-current homes - with an honest re-read nudge only when restart cannot be proven |
 | `/stow`            | Sweep the session for uncaptured durable knowledge, persist the open work records this session knows are unfiled or now wrong, curate tiered startup memory with decay and cold archival, enforce each home's budget or surface the required decision, cascade to registered second mates, and report what is safe to reset |
 
+A board you end in Lavish stays closed during routine refreshes.
+To reopen it, request the board again with `/bearings lavish`, `/lineup`, or `/models`.
+
 Bearings invocation examples:
 
 - `/bearings` returns the fresh four-section digest in chat only.

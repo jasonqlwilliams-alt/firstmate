@@ -8,7 +8,7 @@
 # agent never authors board UI at invocation time.
 #
 # Usage:
-#   fm-bearings-board.sh build <data.json>
+#   fm-bearings-board.sh build [--reopen] <data.json>
 #   fm-bearings-board.sh path
 #
 # build      Validate the payload, drop the Captain's Call cards whose subject
@@ -26,13 +26,18 @@
 #            session on that board and PROVE it is live BEFORE binding and
 #            arming its answer source, so a registered poll can never race a
 #            session that does not exist or attach to one that has ended.
+#            A session the user ended in the browser stays closed unless this
+#            build was given --reopen. Pass that flag only when the user asked
+#            for the board again or something urgent needs them. Without it,
+#            build names that the user closed the board and how to pass
+#            --reopen, exits 0, and does not bind or arm.
 #            Bind to the keyed-answer intake (bin/fm-captain-hold.sh) ALWAYS
 #            precedes arm, so the board can never produce an answer that has
 #            nowhere to go (captain-hold-lifecycle's ordering rule, enforced
 #            here rather than left to agent memory). Output starts with
 #            `board: <path>`, `detail: <path>`, and `canvas: <path> | off ...`,
 #            then includes lavish-axi's session output and the remaining status:
-#              session: live | reopened
+#              session: live | reopened | closed
 #              served: <path>
 #              bound: <source-id>
 #              armed: <source-id>            (first registration)
@@ -44,15 +49,16 @@
 # path       Print the stable board path for this home.
 #
 # A LIVE SESSION IS PROVED, NEVER ASSUMED. `lavish-axi <file>` exits 0 even
-# when it refuses to reopen a session the captain ended from the browser,
+# when it refuses to reopen a session the user ended from the browser,
 # reporting `status: user-ended` with the same session id, so exit status alone
 # cannot tell a live board from a dead one. build requires the server's fresh
-# session listing to show the canonical board open and refuses rather than
-# arming an ended session. After a reopen it retires the pre-reopen source
-# generation through the guarded adapter path, arms a fresh registration, and
-# accepts only the replacement listener as live. A registered board with no
-# live owner also gets a replacement before build returns, because
-# `already-armed` is not the same fact as `listening`.
+# session listing to show the canonical board open before it binds or arms.
+# A plain attach reporting user-ended yields the closed outcome above (exit 0).
+# Other non-open outcomes exit 1 and are not armed. After an explicit reopen
+# it retires the pre-reopen source generation through the guarded adapter path,
+# arms a fresh registration, and accepts only the replacement listener as live.
+# A registered live board with no live owner also gets a replacement before
+# build returns, because `already-armed` is not the same fact as `listening`.
 #
 # CAPTAIN'S CALL HYGIENE. A decision card is dropped when its work item, PR, or
 # structured artifact/version subject appears among the payload's own landed
@@ -673,6 +679,11 @@ publish_detail() {  # <effective.json> <board>
 }
 
 command_build() {
+  local reopen=
+  if [ "${1-}" = --reopen ]; then
+    reopen=$1
+    shift
+  fi
   local data=${1-} board json tmp sid extracted effective owner version pre_reopen_owner
   [ "$#" -eq 1 ] || { usage >&2; exit 2; }
   command -v jq >/dev/null 2>&1 || fail "jq is required"
@@ -730,7 +741,7 @@ command_build() {
   sid=$("$SCRIPT_DIR/fm-procevent-lavish.sh" source-id "$board") \
     || fail "cannot derive the board source id"
   pre_reopen_owner=$(source_owner "$sid")
-  establish_board_session "$board"
+  establish_board_session "$board" ${reopen:+"$reopen"}
   if [ "$BOARD_SESSION_REOPENED" = 1 ]; then
     "$SCRIPT_DIR/fm-procevent-lavish.sh" retire "$board" >/dev/null \
       || fail "cannot retire the pre-reopen source generation (observed owner: ${pre_reopen_owner:-none})"

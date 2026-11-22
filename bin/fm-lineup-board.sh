@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build or apply the agent-composed model lineup. Never ranks or recommends.
-# Usage: fm-lineup-board.sh build <payload.json> | apply <resolved.json> | path
+# Usage: fm-lineup-board.sh build [--reopen] <payload.json> | apply <resolved.json> | path
 #
 # build input: schema=fm-lineup-board.v1, generated (string), quotas (array of
 # {provider,headroom,reset,runway,spend_priority,attention}, all display strings),
@@ -39,8 +39,11 @@
 # fm-secondmate-restart.sh is called only for an explicit true restart option.
 #
 # build uses the shipped template, safe JSON injection, and the shared Lavish
-# session proof before arming fm-procevent-lavish.sh. No keyed-answer binding:
-# the lineup skill handles and resolves the entire submission on its wake.
+# session proof before arming fm-procevent-lavish.sh. Pass --reopen only when
+# the user asked for the board again or something urgent needs them. Without
+# it, a session the user ended is reported, left closed (exit 0), and not
+# armed. bin/fm-lavish-board-lib.sh owns that session outcome. No keyed-answer
+# binding: the lineup skill handles and resolves the entire submission on its wake.
 # FM_HOME and FM_CONFIG_OVERRIDE select private state, as in other home helpers.
 set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -105,7 +108,14 @@ check_profiles() { # <board|apply> <file>
       (.dispatch | (.rules[].use, .default) | profiles | {kind:"rule",profile:.}) end' "$2")
 }
 command_build() {
-  local data=$1 board tmp json sid owner cache
+  local reopen='' data board tmp json sid owner cache
+  if [ "${1-}" = --reopen ]; then
+    reopen=$1
+    shift
+  fi
+  [ "$#" -eq 1 ] || fail "expected build [--reopen] <file.json>"
+  data=$1
+  [ -f "$data" ] || fail "input file is missing"
   validate board "$data"
   check_profiles board "$data"
   cache="$CONFIG/model-benchmarks.json"
@@ -131,11 +141,12 @@ command_build() {
   mv -f -- "$tmp" "$board"
   printf 'board: %s\n' "$board"
   sid=$("$SCRIPT_DIR/fm-procevent-lavish.sh" source-id "$board")
-  establish_board_session "$board"
+  establish_board_session "$board" ${reopen:+"$reopen"}
   if [ "$BOARD_SESSION_REOPENED" = 1 ]; then
     "$SCRIPT_DIR/fm-procevent-lavish.sh" retire "$board" >/dev/null || fail "cannot retire pre-reopen source"
   fi
-  lavish_session_listed_open "$(board_realpath "$board")" || fail "session ended before arm"
+  lavish_session_listed_open "$(board_realpath "$board")" \
+    || fail "the board Lavish session is not listed open immediately before arming"
   owner=$(source_owner "$sid")
   if [ -n "$owner" ]; then
     printf 'already-armed: %s\n' "$sid"
@@ -244,10 +255,11 @@ command_apply() {
 }
 case "${1:-}" in
   path) [ "$#" -eq 1 ] || fail "path takes no arguments"; board_path ;;
-  build|apply)
-    [ "$#" -eq 2 ] || fail "expected build|apply <file.json>"
+  build) shift; command_build "$@" ;;
+  apply)
+    [ "$#" -eq 2 ] || fail "expected apply <file.json>"
     [ -f "$2" ] || fail "input file is missing"
-    case "$1" in build) command_build "$2" ;; apply) command_apply "$2" ;; esac
+    command_apply "$2"
     ;;
   -h|--help|help) usage ;;
   *) usage >&2; exit 2 ;;

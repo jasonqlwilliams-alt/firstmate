@@ -32,6 +32,7 @@ make_home() {  # <name>
 #!/usr/bin/env bash
 set -u
 state=${LAVISH_FAKE_STATE:?}
+printf '%s\n' "$*" >> "$state/calls"
 emit() {  # <canonical-file> <status>
   printf 'session:\n'
   printf '  file: %s\n' "$1"
@@ -61,16 +62,24 @@ case "${1-}" in
     exit 0
     ;;
   '')
-    if [ -e "$state/end-before-next-list" ]; then
-      : > "$state/open"
-      rm -f "$state/end-before-next-list"
+    if [ -e "$state/end-before-list" ]; then
+      remaining=$(cat "$state/end-before-list")
+      if [ "$remaining" -eq 1 ]; then
+        : > "$state/open"
+        : > "$state/user-ended"
+        rm -f "$state/end-before-list"
+      else
+        printf '%s\n' "$((remaining - 1))" > "$state/end-before-list"
+      fi
     fi
-    printf 'sessions[1]{file,status,url,pending_prompts}:\n'
     if [ -s "$state/open" ]; then
+      printf 'sessions[1]{file,status,url,pending_prompts}:\n'
       while IFS= read -r listed; do
         [ -n "$listed" ] || continue
         printf '  %s,open,"http://127.0.0.1:4387/session/deadbeef",0\n' "$listed"
       done < "$state/open"
+    else
+      printf 'sessions: []\n'
     fi
     exit 0
     ;;
@@ -496,7 +505,11 @@ test_rebuild_is_idempotent_and_does_not_double_arm() {
   run_board "$home" build "$data" >/dev/null || fail "the first build failed"
 
   jq '.generated = "2026-08-19T01:00Z"' "$data" > "$data.tmp" && mv "$data.tmp" "$data"
+  : > "$home/lavish-state/calls"
   out=$(run_board "$home" build "$data") || fail "the rebuild failed"
+  if grep -q -- '--reopen' "$home/lavish-state/calls"; then
+    fail "a live rebuild called lavish-axi --reopen"
+  fi
   assert_contains "$out" "already-armed: " "the rebuild re-armed an already registered source: $out"
   extract_payload "$board" | jq -e '.generated == "2026-08-19T01:00Z"' >/dev/null \
     || fail "the rebuild did not refresh the board payload in place"
@@ -568,7 +581,7 @@ test_build_reopens_a_session_the_captain_ended() {
     || fail "the old listener did not receive its terminal result"
   rm -f "$home/lavish-state/poll-trigger"
   end_session_as_captain "$home"
-  out=$(run_board "$home" build "$data") || fail "the rebuild refused a recoverable ended session"
+  out=$(run_board "$home" build --reopen "$data") || fail "an explicit reopen refused a recoverable ended session"
   rm -f "$home/lavish-state/hold-after-terminal"
   assert_contains "$out" "session: reopened" \
     "the rebuild did not reopen the ended session: $out"
@@ -580,24 +593,121 @@ test_build_reopens_a_session_the_captain_ended() {
     || fail "the rebuild accepted the pre-reopen source generation"
   [ "$(run_procevent "$home" list | awk -v id="$sid" 'NR > 1 && $1 == id { print $3 }')" = live ] \
     || fail "the reopened board has no live listener"
-  pass "a board build reopens a session the captain ended instead of arming a dead one"
+  pass "an explicit --reopen reopens a session the user ended and arms a fresh listener"
 }
 
-test_build_reopens_when_an_opened_session_ends_before_listing() {
-  local home data out board sid
-  home=$(make_home establish-list-race)
+test_build_leaves_a_user_ended_session_closed() {
+  local home data board out rc sid claim old_pid old_token owner
+  home=$(make_home user-closed)
   data="$home/payload.json"
   board="$home/.lavish/bearings-board.html"
   write_valid_payload "$data"
-  : > "$home/lavish-state/end-before-next-list"
-  out=$(run_board "$home" build "$data") || fail "the raced session build failed: $out"
-  assert_contains "$out" "session: reopened" \
-    "the build trusted an opened response after the server no longer listed it: $out"
+  run_board "$home" --help | grep -q -- '--reopen' \
+    || fail "build help does not document --reopen"
+
+  # Nothing was ever armed: the board is already closed when build runs.
+  : > "$home/lavish-state/user-ended"
+  : > "$home/lavish-state/calls"
+  set +e
+  out=$(run_board "$home" build "$data" 2>&1)
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || fail "a user-ended session crashed the build (exit $rc): $out"
+  assert_contains "$out" "session: closed" "the build did not report a closed session: $out"
+  assert_contains "$out" "the user closed this board" \
+    "the build did not say the user closed the board: $out"
+  assert_contains "$out" "--reopen" \
+    "the build did not say how to reopen the board: $out"
+  case "$out" in
+    *"session: reopened"*|*"armed: "*|*"bound: "*|*"listening: "*)
+      fail "the closed board was armed: $out" ;;
+  esac
+  [ -e "$home/lavish-state/user-ended" ] \
+    || fail "the build reopened a session the user had already ended"
+  if grep -q -- '--reopen' "$home/lavish-state/calls"; then
+    fail "the build called lavish-axi --reopen without being asked"
+  fi
   sid=$(run_lavish_source_id "$home" "$board")
-  [ -s "$home/lavish-state/open" ] || fail "the raced session was not live before arming"
-  [ "$(run_procevent "$home" list | awk -v id="$sid" 'NR > 1 && $1 == id { print $3 }')" = live ] \
-    || fail "the replacement session did not receive a live listener"
-  pass "build reopens a session that ends between establish and listing"
+  ! run_decisions "$home" binding "$sid" >/dev/null 2>&1 \
+    || fail "build bound a board the user had closed"
+  ! run_procevent "$home" list | awk 'NR > 1 { print $1 }' | grep -Fxq "$sid" \
+    || fail "build armed a board the user had closed"
+
+  # The reported case: a live board the user then ends must not pop back open.
+  rm -f "$home/lavish-state/user-ended" "$home/lavish-state/calls"
+  run_board "$home" build "$data" >/dev/null || fail "the live build failed"
+  sid=$(run_lavish_source_id "$home" "$board")
+  claim="$home/procevent-claims/$sid.claim"
+  old_pid=$(sed -n '2p' "$claim")
+  old_token=$(sed -n '3p' "$claim")
+  : > "$home/lavish-state/hold-after-terminal"
+  : > "$home/lavish-state/poll-trigger"
+  for _ in $(seq 1 100); do
+    [ -e "$home/lavish-state/terminal-emitted" ] && break
+    sleep 0.05
+  done
+  [ -e "$home/lavish-state/terminal-emitted" ] \
+    || fail "the old listener did not receive its terminal result"
+  rm -f "$home/lavish-state/poll-trigger"
+  end_session_as_captain "$home"
+  : > "$home/lavish-state/calls"
+  set +e
+  out=$(run_board "$home" build "$data" 2>&1)
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || fail "rebuilding a user-ended board crashed (exit $rc): $out"
+  assert_contains "$out" "the user closed this board" \
+    "the rebuild did not say the user closed the board: $out"
+  case "$out" in
+    *"session: reopened"*|*"armed: "*|*"listening: "*)
+      fail "the rebuild reopened or armed the board the user closed: $out" ;;
+  esac
+  [ -e "$home/lavish-state/user-ended" ] \
+    || fail "the rebuild reopened the session the user ended"
+  if grep -q -- '--reopen' "$home/lavish-state/calls"; then
+    fail "the rebuild called lavish-axi --reopen without being asked"
+  fi
+  [ "$(sed -n '2p' "$claim")" = "$old_pid" ] && [ "$(sed -n '3p' "$claim")" = "$old_token" ] \
+    || fail "the rebuild replaced the listener on a board the user closed"
+  rm -f "$home/lavish-state/hold-after-terminal"
+  owner=live
+  for _ in $(seq 1 50); do
+    owner=$(run_procevent "$home" list | awk -v id="$sid" 'NR > 1 && $1 == id { print $3 }')
+    [ "$owner" != live ] && break
+    sleep 0.1
+  done
+  [ "$owner" != live ] || fail "the board the user closed still has a live listener"
+  pass "a board build leaves a user-ended session closed and does not arm it"
+}
+
+test_build_refuses_to_arm_after_a_browser_close_during_build() {
+  local listing home data board out sid
+  for listing in 1 2; do
+    home=$(make_home "browser-close-before-list-$listing-${1:-plain}")
+    data="$home/payload.json"
+    board="$home/.lavish/bearings-board.html"
+    write_valid_payload "$data"
+    printf '%s\n' "$listing" > "$home/lavish-state/end-before-list"
+    if out=$(run_board "$home" build "$@" "$data" 2>&1); then
+      fail "build accepted a missing open listing after the browser close: $out"
+    fi
+    [ -e "$home/lavish-state/user-ended" ] && [ ! -s "$home/lavish-state/open" ] \
+      || fail "build did not leave the board closed after listing $listing"
+    [ "$(grep -F -- "$board" "$home/lavish-state/calls")" = "$board" ] \
+      || fail "build did not make exactly one plain attach"
+    assert_contains "$out" "refusing to arm a poll" \
+      "build did not report the liveness failure before listing $listing: $out"
+    case "$out" in
+      *"session: closed"*|*"the user closed this board"*)
+        fail "build inferred a browser close from listing $listing: $out" ;;
+    esac
+    sid=$(run_lavish_source_id "$home" "$board")
+    ! run_decisions "$home" binding "$sid" >/dev/null 2>&1 \
+      || fail "build bound the board after a browser close before listing $listing"
+    ! run_procevent "$home" list | awk 'NR > 1 { print $1 }' | grep -Fxq "$sid" \
+      || fail "build armed the board after a browser close before listing $listing"
+  done
+  pass "a ${1:-plain} build refuses to arm when the browser closes before either listing"
 }
 
 test_build_refuses_to_arm_when_the_session_stays_ended() {
@@ -609,7 +719,7 @@ test_build_refuses_to_arm_when_the_session_stays_ended() {
   # register a poll against it.
   : > "$home/lavish-state/refuse-reopen"
   set +e
-  out=$(run_board "$home" build "$data" 2>&1)
+  out=$(run_board "$home" build --reopen "$data" 2>&1)
   rc=$?
   set -e
   [ "$rc" -ne 0 ] || fail "build armed a poll on a session that stayed ended: $out"
@@ -859,7 +969,9 @@ test_build_does_not_bind_or_arm_when_session_start_fails
 test_rebuild_is_idempotent_and_does_not_double_arm
 test_build_refuses_a_template_without_exactly_one_slot
 test_build_reopens_a_session_the_captain_ended
-test_build_reopens_when_an_opened_session_ends_before_listing
+test_build_leaves_a_user_ended_session_closed
+test_build_refuses_to_arm_after_a_browser_close_during_build
+test_build_refuses_to_arm_after_a_browser_close_during_build --reopen
 test_build_refuses_to_arm_when_the_session_stays_ended
 test_build_starts_a_listener_for_an_already_armed_board
 test_build_drops_decision_cards_whose_subject_already_landed
