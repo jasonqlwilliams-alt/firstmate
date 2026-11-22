@@ -108,7 +108,7 @@ check_profiles() { # <board|apply> <file>
       (.dispatch | (.rules[].use, .default) | profiles | {kind:"rule",profile:.}) end' "$2")
 }
 command_build() {
-  local reopen= data board tmp json sid owner cache
+  local reopen='' data board tmp json sid owner cache
   if [ "${1-}" = --reopen ]; then
     reopen=$1
     shift
