@@ -2325,7 +2325,7 @@ SH
 )
 
 test_busy_closure_publication_keeps_normal_cadence() (
-  local dir state url lock watcher= i stage
+  local dir state url lock watcher='' i stage
   FM_WAKE_NO_MKDIR=1 . "$ROOT/bin/fm-wake-lib.sh"
   dir=$(make_case closure-contention)
   trap '
@@ -2516,7 +2516,7 @@ test_closure_cleanup_tolerates_a_stage_disappearing() (
 )
 
 test_remote_proxy_teardown_removes_closure_evidence() (
-  local dir state url teardown= watcher= i
+  local dir state url teardown='' watcher='' i
   dir=$(make_case remote-pr-closure-teardown)
   state="$dir/home/state"
   url=https://github.com/o/r/pull/25

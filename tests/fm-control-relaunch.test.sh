@@ -522,7 +522,7 @@ SH
 
 test_relaunch_and_pr_replacement_during_closure() {
   local dir state setup=${1:-fresh} id=rl-close url=https://github.com/example/repo/pull/20
-  local replacement=https://github.com/example/repo/pull/21 out rc watcher= checksum= i=0
+  local replacement=https://github.com/example/repo/pull/21 out rc watcher='' checksum='' i=0
   dir=$(new_case "closure-race-$setup" "$id")
   state="$dir/home/state"
 
