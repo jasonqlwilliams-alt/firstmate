@@ -68,6 +68,8 @@
 # `read`, `answers`, `reconciles`, and `assignments` use the same TOON decoder,
 # including for tabular and list prompts. Node.js loads the codec used by
 # lavish-axi on PATH.
+# Expanded list rows must supply scalar `uid`, `prompt`, `selector`, `tag`, and
+# `text` fields.
 # `read` exits 0 for a complete capture or 3 for an incomplete capture, with
 # recoverable rows in either case. Legacy tabular prose recovery is for display.
 # `answers` and `reconciles` exit 0 for a complete prompt block or a complete
@@ -77,6 +79,8 @@
 #
 # `assignments` prints one JSON object per decoded Charted Next helper request,
 # in capture order, including recoverable requests from incomplete captures.
+# It exits 0 after decoding, with a warning on stderr for incomplete captures,
+# or 1 on a capture or decoder error. Use `read` for the completeness verdict.
 # The fm-bearings-assignment.v1 context contains `question` (task id), `owner`
 # (non-blank home string), and `agent` (Packet Router role id). Both ids are
 # ASCII slugs of 1-128 characters. This command feeds neither hold intake.

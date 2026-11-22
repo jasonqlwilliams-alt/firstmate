@@ -292,7 +292,8 @@ For URGENT-ALERT packets, an absent, empty, or unreadable file or a non-absolute
 The first non-comment, non-blank line is the directory path.
 The same inbox path is the Eleusis publish plane for `bin/fm-system-state-card.sh`: when configured, that generator drops a named-C: packet asking Eleusis to write Packet Router `Evidence/SYSTEM_STATE.md`.
 `bin/fm-urgent-alert.sh` remains the owner of URGENT-ALERT packets; the system-state script header owns its own packet shape and no-op when the inbox is absent.
-To enable [Charted Next helper requests](../README.md#built-in-skills), configure an existing inbox whose Packet Router seat registry lists a verifiable recipient role.
+To make Continuum helper roles available on Charted Next, configure an existing `inbox/new` directory with eligible recipient roles listed in `registry/SEATS.md` under the same Packet Router root.
+See [Bearings usage](../README.md#built-in-skills).
 
 ## Bearings detail canvas export (config/bearings-canvas-dir)
 
@@ -1111,8 +1112,10 @@ A value this command cannot use is refused by name before anything is launched, 
 For Lavish, the runner also persists a bounded framing hint beside the captured prefix so the adapter can recover complete rows at the cutoff without publishing bytes from the discarded fields.
 
 The runner stores the bounded result at mode `0600` before any event references it.
-A captured result with no durable handled acknowledgement remains eligible for bounded re-announcement across any number of drains and restarts.
-`bin/fm-procevent.sh handled <source-id> <sequence>` is the only thing that stops re-announcement: a generation-keyed, private, path-safe, durable, and idempotent acknowledgement that atomically checks and deduplicates by the exact source and sequence, so a paired effect gated on its first-time-vs-repeat report is never authorized twice.
+Across any number of drains and restarts, only a durable handled acknowledgement stops bounded re-announcement of a captured result.
+The `bin/fm-procevent.sh handled` acknowledgement is generation-keyed, private, path-safe, and idempotent.
+It atomically deduplicates by the exact source and sequence, so a paired effect gated on its first-time-vs-repeat report is never authorized twice.
+For captures with Charted Next helper requests, follow the [Bearings board-wake acknowledgement procedure](../.agents/skills/bearings/SKILL.md#acknowledge-the-board-wake).
 Default and fallback `check` publication is still best-effort, so the same source and sequence can repeat even before any restart; handlers deduplicate that identity rather than assuming a wake is unique.
 The runner proves nothing about the source side, and the handled acknowledgement proves nothing about a paired external effect performed before it: a crash between that effect and the acknowledgement call can still repeat the effect on replay, so this is never a generic exactly-once guarantee.
 The published `lavish-axi poll` clears feedback destructively before returning it, so a result lost between that clearing and the runner reading process output is unrecoverable.

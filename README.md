@@ -200,9 +200,9 @@ Bearings invocation examples:
 - `/bearings file` replaces today's `data/status-report-<YYYY-MM-DD>.md` from scratch and links it from the four-section chat digest.
 - `/bearings file include PRs` combines the dated report with live PR enrichment.
 - `/bearings lavish` builds the interactive fleet board and its linked detail page for Charted Next and Recently Landed, showing each row's owner, waits, blockers, filed date, and recorded report and PR links.
-  Charted Next uses four color-coded tiers based on recency and urgency and sorts by priority by default.
+  Charted Next assigns work items one of four color-coded tiers based on recency and urgency and sorts them by priority by default.
   Choose **Newest filed** to sort by filing date.
-  For eligible queued tasks, choose a Continuum helper role, select **Queue assignment**, and send the request through Lavish.
+  To request help on a queued task with an unmet start condition, choose a Continuum helper role, select **Queue assignment**, and send the request through Lavish.
   Firstmate asks you to confirm in chat before it asks the helper for evidence or recommendations about the task's start conditions.
   The task stays subject to its existing start conditions.
   See [Packet Router setup](docs/configuration.md#packet-router-inbox-configpacket-router-inbox) to make helper roles available.
