@@ -3344,8 +3344,7 @@ test_leaked_worktree_process_is_reaped() {
     fail "leaked-process-reap: setup sleeper did not start in the worktree"
   fi
 
-  # Without lsof, teardown uses a separate pane process-group fallback.
-  # Supply the cwd scan for this real sleeper so this case still tests cwd reaping.
+  # Keep the lsof scan path covered even when the host has no lsof binary.
   if [ -z "$REAL_LSOF_FOR_TEST" ]; then
     cat > "$case_dir/fakebin/lsof" <<'SH'
 #!/usr/bin/env bash
@@ -3407,14 +3406,75 @@ test_leaked_tasktmp_process_is_reaped() {
   pass "a leaked descendant process rooted under the task's per-task tasktmp is reaped by teardown too"
 }
 
-test_lsof_absent_reaps_tmux_process_group() {
-  local case_dir rc pid path_without_lsof
+test_lsof_absent_reaps_detached_linux_process() (
+  if [ "$(uname -s)" != Linux ]; then
+    printf 'skip: detached /proc cwd scan requires Linux\n'
+    return 0
+  fi
+  local case_dir rc=0 pid='' sibling_pid='' path_without_lsof i
+  case_dir=$(make_case lsof-absent-detached-reap)
+  write_meta "$case_dir" no-mistakes ship
+  land_shippable_commit "$case_dir"
+  path_without_lsof=$(make_path_without_lsof "$case_dir")
+  if PATH="$case_dir/fakebin:$path_without_lsof" command -v lsof >/dev/null 2>&1; then
+    fail 'lsof-absent-detached-reap: fixture path unexpectedly exposes lsof'
+  fi
+
+  mkdir -p "$case_dir/wt/nested" "$case_dir/wt0"
+  ln -s "$case_dir/wt/nested" "$case_dir/cwd-alias"
+  trap 'for child in "$pid" "$sibling_pid"; do
+    [ -n "$child" ] || continue
+    kill -KILL "$child" 2>/dev/null || true
+    wait "$child" 2>/dev/null || true
+  done' EXIT
+  # Each sleeper leads its own session. The in-copy sleeper ignores TERM so
+  # the test also exercises the identity and cwd recheck before KILL.
+  perl -MPOSIX -e 'POSIX::setsid() > 0 or die; $SIG{TERM} = "IGNORE"; chdir shift or die; exec "sleep", "300"' "$case_dir/cwd-alias" &
+  pid=$!
+  perl -MPOSIX -e 'POSIX::setsid() > 0 or die; chdir shift or die; exec "sleep", "300"' "$case_dir/wt0" &
+  sibling_pid=$!
+  for ((i=0; i<100; i++)); do
+    if [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "$case_dir/wt/nested" ] \
+       && [ "$(readlink "/proc/$sibling_pid/cwd" 2>/dev/null)" = "$case_dir/wt0" ]; then
+      break
+    fi
+    sleep 0.05
+  done
+  [ "$i" -lt 100 ] || fail 'lsof-absent-detached-reap: sleepers did not enter their directories'
+
+  # Both the teardown script and its calling shell have an in-copy cwd.
+  cd "$case_dir/wt" || fail 'lsof-absent-detached-reap: could not enter the worktree'
+  FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+
+  [ "$rc" -eq 0 ] || cat "$case_dir/stderr" >&2
+  expect_code 0 "$rc" 'lsof-absent-detached-reap: teardown should succeed'
+  if kill -0 "$pid" 2>/dev/null; then
+    cat "$case_dir/stderr" >&2
+    fail 'lsof-absent-detached-reap: detached worktree process survived successful teardown'
+  fi
+  wait "$pid" 2>/dev/null || true
+  pid=''
+  kill -0 "$sibling_pid" 2>/dev/null || fail 'lsof-absent-detached-reap: sibling process was killed'
+  assert_grep 'force-killing leaked worktree process(es)' "$case_dir/stderr" \
+    'lsof-absent-detached-reap: teardown did not escalate after TERM'
+  pass 'Linux teardown without lsof reaps a detached worktree process and preserves its ancestor and sibling'
+)
+
+test_lsof_absent_on_non_linux_reaps_tmux_process_group() {
+  local case_dir rc pid path_without_lsof real_uname
   case_dir=$(make_case lsof-absent-process-group-reap)
   write_meta "$case_dir" no-mistakes ship
   land_shippable_commit "$case_dir"
   path_without_lsof=$(make_path_without_lsof "$case_dir")
   PATH="$path_without_lsof" command -v lsof >/dev/null 2>&1 \
     && fail "lsof-absent-process-group-reap: fixture path unexpectedly exposes lsof"
+  real_uname=$(command -v uname)
+  cat > "$case_dir/fakebin/uname" <<EOF
+#!/usr/bin/env bash
+if [ "\${1:-}" = -s ]; then printf 'Darwin\n'; else exec '$real_uname' "\$@"; fi
+EOF
+  chmod +x "$case_dir/fakebin/uname"
 
   perl -e 'setpgrp(0, 0); chdir shift or die; exec "sleep", "300"' "$case_dir/wt" &
   pid=$!
@@ -3441,7 +3501,7 @@ EOF
   fi
   assert_grep "reaping leaked worktree process group" "$case_dir/stderr" \
     "lsof-absent-process-group-reap: teardown did not use the process-group fallback"
-  pass "missing lsof falls back to reaping the tmux pane process group"
+  pass "missing lsof on a non-Linux host falls back to reaping the tmux pane process group"
 }
 
 test_lsof_error_refuses_before_removal() {
@@ -4112,6 +4172,8 @@ SH
   pass "real Herdr lab counterfactual: default retirement closes the previously preserved exact pane"
 )
 
+test_leaked_worktree_process_is_reaped
+test_lsof_absent_reaps_detached_linux_process || exit 1
 test_keep_pane_retirement
 test_keep_pane_lab || fail "real Herdr keep-pane lab failed"
 
@@ -4190,9 +4252,8 @@ test_empty_status_after_abort_refuses_unconfirmed
 test_not_found_status_after_abort_confirms_completion
 test_another_branchs_parked_run_is_never_touched
 test_own_autonomous_run_is_left_alone
-test_leaked_worktree_process_is_reaped
 test_leaked_tasktmp_process_is_reaped
-test_lsof_absent_reaps_tmux_process_group
+test_lsof_absent_on_non_linux_reaps_tmux_process_group
 test_lsof_error_refuses_before_removal
 test_reused_pid_identity_is_not_force_killed
 test_exec_changed_process_is_still_reaped
