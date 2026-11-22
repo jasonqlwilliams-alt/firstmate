@@ -27,7 +27,13 @@
 #
 # Closure evidence lives in a separate private state/<id>.pr-poll-closed file.
 # Each line is one canonical URL observed closed without merging.
-# Re-registering a poll preserves this history. Task teardown removes it.
+# Prepare the private closure stage before capturing the registration so task
+# retirement can invalidate an observation even during capture.
+# A missing stage skips the forge read, and publishing the result requires the
+# stage to still be present under the task metadata lock.
+# A re-arm preserves the stage and history even for metadata without a generation.
+# Full teardown, remote proxy retirement, and matching backlog-close replay
+# revoke the registration and clear stages and history before removing metadata.
 # A PR closure can be missed if the task metadata lock is contended and the PR reopens between polls.
 # A PR registration command still in flight across task cleanup and ID reuse can bind the old PR to the new task.
 # A concurrently registered custom check can be removed if it replaces a PR check during revocation, or skipped until the next normal sweep if the prepared PR closure stage is invalidated during the replacement.
