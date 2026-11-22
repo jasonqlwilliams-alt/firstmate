@@ -145,7 +145,8 @@ command_build() {
   if [ "$BOARD_SESSION_REOPENED" = 1 ]; then
     "$SCRIPT_DIR/fm-procevent-lavish.sh" retire "$board" >/dev/null || fail "cannot retire pre-reopen source"
   fi
-  lavish_session_listed_open "$(board_realpath "$board")" +    || fail "the board Lavish session is not listed open immediately before arming"
+  lavish_session_listed_open "$(board_realpath "$board")" \
+    || fail "the board Lavish session is not listed open immediately before arming"
   owner=$(source_owner "$sid")
   if [ -n "$owner" ]; then
     printf 'already-armed: %s\n' "$sid"
