@@ -126,7 +126,7 @@ fm_run_external_timeout() {
 }
 
 fm_monotonic_ms() {
-  perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e 'printf "%d\n", clock_gettime(CLOCK_MONOTONIC) * 1000'
+  node -p 'String(process.hrtime.bigint() / 1000000n)'
 }
 
 fm_timeout_seconds() {  # <milliseconds>

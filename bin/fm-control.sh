@@ -587,13 +587,15 @@ claude_exit_dialog_refusal() {  # <interrupt-result> <exit-command-state> [obser
 }
 
 claude_exit_guard_input() {  # <interrupt-result> <exit-command-state> [expected-pending] [observed-agent-state]
-  [ "$(claude_exit_screen_state "${3:-}")" != exit-confirm ] \
-    || claude_exit_dialog_refusal "$1" "$2" "${4:-}"
+  case "$(claude_exit_screen_state "${3:-}" 5000)" in
+    exit-confirm) claude_exit_dialog_refusal "$1" "$2" "${4:-}" ;;
+    timeout) claude_exit_unconfirmed "$1" "$2" 'the Claude viewport read timed out' "${4:-}" ;;
+  esac
 }
 
 claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
-  local cmd=$1 interrupt_result=$2 screen state=unreadable sample submission=typed attempts=1
-  local budget_ms poll_ms deadline now remaining delay final_probe_ms probe_ms
+  local cmd=$1 interrupt_result=$2 screen= state=unreadable sample submission=typed attempts=1
+  local budget_ms poll_ms deadline now remaining delay probe_ms
   claude_exit_guard_input "$interrupt_result" not-sent
   fm_backend_send_literal "$BACKEND" "$T" "$cmd" "$LABEL" \
     || die "the exit command could not be sent to task $ID on $BACKEND"
@@ -605,22 +607,19 @@ claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
   read -r budget_ms poll_ms < <(awk -v wait="$EXIT_WAIT" -v poll="$POLL" 'BEGIN{printf "%.0f %.0f\n", wait * 1000, poll * 1000}')
   now=$(fm_monotonic_ms) || claude_exit_unconfirmed "$interrupt_result" "$submission" 'the exit clock is unavailable'
   deadline=$(( now + budget_ms ))
-  final_probe_ms=$(( budget_ms / 3 ))
-  [ "$final_probe_ms" -le 1000 ] || final_probe_ms=1000
   while :; do
     remaining=$(( deadline - now ))
     [ "$remaining" -gt 0 ] || break
-    delay=$(( remaining / 2 ))
-    [ "$delay" -le "$poll_ms" ] || delay=$poll_ms
-    sleep "$(fm_timeout_seconds "$delay")"
-    now=$(fm_monotonic_ms) || break
-    remaining=$(( deadline - now ))
-    [ "$remaining" -gt 0 ] || break
-
-    probe_ms=$remaining
-    if [ "$remaining" -gt "$final_probe_ms" ]; then
-      probe_ms=$(( (remaining - final_probe_ms + 1) / 2 ))
+    if [ "$screen" != timeout ]; then
+      delay=$(( remaining / 4 ))
+      [ "$delay" -le "$poll_ms" ] || delay=$poll_ms
+      sleep "$(fm_timeout_seconds "$delay")"
+      now=$(fm_monotonic_ms) || break
+      remaining=$(( deadline - now ))
+      [ "$remaining" -gt 0 ] || break
     fi
+
+    probe_ms=$(( (remaining + 1) / 2 ))
     [ "$probe_ms" -le 1000 ] || probe_ms=1000
     if sample=$(fm_backend_run_timed "$probe_ms" fm_backend_agent_state "$BACKEND" "$T"); then
       state=$sample
@@ -629,16 +628,16 @@ claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
       sample=unreadable
     fi
     now=$(fm_monotonic_ms) || break
-    remaining=$(( deadline - now - final_probe_ms ))
-    [ "$remaining" -gt 0 ] || continue
-    probe_ms=$remaining
+    remaining=$(( deadline - now ))
+    [ "$remaining" -gt 0 ] || break
+    probe_ms=$(( remaining - remaining / 4 ))
     [ "$probe_ms" -le 5000 ] || probe_ms=5000
     screen=$(claude_exit_screen_state "$cmd" "$probe_ms")
     [ "$screen" != exit-confirm ] || claude_exit_dialog_refusal "$interrupt_result" "$submission" "$sample"
     now=$(fm_monotonic_ms) || break
-    remaining=$(( deadline - now - final_probe_ms ))
+    remaining=$(( deadline - now ))
     if [ "$remaining" -gt 0 ] && [ "$screen" = pending ] && [ "$sample" = alive ] && [ "$attempts" -lt "$EXIT_RETRIES" ]; then
-      if fm_backend_run_timed "$remaining" fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null; then
+      if fm_backend_run_timed "$(( (remaining + 1) / 2 ))" fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null; then
         submission=delivered
       fi
       attempts=$((attempts + 1))
@@ -663,6 +662,9 @@ do_exit() {
     alive) ;;
     *) die "task $ID's endpoint reads '$state' rather than a positively classified state; refusing to send a lifecycle command into an unattributed endpoint" ;;
   esac
+  if [ "$HARNESS" = claude ]; then
+    fm_monotonic_ms >/dev/null 2>&1 || die 'the Claude exit clock is unavailable'
+  fi
   if [ "$HARNESS" = codex ]; then
     screen=$(codex_exit_screen_state)
     [ "$screen" != update-picker ] \
