@@ -13,11 +13,13 @@ TMP_ROOT=$(fm_test_tmproot fm-watch-checkpoint)
 if [ "${FM_CHECKPOINT_TEST_HARNESS:-0}" != 1 ]; then
   ln -s /bin/bash "$TMP_ROOT/codex" || exit 1
   unset CLAUDECODE CURSOR_AGENT CURSOR_INVOKED_AS GEMINI_CLI PI_CODING_AGENT GROK_AGENT FM_OMP_HARNESS ANTIGRAVITY_AGENT
-  unset FM_SUPERVISION_MODEL
+  unset ATLASSIAN_AGENT_TYPE ROVODEV_CLI FM_SUPERVISION_MODEL
   # shellcheck disable=SC2016
   FM_CHECKPOINT_TEST_HARNESS=1 "$TMP_ROOT/codex" -c '"$@"; status=$?; exit "$status"' _ "$0" "$@"
   exit $?
 fi
+
+export FM_GUARD_GRACE=300
 
 make_home() {
   local name=$1 home
@@ -85,7 +87,7 @@ test_existing_singleton_watcher_is_not_success() {
   mkdir "$home/state/.watch.lock"
   printf '%s\n' "$$" > "$home/state/.watch.lock/pid"
   status=0
-  FM_HOME="$home" FM_GUARD_GRACE=300 "$CHECKPOINT" --seconds 5 >"$out" 2>"$err" || status=$?
+  FM_HOME="$home" "$CHECKPOINT" --seconds 5 >"$out" 2>"$err" || status=$?
   expect_code 1 "$status" "singleton checkpoint exit"
   assert_contains "$(cat "$out")" "watcher: already running" "singleton watcher output was not passed through"
   assert_contains "$(cat "$err")" "outside this foreground checkpoint" "singleton watcher failure was not explained"
