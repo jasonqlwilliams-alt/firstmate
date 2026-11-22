@@ -27,10 +27,17 @@ REAL_CHMOD=$(command -v chmod)
 # depending on the host keeping jq in one of those four directories.
 REAL_JQ=$(command -v jq) || fail "these tests read glab's JSON with the real jq, which was not found"
 
-ack_watcher_cycle() {  # <state>
-  local state=$1 err sequence generation
+ack_watcher_cycle() {  # <state> [<expected wake kind, key, and payload>]
+  local state=$1 expected=${2-} err drained rows sequence generation
   err="$state/.test-wake-drain.err"
-  FM_STATE_OVERRIDE="$state" "$ROOT/bin/fm-wake-drain.sh" >/dev/null 2> "$err" || return 1
+  drained=$(FM_STATE_OVERRIDE="$state" "$ROOT/bin/fm-wake-drain.sh" 2> "$err") || return 1
+  if [ -n "$expected" ]; then
+    rows=$(printf '%s\n' "$drained" | awk -F '\t' 'NF >= 5 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {
+      sub(/^[^\t]*\t[^\t]*\t/, "")
+      print
+    }')
+    [ "$rows" = "$expected" ] || fail "unexpected drained wake rows: $rows"
+  fi
   sequence=$(sed -n 's/^WAKE_ACK_REQUIRED:.*--ack-through \([0-9][0-9]*\) --recovery-generation [A-Za-z0-9._-][A-Za-z0-9._-]*$/\1/p' "$err")
   generation=$(sed -n 's/^WAKE_ACK_REQUIRED:.*--ack-through [0-9][0-9]* --recovery-generation \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p' "$err")
   rm -f "$err"
@@ -2079,7 +2086,7 @@ test_external_merge_transition_retires_only_terminal_poll() {
 }
 
 test_polled_closures_preserve_other_pr_evidence() {
-  local dir state url out github_pr gitlab_mr replies_before
+  local dir state url out github_pr gitlab_mr replies_before control_check expected_wake
   dir=$(make_case close-two-prs)
   state="$dir/home/state"
   github_pr=https://github.com/o/r/pull/20
@@ -2087,6 +2094,8 @@ test_polled_closures_preserve_other_pr_evidence() {
   write_task_meta "$dir" task-a
   seed_secondmate_home "$dir"
   add_stop_custom_check "$dir"
+  control_check="$state/z-stop.check.sh"
+  expected_wake=$(printf 'check\t%s\tcheck: %s: stop-cycle' "$control_check" "$control_check")
   fm_pr_poll_merge_mark_notified "$state" task-a github github.com o/r 19 \
     || fail "could not seed an earlier merge notification"
 
@@ -2102,9 +2111,8 @@ test_polled_closures_preserve_other_pr_evidence() {
     out=$(FM_TEST_GH_STATE=CLOSED FM_TEST_GLAB_STATE=closed \
       run_watcher_bounded "$dir/home" "$dir/fakebin") || fail "could not poll $url"
     case "$out" in check:*z-stop.check.sh:*stop-cycle) ;; *) fail "closure woke the watcher: $out" ;; esac
-    assert_no_grep "$url" "$state/.wake-queue" "closure queued a PR wake"
     [ "$(cat "$state/parent-replies.status")" = "$replies_before" ] || fail "closure changed the parent ledger"
-    ack_watcher_cycle "$state" || fail "could not acknowledge the control wake"
+    ack_watcher_cycle "$state" "$expected_wake" || fail "could not acknowledge the control wake"
   done
   run_check_entry "$dir" task-a "$github_pr" >/dev/null 2>"$dir/register.err" \
     || fail "could not re-register the first closed PR: $(cat "$dir/register.err")"
@@ -2205,10 +2213,10 @@ SH
     PATH="$dir/fakebin:$BASE_PATH" "$TEARDOWN" task-a >"$dir/teardown.out" 2>"$dir/teardown.err" \
     || fail "remote proxy teardown failed: $(cat "$dir/teardown.err")"
   [ ! -e "$state/task-a.meta" ] || fail "remote teardown left proxy metadata"
-  [ ! -e "$state/task-a.check.sh" ] || fail "remote teardown left the proxy's poll armed"
+  [ -f "$state/task-a.check.sh" ] || fail "remote closure cleanup removed the proxy's poll"
   [ ! -e "$state/task-a.pr-poll-closed" ] || fail "remote teardown left the proxy's closure evidence"
   [ ! -e "$state/.task-a.pr-poll-closed.ABC123" ] || fail "remote teardown left staged closure evidence"
-  pass "remote proxy retirement clears closure evidence and disarms its PR poll"
+  pass "remote proxy retirement clears closure evidence and preserves the poll files"
 }
 
 test_retirement_refuses_replacement_and_nonterminal_results() {
