@@ -1091,6 +1091,7 @@ FM_TEARDOWN_KEEP_PANE_LAB=1 bin/fm-test-run.sh tests/fm-teardown.test.sh
 ```
 
 The opt-in lab reports `skip: keep-pane lab requires lsof` when `lsof` is unavailable.
+The Linux `test_keep_pane_without_lsof` fixture in [`tests/fm-teardown.test.sh`](../../tests/fm-teardown.test.sh) omits `lsof` from teardown's `PATH` and checks that the original shell survives at `/` and a detached process is reaped before the fixture accepts the worktree return.
 The lab uses the named-session helper and default-session tripwire, with an inert shell and a disposable pool fixture.
 It verifies actual pane and shell survival, kernel cwd detachment, task record removal and slot-claim release; pool return is a fixture executable, not a production pool operation.
 It also retires the same real pane without the option to prove the default close behavior.

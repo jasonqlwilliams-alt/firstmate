@@ -659,10 +659,10 @@ backlog_row_state() {
 # Build the teardown test's executable search path without lsof, regardless of
 # whether the host installs it in /usr/bin, /usr/sbin, or a package-manager bin.
 make_path_without_lsof() {  # <case-dir>
-  local case_dir=$1 path_dir="$1/path-without-lsof" cmd resolved
+  local path_dir="$1/path-without-lsof" cmd resolved
   mkdir -p "$path_dir"
-  for cmd in awk bash basename cat chmod cp cut date dirname env find git grep head hostname id ln \
-    mkdir mktemp mv perl ps readlink realpath rm sed sh sleep sort stat tail timeout tr uname wc xargs; do
+  for cmd in awk bash basename cat chmod cp cut date dirname env find git grep head hostname id jq ln \
+    mkdir mktemp mv perl ps readlink realpath rm sed sh sha256sum shasum sleep sort stat tail timeout tr uname wc xargs; do
     resolved=$(command -v "$cmd" 2>/dev/null) || continue
     case "$resolved" in /*) ln -sf "$resolved" "$path_dir/$cmd" ;; esac
   done
@@ -3344,8 +3344,7 @@ test_leaked_worktree_process_is_reaped() {
     fail "leaked-process-reap: setup sleeper did not start in the worktree"
   fi
 
-  # Without lsof, teardown uses a separate pane process-group fallback.
-  # Supply the cwd scan for this real sleeper so this case still tests cwd reaping.
+  # Keep the lsof scan path covered even when the host has no lsof binary.
   if [ -z "$REAL_LSOF_FOR_TEST" ]; then
     cat > "$case_dir/fakebin/lsof" <<'SH'
 #!/usr/bin/env bash
@@ -3407,14 +3406,296 @@ test_leaked_tasktmp_process_is_reaped() {
   pass "a leaked descendant process rooted under the task's per-task tasktmp is reaped by teardown too"
 }
 
-test_lsof_absent_reaps_tmux_process_group() {
-  local case_dir rc pid path_without_lsof
+configure_teardown_ancestry_ps() {
+  local case_dir=$1
+  cat > "$case_dir/fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+set -o pipefail
+case "$*" in
+  '-axo pid=,ppid=') exit 1 ;;
+  '-A -o pid= -o ppid=')
+    "$REAL_PS_FOR_TEST" "$@" | awk -v hidden="${FM_TEST_HIDDEN_ANCESTOR:-}" '$1 != hidden'
+    ;;
+  *) exec "$REAL_PS_FOR_TEST" "$@" ;;
+esac
+SH
+  chmod +x "$case_dir/fakebin/ps"
+}
+
+test_lsof_absent_reaps_detached_linux_process() (
+  if [ "$(uname -s)" != Linux ]; then
+    printf 'skip: detached /proc cwd scan requires Linux\n'
+    return 0
+  fi
+  local visibility=$1 case_dir rc=0 pid='' tmp_pid='' sibling_pid='' path_without_lsof i
+  local nested=$'nested -> dir\nleaf' sibling=$'wt\n'
+  case_dir=$(make_case "lsof-absent-detached-reap-café-$visibility")
+  write_meta "$case_dir" no-mistakes ship
+  land_shippable_commit "$case_dir"
+  path_without_lsof=$(make_path_without_lsof "$case_dir")
+  if PATH="$case_dir/fakebin:$path_without_lsof" command -v lsof >/dev/null 2>&1; then
+    fail 'lsof-absent-detached-reap: fixture path unexpectedly exposes lsof'
+  fi
+  {
+    cat <<'SH'
+#!/usr/bin/env bash
+for arg; do
+  [ "$arg" != -ignore_readdir_race ] || exit 1
+done
+SH
+    printf 'exec %q "$@"\n' "$path_without_lsof/find"
+  } > "$case_dir/fakebin/find"
+  chmod +x "$case_dir/fakebin/find"
+  if [ "$visibility" = hidden ]; then
+    # shellcheck disable=SC2030 # Only this fixture's child processes need this value.
+    export FM_TEST_HIDDEN_ANCESTOR=$$
+  fi
+  configure_teardown_ancestry_ps "$case_dir"
+
+  mkdir -p "$case_dir/wt/$nested" "$case_dir/$sibling" "$case_dir/tasktmp"
+  printf 'tasktmp=%s\n' "$case_dir/tasktmp" >> "$case_dir/state/task-x1.meta"
+  ln -s "$case_dir/wt/$nested" "$case_dir/cwd-alias"
+  trap 'for child in "$pid" "$tmp_pid" "$sibling_pid"; do
+    [ -n "$child" ] || continue
+    kill -KILL "$child" 2>/dev/null || true
+    wait "$child" 2>/dev/null || true
+  done' EXIT
+  if [ "$visibility" = visible ]; then
+    # The in-copy sleeper ignores TERM to exercise the identity and cwd recheck before KILL.
+    perl -MPOSIX -e 'POSIX::setsid() > 0 or die; $SIG{TERM} = "IGNORE"; chdir shift or die; exec "sleep", "300"' "$case_dir/cwd-alias" &
+    pid=$!
+  fi
+  perl -MPOSIX -e 'POSIX::setsid() > 0 or die; chdir shift or die; exec "sleep", "300"' "$case_dir/tasktmp" &
+  tmp_pid=$!
+  perl -MPOSIX -e 'POSIX::setsid() > 0 or die; chdir shift or die; exec "sleep", "300"' "$case_dir/$sibling" &
+  sibling_pid=$!
+  for ((i=0; i<100; i++)); do
+    if { [ -z "$pid" ] || [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "$case_dir/wt/$nested" ]; } \
+       && [ "$(readlink "/proc/$tmp_pid/cwd" 2>/dev/null)" = "$case_dir/tasktmp" ] \
+       && [[ "/proc/$sibling_pid/cwd" -ef "$case_dir/$sibling" ]]; then
+      break
+    fi
+    sleep 0.05
+  done
+  [ "$i" -lt 100 ] || fail 'lsof-absent-detached-reap: sleepers did not enter their directories'
+
+  # Both the teardown script and its calling shell have an in-copy cwd.
+  if [ "$visibility" = visible ]; then
+    cd "$case_dir/wt" || fail 'lsof-absent-detached-reap: could not enter the worktree'
+  fi
+  FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+
+  [ "$rc" -eq 0 ] || cat "$case_dir/stderr" >&2
+  expect_code 0 "$rc" 'lsof-absent-detached-reap: teardown should succeed'
+  if [ -n "$pid" ]; then
+    ! kill -0 "$pid" 2>/dev/null || fail 'lsof-absent-detached-reap: detached worktree process survived successful teardown'
+    wait "$pid" 2>/dev/null || true
+    pid=''
+    assert_grep 'force-killing leaked worktree process(es)' "$case_dir/stderr" \
+      'lsof-absent-detached-reap: teardown did not escalate after TERM'
+  fi
+  kill -0 "$tmp_pid" 2>/dev/null || fail 'lsof-absent-detached-reap: cleanup signalled a process in tasktmp'
+  kill -0 "$sibling_pid" 2>/dev/null || fail 'lsof-absent-detached-reap: sibling process was killed'
+  assert_absent "$case_dir/tasktmp" 'lsof-absent-detached-reap: cleanup left the tasktmp directory'
+  pass "Linux teardown without lsof scopes reaping to its owned worktree ($visibility ancestry)"
+)
+
+test_proc_cwd_read_failure_preserves_copy() (
+  if [ "$(uname -s)" != Linux ]; then
+    printf 'skip: unreadable /proc cwd fixture requires Linux\n'
+    return 0
+  fi
+  local case_dir path_without_lsof rc=0 leak_pid i
+  case_dir=$(make_case proc-cwd-read-failure)
+  write_meta "$case_dir" no-mistakes ship
+  land_shippable_commit "$case_dir"
+  path_without_lsof=$(make_path_without_lsof "$case_dir")
+  ( cd "$case_dir/wt" && exec sleep 300 ) &
+  leak_pid=$!
+  trap 'kill -KILL "$leak_pid" 2>/dev/null || true; wait "$leak_pid" 2>/dev/null || true' EXIT
+  for ((i=0; i<100; i++)); do
+    [[ ! "/proc/$leak_pid/cwd" -ef "$case_dir/wt" ]] || break
+    sleep 0.05
+  done
+  [ "$i" -lt 100 ] || fail 'proc-cwd-read-failure: leak did not enter the worktree'
+
+  # shellcheck disable=SC2016 # The generated readlink stub expands its own arguments.
+  printf '#!/usr/bin/env bash\n[ "$1" != %q ] || exit 1\nexec %q "$@"\n' \
+    "/proc/$leak_pid/cwd" "$path_without_lsof/readlink" > "$case_dir/fakebin/readlink"
+  printf '#!/usr/bin/env bash\n: > %q\n' "$case_dir/returned" > "$case_dir/fakebin/treehouse"
+  chmod +x "$case_dir/fakebin/readlink"
+
+  FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  expect_code 1 "$rc" 'proc-cwd-read-failure: cleanup should refuse'
+  assert_grep '(/proc failed)' "$case_dir/stderr" 'proc-cwd-read-failure: missing scan refusal'
+  assert_present "$case_dir/state/task-x1.meta" 'proc-cwd-read-failure: cleanup retired task metadata'
+  assert_absent "$case_dir/returned" 'proc-cwd-read-failure: cleanup returned the worktree'
+  kill -0 "$leak_pid" 2>/dev/null || fail 'proc-cwd-read-failure: cleanup signalled the leak'
+  pass 'a failed cwd read for a live directory refuses teardown'
+)
+
+test_hidden_intermediate_parent_refuses_reap() (
+  if [ "$(uname -s)" != Linux ]; then
+    printf 'skip: hidden parent fixture requires Linux\n'
+    return 0
+  fi
+  local scanner=$1 case_dir path_without_lsof rc=0 leak_pid i
+  case_dir=$(make_case "reap-hidden-parent-$scanner")
+  write_meta "$case_dir" no-mistakes ship
+  land_shippable_commit "$case_dir"
+  configure_teardown_ancestry_ps "$case_dir"
+  path_without_lsof=$(make_path_without_lsof "$case_dir")
+  if [ "$scanner" = lsof ]; then
+    cat > "$case_dir/fakebin/lsof" <<'SH'
+#!/usr/bin/env bash
+printf 'p%s\nfcwd\nn%s\n' "$FM_TEST_LEAK_PID" "$FM_TEST_WORKTREE" "$FM_TEST_IN_COPY_CALLER" "$FM_TEST_WORKTREE"
+SH
+    chmod +x "$case_dir/fakebin/lsof"
+  fi
+  ( cd "$case_dir/wt" && exec sleep 300 ) &
+  leak_pid=$!
+  trap 'kill -KILL "$leak_pid" 2>/dev/null || true; wait "$leak_pid" 2>/dev/null || true' EXIT
+  for ((i=0; i<100; i++)); do
+    [ "$(readlink "/proc/$leak_pid/cwd" 2>/dev/null)" != "$case_dir/wt" ] || break
+    sleep 0.05
+  done
+  [ "$i" -lt 100 ] || fail 'hidden intermediate parent: leak did not start in the worktree'
+
+  (
+    cd "$case_dir/wt" || exit 1
+    export FM_TEST_IN_COPY_CALLER=$BASHPID FM_TEST_LEAK_PID=$leak_pid FM_TEST_WORKTREE="$case_dir/wt"
+    (
+      # shellcheck disable=SC2030,SC2031 # Only descendants of this subshell use its PID.
+      export FM_TEST_HIDDEN_ANCESTOR=$BASHPID
+      cd "$case_dir" || exit 1
+      FM_TEARDOWN_TEST_PATH="$path_without_lsof" run_teardown "$case_dir" || exit "$?"
+    )
+    rc=$?
+    printf 'survived\n' > "$case_dir/caller"
+    exit "$rc"
+  ) > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+
+  expect_code 1 "$rc" "hidden intermediate parent ($scanner): cleanup should refuse"
+  assert_present "$case_dir/caller" "hidden intermediate parent ($scanner): cleanup signalled the calling shell"
+  kill -0 "$leak_pid" 2>/dev/null || fail "hidden intermediate parent ($scanner): cleanup signalled another match before refusing"
+  assert_present "$case_dir/state/task-x1.meta" "hidden intermediate parent ($scanner): cleanup retired task metadata"
+  assert_grep 'REFUSED: cannot rule out a teardown ancestor among cwd matches' "$case_dir/stderr" \
+    "hidden intermediate parent ($scanner): cleanup did not report the ambiguous ancestry"
+  pass "cleanup with $scanner refuses an ambiguous ancestor without signalling either cwd match"
+)
+
+test_reparented_teardown_preserves_original_caller() (
+  if [ "$(uname -s)" != Linux ]; then
+    printf 'skip: reparented caller fixture requires Linux\n'
+    return 0
+  fi
+  local visibility=$1 case_dir leak_pid rc=0 i
+  case_dir=$(make_case "reparented-teardown-$visibility")
+  write_meta "$case_dir" no-mistakes ship
+  land_shippable_commit "$case_dir"
+  mkfifo "$case_dir/result" || fail 'reparented teardown: could not create result pipe'
+  if [ "$visibility" = hidden ]; then
+    configure_teardown_ancestry_ps "$case_dir"
+  fi
+
+  cat > "$case_dir/fakebin/lsof" <<'SH'
+#!/usr/bin/env bash
+if [ "$FM_TEST_REPARENT_VISIBILITY" = hidden ]; then
+  : > "$FM_TEST_REPARENT_DIR/release"
+fi
+if [ -f "$FM_TEST_REPARENT_DIR/release" ] || [ -f "$FM_TEST_REPARENT_DIR/term" ]; then
+  for ((i=0; i<100; i++)); do
+    parent=$(ps -o ppid= -p "$FM_TEST_REAP_RUNNER" | tr -d '[:space:]')
+    [ -z "$parent" ] || [ "$parent" = "$FM_TEST_REAP_WRAPPER" ] || break
+    sleep 0.05
+  done
+  [ "$i" -lt 100 ] || exit 1
+  : > "$FM_TEST_REPARENT_DIR/reparented"
+fi
+for pid in "$FM_TEST_REAP_CALLER" "$FM_TEST_REAP_LEAK"; do
+  cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || continue
+  printf 'p%s\nfcwd\nn%s\n' "$pid" "$cwd"
+done
+SH
+  chmod +x "$case_dir/fakebin/lsof"
+
+  perl -MPOSIX -e '
+    my ($dir) = @ARGV;
+    chdir "$dir/wt" or die;
+    $SIG{TERM} = sub { open my $term, ">", "$dir/term" or die; exit 0; };
+    open my $ready, ">", "$dir/ready" or die;
+    POSIX::pause();
+  ' "$case_dir" &
+  leak_pid=$!
+  trap 'kill -KILL "$leak_pid" 2>/dev/null || true; wait "$leak_pid" 2>/dev/null || true' EXIT
+  for ((i=0; i<100; i++)); do
+    [ ! -f "$case_dir/ready" ] || break
+    sleep 0.05
+  done
+  [ -f "$case_dir/ready" ] || fail 'reparented teardown: leak did not start'
+
+  (
+    cd "$case_dir/wt" || exit 1
+    exec 3<>"$case_dir/result"
+    export FM_TEST_REAP_CALLER=$BASHPID FM_TEST_REAP_LEAK=$leak_pid FM_TEST_REPARENT_DIR="$case_dir"
+    export FM_TEST_REPARENT_VISIBILITY=$visibility
+    (
+      cd "$case_dir" || exit 1
+      # shellcheck disable=SC2031 # This fixture exports its own wrapper PID.
+      export FM_TEST_REAP_WRAPPER=$BASHPID FM_TEST_HIDDEN_ANCESTOR=$BASHPID
+      (
+        export FM_TEST_REAP_RUNNER=$BASHPID
+        run_teardown "$case_dir" || rc=$?
+        printf '%s\n' "$rc" >&3
+      ) &
+      for ((i=0; i<300; i++)); do
+        if [ -f "$case_dir/release" ] || [ -f "$case_dir/term" ]; then
+          exit 0
+        fi
+        sleep 0.05
+      done
+      exit 1
+    ) || exit 1
+    IFS= read -r -t 20 rc <&3 || exit 1
+    printf 'survived\n' > "$case_dir/caller"
+    exit "$rc"
+  ) > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+
+  assert_present "$case_dir/reparented" 'reparented teardown: parent did not change during cleanup'
+  assert_present "$case_dir/caller" 'reparented teardown: cleanup signalled the original caller'
+  if [ "$visibility" = hidden ]; then
+    expect_code 1 "$rc" 'reparented teardown: hidden startup ancestry should block cleanup'
+    assert_present "$case_dir/state/task-x1.meta" 'reparented teardown: refusal retired task metadata'
+    assert_absent "$case_dir/term" 'reparented teardown: refusal came after sending TERM'
+    kill -0 "$leak_pid" 2>/dev/null || fail 'reparented teardown: refusal came after killing the leak'
+    assert_grep 'REFUSED: cannot rule out a teardown ancestor among cwd matches' "$case_dir/stderr" \
+      'reparented teardown: refusal did not report ambiguous ancestry'
+    pass 'cleanup refuses cwd matches after a hidden wrapper exits'
+    return 0
+  fi
+  expect_code 0 "$rc" 'reparented teardown: cleanup should succeed'
+  assert_absent "$case_dir/state/task-x1.meta" 'reparented teardown: task record survived'
+  wait "$leak_pid" || fail 'reparented teardown: leak did not exit through its TERM handler'
+  trap - EXIT
+  pass 'cleanup reaps the leak and protects its original caller after reparenting'
+)
+
+test_lsof_absent_on_non_linux_reaps_tmux_process_group() {
+  local case_dir rc pid path_without_lsof real_uname
   case_dir=$(make_case lsof-absent-process-group-reap)
   write_meta "$case_dir" no-mistakes ship
   land_shippable_commit "$case_dir"
   path_without_lsof=$(make_path_without_lsof "$case_dir")
   PATH="$path_without_lsof" command -v lsof >/dev/null 2>&1 \
     && fail "lsof-absent-process-group-reap: fixture path unexpectedly exposes lsof"
+  real_uname=$(command -v uname)
+  cat > "$case_dir/fakebin/uname" <<EOF
+#!/usr/bin/env bash
+if [ "\${1:-}" = -s ]; then printf 'Darwin\n'; else exec '$real_uname' "\$@"; fi
+EOF
+  chmod +x "$case_dir/fakebin/uname"
 
   perl -e 'setpgrp(0, 0); chdir shift or die; exec "sleep", "300"' "$case_dir/wt" &
   pid=$!
@@ -3441,7 +3722,7 @@ EOF
   fi
   assert_grep "reaping leaked worktree process group" "$case_dir/stderr" \
     "lsof-absent-process-group-reap: teardown did not use the process-group fallback"
-  pass "missing lsof falls back to reaping the tmux pane process group"
+  pass "missing lsof on a non-Linux host falls back to reaping the tmux pane process group"
 }
 
 test_lsof_error_refuses_before_removal() {
@@ -3792,6 +4073,9 @@ case "${1:-} ${2:-}" in
   'pane run')
     [ "${3:-}" = wG:pQ ] && [ "${4:-}" = 'cd /' ] || exit 9
     [ "${FM_KEEP_MODE:-}" != detach-fails ] || exit 1
+    if [ -p "$FM_KEEP_CASE/shell-input" ]; then
+      printf '%s\n' "$4" 1<>"$FM_KEEP_CASE/shell-input" || exit 1
+    fi
     : > "$FM_KEEP_CASE/detached"
     ;;
   'workspace list')
@@ -3832,6 +4116,80 @@ run_keep_pane_case() {
     FM_HERDR_PS_BIN="$case_dir/fakebin/keep-ps" FM_BACKEND_HERDR_IDLE_SHELL_PROOF_POLLS=1 \
     run_teardown "$case_dir" "$@"
 }
+
+test_keep_pane_without_lsof() (
+  if [ "$(uname -s)" != Linux ]; then
+    printf 'skip: keep-pane /proc cwd proof requires Linux\n'
+    return 0
+  fi
+  local case_dir path_without_lsof shell_pid='' leak_pid='' i
+  case_dir=$(make_case keep-pane-no-lsof)
+  configure_keep_pane_case "$case_dir"
+  rm -f "$case_dir/fakebin/lsof"
+  path_without_lsof=$(make_path_without_lsof "$case_dir")
+  if PATH="$case_dir/fakebin:$path_without_lsof" command -v lsof >/dev/null 2>&1; then
+    fail 'keep-pane-no-lsof: fixture path unexpectedly exposes lsof'
+  fi
+  # shellcheck disable=SC2016 # The generated readlink stub expands its own arguments.
+  printf '#!/usr/bin/env bash\n[ "${1:-}" != -e ] || exit 1\nexec %q "$@"\n' \
+    "$path_without_lsof/readlink" > "$case_dir/fakebin/readlink"
+  chmod +x "$case_dir/fakebin/readlink"
+  cat > "$case_dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+set -eu
+if [ "$#" -ne 3 ] || [ "$1" != return ] || [ "$2" != --force ] || [ "$3" != "$FM_KEEP_CASE/wt" ]; then
+  printf 'unexpected Treehouse return arguments: %s\n' "$*" >&2
+  exit 1
+fi
+if ! [[ "/proc/$FM_KEEP_PID/cwd" -ef / ]]; then
+  printf 'original pane shell was not at / when Treehouse returned the copy\n' >&2
+  exit 1
+fi
+if kill -0 "$FM_KEEP_LEAK_PID" 2>/dev/null; then
+  printf 'the detached leak was still alive when Treehouse returned the copy\n' >&2
+  exit 1
+fi
+: > "$FM_KEEP_CASE/return-verified"
+SH
+  mkfifo "$case_dir/shell-input" || fail 'keep-pane-no-lsof: could not create pane input'
+  trap 'for child in "$shell_pid" "$leak_pid"; do
+    [ -n "$child" ] || continue
+    kill -KILL "$child" 2>/dev/null || true
+    wait "$child" 2>/dev/null || true
+  done' EXIT
+  (
+    cd "$case_dir/wt" || exit 1
+    exec perl -MPOSIX -e 'POSIX::setsid() > 0 or die; exec @ARGV' bash -c '
+      IFS= read -r -t "$FM_TEST_STUB_MAX_BLOCK_SECONDS" command &&
+        [ "$command" = "cd /" ] && cd / && IFS= read -r -t "$FM_TEST_STUB_MAX_BLOCK_SECONDS"
+    ' <>"$case_dir/shell-input"
+  ) &
+  shell_pid=$!
+  perl -MPOSIX -e 'POSIX::setsid() > 0 or die; chdir shift or die; exec "sleep", "300"' "$case_dir/wt" &
+  leak_pid=$!
+  for ((i=0; i<100; i++)); do
+    if [ "$(ps -p "$shell_pid" -o comm=)" = bash ] \
+       && [ "$(readlink "/proc/$shell_pid/cwd" 2>/dev/null)" = "$case_dir/pool/1/project" ] \
+       && [ "$(readlink "/proc/$leak_pid/cwd" 2>/dev/null)" = "$case_dir/pool/1/project" ]; then
+      break
+    fi
+    sleep 0.05
+  done
+  [ "$i" -lt 100 ] || fail 'keep-pane-no-lsof: shell and leak did not start in the worktree'
+
+  FM_KEEP_CASE="$case_dir" FM_KEEP_PID="$shell_pid" FM_KEEP_LEAK_PID="$leak_pid" \
+    FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
+    run_teardown "$case_dir" --keep-pane > "$case_dir/out" 2> "$case_dir/err" \
+    || fail "keep-pane-no-lsof: retirement failed: $(cat "$case_dir/err")"
+  [ "$(readlink "/proc/$shell_pid/cwd" 2>/dev/null)" = / ] || fail 'keep-pane-no-lsof: original shell did not survive at /'
+  ! kill -0 "$leak_pid" 2>/dev/null || fail 'keep-pane-no-lsof: detached worktree process survived'
+  wait "$leak_pid" 2>/dev/null || true
+  leak_pid=''
+  assert_absent "$case_dir/closed" 'keep-pane-no-lsof: cleanup closed the exact pane'
+  assert_present "$case_dir/return-verified" 'keep-pane-no-lsof: cleanup did not return the worktree after reaping and detaching'
+  assert_absent "$case_dir/state/task-x1.meta" 'keep-pane-no-lsof: cleanup retained task metadata'
+  pass 'Linux keep-pane cleanup without lsof detaches the shell and reaps the leak before returning the worktree'
+)
 
 test_keep_pane_retirement() {
   local case_dir mode rc before show
@@ -4112,6 +4470,15 @@ SH
   pass "real Herdr lab counterfactual: default retirement closes the previously preserved exact pane"
 )
 
+test_leaked_worktree_process_is_reaped
+test_lsof_absent_reaps_detached_linux_process visible || exit 1
+test_lsof_absent_reaps_detached_linux_process hidden || exit 1
+test_proc_cwd_read_failure_preserves_copy || exit 1
+test_hidden_intermediate_parent_refuses_reap proc || exit 1
+test_hidden_intermediate_parent_refuses_reap lsof || exit 1
+test_reparented_teardown_preserves_original_caller visible || exit 1
+test_reparented_teardown_preserves_original_caller hidden || exit 1
+test_keep_pane_without_lsof || exit 1
 test_keep_pane_retirement
 test_keep_pane_lab || fail "real Herdr keep-pane lab failed"
 
@@ -4190,9 +4557,8 @@ test_empty_status_after_abort_refuses_unconfirmed
 test_not_found_status_after_abort_confirms_completion
 test_another_branchs_parked_run_is_never_touched
 test_own_autonomous_run_is_left_alone
-test_leaked_worktree_process_is_reaped
 test_leaked_tasktmp_process_is_reaped
-test_lsof_absent_reaps_tmux_process_group
+test_lsof_absent_on_non_linux_reaps_tmux_process_group
 test_lsof_error_refuses_before_removal
 test_reused_pid_identity_is_not_force_killed
 test_exec_changed_process_is_still_reaped
