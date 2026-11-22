@@ -286,6 +286,7 @@
 #     to find processes under the owned worktree and the recorded tasktmp,
 #     which can be shared between homes. On Linux without lsof it uses
 #     `/proc/<pid>/cwd` for the owned worktree only.
+#     Both scans can identify only processes whose working directory is readable.
 #     Both scans are bounded by process count and exclude teardown and its
 #     ancestors. Teardown sends TERM, then KILL after a short grace period
 #     to any survivor whose process identity and task cwd still match.
