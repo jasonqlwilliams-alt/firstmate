@@ -17,6 +17,11 @@
 #
 #   state: <working|parked|done|blocked|paused|failed|unknown> · source: <run-step|pane|status-log|remote-endpoint|none> · <detail>
 #
+# The fleet snapshot's home-summary read can request a second internal line
+# carrying cancellation evidence. The state line comes first so it remains
+# available if the evidence lookup times out. See bin/fm-fleet-snapshot.sh for
+# the home-summary classification contract.
+#
 # Logic, in order:
 #   1. Resolve worktree + backend target + kind from state/<id>.meta. A meta
 #      recording remote_host= is a remote secondmate: its worktree and endpoint

@@ -97,19 +97,25 @@
 #     schemas; a live ledger or cached copy missing either declaration or declaring
 #     an unsupported version is unavailable even when it contains no captain holds.
 #     These schemas also accept v1 summaries from older producers.
-#     A done in-flight child is valid only when its attributed current run-step
+#     A done in-flight child can remain valid when its attributed current run-step
 #     reports passed checks and an exact run PR URL. If task metadata registers
 #     a PR, it must match that URL; absent metadata PR does not erase current
 #     run attribution. No-checks, another PR, or a later pending run cannot
-#     inherit an older green verdict. A cancelled run or its active retry is
-#     exempt when the cancellation matches the registered PR head, the latest
-#     done event reports checks green for that PR, and local records show no merge.
-#     This read uses no forge queries, so it cannot distinguish an
-#     open PR from one closed without merging. Other terminal in-flight children
-#     remain contradictions unless the task has both a hold reason and hold kind. Held
-#     children stay visible but do not invalidate the home for terminal, unowned,
-#     or unknown child state. A validated pending-close receipt is instead disclosed
-#     as unavailable for its task generation, not as an orphan or contradiction.
+#     inherit an older green verdict through that run-step check.
+#     An attributed cancellation or a live retry with evidence of that
+#     cancellation is excluded from terminal_in_flight when the cancellation
+#     matches the registered PR head, the latest done event reports checks green
+#     for that PR, and the PR has no matching local merge notification or
+#     merge-poll retirement receipt. A newer terminal result can supersede the
+#     cancellation evidence. The exemption affects summary validity only. It
+#     preserves the observed endpoint state and uses local records alone, so a
+#     PR closed without merging can still qualify. Regression coverage lives in
+#     tests/fm-fleet-snapshot-view.test.sh.
+#     Other terminal in-flight children remain contradictions unless the task
+#     has both a hold reason and hold kind. Held children stay visible but do
+#     not invalidate the home for terminal, unowned, or unknown child state.
+#     A validated pending-close receipt is instead disclosed as unavailable for
+#     its task generation, not as an orphan or contradiction.
 #   secondmate_landed: {records[],truncated[],unreadable[],partial[]} - the
 #     compatibility landed-work roll-up derived from secondmate_current. Readable
 #     structured homes are partial, not unreadable, when an unavailable child state
