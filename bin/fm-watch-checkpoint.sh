@@ -103,21 +103,29 @@ run_with_perl_timeout() {
       exec @ARGV;
       die "exec failed: $!\n";
     }
-    local $SIG{ALRM} = sub {
-      kill "TERM", -$pid;
-      local $SIG{ALRM} = sub {
-        kill "KILL", -$pid;
-        waitpid $pid, 0;
-        exit 137;
+    # Unwind the first alarm handler before starting the second timed wait.
+    # Perl defers another ALRM while its handler is active.
+    sub wait_with_deadline {
+      my ($child, $limit) = @_;
+      my $deadline = "checkpoint wait expired\n";
+      local $SIG{ALRM} = sub { die $deadline };
+      my $status = eval {
+        alarm $limit;
+        waitpid $child, 0;
+        my $child_status = $?;
+        alarm 0;
+        $child_status;
       };
-      alarm $grace;
-      waitpid $pid, 0;
-      exit 124;
-    };
-    alarm $seconds;
+      die $@ if $@ ne "" && $@ ne $deadline;
+      return $status;
+    }
+    my $status = wait_with_deadline($pid, $seconds);
+    exit($status >> 8) if defined $status;
+    kill "TERM", -$pid;
+    exit 124 if defined wait_with_deadline($pid, $grace);
+    kill "KILL", -$pid;
     waitpid $pid, 0;
-    alarm 0;
-    exit($? >> 8);
+    exit 137;
   ' "$SECONDS_ARG" "$kill_after" "$SCRIPT_DIR/fm-watch.sh"
 }
 

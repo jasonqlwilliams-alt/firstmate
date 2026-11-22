@@ -27,20 +27,17 @@
 # later guarded commands in the same episode print a one-line reminder instead.
 # Between foreground checkpoints: when bin/fm-watch-checkpoint.sh recorded a
 # confirmed clean close (state/.last-checkpoint-return, bound to the current
-# attended Codex session) younger than grace, and the watcher lock is unheld,
-# the guard prints one factual NOTICE instead of the banner, claims no episode,
+# attended Codex session) younger than grace, and the watcher lock is absent,
+# the guard prints a factual NOTICE instead of the banner, claims no episode,
 # and clears an announced one. A quiet close also requires a fresh beacon; a
-# verified wake close does not. Anything else alarms as usual.
+# verified wake close does not.
 # Episode state lives only under state/.guard-watcher-stale-banner (volatile,
 # bounded). Independent alarms (queued wakes, worktree tangle) are never
-# suppressed by that dedup. Normal wake handling (watcher briefly down between a
-# wake and the next supervision resume) stays inside the grace window and stays
-# silent. The queued-wakes warning counts only the rows the calling actor can
-# itself present or retire (fm_wake_actor_pending_count), so it is never an
-# instruction to run a drain with nothing to present. A row reserved by a live
-# supervision-branch grant is never a drain instruction for main; instead of
-# going silent about a visibly non-empty queue, main gets a distinct advisory
-# naming the branch as the holder and saying not to drain those rows.
+# suppressed by that dedup. The queued-wakes warning counts only the rows the
+# calling actor can present or retire (fm_wake_actor_pending_count), so it never
+# directs an empty drain. When a live supervision-branch grant holds rows,
+# main gets a distinct advisory naming the branch as the holder and saying not
+# to drain those rows.
 # The ordinary warning also stays silent for the supervision branch
 # actor (FM_SUPERVISION_ACTOR=branch), because that actor runs guarded commands
 # while handling exactly the queued rows its grant covers and can drain nothing
