@@ -536,7 +536,10 @@ case "$*" in
   *'--json state'*)
     printf '%s\n' "$*" >> "$FM_HOME/forge-reads"
     touch "$FM_HOME/forge-ready"
-    while [ ! -e "$FM_HOME/forge-release" ]; do sleep 0.05; done
+    while [ ! -e "$FM_HOME/forge-release" ]; do
+      [ "$SECONDS" -lt "${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}" ] || exit 75
+      sleep 0.05
+    done
     printf 'CLOSED\n'
     ;;
   *) exit 2 ;;
@@ -562,7 +565,10 @@ SH
 if [ "${TEST_WATCH_CAPTURE:-0}" = 1 ] && [ "${*: -1}" = "$FM_HOME/state/rl-close.pr-poll" ] \
   && [ ! -e "$FM_HOME/replacement-armed" ]; then
   touch "$FM_HOME/capture-started"
-  while [ ! -e "$FM_HOME/replacement-armed" ]; do sleep 0.05; done
+  while [ ! -e "$FM_HOME/replacement-armed" ]; do
+    [ "$SECONDS" -lt "${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}" ] || exit 75
+    sleep 0.05
+  done
 fi
 exec "$TEST_REAL_CHECKSUM" "$@"
 SH
@@ -579,7 +585,10 @@ SH
 #!/usr/bin/env bash
 if [ ! -e "$FM_HOME/capture-verified" ]; then
   touch "$FM_HOME/invalidated-sweep-finished"
-  while [ ! -e "$FM_HOME/capture-verified" ]; do sleep 0.05; done
+  while [ ! -e "$FM_HOME/capture-verified" ]; do
+    [ "$SECONDS" -lt "${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}" ] || exit 75
+    sleep 0.05
+  done
 fi
 if [ -e "$FM_HOME/forge-release" ]; then printf 'poll-cycle-end\n'; fi
 SH

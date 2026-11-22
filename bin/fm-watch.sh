@@ -2078,7 +2078,8 @@ while :; do
     for c in "$STATE"/*.check.sh; do
       [ -e "$c" ] || continue
       is_pr_poll=0
-      if [ "$(basename "$c")" = x-watch.check.sh ]; then
+      id=$(basename "$c" .check.sh)
+      if [ "$id" = x-watch ]; then
         if fmx_poll_shim_valid "$c" "$FM_HOME" "$FM_ROOT" \
           && [ -f "$FM_ROOT/bin/fm-x-poll.sh" ] && [ ! -L "$FM_ROOT/bin/fm-x-poll.sh" ]; then
           FM_HOME="$FM_HOME" run_check_capture "$FM_ROOT/bin/fm-x-poll.sh" || exit 1
@@ -2087,8 +2088,12 @@ while :; do
           rejected_checks="$rejected_checks $c"
           continue
         fi
+      elif fm_custom_check_snapshot_prepare "$STATE" "$id"; then
+        run_check_capture "$FM_CUSTOM_CHECK_SNAPSHOT" || exit 1
+        out=$FM_CHECK_RESULT
+        fm_custom_check_snapshot_cleanup
       else
-        id=$(basename "$c" .check.sh)
+        fm_custom_check_snapshot_cleanup
         poll_prepare_rc=0
         fm_pr_poll_snapshot_prepare "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" || poll_prepare_rc=$?
         [ "$poll_prepare_rc" -eq 0 ] || fm_pr_closure_stage_cleanup
@@ -2105,13 +2110,7 @@ while :; do
           run_check_capture "$SCRIPT_DIR/fm-pr-poll.sh" --validated \
             "$provider" "$url" "$host" "$path" "$number" || exit 1
           out=$FM_CHECK_RESULT
-        elif fm_custom_check_snapshot_prepare "$STATE" "$id"; then
-          custom_snapshot=$FM_CUSTOM_CHECK_SNAPSHOT
-          run_check_capture "$custom_snapshot" || exit 1
-          out=$FM_CHECK_RESULT
-          fm_custom_check_snapshot_cleanup
         else
-          fm_custom_check_snapshot_cleanup
           rejected_checks="$rejected_checks $c"
           continue
         fi

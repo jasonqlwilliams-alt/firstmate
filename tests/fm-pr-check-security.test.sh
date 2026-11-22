@@ -2294,7 +2294,10 @@ test_busy_closure_publication_keeps_normal_cadence() (
   cat > "$dir/on-state" <<'SH'
 #!/usr/bin/env bash
 touch "$FM_HOME/forge-ready"
-while [ ! -e "$FM_HOME/forge-release" ]; do sleep 0.05; done
+while [ ! -e "$FM_HOME/forge-release" ]; do
+  [ "$SECONDS" -lt "${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}" ] || exit 75
+  sleep 0.05
+done
 SH
   chmod 0700 "$dir/on-state"
   FM_HOME="$dir/home" FM_TEST_GH_LOG="$dir/gh.log" FM_TEST_GH_STATE=CLOSED FM_TEST_GH_ON_STATE="$dir/on-state" \
@@ -2370,15 +2373,27 @@ test_registered_custom_check_survives_pr_closure_setup_failure() (
     if [ "$failure" = busy-lock ]; then
       lock=$(fm_meta_lock_path "$state/task-a.meta")
       fm_lock_try_acquire "$lock" || fail "could not hold the metadata lock for the custom check"
-    else
-      cat > "$dir/fakebin/mktemp" <<'SH'
+    fi
+    cat > "$dir/fakebin/mktemp" <<'SH'
 #!/usr/bin/env bash
-case "$1" in */.task-a.pr-poll-closed.XXXXXX) exit 1 ;; esac
+case "${1:-}" in
+  */.task-a.pr-poll-closed.XXXXXX)
+    touch "$FM_HOME/closure-stage-attempted"
+    [ "$TEST_PR_STAGE_FAULT" != failed-stage ] || exit 1
+    ;;
+esac
 exec "$TEST_REAL_MKTEMP" "$@"
 SH
-      chmod 0700 "$dir/fakebin/mktemp"
-    fi
-    out=$(TEST_REAL_MKTEMP="$(command -v mktemp)" FM_TEST_GH_LOG="$dir/gh.log" \
+    cat > "$dir/fakebin/cat" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = "$FM_HOME/state/.meta-task-a.lock/pid" ]; then
+  touch "$FM_HOME/metadata-lock-read"
+fi
+exec "$TEST_REAL_CAT" "$@"
+SH
+    chmod 0700 "$dir/fakebin/mktemp" "$dir/fakebin/cat"
+    out=$(TEST_REAL_MKTEMP="$(command -v mktemp)" TEST_REAL_CAT="$(command -v cat)" \
+      TEST_PR_STAGE_FAULT="$failure" FM_TEST_GH_LOG="$dir/gh.log" \
       run_watcher_bounded "$dir/home" "$dir/fakebin") || fail "watcher failed with $failure: $out"
     [ "$failure" != busy-lock ] || fm_lock_release "$lock"
     case "$out" in
@@ -2386,36 +2401,49 @@ SH
       *) fail "$failure suppressed the registered custom check: $out" ;;
     esac
     [ ! -s "$dir/gh.log" ] || fail "$failure sent the replacement custom check to the forge"
+    [ ! -e "$dir/home/closure-stage-attempted" ] || fail "$failure ran PR stage setup for the custom check"
+    [ ! -e "$dir/home/metadata-lock-read" ] || fail "$failure read the metadata lock for the custom check"
   done
   pass "registered custom checks run despite leftover PR registration and an unavailable closure stage"
 )
 
 test_closure_cleanup_tolerates_a_stage_disappearing() (
-  local dir state stage
+  local dir state stage record url
   dir=$(make_case disappearing-closure)
   state="$dir/home/state"
   stage="$state/.task-a.pr-poll-closed.ABC123"
   touch "$stage"
-  fm_pr_file_link_count() {
-    [ "$1" = "$stage" ] || return 1
-    rm -- "$stage"
-    return 1
-  }
-  fm_pr_poll_closed_remove "$state" task-a || fail "closure cleanup rejected a vanished stage"
+  (
+    fm_pr_file_link_count() {
+      [ "$1" = "$stage" ] || return 1
+      rm -- "$stage"
+      return 1
+    }
+    fm_pr_poll_closed_remove "$state" task-a
+  ) || fail "closure cleanup rejected a vanished stage"
   [ ! -e "$stage" ] || fail "the stage did not disappear during validation"
-  mkdir "$stage"
+  url=https://github.com/o/r/pull/30
+  record="$state/task-a.pr-poll-closed"
+  (umask 077; printf '%s\n' "$url" > "$record")
+  ln -s "$state/missing-target" "$stage"
   if fm_pr_poll_closed_remove "$state" task-a; then
     fail "closure cleanup accepted a remaining unsafe stage"
   fi
-  [ -d "$stage" ] || fail "closure cleanup removed an unsafe directory"
+  [ -L "$stage" ] || fail "closure cleanup removed an unsafe symlink"
+  [ "$(cat "$record")" = "$url" ] || fail "closure cleanup changed the valid record despite refusing the unsafe stage"
   pass "closure cleanup tolerates a concurrent unlink and rejects a remaining unsafe artifact"
 )
 
-test_remote_proxy_teardown_removes_closure_evidence() {
-  local dir state url teardown watcher i
+test_remote_proxy_teardown_removes_closure_evidence() (
+  local dir state url teardown= watcher= i
   dir=$(make_case remote-pr-closure-teardown)
   state="$dir/home/state"
   url=https://github.com/o/r/pull/25
+  trap '
+    touch "$dir/home/finish-teardown" "$dir/home/replacement-armed"
+    [ -z "$teardown" ] || wait "$teardown" || true
+    [ -z "$watcher" ] || wait "$watcher" || true
+  ' EXIT
   fm_write_meta "$state/task-a.meta" 'kind=secondmate' 'window=remote:task-a' \
     'remote_host=remote-mac' "remote_root=$dir/remote-root" "home=$dir/remote-home" "pr=$url"
   printf '%s\n' \
@@ -2438,14 +2466,20 @@ SH
 #!/usr/bin/env bash
 if [ "$#" -eq 2 ] && [ "$1" = -f ] && [ "$2" = "$FM_HOME/state/task-a.meta" ]; then
   touch "$FM_HOME/cleanup-gap"
-  while [ ! -e "$FM_HOME/finish-teardown" ]; do sleep 0.05; done
+  while [ ! -e "$FM_HOME/finish-teardown" ]; do
+    [ "$SECONDS" -lt "${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}" ] || exit 75
+    sleep 0.05
+  done
 fi
 exec "$TEST_REAL_RM" "$@"
 SH
   cat > "$dir/on-state" <<'SH'
 #!/usr/bin/env bash
 touch "$FM_HOME/gap-observed"
-while [ ! -e "$FM_HOME/replacement-armed" ]; do sleep 0.05; done
+while [ ! -e "$FM_HOME/replacement-armed" ]; do
+  [ "$SECONDS" -lt "${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}" ] || exit 75
+  sleep 0.05
+done
 SH
   cat > "$state/z-stop.check.sh" <<'SH'
 #!/usr/bin/env bash
@@ -2467,10 +2501,7 @@ SH
     [ ! -e "$dir/home/cleanup-gap" ] || break
     sleep 0.05
   done
-  if [ ! -e "$dir/home/cleanup-gap" ]; then
-    touch "$dir/home/finish-teardown"
-    fail "remote teardown did not reach metadata removal: $(cat "$dir/teardown.err")"
-  fi
+  [ -e "$dir/home/cleanup-gap" ] || fail "remote teardown did not reach metadata removal: $(cat "$dir/teardown.err")"
   [ -f "$state/task-a.meta" ] && [ ! -e "$state/task-a.pr-poll-closed" ] \
     && [ ! -e "$state/.task-a.pr-poll-closed.ABC123" ] \
     || fail "did not reach the gap after closure cleanup and before metadata removal"
@@ -2487,6 +2518,7 @@ SH
   touch "$dir/home/finish-teardown"
   [ -e "$dir/home/gap-observed" ] || fail "watcher did not reach the gap cycle: $(cat "$dir/watch.log")"
   wait "$teardown" || fail "remote proxy teardown failed: $(cat "$dir/teardown.err")"
+  teardown=
   [ ! -e "$state/task-a.meta" ] || fail "remote teardown left proxy metadata"
   [ -f "$state/task-a.check.sh" ] || fail "remote closure cleanup removed the proxy's poll"
   fm_write_meta "$state/task-a.meta" 'kind=secondmate' 'window=remote:task-a' \
@@ -2494,6 +2526,7 @@ SH
   run_check_entry "$dir" task-a "$url" >/dev/null || fail "could not arm the replacement proxy's poll"
   touch "$dir/home/replacement-armed"
   wait "$watcher" || fail "watcher failed during remote teardown: $(cat "$dir/watch.log")"
+  watcher=
   case "$(cat "$dir/watch.log")" in
     check:*z-stop.check.sh:*stop-cycle) ;;
     *) fail "watcher did not finish the gap cycle: $(cat "$dir/watch.log")" ;;
@@ -2502,7 +2535,7 @@ SH
   fm_pr_poll_artifacts_valid "$state" task-a "$POLL" || fail "replacement proxy did not retain its poll"
   [ ! -e "$state/task-a.pr-poll-closed" ] || fail "the replacement proxy inherited a stale closure"
   pass "remote proxy retirement invalidates closures through same-URL re-registration after ID reuse"
-}
+)
 
 test_retirement_refuses_replacement_and_nonterminal_results() {
   local dir state before rc replacement_check replacement_data replacement_registration replacement_meta
