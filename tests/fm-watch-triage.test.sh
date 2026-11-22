@@ -2330,7 +2330,7 @@ test_missing_tmux_endpoint_surfaces_once() (
 # a relaunch or an explicit clear restores the alarm, and an unmarked parked
 # task still raises the ordinary loss wake.
 test_parked_retained_copy_suppresses_endpoint_loss() (
-  local tmux_bin socket dir state window out pid='' park_pid='' wt before after park lock rc tries
+  local tmux_bin socket dir state window out pid='' park_pid='' wt before after park lock rc tries control_lock lease_lock
   tmux_bin=$(command -v tmux) || { echo "skip: tmux is required for the parked endpoint regression"; return 0; }
   park="$ROOT/bin/fm-park-retained.sh"
   socket="fm-watch-parked-$$-$RANDOM"
@@ -2354,7 +2354,7 @@ test_parked_retained_copy_suppresses_endpoint_loss() (
       FM_PAUSE_RESURFACE_SECS=999999 FM_STALE_ESCALATE_SECS=999999 exec "$WATCH" > "$out"
   }
   ack_parked() { FM_HOME="$dir/home" ack_stopped_cycle "$state" "$@"; }
-  park_task() { FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" "$park" "$@"; }
+  park_task() { PATH="$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" "$park" "$@"; }
   lease_task() { FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=main "$ROOT/bin/fm-lease.sh" "$@"; }
 
   expect_quiet() {
@@ -2370,7 +2370,7 @@ test_parked_retained_copy_suppresses_endpoint_loss() (
     ack_parked || fail "[$label] could not acknowledge the fixture watcher stop"
   }
 
-  close_worker() {  # <task> <spawn-gen>
+  open_worker() {  # <task> <spawn-gen>
     local task=$1 gen=$2
     window="parked:fm-$task"
     "$dir/bin/tmux" new-window -d -t parked: -n "fm-$task" -- bash --noprofile --norc -i \
@@ -2384,7 +2384,11 @@ test_parked_retained_copy_suppresses_endpoint_loss() (
       printf 'paused: parked for later, copy retained\n' > "$state/$task.status"
       seen_sig "$state/$task.status" > "$state/.seen-${task}_status"
     fi
-    "$dir/bin/tmux" kill-window -t "$window" || fail "could not close the fixture window for $task"
+  }
+
+  close_worker() {  # <task> <spawn-gen>
+    open_worker "$@"
+    "$dir/bin/tmux" kill-window -t "$window" || fail "could not close the fixture window for $1"
   }
 
   expect_loss() {
@@ -2417,9 +2421,20 @@ test_parked_retained_copy_suppresses_endpoint_loss() (
   awk -F '\t' -v w="$window" '$3 == "stale" && $4 == w { count++ } END { exit (count != 1) }' \
     "$dir/recovered" || fail "drain did not present one pending loss wake"
   expect_quiet marked-after-queue
+  park_task plain clear > "$dir/park.out" 2>&1 || fail "clearing after acknowledgement failed: $(cat "$dir/park.out")"
+  expect_quiet cleared-after-acknowledgement
 
   # The park mark silences the loss for this incarnation.
-  close_worker held first
+  open_worker held first
+  if park_task held mark > "$dir/park.out" 2>&1 || [ -e "$state/held.parked-retained" ]; then
+    fail "mark accepted an open tmux window"
+  fi
+  "$dir/bin/tmux" kill-window -t "$window" || fail "could not close the held worker's window"
+  printf 'window=unverified:fm-other\nbackend=zellij\nkind=ship\nspawn_gen=first\n' > "$state/other.meta"
+  if park_task other mark > "$dir/park.out" 2>&1 || [ -e "$state/other.parked-retained" ]; then
+    fail "mark accepted a backend that cannot confirm a missing endpoint"
+  fi
+  rm -f "$state/other.meta"
   park_task held mark > "$dir/park.out" 2>&1 || fail "marking failed: $(cat "$dir/park.out")"
   expect_quiet marked
   # Clearing the mark restores the alarm for the same lost endpoint.
@@ -2437,7 +2452,7 @@ test_parked_retained_copy_suppresses_endpoint_loss() (
   printf '%s\n' "$$" > "$lock/pid"
   printf '#!/usr/bin/env bash\n: > %q\nexec %q "$@"\n' "$dir/park-waiting" "$(command -v sleep)" > "$dir/lock-bin/sleep"
   chmod +x "$dir/lock-bin/sleep"
-  PATH="$dir/lock-bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" \
+  PATH="$dir/lock-bin:$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" \
     "$park" again mark > "$dir/park.out" 2>&1 &
   park_pid=$!
   for ((tries=0; tries<100; tries++)); do
@@ -2452,6 +2467,28 @@ test_parked_retained_copy_suppresses_endpoint_loss() (
   wait_for_exit "$park_pid" 100 || rc=$?
   park_pid=''
   [ "$rc" -eq 1 ] || fail "mark racing a replacement exited $rc: $(cat "$dir/park.out")"
+
+  control_lock="$state/.control-again.lock"
+  lease_lock="$state/.fm-lease-command.lock"
+  rm -f "$dir/park-waiting"
+  mkdir "$control_lock" "$lease_lock" "$lock" || fail "could not hold the relaunch fixture locks"
+  printf '%s\n' "$$" | tee "$control_lock/pid" "$lease_lock/pid" > "$lock/pid"
+  sed 's/^spawn_gen=.*/spawn_gen=third/' "$state/again.meta" > "$state/.again-replacement" \
+    && mv "$state/.again-replacement" "$state/again.meta" || fail "could not stage the new record during relaunch"
+  PATH="$dir/lock-bin:$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_SUPERVISION_ACTOR=main \
+    "$park" again mark > "$dir/park.out" 2>&1 &
+  park_pid=$!
+  for ((tries=0; tries<100; tries++)); do
+    if [ -e "$dir/park-waiting" ] || ! is_live_non_zombie "$park_pid"; then break; fi
+    sleep 0.1
+  done
+  [ "$tries" -lt 100 ] || fail "mark neither refused nor waited during relaunch"
+  rm -f "$control_lock/pid" "$lease_lock/pid" "$lock/pid"
+  rmdir "$control_lock" "$lease_lock" "$lock" || fail "could not release the relaunch fixture locks"
+  rc=0
+  wait_for_exit "$park_pid" 100 || rc=$?
+  park_pid=''
+  [ "$rc" -eq 1 ] || fail "mark after replacement publication exited $rc: $(cat "$dir/park.out")"
   expect_loss relaunched
   ack_parked || fail "[relaunched] could not acknowledge the loss wake"
 

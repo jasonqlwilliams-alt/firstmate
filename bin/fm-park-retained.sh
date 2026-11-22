@@ -3,7 +3,7 @@
 # so the watcher's recorded-endpoint loss report stays silent for it.
 #
 # Usage:
-#   fm-park-retained.sh <task-id> mark     record the mark for the current worker
+#   fm-park-retained.sh <task-id> mark     record the mark for a confirmed missing endpoint
 #   fm-park-retained.sh <task-id> clear    remove the mark
 #
 # Use it when a task's worker window was deliberately closed while its copy and
@@ -13,7 +13,8 @@
 # fm_backend_endpoint_park_identity). bin/fm-watch.sh skips the loss report only
 # while that content equals the record's current incarnation, so a relaunch or
 # resume, which records a new spawn generation, makes an old mark inert and the
-# resumed worker's loss alerts again; `clear` restores the alert without one.
+# resumed worker's loss alerts again. `clear` restores normal reporting
+# eligibility with the existing loss deduplication.
 #
 # The mark is advisory to loss reporting only. It never reads or changes the
 # task's copy, branch, or work, and relaunch, cleanup, the landed-work checks,
@@ -26,6 +27,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
+
+# shellcheck source=bin/fm-gate-refuse-lib.sh
+. "$SCRIPT_DIR/fm-gate-refuse-lib.sh"
+fm_refuse_if_gate_agent
 
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
@@ -47,14 +52,24 @@ MARK="$STATE/$ID.parked-retained"
 INCARNATION=$(fm_backend_endpoint_park_identity "$META") || INCARNATION=
 
 LOCK=$(fm_meta_lock_path "$META") || { echo "error: could not resolve the task record lock" >&2; exit 1; }
+CONTROL_LOCK="$STATE/.control-$ID.lock"
 TMP=
+refuse_busy() {
+  echo "error: another lifecycle action is already running for task $ID" >&2
+  exit 1
+}
 cleanup() {
   [ -z "$TMP" ] || rm -f -- "$TMP" || true
   fm_lock_release "$LOCK" || true
+  fm_lock_release "$CONTROL_LOCK" || true
   fm_lease_guard_release || true
 }
+if fm_pid_alive "$(cat "$CONTROL_LOCK/pid" 2>/dev/null || true)"; then
+  refuse_busy
+fi
 trap cleanup EXIT
 fm_lease_guard "$ID" "park $ACTION (fm-park-retained)"
+fm_lock_try_acquire "$CONTROL_LOCK" || refuse_busy
 fm_lock_acquire_wait "$LOCK"
 
 if [ ! -f "$META" ] || [ -L "$META" ] \
@@ -75,6 +90,13 @@ fi
   || { echo "error: $ID is a secondmate; park marks apply to ordinary tasks only" >&2; exit 1; }
 [ -n "$INCARNATION" ] \
   || { echo "error: task $ID records no endpoint to park" >&2; exit 1; }
+BACKEND=$(fm_backend_of_meta "$META")
+TARGET=$(fm_backend_target_of_meta "$META")
+if ! ENDPOINT_STATE=$(FM_BACKEND_HERDR_ENDPOINT_META="$META" \
+    fm_backend_agent_state "$BACKEND" "$TARGET" 2>/dev/null) || [ "$ENDPOINT_STATE" != missing ]; then
+  echo "error: task $ID's recorded endpoint could not be confirmed missing (${ENDPOINT_STATE:-unreadable})" >&2
+  exit 1
+fi
 TMP=$(mktemp "$STATE/.fm-parked-retained.XXXXXX")
 printf '%s\n' "$INCARNATION" > "$TMP"
 chmod 0600 "$TMP"

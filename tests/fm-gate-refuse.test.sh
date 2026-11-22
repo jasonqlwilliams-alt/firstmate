@@ -348,6 +348,44 @@ test_teardown_refuses_and_admits() {
   pass "fm-teardown: refuses on marker and gate-worktree backstop; a normal teardown is unaffected"
 }
 
+test_gate_cannot_change_park_marks() {
+  local home fakebin mark recorded out rc cwd fragment action
+  local -a marker
+  home="$TMP/park-home"
+  out=$(cd "$NORMAL_CWD" && env -u FM_GATE_REFUSE_BYPASS NO_MISTAKES_GATE=1 \
+    FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$ROOT/bin/fm-park-retained.sh" parked mark 2>&1); rc=$?
+  expect_code 3 "$rc" "park entry point must refuse before creating state"
+  assert_absent "$home/state" "refused park created the state directory"
+
+  mkdir -p "$home/state"
+  fakebin=$(fm_fakebin "$home")
+  fm_fake_exit0 "$fakebin" tmux
+  fm_write_meta "$home/state/parked.meta" 'window=firstmate:fm-parked' 'kind=ship' 'spawn_gen=parked-first'
+  mark="$home/state/parked.parked-retained"
+  (cd "$NORMAL_CWD" && env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS \
+    FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" PATH="$fakebin:$PATH" \
+    "$ROOT/bin/fm-park-retained.sh" parked mark >/dev/null) || fail "normal session could not mark the missing window"
+  recorded=$(cat "$mark") || fail "normal session did not publish the mark"
+
+  for cwd in "$NORMAL_CWD" "$GATE_WT"; do
+    marker=()
+    fragment=$PATH_MSG
+    if [ "$cwd" = "$NORMAL_CWD" ]; then
+      marker=(NO_MISTAKES_GATE=1)
+      fragment=$ENV_MSG
+    fi
+    for action in mark clear; do
+      out=$(cd "$cwd" && env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS \
+        "${marker[@]+"${marker[@]}"}" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" PATH="$fakebin:$PATH" \
+        "$ROOT/bin/fm-park-retained.sh" parked "$action" 2>&1); rc=$?
+      expect_code 3 "$rc" "gate must refuse park $action"
+      assert_contains "$out" "$fragment" "park $action refusal reason"
+      [ "$(cat "$mark")" = "$recorded" ] || fail "gate park $action changed the saved mark"
+    done
+  done
+  pass "park mark and clear refuse both gate signals before changing state"
+}
+
 test_helper_env_marker_refuses
 test_helper_empty_env_marker_refuses
 test_helper_path_backstop_refuses
@@ -355,3 +393,4 @@ test_helper_normal_is_noop
 test_spawn_refuses_and_admits
 test_send_refuses_and_admits
 test_teardown_refuses_and_admits
+test_gate_cannot_change_park_marks

@@ -758,7 +758,8 @@ test_endpoint_loss_marker_survives_failed_task_retirement() {
   recorded_loss=$'tmux:firstmate:fm-task-x1\tteardown-test-task-x1'
   printf '%s\n' "$recorded_loss" > "$marker"
   mark="$case_dir/state/task-x1.parked-retained"
-  FM_HOME="$case_dir/home" FM_STATE_OVERRIDE="$case_dir/state" "$ROOT/bin/fm-park-retained.sh" task-x1 mark >/dev/null \
+  PATH="$case_dir/fakebin:$PATH" FM_HOME="$case_dir/home" FM_STATE_OVERRIDE="$case_dir/state" \
+    "$ROOT/bin/fm-park-retained.sh" task-x1 mark >/dev/null \
     || fail "could not mark the parked task"
   recorded_park=$(cat "$mark") || fail "could not read the saved park mark"
 
@@ -797,7 +798,8 @@ test_parked_retained_mark_does_not_relax_cleanup() {
   case_dir=$(make_case parked-retained-mark)
   write_meta "$case_dir" local-only ship
   mark="$case_dir/state/task-x1.parked-retained"
-  FM_STATE_OVERRIDE="$case_dir/state" "$ROOT/bin/fm-park-retained.sh" task-x1 mark > /dev/null \
+  PATH="$case_dir/fakebin:$PATH" FM_HOME="$case_dir/home" FM_STATE_OVERRIDE="$case_dir/state" \
+    "$ROOT/bin/fm-park-retained.sh" task-x1 mark > /dev/null \
     || fail "could not mark the parked task"
   assert_present "$mark" "the park mark was not recorded"
   wt_commit "$case_dir" "unlanded parked work"

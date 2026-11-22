@@ -2015,7 +2015,8 @@ test_recovery_replays_a_close_an_interrupted_cleanup_left_open() {
   add_item "$case_dir" "$id"
   start_item "$case_dir" "$id"
   write_task_meta "$case_dir" "$id" ship no-mistakes "spawn_gen=spawn-heal-pr"
-  FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$ROOT/bin/fm-park-retained.sh" "$id" mark >/dev/null \
+  PATH="$case_dir/fakebin:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+    "$ROOT/bin/fm-park-retained.sh" "$id" mark >/dev/null \
     || fail "could not mark the task for the interrupted cleanup fixture"
   printf 'id=%s\ndata=%s\nspawn_gen=spawn-heal-pr\narg=--pr\narg=https://github.com/example/repo/pull/11\n' \
     "$id" "$(home_of "$case_dir")/data" \
