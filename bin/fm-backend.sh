@@ -973,7 +973,7 @@ fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
   [ "$limit_ms" -gt 0 ] || return 124
   . "$FM_BACKEND_LIB_DIR/fm-timeout-lib.sh" || return 1
   FM_HOME="$FM_HOME" FM_ROOT="$FM_ROOT" FM_BACKEND_HERDR_ENDPOINT_META="${FM_BACKEND_HERDR_ENDPOINT_META:-}" \
-    fm_run_timed "$(fm_timeout_seconds "$limit_ms")" \
+    fm_run_timed --kill "$(fm_timeout_seconds "$limit_ms")" \
     bash -uc '. "$1" && shift && "$@"' _ "$FM_BACKEND_LIB_DIR/fm-backend.sh" "$@" </dev/null 2>/dev/null
 )
 

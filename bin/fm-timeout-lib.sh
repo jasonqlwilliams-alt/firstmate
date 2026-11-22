@@ -10,7 +10,7 @@
 #       "gtimeout", "perl", or "bash". Set FM_TIMEOUT_MECHANISM_OVERRIDE=bash
 #       to force the dependency-free fallback.
 #
-#   fm_run_timed <seconds> <command> [args...]
+#   fm_run_timed [--kill] <seconds> <command> [args...]
 #       Runs the command with a hard bound. Exit status is the command's own,
 #       except 124, which means the bound was hit (GNU timeout's convention,
 #       reproduced by the perl and bash fallbacks).
@@ -42,8 +42,8 @@ fm_timeout_mechanism() {
 }
 
 fm_run_bash_timeout() {
-  local seconds=$1 command_status deadline_status child_pid watchdog_pid command_rc recorded_rc monitor_was_on=0
-  shift
+  local seconds=$1 signal=$2 command_status deadline_status child_pid watchdog_pid command_rc recorded_rc monitor_was_on=0
+  shift 2
   command_status=$(mktemp "${TMPDIR:-/tmp}/fm-bash-timeout-command.XXXXXX" 2>/dev/null) || return 124
   deadline_status="${command_status}.deadline"
   case $- in *m*) monitor_was_on=1 ;; esac
@@ -60,9 +60,11 @@ fm_run_bash_timeout() {
     set +m
     sleep "$seconds"
     printf 'expired\n' > "$deadline_status"
-    kill -TERM -- "-$child_pid" 2>/dev/null || true
-    sleep 0.2
-    kill -KILL -- "-$child_pid" 2>/dev/null || true
+    kill -s "$signal" -- "-$child_pid" 2>/dev/null || true
+    if [ "$signal" = TERM ]; then
+      sleep 0.2
+      kill -KILL -- "-$child_pid" 2>/dev/null || true
+    fi
     exit 124
   ) &
   watchdog_pid=$!
@@ -87,8 +89,11 @@ fm_run_bash_timeout() {
 }
 
 fm_run_external_timeout() {
-  local runner=$1 seconds=$2 status_file runner_pid runner_rc command_rc
-  shift 2
+  local runner=$1 seconds=$2 signal=$3 status_file runner_pid runner_rc command_rc
+  local -a timeout_args
+  shift 3
+  timeout_args=(-k 1)
+  [ "$signal" != KILL ] || timeout_args=(-s KILL)
   status_file=$(mktemp "${TMPDIR:-/tmp}/fm-timeout-status.XXXXXX" 2>/dev/null) || return 124
   # Run timeout asynchronously so its pid - also the process-group id created
   # by GNU/BSD timeout without --foreground - remains available for cleanup.
@@ -96,7 +101,7 @@ fm_run_external_timeout() {
   # ignores TERM; timeout then considers the command finished and does not send
   # its configured KILL. Explicitly reap that leftover group on a real timeout.
   # shellcheck disable=SC2016  # Expansion is deliberately deferred to the child shell.
-  "$runner" -k 1 "$seconds" bash -c '
+  "$runner" "${timeout_args[@]}" "$seconds" bash -c '
     status_file=$1
     shift
     "$@"
@@ -133,17 +138,22 @@ fm_timeout_seconds() {  # <milliseconds>
   printf '%d.%03d' "$(( $1 / 1000 ))" "$(( $1 % 1000 ))"
 }
 
-fm_run_timed() {  # <seconds> <command...>
-  local seconds=$1
+fm_run_timed() {  # [--kill] <seconds> <command...>
+  local seconds signal=TERM
+  if [ "$1" = --kill ]; then
+    signal=KILL
+    shift
+  fi
+  seconds=$1
   shift
   case "$(fm_timeout_mechanism)" in
-    timeout) fm_run_external_timeout timeout "$seconds" "$@" ;;
-    gtimeout) fm_run_external_timeout gtimeout "$seconds" "$@" ;;
+    timeout) fm_run_external_timeout timeout "$seconds" "$signal" "$@" ;;
+    gtimeout) fm_run_external_timeout gtimeout "$seconds" "$signal" "$@" ;;
     perl)
-      perl -MTime::HiRes=alarm -e 'my $t = shift; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0); exec @ARGV } local $SIG{ALRM} = sub { kill "TERM", -$pid; select undef, undef, undef, 0.2; kill "KILL", -$pid; exit 124 }; alarm $t; waitpid $pid, 0; exit($? >> 8)' \
-        "$seconds" "$@"
+      perl -MTime::HiRes=alarm -e 'my ($t, $signal) = splice @ARGV, 0, 2; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0); exec @ARGV } local $SIG{ALRM} = sub { kill $signal, -$pid; if ($signal eq "TERM") { select undef, undef, undef, 0.2; kill "KILL", -$pid; } exit 124 }; alarm $t; waitpid $pid, 0; exit($? >> 8)' \
+        "$seconds" "$signal" "$@"
       ;;
-    bash) fm_run_bash_timeout "$seconds" "$@" ;;
+    bash) fm_run_bash_timeout "$seconds" "$signal" "$@" ;;
     *) return 124 ;;
   esac
 }

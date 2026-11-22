@@ -387,10 +387,10 @@ case "$1 $2" in
     jq -cn --arg cwd "$FM_DIALOG_HOME" '{result:{pane:{pane_id:"p1",terminal_id:"term-claude",cwd:$cwd}}}'
     ;;
   'agent get')
-    if [ "$phase:$FM_DIALOG_MODE" = dialog:dialog-slow-liveness ]; then
-      : > "$FM_DIALOG_CASE/liveness"
-      sleep 3
-    fi
+    case "$phase:$FM_DIALOG_MODE" in
+      dialog:dialog-slow-liveness) : > "$FM_DIALOG_CASE/liveness"; sleep 3 ;;
+      stopped:slow-liveness-stop|retry:slow-liveness-retry) sleep 1.1 ;;
+    esac
     case "$phase" in
       stopped)
         if [ "$FM_DIALOG_MODE" = single-stop ]; then
@@ -469,13 +469,13 @@ case "$1 $2" in
     printf '%s\n' "$4" >> "$FM_DIALOG_CASE/input"
     [ "$4" = enter ] || exit 0
     case "$phase:$FM_DIALOG_MODE" in
-      typed:retry) printf 'retry\n' ;;
+      typed:retry|typed:slow-liveness-retry) printf 'retry\n' ;;
       typed:retry-stalled) printf 'retry\n' ;;
       retry:retry-stalled) sleep 3; : > "$FM_DIALOG_CASE/retry-completed"; printf 'stopped\n' ;;
       typed:retry-failure) printf 'retry\n'; exit 1 ;;
       typed:enter-failure) printf 'typed\n'; exit 1 ;;
       typed:dialog-after-failed-enter) printf 'dialog\n'; exit 1 ;;
-      typed:single-stop) printf 'stopped\n' ;;
+      typed:single-stop|typed:slow-liveness-stop) printf 'stopped\n' ;;
       typed:slow-stop|typed:late-dialog)
         node -p 'Date.now()' > "$FM_DIALOG_CASE/submitted-at"
         printf '%s\n' "$FM_DIALOG_MODE"
@@ -496,7 +496,7 @@ fm_write_meta "$meta" 'backend=herdr' 'window=fixture:p1' 'endpoint_task_id=exit
   'herdr_session=fixture' 'herdr_workspace_id=w1' 'herdr_tab_id=t1' 'herdr_pane_id=p1' 'herdr_terminal_id=term-claude'
 export FM_DIALOG_HOME="$TMP_ROOT/worktree"
 for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-liveness dialog-after-typing dialog-after-failed-enter late-dialog guard-stalled \
-    retry retry-failure retry-stalled enter-failure single-stop slow-stop stalled-stop doorbell-before doorbell-before-picker \
+    retry retry-failure slow-liveness-retry retry-stalled enter-failure single-stop slow-liveness-stop slow-stop stalled-stop doorbell-before doorbell-before-picker \
     doorbell-after doorbell-after-long doorbell-after-long-plain doorbell-after-clipped doorbell-slow; do
   export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/herdr-$mode"
   case "$mode" in
@@ -533,11 +533,13 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-live
       ;;
   esac
   exit_wait=2
+  timeout_override=${FM_TIMEOUT_MECHANISM_OVERRIDE:-}
   case "$mode" in
-    enter-failure) exit_wait=4 ;;
+    enter-failure|slow-liveness-stop|slow-liveness-retry) exit_wait=4 ;;
     late-dialog) exit_wait=3 ;;
+    stalled-stop) exit_wait=1.65; timeout_override=bash ;;
   esac
-  out=$(FM_CONTROL_POLL=0.1 FM_CONTROL_EXIT_WAIT="$exit_wait" FM_CONTROL_EXIT_RETRIES=3 \
+  out=$(FM_TIMEOUT_MECHANISM_OVERRIDE="$timeout_override" FM_CONTROL_POLL=0.1 FM_CONTROL_EXIT_WAIT="$exit_wait" FM_CONTROL_EXIT_RETRIES=3 \
     run_fixture fm-control.sh exitdialog exit 2>&1) || rc=$?
   printf 'herdr %s exit=%s: %s\n' "$mode" "$rc" "$out"
   input=$(cat "$FM_DIALOG_CASE/input")
@@ -571,7 +573,7 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-live
       assert_absent "$FM_DIALOG_CASE/read-completed" 'the guard allowed the stalled read to finish'
       [ "$input" = /exit ] || fail "a stalled guard sent unexpected input: $input"
       ;;
-    retry|retry-failure)
+    retry|retry-failure|slow-liveness-retry)
       expect_code 0 "$rc" 'Herdr should retry a swallowed Enter while the composer still holds /exit'
       [ "$input" = $'/exit\nenter\nenter' ] || fail "the proven pending command should be submitted once more: $input"
       ;;
@@ -591,6 +593,10 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-live
       expect_code 0 "$rc" 'one verified stop should complete exit'
       [ "$(cat "$FM_DIALOG_CASE/phase")" = stop-unreadable ] || fail 'the one stop sample was not consumed'
       [ "$input" = $'/exit\nenter' ] || fail "the ordinary stop sent unexpected input: $input"
+      ;;
+    slow-liveness-stop)
+      expect_code 0 "$rc" 'a slow positive liveness result should confirm the stop'
+      [ "$input" = $'/exit\nenter' ] || fail "a slow stop sent unexpected input: $input"
       ;;
     slow-stop)
       expect_code 1 "$rc" 'the still-running agent should exhaust the stop budget'

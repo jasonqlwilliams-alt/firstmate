@@ -620,7 +620,7 @@ claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
     fi
 
     probe_ms=$(( (remaining + 1) / 2 ))
-    [ "$probe_ms" -le 1000 ] || probe_ms=1000
+    [ "$screen" != timeout ] || probe_ms=$(( remaining - remaining / 4 ))
     if sample=$(fm_backend_run_timed "$probe_ms" fm_backend_agent_state "$BACKEND" "$T"); then
       state=$sample
       [ "$state" != dead ] || return 0
