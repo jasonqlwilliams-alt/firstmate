@@ -102,14 +102,16 @@
 #     a PR, it must match that URL; absent metadata PR does not erase current
 #     run attribution. No-checks, another PR, or a later pending run cannot
 #     inherit an older green verdict through that run-step check.
-#     A failed in-flight child is not a terminal contradiction when its current
-#     run-step detail is exactly "run cancelled" or
-#     "run cancelled · status-log superseded (run failed)" and four local
-#     records all hold: task metadata records a PR, that exact PR has neither a
-#     merge-notified marker nor a retirement receipt, and the task's latest
-#     done status event is "PR <that url> checks green". The check compares no
-#     heads. A PR closed without a merge record can still qualify, and a retry
-#     or a PR registered during this capture waits for the next snapshot.
+#     The home summary excludes a failed in-flight child from terminal_in_flight
+#     when the selected current state comes from run-step with the exact detail
+#     "run cancelled" or "run cancelled · status-log superseded (run failed)",
+#     the task metadata records a valid PR URL, the latest done status event is
+#     "PR <that url> checks green", and that PR has neither a matching local
+#     merge-notified marker nor a valid matching retirement receipt.
+#     The exemption applies only to terminal_in_flight and uses PR identity
+#     independently of commit heads. A PR closed without a local merge record
+#     can still qualify. The next snapshot can reflect a retry or PR
+#     registration that occurs after the relevant inputs were sampled.
 #     Regression coverage lives in tests/fm-fleet-snapshot-view.test.sh.
 #     Other terminal in-flight children remain contradictions unless the task
 #     has both a hold reason and hold kind. Held children stay visible but do
