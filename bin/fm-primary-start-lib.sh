@@ -75,13 +75,15 @@ primary_read_lock() {
   if [ -e "$STATE/.lock" ] || [ -L "$STATE/.lock" ]; then
     [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] && [ -r "$STATE/.lock" ] \
       || primary_die "session lock is unreadable or unsafe"
-    PRIMARY_OWNER=$(cat "$STATE/.lock") || primary_die "cannot read session lock"
+    fm_session_lock_read "$STATE/.lock" || primary_die "cannot read session lock"
+    PRIMARY_OWNER=$FM_SESSION_LOCK_PID
     case "$PRIMARY_OWNER" in ''|*[!0-9]*|0|1) primary_die "malformed session lock" ;; esac
     PRIMARY_LOCK=stale
     if kill -0 "$PRIMARY_OWNER" 2>/dev/null; then
       comm=$(ps -p "$PRIMARY_OWNER" -o comm=) || primary_die "live lock owner cannot be inspected"
       args=$(ps -p "$PRIMARY_OWNER" -o args=) || primary_die "live lock owner arguments are unreadable"
-      if fm_harness_process_matches "$comm" "$args"; then PRIMARY_LOCK=live; fi
+      if fm_harness_process_matches "$comm" "$args" \
+        && fm_session_lock_owner_alive "$PRIMARY_OWNER" "$FM_SESSION_LOCK_START"; then PRIMARY_LOCK=live; fi
     fi
   fi
 }

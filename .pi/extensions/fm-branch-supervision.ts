@@ -355,7 +355,7 @@ function readLockPid(): { lockPid: string; verdict: LockOwnership | null } {
   ownedLockPid = "";
   let lockPid = "";
   try {
-    lockPid = readFileSync(`${state}/.lock`, "utf8").trim();
+    lockPid = readFileSync(`${state}/.lock`, "utf8").split("\n", 1)[0].trim();
   } catch {
     return { lockPid: "", verdict: "missing" };
   }

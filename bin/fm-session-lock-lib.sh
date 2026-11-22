@@ -164,7 +164,7 @@ fm_harness_pid_alive() {
 # ancestry that cannot be resolved all fail closed.
 fm_session_lock_owned_by_self() {
   local state=$1 lock_pid pids pid
-  lock_pid=$(cat "$state/.lock" 2>/dev/null || true)
+  lock_pid=$(fm_session_lock_pid "$state/.lock" || true)
   case "$lock_pid" in
     ''|*[!0-9]*) return 1 ;;
   esac
@@ -174,5 +174,101 @@ fm_session_lock_owned_by_self() {
   done <<EOF
 $pids
 EOF
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# Session-lock owner record.
+#
+# state/.lock is the single owner record of this home's session lock:
+#   line 1   the owning harness pid (every reader keys on this line alone)
+#   line 2   start=<token>, that pid's process start time from fm_pid_start_time
+# A record with no start line is the pre-start-time format: it keeps pid-only
+# liveness until bin/fm-lock.sh rewrites it. bin/fm-lock.sh is the only writer,
+# through fm_session_lock_write, which publishes the whole record by temporary
+# file plus rename so no reader ever observes an empty or partial owner line.
+
+# Print a token identifying when process $1 started, or return 1.
+# The source is the one bin/fm-wake-lib.sh's fm_pid_identity already uses for
+# process identity: Linux-compatible /proc stat field 22 (starttime, clock ticks
+# since boot; immune to wall-clock steps) when present, else `ps -o lstart=`
+# pinned to LC_ALL=C so the rendering is locale-invariant. The two sources carry
+# different prefixes, so a record written from one never matches the other.
+fm_pid_start_time() {  # <pid>
+  local pid=$1 proc_root stat_line value
+  local -a stat_fields
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  proc_root=${FM_PROC_ROOT_OVERRIDE:-/proc}
+  if [ -r "$proc_root/$pid/stat" ]; then
+    stat_line=$(cat "$proc_root/$pid/stat" 2>/dev/null) || return 1
+    # After the final comm delimiter, array index 19 is proc stat field 22.
+    read -r -a stat_fields <<< "${stat_line##*)}"
+    [ "${#stat_fields[@]}" -ge 20 ] || return 1
+    value=${stat_fields[19]}
+    case "$value" in ''|*[!0-9]*) return 1 ;; esac
+    printf 'proc:%s\n' "$value"
+    return 0
+  fi
+  value=$(LC_ALL=C ps -p "$pid" -o lstart= 2>/dev/null) || return 1
+  value=$(printf '%s' "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  [ -n "$value" ] || return 1
+  printf 'lstart:%s\n' "$value"
+}
+
+# Read lock file $1 once into FM_SESSION_LOCK_PID (line 1, unvalidated) and
+# FM_SESSION_LOCK_START (line 2's start= token, empty for the legacy format).
+# Returns 1 only when the file cannot be read.
+FM_SESSION_LOCK_PID=''
+FM_SESSION_LOCK_START=''
+fm_session_lock_read() {  # <lock-file>
+  local content line2
+  FM_SESSION_LOCK_PID='' FM_SESSION_LOCK_START=''
+  content=$(cat "$1" 2>/dev/null) || return 1
+  FM_SESSION_LOCK_PID=${content%%$'\n'*}
+  if [ "$FM_SESSION_LOCK_PID" != "$content" ]; then
+    line2=${content#*$'\n'}
+    line2=${line2%%$'\n'*}
+    case "$line2" in start=?*) FM_SESSION_LOCK_START=${line2#start=} ;; esac
+  fi
+  return 0
+}
+
+# Print lock file $1's owner pid (line 1, unvalidated); returns 1 when unreadable.
+fm_session_lock_pid() {  # <lock-file>
+  fm_session_lock_read "$1" || return 1
+  printf '%s\n' "$FM_SESSION_LOCK_PID"
+}
+
+# True when owner pid $1, recorded with start token $2 (empty = legacy record),
+# is still that same live harness process. A reused pid now naming a different
+# process fails, because its start time differs. When the pid is live but its
+# start time can no longer be read, the owner is kept rather than taken over.
+fm_session_lock_owner_alive() {  # <pid> <recorded-start>
+  local pid=$1 recorded=${2:-} current
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  fm_harness_pid_alive "$pid" || return 1
+  [ -n "$recorded" ] || return 0
+  current=$(fm_pid_start_time "$pid") || return 0
+  [ "$current" = "$recorded" ]
+}
+
+# True when lock file $1 names a live owner under fm_session_lock_owner_alive.
+fm_session_lock_held_live() {  # <lock-file>
+  fm_session_lock_read "$1" || return 1
+  fm_session_lock_owner_alive "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START"
+}
+
+# Publish owner pid $2 (with its start time when readable) as lock file $1 by
+# writing a same-directory temporary file and renaming it into place.
+fm_session_lock_write() {  # <lock-file> <pid>
+  local lock=$1 pid=$2 start tmp
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  start=$(fm_pid_start_time "$pid") || start=''
+  tmp=$(mktemp "${lock%/*}/.lock-write.XXXXXX" 2>/dev/null) || return 1
+  if { printf '%s\n' "$pid"; [ -z "$start" ] || printf 'start=%s\n' "$start"; } > "$tmp" 2>/dev/null \
+    && mv -f "$tmp" "$lock" 2>/dev/null; then
+    return 0
+  fi
+  rm -f "$tmp" 2>/dev/null
   return 1
 }
