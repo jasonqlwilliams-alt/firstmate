@@ -3425,7 +3425,8 @@ test_lsof_absent_reaps_detached_linux_process() (
     printf 'skip: detached /proc cwd scan requires Linux\n'
     return 0
   fi
-  local visibility=$1 case_dir rc=0 pid='' tmp_pid='' sibling_pid='' path_without_lsof i nested=$'nested -> dir\nleaf'
+  local visibility=$1 case_dir rc=0 pid='' tmp_pid='' sibling_pid='' path_without_lsof i
+  local nested=$'nested -> dir\nleaf' sibling=$'wt\n'
   case_dir=$(make_case "lsof-absent-detached-reap-café-$visibility")
   write_meta "$case_dir" no-mistakes ship
   land_shippable_commit "$case_dir"
@@ -3433,15 +3434,22 @@ test_lsof_absent_reaps_detached_linux_process() (
   if PATH="$case_dir/fakebin:$path_without_lsof" command -v lsof >/dev/null 2>&1; then
     fail 'lsof-absent-detached-reap: fixture path unexpectedly exposes lsof'
   fi
-  printf '#!/usr/bin/env bash\nQUOTING_STYLE=shell-always exec %q "$@"\n' \
-    "$path_without_lsof/stat" > "$case_dir/fakebin/stat"
-  chmod +x "$case_dir/fakebin/stat"
+  {
+    cat <<'SH'
+#!/usr/bin/env bash
+for arg; do
+  [ "$arg" != -ignore_readdir_race ] || exit 1
+done
+SH
+    printf 'exec %q "$@"\n' "$path_without_lsof/find"
+  } > "$case_dir/fakebin/find"
+  chmod +x "$case_dir/fakebin/find"
   if [ "$visibility" = hidden ]; then
     export FM_TEST_HIDDEN_ANCESTOR=$$
     hide_teardown_ancestor "$case_dir"
   fi
 
-  mkdir -p "$case_dir/wt/$nested" "$case_dir/wt0" "$case_dir/tasktmp"
+  mkdir -p "$case_dir/wt/$nested" "$case_dir/$sibling" "$case_dir/tasktmp"
   printf 'tasktmp=%s\n' "$case_dir/tasktmp" >> "$case_dir/state/task-x1.meta"
   ln -s "$case_dir/wt/$nested" "$case_dir/cwd-alias"
   trap 'for child in "$pid" "$tmp_pid" "$sibling_pid"; do
@@ -3456,12 +3464,12 @@ test_lsof_absent_reaps_detached_linux_process() (
   fi
   perl -MPOSIX -e 'POSIX::setsid() > 0 or die; chdir shift or die; exec "sleep", "300"' "$case_dir/tasktmp" &
   tmp_pid=$!
-  perl -MPOSIX -e 'POSIX::setsid() > 0 or die; chdir shift or die; exec "sleep", "300"' "$case_dir/wt0" &
+  perl -MPOSIX -e 'POSIX::setsid() > 0 or die; chdir shift or die; exec "sleep", "300"' "$case_dir/$sibling" &
   sibling_pid=$!
   for ((i=0; i<100; i++)); do
     if { [ -z "$pid" ] || [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "$case_dir/wt/$nested" ]; } \
        && [ "$(readlink "/proc/$tmp_pid/cwd" 2>/dev/null)" = "$case_dir/tasktmp" ] \
-       && [ "$(readlink "/proc/$sibling_pid/cwd" 2>/dev/null)" = "$case_dir/wt0" ]; then
+       && [[ "/proc/$sibling_pid/cwd" -ef "$case_dir/$sibling" ]]; then
       break
     fi
     sleep 0.05

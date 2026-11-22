@@ -2066,22 +2066,18 @@ EOF
 }
 
 proc_pids_with_cwd_under() {  # <resolved-worktree>
-  local dir=$1 link cwd pid
-  [ -r /proc ] && find /proc/self/cwd -maxdepth 0 -printf '%l' >/dev/null 2>&1 || return 1
-  set -o pipefail
-  { find /proc -mindepth 1 -maxdepth 2 -ignore_readdir_race \
-      \( ! -path '/proc/[0-9]*' -prune \) -o \
-      \( -name cwd -type l -printf '%p\0%l\0' \) 2>/dev/null || [ "$?" -eq 1 ]; } |
-    while IFS= read -r -d '' link; do
-      IFS= read -r -d '' cwd || return 1
-      [ -n "$cwd" ] || continue
-      case "$cwd" in
-        "$dir"|"$dir/"*)
-          pid=${link#/proc/}
-          printf '%s\n' "${pid%/cwd}"
-          ;;
-      esac
-    done
+  local dir=$1 proc pid cwd
+  [ -r /proc ] && [ -x /proc ] && command -v readlink >/dev/null 2>&1 || return 1
+  set -- /proc/[0-9]*
+  case "${1:-}" in ''|'/proc/[0-9]*') return 1 ;; esac
+  for proc; do
+    pid=${proc##*/}
+    case "$pid" in *[!0-9]*) continue ;; esac
+    cwd=$(readlink "$proc/cwd" 2>/dev/null && printf '.') || continue
+    case "${cwd%$'\n.'}" in
+      "$dir"|"$dir/"*) printf '%s\n' "$pid" ;;
+    esac
+  done
 }
 
 pids_with_cwd_under() {  # <scanner> <dir>...
