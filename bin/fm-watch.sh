@@ -1543,7 +1543,7 @@ FM_ACTIVE_CHECK_PGID=
 FM_CHECK_OUTPUT=
 FM_CHECK_RESULT=
 FM_CHECK_SIGNAL_PENDING=
-closure_stage=
+FM_PR_POLL_CLOSED_STAGE=
 
 fm_check_output_cleanup() {
   [ -z "$FM_CHECK_OUTPUT" ] || rm -f -- "$FM_CHECK_OUTPUT"
@@ -1551,8 +1551,8 @@ fm_check_output_cleanup() {
 }
 
 fm_pr_closure_stage_cleanup() {
-  [ -z "$closure_stage" ] || rm -f -- "$closure_stage"
-  closure_stage=
+  [ -z "$FM_PR_POLL_CLOSED_STAGE" ] || rm -f -- "$FM_PR_POLL_CLOSED_STAGE"
+  FM_PR_POLL_CLOSED_STAGE=
 }
 
 fm_active_check_stop() {
@@ -2089,15 +2089,11 @@ while :; do
         fi
       else
         id=$(basename "$c" .check.sh)
-        closure_gen=
-        if [ -f "$STATE/$id.pr-poll-registration" ]; then
-          if closure_gen=$(fm_pr_poll_task_origin_gen "$STATE" "$id") && [ -z "$closure_gen" ]; then
-            # Reserve the legacy witness before capturing the poll. Teardown
-            # removes it even if another task reuses the same ID and PR.
-            closure_stage=$(fm_pr_poll_closed_stage "$STATE" "$id") || closure_stage=
-          fi
-        fi
-        if fm_pr_poll_snapshot_capture "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh"; then
+        poll_prepare_rc=0
+        fm_pr_poll_snapshot_prepare "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" || poll_prepare_rc=$?
+        if [ "$poll_prepare_rc" -eq 4 ]; then
+          continue
+        elif [ "$poll_prepare_rc" -eq 0 ]; then
           is_pr_poll=1
           provider=$FM_PR_POLL_SNAPSHOT_PROVIDER
           url=$FM_PR_POLL_SNAPSHOT_URL
@@ -2114,15 +2110,13 @@ while :; do
           fm_custom_check_snapshot_cleanup
         else
           fm_custom_check_snapshot_cleanup
-          fm_pr_closure_stage_cleanup
           rejected_checks="$rejected_checks $c"
           continue
         fi
       fi
       if [ "$is_pr_poll" -eq 1 ] && [ "$out" = closed-unmerged ]; then
         closure_rc=0
-        fm_pr_poll_record_closed "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" "$closure_gen" "$closure_stage" \
-          || closure_rc=$?
+        fm_pr_poll_record_closed "$STATE" "$id" || closure_rc=$?
         fm_pr_closure_stage_cleanup
         case "$closure_rc" in
           0|4) ;;

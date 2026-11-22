@@ -2128,16 +2128,16 @@ test_polled_closures_preserve_other_pr_evidence() {
 
 test_closure_publication_preserves_the_observed_pr() (
   local dir state url replacement transition rc
-  . "$ROOT/bin/fm-backlog-transition-lib.sh"
+  FM_WAKE_NO_MKDIR=1 . "$ROOT/bin/fm-wake-lib.sh"
   url=https://github.com/o/r/pull/22
   replacement=https://github.com/o/r/pull/23
   for transition in rearm relaunch replacement reused-id; do
     dir=$(make_case "pr-closure-$transition")
     state="$dir/home/state"
-    write_task_meta "$dir" task-a
-    printf 'spawn_gen=s-original\n' >> "$state/task-a.meta"
+    fm_write_meta "$state/task-a.meta" 'window=firstmate:fm-task-a' 'endpoint_task_id=task-a' \
+      "worktree=$dir/missing-worktree" "project=$dir/project" 'kind=ship' 'mode=local-only' 'spawn_gen=s-original'
     run_check_entry "$dir" task-a "$url" >/dev/null || fail "could not arm the observed poll"
-    fm_pr_poll_snapshot_capture "$state" task-a "$POLL" || fail "could not capture the observed poll"
+    fm_pr_poll_snapshot_prepare "$state" task-a "$POLL" || fail "could not capture the observed poll"
 
     case "$transition" in
       rearm)
@@ -2151,6 +2151,11 @@ test_closure_publication_preserves_the_observed_pr() (
         run_check_entry "$dir" task-a "$replacement" >/dev/null || fail "could not register the replacement PR"
         ;;
       reused-id)
+        printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/fakebin/tmux"
+        chmod +x "$dir/fakebin/tmux"
+        FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" FM_TEARDOWN_GUARD_DONE=1 PATH="$dir/fakebin:$BASE_PATH" \
+          "$TEARDOWN" task-a --force >"$dir/teardown.log" 2>&1 \
+          || fail "could not retire task-a: $(cat "$dir/teardown.log")"
         write_task_meta "$dir" task-a
         printf 'spawn_gen=s-new-task\n' >> "$state/task-a.meta"
         run_check_entry "$dir" task-a "$url" >/dev/null || fail "could not register the new task's PR"
@@ -2158,7 +2163,7 @@ test_closure_publication_preserves_the_observed_pr() (
     esac
 
     rc=0
-    fm_pr_poll_record_closed "$state" task-a "$POLL" s-original || rc=$?
+    fm_pr_poll_record_closed "$state" task-a || rc=$?
     if [ "$transition" = reused-id ]; then
       [ "$rc" -eq 4 ] || fail "the retired task's observation was accepted for a reused ID"
       [ ! -e "$state/task-a.pr-poll-closed" ] || fail "the retired task wrote closure evidence"
@@ -2242,7 +2247,7 @@ test_closure_write_failure_does_not_stop_sibling_checks() {
 }
 
 test_remote_proxy_teardown_removes_closure_evidence() {
-  local dir state url
+  local dir state url teardown watcher i
   dir=$(make_case remote-pr-closure-teardown)
   state="$dir/home/state"
   url=https://github.com/o/r/pull/25
@@ -2263,14 +2268,74 @@ expected=$(printf '%s\0' fm-remote-secondmate-control.sh retire task-a | base64 
 SH
   chmod +x "$dir/fakebin/ssh"
 
-  FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" FM_SSH_BIN="$dir/fakebin/ssh" FM_PROCEVENT_CLAIM_ROOT="$dir/claims" \
-    PATH="$dir/fakebin:$BASE_PATH" "$TEARDOWN" task-a >"$dir/teardown.out" 2>"$dir/teardown.err" \
-    || fail "remote proxy teardown failed: $(cat "$dir/teardown.err")"
+  mkdir -p "$dir/teardownbin"
+  cat > "$dir/teardownbin/rm" <<'SH'
+#!/usr/bin/env bash
+if [ "$#" -eq 2 ] && [ "$1" = -f ] && [ "$2" = "$FM_HOME/state/task-a.meta" ]; then
+  touch "$FM_HOME/cleanup-gap"
+  while [ ! -e "$FM_HOME/finish-teardown" ]; do sleep 0.05; done
+fi
+exec "$TEST_REAL_RM" "$@"
+SH
+  cat > "$dir/on-state" <<'SH'
+#!/usr/bin/env bash
+touch "$FM_HOME/gap-observed"
+while [ ! -e "$FM_HOME/replacement-armed" ]; do sleep 0.05; done
+SH
+  cat > "$state/z-stop.check.sh" <<'SH'
+#!/usr/bin/env bash
+touch "$FM_HOME/gap-observed"
+printf 'stop-cycle\n'
+SH
+  chmod +x "$dir/teardownbin/rm" "$dir/on-state"
+  chmod 0700 "$state/z-stop.check.sh"
+  FM_HOME="$dir/home" "$REGISTER" z-stop >/dev/null || fail "could not register the gap-cycle check"
+  FM_HOME="$dir/home" PATH="$dir/fakebin:$BASE_PATH" "$ROOT/bin/fm-inactive-reconcile.sh" scan \
+    || fail "could not prime the inactive-outcome scan before retirement"
+  touch "$state/home-summary.json"
+
+  TEST_REAL_RM="$(command -v rm)" FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+    FM_SSH_BIN="$dir/fakebin/ssh" FM_PROCEVENT_CLAIM_ROOT="$dir/claims" \
+    PATH="$dir/teardownbin:$dir/fakebin:$BASE_PATH" "$TEARDOWN" task-a >"$dir/teardown.out" 2>"$dir/teardown.err" &
+  teardown=$!
+  for ((i=0; i<200; i++)); do
+    [ ! -e "$dir/home/cleanup-gap" ] || break
+    sleep 0.05
+  done
+  if [ ! -e "$dir/home/cleanup-gap" ]; then
+    touch "$dir/home/finish-teardown"
+    fail "remote teardown did not reach metadata removal: $(cat "$dir/teardown.err")"
+  fi
+  [ -f "$state/task-a.meta" ] && [ ! -e "$state/task-a.pr-poll-closed" ] \
+    && [ ! -e "$state/.task-a.pr-poll-closed.ABC123" ] \
+    || fail "did not reach the gap after closure cleanup and before metadata removal"
+
+  FM_TEST_GH_LOG="$dir/gh.log" FM_TEST_GH_STATE=CLOSED \
+    FM_TEST_GH_ON_STATE="$dir/on-state" FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=15 \
+    FM_HOME="$dir/home" PATH="$dir/fakebin:$BASE_PATH" \
+    "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 25 >"$dir/watch.log" 2>&1 &
+  watcher=$!
+  for ((i=0; i<200; i++)); do
+    [ ! -e "$dir/home/gap-observed" ] || break
+    sleep 0.05
+  done
+  touch "$dir/home/finish-teardown"
+  [ -e "$dir/home/gap-observed" ] || fail "watcher did not reach the gap cycle: $(cat "$dir/watch.log")"
+  wait "$teardown" || fail "remote proxy teardown failed: $(cat "$dir/teardown.err")"
   [ ! -e "$state/task-a.meta" ] || fail "remote teardown left proxy metadata"
   [ -f "$state/task-a.check.sh" ] || fail "remote closure cleanup removed the proxy's poll"
-  [ ! -e "$state/task-a.pr-poll-closed" ] || fail "remote teardown left the proxy's closure evidence"
-  [ ! -e "$state/.task-a.pr-poll-closed.ABC123" ] || fail "remote teardown left staged closure evidence"
-  pass "remote proxy retirement clears closure evidence and preserves the poll files"
+  fm_write_meta "$state/task-a.meta" 'kind=secondmate' 'window=remote:task-a' \
+    'remote_host=remote-mac' "remote_root=$dir/remote-root" "home=$dir/replacement-home"
+  run_check_entry "$dir" task-a "$url" >/dev/null || fail "could not arm the replacement proxy's poll"
+  touch "$dir/home/replacement-armed"
+  wait "$watcher" || fail "watcher failed during remote teardown: $(cat "$dir/watch.log")"
+  case "$(cat "$dir/watch.log")" in
+    check:*z-stop.check.sh:*stop-cycle) ;;
+    *) fail "watcher did not finish the gap cycle: $(cat "$dir/watch.log")" ;;
+  esac
+  fm_pr_poll_artifacts_valid "$state" task-a "$POLL" || fail "replacement proxy did not retain its poll"
+  [ ! -e "$state/task-a.pr-poll-closed" ] || fail "the replacement proxy inherited a stale closure"
+  pass "remote proxy retirement invalidates closures through same-URL re-registration after ID reuse"
 }
 
 test_retirement_refuses_replacement_and_nonterminal_results() {

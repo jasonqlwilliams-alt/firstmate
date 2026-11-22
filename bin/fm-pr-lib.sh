@@ -1055,72 +1055,54 @@ fm_pr_poll_closed_recorded() {
   grep -Fqx -- "$url" "$record"
 }
 
-# The first worker's generation identifies the task across relaunches.
-# Fresh records inherit their spawn generation. A relaunch preserves it in
-# task_origin_gen, which is empty if the task predates spawn generations.
-fm_pr_poll_task_origin_gen() {  # <state> <id>
-  local state=$1 id=$2 meta
+fm_pr_poll_snapshot_prepare() {
+  local state=$1 id=$2 template=$3 lock rc=0
+  FM_PR_POLL_CLOSED_STAGE=
   fm_pr_task_id_valid "$id" || return 1
   [ -d "$state" ] && [ ! -L "$state" ] || return 1
-  meta="$state/$id.meta"
-  [ -f "$meta" ] && fm_pr_regular_destination_or_absent "$meta" || return 1
-  LC_ALL=C awk -F= '
-    $1 == "spawn_gen" { spawns++; spawn = substr($0, length($1) + 2) }
-    $1 == "task_origin_gen" { origins++; origin = substr($0, length($1) + 2) }
-    END {
-      if (spawns > 1 || origins > 1 || (origins && !spawns)) exit 1
-      if (spawns && spawn !~ /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/) exit 1
-      if (origin != "" && origin !~ /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/) exit 1
-      print origins ? origin : spawn
-    }
-  ' "$meta"
-}
-
-fm_pr_poll_closed_stage() {  # <state> <id>
-  local state=$1 id=$2
-  fm_pr_task_id_valid "$id" || return 1
-  [ -d "$state" ] && [ ! -L "$state" ] || return 1
-  mktemp "$state/.$id.pr-poll-closed.XXXXXX"
+  [ -f "$state/$id.pr-poll-registration" ] || return 1
+  lock=$(fm_meta_lock_path "$state/$id.meta") || return 1
+  fm_lock_try_acquire "$lock" || return 4
+  if fm_pr_poll_snapshot_capture "$state" "$id" "$template"; then
+    if ! FM_PR_POLL_CLOSED_STAGE=$(umask 077; mktemp "$state/.$id.pr-poll-closed.XXXXXX") \
+      || ! printf '%s\n' "$FM_PR_POLL_SNAPSHOT_URL" > "$FM_PR_POLL_CLOSED_STAGE"; then
+      [ -z "$FM_PR_POLL_CLOSED_STAGE" ] || rm -f -- "$FM_PR_POLL_CLOSED_STAGE"
+      FM_PR_POLL_CLOSED_STAGE=
+    fi
+  else
+    rc=1
+  fi
+  fm_lock_release "$lock"
+  return "$rc"
 }
 
 fm_pr_poll_record_closed() (
-  local state=$1 id=$2 template=$3 origin_gen=$4 legacy_stage=${5-}
-  local url=$FM_PR_POLL_SNAPSHOT_URL record device tmp current_gen
+  local state=$1 id=$2 tmp=$FM_PR_POLL_CLOSED_STAGE url=$FM_PR_POLL_SNAPSHOT_URL
+  local record device lock staged_url
   [ "$id" = "$FM_PR_POLL_SNAPSHOT_ID" ] || return 4
   fm_pr_task_id_valid "$id" && fm_pr_url_parse "$url" || return 1
   [ -d "$state" ] && [ ! -L "$state" ] || return 1
+  [ -n "$tmp" ] || return 1
+  [ -f "$tmp" ] || return 4
+  lock=$(fm_meta_lock_path "$state/$id.meta") || return 1
+  fm_lock_acquire_wait "$lock"
+  trap 'fm_lock_release "$lock"' EXIT
   record="$state/$id.pr-poll-closed"
   device=$(fm_pr_file_device "$state") || return 1
+  fm_pr_private_file_valid "$tmp" 600 "$device" || return 4
+  IFS= read -r staged_url < "$tmp" && [ "$staged_url" = "$url" ] || return 4
+  [ -f "$state/$id.meta" ] && fm_pr_regular_destination_on_device_or_absent "$state/$id.meta" "$device" || return 4
+  [ -f "$state/$id.check.sh" ] && [ ! -L "$state/$id.check.sh" ] || return 4
   fm_pr_poll_closed_recorded "$state" "$id" "$url" && return 0
 
-  umask 077
-  tmp=$(fm_pr_poll_closed_stage "$state" "$id") || return 1
-  trap 'rm -f -- "$tmp"' EXIT
-  exec 8<> "$tmp" || return 1
+  exec 8> "$tmp" || return 1
   if [ -e "$record" ] || [ -L "$record" ]; then
     fm_pr_private_file_valid "$record" 600 "$device" || return 1
     cat -- "$record" >&8 || return 1
   fi
   printf '%s\n' "$url" >&8 || return 1
-  # A task's original spawn generation survives a relaunch and PR replacement.
-  # A legacy task can also prove continuity with a stage created before the
-  # forge read. Teardown removes that stage together with the poll and the
-  # publication temporary file before the task ID can be reused.
-  [ -f "$state/$id.check.sh" ] && [ ! -L "$state/$id.check.sh" ] || return 4
-  current_gen=$(fm_pr_poll_task_origin_gen "$state" "$id") || current_gen='?'
-  if [ -z "$origin_gen" ] || [ "$current_gen" != "$origin_gen" ]; then
-    if ! fm_pr_poll_snapshot_matches "$state" "$id" "$template"; then
-      [ -z "$origin_gen" ] && [ -z "$current_gen" ] && [ -n "$legacy_stage" ] \
-        && [ "$legacy_stage" != "$tmp" ] \
-        && fm_pr_private_file_valid "$legacy_stage" 600 "$device" || return 4
-    fi
-  fi
   fm_pr_regular_destination_on_device_or_absent "$record" "$device" || return 1
-  if mv -f -- "$tmp" "$record"; then
-    return 0
-  fi
-  [ ! -e "$tmp" ] && return 4
-  return 1
+  mv -f -- "$tmp" "$record"
 )
 
 fm_pr_poll_closed_cleanup_valid() {

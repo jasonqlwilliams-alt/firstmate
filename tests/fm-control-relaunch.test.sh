@@ -521,17 +521,14 @@ SH
 }
 
 test_relaunch_and_pr_replacement_during_closure() {
-  local dir state id=rl-close url=https://github.com/example/repo/pull/20
+  local dir state setup=${1:-fresh} id=rl-close url=https://github.com/example/repo/pull/20
   local replacement=https://github.com/example/repo/pull/21 out rc watcher i=0
-  dir=$(new_case closure-race "$id")
-  add_ship_task "$dir" "$id" claude
+  dir=$(new_case "closure-race-$setup" "$id")
   state="$dir/home/state"
-  printf 'spawn_gen=s-original\n' >> "$state/$id.meta"
-  printf '%s\n' "$$" > "$state/.lock"
 
   mkdir -p "$dir/root/bin" "$dir/pollbin"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/root/bin/fm-guard.sh"
-  printf '#!/usr/bin/env bash\nexit 1\n' > "$dir/pollbin/tmux"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/pollbin/tmux"
   cat > "$dir/pollbin/gh" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
@@ -546,6 +543,22 @@ case "$*" in
 esac
 SH
   chmod +x "$dir/pollbin/gh" "$dir/pollbin/tmux" "$dir/root/bin/fm-guard.sh"
+  if [ "$setup" = reused ]; then
+    fm_write_meta "$state/$id.meta" "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+      "worktree=$dir/old-worktree" "project=$dir/old-project" 'kind=ship' 'mode=local-only' 'spawn_gen=s-retired'
+    env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" PATH="$dir/pollbin:$PATH" \
+      "$ROOT/bin/fm-pr-check.sh" "$id" https://github.com/example/repo/pull/19 > "$dir/register.log" 2>&1 \
+      || fail "could not arm the retired task's PR: $(cat "$dir/register.log")"
+    env FM_HOME="$dir/home" FM_TEARDOWN_GUARD_DONE=1 PATH="$dir/pollbin:$PATH" \
+      "$ROOT/bin/fm-teardown.sh" "$id" --force > "$dir/teardown.log" 2>&1 \
+      || fail "could not retire the previous task: $(cat "$dir/teardown.log")"
+    [ ! -e "$state/$id.meta" ] && [ ! -e "$state/$id.check.sh" ] \
+      || fail "the retired task still owned the ID or its poll"
+  fi
+  add_ship_task "$dir" "$id" claude
+  printf 'spawn_gen=s-original\n' >> "$state/$id.meta"
+  printf '%s\n' "$$" > "$state/.lock"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$dir/pollbin/tmux"
   env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" PATH="$dir/pollbin:$PATH" \
     "$ROOT/bin/fm-pr-check.sh" "$id" "$url" > "$dir/register.log" 2>&1 \
     || fail "could not arm the observed PR: $(cat "$dir/register.log")"
@@ -586,7 +599,7 @@ SH
     || fail "closure did not leave the replacement poll armed"
   [ -f "$state/$id.pr-poll-closed" ] && [ "$(cat "$state/$id.pr-poll-closed")" = "$url" ] \
     || fail "relaunch and PR replacement lost the only observed closure for the original PR"
-  pass "a closure survives a worker relaunch and replacement PR during the same forge read"
+  pass "a closure survives relaunch and PR replacement during the forge read ($setup ID)"
 }
 
 test_relaunch_preserves_durable_task_metadata() {
@@ -3189,6 +3202,7 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
 test_relaunch_from_linked_home_preserves_recorded_worktree
 test_relaunch_preserves_registered_merge_poll
 test_relaunch_and_pr_replacement_during_closure
+test_relaunch_and_pr_replacement_during_closure reused
 test_relaunch_preserves_durable_task_metadata
 test_relaunch_serializes_concurrent_durable_metadata_publication
 test_disabled_relaunch_clears_prior_trace_context
