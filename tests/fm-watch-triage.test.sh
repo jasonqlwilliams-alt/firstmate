@@ -2459,6 +2459,9 @@ case "$*" in
       out-of-window) echo '{"workspaces":[{"id":"ws-other","title":"other"}]}' ;;
       bad-workspace) echo '{"workspaces":[{"id":"ws-gone"}]}' ;;
       renamed) echo '{"workspaces":[{"id":"ws-gone","title":"renamed"}]}' ;;
+      moved-surface)
+        printf '{"workspaces":[{"id":"ws-gone","title":"%s"},{"id":"ws-other","title":"Destination"}]}\n' "$(cat "${0%/*}/scoped-title")"
+        ;;
       *) printf '{"workspaces":[{"id":"ws-gone","title":"%s"}]}\n' "$(cat "${0%/*}/scoped-title")" ;;
     esac
     exit 0
@@ -2467,7 +2470,11 @@ case "$*" in
     case "$FM_FAKE_ENDPOINT" in
       bad-pane) echo '{"panes":[{}]}' ;;
       bad-surface) echo '{"panes":[{"surface_ids":[false]}]}' ;;
-      missing) echo '{"panes":[]}' ;;
+      moved-surface)
+        touch "${0%/*}/cmux-moved-source-read"
+        echo '{"panes":[]}'
+        ;;
+      empty-pane) echo '{"panes":[{"surface_ids":[]}]}' ;;
       *) echo '{"panes":[{"surface_ids":["sf-gone"]}]}' ;;
     esac
     exit 0
@@ -2491,7 +2498,7 @@ SH
   chmod +x "$fakebin/zellij" "$fakebin/cmux" "$fakebin/orca"
 }
 
-test_experimental_backend_endpoint_loss_requires_confirmed_absence() (
+test_experimental_backend_unreadable_endpoints_stay_quiet() (
   local dir state fakebin out pid='' backend target mode kind poll watch_env modes
   command -v jq >/dev/null 2>&1 || { echo "skip: jq is required by the Zellij and cmux adapters"; return 0; }
   command -v node >/dev/null 2>&1 || { echo "skip: node is required to generate fixture titles"; return 0; }
@@ -2502,7 +2509,7 @@ test_experimental_backend_endpoint_loss_requires_confirmed_absence() (
   for backend in zellij cmux orca; do
     case "$backend" in
       zellij) target="remote:7"; modes=(unreadable renamed reused-session) ;;
-      cmux) target="ws-gone:sf-gone"; modes=(out-of-window renamed missing) ;;
+      cmux) target="ws-gone:sf-gone"; modes=(out-of-window renamed moved-surface) ;;
       orca) target="term-gone"; modes=(stale) ;;
     esac
     for mode in "${modes[@]}"; do
@@ -2520,22 +2527,13 @@ test_experimental_backend_endpoint_loss_requires_confirmed_absence() (
         printf 'window=%s\nbackend=%s\nkind=%s\nharness=codex\nspawn_gen=first\n' "$target" "$backend" "$kind" > "$state/lost.meta"
       fi
       env "${watch_env[@]}" FM_FAKE_ENDPOINT="$mode" "$WATCH" > "$out" & pid=$!
-      if [ "$mode" != missing ]; then
-        for poll in 1 2; do
-          wait_poll_cycle "$state" "$pid" 600 \
-            || fail "[$backend/$mode] the watcher did not stay quiet through poll $poll (alive=$(kill -0 "$pid" 2>/dev/null && echo yes || echo no)): $(cat "$out")"
-        done
-        reap "$pid"; pid=''
-        [ ! -s "$state/.wake-queue" ] || fail "[$backend/$mode] an inconclusive probe enqueued a wake"
-        [ ! -e "$state/lost.missing-endpoint" ] || fail "[$backend/$mode] an inconclusive probe recorded a loss"
-      else
-        wait_for_exit "$pid" 150 || fail "[$backend] a confirmed-missing endpoint did not wake the watcher: $(cat "$out")"
-        pid=''
-        grep -Fxq "stale: $target (the recorded endpoint is gone)" "$out" \
-          || fail "[$backend] unexpected watcher output for a confirmed-missing endpoint: $(cat "$out")"
-        awk -F '\t' -v window="$target" '$3 == "stale" && $4 == window { n++ } END { exit(n != 1) }' "$state/.wake-queue" \
-          || fail "[$backend] expected exactly one durable loss wake"
-      fi
+      for poll in 1 2; do
+        wait_poll_cycle "$state" "$pid" 600 \
+          || fail "[$backend/$mode] the watcher did not stay quiet through poll $poll (alive=$(kill -0 "$pid" 2>/dev/null && echo yes || echo no)): $(cat "$out")"
+      done
+      reap "$pid"; pid=''
+      [ ! -s "$state/.wake-queue" ] || fail "[$backend/$mode] an inconclusive probe enqueued a wake"
+      [ ! -e "$state/lost.missing-endpoint" ] || fail "[$backend/$mode] an inconclusive probe recorded a loss"
       [ ! -s "$fakebin/route-errors" ] || fail "unexpected watcher backend route: $(cat "$fakebin/route-errors")"
     done
     case "$backend" in
@@ -2547,7 +2545,10 @@ test_experimental_backend_endpoint_loss_requires_confirmed_absence() (
         [ -s "$fakebin/orca-captures" ] || fail "the watcher did not attempt to capture the recorded Orca terminal"
         pass "orca: stale handles stay quiet after the capture fails"
         ;;
-      cmux) pass "cmux: the watcher queues loss only for confirmed absence" ;;
+      cmux)
+        [ -f "$fakebin/cmux-moved-source-read" ] || fail "the watcher did not inspect the empty cmux source workspace after the move"
+        pass "cmux: the source workspace stays quiet after its surface moves"
+        ;;
     esac
   done
 )
@@ -2574,13 +2575,12 @@ test_experimental_backend_endpoint_state_boundary() (
   expect_endpoint_state unreadable present zellij remote:7
 
   expect_endpoint_state present present cmux ws-gone:sf-gone fm-lost
-  expect_endpoint_state missing missing cmux ws-gone:sf-gone fm-lost
-  for mode in unreadable renamed out-of-window bad-workspace bad-pane bad-surface; do
+  for mode in unreadable renamed out-of-window moved-surface empty-pane bad-workspace bad-pane bad-surface; do
     expect_endpoint_state unreadable "$mode" cmux ws-gone:sf-gone fm-lost
   done
   expect_endpoint_state unreadable present cmux ws-gone:sf-gone
 
-  pass "experimental backends: only matching, readable endpoint evidence establishes presence or loss"
+  pass "experimental backends: only matching, readable endpoint evidence establishes presence"
 )
 
 # A parked task whose worker window was deliberately closed while its isolated
@@ -5888,7 +5888,7 @@ test_exited_declared_pause_is_bounded_but_live_gate_surfaces
 test_missing_tmux_endpoint_surfaces_once || exit 1
 test_endpoint_loss_and_ordinary_stale_are_presented_independently || exit 1
 test_missing_secondmate_endpoint_surfaces_once || exit 1
-test_experimental_backend_endpoint_loss_requires_confirmed_absence || exit 1
+test_experimental_backend_unreadable_endpoints_stay_quiet || exit 1
 test_experimental_backend_endpoint_state_boundary || exit 1
 test_parked_retained_copy_suppresses_endpoint_loss || exit 1
 test_park_wait_stops_when_home_is_retired || exit 1

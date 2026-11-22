@@ -63,6 +63,7 @@ The watcher queues `stale: <window> (the recorded endpoint is gone)` once for th
 The presence verdict comes from `fm_backend_endpoint_state` in [`fm-backend.sh`](../bin/fm-backend.sh), which treats an unavailable or inconclusive inventory as unreadable and leaves it quiet.
 The watcher cannot confirm Zellij endpoint loss because the session named in the record may have been renamed or replaced.
 cmux requires the recorded workspace to appear in the current window inventory.
+The watcher cannot confirm cmux endpoint loss because a surface can move to another workspace while its recorded workspace stays open and empty.
 A listed Zellij pane or cmux workspace with a changed title is unreadable for loss reporting.
 The watcher cannot confirm Orca endpoint loss because a recorded handle can go stale while its terminal survives.
 cmux can miss a surface loss when another surface remains in the same workspace.

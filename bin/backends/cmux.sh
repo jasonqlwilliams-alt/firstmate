@@ -450,7 +450,8 @@ fm_backend_cmux_endpoint_state() {  # <target> <expected-label>
     select(length == 1) | .[0].panes
     | select(type == "array" and all(.[]; .surface_ids
         | type == "array" and all(.[]; type == "string" and length > 0)))
-    | if any(.[]; .surface_ids | length > 0) then "present" else "missing" end
+    | select(any(.[]; .surface_ids | length > 0))
+    | "present"
   ' 2>/dev/null || printf 'unreadable'
 }
 
