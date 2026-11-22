@@ -798,7 +798,7 @@ fm_backend_capture() {  # <backend> <target> <lines> [expected-label]
   fm_backend_source "$backend" || return 1
   case "$backend" in
     tmux) fm_backend_tmux_capture "$@" ;;
-    herdr) fm_backend_herdr_capture "$1" "${2:-}" ;;
+    herdr) fm_backend_herdr_capture "$@" ;;
     zellij) fm_backend_zellij_capture "$@" ;;
     orca) fm_backend_orca_capture "$@" ;;
     cmux) fm_backend_cmux_capture "$@" ;;

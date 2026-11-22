@@ -44,6 +44,7 @@ It was observed in production on 2026-11-21 and 2026-11-22 during second-mate re
 Firstmate never sends a key to this dialog: Enter would stop the tasks without anyone deciding to, and the key plane cannot move the selection.
 `../../../../../bin/fm-composer-lib.sh` (`fm_composer_claude_exit_confirm_screen`) owns the recognition, and `../../../../../docs/agent-control.md` owns the response.
 The guard refuses input when the exact three choices with the marker on choice 1 form the final block on screen, including when the heading or task rows wrap or are offscreen.
+Each choice must fit on one terminal row for the guard to recognize the dialog.
 
 ## Composer ghost
 
