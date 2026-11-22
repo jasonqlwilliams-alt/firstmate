@@ -58,9 +58,7 @@
 #     branch-side containment only; main's tasks-axi path has no executable
 #     backlog lease guard in this scope.
 #
-# Sourced by bin/fm-send.sh, bin/fm-control.sh, bin/fm-teardown.sh,
-# bin/fm-pr-merge.sh, bin/fm-merge-local.sh, bin/fm-spawn.sh, and
-# bin/fm-lease.sh. Callers must have $STATE resolved before calling. No side
+# Fleet commands must resolve $STATE before calling this library. No side
 # effects on source. set -u / set -e safe.
 
 # Distinct from usage errors (2), the gate refusal (3), and fm-send's
@@ -166,6 +164,7 @@ fm_lease_clear_stale() {
 # mutation; the caller must invoke fm_lease_guard_release from its EXIT cleanup.
 # This closes the check/use race with a concurrent claim. Outside Pi, stale
 # records are still cleaned but the lock is released before returning.
+# The optional wait mode is passed to fm_lock_acquire_wait in fm-wake-lib.sh.
 fm_lease_guard() {
   local task=$1 action=$2 wait_mode=${3:-} actor lock lease_actor active=0
   fm_lease_valid_id "$task" || return 0

@@ -383,10 +383,7 @@ fm_backend_endpoint_park_identity() {  # <meta-file>
   printf '%s' "$incarnation"
 }
 
-# fm_backend_endpoint_parked_retained: 0 iff the task's park mark,
-# <state>/<id>.parked-retained written by bin/fm-park-retained.sh (which owns
-# the mark's contract), names the record's current endpoint incarnation. A
-# relaunch records a new incarnation, so an older mark never matches it.
+# The header of bin/fm-park-retained.sh owns the park mark contract.
 fm_backend_endpoint_parked_retained() {  # <meta-file>
   local meta=$1 mark incarnation recorded
   case "$meta" in *.meta) ;; *) return 1 ;; esac

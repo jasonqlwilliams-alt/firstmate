@@ -895,6 +895,8 @@ fm_recovery_marker_reopen_announced() {
   fm_recovery_transition "$1" reopen-announced
 }
 
+# same-owner checks stale-owner recovery against the initially observed lock.
+# A disappearing lifecycle lock can mean another action just finished.
 fm_lock_try_acquire() {
   local lockdir=$1 mode=${2:-} parent pid steal cur rc steal_owner primary_owner='' current
   FM_LOCK_HELD_PID=
@@ -1013,6 +1015,7 @@ fm_lock_try_acquire() {
 
 # Retry at the ordinary 0.1s cadence, without recreating the parent directory.
 # By default, a temporarily missing parent does not interrupt the wait.
+# With existing-parent, a missing parent ends the wait with failure.
 fm_lock_acquire_wait() {
   local lockdir=$1 mode=${2:-} parent=${1%/*}
   [ "$parent" != "$lockdir" ] || parent=.

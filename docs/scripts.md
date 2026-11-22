@@ -101,6 +101,7 @@ Ask the worker to reissue the question with an unreserved key so it can enter `O
 | `fm-watch-arm.sh`        | Verified home-scoped watcher arm wrapper with loud cycle endings and bounded lifecycle ledger |
 | `fm-watch-checkpoint.sh` | Run one bounded foreground watcher checkpoint for Codex-style supervision            |
 | `fm-watch.sh`            | Singleton-safe watcher: absorb benign wakes, detect stalled local-secondmate wake queues, and exit on actionable ones |
+| `fm-park-retained.sh`    | Mark or clear a [retained-copy park](watcher-continuity.md#parking-a-task-with-its-copy-retained) |
 | `fm-inactive-reconcile.sh` | Reconcile long-inactive direct crewmate terminal outcomes without forge access |
 | `fm-afk-contract.sh`     | Own the away-posture record: schema, mandate-clause fields and never-set scan, refusal naming the missing part, read-back, entry announcement, archive |
 | `fm-afk-start.sh`        | Run the common sourceable away-mode daemon entry in the foreground                      |

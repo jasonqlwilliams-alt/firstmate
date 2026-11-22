@@ -6,21 +6,23 @@
 #   fm-park-retained.sh <task-id> mark     record the mark for a confirmed missing endpoint
 #   fm-park-retained.sh <task-id> clear    remove the mark
 #
-# Use it when a task's worker window was deliberately closed while its copy and
-# unlanded work are kept for later. The mark is the file
-# <state>/<id>.parked-retained holding the task record's endpoint incarnation
-# (backend, target, and spawn generation; bin/fm-backend.sh's
-# fm_backend_endpoint_park_identity). bin/fm-watch.sh skips the loss report only
-# while that content equals the record's current incarnation, so a relaunch or
-# resume, which records a new spawn generation, makes an old mark inert and the
-# resumed worker's loss alerts again. `clear` restores normal reporting
-# eligibility with the existing loss deduplication.
+# Operator workflow: docs/watcher-continuity.md#parking-a-task-with-its-copy-retained.
+# Park marks apply only to local ordinary tasks. Existing secondmate reporting
+# rules still apply. Both actions require an existing task record and a state
+# directory that physically resolves within FM_HOME, including when
+# FM_STATE_OVERRIDE is set. The state directory, task record, and any existing
+# park mark must be non-symlinks. Both actions honor the Pi supervision lease.
+# Both actions operate on supervision state, and mark also checks the runtime
+# endpoint. The task's copy, branch, and work stay unread and untouched.
 #
-# The mark is advisory to loss reporting only. It never reads or changes the
-# task's copy, branch, or work, and relaunch, cleanup, the landed-work checks,
-# backlog holds, and decision records ignore it. bin/fm-teardown.sh removes it
-# with the task record. Park marks apply only to local ordinary tasks.
-# Existing secondmate reporting rules still apply.
+# <state>/<id>.parked-retained stores backend:target, a tab, and the spawn
+# generation. fm_backend_endpoint_park_identity treats a legacy teardown
+# stamp like an absent generation, so the mark still applies if teardown
+# leaves the stamped record in place. Watcher loss reporting consults the mark
+# for that identity.
+# Relaunch, cleanup authorization, landed-work checks, backlog holds, and
+# decision records keep their own authority. Teardown and interrupted-close
+# replay remove the mark when the task record is retired.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

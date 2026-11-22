@@ -58,22 +58,27 @@ The turn-end guard remains the final backstop rather than the normal continuity 
 
 ## Recorded endpoint loss
 
-When pane polling cannot read a local task's recorded endpoint and the backend confirms it is missing, the watcher clears pause tracking and queues `stale: <window> (the recorded endpoint is gone)` once for that recorded endpoint.
+When pane polling cannot read a local task's recorded endpoint and the backend confirms it is missing, the watcher clears pause tracking.
+The watcher queues `stale: <window> (the recorded endpoint is gone)` once for that recorded endpoint unless a matching retained-copy park mark suppresses the report.
 tmux and Herdr supply the required missing verdict, and a secondmate enters this poll path only while its latest status declares `paused:` or `captain-held:`.
 The report is keyed to the recorded backend, target, and spawn generation, so a relaunch can report a fresh loss even when it reuses the target.
 A successful capture also re-arms the report, and teardown keeps the loss record until it retires the task record.
 The wake keeps its window key for routing and has a separate deduplication identity, so the drain presents both the endpoint loss and any ordinary stale wake for that window, collapsing repeated loss rows to one.
 After handling both wakes, use the drain's [printed acknowledgement](#recovery-episode-acknowledgement) to retire them.
-After deliberately closing a local ordinary task's worker window and retaining its isolated copy, use `bin/fm-park-retained.sh <task-id> mark` to silence this report for the confirmed missing endpoint without touching the copy or its work.
-Existing secondmate reporting rules still apply.
-`bin/fm-park-retained.sh <task-id> clear` restores normal reporting eligibility with the existing loss deduplication.
-Both commands require the state directory to resolve within the selected Firstmate home, including when `FM_STATE_OVERRIDE` selects an alternate directory.
-A loss notification queued before marking is still presented and acknowledged once through the normal wake acknowledgement, and no further loss notification is raised while the mark matches.
-A relaunch or resume records a new incarnation, so an older mark stops applying and the resumed worker's loss alerts again; the script header owns the mark's format.
 Where the away daemon runs, it routes the loss to its escalation digest and keeps pause tracking cleared while the loss still matches the current endpoint, even if the wait remains declared.
 
 The [backend verification record](verification/runtime-backends.md#recorded-endpoint-loss) covers tmux and Herdr.
-The [drain regression](../tests/fm-watch-triage.test.sh) exercises both wake sequence orders.
+The [watcher triage regressions](../tests/fm-watch-triage.test.sh) exercise both wake sequence orders, marking, and clearing.
+
+### Parking a task with its copy retained
+
+After deliberately closing a local ordinary task's worker window and retaining its isolated copy, use the `mark` action in [`fm-park-retained.sh`](../bin/fm-park-retained.sh) for that task.
+Marking requires the backend to confirm that the recorded endpoint is missing, and both park actions leave the copy and its work intact.
+Secondmates follow the reporting rule above.
+A loss wake queued before marking remains pending until [normal wake acknowledgement](#per-actor-acknowledgement).
+When resuming, use `clear` to remove the mark, including after the worker is running again.
+Clearing restores reporting eligibility and preserves the existing loss deduplication, so an already reported loss stays deduplicated for that incarnation.
+A relaunch makes the old mark inapplicable to the new worker, even if the mark is still on disk.
 
 ## Foreground checkpoint boundary
 
