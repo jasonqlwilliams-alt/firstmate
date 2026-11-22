@@ -46,6 +46,10 @@ If a capture becomes uncertain after Enter, a later pending read does not permit
 Codex exit also returns nonzero with `process-stopped-safe-quit-unconfirmed` when the process stops after lifecycle input, because process death and a shell redraw cannot distinguish an ordinary `/quit` from accepting the global-update picker.
 This includes an ordinary successful `/quit`: the endpoint and worktree remain available, but the result does not certify a safe quit.
 A subsequent exit against an already dead Codex process remains idempotent `already-stopped`; it does not retroactively certify the earlier quit.
+Claude exit never sends a key to Claude's background-tasks exit confirmation, which Claude draws instead of exiting while the session still runs background shell tasks.
+Exit checks for that exact dialog before typing `/exit`, before each Enter, and while it waits, and on sight reports the exit unconfirmed with the dialog named, so the second-mate restart reports that mate unreached; the restart's save request asks the mate to stop its own background tasks first, so the dialog normally never appears.
+The steering doorbell refuses that dialog with its existing refusal outcomes, and the [Claude adapter reference](../.agents/skills/harness-adapters/references/harness/claude.md#background-tasks-exit-confirmation) owns the screen facts.
+A Claude submit Enter is retried only while the composer still proves it holds `/exit`.
 Interrupt never rewrites busy state as proof of its own success.
 Claude exposes no lifecycle acknowledgement for a manual interrupt, so delivery succeeds with `cancel=unconfirmed` and its adapter-owned busy state remains as observed.
 muse's session log records `terminal=cancelled` for the interrupted run, so the control plane reports `cancel=confirmed` only after observing that exact acknowledgement.
@@ -155,5 +159,6 @@ The empirical basis for each adapter's value is the `harness-adapters` skill's v
 ## Verification
 
 - `tests/fm-control.test.sh` - the adapter contract for every verified harness, the backend capability matrix, exact-id scoping, the closed verb list, the busy, idle, dead, and idempotent lifecycle cases, Codex picker and uncertain-screen refusals, slow quit and shell redraw, retained picker history, Herdr plain capture fallback, and marker non-regression, all against a stubbed session provider.
+- `tests/fm-control-claude-exit-dialog.test.sh` - Claude's background-tasks exit confirmation left without keys and reported by exit, the restart, and the doorbell, plus near-miss screens, against a compiled tmux stand-in and a styled Herdr stub.
 - `tests/fm-control-relaunch.test.sh` - the relaunch transaction, preparation refusals, exited-shell recovery, registered merge-poll continuity, and rollback; [runtime verification](verification/runtime-backends.md) records the reusable evidence.
 - `tests/fm-control-herdr-smoke.test.sh` - the second state-verified backend against the real herdr binary, on an isolated throwaway lab session.

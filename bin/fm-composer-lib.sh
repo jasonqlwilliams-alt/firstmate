@@ -1636,3 +1636,32 @@ fm_composer_codex_signin_screen() {  # <styled-screen>
                   (!api && device > first && another > device && provider > another && footer > provider))) }
   '
 }
+
+# Positive identification of Claude's background-tasks exit confirmation, the
+# dialog Claude draws instead of exiting when /exit lands while the session
+# still runs background shell tasks. Every element of the observed rendering
+# must hold, bottom-anchored so a dialog retained above a later screen never
+# matches: the exact heading "The following will stop when you exit:", at
+# least one task row beneath it, and then exactly the three choices
+# "❯ 1. Exit and stop tasks", "2. Move to background and exit", and "3. Stay"
+# as the last non-blank rows. This is a stop-only verdict: no caller ever
+# sends a key to it (the .agents/skills/harness-adapters Claude reference owns
+# the observed shape). Every other screen keeps its ordinary verdict.
+fm_composer_claude_exit_confirm_screen() {  # <styled-screen>
+  printf '%s\n' "$1" | fm_composer_strip_ansi | LC_ALL=C awk '
+    {
+      sub(/\r$/, ""); sub(/^[ \t]+/, ""); sub(/[ \t]+$/, "")
+      row[NR] = $0
+      if ($0 != "") last = NR
+    }
+    END {
+      if (row[last] != "3. Stay" || row[last-1] != "2. Move to background and exit" ||
+          row[last-2] != "❯ 1. Exit and stop tasks") exit 1
+      i = last - 3
+      while (i > 0 && row[i] == "") i--
+      if (row[i] !~ /^· [^[:space:]]/) exit 1
+      while (i > 0 && row[i] ~ /^· [^[:space:]]/) i--
+      exit !(row[i] == "The following will stop when you exit:")
+    }
+  '
+}

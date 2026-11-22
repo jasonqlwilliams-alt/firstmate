@@ -976,7 +976,10 @@ fm_backend_composer_classify_snapshot() {  # <backend> <target>
 # appears between two reads can never borrow an earlier read's verdict.
 # Prints update-picker, or the composer verdict otherwise:
 # empty|pending|pending-unproven|unknown, or sign-in for an explicitly recorded
-# Codex authentication screen (a stop-only verdict). An unreadable capture is
+# Codex authentication screen (a stop-only verdict), or exit-confirm for an
+# explicitly recorded Claude pane showing the background-tasks exit
+# confirmation (fm_composer_claude_exit_confirm_screen in bin/fm-composer-lib.sh;
+# also stop-only: no caller sends it any key). An unreadable capture is
 # unknown. <expected-pending> is the exact text the caller just typed: on a
 # plain (styled=0) capture, where a glyph row with trailing text reads unknown,
 # a composer holding exactly that text reads pending, and on a cursorless
@@ -985,8 +988,8 @@ fm_backend_composer_classify_snapshot() {  # <backend> <target>
 # into the snapshot's capability facts as harness=<name>, so the classifier
 # can apply that harness's own placeholder rule (bin/fm-composer-lib.sh
 # "ROVO PLACEHOLDER CHIP").
-# Callers: the steering-inbox doorbell (bin/fm-task-inbox-lib.sh) and Codex
-# exit (bin/fm-control.sh).
+# Callers: the steering-inbox doorbell (bin/fm-task-inbox-lib.sh), and Codex
+# and Claude exit (bin/fm-control.sh).
 fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness]
   local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} picker verdict kv styled=0
   fm_backend_composer_snapshot "$backend" "$target" "$label" || { printf 'unknown'; return 0; }
@@ -1001,6 +1004,11 @@ fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [ex
   if [ "$harness" = codex ] && [ "$picker" != below ] \
      && fm_composer_codex_signin_screen "$FM_COMPOSER_SNAPSHOT_SCREEN"; then
     printf 'sign-in'
+    return 0
+  fi
+  if [ "$harness" = claude ] && [ "$picker" != below ] \
+     && fm_composer_claude_exit_confirm_screen "$FM_COMPOSER_SNAPSHOT_SCREEN"; then
+    printf 'exit-confirm'
     return 0
   fi
   verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target")

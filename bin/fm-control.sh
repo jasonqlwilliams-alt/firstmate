@@ -557,6 +557,53 @@ codex_signin_exit() {
   printf 'stopped-sign-in'
 }
 
+# Claude exit owns its literal/Enter sequence so no key ever reaches Claude's
+# background-tasks exit confirmation (exit-confirm from the shared guarded
+# read, fm_backend_guarded_composer_state in bin/fm-backend.sh). That dialog
+# appears instead of an exit when the session still runs background shell
+# tasks; its preselected first choice would stop them, so firstmate never
+# answers it. Exit refuses before typing, before every Enter, and while it
+# waits, reporting the exit unconfirmed at once rather than after the wait.
+# A submit Enter is retried only while the composer still proves it holds the
+# exit command, because a slash command can swallow the first Enter.
+claude_exit_screen_state() {  # [expected-pending]
+  fm_backend_guarded_composer_state "$BACKEND" "$T" "$LABEL" "${1:-}" claude
+}
+
+claude_exit_dialog_refusal() {  # <interrupt-result> <exit-command-state>
+  local verb=exit-delivered
+  [ "$2" != not-sent ] || verb=exit-refused
+  die "$verb $ID interrupt=$1 exit-command=$2 agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it"
+}
+
+claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
+  local cmd=$1 interrupt_result=$2 screen state attempts=0 waited=0
+  [ "$(claude_exit_screen_state)" != exit-confirm ] \
+    || claude_exit_dialog_refusal "$interrupt_result" not-sent
+  fm_backend_send_literal "$BACKEND" "$T" "$cmd" "$LABEL" \
+    || die "the exit command could not be sent to task $ID on $BACKEND"
+  sleep 1.2
+  [ "$(claude_exit_screen_state "$cmd")" != exit-confirm ] \
+    || claude_exit_dialog_refusal "$interrupt_result" typed
+  fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null 2>&1 \
+    || die "the exit command could not be submitted to task $ID on $BACKEND"
+  attempts=1
+  while :; do
+    sleep "$POLL"
+    waited=$(awk -v w="$waited" -v p="$POLL" 'BEGIN{printf "%.3f", w + p}')
+    state=$(agent_state)
+    [ "$state" != dead ] || return 0
+    screen=$(claude_exit_screen_state "$cmd")
+    [ "$screen" != exit-confirm ] || claude_exit_dialog_refusal "$interrupt_result" delivered
+    awk -v w="$waited" -v t="$EXIT_WAIT" 'BEGIN{exit !(w < t)}' \
+      || die "exit-delivered $ID interrupt=$interrupt_result exit-command=delivered agent-state=$state exit=unconfirmed; the agent did not stop within ${EXIT_WAIT}s"
+    if [ "$screen" = pending ] && [ "$state" = alive ] && [ "$attempts" -lt "$EXIT_RETRIES" ]; then
+      fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null 2>&1 || true
+      attempts=$((attempts + 1))
+    fi
+  done
+}
+
 # do_exit: stop the running agent, preserving endpoint and worktree. Returns
 # `already-stopped`, `stopped`, or Codex's
 # `process-stopped-safe-quit-unconfirmed` after lifecycle input.
@@ -580,6 +627,9 @@ do_exit() {
       codex_signin_exit
       return $?
     fi
+  fi
+  if [ "$HARNESS" = claude ] && [ "$(claude_exit_screen_state)" = exit-confirm ]; then
+    claude_exit_dialog_refusal not-needed not-sent
   fi
   # A busy agent is interrupted first before the exit command is submitted.
   case "$(busy_verdict)" in
@@ -611,6 +661,8 @@ do_exit() {
   # swallows the first Enter.
   if [ "$HARNESS" = codex ]; then
     codex_exit_submit "$cmd"
+  elif [ "$HARNESS" = claude ]; then
+    claude_exit_submit "$cmd" "$interrupt_result"
   else
     verdict=$(fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" 1.2 "$LABEL") \
       || die "the exit command could not be sent to task $ID on $BACKEND"
