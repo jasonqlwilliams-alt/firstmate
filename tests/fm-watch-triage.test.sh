@@ -2448,8 +2448,10 @@ test_parked_retained_copy_suppresses_endpoint_loss() (
   lease_task release plain || fail "main could not release the task lease"
   rm -f "$state/.lock"
   ack_parked "$dir/recovered" || fail "could not acknowledge the pending loss wake"
-  awk -F '\t' -v w="$worker_window" '$3 == "stale" && $4 == w { count++ } END { exit (count != 1) }' \
-    "$dir/recovered" || fail "drain did not present one pending loss wake"
+  awk -F '\t' -v w="$worker_window" -v p="stale: $worker_window (the recorded endpoint is gone)" '
+    $3 == "stale" && $4 == w { count++; if ($5 != p) wrong_payload=1 }
+    END { exit (count != 1 || wrong_payload) }
+  ' "$dir/recovered" || fail "drain did not present exactly one pending endpoint-loss wake"
   expect_quiet marked-after-queue
   park_task plain clear > "$dir/park.out" 2>&1 || fail "clearing after acknowledgement failed: $(cat "$dir/park.out")"
   expect_quiet cleared-after-acknowledgement
