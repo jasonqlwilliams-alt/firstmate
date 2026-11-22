@@ -1594,19 +1594,26 @@ poll_artifact_snapshot() {
   done
 }
 
-test_merged_poll_retires_once() {
-  local dir state rc first second meta_before
+test_merged_poll_retires_once() (
+  local dir state rc first second meta_before lock
+  FM_WAKE_NO_MKDIR=1 . "$ROOT/bin/fm-wake-lib.sh"
   dir=$(make_case merged-retirement-once)
   state="$dir/home/state"
   write_poll_meta "$state" task-a https://github.com/o/r/pull/1
   meta_before=$(cat "$state/task-a.meta")
   seed_canonical_poll "$dir" task-a https://github.com/o/r/pull/1
   add_stop_custom_check "$dir"
+  FM_HOME="$dir/home" PATH="$dir/fakebin:$BASE_PATH" "$ROOT/bin/fm-inactive-reconcile.sh" scan \
+    || fail "could not prime the inactive-outcome scan before holding the metadata lock"
+  touch "$state/home-summary.json"
+  lock=$(fm_meta_lock_path "$state/task-a.meta")
+  fm_lock_try_acquire "$lock" || fail "could not hold the metadata lock for the merge poll"
 
   set +e
   FM_TEST_GH_STATE=MERGED run_watcher_bounded "$dir/home" "$dir/fakebin" > "$dir/watch-1.out" 2> "$dir/watch-1.err"
   rc=$?
   set -e
+  fm_lock_release "$lock"
   [ "$rc" -eq 0 ] || fail "merged retirement watcher failed: $(cat "$dir/watch-1.err")"
   first=$(cat "$dir/watch-1.out")
   case "$first" in check:*task-a.check.sh:*merged) ;; *) fail "first merged notification was not preserved: $first" ;; esac
@@ -1626,8 +1633,8 @@ test_merged_poll_retires_once() {
     || fail "retired merged poll executed a second time"
   ! grep "$(printf '\tcheck\ttask-a.check.sh\t')" "$state/.wake-queue" >/dev/null 2>&1 \
     || fail "handled merged notification remained queued after acknowledgement"
-  pass "validated merged polls notify once and retire before the next watcher cycle"
-}
+  pass "validated merged polls notify once even with a busy metadata lock"
+)
 
 # A poll's own retirement state is scoped to ONE registration, so it cannot by
 # itself catch a poll re-registered for a task whose merge was already
@@ -2306,9 +2313,13 @@ SH
 )
 
 test_busy_closure_publication_keeps_normal_cadence() (
-  local dir state url lock watcher i stage
+  local dir state url lock watcher= i stage
   FM_WAKE_NO_MKDIR=1 . "$ROOT/bin/fm-wake-lib.sh"
   dir=$(make_case closure-contention)
+  trap '
+    touch "$dir/home/forge-release"
+    [ -z "$watcher" ] || wait "$watcher" || true
+  ' EXIT
   state="$dir/home/state"
   url=https://github.com/o/r/pull/28
   write_poll_meta "$state" task-a "$url"
@@ -2339,6 +2350,7 @@ SH
   fm_lock_try_acquire "$lock" || fail "the watcher held the lock across the forge read"
   touch "$dir/home/forge-release"
   wait "$watcher" || fail "publication contention stalled the watcher: $(cat "$dir/watch.log")"
+  watcher=
   fm_lock_release "$lock"
 
   case "$(cat "$dir/watch.log")" in
@@ -2432,6 +2444,37 @@ SH
   done
   pass "registered custom checks run despite leftover PR registration and an unavailable closure stage"
 )
+
+test_concurrent_custom_replacement_is_authenticated() {
+  local dir state url out
+  dir=$(make_case concurrent-custom-replacement)
+  state="$dir/home/state"
+  url=https://github.com/o/r/pull/31
+  write_poll_meta "$state" task-a "$url"
+  seed_canonical_poll "$dir" task-a "$url"
+  printf '#!/usr/bin/env bash\nprintf "registered-replacement\\n"\n' > "$dir/replacement"
+  chmod 0700 "$dir/replacement"
+  cat > "$dir/fakebin/mktemp" <<'SH'
+#!/usr/bin/env bash
+case "${1:-}" in
+  */.task-a.pr-poll-closed.XXXXXX)
+    mv -f "$TEST_REPLACEMENT" "$FM_HOME/state/task-a.check.sh" || exit 1
+    "$TEST_REGISTER" task-a >/dev/null || exit 1
+    ;;
+esac
+exec "$TEST_REAL_MKTEMP" "$@"
+SH
+  chmod 0700 "$dir/fakebin/mktemp"
+  out=$(TEST_REAL_MKTEMP="$(command -v mktemp)" TEST_REGISTER="$REGISTER" \
+    TEST_REPLACEMENT="$dir/replacement" FM_TEST_GH_LOG="$dir/gh.log" \
+    run_watcher_bounded "$dir/home" "$dir/fakebin") || fail "watcher failed after custom replacement: $out"
+  case "$out" in
+    check:*task-a.check.sh:*registered-replacement) ;;
+    *) fail "watcher did not run the authenticated replacement: $out" ;;
+  esac
+  [ ! -s "$dir/gh.log" ] || fail "watcher queried the forge for the replacement custom check"
+  pass "the watcher authenticates a custom check registered during PR poll preparation"
+}
 
 test_closure_cleanup_tolerates_a_stage_disappearing() (
   local dir state stage record url
@@ -2873,6 +2916,7 @@ test_abandoned_metadata_lock_does_not_skip_the_poll
 test_busy_closure_publication_keeps_normal_cadence
 test_closure_stage_failure_skips_the_forge_read
 test_registered_custom_check_survives_pr_closure_setup_failure
+test_concurrent_custom_replacement_is_authenticated
 test_closure_cleanup_tolerates_a_stage_disappearing
 test_remote_proxy_teardown_removes_closure_evidence
 test_retirement_refuses_replacement_and_nonterminal_results

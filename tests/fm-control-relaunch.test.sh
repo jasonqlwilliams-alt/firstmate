@@ -522,7 +522,7 @@ SH
 
 test_relaunch_and_pr_replacement_during_closure() {
   local dir state setup=${1:-fresh} id=rl-close url=https://github.com/example/repo/pull/20
-  local replacement=https://github.com/example/repo/pull/21 out rc watcher checksum= i=0
+  local replacement=https://github.com/example/repo/pull/21 out rc watcher= checksum= i=0
   dir=$(new_case "closure-race-$setup" "$id")
   state="$dir/home/state"
 
@@ -597,6 +597,11 @@ SH
     || fail "could not register the poll-cycle control check"
   touch "$state/home-summary.json"
 
+  trap '
+    touch "$dir/home/replacement-armed" "$dir/home/capture-verified" "$dir/home/forge-release"
+    [ -z "$watcher" ] || wait "$watcher" || true
+    relaunch_cleanup
+  ' EXIT
   env FM_HOME="$dir/home" PATH="$dir/pollbin:/usr/bin:/bin:/usr/sbin:/sbin" \
     TEST_WATCH_CAPTURE=1 TEST_REAL_CHECKSUM="$checksum" FM_POLL=0.1 FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=30 \
     "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 40 > "$dir/watch.log" 2>&1 &
@@ -642,6 +647,7 @@ SH
     || fail "could not arm the replacement PR: $(cat "$dir/register.log")"
   touch "$dir/home/forge-release"
   wait "$watcher" || fail "watcher failed during relaunch and replacement: $(cat "$dir/watch.log")"
+  trap relaunch_cleanup EXIT
   case "$(cat "$dir/watch.log")" in
     check:*z-cycle-end.check.sh:*poll-cycle-end) ;;
     *) fail "watcher missed the control check: $(cat "$dir/watch.log")" ;;

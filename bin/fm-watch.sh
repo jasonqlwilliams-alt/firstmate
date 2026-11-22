@@ -2088,20 +2088,25 @@ while :; do
           rejected_checks="$rejected_checks $c"
           continue
         fi
-      elif fm_custom_check_snapshot_prepare "$STATE" "$id"; then
-        run_check_capture "$FM_CUSTOM_CHECK_SNAPSHOT" || exit 1
-        out=$FM_CHECK_RESULT
-        fm_custom_check_snapshot_cleanup
       else
-        fm_custom_check_snapshot_cleanup
-        poll_prepare_rc=0
-        fm_pr_poll_snapshot_prepare "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" || poll_prepare_rc=$?
-        [ "$poll_prepare_rc" -eq 0 ] || fm_pr_closure_stage_cleanup
-        if [ "$poll_prepare_rc" -eq 3 ]; then
-          triage_log "PR poll for $id skipped because its closure stage could not be prepared"
-          continue
-        elif [ "$poll_prepare_rc" -eq 0 ]; then
-          is_pr_poll=1
+        if ! fm_custom_check_snapshot_prepare "$STATE" "$id"; then
+          fm_custom_check_snapshot_cleanup
+          poll_prepare_rc=0
+          fm_pr_poll_snapshot_prepare "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" || poll_prepare_rc=$?
+          [ "$poll_prepare_rc" -eq 0 ] || fm_pr_closure_stage_cleanup
+          if [ "$poll_prepare_rc" -eq 3 ]; then
+            triage_log "PR poll for $id skipped because its closure stage could not be prepared"
+            continue
+          elif [ "$poll_prepare_rc" -eq 0 ]; then
+            is_pr_poll=1
+          elif ! fm_custom_check_snapshot_prepare "$STATE" "$id"; then
+            fm_custom_check_snapshot_cleanup
+            [ -e "$c" ] || [ -L "$c" ] || continue
+            rejected_checks="$rejected_checks $c"
+            continue
+          fi
+        fi
+        if [ "$is_pr_poll" -eq 1 ]; then
           provider=$FM_PR_POLL_SNAPSHOT_PROVIDER
           url=$FM_PR_POLL_SNAPSHOT_URL
           host=$FM_PR_POLL_SNAPSHOT_HOST
@@ -2109,12 +2114,11 @@ while :; do
           number=$FM_PR_POLL_SNAPSHOT_NUMBER
           run_check_capture "$SCRIPT_DIR/fm-pr-poll.sh" --validated \
             "$provider" "$url" "$host" "$path" "$number" || exit 1
-          out=$FM_CHECK_RESULT
         else
-          [ -e "$c" ] || [ -L "$c" ] || continue
-          rejected_checks="$rejected_checks $c"
-          continue
+          run_check_capture "$FM_CUSTOM_CHECK_SNAPSHOT" || exit 1
+          fm_custom_check_snapshot_cleanup
         fi
+        out=$FM_CHECK_RESULT
       fi
       if [ "$is_pr_poll" -eq 1 ] && [ "$out" = closed-unmerged ]; then
         closure_rc=0
