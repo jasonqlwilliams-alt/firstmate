@@ -3373,8 +3373,15 @@ SH
   pass "a leaked descendant process rooted under the task's worktree is reaped by teardown, not left surviving"
 }
 
+require_lsof_for_case() {
+  [ -n "$REAL_LSOF_FOR_TEST" ] && return 0
+  printf 'skip: %s requires lsof\n' "$1"
+  return 1
+}
+
 test_leaked_tasktmp_process_is_reaped() {
   local case_dir rc pid
+  require_lsof_for_case leaked-tasktmp-reap || return 0
   case_dir=$(make_case leaked-tasktmp-reap)
   write_meta "$case_dir" no-mistakes ship
   printf '%s\n' "tasktmp=$case_dir/tasktmp" >> "$case_dir/state/task-x1.meta"
@@ -3513,6 +3520,7 @@ SH
 
 test_exec_changed_process_is_still_reaped() {
   local case_dir rc pid marker done_flag survived=0
+  require_lsof_for_case exec-changed-process || return 0
   case_dir=$(make_case exec-changed-process)
   write_meta "$case_dir" no-mistakes ship
   land_shippable_commit "$case_dir"
@@ -3575,6 +3583,7 @@ SH
 
 test_process_spawned_during_grace_is_reaped_on_later_pass() {
   local case_dir rc pid child_file child_pid="" parent_survived=0 child_survived=0
+  require_lsof_for_case grace-spawn-convergence || return 0
   case_dir=$(make_case grace-spawn-convergence)
   write_meta "$case_dir" no-mistakes ship
   land_shippable_commit "$case_dir"
@@ -3692,6 +3701,7 @@ EOF
 
 test_run_abort_precedes_process_reap_precedes_worktree_removal() {
   local case_dir rc head pid abort_log
+  require_lsof_for_case abort-then-reap-then-remove-order || return 0
   case_dir=$(make_case abort-then-reap-then-remove-order)
   write_meta "$case_dir" no-mistakes ship
   land_shippable_commit "$case_dir"
