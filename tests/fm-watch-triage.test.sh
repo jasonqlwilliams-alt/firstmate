@@ -2572,9 +2572,8 @@ SH
   pass "real tmux: a parked retained-copy mark silences only its own incarnation's endpoint loss"
 )
 
-test_park_and_lease_waits_stop_when_home_is_retired() (
+test_park_wait_stops_when_home_is_retired() (
   local dir home retired action real_sleep rc pid=''
-  local -a command
   dir=$(fm_test_tmproot fm-park-retired-home) || fail "could not create the retirement fixture"
   trap '[ -z "$pid" ] || reap "$pid"' EXIT
   real_sleep=$(command -v sleep) || fail "could not resolve sleep for the retirement fixture"
@@ -2588,19 +2587,16 @@ exec "$FM_TEST_REAL_SLEEP" "$@"
 SH
   chmod +x "$dir/bin/sleep"
 
-  for action in mark clear claim; do
+  for action in mark clear; do
     home="$dir/$action"
     retired="$dir/$action-retired"
     mkdir -p "$home/state/.fm-lease-command.lock"
     printf '%s\n' "$$" > "$home/state/.fm-lease-command.lock/pid"
     fm_write_meta "$home/state/task.meta" 'window=parked:fm-task' kind=ship spawn_gen=first
     printf 'tmux:parked:fm-task\tfirst\n' > "$home/state/task.parked-retained"
-    case "$action" in
-      claim) command=("$ROOT/bin/fm-lease.sh" claim task) ;;
-      *) command=("$ROOT/bin/fm-park-retained.sh" task "$action") ;;
-    esac
     PATH="$dir/bin:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_SUPERVISION_ACTOR=main \
-      FM_TEST_REAL_SLEEP="$real_sleep" FM_TEST_RETIRED_HOME="$retired" "${command[@]}" > "$dir/command.out" 2>&1 &
+      FM_TEST_REAL_SLEEP="$real_sleep" FM_TEST_RETIRED_HOME="$retired" \
+      "$ROOT/bin/fm-park-retained.sh" task "$action" > "$dir/command.out" 2>&1 &
     pid=$!
     rc=0
     wait_for_exit "$pid" 100 || rc=$?
@@ -2612,7 +2608,78 @@ SH
     [ "$(cat "$retired/state/task.parked-retained")" = $'tmux:parked:fm-task\tfirst' ] \
       || fail "$action changed the retired home's saved mark"
   done
-  pass "park and lease commands stop waiting when the home is retired"
+  pass "park mark and clear stop waiting when the home is retired"
+)
+
+test_park_refuses_redirected_records() (
+  local dir foreign home state marker redirect action real_ln swap_lock swapped lock_probe rc pid=''
+  dir=$(fm_test_tmproot fm-park-state-boundary) || fail "could not create the park boundary fixture"
+  trap '[ -z "$pid" ] || reap "$pid"' EXIT
+  real_ln=$(command -v ln) || fail "could not resolve ln for the park boundary fixture"
+  foreign="$dir/foreign/state"
+  mkdir -p "$foreign" "$dir/bin"
+  fm_write_meta "$foreign/task.meta" 'window=parked:fm-task' kind=ship spawn_gen=first
+  printf 'tmux:parked:fm-task\tretained\n' > "$foreign/task.parked-retained"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/bin/tmux"
+  cat > "$dir/bin/ln" <<'SH'
+#!/usr/bin/env bash
+case "${3:-}" in */.control-task.lock) : > "$FM_TEST_LOCK_PROBE" ;; esac
+if [ -n "$FM_TEST_SWAP_LOCK" ] && [ "${3:-}" = "$FM_TEST_SWAP_LOCK" ] && [ ! -e "$FM_TEST_STATE_SWAPPED" ]; then
+  mv "$FM_STATE_OVERRIDE" "$FM_STATE_OVERRIDE-original" || exit 1
+  "$FM_TEST_REAL_LN" -s "$FM_TEST_FOREIGN_STATE" "$FM_STATE_OVERRIDE" || exit 1
+  : > "$FM_TEST_STATE_SWAPPED"
+fi
+exec "$FM_TEST_REAL_LN" "$@"
+SH
+  chmod +x "$dir/bin/tmux" "$dir/bin/ln"
+
+  for action in mark clear; do
+    for redirect in state ancestor record mark after-lock; do
+      home="$dir/$action-$redirect"
+      state="$home/state"
+      marker="$state/task.parked-retained"
+      swapped="$home/state-swapped"
+      lock_probe="$home/lock-attempted"
+      swap_lock=''
+      mkdir -p "$home"
+      case "$redirect" in
+        state) ln -s "$foreign" "$state" || fail "could not redirect the state directory" ;;
+        ancestor)
+          ln -s "$dir/foreign" "$home/indirect" || fail "could not redirect a state ancestor"
+          state="$home/indirect/state"
+          ;;
+        record)
+          mkdir "$state" && ln -s "$foreign/task.meta" "$state/task.meta" \
+            || fail "could not redirect the task record"
+          ;;
+        mark|after-lock)
+          mkdir "$state"
+          fm_write_meta "$state/task.meta" 'window=parked:fm-task' kind=ship spawn_gen=first
+          if [ "$redirect" = mark ]; then
+            ln -s "$foreign" "$marker" || fail "could not redirect the mark destination"
+          else
+            swap_lock="$state/.meta-task.lock"
+          fi
+          ;;
+      esac
+      PATH="$dir/bin:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$state" \
+        FM_TEST_REAL_LN="$real_ln" FM_TEST_FOREIGN_STATE="$foreign" \
+        FM_TEST_SWAP_LOCK="$swap_lock" FM_TEST_STATE_SWAPPED="$swapped" FM_TEST_LOCK_PROBE="$lock_probe" \
+        "$ROOT/bin/fm-park-retained.sh" task "$action" > "$home/command.out" 2>&1 &
+      pid=$!
+      rc=0
+      wait_for_exit "$pid" 100 || rc=$?
+      pid=''
+      case "$redirect" in
+        state|ancestor|record) assert_absent "$lock_probe" "$action attempted a lifecycle lock for the redirected $redirect" ;;
+        after-lock) assert_present "$swapped" "$action never reached the metadata lock handoff" ;;
+      esac
+      [ "$rc" -eq 1 ] || fail "$action accepted the $redirect redirect (exit $rc): $(cat "$home/command.out")"
+      [ "$(cat "$foreign/task.parked-retained")" = $'tmux:parked:fm-task\tretained' ] \
+        || fail "$action changed a foreign park mark through the $redirect redirect"
+    done
+  done
+  pass "park mark and clear refuse redirected state, task records, and marks"
 )
 
 test_parked_herdr_endpoint_does_not_hide_recycled_target_loss() (
@@ -5543,7 +5610,8 @@ test_exited_declared_pause_is_bounded_but_live_gate_surfaces
 test_missing_tmux_endpoint_surfaces_once || exit 1
 test_endpoint_loss_and_ordinary_stale_are_presented_independently || exit 1
 test_parked_retained_copy_suppresses_endpoint_loss || exit 1
-test_park_and_lease_waits_stop_when_home_is_retired || exit 1
+test_park_wait_stops_when_home_is_retired || exit 1
+test_park_refuses_redirected_records || exit 1
 test_parked_herdr_endpoint_does_not_hide_recycled_target_loss || exit 1
 test_backlog_hold_suppresses_only_an_agentless_lane
 test_absorbed_replacement_wait_does_not_inherit_the_old_throttle

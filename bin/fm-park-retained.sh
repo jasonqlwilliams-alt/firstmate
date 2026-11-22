@@ -34,6 +34,8 @@ fm_refuse_if_gate_agent
 
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
+# shellcheck source=bin/fm-backlog-transition-lib.sh
+. "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
 # shellcheck source=bin/fm-wake-lib.sh
 FM_WAKE_NO_MKDIR=1 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-lease-lib.sh
@@ -51,7 +53,6 @@ case "$ACTION" in mark|clear) ;; *) usage ;; esac
 
 META="$STATE/$ID.meta"
 MARK="$STATE/$ID.parked-retained"
-[ -d "$STATE" ] || { echo "error: no task record for $ID" >&2; exit 1; }
 LOCK=$(fm_meta_lock_path "$META") || { echo "error: could not resolve the task record lock" >&2; exit 1; }
 CONTROL_LOCK="$STATE/.control-$ID.lock"
 TMP=
@@ -59,23 +60,32 @@ refuse_busy() {
   echo "error: another lifecycle action is already running for task $ID" >&2
   exit 1
 }
+require_task_record() {
+  if ! fm_backlog_directory_present "$STATE" "state directory" \
+    || ! fm_backlog_record_present "$META" "task record" "$STATE"; then
+    echo "error: park $ACTION refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
+    exit 1
+  fi
+}
 cleanup() {
   [ -z "$TMP" ] || rm -f -- "$TMP" || true
   fm_lock_release "$LOCK" || true
   fm_lock_release "$CONTROL_LOCK" || true
   fm_lease_guard_release || true
 }
+require_task_record
 trap cleanup EXIT
 fm_lock_try_acquire "$CONTROL_LOCK" same-owner || refuse_busy
-[ -f "$META" ] && [ ! -L "$META" ] || { echo "error: no task record for $ID" >&2; exit 1; }
+require_task_record
 INCARNATION=$(fm_backend_endpoint_park_identity "$META") || INCARNATION=
 fm_lock_release "$CONTROL_LOCK"
-fm_lease_guard "$ID" "park $ACTION (fm-park-retained)"
+require_task_record
+fm_lease_guard "$ID" "park $ACTION (fm-park-retained)" existing-parent || exit 1
 fm_lock_try_acquire "$CONTROL_LOCK" same-owner || refuse_busy
 fm_lock_acquire_wait "$LOCK" existing-parent || exit 1
 
-if [ ! -f "$META" ] || [ -L "$META" ] \
-   || [ "$INCARNATION" != "$(fm_backend_endpoint_park_identity "$META")" ]; then
+require_task_record
+if [ "$INCARNATION" != "$(fm_backend_endpoint_park_identity "$META")" ]; then
   echo "error: task $ID's recorded endpoint changed while waiting for its lock" >&2
   exit 1
 fi
@@ -84,6 +94,10 @@ fi
   || { echo "error: $ID is placed on a remote host; its endpoint loss is not reported here" >&2; exit 1; }
 [ "$(fm_meta_get "$META" kind)" != secondmate ] \
   || { echo "error: $ID is a secondmate; park marks apply to ordinary tasks only" >&2; exit 1; }
+if { [ -e "$MARK" ] || [ -L "$MARK" ]; } && ! fm_backlog_record_present "$MARK" "park mark" "$STATE"; then
+  echo "error: park $ACTION refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
+  exit 1
+fi
 
 if [ "$ACTION" = clear ]; then
   rm -f "$MARK"
