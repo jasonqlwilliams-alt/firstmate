@@ -924,6 +924,7 @@ test_status_protocol_uses_guarded_writer() {
     bin/fm-brief.sh ship-key some-proj --mode direct-PR --herdr-lab >/dev/null &&
       bin/fm-brief.sh scout-key some-proj --scout --herdr-lab >/dev/null
   ) || fail "could not scaffold with a relative root"
+  # shellcheck disable=SC2016 # Match literal Markdown backticks.
   assert_grep '`./bin/fm-ensure-agents-md.sh .`' "$home/data/ship-key/brief.md" \
     "the ship's project-memory instructions did not retain the relative root"
   for id in ship-key scout-key; do
@@ -931,6 +932,7 @@ test_status_protocol_uses_guarded_writer() {
     status="$home/state/$id.status"
     assert_grep "HERDR_LAB_HELPER='./bin/fm-herdr-lab.sh'" "$brief" \
       "the $id Herdr instructions did not retain the relative root"
+    # shellcheck disable=SC2016 # Match literal Markdown backticks.
     command=$(sed -n 's/^   `\(.*\) "{state}: {one short line}"`$/\1/p' "$brief")
     [ -n "$command" ] || fail "status protocol has no runnable command in $brief"
     (cd "$home" && FM_CLASSIFY_RESERVED_KEY_PREFIXES='pending-reply- def' bash -c "$command"' "$1"' _ 'done: report delivered') \

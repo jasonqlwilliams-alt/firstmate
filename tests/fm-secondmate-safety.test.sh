@@ -62,6 +62,7 @@ test_fm_home_parameterization() {
   FM_HOME="$home_one" "$ROOT/bin/fm-brief.sh" task-a app --mode no-mistakes >/dev/null || fail "brief scaffold failed under FM_HOME"
   brief="$home_one/data/task-a/brief.md"
   [ -f "$brief" ] || fail "brief was not written under FM_HOME/data"
+  # shellcheck disable=SC2016 # Match literal Markdown backticks.
   launch=$(sed -n 's/^   `\(.*\) "{state}: {one short line}"`$/\1/p' "$brief")
   [ -n "$launch" ] || fail "ship brief has no status command"
   (cd "$home_two" && bash -c "$launch"' "$1"' _ 'done: ship report') || fail "ship status command failed"
@@ -70,6 +71,7 @@ test_fm_home_parameterization() {
 
   FM_HOME="$home_two" "$ROOT/bin/fm-brief.sh" task-b app --scout >/dev/null || fail "scout brief scaffold failed under FM_HOME"
   brief="$home_two/data/task-b/brief.md"
+  # shellcheck disable=SC2016 # Match literal Markdown backticks.
   launch=$(sed -n 's/^   `\(.*\) "{state}: {one short line}"`$/\1/p' "$brief")
   [ -n "$launch" ] || fail "scout brief has no status command"
   (cd "$home_one" && bash -c "$launch"' "$1"' _ 'done: scout report') || fail "scout status command failed"

@@ -549,7 +549,7 @@ EOF
     fail "the correlated document report helper accepted a reserved note-head key"
   fi
   grep -F 'reserved prefix' "$dir/error" >/dev/null || fail "the document helper refused for the wrong reason"
-  if FM_HOME="$mate" "$REPORT" --doc done "$corr" $'data/x/report.md\nneeds-decision [key=pending-reply-color]: choose blue' \
+  if FM_HOME="$mate" "$REPORT" --doc "done" "$corr" $'data/x/report.md\nneeds-decision [key=pending-reply-color]: choose blue' \
     2>"$dir/error"; then
     fail "the correlated document report helper accepted a multiline path"
   fi

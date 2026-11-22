@@ -240,6 +240,7 @@ test_rovo_launch_then_send_is_verified() {
     "rovo did not receive the native append instruction for its granted status file"
   assert_contains "$pointer" "Follow the brief's status format and key rules" \
     "the native append instruction did not preserve the brief's status format and key rules"
+  # shellcheck disable=SC2016 # Match literal Markdown backticks.
   assert_contains "$pointer" 'avoid these reserved key prefixes (whitespace-separated): `worker-internal- pending-reply-`' \
     "the native append instruction did not give Rovo the configured prefix list"
 
@@ -259,13 +260,14 @@ test_rovo_effort_xhigh_is_recorded_but_omitted() {
   id="rovo-xhigh-z2-$$"
   rec=$(make_spawn_case xhigh "$id")
   read_spawn_record "$rec"
-  out=$(FM_CLASSIFY_RESERVED_KEY_PREFIXES= run_spawn "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" --effort xhigh)
+  out=$(FM_CLASSIFY_RESERVED_KEY_PREFIXES='' run_spawn "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" --effort xhigh)
   rc=$?
   expect_code 0 "$rc" "rovo spawn with an unsupported effort should still succeed"
   config=$(rovo_launch_config "$(cat "$CASE_DIR/launch.log")") || fail "could not capture the Rovo config override"
   assert_rovo_launch_grant "$config" "$id"
   jq -e '(.agent // {}) | has("efficiencyLevel") | not' <<< "$config" >/dev/null \
     || fail "Rovo received an efficiencyLevel for an unsupported effort"
+  # shellcheck disable=SC2016 # Match literal Markdown backticks.
   assert_contains "$(cat "$CASE_DIR/pointer.log")" 'avoid these reserved key prefixes (whitespace-separated): `pending-reply-`' \
     "the native append instruction did not give Rovo the default prefix"
   meta="$HOME_DIR/state/$id.meta"
