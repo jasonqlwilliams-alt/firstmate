@@ -74,17 +74,12 @@ FM_BACKLOG_ROW_HOLD_KIND=
 FM_BACKLOG_CLOSE_REPLAY_RESULT=
 
 # Emit each byte of a value as a decimal number, locale-independently.
-# Deliberately perl rather than od: the spawn and teardown lifecycle runs under a
-# curated PATH (tests/fm-teardown.test.sh make_path_without_lsof pins that set)
-# that excludes od, and a validator that cannot run must never wedge dispatch or
-# cleanup. perl is already in that curated set and is already used elsewhere in
-# this repo for the same portability reason.
 fm_backlog_bytes_of_string() {  # <string>
-  perl -e 'print join(" ", unpack("C*", $ARGV[0])), "\n"' -- "$1"
+  printf '%s' "$1" | LC_ALL=C od -An -v -tu1
 }
 
 fm_backlog_bytes_of_file() {  # <path>
-  perl -e 'open(my $f, "<", $ARGV[0]) or exit 1; binmode $f; local $/; my $c = <$f>; $c = "" unless defined $c; print join(" ", unpack("C*", $c)), "\n"' -- "$1"
+  LC_ALL=C od -An -v -tu1 < "$1"
 }
 
 fm_backlog_control_bytes_valid() {  # <allow-newline: 0|1> <od-bytes>
@@ -314,9 +309,8 @@ fm_backlog_transition_applies() {  # <config-dir> <data-dir> <kind>
 # expiring and report the timeout as the reason through their existing error
 # plumbing. GNU timeout is used where it exists,
 # gtimeout where coreutils ships under that name, and a small perl watchdog
-# elsewhere (a stock macOS host has perl but no timeout variant; perl is
-# already a hard dependency of this library's byte validators, so the
-# fallback adds no new tool). Every bounded path forces termination: a
+# elsewhere (a stock macOS host has perl but no timeout variant).
+# Every bounded path forces termination: a
 # tasks-axi that ignores SIGTERM must not outlive the bound, since an
 # unbounded call under the lock is exactly the hang the bound exists to
 # prevent - so the GNU variants carry a kill-after of one further bound
@@ -607,6 +601,10 @@ fm_backlog_retain() {  # <data-dir> <id> [flag...]
 }
 
 fm_backlog_canonical_existing() {
+  if [ "$(uname -s)" = Linux ]; then
+    LC_ALL=C readlink -e -- "$1" 2>/dev/null
+    return
+  fi
   LC_ALL=C perl -MCwd=realpath -e '
     my $resolved = realpath($ARGV[0]);
     exit 1 unless defined $resolved;

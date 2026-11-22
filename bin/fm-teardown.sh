@@ -2066,17 +2066,20 @@ EOF
 }
 
 proc_pids_with_cwd_under() {  # <resolved-worktree>
-  PERL_UNICODE=0 perl -e '
-    my ($dir) = @ARGV;
-    opendir(my $proc, "/proc") or exit 1;
-    defined(readlink("/proc/self/cwd")) or exit 1;
-    while (defined(my $pid = readdir($proc))) {
-      next unless $pid =~ /\A[0-9]+\z/;
-      my $cwd = readlink("/proc/$pid/cwd");
-      next unless defined($cwd);
-      print "$pid\n" if $cwd eq $dir || index($cwd, "$dir/") == 0;
-    }
-  ' -- "$1"
+  local dir=$1 entry link pid
+  QUOTING_STYLE=literal stat --printf='%N\0' -- /proc/self/cwd >/dev/null 2>&1 || return 1
+  set -o pipefail
+  printf '%s\0' /proc/[0-9]*/cwd |
+    { QUOTING_STYLE=literal xargs -0 stat --printf='%N\0' -- 2>/dev/null || [ "$?" -eq 123 ]; } |
+    while IFS= read -r -d '' entry; do
+      link=${entry%%" -> "*}
+      case "$entry" in
+        "$link -> $dir"|"$link -> $dir/"*)
+          pid=${link#/proc/}
+          printf '%s\n' "${pid%/cwd}"
+          ;;
+      esac
+    done
 }
 
 pids_with_cwd_under() {  # <scanner> <dir>...

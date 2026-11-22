@@ -658,11 +658,12 @@ backlog_row_state() {
 
 # Build the teardown test's executable search path without lsof, regardless of
 # whether the host installs it in /usr/bin, /usr/sbin, or a package-manager bin.
-make_path_without_lsof() {  # <case-dir>
-  local case_dir=$1 path_dir="$1/path-without-lsof" cmd resolved
+make_path_without_lsof() {  # <case-dir> [excluded-tool]
+  local path_dir="$1/path-without-lsof" excluded_tool=${2:-} cmd resolved
   mkdir -p "$path_dir"
   for cmd in awk bash basename cat chmod cp cut date dirname env find git grep head hostname id jq ln \
-    mkdir mktemp mv perl ps readlink realpath rm sed sh sha256sum shasum sleep sort stat tail timeout tr uname wc xargs; do
+    mkdir mktemp mv od perl ps readlink realpath rm sed sh sha256sum shasum sleep sort stat tail timeout tr uname wc xargs; do
+    [ "$cmd" != "$excluded_tool" ] || continue
     resolved=$(command -v "$cmd" 2>/dev/null) || continue
     case "$resolved" in /*) ln -sf "$resolved" "$path_dir/$cmd" ;; esac
   done
@@ -3425,22 +3426,23 @@ test_lsof_absent_reaps_detached_linux_process() (
     printf 'skip: detached /proc cwd scan requires Linux\n'
     return 0
   fi
-  local visibility=$1 case_dir rc=0 pid='' tmp_pid='' sibling_pid='' path_without_lsof i
+  local visibility=$1 case_dir rc=0 pid='' tmp_pid='' sibling_pid='' path_without_lsof i nested=$'nested -> dir\nleaf'
   case_dir=$(make_case "lsof-absent-detached-reap-café-$visibility")
   write_meta "$case_dir" no-mistakes ship
   land_shippable_commit "$case_dir"
-  path_without_lsof=$(make_path_without_lsof "$case_dir")
-  if PATH="$case_dir/fakebin:$path_without_lsof" command -v lsof >/dev/null 2>&1; then
-    fail 'lsof-absent-detached-reap: fixture path unexpectedly exposes lsof'
+  path_without_lsof=$(make_path_without_lsof "$case_dir" perl)
+  if PATH="$case_dir/fakebin:$path_without_lsof" command -v lsof >/dev/null 2>&1 \
+     || PATH="$case_dir/fakebin:$path_without_lsof" command -v perl >/dev/null 2>&1; then
+    fail 'lsof-absent-detached-reap: fixture path unexpectedly exposes lsof or perl'
   fi
   if [ "$visibility" = hidden ]; then
     export FM_TEST_HIDDEN_ANCESTOR=$$
     hide_teardown_ancestor "$case_dir"
   fi
 
-  mkdir -p "$case_dir/wt/nested" "$case_dir/wt0" "$case_dir/tasktmp"
+  mkdir -p "$case_dir/wt/$nested" "$case_dir/wt0" "$case_dir/tasktmp"
   printf 'tasktmp=%s\n' "$case_dir/tasktmp" >> "$case_dir/state/task-x1.meta"
-  ln -s "$case_dir/wt/nested" "$case_dir/cwd-alias"
+  ln -s "$case_dir/wt/$nested" "$case_dir/cwd-alias"
   trap 'for child in "$pid" "$tmp_pid" "$sibling_pid"; do
     [ -n "$child" ] || continue
     kill -KILL "$child" 2>/dev/null || true
@@ -3456,7 +3458,7 @@ test_lsof_absent_reaps_detached_linux_process() (
   perl -MPOSIX -e 'POSIX::setsid() > 0 or die; chdir shift or die; exec "sleep", "300"' "$case_dir/wt0" &
   sibling_pid=$!
   for ((i=0; i<100; i++)); do
-    if { [ -z "$pid" ] || [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "$case_dir/wt/nested" ]; } \
+    if { [ -z "$pid" ] || [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "$case_dir/wt/$nested" ]; } \
        && [ "$(readlink "/proc/$tmp_pid/cwd" 2>/dev/null)" = "$case_dir/tasktmp" ] \
        && [ "$(readlink "/proc/$sibling_pid/cwd" 2>/dev/null)" = "$case_dir/wt0" ]; then
       break
@@ -3469,7 +3471,7 @@ test_lsof_absent_reaps_detached_linux_process() (
   if [ "$visibility" = visible ]; then
     cd "$case_dir/wt" || fail 'lsof-absent-detached-reap: could not enter the worktree'
   fi
-  PERL_UNICODE=A FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
+  FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
     run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
 
   [ "$rc" -eq 0 ] || cat "$case_dir/stderr" >&2
@@ -3484,7 +3486,7 @@ test_lsof_absent_reaps_detached_linux_process() (
   kill -0 "$tmp_pid" 2>/dev/null || fail 'lsof-absent-detached-reap: cleanup signalled a process in tasktmp'
   kill -0 "$sibling_pid" 2>/dev/null || fail 'lsof-absent-detached-reap: sibling process was killed'
   assert_absent "$case_dir/tasktmp" 'lsof-absent-detached-reap: cleanup left the tasktmp directory'
-  pass "Linux teardown with PERL_UNICODE=A scopes reaping to its owned worktree ($visibility ancestry)"
+  pass "Linux teardown without lsof or perl scopes reaping to its owned worktree ($visibility ancestry)"
 )
 
 test_hidden_intermediate_parent_refuses_reap() (
@@ -4075,10 +4077,28 @@ test_keep_pane_without_lsof() (
   case_dir=$(make_case keep-pane-no-lsof)
   configure_keep_pane_case "$case_dir"
   rm -f "$case_dir/fakebin/lsof"
-  path_without_lsof=$(make_path_without_lsof "$case_dir")
-  if PATH="$case_dir/fakebin:$path_without_lsof" command -v lsof >/dev/null 2>&1; then
-    fail 'keep-pane-no-lsof: fixture path unexpectedly exposes lsof'
+  path_without_lsof=$(make_path_without_lsof "$case_dir" perl)
+  if PATH="$case_dir/fakebin:$path_without_lsof" command -v lsof >/dev/null 2>&1 \
+     || PATH="$case_dir/fakebin:$path_without_lsof" command -v perl >/dev/null 2>&1; then
+    fail 'keep-pane-no-lsof: fixture path unexpectedly exposes lsof or perl'
   fi
+  cat > "$case_dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+set -eu
+if [ "$#" -ne 3 ] || [ "$1" != return ] || [ "$2" != --force ] || [ "$3" != "$FM_KEEP_CASE/wt" ]; then
+  printf 'unexpected Treehouse return arguments: %s\n' "$*" >&2
+  exit 1
+fi
+if ! [[ "/proc/$FM_KEEP_PID/cwd" -ef / ]]; then
+  printf 'original pane shell was not at / when Treehouse returned the copy\n' >&2
+  exit 1
+fi
+if kill -0 "$FM_KEEP_LEAK_PID" 2>/dev/null; then
+  printf 'the detached leak was still alive when Treehouse returned the copy\n' >&2
+  exit 1
+fi
+: > "$FM_KEEP_CASE/return-verified"
+SH
   mkfifo "$case_dir/shell-input" || fail 'keep-pane-no-lsof: could not create pane input'
   trap 'for child in "$shell_pid" "$leak_pid"; do
     [ -n "$child" ] || continue
@@ -4105,7 +4125,8 @@ test_keep_pane_without_lsof() (
   done
   [ "$i" -lt 100 ] || fail 'keep-pane-no-lsof: shell and leak did not start in the worktree'
 
-  FM_KEEP_CASE="$case_dir" FM_KEEP_PID="$shell_pid" FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
+  FM_KEEP_CASE="$case_dir" FM_KEEP_PID="$shell_pid" FM_KEEP_LEAK_PID="$leak_pid" \
+    FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
     run_teardown "$case_dir" --keep-pane > "$case_dir/out" 2> "$case_dir/err" \
     || fail "keep-pane-no-lsof: retirement failed: $(cat "$case_dir/err")"
   [ "$(readlink "/proc/$shell_pid/cwd" 2>/dev/null)" = / ] || fail 'keep-pane-no-lsof: original shell did not survive at /'
@@ -4113,9 +4134,9 @@ test_keep_pane_without_lsof() (
   wait "$leak_pid" 2>/dev/null || true
   leak_pid=''
   assert_absent "$case_dir/closed" 'keep-pane-no-lsof: cleanup closed the exact pane'
-  assert_present "$case_dir/treehouse.log" 'keep-pane-no-lsof: cleanup did not return the worktree'
+  assert_present "$case_dir/return-verified" 'keep-pane-no-lsof: cleanup did not return the worktree after reaping and detaching'
   assert_absent "$case_dir/state/task-x1.meta" 'keep-pane-no-lsof: cleanup retained task metadata'
-  pass 'Linux keep-pane cleanup without lsof detaches the original shell and reaps the detached worktree process'
+  pass 'Linux keep-pane cleanup without lsof or perl detaches the shell and reaps the leak before returning the worktree'
 )
 
 test_keep_pane_retirement() {
