@@ -1,0 +1,50 @@
+$ tmux new-window -d -t firstmate: -n fm-colors '/bin/sleep 90'
+[exit 0]
+$ <firstmate>/bin/fm-wake-drain.sh
+warning: task=colors key=pending-reply-color folded reserved-prefix needs-decision: Should the button be blue?
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[exit 0]
+$ <firstmate>/bin/fm-send.sh colors --resolve-key pending-reply-color 'Use blue'
+WARNING: watcher still down (same stale episode; last beat: 0s ago, grace 300s) - full banner already printed this episode.
+error: --resolve-key 'pending-reply-color': no open decision or blocker with that key in <lab>/primary/state/colors.status, and no captain-held task 'pending-reply-color' or 'colors-decision-pending-reply-color' still open (already closed or mistyped). Re-check the OPEN DECISIONS listing, then resend without that key or with the right one; nothing was sent.
+[exit 1]
+$ <firstmate>/bin/fm-status-append.sh <lab>/primary/state/colors.status 'needs-decision [key=button-color]: Should the button be blue?'
+[exit 0]
+$ <firstmate>/bin/fm-wake-drain.sh
+warning: task=colors key=pending-reply-color folded reserved-prefix needs-decision: Should the button be blue?
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+colors [key=button-color] needs-decision: Should the button be blue?
+colors [key=pending-reply-abcdef0123456789] needs-decision: pending-reply-missed: task=colors pending-reply-id=abcdef0123456789 request=report
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+[exit 0]
+$ <firstmate>/bin/fm-send.sh colors --resolve-key button-color 'Use blue'
+WARNING: watcher still down (same stale episode; last beat: 2s ago, grace 300s) - full banner already printed this episode.
+[exit 0]
+$ <firstmate>/bin/fm-send.sh colors --resolve-key pending-reply-abcdef0123456789 'Dismiss missed reply'
+WARNING: watcher still down (same stale episode; last beat: 3s ago, grace 300s) - full banner already printed this episode.
+[exit 0]
+Durable inbox messages
+schema=fm-task-inbox.v1
+at=2026-11-22T00:54:44Z
+--
+Use blue
+schema=fm-task-inbox.v1
+at=2026-11-22T00:54:45Z
+--
+Dismiss missed reply
+Persisted resolution lines
+resolved [key=button-color]: answered: Use blue
+resolved [key=pending-reply-abcdef0123456789]: pending-reply-resolved: task=colors pending-reply-id=abcdef0123456789 via=operator-resolve-key Dismiss missed reply
+$ <firstmate>/bin/fm-wake-drain.sh
+warning: task=colors key=pending-reply-color folded reserved-prefix needs-decision: Should the button be blue?
+UNREAD STATUS (new since last drain, not re-printed after this presentation):
+colors resolved [key=pending-reply-abcdef0123456789]: pending-reply-resolved: task=colors pending-reply-id=abcdef0123456789 via=operator-resolve-key Dismiss missed reply
+WARNING: watcher still down (same stale episode; last beat: 4s ago, grace 300s) - full banner already printed this episode.
+[exit 0]

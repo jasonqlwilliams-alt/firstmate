@@ -1,0 +1,8 @@
+Status entered by a worker: needs-decision [key=pending-reply-color]: Should the button be blue?
+Base commit
+$ <lab>/base/bin/fm-wake-drain.sh
+[exit 0]
+Target commit
+$ <firstmate>/bin/fm-wake-drain.sh
+warning: task=colors key=pending-reply-color folded reserved-prefix needs-decision: Should the button be blue?
+[exit 0]

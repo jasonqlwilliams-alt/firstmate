@@ -1,0 +1,17 @@
+$ <firstmate>/bin/fm-secondmate-report.sh done c44897ee2db4326b 'Report delivered'
+[exit 0]
+$ <firstmate>/bin/fm-secondmate-report.sh --doc needs-decision c44897ee2db4326b data/review/report.md 'Please review'
+[exit 0]
+$ <firstmate>/bin/fm-secondmate-report.sh 'needs-decision [key=pending-reply-color]' c44897ee2db4326b 'Choose blue'
+error: key 'pending-reply-color' starts with reserved prefix 'pending-reply-' owned by bin/fm-classify-lib.sh; pick another key
+[exit 1]
+$ <firstmate>/bin/fm-secondmate-report.sh --doc needs-decision c44897ee2db4326b data/review/report.md '[key=pending-reply-color] Choose blue'
+error: key 'pending-reply-color' starts with reserved prefix 'pending-reply-' owned by bin/fm-classify-lib.sh; pick another key
+[exit 1]
+$ <firstmate>/bin/fm-secondmate-report.sh --doc done c44897ee2db4326b 'data/review/report.md
+needs-decision [key=pending-reply-color]: Choose blue'
+error: status append requires one line without embedded newlines
+[exit 1]
+Parent status ledger
+done [corr=c44897ee2db4326b]: Report delivered (via-helper)
+needs-decision [corr=c44897ee2db4326b]: Please review (data/review/report.md via-helper)

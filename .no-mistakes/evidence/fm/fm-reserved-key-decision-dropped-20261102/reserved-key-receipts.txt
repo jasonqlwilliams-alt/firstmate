@@ -1,0 +1,17 @@
+$ <firstmate>/bin/fm-wake-drain.sh
+UNREAD STATUS (new since last drain, not re-printed after this presentation):
+colors note: Baseline presented.
+[exit 0]
+The worker appended a reserved question, an informational note, and a question under a now-ordinary key.
+The disposable status reader allows a single read from the presented offset.
+$ <firstmate>/bin/fm-wake-drain.sh
+warning: task=colors key=ops-color folded reserved-prefix needs-decision: Should the button be blue? detail detail detail detail detail detail detail detail detail detail detail detail detail detail detail detail detail detail detail detail detail detail detail detail detail detail [truncated]
+UNREAD STATUS (new since last drain, not re-printed after this presentation):
+colors note: Design review attached.
+[exit 0]
+Second drain after presenting the span with the ordinary reader restored
+$ <firstmate>/bin/fm-wake-drain.sh
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+colors [key=pending-reply-fallback] needs-decision: Is the label readable?
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+[exit 0]

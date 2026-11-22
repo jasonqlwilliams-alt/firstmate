@@ -1,0 +1,17 @@
+$ <firstmate>/bin/fm-brief.sh rovo-scout sample --scout
+scaffolded: <lab>/primary/data/rovo-scout/brief.md (scout; replace {TASK} and {FIRSTMATE_SPEC})
+[exit 0]
+$ <firstmate>/bin/fm-spawn.sh rovo-scout <lab>/primary/projects/sample --scout --backend tmux --harness rovo --model auto --effort high
+spawned rovo-scout harness=rovo kind=scout window=firstmate:fm-rovo-scout worktree=<lab>/pool/.treehouse/sample-aff8c4/1/sample
+[exit 0]
+Arguments received by the local endpoint
+[
+  "run",
+  "--yolo",
+  "--model",
+  "auto",
+  "--config-override",
+  "{\"agent\":{\"efficiencyLevel\":\"high\"},\"toolPermissions\":{\"allowedExternalPaths\":[\"<lab>/primary/data/rovo-scout\",\"<lab>/primary/state/rovo-scout.inbox\",\"<lab>/primary/state/rovo-scout.status\"]}}"
+]
+Instruction received by the local endpoint
+Read the brief at <lab>/primary/data/rovo-scout/launch-brief.md and carry out its instructions. For each status report, use your native file tool to append one line to <lab>/primary/state/rovo-scout.status. Follow the brief's status format and key rules. For any [key=<slug>], avoid these reserved key prefixes (whitespace-separated): `pending-reply- ops-`

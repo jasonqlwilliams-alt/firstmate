@@ -1,0 +1,12 @@
+$ <firstmate>/bin/fm-brief.sh scout sample --scout
+scaffolded: <lab>/primary/data/scout/brief.md (scout; replace {TASK} and {FIRSTMATE_SPEC})
+[exit 0]
+$ <firstmate>/bin/fm-spawn.sh scout <lab>/primary/projects/sample --scout --backend tmux --harness '<lab>/probe <firstmate>/bin/fm-status-append.sh <lab>/primary/state/scout.status <lab>/probe.log'
+spawned scout harness=probe kind=scout window=firstmate:fm-scout worktree=<lab>/pool/.treehouse/sample-4aa02e/1/sample
+[exit 0]
+Worker prefix setting: pending-reply- ops-
+error: key 'ops-color' starts with reserved prefix 'ops-' owned by bin/fm-classify-lib.sh; pick another key
+Reserved append exit: 1
+Ordinary append exit: 0
+Persisted worker status
+needs-decision [key=stale-color]: Should the button be blue?
