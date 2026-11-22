@@ -97,7 +97,8 @@ Inspect those facts at the warning's timestamp before classifying an alarm durin
 After a clean return in the current attended Codex session, the guard describes the unheld watcher lock as an expected gap and clears any watcher-down episode.
 A quiet return requires a completed monitoring scan and a fresh beacon, while a verified actionable wake can explain the gap before the watcher writes its first beacon.
 The gap expires after the guard grace, and a failed successor or a retained lock triggers the usual alarm ([`fm-guard.sh`](../bin/fm-guard.sh) owns the rule).
-If a broken state directory prevents removal of the previous receipt and the next checkpoint also fails during setup in the same session, the guard can still accept that receipt until its age reaches the guard grace.
+If removal of the previous receipt fails at checkpoint startup or during away-posture archival, the guard can still accept that receipt in the same session until its age reaches the guard grace.
+With non-default settings where the watcher poll interval or checkpoint length exceeds the guard grace, the beacon can go stale before the receipt expires, so the guard can still print the full alarm after a normal quiet return.
 An unacknowledged `state/.watcher-down` generation alone does not cause a watcher-health alarm; queued wakes have their own independent warning.
 
 A successful demonstration of a foreground wake, durable acknowledgement, and model-issued successor proves that sequence only.
