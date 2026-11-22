@@ -2411,14 +2411,15 @@ process.stdout.write("fm-firstmate-" + tag + "-lost");
 #!/usr/bin/env bash
 case "$*" in
   --version) echo "zellij 0.44.0"; exit 0 ;;
-  "list-sessions --short --no-formatting") echo "remote"; exit 0 ;;
+  "list-sessions --short --no-formatting")
+    echo list-sessions >> "${FM_FAKE_ENDPOINT_TRACE:-/dev/null}"
+    echo "remote"; exit 0
+    ;;
   "--session remote action list-panes --json")
     [ "$ZELLIJ_SESSION_NAME" = remote ] || exit 3
+    echo list-panes >> "${FM_FAKE_ENDPOINT_TRACE:-/dev/null}"
     case "$FM_FAKE_ENDPOINT" in
-      reused-session)
-        touch "${0%/*}/zellij-reused-session-read"
-        echo '[{"id":1,"tab_id":1,"is_plugin":false}]'
-        ;;
+      reused-session) echo '[{"id":1,"tab_id":1,"is_plugin":false}]' ;;
       empty-panes) echo '[]' ;;
       bad-pane) echo '[{"id":7,"tab_id":1}]' ;;
       unreadable) exit 1 ;;
@@ -2428,6 +2429,7 @@ case "$*" in
     ;;
   "--session remote action list-tabs --json")
     [ "$ZELLIJ_SESSION_NAME" = remote ] || exit 3
+    echo list-tabs >> "${FM_FAKE_ENDPOINT_TRACE:-/dev/null}"
     case "$FM_FAKE_ENDPOINT" in
       renamed) echo '[{"tab_id":1,"name":"renamed"}]' ;;
       bad-tab) echo '[{"tab_id":1,"name":7}]' ;;
@@ -2448,6 +2450,7 @@ case "$*" in
   version) echo "cmux 0.64.0"; exit 0 ;;
   ping) echo "PONG"; exit 0 ;;
   "workspace list --json --id-format uuids")
+    echo workspace-list >> "${FM_FAKE_ENDPOINT_TRACE:-/dev/null}"
     case "$FM_FAKE_ENDPOINT" in
       out-of-window) echo '{"workspaces":[{"id":"ws-other","title":"other"}]}' ;;
       renamed) echo '{"workspaces":[{"id":"ws-gone","title":"renamed"}]}' ;;
@@ -2460,6 +2463,7 @@ case "$*" in
     ;;
   "list-panes --workspace ws-gone --json --id-format uuids")
     if [ "$FM_FAKE_ENDPOINT" = moved-surface ]; then
+      echo list-panes >> "${FM_FAKE_ENDPOINT_TRACE:-/dev/null}"
       echo '{"panes":[]}'
       exit 0
     fi
@@ -2472,7 +2476,7 @@ SH
 #!/usr/bin/env bash
 case "$*" in
   "terminal read --terminal term-gone --limit 40 --json")
-    printf '%s\n' "$*" >> "${0%/*}/orca-captures"
+    echo terminal-read >> "${FM_FAKE_ENDPOINT_TRACE:-/dev/null}"
     echo '{"ok":false,"error":{"code":"terminal_handle_stale"}}'
     exit 1
     ;;
@@ -2484,7 +2488,7 @@ SH
 }
 
 test_experimental_backend_unreadable_endpoints_stay_quiet() (
-  local dir state fakebin out pid='' backend target mode kind poll watch_env modes
+  local dir state fakebin out trace pid='' backend target mode kind poll watch_env modes expected_reads read_name
   command -v jq >/dev/null 2>&1 || { echo "skip: jq is required by the Zellij and cmux adapters"; return 0; }
   command -v node >/dev/null 2>&1 || { echo "skip: node is required to generate fixture titles"; return 0; }
   dir=$(fm_test_tmproot fm-watch-experimental-gone) || fail "could not create the experimental endpoint fixture"
@@ -2499,11 +2503,13 @@ test_experimental_backend_unreadable_endpoints_stay_quiet() (
     esac
     for mode in "${modes[@]}"; do
       state="$dir/$backend-$mode/state"; out="$dir/$backend-$mode/watch.out"
+      trace="$dir/$backend-$mode/cli-trace"
       watch_env=(PATH="$fakebin:$PATH" FM_HOME="$dir/$backend-$mode" FM_STATE_OVERRIDE="$state"
         FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999
         FM_PAUSE_RESURFACE_SECS=999999 FM_STALE_ESCALATE_SECS=999999)
       mkdir -p "$state"
       touch "$state/home-summary.json"
+      : > "$trace"
       if [ "$backend" = orca ]; then
         printf 'window=fm-lost\nterminal=%s\nbackend=orca\nkind=ship\nharness=codex\nspawn_gen=first\n' "$target" > "$state/lost.meta"
       else
@@ -2511,25 +2517,36 @@ test_experimental_backend_unreadable_endpoints_stay_quiet() (
         [ "$mode" != reused-session ] || kind=secondmate
         printf 'window=%s\nbackend=%s\nkind=%s\nharness=codex\nspawn_gen=first\n' "$target" "$backend" "$kind" > "$state/lost.meta"
       fi
-      env "${watch_env[@]}" FM_FAKE_ENDPOINT="$mode" "$WATCH" > "$out" & pid=$!
+      env "${watch_env[@]}" FM_FAKE_ENDPOINT="$mode" FM_FAKE_ENDPOINT_TRACE="$trace" "$WATCH" > "$out" & pid=$!
       for poll in 1 2; do
         wait_poll_cycle "$state" "$pid" 600 \
           || fail "[$backend/$mode] the watcher did not stay quiet through poll $poll (alive=$(kill -0 "$pid" 2>/dev/null && echo yes || echo no)): $(cat "$out")"
       done
       reap "$pid"; pid=''
+      case "$backend/$mode" in
+        zellij/renamed) expected_reads=(list-sessions list-panes list-tabs) ;;
+        zellij/unreadable) expected_reads=(list-sessions list-panes) ;;
+        zellij/*) expected_reads=(list-panes) ;;
+        cmux/moved-surface) expected_reads=(workspace-list list-panes) ;;
+        cmux/*) expected_reads=(workspace-list) ;;
+        orca/*) expected_reads=(terminal-read) ;;
+      esac
+      for read_name in "${expected_reads[@]}"; do
+        grep -Fxq "$read_name" "$trace" || fail "[$backend/$mode] the watcher did not reach $read_name"
+      done
+      if [ "$backend" = zellij ] && [ "$kind" != secondmate ]; then
+        awk '
+          $0 == "list-sessions" { pane_reads = 0 }
+          $0 == "list-panes" && ++pane_reads > 1 { exit 1 }
+        ' "$trace" || fail "[$backend/$mode] the watcher repeated the pane query after capture failed"
+      fi
       [ ! -s "$state/.wake-queue" ] || fail "[$backend/$mode] an inconclusive probe enqueued a wake"
       [ ! -e "$state/lost.missing-endpoint" ] || fail "[$backend/$mode] an inconclusive probe recorded a loss"
       [ ! -s "$fakebin/route-errors" ] || fail "unexpected watcher backend route: $(cat "$fakebin/route-errors")"
     done
     case "$backend" in
-      zellij)
-        [ -f "$fakebin/zellij-reused-session-read" ] || fail "the watcher did not inspect the Zellij session for the idle second mate"
-        pass "zellij: a reused session name stays quiet when the recorded pane is absent"
-        ;;
-      orca)
-        [ -s "$fakebin/orca-captures" ] || fail "the watcher did not attempt to capture the recorded Orca terminal"
-        pass "orca: stale handles stay quiet after the capture fails"
-        ;;
+      zellij) pass "zellij: a reused session name stays quiet when the recorded pane is absent" ;;
+      orca) pass "orca: stale handles stay quiet after the capture fails" ;;
       cmux) pass "cmux: the watcher stays quiet after a surface moves" ;;
     esac
   done

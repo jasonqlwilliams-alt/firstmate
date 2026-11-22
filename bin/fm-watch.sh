@@ -2359,7 +2359,9 @@ EOF
     if { [ "$backend" = herdr ] && [ -z "$herdr_meta" ]; } \
       || ! tail40=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
         fm_backend_capture "$backend" "$w" 40 "fm-$task" 2>/dev/null); then
-      check_recorded_endpoint "$backend" "$w" "$meta" "$key" "$missing_marker" || continue
+      case "$backend" in
+        tmux|herdr) check_recorded_endpoint "$backend" "$w" "$meta" "$key" "$missing_marker" || continue ;;
+      esac
       seen="$seen|$w|"
       continue
     fi
