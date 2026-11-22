@@ -449,7 +449,8 @@ test_refused_restart_falls_back_without_claiming_a_reload() {
   assert_not_contains "$out" "restarted: sm1" "a refused restart must not be reported as restarted"
   [ "$(cat "$dir/fake/command")" = "$before" ] \
     || fail "a refusal before the stop should leave the running agent exactly as it was"
-  assert_no_grep '^/exit$' "$dir/fake/literal" "a pre-stop refusal must not have stopped the agent"
+  ! grep -Fxq -e /exit -e /quit "$dir/fake/literal" \
+    || fail "a pre-stop refusal must not type an exit command"
   pass "T5 a refused restart leaves the mate running and reports an unknown outcome"
 }
 
@@ -637,8 +638,7 @@ test_concurrent_reply_cannot_release_persist_gate() {
   rec="$state/pending-replies/$corr"
   cat > "$dir/fake/on-doorbell" <<SH
 #!/usr/bin/env bash
-[ ! -e "$dir/fake/concurrent-created" ] || exit 0
-: > "$dir/fake/concurrent-created"
+[ -n "\${FM_PENDING_REPLY_EXISTING_CORR:-}" ] || exit 0
 mkdir -p "$state/pending-replies"
 cat > "$rec" <<EOF
 phase=awaiting_report
@@ -656,10 +656,13 @@ SH
   out=$(FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1); rc=$?
 
   assert_grep "done [corr=$corr]: unrelated request answered" "$state/sm1.status" \
-    "the unrelated answer must be present before testing whether it releases the gate"
+    "the submitted persist request must have elicited the unrelated answer"
   expect_code 3 "$rc" "an unrelated concurrent answer must not release the persist gate"$'\n'"$out"
+  assert_contains "$out" "nudged: sm1: it did not confirm within 0s" \
+    "the unrelated answer must leave the persist request unanswered at the deadline"
   assert_not_contains "$out" "restarted: sm1" "the unrelated answer authorized a restart"
-  assert_no_grep '^/exit$' "$dir/fake/literal" "the unrelated answer stopped the mate"
+  ! grep -Fxq -e /exit -e /quit "$dir/fake/literal" \
+    || fail "the unrelated answer authorized an exit command"
   pass "T9 the persist gate retains its explicitly allocated correlation"
 }
 
@@ -901,7 +904,8 @@ test_already_current_unprovable_mate_stays_on_the_nudge_path() {
   assert_not_contains "$out" "restarted: sm1" "an unprovable mate must never be reported as reloaded"
   [ "$(cat "$dir/fake/command")" = "$before" ] \
     || fail "the unprovable mate's agent was stopped anyway"
-  assert_no_grep '^/exit$' "$dir/fake/literal" "nothing may be stopped on the nudge path"
+  ! grep -Fxq -e /exit -e /quit "$dir/fake/literal" \
+    || fail "the nudge-only path must not type an exit command"
   pass "T16 an already-current mate with an unprovable runtime keeps the honest nudge path"
 }
 
