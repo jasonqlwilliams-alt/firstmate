@@ -304,6 +304,44 @@ for mode in restart-initial restart-clipped restart-narrow initial-clipped initi
 done
 pass 'tmux exit and restart leave the exact dialog untouched and report it; near misses stay unrecognized'
 
+neighbor=fixture:fm-exitdialog-west
+"$TMUX_BIN" -f /dev/null -L "$SOCKET" new-window -d -t fixture -n fm-exitdialog-west \
+  -c "$TMP_ROOT/worktree" /bin/bash --noprofile --norc -c "$(stub_command initial-dialog)" \
+  || fail 'tmux neighbor fixture failed'
+i=0
+while [ ! -s "$TMP_ROOT/pid" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+[ -s "$TMP_ROOT/pid" ] || fail 'neighbor stand-in never rendered its screen'
+: > "$TMP_ROOT/keys"
+mkdir -p "$TMP_ROOT/missing-state"
+fm_write_meta "$TMP_ROOT/missing-state/exitdialog.meta" 'backend=tmux' 'window=fixture:fm-exitdialog' \
+  'endpoint_task_id=exitdialog' 'harness=claude' 'kind=secondmate' \
+  "worktree=$TMP_ROOT/worktree" "project=$TMP_ROOT/project"
+rc=0
+out=$(FM_STATE_OVERRIDE="$TMP_ROOT/missing-state" run_fixture fm-secondmate-restart.sh exitdialog 2>&1) || rc=$?
+expect_code 3 "$rc" "the missing endpoint should not restart: $out"
+assert_not_contains "$out" 'background-tasks exit confirmation' 'restart reported the neighboring window’s dialog'
+[ ! -s "$TMP_ROOT/keys" ] || fail 'restart sent input to the neighboring window'
+
+while read -r target expected; do
+  verdict=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" bash -c \
+    '. "$1"; fm_backend_guarded_composer_state tmux "$2" "" "" claude' \
+    _ "$ROOT/bin/fm-backend.sh" "$target")
+  [ "$verdict" = "$expected" ] || fail "$target should read $expected, got $verdict"
+done <<'EOF'
+fixture:fm-exitdialog-west exit-confirm
+fixture:fm-exitdialog unknown
+fix:fm-exitdialog-west unknown
+fixture:fm-exitdialog-west.0 unknown
+EOF
+"$TMUX_BIN" -f /dev/null -L "$SOCKET" rename-window -t "$neighbor" sentinel.0 || fail 'could not name the dotted window'
+verdict=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" bash -c \
+  '. "$1"; fm_backend_guarded_composer_state tmux "$2" "" "" claude' \
+  _ "$ROOT/bin/fm-backend.sh" fixture:sentinel.0)
+[ "$verdict" = exit-confirm ] || fail "a dotted window name should resolve literally, got $verdict"
+kill -TERM "$(cat "$TMP_ROOT/pid")"
+rm -f "$TMP_ROOT/pid" "$TMP_ROOT/keys"
+pass 'Claude dialog reads use the exact tmux session and window'
+
 # A styled Herdr transport, where the selected `❯ 1.` row is bold like typed
 # composer text. Every send is logged before the stub decides its effect.
 cat > "$TMP_ROOT/bin/herdr" <<'SH'

@@ -993,7 +993,13 @@ fm_backend_composer_classify_snapshot() {  # <backend> <target>
 fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness]
   local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} picker verdict kv styled=0
   local capture=
-  [ "$harness" != claude ] || capture=visible
+  if [ "$harness" = claude ]; then
+    capture=visible
+    if [ "$backend" = tmux ]; then
+      fm_backend_source tmux && target=$(fm_backend_tmux_exact_pane "$target") \
+        || { printf 'unknown'; return 0; }
+    fi
+  fi
   fm_backend_composer_snapshot "$backend" "$target" "$label" "$capture" || { printf 'unknown'; return 0; }
   [ -n "$FM_COMPOSER_SNAPSHOT_SCREEN" ] || { printf 'unknown'; return 0; }
   if [ "$harness" = claude ]; then
