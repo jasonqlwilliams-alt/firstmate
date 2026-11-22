@@ -849,62 +849,10 @@ EOF
   pass "build checks ranks and assignment eligibility without publishing router packets or cards"
 }
 
-test_draft_builds_with_all_four_tiers_and_the_delivery_registry() {
-  command -v tasks-axi >/dev/null 2>&1 || { echo "skip: ranked draft requires tasks-axi"; return; }
-  local home probe delivery
-  home=$(make_home ranked-draft)
-  delivery="$home/delivery"
-  probe="$home/probe"
-  mkdir -p "$home/config" "$delivery/inbox/new" "$delivery/registry" "$probe/registry"
-  printf '%s\n' "$delivery/inbox/new" > "$home/config/packet-router-inbox"
-  cat > "$delivery/registry/SEATS.md" <<'EOF'
-| Role | Current hand | State |
-| --- | --- | --- |
-| rakazo | fixture-hand-a | active |
-| grokbot | fixture-hand-b | active |
-| retired-role | fixture-hand-c | inactive |
-EOF
-  printf '%s\n' '| Role | Hand |' '| wrong-router | fixture-hand-d |' > "$probe/registry/SEATS.md"
-  cat > "$home/data/backlog.md" <<'EOF'
-# Fleet backlog
-
-## In flight
-- [ ] dated-hold - Wait for review window (repo: sample) (kind: ship) (since 2026-10-01) (hold: review window) (hold-kind: captain) (hold-until: 2026-11-25)
-
-## Queued
-- [ ] approval - Review samples (repo: sample) (kind: ship) (since 2026-10-03)
-- [ ] recent-due - Confirm receiver readiness blocked-by: approval (repo: sample) (kind: ship) (since 2026-10-23)
-  Due: 2026-11-28.
-- [ ] old-due - Confirm sender readiness blocked-by: approval (repo: sample) (kind: ship) (since 2026-10-22)
-  Due: 2026-11-28.
-- [ ] recent - Triage recent samples blocked-by: approval (repo: sample) (kind: ship) (since 2026-11-15)
-  Due: 2026-11-29.
-- [ ] old - Archive prototypes blocked-by: approval (repo: sample) (kind: ship) (since 2026-10-03)
-## Done
-EOF
-  FM_BEARINGS_NOW=2026-11-21T23:59:50Z FM_HOME="$home" "$ROOT/bin/fm-bearings-snapshot.sh" \
-    --json --all-queued --fields bodies > "$home/snapshot.json" || fail "could not capture the ranking fixture"
-  FM_SYSTEM_STATE_PACKET_ROUTER_ROOT="$probe" run_board "$home" draft "$home/snapshot.json" > "$home/draft.json" ||
-    fail "could not draft the ranked board from its snapshot"
-  jq -e '
-    .continuum_agents == ["grokbot","rakazo"] and
-    (.charted | INDEX(.id) |
-      .["recent-due"].tier == 1 and .["old-due"].tier == 2 and
-      .recent.tier == 3 and .old.tier == 4 and
-      .["dated-hold"].tier == 2 and .["dated-hold"].assignment_eligible == false and
-      .["recent-due"].assignment_eligible == true and .approval.dispatchable == true)
-  ' "$home/draft.json" >/dev/null || fail "draft did not honor the tier dates, eligibility, or delivery registry"
-  run_board "$home" build "$home/draft.json" >/dev/null || fail "the builder refused its ranked draft"
-  assert_present "$home/.lavish/bearings-board.html" "ranked draft did not produce a board"
-  [ -z "$(ls -A "$delivery/inbox/new")" ] || fail "draft/build touched the outbound inbox"
-  pass "a fresh snapshot drafts and builds all four tiers with the delivery roles"
-}
-
 test_path_is_stable_and_home_scoped
 test_build_refuses_malformed_payloads_before_touching_the_board
 test_charted_kind_is_optional_and_accepts_both_values
 test_build_checks_charted_tiers_and_the_continuum_roster
-test_draft_builds_with_all_four_tiers_and_the_delivery_registry
 test_build_injects_binds_then_arms
 test_registration_cannot_consume_before_any_origin_binding
 test_build_does_not_bind_or_arm_when_session_start_fails

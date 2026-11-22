@@ -8,14 +8,9 @@
 # agent never authors board UI at invocation time.
 #
 # Usage:
-#   fm-bearings-board.sh draft <bearings-snapshot.json>
 #   fm-bearings-board.sh build <data.json>
 #   fm-bearings-board.sh path
 #
-# draft      Print a valid board payload from a fresh fm-bearings.v1 snapshot
-#            with all queued gates included. Prefill fixed fields, Charted
-#            Next ranks and the delivery roster. Captain's Call card copy
-#            remains the composer's responsibility. This command only reads.
 # build      Validate the payload, drop the Captain's Call cards whose subject
 #            already landed, give every surviving decision card the standard
 #            reconcile choice, and inject the result into a fresh copy of the
@@ -169,88 +164,6 @@ fail() {
 }
 
 board_path() { printf '%s/.lavish/bearings-board.html\n' "$FM_HOME"; }
-
-command_draft() {
-  [ "$#" -eq 1 ] || { usage >&2; exit 2; }
-  local snapshot=$1 helper="$SCRIPT_DIR/fm-bearings-helper.sh" roster keys key owner task record records draft
-  keys=$(jq -ce '
-    select(.schema == "fm-bearings.v1" and (.gates | type == "array"))
-    | ([.gates[] | {owner,id}] + [.in_flight[] | .id | split("/")
-         | if length == 1 then {owner:"(main)",id:.[0]} else {owner:.[0],id:.[1]} end])
-    | unique
-  ' "$snapshot") || fail "expected a fresh fm-bearings.v1 snapshot"
-  records=$(
-    while IFS= read -r key; do
-      [ -n "$key" ] || continue
-      owner=$(jq -r .owner <<< "$key")
-      task=$(jq -r .id <<< "$key")
-      if record=$(FM_HOME="$FM_HOME" "$helper" task "$owner" "$task" 2>/dev/null); then
-        jq -c --arg owner "$owner" '. + {owner:$owner}' <<< "$record"
-      fi
-    done < <(jq -c '.[]' <<< "$keys")
-  )
-  roster=$(FM_HOME="$FM_HOME" "$helper" roster)
-  draft=$(jq -e --arg schema "$BOARD_SCHEMA" --argjson roster "$roster" --slurpfile records /dev/stdin '
-    def day:
-      if type != "string" or test("^\\d{4}-\\d{2}-\\d{2}($|T)") == false then null
-      else .[0:10] as $date
-        | (try (($date + "T00:00:00Z") | fromdateiso8601
-          | select(strftime("%Y-%m-%d") == $date)) catch null) // null
-      end;
-    def recorded_date($label):
-      [(.body // "") | split("\n")[] | capture(
-        "^[[:space:]]*(?i:" + $label + "):[[:space:]]*(?<date>\\d{4}-\\d{2}-\\d{2})(?:[.]|[[:space:]]|$)")? | .date];
-    def tier($filed; $record; $dependent; $today):
-      ([$filed, $record.created] + ($record | recorded_date("last activity"))
-       | map(day) | map(select(. != null and . <= $today)) | max) as $latest
-      | ($latest != null and $latest >= $today - 29*86400) as $current
-      | ($dependent or ([$record.hold_until] + ($record | recorded_date("due(?: date)?"))
-          | any(.[] | day; . != null and . <= $today + 7*86400))) as $urgent
-      | if $urgent then (if $current then 1 else 2 end) else (if $current then 3 else 4 end) end;
-    def warning($id; $title; $owner; $reason):
-      {id:$id,title:$title,kind:"warning",owner:$owner,reason:$reason,repo:null,dispatchable:false};
-    . as $snapshot
-    | (.generated | day) as $today
-    | select($today != null)
-    | {schema:$schema, home, generated, prs_live:has("candidate_prs"),
-       captains_call:[], continuum_agents:$roster,
-       underway:[.in_flight[] | .doing |= (if . == "" or . == null then "Status unavailable" else . end)],
-       landed:[.landed[] | .repo //= null],
-       charted:[
-         (.gates[] as $gate
-          | if $gate.id == "(main-inventory)" or $gate.id == "(return-catchup)" then
-              warning(($gate.id | .[1:-1]); $gate.title; $gate.owner; $gate.reason)
-            else
-              (first($records[] | select(.id == $gate.id and .owner == $gate.owner)) // {}) as $record
-              | any($records[];
-                    .owner == $gate.owner and .state == "in_flight" and .blocked == "yes"
-                    and ((.blocked_by | split(",") | map(gsub("[[:space:]]"; ""))) | index($gate.id) != null)) as $dependent
-              | (($record.state == "queued") and
-                 ($record.blocked == "yes" or
-                  ($record.held == "yes" and ($record.hold_reason // "-") != "-"))) as $gated
-              | $gate | del(.blocked_by)
-              | . + {repo:($gate.repo // ($record.repo | select(. != "-")) // null),
-                     tier:tier($gate.filed; $record; $dependent; $today),
-                     dispatchable:($record.state == "queued" and $record.blocked == "no"
-                                   and $record.held == "no" and $record.body == ""),
-                     assignment_eligible:$gated,
-                     blockers:[$snapshot.gate_blockers[] | select(.gate == $gate.id and .owner == $gate.owner)
-                               | {id,title}]}
-              | if $gate.blocked_by != "-" and (.reason | startswith("blocked-by ") | not) then
-                  .reason = ("blocked-by " + $gate.blocked_by +
-                             (if .reason == "" then "" else ": " + .reason end))
-                else . end
-            end),
-         (.secondmates[] as $mate
-          | select($mate.state == "unknown" or any($snapshot.secondmate_reconcile[]?; .id == $mate.id))
-          | $mate
-          | warning(("inventory-" + (if .id == "(registry)" then "registry" else .id end));
-                    ("Inventory needs repair for " + .id); .id; (.reason // .doing)))
-       ]}
-  ' "$snapshot" <<< "$records") || fail "cannot draft a ranked board from $snapshot"
-  validate_payload /dev/stdin <<< "$draft" || fail "draft does not satisfy $BOARD_SCHEMA"
-  printf '%s\n' "$draft"
-}
 
 validate_payload() {  # <data.json>
   jq -e --arg schema "$BOARD_SCHEMA" '
@@ -860,7 +773,6 @@ command_build() {
 }
 
 case "${1-}" in
-  draft) shift; command_draft "$@" ;;
   build) shift; command_build "$@" ;;
   path) board_path ;;
   -h|--help|help) usage ;;
