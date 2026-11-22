@@ -72,12 +72,14 @@ case "${1-}" in
         printf '%s\n' "$((remaining - 1))" > "$state/end-before-list"
       fi
     fi
-    printf 'sessions[1]{file,status,url,pending_prompts}:\n'
     if [ -s "$state/open" ]; then
+      printf 'sessions[1]{file,status,url,pending_prompts}:\n'
       while IFS= read -r listed; do
         [ -n "$listed" ] || continue
         printf '  %s,open,"http://127.0.0.1:4387/session/deadbeef",0\n' "$listed"
       done < "$state/open"
+    else
+      printf 'sessions: []\n'
     fi
     exit 0
     ;;
@@ -695,22 +697,25 @@ test_build_reopens_when_an_opened_session_ends_before_listing() {
 }
 
 test_build_reports_a_browser_close_before_either_listing() {
-  local listing home data out sid
+  local listing home data board out sid
   for listing in 1 2; do
     home=$(make_home "browser-close-before-list-$listing")
     data="$home/payload.json"
+    board="$home/.lavish/bearings-board.html"
     write_valid_payload "$data"
     printf '%s\n' "$listing" > "$home/lavish-state/end-before-list"
     out=$(run_board "$home" build "$data" 2>&1) \
       || fail "build failed after a browser close before listing $listing: $out"
-    assert_contains "$out" "the user closed this board" \
-      "build did not report the browser close before listing $listing: $out"
     [ -e "$home/lavish-state/user-ended" ] && [ ! -s "$home/lavish-state/open" ] \
       || fail "build did not leave the board closed after listing $listing"
+    [ "$(grep -Fc -- "$board" "$home/lavish-state/calls")" -eq 1 ] \
+      || fail "build sent another session-opening request after the browser close"
     if grep -q -- '--reopen' "$home/lavish-state/calls"; then
       fail "build called lavish-axi --reopen without being asked"
     fi
-    sid=$(run_lavish_source_id "$home" "$home/.lavish/bearings-board.html")
+    assert_contains "$out" "the board closed during the build" \
+      "build did not report the browser close before listing $listing: $out"
+    sid=$(run_lavish_source_id "$home" "$board")
     ! run_decisions "$home" binding "$sid" >/dev/null 2>&1 \
       || fail "build bound the board after a browser close before listing $listing"
     ! run_procevent "$home" list | awk 'NR > 1 { print $1 }' | grep -Fxq "$sid" \

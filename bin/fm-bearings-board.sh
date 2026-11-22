@@ -53,12 +53,11 @@
 # reporting `status: user-ended` with the same session id, so exit status alone
 # cannot tell a live board from a dead one. build requires the server's fresh
 # session listing to show the canonical board open before it binds or arms.
-# Without --reopen, status user-ended is the closed outcome above (exit 0),
-# distinct from a hard failure. Any other session that is not listed open, and
-# a session that is still not listed open after --reopen, exits 1 and is not
-# armed. After an explicit reopen it retires the pre-reopen source generation
-# through the guarded adapter path, arms a fresh registration, and accepts only
-# the replacement listener as live. A registered live board with no live owner
+# A plain attach reporting user-ended or a session observed to close during
+# the build yields the closed outcome above (exit 0). Other non-open outcomes
+# exit 1 and are not armed. After an explicit reopen it retires the pre-reopen
+# source generation through the guarded adapter path, arms a fresh registration,
+# and accepts only the replacement listener as live. A registered live board with no live owner
 # also gets a replacement before build returns, because `already-armed` is not
 # the same fact as `listening`.
 #
@@ -748,8 +747,7 @@ command_build() {
     "$SCRIPT_DIR/fm-procevent-lavish.sh" retire "$board" >/dev/null \
       || fail "cannot retire the pre-reopen source generation (observed owner: ${pre_reopen_owner:-none})"
   fi
-  if ! lavish_session_listed_open "$(board_realpath "$board")"; then
-    report_user_ended_board "$board"
+  if ! board_session_open_before_arm "$board"; then
     version=$(lavish-axi --version 2>/dev/null | tr -d '[:space:]')
     fail "the board Lavish session is not listed open immediately before arming (lavish-axi ${version:-version-unknown}); refusing to arm a poll on observed state not-open"
   fi
