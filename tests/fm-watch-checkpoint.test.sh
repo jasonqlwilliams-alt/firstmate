@@ -13,6 +13,7 @@ TMP_ROOT=$(fm_test_tmproot fm-watch-checkpoint)
 if [ "${FM_CHECKPOINT_TEST_HARNESS:-0}" != 1 ]; then
   ln -s /bin/bash "$TMP_ROOT/codex" || exit 1
   unset CLAUDECODE CURSOR_AGENT CURSOR_INVOKED_AS GEMINI_CLI PI_CODING_AGENT GROK_AGENT FM_OMP_HARNESS ANTIGRAVITY_AGENT
+  unset FM_SUPERVISION_MODEL
   # shellcheck disable=SC2016
   FM_CHECKPOINT_TEST_HARNESS=1 "$TMP_ROOT/codex" -c '"$@"; status=$?; exit "$status"' _ "$0" "$@"
   exit $?
