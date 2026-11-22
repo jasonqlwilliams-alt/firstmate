@@ -203,21 +203,6 @@ fm_backend_orca_capture() {  # <terminal-id> <lines>
   fm_backend_orca_json_text "$out"
 }
 
-# See bin/fm-backend.sh's fm_backend_endpoint_state contract.
-fm_backend_orca_endpoint_state() {  # <terminal-id>
-  local terminal=$1 out
-  [ -n "$terminal" ] || { printf 'unreadable'; return 0; }
-  out=$(orca terminal show --terminal "$terminal" --json 2>/dev/null) \
-    || { printf 'unreadable'; return 0; }
-  printf '%s' "$out" | node -e '
-const fs = require("fs");
-const data = JSON.parse(fs.readFileSync(0, "utf8"));
-const handle = data?.result?.terminal?.handle;
-if (data?.ok !== true || data.error != null || handle !== process.argv[1]) process.exit(1);
-process.stdout.write("present");
-' -- "$terminal" 2>/dev/null || printf 'unreadable'
-}
-
 fm_backend_orca_json_text() {  # <json>
   printf '%s' "$1" | node -e '
 const fs = require("fs");

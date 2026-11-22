@@ -433,19 +433,17 @@ fm_backend_cmux_target_ready() {  # <target> [expected-label]
 
 # See bin/fm-backend.sh's fm_backend_endpoint_state contract.
 fm_backend_cmux_endpoint_state() {  # <target> <expected-label>
-  local expected_label=${2:-} workspaces workspace panes
+  local expected_label=${2:-} workspaces panes
   [ -n "$expected_label" ] || { printf 'unreadable'; return 0; }
   fm_backend_cmux_parse_target "$1" || { printf 'unreadable'; return 0; }
   workspaces=$(fm_backend_cmux_cli workspace list --json --id-format uuids 2>/dev/null) \
     || { printf 'unreadable'; return 0; }
-  workspace=$(printf '%s' "$workspaces" | jq -ers --arg id "$FM_BACKEND_CMUX_WORKSPACE" \
+  printf '%s' "$workspaces" | jq -es --arg id "$FM_BACKEND_CMUX_WORKSPACE" \
     --arg title "$(fm_backend_cmux_scoped_title "$expected_label")" '
       select(length == 1) | .[0].workspaces
       | select(type == "array" and all(.[]; (.id | type == "string" and length > 0) and (.title | type == "string")))
-      | map(select(.id == $id)) | select(length == 1)
-      | if .[0].title == $title then "match" else "missing" end
-    ' 2>/dev/null) || { printf 'unreadable'; return 0; }
-  [ "$workspace" = match ] || { printf '%s' "$workspace"; return 0; }
+      | map(select(.id == $id)) | length == 1 and .[0].title == $title
+    ' >/dev/null 2>&1 || { printf 'unreadable'; return 0; }
   panes=$(fm_backend_cmux_cli list-panes --workspace "$FM_BACKEND_CMUX_WORKSPACE" --json --id-format uuids 2>/dev/null) \
     || { printf 'unreadable'; return 0; }
   printf '%s' "$panes" | jq -ers '

@@ -412,11 +412,9 @@ fm_backend_zellij_endpoint_state() {  # <target> <expected-label>
       | select(type == "array" and all(.[];
           (.tab_id | type == "number" and . >= 0 and floor == .) and (.name | type == "string")))
       | map(select(.tab_id == $tab)) as $matches | select($matches | length == 1)
-      | if $matches[0].name == $scoped then "present"
-        elif $matches[0].name == $label then
-          if (map(select(.name == $label)) | length) == 1 then "present" else "unreadable" end
-        else "missing"
-        end
+      | select($matches[0].name == $scoped
+          or ($matches[0].name == $label and (map(select(.name == $label)) | length) == 1))
+      | "present"
     ' 2>/dev/null || printf 'unreadable'
 }
 

@@ -2325,10 +2325,10 @@ test_missing_tmux_endpoint_surfaces_once() (
 )
 
 # An idle second mate is healthy, but only while its recorded window exists.
-# Closing a local second mate's window must raise the same one-shot loss wake an
+# Closing a local second mate's session must raise the same one-shot loss wake an
 # ordinary task does, while a live idle second mate stays silent.
 test_missing_secondmate_endpoint_surfaces_once() (
-  local tmux_bin socket dir state window out pid='' poll watch_env
+  local tmux_bin socket dir state window out pid='' poll watch_env recovery_state
   tmux_bin=$(command -v tmux) || { echo "skip: tmux is required for the second mate endpoint regression"; return 0; }
   socket="fm-watch-mate-gone-$$-$RANDOM"
   dir=$(fm_test_tmproot fm-watch-mate-gone) || fail "could not create the second mate endpoint fixture"
@@ -2339,7 +2339,7 @@ test_missing_secondmate_endpoint_surfaces_once() (
     cat <<'SH'
 for arg in "$@"; do
   case "$arg" in
-    remote|remote:*) printf '%s\n' "$*" >> "$FM_FAKE_ROUTE_ERRORS" ;;
+    remote|remote:*|=remote|=remote:*) printf '%s\n' "$*" >> "$FM_FAKE_ROUTE_ERRORS" ;;
   esac
 done
 if [ "$1" = capture-pane ]; then
@@ -2358,6 +2358,8 @@ SH
   "$dir/bin/tmux" -f /dev/null new-session -d -s mates -c "$dir" || fail "could not start the private tmux server"
   "$dir/bin/tmux" new-window -d -t mates: -n fm-mate -- bash --noprofile --norc -i \
     || fail "could not create the second mate fixture window"
+  "$dir/bin/tmux" new-session -d -s mates-dev -n fm-mate -c "$dir" \
+    || fail "could not start the similarly named tmux session"
   printf 'window=%s\nbackend=tmux\nkind=secondmate\nharness=codex\nspawn_gen=first\n' "$window" > "$state/mate.meta"
   printf 'window=remote:peer\nbackend=tmux\nkind=secondmate\nremote_host=another-host\n' > "$state/peer.meta"
   printf 'working: idle under the parent\n' > "$state/mate.status"
@@ -2377,7 +2379,9 @@ SH
   reap "$pid"; pid=''
   ack_stopped_cycle "$state" || fail "could not acknowledge the fixture watcher stop"
 
-  "$dir/bin/tmux" kill-window -t "$window" || fail "could not close the second mate fixture window"
+  "$dir/bin/tmux" kill-session -t =mates || fail "could not close the recorded second mate session"
+  recovery_state=$(env "${watch_env[@]}" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state tmux "$1"' "$ROOT" "$window")
+  [ "$recovery_state" = missing ] || fail "recovery read '$recovery_state' for the closed session"
   env "${watch_env[@]}" "$WATCH" > "$out" & pid=$!
   wait_for_exit "$pid" 150 || fail "closing the idle second mate window did not wake the watcher"
   pid=''
@@ -2393,7 +2397,7 @@ SH
   done
   [ ! -s "$state/.wake-queue" ] || fail "later polls re-reported the lost second mate"
   reap "$pid"; pid=''
-  pass "real tmux: a closed idle second mate window raises one loss wake while a live idle mate stays quiet"
+  pass "real tmux: closing the recorded session raises one loss wake despite a similarly named live session"
 )
 
 install_fake_experimental_backends() {  # <fakebin>
@@ -2412,10 +2416,10 @@ case "$*" in
       omitted-session) echo "another-session"; exit 0 ;;
       no-sessions) echo "No active zellij sessions found." >&2; exit 1 ;;
     esac
-    echo "lab"; exit 0
+    echo "remote"; exit 0
     ;;
-  "--session lab action list-panes --json")
-    [ "$ZELLIJ_SESSION_NAME" = lab ] || exit 3
+  "--session remote action list-panes --json")
+    [ "$ZELLIJ_SESSION_NAME" = remote ] || exit 3
     case "$FM_FAKE_ENDPOINT" in
       missing) echo '[{"id":1,"tab_id":1,"is_plugin":false}]' ;;
       bad-pane) echo '[{"id":7,"tab_id":1}]' ;;
@@ -2424,10 +2428,10 @@ case "$*" in
     esac
     exit 0
     ;;
-  "--session lab action list-tabs --json")
-    [ "$ZELLIJ_SESSION_NAME" = lab ] || exit 3
+  "--session remote action list-tabs --json")
+    [ "$ZELLIJ_SESSION_NAME" = remote ] || exit 3
     case "$FM_FAKE_ENDPOINT" in
-      foreign) echo '[{"tab_id":1,"name":"fm-elsewhere"}]' ;;
+      renamed) echo '[{"tab_id":1,"name":"renamed"}]' ;;
       bad-tab) echo '[{"tab_id":1,"name":7}]' ;;
       tab-not-listed) echo '[{"tab_id":2,"name":"fm-elsewhere"}]' ;;
       legacy) echo '[{"tab_id":1,"name":"fm-lost"}]' ;;
@@ -2450,7 +2454,7 @@ case "$*" in
       unreadable) echo "Error: Socket not found" >&2; exit 1 ;;
       out-of-window) echo '{"workspaces":[{"id":"ws-other","title":"other"}]}' ;;
       bad-workspace) echo '{"workspaces":[{"id":"ws-gone"}]}' ;;
-      foreign) echo '{"workspaces":[{"id":"ws-gone","title":"other"}]}' ;;
+      renamed) echo '{"workspaces":[{"id":"ws-gone","title":"renamed"}]}' ;;
       *) printf '{"workspaces":[{"id":"ws-gone","title":"%s"}]}\n' "$(cat "${0%/*}/scoped-title")" ;;
     esac
     exit 0
@@ -2471,23 +2475,11 @@ SH
   cat > "$fakebin/orca" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
-  "terminal read --terminal term-gone --limit 40 --json"|"terminal show --terminal term-gone --json")
-    case "$FM_FAKE_ENDPOINT" in
-      unreadable) echo "orca: runtime unreachable" >&2; exit 1 ;;
-      stale) echo '{"ok":false,"error":{"code":"terminal_handle_stale"}}'; exit 1 ;;
-    esac
+  "terminal read --terminal term-gone --limit 40 --json")
+    printf '%s\n' "$*" >> "${0%/*}/orca-captures"
+    echo '{"ok":false,"error":{"code":"terminal_handle_stale"}}'
+    exit 1
     ;;
-  "terminal show --terminal term-live --json")
-    case "$FM_FAKE_ENDPOINT" in
-      present) echo '{"ok":true,"result":{"terminal":{"handle":"term-live"}}}'; exit 0 ;;
-      wrong-handle) echo '{"ok":true,"result":{"terminal":{"handle":"someone-else"}}}'; exit 0 ;;
-      bad-envelope) echo '{"result":{"terminal":{"handle":"term-live"}}}'; exit 0 ;;
-      bad-result) echo '{"ok":true,"result":{}}'; exit 0 ;;
-      bad-error) echo '{"ok":false,"error":{"code":["terminal_handle_stale"]}}'; exit 0 ;;
-      other-error) echo '{"ok":false,"error":{"code":"timeout"}}'; exit 1 ;;
-    esac
-    ;;
-  "status --json") echo '{"ok":true,"result":{"runtime":{"reachable":true,"state":"ready"}}}'; exit 0 ;;
 esac
 printf 'orca %s\n' "$*" >> "${0%/*}/route-errors"
 exit 3
@@ -2498,16 +2490,16 @@ SH
 test_experimental_backend_endpoint_loss_requires_confirmed_absence() (
   local dir state fakebin out pid='' backend target mode poll watch_env modes
   command -v jq >/dev/null 2>&1 || { echo "skip: jq is required by the Zellij and cmux adapters"; return 0; }
-  command -v node >/dev/null 2>&1 || { echo "skip: node is required by the Orca adapter"; return 0; }
+  command -v node >/dev/null 2>&1 || { echo "skip: node is required to generate fixture titles"; return 0; }
   dir=$(fm_test_tmproot fm-watch-experimental-gone) || fail "could not create the experimental endpoint fixture"
   trap '[ -z "$pid" ] || reap "$pid"' EXIT
   fakebin="$dir/fakebin"
   install_fake_experimental_backends "$fakebin" || fail "could not install the experimental backend fixtures"
   for backend in zellij cmux orca; do
     case "$backend" in
-      zellij) target="lab:7"; modes=(unreadable missing) ;;
-      cmux) target="ws-gone:sf-gone"; modes=(unreadable out-of-window missing) ;;
-      orca) target="term-gone"; modes=(unreadable stale) ;;
+      zellij) target="remote:7"; modes=(unreadable renamed missing) ;;
+      cmux) target="ws-gone:sf-gone"; modes=(out-of-window renamed missing) ;;
+      orca) target="term-gone"; modes=(stale) ;;
     esac
     for mode in "${modes[@]}"; do
       state="$dir/$backend-$mode/state"; out="$dir/$backend-$mode/watch.out"
@@ -2540,14 +2532,19 @@ test_experimental_backend_endpoint_loss_requires_confirmed_absence() (
       fi
       [ ! -s "$fakebin/route-errors" ] || fail "unexpected watcher backend route: $(cat "$fakebin/route-errors")"
     done
-    pass "$backend: the watcher queues loss only for confirmed absence"
+    if [ "$backend" = orca ]; then
+      [ -s "$fakebin/orca-captures" ] || fail "the watcher did not attempt to capture the recorded Orca terminal"
+      pass "orca: stale handles stay quiet after the capture fails"
+    else
+      pass "$backend: the watcher queues loss only for confirmed absence"
+    fi
   done
 )
 
 test_experimental_backend_endpoint_state_boundary() (
   local dir fakebin mode
   command -v jq >/dev/null 2>&1 || { echo "skip: jq is required by the Zellij and cmux adapters"; return 0; }
-  command -v node >/dev/null 2>&1 || { echo "skip: node is required by the Orca adapter"; return 0; }
+  command -v node >/dev/null 2>&1 || { echo "skip: node is required to generate fixture titles"; return 0; }
   dir=$(fm_test_tmproot fm-endpoint-state-boundary) || fail "could not create the boundary fixture"
   fakebin="$dir/fakebin"
   install_fake_experimental_backends "$fakebin" || fail "could not install the experimental backend fixtures"
@@ -2558,28 +2555,21 @@ test_experimental_backend_endpoint_state_boundary() (
     [ "$got" = "$1" ] || fail "[$3/$2] expected $1 for $4, got '$got'"
     [ ! -s "$fakebin/route-errors" ] || fail "unexpected backend route: $(cat "$fakebin/route-errors")"
   }
-  expect_endpoint_state present present zellij lab:7 fm-lost
-  expect_endpoint_state present legacy zellij lab:7 fm-lost
-  expect_endpoint_state missing foreign zellij lab:7 fm-lost
-  expect_endpoint_state missing missing zellij lab:7 fm-lost
-  for mode in unreadable omitted-session no-sessions resurrectable bad-pane bad-tab tab-not-listed duplicate-legacy; do
-    expect_endpoint_state unreadable "$mode" zellij lab:7 fm-lost
+  expect_endpoint_state present present zellij remote:7 fm-lost
+  expect_endpoint_state present legacy zellij remote:7 fm-lost
+  expect_endpoint_state missing missing zellij remote:7 fm-lost
+  for mode in unreadable renamed omitted-session no-sessions resurrectable bad-pane bad-tab tab-not-listed duplicate-legacy; do
+    expect_endpoint_state unreadable "$mode" zellij remote:7 fm-lost
   done
-  expect_endpoint_state unreadable present zellij lab:7
+  expect_endpoint_state unreadable present zellij remote:7
 
   expect_endpoint_state present present cmux ws-gone:sf-gone fm-lost
   expect_endpoint_state missing missing cmux ws-gone:sf-gone fm-lost
-  expect_endpoint_state missing foreign cmux ws-gone:sf-gone fm-lost
-  for mode in unreadable out-of-window bad-workspace bad-pane bad-surface; do
+  for mode in unreadable renamed out-of-window bad-workspace bad-pane bad-surface; do
     expect_endpoint_state unreadable "$mode" cmux ws-gone:sf-gone fm-lost
   done
   expect_endpoint_state unreadable present cmux ws-gone:sf-gone
 
-  expect_endpoint_state present present orca term-live
-  expect_endpoint_state unreadable stale orca term-gone
-  for mode in wrong-handle bad-envelope bad-result bad-error other-error; do
-    expect_endpoint_state unreadable "$mode" orca term-live
-  done
   pass "experimental backends: only matching, readable endpoint evidence establishes presence or loss"
 )
 

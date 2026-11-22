@@ -658,7 +658,7 @@ recorded_endpoints() {
     [ -e "$meta" ] || continue
     [ -z "$(fm_meta_get "$meta" remote_host)" ] || continue
     w=$(fm_backend_target_of_meta "$meta")
-    case "$w" in ''|remote:*) continue ;; esac
+    [ -n "$w" ] || continue
     task=${meta##*/}
     printf '%s\t%s\t%s\n' "$w" "${task%.meta}" "$(fm_backend_of_meta "$meta")"
   done
