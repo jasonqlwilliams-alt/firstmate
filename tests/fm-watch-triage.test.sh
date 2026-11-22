@@ -2449,7 +2449,6 @@ process.stdout.write("fm-firstmate-" + tag + "-lost");
   cat > "$fakebin/zellij" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
-  --version) echo "zellij 0.44.0"; exit 0 ;;
   "list-sessions --short --no-formatting")
     echo list-sessions >> "${FM_FAKE_ENDPOINT_TRACE:-/dev/null}"
     echo "remote"; exit 0
@@ -2486,8 +2485,6 @@ SH
   cat > "$fakebin/cmux" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
-  version) echo "cmux 0.64.0"; exit 0 ;;
-  ping) echo "PONG"; exit 0 ;;
   "workspace list --json --id-format uuids")
     echo workspace-list >> "${FM_FAKE_ENDPOINT_TRACE:-/dev/null}"
     case "$FM_FAKE_ENDPOINT" in
@@ -3828,7 +3825,7 @@ test_secondmate_unpause_clears_pause_tracking() {
   : > "$state/.stale-$key"
   : > "$state/.stale-since-$key"
   : > "$state/.wedge-escalations-$key"
-  watch_bg "$state" "$fakebin" "$out"
+  watch_bg "$state" "$fakebin" "$out" env FM_FAKE_TMUX_WINDOW="$window"
   pid=$!
   wait_poll_cycle "$state" "$pid" || fail "watcher exited while reconciling a resumed secondmate: $(cat "$out")"
   [ ! -e "$state/.paused-$key" ] || { reap "$pid"; fail "resumed secondmate retained the pause marker"; }
