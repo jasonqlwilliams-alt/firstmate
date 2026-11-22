@@ -1,0 +1,260 @@
+Target f408faee186a6163e0ddc1b7137136a9cce08bc9. Lavish 0.1.46.
+$ bin/fm-bearings-board.sh build ${LAB}/final-bearings/payload.json
+board: ${LAB}/final-bearings/.lavish/bearings-board.html
+detail: ${LAB}/final-bearings/.lavish/bearings-detail.html
+canvas: off
+session:
+  file: ${LAB}/final-bearings/.lavish/bearings-board.html
+  url: "http://127.0.0.1:49549/session/862e4d772544b54f"
+  status: opened
+session: live
+served: ${LAB}/final-bearings/.lavish/bearings-board.html
+bound: lavish-862e4d772544b54f
+armed: lavish-862e4d772544b54f
+listening: live
+exit 0
+$ lavish-axi  [target session row]
+${LAB}/final-bearings/.lavish/bearings-board.html,open,"http://127.0.0.1:49549/session/862e4d772544b54f",0
+$ bin/fm-procevent.sh list
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-862e4d772544b54f      lavish       live       0
+exit 0
+$ bin/fm-bearings-board.sh build ${LAB}/final-bearings/payload.json
+board: ${LAB}/final-bearings/.lavish/bearings-board.html
+detail: ${LAB}/final-bearings/.lavish/bearings-detail.html
+canvas: off
+session:
+  file: ${LAB}/final-bearings/.lavish/bearings-board.html
+  url: "http://127.0.0.1:49549/session/862e4d772544b54f"
+  status: opened
+session: live
+served: ${LAB}/final-bearings/.lavish/bearings-board.html
+bound: lavish-862e4d772544b54f
+already-armed: lavish-862e4d772544b54f
+exit 0
+$ lavish-axi  [target session row]
+${LAB}/final-bearings/.lavish/bearings-board.html,open,"http://127.0.0.1:49549/session/862e4d772544b54f",0
+$ bin/fm-procevent.sh list
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-862e4d772544b54f      lavish       live       0
+exit 0
+Live refresh retained the same listener PID 420348.
+SCENARIO bearings-live: pass
+$ node ${LAB}/browser.cjs wait Review the synthetic launch checklist
+Review the synthetic launch checklist
+exit 0
+Chromium: click More
+Chromium: click End session
+$ bin/fm-bearings-board.sh build ${LAB}/final-bearings/payload.json
+board: ${LAB}/final-bearings/.lavish/bearings-board.html
+detail: ${LAB}/final-bearings/.lavish/bearings-detail.html
+canvas: off
+session:
+  file: ${LAB}/final-bearings/.lavish/bearings-board.html
+  url: "http://127.0.0.1:49549/session/862e4d772544b54f"
+  status: user-ended
+session: closed
+the user closed this board; pass --reopen to fm-bearings-board.sh build to open it again
+exit 0
+$ lavish-axi  [target session row]
+(target session omitted)
+$ bin/fm-procevent.sh list
+no sources registered
+exit 0
+Chromium screenshot: bearings-after-plain-build.png
+SCENARIO bearings-closed: pass
+$ bin/fm-bearings-board.sh build --reopen ${LAB}/final-bearings/payload.json
+board: ${LAB}/final-bearings/.lavish/bearings-board.html
+detail: ${LAB}/final-bearings/.lavish/bearings-detail.html
+canvas: off
+session:
+  file: ${LAB}/final-bearings/.lavish/bearings-board.html
+  url: "http://127.0.0.1:49549/session/862e4d772544b54f"
+  status: user-ended
+session:
+  file: ${LAB}/final-bearings/.lavish/bearings-board.html
+  url: "http://127.0.0.1:49549/session/862e4d772544b54f"
+  status: opened
+session: reopened
+served: ${LAB}/final-bearings/.lavish/bearings-board.html
+bound: lavish-862e4d772544b54f
+armed: lavish-862e4d772544b54f
+listening: live
+exit 0
+$ lavish-axi  [target session row]
+${LAB}/final-bearings/.lavish/bearings-board.html,open,"http://127.0.0.1:49549/session/862e4d772544b54f",0
+$ bin/fm-procevent.sh list
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-862e4d772544b54f      lavish       live       0
+exit 0
+Explicit reopen kept the same URL and source, with a fresh claim (old PID 420348, new PID 428781).
+Chromium screenshot: bearings-explicit-reopen.png
+SCENARIO bearings-reopen: pass
+$ bin/fm-lineup-board.sh build ${LAB}/final-lineup/payload.json
+board: ${LAB}/final-lineup/.lavish/model-lineup.html
+session:
+  file: ${LAB}/final-lineup/.lavish/model-lineup.html
+  url: "http://127.0.0.1:49549/session/272427899d68152d"
+  status: opened
+session: live
+registered: lavish-272427899d68152d (lavish)
+armed: lavish-272427899d68152d
+artifact: ${LAB}/final-lineup/.lavish/model-lineup.html
+listening: live
+exit 0
+$ lavish-axi  [target session row]
+${LAB}/final-lineup/.lavish/model-lineup.html,open,"http://127.0.0.1:49549/session/272427899d68152d",0
+$ bin/fm-procevent.sh list
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-272427899d68152d      lavish       live       0
+exit 0
+$ bin/fm-lineup-board.sh build ${LAB}/final-lineup/payload.json
+board: ${LAB}/final-lineup/.lavish/model-lineup.html
+session:
+  file: ${LAB}/final-lineup/.lavish/model-lineup.html
+  url: "http://127.0.0.1:49549/session/272427899d68152d"
+  status: opened
+session: live
+already-armed: lavish-272427899d68152d
+listening: live
+exit 0
+$ lavish-axi  [target session row]
+${LAB}/final-lineup/.lavish/model-lineup.html,open,"http://127.0.0.1:49549/session/272427899d68152d",0
+$ bin/fm-procevent.sh list
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-272427899d68152d      lavish       live       0
+exit 0
+Live refresh retained the same listener PID 431719.
+SCENARIO lineup-live: pass
+Chromium: click More
+Chromium: click End session
+$ bin/fm-lineup-board.sh build ${LAB}/final-lineup/payload.json
+board: ${LAB}/final-lineup/.lavish/model-lineup.html
+session:
+  file: ${LAB}/final-lineup/.lavish/model-lineup.html
+  url: "http://127.0.0.1:49549/session/272427899d68152d"
+  status: user-ended
+session: closed
+the user closed this board; pass --reopen to fm-lineup-board.sh build to open it again
+exit 0
+$ lavish-axi  [target session row]
+(target session omitted)
+$ bin/fm-procevent.sh list
+no sources registered
+exit 0
+Chromium screenshot: lineup-after-plain-build.png
+SCENARIO lineup-closed: pass
+$ bin/fm-lineup-board.sh build --reopen ${LAB}/final-lineup/payload.json
+board: ${LAB}/final-lineup/.lavish/model-lineup.html
+session:
+  file: ${LAB}/final-lineup/.lavish/model-lineup.html
+  url: "http://127.0.0.1:49549/session/272427899d68152d"
+  status: user-ended
+session:
+  file: ${LAB}/final-lineup/.lavish/model-lineup.html
+  url: "http://127.0.0.1:49549/session/272427899d68152d"
+  status: opened
+session: reopened
+registered: lavish-272427899d68152d (lavish)
+armed: lavish-272427899d68152d
+artifact: ${LAB}/final-lineup/.lavish/model-lineup.html
+listening: live
+exit 0
+$ lavish-axi  [target session row]
+${LAB}/final-lineup/.lavish/model-lineup.html,open,"http://127.0.0.1:49549/session/272427899d68152d",0
+$ bin/fm-procevent.sh list
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-272427899d68152d      lavish       live       0
+exit 0
+Explicit reopen kept the same URL and source, with a fresh claim (old PID 431719, new PID 439432).
+Chromium screenshot: lineup-explicit-reopen.png
+SCENARIO lineup-reopen: pass
+$ bin/fm-lineup-board.sh build --reopen ${LAB}/final-first-gate/payload.json
+Build reached Lavish listing 1. The listing request is paused until browser End completes.
+$ lavish-axi  [target session row]
+${LAB}/final-first-gate/.lavish/model-lineup.html,open,"http://127.0.0.1:49549/session/9c3234dcf1423b07",0
+$ bin/fm-procevent.sh list
+no sources registered
+exit 0
+Chromium: click More
+Chromium: click End session
+$ lavish-axi  [target session row]
+(target session omitted)
+board: ${LAB}/final-first-gate/.lavish/model-lineup.html
+session:
+  file: ${LAB}/final-first-gate/.lavish/model-lineup.html
+  url: "http://127.0.0.1:49549/session/9c3234dcf1423b07"
+  status: opened
+fm-lineup-board: the board Lavish session is not live (lavish-axi 0.1.46 reported status opened); refusing to arm a poll on an ended session
+exit 1
+Lavish attach requests: one plain attach, zero reopen requests.
+$ lavish-axi  [target session row]
+(target session omitted)
+$ bin/fm-procevent.sh list
+no sources registered
+exit 0
+SCENARIO first-gate: pass
+$ bin/fm-bearings-board.sh build ${LAB}/final-second-gate/payload.json
+Build reached Lavish listing 2. The listing request is paused until browser End completes.
+$ lavish-axi  [target session row]
+${LAB}/final-second-gate/.lavish/bearings-board.html,open,"http://127.0.0.1:49549/session/27db5528ad9f23af",0
+$ bin/fm-procevent.sh list
+no sources registered
+exit 0
+Chromium: click More
+Chromium: click End session
+$ lavish-axi  [target session row]
+(target session omitted)
+board: ${LAB}/final-second-gate/.lavish/bearings-board.html
+detail: ${LAB}/final-second-gate/.lavish/bearings-detail.html
+canvas: off
+session:
+  file: ${LAB}/final-second-gate/.lavish/bearings-board.html
+  url: "http://127.0.0.1:49549/session/27db5528ad9f23af"
+  status: opened
+session: live
+fm-bearings-board: the board Lavish session is not listed open immediately before arming (lavish-axi 0.1.46); refusing to arm a poll on observed state not-open
+exit 1
+Lavish attach requests: one plain attach, zero reopen requests.
+$ lavish-axi  [target session row]
+(target session omitted)
+$ bin/fm-procevent.sh list
+no sources registered
+exit 0
+SCENARIO second-gate: pass
+Target scenario results: {"bearings-live": "pass", "bearings-closed": "pass", "bearings-reopen": "pass", "lineup-live": "pass", "lineup-closed": "pass", "lineup-reopen": "pass", "first-gate": "pass", "second-gate": "pass"}
+$ lavish-axi  [target session row]
+${LAB}/final-before-fix/.lavish/bearings-board.html,open,"http://127.0.0.1:49549/session/e3cae5917ecb8270",0
+Chromium: click More
+Chromium: click End session
+$ ${LAB}/baseline-final/bin/fm-bearings-board.sh build ${LAB}/final-before-fix/payload.json
+board: ${LAB}/final-before-fix/.lavish/bearings-board.html
+detail: ${LAB}/final-before-fix/.lavish/bearings-detail.html
+canvas: off
+session:
+  file: ${LAB}/final-before-fix/.lavish/bearings-board.html
+  url: "http://127.0.0.1:49549/session/e3cae5917ecb8270"
+  status: user-ended
+session:
+  file: ${LAB}/final-before-fix/.lavish/bearings-board.html
+  url: "http://127.0.0.1:49549/session/e3cae5917ecb8270"
+  status: opened
+session: reopened
+served: ${LAB}/final-before-fix/.lavish/bearings-board.html
+bound: lavish-e3cae5917ecb8270
+armed: lavish-e3cae5917ecb8270
+listening: live
+exit 0
+$ lavish-axi  [target session row]
+${LAB}/final-before-fix/.lavish/bearings-board.html,open,"http://127.0.0.1:49549/session/e3cae5917ecb8270",0
+$ ${LAB}/baseline-final/bin/fm-procevent.sh list
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-e3cae5917ecb8270      lavish       live       0
+exit 0
+Base revision reproduced the original bug: the plain build reopened the browser-ended session.
+Chromium termination status: 0
+server:
+  status: stopped
+  port: 49549
+Lavish stop command status: 0
+Lavish server termination status: 0

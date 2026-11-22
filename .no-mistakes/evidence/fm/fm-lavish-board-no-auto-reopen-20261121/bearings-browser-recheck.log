@@ -1,0 +1,98 @@
+Target f408faee186a6163e0ddc1b7137136a9cce08bc9. Lavish 0.1.46.
+$ bin/fm-bearings-board.sh build ${LAB}/bearings-retry/payload.json
+board: ${LAB}/bearings-retry/.lavish/bearings-board.html
+detail: ${LAB}/bearings-retry/.lavish/bearings-detail.html
+canvas: off
+session:
+  file: ${LAB}/bearings-retry/.lavish/bearings-board.html
+  url: "http://127.0.0.1:41459/session/5fc2ec2ad92ef16d"
+  status: opened
+session: live
+served: ${LAB}/bearings-retry/.lavish/bearings-board.html
+bound: lavish-5fc2ec2ad92ef16d
+armed: lavish-5fc2ec2ad92ef16d
+listening: live
+exit 0
+$ lavish-axi  [target session row]
+${LAB}/bearings-retry/.lavish/bearings-board.html,open,"http://127.0.0.1:41459/session/5fc2ec2ad92ef16d",0
+$ bin/fm-procevent.sh list
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-5fc2ec2ad92ef16d      lavish       live       0
+exit 0
+$ bin/fm-bearings-board.sh build ${LAB}/bearings-retry/payload.json
+board: ${LAB}/bearings-retry/.lavish/bearings-board.html
+detail: ${LAB}/bearings-retry/.lavish/bearings-detail.html
+canvas: off
+session:
+  file: ${LAB}/bearings-retry/.lavish/bearings-board.html
+  url: "http://127.0.0.1:41459/session/5fc2ec2ad92ef16d"
+  status: opened
+session: live
+served: ${LAB}/bearings-retry/.lavish/bearings-board.html
+bound: lavish-5fc2ec2ad92ef16d
+already-armed: lavish-5fc2ec2ad92ef16d
+exit 0
+$ lavish-axi  [target session row]
+${LAB}/bearings-retry/.lavish/bearings-board.html,open,"http://127.0.0.1:41459/session/5fc2ec2ad92ef16d",0
+$ bin/fm-procevent.sh list
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-5fc2ec2ad92ef16d      lavish       live       0
+exit 0
+Live refresh retained the same listener PID 386856.
+SCENARIO bearings-live: pass
+$ node ${LAB}/browser.cjs wait Review the synthetic launch checklist
+Review the synthetic launch checklist
+exit 0
+Chromium: click More
+Chromium: click End session
+$ bin/fm-bearings-board.sh build ${LAB}/bearings-retry/payload.json
+board: ${LAB}/bearings-retry/.lavish/bearings-board.html
+detail: ${LAB}/bearings-retry/.lavish/bearings-detail.html
+canvas: off
+session:
+  file: ${LAB}/bearings-retry/.lavish/bearings-board.html
+  url: "http://127.0.0.1:41459/session/5fc2ec2ad92ef16d"
+  status: user-ended
+session: closed
+the user closed this board; pass --reopen to fm-bearings-board.sh build to open it again
+exit 0
+$ lavish-axi  [target session row]
+(target session omitted)
+$ bin/fm-procevent.sh list
+no sources registered
+exit 0
+Chromium screenshot: bearings-after-plain-build.png
+SCENARIO bearings-closed: pass
+$ bin/fm-bearings-board.sh build --reopen ${LAB}/bearings-retry/payload.json
+board: ${LAB}/bearings-retry/.lavish/bearings-board.html
+detail: ${LAB}/bearings-retry/.lavish/bearings-detail.html
+canvas: off
+session:
+  file: ${LAB}/bearings-retry/.lavish/bearings-board.html
+  url: "http://127.0.0.1:41459/session/5fc2ec2ad92ef16d"
+  status: user-ended
+session:
+  file: ${LAB}/bearings-retry/.lavish/bearings-board.html
+  url: "http://127.0.0.1:41459/session/5fc2ec2ad92ef16d"
+  status: opened
+session: reopened
+served: ${LAB}/bearings-retry/.lavish/bearings-board.html
+bound: lavish-5fc2ec2ad92ef16d
+armed: lavish-5fc2ec2ad92ef16d
+listening: live
+exit 0
+$ lavish-axi  [target session row]
+${LAB}/bearings-retry/.lavish/bearings-board.html,open,"http://127.0.0.1:41459/session/5fc2ec2ad92ef16d",0
+$ bin/fm-procevent.sh list
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-5fc2ec2ad92ef16d      lavish       live       0
+exit 0
+Explicit reopen kept the same URL and source, with a fresh claim (old PID 386856, new PID 391486).
+Chromium screenshot: bearings-explicit-reopen.png
+SCENARIO bearings-reopen: pass
+Chromium termination status: 0
+server:
+  status: stopped
+  port: 41459
+Lavish stop command status: 0
+Lavish server termination status: 0

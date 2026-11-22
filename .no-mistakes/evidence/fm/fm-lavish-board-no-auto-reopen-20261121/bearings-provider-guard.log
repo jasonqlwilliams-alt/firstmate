@@ -1,0 +1,13 @@
+Target f408faee186a6163e0ddc1b7137136a9cce08bc9. Lavish 0.1.46.
+Existing Bearings provider drift guard (direct browser End endpoint)
+$ bash tests/fm-bearings-board-lavish-live-e2e.test.sh
+# lavish-axi 0.1.46
+ok - lavish-axi 0.1.46 reports a captain-ended session without reopening it and without failing
+ok - a plain board build leaves a user-ended session closed against real lavish-axi
+ok - an explicit reopen restores the same board against real lavish-axi
+exit 0
+server:
+  status: stopped
+  port: 55237
+Lavish stop command status: 0
+Lavish server termination status: 0
