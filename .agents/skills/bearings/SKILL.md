@@ -154,23 +154,25 @@ The normal task lifecycle still owns dispatch, prerequisites, and holds.
 
 1. Run `bin/fm-bearings-helper.sh prepare <source-id> <sequence> <position>` for each request, numbering decoded assignments from 1.
    If the record has a prose prerequisite you verified is still unmet, pass its exact text as the optional last argument.
-   `prepare` reads the current task and delivery registry and prints the exact plan for confirmation.
-   If preparation fails, report the reason and resolve the request without sending.
-2. Ask the captain in trusted chat whether to send that plan, naming its task, owner, recipient and all prerequisite details it will share.
+   `prepare` reads the current task and delivery registry and prints a confirmation preview alongside the exact JSON plan.
+   If preparation fails, report the reason and run `bin/fm-bearings-helper.sh dismiss <source-id> <sequence> <position> --ineligible [verified-prerequisite]` with any prose prerequisite still verified.
+2. Quote the confirmation preview verbatim in trusted chat and ask the captain whether to send the note shown.
    End the turn with the question, with the wake pending.
    Store the exact prepared JSON in private conversation or home state if needed.
 3. After an explicit trusted-chat confirmation, run `bin/fm-bearings-helper.sh send --confirmed '<exact prepare JSON>'`.
    Use the plan from before the confirmation, and recheck any prose prerequisite that depended on supervisor judgment.
    The command revalidates the queued task, start condition, and delivery route before publishing.
    If the plan or prerequisite changed, do not send on the old confirmation.
+   Prepare the current plan for a fresh decision or record ineligibility if it can no longer be prepared.
    Use the command's exit status and output to report delivery.
+   If the captain explicitly declines the note in trusted chat, run `bin/fm-bearings-helper.sh dismiss <source-id> <sequence> <position> --declined`.
 
 Always use the helper command for Packet Router publication.
 Keep all drafts and pending confirmation state outside the delivery inbox.
 Treat the helper's reply as evidence for Firstmate to verify against the existing gates.
 
 While a helper request awaits a trusted-chat decision, leave the wake pending and use its source, sequence, and request position to recognize re-announcements of the same request.
-After every decoded request has been sent with confirmation or resolved without a send, and all other captured actions have been handled, run `bin/fm-procevent.sh handled <source-id> <sequence> --assignments-resolved`.
+After every decoded request has a delivery or dismissal recorded by the helper command, and all other captured actions have been handled, run `bin/fm-procevent.sh handled <source-id> <sequence> --assignments-resolved`.
 Report the wake acknowledged only after that command exits successfully with `handled:` or `already-handled:`.
 Leave the Bearings source listening for later submissions.
 

@@ -346,7 +346,7 @@ test_charted_helper_wake_requires_explicit_resolution() (
   export FM_HOME="$TMP_ROOT/helper-wake" FM_STATE_OVERRIDE="$TMP_ROOT/helper-wake/state"
   export FM_PROCEVENT_CLAIM_ROOT="$FM_HOME/procevent-claims"
   local board sid capture result output rc=0
-  local runner="$ROOT/bin/fm-procevent.sh" adapter="$ROOT/bin/fm-procevent-lavish.sh"
+  local runner="$ROOT/bin/fm-procevent.sh" adapter="$ROOT/bin/fm-procevent-lavish.sh" helper="$ROOT/bin/fm-bearings-helper.sh"
   fm_test_track_procevent_home "$FM_HOME" "$FM_PROCEVENT_CLAIM_ROOT"
   mkdir -p "$FM_HOME/.lavish" "$FM_STATE_OVERRIDE"
   board=$("$BOARD" path) || fail "could not locate the canonical board"
@@ -356,8 +356,9 @@ test_charted_helper_wake_requires_explicit_resolution() (
   cat > "$capture" <<'EOF'
 session:
   status: feedback
-prompts[1]{uid,prompt,selector,tag,text}:
+prompts[2]{uid,prompt,selector,tag,text}:
   1,"Request help\n\nContext data:\n{\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"export-check\",\"owner\":\"(main)\",\"agent\":\"rakazo\"}",form,choice,"Confirm export prerequisite → rakazo"
+  2,"Request help\n\nContext data:\n{\"schema\":\"fm-bearings-assignment.v1\",\"question\":\"export-check\",\"owner\":\"(main)\",\"agent\":\"grokbot\"}",form,choice,"Confirm export prerequisite → grokbot"
 next_step: Review the feedback
 EOF
   "$runner" register lavish "$sid" -- /bin/cat "$capture" >/dev/null ||
@@ -367,23 +368,29 @@ EOF
   output=$("$adapter" read "$result") || fail "could not read the captured result"
   assert_contains "$output" "complete: yes" "the helper capture should be complete"
   output=$("$adapter" assignments "$result") || fail "could not decode the helper request"
-  printf '%s\n' "$output" | jq -se '. == [{question:"export-check",owner:"(main)",agent:"rakazo"}]' >/dev/null ||
-    fail "the captured result did not contain the expected helper request"
+  local expected='[{"question":"export-check","owner":"(main)","agent":"rakazo"},{"question":"export-check","owner":"(main)","agent":"grokbot"}]'
+  printf '%s\n' "$output" | jq -se --argjson expected "$expected" '. == $expected' >/dev/null ||
+    fail "the captured result did not contain both helper requests in order"
 
   output=$("$runner" handled "$sid" 1 2>&1) || rc=$?
   assert_equals 1 "$rc" "plain acknowledgement retired a pending helper request: $output"
   assert_absent "${result%.result}.handled" "the pending helper wake was marked handled"
   assert_contains "$output" "trusted chat" "the refused acknowledgement did not direct the supervisor to confirmation"
-  printf '%s\n' "$output" | jq -Rse '
-    split("\n") | map(fromjson?) | . == [{question:"export-check",owner:"(main)",agent:"rakazo"}]
+  printf '%s\n' "$output" | jq -Rse --argjson expected "$expected" '
+    split("\n") | map(fromjson?) | . == $expected
   ' >/dev/null || fail "the refused acknowledgement did not surface the decoded helper request"
 
+  rc=0
+  output=$("$runner" handled "$sid" 1 --assignments-resolved 2>&1) || rc=$?
+  assert_equals 1 "$rc" "the resolution flag closed a wake without a recorded outcome: $output"
+  assert_absent "${result%.result}.handled" "an unresolved helper wake was marked handled"
+
   if command -v tasks-axi >/dev/null 2>&1; then
-    local helper="$ROOT/bin/fm-bearings-helper.sh" inbox="$FM_HOME/delivery/inbox/new" plan packet backlog
+    local inbox="$FM_HOME/delivery/inbox/new" plan packet backlog
     mkdir -p "$inbox" "$FM_HOME/delivery/registry" "$FM_HOME/config" "$FM_HOME/data"
     printf '%s\n' "$inbox" > "$FM_HOME/config/packet-router-inbox"
     printf '%s\n' '| Role | Current hand | State |' '| --- | --- | --- |' \
-      '| rakazo | test-hand | active |' > "$FM_HOME/delivery/registry/SEATS.md"
+      '| rakazo | test-hand | active |' '| grokbot | test-hand-two | active |' > "$FM_HOME/delivery/registry/SEATS.md"
     backlog="$FM_HOME/data/backlog.md"
     cat > "$backlog" <<'EOF'
 # Fleet backlog
@@ -397,9 +404,16 @@ EOF
 ## Done
 EOF
     cp "$backlog" "$FM_HOME/queued.md"
-    plan=$("$helper" prepare "$sid" 1 1 "Obtain written export team approval.") ||
+    plan=$("$helper" prepare "$sid" 1 1 "Obtain written export team approval." 2>"$FM_HOME/confirmation") ||
       fail "could not prepare a confirmation for the queued task"
+    assert_contains "$(cat "$FM_HOME/confirmation")" "Confirmation preview for rakazo:" "the confirmation preview omitted the recipient"
+    assert_contains "$(cat "$FM_HOME/confirmation")" "Task: Confirm export prerequisite (export-check, owner (main))" "the confirmation preview omitted the task or owner"
+    assert_contains "$(cat "$FM_HOME/confirmation")" "Open blockers: approvals" "the confirmation preview omitted the open blocker"
+    assert_contains "$(cat "$FM_HOME/confirmation")" "Prerequisite: Obtain written export team approval." "the confirmation preview omitted the verified prose condition"
     [ -z "$(ls -A "$inbox")" ] || fail "preparing a helper confirmation touched the outbound inbox"
+    if "$helper" dismiss "$sid" 1 2 --ineligible >/dev/null 2>&1; then
+      fail "an eligible helper request was dismissed as ineligible"
+    fi
     assert_absent "${result%.result}.handled" "preparing a helper confirmation acknowledged the wake"
     if "$helper" send "$plan" >/dev/null 2>&1; then
       fail "helper sent without the explicit confirmation argument"
@@ -429,6 +443,7 @@ EOF
     packet="${output#sent: }"
     [ -f "$packet" ] || fail "helper did not report a real outbound note: $output"
     assert_contains "$(cat "$packet")" 'role_target: "rakazo"' "published note used the wrong role"
+    assert_contains "$(cat "$packet")" 'Open blockers: approvals' "published note omitted the blocker shown for confirmation"
     assert_contains "$(cat "$packet")" 'Prerequisite: Obtain written export team approval.' "published note lost the confirmed prerequisite"
     assert_contains "$(cat "$packet")" "Bearings request: $sid sequence 1 assignment 1" "published note lost request provenance"
     cmp "$FM_HOME/queued.md" "$backlog" || fail "sending changed the authoritative backlog"
@@ -440,8 +455,15 @@ EOF
     pass "helper notes require confirmation, a current queued task, and the same delivery inbox"
   else
     echo "skip: helper publication requires tasks-axi"
+    "$helper" dismiss "$sid" 1 1 --declined >/dev/null || fail "could not record a declined request"
   fi
 
+  rc=0
+  output=$("$runner" handled "$sid" 1 --assignments-resolved 2>&1) || rc=$?
+  assert_equals 1 "$rc" "one outcome closed a wake with another request still pending: $output"
+  assert_contains "$output" "No delivery or dismissal recorded for helper request 2" "reported the wrong unresolved request"
+  assert_absent "${result%.result}.handled" "a partially resolved helper wake was marked handled"
+  "$helper" dismiss "$sid" 1 2 --declined >/dev/null || fail "could not record a declined request"
   output=$("$runner" handled "$sid" 1 --assignments-resolved) || fail "could not acknowledge explicit resolution"
   assert_equals "handled: $sid 1" "$output" "explicit resolution did not acknowledge the wake"
   assert_equals "already-handled: $sid 1" "$("$runner" handled "$sid" 1)" "resolution was not idempotent"
@@ -979,7 +1001,7 @@ test_charted_next_reads_newest_filed_first
 test_charted_rows_without_a_filed_date_follow_the_dated_rows_in_payload_order
 test_charted_next_sorts_four_labeled_tiers_and_keeps_warnings_unranked
 test_charted_next_assigns_only_a_roster_agent_through_the_supervised_answer_path
-test_charted_helper_wake_requires_explicit_resolution
+test_charted_helper_wake_requires_explicit_resolution || exit 1
 test_incomplete_lavish_rows_do_not_reach_choice_intake
 test_feedback_requires_a_declared_prompt_block
 test_a_warning_row_reads_as_a_repair_not_as_queued_work

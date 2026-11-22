@@ -79,8 +79,8 @@
 #            bounded re-announcement on every reconcile. Marking a result
 #            handled does not retire its source registration or claim.
 #            Bearings results with decoded helper requests require
-#            --assignments-resolved after the supervisor resolves every
-#            request under the Bearings skill's trusted-chat procedure.
+#            --assignments-resolved and a recorded delivery or dismissal for
+#            each request under the Bearings skill's trusted-chat procedure.
 # retire     Drop a registration, stop a runner this home owns, release the claim.
 #            Idempotent, and still the supported explicit path after a source has
 #            already retired itself on its adapter's terminal verdict. Existing
@@ -1638,19 +1638,15 @@ cmd_classify() {
   "$script" classify "$result"
 }
 
-check_handled_assignments() {  # <source-id> <sequence>
-  local id=$1 seq=$2 result board board_id assignments
+check_handled_assignments() {  # <source-id> <sequence> [--assignments-resolved]
+  local id=$1 seq=$2 result board board_id
   local adapter="$SCRIPT_DIR/fm-procevent-lavish.sh"
   result="$(fm_procevent_inbox_dir "$STATE")/$id.$seq.result"
   [ "$(fm_procevent_result_adapter "$result")" = lavish ] || return 0
   board=$(FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-bearings-board.sh" path) || return 1
   board_id=$("$adapter" source-id "$board" 2>/dev/null) || return 0
   [ "$id" = "$board_id" ] || return 0
-  assignments=$("$adapter" assignments "$result") || return 1
-  [ -n "$assignments" ] || return 0
-  printf '%s\n' "$assignments" >&2
-  printf 'error: Bearings helper requests are pending. Follow the Bearings skill and seek confirmation for eligible requests in trusted chat before acknowledging this wake.\n' >&2
-  return 1
+  FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-bearings-helper.sh" check-handled "$@"
 }
 
 cmd_handled() {
@@ -1662,8 +1658,8 @@ cmd_handled() {
   case "$seq" in ''|*[!0-9]*) die "sequence must be a nonnegative integer: $seq" ;; esac
   owner_lease_refresh
   fm_procevent_source_lock_acquire "$id" || die "cannot lock source: $id"
-  if [ "$#" -eq 2 ] && ! fm_procevent_is_handled "$STATE" "$id" "$seq" &&
-      ! check_handled_assignments "$id" "$seq"; then
+  if ! fm_procevent_is_handled "$STATE" "$id" "$seq" &&
+      ! check_handled_assignments "$@"; then
     fm_procevent_source_lock_release "$id"
     return 1
   fi
