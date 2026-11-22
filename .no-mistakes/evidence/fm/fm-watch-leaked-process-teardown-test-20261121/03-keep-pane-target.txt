@@ -1,0 +1,31 @@
+Opt-in keep-pane lab with real Herdr and lsof, an isolated Herdr configuration, and synthetic Firstmate task state.
+
+=== target / real lsof / test_keep_pane_lab ===
+Fixture test test_keep_pane_lab
+Ambient lsof: {run-worktree}/.gate-teardown-validation/tools/usr/bin/lsof
+Isolated Herdr default started for the lab safety tripwire under mount-isolated /tmp/config/herdr
+Herdr keep-pane lab version: 0.9.5
+fm-teardown.sh task-x1 --keep-pane --force exit=2 (fixture <disposable sandbox>/tmp/fm-teardown-tests.3AyCZG/keep-pane-real-lab)
+fm-teardown.sh task-x1 --keep-pane --legacy-record exit=2 (fixture <disposable sandbox>/tmp/fm-teardown-tests.3AyCZG/keep-pane-real-lab)
+fm-teardown.sh task-x1 --keep-pane --retire-stale-record exit=2 (fixture <disposable sandbox>/tmp/fm-teardown-tests.3AyCZG/keep-pane-real-lab)
+ok - real cleanup CLI refuses incompatible keep-pane options without touching its pane
+fm-teardown.sh task-x1 --keep-pane exit=1 (fixture <disposable sandbox>/tmp/fm-teardown-tests.3AyCZG/keep-pane-real-lab)
+fm-teardown.sh task-x1 --keep-pane exit=1 (fixture <disposable sandbox>/tmp/fm-teardown-tests.3AyCZG/keep-pane-real-lab)
+ok - real Herdr pane survives unlanded-work and unverified-endpoint refusals
+fm-teardown.sh task-x1 --keep-pane exit=1 (fixture <disposable sandbox>/tmp/fm-teardown-tests.3AyCZG/keep-pane-real-lab)
+fm-teardown.sh task-x1 --keep-pane exit=1 (fixture <disposable sandbox>/tmp/fm-teardown-tests.3AyCZG/keep-pane-real-lab)
+fm-teardown.sh task-x1 --keep-pane exit=1 (fixture <disposable sandbox>/tmp/fm-teardown-tests.3AyCZG/keep-pane-real-lab)
+fm-teardown.sh task-x1 --keep-pane exit=1 (fixture <disposable sandbox>/tmp/fm-teardown-tests.3AyCZG/keep-pane-real-lab)
+ok - real Herdr journal failures retain task identity and the exact pane
+fm-teardown.sh task-x1 --keep-pane exit=0 (fixture <disposable sandbox>/tmp/fm-teardown-tests.3AyCZG/keep-pane-real-lab)
+lsof: WARNING: can't stat() tmpfs file system /tmp/.X11-unix
+      Output information may be incomplete.
+lsof: WARNING: can't stat() tmpfs file system /tmp/.X11-unix
+      Output information may be incomplete.
+ok - real Herdr lab: keep-pane retires records and slot while the identical pane and detached shell survive
+fm-teardown.sh task-x1 --keep-pane exit=0 (fixture <disposable sandbox>/tmp/fm-teardown-tests.3AyCZG/keep-pane-real-lab)
+ok - real Herdr stale-workspace journal retires without closing the pane
+fm-teardown.sh task-x1 exit=0 (fixture <disposable sandbox>/tmp/fm-teardown-tests.3AyCZG/keep-pane-real-lab)
+ok - real Herdr lab counterfactual: default retirement closes the previously preserved exact pane
+Isolated baseline Herdr server exit=0
+Selected case exit=0. All fixture children stopped or reaped.

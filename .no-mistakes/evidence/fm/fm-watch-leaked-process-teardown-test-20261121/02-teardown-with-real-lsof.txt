@@ -1,0 +1,131 @@
+Unmodified lsof 4.99.7 executable extracted from the x86_64 Arch Linux package into the disposable worktree.
+Selected existing cases drive the real teardown CLI with isolated Git/task state and real sleeper processes.
+
+=== base / real lsof / test_leaked_worktree_process_is_reaped ===
+Fixture test test_leaked_worktree_process_is_reaped
+Ambient lsof: {run-worktree}/.gate-teardown-validation/tools/usr/bin/lsof
+Before CLI pid=3942576 executable=sleep cwd-relative-to-fixture=leaked-process-reap/wt pgid=3942491
+fm-teardown.sh task-x1 exit=0 (fixture <disposable sandbox>/tmp/fm-teardown-tests.L2KD81/leaked-process-reap)
+<disposable sandbox>/tmp/fm-teardown-tests.L2KD81/leaked-process-reap/project: already current
+teardown task-x1 complete (window firstmate:fm-task-x1, worktree <disposable sandbox>/tmp/fm-teardown-tests.L2KD81/leaked-process-reap/wt)
+Backlog: task-x1 just finished (this home keeps no markdown backlog at <disposable sandbox>/tmp/fm-teardown-tests.L2KD81/leaked-process-reap/data/backlog.md). Update <disposable sandbox>/tmp/fm-teardown-tests.L2KD81/leaked-process-reap/data/backlog.md - move task-x1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown: reaping leaked worktree process(es) for task-x1: 3942576
+After CLI, before test cleanup pid=3942576 absent from kernel process table
+ok - a leaked descendant process rooted under the task's worktree is reaped by teardown, not left surviving
+Selected case exit=0. All fixture children stopped or reaped.
+
+=== target / real lsof / test_leaked_worktree_process_is_reaped ===
+Fixture test test_leaked_worktree_process_is_reaped
+Ambient lsof: {run-worktree}/.gate-teardown-validation/tools/usr/bin/lsof
+Before CLI pid=3945922 executable=sleep cwd-relative-to-fixture=leaked-process-reap/wt pgid=3945655
+fm-teardown.sh task-x1 exit=0 (fixture <disposable sandbox>/tmp/fm-teardown-tests.3R2aAO/leaked-process-reap)
+<disposable sandbox>/tmp/fm-teardown-tests.3R2aAO/leaked-process-reap/project: already current
+teardown task-x1 complete (window firstmate:fm-task-x1, worktree <disposable sandbox>/tmp/fm-teardown-tests.3R2aAO/leaked-process-reap/wt)
+Backlog: task-x1 just finished (this home keeps no markdown backlog at <disposable sandbox>/tmp/fm-teardown-tests.3R2aAO/leaked-process-reap/data/backlog.md). Update <disposable sandbox>/tmp/fm-teardown-tests.3R2aAO/leaked-process-reap/data/backlog.md - move task-x1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown: reaping leaked worktree process(es) for task-x1: 3945922
+After CLI, before test cleanup pid=3945922 absent from kernel process table
+Owned child wait status=143
+ok - a leaked descendant process rooted under the task's worktree is reaped by teardown, not left surviving
+Selected case exit=0. All fixture children stopped or reaped.
+
+=== target / real lsof / test_leaked_tasktmp_process_is_reaped ===
+Fixture test test_leaked_tasktmp_process_is_reaped
+Ambient lsof: {run-worktree}/.gate-teardown-validation/tools/usr/bin/lsof
+Before CLI pid=3948164 executable=sleep cwd-relative-to-fixture=leaked-tasktmp-reap/tasktmp pgid=3947907
+fm-teardown.sh task-x1 exit=0 (fixture <disposable sandbox>/tmp/fm-teardown-tests.vlvJJB/leaked-tasktmp-reap)
+<disposable sandbox>/tmp/fm-teardown-tests.vlvJJB/leaked-tasktmp-reap/project: already current
+teardown task-x1 complete (window firstmate:fm-task-x1, worktree <disposable sandbox>/tmp/fm-teardown-tests.vlvJJB/leaked-tasktmp-reap/wt)
+Backlog: task-x1 just finished (this home keeps no markdown backlog at <disposable sandbox>/tmp/fm-teardown-tests.vlvJJB/leaked-tasktmp-reap/data/backlog.md). Update <disposable sandbox>/tmp/fm-teardown-tests.vlvJJB/leaked-tasktmp-reap/data/backlog.md - move task-x1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown: reaping leaked worktree process(es) for task-x1: 3948164
+After CLI, before test cleanup pid=3948164 absent from kernel process table
+ok - a leaked descendant process rooted under the task's per-task tasktmp is reaped by teardown too
+Selected case exit=0. All fixture children stopped or reaped.
+
+=== target / real lsof / test_exec_changed_process_is_still_reaped ===
+Fixture test test_exec_changed_process_is_still_reaped
+Ambient lsof: {run-worktree}/.gate-teardown-validation/tools/usr/bin/lsof
+Test fixture scanner is active for this CLI invocation
+Before CLI pid=3952526 executable=perl cwd-relative-to-fixture=exec-changed-process/wt pgid=3952440
+fm-teardown.sh task-x1 exit=0 (fixture <disposable sandbox>/tmp/fm-teardown-tests.igvlWD/exec-changed-process)
+<disposable sandbox>/tmp/fm-teardown-tests.igvlWD/exec-changed-process/project: already current
+teardown task-x1 complete (window firstmate:fm-task-x1, worktree <disposable sandbox>/tmp/fm-teardown-tests.igvlWD/exec-changed-process/wt)
+Backlog: task-x1 just finished (this home keeps no markdown backlog at <disposable sandbox>/tmp/fm-teardown-tests.igvlWD/exec-changed-process/data/backlog.md). Update <disposable sandbox>/tmp/fm-teardown-tests.igvlWD/exec-changed-process/data/backlog.md - move task-x1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown: reaping leaked worktree process(es) for task-x1: 3952526
+teardown: force-killing leaked worktree process(es) for task-x1: 3952526
+After CLI, before test cleanup pid=3952526 absent from kernel process table
+ok - an exec change preserves birth identity and the process is reaped
+Selected case exit=0. All fixture children stopped or reaped.
+
+=== target / real lsof / test_process_spawned_during_grace_is_reaped_on_later_pass ===
+Fixture test test_process_spawned_during_grace_is_reaped_on_later_pass
+Ambient lsof: {run-worktree}/.gate-teardown-validation/tools/usr/bin/lsof
+Before CLI pid=3955327 executable=perl cwd-relative-to-fixture=grace-spawn-convergence/wt pgid=3955206
+fm-teardown.sh task-x1 exit=0 (fixture <disposable sandbox>/tmp/fm-teardown-tests.AKKrvu/grace-spawn-convergence)
+<disposable sandbox>/tmp/fm-teardown-tests.AKKrvu/grace-spawn-convergence/project: already current
+teardown task-x1 complete (window firstmate:fm-task-x1, worktree <disposable sandbox>/tmp/fm-teardown-tests.AKKrvu/grace-spawn-convergence/wt)
+Backlog: task-x1 just finished (this home keeps no markdown backlog at <disposable sandbox>/tmp/fm-teardown-tests.AKKrvu/grace-spawn-convergence/data/backlog.md). Update <disposable sandbox>/tmp/fm-teardown-tests.AKKrvu/grace-spawn-convergence/data/backlog.md - move task-x1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown: reaping leaked worktree process(es) for task-x1: 3955327
+teardown: reaping leaked worktree process(es) for task-x1: 3955915
+teardown: force-killing leaked worktree process(es) for task-x1: 3955915
+After CLI, before test cleanup pid=3955327 absent from kernel process table
+TERM-spawned child after CLI pid=3955915 absent from kernel process table
+ok - a process spawned during grace is reaped on a later pass
+Selected case exit=0. All fixture children stopped or reaped.
+
+=== target / real lsof / test_run_abort_precedes_process_reap_precedes_worktree_removal ===
+Fixture test test_run_abort_precedes_process_reap_precedes_worktree_removal
+Ambient lsof: {run-worktree}/.gate-teardown-validation/tools/usr/bin/lsof
+Before CLI pid=3959907 executable=sleep cwd-relative-to-fixture=abort-then-reap-then-remove-order/wt pgid=3959682
+fm-teardown.sh task-x1 exit=0 (fixture <disposable sandbox>/tmp/fm-teardown-tests.1RecMw/abort-then-reap-then-remove-order)
+<disposable sandbox>/tmp/fm-teardown-tests.1RecMw/abort-then-reap-then-remove-order/project: already current
+teardown task-x1 complete (window firstmate:fm-task-x1, worktree <disposable sandbox>/tmp/fm-teardown-tests.1RecMw/abort-then-reap-then-remove-order/wt)
+Backlog: task-x1 just finished (this home keeps no markdown backlog at <disposable sandbox>/tmp/fm-teardown-tests.1RecMw/abort-then-reap-then-remove-order/data/backlog.md). Update <disposable sandbox>/tmp/fm-teardown-tests.1RecMw/abort-then-reap-then-remove-order/data/backlog.md - move task-x1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown: no-mistakes run for task-x1 is parked at a gate; aborting before the worker is removed
+teardown: reaping leaked worktree process(es) for task-x1: 3959907
+After CLI, before test cleanup pid=3959907 absent from kernel process table
+At worktree return: abort-already-happened
+At worktree return: reap-already-happened
+ok - the run abort and the leaked-process reap both complete before the destructive worktree return
+Selected case exit=0. All fixture children stopped or reaped.
