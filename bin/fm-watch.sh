@@ -1141,12 +1141,14 @@ clear_pause_tracking() {  # <window-key>
 }
 
 report_missing_endpoint() {  # <backend> <window> <meta> <window-key> <marker>
-  local backend=$1 win=$2 meta=$3 key=$4 marker=$5 state incarnation lock reason status=0
+  local backend=$1 win=$2 meta=$3 key=$4 marker=$5 state incarnation lock reason status=0 label
   [ -z "$(fm_meta_get "$meta" remote_host)" ] || return 0
+  label=${meta##*/}
+  label="fm-${label%.meta}"
   incarnation=$(fm_backend_endpoint_incarnation "$meta") || return 0
   case "$incarnation" in "$backend:$win"$'\t'*) ;; *) return 0 ;; esac
   state=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
-    fm_backend_agent_state "$backend" "$win" 2>/dev/null) || return 0
+    fm_backend_endpoint_state "$backend" "$win" "$label" 2>/dev/null) || return 0
   [ "$state" = missing ] || return 0
   lock=$(fm_meta_lock_path "$meta") || return 0
   fm_lock_try_acquire "$lock" || return 0
@@ -2330,17 +2332,9 @@ EOF
       && [ -e "$STATE/.paused-$key" ]; then
       clear_pause_tracking "$key"
     fi
-    # An idle secondmate endpoint is healthy by design, so only a status-declared
-    # wait admits a mate to the pane-stale path. The shared predicate includes
-    # a declared `captain-held` status. A hold recorded only
-    # in the backlog while the mate still says `working:` or `done:` is outside
-    # this guard: reaching it would require backlog reads for windows this gate
-    # deliberately skips, putting that read on the ordinary poll hot path.
-    if [ "$kind" = secondmate ] && ! status_is_paused_or_captain_held "$last"; then
-      seen="$seen|$w|"
-      continue
-    fi
     missing_marker="$STATE/$task.missing-endpoint"
+    # Endpoint presence is read before the idle-secondmate exemption below, so
+    # a mate whose recorded window is gone reports its loss like any task.
     # Herdr capture requires a unique live binding. A closed pane cannot
     # satisfy that guard, but the recovery classifier can confirm its loss.
     if { [ "$backend" = herdr ] && [ -z "$herdr_meta" ]; } \
@@ -2352,6 +2346,15 @@ EOF
     fi
     seen="$seen|$w|"
     [ ! -e "$missing_marker" ] || rm -f "$missing_marker"
+    # An idle secondmate endpoint is healthy by design, so only a status-declared
+    # wait admits a mate to the pane-stale path. The shared predicate includes
+    # a declared `captain-held` status. A hold recorded only
+    # in the backlog while the mate still says `working:` or `done:` is outside
+    # this guard: reaching it would require backlog reads for windows this gate
+    # deliberately skips, putting that read on the ordinary poll hot path.
+    if [ "$kind" = secondmate ] && ! status_is_paused_or_captain_held "$last"; then
+      continue
+    fi
     h=$(printf '%s' "$tail40" | hash_pane)
     hf="$STATE/.hash-$key"
     cf="$STATE/.count-$key"

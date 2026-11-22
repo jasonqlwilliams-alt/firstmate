@@ -203,6 +203,37 @@ fm_backend_orca_capture() {  # <terminal-id> <lines>
   fm_backend_orca_json_text "$out"
 }
 
+# fm_backend_orca_endpoint_state: tri-state presence read for one recorded
+# terminal, owned by bin/fm-backend.sh's fm_backend_endpoint_state contract.
+# Prints `missing` only when a ready Orca runtime answers the terminal read
+# with its typed `terminal_handle_stale` error, `unreadable` for every other
+# failure (unready runtime, untyped or other error, unparseable output), and
+# `unverified` when the read succeeds.
+fm_backend_orca_endpoint_state() {  # <terminal-id>
+  local terminal=$1 out code
+  [ -n "$terminal" ] || { printf 'unreadable'; return 0; }
+  fm_backend_orca_tool_check >/dev/null 2>&1 || { printf 'unreadable'; return 0; }
+  fm_backend_orca_runtime_check >/dev/null 2>&1 || { printf 'unreadable'; return 0; }
+  out=$(orca terminal read --terminal "$terminal" --limit 1 --json 2>/dev/null)
+  code=$(printf '%s' "$out" | node -e '
+const fs = require("fs");
+let data;
+try { data = JSON.parse(fs.readFileSync(0, "utf8")); } catch (err) { process.exit(1); }
+if (data && data.ok === false) {
+  process.stdout.write(String((data.error && data.error.code) || "error"));
+} else if (data && typeof data === "object") {
+  process.stdout.write("ok");
+} else {
+  process.exit(1);
+}
+' 2>/dev/null) || { printf 'unreadable'; return 0; }
+  case "$code" in
+    ok) printf 'unverified' ;;
+    terminal_handle_stale) printf 'missing' ;;
+    *) printf 'unreadable' ;;
+  esac
+}
+
 fm_backend_orca_json_text() {  # <json>
   printf '%s' "$1" | node -e '
 const fs = require("fs");

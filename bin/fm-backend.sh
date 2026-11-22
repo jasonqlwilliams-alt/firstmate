@@ -1194,6 +1194,27 @@ fm_backend_agent_alive() {  # <backend> <target>
   esac
 }
 
+# fm_backend_endpoint_state: recorded-endpoint presence for loss reporting,
+# in fm_backend_agent_state's vocabulary. Only `missing` proves the recorded
+# endpoint is gone; `unreadable` means the probe itself could not read the
+# runtime and proves nothing. tmux and Herdr return their recovery-grade
+# agent state unchanged. Zellij, cmux, and Orca have no agent classifier, so
+# their adapters answer presence alone: `missing` from a successful inventory
+# that omits the endpoint, `unreadable` from a failed or unparseable read, and
+# `unverified` for a present endpoint. This read never licenses recovery on
+# those runtimes, whose fm_backend_agent_state stays `unverified`.
+fm_backend_endpoint_state() {  # <backend> <target> [expected-label]
+  local backend=$1 target=$2 expected_label=${3:-}
+  fm_backend_source "$backend" || { printf 'unreadable'; return 0; }
+  case "$backend" in
+    tmux|herdr) fm_backend_agent_state "$backend" "$target" ;;
+    zellij) fm_backend_zellij_endpoint_state "$target" "$expected_label" ;;
+    cmux) fm_backend_cmux_endpoint_state "$target" "$expected_label" ;;
+    orca) fm_backend_orca_endpoint_state "$target" ;;
+    *) printf 'unverified' ;;
+  esac
+}
+
 # --- native event push (backend-extensible) ---------------------------------
 #
 # The watcher's event-wait splice (bin/fm-watch.sh) is backend-agnostic: it asks

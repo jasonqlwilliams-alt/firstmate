@@ -386,6 +386,56 @@ fm_backend_zellij_target_ready() {  # <target> [expected-label]
   fm_backend_zellij_pane_exists "$FM_BACKEND_ZELLIJ_SESSION" "$FM_BACKEND_ZELLIJ_PANE"
 }
 
+# fm_backend_zellij_endpoint_state: tri-state presence read for one recorded
+# target, owned by bin/fm-backend.sh's fm_backend_endpoint_state contract.
+# Prints `missing` only when a successful session and pane inventory omits the
+# target (or a readable tab list proves the pane belongs to another task),
+# `unreadable` when any inventory read fails or cannot be parsed, and
+# `unverified` when the endpoint is present (no agent classifier here).
+fm_backend_zellij_endpoint_state() {  # <target> [expected-label]
+  local expected_label=${2:-} sessions panes tabs tab_id scoped
+  fm_backend_zellij_parse_target "$1" || { printf 'unreadable'; return 0; }
+  if ! sessions=$(zellij list-sessions --short --no-formatting 2>&1); then
+    # Zellij reports an empty inventory as a failed listing.
+    case "$sessions" in
+      *'No active zellij sessions found'*) printf 'missing'; return 0 ;;
+    esac
+    printf 'unreadable'
+    return 0
+  fi
+  printf '%s\n' "$sessions" | grep -qxF "$FM_BACKEND_ZELLIJ_SESSION" || { printf 'missing'; return 0; }
+  panes=$(fm_backend_zellij_cli "$FM_BACKEND_ZELLIJ_SESSION" action list-panes --json 2>/dev/null) \
+    || { printf 'unreadable'; return 0; }
+  printf '%s' "$panes" | jq -e 'type == "array"' >/dev/null 2>&1 || { printf 'unreadable'; return 0; }
+  tab_id=$(printf '%s' "$panes" | jq -r --arg p "$FM_BACKEND_ZELLIJ_PANE" \
+    '[.[] | select((.id | tostring) == $p and .is_plugin == false) | .tab_id][0] // empty' 2>/dev/null) \
+    || { printf 'unreadable'; return 0; }
+  [ -n "$tab_id" ] || { printf 'missing'; return 0; }
+  [ -n "$expected_label" ] || { printf 'unverified'; return 0; }
+  tabs=$(fm_backend_zellij_cli "$FM_BACKEND_ZELLIJ_SESSION" action list-tabs --json 2>/dev/null) \
+    || { printf 'unreadable'; return 0; }
+  printf '%s' "$tabs" | jq -e 'type == "array"' >/dev/null 2>&1 || { printf 'unreadable'; return 0; }
+  scoped=$(fm_backend_zellij_scoped_title "$expected_label")
+  if printf '%s' "$tabs" | jq -e --arg t "$tab_id" --arg want "$scoped" \
+    '[.[] | select((.tab_id | tostring) == $t and .name == $want)] | length > 0' >/dev/null 2>&1; then
+    printf 'unverified'
+    return 0
+  fi
+  # A legacy bare title counts only when it is unique in the session, as in
+  # fm_backend_zellij_tab_matches_label; a shared bare title is ambiguous.
+  if printf '%s' "$tabs" | jq -e --arg t "$tab_id" --arg want "$expected_label" \
+    '[.[] | select((.tab_id | tostring) == $t and .name == $want)] | length > 0' >/dev/null 2>&1; then
+    if printf '%s' "$tabs" | jq -e --arg want "$expected_label" \
+      '[.[] | select(.name == $want)] | length == 1' >/dev/null 2>&1; then
+      printf 'unverified'
+    else
+      printf 'unreadable'
+    fi
+    return 0
+  fi
+  printf 'missing'
+}
+
 # fm_backend_zellij_current_path: the live pane's cwd, or empty on any error.
 # Mirrors tmux's pane_current_path poll used for worktree-path discovery after
 # `treehouse get`.
