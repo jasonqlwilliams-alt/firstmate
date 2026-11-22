@@ -2003,8 +2003,8 @@ task_cwd_scanner() {
 }
 
 # Use a single cwd listing, without lsof's recursive +D file-tree walk.
-lsof_pids_with_cwd_under() {  # <resolved-dir>
-  local dir=$1 out pid path line
+lsof_pids_with_cwd_under() {  # <resolved-dir>...
+  local dir out pid path line
   out=$(lsof -a -d cwd -Fpn 2>/dev/null) || return 1
   [ -n "$out" ] || return 0
   pid=
@@ -2018,9 +2018,12 @@ lsof_pids_with_cwd_under() {  # <resolved-dir>
       n*)
         [ -n "$pid" ] || return 1
         path=${line#n}
-        if [ "$path" = "$dir" ] || path_is_ancestor_of "$dir" "$path"; then
-          printf '%s\n' "$pid"
-        fi
+        for dir in "$@"; do
+          if [ "$path" = "$dir" ] || path_is_ancestor_of "$dir" "$path"; then
+            printf '%s\n' "$pid"
+            break
+          fi
+        done
         ;;
       '') ;;
       *) return 1 ;;
@@ -2030,35 +2033,34 @@ $out
 EOF
 }
 
-proc_pids_with_cwd_under() {  # <resolved-dir>
-  local dir=$1 entry pid path
-  [ -r /proc ] && [ -x /proc ] && readlink "/proc/$$/cwd" >/dev/null 2>&1 || return 1
-  for entry in /proc/[0-9]*/cwd; do
-    pid=${entry%/cwd}
-    pid=${pid##*/}
-    case "$pid" in ''|*[!0-9]*) continue ;; esac
-    # Individual links may be unreadable or disappear. Preserve trailing
-    # newlines in the link target so path comparison cannot conflate siblings.
-    path=$(readlink "$entry" 2>/dev/null && printf '.') || continue
-    path=${path%$'\n.'}
-    if [ "$path" = "$dir" ] || path_is_ancestor_of "$dir" "$path"; then
-      printf '%s\n' "$pid"
-    fi
-  done
+proc_pids_with_cwd_under() {  # <resolved-dir>...
+  perl -e '
+    opendir(my $proc, "/proc") or exit 1;
+    defined(readlink("/proc/self/cwd")) or exit 1;
+    while (defined(my $pid = readdir($proc))) {
+      next unless $pid =~ /\A[0-9]+\z/;
+      my $cwd = readlink("/proc/$pid/cwd");
+      next unless defined($cwd);
+      for my $dir (@ARGV) {
+        if ($cwd eq $dir || index($cwd, "$dir/") == 0) {
+          print "$pid\n";
+          last;
+        }
+      }
+    }
+  ' -- "$@"
 }
 
-pids_with_cwd_under() {  # <scanner> <dir>
-  local scanner=$1 dir=$2
-  [ -n "$dir" ] && [ -d "$dir" ] || return 0
-  dir=$(cd -- "$dir" >/dev/null && pwd -P && printf '.') || return 1
-  dir=${dir%$'\n.'}
+pids_with_cwd_under() {  # <scanner> <dir>...
+  local scanner=$1
+  shift
   # This function runs in a command substitution. Keep the scanner itself
   # outside the task copy even if the operator invoked teardown from inside it.
   cd / || return 1
   if [ "$scanner" = /proc ]; then
-    proc_pids_with_cwd_under "$dir"
+    proc_pids_with_cwd_under "$@"
   else
-    lsof_pids_with_cwd_under "$dir"
+    lsof_pids_with_cwd_under "$@"
   fi
 }
 
@@ -2092,40 +2094,58 @@ task_pid_list_contains() {  # <pid-list> <pid>
   printf '%s\n' "$1" | grep -Fxq "$2"
 }
 
-task_reap_protected_pids() {
+task_reap_filter_pids() {  # <pid-list>
   local parents
   parents=$(ps -axo pid=,ppid= 2>/dev/null) || return 1
-  awk -v pid="$$" '
-    { parent[$1] = $2 }
+  printf '%s\n%s\n' "$parents" "$1" | awk -v self="$$" '
+    NF == 2 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { parent[$1] = $2 }
+    /^[0-9]+$/ { candidates[$0] = 1 }
     END {
-      while (pid > 0) {
-        if (pid in seen) exit 1
-        seen[pid] = 1
-        printf " %s", pid
-        if (!(pid in parent)) break
-        pid = parent[pid]
+      for (cursor = self; cursor > 0; cursor = parent[cursor]) {
+        if (cursor in protected) exit 1
+        protected[cursor] = 1
+        if (!(cursor in parent)) break
       }
-      print " "
+      complete = cursor == 0
+      for (pid in candidates) {
+        if (pid in protected) continue
+        if (!complete) {
+          for (cursor = pid; cursor in parent && !(cursor in protected); cursor = parent[cursor]) {
+            if (visited[cursor] == pid) exit 1
+            visited[cursor] = pid
+          }
+          if (!(cursor in protected)) exit 1
+        }
+        print pid
+      }
     }
-  ' <<< "$parents"
+  '
 }
 
-task_pids_under_roots() {  # <scanner> <protected-pids> <dir>...
+task_pids_under_roots() {  # <scanner> <dir>...
   TASK_PIDS=
-  local scanner=$1 protected_pids=$2 dir dir_pids pids=""
-  shift 2
+  local scanner=$1 dir resolved pids safe_pids
+  local -a roots=()
+  shift
   for dir in "$@"; do
-    [ -n "$dir" ] || continue
-    if ! dir_pids=$(pids_with_cwd_under "$scanner" "$dir"); then
-      echo "REFUSED: cannot determine leaked processes under $dir for $ID ($scanner failed); preserving the worktree/tasktmp for manual inspection or retry." >&2
+    [ -n "$dir" ] && [ -d "$dir" ] || continue
+    if ! resolved=$(CDPATH='' cd -- "$dir" >/dev/null && pwd -P && printf '.'); then
+      echo "REFUSED: cannot resolve task directory $dir for $ID; preserving the worktree/tasktmp for manual inspection or retry." >&2
       return 1
     fi
-    pids="$pids
-$dir_pids"
+    roots+=("${resolved%$'\n.'}")
   done
-  TASK_PIDS=$(awk -v protected="$protected_pids" '
-    /^[0-9]+$/ && !index(protected, " " $0 " ")
-  ' <<< "$pids" | sort -un)
+  [ -n "${roots[0]:-}" ] || return 0
+  if ! pids=$(pids_with_cwd_under "$scanner" "${roots[@]}"); then
+    echo "REFUSED: cannot determine leaked processes under ${roots[*]} for $ID ($scanner failed); preserving the worktree/tasktmp for manual inspection or retry." >&2
+    return 1
+  fi
+  [ -n "$pids" ] || return 0
+  if ! safe_pids=$(task_reap_filter_pids "$pids"); then
+    echo "REFUSED: cannot rule out a teardown ancestor among cwd matches for $ID; preserving the worktree/tasktmp for manual inspection or retry." >&2
+    return 1
+  fi
+  TASK_PIDS=$(printf '%s\n' "$safe_pids" | sort -un)
 }
 
 reap_task_backend_process_group() {  # <label>
@@ -2179,19 +2199,15 @@ reap_task_backend_process_group() {  # <label>
 # the recheck. Without lsof, Linux uses /proc and other hosts use the backend
 # process-group fallback. A cwd scan error refuses before destructive teardown.
 reap_task_worktree_processes() {  # <label> <dir>...
-  local label=$1 scanner protected_pids pids pid identity current_pids i pass=1 max_passes=3
+  local label=$1 scanner pids pid identity current_pids i pass=1 max_passes=3
   local -a tracked_pids tracked_identities remaining_pids remaining_identities
   shift
   if ! scanner=$(task_cwd_scanner); then
     reap_task_backend_process_group "$label"
     return 0
   fi
-  if ! protected_pids=$(task_reap_protected_pids); then
-    echo "REFUSED: cannot identify teardown's own process and ancestors for $ID; preserving the worktree/tasktmp for manual inspection or retry." >&2
-    return 1
-  fi
   while [ "$pass" -le "$max_passes" ]; do
-    task_pids_under_roots "$scanner" "$protected_pids" "$@" || return 1
+    task_pids_under_roots "$scanner" "$@" || return 1
     pids=$TASK_PIDS
     [ -n "$pids" ] || return 0
     if [ "$KEEP_PANE" = 1 ] && task_pid_list_contains "$pids" "$KEPT_SHELL_PID"; then
@@ -2203,7 +2219,7 @@ reap_task_worktree_processes() {  # <label> <dir>...
     while IFS= read -r pid; do
       [ -n "$pid" ] || continue
       if ! identity=$(task_process_identity "$pid"); then
-        task_pids_under_roots "$scanner" "$protected_pids" "$@" || return 1
+        task_pids_under_roots "$scanner" "$@" || return 1
         if task_pid_list_contains "$TASK_PIDS" "$pid"; then
           echo "REFUSED: cannot verify leaked process $pid identity for $ID; preserving the worktree/tasktmp for manual inspection or retry." >&2
           return 1
@@ -2219,7 +2235,7 @@ EOF
       pass=$((pass + 1))
       continue
     fi
-    task_pids_under_roots "$scanner" "$protected_pids" "$@" || return 1
+    task_pids_under_roots "$scanner" "$@" || return 1
     current_pids=$TASK_PIDS
     echo "teardown: reaping leaked $label process(es) for $ID: $(printf '%s' "$pids" | tr '\n' ' ')" >&2
     for i in "${!tracked_pids[@]}"; do
@@ -2231,7 +2247,7 @@ EOF
       fi
     done
     sleep 1
-    task_pids_under_roots "$scanner" "$protected_pids" "$@" || return 1
+    task_pids_under_roots "$scanner" "$@" || return 1
     current_pids=$TASK_PIDS
     remaining_pids=()
     remaining_identities=()
@@ -2246,7 +2262,7 @@ EOF
     done
     if [ "${#remaining_pids[@]}" -gt 0 ]; then
       echo "teardown: force-killing leaked $label process(es) for $ID: ${remaining_pids[*]}" >&2
-      task_pids_under_roots "$scanner" "$protected_pids" "$@" || return 1
+      task_pids_under_roots "$scanner" "$@" || return 1
       current_pids=$TASK_PIDS
       for i in "${!remaining_pids[@]}"; do
         pid=${remaining_pids[$i]}
@@ -2259,7 +2275,7 @@ EOF
     fi
     pass=$((pass + 1))
   done
-  task_pids_under_roots "$scanner" "$protected_pids" "$@" || return 1
+  task_pids_under_roots "$scanner" "$@" || return 1
   [ -z "$TASK_PIDS" ] && return 0
   echo "REFUSED: leaked $label processes for $ID remain after $max_passes reap attempts; preserving the worktree/tasktmp for manual inspection or retry." >&2
   return 1

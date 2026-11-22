@@ -3406,12 +3406,26 @@ test_leaked_tasktmp_process_is_reaped() {
   pass "a leaked descendant process rooted under the task's per-task tasktmp is reaped by teardown too"
 }
 
+hide_teardown_ancestor() {
+  local case_dir=$1
+  cat > "$case_dir/fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+set -o pipefail
+if [ "$*" = '-axo pid=,ppid=' ]; then
+  "$REAL_PS_FOR_TEST" "$@" | awk -v hidden="$FM_TEST_HIDDEN_ANCESTOR" '$1 != hidden'
+else
+  exec "$REAL_PS_FOR_TEST" "$@"
+fi
+SH
+  chmod +x "$case_dir/fakebin/ps"
+}
+
 test_lsof_absent_reaps_detached_linux_process() (
   if [ "$(uname -s)" != Linux ]; then
     printf 'skip: detached /proc cwd scan requires Linux\n'
     return 0
   fi
-  local visibility=$1 case_dir rc=0 pid='' sibling_pid='' path_without_lsof i
+  local visibility=$1 case_dir rc=0 pid='' tmp_pid='' sibling_pid='' path_without_lsof i
   case_dir=$(make_case "lsof-absent-detached-reap-$visibility")
   write_meta "$case_dir" no-mistakes ship
   land_shippable_commit "$case_dir"
@@ -3421,21 +3435,13 @@ test_lsof_absent_reaps_detached_linux_process() (
   fi
   if [ "$visibility" = hidden ]; then
     export FM_TEST_HIDDEN_ANCESTOR=$$
-    cat > "$case_dir/fakebin/ps" <<'SH'
-#!/usr/bin/env bash
-set -o pipefail
-if [ "$*" = '-axo pid=,ppid=' ]; then
-  "$REAL_PS_FOR_TEST" "$@" | awk -v hidden="$FM_TEST_HIDDEN_ANCESTOR" '$1 != hidden'
-else
-  exec "$REAL_PS_FOR_TEST" "$@"
-fi
-SH
-    chmod +x "$case_dir/fakebin/ps"
+    hide_teardown_ancestor "$case_dir"
   fi
 
-  mkdir -p "$case_dir/wt/nested" "$case_dir/wt0"
+  mkdir -p "$case_dir/wt/nested" "$case_dir/wt0" "$case_dir/tasktmp"
+  printf 'tasktmp=%s\n' "$case_dir/tasktmp" >> "$case_dir/state/task-x1.meta"
   ln -s "$case_dir/wt/nested" "$case_dir/cwd-alias"
-  trap 'for child in "$pid" "$sibling_pid"; do
+  trap 'for child in "$pid" "$tmp_pid" "$sibling_pid"; do
     [ -n "$child" ] || continue
     kill -KILL "$child" 2>/dev/null || true
     wait "$child" 2>/dev/null || true
@@ -3444,10 +3450,13 @@ SH
   # the test also exercises the identity and cwd recheck before KILL.
   perl -MPOSIX -e 'POSIX::setsid() > 0 or die; $SIG{TERM} = "IGNORE"; chdir shift or die; exec "sleep", "300"' "$case_dir/cwd-alias" &
   pid=$!
+  perl -MPOSIX -e 'POSIX::setsid() > 0 or die; chdir shift or die; exec "sleep", "300"' "$case_dir/tasktmp" &
+  tmp_pid=$!
   perl -MPOSIX -e 'POSIX::setsid() > 0 or die; chdir shift or die; exec "sleep", "300"' "$case_dir/wt0" &
   sibling_pid=$!
   for ((i=0; i<100; i++)); do
     if [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "$case_dir/wt/nested" ] \
+       && [ "$(readlink "/proc/$tmp_pid/cwd" 2>/dev/null)" = "$case_dir/tasktmp" ] \
        && [ "$(readlink "/proc/$sibling_pid/cwd" 2>/dev/null)" = "$case_dir/wt0" ]; then
       break
     fi
@@ -3468,10 +3477,62 @@ SH
   fi
   wait "$pid" 2>/dev/null || true
   pid=''
+  ! kill -0 "$tmp_pid" 2>/dev/null || fail 'lsof-absent-detached-reap: detached tasktmp process survived'
+  wait "$tmp_pid" 2>/dev/null || true
+  tmp_pid=''
   kill -0 "$sibling_pid" 2>/dev/null || fail 'lsof-absent-detached-reap: sibling process was killed'
   assert_grep 'force-killing leaked worktree process(es)' "$case_dir/stderr" \
     'lsof-absent-detached-reap: teardown did not escalate after TERM'
-  pass "Linux teardown without lsof reaps a detached process and preserves its caller and sibling ($visibility ancestor above caller)"
+  pass "Linux teardown without lsof reaps both roots and preserves its caller and sibling ($visibility ancestor above caller)"
+)
+
+test_hidden_intermediate_parent_refuses_reap() (
+  if [ "$(uname -s)" != Linux ]; then
+    printf 'skip: hidden parent fixture requires Linux\n'
+    return 0
+  fi
+  local scanner=$1 case_dir path_without_lsof rc=0 leak_pid i
+  case_dir=$(make_case "reap-hidden-parent-$scanner")
+  write_meta "$case_dir" no-mistakes ship
+  land_shippable_commit "$case_dir"
+  hide_teardown_ancestor "$case_dir"
+  path_without_lsof=$(make_path_without_lsof "$case_dir")
+  if [ "$scanner" = lsof ]; then
+    cat > "$case_dir/fakebin/lsof" <<'SH'
+#!/usr/bin/env bash
+printf 'p%s\nfcwd\nn%s\n' "$FM_TEST_LEAK_PID" "$FM_TEST_WORKTREE" "$FM_TEST_IN_COPY_CALLER" "$FM_TEST_WORKTREE"
+SH
+    chmod +x "$case_dir/fakebin/lsof"
+  fi
+  ( cd "$case_dir/wt" && exec sleep 300 ) &
+  leak_pid=$!
+  trap 'kill -KILL "$leak_pid" 2>/dev/null || true; wait "$leak_pid" 2>/dev/null || true' EXIT
+  for ((i=0; i<100; i++)); do
+    [ "$(readlink "/proc/$leak_pid/cwd" 2>/dev/null)" != "$case_dir/wt" ] || break
+    sleep 0.05
+  done
+  [ "$i" -lt 100 ] || fail 'hidden intermediate parent: leak did not start in the worktree'
+
+  (
+    cd "$case_dir/wt" || exit 1
+    export FM_TEST_IN_COPY_CALLER=$BASHPID FM_TEST_LEAK_PID=$leak_pid FM_TEST_WORKTREE="$case_dir/wt"
+    (
+      export FM_TEST_HIDDEN_ANCESTOR=$BASHPID
+      cd "$case_dir" || exit 1
+      FM_TEARDOWN_TEST_PATH="$path_without_lsof" run_teardown "$case_dir" || exit "$?"
+    )
+    rc=$?
+    printf 'survived\n' > "$case_dir/caller"
+    exit "$rc"
+  ) > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+
+  expect_code 1 "$rc" "hidden intermediate parent ($scanner): cleanup should refuse"
+  assert_present "$case_dir/caller" "hidden intermediate parent ($scanner): cleanup signalled the calling shell"
+  kill -0 "$leak_pid" 2>/dev/null || fail "hidden intermediate parent ($scanner): cleanup signalled another match before refusing"
+  assert_present "$case_dir/state/task-x1.meta" "hidden intermediate parent ($scanner): cleanup retired task metadata"
+  assert_grep 'REFUSED: cannot rule out a teardown ancestor among cwd matches' "$case_dir/stderr" \
+    "hidden intermediate parent ($scanner): cleanup did not report the ambiguous ancestry"
+  pass "cleanup with $scanner refuses an ambiguous ancestor without signalling either cwd match"
 )
 
 test_lsof_absent_on_non_linux_reaps_tmux_process_group() {
@@ -4243,6 +4304,8 @@ SH
 test_leaked_worktree_process_is_reaped
 test_lsof_absent_reaps_detached_linux_process visible || exit 1
 test_lsof_absent_reaps_detached_linux_process hidden || exit 1
+test_hidden_intermediate_parent_refuses_reap proc || exit 1
+test_hidden_intermediate_parent_refuses_reap lsof || exit 1
 test_keep_pane_without_lsof || exit 1
 test_keep_pane_retirement
 test_keep_pane_lab || fail "real Herdr keep-pane lab failed"
