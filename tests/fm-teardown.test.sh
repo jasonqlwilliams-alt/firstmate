@@ -661,8 +661,8 @@ backlog_row_state() {
 make_path_without_lsof() {  # <case-dir>
   local case_dir=$1 path_dir="$1/path-without-lsof" cmd resolved
   mkdir -p "$path_dir"
-  for cmd in awk bash basename cat chmod cp cut date dirname env find git grep head hostname id ln \
-    mkdir mktemp mv perl ps readlink realpath rm sed sh sleep sort stat tail timeout tr uname wc xargs; do
+  for cmd in awk bash basename cat chmod cp cut date dirname env find git grep head hostname id jq ln \
+    mkdir mktemp mv perl ps readlink realpath rm sed sh sha256sum shasum sleep sort stat tail timeout tr uname wc xargs; do
     resolved=$(command -v "$cmd" 2>/dev/null) || continue
     case "$resolved" in /*) ln -sf "$resolved" "$path_dir/$cmd" ;; esac
   done
@@ -3411,13 +3411,26 @@ test_lsof_absent_reaps_detached_linux_process() (
     printf 'skip: detached /proc cwd scan requires Linux\n'
     return 0
   fi
-  local case_dir rc=0 pid='' sibling_pid='' path_without_lsof i
-  case_dir=$(make_case lsof-absent-detached-reap)
+  local visibility=$1 case_dir rc=0 pid='' sibling_pid='' path_without_lsof i
+  case_dir=$(make_case "lsof-absent-detached-reap-$visibility")
   write_meta "$case_dir" no-mistakes ship
   land_shippable_commit "$case_dir"
   path_without_lsof=$(make_path_without_lsof "$case_dir")
   if PATH="$case_dir/fakebin:$path_without_lsof" command -v lsof >/dev/null 2>&1; then
     fail 'lsof-absent-detached-reap: fixture path unexpectedly exposes lsof'
+  fi
+  if [ "$visibility" = hidden ]; then
+    export FM_TEST_HIDDEN_ANCESTOR=$$
+    cat > "$case_dir/fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+set -o pipefail
+if [ "$*" = '-axo pid=,ppid=' ]; then
+  "$REAL_PS_FOR_TEST" "$@" | awk -v hidden="$FM_TEST_HIDDEN_ANCESTOR" '$1 != hidden'
+else
+  exec "$REAL_PS_FOR_TEST" "$@"
+fi
+SH
+    chmod +x "$case_dir/fakebin/ps"
   fi
 
   mkdir -p "$case_dir/wt/nested" "$case_dir/wt0"
@@ -3458,7 +3471,7 @@ test_lsof_absent_reaps_detached_linux_process() (
   kill -0 "$sibling_pid" 2>/dev/null || fail 'lsof-absent-detached-reap: sibling process was killed'
   assert_grep 'force-killing leaked worktree process(es)' "$case_dir/stderr" \
     'lsof-absent-detached-reap: teardown did not escalate after TERM'
-  pass 'Linux teardown without lsof reaps a detached worktree process and preserves its ancestor and sibling'
+  pass "Linux teardown without lsof reaps a detached process and preserves its caller and sibling ($visibility ancestor above caller)"
 )
 
 test_lsof_absent_on_non_linux_reaps_tmux_process_group() {
@@ -3852,6 +3865,9 @@ case "${1:-} ${2:-}" in
   'pane run')
     [ "${3:-}" = wG:pQ ] && [ "${4:-}" = 'cd /' ] || exit 9
     [ "${FM_KEEP_MODE:-}" != detach-fails ] || exit 1
+    if [ -p "$FM_KEEP_CASE/shell-input" ]; then
+      printf '%s\n' "$4" 1<>"$FM_KEEP_CASE/shell-input" || exit 1
+    fi
     : > "$FM_KEEP_CASE/detached"
     ;;
   'workspace list')
@@ -3892,6 +3908,58 @@ run_keep_pane_case() {
     FM_HERDR_PS_BIN="$case_dir/fakebin/keep-ps" FM_BACKEND_HERDR_IDLE_SHELL_PROOF_POLLS=1 \
     run_teardown "$case_dir" "$@"
 }
+
+test_keep_pane_without_lsof() (
+  if [ "$(uname -s)" != Linux ]; then
+    printf 'skip: keep-pane /proc cwd proof requires Linux\n'
+    return 0
+  fi
+  local case_dir path_without_lsof shell_pid='' leak_pid='' i
+  case_dir=$(make_case keep-pane-no-lsof)
+  configure_keep_pane_case "$case_dir"
+  rm -f "$case_dir/fakebin/lsof"
+  path_without_lsof=$(make_path_without_lsof "$case_dir")
+  if PATH="$case_dir/fakebin:$path_without_lsof" command -v lsof >/dev/null 2>&1; then
+    fail 'keep-pane-no-lsof: fixture path unexpectedly exposes lsof'
+  fi
+  mkfifo "$case_dir/shell-input" || fail 'keep-pane-no-lsof: could not create pane input'
+  trap 'for child in "$shell_pid" "$leak_pid"; do
+    [ -n "$child" ] || continue
+    kill -KILL "$child" 2>/dev/null || true
+    wait "$child" 2>/dev/null || true
+  done' EXIT
+  (
+    cd "$case_dir/wt" || exit 1
+    exec perl -MPOSIX -e 'POSIX::setsid() > 0 or die; exec @ARGV' bash -c '
+      IFS= read -r -t "$FM_TEST_STUB_MAX_BLOCK_SECONDS" command &&
+        [ "$command" = "cd /" ] && cd / && IFS= read -r -t "$FM_TEST_STUB_MAX_BLOCK_SECONDS"
+    ' <>"$case_dir/shell-input"
+  ) &
+  shell_pid=$!
+  perl -MPOSIX -e 'POSIX::setsid() > 0 or die; chdir shift or die; exec "sleep", "300"' "$case_dir/wt" &
+  leak_pid=$!
+  for ((i=0; i<100; i++)); do
+    if [ "$(ps -p "$shell_pid" -o comm=)" = bash ] \
+       && [ "$(readlink "/proc/$shell_pid/cwd" 2>/dev/null)" = "$case_dir/pool/1/project" ] \
+       && [ "$(readlink "/proc/$leak_pid/cwd" 2>/dev/null)" = "$case_dir/pool/1/project" ]; then
+      break
+    fi
+    sleep 0.05
+  done
+  [ "$i" -lt 100 ] || fail 'keep-pane-no-lsof: shell and leak did not start in the worktree'
+
+  FM_KEEP_CASE="$case_dir" FM_KEEP_PID="$shell_pid" FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
+    run_teardown "$case_dir" --keep-pane > "$case_dir/out" 2> "$case_dir/err" \
+    || fail "keep-pane-no-lsof: retirement failed: $(cat "$case_dir/err")"
+  [ "$(readlink "/proc/$shell_pid/cwd" 2>/dev/null)" = / ] || fail 'keep-pane-no-lsof: original shell did not survive at /'
+  ! kill -0 "$leak_pid" 2>/dev/null || fail 'keep-pane-no-lsof: detached worktree process survived'
+  wait "$leak_pid" 2>/dev/null || true
+  leak_pid=''
+  assert_absent "$case_dir/closed" 'keep-pane-no-lsof: cleanup closed the exact pane'
+  assert_present "$case_dir/treehouse.log" 'keep-pane-no-lsof: cleanup did not return the worktree'
+  assert_absent "$case_dir/state/task-x1.meta" 'keep-pane-no-lsof: cleanup retained task metadata'
+  pass 'Linux keep-pane cleanup without lsof detaches the original shell and reaps the detached worktree process'
+)
 
 test_keep_pane_retirement() {
   local case_dir mode rc before show
@@ -4173,7 +4241,9 @@ SH
 )
 
 test_leaked_worktree_process_is_reaped
-test_lsof_absent_reaps_detached_linux_process || exit 1
+test_lsof_absent_reaps_detached_linux_process visible || exit 1
+test_lsof_absent_reaps_detached_linux_process hidden || exit 1
+test_keep_pane_without_lsof || exit 1
 test_keep_pane_retirement
 test_keep_pane_lab || fail "real Herdr keep-pane lab failed"
 

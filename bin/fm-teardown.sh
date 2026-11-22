@@ -171,9 +171,10 @@
 #   pane open. Stop its worker with fm-control.sh <task-id> exit first: cleanup
 #   requires the existing strict lone idle shell proof, then clears shell
 #   input and moves that shell to / before returning its copy. Nested shells,
-#   children, unknown/missing endpoints, absent lsof, non-Herdr backends,
-#   scouts, secondmates, recovery records, legacy records, stale-record retire
-#   and --force are refused. Dirty and unlanded-work checks remain mandatory.
+#   children, unknown/missing endpoints, hosts without a cwd scanner (lsof or
+#   Linux /proc), non-Herdr backends, scouts, secondmates, recovery records,
+#   legacy records, stale-record retire and --force are refused. Dirty and
+#   unlanded-work checks remain mandatory.
 #   The same pane and shell birth identity are reverified before record removal;
 #   failure retains the records for retry. A correlated presentation journal
 #   is retired without closing, renaming, moving or adopting its workspace.
@@ -1991,6 +1992,16 @@ conclude_task_no_mistakes_run() {  # <worktree>
   return 1
 }
 
+task_cwd_scanner() {
+  if command -v lsof >/dev/null 2>&1; then
+    printf 'lsof\n'
+  elif [ "$(uname -s)" = Linux ]; then
+    printf '/proc\n'
+  else
+    return 1
+  fi
+}
+
 # Use a single cwd listing, without lsof's recursive +D file-tree walk.
 lsof_pids_with_cwd_under() {  # <resolved-dir>
   local dir=$1 out pid path line
@@ -2088,9 +2099,10 @@ task_reap_protected_pids() {
     { parent[$1] = $2 }
     END {
       while (pid > 0) {
-        if (!(pid in parent) || pid in seen) exit 1
+        if (pid in seen) exit 1
         seen[pid] = 1
         printf " %s", pid
+        if (!(pid in parent)) break
         pid = parent[pid]
       }
       print " "
@@ -2170,11 +2182,7 @@ reap_task_worktree_processes() {  # <label> <dir>...
   local label=$1 scanner protected_pids pids pid identity current_pids i pass=1 max_passes=3
   local -a tracked_pids tracked_identities remaining_pids remaining_identities
   shift
-  if command -v lsof >/dev/null 2>&1; then
-    scanner=lsof
-  elif [ "$(uname -s)" = Linux ]; then
-    scanner=/proc
-  else
+  if ! scanner=$(task_cwd_scanner); then
     reap_task_backend_process_group "$label"
     return 0
   fi
@@ -3076,13 +3084,19 @@ FMEOF
 # commands. Birth identity and kernel cwd bind the surviving shell across the
 # copy return, so a replacement pane/process cannot satisfy retirement.
 teardown_kept_shell_sample() {
-  local pid cwd
+  local pid cwd scanner
   fm_backend_herdr_require_task_identity "$T" || return 1
   pid=$(fm_backend_herdr_pane_idle_shell_pid "$TEARDOWN_HERDR_SESSION" "$TEARDOWN_HERDR_PANE") || return 1
   [ "$pid" = "$KEPT_SHELL_PID" ] || return 1
   task_process_identity_matches "$pid" "$KEPT_SHELL_IDENTITY" || return 1
-  cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null) || return 1
-  [ "$(printf '%s\n' "$cwd" | sed -n 's/^n//p')" = / ]
+  scanner=$(task_cwd_scanner) || return 1
+  if [ "$scanner" = /proc ]; then
+    cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null && printf '.') || return 1
+    [ "$cwd" = $'/\n.' ]
+  else
+    cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null) || return 1
+    [ "$(printf '%s\n' "$cwd" | sed -n 's/^n//p')" = / ]
+  fi
 }
 
 teardown_keep_pane_journal_correlates() {
@@ -3113,8 +3127,8 @@ teardown_prepare_kept_pane() {
     echo "REFUSED: --keep-pane requires an exactly present pane and the strict shell-proof machinery; retaining task records." >&2
     return 1
   fi
-  command -v lsof >/dev/null 2>&1 || {
-    echo "REFUSED: --keep-pane requires lsof to verify the surviving shell's cwd and reap worktree processes." >&2
+  task_cwd_scanner >/dev/null || {
+    echo "REFUSED: --keep-pane requires lsof or Linux /proc to verify the surviving shell's cwd and reap worktree processes." >&2
     return 1
   }
   KEPT_SHELL_PID=$(fm_backend_herdr_pane_idle_shell_pid "$TEARDOWN_HERDR_SESSION" "$TEARDOWN_HERDR_PANE") || {
