@@ -759,7 +759,7 @@ snapshot_pr_awaiting_merge() {  # <id> <registered-pr> <captured-status>
   [ -f "$status_log" ] && fm_pr_url_parse "$pr" || return 1
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
-      *done*:*) [ "$(status_line_verb "$line")" != done ] || last_done=$line ;;
+      *done*:*) [ "$(status_line_verb "$line")" != 'done' ] || last_done=$line ;;
     esac
   done < "$status_log"
   [ "$(status_line_note "$last_done")" = "PR $pr checks green" ] || return 1
