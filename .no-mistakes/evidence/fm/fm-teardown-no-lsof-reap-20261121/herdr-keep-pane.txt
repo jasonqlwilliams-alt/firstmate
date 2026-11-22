@@ -1,0 +1,29 @@
+Target --keep-pane without lsof
+Real Herdr 0.9.5 named lab with a synthetic landed copy and detached process. Busy-pane refusal followed by a retry against the same idle shell.
+
+$ bin/fm-herdr-lab.sh provision fm-lab-proc-66-24582
+exit = 0
+Herdr pane w1:p1, terminal term_660e02edcff411, shell 180, cwd [disposable fixture]/keep/pool/.treehouse/café-878935/1/café before cleanup
+Detached PID 201 session 201 cwd 'pool/.treehouse/café-878935/1/café/local-build' TERM behavior ignore
+Busy-pane probe: foreground process PID 213
+Scanner on isolated PATH: Linux /proc (lsof absent)
+$ bin/fm-teardown.sh live-proc --keep-pane
+REFUSED: --keep-pane requires a lone idle shell in the exact pane; stop the worker with fm-control.sh live-proc exit first. Nested shells, children and unknown state are unsupported.
+exit = 1
+Busy pane, live leak, task record and slot claim survived the refusal.
+Scanner on isolated PATH: Linux /proc (lsof absent)
+$ bin/fm-teardown.sh live-proc --keep-pane
+🌳 Worktree returned to pool.
+teardown live-proc complete (pane fm-lab-proc-66-24582:w1:p1 preserved with stopped worker, shell detached to /, worktree [disposable fixture]/keep/pool/.treehouse/café-878935/1/café returned)
+teardown: reaping leaked worktree process(es) for live-proc: 201
+teardown: force-killing leaked worktree process(es) for live-proc: 201
+exit = 0
+Task record and slot claim removed. Treehouse status:
+base  main  (repository default)
+1     available    [disposable fixture]/keep/pool/.treehouse/café-878935/1/café  (detached)
+Herdr pane w1:p1, terminal term_660e02edcff411, same shell 180, kernel cwd '/' after cleanup
+retained shell executed this command
+SCENARIO CHECKS PASSED
+$ bin/fm-herdr-lab.sh teardown fm-lab-proc-66-24582
+exit = 0
+Disposable child processes stopped and reaped.

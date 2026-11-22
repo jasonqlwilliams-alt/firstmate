@@ -1,0 +1,36 @@
+Target teardown without lsof as parent processes exit on Linux
+Private PID and mount namespaces, real kernel process ancestry, synthetic wrappers and detached children.
+
+Previously verified ancestry
+At the Treehouse return boundary, the surviving caller left the copy before the genuine Treehouse command proceeded.
+
+Live tmux windows before cleanup: ['sentinel', 'fm-live-proc']
+Detached PID 85 session 85 cwd 'pool/.treehouse/café-2ffbbd/1/café/detached' TERM behavior ignore
+Real ancestry at launch: in-copy caller PID 92 → wrapper PID 93 → fm-teardown.sh PID 94
+TERM caused wrapper 93 to exit. Teardown reparented to PID 1 and reached copy return with caller 92 alive and unsignalled.
+$ fm-teardown.sh live-proc
+🌳 Worktree returned to pool.
+teardown live-proc complete (window isolated:fm-live-proc, worktree [disposable fixture]/visible/pool/.treehouse/café-2ffbbd/1/café)
+teardown: reaping leaked worktree process(es) for live-proc: 85
+teardown: force-killing leaked worktree process(es) for live-proc: 85
+exit = 0
+Live tmux windows after cleanup: ['sentinel']
+Task record and slot claim removed. Treehouse status:
+base  main  (repository default)
+1     available    [disposable fixture]/visible/pool/.treehouse/café-2ffbbd/1/café  (detached)
+SCENARIO CHECKS PASSED
+Disposable child processes stopped and reaped.
+
+Hidden intermediate ancestor
+The first ps call returned its actual kernel-derived process table after a synchronization pause so the wrapper exited before subsequent scans.
+
+Live tmux windows before cleanup: ['sentinel', 'fm-live-proc']
+Detached PID 83 session 83 cwd 'pool/.treehouse/café-6ae9af/1/café/detached' TERM behavior ignore
+Real ancestry at launch: in-copy caller PID 93 → wrapper PID 94 → fm-teardown.sh PID 95
+Private hidepid=2 procfs: ps saw caller 93, but omitted wrapper 94 while reporting it as teardown's parent. After wrapper exit the kernel reported parent PID 1.
+$ fm-teardown.sh live-proc
+REFUSED: cannot rule out a teardown ancestor among cwd matches for live-proc; preserving the worktree/tasktmp for manual inspection or retry.
+exit = 1
+Caller and detached leak survived without TERM. Task window, task record, and claimed copy were preserved.
+SCENARIO CHECKS PASSED
+Disposable child processes stopped and reaped.

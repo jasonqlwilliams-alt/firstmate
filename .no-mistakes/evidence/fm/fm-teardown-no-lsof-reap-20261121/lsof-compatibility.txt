@@ -1,0 +1,21 @@
+Target cleanup with real lsof 4.99.7
+Real Firstmate CLI, tmux and Treehouse in a private PID namespace.
+
+Live tmux windows before cleanup: ['sentinel', 'fm-live-proc']
+Detached PID 88 session 88 cwd 'pool/.treehouse/café-2d5e9a/1/café/subdir' TERM behavior ignore
+Detached PID 93 session 93 cwd 'shared-temp' TERM behavior exit
+Detached PID 94 session 94 cwd 'café' TERM behavior exit
+Scanner on isolated PATH: [disposable fixture]/lsof/tools/lsof
+$ bash -c 'rc=0; "$1" "$2" || rc=$?; printf "%s\n" "$rc" > "$3"; exit "$rc"' caller bin/fm-teardown.sh live-proc [disposable fixture]/lsof/caller-result
+🌳 Worktree returned to pool.
+teardown live-proc complete (window isolated:fm-live-proc, worktree [disposable fixture]/lsof/pool/.treehouse/café-2d5e9a/1/café)
+teardown: reaping leaked worktree process(es) for live-proc: 88 93
+teardown: force-killing leaked worktree process(es) for live-proc: 88
+exit = 0
+Caller survived. Owned leak received TERM and KILL. Recorded tasktmp process received TERM. Project process survived.
+Live tmux windows after cleanup: ['sentinel']
+Task record and slot claim removed. Treehouse status:
+base  main  (repository default)
+1     available    [disposable fixture]/lsof/pool/.treehouse/café-2d5e9a/1/café  (detached)
+SCENARIO CHECKS PASSED
+Disposable child processes stopped and reaped.
