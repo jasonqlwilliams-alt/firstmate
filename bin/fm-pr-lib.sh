@@ -42,7 +42,6 @@ FM_PR_META_URL=
 FM_PR_META_HOST=
 FM_PR_META_PATH=
 FM_PR_META_NUMBER=
-FM_PR_META_SPAWN_GEN=
 FM_PR_REG_ID=
 FM_PR_REG_PROVIDER=
 FM_PR_REG_URL=
@@ -72,7 +71,6 @@ FM_PR_POLL_EXPECT_CHECK_IDENTITY=
 FM_PR_POLL_TEMPLATE=
 FM_PR_POLL_STATE_DEVICE=
 FM_PR_POLL_SNAPSHOT_ID=
-FM_PR_POLL_SNAPSHOT_SPAWN_GEN=
 FM_PR_POLL_SNAPSHOT_PROVIDER=
 FM_PR_POLL_SNAPSHOT_URL=
 FM_PR_POLL_SNAPSHOT_HOST=
@@ -111,22 +109,6 @@ fm_task_id_path_safe() {
 fm_pr_task_id_valid() {
   local id=${1-}
   fm_task_id_path_safe "$id"
-}
-
-fm_pr_poll_lock_path() {
-  fm_pr_task_id_valid "$2" || return 1
-  printf '%s/.pr-poll-%s.lock\n' "$1" "$2"
-}
-
-fm_pr_poll_with_lock() {
-  local pr_lock pr_status=0
-  [ -d "$1" ] && [ ! -L "$1" ] || return 1
-  pr_lock=$(fm_pr_poll_lock_path "$1" "$2") || return 1
-  shift 2
-  fm_lock_acquire_wait_bounded "$pr_lock" 5 || return 1
-  "$@" || pr_status=$?
-  fm_lock_release "$pr_lock"
-  return "$pr_status"
 }
 
 fm_task_id_creation_valid() {
@@ -333,7 +315,6 @@ fm_pr_metadata_identity_parse() {
   FM_PR_META_HOST=
   FM_PR_META_PATH=
   FM_PR_META_NUMBER=
-  FM_PR_META_SPAWN_GEN=
   [ -f "$file" ] && [ ! -L "$file" ] || return 1
   [ "$(fm_pr_file_link_count "$file")" = 1 ] || return 1
   while IFS= read -r line || [ -n "$line" ]; do
@@ -359,13 +340,7 @@ fm_pr_metadata_identity_parse() {
         ;;
       x_request=*|x_request_ts=*|x_followups=*|x_platform=*|x_reply_max_chars=*)
         ;;
-      spawn_gen=*)
-        [ -z "$FM_PR_META_SPAWN_GEN" ] || return 1
-        value=${line#spawn_gen=}
-        case "$value" in ''|.*|*[!A-Za-z0-9._-]*) return 1 ;; esac
-        FM_PR_META_SPAWN_GEN=$value
-        ;;
-      control_relaunch_tx=*|traceparent=*|decisions_reviewed=*|decision_keys=*)
+      control_relaunch_tx=*|traceparent=*|decisions_reviewed=*|decision_keys=*|spawn_gen=*)
         ;;
       kind=*|mode=*|yolo=*)
         ;;
@@ -646,8 +621,6 @@ fm_pr_poll_artifacts_valid() {
   fm_pr_poll_data_parse "$data" || return 1
   data_hash=$(fm_pr_sha256 "$data") || return 1
   template_hash=$(fm_pr_sha256 "$check") || return 1
-  # A registration made with the approved merge-only template stays valid
-  # across the upgrade. The watcher executes the current repository program.
   if [ "$template_hash" != 24f73c153d68a5404ee5b4f9fc4ad6368ee8d79b43b87566591ce1e05a4112bf ]; then
     cmp -s "$template" "$check" || return 1
   fi
@@ -677,7 +650,6 @@ fm_pr_poll_snapshot_capture() {
   FM_PR_POLL_SNAPSHOT_REG_HASH=$(fm_pr_sha256 "$registration") || return 1
   FM_PR_POLL_SNAPSHOT_REG_IDENTITY=$(fm_pr_file_identity "$registration") || return 1
   FM_PR_POLL_SNAPSHOT_ID=$id
-  FM_PR_POLL_SNAPSHOT_SPAWN_GEN=$FM_PR_META_SPAWN_GEN
   FM_PR_POLL_SNAPSHOT_PROVIDER=$FM_PR_DATA_PROVIDER
   FM_PR_POLL_SNAPSHOT_URL=$FM_PR_DATA_URL
   FM_PR_POLL_SNAPSHOT_HOST=$FM_PR_DATA_HOST
@@ -693,7 +665,6 @@ fm_pr_poll_snapshot_matches() {
   local state=$1 id=$2 template=$3 registration reg_hash reg_identity
   [ -n "$FM_PR_POLL_SNAPSHOT_ID" ] && [ "$id" = "$FM_PR_POLL_SNAPSHOT_ID" ] || return 1
   fm_pr_poll_artifacts_valid "$state" "$id" "$template" || return 1
-  [ "$FM_PR_META_SPAWN_GEN" = "$FM_PR_POLL_SNAPSHOT_SPAWN_GEN" ] || return 1
   registration="$state/$id.pr-poll-registration"
   reg_hash=$(fm_pr_sha256 "$registration") || return 1
   reg_identity=$(fm_pr_file_identity "$registration") || return 1
@@ -983,26 +954,27 @@ fm_pr_poll_retirement_recover_all() {
   for receipt in "$state"/*.pr-poll-retirement; do
     [ -e "$receipt" ] || [ -L "$receipt" ] || continue
     id=$(basename "$receipt" .pr-poll-retirement)
-    if ! fm_pr_poll_with_lock "$state" "$id" \
-      fm_pr_poll_retirement_recover_one "$state" "$id" "$template"; then
+    if ! fm_pr_task_id_valid "$id" \
+      || ! fm_pr_poll_retirement_recover_one "$state" "$id" "$template"; then
       FM_PR_POLL_RETIREMENT_REJECTED="$FM_PR_POLL_RETIREMENT_REJECTED $receipt"
     fi
   done
   [ -z "$FM_PR_POLL_RETIREMENT_REJECTED" ]
 }
 
-# --- PR outcome canonical-identity marker -----------------------------------
+# --- merge-notification canonical-identity marker ----------------------------
 # A merged-PR poll retires (fm_pr_poll_retirement_recover_one) in the same
 # watcher cycle that detects it, which is normally enough on its own to stop a
 # duplicate detection: the check.sh is gone, so nothing re-polls it. The
 # exception is the same poll re-registered after its merge was already
 # surfaced. Its retirement state is scoped to one registration, so this marker
-# carries the latest reported outcome and canonical PR identity across
-# registrations for the task. The existing on-disk merge tag still means
-# merged. Closed polls stay armed, so a later merge can replace a closure.
-fm_pr_poll_outcome_marker_matches() {  # <marker> <device> <provider> <host> <path> <number> <expected>
+# carries the canonical PR identity across registrations for the task. Only a
+# matching identity is a no-op; a different PR for the same task reaches its
+# role-routed supervision destination and replaces the marker when its first
+# outcome is published.
+fm_pr_poll_merge_marker_matches() {  # <marker> <device> <provider> <host> <path> <number>
   local marker=$1 device=$2 expected_provider=$3 expected_host=$4 expected_path=$5 expected_number=$6
-  local expected=$7 version provider host path number outcome
+  local version provider host path number
   fm_pr_private_file_valid "$marker" 600 "$device" || return 1
   exec 8< "$marker" || return 1
   IFS= read -r version <&8 || { exec 8<&-; return 1; }
@@ -1015,36 +987,25 @@ fm_pr_poll_outcome_marker_matches() {  # <marker> <device> <provider> <host> <pa
     return 1
   fi
   exec 8<&-
-  case "$version" in
-    fm-pr-poll-merge-notified-v1) outcome=merged ;;
-    fm-pr-poll-closed-unmerged-notified-v1) outcome=closed-unmerged ;;
-    *) return 1 ;;
-  esac
-  { [ "$expected" = any ] || [ "$outcome" = "$expected" ]; } \
+  [ "$version" = fm-pr-poll-merge-notified-v1 ] \
     && [ "$provider" = "$expected_provider" ] \
     && [ "$host" = "$expected_host" ] \
     && [ "$path" = "$expected_path" ] \
     && [ "$number" = "$expected_number" ]
 }
 
-fm_pr_poll_outcome_recorded() {  # <state> <id> <provider> <host> <path> <number> [expected]
+fm_pr_poll_merge_already_notified() {  # <state> <id> <provider> <host> <path> <number>
   local state=$1 id=$2 provider=$3 host=$4 path=$5 number=$6 marker state_device
   fm_pr_task_id_valid "$id" || return 1
   [ -d "$state" ] && [ ! -L "$state" ] || return 1
   state_device=$(fm_pr_file_device "$state") || return 1
   marker="$state/$id.pr-poll-merge-notified"
-  fm_pr_poll_outcome_marker_matches "$marker" "$state_device" \
-    "$provider" "$host" "$path" "$number" "${7:-any}"
+  fm_pr_poll_merge_marker_matches "$marker" "$state_device" \
+    "$provider" "$host" "$path" "$number"
 }
 
-fm_pr_poll_outcome_record() {  # <state> <id> <provider> <host> <path> <number> <outcome>
+fm_pr_poll_merge_mark_notified() {  # <state> <id> <provider> <host> <path> <number>
   local state=$1 id=$2 provider=$3 host=$4 path=$5 number=$6 marker tmp state_device
-  local outcome=$7 version
-  case "$outcome" in
-    merged) version=fm-pr-poll-merge-notified-v1 ;;
-    closed-unmerged) version=fm-pr-poll-closed-unmerged-notified-v1 ;;
-    *) return 1 ;;
-  esac
   fm_pr_task_id_valid "$id" || return 1
   [ -d "$state" ] && [ ! -L "$state" ] || return 1
   state_device=$(fm_pr_file_device "$state") || return 1
@@ -1053,14 +1014,14 @@ fm_pr_poll_outcome_record() {  # <state> <id> <provider> <host> <path> <number> 
   umask 077
   tmp=$(mktemp "$state/.fm-pr-poll-merge-notified.XXXXXX") || return 1
   if ! printf '%s\n%s\n%s\n%s\n%s\n' \
-      "$version" "$provider" "$host" "$path" "$number" > "$tmp" \
+      fm-pr-poll-merge-notified-v1 "$provider" "$host" "$path" "$number" > "$tmp" \
     || ! chmod 0600 "$tmp" \
-    || ! fm_pr_poll_outcome_marker_matches "$tmp" "$state_device" \
-      "$provider" "$host" "$path" "$number" "$outcome" \
+    || ! fm_pr_poll_merge_marker_matches "$tmp" "$state_device" \
+      "$provider" "$host" "$path" "$number" \
     || ! fm_pr_regular_destination_on_device_or_absent "$marker" "$state_device" \
     || ! mv -f -- "$tmp" "$marker" \
-    || ! fm_pr_poll_outcome_marker_matches "$marker" "$state_device" \
-      "$provider" "$host" "$path" "$number" "$outcome"; then
+    || ! fm_pr_poll_merge_marker_matches "$marker" "$state_device" \
+      "$provider" "$host" "$path" "$number"; then
     rm -f -- "$tmp"
     return 1
   fi
@@ -1076,3 +1037,43 @@ fm_pr_poll_merge_notified_remove() {  # <state> <id>
   [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
   rm -f -- "$marker"
 }
+
+fm_pr_poll_closed_recorded() {
+  local state=$1 id=$2 url=$3 record device
+  fm_pr_task_id_valid "$id" || return 1
+  [ -d "$state" ] && [ ! -L "$state" ] || return 1
+  record="$state/$id.pr-poll-closed"
+  [ -f "$record" ] || return 1
+  device=$(fm_pr_file_device "$state") || return 1
+  fm_pr_private_file_valid "$record" 600 "$device" || return 1
+  grep -Fqx -- "$url" "$record"
+}
+
+fm_pr_poll_record_closed() (
+  local state=$1 id=$2 url=$3 spawn_gen=$4 record device tmp
+  fm_pr_task_id_valid "$id" && fm_pr_url_parse "$url" || return 1
+  [ -d "$state" ] && [ ! -L "$state" ] || return 1
+  record="$state/$id.pr-poll-closed"
+  device=$(fm_pr_file_device "$state") || return 1
+  fm_pr_poll_closed_recorded "$state" "$id" "$url" && return 0
+
+  umask 077
+  tmp=$(mktemp "$state/.$id.pr-poll-closed.XXXXXX") || return 1
+  trap 'rm -f -- "$tmp"' EXIT
+  exec 8<> "$tmp" || return 1
+  if [ -e "$record" ] || [ -L "$record" ]; then
+    fm_pr_private_file_valid "$record" 600 "$device" || return 1
+    cat -- "$record" >&8 || return 1
+  fi
+  printf '%s\n' "$url" >&8 || return 1
+  [ -f "$state/$id.check.sh" ] && [ ! -L "$state/$id.check.sh" ] \
+    && fm_pr_metadata_identity_parse "$state/$id.meta" && [ "$FM_PR_META_URL" = "$url" ] \
+    && fm_backlog_meta_spawn_gen_optional "$state/$id.meta" "$state" \
+    && [ "$FM_BACKLOG_META_SPAWN_GEN" = "$spawn_gen" ] || return 4
+  fm_pr_regular_destination_on_device_or_absent "$record" "$device" || return 1
+  if mv -f -- "$tmp" "$record"; then
+    return 0
+  fi
+  [ ! -e "$tmp" ] && return 4
+  return 1
+)

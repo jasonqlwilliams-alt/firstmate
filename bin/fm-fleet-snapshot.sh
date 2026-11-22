@@ -106,8 +106,8 @@
 #     when the selected current state comes from run-step with the exact detail
 #     "run cancelled" or "run cancelled · status-log superseded (run failed)",
 #     the task metadata records a valid PR URL, the latest done status event is
-#     "PR <that url> checks green", and that PR has neither a matching local
-#     reported PR outcome marker nor a valid matching merge retirement receipt.
+#     "PR <that url> checks green", and local state has no matching closure
+#     record, merge-notified marker, or valid merge retirement receipt.
 #     The exemption applies only to terminal_in_flight and uses PR identity
 #     independently of commit heads. The next snapshot can reflect a retry or PR
 #     registration that occurs after the relevant inputs were sampled.
@@ -756,9 +756,10 @@ snapshot_pr_awaiting_merge() {  # <id> <registered-pr> <captured-status>
     esac
   done < "$status_log"
   [ "$(status_line_note "$last_done")" = "PR $pr checks green" ] || return 1
-  ! fm_pr_poll_outcome_recorded "$STATE" "$id" \
+  ! fm_pr_poll_merge_already_notified "$STATE" "$id" \
       "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" \
-    && ! { fm_pr_poll_retirement_receipt_valid "$STATE" "$id" && [ "$FM_PR_RETIRE_URL" = "$pr" ]; }
+    && ! { fm_pr_poll_retirement_receipt_valid "$STATE" "$id" && [ "$FM_PR_RETIRE_URL" = "$pr" ]; } \
+    && ! fm_pr_poll_closed_recorded "$STATE" "$id" "$pr"
 }
 
 task_json_one() {  # <captured-meta>

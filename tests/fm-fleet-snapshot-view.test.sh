@@ -1349,7 +1349,7 @@ SH
 
   (
     . "$ROOT/bin/fm-pr-lib.sh"
-    fm_pr_poll_outcome_record "$state" cancelled github github.com kunchenguid/firstmate 46 merged
+    fm_pr_poll_merge_mark_notified "$state" cancelled github github.com kunchenguid/firstmate 46
   ) || fail "could not record the matching PR merge in the fixture"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}' >/dev/null \
@@ -1397,6 +1397,20 @@ SH
   printf '%s' "$out" | jq -e '.valid == true and .invalidity == {kind:null,ids:[]}' >/dev/null \
     || fail "a closed outcome for a different PR must preserve the exemption: $out"
 
+  TEST_PR_HEAD="$head" PATH="$fakebin:$PATH" FM_HOME="$home" \
+    "$ROOT/bin/fm-pr-check.sh" cancelled "$pr" >"$home/register.log" 2>&1 \
+    || fail "could not re-register the closed PR: $(cat "$home/register.log")"
+  printf 'done: PR %s checks green\n' "$pr" > "$state/cancelled.status"
+  : > "$home/forge-reads"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
+  [ ! -s "$home/forge-reads" ] || fail "snapshot queried the forge for a re-registered PR"
+  printf '%s' "$out" | jq -e '.valid == false and .invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}' >/dev/null \
+    || fail "re-registering the PR lost its recorded closure: $out"
+
+  TEST_PR_HEAD="$head" PATH="$fakebin:$PATH" FM_HOME="$home" \
+    "$ROOT/bin/fm-pr-check.sh" cancelled "$other_pr" >"$home/register.log" 2>&1 \
+    || fail "could not re-register the other PR: $(cat "$home/register.log")"
+  printf 'done: PR %s checks green\n' "$other_pr" > "$state/cancelled.status"
   cat > "$home/run.txt" <<RUN
 run:
   id: "failed-run"

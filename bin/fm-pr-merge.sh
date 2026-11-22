@@ -1052,7 +1052,7 @@ esac
 # outcome while its existing poll remains armed.
 outcome_rc=0
 fm_merge_outcome_report "$FM_HOME" "$STATE" "$ID" "$URL" self \
-  "${FM_PR_MERGE_AUTHORITY:-}" merged "$MERGE_EXPECTED_SPAWN_GEN" || outcome_rc=$?
+  "${FM_PR_MERGE_AUTHORITY:-}" || outcome_rc=$?
 case "$outcome_rc" in
   0) ;;
   3)

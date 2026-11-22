@@ -2089,6 +2089,11 @@ while :; do
           host=$FM_PR_POLL_SNAPSHOT_HOST
           path=$FM_PR_POLL_SNAPSHOT_PATH
           number=$FM_PR_POLL_SNAPSHOT_NUMBER
+          closure_gen_valid=0
+          if closure_gen=$(fm_backlog_meta_spawn_gen_optional "$STATE/$id.meta" "$STATE" \
+            && printf '%s\n' "$FM_BACKLOG_META_SPAWN_GEN"); then
+            closure_gen_valid=1
+          fi
           run_check_capture "$SCRIPT_DIR/fm-pr-poll.sh" --validated \
             "$provider" "$url" "$host" "$path" "$number" || exit 1
           out=$FM_CHECK_RESULT
@@ -2104,25 +2109,30 @@ while :; do
         fi
       fi
       if [ -n "$out" ]; then
+        if [ "$is_pr_poll" -eq 1 ] && [ "$out" = closed-unmerged ]; then
+          if [ "$closure_gen_valid" -eq 1 ]; then
+            closure_rc=0
+            fm_pr_poll_record_closed "$STATE" "$id" "$url" "$closure_gen" || closure_rc=$?
+            case "$closure_rc" in
+              0|4) ;;
+              *)
+                triage_log "PR closure for $id could not be recorded (rc=$closure_rc)"
+                exit 1
+                ;;
+            esac
+          fi
+          continue
+        fi
         reason="check: $c: $out"
-        if [ "$is_pr_poll" -eq 1 ] && { [ "$out" = merged ] || [ "$out" = closed-unmerged ]; }; then
+        if [ "$is_pr_poll" -eq 1 ] && [ "$out" = merged ]; then
           merge_outcome_rc=0
-          fm_merge_outcome_report "$FM_HOME" "$STATE" "$id" "$url" poll '' "$out" \
+          fm_merge_outcome_report "$FM_HOME" "$STATE" "$id" "$url" poll \
             || merge_outcome_rc=$?
-          case "$merge_outcome_rc" in
-            0) ;;
-            4)
-              triage_log "discarded closure observation because its task or PR changed for $id"
-              continue
-              ;;
-            *)
-              triage_log "PR outcome $out for $id could not be recorded (rc=$merge_outcome_rc)"
-              exit 1
-              ;;
-          esac
-          [ "$out" = merged ] || continue
-          fm_pr_poll_with_lock "$STATE" "$id" retire_merged_pr_poll "$id" \
-            || triage_log "merged PR poll retirement deferred for $id"
+          if [ "$merge_outcome_rc" -ne 0 ]; then
+            triage_log "merge outcome for $id could not be recorded (rc=$merge_outcome_rc)"
+            exit 1
+          fi
+          retire_merged_pr_poll "$id"
           touch "$STATE/.last-check"
           if [ "$FM_MERGE_OUTCOME_ALREADY_RECORDED" = true ]; then
             triage_log "absorbed duplicate merged PR poll result for $id"
