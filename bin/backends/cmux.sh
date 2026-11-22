@@ -518,11 +518,15 @@ fm_backend_cmux_send_text_line() {  # <target> <text> [expected-label]
 # surface's actual current viewport height regardless of the requested
 # --lines value, so a caller asking for more than the viewport can see would
 # otherwise silently get less than it asked for with no way to tell why.
-fm_backend_cmux_capture() {  # <target> <lines|visible> [expected-label]
+fm_backend_cmux_capture() {  # <target> <lines> [expected-label]
+  _fm_backend_cmux_capture "$1" "${2:-200}" "${3:-}"
+}
+
+_fm_backend_cmux_capture() {  # <target> <lines> [expected-label] [visible]
   fm_backend_cmux_target_ready "$1" "${3:-}" || return 1
-  local lines=${2:-200} fetch raw out
+  local lines=$2 scope=${4:-} fetch raw out
   local -a args=(read-screen --workspace "$FM_BACKEND_CMUX_WORKSPACE" --surface "$FM_BACKEND_CMUX_SURFACE")
-  if [ "$lines" != visible ]; then
+  if [ "$scope" != visible ]; then
     case "$lines" in *[!0-9]*) lines=200 ;; esac
     fetch=$lines
     [ "$fetch" -ge 200 ] || fetch=200
@@ -530,7 +534,7 @@ fm_backend_cmux_capture() {  # <target> <lines|visible> [expected-label]
   fi
   raw=$(fm_backend_cmux_cli "${args[@]}" --json 2>/dev/null) || return 1
   out=$(printf '%s' "$raw" | jq -r '.text // empty' 2>/dev/null) || return 1
-  if [ "$lines" = visible ]; then
+  if [ "$scope" = visible ]; then
     printf '%s' "$out"
     return 0
   fi
@@ -557,11 +561,12 @@ fm_backend_cmux_composer_state() {  # <target> [expected-label] -> empty|pending
 # fm_backend_cmux_composer_snapshot: one composer capture into the snapshot
 # globals (bin/fm-composer-lib.sh "Composer SNAPSHOT").
 fm_backend_cmux_composer_snapshot() {  # <target> [expected-label] [visible]
-  local cap lines=${3:-$FM_COMPOSER_CAPTURE_LINES}
-  cap=$(fm_backend_cmux_capture "$1" "$lines" "${2:-}") || return 1
+  local cap scope=${3:-} lines=$FM_COMPOSER_CAPTURE_LINES
+  [ "$scope" != visible ] || lines=0
+  cap=$(_fm_backend_cmux_capture "$1" "$lines" "${2:-}" "$scope") || return 1
   FM_COMPOSER_SNAPSHOT_SCREEN=$cap
   FM_COMPOSER_SNAPSHOT_CURSOR=
-  FM_COMPOSER_SNAPSHOT_CAPS=$(fm_backend_cmux_composer_caps "${lines/#visible/0}")
+  FM_COMPOSER_SNAPSHOT_CAPS=$(fm_backend_cmux_composer_caps "$lines")
 }
 
 # fm_backend_cmux_send_text_submit: type <text> into <target> once (raw,

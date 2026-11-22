@@ -176,7 +176,8 @@ run_fixture() {
   local command=$1
   shift
   PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$TMP_ROOT/home" FM_ROOT_OVERRIDE="$ROOT" \
-    FM_CONTROL_POLL=0.1 FM_CONTROL_EXIT_WAIT=2 FM_SECONDMATE_PERSIST_POLL=1 FM_SECONDMATE_PERSIST_WAIT=5 \
+    FM_CONTROL_POLL="${FM_CONTROL_POLL:-0.1}" FM_CONTROL_EXIT_WAIT="${FM_CONTROL_EXIT_WAIT:-2}" \
+    FM_SECONDMATE_PERSIST_POLL=1 FM_SECONDMATE_PERSIST_WAIT=5 \
     "$control_bin/$command" "$@"
 }
 
@@ -217,6 +218,10 @@ for mode in restart-initial restart exit plain initial-dialog picker-history \
       case "$mode" in initial-dialog|restart-initial) expected='' ;; esac
       [ "$keys" = "$expected" ] || fail "$mode expected '$expected', received '$keys'"
       kill -0 "$pid" 2>/dev/null || fail "$mode stopped the agent"
+      if [ "$mode" = initial-dialog ]; then
+        assert_contains "$out" 'exit-refused exitdialog interrupt=not-needed exit-command=not-sent' \
+          'the open-dialog refusal claimed the exit command was sent'
+      fi
       if [ "$mode" = picker-history ]; then
         assert_contains "$screen" 'esc skip' 'tmux did not retain the earlier picker text'
       fi
@@ -295,6 +300,7 @@ case "$1 $2" in
     esac
     ;;
   'pane read')
+    if [ "$FM_DIALOG_MODE" = peek ]; then printf '%s\n' "$*" >> "$FM_DIALOG_CASE/reads"; fi
     styled=0
     case " $* " in *' --format ansi '*) styled=1 ;; esac
     case "$phase" in
@@ -315,7 +321,7 @@ case "$1 $2" in
   'pane send-text')
     printf '%s\n' "$4" >> "$FM_DIALOG_CASE/input"
     case "$FM_DIALOG_MODE:$4" in
-      doorbell-after*:*) printf 'dialog\n' > "$FM_DIALOG_CASE/phase" ;;
+      doorbell-after*:*|dialog-after-typing:/exit) printf 'dialog\n' > "$FM_DIALOG_CASE/phase" ;;
       *:/exit) printf 'typed\n' > "$FM_DIALOG_CASE/phase" ;;
     esac
     ;;
@@ -325,6 +331,8 @@ case "$1 $2" in
     case "$phase:$FM_DIALOG_MODE" in
       typed:retry) printf 'retry\n' ;;
       typed:retry-failure) printf 'retry\n'; exit 1 ;;
+      typed:enter-failure) printf 'typed\n'; exit 1 ;;
+      typed:dialog-after-failed-enter) printf 'dialog\n'; exit 1 ;;
       typed:single-stop) printf 'stopped\n' ;;
       typed:*) printf 'dialog\n' ;;
       composer:*) printf 'composer\n' ;;
@@ -340,8 +348,8 @@ fm_write_meta "$meta" 'backend=herdr' 'window=fixture:p1' 'endpoint_task_id=exit
   'harness=claude' 'kind=secondmate' "worktree=$TMP_ROOT/worktree" "project=$TMP_ROOT/project" \
   'herdr_session=fixture' 'herdr_workspace_id=w1' 'herdr_tab_id=t1' 'herdr_pane_id=p1' 'herdr_terminal_id=term-claude'
 export FM_DIALOG_HOME="$TMP_ROOT/worktree"
-for mode in dialog long-dialog picker-history dialog-unreadable retry retry-failure single-stop doorbell-before doorbell-after \
-    doorbell-after-long doorbell-before-picker; do
+for mode in dialog long-dialog picker-history dialog-unreadable dialog-after-typing dialog-after-failed-enter \
+    retry retry-failure enter-failure single-stop doorbell-before doorbell-after doorbell-after-long doorbell-before-picker; do
   export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/herdr-$mode"
   case "$mode" in
     long-dialog|doorbell-after-long) export FM_DIALOG_FIXTURE="$TMP_ROOT/long.screen" ;;
@@ -371,22 +379,44 @@ for mode in dialog long-dialog picker-history dialog-unreadable retry retry-fail
       continue
       ;;
   esac
-  out=$(run_fixture fm-control.sh exitdialog exit 2>&1) || rc=$?
+  case "$mode" in
+    retry|retry-failure) poll=1; exit_wait=1 ;;
+    enter-failure) poll=0.1; exit_wait=0.1 ;;
+    *) poll=0.1; exit_wait=2 ;;
+  esac
+  out=$(FM_CONTROL_POLL="$poll" FM_CONTROL_EXIT_WAIT="$exit_wait" FM_CONTROL_EXIT_RETRIES=3 \
+    run_fixture fm-control.sh exitdialog exit 2>&1) || rc=$?
   printf 'herdr %s exit=%s: %s\n' "$mode" "$rc" "$out"
   input=$(cat "$FM_DIALOG_CASE/input")
   case "$mode" in
     dialog|long-dialog|picker-history|dialog-unreadable)
       [ "$rc" -ne 0 ] || fail 'the styled Herdr dialog reported a stopped agent'
       assert_contains "$out" 'background-tasks exit confirmation' 'the styled Herdr dialog was not recognized'
+      assert_contains "$out" 'exit-delivered exitdialog' 'the dialog refusal lost the confirmed Enter'
       [ "$input" = $'/exit\nenter' ] || fail "the styled Herdr dialog received another key: $input"
       [ "$(cat "$FM_DIALOG_CASE/phase")" = dialog ] || fail 'the dialog did not stay open'
       if [ "$mode" = dialog-unreadable ]; then
         assert_contains "$out" 'agent-state=unreadable' 'the dialog refusal lost the observed liveness'
       fi
       ;;
+    dialog-after-typing|dialog-after-failed-enter)
+      expect_code 1 "$rc" 'the exit should refuse the dialog after typing'
+      assert_contains "$out" 'background-tasks exit confirmation' 'the dialog was not recognized after typing'
+      assert_contains "$out" 'exit-typed exitdialog interrupt=not-needed exit-command=typed' \
+        'the dialog refusal claimed an Enter was delivered'
+      expected=/exit
+      [ "$mode" != dialog-after-failed-enter ] || expected=$'/exit\nenter'
+      [ "$input" = "$expected" ] || fail "the dialog received another key: $input"
+      ;;
     retry|retry-failure)
       expect_code 0 "$rc" 'Herdr should retry a swallowed Enter while the composer still holds /exit'
       [ "$input" = $'/exit\nenter\nenter' ] || fail "the proven pending command should be submitted once more: $input"
+      ;;
+    enter-failure)
+      expect_code 1 "$rc" 'the exit should fail after all Enter attempts fail'
+      assert_contains "$out" 'exit-typed exitdialog interrupt=not-needed exit-command=typed agent-state=alive exit=unconfirmed' \
+        'the timeout claimed an Enter was delivered'
+      [ "$input" = $'/exit\nenter\nenter\nenter' ] || fail "the failed submits used the wrong attempt budget: $input"
       ;;
     single-stop)
       expect_code 0 "$rc" 'one verified stop should complete exit'
@@ -434,7 +464,10 @@ cat > "$TMP_ROOT/bin/viewport-stub" <<'SH'
 set -eu
 case "${0##*/}:$1" in
   cmux:list-panes) printf '%s\n' '{"panes":[{"surface_ids":["surface"]}]}' ;;
-  cmux:read-screen) jq -n --rawfile screen "$FM_DIALOG_FIXTURE" '{text: $screen}' ;;
+  cmux:read-screen)
+    if [ "$FM_DIALOG_MODE" = peek ]; then printf '%s\n' "$*" >> "$FM_DIALOG_CASE/reads"; fi
+    jq -n --rawfile screen "$FM_DIALOG_FIXTURE" '{text: $screen}'
+    ;;
   zellij:list-sessions) printf 'fixture\n' ;;
   zellij:--session)
     case "$4" in
@@ -450,9 +483,11 @@ case "${0##*/}:$1" in
   orca:terminal)
     case "$2" in
       read)
+        if [ "$FM_DIALOG_MODE" = peek ]; then printf '%s\n' "$*" >> "$FM_DIALOG_CASE/reads"; fi
         if [ "$5" = --screen ]; then
           jq -n --rawfile screen "$FM_DIALOG_FIXTURE" '{result:{terminal:{source:"screen",tail:($screen|split("\n"))}}}'
         else
+          case "$6" in ''|*[!0-9]*) exit 2 ;; esac
           tail -n "$6" "$FM_DIALOG_FIXTURE" | jq -Rs '{result:{terminal:{source:"stream",tail:split("\n")}}}'
         fi
         ;;
@@ -483,3 +518,36 @@ for mode in cmux zellij zellij-plain orca; do
   assert_absent "$FM_DIALOG_CASE/input" "$mode sent terminal input to the long dialog"
 done
 pass 'cmux, styled and plain Zellij, and Orca refuse doorbell input into a long Claude dialog'
+
+export FM_DIALOG_MODE=peek FM_DIALOG_CASE="$TMP_ROOT/peek" FM_DIALOG_FIXTURE="$TMP_ROOT/peek.screen"
+mkdir "$FM_DIALOG_CASE"
+printf 'composer\n' > "$FM_DIALOG_CASE/phase"
+for ((row=1; row<=60; row++)); do printf 'row %s\n' "$row"; done > "$FM_DIALOG_FIXTURE"
+for backend in herdr cmux zellij orca; do
+  case "$backend" in
+    herdr) target=fm-remote:p1 ;;
+    cmux) target=workspace:surface ;;
+    zellij) target=fixture:1 ;;
+    orca) target=term-claude ;;
+  esac
+  : > "$FM_DIALOG_CASE/reads"
+  rc=0
+  out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_BACKEND_HERDR_ENDPOINT_META="$FM_DIALOG_HOME/state/parent-route/exitdialog.meta" \
+    bash -c '. "$1"; fm_backend_capture "$2" "$3" visible' _ "$ROOT/bin/fm-backend.sh" "$backend" "$target") || rc=$?
+  case "$backend" in
+    herdr|cmux)
+      expect_code 0 "$rc" "$backend should use its default bounded read for a nonnumeric count"
+      case "$backend" in herdr) option='--source recent --lines 200' ;; cmux) option='--scrollback --lines 200' ;; esac
+      assert_contains "$(cat "$FM_DIALOG_CASE/reads")" "$option" "$backend used its full-pane read for an ordinary capture"
+      ;;
+    zellij)
+      expect_code 0 "$rc" 'Zellij should use its default bounded read for a nonnumeric count'
+      [ "$out" = "$(tail -n 40 "$FM_DIALOG_FIXTURE")" ] || fail 'Zellij used its full-pane read for an ordinary capture'
+      ;;
+    orca)
+      expect_code 1 "$rc" 'Orca ordinary capture should fail after the CLI rejects a nonnumeric count'
+      assert_contains "$(cat "$FM_DIALOG_CASE/reads")" '--limit visible' 'Orca used its full-pane read for an ordinary capture'
+      ;;
+  esac
+done
+pass 'ordinary captures keep their line-count behavior and expose no full-pane alias'

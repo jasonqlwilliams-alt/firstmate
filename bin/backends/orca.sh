@@ -196,20 +196,24 @@ fm_backend_orca_worktree_path() {
   printf '%s' "$path"
 }
 
-fm_backend_orca_capture() {  # <terminal-id> <lines|visible>
-  local terminal=$1 lines=${2:-40} out
+fm_backend_orca_capture() {  # <terminal-id> <lines>
+  _fm_backend_orca_capture "$1" "${2:-40}"
+}
+
+_fm_backend_orca_capture() {  # <terminal-id> <lines> [visible]
+  local terminal=$1 lines=$2 scope=${3:-} out
   local -a args=(terminal read --terminal "$terminal")
   fm_backend_orca_tool_check || return 1
-  if [ "$lines" = visible ]; then
+  if [ "$scope" = visible ]; then
     args+=(--screen)
   else
     args+=(--limit "$lines")
   fi
   out=$(orca "${args[@]}" --json) || return 1
-  fm_backend_orca_json_text "$out" "$lines"
+  fm_backend_orca_json_text "$out" "$scope"
 }
 
-fm_backend_orca_json_text() {  # <json> [lines|visible]
+fm_backend_orca_json_text() {  # <json> [visible]
   printf '%s' "$1" | node -e '
 const fs = require("fs");
 const data = JSON.parse(fs.readFileSync(0, "utf8"));
@@ -254,11 +258,12 @@ fm_backend_orca_composer_state() {  # <terminal-id> [expected-label] -> empty|pe
 # fm_backend_orca_composer_snapshot: one composer capture into the snapshot
 # globals (bin/fm-composer-lib.sh "Composer SNAPSHOT").
 fm_backend_orca_composer_snapshot() {  # <terminal-id> [visible]
-  local cap lines=${2:-$FM_COMPOSER_CAPTURE_LINES}
-  cap=$(fm_backend_orca_capture "$1" "$lines") || return 1
+  local cap scope=${2:-} lines=$FM_COMPOSER_CAPTURE_LINES
+  [ "$scope" != visible ] || lines=0
+  cap=$(_fm_backend_orca_capture "$1" "$lines" "$scope") || return 1
   FM_COMPOSER_SNAPSHOT_SCREEN=$cap
   FM_COMPOSER_SNAPSHOT_CURSOR=
-  FM_COMPOSER_SNAPSHOT_CAPS=$(fm_backend_orca_composer_caps "${lines/#visible/0}")
+  FM_COMPOSER_SNAPSHOT_CAPS=$(fm_backend_orca_composer_caps "$lines")
 }
 
 fm_backend_orca_send_key() {  # <terminal-id> <key>

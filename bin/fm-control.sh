@@ -570,10 +570,18 @@ claude_exit_screen_state() {  # [expected-pending]
   fm_backend_guarded_composer_state "$BACKEND" "$T" "$LABEL" "${1:-}" claude
 }
 
+claude_exit_unconfirmed() {  # <interrupt-result> <exit-command-state> <reason> [observed-agent-state]
+  local verb observed=${4:+ agent-state=$4}
+  case "$2" in
+    delivered) verb=exit-delivered ;;
+    typed) verb=exit-typed ;;
+    *) verb=exit-refused ;;
+  esac
+  die "$verb $ID interrupt=$1 exit-command=$2$observed exit=unconfirmed; $3"
+}
+
 claude_exit_dialog_refusal() {  # <interrupt-result> <exit-command-state> [observed-agent-state]
-  local verb=exit-delivered observed=${3:+ agent-state=$3}
-  [ "$2" != not-sent ] || verb=exit-refused
-  die "$verb $ID interrupt=$1 exit-command=$2$observed exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it"
+  claude_exit_unconfirmed "$1" "$2" 'Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it' "${3:-}"
 }
 
 claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
@@ -590,19 +598,20 @@ claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
   fi
   while :; do
     sleep "$POLL"
-    waited=$(awk -v w="$waited" -v p="$POLL" 'BEGIN{printf "%.3f", w + p}')
     state=$(agent_state)
     [ "$state" != dead ] || return 0
     screen=$(claude_exit_screen_state "$cmd")
     [ "$screen" != exit-confirm ] || claude_exit_dialog_refusal "$interrupt_result" "$submission" "$state"
-    awk -v w="$waited" -v t="$EXIT_WAIT" 'BEGIN{exit !(w < t)}' \
-      || die "exit-delivered $ID interrupt=$interrupt_result exit-command=$submission agent-state=$state exit=unconfirmed; the agent did not stop within ${EXIT_WAIT}s"
     if [ "$screen" = pending ] && [ "$state" = alive ] && [ "$attempts" -lt "$EXIT_RETRIES" ]; then
       if fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null 2>&1; then
         submission=delivered
       fi
       attempts=$((attempts + 1))
+      continue
     fi
+    waited=$(awk -v w="$waited" -v p="$POLL" 'BEGIN{printf "%.3f", w + p}')
+    awk -v w="$waited" -v t="$EXIT_WAIT" 'BEGIN{exit !(w < t)}' \
+      || claude_exit_unconfirmed "$interrupt_result" "$submission" "the agent did not stop within ${EXIT_WAIT}s" "$state"
   done
 }
 
