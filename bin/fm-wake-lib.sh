@@ -2335,13 +2335,21 @@ fm_wake_restore_queue() {
   fi
 }
 
+# Presentation dedup keeps the newest row per kind and key, with two identity
+# refinements: every heartbeat collapses to one, and a recorded-endpoint-loss
+# stale (docs/watcher-continuity.md#recorded-endpoint-loss) keeps its own
+# identity beside the ordinary stale wakes for the same window, so neither hides
+# the other. Rows and their window-based keys are never rewritten.
 fm_wake_print_deduped() {
   local file=$1
-  awk -F '\t' '
+  _fm_wake_require_classify
+  awk -F '\t' -v gone="$FM_RECORDED_ENDPOINT_GONE" '
     NF >= 5 {
       dedupe = $3 SUBSEP $4
       if ($3 == "heartbeat") {
         dedupe = "heartbeat"
+      } else if ($3 == "stale" && $5 == "stale: " $4 " (" gone ")") {
+        dedupe = dedupe SUBSEP "endpoint-gone"
       }
       if (!(dedupe in seen)) {
         order[++count] = dedupe
