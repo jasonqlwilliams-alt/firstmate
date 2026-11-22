@@ -3981,7 +3981,7 @@ test_keep_pane_retirement() {
 # candidate teardown, routes through the named lab helper and fleet tripwire.
 test_keep_pane_lab() (
   [ "${FM_TEARDOWN_KEEP_PANE_LAB:-0}" = 1 ] || return 0
-  command -v lsof >/dev/null 2>&1 || fail "keep-pane lab requires lsof"
+  require_lsof_for_case 'keep-pane lab' || return 0
   local case_dir out ws tab pane shell_pid after rc=0 original_path=$PATH arg mode duplicate_ws landed_head
   case_dir=$(make_case keep-pane-real-lab)
   configure_keep_pane_case "$case_dir"
