@@ -432,6 +432,31 @@ test_replacement_and_away_handoff_cannot_reuse_return() (
   pass "replacement sessions and away supervision require their own monitoring cycle"
 )
 
+test_receipt_removal_is_optional() (
+  local home output archived record contract
+  home=$(make_home obstructed-receipt)
+  export FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_ROOT_OVERRIDE="$home"
+  "$ROOT/bin/fm-lock.sh" >/dev/null || fail "fixture could not acquire the fleet lock"
+  printf 'kind=ship\n' > "$home/state/demo.meta"
+  printf 'invalid retirement receipt\n' > "$home/state/demo.pr-poll-retirement"
+  record="$home/state/.last-checkpoint-return"
+  mkdir "$record" || fail "fixture could not obstruct receipt removal"
+
+  output=$("$CHECKPOINT" --seconds 8 2>&1) || fail "receipt removal blocked the checkpoint ($output)"
+  assert_contains "$output" 'rejected unauthenticated PR poll retirement receipts' "receipt removal swallowed the wake"
+  output=$("$ROOT/bin/fm-guard.sh" 2>&1)
+  assert_contains "$output" 'WATCHER DOWN' "an obstructed receipt suppressed the guard alarm"
+
+  contract="$ROOT/bin/fm-afk-contract.sh"
+  "$contract" propose >/dev/null || fail "could not propose away posture"
+  "$contract" confirm >/dev/null || fail "could not confirm away posture"
+  archived=$("$contract" archive) || fail "receipt removal blocked away-posture archival"
+  assert_present "$archived" "away posture was not archived"
+  assert_absent "$home/state/.afk-contract" "away posture remained active"
+  rmdir "$record" || fail "checkpoint wrote into the obstructing directory"
+  pass "an obstructed receipt path leaves wake delivery and away return available"
+)
+
 test_quiet_checkpoint_exits_124_cleanly
 test_signal_passes_through_and_exits_zero
 test_registered_check_uses_preserved_watcher_environment
@@ -444,3 +469,4 @@ test_timeout_after_first_beacon .watcher-down.lock || exit 1
 test_actionable_close_before_first_beacon || exit 1
 test_replaced_receipt_cannot_borrow_successor_mtime || exit 1
 test_replacement_and_away_handoff_cannot_reuse_return || exit 1
+test_receipt_removal_is_optional || exit 1

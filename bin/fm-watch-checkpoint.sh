@@ -50,8 +50,8 @@ checkpoint_session=$(fm_codex_checkpoint_session "$STATE") || checkpoint_session
 attempt_record='' output_dir=''
 trap '[ -z "$attempt_record" ] || rm -f -- "$attempt_record"; [ -z "$output_dir" ] || rm -rf -- "$output_dir"' EXIT
 if [ -n "$checkpoint_session" ]; then
-  rm -f -- "$RETURN_RECORD" || exit 1
-  if { attempt_record=$(mktemp "$RETURN_RECORD.XXXXXX") \
+  if { rm -f -- "$RETURN_RECORD" \
+    && attempt_record=$(mktemp "$RETURN_RECORD.XXXXXX") \
     && exec 3>"$attempt_record" \
     && mv -f -- "$attempt_record" "$RETURN_RECORD"; } 2>/dev/null; then
     attempt_record=
