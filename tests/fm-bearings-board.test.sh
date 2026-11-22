@@ -62,9 +62,15 @@ case "${1-}" in
     exit 0
     ;;
   '')
-    if [ -e "$state/end-before-next-list" ]; then
-      : > "$state/open"
-      rm -f "$state/end-before-next-list"
+    if [ -e "$state/end-before-list" ]; then
+      remaining=$(cat "$state/end-before-list")
+      if [ "$remaining" -eq 1 ]; then
+        : > "$state/open"
+        : > "$state/user-ended"
+        rm -f "$state/end-before-list"
+      else
+        printf '%s\n' "$((remaining - 1))" > "$state/end-before-list"
+      fi
     fi
     printf 'sessions[1]{file,status,url,pending_prompts}:\n'
     if [ -s "$state/open" ]; then
@@ -677,7 +683,7 @@ test_build_reopens_when_an_opened_session_ends_before_listing() {
   data="$home/payload.json"
   board="$home/.lavish/bearings-board.html"
   write_valid_payload "$data"
-  : > "$home/lavish-state/end-before-next-list"
+  printf '1\n' > "$home/lavish-state/end-before-list"
   out=$(run_board "$home" build --reopen "$data") || fail "the raced session build failed: $out"
   assert_contains "$out" "session: reopened" \
     "the build trusted an opened response after the server no longer listed it: $out"
@@ -688,29 +694,29 @@ test_build_reopens_when_an_opened_session_ends_before_listing() {
   pass "an explicit --reopen recovers a session that ends between establish and listing"
 }
 
-test_build_does_not_reopen_a_session_that_ends_before_listing() {
-  local home data out rc sid
-  home=$(make_home establish-list-race-closed)
-  data="$home/payload.json"
-  write_valid_payload "$data"
-  : > "$home/lavish-state/end-before-next-list"
-  : > "$home/lavish-state/calls"
-  set +e
-  out=$(run_board "$home" build "$data" 2>&1)
-  rc=$?
-  set -e
-  [ "$rc" -ne 0 ] || fail "build armed a session that was not listed open: $out"
-  case "$out" in
-    *"session: reopened"*|*"armed: "*|*"bound: "*)
-      fail "build reopened or armed a session that was not listed open: $out" ;;
-  esac
-  if grep -q -- '--reopen' "$home/lavish-state/calls"; then
-    fail "build called lavish-axi --reopen without being asked"
-  fi
-  sid=$(run_lavish_source_id "$home" "$home/.lavish/bearings-board.html")
-  ! run_procevent "$home" list | awk 'NR > 1 { print $1 }' | grep -Fxq "$sid" \
-    || fail "build armed a session that was not listed open"
-  pass "build does not reopen or arm a session that ends before it is listed"
+test_build_reports_a_browser_close_before_either_listing() {
+  local listing home data out sid
+  for listing in 1 2; do
+    home=$(make_home "browser-close-before-list-$listing")
+    data="$home/payload.json"
+    write_valid_payload "$data"
+    printf '%s\n' "$listing" > "$home/lavish-state/end-before-list"
+    out=$(run_board "$home" build "$data" 2>&1) \
+      || fail "build failed after a browser close before listing $listing: $out"
+    assert_contains "$out" "the user closed this board" \
+      "build did not report the browser close before listing $listing: $out"
+    [ -e "$home/lavish-state/user-ended" ] && [ ! -s "$home/lavish-state/open" ] \
+      || fail "build did not leave the board closed after listing $listing"
+    if grep -q -- '--reopen' "$home/lavish-state/calls"; then
+      fail "build called lavish-axi --reopen without being asked"
+    fi
+    sid=$(run_lavish_source_id "$home" "$home/.lavish/bearings-board.html")
+    ! run_decisions "$home" binding "$sid" >/dev/null 2>&1 \
+      || fail "build bound the board after a browser close before listing $listing"
+    ! run_procevent "$home" list | awk 'NR > 1 { print $1 }' | grep -Fxq "$sid" \
+      || fail "build armed the board after a browser close before listing $listing"
+  done
+  pass "build reports a browser close before either listing and leaves the board unarmed"
 }
 
 test_build_refuses_to_arm_when_the_session_stays_ended() {
@@ -974,7 +980,7 @@ test_build_refuses_a_template_without_exactly_one_slot
 test_build_reopens_a_session_the_captain_ended
 test_build_leaves_a_user_ended_session_closed
 test_build_reopens_when_an_opened_session_ends_before_listing
-test_build_does_not_reopen_a_session_that_ends_before_listing
+test_build_reports_a_browser_close_before_either_listing
 test_build_refuses_to_arm_when_the_session_stays_ended
 test_build_starts_a_listener_for_an_already_armed_board
 test_build_drops_decision_cards_whose_subject_already_landed

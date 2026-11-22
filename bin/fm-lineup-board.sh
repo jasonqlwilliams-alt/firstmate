@@ -108,7 +108,14 @@ check_profiles() { # <board|apply> <file>
       (.dispatch | (.rules[].use, .default) | profiles | {kind:"rule",profile:.}) end' "$2")
 }
 command_build() {
-  local data=$1 reopen=${2:-0} board tmp json sid owner cache
+  local reopen= data board tmp json sid owner cache
+  case "${1-}" in
+    --reopen) reopen=$1; shift ;;
+    --*) fail "expected build [--reopen] <file.json>" ;;
+  esac
+  [ "$#" -eq 1 ] || fail "expected build [--reopen] <file.json>"
+  data=$1
+  [ -f "$data" ] || fail "input file is missing"
   validate board "$data"
   check_profiles board "$data"
   cache="$CONFIG/model-benchmarks.json"
@@ -134,15 +141,14 @@ command_build() {
   mv -f -- "$tmp" "$board"
   printf 'board: %s\n' "$board"
   sid=$("$SCRIPT_DIR/fm-procevent-lavish.sh" source-id "$board")
-  if [ "$reopen" -eq 1 ]; then
-    establish_board_session "$board" --reopen
-  else
-    establish_board_session "$board"
-  fi
+  establish_board_session "$board" ${reopen:+"$reopen"}
   if [ "$BOARD_SESSION_REOPENED" = 1 ]; then
     "$SCRIPT_DIR/fm-procevent-lavish.sh" retire "$board" >/dev/null || fail "cannot retire pre-reopen source"
   fi
-  lavish_session_listed_open "$(board_realpath "$board")" || fail "session ended before arm"
+  if ! lavish_session_listed_open "$(board_realpath "$board")"; then
+    report_user_ended_board "$board"
+    fail "session ended before arm"
+  fi
   owner=$(source_owner "$sid")
   if [ -n "$owner" ]; then
     printf 'already-armed: %s\n' "$sid"
@@ -251,17 +257,7 @@ command_apply() {
 }
 case "${1:-}" in
   path) [ "$#" -eq 1 ] || fail "path takes no arguments"; board_path ;;
-  build)
-    shift
-    reopen=0
-    case "${1-}" in
-      --reopen) reopen=1; shift ;;
-      --*) fail "expected build [--reopen] <file.json>" ;;
-    esac
-    [ "$#" -eq 1 ] || fail "expected build [--reopen] <file.json>"
-    [ -f "$1" ] || fail "input file is missing"
-    command_build "$1" "$reopen"
-    ;;
+  build) shift; command_build "$@" ;;
   apply)
     [ "$#" -eq 2 ] || fail "expected apply <file.json>"
     [ -f "$2" ] || fail "input file is missing"

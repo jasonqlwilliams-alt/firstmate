@@ -126,3 +126,13 @@ esac
 lavish-axi 2>/dev/null | grep -F "$BOARD," | grep -q ',open,' \
   && fail "the board build reopened a session the user ended"
 pass "a plain board build leaves a user-ended session closed against real lavish-axi"
+
+out=$(run_board build --reopen "$LAB/payload.json" 2>&1) \
+  || fail "an explicit reopen failed against lavish-axi ${VERSION:-version-unknown}: $out"
+case "$out" in
+  *"session: reopened"*) ;;
+  *) fail "the board build did not report reopening the session: $out" ;;
+esac
+lavish-axi 2>/dev/null | grep -Fq "$BOARD,open," \
+  || fail "lavish-axi ${VERSION:-version-unknown} did not list the explicitly reopened board as open"
+pass "an explicit reopen restores the same board against real lavish-axi"

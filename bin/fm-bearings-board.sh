@@ -681,9 +681,9 @@ publish_detail() {  # <effective.json> <board>
 }
 
 command_build() {
-  local reopen=0
+  local reopen=
   case "${1-}" in
-    --reopen) reopen=1; shift ;;
+    --reopen) reopen=$1; shift ;;
     --*) usage >&2; exit 2 ;;
   esac
   local data=${1-} board json tmp sid extracted effective owner version pre_reopen_owner
@@ -743,16 +743,13 @@ command_build() {
   sid=$("$SCRIPT_DIR/fm-procevent-lavish.sh" source-id "$board") \
     || fail "cannot derive the board source id"
   pre_reopen_owner=$(source_owner "$sid")
-  if [ "$reopen" -eq 1 ]; then
-    establish_board_session "$board" --reopen
-  else
-    establish_board_session "$board"
-  fi
+  establish_board_session "$board" ${reopen:+"$reopen"}
   if [ "$BOARD_SESSION_REOPENED" = 1 ]; then
     "$SCRIPT_DIR/fm-procevent-lavish.sh" retire "$board" >/dev/null \
       || fail "cannot retire the pre-reopen source generation (observed owner: ${pre_reopen_owner:-none})"
   fi
   if ! lavish_session_listed_open "$(board_realpath "$board")"; then
+    report_user_ended_board "$board"
     version=$(lavish-axi --version 2>/dev/null | tr -d '[:space:]')
     fail "the board Lavish session is not listed open immediately before arming (lavish-axi ${version:-version-unknown}); refusing to arm a poll on observed state not-open"
   fi

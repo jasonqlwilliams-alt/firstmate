@@ -36,8 +36,17 @@ lavish_session_listed_open() {  # <canonical-board-path>
   '
 }
 
-lavish_board_live() {  # <establish output> <canonical-board-path>
-  lavish_session_listed_open "$2"
+report_user_ended_board() {
+  local board=$1 status=${2-} out
+  if [ "$status" != user-ended ]; then
+    out=$(lavish-axi "$board" --no-open 2>/dev/null) || return 0
+    status=$(lavish_status_field "$out")
+  fi
+  if [ "$status" = user-ended ]; then
+    printf 'session: closed\n'
+    printf 'the user closed this board; pass --reopen to %s build to open it again\n' "$(basename "$0")"
+    exit 0
+  fi
 }
 
 # Establish the board session and PROVE it is live before anything arms a poll
@@ -48,38 +57,30 @@ lavish_board_live() {  # <establish output> <canonical-board-path>
 # after an explicit reopen, or that is not live for any reason other than
 # user-ended, refuses the build rather than arming a poll that can never attach.
 establish_board_session() {  # <board> [--reopen]
-  local board=$1 allow_reopen=0 real out status version
-  if [ "${2-}" = --reopen ]; then
-    allow_reopen=1
-  elif [ -n "${2-}" ]; then
-    fail "unknown board session option: ${2-}"
-  fi
+  local board=$1 real out status version
   BOARD_SESSION_REOPENED=0
   real=$(board_realpath "$board") || fail "cannot resolve the board path: $board"
   out=$(lavish-axi "$board") || fail "cannot establish the board Lavish session"
   printf '%s\n' "$out"
-  if lavish_board_live "$out" "$real"; then
+  if lavish_session_listed_open "$real"; then
     printf 'session: live\n'
     return 0
   fi
-  status=$(lavish_status_field "$out")
-  if [ "$allow_reopen" -eq 1 ]; then
-    out=$(lavish-axi "$board" --reopen) || fail "cannot reopen the ended board Lavish session"
+  if [ "$#" -eq 2 ]; then
+    out=$(lavish-axi "$@") || fail "cannot reopen the ended board Lavish session"
     printf '%s\n' "$out"
-    if lavish_board_live "$out" "$real"; then
+    if lavish_session_listed_open "$real"; then
       BOARD_SESSION_REOPENED=1
       printf 'session: reopened\n'
       return 0
     fi
     status=$(lavish_status_field "$out")
+    [ "$status" = user-ended ] || report_user_ended_board "$board"
     version=$(lavish-axi --version 2>/dev/null | tr -d '[:space:]')
     fail "the board Lavish session is not live after reopening it (lavish-axi ${version:-version-unknown} reported status ${status:-none}); refusing to arm a poll on an ended session"
   fi
-  if [ "$status" = user-ended ]; then
-    printf 'session: closed\n'
-    printf 'the user closed this board; pass --reopen to %s build to open it again\n' "$(basename "$0")"
-    exit 0
-  fi
+  status=$(lavish_status_field "$out")
+  report_user_ended_board "$board" "$status"
   version=$(lavish-axi --version 2>/dev/null | tr -d '[:space:]')
   fail "the board Lavish session is not live (lavish-axi ${version:-version-unknown} reported status ${status:-none}); refusing to arm a poll on an ended session"
 }
