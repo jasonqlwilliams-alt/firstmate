@@ -1,0 +1,90 @@
+$ orca --version
+exit=0
+1.4.271
+$ orca serve --bind 127.0.0.1 --port 38937 --no-pairing
+orca status --json runtime: {'state': 'ready', 'reachable': True, 'runtimeId': 'f7b76f72-cf5e-42dc-9310-5e492c773f7b'}
+$ bash -c '. ./bin/fm-backend.sh; fm_backend_source orca && fm_backend_orca_worktree_create "$1" endpoint-loss-fixture' firstmate <worktree>/.endpoint-loss-test/live-orca-scope/fixture-repo
+exit=0
+39551c3a-7605-4b72-ad54-1bec9ce264d1::<worktree>/.endpoint-loss-test/live-orca-scope/user/orca/workspaces/fixture-repo/endpoint-loss-fixture	<worktree>/.endpoint-loss-test/live-orca-scope/user/orca/workspaces/fixture-repo/endpoint-loss-fixture
+$ bash -c '. ./bin/fm-backend.sh; fm_backend_source orca && fm_backend_orca_terminal_create "$1" fm-task' firstmate 39551c3a-7605-4b72-ad54-1bec9ce264d1::<worktree>/.endpoint-loss-test/live-orca-scope/user/orca/workspaces/fixture-repo/endpoint-loss-fixture
+exit=0
+term_34a3f10a-94ed-4f64-9804-7d2d079d752f
+$ orca terminal read --terminal term_34a3f10a-94ed-4f64-9804-7d2d079d752f --limit 40 --json
+exit=0
+{
+  "id": "9fb74091-1d3f-400a-9ba4-4f4cae21e61b",
+  "ok": true,
+  "result": {
+    "terminal": {
+      "handle": "term_34a3f10a-94ed-4f64-9804-7d2d079d752f",
+      "status": "running",
+      "tail": [
+        "[fixture@localhost endpoint-loss-fixture]$"
+      ],
+      "truncated": false,
+      "limited": false,
+      "oldestCursor": "0",
+      "nextCursor": "0",
+      "latestCursor": "0",
+      "returnedLineCount": 1,
+      "source": "stream"
+    }
+  },
+  "_meta": {
+    "runtimeId": "f7b76f72-cf5e-42dc-9310-5e492c773f7b"
+  }
+}
+$ orca serve --bind 127.0.0.1 --port 52957 --no-pairing
+orca status --json runtime: {'state': 'ready', 'reachable': True, 'runtimeId': '3aa432e8-421c-4ab6-8a3a-9cb4e58b769b'}
+$ orca terminal read --terminal term_34a3f10a-94ed-4f64-9804-7d2d079d752f --limit 40 --json
+exit=1
+{
+  "id": "c61272c7-c544-46ed-b7f5-996d40d5404c",
+  "ok": false,
+  "error": {
+    "code": "terminal_handle_stale",
+    "message": "terminal_handle_stale",
+    "data": {
+      "nextSteps": [
+        "Terminal handles belong to the Orca server that issued them. If this handle came from a paired server (for example `orca-ide terminal list --environment <server>`), pass the same --environment <server> to this command."
+      ]
+    }
+  },
+  "_meta": {
+    "runtimeId": "3aa432e8-421c-4ab6-8a3a-9cb4e58b769b"
+  }
+}
+$ bash -c '. ./bin/fm-backend.sh; fm_backend_endpoint_state orca "$1" fm-task' firstmate term_34a3f10a-94ed-4f64-9804-7d2d079d752f
+exit=0
+unreadable
+$ bin/fm-watch.sh [orca-handle-unreadable-from-other-runtime]
+polls completed >= 2; watcher stdout=''; wake queue=''; loss marker=None
+watcher stopped by test, exit=1
+$ orca terminal read --terminal term_34a3f10a-94ed-4f64-9804-7d2d079d752f --limit 40 --json
+exit=0
+{
+  "id": "9882dd1e-82ad-472b-87f4-678345bce12e",
+  "ok": true,
+  "result": {
+    "terminal": {
+      "handle": "term_34a3f10a-94ed-4f64-9804-7d2d079d752f",
+      "status": "running",
+      "tail": [
+        "[fixture@localhost endpoint-loss-fixture]$"
+      ],
+      "truncated": false,
+      "limited": false,
+      "oldestCursor": "0",
+      "nextCursor": "0",
+      "latestCursor": "0",
+      "returnedLineCount": 1,
+      "source": "stream"
+    }
+  },
+  "_meta": {
+    "runtimeId": "f7b76f72-cf5e-42dc-9310-5e492c773f7b"
+  }
+}
+Orca server stopped, exit=0
+Orca server stopped, exit=0
+Stopping private Orca child 2280015

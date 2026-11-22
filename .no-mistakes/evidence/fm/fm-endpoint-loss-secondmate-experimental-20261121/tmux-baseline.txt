@@ -1,0 +1,18 @@
+$ tmux -V
+exit=0
+tmux 3.7c
+$ tmux -f /dev/null new-session -d -s mates -n fm-mate -c <worktree>/.endpoint-loss-test/live-tmux-baseline
+exit=0
+$ tmux new-session -d -s mates-dev -n fm-mate -c <worktree>/.endpoint-loss-test/live-tmux-baseline
+exit=0
+$ tmux kill-session -t =mates
+exit=0
+$ tmux list-windows -t =mates-dev -F '#{window_name}'
+exit=0
+fm-mate
+Baseline watcher from 0464e0e2e12c319129f904dc936b6830c68d5a51:
+$ bin/fm-watch.sh [baseline-missing-idle-mate]
+polls completed >= 2; watcher stdout=''; wake queue=''; loss marker=None
+watcher stopped by test, exit=1
+$ tmux kill-server
+exit=0

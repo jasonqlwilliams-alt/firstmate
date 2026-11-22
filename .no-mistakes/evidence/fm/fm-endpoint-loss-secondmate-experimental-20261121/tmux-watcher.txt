@@ -1,0 +1,57 @@
+$ tmux -V
+exit=0
+tmux 3.7c
+$ tmux -f /dev/null new-session -d -s mates -n fm-mate -c <worktree>/.endpoint-loss-test/live-tmux
+exit=0
+$ tmux new-session -d -s mates-dev -n fm-mate -c <worktree>/.endpoint-loss-test/live-tmux
+exit=0
+$ bin/fm-watch.sh [tmux-peer-status]
+signal: <worktree>/.endpoint-loss-test/live-tmux/tmux-home/state/peer.status
+$ ./bin/fm-wake-drain.sh
+exit=0
+1795390976	2	signal	peer.status	signal: <worktree>/.endpoint-loss-test/live-tmux/tmux-home/state/peer.status
+wake annotation: latest wake-EVENT observed at drain, not current state: peer.status: paused: awaiting upstream release
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 2133904.1795390976.3EuUkr
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  2 task(s) in flight, but no live watcher process holds this home lock (last beat: 6s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  After draining queued wakes, use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+$ ./bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 2133904.1795390976.3EuUkr
+exit=0
+$ bin/fm-watch.sh [tmux-idle-and-remote-paused]
+polls completed >= 2; watcher stdout=''; wake queue=''; loss marker=None
+watcher stopped by test, exit=1
+tmux invocations from watcher: ['list-windows -t =mates -F #{window_name}', 'list-windows -t =mates -F #{window_name}']
+$ ./bin/fm-wake-drain.sh
+exit=0
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 2149303.1795390984.WPbCqe
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+$ ./bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 2149303.1795390984.WPbCqe
+exit=0
+$ tmux kill-session -t =mates
+exit=0
+$ tmux list-windows -t =mates-dev -F '#{window_name}'
+exit=0
+fm-mate
+$ bin/fm-watch.sh [tmux-closed-idle-mate]
+watcher exit=0
+stale: mates:fm-mate (the recorded endpoint is gone)
+durable wake queue: 1795390988	3	stale	mates:fm-mate	stale: mates:fm-mate (the recorded endpoint is gone)
+loss marker: tmux:mates:fm-mate	first
+$ ./bin/fm-wake-drain.sh
+exit=0
+1795390988	3	stale	mates:fm-mate	stale: mates:fm-mate (the recorded endpoint is gone)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 2154706.1795390988.gVFk3y
+WARNING: watcher still down (same stale episode; last beat: 2s ago, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+$ ./bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 2154706.1795390988.gVFk3y
+exit=0
+$ bin/fm-watch.sh [tmux-loss-already-acknowledged]
+polls completed >= 2; watcher stdout=''; wake queue=''; loss marker='tmux:mates:fm-mate\tfirst\n'
+watcher stopped by test, exit=1
+$ tmux kill-server
+exit=0

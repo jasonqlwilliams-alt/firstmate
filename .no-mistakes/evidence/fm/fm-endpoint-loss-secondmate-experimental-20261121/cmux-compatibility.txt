@@ -1,0 +1,24 @@
+$ cmux --version
+exit=0
+cmux-tui 0.1.0 (e9815928ecb5b47e2f76b0002cfd8cc6a8d570d2; ghostty ef4f1570d62117ebc51e3b0f07ad4f34032267b6)
+$ cmux-tui server start --session fm-c --socket <worktree>/z/cmux.sock --ephemeral
+$ cmux workspace list --json
+exit=0
+[]
+$ cmux workspace list --json --id-format uuids
+exit=2
+{"code":"usage.invalid","details":{},"message":"unknown flag --id-format for `workspace list`\nusage: cmux-tui workspace list","retryable":false}
+$ bin/fm-watch.sh [cmux-incompatible-inventory]
+polls completed >= 2; watcher stdout=''; wake queue=''; loss marker=None
+watcher stopped by test, exit=1
+cmux invocations from watcher: ['workspace list --json --id-format uuids', 'workspace list --json --id-format uuids', 'workspace list --json --id-format uuids', 'workspace list --json --id-format uuids']
+$ cmux server stop
+exit=0
+accepted    true
+generation  0cb56f38-81bb-4ae2-808f-8c6627f1c44b
+message     local server stopped; durable session topology was preserved
+pid         2319474
+removed     ["<worktree>/z/cmux.sock.spawn-lock"]
+session     fm-c
+status      stopped
+cmux TUI server exit=0

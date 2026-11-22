@@ -1,0 +1,25 @@
+$ herdr --version
+exit=0
+herdr 0.9.5
+Herdr default socket verified inside the disposable XDG config root.
+$ herdr workspace create --label 2ndmate-mate --session default -> default:w1:p1
+$ bin/fm-watch.sh [herdr-present]
+polls completed >= 2; watcher stdout=''; wake queue=''; loss marker=None
+watcher stopped by test, exit=1
+Herdr pane reads by poll beacon: ['2026-11-22 15:40:49.739686032 -0800|pane get w1:p1 --session default', '2026-11-22 15:40:51.787850211 -0800|pane get w1:p1 --session default']
+$ bin/fm-watch.sh [herdr-rearm]
+polls completed >= 2; watcher stdout=''; wake queue=''; loss marker=None
+watcher stopped by test, exit=1
+$ herdr pane close w1:p1 --session default
+exit=0
+{"id":"cli:pane:close","result":{"type":"ok"}}
+$ herdr pane get w1:p1 --session default
+exit=1
+{"error":{"code":"pane_not_found","message":"pane w1:p1 not found"},"id":"cli:pane:get"}
+$ bin/fm-watch.sh [herdr-closed-pane]
+watcher exit=0
+stale: default:w1:p1 (the recorded endpoint is gone)
+durable wake queue: 1795390860	1	stale	default:w1:p1	stale: default:w1:p1 (the recorded endpoint is gone)
+loss marker: herdr:default:w1:p1	first
+$ herdr server stop --session default
+exit=0

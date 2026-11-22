@@ -1,0 +1,56 @@
+$ zellij --version
+exit=0
+zellij 0.44.0
+$ zellij attach -b fm-z
+exit=0
+$ Firstmate Zellij create_task fm-z fm-mate
+1 1
+Zellij terminal inventory: [{"id": 0, "tab_id": 0, "tab_name": "Tab #1"}, {"id": 1, "tab_id": 1, "tab_name": "fm-firstmate-1653ee2c-mate"}]
+$ bash -c '. ./bin/fm-backend.sh; fm_backend_endpoint_state zellij "$1" fm-mate' firstmate fm-z:1
+exit=0
+present
+$ ./bin/fm-peek.sh mate 5
+exit=0
+[fixture@localhost zellij-home]$
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+$ bin/fm-watch.sh [zellij-present]
+polls completed >= 2; watcher stdout=''; wake queue=''; loss marker=None
+watcher stopped by test, exit=1
+$ zellij --session fm-z action rename-tab --tab-id 1 unrelated-tab
+exit=0
+Zellij tab inventory: [{"tab_id": 0, "name": "Tab #1"}, {"tab_id": 1, "name": "unrelated-tab"}]
+$ bash -c '. ./bin/fm-backend.sh; fm_backend_endpoint_state zellij "$1" fm-mate' firstmate fm-z:1
+exit=0
+unreadable
+$ ./bin/fm-peek.sh mate 5
+exit=1
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+$ bin/fm-watch.sh [zellij-foreign-tab]
+polls completed >= 2; watcher stdout=''; wake queue=''; loss marker='zellij:fm-z:1\tfirst\n'
+watcher stopped by test, exit=1
+$ zellij kill-session fm-z
+exit=0
+$ zellij --session fm-z action list-panes --json
+exit=1
+There is no active session!
+$ bash -c '. ./bin/fm-backend.sh; fm_backend_endpoint_state zellij "$1" fm-mate' firstmate fm-z:1
+exit=0
+unreadable
+$ bin/fm-watch.sh [zellij-session-unreadable]
+polls completed >= 2; watcher stdout=''; wake queue=''; loss marker=None
+watcher stopped by test, exit=1
+$ zellij delete-session --force fm-z
+exit=0
+Session: "fm-z" successfully deleted.
