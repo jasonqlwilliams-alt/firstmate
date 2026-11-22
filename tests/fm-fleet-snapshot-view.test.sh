@@ -1271,6 +1271,8 @@ SH
 
 test_cancelled_run_with_registered_green_pr_is_not_terminal_in_flight() {
   local home fakebin out pr other_pr head rebased_head unfetched_head branch state note poll real_env failures=0
+  local registration_case
+  local -x FM_TEST_REAL_CP
   home=$(make_home cancelled-open-pr)
   fakebin=$(make_fakebin "$home")
   pr=https://github.com/kunchenguid/firstmate/pull/46
@@ -1314,16 +1316,72 @@ SH
   chmod +x "$fakebin/no-mistakes"
   fm_write_meta "$state/cancelled.meta" \
     "window=firstmate:fm-cancelled" "worktree=$home/projects/cancelled" \
-    "project=alpha" "harness=claude" "kind=ship" "mode=no-mistakes" "pr=$pr" "pr_head=$head"
+    "project=alpha" "harness=claude" "kind=ship" "mode=no-mistakes" \
+    "spawn_gen=cancellation-gen" "pr=$pr" "pr_head=$head"
   printf 'done [key=validation]: PR %s checks green\nworking: checking fallout\n' "$pr" > "$state/cancelled.status"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   printf '%s' "$out" | jq -e '.valid and .invalidity == {kind:null,ids:[]}
     and .endpoints[0].state == "failed" and .endpoints[0].source == "run-step"' >/dev/null \
     || fail "the latest done event for the registered PR must exempt only the terminal classification: $out"
 
+  # The endpoint verdict stays failed, but the home must remain valid when
+  # the matching green PR registers after metadata has been copied.
+  cp "$state/cancelled.meta" "$home/recorded-meta"
+  FM_TEST_REAL_CP=$(command -v cp)
+  cat > "$fakebin/cp" <<'SH'
+#!/usr/bin/env bash
+set -e
+"$FM_TEST_REAL_CP" "$@"
+if [ "${2:-}" = "$FM_HOME/state/cancelled.meta" ] && [ -f "$FM_HOME/next-meta" ]; then
+  if [ "${FM_TEST_PR_CHURN:-0}" = 1 ]; then
+    "$FM_TEST_REAL_CP" "$3" "$FM_HOME/previous-meta"
+  fi
+  mv "$FM_HOME/next-meta" "$FM_HOME/state/cancelled.meta"
+  if [ -f "$FM_HOME/previous-meta" ]; then
+    mv "$FM_HOME/previous-meta" "$FM_HOME/next-meta"
+  fi
+  "$FM_TEST_REAL_CP" "$FM_HOME/next-status" "$FM_HOME/state/cancelled.status"
+  touch "$FM_HOME/registration-observed"
+fi
+SH
+  chmod +x "$fakebin/cp"
+  for registration_case in first replacement new-head; do
+    case "$registration_case" in
+      first) sed '/^pr[_=]/d' "$home/recorded-meta" > "$state/cancelled.meta" ;;
+      replacement) sed "s|^pr=.*|pr=$other_pr|" "$home/recorded-meta" > "$state/cancelled.meta" ;;
+      new-head) sed "s/^pr_head=.*/pr_head=$rebased_head/" "$home/recorded-meta" > "$state/cancelled.meta" ;;
+    esac
+    : > "$state/cancelled.status"
+    cp "$home/recorded-meta" "$home/next-meta"
+    printf 'done: PR %s checks green\n' "$pr" > "$home/next-status"
+    out=$(PATH="$fakebin:$PATH" FM_HOME="$home" \
+      "$SNAPSHOT" --secondmate-home-summary) || fail "summary failed during PR registration ($registration_case)"
+    [ -f "$home/registration-observed" ] || fail "PR registration fixture did not run ($registration_case)"
+    rm "$home/registration-observed"
+    if ! jq -e '.valid and .invalidity == {kind:null,ids:[]}
+      and .endpoints[0].state == "failed" and .endpoints[0].source == "run-step"' <<< "$out" >/dev/null; then
+      printf 'PR registration (%s): %s\n' "$registration_case" "$(jq -c '{valid,invalidity,endpoints}' <<< "$out")" >&2
+      failures=$((failures + 1))
+    fi
+  done
+
+  # A working task may change registrations on every capture without
+  # preventing the home summary from publishing.
+  cp "$home/run.txt" "$home/cancelled-run.txt"
+  sed '/^  outcome:/d; s/status: cancelled/status: running/' "$home/cancelled-run.txt" > "$home/run.txt"
+  sed "s|^pr=.*|pr=$other_pr|" "$home/recorded-meta" > "$home/next-meta"
+  printf 'working: checks still pending\n' > "$home/next-status"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_TEST_PR_CHURN=1 \
+    "$SNAPSHOT" --secondmate-home-summary) || fail "working PR changes must allow the summary to publish"
+  [ -f "$home/registration-observed" ] || fail "working PR registration fixture did not run"
+  jq -e '.valid and .endpoints[0].state == "working" and .endpoints[0].source == "run-step"' <<< "$out" >/dev/null \
+    || fail "working PR changes must preserve the working observation: $out"
+  rm "$home/next-meta" "$home/registration-observed"
+  mv "$home/cancelled-run.txt" "$home/run.txt"
+  cp "$home/recorded-meta" "$state/cancelled.meta"
+
   # The summary contract requires a matching recorded head and preserves the
   # worker verdict across a cancellation, an active retry, and a newer failure.
-  cp "$state/cancelled.meta" "$home/recorded-meta"
   sed "s/^pr_head=.*/pr_head=$rebased_head/" "$home/recorded-meta" > "$state/cancelled.meta"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   if ! printf '%s' "$out" | jq -e '.invalidity == {kind:"terminal_in_flight",ids:["cancelled"]}
@@ -1351,6 +1409,17 @@ RUN
     printf 'live rebased retry: %s\n' "$(jq -c '{valid,invalidity,endpoints}' <<< "$out")" >&2
     failures=$((failures + 1))
   fi
+  cp "$state/cancelled.meta" "$home/next-meta"
+  cp "$state/cancelled.status" "$home/next-status"
+  sed "s|^pr=.*|pr=$other_pr|" "$home/next-meta" > "$state/cancelled.meta"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" \
+    "$SNAPSHOT" --secondmate-home-summary) || fail "summary failed during PR registration with a live retry"
+  [ -f "$home/registration-observed" ] || fail "retry PR registration fixture did not run"
+  if ! jq -e '.valid and .endpoints[0].state == "done" and .endpoints[0].source == "status-log"' <<< "$out" >/dev/null; then
+    printf 'live retry PR registration: %s\n' "$(jq -c '{valid,invalidity,endpoints}' <<< "$out")" >&2
+    failures=$((failures + 1))
+  fi
+  rm "$fakebin/cp" "$home/registration-observed"
   # The merge marker applies to retry evidence too, and a timed-out evidence
   # read still leaves the already selected worker verdict visible.
   (
