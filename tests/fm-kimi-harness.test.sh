@@ -65,7 +65,14 @@ case "$*" in
 esac
 case "${1:-}" in
   display-message) printf 'firstmate\n'; exit 0 ;;
-  list-windows) exit 0 ;;
+  list-windows)
+    # The exact-window reads ask for ids alongside names: report every window
+    # this fake has created.
+    case "$*" in
+      *window_id*)
+        sed -n 's/^new-window .*-n \([^ ]*\).*/\1/p' "$FM_FAKE_TMUX_CALL_LOG" | awk '{ print "@" NR " " $0 }' ;;
+    esac
+    exit 0 ;;
   has-session|new-session|new-window|kill-window) exit 0 ;;
   send-keys)
     prev=

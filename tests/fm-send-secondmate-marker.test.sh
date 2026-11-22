@@ -59,7 +59,8 @@ case "${1:-}" in
     for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane) printf '╭────╮\n│    │\n╰────╯\n'; exit 0 ;;
-  list-windows) exit 0 ;;
+  # The exact-window reads ask for ids alongside names.
+  list-windows) case "$*" in *window_id*) printf '@1 fm-build\n@2 win\n@3 window\n' ;; esac; exit 0 ;;
 esac
 exit 0
 SH

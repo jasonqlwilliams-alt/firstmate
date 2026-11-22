@@ -62,6 +62,8 @@ case "$*" in
   *display-message*'#{pane_current_command}'*) printf '%s\n' codex ;;
   *display-message*'#{pane_id}'*) printf '%s\n' '%1' ;;
   *display-message*'#{cursor_y}'*) printf '%s\n' 0 ;;
+  # The exact-window reads ask for ids alongside names.
+  *list-windows*window_id*) printf '%s\n' '@1 fm-sm' ;;
   *list-windows*) printf '%s\n' fm-sm ;;
   *capture-pane*) printf '❯\n' ;;
 esac

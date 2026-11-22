@@ -850,7 +850,8 @@ case "${1:-}" in
     esac
     ;;
   capture-pane) printf '❯\n' ;;
-  list-windows) printf '%s\n' fm-sm ;;
+  # The exact-window reads ask for ids alongside names.
+  list-windows) case "$*" in *window_id*) printf '@1 ' ;; esac; printf '%s\n' fm-sm ;;
 esac
 exit 0
 SH

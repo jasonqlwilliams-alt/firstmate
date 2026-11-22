@@ -3743,6 +3743,10 @@ EOF
 if [ "\${1:-}" = display-message ] && [ "\${*: -1}" = '#{pane_pid}' ]; then
   printf '%s\n' '$pid'
 fi
+# The exact-window read confirms the task window in this inventory.
+if [ "\${1:-}" = list-windows ]; then
+  printf '%s\n' '@1 fm-task-x1'
+fi
 exit 0
 EOF
   chmod +x "$case_dir/fakebin/tmux"
