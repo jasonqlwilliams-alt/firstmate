@@ -70,6 +70,8 @@ trap cleanup EXIT
   for ((task=1; task<=24; task++)); do printf '   · Bash(timer %s) · running\n' "$task"; done
   tail -n +2 "$FIXTURE"
 } > "$TMP_ROOT/long.screen"
+tail -n 24 "$TMP_ROOT/long.screen" > "$TMP_ROOT/clipped.screen"
+tail -n 3 "$FIXTURE" > "$TMP_ROOT/choices.screen"
 {
   printf 'Update now (runs npm install)\nSkip until next version\nesc skip\n\n'
   cat "$FIXTURE"
@@ -100,7 +102,6 @@ static void dialog(const char *path) {
   if (!f) exit(2);
   printf("\033[2J\033[H");
   while (fgets(line, sizeof(line), f)) {
-    if (!strcmp(mode, "no-heading") && strstr(line, "will stop when you exit")) continue;
     if (!strcmp(mode, "changed-heading") && strstr(line, "will stop when you exit")) {
       out(" The following unrelated processes will stop when you exit\n"); continue;
     }
@@ -162,13 +163,21 @@ stub_command() {  # <mode>
   local mode=$1 screen=$FIXTURE
   case "$mode" in
     picker-history) screen="$TMP_ROOT/picker-history.screen" ;;
-    restart-initial) mode=initial-dialog; screen="$TMP_ROOT/long.screen" ;;
+    restart-initial|restart-clipped|initial-clipped|doorbell-clipped)
+      mode=initial-dialog
+      screen="$TMP_ROOT/long.screen"
+      ;;
+    exit-clipped) screen="$TMP_ROOT/long.screen" ;;
   esac
   printf '%q %q %q %q %q; exec /bin/bash --noprofile --norc' \
     "$TMP_ROOT/bin/claude" "$TMP_ROOT/pid" "$TMP_ROOT/keys" "$mode" "$screen"
 }
-"$TMUX_BIN" -f /dev/null -L "$SOCKET" new-session -d -s fixture -n sentinel -x 100 -y 40 \
-  -c "$TMP_ROOT/worktree" /bin/bash --noprofile --norc || fail 'tmux fixture failed'
+for session in fixture short; do
+  height=40
+  [ "$session" != short ] || height=24
+  "$TMUX_BIN" -f /dev/null -L "$SOCKET" new-session -d -s "$session" -n sentinel -x 100 -y "$height" \
+    -c "$TMP_ROOT/worktree" /bin/bash --noprofile --norc || fail 'tmux fixture failed'
+done
 "$TMUX_BIN" -f /dev/null -L "$SOCKET" set-option -g automatic-rename off
 "$TMUX_BIN" -f /dev/null -L "$SOCKET" set-option -g allow-rename off
 
@@ -181,10 +190,12 @@ run_fixture() {
     "$control_bin/$command" "$@"
 }
 
-for mode in restart-initial restart exit plain initial-dialog picker-history \
-    no-heading changed-heading no-list no-stay selection-on-2 relabeled extra-choice history history-plain; do
-  target=fixture:fm-exitdialog
-  "$TMUX_BIN" -f /dev/null -L "$SOCKET" new-window -d -t fixture -n fm-exitdialog \
+for mode in restart-initial restart-clipped initial-clipped exit-clipped doorbell-clipped restart exit plain \
+    initial-dialog picker-history changed-heading no-list no-stay selection-on-2 relabeled extra-choice history history-plain; do
+  session=fixture
+  [[ "$mode" != *-clipped ]] || session=short
+  target="$session:fm-exitdialog"
+  "$TMUX_BIN" -f /dev/null -L "$SOCKET" new-window -d -t "$session" -n fm-exitdialog \
     -c "$TMP_ROOT/worktree" /bin/bash --noprofile --norc -c "$(stub_command "$mode")" \
     || fail 'tmux fixture failed'
   i=0
@@ -196,29 +207,45 @@ for mode in restart-initial restart exit plain initial-dialog picker-history \
     "worktree=$TMP_ROOT/worktree" "project=$TMP_ROOT/project"
   : > "$TMP_ROOT/keys"
   rc=0
-  if [[ "$mode" = restart* ]]; then
-    out=$(run_fixture fm-secondmate-restart.sh exitdialog 2>&1) || rc=$?
-  else
-    out=$(run_fixture fm-control.sh exitdialog exit 2>&1) || rc=$?
-  fi
+  case "$mode" in
+    restart*) out=$(run_fixture fm-secondmate-restart.sh exitdialog 2>&1) || rc=$? ;;
+    doorbell-clipped)
+      rec="$TMP_ROOT/001.msg"
+      printf 'schema=fm-task-inbox.v1\n--\nreview the open records\n' > "$rec"
+      out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" bash -c '. "$1"; fm_task_inbox_ring tmux "$2" "$3" fm-exitdialog claude' \
+        _ "$ROOT/bin/fm-task-inbox-lib.sh" "$target" "$rec" 2>&1) || rc=$?
+      ;;
+    *) out=$(run_fixture fm-control.sh exitdialog exit 2>&1) || rc=$? ;;
+  esac
   printf '%s exit=%s: %s\n' "$mode" "$rc" "$out"
   keys=$(od -An -c "$TMP_ROOT/keys" | tr -s ' ' | sed 's/^ //')
   screen=$("$TMUX_BIN" -f /dev/null -L "$SOCKET" capture-pane -p -t "$target" 2>/dev/null || true)
+  if [[ "$mode" = *-clipped ]]; then
+    assert_not_contains "$screen" 'The following will stop when you exit:' 'tmux did not clip the heading'
+    assert_contains "$screen" 'Bash(timer 24)' 'tmux did not retain the bottom of the task list'
+  fi
   case "$mode" in
     plain)
       [ "$rc" -eq 0 ] || fail "a plain exit failed: $out"
       [ "$keys" = '/ e x i t \r' ] || fail "a plain exit sent other keys: $keys"
       ! kill -0 "$pid" 2>/dev/null || fail 'stand-in survived a plain exit'
       ;;
-    restart*|exit|initial-dialog|picker-history)
+    doorbell-clipped)
+      expect_code 1 "$rc" "the clipped dialog should prevent typing the doorbell: $out"
+      [ -z "$keys" ] || fail "the doorbell wrote into the clipped dialog: $keys"
+      assert_contains "$screen" '❯ 1. Exit and stop tasks' 'the doorbell did not leave the clipped dialog open'
+      kill -0 "$pid" 2>/dev/null || fail 'the doorbell stopped the agent'
+      kill -TERM "$pid"
+      ;;
+    restart*|exit*|initial-*|picker-history)
       [ "$rc" -ne 0 ] || fail "$mode reported success with the dialog open"
       assert_contains "$out" 'background-tasks exit confirmation' "$mode did not name the open dialog"
       assert_contains "$screen" '❯ 1. Exit and stop tasks' "$mode did not leave the dialog open"
       expected='/ e x i t \r'
-      case "$mode" in initial-dialog|restart-initial) expected='' ;; esac
+      case "$mode" in initial-*|restart-initial|restart-clipped) expected='' ;; esac
       [ "$keys" = "$expected" ] || fail "$mode expected '$expected', received '$keys'"
       kill -0 "$pid" 2>/dev/null || fail "$mode stopped the agent"
-      if [ "$mode" = initial-dialog ]; then
+      if [[ "$mode" = initial-* ]]; then
         assert_contains "$out" 'exit-refused exitdialog interrupt=not-needed exit-command=not-sent' \
           'the open-dialog refusal claimed the exit command was sent'
       fi
@@ -229,7 +256,7 @@ for mode in restart-initial restart exit plain initial-dialog picker-history \
         expect_code 3 "$rc" 'the restart should report the mate unreached'
         assert_contains "$out" 'unreached: exitdialog:' 'the restart did not report the mate unreached'
       fi
-      if [ "$mode" = restart-initial ]; then
+      if [[ "$mode" = restart-initial || "$mode" = restart-clipped ]]; then
         assert_contains "$screen" 'Bash(timer 24)' 'tmux did not show the long dialog'
         assert_absent "$TMP_ROOT/home/state/exitdialog.inbox" 'the restart queued a steer into the already-open dialog'
       elif [ "$mode" = restart ]; then
@@ -244,7 +271,6 @@ for mode in restart-initial restart exit plain initial-dialog picker-history \
       # Prove each blinded element was really blinded on screen, so a near-miss
       # case cannot pass vacuously against the full dialog.
       case "$mode" in
-        no-heading) assert_not_contains "$screen" 'will stop when you exit' 'heading was not blinded' ;;
         changed-heading) assert_contains "$screen" 'The following unrelated processes will stop when you exit' 'heading was not changed' ;;
         no-list) assert_not_contains "$screen" 'Bash(' 'task listing was not blinded' ;;
         no-stay) assert_not_contains "$screen" '3. Stay' 'third choice was not blinded' ;;
@@ -261,7 +287,7 @@ for mode in restart-initial restart exit plain initial-dialog picker-history \
       kill -TERM "$pid"
       ;;
   esac
-  "$TMUX_BIN" -f /dev/null -L "$SOCKET" has-session -t fixture || fail 'exit removed the terminal session'
+  "$TMUX_BIN" -f /dev/null -L "$SOCKET" has-session -t "$session" || fail 'exit removed the terminal session'
   "$TMUX_BIN" -f /dev/null -L "$SOCKET" kill-window -t "$target"
   rm -f "$TMP_ROOT/pid" "$TMP_ROOT/keys" "$TMP_ROOT/home/state/exitdialog.meta"
 done
@@ -314,7 +340,7 @@ case "$1 $2" in
         done < <(
           case " $* " in
             *' --source visible '*) cat "$FM_DIALOG_FIXTURE" ;;
-            *) tail -n 3 "$FM_DIALOG_FIXTURE" ;;
+            *) tail -n 3 "$FM_DIALOG_FIXTURE"; printf '\nClaude stand-in transcript\n❯ \n' ;;
           esac
         )
         ;;
@@ -357,10 +383,11 @@ fm_write_meta "$meta" 'backend=herdr' 'window=fixture:p1' 'endpoint_task_id=exit
 export FM_DIALOG_HOME="$TMP_ROOT/worktree"
 for mode in dialog long-dialog picker-history dialog-unreadable dialog-after-typing dialog-after-failed-enter \
     retry retry-failure enter-failure single-stop doorbell-before doorbell-before-picker \
-    doorbell-after doorbell-after-long doorbell-after-long-plain; do
+    doorbell-after doorbell-after-long doorbell-after-long-plain doorbell-after-clipped; do
   export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/herdr-$mode"
   case "$mode" in
     long-dialog|doorbell-after-long*) export FM_DIALOG_FIXTURE="$TMP_ROOT/long.screen" ;;
+    doorbell-after-clipped) export FM_DIALOG_FIXTURE="$TMP_ROOT/clipped.screen" ;;
     picker-history|doorbell-before-picker) export FM_DIALOG_FIXTURE="$TMP_ROOT/picker-history.screen" ;;
     *) export FM_DIALOG_FIXTURE="$FIXTURE" ;;
   esac
@@ -447,7 +474,7 @@ printf '%s\n' "${args[*]}" >> "$FM_DIALOG_CASE/remote"
 FM_HOME="$FM_DIALOG_HOME" "$FM_ROOT_OVERRIDE/bin/${args[0]}" "${args[@]:1}"
 SH
 chmod +x "$TMP_ROOT/bin/fake-ssh"
-export FM_DIALOG_MODE=remote-restart FM_DIALOG_CASE="$TMP_ROOT/remote-restart" FM_DIALOG_FIXTURE="$TMP_ROOT/long.screen"
+export FM_DIALOG_MODE=remote-restart FM_DIALOG_CASE="$TMP_ROOT/remote-restart" FM_DIALOG_FIXTURE="$TMP_ROOT/clipped.screen"
 mkdir "$FM_DIALOG_CASE" "$FM_DIALOG_HOME/bin" "$FM_DIALOG_HOME/state/parent-route"
 : > "$FM_DIALOG_HOME/AGENTS.md"
 printf 'dialog\n' > "$FM_DIALOG_CASE/phase"
@@ -497,12 +524,17 @@ viewport() {
   fi
 }
 
+scrollback() {
+  viewport
+  printf '\nClaude stand-in transcript\n❯ \n'
+}
+
 case "${0##*/}:$1" in
   cmux:list-panes) printf '%s\n' '{"panes":[{"surface_ids":["surface"]}]}' ;;
   cmux:read-screen)
     if [ "$FM_DIALOG_MODE" = peek ]; then printf '%s\n' "$*" >> "$FM_DIALOG_CASE/reads"; fi
     case " $* " in
-      *' --scrollback '*) viewport | tail -n 3 ;;
+      *' --scrollback '*) scrollback | tail -n 3 ;;
       *) viewport ;;
     esac | jq -Rs '{text: .}'
     ;;
@@ -526,7 +558,7 @@ case "${0##*/}:$1" in
           viewport | jq -Rs '{result:{terminal:{source:"screen",tail:split("\n")}}}'
         else
           case "$6" in ''|*[!0-9]*) exit 2 ;; esac
-          viewport | tail -n "$6" | jq -Rs '{result:{terminal:{source:"stream",tail:split("\n")}}}'
+          scrollback | tail -n "$6" | jq -Rs '{result:{terminal:{source:"stream",tail:split("\n")}}}'
         fi
         ;;
       send) printf '%s\n' "$*" >> "$FM_DIALOG_CASE/input"; printf '%s\n' '{"ok":true}' ;;
@@ -546,8 +578,10 @@ for mode in cmux zellij zellij-plain orca; do
     zellij*) backend=zellij; target=fixture:1 ;;
     orca) backend=orca; target=term-claude ;;
   esac
-  for when in before after; do
-    export FM_DIALOG_CASE="$TMP_ROOT/capture-$mode-$when"
+  for scenario in long:before long:after clipped:before clipped:after choices:after; do
+    when=${scenario#*:}
+    export FM_DIALOG_CASE="$TMP_ROOT/capture-$mode-${scenario/:/-}"
+    export FM_DIALOG_FIXTURE="$TMP_ROOT/${scenario%:*}.screen"
     mkdir "$FM_DIALOG_CASE"
     rec="$FM_DIALOG_CASE/001.msg"
     printf 'schema=fm-task-inbox.v1\n--\nreview the open records\n' > "$rec"
@@ -556,16 +590,16 @@ for mode in cmux zellij zellij-plain orca; do
       bash -c '. "$1"; fm_task_inbox_ring "$2" "$3" "$4" "" claude' \
       _ "$ROOT/bin/fm-task-inbox-lib.sh" "$backend" "$target" "$rec" || rc=$?
     if [ "$when" = before ]; then
-      expect_code 1 "$rc" "$mode should block typing when the long dialog is already open"
-      assert_absent "$FM_DIALOG_CASE/input" "$mode typed into the long dialog"
+      expect_code 1 "$rc" "$mode $scenario should block typing when the dialog is already open"
+      assert_absent "$FM_DIALOG_CASE/input" "$mode $scenario typed into the dialog"
     else
-      expect_code 5 "$rc" "$mode should withhold Enter when the long dialog appears after typing"
+      expect_code 5 "$rc" "$mode $scenario should withhold Enter when the dialog appears after typing"
       assert_contains "$(cat "$FM_DIALOG_CASE/input")" 'Firstmate instruction waiting' "$mode did not type the doorbell"
       [ "$(wc -l < "$FM_DIALOG_CASE/input")" -eq 1 ] || fail "$mode sent another write after the dialog opened"
     fi
   done
 done
-pass 'cmux, styled and plain Zellij, and Orca refuse doorbell input into a long Claude dialog'
+pass 'cmux, styled and plain Zellij, and Orca refuse doorbell input into full and clipped dialogs'
 
 export FM_DIALOG_MODE=peek FM_DIALOG_CASE="$TMP_ROOT/peek" FM_DIALOG_FIXTURE="$TMP_ROOT/peek.screen"
 mkdir "$FM_DIALOG_CASE"

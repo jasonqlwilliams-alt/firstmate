@@ -42,7 +42,8 @@ It was observed in production on 2026-11-21 and 2026-11-22 during second-mate re
 - the three choices `1. Exit and stop tasks`, `2. Move to background and exit`, and `3. Stay`, with the selection marker `❯` on choice 1, as the last rows on screen.
 
 Firstmate never sends a key to this dialog: Enter would stop the tasks without anyone deciding to, and the key plane cannot move the selection.
-`../../../../../bin/fm-composer-lib.sh` (`fm_composer_claude_exit_confirm_screen`) owns the recognition, which requires every element above at the bottom of the screen, and `../../../../../docs/agent-control.md` owns what exit, the second-mate restart, and the steering doorbell do when they see it.
+`../../../../../bin/fm-composer-lib.sh` (`fm_composer_claude_exit_confirm_screen`) owns the recognition, and `../../../../../docs/agent-control.md` owns the response.
+The guard also refuses input when the viewport begins within the dialog's task list or choices and the exact three choices with the marker on choice 1 are still at the bottom.
 
 ## Composer ghost
 
