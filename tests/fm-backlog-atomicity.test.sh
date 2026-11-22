@@ -2104,15 +2104,18 @@ test_recovery_retry_preserves_incomplete_cleanup_warning() {
 }
 
 test_recovery_finishes_a_close_for_the_same_meta_incarnation() {
-  local case_dir id out state
+  local case_dir id out state url
   id=atomic-heal-same-incarnation-b11
   case_dir=$(make_home heal-same-incarnation)
   add_item "$case_dir" "$id"
   start_item "$case_dir" "$id"
   write_task_meta "$case_dir" "$id" ship no-mistakes "spawn_gen=spawn-one"
   state="$(home_of "$case_dir")/state"
+  url=https://github.com/example/repo/pull/11
+  FM_HOME="$(home_of "$case_dir")" PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-pr-check.sh" "$id" "$url" >/dev/null \
+    || fail "could not register the interrupted task's poll"
   ( umask 077
-    printf '%s\n' https://github.com/example/repo/pull/11 > "$state/$id.pr-poll-closed"
+    printf '%s\n' "$url" > "$state/$id.pr-poll-closed"
     printf '%s\n' https://github.com/example/repo/pull/12 > "$state/.$id.pr-poll-closed.ABC123"
   )
   printf 'id=%s\ndata=%s\nspawn_gen=spawn-one\narg=--note\narg=local%%20main\n' \
@@ -2125,6 +2128,7 @@ test_recovery_finishes_a_close_for_the_same_meta_incarnation() {
     "session start retained the interrupted incarnation's meta"
   assert_absent "$state/$id.backlog-close" \
     "session start retained the completed incarnation's close marker"
+  assert_absent "$state/$id.pr-poll-registration" "session start retained the retired task's registration"
   assert_absent "$state/$id.pr-poll-closed" "session start retained the retired task's closure evidence"
   assert_absent "$state/.$id.pr-poll-closed.ABC123" "session start retained the retired task's staged closure"
   pass "session start finishes a close for the matching meta incarnation"

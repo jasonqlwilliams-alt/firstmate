@@ -537,7 +537,7 @@ case "$*" in
     printf '%s\n' "$*" >> "$FM_HOME/forge-reads"
     touch "$FM_HOME/forge-ready"
     while [ ! -e "$FM_HOME/forge-release" ]; do
-      [ "$SECONDS" -lt "${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}" ] || exit 75
+      [ "$SECONDS" -lt 120 ] || exit 75
       sleep 0.05
     done
     printf 'CLOSED\n'
@@ -566,7 +566,7 @@ if [ "${TEST_WATCH_CAPTURE:-0}" = 1 ] && [ "${*: -1}" = "$FM_HOME/state/rl-close
   && [ ! -e "$FM_HOME/replacement-armed" ]; then
   touch "$FM_HOME/capture-started"
   while [ ! -e "$FM_HOME/replacement-armed" ]; do
-    [ "$SECONDS" -lt "${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}" ] || exit 75
+    [ "$SECONDS" -lt 120 ] || exit 75
     sleep 0.05
   done
 fi
@@ -586,7 +586,7 @@ SH
 if [ ! -e "$FM_HOME/capture-verified" ]; then
   touch "$FM_HOME/invalidated-sweep-finished"
   while [ ! -e "$FM_HOME/capture-verified" ]; do
-    [ "$SECONDS" -lt "${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}" ] || exit 75
+    [ "$SECONDS" -lt 120 ] || exit 75
     sleep 0.05
   done
 fi

@@ -1106,10 +1106,10 @@ fm_pr_poll_record_closed() (
   mv -f -- "$stage" "$record"
 )
 
-fm_pr_poll_closed_cleanup_valid() {
+fm_pr_poll_registration_cleanup_valid() {
   local state=$1 id=$2 artifact device
   fm_pr_task_id_valid "$id" || return 1
-  for artifact in "$state/$id.pr-poll-closed" "$state/.$id.pr-poll-closed."??????; do
+  for artifact in "$state/$id.pr-poll-registration" "$state/$id.pr-poll-closed" "$state/.$id.pr-poll-closed."??????; do
     [ -e "$artifact" ] || [ -L "$artifact" ] || continue
     [ -d "$state" ] && [ ! -L "$state" ] || return 1
     device=$(fm_pr_file_device "$state") || return 1
@@ -1119,8 +1119,8 @@ fm_pr_poll_closed_cleanup_valid() {
   done
 }
 
-fm_pr_poll_closed_remove() {
+fm_pr_poll_registration_remove() {
   local state=$1 id=$2
-  fm_pr_poll_closed_cleanup_valid "$state" "$id" || return 1
-  rm -f -- "$state/.$id.pr-poll-closed."?????? "$state/$id.pr-poll-closed"
+  fm_pr_poll_registration_cleanup_valid "$state" "$id" || return 1
+  rm -f -- "$state/$id.pr-poll-registration" "$state/.$id.pr-poll-closed."?????? "$state/$id.pr-poll-closed"
 }

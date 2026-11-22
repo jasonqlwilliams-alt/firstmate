@@ -1133,8 +1133,8 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path> <authorized-data
     cleanup_incomplete=1
     # shellcheck source=bin/fm-pr-lib.sh
     . "${BASH_SOURCE[0]%/*}/fm-pr-lib.sh"
-    fm_pr_poll_closed_remove "$state" "$id" || {
-      FM_BACKLOG_TRANSITION_ERROR="PR closure evidence for $id could not be removed"
+    fm_pr_poll_registration_remove "$state" "$id" || {
+      FM_BACKLOG_TRANSITION_ERROR="PR poll registration and closure evidence for $id could not be removed"
       return 1
     }
     fm_backlog_atomic_transition remove "$meta" "the interrupted task record" "$state" \

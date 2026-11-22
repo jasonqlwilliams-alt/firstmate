@@ -2295,7 +2295,7 @@ test_busy_closure_publication_keeps_normal_cadence() (
 #!/usr/bin/env bash
 touch "$FM_HOME/forge-ready"
 while [ ! -e "$FM_HOME/forge-release" ]; do
-  [ "$SECONDS" -lt "${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}" ] || exit 75
+  [ "$SECONDS" -lt 120 ] || exit 75
   sleep 0.05
 done
 SH
@@ -2419,14 +2419,14 @@ test_closure_cleanup_tolerates_a_stage_disappearing() (
       rm -- "$stage"
       return 1
     }
-    fm_pr_poll_closed_remove "$state" task-a
+    fm_pr_poll_registration_remove "$state" task-a
   ) || fail "closure cleanup rejected a vanished stage"
   [ ! -e "$stage" ] || fail "the stage did not disappear during validation"
   url=https://github.com/o/r/pull/30
   record="$state/task-a.pr-poll-closed"
   (umask 077; printf '%s\n' "$url" > "$record")
   ln -s "$state/missing-target" "$stage"
-  if fm_pr_poll_closed_remove "$state" task-a; then
+  if fm_pr_poll_registration_remove "$state" task-a; then
     fail "closure cleanup accepted a remaining unsafe stage"
   fi
   [ -L "$stage" ] || fail "closure cleanup removed an unsafe symlink"
@@ -2440,7 +2440,7 @@ test_remote_proxy_teardown_removes_closure_evidence() (
   state="$dir/home/state"
   url=https://github.com/o/r/pull/25
   trap '
-    touch "$dir/home/finish-teardown" "$dir/home/replacement-armed"
+    touch "$dir/home/create-stage" "$dir/home/finish-teardown" "$dir/home/resume-capture" "$dir/home/replacement-armed"
     [ -z "$teardown" ] || wait "$teardown" || true
     [ -z "$watcher" ] || wait "$watcher" || true
   ' EXIT
@@ -2467,17 +2467,37 @@ SH
 if [ "$#" -eq 2 ] && [ "$1" = -f ] && [ "$2" = "$FM_HOME/state/task-a.meta" ]; then
   touch "$FM_HOME/cleanup-gap"
   while [ ! -e "$FM_HOME/finish-teardown" ]; do
-    [ "$SECONDS" -lt "${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}" ] || exit 75
+    [ "$SECONDS" -lt 120 ] || exit 75
     sleep 0.05
   done
 fi
 exec "$TEST_REAL_RM" "$@"
 SH
+  cat > "$dir/fakebin/mktemp" <<'SH'
+#!/usr/bin/env bash
+case "${1:-}" in
+  */.task-a.pr-poll-closed.XXXXXX)
+    touch "$FM_HOME/stage-requested"
+    while [ ! -e "$FM_HOME/create-stage" ]; do
+      [ "$SECONDS" -lt 120 ] || exit 75
+      sleep 0.05
+    done
+    stage=$("$TEST_REAL_MKTEMP" "$@") || exit 1
+    touch "$FM_HOME/stage-created"
+    while [ ! -e "$FM_HOME/resume-capture" ]; do
+      [ "$SECONDS" -lt 120 ] || exit 75
+      sleep 0.05
+    done
+    printf '%s\n' "$stage"
+    ;;
+  *) exec "$TEST_REAL_MKTEMP" "$@" ;;
+esac
+SH
   cat > "$dir/on-state" <<'SH'
 #!/usr/bin/env bash
 touch "$FM_HOME/gap-observed"
 while [ ! -e "$FM_HOME/replacement-armed" ]; do
-  [ "$SECONDS" -lt "${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}" ] || exit 75
+  [ "$SECONDS" -lt 120 ] || exit 75
   sleep 0.05
 done
 SH
@@ -2486,14 +2506,26 @@ SH
 touch "$FM_HOME/gap-observed"
 printf 'stop-cycle\n'
 SH
-  chmod +x "$dir/teardownbin/rm" "$dir/on-state"
+  chmod +x "$dir/teardownbin/rm" "$dir/fakebin/mktemp" "$dir/on-state"
   chmod 0700 "$state/z-stop.check.sh"
   FM_HOME="$dir/home" "$REGISTER" z-stop >/dev/null || fail "could not register the gap-cycle check"
-  FM_HOME="$dir/home" PATH="$dir/fakebin:$BASE_PATH" "$ROOT/bin/fm-inactive-reconcile.sh" scan \
+  TEST_REAL_MKTEMP="$(command -v mktemp)" FM_HOME="$dir/home" PATH="$dir/fakebin:$BASE_PATH" \
+    "$ROOT/bin/fm-inactive-reconcile.sh" scan \
     || fail "could not prime the inactive-outcome scan before retirement"
   touch "$state/home-summary.json"
 
-  TEST_REAL_RM="$(command -v rm)" FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+  TEST_REAL_MKTEMP="$(command -v mktemp)" FM_TEST_GH_LOG="$dir/gh.log" FM_TEST_GH_STATE=CLOSED \
+    FM_TEST_GH_ON_STATE="$dir/on-state" FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=15 \
+    FM_HOME="$dir/home" PATH="$dir/fakebin:$BASE_PATH" \
+    "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 40 >"$dir/watch.log" 2>&1 &
+  watcher=$!
+  for ((i=0; i<200; i++)); do
+    [ ! -e "$dir/home/stage-requested" ] || break
+    sleep 0.05
+  done
+  [ -e "$dir/home/stage-requested" ] || fail "watcher did not start preparing the retiring poll"
+
+  TEST_REAL_RM="$(command -v rm)" TEST_REAL_MKTEMP="$(command -v mktemp)" FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
     FM_SSH_BIN="$dir/fakebin/ssh" FM_PROCEVENT_CLAIM_ROOT="$dir/claims" \
     PATH="$dir/teardownbin:$dir/fakebin:$BASE_PATH" "$TEARDOWN" task-a >"$dir/teardown.out" 2>"$dir/teardown.err" &
   teardown=$!
@@ -2506,24 +2538,27 @@ SH
     && [ ! -e "$state/.task-a.pr-poll-closed.ABC123" ] \
     || fail "did not reach the gap after closure cleanup and before metadata removal"
 
-  FM_TEST_GH_LOG="$dir/gh.log" FM_TEST_GH_STATE=CLOSED \
-    FM_TEST_GH_ON_STATE="$dir/on-state" FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=15 \
-    FM_HOME="$dir/home" PATH="$dir/fakebin:$BASE_PATH" \
-    "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 25 >"$dir/watch.log" 2>&1 &
-  watcher=$!
+  touch "$dir/home/create-stage"
   for ((i=0; i<200; i++)); do
-    [ ! -e "$dir/home/gap-observed" ] || break
+    [ ! -e "$dir/home/stage-created" ] || break
     sleep 0.05
   done
+  [ -e "$dir/home/stage-created" ] || fail "watcher did not create its stage after teardown's cleanup"
   touch "$dir/home/finish-teardown"
-  [ -e "$dir/home/gap-observed" ] || fail "watcher did not reach the gap cycle: $(cat "$dir/watch.log")"
   wait "$teardown" || fail "remote proxy teardown failed: $(cat "$dir/teardown.err")"
   teardown=
   [ ! -e "$state/task-a.meta" ] || fail "remote teardown left proxy metadata"
   [ -f "$state/task-a.check.sh" ] || fail "remote closure cleanup removed the proxy's poll"
   fm_write_meta "$state/task-a.meta" 'kind=secondmate' 'window=remote:task-a' \
-    'remote_host=remote-mac' "remote_root=$dir/remote-root" "home=$dir/replacement-home"
-  run_check_entry "$dir" task-a "$url" >/dev/null || fail "could not arm the replacement proxy's poll"
+    'remote_host=remote-mac' "remote_root=$dir/remote-root" "home=$dir/replacement-home" "pr=$url"
+  touch "$dir/home/resume-capture"
+  for ((i=0; i<200; i++)); do
+    [ ! -e "$dir/home/gap-observed" ] || break
+    sleep 0.05
+  done
+  [ -e "$dir/home/gap-observed" ] || fail "watcher did not reach the gap cycle: $(cat "$dir/watch.log")"
+  TEST_REAL_MKTEMP="$(command -v mktemp)" run_check_entry "$dir" task-a "$url" >/dev/null \
+    || fail "could not arm the replacement proxy's poll"
   touch "$dir/home/replacement-armed"
   wait "$watcher" || fail "watcher failed during remote teardown: $(cat "$dir/watch.log")"
   watcher=
@@ -2534,6 +2569,7 @@ SH
   [ -f "$state/.last-check" ] || fail "a task skipped during retirement left the home-wide cadence overdue"
   fm_pr_poll_artifacts_valid "$state" task-a "$POLL" || fail "replacement proxy did not retain its poll"
   [ ! -e "$state/task-a.pr-poll-closed" ] || fail "the replacement proxy inherited a stale closure"
+  [ ! -s "$dir/gh.log" ] || fail "watcher polled the retired registration before the replacement was armed"
   pass "remote proxy retirement invalidates closures through same-URL re-registration after ID reuse"
 )
 
