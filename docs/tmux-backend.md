@@ -44,6 +44,12 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 
 ## Current behavior and safety
 
+### Exact window reads
+
+tmux resolves a session or window name that is not an exact match by prefix, so a closed `fm-mate` read by name would return a surviving `fm-mate2`.
+Every read of a recorded `session:window` target - screen capture, target existence, composer and busy reads, and the process reads behind agent liveness - first confirms the exact session and window in the session inventory and then reads that window by its stable id, so a closed window reads as missing even when a prefix-named neighbour survives.
+`fm_tmux_exact_target` in `bin/fm-tmux-lib.sh` owns that rule, and `tests/fm-tmux-exact-target.test.sh` is its regression.
+
 ### Agent liveness probe
 
 A target-existence check proves only that the pane exists.

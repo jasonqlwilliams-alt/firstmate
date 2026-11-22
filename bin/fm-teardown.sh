@@ -2163,12 +2163,15 @@ task_pids_under_roots() {  # <scanner> <dir>...
 }
 
 reap_task_backend_process_group() {  # <label>
-  local label=$1 leader leader_start pgid current_pgid own_pgid
+  local label=$1 leader leader_start pgid current_pgid own_pgid target
   if [ "$BACKEND" != tmux ]; then
     echo "warning: lsof is unavailable; cannot resolve a process-group fallback for $BACKEND task $ID" >&2
     return 0
   fi
-  leader=$(tmux display-message -p -t "$T" '#{pane_pid}' 2>/dev/null) || leader=""
+  # Exact recorded window only, so a prefix-named neighbour's process group
+  # is never mistaken for this task's.
+  leader=$(fm_backend_source tmux && target=$(fm_tmux_exact_target "$T") \
+    && tmux display-message -p -t "$target" '#{pane_pid}' 2>/dev/null) || leader=""
   case "$leader" in ''|*[!0-9]*)
     echo "warning: lsof is unavailable; cannot resolve the tmux pane process group for $ID" >&2
     return 0

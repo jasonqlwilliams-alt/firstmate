@@ -73,7 +73,8 @@ case "${1:-}" in
       LC_ALL=C awk '{gsub(/\033\[[0-9;]*m/, ""); print}' "$f" 2>/dev/null
     fi
     exit 0 ;;
-  list-windows) exit 0 ;;
+  # The live window inventory the exact-window reads confirm membership in.
+  list-windows) printf '@1 win\n'; exit 0 ;;
 esac
 exit 1
 SH

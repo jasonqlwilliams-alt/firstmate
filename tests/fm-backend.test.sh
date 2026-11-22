@@ -681,7 +681,8 @@ case "${1:-}" in
       printf '╭────╮\n│    │\n╰────╯\n'
     fi
     exit 0 ;;
-  list-windows) exit 0 ;;
+  # The live window inventory the exact-window reads confirm membership in.
+  list-windows) printf '@1 win\n'; exit 0 ;;
 esac
 exit 0
 SH
@@ -762,6 +763,7 @@ make_peek_fakebin() {  # <dir> <capture-output> -> echoes fakebin dir
 set -u
 { printf 'tmux'; for a in "\$@"; do printf '\\x1f%s' "\$a"; done; printf '\\n'; } >> "\${FM_TMUX_LOG:?}"
 case "\${1:-}" in
+  list-windows) printf '@7 win-neighbour\\n@3 win\\n' ;;
   capture-pane) cat "$dir/capture.out" ;;
 esac
 exit 0
@@ -770,33 +772,34 @@ SH
   printf '%s\n' "$fb"
 }
 
-test_peek_conformance_old_vs_new() {
-  local old_bin fb log_old log_new home out_old out_new payload neutral_root
+# The byte-identical old-vs-new tmux log comparison this test used to run
+# covered the P1 backend extraction. Exact-window targeting deliberately
+# changed that sequence - the capture first confirms the exact recorded window
+# in the session inventory and then reads it by its stable window id, so a
+# closed window can no longer be resolved by prefix to a neighbour - so the
+# current contract is asserted directly instead.
+test_peek_tmux_contract() {
+  local fb log home out payload neutral_root
   payload=$'line one\nline two\ncaptain on deck'
-  old_bin=$(build_old_bin peek-old)
   fb=$(make_peek_fakebin "$TMP_ROOT/peek-fake" "$payload")
   home="$TMP_ROOT/peek-home"; mkdir -p "$home/state"
-  log_old="$TMP_ROOT/peek-old.log"; log_new="$TMP_ROOT/peek-new.log"
-  # A fresh non-git dir keeps fm-guard.sh's worktree-tangle check inert (it warns
-  # to stderr, discarded below) - neither run needs FM_ROOT for anything beyond
-  # that guard, since STATE/HOME are already overridden directly.
+  log="$TMP_ROOT/peek-new.log"
+  # A fresh non-git dir keeps fm-guard.sh's worktree-tangle check inert.
   neutral_root="$TMP_ROOT/peek-neutral-root"; mkdir -p "$neutral_root"
 
-  : > "$log_old"
-  out_old=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" FM_TMUX_LOG="$log_old" \
-    "$old_bin/bin/fm-peek.sh" "sess:win" 25 2>/dev/null)
-  : > "$log_new"
-  out_new=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" FM_TMUX_LOG="$log_new" \
+  : > "$log"
+  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" FM_TMUX_LOG="$log" \
     "$ROOT/bin/fm-peek.sh" "sess:win" 25 2>/dev/null)
 
-  [ "$out_old" = "$out_new" ] || fail "fm-peek output differs old vs new"$'\n'"--- old ---"$'\n'"$out_old"$'\n'"--- new ---"$'\n'"$out_new"
-  [ "$out_new" = "$payload" ] || fail "fm-peek did not pass through the fake capture-pane output exactly"
-  diff -u "$log_old" "$log_new" > "$TMP_ROOT/peek-diff.txt" 2>&1 \
-    || fail "fm-peek: tmux command log differs old vs new"$'\n'"$(cat "$TMP_ROOT/peek-diff.txt")"
-  assert_contains "$(cat "$log_new")" $'\x1f''capture-pane'$'\x1f''-p'$'\x1f''-t'$'\x1f''sess:win'$'\x1f''-S'$'\x1f''-25' \
-    "fm-peek did not call capture-pane -p -t <target> -S -<lines> exactly"
+  [ "$out" = "$payload" ] || fail "fm-peek did not pass through the fake capture-pane output exactly"
+  assert_contains "$(cat "$log")" $'\x1f''list-windows'$'\x1f''-t'$'\x1f''=sess' \
+    "fm-peek did not confirm the exact recorded session's window inventory"
+  assert_contains "$(cat "$log")" $'\x1f''capture-pane'$'\x1f''-p'$'\x1f''-t'$'\x1f''@3'$'\x1f''-S'$'\x1f''-25' \
+    "fm-peek did not capture the exact window by its id with -S -<lines>"
+  assert_not_contains "$(cat "$log")" $'\x1f''-t'$'\x1f''sess:win'$'\x1f' \
+    "fm-peek must not read the recorded window by its prefix-resolvable name"
 
-  pass "fm-peek.sh: capture-pane invocation and output are byte-identical old vs new"
+  pass "fm-peek.sh: captures exactly the recorded window by id after confirming its membership"
 }
 
 # --- old vs new: fm-spawn.sh --------------------------------------------------
@@ -1163,7 +1166,7 @@ test_meta_get_and_backend_of_meta
 test_resolve_selector_three_forms
 test_resolve_selector_retains_metadata
 test_send_tmux_contract
-test_peek_conformance_old_vs_new
+test_peek_tmux_contract
 test_spawn_symlinked_project_prefix_avoids_false_refusal
 test_teardown_conformance_old_vs_new
 test_spawn_refuses_unknown_backend_flag

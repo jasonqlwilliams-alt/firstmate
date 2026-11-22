@@ -1100,7 +1100,10 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
   local backend=$1 target=$2 expected_label=${3:-} session pane
   case "$backend" in
     tmux)
-      tmux display-message -p -t "$target" '#{pane_id}' >/dev/null 2>&1
+      # Exact recorded session and window only: a closed window must not
+      # read as present through a prefix-named neighbour.
+      fm_backend_source tmux || return 1
+      fm_tmux_exact_target "$target" >/dev/null || return 1
       ;;
     herdr)
       fm_backend_source herdr || return 2

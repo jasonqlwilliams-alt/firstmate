@@ -56,6 +56,72 @@
 # so the tmux and herdr adapters cannot drift apart on what counts as ghost text.
 fm_tmux_strip_ghost() { fm_composer_strip_ghost; }
 
+# fm_tmux_exact_target: the read boundary for a recorded `session:window`
+# target. tmux resolves a session or window NAME that is not an exact match by
+# prefix (and, for a pane read, an absent window can fall back to another
+# pane), so a closed `fm-mate` read by name silently returns a surviving
+# `fm-mate2`. This confirms the exact session and window in a successful
+# session inventory - the same exact-membership rule
+# fm_backend_tmux_agent_state applies - and prints that window's stable
+# `@<id>` for the read to target instead of the name. A window id cannot be
+# prefix-matched and stays dot-safe where a `.`-bearing name would be parsed
+# as a pane suffix.
+#
+# Targets that are not a recorded `session:window` name pass through
+# unchanged: one with no session part (an already-resolved `@<id>`, a `%<id>`
+# pane, or a caller's own pane handle), and an explicit window index or id
+# after the colon (fm-peek's `session:window` escape hatch).
+#
+# Status: 0 resolved (target printed); 1 the exact session or window is
+# definitively absent; 2 the target is malformed or the inventory could not be
+# read, so callers can keep a transient tmux failure distinct from absence.
+fm_tmux_exact_target() {  # <target>
+  local target=${1:-} session window selector inventory rc line id name
+  case "$target" in
+    '') return 2 ;;
+    *:*:*|:*|*:) return 2 ;;
+    *:*) ;;
+    *) printf '%s' "$target"; return 0 ;;
+  esac
+  session=${target%%:*}
+  window=${target#*:}
+  case "$window" in
+    @*|%*) printf '%s' "$target"; return 0 ;;
+    *[!0-9]*) ;;
+    *) printf '%s' "$target"; return 0 ;;
+  esac
+  case "$session" in
+    \$*) selector=$session ;;
+    *) selector="=$session" ;;
+  esac
+  # A space, not a tab: tmux prints a tab in a format as `_`. The id never
+  # contains a space, so everything after the first space is the name.
+  if inventory=$(LC_ALL=C tmux list-windows -t "$selector" -F '#{window_id} #{window_name}' 2>&1); then
+    rc=0
+  else
+    rc=$?
+  fi
+  if [ "$rc" -ne 0 ]; then
+    case "$inventory" in
+      *"can't find session:"*|*"no server running on "*|*"error connecting to "*" (No such file or directory)"|*"error connecting to "*" (Connection refused)")
+        return 1
+        ;;
+    esac
+    return 2
+  fi
+  while IFS= read -r line; do
+    id=${line%% *}
+    name=${line#* }
+    [ "$name" = "$window" ] || continue
+    case "$id" in @*) ;; *) return 2 ;; esac
+    printf '%s' "$id"
+    return 0
+  done <<EOF
+$inventory
+EOF
+  return 1
+}
+
 # --- tmux composer capture and capability primitives ------------------------
 #
 # These four functions are the ONLY tmux-specific composer knowledge left:
@@ -69,13 +135,17 @@ fm_tmux_strip_ghost() { fm_composer_strip_ghost; }
 # capture is consumed internally by the classifier and is NEVER surfaced
 # (fm-peek and every human/LLM-facing path stay plain).
 fm_tmux_composer_capture() {  # <target>
-  tmux capture-pane -e -p -t "$1" -S 0 -E - 2>/dev/null
+  local target
+  target=$(fm_tmux_exact_target "$1") || return 1
+  tmux capture-pane -e -p -t "$target" -S 0 -E - 2>/dev/null
 }
 
 # fm_tmux_composer_cursor_row: the pane's cursor row, zero-based, relative to
 # the visible pane - tmux's genuine primitive that no other backend has.
 fm_tmux_composer_cursor_row() {  # <target>
-  tmux display-message -p -t "$1" '#{cursor_y}' 2>/dev/null
+  local target
+  target=$(fm_tmux_exact_target "$1") || return 1
+  tmux display-message -p -t "$target" '#{cursor_y}' 2>/dev/null
 }
 
 # fm_tmux_composer_caps: the tmux capability descriptor - static data, not
@@ -100,7 +170,8 @@ fm_tmux_composer_caps() {
 # Prints "pi<TAB>idle" or "pi<TAB>working"; exits 1 when the pane is not a
 # live pi.
 fm_tmux_composer_identity() {  # <target>
-  local target=$1 tty pgid tpgid comm found=0 status
+  local target tty pgid tpgid comm found=0 status
+  target=$(fm_tmux_exact_target "$1") || return 1
   tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || tty=
   case "$tty" in
     /dev/*)
@@ -146,10 +217,12 @@ fm_tmux_composer_state() {  # <target> -> empty|pending|pending-unproven|unknown
 # read, into the snapshot globals (bin/fm-composer-lib.sh "Composer
 # SNAPSHOT"); fails when either read fails or the cursor row is not numeric.
 fm_tmux_composer_snapshot() {  # <target>
-  local cy pane
-  cy=$(fm_tmux_composer_cursor_row "$1") || return 1
+  local target cy pane
+  # Resolve once so the cursor row and the screen come from the same window.
+  target=$(fm_tmux_exact_target "$1") || return 1
+  cy=$(fm_tmux_composer_cursor_row "$target") || return 1
   case "$cy" in ''|*[!0-9]*) return 1 ;; esac
-  pane=$(fm_tmux_composer_capture "$1") || return 1
+  pane=$(fm_tmux_composer_capture "$target") || return 1
   FM_COMPOSER_SNAPSHOT_CURSOR=$cy
   FM_COMPOSER_SNAPSHOT_SCREEN=$pane
   FM_COMPOSER_SNAPSHOT_CAPS=$(fm_tmux_composer_caps)
@@ -192,7 +265,8 @@ fm_tmux_composer_classify_snapshot() {  # <target>
 # matches fm_tmux_composer_identity, so a pane whose agent exited to a shell has
 # no Cursor foreground process and gets no reclassification.
 fm_tmux_pane_is_cursor() {  # <target>
-  local target=$1 tty pid pgid tpgid comm args argv0
+  local target tty pid pgid tpgid comm args argv0
+  target=$(fm_tmux_exact_target "$1") || return 1
   tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || return 1
   case "$tty" in /dev/*) ;; *) return 1 ;; esac
   while read -r pid pgid tpgid comm; do
@@ -217,7 +291,8 @@ fm_pane_input_pending() {  # <target>
 # fm_pane_is_busy: 0 if the pane's last few non-blank lines show a busy footer
 # (an agent mid-turn). Scans a 40-line tail like fm-watch.sh.
 fm_pane_busy_state() {  # <target> [harness] -> busy|idle|unknown
-  local win=$1 harness=${2:-} tail40 visible
+  local win harness=${2:-} tail40 visible
+  win=$(fm_tmux_exact_target "$1") || { printf 'unknown'; return 0; }
   tail40=$(tmux capture-pane -p -t "$win" -S -40 2>/dev/null) \
     || { printf 'unknown'; return 0; }
   visible=$(printf '%s' "$tail40" | grep -v '^[[:space:]]*$' | tail -12)
