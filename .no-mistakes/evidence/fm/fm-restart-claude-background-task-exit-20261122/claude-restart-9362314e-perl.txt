@@ -1,0 +1,61 @@
+Firstmate 9362314eb12f1bf808c459143c83fa21e2265443
+Claude Code 2.1.330 and disposable local terminal sessions
+The model endpoint is a loopback emulator using synthetic inputs.
+
+Exit a local Claude pane while the Perl-bounded tmux viewport read stalls
+=========================================================================
+
+$ fm-control.sh exitdialog exit
+error: exit-typed exitdialog interrupt=not-needed exit-command=typed exit=unconfirmed; the Claude viewport read timed out
+Exit status: 1
+
+Timeout mechanism: perl
+Elapsed: 8389 ms
+Injected viewport delay: 9000 ms
+Delayed capture PID: 372332
+Delayed capture alive when lifecycle returned: False
+Delayed capture completed: False
+
+Audited terminal writes:
+send-keys -t fixture:fm-exitdialog -l /exit
+
+Final terminal screen:
+ ▐▛███▛█   Claude Code v2.1.330
+▝▜██████▀  Sonnet 5.5 · API Usage Billing
+ ▝▝   ▝▝   {run-worktree}/.fmlive/perl/mate
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ❯ /exit                       Exit the CLI
+    /context                    Show what fills the context
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ /exit
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+
+Scenario result: PASS

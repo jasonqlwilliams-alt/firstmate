@@ -1,0 +1,351 @@
+Firstmate 9362314eb12f1bf808c459143c83fa21e2265443
+Claude Code 2.1.330, real tmux and Herdr 0.9.5, and OpenSSH on loopback.
+The Claude model API was a loopback emulator that issued real Claude Bash tool calls on synthetic records and timers.
+Firstmate tmux and Herdr terminal writes were audited before forwarding. Fixture operator setup input was recorded separately from Firstmate input.
+
+Restart a local Claude mate after it saves work and cleans up its timer
+=======================================================================
+
+$ fm-secondmate-restart.sh exitdialog
+restarted: exitdialog (claude)
+summary: 1 of 1 restarted, 0 nudged, 0 unreached
+Exit status: 0
+
+Original Claude PID: 312025
+Replacement Claude PID: 326832
+Synthetic timer PID 314649 alive after restart: False
+
+Delivered save request:
+[fm-from-firstmate]⁣corr=eef48a6d6c4b5c90 Firstmate was updated and I am about to restart your agent so it comes up on the current instructions and launch-time settings, which drops your conversation but keeps every durable record. Before that, persist the open work you are holding only in this conversation, following the /stow skill's "Open-record persistence" section and nothing else from that skill: file a task for each open record that exists only in this conversation, including any captain call you had formed but never registered, and correct any task whose status no longer reflects what you now know. Do NOT run the memory, learnings, or captain-preference sweeps. Also stop every background shell task you started, such as timers or sleep loops, because a running one makes the exit stop at a confirmation that the restart will not answer. Then reply on your parent channel saying it is done, or saying what you deliberately left alone and why.
+
+Correlated reply:
+done [corr=eef48a6d6c4b5c90]: Synthetic open work saved. Timer disposition is clean. (via-helper)
+
+
+Audited terminal writes:
+send-keys -t fixture:fm-exitdialog -l : Firstmate instruction waiting: list '$LAB/local/parent/state/exitdialog.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '$LAB/local/parent/state/exitdialog.inbox'/handled/.
+send-keys -t fixture:fm-exitdialog Enter
+send-keys -t fixture:fm-exitdialog -l /exit
+send-keys -t fixture:fm-exitdialog Enter
+send-keys -t fixture:fm-exitdialog export GOTMPDIR=/tmp/fm-exitdialog/gotmp Enter
+send-keys -t fixture:fm-exitdialog -l unset TRACEPARENT; export FM_CLASSIFY_RESERVED_KEY_PREFIXES='pending-reply-'; FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_PUBLIC_FOLLOWUP_PRIMARY_HOME='$LAB/local/parent' FM_HOME='$LAB/local/mate' FM_TRACE_CONTEXT=off FM_SUPERVISION_MODEL=autoarm CLAUDE_CONFIG_DIR='$LAB/local/account/claude' env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false CLAUDE_CODE_SEND_FEEDBACK=0 '~/.local/bin/claude' --dangerously-skip-permissions --settings '{"feedbackDrafts":"off","attribution":{"commit":"","pr":"","sessionUrl":false}}' "$('$LAB/code/bin/fm-operational-input.sh' encode launch-brief < '$LAB/local/parent/data/exitdialog/brief.md')"
+send-keys -t fixture:fm-exitdialog Enter
+
+Scenario result: PASS
+
+Restart a local Claude mate whose synthetic timer survives the save reply
+=========================================================================
+
+$ fm-secondmate-restart.sh exitdialog
+unreached: exitdialog: the restart outcome is unknown: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+summary: 0 of 1 restarted, 0 nudged, 1 unreached
+Exit status: 3
+
+Synthetic timer PID 330994 still alive: True
+Claude PID before and after guard: 326832, 326832
+Correlated reply:
+done [corr=eef48a6d6c4b5c90]: Synthetic open work saved. Timer disposition is clean. (via-helper)
+done [corr=add306c6d5f19c93]: Synthetic open work saved. Timer disposition is keep. (via-helper)
+
+
+Audited terminal writes:
+send-keys -t fixture:fm-exitdialog -l : Firstmate instruction waiting: list '$LAB/local/parent/state/exitdialog.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '$LAB/local/parent/state/exitdialog.inbox'/handled/.
+send-keys -t fixture:fm-exitdialog Enter
+send-keys -t fixture:fm-exitdialog -l /exit
+send-keys -t fixture:fm-exitdialog Enter
+
+Final terminal screen:
+ ▝▝   ▝▝   $LAB/local/mate
+
+
+❯ FIRSTMATE_OP: v1 launch-brief: Synthetic validation charter
+
+● Synthetic local validation turn complete.
+
+✻ Worked for 0s · done 1:37 PM
+
+❯ LIVE_TEST_CREATE_TIMER
+
+  Ran 1 shell command
+
+● Synthetic local validation turn complete.
+
+✻ Sautéed for 1s · done 1:37 PM
+
+❯ : Firstmate instruction waiting: list '{run-worktree}
+  H3JR/.fmlive/local/parent/state/exitdialog.inbox'/*.msg and, in numeric order, read and act on each, then mv
+  each handled file to '$LAB/loca
+  l/parent/state/exitdialog.inbox'/handled/.
+
+  Ran 1 shell command
+
+● Synthetic local validation turn complete.
+
+✻ Worked for 1s · done 1:38 PM · 1 shell still running
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  Background work is running
+  The following will stop when you exit:
+
+  shell · Synthetic background timer
+
+  ❯ 1. Exit and stop tasks
+    2. Move to background and exit
+    3. Stay
+
+  Enter to confirm · Esc to cancel
+
+Scenario result: PASS
+
+Retry the local Claude restart while the timer dialog is already open
+=====================================================================
+
+$ fm-secondmate-restart.sh exitdialog
+unreached: exitdialog: Claude is showing its background-tasks exit confirmation and needs manual recovery
+summary: 0 of 1 restarted, 0 nudged, 1 unreached
+Exit status: 3
+
+Pending inbox records before and after retry: [], []
+
+Audited terminal writes:
+(none)
+
+Final terminal screen:
+ ▝▝   ▝▝   $LAB/local/mate
+
+
+❯ FIRSTMATE_OP: v1 launch-brief: Synthetic validation charter
+
+● Synthetic local validation turn complete.
+
+✻ Worked for 0s · done 1:37 PM
+
+❯ LIVE_TEST_CREATE_TIMER
+
+  Ran 1 shell command
+
+● Synthetic local validation turn complete.
+
+✻ Sautéed for 1s · done 1:37 PM
+
+❯ : Firstmate instruction waiting: list '{run-worktree}
+  H3JR/.fmlive/local/parent/state/exitdialog.inbox'/*.msg and, in numeric order, read and act on each, then mv
+  each handled file to '$LAB/loca
+  l/parent/state/exitdialog.inbox'/handled/.
+
+  Ran 1 shell command
+
+● Synthetic local validation turn complete.
+
+✻ Worked for 1s · done 1:38 PM · 1 shell still running
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  Background work is running
+  The following will stop when you exit:
+
+  shell · Synthetic background timer
+
+  ❯ 1. Exit and stop tasks
+    2. Move to background and exit
+    3. Stay
+
+  Enter to confirm · Esc to cancel
+
+Scenario result: PASS
+
+Steer a local Claude mate with the timer dialog already open
+============================================================
+
+$ fm-send.sh exitdialog 'Synthetic steering probe'
+WARNING: watcher still down (same stale episode; last beat: 40s ago, grace 300s) - full banner already printed this episode.
+fm-send: doorbell not typed because the screen in fixture:fm-exitdialog blocked the doorbell; the steer is durably recorded at $LAB/local/parent/state/exitdialog.inbox/003.msg and the watcher will retry, then escalate it as a stuck steer
+Exit status: 0
+
+Pending inbox records after steer: ['003.msg']
+Synthetic timer still alive: True
+
+Audited terminal writes:
+(none)
+
+Final terminal screen:
+ ▝▝   ▝▝   $LAB/local/mate
+
+
+❯ FIRSTMATE_OP: v1 launch-brief: Synthetic validation charter
+
+● Synthetic local validation turn complete.
+
+✻ Worked for 0s · done 1:37 PM
+
+❯ LIVE_TEST_CREATE_TIMER
+
+  Ran 1 shell command
+
+● Synthetic local validation turn complete.
+
+✻ Sautéed for 1s · done 1:37 PM
+
+❯ : Firstmate instruction waiting: list '{run-worktree}
+  H3JR/.fmlive/local/parent/state/exitdialog.inbox'/*.msg and, in numeric order, read and act on each, then mv
+  each handled file to '$LAB/loca
+  l/parent/state/exitdialog.inbox'/handled/.
+
+  Ran 1 shell command
+
+● Synthetic local validation turn complete.
+
+✻ Worked for 1s · done 1:38 PM · 1 shell still running
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  Background work is running
+  The following will stop when you exit:
+
+  shell · Synthetic background timer
+
+  ❯ 1. Exit and stop tasks
+    2. Move to background and exit
+    3. Stay
+
+  Enter to confirm · Esc to cancel
+
+Scenario result: PASS
+
+Exit a local Claude pane while the Perl-bounded tmux viewport read stalls
+=========================================================================
+
+$ fm-control.sh exitdialog exit
+error: exit-typed exitdialog interrupt=not-needed exit-command=typed exit=unconfirmed; the Claude viewport read timed out
+Exit status: 1
+
+Timeout mechanism: perl
+Elapsed: 8389 ms
+Injected viewport delay: 9000 ms
+Delayed capture PID: 372332
+Delayed capture alive when lifecycle returned: False
+Delayed capture completed: False
+
+Audited terminal writes:
+send-keys -t fixture:fm-exitdialog -l /exit
+
+Final terminal screen:
+ ▐▛███▛█   Claude Code v2.1.330
+▝▜██████▀  Sonnet 5.5 · API Usage Billing
+ ▝▝   ▝▝   $LAB/perl/mate
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ❯ /exit                       Exit the CLI
+    /context                    Show what fills the context
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ /exit
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+
+Scenario result: PASS
+
+Restart a loopback SSH Claude mate with the timer dialog open in Herdr
+======================================================================
+
+$ fm-secondmate-restart.sh exitremote
+unreached: exitremote: Claude is showing its background-tasks exit confirmation and needs manual recovery
+summary: 0 of 1 restarted, 0 nudged, 1 unreached
+Exit status: 3
+
+$ fm-on.sh exitremote fm-remote-secondmate-control.sh state exitremote --bound-home
+alive
+
+$ fm-on.sh exitremote fm-remote-secondmate-control.sh observe exitremote --exit-dialog
+exit-confirm
+End-to-end elapsed: 5003 ms
+Same observation with restart’s five-second bound: exit 0 exit-confirm
+
+Remote pending inbox records before and after restart: [], []
+Synthetic timer PID 616326 still alive: True
+
+Audited terminal writes:
+(none)
+
+Final terminal screen:
+ ▐▛███▛█   Claude Code v2.1.330
+▝▜██████▀  Sonnet 5.5 · API Usage Billing
+ ▝▝   ▝▝   /…/e95238b70e4e/01M81ZR40ZMARRH996HWJTH3JR/.fmlive/ssh-measured/remote-mate
+
+
+❯ LIVE_TEST_CREATE_TIMER
+
+  Ran 1 shell command
+
+● Synthetic local validation turn complete.
+
+✻ Worked for 1s · done 1:42 PM · 1 shell still running
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  Background work is running
+  The following will stop when you exit:
+
+  shell · Synthetic background timer
+
+  ❯ 1. Exit and stop tasks
+    2. Move to background and exit
+    3. Stay
+
+  Enter to confirm · Esc to cancel
+
+Scenario result: PASS
+
+Prior SSH run under contention
+==============================
+The direct observer recognized the dialog, but the restart took its fallback path. The dialog received zero writes. The measured retry above exercised the successful bounded observation.
+
+$ fm-secondmate-restart.sh exitremote
+nudged: exitremote: it did not confirm within 6s that its open work is written down, so its conversation was not spent
+summary: 0 of 1 restarted, 1 nudged, 0 unreached
+Exit status: 3
+
+$ fm-on.sh exitremote fm-remote-secondmate-control.sh state exitremote --bound-home
+alive
+
+$ fm-on.sh exitremote fm-remote-secondmate-control.sh observe exitremote --exit-dialog
+exit-confirm
+
+Remote pending inbox records before and after restart: [], ['001.msg', '002.msg']
+Synthetic timer PID 417967 still alive: True
+
+Audited terminal writes:
+(none)

@@ -1,0 +1,65 @@
+Firstmate 9362314eb12f1bf808c459143c83fa21e2265443
+Claude Code 2.1.330 and disposable local terminal sessions
+The model endpoint is a loopback emulator using synthetic inputs.
+
+Restart a loopback SSH Claude mate with the timer dialog open in Herdr
+======================================================================
+
+$ fm-secondmate-restart.sh exitremote
+nudged: exitremote: it did not confirm within 6s that its open work is written down, so its conversation was not spent
+summary: 0 of 1 restarted, 1 nudged, 0 unreached
+Exit status: 3
+
+$ fm-on.sh exitremote fm-remote-secondmate-control.sh state exitremote --bound-home
+alive
+
+$ fm-on.sh exitremote fm-remote-secondmate-control.sh observe exitremote --exit-dialog
+exit-confirm
+
+Remote pending inbox records before and after restart: [], ['001.msg', '002.msg']
+Synthetic timer PID 417967 still alive: True
+
+Audited terminal writes:
+(none)
+
+Final terminal screen:
+ ▐▛███▛█   Claude Code v2.1.330
+▝▜██████▀  Sonnet 5.5 · API Usage Billing
+ ▝▝   ▝▝   /…/worktrees/e95238b70e4e/01M81ZR40ZMARRH996HWJTH3JR/.fmlive/ssh3/remote-mate
+
+
+❯ LIVE_TEST_CREATE_TIMER
+
+  Ran 1 shell command
+
+● Synthetic local validation turn complete.
+
+✻ Brewed for 3s · done 1:39 PM · 1 shell still running
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  Background work is running
+  The following will stop when you exit:
+
+  shell · Synthetic background timer
+
+  ❯ 1. Exit and stop tasks
+    2. Move to background and exit
+    3. Stay
+
+  Enter to confirm · Esc to cancel
+
+Scenario result: FAIL

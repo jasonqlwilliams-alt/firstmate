@@ -1,0 +1,181 @@
+Firstmate 82d02724cdc002e6d5d026966cf9635ffbc439ac
+Claude Code 2.1.330, real tmux and Herdr terminals, local model API emulator
+
+
+
+Local restart with saved work and timer cleanup
+===============================================
+
+
+$ fm-secondmate-restart.sh exitdialog
+restarted: exitdialog (claude)
+summary: 1 of 1 restarted, 0 nudged, 0 unreached
+Exit status: 0
+
+Same tmux pane, original Claude PID 2643761 and replacement Claude PID 3101423.
+
+Four synthetic sleep processes were live before the cleanup. All four were stopped before the reply.
+
+Correlated reply:
+done [corr=a966d8ee7c814ead]: Synthetic open work saved, timer disposition: clean. (via-helper)
+
+Delivered save request:
+--
+[fm-from-firstmate]⁣corr=a966d8ee7c814ead Firstmate was updated and I am about to restart your agent so it comes up on the current instructions and launch-time settings, which drops your conversation but keeps every durable record. Before that, persist the open work you are holding only in this conversation, following the /stow skill's "Open-record persistence" section and nothing else from that skill: file a task for each open record that exists only in this conversation, including any captain call you had formed but never registered, and correct any task whose status no longer reflects what you now know. Do NOT run the memory, learnings, or captain-preference sweeps. Also stop every background shell task you started, such as timers or sleep loops, because a running one makes the exit stop at a confirmation that the restart will not answer. Then reply on your parent channel saying it is done, or saying what you deliberately left alone and why.
+
+Persisted synthetic work:
+Synthetic open record persisted before replying.
+
+
+Local restart with a background timer left running
+==================================================
+
+
+$ fm-secondmate-restart.sh exitdialog
+unreached: exitdialog: the restart outcome is unknown: WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+summary: 0 of 1 restarted, 0 nudged, 1 unreached
+Exit status: 3
+
+Correlated reply:
+done [corr=28d5695ae5f6a7c8]: Synthetic open work saved, timer disposition: keep. (via-helper)
+
+All terminal input:
+  send-keys -t fixture:fm-exitdialog -l :\ Firstmate\ instruction\ waiting:\ list\ \'{run-worktree}/.fmlive/parent/state/exitdialog.inbox\'/\*.msg\ and\,\ in\ numeric\ order\,\ read\ and\ act\ on\ each\,\ then\ mv\ each\ handled\ file\ to\ \'{run-worktree}/.fmlive/parent/state/exitdialog.inbox\'/handled/.
+  send-keys -t fixture:fm-exitdialog Enter
+  send-keys -t fixture:fm-exitdialog -l /exit
+  send-keys -t fixture:fm-exitdialog Enter
+
+Final screen:
+  Background work is running
+  The following will stop when you exit:
+
+  shell · Synthetic background timer
+
+  ❯ 1. Exit and stop tasks
+    2. Move to background and exit
+    3. Stay
+
+  Enter to confirm · Esc to cancel
+
+
+Local steering while the dialog is already open
+===============================================
+
+
+$ fm-send.sh exitdialog 'Synthetic steering probe'
+fm-send: doorbell not typed because the screen in fixture:fm-exitdialog blocked the doorbell; the steer is durably recorded at {run-worktree}/.fmlive/parent/state/exitdialog.inbox/002.msg and the watcher will retry, then escalate it as a stuck steer
+Exit status: 0 (durable enqueue)
+
+All terminal input:
+  (none)
+
+Timer still running after steer:
+    PID    PPID STAT COMMAND
+2701976 2643761 Ss   sleep 300
+
+Final screen:
+  Background work is running
+  The following will stop when you exit:
+  shell · Synthetic background timer
+  ❯ 1. Exit and stop tasks
+    2. Move to background and exit
+    3. Stay
+  Enter to confirm · Esc to cancel
+
+
+Local restart while the dialog is already open
+==============================================
+
+
+$ fm-secondmate-restart.sh exitdialog
+nudged: exitdialog: it did not confirm within 16s that its open work is written down, so its conversation was not spent
+summary: 0 of 1 restarted, 1 nudged, 0 unreached
+Exit status: 3
+
+All terminal input:
+  (none)
+
+Unexpected queued records on the second restart:
+schema=fm-task-inbox.v1
+at=2026-11-22T20:29:25Z
+--
+[fm-from-firstmate]⁣corr=d1037bf3f41f2f33 Firstmate was updated and I am about to restart your agent so it comes up on the current instructions and launch-time settings, which drops your conversation but keeps every durable record. Before that, persist the open work you are holding only in this conversation, following the /stow skill's "Open-record persistence" section and nothing else from that skill: file a task for each open record that exists only in this conversation, including any captain call you had formed but never registered, and correct any task whose status no longer reflects what you now know. Do NOT run the memory, learnings, or captain-preference sweeps. Also stop every background shell task you started, such as timers or sleep loops, because a running one makes the exit stop at a confirmation that the restart will not answer. Then reply on your parent channel saying it is done, or saying what you deliberately left alone and why.
+schema=fm-task-inbox.v1
+at=2026-11-22T20:29:43Z
+--
+[fm-from-firstmate]⁣corr=7718cef1da190c5d firstmate was updated to the latest - please re-read your AGENTS.md to pick up the new instructions.
+
+Final screen:
+  Background work is running
+  The following will stop when you exit:
+
+  shell · Synthetic background timer
+
+  ❯ 1. Exit and stop tasks
+    2. Move to background and exit
+    3. Stay
+
+  Enter to confirm · Esc to cancel
+
+
+Remote restart via local OpenSSH, Firstmate worker, and real Herdr
+==================================================================
+
+
+$ fm-on.sh exitremote fm-remote-secondmate-control.sh state exitremote --bound-home
+alive
+
+$ fm-on.sh exitremote fm-remote-secondmate-control.sh observe exitremote --exit-dialog
+Remote observe exit=0, content=$'Connection to 127.0.0.1 closed by remote host.\r'
+
+$ fm-secondmate-restart.sh exitremote
+nudged: exitremote: it did not confirm within 5s that its open work is written down, so its conversation was not spent
+summary: 0 of 1 restarted, 1 nudged, 0 unreached
+Remote restart exit=3
+
+All terminal input:
+  (none)
+
+Unexpected queued records on remote restart:
+schema=fm-task-inbox.v1
+at=2026-11-22T20:35:37Z
+--
+[fm-from-firstmate]⁣corr=a11407fcc259947b Firstmate was updated and I am about to restart your agent so it comes up on the current instructions and launch-time settings, which drops your conversation but keeps every durable record. Before that, persist the open work you are holding only in this conversation, following the /stow skill's "Open-record persistence" section and nothing else from that skill: file a task for each open record that exists only in this conversation, including any captain call you had formed but never registered, and correct any task whose status no longer reflects what you now know. Do NOT run the memory, learnings, or captain-preference sweeps. Also stop every background shell task you started, such as timers or sleep loops, because a running one makes the exit stop at a confirmation that the restart will not answer. Then reply on your parent channel saying it is done, or saying what you deliberately left alone and why.
+schema=fm-task-inbox.v1
+at=2026-11-22T20:36:05Z
+--
+[fm-from-firstmate]⁣corr=88a6b5400c94266a firstmate was updated to the latest - please re-read your AGENTS.md to pick up the new instructions.
+
+Final screen:
+  Background work is running
+  The following will stop when you exit:
+
+  shell · Synthetic background timer
+
+  ❯ 1. Exit and stop tasks
+    2. Move to background and exit
+    3. Stay
+
+  Enter to confirm · Esc to cancel
+
+
+Stalled viewport with the Perl timeout fallback
+===============================================
+
+
+$ fm-control.sh exitdialog exit
+Timeout mechanism: perl
+error: exit-typed exitdialog interrupt=not-needed exit-command=typed exit=unconfirmed; the Claude viewport read timed out
+fm-control exit status 1, elapsed 7546 ms
+The delayed capture did not finish, and no Enter was sent.
+
+All terminal input:
+  send-keys -t fixture:fm-exitdialog -l /exit
+
+Final screen:
+  ❯ /exit                       Exit the CLI
+    /context                    Show what fills the context
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ /exit
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
