@@ -1417,10 +1417,22 @@ test_teardown_retires_registered_custom_check() {
   chmod 0700 "$state/task-a.check.sh"
   FM_HOME="$dir/home" "$REGISTER" task-a >/dev/null || fail "could not register the replacement custom check"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/fakebin/tmux"
-  chmod +x "$dir/fakebin/tmux"
-  FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" PATH="$dir/fakebin:$BASE_PATH" \
+  cat > "$dir/fakebin/rm" <<'SH'
+#!/usr/bin/env bash
+for artifact in "$@"; do
+  if [ "$artifact" = "$FM_HOME/state/task-a.pr-poll-registration" ] \
+    && [ -e "$FM_HOME/state/task-a.check.sh" ]; then
+    echo "check still runnable at PR revocation" >&2
+    exit 1
+  fi
+done
+exec "$TEST_REAL_RM" "$@"
+SH
+  chmod +x "$dir/fakebin/tmux" "$dir/fakebin/rm"
+  TEST_REAL_RM="$(command -v rm)" FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" PATH="$dir/fakebin:$BASE_PATH" \
     "$TEARDOWN" task-a --force > "$dir/teardown.out" 2> "$dir/teardown.err" \
     || fail "teardown could not retire the task with a custom check: $(cat "$dir/teardown.err")"
+  rm -f "$dir/fakebin/rm"
   add_stop_custom_check "$dir"
   out=$(FM_TEST_GH_LOG="$dir/gh.log" run_watcher_bounded "$dir/home" "$dir/fakebin") \
     || fail "watcher failed after task teardown"
