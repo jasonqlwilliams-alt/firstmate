@@ -1,0 +1,43 @@
+$ FM_HOME=<absent-home> bin/fm-park-retained.sh
+Exit 2
+Usage:
+  fm-park-retained.sh <task-id> mark     record the mark for a confirmed missing endpoint
+  fm-park-retained.sh <task-id> clear    remove the mark
+$ FM_HOME=<absent-home> bin/fm-park-retained.sh missing mark
+Exit 1
+error: park mark refused: cannot resolve the selected home at <disposable-root>/absent-home
+$ FM_HOME=<absent-home> bin/fm-park-retained.sh missing clear
+Exit 1
+error: park clear refused: cannot resolve the selected home at <disposable-root>/absent-home
+The absent home stayed absent.
+$ FM_STATE_OVERRIDE=indirect/state bin/fm-park-retained.sh parked mark
+Exit 1
+error: park mark refused: state directory resolves outside this home at indirect/state
+$ FM_STATE_OVERRIDE=indirect/state bin/fm-park-retained.sh parked clear
+Exit 1
+error: park clear refused: state directory resolves outside this home at indirect/state
+$ FM_STATE_OVERRIDE=<disposable-root>/selected-home/../foreign-home/state bin/fm-park-retained.sh parked mark
+Exit 1
+error: park mark refused: state directory resolves outside this home at <disposable-root>/selected-home/../foreign-home/state
+$ FM_STATE_OVERRIDE=<disposable-root>/selected-home/../foreign-home/state bin/fm-park-retained.sh parked clear
+Exit 1
+error: park clear refused: state directory resolves outside this home at <disposable-root>/selected-home/../foreign-home/state
+Foreign park mark after the refused commands: tmux:fixture:fm-parked	foreign
+$ bin/fm-park-retained.sh remote mark
+Exit 1
+error: remote is placed on a remote host; its endpoint loss is not reported here
+$ bin/fm-park-retained.sh remote clear
+Exit 1
+error: remote is placed on a remote host; its endpoint loss is not reported here
+$ bin/fm-park-retained.sh mate mark
+Exit 1
+error: mate is a secondmate; park marks apply to ordinary tasks only
+$ bin/fm-park-retained.sh mate clear
+Exit 1
+error: mate is a secondmate; park marks apply to ordinary tasks only
+$ NO_MISTAKES_GATE=1 bin/fm-park-retained.sh parked mark
+Exit 3
+error: no-mistakes gate agent must not drive the fleet (NO_MISTAKES_GATE set)
+$ NO_MISTAKES_GATE=1 bin/fm-park-retained.sh parked clear
+Exit 3
+error: no-mistakes gate agent must not drive the fleet (NO_MISTAKES_GATE set)

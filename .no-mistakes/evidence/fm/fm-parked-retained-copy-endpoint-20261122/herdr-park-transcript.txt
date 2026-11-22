@@ -1,0 +1,12 @@
+Herdr herdr 0.9.5, workspace-local configuration and named lab fm-lab-park
+$ fm-herdr-lab.sh run fm-lab-park pane close w1:p1
+{"id":"cli:pane:close","result":{"type":"ok"}}
+{"error":{"code":"pane_not_found","message":"pane w1:p1 not found"},"id":"cli:pane:get"}
+$ bin/fm-park-retained.sh a-parked mark
+parked-retained: yes
+Stored mark: herdr:fm-lab-park:w1:p1	retained-generation
+Both synthetic task records refer to the closed route fm-lab-park:w1:p1.
+$ bin/fm-watch.sh
+stale: fm-lab-park:w1:p1 (the recorded endpoint is gone)
+a-parked.missing-endpoint: absent
+z-unmarked.missing-endpoint: herdr:fm-lab-park:w1:p1	replacement-generation

@@ -1,0 +1,38 @@
+$ bin/fm-park-retained.sh task-x1 mark
+parked-retained: yes
+$ bin/fm-teardown.sh task-x1
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REFUSED: local-only worktree <disposable-root>/treehouse-pool/.treehouse/fixture-f3e964/1/fixture has work not yet merged into main and not on any remote.
+commits not yet on main:
+6897eca local work
+Merge the branch into local main first (bin/fm-merge-local.sh after the captain approves), or push to a fork/remote, or get the captain's explicit OK to discard, then --force.
+Saved mark after refused teardown: tmux:firstmate:fm-task-x1	first
+Worktree file after refused teardown: unlanded fixture work
+$ git merge --ff-only fm/task-x1
+Updating 9880346..6897eca
+Fast-forward
+ work | 1 +
+ 1 file changed, 1 insertion(+)
+ create mode 100644 work
+$ bin/fm-teardown.sh task-x1
+WARNING: watcher still down (same stale episode; last beat: 2s ago, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process group for task-x1: 3751212
+teardown: force-killing leaked worktree process group for task-x1: 3751212
+🌳 Worktree returned to pool.
+teardown task-x1 complete (window firstmate:fm-task-x1, worktree <disposable-root>/treehouse-pool/.treehouse/fixture-f3e964/1/fixture)
+Backlog: task-x1 is closed in <disposable-root>/cleanup-home/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.
+Task record and park mark are absent after successful teardown.
+  state: done
+
+Session start after an interrupted close of a synthetic parked task
+$ bin/fm-park-retained.sh interrupted mark
+parked-retained: yes
+$ FM_BOOTSTRAP_NETWORK=skip bin/fm-bootstrap.sh
+  state: done
+Pending-close record and park mark are absent after session start.
