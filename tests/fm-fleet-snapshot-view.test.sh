@@ -1270,7 +1270,7 @@ SH
 }
 
 test_cancelled_run_with_registered_green_pr_is_not_terminal_in_flight() {
-  local home fakebin out pr other_pr head branch state
+  local home fakebin out pr other_pr head branch state read_command
   home=$(make_home cancelled-open-pr)
   fakebin=$(make_fakebin "$home")
   state=$home/state
@@ -1292,7 +1292,7 @@ MD
   fm_write_meta "$state/cancelled.meta" \
     "window=firstmate:fm-cancelled" "worktree=$home/projects/cancelled" \
     "project=alpha" "harness=claude" "kind=ship" "mode=no-mistakes" \
-    "spawn_gen=cancellation-gen" "pr=$pr"
+    "pr=$pr"
   record_claude_idle "$state" cancelled
   printf 'done: PR %s checks green\n' "$pr" > "$state/cancelled.status"
   cat > "$home/run.txt" <<RUN
@@ -1339,7 +1339,7 @@ SH
   fm_write_meta "$state/cancelled.meta" \
     "window=firstmate:fm-cancelled" "worktree=$home/projects/cancelled" \
     "project=alpha" "harness=claude" "kind=ship" "mode=no-mistakes" \
-    "spawn_gen=cancellation-gen" "pr=$pr"
+    "pr=$pr"
 
   printf 'done: PR %s checks green\nblocked: waiting for guidance\n' "$other_pr" > "$state/cancelled.status"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
@@ -1358,32 +1358,51 @@ SH
 
   cat > "$fakebin/gh" <<'SH'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >> "$FM_HOME/forge-reads"
 case "$*" in
   *" --json headRefOid "*) printf '%s\n' "$TEST_PR_HEAD" ;;
-  *" --json state "*) printf '%s\n' "$TEST_PR_STATE" ;;
+  *" --json state "*)
+    if [ -s "$FM_HOME/forge-reads" ]; then
+      printf 'OPEN\n'
+    else
+      "$TEST_PR_CHECK" cancelled "$TEST_PR_URL" > "$FM_HOME/rearm.log" 2>&1 || exit 1
+      printf 'CLOSED\n'
+    fi
+    printf '%s\n' "$*" >> "$FM_HOME/forge-reads"
+    ;;
   *) exit 1 ;;
 esac
 SH
   chmod +x "$fakebin/gh"
   ln -s gh "$fakebin/gh-axi"
-  printf '#!/usr/bin/env bash\nprintf "poll-cycle-end\\n"\n' > "$state/z-cycle-end.check.sh"
+  cat > "$state/z-cycle-end.check.sh" <<'SH'
+#!/usr/bin/env bash
+if [ "$(wc -l < "$FM_HOME/forge-reads")" -eq 2 ]; then
+  printf 'poll-cycle-end\n'
+fi
+SH
   chmod 0700 "$state/z-cycle-end.check.sh"
   FM_HOME="$home" "$ROOT/bin/fm-check-register.sh" z-cycle-end >/dev/null \
     || fail "could not register the poll-cycle control check"
   TEST_PR_HEAD="$head" PATH="$fakebin:$PATH" FM_HOME="$home" \
     "$ROOT/bin/fm-pr-check.sh" cancelled "$pr" >"$home/register.log" 2>&1 \
     || fail "could not register the PR with the watcher: $(cat "$home/register.log")"
+  # Keep the existing checks-green event from waking the watcher between the
+  # two forge polls, then put it back before observing the snapshot.
+  mv "$state/cancelled.status" "$home/checks-green.status"
   : > "$home/forge-reads"
   touch "$state/home-summary.json"
-  out=$(TEST_PR_STATE=CLOSED FM_HOME="$home" FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=5 \
-    PATH="$fakebin:$PATH" "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 15) || fail "watcher failed: $out"
+  out=$(TEST_PR_HEAD="$head" TEST_PR_URL="$pr" TEST_PR_CHECK="$ROOT/bin/fm-pr-check.sh" \
+    FM_HOME="$home" FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=15 FM_POLL=0.1 FM_SIGNAL_GRACE=0 \
+    PATH="$fakebin:$PATH" "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 30) \
+    || fail "watcher failed: $out"$'\n'"$(cat "$home/forge-reads" "$home/rearm.log" 2>/dev/null)"
   case "$out" in
     check:*z-cycle-end.check.sh:*poll-cycle-end) ;;
     *) fail "watcher did not continue after the observed closure: $out" ;;
   esac
-  [ "$(cat "$home/forge-reads")" = "pr view $pr --repo kunchenguid/firstmate --json state -q .state" ] \
-    || fail "watcher did not poll the exact PR: $out"
+  read_command="pr view $pr --repo kunchenguid/firstmate --json state -q .state"
+  [ "$(cat "$home/forge-reads")" = "$read_command"$'\n'"$read_command" ] \
+    || fail "watcher did not poll the exact PR through its closure and reopening: $out"
+  mv "$home/checks-green.status" "$state/cancelled.status"
   : > "$home/forge-reads"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --secondmate-home-summary)
   [ ! -s "$home/forge-reads" ] || fail "snapshot queried the forge"

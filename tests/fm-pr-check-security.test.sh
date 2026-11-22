@@ -165,6 +165,9 @@ case " $* " in
   *" state "*)
     [ "${FM_TEST_GH_FAIL:-0}" = 0 ] || exit 1
     [ "${FM_TEST_GH_SLEEP:-0}" = 0 ] || sleep "$FM_TEST_GH_SLEEP"
+    if [ -n "${FM_TEST_GH_ON_STATE:-}" ]; then
+      "$FM_TEST_GH_ON_STATE" >&2 || exit 1
+    fi
     printf '%s\n' "${FM_TEST_GH_STATE:-OPEN}"
     ;;
 esac
@@ -2167,6 +2170,57 @@ test_closure_publication_preserves_the_observed_pr() (
   pass "closures follow the observed PR across re-arms, relaunches, and PR replacement"
 )
 
+test_closure_during_rearm_or_task_id_reuse() {
+  local dir state url transition out
+  url=https://github.com/o/r/pull/26
+  for transition in reused-legacy-id reused-generated-id rearm; do
+    dir=$(make_case "watch-closure-$transition")
+    state="$dir/home/state"
+    fm_write_meta "$state/task-a.meta" 'window=firstmate:fm-task-a' 'endpoint_task_id=task-a' \
+      "worktree=$dir/missing-worktree" "project=$dir/project" 'kind=ship' 'mode=local-only'
+    if [ "$transition" = reused-generated-id ]; then
+      printf 'spawn_gen=s-original\n' >> "$state/task-a.meta"
+    fi
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/fakebin/tmux"
+    chmod +x "$dir/fakebin/tmux"
+    run_check_entry "$dir" task-a "$url" >/dev/null || fail "could not arm the generationless poll"
+    [ ! -e "$state/task-a.pr-poll-closed" ] || fail "$transition fixture started with PR closure evidence"
+    add_stop_custom_check "$dir"
+    touch "$state/home-summary.json"
+
+    cat > "$dir/on-state" <<'SH'
+#!/usr/bin/env bash
+set -e
+if [ "$TEST_TRANSITION" != rearm ]; then
+  sed 's/^spawn_gen=.*/spawn_gen=s-new-task/' "$FM_HOME/state/task-a.meta" > "$TEST_CASE/new.meta"
+  FM_ROOT_OVERRIDE="$TEST_ROOT" "$TEST_ROOT/bin/fm-teardown.sh" task-a --force > "$TEST_CASE/teardown.log" 2>&1
+  cp "$TEST_CASE/new.meta" "$FM_HOME/state/task-a.meta"
+fi
+FM_ROOT_OVERRIDE="$TEST_CASE/root" "$TEST_ROOT/bin/fm-pr-check.sh" task-a "$TEST_PR"
+touch "$TEST_CASE/transition-complete"
+SH
+    chmod +x "$dir/on-state"
+    : > "$dir/gh.log"
+    out=$(FM_TEST_GH_LOG="$dir/gh.log" FM_TEST_GH_STATE=CLOSED FM_TEST_GH_ON_STATE="$dir/on-state" \
+      TEST_ROOT="$ROOT" TEST_CASE="$dir" TEST_PR="$url" TEST_TRANSITION="$transition" \
+      FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=15 FM_HOME="$dir/home" PATH="$dir/fakebin:$BASE_PATH" \
+      "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 25) || fail "watcher failed during $transition: $out"
+    [ -f "$dir/transition-complete" ] \
+      || fail "$transition did not finish during the forge read: $(cat "$dir/teardown.log" 2>/dev/null)"
+    [ "$(cat "$dir/gh.log")" = "pr view $url --repo o/r --json state -q .state" ] \
+      || fail "$transition did not exercise exactly one read of the observed PR"
+    case "$out" in check:*z-stop.check.sh:*stop-cycle) ;; *) fail "closure woke the watcher: $out" ;; esac
+    fm_pr_poll_artifacts_valid "$state" task-a "$POLL" || fail "$transition did not leave a valid armed poll"
+    if [ "$transition" != rearm ]; then
+      [ ! -e "$state/task-a.pr-poll-closed" ] || fail "$transition inherited stale PR closure evidence"
+    else
+      [ -f "$state/task-a.pr-poll-closed" ] && [ "$(cat "$state/task-a.pr-poll-closed")" = "$url" ] \
+        || fail "re-arming a generationless task lost the only observed closure"
+    fi
+  done
+  pass "PR closures survive a generationless re-arm and stop at teardown with or without generations"
+}
+
 test_closure_write_failure_does_not_stop_sibling_checks() {
   local dir state url out
   dir=$(make_case failed-pr-closure)
@@ -2484,6 +2538,7 @@ if [ "${1:-}" = --promotion-poll-only ]; then
   exit 0
 fi
 
+test_closure_during_rearm_or_task_id_reuse
 test_control_metadata_preserves_armed_poll
 test_parser_matrix
 test_gitlab_merge_watch

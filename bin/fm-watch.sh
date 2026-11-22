@@ -1543,10 +1543,16 @@ FM_ACTIVE_CHECK_PGID=
 FM_CHECK_OUTPUT=
 FM_CHECK_RESULT=
 FM_CHECK_SIGNAL_PENDING=
+closure_stage=
 
 fm_check_output_cleanup() {
   [ -z "$FM_CHECK_OUTPUT" ] || rm -f -- "$FM_CHECK_OUTPUT"
   FM_CHECK_OUTPUT=
+}
+
+fm_pr_closure_stage_cleanup() {
+  [ -z "$closure_stage" ] || rm -f -- "$closure_stage"
+  closure_stage=
 }
 
 fm_active_check_stop() {
@@ -1919,6 +1925,7 @@ watcher_cleanup() {
   fm_active_check_stop || cleanup_status=1
   fm_check_output_cleanup
   fm_custom_check_snapshot_cleanup
+  fm_pr_closure_stage_cleanup
   if [ "$owns_lock" -eq 1 ] \
     && ! fm_recovery_transition "$WATCHER_DOWNTIME_MARKER" "$transition" "$WATCH_LOCK" downtime; then
     echo "watcher: recovery state could not be persisted; retaining stale lock evidence" >&2
@@ -2084,8 +2091,11 @@ while :; do
         id=$(basename "$c" .check.sh)
         closure_gen=
         if [ -f "$STATE/$id.pr-poll-registration" ]; then
-          closure_gen=$(fm_backlog_meta_spawn_gen_optional "$STATE/$id.meta" "$STATE" \
-            && printf '%s\n' "$FM_BACKLOG_META_SPAWN_GEN") || closure_gen=
+          if closure_gen=$(fm_pr_poll_task_origin_gen "$STATE" "$id") && [ -z "$closure_gen" ]; then
+            # Reserve the legacy witness before capturing the poll. Teardown
+            # removes it even if another task reuses the same ID and PR.
+            closure_stage=$(fm_pr_poll_closed_stage "$STATE" "$id") || closure_stage=
+          fi
         fi
         if fm_pr_poll_snapshot_capture "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh"; then
           is_pr_poll=1
@@ -2104,20 +2114,24 @@ while :; do
           fm_custom_check_snapshot_cleanup
         else
           fm_custom_check_snapshot_cleanup
+          fm_pr_closure_stage_cleanup
           rejected_checks="$rejected_checks $c"
           continue
         fi
       fi
+      if [ "$is_pr_poll" -eq 1 ] && [ "$out" = closed-unmerged ]; then
+        closure_rc=0
+        fm_pr_poll_record_closed "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" "$closure_gen" "$closure_stage" \
+          || closure_rc=$?
+        fm_pr_closure_stage_cleanup
+        case "$closure_rc" in
+          0|4) ;;
+          *) triage_log "PR closure for $id could not be recorded (rc=$closure_rc)" ;;
+        esac
+        continue
+      fi
+      fm_pr_closure_stage_cleanup
       if [ -n "$out" ]; then
-        if [ "$is_pr_poll" -eq 1 ] && [ "$out" = closed-unmerged ]; then
-          closure_rc=0
-          fm_pr_poll_record_closed "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" "$closure_gen" || closure_rc=$?
-          case "$closure_rc" in
-            0|4) ;;
-            *) triage_log "PR closure for $id could not be recorded (rc=$closure_rc)" ;;
-          esac
-          continue
-        fi
         reason="check: $c: $out"
         if [ "$is_pr_poll" -eq 1 ] && [ "$out" = merged ]; then
           merge_outcome_rc=0

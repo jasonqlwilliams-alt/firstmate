@@ -520,6 +520,75 @@ SH
   pass "fm-control relaunch: registered PR polls retain their bindings and deliver durable merge wakes with tracing off and on"
 }
 
+test_relaunch_and_pr_replacement_during_closure() {
+  local dir state id=rl-close url=https://github.com/example/repo/pull/20
+  local replacement=https://github.com/example/repo/pull/21 out rc watcher i=0
+  dir=$(new_case closure-race "$id")
+  add_ship_task "$dir" "$id" claude
+  state="$dir/home/state"
+  printf 'spawn_gen=s-original\n' >> "$state/$id.meta"
+  printf '%s\n' "$$" > "$state/.lock"
+
+  mkdir -p "$dir/root/bin" "$dir/pollbin"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/root/bin/fm-guard.sh"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$dir/pollbin/tmux"
+  cat > "$dir/pollbin/gh" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *'--json headRefOid'*) printf '0123456789abcdef0123456789abcdef01234567\n' ;;
+  *'--json state'*)
+    printf '%s\n' "$*" >> "$FM_HOME/forge-reads"
+    touch "$FM_HOME/forge-ready"
+    while [ ! -e "$FM_HOME/forge-release" ]; do sleep 0.05; done
+    printf 'CLOSED\n'
+    ;;
+  *) exit 2 ;;
+esac
+SH
+  chmod +x "$dir/pollbin/gh" "$dir/pollbin/tmux" "$dir/root/bin/fm-guard.sh"
+  env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" PATH="$dir/pollbin:$PATH" \
+    "$ROOT/bin/fm-pr-check.sh" "$id" "$url" > "$dir/register.log" 2>&1 \
+    || fail "could not arm the observed PR: $(cat "$dir/register.log")"
+  printf '#!/usr/bin/env bash\nprintf "poll-cycle-end\\n"\n' > "$state/z-cycle-end.check.sh"
+  chmod 0700 "$state/z-cycle-end.check.sh"
+  FM_HOME="$dir/home" "$ROOT/bin/fm-check-register.sh" z-cycle-end >/dev/null \
+    || fail "could not register the poll-cycle control check"
+  touch "$state/home-summary.json"
+
+  env FM_HOME="$dir/home" PATH="$dir/pollbin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=30 \
+    "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 40 > "$dir/watch.log" 2>&1 &
+  watcher=$!
+  while [ ! -e "$dir/home/forge-ready" ] && [ "$i" -lt 150 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  [ -e "$dir/home/forge-ready" ] || fail "watcher did not enter the forge read: $(cat "$dir/watch.log")"
+
+  out=$(run_control "$dir" "$id" relaunch --note 'Continue checking the registered PR.'); rc=$?
+  expect_code 0 "$rc" "relaunch during a forge read should succeed"$'\n'"$out"
+  [ -n "$(meta_field "$dir" "$id" spawn_gen)" ] \
+    && [ "$(meta_field "$dir" "$id" spawn_gen)" != s-original ] \
+    || fail "the relaunch did not change the worker generation"
+  env FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$dir/root" PATH="$dir/pollbin:$PATH" \
+    "$ROOT/bin/fm-pr-check.sh" "$id" "$replacement" > "$dir/register.log" 2>&1 \
+    || fail "could not arm the replacement PR: $(cat "$dir/register.log")"
+  touch "$dir/home/forge-release"
+  wait "$watcher" || fail "watcher failed during relaunch and replacement: $(cat "$dir/watch.log")"
+  case "$(cat "$dir/watch.log")" in
+    check:*z-cycle-end.check.sh:*poll-cycle-end) ;;
+    *) fail "watcher missed the control check: $(cat "$dir/watch.log")" ;;
+  esac
+  [ "$(cat "$dir/home/forge-reads")" = "pr view $url --repo example/repo --json state -q .state" ] \
+    || fail "watcher did not observe exactly the original PR once"
+  [ "$(meta_field "$dir" "$id" pr)" = "$replacement" ] || fail "closure changed the registered PR"
+  fm_pr_poll_artifacts_valid "$state" "$id" "$ROOT/bin/fm-pr-poll.sh" \
+    || fail "closure did not leave the replacement poll armed"
+  [ -f "$state/$id.pr-poll-closed" ] && [ "$(cat "$state/$id.pr-poll-closed")" = "$url" ] \
+    || fail "relaunch and PR replacement lost the only observed closure for the original PR"
+  pass "a closure survives a worker relaunch and replacement PR during the same forge read"
+}
+
 test_relaunch_preserves_durable_task_metadata() {
   local dir out rc
   dir=$(new_case durable-meta rl19)
@@ -3119,6 +3188,7 @@ test_relaunch_from_guarded_path
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
 test_relaunch_from_linked_home_preserves_recorded_worktree
 test_relaunch_preserves_registered_merge_poll
+test_relaunch_and_pr_replacement_during_closure
 test_relaunch_preserves_durable_task_metadata
 test_relaunch_serializes_concurrent_durable_metadata_publication
 test_disabled_relaunch_clears_prior_trace_context
