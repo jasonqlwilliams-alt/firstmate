@@ -2655,10 +2655,13 @@ SH
   chmod +x "$case_dir/fakebin/lsof" "$case_dir/fakebin/treehouse" "$case_dir/fakebin/tmux"
 
   (
-    cd "$child_b" || exit 1
-    FM_TEST_CALLER_PID=$BASHPID FM_TEST_CALLER_CWD=$(pwd -P) \
-      FM_TEARDOWN_TEST_ROOT="$case_dir/project" FM_TEARDOWN_GUARD_DONE=1 \
-      run_teardown "$case_dir" --force || exit $?
+    export -f run_teardown
+    TEARDOWN="$TEARDOWN" FM_TEARDOWN_TEST_ROOT="$case_dir/project" FM_TEARDOWN_GUARD_DONE=1 \
+      "$BASH" -uc '
+        cd "$1" || exit 1
+        FM_TEST_CALLER_PID=$$ FM_TEST_CALLER_CWD=$(pwd -P) run_teardown "$2" --force
+        exit "$?"
+      ' descendant-caller "$child_b" "$case_dir"
   ) > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
   expect_code 1 "$rc" "descendant caller ($layout): forced retirement should refuse"
   assert_grep "is in Treehouse copy $child_b" "$case_dir/stderr" 'refusal did not identify the second child copy'
