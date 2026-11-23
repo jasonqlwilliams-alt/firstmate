@@ -180,8 +180,10 @@ $ fm_composer_classify_screen "styled=1 cursor=1 identity=1" "$screen" 8 "pi<TAB
 pending
 ```
 
-`bin/fm-composer-lib.sh` ("AGY COMPOSER") reads exactly those recorded shapes for a pane whose recorded harness is `agy`, and [`tests/fm-composer-lib.test.sh`](../../tests/fm-composer-lib.test.sh) pins its verdicts from the recorded rows and colours.
-Not captured: how agy renders input longer than one composer row, the exact tmux palette code for the mode hint, and any plain-text capture backend; the rule therefore treats each as unproven and the doorbell refuses before typing.
+The capture notes leave agy's live wrapping behavior and the exact tmux palette code for the mode hint unmeasured.
+[`tests/fm-composer-lib.test.sh`](../../tests/fm-composer-lib.test.sh) uses the recorded rows and truecolor values to check the classifier's verdicts, including refusal on plain-text and multirow captures.
+[`tests/fm-task-inbox.test.sh`](../../tests/fm-task-inbox.test.sh) checks the one-row fit boundary and screen refusals with an agy-shaped stub in a real tmux server.
+See [Harness support](../configuration.md#harness-support) for the operator-facing doorbell limits.
 
 ## Skills and no-mistakes validation trigger
 
@@ -226,4 +228,4 @@ After a full launch, tool call, interrupt, and exit cycle, the project directory
 ## Refreshing this record
 
 Re-run the commands above against the installed agy after a version bump, and run [`tests/fm-agy-harness.test.sh`](../../tests/fm-agy-harness.test.sh) for the portable half.
-A live opt-in guard in the `live-harness-optin` family does not yet exist for agy; adding one is the natural next step if agy is ever promoted beyond crewmate and scout work.
+The live [composer matrix](runtime-backends.md#composer-classification-matrix) and [doorbell guard](runtime-backends.md#steering-inbox-doorbell) currently omit agy.

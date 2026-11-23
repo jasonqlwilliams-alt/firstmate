@@ -302,6 +302,15 @@ test_matrix_agy_composer_is_harness_scoped() {
   assert_screen "agy first-use mode hint" empty "$agy_herdr" "$(agy_screen "$hint")"
   assert_screen "agy typed on tmux" pending "$agy_tmux" "$typed" 2
   assert_screen "agy typed on herdr" pending "$agy_herdr" "$typed"
+  # Herdr's live ANSI capture separates terminal rows with CRLF.
+  assert_screen "agy idle in a Herdr CRLF capture" empty "$agy_herdr" "${idle//$'\n'/$'\r\n'}"
+  screen=$(agy_screen "$hint")
+  assert_screen "agy first-use hint in a Herdr CRLF capture" empty "$agy_herdr" "${screen//$'\n'/$'\r\n'}"
+  fm_composer_holds_text "$agy_herdr" "${typed//$'\n'/$'\r\n'}" 'zz probe' \
+    || fail "agy's exact text check should ignore Herdr's row terminator"
+  screen=$(agy_screen "$glyph zz probe ")
+  ! fm_composer_holds_text "$agy_herdr" "${screen//$'\n'/$'\r\n'}" 'zz probe' \
+    || fail "agy's exact text check should keep spaces before Herdr's row terminator"
   # A draft that only repeats the hint's words is typed text, not the hint.
   assert_screen "agy draft matching the hint text" pending "$agy_herdr" \
     "$(agy_screen "$glyph Accept-edits mode: file edits auto-approved (shift+tab to cycle)")"

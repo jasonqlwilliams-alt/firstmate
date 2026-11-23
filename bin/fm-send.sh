@@ -50,13 +50,10 @@
 # available, escalates after the bounded ladder, and instead routes a positively
 # dead or missing endpoint directly to recovery without typing. An explicit
 # fire-and-forget record is excluded from that ladder.
-# bin/fm-task-inbox-lib.sh owns the record format, the doorbell line, and the
-# re-ring ladder, including the ring's per-harness screen gate (the Codex
-# update picker and pending composer text are refused on every harness, and a
-# Codex, Rovo, or agy pane also needs a proven-empty composer); a refused ring prints a
-# notice, and the watcher retries an ordinary record before escalating it. No
-# composer verdict is delivery proof on this plane, and a failed or refused
-# ring never fails the send.
+# bin/fm-task-inbox-lib.sh owns the record format, doorbell screen gate, and
+# re-ring ladder. A refused ring prints a notice. No composer verdict is
+# delivery proof on this plane, and a failed or refused ring never fails
+# the send.
 #
 # TYPED - the LOCAL text that must reach the terminal itself: a harness-native
 # invocation (a leading "/", or a leading "$" to a codex target) must reach

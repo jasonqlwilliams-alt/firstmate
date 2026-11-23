@@ -1683,6 +1683,8 @@ _fm_composer_agy_content() {  # <screen> <plain-screen> <styled> <cursor-row-or-
   [ "$styled" = 1 ] && _fm_composer_agy_frame "$plain" "$cy" || return 1
   prompt_row=$((FM_COMPOSER_SCAN_PI_OPEN + 1))
   row=$(_fm_composer_screen_row "$prompt_row" "$plain")
+  # Herdr serializes terminal rows with CRLF. Drop the terminator and keep draft spaces.
+  row=${row%$'\r'}
   case "$row" in
     '>'|'> '*) row=${row#>}; row=${row# } ;;
     *) return 1 ;;

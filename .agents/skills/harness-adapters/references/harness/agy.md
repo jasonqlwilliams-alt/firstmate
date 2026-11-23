@@ -66,15 +66,10 @@ A refusal blocks the spawn rather than launching a worker that would park before
 ## Composer verdict
 
 The [agy composer rule](../../../../../bin/fm-composer-lib.sh) applies when the capture carries the pane's recorded harness `agy`, which the steering doorbell supplies.
-Visible draft text on the recognized composer row reads `pending`.
-A capture that still contains multiple rows of composer text reads `unknown`.
-The [doorbell](../../../../../bin/fm-task-inbox-lib.sh) requires a proven-empty composer before typing and proof of the full notice before Enter on agy, Codex, and Rovo panes.
-
-The doorbell leaves the pane untouched if the initial check cannot prove the composer empty or the notice would exceed agy's one composer row.
-The initial check withholds typing on a plain-text capture, a busy turn, the first-use hint in an unrecorded colour, or the feedback survey or other text below the composer.
-If the check after typing cannot prove the composer holds the full notice, the doorbell withholds Enter and the pane may still contain an unsubmitted notice.
-In both cases the message stays queued for the normal re-ring and escalation.
-Away-mode injection reads composers without a recorded harness, so it still cannot prove an agy pane empty; agy is a crewmate and scout adapter that away mode never injects into.
+In a recognized frame, a draft captured on one composer row reads `pending`.
+Plain-text captures and frames containing multiple captured composer rows, a busy footer, or a feedback survey read `unknown`.
+See [Harness support](../../../../../docs/configuration.md#harness-support) for the doorbell's delivery checks and what a refusal leaves queued.
+Away-mode injection takes place in the supervisor pane, whose composer read omits the recorded harness required by this agy rule.
 
 ## Skills and no-mistakes validation trigger
 
@@ -98,5 +93,4 @@ agy is deliberately absent from `../../../bin/fm-session-lock-lib.sh`, which own
 ## Verification
 
 `../../../../tests/fm-agy-harness.test.sh` is the portable regression: detection and marker precedence with real processes, tmux liveness, the control tables, busy-source trust, the launch line, the hook wiring, the trust pre-registration, the effort cap, model validation, the Gemini-only model rule, and the secondmate refusal.
-The [composer regression](../../../../../tests/fm-composer-lib.test.sh) pins the verdict, and the [doorbell regression](../../../../../tests/fm-task-inbox.test.sh) checks delivery and refusal in a real tmux server.
-`../../../../docs/verification/agy.md` owns the dated live evidence behind each fact above and the commands that refresh it.
+[agy adapter verification](../../../../../docs/verification/agy.md) owns the dated evidence and the commands that refresh it, including the [composer and doorbell regressions](../../../../../docs/verification/agy.md#composer-classification).

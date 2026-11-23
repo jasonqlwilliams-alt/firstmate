@@ -436,6 +436,8 @@ A cursor secondmate or primary runs the tracked project-scope `.cursor/hooks.jso
 Cursor typed-submit confirmation is verified on tmux and Herdr only.
 On Zellij, cmux, and Orca a typed-plane Cursor send (a harness-native invocation or an explicit backend target; ordinary text steers ride the durable inbox and exit 0 at enqueue) lands, but `fm-send` reports delivery unconfirmed and exits non-zero because their shared submit core does not consult the busy footer; [runtime backend verification](verification/runtime-backends.md#cursor-agent-cli) owns the evidence and transcript-state boundary.
 The doorbell requires a proven-empty composer before typing and proof of the full notice before Enter on Codex, Rovo, and agy panes.
+On agy the notice must fit on one composer row and stop before the last column of the closing divider, so widening the pane can resolve a width refusal.
+When the full text cannot be confirmed after typing, an unsubmitted draft may remain in the composer.
 The Codex update picker is refused on every harness.
 Withheld doorbells leave the steer queued for the watcher's retry and escalation ladder ([`fm-task-inbox-lib.sh`](../bin/fm-task-inbox-lib.sh) owns the gate and ladder).
 muse is verified for crewmate and scout launches ONLY, and `fm-spawn.sh` refuses it for a secondmate, because muse ships no usable hook surface for a primary session's turn-end supervision; [`docs/verification/muse.md`](verification/muse.md) owns that evidence.
