@@ -154,8 +154,13 @@ test_optional_capture_failure() (
 
 test_optional_capture_failure || exit $?
 
+mkdir -p "$TMP/no-perl"
+printf '%s\n' '#!/bin/sh' 'exit 127' > "$TMP/no-perl/perl"
+chmod 700 "$TMP/no-perl/perl"
+
 test_remote_wait_uses_elapsed_budget() (
   local tick=$SECONDS i
+  export PATH="$TMP/no-perl:$PATH"
   WATCHER_WAIT_LIMIT=1
   for ((i=0; i<100; i++)); do
     [ "$SECONDS" -eq "$tick" ] || break
@@ -164,13 +169,14 @@ test_remote_wait_uses_elapsed_budget() (
   command sleep 0.65
   watcher_remote_observe bash -c 'sleep 0.55; printf busy' || fail "remote observation could not run"
   [ "$FM_PENDING_REPLY_OBSERVATION" = busy ] || fail "a subsecond reply was discarded within a one-second budget"
-  pass "watcher: a remote observation gets its full elapsed budget across a clock tick"
+  pass "watcher: without Perl, a remote observation gets its full elapsed budget"
 )
 
 test_remote_wait_uses_elapsed_budget || exit $?
 
 test_remote_wait_rejects_late_success() (
   local child='' i
+  export PATH="$TMP/no-perl:$PATH"
   trap '
     if [ -n "$child" ]; then
       kill -CONT "$child" 2>/dev/null || true

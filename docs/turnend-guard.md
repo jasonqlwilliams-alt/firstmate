@@ -62,7 +62,7 @@ If `jq` is missing or hook stdin is empty, the guard exits 0 because it cannot s
 
 ### Guard grace and the poll cadence
 
-The watcher keeps its beacon fresh during long terminal waits as described in the [watcher beacon contract](watcher-continuity.md#arm-layer-cycle-contract).
+The watcher refreshes its beacon during long ordinary poll sleeps, including sleeps after native event fallback, as described in the [watcher beacon contract](watcher-continuity.md#arm-layer-cycle-contract).
 The Claude Stop-hook auto-arm (`bin/fm-claude-stop-autoarm.sh`) and the watcher's pre-acquisition staleness check retain their poll-derived default grace of `max(300, FM_POLL + 60)`.
 `fm_poll_derived_grace` in `bin/fm-wake-lib.sh` is the single owner of that formula.
 The auto-arm hook additionally exports its resolved `FM_GUARD_GRACE` when it forks `bin/fm-watch-arm.sh`, so the arm wrapper and the watcher it may start judge staleness with the exact same value the hook just judged it with, whether that value came from an operator override or the poll-derived default.

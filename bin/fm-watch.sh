@@ -1634,36 +1634,46 @@ run_check_capture() {
   watcher_finish_capture
 }
 
+remote_observation_owned() {
+  local capture=$1 owner=$2 stat_line parent pgid
+  if [ -r "/proc/$capture/stat" ]; then
+    IFS= read -r stat_line < "/proc/$capture/stat" || return 1
+    read -r _ parent pgid _ <<< "${stat_line##*)}" || return 1
+  else
+    stat_line=$(ps -p "$capture" -o ppid= -o pgid= 2>/dev/null) || return 1
+    read -r parent pgid <<< "$stat_line" || return 1
+  fi
+  [ "$parent" = "$owner" ] && [ "$pgid" = "$capture" ]
+}
+
 run_remote_observation_process() {
-  # shellcheck disable=SC2016
-  exec perl -MPOSIX=WNOHANG -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC,sleep -e '
-    my ($owner, $budget) = splice @ARGV, 0, 2;
-    exit 124 unless getppid() == $owner && getpgrp(0) == $$;
-    my $interrupted = 0;
-    $SIG{HUP} = $SIG{INT} = $SIG{TERM} = sub { $interrupted = 1 };
-    my $deadline = clock_gettime(CLOCK_MONOTONIC) + $budget;
-    my $child = fork();
-    exit 125 unless defined $child;
-    if ($child == 0) {
-      exec @ARGV;
-      exit 125;
-    }
-    while (!$interrupted && getppid() == $owner) {
-      my $finished = waitpid($child, WNOHANG);
-      my $status = $?;
-      last if clock_gettime(CLOCK_MONOTONIC) >= $deadline || $interrupted || getppid() != $owner;
-      exit($status == 0 ? 0 : 1) if $finished == $child;
-      last if $finished < 0;
-      sleep(0.01);
-    }
-    kill "TERM", -$$;
-    my $reap_until = clock_gettime(CLOCK_MONOTONIC) + 0.05;
-    while (waitpid($child, WNOHANG) == 0 && clock_gettime(CLOCK_MONOTONIC) < $reap_until) {
-      sleep(0.01);
-    }
-    kill "KILL", -$$;
-    exit 124;
-  ' "$@" < /dev/null
+  local owner=$1 budget=$2 capture status command_pid command_rc
+  shift 2
+  fm_current_pid capture && remote_observation_owned "$capture" "$owner" || return 124
+  trap ':' HUP INT TERM
+  {
+    if IFS= read -r -t "$budget" status < <(
+      trap ':' HUP INT TERM
+      ( exec "$@" < /dev/null >&3 3>&- ) &
+      command_pid=$!
+      while kill -0 "$command_pid" 2>/dev/null; do
+        if ! remote_observation_owned "$capture" "$owner"; then
+          printf '%s\n' cancelled
+          break
+        fi
+        command sleep 0.02
+      done
+      command_rc=0
+      wait "$command_pid" 2>/dev/null || command_rc=$?
+      printf '%s\n' "$command_rc"
+    ) && [ "$status" = 0 ] && remote_observation_owned "$capture" "$owner"; then
+      return 0
+    fi
+  } 3>&1
+  kill -TERM -- "-$capture" 2>/dev/null || true
+  command sleep 0.05
+  kill -KILL -- "-$capture" 2>/dev/null || true
+  return 124
 }
 
 watcher_remote_observe() {
