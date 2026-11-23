@@ -550,6 +550,7 @@ test_bootstrap_nudge_retry_rejects_malformed_marker_id() {
   assert_not_contains "$out" "BOOTSTRAP_INFO: nudged fm-../escape" \
     "malformed retry marker id must never send through a path-traversed selector"
   assert_present "$marker" "malformed retry marker should remain for operator inspection"
+  assert_absent "$w/home/state/escape.inbox" "malformed retry marker should not enqueue a steer"
   if compgen -G "$fakebin/tmux.*.composer" >/dev/null || compgen -G "$fakebin/tmux.*.submitted" >/dev/null; then
     fail "malformed retry marker should leave every tmux composer untouched"
   fi

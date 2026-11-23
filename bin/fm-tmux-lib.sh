@@ -134,30 +134,6 @@ fm_tmux_exact_target() {  # <target> [explicit]
 }
 
 # --- tmux composer capture and capability primitives ------------------------
-#
-# These four functions are the ONLY tmux-specific composer knowledge left:
-# how to capture a styled screen, how to read the cursor row, how to probe a
-# live pi agent, and the static capability facts. Every shape, glyph, border
-# family, and verdict decision lives in the shared owner
-# (bin/fm-composer-lib.sh, fm_composer_classify_screen), so a new harness
-# shape is taught there once and never here.
-
-# fm_tmux_composer_capture: the visible pane WITH ANSI styling. The styled
-# capture is consumed internally by the classifier and is NEVER surfaced
-# (fm-peek and every human/LLM-facing path stay plain).
-fm_tmux_composer_capture() {  # <target> [explicit]
-  local target
-  target=$(fm_tmux_exact_target "$@") || return 1
-  tmux capture-pane -e -p -t "$target" -S 0 -E - 2>/dev/null
-}
-
-# fm_tmux_composer_cursor_row: the pane's cursor row, zero-based, relative to
-# the visible pane - tmux's genuine primitive that no other backend has.
-fm_tmux_composer_cursor_row() {  # <target> [explicit]
-  local target
-  target=$(fm_tmux_exact_target "$@") || return 1
-  tmux display-message -p -t "$target" '#{cursor_y}' 2>/dev/null
-}
 
 # fm_tmux_composer_caps: the tmux capability descriptor - static data, not
 # logic (see the capability model in bin/fm-composer-lib.sh).
@@ -180,9 +156,8 @@ fm_tmux_composer_caps() {
 #     idle/working vocabulary herdr's probe reports natively.
 # Prints "pi<TAB>idle" or "pi<TAB>working"; exits 1 when the pane is not a
 # live pi.
-fm_tmux_composer_identity() {  # <target> [explicit]
-  local target tty pgid tpgid comm found=0 status
-  target=$(fm_tmux_exact_target "$@") || return 1
+fm_tmux_composer_identity() {  # <resolved-target>
+  local target=$1 tty pgid tpgid comm found=0 status
   tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || tty=
   case "$tty" in
     /dev/*)
@@ -204,7 +179,7 @@ EOF
     esac
   fi
   [ "$found" -eq 1 ] || return 1
-  status=$(fm_pane_busy_state "$target" pi "${2:-}")
+  status=$(fm_tmux_resolved_busy_state "$target" pi)
   case "$status" in
     busy) printf 'pi\tworking' ;;
     idle) printf 'pi\tidle' ;;
@@ -232,9 +207,9 @@ fm_tmux_composer_snapshot() {  # <target> [explicit]
   FM_COMPOSER_SNAPSHOT_TMUX_TARGET=
   # Resolve once so the cursor row and the screen come from the same window.
   target=$(fm_tmux_exact_target "$@") || return 1
-  cy=$(fm_tmux_composer_cursor_row "$target" explicit) || return 1
+  cy=$(tmux display-message -p -t "$target" '#{cursor_y}' 2>/dev/null) || return 1
   case "$cy" in ''|*[!0-9]*) return 1 ;; esac
-  pane=$(fm_tmux_composer_capture "$target" explicit) || return 1
+  pane=$(tmux capture-pane -e -p -t "$target" -S 0 -E - 2>/dev/null) || return 1
   FM_COMPOSER_SNAPSHOT_TMUX_TARGET=$target
   FM_COMPOSER_SNAPSHOT_CURSOR=$cy
   FM_COMPOSER_SNAPSHOT_SCREEN=$pane
@@ -249,7 +224,7 @@ fm_tmux_composer_classify_snapshot() {
   local caps=$FM_COMPOSER_SNAPSHOT_CAPS
   verdict=$(fm_composer_classify_screen "$caps" "$pane" "$cy")
   if [ "$verdict" = need-identity ]; then
-    if ! identity=$(fm_tmux_composer_identity "$target" explicit) || [ -z "$identity" ]; then
+    if ! identity=$(fm_tmux_composer_identity "$target") || [ -z "$identity" ]; then
       identity=probe-absent
     fi
     verdict=$(fm_composer_classify_screen "$caps" "$pane" "$cy" "$identity")
@@ -264,7 +239,7 @@ fm_tmux_composer_classify_snapshot() {
   # Gated on Cursor's own structural process identity, never on the verdict
   # alone, so the strict blank-row posture that owns `unknown` for every other
   # harness is untouched.
-  if [ "$verdict" = unknown ] && fm_tmux_pane_is_cursor "$target" explicit; then
+  if [ "$verdict" = unknown ] && fm_tmux_pane_is_cursor "$target"; then
     verdict=$(fm_composer_classify_screen "$caps" "$pane" '')
   fi
   printf '%s' "$verdict"
@@ -277,9 +252,8 @@ fm_tmux_composer_classify_snapshot() {
 # single owner is bin/fm-cursor-lib.sh. The foreground scoping (pgid = tpgid)
 # matches fm_tmux_composer_identity, so a pane whose agent exited to a shell has
 # no Cursor foreground process and gets no reclassification.
-fm_tmux_pane_is_cursor() {  # <target> [explicit]
-  local target tty pid pgid tpgid comm args argv0
-  target=$(fm_tmux_exact_target "$@") || return 1
+fm_tmux_pane_is_cursor() {  # <resolved-target>
+  local target=$1 tty pid pgid tpgid comm args argv0
   tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || return 1
   case "$tty" in /dev/*) ;; *) return 1 ;; esac
   while read -r pid pgid tpgid comm; do
@@ -304,9 +278,14 @@ fm_pane_input_pending() {  # <target>
 # fm_pane_is_busy: 0 if the pane's last few non-blank lines show a busy footer
 # (an agent mid-turn). Scans a 40-line tail like fm-watch.sh.
 fm_pane_busy_state() {  # <target> [harness] [explicit] -> busy|idle|unknown
-  local win harness=${2:-} tail40 visible
-  win=$(fm_tmux_exact_target "$1" "${3:-}") || { printf 'unknown'; return 0; }
-  tail40=$(tmux capture-pane -p -t "$win" -S -40 2>/dev/null) \
+  local target
+  target=$(fm_tmux_exact_target "$1" "${3:-}") || { printf 'unknown'; return 0; }
+  fm_tmux_resolved_busy_state "$target" "${2:-}"
+}
+
+fm_tmux_resolved_busy_state() {  # <resolved-target> <harness>
+  local target=$1 harness=$2 tail40 visible
+  tail40=$(tmux capture-pane -p -t "$target" -S -40 2>/dev/null) \
     || { printf 'unknown'; return 0; }
   visible=$(printf '%s' "$tail40" | grep -v '^[[:space:]]*$' | tail -12)
   [ -n "$visible" ] || { printf 'unknown'; return 0; }

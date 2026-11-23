@@ -363,9 +363,7 @@ test_pi_identity_requires_readable_busy_state() (
     done
     return 1
   }
-  # shellcheck disable=SC2329 # Mock invoked indirectly by the sourced adapter.
-  fm_pane_busy_state() { printf 'unknown'; }
-  if out=$(fm_tmux_composer_identity fakepane); then
+  if out=$(fm_tmux_composer_identity @1); then
     fail "a live Pi process with unreadable busy state must not produce identity, got '$out'"
   fi
   pass "fm_tmux_composer_identity: unknown busy state cannot become idle identity"

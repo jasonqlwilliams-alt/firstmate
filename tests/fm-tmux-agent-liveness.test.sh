@@ -324,14 +324,13 @@ open_composer_pane() {  # <window> <binary> <composer-text> <ghost 0|1>
 }
 
 cursor_anchored_verdict() {  # <target>
-  local cy pane
-  cy=$(fm_tmux_composer_cursor_row "$1")
-  pane=$(fm_tmux_composer_capture "$1")
-  fm_composer_classify_screen "$(fm_tmux_composer_caps)" "$pane" "$cy"
+  fm_tmux_composer_snapshot "$1" || return 1
+  fm_composer_classify_screen "$FM_COMPOSER_SNAPSHOT_CAPS" "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR"
 }
 
 open_composer_pane cursor-idle "$LAB/bin/cursor-agent" 'Plan, search, build anything' 1
-fm_tmux_pane_is_cursor "$SESSION:cursor-idle" \
+idle_target=$(fm_tmux_exact_target "$SESSION:cursor-idle") || fail "could not resolve the idle Cursor window"
+fm_tmux_pane_is_cursor "$idle_target" \
   || fail "a pane whose foreground process is cursor-agent must be identified as Cursor"
 [ "$(cursor_anchored_verdict "$SESSION:cursor-idle")" = unknown ] \
   || fail "the cursor-anchored source must be blind here, or this case proves nothing about the fallback"
@@ -348,7 +347,8 @@ pass "cursor composer: real typed text still reads pending, so the injection gua
 
 # The SAME rendered screen, with only the foreground process identity changed.
 open_composer_pane notcursor-idle "$LAB/bin/notcursor" 'Plan, search, build anything' 1
-if fm_tmux_pane_is_cursor "$SESSION:notcursor-idle"; then
+notcursor_target=$(fm_tmux_exact_target "$SESSION:notcursor-idle") || fail "could not resolve the non-Cursor window"
+if fm_tmux_pane_is_cursor "$notcursor_target"; then
   fail "a pane running a non-Cursor binary must not be identified as Cursor"
 fi
 [ "$(fm_tmux_composer_state "$SESSION:notcursor-idle")" = unknown ] \
@@ -365,7 +365,8 @@ for _ in $(seq 1 100); do
   esac
   sleep 0.1
 done
-if fm_tmux_pane_is_cursor "$SESSION:cursor-exited"; then
+exited_target=$(fm_tmux_exact_target "$SESSION:cursor-exited") || fail "could not resolve the exited Cursor window"
+if fm_tmux_pane_is_cursor "$exited_target"; then
   fail "a pane whose Cursor process exited must not still identify as Cursor"
 fi
 [ "$(fm_tmux_composer_state "$SESSION:cursor-exited")" != empty ] \
