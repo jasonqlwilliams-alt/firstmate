@@ -1,0 +1,32 @@
+Firstmate: 973510044a7dfc70f1b4b7394cee670d2723e651
+v2.0.1
+$ treehouse get --lease --lease-holder mate
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/repo-ff3c8a/1/repo. Run 'treehouse return ~/.treehouse/repo-ff3c8a/1/repo' to release it.
+$ treehouse status [before]
+1     leased       ~/.treehouse/repo-ff3c8a/1/repo  (held by mate)
+$ tmux list-windows [before]
+control, fm-mate
+Unrelated process PID=6940 cwd=<lab>/run-leased-home/account/.treehouse/repo-ff3c8a/1/repo/nested dir
+$ bin/fm-teardown.sh mate 
+<lab>/target/bin/fm-teardown.sh: line 1139: <lab>/run-leased-home/repo/bin/fm-guard.sh: No such file or directory
+REFUSED: teardown caller or ancestor (PID 6941) is in Treehouse copy <lab>/run-leased-home/account/.treehouse/repo-ff3c8a/1/repo. Retry from a separate terminal outside the task copy.
+Teardown exit: 1
+caller PID=6941 cwd=<lab>/run-leased-home/account/.treehouse/repo-ff3c8a/1/repo/nested dir
+caller PID=6941 answered after teardown, cwd=<lab>/run-leased-home/account/.treehouse/repo-ff3c8a/1/repo/nested dir
+Caller exit: 0
+$ treehouse status [after]
+1     leased       ~/.treehouse/repo-ff3c8a/1/repo  (held by mate)
+                   sleep (6940)
+$ tmux list-windows [after]
+control, fm-mate
+Task metadata: byte-identical
+Pending close record present: False
+Slot claim present: False
+Git branch before/after: HEAD / HEAD
+Git commit before/after: 2ba6b80541bf194b74744eeb3bc53ce9af008d1b / 2ba6b80541bf194b74744eeb3bc53ce9af008d1b
+Work file after: synthetic change that must survive refused cleanup
+Tracked settings after: {"from":"tracked project settings"}
+Generated hook after: (removed)
+Unrelated process after teardown: alive
+Observed result: pass

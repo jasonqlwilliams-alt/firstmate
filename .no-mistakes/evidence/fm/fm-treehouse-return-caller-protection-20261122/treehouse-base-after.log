@@ -1,0 +1,25 @@
+Firstmate: 0464e0e2e12c319129f904dc936b6830c68d5a51
+v2.0.1
+$ treehouse get --lease --lease-holder ship
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/repo-6bc4a9/1/repo. Run 'treehouse return ~/.treehouse/repo-6bc4a9/1/repo' to release it.
+$ treehouse status [before]
+1     leased       ~/.treehouse/repo-6bc4a9/1/repo  (held by ship)
+$ tmux list-windows [before]
+control, fm-ship
+Unrelated process PID=7343 cwd=<lab>/run-base-after/account/.treehouse/repo-6bc4a9/1/repo/nested dir
+Before wrapper exit: caller=7344, wrapper=7345 (PPID=7344), teardown=7346 (PPID=7345)
+Traceback (most recent call last):
+  File "<lab>/live.py", line 193, in case_run
+    wait_for(lambda: (case / "scan-ready").exists(), "entry to Firstmate's real lsof scan")
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<lab>/live.py", line 23, in wait_for
+    raise RuntimeError(f"Timed out waiting for {label}")
+RuntimeError: Timed out waiting for entry to Firstmate's real lsof scan
+
+Teardown transcript:
+$ bin/fm-teardown.sh ship --force
+error: refusing fleet lifecycle from inside a no-mistakes gate worktree (~/.no-mistakes/repos/e95238b70e4e.git)
+
+caller PID=7344 cwd=<lab>/run-base-after/account/.treehouse/repo-6bc4a9/1/repo/nested dir
+

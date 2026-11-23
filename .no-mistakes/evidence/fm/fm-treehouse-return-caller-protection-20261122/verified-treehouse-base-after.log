@@ -1,0 +1,63 @@
+Firstmate: 0464e0e2e12c319129f904dc936b6830c68d5a51
+v2.0.1
+$ treehouse get --lease --lease-holder ship
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/repo-b67f56/1/repo. Run 'treehouse return ~/.treehouse/repo-b67f56/1/repo' to release it.
+$ treehouse status [before]
+1     leased       ~/.treehouse/repo-b67f56/1/repo  (held by ship)
+$ tmux list-windows [before]
+control, fm-ship
+Unrelated process PID=7386 cwd=<lab>/live-base-after/account/.treehouse/repo-b67f56/1/repo/nested dir
+Before wrapper exit: caller=7387, wrapper=7388 (PPID=7387), teardown=7389 (PPID=7388)
+Wrapper exit synchronized after Firstmate's startup ancestry snapshot, before its first real cwd scan.
+After wrapper exit: teardown=7389 PPID=1; original caller=7387, SID=7387
+$ bin/fm-teardown.sh ship --force
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 2s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown: reaping leaked worktree process(es) for ship: 7386 8188
+🌳 Terminated lingering processes: bash (7387), sleep (8380)
+🌳 Worktree returned to pool.
+teardown ship complete (window fixture:fm-ship, worktree <lab>/live-base-after/account/.treehouse/repo-b67f56/1/repo)
+Backlog: ship is closed in <lab>/live-base-after/firstmate-home/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.
+Teardown exit: 0
+caller PID=7387 cwd=<lab>/live-base-after/account/.treehouse/repo-b67f56/1/repo/nested dir
+caller got TERM
+Caller exit: 143
+$ treehouse status [after]
+1     available    ~/.treehouse/repo-b67f56/1/repo
+$ tmux list-windows [after]
+control
+Task metadata: removed
+Pending close record present: False
+Slot claim present: False
+Git branch before/after: fm/ship / HEAD
+Git commit before/after: 4b6fb11f2e761a599af99ca193d900512d44e2dd / 4b6fb11f2e761a599af99ca193d900512d44e2dd
+Work file after: landed work
+Tracked settings after: {"from":"tracked project settings"}
+Generated hook after: (removed)
+Unrelated process after teardown: exited (-15)
+$ tasks-axi show ship
+task:
+  id: ship
+  title: Local Treehouse proof
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+  hold_kind: "-"
+  hold_until: "-"
+  kind: ship
+  repo: "-"
+  priority: "-"
+  created: "-"
+  closed: 2026-11-23
+  deps: none
+  links: none
+  body: local main
+Observed result: base reproduces caller termination

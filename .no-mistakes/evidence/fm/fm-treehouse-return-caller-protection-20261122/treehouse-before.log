@@ -1,0 +1,64 @@
+Firstmate: 973510044a7dfc70f1b4b7394cee670d2723e651
+v2.0.1
+$ treehouse get --lease --lease-holder ship
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/repo-a68e19/1/repo. Run 'treehouse return ~/.treehouse/repo-a68e19/1/repo' to release it.
+$ treehouse status [before]
+1     leased       ~/.treehouse/repo-a68e19/1/repo  (held by ship)
+$ tmux list-windows [before]
+control, fm-ship
+Unrelated process PID=1237 cwd=<lab>/run-before/account/.treehouse/repo-a68e19/1/repo/nested dir
+Before wrapper exit: caller=1238, wrapper=1239 (PPID=1238), teardown=1240 (PPID=1239)
+After wrapper exit: teardown=1240 PPID=1; original caller=1238, SID=1238
+$ bin/fm-teardown.sh ship --force
+error: refusing fleet lifecycle from inside a no-mistakes gate worktree (~/.no-mistakes/repos/e95238b70e4e.git)
+Teardown exit: 3
+caller PID=1238 cwd=<lab>/run-before/account/.treehouse/repo-a68e19/1/repo/nested dir
+caller PID=1238 answered after teardown, cwd=<lab>/run-before/account/.treehouse/repo-a68e19/1/repo/nested dir
+Caller exit: 0
+$ treehouse status [after]
+1     leased       ~/.treehouse/repo-a68e19/1/repo  (held by ship)
+                   sleep (1237)
+$ tmux list-windows [after]
+control, fm-ship
+Task metadata: byte-identical
+Pending close record present: False
+Slot claim present: True
+Git branch before/after: fm/ship / fm/ship
+Git commit before/after: 3783a035fa8a6041aa6ce5d4e251fd004a4eef01 / 3783a035fa8a6041aa6ce5d4e251fd004a4eef01
+Work file after: synthetic change that must survive refused cleanup
+Tracked settings after: {"from":"tracked project settings"}
+Generated hook after: // disposable generated hook
+Unrelated process after teardown: alive
+$ tasks-axi show ship
+task:
+  id: ship
+  title: Local Treehouse proof
+  state: in_flight
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+  hold_kind: "-"
+  hold_until: "-"
+  kind: ship
+  repo: "-"
+  priority: "-"
+  created: 2026-11-23
+  closed: "-"
+  deps: none
+  links: none
+  body: ""
+Traceback (most recent call last):
+  File "<lab>/live.py", line 257, in case_run
+    assert rc != 0 and reason in cli, f"Expected caller refusal ({reason}), got {rc}"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Expected caller refusal (cannot verify teardown caller ancestry), got 3
+
+Teardown transcript:
+$ bin/fm-teardown.sh ship --force
+error: refusing fleet lifecycle from inside a no-mistakes gate worktree (~/.no-mistakes/repos/e95238b70e4e.git)
+
+caller PID=1238 cwd=<lab>/run-before/account/.treehouse/repo-a68e19/1/repo/nested dir
+caller PID=1238 answered after teardown, cwd=<lab>/run-before/account/.treehouse/repo-a68e19/1/repo/nested dir
+

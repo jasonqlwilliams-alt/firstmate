@@ -1,0 +1,23 @@
+Firstmate: 973510044a7dfc70f1b4b7394cee670d2723e651
+v2.0.1
+$ treehouse get --lease --lease-holder ship
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/repo-d4f624/1/repo. Run 'treehouse return ~/.treehouse/repo-d4f624/1/repo' to release it.
+$ treehouse status [before]
+1     leased       ~/.treehouse/repo-d4f624/1/repo  (held by ship)
+$ tmux list-windows [before]
+control, fm-ship
+Traceback (most recent call last):
+  File "<lab>/live.py", line 206, in case_run
+    wait_for(lambda: "waiting 3s and retrying" in read_file(case / "cli.log"), "real Treehouse index.lock error and retry wait")
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<lab>/live.py", line 23, in wait_for
+    raise RuntimeError(f"Timed out waiting for {label}")
+RuntimeError: Timed out waiting for real Treehouse index.lock error and retry wait
+
+Teardown transcript:
+$ bin/fm-teardown.sh ship --force
+error: refusing fleet lifecycle from inside a no-mistakes gate worktree (~/.no-mistakes/repos/e95238b70e4e.git)
+
+caller PID=1797 cwd=<lab>/run-retry
+

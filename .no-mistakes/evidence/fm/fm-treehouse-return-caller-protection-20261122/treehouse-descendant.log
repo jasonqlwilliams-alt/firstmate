@@ -1,0 +1,58 @@
+Firstmate: 973510044a7dfc70f1b4b7394cee670d2723e651
+v2.0.1
+$ treehouse get --lease --lease-holder child
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/repo-54d799/1/repo. Run 'treehouse return ~/.treehouse/repo-54d799/1/repo' to release it.
+$ treehouse status [before]
+1     leased       ~/.treehouse/repo-54d799/1/repo  (held by child)
+$ tmux list-windows [before]
+control, fm-mate, fm-child
+Unrelated process PID=6012 cwd=<lab>/run-descendant/account/.treehouse/repo-54d799/1/repo/nested dir
+$ bin/fm-teardown.sh mate --force
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REFUSED: teardown caller or ancestor (PID 6013) is in Treehouse copy <lab>/run-descendant/account/.treehouse/repo-54d799/1/repo. Retry from a separate terminal outside the task copy.
+Teardown exit: 1
+caller PID=6013 cwd=<lab>/run-descendant/account/.treehouse/repo-54d799/1/repo/nested dir
+caller PID=6013 answered after teardown, cwd=<lab>/run-descendant/account/.treehouse/repo-54d799/1/repo/nested dir
+Caller exit: 0
+$ treehouse status [after]
+1     leased       ~/.treehouse/repo-54d799/1/repo  (held by child)
+                   sleep (6012)
+$ tmux list-windows [after]
+control, fm-mate, fm-child
+Task metadata: byte-identical
+Pending close record present: False
+Slot claim present: True
+Git branch before/after: fm/child / fm/child
+Git commit before/after: d563204f7007317a0eb62fa8c14e2582c30f1709 / d563204f7007317a0eb62fa8c14e2582c30f1709
+Work file after: synthetic change that must survive refused cleanup
+Tracked settings after: {"from":"tracked project settings"}
+Generated hook after: // disposable generated hook
+Unrelated process after teardown: alive
+$ tasks-axi show child
+task:
+  id: child
+  title: Local Treehouse proof
+  state: in_flight
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+  hold_kind: "-"
+  hold_until: "-"
+  kind: ship
+  repo: "-"
+  priority: "-"
+  created: 2026-11-23
+  closed: "-"
+  deps: none
+  links: none
+  body: ""
+Child metadata byte-identical: True
+Observed result: pass
