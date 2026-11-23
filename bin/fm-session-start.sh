@@ -843,13 +843,14 @@ for meta in "$STATE"/*.meta; do
   target=$(fm_backend_target_of_meta "$meta")
   if [ -n "$window" ]; then
     backend=$(fm_backend_of_meta "$meta")
-    if FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_target_exists "$backend" "${target:-$window}" "fm-$id"; then
+    if fm_backend_endpoint_parked_retained "$meta" &&
+        endpoint_state=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_agent_state "$backend" "$target" 2>/dev/null) &&
+        [ "$endpoint_state" = missing ]; then
+      printf 'endpoint: parked, copy retained (backend=%s window=%s)\n' "$backend" "$window"
+    elif FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_target_exists "$backend" "${target:-$window}" "fm-$id"; then
       printf 'endpoint: alive (backend=%s window=%s)\n' "$backend" "$window"
     elif [ "$?" -eq 2 ] && [ "$backend" = herdr ]; then
       printf 'endpoint: unknown (unreadable identity, backend=%s window=%s)\n' "$backend" "$window"
-    elif fm_backend_endpoint_parked_retained "$meta"; then
-      # A current park mark (bin/fm-park-retained.sh) binds this incarnation.
-      printf 'endpoint: parked, copy retained (backend=%s window=%s)\n' "$backend" "$window"
     else
       printf 'endpoint: dead (backend=%s window=%s)\n' "$backend" "$window"
     fi

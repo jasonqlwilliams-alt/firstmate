@@ -1352,27 +1352,30 @@ EOF
 }
 
 test_endpoint_liveness_parked_retained() {
-  local rec root home fakebin out
+  local rec root home fakebin out id
   rec=$(new_world liveness-parked)
   IFS='|' read -r root home fakebin <<EOF
 $rec
 EOF
   make_fake_toolchain "$fakebin"
   make_fake_ps_claude "$fakebin"
-  # The park command confirms the endpoint missing from the session's window inventory.
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
-case "${1:-}" in
-  list-windows) printf 'live-window\n'; exit 0 ;;
+case "$*" in
+  'list-windows -t fm-sess -F #{window_name}') printf 'fm-mate2\n' ;;
+  'display-message -p -t fm-sess:fm-mate #{pane_id}'|'display-message -p -t fm-sess:fm-mate2 #{pane_id}')
+    printf '%%1\n'
+    ;;
+  *) exit 1 ;;
 esac
-exit 1
 SH
   chmod +x "$fakebin/tmux"
 
-  printf 'window=fm-sess:parked-window\nkind=ship\nspawn_gen=spawn-parked\n' > "$home/state/task-parked.meta"
+  printf 'window=fm-sess:fm-mate\nkind=ship\nspawn_gen=spawn-parked\n' > "$home/state/mate.meta"
+  printf 'window=fm-sess:fm-mate2\nkind=ship\n' > "$home/state/mate2.meta"
   printf 'window=fm-sess:stale-window\nkind=ship\nspawn_gen=spawn-stale\n' > "$home/state/task-stale.meta"
   printf 'window=fm-sess:dead-window\nkind=ship\nspawn_gen=spawn-dead\n' > "$home/state/task-dead.meta"
-  for id in task-parked task-stale; do
+  for id in mate task-stale; do
     PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
       "$ROOT/bin/fm-park-retained.sh" "$id" mark >/dev/null \
       || fail "could not park $id for the digest fixture"
@@ -1381,16 +1384,52 @@ SH
   printf 'window=fm-sess:stale-window\nkind=ship\nspawn_gen=spawn-stale-2\n' > "$home/state/task-stale.meta"
 
   out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
-  assert_contains "$out" "endpoint: parked, copy retained (backend=tmux window=fm-sess:parked-window)" \
-    "parked task with a current mark not reported parked with its copy retained"
-  assert_not_contains "$out" "endpoint: dead (backend=tmux window=fm-sess:parked-window)" \
-    "parked task with a current mark still reported dead"
+  assert_contains "$out" "endpoint: parked, copy retained (backend=tmux window=fm-sess:fm-mate)" \
+    "the live neighboring window masked the parked tmux endpoint"
+  assert_contains "$out" "endpoint: alive (backend=tmux window=fm-sess:fm-mate2)" \
+    "the unmarked neighboring tmux window was not reported alive"
   assert_contains "$out" "endpoint: dead (backend=tmux window=fm-sess:stale-window)" \
     "a mark bound to an older incarnation hid a gone endpoint"
   assert_contains "$out" "endpoint: dead (backend=tmux window=fm-sess:dead-window)" \
     "unmarked gone endpoint not reported dead"
 
-  pass "a current park mark shows its gone endpoint as parked; stale and unmarked ones stay dead"
+  pass "a parked tmux endpoint takes precedence over its neighbor; stale and unmarked gone endpoints stay dead"
+}
+
+test_endpoint_liveness_parked_herdr_stopped_server() {
+  local rec root home fakebin out
+  rec=$(new_world liveness-parked-herdr)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_claude "$fakebin"
+  cat > "$fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'status --json --session stopped') printf '%s\n' '{"server":{"running":false}}' ;;
+  'pane get '*\ --session\ stopped)
+    printf '%s\n' '{"error":{"code":"server_not_running"}}' >&2
+    exit 1
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$fakebin/herdr"
+
+  printf 'window=stopped:p-parked\nkind=ship\nbackend=herdr\nherdr_terminal_id=term-parked\nspawn_gen=spawn-parked\n' > "$home/state/task-parked.meta"
+  printf 'window=stopped:p-unmarked\nkind=ship\nbackend=herdr\nherdr_terminal_id=term-unmarked\n' > "$home/state/task-unmarked.meta"
+  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+    "$ROOT/bin/fm-park-retained.sh" task-parked mark >/dev/null \
+    || fail "could not mark the task on the stopped Herdr server"
+
+  out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+  assert_contains "$out" "endpoint: parked, copy retained (backend=herdr window=stopped:p-parked)" \
+    "the unreadable pane masked the parked endpoint on a stopped Herdr server"
+  assert_contains "$out" "endpoint: unknown (unreadable identity, backend=herdr window=stopped:p-unmarked)" \
+    "the unmarked Herdr endpoint lost its unreadable identity verdict"
+
+  pass "a current Herdr park mark uses the stopped server as proof of absence"
 }
 
 test_endpoint_liveness_herdr() {
@@ -2763,6 +2802,7 @@ test_status_tail_line_cap
 test_orphan_status_logs_are_printed
 test_endpoint_liveness_tmux
 test_endpoint_liveness_parked_retained
+test_endpoint_liveness_parked_herdr_stopped_server
 test_endpoint_liveness_herdr
 test_composition_invokes_real_scripts
 test_branch_outcome_replay_respects_captain_barrier_and_lease_sweep
