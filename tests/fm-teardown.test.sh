@@ -2767,9 +2767,14 @@ SH
     || fail 'child return removed a project directory at a hook path'
   assert_not_contains "$(cat "$case_dir/retry.stderr")" '.fm-grok-turnend' \
     'child return attempted to unlink a project directory'
-  [ "$case_dir/child-a-wt/.fm-Kimi-turnend" -ef "$case_dir/child-a-wt/.fm-kimi-turnend" ] \
-    && [ "$(cat "$case_dir/child-a-wt/.fm-kimi-turnend")" = 'project hook' ] \
-    || fail 'child return removed a hook sharing an indexed file identity'
+  [ "$(cat "$case_dir/child-a-wt/.fm-Kimi-turnend")" = 'project hook' ] \
+    || fail 'child return removed the tracked hook'
+  if [ "$case_dir/project/.fm-Kimi-turnend" -ef "$case_dir/project/.fm-kimi-turnend" ]; then
+    [ "$case_dir/child-a-wt/.fm-Kimi-turnend" -ef "$case_dir/child-a-wt/.fm-kimi-turnend" ] \
+      || fail 'child return removed a tracked hook through a spelling alias'
+  else
+    assert_absent "$case_dir/child-a-wt/.fm-kimi-turnend" 'child return retained a distinct untracked hard link'
+  fi
   pass "forced secondmate teardown holds every descendant lifecycle and metadata lock"
 }
 
@@ -3862,7 +3867,7 @@ test_proc_cwd_read_failure_preserves_copy() (
   FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
     run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
   expect_code 1 "$rc" 'proc-cwd-read-failure: cleanup should refuse'
-  assert_grep '(/proc failed)' "$case_dir/stderr" 'proc-cwd-read-failure: missing scan refusal'
+  assert_grep 'cannot verify caller working directories' "$case_dir/stderr" 'proc-cwd-read-failure: missing scan refusal'
   assert_present "$case_dir/state/task-x1.meta" 'proc-cwd-read-failure: cleanup retired task metadata'
   assert_absent "$case_dir/returned" 'proc-cwd-read-failure: cleanup returned the worktree'
   kill -0 "$leak_pid" 2>/dev/null || fail 'proc-cwd-read-failure: cleanup signalled the leak'
@@ -3914,7 +3919,7 @@ SH
   assert_present "$case_dir/caller" "hidden intermediate parent ($scanner): cleanup signalled the calling shell"
   kill -0 "$leak_pid" 2>/dev/null || fail "hidden intermediate parent ($scanner): cleanup signalled another match before refusing"
   assert_present "$case_dir/state/task-x1.meta" "hidden intermediate parent ($scanner): cleanup retired task metadata"
-  assert_grep 'REFUSED: cannot rule out a teardown ancestor among cwd matches' "$case_dir/stderr" \
+  assert_grep 'REFUSED: cannot verify teardown caller ancestry' "$case_dir/stderr" \
     "hidden intermediate parent ($scanner): cleanup did not report the ambiguous ancestry"
   pass "cleanup with $scanner refuses an ambiguous ancestor without signalling either cwd match"
 )
@@ -4006,6 +4011,9 @@ test_reparented_teardown_preserves_original_caller() (
   else
     write_meta "$case_dir" no-mistakes ship
     case "$mode" in
+      inside)
+        printf '%s\n' manual > "$case_dir/config/backlog-backend"
+        ;;
       inside-backlog|retry|stale|stale-edit)
         backlog_case=1
         seed_backlog_in_flight "$case_dir"
@@ -4056,7 +4064,7 @@ test_reparented_teardown_preserves_original_caller() (
   cat > "$case_dir/fakebin/lsof" <<'SH'
 #!/usr/bin/env bash
 [ "$1" != -- ] || exit 1
-if [ "$FM_TEST_REPARENT_MODE" = hidden ] || [[ "$FM_TEST_REPARENT_MODE" == child* ]]; then
+if [[ "$FM_TEST_REPARENT_MODE" == child* ]]; then
   : > "$FM_TEST_REPARENT_DIR/release"
 fi
 if [ -f "$FM_TEST_REPARENT_DIR/release" ] || [ -f "$FM_TEST_REPARENT_DIR/term" ]; then
@@ -4148,6 +4156,10 @@ SH
     if [ "$mode" = inside ] || [ "$mode" = inside-backlog ] || [ "$mode" = hidden ] || [ "$mode" = before-start ]; then
       cd "$copy" || exit 1
     fi
+    if [ "$mode" = inside ]; then
+      FM_FAKE_AXI_STATUS=$(parked_axi_status_toon "$task_branch" "$(git rev-parse HEAD)")
+      export FM_FAKE_AXI_STATUS FM_FAKE_NM_ABORT_LOG="$case_dir/nm-abort.log"
+    fi
     exec 3<>"$case_dir/result"
     export FM_TEST_REAP_CALLER=$BASHPID FM_TEST_REAP_LEAK=$leak_pid FM_TEST_REPARENT_DIR="$case_dir"
     export FM_TEST_REPARENT_MODE=$mode FM_TEST_REPARENT_LOCK=$lock
@@ -4198,9 +4210,10 @@ SH
     exit "$rc"
   ) > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
 
-  if [ "$mode" != inside-backlog ]; then
-    assert_present "$case_dir/reparented" 'reparented teardown: parent did not change'
-  fi
+  case "$mode" in
+    inside|inside-backlog|hidden) ;;
+    *) assert_present "$case_dir/reparented" 'reparented teardown: parent did not change' ;;
+  esac
   assert_present "$case_dir/caller" 'reparented teardown: cleanup signalled the original caller'
   assert_absent "$case_dir/would-stop" 'Treehouse return would have stopped the original caller'
   if [ "$mode" = hidden ] || [ "$mode" = before-start ]; then
@@ -4209,13 +4222,15 @@ SH
     assert_absent "$case_dir/treehouse.log" 'reparented teardown: returned a copy with unknown startup ancestry'
     assert_absent "$case_dir/term" 'reparented teardown: refusal came after sending TERM'
     kill -0 "$leak_pid" 2>/dev/null || fail 'reparented teardown: refusal came after killing the leak'
-    assert_grep 'REFUSED: cannot rule out a teardown ancestor among cwd matches' "$case_dir/stderr" \
+    assert_grep 'REFUSED: cannot verify teardown caller ancestry' "$case_dir/stderr" \
       'reparented teardown: refusal did not report ambiguous ancestry'
     pass "cleanup refuses cwd matches with unknown startup ancestry ($mode)"
     return 0
   fi
-  if [ "$mode" = inside-backlog ]; then
+  if [ "$mode" = inside ] || [ "$mode" = inside-backlog ]; then
     assert_absent "$case_dir/term" 'initial caller refusal let the reaper signal the leak'
+    kill -0 "$leak_pid" 2>/dev/null || fail 'initial caller refusal came after killing the leak'
+    assert_absent "$case_dir/nm-abort.log" 'initial caller refusal let teardown cancel a parked run'
   elif [[ "$mode" != child* ]]; then
     wait "$leak_pid" || fail 'reparented teardown: leak did not exit through its TERM handler'
     trap - EXIT
@@ -4284,7 +4299,7 @@ SH
   pass "cleanup protects its original caller after reparenting ($mode, prior close: $prior_close)"
 )
 
-test_lsof_absent_on_non_linux_reaps_tmux_process_group() {
+test_lsof_absent_on_non_linux_preserves_tmux_process_group() {
   local case_dir rc pid path_without_lsof real_uname
   case_dir=$(make_case lsof-absent-process-group-reap)
   write_meta "$case_dir" no-mistakes ship
@@ -4321,13 +4336,9 @@ EOF
   assert_grep 'cannot verify caller working directories' "$case_dir/stderr" \
     "lsof-absent-process-group-reap: teardown did not report the return refusal"
   assert_present "$case_dir/state/task-x1.meta" "lsof-absent-process-group-reap: refusal retired task metadata"
-  if kill -0 "$pid" 2>/dev/null; then
-    kill -KILL "$pid" 2>/dev/null || true
-    fail "lsof-absent-process-group-reap: tmux process group survived teardown"
-  fi
-  assert_grep "reaping leaked worktree process group" "$case_dir/stderr" \
-    "lsof-absent-process-group-reap: teardown did not use the process-group fallback"
-  pass "missing lsof on a non-Linux host falls back to reaping the tmux pane process group"
+  kill -0 "$pid" 2>/dev/null || fail "lsof-absent-process-group-reap: refusal killed the tmux process group"
+  kill -KILL "$pid" 2>/dev/null || true
+  pass "missing lsof on a non-Linux host refuses Treehouse return before reaping the tmux pane process group"
 }
 
 test_lsof_error_refuses_before_removal() {
@@ -4349,7 +4360,7 @@ EOF
   run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
 
   expect_code 1 "$rc" "lsof-error-refusal: teardown should refuse"
-  assert_grep "REFUSED: cannot determine leaked processes under $case_dir/wt for task-x1 (lsof failed)" "$case_dir/stderr" \
+  assert_grep 'cannot verify caller working directories' "$case_dir/stderr" \
     "lsof-error-refusal: teardown did not explain the lsof refusal"
   assert_present "$case_dir/wt" "lsof-error-refusal: teardown removed the worktree"
   assert_present "$case_dir/state/task-x1.meta" "lsof-error-refusal: teardown removed task metadata"
@@ -4373,7 +4384,7 @@ count=0
 [ ! -f '$case_dir/lsof-count' ] || count=\$(cat '$case_dir/lsof-count')
 count=\$((count + 1))
 printf '%s\n' "\$count" > '$case_dir/lsof-count'
-if [ "\$count" -le 3 ]; then printf 'p%s\nfcwd\nn%s\n' '$pid' '$case_dir/wt'; fi
+if [ "\$count" -le 4 ]; then printf 'p%s\nfcwd\nn%s\n' '$pid' '$case_dir/wt'; fi
 EOF
   cat > "$case_dir/fakebin/ps" <<'SH'
 #!/usr/bin/env bash
@@ -4436,11 +4447,7 @@ exec "$REAL_PS_FOR_TEST" "$@"
 SH
   cat > "$case_dir/fakebin/lsof" <<'SH'
 #!/usr/bin/env bash
-count=0
-[ ! -f "$FM_FAKE_LSOF_COUNT" ] || count=$(cat "$FM_FAKE_LSOF_COUNT")
-count=$((count + 1))
-printf '%s\n' "$count" > "$FM_FAKE_LSOF_COUNT"
-if [ "$count" -eq 2 ]; then
+if [ -e "$FM_FAKE_EXEC_MARKER" ]; then
   i=0
   while [ "$i" -lt 100 ]; do
     [ ! -e "$FM_FAKE_EXEC_DONE" ] || break
@@ -4455,7 +4462,7 @@ SH
   rc=0
   FM_PROC_ROOT_OVERRIDE="$case_dir/no-proc" \
   FM_FAKE_EXEC_PID="$pid" FM_FAKE_EXEC_MARKER="$marker" \
-  FM_FAKE_EXEC_DONE="$done_flag" FM_FAKE_LSOF_COUNT="$case_dir/lsof-count" \
+  FM_FAKE_EXEC_DONE="$done_flag" \
     run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
 
   if kill -0 "$pid" 2>/dev/null; then
@@ -4556,7 +4563,7 @@ count=0
 [ ! -f "$case_dir/lsof-count" ] || count=\$(cat "$case_dir/lsof-count")
 count=\$((count + 1))
 printf '%s\n' "\$count" > "$case_dir/lsof-count"
-if [ "\$count" -eq 1 ]; then
+if [ "\$count" -eq 2 ]; then
   printf 'p%s\nfcwd\nn%s\n' '$fake_pid' '$wt_path'
 fi
 EOF
@@ -5212,7 +5219,7 @@ test_not_found_status_after_abort_confirms_completion
 test_another_branchs_parked_run_is_never_touched
 test_own_autonomous_run_is_left_alone
 test_leaked_tasktmp_process_is_reaped
-test_lsof_absent_on_non_linux_reaps_tmux_process_group
+test_lsof_absent_on_non_linux_preserves_tmux_process_group
 test_lsof_error_refuses_before_removal
 test_reused_pid_identity_is_not_force_killed
 test_exec_changed_process_is_still_reaped

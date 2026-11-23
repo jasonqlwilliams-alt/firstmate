@@ -1865,7 +1865,7 @@ remove_untracked_treehouse_hooks() {
     }
     exit 0 unless %candidates;
 
-    my %untracked = map { $_ => 1 } values %candidates;
+    my %eligible = map { $_ => 1 } values %candidates;
     open my $tracked, "-|", "git", "-C", $copy, "ls-files", "--cached", "-z" or exit 0;
     local $/ = "\0";
     while (my $path = <$tracked>) {
@@ -1873,7 +1873,14 @@ remove_untracked_treehouse_hooks() {
       delete $candidates{$path};
       my @entry = lstat "$copy/$path";
       if (@entry) {
-        delete $untracked{"$entry[0]:$entry[1]"};
+        my $identity = "$entry[0]:$entry[1]";
+        next unless $eligible{$identity};
+        my $actual = resolve_path($copy, $path);
+        if (defined $actual) {
+          delete $candidates{$actual};
+        } else {
+          delete $eligible{$identity};
+        }
       } elsif ($! != ENOENT && $! != ENOTDIR) {
         exit 0;
       }
@@ -1882,7 +1889,7 @@ remove_untracked_treehouse_hooks() {
 
     for my $path (keys %candidates) {
       my $identity = $candidates{$path};
-      next unless $untracked{$identity};
+      next unless $eligible{$identity};
       my @entry = lstat "$copy/$path";
       next unless @entry && "$entry[0]:$entry[1]" eq $identity;
       if (!unlink("$copy/$path") && $! != ENOENT) {
@@ -3826,8 +3833,7 @@ BACKLOG_TRANSITION=$TEARDOWN_BACKLOG_TRANSITION
 BACKLOG_TRANSITION_FLAGS=()
 [ "$BACKLOG_TRANSITION" = close ] || BACKLOG_TRANSITION_FLAGS=(--retain)
 BACKLOG_SKIP_REASON=
-if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ] \
-   && { [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ] || [ -e "$BACKLOG_CLOSE_MARKER" ] || [ -L "$BACKLOG_CLOSE_MARKER" ]; }; then
+if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
   require_treehouse_return_caller_outside "$WT" || {
     teardown_treehouse_backlog_rollback || exit 1
     exit 1
