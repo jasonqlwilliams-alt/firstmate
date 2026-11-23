@@ -1,0 +1,3 @@
+fixture session registration exceeded 1s
+Stopped anchor before record publication. Registration returned after 1s.
+Launcher and anchor were both reaped, no session record was published, and Bash monitor mode remained enabled.

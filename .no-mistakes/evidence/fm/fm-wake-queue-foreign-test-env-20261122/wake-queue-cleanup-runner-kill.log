@@ -1,0 +1,4 @@
+runner-kill: live watcher and child started before the watcher opened state
+Runner killed the test group and removed its temp tree. The released watcher recreated state before the reaper resumed.
+Reaper exited. Watcher, descendant, fixture state and ownership registry are gone.
+Bash monitor mode enabled

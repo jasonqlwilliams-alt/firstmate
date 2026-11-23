@@ -1,0 +1,7 @@
+Revision: 0464e0e; mode: base-normal; lsof on PATH: absent
+ok - foreign secondmate queue alerts once per no-progress episode without age-only or cascade noise
+
+real	0m5.640s
+user	0m3.130s
+sys	0m1.936s
+Selected test exit: 0

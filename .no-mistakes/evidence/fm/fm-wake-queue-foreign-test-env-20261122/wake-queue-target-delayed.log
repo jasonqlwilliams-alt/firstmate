@@ -1,0 +1,11 @@
+Revision: f4907044; mode: target-delayed; lsof on PATH: absent
+not ok - first: expected observation marker 1000	100-7 (exit 124)
+stdout: checkpoint: no actionable wake within 4s
+stderr: 
+actual marker: <missing>
+
+real	0m4.163s
+user	0m0.057s
+sys	0m0.040s
+fm-watch.sh startup held for 5s
+Selected test exit: 1

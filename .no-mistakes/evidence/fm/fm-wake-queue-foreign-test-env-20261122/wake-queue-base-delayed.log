@@ -1,0 +1,10 @@
+Revision: 0464e0e; mode: base-delayed; lsof on PATH: absent
+not ok - a foreign queue with no progress did not alert: checkpoint: no actionable wake within 1s
+
+real	0m3.232s
+user	0m0.068s
+sys	0m0.066s
+fm-watch.sh startup held for 5s
+fm-watch.sh startup held for 5s
+fm-watch.sh startup held for 5s
+Selected test exit: 1

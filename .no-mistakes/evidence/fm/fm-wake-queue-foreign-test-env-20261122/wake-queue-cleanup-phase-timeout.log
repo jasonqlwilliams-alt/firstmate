@@ -1,0 +1,8 @@
+phase-timeout: live watcher and child started before the watcher opened state
+Blocked watcher hit the phase deadline after 30.2s and the test reported failure.
+Reaper exited. Watcher, descendant, fixture state and ownership registry are gone.
+Bash monitor mode enabled
+not ok - first: watcher phase exceeded its hang deadline (exit 124)
+stdout: 
+stderr: 
+actual marker: <missing>

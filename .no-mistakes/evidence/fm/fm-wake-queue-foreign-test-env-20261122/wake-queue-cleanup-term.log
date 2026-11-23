@@ -1,0 +1,4 @@
+term: live watcher and child started before the watcher opened state
+Test received TERM and exited 143 after waiting for its reaper.
+Reaper exited. Watcher, descendant, fixture state and ownership registry are gone.
+Bash monitor mode enabled

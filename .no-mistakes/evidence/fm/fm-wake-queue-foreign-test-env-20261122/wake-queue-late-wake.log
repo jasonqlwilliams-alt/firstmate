@@ -1,0 +1,6 @@
+not ok - first: quiet poll produced a parent wake (exit 0)
+stdout: signal: {run-worktree}/.wake-validation.mOKJiq/late-wake/tmp/fm-wake-tests.hKQViI/secondmate-foreign-stall/state/mate.status
+stderr: 
+actual marker: 1000	100-7
+Fault-injected selected test exit: 1 (expected rejection is 1)
+Published progress observed before the end of the poll

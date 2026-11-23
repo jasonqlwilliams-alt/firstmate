@@ -1,0 +1,31 @@
+Mode: repaired-delayed-monitor; lsof on PATH: absent
+Bash monitor mode enabled
+ok - foreign secondmate queue alerts once per no-progress episode without age-only or cascade noise
+Phase first
+  Terminal poll wait reached. Watcher wake output: 0 bytes.
+Phase progress
+  Terminal poll wait reached. Watcher wake output: 0 bytes.
+Phase stalled
+check: secondmate wake-loop stalled: mate=mate row=8 idle=2s
+Phase next
+  Terminal poll wait reached. Watcher wake output: 0 bytes.
+Phase refrozen
+check: secondmate wake-loop stalled: mate=mate row=9 idle=2s
+Parent drain output before acknowledgement
+1004	1	check	secondmate-wake-loop-mate-100-8	check: secondmate wake-loop stalled: mate=mate row=8 idle=2s
+Parent acknowledgement receipt
+WAKE_ACK_REQUIRED (acknowledged by fm-wake-drain.sh)
+Durable parent queue after renewed stall
+1012	2	check	secondmate-wake-loop-mate-100-9	check: secondmate wake-loop stalled: mate=mate row=9 idle=2s
+Retained foreign queue
+100	9	check	next	check: next row
+
+real	0m30.287s
+user	0m5.954s
+sys	0m2.760s
+fm-watch.sh startup held for 5s
+fm-watch.sh startup held for 5s
+fm-watch.sh startup held for 5s
+fm-watch.sh startup held for 5s
+fm-watch.sh startup held for 5s
+Selected test exit: 0
