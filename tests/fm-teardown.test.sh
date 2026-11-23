@@ -1619,38 +1619,50 @@ test_lsof_error_never_clears_index_lock() {
   pass "lsof errors leave worktree index.lock in place and refuse teardown"
 }
 
-test_stale_index_lock_cleanup_rechecks_dirty_worktree() {
-  local case_dir rc lock
-  case_dir=$(make_case stale-lock-dirty-recheck)
+test_worktree_safety_refusal_cancels_close() {
+  local mode=$1 case_dir rc=0 lock
+  case_dir=$(make_case "worktree-safety-refusal-$mode")
   write_meta "$case_dir" no-mistakes ship
   wt_commit_file "$case_dir" feature.txt landed "landed work"
   git -C "$case_dir/wt" push -q origin fm/task-x1
   git -C "$case_dir/project" fetch -q origin
   printf '%s\n' dirty > "$case_dir/wt/feature.txt"
+  seed_backlog_in_flight "$case_dir"
+  printf 'PR closure evidence\n' > "$case_dir/state/task-x1.pr-poll-closed"
+  (
+    export FM_HOME="$case_dir/home"
+    # shellcheck source=bin/fm-backlog-transition-lib.sh
+    . "$ROOT/bin/fm-backlog-transition-lib.sh"
+    fm_backlog_close_marker_write "$case_dir/state" task-x1 "$case_dir/data" teardown-test-task-x1 --note 'local main'
+  ) || fail 'could not stage the interrupted teardown close'
 
-  add_lock_aware_treehouse "$case_dir"
   add_lsof_no_holder "$case_dir"
-  add_git_status_lock_failure "$case_dir"
-
-  lock=$(git_index_lock_path "$case_dir/wt")
-  mkdir -p "$(dirname "$lock")"
-  : > "$lock"
-  touch -t 200001010000 "$lock"
-
-  set +e
+  cat > "$case_dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = return ]; then touch "$FM_TEST_RETURN_LOG"; fi
+SH
+  chmod +x "$case_dir/fakebin/treehouse"
+  if [ "$mode" = stale ]; then
+    add_git_status_lock_failure "$case_dir"
+    lock=$(git_index_lock_path "$case_dir/wt")
+    touch -t 200001010000 "$lock"
+  fi
+  FM_TEST_RETURN_LOG="$case_dir/treehouse.log" \
   FM_STALE_WORKTREE_LOCK_RETRY_WAIT_SECS=0 FM_STALE_WORKTREE_LOCK_AGE_SECS=1 \
-    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
-  rc=$?
-  set -e
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
 
-  expect_code 1 "$rc" "stale-lock-dirty-recheck: teardown should refuse dirty work after clearing the stale lock"
-  assert_grep "removed provably-stale git lock" "$case_dir/stderr" \
-    "stale-lock-dirty-recheck: teardown did not report clearing the stale lock"
-  assert_grep "uncommitted changes present" "$case_dir/stderr" \
-    "stale-lock-dirty-recheck: teardown did not re-run the dirty check"
-  assert_absent "$lock" "stale-lock-dirty-recheck: stale lock file should have been removed"
-  [ -f "$case_dir/state/task-x1.meta" ] || fail "stale-lock-dirty-recheck: teardown completed despite dirty work"
-  pass "stale lock cleanup rechecks and refuses dirty worktree before return"
+  expect_code 1 "$rc" "worktree safety ($mode) should refuse dirty work"
+  if [ "$mode" = stale ]; then
+    assert_grep 'removed provably-stale git lock' "$case_dir/stderr" 'teardown did not report clearing the stale lock'
+    assert_absent "$lock" 'teardown left the stale lock in place'
+  fi
+  assert_grep 'uncommitted changes present' "$case_dir/stderr" 'teardown did not report the dirty worktree'
+  assert_absent "$case_dir/treehouse.log" 'safety refusal invoked Treehouse return'
+  [ "$(cat "$case_dir/wt/feature.txt")" = dirty ] || fail 'safety refusal lost uncommitted work'
+  [ "$(git -C "$case_dir/wt" symbolic-ref --short HEAD)" = fm/task-x1 ] || fail 'safety refusal changed the checkout'
+  assert_pending_close_replay_preserves_task "$case_dir" task-x1 "$case_dir/home" \
+    || fail 'startup replay changed the task after a safety refusal'
+  pass "worktree safety refusal preserves dirty work and cancels the pending close ($mode)"
 }
 
 test_non_linked_index_lock_path_is_checked_from_worktree() {
@@ -5046,7 +5058,8 @@ test_legacy_record_never_accepts_a_corrupt_spawn_gen
 test_stale_index_lock_cleared_and_teardown_succeeds
 test_live_index_lock_is_never_removed_and_teardown_refuses
 test_lsof_error_never_clears_index_lock
-test_stale_index_lock_cleanup_rechecks_dirty_worktree
+test_worktree_safety_refusal_cancels_close initial
+test_worktree_safety_refusal_cancels_close stale
 test_non_linked_index_lock_path_is_checked_from_worktree
 test_index_lock_mtime_read_failure_refuses
 test_transient_index_lock_clears_after_first_attempt_and_retry_succeeds

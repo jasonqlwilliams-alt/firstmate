@@ -3707,15 +3707,12 @@ if teardown_owns_worktree && [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
     :
   else
     safety_rc=$?
-    if [ "$safety_rc" -eq "$TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED" ]; then
-      cleanup_stale_lock_for_safety_check "$WT" || {
-        if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ] && { [ -e "$WT" ] || [ -L "$WT" ]; }; then
-          teardown_treehouse_backlog_rollback || exit 1
-        fi
-        exit 1
-      }
-      validate_worktree_teardown_safety || exit 1
-    else
+    if [ "$safety_rc" -ne "$TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED" ] \
+       || ! cleanup_stale_lock_for_safety_check "$WT" \
+       || ! validate_worktree_teardown_safety; then
+      if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ] && { [ -e "$WT" ] || [ -L "$WT" ]; }; then
+        teardown_treehouse_backlog_rollback || exit 1
+      fi
       exit 1
     fi
   fi
