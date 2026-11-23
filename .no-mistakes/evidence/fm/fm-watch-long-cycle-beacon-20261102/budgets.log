@@ -1,0 +1,15 @@
+Target commit 689d811d. The real watcher processes a delayed synthetic repost, process-event launch, and registered check.
+
+ok - auto-arm: a short grace preserves repost, launch confirmation, and check budgets
+
+reposted
+[fm-from-firstmate]⁣corr=<synthetic-id> REPOST REQUIRED: previous marked request had no correlated parent report. Reply on the parent status channel including corr=<synthetic-id>. Original request: missing report
+
+reconcile.out
+reconciled: published=0 started=1 stopped=0 uncertain=0 failed=0
+
+outer.out
+check: <fixture>/operation-budgets/state/slow.check.sh: check-kept-its-budget
+
+state/.wake-queue
+<fixture>/operation-budgets/state/slow.check.sh	check: <fixture>/operation-budgets/state/slow.check.sh: check-kept-its-budget

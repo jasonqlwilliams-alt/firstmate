@@ -1,0 +1,10 @@
+Isolated herdr 0.9.5 session=fm-lab-watch-2236092
+Singleton pid=2236827 entered the native event wait, poll=16s
+After early server shutdown: beacon mtime advanced by 7s in 8s, grace=6s
+fm-guard.sh output
+[no output]
+fm-turnend-guard.sh --claude exit=0
+Fallback poll ended: arm exit=0, elapsed=16803ms from disconnect
+watcher: started pid=2236827 (beacon fresh)
+check: <fixture>/state/probe.check.sh: poll-delivered-after-disconnect
+1795402321	1	check	<fixture>/state/probe.check.sh	check: <fixture>/state/probe.check.sh: poll-delivered-after-disconnect

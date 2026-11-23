@@ -1,0 +1,29 @@
+Base commit 0464e0e2 with the target's healthy-sweep fixture. Exit 1 was the expected regression reproduction.
+
+not ok - a progressing sweep must stay fresh (unexpected: 'WATCHER DOWN')
+--- output ---
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  3 registered custom check(s), but no watcher has a fresh beacon (last beat: 11s ago, grace 8s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+outer.out
+watcher: started pid=2032294 (beacon fresh)
+
+guard.out
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  3 registered custom check(s), but no watcher has a fresh beacon (last beat: 11s ago, grace 8s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+hook.out
+[no output]
+
+state/.watch-cycle-exits.log
+arm_pid=2032254	watcher_pid=2032294	origin=started	started_at=1795402180	ended_at=1795402191	exit_code=143	signal=TERM	reason=arm-interrupted	beacon_age=11	lock_before=pid:2032294|identity:linux-starttime=32650583 cmdline-hex=<redacted>	lock_after=pid:none|identity:none	successor=none

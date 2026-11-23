@@ -1,0 +1,22 @@
+Target commit 689d811d. A synthetic SSH endpoint emits a partial idle reply and stalls. The watcher also runs a 15-second poll with 8-second grace.
+
+ok - auto-arm: stalled remote observation and long poll preserve singleton liveness and wake delivery
+
+outer.out
+watcher: started pid=1993254 (beacon fresh)
+check: <fixture>/stalled-observation-poll/state/ready.check.sh: completed-after-observation
+
+guard.out
+[no output]
+
+hook.out
+firstmate watcher wake - one supervision event needs a handling turn now.
+check: <fixture>/stalled-observation-poll/state/ready.check.sh: completed-after-observation
+Run bin/fm-wake-drain.sh first, handle the wake, then run its exact WAKE_ACK_REQUIRED --ack-through command. Until that post-handling acknowledgement, interruption leaves the wake durable for idempotent re-handling. This Stop hook owns watcher continuity: when the handling turn ends, the next needed cycle arms automatically - do NOT run bin/fm-watch-arm.sh after an ordinary wake.
+
+state/.wake-queue
+<fixture>/stalled-observation-poll/state/ready.check.sh	check: <fixture>/stalled-observation-poll/state/ready.check.sh: completed-after-observation
+
+state/.watch-cycle-exits.log
+arm_pid=1993118	watcher_pid=1993254	origin=started	started_at=1795402157	ended_at=1795402179	exit_code=0	signal=none	reason=actionable-check	beacon_age=0	lock_before=pid:1993254|identity:linux-starttime=32648313 cmdline-hex=<redacted>	lock_after=pid:none|identity:none	successor=none
+arm_pid=2018199	watcher_pid=1993254	origin=attached	started_at=1795402173	ended_at=1795402184	exit_code=unknown	signal=unknown	reason=attached-delivered-wake	beacon_age=5	lock_before=pid:1993254|identity:linux-starttime=32648313 cmdline-hex=<redacted>	lock_after=pid:none|identity:none	successor=none

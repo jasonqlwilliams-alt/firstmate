@@ -1,0 +1,9 @@
+Target commit 689d811d. The test sends TERM while its synthetic SSH observation is in flight, before the 60-second observation deadline.
+
+ok - auto-arm: a normally stopped watcher reaps its remote observation
+
+outer.out
+watcher: started pid=1992984 (beacon fresh)
+
+state/.watch-cycle-exits.log
+arm_pid=1992844	watcher_pid=1992984	origin=started	started_at=1795402157	ended_at=1795402158	exit_code=143	signal=TERM	reason=arm-interrupted	beacon_age=0	lock_before=pid:1992984|identity:linux-starttime=32648306 cmdline-hex=<redacted>	lock_after=pid:none|identity:none	successor=none

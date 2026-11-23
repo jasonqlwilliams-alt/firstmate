@@ -1,0 +1,29 @@
+Target commit 689d811d. The test suspends the actual singleton with SIGSTOP while a registered check is active.
+
+ok - auto-arm: stalled watcher during a long check sweep preserves singleton and wake delivery
+
+outer.out
+watcher: started pid=1993754 (beacon fresh)
+check: <fixture>/sweep-stalled/state/c.check.sh: completed-slow-sweep
+
+guard.out
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  3 registered custom check(s), but no watcher has a fresh beacon (last beat: 10s ago, grace 8s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+hook.out
+firstmate watcher auto-arm FAILED - the Stop-owned automatic supervision mechanism is broken after 1 bounded attempts, and no live watcher with a fresh beacon was verified.
+watcher: lock held by live pid 1993754 but heartbeat is stale for 10s (>+07s); inspect or stop that watcher before re-arming.
+watcher: FAILED - watcher cycle exited 1 without an actionable reason
+Do not launch a manual background arm from this notice; investigate the automatic Stop hook and watcher startup before ending blind.
+
+state/.wake-queue
+<fixture>/sweep-stalled/state/c.check.sh	check: <fixture>/sweep-stalled/state/c.check.sh: completed-slow-sweep
+
+state/.watch-cycle-exits.log
+arm_pid=2027320	watcher_pid=2027610	origin=started	started_at=1795402178	ended_at=1795402179	exit_code=1	signal=none	reason=nonzero-exit	beacon_age=11	lock_before=pid:1993754|identity:linux-starttime=32648326 cmdline-hex=<redacted>	lock_after=pid:1993754|identity:linux-starttime=32648326 cmdline-hex=<redacted>	successor=none
+arm_pid=1993653	watcher_pid=1993754	origin=started	started_at=1795402157	ended_at=1795402179	exit_code=0	signal=none	reason=actionable-check	beacon_age=0	lock_before=pid:1993754|identity:linux-starttime=32648326 cmdline-hex=<redacted>	lock_after=pid:none|identity:none	successor=none

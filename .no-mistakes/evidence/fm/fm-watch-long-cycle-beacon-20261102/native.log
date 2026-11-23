@@ -1,0 +1,6 @@
+Isolated herdr 0.9.5 session=fm-lab-watch-2236091
+Singleton pid=2236676 entered the native event wait, poll=16s
+Herdr idle to blocked: arm exit=0, elapsed=486ms
+watcher: started pid=2236676 (beacon fresh)
+stale: fm-lab-watch-2236091:w1:p2 (herdr: agent blocked - waiting on human, escalated immediately, not via wedge timer)
+1795402305	1	stale	fm-lab-watch-2236091:w1:p2	stale: fm-lab-watch-2236091:w1:p2 (herdr: agent blocked - waiting on human, escalated immediately, not via wedge timer)

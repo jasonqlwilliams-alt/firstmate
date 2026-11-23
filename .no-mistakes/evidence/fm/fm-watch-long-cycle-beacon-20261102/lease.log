@@ -1,0 +1,11 @@
+Target commit 689d811d. A synthetic SSH endpoint stalls during a five-second Stop hook lease.
+
+ok - auto-arm: lease expiry terminates the in-flight remote observation
+
+hook.out
+firstmate watcher wake - one supervision event needs a handling turn now.
+check: claude-lease-renewal quiet supervision lease elapsed; take one short drain/ack turn and stop to renew while demand remains.
+Run bin/fm-wake-drain.sh first, handle the wake, then run its exact WAKE_ACK_REQUIRED --ack-through command. Until that post-handling acknowledgement, interruption leaves the wake durable for idempotent re-handling. This Stop hook owns watcher continuity: when the handling turn ends, the next needed cycle arms automatically - do NOT run bin/fm-watch-arm.sh after an ordinary wake.
+
+state/.watch-cycle-exits.log
+arm_pid=1993857	watcher_pid=1993950	origin=started	started_at=1795402157	ended_at=1795402162	exit_code=143	signal=TERM	reason=arm-interrupted	beacon_age=4	lock_before=pid:1993950|identity:linux-starttime=32648331 cmdline-hex=<redacted>	lock_after=pid:none|identity:none	successor=none
