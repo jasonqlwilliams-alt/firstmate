@@ -803,13 +803,13 @@ SH
 }
 
 test_concurrent_reply_does_not_change_persist_outcome() {
-  local cross_reference='audit complete; save request corr=$FM_PENDING_REPLY_EXISTING_CORR is blocked'
+  local cross_reference="audit complete; save request corr=\$FM_PENDING_REPLY_EXISTING_CORR is blocked"
   assert_concurrent_reply_does_not_change_persist_outcome 'unrelated request answered' \
     'nudged: sm1: it did not confirm within 0s' 3
   assert_concurrent_reply_does_not_change_persist_outcome "$cross_reference" \
     'nudged: sm1: it did not confirm within 0s' 3
   assert_concurrent_reply_does_not_change_persist_outcome "$cross_reference" \
-    'restarted: sm1 (claude)' 0 done 'Saved all open work.'
+    'restarted: sm1 (claude)' 0 'done' 'Saved all open work.'
   assert_concurrent_reply_does_not_change_persist_outcome "$cross_reference" \
     'stopped: sm1: it answered that its open work is not saved: task store refused the write' \
     3 blocked 'task store refused the write'
@@ -1165,9 +1165,9 @@ test_unclear_persist_answer_stops_local_restart() {
     "its answer did not confirm that its open work is saved" "a working answer"
   assert_persist_answer_stops_local note "will get to it" \
     "its answer did not confirm that its open work is saved" "a note answer"
-  assert_persist_answer_stops_local done "saved one record; the other write failed" \
+  assert_persist_answer_stops_local 'done' "saved one record; the other write failed" \
     "its answer did not confirm that its open work is saved" "a partial save"
-  assert_persist_answer_stops_local done "Saved all open work. One write failed." \
+  assert_persist_answer_stops_local 'done' "Saved all open work. One write failed." \
     "its answer did not confirm that its open work is saved" "a contradicted receipt"
   pass "T19 an unclear persist answer stops the local restart and reports it"
 }
