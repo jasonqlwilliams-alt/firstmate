@@ -3,12 +3,11 @@
 # Writes the harness (agent) process PID found by walking the shell's ancestry,
 # which lives as long as the firstmate session - unlike the transient subshell
 # PID of any one tool call, which is dead moments after it is written.
-# The record also carries that process's start time, so a pid the kernel later
+# The sidecar records that process's start time, so a pid the kernel later
 # reuses for an unrelated process no longer counts as the live owner; its format
 # and start-time matching are owned by bin/fm-session-lock-record-lib.sh.
 # Usage: fm-lock.sh           acquire; exit 1 unless ownership is verified
 #        fm-lock.sh status    print holder and liveness; always exits 0
-#        fm-lock.sh matches-start <pid> <token>    validate a recorded start token
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,13 +15,6 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 LOCK="$STATE/.lock"
-if [ "${1:-}" = matches-start ]; then
-  # shellcheck source=bin/fm-session-lock-record-lib.sh
-  . "$SCRIPT_DIR/fm-session-lock-record-lib.sh"
-  [ "$#" -eq 3 ] && [ -n "$3" ] && fm_session_lock_start_matches "$2" "$3"
-  exit $?
-fi
-
 mkdir -p "$STATE" 2>/dev/null || {
   echo "error: cannot create session-lock state directory $STATE; operate read-only until resolved" >&2
   exit 1
@@ -68,19 +60,26 @@ trap release_claim_lock EXIT
 trap 'exit 1' HUP INT TERM
 
 me_start=$(fm_pid_start_time "$me") || me_start=''
+legacy_self=0
 if [ -f "$LOCK" ] && [ ! -L "$LOCK" ] && fm_session_lock_read "$LOCK"; then
   old=$FM_SESSION_LOCK_PID
-  if [ "$old" = "$me" ] && [ "$FM_SESSION_LOCK_START" = "$me_start" ]; then
-    echo "lock acquired: harness pid $me"
-    exit 0
-  fi
-  if [ "$old" != "$me" ] && fm_session_lock_owner_alive "$old" "$FM_SESSION_LOCK_START"; then
+  if [ "$old" = "$me" ]; then
+    if [ "$FM_SESSION_LOCK_START" = "$me_start" ]; then
+      echo "lock acquired: harness pid $me"
+      exit 0
+    fi
+    [ -n "$FM_SESSION_LOCK_START" ] || legacy_self=1
+  elif fm_session_lock_owner_alive "$old" "$FM_SESSION_LOCK_START"; then
     echo "error: another live firstmate session holds the lock (pid $old); operate read-only until resolved" >&2
     exit 1
   fi
 fi
 
 if ! fm_lock_try_acquire "$CLAIM_LOCK"; then
+  if [ "$legacy_self" -eq 1 ]; then
+    echo "lock acquired: harness pid $me"
+    exit 0
+  fi
   sweep_pid=$(sed -n 's/^pid=//p' "$STATE/.startup-network.status" 2>/dev/null | tail -1)
   if [ -n "${FM_LOCK_HELD_PID:-}" ] && [ "$FM_LOCK_HELD_PID" = "$sweep_pid" ]; then
     echo "error: the prior session's bounded startup sweep is finishing; operate read-only until it releases the fleet lock" >&2
@@ -90,6 +89,7 @@ if ! fm_lock_try_acquire "$CLAIM_LOCK"; then
 fi
 CLAIM_LOCK_HELD=1
 
+old=''
 if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
   if [ ! -f "$LOCK" ] || [ -L "$LOCK" ]; then
     echo "error: session lock is not a regular file; operate read-only until resolved" >&2
@@ -105,10 +105,14 @@ if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
     exit 1
   fi
 fi
-if ! fm_session_lock_write "$LOCK" "$me" "$me_start"; then
+if [ "$old" = "$me" ]; then
+  fm_session_lock_write_start "$LOCK" "$me" "$me_start"
+else
+  fm_session_lock_write "$LOCK" "$me" "$me_start"
+fi || {
   echo "error: cannot write session lock; operate read-only until resolved" >&2
   exit 1
-fi
+}
 fm_session_lock_read "$LOCK" || {
   echo "error: cannot verify session lock ownership; operate read-only until resolved" >&2
   exit 1

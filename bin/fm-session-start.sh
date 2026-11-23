@@ -992,9 +992,9 @@ if [ "$READ_ONLY" -eq 0 ] && [ "$REEMIT" -eq 0 ]; then
   if [ -n "$STARTUP_OWNER_PID" ] && [ -n "$COMPLETION_TMP" ] \
     && fm_session_lock_read "$STATE/.lock" \
     && [ "$FM_SESSION_LOCK_PID" = "$STARTUP_OWNER_PID" ] \
-    && [ "$FM_SESSION_LOCK_START" = "$STARTUP_OWNER_START" ] \
-    && fm_session_lock_start_matches "$STARTUP_OWNER_PID" "$STARTUP_OWNER_START" \
-    && fm_session_lock_print_record "$STARTUP_OWNER_PID" "$STARTUP_OWNER_START" > "$COMPLETION_TMP" 2>/dev/null \
+    && { [ -z "$STARTUP_OWNER_START" ] || [ "$FM_SESSION_LOCK_START" = "$STARTUP_OWNER_START" ]; } \
+    && fm_session_lock_start_matches "$STARTUP_OWNER_PID" "$FM_SESSION_LOCK_START" \
+    && fm_session_lock_print_record "$STARTUP_OWNER_PID" "$FM_SESSION_LOCK_START" > "$COMPLETION_TMP" 2>/dev/null \
     && mv -f "$COMPLETION_TMP" "$COMPLETION_FILE" 2>/dev/null; then
     COMPLETION_RECORDED=1
   else

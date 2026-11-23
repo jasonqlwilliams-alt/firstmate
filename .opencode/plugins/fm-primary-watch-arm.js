@@ -1,7 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { encodeFirstmateOperationalInput } from "./lib/fm-operational-input.js";
 
 const COORDINATOR_KEY = "__firstmateOpenCodeWatchArm";
@@ -63,7 +62,7 @@ function runProcess(command, args, options = {}) {
       stderr += chunk.toString();
     });
     proc.on("error", (error) => resolve({ code: 127, stdout, stderr: String(error?.message ?? error) }));
-    proc.on("close", (code) => resolve({ code, stdout, stderr }));
+    proc.on("close", (code) => resolve({ code: code ?? 0, stdout, stderr }));
   });
 }
 
@@ -113,21 +112,13 @@ function shouldArm(paths) {
 }
 
 async function sessionOwnsLock(paths) {
-  let lockLines;
+  let lockPid = "";
   try {
-    const record = readFileSync(`${paths.state}/.lock`, "utf8");
-    lockLines = record.replace(/\n$/, "").split("\n", 3);
+    lockPid = readFileSync(`${paths.state}/.lock`, "utf8").trim();
   } catch {
     return false;
   }
-  const [lockPid, startLine] = lockLines;
-  if (!/^[0-9]+$/.test(lockPid) || lockPid === "0" || lockPid === "1" || lockLines.length > 2 ||
-      (startLine !== undefined && (!startLine.startsWith("start=") || startLine.length === 6))) return false;
-  if (startLine !== undefined) {
-    const lockScript = fileURLToPath(new URL("../../bin/fm-lock.sh", import.meta.url));
-    const result = await runProcess("bash", [lockScript, "matches-start", lockPid, startLine.slice(6)]);
-    if (result.code !== 0) return false;
-  }
+  if (!/^[0-9]+$/.test(lockPid) || lockPid === "1") return false;
   let pid = String(process.pid);
   for (let i = 0; i < 8; i += 1) {
     if (pid === lockPid) return true;

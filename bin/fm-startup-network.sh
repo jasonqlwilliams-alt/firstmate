@@ -251,7 +251,7 @@ cmd_start() {  # <locked> <harvest-pid>
     fm_session_lock_owned_by_self "$STATE" || return 1
     lock_pid=$FM_SESSION_LOCK_PID
   else
-    lock_pid=$(fm_session_lock_pid "$STATE/.lock" || true)
+    lock_pid=$(cat "$STATE/.lock" 2>/dev/null || true)
   fi
 
   fm_lock_acquire_wait "$PUBLISH_LOCK"
@@ -346,7 +346,7 @@ lock_unchanged() {  # <expected-pid>
   local expected=$1 current
   case "$expected" in ''|*[!0-9]*) return 1 ;; esac
   [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] || return 1
-  current=$(fm_session_lock_pid "$STATE/.lock") || return 1
+  current=$(cat "$STATE/.lock" 2>/dev/null) || return 1
   [ "$current" = "$expected" ]
 }
 

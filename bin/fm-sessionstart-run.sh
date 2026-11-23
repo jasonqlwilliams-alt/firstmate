@@ -90,12 +90,9 @@ fm_is_gate_agent "$FM_ROOT" && stand_down
 fm_primary_scope_matches "$FM_ROOT" "$STATE" || stand_down
 
 session_start_completed() {
-  local completion_record
   [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] || return 1
-  [ -f "$COMPLETION_FILE" ] && [ ! -L "$COMPLETION_FILE" ] || return 1
   fm_session_lock_owned_by_self "$STATE" || return 1
-  completion_record=$(cat "$COMPLETION_FILE" 2>/dev/null) || return 1
-  [ "$completion_record" = "$(fm_session_lock_print_record "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START")" ]
+  fm_session_start_completion_matches "$COMPLETION_FILE" "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START"
 }
 
 if [ -z "$SOURCE" ] && [ ! -t 0 ]; then

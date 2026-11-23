@@ -223,13 +223,18 @@ test_run_startup_runs_the_full_digest() {
 }
 
 test_run_clear_and_compact_reemit() {
-  local root out source status
+  local root out source status owner
   for source in clear compact; do
     root="$TMP_ROOT/run-$source"
     make_run_primary "$root"
     run_hook "$root" --source startup </dev/null >/dev/null
     assert_present "$root/state/.session-start-complete" \
       "startup did not publish the completion proof needed by $source"
+    FM_ROOT_OVERRIDE="$root" FM_HOME="$root" PATH="$RUN_PATH" "$ROOT/bin/fm-startup-network.sh" wait 30 \
+      || fail "$source fixture's startup sweep never settled"
+    owner=$(cat "$root/state/.lock")
+    printf '%s\n' "$owner" > "$root/state/.session-start-complete"
+    rm -f "$root/state/.lock.start"
     status=0
     out=$(run_hook "$root" --source "$source" </dev/null) || status=$?
     expect_code 0 "$status" "run wrapper $source"
@@ -237,6 +242,10 @@ test_run_clear_and_compact_reemit() {
     assert_contains "$out" "are NOT repeated" "$source did not report the skipped startup sweeps"
     assert_contains "$out" "Queued wakes ARE still drained" "$source did not preserve the wake-queue drain"
     assert_not_contains "$out" "FIRSTMATE_OP" "a $source open also emitted the nudge instruction"
+    assert_present "$root/state/.lock.start" "$source did not upgrade the legacy owner with a sidecar"
+    cmp -s "$root/state/.session-start-complete" <(printf '%s\n' "$owner") || fail "$source changed the legacy completion"
+    out=$(run_hook "$root" --source "$source" </dev/null)
+    assert_contains "$out" "$REEMIT_BANNER$root" "$source stopped re-emitting after the identity upgrade"
   done
   pass "run wrapper: clear and compact re-emit the digest without repeating startup sweeps"
 }
@@ -317,7 +326,7 @@ test_run_clear_rejects_previous_owner_completion() {
     "clear treated a previous session's completion as current"
   assert_not_contains "$out" "$REEMIT_BANNER" \
     "clear skipped startup sweeps completed only by a previous session"
-  [ "$(sed -n '1p' "$root/state/.lock")" != "$previous_pid" ] \
+  [ "$(cat "$root/state/.lock")" != "$previous_pid" ] \
     || fail "the recovery startup did not replace the previous session's stale lock"
   pass "run wrapper: clear accepts completion only from the current harness"
 }
@@ -326,7 +335,7 @@ test_run_compact_rejects_completion_for_reused_pid() {
   local root="$TMP_ROOT/run-compact-reused-owner" out owner
   make_run_primary "$root"
   run_hook "$root" --source startup </dev/null >/dev/null
-  owner=$(sed -n '1p' "$root/state/.lock")
+  owner=$(cat "$root/state/.lock")
   printf '%s\nstart=proc:0\n' "$owner" > "$root/state/.session-start-complete"
   out=$(run_hook "$root" --source compact </dev/null)
   assert_not_contains "$out" "$REEMIT_BANNER" "compact accepted completion from a previous process with the same PID"

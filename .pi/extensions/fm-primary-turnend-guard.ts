@@ -38,20 +38,13 @@ function pidAlive(pid: string): boolean {
 }
 
 function lockOwnership(): LockOwnership {
-  let lockLines: string[];
+  let lockPid = "";
   try {
-    const record = readFileSync(`${state}/.lock`, "utf8");
-    lockLines = record.replace(/\n$/, "").split("\n", 3);
+    lockPid = readFileSync(`${state}/.lock`, "utf8").trim();
   } catch {
     return "missing";
   }
-  const [lockPid, startLine] = lockLines;
-  if (!/^[0-9]+$/.test(lockPid) || lockPid === "0" || lockPid === "1" || lockLines.length > 2 ||
-      (startLine !== undefined && (!startLine.startsWith("start=") || startLine.length === 6))) return "other";
-  if (startLine !== undefined &&
-      spawnSync("bash", [`${root}/bin/fm-lock.sh`, "matches-start", lockPid, startLine.slice(6)]).status !== 0) {
-    return "missing";
-  }
+  if (!/^[0-9]+$/.test(lockPid) || lockPid === "1") return "other";
   let pid = String(process.pid);
   for (let i = 0; i < 8; i += 1) {
     if (pid === lockPid) return "owned";

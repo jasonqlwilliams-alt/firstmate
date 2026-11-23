@@ -617,8 +617,9 @@ EOF
   [ "$elapsed" -lt 4 ] || fail "lock takeover blocked ${elapsed}s behind deferred network work"
   assert_contains "$out" "operate read-only" \
     "a lease-blocked takeover did not fail closed to read-only: $out"
-  [ "$(sed -n '1p' "$home/state/.lock")" = "$$" ] \
+  cmp -s "$home/state/.lock" <(printf '%s\n' "$$") \
     || fail "the lease-blocked takeover replaced the prior owner"
+  assert_absent "$home/state/.lock.start" "the lease-blocked takeover created a sidecar"
 
   run_stage "$home" "$root" wait 30 >/dev/null || fail "the leased sweep never settled"
   out=$(PATH="$root/bin:$PATH" FM_FAKE_HARNESS_PID="$next_owner" \
@@ -626,7 +627,7 @@ EOF
     || fail "lock takeover still failed after the sweep released its lease"
   assert_contains "$out" "lock acquired: harness pid $next_owner" \
     "acquisition did not report the fixture's next owner"
-  [ "$(sed -n '1p' "$home/state/.lock")" = "$next_owner" ] \
+  [ "$(cat "$home/state/.lock")" = "$next_owner" ] \
     || fail "the fleet lock did not record the fixture's next owner"
   pass "fm-startup-network: fleet-lock takeover cannot overlap a mutating sweep"
 }

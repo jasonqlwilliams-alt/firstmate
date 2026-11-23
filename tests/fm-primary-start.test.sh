@@ -310,7 +310,8 @@ printf '%s\n' "$FM_PRIMARY_TEST_PID" > "$HOME_FIXTURE/state/.lock"
 capture start
 expect_rc 2
 no_mutation
-[ "$(sed -n '1p' "$HOME_FIXTURE/state/.lock")" = "$FM_PRIMARY_TEST_PID" ] || fail 'lock changed'
+cmp -s "$HOME_FIXTURE/state/.lock" <(printf '%s\n' "$FM_PRIMARY_TEST_PID") || fail 'lock changed'
+assert_absent "$HOME_FIXTURE/state/.lock.start" 'refused launch created a lock sidecar'
 pass 'a live harness lock without a matching primary refuses and preserves ownership'
 
 reset_world
@@ -425,8 +426,7 @@ if [ -r "/proc/$FM_PRIMARY_TEST_PID/stat" ]; then
 else
   start_token='lstart:fixture-start claude'
 fi
-printf '%s\nstart=%s\n' "$FM_PRIMARY_TEST_PID" "$start_token" > "$HOME_FIXTURE/state/.lock"
-cp "$HOME_FIXTURE/state/.lock" "$HOME_FIXTURE/state/.session-start-complete"
+printf '%s\nstart=%s\n' "$FM_PRIMARY_TEST_PID" "$start_token" > "$HOME_FIXTURE/state/.lock.start"
 capture ready
 expect_rc 0
 contains 'primary_initialized=true'
@@ -434,8 +434,9 @@ printf '%s\nstart=proc:0\n' "$FM_PRIMARY_TEST_PID" > "$HOME_FIXTURE/state/.sessi
 capture ready
 expect_rc 1
 contains 'primary_initialized=false'
+rm "$HOME_FIXTURE/state/.lock.start"
 initialize_primary
-pass 'launcher readiness matches the startup completion to the live process start time'
+pass 'launcher readiness keeps legacy completion and rejects an old start token'
 
 printf 'kind=ship\n' > "$HOME_FIXTURE/state/ordinary.meta"
 capture ready

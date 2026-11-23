@@ -4,13 +4,10 @@
 # ---------------------------------------------------------------------------
 # Session-lock owner record.
 #
-# state/.lock is the single owner record of this home's session lock:
-#   line 1   the owning harness pid
-#   line 2   start=<token>, that pid's process start time from fm_pid_start_time
-# A record with no start line is the pre-start-time format: it keeps pid-only
-# liveness until bin/fm-lock.sh rewrites it. bin/fm-lock.sh is the only writer,
-# through fm_session_lock_write, which publishes the whole record by temporary
-# file plus rename so no reader ever observes an empty or partial owner line.
+# state/.lock contains a single harness PID and is published by atomic rename.
+# state/.lock.start records that same PID on line 1 and start=<token> on line 2.
+# A missing sidecar or one naming a different PID leaves the lock in PID-only
+# mode. A sidecar naming the owner must provide a matching process start time.
 
 fm_proc_start_ticks() {
   local path=$1 stat_line ticks
@@ -51,26 +48,27 @@ fm_session_lock_print_record() {
   [ -z "$2" ] || printf 'start=%s\n' "$2"
 }
 
-# Read lock file $1 once into FM_SESSION_LOCK_PID (line 1, unvalidated) and
-# FM_SESSION_LOCK_START (line 2's start= token, empty for the legacy format).
-# Malformed extra lines leave both outputs empty.
-# Returns 1 only when the file cannot be read.
+# Read the owner PID and its associated start token into the two output globals.
 FM_SESSION_LOCK_PID=''
 FM_SESSION_LOCK_START=''
 fm_session_lock_read() {  # <lock-file>
-  local content line2
+  local content line2 pid sidecar="$1.start"
   FM_SESSION_LOCK_PID='' FM_SESSION_LOCK_START=''
-  content=$(cat "$1" 2>/dev/null && printf '.') || return 1
-  content=${content%.}
-  content=${content%$'\n'}
-  if [[ "$content" == *$'\n'* ]]; then
-    line2=${content#*$'\n'}
-    case "$line2" in
-      *$'\n'*) return 0 ;;
-      start=?*) FM_SESSION_LOCK_START=${line2#start=} ;;
-      *) return 0 ;;
-    esac
+  pid=$(cat "$1" 2>/dev/null) || return 1
+  case "$pid" in ''|0|1|*[!0-9]*) return 0 ;; esac
+  if [ -e "$sidecar" ] || [ -L "$sidecar" ]; then
+    [ -f "$sidecar" ] && [ ! -L "$sidecar" ] || return 1
+    content=$(cat "$sidecar" 2>/dev/null && printf '.') || return 1
+    content=${content%.}
+    content=${content%$'\n'}
+    if [ "${content%%$'\n'*}" = "$pid" ]; then
+      line2=${content#*$'\n'}
+      case "$line2" in
+        *$'\n'*) FM_SESSION_LOCK_START=invalid ;;
+        start=?*) FM_SESSION_LOCK_START=${line2#start=} ;;
+        *) FM_SESSION_LOCK_START=invalid ;;
+      esac
+    fi
   fi
-  FM_SESSION_LOCK_PID=${content%%$'\n'*}
-  return 0
+  FM_SESSION_LOCK_PID=$pid
 }

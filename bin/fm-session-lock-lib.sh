@@ -182,25 +182,42 @@ EOF
   return 1
 }
 
-fm_session_lock_pid() {  # <lock-file>
-  fm_session_lock_read "$1" || return 1
-  printf '%s\n' "$FM_SESSION_LOCK_PID"
-}
-
 fm_session_lock_owner_alive() {  # <pid> <recorded-start>
   fm_session_lock_start_matches "$1" "$2" && fm_harness_pid_alive "$1"
 }
 
-# Publish owner pid $2 and start token $3 as lock file $1 by temporary file
-# plus rename. An empty token writes the legacy pid-only record.
+fm_session_lock_write_start() {  # <lock-file> <pid> <start>
+  local sidecar="$1.start" pid=$2 start=$3 tmp
+  if [ -z "$start" ]; then
+    rm -f "$sidecar" 2>/dev/null
+    return $?
+  fi
+  [ ! -d "$sidecar" ] || return 1
+  tmp=$(mktemp "${sidecar%/*}/.lock-write.XXXXXX" 2>/dev/null) || return 1
+  if fm_session_lock_print_record "$pid" "$start" > "$tmp" 2>/dev/null \
+    && mv -f "$tmp" "$sidecar" 2>/dev/null; then
+    return 0
+  fi
+  rm -f "$tmp" 2>/dev/null
+  return 1
+}
+
 fm_session_lock_write() {  # <lock-file> <pid> <start>
   local lock=$1 pid=$2 start=$3 tmp
   case "$pid" in ''|0|1|*[!0-9]*) return 1 ;; esac
   tmp=$(mktemp "${lock%/*}/.lock-write.XXXXXX" 2>/dev/null) || return 1
-  if fm_session_lock_print_record "$pid" "$start" > "$tmp" 2>/dev/null \
+  if printf '%s\n' "$pid" > "$tmp" 2>/dev/null \
+    && fm_session_lock_write_start "$lock" "$pid" "$start" \
     && mv -f "$tmp" "$lock" 2>/dev/null; then
     return 0
   fi
   rm -f "$tmp" 2>/dev/null
   return 1
+}
+
+fm_session_start_completion_matches() {  # <completion-file> <pid> <start>
+  local file=$1 pid=$2 start=$3 completion
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  completion=$(cat "$file" 2>/dev/null) || return 1
+  [ "$completion" = "$pid" ] || [ "$completion" = "$(fm_session_lock_print_record "$pid" "$start")" ]
 }
