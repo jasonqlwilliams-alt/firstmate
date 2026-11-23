@@ -233,7 +233,7 @@ test_drain_dedupes_obvious_duplicates() {
 # when work is in flight with no live watcher, and stay silent right after a
 # normal fire from a live watcher with a fresh beacon, so it never false-alarms.
 test_secondmate_foreign_queue_stall_tracks_progress_and_alerts_once() {
-  local dir state sub fakebin row_before row_after stall_count real_date
+  local dir state sub fakebin row_before row_after stall_count real_date reaper_dir
   dir=$(make_case secondmate-foreign-stall)
   state="$dir/state"
   sub="$dir/secondmate"
@@ -254,6 +254,10 @@ fi
 SH
   chmod +x "$fakebin/date"
 
+  reaper_dir=$(mktemp -d "${FM_TEST_FIXTURE_CHILDREN:-/tmp}/fm-foreign-wake-reaper.XXXXXX") \
+    || fail "could not create fixture reaper directory"
+  fm_test_arm_fixture_reaper "$reaper_dir" || fail "could not arm fixture reaper"
+
   check_foreign_queue_phase() {
     local phase=$1 expected_progress=$2 expected_alert=${3:-}
     local out="$dir/watch-$phase.out" err="$dir/watch-$phase.err"
@@ -261,25 +265,26 @@ SH
     local stall_marker="$state/.secondmate-wake-stall-mate"
     local deadline=$((SECONDS + 30)) pid stop_requested=0 rc=0 actual_progress failure=
     PATH="$fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" \
-      FM_STATE_OVERRIDE="$state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' \
+      TMPDIR="$dir" FM_STATE_OVERRIDE="$state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' \
       FM_SECONDMATE_WAKE_STALL_SECS=1 FM_POLL=1 FM_SIGNAL_GRACE=0 \
       FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
-      "$WATCH" > "$out" 2> "$err" &
-    pid=$!
-    while is_live_non_zombie "$pid"; do
-      if [ "$SECONDS" -ge "$deadline" ]; then
-        failure="watcher exceeded its hang deadline"
-        kill -KILL "$pid" 2>/dev/null || true
-        break
-      fi
+      fm_test_start_fixture "$WATCH" > "$out" 2> "$err" \
+      || fail "$phase: could not start fixture watcher: $(cat "$err")"
+    pid=$FM_TEST_FIXTURE_PID
+    while [ "$SECONDS" -lt "$deadline" ] && is_live_non_zombie "$pid"; do
       if [ -z "$expected_alert" ] && [ "$stop_requested" -eq 0 ] \
         && [ "$(cat "$progress_marker" 2>/dev/null)" = "$expected_progress" ] \
-        && [ ! -e "$stall_marker" ] && kill -TERM "$pid" 2>/dev/null; then
+        && [ ! -e "$stall_marker" ] && kill -TERM -- "-$pid" 2>/dev/null; then
         stop_requested=1
       fi
       sleep 0.1
     done
-    wait "$pid" 2>/dev/null || rc=$?
+    if is_live_non_zombie "$pid"; then
+      rc=124
+      failure="watcher exceeded its hang deadline"
+    else
+      wait "$pid" 2>/dev/null || rc=$?
+    fi
     actual_progress=$(cat "$progress_marker" 2>/dev/null) || actual_progress='<missing>'
     if [ -z "$failure" ]; then
       if [ "$rc" -ne 0 ] && { [ "$stop_requested" -eq 0 ] || [ "$rc" -ne 1 ]; }; then
