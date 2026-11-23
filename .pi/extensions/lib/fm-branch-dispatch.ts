@@ -35,8 +35,8 @@ export interface UnreadWakeScope {
   eligibleSeqs: string[];
   /**
    * The exact task ids the eligible signal/stale rows name (a signal row by
-   * its status-log key, a stale row by its named endpoint loss or the task
-   * metadata recording that endpoint). The branch may report only these
+   * its status-log key, a stale row by the task metadata recording that
+   * endpoint). The branch may report only these
    * tasks while it handles the wake; `fleet` or a task it merely remembers is refused (docs/
    * pi-supervision-branch.md "Components and their owners"). Empty for a
    * heartbeat, which is not scoped by task.
@@ -187,9 +187,8 @@ function hasOpenNeedsDecision(
   return [...open.values()].includes("needs-decision");
 }
 
-export function namedEndpointLoss(payload: string): { window: string; task: string; watcherFailed: boolean } | null {
-  const match = /^stale: (\S+) \(the recorded endpoint is gone for task ([A-Za-z0-9._-]+)\)(?:\r?\n|$)/.exec(payload);
-  return match ? { window: match[1], task: match[2], watcherFailed: /^watcher: FAILED - /m.test(payload) } : null;
+export function isNamedEndpointLoss(payload: string): boolean {
+  return /^stale: \S+ \(the recorded endpoint is gone for task [A-Za-z0-9._-]+\)(?:\r?\n|$)/.test(payload);
 }
 
 export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWakeScope {
@@ -205,7 +204,6 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
 
   const projects = new Set<string>();
   const metadata = new Map<string, string>();
-  const metadataByTask = new Map<string, { project: string; window: string; incarnation: string }>();
   // The task id behind each key a signal or stale row may carry: the task id
   // itself, or the endpoint its metadata records.
   const taskByKey = new Map<string, string>();
@@ -217,13 +215,6 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
       const project = fields.find((line) => line.startsWith("project="))?.slice(8) ?? "";
       const window = fields.find((line) => line.startsWith("window="))?.slice(7) ?? "";
       if (project) {
-        const recordedWindow = fields.findLast((line) => line.startsWith("window="))?.slice(7) ?? "";
-        const backend = fields.findLast((line) => line.startsWith("backend="))?.slice(8) ?? "";
-        const generation = fields.findLast((line) => line.startsWith("spawn_gen="))?.slice(10) ?? "";
-        const incarnation = (backend === "herdr" || backend === "zellij") && generation
-          ? `${backend}:${recordedWindow}\t${generation}\n`
-          : "";
-        metadataByTask.set(task, { project, window: recordedWindow, incarnation });
         metadata.set(task, project);
         taskByKey.set(task, task);
         taskByKey.set(`${task}.status`, task);
@@ -279,22 +270,9 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
       task = key.replace(/\.(?:status|turn-ended)$/, "");
       project = metadata.get(task) ?? "";
     } else if (kind === "stale") {
-      const loss = namedEndpointLoss(fields[4]);
-      if (loss) {
-        const record = metadataByTask.get(loss.task);
-        if (!record?.incarnation || loss.window !== key || record.window !== key) return UNSAFE_SCOPE;
-        const marker = `${state}/${loss.task}.missing-endpoint`;
-        try {
-          if (!lstatSync(marker).isFile() || readFileSync(marker, "utf8") !== record.incarnation) return UNSAFE_SCOPE;
-        } catch {
-          return UNSAFE_SCOPE;
-        }
-        task = loss.task;
-        project = record.project;
-      } else {
-        task = taskByKey.get(key) ?? taskByKey.get(key.replace(/^fm-/, "")) ?? "";
-        project = metadata.get(key) ?? metadata.get(key.replace(/^fm-/, "")) ?? "";
-      }
+      if (isNamedEndpointLoss(fields[4])) continue;
+      task = taskByKey.get(key) ?? taskByKey.get(key.replace(/^fm-/, "")) ?? "";
+      project = metadata.get(key) ?? metadata.get(key.replace(/^fm-/, "")) ?? "";
       if (task) {
         const statusPath = `${state}/${task}.status`;
         if (!staleDecisionOwnership.has(statusPath)) {

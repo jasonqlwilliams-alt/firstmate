@@ -99,7 +99,6 @@ import {
   activateEligibleRowsOwner,
   deactivateEligibleRowsOwner,
   FM_BRANCH_DISPATCH_EVENT,
-  namedEndpointLoss,
   releaseEligibleRowsSnapshot,
   scopeForUnreadWake,
   writeEligibleRowsSnapshot,
@@ -1417,10 +1416,6 @@ ${context.command}
         if (!(await actingAsOwner(acceptedGeneration))) throw new Error("supervision session no longer owns the fleet lock");
         const heartbeat = /^heartbeat($|:)/.test(message);
         const scope = scopeForUnreadWake(state, heartbeat);
-        const loss = namedEndpointLoss(message);
-        if (loss && scope.needsDecisionTasks.includes(loss.task)) {
-          throw new Error("the named endpoint loss now belongs to main");
-        }
         // A newly-arrived main-owned (check-kind) row never bounces this
         // whole recheck back to main - scopeForUnreadWake excludes it from
         // eligibleSeqs rather than vetoing the scan, in a heartbeat review as

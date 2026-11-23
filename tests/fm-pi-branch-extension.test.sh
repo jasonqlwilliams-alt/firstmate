@@ -1690,9 +1690,9 @@ test_branch_report_refuses_a_task_the_wake_did_not_name() {
   PLUGIN="$repo/.pi/extensions/fm-branch-supervision.ts" FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" \
     DRIVER_PRELUDE="$DRIVER_PRELUDE" node --input-type=module > "$TMP_ROOT/node-output" 2>&1 <<'EOF'
 const prelude = process.env.DRIVER_PRELUDE;
-await eval(`(async () => { ${prelude}; globalThis.__t = { dispatch, fire, home, settle, approvedProject, defaultSessionCtx, makeOffer, bus }; })()`);
-const { dispatch, fire, home, settle, approvedProject, defaultSessionCtx, makeOffer, bus } = globalThis.__t;
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+await eval(`(async () => { ${prelude}; globalThis.__t = { dispatch, fire, home, settle, approvedProject, defaultSessionCtx }; })()`);
+const { dispatch, fire, home, settle, approvedProject, defaultSessionCtx } = globalThis.__t;
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -1722,64 +1722,11 @@ if (named.isError) throw new Error(`the wake's own task was refused: ${JSON.stri
 finish();
 await settle(() => !existsSync(`${home}/state/.branch-eligible-rows`), "task-local grant release");
 
-const writeLossMeta = (window, generation) => writeFileSync(
-  `${home}/state/a-lost.meta`, `project=${approvedProject}\nbackend=herdr\nwindow=${window}\nspawn_gen=${generation}\n`,
-);
-const lossMarker = `${home}/state/a-lost.missing-endpoint`;
-writeLossMeta("default:wX:p1", "old");
-writeFileSync(lossMarker, "herdr:default:wX:p1\told\n");
-writeFileSync(`${home}/state/.wake-queue`,
-  "1\t2\tstale\tdefault:wX:p1\tstale: default:wX:p1 (the recorded endpoint is gone for task a-lost)\n");
-globalThis.__fmOnBranchPrompt = () => new Promise((resolve) => { finish = resolve; });
-const loss = makeOffer("stale: default:wX:p1 (the recorded endpoint is gone for task a-lost)");
-bus.emit("fm-branch-supervision:dispatch", loss);
-if (!loss.accepted) throw new Error("branch refused the named loss");
-await settle(() => (globalThis.__fmPrompts ?? []).length === 2, "named endpoint loss branch prompt");
-const lossReport = globalThis.__fmSessions.at(-1).options.customTools.find((tool) => tool.name === "fm_branch_report");
-const replacement = await lossReport.execute("replacement", { task: "other-task", verdict: "routine", summary: "pane healthy" }, undefined, undefined, {});
-if (!replacement.isError || !replacement.content[0].text.includes("names a-lost, not other-task")) {
-  throw new Error(`the named loss allowed a report for the replacement: ${JSON.stringify(replacement)}`);
-}
-const lost = await lossReport.execute("lost", { task: "a-lost", verdict: "routine", summary: "endpoint gone" }, undefined, undefined, {});
-if (lost.isError) throw new Error(`the named loss refused a report for the lost task: ${JSON.stringify(lost)}`);
-finish();
-await loss.settlement;
-
-globalThis.__fmOnBranchPrompt = async () => {};
-const decorated = `${loss.message}\n\nwatcher: FAILED - Pi extension could not persist a late replacement-session actionable wake\nfixture error`;
-const requiresMain = async (message, reason) => {
-  const offer = makeOffer(message);
-  bus.emit("fm-branch-supervision:dispatch", offer);
-  if (!offer.accepted) throw new Error("branch fixture did not reach the eligibility recheck");
-  await offer.settlement.then(
-    () => { throw new Error("the endpoint loss did not return to main"); },
-    (error) => { if (!String(error).includes(reason)) throw error; },
-  );
-};
-writeFileSync(`${home}/state/a-lost.status`, "captain-held: awaiting the captain\n");
-writeFileSync(`${home}/state/.wake-queue`,
-  `1\t2\tstale\tdefault:wX:p1\t${loss.message}\n1\t3\tstale\tdefault:wX:p1\tstale: default:wX:p1\n`);
-await requiresMain(loss.message, "named endpoint loss now belongs to main");
-await requiresMain(decorated, "named endpoint loss now belongs to main");
-writeFileSync(`${home}/state/a-lost.status`, "working: relaunched\n");
-writeLossMeta("default:wX:p2", "old");
-await requiresMain(loss.message, "unread wake queue could not be read safely");
-writeLossMeta("default:wX:p1", "new");
-await requiresMain(loss.message, "unread wake queue could not be read safely");
-writeLossMeta("default:wX:p1", "old");
-writeFileSync(lossMarker, "zellij:default:wX:p1\told\n");
-await requiresMain(loss.message, "unread wake queue could not be read safely");
-unlinkSync(lossMarker);
-await requiresMain(loss.message, "unread wake queue could not be read safely");
-mkdirSync(lossMarker);
-await requiresMain(loss.message, "unread wake queue could not be read safely");
-if (globalThis.__fmPrompts.length !== 2) throw new Error("a main-owned loss prompted the branch");
-
 // A heartbeat review is not scoped by task: it may report any task id, a
 // task whose records are already gone, and fleet.
 globalThis.__fmOnBranchPrompt = () => new Promise((resolve) => { finish = resolve; });
 if (!dispatch("heartbeat", [], true, true).accepted) throw new Error("branch refused the heartbeat");
-await settle(() => (globalThis.__fmPrompts ?? []).length === 3, "heartbeat branch prompt");
+await settle(() => (globalThis.__fmPrompts ?? []).length === 2, "heartbeat branch prompt");
 const heartbeatSession = globalThis.__fmSessions[globalThis.__fmSessions.length - 1];
 const heartbeatReport = heartbeatSession.options.customTools.find((tool) => tool.name === "fm_branch_report");
 const live = await heartbeatReport.execute("live", { task: "other-task", verdict: "routine", summary: "worker healthy" }, undefined, undefined, {});
@@ -1791,7 +1738,7 @@ if (fleetInReview.isError) throw new Error(`a fleet-wide report was refused duri
 finish();
 
 const stored = readFileSync(`${home}/state/branch-outcomes.jsonl`, "utf8").trim().split("\n").map((line) => JSON.parse(line).task);
-if (JSON.stringify(stored) !== JSON.stringify(["branch-driver", "a-lost", "other-task", "retired-task", "fleet"])) {
+if (JSON.stringify(stored) !== JSON.stringify(["branch-driver", "other-task", "retired-task", "fleet"])) {
   throw new Error(`refused reports reached the durable store: ${JSON.stringify(stored)}`);
 }
 
@@ -1826,17 +1773,17 @@ EOF
 # main-owned in every mode, so the heartbeat case proven above and this one
 # resolve the same way.
 test_branch_predrain_recheck_excludes_new_main_owned_row_without_deferring_eligible_work() {
-  local repo home out status
-  repo="$TMP_ROOT/predrain-partial-root"
-  home="$TMP_ROOT/predrain-partial-home"
+  local scenario=$1 repo home out status
+  repo="$TMP_ROOT/predrain-partial-$scenario-root"
+  home="$TMP_ROOT/predrain-partial-$scenario-home"
   mkdir -p "$home/state" "$home/config"
   install_pi_branch_extension_fixture "$repo"
   PLUGIN="$repo/.pi/extensions/fm-branch-supervision.ts" FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" \
-    DRIVER_PRELUDE="$DRIVER_PRELUDE" node --input-type=module > "$TMP_ROOT/node-output" 2>&1 <<'EOF'
+    DRIVER_PRELUDE="$DRIVER_PRELUDE" FM_TEST_SCENARIO="$scenario" node --input-type=module > "$TMP_ROOT/node-output" 2>&1 <<'EOF'
 const prelude = process.env.DRIVER_PRELUDE;
 await eval(`(async () => { ${prelude}; globalThis.__t = { dispatch, fire, home, mainUserMessages }; })()`);
 const { dispatch, fire, home, mainUserMessages } = globalThis.__t;
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 await fire("session_start", {});
 let releasePrompt;
@@ -1846,7 +1793,24 @@ if (!offer.accepted) throw new Error("eligible task-local offer was not accepted
 // A main-only notice arrives while main is still finishing its own earlier
 // turn - unacked, still sitting in the queue - between offer acceptance and
 // the branch's own drain.
-appendFileSync(`${home}/state/.wake-queue`, "2\t2\tcheck\tx-inbox\tcheck: pending x mention\n");
+const queuePath = `${home}/state/.wake-queue`;
+let mainRows;
+if (process.env.FM_TEST_SCENARIO === "second-loss") {
+  const metadata = `project=${home}/projects/lost\nbackend=herdr\nwindow=shared:w1:p2\n`;
+  const metaPath = `${home}/state/a-lost.meta`;
+  const markerPath = `${home}/state/a-lost.missing-endpoint`;
+  const loss = "stale\tshared:w1:p2\tstale: shared:w1:p2 (the recorded endpoint is gone for task a-lost)";
+  writeFileSync(metaPath, metadata + "spawn_gen=old\n");
+  appendFileSync(queuePath, `2\t2\t${loss}\n`);
+  writeFileSync(markerPath, "herdr:shared:w1:p2\told\n");
+  writeFileSync(metaPath, metadata + "spawn_gen=new\n");
+  appendFileSync(queuePath, `3\t3\t${loss}\n`);
+  writeFileSync(markerPath, "herdr:shared:w1:p2\tnew\n");
+  mainRows = [`2\t2\t${loss}`, `3\t3\t${loss}`];
+} else {
+  mainRows = ["2\t2\tcheck\tx-inbox\tcheck: pending x mention"];
+  appendFileSync(queuePath, mainRows[0] + "\n");
+}
 for (let i = 0; i < 250 && !globalThis.__fmPromptStarted && mainUserMessages.length === 0; i += 1) {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
@@ -1857,11 +1821,12 @@ if (!globalThis.__fmPromptStarted) {
   throw new Error("the branch was never prompted even though its own row stayed eligible");
 }
 const snapshot = readFileSync(`${home}/state/.branch-eligible-rows`, "utf8").trim().split("\n");
-if (!snapshot.includes("1")) throw new Error(`eligible-row snapshot omitted the task-local row: ${snapshot}`);
-if (snapshot.includes("2")) throw new Error(`eligible-row snapshot granted the main-owned row: ${snapshot}`);
-const queue = readFileSync(`${home}/state/.wake-queue`, "utf8");
-if (!queue.includes("\tcheck\tx-inbox\t")) {
-  throw new Error(`the main-owned row must remain queued for main, untouched: ${queue}`);
+if (snapshot.length !== 1 || snapshot[0] !== "1") {
+  throw new Error(`branch grant must contain only its task-local row: ${snapshot}`);
+}
+const queue = readFileSync(queuePath, "utf8").split("\n");
+if (!mainRows.every((row) => queue.includes(row))) {
+  throw new Error(`main-owned rows must remain queued for main: ${queue}`);
 }
 releasePrompt();
 for (let i = 0; i < 250 && (globalThis.__fmPrompts ?? []).length === 0; i += 1) {
@@ -1878,7 +1843,7 @@ EOF
   status=$?
   out=$(cat "$TMP_ROOT/node-output")
   expect_code 0 "$status" "pre-drain eligibility re-check must exclude only the new main-owned row: $out"
-  pass "pre-drain eligibility re-check excludes a newly main-owned row without deferring eligible work"
+  pass "pre-drain eligibility re-check excludes main-owned rows without deferring eligible work ($scenario)"
 }
 
 # A needs-decision signal wakes main independently, but it must not veto an
@@ -4991,7 +4956,8 @@ test_branch_cache_key_is_per_home_stable
 test_branch_default_on_heartbeat_afk_and_fallback
 test_branch_predrain_recheck_keeps_a_heartbeat_a_co_present_check_arrives_under
 test_branch_report_refuses_a_task_the_wake_did_not_name
-test_branch_predrain_recheck_excludes_new_main_owned_row_without_deferring_eligible_work
+test_branch_predrain_recheck_excludes_new_main_owned_row_without_deferring_eligible_work check
+test_branch_predrain_recheck_excludes_new_main_owned_row_without_deferring_eligible_work second-loss
 test_branch_predrain_needs_decision_keeps_routine_row_branch_eligible
 test_settled_branch_prompt_releases_unacknowledged_grant
 test_post_construction_provider_error_falls_back_latches_and_recovers_on_cooldown
