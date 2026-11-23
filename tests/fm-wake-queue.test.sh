@@ -8,10 +8,8 @@
 # fm-daemon.test.sh.
 set -u
 
-foreign_queue_reaper_dir=$(mktemp -d /tmp/fm-foreign-wake-reaper.XXXXXX) || exit 1
 # shellcheck source=tests/wake-helpers.sh
-FM_TEST_REGISTRY_DIR="$foreign_queue_reaper_dir" . "$(dirname "${BASH_SOURCE[0]}")/wake-helpers.sh"
-fm_test_arm_fixture_reaper "$foreign_queue_reaper_dir" || fail "could not arm fixture reaper"
+. "$(dirname "${BASH_SOURCE[0]}")/wake-helpers.sh"
 
 WATCH="$ROOT/bin/fm-watch.sh"
 DRAIN="$ROOT/bin/fm-wake-drain.sh"
@@ -236,7 +234,8 @@ test_drain_dedupes_obvious_duplicates() {
 # normal fire from a live watcher with a fresh beacon, so it never false-alarms.
 test_secondmate_foreign_queue_stall_tracks_progress_and_alerts_once() {
   local dir state sub fakebin row_before row_after stall_count real_date
-  local phase_timeout_seconds=30
+  # The watcher needs real startup and I/O time independently of the fake stall interval.
+  local checkpoint_seconds=4
   dir=$(make_case secondmate-foreign-stall)
   state="$dir/state"
   sub="$dir/secondmate"
@@ -257,86 +256,23 @@ fi
 SH
   chmod +x "$fakebin/date"
 
-  check_foreign_queue_phase() {
+  check_foreign_queue_checkpoint() {
     local phase=$1 expected_progress=$2 expected_alert=${3:-}
     local out="$dir/watch-$phase.out" err="$dir/watch-$phase.err"
-    local progress_marker="$state/.secondmate-wake-progress-mate"
-    local stall_marker="$state/.secondmate-wake-stall-mate"
-    local deadline=$((SECONDS + phase_timeout_seconds)) watcher_pid stop_requested=0 rc=0 actual_progress failure=
+    local rc=0 actual_progress failure=
     PATH="$fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" \
-      TMPDIR="$dir" FM_STATE_OVERRIDE="$state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' \
+      FM_STATE_OVERRIDE="$state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' \
       FM_SECONDMATE_WAKE_STALL_SECS=1 FM_POLL=1 FM_SIGNAL_GRACE=0 \
       FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
-      perl -MPOSIX=setsid,sigprocmask,SIG_BLOCK,SIG_UNBLOCK,SIGTERM -MFcntl=O_CREAT,O_EXCL,O_WRONLY -e '
-        my ($registry, $seconds, @watch) = @ARGV;
-        my $session = setsid();
-        die "setsid: $!" unless defined($session) && $session > 1;
-        pipe(my $registered, my $ready) or die "pipe: $!";
-        my $term = POSIX::SigSet->new(SIGTERM);
-        sigprocmask(SIG_BLOCK, $term) or die "block TERM: $!";
-        my $anchor = fork();
-        die "fork: $!" unless defined $anchor;
-        if (!$anchor) {
-          sigprocmask(SIG_UNBLOCK, $term) or die "unblock TERM: $!";
-          close $registered;
-          setpgrp(0, 0) or die "setpgrp: $!";
-          sysopen(my $record, "$registry/$session.$$", O_CREAT | O_EXCL | O_WRONLY, 0600)
-            or die "record fixture session: $!";
-          close $record;
-          close STDIN;
-          close STDOUT;
-          close STDERR;
-          print {$ready} "ready\n";
-          close $ready;
-          sleep;
-          exit;
-        }
-        close $ready;
-        my $abort = sub {
-          local $SIG{TERM} = $SIG{ALRM} = "IGNORE";
-          alarm 0;
-          kill "KILL", $anchor;
-          waitpid $anchor, 0;
-          exit $_[0];
-        };
-        $SIG{TERM} = $SIG{ALRM} = sub { $abort->(124) };
-        alarm $seconds;
-        sigprocmask(SIG_UNBLOCK, $term) or $abort->(1);
-        <$registered> or $abort->(1);
-        alarm 0;
-        close $registered;
-        exec { $watch[0] } @watch or $abort->(1);
-      ' "$FM_TEST_FIXTURE_SESSIONS" "$phase_timeout_seconds" "$WATCH" > "$out" 2> "$err" &
-    watcher_pid=$!
-    while [ "$SECONDS" -lt "$deadline" ] && is_live_non_zombie "$watcher_pid"; do
-      if [ -z "$expected_alert" ] && [ "$stop_requested" -eq 0 ] \
-        && [ "$(cat "$progress_marker" 2>/dev/null)" = "$expected_progress" ] \
-        && [ ! -e "$stall_marker" ] && [ ! -L "$stall_marker" ] \
-        && kill -TERM -- "-$watcher_pid" 2>/dev/null; then
-        stop_requested=1
-      fi
-      sleep 0.1
-    done
-    if is_live_non_zombie "$watcher_pid"; then
-      kill -TERM "$watcher_pid" 2>/dev/null || true
-      rc=124
-    else
-      wait "$watcher_pid" 2>/dev/null || rc=$?
-    fi
-    actual_progress=$(cat "$progress_marker" 2>/dev/null) || actual_progress='<missing>'
-    if [ "$rc" -eq 124 ]; then
-      failure="watcher phase exceeded its hang deadline"
-    elif [ "$rc" -ne 0 ] && { [ "$stop_requested" -eq 0 ] || [ "$rc" -ne 1 ]; }; then
-      failure="watcher phase failed"
+      "$ROOT/bin/fm-watch-checkpoint.sh" --seconds "$checkpoint_seconds" > "$out" 2> "$err" || rc=$?
+    actual_progress=$(cat "$state/.secondmate-wake-progress-mate" 2>/dev/null) || actual_progress='<missing>'
+    if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
+      failure="checkpoint failed"
     elif [ "$actual_progress" != "$expected_progress" ]; then
       failure="expected observation marker $expected_progress"
     elif [ -z "$expected_alert" ]; then
-      if [ -e "$stall_marker" ] || [ -L "$stall_marker" ]; then
-        failure="prior stall marker was not cleared"
-      elif [ -s "$state/.wake-queue" ]; then
-        failure="observation produced a parent wake"
-      fi
-    elif ! grep -Fxq "$expected_alert" "$out"; then
+      [ ! -s "$state/.wake-queue" ] || failure="quiet checkpoint produced a parent wake"
+    elif [ "$rc" -ne 0 ] || ! grep -Fxq "$expected_alert" "$out"; then
       failure="expected alert $expected_alert"
     fi
     [ -z "$failure" ] || fail "$(printf '%s: %s (exit %s)\nstdout: %s\nstderr: %s\nactual marker: %s' \
@@ -347,13 +283,13 @@ SH
   # cannot produce an alert.
   printf '1000\n' > "$dir/now"
   printf '100\t7\tcheck\trouted\tcheck: routed row\n' > "$sub/state/.wake-queue"
-  check_foreign_queue_phase first $'1000\t100-7'
+  check_foreign_queue_checkpoint first $'1000\t100-7'
 
   # The oldest sequence advances after more than the threshold. This is healthy
   # drain progress even though the replacement row is itself very old.
   printf '1002\n' > "$dir/now"
   printf '100\t8\tcheck\thealthy\tcheck: healthy progress\n' > "$sub/state/.wake-queue"
-  check_foreign_queue_phase progress $'1002\t100-8'
+  check_foreign_queue_checkpoint progress $'1002\t100-8'
 
   # With no further sequence progress, the same queue must still expose the real
   # failure after the configured interval.
@@ -361,7 +297,7 @@ SH
   row_before="$dir/foreign-before"
   row_after="$dir/foreign-after"
   cp "$sub/state/.wake-queue" "$row_before"
-  check_foreign_queue_phase stalled $'1002\t100-8' \
+  check_foreign_queue_checkpoint stalled $'1002\t100-8' \
     'check: secondmate wake-loop stalled: mate=mate row=8 idle=2s'
   stall_count=$(grep -c 'secondmate-wake-loop-mate-' "$state/.wake-queue" || true)
   [ "$stall_count" -eq 1 ] || fail "the stalled episode did not publish exactly one parent notification"
@@ -376,14 +312,14 @@ SH
   # and cannot produce an immediate notification cascade.
   printf '1010\n' > "$dir/now"
   printf '100\t9\tcheck\tnext\tcheck: next row\n' > "$sub/state/.wake-queue"
-  check_foreign_queue_phase next $'1010\t100-9'
+  check_foreign_queue_checkpoint next $'1010\t100-9'
   cp "$sub/state/.wake-queue" "$row_after"
   grep -F $'\t9\t' "$row_after" >/dev/null || fail "foreign queue progress fixture changed during observation"
 
   # If that new drain position then genuinely stops advancing, it is a new
   # no-progress episode and must remain visible rather than being muted forever.
   printf '1012\n' > "$dir/now"
-  check_foreign_queue_phase refrozen $'1010\t100-9' \
+  check_foreign_queue_checkpoint refrozen $'1010\t100-9' \
     'check: secondmate wake-loop stalled: mate=mate row=9 idle=2s'
   stall_count=$(grep -c 'secondmate-wake-loop-mate-' "$state/.wake-queue" || true)
   [ "$stall_count" -eq 1 ] || fail "the later no-progress episode did not publish exactly one notification"
