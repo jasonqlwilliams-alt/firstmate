@@ -44,47 +44,43 @@ fm_secondmate_persist_request() {  # <running-harness>
   printf ' If all required open work is written down, reply on your parent channel with done [corr=<request id>]: %s Use the correlation ID from this request and keep the receipt text exact. If any required write failed or was skipped, reply with blocked [corr=<request id>]: <reason> and explain what was left unwritten. Only the exact save receipt lets the restart go ahead.' "$_FM_SECONDMATE_SAVED_RECEIPT"
 }
 
-# Read the persist answer on <corr_id>'s parent channel. Publishes:
+# Read the persist answers on <corr_id>'s parent channel. Publishes:
 #   FM_SECONDMATE_PERSIST_OUTCOME  saved|not-saved|unclear
-#   FM_SECONDMATE_PERSIST_NOTE     the answer's own note, one line (may be empty)
-# Only a done with the requested save receipt is saved.
+#   FM_SECONDMATE_PERSIST_NOTE     the negative or unclear answer's note, if any
+# Only a done with the requested save receipt is saved, and any contrary reply
+# already on the channel vetoes it.
 # blocked, failed, and needs-decision are the status vocabulary's negative
-# verbs. Every other answer - another verb, a line whose verb cannot be read,
-# or an operator closing the request instead of the mate answering it - is
-# unclear, and unclear stops the restart exactly as a negative answer does.
+# verbs. Other replies are unclear and also stop the restart.
 # The answer is the same correlated parent-channel line for a local and a remote
 # mate, so placement plays no part here.
 FM_SECONDMATE_PERSIST_OUTCOME=""
 FM_SECONDMATE_PERSIST_NOTE=""
 fm_secondmate_persist_outcome() {  # <state-dir> <corr_id>
-  local state=$1 corr=$2 rec status_file line reply_header operator_key
+  local state=$1 corr=$2 rec status_file line reply_header
   local decision_tag='\[key=[A-Za-z0-9._-]+\]'
-  local operator_close='[[:blank:]]via=operator-resolve-key([[:blank:]]|$)'
   reply_header="^[[:blank:]]*[A-Za-z][A-Za-z0-9_-]*[[:blank:]]+($decision_tag[[:blank:]]+)?(\[corr=$corr\]|corr=$corr)([[:blank:]]+$decision_tag)?[[:blank:]]*:"
-  FM_SECONDMATE_PERSIST_OUTCOME=unclear
+  FM_SECONDMATE_PERSIST_OUTCOME=""
   FM_SECONDMATE_PERSIST_NOTE=""
   rec=$(fm_pending_reply_path "$state" "$corr")
   [ -f "$rec" ] || return 1
   status_file=$(fm_pending_reply_get "$rec" parent_status)
   [ -f "$status_file" ] || return 1
-  operator_key=$(fm_pending_reply_escalation_key "$corr")
   while IFS= read -r line || [ -n "$line" ]; do
-    if ! [[ "$line" =~ $reply_header ]]; then
-      [[ "$line" =~ $operator_close ]] && fm_pending_reply_line_closes_decision "$line" "$corr" || continue
-    fi
-    FM_SECONDMATE_PERSIST_NOTE=$(status_line_note "$line" | tr -s '[:space:]' ' ')
+    [[ "$line" =~ $reply_header ]] || continue
     case "$line" in
       "done [corr=$corr]: $_FM_SECONDMATE_SAVED_RECEIPT"|"done [corr=$corr]: $_FM_SECONDMATE_SAVED_RECEIPT (via-helper)")
-        FM_SECONDMATE_PERSIST_OUTCOME=saved ;;
-      *)
-        case "$(status_line_verb "$line")" in
-          blocked|failed|needs-decision) FM_SECONDMATE_PERSIST_OUTCOME=not-saved ;;
-        esac
+        FM_SECONDMATE_PERSIST_OUTCOME=saved
+        continue
         ;;
     esac
+    FM_SECONDMATE_PERSIST_NOTE=$(status_line_note "$line" | tr -s '[:space:]' ' ')
+    case "$(status_line_verb "$line")" in
+      blocked|failed|needs-decision) FM_SECONDMATE_PERSIST_OUTCOME=not-saved ;;
+      *) FM_SECONDMATE_PERSIST_OUTCOME=unclear ;;
+    esac
     return 0
-  done < <(grep -F -e "corr=$corr" -e "[key=$operator_key]" "$status_file")
-  return 1
+  done < <(grep -F -e "corr=$corr" "$status_file")
+  [ "$FM_SECONDMATE_PERSIST_OUTCOME" = saved ]
 }
 
 # Resolve one mate's restart capability from its durable record alone.

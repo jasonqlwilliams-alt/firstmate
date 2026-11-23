@@ -36,9 +36,10 @@
 #      top, and the pass reports it. The gate is that answer, never a wall
 #      clock, so a mate that is mid-turn queues the request behind that turn;
 #      the bound below exists to end the wait, not to authorize a restart
-#      without the answer. A timeout deliberately leaves that unanswered
-#      expectation open: it is a genuine open loop owned by the ordinary
-#      pending-reply recovery ladder, not state this restart pass may close.
+#      without the answer. On timeout the restart pass leaves settlement and
+#      recovery to the ordinary pending-reply machinery. Shared pending-reply
+#      settlement can treat a correlation mentioned in another reply's note as
+#      an acknowledgement.
 #
 # A missing persist answer or an unsupported restart can fall back to the
 # ordinary re-read nudge. A failed or ambiguous relaunch leaves the outcome

@@ -1098,14 +1098,26 @@ test_remote_secondmate_control_relaunch_updates_parent_record() {
 # without the requested save receipt, keeps its agent and its conversation:
 # nothing is stopped, no re-read message is sent on top of its answer, and the
 # pass reports the stop in its output and exit status.
-assert_persist_answer_stops_local() {  # <verb> <note> <expected-fragment> <label>
-  local verb=$1 note=$2 fragment=$3 label=$4 dir out rc
+assert_persist_answer_stops_local() {  # <verb> <note> <expected-fragment> <label> [with-receipt]
+  local verb=$1 note=$2 fragment=$3 label=$4 initial=${5:-} dir out rc
   dir=$(new_case "stop-$verb")
   add_local_mate "$dir" sm1
   arm_answer "$dir" sm1
+  if [ "$initial" = with-receipt ]; then
+    cat > "$dir/fake/on-doorbell" <<'SH'
+#!/usr/bin/env bash
+printf 'done [corr=%s]: Saved all open work.\n' "$FM_PENDING_REPLY_EXISTING_CORR" \
+  >> "$(cat "$FM_FAKE_DIR/answer-status")"
+SH
+    chmod +x "$dir/fake/on-doorbell"
+  fi
 
   out=$(FM_FAKE_ANSWER_VERB="$verb" FM_FAKE_ANSWER_NOTE="$note" run_restart "$dir" fm-sm1); rc=$?
 
+  if [ "$initial" = with-receipt ]; then
+    assert_contains "$(head -1 "$dir/home/state/sm1.status")" ']: Saved all open work.' \
+      "the mate must have sent the receipt before the correction"
+  fi
   expect_code 3 "$rc" "$label must not count as a clean restart"$'\n'"$out"
   assert_contains "$out" "stopped: sm1: $fragment" "$label must stop the restart and say why"
   assert_contains "$out" "$note" "$label must carry the mate's own words"
@@ -1163,6 +1175,40 @@ test_negative_persist_answer_stops_remote_restart() {
   pass "T20 a negative persist answer stops the remote restart and reports it"
 }
 
+test_negative_or_unclear_reply_vetoes_save_receipt() {
+  assert_persist_answer_stops_local blocked 'one record was never written' \
+    'it answered that its open work is not saved' 'a blocked correction' with-receipt
+  assert_persist_answer_stops_local note 'I may have missed a record' \
+    'its answer did not confirm that its open work is saved' 'an unclear correction' with-receipt
+  pass "a negative or unclear correction vetoes an earlier save receipt"
+}
+
+test_operator_close_does_not_count_as_a_save_reply() {
+  local dir out rc
+  dir=$(new_case operator-close)
+  add_local_mate "$dir" sm1
+  cat > "$dir/fake/on-doorbell" <<'SH'
+#!/usr/bin/env bash
+corr=${FM_PENDING_REPLY_EXISTING_CORR:-}
+[ -n "$corr" ] || exit 0
+printf 'resolved [key=pending-reply-%s]: pending-reply-resolved: task=sm1 pending-reply-id=%s via=operator-resolve-key\n' \
+  "$corr" "$corr" >> "${FM_FAKE_DIR%/fake}/home/state/sm1.status"
+SH
+  chmod +x "$dir/fake/on-doorbell"
+
+  out=$(FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1); rc=$?
+
+  assert_grep 'via=operator-resolve-key' "$dir/home/state/sm1.status" \
+    "the operator close must be present on the parent channel"
+  expect_code 3 "$rc" "an operator close does not confirm a save"$'\n'"$out"
+  assert_contains "$out" 'nudged: sm1: it did not confirm within 0s' \
+    "an operator close without a mate reply follows the timeout path"
+  assert_not_contains "$out" 'stopped: sm1' "an operator close is not a mate reply"
+  ! grep -Eq '^/(exit|quit)$' "$dir/fake/literal" \
+    || fail "an operator close released the restart"
+  pass "an operator closure leaves the save request unanswered at the restart gate"
+}
+
 test_usage_includes_all_exit_statuses
 test_persist_gates_and_asks_only_for_open_records
 test_persist_precedes_restart
@@ -1192,5 +1238,7 @@ test_remote_secondmate_control_relaunch_updates_parent_record
 test_negative_persist_answer_stops_local_restart
 test_unclear_persist_answer_stops_local_restart
 test_negative_persist_answer_stops_remote_restart
+test_negative_or_unclear_reply_vetoes_save_receipt
+test_operator_close_does_not_count_as_a_save_reply
 
 echo "# all fm-secondmate-restart tests passed"
