@@ -98,8 +98,6 @@ An already registered PR merge poll remains armed and authenticated across relau
 5. **Stop the old agent** through the `exit` verb, with its postcondition, then release the prepared launch.
    A missing endpoint is already-stopped.
    The replacement retires the previous harness's per-task wiring, publishes the staged wiring, and activates the prepared busy generation where one was armed.
-   A fresh spawn allocates a private temporary root, and existing tasks keep their recorded legacy `/tmp/fm-<id>` path until relaunch, with shared legacy roots left for manual cleanup.
-   Relaunch and secondmate recovery reuse an existing private temporary root owned by the current user, so detached processes can keep using it across launches, and teardown scans that root for crewmates and scouts when `lsof` is available.
    A Codex `process-stopped-safe-quit-unconfirmed` result keeps the prepared replacement from launching and preserves the prior record and worktree for recovery.
    Kimi's installer reapplies its owned hook region to the current configuration after stop, preserving unrelated edits made during preparation and leaving an unchanged configuration file untouched.
 
@@ -111,6 +109,20 @@ Switching harness is therefore one ordinary relaunch rather than a separate mech
 - A launch failure **after** the agent is stopped restores the prior durable record, keeps the progress note so a later recovery still has it, marks the journal `failed:launching`, and reports plainly that no agent is running and where the work is preserved.
 - If the launch owner already published the new record but no running agent can be confirmed, the new record is kept: the task is recorded on the new harness with no agent confirmed, which is exactly what recovery reconciles.
   Rewriting it back to the old harness would be a second, worse inaccuracy.
+
+## Task temporary directories
+
+Firstmate allocates a private temporary directory for a new task even when another home uses the same task ID.
+On explicit task relaunch or automatic recovery of the same secondmate, Firstmate reuses the root on the agent's host if the recorded path directly names an existing private directory owned by the current user.
+Reusing it keeps temporary files and any detached processes still using the directory under the same recorded root.
+A missing or invalid root gets a fresh allocation, as does a legacy `/tmp/fm-<id>` root that same-ID tasks may share.
+
+Teardown removes the validated private root before retiring its task record, including child roots during forced secondmate home teardown.
+The working-directory scan of the temporary root applies to ordinary ship and scout teardown on hosts with `lsof`.
+Shared legacy roots are left for manual reconciliation.
+
+If a failed launch leaves an unrecorded temporary root, the launch warning identifies the exact path to inspect after closing the named endpoint.
+Bootstrap carries that warning into the failed secondmate recovery summary when it receives it.
 
 ## Fail-closed boundaries
 
@@ -157,5 +169,7 @@ The empirical basis for each adapter's value is the `harness-adapters` skill's v
 ## Verification
 
 - `tests/fm-control.test.sh` - the adapter contract for every verified harness, the backend capability matrix, exact-id scoping, the closed verb list, the busy, idle, dead, and idempotent lifecycle cases, Codex picker and uncertain-screen refusals, slow quit and shell redraw, retained picker history, Herdr plain capture fallback, and marker non-regression, all against a stubbed session provider.
-- `tests/fm-control-relaunch.test.sh` - the relaunch transaction, preparation refusals, exited-shell recovery, registered merge-poll continuity, and rollback; [runtime verification](verification/runtime-backends.md) records the reusable evidence.
+- `tests/fm-control-relaunch.test.sh` covers the relaunch transaction, preparation refusals, exited-shell recovery, temporary-root reuse and migration, registered merge-poll continuity, and rollback.
+  See [runtime verification](verification/runtime-backends.md) for the reusable evidence.
+- [`tests/fm-kimi-harness.test.sh`](../tests/fm-kimi-harness.test.sh) and [`tests/fm-gotmp.test.sh`](../tests/fm-gotmp.test.sh) cover same-ID isolation between homes and preservation of shared legacy roots.
 - `tests/fm-control-herdr-smoke.test.sh` - the second state-verified backend against the real herdr binary, on an isolated throwaway lab session.
