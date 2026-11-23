@@ -252,6 +252,7 @@
 # cannot be verified, teardown refuses and retains the copy.
 # Only Treehouse can exclude a caller that enters the copy between teardown's final check and Treehouse's own scan.
 # Detection of reparenting before startup uses Linux process sessions and is unavailable on non-Linux hosts.
+# Adoption by a Linux subreaper in the same session can hide a caller that reparented before teardown started.
 #
 # Pre-teardown cleanup sequence (runs once every landed/discard-work safety
 # refusal above has already passed, and BEFORE any worktree return, branch
@@ -453,19 +454,11 @@ if [ "$KEEP_PANE" = 1 ] \
 fi
 
 task_reap_filter_pids() {  # <previously-protected-pids> <candidate-pids>
-  local parents check_session=0
-  local -a fields=(-A -o pid= -o ppid=)
+  local parents
   case "$1" in 'incomplete '*) return 1 ;; esac
-  if [ -z "$1" ] && [ "$(uname -s)" = Linux ]; then
-    fields+=(-o sid=)
-    check_session=1
-  fi
-  parents=$(ps "${fields[@]}" 2>/dev/null) || return 1
-  printf '%s\n%s\n' "$parents" "$2" | awk -v self="$$" -v previous="$1" -v check_session="$check_session" '
-    NF >= 2 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {
-      parent[$1] = $2
-      if ($3 ~ /^[0-9]+$/) session[$1] = $3
-    }
+  parents=$(ps -A -o pid= -o ppid= 2>/dev/null) || return 1
+  printf '%s\n%s\n' "$parents" "$2" | awk -v self="$$" -v previous="$1" '
+    NF == 2 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { parent[$1] = $2 }
     /^[0-9]+$/ { candidates[$0] = 1; matched = 1 }
     END {
       split(previous, saved, " ")
@@ -474,10 +467,9 @@ task_reap_filter_pids() {  # <previously-protected-pids> <candidate-pids>
         if (cursor in ancestors) exit 1
         ancestors[cursor] = 1
         excluded[cursor] = 1
-        if (cursor != self && session[self] == cursor) launch_session_visible = 1
         if (!(cursor in parent)) break
       }
-      if (cursor != 0 || (check_session && !launch_session_visible)) {
+      if (cursor != 0) {
         if (matched) exit 1
         printf "incomplete "
       }
@@ -489,6 +481,16 @@ task_reap_filter_pids() {  # <previously-protected-pids> <candidate-pids>
 }
 
 TEARDOWN_REAP_PROTECTED_PIDS=$(task_reap_filter_pids "" "") || TEARDOWN_REAP_PROTECTED_PIDS=
+TEARDOWN_LAUNCH_SESSION_VERIFIED=1
+if [ "$(uname -s)" = Linux ]; then
+  TEARDOWN_LAUNCH_SESSION_VERIFIED=0
+  launch_session_pid=$(ps -o sid= -p "$$" 2>/dev/null) || launch_session_pid=
+  launch_session_pid=${launch_session_pid//[[:space:]]/}
+  if [[ "$launch_session_pid" =~ ^[1-9][0-9]*$ ]] && [ "$launch_session_pid" != "$$" ] \
+     && [[ " $TEARDOWN_REAP_PROTECTED_PIDS" == *" $launch_session_pid "* ]]; then
+    TEARDOWN_LAUNCH_SESSION_VERIFIED=1
+  fi
+fi
 fm_backlog_directory_present "$STATE" "state directory" || {
   echo "error: teardown refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
   exit 1
@@ -546,6 +548,7 @@ DESCENDANT_TASK_IDS=()
 DESCENDANT_TASK_KINDS=()
 DESCENDANT_TASK_HOMES=()
 DESCENDANT_TREEHOUSE_LOCK_PATHS=()
+BACKLOG_CLOSE_BACKUP=
 teardown_release_meta_lock() {
   [ "$META_LOCK_HELD" = 1 ] || return 0
   # A failed retirement can leave a live record that still needs loss deduplication.
@@ -557,6 +560,7 @@ teardown_release_meta_lock() {
 }
 teardown_release_locks() {
   local status=$? i
+  [ -z "$BACKLOG_CLOSE_BACKUP" ] || rm -f -- "$BACKLOG_CLOSE_BACKUP" || true
   if declare -F teardown_release_herdr_locks >/dev/null 2>&1; then
     teardown_release_herdr_locks || true
   fi
@@ -1776,7 +1780,7 @@ cleanup_stale_lock_for_safety_check() {
   fi
 
   if fm_lock_is_provably_stale "$lock" "$dir" "$STALE_WORKTREE_LOCK_AGE_SECS"; then
-    if [ "$BACKEND" != orca ]; then
+    if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
       require_treehouse_return_caller_outside "$dir" || return "$TEARDOWN_TREEHOUSE_CALLER_REFUSED"
     fi
     rm -f "$lock"
@@ -1792,6 +1796,10 @@ attempt_treehouse_return() {  # <copy> <project>
   cd -- "$2" || return 1
   require_treehouse_return_caller_outside "$1" || return "$TEARDOWN_TREEHOUSE_CALLER_REFUSED"
   treehouse return --force "$1" || return 1
+}
+
+treehouse_task_ref_is_unchanged_and_unused() {  # <git-dir> <ref> <commit>
+  [ "$(git --git-dir="$1" for-each-ref --format='%(objectname) %(worktreepath) %(symref)' "$2" 2>/dev/null)" = "$3  " ]
 }
 
 # Return a worktree/home via `treehouse return --force`, tolerating a transient or
@@ -1858,6 +1866,7 @@ teardown_treehouse_return() {
       if [ -n "$post_cleanup_check" ]; then
         if ! "$post_cleanup_check"; then
           echo "teardown: $label return aborted after stale-lock cleanup because safety checks failed" >&2
+          require_treehouse_return_caller_outside "$dir" || return "$TEARDOWN_TREEHOUSE_CALLER_REFUSED"
           return 1
         fi
       fi
@@ -2170,7 +2179,7 @@ task_pid_list_contains() {  # <pid-list> <pid>
 
 require_treehouse_return_caller_outside() {  # <copy>
   local dir=$1 protected root scanner pids pid
-  if [ -z "$TEARDOWN_REAP_PROTECTED_PIDS" ] \
+  if [ "$TEARDOWN_LAUNCH_SESSION_VERIFIED" != 1 ] || [ -z "$TEARDOWN_REAP_PROTECTED_PIDS" ] \
      || ! protected=$(task_reap_filter_pids "$TEARDOWN_REAP_PROTECTED_PIDS" "") \
      || [[ "$protected" == 'incomplete '* ]]; then
     echo "REFUSED: cannot verify teardown caller ancestry; retaining Treehouse copy $dir." >&2
@@ -2211,7 +2220,8 @@ task_pids_under_roots() {  # <scanner> <dir>...
     return 1
   fi
   [ -n "$pids" ] || return 0
-  if [ -z "$TEARDOWN_REAP_PROTECTED_PIDS" ] \
+  if { [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ] && [ "$TEARDOWN_LAUNCH_SESSION_VERIFIED" != 1 ]; } \
+     || [ -z "$TEARDOWN_REAP_PROTECTED_PIDS" ] \
      || ! ancestry_scan=$(task_reap_filter_pids "$TEARDOWN_REAP_PROTECTED_PIDS" "$pids"); then
     echo "REFUSED: cannot rule out a teardown ancestor among cwd matches for $ID; preserving the worktree/tasktmp for manual inspection or retry." >&2
     return 1
@@ -3622,6 +3632,11 @@ if [ "$KEEP_PANE" = 1 ]; then
   fi
 fi
 
+TEARDOWN_RETURNS_TASK_COPY=0
+if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ] && teardown_owns_worktree && [ -d "$WT" ]; then
+  TEARDOWN_RETURNS_TASK_COPY=1
+fi
+
 if teardown_owns_worktree && [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
   if validate_worktree_teardown_safety; then
     :
@@ -3671,11 +3686,6 @@ BACKLOG_TRANSITION=$TEARDOWN_BACKLOG_TRANSITION
 BACKLOG_TRANSITION_FLAGS=()
 [ "$BACKLOG_TRANSITION" = close ] || BACKLOG_TRANSITION_FLAGS=(--retain)
 BACKLOG_SKIP_REASON=
-if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
-  backlog_done_args || {
-    echo "error: the pending backlog $BACKLOG_TRANSITION for $ID is not replayable; refusing destructive teardown" >&2
-    exit 1
-  }
 # Roll the accepted legacy incarnation's stamp back to the record's exact
 # pre-stamp bytes. Uses perl - already in the teardown lifecycle's curated PATH
 # (truncate is not, and is absent on stock macOS) - and verifies the restored
@@ -3687,6 +3697,42 @@ teardown_legacy_stamp_rollback() {
     "$META" "$TEARDOWN_LEGACY_PRESTAMP_SIZE" || return 1
   [ "$(wc -c < "$META" | tr -d ' ')" = "$TEARDOWN_LEGACY_PRESTAMP_SIZE" ]
 }
+
+teardown_treehouse_backlog_rollback() {
+  [ "$BACKLOG_CLOSED" = 1 ] || return 0
+  if [ -n "$BACKLOG_CLOSE_BACKUP" ]; then
+    if ! fm_backlog_atomic_transition publish "$BACKLOG_CLOSE_BACKUP" "$BACKLOG_CLOSE_MARKER" "pending-close record" "$STATE"; then
+      echo "error: could not restore the prior pending backlog transition for $ID from $BACKLOG_CLOSE_BACKUP ($FM_BACKLOG_TRANSITION_ERROR)" >&2
+      BACKLOG_CLOSE_BACKUP=
+      return 1
+    fi
+  elif ! fm_backlog_close_marker_remove "$BACKLOG_CLOSE_MARKER" "$STATE"; then
+    echo "error: could not cancel the pending backlog transition for $ID ($FM_BACKLOG_TRANSITION_ERROR)" >&2
+    return 1
+  fi
+  if [ "$TEARDOWN_LEGACY_PRESTAMP_SIZE" -gt 0 ] && ! teardown_legacy_stamp_rollback; then
+    echo "error: the legacy incarnation stamp on $ID's record could not be rolled back; re-run teardown with --legacy-record after reconciling its endpoint" >&2
+    return 1
+  fi
+}
+
+if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
+  backlog_done_args || {
+    echo "error: the pending backlog $BACKLOG_TRANSITION for $ID is not replayable; refusing destructive teardown" >&2
+    exit 1
+  }
+  BACKLOG_CLOSE_MARKER=$(fm_backlog_close_marker_path "$STATE" "$ID") || exit 1
+  if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
+    require_treehouse_return_caller_outside "$WT" || exit 1
+    if [ -e "$BACKLOG_CLOSE_MARKER" ] || [ -L "$BACKLOG_CLOSE_MARKER" ]; then
+      if ! fm_backlog_record_present "$BACKLOG_CLOSE_MARKER" "pending-close record" "$STATE" \
+         || ! BACKLOG_CLOSE_BACKUP=$(mktemp "$STATE/.$ID.backlog-close-before.XXXXXX") \
+         || ! cp "$BACKLOG_CLOSE_MARKER" "$BACKLOG_CLOSE_BACKUP"; then
+        echo "error: could not preserve the prior pending backlog transition for $ID" >&2
+        exit 1
+      fi
+    fi
+  fi
 
   # The accepted legacy incarnation is stamped under the meta lock already
   # held, right before the close marker binds to it: every refusal above leaves
@@ -3720,7 +3766,6 @@ teardown_legacy_stamp_rollback() {
       exit 1
     fi
   fi
-  BACKLOG_CLOSED=1
   META_SPAWN_GEN=$TEARDOWN_META_SPAWN_GEN
   if ! fm_backlog_close_marker_write "$STATE" "$ID" "$DATA" "$META_SPAWN_GEN" \
       "${BACKLOG_TRANSITION_FLAGS[@]+"${BACKLOG_TRANSITION_FLAGS[@]}"}" \
@@ -3736,6 +3781,7 @@ teardown_legacy_stamp_rollback() {
     fi
     exit 1
   fi
+  BACKLOG_CLOSED=1
 else
   if [ "$CLEANUP_RECOVERY" = orca ]; then
     BACKLOG_SKIP_REASON="Orca cleanup recovery is not a launched backlog worker"
@@ -3753,7 +3799,12 @@ fi
 # not by task-worktree cleanup.
 if [ "$KIND" != secondmate ] && teardown_owns_worktree; then
   conclude_task_no_mistakes_run "$WT"
-  reap_task_worktree_processes worktree "$WT" "$TASK_TMP"
+  reap_task_worktree_processes worktree "$WT" "$TASK_TMP" || {
+    if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
+      teardown_treehouse_backlog_rollback || exit 1
+    fi
+    exit 1
+  }
 elif [ "$KIND" != secondmate ]; then
   reap_task_worktree_processes tasktmp "" "$TASK_TMP"
 fi
@@ -3781,18 +3832,20 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
   fi
   [ -z "$T_ORCA" ] || fm_backend_kill "$BACKEND" "$T" "$(meta_value "$META" zellij_tab_id)" "fm-$ID" 2>/dev/null || true
   fm_backend_remove_worktree "$BACKEND" "$ORCA_WORKTREE_ID"
-elif [ "$KIND" != secondmate ] && ! teardown_owns_worktree; then
-  :
-elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
+elif [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
   if [ "$KEEP_PANE" = 1 ]; then
     teardown_kept_shell_sample || {
       echo "REFUSED: the preserved pane is no longer a verified detached shell; retaining the copy and records." >&2
       exit 1
     }
   fi
-  require_treehouse_return_caller_outside "$WT" || exit 1
+  require_treehouse_return_caller_outside "$WT" || {
+    teardown_treehouse_backlog_rollback || exit 1
+    exit 1
+  }
   detached_task_ref=
   if branch=$(git -C "$WT" symbolic-ref --quiet HEAD 2>/dev/null) \
+     && [[ "$branch" == refs/heads/* ]] \
      && head=$(git -C "$WT" rev-parse --verify HEAD 2>/dev/null) \
      && worktree_git_dir=$(git -C "$WT" rev-parse --absolute-git-dir 2>/dev/null) \
      && git -C "$WT" update-ref --no-deref HEAD "$head" "$head" 2>/dev/null; then
@@ -3807,19 +3860,24 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
     post_lock_cleanup_check=validate_worktree_teardown_safety
   fi
   teardown_treehouse_return "$WT" "$PROJ" "worktree" "$post_lock_cleanup_check" || {
+    rc=$?
     if [ -n "$detached_task_ref" ] \
        && ! git --git-dir="$worktree_git_dir" symbolic-ref --quiet HEAD >/dev/null 2>&1 \
-       && [ "$(git --git-dir="$worktree_git_dir" rev-parse --verify HEAD 2>/dev/null)" = "$head" ]; then
+       && [ "$(git --git-dir="$worktree_git_dir" rev-parse --verify HEAD 2>/dev/null)" = "$head" ] \
+       && treehouse_task_ref_is_unchanged_and_unused "$worktree_git_dir" "$detached_task_ref" "$head"; then
       git --git-dir="$worktree_git_dir" symbolic-ref HEAD "$detached_task_ref" || \
         echo "error: could not restore $detached_task_ref as HEAD in $WT" >&2
+    fi
+    if [ "$rc" -eq "$TEARDOWN_TREEHOUSE_CALLER_REFUSED" ]; then
+      teardown_treehouse_backlog_rollback || exit 1
     fi
     echo "error: treehouse return failed for worktree $WT; teardown aborted" >&2
     exit 1
   }
   rm -f "$WT/.claude/settings.local.json" "$WT/.opencode/plugins/fm-turn-end.js" \
     "$WT/.fm-grok-turnend" "$WT/.fm-kimi-turnend"
-  if [ -n "$detached_task_ref" ]; then
-    git -C "$WT" branch -D "${detached_task_ref#refs/heads/}" >/dev/null 2>&1 || true
+  if [ -n "$detached_task_ref" ] && treehouse_task_ref_is_unchanged_and_unused "$worktree_git_dir" "$detached_task_ref" "$head"; then
+    git --git-dir="$worktree_git_dir" update-ref --no-deref -d "$detached_task_ref" "$head" >/dev/null 2>&1 || true
   fi
   # The slot is back in the pool, so this task's claim on it is spent. Dropping
   # it here - and only after a return that succeeded - keeps a returned slot
@@ -3982,7 +4040,6 @@ if [ "$KEEP_PANE" = 1 ]; then
   fi
 fi
 if [ "$BACKLOG_CLOSED" = 1 ]; then
-  BACKLOG_CLOSE_MARKER=$(fm_backlog_close_marker_path "$STATE" "$ID") || exit 1
   if ! fm_backlog_atomic_transition "$BACKLOG_TRANSITION" "$STATE/$ID.meta" "$BACKLOG_CLOSE_MARKER" \
       "$DATA" "$ID" "$STATE" "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}"; then
     teardown_release_meta_lock

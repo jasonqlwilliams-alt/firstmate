@@ -1807,29 +1807,55 @@ test_persistent_index_lock_exhausts_retries_and_refuses_loudly() {
 }
 
 test_non_lock_return_failure_preserves_checkout() {
-  local mode=$1 case_dir copy rc=0
+  local mode=$1 case_dir copy original_tip rc=0
   case_dir=$(make_case "failed-return-$mode")
   copy="$case_dir/wt"
   write_meta "$case_dir" no-mistakes ship
   land_shippable_commit "$case_dir"
+  original_tip=$(git -C "$copy" rev-parse HEAD)
   add_lsof_no_holder "$case_dir"
   printf 'configured hook\n' > "$copy/.fm-grok-turnend"
   cat > "$case_dir/fakebin/treehouse" <<'SH'
 #!/usr/bin/env bash
-if [ "$FM_TEST_FAILED_RETURN_MODE" = moved ]; then
-  git -C "$3" update-ref --no-deref HEAD refs/heads/main || exit 2
-fi
+case "$FM_TEST_FAILED_RETURN_MODE" in
+  moved) git -C "$3" update-ref --no-deref HEAD refs/heads/main || exit 2 ;;
+  branch-in-use) git -C "$3" worktree add --quiet "$FM_TEST_OTHER_WORKTREE" fm/task-x1; exit $? ;;
+  branch-*) git -C "$3" update-ref refs/heads/fm/task-x1 refs/heads/main || exit 2 ;;
+esac
+[ "$FM_TEST_FAILED_RETURN_MODE" != branch-success ] || exit 0
 echo 'treehouse: simulated return error' >&2
 exit 1
 SH
   chmod +x "$case_dir/fakebin/treehouse"
-  FM_TEST_FAILED_RETURN_MODE=$mode run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  FM_TEST_FAILED_RETURN_MODE=$mode FM_TEST_OTHER_WORKTREE="$case_dir/other-worktree" \
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  if [ "$mode" = branch-in-use ]; then
+    expect_code 0 "$rc" 'successful return should leave the other worktree alone'
+    [ "$(git -C "$case_dir/other-worktree" symbolic-ref --short HEAD)" = fm/task-x1 ] \
+      && [ "$(git -C "$case_dir/other-worktree" rev-parse HEAD)" = "$original_tip" ] \
+      || fail 'successful return deleted the task branch checked out elsewhere'
+    pass 'successful Treehouse return preserves the branch checked out elsewhere'
+    return 0
+  fi
+  if [ "$mode" = branch-success ]; then
+    expect_code 0 "$rc" 'a branch update should not block returning the copy'
+    [ "$(git -C "$copy" rev-parse --verify refs/heads/fm/task-x1)" = "$(git -C "$copy" rev-parse main)" ] \
+      || fail 'successful return deleted a branch that moved while the copy was detached'
+    assert_absent "$case_dir/state/task-x1.meta" 'successful return retained the task record'
+    pass 'successful Treehouse return preserves a task branch that moved'
+    return 0
+  fi
   expect_code 1 "$rc" "failed return ($mode): cleanup should fail"
   assert_grep 'treehouse: simulated return error' "$case_dir/stderr" 'cleanup did not reach the failed return'
   if [ "$mode" = moved ]; then
     [ "$(git -C "$copy" rev-parse --abbrev-ref HEAD)" = HEAD ] \
       && [ "$(git -C "$copy" rev-parse HEAD)" = "$(git -C "$copy" rev-parse main)" ] \
       || fail 'failed return: teardown overwrote a changed HEAD'
+  elif [ "$mode" = branch-failure ]; then
+    [ "$(git -C "$copy" rev-parse --abbrev-ref HEAD)" = HEAD ] \
+      && [ "$(git -C "$copy" rev-parse HEAD)" = "$original_tip" ] \
+      && [ "$(git -C "$copy" rev-parse refs/heads/fm/task-x1)" = "$(git -C "$copy" rev-parse main)" ] \
+      || fail 'failed return: teardown reattached HEAD to a branch that moved'
   else
     [ "$(git -C "$copy" symbolic-ref --short HEAD)" = fm/task-x1 ] \
       || fail 'failed return: teardown left the task detached'
@@ -3530,7 +3556,7 @@ configure_teardown_ancestry_ps() {
 set -o pipefail
 case "$*" in
   '-axo pid=,ppid=') exit 1 ;;
-  '-A -o pid= -o ppid='|'-A -o pid= -o ppid= -o sid=')
+  '-A -o pid= -o ppid=')
     "$REAL_PS_FOR_TEST" "$@" | awk -v hidden="${FM_TEST_HIDDEN_ANCESTOR:-}" '$1 != hidden'
     ;;
   *) exec "$REAL_PS_FOR_TEST" "$@" ;;
@@ -3706,12 +3732,80 @@ SH
   pass "cleanup with $scanner refuses an ambiguous ancestor without signalling either cwd match"
 )
 
+test_non_treehouse_reap_with_unverified_session() (
+  [ "$(uname -s)" = Linux ] || return 0
+  local mode=$1 case_dir dir pid i rc=0
+  case_dir=$(make_case "session-unverified-$mode")
+  dir="$case_dir/wt"
+  if [ "$mode" = orca ]; then
+    command -v node >/dev/null 2>&1 || { printf 'skip: Orca fixture requires node\n'; return 0; }
+    fm_write_meta "$case_dir/state/task-x1.meta" window=fm-task-x1 endpoint_task_id=task-x1 \
+      "worktree=$dir" "project=$case_dir/project" kind=scout mode=local-only \
+      backend=orca terminal=term-7 orca_worktree_id=worktree-9
+    cat > "$case_dir/fakebin/orca" <<SH
+#!/usr/bin/env bash
+case "\$1 \$2" in
+  'worktree show') printf '%s\n' '{"ok":true,"result":{"path":"$dir"}}' ;;
+  'worktree rm') : > "$case_dir/orca-removed" ;;
+  'terminal close') ;;
+  *) exit 1 ;;
+esac
+SH
+    chmod +x "$case_dir/fakebin/orca"
+  else
+    write_meta "$case_dir" local-only scout
+    mkdir -p "$case_dir/pool/1"
+    git -C "$case_dir/project" worktree move "$dir" "$case_dir/pool/1/project"
+    ln -s pool/1/project "$dir"
+    printf '{}\n' > "$case_dir/pool/treehouse-state.json"
+    printf 'task=other-task\nhome=%s\n' "$case_dir/home" > "$case_dir/pool/1/.fm-slot-owner"
+    dir="$case_dir/tasktmp"
+    mkdir "$dir"
+    printf 'tasktmp=%s\n' "$dir" >> "$case_dir/state/task-x1.meta"
+  fi
+  cat > "$case_dir/fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  '-o sid= -p '*) printf '%s\n' 99999999 ;;
+  '-A -o pid= -o ppid= -o sid=') "$REAL_PS_FOR_TEST" "$@" | awk '{$3=99999999; print}' ;;
+  *) exec "$REAL_PS_FOR_TEST" "$@" ;;
+esac
+SH
+  cat > "$case_dir/fakebin/lsof" <<'SH'
+#!/usr/bin/env bash
+if cwd=$(readlink "/proc/$FM_TEST_LEAK_PID/cwd" 2>/dev/null); then
+  printf 'p%s\nfcwd\nn%s\n' "$FM_TEST_LEAK_PID" "$cwd"
+fi
+SH
+  printf '#!/usr/bin/env bash\nexit 2\n' > "$case_dir/fakebin/treehouse"
+  chmod +x "$case_dir/fakebin/ps" "$case_dir/fakebin/lsof" "$case_dir/fakebin/treehouse"
+  ( cd "$dir" && : > "$case_dir/ready" && exec sleep 30 ) &
+  pid=$!
+  trap 'kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT
+  for ((i=0; i<100; i++)); do
+    [ ! -e "$case_dir/ready" ] || break
+    sleep 0.05
+  done
+  assert_present "$case_dir/ready" 'leaked process did not enter the fixture'
+  FM_TEST_LEAK_PID=$pid run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  [ "$rc" = 0 ] || fail "non-Treehouse reaping ($mode) refused: $(cat "$case_dir/stderr")"
+  if kill -0 "$pid" 2>/dev/null; then fail "non-Treehouse reaping ($mode) left the leak alive"; fi
+  if [ "$mode" = orca ]; then
+    assert_present "$case_dir/orca-removed" 'Orca cleanup did not remove its copy'
+  else
+    assert_present "$case_dir/pool/1/.fm-slot-owner" 'task-temp cleanup changed the reassigned slot'
+  fi
+  assert_absent "$case_dir/state/task-x1.meta" 'non-Treehouse cleanup did not retire the task record'
+  pass "non-Treehouse cleanup reaps leaks without requiring a verified Linux session ($mode)"
+)
+
 test_reparented_teardown_preserves_original_caller() (
   if [ "$(uname -s)" != Linux ]; then
     printf 'skip: reparented caller fixture requires Linux\n'
     return 0
   fi
   local mode=$1 case_dir leak_pid rc=0 i lock retries=1 copy task_branch hook parent
+  local backlog_case=0
   local -a teardown_args=()
   case_dir=$(make_case "reparented-teardown-$mode")
   if [ "$mode" = child ]; then
@@ -3723,6 +3817,17 @@ test_reparented_teardown_preserves_original_caller() (
     teardown_args=(--force)
   else
     write_meta "$case_dir" no-mistakes ship
+    case "$mode" in
+      inside-backlog|retry|stale|stale-edit)
+        backlog_case=1
+        seed_backlog_in_flight "$case_dir"
+        printf 'PR closure evidence\n' > "$case_dir/state/task-x1.pr-poll-closed"
+        ;;
+    esac
+    if [ "$mode" = retry ]; then
+      write_legacy_meta "$case_dir" no-mistakes ship
+      teardown_args=(--legacy-record)
+    fi
     if [ "$mode" = stale-edit ]; then
       wt_commit_file "$case_dir" feature.txt landed
     fi
@@ -3730,6 +3835,9 @@ test_reparented_teardown_preserves_original_caller() (
     copy="$case_dir/wt"
     task_branch=fm/task-x1
     hook="$copy/.claude/settings.local.json"
+  fi
+  if [ "$backlog_case" = 1 ]; then
+    cp "$case_dir/state/task-x1.meta" "$case_dir/meta-before"
   fi
   printf '/%s\n' "${hook#"$copy"/}" >> "$case_dir/project/.git/info/exclude"
   mkdir -p "${hook%/*}"
@@ -3829,7 +3937,7 @@ SH
   [ -f "$case_dir/ready" ] || fail 'reparented teardown: leak did not start'
 
   (
-    if [ "$mode" = inside ] || [ "$mode" = hidden ] || [ "$mode" = before-start ]; then
+    if [ "$mode" = inside ] || [ "$mode" = inside-backlog ] || [ "$mode" = hidden ] || [ "$mode" = before-start ]; then
       cd "$copy" || exit 1
     fi
     exec 3<>"$case_dir/result"
@@ -3853,11 +3961,12 @@ SH
         fi
         FM_TREEHOUSE_RETURN_LOCK_RETRIES=$retries FM_TREEHOUSE_RETURN_LOCK_RETRY_WAIT_SECS=0 \
           run_teardown "$case_dir" ${teardown_args[@]+"${teardown_args[@]}"} || rc=$?
+        : > "$case_dir/finished"
         printf '%s\n' "$rc" >&3
       ) &
       [ "$mode" != before-start ] || exit 0
       for ((i=0; i<300; i++)); do
-        if [ -f "$case_dir/release" ] || [ -f "$case_dir/term" ]; then
+        if [ -f "$case_dir/release" ] || [ -f "$case_dir/term" ] || [ -f "$case_dir/finished" ]; then
           exit 0
         fi
         sleep 0.05
@@ -3881,7 +3990,9 @@ SH
     exit "$rc"
   ) > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
 
-  assert_present "$case_dir/reparented" 'reparented teardown: parent did not change'
+  if [ "$mode" != inside-backlog ]; then
+    assert_present "$case_dir/reparented" 'reparented teardown: parent did not change'
+  fi
   assert_present "$case_dir/caller" 'reparented teardown: cleanup signalled the original caller'
   assert_absent "$case_dir/would-stop" 'Treehouse return would have stopped the original caller'
   if [ "$mode" = hidden ] || [ "$mode" = before-start ]; then
@@ -3895,7 +4006,9 @@ SH
     pass "cleanup refuses cwd matches with unknown startup ancestry ($mode)"
     return 0
   fi
-  if [ "$mode" != child ]; then
+  if [ "$mode" = inside-backlog ]; then
+    assert_absent "$case_dir/term" 'initial caller refusal let the reaper signal the leak'
+  elif [ "$mode" != child ]; then
     wait "$leak_pid" || fail 'reparented teardown: leak did not exit through its TERM handler'
     trap - EXIT
   fi
@@ -3924,7 +4037,7 @@ SH
     [ "$(git -C "$copy" symbolic-ref --short HEAD)" = "$task_branch" ] \
       || fail 'reparented teardown: refusal detached the task branch'
     [ "$(cat "$hook")" = 'configured hook' ] || fail 'reparented teardown: refusal changed the task hook'
-    if [ "$mode" = inside ]; then
+    if [ "$mode" = inside ] || [ "$mode" = inside-backlog ]; then
       assert_absent "$case_dir/treehouse.log" 'reparented teardown: invoked Treehouse despite an in-copy caller'
     else
       [ "$(cat "$case_dir/treehouse.log")" = return ] \
@@ -3933,10 +4046,24 @@ SH
     if [ "$retries" -eq 0 ]; then
       assert_grep 'removed provably-stale git lock' "$case_dir/stderr" 'stale retry was not reached'
     fi
+    if [ "$backlog_case" = 1 ]; then
+      (
+        export FM_HOME="$case_dir/home"
+        # shellcheck source=bin/fm-backlog-transition-lib.sh
+        . "$ROOT/bin/fm-backlog-transition-lib.sh"
+        fm_backlog_close_marker_replay "$case_dir/state" "$case_dir/state/task-x1.backlog-close" "$case_dir/data"
+      ) || fail 'startup replay failed after caller refusal'
+      assert_absent "$case_dir/state/task-x1.backlog-close" 'caller refusal left a pending backlog transition'
+      cmp -s "$case_dir/meta-before" "$case_dir/state/task-x1.meta" \
+        || fail 'caller refusal or startup replay changed the task record'
+      [ "$(cat "$case_dir/state/task-x1.pr-poll-closed")" = 'PR closure evidence' ] \
+        || fail 'caller refusal or startup replay lost PR closure evidence'
+      [ "$(backlog_row_state "$case_dir")" = in_flight ] || fail 'startup replay closed a refused task'
+    fi
     if [ "$mode" = retry ]; then
       printf '#!/usr/bin/env bash\nexit 0\n' > "$case_dir/fakebin/treehouse"
       rm -f "$case_dir/fakebin/lsof"
-      run_teardown "$case_dir" > "$case_dir/retry.stdout" 2> "$case_dir/retry.stderr" \
+      run_teardown "$case_dir" --legacy-record > "$case_dir/retry.stdout" 2> "$case_dir/retry.stderr" \
         || fail 'reparented teardown: subsequent cleanup from outside the copy failed'
       if git -C "$copy" show-ref --verify --quiet "refs/heads/$task_branch"; then
         fail 'reparented teardown: subsequent cleanup left the task branch'
@@ -4743,7 +4870,10 @@ test_lsof_absent_reaps_detached_linux_process hidden || exit 1
 test_proc_cwd_read_failure_preserves_copy || exit 1
 test_hidden_intermediate_parent_refuses_reap proc || exit 1
 test_hidden_intermediate_parent_refuses_reap lsof || exit 1
+test_non_treehouse_reap_with_unverified_session orca || exit 1
+test_non_treehouse_reap_with_unverified_session tasktmp || exit 1
 test_reparented_teardown_preserves_original_caller inside || exit 1
+test_reparented_teardown_preserves_original_caller inside-backlog || exit 1
 test_reparented_teardown_preserves_original_caller outside || exit 1
 test_reparented_teardown_preserves_original_caller retry || exit 1
 test_reparented_teardown_preserves_original_caller stale || exit 1
@@ -4813,6 +4943,9 @@ test_transient_index_lock_clears_after_first_attempt_and_retry_succeeds
 test_persistent_index_lock_exhausts_retries_and_refuses_loudly
 test_non_lock_return_failure_preserves_checkout same
 test_non_lock_return_failure_preserves_checkout moved
+test_non_lock_return_failure_preserves_checkout branch-failure
+test_non_lock_return_failure_preserves_checkout branch-success
+test_non_lock_return_failure_preserves_checkout branch-in-use
 test_empty_retry_wait_uses_default_without_aborting
 test_fractional_legacy_retry_wait_refuses_without_arithmetic_error
 test_parked_own_run_is_aborted_before_teardown
