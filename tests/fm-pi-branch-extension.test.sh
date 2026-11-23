@@ -1692,7 +1692,7 @@ test_branch_report_refuses_a_task_the_wake_did_not_name() {
 const prelude = process.env.DRIVER_PRELUDE;
 await eval(`(async () => { ${prelude}; globalThis.__t = { dispatch, fire, home, settle, approvedProject, defaultSessionCtx, makeOffer, bus }; })()`);
 const { dispatch, fire, home, settle, approvedProject, defaultSessionCtx, makeOffer, bus } = globalThis.__t;
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -1722,7 +1722,12 @@ if (named.isError) throw new Error(`the wake's own task was refused: ${JSON.stri
 finish();
 await settle(() => !existsSync(`${home}/state/.branch-eligible-rows`), "task-local grant release");
 
-writeFileSync(`${home}/state/a-lost.meta`, `project=${approvedProject}\nwindow=default:wX:p1\n`);
+const writeLossMeta = (window, generation) => writeFileSync(
+  `${home}/state/a-lost.meta`, `project=${approvedProject}\nbackend=herdr\nwindow=${window}\nspawn_gen=${generation}\n`,
+);
+const lossMarker = `${home}/state/a-lost.missing-endpoint`;
+writeLossMeta("default:wX:p1", "old");
+writeFileSync(lossMarker, "herdr:default:wX:p1\told\n");
 writeFileSync(`${home}/state/.wake-queue`,
   "1\t2\tstale\tdefault:wX:p1\tstale: default:wX:p1 (the recorded endpoint is gone for task a-lost)\n");
 globalThis.__fmOnBranchPrompt = () => new Promise((resolve) => { finish = resolve; });
@@ -1757,7 +1762,16 @@ writeFileSync(`${home}/state/.wake-queue`,
 await requiresMain(loss.message, "named endpoint loss now belongs to main");
 await requiresMain(decorated, "named endpoint loss now belongs to main");
 writeFileSync(`${home}/state/a-lost.status`, "working: relaunched\n");
-writeFileSync(`${home}/state/a-lost.meta`, `project=${approvedProject}\nwindow=default:wX:p2\n`);
+writeLossMeta("default:wX:p2", "old");
+await requiresMain(loss.message, "unread wake queue could not be read safely");
+writeLossMeta("default:wX:p1", "new");
+await requiresMain(loss.message, "unread wake queue could not be read safely");
+writeLossMeta("default:wX:p1", "old");
+writeFileSync(lossMarker, "zellij:default:wX:p1\told\n");
+await requiresMain(loss.message, "unread wake queue could not be read safely");
+unlinkSync(lossMarker);
+await requiresMain(loss.message, "unread wake queue could not be read safely");
+mkdirSync(lossMarker);
 await requiresMain(loss.message, "unread wake queue could not be read safely");
 if (globalThis.__fmPrompts.length !== 2) throw new Error("a main-owned loss prompted the branch");
 

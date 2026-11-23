@@ -205,7 +205,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
 
   const projects = new Set<string>();
   const metadata = new Map<string, string>();
-  const metadataByTask = new Map<string, { project: string; window: string }>();
+  const metadataByTask = new Map<string, { project: string; window: string; incarnation: string }>();
   // The task id behind each key a signal or stale row may carry: the task id
   // itself, or the endpoint its metadata records.
   const taskByKey = new Map<string, string>();
@@ -217,7 +217,13 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
       const project = fields.find((line) => line.startsWith("project="))?.slice(8) ?? "";
       const window = fields.find((line) => line.startsWith("window="))?.slice(7) ?? "";
       if (project) {
-        metadataByTask.set(task, { project, window });
+        const recordedWindow = fields.findLast((line) => line.startsWith("window="))?.slice(7) ?? "";
+        const backend = fields.findLast((line) => line.startsWith("backend="))?.slice(8) ?? "";
+        const generation = fields.findLast((line) => line.startsWith("spawn_gen="))?.slice(10) ?? "";
+        const incarnation = (backend === "herdr" || backend === "zellij") && generation
+          ? `${backend}:${recordedWindow}\t${generation}\n`
+          : "";
+        metadataByTask.set(task, { project, window: recordedWindow, incarnation });
         metadata.set(task, project);
         taskByKey.set(task, task);
         taskByKey.set(`${task}.status`, task);
@@ -276,7 +282,13 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
       const loss = namedEndpointLoss(fields[4]);
       if (loss) {
         const record = metadataByTask.get(loss.task);
-        if (!record || loss.window !== key || record.window !== key) return UNSAFE_SCOPE;
+        if (!record?.incarnation || loss.window !== key || record.window !== key) return UNSAFE_SCOPE;
+        const marker = `${state}/${loss.task}.missing-endpoint`;
+        try {
+          if (!lstatSync(marker).isFile() || readFileSync(marker, "utf8") !== record.incarnation) return UNSAFE_SCOPE;
+        } catch {
+          return UNSAFE_SCOPE;
+        }
         task = loss.task;
         project = record.project;
       } else {

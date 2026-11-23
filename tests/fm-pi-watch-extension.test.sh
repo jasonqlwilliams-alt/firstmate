@@ -920,14 +920,18 @@ test_pi_stale_trigger_uses_its_task() {
       trigger='stale: fm-a (routine reminder)'
       queue=$(printf '1\t1\tsignal\ttask-a.status\tneeds-decision: task-a.status\n2\t2\tstale\tfm-a\t%s\n' "$trigger")
       ;;
-    held-loss|eligible-loss|relaunched-loss|torn-down-loss)
+    held-loss|eligible-loss|relaunched-loss|same-pane-relaunch|torn-down-loss)
       printf 'project=%s/projects/approved\nwindow=shared:w1:p2\n' "$home" > "$home/state/z-live.meta"
+      printf 'herdr:shared:w1:p2\told\n' > "$home/state/a-lost.missing-endpoint"
       case "$scenario" in
         held-loss|eligible-loss)
-          printf 'project=%s/projects/lost\nwindow=shared:w1:p2\n' "$home" > "$home/state/a-lost.meta"
+          printf 'project=%s/projects/lost\nbackend=herdr\nwindow=shared:w1:p2\nspawn_gen=old\n' "$home" > "$home/state/a-lost.meta"
           ;;
         relaunched-loss)
-          printf 'project=%s/projects/lost\nwindow=shared:w1:p3\n' "$home" > "$home/state/a-lost.meta"
+          printf 'project=%s/projects/lost\nbackend=herdr\nwindow=shared:w1:p3\nspawn_gen=new\n' "$home" > "$home/state/a-lost.meta"
+          ;;
+        same-pane-relaunch)
+          printf 'project=%s/projects/lost\nbackend=herdr\nwindow=shared:w1:p2\nspawn_gen=new\n' "$home" > "$home/state/a-lost.meta"
           ;;
       esac
       case "$scenario" in
@@ -2837,7 +2841,8 @@ test_pi_replacement_persistence_failure_stops_arm_child() {
       ;;
     named-loss)
       trigger='stale: shared:w1:p2 (the recorded endpoint is gone for task a-lost)'
-      printf 'project=%s/projects/first\nwindow=shared:w1:p2\n' "$home" > "$home/state/a-lost.meta"
+      printf 'project=%s/projects/first\nbackend=herdr\nwindow=shared:w1:p2\nspawn_gen=old\n' "$home" > "$home/state/a-lost.meta"
+      printf 'herdr:shared:w1:p2\told\n' > "$home/state/a-lost.missing-endpoint"
       printf 'project=%s/projects/second\nwindow=shared:w1:p2\n' "$home" > "$home/state/z-live.meta"
       printf 'captain-held: awaiting the captain\n' > "$home/state/a-lost.status"
       printf '1\t1\tstale\tshared:w1:p2\t%s\n1\t2\tstale\tshared:w1:p2\tstale: shared:w1:p2\n' "$trigger" \
@@ -4054,6 +4059,7 @@ test_pi_stale_trigger_uses_its_task pending-reply
 test_pi_stale_trigger_uses_its_task held-loss
 test_pi_stale_trigger_uses_its_task eligible-loss
 test_pi_stale_trigger_uses_its_task relaunched-loss
+test_pi_stale_trigger_uses_its_task same-pane-relaunch
 test_pi_stale_trigger_uses_its_task torn-down-loss
 test_pi_distinct_files_mixed_batch_routes_whole_batch_to_main
 test_pi_heartbeat_is_not_ridden_into_main_by_a_co_present_needs_decision
