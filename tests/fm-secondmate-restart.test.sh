@@ -93,7 +93,8 @@ case "${1:-}" in
           corr=$(cat "$inbox"/*.msg 2>/dev/null \
             | grep -oE 'corr=[0-9a-f]{16}' | head -1)
           if [ -n "$corr" ]; then
-            printf '%s [%s]: %s\n' "${FM_FAKE_ANSWER_VERB:-done}" "$corr" \
+            header=${FM_FAKE_ANSWER_HEADER:-${FM_FAKE_ANSWER_VERB:-done} [$corr]}
+            printf '%s: %s\n' "${header//<corr>/$corr}" \
               "${FM_FAKE_ANSWER_NOTE:-Saved all open work.}" \
               >> "$(cat "$D/answer-status")"
           fi
@@ -1098,8 +1099,8 @@ test_remote_secondmate_control_relaunch_updates_parent_record() {
 # without the requested save receipt, keeps its agent and its conversation:
 # nothing is stopped, no re-read message is sent on top of its answer, and the
 # pass reports the stop in its output and exit status.
-assert_persist_answer_stops_local() {  # <verb> <note> <expected-fragment> <label> [with-receipt]
-  local verb=$1 note=$2 fragment=$3 label=$4 initial=${5:-} dir out rc
+assert_persist_answer_stops_local() {  # <verb> <note> <expected-fragment> <label> [with-receipt] [header]
+  local verb=$1 note=$2 fragment=$3 label=$4 initial=${5:-} header=${6:-} dir out rc
   dir=$(new_case "stop-$verb")
   add_local_mate "$dir" sm1
   arm_answer "$dir" sm1
@@ -1112,7 +1113,8 @@ SH
     chmod +x "$dir/fake/on-doorbell"
   fi
 
-  out=$(FM_FAKE_ANSWER_VERB="$verb" FM_FAKE_ANSWER_NOTE="$note" run_restart "$dir" fm-sm1); rc=$?
+  out=$(FM_FAKE_ANSWER_VERB="$verb" FM_FAKE_ANSWER_NOTE="$note" FM_FAKE_ANSWER_HEADER="$header" \
+    run_restart "$dir" fm-sm1); rc=$?
 
   if [ "$initial" = with-receipt ]; then
     assert_contains "$(head -1 "$dir/home/state/sm1.status")" ']: Saved all open work.' \
@@ -1178,6 +1180,12 @@ test_negative_persist_answer_stops_remote_restart() {
 test_negative_or_unclear_reply_vetoes_save_receipt() {
   assert_persist_answer_stops_local blocked 'one record was never written' \
     'it answered that its open work is not saved' 'a blocked correction' with-receipt
+  assert_persist_answer_stops_local blocked 'one record was never written' \
+    'it answered that its open work is not saved' 'a recovery correction with repeated correlation' \
+    with-receipt 'blocked <corr> <corr> [key=save]'
+  assert_persist_answer_stops_local blocked 'one record was never written' \
+    'it answered that its open work is not saved' 'a correction with intervening tags' \
+    with-receipt 'blocked [key=save] [source=recovery] [<corr>]'
   assert_persist_answer_stops_local note 'I may have missed a record' \
     'its answer did not confirm that its open work is saved' 'an unclear correction' with-receipt
   pass "a negative or unclear correction vetoes an earlier save receipt"

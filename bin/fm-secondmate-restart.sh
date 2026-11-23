@@ -40,10 +40,14 @@
 #      recovery to the ordinary pending-reply machinery. Shared pending-reply
 #      settlement can treat a correlation mentioned in another reply's note as
 #      an acknowledgement.
+#      The gate decides on replies visible during its scan, so a correction
+#      that becomes visible afterward can miss the restart decision.
 #
 # A missing persist answer or an unsupported restart can fall back to the
-# ordinary re-read nudge. A failed or ambiguous relaunch leaves the outcome
-# unknown. See docs/agent-control.md, "Claude background-tasks exit
+# ordinary re-read nudge. For an unconfirmed remote send, the pass reports
+# delivery failure without consulting any mirrored reply.
+# A failed or ambiguous relaunch leaves the outcome unknown.
+# See docs/agent-control.md, "Claude background-tasks exit
 # confirmation", for the case that goes straight to manual recovery.
 #
 # Placement changes the transport and nothing else. A local mate is restarted

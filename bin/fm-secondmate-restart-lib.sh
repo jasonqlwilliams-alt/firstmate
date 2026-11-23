@@ -56,9 +56,7 @@ fm_secondmate_persist_request() {  # <running-harness>
 FM_SECONDMATE_PERSIST_OUTCOME=""
 FM_SECONDMATE_PERSIST_NOTE=""
 fm_secondmate_persist_outcome() {  # <state-dir> <corr_id>
-  local state=$1 corr=$2 rec status_file line reply_header
-  local decision_tag='\[key=[A-Za-z0-9._-]+\]'
-  reply_header="^[[:blank:]]*[A-Za-z][A-Za-z0-9_-]*[[:blank:]]+($decision_tag[[:blank:]]+)?(\[corr=$corr\]|corr=$corr)([[:blank:]]+$decision_tag)?[[:blank:]]*:"
+  local state=$1 corr=$2 rec status_file line header verb
   FM_SECONDMATE_PERSIST_OUTCOME=""
   FM_SECONDMATE_PERSIST_NOTE=""
   rec=$(fm_pending_reply_path "$state" "$corr")
@@ -66,20 +64,33 @@ fm_secondmate_persist_outcome() {  # <state-dir> <corr_id>
   status_file=$(fm_pending_reply_get "$rec" parent_status)
   [ -f "$status_file" ] || return 1
   while IFS= read -r line || [ -n "$line" ]; do
-    [[ "$line" =~ $reply_header ]] || continue
     case "$line" in
       "done [corr=$corr]: $_FM_SECONDMATE_SAVED_RECEIPT"|"done [corr=$corr]: $_FM_SECONDMATE_SAVED_RECEIPT (via-helper)")
         FM_SECONDMATE_PERSIST_OUTCOME=saved
         continue
         ;;
+      *:*) ;;
+      *) continue ;;
+    esac
+    header=$(printf '%s\n' "${line%%:*}" | sed -E "s/\[($FM_PENDING_REPLY_CORR_RE)\]|\[[^][]*\]/ \1 /g")
+    case "$header" in
+      *'['*|*']'*) continue ;;
+    esac
+    verb=$(status_line_verb "$header")
+    case "$verb" in
+      ''|[!A-Za-z]*|*[!A-Za-z0-9_-]*) continue ;;
+    esac
+    case " $(printf '%s' "$header" | tr 'A-F' 'a-f') " in
+      *[[:space:]]"corr=$corr"[[:space:]]*) ;;
+      *) continue ;;
     esac
     FM_SECONDMATE_PERSIST_NOTE=$(status_line_note "$line" | tr -s '[:space:]' ' ')
-    case "$(status_line_verb "$line")" in
+    case "$verb" in
       blocked|failed|needs-decision) FM_SECONDMATE_PERSIST_OUTCOME=not-saved ;;
       *) FM_SECONDMATE_PERSIST_OUTCOME=unclear ;;
     esac
     return 0
-  done < <(grep -F -e "corr=$corr" "$status_file")
+  done < <(grep -Fi -e "corr=$corr" "$status_file")
   [ "$FM_SECONDMATE_PERSIST_OUTCOME" = saved ]
 }
 
