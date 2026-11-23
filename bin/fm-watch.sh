@@ -160,6 +160,8 @@ mkdir -p "$STATE"
 # cheap when no records exist and never scrapes secondmate conversation.
 # shellcheck source=bin/fm-pending-reply-lib.sh
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
+# shellcheck source=bin/fm-timeout-lib.sh
+. "$SCRIPT_DIR/fm-timeout-lib.sh"
 # shellcheck source=bin/fm-busy-lib.sh
 . "$SCRIPT_DIR/fm-busy-lib.sh"
 # Steering-inbox loss detection: bin/fm-task-inbox-lib.sh owns the record,
@@ -208,10 +210,18 @@ POLL=${FM_POLL:-15}                   # seconds between cycles
 # This recomputes the library default above now that the real configured
 # POLL is known.
 WATCHER_STALE_GRACE=${FM_WATCHER_STALE_GRACE:-${FM_GUARD_GRACE:-$(fm_poll_derived_grace "$POLL")}}
+WATCHER_WAIT_LIMIT=150
+for grace in "${FM_GUARD_GRACE:-300}" "$WATCHER_STALE_GRACE"; do
+  if [ "$grace" -gt 0 ] 2>/dev/null && [ "$grace" -lt "$((WATCHER_WAIT_LIMIT * 2))" ]; then
+    WATCHER_WAIT_LIMIT=$((10#$grace / 2))
+    [ "$WATCHER_WAIT_LIMIT" -gt 0 ] || WATCHER_WAIT_LIMIT=1
+  fi
+done
 HEARTBEAT=${FM_HEARTBEAT:-600}        # base seconds between heartbeat scans
 HEARTBEAT_MAX=${FM_HEARTBEAT_MAX:-7200}  # heartbeat backoff cap
 CHECK_INTERVAL=${FM_CHECK_INTERVAL:-300}  # seconds between *.check.sh sweeps
 CHECK_TIMEOUT=${FM_CHECK_TIMEOUT:-30}     # seconds allowed per *.check.sh
+WATCHER_HALF_WAIT_LIMIT=$((WATCHER_WAIT_LIMIT > 1 ? WATCHER_WAIT_LIMIT / 2 : 1))
 HOME_SUMMARY_INTERVAL=${FM_HOME_SUMMARY_INTERVAL:-300}
 case "$HOME_SUMMARY_INTERVAL" in
   ''|*[!0-9]*|0) HOME_SUMMARY_INTERVAL=300 ;;
@@ -670,7 +680,8 @@ refresh_active_captain_hold_ids() {
   local output ids
   ACTIVE_CAPTAIN_HOLD_IDS=
   command -v tasks-axi >/dev/null 2>&1 || return 1
-  output=$(cd "$FM_HOME" && tasks-axi list --state held --fields hold_kind --limit 100000 2>/dev/null) || return 1
+  output=$(cd "$FM_HOME" && fm_run_timed "$WATCHER_WAIT_LIMIT" \
+    tasks-axi list --state held --fields hold_kind --limit 100000 2>/dev/null) || return 1
   ids=$(printf '%s\n' "$output" | awk -F, '
     /^  [A-Za-z0-9._-]+,/ && $NF == "captain" {
       id = $1
@@ -782,6 +793,7 @@ secondmate_wake_stall_tick() {
     [ -n "$home" ] || continue
     [ -f "$home/.fm-secondmate-home" ] && [ ! -L "$home/.fm-secondmate-home" ] || continue
     [ "$(cat "$home/.fm-secondmate-home" 2>/dev/null || true)" = "$task" ] || continue
+    watcher_publish_beat || exit 0
     queue="$home/state/.wake-queue"
     row=$(secondmate_oldest_queue_row "$queue")
     marker="$STATE/.secondmate-wake-stall-$task"
@@ -1525,13 +1537,19 @@ procevent_surface_queued() {
 run_check_process() {
   local c=$1
   shift
+  local FM_CHECK_TIMEOUT
+  FM_CHECK_TIMEOUT=$WATCHER_WAIT_LIMIT
+  if [[ "$CHECK_TIMEOUT" =~ ^[0-9]*\.?[0-9]+$ && "$CHECK_TIMEOUT" == *[1-9]* ]]; then
+    FM_CHECK_TIMEOUT=$(watcher_wait_slice "$CHECK_TIMEOUT")
+  fi
+  export FM_CHECK_TIMEOUT
   if [ "${FM_CHECK_FORCE_FALLBACK:-0}" != 1 ] && command -v timeout >/dev/null 2>&1; then
-    exec timeout "$CHECK_TIMEOUT" bash "$c" "$@"
+    exec timeout -k 1 "$FM_CHECK_TIMEOUT" bash "$c" "$@"
   elif [ "${FM_CHECK_FORCE_FALLBACK:-0}" != 1 ] && command -v gtimeout >/dev/null 2>&1; then
-    exec gtimeout "$CHECK_TIMEOUT" bash "$c" "$@"
+    exec gtimeout -k 1 "$FM_CHECK_TIMEOUT" bash "$c" "$@"
   else
     # shellcheck disable=SC2016  # single quotes are deliberate: Perl expands its own variables.
-    exec perl -e 'my $t = shift; my $owned = shift; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0) unless $owned; exec @ARGV } my $group = $owned ? getpgrp(0) : $pid; my $stop = sub { $SIG{HUP} = $SIG{INT} = $SIG{TERM} = "IGNORE"; kill "TERM", -$group; select undef, undef, undef, 0.2; kill "KILL", -$group; waitpid $pid, 0; exit 124 }; local $SIG{ALRM} = $stop; local $SIG{HUP} = $stop; local $SIG{INT} = $stop; local $SIG{TERM} = $stop; alarm $t; waitpid $pid, 0; exit($? >> 8)' "$CHECK_TIMEOUT" "${FM_CHECK_OWNED_GROUP:-0}" bash "$c" "$@"
+    exec perl -MTime::HiRes=alarm -e 'my $t = shift; my $owned = shift; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0) unless $owned; exec @ARGV } my $group = $owned ? getpgrp(0) : $pid; my $stop = sub { $SIG{HUP} = $SIG{INT} = $SIG{TERM} = "IGNORE"; kill "TERM", -$group; select undef, undef, undef, 0.2; kill "KILL", -$group; waitpid $pid, 0; exit 124 }; local $SIG{ALRM} = $stop; local $SIG{HUP} = $stop; local $SIG{INT} = $stop; local $SIG{TERM} = $stop; alarm $t; waitpid $pid, 0; exit($? >> 8)' "$FM_CHECK_TIMEOUT" "${FM_CHECK_OWNED_GROUP:-0}" bash "$c" "$@"
   fi
 }
 
@@ -1714,19 +1732,56 @@ heartbeat_scan_finds_actionable() {
   return "$found"
 }
 
+watcher_wait_slice() {
+  awk -v seconds="$1" -v limit="${2:-$WATCHER_WAIT_LIMIT}" 'BEGIN { print (seconds + 0 > limit) ? limit : seconds }'
+}
+
+watcher_wait() {
+  local remaining=$1 slice rec rc
+  shift
+  while :; do
+    slice=$(watcher_wait_slice "$remaining")
+    if [ "$#" -gt 0 ]; then
+      rec=$(FM_BACKEND_EVENTS_CAPABILITY_CONFIRMED=1 \
+        fm_backend_wait_transition "$1" "$2" "$slice" "$STATE" "${@:3}")
+      rc=$?
+      case "$rc" in
+        0)
+          _event_cap_fails=0
+          handle_push_transition "$1" "$2" "$rec"
+          return
+          ;;
+        2)
+          _event_cap_fails=$((_event_cap_fails + 1))
+          [ "$_event_cap_fails" -lt "$EVENT_CAP_FAIL_MAX" ] || _event_cap_ok=0
+          watcher_publish_beat || exit 0
+          set --
+          sleep "$slice"
+          ;;
+        *) _event_cap_fails=0 ;;
+      esac
+    else
+      sleep "$slice"
+    fi
+    [ "$slice" != "$remaining" ] || return 0
+    watcher_publish_beat || exit 0
+    remaining=$(awk -v seconds="$remaining" -v slice="$slice" 'BEGIN { print (seconds - slice) }')
+  done
+}
+
 # event_wait_or_sleep: the terminal wait of each supervision cycle. For a home
 # with push-capable windows (herdr), it replaces the blind `sleep POLL` with a
 # bounded wait on the backend's native transition stream, so a crew going
 # `blocked` wakes the supervisor sub-second instead of after the stale-pane
 # wedge timer. For every other home - no push-capable window, backend not
-# capable, or the event path proven unreliable this process - it sleeps POLL,
-# byte-for-byte today's behavior. The poll loop above still runs every cycle, so
+# capable, or the event path proven unreliable this process - it sleeps POLL.
+# The poll loop above still runs every cycle, so
 # this only ever SHORTENS latency; it can never drop an escalation (the poll
 # loop is the permanent fail-closed backstop). This preserves the single live
 # supervision cycle: the reader is a short-lived subprocess of THIS watcher, not
 # a second watcher, so every guard/beacon/arm/turn-end mechanism is unchanged.
 event_wait_or_sleep() {
-  local w task b session first_backend="" first_session="" rec rc seen=
+  local w task b session first_backend="" first_session="" seen=
   local windows=()
   while IFS=$'\t' read -r w task b; do
     fm_backend_has_push "$b" || continue
@@ -1751,7 +1806,7 @@ event_wait_or_sleep() {
   done < <(recorded_endpoints)
 
   if [ "${#windows[@]}" -eq 0 ]; then
-    sleep "$POLL"
+    watcher_wait "$POLL"
     return
   fi
 
@@ -1767,31 +1822,11 @@ event_wait_or_sleep() {
     _event_cap_fails=0
   fi
   if [ "$_event_cap_ok" != 1 ]; then
-    sleep "$POLL"
+    watcher_wait "$POLL"
     return
   fi
 
-  rec=$(FM_BACKEND_EVENTS_CAPABILITY_CONFIRMED=1 fm_backend_wait_transition "$first_backend" "$first_session" "$POLL" "$STATE" "${windows[@]}")
-  rc=$?
-  case "$rc" in
-    0)
-      _event_cap_fails=0
-      handle_push_transition "$first_backend" "$first_session" "$rec"
-      ;;
-    2)
-      # Event path unusable this cycle (connect/subscribe failure). Sleep the
-      # budget and count toward the runtime-disable threshold; past it, drop to
-      # pure polling for the rest of this watcher process.
-      _event_cap_fails=$((_event_cap_fails + 1))
-      [ "$_event_cap_fails" -ge "$EVENT_CAP_FAIL_MAX" ] && _event_cap_ok=0
-      sleep "$POLL"
-      ;;
-    *)
-      # 1: a clean full-budget wait with no actionable edge - the reader already
-      # blocked ~POLL, so just continue; the next cycle re-scans.
-      _event_cap_fails=0
-      ;;
-  esac
+  watcher_wait "$POLL" "$first_backend" "$first_session" "${windows[@]}"
 }
 
 # --- Main entry: the runtime below runs only when this file is executed as a
@@ -2007,6 +2042,11 @@ watcher_publish_beat() {
   return 0
 }
 
+reply_send_budget=$(watcher_wait_slice "${FM_SEND_REMOTE_BUDGET:-30}" "$WATCHER_HALF_WAIT_LIMIT")
+confirm_seconds=$(watcher_wait_slice "$(fm_procevent_launch_confirm_seconds)" "$WATCHER_HALF_WAIT_LIMIT")
+inactive_scan_limit=$((WATCHER_WAIT_LIMIT > 2 ? WATCHER_WAIT_LIMIT - 2 : 1))
+inactive_scan_budget=$(watcher_wait_slice "${FM_INACTIVE_RECONCILE_BUDGET_SECS:-10}" "$inactive_scan_limit")
+
 while :; do
   watcher_publish_beat || exit 0
 
@@ -2025,7 +2065,9 @@ while :; do
   # parent reports, observe backend busy/idle turn completion, send one recovery
   # repost after grace, and escalate once if the recovery turn is also missed.
   # No conversation scraping; unresolved records are never silently expired.
-  fm_pending_reply_tick "$STATE" || true
+  FM_SEND_REMOTE_BUDGET="$reply_send_budget" \
+    fm_pending_reply_tick "$STATE" "$WATCHER_WAIT_LIMIT" watcher_publish_beat || exit 0
+  watcher_publish_beat || exit 0
 
   # A live secondmate endpoint does not prove that its own wake loop is alive.
   # Observe the foreign queue before the rest of this cycle so an aged row wakes
@@ -2034,13 +2076,17 @@ while :; do
     echo "watcher: secondmate wake-loop observation failed" >&2
     exit 1
   }
+  watcher_publish_beat || exit 0
 
   # Process-to-event liveness repair. This never discovers a result by polling:
   # each registered source has its own child blocking on that source, and this
   # only republishes results already captured durably and restarts a source
   # whose owner is gone. It is a no-op with nothing registered.
   if [ -d "$STATE/procevent" ]; then
-    FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-procevent.sh" reconcile >/dev/null 2>&1 || true
+    fm_run_timed "$WATCHER_WAIT_LIMIT" env FM_HOME="$FM_HOME" \
+      FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS="$confirm_seconds" \
+      "$SCRIPT_DIR/fm-procevent.sh" reconcile >/dev/null 2>&1 || true
+    watcher_publish_beat || exit 0
   fi
   # Then deliver any queued-but-unsurfaced result, including one a runner
   # published while this watcher was between cycles.
@@ -2054,7 +2100,8 @@ while :; do
   # This is mechanical and silent unless a durable terminal-outcome obligation
   # was created, so quiet cycles never wake firstmate or consume model tokens.
   inactive_out=
-  if inactive_out=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+  if inactive_out=$(FM_INACTIVE_RECONCILE_BUDGET_SECS="$inactive_scan_budget" \
+    FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
     "$SCRIPT_DIR/fm-inactive-reconcile.sh" scan 2>/dev/null); then
     if [ -n "$inactive_out" ]; then
       wake "check: inactive-outcome"
@@ -2062,6 +2109,7 @@ while :; do
   else
     triage_log "inactive-outcome reconciliation unavailable"
   fi
+  watcher_publish_beat || exit 0
 
   # Slow per-task checks (firstmate writes these, e.g. a merged-PR poll).
   # Time-based via .last-check mtime so the cadence survives watcher restarts.
@@ -2074,6 +2122,7 @@ while :; do
     rejected_checks=
     for c in "$STATE"/*.check.sh; do
       [ -e "$c" ] || continue
+      watcher_publish_beat || exit 0
       is_pr_poll=0
       id=$(basename "$c" .check.sh)
       if [ "$id" = x-watch ]; then
@@ -2171,7 +2220,8 @@ while :; do
   # signature for an already-pending file (last write wins below).
   pending=$(scan_signals)
   if [ -n "$pending" ]; then
-    sleep "$SIGNAL_GRACE"
+    watcher_publish_beat || exit 0
+    watcher_wait "$SIGNAL_GRACE"
     pending=$(printf '%s\n%s' "$pending" "$(scan_signals)")
     # The final coalesced signal set is the watcher-carried status-change
     # trigger for this home's published summary. Start it before either
@@ -2294,6 +2344,7 @@ EOF
   # stale hash is surfaced, absorbed, or timed toward escalation once (.stale-*
   # remembers the hash already classified, or the declaration a busy pane's
   # crossed turn bound already handed to the away-mode daemon).
+  watcher_publish_beat || exit 0
   if refresh_active_captain_hold_ids; then
     if [ "$ACTIVE_CAPTAIN_HOLD_REFRESH_FAILED" -eq 1 ]; then
       triage_log "active captain backlog hold refresh recovered"
@@ -2307,6 +2358,7 @@ EOF
   fi
   seen=
   while IFS=$'\t' read -r w task backend; do
+    watcher_publish_beat || exit 0
     meta="$STATE/$task.meta"
     # Steering-inbox loss detection runs before the secondmate stale
     # exemption below, because a mate's steers land in an inbox too.
@@ -2599,5 +2651,6 @@ EOF
 
   # Terminal wait: a bounded native-event wait for push-capable homes (herdr),
   # else the blind poll sleep. See event_wait_or_sleep.
+  watcher_publish_beat || exit 0
   event_wait_or_sleep
 done

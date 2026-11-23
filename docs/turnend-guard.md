@@ -62,9 +62,8 @@ If `jq` is missing or hook stdin is empty, the guard exits 0 because it cannot s
 
 ### Guard grace and the poll cadence
 
-The beacon can age throughout the watcher's `FM_POLL` terminal wait, as described in the [watcher beacon contract](watcher-continuity.md#arm-layer-cycle-contract).
-A fixed 300-second grace default stops correctly bounding staleness once a home's `FM_POLL` reaches or exceeds it: a perfectly healthy watcher mid-wait would then read stale at the edge of every full poll cycle by definition, which is exactly what a long-poll home (`FM_POLL=300`) hit against the Claude Stop-hook auto-arm (`bin/fm-claude-stop-autoarm.sh`).
-That hook and `bin/fm-watch.sh`'s own pre-acquisition staleness check (the "lock held by live pid but heartbeat is stale" refusal) both derive their default grace from the configured poll instead of a bare constant: `max(300, FM_POLL + 60)`, so the default never drops below the historical 300-second floor for the common short-poll case but grows with the poll cadence once that cadence would otherwise outrun it.
+The watcher keeps its beacon fresh during long terminal waits as described in the [watcher beacon contract](watcher-continuity.md#arm-layer-cycle-contract).
+The Claude Stop-hook auto-arm (`bin/fm-claude-stop-autoarm.sh`) and the watcher's pre-acquisition staleness check retain their poll-derived default grace of `max(300, FM_POLL + 60)`.
 `fm_poll_derived_grace` in `bin/fm-wake-lib.sh` is the single owner of that formula.
 The auto-arm hook additionally exports its resolved `FM_GUARD_GRACE` when it forks `bin/fm-watch-arm.sh`, so the arm wrapper and the watcher it may start judge staleness with the exact same value the hook just judged it with, whether that value came from an operator override or the poll-derived default.
 `bin/fm-turnend-guard.sh`'s away-mode branch (`fm_afk_daemon_owns_supervision`, above) also derives its beacon grace from `fm_poll_derived_grace` rather than falling back to the bare 300-second default, for the same reason: the daemon's watcher-restart cadence there is not a fixed poll loop, so a flat grace misreads a daemon that is genuinely still cycling as down.

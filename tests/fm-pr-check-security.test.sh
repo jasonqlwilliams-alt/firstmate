@@ -1167,6 +1167,7 @@ test_custom_snapshot_cleanup_on_signal() {
   chmod 0700 "$state/custom.check.sh"
   cat > "$dir/fakebin/timeout" <<'SH'
 #!/usr/bin/env bash
+[ "$1" != -k ] || shift 2
 shift
 "$@" &
 child=$!
@@ -1239,6 +1240,7 @@ SH
     if [ "$backend" = installed-timeout ]; then
       cat > "$fakebin/timeout" <<'SH'
 #!/usr/bin/env bash
+[ "$1" != -k ] || shift 2
 shift
 exec "$@"
 SH

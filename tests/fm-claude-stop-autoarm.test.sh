@@ -1341,9 +1341,9 @@ test_slow_check_sweep_liveness() (
   cp -R "$ROOT/bin/." "$dir/bin/" || fail "could not install watcher scripts"
   cp "$ROOT/.tasks.toml" "$dir/.tasks.toml" || fail "could not install backlog configuration"
   export FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state"
-  export FM_GUARD_GRACE=8 FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=35
+  export FM_GUARD_GRACE=12 FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=35
   export FM_POLL=1 FM_HEARTBEAT=999999 FM_ARM_CONFIRM_TIMEOUT=4
-  export FM_CLAUDE_AUTOARM_ATTEMPTS=1 FM_CLAUDE_AUTOARM_LEASE_SECONDS=24
+  export FM_CLAUDE_AUTOARM_ATTEMPTS=1 FM_CLAUDE_AUTOARM_LEASE_SECONDS=30
 
   cleanup_sweep() {
     if [ "$stopped" -eq 1 ]; then kill -CONT "$watcher_pid" 2>/dev/null || true; fi
@@ -1358,12 +1358,13 @@ test_slow_check_sweep_liveness() (
   # carry the cycle past it. Hold the final actionable check for the probe.
   printf 'sleep 5\n' > "$state/a.check.sh"
   cp "$state/a.check.sh" "$state/b.check.sh" || fail "could not install silent check"
-  cat > "$state/c.check.sh" <<'SH'
+  cp "$state/a.check.sh" "$state/c.check.sh" || fail "could not install silent check"
+  cat > "$state/d.check.sh" <<'SH'
 touch "$FM_HOME/state/ready"
 until [ -f "$FM_HOME/state/finish" ]; do sleep 0.1; done
 echo completed-slow-sweep
 SH
-  for id in a b c; do
+  for id in a b c d; do
     chmod 700 "$state/$id.check.sh"
     "$dir/bin/fm-check-register.sh" "$id" >/dev/null || fail "could not register $id"
   done
@@ -1380,6 +1381,7 @@ SH
   if [ "$mode" = stalled ]; then
     kill -STOP "$watcher_pid" || fail "could not stop the watcher during the final check"
     stopped=1
+    touch "$state/finish"
     sleep "$((FM_GUARD_GRACE + 1))"
   fi
   "$dir/bin/fm-guard.sh" --read-only > "$dir/guard.out" 2>&1
@@ -1421,6 +1423,97 @@ SH
   pass "auto-arm: $mode watcher during a long check sweep preserves singleton and wake delivery"
 )
 
+test_stalled_remote_observation_liveness() (
+  local dir state corr rec i watcher_pid hook_rc
+  local arm_pid='' RUN_AUTOARM_BG_PID=''
+  dir=$(make_primary_dir "$TMP_ROOT/stalled-observation")
+  state="$dir/state"
+  cp -R "$ROOT/bin/." "$dir/bin/" || fail "could not install watcher scripts"
+  cp "$ROOT/.tasks.toml" "$dir/.tasks.toml" || fail "could not install backlog configuration"
+  git -C "$dir" add bin/fm-remote-secondmate-control.sh || fail "could not track the remote observation command"
+  mkdir -p "$dir/data"
+  printf '%s\n' "- mate - fixture (host: remote-mac; root: $dir; home: $dir/mate; scope: fixture; projects: alpha; added 2026-08-02)" \
+    > "$dir/data/secondmates.md"
+  fm_write_meta "$state/mate.meta" 'kind=secondmate' 'remote_host=remote-mac'
+  export FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state"
+  export FM_GUARD_GRACE=8 FM_POLL=15 FM_CHECK_INTERVAL=0 FM_HEARTBEAT=999999
+  export FM_ARM_CONFIRM_TIMEOUT=4 FM_CLAUDE_AUTOARM_ATTEMPTS=1 FM_CLAUDE_AUTOARM_LEASE_SECONDS=30
+  export FM_SSH_BIN="$dir/fixture-ssh"
+
+  # shellcheck source=/dev/null
+  . "$dir/bin/fm-pending-reply-lib.sh"
+  corr=$(fm_pending_reply_create "$dir" "$state" mate observe) || fail "could not create reply expectation"
+  fm_pending_reply_mark_delivered "$state" "$corr" || fail "could not record delivery"
+  rec=$(fm_pending_reply_path "$state" "$corr")
+
+  cat > "$FM_SSH_BIN" <<'SH'
+#!/usr/bin/env bash
+if [ ! -e "$FM_HOME/state/observing" ]; then
+  touch "$FM_HOME/state/observing"
+  printf 'idle'
+  exec sleep 30
+fi
+printf 'busy'
+SH
+  cat > "$state/ready.check.sh" <<'SH'
+touch "$FM_HOME/state/checked"
+if [ -e "$FM_HOME/state/finish" ]; then echo completed-after-observation; fi
+SH
+  chmod 700 "$FM_SSH_BIN" "$state/ready.check.sh"
+  "$dir/bin/fm-check-register.sh" ready >/dev/null || fail "could not register the check"
+
+  cleanup_observation() {
+    if [ -n "$arm_pid" ]; then
+      kill "$arm_pid" 2>/dev/null || true
+      wait "$arm_pid" 2>/dev/null || true
+    fi
+    if [ -n "$RUN_AUTOARM_BG_PID" ]; then
+      kill "$RUN_AUTOARM_BG_PID" 2>/dev/null || true
+      wait "$RUN_AUTOARM_BG_PID" 2>/dev/null || true
+    fi
+  }
+  trap cleanup_observation EXIT
+  trap 'exit 1' HUP INT TERM
+
+  "$dir/bin/fm-watch-arm.sh" > "$dir/outer.out" 2>&1 &
+  arm_pid=$!
+  for ((i=0; i<160; i++)); do
+    [ ! -e "$state/checked" ] || break
+    kill -0 "$arm_pid" 2>/dev/null || break
+    sleep 0.05
+  done
+  [ -e "$state/observing" ] || fail "watcher never entered the remote observation"
+  [ -e "$state/checked" ] || fail "the remote observation stalled the watcher past grace"
+  [ -z "$(fm_pending_reply_get "$rec" request_turn_completed_epoch)" ] \
+    || fail "incomplete observation output was accepted as idle"
+  watcher_pid=$(cat "$state/.watch.lock/pid") || fail "original watcher did not hold the lock"
+
+  sleep 10
+  "$dir/bin/fm-guard.sh" --read-only > "$dir/guard.out" 2>&1
+  assert_not_contains "$(cat "$dir/guard.out")" 'WATCHER DOWN' "the terminal wait must stay fresh past grace"
+  [ "$(fm_pending_reply_get "$rec" turn_seen_busy)" = 0 ] || fail "beacon refresh shortened the configured poll"
+  run_autoarm_bg "$dir" "$dir/hook.out"
+  for ((i=0; i<120; i++)); do
+    grep -qsF "watcher: attached pid=$watcher_pid " "$state"/.claude-autoarm-output.* && break
+    kill -0 "$RUN_AUTOARM_BG_PID" 2>/dev/null || break
+    sleep 0.05
+  done
+  grep -qsF "watcher: attached pid=$watcher_pid " "$state"/.claude-autoarm-output.* \
+    || fail "Stop hook did not attach to the original watcher: $(cat "$dir/hook.out")"
+  touch "$state/finish"
+  wait "$arm_pid" || fail "original watcher cycle did not succeed: $(cat "$dir/outer.out")"
+  arm_pid=
+  wait "$RUN_AUTOARM_BG_PID"
+  hook_rc=$?
+  RUN_AUTOARM_BG_PID=
+  expect_code 2 "$hook_rc" "the attached Stop hook must request a handling turn"
+  assert_grep 'completed-after-observation' "$dir/hook.out" "Stop hook must relay the original watcher's check"
+  [ "$(fm_pending_reply_get "$rec" turn_seen_busy)" = 1 ] || fail "the watcher did not retry the remote observation"
+  [ "$(wc -l < "$state/.wake-queue" | tr -d ' ')" = 1 ] || fail "the check must queue exactly one wake"
+  pass "auto-arm: stalled remote observation and long poll preserve singleton liveness and wake delivery"
+)
+
+test_stalled_remote_observation_liveness || exit $?
 test_slow_check_sweep_liveness healthy || exit $?
 test_slow_check_sweep_liveness stalled || exit $?
 test_inert_in_child_worktree

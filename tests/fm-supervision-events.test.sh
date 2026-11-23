@@ -30,6 +30,8 @@ WAKE_LOG="$TMP/wakes"
 SLEEP_LOG="$TMP/sleeps"
 wake() { printf '%s\n' "$1" >> "$WAKE_LOG"; return 0; }
 sleep() { printf 'SLEEP\n' >> "$SLEEP_LOG"; }
+# shellcheck disable=SC2329 # Runtime override called by the isolated watcher.
+watcher_publish_beat() { return 0; }
 
 fm_backend_source herdr || fail "could not load the Herdr adapter"
 fm_backend_herdr_cli() {
