@@ -1450,6 +1450,14 @@ SH
 test_stalled_remote_observation_liveness() (
   local mode=${1:-poll} dir state corr rec i watcher_pid hook_rc ssh_pid='' transport_pid='' ssh_status
   local arm_pid='' RUN_AUTOARM_BG_PID=''
+  if [ "$mode" = poll ]; then
+    # shellcheck source=bin/fm-timeout-lib.sh
+    . "$ROOT/bin/fm-timeout-lib.sh"
+    if ! fm_gnu_timeout >/dev/null; then
+      printf '%s\n' 'ok - auto-arm: stalled remote observation is bounded # SKIP GNU timeout unavailable'
+      return 0
+    fi
+  fi
   dir=$(make_primary_dir "$TMP_ROOT/stalled-observation-$mode")
   state="$dir/state"
   cp -R "$ROOT/bin/." "$dir/bin/" || fail "could not install watcher scripts"

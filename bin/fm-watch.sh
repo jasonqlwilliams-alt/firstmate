@@ -155,6 +155,8 @@ mkdir -p "$STATE"
 . "$SCRIPT_DIR/fm-x-lib.sh"
 # shellcheck source=bin/fm-check-lib.sh
 . "$SCRIPT_DIR/fm-check-lib.sh"
+# shellcheck source=bin/fm-timeout-lib.sh
+. "$SCRIPT_DIR/fm-timeout-lib.sh"
 # Parent-owned secondmate missed-report guards: durable pending-reply
 # expectations created by fm-send on marked secondmate requests. The tick is
 # cheap when no records exist and never scrapes secondmate conversation.
@@ -1634,65 +1636,17 @@ run_check_capture() {
   watcher_finish_capture
 }
 
-remote_observation_owned() {
-  local capture=$1 owner=$2 stat_line parent pgid
-  if [ -r "/proc/$capture/stat" ]; then
-    IFS= read -r stat_line < "/proc/$capture/stat" || return 1
-    read -r _ parent pgid _ <<< "${stat_line##*)}" || return 1
-  else
-    stat_line=$(ps -p "$capture" -o ppid= -o pgid= 2>/dev/null) || return 1
-    read -r parent pgid <<< "$stat_line" || return 1
-  fi
-  [ "$parent" = "$owner" ] && [ "$pgid" = "$capture" ]
-}
-
-remote_observation_status() {
-  local owner=$1 budget=$2 capture=$3 status command_pid command_rc
-  shift 3
-  IFS= read -r -t "$budget" status < <(
-    exec 2>/dev/null
-    trap ':' HUP INT TERM
-    ( exec "$@" < /dev/null >&3 3>&- ) &
-    command_pid=$!
-    while kill -0 "$command_pid" 2>/dev/null; do
-      if ! remote_observation_owned "$capture" "$owner"; then
-        printf '%s\n' cancelled
-        break
-      fi
-      command sleep 0.02
-    done
-    command_rc=0
-    wait "$command_pid" 2>/dev/null || command_rc=$?
-    printf '%s\n' "$command_rc"
-  ) && [ "$status" = 0 ]
-}
-
 run_remote_observation_process() {
-  local owner=$1 budget=$2 capture elapsed
-  shift 2
-  fm_current_pid capture && remote_observation_owned "$capture" "$owner" || return 124
-  trap ':' HUP INT TERM
-  {
-    if elapsed=$(
-      LC_ALL=C TIMEFORMAT=%R
-      { time remote_observation_status "$owner" "$budget" "$capture" "$@"; } 2>&1
-    ) && LC_ALL=C awk -v elapsed="$elapsed" -v budget="$budget" \
-      'BEGIN { exit !(elapsed ~ /^[0-9]+[.][0-9]+$/ && elapsed + 0 < budget) }' \
-      && remote_observation_owned "$capture" "$owner"; then
-      return 0
-    fi
-  } 3>&1
-  kill -TERM -- "-$capture" 2>/dev/null || true
-  command sleep 0.05
-  kill -KILL -- "-$capture" 2>/dev/null || true
-  return 124
+  local runner
+  if runner=$(fm_gnu_timeout); then
+    exec "$runner" -k 0.1 "$WATCHER_WAIT_LIMIT" "$@" < /dev/null
+  fi
+  exec "$@" < /dev/null
 }
 
 watcher_remote_observe() {
-  local owner
   FM_PENDING_REPLY_OBSERVATION=unknown
-  fm_current_pid owner || return 0
-  watcher_start_capture run_remote_observation_process "$owner" "$WATCHER_WAIT_LIMIT" "$@" || return 0
+  watcher_start_capture run_remote_observation_process "$@" || return 0
   watcher_finish_capture || return 1
   [ "$FM_CAPTURE_RC" -ne 0 ] || FM_PENDING_REPLY_OBSERVATION=$FM_CHECK_RESULT
 }
@@ -2022,6 +1976,7 @@ reconcile_requests_detached() {
 }
 
 watcher_cleanup() {
+  trap '' HUP INT TERM
   local cleanup_status=0 owns_lock=0 transition=release-lock
   if [ "$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)" = "${WATCHER_PID:-}" ]; then
     owns_lock=1

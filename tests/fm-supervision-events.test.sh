@@ -174,8 +174,26 @@ test_remote_wait_uses_elapsed_budget() (
 
 test_remote_wait_uses_elapsed_budget || exit $?
 
+test_remote_wait_without_gnu_timeout() (
+  local no_timeout="$TMP/no-timeout"
+  mkdir -p "$no_timeout" || fail "could not create the no-timeout fixture"
+  ln -s "$TMP/no-perl/perl" "$no_timeout/timeout" || fail "could not mask timeout"
+  ln -s "$TMP/no-perl/perl" "$no_timeout/gtimeout" || fail "could not mask gtimeout"
+  export PATH="$no_timeout:$TMP/no-perl:$PATH"
+  WATCHER_WAIT_LIMIT=1 watcher_remote_observe bash -c 'sleep 1.2; printf busy' \
+    || fail "direct remote observation could not run"
+  [ "$FM_PENDING_REPLY_OBSERVATION" = busy ] || fail "the observation must still work without GNU timeout"
+  pass "watcher: without GNU timeout the direct observation still supplies its result"
+)
+
+test_remote_wait_without_gnu_timeout || exit $?
+
 test_remote_wait_rejects_late_success() (
   local child='' i
+  if ! fm_gnu_timeout >/dev/null; then
+    printf '%s\n' 'ok - watcher: a reply after the deadline stays unknown # SKIP GNU timeout unavailable'
+    return 0
+  fi
   export PATH="$TMP/no-perl:$PATH"
   trap '
     if [ -n "$child" ]; then
@@ -215,8 +233,12 @@ test_remote_wait_rejects_late_success() (
 
 test_remote_wait_rejects_late_success || exit $?
 
-test_remote_wait_counts_dispatch_time() (
-  local dispatched="$TMP/dispatched"
+test_remote_wait_enforces_dispatch_deadline() (
+  local dispatched="$TMP/dispatched" overran="$TMP/overran"
+  if ! fm_gnu_timeout >/dev/null; then
+    printf '%s\n' 'ok - watcher: slow status collection cannot delay cancellation # SKIP GNU timeout unavailable'
+    return 0
+  fi
   export PATH="$TMP/no-perl:$PATH"
   read() {
     local i
@@ -226,21 +248,24 @@ test_remote_wait_counts_dispatch_time() (
         command sleep 0.01
       done
       [ -e "$dispatched" ] || return 1
-      command sleep 0.6
+      command sleep 0.8
     fi
     builtin read "$@"
   }
   WATCHER_WAIT_LIMIT=1 watcher_remote_observe bash -c '
+    trap "" TERM
     touch "$1"
-    sleep 1.2
+    sleep 1.45
+    touch "$2"
     printf idle
-  ' _ "$dispatched" || fail "remote observation could not run"
+  ' _ "$dispatched" "$overran" || fail "remote observation could not run"
   [ -e "$dispatched" ] || fail "remote observation did not dispatch"
+  [ ! -e "$overran" ] || fail "the remote command survived the deadline and kill-after allowance"
   [ "$FM_PENDING_REPLY_OBSERVATION" = unknown ] || fail "a delay before reading extended the observation deadline"
-  pass "watcher: a delayed status read cannot extend the observation deadline"
+  pass "watcher: slow status collection cannot delay cancellation"
 )
 
-test_remote_wait_counts_dispatch_time || exit $?
+test_remote_wait_enforces_dispatch_deadline || exit $?
 
 test_wait_preserves_sleep_units() (
   reset_state

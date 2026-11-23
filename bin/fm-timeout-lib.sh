@@ -41,6 +41,17 @@ fm_timeout_mechanism() {
   fi
 }
 
+fm_gnu_timeout() {
+  local runner version
+  for runner in timeout gtimeout; do
+    version=$(LC_ALL=C command "$runner" --version 2>/dev/null </dev/null) || continue
+    case "$version" in
+      *'(GNU coreutils)'*) printf '%s\n' "$runner"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
 fm_run_bash_timeout() {
   local seconds=$1 command_status deadline_status child_pid watchdog_pid command_rc recorded_rc monitor_was_on=0
   shift
@@ -99,6 +110,9 @@ fm_run_external_timeout() {
   "$runner" -k 1 "$seconds" bash -c '
     status_file=$1
     shift
+    trap "exit 129" HUP
+    trap "exit 130" INT
+    trap "exit 143" TERM
     "$@"
     command_rc=$?
     printf "%s\n" "$command_rc" > "$status_file"
