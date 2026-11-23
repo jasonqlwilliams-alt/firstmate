@@ -45,7 +45,9 @@
 # The writer and replay share one complete-record validator, and teardown stages
 # that record before destructive cleanup, so it never publishes or acts on a close
 # replay would reject. The validator pins the data path to this home's configured
-# root before any recovery mutation, then re-runs exactly that close.
+# root before replay can run that close. Teardown's cancellation path uses the
+# shared record reader to match the task incarnation even if its data root has
+# moved. Reading the marker alone grants no authority to act on its data path.
 # `tasks-axi done` on an already-closed task backfills links
 # without moving the close date, so replay is idempotent. Spawn needs no marker:
 # it publishes the meta first, so a crash

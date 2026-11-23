@@ -12,12 +12,16 @@
 # record being removed, the intended transition is recorded in
 # state/<id>.backlog-close first, so a process killed between the halves leaves
 # the next session start enough to finish it; a landed close removes that record.
-# A close that fails is fatal and loud, preserves its pending-close record, and
-# is retried by the next session start. The transition is skipped on a
-# config/backlog-backend=manual home and in a markdown home that keeps no
-# data/backlog.md; those cases print the manual follow-up. A configured
-# non-markdown adapter remains active without a markdown file; any active
-# automatic backend without compatible tasks-axi refuses before cleanup.
+# A failed backlog transition after cleanup makes teardown fail and preserves
+# its pending-close record for session-start replay. On a failed Treehouse return
+# with the copy still present, teardown cancels the close for that task
+# incarnation so replay does not remove the retained task record. It restores
+# any unrelated marker it replaced and rolls back an unpublished legacy stamp.
+# The transition is skipped on a config/backlog-backend=manual home and in a
+# markdown home that keeps no data/backlog.md. Both cases print the manual
+# follow-up. A configured non-markdown adapter remains active without a
+# markdown file. Teardown refuses before cleanup if an active automatic
+# backend lacks compatible tasks-axi.
 # None of this loosens the landed-work gates below: the transition runs only on
 # the paths that already proceed to remove the record.
 # The close - and only the close - is replaced by `tasks-axi reopen` with the
@@ -73,8 +77,8 @@
 # volatile state.
 # Worktree-slot ownership (teardown-slot-collision): a treehouse pool slot is
 # reused across tasks, so a stale, duplicated, or drifted worktree= record can
-# name a slot a DIFFERENT live task now holds. Cleanup kills every process under
-# that path and hard-resets it before returning it, so releasing a slot that is
+# name a slot a DIFFERENT live task now holds. Returning a slot stops processes
+# under that path and hard-resets it, so releasing a slot that is
 # not genuinely this task's destroys another worker's live work. Before the first
 # cleanup step, teardown verifies record exclusivity: no OTHER task record in
 # this home or any locally registered Firstmate home may name the same live path
@@ -124,9 +128,9 @@
 # bin/fm-wake-lib.sh's slot-owner claim comment.
 # The recorded endpoint's exact task identity and the record's spawn incarnation
 # are validated separately
-# before cleanup. Its current working directory is only incidental process
-# state: the same worker remains the owner after changing directory, so cwd can
-# never veto teardown of that exact recorded endpoint.
+# before cleanup. A worker's cwd is incidental to endpoint ownership: the same
+# worker remains the owner after changing directory. Caller cwd is checked
+# separately for Treehouse return safety.
 # The scan and destructive return hold a project-identity lock in the local root
 # Firstmate home's state directory, as resolved by bin/fm-wake-lib.sh's
 # fm_firstmate_root_home; a home seeded from another machine is its own local
@@ -246,10 +250,11 @@
 # checks before any destructive return. Teardown output notes every wait, retry, and
 # removal so the operator can see what happened.
 #
-# Before each Treehouse return attempt, teardown verifies that no protected
-# caller or ancestor has its cwd in the copy. This includes ancestors saved
-# at startup before a wrapper exited. If either the ancestry or the cwd scan
-# cannot be verified, teardown refuses and retains the copy.
+# Treehouse's process scan sees its own live ancestry. Teardown's preflight and
+# per-attempt checks also consider ancestors saved at startup before a wrapper
+# exited, so a protected working-directory match or a failed ancestry or cwd
+# check refuses the return attempt. Linux additionally requires a different
+# process in the startup ancestry to be teardown's session leader.
 # Only Treehouse can exclude a caller that enters the copy between teardown's final check and Treehouse's own scan.
 # Detection of reparenting before startup uses Linux process sessions and is unavailable on non-Linux hosts.
 # Adoption by a Linux subreaper in the same session can hide a caller that reparented before teardown started.
@@ -300,7 +305,9 @@
 #     to find processes under the owned worktree and the recorded tasktmp,
 #     which can be shared between homes. On Linux without lsof it uses
 #     `/proc/<pid>/cwd` for the owned worktree only. On other hosts without
-#     lsof, teardown can only attempt to reap the tmux pane's process group.
+#     lsof, the early Treehouse preflight refuses before reaping. For cleanup
+#     without that preflight, teardown can only attempt to reap the tmux pane's
+#     process group.
 #     Both scans can identify only processes whose working directory is readable.
 #     Both scans are bounded by process count and exclude teardown and its
 #     current and startup ancestors. Teardown sends TERM, then KILL after a

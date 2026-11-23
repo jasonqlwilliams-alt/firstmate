@@ -568,12 +568,18 @@ SH
   chmod +x "$case_dir/fakebin/lsof"
 }
 
-add_lsof_error() {
+add_lsof_index_lock_error() {
   local case_dir=$1
   cat > "$case_dir/fakebin/lsof" <<'SH'
 #!/usr/bin/env bash
-echo "lsof: simulated failure for ${1:-unknown}" >&2
-exit 2
+case " $* " in
+  *" -d cwd "*) exit 0 ;;
+  " -- "*/index.lock" ")
+    echo "lsof: simulated failure for $2" >&2
+    exit 2
+    ;;
+esac
+exit 1
 SH
   chmod +x "$case_dir/fakebin/lsof"
 }
@@ -1598,7 +1604,7 @@ test_lsof_error_never_clears_index_lock() {
   git -C "$case_dir/project" fetch -q origin
 
   add_lock_aware_treehouse "$case_dir"
-  add_lsof_error "$case_dir"
+  add_lsof_index_lock_error "$case_dir"
 
   lock=$(git_index_lock_path "$case_dir/wt")
   mkdir -p "$(dirname "$lock")"
@@ -1612,7 +1618,7 @@ test_lsof_error_never_clears_index_lock() {
   set -e
 
   expect_code 1 "$rc" "lsof-error-index-lock: teardown should refuse when lsof errors"
-  assert_grep "REFUSED: cannot determine leaked processes" "$case_dir/stderr" \
+  assert_grep "lsof check failed: lsof: simulated failure for $lock" "$case_dir/stderr" \
     "lsof-error-index-lock: teardown did not report the lsof failure"
   assert_not_contains "$(cat "$case_dir/stderr")" "removed provably-stale git lock" \
     "lsof-error-index-lock: teardown removed a lock after lsof failed"
