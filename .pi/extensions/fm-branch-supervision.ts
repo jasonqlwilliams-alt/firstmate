@@ -355,13 +355,15 @@ function readLockPid(): { lockPid: string; startLine?: string; verdict: LockOwne
   ownedLockPid = "";
   let lockLines: string[];
   try {
-    lockLines = readFileSync(`${state}/.lock`, "utf8").split("\n", 2);
+    const record = readFileSync(`${state}/.lock`, "utf8");
+    lockLines = record.replace(/\n$/, "").split("\n", 3);
   } catch {
     return { lockPid: "", verdict: "missing" };
   }
-  const lockPid = lockLines[0].trim();
-  if (!/^[0-9]+$/.test(lockPid) || lockPid === "0" || lockPid === "1") return { lockPid, verdict: "other" };
-  return { lockPid, startLine: lockLines[1], verdict: null };
+  const [lockPid, startLine] = lockLines;
+  if (!/^[0-9]+$/.test(lockPid) || lockPid === "0" || lockPid === "1" || lockLines.length > 2 ||
+      (startLine !== undefined && (!startLine.startsWith("start=") || startLine.length === 6))) return { lockPid, verdict: "other" };
+  return { lockPid, startLine, verdict: null };
 }
 
 function ownershipVerdict(lockPid: string, ancestryMatched: boolean): LockOwnership {
@@ -383,7 +385,7 @@ async function lockOwnership(): Promise<LockOwnership> {
       break;
     }
   }
-  if (startLine?.startsWith("start=")) {
+  if (startLine !== undefined) {
     const result = await runCommandAsync("bash", [`${root}/bin/fm-lock.sh`, "matches-start", lockPid, startLine.slice(6)]);
     if (result.status !== 0) return "missing";
   }
@@ -401,7 +403,7 @@ async function lockOwnership(): Promise<LockOwnership> {
 function lockOwnershipSync(): LockOwnership {
   const { lockPid, startLine, verdict } = readLockPid();
   if (verdict) return verdict;
-  if (startLine?.startsWith("start=") &&
+  if (startLine !== undefined &&
       spawnSync("bash", [`${root}/bin/fm-lock.sh`, "matches-start", lockPid, startLine.slice(6)]).status !== 0) {
     return "missing";
   }

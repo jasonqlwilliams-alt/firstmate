@@ -53,18 +53,24 @@ fm_session_lock_print_record() {
 
 # Read lock file $1 once into FM_SESSION_LOCK_PID (line 1, unvalidated) and
 # FM_SESSION_LOCK_START (line 2's start= token, empty for the legacy format).
+# Malformed extra lines leave both outputs empty.
 # Returns 1 only when the file cannot be read.
 FM_SESSION_LOCK_PID=''
 FM_SESSION_LOCK_START=''
 fm_session_lock_read() {  # <lock-file>
   local content line2
   FM_SESSION_LOCK_PID='' FM_SESSION_LOCK_START=''
-  content=$(cat "$1" 2>/dev/null) || return 1
-  FM_SESSION_LOCK_PID=${content%%$'\n'*}
-  if [ "$FM_SESSION_LOCK_PID" != "$content" ]; then
+  content=$(cat "$1" 2>/dev/null && printf '.') || return 1
+  content=${content%.}
+  content=${content%$'\n'}
+  if [[ "$content" == *$'\n'* ]]; then
     line2=${content#*$'\n'}
-    line2=${line2%%$'\n'*}
-    case "$line2" in start=) FM_SESSION_LOCK_START=invalid ;; start=*) FM_SESSION_LOCK_START=${line2#start=} ;; esac
+    case "$line2" in
+      *$'\n'*) return 0 ;;
+      start=?*) FM_SESSION_LOCK_START=${line2#start=} ;;
+      *) return 0 ;;
+    esac
   fi
+  FM_SESSION_LOCK_PID=${content%%$'\n'*}
   return 0
 }

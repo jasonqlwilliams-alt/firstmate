@@ -476,7 +476,6 @@ herdr_tab_id=w2:t1
 home=$TMP_ROOT/mate
 herdr_workspace_id=w2
 EOF
-printf '\nunset -f fm_backend_herdr_pane_home_state\n' >> "$CODE/bin/backends/herdr.sh"
 capture ready
 expect_rc 1
 contains 'home-bound secondmate recovery support is not installed'

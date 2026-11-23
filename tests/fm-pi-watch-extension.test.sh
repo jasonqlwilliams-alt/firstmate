@@ -3137,8 +3137,16 @@ test_opencode_primary_watch_plugin_requires_session_lock() {
 printf 'arm\n' >> "${FM_ARM_LOG:?}"
 printf 'watcher: healthy pid=1 (beacon 0s)\n'
 SH
-  chmod +x "$repo/bin/fm-watch-arm.sh"
-  out=$(PLUGIN="$plugin" WORKTREE="$repo" FM_HOME="$home" FM_ARM_LOG="$log" LOCK_SCRIPT="$ROOT/bin/fm-lock.sh" \
+  cat > "$repo/bin/bash" <<'SH'
+#!/bin/sh
+if [ "${2:-}" = matches-start ] && [ "${FM_TEST_SIGNAL_LOCK_VERIFIER:-0}" = 1 ]; then
+  : > "$FM_HOME/state/verifier-signaled"
+  kill -KILL "$$"
+fi
+exec /bin/bash "$@"
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh" "$repo/bin/bash"
+  out=$(PATH="$repo/bin:$PATH" PLUGIN="$plugin" WORKTREE="$repo" FM_HOME="$home" FM_ARM_LOG="$log" LOCK_SCRIPT="$ROOT/bin/fm-lock.sh" \
     "$harness" -c 'node; rc=$?; exit "$rc"' 2>&1 <<'EOF'
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -3173,12 +3181,26 @@ writeFileSync(lockFile, `${process.ppid}\nstart=proc:0\n`);
 if (await globalThis.__firstmateOpenCodeWatchArm.ensureArmed("session-test", client) !== "read-only") {
   throw new Error("the plugin accepted a lock with its harness PID and a stale start time");
 }
+process.env.FM_TEST_SIGNAL_LOCK_VERIFIER = "1";
+const interrupted = await globalThis.__firstmateOpenCodeWatchArm.ensureArmed("session-test", client);
+delete process.env.FM_TEST_SIGNAL_LOCK_VERIFIER;
+if (!existsSync(`${process.env.FM_HOME}/state/verifier-signaled`) || interrupted !== "read-only") {
+  throw new Error("an interrupted start-time verifier did not refuse ownership");
+}
 const acquired = spawnSync("bash", [process.env.LOCK_SCRIPT], { encoding: "utf8" });
 if (acquired.status !== 0) throw new Error(acquired.stderr || acquired.stdout);
 const [owner, start] = readFileSync(lockFile, "utf8").split("\n");
 if (owner !== String(process.ppid) || !start?.startsWith("start=")) {
   throw new Error("fm-lock did not publish a versioned record for the fixture harness");
 }
+for (const extra of ["", "started=proc:123", "start=", `${start}\nextra`]) {
+  writeFileSync(lockFile, `${owner}\n${extra}\n`);
+  if (await globalThis.__firstmateOpenCodeWatchArm.ensureArmed("session-test", client) !== "read-only") {
+    throw new Error("the plugin accepted a malformed claim with its harness PID");
+  }
+}
+if (existsSync(process.env.FM_ARM_LOG)) throw new Error("the watcher ran without valid ownership");
+writeFileSync(lockFile, `${owner}\n${start}\n`);
 await hooks.event(event);
 for (let i = 0; i < 250 && !existsSync(process.env.FM_ARM_LOG); i += 1) {
   await new Promise((resolve) => setTimeout(resolve, 20));

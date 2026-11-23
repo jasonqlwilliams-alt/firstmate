@@ -70,9 +70,7 @@ trap 'exit 1' HUP INT TERM
 me_start=$(fm_pid_start_time "$me") || me_start=''
 if [ -f "$LOCK" ] && [ ! -L "$LOCK" ] && fm_session_lock_read "$LOCK"; then
   old=$FM_SESSION_LOCK_PID
-  # Already ours only when the record also carries our start time; a legacy
-  # record naming our pid falls through and is rewritten in the current format.
-  if [ "$old" = "$me" ] && [ -n "$me_start" ] && [ "$FM_SESSION_LOCK_START" = "$me_start" ]; then
+  if [ "$old" = "$me" ] && [ "$FM_SESSION_LOCK_START" = "$me_start" ]; then
     echo "lock acquired: harness pid $me"
     exit 0
   fi

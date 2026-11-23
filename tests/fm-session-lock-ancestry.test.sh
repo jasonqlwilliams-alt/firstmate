@@ -461,6 +461,15 @@ test_legacy_pid_only_record_keeps_pid_only_liveness() {
   printf '%s\n' "$dead" > "$home/state/.lock"
   out=$(lock_as_harness "$home" 2>&1) || fail "a legacy record naming a dead pid was not recovered: $out"
   case "$(sed -n '2p' "$home/state/.lock")" in start=?*) ;; *) fail "the recovered lock was not rewritten in the current format" ;; esac
+  home=$(lock_home legacy-upgrade)
+  out=$(FM_HOME="$home" "$CODEX_FIXTURE" -c '
+    printf "%s\n" "$$" > "$FM_HOME/state/.lock"
+    printf "%s\n" "$$" > "$FM_HOME/harness-pid"
+    fixture_start_time "$$" > "$FM_HOME/harness-start"
+    "$0"; rc=$?; exit "$rc"
+  ' "$ROOT/bin/fm-lock.sh" 2>&1) || fail "the legacy owner could not upgrade its lock: $out"
+  [ "$(sed -n '1p' "$home/state/.lock")" = "$(cat "$home/harness-pid")" ] || fail "upgrading the legacy claim changed the owner"
+  [ "$(sed -n '2p' "$home/state/.lock")" = "start=$(cat "$home/harness-start")" ] || fail "a known start time did not upgrade the legacy claim"
   pass "session lock: a legacy pid-only record keeps pid-only liveness until it is rewritten"
 }
 
@@ -519,14 +528,19 @@ test_failed_start_lookup_preserves_only_legacy_liveness() {
   status=$(FM_PROC_ROOT_OVERRIDE="$proc" FM_HOME="$home" "$ROOT/bin/fm-lock.sh" status)
   [ "$status" = "lock: held by live harness pid $LIVE_HARNESS_PID" ] || fail "legacy liveness changed: $status"
   rm "$home/state/.lock"
-  out=$(FM_HOME="$home" FM_PROC_ROOT_OVERRIDE="$proc" "$CODEX_FIXTURE" -c '
+  out=$(FM_HOME="$home" FM_PROC_ROOT_OVERRIDE="$proc" "$CODEX_FIXTURE" -ec '
     mkdir -p "$FM_PROC_ROOT_OVERRIDE/$$"
     printf "malformed\n" > "$FM_PROC_ROOT_OVERRIDE/$$/stat"
     printf "%s\n" "$$" > "$FM_HOME/harness-pid"
+    "$0" || exit 1
+    mkdir "$FM_HOME/state/.lock.acquire"
+    printf "%s\n" "$$" > "$FM_HOME/state/.lock.acquire/pid"
+    printf "pid=%s\n" "$$" > "$FM_HOME/state/.startup-network.status"
     "$0"; rc=$?; exit "$rc"
-  ' "$ROOT/bin/fm-lock.sh" 2>&1) || fail "legacy acquisition failed: $out"
+  ' "$ROOT/bin/fm-lock.sh" 2>&1) || fail "legacy acquisition or renewal during a sweep failed: $out"
   [ "$(cat "$home/state/.lock")" = "$(cat "$home/harness-pid")" ] || fail "failed acquisition lookup did not publish a PID-only record"
-  pass "session lock: a failed lookup makes a versioned owner stale and publishes legacy claims"
+  [ -d "$home/state/.lock.acquire" ] || fail "the legacy owner disturbed the running sweep's claim"
+  pass "session lock: a failed lookup permits legacy acquisition and renewal during a sweep"
 }
 
 test_ps_start_time_matches_across_timezones() {
@@ -544,7 +558,7 @@ test_ps_start_time_matches_across_timezones() {
 }
 
 test_malformed_records_are_not_owned() {
-  local dir status
+  local dir status start extra
   dir="$TMP_ROOT/owner-record/malformed"
   mkdir -p "$dir/state"
   printf 'not-a-pid\nstart=proc:1\n' > "$dir/state/.lock"
@@ -556,6 +570,14 @@ test_malformed_records_are_not_owned() {
   : > "$dir/state/.lock"
   status=$(FM_HOME="$dir" "$ROOT/bin/fm-lock.sh" status)
   case "$status" in "lock: stale"*) ;; *) fail "an empty owner record was treated as a live owner: $status" ;; esac
+  start_live_harness
+  start=$(fixture_start_time "$LIVE_HARNESS_PID") || fail "no start time for a live process"
+  for extra in '' 'started=proc:123' 'start=' "start=$start"$'\nextra'; do
+    printf '%s\n%s\n' "$LIVE_HARNESS_PID" "$extra" > "$dir/state/.lock"
+    status=$(FM_HOME="$dir" "$ROOT/bin/fm-lock.sh" status)
+    case "$status" in "lock: stale"*) ;; *) fail "a malformed owner record with a live PID was treated as live: $status" ;; esac
+  done
+  lock_as_harness "$dir" >/dev/null || fail "a malformed owner record blocked takeover"
   pass "session lock: malformed or empty owner records are never owned"
 }
 

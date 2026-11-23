@@ -216,14 +216,15 @@ function pidAlive(pid: string): boolean {
 function lockOwnership(): LockOwnership {
   let lockLines: string[];
   try {
-    lockLines = readFileSync(`${state}/.lock`, "utf8").split("\n", 2);
+    const record = readFileSync(`${state}/.lock`, "utf8");
+    lockLines = record.replace(/\n$/, "").split("\n", 3);
   } catch {
     return "missing";
   }
-  const lockPid = lockLines[0].trim();
-  if (!/^[0-9]+$/.test(lockPid) || lockPid === "0" || lockPid === "1") return "other";
-  const startLine = lockLines[1];
-  if (startLine?.startsWith("start=") &&
+  const [lockPid, startLine] = lockLines;
+  if (!/^[0-9]+$/.test(lockPid) || lockPid === "0" || lockPid === "1" || lockLines.length > 2 ||
+      (startLine !== undefined && (!startLine.startsWith("start=") || startLine.length === 6))) return "other";
+  if (startLine !== undefined &&
       spawnSync("bash", [`${root}/bin/fm-lock.sh`, "matches-start", lockPid, startLine.slice(6)]).status !== 0) {
     return "missing";
   }
