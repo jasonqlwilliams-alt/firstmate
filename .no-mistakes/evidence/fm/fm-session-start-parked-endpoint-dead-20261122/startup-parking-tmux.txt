@@ -1,0 +1,158 @@
+Session-start digest with private tmux and synthetic task records
+Base 0464e0e2e12c319129f904dc936b6830c68d5a51
+Target 476689a788868cc5a9336b9436321425ad07119f
+$ tmux -V
+tmux 3.7c
+$ tmux kill-window -t '@1'  # fleet:fm-mate
+$ fm-park-retained.sh mate mark
+parked-retained: yes
+$ tmux kill-window -t '@2'  # fleet:fm-plain
+$ fm-park-retained.sh plain mark
+parked-retained: yes
+$ tmux kill-window -t '@3'  # fleet:fm-stale
+$ fm-park-retained.sh stale mark
+parked-retained: yes
+$ tmux kill-window -t '@4'  # replacement incarnation stale-2
+$ tmux kill-window -t '@5'  # fleet:fm-unmarked
+$ tmux list-windows -t '=fleet' -F '#{session_name}:#{window_name}'
+fleet:fm-mate2
+$ tmux display-message -p -t fleet:fm-mate '#{session_name}:#{window_name}'
+fleet:fm-mate2
+
+BASE. Same server and records with the name collision
+$ fm-session-start.sh --source startup
+lock acquired: harness pid 733937
+--- mate ---
+window=fleet:fm-mate
+spawn_gen=mate-1
+endpoint: alive (backend=tmux window=fleet:fm-mate)
+--- mate2 ---
+window=fleet:fm-mate2
+spawn_gen=mate2-1
+endpoint: alive (backend=tmux window=fleet:fm-mate2)
+--- plain ---
+window=fleet:fm-plain
+spawn_gen=plain-1
+endpoint: alive (backend=tmux window=fleet:fm-plain)
+--- stale ---
+window=fleet:fm-stale
+spawn_gen=stale-2
+endpoint: alive (backend=tmux window=fleet:fm-stale)
+--- unmarked ---
+window=fleet:fm-unmarked
+spawn_gen=unmarked-1
+endpoint: alive (backend=tmux window=fleet:fm-unmarked)
+[Deferred startup worker exited 0; state=done, sweep exit=0]
+
+TARGET. Same server and records with the name collision
+$ fm-session-start.sh --source startup
+lock acquired: harness pid 733937
+--- mate ---
+window=fleet:fm-mate
+spawn_gen=mate-1
+endpoint: parked, copy retained (backend=tmux window=fleet:fm-mate)
+--- mate2 ---
+window=fleet:fm-mate2
+spawn_gen=mate2-1
+endpoint: alive (backend=tmux window=fleet:fm-mate2)
+--- plain ---
+window=fleet:fm-plain
+spawn_gen=plain-1
+endpoint: parked, copy retained (backend=tmux window=fleet:fm-plain)
+--- stale ---
+window=fleet:fm-stale
+spawn_gen=stale-2
+endpoint: alive (backend=tmux window=fleet:fm-stale)
+--- unmarked ---
+window=fleet:fm-unmarked
+spawn_gen=unmarked-1
+endpoint: alive (backend=tmux window=fleet:fm-unmarked)
+[Deferred startup worker exited 0; state=done, sweep exit=0]
+$ git -C copies/mate status --short
+?? retained-work.txt
+Retained mark bytes for mate: tmux:fleet:fm-mate	mate-1
+
+TARGET. Same live server but tmux missing from hook PATH
+$ command -v tmux
+[exit 1]
+$ fm-session-start.sh --source startup
+lock acquired: harness pid 733937
+--- mate ---
+window=fleet:fm-mate
+spawn_gen=mate-1
+endpoint: parked, copy retained (backend=tmux window=fleet:fm-mate)
+--- mate2 ---
+window=fleet:fm-mate2
+spawn_gen=mate2-1
+endpoint: dead (backend=tmux window=fleet:fm-mate2)
+--- plain ---
+window=fleet:fm-plain
+spawn_gen=plain-1
+endpoint: parked, copy retained (backend=tmux window=fleet:fm-plain)
+--- stale ---
+window=fleet:fm-stale
+spawn_gen=stale-2
+endpoint: dead (backend=tmux window=fleet:fm-stale)
+--- unmarked ---
+window=fleet:fm-unmarked
+spawn_gen=unmarked-1
+endpoint: dead (backend=tmux window=fleet:fm-unmarked)
+[Deferred startup worker exited 0; state=done, sweep exit=0]
+$ tmux kill-server  # private socket
+
+BASE. Server stopped and endpoints absent
+$ fm-session-start.sh --source startup
+lock acquired: harness pid 733937
+--- mate ---
+window=fleet:fm-mate
+spawn_gen=mate-1
+endpoint: dead (backend=tmux window=fleet:fm-mate)
+--- mate2 ---
+window=fleet:fm-mate2
+spawn_gen=mate2-1
+endpoint: dead (backend=tmux window=fleet:fm-mate2)
+--- plain ---
+window=fleet:fm-plain
+spawn_gen=plain-1
+endpoint: dead (backend=tmux window=fleet:fm-plain)
+--- stale ---
+window=fleet:fm-stale
+spawn_gen=stale-2
+endpoint: dead (backend=tmux window=fleet:fm-stale)
+--- unmarked ---
+window=fleet:fm-unmarked
+spawn_gen=unmarked-1
+endpoint: dead (backend=tmux window=fleet:fm-unmarked)
+[Deferred startup worker exited 0; state=done, sweep exit=0]
+
+TARGET. Server stopped and endpoints absent
+$ fm-session-start.sh --source startup
+lock acquired: harness pid 733937
+--- mate ---
+window=fleet:fm-mate
+spawn_gen=mate-1
+endpoint: parked, copy retained (backend=tmux window=fleet:fm-mate)
+--- mate2 ---
+window=fleet:fm-mate2
+spawn_gen=mate2-1
+endpoint: dead (backend=tmux window=fleet:fm-mate2)
+--- plain ---
+window=fleet:fm-plain
+spawn_gen=plain-1
+endpoint: parked, copy retained (backend=tmux window=fleet:fm-plain)
+--- stale ---
+window=fleet:fm-stale
+spawn_gen=stale-2
+endpoint: dead (backend=tmux window=fleet:fm-stale)
+--- unmarked ---
+window=fleet:fm-unmarked
+spawn_gen=unmarked-1
+endpoint: dead (backend=tmux window=fleet:fm-unmarked)
+[Deferred startup worker exited 0; state=done, sweep exit=0]
+$ git -C copies/plain status --short
+?? retained-work.txt
+Retained mark bytes for plain: tmux:fleet:fm-plain	plain-1
+$ git -C copies/stale status --short
+?? retained-work.txt
+Retained mark bytes for stale: tmux:fleet:fm-stale	stale-1
+Private tmux server exited 0.

@@ -1,0 +1,64 @@
+Session-start digest with private Herdr and synthetic task records
+Base 0464e0e2e12c319129f904dc936b6830c68d5a51
+Target 476689a788868cc5a9336b9436321425ad07119f
+$ herdr --version
+herdr 0.9.5
+$ herdr status --json --session fm-digest [server fields]
+{"running": true, "status": "running", "session": "fm-digest", "socket": "cfg/herdr/sessions/fm-digest/herdr.sock"}
+$ herdr pane get w1:p2 --session fm-digest [identity fields]
+{"pane_id": "w1:p2", "terminal_id": "term_660e94d3f55bd2"}
+$ herdr pane get w1:p3 --session fm-digest [identity fields]
+{"pane_id": "w1:p3", "terminal_id": "term_660e94d3f93323"}
+$ herdr server stop --session fm-digest
+$ herdr status --json --session fm-digest [server fields]
+{"running": false, "status": "not_running", "session": "fm-digest", "socket": "cfg/herdr/sessions/fm-digest/herdr.sock"}
+$ herdr pane get w1:p2 --session fm-digest
+{"id":"cli:pane:get","error":{"code":"server_not_running","message":"no herdr server is running at cfg/herdr/sessions/fm-digest/herdr.sock; run `herdr session attach fm-digest` to start or attach it"}}
+[exit 1]
+$ fm-park-retained.sh parked mark
+parked-retained: yes
+
+BASE. Private Herdr server stopped
+$ fm-session-start.sh --source startup
+lock acquired: harness pid 733937
+--- parked ---
+window=fm-digest:w1:p2
+spawn_gen=parked-1
+endpoint: unknown (unreadable identity, backend=herdr window=fm-digest:w1:p2)
+--- unmarked ---
+window=fm-digest:w1:p3
+spawn_gen=unmarked-1
+endpoint: unknown (unreadable identity, backend=herdr window=fm-digest:w1:p3)
+[Deferred startup worker exited 0; state=done, sweep exit=0]
+
+TARGET. Private Herdr server stopped
+$ fm-session-start.sh --source startup
+lock acquired: harness pid 733937
+--- parked ---
+window=fm-digest:w1:p2
+spawn_gen=parked-1
+endpoint: parked, copy retained (backend=herdr window=fm-digest:w1:p2)
+--- unmarked ---
+window=fm-digest:w1:p3
+spawn_gen=unmarked-1
+endpoint: unknown (unreadable identity, backend=herdr window=fm-digest:w1:p3)
+[Deferred startup worker exited 0; state=done, sweep exit=0]
+$ git -C copies/parked status --short
+?? retained-work.txt
+Retained mark bytes for parked: herdr:fm-digest:w1:p2	parked-1
+
+TARGET. Herdr missing from hook PATH
+$ command -v herdr
+[exit 1]
+$ fm-session-start.sh --source startup
+lock acquired: harness pid 733937
+--- parked ---
+window=fm-digest:w1:p2
+spawn_gen=parked-1
+endpoint: parked, copy retained (backend=herdr window=fm-digest:w1:p2)
+--- unmarked ---
+window=fm-digest:w1:p3
+spawn_gen=unmarked-1
+endpoint: unknown (unreadable identity, backend=herdr window=fm-digest:w1:p3)
+[Deferred startup worker exited 0; state=done, sweep exit=0]
+Private Herdr server exited 0.
