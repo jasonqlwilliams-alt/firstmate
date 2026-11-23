@@ -255,6 +255,8 @@
 # Adoption by a Linux subreaper in the same session can hide a caller that reparented before teardown started.
 # A detached wrapper can present a different surviving session leader and hide the original caller.
 # An escaped cwd reported by lsof can prevent an exact path match.
+# If Treehouse detaches the copy before a failed return, a later successful retry can leave the task branch behind because the retry starts with a detached HEAD.
+# If a successful return leaves a pending backlog close, a manual retry from inside the returned copy before startup replay can refuse and clear that marker, leaving the backlog item in flight.
 #
 # Pre-teardown cleanup sequence (runs once every landed/discard-work safety
 # refusal above has already passed, and BEFORE any worktree return, branch
