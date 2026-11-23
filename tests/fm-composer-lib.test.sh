@@ -290,7 +290,7 @@ test_matrix_agy_composer_is_harness_scoped() {
   # The recorded rows: an idle `>` glyph in truecolor 122;162;247, the
   # first-use mode hint in truecolor 154;165;206, and typed text in the default
   # foreground. Only the full recorded screen proves an empty agy composer.
-  local glyph hint idle typed agy_tmux agy_herdr out
+  local glyph hint idle typed agy_tmux agy_herdr out rule draft forged dim
   glyph="${ESC}[0m${ESC}[38;2;122;162;247m>${ESC}[0m"
   hint="$glyph ${ESC}[0m${ESC}[38;2;154;165;206mAccept-edits mode: file edits auto-approved (shift+tab to cycle)${ESC}[0m"
   idle=$(agy_screen "$glyph" '? for shortcuts                      accept-edits · Gemini · high')
@@ -305,6 +305,10 @@ test_matrix_agy_composer_is_harness_scoped() {
   # A draft that only repeats the hint's words is typed text, not the hint.
   assert_screen "agy draft matching the hint text" pending "$agy_herdr" \
     "$(agy_screen "$glyph Accept-edits mode: file edits auto-approved (shift+tab to cycle)")"
+  dim=$(agy_screen "$glyph ${ESC}[2mvisible draft${ESC}[0m")
+  assert_screen "agy dim visible draft" pending "$agy_herdr" "$dim"
+  fm_composer_holds_text "$agy_herdr" "$dim" 'visible draft' \
+    || fail "agy's exact text check should include dim visible text"
   # Drive the frame and the footer apart: neither alone proves empty.
   assert_screen "agy idle row over the busy footer" unknown "$agy_tmux" "$(agy_screen "$glyph" 'esc to cancel')" 2
   assert_screen "agy idle row with no footer" unknown "$agy_tmux" "$(agy_screen "$glyph" '')" 2
@@ -321,6 +325,16 @@ test_matrix_agy_composer_is_harness_scoped() {
     "$(agy_screen "$glyph zz probe"$'\n  wrapped tail')"
   assert_screen "agy draft divider forging a frame" unknown "$agy_herdr" \
     "$(printf '%s\n' "$glyph draft text" "$(agy_screen "$glyph")" | sed '2d')"
+  rule=$(printf '─%.0s' $(seq 1 60))
+  draft="$glyph draft text"$'\n  wrapped tail\n'"$rule"$'\n'"$glyph"
+  forged=$(agy_screen "$draft")
+  assert_screen "agy continuation forging an idle frame on tmux" unknown "$agy_tmux" "$forged" 5
+  assert_screen "agy continuation forging an idle frame on herdr" unknown "$agy_herdr" "$forged"
+  ! fm_composer_holds_text "$agy_herdr" "$(agy_screen "$draft zz probe")" 'zz probe' \
+    || fail "a continuation must not prove the exact contents of the agy composer"
+  ! fm_composer_agy_notice_fits "$forged" 'zz probe' \
+    || fail "a continuation must not supply the agy frame for the fit check"
+  assert_screen "agy idle frame below a retained footer" empty "$agy_herdr" "$idle"$'\n'"$idle"
   assert_screen "agy bare prompt glyph elsewhere" unknown "$agy_tmux" $'transcript\n❯\nmore' 1
   # Without the recorded harness the same idle screen keeps pi's reading, so
   # pi is unchanged.
@@ -331,9 +345,9 @@ test_matrix_agy_composer_is_harness_scoped() {
   [ "$out" = 'zz probe' ] || fail "agy's typed text should extract without its glyph, got '$out'"
   fm_composer_holds_text "$agy_herdr" "$typed" 'zz probe' \
     || fail "an agy composer holding typed text should hold exactly that text"
-  fm_composer_agy_notice_fits "$agy_herdr" "$idle" "$(printf 'x%.0s' $(seq 1 57))" \
+  fm_composer_agy_notice_fits "$idle" "$(printf 'x%.0s' $(seq 1 57))" \
     || fail "a line leaving the last column free should fit agy's 60-column row"
-  ! fm_composer_agy_notice_fits "$agy_herdr" "$idle" "$(printf 'x%.0s' $(seq 1 58))" \
+  ! fm_composer_agy_notice_fits "$idle" "$(printf 'x%.0s' $(seq 1 58))" \
     || fail "a line reaching agy's last column must not fit"
   pass "matrix: agy's > row reads empty only on an agy pane's full recorded screen, typed text stays pending, and pi is unchanged"
 }

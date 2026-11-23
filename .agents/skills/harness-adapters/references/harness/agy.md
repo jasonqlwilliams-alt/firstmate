@@ -65,10 +65,10 @@ A refusal blocks the spawn rather than launching a worker that would park before
 
 ## Composer verdict
 
-`../../../bin/fm-composer-lib.sh` ("AGY COMPOSER") reads an agy pane only when the capture carries the pane's recorded harness `agy`, which the steering doorbell supplies, and then no generic shape rule applies.
-It proves the composer empty only from the recorded screen: a styled capture whose last rule pair holds exactly one row, the cursor (when the backend reports one) on that row, the row holding only the `>` glyph or agy's exact first-use mode hint in its recorded colour, and the idle footer as the only text below.
-Typed text after the glyph reads `pending`; pi's own rule still reads that glyph as typed content, which is why agy has its own rule.
-The doorbell (`../../../bin/fm-task-inbox-lib.sh`) therefore holds agy panes to the same proven-empty rule as Codex and Rovo panes.
+The [agy composer rule](../../../../../bin/fm-composer-lib.sh) applies when the capture carries the pane's recorded harness `agy`, which the steering doorbell supplies.
+Visible draft text on the recognized composer row reads `pending`.
+A capture that still contains multiple rows of composer text reads `unknown`.
+The [doorbell](../../../../../bin/fm-task-inbox-lib.sh) requires a proven-empty composer before typing and proof of the full notice before Enter on agy, Codex, and Rovo panes.
 
 Limits: wherever that proof is missing, the doorbell refuses before typing anything and the message stays queued for the normal re-ring and escalation.
 That covers a doorbell line too long for agy's one composer row (most panes narrower than the line, since wrapped input was never captured), a plain-text capture backend, the feedback survey or any other text below the composer, a busy turn, the mode hint in an unrecorded colour, and any screen the rule does not recognise.
@@ -96,5 +96,5 @@ agy is deliberately absent from `../../../bin/fm-session-lock-lib.sh`, which own
 ## Verification
 
 `../../../../tests/fm-agy-harness.test.sh` is the portable regression: detection and marker precedence with real processes, tmux liveness, the control tables, busy-source trust, the launch line, the hook wiring, the trust pre-registration, the effort cap, model validation, the Gemini-only model rule, and the secondmate refusal.
-`../../../../tests/fm-composer-lib.test.sh` pins the composer verdict, and `../../../../tests/fm-task-inbox.test.sh` pins the doorbell's proven-empty rule and its refusals for agy panes in a real tmux server.
+The [composer regression](../../../../../tests/fm-composer-lib.test.sh) pins the verdict, and the [doorbell regression](../../../../../tests/fm-task-inbox.test.sh) checks delivery and refusal in a real tmux server.
 `../../../../docs/verification/agy.md` owns the dated live evidence behind each fact above and the commands that refresh it.

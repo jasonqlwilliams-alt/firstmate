@@ -107,12 +107,13 @@
 # bare `>` glyph between two solid `─` rules, over a `? for shortcuts` footer at
 # idle (docs/verification/agy.md "Composer classification"). pi's row rule would
 # read that glyph as typed content, so caps carrying harness=agy take
-# _fm_composer_agy_verdict INSTEAD of every generic shape rule. It proves
+# _fm_composer_agy_content INSTEAD of every generic shape rule. It proves
 # `empty` only from the recorded screen exactly: a styled capture, the last
 # rule pair holding exactly one row, the cursor (when known) on that row, no
-# `>` row directly above the opening rule, the row holding only the glyph or
-# agy's exact recorded mode hint in its recorded colour, and the idle footer as
-# the only text below the closing rule. Typed text after the glyph is
+# `>` row directly above the opening rule, no earlier rule without an
+# intervening idle footer, the row holding only the glyph or agy's exact
+# recorded mode hint in its recorded colour, and the idle footer as the only
+# text below the closing rule. Typed text after the glyph is
 # `pending`; anything else - a plain capture, wrapped rows, the feedback
 # survey, extra text below the composer - stays `unknown`, so a caller that
 # needs proof refuses. fm_composer_agy_notice_fits answers whether a line can
@@ -1223,6 +1224,11 @@ fm_composer_extract_selected_content() {  # <caps> <screen> [rows]
 $caps
 EOF
   plain=$(printf '%s\n' "$screen" | fm_composer_strip_ansi)
+  if [ "$agy" = 1 ]; then
+    _fm_composer_scan_screen "$plain" ''
+    _fm_composer_agy_content "$screen" "$plain" "$styled" ''
+    return $?
+  fi
   _fm_composer_scan_screen "$plain" '' 1
   _fm_composer_select_cursorless "$plain" || return 1
   row=$FM_COMPOSER_SELECTED_FIRST
@@ -1235,14 +1241,6 @@ EOF
         if [ "$row" -eq "$FM_COMPOSER_SELECTED_FIRST" ] \
            && fm_composer_leading_agent_glyph_var glyph "$content"; then
           content=${content#*"$glyph"}
-        fi
-        ;;
-      pi)
-        # agy's composer row opens with its own `>` glyph (AGY COMPOSER),
-        # which is furniture, not typed content.
-        if [ "$agy" = 1 ] && [ "$row" -eq "$FM_COMPOSER_SELECTED_FIRST" ]; then
-          fm_composer_normalize_trim_var content
-          content=${content#>}
         fi
         ;;
       leftbar)
@@ -1308,7 +1306,7 @@ EOF
 
 fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity]
   local caps=$1 screen=$2 cy=${3:-} identity=${4:-}
-  local styled=0 cursor=0 has_identity=0 agy=0 kv plain luma
+  local styled=0 cursor=0 has_identity=0 agy=0 kv plain luma content
   # Shadow the ghost ceiling for this capture's harness; read the inherited
   # value before the shadow exists.
   luma=$(fm_composer_ghost_luma_for_caps "$caps")
@@ -1332,7 +1330,13 @@ EOF
   # An agy pane is read ONLY by its own rule (AGY COMPOSER): no generic shape
   # may prove it empty.
   if [ "$agy" = 1 ]; then
-    _fm_composer_agy_verdict "$screen" "$plain" "$styled" "$cy"
+    if ! content=$(_fm_composer_agy_content "$screen" "$plain" "$styled" "$cy"); then
+      printf 'unknown'
+    elif [ -n "$content" ]; then
+      printf 'pending'
+    else
+      printf 'empty'
+    fi
     return 0
   fi
   if [ -n "$cy" ]; then
@@ -1645,60 +1649,24 @@ _fm_composer_pi_verdict() {  # <screen> <styled> <has_identity> <identity>
   esac
 }
 
-# The agy composer verdict (AGY COMPOSER above), reached only for caps
-# carrying harness=agy, after _fm_composer_scan_screen ran on <plain-screen>.
-_fm_composer_agy_verdict() {  # <screen> <plain-screen> <styled> <cursor-row-or-empty>
-  local screen=$1 plain=$2 styled=$3 cy=$4 open close raw row rest content line seen=0
+_fm_composer_agy_frame() {  # <plain-screen> <cursor-row-or-empty>
+  local plain=$1 cy=$2 open close line above='' earlier_rule=0 seen=0
   open=$FM_COMPOSER_SCAN_PI_OPEN
   close=$FM_COMPOSER_SCAN_PI_CLOSE
-  if [ "$styled" != 1 ] || [ "$FM_COMPOSER_SCAN_PI_PAIR_VALID" != 1 ] \
-     || [ $((close - open)) -ne 2 ] \
-     || [ "$FM_COMPOSER_SCAN_PI_LAST_SEPARATOR" != "$close" ]; then
-    printf 'unknown'
-    return 0
-  fi
-  if [ -n "$cy" ] && [ "$cy" != $((open + 1)) ]; then
-    printf 'unknown'
-    return 0
-  fi
-  # A `>` row directly above the opening rule means that rule may be a wrapped
-  # draft's own row, not the composer's frame.
-  if [ "$open" -gt 0 ]; then
-    row=$(_fm_composer_screen_row "$((open - 1))" "$plain")
-    fm_composer_normalize_trim_var row
-    case "$row" in '>'*) printf 'unknown'; return 0 ;; esac
-  fi
-  raw=$(_fm_composer_screen_row "$((open + 1))" "$screen")
-  row=$(printf '%s\n' "$raw" | fm_composer_strip_ansi)
-  fm_composer_normalize_trim_var row
-  case "$row" in
-    '>') ;;
-    '>'[[:space:]]*)
-      rest=${row#>}
-      fm_composer_normalize_trim_var rest
-      case "$raw" in
-        *"$FM_COMPOSER_AGY_MODE_HINT_SGR"m"$FM_COMPOSER_AGY_MODE_HINT"*)
-          [ "$rest" = "$FM_COMPOSER_AGY_MODE_HINT" ] || { printf 'pending'; return 0; }
-          ;;
-        *)
-          content=$(_fm_composer_row_content "$raw" 1)
-          fm_composer_normalize_trim_var content
-          content=${content#>}
-          fm_composer_normalize_trim_var content
-          if [ -n "$content" ]; then
-            printf 'pending'
-          else
-            printf 'unknown'
-          fi
-          return 0
-          ;;
-      esac
-      ;;
-    *)
-      printf 'unknown'
-      return 0
-      ;;
-  esac
+  [ "$FM_COMPOSER_SCAN_PI_PAIR_VALID" = 1 ] \
+    && [ $((close - open)) -eq 2 ] \
+    && [ "$FM_COMPOSER_SCAN_PI_LAST_SEPARATOR" = "$close" ] || return 1
+  [ -z "$cy" ] || [ "$cy" = $((open + 1)) ] || return 1
+  while IFS= read -r line; do
+    fm_composer_normalize_trim_var line
+    case "$line" in
+      '? for shortcuts'|'? for shortcuts '*) earlier_rule=0 ;;
+      *) if _fm_composer_pi_separator_row "$line"; then earlier_rule=1; fi ;;
+    esac
+    above=$line
+  done <<< "$(printf '%s\n' "$plain" | head -n "$open")"
+  case "$above" in '>'*) return 1 ;; esac
+  [ "$earlier_rule" = 0 ] || return 1
   # The idle footer must be the only text below the closing rule.
   while IFS= read -r line; do
     fm_composer_normalize_trim_var line
@@ -1706,33 +1674,49 @@ _fm_composer_agy_verdict() {  # <screen> <plain-screen> <styled> <cursor-row-or-
     seen=$((seen + 1))
     case "$seen:$line" in
       '1:? for shortcuts'|'1:? for shortcuts '*) ;;
-      *) printf 'unknown'; return 0 ;;
+      *) return 1 ;;
     esac
   done <<EOF
 $(printf '%s\n' "$plain" | tail -n "+$((close + 2))")
 EOF
-  if [ "$seen" = 1 ]; then
-    printf 'empty'
-  else
-    printf 'unknown'
+  [ "$seen" = 1 ]
+}
+
+_fm_composer_agy_content() {  # <screen> <plain-screen> <styled> <cursor-row-or-empty>
+  local screen=$1 plain=$2 styled=$3 cy=$4 prompt_row row raw
+  [ "$styled" = 1 ] && _fm_composer_agy_frame "$plain" "$cy" || return 1
+  prompt_row=$((FM_COMPOSER_SCAN_PI_OPEN + 1))
+  row=$(_fm_composer_screen_row "$prompt_row" "$plain")
+  fm_composer_normalize_trim_var row
+  case "$row" in
+    '>') return 0 ;;
+    '>'[[:space:]]*) row=${row#>} ;;
+    *) return 1 ;;
+  esac
+  fm_composer_normalize_trim_var row
+  if [ "$row" = "$FM_COMPOSER_AGY_MODE_HINT" ]; then
+    raw=$(_fm_composer_screen_row "$prompt_row" "$screen")
+    case "$raw" in
+      *"$FM_COMPOSER_AGY_MODE_HINT_SGR"m"$FM_COMPOSER_AGY_MODE_HINT"*) return 0 ;;
+    esac
   fi
+  printf '%s' "$row"
 }
 
 # fm_composer_agy_notice_fits: 0 when <text>, typed after agy's `>` glyph,
 # stays on the composer's one row of <screen> without reaching its last
 # column, measured against the closing rule's width. Counting <text> in bytes
 # never undercounts its cells, so the check only errs toward refusing.
-fm_composer_agy_notice_fits() {  # <caps> <screen> <text>
+fm_composer_agy_notice_fits() {  # <screen> <text>
   local plain rule width len
-  plain=$(printf '%s\n' "$2" | fm_composer_strip_ansi)
+  plain=$(printf '%s\n' "$1" | fm_composer_strip_ansi)
   _fm_composer_scan_screen "$plain" ''
-  [ "$FM_COMPOSER_SCAN_PI_PAIR_VALID" = 1 ] || return 1
+  _fm_composer_agy_frame "$plain" '' || return 1
   rule=$(_fm_composer_screen_row "$FM_COMPOSER_SCAN_PI_CLOSE" "$plain")
   fm_composer_normalize_trim_var rule
-  _fm_composer_pi_separator_row "$rule" || return 1
   width=$(printf '%s' "$rule" | LC_ALL=C wc -c)
   width=$((width / 3))
-  len=$(printf '%s' "$3" | LC_ALL=C wc -c)
+  len=$(printf '%s' "$2" | LC_ALL=C wc -c)
   [ $((len + 2)) -lt "$width" ]
 }
 

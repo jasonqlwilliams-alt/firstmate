@@ -360,7 +360,9 @@ ok - muse (Muse Code 0.2.1 (0.2.1-R1215.1)): the doorbell reached a real worker,
 ```
 
 All six installed harnesses honored the doorbell contract with real model turns: each listed the inbox named by the doorbell, read its record, executed the instruction inside it, and acknowledged with the atomic `mv`.
-Two findings from the run shaped the shipped behavior: an OpenCode vendor update modal swallowed the first doorbell and the single re-ring recovered it, which is exactly the watcher ladder's job; and grok 1.0.5's idle composer never classifies `empty` (a classifier drift owned by the [Composer classification matrix](#composer-classification-matrix) guard, whose refresh for grok 1.0.5 is still owed), which is why the ring's composer pre-check skips only on an exact proven `pending` verdict for harnesses outside the Codex and Rovo proven-empty rule - ringing an ambiguous composer on those harnesses keeps steering available when the classifier cannot positively identify their idle screen.
+An OpenCode vendor update modal swallowed the first doorbell, and the watcher's re-ring recovered it.
+Grok 1.0.5's idle composer never classifies as `empty` and still needs a refresh of the [Composer classification matrix](#composer-classification-matrix).
+The doorbell can ring on an ambiguous composer for harnesses outside the Codex, Rovo, and agy proven-empty rule, which keeps steering available on Grok.
 The current per-harness gate is owned by `bin/fm-task-inbox-lib.sh` and pinned by the fake-pane regressions in `tests/fm-task-inbox.test.sh`; the live run above predates it.
 The live guard now fails Codex when its idle composer never classifies `empty`, and still proceeds with a note for the other harnesses it currently covers.
 Kimi was not installed on the verification machine; its receive path is the same one-line-plus-shell contract, and the portable ladder and enqueue regressions in `tests/fm-task-inbox.test.sh` and `tests/fm-send-inbox.test.sh` cover every harness-independent half.

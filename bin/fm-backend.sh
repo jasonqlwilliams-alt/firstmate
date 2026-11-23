@@ -1029,7 +1029,7 @@ fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [ex
   fi
   verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target")
   if [ "$verdict" = empty ] && [ "$harness" = agy ] && [ -n "$fit" ] \
-     && ! fm_composer_agy_notice_fits "$FM_COMPOSER_SNAPSHOT_CAPS" "$FM_COMPOSER_SNAPSHOT_SCREEN" "$fit"; then
+     && ! fm_composer_agy_notice_fits "$FM_COMPOSER_SNAPSHOT_SCREEN" "$fit"; then
     verdict=unknown
   fi
   if [ "$verdict" = unknown ] && [ -n "$expected" ]; then
