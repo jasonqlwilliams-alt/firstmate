@@ -257,6 +257,7 @@
 # An escaped cwd reported by lsof can prevent an exact path match.
 # If Treehouse detaches the copy before a failed return, a later successful retry can leave the task branch behind because the retry starts with a detached HEAD.
 # If a successful return leaves a pending backlog close, a manual retry from inside the returned copy before startup replay can refuse and clear that marker, leaving the backlog item in flight.
+# Direct Treehouse acquisition bypasses Firstmate's project lock and can overlap post-return hook cleanup.
 #
 # Pre-teardown cleanup sequence (runs once every landed/discard-work safety
 # refusal above has already passed, and BEFORE any worktree return, branch
@@ -1734,10 +1735,14 @@ TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED=3
 TEARDOWN_PROCEVENT_RESTORE_FAILED=4
 TEARDOWN_TREEHOUSE_CALLER_REFUSED=5
 
-teardown_treehouse_close_matches_task() {  # <marker> <data> <task-id> <state>
+teardown_treehouse_close_matches_task() {  # <marker> <data-or-empty> <task-id> <state>
   [ -e "$1" ] || [ -L "$1" ] || return 1
-  fm_backlog_close_marker_validate "$1" "$2" "$3" "$4" \
-    && fm_backlog_meta_spawn_gen "$4/$3.meta" "$4" \
+  if [ -n "$2" ]; then
+    fm_backlog_close_marker_validate "$1" "$2" "$3" "$4" || return 1
+  else
+    fm_backlog_close_marker_read "$1" "$3" "$4" || return 1
+  fi
+  fm_backlog_meta_spawn_gen "$4/$3.meta" "$4" \
     && [ "$FM_BACKLOG_CLOSE_VALIDATED_SPAWN_GEN" = "$FM_BACKLOG_META_SPAWN_GEN" ]
 }
 
@@ -1752,7 +1757,7 @@ teardown_descendant_return_failure() {  # <status> <state> <task-id> <copy>
   local rc=$1 state=$2 id=$3 copy=$4 marker
   if [ -e "$copy" ] || [ -L "$copy" ]; then
     marker=$(fm_backlog_close_marker_path "$state" "$id") || return 1
-    teardown_cancel_matching_treehouse_close "$marker" "${state%/*}/data" "$id" "$state" || return 1
+    teardown_cancel_matching_treehouse_close "$marker" "" "$id" "$state" || return 1
   fi
   return "$rc"
 }
@@ -1847,6 +1852,7 @@ remove_untracked_treehouse_hooks() {
   shift
   for hook; do
     [ -e "$copy/$hook" ] || [ -L "$copy/$hook" ] || continue
+    [ ! -d "$copy/$hook" ] || [ -L "$copy/$hook" ] || continue
     treehouse_hook_path_has_exact_spelling "$copy" "$hook" || continue
     tracked=$(git -C "$copy" ls-files --cached -- ":(icase,literal)$hook" 2>/dev/null) || continue
     while IFS= read -r tracked_path && [ -n "$tracked_path" ]; do
@@ -3514,8 +3520,13 @@ cleanup_firstmate_home_children() {
       [ -n "$child_home" ] || child_home=$child_wt
       if [ -n "$child_home" ] && [ -d "$child_home" ]; then
         cleanup_firstmate_home_children "$child_home" || return $?
-        remove_firstmate_home "$child_home" "child firstmate home" "$child_id" \
-          || teardown_descendant_return_failure "$?" "$sub_state" "$child_id" "$child_home" || return $?
+        remove_firstmate_home "$child_home" "child firstmate home" "$child_id" || {
+          child_return_rc=$?
+          if firstmate_home_has_treehouse_slot "$child_home"; then
+            teardown_descendant_return_failure "$child_return_rc" "$sub_state" "$child_id" "$child_home" || return $?
+          fi
+          return "$child_return_rc"
+        }
       fi
     elif [ "$child_backend" = orca ]; then
       if [ -n "$child_wt" ] && [ -d "$child_wt" ]; then
@@ -3544,8 +3555,7 @@ cleanup_firstmate_home_children() {
             || teardown_descendant_return_failure "$?" "$sub_state" "$child_id" "$child_wt" || return $?
         fi
       else
-        safe_rm_rf_child_worktree "$child_wt" "$child_proj" \
-          || teardown_descendant_return_failure "$?" "$sub_state" "$child_id" "$child_wt" || return $?
+        safe_rm_rf_child_worktree "$child_wt" "$child_proj" || return $?
       fi
     fi
     remove_grok_turnend_auth "$sub_state" "$child_id" || return 1

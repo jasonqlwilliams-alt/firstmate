@@ -642,13 +642,13 @@ run_teardown() {
 # has a row to close. Uses the real tasks-axi (the fixture's default fakebin has
 # no tasks-axi stub, so PATH resolves the installed one).
 seed_backlog_in_flight() {
-  local case_dir=$1 kind=${2:-ship} id=${3:-task-x1}
-  mkdir -p "$case_dir/data"
+  local kind=${2:-ship} id=${3:-task-x1} data=${4:-$1/data}
+  mkdir -p "$data"
   printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' \
-    > "$case_dir/data/backlog.md"
+    > "$data/backlog.md"
   tasks-axi add "$id" "teardown fixture task" --kind "$kind" \
-    --file "$case_dir/data/backlog.md" >/dev/null
-  tasks-axi start "$id" --file "$case_dir/data/backlog.md" >/dev/null
+    --file "$data/backlog.md" >/dev/null
+  tasks-axi start "$id" --file "$data/backlog.md" >/dev/null
 }
 
 backlog_row_state() {
@@ -2517,10 +2517,10 @@ configure_secondmate_with_tmux_children() {  # <case-dir> [child-b-worktree]
 
 seed_descendant_close_for_replay() (
   export FM_HOME=$1
-  local id=$2 state="$1/state" data="$1/data" gen=descendant-fixture-gen
+  local id=$2 state="$1/state" data=${3:-$1/data} gen=descendant-fixture-gen
   printf 'spawn_gen=%s\n' "$gen" >> "$state/$id.meta"
   printf 'PR closure evidence\n' > "$state/$id.pr-poll-closed"
-  seed_backlog_in_flight "$FM_HOME" ship "$id" || exit 1
+  seed_backlog_in_flight "$FM_HOME" ship "$id" "$data" || exit 1
   # shellcheck source=bin/fm-backlog-transition-lib.sh
   . "$ROOT/bin/fm-backlog-transition-lib.sh"
   fm_backlog_close_marker_write "$state" "$id" "$data" "$gen" --note 'local main'
@@ -2528,7 +2528,9 @@ seed_descendant_close_for_replay() (
 
 assert_pending_close_replay_preserves_task() (
   export FM_HOME=${3:-$1}
-  local id=$2 state="$1/state" data="$1/data" row
+  local id=$2 state="$1/state" data=${4:-$1/data} row
+  # shellcheck source=bin/fm-tasks-axi-lib.sh
+  . "$ROOT/bin/fm-tasks-axi-lib.sh"
   # shellcheck source=bin/fm-backlog-transition-lib.sh
   . "$ROOT/bin/fm-backlog-transition-lib.sh"
   fm_backlog_close_marker_replay "$state" "$state/$id.backlog-close" "$data" \
@@ -2540,14 +2542,21 @@ assert_pending_close_replay_preserves_task() (
   [[ "$row" == *'state: in_flight'* ]] || fail 'startup replay changed the retained backlog row'
 )
 
-test_child_failed_return_cancels_close() {
-  local mode=$1 case_dir home copy rc=0 expected_rc diagnostic
+test_child_removal_failure_preserves_copy() {
+  local mode=$1 case_dir home copy marker rc=0 expected_rc diagnostic test_path=$PATH
   case_dir=$(make_case "child-failed-return-$mode")
   home="$case_dir/secondmate-home"
   copy="$case_dir/child-a-wt"
   write_meta "$case_dir" local-only secondmate
   configure_secondmate_with_tmux_children "$case_dir"
   seed_descendant_close_for_replay "$home" child-a || fail 'could not stage the descendant close'
+  marker="$home/state/child-a.backlog-close"
+  cp "$marker" "$case_dir/close-before"
+  if [ "$mode" = nested ]; then
+    printf '%s\n' child-a > "$copy/.fm-secondmate-home"
+    fm_write_meta "$home/state/child-a.meta" kind=secondmate "home=$copy" "worktree=$copy" \
+      "project=$case_dir/project" window=firstmate:fm-child-a endpoint_task_id=child-a spawn_gen=descendant-fixture-gen
+  fi
   if [ "$mode" = lock ]; then
     add_persistent_lock_treehouse "$case_dir"
     add_lsof_live_holder "$case_dir"
@@ -2564,30 +2573,41 @@ SH
     cat > "$case_dir/fakebin/rm" <<'SH'
 #!/usr/bin/env bash
 if [ "${*: -1}" = "$FM_TEST_RETAINED_CHILD_COPY" ]; then
-  echo 'rm: simulated child fallback failure' >&2
+  echo 'rm: simulated child removal failure' >&2
   exit 1
 fi
 exec "$REAL_RM_FOR_TEST" "$@"
 SH
     chmod +x "$case_dir/fakebin/treehouse" "$case_dir/fakebin/rm"
     expected_rc=1
-    diagnostic='rm: simulated child fallback failure'
+    diagnostic='rm: simulated child removal failure'
+    if [ "$mode" = direct ]; then
+      rm "$case_dir/fakebin/treehouse"
+      test_path=$(make_path_without_lsof "$case_dir")
+    fi
   fi
   FM_TEST_RETAINED_CHILD_COPY="$copy" \
+    FM_TEARDOWN_TEST_PATH="$test_path" \
     FM_TREEHOUSE_RETURN_LOCK_RETRIES=0 \
     run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
   expect_code "$expected_rc" "$rc" "child return ($mode) should retain the copy"
   assert_grep "$diagnostic" "$case_dir/stderr" "child return ($mode) did not reach the expected failure"
   [ "$(git -C "$copy" symbolic-ref --short HEAD)" = fm/child-a ] || fail 'child failure changed the checkout'
   assert_present "$case_dir/state/task-x1.meta" 'child failure retired the parent record'
-  assert_pending_close_replay_preserves_task "$home" child-a || fail 'startup replay changed the retained child task'
-  pass "failed child return retains the copy and cancels its pending close ($mode)"
+  if [ "$mode" = direct ] || [ "$mode" = nested ]; then
+    cmp -s "$case_dir/close-before" "$marker" || fail 'plain removal failure changed the pending close'
+    assert_present "$home/state/child-a.meta" 'plain removal failure retired the child record'
+  else
+    assert_pending_close_replay_preserves_task "$home" child-a || fail 'startup replay changed the retained child task'
+  fi
+  pass "failed child removal retains the copy and handles its pending close ($mode)"
 }
 
 test_forced_secondmate_teardown_preflights_all_child_copies() {
-  local layout=$1 case_dir home child_b rc=0
+  local layout=$1 case_dir home child_b backlog_data rc=0
   case_dir=$(make_case "descendant-caller-$layout")
   home="$case_dir/secondmate-home"
+  backlog_data="$case_dir/relocated/data"
   child_b="$case_dir/child-b-wt"
   if [ "$layout" = pool ]; then
     child_b="$case_dir/pool/2/project"
@@ -2597,7 +2617,19 @@ test_forced_secondmate_teardown_preflights_all_child_copies() {
   git -C "$case_dir/project" worktree add -q --detach "$home" main
   write_meta "$case_dir" local-only secondmate
   configure_secondmate_with_tmux_children "$case_dir" "$child_b"
-  seed_descendant_close_for_replay "$home" child-b || fail 'could not stage the descendant close'
+  seed_descendant_close_for_replay "$home" child-b "$backlog_data" || fail 'could not stage the descendant close'
+  (
+    export FM_HOME="$home"
+    # shellcheck source=bin/fm-tasks-axi-lib.sh
+    . "$ROOT/bin/fm-tasks-axi-lib.sh"
+    # shellcheck source=bin/fm-backlog-transition-lib.sh
+    . "$ROOT/bin/fm-backlog-transition-lib.sh"
+    if fm_backlog_close_marker_replay "$home/state" "$home/state/child-b.backlog-close" "$home/data"; then
+      fail 'startup replay accepted a close for a foreign data directory'
+    fi
+    assert_present "$home/state/child-b.meta" 'foreign data replay retired the child record'
+    assert_present "$home/state/child-b.backlog-close" 'foreign data replay removed the pending close'
+  ) || exit 1
 
   cat > "$case_dir/fakebin/lsof" <<'SH'
 #!/usr/bin/env bash
@@ -2626,7 +2658,8 @@ SH
   assert_absent "$case_dir/kill.log" 'refusal killed an earlier sibling endpoint'
   assert_present "$home/state/child-a.meta" 'refusal removed the first child record from the leased home'
   assert_present "$home/state/child-b.meta" 'refusal removed the second child record from the leased home'
-  assert_pending_close_replay_preserves_task "$home" child-b || fail 'descendant replay did not preserve the preflight refusal'
+  assert_pending_close_replay_preserves_task "$home" child-b "$home" "$backlog_data" \
+    || fail 'descendant replay did not preserve the preflight refusal with relocated data'
   assert_present "$case_dir/state/task-x1.meta" 'refusal retired the leased home record'
   pass "forced retirement preflights every child before touching the leased home ($layout)"
 }
@@ -2636,8 +2669,10 @@ test_forced_secondmate_teardown_holds_descendant_lifecycle_locks() {
   case_dir=$(make_case descendant-locks)
   write_meta "$case_dir" local-only secondmate
   mkdir -p "$case_dir/project/.opencode/plugins"
+  mkdir -p "$case_dir/project/.fm-grok-turnend"
   printf 'project plugin\n' > "$case_dir/project/.opencode/plugins/fm-busy-state.js"
-  git -C "$case_dir/project" add -f .opencode/plugins/fm-busy-state.js
+  printf 'project data\n' > "$case_dir/project/.fm-grok-turnend/data"
+  git -C "$case_dir/project" add -f .opencode/plugins/fm-busy-state.js .fm-grok-turnend/data
   git -C "$case_dir/project" commit -qm 'Track project plugin on main'
   configure_secondmate_with_tmux_children "$case_dir"
   printf 'task hook\n' > "$case_dir/child-a-wt/.fm-kimi-turnend"
@@ -2709,6 +2744,10 @@ SH
     || fail "descendant-locks: uncontended retry did not perform endpoint and worktree cleanup"
   [ "$(cat "$case_dir/child-a-wt/.opencode/plugins/fm-busy-state.js")" = 'project plugin' ] \
     || fail 'child return removed a tracked project plugin'
+  [ "$(cat "$case_dir/child-a-wt/.fm-grok-turnend/data")" = 'project data' ] \
+    || fail 'child return removed a project directory at a hook path'
+  assert_not_contains "$(cat "$case_dir/retry.stderr")" '.fm-grok-turnend' \
+    'child return attempted to unlink a project directory'
   assert_absent "$case_dir/child-a-wt/.fm-kimi-turnend" 'child return retained an untracked task hook'
   pass "forced secondmate teardown holds every descendant lifecycle and metadata lock"
 }
@@ -5085,8 +5124,10 @@ test_forced_secondmate_herdr_child_preflight_refuses_before_changes
 test_forced_secondmate_teardown_holds_descendant_lifecycle_locks
 test_forced_secondmate_teardown_preflights_all_child_copies linked
 test_forced_secondmate_teardown_preflights_all_child_copies pool
-test_child_failed_return_cancels_close lock
-test_child_failed_return_cancels_close remove
+test_child_removal_failure_preserves_copy lock
+test_child_removal_failure_preserves_copy remove
+test_child_removal_failure_preserves_copy direct
+test_child_removal_failure_preserves_copy nested
 test_forced_secondmate_herdr_child_retains_records_when_close_unconfirmed
 test_forced_teardown_retains_nested_secondmate_home_when_grandchild_close_unconfirmed
 test_herdr_projection_teardown_retires_journal_only_after_confirmed_close
