@@ -456,8 +456,7 @@ test_secondmate_active_turn_defers_stall_until_the_turn_ends() {
 #!/usr/bin/env bash
 case "${1:-}" in
   list-windows)
-    # The exact-window reads ask for ids alongside names.
-    case "$*" in *window_id*) printf '%s\n' '@1 firstmate:fm-mate' ;; *) printf '%s\n' 'firstmate:fm-mate' ;; esac ;;
+    case "$*" in *window_id*) printf '%s\n' '@1 firstmate:fm-mate' | fm_fake_tmux_window_ids "$@" ;; *) printf '%s\n' 'firstmate:fm-mate' ;; esac ;;
   capture-pane) printf 'working\n' ;;
   display-message) printf '0\n' ;;
   *) exit 0 ;;
@@ -513,8 +512,7 @@ test_secondmate_stall_marker_rejects_symlink() {
 #!/usr/bin/env bash
 case "${1:-}" in
   list-windows)
-    # The exact-window reads ask for ids alongside names.
-    case "$*" in *window_id*) printf '%s\n' '@1 firstmate:fm-mate' ;; *) printf '%s\n' 'firstmate:fm-mate' ;; esac ;;
+    case "$*" in *window_id*) printf '%s\n' '@1 firstmate:fm-mate' | fm_fake_tmux_window_ids "$@" ;; *) printf '%s\n' 'firstmate:fm-mate' ;; esac ;;
   capture-pane) : ;;
   display-message) printf '0\n' ;;
   *) exit 0 ;;

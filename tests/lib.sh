@@ -581,6 +581,23 @@ fm_fakebin() {
   printf '%s\n' "$fakebin"
 }
 
+fm_fake_tmux_window_ids() {  # <tmux args...>, reads ID and name pairs from stdin
+  local id name target
+  while [ "$#" -ge 2 ] && [ "$1" != -f ]; do shift; done
+  [ "$#" -ge 2 ] || return 1
+  case "$2" in
+    '#{==:#{session_name}:#{window_name},'*'}')
+      target=${2#'#{==:#{session_name}:#{window_name},'}
+      target=${target%\}}
+      ;;
+    *) return 1 ;;
+  esac
+  while IFS=' ' read -r id name; do
+    if [ "$name" = "$target" ]; then printf '%s\n' "$id"; fi
+  done
+}
+export -f fm_fake_tmux_window_ids
+
 fm_fake_exit0() {
   local fakebin=$1 tool
   shift

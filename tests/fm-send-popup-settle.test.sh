@@ -58,8 +58,7 @@ case "${1:-}" in
     printf 'fakepane\n'; exit 0 ;;
   capture-pane) printf '╭────╮\n│    │\n╰────╯\n'; exit 0 ;;
   list-windows)
-    # The exact-window reads ask for ids alongside names.
-    case "$*" in *window_id*) printf '@1 sess:win\n' ;; *) printf 'win\n' ;; esac
+    case "$*" in *window_id*) printf '@1 sess:win\n' | fm_fake_tmux_window_ids "$@" ;; *) printf 'win\n' ;; esac
     exit 0 ;;
 esac
 exit 0

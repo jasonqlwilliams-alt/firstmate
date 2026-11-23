@@ -74,7 +74,7 @@ case "${1:-}" in
     fi
     exit 0 ;;
   # The live window inventory the exact-window reads confirm membership in.
-  list-windows) printf '@1 sess:win\n'; exit 0 ;;
+  list-windows) printf '@1 sess:win\n' | fm_fake_tmux_window_ids "$@"; exit 0 ;;
 esac
 exit 1
 SH

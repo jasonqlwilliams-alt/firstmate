@@ -62,7 +62,6 @@ make_case() {
 #!/usr/bin/env bash
 set -u
 if [ "${1:-}" = "list-windows" ]; then
-  # The exact-window reads ask for ids alongside names.
   case "$*" in *window_id*) _ids=1 ;; *) _ids=0 ;; esac
   if [ -n "${FM_FAKE_TMUX_WINDOWS:-}" ]; then
     _names=$FM_FAKE_TMUX_WINDOWS
@@ -73,7 +72,8 @@ if [ "${1:-}" = "list-windows" ]; then
   fi
   if [ "$_ids" = 1 ]; then
     _session=${FM_FAKE_TMUX_WINDOW:-test}
-    printf '%s\n' "$_names" | awk -v session="${_session%%:*}" '{ print "@" NR " " session ":" $0 }'
+    printf '%s\n' "$_names" | awk -v session="${_session%%:*}" '{ print "@" NR " " session ":" $0 }' |
+      fm_fake_tmux_window_ids "$@"
   else
     printf '%s\n' "$_names"
   fi
@@ -193,9 +193,8 @@ case "${1:-}" in
   list-panes) [ "${FM_FAKE_TMUX_PANE_ALIVE:-1}" = 1 ]; exit $? ;;
   list-windows)
     [ -n "${FM_FAKE_TMUX_WINDOW:-}" ] || exit 0
-    # The exact-window reads ask for ids alongside names.
     case "$*" in
-      *window_id*) printf '@1 %s\n' "$FM_FAKE_TMUX_WINDOW" ;;
+      *window_id*) printf '@1 %s\n' "$FM_FAKE_TMUX_WINDOW" | fm_fake_tmux_window_ids "$@" ;;
       *) printf '%s\n' "$FM_FAKE_TMUX_WINDOW" ;;
     esac
     exit 0 ;;
@@ -287,7 +286,7 @@ case "${1:-}" in
   capture-pane) cat "$COMPOSER" 2>/dev/null; exit 0 ;;
   # The exact-window reads confirm the window in this inventory.
   list-panes) exit 0 ;;
-  list-windows) printf '@1 sess:win\n'; exit 0 ;;
+  list-windows) printf '@1 sess:win\n' | fm_fake_tmux_window_ids "$@"; exit 0 ;;
   send-keys)
     shift
     text=""; is_enter=0; lit=0

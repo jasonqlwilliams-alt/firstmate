@@ -616,8 +616,10 @@ printf ' <%s>' "\$@" >> "\${FM_RUNTIME_LOG:?}"
 printf '\\n' >> "\${FM_RUNTIME_LOG:?}"
 case "\${1:-}" in
   list-windows)
-    case "\$*" in *window_id*) printf '@1 firstmate:' ;; esac
-    printf 'fm-$id\\n'; exit 0 ;;
+    case "\$*" in
+      *window_id*) printf '@1 firstmate:fm-$id\\n' | fm_fake_tmux_window_ids "\$@" ;;
+      *) printf 'fm-$id\\n' ;;
+    esac ;;
   display-message)
     for a in "\$@"; do
       case "\$a" in

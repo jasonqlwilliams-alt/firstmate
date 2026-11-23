@@ -340,7 +340,7 @@ fm_send_resolve_target() {  # <raw-target>
   TARGET_REMOTE_ID=""
   TARGET_REMOTE_HOST=""
   RESOLUTION_TRIED=""
-  FM_TMUX_EXPLICIT_TARGET=
+  TARGET_MODE=
 
   meta=$(fm_backend_meta_for_selector "$raw" "$STATE" 2>/dev/null || true)
   if [ -n "$meta" ]; then
@@ -417,9 +417,9 @@ fm_send_resolve_target() {  # <raw-target>
         assumed=herdr
       else
         assumed=tmux
-        FM_TMUX_EXPLICIT_TARGET=$raw
+        TARGET_MODE=explicit
       fi
-      if ! fm_backend_target_exists "$assumed" "$raw"; then
+      if ! fm_backend_target_exists "$assumed" "$raw" '' "$TARGET_MODE"; then
         echo "error: explicit target '$raw' is not a live $assumed endpoint (tried meta=$STATE/$raw.meta; metadata window/terminal lookup; backend=$assumed). Use fm-<id> for a recorded task/lane, or pass a target whose backend endpoint can be verified." >&2
         return 1
       fi
@@ -1049,7 +1049,7 @@ else
   # block: remote text rides the inbox leg above, and remote --key exits
   # earlier.
   send_rc=0
-  if verdict=$(fm_backend_send_text_submit "$TARGET_BACKEND" "$T" "$MESSAGE" "$retries" "$sleep_s" "$settle" "$EXPECTED_LABEL"); then
+  if verdict=$(fm_backend_send_text_submit "$TARGET_BACKEND" "$T" "$MESSAGE" "$retries" "$sleep_s" "$settle" "$EXPECTED_LABEL" "$TARGET_MODE"); then
     :
   else
     send_rc=$?

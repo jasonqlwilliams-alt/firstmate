@@ -850,8 +850,11 @@ case "${1:-}" in
     esac
     ;;
   capture-pane) printf '❯\n' ;;
-  # The exact-window reads ask for ids alongside names.
-  list-windows) case "$*" in *window_id*) printf '@1 firstmate:' ;; esac; printf '%s\n' fm-sm ;;
+  list-windows)
+    case "$*" in
+      *window_id*) printf '%s\n' '@1 firstmate:fm-sm' | fm_fake_tmux_window_ids "$@" ;;
+      *) printf '%s\n' fm-sm ;;
+    esac ;;
 esac
 exit 0
 SH

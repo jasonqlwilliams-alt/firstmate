@@ -235,10 +235,9 @@ case "${1:-}" in
       fi
     elif [ -f "$D/pane" ]; then cat "$D/pane"; else printf '╭────╮\n│    │\n╰────╯\n'; fi
     exit 0 ;;
-  # The exact-window reads ask for ids alongside names.
   list-windows)
     if [ -f "$D/windows" ]; then
-      case "$*" in *window_id*) awk '{ print "@" NR " fmses:" $0 }' "$D/windows" ;; *) cat "$D/windows" ;; esac
+      case "$*" in *window_id*) awk '{ print "@" NR " fmses:" $0 }' "$D/windows" | fm_fake_tmux_window_ids "$@" ;; *) cat "$D/windows" ;; esac
     fi
     exit 0 ;;
 esac

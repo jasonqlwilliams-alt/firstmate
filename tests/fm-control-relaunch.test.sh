@@ -134,13 +134,12 @@ case "${1:-}" in
       printf 'Welcome to Kimi Code!\ncontext: 1%% (2k/256k)\n'
     fi
     exit 0 ;;
-  # The exact-window reads ask for ids alongside names.
   list-windows)
     [ -f "$D/windows" ] || exit 0
     session=fmses
     [ ! -f "$D/session" ] || session=$(cat "$D/session")
     case "$*" in
-      *window_id*) awk -v session="$session" '{ print "@" NR " " session ":" $0 }' "$D/windows" ;;
+      *window_id*) awk -v session="$session" '{ print "@" NR " " session ":" $0 }' "$D/windows" | fm_fake_tmux_window_ids "$@" ;;
       *) cat "$D/windows" ;;
     esac
     exit 0 ;;

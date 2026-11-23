@@ -37,7 +37,6 @@ case "${1:-}" in
       if [ "$prev" = -t ]; then session=${arg#=}; break; fi
       prev=$arg
     done
-    # The exact-window reads ask for ids alongside names.
     case "$*" in *window_id*) ids=1 ;; *) ids=0 ;; esac
     n=0
     while IFS= read -r recorded; do
@@ -53,7 +52,7 @@ case "${1:-}" in
         *) name=$recorded ;;
       esac
       if [ "$ids" = 1 ]; then printf '@%s %s:%s\n' "$n" "$session" "$name"; else printf '%s\n' "$name"; fi
-    done <<EOF
+    done <<EOF | if [ "$ids" = 1 ]; then fm_fake_tmux_window_ids "$@"; else cat; fi
 ${FM_FAKE_TMUX_WINDOW:-}
 EOF
     exit 0

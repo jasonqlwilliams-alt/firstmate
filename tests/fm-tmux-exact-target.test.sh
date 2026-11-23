@@ -98,6 +98,7 @@ pass "open worker window reads its own screen"
   || fail "precondition: a raw by-name read of the closed window must reach the prefix-named neighbour"
 pass "precondition: raw tmux resolves the closed name to the surviving neighbour"
 
+export FM_TMUX_EXPLICIT_TARGET="$SESSION:fm-mate"
 out=$(fm_backend_capture tmux "$SESSION:fm-mate" 40 2>/dev/null) \
   && fail "capture of a closed worker window must fail, got: $out"
 case "$out" in *NEIGHBOUR-TWO-MARKER*) fail "capture of a closed worker returned the neighbour's screen" ;; esac
@@ -109,7 +110,7 @@ fm_backend_target_exists tmux "$mate_pane" \
   && fail "a closed worker pane ID must not read as present"
 fm_backend_target_exists tmux "$mate_window" \
   && fail "a closed worker window ID must not read as present"
-FM_TMUX_EXPLICIT_TARGET="$SESSION:$mate_index" fm_backend_target_exists tmux "$SESSION:$mate_index" \
+fm_backend_target_exists tmux "$SESSION:$mate_index" '' explicit \
   && fail "a closed worker window index must not read as present"
 [ -z "$(fm_backend_tmux_current_path "$SESSION:fm-mate")" ] \
   || fail "a closed worker must not report its neighbour's cwd"
@@ -130,6 +131,7 @@ fm_backend_composer_snapshot tmux "$SESSION:fm-mate" \
 [ -z "$(fm_backend_tmux_foreground_comms "$SESSION:fm-mate")" ] \
   || fail "foreground process read of a closed worker window must be empty"
 pass "composer, busy, and process reads: closed worker window reads nothing"
+unset FM_TMUX_EXPLICIT_TARGET
 
 # End to end through fm-peek with a recorded task in a disposable home.
 printf 'window=%s:fm-mate\n' "$SESSION" > "$LAB/home/state/mate.meta"
@@ -164,9 +166,9 @@ explicit="$SESSION:0.$split_index"
 wait_for_marker "$split_pane" SPLIT-PANE-MARKER
 FM_HOME="$LAB/home" "$ROOT/bin/fm-peek.sh" "$explicit" 40 | grep -q SPLIT-PANE-MARKER \
   || fail "fm-peek should read the explicitly selected split pane"
-FM_TMUX_EXPLICIT_TARGET="$explicit" fm_backend_target_exists tmux "$explicit" \
+fm_backend_target_exists tmux "$explicit" '' explicit \
   || fail "a live explicit split pane should pass the presence probe"
-FM_TMUX_EXPLICIT_TARGET="$SESSION:0.99" fm_backend_target_exists tmux "$SESSION:0.99" \
+fm_backend_target_exists tmux "$SESSION:0.99" '' explicit \
   && fail "the presence probe must reject a missing split pane in a live window"
 pass "explicit tmux pane syntax works for capture and presence"
 
@@ -182,6 +184,13 @@ LC_ALL=C fm_backend_target_exists tmux "$SESSION:fm-caf_" \
 LC_ALL=C fm_backend_target_exists tmux 'équipe:fm-mate' \
   || fail "an accented session name must remain readable from a C locale"
 pass "inventory preserves non-ASCII names from a C locale"
+
+literal_name='fm-#[bold],#{window_id}'
+new_window "$SESSION" 'fm-#{a:35}[bold],#{a:35}{window_id}' LITERAL-WINDOW-MARKER
+wait_for_marker "=$SESSION:=$literal_name" LITERAL-WINDOW-MARKER
+fm_backend_capture tmux "$SESSION:$literal_name" 40 | grep -q LITERAL-WINDOW-MARKER \
+  || fail "tmux format punctuation in a window name must remain literal"
+pass "inventory matches format punctuation in window names literally"
 
 # Session names are matched exactly too: a closed recorded session must not
 # resolve to a prefix-named surviving session.

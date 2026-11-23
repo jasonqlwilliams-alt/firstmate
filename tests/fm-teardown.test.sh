@@ -3745,7 +3745,7 @@ if [ "\${1:-}" = display-message ] && [ "\${*: -1}" = '#{pane_pid}' ]; then
 fi
 # The exact-window read confirms the task window in this inventory.
 if [ "\${1:-}" = list-windows ]; then
-  printf '%s\n' '@1 firstmate:fm-task-x1'
+  printf '%s\n' '@1 firstmate:fm-task-x1' | fm_fake_tmux_window_ids "\$@"
 fi
 exit 0
 EOF

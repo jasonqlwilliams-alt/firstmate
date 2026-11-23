@@ -498,7 +498,7 @@ helm_target_exists() {
     driver target-exists
     return $?
   fi
-  fm_backend_target_exists "$HELM_BACKEND" "$HELM_TARGET"
+  fm_backend_target_exists "$HELM_BACKEND" "$HELM_TARGET" '' explicit
 }
 
 helm_busy() {
@@ -509,7 +509,7 @@ helm_busy() {
   local native tail
   native=$(fm_backend_busy_state "$HELM_BACKEND" "$HELM_TARGET" 2>/dev/null || printf 'unknown')
   [ "$native" = busy ] && return 0
-  tail=$(fm_backend_capture "$HELM_BACKEND" "$HELM_TARGET" 40 2>/dev/null) || return 0
+  tail=$(fm_backend_capture "$HELM_BACKEND" "$HELM_TARGET" 40 '' explicit 2>/dev/null) || return 0
   printf '%s' "$tail" | grep -v '^[[:space:]]*$' | tail -12 | fm_busy_lines_match claude
 }
 
@@ -518,7 +518,7 @@ helm_composer() {
     driver composer
     return $?
   fi
-  fm_backend_composer_state "$HELM_BACKEND" "$HELM_TARGET" 2>/dev/null || printf 'unknown'
+  fm_backend_composer_state "$HELM_BACKEND" "$HELM_TARGET" '' explicit 2>/dev/null || printf 'unknown'
 }
 
 helm_send_slash() {
@@ -527,7 +527,7 @@ helm_send_slash() {
     driver send "$text"
     return $?
   fi
-  verdict=$(fm_backend_send_text_submit "$HELM_BACKEND" "$HELM_TARGET" "$text" 4 0.8 0.8) || return 1
+  verdict=$(fm_backend_send_text_submit "$HELM_BACKEND" "$HELM_TARGET" "$text" 4 0.8 0.8 '' explicit) || return 1
   [ "$verdict" = empty ]
 }
 
@@ -649,7 +649,6 @@ cmd_handover() {
   validate_successor
   backend_supported "$HELM_BACKEND" || die "handover supports only tmux or herdr, not '${HELM_BACKEND:-}'"
   [ -n "$HELM_TARGET" ] || die "handover needs --target"
-  local FM_TMUX_EXPLICIT_TARGET=$HELM_TARGET
   resolve_workspace "$HELM_WORKSPACE" HELM_WORKSPACE
 
   if [ -z "${FM_BACKUP_HELM_DRIVER:-}" ]; then

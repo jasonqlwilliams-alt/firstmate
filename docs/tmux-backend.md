@@ -5,7 +5,7 @@ tmux is Firstmate's verified reference runtime backend and the fully supported b
 
 ## Setup
 
-Install tmux with `brew install tmux` or your platform package manager.
+Install tmux 3.2 or newer with `brew install tmux` or your platform package manager.
 The universal harness and toolchain requirements are in [`configuration.md`](configuration.md#toolchain).
 
 tmux is the hard default when no explicit setting or runtime auto-detection selects another backend.
@@ -47,7 +47,7 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 ### Exact window reads
 
 tmux resolves a session or window name that is not an exact match by prefix, so a closed `fm-mate` read by name would return a surviving `fm-mate2`.
-Every read of a recorded `session:window` target requires a unique literal session and window match in the inventory, then reads the window by ID.
+Every read of a recorded `session:window` target asks tmux to filter the inventory by literal session and window name, then reads the window by ID if exactly one matches.
 If the tmux server restarts on the same socket between those two commands, the new server can reuse that ID.
 `fm_tmux_exact_target` in `bin/fm-tmux-lib.sh` owns that rule, and `tests/fm-tmux-exact-target.test.sh` is its regression.
 

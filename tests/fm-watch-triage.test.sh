@@ -4233,9 +4233,8 @@ set -u
 case "${1:-}" in
   list-windows)
     [ -n "${FM_FAKE_TMUX_WINDOW:-}" ] || exit 0
-    # The exact-window reads ask for ids alongside names.
     case "$*" in
-      *window_id*) printf '@1 %s\n' "$FM_FAKE_TMUX_WINDOW" ;;
+      *window_id*) printf '@1 %s\n' "$FM_FAKE_TMUX_WINDOW" | fm_fake_tmux_window_ids "$@" ;;
       *) printf '%s\n' "${FM_FAKE_TMUX_WINDOW#*:}" ;;
     esac
     exit 0 ;;

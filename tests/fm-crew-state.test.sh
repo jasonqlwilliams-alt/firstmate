@@ -123,7 +123,7 @@ case "${1:-}" in
       [ -f "$m" ] || continue
       w=$(sed -n 's/^window=//p' "$m" | tail -n 1)
       case "$w" in *:*) n=$((n + 1)); printf '@%s %s\n' "$n" "$w" ;; esac
-    done
+    done | fm_fake_tmux_window_ids "$@"
     ;;
   display-message)
     [ "${FM_FAKE_TMUX_MISSING:-0}" = 1 ] && exit 1

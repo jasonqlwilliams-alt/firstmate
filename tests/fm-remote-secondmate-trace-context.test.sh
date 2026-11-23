@@ -60,7 +60,7 @@ case "\${1:-}" in
     [ -f "\$state" ] || exit 0
     name=\$(cut -d'|' -f1 "\$state")
     case "\$*" in
-      *window_id*) printf '@1 firstmate:%s\n' "\$name" ;;
+      *window_id*) printf '@1 firstmate:%s\n' "\$name" | fm_fake_tmux_window_ids "\$@" ;;
       *'#{session_name}:#{window_name}'*) printf 'firstmate:%s\n' "\$name" ;;
       *) printf '%s\n' "\$name" ;;
     esac

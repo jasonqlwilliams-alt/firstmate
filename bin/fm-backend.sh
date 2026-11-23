@@ -812,12 +812,12 @@ fm_backend_resolve_selector() {  # <raw-target> <state-dir>
 # changing call sites.
 
 # fm_backend_capture: bounded plain-text session capture.
-fm_backend_capture() {  # <backend> <target> <lines> [expected-label]
+fm_backend_capture() {  # <backend> <target> <lines> [expected-label] [explicit]
   local backend=$1
   shift
   fm_backend_source "$backend" || return 1
   case "$backend" in
-    tmux) fm_backend_tmux_capture "$@" ;;
+    tmux) fm_backend_tmux_capture "$1" "$2" "${4:-}" ;;
     herdr) fm_backend_herdr_capture "$@" ;;
     zellij) fm_backend_zellij_capture "$@" ;;
     orca) fm_backend_orca_capture "$@" ;;
@@ -860,12 +860,12 @@ fm_backend_send_literal() {  # <backend> <target> <text> [expected-label]
 # fm_backend_send_text_submit: type text once, then submit and verify,
 # retrying only the submission (never retyping). Echoes the backend's
 # proof-carrying verdict; callers require exact empty for confirmed delivery.
-fm_backend_send_text_submit() {  # <backend> <target> <text> <retries> <enter-sleep> <settle> [expected-label]
+fm_backend_send_text_submit() {  # <backend> <target> <text> <retries> <enter-sleep> <settle> [expected-label] [explicit]
   local backend=$1
   shift
   fm_backend_source "$backend" || return 1
   case "$backend" in
-    tmux) fm_backend_tmux_send_text_submit "$@" ;;
+    tmux) fm_backend_tmux_send_text_submit "$1" "$2" "$3" "$4" "$5" "${7:-}" ;;
     herdr) fm_backend_herdr_send_text_submit "$@" ;;
     zellij) fm_backend_zellij_send_text_submit "$@" ;;
     orca) fm_backend_orca_send_text_submit "$@" ;;
@@ -941,12 +941,12 @@ fm_backend_busy_state() {  # <backend> <target>
 # fm_composer_classify_screen) - so no backend can hold a private shape
 # assumption; zellij's classifier reads `dump-screen --ansi`, which replaced
 # its old no-classifier content-diff reporting.
-fm_backend_composer_state() {  # <backend> <target> [expected-label] -> empty|pending|pending-unproven|unknown
+fm_backend_composer_state() {  # <backend> <target> [expected-label] [explicit] -> empty|pending|pending-unproven|unknown
   local backend=$1
   shift
   fm_backend_source "$backend" || { printf 'unknown'; return 0; }
   case "$backend" in
-    tmux) fm_tmux_composer_state "$@" ;;
+    tmux) fm_tmux_composer_state "$1" "${3:-}" ;;
     herdr) fm_backend_herdr_composer_state "$@" ;;
     orca) fm_backend_orca_composer_state "$@" ;;
     cmux) fm_backend_cmux_composer_state "$@" ;;
@@ -1096,12 +1096,12 @@ fm_backend_codex_agent_pid() {  # <backend> <target>
 # server or session. For a bound Herdr target, status 0 means the pane matches,
 # status 1 means it is missing or foreign, and status 2 means its identity
 # could not be determined. Unbound Herdr targets use a direct presence read.
-fm_backend_target_exists() {  # <backend> <target> [expected-label]
+fm_backend_target_exists() {  # <backend> <target> [expected-label] [explicit]
   local backend=$1 target=$2 expected_label=${3:-} session pane
   case "$backend" in
     tmux)
       fm_backend_source tmux || return 1
-      fm_backend_tmux_target_exists "$target"
+      fm_backend_tmux_target_exists "$target" "${4:-}"
       ;;
     herdr)
       fm_backend_source herdr || return 2

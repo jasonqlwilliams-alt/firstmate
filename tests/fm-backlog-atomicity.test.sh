@@ -502,7 +502,7 @@ esac
 case "\${1:-}" in
   display-message) printf 'firstmate\\n'; exit 0 ;;
   new-window) printf '@1\\n'; exit 0 ;;
-  list-windows) case "\$*" in *window_id*) printf '@1 firstmate:fm-$id\\n' ;; esac ;;
+  list-windows) case "\$*" in *window_id*) printf '@1 firstmate:fm-$id\\n' | fm_fake_tmux_window_ids "\$@" ;; esac ;;
   capture-pane)
     if [ ! -f "$case_dir/kimi-interrupted" ]; then
       : > "$case_dir/kimi-interrupted"

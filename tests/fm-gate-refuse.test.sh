@@ -206,8 +206,11 @@ case "${1:-}" in
     for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
     printf '%%1\n'; exit 0 ;;
   capture-pane) printf '╭────╮\n│    │\n╰────╯\n'; exit 0 ;;
-  # The exact-window reads ask for ids alongside names.
-  list-windows) case "$*" in *window_id*) printf '@1 sess:' ;; esac; printf 'fm-lane-ok\n'; exit 0 ;;
+  list-windows)
+    case "$*" in
+      *window_id*) printf '%s\n' '@1 sess:fm-lane-ok' | fm_fake_tmux_window_ids "$@" ;;
+      *) printf '%s\n' fm-lane-ok ;;
+    esac ;;
 esac
 exit 0
 SH

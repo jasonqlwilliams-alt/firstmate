@@ -297,7 +297,7 @@ make_fake_tmux() {
 #!/usr/bin/env bash
 set -u
 case "\${1:-}" in
-  list-windows) printf '%s\n' '@1 $live'; exit 0 ;;
+  list-windows) printf '%s\n' '@1 $live' | fm_fake_tmux_window_ids "\$@"; exit 0 ;;
   list-panes) [ "\${3:-}" = '@1' ] || exit 1; printf '%%1\n'; exit 0 ;;
   display-message)
     target=""
@@ -381,8 +381,10 @@ case "${1:-}" in
     else
       name=main
     fi
-    case "$*" in *window_id*) printf '@1 firstmate:' ;; esac
-    printf '%s\n' "$name"
+    case "$*" in
+      *window_id*) printf '@1 firstmate:%s\n' "$name" | fm_fake_tmux_window_ids "$@" ;;
+      *) printf '%s\n' "$name" ;;
+    esac
     exit 0
     ;;
   has-session) exit 0 ;;

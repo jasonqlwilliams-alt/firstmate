@@ -341,7 +341,7 @@ case "$*" in
   list-windows*)
     state=${FM_STATE_OVERRIDE:-${FM_HOME:?}/state}
     case "$*" in
-      *window_id*) sed -n 's/^window=//p' "$state"/*.meta | awk '{ print "@" NR " " $0 }' ;;
+      *window_id*) sed -n 's/^window=//p' "$state"/*.meta | awk '{ print "@" NR " " $0 }' | fm_fake_tmux_window_ids "$@" ;;
       *) sed -n 's/^window=[^:]*://p' "$state"/*.meta ;;
     esac
     exit 0

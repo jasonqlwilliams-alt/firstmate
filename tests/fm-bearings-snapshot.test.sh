@@ -39,7 +39,7 @@ SH
 #!/usr/bin/env bash
 case "${1:-}" in
   list-windows)
-    case "$*" in *window_id*) printf '%s\n' '@1 firstmate:fm-phase8' '@2 firstmate:fm-domain-alpha' ;; esac ;;
+    case "$*" in *window_id*) printf '%s\n' '@1 firstmate:fm-phase8' '@2 firstmate:fm-domain-alpha' | fm_fake_tmux_window_ids "$@" ;; esac ;;
   list-panes) [ "$3" = @1 ] || [ "$3" = @2 ] ;;
   display-message) case "$*" in *dead-*) exit 1 ;; *) printf '%%1\n' ;; esac ;;
   capture-pane)

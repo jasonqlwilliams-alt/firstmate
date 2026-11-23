@@ -55,8 +55,11 @@ case "\${1:-}" in
   display-message)
     for a in "\$@"; do case "\$a" in *pane_current_command*) printf '%s\n' '$comm'; exit 0 ;; esac; done
     exit 0 ;;
-  # The exact-window reads ask for ids alongside names.
-  list-windows) case "\$*" in *window_id*) printf '@1 sess:' ;; esac; printf '%s\n' win; exit 0 ;;
+  list-windows)
+    case "\$*" in
+      *window_id*) printf '%s\n' '@1 sess:win' | fm_fake_tmux_window_ids "\$@" ;;
+      *) printf '%s\n' win ;;
+    esac ;;
 esac
 exit 0
 SH
@@ -79,16 +82,16 @@ case "\${1:-}" in
     exit 1
     ;;
   list-windows)
-    # The exact-window reads ask for ids alongside names.
-    case "\$*" in *window_id*) printf '@1 sess:' ;; esac
     case '$inventory' in
-      missing) printf '%s\n' main ; exit 0 ;;
+      missing) name=main ;;
       missing-session) printf '%s\n' "can't find session: sess" >&2; exit 1 ;;
       missing-server) printf '%s\n' "no server running on /tmp/tmux-test/default" >&2; exit 1 ;;
       missing-socket) printf '%s\n' "error connecting to /tmp/tmux-test/default (No such file or directory)" >&2; exit 1 ;;
-      present) printf '%s\n' fm-sm1 ; exit 0 ;;
+      present) name=fm-sm1 ;;
       *) printf '%s\n' "permission denied" >&2; exit 1 ;;
     esac
+    printf '@1 sess:%s\n' "\$name" | fm_fake_tmux_window_ids "\$@"
+    exit 0
     ;;
 esac
 exit 1
@@ -290,13 +293,16 @@ case "${1:-}" in
     exit 0
     ;;
   list-windows)
-    # The exact-window reads ask for ids alongside names.
-    case "$*" in *window_id*) [ "$mode" = unreadable ] || [ -e "${FM_TMUX_CALL_LOG:?}.killed" ] || printf '@1 firstmate:' ;; esac
     case "$mode" in
-      missing) printf '%s\n' main; exit 0 ;;
+      missing) name=main ;;
       unreadable) exit 1 ;;
-      *) [ -e "${FM_TMUX_CALL_LOG:?}.killed" ] || printf '%s\n' fm-sm1; exit 0 ;;
+      *) [ ! -e "${FM_TMUX_CALL_LOG:?}.killed" ] || exit 0; name=fm-sm1 ;;
     esac
+    case "$*" in
+      *window_id*) printf '@1 firstmate:%s\n' "$name" | fm_fake_tmux_window_ids "$@" ;;
+      *) printf '%s\n' "$name" ;;
+    esac
+    exit 0
     ;;
   new-window|kill-window)
     printf '%s\n' "$*" >> "${FM_TMUX_CALL_LOG:?}"

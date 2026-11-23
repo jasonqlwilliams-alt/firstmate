@@ -39,9 +39,9 @@ fm_backend_tmux_resolve_bare_selector() {  # <name>
 # fm_backend_tmux_capture: bounded plain-text pane capture of exactly the
 # recorded window (fm_tmux_exact_target, bin/fm-tmux-lib.sh), so a closed
 # window reads as missing even when a prefix-named neighbour survives.
-fm_backend_tmux_capture() {  # <target> <lines>
+fm_backend_tmux_capture() {  # <target> <lines> [explicit]
   local target
-  if target=$(fm_tmux_exact_target "$1"); then
+  if target=$(fm_tmux_exact_target "$1" "${3:-}"); then
     tmux capture-pane -p -t "$target" -S -"$2"
   else
     case $? in
@@ -52,9 +52,9 @@ fm_backend_tmux_capture() {  # <target> <lines>
   fi
 }
 
-fm_backend_tmux_target_exists() {  # <target>
+fm_backend_tmux_target_exists() {  # <target> [explicit]
   local target
-  target=$(fm_tmux_exact_target "$1") || return 1
+  target=$(fm_tmux_exact_target "$@") || return 1
   tmux list-panes -t "$target" -F '#{pane_id}' >/dev/null 2>&1
 }
 
@@ -67,7 +67,7 @@ fm_backend_tmux_send_key() {  # <target> <key>
 # submit with Enter, retried (Enter only, never retyped) until the composer
 # clears. Re-exports fm_tmux_submit_core (bin/fm-tmux-lib.sh) verbatim; see
 # that file for the composer-verification contract and echoed verdicts.
-fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle>
+fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle> [explicit]
   fm_tmux_submit_core "$@"
 }
 

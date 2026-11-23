@@ -34,9 +34,8 @@ case "$target" in
 esac
 case "${1:-}" in
   list-windows)
-    # The exact-window reads ask for ids alongside names.
     case "$*" in
-      *window_id*) sed -n 's/^window=//p' "${FM_HOME:?}"/state/*.meta | awk '{ print "@" NR " " $0 }' ;;
+      *window_id*) sed -n 's/^window=//p' "${FM_HOME:?}"/state/*.meta | awk '{ print "@" NR " " $0 }' | fm_fake_tmux_window_ids "$@" ;;
       *) sed -n 's/^window=[^:]*://p' "${FM_HOME:?}"/state/*.meta ;;
     esac
     ;;
