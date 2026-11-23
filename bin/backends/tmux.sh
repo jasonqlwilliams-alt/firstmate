@@ -37,19 +37,12 @@ fm_backend_tmux_resolve_bare_selector() {  # <name>
 }
 
 fm_backend_tmux_exact_pane() {  # <session:window>
-  local target=$1 session window windows
-  case "$target" in
-    *:*:*|:*|*:) return 1 ;;
-    *:*) ;;
-    *) return 1 ;;
-  esac
-  session=${target%%:*}
-  window=${target#*:}
-  windows=$(tmux list-windows -t "=$session" -F $'#{window_name}\t#{pane_id}' 2>/dev/null) || return 1
-  awk -F '\t' -v window="$window" '
-    $1 == window { pane=$2; matches++ }
-    END { if (matches != 1 || pane == "") exit 1; print pane }
-  ' <<< "$windows"
+  local window pane
+  [[ $1 = *:* ]] || return 1
+  window=$(fm_tmux_exact_target "$1") || return 1
+  pane=$(tmux display-message -p -t "$window" '#{pane_id}' 2>/dev/null) || return 1
+  [[ $pane =~ ^%[0-9]+$ ]] || return 1
+  printf '%s\n' "$pane"
 }
 
 # fm_backend_tmux_capture: bounded plain-text pane capture of exactly the

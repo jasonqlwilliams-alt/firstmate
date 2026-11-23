@@ -64,7 +64,10 @@ case "${1:-}" in
     fi
     exit 0 ;;
   display-message)
-    for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
+    case "${*: -1}" in
+      '#{cursor_y}') printf '1\n'; exit 0 ;;
+      '#{pane_id}') printf '%%%s\n' "${4#@}"; exit 0 ;;
+    esac
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
     if [ "${FM_FAKE_TMUX_COMPOSER:-}" = pending ]; then
@@ -76,12 +79,7 @@ case "${1:-}" in
   list-windows)
     case "$*" in
       *window_id*) printf '@1 sess:fm-t1\n@2 sess:win\n' | fm_fake_tmux_window_ids "$@" ;;
-      *)
-        case "${*: -1}" in
-          $'#{window_name}\t#{pane_id}') printf 'fm-t1\t%%1\n' ;;
-          *) printf 'fm-t1\n' ;;
-        esac
-        ;;
+      *) printf 'fm-t1\n' ;;
     esac
     exit 0 ;;
 esac

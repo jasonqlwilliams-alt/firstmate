@@ -105,6 +105,7 @@ case "${1:-}" in
       if [ "$prev" = -t ]; then target=$a; fi
       case "$a" in
         *cursor_y*) printf '1\n'; exit 0 ;;
+        '#{pane_id}') printf '%%%s\n' "${target#@}"; exit 0 ;;
         *pane_current_command*)
           # Exact-window reads arrive by window id; map it back to the name
           # the keyed state was written under.
@@ -133,12 +134,7 @@ case "${1:-}" in
     [ -f "$D/windows" ] || exit 0
     case "$*" in
       *window_id*) awk '{ print "@" NR " fmses:" $0 }' "$D/windows" | fm_fake_tmux_window_ids "$@" ;;
-      *)
-        case "${*: -1}" in
-          $'#{window_name}\t#{pane_id}') awk '{ printf "%s\t%%%d\n", $0, NR }' "$D/windows" ;;
-          *) cat "$D/windows" ;;
-        esac
-        ;;
+      *) cat "$D/windows" ;;
     esac
     exit 0 ;;
 esac

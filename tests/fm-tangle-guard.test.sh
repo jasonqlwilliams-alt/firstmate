@@ -227,7 +227,10 @@ make_spawn_record_fakebin() {
 set -u
 [ -n "${FM_TMUX_REC:-}" ] && printf 'tmux %s\n' "$*" >> "$FM_TMUX_REC"
 case "$*" in
-  *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
+  *"#{pane_current_path}"*)
+    [ "${4:-}" = @1 ] && [ -f "$0.original-windows" ] || exit 1
+    printf '%s\n' "${FM_FAKE_PANE_PATH:-}"
+    exit 0 ;;
 esac
 case "${1:-}" in
   display-message) printf 'firstmate\n'; exit 0 ;;
@@ -237,7 +240,17 @@ case "${1:-}" in
       fm_fake_tmux_window_ids "$@" < "$0.windows"
     fi
     exit 0 ;;
-  has-session|new-session|send-keys|set-window-option) exit 0 ;;
+  send-keys)
+    case "${4:-}" in
+      *'treehouse get --lease --lease-holder '*)
+        [ "${3:-}" = @1 ] || exit 1
+        mv "$0.windows" "$0.original-windows" || exit 1
+        printf '@1 firstmate:renamed\n' > "$0.windows" || exit 1
+        ;;
+      'export GOTMPDIR='*) mv "$0.original-windows" "$0.windows" || exit 1 ;;
+    esac
+    exit 0 ;;
+  has-session|new-session|set-window-option) exit 0 ;;
 esac
 exit 0
 SH
@@ -260,6 +273,7 @@ test_spawn_tmux_window_construction() {
   mkdir -p "$home/data"
   proj=$(make_repo "$TMP_ROOT/spawn-rec-proj")
   fakebin=$(make_spawn_record_fakebin "$TMP_ROOT/spawn-rec-fake")
+  fm_test_fake_sleep_noop "$fakebin"
   rec="$TMP_ROOT/spawn-rec.log"
   : > "$rec"
   wt="$TMP_ROOT/spawn-rec-wt"
@@ -268,6 +282,8 @@ test_spawn_tmux_window_construction() {
   out=$(run_spawn_record "$home" rec-win-gg7 "$proj" "$wt" "$fakebin" "$rec"); status=$?
   expect_code 0 "$status" "spawn into a genuine worktree should succeed"
   assert_contains "$out" "spawned rec-win-gg7" "recording spawn did not report success"
+  grep -Fxq "worktree=$wt" "$home/state/rec-win-gg7.meta" \
+    || fail "spawn must record the worktree discovered while the window is renamed"
 
   # Bug 1 fix: append-form window creation (trailing colon on the session target).
   assert_grep "new-window -dP -F #{window_id} -t firstmate: -n fm-rec-win-gg7" "$rec" \
@@ -286,9 +302,6 @@ test_spawn_tmux_window_construction() {
     | grep -F 'treehouse get --lease --lease-holder rec-win-gg7' \
     | grep -Fq ' Enter' \
     || fail "durable treehouse get must be sent to the stable window id"
-  assert_grep "display-message -p -t @1 #{pane_current_path}" "$rec" \
-    "the worktree wait loop must query the stable window id, not the name"
-
   pass "fm-spawn: appends windows by session-colon, pins the name, and targets the window id"
 }
 

@@ -130,14 +130,14 @@ out=$(fm_backend_capture tmux "$SESSION:fm-mate" 40 2>/dev/null) \
 case "$out" in *NEIGHBOUR-TWO-MARKER*) fail "capture of a closed worker returned the neighbour's screen" ;; esac
 pass "capture: closed worker window reads as missing, not the neighbour's screen"
 
-fm_backend_target_exists tmux "$SESSION:fm-mate" \
-  && fail "a closed worker window must not read as present"
-fm_backend_target_exists tmux "$mate_pane" \
-  && fail "a closed worker pane ID must not read as present"
-fm_backend_target_exists tmux "$mate_window" \
-  && fail "a closed worker window ID must not read as present"
-fm_backend_target_exists tmux "$SESSION:$mate_index" '' explicit \
-  && fail "a closed worker window index must not read as present"
+for closed_target in "$SESSION:fm-mate" "$mate_pane" "$mate_window"; do
+  rc=0
+  fm_backend_target_exists tmux "$closed_target" || rc=$?
+  [ "$rc" -eq 1 ] || fail "closed worker target $closed_target should report absence, got status $rc"
+done
+rc=0
+fm_backend_target_exists tmux "$SESSION:$mate_index" '' explicit || rc=$?
+[ "$rc" -eq 1 ] || fail "closed worker index $mate_index should report absence, got status $rc"
 [ -z "$(fm_backend_tmux_current_path "$SESSION:fm-mate")" ] \
   || fail "a closed worker must not report its neighbour's cwd"
 pass "liveness: closed worker window reads as missing"

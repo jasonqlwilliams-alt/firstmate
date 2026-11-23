@@ -393,11 +393,19 @@ fixture:fm-exitdialog unknown
 fix:fm-exitdialog-west unknown
 fixture:fm-exitdialog-west.0 unknown
 EOF
+neighbor_window=$("$TMUX_BIN" -f /dev/null -L "$SOCKET" display-message -p -t "$neighbor" '#{window_id}')
+[ -n "$neighbor_window" ] || fail 'could not identify the Claude dialog window'
 "$TMUX_BIN" -f /dev/null -L "$SOCKET" rename-window -t "$neighbor" sentinel.0 || fail 'could not name the dotted window'
 verdict=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" bash -c \
   '. "$1"; fm_backend_guarded_composer_state tmux "$2" "" "" claude' \
   _ "$ROOT/bin/fm-backend.sh" fixture:sentinel.0)
 [ "$verdict" = exit-confirm ] || fail "a dotted window name should resolve literally, got $verdict"
+"$TMUX_BIN" -f /dev/null -L "$SOCKET" link-window -d -s "$neighbor_window" -t fixture:99 \
+  || fail 'could not link the Claude dialog window to a second index'
+verdict=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" bash -c \
+  '. "$1"; fm_backend_guarded_composer_state tmux "$2" "" "" claude' \
+  _ "$ROOT/bin/fm-backend.sh" fixture:sentinel.0)
+[ "$verdict" = exit-confirm ] || fail "two links to one Claude dialog should still read exit-confirm, got $verdict"
 kill -TERM "$(cat "$TMP_ROOT/pid")"
 rm -f "$TMP_ROOT/pid" "$TMP_ROOT/keys"
 pass 'Claude dialog reads use the exact tmux session and window'
