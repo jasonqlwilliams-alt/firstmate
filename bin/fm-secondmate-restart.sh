@@ -29,12 +29,16 @@
 #      All requests go out before any restart, so a slow mate delays only its own
 #      restart instead of serializing the fleet behind it.
 #   B. RESTART. Only after that mate's own correlated answer lands on the parent
-#      channel. The gate is that answer, never a wall clock, so a mate that is
-#      mid-turn queues the request behind that turn; the bound below exists to
-#      end the wait, not to authorize a restart without the answer. A timeout
-#      deliberately leaves that unanswered expectation open: it is a genuine
-#      open loop owned by the ordinary pending-reply recovery ladder, not state
-#      this restart pass may close.
+#      channel AND says the open work is saved: an explicit done, read by
+#      bin/fm-secondmate-restart-lib.sh's fm_secondmate_persist_outcome. A
+#      negative or unclear answer STOPS the restart for that mate: its agent and
+#      conversation are left exactly as they are, with no re-read message on
+#      top, and the pass reports it. The gate is that answer, never a wall
+#      clock, so a mate that is mid-turn queues the request behind that turn;
+#      the bound below exists to end the wait, not to authorize a restart
+#      without the answer. A timeout deliberately leaves that unanswered
+#      expectation open: it is a genuine open loop owned by the ordinary
+#      pending-reply recovery ladder, not state this restart pass may close.
 #
 # A missing persist answer or an unsupported restart can fall back to the
 # ordinary re-read nudge. A failed or ambiguous relaunch leaves the outcome
@@ -60,16 +64,20 @@
 #   FM_SECONDMATE_PERSIST_WAIT  seconds to wait for one mate's persist answer (900)
 #   FM_SECONDMATE_PERSIST_POLL  seconds between checks of that answer (5)
 #
-# Exit status: 0 every named mate restarted; 3 at least one was nudged or left
-# unreached and every mate was still accounted for; 1 the input itself is
-# unusable; 2 invalid use.
+# Output: one line per mate - restarted:, nudged:, unreached:, or stopped:
+# (it answered that its open work is not saved, or did not clearly say it is)
+# - then one summary: line.
+#
+# Exit status: 0 every named mate restarted; 3 at least one was nudged, left
+# unreached, or stopped and every mate was still accounted for; 1 the input
+# itself is unusable; 2 invalid use.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 
 usage() {
-  sed -n '2,65{s/^# \{0,1\}//;p;}' "$0"
+  sed -n '2,72{s/^# \{0,1\}//;p;}' "$0"
 }
 
 case "${1:-}" in
@@ -133,6 +141,7 @@ RESTART_RESULT=()
 restarted_count=0
 nudged_count=0
 unreached_count=0
+stopped_count=0
 
 # The first line of a command's output that carries anything, flattened to one
 # readable line with its "error: " prefix dropped. A refusal's own words are the
@@ -162,6 +171,27 @@ fall_back_to_nudge() {  # <id> <reason>
 report_unreached() {  # <id> <reason>
   unreached_count=$((unreached_count + 1))
   printf 'unreached: %s: %s\n' "$1" "$2"
+}
+
+# A resolved persist answer releases the restart only when it says the open work
+# is saved. Anything else leaves the mate exactly as it is: no stop, and no
+# re-read message on top of the answer it just gave.
+release_or_stop() {  # <array-index>
+  local i=$1 why
+  fm_secondmate_persist_outcome "$STATE" "${CORR[i]}"
+  if [ "$FM_SECONDMATE_PERSIST_OUTCOME" = saved ]; then
+    launch_restart "$i"
+    return
+  fi
+  if [ "$FM_SECONDMATE_PERSIST_OUTCOME" = not-saved ]; then
+    why="it answered that its open work is not saved"
+  else
+    why="its answer did not confirm that its open work is saved"
+  fi
+  [ -z "$FM_SECONDMATE_PERSIST_NOTE" ] || why="$why: $FM_SECONDMATE_PERSIST_NOTE"
+  stopped_count=$((stopped_count + 1))
+  printf 'stopped: %s: %s, so its agent was left running untouched\n' "${IDS[$i]}" "$why"
+  PLAN[i]="done"
 }
 
 report_open_exit_dialog() {  # <id>
@@ -368,7 +398,7 @@ while [ "$((pending_count + restart_active_count))" -gt 0 ]; do
     if [ "${PLAN[i]}" = persisted-pending ] \
       && fm_pending_reply_try_resolve "$STATE" "${CORR[i]}"; then
       pending_count=$((pending_count - 1))
-      launch_restart "$i"
+      release_or_stop "$i"
     fi
     i=$((i + 1))
   done
@@ -383,7 +413,7 @@ while [ "$((pending_count + restart_active_count))" -gt 0 ]; do
       # timeout decision so an answer already on disk wins over the fallback.
       if fm_pending_reply_try_resolve "$STATE" "${CORR[i]}"; then
         pending_count=$((pending_count - 1))
-        launch_restart "$i"
+        release_or_stop "$i"
       else
         fall_back_to_nudge "${IDS[$i]}" \
           "it did not confirm within ${PERSIST_WAIT}s that its open work is written down, so its conversation was not spent"
@@ -402,7 +432,7 @@ done
 
 # --- summary ---------------------------------------------------------------
 
-printf 'summary: %d of %d restarted, %d nudged, %d unreached\n' \
-  "$restarted_count" "${#IDS[@]}" "$nudged_count" "$unreached_count"
-[ "$((nudged_count + unreached_count))" -eq 0 ] || exit 3
+printf 'summary: %d of %d restarted, %d nudged, %d unreached, %d stopped\n' \
+  "$restarted_count" "${#IDS[@]}" "$nudged_count" "$unreached_count" "$stopped_count"
+[ "$((nudged_count + unreached_count + stopped_count))" -eq 0 ] || exit 3
 exit 0

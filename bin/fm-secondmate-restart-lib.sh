@@ -33,13 +33,45 @@ _FM_SECONDMATE_RESTART_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # the reload it is paying for.
 # The mate answers through its parent channel, which is what resolves the
 # parent-owned reply expectation fm-send arms for a marked request; that
-# correlated answer, never the wall clock, is what releases the restart.
+# correlated answer, never the wall clock, is what releases the restart, and
+# only when fm_secondmate_persist_outcome reads it as saved.
 fm_secondmate_persist_request() {  # <running-harness>
   printf '%s' 'Firstmate was updated and I am about to restart your agent so it comes up on the current instructions and launch-time settings, which drops your conversation but keeps every durable record. Before that, persist the open work you are holding only in this conversation, following the /stow skill'"'"'s "Open-record persistence" section and nothing else from that skill: file a task for each open record that exists only in this conversation, including any captain call you had formed but never registered, and correct any task whose status no longer reflects what you now know. Do NOT run the memory, learnings, or captain-preference sweeps.'
   if [ "$1" = claude ]; then
     printf '%s' ' Also stop every background shell task you started, such as timers or sleep loops, because a running one makes the exit stop at a confirmation that the restart will not answer.'
   fi
-  printf '%s' ' Then reply on your parent channel saying it is done, or saying what you deliberately left alone and why.'
+  printf '%s' ' Then reply on your parent channel with done once it is written down, naming anything you deliberately left alone and why, or with blocked and the reason if you could not write it down. Only a done reply lets the restart go ahead; any other reply leaves your agent running as it is.'
+}
+
+# Read the persist answer that resolved <corr_id>'s expectation, after
+# fm_pending_reply_try_resolve has returned 0 for it. Publishes:
+#   FM_SECONDMATE_PERSIST_OUTCOME  saved|not-saved|unclear
+#   FM_SECONDMATE_PERSIST_NOTE     the answer's own note, one line (may be empty)
+# Only an explicit done is saved: the conversation is spent on nothing less.
+# blocked, failed, and needs-decision are the status vocabulary's negative
+# verbs. Every other answer - another verb, a line whose verb cannot be read,
+# or an operator closing the request instead of the mate answering it - is
+# unclear, and unclear stops the restart exactly as a negative answer does.
+# The answer is the same correlated parent-channel line for a local and a remote
+# mate, so placement plays no part here.
+FM_SECONDMATE_PERSIST_OUTCOME=""
+FM_SECONDMATE_PERSIST_NOTE=""
+fm_secondmate_persist_outcome() {  # <state-dir> <corr_id>
+  local state=$1 corr=$2 rec status_file line
+  FM_SECONDMATE_PERSIST_OUTCOME=unclear
+  FM_SECONDMATE_PERSIST_NOTE=""
+  rec=$(fm_pending_reply_path "$state" "$corr")
+  [ -f "$rec" ] || return 0
+  status_file=$(fm_pending_reply_get "$rec" parent_status)
+  line=$(fm_pending_reply_find_resolve_line "$status_file" "$corr" parent)
+  [ -n "$line" ] || return 0
+  FM_SECONDMATE_PERSIST_NOTE=$(status_line_note "$line" | tr -s '[:space:]' ' ')
+  fm_pending_reply_line_closes_decision "$line" "$corr" && return 0
+  case "$(status_line_verb "$line")" in
+    done) FM_SECONDMATE_PERSIST_OUTCOME=saved ;;
+    blocked|failed|needs-decision) FM_SECONDMATE_PERSIST_OUTCOME=not-saved ;;
+  esac
+  return 0
 }
 
 # Resolve one mate's restart capability from its durable record alone.

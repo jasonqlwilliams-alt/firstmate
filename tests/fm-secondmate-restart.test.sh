@@ -6,8 +6,10 @@
 # transaction) against a lifecycle-modelling session-provider stub:
 #
 #   1. The persist request is a GATE. Nothing is stopped until that mate's own
-#      correlated answer lands on the parent channel, and a mate that never
-#      answers keeps its agent and gets the re-read message instead.
+#      correlated answer lands on the parent channel and says done, a mate that
+#      never answers keeps its agent and gets the re-read message instead, and a
+#      mate whose answer is negative or unclear (local or remote) keeps its
+#      agent untouched and is reported as stopped.
 #   2. The order is persist THEN restart, observable in what reaches the pane.
 #   3. The persist request is the task-subset of /stow: it asks for open records
 #      and task status, and explicitly not for the memory, learnings, or
@@ -91,7 +93,8 @@ case "${1:-}" in
           corr=$(cat "$inbox"/*.msg 2>/dev/null \
             | grep -oE 'corr=[0-9a-f]{16}' | head -1)
           if [ -n "$corr" ]; then
-            printf 'done [%s]: open records written down\n' "$corr" \
+            printf '%s [%s]: %s\n' "${FM_FAKE_ANSWER_VERB:-done}" "$corr" \
+              "${FM_FAKE_ANSWER_NOTE:-open records written down}" \
               >> "$(cat "$D/answer-status")"
           fi
         fi
@@ -517,7 +520,8 @@ case "${rargs[1]:-}" in
     # parent channel, carrying the correlation token the request embedded.
     if [ -n "${FM_FAKE_ANSWER_STATUS:-}" ]; then
       corr=$(printf '%s' "${rargs[3]:-}" | grep -oE 'corr=[0-9a-f]{16}' | head -1)
-      [ -z "$corr" ] || printf 'done [%s]: open records written down\n' "$corr" \
+      [ -z "$corr" ] || printf '%s [%s]: %s\n' "${FM_FAKE_ANSWER_VERB:-done}" "$corr" \
+        "${FM_FAKE_ANSWER_NOTE:-open records written down}" \
         >> "$FM_FAKE_ANSWER_STATUS"
     fi
     ;;
@@ -1056,6 +1060,72 @@ test_remote_secondmate_control_relaunch_updates_parent_record() {
   pass "T17 direct remote secondmate control relaunch updates parent record and preserves on failure"
 }
 
+# --- T18: only an explicit positive persist answer releases the restart -------
+# A mate that answers that it could not write its open records down, or answers
+# with anything other than a plain "done", keeps its agent and its conversation:
+# nothing is stopped, no re-read message is sent on top of its answer, and the
+# pass reports the stop in its output and exit status.
+assert_persist_answer_stops_local() {  # <verb> <note> <expected-fragment> <label>
+  local verb=$1 note=$2 fragment=$3 label=$4 dir out rc
+  dir=$(new_case "stop-$verb")
+  add_local_mate "$dir" sm1
+  arm_answer "$dir" sm1
+
+  out=$(FM_FAKE_ANSWER_VERB="$verb" FM_FAKE_ANSWER_NOTE="$note" run_restart "$dir" fm-sm1); rc=$?
+
+  expect_code 3 "$rc" "$label must not count as a clean restart"$'\n'"$out"
+  assert_contains "$out" "stopped: sm1: $fragment" "$label must stop the restart and say why"
+  assert_contains "$out" "$note" "$label must carry the mate's own words"
+  assert_not_contains "$out" "restarted: sm1" "$label must not restart the mate"
+  assert_not_contains "$out" "nudged: sm1" "$label must leave the mate untouched, without a re-read message"
+  assert_contains "$out" "summary: 0 of 1 restarted, 0 nudged, 0 unreached, 1 stopped" \
+    "$label must be counted as stopped"
+  ! grep -Eq '^/(exit|quit)$' "$dir/fake/literal" \
+    || fail "$label still stopped the agent"
+  assert_absent "$dir/home/state/sm1.control-relaunch" \
+    "$label still opened a restart transaction"
+  [ "$(grep -c '^: Firstmate instruction waiting: ' "$dir/fake/submitted")" -eq 1 ] \
+    || fail "$label must leave the mate with only the persist request"$'\n'"$(cat "$dir/fake/submitted")"
+}
+
+test_negative_persist_answer_stops_local_restart() {
+  assert_persist_answer_stops_local blocked "could not write the open records" \
+    "it answered that its open work is not saved" "a blocked answer"
+  assert_persist_answer_stops_local failed "task store refused the write" \
+    "it answered that its open work is not saved" "a failed answer"
+  assert_persist_answer_stops_local needs-decision "which records to keep" \
+    "it answered that its open work is not saved" "a needs-decision answer"
+  pass "T18 a negative persist answer stops the local restart and reports it"
+}
+
+test_unclear_persist_answer_stops_local_restart() {
+  assert_persist_answer_stops_local working "looking at it" \
+    "its answer did not confirm that its open work is saved" "a working answer"
+  assert_persist_answer_stops_local note "will get to it" \
+    "its answer did not confirm that its open work is saved" "a note answer"
+  pass "T19 an unclear persist answer stops the local restart and reports it"
+}
+
+test_negative_persist_answer_stops_remote_restart() {
+  local dir out rc
+  dir=$(new_case remote-stop)
+  setup_remote_case "$dir" sm2 ok
+  export FM_FAKE_ANSWER_STATUS="$dir/home/state/sm2.status"
+  out=$(FM_FAKE_ANSWER_VERB=failed FM_FAKE_ANSWER_NOTE="could not write the open records" \
+    run_restart "$dir" fm-sm2); rc=$?
+  unset FM_FAKE_ANSWER_STATUS
+
+  expect_code 3 "$rc" "a remote negative answer must not count as a clean restart"$'\n'"$out"
+  assert_contains "$out" "stopped: sm2: it answered that its open work is not saved" \
+    "a remote negative answer must stop the restart and say why"
+  assert_not_contains "$out" "restarted: sm2" "a remote negative answer must not restart the mate"
+  ! grep -q '^fm-remote-secondmate-control.sh relaunch' "$dir/ssh.log" \
+    || fail "a remote negative answer still crossed the hop to relaunch"$'\n'"$(cat "$dir/ssh.log")"
+  [ "$(grep -c '^fm-remote-secondmate-control.sh send' "$dir/ssh.log")" -eq 1 ] \
+    || fail "a remote negative answer must leave the mate with only the persist request"$'\n'"$(cat "$dir/ssh.log")"
+  pass "T20 a negative persist answer stops the remote restart and reports it"
+}
+
 test_persist_gates_and_asks_only_for_open_records
 test_persist_precedes_restart
 test_arrived_answer_precedes_deadline_check
@@ -1081,5 +1151,8 @@ test_result_published_while_reaping_is_honored
 test_already_current_mate_restarts_end_to_end
 test_already_current_unprovable_mate_stays_on_the_nudge_path
 test_remote_secondmate_control_relaunch_updates_parent_record
+test_negative_persist_answer_stops_local_restart
+test_unclear_persist_answer_stops_local_restart
+test_negative_persist_answer_stops_remote_restart
 
 echo "# all fm-secondmate-restart tests passed"
