@@ -246,8 +246,7 @@ fi
 # Arm fm_test_arm_fixture_reaper before starting fixtures, then launch them
 # through fm_test_start_fixture or fm_test_run_fixture. The launcher records
 # the session and its anchor before executing the fixture so ownership survives
-# reparenting and process-group changes within the session. Registration is
-# bounded by FM_TEST_FIXTURE_REGISTER_SECONDS (30 seconds by default).
+# reparenting and process-group changes within the session.
 #
 # The detached reaper signals groups from recorded sessions with live anchors
 # using process IDs, group and session IDs, and process state. Keep the anchors
@@ -257,25 +256,18 @@ fi
 # owner's exit and cleans up asynchronously.
 
 fm_test_start_fixture() {
-  local monitor_was_on=0 registration_seconds=${FM_TEST_FIXTURE_REGISTER_SECONDS:-30}
-  case "$registration_seconds" in
-    ''|*[!0-9]*|0) return 1 ;;
-  esac
+  local monitor_was_on=0
   case $- in *m*) monitor_was_on=1 ;; esac
   set +m
   # shellcheck disable=SC2016
-  perl -MPOSIX=setsid,sigprocmask,SIG_BLOCK,SIG_UNBLOCK,SIGTERM -MFcntl=O_CREAT,O_EXCL,O_WRONLY -e '
-    my ($registry, $seconds) = splice @ARGV, 0, 2;
+  perl -MPOSIX=setsid -MFcntl=O_CREAT,O_EXCL,O_WRONLY -e '
+    my $registry = shift;
     my $session = setsid();
     die "setsid: $!" unless defined($session) && $session > 1;
     pipe(my $registered, my $ready) or die "pipe: $!";
-    # Do not let cancellation land between fork and acquiring the anchor PID.
-    my $term = POSIX::SigSet->new(SIGTERM);
-    sigprocmask(SIG_BLOCK, $term) or die "block TERM: $!";
     my $anchor = fork();
     die "fork: $!" unless defined($anchor);
     if (!$anchor) {
-      sigprocmask(SIG_UNBLOCK, $term) or die "unblock TERM: $!";
       close $registered;
       setpgrp(0, 0) or die "setpgrp: $!";
       sysopen(my $record, "$registry/$session.$$", O_CREAT | O_EXCL | O_WRONLY, 0600)
@@ -290,30 +282,10 @@ fm_test_start_fixture() {
       exit;
     }
     close $ready;
-    # Until registration succeeds, the launcher owns the anchor directly.
-    # The reaper cannot identify a session that has no published record.
-    my $abort = sub {
-      local $SIG{TERM} = $SIG{ALRM} = "IGNORE";
-      alarm 0;
-      kill "KILL", $anchor;
-      waitpid $anchor, 0;
-      exit 1;
-    };
-    $SIG{TERM} = $abort;
-    $SIG{ALRM} = sub {
-      warn "fixture session registration exceeded ${seconds}s\n";
-      $abort->();
-    };
-    alarm $seconds;
-    sigprocmask(SIG_UNBLOCK, $term) or $abort->();
-    <$registered> or $abort->();
+    exit 1 unless <$registered>;
     close $registered;
-    alarm 0;
-    exec { $ARGV[0] } @ARGV or do {
-      warn "exec $ARGV[0]: $!\n";
-      $abort->();
-    };
-  ' "$FM_TEST_FIXTURE_SESSIONS" "$registration_seconds" "$@" 3<&0 <&3 3<&- &
+    exec { $ARGV[0] } @ARGV or die "exec $ARGV[0]: $!";
+  ' "$FM_TEST_FIXTURE_SESSIONS" "$@" 3<&0 <&3 3<&- &
   FM_TEST_FIXTURE_PID=$!
   [ "$monitor_was_on" -eq 0 ] || set -m
   until compgen -G "$FM_TEST_FIXTURE_SESSIONS/$FM_TEST_FIXTURE_PID.*" >/dev/null; do
