@@ -1,0 +1,51 @@
+Firstmate eaef2daf. Synthetic Claude and Kimi programs only report pane environment and emulate agent readiness/exit.
+warning: /tmp/home-a/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+spawned duplicate-live harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-duplicate-live worktree=/tmp/pools/.treehouse/project-a-a35ec8/1/project-a
+warning: /tmp/home-b/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+spawned duplicate-live harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-duplicate-live worktree=/tmp/pools/.treehouse/project-b-45fb3a/1/project-b
+GOTMPDIR=/tmp/fm-duplicate-live+C6n1kN/gotmp accessible=yes
+GOTMPDIR=/tmp/fm-duplicate-live+SiPYx7/gotmp accessible=yes
+Two same-ID tasks own distinct mode 700 roots: /tmp/fm-duplicate-live+C6n1kN and /tmp/fm-duplicate-live+SiPYx7
+sleeper pid=1800 cwd=/tmp/fm-duplicate-live+C6n1kN/gotmp
+sleeper pid=1807 cwd=/tmp/fm-duplicate-live+SiPYx7/gotmp
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown: reaping leaked worktree process(es) for duplicate-live: 278 924 1800
+teardown: force-killing leaked worktree process(es) for duplicate-live: 278
+🌳 Worktree returned to pool.
+teardown duplicate-live complete (window firstmate:fm-duplicate-live, worktree /tmp/pools/.treehouse/project-a-a35ec8/1/project-a)
+Backlog: duplicate-live just finished (config/backlog-backend selects manual editing). Update /tmp/home-a/data/backlog.md - move duplicate-live to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+Home B scratch sentinel
+GOTMPDIR=/tmp/fm-duplicate-live+SiPYx7/gotmp accessible=yes
+Home A removed its root and stopped its sleeper (exit 143). Home B kept its pane, sleeper, and file.
+OBSERVED home-isolation
+warning: /tmp/home-a/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+spawned duplicate-live harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-duplicate-live worktree=/tmp/pools/.treehouse/project-a-a35ec8/1/project-a
+GOTMPDIR=/tmp/fm-duplicate-live+8Ygsbm/gotmp accessible=yes
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for duplicate-live: 2820 3471
+teardown: force-killing leaked worktree process(es) for duplicate-live: 2820
+🌳 Worktree returned to pool.
+teardown duplicate-live complete (window firstmate:fm-duplicate-live, worktree /tmp/pools/.treehouse/project-a-a35ec8/1/project-a)
+Backlog: duplicate-live just finished (config/backlog-backend selects manual editing). Update /tmp/home-a/data/backlog.md - move duplicate-live to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+Home B scratch sentinel
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown: reaping leaked worktree process(es) for duplicate-live: 1123 1768 1807
+teardown: force-killing leaked worktree process(es) for duplicate-live: 1123
+🌳 Worktree returned to pool.
+teardown duplicate-live complete (window firstmate:fm-duplicate-live, worktree /tmp/pools/.treehouse/project-b-45fb3a/1/project-b)
+Backlog: duplicate-live just finished (config/backlog-backend selects manual editing). Update /tmp/home-b/data/backlog.md - move duplicate-live to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+Fresh dispatch root /tmp/fm-duplicate-live+8Ygsbm was distinct and removed on its own teardown. Home B cleanup alone removed /tmp/fm-duplicate-live+SiPYx7.
+OBSERVED fresh-redispatch
+Disposable agents and terminal servers stopped. Driver exit=0

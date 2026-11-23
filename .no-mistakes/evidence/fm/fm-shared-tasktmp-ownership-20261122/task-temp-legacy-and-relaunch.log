@@ -1,0 +1,65 @@
+Target f04af02b, fm-teardown against a legacy root and a symlink target
+Driver exit status: 0
+
+warning: /tmp/home-a/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: duplicate-live ships mode=local-only while the standing posture for project-a is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned duplicate-live harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-duplicate-live worktree=/tmp/pools/.treehouse/project-a-bc05c6/1/project-a
+sleeper pid=854 cwd=/tmp/fm-duplicate-live/gotmp
+teardown: reaping leaked worktree process(es) for duplicate-live: 211 837
+teardown: force-killing leaked worktree process(es) for duplicate-live: 211
+🌳 Worktree returned to pool.
+teardown duplicate-live complete (window firstmate:fm-duplicate-live, worktree /tmp/pools/.treehouse/project-a-bc05c6/1/project-a)
+Backlog: duplicate-live just finished (config/backlog-backend selects manual editing). Update /tmp/home-a/data/backlog.md - move duplicate-live to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+legacy record removed
+process in legacy directory still alive
+legacy sentinel
+warning: /tmp/home-a/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: duplicate-live ships mode=local-only while the standing posture for project-a is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned duplicate-live harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-duplicate-live worktree=/tmp/pools/.treehouse/project-a-bc05c6/1/project-a
+sleeper pid=2278 cwd=/tmp/outside-symlink/gotmp
+teardown: reaping leaked worktree process(es) for duplicate-live: 1634 2260
+teardown: force-killing leaked worktree process(es) for duplicate-live: 1634
+🌳 Worktree returned to pool.
+teardown duplicate-live complete (window firstmate:fm-duplicate-live, worktree /tmp/pools/.treehouse/project-a-bc05c6/1/project-a)
+Backlog: duplicate-live just finished (config/backlog-backend selects manual editing). Update /tmp/home-a/data/backlog.md - move duplicate-live to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+recorded symlink preserved
+process in symlink target still alive
+symlink target sentinel
+OBSERVED case=legacy-and-symlink-teardown
+
+Target f04af02b, fm-control relaunch with existing, missing and symlinked recorded roots
+Driver exit status: 0
+
+warning: /tmp/home-a/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: duplicate-live ships mode=local-only while the standing posture for project-a is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned duplicate-live harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-duplicate-live worktree=/tmp/pools/.treehouse/project-a-bc05c6/1/project-a
+warning: /tmp/home-a/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: duplicate-live ships mode=local-only while the standing posture for project-a is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+relaunched duplicate-live harness=claude from=claude model=default effort=default backend=tmux endpoint=firstmate:fm-duplicate-live worktree=/tmp/pools/.treehouse/project-a-bc05c6/1/project-a
+relaunch replaced the existing legacy root
+GOTMPDIR=/tmp/fm-duplicate-live+j7CPC2/gotmp accessible=yes
+legacy sentinel
+warning: /tmp/home-a/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: duplicate-live ships mode=local-only while the standing posture for project-a is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+relaunched duplicate-live harness=claude from=claude model=default effort=default backend=tmux endpoint=firstmate:fm-duplicate-live worktree=/tmp/pools/.treehouse/project-a-bc05c6/1/project-a
+private root retained across relaunch
+retained build artifact
+OBSERVED case=legacy-and-private-relaunch
+warning: /tmp/home-a/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: duplicate-live ships mode=local-only while the standing posture for project-a is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+relaunched duplicate-live harness=claude from=claude model=default effort=default backend=tmux endpoint=firstmate:fm-duplicate-live worktree=/tmp/pools/.treehouse/project-a-bc05c6/1/project-a
+missing path replaced with a different private root
+GOTMPDIR=/tmp/fm-duplicate-live+qOrpyE/gotmp accessible=yes
+warning: /tmp/home-a/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: duplicate-live ships mode=local-only while the standing posture for project-a is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+relaunched duplicate-live harness=claude from=claude model=default effort=default backend=tmux endpoint=firstmate:fm-duplicate-live worktree=/tmp/pools/.treehouse/project-a-bc05c6/1/project-a
+symlinked path replaced with a different private root
+GOTMPDIR=/tmp/fm-duplicate-live+bYU2ww/gotmp accessible=yes
+spawn did not create gotmp in the symlink target
+teardown: reaping leaked worktree process(es) for duplicate-live: 4561 5290
+teardown: force-killing leaked worktree process(es) for duplicate-live: 4561
+🌳 Worktree returned to pool.
+teardown duplicate-live complete (window firstmate:fm-duplicate-live, worktree /tmp/pools/.treehouse/project-a-bc05c6/1/project-a)
+Backlog: duplicate-live just finished (config/backlog-backend selects manual editing). Update /tmp/home-a/data/backlog.md - move duplicate-live to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+current private root removed at final teardown
+OBSERVED case=stale-root-relaunch

@@ -1,0 +1,50 @@
+Firstmate eaef2daf. Synthetic Claude and Kimi programs only report pane environment and emulate agent readiness/exit.
+warning: /tmp/home-a/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+spawned duplicate-live harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-duplicate-live worktree=/tmp/pools/.treehouse/project-a-a35ec8/1/project-a
+sleeper pid=898 cwd=/tmp/fm-duplicate-live/gotmp
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown: reaping leaked worktree process(es) for duplicate-live: 239 884
+teardown: force-killing leaked worktree process(es) for duplicate-live: 239
+🌳 Worktree returned to pool.
+teardown duplicate-live complete (window firstmate:fm-duplicate-live, worktree /tmp/pools/.treehouse/project-a-a35ec8/1/project-a)
+Backlog: duplicate-live just finished (config/backlog-backend selects manual editing). Update /tmp/home-a/data/backlog.md - move duplicate-live to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+legacy scratch sentinel
+Task record retired, legacy cwd process 898 still alive and scratch remains.
+OBSERVED teardown-legacy
+warning: /tmp/home-a/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+spawned duplicate-live harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-duplicate-live worktree=/tmp/pools/.treehouse/project-a-a35ec8/1/project-a
+sleeper pid=2557 cwd=/tmp/foreign-scratch/gotmp
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for duplicate-live: 1886 2542
+teardown: force-killing leaked worktree process(es) for duplicate-live: 1886
+🌳 Worktree returned to pool.
+teardown duplicate-live complete (window firstmate:fm-duplicate-live, worktree /tmp/pools/.treehouse/project-a-a35ec8/1/project-a)
+Backlog: duplicate-live just finished (config/backlog-backend selects manual editing). Update /tmp/home-a/data/backlog.md - move duplicate-live to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+symlink scratch sentinel
+Task record retired, symlink cwd process 2557 still alive and scratch remains.
+OBSERVED teardown-symlink
+warning: /tmp/home-a/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+spawned duplicate-live harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-duplicate-live worktree=/tmp/pools/.treehouse/project-a-a35ec8/1/project-a
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for duplicate-live: 3448 4107
+teardown: force-killing leaked worktree process(es) for duplicate-live: 3448
+🌳 Worktree returned to pool.
+teardown duplicate-live complete (window firstmate:fm-duplicate-live, worktree /tmp/pools/.treehouse/project-a-a35ec8/1/project-a)
+Backlog: duplicate-live just finished (config/backlog-backend selects manual editing). Update /tmp/home-a/data/backlog.md - move duplicate-live to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+OBSERVED teardown-absent
+warning: /tmp/home-a/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+spawned duplicate-live harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-duplicate-live worktree=/tmp/pools/.treehouse/project-a-a35ec8/1/project-a
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for duplicate-live: 4998 5657
+teardown: force-killing leaked worktree process(es) for duplicate-live: 4998
+🌳 Worktree returned to pool.
+teardown duplicate-live complete (window firstmate:fm-duplicate-live, worktree /tmp/pools/.treehouse/project-a-a35ec8/1/project-a)
+Backlog: duplicate-live just finished (config/backlog-backend selects manual editing). Update /tmp/home-a/data/backlog.md - move duplicate-live to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+OBSERVED teardown-missing
+Disposable agents and terminal servers stopped. Driver exit=0

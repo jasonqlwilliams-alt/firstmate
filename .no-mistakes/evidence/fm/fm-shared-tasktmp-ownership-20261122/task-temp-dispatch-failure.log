@@ -1,0 +1,30 @@
+Target f04af02b, fm-spawn with a refused metadata publication
+Driver exit status: 0
+
+warning: /tmp/home-a/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: duplicate-live ships mode=local-only while the standing posture for project-a is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+error: task record for duplicate-live could not be published (task record publication failed at /tmp/home-a/state/duplicate-live.meta)
+warning: keeping Treehouse lease for aborted task duplicate-live at /tmp/pools/.treehouse/project-a-bc05c6/1/project-a; inspect the slot before running: treehouse return --force --if-lease-id 150309305598e22e2615b34ff1996b41 /tmp/pools/.treehouse/project-a-bc05c6/1/project-a
+spawn exited unsuccessfully
+error: task record for duplicate-live could not be published (task record publication failed at /tmp/home-a/state/duplicate-live.meta)
+observed allocated root before refusal: /tmp/fm-duplicate-live+zr21rL
+unhanded root removed
+no published task record
+OBSERVED case=pre-handoff-failure
+
+Target f04af02b, fm-spawn with a refused tasks-axi start after pane handoff
+Driver exit status: 0
+
+warning: /tmp/home-a/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: duplicate-live ships mode=local-only while the standing posture for project-a is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+error: task duplicate-live's backlog item could not be moved to In flight (synthetic backlog start refusal); its record was removed - close out endpoint firstmate:fm-duplicate-live and local copy /tmp/pools/.treehouse/project-a-bc05c6/1/project-a by hand, then re-run the spawn
+warning: keeping Treehouse lease for aborted task duplicate-live at /tmp/pools/.treehouse/project-a-bc05c6/1/project-a; inspect the slot before running: treehouse return --force --if-lease-id aa05260cbf6389be421208627193da2e /tmp/pools/.treehouse/project-a-bc05c6/1/project-a
+warning: leaving task duplicate-live's slot claim on /tmp/pools/.treehouse/project-a-bc05c6/1/project-a in place; the Treehouse project lock is no longer held, so a later spawn of duplicate-live may reclaim it, a later same-home spawn may recycle it once duplicate-live no longer records it, and a spawn from another home must refuse until bin/fm-teardown.sh --release-orphaned-slot-claim /tmp/pools/.treehouse/project-a-bc05c6/1/project-a drops the leftover claim
+warning: task duplicate-live's temporary directory remains at /tmp/fm-duplicate-live+4lN8s8; inspect it after closing endpoint firstmate:fm-duplicate-live
+spawn exited unsuccessfully
+error: task duplicate-live's backlog item could not be moved to In flight (synthetic backlog start refusal); its record was removed - close out endpoint firstmate:fm-duplicate-live and local copy /tmp/pools/.treehouse/project-a-bc05c6/1/project-a by hand, then re-run the spawn
+the provisional task record was rolled back
+warning names an existing, empty Go temp directory
+GOTMPDIR=/tmp/fm-duplicate-live+4lN8s8/gotmp accessible=yes
+  state: queued
+OBSERVED case=post-handoff-failure

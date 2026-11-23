@@ -1,0 +1,8 @@
+Firstmate eaef2daf. Synthetic Claude and Kimi programs only report pane environment and emulate agent readiness/exit.
+warning: /tmp/home-a/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+error: task record for duplicate-live could not be published (task record publication failed at /tmp/home-a/state/duplicate-live.meta)
+warning: keeping Treehouse lease for aborted task duplicate-live at /tmp/pools/.treehouse/project-a-a35ec8/1/project-a; inspect the slot before running: treehouse return --force --if-lease-id 518aea48495e774f3f6255660d4d87ab /tmp/pools/.treehouse/project-a-a35ec8/1/project-a
+error: task record for duplicate-live could not be published (task record publication failed at /tmp/home-a/state/duplicate-live.meta)
+Spawn exit=1. Allocated root /tmp/fm-duplicate-live+HWYns8 was removed before pane handoff; no task record was published.
+OBSERVED pre-handoff-failure
+Disposable agents and terminal servers stopped. Driver exit=0

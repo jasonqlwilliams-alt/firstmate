@@ -1,0 +1,48 @@
+Target f04af02b, fm-bootstrap with real tmux, synthetic Claude and Kimi panes
+Driver exit status: 0
+
+spawned domain harness=claude kind=secondmate mode=secondmate yolo=off window=firstmate:fm-domain worktree=/tmp/domain
+GOTMPDIR=/tmp/fm-domain+cTDlxH/gotmp accessible=yes
+confirmed missing window before bootstrap
+NEEDS_GH_AUTH
+BOOTSTRAP_INFO: secondmate domain relaunched after recorded endpoint confidently missing (backend=tmux)
+SECONDMATE_SYNC: secondmate domain: skipped: primary default-branch commit cannot be resolved
+BOOTSTRAP_INFO: secondmate domain relaunched after recorded endpoint confidently missing (backend=tmux)
+successful recovery reuses the recorded root
+GOTMPDIR=/tmp/fm-domain+cTDlxH/gotmp accessible=yes
+retained through recovery
+OBSERVED case=successful-secondmate-recovery
+SECONDMATE_LIVENESS: secondmate domain: respawn failed after recorded endpoint confidently missing: error: kimi did not show a verified ready signal before brief delivery; inspect window firstmate:fm-domain (warning: task domain's temporary directory remains at /tmp/fm-domain+cTDlxH; inspect it after closing endpoint firstmate:fm-domain)
+SECONDMATE_LIVENESS: secondmate domain: respawn failed after recorded endpoint confidently missing: error: kimi did not show a verified ready signal before brief delivery; inspect window firstmate:fm-domain (warning: task domain's temporary directory remains at /tmp/fm-domain+cTDlxH; inspect it after closing endpoint firstmate:fm-domain)
+failed recovery rolled back the record
+retained through recovery
+OBSERVED case=failed-secondmate-recovery
+
+Target f04af02b, fm-remote-secondmate-control with a real local Herdr server
+Driver exit status: 0
+
+{"client":{"version":"0.9.5","channel":"stable","protocol":22,"endpoint_protocol_generation":1,"endpoint_capabilities":["surface_interest","presentation_effects_fence","health_check"],"remote_host_bridge":true,"remote_bridge_idle_timeout":true,"binary":"herdr","session":"fm-remote"},"server":{"status":"running","running":true,"version":"0.9.5","protocol":22,"capabilities":{"live_handoff":true,"detached_server_daemon":false,"endpoint_protocol_generation":1,"surface_interest":true,"health_check":true,"ssh_agent_registration":true},"compatible":true,"endpoint_compatible":true,"socket":"/tmp/login/.config/herdr/sessions/fm-remote/herdr.sock","session":"fm-remote","restart_needed":false,"server_binary_stale":false},"update":{"restart_needed":false,"server_binary_stale":false}}
+schema=fm-remote-secondmate-control.v1
+backend=herdr
+target=fm-remote:w1:p2
+herdr_session=fm-remote
+harness=claude
+{"id":"cli:pane:close","result":{"type":"ok"}}
+host-local remote endpoint state is missing
+schema=fm-remote-secondmate-control.v1
+backend=herdr
+target=fm-remote:w2:p2
+herdr_session=fm-remote
+harness=claude
+remote recovery reused the host-local private root
+remote scratch sentinel
+{"id":"cli:pane:close","result":{"type":"ok"}}
+host-local remote endpoint state is missing
+error: kimi did not show a verified ready signal before brief delivery; inspect window fm-remote:w3:p2
+warning: task domain's temporary directory remains at /tmp/fm-domain+TW0JZS; inspect it after closing endpoint fm-remote:w3:p2
+error: remote host-local secondmate launch failed
+failed remote Kimi launch exits unsuccessfully
+warning: task domain's temporary directory remains at /tmp/fm-domain+TW0JZS; inspect it after closing endpoint fm-remote:w3:p2
+failed remote launch rolled back its host-local endpoint record
+remote scratch sentinel
+OBSERVED case=remote-host-recovery

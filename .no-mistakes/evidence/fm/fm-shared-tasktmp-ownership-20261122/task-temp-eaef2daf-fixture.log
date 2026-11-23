@@ -1,0 +1,5 @@
+Firstmate eaef2daf. Synthetic Claude and Kimi programs only report pane environment and emulate agent readiness/exit.
+Fixture A retired /tmp/fm-same-id+EdnVlK and preserved /tmp/fm-same-id+CsSNW6 and scratch /tmp/fm-bootstrap-scratch.NGj4UI / /tmp/fm-bootstrap-scratch.uOB8s7.
+Fixture B retired /tmp/fm-same-id+CsSNW6 and both scratch roots remained.
+OBSERVED fixture-cleanup
+Disposable agents and terminal servers stopped. Driver exit=0

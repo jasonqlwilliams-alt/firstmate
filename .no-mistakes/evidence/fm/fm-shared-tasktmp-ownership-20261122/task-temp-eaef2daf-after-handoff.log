@@ -1,0 +1,34 @@
+Firstmate eaef2daf. Synthetic Claude and Kimi programs only report pane environment and emulate agent readiness/exit.
+ok: added duplicate-live (ship) -> Queued
+task:
+  id: duplicate-live
+  title: Synthetic dispatch item
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+  hold_kind: "-"
+  hold_until: "-"
+  kind: ship
+  repo: "-"
+  priority: "-"
+  created: 2026-11-22
+  closed: "-"
+  deps: none
+  links: none
+  body: ""
+help[2]:
+  - Run `tasks-axi start duplicate-live --file=/tmp/home-a/data/backlog.md` to move it to in flight
+  - Run `tasks-axi block duplicate-live --by <other> --file=/tmp/home-a/data/backlog.md` to record a dependency
+warning: /tmp/home-a/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+error: task duplicate-live's backlog item could not be moved to In flight (Synthetic backlog start refusal); its record was removed - close out endpoint firstmate:fm-duplicate-live and local copy /tmp/pools/.treehouse/project-a-a35ec8/1/project-a by hand, then re-run the spawn
+warning: keeping Treehouse lease for aborted task duplicate-live at /tmp/pools/.treehouse/project-a-a35ec8/1/project-a; inspect the slot before running: treehouse return --force --if-lease-id 6770632c0063906134f84448e47c5ed3 /tmp/pools/.treehouse/project-a-a35ec8/1/project-a
+warning: leaving task duplicate-live's slot claim on /tmp/pools/.treehouse/project-a-a35ec8/1/project-a in place; the Treehouse project lock is no longer held, so a later spawn of duplicate-live may reclaim it, a later same-home spawn may recycle it once duplicate-live no longer records it, and a spawn from another home must refuse until /tmp/code/bin/fm-teardown.sh --release-orphaned-slot-claim /tmp/pools/.treehouse/project-a-a35ec8/1/project-a drops the leftover claim
+warning: task duplicate-live's temporary directory remains at /tmp/fm-duplicate-live+NvY47w; inspect it after closing endpoint firstmate:fm-duplicate-live
+error: task duplicate-live's backlog item could not be moved to In flight (Synthetic backlog start refusal); its record was removed - close out endpoint firstmate:fm-duplicate-live and local copy /tmp/pools/.treehouse/project-a-a35ec8/1/project-a by hand, then re-run the spawn
+GOTMPDIR=/tmp/fm-duplicate-live+NvY47w/gotmp accessible=yes
+  state: queued
+Spawn exit=5. Rolled back the record and retained the live pane's empty Go scratch directory at the exact path in the warning.
+OBSERVED post-handoff-failure
+Disposable agents and terminal servers stopped. Driver exit=0

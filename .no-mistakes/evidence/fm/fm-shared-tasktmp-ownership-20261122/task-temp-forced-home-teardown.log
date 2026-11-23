@@ -1,0 +1,16 @@
+Target f04af02b, fm-teardown domain --force with real tmux and Treehouse
+Driver exit status: 1
+
+spawned domain harness=claude kind=secondmate mode=secondmate yolo=off window=firstmate:fm-domain worktree=/tmp/domain
+GOTMPDIR=/tmp/fm-domain+Dacwp6/gotmp accessible=yes
+warning: /tmp/domain/data/duplicate-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: duplicate-live ships mode=local-only while the standing posture for alpha is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned duplicate-live harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-duplicate-live worktree=/tmp/pools/.treehouse/alpha-8fb927/1/alpha
+GOTMPDIR=/tmp/fm-duplicate-live+h5dtut/gotmp accessible=yes
+child metadata records /tmp/fm-duplicate-live+h5dtut and its artifact exists
+🌳 Worktree returned to pool.
+teardown domain complete (window firstmate:fm-domain, worktree /tmp/domain)
+secondmate home and child records retired
+parent temp directory retired
+FAIL: child temp root remains after forced home teardown: drwx------ 3 root root 4096 Nov 22 19:11 /tmp/fm-duplicate-live+h5dtut
+synthetic child build artifact

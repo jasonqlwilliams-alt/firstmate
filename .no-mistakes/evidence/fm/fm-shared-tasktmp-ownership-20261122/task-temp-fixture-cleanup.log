@@ -1,0 +1,7 @@
+Target f04af02b, overlapping fixture runs using real mktemp in one isolated /tmp
+Driver exit status: 0
+
+fixture A registered temporary task root /tmp/fm-same-id+cswo5c
+fixture B registered temporary task root /tmp/fm-same-id+HQxRpZ
+fixture A exit removed its own root and preserved fixture B root and bootstrap scratch
+fixture B exit removed its own root and preserved bootstrap scratch

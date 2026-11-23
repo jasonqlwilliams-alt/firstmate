@@ -1,0 +1,32 @@
+Firstmate eaef2daf. Synthetic Claude and Kimi programs only report pane environment and emulate agent readiness/exit.
+{"client":{"version":"0.9.5","channel":"stable","protocol":22,"endpoint_protocol_generation":1,"endpoint_capabilities":["surface_interest","presentation_effects_fence","health_check"],"remote_host_bridge":true,"remote_bridge_idle_timeout":true,"binary":"~/.local/bin/herdr","session":"fm-remote"},"server":{"status":"running","running":true,"version":"0.9.5","protocol":22,"capabilities":{"live_handoff":true,"detached_server_daemon":false,"endpoint_protocol_generation":1,"surface_interest":true,"health_check":true,"ssh_agent_registration":true},"compatible":true,"endpoint_compatible":true,"socket":"/tmp/login/.config/herdr/sessions/fm-remote/herdr.sock","session":"fm-remote","restart_needed":false,"server_binary_stale":false},"update":{"restart_needed":false,"server_binary_stale":false}}
+herdr server running; you can use any herdr CLI command in another terminal.
+api socket: /tmp/login/.config/herdr/sessions/fm-remote/herdr.sock
+client socket: /tmp/login/.config/herdr/sessions/fm-remote/herdr-client.sock
+logs: /tmp/login/.config/herdr/sessions/fm-remote/herdr-server.log
+did you mean to open the Herdr TUI? run `herdr`; you do not need `herdr server`.
+schema=fm-remote-secondmate-control.v1
+backend=herdr
+target=fm-remote:w1:p2
+herdr_session=fm-remote
+harness=claude
+{"id":"cli:pane:close","result":{"type":"ok"}}
+Host-local endpoint state: missing
+schema=fm-remote-secondmate-control.v1
+backend=herdr
+target=fm-remote:w2:p2
+herdr_session=fm-remote
+harness=claude
+New endpoint reused the host-local scratch root /tmp/fm-domain+dlFVWk.
+Host-local scratch sentinel
+{"id":"cli:pane:close","result":{"type":"ok"}}
+Host-local endpoint state: missing
+error: kimi did not show a verified ready signal before brief delivery; inspect window fm-remote:w3:p2
+warning: task domain's temporary directory remains at /tmp/fm-domain+dlFVWk; inspect it after closing endpoint fm-remote:w3:p2
+error: remote host-local secondmate launch failed
+error: kimi did not show a verified ready signal before brief delivery; inspect window fm-remote:w3:p2
+warning: task domain's temporary directory remains at /tmp/fm-domain+dlFVWk; inspect it after closing endpoint fm-remote:w3:p2
+Host-local scratch sentinel
+Failed host-local recovery exit=1. Provisional endpoint record removed and exact scratch root reported.
+OBSERVED remote-host-recovery
+Disposable agents and terminal servers stopped. Driver exit=0

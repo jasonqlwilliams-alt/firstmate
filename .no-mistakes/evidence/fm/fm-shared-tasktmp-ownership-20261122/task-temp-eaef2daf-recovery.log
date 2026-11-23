@@ -1,0 +1,23 @@
+Firstmate eaef2daf. Synthetic Claude and Kimi programs only report pane environment and emulate agent readiness/exit.
+spawned domain harness=claude kind=secondmate mode=secondmate yolo=off window=firstmate:fm-domain worktree=/tmp/domain
+GOTMPDIR=/tmp/fm-domain+9rypqr/gotmp accessible=yes
+Closed the recorded pane. Inventory before bootstrap:
+main
+NEEDS_GH_AUTH
+BOOTSTRAP_INFO: secondmate domain relaunched after recorded endpoint confidently missing (backend=tmux)
+fatal: not a git repository (or any of the parent directories): .git
+fatal: not a git repository (or any of the parent directories): .git
+SECONDMATE_SYNC: secondmate domain: skipped: primary default-branch commit cannot be resolved
+BOOTSTRAP_INFO: secondmate domain relaunched after recorded endpoint confidently missing (backend=tmux)
+GOTMPDIR=/tmp/fm-domain+9rypqr/gotmp accessible=yes
+Secondmate scratch survives recovery
+OBSERVED successful-secondmate-recovery
+NEEDS_GH_AUTH
+SECONDMATE_LIVENESS: secondmate domain: respawn failed after recorded endpoint confidently missing: error: kimi did not show a verified ready signal before brief delivery; inspect window firstmate:fm-domain (warning: task domain's temporary directory remains at /tmp/fm-domain+9rypqr; inspect it after closing endpoint firstmate:fm-domain)
+fatal: not a git repository (or any of the parent directories): .git
+fatal: not a git repository (or any of the parent directories): .git
+SECONDMATE_LIVENESS: secondmate domain: respawn failed after recorded endpoint confidently missing: error: kimi did not show a verified ready signal before brief delivery; inspect window firstmate:fm-domain (warning: task domain's temporary directory remains at /tmp/fm-domain+9rypqr; inspect it after closing endpoint firstmate:fm-domain)
+Secondmate scratch survives recovery
+Failed recovery removed the provisional record and exposed the exact still-existing root.
+OBSERVED failed-secondmate-recovery
+Disposable agents and terminal servers stopped. Driver exit=0
