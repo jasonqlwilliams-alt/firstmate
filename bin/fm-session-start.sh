@@ -46,9 +46,9 @@
 #   6. fleet digest   - a compact data/backlog.md identity/metadata listing,
 #                       every state/*.meta, a bounded state/*.status tail,
 #                       the away posture (state/.afk-contract and the legacy
-#                       state/.afk daemon flag), and a cheap per-task
-#                       endpoint-liveness read (a current park mark prints as
-#                       parked, copy retained for missing or unreadable endpoints):
+#                       state/.afk daemon flag), and a per-task endpoint status.
+#                       See docs/watcher-continuity.md#parking-a-task-with-its-copy-retained
+#                       for the parked status.
 #                       read-only, always runs.
 #   7. network checks - the result of the deferred network stage started back at
 #                       step 1, harvested WITHOUT waiting for it.

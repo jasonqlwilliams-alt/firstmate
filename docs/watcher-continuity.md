@@ -74,13 +74,16 @@ The [watcher triage regressions](../tests/fm-watch-triage.test.sh) exercise both
 
 After deliberately closing a local ordinary task's worker window and retaining its isolated copy, use the `mark` action in [`fm-park-retained.sh`](../bin/fm-park-retained.sh) for that task.
 Marking requires the backend to confirm that the recorded endpoint is missing, and both park actions leave the copy and its work intact.
-The session-start fleet digest shows a task as parked with its copy retained when the mark binds the current incarnation and the endpoint is missing or unreadable.
+With a current mark, the session-start fleet digest shows `endpoint: parked, copy retained` when the backend classifies the recorded endpoint as missing or unreadable.
+Tasks without a current mark use the regular endpoint check.
 Secondmates follow the reporting rule above.
 A loss wake queued before marking remains pending until [normal wake acknowledgement](#per-actor-acknowledgement).
 When resuming, use `clear` to remove the mark, including after the worker is running again.
 Clearing restores reporting eligibility and preserves the existing loss deduplication, so an already reported loss stays deduplicated for that incarnation.
 A park mark applies only to the worker incarnation that was marked.
 A relaunched worker or another task that reuses the same target remains eligible for loss reporting.
+
+The [session-start regressions](../tests/fm-session-start.test.sh) cover current marks on tmux and Herdr, along with stale and absent marks.
 
 ## Foreground checkpoint boundary
 
