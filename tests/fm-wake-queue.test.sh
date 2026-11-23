@@ -233,7 +233,9 @@ test_drain_dedupes_obvious_duplicates() {
 # when work is in flight with no live watcher, and stay silent right after a
 # normal fire from a live watcher with a fresh beacon, so it never false-alarms.
 test_secondmate_foreign_queue_stall_tracks_progress_and_alerts_once() {
-  local dir state sub fakebin out row_before row_after stall_count real_date
+  local dir state sub fakebin row_before row_after stall_count real_date
+  # The watcher needs real startup and I/O time independently of the fake stall interval.
+  local checkpoint_seconds=4
   dir=$(make_case secondmate-foreign-stall)
   state="$dir/state"
   sub="$dir/secondmate"
@@ -254,29 +256,40 @@ fi
 SH
   chmod +x "$fakebin/date"
 
+  check_foreign_queue_checkpoint() {
+    local phase=$1 expected_progress=$2 expected_alert=${3:-}
+    local out="$dir/watch-$phase.out" err="$dir/watch-$phase.err"
+    local rc=0 actual_progress failure=
+    PATH="$fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" \
+      FM_STATE_OVERRIDE="$state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' \
+      FM_SECONDMATE_WAKE_STALL_SECS=1 FM_POLL=1 FM_SIGNAL_GRACE=0 \
+      FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+      "$ROOT/bin/fm-watch-checkpoint.sh" --seconds "$checkpoint_seconds" > "$out" 2> "$err" || rc=$?
+    actual_progress=$(cat "$state/.secondmate-wake-progress-mate" 2>/dev/null) || actual_progress='<missing>'
+    if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
+      failure="checkpoint failed"
+    elif [ "$actual_progress" != "$expected_progress" ]; then
+      failure="expected observation marker $expected_progress"
+    elif [ -z "$expected_alert" ]; then
+      [ ! -s "$state/.wake-queue" ] || failure="quiet checkpoint produced a parent wake"
+    elif [ "$rc" -ne 0 ] || ! grep -Fxq "$expected_alert" "$out"; then
+      failure="expected alert $expected_alert"
+    fi
+    [ -z "$failure" ] || fail "$(printf '%s: %s (exit %s)\nstdout: %s\nstderr: %s\nactual marker: %s' \
+      "$phase" "$failure" "$rc" "$(cat "$out")" "$(cat "$err")" "$actual_progress")"
+  }
+
   # An already-old row starts an observation interval; its creation time alone
   # cannot produce an alert.
   printf '1000\n' > "$dir/now"
   printf '100\t7\tcheck\trouted\tcheck: routed row\n' > "$sub/state/.wake-queue"
-  PATH="$fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" \
-    FM_STATE_OVERRIDE="$state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' \
-    FM_SECONDMATE_WAKE_STALL_SECS=1 FM_POLL=1 FM_SIGNAL_GRACE=0 \
-    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
-    "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 1 > "$dir/watch-first.out" 2> "$dir/watch-first.err" || true
-  [ ! -s "$state/.wake-queue" ] \
-    || fail "the first observation of an old foreign row produced an age-only alert"
+  check_foreign_queue_checkpoint first $'1000\t100-7'
 
   # The oldest sequence advances after more than the threshold. This is healthy
   # drain progress even though the replacement row is itself very old.
   printf '1002\n' > "$dir/now"
   printf '100\t8\tcheck\thealthy\tcheck: healthy progress\n' > "$sub/state/.wake-queue"
-  PATH="$fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" \
-    FM_STATE_OVERRIDE="$state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' \
-    FM_SECONDMATE_WAKE_STALL_SECS=1 FM_POLL=1 FM_SIGNAL_GRACE=0 \
-    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
-    "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 1 > "$dir/watch-progress.out" 2> "$dir/watch-progress.err" || true
-  [ ! -s "$state/.wake-queue" ] \
-    || fail "an advancing foreign queue produced a stall alert because its oldest row was old"
+  check_foreign_queue_checkpoint progress $'1002\t100-8'
 
   # With no further sequence progress, the same queue must still expose the real
   # failure after the configured interval.
@@ -284,14 +297,8 @@ SH
   row_before="$dir/foreign-before"
   row_after="$dir/foreign-after"
   cp "$sub/state/.wake-queue" "$row_before"
-  out="$dir/watch-stalled.out"
-  PATH="$fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" \
-    FM_STATE_OVERRIDE="$state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' \
-    FM_SECONDMATE_WAKE_STALL_SECS=1 FM_POLL=1 FM_SIGNAL_GRACE=0 \
-    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
-    "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 1 > "$out" 2> "$dir/watch-stalled.err" || true
-  grep -F 'check: secondmate wake-loop stalled: mate=mate row=8 idle=2s' "$out" >/dev/null \
-    || fail "a foreign queue with no progress did not alert: $(cat "$out")"
+  check_foreign_queue_checkpoint stalled $'1002\t100-8' \
+    'check: secondmate wake-loop stalled: mate=mate row=8 idle=2s'
   stall_count=$(grep -c 'secondmate-wake-loop-mate-' "$state/.wake-queue" || true)
   [ "$stall_count" -eq 1 ] || fail "the stalled episode did not publish exactly one parent notification"
   cmp -s "$row_before" "$sub/state/.wake-queue" \
@@ -305,26 +312,15 @@ SH
   # and cannot produce an immediate notification cascade.
   printf '1010\n' > "$dir/now"
   printf '100\t9\tcheck\tnext\tcheck: next row\n' > "$sub/state/.wake-queue"
-  PATH="$fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" \
-    FM_STATE_OVERRIDE="$state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' \
-    FM_SECONDMATE_WAKE_STALL_SECS=1 FM_POLL=1 FM_SIGNAL_GRACE=0 \
-    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
-    "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 1 > "$dir/watch-next.out" 2> "$dir/watch-next.err" || true
-  [ ! -s "$state/.wake-queue" ] \
-    || fail "a newly-oldest row cascaded an immediate second alert after progress"
+  check_foreign_queue_checkpoint next $'1010\t100-9'
   cp "$sub/state/.wake-queue" "$row_after"
   grep -F $'\t9\t' "$row_after" >/dev/null || fail "foreign queue progress fixture changed during observation"
 
   # If that new drain position then genuinely stops advancing, it is a new
   # no-progress episode and must remain visible rather than being muted forever.
   printf '1012\n' > "$dir/now"
-  PATH="$fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" \
-    FM_STATE_OVERRIDE="$state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' \
-    FM_SECONDMATE_WAKE_STALL_SECS=1 FM_POLL=1 FM_SIGNAL_GRACE=0 \
-    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
-    "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 1 > "$dir/watch-refrozen.out" 2> "$dir/watch-refrozen.err" || true
-  grep -F 'check: secondmate wake-loop stalled: mate=mate row=9 idle=2s' "$dir/watch-refrozen.out" >/dev/null \
-    || fail "a genuine later no-progress episode was hidden after earlier progress"
+  check_foreign_queue_checkpoint refrozen $'1010\t100-9' \
+    'check: secondmate wake-loop stalled: mate=mate row=9 idle=2s'
   stall_count=$(grep -c 'secondmate-wake-loop-mate-' "$state/.wake-queue" || true)
   [ "$stall_count" -eq 1 ] || fail "the later no-progress episode did not publish exactly one notification"
   pass "foreign secondmate queue alerts once per no-progress episode without age-only or cascade noise"
