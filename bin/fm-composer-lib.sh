@@ -1655,8 +1655,7 @@ _fm_composer_agy_frame() {  # <plain-screen> <cursor-row-or-empty>
   open=$FM_COMPOSER_SCAN_PI_OPEN
   close=$FM_COMPOSER_SCAN_PI_CLOSE
   [ "$FM_COMPOSER_SCAN_PI_PAIR_VALID" = 1 ] \
-    && [ $((close - open)) -eq 2 ] \
-    && [ "$FM_COMPOSER_SCAN_PI_LAST_SEPARATOR" = "$close" ] || return 1
+    && [ $((close - open)) -eq 2 ] || return 1
   [ -z "$cy" ] || [ "$cy" = $((open + 1)) ] || return 1
   while IFS= read -r line; do
     fm_composer_normalize_trim_var line
