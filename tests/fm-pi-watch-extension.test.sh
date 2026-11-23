@@ -3138,6 +3138,7 @@ printf 'arm\n' >> "${FM_ARM_LOG:?}"
 printf 'watcher: healthy pid=1 (beacon 0s)\n'
 SH
   chmod +x "$repo/bin/fm-watch-arm.sh"
+  # shellcheck disable=SC2016 # The child shell expands $? and $rc.
   out=$(PLUGIN="$plugin" WORKTREE="$repo" FM_HOME="$home" FM_ARM_LOG="$log" LOCK_SCRIPT="$ROOT/bin/fm-lock.sh" \
     "$harness" -c 'node; rc=$?; exit "$rc"' 2>&1 <<'EOF'
 import { spawnSync } from "node:child_process";
