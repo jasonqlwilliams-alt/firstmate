@@ -356,7 +356,8 @@ A claim naming a different task releases nothing - teardown warns, names the cla
 Allocation and return serialize on one project lock per machine-local Firstmate tree: every home reachable through local parent links shares that lock, and a home seeded from another machine anchors its own, because a lock taken on this filesystem is neither held nor observable across that boundary.
 A Treehouse slot from a sibling clone remains recognizable when both clones resolve to the same repository identity; `bin/fm-wake-lib.sh` owns the pool membership and slot claim checks.
 Before the worktree is returned, teardown concludes the task's own no-mistakes run when it is parked at a gate, including a run whose head the task copy cannot resolve - the shared runs-ledger continuation proof is the only recognition for that case, so cleanup never orphans a parked run the pipeline advanced past the submitted head.
-[`bin/fm-teardown.sh`](../bin/fm-teardown.sh)'s header owns the landed-work proofs, slot-ownership proof, stale-record retire flag, orphaned-claim release flag, PR-discovery fallback, pre-teardown run conclusion, and stale-lock recovery procedure.
+[`bin/fm-teardown.sh`](../bin/fm-teardown.sh)'s header owns the landed-work proofs, slot-ownership proof, stale-record retire flag, orphaned-claim release flag, PR-discovery fallback, pre-teardown run conclusion, stale-lock recovery procedure, and limits of caller protection at the Treehouse boundary.
+[`tests/fm-teardown.test.sh`](../tests/fm-teardown.test.sh) covers caller refusals through initial returns, lock retries, and descendant cleanup.
 [`tests/fm-teardown-endpoint-safety.test.sh`](../tests/fm-teardown-endpoint-safety.test.sh) and [`tests/fm-secondmate-safety.test.sh`](../tests/fm-secondmate-safety.test.sh) pin the slot-collision boundary, and [`tests/fm-spawn-pool-base-freshen.test.sh`](../tests/fm-spawn-pool-base-freshen.test.sh) pins spawn occupancy.
 
 ## Optional Relay
