@@ -6,8 +6,8 @@
 # as a child of a fake harness (a bash symlink named "claude") whose pid is
 # written into the fixture home's state/.lock for ordinary owned-lock cases.
 # Stale-owner cases instead leave a dead recorded pid for the hook to reclaim
-# through the real fm-lock.sh path. The arm wrapper is a per-test fixture, so no
-# real watcher, model, or fleet state is touched.
+# through the real fm-lock.sh path. Most cases stub the arm wrapper. Integration
+# cases run the real watcher and arm entirely inside their fixture homes.
 # shellcheck disable=SC2016 # single quotes are deliberate: $FM_HOME expands inside the fake harness child, and grep needles are literal strings
 set -u
 
@@ -1333,6 +1333,96 @@ test_quiet_lease_preserves_live_lock() {
   pass "auto-arm: lease retires only dead watcher locks and preserves live or identity-mismatched live holders"
 }
 
+test_slow_check_sweep_liveness() (
+  local mode=$1 dir state id i hook_rc
+  local arm_pid='' watcher_pid='' stopped=0 RUN_AUTOARM_BG_PID=''
+  dir=$(make_primary_dir "$TMP_ROOT/sweep-$mode")
+  state="$dir/state"
+  cp -R "$ROOT/bin/." "$dir/bin/" || fail "could not install watcher scripts"
+  cp "$ROOT/.tasks.toml" "$dir/.tasks.toml" || fail "could not install backlog configuration"
+  export FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state"
+  export FM_GUARD_GRACE=8 FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=35
+  export FM_POLL=1 FM_HEARTBEAT=999999 FM_ARM_CONFIRM_TIMEOUT=4
+  export FM_CLAUDE_AUTOARM_ATTEMPTS=1 FM_CLAUDE_AUTOARM_LEASE_SECONDS=24
+
+  cleanup_sweep() {
+    if [ "$stopped" -eq 1 ]; then kill -CONT "$watcher_pid" 2>/dev/null || true; fi
+    touch "$state/finish"
+    if [ -n "$arm_pid" ]; then wait "$arm_pid" 2>/dev/null || true; fi
+    if [ -n "$RUN_AUTOARM_BG_PID" ]; then wait "$RUN_AUTOARM_BG_PID" 2>/dev/null || true; fi
+  }
+  trap cleanup_sweep EXIT
+  trap 'exit 1' HUP INT TERM
+
+  # Each silent check is shorter than the grace window, but together they
+  # carry the cycle past it. Hold the final actionable check for the probe.
+  printf 'sleep 5\n' > "$state/a.check.sh"
+  cp "$state/a.check.sh" "$state/b.check.sh" || fail "could not install silent check"
+  cat > "$state/c.check.sh" <<'SH'
+touch "$FM_HOME/state/ready"
+until [ -f "$FM_HOME/state/finish" ]; do sleep 0.1; done
+echo completed-slow-sweep
+SH
+  for id in a b c; do
+    chmod 700 "$state/$id.check.sh"
+    "$dir/bin/fm-check-register.sh" "$id" >/dev/null || fail "could not register $id"
+  done
+  "$dir/bin/fm-watch-arm.sh" > "$dir/outer.out" 2>&1 &
+  arm_pid=$!
+  for ((i=0; i<300; i++)); do
+    [ ! -e "$state/ready" ] || break
+    kill -0 "$arm_pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  [ -f "$state/ready" ] || fail "sweep did not reach final check: $(cat "$dir/outer.out")"
+  watcher_pid=$(cat "$state/.watch.lock/pid") || fail "original watcher did not hold the lock"
+  assert_grep "watcher: started pid=$watcher_pid " "$dir/outer.out" "the original arm must own the watcher"
+  if [ "$mode" = stalled ]; then
+    kill -STOP "$watcher_pid" || fail "could not stop the watcher during the final check"
+    stopped=1
+    sleep "$((FM_GUARD_GRACE + 1))"
+  fi
+  "$dir/bin/fm-guard.sh" --read-only > "$dir/guard.out" 2>&1
+  run_autoarm_bg "$dir" "$dir/hook.out"
+  if [ "$mode" = healthy ]; then
+    assert_not_contains "$(cat "$dir/guard.out")" 'WATCHER DOWN' "a progressing sweep must stay fresh"
+    for ((i=0; i<120; i++)); do
+      grep -qsF "watcher: attached pid=$watcher_pid " "$state"/.claude-autoarm-output.* && break
+      kill -0 "$RUN_AUTOARM_BG_PID" 2>/dev/null || break
+      sleep 0.1
+    done
+    grep -qsF "watcher: attached pid=$watcher_pid " "$state"/.claude-autoarm-output.* \
+      || fail "Stop hook did not attach to the original watcher: $(cat "$dir/hook.out")"
+  else
+    assert_grep 'WATCHER DOWN' "$dir/guard.out" "a stopped watcher must become stale"
+    wait "$RUN_AUTOARM_BG_PID"
+    hook_rc=$?
+    RUN_AUTOARM_BG_PID=
+    expect_code 2 "$hook_rc" "the Stop hook must report the stalled watcher"
+    assert_grep 'auto-arm FAILED' "$dir/hook.out" "the stalled watcher must trigger the ordinary failure"
+    assert_grep 'heartbeat is stale' "$dir/hook.out" "the live lock must fail on beacon age"
+    kill -CONT "$watcher_pid" || fail "stalled watcher disappeared while it still held the lock"
+    stopped=0
+  fi
+  [ "$(cat "$state/.watch.lock/pid")" = "$watcher_pid" ] || fail "Stop hook replaced the original watcher"
+  touch "$state/finish"
+  wait "$arm_pid" || fail "original watcher cycle did not succeed: $(cat "$dir/outer.out")"
+  arm_pid=
+  assert_grep 'completed-slow-sweep' "$dir/outer.out" "original watcher must deliver the final check"
+  [ "$(wc -l < "$state/.wake-queue" | tr -d ' ')" = 1 ] || fail "final check must queue exactly one wake"
+  if [ "$mode" = healthy ]; then
+    wait "$RUN_AUTOARM_BG_PID"
+    hook_rc=$?
+    RUN_AUTOARM_BG_PID=
+    expect_code 2 "$hook_rc" "the attached Stop hook must request a handling turn"
+    assert_grep 'completed-slow-sweep' "$dir/hook.out" "Stop hook must relay the original check output"
+    assert_not_contains "$(cat "$dir/hook.out")" 'auto-arm FAILED' "healthy sweep must never report arm failure"
+  fi
+  pass "auto-arm: $mode watcher during a long check sweep preserves singleton and wake delivery"
+)
+
+test_slow_check_sweep_liveness healthy || exit $?
+test_slow_check_sweep_liveness stalled || exit $?
 test_inert_in_child_worktree
 test_inert_without_session_lock
 test_reclaims_stale_session_lock_before_arming

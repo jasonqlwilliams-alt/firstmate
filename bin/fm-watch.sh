@@ -203,12 +203,8 @@ fi
 # turn-ended signature, annotation staleness checks, and guarded bookkeeping writes.
 
 POLL=${FM_POLL:-15}                   # seconds between cycles
-# The liveness beacon is touched once per cycle, immediately before the
-# terminal wait below (event_wait_or_sleep) as well as at the top of the next
-# one, so a healthy cycle's beacon can legitimately age up to POLL seconds
-# between touches. fm_poll_derived_grace (bin/fm-wake-lib.sh, already sourced
-# transitively above) is the single owner of the max(300, poll+60)
-# derivation - see docs/turnend-guard.md "Guard grace and the poll cadence".
+# See docs/watcher-continuity.md for beacon publication and
+# docs/turnend-guard.md "Guard grace and the poll cadence" for the shared grace.
 # This recomputes the library default above now that the real configured
 # POLL is known.
 WATCHER_STALE_GRACE=${FM_WATCHER_STALE_GRACE:-${FM_GUARD_GRACE:-$(fm_poll_derived_grace "$POLL")}}
@@ -1992,24 +1988,15 @@ resurface_after_downtime() {
   wake "check: rearm-resurface"
 }
 
-while :; do
-  # Self-eviction: if the singleton lock no longer names this process, a second
-  # watcher has taken over (e.g. a transient duplicate from a racy arm). Stand
-  # down so the rightful singleton continues alone. The EXIT trap's release
-  # no-ops because the lock pid is not ours, so the survivor's lock is untouched.
-  # This makes any duplicate self-resolve within one poll instead of persisting
-  # and doubling every wake.
-  if [ "$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)" != "$WATCHER_PID" ]; then
-    exit 0
-  fi
+watcher_publish_beat() {
+  local beat_tmp
+  # A displaced watcher must stand down without refreshing the successor's
+  # beacon. The EXIT trap also leaves the successor's lock alone.
+  [ "$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)" = "$WATCHER_PID" ] || return 1
 
-  # Liveness beacon for fm-guard.sh: mtime freshness means a watcher is alive.
-  # The one-line content is informational for external observers; every reader
-  # judges liveness from mtime only. Supervision scripts warn when this goes
-  # stale with tasks in flight. The line is renamed into place so a size-based
-  # observer never sees the truncate-then-write gap; if the rename fails (a
-  # Windows handle can hold the target), touch keeps mtime fresh without ever
-  # emptying the existing content.
+  # Rename the informational line into place so a size-based observer never
+  # sees an empty file. If a Windows handle prevents replacement, touch
+  # preserves the existing content while refreshing the authoritative mtime.
   beat_tmp=$(mktemp "$STATE/.last-watcher-beat.XXXXXX")
   if [ -z "$beat_tmp" ] \
     || ! printf '%s pid=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$WATCHER_PID" > "$beat_tmp" \
@@ -2017,6 +2004,11 @@ while :; do
     [ -z "$beat_tmp" ] || rm -f -- "$beat_tmp"
     touch "$STATE/.last-watcher-beat"
   fi
+  return 0
+}
+
+while :; do
+  watcher_publish_beat || exit 0
 
   if [ "$(age_of "$STATE/home-summary.json")" -ge "$HOME_SUMMARY_INTERVAL" ]; then
     home_summary_refresh_detached
@@ -2125,6 +2117,9 @@ while :; do
         fi
         out=$FM_CHECK_RESULT
       fi
+      # Each check has its own timeout, but a serial sweep can exceed the grace
+      # window. Publish progress only after the watcher has reaped the check.
+      watcher_publish_beat || exit 0
       if [ "$is_pr_poll" -eq 1 ] && [ "$out" = closed-unmerged ]; then
         closure_rc=0
         fm_pr_poll_record_closed "$STATE" "$id" || closure_rc=$?

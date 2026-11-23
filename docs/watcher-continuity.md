@@ -162,7 +162,9 @@ The file is size-capped through `FM_WATCH_CYCLE_LOG_MAX_BYTES` and `FM_WATCH_CYC
 `state/.watch-triage.log` remains only the watcher's bounded absorbed-wake debug log and carries no lifecycle semantics.
 
 The default 300-second grace is unchanged.
-Only the watcher process updates `state/.last-watcher-beat`; mtime freshness is authoritative and the one-line content is informational, and no helper process can make a wedged watcher appear healthy.
+The watcher process updates `state/.last-watcher-beat` at the start of each cycle and after each bounded check it reaps during a serial sweep.
+The singleton owner publishes each update, so a stalled watcher or one waiting indefinitely for a check still ages out.
+The mtime is authoritative for freshness, and the one-line content is informational.
 
 ## Regression coverage
 
@@ -173,6 +175,7 @@ The same suite covers ordinary same-process session replacement for `/new`, `/re
 `tests/fm-watcher-lock.test.sh` covers verified-successor attach, recovery publication before stale-lock removal, the typed self-eviction failure, bounded and successor-linked lifecycle rows, a poll's non-empty beacon that mtime-based readers judge by freshness alone and a size-based observer never reads as empty, and a SIGSTOP counterfactual that distinguishes a live PID from a stale beacon before classifying termination.
 `tests/fm-subagent-pretool-check.test.sh` proves Claude retains only the non-status Bash seatbelts.
 `tests/fm-claude-stop-autoarm.test.sh` covers the auto-arm's scope, stale and live session owners, unchanged AFK and need boundaries, single-flight, bounded failure retries, benign live-watcher cycle ends, one-notice failure episodes, and exit-2 translation.
+It drives the real guard, watcher and Stop hook during a check sweep longer than the grace window, verifying both that the healthy owner delivers one queued wake and that suspending the watcher during a check still triggers the stale-beacon failure.
 It also covers generation-claim single-flight, stuck-claim supersession, superseded-owner silence, notice-marker refusal and retry, ownership-atomic episode reset, and the legacy upgrade shim; [`turnend-guard.md`](turnend-guard.md) owns those behavior contracts.
 `FM_CLAUDE_LIVE_E2E=1 tests/fm-claude-stop-autoarm-live-e2e.test.sh` starts with the reproduced stale-lock state, runs session start first, completes two immediate fixture cycles, and checks the competing-live-owner negative control.
 It also runs a real parked watcher with a 40-second lease and 60-second native deadline, delivers an inbox note after that original deadline with no additional human turn, checks singleton ownership and exact acknowledgements, and verifies that held backlog alone does not renew.
