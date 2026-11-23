@@ -1637,6 +1637,7 @@ test_worktree_safety_refusal_cancels_close() {
   seed_backlog_in_flight "$case_dir"
   printf 'PR closure evidence\n' > "$case_dir/state/task-x1.pr-poll-closed"
   (
+    # shellcheck disable=SC2030 # The fixture home is scoped to this subshell.
     export FM_HOME="$case_dir/home"
     # shellcheck source=bin/fm-backlog-transition-lib.sh
     . "$ROOT/bin/fm-backlog-transition-lib.sh"
@@ -1890,7 +1891,7 @@ SH
   if [ "$mode" = success ]; then
     expect_code 0 "$rc" "Treehouse should return the copy and retire the record: $(cat "$case_dir/stderr")"
     assert_absent "$case_dir/state/task-x1.meta" 'successful return retained the task record'
-    [ "$(backlog_row_state "$case_dir")" = done ] || fail 'successful return did not close the task'
+    [ "$(backlog_row_state "$case_dir")" = 'done' ] || fail 'successful return did not close the task'
     [ "$(git -C "$copy" rev-parse --abbrev-ref HEAD)" = HEAD ] \
       && [ "$(git -C "$copy" rev-parse HEAD)" = "$(git -C "$copy" rev-parse main)" ] \
       || fail 'teardown changed the checkout left by Treehouse'
@@ -2530,6 +2531,7 @@ configure_secondmate_with_tmux_children() {  # <case-dir> [child-b-worktree]
 }
 
 seed_descendant_close_for_replay() (
+  # shellcheck disable=SC2030,SC2031 # Use the descendant home only while staging its close marker.
   export FM_HOME=$1
   local id=$2 state="$1/state" data=${3:-$1/data} gen=descendant-fixture-gen
   printf 'spawn_gen=%s\n' "$gen" >> "$state/$id.meta"
@@ -2541,6 +2543,7 @@ seed_descendant_close_for_replay() (
 )
 
 assert_pending_close_replay_preserves_task() (
+  # shellcheck disable=SC2030,SC2031 # Use the fixture home only during replay and its assertions.
   export FM_HOME=${3:-$1}
   local id=$2 state="$1/state" data=${4:-$1/data} row
   # shellcheck source=bin/fm-tasks-axi-lib.sh
@@ -2633,6 +2636,7 @@ test_forced_secondmate_teardown_preflights_all_child_copies() {
   configure_secondmate_with_tmux_children "$case_dir" "$child_b"
   seed_descendant_close_for_replay "$home" child-b "$backlog_data" || fail 'could not stage the descendant close'
   (
+    # shellcheck disable=SC2030,SC2031 # Scope the secondmate home to the replay subtest.
     export FM_HOME="$home"
     # shellcheck source=bin/fm-tasks-axi-lib.sh
     . "$ROOT/bin/fm-tasks-axi-lib.sh"
@@ -2662,6 +2666,7 @@ SH
 
   (
     export -f run_teardown
+    # shellcheck disable=SC2016 # The child Bash expands its own PID and arguments.
     TEARDOWN="$TEARDOWN" FM_TEARDOWN_TEST_ROOT="$case_dir/project" FM_TEARDOWN_GUARD_DONE=1 \
       "$BASH" -uc '
         cd "$1" || exit 1
@@ -2801,7 +2806,7 @@ test_return_retires_slot_after_hook_error() {
     write_meta "$case_dir" local-only secondmate
     configure_secondmate_with_tmux_children "$case_dir" "$copy"
     worktree=$copy
-    id=child-b
+    id='child-b'
     home="$case_dir/secondmate-home"
   else
     write_meta "$case_dir" local-only ship
@@ -4119,6 +4124,7 @@ test_reparented_teardown_preserves_original_caller() (
       prior_gen=teardown-test-task-x1
       [ "$prior_close" != unrelated ] || prior_gen=older-task-incarnation
       (
+        # shellcheck disable=SC2030,SC2031 # Scope the fixture home to staging the prior close.
         export FM_HOME="$case_dir/home"
         # shellcheck source=bin/fm-backlog-transition-lib.sh
         . "$ROOT/bin/fm-backlog-transition-lib.sh"
@@ -4364,6 +4370,7 @@ SH
       [ "$(backlog_row_state "$case_dir")" = in_flight ] || fail 'startup replay closed a refused task'
     fi
     if [ "$mode" = retry ]; then
+      # shellcheck disable=SC2016 # The Treehouse stub expands its own third argument.
       printf '#!/usr/bin/env bash\ngit -C "$3" checkout --detach -q main\n' > "$case_dir/fakebin/treehouse"
       rm -f "$case_dir/fakebin/lsof"
       run_teardown "$case_dir" --legacy-record > "$case_dir/retry.stdout" 2> "$case_dir/retry.stderr" \
@@ -5008,6 +5015,7 @@ test_keep_pane_retirement() {
     else
       assert_present "$case_dir/state/task-x1.backlog-close" "keep-pane $mode lost durable transition"
       (
+        # shellcheck disable=SC2031 # Scope the fixture home to startup replay.
         export FM_HOME="$case_dir/home"
         # shellcheck source=bin/fm-tasks-axi-lib.sh
         . "$ROOT/bin/fm-tasks-axi-lib.sh"
@@ -5016,7 +5024,7 @@ test_keep_pane_retirement() {
         fm_backlog_close_marker_replay "$case_dir/state" "$case_dir/state/task-x1.backlog-close" "$case_dir/data" \
           || fail "startup could not replay the close after the copy was returned: $FM_BACKLOG_TRANSITION_ERROR"
       ) || exit 1
-      [ "$(backlog_row_state "$case_dir")" = done ] || fail 'startup replay did not close the returned task'
+      [ "$(backlog_row_state "$case_dir")" = 'done' ] || fail 'startup replay did not close the returned task'
       git -C "$case_dir/wt" checkout -qb fm/task-x1 \
         || fail 'startup replay left the returned task branch in the way of fresh dispatch'
     fi
