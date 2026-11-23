@@ -160,7 +160,8 @@ test_teardown_preserves_shared_tasktmp() {
     fm_test_owner_is_alive "$LEGACY_SLEEPER_PID" "$LEGACY_SLEEPER_IDENTITY" \
       || fail "$variant teardown signalled a process in the shared temp root"
     fm_test_stop_sleeper "$LEGACY_SLEEPER_PID" "$LEGACY_SLEEPER_IDENTITY"
-    LEGACY_SLEEPER_PID= LEGACY_SLEEPER_IDENTITY=
+    LEGACY_SLEEPER_PID=''
+    LEGACY_SLEEPER_IDENTITY=''
   fi
   pass "fm-teardown leaves the $variant task temp path alone"
 }

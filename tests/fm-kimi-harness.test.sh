@@ -28,8 +28,10 @@ BASE_PATH=${FM_TEST_BASE_PATH:-$PYTHON_BIN_DIR:/usr/bin:/bin:/usr/sbin:/sbin}
 cleanup_kimi_sleepers() {
   fm_test_stop_sleeper "$KIMI_SLEEPER_A_PID" "$KIMI_SLEEPER_A_IDENTITY"
   fm_test_stop_sleeper "$KIMI_SLEEPER_B_PID" "$KIMI_SLEEPER_B_IDENTITY"
-  KIMI_SLEEPER_A_PID= KIMI_SLEEPER_A_IDENTITY=
-  KIMI_SLEEPER_B_PID= KIMI_SLEEPER_B_IDENTITY=
+  KIMI_SLEEPER_A_PID=''
+  KIMI_SLEEPER_A_IDENTITY=''
+  KIMI_SLEEPER_B_PID=''
+  KIMI_SLEEPER_B_IDENTITY=''
 }
 trap 'cleanup_kimi_sleepers; fm_test_cleanup' EXIT
 
@@ -518,7 +520,8 @@ EOF
       fail "home A cleanup did not reap its leaked process in its task temp root"
     fi
     wait "$KIMI_SLEEPER_A_PID" 2>/dev/null || true
-    KIMI_SLEEPER_A_PID= KIMI_SLEEPER_A_IDENTITY=
+    KIMI_SLEEPER_A_PID=''
+    KIMI_SLEEPER_A_IDENTITY=''
     fm_test_owner_is_alive "$KIMI_SLEEPER_B_PID" "$KIMI_SLEEPER_B_IDENTITY" \
       || fail "home A cleanup signalled home B's live process in its task temp root"
     cleanup_kimi_sleepers
