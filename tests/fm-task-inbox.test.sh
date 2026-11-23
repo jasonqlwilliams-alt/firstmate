@@ -872,10 +872,10 @@ STUB
 
 # Start one stub window and wait until its screen is drawn. Echoes its target.
 ring_stub_window() {  # <name> <mode> <log> [pane-columns]
-  local name=$1 mode=$2 log=$3 cols=${4:-} i=0 marker agent=codex session=ring
+  local name=$1 mode=$2 log=$3 cols=${4:-} i=0 marker cursor_row='' agent=codex session=ring
   : > "$log"
   case "$mode" in
-    agy|agy-*) agent=agy ;;
+    agy|agy-*) agent=agy; cursor_row=3 ;;
     rovo|rovo-pending|rovo-unknown) agent=rovo ;;
   esac
   if [ -n "$cols" ]; then
@@ -890,13 +890,19 @@ ring_stub_window() {  # <name> <mode> <log> [pane-columns]
     picker-below|picker-row) marker='esc skip' ;;
     unknown|rovo-unknown) marker='Loading your session' ;;
     agy-busy) marker='esc to cancel' ;;
-    agy-forged) marker='accept-edits' ;;
+    agy-forged) marker='accept-edits'; cursor_row=6 ;;
+    agy-survey) marker='[0] Skip' ;;
     agy|agy-*) marker='for shortcuts' ;;
     rovo|rovo-pending) marker='Context:' ;;
     *) marker='context left' ;;
   esac
   while [ "$i" -lt 100 ]; do
-    "$RING_TMUX" -L "$RING_SOCKET" capture-pane -p -t "$session:$name" 2>/dev/null | grep -qF "$marker" && break
+    if "$RING_TMUX" -L "$RING_SOCKET" capture-pane -p -t "$session:$name" 2>/dev/null | grep -qF "$marker"; then
+      if [ -z "$cursor_row" ] ||
+         [ "$("$RING_TMUX" -L "$RING_SOCKET" display-message -p -t "$session:$name" '#{cursor_y}' 2>/dev/null)" = "$cursor_row" ]; then
+        break
+      fi
+    fi
     sleep 0.1
     i=$((i + 1))
   done
