@@ -998,38 +998,46 @@ test_ring_refuses_pending_and_unproven_codex_screens() {
 }
 
 test_agy_doorbell_width_boundary() {
-  local home state rec notice narrow wide target log err verdict i=0
+  local home state narrow_rec wide_rec narrow_notice wide_notice narrow wide target log task err verdict i=0
   ring_lab_setup
   home="$TMP_ROOT/ring-agy"
   state="$home/state"
   mkdir -p "$state"
-  rec="$state/t1.inbox/001.msg"
-  notice=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$rec") || fail "could not generate the test doorbell"
-  narrow=$(ring_stub_window agy-narrow agy "$RING_LAB/agy-narrow.log" "$((${#notice} + 4))")
+  narrow_rec="$state/t1.inbox/001.msg"
+  wide_rec="$state/t2.inbox/001.msg"
+  narrow_notice=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$narrow_rec") \
+    || fail "could not generate the narrow test doorbell"
+  wide_notice=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$wide_rec") \
+    || fail "could not generate the wide test doorbell"
+  [ "${#narrow_notice}" -eq "${#wide_notice}" ] || fail "the two test doorbells must have equal length"
+  narrow=$(ring_stub_window agy-narrow agy "$RING_LAB/agy-narrow.log" "$((${#narrow_notice} + 4))")
   log="$RING_LAB/agy-wide.log"
-  wide=$(ring_stub_window agy-wide agy "$log" "$((${#notice} + 5))")
+  wide=$(ring_stub_window agy-wide agy "$log" "$((${#wide_notice} + 5))")
   for target in "$narrow" "$wide"; do
     verdict=$(PATH="$RING_LAB/shim:$PATH" bash -c '. "$1"; fm_backend_guarded_composer_state tmux "$2" "" "" agy' _ \
       "$ROOT/bin/fm-backend.sh" "$target")
     [ "$verdict" = empty ] || fail "the idle agy composer in $target should read empty before the fit check, got $verdict"
   done
   fm_write_meta "$state/t1.meta" "window=$narrow" "backend=tmux" "kind=ship" "harness=agy"
-  err="$home/send.err"
-  PATH="$RING_LAB/shim:$PATH" FM_HOME="$home" \
-    "$ROOT/bin/fm-send.sh" t1 "please continue" >/dev/null 2>"$err" \
-    || fail "a width refusal is still a durably sent steer:"$'\n'"$(cat "$err")"
+  fm_write_meta "$state/t2.meta" "window=$wide" "backend=tmux" "kind=ship" "harness=agy"
+  for task in t1 t2; do
+    err="$home/$task.err"
+    PATH="$RING_LAB/shim:$PATH" FM_HOME="$home" \
+      "$ROOT/bin/fm-send.sh" "$task" "please continue" >/dev/null 2>"$err" \
+      || fail "fm-send did not enqueue the steer for $task:"$'\n'"$(cat "$err")"
+  done
   [ ! -s "$RING_LAB/agy-narrow.log" ] || fail "fm-send typed into the narrow agy composer"
-  [ -f "$rec" ] || fail "fm-send did not record the steer after a width refusal"
+  [ -f "$narrow_rec" ] || fail "fm-send did not record the steer after a width refusal"
+  err="$home/t1.err"
   assert_contains "$(cat "$err")" "too narrow for the doorbell line" "fm-send should mention the agy width limit"
   assert_contains "$(cat "$err")" "A wider agy pane" "fm-send should explain how to make room for the doorbell"
-  PATH="$RING_LAB/shim:$PATH" inbox_lib "$state" fm_task_inbox_ring tmux "$wide" "$rec" "" agy \
-    || fail "the same agy notice should be delivered with one more column"
-  while [ "$i" -lt 50 ] && [ -e "$rec" ]; do sleep 0.1; i=$((i + 1)); done
-  [ "$(grep -c '^ENTER' "$log")" = 1 ] || fail "the agy ring should press exactly one Enter:"$'\n'"$(cat "$log")"
-  grep -qxF "SUBMIT $notice" "$log" \
-    || fail "the agy stub never received the doorbell line:"$'\n'"$(cat "$log")"
-  [ -f "$state/t1.inbox/handled/001.msg" ] || fail "the agy doorbell was not acted on"
-  pass "inbox: the same agy notice is refused at the last column and delivered with one more column"
+  while [ "$i" -lt 50 ] && [ ! -f "$state/t2.inbox/handled/001.msg" ]; do sleep 0.1; i=$((i + 1)); done
+  [ -f "$state/t2.inbox/handled/001.msg" ] \
+    || fail "fm-send did not deliver to the wide agy composer:"$'\n'"$(cat "$home/t2.err")"
+  [ "$(grep -c '^ENTER' "$log")" = 1 ] || fail "fm-send should press exactly one Enter:"$'\n'"$(cat "$log")"
+  [ "$(grep -c '^SUBMIT ' "$log")" = 1 ] && grep -qxF "SUBMIT $wide_notice" "$log" \
+    || fail "fm-send should submit the wide agy notice exactly once:"$'\n'"$(cat "$log")"
+  pass "fm-send: equal-length agy notices are refused at the last column and delivered with one more column"
 }
 
 # An agy pane with a draft or an unproven frame gets nothing typed, and the
