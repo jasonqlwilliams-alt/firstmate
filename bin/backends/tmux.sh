@@ -64,7 +64,8 @@ fm_backend_tmux_target_exists() {  # <target> [explicit]
 }
 
 # fm_backend_tmux_send_key: one named key.
-fm_backend_tmux_send_key() {  # <target> <key>
+fm_backend_tmux_send_key() {  # <target> <key> [explicit]
+  fm_backend_tmux_target_exists "$1" "${3:-}" || return $?
   tmux send-keys -t "$1" "$2"
 }
 

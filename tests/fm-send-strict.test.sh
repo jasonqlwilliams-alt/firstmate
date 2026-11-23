@@ -73,7 +73,7 @@ case "${1:-}" in
     exit 0 ;;
   list-windows)
     case "$*" in
-      *window_id*) printf '@1 sess:fm-mpf-lane-m8\n@2 sess:fm-lane-ok\n' | fm_fake_tmux_window_ids "$@" ;;
+      *window_id*) printf '@1 sess:fm-mpf-lane-m8\n@2 sess:fm-lane-ok\n@3 sess:fm-lane-key\n' | fm_fake_tmux_window_ids "$@" ;;
       *) printf 'foreign:%s\nfm-mpf-lane-m8\nfm-lane-ok\n' "${FM_FAKE_TMUX_WINDOW:-fm-lost}" ;;
     esac
     exit 0 ;;

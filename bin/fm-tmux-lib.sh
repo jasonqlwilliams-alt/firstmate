@@ -73,7 +73,12 @@ fm_tmux_read_failure_status() {  # <diagnostic>
 
 fm_tmux_window_filter_available() {
   local diagnostic
-  diagnostic=$(tmux list-windows -a -f 0 2>&1 >/dev/null) && return 0
+  diagnostic=$(
+    # shellcheck source=bin/fm-timeout-lib.sh
+    . "$(dirname -- "${BASH_SOURCE[0]}")/fm-timeout-lib.sh"
+    fm_run_timed 3 tmux list-windows -a -f 0 2>&1 >/dev/null
+  ) && return 0
+  [ "$?" -ne 124 ] || return 1
   [ "$diagnostic" = 'no current target' ] || fm_tmux_no_server_error "$diagnostic"
 }
 
@@ -95,7 +100,7 @@ fm_tmux_window_filter_available() {
 # definitively absent; 2 the target is malformed or the inventory could not be
 # read, so callers can keep a transient tmux failure distinct from absence.
 fm_tmux_exact_target() {  # <target> [explicit]
-  local target=${1:-} session literal inventory
+  local target=${1:-} session literal inventory id resolved=
   [ -n "$target" ] || return 2
   if [ "${2:-}" = explicit ]; then
     printf '%s' "$target"
@@ -116,12 +121,16 @@ fm_tmux_exact_target() {  # <target> [explicit]
     fm_tmux_read_failure_status "$inventory"
     return $?
   fi
-  case "$inventory" in
-    '') return 1 ;;
-    @*) case "${inventory#@}" in ''|*[!0-9]*) return 2 ;; esac ;;
-    *) return 2 ;;
-  esac
-  printf '%s' "$inventory"
+  [ -n "$inventory" ] || return 1
+  while IFS= read -r id; do
+    case "$id" in
+      @*) case "${id#@}" in ''|*[!0-9]*) return 2 ;; esac ;;
+      *) return 2 ;;
+    esac
+    [ -z "$resolved" ] || [ "$id" = "$resolved" ] || return 2
+    resolved=$id
+  done <<< "$inventory"
+  printf '%s' "$resolved"
 }
 
 # --- tmux composer capture and capability primitives ------------------------

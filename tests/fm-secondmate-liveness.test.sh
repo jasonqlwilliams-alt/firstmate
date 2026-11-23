@@ -294,6 +294,10 @@ case "${1:-}" in
     exit 0
     ;;
   list-windows)
+    if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
+      fm_fake_tmux_window_ids "$@" < "$0.windows"
+      exit 0
+    fi
     case "$mode" in
       missing) name=main ;;
       unreadable) exit 1 ;;
@@ -309,7 +313,12 @@ case "${1:-}" in
     printf '%s\n' "$*" >> "${FM_TMUX_CALL_LOG:?}"
     [ "${1:-}" = kill-window ] && : > "${FM_TMUX_CALL_LOG}.killed"
     [ "${FM_TEST_FAIL_NEW_WINDOW:-0}" = 1 ] && [ "${1:-}" = new-window ] && exit 1
-    [ "${1:-}" = new-window ] && rm -f "${FM_TMUX_CALL_LOG}.killed"
+    if [ "${1:-}" = new-window ]; then
+      rm -f "${FM_TMUX_CALL_LOG}.killed"
+      fm_fake_tmux_new_window "$0.windows" @1 "$@"
+    else
+      rm -f "$0.windows"
+    fi
     exit 0
     ;;
   has-session) exit 0 ;;

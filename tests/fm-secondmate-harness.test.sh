@@ -423,6 +423,13 @@ make_noop_tmux() {
   mkdir -p "$fakebin"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+case "${1:-}" in
+  new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@" ;;
+  list-windows)
+    if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
+      fm_fake_tmux_window_ids "$@" < "$0.windows"
+    fi ;;
+esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
@@ -720,8 +727,12 @@ case "$*" in
 esac
 case "${1:-}" in
   display-message) printf 'firstmate\n'; exit 0 ;;
-  list-windows) exit 0 ;;
-  new-window) printf '@1\n'; exit 0 ;;
+  list-windows)
+    if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
+      fm_fake_tmux_window_ids "$@" < "$0.windows"
+    fi
+    exit 0 ;;
+  new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@"; exit 0 ;;
   has-session|new-session|kill-window) exit 0 ;;
   send-keys)
     if [ -n "${FM_FAKE_LAUNCH_LOG:-}" ]; then

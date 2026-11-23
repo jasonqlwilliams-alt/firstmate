@@ -28,6 +28,10 @@ set -u
 case "${1:-}" in
   has-session|new-session|new-window|send-keys|kill-window)
     printf '%s\n' "$*" >> "$FM_FAKE_TMUX_LOG"
+    case "$1" in
+      new-window) fm_fake_tmux_new_window "$0.windows" @100 "$@" ;;
+      kill-window) rm -f "$0.windows" ;;
+    esac
     exit 0
     ;;
   list-windows)
@@ -52,12 +56,18 @@ case "${1:-}" in
         *) name=$recorded ;;
       esac
       if [ "$ids" = 1 ]; then printf '@%s %s:%s\n' "$n" "$session" "$name"; else printf '%s\n' "$name"; fi
-    done <<EOF | if [ "$ids" = 1 ]; then fm_fake_tmux_window_ids "$@"; else cat; fi
-${FM_FAKE_TMUX_WINDOW:-}
-EOF
+    done <<< "${FM_FAKE_TMUX_WINDOW:-}" | if [ "$ids" = 1 ]; then
+      { cat; [ ! -f "$0.windows" ] || cat "$0.windows"; } | fm_fake_tmux_window_ids "$@"
+    else
+      cat
+    fi
     exit 0
     ;;
   list-panes)
+    if [ "${3:-}" = @100 ] && [ -f "$0.windows" ]; then
+      printf '%%100\n'
+      exit 0
+    fi
     printf '%s\n' "${FM_FAKE_TMUX_WINDOW:-}" | awk -v target="${3:-}" '
       length { n++; if ("@" n == target || $0 == target) present=1 }
       END { exit !present }

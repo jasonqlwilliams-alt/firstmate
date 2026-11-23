@@ -82,8 +82,12 @@ case "${1:-}" in
     exit 0
     ;;
   display-message) printf 'firstmate\n'; exit 0 ;;
-  list-windows) exit 0 ;;
-  new-window) printf '@1\n'; exit 0 ;;
+  list-windows)
+    if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
+      fm_fake_tmux_window_ids "$@" < "$0.windows"
+    fi
+    exit 0 ;;
+  new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@"; exit 0 ;;
   has-session|new-session|kill-window) exit 0 ;;
   send-keys)
     prev=

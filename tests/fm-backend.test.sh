@@ -716,7 +716,7 @@ test_send_tmux_contract() {
   log="$TMP_ROOT/send-new.log"
 
   # Case 1: --key path - target verified, named key sent, no typing.
-  run_send_case "$ROOT" "$fb" "$log" "$home" -- "sess:win" --key Escape
+  run_send_case "$ROOT" "$fb" "$log" "$home" -- "sess:0.1" --key Escape
   rc=$?
   expect_code 0 "$rc" "fm-send --key should succeed against a live fake pane"
   assert_contains "$(cat "$log")" $'\x1f''Escape' "fm-send --key did not send the named key"

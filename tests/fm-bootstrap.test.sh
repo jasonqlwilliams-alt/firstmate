@@ -345,10 +345,11 @@ case "$1" in
       stopped) printf '%s\n' 'no server running on /tmp/tmux-test/default' >&2; exit 1 ;;
       empty) printf '%s\n' 'no current target' >&2; exit 1 ;;
       current) exit 0 ;;
+      stalled) exec sleep 10 ;;
     esac ;;
 esac
 SH
-  for server in old stopped empty current; do
+  for server in old stopped empty current stalled; do
     out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$home" FM_BACKEND=tmux \
       FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_FAKE_TMUX_SERVER="$server" FM_BOOTSTRAP_DETECT_ONLY=1 \
       "$ROOT/bin/fm-bootstrap.sh")
@@ -356,6 +357,9 @@ SH
       assert_contains "$out" 'start a new server after the old sessions are no longer needed' \
         "a current client with an incompatible server must explain how to replace the server"
       assert_not_contains "$out" 'MISSING: tmux' "a server failure must not recommend a client install"
+    elif [ "$server" = stalled ]; then
+      assert_contains "$out" 'TMUX_SERVER:' "a stalled server must time out as an unresolved server probe"
+      assert_not_contains "$out" 'MISSING: tmux' "a stalled server must not recommend a client install"
     else
       assert_not_contains "$out" 'MISSING: tmux' "a $server tmux server should satisfy the prerequisite"
       assert_not_contains "$out" 'TMUX_SERVER:' "a $server tmux server should satisfy the prerequisite"

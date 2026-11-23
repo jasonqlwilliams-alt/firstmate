@@ -598,6 +598,21 @@ fm_fake_tmux_window_ids() {  # <tmux args...>, reads ID and name pairs from stdi
 }
 export -f fm_fake_tmux_window_ids
 
+fm_fake_tmux_new_window() {  # <inventory-file> <id> <new-window args...>
+  local inventory=$1 id=$2 session name
+  shift 2
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -t) session=${2%:}; shift ;;
+      -n) name=$2; shift ;;
+    esac
+    shift
+  done
+  printf '%s %s:%s\n' "$id" "$session" "$name" >> "$inventory"
+  printf '%s\n' "$id"
+}
+export -f fm_fake_tmux_new_window
+
 fm_fake_exit0() {
   local fakebin=$1 tool
   shift

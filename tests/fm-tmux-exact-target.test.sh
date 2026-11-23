@@ -170,6 +170,14 @@ fm_backend_capture tmux "$SESSION:fm-mate2" 40 | grep -q NEIGHBOUR-TWO-MARKER \
   || fail "the surviving neighbour must still capture its own screen"
 pass "surviving neighbour still reads its own screen"
 
+tmux link-window -s "$SESSION:fm-mate2" -t "$SESSION:99" \
+  || fail "could not link the surviving window to a second index"
+fm_backend_capture tmux "$SESSION:fm-mate2" 40 | grep -q NEIGHBOUR-TWO-MARKER \
+  || fail "two links to the same window must still capture its screen"
+fm_backend_target_exists tmux "$SESSION:fm-mate2" \
+  || fail "two links to the same live window must still prove presence"
+pass "repeated links to one window resolve to that window"
+
 new_window "$SESSION" fm-duplicate FIRST-DUPLICATE
 new_window "$SESSION" fm-duplicate SECOND-DUPLICATE
 [ "$(fm_backend_agent_state tmux "$SESSION:fm-duplicate")" = unreadable ] \

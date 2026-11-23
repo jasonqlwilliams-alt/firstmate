@@ -541,7 +541,7 @@ helm_launch() {
     tmux)
       fm_backend_source tmux || return 1
       fm_backend_tmux_send_literal "$HELM_TARGET" "$cmd" || return 1
-      fm_backend_tmux_send_key "$HELM_TARGET" Enter
+      fm_backend_tmux_send_key "$HELM_TARGET" Enter explicit
       ;;
     herdr)
       fm_backend_source herdr || return 1

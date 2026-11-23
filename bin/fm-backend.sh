@@ -841,12 +841,12 @@ fm_backend_capture() {  # <backend> <target> <lines> [expected-label] [explicit]
 }
 
 # fm_backend_send_key: one backend-supported named special key.
-fm_backend_send_key() {  # <backend> <target> <key> [expected-label]
+fm_backend_send_key() {  # <backend> <target> <key> [expected-label] [explicit]
   local backend=$1
   shift
   fm_backend_source "$backend" || return 1
   case "$backend" in
-    tmux) fm_backend_tmux_send_key "$@" ;;
+    tmux) fm_backend_tmux_send_key "$1" "$2" "${4:-}" ;;
     herdr) fm_backend_herdr_send_key "$@" ;;
     zellij) fm_backend_zellij_send_key "$@" ;;
     orca) fm_backend_orca_send_key "$@" ;;

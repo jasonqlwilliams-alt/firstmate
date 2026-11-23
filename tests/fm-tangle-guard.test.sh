@@ -231,8 +231,12 @@ case "$*" in
 esac
 case "${1:-}" in
   display-message) printf 'firstmate\n'; exit 0 ;;
-  new-window) printf '%s\n' "@spawnwid"; exit 0 ;;
-  list-windows) exit 0 ;;
+  new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@"; exit 0 ;;
+  list-windows)
+    if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
+      fm_fake_tmux_window_ids "$@" < "$0.windows"
+    fi
+    exit 0 ;;
   has-session|new-session|send-keys|set-window-option) exit 0 ;;
 esac
 exit 0
@@ -272,17 +276,17 @@ test_spawn_tmux_window_construction() {
     "new-window must not target the bare session name (collides under base-index 1)"
 
   # Bug 2 fix (a): pin the window name against automatic-rename / allow-rename.
-  assert_grep "set-window-option -t @spawnwid automatic-rename off" "$rec" \
+  assert_grep "set-window-option -t @1 automatic-rename off" "$rec" \
     "must disable automatic-rename on the spawned window"
-  assert_grep "set-window-option -t @spawnwid allow-rename off" "$rec" \
+  assert_grep "set-window-option -t @1 allow-rename off" "$rec" \
     "must disable allow-rename on the spawned window"
 
   # Bug 2 fix (b): treehouse-get and the worktree wait loop target the stable id.
-  grep -F 'send-keys -t @spawnwid ' "$rec" \
+  grep -F 'send-keys -t @1 ' "$rec" \
     | grep -F 'treehouse get --lease --lease-holder rec-win-gg7' \
     | grep -Fq ' Enter' \
     || fail "durable treehouse get must be sent to the stable window id"
-  assert_grep "display-message -p -t @spawnwid #{pane_current_path}" "$rec" \
+  assert_grep "display-message -p -t @1 #{pane_current_path}" "$rec" \
     "the worktree wait loop must query the stable window id, not the name"
 
   pass "fm-spawn: appends windows by session-colon, pins the name, and targets the window id"
