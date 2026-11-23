@@ -106,7 +106,13 @@ if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
   fi
 fi
 if [ "$old" = "$me" ]; then
-  fm_session_lock_write_start "$LOCK" "$me" "$me_start"
+  if [ "$FM_SESSION_LOCK_START" != "$me_start" ]; then
+    if [ -z "$me_start" ]; then
+      echo "error: cannot verify session lock owner's start time; operate read-only until resolved" >&2
+      exit 1
+    fi
+    fm_session_lock_write_start "$LOCK" "$me" "$me_start"
+  fi
 else
   fm_session_lock_write "$LOCK" "$me" "$me_start"
 fi || {

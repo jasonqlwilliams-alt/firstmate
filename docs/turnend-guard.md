@@ -44,6 +44,7 @@ A lock is genuinely unheld only when the lock directory or its symlinked owner d
 Any lock with a recorded pid remains down when its pid, home, watcher path, or process identity fails the strict watcher health check.
 That ownership proof is `fm_extension_owns_supervision` in `bin/fm-wake-lib.sh`, which accepts either the Pi pair (`fm_pi_extension_owns_supervision`) or the omp pair (`fm_omp_extension_owns_supervision`): both primary extensions of one family must be recorded in their state markers at their current on-disk builds by the process named in `state/.lock`, and that process must still be alive and match any start time recorded for its PID in `state/.lock.start`.
 The in-process Pi, omp, and OpenCode readers continue to use the single PID line in `state/.lock` so they work across a live update.
+If the writer is killed after publishing the next owner's start record but before renaming the PID file, a live harness that reused the previous PID can keep the lock until it exits.
 omp never inherits the Pi tolerance because its proof is keyed on its own two files and markers.
 Requiring the turn-end guard extension as well as the watch extension is deliberate, because a home without that structural backstop has no benign hand-off to tolerate.
 Without that proof an unheld lock alarms exactly as it did before, so an unloaded, version-drifted, or exited Pi or omp session is loud immediately, and a cycle the extension never restores is loud once the beacon passes grace.

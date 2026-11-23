@@ -574,6 +574,31 @@ test_failed_start_lookup_preserves_only_legacy_liveness() {
   pass "session lock: a failed lookup permits legacy acquisition and renewal during a sweep"
 }
 
+test_failed_renewal_preserves_recorded_start_time() {
+  local home out pid start
+  home=$(lock_home renewal-no-start)
+  out=$(FM_HOME="$home" "$CODEX_FIXTURE" -ec '
+    state="$FM_HOME/state"
+    printf "%s\n" "$$" > "$FM_HOME/harness-pid"
+    fixture_start_time "$$" > "$FM_HOME/harness-start"
+    "$0"
+    mkdir -p "$FM_HOME/proc/$$"
+    printf "malformed\n" > "$FM_HOME/proc/$$/stat"
+    if FM_PROC_ROOT_OVERRIDE="$FM_HOME/proc" "$0"; then
+      exit 1
+    fi
+    "$0" status
+  ' "$ROOT/bin/fm-lock.sh" 2>&1) || fail "an unverified renewal succeeded or the fixture failed: $out"
+  pid=$(cat "$home/harness-pid")
+  start=$(cat "$home/harness-start")
+  assert_contains "$out" "cannot verify session lock owner's start time" "renewal did not refuse the failed lookup"
+  assert_contains "$out" "lock: held by live harness pid $pid" "a restored lookup did not recognize the existing owner"
+  cmp -s "$home/state/.lock" <(printf '%s\n' "$pid") || fail "a failed renewal changed the owner PID"
+  cmp -s "$home/state/.lock.start" <(printf '%s\nstart=%s\n' "$pid" "$start") \
+    || fail "a failed renewal changed the recorded start time"
+  pass "session lock: a failed renewal preserves its existing start record"
+}
+
 test_ps_start_time_matches_across_timezones() {
   local home proc start status
   home=$(lock_home ps-timezones)
@@ -628,5 +653,6 @@ test_legacy_pid_only_record_keeps_pid_only_liveness
 test_legacy_upgrade_during_own_sweep
 test_readers_see_only_complete_owner_lines
 test_failed_start_lookup_preserves_only_legacy_liveness
+test_failed_renewal_preserves_recorded_start_time
 test_ps_start_time_matches_across_timezones
 test_malformed_records_are_not_owned

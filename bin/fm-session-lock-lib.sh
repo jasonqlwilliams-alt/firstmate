@@ -188,11 +188,7 @@ fm_session_lock_owner_alive() {  # <pid> <recorded-start>
 
 fm_session_lock_write_start() {  # <lock-file> <pid> <start>
   local sidecar="$1.start" pid=$2 start=$3 tmp
-  if [ -z "$start" ]; then
-    rm -f "$sidecar" 2>/dev/null
-    return $?
-  fi
-  [ ! -d "$sidecar" ] || return 1
+  [ -n "$start" ] && [ ! -d "$sidecar" ] || return 1
   tmp=$(mktemp "${sidecar%/*}/.lock-write.XXXXXX" 2>/dev/null) || return 1
   if fm_session_lock_print_record "$pid" "$start" > "$tmp" 2>/dev/null \
     && mv -f "$tmp" "$sidecar" 2>/dev/null; then
@@ -207,7 +203,13 @@ fm_session_lock_write() {  # <lock-file> <pid> <start>
   case "$pid" in ''|0|1|*[!0-9]*) return 1 ;; esac
   tmp=$(mktemp "${lock%/*}/.lock-write.XXXXXX" 2>/dev/null) || return 1
   if printf '%s\n' "$pid" > "$tmp" 2>/dev/null \
-    && fm_session_lock_write_start "$lock" "$pid" "$start" \
+    && {
+      if [ -n "$start" ]; then
+        fm_session_lock_write_start "$lock" "$pid" "$start"
+      else
+        rm -f "$lock.start" 2>/dev/null
+      fi
+    } \
     && mv -f "$tmp" "$lock" 2>/dev/null; then
     return 0
   fi
@@ -217,7 +219,7 @@ fm_session_lock_write() {  # <lock-file> <pid> <start>
 
 fm_session_start_completion_matches() {  # <completion-file> <pid> <start>
   local file=$1 pid=$2 start=$3 completion
-  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  [ -n "$start" ] && [ -f "$file" ] && [ ! -L "$file" ] || return 1
   completion=$(cat "$file" 2>/dev/null) || return 1
-  [ "$completion" = "$pid" ] || [ "$completion" = "$(fm_session_lock_print_record "$pid" "$start")" ]
+  [ "$completion" = "$(fm_session_lock_print_record "$pid" "$start")" ]
 }

@@ -44,8 +44,8 @@ fm_session_lock_start_matches() {
 }
 
 fm_session_lock_print_record() {
-  printf '%s\n' "$1" || return 1
-  [ -z "$2" ] || printf 'start=%s\n' "$2"
+  [ -n "$2" ] || return 1
+  printf '%s\nstart=%s\n' "$1" "$2"
 }
 
 # Read the owner PID and its associated start token into the two output globals.

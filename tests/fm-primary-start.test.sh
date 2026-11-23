@@ -70,11 +70,17 @@ assert not any(r[0]=='server' or r[:2] in [['workspace','create'],['tab','create
 PY
 }
 initialize_primary() {
-  local identity
+  local identity start_token
   identity=$(FM_WAKE_NO_MKDIR=1 FM_HOME="$HOME_FIXTURE" bash -c '. "$1/bin/fm-wake-lib.sh"; fm_pid_identity "$2"' _ "$ROOT" "$FM_PRIMARY_TEST_PID")
   identity=$(printf '%s' "$identity" | base64 | tr -d '\r\n')
+  if [ -r "/proc/$FM_PRIMARY_TEST_PID/stat" ]; then
+    start_token=$(awk '{print "proc:" $22}' "/proc/$FM_PRIMARY_TEST_PID/stat")
+  else
+    start_token='lstart:fixture-start claude'
+  fi
   printf '%s\n' "$FM_PRIMARY_TEST_PID" > "$HOME_FIXTURE/state/.lock"
-  printf '%s\n' "$FM_PRIMARY_TEST_PID" > "$HOME_FIXTURE/state/.session-start-complete"
+  printf '%s\nstart=%s\n' "$FM_PRIMARY_TEST_PID" "$start_token" > "$HOME_FIXTURE/state/.lock.start"
+  printf '%s\nstart=%s\n' "$FM_PRIMARY_TEST_PID" "$start_token" > "$HOME_FIXTURE/state/.session-start-complete"
   cat > "$HOME_FIXTURE/state/.startup-network.status" <<EOF
 state=done
 rc=0
@@ -421,22 +427,16 @@ contains 'supervision_healthy=true'
 no_mutation
 pass 'current initialized generation with no mates or supervision demand is ready'
 
-if [ -r "/proc/$FM_PRIMARY_TEST_PID/stat" ]; then
-  start_token=$(awk '{print "proc:" $22}' "/proc/$FM_PRIMARY_TEST_PID/stat")
-else
-  start_token='lstart:fixture-start claude'
-fi
-printf '%s\nstart=%s\n' "$FM_PRIMARY_TEST_PID" "$start_token" > "$HOME_FIXTURE/state/.lock.start"
+printf '%s\n' "$FM_PRIMARY_TEST_PID" > "$HOME_FIXTURE/state/.session-start-complete"
 capture ready
-expect_rc 0
-contains 'primary_initialized=true'
+expect_rc 1
+contains 'primary_initialized=false'
 printf '%s\nstart=proc:0\n' "$FM_PRIMARY_TEST_PID" > "$HOME_FIXTURE/state/.session-start-complete"
 capture ready
 expect_rc 1
 contains 'primary_initialized=false'
-rm "$HOME_FIXTURE/state/.lock.start"
 initialize_primary
-pass 'launcher readiness keeps legacy completion and rejects an old start token'
+pass 'launcher readiness rejects PID-only completion and old start tokens'
 
 printf 'kind=ship\n' > "$HOME_FIXTURE/state/ordinary.meta"
 capture ready

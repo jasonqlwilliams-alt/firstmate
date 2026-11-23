@@ -234,7 +234,11 @@ test_run_clear_and_compact_reemit() {
       || fail "$source fixture's startup sweep never settled"
     owner=$(cat "$root/state/.lock")
     printf '%s\n' "$owner" > "$root/state/.session-start-complete"
-    rm -f "$root/state/.lock.start"
+    out=$(run_hook "$root" --source "$source" </dev/null)
+    assert_contains "$out" "$FULL_BANNER$root" "$source trusted a PID-only receipt"
+    assert_not_contains "$out" "$REEMIT_BANNER$root" "$source skipped startup using an unverified receipt"
+    cmp -s "$root/state/.session-start-complete" "$root/state/.lock.start" \
+      || fail "$source did not record completion for the current process identity"
     status=0
     out=$(run_hook "$root" --source "$source" </dev/null) || status=$?
     expect_code 0 "$status" "run wrapper $source"
@@ -242,12 +246,8 @@ test_run_clear_and_compact_reemit() {
     assert_contains "$out" "are NOT repeated" "$source did not report the skipped startup sweeps"
     assert_contains "$out" "Queued wakes ARE still drained" "$source did not preserve the wake-queue drain"
     assert_not_contains "$out" "FIRSTMATE_OP" "a $source open also emitted the nudge instruction"
-    assert_present "$root/state/.lock.start" "$source did not upgrade the legacy owner with a sidecar"
-    cmp -s "$root/state/.session-start-complete" <(printf '%s\n' "$owner") || fail "$source changed the legacy completion"
-    out=$(run_hook "$root" --source "$source" </dev/null)
-    assert_contains "$out" "$REEMIT_BANNER$root" "$source stopped re-emitting after the identity upgrade"
   done
-  pass "run wrapper: clear and compact re-emit the digest without repeating startup sweeps"
+  pass "run wrapper: clear and compact replace PID-only receipts and re-emit after verified startup"
 }
 
 test_run_rebuild_forwards_source_to_drifted_instruction_refresh() {
