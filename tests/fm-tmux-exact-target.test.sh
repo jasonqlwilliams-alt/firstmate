@@ -93,6 +93,7 @@ fi
 pass "explicit tmux pane syntax works for capture and presence"
 
 new_window "$SESSION" fm-mate MATE-ONE-MARKER
+# shellcheck disable=SC2016 # The child shell expands its own positional parameters.
 tmux new-window -d -t "$SESSION:" -n fm-mate2 -c "$LAB/neighbour" -- \
   sh -c 'printf "%s\n%s" "$1" "$2"; exec "$3" 600' sh NEIGHBOUR-TWO-MARKER '❯ visible draft' "$SLEEP_BIN" \
   || fail "could not create the neighbouring window with a draft"
@@ -109,8 +110,9 @@ fm_backend_target_exists tmux "$SESSION:fm-mate" \
 mate_pane=$(tmux display-message -p -t "=$SESSION:=fm-mate" '#{pane_id}')
 mate_window=$(tmux display-message -p -t "$mate_pane" '#{window_id}')
 mate_index=$(tmux display-message -p -t "$mate_pane" '#{window_index}')
-fm_backend_target_exists tmux "$mate_pane" && fm_backend_target_exists tmux "$mate_window" \
-  || fail "an open worker must read as present by pane and window ID"
+if ! fm_backend_target_exists tmux "$mate_pane" || ! fm_backend_target_exists tmux "$mate_window"; then
+  fail "an open worker must read as present by pane and window ID"
+fi
 pass "open worker window reads its own screen"
 
 "$REAL_TMUX" -L "$SOCKET" kill-window -t "=$SESSION:=fm-mate" \
