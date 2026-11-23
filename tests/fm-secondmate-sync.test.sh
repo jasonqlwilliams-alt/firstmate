@@ -334,6 +334,7 @@ SH
   chmod +x "$fakebin/gh-axi"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+[ "${1:-}" != -V ] || { printf '%s\n' 'tmux 3.2'; exit 0; }
 if [ -n "${FM_FAKE_TMUX_LOG:-}" ]; then
   printf '%s\n' "$*" >> "$FM_FAKE_TMUX_LOG"
 fi

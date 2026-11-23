@@ -646,15 +646,15 @@ SH
   chmod +x "$fakebin/fm-crash-inject"
 }
 
-# fm_fake_version_tool <fakebin> <tool> <override-env-var> <default-version>
-# The stub answers `--version` with <override-env-var> when that variable is set
+# fm_fake_version_tool <fakebin> <tool> <override-env-var> <default-version> [version-flag]
+# The stub answers the version flag (default `--version`) with <override-env-var> when that variable is set
 # and non-empty, and with <default-version> otherwise; every other invocation
 # exits 0. A case that needs to drive a version floor exports the variable.
 fm_fake_version_tool() {
-  local fakebin=$1 tool=$2 override=$3 default=$4
+  local fakebin=$1 tool=$2 override=$3 default=$4 version_flag=${5:---version}
   cat > "$fakebin/$tool" <<SH
 #!/usr/bin/env bash
-if [ "\${1:-}" = --version ]; then
+if [ "\${1:-}" = '$version_flag' ]; then
   printf '%s\n' "\${$override:-$default}"
   exit 0
 fi

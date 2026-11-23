@@ -319,11 +319,21 @@ fm_backend_required_tools() {  # <backend>
   esac
 }
 
+FM_BACKEND_TMUX_MIN_VERSION=3.2
+
 fm_backend_required_tool_available() {  # <backend> <tool>
-  local backend=$1 tool=$2 required
+  local backend=$1 tool=$2 required version min_major min_minor
   required=$(fm_backend_required_tools "$backend") || return 1
   fm_backend_list_contains "$required" "$tool" || return 1
   case "$backend:$tool" in
+    tmux:tmux)
+      version=$(tmux -V 2>/dev/null) || return 1
+      [[ "$version" =~ ^tmux[[:space:]]+([0-9]+)\.([0-9]+) ]] || return 1
+      min_major=${FM_BACKEND_TMUX_MIN_VERSION%%.*}
+      min_minor=${FM_BACKEND_TMUX_MIN_VERSION#*.}
+      [ "${BASH_REMATCH[1]}" -gt "$min_major" ] ||
+        { [ "${BASH_REMATCH[1]}" -eq "$min_major" ] && [ "${BASH_REMATCH[2]}" -ge "$min_minor" ]; }
+      ;;
     cmux:cmux)
       fm_backend_source cmux >/dev/null 2>&1 || return 1
       fm_backend_cmux_bin >/dev/null 2>&1

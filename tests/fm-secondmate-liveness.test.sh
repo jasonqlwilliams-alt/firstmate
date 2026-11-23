@@ -278,6 +278,7 @@ make_liveness_tmux() {
 set -u
 mode=${FM_TEST_PANE_CMD:-zsh}
 case "${1:-}" in
+  -V) printf '%s\n' 'tmux 3.2'; exit 0 ;;
   display-message)
     for a in "$@"; do
       case "$a" in

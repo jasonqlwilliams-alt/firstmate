@@ -43,7 +43,7 @@ BACKEND=tmux
 TARGET_MODE=
 if [ -n "$TARGET_META" ]; then
   BACKEND=$(fm_backend_of_meta "$TARGET_META")
-elif [[ "$RAW_TARGET" == *:* ]]; then
+else
   TARGET_MODE=explicit
 fi
 FM_BACKEND_HERDR_ENDPOINT_META="$TARGET_META" \

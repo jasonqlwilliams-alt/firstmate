@@ -34,7 +34,7 @@ case "${1:-}" in
     session=
     prev=
     for arg in "$@"; do
-      if [ "$prev" = -t ]; then session=${arg#=}; break; fi
+      if [ "$prev" = -t ]; then session=${arg#=}; session=${session%:}; break; fi
       prev=$arg
     done
     case "$*" in *window_id*) ids=1 ;; *) ids=0 ;; esac

@@ -192,6 +192,14 @@ fm_backend_capture tmux "$SESSION:$literal_name" 40 | grep -q LITERAL-WINDOW-MAR
   || fail "tmux format punctuation in a window name must remain literal"
 pass "inventory matches format punctuation in window names literally"
 
+"$REAL_TMUX" -L "$SOCKET" new-session -d -s 'semicolon\;' -n fm-mate -c "$LAB/wt" -- \
+  sh -c "printf '%s\n' SEMICOLON-SESSION-MARKER; exec '$SLEEP_BIN' 600" \
+  || fail "could not create a session with a terminal semicolon"
+wait_for_marker '=semicolon;:=fm-mate' SEMICOLON-SESSION-MARKER
+fm_backend_capture tmux 'semicolon;:fm-mate' 40 | grep -q SEMICOLON-SESSION-MARKER \
+  || fail "a recorded session with a terminal semicolon must remain readable"
+pass "inventory reads a session with a terminal semicolon"
+
 # Session names are matched exactly too: a closed recorded session must not
 # resolve to a prefix-named surviving session.
 "$REAL_TMUX" -L "$SOCKET" new-session -d -s "${SESSION}2" -n fm-mate -c "$LAB/wt" -- \

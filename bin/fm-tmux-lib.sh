@@ -90,7 +90,7 @@ fm_tmux_exact_target() {  # <target> [explicit]
   literal=${literal//,/#,}
   literal=${literal//\}/#\}}
   literal=${literal//\#\#\[/\#\{a:35\}\[}
-  if ! inventory=$(LC_ALL=C tmux list-windows -t "=$session" \
+  if ! inventory=$(tmux list-windows -t "=$session:" \
     -f "#{==:#{session_name}:#{window_name},$literal}" -F '#{window_id}' 2>&1); then
     case "$inventory" in
       *"can't find session:"*|*"no server running on "*|*"error connecting to "*" (No such file or directory)"|*"error connecting to "*" (Connection refused)")

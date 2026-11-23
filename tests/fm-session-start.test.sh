@@ -71,7 +71,8 @@ new_world() {
 # test deliberately breaks one. Mirrors fm-bootstrap.test.sh's fixture.
 make_fake_toolchain() {
   local fakebin=$1
-  fm_fake_exit0 "$fakebin" tmux node chrome-devtools-axi
+  fm_fake_exit0 "$fakebin" node chrome-devtools-axi
+  fm_fake_version_tool "$fakebin" tmux FM_FAKE_TMUX_VERSION 'tmux 3.2' -V
   fm_fake_version_tool "$fakebin" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.46
   cat > "$fakebin/gh-axi" <<'SH'
 #!/usr/bin/env bash
@@ -297,6 +298,7 @@ make_fake_tmux() {
 #!/usr/bin/env bash
 set -u
 case "\${1:-}" in
+  -V) printf '%s\n' 'tmux 3.2'; exit 0 ;;
   list-windows) printf '%s\n' '@1 $live' | fm_fake_tmux_window_ids "\$@"; exit 0 ;;
   list-panes) [ "\${3:-}" = '@1' ] || exit 1; printf '%%1\n'; exit 0 ;;
   display-message)
@@ -387,6 +389,7 @@ case "${1:-}" in
     esac
     exit 0
     ;;
+  -V) printf '%s\n' 'tmux 3.2'; exit 0 ;;
   has-session) exit 0 ;;
   kill-window)
     printf '%s\n' "$*" >> "$log"

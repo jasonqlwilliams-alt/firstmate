@@ -44,7 +44,8 @@ unset TMUX TMUX_PANE HERDR_ENV HERDR_PANE_ID HERDR_SESSION HERDR_SOCKET_PATH \
 make_fake_toolchain() {
   local dir=$1 fakebin
   fakebin=$(fm_fakebin "$dir")
-  fm_fake_exit0 "$fakebin" tmux node chrome-devtools-axi
+  fm_fake_exit0 "$fakebin" node chrome-devtools-axi
+  fm_fake_version_tool "$fakebin" tmux FM_FAKE_TMUX_VERSION 'tmux 3.2' -V
   fm_fake_version_tool "$fakebin" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.46
   cat > "$fakebin/gh-axi" <<'SH'
 #!/usr/bin/env bash
@@ -309,6 +310,24 @@ manual backlog backend still requires missing tasks-axi^1^-^1^manual^exact^MISSI
 manual backlog backend suppresses tasks-axi availability^1^0.2.4^1^manual^empty^^
 ROWS
   pass "bootstrap reports treehouse lease + tasks-axi/quota-axi bootstrap contracts"
+}
+
+test_tmux_min_version() {
+  local home="$TMP_ROOT/tmux-floor/home" fakebin out version
+  mkdir -p "$home"
+  fakebin=$(make_fake_toolchain "$TMP_ROOT/tmux-floor")
+  for version in 'tmux 3.0a' 'tmux 3.1c' 'tmux 3.2' 'tmux 3.2a' 'tmux 3.10' 'tmux 10.0' 'tmux development'; do
+    out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$home" FM_BACKEND=tmux \
+      FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_FAKE_TMUX_VERSION="$version" FM_BOOTSTRAP_DETECT_ONLY=1 \
+      "$ROOT/bin/fm-bootstrap.sh")
+    case "$version" in
+      'tmux 3.0a'|'tmux 3.1c'|'tmux development')
+        assert_contains "$out" 'MISSING: tmux (install:' "$version should report a tmux prerequisite failure"
+        assert_contains "$out" 'tmux >=3.2' "$version should report the minimum" ;;
+      *) assert_not_contains "$out" 'MISSING: tmux' "$version should satisfy the prerequisite" ;;
+    esac
+  done
+  pass "bootstrap enforces the tmux 3.2 minimum on the selected backend"
 }
 
 test_no_mistakes_min_version() {
@@ -843,6 +862,7 @@ make_routine_bootstrap_fixture() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 case "${1:-}" in
+  -V) printf '%s\n' 'tmux 3.2' ;;
   display-message)
     case "$*" in
       *'#{cursor_y}'*) printf '%s\n' 0 ;;
@@ -1168,6 +1188,7 @@ ROWS
 }
 
 test_bootstrap_reporting
+test_tmux_min_version
 test_no_mistakes_min_version
 test_gh_axi_min_version
 test_lavish_axi_min_version

@@ -771,7 +771,17 @@ for arg in "$@"; do
 done
 case "${1:-}" in
   list-windows)
+    if [ -n "${PEEK_CHARACTER_LOCALE:-}" ] &&
+      [ "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" != "$PEEK_CHARACTER_LOCALE" ]; then
+      exit 1
+    fi
     case "${PEEK_INVENTORY:-live}" in
+      adhoc)
+        if [ "$format" = '#{session_name}:#{window_name}' ]; then
+          printf '%s\n' 'sess:scratch' 'sess:scratch'
+        else
+          printf '%s\n' '@4 sess:scratch' '@5 sess:scratch' | fm_fake_tmux_window_ids "$@"
+        fi ;;
       foreign) printf '@7 other:win\n' | fm_fake_tmux_window_ids "$@" ;;
       multiline)
         if [ "$format" = '#{window_id}' ]; then
@@ -788,6 +798,7 @@ case "${1:-}" in
         printf '%s\n' 'oldest history' 'older history' 'latest history' | tail -n "${start#-}"
         printf 'recorded screen\n' ;;
       sess:0.1) printf 'explicit split pane\n' ;;
+      sess:scratch) printf 'ad hoc screen\n' ;;
       *) printf 'neighbour screen\n' ;;
     esac ;;
 esac
@@ -804,12 +815,22 @@ test_peek_tmux_contract() {
   neutral_root="$TMP_ROOT/peek-neutral-root"; mkdir -p "$neutral_root"
 
   out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" \
+    LC_ALL= LC_CTYPE=en_US.UTF-8 PEEK_CHARACTER_LOCALE=en_US.UTF-8 \
     "$ROOT/bin/fm-peek.sh" worker 2 2>/dev/null)
   [ "$out" = $'older history\nlatest history\nrecorded screen' ] \
     || fail "fm-peek should return the recorded screen and exactly two history lines"
   out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" \
     "$ROOT/bin/fm-peek.sh" sess:0.1 2 2>/dev/null)
   [ "$out" = 'explicit split pane' ] || fail "fm-peek should accept an explicit pane selector"
+  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" PEEK_INVENTORY=adhoc \
+    "$ROOT/bin/fm-peek.sh" scratch 2 2>/dev/null)
+  [ "$out" = 'ad hoc screen' ] || fail "an unrecorded bare name should retain its ad hoc capture"
+  fm_write_meta "$home/state/scratch-worker.meta" 'window=sess:scratch'
+  if out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" PEEK_INVENTORY=adhoc \
+    "$ROOT/bin/fm-peek.sh" scratch 2 2>&1); then
+    fail "a bare name that resolves to worker metadata should require a unique recorded target"
+  fi
+  assert_contains "$out" 'could not resolve tmux window sess:scratch' "duplicate recorded windows should be unreadable"
 
   if out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" PEEK_INVENTORY=foreign \
     "$ROOT/bin/fm-peek.sh" worker 2 2>&1); then
