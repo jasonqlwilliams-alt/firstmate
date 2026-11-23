@@ -741,7 +741,9 @@ ring_lab_setup() {
   ln -s "$bash_bin" "$RING_LAB/bin/agy"
   ln -s "$bash_bin" "$RING_LAB/bin/rovo"
   cat > "$RING_LAB/screen-stub.sh" <<'STUB'
-# Screen stub: <mode> <log>. Modes: empty, pending, unknown, picker-below,
+# Screen stub: <mode> <log> [inbox-dir]. With [inbox-dir], a submitted short
+# agy notice acknowledges that inbox's records the way a worker would.
+# Modes: empty, pending, unknown, picker-below,
 # picker-row, picker-after-key (empty until the first key, then the picker),
 # noecho (an empty composer that never renders what is typed), partial (a
 # composer that renders only a prefix of typed text), agy (agy's recorded
@@ -754,7 +756,7 @@ ring_lab_setup() {
 # chip at truecolor 162;163;165 with the cursor on the chip row; typed text
 # replaces the chip at truecolor 206;207;210), rovo-pending (the same box
 # already holding typed text), rovo-unknown (an unidentifiable rovo screen).
-mode=$1 log=$2 buf=
+mode=$1 log=$2 inbox=${3:-} buf=
 cols=$(stty size 2>/dev/null | cut -d' ' -f2)
 case "$cols" in ''|*[!0-9]*) cols=80 ;; esac
 case "$mode" in
@@ -851,6 +853,10 @@ while batch=$(dd bs=4096 count=1 2>/dev/null && printf '.'); do
               for f in "${BASH_REMATCH[1]}"/*.msg; do
                 [ -e "$f" ] && mv "$f" "${BASH_REMATCH[1]}/handled/"
               done
+            elif [ -n "$inbox" ] && [[ $buf == *'read your inbox'* ]]; then
+              for f in "$inbox"/*.msg; do
+                [ -e "$f" ] && mv "$f" "$inbox/handled/"
+              done
             fi
             buf=
           fi
@@ -871,8 +877,8 @@ STUB
 }
 
 # Start one stub window and wait until its screen is drawn. Echoes its target.
-ring_stub_window() {  # <name> <mode> <log> [pane-columns]
-  local name=$1 mode=$2 log=$3 cols=${4:-} i=0 marker cursor_row='' agent=codex session=ring
+ring_stub_window() {  # <name> <mode> <log> [pane-columns] [inbox-dir]
+  local name=$1 mode=$2 log=$3 cols=${4:-} inbox=${5:-} i=0 marker cursor_row='' agent=codex session=ring
   : > "$log"
   case "$mode" in
     agy|agy-*) agent=agy; cursor_row=3 ;;
@@ -881,10 +887,10 @@ ring_stub_window() {  # <name> <mode> <log> [pane-columns]
   if [ -n "$cols" ]; then
     session=$name
     "$RING_TMUX" -L "$RING_SOCKET" new-session -d -s "$session" -n "$name" -x "$cols" -y 40 -- \
-      "$RING_LAB/bin/$agent" "$RING_LAB/screen-stub.sh" "$mode" "$log" || fail "could not create $name pane"
+      "$RING_LAB/bin/$agent" "$RING_LAB/screen-stub.sh" "$mode" "$log" "$inbox" || fail "could not create $name pane"
   else
     "$RING_TMUX" -L "$RING_SOCKET" new-window -d -t "$session:" -n "$name" -- \
-      "$RING_LAB/bin/$agent" "$RING_LAB/screen-stub.sh" "$mode" "$log"
+      "$RING_LAB/bin/$agent" "$RING_LAB/screen-stub.sh" "$mode" "$log" "$inbox"
   fi
   case "$mode" in
     picker-below|picker-row) marker='esc skip' ;;
@@ -1019,14 +1025,15 @@ test_agy_doorbell_width_boundary() {
   mkdir -p "$state"
   narrow_rec="$state/t1.inbox/001.msg"
   wide_rec="$state/t2.inbox/001.msg"
-  narrow_notice=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$narrow_rec") \
+  narrow_notice=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$narrow_rec" agy) \
     || fail "could not generate the narrow test doorbell"
-  wide_notice=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$wide_rec") \
+  wide_notice=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$wide_rec" agy) \
     || fail "could not generate the wide test doorbell"
   [ "${#narrow_notice}" -eq "${#wide_notice}" ] || fail "the two test doorbells must have equal length"
-  narrow=$(ring_stub_window agy-narrow agy "$RING_LAB/agy-narrow.log" "$((${#narrow_notice} + 4))")
+  mkdir -p "$state/t1.inbox/handled" "$state/t2.inbox/handled"
+  narrow=$(ring_stub_window agy-narrow agy "$RING_LAB/agy-narrow.log" "$((${#narrow_notice} + 4))" "$state/t1.inbox")
   log="$RING_LAB/agy-wide.log"
-  wide=$(ring_stub_window agy-wide agy "$log" "$((${#wide_notice} + 5))")
+  wide=$(ring_stub_window agy-wide agy "$log" "$((${#wide_notice} + 5))" "$state/t2.inbox")
   for target in "$narrow" "$wide"; do
     verdict=$(PATH="$RING_LAB/shim:$PATH" bash -c '. "$1"; fm_backend_guarded_composer_state tmux "$2" "" "" agy' _ \
       "$ROOT/bin/fm-backend.sh" "$target")
@@ -1055,6 +1062,38 @@ test_agy_doorbell_width_boundary() {
   pass "fm-send: equal-length agy notices are refused at the last column and delivered with one more column"
 }
 
+# agy panes get a short one-line notice that fits an ordinary pane, while
+# every other harness keeps the self-describing path-bearing line.
+test_agy_short_doorbell_fits_an_ordinary_pane() {
+  local state rec agy_line codex_line target log rc i=0
+  ring_lab_setup
+  state="$TMP_ROOT/ring-agy-short/state"
+  mkdir -p "$state"
+  rec=$(inbox_lib "$state" fm_task_inbox_write "$state" t1 "please continue")
+  agy_line=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$rec" agy) \
+    || fail "could not generate the agy doorbell"
+  codex_line=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$rec" codex) \
+    || fail "could not generate the codex doorbell"
+  [ "${#agy_line}" -lt 70 ] || fail "the agy doorbell should stay under 70 characters, got ${#agy_line}: $agy_line"
+  case "$agy_line" in
+    ': '*'waiting'*'inbox'*'handled'*) ;;
+    *) fail "the agy doorbell must say a message is waiting and how to read and acknowledge it: $agy_line" ;;
+  esac
+  assert_contains "$codex_line" "list '$state/t1.inbox'/*.msg" "other harnesses keep the path-bearing doorbell"
+  [ "$(inbox_lib "$state" fm_task_inbox_doorbell_line "$rec")" = "$codex_line" ] \
+    || fail "a ring without a harness must keep today's doorbell"
+  log="$RING_LAB/agy-ordinary.log"
+  target=$(ring_stub_window agy-ordinary agy "$log" 80 "$state/t1.inbox")
+  PATH="$RING_LAB/shim:$PATH" \
+    inbox_lib "$state" fm_task_inbox_ring tmux "$target" "$rec" "" agy || rc=$?
+  [ "${rc:-0}" = 0 ] || fail "an idle 80-column agy composer should receive the short doorbell, got $rc"
+  while [ "$i" -lt 50 ] && [ -e "$rec" ]; do sleep 0.1; i=$((i + 1)); done
+  [ "$(grep -c '^ENTER' "$log")" = 1 ] || fail "the agy ring should press exactly one Enter:"$'\n'"$(cat "$log")"
+  grep -qxF "SUBMIT $agy_line" "$log" || fail "the agy pane should receive the short doorbell:"$'\n'"$(cat "$log")"
+  [ -f "$state/t1.inbox/handled/001.msg" ] || fail "the short agy doorbell was not acted on"
+  pass "inbox: agy gets a short doorbell that fits an ordinary 80-column pane; other harnesses keep the full line"
+}
+
 # An agy pane with a draft or an unproven frame gets nothing typed, and the
 # record stays queued for the re-ring ladder.
 test_ring_refuses_unproven_agy_screens() {
@@ -1064,7 +1103,7 @@ test_ring_refuses_unproven_agy_screens() {
   mkdir -p "$state"
   for mode in agy-pending agy-busy agy-survey agy-forged; do
     log="$RING_LAB/$mode.log"
-    notice=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$state/$mode.inbox/001.msg") \
+    notice=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$state/$mode.inbox/001.msg" agy) \
       || fail "could not generate the $mode test doorbell"
     target=$(ring_stub_window "$mode" "$mode" "$log" "$((${#notice} + 5))")
     rc=$(ring_into "$state" "$mode" "$target" agy)
@@ -1227,6 +1266,7 @@ test_ring_refuses_a_picker_that_appears_while_typing
 test_ring_still_delivers_into_an_empty_composer
 test_ring_refuses_pending_and_unproven_codex_screens
 test_agy_doorbell_width_boundary
+test_agy_short_doorbell_fits_an_ordinary_pane
 test_ring_refuses_unproven_agy_screens
 test_ring_still_rings_an_unknown_screen_outside_the_strict_harnesses
 test_ring_delivers_into_an_idle_rovo_composer

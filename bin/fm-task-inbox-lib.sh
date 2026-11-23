@@ -258,12 +258,23 @@ fm_task_inbox_body() {  # <record-path>
 # exited (a bare shell) runs nothing; see the dead-pane note in the header.
 # A non-printable path fails without output so terminal controls never reach
 # the pane's line discipline.
-fm_task_inbox_doorbell_line() {  # <record-path>
+# An agy pane gets its own short constant line instead: the doorbell types
+# into agy only when the whole line fits agy's one composer row
+# (fm_composer_agy_notice_fits), and the path-bearing line is too long for an
+# ordinary pane. It keeps the meaning - a message is waiting; read the inbox,
+# act, and acknowledge by moving it - while the worker's instructions name its
+# inbox.
+FM_TASK_INBOX_AGY_DOORBELL=': Firstmate message waiting: read your inbox, act, mv to handled/.'
+fm_task_inbox_doorbell_line() {  # <record-path> [harness]
   local dir=${1%/*} abs quoted LC_ALL=C
   abs=$(cd "$dir" 2>/dev/null && pwd) || abs=$dir
   case "$abs" in
     *[![:print:]]*) return 1 ;;
   esac
+  if [ "${2:-}" = agy ]; then
+    printf '%s' "$FM_TASK_INBOX_AGY_DOORBELL"
+    return 0
+  fi
   quoted=$(printf '%s' "$abs" | sed "s/'/'\\\\''/g")
   printf ": Firstmate instruction waiting: list '%s'/*.msg and, in numeric order, read and act on each, then mv each handled file to '%s'/handled/." \
     "$quoted" "$quoted"
@@ -313,7 +324,7 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label] [har
   case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
     dead|missing) return 3 ;;
   esac
-  if ! line=$(fm_task_inbox_doorbell_line "$rec"); then
+  if ! line=$(fm_task_inbox_doorbell_line "$rec" "$harness"); then
     return 2
   fi
   screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" '' "$harness" "$line" 2>/dev/null) \
