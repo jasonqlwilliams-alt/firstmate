@@ -400,11 +400,11 @@ test_answer_between_resolution_and_timeout_wins() {
 set -u
 command -p grep "$@"
 rc=$?
-status=${!#}
-case "$rc:${3:-}:$status" in
-  1:corr=*:"${FM_FAKE_DIR%/fake}"/home/state/sm1.status)
+case "$rc:${1:-}:${3:-}" in
+  1:-aF:corr=*)
     corr=${3#corr=}
-    printf 'done [corr=%s]: Saved all open work. (via-helper)\n' "$corr" >> "$status"
+    printf 'done [corr=%s]: Saved all open work. (via-helper)\n' "$corr" \
+      >> "${FM_FAKE_DIR%/fake}/home/state/sm1.status"
     ;;
 esac
 exit "$rc"
@@ -1230,6 +1230,59 @@ test_non_utf8_correction_vetoes_save_receipt() {
   pass "a non-UTF-8 correction vetoes an earlier save receipt"
 }
 
+test_incomplete_save_evidence_stops_restart() {
+  local mode dir out rc expected
+  for mode in unterminated scan-error; do
+    dir=$(new_case "$mode")
+    add_local_mate "$dir" sm1
+    cat > "$dir/fake/on-doorbell" <<'SH'
+#!/usr/bin/env bash
+corr=${FM_PENDING_REPLY_EXISTING_CORR:-}
+[ -n "$corr" ] || exit 0
+status="${FM_FAKE_DIR%/fake}/home/state/sm1.status"
+printf 'done [corr=%s]: Saved all open work.' "$corr" >> "$status"
+if [ "$FM_FAKE_SAVE_MODE" = scan-error ]; then
+  printf '\nblocked [corr=%s]: one record was never written\n' "$corr" >> "$status"
+fi
+SH
+    chmod +x "$dir/fake/on-doorbell"
+
+    if [ "$mode" = scan-error ]; then
+      cat > "$dir/fakebin/grep" <<'SH'
+#!/usr/bin/env bash
+case "${1:-}:${3:-}" in
+  -aF:corr=*)
+    head -1 "${FM_FAKE_DIR%/fake}/home/state/sm1.status"
+    exit 2
+    ;;
+esac
+command -p grep "$@"
+SH
+      chmod +x "$dir/fakebin/grep"
+      expected='the parent status scan failed'
+    else
+      expected='unterminated status line'
+    fi
+
+    out=$(FM_FAKE_SAVE_MODE="$mode" FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1); rc=$?
+
+    if [ "$mode" = scan-error ]; then
+      assert_grep 'one record was never written' "$dir/home/state/sm1.status" \
+        "the status file must contain the correction hidden by the scan error"
+    else
+      [ "$(tail -c 1 "$dir/home/state/sm1.status")" = . ] \
+        || fail "the partial receipt fixture must end before a newline"
+    fi
+    expect_code 3 "$rc" "$mode save evidence must not release the restart"$'\n'"$out"
+    assert_contains "$out" 'stopped: sm1: its answer did not confirm that its open work is saved' \
+      "$mode save evidence must be reported as unclear"
+    assert_contains "$out" "$expected" "the pass must report why $mode save evidence was inconclusive"
+    ! grep -Eq '^/(exit|quit)$' "$dir/fake/literal" \
+      || fail "$mode save evidence sent an exit command"
+  done
+  pass "a partial line or failed status scan cannot release the restart"
+}
+
 test_unrelated_headers_do_not_veto_save_receipt() {
   local dir out rc
   dir=$(new_case tag-first)
@@ -1324,6 +1377,7 @@ test_unclear_persist_answer_stops_local_restart
 test_negative_persist_answer_stops_remote_restart
 test_negative_or_unclear_reply_vetoes_save_receipt
 test_non_utf8_correction_vetoes_save_receipt
+test_incomplete_save_evidence_stops_restart
 test_unrelated_headers_do_not_veto_save_receipt
 test_operator_close_does_not_count_as_a_save_reply
 

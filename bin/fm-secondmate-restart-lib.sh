@@ -57,7 +57,7 @@ fm_secondmate_persist_request() {  # <running-harness>
 FM_SECONDMATE_PERSIST_OUTCOME=""
 FM_SECONDMATE_PERSIST_NOTE=""
 fm_secondmate_persist_outcome() {  # <state-dir> <corr_id>
-  local state=$1 corr=$2 rec status_file line header note verb reply_token header_corr note_token
+  local state=$1 corr=$2 rec status_file replies line header note verb reply_token header_corr note_token
   reply_token="\[corr=$corr\]|(^|[[:space:]])corr=$corr([[:space:]]|\[|$)"
   header_corr="\[$FM_PENDING_REPLY_CORR_RE\]|(^|[[:space:]])$FM_PENDING_REPLY_CORR_RE([[:space:]]|\[|$)"
   note_token="^[[:space:]]*(\[corr=$corr\]|corr=$corr)([[:space:]]|$)"
@@ -67,7 +67,17 @@ fm_secondmate_persist_outcome() {  # <state-dir> <corr_id>
   [ -f "$rec" ] || return 1
   status_file=$(fm_pending_reply_get "$rec" parent_status)
   [ -f "$status_file" ] || return 1
-  while IFS= read -r line || [ -n "$line" ]; do
+  if ! replies=$(
+    set -o pipefail
+    { cat "$status_file" && printf ' [unterminated status line]\n'; } |
+      { grep -aF -e "corr=$corr" || [ "$?" -eq 1 ]; } |
+      LC_ALL=C tr '\000' '?'
+  ); then
+    FM_SECONDMATE_PERSIST_OUTCOME=unclear
+    FM_SECONDMATE_PERSIST_NOTE="the parent status scan failed"
+    return 0
+  fi
+  while IFS= read -r line; do
     case "$line" in
       "done [corr=$corr]: $_FM_SECONDMATE_SAVED_RECEIPT"|"done [corr=$corr]: $_FM_SECONDMATE_SAVED_RECEIPT (via-helper)")
         FM_SECONDMATE_PERSIST_OUTCOME=saved
@@ -91,7 +101,7 @@ fm_secondmate_persist_outcome() {  # <state-dir> <corr_id>
       *) FM_SECONDMATE_PERSIST_OUTCOME=unclear ;;
     esac
     return 0
-  done < <(grep -aF -e "corr=$corr" "$status_file")
+  done <<< "$replies"
   [ "$FM_SECONDMATE_PERSIST_OUTCOME" = saved ]
 }
 
