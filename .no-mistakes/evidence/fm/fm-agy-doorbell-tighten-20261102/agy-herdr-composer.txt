@@ -1,0 +1,17 @@
+Firstmate's guarded composer read on Herdr 0.9.5 with a synthetic Agy terminal peer.
+
+$ herdr pane read (isolated lab, synthetic Agy terminal peer)
+Synthetic Agy terminal peer
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+> Accept-edits mode: file edits auto-approved (shift+tab to cycle)
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+
+$ fm_backend_guarded_composer_state herdr <pane> "" "" agy <short notice>
+Verdict empty
+
+$ fm_backend_guarded_composer_state herdr <pane> "" "" agy <500-byte notice>
+Verdict unknown
+
+$ fm_backend_guarded_composer_state herdr <pane> "" "" <absent harness>
+Verdict unknown

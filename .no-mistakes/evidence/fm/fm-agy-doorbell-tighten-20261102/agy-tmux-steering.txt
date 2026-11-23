@@ -1,0 +1,146 @@
+Firstmate fm-send.sh and fm-watch.sh on tmux 3.7c with a synthetic Agy terminal peer.
+Pane sizes were measured before lab paths were shortened in this transcript.
+Supervision startup warnings from the send-only cases are omitted.
+
+=== Harness-scoped proof ===
+[Same idle screen for all recorded harness values]
+Synthetic Agy terminal peer
+──────────────────────────────────────────────────────────────────────────────
+>
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+recorded harness=agy verdict=empty
+recorded harness=(absent) verdict=unknown
+recorded harness=codex verdict=unknown
+recorded harness=rovo verdict=unknown
+Result: PASS
+
+=== Ordinary width with equivalent UTF-8 locator ===
+Brief locator uses a quote-bearing symlink spelling with a doubled separator; fm-send uses the real UTF-8 path.
+[Idle 80-column terminal before steer]
+Synthetic Agy terminal peer
+──────────────────────────────────────────────────────────────────────────────
+>
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+$ fm-send.sh short 'Confirm receipt of synthetic steer'
+exit 0
+Pending 001.msg body = 'Confirm receipt of synthetic steer'
+Peer received terminal bytes b': Firstmate message waiting: read your inbox, act, mv to handled/.\r'
+[Idle terminal after one exact submission]
+Synthetic Agy terminal peer
+Sent: : Firstmate message waiting: read your inbox, act, mv to handled/.
+──────────────────────────────────────────────────────────────────────────────
+>
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+Result: PASS
+
+=== Legacy notice fit boundary ===
+Path-bearing notice has 351 characters. First pane width = 355.
+$ fm-send.sh legacy 'Confirm receipt of synthetic steer'
+exit 0
+fm-send: doorbell not typed into legacy:fm-legacy. Possible causes are pending text, a composer that could not be proven empty, or a composer row too narrow for the doorbell line. A wider agy pane can help the line fit. The steer is durably recorded at <disposable lab>/fleet/state/legacy.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer.
+Pending 001.msg body = 'Confirm receipt of synthetic steer'
+Peer received terminal bytes b''
+$ fm-send.sh legacy 'Second synthetic steer after widening'
+exit 0; WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+Peer received terminal bytes b": Firstmate instruction waiting: list '<disposable lab>/fleet/state/legacy.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<disposable lab>/fleet/state/legacy.inbox'/handled/.\r"
+[Wide legacy terminal after one path-bearing submission]
+Synthetic Agy terminal peer
+Sent: : Firstmate instruction waiting: list '<disposable lab>/fleet/state/legacy.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<disposable lab>/fleet/state/legacy.inbox'/handled/
+.
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+Result: PASS
+
+=== Pending or unproven first capture ===
+[pending before steer]
+Synthetic Agy terminal peer
+──────────────────────────────────────────────────────────────────────────────
+> operator draft
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+$ fm-send.sh pending 'Confirm receipt of synthetic steer'
+exit 0
+fm-send: doorbell not typed into pending:fm-pending. Possible causes are pending text, a composer that could not be proven empty, or a composer row too narrow for the doorbell line. A wider agy pane can help the line fit. The steer is durably recorded at <disposable lab>/fleet/state/pending.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer.
+Pending 001.msg body = 'Confirm receipt of synthetic steer'
+[pending after steer]
+Synthetic Agy terminal peer
+──────────────────────────────────────────────────────────────────────────────
+> operator draft
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+Peer received terminal bytes b''
+[survey before steer]
+Synthetic Agy terminal peer
+──────────────────────────────────────────────────────────────────────────────
+>
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+How's the CLI experience so far? Help us improve:
+[1] Good  [2] Fine  [3] Bad  [0] Skip
+$ fm-send.sh survey 'Confirm receipt of synthetic steer'
+exit 0
+fm-send: doorbell not typed into survey:fm-survey. Possible causes are pending text, a composer that could not be proven empty, or a composer row too narrow for the doorbell line. A wider agy pane can help the line fit. The steer is durably recorded at <disposable lab>/fleet/state/survey.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer.
+Pending 001.msg body = 'Confirm receipt of synthetic steer'
+[survey after steer]
+Synthetic Agy terminal peer
+──────────────────────────────────────────────────────────────────────────────
+>
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+How's the CLI experience so far? Help us improve:
+[1] Good  [2] Fine  [3] Bad  [0] Skip
+Peer received terminal bytes b''
+Result: PASS
+
+=== Exact-text proof before Enter ===
+[Composer initially idle]
+Synthetic Agy terminal peer
+──────────────────────────────────────────────────────────────────────────────
+>
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+$ fm-send.sh mismatch 'Confirm receipt of synthetic steer'
+exit 0
+fm-send: doorbell typed into mismatch:fm-mismatch but its Enter was withheld because the composer did not prove it holds the doorbell; the steer is durably recorded at <disposable lab>/fleet/state/mismatch.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+Pending 001.msg body = 'Confirm receipt of synthetic steer'
+Peer received terminal bytes b': Firstmate message waiting: read your inbox, act, mv to handled/.'
+[Composer shows a different final character after typing]
+Synthetic Agy terminal peer
+──────────────────────────────────────────────────────────────────────────────
+> : Firstmate message waiting: read your inbox, act, mv to handled/!
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+Result: PASS
+
+=== Watcher honors refusal and escalates ===
+[Existing draft before retry]
+Synthetic Agy terminal peer
+──────────────────────────────────────────────────────────────────────────────
+> operator draft
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+$ fm-send.sh retry 'Confirm receipt of synthetic steer'
+exit 0
+fm-send: doorbell not typed into retry:fm-retry. Possible causes are pending text, a composer that could not be proven empty, or a composer row too narrow for the doorbell line. A wider agy pane can help the line fit. The steer is durably recorded at <disposable lab>/fleet/watch-state/retry.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer.
+Pending 001.msg body = 'Confirm receipt of synthetic steer'
+$ FM_TASK_INBOX_GRACE_SECS=1 FM_TASK_INBOX_RING_MAX=2 FM_POLL=1 fm-watch.sh
+exit 0
+stale: retry:fm-retry (unread firstmate instruction: <disposable lab>/fleet/watch-state/retry.inbox/001.msg still unhandled after 2 doorbell delivery attempts with an idle pane; inspect the worker)
+[Existing draft after bounded retries]
+Synthetic Agy terminal peer
+──────────────────────────────────────────────────────────────────────────────
+> operator draft
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+Peer received terminal bytes b''
+[2026-11-23T04:55:48-0800] steer-inbox delivery attempt: retry 001.msg result=1
+[2026-11-23T04:55:50-0800] steer-inbox delivery attempt: retry 001.msg result=1
+Retry record = 001.msg	2	1795438550
+Wake queue = 1795438551	1	stale	retry:fm-retry	stale: retry:fm-retry (unread firstmate instruction: <disposable lab>/fleet/watch-state/retry.inbox/001.msg still unhandled after 2 doorbell delivery attempts with an idle pane; inspect the worker)
+Result: PASS
+{'Harness-scoped proof': 'PASS', 'Ordinary width with equivalent UTF-8 locator': 'PASS', 'Legacy notice fit boundary': 'PASS', 'Pending or unproven first capture': 'PASS', 'Exact-text proof before Enter': 'PASS', 'Watcher honors refusal and escalates': 'PASS'}

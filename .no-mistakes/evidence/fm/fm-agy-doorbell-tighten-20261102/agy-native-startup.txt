@@ -1,0 +1,25 @@
+$ agy --version
+1.5.15
+$ tmux new-session -d -x 100 -y 30 -- agy --add-dir <disposable workspace>
+pane=100x30 process=agy dead=0
+     ▄▀▀▄
+    ▀▀▀▀▀▀
+   ▀▀▀▀▀▀▀▀
+  ▄▀▀    ▀▀▄
+ ▄▀▀      ▀▀▄
+ Welcome to the Antigravity CLI. You are currently not signed in.
+ Select login method:
+ > 1. Google OAuth
+   2. Use a Google Cloud project
+   ↑/↓ Navigate · enter Select
+
+$ fm-send.sh native 'Synthetic sign-in guard check'
+exit 0
+fm-send: doorbell not typed into native:fm-native. Possible causes are pending text, a composer that could not be proven empty, or a composer row too narrow for the doorbell line. A wider agy pane can help the line fit. The steer is durably recorded at <disposable lab>/fleet/state/native.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer.
+Synthetic sign-in guard check
+Login picker unchanged. No terminal key dispatch. Steer remains in native.inbox/001.msg.
+
+$ agy models (same disposable HOME)
+exit 1
+Fetching available models...
+Error: Please sign in to view available models. Launch the CLI without arguments to sign in.
