@@ -332,11 +332,13 @@ test_run_clear_rejects_previous_owner_completion() {
 }
 
 test_run_compact_rejects_completion_for_reused_pid() {
-  local root="$TMP_ROOT/run-compact-reused-owner" out owner
+  local root="$TMP_ROOT/run-compact-reused-owner" out owner start stale
   make_run_primary "$root"
   run_hook "$root" --source startup </dev/null >/dev/null
   owner=$(cat "$root/state/.lock")
-  printf '%s\nstart=proc:0\n' "$owner" > "$root/state/.session-start-complete"
+  start=$(sed -n 's/^start=//p' "$root/state/.lock.start")
+  stale=$(fm_test_stale_start_token "$start") || fail "no different start time in the fixture's format"
+  printf '%s\nstart=%s\n' "$owner" "$stale" > "$root/state/.session-start-complete"
   out=$(run_hook "$root" --source compact </dev/null)
   assert_not_contains "$out" "$REEMIT_BANNER" "compact accepted completion from a previous process with the same PID"
   assert_contains "$out" "$FULL_BANNER$root" "compact did not finish startup for the current process"

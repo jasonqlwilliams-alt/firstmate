@@ -150,6 +150,17 @@ fm_test_pid_identity() {
     '. "$1"; fm_pid_identity "$2"' _ "$ROOT/bin/fm-wake-lib.sh" "$pid"
 }
 
+fm_test_stale_start_token() {
+  local stale
+  case "$1" in
+    proc:?*) stale=proc:0 ;;
+    lstart:?*) stale='lstart:Sat Jan  1 00:00:00 2000' ;;
+    *) return 1 ;;
+  esac
+  [ "$stale" != "$1" ] || return 1
+  printf '%s\n' "$stale"
+}
+
 # --- process-event runner reaping -------------------------------------------
 #
 # A process-event runner is detached into its own process group and reparents to

@@ -431,7 +431,9 @@ printf '%s\n' "$FM_PRIMARY_TEST_PID" > "$HOME_FIXTURE/state/.session-start-compl
 capture ready
 expect_rc 1
 contains 'primary_initialized=false'
-printf '%s\nstart=proc:0\n' "$FM_PRIMARY_TEST_PID" > "$HOME_FIXTURE/state/.session-start-complete"
+start_token=$(sed -n 's/^start=//p' "$HOME_FIXTURE/state/.lock.start")
+stale_token=$(fm_test_stale_start_token "$start_token") || fail 'no different start time in the fixture format'
+printf '%s\nstart=%s\n' "$FM_PRIMARY_TEST_PID" "$stale_token" > "$HOME_FIXTURE/state/.session-start-complete"
 capture ready
 expect_rc 1
 contains 'primary_initialized=false'

@@ -424,17 +424,23 @@ test_acquire_records_pid_and_start_time() {
 }
 
 test_reused_pid_with_other_start_time_is_not_an_owner() {
-  local home out status
+  local home out status start stale replacement_pid replacement_start
   home=$(lock_home reused)
   start_live_harness
+  start=$(fixture_start_time "$LIVE_HARNESS_PID") || fail "no start time for the live fixture"
+  stale=$(fm_test_stale_start_token "$start") || fail "no different start time in the fixture's format"
   # The recorded owner exited and the kernel gave its pid to an unrelated live
   # harness-named process: same pid, different start time.
   printf '%s\n' "$LIVE_HARNESS_PID" > "$home/state/.lock"
-  printf '%s\nstart=proc:1\n' "$LIVE_HARNESS_PID" > "$home/state/.lock.start"
+  printf '%s\nstart=%s\n' "$LIVE_HARNESS_PID" "$stale" > "$home/state/.lock.start"
   status=$(FM_HOME="$home" "$ROOT/bin/fm-lock.sh" status)
   case "$status" in "lock: stale"*) ;; *) fail "a reused pid still reads as the live owner: $status" ;; esac
   out=$(lock_as_harness "$home" 2>&1) || fail "a reused owner pid kept the home refused: $out"
-  [ "$(cat "$home/state/.lock")" != "$LIVE_HARNESS_PID" ] || fail "the lock still names the unrelated process"
+  replacement_pid=$(cat "$home/harness-pid")
+  replacement_start=$(cat "$home/harness-start")
+  cmp -s "$home/state/.lock" <(printf '%s\n' "$replacement_pid") || fail "takeover did not publish the replacement PID"
+  cmp -s "$home/state/.lock.start" <(printf '%s\nstart=%s\n' "$replacement_pid" "$replacement_start") \
+    || fail "takeover did not publish the replacement start time"
   pass "session lock: a reused pid with a different start time no longer holds the lock"
 }
 
@@ -511,7 +517,11 @@ test_readers_see_only_complete_owner_lines() {
 [ "${@: -1}" = "$FM_HOME/state/.lock" ] || exec /bin/mv "$@"
 : > "$FM_HOME/publishing"
 for ((i = 0; i < 500; i++)); do
-  if [ -e "$FM_HOME/reader-sampled" ]; then exec /bin/mv "$@"; fi
+  if [ -e "$FM_HOME/reader-sampled" ]; then
+    /bin/mv "$@" || exit $?
+    cat "$FM_HOME/state/.lock" > "$FM_HOME/owner-after-rename"
+    exit $?
+  fi
   sleep 0.01
 done
 exit 1
@@ -539,6 +549,8 @@ SH
     esac
   done
   wait "$writer_pid" || fail "replacement acquisition failed"
+  cmp -s "$home/owner-after-rename" <(printf '%s\n' "$new_owner") \
+    || fail "the owner file did not contain the replacement PID at the rename boundary"
   [ "$observed" = "$new_owner" ] || fail "the reader never saw the replacement owner"
   pass "session lock: a reader across publication sees only complete fixture PIDs"
 }
