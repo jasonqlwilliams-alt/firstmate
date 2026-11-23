@@ -161,14 +161,17 @@ Each record includes arm and watcher PIDs, start and end timestamps, exit code a
 The file is size-capped through `FM_WATCH_CYCLE_LOG_MAX_BYTES` and `FM_WATCH_CYCLE_LOG_KEEP_LINES`.
 `state/.watch-triage.log` remains only the watcher's bounded absorbed-wake debug log and carries no lifecycle semantics.
 
-The default 300-second grace is unchanged.
-The watcher process updates `state/.last-watcher-beat` at cycle checkpoints, including after each check it reaps and between slices of long sleeps.
-With GNU timeout available as `timeout` or `gtimeout`, it gives remote pending-reply observations half the applicable grace, capped at 150 seconds, and escalates to KILL after a short shutdown allowance.
-Without GNU timeout, an observation queued behind work for the same remote home can exceed the liveness grace.
-An observation that times out supplies no completion evidence and is retried on a later cycle while the reply is still pending.
-A short configured grace can expire during triage or other work that runs under its own timeout.
-The singleton owner publishes each update, so a watcher that stops making progress still ages out.
+The watcher checks singleton lock ownership before updating `state/.last-watcher-beat` at cycle checkpoints, including between pending-reply records, around registered checks, and between slices of ordinary poll and signal-coalescing sleeps.
 The mtime is authoritative for freshness, and the one-line content is informational.
+The sleep slice limit is half the smaller positive value of the ordinary guard threshold (`FM_GUARD_GRACE`) and the watcher's resolved pre-acquisition threshold (`FM_WATCHER_STALE_GRACE`), rounded down and clamped to 1–150 seconds.
+The slices add up to the requested sleep duration, including for a poll sleep entered after native event fallback.
+The beacon is a progress signal, so a watcher that stops reaching checkpoints still ages out.
+A native Herdr subscription waits uninterrupted, and an individual operation such as a check, recovery repost, or process-event launch keeps its own budget and can run past the freshness threshold between checkpoints.
+
+When GNU `timeout` or `gtimeout` is available, the watcher uses the sleep slice limit as a deadline for each remote pending-reply observation.
+At the deadline the capture process group gets a short shutdown allowance before KILL, and normal watcher shutdown also cleans up the active capture group.
+A timed-out observation yields `unknown`, supplies no turn-completion evidence, and can be retried on a later poll while the reply is still pending.
+Without GNU timeout, the watcher uses the ordinary remote observation path, whose queue wait can exceed the liveness grace.
 
 ## Regression coverage
 
@@ -179,7 +182,8 @@ The same suite covers ordinary same-process session replacement for `/new`, `/re
 `tests/fm-watcher-lock.test.sh` covers verified-successor attach, recovery publication before stale-lock removal, the typed self-eviction failure, bounded and successor-linked lifecycle rows, a poll's non-empty beacon that mtime-based readers judge by freshness alone and a size-based observer never reads as empty, and a SIGSTOP counterfactual that distinguishes a live PID from a stale beacon before classifying termination.
 `tests/fm-subagent-pretool-check.test.sh` proves Claude retains only the non-status Bash seatbelts.
 `tests/fm-claude-stop-autoarm.test.sh` covers the auto-arm's scope, stale and live session owners, unchanged AFK and need boundaries, single-flight, bounded failure retries, benign live-watcher cycle ends, one-notice failure episodes, and exit-2 translation.
-It drives the real guard, watcher and Stop hook through a stalled remote observation, a long terminal wait, and a check sweep longer than the grace window, verifying delivery by the original owner and stale-beacon failure when the watcher stops making progress.
+It drives the real guard, watcher and Stop hook through a stalled remote observation, a long polling sleep, and a check sweep longer than the grace window, verifying delivery by the original owner and stale-beacon failure when the watcher stops making progress.
+It checks observation cleanup on normal shutdown and Claude lease expiry, and verifies that checks, recovery reposts, and process-event launches retain their operation budgets.
 It also covers generation-claim single-flight, stuck-claim supersession, superseded-owner silence, notice-marker refusal and retry, ownership-atomic episode reset, and the legacy upgrade shim; [`turnend-guard.md`](turnend-guard.md) owns those behavior contracts.
 `FM_CLAUDE_LIVE_E2E=1 tests/fm-claude-stop-autoarm-live-e2e.test.sh` starts with the reproduced stale-lock state, runs session start first, completes two immediate fixture cycles, and checks the competing-live-owner negative control.
 It also runs a real parked watcher with a 40-second lease and 60-second native deadline, delivers an inbox note after that original deadline with no additional human turn, checks singleton ownership and exact acknowledgements, and verifies that held backlog alone does not renew.

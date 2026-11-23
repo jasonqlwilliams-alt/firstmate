@@ -62,10 +62,11 @@ If `jq` is missing or hook stdin is empty, the guard exits 0 because it cannot s
 
 ### Guard grace and the poll cadence
 
-The watcher refreshes its beacon during long ordinary poll sleeps, including sleeps after native event fallback, as described in the [watcher beacon contract](watcher-continuity.md#arm-layer-cycle-contract).
+See the [watcher beacon contract](watcher-continuity.md#arm-layer-cycle-contract) for publication checkpoints and limits on freshness during a cycle.
 The Claude Stop-hook auto-arm (`bin/fm-claude-stop-autoarm.sh`) and the watcher's pre-acquisition staleness check retain their poll-derived default grace of `max(300, FM_POLL + 60)`.
 `fm_poll_derived_grace` in `bin/fm-wake-lib.sh` is the single owner of that formula.
-The auto-arm hook additionally exports its resolved `FM_GUARD_GRACE` when it forks `bin/fm-watch-arm.sh`, so the arm wrapper and the watcher it may start judge staleness with the exact same value the hook just judged it with, whether that value came from an operator override or the poll-derived default.
+The auto-arm hook exports its resolved `FM_GUARD_GRACE` to `bin/fm-watch-arm.sh` so the wrapper uses the hook's threshold and the watcher inherits it as the default for its pre-acquisition check.
+An explicit `FM_WATCHER_STALE_GRACE` takes precedence for the watcher's pre-acquisition check.
 `bin/fm-turnend-guard.sh`'s away-mode branch (`fm_afk_daemon_owns_supervision`, above) also derives its beacon grace from `fm_poll_derived_grace` rather than falling back to the bare 300-second default, for the same reason: the daemon's watcher-restart cadence there is not a fixed poll loop, so a flat grace misreads a daemon that is genuinely still cycling as down.
 Every other direct `FM_GUARD_GRACE` reader (`bin/fm-guard.sh`, the strict-watcher checks in `bin/fm-turnend-guard.sh` and its harness-specific wrappers, `bin/fm-wake-lib.sh`) still falls back to the bare 300-second default unless `FM_GUARD_GRACE` is set explicitly in the environment.
 
@@ -99,7 +100,7 @@ Claude runs the guard with `--claude`, which ignores `stop_hook_active` and coop
 Claude Code sets `stop_hook_active=true` on every stop after any stop-hook continuation, including `asyncRewake` rewakes, which re-opened the 2026-07-21 blind window under the default one-shot behavior.
 The Claude mode waits up to `FM_CLAUDE_AUTOARM_SYNC_WAIT_MS` (default 800 milliseconds) and allows the stop when the watcher is healthy, the auto-arm's generation claim is open, or `state/.claude-autoarm-epoch` contains a fresh actionable rewake owned by this event epoch.
 The claim is the ledger entry itself: the epoch sequence in `state/.claude-autoarm-epoch` is a monotonic claim generation, line 1 records the claim and terminal outcome, and line 2 records the claiming process's mandatory pid-identity; `fm_autoarm_claim_open` and `fm_autoarm_claim_next` in `bin/fm-wake-lib.sh` own the format contract.
-A claim is open while its outcome is `arming`, its owner pid is alive, its recorded identity successfully recomputes and matches that pid, and it is not stuck - stuck meaning the entry and the watcher beacon are both older than the guard grace, which proves the owner hung mid-arm (a healthy hours-long foregrounded cycle keeps the beacon beating, and every arming phase with no watcher is bounded in seconds).
+An `arming` claim with a live, identity-matched owner stays open until both the entry and the watcher beacon reach the grace threshold, at which point the guard treats it as stuck.
 Anything else - a finished outcome, a dead or identity-mismatched owner, a stuck owner, an identityless entry, or no entry - lets the next Stop-owned firing take the next generation and arm; taking a newer generation is the reclaim, and a steady-state predecessor is never signalled or revoked.
 No mutex is held across arming or output: `state/.claude-autoarm.lock` survives only as a micro-mutex serializing individual ledger writes, and a superseded owner goes completely silent - ownership is re-verified before every arm invocation, episode-state mutation, ledger write, and continuation.
 The irrevocable commit point of a translation is the exit status, because the harness delivers the collected stderr banner only on exit 2, so an owned terminal commit decides the exit: markerless outcomes commit with the ledger write, while the once-per-episode failure notice commits only when its marker is created after the winning failed write in the same critical section.
