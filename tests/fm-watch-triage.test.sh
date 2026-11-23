@@ -2267,10 +2267,14 @@ test_missing_tmux_endpoint_surfaces_once() (
   printf '#!/usr/bin/env bash\nexec %q -L %q "$@"\n' "$tmux_bin" "$socket" > "$dir/bin/tmux"
   chmod +x "$dir/bin/tmux"
   export FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999
+  # Only this private tmux fixture uses these watcher intervals.
+  # shellcheck disable=SC2030
   export FM_PAUSE_RESURFACE_SECS=999999 FM_STALE_ESCALATE_SECS=999999
   "$dir/bin/tmux" -f /dev/null new-session -d -s missing -c "$dir" || fail "could not start the private tmux server"
 
   for task in ordinary held; do
+    # Each watcher runs in its own fixture home within this subshell.
+    # shellcheck disable=SC2030
     export FM_HOME="$dir/$task"
     state="$FM_HOME/state"; out="$FM_HOME/watch.out"
     export FM_STATE_OVERRIDE="$state"
@@ -3541,7 +3545,11 @@ SH
   chmod +x "$dir/fakebin/herdr"
   fm_write_meta "$state/held-merge.meta" window=test:w1:p2 kind=ship harness=grok backend=herdr \
     herdr_terminal_id=current spawn_gen=current
+  # The watcher and captain-hold commands use this fixture's environment.
+  # shellcheck disable=SC2030,SC2031
   export FM_HOME="$dir" FM_DATA_OVERRIDE="$dir/data" FM_CONFIG_OVERRIDE="$dir/config" FM_WATCH_HANDLING_SUCCESSOR=1
+  # The fake crew-state command reads this verdict from the watcher environment.
+  # shellcheck disable=SC2030
   export FM_FAKE_CREW_STATE='state: unknown · source: none · no current-state source available'
   export FM_TEST_TERMINAL=current
   if [ "$scenario" = no-status ]; then
@@ -3624,6 +3632,8 @@ test_secondmate_paused_resurfaces_in_normal_mode() {
   pane_hash=$(hash_text "idle awaiting external")
   printf '%s' "$pane_hash" > "$state/.hash-$key"
   printf '1\n' > "$state/.count-$key"
+  # This case supplies its own verdict for the fake crew-state command.
+  # shellcheck disable=SC2031
   export FM_FAKE_CREW_STATE='state: paused · source: status-log · awaiting the upstream release'
   PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
     FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" FM_PAUSE_RESURFACE_SECS=240 FM_POLL=1 FM_SIGNAL_GRACE=1 \
@@ -3742,6 +3752,8 @@ case "$*" in
 esac
 SH
   chmod +x "$fakebin/zellij"
+  # This fixture sets its own home and pause interval before launching the watcher.
+  # shellcheck disable=SC2031
   export FM_HOME="$dir" FM_PAUSE_RESURFACE_SECS=240
   fm_write_meta "$state/mate.meta" window=test:7 backend=zellij kind=secondmate spawn_gen=current
   printf '%s\n' mate > "$dir/tab"
@@ -3756,6 +3768,8 @@ SH
   throttle="$state/.paused-resurfaced-$key"
   assert_present "$throttle" "the first pause did not record a recheck"
   ack_stopped_cycle "$state" || fail "could not acknowledge the first Zellij pause"
+  # This assignment applies to the watcher launches after acknowledgement.
+  # shellcheck disable=SC2031
   export FM_WATCH_HANDLING_SUCCESSOR=1
 
   reminder=$(file_mtime "$throttle")

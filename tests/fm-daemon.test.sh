@@ -890,7 +890,7 @@ test_named_endpoint_loss_preserves_the_live_tasks_tracking() {
   pass "named endpoint loss escalates the lost record without clearing the replacement's tracking"
 }
 
-test_queued_stale_does_not_start_tracking_replacement() (
+test_queued_stale_does_not_start_tracking_replacement() {
   local dir state win=shared:w1:p2
   dir=$(make_supercase queued-stale-pane-reuse)
   state="$dir/state"
@@ -915,7 +915,7 @@ SH
   assert_present "$state/.subsuper-stale-a-original" "the queued stale wake did not start tracking the original worker"
   assert_absent "$state/.subsuper-stale-z-replacement" "a wake queued by the original worker started the replacement's stale timer"
   pass "a queued stale wake leaves the replacement's timer untouched after Herdr pane reuse"
-)
+}
 
 test_handle_wake_paused_signal_records_pause_marker() {
   local dir state key win
@@ -2916,7 +2916,8 @@ test_stale_paused_classifies_pause
 test_stale_captain_held_classifies_pause
 test_handle_wake_paused_records_pause_marker
 test_named_endpoint_loss_preserves_the_live_tasks_tracking
-test_queued_stale_does_not_start_tracking_replacement || exit 1
+# Isolate the fake Herdr PATH and daemon fixture state from the other cases.
+(test_queued_stale_does_not_start_tracking_replacement) || exit 1
 test_handle_wake_paused_signal_records_pause_marker
 test_handle_wake_terminal_signal_clears_pause_tracking
 test_housekeeping_migrates_watcher_pause_marker
