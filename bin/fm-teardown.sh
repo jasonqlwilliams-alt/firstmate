@@ -1826,39 +1826,54 @@ attempt_treehouse_return() {  # <copy> <project>
   treehouse return --force "$1" || return 1
 }
 
-treehouse_hook_path_has_exact_spelling() {
-  local dir=$1 component entry
-  local -a components
-  IFS=/ read -r -a components <<< "$2"
-  for component in "${components[@]}"; do
-    [ ! -L "$dir" ] || return 1
-    for entry in "$dir/$component"*; do
-      if [ "$entry" = "$dir/$component" ]; then
-        dir=$entry
-        continue 2
-      fi
-    done
-    return 1
-  done
+treehouse_untracked_hook_path() {
+  perl -e '
+    sub resolve_path {
+      my ($dir, $path) = @_;
+      my @resolved;
+      for my $component (split m{/}, $path) {
+        return if -l $dir;
+        opendir my $entries, $dir or return;
+        my @names = grep { $_ ne "." && $_ ne ".." } readdir $entries;
+        my ($name) = grep { $_ eq $component } @names;
+        unless (defined $name) {
+          my @wanted = lstat "$dir/$component";
+          return unless @wanted;
+          my @matches = grep {
+            my @entry = lstat "$dir/$_";
+            @entry && $entry[0] == $wanted[0] && $entry[1] == $wanted[1]
+          } @names;
+          return unless @matches == 1;
+          $name = $matches[0];
+        }
+        push @resolved, $name;
+        $dir .= "/$name";
+      }
+      return join "/", @resolved;
+    }
+
+    my ($copy, $hook) = @ARGV;
+    my $actual = resolve_path($copy, $hook) // exit 1;
+    exit 1 if -d "$copy/$actual" && !-l "$copy/$actual";
+    open my $tracked, "-|", "git", "-C", $copy, "ls-files", "--cached", "-z",
+      "--", ":(icase,literal)$actual" or exit 1;
+    local $/ = "\0";
+    while (my $path = <$tracked>) {
+      chomp $path;
+      exit 1 if $path eq $actual || (resolve_path($copy, $path) // "") eq $actual;
+    }
+    close $tracked or exit 1;
+    print "$actual.";
+  ' -- "$1" "$2"
 }
 
 remove_untracked_treehouse_hooks() {
-  local copy hook tracked tracked_path
+  local copy hook actual
   copy=$(canonical_existing_dir "$1") || return 0
   shift
   for hook; do
-    [ -e "$copy/$hook" ] || [ -L "$copy/$hook" ] || continue
-    [ ! -d "$copy/$hook" ] || [ -L "$copy/$hook" ] || continue
-    treehouse_hook_path_has_exact_spelling "$copy" "$hook" || continue
-    tracked=$(git -C "$copy" ls-files --cached -- ":(icase,literal)$hook" 2>/dev/null) || continue
-    while IFS= read -r tracked_path && [ -n "$tracked_path" ]; do
-      if [ "$tracked_path" = "$hook" ] \
-         || { { [ -e "$copy/$tracked_path" ] || [ -L "$copy/$tracked_path" ]; } \
-              && ! treehouse_hook_path_has_exact_spelling "$copy" "$tracked_path"; }; then
-        continue 2
-      fi
-    done <<< "$tracked"
-    rm -f -- "$copy/$hook"
+    actual=$(treehouse_untracked_hook_path "$copy" "$hook" 2>/dev/null) || continue
+    rm -f -- "$copy/${actual%.}"
   done
 }
 

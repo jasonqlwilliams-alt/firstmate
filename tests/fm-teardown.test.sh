@@ -1840,12 +1840,12 @@ test_treehouse_owns_checkout_and_cancels_failed_close() {
   copy="$case_dir/wt"
   write_meta "$case_dir" no-mistakes ship
   if [ "$mode" = success ]; then
-    mkdir -p "$case_dir/project/.claude" "$case_dir/shared-settings/plugins"
-    printf '{}\n' > "$case_dir/project/.claude/settings.local.json"
+    mkdir -p "$case_dir/project/.Claude" "$case_dir/shared-settings/plugins"
+    printf 'project settings\n' > "$case_dir/project/.Claude/README.md"
     printf 'project settings\n' > "$case_dir/project/.fm-Kimi-turnend"
     printf 'shared settings\n' > "$case_dir/shared-settings/plugins/fm-turn-end.js"
     ln -s ../shared-settings "$case_dir/project/.opencode"
-    git -C "$case_dir/project" add -f .claude/settings.local.json .fm-Kimi-turnend .opencode
+    git -C "$case_dir/project" add -f .Claude/README.md .fm-Kimi-turnend .opencode
     git -C "$case_dir/project" commit -qm 'Track project settings on main'
   fi
   land_shippable_commit "$case_dir"
@@ -1863,6 +1863,8 @@ test_treehouse_owns_checkout_and_cancels_failed_close() {
 printf '%s %s\n' "$(git -C "$3" rev-parse --abbrev-ref HEAD)" "$(git -C "$3" rev-parse HEAD)" > "$FM_TEST_RETURN_LOG"
 if [ "$FM_TEST_RETURN_MODE" = success ]; then
   git -C "$3" checkout --detach -q main || exit $?
+  mkdir -p "$3/.claude" || exit $?
+  printf 'configured hook\n' > "$3/.claude/settings.local.json" || exit $?
   [ -e "$3/.fm-kimi-turnend" ] || printf 'configured hook\n' > "$3/.fm-kimi-turnend"
   exit $?
 fi
@@ -1881,7 +1883,8 @@ SH
     [ "$(git -C "$copy" rev-parse --abbrev-ref HEAD)" = HEAD ] \
       && [ "$(git -C "$copy" rev-parse HEAD)" = "$(git -C "$copy" rev-parse main)" ] \
       || fail 'teardown changed the checkout left by Treehouse'
-    [ "$(cat "$copy/.claude/settings.local.json")" = '{}' ] || fail 'return removed tracked project settings'
+    [ "$(cat "$copy/.Claude/README.md")" = 'project settings' ] || fail 'return removed tracked project settings'
+    assert_absent "$copy/.claude/settings.local.json" 'return retained a task hook under a project directory'
     [ "$(cat "$copy/.fm-Kimi-turnend")" = 'project settings' ] \
       || fail 'return removed tracked settings with a Unicode spelling'
     if [ "$case_dir/project/.fm-Kimi-turnend" -ef "$case_dir/project/.fm-kimi-turnend" ]; then
@@ -2668,13 +2671,16 @@ test_forced_secondmate_teardown_holds_descendant_lifecycle_locks() {
   local case_dir home lock ready release holder_pid rc waited=0 child
   case_dir=$(make_case descendant-locks)
   write_meta "$case_dir" local-only secondmate
-  mkdir -p "$case_dir/project/.opencode/plugins"
+  mkdir -p "$case_dir/project/.OpenCode/Plugins" "$case_dir/project/.claude"
   mkdir -p "$case_dir/project/.fm-grok-turnend"
-  printf 'project plugin\n' > "$case_dir/project/.opencode/plugins/fm-busy-state.js"
+  printf 'project plugin\n' > "$case_dir/project/.OpenCode/Plugins/fm-busy-state.js"
+  printf '{}\n' > "$case_dir/project/.claude/settings.local.json"
   printf 'project data\n' > "$case_dir/project/.fm-grok-turnend/data"
-  git -C "$case_dir/project" add -f .opencode/plugins/fm-busy-state.js .fm-grok-turnend/data
+  git -C "$case_dir/project" add -f .OpenCode/Plugins/fm-busy-state.js .claude/settings.local.json .fm-grok-turnend/data
   git -C "$case_dir/project" commit -qm 'Track project plugin on main'
   configure_secondmate_with_tmux_children "$case_dir"
+  mkdir -p "$case_dir/child-a-wt/.opencode/plugins"
+  printf 'task hook\n' > "$case_dir/child-a-wt/.opencode/plugins/fm-turn-end.js"
   printf 'task hook\n' > "$case_dir/child-a-wt/.fm-kimi-turnend"
   home="$case_dir/secondmate-home"
   : > "$case_dir/kill.log"
@@ -2742,8 +2748,12 @@ SH
     || fail "descendant-locks: uncontended retry retained retired task state"
   [ -s "$case_dir/kill.log" ] && [ -s "$case_dir/treehouse.log" ] \
     || fail "descendant-locks: uncontended retry did not perform endpoint and worktree cleanup"
-  [ "$(cat "$case_dir/child-a-wt/.opencode/plugins/fm-busy-state.js")" = 'project plugin' ] \
+  [ "$(cat "$case_dir/child-a-wt/.OpenCode/Plugins/fm-busy-state.js")" = 'project plugin' ] \
     || fail 'child return removed a tracked project plugin'
+  [ "$(cat "$case_dir/child-a-wt/.claude/settings.local.json")" = '{}' ] \
+    || fail 'child return removed tracked project settings'
+  assert_absent "$case_dir/child-a-wt/.opencode/plugins/fm-turn-end.js" \
+    'child return retained a task hook under a project plugin directory'
   [ "$(cat "$case_dir/child-a-wt/.fm-grok-turnend/data")" = 'project data' ] \
     || fail 'child return removed a project directory at a hook path'
   assert_not_contains "$(cat "$case_dir/retry.stderr")" '.fm-grok-turnend' \
