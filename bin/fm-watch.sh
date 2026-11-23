@@ -1550,9 +1550,7 @@ run_check() {
 
 FM_ACTIVE_CHECK_PID=
 FM_ACTIVE_CHECK_PGID=
-FM_CAPTURE_HELPER_PID=
 FM_CHECK_OUTPUT=
-FM_CHECK_OUTPUT_DIR=
 FM_CHECK_RESULT=
 FM_CAPTURE_RC=
 FM_CHECK_SIGNAL_PENDING=
@@ -1560,12 +1558,7 @@ FM_PR_POLL_CLOSED_STAGE=
 
 fm_check_output_cleanup() {
   [ -z "$FM_CHECK_OUTPUT" ] || rm -f -- "$FM_CHECK_OUTPUT"
-  if [ -n "$FM_CHECK_OUTPUT_DIR" ]; then
-    rm -f -- "$FM_CHECK_OUTPUT_DIR/reader"
-    rmdir -- "$FM_CHECK_OUTPUT_DIR"
-  fi
   FM_CHECK_OUTPUT=
-  FM_CHECK_OUTPUT_DIR=
 }
 
 fm_pr_closure_stage_cleanup() {
@@ -1574,14 +1567,12 @@ fm_pr_closure_stage_cleanup() {
 }
 
 fm_active_check_stop() {
-  local pid=${FM_ACTIVE_CHECK_PID:-} pgid=${FM_ACTIVE_CHECK_PGID:-} target i
+  local pid=${FM_ACTIVE_CHECK_PID:-} pgid=${FM_ACTIVE_CHECK_PGID:-} process_states i
   [ -n "$pid" ] || [ -n "$pgid" ] || return 0
-  target=${pgid:+-$pgid}
-  target=${target:-$pid}
   [ -z "$pgid" ] || kill -TERM -- "-$pgid" 2>/dev/null || true
   [ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null || true
   i=0
-  while kill -0 -- "$target" 2>/dev/null && [ "$i" -lt 20 ]; do
+  while [ -n "$pgid" ] && kill -0 -- "-$pgid" 2>/dev/null && [ "$i" -lt 20 ]; do
     sleep 0.01
     i=$((i + 1))
   done
@@ -1594,40 +1585,32 @@ fm_active_check_stop() {
     i=$((i + 1))
   done
   if [ -n "$pgid" ] && kill -0 -- "-$pgid" 2>/dev/null; then
-    return 1
+    process_states=$(ps -ax -o pgid= -o stat= 2>/dev/null) || return 1
+    if printf '%s\n' "$process_states" | awk -v group="$pgid" '
+      $1 == group && $2 !~ /^Z/ { live = 1 }
+      END { exit !live }
+    '; then
+      return 1
+    fi
   fi
   FM_ACTIVE_CHECK_PID=
   FM_ACTIVE_CHECK_PGID=
 }
 
 watcher_start_capture() {
-  local capture_mode=$1 pgid
-  shift
+  local pgid
   fm_check_output_cleanup
   FM_CHECK_RESULT=
-  if [ "$capture_mode" = stream ]; then
-    FM_CHECK_OUTPUT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-watch-events.XXXXXX") || return 1
-    FM_CHECK_OUTPUT="$FM_CHECK_OUTPUT_DIR/events"
-    mkfifo -m 0600 "$FM_CHECK_OUTPUT" "$FM_CHECK_OUTPUT_DIR/reader" || { fm_check_output_cleanup; return 1; }
-  else
-    FM_CHECK_OUTPUT=$(mktemp "$STATE/.fm-check-output.XXXXXX") || return 1
-    chmod 0600 "$FM_CHECK_OUTPUT" || { fm_check_output_cleanup; return 1; }
-  fi
+  FM_CHECK_OUTPUT=$(mktemp "$STATE/.fm-check-output.XXXXXX") || return 1
+  chmod 0600 "$FM_CHECK_OUTPUT" || { fm_check_output_cleanup; return 1; }
   FM_CHECK_SIGNAL_PENDING=
   trap 'FM_CHECK_SIGNAL_PENDING=1' HUP INT TERM
-  if [ "$capture_mode" = check ]; then
-    set -m
-  else
-    set +m
-  fi
-  ( set +m; "$@" ) < /dev/null > "$FM_CHECK_OUTPUT" 2>/dev/null &
+  set -m
+  ( set +m; "$@" ) > "$FM_CHECK_OUTPUT" 2>/dev/null &
   FM_ACTIVE_CHECK_PID=$!
-  pgid=
-  if [ "$capture_mode" = check ]; then
-    FM_ACTIVE_CHECK_PGID=$FM_ACTIVE_CHECK_PID
-    set +m
-    pgid=$(ps -o pgid= -p "$FM_ACTIVE_CHECK_PID" 2>/dev/null | tr -d '[:space:]')
-  fi
+  FM_ACTIVE_CHECK_PGID=$FM_ACTIVE_CHECK_PID
+  set +m
+  pgid=$(ps -o pgid= -p "$FM_ACTIVE_CHECK_PID" 2>/dev/null | tr -d '[:space:]')
   trap 'exit 1' HUP INT TERM
   if [ -n "$pgid" ] && [ "$pgid" != "$FM_ACTIVE_CHECK_PGID" ]; then
     fm_active_check_stop || true
@@ -1642,61 +1625,52 @@ watcher_finish_capture() {
   wait "$FM_ACTIVE_CHECK_PID" 2>/dev/null || FM_CAPTURE_RC=$?
   FM_ACTIVE_CHECK_PID=
   fm_active_check_stop || return 1
-  if [ -f "$FM_CHECK_OUTPUT" ]; then
-    FM_CHECK_RESULT=$(cat "$FM_CHECK_OUTPUT" 2>/dev/null || true)
-  fi
+  FM_CHECK_RESULT=$(cat "$FM_CHECK_OUTPUT" 2>/dev/null || true)
   fm_check_output_cleanup
 }
 
 run_check_capture() {
-  FM_CHECK_OWNED_GROUP=1 watcher_start_capture check run_check_process "$@" || return 1
+  FM_CHECK_OWNED_GROUP=1 watcher_start_capture run_check_process "$@" || return 1
   watcher_finish_capture
 }
 
-watcher_start_capture_helper() {
-  local output=$1
-  shift
-  FM_CHECK_SIGNAL_PENDING=
-  trap 'FM_CHECK_SIGNAL_PENDING=1' HUP INT TERM
-  ( exec "$@" > "$output" ) < /dev/null 2>/dev/null &
-  FM_CAPTURE_HELPER_PID=$!
-  trap 'exit 1' HUP INT TERM
-  [ -z "$FM_CHECK_SIGNAL_PENDING" ] || exit 1
-}
-
-watcher_finish_capture_helper() {
-  local rc=0
-  [ -n "$FM_CAPTURE_HELPER_PID" ] || return 0
-  if [ "$1" = stop ]; then
-    kill -KILL "$FM_CAPTURE_HELPER_PID" 2>/dev/null || true
-  fi
-  wait "$FM_CAPTURE_HELPER_PID" 2>/dev/null || rc=$?
-  FM_CAPTURE_HELPER_PID=
-  return "$rc"
-}
-
-watcher_cleanup_capture() {
-  local rc=0
-  watcher_finish_capture_helper stop || true
-  fm_active_check_stop || rc=1
-  fm_check_output_cleanup
-  return "$rc"
+run_remote_observation_process() {
+  # shellcheck disable=SC2016
+  exec perl -MPOSIX=WNOHANG -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC,sleep -e '
+    my ($owner, $budget) = splice @ARGV, 0, 2;
+    exit 124 unless getppid() == $owner && getpgrp(0) == $$;
+    my $interrupted = 0;
+    $SIG{HUP} = $SIG{INT} = $SIG{TERM} = sub { $interrupted = 1 };
+    my $deadline = clock_gettime(CLOCK_MONOTONIC) + $budget;
+    my $child = fork();
+    exit 125 unless defined $child;
+    if ($child == 0) {
+      exec @ARGV;
+      exit 125;
+    }
+    while (!$interrupted && getppid() == $owner) {
+      my $finished = waitpid($child, WNOHANG);
+      my $status = $?;
+      last if clock_gettime(CLOCK_MONOTONIC) >= $deadline || $interrupted || getppid() != $owner;
+      exit($status == 0 ? 0 : 1) if $finished == $child;
+      last if $finished < 0;
+      sleep(0.01);
+    }
+    kill "TERM", -$$;
+    my $reap_until = clock_gettime(CLOCK_MONOTONIC) + 0.05;
+    while (waitpid($child, WNOHANG) == 0 && clock_gettime(CLOCK_MONOTONIC) < $reap_until) {
+      sleep(0.01);
+    }
+    kill "KILL", -$$;
+    exit 124;
+  ' "$@" < /dev/null
 }
 
 watcher_remote_observe() {
+  local owner
   FM_PENDING_REPLY_OBSERVATION=unknown
-  watcher_start_capture file exec "$@" || return 0
-  watcher_start_capture_helper /dev/null sleep "$WATCHER_WAIT_LIMIT"
-  while kill -0 "$FM_ACTIVE_CHECK_PID" 2>/dev/null; do
-    if ! kill -0 "$FM_CAPTURE_HELPER_PID" 2>/dev/null; then
-      watcher_finish_capture_helper wait || true
-      fm_active_check_stop || return 1
-      fm_check_output_cleanup
-      return 0
-    fi
-    command sleep 0.05
-  done
-  watcher_finish_capture_helper stop || true
+  fm_current_pid owner || return 0
+  watcher_start_capture run_remote_observation_process "$owner" "$WATCHER_WAIT_LIMIT" "$@" || return 0
   watcher_finish_capture || return 1
   [ "$FM_CAPTURE_RC" -ne 0 ] || FM_PENDING_REPLY_OBSERVATION=$FM_CHECK_RESULT
 }
@@ -1821,42 +1795,6 @@ watcher_wait() {
   done
 }
 
-watcher_event_progress() {
-  local line
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in
-      '@waiting') watcher_publish_beat || exit 0 ;;
-      *) FM_CHECK_RESULT=$line ;;
-    esac
-  done
-}
-
-watcher_read_native_events() {
-  fm_backend_herdr_read_transitions "$FM_CHECK_OUTPUT_DIR/reader" "$@"
-}
-
-watcher_native_wait() {
-  local session=$1 state=$2 window_count=$3 reader_rc=0
-  shift 3
-  watcher_start_capture stream watcher_read_native_events "$session" "$state" "${@:1:window_count}" || return 2
-  shift "$window_count"
-  watcher_start_capture_helper "$FM_CHECK_OUTPUT_DIR/reader" "$@"
-  if ! watcher_event_progress < "$FM_CHECK_OUTPUT"; then
-    watcher_cleanup_capture || true
-    return 2
-  fi
-  if ! watcher_finish_capture; then
-    watcher_finish_capture_helper stop || true
-    return 2
-  fi
-  if [ "$FM_CAPTURE_RC" -eq 1 ]; then
-    watcher_finish_capture_helper wait || reader_rc=$?
-  else
-    watcher_finish_capture_helper stop || true
-  fi
-  fm_backend_herdr_wait_status "$FM_CAPTURE_RC" "$reader_rc"
-}
-
 # event_wait_or_sleep: the terminal wait of each supervision cycle. For a home
 # with push-capable windows (herdr), it replaces the blind `sleep POLL` with a
 # bounded wait on the backend's native transition stream, so a crew going
@@ -1869,7 +1807,7 @@ watcher_native_wait() {
 # supervision cycle: the reader is a short-lived subprocess of THIS watcher, not
 # a second watcher, so every guard/beacon/arm/turn-end mechanism is unchanged.
 event_wait_or_sleep() {
-  local w task b session first_backend="" first_session="" seen= rc=0
+  local w task b session first_backend="" first_session="" rec rc seen=
   local windows=()
   while IFS=$'\t' read -r w task b; do
     fm_backend_has_push "$b" || continue
@@ -1914,22 +1852,26 @@ event_wait_or_sleep() {
     return
   fi
 
-  FM_BACKEND_EVENTS_CAPABILITY_CONFIRMED=1 FM_BACKEND_EVENTS_PROGRESS_INTERVAL="$WATCHER_WAIT_LIMIT" \
-    FM_BACKEND_EVENTS_WAIT_RUNNER=watcher_native_wait \
-    fm_backend_wait_transition "$first_backend" "$first_session" "$POLL" "$STATE" "${windows[@]}" \
-    2>/dev/null || rc=$?
+  rec=$(FM_BACKEND_EVENTS_CAPABILITY_CONFIRMED=1 fm_backend_wait_transition "$first_backend" "$first_session" "$POLL" "$STATE" "${windows[@]}")
+  rc=$?
   case "$rc" in
     0)
       _event_cap_fails=0
-      handle_push_transition "$first_backend" "$first_session" "$FM_CHECK_RESULT"
+      handle_push_transition "$first_backend" "$first_session" "$rec"
       ;;
     2)
+      # Event path unusable this cycle (connect/subscribe failure). Sleep the
+      # budget and count toward the runtime-disable threshold; past it, drop to
+      # pure polling for the rest of this watcher process.
       _event_cap_fails=$((_event_cap_fails + 1))
-      [ "$_event_cap_fails" -lt "$EVENT_CAP_FAIL_MAX" ] || _event_cap_ok=0
-      watcher_publish_beat || exit 0
+      [ "$_event_cap_fails" -ge "$EVENT_CAP_FAIL_MAX" ] && _event_cap_ok=0
       watcher_wait "$POLL"
       ;;
-    *) _event_cap_fails=0 ;;
+    *)
+      # 1: a clean full-budget wait with no actionable edge - the reader already
+      # blocked ~POLL, so just continue; the next cycle re-scans.
+      _event_cap_fails=0
+      ;;
   esac
 }
 
@@ -2062,7 +2004,8 @@ watcher_cleanup() {
       transition=release-lock-existing
     fi
   fi
-  watcher_cleanup_capture || cleanup_status=1
+  fm_active_check_stop || cleanup_status=1
+  fm_check_output_cleanup
   fm_custom_check_snapshot_cleanup
   fm_pr_closure_stage_cleanup
   if [ "$owns_lock" -eq 1 ] \

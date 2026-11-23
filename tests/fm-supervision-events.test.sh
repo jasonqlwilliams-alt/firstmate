@@ -144,141 +144,15 @@ handle_push_transition herdr default "$(mkrec wG:pQ blocked)"
 [ -s "$WAKE_LOG" ] || fail "the old task's pause suppressed the live worker's blocked event"
 pass "handle_push_transition: a stale record sharing the slot cannot displace the bound worker"
 
-test_native_wait_keeps_subscription() (
-  local mode=$1 dir="$TMP/native-$1" server i path watch_pid=''
-  mkdir -p "$dir"
-  reset_state
-  export FM_GUARD_GRACE=4 TMPDIR="$dir"
-  WATCHER_WAIT_LIMIT=2
-  POLL=15
-  fm_write_meta "$STATE_DIR/tk3.meta" 'window=default:wG:pQ' 'backend=herdr' 'kind=ship' 'herdr_terminal_id=term-worker'
-  fm_backend_herdr_commit_transition "$STATE_DIR" default "$(mkrec wG:pQ blocked)" \
-    || fail "could not record the previous blocked edge"
-  fm_backend_events_capable() { return 0; }
-  fm_backend_herdr_socket_path() { printf '%s\n' "$dir/socket"; }
-  fm_backend_herdr_agent_status_raw() {
-    if [ "$mode" = cancel ]; then
-      : > "$dir/level-started"
-      command sleep 4
-    fi
-    printf '%s\n' blocked
-  }
-  fm_backend_herdr_event_reader_cmd() { printf '%s\n' python3 "$ROOT/bin/backends/herdr-eventwait.py"; }
-  watcher_publish_beat() { printf '%s\n' beat >> "$dir/beats"; }
-
-  python3 - "$dir" "$mode" "$FM_GUARD_GRACE" <<'PYTHON' &
-import json
-from pathlib import Path
-import select
-import socket
-import sys
-import time
-
-directory, mode, grace = Path(sys.argv[1]), sys.argv[2], float(sys.argv[3])
-beats = directory / "beats"
-with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
-    server.bind(str(directory / "socket"))
-    server.listen()
-    server.settimeout(10)
-    connection, _ = server.accept()
-    with connection, connection.makefile("r") as requests:
-        connection.settimeout(10)
-        assert json.loads(requests.readline())["method"] == "events.subscribe"
-
-        def reject_reconnect(delay):
-            ready, _, _ = select.select([server], [], [], delay)
-            if ready:
-                server.accept()[0].close()
-                raise AssertionError("watcher opened another subscription")
-
-        def await_beat(count, started, release_after):
-            seen = None
-            while time.monotonic() - started < grace:
-                reject_reconnect(0.02)
-                now = time.monotonic()
-                if seen is None and beats.exists() and len(beats.read_text().splitlines()) >= count:
-                    seen = now
-                if seen is not None and now >= release_after:
-                    return seen
-            raise AssertionError("watcher did not publish a beacon within grace")
-
-        started = time.monotonic()
-        if mode == "progress":
-            first_beat = await_beat(1, started, started + 3)
-        connection.sendall(b'{"result":{"type":"subscription_started"}}\n')
-        if mode == "cancel":
-            connection.settimeout(2)
-            assert connection.recv(1) == b"", "subscriber outlived cancellation"
-        else:
-            await_beat(2, first_beat, time.monotonic() + 1.5)
-            for status in ("working", "blocked"):
-                event = {
-                    "event": "pane.agent_status_changed",
-                    "data": {"pane_id": "wG:pQ", "workspace_id": "wG", "agent_status": status, "agent": "claude"},
-                }
-                connection.sendall((json.dumps(event) + "\n").encode())
-            reject_reconnect(0.1)
-PYTHON
-  server=$!
-  trap 'if [ -n "$watch_pid" ]; then kill "$watch_pid" 2>/dev/null || true; fi
-    kill "$server" 2>/dev/null || true; wait "$server" 2>/dev/null || true' EXIT
-  for ((i=0; i<100; i++)); do
-    [ ! -S "$dir/socket" ] || break
-    command sleep 0.02
-  done
-  [ -S "$dir/socket" ] || fail "fixture subscription socket did not open"
-
-  if [ "$mode" = cancel ]; then
-    ( trap watcher_cleanup_capture EXIT; event_wait_or_sleep ) &
-    watch_pid=$!
-    for ((i=0; i<100; i++)); do
-      [ ! -e "$dir/level-started" ] || break
-      command sleep 0.02
-    done
-    [ -e "$dir/level-started" ] || fail "native level read did not start"
-    kill -TERM "$watch_pid" || fail "could not stop the native wait"
-    wait "$server" || fail "native subscription did not close while the level read was pending"
-    for ((i=0; i<100; i++)); do
-      kill -0 "$watch_pid" 2>/dev/null || break
-      command sleep 0.02
-    done
-    ! kill -0 "$watch_pid" 2>/dev/null || fail "native wait did not shut down"
-    wait "$watch_pid" 2>/dev/null || true
-    watch_pid=
-    for path in "$dir"/fm-watch-events.* "$dir"/fm-herdr-eventwait.*; do
-      [ ! -e "$path" ] || fail "native wait leaked its FIFO directory"
-    done
-    pass "event_wait_or_sleep: cancelling a slow level read closes the subscription and removes its FIFOs"
-  else
-    event_wait_or_sleep
-    wait "$server" || fail "fixture server did not see timely progress on a single subscription"
-    [ ! -s "$SLEEP_LOG" ] || fail "the delayed acknowledgement caused a fallback to polling"
-    assert_grep 'herdr: agent blocked' "$WAKE_LOG" "the working edge must rearm delivery of the second blocked edge"
-    pass "event_wait_or_sleep: beacons, delayed acknowledgement, and blocked-again delivery share one subscription"
-  fi
-  trap - EXIT
-)
-
-test_native_wait_keeps_subscription progress || exit $?
-test_native_wait_keeps_subscription cancel || exit $?
-
-test_optional_capture_failures() (
-  reset_state
-  fm_write_meta "$STATE_DIR/tk3.meta" 'window=default:wG:pQ' 'backend=herdr' 'kind=ship' 'herdr_terminal_id=term-worker'
-  fm_backend_events_capable() { return 0; }
-  fm_backend_herdr_socket_path() { printf '%s\n' "$TMP/unused.sock"; }
-  mkfifo() { return 1; }
-  event_wait_or_sleep
-  [ -s "$SLEEP_LOG" ] || fail "native FIFO failure must fall back to polling"
-
+test_optional_capture_failure() (
   mktemp() { return 1; }
   FM_PENDING_REPLY_OBSERVATION=idle
   watcher_remote_observe printf busy || fail "remote capture failure must not stop supervision"
   [ "$FM_PENDING_REPLY_OBSERVATION" = unknown ] || fail "remote capture failure must leave observation unknown"
-  pass "watcher: optional capture setup failures degrade to polling or unknown"
+  pass "watcher: remote capture setup failure leaves observation unknown"
 )
 
-test_optional_capture_failures || exit $?
+test_optional_capture_failure || exit $?
 
 test_remote_wait_uses_elapsed_budget() (
   local tick=$SECONDS i
@@ -294,6 +168,46 @@ test_remote_wait_uses_elapsed_budget() (
 )
 
 test_remote_wait_uses_elapsed_budget || exit $?
+
+test_remote_wait_rejects_late_success() (
+  local child='' i
+  trap '
+    if [ -n "$child" ]; then
+      kill -CONT "$child" 2>/dev/null || true
+      kill -TERM "$child" 2>/dev/null || true
+    fi
+  ' EXIT
+  (
+    trap 'fm_active_check_stop; fm_check_output_cleanup' EXIT
+    WATCHER_WAIT_LIMIT=1 watcher_remote_observe bash -c '
+      touch "$1"
+      sleep 1.3
+      printf idle
+    ' _ "$TMP/observation-started" || exit 1
+    printf '%s\n' "$FM_PENDING_REPLY_OBSERVATION"
+  ) > "$TMP/late-observation" 2>&1 &
+  child=$!
+  for ((i=0; i<100; i++)); do
+    [ ! -e "$TMP/observation-started" ] || break
+    kill -0 "$child" 2>/dev/null || break
+    command sleep 0.02
+  done
+  [ -e "$TMP/observation-started" ] || fail "remote observation did not start: $(cat "$TMP/late-observation")"
+  kill -STOP "$child" || fail "could not suspend observation owner"
+  command sleep 1.6
+  kill -CONT "$child" || fail "could not resume observation owner"
+  for ((i=0; i<150; i++)); do
+    kill -0 "$child" 2>/dev/null || break
+    command sleep 0.02
+  done
+  ! kill -0 "$child" 2>/dev/null || fail "observation did not finish: $(cat "$TMP/late-observation")"
+  wait "$child" || fail "observation failed: $(cat "$TMP/late-observation")"
+  child=
+  [ "$(cat "$TMP/late-observation")" = unknown ] || fail "a late idle reply was accepted"
+  pass "watcher: a reply after the deadline stays unknown when the watcher resumes"
+)
+
+test_remote_wait_rejects_late_success || exit $?
 
 # --- event_wait_or_sleep: secondmate windows are excluded from the pane list --
 

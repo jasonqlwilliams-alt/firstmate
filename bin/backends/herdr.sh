@@ -3970,49 +3970,31 @@ fm_backend_herdr_wait_transition() {  # <session> <timeout_secs> <state_dir> <pa
   done < <(fm_backend_herdr_event_reader_cmd)
   [ "${#reader[@]}" -gt 0 ] || return 2
 
-  reader+=("$sock" "$timeout" "${pane_ids[@]}")
-  if [ -n "${FM_BACKEND_EVENTS_WAIT_RUNNER:-}" ]; then
-    "$FM_BACKEND_EVENTS_WAIT_RUNNER" "$session" "$state" "${#windows[@]}" "${windows[@]}" "${reader[@]}"
-    return $?
-  fi
-
-  local fifo_dir fifo reader_pid rc=0 reader_rc=0
+  local fifo_dir fifo reader_pid line ws status agent raw record hit rc=1 reader_rc=0
   fifo_dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-herdr-eventwait.XXXXXX") || return 2
   fifo="$fifo_dir/events"
   if ! mkfifo "$fifo" 2>/dev/null; then
     rm -rf "$fifo_dir" 2>/dev/null || true
     return 2
   fi
-  "${reader[@]}" > "$fifo" 2>/dev/null &
+  "${reader[@]}" "$sock" "$timeout" "${pane_ids[@]}" > "$fifo" 2>/dev/null &
   reader_pid=$!
-  fm_backend_herdr_read_transitions "$fifo" "$session" "$state" "${windows[@]}" || rc=$?
-  if [ "$rc" -ne 1 ]; then
+  if ! exec 9< "$fifo"; then
     kill "$reader_pid" 2>/dev/null || true
+    wait "$reader_pid" 2>/dev/null || true
+    rm -rf "$fifo_dir" 2>/dev/null || true
+    return 2
   fi
-  wait "$reader_pid" 2>/dev/null || reader_rc=$?
-  rm -rf "$fifo_dir" 2>/dev/null || true
-  fm_backend_herdr_wait_status "$rc" "$reader_rc"
-}
-
-fm_backend_herdr_read_transitions() {
-  local fifo=$1 session=$2 state=$3 line meta pane_id w ws status agent raw record hit rc
-  shift 3
-  exec 9< "$fifo" || return 2
-  rc=2
-  while IFS= read -r -u 9 line; do
-    case "$line" in
-      '@waiting') printf '%s\n' "$line" ;;
-      '@subscribed') rc=1; break ;;
-      *) break ;;
-    esac
-  done
+  if ! IFS= read -r -u 9 line || [ "$line" != "@subscribed" ]; then
+    rc=2
+  fi
 
   # Level reconcile on (re)connect (report section 3d): a pane already `blocked`
   # during the gap since the last subscription is returned now, once, while
   # newer edges accumulate in the active stream. `working` panes clear their
   # marker here too.
   if [ "$rc" -ne 2 ]; then
-    for w in "$@"; do
+    for w in "${windows[@]}"; do
       pane_id=${w#*:}
       if [ -z "$pane_id" ] || [ "$pane_id" = "$w" ]; then
         continue
@@ -4029,17 +4011,15 @@ fm_backend_herdr_read_transitions() {
     done
   fi
 
-  # Drain stream edges until a fresh blocked edge or the timeout.
+  # Drain stream edges until a fresh blocked edge or the timeout. The reader is
+  # a subprocess of this call (NOT a second watcher), and is killed the instant
+  # a blocked edge is found.
   # Split each raw projected line (pane_id\tworkspace_id\tagent_status\tagent)
   # with `cut`, NOT `IFS=$'\t' read`: a tab is IFS-whitespace, so `read` would
   # collapse an empty middle field (e.g. an absent workspace_id) and shift the
   # status into the wrong column. `cut` preserves empty fields.
   while [ "$rc" -eq 1 ] && IFS= read -r line <&9; do
     [ -n "$line" ] || continue
-    if [ "$line" = '@waiting' ]; then
-      printf '%s\n' "$line"
-      continue
-    fi
     pane_id=$(printf '%s' "$line" | cut -f1)
     ws=$(printf '%s' "$line" | cut -f2)
     status=$(printf '%s' "$line" | cut -f3)
@@ -4052,13 +4032,21 @@ fm_backend_herdr_read_transitions() {
       break
     fi
   done
+  if [ "$rc" -eq 0 ]; then
+    kill "$reader_pid" 2>/dev/null || true
+  fi
+  if [ "$rc" -eq 2 ]; then
+    kill "$reader_pid" 2>/dev/null || true
+  fi
+  # No actionable edge: distinguish a clean full-budget wait (reader exit 0 ->
+  # return 1, caller already waited) from a reader error (connect/subscribe
+  # failure, exit non-zero -> return 2, caller sleeps and counts toward the
+  # runtime-disable threshold).
+  wait "$reader_pid" 2>/dev/null || reader_rc=$?
   exec 9<&-
-  return "$rc"
-}
-
-fm_backend_herdr_wait_status() {
-  local rc=$1 reader_rc=$2
+  rm -rf "$fifo_dir" 2>/dev/null || true
   [ "$rc" -eq 0 ] && return 0
-  [ "$rc" -eq 1 ] && [ "$reader_rc" -eq 0 ] && return 1
+  [ "$rc" -eq 2 ] && return 2
+  [ "$reader_rc" -eq 0 ] && return 1
   return 2
 }

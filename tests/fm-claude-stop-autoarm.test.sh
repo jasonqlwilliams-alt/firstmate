@@ -1448,7 +1448,7 @@ SH
 )
 
 test_stalled_remote_observation_liveness() (
-  local mode=${1:-poll} dir state corr rec i watcher_pid hook_rc ssh_pid='' ssh_status
+  local mode=${1:-poll} dir state corr rec i watcher_pid hook_rc ssh_pid='' transport_pid='' ssh_status
   local arm_pid='' RUN_AUTOARM_BG_PID=''
   dir=$(make_primary_dir "$TMP_ROOT/stalled-observation-$mode")
   state="$dir/state"
@@ -1473,9 +1473,13 @@ test_stalled_remote_observation_liveness() (
   cat > "$FM_SSH_BIN" <<'SH'
 #!/usr/bin/env bash
 if [ ! -e "$FM_HOME/state/observing" ]; then
-  echo "$$" > "$FM_HOME/state/observing"
+  sleep 30 &
+  transport_pid=$!
+  trap 'wait "$transport_pid" 2>/dev/null; exit 1' TERM
+  printf '%s %s\n' "$$" "$transport_pid" > "$FM_HOME/state/observing"
   printf 'idle'
-  exec sleep 30
+  wait "$transport_pid"
+  exit
 fi
 printf 'busy'
 SH
@@ -1490,6 +1494,7 @@ SH
     stop_liveness_fixture "$arm_pid"
     stop_liveness_fixture "$RUN_AUTOARM_BG_PID"
     if [ -n "$ssh_pid" ]; then kill "$ssh_pid" 2>/dev/null || true; fi
+    if [ -n "$transport_pid" ]; then kill "$transport_pid" 2>/dev/null || true; fi
   }
   trap cleanup_observation EXIT
   trap 'exit 1' HUP INT TERM
@@ -1501,12 +1506,15 @@ SH
     hook_rc=$?
     [ "$hook_rc" -ne 124 ] || fail "lease did not finish: $(cat "$dir/hook.out")"
     RUN_AUTOARM_BG_PID=
-    ssh_pid=$(cat "$state/observing") || fail "lease ended before the watcher entered the remote observation"
+    read -r ssh_pid transport_pid < "$state/observing" || fail "lease ended before the watcher entered the remote observation"
     expect_code 2 "$hook_rc" "an active home must receive the lease renewal wake"
     assert_grep 'check: claude-lease-renewal' "$dir/hook.out" "expiry must use the ordinary lease handoff"
     ssh_status=$(ps -o stat= -p "$ssh_pid" 2>/dev/null | tr -d '[:space:]')
     case "$ssh_status" in ''|Z*) ;; *) fail "SSH survived the watcher's lease";; esac
+    ssh_status=$(ps -o stat= -p "$transport_pid" 2>/dev/null | tr -d '[:space:]')
+    case "$ssh_status" in ''|Z*) ;; *) fail "SSH transport survived the watcher's lease";; esac
     ssh_pid=
+    transport_pid=
     [ ! -e "$state/.watch.lock" ] || fail "lease expiry left a watcher lock behind"
     [ -z "$(fm_pending_reply_get "$rec" request_turn_completed_epoch)" ] \
       || fail "a cancelled observation must not prove the mate was idle"
@@ -1522,14 +1530,16 @@ SH
       kill -0 "$arm_pid" 2>/dev/null || break
       sleep 0.05
     done
-    ssh_pid=$(cat "$state/observing") || fail "the watcher did not enter the remote observation"
+    read -r ssh_pid transport_pid < "$state/observing" || fail "the watcher did not enter the remote observation"
     kill -TERM "$arm_pid" || fail "could not stop the arm"
     wait_for_liveness_fixture "$arm_pid" 300
     hook_rc=$?
     [ "$hook_rc" -ne 124 ] || fail "arm did not stop: $(cat "$dir/outer.out")"
     arm_pid=
     ! kill -0 "$ssh_pid" 2>/dev/null || fail "a normally stopped watcher did not reap SSH"
+    ! kill -0 "$transport_pid" 2>/dev/null || fail "SSH left a transport running after watcher stop"
     ssh_pid=
+    transport_pid=
     [ ! -e "$state/.watch.lock" ] || fail "a normally stopped watcher did not release its lock"
     pass "auto-arm: a normally stopped watcher reaps its remote observation"
     return 0
@@ -1539,8 +1549,12 @@ SH
     kill -0 "$arm_pid" 2>/dev/null || break
     sleep 0.05
   done
-  [ -e "$state/observing" ] || fail "watcher never entered the remote observation"
+  read -r ssh_pid transport_pid < "$state/observing" || fail "watcher never entered the remote observation"
   [ -e "$state/checked" ] || fail "the remote observation stalled the watcher past grace"
+  ! kill -0 "$ssh_pid" 2>/dev/null || fail "timed-out observation left the SSH wrapper running"
+  ! kill -0 "$transport_pid" 2>/dev/null || fail "timed-out observation left the transport running"
+  ssh_pid=
+  transport_pid=
   [ -z "$(fm_pending_reply_get "$rec" request_turn_completed_epoch)" ] \
     || fail "incomplete observation output was accepted as idle"
   watcher_pid=$(cat "$state/.watch.lock/pid") || fail "original watcher did not hold the lock"
