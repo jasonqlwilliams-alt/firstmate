@@ -195,7 +195,7 @@ EOF
 # for the process probe.
 fm_tmux_composer_state() {  # <target> [explicit] -> empty|pending|pending-unproven|unknown
   fm_tmux_composer_snapshot "$@" || { printf 'unknown'; return 0; }
-  fm_tmux_composer_classify_snapshot "$@"
+  fm_tmux_composer_classify_snapshot
 }
 
 # fm_tmux_composer_snapshot: the cursor row and styled screen of one composer
@@ -203,25 +203,27 @@ fm_tmux_composer_state() {  # <target> [explicit] -> empty|pending|pending-unpro
 # SNAPSHOT"); fails when either read fails or the cursor row is not numeric.
 fm_tmux_composer_snapshot() {  # <target> [explicit]
   local target cy pane
+  FM_COMPOSER_SNAPSHOT_TMUX_TARGET=
   # Resolve once so the cursor row and the screen come from the same window.
   target=$(fm_tmux_exact_target "$@") || return 1
-  cy=$(fm_tmux_composer_cursor_row "$target" "${2:-}") || return 1
+  cy=$(fm_tmux_composer_cursor_row "$target" explicit) || return 1
   case "$cy" in ''|*[!0-9]*) return 1 ;; esac
-  pane=$(fm_tmux_composer_capture "$target" "${2:-}") || return 1
+  pane=$(fm_tmux_composer_capture "$target" explicit) || return 1
+  FM_COMPOSER_SNAPSHOT_TMUX_TARGET=$target
   FM_COMPOSER_SNAPSHOT_CURSOR=$cy
   FM_COMPOSER_SNAPSHOT_SCREEN=$pane
   FM_COMPOSER_SNAPSHOT_CAPS=$(fm_tmux_composer_caps)
 }
 
-# fm_tmux_composer_classify_snapshot: the tmux composer verdict for the
-# snapshot taken from <target>, which supplies the lazy identity probe and the
-# Cursor process check below.
-fm_tmux_composer_classify_snapshot() {  # <target> [explicit]
-  local target=$1 cy=$FM_COMPOSER_SNAPSHOT_CURSOR pane=$FM_COMPOSER_SNAPSHOT_SCREEN verdict identity
+# fm_tmux_composer_classify_snapshot: the verdict for the captured tmux snapshot.
+fm_tmux_composer_classify_snapshot() {
+  local target=${FM_COMPOSER_SNAPSHOT_TMUX_TARGET:-} verdict identity
+  [ -n "$target" ] || { printf 'unknown'; return 0; }
+  local cy=$FM_COMPOSER_SNAPSHOT_CURSOR pane=$FM_COMPOSER_SNAPSHOT_SCREEN
   local caps=$FM_COMPOSER_SNAPSHOT_CAPS
   verdict=$(fm_composer_classify_screen "$caps" "$pane" "$cy")
   if [ "$verdict" = need-identity ]; then
-    if ! identity=$(fm_tmux_composer_identity "$target" "${2:-}") || [ -z "$identity" ]; then
+    if ! identity=$(fm_tmux_composer_identity "$target" explicit) || [ -z "$identity" ]; then
       identity=probe-absent
     fi
     verdict=$(fm_composer_classify_screen "$caps" "$pane" "$cy" "$identity")
@@ -236,7 +238,7 @@ fm_tmux_composer_classify_snapshot() {  # <target> [explicit]
   # Gated on Cursor's own structural process identity, never on the verdict
   # alone, so the strict blank-row posture that owns `unknown` for every other
   # harness is untouched.
-  if [ "$verdict" = unknown ] && fm_tmux_pane_is_cursor "$target" "${2:-}"; then
+  if [ "$verdict" = unknown ] && fm_tmux_pane_is_cursor "$target" explicit; then
     verdict=$(fm_composer_classify_screen "$caps" "$pane" '')
   fi
   printf '%s' "$verdict"

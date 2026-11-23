@@ -682,6 +682,86 @@ test_peek_output_is_escape_free() {
   pass "fm-peek output is escape-free (no raw -e bytes reach firstmate context)"
 }
 
+test_snapshot_identity_stays_with_captured_window() (
+  local fixture_agent check out captured replacement cursor replace_after_capture=0
+  local switched="$TMP_ROOT/composer-replaced"
+
+  # shellcheck source=bin/fm-backend.sh
+  . "$ROOT/bin/fm-backend.sh"
+  fm_backend_source tmux || fail "could not load the tmux adapter"
+
+  # shellcheck disable=SC2329
+  tmux() {
+    local window='' prev='' arg
+    if [ "$1" = list-windows ]; then
+      if [ -e "$switched" ]; then printf '@2\n'; else printf '@1\n'; fi
+      return 0
+    fi
+    for arg in "$@"; do
+      [ "$prev" != -t ] || window=$arg
+      prev=$arg
+    done
+    case "$window" in
+      @1) [ ! -e "$switched" ] || return 1 ;;
+      @2) [ -e "$switched" ] || return 1 ;;
+      *) return 1 ;;
+    esac
+    case "$1" in
+      display-message)
+        case "${*: -1}" in
+          '#{cursor_y}') printf '%s\n' "$cursor" ;;
+          '#{pane_current_command}') printf '%s\n' "$fixture_agent" ;;
+          '#{pane_tty}')
+            if [ "$fixture_agent" = cursor-agent ]; then printf '/dev/composer-fixture\n'; fi ;;
+        esac ;;
+      capture-pane)
+        if [ "$window" = @1 ]; then
+          printf '%s\n' "$captured"
+          if [ "$replace_after_capture" = 1 ] && [ "$2" = -e ]; then : > "$switched"; fi
+        else
+          printf '%s\n' "$replacement"
+        fi ;;
+    esac
+  }
+
+  # shellcheck disable=SC2329
+  ps() {
+    case "$1:$2" in
+      -t:composer-fixture) printf '41 41 41 cursor-agent\n' ;;
+      -p:41) printf 'cursor-agent\n' ;;
+      *) return 1 ;;
+    esac
+  }
+
+  for fixture_agent in pi cursor-agent; do
+    case "$fixture_agent" in
+      pi)
+        captured=$'transcript\n────────────────────────\n\n────────────────────────\n footer'
+        replacement=$'transcript\n────────────────────────\ndraft text\n────────────────────────\n footer'
+        cursor=2 ;;
+      cursor-agent)
+        captured=$'transcript\n  → \n\n  Cursor Grok 4.5 High                    Run Everything\n  /workspace · main'
+        replacement=${captured/→ /→ draft text}
+        cursor=5 ;;
+    esac
+    for check in fm_backend_composer_state fm_backend_guarded_composer_state; do
+      rm -f "$switched"
+      replace_after_capture=0
+      out=$("$check" tmux sess:worker)
+      [ "$out" = empty ] || fail "$check should read the original idle $fixture_agent composer as empty, got '$out'"
+
+      replace_after_capture=1
+      out=$("$check" tmux sess:worker)
+      [ -e "$switched" ] || fail "the fixture must replace the window after its capture"
+      [ "$out" = unknown ] || fail "$check borrowed the replacement $fixture_agent window's identity, got '$out'"
+
+      out=$("$check" tmux sess:worker)
+      [ "$out" = pending ] || fail "$check should read the replacement $fixture_agent window's draft, got '$out'"
+    done
+  done
+  pass "a composer snapshot cannot borrow identity from a replacement window"
+)
+
 test_strip_ghost_drops_dim_keeps_normal
 test_strip_ghost_handles_combined_and_boundary_codes
 test_strip_ghost_keeps_colored_text_with_2_payloads
@@ -715,3 +795,4 @@ test_legitimate_empty_routes_remain_empty
 test_non_bordered_composer_uses_compatibility_fallback
 test_non_bordered_interior_edges_are_pending
 test_peek_output_is_escape_free
+test_snapshot_identity_stays_with_captured_window

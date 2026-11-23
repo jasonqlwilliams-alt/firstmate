@@ -974,6 +974,7 @@ fm_backend_composer_snapshot() {  # <backend> <target> [expected-label]
   FM_COMPOSER_SNAPSHOT_SCREEN=
   FM_COMPOSER_SNAPSHOT_CAPS=
   FM_COMPOSER_SNAPSHOT_CURSOR=
+  FM_COMPOSER_SNAPSHOT_TMUX_TARGET=
   fm_backend_source "$backend" || return 1
   case "$backend" in
     tmux) fm_tmux_composer_snapshot "$1" ;;
@@ -990,7 +991,7 @@ fm_backend_composer_snapshot() {  # <backend> <target> [expected-label]
 # answered for that capture.
 fm_backend_composer_classify_snapshot() {  # <backend> <target>
   case "$1" in
-    tmux) fm_tmux_composer_classify_snapshot "$2" ;;
+    tmux) fm_tmux_composer_classify_snapshot ;;
     herdr) fm_backend_herdr_composer_classify_snapshot "$2" ;;
     zellij|orca|cmux) fm_composer_classify_snapshot_no_identity ;;
     *) printf 'unknown' ;;
