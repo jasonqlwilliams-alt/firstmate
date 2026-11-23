@@ -1,0 +1,118 @@
+Repeated startup warnings about the disposable home's watcher were omitted.
+
+=== width ===
+fm-0:fm-narrow agy 401x24 cursor=(2,3)
+Terminal capture: tmux narrow before fm-send
+$ bin/fm-send.sh narrow 'Continue the synthetic work item.'
+exit=0
+fm-send: doorbell not typed into fm-0:fm-narrow. Possible causes are pending text, a composer that could not be proven empty, or a composer row too narrow for the doorbell line. A wider agy pane can help the line fit. The steer is durably recorded at <lab>/confirmed/width/narrow/state/narrow.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer.
+Unread record remains queued.
+Multiplexer writes: <none>
+Terminal events: ["ready", 401]
+fm-1:fm-wide01 agy 402x24 cursor=(2,3)
+Terminal capture: tmux wide01 before fm-send
+$ bin/fm-send.sh wide01 'Continue the synthetic work item.'
+exit=0
+One exact notice and Enter. Original payload moved to handled/001.msg.
+Terminal capture: tmux roomy pane after one submission
+Multiplexer writes: <send-keys><-t><fm-1:fm-wide01><-l><: Firstmate instruction waiting: list '<lab>/confirmed/width/wide01/state/wide01.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<lab>/confirmed/width/wide01/state/wide01.inbox'/handled/.>
+<send-keys><-t><fm-1:fm-wide01><Enter>
+Terminal events: ["ready", 402]
+["literal", ": Firstmate instruction waiting: list '<lab>/confirmed/width/wide01/state/wide01.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<lab>/confirmed/width/wide01/state/wide01.inbox'/handled/."]
+["Enter", ": Firstmate instruction waiting: list '<lab>/confirmed/width/wide01/state/wide01.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<lab>/confirmed/width/wide01/state/wide01.inbox'/handled/."]
+RESULT width pass
+
+=== unsafe ===
+fm-2:fm-draft agy 450x24 cursor=(31,3)
+Terminal capture: tmux synthetic draft before fm-send
+$ bin/fm-send.sh draft 'Continue the synthetic work item.'
+exit=0
+fm-send: doorbell not typed into fm-2:fm-draft. Possible causes are pending text, a composer that could not be proven empty, or a composer row too narrow for the doorbell line. A wider agy pane can help the line fit. The steer is durably recorded at <lab>/confirmed/unsafe/draft/state/draft.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer.
+Multiplexer writes: <none>
+Terminal events: ["ready", 450]
+Pane capture is unchanged. Original payload remains queued.
+fm-3:fm-forged agy 450x24 cursor=(2,6)
+Terminal capture: tmux synthetic forged before fm-send
+$ bin/fm-send.sh forged 'Continue the synthetic work item.'
+exit=0
+fm-send: doorbell not typed into fm-3:fm-forged. Possible causes are pending text, a composer that could not be proven empty, or a composer row too narrow for the doorbell line. A wider agy pane can help the line fit. The steer is durably recorded at <lab>/confirmed/unsafe/forged/state/forged.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer.
+Multiplexer writes: <none>
+Terminal events: ["ready", 450]
+Pane capture is unchanged. Original payload remains queued.
+fm-4:fm-survey agy 450x24 cursor=(2,3)
+Terminal capture: tmux synthetic survey before fm-send
+$ bin/fm-send.sh survey 'Continue the synthetic work item.'
+exit=0
+fm-send: doorbell not typed into fm-4:fm-survey. Possible causes are pending text, a composer that could not be proven empty, or a composer row too narrow for the doorbell line. A wider agy pane can help the line fit. The steer is durably recorded at <lab>/confirmed/unsafe/survey/state/survey.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer.
+Multiplexer writes: <none>
+Terminal events: ["ready", 450]
+Pane capture is unchanged. Original payload remains queued.
+fm-5:fm-native agy 450x24 cursor=(30,13)
+Terminal capture: Antigravity CLI 1.5.15 sign-in picker
+$ bin/fm-send.sh native 'Continue the synthetic work item.'
+exit=0
+fm-send: doorbell not typed into fm-5:fm-native. Possible causes are pending text, a composer that could not be proven empty, or a composer row too narrow for the doorbell line. A wider agy pane can help the line fit. The steer is durably recorded at <lab>/confirmed/unsafe/native/state/native.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer.
+Multiplexer writes: <none>
+Pane capture is unchanged. Original payload remains queued.
+RESULT unsafe pass
+
+=== confirmation ===
+fm-6:fm-partial agy 450x24 cursor=(2,3)
+Terminal capture: tmux partial-echo fixture before fm-send
+$ bin/fm-send.sh partial 'Continue the synthetic work item.'
+exit=0
+fm-send: doorbell typed into fm-6:fm-partial but its Enter was withheld because the composer did not prove it holds the doorbell; the steer is durably recorded at <lab>/confirmed/confirmation/partial/state/partial.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+Terminal capture: tmux pane after altered echo and withheld Enter
+Multiplexer writes: <send-keys><-t><fm-6:fm-partial><-l><: Firstmate instruction waiting: list '<lab>/confirmed/confirmation/partial/state/partial.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<lab>/confirmed/confirmation/partial/state/partial.inbox'/handled/.>
+Terminal events: ["ready", 450]
+["literal", ": Firstmate instruction waiting: list '<lab>/confirmed/confirmation/partial/state/partial.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<lab>/confirmed/confirmation/partial/state/partial.inbox'/handled/."]
+Original payload remains queued; no Enter was dispatched.
+RESULT confirmation pass
+
+=== watcher ===
+fm-7:fm-retry agy 450x24 cursor=(31,3)
+$ bin/fm-send.sh retry 'Continue the synthetic work item.'
+exit=0
+fm-send: doorbell not typed into fm-7:fm-retry. Possible causes are pending text, a composer that could not be proven empty, or a composer row too narrow for the doorbell line. A wider agy pane can help the line fit. The steer is durably recorded at <lab>/confirmed/watcher/retry/state/retry.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer.
+$ bin/fm-watch.sh
+[2026-11-23T03:58:13-0800] steer-inbox delivery attempt: retry 001.msg result=1
+Terminal capture: tmux draft preserved after watcher retry
+[2026-11-23T03:58:16-0800] steer-inbox delivery attempt: retry 001.msg result=0
+Terminal capture: tmux after watcher submits to the cleared composer
+Watcher retries reached the inbox after the draft was cleared, with no escalation.
+Multiplexer writes: <send-keys><-t><fm-7:fm-retry><-l><: Firstmate instruction waiting: list '<lab>/confirmed/watcher/retry/state/retry.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<lab>/confirmed/watcher/retry/state/retry.inbox'/handled/.>
+<send-keys><-t><fm-7:fm-retry><Enter>
+Terminal events: ["ready", 450]
+["operator-clear", "human draft: keep these words"]
+["literal", ": Firstmate instruction waiting: list '<lab>/confirmed/watcher/retry/state/retry.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<lab>/confirmed/watcher/retry/state/retry.inbox'/handled/."]
+["Enter", ": Firstmate instruction waiting: list '<lab>/confirmed/watcher/retry/state/retry.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<lab>/confirmed/watcher/retry/state/retry.inbox'/handled/."]
+watcher exited 1 on teardown
+RESULT watcher pass
+
+=== scope ===
+fm-8:fm-scope agy 450x24 cursor=(2,3)
+$ bash -c '. bin/fm-backend.sh; fm_backend_guarded_composer_state tmux "$1" "" "" "$2"' _ fm-8:fm-scope agy
+exit=0
+empty
+$ bash -c '. bin/fm-backend.sh; fm_backend_guarded_composer_state tmux "$1" "" "" "$2"' _ fm-8:fm-scope pi
+exit=0
+unknown
+fm-9:fm-supervisor agy 450x24 cursor=(2,2)
+$ bin/fm-afk-start.sh
+[2026-11-23T03:58:19-0800] inject deferred: supervisor composer not confirmed-empty (state=unknown: pending input, dead-shell prompt, or unreadable pane)
+Terminal capture: Away-mode guard leaves unscoped agy-shaped supervisor pane untouched
+Multiplexer writes: <none>
+Terminal events: ["ready", 450]
+away-agy exited 0 on teardown
+afk: starting supervise daemon in foreground; keep this command as a tracked background session
+$ bin/fm-afk-start.sh
+Terminal capture: Away-mode control delivers the same status into a supported empty composer
+Multiplexer writes: <send-keys><-t><fm-9:fm-supervisor><-l><⁣FIRSTMATE_OP: v1 away-supervisor: Supervisor escalate (1 event(s)): synthetic.status: done: PR https://example.test/pull/42 (catch-all scan) (pre-read; re-arm not needed — watcher daemon-managed)>
+<send-keys><-t><fm-9:fm-supervisor><Enter>
+Terminal events: ["ready", 450]
+["literal", "⁣FIRSTMATE_OP: v1 away-supervisor: Supervisor escalate (1 event(s)): synthetic.status: done: PR https://example.test/pull/42 (catch-all scan) (pre-read; re-arm not needed — watcher daemon-managed)"]
+["Enter", "⁣FIRSTMATE_OP: v1 away-supervisor: Supervisor escalate (1 event(s)): synthetic.status: done: PR https://example.test/pull/42 (catch-all scan) (pre-read; re-arm not needed — watcher daemon-managed)"]
+away-generic exited 0 on teardown
+afk: starting supervise daemon in foreground; keep this command as a tracked background session
+RESULT scope pass
+Private tmux server stopped (exit 0).

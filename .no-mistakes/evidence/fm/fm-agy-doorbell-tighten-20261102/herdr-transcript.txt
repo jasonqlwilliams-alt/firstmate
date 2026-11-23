@@ -1,0 +1,62 @@
+Repeated startup warnings about the disposable home's watcher were omitted.
+Before the CRLF repair
+The real Herdr pane supplied synthetic agy frames.
+Composer state on idle Herdr grid 443: pending 
+First-use hint yielded no delivery. Original record queued: True
+Composer state on idle Herdr grid 443: unknown 
+Wide bare prompt yielded no delivery. Original record queued: True
+Composer state on idle Herdr grid 53: unknown 
+b'\x1b[0m\x1b[38;2;122;162;247m>\x1b[0m \x1b[0m\x1b[38;2;154;165;206mAccept-edits mode: file edits auto-approved (shift+tab to cycle)\x1b[0m\r\n'
+b'\x1b[0m\x1b[38;2;122;162;247m>\x1b[0m\r\n'
+not ok - agy idle in a Herdr CRLF capture: expected empty, got 'unknown'
+
+After the CRLF repair
+$ ~/.local/bin/herdr server --session fm-lab-agy-check
+Terminal capture: Herdr hint at 443 columns before fm-send
+Rendered hint row bytes: '\x1b[0m\x1b[38;2;122;162;247m>\x1b[0m \x1b[0m\x1b[38;2;154;165;206mAccept-edits mode: file edits auto-approved (shift+tab to cycle)\x1b[0m'
+Recent row bytes (22): 'Synthetic local worker'
+Recent row bytes (120): '\x1b[0m\x1b[38;2;122;162;247m>\x1b[0m \x1b[0m\x1b[38;2;154;165;206mAccept-edits mode: file edits auto-approved (shift+tab to cycle)\x1b[0m'
+Recent row bytes (15): '? for shortcuts'
+Classifier on visible snapshot: empty
+Composer state on idle Herdr grid 443: empty 
+$ bin/fm-send.sh herdr-hint-470 'Continue the synthetic work item.'
+exit=0
+Terminal capture: Herdr after one exact doorbell submission
+One exact notice and Enter. Original payload moved to handled/001.msg.
+["ready", 443]
+["literal", ": Firstmate instruction waiting: list '<lab>/herdr-done/herdr-hint-470/state/herdr-hint-470.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<lab>/herdr-done/herdr-hint-470/state/herdr-hint-470.inbox'/handled/."]
+["Enter", ": Firstmate instruction waiting: list '<lab>/herdr-done/herdr-hint-470/state/herdr-hint-470.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<lab>/herdr-done/herdr-hint-470/state/herdr-hint-470.inbox'/handled/."]
+Terminal capture: Herdr idle at 443 columns before fm-send
+Rendered hint row bytes: ''
+Recent row bytes (22): 'Synthetic local worker'
+Recent row bytes (28): '\x1b[0m\x1b[38;2;122;162;247m>\x1b[0m'
+Recent row bytes (15): '? for shortcuts'
+Classifier on visible snapshot: empty
+Composer state on idle Herdr grid 443: empty 
+$ bin/fm-send.sh herdr-idle-470 'Continue the synthetic work item.'
+exit=0
+Terminal capture: Herdr after one exact doorbell submission
+One exact notice and Enter. Original payload moved to handled/001.msg.
+["ready", 443]
+["literal", ": Firstmate instruction waiting: list '<lab>/herdr-done/herdr-idle-470/state/herdr-idle-470.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<lab>/herdr-done/herdr-idle-470/state/herdr-idle-470.inbox'/handled/."]
+["Enter", ": Firstmate instruction waiting: list '<lab>/herdr-done/herdr-idle-470/state/herdr-idle-470.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<lab>/herdr-done/herdr-idle-470/state/herdr-idle-470.inbox'/handled/."]
+Terminal capture: Herdr idle at 53 columns before fm-send
+Rendered hint row bytes: ''
+Recent row bytes (22): 'Synthetic local worker'
+Recent row bytes (28): '\x1b[0m\x1b[38;2;122;162;247m>\x1b[0m'
+Recent row bytes (15): '? for shortcuts'
+Classifier on visible snapshot: empty
+Composer state on idle Herdr grid 53: empty 
+$ bin/fm-send.sh herdr-idle-80 'Continue the synthetic work item.'
+exit=0
+fm-send: doorbell not typed into fm-lab-agy-check:wF:p1. Possible causes are pending text, a composer that could not be proven empty, or a composer row too narrow for the doorbell line. A wider agy pane can help the line fit. The steer is durably recorded at <lab>/herdr-done/herdr-idle-80/state/herdr-idle-80.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer.
+Original record remains queued. No input or Enter.
+["ready", 53]
+Herdr stop exit=0
+herdr-server exited 0 on teardown
+herdr server running; you can use any herdr CLI command in another terminal.
+api socket: .validation-agy/herdr-config/herdr/sessions/fm-lab-agy-check/herdr.sock
+client socket: .validation-agy/herdr-config/herdr/sessions/fm-lab-agy-check/herdr-client.sock
+logs: .validation-agy/herdr-config/herdr/sessions/fm-lab-agy-check/herdr-server.log
+did you mean to open the Herdr TUI? run `herdr`; you do not need `herdr server`.
+RESULT herdr pass
