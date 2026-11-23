@@ -178,8 +178,9 @@ fm_tmux_composer_classify_snapshot() {  # <target> [fit-text]
   # Gated on Cursor's own structural process identity, never on the verdict
   # alone, so the strict blank-row posture that owns `unknown` for every other
   # harness is untouched.
-  if [ "$verdict" = unknown ] && fm_tmux_pane_is_cursor "$target"; then
-    verdict=$(fm_composer_classify_screen "$caps" "$pane" '' '' "$fit")
+  if [ "$verdict" = unknown ] && [[ $'\n'"$caps"$'\n' != *$'\nharness=agy\n'* ]] &&
+     fm_tmux_pane_is_cursor "$target"; then
+    verdict=$(fm_composer_classify_screen "$caps" "$pane" '')
   fi
   printf '%s' "$verdict"
 }

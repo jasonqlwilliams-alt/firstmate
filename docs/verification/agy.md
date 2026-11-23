@@ -182,7 +182,7 @@ pending
 
 The capture notes leave agy's live wrapping behavior and the exact tmux palette code for the mode hint unmeasured.
 [`tests/fm-composer-lib.test.sh`](../../tests/fm-composer-lib.test.sh) uses the recorded rows and truecolor values to check the classifier's verdicts, including refusal on plain-text and multirow captures.
-[`tests/fm-task-inbox.test.sh`](../../tests/fm-task-inbox.test.sh) checks the one-row fit boundary, delivery of agy's short notice into an 80-column pane, and screen refusals with an agy-shaped stub in a real tmux server.
+[`tests/fm-task-inbox.test.sh`](../../tests/fm-task-inbox.test.sh) checks the one-row fit boundary for the path-bearing notice, delivery of the short notice into an 80-column pane with a scaffolded inbox locator, and screen refusals with an agy-shaped stub in a real tmux server.
 See [Harness support](../configuration.md#harness-support) for the operator-facing doorbell limits.
 
 ## Skills and no-mistakes validation trigger

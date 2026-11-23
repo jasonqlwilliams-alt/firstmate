@@ -78,6 +78,8 @@ _FM_TASK_INBOX_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$_FM_TASK_INBOX_LIB_DIR/fm-wake-lib.sh"
 # shellcheck source=/dev/null
 . "$_FM_TASK_INBOX_LIB_DIR/fm-backend.sh"
+# shellcheck source=bin/fm-dod-lib.sh
+. "$_FM_TASK_INBOX_LIB_DIR/fm-dod-lib.sh"
 
 FM_TASK_INBOX_SCHEMA='fm-task-inbox.v1'
 FM_TASK_INBOX_GRACE_DEFAULT=90
@@ -251,19 +253,24 @@ fm_task_inbox_body() {  # <record-path>
   return 1
 }
 
-# The constant self-describing doorbell line for the inbox containing a record.
+_fm_task_inbox_brief_names_inbox() {  # <inbox-dir> <shell-quoted-path>
+  local data=${FM_DATA_OVERRIDE:-${FM_HOME:+$FM_HOME/data}} task=${1##*/} brief section
+  [ -n "$data" ] || return 1
+  brief="$data/${task%.inbox}/launch-brief.md"
+  if [ ! -e "$brief" ] && [ ! -L "$brief" ]; then
+    brief="$data/${task%.inbox}/brief.md"
+  fi
+  section=$(fm_brief_heading_body "$brief" '# Firstmate instruction inbox' 2>/dev/null) || return 1
+  [ "${section%%$'\n'*}" = "Firstmate steers you through durable message files in '$2'." ]
+}
+
+# The constant doorbell line for the inbox containing a record.
 # Self-describing on purpose: a worker whose brief predates the inbox contract
 # still receives the complete instruction in the line itself. The leading `: `
 # is the POSIX shell no-op, so the same line typed into a pane whose agent has
 # exited (a bare shell) runs nothing; see the dead-pane note in the header.
 # A non-printable path fails without output so terminal controls never reach
 # the pane's line discipline.
-# An agy pane gets its own short constant line instead: the doorbell types
-# into agy only when the whole line fits agy's one composer row
-# (fm_composer_agy_notice_fits), and the path-bearing line is too long for an
-# ordinary pane. It keeps the meaning - a message is waiting; read the inbox,
-# act, and acknowledge by moving it - while the worker's instructions name its
-# inbox.
 FM_TASK_INBOX_AGY_DOORBELL=': Firstmate message waiting: read your inbox, act, mv to handled/.'
 fm_task_inbox_doorbell_line() {  # <record-path> [harness]
   local dir=${1%/*} abs quoted LC_ALL=C
@@ -271,11 +278,11 @@ fm_task_inbox_doorbell_line() {  # <record-path> [harness]
   case "$abs" in
     *[![:print:]]*) return 1 ;;
   esac
-  if [ "${2:-}" = agy ]; then
+  quoted=$(printf '%s' "$abs" | sed "s/'/'\\\\''/g")
+  if [ "${2:-}" = agy ] && _fm_task_inbox_brief_names_inbox "$abs" "$quoted"; then
     printf '%s' "$FM_TASK_INBOX_AGY_DOORBELL"
     return 0
   fi
-  quoted=$(printf '%s' "$abs" | sed "s/'/'\\\\''/g")
   printf ": Firstmate instruction waiting: list '%s'/*.msg and, in numeric order, read and act on each, then mv each handled file to '%s'/handled/." \
     "$quoted" "$quoted"
 }
