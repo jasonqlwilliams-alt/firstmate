@@ -205,7 +205,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
 
   const projects = new Set<string>();
   const metadata = new Map<string, string>();
-  const projectByTask = new Map<string, string>();
+  const metadataByTask = new Map<string, { project: string; window: string }>();
   // The task id behind each key a signal or stale row may carry: the task id
   // itself, or the endpoint its metadata records.
   const taskByKey = new Map<string, string>();
@@ -217,7 +217,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
       const project = fields.find((line) => line.startsWith("project="))?.slice(8) ?? "";
       const window = fields.find((line) => line.startsWith("window="))?.slice(7) ?? "";
       if (project) {
-        projectByTask.set(task, project);
+        metadataByTask.set(task, { project, window });
         metadata.set(task, project);
         taskByKey.set(task, task);
         taskByKey.set(`${task}.status`, task);
@@ -275,10 +275,10 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
     } else if (kind === "stale") {
       const loss = namedEndpointLoss(fields[4]);
       if (loss) {
-        if (loss.window !== key) return UNSAFE_SCOPE;
+        const record = metadataByTask.get(loss.task);
+        if (!record || loss.window !== key || record.window !== key) return UNSAFE_SCOPE;
         task = loss.task;
-        project = projectByTask.get(task) ?? "";
-        if (!project) return UNSAFE_SCOPE;
+        project = record.project;
       } else {
         task = taskByKey.get(key) ?? taskByKey.get(key.replace(/^fm-/, "")) ?? "";
         project = metadata.get(key) ?? metadata.get(key.replace(/^fm-/, "")) ?? "";

@@ -3517,17 +3517,22 @@ test_reheld_captain_call_starts_its_own_resurface_window() {
 }
 
 test_herdr_legacy_hash_keeps_only_the_current_captain_call() (
-  local dir state out throttle original reminder poll key=test_w1_p2 pid=''
+  local scenario=$1 dir state out throttle original reminder poll key=test_w1_p2 pid=''
+  local old_call new_call
   command -v tasks-axi >/dev/null 2>&1 \
     || { echo "skip: tasks-axi not found (legacy Herdr captain-call reminder)"; return 0; }
-  dir=$(make_hold_home herdr-legacy-call 'done: PR https://example.invalid/pull/1 checks green' hold) \
+  if [ "$scenario" = no-status ]; then
+    FM_CAPTAIN_HOLD_NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    export FM_CAPTAIN_HOLD_NOW
+  fi
+  dir=$(make_hold_home "herdr-legacy-call-$scenario" 'done: PR https://example.invalid/pull/1 checks green' hold) \
     || fail "could not build a captain-held backlog fixture"
   state="$dir/state"; out="$dir/watch.out"; throttle="$state/.paused-resurfaced-$key"
   trap '[ -z "$pid" ] || reap "$pid"' EXIT
   cat > "$dir/fakebin/herdr" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
-  'pane get w1:p2 --session test') printf '%s\n' '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"current"}}}' ;;
+  'pane get w1:p2 --session test') printf '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"%s"}}}\n' "$FM_TEST_TERMINAL" ;;
   'pane read w1:p2 --source recent --lines 200 --session test') printf '%s\n' 'idle held worker' ;;
   'agent get w1:p2 --session test') printf '%s\n' '{"result":{"agent":{"agent":"grok","agent_status":"idle"}}}' ;;
   *) exit 1 ;;
@@ -3537,6 +3542,10 @@ SH
   fm_write_meta "$state/held-merge.meta" window=test:w1:p2 kind=ship harness=grok backend=herdr \
     herdr_terminal_id=current spawn_gen=current
   export FM_HOME="$dir" FM_DATA_OVERRIDE="$dir/data" FM_CONFIG_OVERRIDE="$dir/config" FM_WATCH_HANDLING_SUCCESSOR=1
+  export FM_TEST_TERMINAL=current
+  if [ "$scenario" = no-status ]; then
+    rm -f "$state/held-merge.status" "$state/.seen-held-merge_status"
+  fi
   watch_bg "$state" "$dir/fakebin" "$out"
   pid=$!
   wait_for_exit "$pid" 150 || fail "the first held delivery did not surface"
@@ -3548,6 +3557,27 @@ SH
   ack_stopped_cycle "$state" || fail "could not acknowledge the first held delivery"
 
   printf '%s' "$(hash_text 'idle held worker')" > "$state/.hash-$key"
+  if [ "$scenario" = no-status ]; then
+    (cd "$dir" && tasks-axi add replacement 'replacement worker' --file data/backlog.md) >/dev/null \
+      || fail "could not add the replacement task"
+    run_hold "$dir" hold replacement --reason 'awaiting another captain decision' \
+      || fail "could not hold the replacement task"
+    old_call=$("$ROOT/bin/fm-captain-hold.sh" open held-merge --identity) || fail "could not read the first call"
+    new_call=$("$ROOT/bin/fm-captain-hold.sh" open replacement --identity) || fail "could not read the replacement call"
+    [ -n "$old_call" ] && [ "$old_call" = "$new_call" ] || fail "the fixture did not reproduce the shared call token"
+    rm -f "$state/held-merge.meta"
+    fm_write_meta "$state/replacement.meta" window=test:w1:p2 kind=ship harness=grok backend=herdr \
+      herdr_terminal_id=replacement spawn_gen=replacement
+    FM_TEST_TERMINAL=replacement
+    watch_bg "$state" "$dir/fakebin" "$out"
+    pid=$!
+    wait_for_exit "$pid" 150 || fail "the replacement inherited an unbound reminder without a status file"
+    pid=''
+    grep -Fxq 'stale: test:w1:p2' "$out" || fail "the replacement did not get its first stale wake"
+    pass "a replacement with the same call token gets its first wake without task-specific status evidence"
+    return 0
+  fi
+
   printf '99\n' > "$state/.count-$key"
   printf '1\n' > "$state/.stale-since-$key"
   watch_bg "$state" "$dir/fakebin" "$out"
@@ -5881,7 +5911,8 @@ test_open_captain_call_bounds_stale_churn
 test_stale_churn_without_a_captain_call_still_alarms
 test_failed_wake_append_does_not_arm_the_captain_hold_throttle
 test_reheld_captain_call_starts_its_own_resurface_window
-test_herdr_legacy_hash_keeps_only_the_current_captain_call || exit 1
+test_herdr_legacy_hash_keeps_only_the_current_captain_call with-status || exit 1
+test_herdr_legacy_hash_keeps_only_the_current_captain_call no-status || exit 1
 test_secondmate_paused_resurfaces_in_normal_mode
 test_secondmate_captain_held_resurfaces_in_normal_mode
 test_secondmate_nonpaused_stale_remains_suppressed

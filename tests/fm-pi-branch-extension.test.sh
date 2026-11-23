@@ -1742,21 +1742,23 @@ await loss.settlement;
 
 globalThis.__fmOnBranchPrompt = async () => {};
 const decorated = `${loss.message}\n\nwatcher: FAILED - Pi extension could not persist a late replacement-session actionable wake\nfixture error`;
-const requiresMain = async (message) => {
+const requiresMain = async (message, reason) => {
   const offer = makeOffer(message);
   bus.emit("fm-branch-supervision:dispatch", offer);
   if (!offer.accepted) throw new Error("branch fixture did not reach the eligibility recheck");
   await offer.settlement.then(
     () => { throw new Error("the endpoint loss did not return to main"); },
-    (error) => { if (!String(error).includes("named endpoint loss now belongs to main")) throw error; },
+    (error) => { if (!String(error).includes(reason)) throw error; },
   );
 };
-await requiresMain(decorated);
 writeFileSync(`${home}/state/a-lost.status`, "captain-held: awaiting the captain\n");
 writeFileSync(`${home}/state/.wake-queue`,
   `1\t2\tstale\tdefault:wX:p1\t${loss.message}\n1\t3\tstale\tdefault:wX:p1\tstale: default:wX:p1\n`);
-await requiresMain(loss.message);
-await requiresMain(decorated);
+await requiresMain(loss.message, "named endpoint loss now belongs to main");
+await requiresMain(decorated, "named endpoint loss now belongs to main");
+writeFileSync(`${home}/state/a-lost.status`, "working: relaunched\n");
+writeFileSync(`${home}/state/a-lost.meta`, `project=${approvedProject}\nwindow=default:wX:p2\n`);
+await requiresMain(loss.message, "unread wake queue could not be read safely");
 if (globalThis.__fmPrompts.length !== 2) throw new Error("a main-owned loss prompted the branch");
 
 // A heartbeat review is not scoped by task: it may report any task id, a

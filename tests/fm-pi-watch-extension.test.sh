@@ -920,14 +920,24 @@ test_pi_stale_trigger_uses_its_task() {
       trigger='stale: fm-a (routine reminder)'
       queue=$(printf '1\t1\tsignal\ttask-a.status\tneeds-decision: task-a.status\n2\t2\tstale\tfm-a\t%s\n' "$trigger")
       ;;
-    held-loss|eligible-loss)
-      printf 'project=%s/projects/lost\nwindow=shared:w1:p2\n' "$home" > "$home/state/a-lost.meta"
+    held-loss|eligible-loss|relaunched-loss|torn-down-loss)
       printf 'project=%s/projects/approved\nwindow=shared:w1:p2\n' "$home" > "$home/state/z-live.meta"
+      case "$scenario" in
+        held-loss|eligible-loss)
+          printf 'project=%s/projects/lost\nwindow=shared:w1:p2\n' "$home" > "$home/state/a-lost.meta"
+          ;;
+        relaunched-loss)
+          printf 'project=%s/projects/lost\nwindow=shared:w1:p3\n' "$home" > "$home/state/a-lost.meta"
+          ;;
+      esac
       case "$scenario" in
         held-loss) held=a-lost ;;
         eligible-loss) held=z-live; expected_project=lost ;;
+        *) held=''; expected_project='' ;;
       esac
-      printf 'captain-held: awaiting the captain\n' > "$home/state/$held.status"
+      if [ -n "$held" ]; then
+        printf 'captain-held: awaiting the captain\n' > "$home/state/$held.status"
+      fi
       trigger='stale: shared:w1:p2 (the recorded endpoint is gone for task a-lost)'
       queue=$(printf '1\t1\tstale\tshared:w1:p2\t%s\n2\t2\tstale\tshared:w1:p2\tstale: shared:w1:p2\n' "$trigger")
       ;;
@@ -993,11 +1003,12 @@ for (let i = 0; i < 250 && offers.length === 0; i += 1) {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
 const eligible = process.env.FM_TEST_WAKE_PROJECT === "lost";
+const expected = process.env.FM_TEST_WAKE_PROJECT;
 for (let i = 0; !eligible && i < 250 && !prompt; i += 1) {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
 if (offers.length !== 1 || offers[0].eligible !== eligible ||
-  offers[0].projects.join(",") !== `${process.env.FM_HOME}/projects/${process.env.FM_TEST_WAKE_PROJECT}`) {
+  offers[0].projects.join(",") !== (expected ? `${process.env.FM_HOME}/projects/${expected}` : "")) {
   throw new Error(`the stale trigger used the wrong task scope: ${JSON.stringify(offers)}`);
 }
 if (eligible ? prompt !== "" : !prompt.includes(`FIRSTMATE WATCHER WAKE: ${process.env.FM_TEST_TRIGGER}`)) {
@@ -2862,6 +2873,7 @@ let tool = null;
 let deliveryStarted = false;
 const prompts = [];
 let offeredToBranch = false;
+let replayProjects = [];
 const pi = {
   on(event, handler) {
     handlers.set(event, handler);
@@ -2877,7 +2889,11 @@ const pi = {
   events: {
     on() {},
     emit(channel, offer) {
-      if (channel !== "fm-branch-supervision:dispatch" || !offer.eligible) return;
+      if (channel !== "fm-branch-supervision:dispatch") return;
+      if (offer.message.includes("could not persist a replacement-session actionable wake")) {
+        replayProjects = offer.projects;
+      }
+      if (!offer.eligible) return;
       offeredToBranch = true;
       offer.accept();
     },
@@ -2909,11 +2925,17 @@ if (!shutdownError) throw new Error("replacement shutdown hid the handoff persis
 await waitFor(() => !existsSync(process.env.FM_CHILD_MARKER), "successor cleanup after persistence failure");
 const { unlinkSync } = await import("node:fs");
 unlinkSync(`${process.env.FM_HOME}/state/extensions`);
+if (process.env.FM_TEST_TRIGGER.startsWith("stale:")) {
+  writeFileSync(`${process.env.FM_HOME}/state/a-lost.status`, "working: the captain released the hold\n");
+}
 const replacementMod = await import(`${pathToFileURL(process.env.PLUGIN).href}?replacement=persistence-failure`);
 replacementMod.default(pi);
 await handlers.get("session_start")?.({ type: "session_start", reason: "new" }, {});
 await waitFor(() => prompts.length >= 2 || offeredToBranch, "in-process handoff after persistence failure");
 if (offeredToBranch) throw new Error("the replacement routed a handoff failure to the branch");
+if (process.env.FM_TEST_TRIGGER.startsWith("stale:") && !replayProjects.includes(`${process.env.FM_HOME}/projects/first`)) {
+  throw new Error("the loss was still ineligible when the handoff failure was replayed");
+}
 if (!prompts[1].includes(process.env.FM_TEST_TRIGGER)) {
   throw new Error(`replacement lost the in-process actionable outcome: ${prompts.join(" | ")}`);
 }
@@ -4031,6 +4053,8 @@ test_pi_captain_held_signal_stays_on_main
 test_pi_stale_trigger_uses_its_task pending-reply
 test_pi_stale_trigger_uses_its_task held-loss
 test_pi_stale_trigger_uses_its_task eligible-loss
+test_pi_stale_trigger_uses_its_task relaunched-loss
+test_pi_stale_trigger_uses_its_task torn-down-loss
 test_pi_distinct_files_mixed_batch_routes_whole_batch_to_main
 test_pi_heartbeat_is_not_ridden_into_main_by_a_co_present_needs_decision
 test_pi_heartbeat_restoration_failure_stays_on_main

@@ -1418,7 +1418,7 @@ ${context.command}
         const heartbeat = /^heartbeat($|:)/.test(message);
         const scope = scopeForUnreadWake(state, heartbeat);
         const loss = namedEndpointLoss(message);
-        if (loss && (loss.watcherFailed || scope.needsDecisionTasks.includes(loss.task))) {
+        if (loss && scope.needsDecisionTasks.includes(loss.task)) {
           throw new Error("the named endpoint loss now belongs to main");
         }
         // A newly-arrived main-owned (check-kind) row never bounces this

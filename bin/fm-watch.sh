@@ -195,8 +195,10 @@ WATCHER_DOWNTIME_MARKER="$STATE/.watcher-down"
 # cannot shadow the BSD `-f` syntax.
 if [ "$(uname)" = Darwin ]; then
   stat_mtime() { /usr/bin/stat -f %m "$1" 2>/dev/null; }        # epoch seconds of mtime
+  stat_link_count() { /usr/bin/stat -f %l "$1" 2>/dev/null; }
 else
   stat_mtime() { stat -c %Y "$1" 2>/dev/null; }
+  stat_link_count() { stat -c %h "$1" 2>/dev/null; }
 fi
 # bin/fm-classify-lib.sh owns status reported-state signatures and presentation
 # markers, while bin/fm-wake-lib.sh owns their wake-facing routing, the legacy
@@ -1334,8 +1336,15 @@ stale_wait_throttled() {  # <window-key> <declaration>
 }
 
 current_wait_throttled() {  # <window-key> <task> <last-status-line> <kind>
-  local key=$1 task=$2 last=$3 kind=$4 declaration until CAPTAIN_CALL_IDENTITY
-  case "$(cat "$STATE/.paused-resurfaced-$key" 2>/dev/null)" in
+  local key=$1 task=$2 last=$3 kind=$4 declaration until reminder statusf="$STATE/$2.status" CAPTAIN_CALL_IDENTITY
+  reminder=$(cat "$STATE/.paused-resurfaced-$key" 2>/dev/null) || return 1
+  [ -f "$statusf" ] && [ -r "$statusf" ] && [ ! -L "$statusf" ] || return 1
+  [ "$(stat_link_count "$statusf")" = 1 ] || return 1
+  case "$(_fm_open_decisions_file_ident "$statusf")" in
+    strong:?*|weak:?*) ;;
+    *) return 1 ;;
+  esac
+  case "$reminder" in
     captain-hold:*)
       [ "$kind" != secondmate ] && task_captain_call_open "$task" || return 1
       declaration=$(captain_call_declaration "$task" "$CAPTAIN_CALL_IDENTITY")
