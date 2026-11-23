@@ -16,22 +16,22 @@ SPAWN="$ROOT/bin/fm-spawn.sh"
 TEARDOWN="$ROOT/bin/fm-teardown.sh"
 KIMI_HOOK="$ROOT/bin/fm-kimi-turnend-hook.sh"
 TMP_ROOT=$(fm_test_tmproot fm-kimi-harness)
-KIMI_SLEEPERS=()
+KIMI_SLEEPER_A_PID=
+KIMI_SLEEPER_A_IDENTITY=
+KIMI_SLEEPER_B_PID=
+KIMI_SLEEPER_B_IDENTITY=
 PYTHON_BIN=$(command -v python3) || fail "test needs python3"
 PYTHON_BIN_DIR=$(dirname "$PYTHON_BIN")
 JQ_BIN=$(command -v jq) || fail "test needs jq"
 BASE_PATH=${FM_TEST_BASE_PATH:-$PYTHON_BIN_DIR:/usr/bin:/bin:/usr/sbin:/sbin}
 
-cleanup_kimi_harness() {
-  local pid
-  for pid in "${KIMI_SLEEPERS[@]:-}"; do
-    [ -n "$pid" ] || continue
-    kill "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
-  done
-  KIMI_SLEEPERS=()
+cleanup_kimi_sleepers() {
+  fm_test_stop_sleeper "$KIMI_SLEEPER_A_PID" "$KIMI_SLEEPER_A_IDENTITY"
+  fm_test_stop_sleeper "$KIMI_SLEEPER_B_PID" "$KIMI_SLEEPER_B_IDENTITY"
+  KIMI_SLEEPER_A_PID= KIMI_SLEEPER_A_IDENTITY=
+  KIMI_SLEEPER_B_PID= KIMI_SLEEPER_B_IDENTITY=
 }
-trap 'cleanup_kimi_harness; fm_test_cleanup' EXIT
+trap 'cleanup_kimi_sleepers; fm_test_cleanup' EXIT
 
 make_spawn_fakebin() {
   local dir=$1 fakebin
@@ -470,7 +470,7 @@ test_kimi_teardown_removes_pointer_and_registry_token() {
 
 test_same_task_id_in_two_homes_gets_unshared_task_temp() {
   local id rec_a rec_b out rc case_a home_a wt_a fakebin_a case_b home_b wt_b fakebin_b
-  local proj_a proj_b tmp_a tmp_b tmp_a2 sleeper_a='' sleeper_b='' i
+  local proj_a proj_b tmp_a tmp_b tmp_a2
   id="kimi-twohome-z9-$$"
   rec_a=$(make_spawn_case twohome-a "$id")
   rec_b=$(make_spawn_case twohome-b "$id")
@@ -494,18 +494,14 @@ EOF
     || fail "two homes spawning task $id share one task temp root: $tmp_a"
   printf 'home B scratch\n' > "$tmp_b/gotmp/keep"
   if PATH="$fakebin_a:$BASE_PATH" command -v lsof >/dev/null; then
-    ( cd "$tmp_a/gotmp" && : > "$case_a/sleeper-ready" && exec sleep 300 ) &
-    sleeper_a=$!
-    KIMI_SLEEPERS+=("$sleeper_a")
-    ( cd "$tmp_b/gotmp" && : > "$case_b/sleeper-ready" && exec sleep 300 ) &
-    sleeper_b=$!
-    KIMI_SLEEPERS+=("$sleeper_b")
-    for ((i=0; i<100; i++)); do
-      if [ -f "$case_a/sleeper-ready" ] && [ -f "$case_b/sleeper-ready" ]; then break; fi
-      sleep 0.05
-    done
-    [ "$i" -lt 100 ] && kill -0 "$sleeper_a" "$sleeper_b" 2>/dev/null \
-      || fail "both sleepers must be running inside their Go temp directories"
+    ( cd "$tmp_a/gotmp" && exec sleep 300 ) &
+    KIMI_SLEEPER_A_PID=$!
+    KIMI_SLEEPER_A_IDENTITY=$(fm_test_cwd_sleeper_identity "$KIMI_SLEEPER_A_PID") \
+      || fail "home A sleeper did not start inside its Go temp directory"
+    ( cd "$tmp_b/gotmp" && exec sleep 300 ) &
+    KIMI_SLEEPER_B_PID=$!
+    KIMI_SLEEPER_B_IDENTITY=$(fm_test_cwd_sleeper_identity "$KIMI_SLEEPER_B_PID") \
+      || fail "home B sleeper did not start inside its Go temp directory"
   else
     printf 'skip: two-home task temp process isolation requires lsof\n'
   fi
@@ -517,13 +513,15 @@ EOF
     "$TEARDOWN" "$id" --force > "$case_a/teardown.log" 2>&1 \
     || fail "home A teardown failed: $(cat "$case_a/teardown.log")"
   assert_absent "$tmp_a" "home A cleanup left its own task temp root"
-  if [ -n "$sleeper_a" ]; then
-    if kill -0 "$sleeper_a" 2>/dev/null; then
+  if [ -n "$KIMI_SLEEPER_A_IDENTITY" ]; then
+    if fm_test_owner_is_alive "$KIMI_SLEEPER_A_PID" "$KIMI_SLEEPER_A_IDENTITY"; then
       fail "home A cleanup did not reap its leaked process in its task temp root"
     fi
-    kill -0 "$sleeper_b" 2>/dev/null \
+    wait "$KIMI_SLEEPER_A_PID" 2>/dev/null || true
+    KIMI_SLEEPER_A_PID= KIMI_SLEEPER_A_IDENTITY=
+    fm_test_owner_is_alive "$KIMI_SLEEPER_B_PID" "$KIMI_SLEEPER_B_IDENTITY" \
       || fail "home A cleanup signalled home B's live process in its task temp root"
-    cleanup_kimi_harness
+    cleanup_kimi_sleepers
   fi
   assert_present "$tmp_b/gotmp/keep" "home A cleanup deleted home B's task temp files"
 

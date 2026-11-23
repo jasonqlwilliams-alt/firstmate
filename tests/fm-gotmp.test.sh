@@ -11,38 +11,13 @@
 # metadata publication, and the pane environment export.
 set -u
 
-# This suite does not source tests/lib.sh, so exempt its teardown subprocess from
-# the gate-lifecycle refusal (bin/fm-gate-refuse-lib.sh) the way lib.sh does for
-# the rest of the suite: the no-mistakes gate runs this suite from a gate worktree,
-# which the guard would otherwise refuse.
-export FM_GATE_REFUSE_BYPASS=1
-
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=tests/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 TEARDOWN="$ROOT/bin/fm-teardown.sh"
-
-fail() {
-  printf 'not ok - %s\n' "$1" >&2
-  exit 1
-}
-
-pass() {
-  printf 'ok - %s\n' "$1"
-}
-
-TMP_ROOT=
-LEGACY_TASK_TMP=
-
-cleanup() {
-  if [ -n "${TMP_ROOT:-}" ]; then
-    rm -rf "$TMP_ROOT"
-  fi
-  if [ -n "$LEGACY_TASK_TMP" ]; then
-    rm -rf -- "$LEGACY_TASK_TMP"
-  fi
-}
-trap cleanup EXIT
-
-TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-gotmp-tests.XXXXXX")
+TMP_ROOT=$(fm_test_tmproot fm-gotmp-tests)
+LEGACY_SLEEPER_PID=
+LEGACY_SLEEPER_IDENTITY=
+trap 'fm_test_stop_sleeper "$LEGACY_SLEEPER_PID" "$LEGACY_SLEEPER_IDENTITY"; fm_test_cleanup' EXIT
 
 # Build a fake FM_HOME/FM_ROOT so the real fm-teardown.sh (symlinked in) resolves
 # state and helper scripts inside it. Stub the helper scripts fm-teardown calls so no
@@ -157,16 +132,31 @@ test_teardown_removes_tasktmp_dir() {
 }
 
 test_teardown_preserves_shared_legacy_tasktmp() {
-  local id fake
-  LEGACY_TASK_TMP=$(mktemp -d /tmp/fm-legacy-XXXXXX) || fail "could not allocate legacy fixture"
-  id=${LEGACY_TASK_TMP#/tmp/fm-}
-  mkdir "$LEGACY_TASK_TMP/gotmp"
-  printf 'another home still needs this\n' > "$LEGACY_TASK_TMP/gotmp/keep"
-  fake=$(make_fake_root "$id" "$LEGACY_TASK_TMP")
+  local id fake legacy_task_tmp
+  legacy_task_tmp=$(mktemp -d /tmp/fm-legacy-XXXXXX) || fail "could not allocate legacy fixture"
+  FM_TEST_CLEANUP_DIRS+=("$legacy_task_tmp")
+  id=${legacy_task_tmp#/tmp/fm-}
+  mkdir "$legacy_task_tmp/gotmp"
+  printf 'another home still needs this\n' > "$legacy_task_tmp/gotmp/keep"
+  fake=$(make_fake_root "$id" "$legacy_task_tmp")
+  if command -v lsof >/dev/null; then
+    ( cd "$legacy_task_tmp/gotmp" && exec sleep 300 ) &
+    LEGACY_SLEEPER_PID=$!
+    LEGACY_SLEEPER_IDENTITY=$(fm_test_cwd_sleeper_identity "$LEGACY_SLEEPER_PID") \
+      || fail "legacy sleeper did not start inside the shared root"
+  else
+    printf 'skip: legacy task temp process preservation requires lsof\n'
+  fi
   FM_HOME="$fake" bash "$fake/bin/fm-teardown.sh" "$id" > "$fake/teardown.log" 2>&1 \
     || fail "legacy teardown failed: $(cat "$fake/teardown.log")"
   [ ! -e "$fake/state/$id.meta" ] || fail "legacy teardown left the task record"
-  [ -f "$LEGACY_TASK_TMP/gotmp/keep" ] || fail "legacy teardown removed a potentially shared temp root"
+  [ -f "$legacy_task_tmp/gotmp/keep" ] || fail "legacy teardown removed a potentially shared temp root"
+  if [ -n "$LEGACY_SLEEPER_IDENTITY" ]; then
+    fm_test_owner_is_alive "$LEGACY_SLEEPER_PID" "$LEGACY_SLEEPER_IDENTITY" \
+      || fail "legacy teardown signalled a process in the shared temp root"
+    fm_test_stop_sleeper "$LEGACY_SLEEPER_PID" "$LEGACY_SLEEPER_IDENTITY"
+    LEGACY_SLEEPER_PID= LEGACY_SLEEPER_IDENTITY=
+  fi
   pass "fm-teardown preserves the legacy task temp directory for manual cleanup"
 }
 

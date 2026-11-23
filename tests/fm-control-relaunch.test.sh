@@ -395,14 +395,15 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
   assert_grep "encode launch-brief" "$dir/fake/literal" "the replacement should have been launched"
 
   tmp_before=$tmp_after
+  printf 'build artifact\n' > "$tmp_before/gotmp/keep"
+  : > "$dir/fake/keys"
   out=$(run_control "$dir" rl1 relaunch --note "continue the refactor"); rc=$?
   expect_code 0 "$rc" "a second same-harness relaunch should succeed"$'\n'"$out"
   tmp_after=$(meta_field "$dir" rl1 tasktmp)
-  [ -n "$tmp_after" ] && [ -d "$tmp_after/gotmp" ] && [ "$tmp_after" != "$tmp_before" ] \
-    || fail "a relaunch must replace an already private Go temp directory"
-  [ -d "$tmp_before/gotmp" ] || fail "the relaunch removed the prior incarnation's Go temp directory"
+  [ "$tmp_after" = "$tmp_before" ] || fail "a relaunch must reuse the recorded private root"
+  assert_present "$tmp_after/gotmp/keep" "the relaunch discarded the private root's contents"
   assert_grep "export GOTMPDIR=$tmp_after/gotmp" "$dir/fake/keys" \
-    "the second replacement pane did not receive the fresh Go temp directory"
+    "the second replacement pane did not receive the recorded Go temp directory"
   pass "fm-control relaunch: a same-harness relaunch replaces the agent in the same endpoint and worktree"
 }
 

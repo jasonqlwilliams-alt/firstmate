@@ -403,6 +403,26 @@ fm_test_owner_is_alive() {  # <pid> <identity>
   [ "$identity" = "$2" ]
 }
 
+fm_test_cwd_sleeper_identity() {
+  local pid=$1 command_name i
+  for ((i=0; i<100; i++)); do
+    command_name=$(ps -p "$pid" -o comm= 2>/dev/null) || return 1
+    case "$command_name" in
+      sleep|*/sleep) TZ=UTC0 fm_test_pid_identity "$pid"; return ;;
+    esac
+    sleep 0.05
+  done
+  return 1
+}
+
+fm_test_stop_sleeper() {
+  local pid=$1 identity=$2
+  if [ -n "$identity" ] && fm_test_owner_is_alive "$pid" "$identity"; then
+    kill "$pid" 2>/dev/null || return 0
+    wait "$pid" 2>/dev/null || true
+  fi
+}
+
 fm_test_finish_fixture_reaper() {  # <exit status>
   local status=$1
   trap '' INT TERM HUP QUIT

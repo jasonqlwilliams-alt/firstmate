@@ -1015,6 +1015,7 @@ SPAWN_META_LOCK=
 SPAWN_META_LOCK_HELD=0
 SPAWN_META_PUBLISH_STARTED=0
 TASK_TMP=
+SPAWN_TASK_TMP_CREATED=0
 SPAWN_TASK_TMP_HANDED_OFF=0
 SPAWN_FRESH_COMMIT_PENDING=0
 SPAWN_TASK_SET_LOCK=
@@ -1251,7 +1252,7 @@ spawn_abort_cleanup() {
     fm_lock_release "$CONFIG_INHERIT_LOCK" || true
   fi
   [ -z "$SPAWN_SLOT_ACQUIRE_FILE" ] || rm -f -- "$SPAWN_SLOT_ACQUIRE_FILE" 2>/dev/null || true
-  if [ "$status" -ne 0 ] && [ -n "$TASK_TMP" ] \
+  if [ "$status" -ne 0 ] && [ "$SPAWN_TASK_TMP_CREATED" = 1 ] \
      && [ "$(fm_meta_get "$STATE/$ID.meta" tasktmp 2>/dev/null)" != "$TASK_TMP" ]; then
     if [ "$SPAWN_TASK_TMP_HANDED_OFF" = 1 ]; then
       echo "warning: task $ID's temporary directory remains at $TASK_TMP; inspect it after closing endpoint $T" >&2
@@ -4058,18 +4059,25 @@ fi
 
 # Per-task temp root: /tmp/fm-<id>+XXXXXX/ with Go's build temp nested at gotmp/.
 # mktemp creates the root atomically under a fresh random suffix, so no other
-# home spawning the same task id and no other incarnation of this id can share
-# it; fm-teardown's process scan and removal of the recorded root therefore
-# touch only this task. Go won't create GOTMPDIR, so mkdir
+# home spawning the same task id can share it. Go won't create GOTMPDIR, so mkdir
 # before it is used; fm-teardown removes the whole root recorded as tasktmp=.
 # Nested (not a bare root used as GOTMPDIR) so other per-task temp can live
 # alongside later. The short suffix keeps paths inside the socket-path limits
 # Go and tmux impose. GOTMPDIR (not TMPDIR) is the targeted knob: TMPDIR is too
 # broad (affects every program's temp, not just Go's).
-TASK_TMP=$(mktemp -d "/tmp/fm-$ID+XXXXXX") || {
-  echo "error: could not create a private task temp root under /tmp for $ID" >&2
-  exit 1
-}
+if [ "$RELAUNCH" -eq 1 ]; then
+  TASK_TMP=$(fm_meta_get "$RELAUNCH_META" tasktmp)
+  case "$TASK_TMP" in
+    "/tmp/fm-$ID") TASK_TMP= ;;
+  esac
+fi
+if [ -z "$TASK_TMP" ]; then
+  TASK_TMP=$(mktemp -d "/tmp/fm-$ID+XXXXXX") || {
+    echo "error: could not create a private task temp root under /tmp for $ID" >&2
+    exit 1
+  }
+  SPAWN_TASK_TMP_CREATED=1
+fi
 mkdir -p "$TASK_TMP/gotmp"
 
 # Per-harness turn-end hook where enabled: a file that touches
@@ -5039,7 +5047,7 @@ spawn_record_traceparent() {
 # process (go build, go test, ...) inherit it. Sent before the launch command so
 # the env is set when the agent starts; the brief sleep lets the export land.
 SPAWN_TASK_TMP_HANDED_OFF=1
-spawn_send_text_line "$T" "export GOTMPDIR=$TASK_TMP/gotmp"
+spawn_send_text_line "$T" "export GOTMPDIR=$(printf '%q' "$TASK_TMP/gotmp")"
 # Mark the pane as a task worker so bin/fm-test-run.sh can refuse to run the
 # suite in the repository's primary checkout. Ship and scout workers are the
 # ones assigned an isolated worktree; a secondmate runs its own home instead.
