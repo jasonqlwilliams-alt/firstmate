@@ -230,7 +230,7 @@ test_kimi_launch_then_send_is_verified() {
   assert_grep 'model=kimi-code/k3' "$meta" "kimi meta lost the requested model"
   assert_grep 'effort=high' "$meta" "kimi meta did not retain the unsupported effort axis"
   task_tmp=$(sed -n 's/^tasktmp=//p' "$meta")
-  KIMI_RUNTIME_TASK_TMP=$task_tmp
+  KIMI_RUNTIME_TASK_TMP="$KIMI_RUNTIME_TASK_TMP $task_tmp"
   case "$task_tmp" in
     "/tmp/fm-$id."??????) ;;
     *) fail "kimi meta did not record a private task temp root: '$task_tmp'" ;;
@@ -487,7 +487,7 @@ EOF
   expect_code 0 "$rc" "home B spawn should succeed: $out"
   tmp_a=$(sed -n 's/^tasktmp=//p' "$home_a/state/$id.meta")
   tmp_b=$(sed -n 's/^tasktmp=//p' "$home_b/state/$id.meta")
-  KIMI_RUNTIME_TASK_TMP="$tmp_a $tmp_b"
+  KIMI_RUNTIME_TASK_TMP="$KIMI_RUNTIME_TASK_TMP $tmp_a $tmp_b"
   [ -n "$tmp_a" ] && [ -n "$tmp_b" ] || fail "both spawns must record a task temp root"
   [ "$tmp_a" != "$tmp_b" ] \
     || fail "two homes spawning task $id share one task temp root: $tmp_a"
@@ -513,7 +513,7 @@ EOF
   rc=$?
   expect_code 0 "$rc" "home A respawn should succeed: $out"
   tmp_a2=$(sed -n 's/^tasktmp=//p' "$home_a/state/$id.meta")
-  KIMI_RUNTIME_TASK_TMP="$tmp_a $tmp_b $tmp_a2"
+  KIMI_RUNTIME_TASK_TMP="$KIMI_RUNTIME_TASK_TMP $tmp_a2"
   [ "$tmp_a2" != "$tmp_a" ] && [ "$tmp_a2" != "$tmp_b" ] \
     || fail "a new incarnation of task $id reused an earlier task temp root: $tmp_a2"
   pass "fm-spawn: the same task id in two homes gets unshared task temp roots that cleanup keeps apart"
