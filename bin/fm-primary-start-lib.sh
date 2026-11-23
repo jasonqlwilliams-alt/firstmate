@@ -271,7 +271,7 @@ primary_report() {
   [ -z "$PRIMARY_PANE" ] || detected=true
   before=$PRIMARY_OWNER before_start=$PRIMARY_OWNER_START
   if primary_owner_in_pane "$PRIMARY_PANE"; then
-    if fm_session_start_completion_matches "$STATE/.session-start-complete" "$PRIMARY_OWNER" "$PRIMARY_OWNER_START" \
+    if fm_session_start_completion_matches "$STATE/.session-start-complete" "$before" "$before_start" \
       && FM_WAKE_NO_MKDIR=1 "$FM_HOME/bin/fm-startup-network.sh" owner "$PRIMARY_OWNER"; then
       initialized=true
       if FM_WAKE_NO_MKDIR=1 "$FM_HOME/bin/fm-startup-network.sh" ready "$PRIMARY_OWNER"; then
@@ -297,7 +297,7 @@ primary_report() {
   fi
   primary_read_lock
   if [ "$PRIMARY_LOCK" != live ] || [ "$before" != "$PRIMARY_OWNER" ] \
-    || { [ -n "$before_start" ] && [ "$before_start" != "$PRIMARY_OWNER_START" ]; }; then
+    || [ "$before_start" != "$PRIMARY_OWNER_START" ]; then
     initialized=false recovered=false supervised=false
   fi
   printf 'agent_detected=%s\nprimary_initialized=%s\nrecovery_ready=%s\nsupervision_healthy=%s\n' \
