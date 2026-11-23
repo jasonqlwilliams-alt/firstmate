@@ -3303,7 +3303,7 @@ fm_backend_herdr_composer_classify_snapshot() {  # <target> [fit-text]
     if ! identity=$(fm_backend_herdr_composer_identity "$target" 2>/dev/null) || [ -z "$identity" ]; then
       identity=probe-absent
     fi
-    verdict=$(fm_composer_classify_screen "$caps" "$cap" '' "$identity" "$fit")
+    verdict=$(fm_composer_classify_screen "$caps" "$cap" '' "$identity")
     [ "$verdict" != need-identity ] || verdict=unknown
   fi
   printf '%s' "$verdict"

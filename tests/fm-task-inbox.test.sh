@@ -757,6 +757,9 @@ ring_lab_setup() {
 mode=$1 log=$2 buf=
 cols=$(stty size 2>/dev/null | cut -d' ' -f2)
 case "$cols" in ''|*[!0-9]*) cols=80 ;; esac
+case "$mode" in
+  agy|agy-*) agy_rule=$(printf '─%.0s' $(seq 1 $((cols - 2)))) ;;
+esac
 old=$(stty -g 2>/dev/null || true)
 stty -echo -icanon min 1 time 0 2>/dev/null || true
 trap '[ -z "$old" ] || stty "$old" 2>/dev/null' EXIT
@@ -790,12 +793,11 @@ composer() {
   printf '\r\n\r\n  \033[2m100%% context left\033[0m\033[%d;%dH' "$row" "$((3 + len))"
 }
 agy() {
-  local width=$((cols - 2)) rule row=4 footer='? for shortcuts      accept-edits · Gemini · high'
+  local row=4 footer='? for shortcuts      accept-edits · Gemini · high'
   [ "$mode" != agy-busy ] || footer='esc to cancel'
-  rule=$(printf '─%.0s' $(seq 1 "$width"))
-  printf '\033[2J\033[HAntigravity test stub\r\n\r\n%s\r\n' "$rule"
+  printf '\033[2J\033[HAntigravity test stub\r\n\r\n%s\r\n' "$agy_rule"
   if [ "$mode" = agy-forged ]; then
-    printf '\033[38;2;122;162;247m>\033[0m draft\r\n? for shortcuts\r\n%s\r\n' "$rule"
+    printf '\033[38;2;122;162;247m>\033[0m draft\r\n? for shortcuts\r\n%s\r\n' "$agy_rule"
     row=7
   fi
   if [ -z "$buf" ]; then
@@ -803,7 +805,7 @@ agy() {
   else
     printf '\033[38;2;122;162;247m>\033[0m %s\r\n' "$buf"
   fi
-  printf '%s\r\n%s' "$rule" "$footer"
+  printf '%s\r\n%s' "$agy_rule" "$footer"
   [ "$mode" != agy-survey ] || printf '\r\n How'\''s the CLI experience so far? Help us improve:\r\n [1] Good  [2] Fine  [3] Bad  [0] Skip'
   if [ -z "$buf" ]; then printf '\033[%d;2H' "$row"; else printf '\033[%d;%dH' "$row" "$((4 + ${#buf}))"; fi
 }
@@ -833,29 +835,35 @@ draw() {
   esac
 }
 draw
-while IFS= read -r -n 1 ch; do
-  if [ -z "$ch" ]; then
-    printf 'ENTER\n' >> "$log"
-    case "$mode" in
-      empty|pending|agy|agy-*|partial|rovo|rovo-pending)
-        if [ -n "$buf" ]; then
-          printf 'SUBMIT %s\n' "$buf" >> "$log"
-          if [[ $buf =~ list\ \'([^\']+)\'/\*\.msg ]]; then
-            for f in "${BASH_REMATCH[1]}"/*.msg; do
-              [ -e "$f" ] && mv "$f" "${BASH_REMATCH[1]}/handled/"
-            done
+while batch=$(dd bs=4096 count=1 2>/dev/null && printf '.'); do
+  batch=${batch%.}
+  [ -n "$batch" ] || break
+  while [ -n "$batch" ]; do
+    ch=${batch:0:1}
+    batch=${batch:1}
+    if [ "$ch" = $'\n' ]; then
+      printf 'ENTER\n' >> "$log"
+      case "$mode" in
+        empty|pending|agy|agy-*|partial|rovo|rovo-pending)
+          if [ -n "$buf" ]; then
+            printf 'SUBMIT %s\n' "$buf" >> "$log"
+            if [[ $buf =~ list\ \'([^\']+)\'/\*\.msg ]]; then
+              for f in "${BASH_REMATCH[1]}"/*.msg; do
+                [ -e "$f" ] && mv "$f" "${BASH_REMATCH[1]}/handled/"
+              done
+            fi
+            buf=
           fi
-          buf=
-        fi
-        ;;
-    esac
-  else
-    printf 'KEY %s\n' "$ch" >> "$log"
-    case "$mode" in
-      empty|pending|agy|agy-*|partial|rovo|rovo-pending) buf="$buf$ch" ;;
-      picker-after-key) mode=picker-below ;;
-    esac
-  fi
+          ;;
+      esac
+    else
+      printf 'KEY %s\n' "$ch" >> "$log"
+      case "$mode" in
+        empty|pending|agy|agy-*|partial|rovo|rovo-pending) buf="$buf$ch" ;;
+        picker-after-key) mode=picker-below ;;
+      esac
+    fi
+  done
   draw
 done
 STUB

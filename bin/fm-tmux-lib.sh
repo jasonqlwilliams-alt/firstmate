@@ -166,7 +166,7 @@ fm_tmux_composer_classify_snapshot() {  # <target> [fit-text]
     if ! identity=$(fm_tmux_composer_identity "$target") || [ -z "$identity" ]; then
       identity=probe-absent
     fi
-    verdict=$(fm_composer_classify_screen "$caps" "$pane" "$cy" "$identity" "$fit")
+    verdict=$(fm_composer_classify_screen "$caps" "$pane" "$cy" "$identity")
     [ "$verdict" != need-identity ] || verdict=unknown
   fi
   # Cursor Agent CLI parks its terminal cursor OUTSIDE its composer, below the
