@@ -56,13 +56,21 @@ fm_secondmate_persist_request() {  # <running-harness>
 FM_SECONDMATE_PERSIST_OUTCOME=""
 FM_SECONDMATE_PERSIST_NOTE=""
 fm_secondmate_persist_outcome() {  # <state-dir> <corr_id>
-  local state=$1 corr=$2 rec status_file line header verb
+  local state=$1 corr=$2 rec status_file line header verb corr_pattern reply_metadata
+  local metadata="([[:space:]]+|\[[^][]*\]|[[:space:]]+$FM_PENDING_REPLY_CORR_RE)"
   FM_SECONDMATE_PERSIST_OUTCOME=""
   FM_SECONDMATE_PERSIST_NOTE=""
   rec=$(fm_pending_reply_path "$state" "$corr")
   [ -f "$rec" ] || return 1
   status_file=$(fm_pending_reply_get "$rec" parent_status)
   [ -f "$status_file" ] || return 1
+  corr_pattern=$(printf '%s\n' "$corr" | awk '{
+    for (i = 1; i <= length($0); i++) {
+      digit = substr($0, i, 1)
+      printf "[%s%s]", digit, toupper(digit)
+    }
+  }')
+  reply_metadata="^$metadata*([[:space:]]+corr=$corr_pattern|\[corr=$corr_pattern\])$metadata*$"
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       "done [corr=$corr]: $_FM_SECONDMATE_SAVED_RECEIPT"|"done [corr=$corr]: $_FM_SECONDMATE_SAVED_RECEIPT (via-helper)")
@@ -72,25 +80,19 @@ fm_secondmate_persist_outcome() {  # <state-dir> <corr_id>
       *:*) ;;
       *) continue ;;
     esac
-    header=$(printf '%s\n' "${line%%:*}" | sed -E "s/\[($FM_PENDING_REPLY_CORR_RE)\]|\[[^][]*\]/ \1 /g")
-    case "$header" in
-      *'['*|*']'*) continue ;;
-    esac
-    verb=$(status_line_verb "$header")
+    verb=$(status_line_verb "$line")
     case "$verb" in
       ''|[!A-Za-z]*|*[!A-Za-z0-9_-]*) continue ;;
     esac
-    case " $(printf '%s' "$header" | tr 'A-F' 'a-f') " in
-      *[[:space:]]"corr=$corr"[[:space:]]*) ;;
-      *) continue ;;
-    esac
+    header=${line%%:*}
+    [[ "${header#*"$verb"}" =~ $reply_metadata ]] || continue
     FM_SECONDMATE_PERSIST_NOTE=$(status_line_note "$line" | tr -s '[:space:]' ' ')
     case "$verb" in
       blocked|failed|needs-decision) FM_SECONDMATE_PERSIST_OUTCOME=not-saved ;;
       *) FM_SECONDMATE_PERSIST_OUTCOME=unclear ;;
     esac
     return 0
-  done < <(grep -Fi -e "corr=$corr" "$status_file")
+  done < <(grep -aFi -e "corr=$corr" "$status_file")
   [ "$FM_SECONDMATE_PERSIST_OUTCOME" = saved ]
 }
 

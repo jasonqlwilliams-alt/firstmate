@@ -1191,6 +1191,39 @@ test_negative_or_unclear_reply_vetoes_save_receipt() {
   pass "a negative or unclear correction vetoes an earlier save receipt"
 }
 
+test_non_utf8_correction_vetoes_save_receipt() {
+  local utf8_locale
+  utf8_locale=$(locale -a | awk 'tolower($0) ~ /utf-?8$/ { print; exit }')
+  LC_ALL="${utf8_locale:-C}" assert_persist_answer_stops_local blocked \
+    $'one record was never written: caf\351' \
+    'it answered that its open work is not saved' 'a non-UTF-8 correction' with-receipt
+  pass "a non-UTF-8 correction vetoes an earlier save receipt"
+}
+
+test_tag_first_status_does_not_veto_save_receipt() {
+  local dir out rc
+  dir=$(new_case tag-first)
+  add_local_mate "$dir" sm1
+  arm_answer "$dir" sm1
+  cat > "$dir/fake/on-doorbell" <<'SH'
+#!/usr/bin/env bash
+corr=${FM_PENDING_REPLY_EXISTING_CORR:-}
+[ -n "$corr" ] || exit 0
+printf '[key=save] blocked corr=%s: still writing\n' "$corr" \
+  >> "$(cat "$FM_FAKE_DIR/answer-status")"
+SH
+  chmod +x "$dir/fake/on-doorbell"
+
+  out=$(run_restart "$dir" sm1); rc=$?
+
+  assert_grep '[key=save] blocked corr=' "$dir/home/state/sm1.status" \
+    "the tag-first status must be present on the parent channel"
+  expect_code 0 "$rc" "the exact receipt releases the gate despite a tag-first status"$'\n'"$out"
+  assert_contains "$out" 'restarted: sm1' "the pass must report the restart"
+  assert_grep '/exit' "$dir/fake/submitted" "the mate must receive the exit command"
+  pass "a tag-first status does not veto a save receipt"
+}
+
 test_operator_close_does_not_count_as_a_save_reply() {
   local dir out rc
   dir=$(new_case operator-close)
@@ -1247,6 +1280,8 @@ test_negative_persist_answer_stops_local_restart
 test_unclear_persist_answer_stops_local_restart
 test_negative_persist_answer_stops_remote_restart
 test_negative_or_unclear_reply_vetoes_save_receipt
+test_non_utf8_correction_vetoes_save_receipt
+test_tag_first_status_does_not_veto_save_receipt
 test_operator_close_does_not_count_as_a_save_reply
 
 echo "# all fm-secondmate-restart tests passed"
