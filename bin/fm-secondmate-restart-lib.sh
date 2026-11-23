@@ -57,7 +57,7 @@ fm_secondmate_persist_request() {  # <running-harness>
 FM_SECONDMATE_PERSIST_OUTCOME=""
 FM_SECONDMATE_PERSIST_NOTE=""
 fm_secondmate_persist_outcome() {  # <state-dir> <corr_id>
-  local state=$1 corr=$2 rec status_file line header verb reply_token header_corr note_token
+  local state=$1 corr=$2 rec status_file line header note verb reply_token header_corr note_token
   reply_token="\[corr=$corr\]|(^|[[:space:]])corr=$corr([[:space:]]|\[|$)"
   header_corr="\[$FM_PENDING_REPLY_CORR_RE\]|(^|[[:space:]])$FM_PENDING_REPLY_CORR_RE([[:space:]]|\[|$)"
   note_token="^[[:space:]]*(\[corr=$corr\]|corr=$corr)([[:space:]]|$)"
@@ -81,10 +81,11 @@ fm_secondmate_persist_outcome() {  # <state-dir> <corr_id>
       ''|[!A-Za-z]*|*[!A-Za-z0-9_-]*) continue ;;
     esac
     header=${line%%:*}
+    note=$(status_line_note "$line")
     if ! [[ "$header" =~ $reply_token ]]; then
-      [[ ! "$header" =~ $header_corr && "${line#*:}" =~ $note_token ]] || continue
+      [[ ! "$header" =~ $header_corr && "$note" =~ $note_token ]] || continue
     fi
-    FM_SECONDMATE_PERSIST_NOTE=$(status_line_note "$line" | LC_ALL=C tr -s '[:space:]' ' ')
+    FM_SECONDMATE_PERSIST_NOTE=$(printf '%s' "$note" | LC_ALL=C tr -s '[:space:]' ' ')
     case "$verb" in
       blocked|failed|needs-decision) FM_SECONDMATE_PERSIST_OUTCOME=not-saved ;;
       *) FM_SECONDMATE_PERSIST_OUTCOME=unclear ;;

@@ -42,6 +42,9 @@
 #      an acknowledgement.
 #      The gate decides on replies visible during its scan, so a correction
 #      that becomes visible afterward can miss the restart decision.
+#      Repair of a reply written to a local mate's own status file copies
+#      only the first matching reply to the parent channel, so the gate
+#      cannot see a later correction left in the mate's file.
 #
 # A missing persist answer or an unsupported restart can fall back to the
 # ordinary re-read nudge. For an unconfirmed remote send, the pass reports

@@ -303,7 +303,7 @@ test_usage_includes_all_exit_statuses() {
 
 # --- T1: the persist request is the task subset of /stow, and it gates --------
 test_persist_gates_and_asks_only_for_open_records() {
-  local dir out rc request recovery
+  local dir out rc request corr rec recovery
   dir=$(new_case gate)
   add_local_mate "$dir" sm1 pi
   printf 'pi' > "$dir/fake/command"
@@ -320,11 +320,13 @@ test_persist_gates_and_asks_only_for_open_records() {
     || fail "the agent was stopped without a confirmed persist"
   assert_absent "$dir/home/state/sm1.control-relaunch" \
     "a restart transaction was opened without a confirmed persist"
-  grep -h '^phase=' "$dir/home/state/pending-replies"/* | grep -q '^phase=awaiting_report$' \
+  request=$(cat "$dir/home/state/sm1.inbox/001.msg")
+  corr=$(printf '%s\n' "$request" | grep -oE 'corr=[0-9a-f]{16}' | head -1)
+  rec="$dir/home/state/pending-replies/${corr#corr=}"
+  grep -qx 'phase=awaiting_report' "$rec" \
     || fail "the timed-out persist expectation was closed instead of left to recovery"
 
   # The request the mate actually received is the open-record half of /stow only.
-  request=$(cat "$dir/home/state/sm1.inbox"/*.msg)
   assert_contains "$request" "Open-record persistence" "the request must reuse stow's open-record contract"
   assert_contains "$request" "file a task for each open record" "the request must ask for the unfiled open records"
   assert_contains "$request" "correct any task whose status" "the request must ask for stale task status"
@@ -336,7 +338,7 @@ test_persist_gates_and_asks_only_for_open_records() {
     "the delivered request must tell the mate which receipt releases the gate"
   recovery=$(
     . "$ROOT/bin/fm-pending-reply-lib.sh"
-    fm_pending_reply_recovery_message "$dir/home/state/pending-replies/"*
+    fm_pending_reply_recovery_message "$rec"
   )
   assert_contains "$recovery" 'done [corr=<request id>]: Saved all open work.' \
     "the emitted recovery prompt must preserve the required receipt"
@@ -1130,7 +1132,10 @@ SH
   expect_code 3 "$rc" "$label must not count as a clean restart"$'\n'"$out"
   assert_contains "$out" "stopped: sm1: $fragment" "$label must stop the restart and say why"
   case "$note" in
-    *'<corr>'*) note=${note#* } ;;
+    *'<corr>'*)
+      note=${note#*'<corr>'}
+      note=${note#']'}
+      ;;
   esac
   assert_contains "$out" "$note" "$label must carry the mate's own words"
   assert_not_contains "$out" "restarted: sm1" "$label must not restart the mate"
@@ -1204,6 +1209,12 @@ test_negative_or_unclear_reply_vetoes_save_receipt() {
     with-receipt blocked
   assert_persist_answer_stops_local blocked '<corr> one record could not be written' \
     'it answered that its open work is not saved' 'a correction with a bare note-head correlation' \
+    with-receipt blocked
+  assert_persist_answer_stops_local blocked '[key=save] [<corr>] one record was never written' \
+    'it answered that its open work is not saved' 'a bracketed correlation after a note-head key' \
+    with-receipt blocked
+  assert_persist_answer_stops_local blocked '[key=save] <corr> one record was never written' \
+    'it answered that its open work is not saved' 'a bare correlation after a note-head key' \
     with-receipt blocked
   assert_persist_answer_stops_local note 'I may have missed a record' \
     'its answer did not confirm that its open work is saved' 'an unclear correction' with-receipt
