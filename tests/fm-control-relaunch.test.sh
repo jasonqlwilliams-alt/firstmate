@@ -32,21 +32,7 @@ CONTROL="$ROOT/bin/fm-control.sh"
 SPAWN="$ROOT/bin/fm-spawn.sh"
 PROMOTE="$ROOT/bin/fm-promote.sh"
 X_LINK="$ROOT/bin/fm-x-link.sh"
-# fm_test_tmproot's own cleanup trap fires when its command substitution exits,
-# so recreate the root before resolving it and clean it up from this file's trap.
 TMP_ROOT=$(fm_test_tmproot fm-control-relaunch)
-mkdir -p "$TMP_ROOT"
-TMP_ROOT=$(cd "$TMP_ROOT" && pwd)
-TASK_TMPS=()
-
-relaunch_cleanup() {
-  local d
-  for d in "${TASK_TMPS[@]:-}"; do
-    [ -n "$d" ] && rm -rf "$d"
-  done
-  rm -rf "$TMP_ROOT"
-}
-trap relaunch_cleanup EXIT
 
 # The same lifecycle-modelling tmux stub as tests/fm-control.test.sh: the
 # harness's exit command stops the agent, and a launch-brief literal starts the
@@ -54,6 +40,7 @@ trap relaunch_cleanup EXIT
 make_tmux_stub() {  # <dir>
   local fb="$1/fakebin"
   mkdir -p "$fb"
+  fm_test_track_task_tmps "$fb"
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
@@ -226,7 +213,6 @@ EOF
   } > "$home/state/$id.meta"
   printf '%s\n' "fm-$id" > "$dir/fake/windows"
   printf '%s' "$wt" > "$dir/fake/cwd"
-  TASK_TMPS+=("/tmp/fm-$id")
 }
 
 run_control() {  # <case-dir> <args...>
@@ -380,9 +366,10 @@ SH
 # --- 1. same-harness relaunch -----------------------------------------------
 
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
-  local dir out rc gen_before gen_after
+  local dir out rc gen_before gen_after tmp_before tmp_after
   dir=$(new_case same rl1)
   add_ship_task "$dir" rl1 claude
+  tmp_before=$(meta_field "$dir" rl1 tasktmp)
   gen_before=$("$ROOT/bin/fm-busy-event.sh" arm "$dir/home/state" rl1)
   printf 'busy_gen=%s\n' "$gen_before" >> "$dir/home/state/rl1.meta"
   out=$(run_control "$dir" rl1 relaunch --note "stopped mid-refactor"); rc=$?
@@ -394,8 +381,11 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
     || fail "the worktree must be reused, not reallocated"
   [ "$(meta_field "$dir" rl1 kind)" = ship ] || fail "kind must survive the relaunch"
   [ "$(meta_field "$dir" rl1 project)" = "$dir/proj" ] || fail "project must survive the relaunch"
-  [ "$(meta_field "$dir" rl1 tasktmp)" = "/tmp/fm-rl1" ] \
-    || fail "the task temp root must be reused, not orphaned by a fresh one"
+  tmp_after=$(meta_field "$dir" rl1 tasktmp)
+  [ -n "$tmp_after" ] && [ -d "$tmp_after/gotmp" ] && [ "$tmp_after" != "$tmp_before" ] \
+    || fail "the replacement must record a fresh Go temp directory"
+  assert_grep "export GOTMPDIR=$tmp_after/gotmp" "$dir/fake/keys" \
+    "the replacement pane did not receive the fresh Go temp directory"
   gen_after=$(meta_field "$dir" rl1 busy_gen)
   [ -n "$gen_after" ] && [ "$gen_after" != "$gen_before" ] \
     || fail "a relaunch must arm a fresh busy generation, got '$gen_after'"
@@ -403,6 +393,16 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
     || fail "the transaction journal should end complete"
   assert_grep "/exit" "$dir/fake/literal" "the previous agent should have been exited"
   assert_grep "encode launch-brief" "$dir/fake/literal" "the replacement should have been launched"
+
+  tmp_before=$tmp_after
+  out=$(run_control "$dir" rl1 relaunch --note "continue the refactor"); rc=$?
+  expect_code 0 "$rc" "a second same-harness relaunch should succeed"$'\n'"$out"
+  tmp_after=$(meta_field "$dir" rl1 tasktmp)
+  [ -n "$tmp_after" ] && [ -d "$tmp_after/gotmp" ] && [ "$tmp_after" != "$tmp_before" ] \
+    || fail "a relaunch must replace an already private Go temp directory"
+  [ -d "$tmp_before/gotmp" ] || fail "the relaunch removed the prior incarnation's Go temp directory"
+  assert_grep "export GOTMPDIR=$tmp_after/gotmp" "$dir/fake/keys" \
+    "the second replacement pane did not receive the fresh Go temp directory"
   pass "fm-control relaunch: a same-harness relaunch replaces the agent in the same endpoint and worktree"
 }
 
@@ -602,7 +602,7 @@ SH
   trap '
     touch "$dir/home/replacement-armed" "$dir/home/capture-verified" "$dir/home/forge-release"
     [ -z "$watcher" ] || wait "$watcher" || true
-    relaunch_cleanup
+    fm_test_cleanup
   ' EXIT
   env FM_HOME="$dir/home" PATH="$dir/pollbin:/usr/bin:/bin:/usr/sbin:/sbin" \
     TEST_WATCH_CAPTURE=1 TEST_REAL_CHECKSUM="$checksum" FM_POLL=0.1 FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=30 \
@@ -649,7 +649,7 @@ SH
     || fail "could not arm the replacement PR: $(cat "$dir/register.log")"
   touch "$dir/home/forge-release"
   wait "$watcher" || fail "watcher failed during relaunch and replacement: $(cat "$dir/watch.log")"
-  trap relaunch_cleanup EXIT
+  trap fm_test_cleanup EXIT
   case "$(cat "$dir/watch.log")" in
     check:*z-cycle-end.check.sh:*poll-cycle-end) ;;
     *) fail "watcher missed the control check: $(cat "$dir/watch.log")" ;;
@@ -1939,7 +1939,6 @@ test_herdr_relaunch_recreates_missing_endpoint_without_confusing_worker_pane_for
     echo "herdr_pane_id=w1:p2"
     echo "herdr_terminal_id=term-old"
   } > "$dir/home/state/rl-hmiss.meta"
-  TASK_TMPS+=("/tmp/fm-rl-hmiss")
   cat > "$dir/fakebin/herdr" <<'SH'
 #!/usr/bin/env bash
 set -u

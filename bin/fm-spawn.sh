@@ -1014,7 +1014,8 @@ SPAWN_META_TMP=
 SPAWN_META_LOCK=
 SPAWN_META_LOCK_HELD=0
 SPAWN_META_PUBLISH_STARTED=0
-SPAWN_TASK_TMP_CREATED=
+TASK_TMP=
+SPAWN_TASK_TMP_HANDED_OFF=0
 SPAWN_FRESH_COMMIT_PENDING=0
 SPAWN_TASK_SET_LOCK=
 SPAWN_TASK_SET_LOCK_HELD=0
@@ -1250,11 +1251,13 @@ spawn_abort_cleanup() {
     fm_lock_release "$CONFIG_INHERIT_LOCK" || true
   fi
   [ -z "$SPAWN_SLOT_ACQUIRE_FILE" ] || rm -f -- "$SPAWN_SLOT_ACQUIRE_FILE" 2>/dev/null || true
-  # A failed spawn that never recorded its fresh task temp root drops it only
-  # while still empty: rmdir refuses anything a leftover process wrote there.
-  if [ "$status" -ne 0 ] && [ -n "$SPAWN_TASK_TMP_CREATED" ] \
-     && [ "$(fm_meta_get "$STATE/$ID.meta" tasktmp 2>/dev/null)" != "$SPAWN_TASK_TMP_CREATED" ]; then
-    rmdir -- "$SPAWN_TASK_TMP_CREATED/gotmp" "$SPAWN_TASK_TMP_CREATED" 2>/dev/null || true
+  if [ "$status" -ne 0 ] && [ -n "$TASK_TMP" ] \
+     && [ "$(fm_meta_get "$STATE/$ID.meta" tasktmp 2>/dev/null)" != "$TASK_TMP" ]; then
+    if [ "$SPAWN_TASK_TMP_HANDED_OFF" = 1 ]; then
+      echo "warning: task $ID's temporary directory remains at $TASK_TMP; inspect it after closing endpoint $T" >&2
+    else
+      rmdir -- "$TASK_TMP/gotmp" "$TASK_TMP" 2>/dev/null || true
+    fi
   fi
   return "$status"
 }
@@ -4053,29 +4056,20 @@ if [ "$KIND" != secondmate ]; then
   esac
 fi
 
-# Per-task temp root: /tmp/fm-<id>.XXXXXX/ with Go's build temp nested at gotmp/.
+# Per-task temp root: /tmp/fm-<id>+XXXXXX/ with Go's build temp nested at gotmp/.
 # mktemp creates the root atomically under a fresh random suffix, so no other
 # home spawning the same task id and no other incarnation of this id can share
 # it; fm-teardown's process scan and removal of the recorded root therefore
-# touch only this task. A relaunch continues the same task in its recorded
-# worktree, so it keeps the recorded root (including a legacy shared
-# /tmp/fm-<id>) rather than orphaning it. Go won't create GOTMPDIR, so mkdir
+# touch only this task. Go won't create GOTMPDIR, so mkdir
 # before it is used; fm-teardown removes the whole root recorded as tasktmp=.
 # Nested (not a bare root used as GOTMPDIR) so other per-task temp can live
 # alongside later. The short suffix keeps paths inside the socket-path limits
 # Go and tmux impose. GOTMPDIR (not TMPDIR) is the targeted knob: TMPDIR is too
 # broad (affects every program's temp, not just Go's).
-TASK_TMP=
-if [ "$RELAUNCH" -eq 1 ]; then
-  TASK_TMP=$(fm_meta_get "$RELAUNCH_META" tasktmp)
-fi
-if [ -z "$TASK_TMP" ]; then
-  TASK_TMP=$(mktemp -d "/tmp/fm-$ID.XXXXXX") || {
-    echo "error: could not create a private task temp root under /tmp for $ID" >&2
-    exit 1
-  }
-  SPAWN_TASK_TMP_CREATED=$TASK_TMP
-fi
+TASK_TMP=$(mktemp -d "/tmp/fm-$ID+XXXXXX") || {
+  echo "error: could not create a private task temp root under /tmp for $ID" >&2
+  exit 1
+}
 mkdir -p "$TASK_TMP/gotmp"
 
 # Per-harness turn-end hook where enabled: a file that touches
@@ -5044,6 +5038,7 @@ spawn_record_traceparent() {
 # Export GOTMPDIR into the crewmate's pane shell so the agent and every child
 # process (go build, go test, ...) inherit it. Sent before the launch command so
 # the env is set when the agent starts; the brief sleep lets the export land.
+SPAWN_TASK_TMP_HANDED_OFF=1
 spawn_send_text_line "$T" "export GOTMPDIR=$TASK_TMP/gotmp"
 # Mark the pane as a task worker so bin/fm-test-run.sh can refuse to run the
 # suite in the repository's primary checkout. Ship and scout workers are the
@@ -5196,7 +5191,7 @@ fi
 if [ "$SPAWN_BACKLOG_COMMIT_STATUS" -ne 0 ]; then
   if [ "$RELAUNCH" -eq 0 ]; then
     if spawn_fresh_commit_rollback; then
-      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
+      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
     else
       echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR), and failed-dispatch cleanup is incomplete; the provisional record may remain at $STATE/$ID.meta - close out endpoint $T and local copy $WT by hand, then remove the record and busy state before retrying" >&2
     fi

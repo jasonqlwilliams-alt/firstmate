@@ -42,12 +42,6 @@ TMP_ROOT=$(fm_test_tmproot fm-session-start-tests)
 SESSION_START_TEST_HARNESS_PID=$$
 SESSION_START_SECOND_MATE_ID="fmtest-sm-${TMP_ROOT##*.}"
 SESSION_START_HERDR_SECOND_MATE_ID="fmtest-herdr-${TMP_ROOT##*.}"
-FM_TEST_CLEANUP_DIRS+=("$TMP_ROOT")
-session_start_test_cleanup() {
-  fm_test_remove_task_tmps "$SESSION_START_SECOND_MATE_ID" "$SESSION_START_HERDR_SECOND_MATE_ID"
-  fm_test_cleanup
-}
-trap session_start_test_cleanup EXIT
 fm_git_identity fmtest fmtest@example.invalid
 
 # --- world builders ----------------------------------------------------------
@@ -441,7 +435,7 @@ case "${1:-} ${2:-}" in
     ;;
   "tab create")
     : > "$spawned"
-    printf '%s\n' '{"result":{"tab":{"tab_id":"t-new"},"root_pane":{"pane_id":"p-new"}}}'
+    printf '%s\n' '{"result":{"tab":{"tab_id":"t-new"},"root_pane":{"pane_id":"p-new","terminal_id":"term-new"}}}'
     ;;
   "pane list")
     if [ -e "$spawned" ]; then
@@ -455,7 +449,7 @@ case "${1:-} ${2:-}" in
   "pane get")
     pane=${3:-}
     if [ "$pane" = p-new ] && [ -e "$spawned" ]; then
-      printf '{"result":{"pane":{"pane_id":"p-new","tab_id":"t-new","workspace_id":"ws1","cwd":"%s"}}}\n' "${state%/*}/secondmate-$mate_id"
+      printf '{"result":{"pane":{"pane_id":"p-new","tab_id":"t-new","workspace_id":"ws1","terminal_id":"term-new","cwd":"%s"}}}\n' "${state%/*}/secondmate-$mate_id"
     elif [ "$pane" = p-old ] && [ ! -e "$killed" ]; then
       printf '{"result":{"pane":{"pane_id":"p-old","tab_id":"t-old","workspace_id":"ws1","cwd":"%s"}}}\n' "${state%/*}/secondmate-$mate_id"
     else
@@ -576,6 +570,7 @@ EOF
   make_fake_toolchain "$fakebin"
   make_fake_ps_claude "$fakebin"
   fm_fake_exit0 "$fakebin" pi
+  fm_test_track_task_tmps "$fakebin"
   make_fake_tmux_secondmate_recovery "$fakebin"
   : > "$log"
   printf '%s|%s|%s|%s|%s|%s\n' "$root" "$home" "$fakebin" "$mate" "$log" "$spawned"
@@ -623,6 +618,7 @@ EOF
   make_fake_toolchain "$fakebin"
   make_fake_ps_claude "$fakebin"
   fm_fake_exit0 "$fakebin" pi
+  fm_test_track_task_tmps "$fakebin"
   make_fake_herdr_secondmate_recovery "$fakebin"
   : > "$log"
   printf '%s|%s|%s|%s|%s|%s\n' "$root" "$home" "$fakebin" "$mate" "$log" "$state"

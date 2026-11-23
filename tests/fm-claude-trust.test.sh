@@ -365,15 +365,8 @@ test_corrupt_store_fails_closed() {
 }
 
 # A refused registration must abort the spawn before any per-task state exists.
-# The busy-state generation is armed after it, and nothing between that arm and
-# the far-later rollback arming can clear it, so a record stranded here would
-# read as a task busy forever for an id that has no meta at all. The per-task
-# temp root /tmp/fm-<id>.<suffix> is the other resource created on the way to the arm, and
-# nothing removes it either: fm-teardown finds it through tasktmp= in the task's
-# meta, which a refused spawn never publishes. The id carries this process's pid
-# so the temp-root assertion reads only this run's path.
 test_refused_spawn_leaves_no_task_state() {
-  local case_dir home proj wt config fakebin out id
+  local case_dir home proj wt config fakebin out id allocations_before stranded
   case_dir="$TMP_ROOT/refused-spawn"
   home="$case_dir/home"
   proj="$case_dir/project"
@@ -389,9 +382,11 @@ test_refused_spawn_leaves_no_task_state() {
   mkdir -p "$config"
   ln -s /etc/passwd "$config/.claude.json"
   fakebin=$(make_spawn_fakebin "$case_dir/fake" claude)
+  fm_test_track_task_tmps "$fakebin"
   fm_test_spawn_home "$home" claude
   fm_git_worktree "$proj" "$wt" wt-refused
   fm_test_spawn_brief "$home" "$id"
+  allocations_before=$(wc -l < "$FM_TEST_CLEANUP_REGISTRY")
   out=$(FM_TEST_CLAUDE_CONFIG_DIR="$config" \
     fm_test_run_spawn "$home" "$wt" "$fakebin" "$id" "$proj" claude \
     --mode no-mistakes --yolo off)
@@ -401,11 +396,9 @@ test_refused_spawn_leaves_no_task_state() {
     || fail "a refused spawn stranded a busy record nothing can clear"
   [ ! -e "$home/state/$id.busy-gen" ] \
     || fail "a refused spawn stranded a busy generation nothing can clear"
-  local stranded
-  for stranded in "/tmp/fm-$id" "/tmp/fm-$id".*; do
-    [ ! -e "$stranded" ] \
-      || { rm -rf "$stranded"; fail "a refused spawn stranded a temp root no teardown can find"; }
-  done
+  while IFS= read -r stranded; do
+    assert_absent "$stranded" "a refused spawn stranded a temp root no teardown can find: $stranded"
+  done < <(tail -n "+$((allocations_before + 1))" "$FM_TEST_CLEANUP_REGISTRY")
   pass "fm-spawn.sh: a trust-refused claude spawn leaves no task state behind"
 }
 
@@ -422,6 +415,7 @@ test_claude_spawn_pretrusts_its_worktree_and_reaches_the_brief() {
   launch_log="$case_dir/launch.log"
   mkdir -p "$config"
   fakebin=$(make_spawn_fakebin "$case_dir/fake" claude)
+  fm_test_track_task_tmps "$fakebin"
   fm_test_spawn_home "$home" claude
   fm_git_worktree "$proj" "$wt" wt-spawn
   fm_test_spawn_brief "$home" trustspawn

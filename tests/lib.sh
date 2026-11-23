@@ -212,17 +212,21 @@ fm_test_cleanup() {
   fi
 }
 
-# fm_test_remove_task_tmps <task-id>...: remove the task temp roots fm-spawn
-# created for these test-owned task ids, both the private /tmp/fm-<id>.XXXXXX
-# shape and the legacy fixed /tmp/fm-<id>.
-fm_test_remove_task_tmps() {
-  local id d
-  for id in "$@"; do
-    [ -n "$id" ] || continue
-    for d in "/tmp/fm-$id" "/tmp/fm-$id".??????; do
-      [ ! -e "$d" ] || rm -rf "$d"
-    done
-  done
+fm_test_track_task_tmps() {
+  local fakebin=$1 real_mktemp
+  real_mktemp=$(command -v mktemp) || return 1
+  {
+    printf '#!/usr/bin/env bash\nreal_mktemp=%q\nregistry=%q\n' "$real_mktemp" "$FM_TEST_CLEANUP_REGISTRY"
+    cat <<'SH'
+set -eu
+path=$("$real_mktemp" "$@")
+case "${1:-}:$path" in
+  -d:/tmp/fm-*) printf '%s\n' "$path" >> "$registry" ;;
+esac
+printf '%s\n' "$path"
+SH
+  } > "$fakebin/mktemp"
+  chmod +x "$fakebin/mktemp"
 }
 
 fm_test_tmproot() {

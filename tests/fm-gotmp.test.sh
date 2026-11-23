@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Behavior tests for per-task GOTMPDIR support (fm-gotmp).
 #
-# fm-spawn gives each task a private temp root /tmp/fm-<id>.<suffix>/ with Go's build temp nested at
+# fm-spawn gives each task a private temp root with Go's build temp nested at
 # gotmp/, exports GOTMPDIR into the crewmate pane, and records tasktmp= in the task's
 # meta. fm-teardown reads tasktmp= and removes the whole root on cleanup.
 #
@@ -30,10 +30,14 @@ pass() {
 }
 
 TMP_ROOT=
+LEGACY_TASK_TMP=
 
 cleanup() {
   if [ -n "${TMP_ROOT:-}" ]; then
     rm -rf "$TMP_ROOT"
+  fi
+  if [ -n "$LEGACY_TASK_TMP" ]; then
+    rm -rf -- "$LEGACY_TASK_TMP"
   fi
 }
 trap cleanup EXIT
@@ -152,6 +156,20 @@ test_teardown_removes_tasktmp_dir() {
   pass "fm-teardown removes the dir pointed to by tasktmp= in meta"
 }
 
+test_teardown_preserves_shared_legacy_tasktmp() {
+  local id fake
+  LEGACY_TASK_TMP=$(mktemp -d /tmp/fm-legacy-XXXXXX) || fail "could not allocate legacy fixture"
+  id=${LEGACY_TASK_TMP#/tmp/fm-}
+  mkdir "$LEGACY_TASK_TMP/gotmp"
+  printf 'another home still needs this\n' > "$LEGACY_TASK_TMP/gotmp/keep"
+  fake=$(make_fake_root "$id" "$LEGACY_TASK_TMP")
+  FM_HOME="$fake" bash "$fake/bin/fm-teardown.sh" "$id" > "$fake/teardown.log" 2>&1 \
+    || fail "legacy teardown failed: $(cat "$fake/teardown.log")"
+  [ ! -e "$fake/state/$id.meta" ] || fail "legacy teardown left the task record"
+  [ -f "$LEGACY_TASK_TMP/gotmp/keep" ] || fail "legacy teardown removed a potentially shared temp root"
+  pass "fm-teardown preserves the legacy task temp directory for manual cleanup"
+}
+
 test_teardown_skips_gracefully_without_tasktmp() {
   # Backward compat: a meta from a pre-fix task has no tasktmp= line. Teardown must
   # not error and must not remove anything.
@@ -245,5 +263,6 @@ test_teardown_skips_gracefully_when_dir_missing() {
 }
 
 test_teardown_removes_tasktmp_dir
+test_teardown_preserves_shared_legacy_tasktmp
 test_teardown_skips_gracefully_without_tasktmp
 test_teardown_skips_gracefully_when_dir_missing

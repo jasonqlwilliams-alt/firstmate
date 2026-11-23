@@ -98,6 +98,7 @@ An already registered PR merge poll remains armed and authenticated across relau
 5. **Stop the old agent** through the `exit` verb, with its postcondition, then release the prepared launch.
    A missing endpoint is already-stopped.
    The replacement retires the previous harness's per-task wiring, publishes the staged wiring, and activates the prepared busy generation where one was armed.
+   Each launch gets a private temporary root, and existing tasks keep their recorded legacy `/tmp/fm-<id>` path until relaunch, with shared legacy roots left for manual cleanup.
    A Codex `process-stopped-safe-quit-unconfirmed` result keeps the prepared replacement from launching and preserves the prior record and worktree for recovery.
    Kimi's installer reapplies its owned hook region to the current configuration after stop, preserving unrelated edits made during preparation and leaving an unchanged configuration file untouched.
 
