@@ -1206,12 +1206,12 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
 # Only `dead` and `missing` license recovery. Every `alive` is proven at
 # process level through the shared classifier in bin/fm-agent-process-lib.sh,
 # never from a registration or a rendered title alone. The tmux adapter
-# requires a successful session inventory and returns `missing` only when it
-# omits the exact window; the Herdr adapter reuses its strict husk classifier -
+# shares fm_backend_tmux_endpoint_state with loss reporting. The Herdr adapter
+# reuses its strict husk classifier -
 # which verifies a registered agent against `pane process-info` and the real
 # process table, so a registration Herdr kept over a shell-only pane reads
-# `dead` here (issue #4115) - then maps a positively stopped session server to
-# `missing` only in this recovery-grade view. Zellij remains unverified because
+# `dead` here (issue #4115). A positively stopped session server maps to
+# `missing` without widening husk detection. Zellij remains unverified because
 # its secondmate ghost-tab and agent-process recovery path has not been
 # empirically validated. Orca and cmux do not support secondmate spawns.
 # An optional expected-home binds Herdr secondmate recovery to the pane's
@@ -1243,6 +1243,32 @@ fm_backend_agent_alive() {  # <backend> <target>
     alive) printf 'alive' ;;
     dead|missing) printf 'dead' ;;
     *) printf 'unknown' ;;
+  esac
+}
+
+# fm_backend_endpoint_state: recorded-endpoint presence for loss reporting.
+# Prints present, missing, or unreadable. Recovery uses fm_backend_agent_state.
+fm_backend_endpoint_state() {  # <backend> <target> <expected-label>
+  local backend=$1 target=$2 expected_label=${3:-}
+  fm_backend_source "$backend" || { printf 'unreadable'; return 0; }
+  case "$backend" in
+    tmux) fm_backend_tmux_endpoint_state "$target" ;;
+    herdr)
+      fm_backend_herdr_parse_target "$target" || { printf 'unreadable'; return 0; }
+      case "$(fm_backend_herdr_task_identity_state "$target")" in
+        match) printf 'present' ;;
+        missing|mismatch) printf 'missing' ;;
+        *)
+          if [ "$(fm_backend_herdr_server_running_state "$FM_BACKEND_HERDR_SESSION")" = stopped ]; then
+            printf 'missing'
+          else
+            printf 'unreadable'
+          fi
+          ;;
+      esac
+      ;;
+    zellij) fm_backend_zellij_endpoint_state "$target" "$expected_label" ;;
+    *) printf 'unreadable' ;;
   esac
 }
 
