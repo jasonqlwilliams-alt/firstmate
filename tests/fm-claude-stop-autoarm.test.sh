@@ -1364,11 +1364,13 @@ test_slow_check_sweep_liveness() (
   state="$dir/state"
   cp -R "$ROOT/bin/." "$dir/bin/" || fail "could not install watcher scripts"
   cp "$ROOT/.tasks.toml" "$dir/.tasks.toml" || fail "could not install backlog configuration"
-  export FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state"
-  export FM_GUARD_GRACE=8 FM_WATCHER_STALE_GRACE=+07 FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=35
-  export FM_POLL=1 FM_HEARTBEAT=999999 FM_ARM_CONFIRM_TIMEOUT=4
-  export FM_CLAUDE_AUTOARM_ATTEMPTS=1 FM_CLAUDE_AUTOARM_LEASE_SECONDS=24
+  # shellcheck disable=SC2030 # These exports apply only to the fixture and its children.
+  export FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state" \
+    FM_GUARD_GRACE=8 FM_WATCHER_STALE_GRACE=+07 FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=35 \
+    FM_POLL=1 FM_HEARTBEAT=999999 FM_ARM_CONFIRM_TIMEOUT=4 \
+    FM_CLAUDE_AUTOARM_ATTEMPTS=1 FM_CLAUDE_AUTOARM_LEASE_SECONDS=24
 
+  # shellcheck disable=SC2329 # The fixture invokes this through its EXIT trap.
   cleanup_sweep() {
     if [ "$stopped" -eq 1 ]; then kill -CONT "$watcher_pid" 2>/dev/null || true; fi
     touch "$state/finish"
@@ -1465,15 +1467,17 @@ test_stalled_remote_observation_liveness() (
   printf '%s\n' "- mate - fixture (host: remote-mac; root: $dir; home: $dir/mate; scope: fixture; projects: alpha; added 2026-08-02)" \
     > "$dir/data/secondmates.md"
   fm_write_meta "$state/mate.meta" 'kind=secondmate' 'remote_host=remote-mac'
-  export FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state"
-  export FM_GUARD_GRACE=+8 FM_POLL=15 FM_CHECK_INTERVAL=0 FM_HEARTBEAT=999999
-  export FM_ARM_CONFIRM_TIMEOUT=4 FM_CLAUDE_AUTOARM_ATTEMPTS=1 FM_CLAUDE_AUTOARM_LEASE_SECONDS=30
+  # shellcheck disable=SC2030,SC2031 # This fixture exports its own environment.
+  export FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state" \
+    FM_GUARD_GRACE=+8 FM_POLL=15 FM_CHECK_INTERVAL=0 FM_HEARTBEAT=999999 \
+    FM_ARM_CONFIRM_TIMEOUT=4 FM_CLAUDE_AUTOARM_ATTEMPTS=1 FM_CLAUDE_AUTOARM_LEASE_SECONDS=30
   export FM_SSH_BIN="$dir/fixture-ssh"
   if [ "$mode" = lease-no-gnu ]; then
     mkdir "$dir/no-gnu" || fail "could not create the no-GNU fixture"
     printf '%s\n' '#!/bin/sh' 'exit 127' > "$dir/no-gnu/timeout"
     chmod 700 "$dir/no-gnu/timeout" || fail "could not mask timeout"
     ln -s timeout "$dir/no-gnu/gtimeout" || fail "could not mask gtimeout"
+    # shellcheck disable=SC2030 # Only this fixture selects the Bash timeout mechanism.
     export PATH="$dir/no-gnu:$PATH" FM_TIMEOUT_MECHANISM_OVERRIDE=bash
     export FM_FIXTURE_SSH_IGNORES_TERM=1
     cleanup_signal=KILL
@@ -1510,6 +1514,7 @@ SH
   chmod 700 "$FM_SSH_BIN" "$state/ready.check.sh"
   "$dir/bin/fm-check-register.sh" ready >/dev/null || fail "could not register the check"
 
+  # shellcheck disable=SC2329 # The fixture invokes this through its EXIT trap.
   cleanup_observation() {
     stop_liveness_fixture "$arm_pid"
     stop_liveness_fixture "$RUN_AUTOARM_BG_PID"
@@ -1543,6 +1548,7 @@ SH
   fi
 
   if [ "$mode" = stop ]; then
+    # shellcheck disable=SC2031 # Stop mode sets its own stale grace.
     export FM_GUARD_GRACE=120 FM_WATCHER_STALE_GRACE=120
   fi
   "$dir/bin/fm-watch-arm.sh" > "$dir/outer.out" 2>&1 &
@@ -1613,8 +1619,9 @@ test_watcher_keeps_operation_budgets() (
   dir=$(make_primary_dir "$TMP_ROOT/operation-budgets")
   state="$dir/state"
   cp -R "$ROOT/bin/." "$dir/bin/" || fail "could not install watcher scripts"
-  export FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state"
-  export FM_GUARD_GRACE=12 FM_POLL=1 FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=15
+  # shellcheck disable=SC2031 # This fixture exports its own environment.
+  export FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state" \
+    FM_GUARD_GRACE=12 FM_POLL=1 FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=15
   export FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=10 FM_PROCEVENT_CLAIM_ROOT="$dir/claims"
   export FM_PENDING_REPLY_GRACE_SECS=0
   unset FM_SEND_REMOTE_BUDGET

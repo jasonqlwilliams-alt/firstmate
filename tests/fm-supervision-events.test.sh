@@ -113,6 +113,7 @@ reset_state
 fm_write_meta "$STATE_DIR/tk1.meta" "window=default:wG:pQ" "backend=herdr" "herdr_terminal_id=term-worker"
 record=$(fm_task_inbox_write "$STATE_DIR" tk1 'fixture steer') || fail "could not create a steer"
 terminal_calls="$TMP/terminal-calls"
+# shellcheck disable=SC2329 # The sourced watcher and backend code call these fixture functions.
 (
   fm_task_inbox_due_action() { printf 'ring %s' "$record"; }
   fm_backend_herdr_pane_agent_state() { printf 'live'; }
@@ -154,7 +155,9 @@ test_optional_capture_failure() (
     printf '%s\n' 'ok - watcher: optional capture failure # SKIP GNU timeout unavailable'
     return 0
   fi
+  # shellcheck disable=SC2329 # The sourced watcher calls this fixture override.
   mktemp() { return 1; }
+  # shellcheck disable=SC2030 # This fixture seeds its own observation state.
   FM_PENDING_REPLY_OBSERVATION=idle
   watcher_remote_observe printf busy || fail "remote capture failure must not stop supervision"
   [ "$FM_PENDING_REPLY_OBSERVATION" = unknown ] || fail "remote capture failure must leave observation unknown"
@@ -173,6 +176,7 @@ test_remote_wait_uses_elapsed_budget() (
     return 0
   fi
   local tick=$SECONDS i
+  # shellcheck disable=SC2030 # Mask Perl only in this fixture.
   export PATH="$TMP/no-perl:$PATH"
   WATCHER_WAIT_LIMIT=1
   for ((i=0; i<100; i++)); do
@@ -181,6 +185,7 @@ test_remote_wait_uses_elapsed_budget() (
   done
   command sleep 0.65
   watcher_remote_observe bash -c 'sleep 0.55; printf busy' || fail "remote observation could not run"
+  # shellcheck disable=SC2031 # The call above sets the result in this subshell.
   [ "$FM_PENDING_REPLY_OBSERVATION" = busy ] || fail "a subsecond reply was discarded within a one-second budget"
   pass "watcher: without Perl, a remote observation gets its full elapsed budget"
 )
@@ -192,9 +197,11 @@ test_remote_wait_without_gnu_timeout() (
   mkdir -p "$no_timeout" || fail "could not create the no-timeout fixture"
   ln -s "$TMP/no-perl/perl" "$no_timeout/timeout" || fail "could not mask timeout"
   ln -s "$TMP/no-perl/perl" "$no_timeout/gtimeout" || fail "could not mask gtimeout"
+  # shellcheck disable=SC2030,SC2031 # Start from the inherited PATH and mask tools only here.
   export PATH="$no_timeout:$TMP/no-perl:$PATH"
   WATCHER_WAIT_LIMIT=1 watcher_remote_observe bash -c 'sleep 1.2; printf busy' \
     || fail "direct remote observation could not run"
+  # shellcheck disable=SC2031 # The call above sets the result in this subshell.
   [ "$FM_PENDING_REPLY_OBSERVATION" = busy ] || fail "the observation must still work without GNU timeout"
   pass "watcher: without GNU timeout the direct observation still supplies its result"
 )
@@ -207,6 +214,7 @@ test_remote_wait_rejects_late_success() (
     printf '%s\n' 'ok - watcher: a reply after the deadline stays unknown # SKIP GNU timeout unavailable'
     return 0
   fi
+  # shellcheck disable=SC2030,SC2031 # Start from the inherited PATH and mask Perl only here.
   export PATH="$TMP/no-perl:$PATH"
   trap '
     if [ -n "$child" ]; then
@@ -216,11 +224,13 @@ test_remote_wait_rejects_late_success() (
   ' EXIT
   (
     trap 'fm_active_check_stop; fm_check_output_cleanup' EXIT
+    # shellcheck disable=SC2016 # The child Bash expands its positional argument.
     WATCHER_WAIT_LIMIT=1 watcher_remote_observe bash -c '
       touch "$1"
       sleep 1.3
       printf idle
     ' _ "$TMP/observation-started" || exit 1
+    # shellcheck disable=SC2031 # The call above sets the result in this subshell.
     printf '%s\n' "$FM_PENDING_REPLY_OBSERVATION"
   ) > "$TMP/late-observation" 2>&1 &
   child=$!
@@ -252,7 +262,9 @@ test_remote_timeout_kills_term_resistant_observation() (
     printf '%s\n' 'ok - watcher: timeout kills a TERM-resistant observation # SKIP GNU timeout unavailable'
     return 0
   fi
+  # shellcheck disable=SC2031 # Each fixture inherits the original PATH.
   export PATH="$TMP/no-perl:$PATH"
+  # shellcheck disable=SC2016 # The child Bash expands its positional arguments.
   WATCHER_WAIT_LIMIT=1 watcher_remote_observe bash -c '
     trap "" TERM
     touch "$1"
@@ -262,6 +274,7 @@ test_remote_timeout_kills_term_resistant_observation() (
   ' _ "$dispatched" "$overran" || fail "remote observation could not run"
   [ -e "$dispatched" ] || fail "remote observation did not dispatch"
   [ ! -e "$overran" ] || fail "the remote command survived the deadline and kill-after allowance"
+  # shellcheck disable=SC2031 # The call above sets the result in this subshell.
   [ "$FM_PENDING_REPLY_OBSERVATION" = unknown ] || fail "a killed observation supplied completion evidence"
   pass "watcher: timeout kills a TERM-resistant observation"
 )
@@ -270,8 +283,11 @@ test_remote_timeout_kills_term_resistant_observation || exit $?
 
 test_wait_preserves_sleep_units() (
   reset_state
+  # shellcheck disable=SC2034 # The sourced watcher reads the wait limit.
   WATCHER_WAIT_LIMIT=150
+  # shellcheck disable=SC2329 # The sourced watcher calls this fixture override.
   sleep() { printf 'sleep %s\n' "$1" >> "$SLEEP_LOG"; }
+  # shellcheck disable=SC2329 # The sourced watcher calls this fixture override.
   watcher_publish_beat() { printf 'beat\n' >> "$SLEEP_LOG"; }
   POLL=6m event_wait_or_sleep
   watcher_wait 0.05h
