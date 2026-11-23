@@ -1066,26 +1066,30 @@ test_agy_doorbell_width_boundary() {
 }
 
 test_agy_short_doorbell_fits_an_ordinary_pane() {
-  local home state state_alias rec agy_line codex_line target log rc i=0
+  local home state state_alias rec ascii_rec agy_line codex_line target log rc i=0
   ring_lab_setup
   home="$TMP_ROOT/ring-agy-short"
-  state="$home/state"
+  state="$home/équipe/state"
   mkdir -p "$state"
   state_alias="$home/scout's state"
   ln -s "$state" "$state_alias" || fail "could not alias the inbox state directory"
   rec=$(inbox_lib "$state" fm_task_inbox_write "$state" t1 "please continue")
+  ascii_rec="$state_alias/t1.inbox/${rec##*/}"
   FM_HOME="$home" FM_STATE_OVERRIDE="$state_alias/" "$ROOT/bin/fm-brief.sh" t1 demo --scout >/dev/null \
     || fail "could not scaffold the agy scout brief"
   agy_line=': Firstmate message waiting: read your inbox, act, mv to handled/.'
-  codex_line=$(FM_HOME="$home" inbox_lib "$state" fm_task_inbox_doorbell_line "$rec" codex) \
+  codex_line=$(FM_HOME="$home" inbox_lib "$state" fm_task_inbox_doorbell_line "$ascii_rec" codex) \
     || fail "could not generate the codex doorbell"
-  assert_contains "$codex_line" "list '$state/t1.inbox'/*.msg" "other harnesses keep the path-bearing doorbell"
-  [ "$(FM_HOME="$home" inbox_lib "$state" fm_task_inbox_doorbell_line "$rec")" = "$codex_line" ] \
+  assert_contains "$codex_line" "list '$home/scout'\\''s state/t1.inbox'/*.msg" "other harnesses keep the path-bearing doorbell"
+  [ "$(FM_HOME="$home" inbox_lib "$state" fm_task_inbox_doorbell_line "$ascii_rec")" = "$codex_line" ] \
     || fail "a ring without a harness must keep today's doorbell"
+  if FM_HOME="$home" inbox_lib "$state" fm_task_inbox_doorbell_line "$rec" codex >/dev/null; then
+    fail "a path-bearing notice should still reject a UTF-8 inbox path"
+  fi
   [ "$(FM_HOME="$home" inbox_lib "$state" fm_task_inbox_doorbell_line "$rec" agy)" = "$agy_line" ] \
     || fail "an equivalent inbox locator in the scaffolded task brief should allow a short notice"
   printf '# Task\nRead the project notes.\n' > "$home/data/t1/launch-brief.md"
-  [ "$(FM_HOME="$home" inbox_lib "$state" fm_task_inbox_doorbell_line "$rec" agy)" = "$codex_line" ] \
+  [ "$(FM_HOME="$home" inbox_lib "$state" fm_task_inbox_doorbell_line "$ascii_rec" agy)" = "$codex_line" ] \
     || fail "a legacy launch brief needs a path-bearing notice even after the task brief is updated"
   cp "$home/data/t1/brief.md" "$home/data/t1/launch-brief.md"
   log="$RING_LAB/agy-ordinary.log"
@@ -1097,7 +1101,7 @@ test_agy_short_doorbell_fits_an_ordinary_pane() {
   [ "$(grep -c '^ENTER' "$log")" = 1 ] || fail "the agy ring should press exactly one Enter:"$'\n'"$(cat "$log")"
   grep -qxF "SUBMIT $agy_line" "$log" || fail "the agy pane should receive the short doorbell:"$'\n'"$(cat "$log")"
   [ -f "$state/t1.inbox/handled/001.msg" ] || fail "the short agy doorbell was not acted on"
-  pass "inbox: an equivalent scaffolded locator allows the short agy notice in an 80-column pane"
+  pass "inbox: an equivalent scaffolded locator allows the short agy notice for a UTF-8 inbox in an 80-column pane"
 }
 
 # An agy pane with a draft or an unproven frame gets nothing typed, and the
