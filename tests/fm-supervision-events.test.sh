@@ -168,6 +168,10 @@ printf '%s\n' '#!/bin/sh' 'exit 127' > "$TMP/no-perl/perl"
 chmod 700 "$TMP/no-perl/perl"
 
 test_remote_wait_uses_elapsed_budget() (
+  if ! gnu_timeout_available; then
+    printf '%s\n' 'ok - watcher: without Perl, a remote observation gets its full elapsed budget # SKIP GNU timeout unavailable'
+    return 0
+  fi
   local tick=$SECONDS i
   export PATH="$TMP/no-perl:$PATH"
   WATCHER_WAIT_LIMIT=1
