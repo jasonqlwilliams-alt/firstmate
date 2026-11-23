@@ -35,19 +35,20 @@ _FM_SECONDMATE_RESTART_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # parent-owned reply expectation fm-send arms for a marked request; that
 # correlated answer, never the wall clock, is what releases the restart, and
 # only when fm_secondmate_persist_outcome reads it as saved.
+_FM_SECONDMATE_SAVED_RECEIPT='Saved all open work.'
 fm_secondmate_persist_request() {  # <running-harness>
   printf '%s' 'Firstmate was updated and I am about to restart your agent so it comes up on the current instructions and launch-time settings, which drops your conversation but keeps every durable record. Before that, persist the open work you are holding only in this conversation, following the /stow skill'"'"'s "Open-record persistence" section and nothing else from that skill: file a task for each open record that exists only in this conversation, including any captain call you had formed but never registered, and correct any task whose status no longer reflects what you now know. Do NOT run the memory, learnings, or captain-preference sweeps.'
   if [ "$1" = claude ]; then
     printf '%s' ' Also stop every background shell task you started, such as timers or sleep loops, because a running one makes the exit stop at a confirmation that the restart will not answer.'
   fi
-  printf '%s' ' Then reply on your parent channel with done once it is written down, naming anything you deliberately left alone and why, or with blocked and the reason if you could not write it down. Only a done reply lets the restart go ahead; any other reply leaves your agent running as it is.'
+  printf ' If all required open work is written down, reply on your parent channel with done [corr=<request id>]: %s Use the correlation ID from this request and keep the receipt text exact. If any required write failed or was skipped, reply with blocked [corr=<request id>]: <reason> and explain what was left unwritten. Only the exact save receipt lets the restart go ahead.' "$_FM_SECONDMATE_SAVED_RECEIPT"
 }
 
 # Read the persist answer that resolved <corr_id>'s expectation, after
 # fm_pending_reply_try_resolve has returned 0 for it. Publishes:
 #   FM_SECONDMATE_PERSIST_OUTCOME  saved|not-saved|unclear
 #   FM_SECONDMATE_PERSIST_NOTE     the answer's own note, one line (may be empty)
-# Only an explicit done is saved: the conversation is spent on nothing less.
+# Only a done with the requested save receipt is saved.
 # blocked, failed, and needs-decision are the status vocabulary's negative
 # verbs. Every other answer - another verb, a line whose verb cannot be read,
 # or an operator closing the request instead of the mate answering it - is
@@ -66,9 +67,13 @@ fm_secondmate_persist_outcome() {  # <state-dir> <corr_id>
   line=$(fm_pending_reply_find_resolve_line "$status_file" "$corr" parent)
   [ -n "$line" ] || return 0
   FM_SECONDMATE_PERSIST_NOTE=$(status_line_note "$line" | tr -s '[:space:]' ' ')
-  fm_pending_reply_line_closes_decision "$line" "$corr" && return 0
   case "$(status_line_verb "$line")" in
-    done) FM_SECONDMATE_PERSIST_OUTCOME=saved ;;
+    done)
+      case "$line" in
+        "done [corr=$corr]: $_FM_SECONDMATE_SAVED_RECEIPT"|"done [corr=$corr]: $_FM_SECONDMATE_SAVED_RECEIPT (via-helper)")
+          FM_SECONDMATE_PERSIST_OUTCOME=saved ;;
+      esac
+      ;;
     blocked|failed|needs-decision) FM_SECONDMATE_PERSIST_OUTCOME=not-saved ;;
   esac
   return 0

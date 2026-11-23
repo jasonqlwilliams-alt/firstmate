@@ -29,7 +29,7 @@
 #      All requests go out before any restart, so a slow mate delays only its own
 #      restart instead of serializing the fleet behind it.
 #   B. RESTART. Only after that mate's own correlated answer lands on the parent
-#      channel AND says the open work is saved: an explicit done, read by
+#      channel AND includes the requested save receipt, read by
 #      bin/fm-secondmate-restart-lib.sh's fm_secondmate_persist_outcome. A
 #      negative or unclear answer STOPS the restart for that mate: its agent and
 #      conversation are left exactly as they are, with no re-read message on
@@ -77,7 +77,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 
 usage() {
-  sed -n '2,72{s/^# \{0,1\}//;p;}' "$0"
+  awk '
+    NR == 1 { next }
+    /^#/ { sub(/^# ?/, ""); print; next }
+    { exit }
+  ' "$0"
 }
 
 case "${1:-}" in

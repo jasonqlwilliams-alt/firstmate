@@ -6,7 +6,7 @@
 # transaction) against a lifecycle-modelling session-provider stub:
 #
 #   1. The persist request is a GATE. Nothing is stopped until that mate's own
-#      correlated answer lands on the parent channel and says done, a mate that
+#      correlated save receipt lands on the parent channel, a mate that
 #      never answers keeps its agent and gets the re-read message instead, and a
 #      mate whose answer is negative or unclear (local or remote) keeps its
 #      agent untouched and is reported as stopped.
@@ -94,7 +94,7 @@ case "${1:-}" in
             | grep -oE 'corr=[0-9a-f]{16}' | head -1)
           if [ -n "$corr" ]; then
             printf '%s [%s]: %s\n' "${FM_FAKE_ANSWER_VERB:-done}" "$corr" \
-              "${FM_FAKE_ANSWER_NOTE:-open records written down}" \
+              "${FM_FAKE_ANSWER_NOTE:-Saved all open work.}" \
               >> "$(cat "$D/answer-status")"
           fi
         fi
@@ -287,6 +287,18 @@ run_restart() {  # <case-dir> <args...>
   return "$rc"
 }
 
+test_usage_includes_all_exit_statuses() {
+  local help invalid rc
+  help=$("$RESTART" --help); rc=$?
+  expect_code 0 "$rc" "help must succeed without a mate argument"
+  assert_contains "$help" 'itself is unusable; 2 invalid use.' \
+    "help must include the complete exit status description"
+  invalid=$("$RESTART" 2>&1); rc=$?
+  expect_code 2 "$rc" "missing mate arguments must be reported as invalid use"
+  [ "$invalid" = "$help" ] || fail "missing mate arguments must print the same full usage"
+  pass "help and invalid invocation show all exit statuses"
+}
+
 # --- T1: the persist request is the task subset of /stow, and it gates --------
 test_persist_gates_and_asks_only_for_open_records() {
   local dir out rc request
@@ -318,6 +330,8 @@ test_persist_gates_and_asks_only_for_open_records() {
     "the request must flush an unregistered captain call"
   assert_contains "$request" "Do NOT run the memory, learnings, or captain-preference sweeps" \
     "the request must exclude the memory curation half of stow"
+  assert_contains "$request" 'done [corr=<request id>]: Saved all open work.' \
+    "the delivered request must tell the mate which receipt releases the gate"
   assert_not_contains "$request" "stop every background shell task" \
     "the running Pi mate must keep its background tasks when the replacement is Claude"
   pass "T1 persist is a gate, and asks for open records and task status only"
@@ -385,7 +399,7 @@ case "$target" in
       : > "$FM_FAKE_DIR/answer-after-scan"
       corr=${target##*/}
       status=$(sed -n 's/^parent_status=//p' "$target")
-      printf 'done [corr=%s]: open records written down\n' "$corr" >> "$status"
+      printf 'done [corr=%s]: Saved all open work. (via-helper)\n' "$corr" >> "$status"
     fi
     ;;
 esac
@@ -521,7 +535,7 @@ case "${rargs[1]:-}" in
     if [ -n "${FM_FAKE_ANSWER_STATUS:-}" ]; then
       corr=$(printf '%s' "${rargs[3]:-}" | grep -oE 'corr=[0-9a-f]{16}' | head -1)
       [ -z "$corr" ] || printf '%s [%s]: %s\n' "${FM_FAKE_ANSWER_VERB:-done}" "$corr" \
-        "${FM_FAKE_ANSWER_NOTE:-open records written down}" \
+        "${FM_FAKE_ANSWER_NOTE:-Saved all open work.}" \
         >> "$FM_FAKE_ANSWER_STATUS"
     fi
     ;;
@@ -736,8 +750,8 @@ test_native_ultra_restart_keeps_local_and_remote_profiles() {
 }
 
 # --- T9: an unrelated concurrent reply cannot release the persist gate -------
-test_concurrent_reply_cannot_release_persist_gate() {
-  local dir out rc state corr rec
+assert_concurrent_reply_cannot_release_persist_gate() {
+  local note=$1 expected=$2 dir out rc state corr rec
   dir=$(new_case correlation)
   add_local_mate "$dir" sm1
   state="$dir/home/state"
@@ -756,20 +770,27 @@ delivered_epoch=1
 resolved_epoch=
 resolved_via=
 EOF
-printf 'done [corr=$corr]: unrelated request answered\n' >> "$state/sm1.status"
+printf 'done [corr=$corr]: %s\n' "$note" >> "$state/sm1.status"
 SH
   chmod +x "$dir/fake/on-doorbell"
 
   out=$(FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1); rc=$?
 
-  assert_grep "done [corr=$corr]: unrelated request answered" "$state/sm1.status" \
+  assert_grep "done [corr=$corr]:" "$state/sm1.status" \
     "the submitted persist request must have elicited the unrelated answer"
   expect_code 3 "$rc" "an unrelated concurrent answer must not release the persist gate"$'\n'"$out"
-  assert_contains "$out" "nudged: sm1: it did not confirm within 0s" \
-    "the unrelated answer must leave the persist request unanswered at the deadline"
+  assert_contains "$out" "$expected" "the pass must report why the unrelated answer did not authorize a restart"
   assert_not_contains "$out" "restarted: sm1" "the unrelated answer authorized a restart"
   ! grep -Fxq -e /exit -e /quit "$dir/fake/literal" \
     || fail "the unrelated answer authorized an exit command"
+}
+
+test_concurrent_reply_cannot_release_persist_gate() {
+  assert_concurrent_reply_cannot_release_persist_gate 'unrelated request answered' \
+    'nudged: sm1: it did not confirm within 0s'
+  assert_concurrent_reply_cannot_release_persist_gate \
+    'audit complete; save request corr=$FM_PENDING_REPLY_EXISTING_CORR is blocked' \
+    'stopped: sm1: its answer did not confirm that its open work is saved'
   pass "T9 the persist gate retains its explicitly allocated correlation"
 }
 
@@ -1062,7 +1083,7 @@ test_remote_secondmate_control_relaunch_updates_parent_record() {
 
 # --- T18: only an explicit positive persist answer releases the restart -------
 # A mate that answers that it could not write its open records down, or answers
-# with anything other than a plain "done", keeps its agent and its conversation:
+# without the requested save receipt, keeps its agent and its conversation:
 # nothing is stopped, no re-read message is sent on top of its answer, and the
 # pass reports the stop in its output and exit status.
 assert_persist_answer_stops_local() {  # <verb> <note> <expected-fragment> <label>
@@ -1103,6 +1124,10 @@ test_unclear_persist_answer_stops_local_restart() {
     "its answer did not confirm that its open work is saved" "a working answer"
   assert_persist_answer_stops_local note "will get to it" \
     "its answer did not confirm that its open work is saved" "a note answer"
+  assert_persist_answer_stops_local done "saved one record; the other write failed" \
+    "its answer did not confirm that its open work is saved" "a partial save"
+  assert_persist_answer_stops_local done "Saved all open work. One write failed." \
+    "its answer did not confirm that its open work is saved" "a contradicted receipt"
   pass "T19 an unclear persist answer stops the local restart and reports it"
 }
 
@@ -1126,6 +1151,7 @@ test_negative_persist_answer_stops_remote_restart() {
   pass "T20 a negative persist answer stops the remote restart and reports it"
 }
 
+test_usage_includes_all_exit_statuses
 test_persist_gates_and_asks_only_for_open_records
 test_persist_precedes_restart
 test_arrived_answer_precedes_deadline_check
