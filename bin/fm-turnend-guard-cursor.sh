@@ -242,9 +242,7 @@ park_still_ours() {
 }
 
 current_session_still_ours() {
-  fm_session_lock_owned_by_self "$STATE" \
-    && [ "$FM_SESSION_LOCK_PID" = "$OWNER_ID" ] \
-    && { [ -z "$OWNER_START" ] || [ "$FM_SESSION_LOCK_START" = "$OWNER_START" ]; }
+  fm_session_lock_owned_by_self "$STATE" && [ "$FM_SESSION_LOCK_PID" = "$OWNER_ID" ]
 }
 
 # Only the lock-owning session may arm or wake. A prior session that died
@@ -258,7 +256,6 @@ if ! fm_session_lock_owned_by_self "$STATE"; then
 fi
 
 OWNER_ID=$FM_SESSION_LOCK_PID
-OWNER_START=$FM_SESSION_LOCK_START
 
 PARK_SEQ=
 claim_park || exit 0

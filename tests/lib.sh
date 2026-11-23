@@ -151,9 +151,13 @@ fm_test_pid_identity() {
 }
 
 fm_test_stale_start_token() {
-  local stale
+  local stale ticks
   case "$1" in
-    proc:?*) stale=proc:0 ;;
+    proc:?*)
+      ticks=${1#proc:}
+      case "$ticks" in *[!0-9]*) return 1 ;; esac
+      stale=proc:$((ticks > 1 ? ticks - 1 : ticks + 1))
+      ;;
     lstart:?*) stale='lstart:Sat Jan  1 00:00:00 2000' ;;
     *) return 1 ;;
   esac
