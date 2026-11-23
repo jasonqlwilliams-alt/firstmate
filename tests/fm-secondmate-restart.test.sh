@@ -94,8 +94,9 @@ case "${1:-}" in
             | grep -oE 'corr=[0-9a-f]{16}' | head -1)
           if [ -n "$corr" ]; then
             header=${FM_FAKE_ANSWER_HEADER:-${FM_FAKE_ANSWER_VERB:-done} [$corr]}
+            note=${FM_FAKE_ANSWER_NOTE:-Saved all open work.}
             printf '%s: %s\n' "${header//<corr>/$corr}" \
-              "${FM_FAKE_ANSWER_NOTE:-Saved all open work.}" \
+              "${note//<corr>/$corr}" \
               >> "$(cat "$D/answer-status")"
           fi
         fi
@@ -1128,6 +1129,9 @@ SH
   fi
   expect_code 3 "$rc" "$label must not count as a clean restart"$'\n'"$out"
   assert_contains "$out" "stopped: sm1: $fragment" "$label must stop the restart and say why"
+  case "$note" in
+    *'<corr>'*) note=${note#* } ;;
+  esac
   assert_contains "$out" "$note" "$label must carry the mate's own words"
   assert_not_contains "$out" "restarted: sm1" "$label must not restart the mate"
   assert_not_contains "$out" "nudged: sm1" "$label must leave the mate untouched, without a re-read message"
@@ -1195,6 +1199,12 @@ test_negative_or_unclear_reply_vetoes_save_receipt() {
   assert_persist_answer_stops_local blocked 'one record was never written' \
     'it answered that its open work is not saved' 'a correction with brackets inside a source tag' \
     with-receipt 'blocked [<corr>] [source=retry[2]]'
+  assert_persist_answer_stops_local blocked '[<corr>] one record could not be written' \
+    'it answered that its open work is not saved' 'a correction with a bracketed note-head correlation' \
+    with-receipt blocked
+  assert_persist_answer_stops_local blocked '<corr> one record could not be written' \
+    'it answered that its open work is not saved' 'a correction with a bare note-head correlation' \
+    with-receipt blocked
   assert_persist_answer_stops_local note 'I may have missed a record' \
     'its answer did not confirm that its open work is saved' 'an unclear correction' with-receipt
   pass "a negative or unclear correction vetoes an earlier save receipt"
@@ -1227,6 +1237,8 @@ printf '[key=save] blocked corr=%s: still writing\n' "$corr" \
   >> "$(cat "$FM_FAKE_DIR/answer-status")"
 printf 'blocked [corr=%s]: a different correlation\n' "$(printf '%s' "$corr" | tr 'a-f' 'A-F')" \
   >> "$(cat "$FM_FAKE_DIR/answer-status")"
+printf 'blocked [corr=ffffffffffffffff]: [corr=%s] another request is blocked\n' "$corr" \
+  >> "$(cat "$FM_FAKE_DIR/answer-status")"
 SH
   chmod +x "$dir/fake/on-doorbell"
 
@@ -1236,10 +1248,12 @@ SH
     "the tag-first status must be present on the parent channel"
   assert_grep 'blocked [corr=ABCDEF0123456789]' "$dir/home/state/sm1.status" \
     "the case-changed reply must be present on the parent channel"
+  assert_grep 'blocked [corr=ffffffffffffffff]: [corr=abcdef0123456789]' "$dir/home/state/sm1.status" \
+    "the reply with conflicting header and note correlations must be present on the parent channel"
   expect_code 0 "$rc" "only a reply with the issued correlation and a leading verb can veto the receipt"$'\n'"$out"
   assert_contains "$out" 'restarted: sm1' "the pass must report the restart"
   assert_grep '/exit' "$dir/fake/submitted" "the mate must receive the exit command"
-  pass "tag-first and case-changed replies do not veto a save receipt"
+  pass "tag-first and differently correlated replies do not veto a save receipt"
 }
 
 test_operator_close_does_not_count_as_a_save_reply() {
