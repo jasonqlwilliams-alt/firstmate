@@ -663,7 +663,7 @@ pane_is_busy() {  # <target> [backend]
 # directly and applies the same positive-proof boundary.
 pane_input_pending() {  # <target> [backend]
   local target=$1 backend=${2:-tmux}
-  [ "$(fm_backend_composer_state "$backend" "$target" '' explicit 2>/dev/null)" != empty ]
+  [ "$(fm_backend_composer_state "$backend" "$target" 2>/dev/null)" != empty ]
 }
 
 task_window_backend() {  # <window> <state>
