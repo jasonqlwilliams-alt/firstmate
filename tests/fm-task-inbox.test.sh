@@ -1049,8 +1049,9 @@ test_agy_doorbell_width_boundary() {
   [ -f "$state/t2.inbox/handled/001.msg" ] \
     || fail "fm-send did not deliver to the wide agy composer:"$'\n'"$(cat "$home/t2.err")"
   [ "$(grep -c '^ENTER' "$log")" = 1 ] || fail "fm-send should press exactly one Enter:"$'\n'"$(cat "$log")"
-  [ "$(grep -c '^SUBMIT ' "$log")" = 1 ] && grep -qxF "SUBMIT $wide_notice" "$log" \
-    || fail "fm-send should submit the wide agy notice exactly once:"$'\n'"$(cat "$log")"
+  if [ "$(grep -c '^SUBMIT ' "$log")" != 1 ] || ! grep -qxF "SUBMIT $wide_notice" "$log"; then
+    fail "fm-send should submit the wide agy notice exactly once:"$'\n'"$(cat "$log")"
+  fi
   pass "fm-send: equal-length agy notices are refused at the last column and delivered with one more column"
 }
 
