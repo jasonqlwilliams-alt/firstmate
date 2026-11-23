@@ -93,7 +93,7 @@ if [ "$pid" = "${FM_FAKE_HARNESS_PID:-}" ]; then
   case "$*" in
     *comm=*) printf '/usr/local/bin/claude\n' ;;
     *args=*) printf 'claude\n' ;;
-    *ppid=*) /bin/ps -o ppid= -p "$pid" ;;
+    *) /bin/ps "$@" ;;
   esac
 else
   /bin/ps "$@"
@@ -593,7 +593,7 @@ EOF
 }
 
 test_lock_takeover_stays_read_only_while_a_sweep_holds_the_lease() {
-  local rec home root log next_owner new_owner out rc started elapsed waited=0
+  local rec home root log next_owner out rc started elapsed waited=0
   rec=$(new_world sweep-lease)
   IFS='|' read -r home root log <<EOF
 $rec
@@ -624,10 +624,10 @@ EOF
   out=$(PATH="$root/bin:$PATH" FM_FAKE_HARNESS_PID="$next_owner" \
     FM_HOME="$home" FM_ROOT_OVERRIDE="$root" fm_test_run_fixture "$root/bin/fm-lock.sh" 2>&1) \
     || fail "lock takeover still failed after the sweep released its lease"
-  new_owner=$(sed -n '1p' "$home/state/.lock")
-  assert_contains "$out" "lock acquired: harness pid $new_owner" \
-    "the fleet lock did not record the harness owner reported by acquisition"
-  [ "$new_owner" != "$$" ] || fail "the prior harness still owned the lock after takeover"
+  assert_contains "$out" "lock acquired: harness pid $next_owner" \
+    "acquisition did not report the fixture's next owner"
+  [ "$(sed -n '1p' "$home/state/.lock")" = "$next_owner" ] \
+    || fail "the fleet lock did not record the fixture's next owner"
   pass "fm-startup-network: fleet-lock takeover cannot overlap a mutating sweep"
 }
 

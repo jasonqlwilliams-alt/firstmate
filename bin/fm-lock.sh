@@ -4,10 +4,11 @@
 # which lives as long as the firstmate session - unlike the transient subshell
 # PID of any one tool call, which is dead moments after it is written.
 # The record also carries that process's start time, so a pid the kernel later
-# reuses for an unrelated process no longer counts as the live owner; its format,
-# atomic publication, and liveness rule are owned by bin/fm-session-lock-lib.sh.
+# reuses for an unrelated process no longer counts as the live owner; its format
+# and start-time matching are owned by bin/fm-session-lock-record-lib.sh.
 # Usage: fm-lock.sh           acquire; exit 1 unless ownership is verified
 #        fm-lock.sh status    print holder and liveness; always exits 0
+#        fm-lock.sh matches-start <pid> <token>    validate a recorded start token
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,6 +16,13 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 LOCK="$STATE/.lock"
+if [ "${1:-}" = matches-start ]; then
+  # shellcheck source=bin/fm-session-lock-record-lib.sh
+  . "$SCRIPT_DIR/fm-session-lock-record-lib.sh"
+  [ "$#" -eq 3 ] && [ -n "$3" ] && fm_session_lock_start_matches "$2" "$3"
+  exit $?
+fi
+
 mkdir -p "$STATE" 2>/dev/null || {
   echo "error: cannot create session-lock state directory $STATE; operate read-only until resolved" >&2
   exit 1

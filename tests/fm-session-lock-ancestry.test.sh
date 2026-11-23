@@ -230,7 +230,7 @@ install_autoarm_scripts() {
   cp "$ROOT/bin/fm-primary-scope-lib.sh" "$dir/bin/fm-primary-scope-lib.sh"
   cp "$ROOT/bin/fm-supervision-lib.sh" "$dir/bin/fm-supervision-lib.sh"
   cp "$ROOT/bin/fm-wake-lib.sh" "$dir/bin/fm-wake-lib.sh"
-  cp "$ROOT/bin/fm-session-lock-lib.sh" "$dir/bin/fm-session-lock-lib.sh"
+  cp "$ROOT/bin/fm-session-lock-lib.sh" "$ROOT/bin/fm-session-lock-record-lib.sh" "$dir/bin/"
   cp "$ROOT/bin/fm-cursor-lib.sh" "$dir/bin/fm-cursor-lib.sh"
   cp "$ROOT/bin/fm-hook-host-lib.sh" "$dir/bin/fm-hook-host-lib.sh"
   cp "$ROOT/bin/fm-lock.sh" "$dir/bin/fm-lock.sh"
@@ -374,20 +374,31 @@ lock_home() {  # <name>
 
 # Run fm-lock.sh with a harness-named parent; the trailing command keeps bash
 # from exec-replacing the fixture process with the script.
+fixture_start_time() {
+  local pid=$1 start
+  if [ -r "/proc/$pid/stat" ]; then
+    awk '{print "proc:" $22}' "/proc/$pid/stat"
+  else
+    start=$(TZ=UTC0 LC_ALL=C /bin/ps -p "$pid" -o lstart=) || return 1
+    printf 'lstart:%s\n' "$(printf '%s' "$start" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  fi
+}
+export -f fixture_start_time
+
 lock_as_harness() {  # <home> [args...]
   local home=$1
   shift
-  FM_HOME="$home" "$CODEX_FIXTURE" -c '"$0" "$@"; rc=$?; exit "$rc"' "$ROOT/bin/fm-lock.sh" "$@"
+  FM_HOME="$home" "$CODEX_FIXTURE" -c '
+    printf "%s\n" "$$" > "$FM_HOME/harness-pid"
+    fixture_start_time "$$" > "$FM_HOME/harness-start"
+    "$0" "$@"; rc=$?; exit "$rc"
+  ' "$ROOT/bin/fm-lock.sh" "$@"
 }
 
 start_live_harness() {  # sets LIVE_HARNESS_PID
   "$CODEX_FIXTURE" -c 'sleep 120; exit 0' </dev/null >/dev/null 2>&1 &
   LIVE_HARNESS_PID=$!
   OWNER_RECORD_PIDS="${OWNER_RECORD_PIDS:-} $LIVE_HARNESS_PID"
-}
-
-lib_start_time() {  # <pid>
-  bash -c '. "$0"; fm_pid_start_time "$1"' "$LIB" "$1"
 }
 
 cleanup_owner_record() {
@@ -405,8 +416,8 @@ test_acquire_records_pid_and_start_time() {
   out=$(lock_as_harness "$home" 2>&1) || fail "a harness caller could not take a free lock: $out"
   pid=$(sed -n '1p' "$home/state/.lock")
   start=$(sed -n '2p' "$home/state/.lock")
-  case "$pid" in ''|*[!0-9]*) fail "line 1 of the owner record is not a pid: $pid" ;; esac
-  case "$start" in start=proc:[0-9]*|start=lstart:?*) ;; *) fail "line 2 does not carry the owner's start time: $start" ;; esac
+  [ "$pid" = "$(cat "$home/harness-pid")" ] || fail "the lock did not record the fixture's PID: $pid"
+  [ "$start" = "start=$(cat "$home/harness-start")" ] || fail "the lock did not record the fixture's start time: $start"
   [ "$(wc -l < "$home/state/.lock" | tr -d ' ')" = 2 ] || fail "the owner record is not exactly two lines"
   if ls "$home/state"/.lock-write.* >/dev/null 2>&1; then fail "a temporary owner record was left behind"; fi
   pass "session lock: acquisition records the owner's pid and process start time"
@@ -430,7 +441,7 @@ test_live_owner_with_matching_start_time_keeps_the_lock() {
   local home start out
   home=$(lock_home live)
   start_live_harness
-  start=$(lib_start_time "$LIVE_HARNESS_PID") || fail "no start time for a live process"
+  start=$(fixture_start_time "$LIVE_HARNESS_PID") || fail "no start time for a live process"
   printf '%s\nstart=%s\n' "$LIVE_HARNESS_PID" "$start" > "$home/state/.lock"
   if out=$(lock_as_harness "$home" 2>&1); then fail "a second session took a live owner's lock: $out"; fi
   [ "$(sed -n '1p' "$home/state/.lock")" = "$LIVE_HARNESS_PID" ] || fail "the live owner lost its lock"
@@ -453,43 +464,98 @@ test_legacy_pid_only_record_keeps_pid_only_liveness() {
   pass "session lock: a legacy pid-only record keeps pid-only liveness until it is rewritten"
 }
 
-test_readers_never_see_an_empty_owner_line() {
-  local home reader_out reader_pid i empty
+test_readers_see_only_complete_owner_lines() {
+  local home fakebin old_owner new_owner observed writer_pid i
   home=$(lock_home atomic)
-  reader_out="$TMP_ROOT/owner-record/atomic.reads"
+  fakebin=$(fm_fakebin "$home/publication")
   lock_as_harness "$home" >/dev/null 2>&1 || fail "seed acquisition failed"
-  (
-    empty=0
-    while [ ! -e "$home/stop-reader" ]; do
-      [ -n "$(sed -n '1p' "$home/state/.lock" 2>/dev/null)" ] || empty=$((empty + 1))
-    done
-    printf '%s\n' "$empty" > "$reader_out"
-  ) &
-  reader_pid=$!
-  # Each run is a new dead-owner takeover, so every iteration rewrites the record.
-  for i in $(seq 1 30); do lock_as_harness "$home" >/dev/null 2>&1 || fail "takeover $i failed"; done
-  : > "$home/stop-reader"
-  wait "$reader_pid"
-  empty=$(cat "$reader_out")
-  [ "$empty" = 0 ] || fail "a reader saw an empty owner line $empty time(s) during rewrites"
-  pass "session lock: concurrent readers never see an empty owner line during rewrites"
+  old_owner=$(cat "$home/harness-pid")
+  cat > "$fakebin/mv" <<'SH'
+#!/usr/bin/env bash
+: > "$FM_HOME/publishing"
+for ((i = 0; i < 500; i++)); do
+  if [ -e "$FM_HOME/reader-sampled" ]; then exec /bin/mv "$@"; fi
+  sleep 0.01
+done
+exit 1
+SH
+  chmod +x "$fakebin/mv"
+  PATH="$fakebin:$PATH" lock_as_harness "$home" >/dev/null 2>&1 &
+  writer_pid=$!
+  for ((i = 0; i < 500; i++)); do
+    [ ! -e "$home/publishing" ] || break
+    sleep 0.01
+  done
+  [ -e "$home/publishing" ] || fail "the replacement owner never reached publication"
+  new_owner=$(cat "$home/harness-pid")
+  [ "$old_owner" != "$new_owner" ] || fail "the replacement fixture reused the first fixture's PID"
+  observed=$(sed -n '1p' "$home/state/.lock")
+  [ "$observed" = "$old_owner" ] || fail "a reader saw '$observed' before the pending rename"
+  : > "$home/reader-sampled"
+  for ((i = 0; i < 500; i++)); do
+    observed=$(sed -n '1p' "$home/state/.lock")
+    case "$observed" in
+      "$new_owner") break ;;
+      "$old_owner") sleep 0.01 ;;
+      *) fail "a reader saw an invalid owner line during publication: '$observed'" ;;
+    esac
+  done
+  wait "$writer_pid" || fail "replacement acquisition failed"
+  [ "$observed" = "$new_owner" ] || fail "the reader never saw the replacement owner"
+  pass "session lock: a reader across publication sees only complete fixture PIDs"
+}
+
+test_failed_start_lookup_preserves_only_legacy_liveness() {
+  local home proc status out
+  home=$(lock_home no-start)
+  proc="$home/proc"
+  start_live_harness
+  mkdir -p "$proc/$LIVE_HARNESS_PID"
+  printf 'unreadable start-time fixture\n' > "$proc/$LIVE_HARNESS_PID/stat"
+  printf '%s\nstart=%s\n' "$LIVE_HARNESS_PID" "$(fixture_start_time "$LIVE_HARNESS_PID")" > "$home/state/.lock"
+  status=$(FM_PROC_ROOT_OVERRIDE="$proc" FM_HOME="$home" "$ROOT/bin/fm-lock.sh" status)
+  case "$status" in "lock: stale"*) ;; *) fail "a versioned record survived a failed start lookup: $status" ;; esac
+  printf '%s\n' "$LIVE_HARNESS_PID" > "$home/state/.lock"
+  status=$(FM_PROC_ROOT_OVERRIDE="$proc" FM_HOME="$home" "$ROOT/bin/fm-lock.sh" status)
+  [ "$status" = "lock: held by live harness pid $LIVE_HARNESS_PID" ] || fail "legacy liveness changed: $status"
+  rm "$home/state/.lock"
+  out=$(FM_HOME="$home" FM_PROC_ROOT_OVERRIDE="$proc" "$CODEX_FIXTURE" -c '
+    mkdir -p "$FM_PROC_ROOT_OVERRIDE/$$"
+    printf "malformed\n" > "$FM_PROC_ROOT_OVERRIDE/$$/stat"
+    printf "%s\n" "$$" > "$FM_HOME/harness-pid"
+    "$0"; rc=$?; exit "$rc"
+  ' "$ROOT/bin/fm-lock.sh" 2>&1) || fail "legacy acquisition failed: $out"
+  [ "$(cat "$home/state/.lock")" = "$(cat "$home/harness-pid")" ] || fail "failed acquisition lookup did not publish a PID-only record"
+  pass "session lock: a failed lookup makes a versioned owner stale and publishes legacy claims"
+}
+
+test_ps_start_time_matches_across_timezones() {
+  local home proc start status
+  home=$(lock_home ps-timezones)
+  proc="$home/proc"
+  mkdir "$proc"
+  start_live_harness
+  start=$(TZ=UTC0 LC_ALL=C /bin/ps -p "$LIVE_HARNESS_PID" -o lstart= | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  [ -n "$start" ] || fail "ps did not report the fixture's UTC start time"
+  printf '%s\nstart=lstart:%s\n' "$LIVE_HARNESS_PID" "$start" > "$home/state/.lock"
+  status=$(TZ=PST8 FM_PROC_ROOT_OVERRIDE="$proc" FM_HOME="$home" "$ROOT/bin/fm-lock.sh" status)
+  [ "$status" = "lock: held by live harness pid $LIVE_HARNESS_PID" ] || fail "the ps fallback varied by timezone: $status"
+  pass "session lock: ps start times match across reader timezones"
 }
 
 test_malformed_records_are_not_owned() {
-  local dir
+  local dir status
   dir="$TMP_ROOT/owner-record/malformed"
   mkdir -p "$dir/state"
   printf 'not-a-pid\nstart=proc:1\n' > "$dir/state/.lock"
   if bash -c '. "$0"; fm_session_lock_owned_by_self "$1"' "$LIB" "$dir/state"; then
     fail "a non-numeric owner line was treated as owned"
   fi
-  if bash -c '. "$0"; fm_session_lock_held_live "$1"' "$LIB" "$dir/state/.lock"; then
-    fail "a non-numeric owner line was treated as a live owner"
-  fi
+  status=$(FM_HOME="$dir" "$ROOT/bin/fm-lock.sh" status)
+  case "$status" in "lock: stale"*) ;; *) fail "a non-numeric owner line was treated as a live owner: $status" ;; esac
   : > "$dir/state/.lock"
-  if bash -c '. "$0"; fm_session_lock_held_live "$1"' "$LIB" "$dir/state/.lock"; then
-    fail "an empty owner record was treated as a live owner"
-  fi
+  status=$(FM_HOME="$dir" "$ROOT/bin/fm-lock.sh" status)
+  case "$status" in "lock: stale"*) ;; *) fail "an empty owner record was treated as a live owner: $status" ;; esac
   pass "session lock: malformed or empty owner records are never owned"
 }
 
@@ -504,5 +570,7 @@ test_acquire_records_pid_and_start_time
 test_reused_pid_with_other_start_time_is_not_an_owner
 test_live_owner_with_matching_start_time_keeps_the_lock
 test_legacy_pid_only_record_keeps_pid_only_liveness
-test_readers_never_see_an_empty_owner_line
+test_readers_see_only_complete_owner_lines
+test_failed_start_lookup_preserves_only_legacy_liveness
+test_ps_start_time_matches_across_timezones
 test_malformed_records_are_not_owned

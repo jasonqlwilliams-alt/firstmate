@@ -135,7 +135,8 @@ test_opencode_plugin_delivers_exact_nudge_once() {
   local root="$TMP_ROOT/opencode-primary" out status=0
   make_primary "$root"
   cp "$ROOT/bin/fm-sessionstart-nudge.sh" "$ROOT/bin/fm-primary-scope-lib.sh" \
-    "$ROOT/bin/fm-gate-refuse-lib.sh" "$ROOT/bin/fm-operational-input.sh" "$root/bin/"
+    "$ROOT/bin/fm-gate-refuse-lib.sh" "$ROOT/bin/fm-operational-input.sh" \
+    "$ROOT/bin/fm-session-lock-record-lib.sh" "$root/bin/"
   chmod +x "$root/bin/fm-sessionstart-nudge.sh"
   out=$(PLUGIN="$ROOT/.opencode/plugins/fm-primary-sessionstart-nudge.js" \
     WORKTREE="$root" EXPECTED="$NUDGE_LINE" node --input-type=module 2>&1 <<'EOF'
@@ -319,6 +320,18 @@ test_run_clear_rejects_previous_owner_completion() {
   [ "$(sed -n '1p' "$root/state/.lock")" != "$previous_pid" ] \
     || fail "the recovery startup did not replace the previous session's stale lock"
   pass "run wrapper: clear accepts completion only from the current harness"
+}
+
+test_run_compact_rejects_completion_for_reused_pid() {
+  local root="$TMP_ROOT/run-compact-reused-owner" out owner
+  make_run_primary "$root"
+  run_hook "$root" --source startup </dev/null >/dev/null
+  owner=$(sed -n '1p' "$root/state/.lock")
+  printf '%s\nstart=proc:0\n' "$owner" > "$root/state/.session-start-complete"
+  out=$(run_hook "$root" --source compact </dev/null)
+  assert_not_contains "$out" "$REEMIT_BANNER" "compact accepted completion from a previous process with the same PID"
+  assert_contains "$out" "$FULL_BANNER$root" "compact did not finish startup for the current process"
+  pass "run wrapper: compact rejects a completion with the current PID and an old start time"
 }
 
 test_pi_startup_classifies_cli_continuations() {
@@ -892,7 +905,8 @@ test_pi_large_sessionstart_digest_is_delivered_loudly() {
     "$ROOT/.pi/extensions/lib/fm-sessionstart-supervisor.mjs" "$fixture/.pi/extensions/lib/"
   cp "$ROOT/bin/fm-sessionstart-run.sh" "$ROOT/bin/fm-sessionstart-nudge.sh" \
     "$ROOT/bin/fm-primary-scope-lib.sh" "$ROOT/bin/fm-gate-refuse-lib.sh" \
-    "$ROOT/bin/fm-hook-host-lib.sh" \
+    "$ROOT/bin/fm-hook-host-lib.sh" "$ROOT/bin/fm-session-lock-record-lib.sh" \
+    "$ROOT/bin/fm-session-lock-lib.sh" "$ROOT/bin/fm-cursor-lib.sh" \
     "$ROOT/bin/fm-operational-input.sh" "$fixture/bin/"
   cat > "$fixture/bin/fm-session-start.sh" <<'SH'
 #!/usr/bin/env bash
@@ -1028,6 +1042,7 @@ test_run_rebuild_forwards_source_to_drifted_instruction_refresh
 test_run_compact_without_completion_refreshes_before_finishing_startup
 test_run_clear_without_completion_finishes_startup
 test_run_clear_rejects_previous_owner_completion
+test_run_compact_rejects_completion_for_reused_pid
 test_run_resume_delegates_to_the_nudge
 test_run_reads_source_from_the_hook_payload
 test_run_unknown_source_takes_the_helm

@@ -3121,12 +3121,14 @@ EOF
 }
 
 test_opencode_primary_watch_plugin_requires_session_lock() {
-  local plugin repo home log out status
+  local plugin repo home log out status harness
   plugin="$ROOT/.opencode/plugins/fm-primary-watch-arm.js"
   repo="$TMP_ROOT/opencode-lock-root"
   home="$TMP_ROOT/opencode-lock-home"
   log="$TMP_ROOT/opencode-lock.log"
   mkdir -p "$repo/bin" "$home/state" "$home/config"
+  harness="$repo/bin/opencode"
+  ln -s /bin/bash "$harness"
   git init -q "$repo"
   : > "$repo/AGENTS.md"
   : > "$home/state/task.meta"
@@ -3136,8 +3138,10 @@ printf 'arm\n' >> "${FM_ARM_LOG:?}"
 printf 'watcher: healthy pid=1 (beacon 0s)\n'
 SH
   chmod +x "$repo/bin/fm-watch-arm.sh"
-  out=$(PLUGIN="$plugin" WORKTREE="$repo" FM_HOME="$home" FM_ARM_LOG="$log" node 2>&1 <<'EOF'
-import { existsSync, writeFileSync } from "node:fs";
+  out=$(PLUGIN="$plugin" WORKTREE="$repo" FM_HOME="$home" FM_ARM_LOG="$log" LOCK_SCRIPT="$ROOT/bin/fm-lock.sh" \
+    "$harness" -c 'node; rc=$?; exit "$rc"' 2>&1 <<'EOF'
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const mod = await import(pathToFileURL(process.env.PLUGIN).href);
@@ -3164,7 +3168,17 @@ if (existsSync(process.env.FM_ARM_LOG)) {
   console.error("watch arm ran without owning the session lock");
   process.exit(1);
 }
-writeFileSync(`${process.env.FM_HOME}/state/.lock`, `${process.pid}\n`);
+const lockFile = `${process.env.FM_HOME}/state/.lock`;
+writeFileSync(lockFile, `${process.ppid}\nstart=proc:0\n`);
+if (await globalThis.__firstmateOpenCodeWatchArm.ensureArmed("session-test", client) !== "read-only") {
+  throw new Error("the plugin accepted a lock with its harness PID and a stale start time");
+}
+const acquired = spawnSync("bash", [process.env.LOCK_SCRIPT], { encoding: "utf8" });
+if (acquired.status !== 0) throw new Error(acquired.stderr || acquired.stdout);
+const [owner, start] = readFileSync(lockFile, "utf8").split("\n");
+if (owner !== String(process.ppid) || !start?.startsWith("start=")) {
+  throw new Error("fm-lock did not publish a versioned record for the fixture harness");
+}
 await hooks.event(event);
 for (let i = 0; i < 250 && !existsSync(process.env.FM_ARM_LOG); i += 1) {
   await new Promise((resolve) => setTimeout(resolve, 20));

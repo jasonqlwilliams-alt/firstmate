@@ -140,7 +140,6 @@ fm_primary_scope_matches "$FM_ROOT" "$STATE" || exit 0
 # uncertainty rather than stale-owner evidence and remain inert.
 RECOVER_SESSION_LOCK=0
 if ! fm_session_lock_owned_by_self "$STATE"; then
-  fm_session_lock_read "$STATE/.lock" || exit 0
   case "$FM_SESSION_LOCK_PID" in
     ''|*[!0-9]*) exit 0 ;;
   esac
@@ -202,7 +201,7 @@ autoarm_commit() {  # <outcome> [marker-file]
   local outcome=$1 marker=${2:-} session_pid recovery
   if [ "$outcome" = rewake ]; then
     fm_session_lock_owned_by_self "$STATE" || return 2
-    session_pid=$(sed -n '1p' "$STATE/.lock" 2>/dev/null || true)
+    session_pid=$FM_SESSION_LOCK_PID
     fm_recovery_marker_snapshot "$STATE/.watcher-down" || return 2
     case "$FM_RECOVERY_MARKER_TOKEN" in
       # A quiet lease publishes a handling episode before retiring its arm.

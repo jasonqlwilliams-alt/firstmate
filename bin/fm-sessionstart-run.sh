@@ -90,14 +90,12 @@ fm_is_gate_agent "$FM_ROOT" && stand_down
 fm_primary_scope_matches "$FM_ROOT" "$STATE" || stand_down
 
 session_start_completed() {
-  local lock_pid completion_pid
+  local completion_record
   [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] || return 1
   [ -f "$COMPLETION_FILE" ] && [ ! -L "$COMPLETION_FILE" ] || return 1
   fm_session_lock_owned_by_self "$STATE" || return 1
-  lock_pid=$(fm_session_lock_pid "$STATE/.lock") || return 1
-  completion_pid=$(cat "$COMPLETION_FILE" 2>/dev/null) || return 1
-  case "$lock_pid" in ''|*[!0-9]*) return 1 ;; esac
-  [ "$completion_pid" = "$lock_pid" ]
+  completion_record=$(cat "$COMPLETION_FILE" 2>/dev/null) || return 1
+  [ "$completion_record" = "$(fm_session_lock_print_record "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START")" ]
 }
 
 if [ -z "$SOURCE" ] && [ ! -t 0 ]; then

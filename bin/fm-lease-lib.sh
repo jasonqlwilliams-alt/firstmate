@@ -67,6 +67,8 @@
 FM_LEASE_REFUSE_EXIT=6
 FM_LEASE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_LEASE_GUARD_LOCK=
+# shellcheck source=bin/fm-session-lock-record-lib.sh
+. "$FM_LEASE_LIB_DIR/fm-session-lock-record-lib.sh"
 
 fm_lease_lock_helpers() {
   command -v fm_lock_acquire_wait >/dev/null 2>&1 && return 0
@@ -134,7 +136,6 @@ fm_lease_read() {
 # recorded pid is alive, and that pid IS the current session-lock holder (see
 # the staleness contract above).
 fm_lease_live() {
-  local lock_pid
   case "${PI_CODING_AGENT:-}:${FM_SUPERVISION_ACTOR:-}" in
     true:*|*:main|*:branch) ;;
     *) return 1 ;;
@@ -143,9 +144,9 @@ fm_lease_live() {
   [ -n "$FM_LEASE_ACTOR" ] || return 1
   [ -n "$FM_LEASE_PID" ] || return 1
   kill -0 "$FM_LEASE_PID" 2>/dev/null || return 1
-  lock_pid=$(head -n 1 "$STATE/.lock" 2>/dev/null || true)
-  case "$lock_pid" in ''|0|1|*[!0-9]*) return 1 ;; esac
-  [ "$FM_LEASE_PID" = "$lock_pid" ]
+  fm_session_lock_read "$STATE/.lock" || return 1
+  [ "$FM_LEASE_PID" = "$FM_SESSION_LOCK_PID" ] \
+    && fm_session_lock_start_matches "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START"
 }
 
 # fm_lease_clear_stale <task>: remove the lease file when it exists but is not

@@ -351,16 +351,17 @@ let ownedLockPid = "";
 // stays the wait.
 const LOCK_ANCESTRY_DEPTH = 8;
 
-function readLockPid(): { lockPid: string; verdict: LockOwnership | null } {
+function readLockPid(): { lockPid: string; startLine?: string; verdict: LockOwnership | null } {
   ownedLockPid = "";
-  let lockPid = "";
+  let lockLines: string[];
   try {
-    lockPid = readFileSync(`${state}/.lock`, "utf8").split("\n", 1)[0].trim();
+    lockLines = readFileSync(`${state}/.lock`, "utf8").split("\n", 2);
   } catch {
     return { lockPid: "", verdict: "missing" };
   }
-  if (!/^[0-9]+$/.test(lockPid) || lockPid === "1") return { lockPid, verdict: "other" };
-  return { lockPid, verdict: null };
+  const lockPid = lockLines[0].trim();
+  if (!/^[0-9]+$/.test(lockPid) || lockPid === "0" || lockPid === "1") return { lockPid, verdict: "other" };
+  return { lockPid, startLine: lockLines[1], verdict: null };
 }
 
 function ownershipVerdict(lockPid: string, ancestryMatched: boolean): LockOwnership {
@@ -372,19 +373,24 @@ function ownershipVerdict(lockPid: string, ancestryMatched: boolean): LockOwners
 }
 
 async function lockOwnership(): Promise<LockOwnership> {
-  const { lockPid, verdict } = readLockPid();
+  const { lockPid, startLine, verdict } = readLockPid();
   if (verdict) return verdict;
   let pid = String(process.pid);
-  for (let i = 0; i < LOCK_ANCESTRY_DEPTH; i += 1) {
-    if (pid === lockPid) {
-      const current = readLockPid();
-      if (current.verdict || current.lockPid !== lockPid) return current.verdict ?? "other";
-      return ownershipVerdict(lockPid, true);
-    }
+  for (let i = 0; i < LOCK_ANCESTRY_DEPTH && pid !== lockPid; i += 1) {
     pid = await parentPid(pid);
-    if (!pid || pid === "1") break;
+    if (!pid || pid === "1" || i === LOCK_ANCESTRY_DEPTH - 1) {
+      pid = "";
+      break;
+    }
   }
-  return ownershipVerdict(lockPid, false);
+  if (startLine?.startsWith("start=")) {
+    const result = await runCommandAsync("bash", [`${root}/bin/fm-lock.sh`, "matches-start", lockPid, startLine.slice(6)]);
+    if (result.status !== 0) return "missing";
+  }
+  const current = readLockPid();
+  if (current.verdict) return current.verdict;
+  if (current.lockPid !== lockPid || current.startLine !== startLine) return "other";
+  return ownershipVerdict(lockPid, pid === lockPid);
 }
 
 // Pi types its bash spawn hook as a synchronous function
@@ -393,8 +399,12 @@ async function lockOwnership(): Promise<LockOwnership> {
 // than caching the authority: what blocks there is one branch shell command
 // about to spawn a shell anyway, never an arriving outcome.
 function lockOwnershipSync(): LockOwnership {
-  const { lockPid, verdict } = readLockPid();
+  const { lockPid, startLine, verdict } = readLockPid();
   if (verdict) return verdict;
+  if (startLine?.startsWith("start=") &&
+      spawnSync("bash", [`${root}/bin/fm-lock.sh`, "matches-start", lockPid, startLine.slice(6)]).status !== 0) {
+    return "missing";
+  }
   let pid = String(process.pid);
   for (let i = 0; i < LOCK_ANCESTRY_DEPTH; i += 1) {
     if (pid === lockPid) return ownershipVerdict(lockPid, true);

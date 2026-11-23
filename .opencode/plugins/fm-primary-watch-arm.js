@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { encodeFirstmateOperationalInput } from "./lib/fm-operational-input.js";
 
 const COORDINATOR_KEY = "__firstmateOpenCodeWatchArm";
@@ -112,13 +113,20 @@ function shouldArm(paths) {
 }
 
 async function sessionOwnsLock(paths) {
-  let lockPid = "";
+  let lockLines;
   try {
-    lockPid = readFileSync(`${paths.state}/.lock`, "utf8").trim();
+    lockLines = readFileSync(`${paths.state}/.lock`, "utf8").split("\n", 2);
   } catch {
     return false;
   }
-  if (!/^[0-9]+$/.test(lockPid) || lockPid === "1") return false;
+  const lockPid = lockLines[0].trim();
+  if (!/^[0-9]+$/.test(lockPid) || lockPid === "0" || lockPid === "1") return false;
+  const startLine = lockLines[1];
+  if (startLine?.startsWith("start=")) {
+    const lockScript = fileURLToPath(new URL("../../bin/fm-lock.sh", import.meta.url));
+    const result = await runProcess("bash", [lockScript, "matches-start", lockPid, startLine.slice(6)]);
+    if (result.code !== 0) return false;
+  }
   let pid = String(process.pid);
   for (let i = 0; i < 8; i += 1) {
     if (pid === lockPid) return true;

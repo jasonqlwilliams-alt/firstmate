@@ -420,6 +420,23 @@ contains 'supervision_healthy=true'
 no_mutation
 pass 'current initialized generation with no mates or supervision demand is ready'
 
+if [ -r "/proc/$FM_PRIMARY_TEST_PID/stat" ]; then
+  start_token=$(awk '{print "proc:" $22}' "/proc/$FM_PRIMARY_TEST_PID/stat")
+else
+  start_token='lstart:fixture-start claude'
+fi
+printf '%s\nstart=%s\n' "$FM_PRIMARY_TEST_PID" "$start_token" > "$HOME_FIXTURE/state/.lock"
+cp "$HOME_FIXTURE/state/.lock" "$HOME_FIXTURE/state/.session-start-complete"
+capture ready
+expect_rc 0
+contains 'primary_initialized=true'
+printf '%s\nstart=proc:0\n' "$FM_PRIMARY_TEST_PID" > "$HOME_FIXTURE/state/.session-start-complete"
+capture ready
+expect_rc 1
+contains 'primary_initialized=false'
+initialize_primary
+pass 'launcher readiness matches the startup completion to the live process start time'
+
 printf 'kind=ship\n' > "$HOME_FIXTURE/state/ordinary.meta"
 capture ready
 expect_rc 0
@@ -459,6 +476,7 @@ herdr_tab_id=w2:t1
 home=$TMP_ROOT/mate
 herdr_workspace_id=w2
 EOF
+printf '\nunset -f fm_backend_herdr_pane_home_state\n' >> "$CODE/bin/backends/herdr.sh"
 capture ready
 expect_rc 1
 contains 'home-bound secondmate recovery support is not installed'

@@ -22,7 +22,7 @@ fm_backend_source herdr
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
 
 PRIMARY_PANE='' PRIMARY_TAB='' PRIMARY_FOUND_WORKSPACE=
-PRIMARY_OWNER='' PRIMARY_LOCK=
+PRIMARY_OWNER='' PRIMARY_OWNER_START='' PRIMARY_LOCK=
 PRIMARY_LABEL=$(fm_backend_herdr_workspace_label)
 
 primary_validate_home() {
@@ -71,19 +71,19 @@ primary_server_state() {
 
 primary_read_lock() {
   local comm args
-  PRIMARY_OWNER='' PRIMARY_LOCK=free
+  PRIMARY_OWNER='' PRIMARY_OWNER_START='' PRIMARY_LOCK=free
   if [ -e "$STATE/.lock" ] || [ -L "$STATE/.lock" ]; then
     [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] && [ -r "$STATE/.lock" ] \
       || primary_die "session lock is unreadable or unsafe"
     fm_session_lock_read "$STATE/.lock" || primary_die "cannot read session lock"
-    PRIMARY_OWNER=$FM_SESSION_LOCK_PID
+    PRIMARY_OWNER=$FM_SESSION_LOCK_PID PRIMARY_OWNER_START=$FM_SESSION_LOCK_START
     case "$PRIMARY_OWNER" in ''|*[!0-9]*|0|1) primary_die "malformed session lock" ;; esac
     PRIMARY_LOCK=stale
     if kill -0 "$PRIMARY_OWNER" 2>/dev/null; then
       comm=$(ps -p "$PRIMARY_OWNER" -o comm=) || primary_die "live lock owner cannot be inspected"
       args=$(ps -p "$PRIMARY_OWNER" -o args=) || primary_die "live lock owner arguments are unreadable"
       if fm_harness_process_matches "$comm" "$args" \
-        && fm_session_lock_owner_alive "$PRIMARY_OWNER" "$FM_SESSION_LOCK_START"; then PRIMARY_LOCK=live; fi
+        && fm_session_lock_start_matches "$PRIMARY_OWNER" "$PRIMARY_OWNER_START"; then PRIMARY_LOCK=live; fi
     fi
   fi
 }
@@ -264,15 +264,16 @@ primary_mates_ready() {
 }
 
 primary_report() {
-  local detected=false initialized=false recovered=false supervised=false completion before
+  local detected=false initialized=false recovered=false supervised=false completion before before_start
   primary_read_lock
   primary_server_state
   if [ "$PRIMARY_SERVER" = running ]; then primary_discover; fi
   [ -z "$PRIMARY_PANE" ] || detected=true
-  before=$PRIMARY_OWNER
+  before=$PRIMARY_OWNER before_start=$PRIMARY_OWNER_START
   if primary_owner_in_pane "$PRIMARY_PANE"; then
     completion=$(cat "$STATE/.session-start-complete" 2>/dev/null || true)
-    if [ ! -L "$STATE/.session-start-complete" ] && [ "$completion" = "$PRIMARY_OWNER" ] \
+    if [ ! -L "$STATE/.session-start-complete" ] \
+      && [ "$completion" = "$(fm_session_lock_print_record "$PRIMARY_OWNER" "$PRIMARY_OWNER_START")" ] \
       && FM_WAKE_NO_MKDIR=1 "$FM_HOME/bin/fm-startup-network.sh" owner "$PRIMARY_OWNER"; then
       initialized=true
       if FM_WAKE_NO_MKDIR=1 "$FM_HOME/bin/fm-startup-network.sh" ready "$PRIMARY_OWNER"; then
@@ -297,7 +298,9 @@ primary_report() {
     printf 'initialization_reason=current primary has not completed native session-start\n'
   fi
   primary_read_lock
-  [ "$before" = "$PRIMARY_OWNER" ] || { initialized=false; recovered=false; supervised=false; }
+  if [ "$PRIMARY_LOCK" != live ] || [ "$before" != "$PRIMARY_OWNER" ] || [ "$before_start" != "$PRIMARY_OWNER_START" ]; then
+    initialized=false recovered=false supervised=false
+  fi
   printf 'agent_detected=%s\nprimary_initialized=%s\nrecovery_ready=%s\nsupervision_healthy=%s\n' \
     "$detected" "$initialized" "$recovered" "$supervised"
   printf 'home=%s\nsession=%s\nworkspace=%s\ntab=%s\npane=%s\n' "$FM_HOME" "$PRIMARY_SESSION" "$PRIMARY_FOUND_WORKSPACE" "$PRIMARY_TAB" "$PRIMARY_PANE"
