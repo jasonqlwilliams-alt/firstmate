@@ -64,6 +64,7 @@ Herdr uses the recorded terminal identity to confirm replacement.
 Zellij reports absence only when a successful pane inventory omits the terminal id, so an occupied id can leave a replacement inconclusive.
 Physical absence clears the pane's pause tracking.
 A verified replacement leaves the current pane's tracking to its live task.
+On Herdr and Zellij, upgrading can repeat a reminder once if the watcher cannot tie the saved reminder to the currently verified task.
 A secondmate enters the loss path only while its latest status declares `paused:` or `captain-held:`.
 The report is keyed to the task record's backend, target, and spawn generation, so a relaunch can report a fresh loss even when it reuses the target.
 A successful capture for that task re-arms its report, and teardown keeps the loss record until it retires the task record.
