@@ -1333,6 +1333,30 @@ test_quiet_lease_preserves_live_lock() {
   pass "auto-arm: lease retires only dead watcher locks and preserves live or identity-mismatched live holders"
 }
 
+wait_for_liveness_fixture() {
+  local pid=$1 attempts=$2 i
+  for ((i=0; i<attempts; i++)); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid"
+      return $?
+    fi
+    sleep 0.05
+  done
+  return 124
+}
+
+stop_liveness_fixture() {
+  local pid=$1
+  [ -n "$pid" ] || return 0
+  kill -TERM "$pid" 2>/dev/null || true
+  if wait_for_liveness_fixture "$pid" 60 2>/dev/null; then
+    return 0
+  elif [ "$?" -eq 124 ]; then
+    kill -KILL "$pid" 2>/dev/null || true
+    wait_for_liveness_fixture "$pid" 60 2>/dev/null || true
+  fi
+}
+
 test_slow_check_sweep_liveness() (
   local mode=$1 dir state id i hook_rc
   local arm_pid='' watcher_pid='' stopped=0 RUN_AUTOARM_BG_PID=''
@@ -1348,8 +1372,8 @@ test_slow_check_sweep_liveness() (
   cleanup_sweep() {
     if [ "$stopped" -eq 1 ]; then kill -CONT "$watcher_pid" 2>/dev/null || true; fi
     touch "$state/finish"
-    if [ -n "$arm_pid" ]; then wait "$arm_pid" 2>/dev/null || true; fi
-    if [ -n "$RUN_AUTOARM_BG_PID" ]; then wait "$RUN_AUTOARM_BG_PID" 2>/dev/null || true; fi
+    stop_liveness_fixture "$arm_pid"
+    stop_liveness_fixture "$RUN_AUTOARM_BG_PID"
   }
   trap cleanup_sweep EXIT
   trap 'exit 1' HUP INT TERM
@@ -1395,8 +1419,9 @@ SH
       || fail "Stop hook did not attach to the original watcher: $(cat "$dir/hook.out")"
   else
     assert_grep 'WATCHER DOWN' "$dir/guard.out" "a stopped watcher must become stale"
-    wait "$RUN_AUTOARM_BG_PID"
+    wait_for_liveness_fixture "$RUN_AUTOARM_BG_PID" 300
     hook_rc=$?
+    [ "$hook_rc" -ne 124 ] || fail "Stop hook did not finish: $(cat "$dir/hook.out")"
     RUN_AUTOARM_BG_PID=
     expect_code 2 "$hook_rc" "the Stop hook must report the stalled watcher"
     assert_grep 'auto-arm FAILED' "$dir/hook.out" "the stalled watcher must trigger the ordinary failure"
@@ -1406,13 +1431,14 @@ SH
   fi
   [ "$(cat "$state/.watch.lock/pid")" = "$watcher_pid" ] || fail "Stop hook replaced the original watcher"
   touch "$state/finish"
-  wait "$arm_pid" || fail "original watcher cycle did not succeed: $(cat "$dir/outer.out")"
+  wait_for_liveness_fixture "$arm_pid" 300 || fail "original watcher cycle did not succeed: $(cat "$dir/outer.out")"
   arm_pid=
   assert_grep 'completed-slow-sweep' "$dir/outer.out" "original watcher must deliver the final check"
   [ "$(wc -l < "$state/.wake-queue" | tr -d ' ')" = 1 ] || fail "final check must queue exactly one wake"
   if [ "$mode" = healthy ]; then
-    wait "$RUN_AUTOARM_BG_PID"
+    wait_for_liveness_fixture "$RUN_AUTOARM_BG_PID" 300
     hook_rc=$?
+    [ "$hook_rc" -ne 124 ] || fail "Stop hook did not finish: $(cat "$dir/hook.out")"
     RUN_AUTOARM_BG_PID=
     expect_code 2 "$hook_rc" "the attached Stop hook must request a handling turn"
     assert_grep 'completed-slow-sweep' "$dir/hook.out" "Stop hook must relay the original check output"
@@ -1461,14 +1487,8 @@ SH
   "$dir/bin/fm-check-register.sh" ready >/dev/null || fail "could not register the check"
 
   cleanup_observation() {
-    if [ -n "$arm_pid" ]; then
-      kill "$arm_pid" 2>/dev/null || true
-      wait "$arm_pid" 2>/dev/null || true
-    fi
-    if [ -n "$RUN_AUTOARM_BG_PID" ]; then
-      kill "$RUN_AUTOARM_BG_PID" 2>/dev/null || true
-      wait "$RUN_AUTOARM_BG_PID" 2>/dev/null || true
-    fi
+    stop_liveness_fixture "$arm_pid"
+    stop_liveness_fixture "$RUN_AUTOARM_BG_PID"
     if [ -n "$ssh_pid" ]; then kill "$ssh_pid" 2>/dev/null || true; fi
   }
   trap cleanup_observation EXIT
@@ -1476,8 +1496,11 @@ SH
 
   if [ "$mode" = lease ]; then
     export FM_GUARD_GRACE=60 FM_CLAUDE_AUTOARM_LEASE_SECONDS=5
-    run_autoarm "$dir" > "$dir/hook.out"
+    run_autoarm_bg "$dir" "$dir/hook.out"
+    wait_for_liveness_fixture "$RUN_AUTOARM_BG_PID" 300
     hook_rc=$?
+    [ "$hook_rc" -ne 124 ] || fail "lease did not finish: $(cat "$dir/hook.out")"
+    RUN_AUTOARM_BG_PID=
     ssh_pid=$(cat "$state/observing") || fail "lease ended before the watcher entered the remote observation"
     expect_code 2 "$hook_rc" "an active home must receive the lease renewal wake"
     assert_grep 'check: claude-lease-renewal' "$dir/hook.out" "expiry must use the ordinary lease handoff"
@@ -1501,7 +1524,9 @@ SH
     done
     ssh_pid=$(cat "$state/observing") || fail "the watcher did not enter the remote observation"
     kill -TERM "$arm_pid" || fail "could not stop the arm"
-    wait "$arm_pid" 2>/dev/null || true
+    wait_for_liveness_fixture "$arm_pid" 300
+    hook_rc=$?
+    [ "$hook_rc" -ne 124 ] || fail "arm did not stop: $(cat "$dir/outer.out")"
     arm_pid=
     ! kill -0 "$ssh_pid" 2>/dev/null || fail "a normally stopped watcher did not reap SSH"
     ssh_pid=
@@ -1533,10 +1558,11 @@ SH
   grep -qsF "watcher: attached pid=$watcher_pid " "$state"/.claude-autoarm-output.* \
     || fail "Stop hook did not attach to the original watcher: $(cat "$dir/hook.out")"
   touch "$state/finish"
-  wait "$arm_pid" || fail "original watcher cycle did not succeed: $(cat "$dir/outer.out")"
+  wait_for_liveness_fixture "$arm_pid" 300 || fail "original watcher cycle did not succeed: $(cat "$dir/outer.out")"
   arm_pid=
-  wait "$RUN_AUTOARM_BG_PID"
+  wait_for_liveness_fixture "$RUN_AUTOARM_BG_PID" 300
   hook_rc=$?
+  [ "$hook_rc" -ne 124 ] || fail "Stop hook did not finish: $(cat "$dir/hook.out")"
   RUN_AUTOARM_BG_PID=
   expect_code 2 "$hook_rc" "the attached Stop hook must request a handling turn"
   assert_grep 'completed-after-observation' "$dir/hook.out" "Stop hook must relay the original watcher's check"
