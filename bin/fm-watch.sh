@@ -160,8 +160,6 @@ mkdir -p "$STATE"
 # cheap when no records exist and never scrapes secondmate conversation.
 # shellcheck source=bin/fm-pending-reply-lib.sh
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
-# shellcheck source=bin/fm-timeout-lib.sh
-. "$SCRIPT_DIR/fm-timeout-lib.sh"
 # shellcheck source=bin/fm-busy-lib.sh
 . "$SCRIPT_DIR/fm-busy-lib.sh"
 # Steering-inbox loss detection: bin/fm-task-inbox-lib.sh owns the record,
@@ -213,6 +211,7 @@ WATCHER_STALE_GRACE=${FM_WATCHER_STALE_GRACE:-${FM_GUARD_GRACE:-$(fm_poll_derive
 WATCHER_WAIT_LIMIT=150
 for grace in "${FM_GUARD_GRACE:-300}" "$WATCHER_STALE_GRACE"; do
   if [ "$grace" -gt 0 ] 2>/dev/null && [ "$grace" -lt "$((WATCHER_WAIT_LIMIT * 2))" ]; then
+    grace=${grace//[[:space:]+]/}
     WATCHER_WAIT_LIMIT=$((10#$grace / 2))
     [ "$WATCHER_WAIT_LIMIT" -gt 0 ] || WATCHER_WAIT_LIMIT=1
   fi
@@ -221,7 +220,6 @@ HEARTBEAT=${FM_HEARTBEAT:-600}        # base seconds between heartbeat scans
 HEARTBEAT_MAX=${FM_HEARTBEAT_MAX:-7200}  # heartbeat backoff cap
 CHECK_INTERVAL=${FM_CHECK_INTERVAL:-300}  # seconds between *.check.sh sweeps
 CHECK_TIMEOUT=${FM_CHECK_TIMEOUT:-30}     # seconds allowed per *.check.sh
-WATCHER_HALF_WAIT_LIMIT=$((WATCHER_WAIT_LIMIT > 1 ? WATCHER_WAIT_LIMIT / 2 : 1))
 HOME_SUMMARY_INTERVAL=${FM_HOME_SUMMARY_INTERVAL:-300}
 case "$HOME_SUMMARY_INTERVAL" in
   ''|*[!0-9]*|0) HOME_SUMMARY_INTERVAL=300 ;;
@@ -680,8 +678,7 @@ refresh_active_captain_hold_ids() {
   local output ids
   ACTIVE_CAPTAIN_HOLD_IDS=
   command -v tasks-axi >/dev/null 2>&1 || return 1
-  output=$(cd "$FM_HOME" && fm_run_timed "$WATCHER_WAIT_LIMIT" \
-    tasks-axi list --state held --fields hold_kind --limit 100000 2>/dev/null) || return 1
+  output=$(cd "$FM_HOME" && tasks-axi list --state held --fields hold_kind --limit 100000 2>/dev/null) || return 1
   ids=$(printf '%s\n' "$output" | awk -F, '
     /^  [A-Za-z0-9._-]+,/ && $NF == "captain" {
       id = $1
@@ -1537,19 +1534,13 @@ procevent_surface_queued() {
 run_check_process() {
   local c=$1
   shift
-  local FM_CHECK_TIMEOUT
-  FM_CHECK_TIMEOUT=$WATCHER_WAIT_LIMIT
-  if [[ "$CHECK_TIMEOUT" =~ ^[0-9]*\.?[0-9]+$ && "$CHECK_TIMEOUT" == *[1-9]* ]]; then
-    FM_CHECK_TIMEOUT=$(watcher_wait_slice "$CHECK_TIMEOUT")
-  fi
-  export FM_CHECK_TIMEOUT
   if [ "${FM_CHECK_FORCE_FALLBACK:-0}" != 1 ] && command -v timeout >/dev/null 2>&1; then
-    exec timeout -k 1 "$FM_CHECK_TIMEOUT" bash "$c" "$@"
+    exec timeout "$CHECK_TIMEOUT" bash "$c" "$@"
   elif [ "${FM_CHECK_FORCE_FALLBACK:-0}" != 1 ] && command -v gtimeout >/dev/null 2>&1; then
-    exec gtimeout -k 1 "$FM_CHECK_TIMEOUT" bash "$c" "$@"
+    exec gtimeout "$CHECK_TIMEOUT" bash "$c" "$@"
   else
     # shellcheck disable=SC2016  # single quotes are deliberate: Perl expands its own variables.
-    exec perl -MTime::HiRes=alarm -e 'my $t = shift; my $owned = shift; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0) unless $owned; exec @ARGV } my $group = $owned ? getpgrp(0) : $pid; my $stop = sub { $SIG{HUP} = $SIG{INT} = $SIG{TERM} = "IGNORE"; kill "TERM", -$group; select undef, undef, undef, 0.2; kill "KILL", -$group; waitpid $pid, 0; exit 124 }; local $SIG{ALRM} = $stop; local $SIG{HUP} = $stop; local $SIG{INT} = $stop; local $SIG{TERM} = $stop; alarm $t; waitpid $pid, 0; exit($? >> 8)' "$FM_CHECK_TIMEOUT" "${FM_CHECK_OWNED_GROUP:-0}" bash "$c" "$@"
+    exec perl -e 'my $t = shift; my $owned = shift; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0) unless $owned; exec @ARGV } my $group = $owned ? getpgrp(0) : $pid; my $stop = sub { $SIG{HUP} = $SIG{INT} = $SIG{TERM} = "IGNORE"; kill "TERM", -$group; select undef, undef, undef, 0.2; kill "KILL", -$group; waitpid $pid, 0; exit 124 }; local $SIG{ALRM} = $stop; local $SIG{HUP} = $stop; local $SIG{INT} = $stop; local $SIG{TERM} = $stop; alarm $t; waitpid $pid, 0; exit($? >> 8)' "$CHECK_TIMEOUT" "${FM_CHECK_OWNED_GROUP:-0}" bash "$c" "$@"
   fi
 }
 
@@ -1733,7 +1724,7 @@ heartbeat_scan_finds_actionable() {
 }
 
 watcher_wait_slice() {
-  awk -v seconds="$1" -v limit="${2:-$WATCHER_WAIT_LIMIT}" 'BEGIN { print (seconds + 0 > limit) ? limit : seconds }'
+  awk -v seconds="$1" -v limit="$WATCHER_WAIT_LIMIT" 'BEGIN { print (seconds + 0 > limit) ? limit : seconds }'
 }
 
 watcher_wait() {
@@ -2042,11 +2033,6 @@ watcher_publish_beat() {
   return 0
 }
 
-reply_send_budget=$(watcher_wait_slice "${FM_SEND_REMOTE_BUDGET:-30}" "$WATCHER_HALF_WAIT_LIMIT")
-confirm_seconds=$(watcher_wait_slice "$(fm_procevent_launch_confirm_seconds)" "$WATCHER_HALF_WAIT_LIMIT")
-inactive_scan_limit=$((WATCHER_WAIT_LIMIT > 2 ? WATCHER_WAIT_LIMIT - 2 : 1))
-inactive_scan_budget=$(watcher_wait_slice "${FM_INACTIVE_RECONCILE_BUDGET_SECS:-10}" "$inactive_scan_limit")
-
 while :; do
   watcher_publish_beat || exit 0
 
@@ -2065,8 +2051,7 @@ while :; do
   # parent reports, observe backend busy/idle turn completion, send one recovery
   # repost after grace, and escalate once if the recovery turn is also missed.
   # No conversation scraping; unresolved records are never silently expired.
-  FM_SEND_REMOTE_BUDGET="$reply_send_budget" \
-    fm_pending_reply_tick "$STATE" "$WATCHER_WAIT_LIMIT" watcher_publish_beat || exit 0
+  fm_pending_reply_tick "$STATE" "$WATCHER_WAIT_LIMIT" watcher_publish_beat || exit 0
   watcher_publish_beat || exit 0
 
   # A live secondmate endpoint does not prove that its own wake loop is alive.
@@ -2083,9 +2068,7 @@ while :; do
   # only republishes results already captured durably and restarts a source
   # whose owner is gone. It is a no-op with nothing registered.
   if [ -d "$STATE/procevent" ]; then
-    fm_run_timed "$WATCHER_WAIT_LIMIT" env FM_HOME="$FM_HOME" \
-      FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS="$confirm_seconds" \
-      "$SCRIPT_DIR/fm-procevent.sh" reconcile >/dev/null 2>&1 || true
+    FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-procevent.sh" reconcile >/dev/null 2>&1 || true
     watcher_publish_beat || exit 0
   fi
   # Then deliver any queued-but-unsurfaced result, including one a runner
@@ -2100,8 +2083,7 @@ while :; do
   # This is mechanical and silent unless a durable terminal-outcome obligation
   # was created, so quiet cycles never wake firstmate or consume model tokens.
   inactive_out=
-  if inactive_out=$(FM_INACTIVE_RECONCILE_BUDGET_SECS="$inactive_scan_budget" \
-    FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+  if inactive_out=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
     "$SCRIPT_DIR/fm-inactive-reconcile.sh" scan 2>/dev/null); then
     if [ -n "$inactive_out" ]; then
       wake "check: inactive-outcome"

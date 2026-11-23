@@ -163,8 +163,9 @@ The file is size-capped through `FM_WATCH_CYCLE_LOG_MAX_BYTES` and `FM_WATCH_CYC
 
 The default 300-second grace is unchanged.
 The watcher process updates `state/.last-watcher-beat` at cycle checkpoints, including after each check it reaps and between slices of long signal or terminal waits.
-It caps remote pending-reply observations and check execution at half the applicable grace, with a ceiling of 150 seconds.
+It caps remote pending-reply observations at half the applicable grace, with a ceiling of 150 seconds.
 An observation that times out supplies no completion evidence and is retried on a later cycle while the reply is still pending.
+A short configured grace can expire during triage or other work that runs under its own timeout.
 The singleton owner publishes each update, so a watcher that stops making progress still ages out.
 The mtime is authoritative for freshness, and the one-line content is informational.
 

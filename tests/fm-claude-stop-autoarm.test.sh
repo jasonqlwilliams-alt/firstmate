@@ -1341,9 +1341,9 @@ test_slow_check_sweep_liveness() (
   cp -R "$ROOT/bin/." "$dir/bin/" || fail "could not install watcher scripts"
   cp "$ROOT/.tasks.toml" "$dir/.tasks.toml" || fail "could not install backlog configuration"
   export FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state"
-  export FM_GUARD_GRACE=12 FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=35
+  export FM_GUARD_GRACE=8 FM_WATCHER_STALE_GRACE=+07 FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=35
   export FM_POLL=1 FM_HEARTBEAT=999999 FM_ARM_CONFIRM_TIMEOUT=4
-  export FM_CLAUDE_AUTOARM_ATTEMPTS=1 FM_CLAUDE_AUTOARM_LEASE_SECONDS=30
+  export FM_CLAUDE_AUTOARM_ATTEMPTS=1 FM_CLAUDE_AUTOARM_LEASE_SECONDS=24
 
   cleanup_sweep() {
     if [ "$stopped" -eq 1 ]; then kill -CONT "$watcher_pid" 2>/dev/null || true; fi
@@ -1358,13 +1358,12 @@ test_slow_check_sweep_liveness() (
   # carry the cycle past it. Hold the final actionable check for the probe.
   printf 'sleep 5\n' > "$state/a.check.sh"
   cp "$state/a.check.sh" "$state/b.check.sh" || fail "could not install silent check"
-  cp "$state/a.check.sh" "$state/c.check.sh" || fail "could not install silent check"
-  cat > "$state/d.check.sh" <<'SH'
+  cat > "$state/c.check.sh" <<'SH'
 touch "$FM_HOME/state/ready"
 until [ -f "$FM_HOME/state/finish" ]; do sleep 0.1; done
 echo completed-slow-sweep
 SH
-  for id in a b c d; do
+  for id in a b c; do
     chmod 700 "$state/$id.check.sh"
     "$dir/bin/fm-check-register.sh" "$id" >/dev/null || fail "could not register $id"
   done
@@ -1381,7 +1380,6 @@ SH
   if [ "$mode" = stalled ]; then
     kill -STOP "$watcher_pid" || fail "could not stop the watcher during the final check"
     stopped=1
-    touch "$state/finish"
     sleep "$((FM_GUARD_GRACE + 1))"
   fi
   "$dir/bin/fm-guard.sh" --read-only > "$dir/guard.out" 2>&1
@@ -1436,7 +1434,7 @@ test_stalled_remote_observation_liveness() (
     > "$dir/data/secondmates.md"
   fm_write_meta "$state/mate.meta" 'kind=secondmate' 'remote_host=remote-mac'
   export FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state"
-  export FM_GUARD_GRACE=8 FM_POLL=15 FM_CHECK_INTERVAL=0 FM_HEARTBEAT=999999
+  export FM_GUARD_GRACE=+8 FM_POLL=15 FM_CHECK_INTERVAL=0 FM_HEARTBEAT=999999
   export FM_ARM_CONFIRM_TIMEOUT=4 FM_CLAUDE_AUTOARM_ATTEMPTS=1 FM_CLAUDE_AUTOARM_LEASE_SECONDS=30
   export FM_SSH_BIN="$dir/fixture-ssh"
 
@@ -1513,6 +1511,68 @@ SH
   pass "auto-arm: stalled remote observation and long poll preserve singleton liveness and wake delivery"
 )
 
+test_watcher_keeps_operation_budgets() (
+  local dir state corr rec
+  dir=$(make_primary_dir "$TMP_ROOT/operation-budgets")
+  state="$dir/state"
+  cp -R "$ROOT/bin/." "$dir/bin/" || fail "could not install watcher scripts"
+  export FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state"
+  export FM_GUARD_GRACE=12 FM_POLL=1 FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=15
+  export FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=10 FM_PROCEVENT_CLAIM_ROOT="$dir/claims"
+  export FM_PENDING_REPLY_GRACE_SECS=0
+  unset FM_SEND_REMOTE_BUDGET
+
+  fm_write_meta "$state/mate.meta" 'kind=secondmate' 'remote_host=remote-mac'
+  # shellcheck source=/dev/null
+  . "$dir/bin/fm-pending-reply-lib.sh"
+  corr=$(fm_pending_reply_create "$dir" "$state" mate 'missing report') || fail "could not create reply expectation"
+  fm_pending_reply_mark_delivered "$state" "$corr" || fail "could not record delivery"
+  fm_pending_reply_mark_turn_completed "$state" "$corr" request || fail "could not record turn completion"
+  fm_pending_reply_note_remote_channel_caught_up "$state" mate || fail "could not record mirror progress"
+  rec=$(fm_pending_reply_path "$state" "$corr")
+
+  cat > "$dir/bin/fm-on.sh" <<'SH'
+#!/usr/bin/env bash
+case "$3" in
+  observe) printf idle ;;
+  send)
+    sleep 5
+    printf '%s\n' "$5" > "$FM_HOME/reposted"
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  mv "$dir/bin/fm-procevent.sh" "$dir/bin/fm-procevent-real.sh" || fail "could not wrap process-event CLI"
+  cat > "$dir/bin/fm-procevent.sh" <<'SH'
+#!/usr/bin/env bash
+case "$1" in
+  reconcile) exec "$FM_HOME/bin/fm-procevent-real.sh" "$@" > "$FM_HOME/reconcile.out" ;;
+  _start) sleep 7 ;;
+esac
+exec "$FM_HOME/bin/fm-procevent-real.sh" "$@"
+SH
+  cat > "$state/slow.check.sh" <<'SH'
+sleep 7
+echo check-kept-its-budget
+SH
+  chmod 700 "$dir/bin/fm-on.sh" "$dir/bin/fm-procevent.sh" "$state/slow.check.sh"
+  fm_test_track_procevent_home "$dir" "$FM_PROCEVENT_CLAIM_ROOT"
+  "$dir/bin/fm-procevent.sh" register lavish slow-start -- bash -c 'exit 1' >/dev/null \
+    || fail "could not register the delayed process-event source"
+  "$dir/bin/fm-check-register.sh" slow >/dev/null || fail "could not register the slow check"
+
+  fm_run_timed 35 "$dir/bin/fm-watch.sh" > "$dir/outer.out" 2>&1 \
+    || fail "watcher did not finish the cycle: $(cat "$dir/outer.out")"
+  assert_grep "corr=$corr" "$dir/reposted" "the delayed repost must reach the remote transport"
+  [ "$(fm_pending_reply_get "$rec" phase)" = recovery_sent ] || fail "the delayed repost was not confirmed"
+  assert_grep 'started=1' "$dir/reconcile.out" "the slow launch did not confirm: $(cat "$dir/reconcile.out")"
+  assert_grep 'failed=0' "$dir/reconcile.out" "the slow launch reported a failure: $(cat "$dir/reconcile.out")"
+  assert_grep 'check-kept-its-budget' "$dir/outer.out" "the slow check must run within its own timeout"
+  assert_not_contains "$(cat "$state/.wake-queue")" 'launch-failed' "a confirmed launch must not queue a false failure"
+  pass "auto-arm: a short grace preserves repost, launch confirmation, and check budgets"
+)
+
+test_watcher_keeps_operation_budgets || exit $?
 test_stalled_remote_observation_liveness || exit $?
 test_slow_check_sweep_liveness healthy || exit $?
 test_slow_check_sweep_liveness stalled || exit $?
