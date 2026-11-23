@@ -23,8 +23,16 @@ JQ_BIN=$(command -v jq) || fail "test needs jq"
 BASE_PATH=${FM_TEST_BASE_PATH:-$PYTHON_BIN_DIR:/usr/bin:/bin:/usr/sbin:/sbin}
 
 cleanup_kimi_harness() {
+  local meta task_tmp
   # shellcheck disable=SC2086 # space-separated list of temp roots this suite created
   [ -z "$KIMI_RUNTIME_TASK_TMP" ] || rm -rf $KIMI_RUNTIME_TASK_TMP
+  # Every spawn here creates a private task temp root outside TMP_ROOT; remove
+  # each one its task record still names.
+  for meta in "$TMP_ROOT"/*/home/state/*.meta; do
+    [ -f "$meta" ] || continue
+    task_tmp=$(sed -n 's/^tasktmp=//p' "$meta")
+    case "$task_tmp" in /tmp/fm-kimi-*) rm -rf "$task_tmp" ;; esac
+  done
   rm -rf "$TMP_ROOT"
 }
 trap cleanup_kimi_harness EXIT
