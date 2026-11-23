@@ -313,9 +313,10 @@ SH
     if [ -z "$expected_alert" ]; then
       # A planned stop records downtime even with an empty queue. Acknowledge
       # that episode so the next watcher can observe the queue in a fresh poll.
-      FM_HOME="$dir" FM_STATE_OVERRIDE="$state" "$DRAIN" > "$dir/drain-$phase.out" 2> "$dir/drain-$phase.err" &&
-        FM_HOME="$dir" ack_drain_err "$state" "$dir/drain-$phase.err" ||
+      if ! FM_HOME="$dir" FM_STATE_OVERRIDE="$state" "$DRAIN" > "$dir/drain-$phase.out" 2> "$dir/drain-$phase.err" ||
+         ! FM_HOME="$dir" ack_drain_err "$state" "$dir/drain-$phase.err"; then
         fail "$phase: planned watcher stop could not be acknowledged"
+      fi
     fi
   }
 
