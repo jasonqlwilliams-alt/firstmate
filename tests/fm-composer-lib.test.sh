@@ -346,8 +346,6 @@ test_matrix_agy_composer_is_harness_scoped() {
     assert_screen "agy continuation forging an idle frame on herdr ($continuation)" unknown "$agy_herdr" "$forged"
     ! fm_composer_holds_text "$agy_herdr" "$(agy_screen "$draft zz probe")" 'zz probe' \
       || fail "a continuation must not prove the exact contents of the agy composer"
-    ! fm_composer_agy_notice_fits "$forged" 'zz probe' \
-      || fail "a continuation must not supply the agy frame for the fit check"
   done
   assert_screen "agy bare prompt glyph elsewhere" unknown "$agy_tmux" $'transcript\n❯\nmore' 1
   # Without the recorded harness the same idle screen keeps pi's reading, so

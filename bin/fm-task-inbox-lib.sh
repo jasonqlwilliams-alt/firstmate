@@ -47,8 +47,7 @@
 # Re-ring ladder (fm_task_inbox_due_action): an unhandled message older than
 # FM_TASK_INBOX_GRACE_SECS is due one delivery attempt per grace period; an
 # attempt may ring or be refused by fm_task_inbox_ring's per-harness screen
-# gate (pending text, the Codex update picker, or an unproven screen on a
-# Codex, Rovo, or agy pane), and every refusal counts as an attempt. After
+# gate, and every refusal counts as an attempt. After
 # FM_TASK_INBOX_RING_MAX attempts without an acknowledgement it escalates. The
 # caller owns the busy and recovery-grade endpoint checks: a busy pane waits,
 # while a positively dead or missing endpoint skips delivery and the ladder and
@@ -295,8 +294,8 @@ fm_task_inbox_doorbell_line() {  # <record-path>
 # row), and the interrupted global install broke the shared Codex.
 # Returns:
 #   0 rang: typed and one Enter sent
-#   1 refused before typing: pending composer text, or a Codex, Rovo, or agy
-#     pane whose screen is not a proven-empty composer
+#   1 refused before typing: pending composer text, a Codex, Rovo, or agy
+#     composer without empty proof, or an agy row too narrow for the doorbell
 #   2 the backend send failed
 #   3 the endpoint is positively dead or missing (nothing typed; recovery owns
 #     the record)

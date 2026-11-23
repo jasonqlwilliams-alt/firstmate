@@ -1696,20 +1696,23 @@ _fm_composer_agy_content() {  # <screen> <plain-screen> <styled> <cursor-row-or-
 }
 
 # fm_composer_agy_notice_fits: 0 when <text>, typed after agy's `>` glyph,
-# stays on the composer's one row of <screen> without reaching its last
-# column, measured against the closing rule's width. Counting <text> in bytes
-# never undercounts its cells, so the check only errs toward refusing.
+# stays on the composer's one row of a proven-empty <screen> without reaching
+# its last column, measured against the closing rule's width. Counting <text>
+# in bytes never undercounts its cells, so the check only errs toward refusing.
 fm_composer_agy_notice_fits() {  # <screen> <text>
   local plain rule width len
   plain=$(printf '%s\n' "$1" | fm_composer_strip_ansi)
-  _fm_composer_scan_screen "$plain" ''
-  _fm_composer_agy_frame "$plain" '' || return 1
-  rule=$(_fm_composer_screen_row "$FM_COMPOSER_SCAN_PI_CLOSE" "$plain")
-  fm_composer_normalize_trim_var rule
-  width=$(printf '%s' "$rule" | LC_ALL=C wc -c)
-  width=$((width / 3))
-  len=$(printf '%s' "$2" | LC_ALL=C wc -c)
-  [ $((len + 2)) -lt "$width" ]
+  while [[ "$plain" = *$'\n'* ]]; do
+    rule=${plain##*$'\n'}
+    plain=${plain%$'\n'*}
+    fm_composer_normalize_trim_var rule
+    _fm_composer_pi_separator_row "$rule" || continue
+    width=$(printf '%s' "$rule" | LC_ALL=C wc -c)
+    len=$(printf '%s' "$2" | LC_ALL=C wc -c)
+    [ $((len + 2)) -lt $((width / 3)) ]
+    return $?
+  done
+  return 1
 }
 
 # Positive identification of Codex's initial authentication choice screen.

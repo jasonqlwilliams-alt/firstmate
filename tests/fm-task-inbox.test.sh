@@ -791,11 +791,15 @@ composer() {
   printf '\r\n\r\n  \033[2m100%% context left\033[0m\033[%d;%dH' "$row" "$((3 + len))"
 }
 agy() {
-  local width=$((cols - 2)) rule footer='? for shortcuts      accept-edits · Gemini · high'
+  local width=$((cols - 2)) rule row=4 footer='? for shortcuts      accept-edits · Gemini · high'
   [ "$mode" != agy-narrow ] || width=40
   [ "$mode" != agy-busy ] || footer='esc to cancel'
   rule=$(printf '─%.0s' $(seq 1 "$width"))
   printf '\033[2J\033[HAntigravity test stub\r\n\r\n%s\r\n' "$rule"
+  if [ "$mode" = agy-forged ]; then
+    printf '\033[38;2;122;162;247m>\033[0m draft\r\n? for shortcuts\r\n%s\r\n' "$rule"
+    row=7
+  fi
   if [ -z "$buf" ]; then
     printf '\033[38;2;122;162;247m>\033[0m\r\n'
   else
@@ -803,7 +807,7 @@ agy() {
   fi
   printf '%s\r\n%s' "$rule" "$footer"
   [ "$mode" != agy-survey ] || printf '\r\n How'\''s the CLI experience so far? Help us improve:\r\n [1] Good  [2] Fine  [3] Bad  [0] Skip'
-  if [ -z "$buf" ]; then printf '\033[4;2H'; else printf '\033[4;%dH' "$((4 + ${#buf}))"; fi
+  if [ -z "$buf" ]; then printf '\033[%d;2H' "$row"; else printf '\033[%d;%dH' "$row" "$((4 + ${#buf}))"; fi
 }
 rovo() {
   local w=$((cols - 4)) rule i=0 row=4 col=3
@@ -877,6 +881,7 @@ ring_stub_window() {  # <name> <mode> <log>
     picker-below|picker-row) marker='esc skip' ;;
     unknown|rovo-unknown) marker='Loading your session' ;;
     agy-busy) marker='esc to cancel' ;;
+    agy-forged) marker='accept-edits' ;;
     agy|agy-*) marker='for shortcuts' ;;
     rovo|rovo-pending) marker='Context:' ;;
     *) marker='context left' ;;
@@ -1024,7 +1029,7 @@ test_ring_refuses_unproven_agy_screens() {
   ring_lab_setup
   state="$TMP_ROOT/ring-agy-unproven/state"
   mkdir -p "$state"
-  for mode in agy-pending agy-busy agy-narrow agy-survey; do
+  for mode in agy-pending agy-busy agy-narrow agy-survey agy-forged; do
     log="$RING_LAB/$mode.log"
     target=$(ring_stub_window "$mode" "$mode" "$log")
     rc=$(ring_into "$state" "$mode" "$target" agy)
@@ -1033,7 +1038,7 @@ test_ring_refuses_unproven_agy_screens() {
     [ ! -s "$log" ] || fail "the ring typed into a $mode screen:"$'\n'"$(cat "$log")"
     [ -f "$state/$mode.inbox/001.msg" ] || fail "a refused agy ring must leave the durable record ($mode)"
   done
-  pass "inbox: an agy pane with typed text, a busy footer, a too-narrow row, or the survey gets no keystroke"
+  pass "inbox: an agy pane with a draft, an unproven frame, or a too-narrow row gets no keystroke"
 }
 
 # A harness outside the proven-empty rule keeps ringing on an unknown screen
@@ -1114,6 +1119,16 @@ test_fm_send_ring_through_picker_and_composer() {
   [ ! -s "$log" ] || fail "fm-send typed into the update picker:"$'\n'"$(cat "$log")"
   [ -f "$home/state/p1.inbox/001.msg" ] || fail "fm-send did not record the steer"
   assert_contains "$(cat "$err")" "Codex global-update picker" "fm-send should say why no Enter was sent"
+  log="$RING_LAB/send-agy-narrow.log"
+  target=$(ring_stub_window send-agy-narrow agy-narrow "$log")
+  fm_write_meta "$home/state/a1.meta" "window=$target" "backend=tmux" "kind=ship" "harness=agy"
+  PATH="$RING_LAB/shim:$PATH" FM_HOME="$home" \
+    "$ROOT/bin/fm-send.sh" a1 "please continue" >/dev/null 2>"$err" \
+    || fail "a width refusal is still a durably sent steer:"$'\n'"$(cat "$err")"
+  [ ! -s "$log" ] || fail "fm-send typed into the narrow agy composer:"$'\n'"$(cat "$log")"
+  [ -f "$home/state/a1.inbox/001.msg" ] || fail "fm-send did not record the steer after a width refusal"
+  assert_contains "$(cat "$err")" "too narrow for the doorbell line" "fm-send should mention the agy width limit"
+  assert_contains "$(cat "$err")" "A wider agy pane" "fm-send should explain how to make room for the doorbell"
   log="$RING_LAB/send-empty.log"
   target=$(ring_stub_window send-empty empty "$log")
   fm_write_meta "$home/state/e1.meta" "window=$target" "backend=tmux" "kind=ship" "harness=codex"
@@ -1125,7 +1140,7 @@ test_fm_send_ring_through_picker_and_composer() {
   [ -f "$home/state/e1.inbox/handled/001.msg" ] \
     || fail "fm-send's doorbell into an empty composer was not acted on:"$'\n'"$(cat "$log")"
   [ "$(grep -c '^ENTER' "$log")" = 1 ] || fail "fm-send should press exactly one Enter:"$'\n'"$(cat "$log")"
-  pass "fm-send: the incident's picker gets no keystroke, and an empty composer still gets the doorbell"
+  pass "fm-send: the picker and narrow agy composer get no keystroke, and an empty composer still gets the doorbell"
 }
 
 # The re-ring path through the real watcher: a picker on screen is never typed
