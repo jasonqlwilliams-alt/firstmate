@@ -1842,10 +1842,10 @@ test_treehouse_owns_checkout_and_cancels_failed_close() {
   if [ "$mode" = success ]; then
     mkdir -p "$case_dir/project/.claude" "$case_dir/shared-settings/plugins"
     printf '{}\n' > "$case_dir/project/.claude/settings.local.json"
-    printf 'project settings\n' > "$case_dir/project/.fm-Kimi-turnend"
+    printf 'project settings\n' > "$case_dir/project/.fm-Kimi-turnend"
     printf 'shared settings\n' > "$case_dir/shared-settings/plugins/fm-turn-end.js"
     ln -s ../shared-settings "$case_dir/project/.opencode"
-    git -C "$case_dir/project" add -f .claude/settings.local.json .fm-Kimi-turnend .opencode
+    git -C "$case_dir/project" add -f .claude/settings.local.json .fm-Kimi-turnend .opencode
     git -C "$case_dir/project" commit -qm 'Track project settings on main'
   fi
   land_shippable_commit "$case_dir"
@@ -1863,7 +1863,7 @@ test_treehouse_owns_checkout_and_cancels_failed_close() {
 printf '%s %s\n' "$(git -C "$3" rev-parse --abbrev-ref HEAD)" "$(git -C "$3" rev-parse HEAD)" > "$FM_TEST_RETURN_LOG"
 if [ "$FM_TEST_RETURN_MODE" = success ]; then
   git -C "$3" checkout --detach -q main || exit $?
-  [ -e "$3/.fm-kimi-turnend" ] || ln "$3/.fm-Kimi-turnend" "$3/.fm-kimi-turnend"
+  [ -e "$3/.fm-kimi-turnend" ] || printf 'configured hook\n' > "$3/.fm-kimi-turnend"
   exit $?
 fi
 echo 'treehouse: simulated return error before checkout' >&2
@@ -1882,9 +1882,14 @@ SH
       && [ "$(git -C "$copy" rev-parse HEAD)" = "$(git -C "$copy" rev-parse main)" ] \
       || fail 'teardown changed the checkout left by Treehouse'
     [ "$(cat "$copy/.claude/settings.local.json")" = '{}' ] || fail 'return removed tracked project settings'
-    [ "$copy/.fm-Kimi-turnend" -ef "$copy/.fm-kimi-turnend" ] \
-      && [ "$(cat "$copy/.fm-Kimi-turnend")" = 'project settings' ] \
-      || fail 'return removed a tracked file through a case alias'
+    [ "$(cat "$copy/.fm-Kimi-turnend")" = 'project settings' ] \
+      || fail 'return removed tracked settings with a Unicode spelling'
+    if [ "$case_dir/project/.fm-Kimi-turnend" -ef "$case_dir/project/.fm-kimi-turnend" ]; then
+      [ "$copy/.fm-Kimi-turnend" -ef "$copy/.fm-kimi-turnend" ] \
+        || fail 'return removed tracked settings through a filesystem alias'
+    else
+      assert_absent "$copy/.fm-kimi-turnend" 'return retained a distinct untracked task hook'
+    fi
     [ "$(cat "$case_dir/shared-settings/plugins/fm-turn-end.js")" = 'shared settings' ] \
       || fail 'return removed settings outside the returned copy'
     assert_absent "$copy/.fm-grok-turnend" 'return retained an untracked task hook'

@@ -1823,20 +1823,34 @@ attempt_treehouse_return() {  # <copy> <project>
   treehouse return --force "$1" || return 1
 }
 
+treehouse_hook_path_has_exact_spelling() {
+  local dir=$1 component entry
+  local -a components
+  IFS=/ read -r -a components <<< "$2"
+  for component in "${components[@]}"; do
+    [ ! -L "$dir" ] || return 1
+    for entry in "$dir/$component"*; do
+      if [ "$entry" = "$dir/$component" ]; then
+        dir=$entry
+        continue 2
+      fi
+    done
+    return 1
+  done
+}
+
 remove_untracked_treehouse_hooks() {
-  local copy hook parent tracked tracked_path
+  local copy hook tracked tracked_path
   copy=$(canonical_existing_dir "$1") || return 0
   shift
   for hook; do
     [ -e "$copy/$hook" ] || [ -L "$copy/$hook" ] || continue
-    if [[ "$hook" == */* ]]; then
-      parent="$copy/${hook%/*}"
-      [ "$(canonical_existing_dir "$parent")" = "$parent" ] || continue
-    fi
+    treehouse_hook_path_has_exact_spelling "$copy" "$hook" || continue
     tracked=$(git -C "$copy" ls-files --cached -- ":(icase,literal)$hook" 2>/dev/null) || continue
     while IFS= read -r tracked_path && [ -n "$tracked_path" ]; do
-      if [ "$tracked_path" = "$hook" ] || [ "$copy/$tracked_path" -ef "$copy/$hook" ] \
-         || { [ -L "$copy/$tracked_path" ] && [ -L "$copy/$hook" ]; }; then
+      if [ "$tracked_path" = "$hook" ] \
+         || { { [ -e "$copy/$tracked_path" ] || [ -L "$copy/$tracked_path" ]; } \
+              && ! treehouse_hook_path_has_exact_spelling "$copy" "$tracked_path"; }; then
         continue 2
       fi
     done <<< "$tracked"
