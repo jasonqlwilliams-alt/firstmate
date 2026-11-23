@@ -187,9 +187,9 @@ function hasOpenNeedsDecision(
   return [...open.values()].includes("needs-decision");
 }
 
-export function namedEndpointLoss(payload: string): { window: string; task: string } | null {
-  const match = /^stale: (\S+) \(the recorded endpoint is gone for task ([A-Za-z0-9._-]+)\)$/.exec(payload);
-  return match ? { window: match[1], task: match[2] } : null;
+export function namedEndpointLoss(payload: string): { window: string; task: string; watcherFailed: boolean } | null {
+  const match = /^stale: (\S+) \(the recorded endpoint is gone for task ([A-Za-z0-9._-]+)\)(?:\r?\n|$)/.exec(payload);
+  return match ? { window: match[1], task: match[2], watcherFailed: /^watcher: FAILED - /m.test(payload) } : null;
 }
 
 export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWakeScope {

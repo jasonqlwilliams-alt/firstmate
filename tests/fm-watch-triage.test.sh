@@ -3516,6 +3516,65 @@ test_reheld_captain_call_starts_its_own_resurface_window() {
   pass "a released-then-re-held task is a distinct captain call whose first sight still alarms"
 }
 
+test_herdr_legacy_hash_keeps_only_the_current_captain_call() (
+  local dir state out throttle original reminder poll key=test_w1_p2 pid=''
+  command -v tasks-axi >/dev/null 2>&1 \
+    || { echo "skip: tasks-axi not found (legacy Herdr captain-call reminder)"; return 0; }
+  dir=$(make_hold_home herdr-legacy-call 'done: PR https://example.invalid/pull/1 checks green' hold) \
+    || fail "could not build a captain-held backlog fixture"
+  state="$dir/state"; out="$dir/watch.out"; throttle="$state/.paused-resurfaced-$key"
+  trap '[ -z "$pid" ] || reap "$pid"' EXIT
+  cat > "$dir/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'pane get w1:p2 --session test') printf '%s\n' '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"current"}}}' ;;
+  'pane read w1:p2 --source recent --lines 200 --session test') printf '%s\n' 'idle held worker' ;;
+  'agent get w1:p2 --session test') printf '%s\n' '{"result":{"agent":{"agent":"grok","agent_status":"idle"}}}' ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$dir/fakebin/herdr"
+  fm_write_meta "$state/held-merge.meta" window=test:w1:p2 kind=ship harness=grok backend=herdr \
+    herdr_terminal_id=current spawn_gen=current
+  export FM_HOME="$dir" FM_DATA_OVERRIDE="$dir/data" FM_CONFIG_OVERRIDE="$dir/config" FM_WATCH_HANDLING_SUCCESSOR=1
+  watch_bg "$state" "$dir/fakebin" "$out"
+  pid=$!
+  wait_for_exit "$pid" 150 || fail "the first held delivery did not surface"
+  pid=''
+  grep -Fxq 'stale: test:w1:p2' "$out" || fail "the first held delivery did not take the ordinary stale path"
+  original=$(cat "$throttle")
+  [[ "$original" == captain-hold:* ]] || fail "the first delivery did not arm a backlog-call reminder"
+  reminder=$(file_mtime "$throttle")
+  ack_stopped_cycle "$state" || fail "could not acknowledge the first held delivery"
+
+  printf '%s' "$(hash_text 'idle held worker')" > "$state/.hash-$key"
+  printf '99\n' > "$state/.count-$key"
+  printf '1\n' > "$state/.stale-since-$key"
+  watch_bg "$state" "$dir/fakebin" "$out"
+  pid=$!
+  for poll in 1 2 3; do
+    wait_poll_cycle "$state" "$pid" || fail "legacy hash upgrade repeated the current call: $(cat "$out")"
+  done
+  [ "$(cat "$throttle")" = "$original" ] && [ "$(file_mtime "$throttle")" = "$reminder" ] \
+    || fail "legacy hash upgrade replaced the current call's reminder"
+  [ "$(cat "$state/.count-$key")" -lt 99 ] || fail "legacy hash upgrade kept the unbound count"
+  assert_absent "$state/.stale-since-$key" "legacy hash upgrade kept the unbound stale timer"
+  reap "$pid"
+  pid=''
+
+  printf 'go ahead\n' > "$dir/decision.txt"
+  run_hold "$dir" answer held-merge --decision-file "$dir/decision.txt" --release || fail "could not close the old captain call"
+  run_hold "$dir" hold held-merge --reason 'awaiting a different captain decision' || fail "could not open a new captain call"
+  printf '%s' "$(hash_text 'idle held worker')" > "$state/.hash-$key"
+  watch_bg "$state" "$dir/fakebin" "$out"
+  pid=$!
+  wait_for_exit "$pid" 150 || fail "legacy hash upgrade suppressed the new call"
+  pid=''
+  grep -Fxq 'stale: test:w1:p2' "$out" || fail "the new call did not get its first stale wake"
+  [ "$(cat "$throttle")" != "$original" ] || fail "the new call inherited the old reminder"
+  pass "the Herdr legacy hash upgrade preserves the open call's cadence and rechecks a new call"
+)
+
 
 
 test_secondmate_paused_resurfaces_in_normal_mode() {
@@ -5822,6 +5881,7 @@ test_open_captain_call_bounds_stale_churn
 test_stale_churn_without_a_captain_call_still_alarms
 test_failed_wake_append_does_not_arm_the_captain_hold_throttle
 test_reheld_captain_call_starts_its_own_resurface_window
+test_herdr_legacy_hash_keeps_only_the_current_captain_call || exit 1
 test_secondmate_paused_resurfaces_in_normal_mode
 test_secondmate_captain_held_resurfaces_in_normal_mode
 test_secondmate_nonpaused_stale_remains_suppressed

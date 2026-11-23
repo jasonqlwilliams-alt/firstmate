@@ -1740,14 +1740,24 @@ if (lost.isError) throw new Error(`the named loss refused a report for the lost 
 finish();
 await loss.settlement;
 
+globalThis.__fmOnBranchPrompt = async () => {};
+const decorated = `${loss.message}\n\nwatcher: FAILED - Pi extension could not persist a late replacement-session actionable wake\nfixture error`;
+const requiresMain = async (message) => {
+  const offer = makeOffer(message);
+  bus.emit("fm-branch-supervision:dispatch", offer);
+  if (!offer.accepted) throw new Error("branch fixture did not reach the eligibility recheck");
+  await offer.settlement.then(
+    () => { throw new Error("the endpoint loss did not return to main"); },
+    (error) => { if (!String(error).includes("named endpoint loss now belongs to main")) throw error; },
+  );
+};
+await requiresMain(decorated);
 writeFileSync(`${home}/state/a-lost.status`, "captain-held: awaiting the captain\n");
-const nowMain = makeOffer("stale: default:wX:p1 (the recorded endpoint is gone for task a-lost)");
-bus.emit("fm-branch-supervision:dispatch", nowMain);
-if (!nowMain.accepted) throw new Error("branch fixture did not reach the eligibility recheck");
-await nowMain.settlement.then(
-  () => { throw new Error("an endpoint loss that became main-owned did not return to main"); },
-  (error) => { if (!String(error).includes("named endpoint loss now belongs to main")) throw error; },
-);
+writeFileSync(`${home}/state/.wake-queue`,
+  `1\t2\tstale\tdefault:wX:p1\t${loss.message}\n1\t3\tstale\tdefault:wX:p1\tstale: default:wX:p1\n`);
+await requiresMain(loss.message);
+await requiresMain(decorated);
+if (globalThis.__fmPrompts.length !== 2) throw new Error("a main-owned loss prompted the branch");
 
 // A heartbeat review is not scoped by task: it may report any task id, a
 // task whose records are already gone, and fleet.

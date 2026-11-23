@@ -1333,14 +1333,24 @@ stale_wait_throttled() {  # <window-key> <declaration>
     && [ "$(age_of "$throttle")" -lt "$PAUSE_RESURFACE_SECS" ]
 }
 
-current_declared_wait_throttled() {  # <window-key> <task> <last-status-line>
-  local key=$1 task=$2 last=$3 declaration until
-  [ -s "$STATE/.paused-resurfaced-$key" ] && status_is_paused_or_captain_held "$last" || return 1
-  declaration=$(stale_wait_declaration "$task")
-  [ "$declaration" != declared: ] || return 1
-  if until=$(status_paused_until "$last") && [ "$(date +%s)" -ge "$until" ]; then
-    declaration="$declaration:due"
-  fi
+current_wait_throttled() {  # <window-key> <task> <last-status-line> <kind>
+  local key=$1 task=$2 last=$3 kind=$4 declaration until CAPTAIN_CALL_IDENTITY
+  case "$(cat "$STATE/.paused-resurfaced-$key" 2>/dev/null)" in
+    captain-hold:*)
+      [ "$kind" != secondmate ] && task_captain_call_open "$task" || return 1
+      declaration=$(captain_call_declaration "$task" "$CAPTAIN_CALL_IDENTITY")
+      [[ "$declaration" != *: ]] || return 1
+      ;;
+    declared:*)
+      status_is_paused_or_captain_held "$last" || return 1
+      declaration=$(stale_wait_declaration "$task")
+      [ "$declaration" != declared: ] || return 1
+      if until=$(status_paused_until "$last") && [ "$(date +%s)" -ge "$until" ]; then
+        declaration="$declaration:due"
+      fi
+      ;;
+    *) return 1 ;;
+  esac
   stale_wait_throttled "$key" "$declaration"
 }
 
@@ -2416,7 +2426,7 @@ EOF
     case "$prev" in
       "$hash_prefix"*) prev=${prev#"$hash_prefix"} ;;
       *)
-        if [[ $prev =~ ^[0-9a-f]{32}$ ]] && current_declared_wait_throttled "$key" "$task" "$last"; then
+        if [[ $prev =~ ^[0-9a-f]{32}$ ]] && current_wait_throttled "$key" "$task" "$last" "$kind"; then
           clear_pause_flags "$key"
           clear_stale_hash_tracking "$key"
         else

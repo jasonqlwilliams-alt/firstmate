@@ -2811,14 +2811,28 @@ EOF
 }
 
 test_pi_replacement_persistence_failure_stops_arm_child() {
-  local repo home plugin count marker out status
-  repo="$TMP_ROOT/pi-replacement-persistence-failure-root"
-  home="$TMP_ROOT/pi-replacement-persistence-failure-home"
-  count="$TMP_ROOT/pi-replacement-persistence-failure.count"
-  marker="$TMP_ROOT/pi-replacement-persistence-failure.marker"
+  local scenario=$1 dir repo home plugin count marker out status trigger
+  dir="$TMP_ROOT/pi-replacement-persistence-failure-$scenario"
+  repo="$dir/repo"
+  home="$dir/home"
+  count="$dir/count"
+  marker="$dir/child"
   mkdir -p "$repo/bin" "$home/state" "$home/config"
   install_pi_watch_extension_fixture "$repo"
   plugin="$repo/.pi/extensions/fm-primary-pi-watch.ts"
+  case "$scenario" in
+    signal)
+      trigger='signal: persistence failure actionable outcome'
+      ;;
+    named-loss)
+      trigger='stale: shared:w1:p2 (the recorded endpoint is gone for task a-lost)'
+      printf 'project=%s/projects/first\nwindow=shared:w1:p2\n' "$home" > "$home/state/a-lost.meta"
+      printf 'project=%s/projects/second\nwindow=shared:w1:p2\n' "$home" > "$home/state/z-live.meta"
+      printf 'captain-held: awaiting the captain\n' > "$home/state/a-lost.status"
+      printf '1\t1\tstale\tshared:w1:p2\t%s\n1\t2\tstale\tshared:w1:p2\tstale: shared:w1:p2\n' "$trigger" \
+        > "$home/state/.wake-queue"
+      ;;
+  esac
   cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
 #!/usr/bin/env bash
 count=0
@@ -2827,7 +2841,7 @@ count=$((count + 1))
 printf '%s\n' "$count" > "$FM_ARM_COUNT"
 if [ "$count" -eq 1 ]; then
   printf 'watcher: started pid=%s\n' "$$"
-  printf 'signal: persistence failure actionable outcome\n'
+  printf '%s\n' "$FM_TEST_TRIGGER"
   exit 0
 fi
 cleanup() { rm -f "$FM_CHILD_MARKER"; }
@@ -2838,7 +2852,8 @@ printf 'watcher: started pid=%s\n' "$$"
 while :; do sleep 0.02; done
 SH
   chmod +x "$repo/bin/fm-watch-arm.sh"
-  out=$(PLUGIN="$plugin" FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_ARM_COUNT="$count" FM_CHILD_MARKER="$marker" node --input-type=module 2>&1 <<'EOF'
+  out=$(PLUGIN="$plugin" FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_ARM_COUNT="$count" FM_CHILD_MARKER="$marker" \
+    FM_TEST_TRIGGER="$trigger" node --input-type=module 2>&1 <<'EOF'
 import { existsSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -2846,6 +2861,7 @@ const handlers = new Map();
 let tool = null;
 let deliveryStarted = false;
 const prompts = [];
+let offeredToBranch = false;
 const pi = {
   on(event, handler) {
     handlers.set(event, handler);
@@ -2858,7 +2874,14 @@ const pi = {
     deliveryStarted = true;
     prompts.push(message);
   },
-  events: { on() {}, emit() {} },
+  events: {
+    on() {},
+    emit(channel, offer) {
+      if (channel !== "fm-branch-supervision:dispatch" || !offer.eligible) return;
+      offeredToBranch = true;
+      offer.accept();
+    },
+  },
 };
 
 async function waitFor(pred, label) {
@@ -2889,8 +2912,9 @@ unlinkSync(`${process.env.FM_HOME}/state/extensions`);
 const replacementMod = await import(`${pathToFileURL(process.env.PLUGIN).href}?replacement=persistence-failure`);
 replacementMod.default(pi);
 await handlers.get("session_start")?.({ type: "session_start", reason: "new" }, {});
-await waitFor(() => prompts.length >= 2, "in-process handoff after persistence failure");
-if (!prompts[1].includes("signal: persistence failure actionable outcome")) {
+await waitFor(() => prompts.length >= 2 || offeredToBranch, "in-process handoff after persistence failure");
+if (offeredToBranch) throw new Error("the replacement routed a handoff failure to the branch");
+if (!prompts[1].includes(process.env.FM_TEST_TRIGGER)) {
   throw new Error(`replacement lost the in-process actionable outcome: ${prompts.join(" | ")}`);
 }
 if (!prompts[1].includes("could not persist a replacement-session actionable wake")) {
@@ -2903,7 +2927,7 @@ EOF
   status=$?
   expect_code 0 "$status" "Pi replacement shutdown must stop its arm after handoff persistence fails"
   [ -z "$out" ] || fail "Pi replacement persistence-failure cleanup test printed output: $out"
-  pass "Pi replacement persistence failure still stops its arm child"
+  pass "Pi replacement persistence failure stops its arm child and replays the wake to main ($scenario)"
 }
 
 test_pi_process_exit_cleanup_listener_lifecycle() {
@@ -4026,7 +4050,8 @@ test_pi_streaming_time_delivery_keeps_the_successor_chain
 test_pi_successor_failure_during_delivery_is_retried_after_delivery
 test_pi_late_retiring_actionable_reaches_replacement
 test_pi_replacement_tokens_are_process_unique
-test_pi_replacement_persistence_failure_stops_arm_child
+test_pi_replacement_persistence_failure_stops_arm_child signal
+test_pi_replacement_persistence_failure_stops_arm_child named-loss
 test_pi_process_exit_cleanup_listener_lifecycle
 test_pi_process_exit_cleanup_stops_arm_child
 test_opencode_plugin_package_boundary_is_explicit_esm
