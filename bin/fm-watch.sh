@@ -1636,17 +1636,14 @@ run_check_capture() {
   watcher_finish_capture
 }
 
-run_remote_observation_process() {
-  local runner
-  if runner=$(fm_gnu_timeout); then
-    exec "$runner" -k 0.1 "$WATCHER_WAIT_LIMIT" "$@" < /dev/null
-  fi
-  exec "$@" < /dev/null
-}
-
 watcher_remote_observe() {
+  local runner
+  if ! runner=$(fm_gnu_timeout); then
+    fm_pending_reply_remote_observe "$@"
+    return
+  fi
   FM_PENDING_REPLY_OBSERVATION=unknown
-  watcher_start_capture run_remote_observation_process "$@" || return 0
+  watcher_start_capture exec "$runner" -k 0.1 "$WATCHER_WAIT_LIMIT" "$@" < /dev/null || return 0
   watcher_finish_capture || return 1
   [ "$FM_CAPTURE_RC" -ne 0 ] || FM_PENDING_REPLY_OBSERVATION=$FM_CHECK_RESULT
 }

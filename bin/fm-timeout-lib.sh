@@ -110,8 +110,6 @@ fm_run_external_timeout() {
   "$runner" -k 1 "$seconds" bash -c '
     status_file=$1
     shift
-    trap "exit 129" HUP
-    trap "exit 130" INT
     trap "exit 143" TERM
     "$@"
     command_rc=$?

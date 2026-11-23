@@ -1449,14 +1449,12 @@ SH
 
 test_stalled_remote_observation_liveness() (
   local mode=${1:-poll} dir state corr rec i watcher_pid hook_rc ssh_pid='' transport_pid='' ssh_status
-  local arm_pid='' RUN_AUTOARM_BG_PID=''
-  if [ "$mode" = poll ]; then
-    # shellcheck source=bin/fm-timeout-lib.sh
-    . "$ROOT/bin/fm-timeout-lib.sh"
-    if ! fm_gnu_timeout >/dev/null; then
-      printf '%s\n' 'ok - auto-arm: stalled remote observation is bounded # SKIP GNU timeout unavailable'
-      return 0
-    fi
+  local arm_pid='' RUN_AUTOARM_BG_PID='' cleanup_signal=TERM
+  if [ "$mode" != lease-no-gnu ] \
+    && ! { LC_ALL=C timeout --version || true; LC_ALL=C gtimeout --version || true; } 2>/dev/null \
+      | grep -F '(GNU coreutils)' >/dev/null; then
+    printf 'ok - auto-arm: remote observation %s # SKIP GNU timeout unavailable\n' "$mode"
+    return 0
   fi
   dir=$(make_primary_dir "$TMP_ROOT/stalled-observation-$mode")
   state="$dir/state"
@@ -1471,6 +1469,15 @@ test_stalled_remote_observation_liveness() (
   export FM_GUARD_GRACE=+8 FM_POLL=15 FM_CHECK_INTERVAL=0 FM_HEARTBEAT=999999
   export FM_ARM_CONFIRM_TIMEOUT=4 FM_CLAUDE_AUTOARM_ATTEMPTS=1 FM_CLAUDE_AUTOARM_LEASE_SECONDS=30
   export FM_SSH_BIN="$dir/fixture-ssh"
+  if [ "$mode" = lease-no-gnu ]; then
+    mkdir "$dir/no-gnu" || fail "could not create the no-GNU fixture"
+    printf '%s\n' '#!/bin/sh' 'exit 127' > "$dir/no-gnu/timeout"
+    chmod 700 "$dir/no-gnu/timeout" || fail "could not mask timeout"
+    ln -s timeout "$dir/no-gnu/gtimeout" || fail "could not mask gtimeout"
+    export PATH="$dir/no-gnu:$PATH" FM_TIMEOUT_MECHANISM_OVERRIDE=bash
+    export FM_FIXTURE_SSH_IGNORES_TERM=1
+    cleanup_signal=KILL
+  fi
 
   # shellcheck source=/dev/null
   . "$dir/bin/fm-pending-reply-lib.sh"
@@ -1481,9 +1488,14 @@ test_stalled_remote_observation_liveness() (
   cat > "$FM_SSH_BIN" <<'SH'
 #!/usr/bin/env bash
 if [ ! -e "$FM_HOME/state/observing" ]; then
+  if [ "${FM_FIXTURE_SSH_IGNORES_TERM:-0}" = 1 ]; then
+    trap '' TERM
+  fi
   sleep 30 &
   transport_pid=$!
-  trap 'wait "$transport_pid" 2>/dev/null; exit 1' TERM
+  if [ "${FM_FIXTURE_SSH_IGNORES_TERM:-0}" != 1 ]; then
+    trap 'wait "$transport_pid" 2>/dev/null; exit 1' TERM
+  fi
   printf '%s %s\n' "$$" "$transport_pid" > "$FM_HOME/state/observing"
   printf 'idle'
   wait "$transport_pid"
@@ -1501,13 +1513,13 @@ SH
   cleanup_observation() {
     stop_liveness_fixture "$arm_pid"
     stop_liveness_fixture "$RUN_AUTOARM_BG_PID"
-    if [ -n "$ssh_pid" ]; then kill "$ssh_pid" 2>/dev/null || true; fi
-    if [ -n "$transport_pid" ]; then kill "$transport_pid" 2>/dev/null || true; fi
+    if [ -n "$ssh_pid" ]; then kill "-$cleanup_signal" "$ssh_pid" 2>/dev/null || true; fi
+    if [ -n "$transport_pid" ]; then kill "-$cleanup_signal" "$transport_pid" 2>/dev/null || true; fi
   }
   trap cleanup_observation EXIT
   trap 'exit 1' HUP INT TERM
 
-  if [ "$mode" = lease ]; then
+  if [ "$mode" = lease ] || [ "$mode" = lease-no-gnu ]; then
     export FM_GUARD_GRACE=60 FM_CLAUDE_AUTOARM_LEASE_SECONDS=5
     run_autoarm_bg "$dir" "$dir/hook.out"
     wait_for_liveness_fixture "$RUN_AUTOARM_BG_PID" 300
@@ -1526,7 +1538,7 @@ SH
     [ ! -e "$state/.watch.lock" ] || fail "lease expiry left a watcher lock behind"
     [ -z "$(fm_pending_reply_get "$rec" request_turn_completed_epoch)" ] \
       || fail "a cancelled observation must not prove the mate was idle"
-    pass "auto-arm: lease expiry terminates the in-flight remote observation"
+    pass "auto-arm: $mode expiry terminates the in-flight remote observation"
     return 0
   fi
 
@@ -1658,6 +1670,7 @@ SH
 
 test_watcher_keeps_operation_budgets || exit $?
 test_stalled_remote_observation_liveness lease || exit $?
+test_stalled_remote_observation_liveness lease-no-gnu || exit $?
 test_stalled_remote_observation_liveness stop || exit $?
 test_stalled_remote_observation_liveness || exit $?
 test_slow_check_sweep_liveness healthy || exit $?

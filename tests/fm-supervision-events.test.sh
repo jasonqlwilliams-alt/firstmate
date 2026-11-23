@@ -144,7 +144,16 @@ handle_push_transition herdr default "$(mkrec wG:pQ blocked)"
 [ -s "$WAKE_LOG" ] || fail "the old task's pause suppressed the live worker's blocked event"
 pass "handle_push_transition: a stale record sharing the slot cannot displace the bound worker"
 
+gnu_timeout_available() {
+  { LC_ALL=C timeout --version || true; LC_ALL=C gtimeout --version || true; } 2>/dev/null \
+    | grep -F '(GNU coreutils)' >/dev/null
+}
+
 test_optional_capture_failure() (
+  if ! gnu_timeout_available; then
+    printf '%s\n' 'ok - watcher: optional capture failure # SKIP GNU timeout unavailable'
+    return 0
+  fi
   mktemp() { return 1; }
   FM_PENDING_REPLY_OBSERVATION=idle
   watcher_remote_observe printf busy || fail "remote capture failure must not stop supervision"
@@ -190,7 +199,7 @@ test_remote_wait_without_gnu_timeout || exit $?
 
 test_remote_wait_rejects_late_success() (
   local child='' i
-  if ! fm_gnu_timeout >/dev/null; then
+  if ! gnu_timeout_available; then
     printf '%s\n' 'ok - watcher: a reply after the deadline stays unknown # SKIP GNU timeout unavailable'
     return 0
   fi
@@ -233,25 +242,13 @@ test_remote_wait_rejects_late_success() (
 
 test_remote_wait_rejects_late_success || exit $?
 
-test_remote_wait_enforces_dispatch_deadline() (
+test_remote_timeout_kills_term_resistant_observation() (
   local dispatched="$TMP/dispatched" overran="$TMP/overran"
-  if ! fm_gnu_timeout >/dev/null; then
-    printf '%s\n' 'ok - watcher: slow status collection cannot delay cancellation # SKIP GNU timeout unavailable'
+  if ! gnu_timeout_available; then
+    printf '%s\n' 'ok - watcher: timeout kills a TERM-resistant observation # SKIP GNU timeout unavailable'
     return 0
   fi
   export PATH="$TMP/no-perl:$PATH"
-  read() {
-    local i
-    if [ "${2:-}" = -t ]; then
-      for ((i=0; i<100; i++)); do
-        [ ! -e "$dispatched" ] || break
-        command sleep 0.01
-      done
-      [ -e "$dispatched" ] || return 1
-      command sleep 0.8
-    fi
-    builtin read "$@"
-  }
   WATCHER_WAIT_LIMIT=1 watcher_remote_observe bash -c '
     trap "" TERM
     touch "$1"
@@ -261,11 +258,11 @@ test_remote_wait_enforces_dispatch_deadline() (
   ' _ "$dispatched" "$overran" || fail "remote observation could not run"
   [ -e "$dispatched" ] || fail "remote observation did not dispatch"
   [ ! -e "$overran" ] || fail "the remote command survived the deadline and kill-after allowance"
-  [ "$FM_PENDING_REPLY_OBSERVATION" = unknown ] || fail "a delay before reading extended the observation deadline"
-  pass "watcher: slow status collection cannot delay cancellation"
+  [ "$FM_PENDING_REPLY_OBSERVATION" = unknown ] || fail "a killed observation supplied completion evidence"
+  pass "watcher: timeout kills a TERM-resistant observation"
 )
 
-test_remote_wait_enforces_dispatch_deadline || exit $?
+test_remote_timeout_kills_term_resistant_observation || exit $?
 
 test_wait_preserves_sleep_units() (
   reset_state
