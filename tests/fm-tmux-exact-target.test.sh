@@ -35,7 +35,8 @@ trap cleanup_all EXIT
 
 # A `tmux` shim on PATH so every bare `tmux` call reaches the private socket
 # and never touches the host's real sessions.
-mkdir -p "$LAB/shim" "$LAB/home/state" "$LAB/wt"
+mkdir -p "$LAB/shim" "$LAB/home/state" "$LAB/wt" "$LAB/base" "$LAB/neighbour"
+worker_cwd=$(cd "$LAB/wt" && pwd -P) || fail "could not resolve the worker launch directory"
 cat > "$LAB/shim/tmux" <<SH
 #!/usr/bin/env bash
 exec "$REAL_TMUX" -L "$SOCKET" "\$@"
@@ -49,7 +50,7 @@ unset TMUX TMUX_PANE
 . "$ROOT/bin/fm-backend.sh"
 fm_backend_source tmux || fail "fm_backend_source tmux failed"
 
-"$REAL_TMUX" -L "$SOCKET" -f /dev/null new-session -d -s "$SESSION" -n base -c "$LAB/wt" \
+"$REAL_TMUX" -L "$SOCKET" -f /dev/null new-session -d -s "$SESSION" -n base -c "$LAB/base" \
   || fail "could not start the private tmux server"
 
 # Each window prints a marker then idles, run directly as the window command so
@@ -70,7 +71,7 @@ wait_for_marker() {  # <raw-target> <marker>
   fail "window $1 never showed $2"
 }
 
-split_pane=$(tmux split-window -d -P -F '#{pane_id}' -t "$SESSION:0" -- \
+split_pane=$(tmux split-window -d -P -F '#{pane_id}' -t "$SESSION:0" -c "$LAB/base" -- \
   sh -c "printf '%s\\n' SPLIT-PANE-MARKER; exec '$SLEEP_BIN' 600") \
   || fail "could not create the explicit split pane"
 split_index=$(tmux display-message -p -t "$split_pane" '#{pane_index}')
@@ -92,7 +93,7 @@ fi
 pass "explicit tmux pane syntax works for capture and presence"
 
 new_window "$SESSION" fm-mate MATE-ONE-MARKER
-tmux new-window -d -t "$SESSION:" -n fm-mate2 -c "$LAB/wt" -- \
+tmux new-window -d -t "$SESSION:" -n fm-mate2 -c "$LAB/neighbour" -- \
   sh -c 'printf "%s\n%s" "$1" "$2"; exec "$3" 600' sh NEIGHBOUR-TWO-MARKER '❯ visible draft' "$SLEEP_BIN" \
   || fail "could not create the neighbouring window with a draft"
 wait_for_marker "=$SESSION:=fm-mate" MATE-ONE-MARKER
@@ -103,7 +104,7 @@ fm_backend_capture tmux "$SESSION:fm-mate" 40 | grep -q MATE-ONE-MARKER \
   || fail "an open worker window must capture its own screen"
 fm_backend_target_exists tmux "$SESSION:fm-mate" \
   || fail "an open worker window must read as present"
-[ "$(fm_backend_tmux_current_path "$SESSION:fm-mate")" = "$LAB/wt" ] \
+[ "$(fm_backend_tmux_current_path "$SESSION:fm-mate")" = "$worker_cwd" ] \
   || fail "an open worker window must report its cwd"
 mate_pane=$(tmux display-message -p -t "=$SESSION:=fm-mate" '#{pane_id}')
 mate_window=$(tmux display-message -p -t "$mate_pane" '#{window_id}')

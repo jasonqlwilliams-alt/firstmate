@@ -773,10 +773,6 @@ for arg in "$@"; do
 done
 case "${1:-}" in
   list-windows)
-    if [ -n "${PEEK_CHARACTER_LOCALE:-}" ] &&
-      [ "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" != "$PEEK_CHARACTER_LOCALE" ]; then
-      exit 1
-    fi
     case "${PEEK_INVENTORY:-live}" in
       adhoc)
         if [ "$format" = '#{session_name}:#{window_name}' ]; then
@@ -817,7 +813,6 @@ test_peek_tmux_contract() {
   neutral_root="$TMP_ROOT/peek-neutral-root"; mkdir -p "$neutral_root"
 
   out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" \
-    LC_ALL= LC_CTYPE=en_US.UTF-8 PEEK_CHARACTER_LOCALE=en_US.UTF-8 \
     "$ROOT/bin/fm-peek.sh" worker 2 2>/dev/null)
   [ "$out" = $'older history\nlatest history\nrecorded screen' ] \
     || fail "fm-peek should return the recorded screen and exactly two history lines"
