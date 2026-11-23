@@ -1775,6 +1775,8 @@ test_persistent_index_lock_exhausts_retries_and_refuses_loudly() {
   git -C "$case_dir/project" fetch -q origin
 
   add_persistent_lock_treehouse "$case_dir"
+  seed_backlog_in_flight "$case_dir"
+  printf 'PR closure evidence\n' > "$case_dir/state/task-x1.pr-poll-closed"
   # Fresh lock with a live holder: never provably stale, never force-removed.
   add_lsof_live_holder "$case_dir"
 
@@ -1803,127 +1805,69 @@ test_persistent_index_lock_exhausts_retries_and_refuses_loudly() {
     || fail "persistent-index-lock: teardown completed despite persistent lock"
   [ "$(git -C "$case_dir/wt" symbolic-ref --short HEAD)" = fm/task-x1 ] \
     || fail "persistent-index-lock: teardown left the task detached"
+  assert_pending_close_replay_preserves_task "$case_dir" task-x1 "$case_dir/home" \
+    || fail 'startup replay changed the task after a persistent lock'
   pass "persistent index.lock exhausts retries and refuses without force-removing the lock"
 }
 
-test_non_lock_return_failure_preserves_checkout() {
-  local mode=$1 case_dir copy original_tip rc=0
-  case_dir=$(make_case "failed-return-$mode")
+test_treehouse_owns_checkout_and_cancels_failed_close() {
+  local mode=$1 case_dir copy tip expected_branch=fm/task-x1 rc=0
+  if [ "$mode" = reftable ]; then
+    case_dir=$(GIT_DEFAULT_REF_FORMAT=reftable make_case "treehouse-checkout-$mode")
+    if [ "$(git -C "$case_dir/wt" config --local --get extensions.refStorage)" != reftable ]; then
+      printf 'skip: Git does not support reftable fixtures\n'
+      return 0
+    fi
+  else
+    case_dir=$(make_case "treehouse-checkout-$mode")
+  fi
   copy="$case_dir/wt"
   write_meta "$case_dir" no-mistakes ship
-  if [[ "$mode" == rebase-* ]]; then
-    wt_commit_file "$case_dir" conflict.txt topic
-    printf 'base\n' > "$case_dir/project/conflict.txt"
-    git -C "$case_dir/project" add conflict.txt
-    git -C "$case_dir/project" commit -qm 'Add conflicting file to main'
-  fi
   land_shippable_commit "$case_dir"
-  original_tip=$(git -C "$copy" rev-parse HEAD)
-  if [[ "$mode" == *-race ]]; then
-    git -C "$copy" branch recovery "$original_tip"
-    cat > "$case_dir/fakebin/git" <<'SH'
-#!/usr/bin/env bash
-case "$*" in
-  *' update-ref --stdin'|*' update-ref --no-deref HEAD '*|*' symbolic-ref HEAD refs/heads/fm/task-x1')
-    if { [ "$FM_TEST_FAILED_RETURN_MODE" = detach-race ] && [ ! -e "$FM_TEST_RACE_DIR/return-started" ]; } \
-       || { [ "$FM_TEST_FAILED_RETURN_MODE" = restore-race ] && [ -e "$FM_TEST_RACE_DIR/return-started" ]; }; then
-      "$REAL_GIT_FOR_TEST" -C "$FM_TEST_RACE_DIR/wt" symbolic-ref HEAD refs/heads/recovery || exit 2
-      : > "$FM_TEST_RACE_DIR/checkout-raced"
-    fi
-    ;;
-esac
-exec "$REAL_GIT_FOR_TEST" "$@"
-SH
-    chmod +x "$case_dir/fakebin/git"
+  seed_backlog_in_flight "$case_dir"
+  printf 'PR closure evidence\n' > "$case_dir/state/task-x1.pr-poll-closed"
+  tip=$(git -C "$copy" rev-parse HEAD)
+  if [ "$mode" = detached ]; then
+    git -C "$copy" checkout --detach -q
+    expected_branch=HEAD
   fi
   add_lsof_no_holder "$case_dir"
   printf 'configured hook\n' > "$copy/.fm-grok-turnend"
   cat > "$case_dir/fakebin/treehouse" <<'SH'
 #!/usr/bin/env bash
-: > "$FM_TEST_RACE_DIR/return-started"
-case "$FM_TEST_FAILED_RETURN_MODE" in
-  moved) git -C "$3" update-ref --no-deref HEAD refs/heads/main || exit 2 ;;
-  branch-in-use) git -C "$3" worktree add --quiet "$FM_TEST_OTHER_WORKTREE" fm/task-x1; exit $? ;;
-  branch-*) git -C "$3" update-ref refs/heads/fm/task-x1 refs/heads/main || exit 2 ;;
-  rebase-*)
-    git -C "$3" worktree add --quiet "$FM_TEST_OTHER_WORKTREE" fm/task-x1 || exit 2
-    git -C "$FM_TEST_OTHER_WORKTREE" rebase --merge main && exit 2
-    [ "$(git -C "$FM_TEST_OTHER_WORKTREE" status --porcelain -- conflict.txt)" = 'AA conflict.txt' ] || exit 2
-    ;;
-esac
-case "$FM_TEST_FAILED_RETURN_MODE" in branch-success|rebase-success) exit 0 ;; esac
-echo 'treehouse: simulated return error' >&2
+printf '%s %s\n' "$(git -C "$3" rev-parse --abbrev-ref HEAD)" "$(git -C "$3" rev-parse HEAD)" > "$FM_TEST_RETURN_LOG"
+if [ "$FM_TEST_RETURN_MODE" = success ]; then
+  git -C "$3" checkout --detach -q main
+  exit $?
+fi
+echo 'treehouse: simulated return error before checkout' >&2
 exit 1
 SH
   chmod +x "$case_dir/fakebin/treehouse"
-  FM_TEST_FAILED_RETURN_MODE=$mode FM_TEST_RACE_DIR="$case_dir" FM_TEST_OTHER_WORKTREE="$case_dir/other-worktree" \
+  FM_TEST_RETURN_MODE=$mode FM_TEST_RETURN_LOG="$case_dir/treehouse.log" \
     run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-  if [[ "$mode" == *-race ]]; then
-    expect_code 1 "$rc" "concurrent checkout ($mode) should retain the copy"
-    assert_present "$case_dir/checkout-raced" 'fixture did not change HEAD before the write'
-    [ "$(git -C "$copy" symbolic-ref --short HEAD)" = recovery ] \
-      && [ "$(git -C "$copy" rev-parse HEAD)" = "$original_tip" ] \
-      || fail 'teardown changed a concurrent checkout at the saved commit'
-    if [ "$mode" = detach-race ]; then
-      assert_absent "$case_dir/return-started" 'teardown invoked Treehouse after the detach comparison failed'
-    else
-      assert_present "$case_dir/return-started" 'teardown missed the failed return before restoration'
-    fi
-    assert_present "$case_dir/state/task-x1.meta" 'refusal retired the task record'
-    pass "teardown preserves a concurrent checkout at the same commit ($mode)"
-    return 0
-  fi
-  if [[ "$mode" == rebase-* ]]; then
-    if [ "$mode" = rebase-success ]; then
-      expect_code 0 "$rc" 'successful return should preserve a branch in rebase'
-    else
-      expect_code 1 "$rc" 'failed return should preserve a branch in rebase'
-      assert_grep 'treehouse: simulated return error' "$case_dir/stderr" 'cleanup did not reach the failed return'
-      [ "$(git -C "$copy" rev-parse --abbrev-ref HEAD)" = HEAD ] \
-        || fail 'failed return reattached HEAD to a branch another worktree is rebasing'
-      assert_present "$case_dir/state/task-x1.meta" 'failed return retired task metadata'
-    fi
-    [ "$(git -C "$copy" rev-parse --verify refs/heads/fm/task-x1)" = "$original_tip" ] \
-      || fail 'teardown deleted or moved a branch another worktree is rebasing'
-    [ "$(git -C "$case_dir/other-worktree" status --porcelain -- conflict.txt)" = 'AA conflict.txt' ] \
-      || fail 'teardown changed the other worktree’s rebase'
-    pass "Treehouse return respects a branch in rebase ($mode)"
-    return 0
-  fi
-  if [ "$mode" = branch-in-use ]; then
-    expect_code 0 "$rc" 'successful return should leave the other worktree alone'
-    [ "$(git -C "$case_dir/other-worktree" symbolic-ref --short HEAD)" = fm/task-x1 ] \
-      && [ "$(git -C "$case_dir/other-worktree" rev-parse HEAD)" = "$original_tip" ] \
-      || fail 'successful return deleted the task branch checked out elsewhere'
-    pass 'successful Treehouse return preserves the branch checked out elsewhere'
-    return 0
-  fi
-  if [ "$mode" = branch-success ]; then
-    expect_code 0 "$rc" 'a branch update should not block returning the copy'
-    [ "$(git -C "$copy" rev-parse --verify refs/heads/fm/task-x1)" = "$(git -C "$copy" rev-parse main)" ] \
-      || fail 'successful return deleted a branch that moved while the copy was detached'
+  [ "$(cat "$case_dir/treehouse.log")" = "$expected_branch $tip" ] \
+    || fail 'Treehouse did not receive the original checkout'
+  [ "$(git -C "$copy" rev-parse --verify refs/heads/fm/task-x1)" = "$tip" ] \
+    || fail 'teardown changed the task ref'
+  if [ "$mode" = success ]; then
+    expect_code 0 "$rc" 'Treehouse should return the copy and retire the record'
     assert_absent "$case_dir/state/task-x1.meta" 'successful return retained the task record'
-    pass 'successful Treehouse return preserves a task branch that moved'
-    return 0
-  fi
-  expect_code 1 "$rc" "failed return ($mode): cleanup should fail"
-  assert_grep 'treehouse: simulated return error' "$case_dir/stderr" 'cleanup did not reach the failed return'
-  if [ "$mode" = moved ]; then
+    [ "$(backlog_row_state "$case_dir")" = done ] || fail 'successful return did not close the task'
     [ "$(git -C "$copy" rev-parse --abbrev-ref HEAD)" = HEAD ] \
       && [ "$(git -C "$copy" rev-parse HEAD)" = "$(git -C "$copy" rev-parse main)" ] \
-      || fail 'failed return: teardown overwrote a changed HEAD'
-  elif [ "$mode" = branch-failure ]; then
-    [ "$(git -C "$copy" rev-parse --abbrev-ref HEAD)" = HEAD ] \
-      && [ "$(git -C "$copy" rev-parse HEAD)" = "$original_tip" ] \
-      && [ "$(git -C "$copy" rev-parse refs/heads/fm/task-x1)" = "$(git -C "$copy" rev-parse main)" ] \
-      || fail 'failed return: teardown reattached HEAD to a branch that moved'
+      || fail 'teardown changed the checkout left by Treehouse'
   else
-    [ "$(git -C "$copy" symbolic-ref --short HEAD)" = fm/task-x1 ] \
-      || fail 'failed return: teardown left the task detached'
+    expect_code 1 "$rc" "failed Treehouse return ($mode) should retain the copy"
+    assert_grep 'treehouse: simulated return error before checkout' "$case_dir/stderr" 'cleanup did not reach the failed return'
+    [ "$(git -C "$copy" rev-parse --abbrev-ref HEAD)" = "$expected_branch" ] \
+      && [ "$(git -C "$copy" rev-parse HEAD)" = "$tip" ] \
+      || fail 'failed return changed the retained checkout'
+    [ "$(cat "$copy/.fm-grok-turnend")" = 'configured hook' ] || fail 'failed return changed the task hook'
+    assert_pending_close_replay_preserves_task "$case_dir" task-x1 "$case_dir/home" \
+      || fail 'startup replay changed the retained task'
   fi
-  [ "$(cat "$copy/.fm-grok-turnend")" = 'configured hook' ] || fail 'failed return: teardown changed the task hook'
-  assert_present "$case_dir/state/task-x1.meta" 'failed return: teardown retired the task record'
-  pass "failed Treehouse return preserves checkout and hooks ($mode)"
+  pass "Treehouse owns the checkout and teardown handles its result ($mode)"
 }
 
 test_empty_retry_wait_uses_default_without_aborting() {
@@ -2543,19 +2487,63 @@ seed_descendant_close_for_replay() (
   fm_backlog_close_marker_write "$state" "$id" "$data" "$gen" --note 'local main'
 )
 
-assert_descendant_close_replay_preserves_task() (
-  export FM_HOME=$1
+assert_pending_close_replay_preserves_task() (
+  export FM_HOME=${3:-$1}
   local id=$2 state="$1/state" data="$1/data" row
   # shellcheck source=bin/fm-backlog-transition-lib.sh
   . "$ROOT/bin/fm-backlog-transition-lib.sh"
   fm_backlog_close_marker_replay "$state" "$state/$id.backlog-close" "$data" \
-    || fail 'startup replay failed after descendant caller refusal'
-  assert_absent "$state/$id.backlog-close" 'caller refusal left a replayable descendant close'
-  assert_present "$state/$id.meta" 'startup replay retired the refused descendant'
-  [ "$(cat "$state/$id.pr-poll-closed")" = 'PR closure evidence' ] || fail 'startup replay removed descendant PR evidence'
+    || fail 'startup replay failed after teardown failure'
+  assert_absent "$state/$id.backlog-close" 'teardown failure left a replayable close'
+  assert_present "$state/$id.meta" 'startup replay retired the retained task'
+  [ "$(cat "$state/$id.pr-poll-closed")" = 'PR closure evidence' ] || fail 'startup replay removed PR evidence'
   row=$(tasks-axi show "$id" --file "$data/backlog.md") || fail 'could not read the retained backlog row'
-  [[ "$row" == *'state: in_flight'* ]] || fail 'startup replay changed the refused descendant backlog row'
+  [[ "$row" == *'state: in_flight'* ]] || fail 'startup replay changed the retained backlog row'
 )
+
+test_child_failed_return_cancels_close() {
+  local mode=$1 case_dir home copy rc=0 expected_rc diagnostic
+  case_dir=$(make_case "child-failed-return-$mode")
+  home="$case_dir/secondmate-home"
+  copy="$case_dir/child-a-wt"
+  write_meta "$case_dir" local-only secondmate
+  configure_secondmate_with_tmux_children "$case_dir"
+  seed_descendant_close_for_replay "$home" child-a || fail 'could not stage the descendant close'
+  if [ "$mode" = lock ]; then
+    add_persistent_lock_treehouse "$case_dir"
+    add_lsof_live_holder "$case_dir"
+    touch "$(git_index_lock_path "$copy")"
+    expected_rc=2
+    diagnostic='not provably stale'
+  else
+    add_lsof_no_holder "$case_dir"
+    cat > "$case_dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+echo 'treehouse: simulated child return error' >&2
+exit 1
+SH
+    cat > "$case_dir/fakebin/rm" <<'SH'
+#!/usr/bin/env bash
+if [ "${*: -1}" = "$FM_TEST_RETAINED_CHILD_COPY" ]; then
+  echo 'rm: simulated child fallback failure' >&2
+  exit 1
+fi
+exec "$REAL_RM_FOR_TEST" "$@"
+SH
+    chmod +x "$case_dir/fakebin/treehouse" "$case_dir/fakebin/rm"
+    expected_rc=1
+    diagnostic='rm: simulated child fallback failure'
+  fi
+  FM_TEST_RETAINED_CHILD_COPY="$copy" \
+    FM_TREEHOUSE_RETURN_LOCK_RETRIES=0 \
+    run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  expect_code "$expected_rc" "$rc" "child return ($mode) should retain the copy"
+  assert_grep "$diagnostic" "$case_dir/stderr" "child return ($mode) did not reach the expected failure"
+  [ "$(git -C "$copy" symbolic-ref --short HEAD)" = fm/child-a ] || fail 'child failure changed the checkout'
+  assert_present "$case_dir/state/task-x1.meta" 'child failure retired the parent record'
+  assert_pending_close_replay_preserves_task "$home" child-a || fail 'startup replay changed the retained child task'
+  pass "failed child return retains the copy and cancels its pending close ($mode)"
+}
 
 test_forced_secondmate_teardown_preflights_all_child_copies() {
   local layout=$1 case_dir home child_b rc=0
@@ -2599,7 +2587,7 @@ SH
   assert_absent "$case_dir/kill.log" 'refusal killed an earlier sibling endpoint'
   assert_present "$home/state/child-a.meta" 'refusal removed the first child record from the leased home'
   assert_present "$home/state/child-b.meta" 'refusal removed the second child record from the leased home'
-  assert_descendant_close_replay_preserves_task "$home" child-b || fail 'descendant replay did not preserve the preflight refusal'
+  assert_pending_close_replay_preserves_task "$home" child-b || fail 'descendant replay did not preserve the preflight refusal'
   assert_present "$case_dir/state/task-x1.meta" 'refusal retired the leased home record'
   pass "forced retirement preflights every child before touching the leased home ($layout)"
 }
@@ -4125,7 +4113,7 @@ SH
     if [[ "$mode" == child* ]]; then
       expect_code 5 "$rc" 'child teardown should propagate a caller refusal'
       assert_present "$case_dir/secondmate-home/state/child-a.meta" 'refusal retired the child task record'
-      assert_descendant_close_replay_preserves_task "$case_dir/secondmate-home" child-a || fail 'descendant replay did not preserve the return refusal'
+      assert_pending_close_replay_preserves_task "$case_dir/secondmate-home" child-a || fail 'descendant replay did not preserve the return refusal'
       if [ "$mode" = child-error ]; then
         assert_grep 'treehouse: simulated child return error' "$case_dir/stderr" 'fallback fixture missed the non-lock return error'
         [ "$(cat "$copy/feature.txt")" = 'caller edit' ] || fail 'child fallback lost the caller edit'
@@ -4798,10 +4786,14 @@ test_keep_pane_retirement() {
     FM_KEEP_MODE="$mode" run_keep_pane_case "$case_dir" --keep-pane > "$case_dir/out" 2> "$case_dir/err" || rc=$?
     [ "$rc" -ne 0 ] || fail "keep-pane $mode unexpectedly succeeded"
     assert_present "$case_dir/state/task-x1.meta" "keep-pane $mode lost endpoint record"
-    assert_present "$case_dir/state/task-x1.backlog-close" "keep-pane $mode lost durable transition"
+    if [ "$mode" = return-fails ]; then
+      assert_absent "$case_dir/state/task-x1.backlog-close" "keep-pane $mode left a replayable close"
+    else
+      assert_present "$case_dir/state/task-x1.backlog-close" "keep-pane $mode lost durable transition"
+    fi
     [ "$(backlog_row_state "$case_dir")" = in_flight ] || fail "keep-pane $mode closed backlog"
   done
-  pass "keep-pane retains records and replayable backlog transition on return or pane-survival failure"
+  pass "keep-pane retains records and keeps the pending close only after the copy is returned"
 
   case_dir=$(make_case keep-pane-captain-call)
   configure_keep_pane_case "$case_dir"
@@ -5022,6 +5014,8 @@ test_forced_secondmate_herdr_child_preflight_refuses_before_changes
 test_forced_secondmate_teardown_holds_descendant_lifecycle_locks
 test_forced_secondmate_teardown_preflights_all_child_copies linked
 test_forced_secondmate_teardown_preflights_all_child_copies pool
+test_child_failed_return_cancels_close lock
+test_child_failed_return_cancels_close remove
 test_forced_secondmate_herdr_child_retains_records_when_close_unconfirmed
 test_forced_teardown_retains_nested_secondmate_home_when_grandchild_close_unconfirmed
 test_herdr_projection_teardown_retires_journal_only_after_confirmed_close
@@ -5057,15 +5051,10 @@ test_non_linked_index_lock_path_is_checked_from_worktree
 test_index_lock_mtime_read_failure_refuses
 test_transient_index_lock_clears_after_first_attempt_and_retry_succeeds
 test_persistent_index_lock_exhausts_retries_and_refuses_loudly
-test_non_lock_return_failure_preserves_checkout same
-test_non_lock_return_failure_preserves_checkout moved
-test_non_lock_return_failure_preserves_checkout branch-failure
-test_non_lock_return_failure_preserves_checkout branch-success
-test_non_lock_return_failure_preserves_checkout branch-in-use
-test_non_lock_return_failure_preserves_checkout rebase-failure
-test_non_lock_return_failure_preserves_checkout rebase-success
-test_non_lock_return_failure_preserves_checkout detach-race
-test_non_lock_return_failure_preserves_checkout restore-race
+test_treehouse_owns_checkout_and_cancels_failed_close files
+test_treehouse_owns_checkout_and_cancels_failed_close detached
+test_treehouse_owns_checkout_and_cancels_failed_close reftable
+test_treehouse_owns_checkout_and_cancels_failed_close success
 test_empty_retry_wait_uses_default_without_aborting
 test_fractional_legacy_retry_wait_refuses_without_arithmetic_error
 test_parked_own_run_is_aborted_before_teardown
