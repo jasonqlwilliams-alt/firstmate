@@ -4,7 +4,7 @@
 #
 # ONE owner of the steering-inbox contract: the record format, sequence
 # allocation, the idempotent re-enqueue dedup, the handled/ acknowledgement,
-# the self-describing doorbell line, and the watcher's re-ring ladder policy.
+# the doorbell notices, and the watcher's re-ring ladder policy.
 # bin/fm-send.sh writes and rings locally, the host-local remote steer leg
 # (bin/fm-remote-secondmate-control.sh cmd_send) writes idempotently and rings
 # on the remote host, bin/fm-watch.sh polls and re-rings, and the brief
@@ -271,12 +271,12 @@ _fm_task_inbox_brief_names_inbox() {  # <inbox-dir>
   [ -d "$locator" ] && [ "$locator" -ef "$inbox" ]
 }
 
-# The constant doorbell line for the inbox containing a record.
-# Self-describing on purpose: a worker whose brief predates the inbox contract
-# still receives the complete instruction in the line itself. The leading `: `
-# is the POSIX shell no-op, so the same line typed into a pane whose agent has
-# exited (a bare shell) runs nothing; see the dead-pane note in the header.
-# The path-bearing notice requires a printable ASCII path.
+# The path-bearing doorbell supplies the inbox location to workers whose
+# briefs omit it. agy can use a shorter line for its one-row composer when
+# the brief identifies the inbox. The printable ASCII check applies to the
+# embedded path so terminal control bytes cannot reach the pane through the
+# notice. Both notices start with the POSIX shell no-op `: ` to protect a bare
+# shell from a complete line typed after the worker exits.
 FM_TASK_INBOX_AGY_DOORBELL=': Firstmate message waiting: read your inbox, act, mv to handled/.'
 fm_task_inbox_doorbell_line() {  # <record-path> [harness]
   local dir=${1%/*} abs quoted
@@ -321,7 +321,7 @@ fm_task_inbox_doorbell_line() {  # <record-path> [harness]
 #   0 rang: typed and one Enter sent
 #   1 refused before typing: pending composer text, a Codex, Rovo, or agy
 #     composer without empty proof, or an agy row too narrow for the doorbell
-#   2 the backend send failed
+#   2 the notice could not be built or the backend send failed
 #   3 the endpoint is positively dead or missing (nothing typed; recovery owns
 #     the record)
 #   4 refused: the Codex global-update picker is on screen; no Enter was sent

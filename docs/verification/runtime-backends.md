@@ -341,7 +341,8 @@ Cursor is deliberately outside this cursor-anchored empty-composer matrix becaus
 
 ## Steering-inbox doorbell
 
-The steering channel's one behavioral assumption - a real worker agent follows the constant self-describing doorbell line (list the inbox, read and act on its records in numeric order, then `mv` each into `handled/`) - was verified on 2026-08-23 against every installed verified harness, on tmux 3.6a, macOS arm64, on an isolated private socket, driving the REAL `bin/fm-send.sh` end to end (durable record plus doorbell, with one mid-wait re-ring playing the watcher's role).
+The 2026-08-23 run verified the path-bearing doorbell against every installed verified harness on tmux 3.6a, macOS arm64, using an isolated private socket.
+It drove the real `bin/fm-send.sh` end to end, from durable enqueue to doorbell delivery, with one mid-wait re-ring playing the watcher's role.
 
 ```sh
 FM_SEND_INBOX_LIVE_E2E=1 tests/fm-send-inbox-doorbell-live-e2e.test.sh
@@ -360,7 +361,7 @@ ok - grok (grok 1.0.5 (5115b46bc909) [stable]): the doorbell reached a real work
 ok - muse (Muse Code 0.2.1 (0.2.1-R1215.1)): the doorbell reached a real worker, which acted and acked with the mv
 ```
 
-All six installed harnesses honored the doorbell contract with real model turns: each listed the inbox named by the doorbell, read its record, executed the instruction inside it, and acknowledged with the atomic `mv`.
+In real model turns, all six installed harnesses listed the inbox named by the doorbell, read its record, executed the instruction inside it, and acknowledged it with an atomic `mv` into `handled/`.
 An OpenCode vendor update modal swallowed the first doorbell, and the watcher's re-ring recovered it.
 The Grok 1.0.5 worker acknowledged the doorbell despite the absence of an `empty` verdict during startup.
 The live run above predates the [current per-harness gate](../../bin/fm-task-inbox-lib.sh), which is covered by the stub-pane regressions in [`tests/fm-task-inbox.test.sh`](../../tests/fm-task-inbox.test.sh).

@@ -1002,8 +1002,7 @@ fm_backend_composer_classify_snapshot() {  # <backend> <target> [fit-text]
 # capture it also proves picker rows above it are retained history.
 # [harness] is the pane's recorded harness; when it is a plain token it rides
 # into the snapshot's capability facts as harness=<name>, so the classifier
-# can apply that harness's own placeholder rule (bin/fm-composer-lib.sh
-# "ROVO PLACEHOLDER CHIP").
+# can apply the harness-scoped rules in bin/fm-composer-lib.sh.
 # [fit-text] is the line a caller is about to type into an agy pane: an
 # `empty` verdict for harness agy reads `unknown` unless that line fits agy's
 # one composer row, so it is never typed into a row it would wrap.

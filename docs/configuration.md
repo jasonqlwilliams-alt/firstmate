@@ -436,9 +436,10 @@ A cursor secondmate or primary runs the tracked project-scope `.cursor/hooks.jso
 Cursor typed-submit confirmation is verified on tmux and Herdr only.
 On Zellij, cmux, and Orca a typed-plane Cursor send (a harness-native invocation or an explicit backend target; ordinary text steers ride the durable inbox and exit 0 at enqueue) lands, but `fm-send` reports delivery unconfirmed and exits non-zero because their shared submit core does not consult the busy footer; [runtime backend verification](verification/runtime-backends.md#cursor-agent-cli) owns the evidence and transcript-state boundary.
 The doorbell requires a proven-empty composer before typing and proof of the full notice before Enter on Codex, Rovo, and agy panes.
-An agy pane can use the short notice `: Firstmate message waiting: read your inbox, act, mv to handled/.` when the task's brief names that task's inbox in the scaffolded Firstmate instruction inbox section.
+An agy pane uses the short notice `: Firstmate message waiting: read your inbox, act, mv to handled/.` when the path in the scaffolded Firstmate instruction inbox section points to the same inbox directory as the queued record.
 The doorbell checks the launch brief when present and uses the original task brief when there is no launch brief.
-Workers without that inbox locator and workers on other harnesses receive the full path-bearing notice.
+Equivalent paths, including symlink aliases, qualify for the short notice, and the inbox path may contain UTF-8 characters.
+In other cases the doorbell uses the full path-bearing notice, which requires printable ASCII in the path it embeds.
 On agy either notice must fit on one composer row and stop before the last column of the closing divider.
 An 80-column pane fits the short notice, and widening a pane can resolve a width refusal.
 When the full text cannot be confirmed after typing, an unsubmitted draft may remain in the composer.
