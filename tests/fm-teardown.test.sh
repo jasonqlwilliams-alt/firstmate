@@ -1811,6 +1811,12 @@ test_non_lock_return_failure_preserves_checkout() {
   case_dir=$(make_case "failed-return-$mode")
   copy="$case_dir/wt"
   write_meta "$case_dir" no-mistakes ship
+  if [[ "$mode" == rebase-* ]]; then
+    wt_commit_file "$case_dir" conflict.txt topic
+    printf 'base\n' > "$case_dir/project/conflict.txt"
+    git -C "$case_dir/project" add conflict.txt
+    git -C "$case_dir/project" commit -qm 'Add conflicting file to main'
+  fi
   land_shippable_commit "$case_dir"
   original_tip=$(git -C "$copy" rev-parse HEAD)
   add_lsof_no_holder "$case_dir"
@@ -1821,14 +1827,36 @@ case "$FM_TEST_FAILED_RETURN_MODE" in
   moved) git -C "$3" update-ref --no-deref HEAD refs/heads/main || exit 2 ;;
   branch-in-use) git -C "$3" worktree add --quiet "$FM_TEST_OTHER_WORKTREE" fm/task-x1; exit $? ;;
   branch-*) git -C "$3" update-ref refs/heads/fm/task-x1 refs/heads/main || exit 2 ;;
+  rebase-*)
+    git -C "$3" worktree add --quiet "$FM_TEST_OTHER_WORKTREE" fm/task-x1 || exit 2
+    git -C "$FM_TEST_OTHER_WORKTREE" rebase --merge main && exit 2
+    [ "$(git -C "$FM_TEST_OTHER_WORKTREE" status --porcelain -- conflict.txt)" = 'AA conflict.txt' ] || exit 2
+    ;;
 esac
-[ "$FM_TEST_FAILED_RETURN_MODE" != branch-success ] || exit 0
+case "$FM_TEST_FAILED_RETURN_MODE" in branch-success|rebase-success) exit 0 ;; esac
 echo 'treehouse: simulated return error' >&2
 exit 1
 SH
   chmod +x "$case_dir/fakebin/treehouse"
   FM_TEST_FAILED_RETURN_MODE=$mode FM_TEST_OTHER_WORKTREE="$case_dir/other-worktree" \
     run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  if [[ "$mode" == rebase-* ]]; then
+    if [ "$mode" = rebase-success ]; then
+      expect_code 0 "$rc" 'successful return should preserve a branch in rebase'
+    else
+      expect_code 1 "$rc" 'failed return should preserve a branch in rebase'
+      assert_grep 'treehouse: simulated return error' "$case_dir/stderr" 'cleanup did not reach the failed return'
+      [ "$(git -C "$copy" rev-parse --abbrev-ref HEAD)" = HEAD ] \
+        || fail 'failed return reattached HEAD to a branch another worktree is rebasing'
+      assert_present "$case_dir/state/task-x1.meta" 'failed return retired task metadata'
+    fi
+    [ "$(git -C "$copy" rev-parse --verify refs/heads/fm/task-x1)" = "$original_tip" ] \
+      || fail 'teardown deleted or moved a branch another worktree is rebasing'
+    [ "$(git -C "$case_dir/other-worktree" status --porcelain -- conflict.txt)" = 'AA conflict.txt' ] \
+      || fail 'teardown changed the other worktree’s rebase'
+    pass "Treehouse return respects a branch in rebase ($mode)"
+    return 0
+  fi
   if [ "$mode" = branch-in-use ]; then
     expect_code 0 "$rc" 'successful return should leave the other worktree alone'
     [ "$(git -C "$case_dir/other-worktree" symbolic-ref --short HEAD)" = fm/task-x1 ] \
@@ -3805,10 +3833,10 @@ test_reparented_teardown_preserves_original_caller() (
     return 0
   fi
   local mode=$1 case_dir leak_pid rc=0 i lock retries=1 copy task_branch hook parent
-  local backlog_case=0
+  local backlog_case=0 prior_close=${2:-none} prior_gen
   local -a teardown_args=()
-  case_dir=$(make_case "reparented-teardown-$mode")
-  if [ "$mode" = child ]; then
+  case_dir=$(make_case "reparented-teardown-$mode-$prior_close")
+  if [[ "$mode" == child* ]]; then
     write_meta "$case_dir" local-only secondmate
     configure_secondmate_with_tmux_children "$case_dir"
     copy="$case_dir/child-a-wt"
@@ -3838,6 +3866,17 @@ test_reparented_teardown_preserves_original_caller() (
   fi
   if [ "$backlog_case" = 1 ]; then
     cp "$case_dir/state/task-x1.meta" "$case_dir/meta-before"
+    if [ "$prior_close" != none ]; then
+      prior_gen=teardown-test-task-x1
+      [ "$prior_close" != unrelated ] || prior_gen=older-task-incarnation
+      (
+        export FM_HOME="$case_dir/home"
+        # shellcheck source=bin/fm-backlog-transition-lib.sh
+        . "$ROOT/bin/fm-backlog-transition-lib.sh"
+        fm_backlog_close_marker_write "$case_dir/state" task-x1 "$case_dir/data" "$prior_gen" --note 'local main'
+      ) || fail 'could not seed the pre-existing close marker'
+      cp "$case_dir/state/task-x1.backlog-close" "$case_dir/close-before"
+    fi
   fi
   printf '/%s\n' "${hook#"$copy"/}" >> "$case_dir/project/.git/info/exclude"
   mkdir -p "${hook%/*}"
@@ -3852,7 +3891,7 @@ test_reparented_teardown_preserves_original_caller() (
   cat > "$case_dir/fakebin/lsof" <<'SH'
 #!/usr/bin/env bash
 [ "$1" != -- ] || exit 1
-if [ "$FM_TEST_REPARENT_MODE" = hidden ] || [ "$FM_TEST_REPARENT_MODE" = child ]; then
+if [ "$FM_TEST_REPARENT_MODE" = hidden ] || [[ "$FM_TEST_REPARENT_MODE" == child* ]]; then
   : > "$FM_TEST_REPARENT_DIR/release"
 fi
 if [ -f "$FM_TEST_REPARENT_DIR/release" ] || [ -f "$FM_TEST_REPARENT_DIR/term" ]; then
@@ -3902,13 +3941,17 @@ if [[ "/proc/$FM_TEST_REAP_CALLER/cwd" -ef "$3" ]]; then
 fi
 [ "$(wc -l < "$log" | tr -d '[:space:]')" = 1 ] || exit 0
 case "$FM_TEST_REPARENT_MODE" in
-  retry|child)
+  retry|child|child-error)
     : > "$FM_TEST_REPARENT_DIR/move-caller"
     for ((i=0; i<100; i++)); do
-      [[ ! "/proc/$FM_TEST_REAP_CALLER/cwd" -ef "$3" ]] || break
+      [ ! -f "$FM_TEST_REPARENT_DIR/caller-moved" ] || break
       sleep 0.05
     done
     [ "$i" -lt 100 ] || exit 1
+    if [ "$FM_TEST_REPARENT_MODE" = child-error ]; then
+      echo 'treehouse: simulated child return error' >&2
+      exit 1
+    fi
     ;;
   stale|stale-edit)
     : > "$FM_TEST_REPARENT_LOCK"
@@ -3973,14 +4016,14 @@ SH
       done
       exit 1
     ) || exit 1
-    if [ "$mode" = retry ] || [ "$retries" -eq 0 ] || [ "$mode" = child ]; then
+    if [ "$mode" = retry ] || [ "$retries" -eq 0 ] || [[ "$mode" == child* ]]; then
       for ((i=0; i<100; i++)); do
         [ ! -f "$case_dir/move-caller" ] || break
         sleep 0.05
       done
       [ "$i" -lt 100 ] || exit 1
       cd "$copy" || exit 1
-      if [ "$mode" = stale-edit ]; then
+      if [ "$mode" = stale-edit ] || [ "$mode" = child-error ]; then
         printf 'caller edit\n' > feature.txt
       fi
       : > "$case_dir/caller-moved"
@@ -4008,7 +4051,7 @@ SH
   fi
   if [ "$mode" = inside-backlog ]; then
     assert_absent "$case_dir/term" 'initial caller refusal let the reaper signal the leak'
-  elif [ "$mode" != child ]; then
+  elif [[ "$mode" != child* ]]; then
     wait "$leak_pid" || fail 'reparented teardown: leak did not exit through its TERM handler'
     trap - EXIT
   fi
@@ -4018,9 +4061,13 @@ SH
     assert_absent "$case_dir/state/task-x1.meta" 'reparented teardown: cleanup left the task record'
     assert_absent "$hook" 'successful teardown left the task hook behind'
   else
-    if [ "$mode" = child ]; then
+    if [[ "$mode" == child* ]]; then
       expect_code 5 "$rc" 'child teardown should propagate a caller refusal'
       assert_present "$case_dir/secondmate-home/state/child-a.meta" 'refusal retired the child task record'
+      if [ "$mode" = child-error ]; then
+        assert_grep 'treehouse: simulated child return error' "$case_dir/stderr" 'fallback fixture missed the non-lock return error'
+        [ "$(cat "$copy/feature.txt")" = 'caller edit' ] || fail 'child fallback lost the caller edit'
+      fi
     else
       expect_code 1 "$rc" "reparented teardown ($mode): cleanup should refuse an in-copy caller"
     fi
@@ -4047,6 +4094,10 @@ SH
       assert_grep 'removed provably-stale git lock' "$case_dir/stderr" 'stale retry was not reached'
     fi
     if [ "$backlog_case" = 1 ]; then
+      if [ "$prior_close" = unrelated ]; then
+        cmp -s "$case_dir/close-before" "$case_dir/state/task-x1.backlog-close" \
+          || fail 'caller refusal changed a marker for another incarnation'
+      fi
       (
         export FM_HOME="$case_dir/home"
         # shellcheck source=bin/fm-backlog-transition-lib.sh
@@ -4070,7 +4121,7 @@ SH
       fi
     fi
   fi
-  pass "cleanup protects its original caller after reparenting ($mode)"
+  pass "cleanup protects its original caller after reparenting ($mode, prior close: $prior_close)"
 )
 
 test_lsof_absent_on_non_linux_reaps_tmux_process_group() {
@@ -4874,13 +4925,17 @@ test_non_treehouse_reap_with_unverified_session orca || exit 1
 test_non_treehouse_reap_with_unverified_session tasktmp || exit 1
 test_reparented_teardown_preserves_original_caller inside || exit 1
 test_reparented_teardown_preserves_original_caller inside-backlog || exit 1
+test_reparented_teardown_preserves_original_caller inside-backlog matching || exit 1
 test_reparented_teardown_preserves_original_caller outside || exit 1
 test_reparented_teardown_preserves_original_caller retry || exit 1
 test_reparented_teardown_preserves_original_caller stale || exit 1
+test_reparented_teardown_preserves_original_caller stale matching || exit 1
+test_reparented_teardown_preserves_original_caller stale unrelated || exit 1
 test_reparented_teardown_preserves_original_caller stale-edit || exit 1
 test_reparented_teardown_preserves_original_caller hidden || exit 1
 test_reparented_teardown_preserves_original_caller before-start || exit 1
 test_reparented_teardown_preserves_original_caller child || exit 1
+test_reparented_teardown_preserves_original_caller child-error || exit 1
 test_keep_pane_without_lsof || exit 1
 test_keep_pane_retirement
 test_keep_pane_lab || fail "real Herdr keep-pane lab failed"
@@ -4946,6 +5001,8 @@ test_non_lock_return_failure_preserves_checkout moved
 test_non_lock_return_failure_preserves_checkout branch-failure
 test_non_lock_return_failure_preserves_checkout branch-success
 test_non_lock_return_failure_preserves_checkout branch-in-use
+test_non_lock_return_failure_preserves_checkout rebase-failure
+test_non_lock_return_failure_preserves_checkout rebase-success
 test_empty_retry_wait_uses_default_without_aborting
 test_fractional_legacy_retry_wait_refuses_without_arithmetic_error
 test_parked_own_run_is_aborted_before_teardown

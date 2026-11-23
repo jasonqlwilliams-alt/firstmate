@@ -1799,7 +1799,23 @@ attempt_treehouse_return() {  # <copy> <project>
 }
 
 treehouse_task_ref_is_unchanged_and_unused() {  # <git-dir> <ref> <commit>
-  [ "$(git --git-dir="$1" for-each-ref --format='%(objectname) %(worktreepath) %(symref)' "$2" 2>/dev/null)" = "$3  " ]
+  local common git_dir state contents
+  [ "$(git --git-dir="$1" for-each-ref --format='%(objectname) %(worktreepath) %(symref)' "$2" 2>/dev/null)" = "$3  " ] || return 1
+  common=$(git --git-dir="$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  for git_dir in "$common" "$common"/worktrees/*; do
+    [ -d "$git_dir" ] || continue
+    if [ -e "$git_dir/BISECT_LOG" ] && [ -e "$git_dir/BISECT_START" ]; then
+      contents=$(cat "$git_dir/BISECT_START") || return 1
+      [ "$contents" != "${2#refs/heads/}" ] && [ "$contents" != "$2" ] || return 1
+    fi
+    for state in "$git_dir/rebase-merge/head-name" "$git_dir/rebase-merge/update-refs" "$git_dir/rebase-apply/head-name"; do
+      [ -e "$state" ] || continue
+      contents=$(cat "$state") || return 1
+      if printf '%s\n' "$contents" | grep -Fxq -- "$2"; then
+        return 1
+      fi
+    done
+  done
 }
 
 # Return a worktree/home via `treehouse return --force`, tolerating a transient or
@@ -2724,6 +2740,9 @@ safe_rm_rf() {
 safe_rm_rf_child_worktree() {
   local target=$1 project=$2
   validate_child_worktree_for_removal "$target" "$project" >/dev/null || return 1
+  if [ "${3:-}" = treehouse-failed ]; then
+    require_treehouse_return_caller_outside "$target" || return "$TEARDOWN_TREEHOUSE_CALLER_REFUSED"
+  fi
   rm -rf -- "$target"
 }
 
@@ -3470,10 +3489,10 @@ cleanup_firstmate_home_children() {
           case "$child_return_rc" in
             "$TEARDOWN_TREEHOUSE_LOCK_REFUSED"|"$TEARDOWN_TREEHOUSE_CALLER_REFUSED") return "$child_return_rc" ;;
           esac
-          safe_rm_rf_child_worktree "$child_wt" "$child_proj"
+          safe_rm_rf_child_worktree "$child_wt" "$child_proj" treehouse-failed || return $?
         fi
       else
-        safe_rm_rf_child_worktree "$child_wt" "$child_proj"
+        safe_rm_rf_child_worktree "$child_wt" "$child_proj" || return $?
       fi
     fi
     remove_grok_turnend_auth "$sub_state" "$child_id" || return 1
@@ -3637,13 +3656,56 @@ if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ] && teardown_owns_worktree
   TEARDOWN_RETURNS_TASK_COPY=1
 fi
 
+# Roll the accepted legacy incarnation's stamp back to the record's exact
+# pre-stamp bytes. Uses perl - already in the teardown lifecycle's curated PATH
+# (truncate is not, and is absent on stock macOS) - and verifies the restored
+# size before reporting success, so a rollback that cannot be proven complete
+# is reported as not rolled back.
+teardown_legacy_stamp_rollback() {
+  [ "$TEARDOWN_LEGACY_PRESTAMP_SIZE" -gt 0 ] 2>/dev/null || return 1
+  perl -e 'truncate($ARGV[0], $ARGV[1]) or exit 1' -- \
+    "$META" "$TEARDOWN_LEGACY_PRESTAMP_SIZE" || return 1
+  [ "$(wc -c < "$META" | tr -d ' ')" = "$TEARDOWN_LEGACY_PRESTAMP_SIZE" ]
+}
+
+teardown_treehouse_close_matches_task() {
+  [ -e "$BACKLOG_CLOSE_MARKER" ] || [ -L "$BACKLOG_CLOSE_MARKER" ] || return 1
+  fm_backlog_close_marker_validate "$BACKLOG_CLOSE_MARKER" "$DATA" "$ID" "$STATE" \
+    && fm_backlog_meta_spawn_gen "$META" "$STATE" \
+    && [ "$FM_BACKLOG_CLOSE_VALIDATED_SPAWN_GEN" = "$FM_BACKLOG_META_SPAWN_GEN" ]
+}
+
+teardown_treehouse_backlog_rollback() {
+  if [ -n "$BACKLOG_CLOSE_BACKUP" ]; then
+    if ! fm_backlog_atomic_transition publish "$BACKLOG_CLOSE_BACKUP" "$BACKLOG_CLOSE_MARKER" "pending-close record" "$STATE"; then
+      echo "error: could not restore the prior pending backlog transition for $ID from $BACKLOG_CLOSE_BACKUP ($FM_BACKLOG_TRANSITION_ERROR)" >&2
+      BACKLOG_CLOSE_BACKUP=
+      return 1
+    fi
+  elif teardown_treehouse_close_matches_task \
+     && ! fm_backlog_close_marker_remove "$BACKLOG_CLOSE_MARKER" "$STATE"; then
+    echo "error: could not cancel the pending backlog transition for $ID ($FM_BACKLOG_TRANSITION_ERROR)" >&2
+    return 1
+  fi
+  if [ "$TEARDOWN_LEGACY_PRESTAMP_SIZE" -gt 0 ] && ! teardown_legacy_stamp_rollback; then
+    echo "error: the legacy incarnation stamp on $ID's record could not be rolled back; re-run teardown with --legacy-record after reconciling its endpoint" >&2
+    return 1
+  fi
+}
+
+BACKLOG_CLOSE_MARKER=$(fm_backlog_close_marker_path "$STATE" "$ID") || exit 1
 if teardown_owns_worktree && [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
   if validate_worktree_teardown_safety; then
     :
   else
     safety_rc=$?
     if [ "$safety_rc" -eq "$TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED" ]; then
-      cleanup_stale_lock_for_safety_check "$WT" || exit 1
+      cleanup_stale_lock_for_safety_check "$WT" || {
+        if [ "$?" -eq "$TEARDOWN_TREEHOUSE_CALLER_REFUSED" ]; then
+          teardown_treehouse_backlog_rollback || exit 1
+        fi
+        exit 1
+      }
       validate_worktree_teardown_safety || exit 1
     else
       exit 1
@@ -3686,51 +3748,26 @@ BACKLOG_TRANSITION=$TEARDOWN_BACKLOG_TRANSITION
 BACKLOG_TRANSITION_FLAGS=()
 [ "$BACKLOG_TRANSITION" = close ] || BACKLOG_TRANSITION_FLAGS=(--retain)
 BACKLOG_SKIP_REASON=
-# Roll the accepted legacy incarnation's stamp back to the record's exact
-# pre-stamp bytes. Uses perl - already in the teardown lifecycle's curated PATH
-# (truncate is not, and is absent on stock macOS) - and verifies the restored
-# size before reporting success, so a rollback that cannot be proven complete
-# is reported as not rolled back.
-teardown_legacy_stamp_rollback() {
-  [ "$TEARDOWN_LEGACY_PRESTAMP_SIZE" -gt 0 ] 2>/dev/null || return 1
-  perl -e 'truncate($ARGV[0], $ARGV[1]) or exit 1' -- \
-    "$META" "$TEARDOWN_LEGACY_PRESTAMP_SIZE" || return 1
-  [ "$(wc -c < "$META" | tr -d ' ')" = "$TEARDOWN_LEGACY_PRESTAMP_SIZE" ]
-}
-
-teardown_treehouse_backlog_rollback() {
-  [ "$BACKLOG_CLOSED" = 1 ] || return 0
-  if [ -n "$BACKLOG_CLOSE_BACKUP" ]; then
-    if ! fm_backlog_atomic_transition publish "$BACKLOG_CLOSE_BACKUP" "$BACKLOG_CLOSE_MARKER" "pending-close record" "$STATE"; then
-      echo "error: could not restore the prior pending backlog transition for $ID from $BACKLOG_CLOSE_BACKUP ($FM_BACKLOG_TRANSITION_ERROR)" >&2
-      BACKLOG_CLOSE_BACKUP=
-      return 1
-    fi
-  elif ! fm_backlog_close_marker_remove "$BACKLOG_CLOSE_MARKER" "$STATE"; then
-    echo "error: could not cancel the pending backlog transition for $ID ($FM_BACKLOG_TRANSITION_ERROR)" >&2
-    return 1
-  fi
-  if [ "$TEARDOWN_LEGACY_PRESTAMP_SIZE" -gt 0 ] && ! teardown_legacy_stamp_rollback; then
-    echo "error: the legacy incarnation stamp on $ID's record could not be rolled back; re-run teardown with --legacy-record after reconciling its endpoint" >&2
-    return 1
-  fi
-}
-
+if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ] \
+   && { [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ] || [ -e "$BACKLOG_CLOSE_MARKER" ] || [ -L "$BACKLOG_CLOSE_MARKER" ]; }; then
+  require_treehouse_return_caller_outside "$WT" || {
+    teardown_treehouse_backlog_rollback || exit 1
+    exit 1
+  }
+fi
 if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
   backlog_done_args || {
     echo "error: the pending backlog $BACKLOG_TRANSITION for $ID is not replayable; refusing destructive teardown" >&2
     exit 1
   }
-  BACKLOG_CLOSE_MARKER=$(fm_backlog_close_marker_path "$STATE" "$ID") || exit 1
-  if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
-    require_treehouse_return_caller_outside "$WT" || exit 1
-    if [ -e "$BACKLOG_CLOSE_MARKER" ] || [ -L "$BACKLOG_CLOSE_MARKER" ]; then
-      if ! fm_backlog_record_present "$BACKLOG_CLOSE_MARKER" "pending-close record" "$STATE" \
-         || ! BACKLOG_CLOSE_BACKUP=$(mktemp "$STATE/.$ID.backlog-close-before.XXXXXX") \
-         || ! cp "$BACKLOG_CLOSE_MARKER" "$BACKLOG_CLOSE_BACKUP"; then
-        echo "error: could not preserve the prior pending backlog transition for $ID" >&2
-        exit 1
-      fi
+  if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ] \
+     && { [ -e "$BACKLOG_CLOSE_MARKER" ] || [ -L "$BACKLOG_CLOSE_MARKER" ]; } \
+     && ! teardown_treehouse_close_matches_task; then
+    if ! fm_backlog_record_present "$BACKLOG_CLOSE_MARKER" "pending-close record" "$STATE" \
+       || ! BACKLOG_CLOSE_BACKUP=$(mktemp "$STATE/.$ID.backlog-close-before.XXXXXX") \
+       || ! cp "$BACKLOG_CLOSE_MARKER" "$BACKLOG_CLOSE_BACKUP"; then
+      echo "error: could not preserve the prior pending backlog transition for $ID" >&2
+      exit 1
     fi
   fi
 
