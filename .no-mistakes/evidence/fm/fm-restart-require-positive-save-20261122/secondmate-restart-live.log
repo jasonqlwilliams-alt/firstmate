@@ -1,0 +1,65 @@
+Target 28731bab6709bea15e8f63348f3e4940c4b1e793, 2026-11-23T23:44:04.673850+00:00
+Real Firstmate and Pi 1.5.0. Local tmux 3.7c. Remote Herdr 0.9.5 over OpenSSH on isolated loopback. Reply content is synthetic and supplied through the real reporting interface or parent status stream.
+lsave original Pi pid=779 tty=114x40
+lblock original Pi pid=3167 tty=114x40
+lambig original Pi pid=5767 tty=114x40
+lcorrect original Pi pid=8503 tty=114x40
+lpartial original Pi pid=11406 tty=114x40
+lscan original Pi pid=14446 tty=114x40
+lother original Pi pid=17630 tty=114x40
+lclose original Pi pid=20939 tty=114x40
+$ ./bin/fm-secondmate-restart.sh lsave lblock lambig lcorrect lpartial lscan lother lclose
+lsave received durable save request #001 corr=28d659253e08299d; original Pi still running.
+lsave parent status bytes=b'done [corr=28d659253e08299d]: Saved all open work. (via-helper)\n'
+lblock received durable save request #001 corr=a1a75fa02ce35553; original Pi still running.
+lblock parent status bytes=b'blocked [corr=a1a75fa02ce35553]: The task store refused the write. (via-helper)\n'
+lambig received durable save request #001 corr=4289c3a392bdf496; original Pi still running.
+lambig parent status bytes=b'done [corr=4289c3a392bdf496]: I looked at the open records. (via-helper)\n'
+lcorrect received durable save request #001 corr=7cd26ab2340858a4; original Pi still running.
+lcorrect parent status bytes=b'done [corr=7cd26ab2340858a4]: Saved all open work.\nblocked: [key=save] [corr=7cd26ab2340858a4] One record was never written.\n'
+lpartial received durable save request #001 corr=212f237402ebe303; original Pi still running.
+lpartial parent status bytes=b'done [corr=212f237402ebe303]: Saved all open work.'
+lscan received durable save request #001 corr=ff772003d2b8eed5; original Pi still running.
+lscan kernel status-file read returned EIO
+lother received durable save request #001 corr=619ded763707182a; original Pi still running.
+lother parent status bytes=b'done [corr=0101010101010101]: Audit complete. Save corr=619ded763707182a is still pending.\n'
+lclose received durable save request #001 corr=5fd8e62323250f63; original Pi still running.
+lclose parent status bytes=b'resolved [key=pending-reply-5fd8e62323250f63]: pending-reply-resolved: task=lclose pending-reply-id=5fd8e62323250f63 via=operator-resolve-key\n'
+stopped: lblock: it answered that its open work is not saved: The task store refused the write. (via-helper), so its agent was left running untouched
+stopped: lambig: its answer did not confirm that its open work is saved: I looked at the open records. (via-helper), so its agent was left running untouched
+stopped: lcorrect: it answered that its open work is not saved: [corr=7cd26ab2340858a4] One record was never written., so its agent was left running untouched
+stopped: lpartial: its answer did not confirm that its open work is saved: Saved all open work. [unterminated status line], so its agent was left running untouched
+cat: <disposable-lab>/parent/state/lscan.status: Input/output error
+<disposable-lab>/src/bin/fm-pending-reply-lib.sh: line 678: read: 0: read error: Input/output error
+<disposable-lab>/src/bin/fm-pending-reply-lib.sh: line 678: line: unbound variable
+stopped: lscan: its answer did not confirm that its open work is saved: the parent status scan failed, so its agent was left running untouched
+restarted: lsave (pi)
+nudged: lother: it did not confirm within 20s that its open work is written down, so its conversation was not spent
+nudged: lclose: it did not confirm within 20s that its open work is written down, so its conversation was not spent
+summary: 1 of 8 restarted, 2 nudged, 0 unreached, 5 stopped
+CLI exit=3
+PASS lsave: original Pi pid=779 exited, replacement pid=46852 is live, saved open record remains, 1 inbox record
+PASS lblock: same Pi pid=3167 still running, 1 inbox record(s)
+PASS lambig: same Pi pid=5767 still running, 1 inbox record(s)
+PASS lcorrect: same Pi pid=8503 still running, 1 inbox record(s)
+PASS lpartial: same Pi pid=11406 still running, 1 inbox record(s)
+PASS lscan: same Pi pid=14446 still running, 1 inbox record(s)
+PASS lother: same Pi pid=17630 still running, 2 inbox record(s)
+PASS lclose: same Pi pid=20939 still running, 2 inbox record(s)
+local batch finished
+rsave original Pi pid=26250 tty=119x40
+rblock original Pi pid=31626 tty=119x40
+$ ./bin/fm-secondmate-restart.sh rsave rblock
+rsave received durable save request #001 corr=fbb58ac2c3c2cf9a; original Pi still running.
+rsave host-local reply bytes=b'done [corr=fbb58ac2c3c2cf9a]: Saved all open work. (via-helper)\n'
+rsave mirrored parent status bytes=b'done [corr=fbb58ac2c3c2cf9a]: Saved all open work. (via-helper)\n'
+rblock received durable save request #001 corr=27e360d0ab71b0ab; original Pi still running.
+rblock host-local reply bytes=b'blocked [corr=27e360d0ab71b0ab]: The remote record could not be written. (via-helper)\n'
+rblock mirrored parent status bytes=b'blocked [corr=27e360d0ab71b0ab]: The remote record could not be written. (via-helper)\n'
+stopped: rblock: it answered that its open work is not saved: The remote record could not be written. (via-helper), so its agent was left running untouched
+restarted: rsave on save-gate-local (pi)
+summary: 1 of 2 restarted, 0 nudged, 0 unreached, 1 stopped
+CLI exit=3
+PASS rsave: original Pi pid=26250 exited, replacement pid=75856 is live, saved open record remains, 1 inbox record
+PASS rblock: same Pi pid=31626 still running, 1 inbox record(s)
+remote batch finished
