@@ -1422,9 +1422,9 @@ SH
 )
 
 test_stalled_remote_observation_liveness() (
-  local dir state corr rec i watcher_pid hook_rc
+  local mode=${1:-poll} dir state corr rec i watcher_pid hook_rc ssh_pid='' ssh_status
   local arm_pid='' RUN_AUTOARM_BG_PID=''
-  dir=$(make_primary_dir "$TMP_ROOT/stalled-observation")
+  dir=$(make_primary_dir "$TMP_ROOT/stalled-observation-$mode")
   state="$dir/state"
   cp -R "$ROOT/bin/." "$dir/bin/" || fail "could not install watcher scripts"
   cp "$ROOT/.tasks.toml" "$dir/.tasks.toml" || fail "could not install backlog configuration"
@@ -1447,7 +1447,7 @@ test_stalled_remote_observation_liveness() (
   cat > "$FM_SSH_BIN" <<'SH'
 #!/usr/bin/env bash
 if [ ! -e "$FM_HOME/state/observing" ]; then
-  touch "$FM_HOME/state/observing"
+  echo "$$" > "$FM_HOME/state/observing"
   printf 'idle'
   exec sleep 30
 fi
@@ -1469,12 +1469,46 @@ SH
       kill "$RUN_AUTOARM_BG_PID" 2>/dev/null || true
       wait "$RUN_AUTOARM_BG_PID" 2>/dev/null || true
     fi
+    if [ -n "$ssh_pid" ]; then kill "$ssh_pid" 2>/dev/null || true; fi
   }
   trap cleanup_observation EXIT
   trap 'exit 1' HUP INT TERM
 
+  if [ "$mode" = lease ]; then
+    export FM_GUARD_GRACE=60 FM_CLAUDE_AUTOARM_LEASE_SECONDS=5
+    run_autoarm "$dir" > "$dir/hook.out"
+    hook_rc=$?
+    ssh_pid=$(cat "$state/observing") || fail "lease ended before the watcher entered the remote observation"
+    expect_code 2 "$hook_rc" "an active home must receive the lease renewal wake"
+    assert_grep 'check: claude-lease-renewal' "$dir/hook.out" "expiry must use the ordinary lease handoff"
+    ssh_status=$(ps -o stat= -p "$ssh_pid" 2>/dev/null | tr -d '[:space:]')
+    case "$ssh_status" in ''|Z*) ;; *) fail "SSH survived the watcher's lease";; esac
+    ssh_pid=
+    [ ! -e "$state/.watch.lock" ] || fail "lease expiry left a watcher lock behind"
+    [ -z "$(fm_pending_reply_get "$rec" request_turn_completed_epoch)" ] \
+      || fail "a cancelled observation must not prove the mate was idle"
+    pass "auto-arm: lease expiry terminates the in-flight remote observation"
+    return 0
+  fi
+
   "$dir/bin/fm-watch-arm.sh" > "$dir/outer.out" 2>&1 &
   arm_pid=$!
+  if [ "$mode" = stop ]; then
+    for ((i=0; i<160; i++)); do
+      [ ! -s "$state/observing" ] || break
+      kill -0 "$arm_pid" 2>/dev/null || break
+      sleep 0.05
+    done
+    ssh_pid=$(cat "$state/observing") || fail "the watcher did not enter the remote observation"
+    kill -TERM "$arm_pid" || fail "could not stop the arm"
+    wait "$arm_pid" 2>/dev/null || true
+    arm_pid=
+    ! kill -0 "$ssh_pid" 2>/dev/null || fail "a normally stopped watcher did not reap SSH"
+    ssh_pid=
+    [ ! -e "$state/.watch.lock" ] || fail "a normally stopped watcher did not release its lock"
+    pass "auto-arm: a normally stopped watcher reaps its remote observation"
+    return 0
+  fi
   for ((i=0; i<160; i++)); do
     [ ! -e "$state/checked" ] || break
     kill -0 "$arm_pid" 2>/dev/null || break
@@ -1525,6 +1559,8 @@ test_watcher_keeps_operation_budgets() (
   fm_write_meta "$state/mate.meta" 'kind=secondmate' 'remote_host=remote-mac'
   # shellcheck source=/dev/null
   . "$dir/bin/fm-pending-reply-lib.sh"
+  # shellcheck source=bin/fm-timeout-lib.sh
+  . "$dir/bin/fm-timeout-lib.sh"
   corr=$(fm_pending_reply_create "$dir" "$state" mate 'missing report') || fail "could not create reply expectation"
   fm_pending_reply_mark_delivered "$state" "$corr" || fail "could not record delivery"
   fm_pending_reply_mark_turn_completed "$state" "$corr" request || fail "could not record turn completion"
@@ -1573,6 +1609,8 @@ SH
 )
 
 test_watcher_keeps_operation_budgets || exit $?
+test_stalled_remote_observation_liveness lease || exit $?
+test_stalled_remote_observation_liveness stop || exit $?
 test_stalled_remote_observation_liveness || exit $?
 test_slow_check_sweep_liveness healthy || exit $?
 test_slow_check_sweep_liveness stalled || exit $?

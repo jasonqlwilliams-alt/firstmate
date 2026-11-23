@@ -36,6 +36,7 @@ A non-zero exit tells the bash caller to fall back to plain polling for this
 cycle (the permanent fail-closed backstop), never to go silent.
 """
 import json
+import os
 import socket
 import sys
 import time
@@ -77,6 +78,7 @@ def main(argv):
     sock_path = argv[1]
     try:
         timeout = float(argv[2])
+        progress_interval = float(os.environ.get("FM_BACKEND_EVENTS_PROGRESS_INTERVAL", "0"))
     except ValueError:
         return 2
     panes = argv[3:]
@@ -106,11 +108,24 @@ def main(argv):
     start = time.monotonic()
     deadline = start + timeout
     buf = b""
+    next_progress = start + progress_interval if progress_interval > 0 else float("inf")
+
+    def read_until(limit):
+        nonlocal buf, next_progress
+        while True:
+            line, buf, outcome = _read_line(sock, buf, min(limit, next_progress))
+            now = time.monotonic()
+            if next_progress <= now < limit and outcome in ("line", "timeout"):
+                print("@waiting", flush=True)
+                next_progress = now + progress_interval
+                if outcome == "timeout":
+                    continue
+            return line, outcome
 
     # Bounded wait for the subscription_started ack (its own short budget, but
     # never past the overall deadline).
     ack_deadline = min(deadline, start + ACK_TIMEOUT)
-    line, buf, outcome = _read_line(sock, buf, ack_deadline)
+    line, outcome = read_until(ack_deadline)
     if line is None:
         return 2
     try:
@@ -126,7 +141,7 @@ def main(argv):
 
     # Stream projected events until the deadline or the server closes.
     while True:
-        line, buf, outcome = _read_line(sock, buf, deadline)
+        line, outcome = read_until(deadline)
         if line is None:
             return 0 if outcome == "timeout" else 4
         try:

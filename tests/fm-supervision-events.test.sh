@@ -5,8 +5,7 @@
 # guard lets this file source it to load
 # the functions WITHOUT acquiring the singleton lock or entering the blocking
 # loop; wake/sleep and the backend dispatchers are overridden so the exemptions,
-# capability memo, and fail-closed disable are asserted deterministically with no
-# real herdr, watcher process, or blocking sleeps.
+# capability memo, and fail-closed disable are asserted without launching Herdr.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -144,6 +143,66 @@ printf 'paused: waiting on the upstream release\n' > "$STATE_DIR/a-old.status"
 handle_push_transition herdr default "$(mkrec wG:pQ blocked)"
 [ -s "$WAKE_LOG" ] || fail "the old task's pause suppressed the live worker's blocked event"
 pass "handle_push_transition: a stale record sharing the slot cannot displace the bound worker"
+
+test_native_wait_keeps_subscription() (
+  local server i
+  reset_state
+  WATCHER_WAIT_LIMIT=2
+  POLL=15
+  fm_write_meta "$STATE_DIR/tk3.meta" 'window=default:wG:pQ' 'backend=herdr' 'kind=ship' 'herdr_terminal_id=term-worker'
+  fm_backend_herdr_commit_transition "$STATE_DIR" default "$(mkrec wG:pQ blocked)" \
+    || fail "could not record the previous blocked edge"
+  fm_backend_events_capable() { return 0; }
+  fm_backend_herdr_socket_path() { printf '%s\n' "$TMP/native.sock"; }
+  fm_backend_herdr_agent_status_raw() { printf '%s\n' blocked; }
+  fm_backend_herdr_event_reader_cmd() { printf '%s\n' python3 "$ROOT/bin/backends/herdr-eventwait.py"; }
+  watcher_publish_beat() { printf '%s\n' beat >> "$TMP/beats"; }
+
+  python3 - "$TMP/native.sock" "$TMP/subscriptions" <<'PY' &
+import json
+import socket
+import sys
+import time
+
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+    server.bind(sys.argv[1])
+    server.listen()
+    server.settimeout(10)
+    connection, _ = server.accept()
+    with connection, connection.makefile("r") as requests:
+        connection.settimeout(10)
+        request = json.loads(requests.readline())
+        assert request["method"] == "events.subscribe"
+        with open(sys.argv[2], "a") as subscriptions:
+            subscriptions.write("subscribed\n")
+        time.sleep(3)
+        connection.sendall(b'{"result":{"type":"subscription_started"}}\n')
+        time.sleep(2)
+        for status in ("working", "blocked"):
+            event = {
+                "event": "pane.agent_status_changed",
+                "data": {"pane_id": "wG:pQ", "workspace_id": "wG", "agent_status": status, "agent": "claude"},
+            }
+            connection.sendall((json.dumps(event) + "\n").encode())
+PY
+  server=$!
+  trap 'kill "$server" 2>/dev/null || true; wait "$server" 2>/dev/null || true' EXIT
+  for ((i=0; i<100; i++)); do
+    [ ! -S "$TMP/native.sock" ] || break
+    command sleep 0.02
+  done
+  [ -S "$TMP/native.sock" ] || fail "fixture subscription socket did not open"
+  event_wait_or_sleep
+  wait "$server" || fail "fixture server could not deliver state transitions"
+  trap - EXIT
+  [ "$(wc -l < "$TMP/subscriptions" | tr -d ' ')" = 1 ] || fail "native wait resubscribed before the poll ended"
+  [ "$(wc -l < "$TMP/beats" | tr -d ' ')" -ge 2 ] || fail "native wait did not report progress across the grace window"
+  [ ! -s "$SLEEP_LOG" ] || fail "the delayed acknowledgement caused a fallback to polling"
+  assert_grep 'herdr: agent blocked' "$WAKE_LOG" "the working edge must rearm delivery of the second blocked edge"
+  pass "event_wait_or_sleep: delayed acknowledgement and blocked-again delivery share one subscription"
+)
+
+test_native_wait_keeps_subscription || exit $?
 
 # --- event_wait_or_sleep: secondmate windows are excluded from the pane list --
 

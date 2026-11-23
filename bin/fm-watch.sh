@@ -1551,13 +1551,17 @@ run_check() {
 FM_ACTIVE_CHECK_PID=
 FM_ACTIVE_CHECK_PGID=
 FM_CHECK_OUTPUT=
+FM_CHECK_OUTPUT_DIR=
 FM_CHECK_RESULT=
+FM_CAPTURE_RC=
 FM_CHECK_SIGNAL_PENDING=
 FM_PR_POLL_CLOSED_STAGE=
 
 fm_check_output_cleanup() {
   [ -z "$FM_CHECK_OUTPUT" ] || rm -f -- "$FM_CHECK_OUTPUT"
+  [ -z "$FM_CHECK_OUTPUT_DIR" ] || rmdir -- "$FM_CHECK_OUTPUT_DIR"
   FM_CHECK_OUTPUT=
+  FM_CHECK_OUTPUT_DIR=
 }
 
 fm_pr_closure_stage_cleanup() {
@@ -1566,12 +1570,14 @@ fm_pr_closure_stage_cleanup() {
 }
 
 fm_active_check_stop() {
-  local pid=${FM_ACTIVE_CHECK_PID:-} pgid=${FM_ACTIVE_CHECK_PGID:-} i
+  local pid=${FM_ACTIVE_CHECK_PID:-} pgid=${FM_ACTIVE_CHECK_PGID:-} target i
   [ -n "$pid" ] || [ -n "$pgid" ] || return 0
+  target=${pgid:+-$pgid}
+  target=${target:-$pid}
   [ -z "$pgid" ] || kill -TERM -- "-$pgid" 2>/dev/null || true
   [ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null || true
   i=0
-  while [ -n "$pgid" ] && kill -0 -- "-$pgid" 2>/dev/null && [ "$i" -lt 20 ]; do
+  while kill -0 -- "$target" 2>/dev/null && [ "$i" -lt 20 ]; do
     sleep 0.01
     i=$((i + 1))
   done
@@ -1590,20 +1596,34 @@ fm_active_check_stop() {
   FM_ACTIVE_CHECK_PGID=
 }
 
-run_check_capture() {
-  local pgid
+watcher_start_capture() {
+  local capture_mode=$1 pgid
+  shift
   fm_check_output_cleanup
   FM_CHECK_RESULT=
-  FM_CHECK_OUTPUT=$(mktemp "$STATE/.fm-check-output.XXXXXX") || return 1
-  chmod 0600 "$FM_CHECK_OUTPUT" || { fm_check_output_cleanup; return 1; }
+  if [ "$capture_mode" = stream ]; then
+    FM_CHECK_OUTPUT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-watch-events.XXXXXX") || return 1
+    FM_CHECK_OUTPUT="$FM_CHECK_OUTPUT_DIR/events"
+    mkfifo -m 0600 "$FM_CHECK_OUTPUT" || { fm_check_output_cleanup; return 1; }
+  else
+    FM_CHECK_OUTPUT=$(mktemp "$STATE/.fm-check-output.XXXXXX") || return 1
+    chmod 0600 "$FM_CHECK_OUTPUT" || { fm_check_output_cleanup; return 1; }
+  fi
   FM_CHECK_SIGNAL_PENDING=
   trap 'FM_CHECK_SIGNAL_PENDING=1' HUP INT TERM
-  set -m
-  ( FM_CHECK_OWNED_GROUP=1 run_check_process "$@" ) > "$FM_CHECK_OUTPUT" 2>/dev/null &
+  if [ "$capture_mode" = check ]; then
+    set -m
+  else
+    set +m
+  fi
+  ( set +m; "$@" ) < /dev/null > "$FM_CHECK_OUTPUT" 2>/dev/null &
   FM_ACTIVE_CHECK_PID=$!
-  FM_ACTIVE_CHECK_PGID=$FM_ACTIVE_CHECK_PID
-  set +m
-  pgid=$(ps -o pgid= -p "$FM_ACTIVE_CHECK_PID" 2>/dev/null | tr -d '[:space:]')
+  pgid=
+  if [ "$capture_mode" = check ]; then
+    FM_ACTIVE_CHECK_PGID=$FM_ACTIVE_CHECK_PID
+    set +m
+    pgid=$(ps -o pgid= -p "$FM_ACTIVE_CHECK_PID" 2>/dev/null | tr -d '[:space:]')
+  fi
   trap 'exit 1' HUP INT TERM
   if [ -n "$pgid" ] && [ "$pgid" != "$FM_ACTIVE_CHECK_PGID" ]; then
     fm_active_check_stop || true
@@ -1611,11 +1631,39 @@ run_check_capture() {
     return 1
   fi
   [ -z "$FM_CHECK_SIGNAL_PENDING" ] || exit 1
-  wait "$FM_ACTIVE_CHECK_PID" 2>/dev/null || true
+}
+
+watcher_finish_capture() {
+  FM_CAPTURE_RC=0
+  wait "$FM_ACTIVE_CHECK_PID" 2>/dev/null || FM_CAPTURE_RC=$?
   FM_ACTIVE_CHECK_PID=
   fm_active_check_stop || return 1
-  FM_CHECK_RESULT=$(cat "$FM_CHECK_OUTPUT" 2>/dev/null || true)
+  if [ -f "$FM_CHECK_OUTPUT" ]; then
+    FM_CHECK_RESULT=$(cat "$FM_CHECK_OUTPUT" 2>/dev/null || true)
+  fi
   fm_check_output_cleanup
+}
+
+run_check_capture() {
+  FM_CHECK_OWNED_GROUP=1 watcher_start_capture check run_check_process "$@" || return 1
+  watcher_finish_capture
+}
+
+watcher_remote_observe() {
+  local deadline
+  FM_PENDING_REPLY_OBSERVATION=unknown
+  watcher_start_capture file exec "$@" || return 1
+  deadline=$((SECONDS + WATCHER_WAIT_LIMIT))
+  while kill -0 "$FM_ACTIVE_CHECK_PID" 2>/dev/null; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      fm_active_check_stop || return 1
+      fm_check_output_cleanup
+      return 0
+    fi
+    command sleep 0.05
+  done
+  watcher_finish_capture || return 1
+  [ "$FM_CAPTURE_RC" -ne 0 ] || FM_PENDING_REPLY_OBSERVATION=$FM_CHECK_RESULT
 }
 
 # 0 when any signaled status file carries a captain-relevant event in the bytes
@@ -1728,35 +1776,23 @@ watcher_wait_slice() {
 }
 
 watcher_wait() {
-  local remaining=$1 slice rec rc
-  shift
+  local remaining=$1 slice
   while :; do
     slice=$(watcher_wait_slice "$remaining")
-    if [ "$#" -gt 0 ]; then
-      rec=$(FM_BACKEND_EVENTS_CAPABILITY_CONFIRMED=1 \
-        fm_backend_wait_transition "$1" "$2" "$slice" "$STATE" "${@:3}")
-      rc=$?
-      case "$rc" in
-        0)
-          _event_cap_fails=0
-          handle_push_transition "$1" "$2" "$rec"
-          return
-          ;;
-        2)
-          _event_cap_fails=$((_event_cap_fails + 1))
-          [ "$_event_cap_fails" -lt "$EVENT_CAP_FAIL_MAX" ] || _event_cap_ok=0
-          watcher_publish_beat || exit 0
-          set --
-          sleep "$slice"
-          ;;
-        *) _event_cap_fails=0 ;;
-      esac
-    else
-      sleep "$slice"
-    fi
+    sleep "$slice"
     [ "$slice" != "$remaining" ] || return 0
     watcher_publish_beat || exit 0
     remaining=$(awk -v seconds="$remaining" -v slice="$slice" 'BEGIN { print (seconds - slice) }')
+  done
+}
+
+watcher_event_progress() {
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      '@waiting') watcher_publish_beat || exit 0 ;;
+      *) FM_CHECK_RESULT=$line ;;
+    esac
   done
 }
 
@@ -1817,7 +1853,24 @@ event_wait_or_sleep() {
     return
   fi
 
-  watcher_wait "$POLL" "$first_backend" "$first_session" "${windows[@]}"
+  FM_BACKEND_EVENTS_CAPABILITY_CONFIRMED=1 FM_BACKEND_EVENTS_PROGRESS_INTERVAL="$WATCHER_WAIT_LIMIT" \
+    watcher_start_capture stream fm_backend_wait_transition "$first_backend" "$first_session" "$POLL" \
+    "$STATE" "${windows[@]}" || exit 1
+  watcher_event_progress < "$FM_CHECK_OUTPUT"
+  watcher_finish_capture || exit 1
+  case "$FM_CAPTURE_RC" in
+    0)
+      _event_cap_fails=0
+      handle_push_transition "$first_backend" "$first_session" "$FM_CHECK_RESULT"
+      ;;
+    2)
+      _event_cap_fails=$((_event_cap_fails + 1))
+      [ "$_event_cap_fails" -lt "$EVENT_CAP_FAIL_MAX" ] || _event_cap_ok=0
+      watcher_publish_beat || exit 0
+      watcher_wait "$POLL"
+      ;;
+    *) _event_cap_fails=0 ;;
+  esac
 }
 
 # --- Main entry: the runtime below runs only when this file is executed as a
@@ -2051,7 +2104,7 @@ while :; do
   # parent reports, observe backend busy/idle turn completion, send one recovery
   # repost after grace, and escalate once if the recovery turn is also missed.
   # No conversation scraping; unresolved records are never silently expired.
-  fm_pending_reply_tick "$STATE" "$WATCHER_WAIT_LIMIT" watcher_publish_beat || exit 0
+  fm_pending_reply_tick "$STATE" watcher_remote_observe watcher_publish_beat || exit 0
   watcher_publish_beat || exit 0
 
   # A live secondmate endpoint does not prove that its own wake loop is alive.

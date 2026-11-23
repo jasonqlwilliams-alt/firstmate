@@ -162,7 +162,7 @@ The file is size-capped through `FM_WATCH_CYCLE_LOG_MAX_BYTES` and `FM_WATCH_CYC
 `state/.watch-triage.log` remains only the watcher's bounded absorbed-wake debug log and carries no lifecycle semantics.
 
 The default 300-second grace is unchanged.
-The watcher process updates `state/.last-watcher-beat` at cycle checkpoints, including after each check it reaps and between slices of long signal or terminal waits.
+The watcher process updates `state/.last-watcher-beat` at cycle checkpoints, including after each check it reaps, between slices of long sleeps, and as the native event reader reports progress on its open subscription.
 It caps remote pending-reply observations at half the applicable grace, with a ceiling of 150 seconds.
 An observation that times out supplies no completion evidence and is retried on a later cycle while the reply is still pending.
 A short configured grace can expire during triage or other work that runs under its own timeout.

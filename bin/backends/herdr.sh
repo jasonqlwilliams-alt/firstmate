@@ -3970,12 +3970,22 @@ fm_backend_herdr_wait_transition() {  # <session> <timeout_secs> <state_dir> <pa
   done < <(fm_backend_herdr_event_reader_cmd)
   [ "${#reader[@]}" -gt 0 ] || return 2
 
-  local fifo_dir fifo reader_pid line ws status agent raw record hit rc=1 reader_rc=0
+  local fifo_dir fifo reader_pid='' line ws status agent raw record hit rc=1 reader_rc=0
   fifo_dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-herdr-eventwait.XXXXXX") || return 2
   fifo="$fifo_dir/events"
   if ! mkfifo "$fifo" 2>/dev/null; then
     rm -rf "$fifo_dir" 2>/dev/null || true
     return 2
+  fi
+  if [ -n "${FM_BACKEND_EVENTS_PROGRESS_INTERVAL:-}" ]; then
+    trap '
+      if [ -n "$reader_pid" ]; then
+        kill "$reader_pid" 2>/dev/null || true
+        wait "$reader_pid" 2>/dev/null || true
+      fi
+      rm -rf "$fifo_dir"
+      exit 2
+    ' HUP INT TERM
   fi
   "${reader[@]}" "$sock" "$timeout" "${pane_ids[@]}" > "$fifo" 2>/dev/null &
   reader_pid=$!
@@ -3985,9 +3995,14 @@ fm_backend_herdr_wait_transition() {  # <session> <timeout_secs> <state_dir> <pa
     rm -rf "$fifo_dir" 2>/dev/null || true
     return 2
   fi
-  if ! IFS= read -r -u 9 line || [ "$line" != "@subscribed" ]; then
-    rc=2
-  fi
+  rc=2
+  while IFS= read -r -u 9 line; do
+    case "$line" in
+      '@waiting') printf '%s\n' "$line" ;;
+      '@subscribed') rc=1; break ;;
+      *) break ;;
+    esac
+  done
 
   # Level reconcile on (re)connect (report section 3d): a pane already `blocked`
   # during the gap since the last subscription is returned now, once, while
@@ -4020,6 +4035,10 @@ fm_backend_herdr_wait_transition() {  # <session> <timeout_secs> <state_dir> <pa
   # status into the wrong column. `cut` preserves empty fields.
   while [ "$rc" -eq 1 ] && IFS= read -r line <&9; do
     [ -n "$line" ] || continue
+    if [ "$line" = '@waiting' ]; then
+      printf '%s\n' "$line"
+      continue
+    fi
     pane_id=$(printf '%s' "$line" | cut -f1)
     ws=$(printf '%s' "$line" | cut -f2)
     status=$(printf '%s' "$line" | cut -f3)
