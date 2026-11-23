@@ -1114,11 +1114,18 @@ if [ "${FM_TEARDOWN_GUARD_DONE:-0}" != 1 ]; then
 fi
 HOME_PATH=$(grep '^home=' "$META" | cut -d= -f2- || true)
 PR_URL=$(grep '^pr=' "$META" | tail -1 | cut -d= -f2- || true)
+task_tmp_is_private() {
+  local path=$1 task_id=$2
+  case "$path" in
+    "/tmp/fm-$task_id"|*/) return 1 ;;
+    /*) ;;
+    *) return 1 ;;
+  esac
+  [ -d "$path" ] && [ ! -L "$path" ] && [ -O "$path" ]
+}
+
 TASK_TMP=$(fm_meta_get "$META" tasktmp)
-case "$TASK_TMP" in
-  "/tmp/fm-$ID") TASK_TMP= ;;
-esac
-[ ! -L "$TASK_TMP" ] || TASK_TMP=
+task_tmp_is_private "$TASK_TMP" "$ID" || TASK_TMP=
 BUSY_GEN=$(fm_meta_get "$META" busy_gen)
 if [ -z "$BUSY_GEN" ]; then
   BUSY_GEN=$(cat "$STATE/$ID.busy-gen" 2>/dev/null || true)
@@ -3300,6 +3307,7 @@ preflight_firstmate_home_herdr_children() {  # <home>
 
 cleanup_firstmate_home_children() {
   local home=$1 sub_state child_meta child_id child_t child_wt child_proj child_kind child_home child_backend child_orca_worktree_id child_return_rc child_busy_gen child_owner_rc
+  local child_tmp
   sub_state="$home/state"
   [ -d "$sub_state" ] || return 0
   for child_meta in "$sub_state"/*.meta; do
@@ -3398,6 +3406,10 @@ cleanup_firstmate_home_children() {
     fi
     retire_busy_state "$sub_state" "$child_id" "$child_busy_gen" || return 1
     status_retire_presentation_task "$sub_state" "$child_id" || return 1
+    child_tmp=$(fm_meta_get "$child_meta" tasktmp)
+    if task_tmp_is_private "$child_tmp" "$child_id"; then
+      rm -rf -- "$child_tmp" || return 1
+    fi
     fm_backlog_atomic_transition remove "$sub_state/$child_id.meta" "task record" "$sub_state" || return 1
     rm -f "$sub_state/$child_id.turn-ended" "$sub_state/$child_id.progress" \
       "$sub_state/$child_id.pi-ext.ts" "$sub_state/$child_id.omp-ext.ts" \
@@ -3850,7 +3862,9 @@ remove_grok_turnend_auth "$STATE" "$ID" || exit 1
 remove_kimi_turnend_auth "$STATE" "$ID" || exit 1
 fm_backend_clear_transition "$BACKEND" "$STATE" "$T" || true
 # Remove the private task temp root before removing its record below.
-[ -n "$TASK_TMP" ] && rm -rf -- "$TASK_TMP"
+if task_tmp_is_private "$TASK_TMP" "$ID"; then
+  rm -rf -- "$TASK_TMP"
+fi
 remove_pr_poll_artifacts "$STATE" "$ID" || exit 1
 retire_busy_state "$STATE" "$ID" "$BUSY_GEN" || exit 1
 status_retire_presentation_task "$STATE" "$ID" || exit 1
