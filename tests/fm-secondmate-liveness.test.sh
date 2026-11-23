@@ -301,6 +301,16 @@ case "${1:-}" in
     [ "${1:-}" = new-window ] && rm -f "${FM_TMUX_CALL_LOG}.killed"
     exit 0
     ;;
+  send-keys)
+    if [ "${FM_TEST_FAIL_LAUNCH:-0}" = 1 ]; then
+      for a in "$@"; do
+        if [ "$a" = -l ]; then
+          printf 'fixture rejected launch text\n' >&2
+          exit 1
+        fi
+      done
+    fi
+    ;;
   has-session) exit 0 ;;
 esac
 exit 0
@@ -469,6 +479,27 @@ test_sweep_reports_missing_endpoint_relaunch_failure() {
   pass "sweep: failed relaunch diagnostics distinguish a confidently missing endpoint"
 }
 
+test_sweep_reports_retained_temp_root_after_failed_recovery() {
+  local w fb tmuxfb log out meta task_tmp
+  w=$(new_world sweep-retained-tasktmp)
+  add_sm_home "$w" sm1 firstmate:fm-sm1 pi
+  meta="$w/home/state/sm1.meta"
+  task_tmp="$w/worker-temp"
+  mkdir -p "$task_tmp/gotmp"
+  printf 'saved artifact\n' > "$task_tmp/gotmp/keep"
+  printf 'tasktmp=%s\n' "$task_tmp" >> "$meta"
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  log="$w/calls.log"; : > "$log"
+
+  out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" missing "$log" FM_TEST_FAIL_LAUNCH=1)
+
+  assert_absent "$meta" "failed recovery should roll back its task record"
+  assert_present "$task_tmp/gotmp/keep" "failed recovery removed the reused temp root"
+  assert_contains "$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed')" \
+    "temporary directory remains at $task_tmp" "recovery failure summary omitted the retained temp root"
+  pass "sweep: failed recovery reports the exact temp root it retained"
+}
+
 test_sweep_never_acts_on_unverified_harness_dead_reading() {
   local w fb tmuxfb log out
   w=$(new_world sweep-unverified-harness)
@@ -598,6 +629,7 @@ test_sweep_respawns_authoritatively_missing_pi_signed_secondmate
 test_sweep_never_acts_on_ambiguous_existing_process
 test_sweep_never_acts_on_transient_unreadability
 test_sweep_reports_missing_endpoint_relaunch_failure
+test_sweep_reports_retained_temp_root_after_failed_recovery
 test_sweep_never_acts_on_unverified_harness_dead_reading
 test_sweep_converges_no_retouch_once_alive
 test_sweep_skipped_under_detect_only

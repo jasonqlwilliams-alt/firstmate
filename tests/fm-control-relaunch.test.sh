@@ -366,30 +366,35 @@ SH
 # --- 1. same-harness relaunch -----------------------------------------------
 
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
-  local dir out rc gen_before gen_after tmp_before tmp_after
-  dir=$(new_case same rl1)
-  add_ship_task "$dir" rl1 claude
-  tmp_before=$(meta_field "$dir" rl1 tasktmp)
-  gen_before=$("$ROOT/bin/fm-busy-event.sh" arm "$dir/home/state" rl1)
-  printf 'busy_gen=%s\n' "$gen_before" >> "$dir/home/state/rl1.meta"
-  out=$(run_control "$dir" rl1 relaunch --note "stopped mid-refactor"); rc=$?
+  local dir id out rc gen_before gen_after tmp_before tmp_after
+  tmp_before=$(mktemp -d /tmp/fm-rl1-XXXXXX) || fail "could not allocate the legacy temp root"
+  FM_TEST_CLEANUP_DIRS+=("$tmp_before")
+  id=${tmp_before#/tmp/fm-}
+  mkdir "$tmp_before/gotmp" || fail "could not create the legacy Go temp directory"
+  printf 'legacy build artifact\n' > "$tmp_before/gotmp/keep"
+  dir=$(new_case same "$id")
+  add_ship_task "$dir" "$id" claude
+  gen_before=$("$ROOT/bin/fm-busy-event.sh" arm "$dir/home/state" "$id")
+  printf 'busy_gen=%s\n' "$gen_before" >> "$dir/home/state/$id.meta"
+  out=$(run_control "$dir" "$id" relaunch --note "stopped mid-refactor"); rc=$?
   expect_code 0 "$rc" "a same-harness relaunch should succeed"$'\n'"$out"
-  assert_contains "$out" "relaunched rl1 harness=claude from=claude" "the outcome should name the transition"
-  [ "$(meta_field "$dir" rl1 window)" = "fmses:fm-rl1" ] \
+  assert_contains "$out" "relaunched $id harness=claude from=claude" "the outcome should name the transition"
+  [ "$(meta_field "$dir" "$id" window)" = "fmses:fm-$id" ] \
     || fail "the endpoint must be reused, not recreated"
-  [ "$(meta_field "$dir" rl1 worktree)" = "$dir/wt" ] \
+  [ "$(meta_field "$dir" "$id" worktree)" = "$dir/wt" ] \
     || fail "the worktree must be reused, not reallocated"
-  [ "$(meta_field "$dir" rl1 kind)" = ship ] || fail "kind must survive the relaunch"
-  [ "$(meta_field "$dir" rl1 project)" = "$dir/proj" ] || fail "project must survive the relaunch"
-  tmp_after=$(meta_field "$dir" rl1 tasktmp)
+  [ "$(meta_field "$dir" "$id" kind)" = ship ] || fail "kind must survive the relaunch"
+  [ "$(meta_field "$dir" "$id" project)" = "$dir/proj" ] || fail "project must survive the relaunch"
+  tmp_after=$(meta_field "$dir" "$id" tasktmp)
   [ -n "$tmp_after" ] && [ -d "$tmp_after/gotmp" ] && [ "$tmp_after" != "$tmp_before" ] \
     || fail "the replacement must record a fresh Go temp directory"
+  assert_present "$tmp_before/gotmp/keep" "relaunch removed data from the legacy root"
   assert_grep "export GOTMPDIR=$tmp_after/gotmp" "$dir/fake/keys" \
     "the replacement pane did not receive the fresh Go temp directory"
-  gen_after=$(meta_field "$dir" rl1 busy_gen)
+  gen_after=$(meta_field "$dir" "$id" busy_gen)
   [ -n "$gen_after" ] && [ "$gen_after" != "$gen_before" ] \
     || fail "a relaunch must arm a fresh busy generation, got '$gen_after'"
-  [ "$(journal_field "$dir" rl1 phase)" = complete ] \
+  [ "$(journal_field "$dir" "$id" phase)" = complete ] \
     || fail "the transaction journal should end complete"
   assert_grep "/exit" "$dir/fake/literal" "the previous agent should have been exited"
   assert_grep "encode launch-brief" "$dir/fake/literal" "the replacement should have been launched"
@@ -397,9 +402,9 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
   tmp_before=$tmp_after
   printf 'build artifact\n' > "$tmp_before/gotmp/keep"
   : > "$dir/fake/keys"
-  out=$(run_control "$dir" rl1 relaunch --note "continue the refactor"); rc=$?
+  out=$(run_control "$dir" "$id" relaunch --note "continue the refactor"); rc=$?
   expect_code 0 "$rc" "a second same-harness relaunch should succeed"$'\n'"$out"
-  tmp_after=$(meta_field "$dir" rl1 tasktmp)
+  tmp_after=$(meta_field "$dir" "$id" tasktmp)
   [ "$tmp_after" = "$tmp_before" ] || fail "a relaunch must reuse the recorded private root"
   assert_present "$tmp_after/gotmp/keep" "the relaunch discarded the private root's contents"
   assert_grep "export GOTMPDIR=$tmp_after/gotmp" "$dir/fake/keys" \

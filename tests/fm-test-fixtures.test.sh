@@ -245,6 +245,23 @@ test_spawn_tmux_and_fakebin() {
   pass "spawn fakebin answers pane path, logs -l payloads, and installs extra tools"
 }
 
+test_spawn_fixture_tracks_only_task_temp_roots() {
+  local fakebin task_tmp scratch
+  fakebin=$(make_spawn_fakebin "$TMP_ROOT/task-tmp")
+  task_tmp=$("$fakebin/mktemp" -d /tmp/fm-fixture-task+XXXXXX) || fail "could not allocate a task root"
+  if ! grep -Fxq -- "$task_tmp" "$FM_TEST_CLEANUP_REGISTRY"; then
+    FM_TEST_CLEANUP_DIRS+=("$task_tmp")
+    fail "the exact task root was not registered"
+  fi
+  scratch=$("$fakebin/mktemp" -d /tmp/fm-fixture-bootstrap.XXXXXX) || fail "could not allocate a scratch directory"
+  FM_TEST_CLEANUP_DIRS+=("$scratch")
+  [ -d "$task_tmp" ] && [ -d "$scratch" ] || fail "the shim did not create both directories"
+  if grep -Fxq -- "$scratch" "$FM_TEST_CLEANUP_REGISTRY"; then
+    fail "the unrelated scratch directory entered the task root registry"
+  fi
+  pass "spawn fixtures register only exact task temp allocations"
+}
+
 test_send_stubs_and_ssh() {
   local fakebin log ssh_log out
   fakebin=$(make_stubs "$TMP_ROOT/send")
@@ -285,5 +302,6 @@ test_no_mistakes_version_constant
 test_no_mistakes_init_doctor_markers
 test_fake_gh_and_gh_axi
 test_spawn_tmux_and_fakebin
+test_spawn_fixture_tracks_only_task_temp_roots
 test_send_stubs_and_ssh
 test_spawn_home_layout

@@ -1252,12 +1252,13 @@ spawn_abort_cleanup() {
     fm_lock_release "$CONFIG_INHERIT_LOCK" || true
   fi
   [ -z "$SPAWN_SLOT_ACQUIRE_FILE" ] || rm -f -- "$SPAWN_SLOT_ACQUIRE_FILE" 2>/dev/null || true
-  if [ "$status" -ne 0 ] && [ "$SPAWN_TASK_TMP_CREATED" = 1 ] \
+  if [ "$status" -ne 0 ] && [ -n "$TASK_TMP" ] \
      && [ "$(fm_meta_get "$STATE/$ID.meta" tasktmp 2>/dev/null)" != "$TASK_TMP" ]; then
-    if [ "$SPAWN_TASK_TMP_HANDED_OFF" = 1 ]; then
-      echo "warning: task $ID's temporary directory remains at $TASK_TMP; inspect it after closing endpoint $T" >&2
-    else
+    if [ "$SPAWN_TASK_TMP_CREATED" = 1 ] && [ "$SPAWN_TASK_TMP_HANDED_OFF" = 0 ]; then
       rmdir -- "$TASK_TMP/gotmp" "$TASK_TMP" 2>/dev/null || true
+    fi
+    if [ -d "$TASK_TMP" ]; then
+      echo "warning: task $ID's temporary directory remains at $TASK_TMP; inspect it after closing endpoint $T" >&2
     fi
   fi
   return "$status"

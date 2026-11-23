@@ -220,10 +220,9 @@ fm_test_track_task_tmps() {
     cat <<'SH'
 set -eu
 path=$("$real_mktemp" "$@")
-case "${1:-}:$path" in
-  -d:/tmp/*/*) ;;
-  -d:/tmp/fm-*) printf '%s\n' "$path" >> "$registry" ;;
-esac
+if [ "$#" -eq 2 ] && [ "$1" = -d ] && [[ "$2" =~ ^/tmp/fm-[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}\+XXXXXX$ ]]; then
+  printf '%s\n' "$path" >> "$registry"
+fi
 printf '%s\n' "$path"
 SH
   } > "$fakebin/mktemp"
