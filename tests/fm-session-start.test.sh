@@ -439,7 +439,7 @@ case "${1:-} ${2:-}" in
     ;;
   "tab create")
     : > "$spawned"
-    printf '%s\n' '{"result":{"tab":{"tab_id":"t-new"},"root_pane":{"pane_id":"p-new"}}}'
+    printf '%s\n' '{"result":{"tab":{"tab_id":"t-new"},"root_pane":{"pane_id":"p-new","terminal_id":"term-new"}}}'
     ;;
   "pane list")
     if [ -e "$spawned" ]; then
@@ -453,7 +453,7 @@ case "${1:-} ${2:-}" in
   "pane get")
     pane=${3:-}
     if [ "$pane" = p-new ] && [ -e "$spawned" ]; then
-      printf '{"result":{"pane":{"pane_id":"p-new","tab_id":"t-new","workspace_id":"ws1","cwd":"%s"}}}\n' "${state%/*}/secondmate-$mate_id"
+      printf '{"result":{"pane":{"pane_id":"p-new","tab_id":"t-new","workspace_id":"ws1","terminal_id":"term-new","cwd":"%s"}}}\n' "${state%/*}/secondmate-$mate_id"
     elif [ "$pane" = p-old ] && [ ! -e "$killed" ]; then
       printf '{"result":{"pane":{"pane_id":"p-old","tab_id":"t-old","workspace_id":"ws1","cwd":"%s"}}}\n' "${state%/*}/secondmate-$mate_id"
     else
@@ -2696,58 +2696,73 @@ PYFIXTURE
 }
 
 # Measure startup before the other cases accumulate detached fixture workers.
-test_populated_summary_startup_budget
-test_context_digest_absent_empty_present
-test_lock_refusal_read_only_path
-test_lock_write_failure_read_only_path
-test_trace_context_effective_state_is_frozen_after_lock
-test_session_lock_concurrent_single_winner
-test_output_ordering_diagnostics_lead
-test_read_once_contract_is_stated_once_before_its_subject
-test_herdr_backend_diagnostics_follow_real_session_start
-test_session_start_relaunches_missing_pi_secondmate
-test_deferred_relaunch_is_always_reported
-test_inactive_reconcile_never_blocks_the_digest
-test_unreachable_network_never_blocks_the_digest
-test_deferred_result_reaches_the_agent_when_the_digest_cannot_print_it
-test_read_only_session_declares_skipped_network_checks
-test_tasks_axi_compatibility_is_probed_once
-test_session_start_preserves_ambiguous_pi_process
-test_session_start_preserves_transiently_unreadable_tmux
-test_session_start_preserves_proven_bare_shell_recovery
-test_session_start_relaunches_herdr_husk_secondmate
-test_status_tail_bounding
-test_status_tail_line_cap
-test_orphan_status_logs_are_printed
-test_endpoint_liveness_tmux
-test_endpoint_liveness_herdr
-test_composition_invokes_real_scripts
-test_branch_outcome_replay_respects_captain_barrier_and_lease_sweep
-test_non_pi_session_start_leaves_branch_state_untouched
-test_backlog_compact_tasks_axi_omits_bodies_and_keeps_metadata
-test_backlog_queued_bound_discloses_its_remainder
-test_backlog_compact_manual_backend_skips_indented_bodies
-test_backlog_compact_tasks_axi_unavailable_uses_manual_fallback
-test_fleet_digest_empty_fleet
-test_next_step_sources_x_mode_cadence
-test_next_step_afk_delegates_to_daemon
-test_supervision_block_exactly_one_and_pi_diagnostic
-test_pi_signed_primary_uses_pi_extensions_without_identity_normalization
-test_pi_diagnostic_rejects_stale_loaded_marker
-test_pi_diagnostic_accepts_prelock_loaded_marker
-test_omp_supervision_block_and_diagnostic
-test_omp_diagnostic_accepts_prelock_loaded_marker
-test_pi_diagnostic_rejects_missing_turnend_guard_marker
-test_pi_diagnostic_rejects_previous_session_loaded_marker
-test_runtime_bound_truncates_loudly_and_exits_zero
-test_portable_timeout_escalates_term_resistant_process
-test_runtime_bound_leaves_a_healthy_digest_untouched
-test_runtime_bound_leaves_harness_ancestry_headroom
-test_reemit_skips_startup_sweeps_but_keeps_the_wake_drain
-test_agents_baseline_stays_at_true_start_and_reemits_on_every_drifted_pi_compact
-test_read_only_pi_compact_refreshes_against_its_own_session_identity
-test_codex_unreachable_reset_sources_do_not_claim_instruction_refresh
-test_agents_baseline_requires_sha256_and_successful_completion
-test_reemit_keeps_repair_ownership_with_the_lock_holder
+session_start_cases=(
+  test_populated_summary_startup_budget
+  test_context_digest_absent_empty_present
+  test_lock_refusal_read_only_path
+  test_lock_write_failure_read_only_path
+  test_trace_context_effective_state_is_frozen_after_lock
+  test_session_lock_concurrent_single_winner
+  test_output_ordering_diagnostics_lead
+  test_read_once_contract_is_stated_once_before_its_subject
+  test_herdr_backend_diagnostics_follow_real_session_start
+  test_session_start_relaunches_missing_pi_secondmate
+  test_deferred_relaunch_is_always_reported
+  test_inactive_reconcile_never_blocks_the_digest
+  test_unreachable_network_never_blocks_the_digest
+  test_deferred_result_reaches_the_agent_when_the_digest_cannot_print_it
+  test_read_only_session_declares_skipped_network_checks
+  test_tasks_axi_compatibility_is_probed_once
+  test_session_start_preserves_ambiguous_pi_process
+  test_session_start_preserves_transiently_unreadable_tmux
+  test_session_start_preserves_proven_bare_shell_recovery
+  test_session_start_relaunches_herdr_husk_secondmate
+  test_status_tail_bounding
+  test_status_tail_line_cap
+  test_orphan_status_logs_are_printed
+  test_endpoint_liveness_tmux
+  test_endpoint_liveness_herdr
+  test_composition_invokes_real_scripts
+  test_branch_outcome_replay_respects_captain_barrier_and_lease_sweep
+  test_non_pi_session_start_leaves_branch_state_untouched
+  test_backlog_compact_tasks_axi_omits_bodies_and_keeps_metadata
+  test_backlog_queued_bound_discloses_its_remainder
+  test_backlog_compact_manual_backend_skips_indented_bodies
+  test_backlog_compact_tasks_axi_unavailable_uses_manual_fallback
+  test_fleet_digest_empty_fleet
+  test_next_step_sources_x_mode_cadence
+  test_next_step_afk_delegates_to_daemon
+  test_supervision_block_exactly_one_and_pi_diagnostic
+  test_pi_signed_primary_uses_pi_extensions_without_identity_normalization
+  test_pi_diagnostic_rejects_stale_loaded_marker
+  test_pi_diagnostic_accepts_prelock_loaded_marker
+  test_omp_supervision_block_and_diagnostic
+  test_omp_diagnostic_accepts_prelock_loaded_marker
+  test_pi_diagnostic_rejects_missing_turnend_guard_marker
+  test_pi_diagnostic_rejects_previous_session_loaded_marker
+  test_runtime_bound_truncates_loudly_and_exits_zero
+  test_portable_timeout_escalates_term_resistant_process
+  test_runtime_bound_leaves_a_healthy_digest_untouched
+  test_runtime_bound_leaves_harness_ancestry_headroom
+  test_reemit_skips_startup_sweeps_but_keeps_the_wake_drain
+  test_agents_baseline_stays_at_true_start_and_reemits_on_every_drifted_pi_compact
+  test_read_only_pi_compact_refreshes_against_its_own_session_identity
+  test_codex_unreachable_reset_sources_do_not_claim_instruction_refresh
+  test_agents_baseline_requires_sha256_and_successful_completion
+  test_reemit_keeps_repair_ownership_with_the_lock_holder
+)
+failures=0
+for case_name in "${session_start_cases[@]}"; do
+  if ( "$case_name" ); then
+    continue
+  else
+    printf '# %s exited %s\n' "$case_name" "$?" >&2
+    failures=$((failures + 1))
+  fi
+done
 
+if [ "$failures" -ne 0 ]; then
+  printf '# fm-session-start.test.sh: %s case(s) failed\n' "$failures" >&2
+  exit 1
+fi
 echo "# fm-session-start.test.sh: all assertions passed"
