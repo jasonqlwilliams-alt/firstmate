@@ -610,8 +610,8 @@ test_stale_transient_self_records_marker() {
   dir=$(make_supercase stale-transient)
   state="$dir/state"
   printf 'working: building\n' > "$state/qux-w4.status"
-  stale_marker_record qux-w4 "$state"
-  out=$(FM_STATE_OVERRIDE="$state" classify_stale "sess:fm-qux-w4" "$state" qux-w4)
+  stale_marker_record "sess:fm-qux-w4" "$state"
+  out=$(FM_STATE_OVERRIDE="$state" classify_stale "sess:fm-qux-w4" "$state")
   case "$out" in self\|*) ;; *) fail "transient stale did not self-handle: $out" ;; esac
   key=$(printf '%s' "$(window_to_task "sess:fm-qux-w4")" | tr ':/.' '___')
   [ -e "$state/.subsuper-stale-$key" ] || fail "stale marker was not recorded"
@@ -700,7 +700,7 @@ test_enriched_wedge_under_declared_wait_uses_pause_cadence() {
   printf 'working: dispatching the long audit\npaused: the audit engine is running to completion\n' \
     > "$state/$task.status"
   printf 'idle prompt $\n' > "$pane"
-  case "$(FM_STATE_OVERRIDE="$state" classify_stale "$win" "$state" "$task")" in
+  case "$(FM_STATE_OVERRIDE="$state" classify_stale "$win" "$state")" in
     pause\|*) ;;
     *) fail "the fixture's own classifier verdict is not a pause, so this case pins nothing about the override" ;;
   esac
@@ -764,11 +764,11 @@ test_stale_terminal_escalates() {
   dir=$(make_supercase stale-terminal)
   state="$dir/state"
   printf 'done: ready in branch fm/t1\n' > "$state/fin-t5.status"
-  out=$(FM_STATE_OVERRIDE="$state" classify_stale "sess:fm-fin-t5" "$state" fin-t5)
+  out=$(FM_STATE_OVERRIDE="$state" classify_stale "sess:fm-fin-t5" "$state")
   case "$out" in escalate\|*) ;; *) fail "terminal stale did not escalate: $out" ;; esac
   fm_write_meta "$state/herdr-t5.meta" "window=default:w1:p2" "backend=herdr"
   printf 'done: ready in branch fm/herdr\n' > "$state/herdr-t5.status"
-  out=$(FM_STATE_OVERRIDE="$state" classify_stale "default:w1:p2" "$state" herdr-t5)
+  out=$(FM_STATE_OVERRIDE="$state" classify_stale "default:w1:p2" "$state")
   case "$out" in escalate\|*) ;; *) fail "terminal herdr stale did not escalate through metadata: $out" ;; esac
   pass "stale + terminal status escalates immediately"
 }
@@ -780,7 +780,7 @@ test_stale_actionable_wait_escalates_and_keeps_pause_cadence() {
   printf 'blocked [key=release]: need captain approval\npaused: waiting for release access\n' \
     > "$state/waiting-r10.status"
 
-  out=$(FM_STATE_OVERRIDE="$state" classify_stale "$win" "$state" waiting-r10)
+  out=$(FM_STATE_OVERRIDE="$state" classify_stale "$win" "$state")
   case "$out" in escalate\|*"blocked [key=release]: need captain approval"*) ;;
     *) fail "a current wait hid an unreported blocker from stale classification: $out" ;;
   esac
@@ -816,7 +816,7 @@ test_stale_paused_classifies_pause() {
   pause_reason='paused: waiting for upstream checks green, merged, and blocked state to clear'
   status_is_captain_relevant "$pause_reason" && fail "pause reason phrases made the status captain-relevant"
   printf '%s\n' "$pause_reason" > "$state/held-w9.status"
-  out=$(FM_STATE_OVERRIDE="$state" classify_stale "sess:fm-held-w9" "$state" held-w9)
+  out=$(FM_STATE_OVERRIDE="$state" classify_stale "sess:fm-held-w9" "$state")
   case "$out" in pause\|*) ;; *) fail "declared pause did not classify as pause: $out" ;; esac
   pass "paused reasons with captain phrases remain pause-classified"
 }
@@ -831,7 +831,7 @@ test_stale_captain_held_classifies_pause() {
   held_reason='captain-held [key=route]: tracked by task-decision-route'
   status_is_captain_relevant "$held_reason" && fail "a captain-held transfer line was treated as captain-relevant"
   printf '%s\n' "$held_reason" > "$state/held-w9h.status"
-  out=$(FM_STATE_OVERRIDE="$state" classify_stale "sess:fm-held-w9h" "$state" held-w9h)
+  out=$(FM_STATE_OVERRIDE="$state" classify_stale "sess:fm-held-w9h" "$state")
   case "$out" in pause\|*) ;; *) fail "captain-held transfer did not classify as pause: $out" ;; esac
   pass "a captain-held transfer classifies as pause, not as a wedge candidate"
 }
@@ -890,63 +890,31 @@ test_named_endpoint_loss_preserves_the_live_tasks_tracking() {
   pass "named endpoint loss escalates the lost record without clearing the replacement's tracking"
 }
 
-test_shared_pane_stale_rechecks_the_live_task() (
-  local dir state backend order win lost live
-  dir=$(make_supercase shared-pane-stale)
-  export PATH="$dir/fakebin:$PATH" FM_HOME="$dir" FM_ESCALATE_BATCH_SECS=999
+test_queued_stale_does_not_start_tracking_replacement() (
+  local dir state win=shared:w1:p2
+  dir=$(make_supercase queued-stale-pane-reuse)
+  state="$dir/state"
+  export PATH="$dir/fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_ESCALATE_BATCH_SECS=999
   cat > "$dir/fakebin/herdr" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
-  'pane get w1:p2 --session shared') printf '%s\n' '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"current"}}}' ;;
-  'pane read w1:p2 --source recent --lines 200 --session shared') printf '%s\n' 'idle replacement' ;;
+  'pane get w1:p2 --session shared')
+    printf '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"%s"}}}\n' "$FM_TEST_TERMINAL"
+    ;;
   *) exit 1 ;;
 esac
 SH
-  cat > "$dir/fakebin/zellij" <<'SH'
-#!/usr/bin/env bash
-case "$*" in
-  'list-sessions --short --no-formatting') printf '%s\n' shared ;;
-  '--session shared action list-panes --json') printf '%s\n' '[{"id":7,"tab_id":3,"is_plugin":false}]' ;;
-  '--session shared action list-tabs --json') printf '[{"tab_id":3,"name":"fm-%s"}]\n' "$FM_TEST_PANE_TASK" ;;
-  '--session shared action dump-screen --pane-id 7') printf '%s\n' 'idle replacement' ;;
-  *) exit 1 ;;
-esac
-SH
-  chmod +x "$dir/fakebin/herdr" "$dir/fakebin/zellij"
-  for backend in herdr zellij; do
-    case "$backend" in herdr) win=shared:w1:p2 ;; zellij) win=shared:7 ;; esac
-    for order in lost-first live-first; do
-      case "$order" in
-        lost-first) lost=a-lost; live=z-live ;;
-        live-first) lost=z-lost; live=a-live ;;
-      esac
-      state="$dir/$backend-$order"
-      mkdir "$state"
-      export FM_STATE_OVERRIDE="$state" FM_TEST_PANE_TASK="$live"
-      fm_write_meta "$state/$lost.meta" "window=$win" "backend=$backend" kind=ship spawn_gen=old herdr_terminal_id=old
-      fm_write_meta "$state/$live.meta" "window=$win" "backend=$backend" kind=ship spawn_gen=current herdr_terminal_id=current
-      printf 'paused: the lost worker is waiting\n' > "$state/$lost.status"
-      if [ "$backend" = herdr ]; then
-        printf 'herdr:%s\told\n' "$win" > "$state/$lost.missing-endpoint"
-      fi
-      handle_wake "stale: $win" "$state"
-      assert_present "$state/.subsuper-stale-$live" "$backend $order: stale wake did not age the live task"
-      assert_absent "$state/.subsuper-stale-$lost" "$backend $order: stale wake aged the lost task"
-      assert_absent "$state/.subsuper-paused-$lost" "$backend $order: stale wake classified the lost task's declaration"
-      FM_STALE_ESCALATE_SECS=0 housekeeping "$state"
-      assert_contains "$(cat "$state/.subsuper-escalations")" "(possible wedge): $win" "$backend $order: persistence recheck missed the idle replacement"
+  chmod +x "$dir/fakebin/herdr"
+  export FM_TEST_TERMINAL=original
+  fm_write_meta "$state/a-original.meta" "window=$win" backend=herdr kind=ship herdr_terminal_id=original
+  append_wake "$state" stale "$win" "stale: $win" || fail "could not queue the original worker's stale wake"
 
-      : > "$state/.subsuper-escalations"
-      printf 'captain-held [key=replacement]: waiting for the captain\n' > "$state/$live.status"
-      handle_wake "stale: $win" "$state"
-      assert_present "$state/.subsuper-paused-$live" "$backend $order: the live declaration did not start pause tracking"
-      : > "$state/.subsuper-escalations"
-      FM_PAUSE_RESURFACE_SECS=0 housekeeping "$state"
-      assert_contains "$(cat "$state/.subsuper-escalations")" "(awaiting the captain, answer the held decision or release the hold): $win" \
-        "$backend $order: the pause recheck missed the replacement's captain hold"
-    done
-  done
-  pass "shared pane stale intake and housekeeping follow the live task in either record order"
+  export FM_TEST_TERMINAL=replacement
+  fm_write_meta "$state/z-replacement.meta" "window=$win" backend=herdr kind=ship herdr_terminal_id=replacement
+  handle_durable_wakes fallback "$state" || fail "could not handle the queued stale wake"
+  assert_present "$state/.subsuper-stale-a-original" "the queued stale wake did not start tracking the original worker"
+  assert_absent "$state/.subsuper-stale-z-replacement" "a wake queued by the original worker started the replacement's stale timer"
+  pass "a queued stale wake leaves the replacement's timer untouched after Herdr pane reuse"
 )
 
 test_handle_wake_paused_signal_records_pause_marker() {
@@ -1112,7 +1080,7 @@ test_housekeeping_paused_resumed_cleared() {
   key=$(printf '%s' "held-w12" | tr ':/.' '___')
   echo $(( $(date +%s) - 5000 )) > "$state/.subsuper-paused-$key"
   PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$win" FM_FAKE_TMUX_CAPTURE="$pane" \
-    FM_STATE_OVERRIDE="$state" stale_window_is_busy "$win" "$state" held-w12 \
+    FM_STATE_OVERRIDE="$state" stale_window_is_busy "$win" "$state" \
     || fail "the resumed-pause fixture does not actually read busy, so it pins nothing about busy state"
   PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$win" FM_FAKE_TMUX_CAPTURE="$pane" \
     FM_STATE_OVERRIDE="$state" FM_PAUSE_RESURFACE_SECS=240 housekeeping "$state"
@@ -1150,7 +1118,7 @@ test_housekeeping_busy_declared_wait_matures_its_window() {
       --source pi-ext --event agent-start
     key=$(printf '%s' "$task" | tr ':/.' '___')
     PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$win" FM_FAKE_TMUX_CAPTURE="$pane" \
-      FM_STATE_OVERRIDE="$state" stale_window_is_busy "$win" "$state" "$task" \
+      FM_STATE_OVERRIDE="$state" stale_window_is_busy "$win" "$state" \
       || fail "the $case_name fixture does not actually read busy, so it pins nothing about busy state"
 
     # Immature window: ticks inside PAUSE_RESURFACE_SECS neither escalate nor let the
@@ -2029,11 +1997,11 @@ test_classify_stale_dedup_against_signal() {
   printf 'done: PR https://x/y/pull/10\n' > "$state/dup-s10.status"
   key=$(printf '%s' "dup-s10" | tr ':/.' '___')
   seen_through "$state" "dup-s10"
-  out=$(FM_STATE_OVERRIDE="$state" classify_stale "sess:fm-dup-s10" "$state" dup-s10)
+  out=$(FM_STATE_OVERRIDE="$state" classify_stale "sess:fm-dup-s10" "$state")
   case "$out" in self\|*) ;; *) fail "stale not deduped against signal: $out" ;; esac
   # Without the seen marker, it should escalate.
   rm -f "$state/.subsuper-seen-status-$key"
-  out=$(FM_STATE_OVERRIDE="$state" classify_stale "sess:fm-dup-s10" "$state" dup-s10)
+  out=$(FM_STATE_OVERRIDE="$state" classify_stale "sess:fm-dup-s10" "$state")
   case "$out" in escalate\|*) ;; *) fail "stale should escalate when not seen: $out" ;; esac
   pass "classify_stale dedupes against the signal path seen marker"
 }
@@ -2055,7 +2023,7 @@ test_afk_nonterminal_working_merged_keeps_wedge_aging() {
   key=$(printf '%s' "wishlist-w1" | tr ':/.' '___')
   # Simulate an earlier false-positive escalate that wrote the seen marker.
   seen_through "$state" "wishlist-w1"
-  out=$(FM_STATE_OVERRIDE="$state" classify_stale "$win" "$state" wishlist-w1)
+  out=$(FM_STATE_OVERRIDE="$state" classify_stale "$win" "$state")
   case "$out" in
     self\|*transient*) ;;
     escalate\|*) fail "nonterminal working: escalated as terminal stale: $out" ;;
@@ -2088,7 +2056,7 @@ test_afk_genuine_done_still_terminal_stale() {
   state="$dir/state"
   printf 'done: PR https://example.com/pull/76 checks green; stage 1 of 4 ready for firstmate merge\n' \
     > "$state/stage1-w2.status"
-  out=$(FM_STATE_OVERRIDE="$state" classify_stale "sess:fm-stage1-w2" "$state" stage1-w2)
+  out=$(FM_STATE_OVERRIDE="$state" classify_stale "sess:fm-stage1-w2" "$state")
   case "$out" in escalate\|*) ;; *) fail "genuine done: stale did not escalate: $out" ;; esac
   out=$(classify_check "check: /s/t.check.sh: merged")
   case "$out" in escalate\|*) ;; *) fail "validated merge-check did not escalate: $out" ;; esac
@@ -2948,7 +2916,7 @@ test_stale_paused_classifies_pause
 test_stale_captain_held_classifies_pause
 test_handle_wake_paused_records_pause_marker
 test_named_endpoint_loss_preserves_the_live_tasks_tracking
-test_shared_pane_stale_rechecks_the_live_task || exit 1
+test_queued_stale_does_not_start_tracking_replacement || exit 1
 test_handle_wake_paused_signal_records_pause_marker
 test_handle_wake_terminal_signal_clears_pause_tracking
 test_housekeeping_migrates_watcher_pause_marker
