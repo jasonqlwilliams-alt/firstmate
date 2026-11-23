@@ -284,7 +284,9 @@
 #     hours with no live task meta to attribute them to once teardown had
 #     already removed it). reap_task_worktree_processes uses `lsof -a -d cwd`
 #     to find processes under the owned worktree and the recorded tasktmp,
-#     which can be shared between homes. On Linux without lsof it uses
+#     which fm-spawn creates private to one home's task incarnation (an older
+#     task may still record a legacy /tmp/fm-<id> another home can share).
+#     On Linux without lsof it uses
 #     `/proc/<pid>/cwd` for the owned worktree only. On other hosts without
 #     lsof, teardown can only attempt to reap the tmux pane's process group.
 #     Both scans can identify only processes whose working directory is readable.
@@ -1115,7 +1117,8 @@ fi
 HOME_PATH=$(grep '^home=' "$META" | cut -d= -f2- || true)
 PR_URL=$(grep '^pr=' "$META" | tail -1 | cut -d= -f2- || true)
 # tasktmp is recorded by fm-spawn for tasks that set up a per-task temp root
-# (/tmp/fm-<id>/); absent for tasks spawned before that change, so tolerate empty.
+# (/tmp/fm-<id>.<suffix>/, or /tmp/fm-<id>/ for older tasks); absent for tasks
+# spawned before per-task temp roots existed, so tolerate empty.
 TASK_TMP=$(grep '^tasktmp=' "$META" | cut -d= -f2- || true)
 BUSY_GEN=$(fm_meta_get "$META" busy_gen)
 if [ -z "$BUSY_GEN" ]; then
@@ -3847,7 +3850,7 @@ fi
 remove_grok_turnend_auth "$STATE" "$ID" || exit 1
 remove_kimi_turnend_auth "$STATE" "$ID" || exit 1
 fm_backend_clear_transition "$BACKEND" "$STATE" "$T" || true
-# Remove the per-task temp root (/tmp/fm-<id>/, incl. its gotmp/) recorded by spawn.
+# Remove the per-task temp root (incl. its gotmp/) recorded by spawn as tasktmp=.
 # Read before the state-file rm below; empty (pre-fix tasks without tasktmp=) is a no-op.
 [ -n "$TASK_TMP" ] && rm -rf "$TASK_TMP"
 remove_pr_poll_artifacts "$STATE" "$ID" || exit 1

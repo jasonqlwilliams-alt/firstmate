@@ -1014,6 +1014,7 @@ SPAWN_META_TMP=
 SPAWN_META_LOCK=
 SPAWN_META_LOCK_HELD=0
 SPAWN_META_PUBLISH_STARTED=0
+SPAWN_TASK_TMP_CREATED=
 SPAWN_FRESH_COMMIT_PENDING=0
 SPAWN_TASK_SET_LOCK=
 SPAWN_TASK_SET_LOCK_HELD=0
@@ -1249,6 +1250,12 @@ spawn_abort_cleanup() {
     fm_lock_release "$CONFIG_INHERIT_LOCK" || true
   fi
   [ -z "$SPAWN_SLOT_ACQUIRE_FILE" ] || rm -f -- "$SPAWN_SLOT_ACQUIRE_FILE" 2>/dev/null || true
+  # A failed spawn that never recorded its fresh task temp root drops it only
+  # while still empty: rmdir refuses anything a leftover process wrote there.
+  if [ "$status" -ne 0 ] && [ -n "$SPAWN_TASK_TMP_CREATED" ] \
+     && [ "$(fm_meta_get "$STATE/$ID.meta" tasktmp 2>/dev/null)" != "$SPAWN_TASK_TMP_CREATED" ]; then
+    rmdir -- "$SPAWN_TASK_TMP_CREATED/gotmp" "$SPAWN_TASK_TMP_CREATED" 2>/dev/null || true
+  fi
   return "$status"
 }
 trap spawn_abort_cleanup EXIT
@@ -4046,12 +4053,29 @@ if [ "$KIND" != secondmate ]; then
   esac
 fi
 
-# Per-task temp root: /tmp/fm-<id>/ with Go's build temp nested at gotmp/. Go won't
-# create GOTMPDIR, so mkdir before it is used; fm-teardown removes the whole root.
-# Nested (not a bare /tmp/fm-<id>/gotmp) so other per-task temp can live alongside
-# later, and teardown cleans one deterministic path. GOTMPDIR (not TMPDIR) is the
-# targeted knob: TMPDIR is too broad (affects every program's temp, not just Go's).
-TASK_TMP="/tmp/fm-$ID"
+# Per-task temp root: /tmp/fm-<id>.XXXXXX/ with Go's build temp nested at gotmp/.
+# mktemp creates the root atomically under a fresh random suffix, so no other
+# home spawning the same task id and no other incarnation of this id can share
+# it; fm-teardown's process scan and removal of the recorded root therefore
+# touch only this task. A relaunch continues the same task in its recorded
+# worktree, so it keeps the recorded root (including a legacy shared
+# /tmp/fm-<id>) rather than orphaning it. Go won't create GOTMPDIR, so mkdir
+# before it is used; fm-teardown removes the whole root recorded as tasktmp=.
+# Nested (not a bare root used as GOTMPDIR) so other per-task temp can live
+# alongside later. The short suffix keeps paths inside the socket-path limits
+# Go and tmux impose. GOTMPDIR (not TMPDIR) is the targeted knob: TMPDIR is too
+# broad (affects every program's temp, not just Go's).
+TASK_TMP=
+if [ "$RELAUNCH" -eq 1 ]; then
+  TASK_TMP=$(fm_meta_get "$RELAUNCH_META" tasktmp)
+fi
+if [ -z "$TASK_TMP" ]; then
+  TASK_TMP=$(mktemp -d "/tmp/fm-$ID.XXXXXX") || {
+    echo "error: could not create a private task temp root under /tmp for $ID" >&2
+    exit 1
+  }
+  SPAWN_TASK_TMP_CREATED=$TASK_TMP
+fi
 mkdir -p "$TASK_TMP/gotmp"
 
 # Per-harness turn-end hook where enabled: a file that touches

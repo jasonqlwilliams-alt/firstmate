@@ -23,7 +23,8 @@ JQ_BIN=$(command -v jq) || fail "test needs jq"
 BASE_PATH=${FM_TEST_BASE_PATH:-$PYTHON_BIN_DIR:/usr/bin:/bin:/usr/sbin:/sbin}
 
 cleanup_kimi_harness() {
-  [ -z "$KIMI_RUNTIME_TASK_TMP" ] || rm -rf "$KIMI_RUNTIME_TASK_TMP"
+  # shellcheck disable=SC2086 # space-separated list of temp roots this suite created
+  [ -z "$KIMI_RUNTIME_TASK_TMP" ] || rm -rf $KIMI_RUNTIME_TASK_TMP
   rm -rf "$TMP_ROOT"
 }
 trap cleanup_kimi_harness EXIT
@@ -209,9 +210,6 @@ SH
 test_kimi_launch_then_send_is_verified() {
   local id rec out rc launch pointer brief_real meta task_tmp
   id="kimi-success-z1-$$"
-  task_tmp="/tmp/fm-$id"
-  KIMI_RUNTIME_TASK_TMP=$task_tmp
-  rm -rf "$task_tmp"
   rec=$(make_spawn_case success "$id")
   read_spawn_record "$rec"
   out=$(FM_FAKE_KIMI_SWALLOW_FIRST=yes run_spawn \
@@ -231,7 +229,12 @@ test_kimi_launch_then_send_is_verified() {
   meta="$HOME_DIR/state/$id.meta"
   assert_grep 'model=kimi-code/k3' "$meta" "kimi meta lost the requested model"
   assert_grep 'effort=high' "$meta" "kimi meta did not retain the unsupported effort axis"
-  assert_grep "tasktmp=$task_tmp" "$meta" "kimi meta did not record its task temp root"
+  task_tmp=$(sed -n 's/^tasktmp=//p' "$meta")
+  KIMI_RUNTIME_TASK_TMP=$task_tmp
+  case "$task_tmp" in
+    "/tmp/fm-$id."??????) ;;
+    *) fail "kimi meta did not record a private task temp root: '$task_tmp'" ;;
+  esac
   assert_present "$task_tmp/gotmp" "kimi spawn did not create its Go temp directory"
   assert_grep "export GOTMPDIR=$task_tmp/gotmp" "$CASE_DIR/tmux-calls.log" \
     "kimi spawn did not export its Go temp directory into the pane"
@@ -462,6 +465,58 @@ test_kimi_teardown_removes_pointer_and_registry_token() {
   assert_absent "$HOME_DIR/.kimi-code/fm-turn-end.d/$token" "Kimi registry token survived teardown"
   assert_absent "$HOME_DIR/state/$id.kimi-turnend-token" "Kimi token state survived teardown"
   pass "fm-teardown: Kimi task pointer and registry token are removed"
+}
+
+test_same_task_id_in_two_homes_gets_unshared_task_temp() {
+  local id rec_a rec_b out rc case_a home_a wt_a fakebin_a case_b home_b wt_b fakebin_b
+  local proj_a proj_b tmp_a tmp_b tmp_a2 sleeper
+  id="kimi-twohome-z9-$$"
+  rec_a=$(make_spawn_case twohome-a "$id")
+  rec_b=$(make_spawn_case twohome-b "$id")
+  IFS='|' read -r case_a home_a proj_a wt_a fakebin_a <<EOF
+$rec_a
+EOF
+  IFS='|' read -r case_b home_b proj_b wt_b fakebin_b <<EOF
+$rec_b
+EOF
+  out=$(run_spawn "$case_a" "$home_a" "$proj_a" "$wt_a" "$fakebin_a" "$id")
+  rc=$?
+  expect_code 0 "$rc" "home A spawn should succeed: $out"
+  out=$(run_spawn "$case_b" "$home_b" "$proj_b" "$wt_b" "$fakebin_b" "$id")
+  rc=$?
+  expect_code 0 "$rc" "home B spawn should succeed: $out"
+  tmp_a=$(sed -n 's/^tasktmp=//p' "$home_a/state/$id.meta")
+  tmp_b=$(sed -n 's/^tasktmp=//p' "$home_b/state/$id.meta")
+  KIMI_RUNTIME_TASK_TMP="$tmp_a $tmp_b"
+  [ -n "$tmp_a" ] && [ -n "$tmp_b" ] || fail "both spawns must record a task temp root"
+  [ "$tmp_a" != "$tmp_b" ] \
+    || fail "two homes spawning task $id share one task temp root: $tmp_a"
+  assert_present "$tmp_b/gotmp" "home B spawn did not create its Go temp directory"
+  printf 'home B scratch\n' > "$tmp_b/gotmp/keep"
+  ( cd "$tmp_b/gotmp" && exec sleep 300 ) &
+  sleeper=$!
+
+  HOME="$home_a" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home_a" \
+    FM_STATE_OVERRIDE="$home_a/state" FM_DATA_OVERRIDE="$home_a/data" \
+    FM_PROJECTS_OVERRIDE="$home_a/projects" FM_CONFIG_OVERRIDE="$home_a/config" \
+    FM_SPAWN_NO_GUARD=1 PATH="$fakebin_a:$BASE_PATH" \
+    "$TEARDOWN" "$id" --force >/dev/null 2>&1 || { kill "$sleeper" 2>/dev/null; fail "home A teardown failed"; }
+  assert_absent "$tmp_a" "home A cleanup left its own task temp root"
+  if ! kill -0 "$sleeper" 2>/dev/null; then
+    fail "home A cleanup signalled home B's live process in its task temp root"
+  fi
+  kill "$sleeper" 2>/dev/null; wait "$sleeper" 2>/dev/null
+  assert_present "$tmp_b/gotmp/keep" "home A cleanup deleted home B's task temp files"
+
+  # A later incarnation of the same task id in the same home gets a fresh root too.
+  out=$(run_spawn "$case_a" "$home_a" "$proj_a" "$wt_a" "$fakebin_a" "$id")
+  rc=$?
+  expect_code 0 "$rc" "home A respawn should succeed: $out"
+  tmp_a2=$(sed -n 's/^tasktmp=//p' "$home_a/state/$id.meta")
+  KIMI_RUNTIME_TASK_TMP="$tmp_a $tmp_b $tmp_a2"
+  [ "$tmp_a2" != "$tmp_a" ] && [ "$tmp_a2" != "$tmp_b" ] \
+    || fail "a new incarnation of task $id reused an earlier task temp root: $tmp_a2"
+  pass "fm-spawn: the same task id in two homes gets unshared task temp roots that cleanup keeps apart"
 }
 
 test_kimi_falls_back_to_expanded_home_binary() {
@@ -697,6 +752,7 @@ test_kimi_launch_then_send_is_verified
 test_kimi_hook_is_silent_and_requires_registered_workspace_token
 test_kimi_spawn_refuses_unsafe_global_config_before_pane_creation
 test_kimi_teardown_removes_pointer_and_registry_token
+test_same_task_id_in_two_homes_gets_unshared_task_temp
 test_kimi_falls_back_to_expanded_home_binary
 test_kimi_missing_binary_refuses_before_pane_creation
 test_kimi_unconfirmed_delivery_fails_loudly
