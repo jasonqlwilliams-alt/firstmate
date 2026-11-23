@@ -1842,9 +1842,10 @@ test_treehouse_owns_checkout_and_cancels_failed_close() {
   if [ "$mode" = success ]; then
     mkdir -p "$case_dir/project/.claude" "$case_dir/shared-settings/plugins"
     printf '{}\n' > "$case_dir/project/.claude/settings.local.json"
+    printf 'project settings\n' > "$case_dir/project/.fm-Kimi-turnend"
     printf 'shared settings\n' > "$case_dir/shared-settings/plugins/fm-turn-end.js"
     ln -s ../shared-settings "$case_dir/project/.opencode"
-    git -C "$case_dir/project" add -f .claude/settings.local.json .opencode
+    git -C "$case_dir/project" add -f .claude/settings.local.json .fm-Kimi-turnend .opencode
     git -C "$case_dir/project" commit -qm 'Track project settings on main'
   fi
   land_shippable_commit "$case_dir"
@@ -1861,7 +1862,8 @@ test_treehouse_owns_checkout_and_cancels_failed_close() {
 #!/usr/bin/env bash
 printf '%s %s\n' "$(git -C "$3" rev-parse --abbrev-ref HEAD)" "$(git -C "$3" rev-parse HEAD)" > "$FM_TEST_RETURN_LOG"
 if [ "$FM_TEST_RETURN_MODE" = success ]; then
-  git -C "$3" checkout --detach -q main
+  git -C "$3" checkout --detach -q main || exit $?
+  [ -e "$3/.fm-kimi-turnend" ] || ln "$3/.fm-Kimi-turnend" "$3/.fm-kimi-turnend"
   exit $?
 fi
 echo 'treehouse: simulated return error before checkout' >&2
@@ -1880,6 +1882,9 @@ SH
       && [ "$(git -C "$copy" rev-parse HEAD)" = "$(git -C "$copy" rev-parse main)" ] \
       || fail 'teardown changed the checkout left by Treehouse'
     [ "$(cat "$copy/.claude/settings.local.json")" = '{}' ] || fail 'return removed tracked project settings'
+    [ "$copy/.fm-Kimi-turnend" -ef "$copy/.fm-kimi-turnend" ] \
+      && [ "$(cat "$copy/.fm-Kimi-turnend")" = 'project settings' ] \
+      || fail 'return removed a tracked file through a case alias'
     [ "$(cat "$case_dir/shared-settings/plugins/fm-turn-end.js")" = 'shared settings' ] \
       || fail 'return removed settings outside the returned copy'
     assert_absent "$copy/.fm-grok-turnend" 'return retained an untracked task hook'
@@ -4833,14 +4838,26 @@ test_keep_pane_retirement() {
     FM_KEEP_MODE="$mode" run_keep_pane_case "$case_dir" --keep-pane > "$case_dir/out" 2> "$case_dir/err" || rc=$?
     [ "$rc" -ne 0 ] || fail "keep-pane $mode unexpectedly succeeded"
     assert_present "$case_dir/state/task-x1.meta" "keep-pane $mode lost endpoint record"
-    git -C "$case_dir/wt" show-ref --verify --quiet refs/heads/fm/task-x1 \
-      || fail "keep-pane $mode lost the task branch"
+    [ "$(backlog_row_state "$case_dir")" = in_flight ] || fail "keep-pane $mode closed backlog"
     if [ "$mode" = return-fails ]; then
+      git -C "$case_dir/wt" show-ref --verify --quiet refs/heads/fm/task-x1 \
+        || fail "failed return lost the task branch"
       assert_absent "$case_dir/state/task-x1.backlog-close" "keep-pane $mode left a replayable close"
     else
       assert_present "$case_dir/state/task-x1.backlog-close" "keep-pane $mode lost durable transition"
+      (
+        export FM_HOME="$case_dir/home"
+        # shellcheck source=bin/fm-tasks-axi-lib.sh
+        . "$ROOT/bin/fm-tasks-axi-lib.sh"
+        # shellcheck source=bin/fm-backlog-transition-lib.sh
+        . "$ROOT/bin/fm-backlog-transition-lib.sh"
+        fm_backlog_close_marker_replay "$case_dir/state" "$case_dir/state/task-x1.backlog-close" "$case_dir/data" \
+          || fail "startup could not replay the close after the copy was returned: $FM_BACKLOG_TRANSITION_ERROR"
+      ) || exit 1
+      [ "$(backlog_row_state "$case_dir")" = done ] || fail 'startup replay did not close the returned task'
+      git -C "$case_dir/wt" checkout -qb fm/task-x1 \
+        || fail 'startup replay left the returned task branch in the way of fresh dispatch'
     fi
-    [ "$(backlog_row_state "$case_dir")" = in_flight ] || fail "keep-pane $mode closed backlog"
   done
   pass "keep-pane retains records and keeps the pending close only after the copy is returned"
 

@@ -1824,7 +1824,7 @@ attempt_treehouse_return() {  # <copy> <project>
 }
 
 remove_untracked_treehouse_hooks() {
-  local copy hook parent tracked
+  local copy hook parent tracked tracked_path
   copy=$(canonical_existing_dir "$1") || return 0
   shift
   for hook; do
@@ -1833,9 +1833,14 @@ remove_untracked_treehouse_hooks() {
       parent="$copy/${hook%/*}"
       [ "$(canonical_existing_dir "$parent")" = "$parent" ] || continue
     fi
-    if tracked=$(git -C "$copy" ls-tree --name-only HEAD -- "$hook" 2>/dev/null) && [ -z "$tracked" ]; then
-      rm -f -- "$copy/$hook"
-    fi
+    tracked=$(git -C "$copy" ls-files --cached -- ":(icase,literal)$hook" 2>/dev/null) || continue
+    while IFS= read -r tracked_path && [ -n "$tracked_path" ]; do
+      if [ "$tracked_path" = "$hook" ] || [ "$copy/$tracked_path" -ef "$copy/$hook" ] \
+         || { [ -L "$copy/$tracked_path" ] && [ -L "$copy/$hook" ]; }; then
+        continue 2
+      fi
+    done <<< "$tracked"
+    rm -f -- "$copy/$hook"
   done
 }
 
@@ -3870,7 +3875,6 @@ fi
 "$SCRIPT_DIR/fm-remote-job-reap-orphans.sh" >&2 || true
 
 # Best-effort: drop the local task branch so the shared repo does not accumulate refs.
-treehouse_task_ref=
 if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
   if [ "$ORCA_PATH_MATCH_VERIFIED" != 1 ]; then
     require_orca_worktree_path_match_if_present "$ORCA_WORKTREE_ID" "$WT" || exit 1
@@ -3917,6 +3921,11 @@ elif [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
     echo "error: treehouse return failed for worktree $WT; teardown aborted" >&2
     exit 1
   }
+  if [ "$treehouse_task_ref" = "refs/heads/fm/$ID" ] \
+     && treehouse_returned_head=$(git -C "$WT" rev-parse --abbrev-ref --verify HEAD 2>/dev/null) \
+     && [ "$treehouse_returned_head" = HEAD ]; then
+    git -C "$WT" branch -D -- "fm/$ID" >/dev/null 2>&1 || true
+  fi
   remove_untracked_treehouse_hooks "$WT" .claude/settings.local.json \
     .opencode/plugins/fm-turn-end.js .fm-grok-turnend .fm-kimi-turnend
   # The slot is back in the pool, so this task's claim on it is spent. Dropping
@@ -4101,11 +4110,6 @@ else
     echo "error: $ID's endpoint and local copy are cleaned up, but its task record could not be removed ($FM_BACKLOG_TRANSITION_ERROR)" >&2
     exit 1
   fi
-fi
-if [ "$treehouse_task_ref" = "refs/heads/fm/$ID" ] \
-   && treehouse_returned_head=$(git -C "$WT" rev-parse --abbrev-ref --verify HEAD 2>/dev/null) \
-   && [ "$treehouse_returned_head" = HEAD ]; then
-  git -C "$WT" branch -D -- "fm/$ID" >/dev/null 2>&1 || true
 fi
 teardown_release_meta_lock
 if [ "$KIND" != scout ] && [ "$KIND" != secondmate ] && [ "$MODE" != local-only ]; then
