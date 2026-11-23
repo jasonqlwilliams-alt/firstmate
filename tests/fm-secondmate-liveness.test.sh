@@ -56,7 +56,7 @@ case "\${1:-}" in
     for a in "\$@"; do case "\$a" in *pane_current_command*) printf '%s\n' '$comm'; exit 0 ;; esac; done
     exit 0 ;;
   # The exact-window reads ask for ids alongside names.
-  list-windows) case "\$*" in *window_id*) printf '@1 ' ;; esac; printf '%s\n' win; exit 0 ;;
+  list-windows) case "\$*" in *window_id*) printf '@1 sess:' ;; esac; printf '%s\n' win; exit 0 ;;
 esac
 exit 0
 SH
@@ -80,7 +80,7 @@ case "\${1:-}" in
     ;;
   list-windows)
     # The exact-window reads ask for ids alongside names.
-    case "\$*" in *window_id*) printf '@1 ' ;; esac
+    case "\$*" in *window_id*) printf '@1 sess:' ;; esac
     case '$inventory' in
       missing) printf '%s\n' main ; exit 0 ;;
       missing-session) printf '%s\n' "can't find session: sess" >&2; exit 1 ;;
@@ -291,7 +291,7 @@ case "${1:-}" in
     ;;
   list-windows)
     # The exact-window reads ask for ids alongside names.
-    case "$*" in *window_id*) [ "$mode" = unreadable ] || [ -e "${FM_TMUX_CALL_LOG:?}.killed" ] || printf '@1 ' ;; esac
+    case "$*" in *window_id*) [ "$mode" = unreadable ] || [ -e "${FM_TMUX_CALL_LOG:?}.killed" ] || printf '@1 firstmate:' ;; esac
     case "$mode" in
       missing) printf '%s\n' main; exit 0 ;;
       unreadable) exit 1 ;;

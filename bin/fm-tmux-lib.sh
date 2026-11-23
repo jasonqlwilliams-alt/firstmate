@@ -67,41 +67,28 @@ fm_tmux_strip_ghost() { fm_composer_strip_ghost; }
 # prefix-matched and stays dot-safe where a `.`-bearing name would be parsed
 # as a pane suffix.
 #
-# Targets that are not a recorded `session:window` name pass through
-# unchanged: one with no session part (an already-resolved `@<id>`, a `%<id>`
-# pane, or a caller's own pane handle), and an explicit window index or id
-# after the colon (fm-peek's `session:window` escape hatch).
+# Unqualified targets (including stable window and pane IDs) and selectors
+# explicitly supplied by a caller pass through unchanged.
 #
 # Status: 0 resolved (target printed); 1 the exact session or window is
 # definitively absent; 2 the target is malformed or the inventory could not be
 # read, so callers can keep a transient tmux failure distinct from absence.
 fm_tmux_exact_target() {  # <target>
-  local target=${1:-} session window selector inventory rc line id name
+  local target=${1:-} session inventory line id match=''
+  [ -n "$target" ] || return 2
+  if [ "$target" = "${FM_TMUX_EXPLICIT_TARGET:-}" ]; then
+    printf '%s' "$target"
+    return 0
+  fi
   case "$target" in
-    '') return 2 ;;
     *:*:*|:*|*:) return 2 ;;
     *:*) ;;
     *) printf '%s' "$target"; return 0 ;;
   esac
   session=${target%%:*}
-  window=${target#*:}
-  case "$window" in
-    @*|%*) printf '%s' "$target"; return 0 ;;
-    *[!0-9]*) ;;
-    *) printf '%s' "$target"; return 0 ;;
-  esac
-  case "$session" in
-    \$*) selector=$session ;;
-    *) selector="=$session" ;;
-  esac
   # A space, not a tab: tmux prints a tab in a format as `_`. The id never
-  # contains a space, so everything after the first space is the name.
-  if inventory=$(LC_ALL=C tmux list-windows -t "$selector" -F '#{window_id} #{window_name}' 2>&1); then
-    rc=0
-  else
-    rc=$?
-  fi
-  if [ "$rc" -ne 0 ]; then
+  # contains a space, so everything after it is the session and window name.
+  if ! inventory=$(LC_ALL=C.UTF-8 tmux list-windows -t "=$session" -F '#{window_id} #{session_name}:#{window_name}' 2>&1); then
     case "$inventory" in
       *"can't find session:"*|*"no server running on "*|*"error connecting to "*" (No such file or directory)"|*"error connecting to "*" (Connection refused)")
         return 1
@@ -110,16 +97,16 @@ fm_tmux_exact_target() {  # <target>
     return 2
   fi
   while IFS= read -r line; do
+    [ "${line#* }" = "$target" ] || continue
     id=${line%% *}
-    name=${line#* }
-    [ "$name" = "$window" ] || continue
-    case "$id" in @*) ;; *) return 2 ;; esac
-    printf '%s' "$id"
-    return 0
+    case "${id#@}" in ''|*[!0-9]*) return 2 ;; esac
+    [ "$id" != "${id#@}" ] && [ -z "$match" ] || return 2
+    match=$id
   done <<EOF
 $inventory
 EOF
-  return 1
+  [ -n "$match" ] || return 1
+  printf '%s' "$match"
 }
 
 # --- tmux composer capture and capability primitives ------------------------

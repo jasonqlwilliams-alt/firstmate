@@ -207,7 +207,7 @@ case "${1:-}" in
     printf '%%1\n'; exit 0 ;;
   capture-pane) printf '╭────╮\n│    │\n╰────╯\n'; exit 0 ;;
   # The exact-window reads ask for ids alongside names.
-  list-windows) case "$*" in *window_id*) printf '@1 ' ;; esac; printf 'fm-lane-ok\n'; exit 0 ;;
+  list-windows) case "$*" in *window_id*) printf '@1 sess:' ;; esac; printf 'fm-lane-ok\n'; exit 0 ;;
 esac
 exit 0
 SH

@@ -122,7 +122,7 @@ case "${1:-}" in
     for m in "${FM_STATE_OVERRIDE:-/nonexistent}"/*.meta; do
       [ -f "$m" ] || continue
       w=$(sed -n 's/^window=//p' "$m" | tail -n 1)
-      case "$w" in *:*) n=$((n + 1)); printf '@%s %s\n' "$n" "${w#*:}" ;; esac
+      case "$w" in *:*) n=$((n + 1)); printf '@%s %s\n' "$n" "$w" ;; esac
     done
     ;;
   display-message)

@@ -340,6 +340,7 @@ fm_send_resolve_target() {  # <raw-target>
   TARGET_REMOTE_ID=""
   TARGET_REMOTE_HOST=""
   RESOLUTION_TRIED=""
+  FM_TMUX_EXPLICIT_TARGET=
 
   meta=$(fm_backend_meta_for_selector "$raw" "$STATE" 2>/dev/null || true)
   if [ -n "$meta" ]; then
@@ -416,6 +417,7 @@ fm_send_resolve_target() {  # <raw-target>
         assumed=herdr
       else
         assumed=tmux
+        FM_TMUX_EXPLICIT_TARGET=$raw
       fi
       if ! fm_backend_target_exists "$assumed" "$raw"; then
         echo "error: explicit target '$raw' is not a live $assumed endpoint (tried meta=$STATE/$raw.meta; metadata window/terminal lookup; backend=$assumed). Use fm-<id> for a recorded task/lane, or pass a target whose backend endpoint can be verified." >&2

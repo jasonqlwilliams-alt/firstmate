@@ -57,7 +57,7 @@ cat > "$FAKEBIN/tmux" <<'SH'
 set -u
 case "$*" in
   # The exact-window reads ask for ids alongside names.
-  *list-windows*window_id*) [ -z "${FM_FAKE_TMUX_WINDOW:-}" ] || printf '@1 %s\n' "$FM_FAKE_TMUX_WINDOW" ;;
+  *list-windows*window_id*) [ -z "${FM_FAKE_TMUX_WINDOW:-}" ] || printf '@1 firstmate:%s\n' "$FM_FAKE_TMUX_WINDOW" ;;
   *list-windows*) printf '%s\n' "${FM_FAKE_TMUX_WINDOW:-}" ;;
   *list-panes*) printf '%s\n' "${FM_FAKE_TMUX_PANE:-}" ;;
   *display-message*'#{pane_current_command}'*) printf '%s\n' "${FM_FAKE_TMUX_COMMAND:-claude}" ;;

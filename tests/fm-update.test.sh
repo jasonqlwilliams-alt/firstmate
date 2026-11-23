@@ -50,7 +50,7 @@ case "${1:-}" in
   # The exact-window reads ask for ids alongside names.
   list-windows)
     case "$*" in
-      *window_id*) awk '{ print "@" NR " " $0 }' "$FM_FAKE_DIR/windows" ;;
+      *window_id*) awk '{ print "@" NR " main:" $0 }' "$FM_FAKE_DIR/windows" ;;
       *) cat "$FM_FAKE_DIR/windows" ;;
     esac ;;
   display-message)

@@ -70,10 +70,11 @@ case "${1:-}" in
     # this fake has created.
     case "$*" in
       *window_id*)
-        sed -n 's/^new-window .*-n \([^ ]*\).*/\1/p' "$FM_FAKE_TMUX_CALL_LOG" | awk '{ print "@" NR " " $0 }' ;;
+        sed -n 's/^new-window .*-n \([^ ]*\).*/\1/p' "$FM_FAKE_TMUX_CALL_LOG" | awk '{ print "@" NR " firstmate:" $0 }' ;;
     esac
     exit 0 ;;
-  has-session|new-session|new-window|kill-window) exit 0 ;;
+  new-window) printf '@1\n'; exit 0 ;;
+  has-session|new-session|kill-window) exit 0 ;;
   send-keys)
     prev=
     literal=

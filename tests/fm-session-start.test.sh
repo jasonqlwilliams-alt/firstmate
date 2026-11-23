@@ -290,15 +290,15 @@ SH
   chmod +x "$fakebin/ps"
 }
 
-# make_fake_tmux <fakebin> <live-target>: display-message succeeds only for
-# the given "session:window" target - the exact primitive
-# fm_backend_target_exists uses for a tmux endpoint liveness read.
+# make_fake_tmux <fakebin> <live-target>: one live window and pane.
 make_fake_tmux() {
   local fakebin=$1 live=$2
   cat > "$fakebin/tmux" <<SH
 #!/usr/bin/env bash
 set -u
 case "\${1:-}" in
+  list-windows) printf '%s\n' '@1 $live'; exit 0 ;;
+  list-panes) [ "\${3:-}" = '@1' ] || exit 1; printf '%%1\n'; exit 0 ;;
   display-message)
     target=""
     prev=""
@@ -306,7 +306,7 @@ case "\${1:-}" in
       [ "\$prev" = "-t" ] && target="\$a"
       prev="\$a"
     done
-    [ "\$target" = "$live" ] && { printf '%%1\n'; exit 0; }
+    case "\$target" in '$live'|@1) printf '%%1\n'; exit 0 ;; esac
     exit 1
     ;;
 esac
@@ -376,13 +376,13 @@ case "${1:-}" in
     if [ "$mode" = unreadable ] && [ ! -e "$spawned" ] && [ ! -e "$killed" ]; then
       exit 1
     fi
-    if [ -e "$spawned" ]; then
-      printf '%s\n' "$mate_window"
-    elif [ ! -e "$killed" ] && { [ "$mode" = ambiguous ] || [ "$mode" = shell ]; }; then
-      printf '%s\n' "$mate_window"
+    if [ -e "$spawned" ] || { [ ! -e "$killed" ] && { [ "$mode" = ambiguous ] || [ "$mode" = shell ]; }; }; then
+      name=$mate_window
     else
-      printf '%s\n' main
+      name=main
     fi
+    case "$*" in *window_id*) printf '@1 firstmate:' ;; esac
+    printf '%s\n' "$name"
     exit 0
     ;;
   has-session) exit 0 ;;

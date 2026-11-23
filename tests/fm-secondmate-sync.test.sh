@@ -339,7 +339,11 @@ if [ -n "${FM_FAKE_TMUX_LOG:-}" ]; then
 fi
 case "$*" in
   list-windows*)
-    sed -n 's/^window=[^:]*://p' "${FM_HOME:?}"/state/*.meta
+    state=${FM_STATE_OVERRIDE:-${FM_HOME:?}/state}
+    case "$*" in
+      *window_id*) sed -n 's/^window=//p' "$state"/*.meta | awk '{ print "@" NR " " $0 }' ;;
+      *) sed -n 's/^window=[^:]*://p' "$state"/*.meta ;;
+    esac
     exit 0
     ;;
   *display-message*'#{pane_current_command}'*) printf '%s\n' codex; exit 0 ;;
@@ -478,6 +482,8 @@ test_bootstrap_nudge_send_uses_state_override() {
     "effective-state nudge should not fail through FM_HOME/state"
   assert_contains "$(cat "$override_state/sm-instr.inbox/001.msg")" "[fm-from-firstmate]" \
     "effective-state nudge should still use secondmate marker metadata"
+  assert_contains "$(cat "$log")" "Firstmate instruction waiting" \
+    "effective-state nudge should ring the secondmate doorbell"
   marker="$override_state/.secondmate-nudge-pending/sm-instr.pending"
   assert_absent "$marker" "successful effective-state nudge should clear its retry marker"
   pass "T8a bootstrap nudge send respects FM_STATE_OVERRIDE"

@@ -52,11 +52,17 @@ case "${1:-}" in
         *:*) continue ;;
         *) name=$recorded ;;
       esac
-      if [ "$ids" = 1 ]; then printf '@%s %s\n' "$n" "$name"; else printf '%s\n' "$name"; fi
+      if [ "$ids" = 1 ]; then printf '@%s %s:%s\n' "$n" "$session" "$name"; else printf '%s\n' "$name"; fi
     done <<EOF
 ${FM_FAKE_TMUX_WINDOW:-}
 EOF
     exit 0
+    ;;
+  list-panes)
+    printf '%s\n' "${FM_FAKE_TMUX_WINDOW:-}" | awk -v target="${3:-}" '
+      length { n++; if ("@" n == target || $0 == target) present=1 }
+      END { exit !present }
+    '
     ;;
   display-message)
     case "$*" in

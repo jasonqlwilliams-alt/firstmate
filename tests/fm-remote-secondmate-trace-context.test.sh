@@ -59,7 +59,11 @@ case "\${1:-}" in
   list-windows)
     [ -f "\$state" ] || exit 0
     name=\$(cut -d'|' -f1 "\$state")
-    case "\$*" in *'#{session_name}:#{window_name}'*) printf 'firstmate:%s\n' "\$name" ;; *) printf '%s\n' "\$name" ;; esac
+    case "\$*" in
+      *window_id*) printf '@1 firstmate:%s\n' "\$name" ;;
+      *'#{session_name}:#{window_name}'*) printf 'firstmate:%s\n' "\$name" ;;
+      *) printf '%s\n' "\$name" ;;
+    esac
     exit 0
     ;;
   new-window)

@@ -75,7 +75,7 @@ case "${1:-}" in
   list-windows)
     # The exact-window reads ask for ids alongside names.
     case "$*" in
-      *window_id*) printf '%s\n' fm-t1 fm-t2 fm-t3 fm-t4 fm-t5 fm-t6 fm-t7 fm-t8 fm-t9 fm-mate elsewhere | awk '{ print "@" NR " " $0 }' ;;
+      *window_id*) printf '%s\n' fm-t1 fm-t2 fm-t3 fm-t4 fm-t5 fm-t6 fm-t7 fm-t8 fm-t9 fm-mate elsewhere | awk '{ print "@" NR " sess:" $0 }' ;;
       *) printf '%s\n' fm-t1 fm-t2 fm-t3 fm-t4 fm-t5 fm-t6 fm-t7 fm-t8 fm-t9 fm-mate ;;
     esac
     exit 0 ;;

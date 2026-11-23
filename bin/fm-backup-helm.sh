@@ -649,6 +649,7 @@ cmd_handover() {
   validate_successor
   backend_supported "$HELM_BACKEND" || die "handover supports only tmux or herdr, not '${HELM_BACKEND:-}'"
   [ -n "$HELM_TARGET" ] || die "handover needs --target"
+  local FM_TMUX_EXPLICIT_TARGET=$HELM_TARGET
   resolve_workspace "$HELM_WORKSPACE" HELM_WORKSPACE
 
   if [ -z "${FM_BACKUP_HELM_DRIVER:-}" ]; then

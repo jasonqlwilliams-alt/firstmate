@@ -4234,8 +4234,10 @@ case "${1:-}" in
   list-windows)
     [ -n "${FM_FAKE_TMUX_WINDOW:-}" ] || exit 0
     # The exact-window reads ask for ids alongside names.
-    case "$*" in *window_id*) printf '@1 ' ;; esac
-    printf '%s\n' "${FM_FAKE_TMUX_WINDOW#*:}"
+    case "$*" in
+      *window_id*) printf '@1 %s\n' "$FM_FAKE_TMUX_WINDOW" ;;
+      *) printf '%s\n' "${FM_FAKE_TMUX_WINDOW#*:}" ;;
+    esac
     exit 0 ;;
   capture-pane)
     n=$(( $(cat "$FM_FAKE_TMUX_TICKS" 2>/dev/null || echo 0) + 1 ))

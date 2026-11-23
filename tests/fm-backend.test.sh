@@ -662,27 +662,28 @@ make_send_fakebin() {  # <dir> -> echoes fakebin dir; logs every tmux call to $F
 set -u
 { printf 'tmux'; for a in "$@"; do printf '\x1f%s' "$a"; done; printf '\n'; } >> "${FM_TMUX_LOG:?}"
 case "${1:-}" in
+  list-panes) [ "${3:-}" = sess:win ] || [ "${3:-}" = sess:0.1 ]; exit $? ;;
   send-keys) exit 0 ;;
   display-message)
     for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
-    start= end=
+    start= end= target=
     while [ $# -gt 0 ]; do
       case "$1" in
         -S) start=$2; shift 2 ;;
         -E) end=$2; shift 2 ;;
+        -t) target=$2; shift 2 ;;
         *) shift ;;
       esac
     done
+    [ "$target" = sess:win ] || [ "$target" = sess:0.1 ] || exit 1
     if [ "$start" = 1 ] && [ "$end" = 1 ]; then
       printf '│    │\n'
     else
       printf '╭────╮\n│    │\n╰────╯\n'
     fi
     exit 0 ;;
-  # The live window inventory the exact-window reads confirm membership in.
-  list-windows) printf '@1 win\n'; exit 0 ;;
 esac
 exit 0
 SH
@@ -697,12 +698,6 @@ run_send_case() {  # <bin-root> <fakebin> <log> <home> -- <send args...>
   env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$bin" FM_HOME="$home" FM_TMUX_LOG="$log" \
     FM_SEND_SETTLE=0 FM_SEND_SLEEP=0 \
     "$bin/bin/fm-send.sh" "$@" >/dev/null 2>&1
-}
-
-strip_send_preflight() {  # <log>
-  local preflight
-  preflight=$'tmux\x1fdisplay-message\x1f-p\x1f-t\x1fsess:win\x1f#{pane_id}'
-  awk -v preflight="$preflight" '$0 != preflight { print }' "$1"
 }
 
 # The byte-identical old-vs-new tmux log comparison this test used to run
@@ -722,17 +717,15 @@ test_send_tmux_contract() {
   run_send_case "$ROOT" "$fb" "$log" "$home" -- "sess:win" --key Escape
   rc=$?
   expect_code 0 "$rc" "fm-send --key should succeed against a live fake pane"
-  assert_contains "$(cat "$log")" $'\x1f''display-message'$'\x1f''-p'$'\x1f''-t'$'\x1f''sess:win'$'\x1f''#{pane_id}' \
-    "fm-send --key did not verify the explicit tmux target before sending"
   assert_contains "$(cat "$log")" $'\x1f''Escape' "fm-send --key did not send the named key"
   assert_not_contains "$(cat "$log")" $'\x1f''-l'$'\x1f' "fm-send --key must not type literal text"
 
   # Case 2: plain text - typed literally exactly once, submitted with Enter,
   # confirmed against the bordered-empty fake composer.
-  run_send_case "$ROOT" "$fb" "$log" "$home" -- "sess:win" hello captain
+  run_send_case "$ROOT" "$fb" "$log" "$home" -- "sess:0.1" hello captain
   rc=$?
   expect_code 0 "$rc" "fm-send plain text should confirm against the empty fake composer"
-  assert_contains "$(cat "$log")" $'\x1f''send-keys'$'\x1f''-t'$'\x1f''sess:win'$'\x1f''-l'$'\x1f''hello captain' \
+  assert_contains "$(cat "$log")" $'\x1f''send-keys'$'\x1f''-t'$'\x1f''sess:0.1'$'\x1f''-l'$'\x1f''hello captain' \
     "fm-send did not send the literal text with send-keys -l"
   [ "$(grep -c $'\x1f''-l'$'\x1f' "$log")" -eq 1 ] \
     || fail "fm-send must type the text exactly once (Enter-only retries, never a retype)"
@@ -749,57 +742,80 @@ test_send_tmux_contract() {
   [ "$(grep -c $'\x1f''-l'$'\x1f' "$log")" -eq 1 ] \
     || fail "fm-send /skill must type the text exactly once"
 
+  run_send_case "$ROOT" "$fb" "$log" "$home" -- "sess:0.99" --key Escape
+  rc=$?
+  expect_code 1 "$rc" "fm-send should refuse a missing explicit pane"
+  assert_not_contains "$(cat "$log")" $'\x1f''send-keys'$'\x1f' \
+    "fm-send must not send a key to a missing explicit pane"
+
   pass "fm-send.sh: explicit tmux targets are verified; text types once and submits with Enter"
 }
 
-# --- old vs new: fm-peek.sh --------------------------------------------------
+# --- fm-peek.sh -------------------------------------------------------------
 
-make_peek_fakebin() {  # <dir> <capture-output> -> echoes fakebin dir
-  local dir=$1 payload=$2 fb="$1/fakebin"
+make_peek_fakebin() {  # <dir> -> echoes fakebin dir
+  local fb="$1/fakebin"
   mkdir -p "$fb"
-  printf '%s' "$payload" > "$dir/capture.out"
-  cat > "$fb/tmux" <<SH
+  cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
-{ printf 'tmux'; for a in "\$@"; do printf '\\x1f%s' "\$a"; done; printf '\\n'; } >> "\${FM_TMUX_LOG:?}"
-case "\${1:-}" in
-  list-windows) printf '@7 win-neighbour\\n@3 win\\n' ;;
-  capture-pane) cat "$dir/capture.out" ;;
+target= start=
+prev=
+for arg in "$@"; do
+  case "$prev" in
+    -t) target=$arg ;;
+    -S) start=$arg ;;
+  esac
+  prev=$arg
+done
+case "${1:-}" in
+  list-windows)
+    case "${PEEK_INVENTORY:-live}" in
+      foreign) printf '@7 other:win\n' ;;
+      unreadable) printf 'error connecting to fixture (Permission denied)\n' >&2; exit 1 ;;
+      *) printf '@7 sess:win-neighbour\n@3 sess:win\n' ;;
+    esac ;;
+  capture-pane)
+    case "$target" in
+      @3|=sess:=win|sess:win)
+        printf '%s\n' 'oldest history' 'older history' 'latest history' | tail -n "${start#-}"
+        printf 'recorded screen\n' ;;
+      sess:0.1) printf 'explicit split pane\n' ;;
+      *) printf 'neighbour screen\n' ;;
+    esac ;;
 esac
-exit 0
 SH
   chmod +x "$fb/tmux"
   printf '%s\n' "$fb"
 }
 
-# The byte-identical old-vs-new tmux log comparison this test used to run
-# covered the P1 backend extraction. Exact-window targeting deliberately
-# changed that sequence - the capture first confirms the exact recorded window
-# in the session inventory and then reads it by its stable window id, so a
-# closed window can no longer be resolved by prefix to a neighbour - so the
-# current contract is asserted directly instead.
 test_peek_tmux_contract() {
-  local fb log home out payload neutral_root
-  payload=$'line one\nline two\ncaptain on deck'
-  fb=$(make_peek_fakebin "$TMP_ROOT/peek-fake" "$payload")
+  local fb home out neutral_root
+  fb=$(make_peek_fakebin "$TMP_ROOT/peek-fake")
   home="$TMP_ROOT/peek-home"; mkdir -p "$home/state"
-  log="$TMP_ROOT/peek-new.log"
-  # A fresh non-git dir keeps fm-guard.sh's worktree-tangle check inert.
+  fm_write_meta "$home/state/worker.meta" "window=sess:win"
   neutral_root="$TMP_ROOT/peek-neutral-root"; mkdir -p "$neutral_root"
 
-  : > "$log"
-  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" FM_TMUX_LOG="$log" \
-    "$ROOT/bin/fm-peek.sh" "sess:win" 25 2>/dev/null)
+  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" \
+    "$ROOT/bin/fm-peek.sh" worker 2 2>/dev/null)
+  [ "$out" = $'older history\nlatest history\nrecorded screen' ] \
+    || fail "fm-peek should return the recorded screen and exactly two history lines"
+  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" \
+    "$ROOT/bin/fm-peek.sh" sess:0.1 2 2>/dev/null)
+  [ "$out" = 'explicit split pane' ] || fail "fm-peek should accept an explicit pane selector"
 
-  [ "$out" = "$payload" ] || fail "fm-peek did not pass through the fake capture-pane output exactly"
-  assert_contains "$(cat "$log")" $'\x1f''list-windows'$'\x1f''-t'$'\x1f''=sess' \
-    "fm-peek did not confirm the exact recorded session's window inventory"
-  assert_contains "$(cat "$log")" $'\x1f''capture-pane'$'\x1f''-p'$'\x1f''-t'$'\x1f''@3'$'\x1f''-S'$'\x1f''-25' \
-    "fm-peek did not capture the exact window by its id with -S -<lines>"
-  assert_not_contains "$(cat "$log")" $'\x1f''-t'$'\x1f''sess:win'$'\x1f' \
-    "fm-peek must not read the recorded window by its prefix-resolvable name"
+  if out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" PEEK_INVENTORY=foreign \
+    "$ROOT/bin/fm-peek.sh" worker 2 2>&1); then
+    fail "fm-peek should reject the same window name in another session"
+  fi
+  assert_contains "$out" "window sess:win not found" "fm-peek should report a missing recorded window"
+  if out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" PEEK_INVENTORY=unreadable \
+    "$ROOT/bin/fm-peek.sh" worker 2 2>&1); then
+    fail "fm-peek should fail when tmux cannot read the inventory"
+  fi
+  assert_contains "$out" "could not resolve tmux window sess:win" "fm-peek should report an unreadable inventory"
 
-  pass "fm-peek.sh: captures exactly the recorded window by id after confirming its membership"
+  pass "fm-peek returns the selected pane and requested history and distinguishes lookup failures"
 }
 
 # --- old vs new: fm-spawn.sh --------------------------------------------------
@@ -815,6 +831,7 @@ case "\${1:-}" in
   display-message)
     for a in "\$@"; do case "\$a" in *pane_current_path*) printf '%s\\n' "$wt"; exit 0 ;; esac; done
     printf 'firstmate\\n'; exit 0 ;;
+  new-window) printf '@1\\n'; exit 0 ;;
   list-windows) exit 0 ;;
 esac
 exit 0
@@ -885,6 +902,7 @@ case "\${1:-}" in
       exit 0
     ;; esac; done
     printf 'firstmate\\n'; exit 0 ;;
+  new-window) printf '@1\\n'; exit 0 ;;
   list-windows) exit 0 ;;
 esac
 exit 0

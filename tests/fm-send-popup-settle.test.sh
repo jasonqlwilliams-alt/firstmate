@@ -59,7 +59,7 @@ case "${1:-}" in
   capture-pane) printf '╭────╮\n│    │\n╰────╯\n'; exit 0 ;;
   list-windows)
     # The exact-window reads ask for ids alongside names.
-    case "$*" in *window_id*) printf '@1 win\n' ;; *) printf 'win\n' ;; esac
+    case "$*" in *window_id*) printf '@1 sess:win\n' ;; *) printf 'win\n' ;; esac
     exit 0 ;;
 esac
 exit 0

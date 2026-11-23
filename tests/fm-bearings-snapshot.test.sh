@@ -38,10 +38,13 @@ SH
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 case "${1:-}" in
+  list-windows)
+    case "$*" in *window_id*) printf '%s\n' '@1 firstmate:fm-phase8' '@2 firstmate:fm-domain-alpha' ;; esac ;;
+  list-panes) [ "$3" = @1 ] || [ "$3" = @2 ] ;;
   display-message) case "$*" in *dead-*) exit 1 ;; *) printf '%%1\n' ;; esac ;;
   capture-pane)
     case "$*" in
-      *fm-domain-alpha*) printf 'stale terminal summary: Phase 7 started\n> \n' ;;
+      *fm-domain-alpha*|*' -t @2 '*) printf 'stale terminal summary: Phase 7 started\n> \n' ;;
       *) printf 'all quiet\n> \n' ;;
     esac
     ;;
@@ -3127,7 +3130,7 @@ EOF
   printf 'working: old generation\n' > "$home/state/generation-race.status"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
-if [ "${1:-}" = display-message ]; then
+if [ "${1:-}" = list-windows ]; then
   if mkdir "$RACE_ONCE" 2>/dev/null; then
     tmp="$RACE_META.tmp.$$"
     cat > "$tmp" <<EOF

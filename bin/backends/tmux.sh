@@ -41,18 +41,25 @@ fm_backend_tmux_resolve_bare_selector() {  # <name>
 # window reads as missing even when a prefix-named neighbour survives.
 fm_backend_tmux_capture() {  # <target> <lines>
   local target
-  target=$(fm_tmux_exact_target "$1") || {
-    echo "error: tmux window $1 not found" >&2
+  if target=$(fm_tmux_exact_target "$1"); then
+    tmux capture-pane -p -t "$target" -S -"$2"
+  else
+    case $? in
+      1) echo "error: tmux window $1 not found" >&2 ;;
+      *) echo "error: could not resolve tmux window $1" >&2 ;;
+    esac
     return 1
-  }
-  tmux capture-pane -p -t "$target" -S -"$2"
+  fi
 }
 
-# fm_backend_tmux_send_key: one named key. Mirrors fm-send.sh's --key path:
-# `tmux display-message -p -t "$T" '#{pane_id}' >/dev/null`, then
-# `tmux send-keys -t "$T" "$2"`.
+fm_backend_tmux_target_exists() {  # <target>
+  local target
+  target=$(fm_tmux_exact_target "$1") || return 1
+  tmux list-panes -t "$target" -F '#{pane_id}' >/dev/null 2>&1
+}
+
+# fm_backend_tmux_send_key: one named key.
 fm_backend_tmux_send_key() {  # <target> <key>
-  tmux display-message -p -t "$1" '#{pane_id}' >/dev/null
   tmux send-keys -t "$1" "$2"
 }
 
@@ -108,7 +115,9 @@ fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs> -> prints 
 # empty on any tmux error. Mirrors fm-spawn.sh's worktree-discovery poll:
 # `tmux display-message -p -t "$T" '#{pane_current_path}'`.
 fm_backend_tmux_current_path() {  # <target>
-  tmux display-message -p -t "$1" '#{pane_current_path}' 2>/dev/null
+  local target
+  target=$(fm_tmux_exact_target "$1") || return 1
+  tmux display-message -p -t "$target" '#{pane_current_path}' 2>/dev/null
 }
 
 # fm_backend_tmux_send_text_line: send one line of TEXT then Enter, with no

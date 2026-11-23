@@ -137,25 +137,33 @@ case "${1:-}" in
   # The exact-window reads ask for ids alongside names.
   list-windows)
     [ -f "$D/windows" ] || exit 0
-    case "$*" in *window_id*) awk '{ print "@" NR " " $0 }' "$D/windows" ;; *) cat "$D/windows" ;; esac
+    session=fmses
+    [ ! -f "$D/session" ] || session=$(cat "$D/session")
+    case "$*" in
+      *window_id*) awk -v session="$session" '{ print "@" NR " " session ":" $0 }' "$D/windows" ;;
+      *) cat "$D/windows" ;;
+    esac
     exit 0 ;;
   has-session|new-session|set-window-option) exit 0 ;;
   new-window)
     name=
     cwd=
+    session=
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
         -n) name=$2; shift 2 ;;
         -c) cwd=$2; shift 2 ;;
-        -t|-F) shift 2 ;;
+        -t) session=${2%:}; shift 2 ;;
+        -F) shift 2 ;;
         -dP|-d|-P) shift ;;
         *) shift ;;
       esac
     done
     [ -z "$name" ] || printf '%s\n' "$name" >> "$D/windows"
     [ -z "$cwd" ] || printf '%s' "$cwd" > "$D/cwd"
-    printf '@recreated\n'
+    [ -z "$session" ] || printf '%s\n' "$session" > "$D/session"
+    awk 'END { print "@" NR }' "$D/windows"
     exit 0 ;;
 esac
 exit 0

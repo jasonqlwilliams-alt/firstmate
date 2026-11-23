@@ -47,7 +47,7 @@ case "${1:-}" in
       exit 1
     fi
     exit 0 ;;
-  display-message)
+  list-panes|display-message)
     target=
     cursor=0
     while [ $# -gt 0 ]; do
@@ -73,7 +73,7 @@ case "${1:-}" in
   list-windows)
     # The exact-window reads ask for ids alongside names.
     case "$*" in
-      *window_id*) printf '@1 fm-mpf-lane-m8\n@2 fm-lane-ok\n' ;;
+      *window_id*) printf '@1 sess:fm-mpf-lane-m8\n@2 sess:fm-lane-ok\n' ;;
       *) printf 'foreign:%s\nfm-mpf-lane-m8\nfm-lane-ok\n' "${FM_FAKE_TMUX_WINDOW:-fm-lost}" ;;
     esac
     exit 0 ;;

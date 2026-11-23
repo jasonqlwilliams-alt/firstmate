@@ -74,7 +74,7 @@ case "${1:-}" in
     fi
     exit 0 ;;
   # The exact-window reads ask for ids alongside names.
-  list-windows) case "$*" in *window_id*) printf '@1 fm-t1\n@2 win\n' ;; *) printf 'fm-t1\n' ;; esac; exit 0 ;;
+  list-windows) case "$*" in *window_id*) printf '@1 sess:fm-t1\n@2 sess:win\n' ;; *) printf 'fm-t1\n' ;; esac; exit 0 ;;
 esac
 exit 0
 SH

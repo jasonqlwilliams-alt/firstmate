@@ -121,7 +121,7 @@ case "${1:-}" in
   # The exact-window reads ask for ids alongside names.
   list-windows)
     [ -f "$D/windows" ] || exit 0
-    case "$*" in *window_id*) awk '{ print "@" NR " " $0 }' "$D/windows" ;; *) cat "$D/windows" ;; esac
+    case "$*" in *window_id*) awk '{ print "@" NR " fmses:" $0 }' "$D/windows" ;; *) cat "$D/windows" ;; esac
     exit 0 ;;
 esac
 exit 0
