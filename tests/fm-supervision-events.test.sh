@@ -215,6 +215,50 @@ test_remote_wait_rejects_late_success() (
 
 test_remote_wait_rejects_late_success || exit $?
 
+test_remote_wait_counts_dispatch_time() (
+  local dispatched="$TMP/dispatched"
+  export PATH="$TMP/no-perl:$PATH"
+  read() {
+    local i
+    if [ "${2:-}" = -t ]; then
+      for ((i=0; i<100; i++)); do
+        [ ! -e "$dispatched" ] || break
+        command sleep 0.01
+      done
+      [ -e "$dispatched" ] || return 1
+      command sleep 0.6
+    fi
+    builtin read "$@"
+  }
+  WATCHER_WAIT_LIMIT=1 watcher_remote_observe bash -c '
+    touch "$1"
+    sleep 1.2
+    printf idle
+  ' _ "$dispatched" || fail "remote observation could not run"
+  [ -e "$dispatched" ] || fail "remote observation did not dispatch"
+  [ "$FM_PENDING_REPLY_OBSERVATION" = unknown ] || fail "a delay before reading extended the observation deadline"
+  pass "watcher: a delayed status read cannot extend the observation deadline"
+)
+
+test_remote_wait_counts_dispatch_time || exit $?
+
+test_wait_preserves_sleep_units() (
+  reset_state
+  WATCHER_WAIT_LIMIT=150
+  sleep() { printf 'sleep %s\n' "$1" >> "$SLEEP_LOG"; }
+  watcher_publish_beat() { printf 'beat\n' >> "$SLEEP_LOG"; }
+  POLL=6m event_wait_or_sleep
+  watcher_wait 0.05h
+  watcher_wait 0.0005d
+  [ "$(cat "$SLEEP_LOG")" = "$(printf '%s\n' \
+    'sleep 150' beat 'sleep 150' beat 'sleep 60' \
+    'sleep 150' beat 'sleep 30' 'sleep 43.2')" ] \
+    || fail "suffixed waits changed duration or missed a checkpoint: $(cat "$SLEEP_LOG")"
+  pass "watcher: sleep unit suffixes preserve duration and beacon checkpoints"
+)
+
+test_wait_preserves_sleep_units || exit $?
+
 # --- event_wait_or_sleep: secondmate windows are excluded from the pane list --
 
 reset_state

@@ -1646,27 +1646,39 @@ remote_observation_owned() {
   [ "$parent" = "$owner" ] && [ "$pgid" = "$capture" ]
 }
 
+remote_observation_status() {
+  local owner=$1 budget=$2 capture=$3 status command_pid command_rc
+  shift 3
+  IFS= read -r -t "$budget" status < <(
+    exec 2>/dev/null
+    trap ':' HUP INT TERM
+    ( exec "$@" < /dev/null >&3 3>&- ) &
+    command_pid=$!
+    while kill -0 "$command_pid" 2>/dev/null; do
+      if ! remote_observation_owned "$capture" "$owner"; then
+        printf '%s\n' cancelled
+        break
+      fi
+      command sleep 0.02
+    done
+    command_rc=0
+    wait "$command_pid" 2>/dev/null || command_rc=$?
+    printf '%s\n' "$command_rc"
+  ) && [ "$status" = 0 ]
+}
+
 run_remote_observation_process() {
-  local owner=$1 budget=$2 capture status command_pid command_rc
+  local owner=$1 budget=$2 capture elapsed
   shift 2
   fm_current_pid capture && remote_observation_owned "$capture" "$owner" || return 124
   trap ':' HUP INT TERM
   {
-    if IFS= read -r -t "$budget" status < <(
-      trap ':' HUP INT TERM
-      ( exec "$@" < /dev/null >&3 3>&- ) &
-      command_pid=$!
-      while kill -0 "$command_pid" 2>/dev/null; do
-        if ! remote_observation_owned "$capture" "$owner"; then
-          printf '%s\n' cancelled
-          break
-        fi
-        command sleep 0.02
-      done
-      command_rc=0
-      wait "$command_pid" 2>/dev/null || command_rc=$?
-      printf '%s\n' "$command_rc"
-    ) && [ "$status" = 0 ] && remote_observation_owned "$capture" "$owner"; then
+    if elapsed=$(
+      LC_ALL=C TIMEFORMAT=%R
+      { time remote_observation_status "$owner" "$budget" "$capture" "$@"; } 2>&1
+    ) && LC_ALL=C awk -v elapsed="$elapsed" -v budget="$budget" \
+      'BEGIN { exit !(elapsed ~ /^[0-9]+[.][0-9]+$/ && elapsed + 0 < budget) }' \
+      && remote_observation_owned "$capture" "$owner"; then
       return 0
     fi
   } 3>&1
@@ -1790,19 +1802,23 @@ heartbeat_scan_finds_actionable() {
   return "$found"
 }
 
-watcher_wait_slice() {
-  awk -v seconds="$1" -v limit="$WATCHER_WAIT_LIMIT" 'BEGIN { print (seconds + 0 > limit) ? limit : seconds }'
-}
-
 watcher_wait() {
-  local remaining=$1 slice
-  while :; do
-    slice=$(watcher_wait_slice "$remaining")
-    sleep "$slice"
-    [ "$slice" != "$remaining" ] || return 0
+  local duration=$1 remaining next
+  remaining=$(LC_ALL=C awk -v duration="$duration" 'BEGIN {
+    if (duration !~ /^\+?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][-+]?[0-9]+)?[smhd]?$/)
+      exit 1
+    unit = substr(duration, length(duration))
+    scale = unit == "m" ? 60 : unit == "h" ? 3600 : unit == "d" ? 86400 : 1
+    printf "%.15g\n", (duration + 0) * scale
+  }') || { sleep "$duration"; return 0; }
+  while next=$(LC_ALL=C awk -v seconds="$remaining" -v limit="$WATCHER_WAIT_LIMIT" \
+    'BEGIN { if (seconds + 0 <= limit) exit 1; printf "%.15g\n", seconds - limit }'); do
+    sleep "$WATCHER_WAIT_LIMIT"
     watcher_publish_beat || exit 0
-    remaining=$(awk -v seconds="$remaining" -v slice="$slice" 'BEGIN { print (seconds - slice) }')
+    remaining=$next
   done
+  sleep "$remaining"
+  return 0
 }
 
 # event_wait_or_sleep: the terminal wait of each supervision cycle. For a home
