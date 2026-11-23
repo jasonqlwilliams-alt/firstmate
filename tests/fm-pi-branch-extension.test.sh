@@ -1690,8 +1690,8 @@ test_branch_report_refuses_a_task_the_wake_did_not_name() {
   PLUGIN="$repo/.pi/extensions/fm-branch-supervision.ts" FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" \
     DRIVER_PRELUDE="$DRIVER_PRELUDE" node --input-type=module > "$TMP_ROOT/node-output" 2>&1 <<'EOF'
 const prelude = process.env.DRIVER_PRELUDE;
-await eval(`(async () => { ${prelude}; globalThis.__t = { dispatch, fire, home, settle, approvedProject, defaultSessionCtx }; })()`);
-const { dispatch, fire, home, settle, approvedProject, defaultSessionCtx } = globalThis.__t;
+await eval(`(async () => { ${prelude}; globalThis.__t = { dispatch, fire, home, settle, approvedProject, defaultSessionCtx, makeOffer, bus }; })()`);
+const { dispatch, fire, home, settle, approvedProject, defaultSessionCtx, makeOffer, bus } = globalThis.__t;
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -1722,11 +1722,38 @@ if (named.isError) throw new Error(`the wake's own task was refused: ${JSON.stri
 finish();
 await settle(() => !existsSync(`${home}/state/.branch-eligible-rows`), "task-local grant release");
 
+writeFileSync(`${home}/state/a-lost.meta`, `project=${approvedProject}\nwindow=default:wX:p1\n`);
+writeFileSync(`${home}/state/.wake-queue`,
+  "1\t2\tstale\tdefault:wX:p1\tstale: default:wX:p1 (the recorded endpoint is gone for task a-lost)\n");
+globalThis.__fmOnBranchPrompt = () => new Promise((resolve) => { finish = resolve; });
+const loss = makeOffer("stale: default:wX:p1 (the recorded endpoint is gone for task a-lost)");
+bus.emit("fm-branch-supervision:dispatch", loss);
+if (!loss.accepted) throw new Error("branch refused the named loss");
+await settle(() => (globalThis.__fmPrompts ?? []).length === 2, "named endpoint loss branch prompt");
+const lossReport = globalThis.__fmSessions.at(-1).options.customTools.find((tool) => tool.name === "fm_branch_report");
+const replacement = await lossReport.execute("replacement", { task: "other-task", verdict: "routine", summary: "pane healthy" }, undefined, undefined, {});
+if (!replacement.isError || !replacement.content[0].text.includes("names a-lost, not other-task")) {
+  throw new Error(`the named loss allowed a report for the replacement: ${JSON.stringify(replacement)}`);
+}
+const lost = await lossReport.execute("lost", { task: "a-lost", verdict: "routine", summary: "endpoint gone" }, undefined, undefined, {});
+if (lost.isError) throw new Error(`the named loss refused a report for the lost task: ${JSON.stringify(lost)}`);
+finish();
+await loss.settlement;
+
+writeFileSync(`${home}/state/a-lost.status`, "captain-held: awaiting the captain\n");
+const nowMain = makeOffer("stale: default:wX:p1 (the recorded endpoint is gone for task a-lost)");
+bus.emit("fm-branch-supervision:dispatch", nowMain);
+if (!nowMain.accepted) throw new Error("branch fixture did not reach the eligibility recheck");
+await nowMain.settlement.then(
+  () => { throw new Error("an endpoint loss that became main-owned did not return to main"); },
+  (error) => { if (!String(error).includes("named endpoint loss now belongs to main")) throw error; },
+);
+
 // A heartbeat review is not scoped by task: it may report any task id, a
 // task whose records are already gone, and fleet.
 globalThis.__fmOnBranchPrompt = () => new Promise((resolve) => { finish = resolve; });
 if (!dispatch("heartbeat", [], true, true).accepted) throw new Error("branch refused the heartbeat");
-await settle(() => (globalThis.__fmPrompts ?? []).length === 2, "heartbeat branch prompt");
+await settle(() => (globalThis.__fmPrompts ?? []).length === 3, "heartbeat branch prompt");
 const heartbeatSession = globalThis.__fmSessions[globalThis.__fmSessions.length - 1];
 const heartbeatReport = heartbeatSession.options.customTools.find((tool) => tool.name === "fm_branch_report");
 const live = await heartbeatReport.execute("live", { task: "other-task", verdict: "routine", summary: "worker healthy" }, undefined, undefined, {});
@@ -1738,7 +1765,7 @@ if (fleetInReview.isError) throw new Error(`a fleet-wide report was refused duri
 finish();
 
 const stored = readFileSync(`${home}/state/branch-outcomes.jsonl`, "utf8").trim().split("\n").map((line) => JSON.parse(line).task);
-if (JSON.stringify(stored) !== JSON.stringify(["branch-driver", "other-task", "retired-task", "fleet"])) {
+if (JSON.stringify(stored) !== JSON.stringify(["branch-driver", "a-lost", "other-task", "retired-task", "fleet"])) {
   throw new Error(`refused reports reached the durable store: ${JSON.stringify(stored)}`);
 }
 
@@ -3849,7 +3876,7 @@ for (const row of mainOnlyRows) {
 
 // A needs-decision signal row is a main-only class too, marked by payload
 // rather than kind (docs/pi-supervision-branch.md "Autonomy"): it is excluded
-// from eligibleSeqs and named in needsDecisionKeys. A later stale row under the
+// from eligibleSeqs and named in needsDecisionTasks. A later stale row under the
 // task's window alias remains individually claimable, while task-identity
 // precedence keeps its complete wake on main until the decision row is read.
 writeFileSync(
@@ -3866,8 +3893,8 @@ if (!needsDecisionMixed.eligible) {
 if (needsDecisionMixed.eligibleSeqs.join(",") !== "2") {
   throw new Error(`a needs-decision row must be excluded from eligibleSeqs: ${JSON.stringify(needsDecisionMixed)}`);
 }
-if (needsDecisionMixed.needsDecisionKeys.join(",") !== "task-a.status") {
-  throw new Error(`needsDecisionKeys must name the excluded row: ${JSON.stringify(needsDecisionMixed)}`);
+if (needsDecisionMixed.needsDecisionTasks.join(",") !== "task-a") {
+  throw new Error(`needsDecisionTasks must identify the excluded task: ${JSON.stringify(needsDecisionMixed)}`);
 }
 if (needsDecisionMixed.taskByWakeKey["task-a.status"] !== "task-a" ||
   needsDecisionMixed.taskByWakeKey["fm-window"] !== "task-a") {
@@ -3899,8 +3926,8 @@ const captainHeldMixed = scopeForUnreadWake(state, false);
 if (!captainHeldMixed.eligible || captainHeldMixed.eligibleSeqs.join(",") !== "2") {
   throw new Error(`a captain-held stale row was offered to the branch: ${JSON.stringify(captainHeldMixed)}`);
 }
-if (captainHeldMixed.needsDecisionKeys.join(",") !== "fm-window") {
-  throw new Error(`the captain-held stale key was not marked main-owned: ${JSON.stringify(captainHeldMixed)}`);
+if (captainHeldMixed.needsDecisionTasks.join(",") !== "task-a") {
+  throw new Error(`the captain-held stale task was not marked main-owned: ${JSON.stringify(captainHeldMixed)}`);
 }
 
 writeFileSync(`${state}/task-a.status`, "captain-held [key=route]: awaiting a second captain reminder\n \n");
@@ -3919,17 +3946,17 @@ if (countedStatusReads !== 1) {
   throw new Error(`one status was read ${countedStatusReads} times for repeated stale rows`);
 }
 if (!repeatedCaptainHeld.eligible || repeatedCaptainHeld.eligibleSeqs.join(",") !== "3" ||
-  repeatedCaptainHeld.needsDecisionKeys.join(",") !== "fm-window,fm-window") {
+  repeatedCaptainHeld.needsDecisionTasks.join(",") !== "task-a,task-a") {
   throw new Error(`repeated stale reminders changed classification: ${JSON.stringify(repeatedCaptainHeld)}`);
 }
 const repeatedCaptainHeldNextScan = scopeForUnreadWake(state, false);
-if (countedStatusReads !== 1 || repeatedCaptainHeldNextScan.needsDecisionKeys.join(",") !== "fm-window,fm-window") {
+if (countedStatusReads !== 1 || repeatedCaptainHeldNextScan.needsDecisionTasks.join(",") !== "task-a,task-a") {
   throw new Error(`an unchanged status was not reused across scans: reads=${countedStatusReads} scope=${JSON.stringify(repeatedCaptainHeldNextScan)}`);
 }
 writeFileSync(`${state}/task-a.status`, "captain-held [key=route]: awaiting the captain\nworking: resumed after answer\n");
 const changedCaptainHeld = scopeForUnreadWake(state, false);
 if (countedStatusReads !== 2 || changedCaptainHeld.eligibleSeqs.join(",") !== "1,2,3" ||
-  changedCaptainHeld.needsDecisionKeys.length !== 0) {
+  changedCaptainHeld.needsDecisionTasks.length !== 0) {
   throw new Error(`a changed status did not invalidate its cached decision: reads=${countedStatusReads} scope=${JSON.stringify(changedCaptainHeld)}`);
 }
 countedStatusPath = "";
@@ -3951,8 +3978,8 @@ const openDecisionMixed = scopeForUnreadWake(state, false);
 if (!openDecisionMixed.eligible || openDecisionMixed.eligibleSeqs.join(",") !== "2") {
   throw new Error(`an open-decision stale row was offered to the branch: ${JSON.stringify(openDecisionMixed)}`);
 }
-if (openDecisionMixed.needsDecisionKeys.join(",") !== "fm-window") {
-  throw new Error(`the open-decision stale key was not marked main-owned: ${JSON.stringify(openDecisionMixed)}`);
+if (openDecisionMixed.needsDecisionTasks.join(",") !== "task-a") {
+  throw new Error(`the open-decision stale task was not marked main-owned: ${JSON.stringify(openDecisionMixed)}`);
 }
 
 process.env.FM_CLASSIFY_RESOLVE_VERB = "answered";
@@ -3962,7 +3989,7 @@ writeFileSync(
 );
 const customResolved = scopeForUnreadWake(state, false);
 if (!customResolved.eligible || customResolved.eligibleSeqs.slice().sort().join(",") !== "1,2" ||
-  customResolved.needsDecisionKeys.length !== 0) {
+  customResolved.needsDecisionTasks.length !== 0) {
   throw new Error(`a custom resolution verb left the stale decision open: ${JSON.stringify(customResolved)}`);
 }
 
@@ -3970,7 +3997,7 @@ process.env.FM_CLASSIFY_CAPTAIN_HELD_VERB = "awaiting-captain";
 writeFileSync(`${state}/task-a.status`, "awaiting-captain [key=cleanup]: awaiting the captain\n");
 const customHeld = scopeForUnreadWake(state, false);
 if (!customHeld.eligible || customHeld.eligibleSeqs.join(",") !== "2" ||
-  customHeld.needsDecisionKeys.join(",") !== "fm-window") {
+  customHeld.needsDecisionTasks.join(",") !== "task-a") {
   throw new Error(`a custom captain-held verb was offered to the branch: ${JSON.stringify(customHeld)}`);
 }
 delete process.env.FM_CLASSIFY_RESOLVE_VERB;
@@ -3983,7 +4010,7 @@ writeFileSync(
 );
 const customReservedPrefixes = scopeForUnreadWake(state, false);
 if (!customReservedPrefixes.eligible || customReservedPrefixes.eligibleSeqs.join(",") !== "2" ||
-  customReservedPrefixes.needsDecisionKeys.join(",") !== "fm-window") {
+  customReservedPrefixes.needsDecisionTasks.join(",") !== "task-a") {
   throw new Error(`configured reserved prefixes lost an open stale decision: ${JSON.stringify(customReservedPrefixes)}`);
 }
 delete process.env.FM_CLASSIFY_RESERVED_KEY_PREFIXES;
@@ -3992,7 +4019,7 @@ writeFileSync(`${state}/symlink-target.status`, "needs-decision: external choice
 unlinkSync(`${state}/task-a.status`);
 symlinkSync(`${state}/symlink-target.status`, `${state}/task-a.status`);
 const symlinkedStatus = scopeForUnreadWake(state, false);
-if (!symlinkedStatus.corrupted || symlinkedStatus.eligible || symlinkedStatus.needsDecisionKeys.length !== 0) {
+if (!symlinkedStatus.corrupted || symlinkedStatus.eligible || symlinkedStatus.needsDecisionTasks.length !== 0) {
   throw new Error(`a symlinked status file influenced stale routing: ${JSON.stringify(symlinkedStatus)}`);
 }
 unlinkSync(`${state}/task-a.status`);

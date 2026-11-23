@@ -3633,7 +3633,7 @@ test_secondmate_unpause_clears_pause_tracking() {
 }
 
 test_zellij_secondmate_resume_restarts_pause_cadence() (
-  local dir state fakebin out statusf phase key=test_7 pid=''
+  local dir state fakebin out statusf phase throttle reminder legacy_hash key=test_7 pid=''
   dir=$(make_case zellij-secondmate-resume)
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
   statusf="$state/mate.status"
@@ -3663,9 +3663,35 @@ SH
   wait_for_exit "$pid" 150 || fail "the first Zellij pause did not re-surface"
   pid=''
   assert_contains "$(cat "$out")" "awaiting external" "the first wake was not a pause recheck"
-  assert_present "$state/.paused-resurfaced-$key" "the first pause did not record a recheck"
+  throttle="$state/.paused-resurfaced-$key"
+  assert_present "$throttle" "the first pause did not record a recheck"
   ack_stopped_cycle "$state" || fail "could not acknowledge the first Zellij pause"
   export FM_WATCH_HANDLING_SUCCESSOR=1
+
+  reminder=$(file_mtime "$throttle")
+  legacy_hash=$(hash_text 'idle secondmate')
+  printf '%s' "$legacy_hash" > "$state/.hash-$key"
+  printf '99\n' > "$state/.count-$key"
+  printf '1\n' > "$state/.stale-since-$key"
+  printf '2\n' > "$state/.wedge-escalations-$key"
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_poll_cycle "$state" "$pid" || fail "upgrading a legacy hash duplicated the current pause reminder: $(cat "$out")"
+  [ "$(file_mtime "$throttle")" = "$reminder" ] || fail "hash upgrade changed the current declaration's reminder time"
+  [ "$(cat "$state/.count-$key")" -lt 99 ] || fail "hash upgrade kept the unbound count"
+  assert_absent "$state/.stale-since-$key" "hash upgrade kept the unbound stale timer"
+  assert_absent "$state/.wedge-escalations-$key" "hash upgrade kept the unbound wedge count"
+  reap "$pid"
+  pid=''
+
+  printf '%s' "$legacy_hash" > "$state/.hash-$key"
+  printf 'declared:r1:foreign' > "$throttle"
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_for_exit "$pid" 150 || fail "hash upgrade let a foreign reminder suppress the current pause"
+  pid=''
+  assert_contains "$(cat "$out")" "awaiting external" "hash upgrade did not recheck the current pause"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the current pause after hash upgrade"
 
   printf 'working: the first release landed\n' >> "$statusf"
   printf '%s' "$(seen_sig "$statusf")" > "$state/.seen-mate_status"
@@ -3699,7 +3725,7 @@ SH
   assert_absent "$state/.paused-resurfaced-$key" "the fresh Zellij pause recorded a premature recheck"
   reap "$pid"
   pid=''
-  pass "a verified Zellij secondmate resume clears the old cadence before its next pause"
+  pass "a verified Zellij secondmate keeps its own reminder on upgrade and clears it on resume"
 )
 
 test_nonterminal_stale_pause_transitions_reclassify_unchanged_hash() {

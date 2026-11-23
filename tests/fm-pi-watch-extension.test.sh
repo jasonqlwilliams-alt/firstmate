@@ -902,18 +902,36 @@ EOF
 
 # An unread second-mate pending-reply escalation keeps a later stale reminder
 # under the same task's window alias on main until the decision row is read.
-test_pi_unread_pending_reply_forces_later_stale_alias_to_main() {
-  local repo home plugin log stop out status
-  repo="$TMP_ROOT/pi-mixed-signal-root"
-  home="$TMP_ROOT/pi-mixed-signal-home"
-  log="$TMP_ROOT/pi-mixed-signal.log"
-  stop="$TMP_ROOT/pi-mixed-signal.stop"
+test_pi_stale_trigger_uses_its_task() {
+  local scenario=$1 dir repo home plugin log stop out status trigger queue held expected_project=approved
+  dir="$TMP_ROOT/pi-stale-$scenario"
+  repo="$dir/repo"
+  home="$dir/home"
+  log="$dir/arm.log"
+  stop="$dir/stop"
   mkdir -p "$repo/bin" "$home/state" "$home/config" "$home/projects/approved"
   install_pi_watch_extension_fixture "$repo"
   plugin="$repo/.pi/extensions/fm-primary-pi-watch.ts"
-  printf 'project=%s/projects/approved\nwindow=fm-a\n' "$home" > "$home/state/task-a.meta"
-  printf 'blocked [key=pending-reply-0123456789abcdef]: pending-reply-missed: task=task-a pending-reply-id=0123456789abcdef request=finish report\n' \
-    > "$home/state/task-a.status"
+  case "$scenario" in
+    pending-reply)
+      printf 'project=%s/projects/approved\nwindow=fm-a\n' "$home" > "$home/state/task-a.meta"
+      printf 'blocked [key=pending-reply-0123456789abcdef]: pending-reply-missed: task=task-a pending-reply-id=0123456789abcdef request=finish report\n' \
+        > "$home/state/task-a.status"
+      trigger='stale: fm-a (routine reminder)'
+      queue=$(printf '1\t1\tsignal\ttask-a.status\tneeds-decision: task-a.status\n2\t2\tstale\tfm-a\t%s\n' "$trigger")
+      ;;
+    held-loss|eligible-loss)
+      printf 'project=%s/projects/lost\nwindow=shared:w1:p2\n' "$home" > "$home/state/a-lost.meta"
+      printf 'project=%s/projects/approved\nwindow=shared:w1:p2\n' "$home" > "$home/state/z-live.meta"
+      case "$scenario" in
+        held-loss) held=a-lost ;;
+        eligible-loss) held=z-live; expected_project=lost ;;
+      esac
+      printf 'captain-held: awaiting the captain\n' > "$home/state/$held.status"
+      trigger='stale: shared:w1:p2 (the recorded endpoint is gone for task a-lost)'
+      queue=$(printf '1\t1\tstale\tshared:w1:p2\t%s\n2\t2\tstale\tshared:w1:p2\tstale: shared:w1:p2\n' "$trigger")
+      ;;
+  esac
   cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = --handling-delivered ]; then exit 0; fi
@@ -921,7 +939,7 @@ printf 'arm=%s\n' "$$" >> "${FM_ARM_LOG:?}"
 count=$(grep -c '^arm=' "$FM_ARM_LOG")
 if [ "$count" -eq 1 ]; then
   printf 'watcher: started pid=%s (beacon fresh)\n' "$$"
-  printf 'stale: fm-a (routine reminder)\n'
+  printf '%s\n' "$FM_TEST_TRIGGER"
   exit 0
 fi
 printf 'watcher: started pid=%s (beacon fresh) recovery-generation=fixture-generation\n' "$$"
@@ -930,6 +948,7 @@ while [ ! -e "$FM_STOP_FILE" ]; do sleep 0.02; done
 SH
   chmod +x "$repo/bin/fm-watch-arm.sh"
   out=$(PLUGIN="$plugin" FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_ARM_LOG="$log" FM_STOP_FILE="$stop" \
+    FM_TEST_TRIGGER="$trigger" FM_TEST_WAKE_QUEUE="$queue" FM_TEST_WAKE_PROJECT="$expected_project" \
     node --input-type=module 2>&1 <<'EOF'
 import { writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -965,8 +984,7 @@ const pi = {
 writeFileSync(`${process.env.FM_HOME}/state/.lock`, `${process.pid}\n`);
 writeFileSync(
   `${process.env.FM_HOME}/state/.wake-queue`,
-  "1\t1\tsignal\ttask-a.status\tneeds-decision: task-a.status\n" +
-    "2\t2\tstale\tfm-a\tstale: fm-a (routine reminder)\n",
+  process.env.FM_TEST_WAKE_QUEUE + "\n",
 );
 const mod = await import(pathToFileURL(process.env.PLUGIN).href);
 mod.default(pi);
@@ -974,23 +992,25 @@ await tool.execute("tool-call-later-stale-alias", {}, undefined, undefined, {});
 for (let i = 0; i < 250 && offers.length === 0; i += 1) {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
-for (let i = 0; i < 250 && !prompt; i += 1) {
+const eligible = process.env.FM_TEST_WAKE_PROJECT === "lost";
+for (let i = 0; !eligible && i < 250 && !prompt; i += 1) {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
-if (offers.length !== 1 || offers[0].eligible !== false) {
-  throw new Error(`a later stale alias bypassed its unread decision: ${JSON.stringify(offers)}`);
+if (offers.length !== 1 || offers[0].eligible !== eligible ||
+  offers[0].projects.join(",") !== `${process.env.FM_HOME}/projects/${process.env.FM_TEST_WAKE_PROJECT}`) {
+  throw new Error(`the stale trigger used the wrong task scope: ${JSON.stringify(offers)}`);
 }
-if (!prompt.includes("FIRSTMATE WATCHER WAKE: stale: fm-a")) {
-  throw new Error(`a later stale alias with an unread decision did not wake main: ${prompt}`);
+if (eligible ? prompt !== "" : !prompt.includes(`FIRSTMATE WATCHER WAKE: ${process.env.FM_TEST_TRIGGER}`)) {
+  throw new Error(`the stale trigger used the wrong delivery path: ${prompt}`);
 }
 writeFileSync(process.env.FM_STOP_FILE, "stop\n");
 process.exit(0);
 EOF
   )
   status=$?
-  expect_code 0 "$status" "an unread pending-reply escalation must keep a later stale alias on main: $out"
-  [ -z "$out" ] || fail "Pi unread pending-reply alias test printed output: $out"
-  pass "an unread pending-reply escalation keeps later stale aliases on main"
+  expect_code 0 "$status" "$scenario must route the stale trigger for the right task: $out"
+  [ -z "$out" ] || fail "Pi $scenario test printed output: $out"
+  pass "Pi routes stale triggers by task with mixed eligible rows ($scenario)"
 }
 
 # The captain's accepted rule names ONE coalesced trigger batch, not only a
@@ -3984,7 +4004,9 @@ test_pi_branch_offer_flags_heartbeat
 test_pi_heartbeat_is_not_ridden_into_main_by_a_co_present_check
 test_pi_main_only_check_classes_stay_on_main
 test_pi_captain_held_signal_stays_on_main
-test_pi_unread_pending_reply_forces_later_stale_alias_to_main
+test_pi_stale_trigger_uses_its_task pending-reply
+test_pi_stale_trigger_uses_its_task held-loss
+test_pi_stale_trigger_uses_its_task eligible-loss
 test_pi_distinct_files_mixed_batch_routes_whole_batch_to_main
 test_pi_heartbeat_is_not_ridden_into_main_by_a_co_present_needs_decision
 test_pi_heartbeat_restoration_failure_stays_on_main

@@ -35,9 +35,9 @@ export interface UnreadWakeScope {
   eligibleSeqs: string[];
   /**
    * The exact task ids the eligible signal/stale rows name (a signal row by
-   * its status-log key, a stale row through the task metadata recording that
-   * endpoint). The branch may report only these tasks while it handles the
-   * wake; `fleet` or a task it merely remembers is refused (docs/
+   * its status-log key, a stale row by its named endpoint loss or the task
+   * metadata recording that endpoint). The branch may report only these
+   * tasks while it handles the wake; `fleet` or a task it merely remembers is refused (docs/
    * pi-supervision-branch.md "Components and their owners"). Empty for a
    * heartbeat, which is not scoped by task.
    */
@@ -55,14 +55,14 @@ export interface UnreadWakeScope {
    */
   corrupted: boolean;
   /**
-   * The exact "key" field of every decision-owned signal or stale row this
+   * The task identity of every decision-owned signal or stale row this
    * scan excluded. Signal rows are marked by bin/fm-watch.sh; stale rows are
    * decision-owned when their task has an open needs-decision or its current
    * declaration is captain-held. fm-primary-pi-watch.ts cross-references these
-   * keys against the current trigger so its entire coalesced batch is forced
+   * identities against the current trigger so its entire coalesced batch is forced
    * to main.
    */
-  needsDecisionKeys: string[];
+  needsDecisionTasks: string[];
   taskByWakeKey: Record<string, string>;
 }
 
@@ -73,7 +73,7 @@ const EMPTY_SCOPE: UnreadWakeScope = {
   eligibleSeqs: [],
   eligibleTasks: [],
   corrupted: false,
-  needsDecisionKeys: [],
+  needsDecisionTasks: [],
   taskByWakeKey: {},
 };
 const UNSAFE_SCOPE: UnreadWakeScope = {
@@ -83,7 +83,7 @@ const UNSAFE_SCOPE: UnreadWakeScope = {
   eligibleSeqs: [],
   eligibleTasks: [],
   corrupted: true,
-  needsDecisionKeys: [],
+  needsDecisionTasks: [],
   taskByWakeKey: {},
 };
 
@@ -187,6 +187,11 @@ function hasOpenNeedsDecision(
   return [...open.values()].includes("needs-decision");
 }
 
+export function namedEndpointLoss(payload: string): { window: string; task: string } | null {
+  const match = /^stale: (\S+) \(the recorded endpoint is gone for task ([A-Za-z0-9._-]+)\)$/.exec(payload);
+  return match ? { window: match[1], task: match[2] } : null;
+}
+
 export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWakeScope {
   let queue = "";
   try {
@@ -200,6 +205,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
 
   const projects = new Set<string>();
   const metadata = new Map<string, string>();
+  const projectByTask = new Map<string, string>();
   // The task id behind each key a signal or stale row may carry: the task id
   // itself, or the endpoint its metadata records.
   const taskByKey = new Map<string, string>();
@@ -211,6 +217,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
       const project = fields.find((line) => line.startsWith("project="))?.slice(8) ?? "";
       const window = fields.find((line) => line.startsWith("window="))?.slice(7) ?? "";
       if (project) {
+        projectByTask.set(task, project);
         metadata.set(task, project);
         taskByKey.set(task, task);
         taskByKey.set(`${task}.status`, task);
@@ -227,7 +234,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
 
   const eligibleSeqs: string[] = [];
   const eligibleTasks = new Set<string>();
-  const needsDecisionKeys: string[] = [];
+  const needsDecisionTasks: string[] = [];
   const staleDecisionOwnership = new Map<string, boolean>();
   const resolveVerb = process.env.FM_CLASSIFY_RESOLVE_VERB || "resolved";
   const heldVerb = process.env.FM_CLASSIFY_CAPTAIN_HELD_VERB || "captain-held";
@@ -260,14 +267,22 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
         // status append surfaced through the actionable signal path is
         // excluded from what the branch may claim without vetoing the scan
         // (docs/pi-supervision-branch.md "Autonomy").
-        needsDecisionKeys.push(key);
+        needsDecisionTasks.push(taskByKey.get(key) ?? taskByKey.get(key.replace(/^fm-/, "")) ?? key);
         continue;
       }
       task = key.replace(/\.(?:status|turn-ended)$/, "");
       project = metadata.get(task) ?? "";
     } else if (kind === "stale") {
-      task = taskByKey.get(key) ?? taskByKey.get(key.replace(/^fm-/, "")) ?? "";
-      project = metadata.get(key) ?? metadata.get(key.replace(/^fm-/, "")) ?? "";
+      const loss = namedEndpointLoss(fields[4]);
+      if (loss) {
+        if (loss.window !== key) return UNSAFE_SCOPE;
+        task = loss.task;
+        project = projectByTask.get(task) ?? "";
+        if (!project) return UNSAFE_SCOPE;
+      } else {
+        task = taskByKey.get(key) ?? taskByKey.get(key.replace(/^fm-/, "")) ?? "";
+        project = metadata.get(key) ?? metadata.get(key.replace(/^fm-/, "")) ?? "";
+      }
       if (task) {
         const statusPath = `${state}/${task}.status`;
         if (!staleDecisionOwnership.has(statusPath)) {
@@ -303,7 +318,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
           staleDecisionOwnership.set(statusPath, decisionOwned);
         }
         if (staleDecisionOwnership.get(statusPath)) {
-          needsDecisionKeys.push(key);
+          needsDecisionTasks.push(task);
           continue;
         }
       }
@@ -332,7 +347,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
     eligibleSeqs,
     eligibleTasks: [...eligibleTasks],
     corrupted: false,
-    needsDecisionKeys,
+    needsDecisionTasks,
     taskByWakeKey: Object.fromEntries(taskByKey),
   };
 }

@@ -1021,7 +1021,7 @@ handle_paused_stale() {  # <window> <task> <hash>
   age=$(( now - mtime ))
   last=$(last_status_line "$statusf")
   min_age=$PAUSE_RESURFACE_SECS
-  declaration="declared:$(fm_wake_signal_sig "$statusf" || true)"
+  declaration=$(stale_wait_declaration "$task")
   if task_hold_has_no_agent "$win" "$task"; then
     if afk_record_present; then
       triage_log "absorbed stale (backlog-held, no agent attached, awaiting return): $win"
@@ -1132,9 +1132,14 @@ busy_turn_bound_check() {  # <window> <task> <hash> <since-file> <escalation-fil
   return 1
 }
 
-clear_pause_state() {  # <window-key>
+clear_pause_flags() {  # <window-key>
   local key=$1
-  rm -f "$STATE/.paused-$key" "$STATE/.paused-rechecked-$key" "$STATE/.paused-resurfaced-$key"
+  rm -f "$STATE/.paused-$key" "$STATE/.paused-rechecked-$key"
+}
+
+clear_pause_state() {  # <window-key>
+  clear_pause_flags "$1"
+  rm -f "$STATE/.paused-resurfaced-$1"
 }
 
 # The hash-scoped half of clear_pause_tracking: the stale suppressor, its wedge
@@ -1328,6 +1333,17 @@ stale_wait_throttled() {  # <window-key> <declaration>
     && [ "$(age_of "$throttle")" -lt "$PAUSE_RESURFACE_SECS" ]
 }
 
+current_declared_wait_throttled() {  # <window-key> <task> <last-status-line>
+  local key=$1 task=$2 last=$3 declaration until
+  [ -s "$STATE/.paused-resurfaced-$key" ] && status_is_paused_or_captain_held "$last" || return 1
+  declaration=$(stale_wait_declaration "$task")
+  [ "$declaration" != declared: ] || return 1
+  if until=$(status_paused_until "$last") && [ "$(date +%s)" -ge "$until" ]; then
+    declaration="$declaration:due"
+  fi
+  stale_wait_throttled "$key" "$declaration"
+}
+
 # The same bound, for a stale window whose last line IS captain-relevant. That
 # line is real and its first sight must still reach the captain, but a delivery
 # they are already holding has nothing new to say on the next pane tick.
@@ -1432,7 +1448,7 @@ surface_nonterminal_stale() {  # <window> <task> <hash>
     # poll - taking the throttle with it - and would hand the mate and dead-agent
     # cadences a declaration they were never given. Only the shared re-surface
     # marker is kept, which is the whole of what this bound needs.
-    rm -f "$STATE/.paused-$key" "$STATE/.paused-rechecked-$key"
+    clear_pause_flags "$key"
   else
     clear_pause_state "$key"
   fi
@@ -2400,7 +2416,12 @@ EOF
     case "$prev" in
       "$hash_prefix"*) prev=${prev#"$hash_prefix"} ;;
       *)
-        clear_pause_tracking "$key"
+        if [[ $prev =~ ^[0-9a-f]{32}$ ]] && current_declared_wait_throttled "$key" "$task" "$last"; then
+          clear_pause_flags "$key"
+          clear_stale_hash_tracking "$key"
+        else
+          clear_pause_tracking "$key"
+        fi
         rm -f "$STATE/.churn-since-$key"
         prev=
         ;;
