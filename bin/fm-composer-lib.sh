@@ -110,11 +110,10 @@
 # _fm_composer_agy_content INSTEAD of every generic shape rule. It proves
 # `empty` only from the recorded screen exactly: a styled capture, the last
 # rule pair holding exactly one row, the cursor (when known) on that row, no
-# `>` row directly above the opening rule, no earlier rule without an
-# intervening idle footer, the row holding only the glyph or agy's exact
-# recorded mode hint in its recorded colour, and the idle footer as the only
-# text below the closing rule. Typed text after the glyph is
-# `pending`; anything else - a plain capture, wrapped rows, the feedback
+# `>` row directly above the opening rule, no earlier rule, the row holding
+# only the glyph or agy's exact mode hint in its recorded colour, and the
+# idle footer as the only text below the closing rule. Typed text after the
+# glyph is `pending`; anything else - a plain capture, wrapped rows, the feedback
 # survey, extra text below the composer - stays `unknown`, so a caller that
 # needs proof refuses. fm_composer_agy_notice_fits answers whether a line can
 # be typed without wrapping that one row.
@@ -1650,7 +1649,7 @@ _fm_composer_pi_verdict() {  # <screen> <styled> <has_identity> <identity>
 }
 
 _fm_composer_agy_frame() {  # <plain-screen> <cursor-row-or-empty>
-  local plain=$1 cy=$2 open close line above='' earlier_rule=0 seen=0
+  local plain=$1 cy=$2 open close line above='' seen=0
   open=$FM_COMPOSER_SCAN_PI_OPEN
   close=$FM_COMPOSER_SCAN_PI_CLOSE
   [ "$FM_COMPOSER_SCAN_PI_PAIR_VALID" = 1 ] \
@@ -1659,14 +1658,10 @@ _fm_composer_agy_frame() {  # <plain-screen> <cursor-row-or-empty>
   [ -z "$cy" ] || [ "$cy" = $((open + 1)) ] || return 1
   while IFS= read -r line; do
     fm_composer_normalize_trim_var line
-    case "$line" in
-      '? for shortcuts'|'? for shortcuts '*) earlier_rule=0 ;;
-      *) if _fm_composer_pi_separator_row "$line"; then earlier_rule=1; fi ;;
-    esac
+    if _fm_composer_pi_separator_row "$line"; then return 1; fi
     above=$line
   done <<< "$(printf '%s\n' "$plain" | head -n "$open")"
   case "$above" in '>'*) return 1 ;; esac
-  [ "$earlier_rule" = 0 ] || return 1
   # The idle footer must be the only text below the closing rule.
   while IFS= read -r line; do
     fm_composer_normalize_trim_var line
@@ -1687,13 +1682,10 @@ _fm_composer_agy_content() {  # <screen> <plain-screen> <styled> <cursor-row-or-
   [ "$styled" = 1 ] && _fm_composer_agy_frame "$plain" "$cy" || return 1
   prompt_row=$((FM_COMPOSER_SCAN_PI_OPEN + 1))
   row=$(_fm_composer_screen_row "$prompt_row" "$plain")
-  fm_composer_normalize_trim_var row
   case "$row" in
-    '>') return 0 ;;
-    '>'[[:space:]]*) row=${row#>} ;;
+    '>'|'> '*) row=${row#>}; row=${row# } ;;
     *) return 1 ;;
   esac
-  fm_composer_normalize_trim_var row
   if [ "$row" = "$FM_COMPOSER_AGY_MODE_HINT" ]; then
     raw=$(_fm_composer_screen_row "$prompt_row" "$screen")
     case "$raw" in

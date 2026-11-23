@@ -70,8 +70,10 @@ Visible draft text on the recognized composer row reads `pending`.
 A capture that still contains multiple rows of composer text reads `unknown`.
 The [doorbell](../../../../../bin/fm-task-inbox-lib.sh) requires a proven-empty composer before typing and proof of the full notice before Enter on agy, Codex, and Rovo panes.
 
-Limits: wherever that proof is missing, the doorbell refuses before typing anything and the message stays queued for the normal re-ring and escalation.
-That covers a doorbell line too long for agy's one composer row (most panes narrower than the line, since wrapped input was never captured), a plain-text capture backend, the feedback survey or any other text below the composer, a busy turn, the mode hint in an unrecorded colour, and any screen the rule does not recognise.
+The doorbell leaves the pane untouched if the initial check cannot prove the composer empty or the notice would exceed agy's one composer row.
+The initial check withholds typing on a plain-text capture, a busy turn, the first-use hint in an unrecorded colour, or the feedback survey or other text below the composer.
+If the check after typing cannot prove the composer holds the full notice, the doorbell withholds Enter and the pane may still contain an unsubmitted notice.
+In both cases the message stays queued for the normal re-ring and escalation.
 Away-mode injection reads composers without a recorded harness, so it still cannot prove an agy pane empty; agy is a crewmate and scout adapter that away mode never injects into.
 
 ## Skills and no-mistakes validation trigger
