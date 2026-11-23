@@ -422,8 +422,8 @@ fm_send_resolve_target() {  # <raw-target>
       if fm_backend_target_exists "$assumed" "$raw" '' "$TARGET_MODE"; then
         :
       else
-        case "$?" in
-          2) diagnosis='could not be verified as' ;;
+        case "$assumed:$?" in
+          tmux:2) diagnosis='could not be verified as' ;;
           *) diagnosis='is not' ;;
         esac
         echo "error: explicit target '$raw' $diagnosis a live $assumed endpoint (tried meta=$STATE/$raw.meta; metadata window/terminal lookup; backend=$assumed). Use fm-<id> for a recorded task/lane, or pass a target whose backend endpoint can be verified." >&2

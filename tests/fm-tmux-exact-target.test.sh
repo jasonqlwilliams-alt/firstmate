@@ -92,7 +92,9 @@ fi
 pass "explicit tmux pane syntax works for capture and presence"
 
 new_window "$SESSION" fm-mate MATE-ONE-MARKER
-new_window "$SESSION" fm-mate2 NEIGHBOUR-TWO-MARKER
+tmux new-window -d -t "$SESSION:" -n fm-mate2 -c "$LAB/wt" -- \
+  sh -c 'printf "%s\n%s" "$1" "$2"; exec "$3" 600' sh NEIGHBOUR-TWO-MARKER '❯ visible draft' "$SLEEP_BIN" \
+  || fail "could not create the neighbouring window with a draft"
 wait_for_marker "=$SESSION:=fm-mate" MATE-ONE-MARKER
 wait_for_marker "=$SESSION:=fm-mate2" NEIGHBOUR-TWO-MARKER
 
@@ -141,6 +143,8 @@ state=$(fm_backend_agent_state tmux "$SESSION:fm-mate")
 [ "$state" = missing ] || fail "agent state of a closed worker must be missing, got $state"
 pass "agent state: closed worker window is missing"
 
+[ "$(fm_backend_composer_state tmux "$SESSION:fm-mate2")" = pending ] \
+  || fail "the surviving neighbour's visible draft must classify as pending"
 fm_backend_composer_snapshot tmux "$SESSION:fm-mate" \
   && fail "composer snapshot of a closed worker window must fail"
 [ "$(fm_backend_composer_state tmux "$SESSION:fm-mate")" = unknown ] \

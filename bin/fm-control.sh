@@ -450,8 +450,12 @@ deliver_interrupt() {
 
 verify_interrupt_running() {
   local proof after
-  fm_backend_target_exists "$BACKEND" "$T" "$LABEL" \
-    || die "could not verify task $ID's endpoint after interrupting it; no further control action is safe"
+  fm_backend_target_exists "$BACKEND" "$T" "$LABEL" || {
+    if [ "$?" -eq 2 ] && [ "$BACKEND" = tmux ]; then
+      die "could not verify task $ID's endpoint after interrupting it; no further control action is safe"
+    fi
+    die "task $ID's endpoint disappeared while interrupting it; no further control action is safe"
+  }
   proof=endpoint
   if fm_control_backend_state_verified "$BACKEND"; then
     # An interrupt cancels a turn; it must never have stopped the agent. This

@@ -1000,7 +1000,7 @@ fm_busy_classify_live() {  # <backend> <target> <harness> <id> <state-dir> [expe
   fi
   if fm_backend_target_exists "$backend" "$target" "$label" 2>/dev/null; then
     fm_busy_classify "$backend" "$target" "$harness" "$id" "$state"
-  elif [ "$?" -eq 2 ] && [[ "$backend" = tmux || "$backend" = herdr ]]; then
+  elif [ "$?" -eq 2 ] && [ "$backend" = tmux ]; then
     printf 'unknown capture-failed'
   else
     printf 'dead endpoint-gone'

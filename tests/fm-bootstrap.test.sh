@@ -323,8 +323,11 @@ test_tmux_min_version() {
     case "$version" in
       'tmux 3.0a'|'tmux 3.1c'|'tmux development')
         assert_contains "$out" 'MISSING: tmux (install:' "$version should report a tmux prerequisite failure"
+        assert_not_contains "$out" 'TMUX_SERVER:' "$version should report the client prerequisite only"
         assert_contains "$out" 'tmux >=3.2' "$version should report the minimum" ;;
-      *) assert_not_contains "$out" 'MISSING: tmux' "$version should satisfy the prerequisite" ;;
+      *)
+        assert_not_contains "$out" 'MISSING: tmux' "$version should satisfy the prerequisite"
+        assert_not_contains "$out" 'TMUX_SERVER:' "$version should satisfy the server prerequisite" ;;
     esac
   done
   cat > "$fakebin/tmux" <<'SH'
@@ -350,9 +353,12 @@ SH
       FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_FAKE_TMUX_SERVER="$server" FM_BOOTSTRAP_DETECT_ONLY=1 \
       "$ROOT/bin/fm-bootstrap.sh")
     if [ "$server" = old ]; then
-      assert_contains "$out" 'MISSING: tmux (install:' "a current client with an incompatible server must fail the prerequisite"
+      assert_contains "$out" 'start a new server after the old sessions are no longer needed' \
+        "a current client with an incompatible server must explain how to replace the server"
+      assert_not_contains "$out" 'MISSING: tmux' "a server failure must not recommend a client install"
     else
       assert_not_contains "$out" 'MISSING: tmux' "a $server tmux server should satisfy the prerequisite"
+      assert_not_contains "$out" 'TMUX_SERVER:' "a $server tmux server should satisfy the prerequisite"
     fi
   done
   pass "bootstrap checks the tmux client minimum and running server capability"

@@ -321,7 +321,7 @@ fm_backend_required_tools() {  # <backend>
 
 FM_BACKEND_TMUX_MIN_VERSION=3.2
 
-fm_backend_required_tool_available() {  # <backend> <tool>
+fm_backend_required_tool_available() {  # <backend> <tool>; status 2 means the tmux server probe failed
   local backend=$1 tool=$2 required version min_major min_minor
   required=$(fm_backend_required_tools "$backend") || return 1
   fm_backend_list_contains "$required" "$tool" || return 1
@@ -335,8 +335,8 @@ fm_backend_required_tool_available() {  # <backend> <tool>
         { [ "${BASH_REMATCH[1]}" -eq "$min_major" ] && [ "${BASH_REMATCH[2]}" -lt "$min_minor" ]; }; then
         return 1
       fi
-      fm_backend_source tmux || return 1
-      fm_tmux_window_filter_available
+      fm_backend_source tmux || return 2
+      fm_tmux_window_filter_available || return 2
       ;;
     cmux:cmux)
       fm_backend_source cmux >/dev/null 2>&1 || return 1
