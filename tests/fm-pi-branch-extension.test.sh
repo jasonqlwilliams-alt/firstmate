@@ -3867,7 +3867,7 @@ for (const row of mainOnlyRows) {
 
 // A needs-decision signal row is a main-only class too, marked by payload
 // rather than kind (docs/pi-supervision-branch.md "Autonomy"): it is excluded
-// from eligibleSeqs and named in needsDecisionTasks. A later stale row under the
+// from eligibleSeqs and named in needsDecisionKeys. A later stale row under the
 // task's window alias remains individually claimable, while task-identity
 // precedence keeps its complete wake on main until the decision row is read.
 writeFileSync(
@@ -3884,8 +3884,8 @@ if (!needsDecisionMixed.eligible) {
 if (needsDecisionMixed.eligibleSeqs.join(",") !== "2") {
   throw new Error(`a needs-decision row must be excluded from eligibleSeqs: ${JSON.stringify(needsDecisionMixed)}`);
 }
-if (needsDecisionMixed.needsDecisionTasks.join(",") !== "task-a") {
-  throw new Error(`needsDecisionTasks must identify the excluded task: ${JSON.stringify(needsDecisionMixed)}`);
+if (needsDecisionMixed.needsDecisionKeys.join(",") !== "task-a.status") {
+  throw new Error(`needsDecisionKeys must name the excluded row: ${JSON.stringify(needsDecisionMixed)}`);
 }
 if (needsDecisionMixed.taskByWakeKey["task-a.status"] !== "task-a" ||
   needsDecisionMixed.taskByWakeKey["fm-window"] !== "task-a") {
@@ -3917,8 +3917,8 @@ const captainHeldMixed = scopeForUnreadWake(state, false);
 if (!captainHeldMixed.eligible || captainHeldMixed.eligibleSeqs.join(",") !== "2") {
   throw new Error(`a captain-held stale row was offered to the branch: ${JSON.stringify(captainHeldMixed)}`);
 }
-if (captainHeldMixed.needsDecisionTasks.join(",") !== "task-a") {
-  throw new Error(`the captain-held stale task was not marked main-owned: ${JSON.stringify(captainHeldMixed)}`);
+if (captainHeldMixed.needsDecisionKeys.join(",") !== "fm-window") {
+  throw new Error(`the captain-held stale key was not marked main-owned: ${JSON.stringify(captainHeldMixed)}`);
 }
 
 writeFileSync(`${state}/task-a.status`, "captain-held [key=route]: awaiting a second captain reminder\n \n");
@@ -3937,17 +3937,17 @@ if (countedStatusReads !== 1) {
   throw new Error(`one status was read ${countedStatusReads} times for repeated stale rows`);
 }
 if (!repeatedCaptainHeld.eligible || repeatedCaptainHeld.eligibleSeqs.join(",") !== "3" ||
-  repeatedCaptainHeld.needsDecisionTasks.join(",") !== "task-a,task-a") {
+  repeatedCaptainHeld.needsDecisionKeys.join(",") !== "fm-window,fm-window") {
   throw new Error(`repeated stale reminders changed classification: ${JSON.stringify(repeatedCaptainHeld)}`);
 }
 const repeatedCaptainHeldNextScan = scopeForUnreadWake(state, false);
-if (countedStatusReads !== 1 || repeatedCaptainHeldNextScan.needsDecisionTasks.join(",") !== "task-a,task-a") {
+if (countedStatusReads !== 1 || repeatedCaptainHeldNextScan.needsDecisionKeys.join(",") !== "fm-window,fm-window") {
   throw new Error(`an unchanged status was not reused across scans: reads=${countedStatusReads} scope=${JSON.stringify(repeatedCaptainHeldNextScan)}`);
 }
 writeFileSync(`${state}/task-a.status`, "captain-held [key=route]: awaiting the captain\nworking: resumed after answer\n");
 const changedCaptainHeld = scopeForUnreadWake(state, false);
 if (countedStatusReads !== 2 || changedCaptainHeld.eligibleSeqs.join(",") !== "1,2,3" ||
-  changedCaptainHeld.needsDecisionTasks.length !== 0) {
+  changedCaptainHeld.needsDecisionKeys.length !== 0) {
   throw new Error(`a changed status did not invalidate its cached decision: reads=${countedStatusReads} scope=${JSON.stringify(changedCaptainHeld)}`);
 }
 countedStatusPath = "";
@@ -3969,8 +3969,8 @@ const openDecisionMixed = scopeForUnreadWake(state, false);
 if (!openDecisionMixed.eligible || openDecisionMixed.eligibleSeqs.join(",") !== "2") {
   throw new Error(`an open-decision stale row was offered to the branch: ${JSON.stringify(openDecisionMixed)}`);
 }
-if (openDecisionMixed.needsDecisionTasks.join(",") !== "task-a") {
-  throw new Error(`the open-decision stale task was not marked main-owned: ${JSON.stringify(openDecisionMixed)}`);
+if (openDecisionMixed.needsDecisionKeys.join(",") !== "fm-window") {
+  throw new Error(`the open-decision stale key was not marked main-owned: ${JSON.stringify(openDecisionMixed)}`);
 }
 
 process.env.FM_CLASSIFY_RESOLVE_VERB = "answered";
@@ -3980,7 +3980,7 @@ writeFileSync(
 );
 const customResolved = scopeForUnreadWake(state, false);
 if (!customResolved.eligible || customResolved.eligibleSeqs.slice().sort().join(",") !== "1,2" ||
-  customResolved.needsDecisionTasks.length !== 0) {
+  customResolved.needsDecisionKeys.length !== 0) {
   throw new Error(`a custom resolution verb left the stale decision open: ${JSON.stringify(customResolved)}`);
 }
 
@@ -3988,7 +3988,7 @@ process.env.FM_CLASSIFY_CAPTAIN_HELD_VERB = "awaiting-captain";
 writeFileSync(`${state}/task-a.status`, "awaiting-captain [key=cleanup]: awaiting the captain\n");
 const customHeld = scopeForUnreadWake(state, false);
 if (!customHeld.eligible || customHeld.eligibleSeqs.join(",") !== "2" ||
-  customHeld.needsDecisionTasks.join(",") !== "task-a") {
+  customHeld.needsDecisionKeys.join(",") !== "fm-window") {
   throw new Error(`a custom captain-held verb was offered to the branch: ${JSON.stringify(customHeld)}`);
 }
 delete process.env.FM_CLASSIFY_RESOLVE_VERB;
@@ -4001,7 +4001,7 @@ writeFileSync(
 );
 const customReservedPrefixes = scopeForUnreadWake(state, false);
 if (!customReservedPrefixes.eligible || customReservedPrefixes.eligibleSeqs.join(",") !== "2" ||
-  customReservedPrefixes.needsDecisionTasks.join(",") !== "task-a") {
+  customReservedPrefixes.needsDecisionKeys.join(",") !== "fm-window") {
   throw new Error(`configured reserved prefixes lost an open stale decision: ${JSON.stringify(customReservedPrefixes)}`);
 }
 delete process.env.FM_CLASSIFY_RESERVED_KEY_PREFIXES;
@@ -4010,7 +4010,7 @@ writeFileSync(`${state}/symlink-target.status`, "needs-decision: external choice
 unlinkSync(`${state}/task-a.status`);
 symlinkSync(`${state}/symlink-target.status`, `${state}/task-a.status`);
 const symlinkedStatus = scopeForUnreadWake(state, false);
-if (!symlinkedStatus.corrupted || symlinkedStatus.eligible || symlinkedStatus.needsDecisionTasks.length !== 0) {
+if (!symlinkedStatus.corrupted || symlinkedStatus.eligible || symlinkedStatus.needsDecisionKeys.length !== 0) {
   throw new Error(`a symlinked status file influenced stale routing: ${JSON.stringify(symlinkedStatus)}`);
 }
 unlinkSync(`${state}/task-a.status`);
