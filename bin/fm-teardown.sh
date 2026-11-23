@@ -253,6 +253,8 @@
 # Only Treehouse can exclude a caller that enters the copy between teardown's final check and Treehouse's own scan.
 # Detection of reparenting before startup uses Linux process sessions and is unavailable on non-Linux hosts.
 # Adoption by a Linux subreaper in the same session can hide a caller that reparented before teardown started.
+# A detached wrapper can present a different surviving session leader and hide the original caller.
+# An escaped cwd reported by lsof can prevent an exact path match.
 #
 # Pre-teardown cleanup sequence (runs once every landed/discard-work safety
 # refusal above has already passed, and BEFORE any worktree return, branch
@@ -1730,6 +1732,29 @@ TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED=3
 TEARDOWN_PROCEVENT_RESTORE_FAILED=4
 TEARDOWN_TREEHOUSE_CALLER_REFUSED=5
 
+teardown_treehouse_close_matches_task() {  # <marker> <data> <task-id> <state>
+  [ -e "$1" ] || [ -L "$1" ] || return 1
+  fm_backlog_close_marker_validate "$1" "$2" "$3" "$4" \
+    && fm_backlog_meta_spawn_gen "$4/$3.meta" "$4" \
+    && [ "$FM_BACKLOG_CLOSE_VALIDATED_SPAWN_GEN" = "$FM_BACKLOG_META_SPAWN_GEN" ]
+}
+
+teardown_cancel_matching_treehouse_close() {  # <marker> <data> <task-id> <state>
+  if teardown_treehouse_close_matches_task "$@" && ! fm_backlog_close_marker_remove "$1" "$4"; then
+    echo "error: could not cancel the pending backlog transition for $3 ($FM_BACKLOG_TRANSITION_ERROR)" >&2
+    return 1
+  fi
+}
+
+teardown_descendant_return_failure() {  # <status> <state> <task-id>
+  local rc=$1 state=$2 id=$3 marker
+  if [ "$rc" -eq "$TEARDOWN_TREEHOUSE_CALLER_REFUSED" ]; then
+    marker=$(fm_backlog_close_marker_path "$state" "$id") || return 1
+    teardown_cancel_matching_treehouse_close "$marker" "${state%/*}/data" "$id" "$state" || return 1
+  fi
+  return "$rc"
+}
+
 # True when treehouse/git stderr shows the transient index.lock "File exists" race.
 # Other return failures must not enter the retry path.
 treehouse_return_is_index_lock_error() {
@@ -1816,6 +1841,36 @@ treehouse_task_ref_is_unchanged_and_unused() {  # <git-dir> <ref> <commit>
       fi
     done
   done
+}
+
+teardown_replace_treehouse_head() {  # <git-dir> <ref> <commit> <detach|restore>
+  [ "$(git --git-dir="$1" config --local --default files --get extensions.refStorage)" = files ] || return 1
+  LC_ALL=C perl -MFile::Temp=tempfile -MIPC::Open2=open2 -MIO::Handle -e '
+    my ($dir, $ref, $oid, $action) = @ARGV;
+    my ($expected, $replacement) = ("ref: $ref\n", "$oid\n");
+    my $verify = "verify HEAD $oid\n";
+    if ($action eq "restore") {
+      ($expected, $replacement) = ($replacement, $expected);
+      $verify .= "verify $ref $oid\n";
+    }
+    my $pid = open2(my $reply, my $request, "git", "--git-dir=$dir", "update-ref", "--stdin");
+    $request->autoflush(1);
+    print {$request} "start\n${verify}prepare\n" or exit 1;
+    exit 1 unless (<$reply> // "") eq "start: ok\n" && (<$reply> // "") eq "prepare: ok\n";
+    my $head = "$dir/HEAD";
+    exit 1 unless -f $head && !-l $head;
+    open my $current, "<", $head or exit 1;
+    my $value = do { local $/; <$current> };
+    exit 1 unless defined $value && $value eq $expected;
+    my $mode = (stat($current))[2];
+    close $current or exit 1;
+    my ($next, $path) = tempfile(".fm-head-XXXXXX", DIR => $dir, UNLINK => 1);
+    print {$next} $replacement or exit 1;
+    close $next && chmod($mode & 0777, $path) && rename($path, $head) or exit 1;
+    close $request;
+    close $reply;
+    waitpid($pid, 0);
+  ' -- "$@"
 }
 
 # Return a worktree/home via `treehouse return --force`, tolerating a transient or
@@ -2800,7 +2855,7 @@ EOF
 }
 
 remove_firstmate_home() {
-  local home=$1 label=$2 expected_id=${3:-} abs_home_path process_event_backup treehouse_slot=0
+  local home=$1 label=$2 expected_id=${3:-} abs_home_path process_event_backup return_rc treehouse_slot=0
   [ -n "$home" ] || return 0
   [ -e "$home" ] || return 0
   abs_home_path=$(validate_firstmate_home_for_removal "$home" "$label" "$expected_id") || return 1
@@ -2820,9 +2875,10 @@ remove_firstmate_home() {
   fi
   if [ "$treehouse_slot" = 1 ]; then
     teardown_treehouse_return "$abs_home_path" "$FM_ROOT" "$label" || {
+      return_rc=$?
       echo "error: treehouse return failed for $label $abs_home_path; lease may still be held" >&2
       restore_firstmate_home_process_events "$abs_home_path" "$label" "$process_event_backup" || return $?
-      return 1
+      return "$return_rc"
     }
     [ -z "$process_event_backup" ] || rm -rf -- "$process_event_backup"
     return 0
@@ -2946,9 +3002,14 @@ preflight_firstmate_home_process_events() {
 }
 
 preflight_firstmate_home_process_event_tree() {
-  local home=$1 label=$2 sub_state child_meta child_kind child_home child_wt child_id
+  local home=$1 label=$2 record_state=${3:-} record_id=${4:-} sub_state child_meta child_kind child_home child_wt child_id
   if [ -d "$home" ] && firstmate_home_has_treehouse_slot "$home"; then
-    require_treehouse_return_caller_outside "$home" || return "$TEARDOWN_TREEHOUSE_CALLER_REFUSED"
+    require_treehouse_return_caller_outside "$home" || {
+      if [ -n "$record_state" ]; then
+        teardown_descendant_return_failure "$TEARDOWN_TREEHOUSE_CALLER_REFUSED" "$record_state" "$record_id" || return $?
+      fi
+      return "$TEARDOWN_TREEHOUSE_CALLER_REFUSED"
+    }
   fi
   sub_state="$home/state"
   if [ -d "$sub_state" ]; then
@@ -2960,7 +3021,7 @@ preflight_firstmate_home_process_event_tree() {
       child_wt=$(meta_value "$child_meta" worktree)
       child_home=$(meta_value "$child_meta" home)
       [ -n "$child_home" ] || child_home=$child_wt
-      preflight_firstmate_home_process_event_tree "$child_home" "child firstmate home for $child_id" || return 1
+      preflight_firstmate_home_process_event_tree "$child_home" "child firstmate home for $child_id" "$sub_state" "$child_id" || return $?
     done
   fi
   preflight_firstmate_home_process_events "$home" "$label"
@@ -3146,7 +3207,8 @@ preflight_descendant_treehouse_slots() {
       esac
     fi
     if child_worktree_can_return_with_treehouse "$project" "$worktree"; then
-      require_treehouse_return_caller_outside "$worktree" || return "$TEARDOWN_TREEHOUSE_CALLER_REFUSED"
+      require_treehouse_return_caller_outside "$worktree" \
+        || teardown_descendant_return_failure "$TEARDOWN_TREEHOUSE_CALLER_REFUSED" "$state" "$task_id" || return $?
     fi
   done
 }
@@ -3430,7 +3492,8 @@ cleanup_firstmate_home_children() {
         0)
           validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
           if child_worktree_can_return_with_treehouse "$child_proj" "$child_wt"; then
-            require_treehouse_return_caller_outside "$child_wt" || return "$TEARDOWN_TREEHOUSE_CALLER_REFUSED"
+            require_treehouse_return_caller_outside "$child_wt" \
+              || teardown_descendant_return_failure "$TEARDOWN_TREEHOUSE_CALLER_REFUSED" "$sub_state" "$child_id" || return $?
             child_treehouse=1
           fi
           ;;
@@ -3464,7 +3527,8 @@ cleanup_firstmate_home_children() {
       [ -n "$child_home" ] || child_home=$child_wt
       if [ -n "$child_home" ] && [ -d "$child_home" ]; then
         cleanup_firstmate_home_children "$child_home" || return $?
-        remove_firstmate_home "$child_home" "child firstmate home" "$child_id" || return $?
+        remove_firstmate_home "$child_home" "child firstmate home" "$child_id" \
+          || teardown_descendant_return_failure "$?" "$sub_state" "$child_id" || return $?
       fi
     elif [ "$child_backend" = orca ]; then
       if [ -n "$child_wt" ] && [ -d "$child_wt" ]; then
@@ -3487,9 +3551,11 @@ cleanup_firstmate_home_children() {
         else
           child_return_rc=$?
           case "$child_return_rc" in
-            "$TEARDOWN_TREEHOUSE_LOCK_REFUSED"|"$TEARDOWN_TREEHOUSE_CALLER_REFUSED") return "$child_return_rc" ;;
+            "$TEARDOWN_TREEHOUSE_LOCK_REFUSED"|"$TEARDOWN_TREEHOUSE_CALLER_REFUSED")
+              teardown_descendant_return_failure "$child_return_rc" "$sub_state" "$child_id" || return $? ;;
           esac
-          safe_rm_rf_child_worktree "$child_wt" "$child_proj" treehouse-failed || return $?
+          safe_rm_rf_child_worktree "$child_wt" "$child_proj" treehouse-failed \
+            || teardown_descendant_return_failure "$?" "$sub_state" "$child_id" || return $?
         fi
       else
         safe_rm_rf_child_worktree "$child_wt" "$child_proj" || return $?
@@ -3668,13 +3734,6 @@ teardown_legacy_stamp_rollback() {
   [ "$(wc -c < "$META" | tr -d ' ')" = "$TEARDOWN_LEGACY_PRESTAMP_SIZE" ]
 }
 
-teardown_treehouse_close_matches_task() {
-  [ -e "$BACKLOG_CLOSE_MARKER" ] || [ -L "$BACKLOG_CLOSE_MARKER" ] || return 1
-  fm_backlog_close_marker_validate "$BACKLOG_CLOSE_MARKER" "$DATA" "$ID" "$STATE" \
-    && fm_backlog_meta_spawn_gen "$META" "$STATE" \
-    && [ "$FM_BACKLOG_CLOSE_VALIDATED_SPAWN_GEN" = "$FM_BACKLOG_META_SPAWN_GEN" ]
-}
-
 teardown_treehouse_backlog_rollback() {
   if [ -n "$BACKLOG_CLOSE_BACKUP" ]; then
     if ! fm_backlog_atomic_transition publish "$BACKLOG_CLOSE_BACKUP" "$BACKLOG_CLOSE_MARKER" "pending-close record" "$STATE"; then
@@ -3682,10 +3741,8 @@ teardown_treehouse_backlog_rollback() {
       BACKLOG_CLOSE_BACKUP=
       return 1
     fi
-  elif teardown_treehouse_close_matches_task \
-     && ! fm_backlog_close_marker_remove "$BACKLOG_CLOSE_MARKER" "$STATE"; then
-    echo "error: could not cancel the pending backlog transition for $ID ($FM_BACKLOG_TRANSITION_ERROR)" >&2
-    return 1
+  else
+    teardown_cancel_matching_treehouse_close "$BACKLOG_CLOSE_MARKER" "$DATA" "$ID" "$STATE" || return 1
   fi
   if [ "$TEARDOWN_LEGACY_PRESTAMP_SIZE" -gt 0 ] && ! teardown_legacy_stamp_rollback; then
     echo "error: the legacy incarnation stamp on $ID's record could not be rolled back; re-run teardown with --legacy-record after reconciling its endpoint" >&2
@@ -3762,7 +3819,7 @@ if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
   }
   if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ] \
      && { [ -e "$BACKLOG_CLOSE_MARKER" ] || [ -L "$BACKLOG_CLOSE_MARKER" ]; } \
-     && ! teardown_treehouse_close_matches_task; then
+     && ! teardown_treehouse_close_matches_task "$BACKLOG_CLOSE_MARKER" "$DATA" "$ID" "$STATE"; then
     if ! fm_backlog_record_present "$BACKLOG_CLOSE_MARKER" "pending-close record" "$STATE" \
        || ! BACKLOG_CLOSE_BACKUP=$(mktemp "$STATE/.$ID.backlog-close-before.XXXXXX") \
        || ! cp "$BACKLOG_CLOSE_MARKER" "$BACKLOG_CLOSE_BACKUP"; then
@@ -3881,11 +3938,15 @@ elif [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
     exit 1
   }
   detached_task_ref=
-  if branch=$(git -C "$WT" symbolic-ref --quiet HEAD 2>/dev/null) \
-     && [[ "$branch" == refs/heads/* ]] \
-     && head=$(git -C "$WT" rev-parse --verify HEAD 2>/dev/null) \
-     && worktree_git_dir=$(git -C "$WT" rev-parse --absolute-git-dir 2>/dev/null) \
-     && git -C "$WT" update-ref --no-deref HEAD "$head" "$head" 2>/dev/null; then
+  if branch=$(git -C "$WT" symbolic-ref --quiet --no-recurse HEAD 2>/dev/null); then
+    if [[ "$branch" != refs/heads/* ]] \
+       || ! head=$(git -C "$WT" rev-parse --verify "$branch" 2>/dev/null) \
+       || ! worktree_git_dir=$(git -C "$WT" rev-parse --absolute-git-dir 2>/dev/null) \
+       || ! teardown_replace_treehouse_head "$worktree_git_dir" "$branch" "$head" detach; then
+      echo "REFUSED: could not safely detach HEAD from $branch in $WT; retaining the copy." >&2
+      teardown_treehouse_backlog_rollback || exit 1
+      exit 1
+    fi
     detached_task_ref=$branch
   fi
   # Kills remaining processes in the worktree (including the agent), resets, returns
@@ -3899,10 +3960,8 @@ elif [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
   teardown_treehouse_return "$WT" "$PROJ" "worktree" "$post_lock_cleanup_check" || {
     rc=$?
     if [ -n "$detached_task_ref" ] \
-       && ! git --git-dir="$worktree_git_dir" symbolic-ref --quiet HEAD >/dev/null 2>&1 \
-       && [ "$(git --git-dir="$worktree_git_dir" rev-parse --verify HEAD 2>/dev/null)" = "$head" ] \
        && treehouse_task_ref_is_unchanged_and_unused "$worktree_git_dir" "$detached_task_ref" "$head"; then
-      git --git-dir="$worktree_git_dir" symbolic-ref HEAD "$detached_task_ref" || \
+      teardown_replace_treehouse_head "$worktree_git_dir" "$detached_task_ref" "$head" restore || \
         echo "error: could not restore $detached_task_ref as HEAD in $WT" >&2
     fi
     if [ "$rc" -eq "$TEARDOWN_TREEHOUSE_CALLER_REFUSED" ]; then
@@ -3913,9 +3972,6 @@ elif [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
   }
   rm -f "$WT/.claude/settings.local.json" "$WT/.opencode/plugins/fm-turn-end.js" \
     "$WT/.fm-grok-turnend" "$WT/.fm-kimi-turnend"
-  if [ -n "$detached_task_ref" ] && treehouse_task_ref_is_unchanged_and_unused "$worktree_git_dir" "$detached_task_ref" "$head"; then
-    git --git-dir="$worktree_git_dir" update-ref --no-deref -d "$detached_task_ref" "$head" >/dev/null 2>&1 || true
-  fi
   # The slot is back in the pool, so this task's claim on it is spent. Dropping
   # it here - and only after a return that succeeded - keeps a returned slot
   # unclaimed until its next holder claims it, and leaves the claim in place

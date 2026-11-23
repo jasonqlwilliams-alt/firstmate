@@ -641,13 +641,13 @@ run_teardown() {
 # has a row to close. Uses the real tasks-axi (the fixture's default fakebin has
 # no tasks-axi stub, so PATH resolves the installed one).
 seed_backlog_in_flight() {
-  local case_dir=$1 kind=${2:-ship}
+  local case_dir=$1 kind=${2:-ship} id=${3:-task-x1}
   mkdir -p "$case_dir/data"
   printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' \
     > "$case_dir/data/backlog.md"
-  tasks-axi add task-x1 "teardown fixture task" --kind "$kind" \
+  tasks-axi add "$id" "teardown fixture task" --kind "$kind" \
     --file "$case_dir/data/backlog.md" >/dev/null
-  tasks-axi start task-x1 --file "$case_dir/data/backlog.md" >/dev/null
+  tasks-axi start "$id" --file "$case_dir/data/backlog.md" >/dev/null
 }
 
 backlog_row_state() {
@@ -1819,10 +1819,28 @@ test_non_lock_return_failure_preserves_checkout() {
   fi
   land_shippable_commit "$case_dir"
   original_tip=$(git -C "$copy" rev-parse HEAD)
+  if [[ "$mode" == *-race ]]; then
+    git -C "$copy" branch recovery "$original_tip"
+    cat > "$case_dir/fakebin/git" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *' update-ref --stdin'|*' update-ref --no-deref HEAD '*|*' symbolic-ref HEAD refs/heads/fm/task-x1')
+    if { [ "$FM_TEST_FAILED_RETURN_MODE" = detach-race ] && [ ! -e "$FM_TEST_RACE_DIR/return-started" ]; } \
+       || { [ "$FM_TEST_FAILED_RETURN_MODE" = restore-race ] && [ -e "$FM_TEST_RACE_DIR/return-started" ]; }; then
+      "$REAL_GIT_FOR_TEST" -C "$FM_TEST_RACE_DIR/wt" symbolic-ref HEAD refs/heads/recovery || exit 2
+      : > "$FM_TEST_RACE_DIR/checkout-raced"
+    fi
+    ;;
+esac
+exec "$REAL_GIT_FOR_TEST" "$@"
+SH
+    chmod +x "$case_dir/fakebin/git"
+  fi
   add_lsof_no_holder "$case_dir"
   printf 'configured hook\n' > "$copy/.fm-grok-turnend"
   cat > "$case_dir/fakebin/treehouse" <<'SH'
 #!/usr/bin/env bash
+: > "$FM_TEST_RACE_DIR/return-started"
 case "$FM_TEST_FAILED_RETURN_MODE" in
   moved) git -C "$3" update-ref --no-deref HEAD refs/heads/main || exit 2 ;;
   branch-in-use) git -C "$3" worktree add --quiet "$FM_TEST_OTHER_WORKTREE" fm/task-x1; exit $? ;;
@@ -1838,8 +1856,23 @@ echo 'treehouse: simulated return error' >&2
 exit 1
 SH
   chmod +x "$case_dir/fakebin/treehouse"
-  FM_TEST_FAILED_RETURN_MODE=$mode FM_TEST_OTHER_WORKTREE="$case_dir/other-worktree" \
+  FM_TEST_FAILED_RETURN_MODE=$mode FM_TEST_RACE_DIR="$case_dir" FM_TEST_OTHER_WORKTREE="$case_dir/other-worktree" \
     run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  if [[ "$mode" == *-race ]]; then
+    expect_code 1 "$rc" "concurrent checkout ($mode) should retain the copy"
+    assert_present "$case_dir/checkout-raced" 'fixture did not change HEAD before the write'
+    [ "$(git -C "$copy" symbolic-ref --short HEAD)" = recovery ] \
+      && [ "$(git -C "$copy" rev-parse HEAD)" = "$original_tip" ] \
+      || fail 'teardown changed a concurrent checkout at the saved commit'
+    if [ "$mode" = detach-race ]; then
+      assert_absent "$case_dir/return-started" 'teardown invoked Treehouse after the detach comparison failed'
+    else
+      assert_present "$case_dir/return-started" 'teardown missed the failed return before restoration'
+    fi
+    assert_present "$case_dir/state/task-x1.meta" 'refusal retired the task record'
+    pass "teardown preserves a concurrent checkout at the same commit ($mode)"
+    return 0
+  fi
   if [[ "$mode" == rebase-* ]]; then
     if [ "$mode" = rebase-success ]; then
       expect_code 0 "$rc" 'successful return should preserve a branch in rebase'
@@ -2499,6 +2532,31 @@ configure_secondmate_with_tmux_children() {  # <case-dir> [child-b-worktree]
   done
 }
 
+seed_descendant_close_for_replay() (
+  export FM_HOME=$1
+  local id=$2 state="$1/state" data="$1/data" gen=descendant-fixture-gen
+  printf 'spawn_gen=%s\n' "$gen" >> "$state/$id.meta"
+  printf 'PR closure evidence\n' > "$state/$id.pr-poll-closed"
+  seed_backlog_in_flight "$FM_HOME" ship "$id" || exit 1
+  # shellcheck source=bin/fm-backlog-transition-lib.sh
+  . "$ROOT/bin/fm-backlog-transition-lib.sh"
+  fm_backlog_close_marker_write "$state" "$id" "$data" "$gen" --note 'local main'
+)
+
+assert_descendant_close_replay_preserves_task() (
+  export FM_HOME=$1
+  local id=$2 state="$1/state" data="$1/data" row
+  # shellcheck source=bin/fm-backlog-transition-lib.sh
+  . "$ROOT/bin/fm-backlog-transition-lib.sh"
+  fm_backlog_close_marker_replay "$state" "$state/$id.backlog-close" "$data" \
+    || fail 'startup replay failed after descendant caller refusal'
+  assert_absent "$state/$id.backlog-close" 'caller refusal left a replayable descendant close'
+  assert_present "$state/$id.meta" 'startup replay retired the refused descendant'
+  [ "$(cat "$state/$id.pr-poll-closed")" = 'PR closure evidence' ] || fail 'startup replay removed descendant PR evidence'
+  row=$(tasks-axi show "$id" --file "$data/backlog.md") || fail 'could not read the retained backlog row'
+  [[ "$row" == *'state: in_flight'* ]] || fail 'startup replay changed the refused descendant backlog row'
+)
+
 test_forced_secondmate_teardown_preflights_all_child_copies() {
   local layout=$1 case_dir home child_b rc=0
   case_dir=$(make_case "descendant-caller-$layout")
@@ -2512,6 +2570,7 @@ test_forced_secondmate_teardown_preflights_all_child_copies() {
   git -C "$case_dir/project" worktree add -q --detach "$home" main
   write_meta "$case_dir" local-only secondmate
   configure_secondmate_with_tmux_children "$case_dir" "$child_b"
+  seed_descendant_close_for_replay "$home" child-b || fail 'could not stage the descendant close'
 
   cat > "$case_dir/fakebin/lsof" <<'SH'
 #!/usr/bin/env bash
@@ -2540,6 +2599,7 @@ SH
   assert_absent "$case_dir/kill.log" 'refusal killed an earlier sibling endpoint'
   assert_present "$home/state/child-a.meta" 'refusal removed the first child record from the leased home'
   assert_present "$home/state/child-b.meta" 'refusal removed the second child record from the leased home'
+  assert_descendant_close_replay_preserves_task "$home" child-b || fail 'descendant replay did not preserve the preflight refusal'
   assert_present "$case_dir/state/task-x1.meta" 'refusal retired the leased home record'
   pass "forced retirement preflights every child before touching the leased home ($layout)"
 }
@@ -3839,6 +3899,7 @@ test_reparented_teardown_preserves_original_caller() (
   if [[ "$mode" == child* ]]; then
     write_meta "$case_dir" local-only secondmate
     configure_secondmate_with_tmux_children "$case_dir"
+    seed_descendant_close_for_replay "$case_dir/secondmate-home" child-a || fail 'could not stage the descendant close'
     copy="$case_dir/child-a-wt"
     task_branch=fm/child-a
     hook="$copy/.opencode/plugins/fm-busy-state.js"
@@ -4064,6 +4125,7 @@ SH
     if [[ "$mode" == child* ]]; then
       expect_code 5 "$rc" 'child teardown should propagate a caller refusal'
       assert_present "$case_dir/secondmate-home/state/child-a.meta" 'refusal retired the child task record'
+      assert_descendant_close_replay_preserves_task "$case_dir/secondmate-home" child-a || fail 'descendant replay did not preserve the return refusal'
       if [ "$mode" = child-error ]; then
         assert_grep 'treehouse: simulated child return error' "$case_dir/stderr" 'fallback fixture missed the non-lock return error'
         [ "$(cat "$copy/feature.txt")" = 'caller edit' ] || fail 'child fallback lost the caller edit'
@@ -4116,9 +4178,8 @@ SH
       rm -f "$case_dir/fakebin/lsof"
       run_teardown "$case_dir" --legacy-record > "$case_dir/retry.stdout" 2> "$case_dir/retry.stderr" \
         || fail 'reparented teardown: subsequent cleanup from outside the copy failed'
-      if git -C "$copy" show-ref --verify --quiet "refs/heads/$task_branch"; then
-        fail 'reparented teardown: subsequent cleanup left the task branch'
-      fi
+      assert_absent "$case_dir/state/task-x1.meta" 'subsequent cleanup left the task record'
+      git -C "$copy" show-ref --verify --quiet "refs/heads/$task_branch" || fail 'subsequent cleanup deleted the task branch'
     fi
   fi
   pass "cleanup protects its original caller after reparenting ($mode, prior close: $prior_close)"
@@ -5003,6 +5064,8 @@ test_non_lock_return_failure_preserves_checkout branch-success
 test_non_lock_return_failure_preserves_checkout branch-in-use
 test_non_lock_return_failure_preserves_checkout rebase-failure
 test_non_lock_return_failure_preserves_checkout rebase-success
+test_non_lock_return_failure_preserves_checkout detach-race
+test_non_lock_return_failure_preserves_checkout restore-race
 test_empty_retry_wait_uses_default_without_aborting
 test_fractional_legacy_retry_wait_refuses_without_arithmetic_error
 test_parked_own_run_is_aborted_before_teardown
