@@ -8,7 +8,6 @@ tmux is Firstmate's verified reference runtime backend and the fully supported b
 Install tmux 3.2 or newer with `brew install tmux` or your platform package manager.
 A running tmux server must support `list-windows -f`.
 If the client was upgraded while an older server was running, start a new server after the old sessions are no longer needed.
-With tmux `exit-empty off`, an empty server can leave a closed worker's endpoint reported as unreadable until the server has a session again or stops.
 The universal harness and toolchain requirements are in [`configuration.md`](configuration.md#toolchain).
 
 tmux is the hard default when no explicit setting or runtime auto-detection selects another backend.
@@ -49,15 +48,19 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 
 ### Exact window reads
 
-tmux resolves a session or window name that is not an exact match by prefix, so a closed `fm-mate` read by name would return a surviving `fm-mate2`.
-Every read of a recorded `session:window` target asks tmux to filter the inventory by literal session and window name, then reads the window if all matches identify one distinct window ID.
-If the tmux server restarts on the same socket between those two commands, the new server can reuse that ID.
-`fm_tmux_exact_target` in `bin/fm-tmux-lib.sh` owns that rule, and `tests/fm-tmux-exact-target.test.sh` is its regression.
+For a recorded `session:window` target, Firstmate filters tmux's inventory by literal session and window names and reads by window ID when the matches identify one distinct window.
+This prevents tmux's prefix matching from returning `fm-mate2` when the recorded `fm-mate` window closes.
+Presence checks report a confirmed absent session or window as missing.
+An inconclusive inventory or matches to multiple window IDs leave the endpoint unreadable.
+With tmux `exit-empty off`, an empty server can leave a closed worker's endpoint unreadable until the server has a session again or stops.
+If the tmux server restarts on the same socket between the inventory lookup and the read, the new server can reuse the resolved window ID.
+Explicit pane selectors such as `session:0.1` use native tmux syntax when they do not resolve to task metadata.
+[`fm_tmux_exact_target`](../bin/fm-tmux-lib.sh) implements the lookup, and [`fm-tmux-exact-target.test.sh`](../tests/fm-tmux-exact-target.test.sh) exercises it with a private tmux server.
 
 ### Agent liveness probe
 
 A target-existence check proves only that the pane exists.
-The deeper tmux agent-liveness probe first verifies exact window membership, then reads process names to distinguish a running harness from a bare idle shell.
+After [resolving the recorded window](#exact-window-reads), the deeper tmux agent-liveness probe reads process names to distinguish a running harness from a bare idle shell.
 It classifies recognized Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, Muse, and Rovo process identities as `alive`, common shells as `dead`, an authoritatively absent window as `missing`, unreadable state as `unreadable`, and every other process as `ambiguous`.
 The process-name vocabulary behind those verdicts is owned by `bin/fm-agent-process-lib.sh` and shared with the Herdr adapter, which proves a registered agent against the same names ([herdr-backend.md](herdr-backend.md) "Restart and liveness behavior").
 Only `dead` and `missing` authorize recovery because a false dead result could launch a duplicate agent.

@@ -87,9 +87,7 @@ fm_tmux_window_filter_available() {
 # prefix (and, for a pane read, an absent window can fall back to another
 # pane), so a closed `fm-mate` read by name silently returns a surviving
 # `fm-mate2`. This confirms the exact session and window in a successful
-# session inventory - the same exact-membership rule
-# fm_backend_tmux_agent_state applies - and prints that window's stable
-# `@<id>` for the read to target instead of the name. A window id cannot be
+# session inventory and prints its `@<id>` for the read. A window id cannot be
 # prefix-matched and stays dot-safe where a `.`-bearing name would be parsed
 # as a pane suffix.
 #
@@ -97,8 +95,8 @@ fm_tmux_window_filter_available() {
 # explicitly supplied by a caller pass through unchanged.
 #
 # Status: 0 resolved (target printed); 1 the exact session or window is
-# definitively absent; 2 the target is malformed or the inventory could not be
-# read, so callers can keep a transient tmux failure distinct from absence.
+# definitively absent; 2 the target is malformed or the inventory is
+# inconclusive, including when it returns multiple distinct window IDs.
 fm_tmux_exact_target() {  # <target> [explicit]
   local target=${1:-} session literal inventory id resolved=
   [ -n "$target" ] || return 2

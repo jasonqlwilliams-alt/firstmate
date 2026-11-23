@@ -117,9 +117,8 @@ fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs> -> prints 
   printf '%s\n' "$wid"
 }
 
-# fm_backend_tmux_current_path: the live pane's current working directory, or
-# empty on any tmux error. Mirrors fm-spawn.sh's worktree-discovery poll:
-# `tmux display-message -p -t "$T" '#{pane_current_path}'`.
+# fm_backend_tmux_current_path: used by spawn to discover the worktree from
+# the recorded window. Unresolved windows yield no path.
 fm_backend_tmux_current_path() {  # <target>
   local target
   target=$(fm_tmux_exact_target "$1") || return 1
@@ -287,13 +286,8 @@ fm_backend_tmux_foreground_argv0s() {  # <target>
 # fm_backend_tmux_agent_state: recovery-grade harness-agent state for one
 # recorded target. See bin/fm-backend.sh's fm_backend_agent_state for the
 # shared state vocabulary and docs/tmux-backend.md "Agent liveness probe" for
-# the empirical basis. Tmux silently resolves an absent name by prefix or falls
-# back to the active window, so the exact recorded window must appear in a
-# successful session inventory (fm_tmux_exact_target) before its foreground
-# command can be trusted.
-# An omitted window or a definitive missing-session/server response is
-# `missing`; any other inventory or pane read failure is `unreadable`, so a
-# transient tmux problem never licenses a duplicate.
+# its relationship to presence. Use the fm_tmux_exact_target verdict before
+# reading process names so an unresolved endpoint cannot license a duplicate.
 #
 # The verdict combines two independent name sources rather than trusting either
 # alone. Either source naming a verified harness is enough for `alive`, because
