@@ -1826,8 +1826,11 @@ attempt_treehouse_return() {  # <copy> <project>
   treehouse return --force "$1" || return 1
 }
 
-treehouse_untracked_hook_path() {
-  perl -e '
+remove_untracked_treehouse_hooks() {
+  local copy
+  copy=$(canonical_existing_dir "$1") || return 0
+  shift
+  perl -MErrno=ENOENT,ENOTDIR -e '
     sub resolve_path {
       my ($dir, $path) = @_;
       my @resolved;
@@ -1852,29 +1855,42 @@ treehouse_untracked_hook_path() {
       return join "/", @resolved;
     }
 
-    my ($copy, $hook) = @ARGV;
-    my $actual = resolve_path($copy, $hook) // exit 1;
-    exit 1 if -d "$copy/$actual" && !-l "$copy/$actual";
-    open my $tracked, "-|", "git", "-C", $copy, "ls-files", "--cached", "-z",
-      "--", ":(icase,literal)$actual" or exit 1;
+    my ($copy, @hooks) = @ARGV;
+    my %candidates;
+    for my $hook (@hooks) {
+      my $actual = resolve_path($copy, $hook) // next;
+      my @entry = lstat "$copy/$actual";
+      next unless @entry && !-d _;
+      $candidates{$actual} = "$entry[0]:$entry[1]";
+    }
+    exit 0 unless %candidates;
+
+    my %untracked = map { $_ => 1 } values %candidates;
+    open my $tracked, "-|", "git", "-C", $copy, "ls-files", "--cached", "-z" or exit 0;
     local $/ = "\0";
     while (my $path = <$tracked>) {
       chomp $path;
-      exit 1 if $path eq $actual || (resolve_path($copy, $path) // "") eq $actual;
+      delete $candidates{$path};
+      my @entry = lstat "$copy/$path";
+      if (@entry) {
+        delete $untracked{"$entry[0]:$entry[1]"};
+      } elsif ($! != ENOENT && $! != ENOTDIR) {
+        exit 0;
+      }
     }
-    close $tracked or exit 1;
-    print "$actual.";
-  ' -- "$1" "$2"
-}
+    close $tracked or exit 0;
 
-remove_untracked_treehouse_hooks() {
-  local copy hook actual
-  copy=$(canonical_existing_dir "$1") || return 0
-  shift
-  for hook; do
-    actual=$(treehouse_untracked_hook_path "$copy" "$hook" 2>/dev/null) || continue
-    rm -f -- "$copy/${actual%.}"
-  done
+    for my $path (keys %candidates) {
+      my $identity = $candidates{$path};
+      next unless $untracked{$identity};
+      my @entry = lstat "$copy/$path";
+      next unless @entry && "$entry[0]:$entry[1]" eq $identity;
+      if (!unlink("$copy/$path") && $! != ENOENT) {
+        warn "could not remove task hook $copy/$path: $!\n";
+        exit 1;
+      }
+    }
+  ' -- "$copy" "$@"
 }
 
 # Return a worktree/home via `treehouse return --force`, tolerating a transient or

@@ -1865,7 +1865,12 @@ if [ "$FM_TEST_RETURN_MODE" = success ]; then
   git -C "$3" checkout --detach -q main || exit $?
   mkdir -p "$3/.claude" || exit $?
   printf 'configured hook\n' > "$3/.claude/settings.local.json" || exit $?
-  [ -e "$3/.fm-kimi-turnend" ] || printf 'configured hook\n' > "$3/.fm-kimi-turnend"
+  if [ "$3/.fm-Kimi-turnend" -ef "$3/.fm-kimi-turnend" ]; then
+    mv "$3/.fm-Kimi-turnend" "$3/renaming-hook" || exit $?
+    mv "$3/renaming-hook" "$3/.fm-kimi-turnend" || exit $?
+  else
+    printf 'configured hook\n' > "$3/.fm-kimi-turnend" || exit $?
+  fi
   exit $?
 fi
 echo 'treehouse: simulated return error before checkout' >&2
@@ -1877,7 +1882,7 @@ SH
   [ "$(cat "$case_dir/treehouse.log")" = "$expected_branch $tip" ] \
     || fail 'Treehouse did not receive the original checkout'
   if [ "$mode" = success ]; then
-    expect_code 0 "$rc" 'Treehouse should return the copy and retire the record'
+    expect_code 0 "$rc" "Treehouse should return the copy and retire the record: $(cat "$case_dir/stderr")"
     assert_absent "$case_dir/state/task-x1.meta" 'successful return retained the task record'
     [ "$(backlog_row_state "$case_dir")" = done ] || fail 'successful return did not close the task'
     [ "$(git -C "$copy" rev-parse --abbrev-ref HEAD)" = HEAD ] \
@@ -2676,12 +2681,16 @@ test_forced_secondmate_teardown_holds_descendant_lifecycle_locks() {
   printf 'project plugin\n' > "$case_dir/project/.OpenCode/Plugins/fm-busy-state.js"
   printf '{}\n' > "$case_dir/project/.claude/settings.local.json"
   printf 'project data\n' > "$case_dir/project/.fm-grok-turnend/data"
-  git -C "$case_dir/project" add -f .OpenCode/Plugins/fm-busy-state.js .claude/settings.local.json .fm-grok-turnend/data
+  printf 'project hook\n' > "$case_dir/project/.fm-Kimi-turnend"
+  git -C "$case_dir/project" add -f .OpenCode/Plugins/fm-busy-state.js .claude/settings.local.json \
+    .fm-grok-turnend/data .fm-Kimi-turnend
   git -C "$case_dir/project" commit -qm 'Track project plugin on main'
   configure_secondmate_with_tmux_children "$case_dir"
   mkdir -p "$case_dir/child-a-wt/.opencode/plugins"
   printf 'task hook\n' > "$case_dir/child-a-wt/.opencode/plugins/fm-turn-end.js"
-  printf 'task hook\n' > "$case_dir/child-a-wt/.fm-kimi-turnend"
+  if [ ! -e "$case_dir/child-a-wt/.fm-kimi-turnend" ]; then
+    ln "$case_dir/child-a-wt/.fm-Kimi-turnend" "$case_dir/child-a-wt/.fm-kimi-turnend"
+  fi
   home="$case_dir/secondmate-home"
   : > "$case_dir/kill.log"
   : > "$case_dir/treehouse.log"
@@ -2758,7 +2767,9 @@ SH
     || fail 'child return removed a project directory at a hook path'
   assert_not_contains "$(cat "$case_dir/retry.stderr")" '.fm-grok-turnend' \
     'child return attempted to unlink a project directory'
-  assert_absent "$case_dir/child-a-wt/.fm-kimi-turnend" 'child return retained an untracked task hook'
+  [ "$case_dir/child-a-wt/.fm-Kimi-turnend" -ef "$case_dir/child-a-wt/.fm-kimi-turnend" ] \
+    && [ "$(cat "$case_dir/child-a-wt/.fm-kimi-turnend")" = 'project hook' ] \
+    || fail 'child return removed a hook sharing an indexed file identity'
   pass "forced secondmate teardown holds every descendant lifecycle and metadata lock"
 }
 
