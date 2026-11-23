@@ -8,8 +8,10 @@
 # fm-daemon.test.sh.
 set -u
 
+foreign_queue_reaper_dir=$(mktemp -d "${FM_TEST_FIXTURE_CHILDREN:-/tmp}/fm-foreign-wake-reaper.XXXXXX") || exit 1
 # shellcheck source=tests/wake-helpers.sh
-. "$(dirname "${BASH_SOURCE[0]}")/wake-helpers.sh"
+FM_TEST_REGISTRY_DIR="$foreign_queue_reaper_dir" . "$(dirname "${BASH_SOURCE[0]}")/wake-helpers.sh"
+fm_test_arm_fixture_reaper "$foreign_queue_reaper_dir" || fail "could not arm fixture reaper"
 
 WATCH="$ROOT/bin/fm-watch.sh"
 DRAIN="$ROOT/bin/fm-wake-drain.sh"
@@ -234,7 +236,7 @@ test_drain_dedupes_obvious_duplicates() {
 # normal fire from a live watcher with a fresh beacon, so it never false-alarms.
 test_secondmate_foreign_queue_stall_tracks_progress_and_alerts_once() {
   local dir state sub fakebin row_before row_after stall_count real_date
-  local checkpoint_seconds=15
+  local phase_timeout_seconds=30
   dir=$(make_case secondmate-foreign-stall)
   state="$dir/state"
   sub="$dir/secondmate"
@@ -260,24 +262,56 @@ SH
     local out="$dir/watch-$phase.out" err="$dir/watch-$phase.err"
     local progress_marker="$state/.secondmate-wake-progress-mate"
     local stall_marker="$state/.secondmate-wake-stall-mate"
-    local rc=0 actual_progress failure=
-    PATH="$fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" \
-      TMPDIR="$dir" FM_STATE_OVERRIDE="$state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' \
-      FM_SECONDMATE_WAKE_STALL_SECS=1 FM_POLL=1 FM_SIGNAL_GRACE=0 \
-      FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
-      "$ROOT/bin/fm-watch-checkpoint.sh" --seconds "$checkpoint_seconds" > "$out" 2> "$err" || rc=$?
+    local deadline=$((SECONDS + phase_timeout_seconds)) phase_pid stop_requested=0 rc=0 actual_progress failure=
+    (
+      trap - EXIT
+      PATH="$fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" \
+        TMPDIR="$dir" FM_STATE_OVERRIDE="$state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' \
+        FM_SECONDMATE_WAKE_STALL_SECS=1 FM_POLL=1 FM_SIGNAL_GRACE=0 \
+        FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+        fm_test_start_fixture "$WATCH" || exit 1
+      if [ -z "$expected_alert" ]; then
+        while is_live_non_zombie "$FM_TEST_FIXTURE_PID"; do
+          if [ "$(cat "$progress_marker" 2>/dev/null)" = "$expected_progress" ] \
+            && [ ! -e "$stall_marker" ] && [ ! -L "$stall_marker" ] \
+            && kill -TERM -- "-$FM_TEST_FIXTURE_PID" 2>/dev/null; then
+            stop_requested=1
+            break
+          fi
+          sleep 0.1
+        done
+      fi
+      wait "$FM_TEST_FIXTURE_PID" || rc=$?
+      if [ "$stop_requested" -eq 1 ] && [ "$rc" -eq 1 ]; then
+        exit 0
+      fi
+      exit "$rc"
+    ) > "$out" 2> "$err" &
+    phase_pid=$!
+    while [ "$SECONDS" -lt "$deadline" ] && is_live_non_zombie "$phase_pid"; do
+      sleep 0.1
+    done
+    if is_live_non_zombie "$phase_pid"; then
+      kill -KILL "$phase_pid" 2>/dev/null || true
+      wait "$phase_pid" 2>/dev/null || true
+      rc=124
+    else
+      wait "$phase_pid" 2>/dev/null || rc=$?
+    fi
     actual_progress=$(cat "$progress_marker" 2>/dev/null) || actual_progress='<missing>'
-    if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
-      failure="watcher checkpoint failed"
+    if [ "$rc" -eq 124 ]; then
+      failure="watcher phase exceeded its hang deadline"
+    elif [ "$rc" -ne 0 ]; then
+      failure="watcher phase failed"
     elif [ "$actual_progress" != "$expected_progress" ]; then
       failure="expected observation marker $expected_progress"
     elif [ -z "$expected_alert" ]; then
-      if [ -e "$stall_marker" ]; then
+      if [ -e "$stall_marker" ] || [ -L "$stall_marker" ]; then
         failure="prior stall marker was not cleared"
       elif [ -s "$state/.wake-queue" ]; then
         failure="observation produced a parent wake"
       fi
-    elif [ "$rc" -ne 0 ] || ! grep -Fxq "$expected_alert" "$out"; then
+    elif ! grep -Fxq "$expected_alert" "$out"; then
       failure="expected alert $expected_alert"
     fi
     [ -z "$failure" ] || fail "$(printf '%s: %s (exit %s)\nstdout: %s\nstderr: %s\nactual marker: %s' \
