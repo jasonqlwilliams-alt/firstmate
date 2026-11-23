@@ -246,6 +246,11 @@
 # checks before any destructive return. Teardown output notes every wait, retry, and
 # removal so the operator can see what happened.
 #
+# Before each Treehouse return attempt, teardown verifies that no protected
+# caller or ancestor has its cwd in the copy. This includes ancestors saved
+# at startup before a wrapper exited. If either the ancestry or the cwd scan
+# cannot be verified, teardown refuses and retains the copy.
+#
 # Pre-teardown cleanup sequence (runs once every landed/discard-work safety
 # refusal above has already passed, and BEFORE any worktree return, branch
 # delete, or backend kill below - a still-active run or a leaked process may
@@ -289,9 +294,9 @@
 #     lsof, teardown can only attempt to reap the tmux pane's process group.
 #     Both scans can identify only processes whose working directory is readable.
 #     Both scans are bounded by process count and exclude teardown and its
-#     ancestors. Teardown sends TERM, then KILL after a short grace period
-#     to any survivor whose process identity and task cwd still match.
-#     Do not launch cleanup from inside the task copy through a wrapper that detaches and exits.
+#     current and startup ancestors. Teardown sends TERM, then KILL after a
+#     short grace period to any survivor whose process identity and task cwd
+#     still match.
 #     A failed cwd scan stops cleanup before copy return. Hosts that hide
 #     part of teardown's ancestry cause it to refuse when either cwd scan
 #     finds a match. No matches is a silent no-op.
@@ -1708,6 +1713,7 @@ STALE_WORKTREE_LOCK_RETRY_WAIT_SECS=$TREEHOUSE_RETURN_LOCK_RETRY_WAIT_SECS
 TEARDOWN_TREEHOUSE_LOCK_REFUSED=2
 TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED=3
 TEARDOWN_PROCEVENT_RESTORE_FAILED=4
+TEARDOWN_TREEHOUSE_CALLER_REFUSED=5
 
 # True when treehouse/git stderr shows the transient index.lock "File exists" race.
 # Other return failures must not enter the retry path.
@@ -1776,6 +1782,7 @@ teardown_treehouse_return() {
 
   # Capture stdout+stderr so non-lock failures stay visible and lock failures can
   # be matched by signature even when the lock file is already gone mid-check.
+  require_treehouse_return_caller_outside "$dir" || return "$TEARDOWN_TREEHOUSE_CALLER_REFUSED"
   if out=$( ( cd "$cd_dir" && treehouse return --force "$dir" ) 2>&1 ); then
     [ -n "$out" ] && printf '%s\n' "$out"
     return 0
@@ -1801,6 +1808,7 @@ teardown_treehouse_return() {
     echo "teardown: $label return failed with transient git lock ($lock_desc); waiting ${TREEHOUSE_RETURN_LOCK_RETRY_WAIT_SECS}s and retrying ($attempt/${max_retries})" >&2
     sleep "$TREEHOUSE_RETURN_LOCK_RETRY_WAIT_SECS"
 
+    require_treehouse_return_caller_outside "$dir" || return "$TEARDOWN_TREEHOUSE_CALLER_REFUSED"
     if out=$( ( cd "$cd_dir" && treehouse return --force "$dir" ) 2>&1 ); then
       [ -n "$out" ] && printf '%s\n' "$out"
       echo "teardown: $label return succeeded on retry; lock cleared on its own" >&2
@@ -1828,6 +1836,7 @@ teardown_treehouse_return() {
           return 1
         fi
       fi
+      require_treehouse_return_caller_outside "$dir" || return "$TEARDOWN_TREEHOUSE_CALLER_REFUSED"
       if out=$( ( cd "$cd_dir" && treehouse return --force "$dir" ) 2>&1 ); then
         [ -n "$out" ] && printf '%s\n' "$out"
         echo "teardown: $label return succeeded after stale-lock cleanup" >&2
@@ -2130,6 +2139,30 @@ task_process_identity_matches() {  # <pid> <identity>
 
 task_pid_list_contains() {  # <pid-list> <pid>
   printf '%s\n' "$1" | grep -Fxq "$2"
+}
+
+require_treehouse_return_caller_outside() {  # <copy>
+  local dir=$1 protected root scanner pids pid
+  if [ -z "$TEARDOWN_REAP_PROTECTED_PIDS" ] \
+     || ! protected=$(task_reap_filter_pids "$TEARDOWN_REAP_PROTECTED_PIDS" "") \
+     || [[ "$protected" == 'incomplete '* ]]; then
+    echo "REFUSED: cannot verify teardown caller ancestry; retaining Treehouse copy $dir." >&2
+    return 1
+  fi
+  if ! root=$(canonical_existing_dir "$dir" && printf '.') \
+     || ! scanner=$(task_cwd_scanner) \
+     || ! pids=$(pids_with_cwd_under "$scanner" "${root%$'\n.'}"); then
+    echo "REFUSED: cannot verify caller working directories for Treehouse copy $dir; retaining it." >&2
+    return 1
+  fi
+  [ -n "$pids" ] || return 0
+  for pid in $protected; do
+    if task_pid_list_contains "$pids" "$pid"; then
+      echo "REFUSED: teardown caller or ancestor (PID $pid) is in Treehouse copy $dir; move outside the copy and retry." >&2
+      return 1
+    fi
+  done
+  return 0
 }
 
 task_pids_under_roots() {  # <scanner> <dir>...
@@ -3369,6 +3402,9 @@ cleanup_firstmate_home_children() {
         require_owned_worktree_slot_record "$child_id" "$child_wt" || return 1
       else
         validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
+        if [ -n "$child_proj" ] && [ -d "$child_proj" ] && command -v treehouse >/dev/null 2>&1; then
+          require_treehouse_return_caller_outside "$child_wt" || return "$TEARDOWN_TREEHOUSE_CALLER_REFUSED"
+        fi
         rm -f "$child_wt/.claude/settings.local.json" "$child_wt/.opencode/plugins/fm-turn-end.js" \
           "$child_wt/.opencode/plugins/fm-busy-state.js" \
           "$child_wt/.fm-grok-turnend" "$child_wt/.fm-kimi-turnend"
@@ -3377,9 +3413,9 @@ cleanup_firstmate_home_children() {
             fm_treehouse_slot_owner_release "$child_wt" "$child_id"
           else
             child_return_rc=$?
-            if [ "$child_return_rc" -eq "$TEARDOWN_TREEHOUSE_LOCK_REFUSED" ]; then
-              return "$child_return_rc"
-            fi
+            case "$child_return_rc" in
+              "$TEARDOWN_TREEHOUSE_LOCK_REFUSED"|"$TEARDOWN_TREEHOUSE_CALLER_REFUSED") return "$child_return_rc" ;;
+            esac
             safe_rm_rf_child_worktree "$child_wt" "$child_proj"
           fi
         else
@@ -3711,10 +3747,12 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
       exit 1
     }
   fi
+  require_treehouse_return_caller_outside "$WT" || exit 1
   branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
+  detached_task_branch=
   if [ "$branch" != "HEAD" ]; then
     if git -C "$WT" checkout --detach -q 2>/dev/null; then
-      git -C "$WT" branch -D "$branch" >/dev/null 2>&1 || true
+      detached_task_branch=$branch
     fi
   fi
   # Remove our hook file so a reused pool worktree cannot fire signals for a dead task.
@@ -3732,6 +3770,10 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
     echo "error: treehouse return failed for worktree $WT; teardown aborted" >&2
     exit 1
   }
+  # Keep the branch reachable if a return attempt is refused after we detach.
+  if [ -n "$detached_task_branch" ]; then
+    git -C "$WT" branch -D "$detached_task_branch" >/dev/null 2>&1 || true
+  fi
   # The slot is back in the pool, so this task's claim on it is spent. Dropping
   # it here - and only after a return that succeeded - keeps a returned slot
   # unclaimed until its next holder claims it, and leaves the claim in place

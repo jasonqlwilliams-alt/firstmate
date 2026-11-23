@@ -3515,13 +3515,18 @@ SH
   done
   [ "$i" -lt 100 ] || fail 'lsof-absent-detached-reap: sleepers did not enter their directories'
 
-  # Both the teardown script and its calling shell have an in-copy cwd.
-  if [ "$visibility" = visible ]; then
-    cd "$case_dir/wt" || fail 'lsof-absent-detached-reap: could not enter the worktree'
-  fi
   FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
     run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
 
+  kill -0 "$tmp_pid" 2>/dev/null || fail 'lsof-absent-detached-reap: cleanup signalled a process in tasktmp'
+  kill -0 "$sibling_pid" 2>/dev/null || fail 'lsof-absent-detached-reap: sibling process was killed'
+  if [ "$visibility" = hidden ]; then
+    expect_code 1 "$rc" 'lsof-absent-detached-reap: return should refuse unknown caller ancestry'
+    assert_grep 'cannot verify teardown caller ancestry' "$case_dir/stderr" 'missing return refusal'
+    assert_present "$case_dir/state/task-x1.meta" 'refusal retired task metadata'
+    pass 'Linux teardown refuses to return a copy when caller ancestry is incomplete even without a cwd match'
+    return 0
+  fi
   [ "$rc" -eq 0 ] || cat "$case_dir/stderr" >&2
   expect_code 0 "$rc" 'lsof-absent-detached-reap: teardown should succeed'
   if [ -n "$pid" ]; then
@@ -3531,8 +3536,6 @@ SH
     assert_grep 'force-killing leaked worktree process(es)' "$case_dir/stderr" \
       'lsof-absent-detached-reap: teardown did not escalate after TERM'
   fi
-  kill -0 "$tmp_pid" 2>/dev/null || fail 'lsof-absent-detached-reap: cleanup signalled a process in tasktmp'
-  kill -0 "$sibling_pid" 2>/dev/null || fail 'lsof-absent-detached-reap: sibling process was killed'
   assert_absent "$case_dir/tasktmp" 'lsof-absent-detached-reap: cleanup left the tasktmp directory'
   pass "Linux teardown without lsof scopes reaping to its owned worktree ($visibility ancestry)"
 )
@@ -3627,18 +3630,34 @@ test_reparented_teardown_preserves_original_caller() (
     printf 'skip: reparented caller fixture requires Linux\n'
     return 0
   fi
-  local visibility=$1 case_dir leak_pid rc=0 i
-  case_dir=$(make_case "reparented-teardown-$visibility")
+  local mode=$1 case_dir leak_pid rc=0 i lock retries=1
+  case_dir=$(make_case "reparented-teardown-$mode")
   write_meta "$case_dir" no-mistakes ship
   land_shippable_commit "$case_dir"
+  lock=$(git_index_lock_path "$case_dir/wt")
+  [ "$mode" != stale ] || retries=0
   mkfifo "$case_dir/result" || fail 'reparented teardown: could not create result pipe'
-  if [ "$visibility" = hidden ]; then
+  if [ "$mode" = hidden ]; then
     configure_teardown_ancestry_ps "$case_dir"
   fi
 
   cat > "$case_dir/fakebin/lsof" <<'SH'
 #!/usr/bin/env bash
-if [ "$FM_TEST_REPARENT_VISIBILITY" = hidden ]; then
+if [ "$1" = -- ]; then
+  if [ "$2" = "$FM_TEST_REPARENT_DIR/wt" ] && [ "$FM_TEST_REPARENT_MODE" = stale ]; then
+    # Let the caller enter after the holder probe sampled an empty copy.
+    : > "$FM_TEST_REPARENT_DIR/move-caller"
+    for ((i=0; i<100; i++)); do
+      if [[ "/proc/$FM_TEST_REAP_CALLER/cwd" -ef "$2" ]]; then
+        exit 1
+      fi
+      sleep 0.05
+    done
+    exit 2
+  fi
+  exit 1
+fi
+if [ "$FM_TEST_REPARENT_MODE" = hidden ]; then
   : > "$FM_TEST_REPARENT_DIR/release"
 fi
 if [ -f "$FM_TEST_REPARENT_DIR/release" ] || [ -f "$FM_TEST_REPARENT_DIR/term" ]; then
@@ -3657,6 +3676,41 @@ done
 SH
   chmod +x "$case_dir/fakebin/lsof"
 
+  # Model Treehouse's second scan without signalling even a disposable caller.
+  cat > "$case_dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+log="$FM_TEST_REPARENT_DIR/treehouse.log"
+printf 'return\n' >> "$log"
+pid=$$
+while [ "$pid" -gt 0 ]; do
+  [ "$pid" != "$FM_TEST_REAP_CALLER" ] || exit 0
+  pid=$(ps -o ppid= -p "$pid" | tr -d '[:space:]')
+  [ -n "$pid" ] || exit 1
+done
+if [[ "/proc/$FM_TEST_REAP_CALLER/cwd" -ef "$3" ]]; then
+  printf '%s\n' "$FM_TEST_REAP_CALLER" > "$FM_TEST_REPARENT_DIR/would-stop"
+fi
+[ "$(wc -l < "$log" | tr -d '[:space:]')" = 1 ] || exit 0
+case "$FM_TEST_REPARENT_MODE" in
+  retry)
+    : > "$FM_TEST_REPARENT_DIR/move-caller"
+    for ((i=0; i<100; i++)); do
+      [[ ! "/proc/$FM_TEST_REAP_CALLER/cwd" -ef "$3" ]] || break
+      sleep 0.05
+    done
+    [ "$i" -lt 100 ] || exit 1
+    ;;
+  stale)
+    : > "$FM_TEST_REPARENT_LOCK"
+    touch -t 200001010000 "$FM_TEST_REPARENT_LOCK"
+    ;;
+  *) exit 0 ;;
+esac
+printf "fatal: Unable to create '%s': File exists.\n" "$FM_TEST_REPARENT_LOCK" >&2
+exit 128
+SH
+  chmod +x "$case_dir/fakebin/treehouse"
+
   perl -MPOSIX -e '
     my ($dir) = @ARGV;
     chdir "$dir/wt" or die;
@@ -3673,17 +3727,20 @@ SH
   [ -f "$case_dir/ready" ] || fail 'reparented teardown: leak did not start'
 
   (
-    cd "$case_dir/wt" || exit 1
+    if [ "$mode" = inside ] || [ "$mode" = hidden ]; then
+      cd "$case_dir/wt" || exit 1
+    fi
     exec 3<>"$case_dir/result"
     export FM_TEST_REAP_CALLER=$BASHPID FM_TEST_REAP_LEAK=$leak_pid FM_TEST_REPARENT_DIR="$case_dir"
-    export FM_TEST_REPARENT_VISIBILITY=$visibility
+    export FM_TEST_REPARENT_MODE=$mode FM_TEST_REPARENT_LOCK=$lock
     (
       cd "$case_dir" || exit 1
       # shellcheck disable=SC2031 # This fixture exports its own wrapper PID.
       export FM_TEST_REAP_WRAPPER=$BASHPID FM_TEST_HIDDEN_ANCESTOR=$BASHPID
       (
         export FM_TEST_REAP_RUNNER=$BASHPID
-        run_teardown "$case_dir" || rc=$?
+        FM_TREEHOUSE_RETURN_LOCK_RETRIES=$retries FM_TREEHOUSE_RETURN_LOCK_RETRY_WAIT_SECS=0 \
+          run_teardown "$case_dir" || rc=$?
         printf '%s\n' "$rc" >&3
       ) &
       for ((i=0; i<300; i++)); do
@@ -3694,6 +3751,14 @@ SH
       done
       exit 1
     ) || exit 1
+    if [ "$mode" = retry ] || [ "$mode" = stale ]; then
+      for ((i=0; i<100; i++)); do
+        [ ! -f "$case_dir/move-caller" ] || break
+        sleep 0.05
+      done
+      [ "$i" -lt 100 ] || exit 1
+      cd "$case_dir/wt" || exit 1
+    fi
     IFS= read -r -t 20 rc <&3 || exit 1
     printf 'survived\n' > "$case_dir/caller"
     exit "$rc"
@@ -3701,7 +3766,7 @@ SH
 
   assert_present "$case_dir/reparented" 'reparented teardown: parent did not change during cleanup'
   assert_present "$case_dir/caller" 'reparented teardown: cleanup signalled the original caller'
-  if [ "$visibility" = hidden ]; then
+  if [ "$mode" = hidden ]; then
     expect_code 1 "$rc" 'reparented teardown: hidden startup ancestry should block cleanup'
     assert_present "$case_dir/state/task-x1.meta" 'reparented teardown: refusal retired task metadata'
     assert_absent "$case_dir/term" 'reparented teardown: refusal came after sending TERM'
@@ -3711,11 +3776,33 @@ SH
     pass 'cleanup refuses cwd matches after a hidden wrapper exits'
     return 0
   fi
-  expect_code 0 "$rc" 'reparented teardown: cleanup should succeed'
-  assert_absent "$case_dir/state/task-x1.meta" 'reparented teardown: task record survived'
+  assert_absent "$case_dir/would-stop" 'Treehouse return would have stopped the original caller'
   wait "$leak_pid" || fail 'reparented teardown: leak did not exit through its TERM handler'
   trap - EXIT
-  pass 'cleanup reaps the leak and protects its original caller after reparenting'
+  if [ "$mode" = outside ]; then
+    expect_code 0 "$rc" 'reparented teardown: cleanup should return the copy with the caller outside'
+    assert_present "$case_dir/treehouse.log" 'reparented teardown: did not return the copy'
+    assert_absent "$case_dir/state/task-x1.meta" 'reparented teardown: cleanup left the task record'
+  else
+    expect_code 1 "$rc" "reparented teardown ($mode): cleanup should refuse an in-copy caller"
+    assert_grep 'teardown caller or ancestor (PID ' "$case_dir/stderr" 'missing caller refusal'
+    assert_present "$case_dir/wt" 'reparented teardown: refusal removed the copy'
+    assert_present "$case_dir/state/task-x1.meta" 'reparented teardown: refusal retired task metadata'
+    git -C "$case_dir/wt" show-ref --verify --quiet refs/heads/fm/task-x1 \
+      || fail 'reparented teardown: refusal deleted the task branch'
+    if [ "$mode" = inside ]; then
+      assert_absent "$case_dir/treehouse.log" 'reparented teardown: invoked Treehouse despite an in-copy caller'
+      [ "$(git -C "$case_dir/wt" symbolic-ref --short HEAD)" = fm/task-x1 ] \
+        || fail 'reparented teardown: refusal detached the task branch'
+    else
+      [ "$(cat "$case_dir/treehouse.log")" = return ] \
+        || fail 'reparented teardown: Treehouse ran again after the caller moved inside'
+    fi
+    if [ "$mode" = stale ]; then
+      assert_grep 'removed provably-stale git lock' "$case_dir/stderr" 'stale retry was not reached'
+    fi
+  fi
+  pass "cleanup reaps the leak and protects its original caller after reparenting ($mode)"
 )
 
 test_lsof_absent_on_non_linux_reaps_tmux_process_group() {
@@ -3751,7 +3838,10 @@ EOF
   FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
     run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
 
-  expect_code 0 "$rc" "lsof-absent-process-group-reap: teardown should succeed"
+  expect_code 1 "$rc" "lsof-absent-process-group-reap: return should refuse without a cwd scanner"
+  assert_grep 'cannot verify caller working directories' "$case_dir/stderr" \
+    "lsof-absent-process-group-reap: teardown did not report the return refusal"
+  assert_present "$case_dir/state/task-x1.meta" "lsof-absent-process-group-reap: refusal retired task metadata"
   if kill -0 "$pid" 2>/dev/null; then
     kill -KILL "$pid" 2>/dev/null || true
     fail "lsof-absent-process-group-reap: tmux process group survived teardown"
@@ -4512,7 +4602,10 @@ test_lsof_absent_reaps_detached_linux_process hidden || exit 1
 test_proc_cwd_read_failure_preserves_copy || exit 1
 test_hidden_intermediate_parent_refuses_reap proc || exit 1
 test_hidden_intermediate_parent_refuses_reap lsof || exit 1
-test_reparented_teardown_preserves_original_caller visible || exit 1
+test_reparented_teardown_preserves_original_caller inside || exit 1
+test_reparented_teardown_preserves_original_caller outside || exit 1
+test_reparented_teardown_preserves_original_caller retry || exit 1
+test_reparented_teardown_preserves_original_caller stale || exit 1
 test_reparented_teardown_preserves_original_caller hidden || exit 1
 test_keep_pane_without_lsof || exit 1
 test_keep_pane_retirement
