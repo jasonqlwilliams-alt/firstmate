@@ -1,0 +1,171 @@
+Live local Firstmate CLI at 76325a93f2d0453715235ce95f72c187f5b043af; base replay at 0464e0e2e12c319129f904dc936b6830c68d5a51
+Synthetic homes and harness-named shell processes, real procfs and Firstmate executables.
+Recorded start ticks for the reuse case come from a real earlier fixture process.
+
+[1] Fresh acquisition, same-owner renewal and read-only refusal
+$ bin/fm-lock.sh status
+exit=0
+lock: free
+$ Owner runs bin/fm-lock.sh (fixture PID 1503559)
+exit=0
+lock acquired: harness pid 1503559
+Kernel /proc/1503559/stat field 22 = 32218351
+state/.lock bytes = b'1503559\n'
+state/.lock.start bytes = b'1503559\nstart=proc:32218351\n'
+$ bin/fm-lock.sh status
+exit=0
+lock: held by live harness pid 1503559
+$ Owner renews runs bin/fm-lock.sh (fixture PID 1503559)
+exit=0
+lock acquired: harness pid 1503559
+$ Contender runs bin/fm-lock.sh (fixture PID 1503560)
+exit=1
+error: another live firstmate session holds the lock (pid 1503559); operate read-only until resolved
+$ bin/fm-lock.sh status
+exit=0
+lock: stale (pid 1503559 dead, reused, or not a harness)
+RESULT matching PASS
+
+[2] Same PID, different positive start tick (base)
+Persisted stale owner record = b'1503827\nstart=proc:32218373\n'
+Unrelated live codex PID 1503827 started at kernel tick 32218377
+$ bin/fm-lock.sh status
+exit=0
+lock: held by live harness pid 1503827
+$ Contender runs bin/fm-lock.sh (fixture PID 1503828)
+exit=1
+error: another live firstmate session holds the lock (pid 1503827); operate read-only until resolved
+RESULT reuse-base PASS
+
+[2] Same PID, different positive start tick (target)
+Persisted stale owner record = b'1503924\nstart=proc:32218384\n'
+Unrelated live codex PID 1503924 started at kernel tick 32218388
+$ bin/fm-lock.sh status
+exit=0
+lock: stale (pid 1503924 dead, reused, or not a harness)
+$ Contender runs bin/fm-lock.sh (fixture PID 1503925)
+exit=0
+lock acquired: harness pid 1503925
+Replacement owner record = b'1503925\nstart=proc:32218388\n'
+$ bin/fm-lock.sh status
+exit=0
+lock: held by live harness pid 1503925
+RESULT reuse PASS
+
+[3] Concurrent reader across stale-owner replacement (base)
+$ Previous owner runs bin/fm-lock.sh (fixture PID 1504106)
+exit=0
+lock acquired: harness pid 1504106
+$ Replacement runs bin/fm-lock.sh (fixture PID 1504273)
+exit=0
+lock acquired: harness pid 1504273
+Reader snapshots of state/.lock = {b'1504106\n': 4323, b'': 2, b'1504273\n': 1224}
+Linux directory events for .lock = ['IN_MODIFY']
+Old open descriptor (inode 6933659) reads b'1504273\n'; .lock (inode 6933659) reads b'1504273\n'
+RESULT atomic-base PASS
+
+[3] Concurrent reader across stale-owner replacement (target)
+$ Previous owner runs bin/fm-lock.sh (fixture PID 1504459)
+exit=0
+lock acquired: harness pid 1504459
+$ Replacement runs bin/fm-lock.sh (fixture PID 1504556)
+exit=0
+lock acquired: harness pid 1504556
+Reader snapshots of state/.lock = {b'1504459\n': 6517, b'1504556\n': 1226}
+Linux directory events for .lock = ['IN_MOVED_TO']
+Old open descriptor (inode 6934253) reads b'1504459\n'; .lock (inode 6934264) reads b'1504556\n'
+RESULT atomic PASS
+
+[4] Legacy single-line lock remains usable and upgrades
+$ bin/fm-lock.sh status
+exit=0
+lock: held by live harness pid 1504650
+$ Contender without a sidecar runs bin/fm-lock.sh (fixture PID 1504651)
+exit=1
+error: another live firstmate session holds the lock (pid 1504650); operate read-only until resolved
+$ Contender with a sidecar naming another PID runs bin/fm-lock.sh (fixture PID 1504651)
+exit=1
+error: another live firstmate session holds the lock (pid 1504650); operate read-only until resolved
+$ Legacy owner renews runs bin/fm-lock.sh (fixture PID 1504650)
+exit=0
+lock acquired: harness pid 1504650
+Existing state/.lock inode 6934270 kept bytes b'1504650\n'
+Upgraded state/.lock.start bytes = b'1504650\nstart=proc:32218435\n'
+RESULT legacy PASS
+
+[5] Startup/compact accept only the current process's completion receipt
+$ bin/fm-sessionstart-run.sh --source=startup (fixture PID 1504922)
+exit=0
+SESSION START - {run-worktree}/.nm-lock-validation/drive-ps1ujzqw/startup
+lock acquired: harness pid 1504922
+NEXT STEP
+Native startup persisted completion b'1504922\nstart=proc:32218461\n'
+$ bin/fm-startup-network.sh owner <current PID> with matching lock
+exit=0
+$ bin/fm-sessionstart-run.sh --source=startup (fixture PID 1504923)
+exit=0
+SESSION START - {run-worktree}/.nm-lock-validation/drive-ps1ujzqw/startup
+●  READ-ONLY SESSION - FLEET LOCK OWNERSHIP WAS NOT VERIFIED
+NEXT STEP
+$ bin/fm-startup-network.sh owner <current PID> with stale lock
+exit=1
+$ bin/fm-sessionstart-nudge.sh with stale lock in its ancestry
+exit=0
+⁣FIRSTMATE_OP: v1 session-start: Run `bin/fm-session-start.sh` now, exactly once, before executing any other instructions.
+$ bin/fm-sessionstart-nudge.sh with verified lock
+exit=0
+Injected saved completion = b'1504922\n'
+$ bin/fm-sessionstart-run.sh --source=compact (fixture PID 1504922)
+exit=0
+SESSION START - {run-worktree}/.nm-lock-validation/drive-ps1ujzqw/startup
+lock acquired: harness pid 1504922
+NEXT STEP
+Injected saved completion = b'1504922\nstart=proc:32218457\n'
+$ bin/fm-sessionstart-run.sh --source=compact (fixture PID 1504922)
+exit=0
+SESSION START - {run-worktree}/.nm-lock-validation/drive-ps1ujzqw/startup
+lock acquired: harness pid 1504922
+NEXT STEP
+Verified saved completion = b'1504922\nstart=proc:32218461\n'
+$ bin/fm-sessionstart-run.sh --source=compact (fixture PID 1504922)
+exit=0
+SESSION START (CONTEXT RE-EMIT) - {run-worktree}/.nm-lock-validation/drive-ps1ujzqw/startup
+Queued wakes ARE still drained: they arrived after startup and are this turn work.
+lock acquired: harness pid 1504922
+NEXT STEP
+Final deferred startup worker report:
+completed off the startup path in 0s: GitHub authentication.
+NEEDS_GH_AUTH
+These ran AFTER the sections above were composed, so re-read any record a line here names.
+TIMINGS - where the deferred network checks spent their time (ms):
+  phase       gh-auth                                    start=+36      elapsed=2
+Final deferred worker state=done, rc=0
+RESULT startup PASS
+
+[6] A reused session PID does not keep an old task lease live
+$ Session owner runs bin/fm-lock.sh (fixture PID 1512749)
+exit=0
+lock acquired: harness pid 1512749
+$ bin/fm-lease.sh claim fixture-task (actor=main)
+exit=0
+$ bin/fm-lease.sh check fixture-task (actor=branch)
+exit=0
+main 1512749 1795397864 live
+$ bin/fm-lease.sh claim fixture-task (actor=branch)
+exit=6
+error: claim refused - task 'fixture-task' is leased to the main supervision actor (state/.lease-fixture-task)
+Persisted stale owner = b'1512749\nstart=proc:32219004\n'; live PID started at tick 32219008
+$ bin/fm-lease.sh check fixture-task (actor=branch)
+exit=0
+main 1512749 1795397864 stale
+$ bin/fm-lease.sh sweep (actor=branch)
+exit=0
+$ bin/fm-lease.sh check fixture-task (actor=branch)
+exit=1
+RESULT leases PASS
+Reaped detached fixture child 1504919, wait status 0
+Reaped detached fixture child 1505872, wait status 0
+Reaped detached fixture child 1508707, wait status 0
+Reaped detached fixture child 1510522, wait status 0
+Reaped detached fixture child 1512065, wait status 0
+Fixture teardown: no child processes remain; emergency stops=[]
