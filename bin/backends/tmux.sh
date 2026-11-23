@@ -36,6 +36,22 @@ fm_backend_tmux_resolve_bare_selector() {  # <name>
     || { echo "error: no window named $name" >&2; return 1; }
 }
 
+fm_backend_tmux_exact_pane() {  # <session:window>
+  local target=$1 session window windows
+  case "$target" in
+    *:*:*|:*|*:) return 1 ;;
+    *:*) ;;
+    *) return 1 ;;
+  esac
+  session=${target%%:*}
+  window=${target#*:}
+  windows=$(tmux list-windows -t "=$session" -F $'#{window_name}\t#{pane_id}' 2>/dev/null) || return 1
+  awk -F '\t' -v window="$window" '
+    $1 == window { pane=$2; matches++ }
+    END { if (matches != 1 || pane == "") exit 1; print pane }
+  ' <<< "$windows"
+}
+
 # fm_backend_tmux_capture: bounded plain-text pane capture. Mirrors
 # fm-peek.sh's and fm-watch.sh's `tmux capture-pane -p -t "$T" -S -"$N"`.
 fm_backend_tmux_capture() {  # <target> <lines>

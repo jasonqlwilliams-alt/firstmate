@@ -9,7 +9,7 @@
 #   fm-remote-secondmate-control.sh send <id> <message> [fire-and-forget]
 #   fm-remote-secondmate-control.sh key <id> <key>
 #   fm-remote-secondmate-control.sh capture <id> [lines]
-#   fm-remote-secondmate-control.sh observe <id>
+#   fm-remote-secondmate-control.sh observe <id> [--exit-dialog]
 #   fm-remote-secondmate-control.sh sync <id> [<parent-commit>]
 #   fm-remote-secondmate-control.sh update <id>
 #   fm-remote-secondmate-control.sh retire <id> [--force]
@@ -428,7 +428,7 @@ cmd_send() {
     fm_task_inbox_ring "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "$rec" "fm-$id" \
     "$(fm_meta_get "$REMOTE_ENDPOINT_META" harness)" || ring_rc=$?
   case "$ring_rc" in
-    1) printf 'notice: doorbell not typed because the composer in %s holds pending text or, on a Codex or Rovo pane, is not proven empty; the steer is durably recorded at %s\n' "$REMOTE_ENDPOINT_TARGET" "$rec" >&2 ;;
+    1) printf 'notice: the screen in %s prevented typing the doorbell; the steer is durably recorded at %s\n' "$REMOTE_ENDPOINT_TARGET" "$rec" >&2 ;;
     2) printf 'notice: doorbell did not reach %s; the steer is durably recorded at %s\n' "$REMOTE_ENDPOINT_TARGET" "$rec" >&2 ;;
     3) printf 'notice: doorbell not typed because the agent in %s has exited; the steer is durably recorded at %s for recovery\n' "$REMOTE_ENDPOINT_TARGET" "$rec" >&2 ;;
     4) printf 'notice: no doorbell Enter sent because %s shows the Codex global-update picker; the steer is durably recorded at %s\n' "$REMOTE_ENDPOINT_TARGET" "$rec" >&2 ;;
@@ -463,12 +463,21 @@ cmd_capture() {
 }
 
 cmd_observe() {
-  local id=$1 harness
+  local id=$1 harness screen
   validate_id "$id"
   validate_home "$id"
   remote_endpoint_require "$id"
   remote_endpoint_require_home
   harness=$(fm_meta_get "$REMOTE_ENDPOINT_META" harness)
+  if [ "${2:-}" = --exit-dialog ]; then
+    [ "$(fm_control_harness_family "$harness")" = claude ] || return 0
+    screen=$(FM_BACKEND_HERDR_ENDPOINT_META="$REMOTE_ENDPOINT_META" fm_backend_guarded_composer_state \
+      "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "fm-$id" '' claude 5000)
+    if [ "$screen" = exit-confirm ]; then
+      printf 'exit-confirm\n'
+    fi
+    return 0
+  fi
   FM_BACKEND_HERDR_ENDPOINT_META="$REMOTE_ENDPOINT_META" \
     fm_pending_reply_backend_observation "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "fm-$id" "$harness"
   printf '\n'
@@ -576,7 +585,7 @@ case "${1:-}" in
   send) shift; [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage; cmd_send "$@" ;;
   key) shift; [ "$#" -eq 2 ] || usage; cmd_key "$@" ;;
   capture) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_capture "$@" ;;
-  observe) shift; [ "$#" -eq 1 ] || usage; cmd_observe "$@" ;;
+  observe) shift; case "$#" in 1) ;; 2) [ "$2" = --exit-dialog ] || usage ;; *) usage ;; esac; cmd_observe "$@" ;;
   sync) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_sync "$@" ;;
   update) shift; [ "$#" -eq 1 ] || usage; cmd_update "$@" ;;
   retire) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_retire "$@" ;;
