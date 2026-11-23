@@ -3542,6 +3542,7 @@ SH
   fm_write_meta "$state/held-merge.meta" window=test:w1:p2 kind=ship harness=grok backend=herdr \
     herdr_terminal_id=current spawn_gen=current
   export FM_HOME="$dir" FM_DATA_OVERRIDE="$dir/data" FM_CONFIG_OVERRIDE="$dir/config" FM_WATCH_HANDLING_SUCCESSOR=1
+  export FM_FAKE_CREW_STATE='state: unknown · source: none · no current-state source available'
   export FM_TEST_TERMINAL=current
   if [ "$scenario" = no-status ]; then
     rm -f "$state/held-merge.status" "$state/.seen-held-merge_status"

@@ -495,13 +495,9 @@ stale_marker_remove() {  # <window> <state> [task]
   rm -f "$state/.subsuper-stale-$key"
 }
 
-# Pause marker: state/.subsuper-paused-<key> holds the epoch a declared wait (a
-# paused: external wait or a verified captain-held transfer) was first observed
-# declared, whether its pane read idle or busy. Housekeeping ages it against
-# PAUSE_RESURFACE_SECS (much longer than a wedge) and re-surfaces the wait once
-# per window. Recording is create-if-absent so the timestamp is stable across a
-# churny pane (many distinct stale hashes map to one marker), keeping the cadence
-# hash-immune.
+# The pause marker uses the task-derived key and holds the epoch when the wait
+# was first observed, whether its pane read idle or busy. Recording is
+# create-if-absent so pane redraws cannot reset the recheck interval.
 pause_marker_record() {  # <task> <state> - create if absent
   local task=$1 state=$2 key marker
   key=$(_stale_key "$task")
