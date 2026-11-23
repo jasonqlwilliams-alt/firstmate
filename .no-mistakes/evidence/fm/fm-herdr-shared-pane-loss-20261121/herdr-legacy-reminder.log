@@ -1,0 +1,61 @@
+herdr 0.9.5
+Herdr isolation root uses a private settings directory and an empty default server for the lab tripwire.
+$ bin/fm-watch.sh
+signal: {run-worktree}/.gate-live/herdr-legacy-final/legacy/state/a-original.status
+$ bin/fm-wake-drain.sh
+1795416847	2	signal	a-original.status	signal: {run-worktree}/.gate-live/herdr-legacy-final/legacy/state/a-original.status
+wake annotation: latest wake-EVENT observed at drain, not current state: a-original.status: paused: waiting for the synthetic release until 2026-01-01T00:00:00Z
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 652721.1795416847.3Sj6Nv
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 2s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  After draining queued wakes, use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+$ bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 652721.1795416847.3Sj6Nv
+$ bin/fm-watch.sh
+stale: fm-lab-legacy:w1:p2 (paused 5s, awaiting external - the declared clearing time has passed, rechecked on a long cadence not a wedge; confirm the wait cleared)
+$ bin/fm-wake-drain.sh
+1795416850	3	stale	fm-lab-legacy:w1:p2	stale: fm-lab-legacy:w1:p2 (paused 5s, awaiting external - the declared clearing time has passed, rechecked on a long cadence not a wedge; confirm the wait cleared)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 659382.1795416850.XvHAtq
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+$ bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 659382.1795416850.XvHAtq
+Reopen the same verified terminal with a legacy unowned hash.
+No extra reminder after upgrade. The verified worker kept its reminder timestamp 1795416850.
+Reopen with another terminal on fm-lab-legacy:w1:p2 and the same declared wait.
+$ bin/fm-watch.sh
+check: rearm-resurface
+$ bin/fm-wake-drain.sh
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 676371.1795416859.EtpZdw
+WARNING: watcher still down (same stale episode; last beat: 0s ago, grace 300s) - full banner already printed this episode.
+$ bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 676371.1795416859.EtpZdw
+$ bin/fm-watch.sh
+signal: {run-worktree}/.gate-live/herdr-legacy-final/legacy/state/z-replacement.status
+$ bin/fm-wake-drain.sh
+1795416862	5	signal	z-replacement.status	signal: {run-worktree}/.gate-live/herdr-legacy-final/legacy/state/z-replacement.status
+wake annotation: latest wake-EVENT observed at drain, not current state: z-replacement.status: paused: waiting for the synthetic release until 2026-01-01T00:00:00Z
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 5 --recovery-generation 681399.1795416862.dvlv8m
+WARNING: watcher still down (same stale episode; last beat: 2s ago, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+$ bin/fm-wake-drain.sh --ack-through 5 --recovery-generation 681399.1795416862.dvlv8m
+$ bin/fm-watch.sh
+stale: fm-lab-legacy:w1:p2 (the recorded endpoint is gone for task a-original)
+$ bin/fm-wake-drain.sh
+1795416864	6	stale	fm-lab-legacy:w1:p2	stale: fm-lab-legacy:w1:p2 (the recorded endpoint is gone for task a-original)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 6 --recovery-generation 684372.1795416864.Yb2QWf
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+$ bin/fm-wake-drain.sh --ack-through 6 --recovery-generation 684372.1795416864.Yb2QWf
+$ bin/fm-watch.sh
+stale: fm-lab-legacy:w1:p2 (paused 6s, awaiting external - the declared clearing time has passed, rechecked on a long cadence not a wedge; confirm the wait cleared)
+$ bin/fm-wake-drain.sh
+1795416866	7	stale	fm-lab-legacy:w1:p2	stale: fm-lab-legacy:w1:p2 (paused 6s, awaiting external - the declared clearing time has passed, rechecked on a long cadence not a wedge; confirm the wait cleared)
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 7 --recovery-generation 687553.1795416866.TQg7zu
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+$ bin/fm-wake-drain.sh --ack-through 7 --recovery-generation 687553.1795416866.TQg7zu
+no unacknowledged Herdr fleet-state tripwire breaches
+RESULT legacy reminder migration and replacement pass

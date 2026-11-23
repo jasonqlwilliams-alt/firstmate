@@ -1,0 +1,49 @@
+zellij 0.44.0
+Private session through a drained 120×40 PTY with disposable config, sockets and data.
+
+[old-first]
+Zellij tab fm-a-original, terminal pane 1
+$ bin/fm-watch.sh
+stale: nm-loss-old-first:1
+$ bin/fm-wake-drain.sh
+1795416573	1	stale	nm-loss-old-first:1	stale: nm-loss-old-first:1
+$ bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 263244.1795416574.yUupgI
+Zellij TUI exit 0
+Zellij tab fm-z-replacement, terminal pane 1
+$ bin/fm-watch.sh
+stale: nm-loss-old-first:1
+$ bin/fm-wake-drain.sh
+1795416580	2	stale	nm-loss-old-first:1	stale: nm-loss-old-first:1
+$ bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 269364.1795416581.EK3B5A
+Occupied pane recorded by both tasks. The current tab went stale and no loss was recorded.
+Zellij TUI exit 0
+RESULT old-first pass
+
+[live-first]
+Zellij tab fm-z-original, terminal pane 1
+$ bin/fm-watch.sh
+stale: nm-loss-live-first:1
+$ bin/fm-wake-drain.sh
+1795416586	1	stale	nm-loss-live-first:1	stale: nm-loss-live-first:1
+$ bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 278014.1795416586.i9FLeq
+Zellij TUI exit 0
+Zellij tab fm-a-replacement, terminal pane 1
+$ bin/fm-watch.sh
+stale: nm-loss-live-first:1
+$ bin/fm-wake-drain.sh
+1795416593	2	stale	nm-loss-live-first:1	stale: nm-loss-live-first:1
+$ bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 291353.1795416593.8mryO3
+Occupied pane recorded by both tasks. The current tab went stale and no loss was recorded.
+$ zellij -s nm-loss-live-first action close-tab-by-id 1
+Live inventory still has terminal panes [0]
+$ bin/fm-watch.sh
+stale: nm-loss-live-first:1 (the recorded endpoint is gone for task a-replacement)
+$ bin/fm-wake-drain.sh
+1795416595	3	stale	nm-loss-live-first:1	stale: nm-loss-live-first:1 (the recorded endpoint is gone for task a-replacement)
+$ bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 294939.1795416595.SMMDM4
+a-replacement.missing-endpoint = zellij:nm-loss-live-first:1	replacement
+$ bin/fm-watch.sh
+Five monitored seconds; no new notice.
+RESULT physical closure pass
+Zellij TUI exit 0
+RESULT live-first pass

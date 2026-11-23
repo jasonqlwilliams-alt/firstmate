@@ -1,0 +1,17 @@
+herdr 0.9.5
+Herdr isolation root uses a private settings directory and an empty default server for the lab tripwire.
+Pane w1:p2 was reused with terminal term_660ec0e8a6a272 → term_660ec0e9a9ca12
+Pi SDK 1.5.0, real watcher arm and local HTTP completions with synthetic tasks.
+watcher: unchanged - Pi extension already owns an arm child; no manual re-arm needed; call fm_watch_arm_pi again only after a later notification says the cycle is missing, failed, or unhealthy
+Main Pi transcript → FIRSTMATE WATCHER WAKE: check: rearm-resurface
+Main Pi transcript → FIRSTMATE WATCHER WAKE: stale: fm-lab-pi-loss:w1:p2 (the recorded endpoint is gone for task a-original)
+Firstmate branch grant 1, 3 excludes named loss row 2.
+$ FM_SUPERVISION_ACTOR=branch bin/fm-wake-drain.sh
+1795416846	3	stale	fm-lab-pi-loss:w1:p2	stale: fm-lab-pi-loss:w1:p2
+Durable branch result
+{"seq":1,"epoch":1795416847,"task":"z-replacement","wake":"stale: fm-lab-pi-loss:w1:p2","verdict":"routine","summary":"The replacement worker is idle.","silent":false,"statusEndpoint":0,"statusIdent":"-"}
+$ FM_SUPERVISION_ACTOR=main bin/fm-wake-drain.sh
+1795416846	3	stale	fm-lab-pi-loss:w1:p2	stale: fm-lab-pi-loss:w1:p2
+1795416838	2	stale	fm-lab-pi-loss:w1:p2	stale: fm-lab-pi-loss:w1:p2 (the recorded endpoint is gone for task a-original)
+RESULT Pi named loss stays on main; ordinary stale reaches branch
+no unacknowledged Herdr fleet-state tripwire breaches

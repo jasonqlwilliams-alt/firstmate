@@ -1,0 +1,80 @@
+herdr 0.9.5
+Herdr isolation root uses a private settings directory and an empty default server for the lab tripwire.
+
+[old-first] original=a-original replacement=z-replacement
+Original pane w1:p2 with terminal term_660ebf89c2f3c2
+$ bin/fm-watch.sh
+stale: fm-lab-shared-loss:w1:p2
+$ bin/fm-wake-drain.sh
+1795416469	1	stale	fm-lab-shared-loss:w1:p2	stale: fm-lab-shared-loss:w1:p2
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 66193.1795416469.ksnOLv
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  After draining queued wakes, use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+$ bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 66193.1795416469.ksnOLv
+Replacement pane w1:p2 with terminal term_660ebf8f8d46c2
+$ bin/fm-watch.sh
+stale: fm-lab-shared-loss:w1:p2 (the recorded endpoint is gone for task a-original)
+$ FM_WATCH_HANDLING_SUCCESSOR=1 bin/fm-watch.sh
+stale: fm-lab-shared-loss:w1:p2
+$ bin/fm-wake-drain.sh
+1795416471	2	stale	fm-lab-shared-loss:w1:p2	stale: fm-lab-shared-loss:w1:p2 (the recorded endpoint is gone for task a-original)
+1795416477	3	stale	fm-lab-shared-loss:w1:p2	stale: fm-lab-shared-loss:w1:p2
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 71034.1795416471.WihHVi
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+$ bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 71034.1795416471.WihHVi
+a-original.missing-endpoint = herdr:fm-lab-shared-loss:w1:p2	original
+Re-arm after acknowledging both records and observe five quiet seconds.
+RESULT old-first pass
+
+[live-first] original=z-original replacement=a-replacement
+Original pane w1:p2 with terminal term_660ebf9bd6e322
+$ bin/fm-watch.sh
+stale: fm-lab-shared-loss:w1:p2
+$ bin/fm-wake-drain.sh
+1795416487	1	stale	fm-lab-shared-loss:w1:p2	stale: fm-lab-shared-loss:w1:p2
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 99545.1795416487.WwF7MP
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  After draining queued wakes, use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+$ bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 99545.1795416487.WwF7MP
+Replacement pane w1:p2 with terminal term_660ebfa14b1b22
+$ bin/fm-watch.sh
+stale: fm-lab-shared-loss:w1:p2 (the recorded endpoint is gone for task z-original)
+$ FM_WATCH_HANDLING_SUCCESSOR=1 bin/fm-watch.sh
+stale: fm-lab-shared-loss:w1:p2
+$ bin/fm-wake-drain.sh
+1795416490	2	stale	fm-lab-shared-loss:w1:p2	stale: fm-lab-shared-loss:w1:p2 (the recorded endpoint is gone for task z-original)
+1795416493	3	stale	fm-lab-shared-loss:w1:p2	stale: fm-lab-shared-loss:w1:p2
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 104945.1795416490.BZTBxo
+WARNING: watcher still down (same stale episode; last beat: 2s ago, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+$ bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 104945.1795416490.BZTBxo
+z-original.missing-endpoint = herdr:fm-lab-shared-loss:w1:p2	original
+Re-arm after acknowledging both records and observe five quiet seconds.
+RESULT live-first pass
+
+[away mode] named loss leaves the live pause timer in place
+Live pause established at 1795416501
+[2026-11-22T22:48:21-0800] daemon starting (pid 131970); target=fm-lab-shared-loss:w1:p1; target_source=FM_SUPERVISOR_TARGET; backend=herdr; backend_source=FM_SUPERVISOR_BACKEND; afk=on; inject_skip='heartbeat'; stale_escalate=240s; batch=999999s
+[2026-11-22T22:48:23-0800] wake: signal: {run-worktree}/.gate-live/herdr-live/away/state/a-replacement.status {run-worktree}/.gate-live/herdr-live/away/state/z-original.status
+[2026-11-22T22:48:24-0800] self-handle: signal: {run-worktree}/.gate-live/herdr-live/away/state/a-replacement.status {run-worktree}/.gate-live/herdr-live/away/state/z-original.status -> routine signal: a-replacement.status: paused: waiting for the synthetic release | z-original.status: paused: waiting for the synthetic release
+[2026-11-22T22:48:24-0800] self-handle: signal: {run-worktree}/.gate-live/herdr-live/away/state/a-replacement.status {run-worktree}/.gate-live/herdr-live/away/state/z-original.status -> routine signal: a-replacement.status: paused: waiting for the synthetic release | z-original.status: paused: waiting for the synthetic release
+[2026-11-22T22:48:25-0800] wake: stale: fm-lab-shared-loss:w1:p2 (the recorded endpoint is gone for task z-original)
+[2026-11-22T22:48:26-0800] escalate: stale: fm-lab-shared-loss:w1:p2 (the recorded endpoint is gone for task z-original) -> fm-lab-shared-loss:w1:p2 (the recorded endpoint is gone for task z-original)
+Away escalation buffer after another housekeeping pass
+fm-lab-shared-loss:w1:p2 (the recorded endpoint is gone for task z-original)
+Live pause kept its original timestamp 1795416501
+no unacknowledged Herdr fleet-state tripwire breaches
+RESULT away pass
