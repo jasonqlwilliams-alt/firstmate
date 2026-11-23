@@ -383,28 +383,23 @@ test_answer_between_resolution_and_timeout_wins() {
   dir=$(new_case answer-at-timeout-decision)
   add_local_mate "$dir" sm1
 
-  # Delay the modelled answer until the first resolution attempt has completed
-  # its unsuccessful status scan. The real pending-reply machinery publishes
-  # that scan signature with mv; this wrapper appends the correlated answer only
-  # after that publication, reproducing the boundary race deterministically.
-  cat > "$dir/fakebin/mv" <<'SH'
+  : > "$dir/home/state/sm1.status"
+  # Delay the modelled answer until the first status scan has already missed it.
+  cat > "$dir/fakebin/grep" <<'SH'
 #!/usr/bin/env bash
 set -u
-/bin/mv "$@" || exit $?
-target=${!#}
-case "$target" in
-  "${FM_FAKE_DIR%/fake}"/home/state/pending-replies/*)
-    if [ ! -e "$FM_FAKE_DIR/answer-after-scan" ] \
-      && grep -q '^parent_status_scan_signature=.' "$target"; then
-      : > "$FM_FAKE_DIR/answer-after-scan"
-      corr=${target##*/}
-      status=$(sed -n 's/^parent_status=//p' "$target")
-      printf 'done [corr=%s]: Saved all open work. (via-helper)\n' "$corr" >> "$status"
-    fi
+command -p grep "$@"
+rc=$?
+status=${!#}
+case "$rc:${3:-}:$status" in
+  1:corr=*:"${FM_FAKE_DIR%/fake}"/home/state/sm1.status)
+    corr=${3#corr=}
+    printf 'done [corr=%s]: Saved all open work. (via-helper)\n' "$corr" >> "$status"
     ;;
 esac
+exit "$rc"
 SH
-  chmod +x "$dir/fakebin/mv"
+  chmod +x "$dir/fakebin/grep"
 
   out=$(FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1); rc=$?
 
@@ -750,8 +745,9 @@ test_native_ultra_restart_keeps_local_and_remote_profiles() {
 }
 
 # --- T9: an unrelated concurrent reply cannot release the persist gate -------
-assert_concurrent_reply_cannot_release_persist_gate() {
-  local note=$1 expected=$2 dir out rc state corr rec
+assert_concurrent_reply_does_not_change_persist_outcome() {
+  local note=$1 expected=$2 expected_code=$3 verb=${4:-} save_note=${5:-}
+  local dir out rc state corr rec
   dir=$(new_case correlation)
   add_local_mate "$dir" sm1
   state="$dir/home/state"
@@ -773,25 +769,41 @@ EOF
 printf 'done [corr=$corr]: %s\n' "$note" >> "$state/sm1.status"
 SH
   chmod +x "$dir/fake/on-doorbell"
+  if [ -n "$verb" ]; then
+    arm_answer "$dir" sm1
+  fi
 
-  out=$(FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1); rc=$?
+  out=$(FM_TEST_PERSIST_WAIT=0 FM_FAKE_ANSWER_VERB="$verb" FM_FAKE_ANSWER_NOTE="$save_note" \
+    run_restart "$dir" sm1); rc=$?
 
   assert_grep "done [corr=$corr]:" "$state/sm1.status" \
     "the submitted persist request must have elicited the unrelated answer"
-  expect_code 3 "$rc" "an unrelated concurrent answer must not release the persist gate"$'\n'"$out"
-  assert_contains "$out" "$expected" "the pass must report why the unrelated answer did not authorize a restart"
-  assert_not_contains "$out" "restarted: sm1" "the unrelated answer authorized a restart"
-  ! grep -Fxq -e /exit -e /quit "$dir/fake/literal" \
-    || fail "the unrelated answer authorized an exit command"
+  expect_code "$expected_code" "$rc" "the save request's own reply must determine the result"$'\n'"$out"
+  assert_contains "$out" "$expected" "the pass must report the save request's actual outcome"
+  assert_not_contains "$out" "audit complete" "the unrelated answer must not be reported as the save reply"
+  if [ -n "$verb" ]; then
+    assert_not_contains "$out" "nudged: sm1" "an actual save reply must settle the gate before timeout"
+  fi
+  if [ "$expected_code" -eq 0 ]; then
+    assert_grep '/exit' "$dir/fake/submitted" "a save receipt must release the restart"
+  else
+    ! grep -Fxq -e /exit -e /quit "$dir/fake/literal" \
+      || fail "a mate without a save receipt received an exit command"
+  fi
 }
 
-test_concurrent_reply_cannot_release_persist_gate() {
-  assert_concurrent_reply_cannot_release_persist_gate 'unrelated request answered' \
-    'nudged: sm1: it did not confirm within 0s'
-  assert_concurrent_reply_cannot_release_persist_gate \
-    'audit complete; save request corr=$FM_PENDING_REPLY_EXISTING_CORR is blocked' \
-    'stopped: sm1: its answer did not confirm that its open work is saved'
-  pass "T9 the persist gate retains its explicitly allocated correlation"
+test_concurrent_reply_does_not_change_persist_outcome() {
+  local cross_reference='audit complete; save request corr=$FM_PENDING_REPLY_EXISTING_CORR is blocked'
+  assert_concurrent_reply_does_not_change_persist_outcome 'unrelated request answered' \
+    'nudged: sm1: it did not confirm within 0s' 3
+  assert_concurrent_reply_does_not_change_persist_outcome "$cross_reference" \
+    'nudged: sm1: it did not confirm within 0s' 3
+  assert_concurrent_reply_does_not_change_persist_outcome "$cross_reference" \
+    'restarted: sm1 (claude)' 0 done 'Saved all open work.'
+  assert_concurrent_reply_does_not_change_persist_outcome "$cross_reference" \
+    'stopped: sm1: it answered that its open work is not saved: task store refused the write' \
+    3 blocked 'task store refused the write'
+  pass "T9 an unrelated reply cannot release or mask the save request's own outcome"
 }
 
 # --- T10: one unanswered mate does not hold a confirmed mate behind it -------
@@ -1167,7 +1179,7 @@ test_remote_exit_timeout_keeps_first_diagnostic
 test_unreachable_host_is_reported_unknown
 test_slow_exit_dialog_observation_does_not_block_restart
 test_slow_local_exit_dialog_observation_does_not_block_restart
-test_concurrent_reply_cannot_release_persist_gate
+test_concurrent_reply_does_not_change_persist_outcome
 test_persist_waits_are_polled_together
 test_post_stop_failure_is_reported_unreached
 test_lost_lifecycle_enter_cannot_complete_restart

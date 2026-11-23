@@ -182,7 +182,9 @@ report_unreached() {  # <id> <reason>
 # re-read message on top of the answer it just gave.
 release_or_stop() {  # <array-index>
   local i=$1 why
-  fm_secondmate_persist_outcome "$STATE" "${CORR[i]}"
+  fm_secondmate_persist_outcome "$STATE" "${CORR[i]}" || return 1
+  fm_pending_reply_try_resolve "$STATE" "${CORR[i]}" || true
+  pending_count=$((pending_count - 1))
   if [ "$FM_SECONDMATE_PERSIST_OUTCOME" = saved ]; then
     launch_restart "$i"
     return
@@ -399,10 +401,8 @@ while [ "$((pending_count + restart_active_count))" -gt 0 ]; do
   # expired mate must not hold an already-confirmed mate behind its fallback.
   i=0
   while [ "$i" -lt "${#IDS[@]}" ]; do
-    if [ "${PLAN[i]}" = persisted-pending ] \
-      && fm_pending_reply_try_resolve "$STATE" "${CORR[i]}"; then
-      pending_count=$((pending_count - 1))
-      release_or_stop "$i"
+    if [ "${PLAN[i]}" = persisted-pending ]; then
+      release_or_stop "$i" || true
     fi
     i=$((i + 1))
   done
@@ -415,10 +415,7 @@ while [ "$((pending_count + restart_active_count))" -gt 0 ]; do
     if [ "$now" -ge "${DEADLINE[i]}" ]; then
       # A reply can land after the fleet-wide resolution pass. Recheck at the
       # timeout decision so an answer already on disk wins over the fallback.
-      if fm_pending_reply_try_resolve "$STATE" "${CORR[i]}"; then
-        pending_count=$((pending_count - 1))
-        release_or_stop "$i"
-      else
+      if ! release_or_stop "$i"; then
         fall_back_to_nudge "${IDS[$i]}" \
           "it did not confirm within ${PERSIST_WAIT}s that its open work is written down, so its conversation was not spent"
         PLAN[i]="done"

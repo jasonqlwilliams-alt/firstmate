@@ -21,9 +21,10 @@ A running agent holds `AGENTS.md` and every skill it has already loaded frozen f
 A re-read cannot substitute: it appends a second copy of the mate's own job description with no defined precedence, and it cannot reach a skill that is already loaded.
 Replacing the agent is also the only thing that re-resolves the launch-time wiring - turn-end hooks, harness flags, per-harness feature switches - which the mate froze when it started and which nothing on disk describes.
 
-That is why **every live second mate is restarted after a successful update, including one that was already on the target commit.**
+That is why **every eligible live second mate is considered for restart after a successful update, including one that was already on the target commit.**
 Launch-time wiring is not derivable from a file diff, so an unchanged tracked surface is not evidence the running agent is already on the current behavior.
-The only live mates that do not restart are the ones whose home the update pass had to skip, and the ones whose runtime cannot prove a restart; the updater keeps both cases honest and neither is reported as a reload.
+A skipped home or a runtime that cannot prove a restart can leave a live mate on its old wiring.
+An eligible mate must confirm that it saved its open work before its agent can be restarted.
 
 **One-time rollout note:** the update that carries this change is still executed by the previous release, which restarts only the mates whose `AGENTS.md` or `.agents/skills/` moved on that pass. After it completes, run `bin/fm-secondmate-restart.sh <fm-id>...` once with every live second mate ID, not only the ones that release named; later updates follow the normal flow below.
 
@@ -48,7 +49,7 @@ This touches only the firstmate repo and its own worktrees, never anything under
    - `nudge-secondmates: fm-<id>...|none`
 
    The two second-mate sets are disjoint and the script owns the split; do not re-derive it.
-   `restart-secondmates:` carries every live mate the pass left on the latest commit, whether it advanced or was already there.
+   `restart-secondmates:` carries the restart-capable live mates the pass left on the latest commit, whether they advanced or were already there.
    A mate reaches neither set only because its home was skipped, because it has no live endpoint recorded here, or because its endpoint was positively classified as dead or missing - none of those need any action from you.
 
 2. **Re-read AGENTS.md if your own instructions changed.**
@@ -56,7 +57,7 @@ This touches only the firstmate repo and its own worktrees, never anything under
    **Read `AGENTS.md` now** (CLAUDE.md is a real `@AGENTS.md` pointer to it) to refresh your operating instructions before doing anything else, so you are acting on the new instructions rather than the stale ones you were started with.
    When it printed `reread-firstmate: no`, nothing changed for you - skip the re-read.
 
-3. **Restart every second mate the updater named.**
+3. **Run the save and restart pass for the named second mates.**
    Pass the whole `restart-secondmates:` list to one command (skip this step entirely when it says `none`):
    ```sh
    FM_HOME=<this-firstmate-home> bin/fm-secondmate-restart.sh <fm-id>...
@@ -65,7 +66,7 @@ This touches only the firstmate repo and its own worktrees, never anything under
    This is automatic and needs no per-mate confirmation from the captain.
    Local and remote mates go in the same list; the command owns the transport, the profile each replacement runs on, and the wait.
 
-   It asks every listed mate first to write down the open work it holds only in its conversation, and restarts one only after that mate's own answer comes back.
+   It asks every listed mate first to write down the open work it holds only in its conversation, and restarts one only after that mate explicitly confirms the save for that request.
    A mate that is mid-turn queues the request behind that turn.
    That is the whole point of the step, so do not work around it: it is what keeps a captain call the mate had formed but never registered from being lost with the conversation.
    Its header owns the request, the bound, and the two knobs that change them.
@@ -77,7 +78,7 @@ This touches only the firstmate repo and its own worktrees, never anything under
    - `unreached: <id>: <reason>` - no safe running outcome could be confirmed, including an ambiguous relaunch result.
    - `stopped: <id>: <reason>` - the mate answered that its open work is not saved, or did not clearly say it is, so its agent and conversation were left running untouched; relay its reason, and restart it later only after it confirms the save.
 
-4. **Send the re-read message to the rest.**
+4. **Send the re-read message to the mates listed for it.**
    For every target on the `nudge-secondmates:` line (do nothing when it says `none`), send the one-line re-read steer:
    ```sh
    FM_HOME=<this-firstmate-home> bin/fm-send.sh <id> 'firstmate was updated to the latest - please re-read your AGENTS.md to pick up the new instructions.'
@@ -103,4 +104,6 @@ This touches only the firstmate repo and its own worktrees, never anything under
   A local or remote second mate gets a tracked-files fast-forward only when its own checkout is safe to advance, and a mate whose home was skipped is not restarted either.
   A restart replaces that mate's agent in the same home and endpoint after its open work is written down; it is never a teardown and never forced.
   Its crewmates keep running in their own endpoints, and every durable record - backlog, held captain calls, unread status, unhandled instructions - is re-presented to the replacement at startup.
-  A restart refused before it is attempted leaves that mate on the re-read path; once a relaunch is attempted, any failed or ambiguous result is reported as unknown rather than attributed to either incarnation.
+  A runtime that cannot prove a restart or a save request that gets no reply can leave a mate on the re-read path.
+  A negative or unclear save reply leaves the mate running with its conversation intact and no re-read message.
+  Once a relaunch is attempted, any failed or ambiguous result is reported as unknown.
