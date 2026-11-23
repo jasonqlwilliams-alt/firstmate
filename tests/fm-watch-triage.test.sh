@@ -2726,11 +2726,89 @@ SH
   pid=$!
   wait_for_exit "$pid" 100 || fail "the unmarked Herdr worker's loss did not wake the watcher: $(cat "$dir/watch.out")"
   pid=''
-  grep -Fxq "stale: $target (the recorded endpoint is gone)" "$dir/watch.out" \
+  grep -Fxq "stale: $target (the recorded endpoint is gone for task z-unmarked)" "$dir/watch.out" \
     || fail "unexpected watcher output: $(cat "$dir/watch.out")"
   assert_present "$state/z-unmarked.missing-endpoint" "loss did not belong to the unmarked worker"
   assert_absent "$state/a-parked.missing-endpoint" "loss was also recorded for the parked worker"
   pass "a park mark leaves a recycled Herdr target eligible for an unmarked worker's loss"
+)
+
+test_shared_pane_keeps_task_loss_and_stale_checks_independent() (
+  local backend order dir state fakebin out pane target lost live loss rows pid=''
+  trap '[ -z "$pid" ] || reap "$pid"' EXIT
+  for backend in herdr zellij; do
+    for order in lost-first live-first; do
+      dir=$(make_case "shared-$backend-$order")
+      state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+      case "$order" in
+        lost-first) lost=a-lost; live=z-live ;;
+        live-first) live=a-live; lost=z-lost ;;
+      esac
+      case "$backend" in
+        herdr)
+          pane=w1:p2
+          cat > "$fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'pane get w1:p2 --session shared') printf '%s\n' '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"current"}}}' ;;
+  'pane read w1:p2 --source recent --lines 200 --session shared') printf '%s\n' 'idle replacement' ;;
+  'agent get w1:p2 --session shared') printf '%s\n' '{"error":{"code":"agent_not_found"}}' ;;
+  *) exit 1 ;;
+esac
+SH
+          ;;
+        zellij)
+          pane=7
+          cat > "$fakebin/zellij" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'list-sessions --short --no-formatting') printf '%s\n' shared ;;
+  '--session shared action list-panes --json') printf '%s\n' '[{"id":7,"tab_id":3,"is_plugin":false}]' ;;
+  '--session shared action list-tabs --json') printf '[{"tab_id":3,"name":"fm-%s"}]\n' "$FM_TEST_LIVE_TASK" ;;
+  '--session shared action dump-screen --pane-id 7') printf '%s\n' 'idle replacement' ;;
+  *) exit 1 ;;
+esac
+SH
+          ;;
+      esac
+      chmod +x "$fakebin/$backend"
+      target="shared:$pane"
+      loss="stale: $target (the recorded endpoint is gone for task $lost)"
+      fm_write_meta "$state/$lost.meta" "window=$target" "backend=$backend" kind=ship \
+        spawn_gen=old herdr_terminal_id=old
+      fm_write_meta "$state/$live.meta" "window=$target" "backend=$backend" kind=ship \
+        spawn_gen=current herdr_terminal_id=current
+
+      if [ "$backend" = herdr ]; then
+        watch_bg "$state" "$fakebin" "$out" env FM_HOME="$dir"
+        pid=$!
+        wait_for_exit "$pid" 150 || fail "$order: the lost Herdr record did not wake the watcher"
+        pid=''
+        grep -Fxq "$loss" "$out" || fail "$order: the Herdr loss named the wrong task: $(cat "$out")"
+        assert_present "$state/$lost.missing-endpoint" "$order: no loss marker for the lost record"
+        ack_stopped_cycle "$state" || fail "$order: could not acknowledge the Herdr loss"
+      fi
+
+      watch_bg "$state" "$fakebin" "$out" env FM_HOME="$dir" FM_TEST_LIVE_TASK="$live" \
+        FM_FAKE_CREW_STATE='state: stopped · source: pane · idle replacement'
+      pid=$!
+      wait_for_exit "$pid" 150 || fail "$backend $order: the live task never reached normal staleness"
+      pid=''
+      grep -Fxq "stale: $target" "$out" || fail "$backend $order: expected ordinary stale: $(cat "$out")"
+      assert_absent "$state/$live.missing-endpoint" "$backend $order: published a loss for the live record"
+      if [ "$backend" = herdr ]; then
+        append_wake "$state" stale "$target" "$loss" || fail "$order: could not requeue the loss"
+        ack_stopped_cycle "$state" "$dir/drained" || fail "$order: could not drain both wake types"
+        for rows in "stale: $target" "$loss"; do
+          awk -F '\t' -v w="$target" -v p="$rows" '$3 == "stale" && $4 == w && $5 == p { n++ } END { exit(n != 1) }' \
+            "$dir/drained" || fail "$order: drain lost the wake keyed to the shared pane: $rows"
+        done
+      else
+        assert_absent "$state/$lost.missing-endpoint" "$order: an ambiguous Zellij replacement was treated as lost"
+      fi
+    done
+  done
+  pass "shared pane ids preserve named Herdr loss, conservative Zellij loss, and live stale checks in either record order"
 )
 
 test_backlog_hold_suppresses_only_an_agentless_lane() {
@@ -5632,6 +5710,7 @@ test_parked_retained_copy_suppresses_endpoint_loss || exit 1
 test_park_wait_stops_when_home_is_retired || exit 1
 test_park_refuses_redirected_records || exit 1
 test_parked_herdr_endpoint_does_not_hide_recycled_target_loss || exit 1
+test_shared_pane_keeps_task_loss_and_stale_checks_independent || exit 1
 test_backlog_hold_suppresses_only_an_agentless_lane
 test_absorbed_replacement_wait_does_not_inherit_the_old_throttle
 test_live_declared_wait_churn_honors_the_resurface_throttle

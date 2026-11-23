@@ -2445,6 +2445,25 @@ fm_backend_herdr_terminal_id_valid() {
   case "${1:-}" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
 }
 
+# Polling needs endpoint identity even when the pane's agent is unreadable.
+fm_backend_herdr_recorded_endpoint_state() {  # <target>
+  local target=$1 identity
+  fm_backend_herdr_parse_target "$target" || { printf 'unreadable'; return 0; }
+  identity=$(fm_backend_herdr_task_identity_state "$target")
+  case "$identity" in
+    match) printf 'present' ;;
+    mismatch) printf 'replaced' ;;
+    missing) printf 'missing' ;;
+    *)
+      if [ "$(fm_backend_herdr_server_running_state "$FM_BACKEND_HERDR_SESSION")" = stopped ]; then
+        printf 'missing'
+      else
+        printf 'unreadable'
+      fi
+      ;;
+  esac
+}
+
 # Preserve the secondmate recovery classifier's existing vocabulary.
 fm_backend_herdr_pane_home_state() {  # <session> <pane> <expected-home>
   local state

@@ -64,8 +64,8 @@
 #                          for human inspection only - never an automatic
 #                          interrupt, signal, or restart of the worker or its
 #                          tool process.
-#   stale: <window> (the recorded endpoint is gone)
-#                          reportable loss of the recorded local endpoint;
+#   stale: <window> (the recorded endpoint is gone [for task <task>])
+#                          reportable loss of the recorded local endpoint
 #                          see docs/watcher-continuity.md#recorded-endpoint-loss
 #   stale: <window> (unread firstmate instruction: ...)
 #                          the steering-inbox ladder spent its delivery-attempt
@@ -1140,21 +1140,21 @@ clear_pause_tracking() {  # <window-key>
   clear_stale_hash_tracking "$key"
 }
 
-report_missing_endpoint() {  # <backend> <window> <meta> <window-key> <marker>
-  local backend=$1 win=$2 meta=$3 key=$4 marker=$5 state incarnation lock reason status=0
+report_missing_endpoint() {  # <backend> <window> <task> <window-key>
+  local backend=$1 win=$2 task=$3 key=$4 state incarnation lock reason status=0
+  local meta="$STATE/$task.meta" marker="$STATE/$task.missing-endpoint"
   [ -z "$(fm_meta_get "$meta" remote_host)" ] || return 0
   incarnation=$(fm_backend_endpoint_incarnation "$meta") || return 0
   case "$incarnation" in "$backend:$win"$'\t'*) ;; *) return 0 ;; esac
-  state=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
-    fm_backend_agent_state "$backend" "$win" 2>/dev/null) || return 0
-  [ "$state" = missing ] || return 0
+  state=$(fm_backend_recorded_endpoint_state "$backend" "$win" "$meta" 2>/dev/null) || return 0
+  case "$state" in missing|replaced) ;; *) return 0 ;; esac
   lock=$(fm_meta_lock_path "$meta") || return 0
   fm_lock_try_acquire "$lock" || return 0
   if [ "$incarnation" != "$(fm_backend_endpoint_incarnation "$meta")" ]; then
     fm_lock_release "$lock"
     return 0
   fi
-  clear_pause_tracking "$key"
+  [ "$state" != missing ] || clear_pause_tracking "$key"
   # Leave a reused target eligible for an unmarked task's loss check.
   if fm_backend_endpoint_parked_retained "$meta"; then
     fm_lock_release "$lock"
@@ -1167,11 +1167,22 @@ report_missing_endpoint() {  # <backend> <window> <meta> <window-key> <marker>
     fm_lock_release "$lock"
     return 0
   fi
-  reason="stale: $win ($FM_RECORDED_ENDPOINT_GONE)"
+  case "$backend" in
+    herdr|zellij) reason="stale: $win ($FM_RECORDED_ENDPOINT_GONE for task $task)" ;;
+    *) reason="stale: $win ($FM_RECORDED_ENDPOINT_GONE)" ;;
+  esac
   { fm_wake_append stale "$win" "$reason" && printf '%s\n' "$incarnation" > "$marker"; } || status=1
   fm_lock_release "$lock"
   [ "$status" -eq 0 ] || exit 1
   wake "$reason"
+}
+
+clear_undeclared_pause_tracking() {  # <window-key> <window> <task> <last-status-line>
+  local key=$1 win=$2 task=$3 last=$4
+  if [ -e "$STATE/.paused-$key" ] && ! status_is_paused_or_captain_held "$last" \
+    && ! task_hold_has_no_agent "$win" "$task"; then
+    clear_pause_tracking "$key"
+  fi
 }
 
 # Reconcile a declared pause, captain-held status, or active captain backlog hold
@@ -2319,17 +2330,19 @@ EOF
     if [ "$backend" = herdr ]; then
       fm_backend_source herdr || continue
       herdr_meta=$(fm_backend_herdr_matching_meta "$w" "$STATE") || herdr_meta=
-      [ -z "$herdr_meta" ] || [ "$herdr_meta" = "$meta" ] || continue
     fi
-    case "$seen" in *"|$w|"*) continue ;; esac
+    case "$backend" in
+      herdr|zellij) ;; # Only a verified capture can claim this pane for stale tracking.
+      *) case "$seen" in *"|$w|"*) continue ;; esac ;;
+    esac
     kind=$(fm_meta_get "$meta" kind)
     key=$(window_key "$w")
     last=$(last_status_line "$STATE/$task.status")
-    if ! status_is_paused_or_captain_held "$last" \
-      && ! task_hold_has_no_agent "$w" "$task" \
-      && [ -e "$STATE/.paused-$key" ]; then
-      clear_pause_tracking "$key"
-    fi
+    case "$backend" in
+      herdr) [ "$herdr_meta" != "$meta" ] || clear_undeclared_pause_tracking "$key" "$w" "$task" "$last" ;;
+      zellij) ;; # The record's tab label is checked during capture.
+      *) clear_undeclared_pause_tracking "$key" "$w" "$task" "$last" ;;
+    esac
     # An idle secondmate endpoint is healthy by design, so only a status-declared
     # wait admits a mate to the pane-stale path. The shared predicate includes
     # a declared `captain-held` status. A hold recorded only
@@ -2337,21 +2350,22 @@ EOF
     # this guard: reaching it would require backlog reads for windows this gate
     # deliberately skips, putting that read on the ordinary poll hot path.
     if [ "$kind" = secondmate ] && ! status_is_paused_or_captain_held "$last"; then
-      seen="$seen|$w|"
+      case "$backend" in herdr|zellij) ;; *) seen="$seen|$w|" ;; esac
       continue
     fi
     missing_marker="$STATE/$task.missing-endpoint"
-    # Herdr capture requires a unique live binding. A closed pane cannot
-    # satisfy that guard, but the recovery classifier can confirm its loss.
-    if { [ "$backend" = herdr ] && [ -z "$herdr_meta" ]; } \
+    # Check loss for this record even if another task captured the same pane.
+    if { [ "$backend" = herdr ] && [ "$herdr_meta" != "$meta" ]; } \
       || ! tail40=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
         fm_backend_capture "$backend" "$w" 40 "fm-$task" 2>/dev/null); then
-      report_missing_endpoint "$backend" "$w" "$meta" "$key" "$missing_marker" || continue
-      seen="$seen|$w|"
+      report_missing_endpoint "$backend" "$w" "$task" "$key" || continue
+      case "$backend" in herdr|zellij) ;; *) seen="$seen|$w|" ;; esac
       continue
     fi
-    seen="$seen|$w|"
     [ ! -e "$missing_marker" ] || rm -f "$missing_marker"
+    case "$seen" in *"|$w|"*) continue ;; esac
+    seen="$seen|$w|"
+    [ "$backend" != zellij ] || clear_undeclared_pause_tracking "$key" "$w" "$task" "$last"
     h=$(printf '%s' "$tail40" | hash_pane)
     hf="$STATE/.hash-$key"
     cf="$STATE/.count-$key"
@@ -2395,7 +2409,7 @@ EOF
             printf '%s' "$h" > "$sf"
             wake "stale: $w"
           fi
-        elif stale_is_terminal "$w" "$STATE"; then
+        elif stale_is_terminal "$w" "$STATE" "$task"; then
           # The log's last line is captain-relevant - but that alone is not
           # proof the crew is actually done: a crew's own status log gets no
           # new entry once firstmate hands it to a no-mistakes validation

@@ -1183,6 +1183,25 @@ fm_backend_agent_state() {  # <backend> <target> [<expected-home>]
   esac
 }
 
+# Polling distinguishes a missing pane from a verified replacement. Only
+# physical absence lets the watcher clear the shared pane's stale state.
+fm_backend_recorded_endpoint_state() {  # <backend> <target> <meta>
+  local backend=$1 target=$2 meta=$3
+  fm_backend_source "$backend" || { printf 'unreadable'; return 0; }
+  case "$backend" in
+    herdr) FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_herdr_recorded_endpoint_state "$target" ;;
+    zellij) fm_backend_zellij_recorded_endpoint_state "$target" ;;
+    tmux)
+      case "$(fm_backend_tmux_agent_state "$target")" in
+        missing) printf 'missing' ;;
+        alive|dead|ambiguous) printf 'present' ;;
+        *) printf 'unreadable' ;;
+      esac
+      ;;
+    *) printf 'unreadable' ;;
+  esac
+}
+
 # Backward-compatible three-state view for existing callers. An
 # authoritatively missing endpoint is confidently not a live agent, while every
 # ambiguous, unreadable, or unverified result stays unknown.

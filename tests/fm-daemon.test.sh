@@ -854,6 +854,42 @@ test_handle_wake_paused_records_pause_marker() {
   pass "handle_wake on a paused stale records a pause marker, drops the wedge marker, and does not escalate"
 }
 
+test_named_endpoint_loss_preserves_the_live_tasks_tracking() {
+  local dir state win watcher_key reason lost live order
+  dir=$(make_supercase named-endpoint-loss)
+  win=shared:w1:p2
+  watcher_key=$(printf '%s' "$win" | tr '.:/' '___')
+  for order in lost-first live-first; do
+    state="$dir/$order"; mkdir "$state"
+    case "$order" in
+      lost-first) lost=a-lost; live=z-live ;;
+      live-first) lost=z-lost; live=a-live ;;
+    esac
+    fm_write_meta "$state/$live.meta" "window=$win" backend=herdr kind=ship spawn_gen=current
+    fm_write_meta "$state/$lost.meta" "window=$win" backend=herdr kind=ship spawn_gen=old
+    printf 'herdr:%s\told\n' "$win" > "$state/$lost.missing-endpoint"
+    date +%s > "$state/.subsuper-paused-$lost"
+    date +%s > "$state/.subsuper-paused-$live"
+    date +%s > "$state/.stale-since-$watcher_key"
+    reason="$win (the recorded endpoint is gone for task $lost)"
+    FM_STATE_OVERRIDE="$state" handle_wake "stale: $reason" "$state"
+    [ "$(cat "$state/.subsuper-escalations")" = "$reason" ] || fail "the loss escalation did not name its task"
+    [ ! -e "$state/.subsuper-paused-$lost" ] || fail "the lost record retained its daemon pause"
+    [ -e "$state/.subsuper-paused-$live" ] || fail "the loss cleared the live record's daemon pause"
+    printf 'paused: waiting\n' > "$state/$lost.status"
+    printf 'paused: waiting\n' > "$state/$live.status"
+    migrate_watcher_pause_markers "$state"
+    [ ! -e "$state/.subsuper-paused-$lost" ] || fail "housekeeping restored the lost record's daemon pause"
+    [ -e "$state/.subsuper-paused-$live" ] || fail "housekeeping cleared the live record's daemon pause"
+    [ -e "$state/.stale-since-$watcher_key" ] || fail "the loss cleared the live pane's stale timer"
+    fm_write_meta "$state/$lost.meta" "window=$win" backend=herdr kind=ship spawn_gen=relaunched
+    date +%s > "$state/.subsuper-paused-$lost"
+    FM_STATE_OVERRIDE="$state" handle_wake "stale: $reason" "$state"
+    [ -e "$state/.subsuper-paused-$lost" ] || fail "the earlier loss cleared the relaunched record's pause"
+  done
+  pass "named endpoint loss escalates the lost record without clearing the replacement's tracking"
+}
+
 test_handle_wake_paused_signal_records_pause_marker() {
   local dir state key win
   dir=$(make_supercase handle-paused-signal)
@@ -2852,6 +2888,7 @@ test_stale_actionable_wait_escalates_and_keeps_pause_cadence
 test_stale_paused_classifies_pause
 test_stale_captain_held_classifies_pause
 test_handle_wake_paused_records_pause_marker
+test_named_endpoint_loss_preserves_the_live_tasks_tracking
 test_handle_wake_paused_signal_records_pause_marker
 test_handle_wake_terminal_signal_clears_pause_tracking
 test_housekeeping_migrates_watcher_pause_marker

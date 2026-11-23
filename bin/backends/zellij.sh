@@ -286,6 +286,28 @@ fm_backend_zellij_pane_exists() {  # <session> <pane_id>
     | jq -e --argjson p "$pane_id" '[.[]? | select(.id == $p and .is_plugin == false)] | length > 0' >/dev/null 2>&1
 }
 
+# A successful, well-formed inventory can prove physical absence. A terminal
+# at the recorded numeric id may be a replacement, and tab labels alone
+# cannot establish that the original endpoint was lost.
+fm_backend_zellij_recorded_endpoint_state() {  # <target>
+  local panes
+  if ! fm_backend_zellij_parse_target "$1" \
+    || ! fm_backend_endpoint_atom_valid "$FM_BACKEND_ZELLIJ_SESSION" \
+    || [[ ! "$FM_BACKEND_ZELLIJ_PANE" =~ ^(0|[1-9][0-9]*)$ ]] \
+    || ! fm_backend_zellij_session_exists "$FM_BACKEND_ZELLIJ_SESSION" \
+    || ! panes=$(fm_backend_zellij_cli "$FM_BACKEND_ZELLIJ_SESSION" action list-panes --json 2>/dev/null); then
+    printf 'unreadable'
+    return 0
+  fi
+  printf '%s' "$panes" | jq -ers --arg pane "$FM_BACKEND_ZELLIJ_PANE" '
+    select(length == 1) | .[0] | select(type == "array")
+    | select(all(.[]; (.id | type) == "number" and (.id >= 0 and .id == (.id | floor))
+        and (.is_plugin | type) == "boolean"))
+    | select(all(.[]; .is_plugin or (.id | tostring) != $pane))
+    | "missing"
+  ' 2>/dev/null || printf 'unreadable'
+}
+
 # fm_backend_zellij_tab_matches_label: does <tab_id> in <session> carry the
 # tab name firstmate expects for the caller-facing task label <label>?
 # Checks the home-scoped, tagged title first (fm_backend_zellij_scoped_title

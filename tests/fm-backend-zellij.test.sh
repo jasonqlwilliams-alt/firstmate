@@ -585,6 +585,29 @@ test_capture_fails_when_session_absent() {
   pass "fm_backend_zellij_capture: fails when the target session is not listed as active (session_exists pre-check)"
 }
 
+test_recorded_endpoint_state_requires_positive_absence() {
+  local dir fb output
+  dir="$TMP_ROOT/recorded-presence"; mkdir -p "$dir/responses"
+  fb=$(make_zellij_fakebin "$dir")
+  zellij_pane_response "$dir" 1 8 3
+  zellij_pane_response "$dir" 2 7 3
+  printf '[{"id":"7","is_plugin":false}]\n' > "$dir/responses/3.out"
+  printf '[]\n' > "$dir/responses/4.out"
+  printf '1\n' > "$dir/responses/4.exit"
+
+  output=$(PATH="$fb:$PATH" FM_ZELLIJ_LOG="$dir/log" FM_ZELLIJ_RESPONSES="$dir/responses" \
+    FM_ZELLIJ_SESSION_LIST=firstmate bash -c '
+      . "$1"
+      for probe in absent reused malformed failed; do
+        printf "%s: %s\n" "$probe" "$(fm_backend_recorded_endpoint_state zellij firstmate:7 unused.meta)"
+      done
+      printf "missing session: %s\n" "$(fm_backend_recorded_endpoint_state zellij other:7 unused.meta)"
+    ' _ "$ROOT/bin/fm-backend.sh")
+  [ "$output" = $'absent: missing\nreused: unreadable\nmalformed: unreadable\nfailed: unreadable\nmissing session: unreadable' ] \
+    || fail "unexpected Zellij endpoint loss verdicts: $output"
+  pass "Zellij reports physical pane absence only from a successful, well-formed inventory"
+}
+
 test_send_key_normalizes_and_targets_pane() {
   local dir fb
   dir="$TMP_ROOT/sendkey"; mkdir -p "$dir/responses"
@@ -1325,6 +1348,7 @@ test_capture_small_reads_use_viewport_and_trim
 test_capture_large_reads_use_full_scrollback_and_trim
 test_capture_fails_when_pane_absent
 test_capture_fails_when_session_absent
+test_recorded_endpoint_state_requires_positive_absence
 test_send_key_normalizes_and_targets_pane
 test_send_literal_uses_paste_separator_for_option_shaped_text
 test_send_text_line_clears_partial_input_when_enter_fails

@@ -488,9 +488,10 @@ stale_marker_record() {  # <window> <state>  — create if absent
   [ -e "$marker" ] || _now > "$marker"
 }
 
-stale_marker_remove() {  # <window> <state>
-  local win=$1 state=$2 key
-  key=$(_stale_key "$(window_to_task "$win" "$state")")
+stale_marker_remove() {  # <window> <state> [task]
+  local win=$1 state=$2 task=${3:-} key
+  [ -n "$task" ] || task=$(window_to_task "$win" "$state")
+  key=$(_stale_key "$task")
   rm -f "$state/.subsuper-stale-$key"
 }
 
@@ -501,9 +502,10 @@ stale_marker_remove() {  # <window> <state>
 # per window. Recording is create-if-absent so the timestamp is stable across a
 # churny pane (many distinct stale hashes map to one marker), keeping the cadence
 # hash-immune.
-pause_marker_record() {  # <window> <state> - create if absent
-  local win=$1 state=$2 key marker
-  key=$(_stale_key "$(window_to_task "$win" "$state")")
+pause_marker_record() {  # <window> <state> [task] - create if absent
+  local win=$1 state=$2 task=${3:-} key marker
+  [ -n "$task" ] || task=$(window_to_task "$win" "$state")
+  key=$(_stale_key "$task")
   marker="$state/.subsuper-paused-$key"
   [ -e "$marker" ] || _now > "$marker"
 }
@@ -514,32 +516,46 @@ pause_marker_remove() {  # <window> <state>
   rm -f "$state/.subsuper-paused-$key" "$state/.subsuper-pause-until-due-$key"
 }
 
-clear_pause_tracking() {  # <window> <state>
-  local win=$1 state=$2 task key watcher_key
-  task=$(window_to_task "$win" "$state")
+clear_task_pause_tracking() {  # <task> <state>
+  local task=$1 state=$2 key
   key=$(_stale_key "$task")
+  rm -f "$state/.subsuper-paused-$key" "$state/.subsuper-pause-until-due-$key" "$state/.subsuper-stale-$key"
+}
+
+clear_pause_tracking() {  # <window> <state> [task]
+  local win=$1 state=$2 task=${3:-} watcher_key
+  [ -n "$task" ] || task=$(window_to_task "$win" "$state")
   watcher_key=$(_stale_key "$win")
-  rm -f "$state/.subsuper-paused-$key" "$state/.subsuper-pause-until-due-$key" "$state/.subsuper-stale-$key" \
-    "$state/.paused-$watcher_key" "$state/.paused-rechecked-$watcher_key" "$state/.paused-resurfaced-$watcher_key" \
+  clear_task_pause_tracking "$task" "$state"
+  rm -f "$state/.paused-$watcher_key" "$state/.paused-rechecked-$watcher_key" "$state/.paused-resurfaced-$watcher_key" \
     "$state/.stale-$watcher_key" "$state/.stale-since-$watcher_key" "$state/.wedge-escalations-$watcher_key" \
     "$state/.writing-since-$watcher_key" "$state/.writing-resurfaced-$watcher_key"
 }
 
-reconcile_pause_tracking() {  # <window> <state> <last-status-line>
-  local win=$1 state=$2 last=$3 task key marker watcher_key incarnation
-  task=$(window_to_task "$win" "$state")
+task_has_current_endpoint_loss() {  # <task> <state>
+  local task=$1 state=$2 incarnation marker="$2/$1.missing-endpoint"
+  case "$task" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  [ -s "$marker" ] \
+    && incarnation=$(fm_backend_endpoint_incarnation "$state/$task.meta") \
+    && [ "$incarnation" = "$(cat "$marker" 2>/dev/null)" ]
+}
+
+reconcile_pause_tracking() {  # <window> <state> <last-status-line> [task]
+  local win=$1 state=$2 last=$3 task=${4:-} key marker watcher_key
+  [ -n "$task" ] || task=$(window_to_task "$win" "$state")
   key=$(_stale_key "$task")
   marker="$state/.subsuper-paused-$key"
   watcher_key=$(_stale_key "$win")
-  if [ -s "$state/$task.missing-endpoint" ] \
-    && incarnation=$(fm_backend_endpoint_incarnation "$state/$task.meta") \
-    && [ "$incarnation" = "$(cat "$state/$task.missing-endpoint" 2>/dev/null)" ]; then
-    clear_pause_tracking "$win" "$state"
+  if task_has_current_endpoint_loss "$task" "$state"; then
+    case "$(fm_backend_of_meta "$state/$task.meta")" in
+      herdr|zellij) clear_task_pause_tracking "$task" "$state" ;;
+      *) clear_pause_tracking "$win" "$state" "$task" ;;
+    esac
   elif status_is_paused_or_captain_held "$last"; then
-    stale_marker_remove "$win" "$state"
-    pause_marker_record "$win" "$state"
+    stale_marker_remove "$win" "$state" "$task"
+    pause_marker_record "$win" "$state" "$task"
   elif [ -e "$marker" ] || [ -e "$state/.paused-$watcher_key" ]; then
-    clear_pause_tracking "$win" "$state"
+    clear_pause_tracking "$win" "$state" "$task"
   fi
 }
 
@@ -554,7 +570,7 @@ migrate_watcher_pause_markers() {  # <state>
     watcher_key=$(_stale_key "$win")
     last=$(last_status_line "$state/$task.status")
     if status_is_paused_or_captain_held "$last" || [ -e "$state/.subsuper-paused-$key" ] || [ -e "$state/.paused-$watcher_key" ]; then
-      reconcile_pause_tracking "$win" "$state" "$last"
+      reconcile_pause_tracking "$win" "$state" "$last" "$task"
     fi
   done
 }
@@ -570,7 +586,7 @@ sync_pause_markers_from_signal() {  # <state> <signal files>
     task=$(basename "$f"); task=${task%.status}
     win=$(window_for_task "$task" "$state" 2>/dev/null || true)
     [ -n "$win" ] || continue
-    reconcile_pause_tracking "$win" "$state" "$last"
+    reconcile_pause_tracking "$win" "$state" "$last" "$task"
   done
 }
 
@@ -1361,6 +1377,16 @@ handle_wake() {  # <reason> <state>
               kind=stale; arg=${reason#stale: }
               decision="escalate|$arg"
               arg=${arg%" ($FM_RECORDED_ENDPOINT_GONE)"} ;;
+    stale:\ *" ($FM_RECORDED_ENDPOINT_GONE for task "*")")
+              arg=${reason#stale: }
+              task=${arg##*" ($FM_RECORDED_ENDPOINT_GONE for task "}
+              task=${task%)}
+              # The watcher owns shared pane tracking. The named record can
+              # be gone even though another worker still owns this pane.
+              if task_has_current_endpoint_loss "$task" "$state"; then
+                clear_task_pause_tracking "$task" "$state"
+              fi
+              decision="escalate|$arg" ;;
     stale:*)  kind=stale; arg="${reason#stale: }"; stale_detail="${arg#"$arg"}"
               case "$arg" in *" ("*) stale_detail="${arg#*" ("}"; arg="${arg%% \(*}" ;; esac
               task=$(window_to_task "$arg" "$state")

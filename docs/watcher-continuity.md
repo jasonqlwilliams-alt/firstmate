@@ -58,16 +58,19 @@ The turn-end guard remains the final backstop rather than the normal continuity 
 
 ## Recorded endpoint loss
 
-When pane polling cannot read a local task's recorded endpoint and the backend confirms it is missing, the watcher clears pause tracking.
-The watcher queues `stale: <window> (the recorded endpoint is gone)` once for that recorded endpoint unless a matching [retained-copy park mark](#parking-a-task-with-its-copy-retained) suppresses the report.
-tmux and Herdr supply the required missing verdict, and a secondmate enters this poll path only while its latest status declares `paused:` or `captain-held:`.
-The report is keyed to the recorded backend, target, and spawn generation, so a relaunch can report a fresh loss even when it reuses the target.
-A successful capture also re-arms the report, and teardown keeps the loss record until it retires the task record.
+When pane polling cannot read a local task's recorded endpoint and the backend confirms it is gone, the watcher queues `stale: <window> (the recorded endpoint is gone)` unless a matching [retained-copy park mark](#parking-a-task-with-its-copy-retained) suppresses the report.
+Herdr and Zellij check loss for each task record even when multiple records share the window key, and include `for task <task>` in the reason.
+Herdr uses the recorded terminal identity to confirm replacement, while Zellij requires a successful pane inventory that omits the terminal id and leaves a possible replacement unreadable.
+Physical absence clears the pane's pause tracking.
+A verified replacement leaves the current pane's tracking to its live task.
+A secondmate enters the loss path only while its latest status declares `paused:` or `captain-held:`.
+The report is keyed to the task record's backend, target, and spawn generation, so a relaunch can report a fresh loss even when it reuses the target.
+A successful capture for that task re-arms its report, and teardown keeps the loss record until it retires the task record.
 The wake keeps its window key for routing and has a separate deduplication identity, so the drain presents both the endpoint loss and any ordinary stale wake for that window, collapsing repeated loss rows to one.
 After handling both wakes, use the drain's [printed acknowledgement](#recovery-episode-acknowledgement) to retire them.
 Where the away daemon runs, it routes the loss to its escalation digest and keeps pause tracking cleared while the loss still matches the current endpoint, even if the wait remains declared.
 
-The [backend verification record](verification/runtime-backends.md#recorded-endpoint-loss) covers tmux and Herdr.
+The [backend verification record](verification/runtime-backends.md#recorded-endpoint-loss) covers tmux, Herdr, and Zellij.
 The [watcher triage regressions](../tests/fm-watch-triage.test.sh) exercise both wake sequence orders, marking, and clearing.
 
 ### Parking a task with its copy retained

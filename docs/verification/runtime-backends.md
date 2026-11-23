@@ -1145,10 +1145,11 @@ Polling remained active and is covered as the fallback for capability, connect, 
 ### Recorded endpoint loss
 
 On 2026-11-21 on Linux x86_64, `bin/fm-test-run.sh tests/fm-watch-triage.test.sh` with tmux 3.7c verified a single stale wake per recorded incarnation for unmarked ordinary and captain-held windows, and cleared the held window's pause tracking on closure.
-The same poll path was verified in an isolated Herdr 0.9.5 lab with a task record bound to a shell pane.
-After `bin/fm-herdr-lab.sh run "$session" pane close "$pane"`, `bin/fm-watch.sh` printed `stale: <window> (the recorded endpoint is gone)` and queued one stale wake.
-After `bin/fm-wake-drain.sh` and the printed acknowledgement command, the re-armed watcher stayed quiet on later polls.
+On 2026-11-22, `bin/fm-herdr-lab.sh teardown "$session"` and `bin/fm-herdr-lab.sh provision "$session"` recycled a Herdr 0.9.5 pane id with a distinct terminal id.
+With both task records present, `bin/fm-watch.sh` printed `stale: <window> (the recorded endpoint is gone for task <lost-task>)` in both record orders.
+After `bin/fm-wake-drain.sh` and its printed acknowledgement command, the re-armed watcher printed `stale: <window>` for the idle replacement.
 Guarded Herdr teardown verified the unchanged default-session tripwire.
+On 2026-11-22, `bin/fm-test-run.sh tests/fm-backend-zellij.test.sh` reported `ok - Zellij reports physical pane absence only from a successful, well-formed inventory` using CLI fixtures for the Zellij 0.44.0 adapter.
 [`tests/fm-wake-daemon-lifecycle-e2e.test.sh`](../../tests/fm-wake-daemon-lifecycle-e2e.test.sh) covers the away-daemon escalation and later pause reconciliation.
 [`tests/fm-teardown.test.sh`](../../tests/fm-teardown.test.sh) covers retaining the loss record after failed task retirement and removing it on a successful retry.
 
