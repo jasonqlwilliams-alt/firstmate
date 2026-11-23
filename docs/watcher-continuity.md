@@ -74,7 +74,7 @@ The [watcher triage regressions](../tests/fm-watch-triage.test.sh) exercise both
 
 After deliberately closing a local ordinary task's worker window and retaining its isolated copy, use the `mark` action in [`fm-park-retained.sh`](../bin/fm-park-retained.sh) for that task.
 Marking requires the backend to confirm that the recorded endpoint is missing, and both park actions leave the copy and its work intact.
-While the mark binds the current incarnation, the session-start fleet digest prints that task's gone endpoint as parked with its copy retained rather than dead.
+The session-start fleet digest shows a task as parked with its copy retained when the mark binds the current incarnation and the endpoint is missing or unreadable.
 Secondmates follow the reporting rule above.
 A loss wake queued before marking remains pending until [normal wake acknowledgement](#per-actor-acknowledgement).
 When resuming, use `clear` to remove the mark, including after the worker is running again.

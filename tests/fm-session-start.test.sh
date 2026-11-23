@@ -1352,7 +1352,7 @@ EOF
 }
 
 test_endpoint_liveness_parked_retained() {
-  local rec root home fakebin out id
+  local rec root home fakebin out id base_without_tmux
   rec=$(new_world liveness-parked)
   IFS='|' read -r root home fakebin <<EOF
 $rec
@@ -1394,6 +1394,18 @@ SH
     "unmarked gone endpoint not reported dead"
 
   pass "a parked tmux endpoint takes precedence over its neighbor; stale and unmarked gone endpoints stay dead"
+
+  rm -f "$fakebin/tmux"
+  base_without_tmux=$(fm_test_base_path_sans "$BASE_PATH" tmux) || fail "could not build a PATH without tmux"
+  out=$(run_session_start "$home" "$root" "$fakebin:$base_without_tmux")
+  assert_contains "$out" "endpoint: parked, copy retained (backend=tmux window=fm-sess:fm-mate)" \
+    "the current park mark disappeared when tmux was unavailable"
+  assert_contains "$out" "endpoint: dead (backend=tmux window=fm-sess:stale-window)" \
+    "the unavailable tmux executable made a stale park mark effective"
+  assert_contains "$out" "endpoint: dead (backend=tmux window=fm-sess:dead-window)" \
+    "the unmarked endpoint lost its dead verdict when tmux was unavailable"
+
+  pass "the current park mark remains visible when tmux is unavailable"
 }
 
 test_endpoint_liveness_parked_herdr_stopped_server() {
@@ -1407,7 +1419,10 @@ EOF
   cat > "$fakebin/herdr" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
-  'status --json --session stopped') printf '%s\n' '{"server":{"running":false}}' ;;
+  'status --json --session stopped')
+    [ "${FM_TEST_HERDR_STATUS_UNREADABLE:-0}" = 0 ] || exit 1
+    printf '%s\n' '{"server":{"running":false}}'
+    ;;
   'pane get '*\ --session\ stopped)
     printf '%s\n' '{"error":{"code":"server_not_running"}}' >&2
     exit 1
@@ -1430,6 +1445,14 @@ SH
     "the unmarked Herdr endpoint lost its unreadable identity verdict"
 
   pass "a current Herdr park mark uses the stopped server as proof of absence"
+
+  out=$(FM_TEST_HERDR_STATUS_UNREADABLE=1 run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+  assert_contains "$out" "endpoint: parked, copy retained (backend=herdr window=stopped:p-parked)" \
+    "the current park mark disappeared when the Herdr server status was unreadable"
+  assert_contains "$out" "endpoint: unknown (unreadable identity, backend=herdr window=stopped:p-unmarked)" \
+    "the unmarked endpoint lost its unknown verdict when the Herdr server status was unreadable"
+
+  pass "the current park mark remains visible when Herdr server status is unreadable"
 }
 
 test_endpoint_liveness_herdr() {

@@ -47,8 +47,8 @@
 #                       every state/*.meta, a bounded state/*.status tail,
 #                       the away posture (state/.afk-contract and the legacy
 #                       state/.afk daemon flag), and a cheap per-task
-#                       endpoint-liveness read (a gone endpoint whose current
-#                       park mark matches prints as parked, copy retained):
+#                       endpoint-liveness read (a current park mark prints as
+#                       parked, copy retained for missing or unreadable endpoints):
 #                       read-only, always runs.
 #   7. network checks - the result of the deferred network stage started back at
 #                       step 1, harvested WITHOUT waiting for it.
@@ -845,7 +845,7 @@ for meta in "$STATE"/*.meta; do
     backend=$(fm_backend_of_meta "$meta")
     if fm_backend_endpoint_parked_retained "$meta" &&
         endpoint_state=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_agent_state "$backend" "$target" 2>/dev/null) &&
-        [ "$endpoint_state" = missing ]; then
+        [[ "$endpoint_state" = missing || "$endpoint_state" = unreadable ]]; then
       printf 'endpoint: parked, copy retained (backend=%s window=%s)\n' "$backend" "$window"
     elif FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_target_exists "$backend" "${target:-$window}" "fm-$id"; then
       printf 'endpoint: alive (backend=%s window=%s)\n' "$backend" "$window"
