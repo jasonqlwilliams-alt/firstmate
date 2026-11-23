@@ -37,11 +37,12 @@ _FM_SECONDMATE_RESTART_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # only when fm_secondmate_persist_outcome reads it as saved.
 _FM_SECONDMATE_SAVED_RECEIPT='Saved all open work.'
 fm_secondmate_persist_request() {  # <running-harness>
+  printf 'After saving, reply exactly: done [corr=<request id>]: %s If blocked, report what is unwritten. ' "$_FM_SECONDMATE_SAVED_RECEIPT"
   printf '%s' 'Firstmate was updated and I am about to restart your agent so it comes up on the current instructions and launch-time settings, which drops your conversation but keeps every durable record. Before that, persist the open work you are holding only in this conversation, following the /stow skill'"'"'s "Open-record persistence" section and nothing else from that skill: file a task for each open record that exists only in this conversation, including any captain call you had formed but never registered, and correct any task whose status no longer reflects what you now know. Do NOT run the memory, learnings, or captain-preference sweeps.'
   if [ "$1" = claude ]; then
     printf '%s' ' Also stop every background shell task you started, such as timers or sleep loops, because a running one makes the exit stop at a confirmation that the restart will not answer.'
   fi
-  printf ' If all required open work is written down, reply on your parent channel with done [corr=<request id>]: %s Use the correlation ID from this request and keep the receipt text exact. If any required write failed or was skipped, reply with blocked [corr=<request id>]: <reason> and explain what was left unwritten. Only the exact save receipt lets the restart go ahead.' "$_FM_SECONDMATE_SAVED_RECEIPT"
+  printf '%s' ' Reply on your parent channel using the correlation ID from this request. If any required write failed or was skipped, reply with blocked [corr=<request id>]: <reason> and explain what was left unwritten. Only the exact save receipt lets the restart go ahead.'
 }
 
 # Read the persist answers on <corr_id>'s parent channel. Publishes:
@@ -56,21 +57,14 @@ fm_secondmate_persist_request() {  # <running-harness>
 FM_SECONDMATE_PERSIST_OUTCOME=""
 FM_SECONDMATE_PERSIST_NOTE=""
 fm_secondmate_persist_outcome() {  # <state-dir> <corr_id>
-  local state=$1 corr=$2 rec status_file line header verb corr_pattern reply_metadata
-  local metadata="([[:space:]]+|\[[^][]*\]|[[:space:]]+$FM_PENDING_REPLY_CORR_RE)"
+  local state=$1 corr=$2 rec status_file line header verb reply_token
+  reply_token="\[corr=$corr\]|(^|[[:space:]])corr=$corr([[:space:]]|\[|$)"
   FM_SECONDMATE_PERSIST_OUTCOME=""
   FM_SECONDMATE_PERSIST_NOTE=""
   rec=$(fm_pending_reply_path "$state" "$corr")
   [ -f "$rec" ] || return 1
   status_file=$(fm_pending_reply_get "$rec" parent_status)
   [ -f "$status_file" ] || return 1
-  corr_pattern=$(printf '%s\n' "$corr" | awk '{
-    for (i = 1; i <= length($0); i++) {
-      digit = substr($0, i, 1)
-      printf "[%s%s]", digit, toupper(digit)
-    }
-  }')
-  reply_metadata="^$metadata*([[:space:]]+corr=$corr_pattern|\[corr=$corr_pattern\])$metadata*$"
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       "done [corr=$corr]: $_FM_SECONDMATE_SAVED_RECEIPT"|"done [corr=$corr]: $_FM_SECONDMATE_SAVED_RECEIPT (via-helper)")
@@ -85,14 +79,14 @@ fm_secondmate_persist_outcome() {  # <state-dir> <corr_id>
       ''|[!A-Za-z]*|*[!A-Za-z0-9_-]*) continue ;;
     esac
     header=${line%%:*}
-    [[ "${header#*"$verb"}" =~ $reply_metadata ]] || continue
+    [[ "$header" =~ $reply_token ]] || continue
     FM_SECONDMATE_PERSIST_NOTE=$(status_line_note "$line" | tr -s '[:space:]' ' ')
     case "$verb" in
       blocked|failed|needs-decision) FM_SECONDMATE_PERSIST_OUTCOME=not-saved ;;
       *) FM_SECONDMATE_PERSIST_OUTCOME=unclear ;;
     esac
     return 0
-  done < <(grep -aFi -e "corr=$corr" "$status_file")
+  done < <(grep -aF -e "corr=$corr" "$status_file")
   [ "$FM_SECONDMATE_PERSIST_OUTCOME" = saved ]
 }
 

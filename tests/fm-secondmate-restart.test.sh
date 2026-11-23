@@ -302,7 +302,7 @@ test_usage_includes_all_exit_statuses() {
 
 # --- T1: the persist request is the task subset of /stow, and it gates --------
 test_persist_gates_and_asks_only_for_open_records() {
-  local dir out rc request
+  local dir out rc request recovery
   dir=$(new_case gate)
   add_local_mate "$dir" sm1 pi
   printf 'pi' > "$dir/fake/command"
@@ -333,6 +333,12 @@ test_persist_gates_and_asks_only_for_open_records() {
     "the request must exclude the memory curation half of stow"
   assert_contains "$request" 'done [corr=<request id>]: Saved all open work.' \
     "the delivered request must tell the mate which receipt releases the gate"
+  recovery=$(
+    . "$ROOT/bin/fm-pending-reply-lib.sh"
+    fm_pending_reply_recovery_message "$dir/home/state/pending-replies/"*
+  )
+  assert_contains "$recovery" 'done [corr=<request id>]: Saved all open work.' \
+    "the emitted recovery prompt must preserve the required receipt"
   assert_not_contains "$request" "stop every background shell task" \
     "the running Pi mate must keep its background tasks when the replacement is Claude"
   pass "T1 persist is a gate, and asks for open records and task status only"
@@ -1186,6 +1192,9 @@ test_negative_or_unclear_reply_vetoes_save_receipt() {
   assert_persist_answer_stops_local blocked 'one record was never written' \
     'it answered that its open work is not saved' 'a correction with intervening tags' \
     with-receipt 'blocked [key=save] [source=recovery] [<corr>]'
+  assert_persist_answer_stops_local blocked 'one record was never written' \
+    'it answered that its open work is not saved' 'a correction with brackets inside a source tag' \
+    with-receipt 'blocked [<corr>] [source=retry[2]]'
   assert_persist_answer_stops_local note 'I may have missed a record' \
     'its answer did not confirm that its open work is saved' 'an unclear correction' with-receipt
   pass "a negative or unclear correction vetoes an earlier save receipt"
@@ -1200,16 +1209,23 @@ test_non_utf8_correction_vetoes_save_receipt() {
   pass "a non-UTF-8 correction vetoes an earlier save receipt"
 }
 
-test_tag_first_status_does_not_veto_save_receipt() {
+test_unrelated_headers_do_not_veto_save_receipt() {
   local dir out rc
   dir=$(new_case tag-first)
   add_local_mate "$dir" sm1
   arm_answer "$dir" sm1
+  cat > "$dir/fakebin/openssl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' abcdef0123456789
+SH
+  chmod +x "$dir/fakebin/openssl"
   cat > "$dir/fake/on-doorbell" <<'SH'
 #!/usr/bin/env bash
 corr=${FM_PENDING_REPLY_EXISTING_CORR:-}
 [ -n "$corr" ] || exit 0
 printf '[key=save] blocked corr=%s: still writing\n' "$corr" \
+  >> "$(cat "$FM_FAKE_DIR/answer-status")"
+printf 'blocked [corr=%s]: a different correlation\n' "$(printf '%s' "$corr" | tr 'a-f' 'A-F')" \
   >> "$(cat "$FM_FAKE_DIR/answer-status")"
 SH
   chmod +x "$dir/fake/on-doorbell"
@@ -1218,10 +1234,12 @@ SH
 
   assert_grep '[key=save] blocked corr=' "$dir/home/state/sm1.status" \
     "the tag-first status must be present on the parent channel"
-  expect_code 0 "$rc" "the exact receipt releases the gate despite a tag-first status"$'\n'"$out"
+  assert_grep 'blocked [corr=ABCDEF0123456789]' "$dir/home/state/sm1.status" \
+    "the case-changed reply must be present on the parent channel"
+  expect_code 0 "$rc" "only a reply with the issued correlation and a leading verb can veto the receipt"$'\n'"$out"
   assert_contains "$out" 'restarted: sm1' "the pass must report the restart"
   assert_grep '/exit' "$dir/fake/submitted" "the mate must receive the exit command"
-  pass "a tag-first status does not veto a save receipt"
+  pass "tag-first and case-changed replies do not veto a save receipt"
 }
 
 test_operator_close_does_not_count_as_a_save_reply() {
@@ -1281,7 +1299,7 @@ test_unclear_persist_answer_stops_local_restart
 test_negative_persist_answer_stops_remote_restart
 test_negative_or_unclear_reply_vetoes_save_receipt
 test_non_utf8_correction_vetoes_save_receipt
-test_tag_first_status_does_not_veto_save_receipt
+test_unrelated_headers_do_not_veto_save_receipt
 test_operator_close_does_not_count_as_a_save_reply
 
 echo "# all fm-secondmate-restart tests passed"
