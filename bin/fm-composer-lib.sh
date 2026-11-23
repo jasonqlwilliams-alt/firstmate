@@ -115,8 +115,7 @@
 # idle footer as the only text below the closing rule. Typed text after the
 # glyph is `pending`; anything else - a plain capture, wrapped rows, the feedback
 # survey, extra text below the composer - stays `unknown`, so a caller that
-# needs proof refuses. fm_composer_agy_notice_fits answers whether a line can
-# be typed without wrapping that one row.
+# needs proof refuses. An optional fit check limits a notice to that one row.
 #
 # UNICODE WHITESPACE (issue #1988; open PRs #1995/#2047 target the same
 # defect and #1995's naming is adopted here so the implementations converge):
@@ -642,7 +641,7 @@ fm_composer_classify_content() {  # <bordered> <content> [idle_re] [idle_case] [
 
 # --- The screen classifier ---------------------------------------------------
 #
-# fm_composer_classify_screen <caps> <screen> [cursor_row] [identity]
+# fm_composer_classify_screen <caps> <screen> [cursor_row] [identity] [fit-text]
 #   <caps>       newline-separated key=value capability facts (see header).
 #   <screen>     the captured screen: ANSI-preserving when styled=1, plain
 #                otherwise.
@@ -1303,8 +1302,8 @@ EOF
   fi
 }
 
-fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity]
-  local caps=$1 screen=$2 cy=${3:-} identity=${4:-}
+fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity] [fit-text]
+  local caps=$1 screen=$2 cy=${3:-} identity=${4:-} fit=${5:-}
   local styled=0 cursor=0 has_identity=0 agy=0 kv plain luma content
   # Shadow the ghost ceiling for this capture's harness; read the inherited
   # value before the shadow exists.
@@ -1333,6 +1332,9 @@ EOF
       printf 'unknown'
     elif [ -n "$content" ]; then
       printf 'pending'
+    elif [ -n "$fit" ] && ! _fm_composer_agy_notice_fits \
+      "$(_fm_composer_screen_row "$FM_COMPOSER_SCAN_PI_CLOSE" "$plain")" "$fit"; then
+      printf 'unknown'
     else
       printf 'empty'
     fi
@@ -1440,10 +1442,10 @@ EOF
 # fm_composer_classify_snapshot_no_identity: the verdict for the snapshot on a
 # backend with no agent-identity probe, so an identity-dependent shape (pi's
 # separated pair) stays unknown.
-fm_composer_classify_snapshot_no_identity() {
+fm_composer_classify_snapshot_no_identity() {  # [fit-text]
   local verdict
   verdict=$(fm_composer_classify_screen "$FM_COMPOSER_SNAPSHOT_CAPS" \
-    "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR")
+    "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR" '' "${1:-}")
   [ "$verdict" != need-identity ] || verdict=unknown
   printf '%s' "$verdict"
 }
@@ -1695,24 +1697,15 @@ _fm_composer_agy_content() {  # <screen> <plain-screen> <styled> <cursor-row-or-
   printf '%s' "$row"
 }
 
-# fm_composer_agy_notice_fits: 0 when <text>, typed after agy's `>` glyph,
-# stays on the composer's one row of a proven-empty <screen> without reaching
-# its last column, measured against the closing rule's width. Counting <text>
-# in bytes never undercounts its cells, so the check only errs toward refusing.
-fm_composer_agy_notice_fits() {  # <screen> <text>
-  local plain rule width len
-  plain=$(printf '%s\n' "$1" | fm_composer_strip_ansi)
-  while [[ "$plain" = *$'\n'* ]]; do
-    rule=${plain##*$'\n'}
-    plain=${plain%$'\n'*}
-    fm_composer_normalize_trim_var rule
-    _fm_composer_pi_separator_row "$rule" || continue
-    width=$(printf '%s' "$rule" | LC_ALL=C wc -c)
-    len=$(printf '%s' "$2" | LC_ALL=C wc -c)
-    [ $((len + 2)) -lt $((width / 3)) ]
-    return $?
-  done
-  return 1
+# _fm_composer_agy_notice_fits: 0 when <text>, typed after agy's `>` glyph,
+# stays on one row without reaching the last column of the validated rule.
+# Counting <text> in bytes never undercounts its cells.
+_fm_composer_agy_notice_fits() {  # <closing-rule> <text>
+  local rule=$1 width len
+  fm_composer_normalize_trim_var rule
+  width=$(printf '%s' "$rule" | LC_ALL=C wc -c)
+  len=$(printf '%s' "$2" | LC_ALL=C wc -c)
+  [ $((len + 2)) -lt $((width / 3)) ]
 }
 
 # Positive identification of Codex's initial authentication choice screen.

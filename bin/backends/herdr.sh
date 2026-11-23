@@ -3296,14 +3296,14 @@ fm_backend_herdr_composer_snapshot() {  # <target>
 
 # fm_backend_herdr_composer_classify_snapshot: the herdr composer verdict for
 # the snapshot taken from <target>, which supplies the lazy identity probe.
-fm_backend_herdr_composer_classify_snapshot() {  # <target>
-  local target=$1 cap=$FM_COMPOSER_SNAPSHOT_SCREEN caps=$FM_COMPOSER_SNAPSHOT_CAPS verdict identity
-  verdict=$(fm_composer_classify_screen "$caps" "$cap")
+fm_backend_herdr_composer_classify_snapshot() {  # <target> [fit-text]
+  local target=$1 fit=${2:-} cap=$FM_COMPOSER_SNAPSHOT_SCREEN caps=$FM_COMPOSER_SNAPSHOT_CAPS verdict identity
+  verdict=$(fm_composer_classify_screen "$caps" "$cap" '' '' "$fit")
   if [ "$verdict" = need-identity ]; then
     if ! identity=$(fm_backend_herdr_composer_identity "$target" 2>/dev/null) || [ -z "$identity" ]; then
       identity=probe-absent
     fi
-    verdict=$(fm_composer_classify_screen "$caps" "$cap" '' "$identity")
+    verdict=$(fm_composer_classify_screen "$caps" "$cap" '' "$identity" "$fit")
     [ "$verdict" != need-identity ] || verdict=unknown
   fi
   printf '%s' "$verdict"

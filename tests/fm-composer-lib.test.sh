@@ -159,7 +159,7 @@ CAPS_STYLED=$'styled=1\ncursor=0\nidentity=1\nrows=20'      # herdr
 CAPS_STYLED_NOID=$'styled=1\ncursor=0\nidentity=0\nrows=20' # zellij
 CAPS_PLAIN=$'styled=0\ncursor=0\nidentity=0\nrows=20'       # cmux, orca
 
-# assert_screen <label> <want> <caps> <screen> [cursor] [identity]: one
+# assert_screen <label> <want> <caps> <screen> [cursor] [identity] [fit-text]: one
 # verdict, asserted under the ambient locale AND LC_ALL=C.
 assert_screen() {
   local label=$1 want=$2 out
@@ -357,22 +357,12 @@ test_matrix_agy_composer_is_harness_scoped() {
   [ "$out" = 'zz probe' ] || fail "agy's typed text should extract without its glyph, got '$out'"
   fm_composer_holds_text "$agy_herdr" "$typed" 'zz probe' \
     || fail "an agy composer holding typed text should hold exactly that text"
-  fm_composer_agy_notice_fits "$idle" "$(printf 'x%.0s' $(seq 1 57))" \
-    || fail "a line leaving the last column free should fit agy's 60-column row"
-  ! fm_composer_agy_notice_fits "$idle" "$(printf 'x%.0s' $(seq 1 58))" \
-    || fail "a line reaching agy's last column must not fit"
+  assert_screen "agy notice leaving the last column free" empty "$agy_herdr" "$idle" '' '' \
+    "$(printf 'x%.0s' $(seq 1 57))"
+  screen=$(printf '%s\n' "$idle" | sed '2s/$/──/')
+  assert_screen "agy notice reaching the closing divider's last column" unknown "$agy_herdr" "$screen" '' '' \
+    "$(printf 'x%.0s' $(seq 1 58))"
   pass "matrix: agy's > row reads empty only on an agy pane's full recorded screen, typed text stays pending, and pi is unchanged"
-}
-
-test_matrix_pi_separated_row_unchanged() {
-  local rule screen typed
-  rule=$(printf '─%.0s' $(seq 1 60))
-  screen=$(printf 'transcript\n%s\n\n%s\nfooter' "$rule" "$rule")
-  typed=$(printf 'transcript\n%s\nhello\n%s\nfooter' "$rule" "$rule")
-  assert_screen "pi idle" empty "$CAPS_TMUX" "$screen" 2 $'pi\tidle'
-  assert_screen "pi working" unknown "$CAPS_TMUX" "$screen" 2 $'pi\tworking'
-  assert_screen "pi typed" pending "$CAPS_TMUX" "$typed" 2 $'pi\tidle'
-  pass "matrix: pi's separated row verdicts are unchanged by the agy rule"
 }
 
 test_matrix_muse_unchanged_by_rovo_scope() {
@@ -853,7 +843,6 @@ test_matrix_codex_dim_hint_row
 test_matrix_muse_truecolor_glyph_survives_signal_loss
 test_matrix_rovo_placeholder_chip_is_harness_scoped
 test_matrix_agy_composer_is_harness_scoped
-test_matrix_pi_separated_row_unchanged
 test_matrix_muse_unchanged_by_rovo_scope
 test_matrix_cursor_reverse_video_placeholder_remnant
 test_matrix_herdr_halfblock_rule_bounds_bare_wrap

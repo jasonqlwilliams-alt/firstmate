@@ -976,13 +976,12 @@ fm_backend_composer_snapshot() {  # <backend> <target> [expected-label]
 }
 
 # fm_backend_composer_classify_snapshot: the backend's own composer verdict for
-# the current snapshot, identical to what fm_backend_composer_state would have
-# answered for that capture.
-fm_backend_composer_classify_snapshot() {  # <backend> <target>
+# the current snapshot, with an optional agy notice fit check.
+fm_backend_composer_classify_snapshot() {  # <backend> <target> [fit-text]
   case "$1" in
-    tmux) fm_tmux_composer_classify_snapshot "$2" ;;
-    herdr) fm_backend_herdr_composer_classify_snapshot "$2" ;;
-    zellij|orca|cmux) fm_composer_classify_snapshot_no_identity ;;
+    tmux) fm_tmux_composer_classify_snapshot "$2" "${3:-}" ;;
+    herdr) fm_backend_herdr_composer_classify_snapshot "$2" "${3:-}" ;;
+    zellij|orca|cmux) fm_composer_classify_snapshot_no_identity "${3:-}" ;;
     *) printf 'unknown' ;;
   esac
 }
@@ -1007,8 +1006,7 @@ fm_backend_composer_classify_snapshot() {  # <backend> <target>
 # "ROVO PLACEHOLDER CHIP").
 # [fit-text] is the line a caller is about to type into an agy pane: an
 # `empty` verdict for harness agy reads `unknown` unless that line fits agy's
-# one composer row (fm_composer_agy_notice_fits), so it is never typed into a
-# row it would wrap.
+# one composer row, so it is never typed into a row it would wrap.
 # Callers: the steering-inbox doorbell (bin/fm-task-inbox-lib.sh) and Codex
 # exit (bin/fm-control.sh).
 fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [fit-text]
@@ -1027,11 +1025,7 @@ fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [ex
     printf 'sign-in'
     return 0
   fi
-  verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target")
-  if [ "$verdict" = empty ] && [ "$harness" = agy ] && [ -n "$fit" ] \
-     && ! fm_composer_agy_notice_fits "$FM_COMPOSER_SNAPSHOT_SCREEN" "$fit"; then
-    verdict=unknown
-  fi
+  verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target" "$fit")
   if [ "$verdict" = unknown ] && [ -n "$expected" ]; then
     while IFS= read -r kv; do
       [ "$kv" != styled=1 ] || styled=1

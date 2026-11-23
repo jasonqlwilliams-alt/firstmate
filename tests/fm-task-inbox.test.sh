@@ -748,8 +748,7 @@ ring_lab_setup() {
 # idle shape: a truecolor `>` row between two full-width solid rules over the
 # `? for shortcuts` footer; typed text follows the glyph on that row),
 # agy-pending (the same composer already holding typed text), agy-busy (an
-# empty `>` row over the `esc to cancel` footer), agy-narrow (an idle composer
-# too narrow for the doorbell line), agy-survey (an idle frame with agy's
+# empty `>` row over the `esc to cancel` footer), agy-survey (an idle frame with agy's
 # feedback survey below it), rovo
 # (rovo's recorded idle box: a rounded border around an inline placeholder
 # chip at truecolor 162;163;165 with the cursor on the chip row; typed text
@@ -792,7 +791,6 @@ composer() {
 }
 agy() {
   local width=$((cols - 2)) rule row=4 footer='? for shortcuts      accept-edits · Gemini · high'
-  [ "$mode" != agy-narrow ] || width=40
   [ "$mode" != agy-busy ] || footer='esc to cancel'
   rule=$(printf '─%.0s' $(seq 1 "$width"))
   printf '\033[2J\033[HAntigravity test stub\r\n\r\n%s\r\n' "$rule"
@@ -862,21 +860,24 @@ while IFS= read -r -n 1 ch; do
 done
 STUB
   "$RING_TMUX" -L "$RING_SOCKET" new-session -d -s ring -x 200 -y 40
-  # agy panes are wide enough for the doorbell line to fit agy's one composer
-  # row, so its delivery path is exercised rather than its wrap refusal.
-  "$RING_TMUX" -L "$RING_SOCKET" new-session -d -s ringwide -x 400 -y 40
 }
 
 # Start one stub window and wait until its screen is drawn. Echoes its target.
-ring_stub_window() {  # <name> <mode> <log>
-  local name=$1 mode=$2 log=$3 i=0 marker agent=codex session=ring
+ring_stub_window() {  # <name> <mode> <log> [pane-columns]
+  local name=$1 mode=$2 log=$3 cols=${4:-} i=0 marker agent=codex session=ring
   : > "$log"
   case "$mode" in
-    agy|agy-*) agent=agy; session=ringwide ;;
+    agy|agy-*) agent=agy ;;
     rovo|rovo-pending|rovo-unknown) agent=rovo ;;
   esac
-  "$RING_TMUX" -L "$RING_SOCKET" new-window -d -t "$session:" -n "$name" -- \
-    "$RING_LAB/bin/$agent" "$RING_LAB/screen-stub.sh" "$mode" "$log"
+  if [ -n "$cols" ]; then
+    session=$name
+    "$RING_TMUX" -L "$RING_SOCKET" new-session -d -s "$session" -n "$name" -x "$cols" -y 40 -- \
+      "$RING_LAB/bin/$agent" "$RING_LAB/screen-stub.sh" "$mode" "$log" || fail "could not create $name pane"
+  else
+    "$RING_TMUX" -L "$RING_SOCKET" new-window -d -t "$session:" -n "$name" -- \
+      "$RING_LAB/bin/$agent" "$RING_LAB/screen-stub.sh" "$mode" "$log"
+  fi
   case "$mode" in
     picker-below|picker-row) marker='esc skip' ;;
     unknown|rovo-unknown) marker='Loading your session' ;;
@@ -996,49 +997,60 @@ test_ring_refuses_pending_and_unproven_codex_screens() {
   pass "inbox: pending text gets no keystroke on any harness, and an unproven Codex screen gets no keystroke or no Enter"
 }
 
-# agy's idle `>` row reads empty only through its agy-scoped rule, so the
-# doorbell is delivered into an idle agy composer the line fits.
-test_ring_delivers_into_an_idle_agy_composer() {
-  local state target log rc verdict i=0
+test_agy_doorbell_width_boundary() {
+  local home state rec notice narrow wide target log err verdict i=0
   ring_lab_setup
-  state="$TMP_ROOT/ring-agy/state"
+  home="$TMP_ROOT/ring-agy"
+  state="$home/state"
   mkdir -p "$state"
-  log="$RING_LAB/agy.log"
-  target=$(ring_stub_window agy agy "$log")
-  verdict=$(PATH="$RING_LAB/shim:$PATH" bash -c '. "$1"; fm_backend_guarded_composer_state tmux "$2"' _ \
-    "$ROOT/bin/fm-backend.sh" "$target")
-  [ "$verdict" != empty ] || fail "the case is vacuous unless agy's idle row is unproven without the harness fact"
-  verdict=$(PATH="$RING_LAB/shim:$PATH" bash -c '. "$1"; fm_backend_guarded_composer_state tmux "$2" "" "" agy' _ \
-    "$ROOT/bin/fm-backend.sh" "$target")
-  [ "$verdict" = empty ] || fail "agy's idle row should read empty on an agy pane, got $verdict"
-  rc=$(ring_into "$state" t1 "$target" agy)
-  [ "$rc" = 0 ] || fail "an idle agy composer should receive the doorbell, got $rc"
-  while [ "$i" -lt 50 ] && [ -e "$state/t1.inbox/001.msg" ]; do sleep 0.1; i=$((i + 1)); done
+  rec="$state/t1.inbox/001.msg"
+  notice=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$rec") || fail "could not generate the test doorbell"
+  narrow=$(ring_stub_window agy-narrow agy "$RING_LAB/agy-narrow.log" "$((${#notice} + 4))")
+  log="$RING_LAB/agy-wide.log"
+  wide=$(ring_stub_window agy-wide agy "$log" "$((${#notice} + 5))")
+  for target in "$narrow" "$wide"; do
+    verdict=$(PATH="$RING_LAB/shim:$PATH" bash -c '. "$1"; fm_backend_guarded_composer_state tmux "$2" "" "" agy' _ \
+      "$ROOT/bin/fm-backend.sh" "$target")
+    [ "$verdict" = empty ] || fail "the idle agy composer in $target should read empty before the fit check, got $verdict"
+  done
+  fm_write_meta "$state/t1.meta" "window=$narrow" "backend=tmux" "kind=ship" "harness=agy"
+  err="$home/send.err"
+  PATH="$RING_LAB/shim:$PATH" FM_HOME="$home" \
+    "$ROOT/bin/fm-send.sh" t1 "please continue" >/dev/null 2>"$err" \
+    || fail "a width refusal is still a durably sent steer:"$'\n'"$(cat "$err")"
+  [ ! -s "$RING_LAB/agy-narrow.log" ] || fail "fm-send typed into the narrow agy composer"
+  [ -f "$rec" ] || fail "fm-send did not record the steer after a width refusal"
+  assert_contains "$(cat "$err")" "too narrow for the doorbell line" "fm-send should mention the agy width limit"
+  assert_contains "$(cat "$err")" "A wider agy pane" "fm-send should explain how to make room for the doorbell"
+  PATH="$RING_LAB/shim:$PATH" inbox_lib "$state" fm_task_inbox_ring tmux "$wide" "$rec" "" agy \
+    || fail "the same agy notice should be delivered with one more column"
+  while [ "$i" -lt 50 ] && [ -e "$rec" ]; do sleep 0.1; i=$((i + 1)); done
   [ "$(grep -c '^ENTER' "$log")" = 1 ] || fail "the agy ring should press exactly one Enter:"$'\n'"$(cat "$log")"
-  grep -qF "SUBMIT : Firstmate instruction waiting: list '$state/t1.inbox'/*.msg" "$log" \
+  grep -qxF "SUBMIT $notice" "$log" \
     || fail "the agy stub never received the doorbell line:"$'\n'"$(cat "$log")"
   [ -f "$state/t1.inbox/handled/001.msg" ] || fail "the agy doorbell was not acted on"
-  pass "inbox: an idle agy composer reads empty and receives the doorbell with one Enter"
+  pass "inbox: the same agy notice is refused at the last column and delivered with one more column"
 }
 
-# An agy pane without proof - typed text, a busy footer, a composer row the
-# doorbell would wrap, or the feedback survey below the frame - gets nothing
-# typed, and the record stays queued for the re-ring ladder.
+# An agy pane with a draft or an unproven frame gets nothing typed, and the
+# record stays queued for the re-ring ladder.
 test_ring_refuses_unproven_agy_screens() {
-  local state target log rc mode
+  local state target log rc mode notice
   ring_lab_setup
   state="$TMP_ROOT/ring-agy-unproven/state"
   mkdir -p "$state"
-  for mode in agy-pending agy-busy agy-narrow agy-survey agy-forged; do
+  for mode in agy-pending agy-busy agy-survey agy-forged; do
     log="$RING_LAB/$mode.log"
-    target=$(ring_stub_window "$mode" "$mode" "$log")
+    notice=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$state/$mode.inbox/001.msg") \
+      || fail "could not generate the $mode test doorbell"
+    target=$(ring_stub_window "$mode" "$mode" "$log" "$((${#notice} + 5))")
     rc=$(ring_into "$state" "$mode" "$target" agy)
     sleep 0.3
     [ "$rc" = 1 ] || fail "the ring should refuse a $mode screen with 1, got $rc"
     [ ! -s "$log" ] || fail "the ring typed into a $mode screen:"$'\n'"$(cat "$log")"
     [ -f "$state/$mode.inbox/001.msg" ] || fail "a refused agy ring must leave the durable record ($mode)"
   done
-  pass "inbox: an agy pane with a draft, an unproven frame, or a too-narrow row gets no keystroke"
+  pass "inbox: an agy pane with a draft or an unproven frame gets no keystroke"
 }
 
 # A harness outside the proven-empty rule keeps ringing on an unknown screen
@@ -1119,16 +1131,6 @@ test_fm_send_ring_through_picker_and_composer() {
   [ ! -s "$log" ] || fail "fm-send typed into the update picker:"$'\n'"$(cat "$log")"
   [ -f "$home/state/p1.inbox/001.msg" ] || fail "fm-send did not record the steer"
   assert_contains "$(cat "$err")" "Codex global-update picker" "fm-send should say why no Enter was sent"
-  log="$RING_LAB/send-agy-narrow.log"
-  target=$(ring_stub_window send-agy-narrow agy-narrow "$log")
-  fm_write_meta "$home/state/a1.meta" "window=$target" "backend=tmux" "kind=ship" "harness=agy"
-  PATH="$RING_LAB/shim:$PATH" FM_HOME="$home" \
-    "$ROOT/bin/fm-send.sh" a1 "please continue" >/dev/null 2>"$err" \
-    || fail "a width refusal is still a durably sent steer:"$'\n'"$(cat "$err")"
-  [ ! -s "$log" ] || fail "fm-send typed into the narrow agy composer:"$'\n'"$(cat "$log")"
-  [ -f "$home/state/a1.inbox/001.msg" ] || fail "fm-send did not record the steer after a width refusal"
-  assert_contains "$(cat "$err")" "too narrow for the doorbell line" "fm-send should mention the agy width limit"
-  assert_contains "$(cat "$err")" "A wider agy pane" "fm-send should explain how to make room for the doorbell"
   log="$RING_LAB/send-empty.log"
   target=$(ring_stub_window send-empty empty "$log")
   fm_write_meta "$home/state/e1.meta" "window=$target" "backend=tmux" "kind=ship" "harness=codex"
@@ -1140,7 +1142,7 @@ test_fm_send_ring_through_picker_and_composer() {
   [ -f "$home/state/e1.inbox/handled/001.msg" ] \
     || fail "fm-send's doorbell into an empty composer was not acted on:"$'\n'"$(cat "$log")"
   [ "$(grep -c '^ENTER' "$log")" = 1 ] || fail "fm-send should press exactly one Enter:"$'\n'"$(cat "$log")"
-  pass "fm-send: the picker and narrow agy composer get no keystroke, and an empty composer still gets the doorbell"
+  pass "fm-send: the picker gets no keystroke, and an empty composer still gets the doorbell"
 }
 
 # The re-ring path through the real watcher: a picker on screen is never typed
@@ -1201,7 +1203,7 @@ test_ring_refuses_the_codex_update_picker
 test_ring_refuses_a_picker_that_appears_while_typing
 test_ring_still_delivers_into_an_empty_composer
 test_ring_refuses_pending_and_unproven_codex_screens
-test_ring_delivers_into_an_idle_agy_composer
+test_agy_doorbell_width_boundary
 test_ring_refuses_unproven_agy_screens
 test_ring_still_rings_an_unknown_screen_outside_the_strict_harnesses
 test_ring_delivers_into_an_idle_rovo_composer
