@@ -160,6 +160,8 @@ if [ -n "${FM_STATE_OVERRIDE:-}" ]; then FM_STATE_OVERRIDE=$STATE; fi
 . "$SCRIPT_DIR/fm-pr-lib.sh"
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
+# shellcheck source=bin/fm-timeout-lib.sh
+. "$SCRIPT_DIR/fm-timeout-lib.sh"
 
 POLL=${FM_CONTROL_POLL:-0.5}
 SETTLE_WAIT=${FM_CONTROL_SETTLE_WAIT:-5}
@@ -561,6 +563,89 @@ codex_signin_exit() {
   printf 'stopped-sign-in'
 }
 
+# Claude has its own submit sequence because the generic retry loop does not
+# act on the shared reader's exit-confirm verdict. A slash command can swallow
+# the first Enter, so retries require a fresh pending verdict for /exit.
+# See docs/agent-control.md for the Claude exit and recovery contract.
+claude_exit_screen_state() {  # [expected-pending] [remaining-ms]
+  fm_backend_guarded_composer_state "$BACKEND" "$T" "$LABEL" "${1:-}" claude "${2:-}"
+}
+
+claude_exit_unconfirmed() {  # <interrupt-result> <exit-command-state> <reason> [observed-agent-state]
+  local verb observed=${4:+ agent-state=$4}
+  case "$2" in
+    delivered) verb=exit-delivered ;;
+    typed) verb=exit-typed ;;
+    *) verb=exit-refused ;;
+  esac
+  die "$verb $ID interrupt=$1 exit-command=$2$observed exit=unconfirmed; $3"
+}
+
+claude_exit_dialog_refusal() {  # <interrupt-result> <exit-command-state> [observed-agent-state]
+  claude_exit_unconfirmed "$1" "$2" 'Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it' "${3:-}"
+}
+
+claude_exit_guard_input() {  # <interrupt-result> <exit-command-state> [expected-pending] [observed-agent-state]
+  case "$(claude_exit_screen_state "${3:-}" 5000)" in
+    exit-confirm) claude_exit_dialog_refusal "$1" "$2" "${4:-}" ;;
+    timeout) claude_exit_unconfirmed "$1" "$2" 'the Claude viewport read timed out' "${4:-}" ;;
+  esac
+}
+
+claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
+  local cmd=$1 interrupt_result=$2 screen='' state=unreadable sample submission=typed attempts=1
+  local budget_ms poll_ms deadline now remaining delay probe_ms
+  claude_exit_guard_input "$interrupt_result" not-sent
+  fm_backend_send_literal "$BACKEND" "$T" "$cmd" "$LABEL" \
+    || die "the exit command could not be sent to task $ID on $BACKEND"
+  sleep 1.2
+  claude_exit_guard_input "$interrupt_result" typed "$cmd"
+  if fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null 2>&1; then
+    submission=delivered
+  fi
+  read -r budget_ms poll_ms < <(awk -v wait="$EXIT_WAIT" -v poll="$POLL" 'BEGIN{printf "%.0f %.0f\n", wait * 1000, poll * 1000}')
+  now=$(fm_monotonic_ms) || claude_exit_unconfirmed "$interrupt_result" "$submission" 'the exit clock is unavailable'
+  deadline=$(( now + budget_ms ))
+  while :; do
+    remaining=$(( deadline - now ))
+    [ "$remaining" -gt 0 ] || break
+    if [ "$screen" != timeout ]; then
+      delay=$(( remaining / 4 ))
+      [ "$delay" -le "$poll_ms" ] || delay=$poll_ms
+      sleep "$(fm_timeout_seconds "$delay")"
+      now=$(fm_monotonic_ms) || break
+      remaining=$(( deadline - now ))
+      [ "$remaining" -gt 0 ] || break
+    fi
+
+    probe_ms=$(( (remaining + 1) / 2 ))
+    [ "$screen" != timeout ] || probe_ms=$(( remaining - remaining / 4 ))
+    if sample=$(fm_backend_run_timed "$probe_ms" fm_backend_agent_state "$BACKEND" "$T"); then
+      state=$sample
+      [ "$state" != dead ] || return 0
+    else
+      sample=unreadable
+    fi
+    now=$(fm_monotonic_ms) || break
+    remaining=$(( deadline - now ))
+    [ "$remaining" -gt 0 ] || break
+    probe_ms=$(( remaining - remaining / 4 ))
+    [ "$probe_ms" -le 5000 ] || probe_ms=5000
+    screen=$(claude_exit_screen_state "$cmd" "$probe_ms")
+    [ "$screen" != exit-confirm ] || claude_exit_dialog_refusal "$interrupt_result" "$submission" "$sample"
+    now=$(fm_monotonic_ms) || break
+    remaining=$(( deadline - now ))
+    if [ "$remaining" -gt 0 ] && [ "$screen" = pending ] && [ "$sample" = alive ] && [ "$attempts" -lt "$EXIT_RETRIES" ]; then
+      if fm_backend_run_timed "$(( (remaining + 1) / 2 ))" fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null; then
+        submission=delivered
+      fi
+      attempts=$((attempts + 1))
+      now=$(fm_monotonic_ms) || break
+    fi
+  done
+  claude_exit_unconfirmed "$interrupt_result" "$submission" "the agent did not stop within ${EXIT_WAIT}s" "$state"
+}
+
 # do_exit: stop the running agent, preserving endpoint and worktree. Returns
 # `already-stopped`, `stopped`, or Codex's
 # `process-stopped-safe-quit-unconfirmed` after lifecycle input.
@@ -576,6 +661,9 @@ do_exit() {
     alive) ;;
     *) die "task $ID's endpoint reads '$state' rather than a positively classified state; refusing to send a lifecycle command into an unattributed endpoint" ;;
   esac
+  if [ "$HARNESS" = claude ]; then
+    fm_monotonic_ms >/dev/null 2>&1 || die 'the Claude exit clock is unavailable'
+  fi
   if [ "$HARNESS" = codex ]; then
     screen=$(codex_exit_screen_state)
     [ "$screen" != update-picker ] \
@@ -588,6 +676,9 @@ do_exit() {
   # A busy agent is interrupted first before the exit command is submitted.
   case "$(busy_verdict)" in
     busy*)
+      if [ "$HARNESS" = claude ]; then
+        claude_exit_guard_input not-needed not-sent '' "$state"
+      fi
       cancel=$(deliver_interrupt) || return $?
       state=$(agent_state)
       case "$state" in
@@ -615,15 +706,19 @@ do_exit() {
   # swallows the first Enter.
   if [ "$HARNESS" = codex ]; then
     codex_exit_submit "$cmd"
+  elif [ "$HARNESS" = claude ]; then
+    claude_exit_submit "$cmd" "$interrupt_result"
   else
     verdict=$(fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" 1.2 "$LABEL") \
       || die "the exit command could not be sent to task $ID on $BACKEND"
     [ "$verdict" != send-failed ] \
       || die "the exit command could not be sent to task $ID on $BACKEND"
   fi
-  state=$(wait_agent_state "$EXIT_WAIT" dead) || {
-    die "exit-delivered $ID interrupt=$interrupt_result exit-command=delivered agent-state=$state exit=unconfirmed; the agent did not stop within ${EXIT_WAIT}s"
-  }
+  if [ "$HARNESS" != claude ]; then
+    state=$(wait_agent_state "$EXIT_WAIT" dead) || {
+      die "exit-delivered $ID interrupt=$interrupt_result exit-command=delivered agent-state=$state exit=unconfirmed; the agent did not stop within ${EXIT_WAIT}s"
+    }
+  fi
   # The incarnation is over: retire its busy wiring so no stale record or
   # orphaned generation survives the agent that produced it.
   retire_busy_incarnation

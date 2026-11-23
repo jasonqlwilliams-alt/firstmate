@@ -249,6 +249,7 @@ case "$*" in
     [ -n "${FM_FAKE_HARNESS_PID:-}" ] || exit 1
     /bin/ps -o ppid= -p "$pid"
     ;;
+  *"lstart="*) exec /bin/ps "$@" ;;
 esac
 exit 1
 SH
@@ -285,6 +286,7 @@ case "\$*" in
     exit 0
     ;;
   *"ppid="*) printf '%s\n' "$holder_pid"; exit 0 ;;
+  *"lstart="*) exec /bin/ps "\$@" ;;
 esac
 exit 1
 SH
@@ -2079,6 +2081,7 @@ case "$*" in
     else printf '%s\n' bash; fi
     ;;
   *"ppid="*) /bin/ps -o ppid= -p "$pid" ;;
+  *"lstart="*) exec /bin/ps "$@" ;;
   *) exit 1 ;;
 esac
 SH
@@ -2330,18 +2333,56 @@ EOF
   cat > "$fakebin/mv" <<SH
 #!/usr/bin/env bash
 case "\${*: -1}" in
-  "$home/state/.session-start-complete") exit 1 ;;
+  "$home/state/.session-start-complete")
+    : > "$home/state/completion-rename-attempted"
+    exit 1
+    ;;
 esac
 exec /bin/mv "\$@"
 SH
   chmod +x "$fakebin/mv"
   FM_FAKE_HARNESS=pi run_pi_session_start "$home" "$root" "$fakebin:$BASE_PATH" --source startup >/dev/null
+  assert_present "$home/state/completion-rename-attempted" "startup did not reach the forced completion rename failure"
   assert_absent "$home/state/.session-start-complete" \
     "startup published completion despite the atomic completion write failure"
   assert_absent "$home/state/.session-start-agents-baseline" \
     "startup recorded an instruction baseline after completion publication failed"
 
   pass "instruction baselines require SHA-256 and successful startup completion"
+}
+
+test_startup_refuses_a_start_token_published_mid_digest() {
+  local rec root home fakebin proc start out real_mktemp
+  rec=$(new_world startup-token-upgrade)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_harness "$fakebin" pi
+  proc="$home/proc"
+  mkdir -p "$proc/$SESSION_START_TEST_HARNESS_PID"
+  printf 'malformed fixture stat\n' > "$proc/$SESSION_START_TEST_HARNESS_PID/stat"
+  start=$(TZ=UTC0 LC_ALL=C /bin/ps -p "$SESSION_START_TEST_HARNESS_PID" -o lstart= | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  [ -n "$start" ] || fail "the process fixture has no real start time"
+  real_mktemp=$(PATH="$BASE_PATH" command -v mktemp) || fail "mktemp is unavailable for the startup fixture"
+  cat > "$fakebin/mktemp" <<'SH'
+#!/usr/bin/env bash
+case "${*: -1}" in
+  */.session-start-complete.XXXXXX)
+    rm "$FM_PROC_ROOT_OVERRIDE/$FM_FAKE_HARNESS_PID/stat" || exit 1
+    printf '%s\nstart=lstart:%s\n' "$FM_FAKE_HARNESS_PID" "$FM_TEST_LATE_START" > "$FM_HOME/state/.lock.start" || exit 1
+    ;;
+esac
+exec "$FM_TEST_REAL_MKTEMP" "$@"
+SH
+  chmod +x "$fakebin/mktemp"
+  out=$(FM_PROC_ROOT_OVERRIDE="$proc" FM_TEST_LATE_START="$start" FM_TEST_REAL_MKTEMP="$real_mktemp" FM_FAKE_HARNESS=pi \
+    run_pi_session_start "$home" "$root" "$fakebin:$BASE_PATH" --source startup)
+  assert_contains "$out" "lock acquired: harness pid $SESSION_START_TEST_HARNESS_PID" "the fixture did not begin as the legacy owner"
+  cmp -s "$home/state/.lock.start" <(printf '%s\nstart=lstart:%s\n' "$SESSION_START_TEST_HARNESS_PID" "$start") \
+    || fail "the fixture did not publish the token during startup"
+  assert_absent "$home/state/.session-start-complete" "startup adopted the start token published mid-digest"
+  pass "startup cannot certify completion with a start token acquired mid-digest"
 }
 
 test_reemit_keeps_repair_ownership_with_the_lock_holder() {
@@ -2758,6 +2799,7 @@ test_agents_baseline_stays_at_true_start_and_reemits_on_every_drifted_pi_compact
 test_read_only_pi_compact_refreshes_against_its_own_session_identity
 test_codex_unreachable_reset_sources_do_not_claim_instruction_refresh
 test_agents_baseline_requires_sha256_and_successful_completion
+test_startup_refuses_a_start_token_published_mid_digest
 test_reemit_keeps_repair_ownership_with_the_lock_holder
 
 echo "# fm-session-start.test.sh: all assertions passed"

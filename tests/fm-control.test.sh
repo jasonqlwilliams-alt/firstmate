@@ -378,7 +378,7 @@ run_control() {
   local dir=$1; shift
   env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
     FM_CONTROL_POLL=0.01 FM_CONTROL_SETTLE_WAIT=0.05 \
-    FM_CONTROL_EXIT_WAIT=0.05 FM_CONTROL_LAUNCH_WAIT=0.05 \
+    FM_CONTROL_EXIT_WAIT=0.5 FM_CONTROL_LAUNCH_WAIT=0.05 \
     FM_FAKE_MUSE_LOG="${FM_FAKE_MUSE_LOG:-}" \
     FM_FAKE_MUSE_DISAPPEAR_BEFORE_ACK="${FM_FAKE_MUSE_DISAPPEAR_BEFORE_ACK:-}" \
     FM_FAKE_INTERRUPT_STOPS_AGENT="${FM_FAKE_INTERRUPT_STOPS_AGENT:-}" \
@@ -1166,7 +1166,7 @@ test_agent_that_does_not_stop_fails_closed() {
   gen=$("$ROOT/bin/fm-busy-event.sh" arm "$dir/home/state" t1)
   printf 'busy_gen=%s\n' "$gen" >> "$dir/home/state/t1.meta"
   out=$(env FM_FAKE_NEVER_DIES=1 PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" \
-    FM_FAKE_DIR="$dir/fake" FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 \
+    FM_FAKE_DIR="$dir/fake" FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.5 \
     "$CONTROL" t1 exit 2>&1); rc=$?
   expect_code 1 "$rc" "an agent that ignores its exit command should fail closed"
   assert_contains "$out" "did not stop" "the failure should say the agent did not stop"

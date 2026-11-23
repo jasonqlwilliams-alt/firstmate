@@ -36,6 +36,22 @@ fm_backend_tmux_resolve_bare_selector() {  # <name>
     || { echo "error: no window named $name" >&2; return 1; }
 }
 
+fm_backend_tmux_exact_pane() {  # <session:window>
+  local target=$1 session window windows
+  case "$target" in
+    *:*:*|:*|*:) return 1 ;;
+    *:*) ;;
+    *) return 1 ;;
+  esac
+  session=${target%%:*}
+  window=${target#*:}
+  windows=$(tmux list-windows -t "=$session" -F $'#{window_name}\t#{pane_id}' 2>/dev/null) || return 1
+  awk -F '\t' -v window="$window" '
+    $1 == window { pane=$2; matches++ }
+    END { if (matches != 1 || pane == "") exit 1; print pane }
+  ' <<< "$windows"
+}
+
 # fm_backend_tmux_capture: bounded plain-text pane capture of exactly the
 # recorded window (fm_tmux_exact_target, bin/fm-tmux-lib.sh), so a closed
 # window reads as missing even when a prefix-named neighbour survives.
@@ -281,6 +297,31 @@ fm_backend_tmux_foreground_argv0s() {  # <target>
         argv0=${args%%[[:space:]]*}
         [ -n "$argv0" ] && printf '%s\n' "$argv0"
       done
+}
+
+# See docs/tmux-backend.md "Agent liveness probe" for the empirical basis.
+# Check the exact recorded session and window because implicit tmux target
+# resolution can select a different window when the recorded one is absent;
+# fm_tmux_exact_target (bin/fm-tmux-lib.sh) owns that exact lookup.
+# An omitted window or a definitive missing-session/server response is
+# `missing`. Other inventory failures are `unreadable`.
+fm_backend_tmux_endpoint_state() {  # <target>
+  local target=$1 resolve_status
+  case "$target" in
+    *:*:*|'':*|*:'') printf 'unreadable'; return 0 ;;
+    *:*) ;;
+    *) printf 'unreadable'; return 0 ;;
+  esac
+  if fm_tmux_exact_target "$target" >/dev/null; then
+    resolve_status=0
+  else
+    resolve_status=$?
+  fi
+  case "$resolve_status" in
+    0) printf 'present' ;;
+    1) printf 'missing' ;;
+    *) printf 'unreadable' ;;
+  esac
 }
 
 # fm_backend_tmux_agent_state: recovery-grade harness-agent state for one

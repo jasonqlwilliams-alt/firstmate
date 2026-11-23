@@ -25,16 +25,19 @@
 # per distinct down-episode in this FM_HOME (keyed to the failing condition, not
 # the beacon mtime, which a healthy between-turns watcher advances every poll);
 # later guarded commands in the same episode print a one-line reminder instead.
+# Between foreground checkpoints: when bin/fm-watch-checkpoint.sh recorded a
+# confirmed clean close (state/.last-checkpoint-return, bound to the current
+# attended Codex session) younger than grace, and the watcher lock is absent,
+# the guard prints a factual NOTICE instead of the banner, claims no episode,
+# and clears an announced one. A quiet close also requires a fresh beacon; a
+# verified wake close does not.
 # Episode state lives only under state/.guard-watcher-stale-banner (volatile,
 # bounded). Independent alarms (queued wakes, worktree tangle) are never
-# suppressed by that dedup. Normal wake handling (watcher briefly down between a
-# wake and the next supervision resume) stays inside the grace window and stays
-# silent. The queued-wakes warning counts only the rows the calling actor can
-# itself present or retire (fm_wake_actor_pending_count), so it is never an
-# instruction to run a drain with nothing to present. A row reserved by a live
-# supervision-branch grant is never a drain instruction for main; instead of
-# going silent about a visibly non-empty queue, main gets a distinct advisory
-# naming the branch as the holder and saying not to drain those rows.
+# suppressed by that dedup. The queued-wakes warning counts only the rows the
+# calling actor can present or retire (fm_wake_actor_pending_count), so it never
+# directs an empty drain. When a live supervision-branch grant holds rows,
+# main gets a distinct advisory naming the branch as the holder and saying not
+# to drain those rows.
 # The ordinary warning also stays silent for the supervision branch
 # actor (FM_SUPERVISION_ACTOR=branch), because that actor runs guarded commands
 # while handling exactly the queued rows its grant covers and can drain nothing
@@ -139,6 +142,24 @@ fm_guard_clear_stale_banner() {
   rm -f "$STALE_BANNER_MARKER" 2>/dev/null || true
 }
 
+fm_guard_checkpoint_age() {
+  local record=$1 session=$2 reason=$3 close return_session snapshot current now
+
+  IFS=' ' read -r close return_session || return 1
+  [ "$return_session" = "$session" ] || return 1
+  [ "$close" = wake ] || { [ "$close" = quiet ] && [ "$reason" = no-watcher ]; } || return 1
+  now=$(date +%s) || return 1
+  if [ "$_FM_UNAME" = Darwin ]; then
+    snapshot=$(/usr/bin/stat -f '%d %i %m') || return 1
+    current=$(/usr/bin/stat -f '%d %i %m' "$record") || return 1
+  else
+    snapshot=$(stat -Lc '%d %i %Y' /dev/stdin) || return 1
+    current=$(stat -c '%d %i %Y' "$record") || return 1
+  fi
+  [ "$snapshot" = "$current" ] || return 1
+  printf '%s\n' "$(( now - ${snapshot##* } ))"
+}
+
 # Worktree-tangle alarm, checked FIRST and independent of in-flight tasks: the
 # firstmate PRIMARY checkout (FM_ROOT) must stay on its default branch. If a
 # crewmate's branch/commits landed here instead of in its own isolated worktree,
@@ -202,7 +223,25 @@ fi
 # No fresh watcher with tasks in flight is the dangerous state: emit a prominent,
 # bordered banner FIRST so it reads as an alarm, not a buried stderr line. Later
 # calls in the same episode get a one-line reminder only.
-if [ "$watcher_healthy" = false ]; then
+between_checkpoints=false
+checkpoint_record="$STATE/.last-checkpoint-return"
+if [ "$watcher_healthy" = false ] && [ "$READ_ONLY" -eq 0 ] && [ -f "$checkpoint_record" ] && [ -s "$checkpoint_record" ] \
+  && checkpoint_session=$(fm_codex_checkpoint_session "$STATE") \
+  && checkpoint_return_age=$(
+    # shellcheck disable=SC2094 # The helper only reads the receipt.
+    fm_guard_checkpoint_age "$checkpoint_record" "$checkpoint_session" "$watcher_down_reason" \
+      2>/dev/null < "$checkpoint_record"
+  ) \
+  && [ ! -e "$STATE/.watch.lock" ] && [ ! -L "$STATE/.watch.lock" ] \
+  && [ "$checkpoint_return_age" -ge 0 ] && [ "$checkpoint_return_age" -lt "$GRACE" ]; then
+  between_checkpoints=true
+fi
+
+if [ "$between_checkpoints" = true ]; then
+  fm_guard_clear_stale_banner
+  printf 'NOTICE: between foreground checkpoints - no live watcher process holds this home lock since the last checkpoint returned %ss ago.\n' \
+    "$checkpoint_return_age" >&2
+elif [ "$watcher_healthy" = false ]; then
   episode_key=$(fm_guard_stale_episode_key "$watcher_down_reason")
   episode_key=${episode_key%$'\n'}
   print_full_banner=0

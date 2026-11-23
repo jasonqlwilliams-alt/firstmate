@@ -63,36 +63,40 @@ case "${1:-}" in
     payload=${1:-}
     if [ "$literal" = 1 ]; then
       printf '%s\n' "$payload" >> "$D/literal"
-      case "$payload" in
-        /exit|/quit)
-          if [ -e "$D/remote-relaunch-start" ] && [ ! -e "$D/remote-relaunch-end" ]; then
-            : > "$D/local-relaunch-during-remote"
-          fi
-          printf 'zsh' > "$D/command.$target"
-          ;;
-        *'encode launch-brief'*) cat "$D/becomes" > "$D/command.$target" ;;
-        ': Firstmate instruction waiting: list '*)
-          printf 'doorbell\n' >> "$D/rings"
-          if [ -x "$D/on-doorbell" ]; then
-            "$D/on-doorbell" "$payload"
-          fi
-          if [ -f "$D/answer-inbox" ]; then
-            # Model the mate: read the newest instruction it was handed and
-            # report back on the parent channel, carrying the correlation token
-            # the request itself embedded.
-            inbox=$(cat "$D/answer-inbox")
-            corr=$(cat "$inbox"/*.msg 2>/dev/null \
-              | grep -oE 'corr=[0-9a-f]{16}' | head -1)
-            if [ -n "$corr" ]; then
-              printf 'done [%s]: open records written down\n' "$corr" \
-                >> "$(cat "$D/answer-status")"
-            fi
-          fi
-          ;;
-      esac
-    else
-      printf '%s\n' "$payload" >> "$D/keys"
+      printf '%s\n' "$payload" > "$D/composer.$target"
+      exit 0
     fi
+    printf '%s\n' "$payload" >> "$D/keys"
+    [ "$payload" = Enter ] && [ -f "$D/composer.$target" ] || exit 0
+    payload=$(cat "$D/composer.$target")
+    case "${FM_FAKE_DROP_SUBMIT:-}:$payload" in
+      exit:/exit|exit:/quit|launch:*'encode launch-brief'*) exit 0 ;;
+    esac
+    rm -f "$D/composer.$target"
+    printf '%s\n' "$payload" >> "$D/submitted"
+    case "$payload" in
+      /exit|/quit)
+        if [ -e "$D/remote-relaunch-start" ] && [ ! -e "$D/remote-relaunch-end" ]; then
+          : > "$D/local-relaunch-during-remote"
+        fi
+        printf 'zsh' > "$D/command.$target"
+        ;;
+      *'encode launch-brief'*) cat "$D/becomes" > "$D/command.$target" ;;
+      ': Firstmate instruction waiting: list '*)
+        if [ -x "$D/on-doorbell" ]; then
+          "$D/on-doorbell" "$payload"
+        fi
+        if [ -f "$D/answer-inbox" ]; then
+          inbox=$(cat "$D/answer-inbox")
+          corr=$(cat "$inbox"/*.msg 2>/dev/null \
+            | grep -oE 'corr=[0-9a-f]{16}' | head -1)
+          if [ -n "$corr" ]; then
+            printf 'done [%s]: open records written down\n' "$corr" \
+              >> "$(cat "$D/answer-status")"
+          fi
+        fi
+        ;;
+    esac
     exit 0 ;;
   display-message)
     target=
@@ -117,10 +121,25 @@ case "${1:-}" in
       prev=$a
     done
     printf 'fakepane\n'; exit 0 ;;
-  capture-pane) printf '> \n'; exit 0 ;;
+  capture-pane)
+    if [ -n "${FM_FAKE_LOCAL_EXIT_DIALOG:-}" ] && mkdir "$D/delayed-dialog" 2>/dev/null; then
+      /bin/sleep 8
+      cat "$FM_FAKE_LOCAL_EXIT_DIALOG"
+    else
+      printf '> \n'
+    fi
+    exit 0 ;;
   list-windows)
     [ -f "$D/windows" ] || exit 0
-    case "$*" in *window_id*) awk '{ print "@" NR " fmses:" $0 }' "$D/windows" | fm_fake_tmux_window_ids "$@" ;; *) cat "$D/windows" ;; esac
+    case "$*" in
+      *window_id*) awk '{ print "@" NR " fmses:" $0 }' "$D/windows" | fm_fake_tmux_window_ids "$@" ;;
+      *)
+        case "${*: -1}" in
+          $'#{window_name}\t#{pane_id}') awk '{ printf "%s\t%%%d\n", $0, NR }' "$D/windows" ;;
+          *) cat "$D/windows" ;;
+        esac
+        ;;
+    esac
     exit 0 ;;
 esac
 exit 0
@@ -142,8 +161,9 @@ SH
   cat > "$fb/sleep" <<'SH'
 #!/usr/bin/env bash
 case "${1:-}" in
-  ''|*[!0-9]*) ;;
-  *) /bin/sleep 0.01 ;;
+  1) /bin/sleep 0.01 ;;
+  0.3|1.2) ;;
+  *) exec /bin/sleep "$@" ;;
 esac
 exit 0
 SH
@@ -157,7 +177,7 @@ new_case() {
   printf 'claude\n' > "$dir/home/config/secondmate-harness"
   : > "$dir/fake/literal"
   : > "$dir/fake/keys"
-  : > "$dir/fake/rings"
+  : > "$dir/fake/submitted"
   printf 'claude' > "$dir/fake/command"
   printf 'claude' > "$dir/fake/becomes"
   make_stub "$dir"
@@ -268,7 +288,7 @@ run_restart() {  # <case-dir> <args...>
     PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
     FM_SPAWN_NO_GUARD=1 FM_SECONDMATE_PERSIST_POLL=1 \
     FM_SECONDMATE_PERSIST_WAIT="${FM_TEST_PERSIST_WAIT:-30}" \
-    FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 FM_CONTROL_LAUNCH_WAIT=0.05 \
+    FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=2 FM_CONTROL_LAUNCH_WAIT=0.05 \
     FM_SSH_BIN="${FM_TEST_SSH_BIN:-ssh}" \
     "$RESTART" "$@" 2>&1
   rc=$?
@@ -281,7 +301,8 @@ run_restart() {  # <case-dir> <args...>
 test_persist_gates_and_asks_only_for_open_records() {
   local dir out rc request
   dir=$(new_case gate)
-  add_local_mate "$dir" sm1
+  add_local_mate "$dir" sm1 pi
+  printf 'pi' > "$dir/fake/command"
   # No answer armed: the mate never confirms its open work is written down.
   out=$(FM_TEST_PERSIST_WAIT=0 run_restart "$dir" fm-sm1); rc=$?
 
@@ -291,7 +312,8 @@ test_persist_gates_and_asks_only_for_open_records() {
   assert_not_contains "$out" "restarted: sm1" "a mate that never confirmed must not be restarted"
   assert_contains "$out" "summary: 0 of 1 restarted" "the summary must not claim a reload"
   # The agent is untouched: nothing exited, nothing relaunched.
-  assert_no_grep '^/exit$' "$dir/fake/literal" "the agent was stopped without a confirmed persist"
+  ! grep -Eq '^/(exit|quit)$' "$dir/fake/literal" \
+    || fail "the agent was stopped without a confirmed persist"
   assert_absent "$dir/home/state/sm1.control-relaunch" \
     "a restart transaction was opened without a confirmed persist"
   grep -h '^phase=' "$dir/home/state/pending-replies"/* | grep -q '^phase=awaiting_report$' \
@@ -306,6 +328,8 @@ test_persist_gates_and_asks_only_for_open_records() {
     "the request must flush an unregistered captain call"
   assert_contains "$request" "Do NOT run the memory, learnings, or captain-preference sweeps" \
     "the request must exclude the memory curation half of stow"
+  assert_not_contains "$request" "stop every background shell task" \
+    "the running Pi mate must keep its background tasks when the replacement is Claude"
   pass "T1 persist is a gate, and asks for open records and task status only"
 }
 
@@ -323,8 +347,8 @@ test_persist_precedes_restart() {
   assert_contains "$out" "summary: 1 of 1 restarted, 0 nudged, 0 unreached" "the summary should report the reload"
   # The pane transcript orders the two phases: the instruction doorbell first,
   # the harness exit command only after it.
-  doorbell_line=$(grep -n '^: Firstmate instruction waiting: ' "$dir/fake/literal" | head -1 | cut -d: -f1)
-  exit_line=$(grep -n '^/exit$' "$dir/fake/literal" | head -1 | cut -d: -f1)
+  doorbell_line=$(grep -n '^: Firstmate instruction waiting: ' "$dir/fake/submitted" | head -1 | cut -d: -f1)
+  exit_line=$(grep -n '^/exit$' "$dir/fake/submitted" | head -1 | cut -d: -f1)
   [ -n "$doorbell_line" ] || fail "the persist request never reached the mate"
   [ -n "$exit_line" ] || fail "the mate was never stopped, so it was not restarted"
   [ "$doorbell_line" -lt "$exit_line" ] \
@@ -446,7 +470,8 @@ test_refused_restart_falls_back_without_claiming_a_reload() {
   assert_not_contains "$out" "restarted: sm1" "a refused restart must not be reported as restarted"
   [ "$(cat "$dir/fake/command")" = "$before" ] \
     || fail "a refusal before the stop should leave the running agent exactly as it was"
-  assert_no_grep '^/exit$' "$dir/fake/literal" "a pre-stop refusal must not have stopped the agent"
+  ! grep -Fxq -e /exit -e /quit "$dir/fake/literal" \
+    || fail "a pre-stop refusal must not type an exit command"
   pass "T5 a refused restart leaves the mate running and reports an unknown outcome"
 }
 
@@ -455,8 +480,8 @@ test_refused_restart_falls_back_without_claiming_a_reload() {
 # host-local command and the profile the PARENT resolved, not a local shortcut.
 # The far side also models the live mate: it answers the persist request that
 # crossed the same hop, on the parent channel, with that request's own token.
-setup_remote_case() {  # <case-dir> <id> <ssh-mode>
-  local dir=$1 id=$2 mode=$3
+setup_remote_case() {  # <case-dir> <id> <ssh-mode> [harness]
+  local dir=$1 id=$2 mode=$3 harness=${4:-claude}
   local fb="$dir/fakebin"
   mkdir -p "$dir/$id-home"
   {
@@ -464,7 +489,7 @@ setup_remote_case() {  # <case-dir> <id> <ssh-mode>
     echo "endpoint_task_id=$id"
     echo "worktree=$dir/$id-home"
     echo "project=$dir/$id-home"
-    echo "harness=claude"
+    echo "harness=$harness"
     echo "kind=secondmate"
     echo "mode=secondmate"
     echo "yolo=off"
@@ -494,6 +519,12 @@ case "${FM_FAKE_SSH_MODE:-ok}" in
   unreachable) exit 255 ;;
 esac
 case "${rargs[1]:-}" in
+  observe)
+    if [ "${FM_FAKE_SSH_MODE:-ok}" = slow-exit-dialog ] && [ "${rargs[3]:-}" = --exit-dialog ]; then
+      /bin/sleep 8
+      printf 'exit-confirm\n'
+    fi
+    ;;
   send)
     # Model the live remote mate: act on the instruction and report back on the
     # parent channel, carrying the correlation token the request embedded.
@@ -509,9 +540,27 @@ case "${rargs[1]:-}" in
         printf 'error: remote host-local relaunch failed\n' >&2
         exit 1
         ;;
+      dialog-refusal|exit-timeout)
+        reason='the agent did not stop within 30s'
+        if [ "$FM_FAKE_SSH_MODE" = dialog-refusal ]; then
+          reason='Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it'
+        fi
+        printf '%s\n' 'warning: ignoring an invalid configured effort token' \
+          "error: exit-delivered ${rargs[2]} interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; $reason" >&2
+        exit 1
+        ;;
       slow-relaunch)
         : > "$FM_FAKE_DIR/remote-relaunch-start"
         /bin/sleep 2
+        : > "$FM_FAKE_DIR/remote-relaunch-end"
+        ;;
+      overlap-relaunch)
+        : > "$FM_FAKE_DIR/remote-relaunch-start"
+        deadline=$((SECONDS + 15))
+        until [ -e "$FM_FAKE_DIR/local-relaunch-during-remote" ]; do
+          [ "$SECONDS" -lt "$deadline" ] || exit 1
+          /bin/sleep 0.05
+        done
         : > "$FM_FAKE_DIR/remote-relaunch-end"
         ;;
     esac
@@ -548,6 +597,8 @@ test_remote_mate_restarts_over_the_transport_hop() {
   [ "$relaunch_line" = "fm-remote-secondmate-control.sh relaunch sm2 codex big-model high" ] \
     || fail "the host-local relaunch did not carry the parent's resolved profile: $relaunch_line"
   # The persist request crossed the SAME hop before the restart did.
+  grep -q '^fm-remote-secondmate-control.sh send .*stop every background shell task you started' \
+    "$dir/ssh.log" || fail "the running Claude mate must get the cleanup request when the replacement is Codex"
   [ "$(grep -n '^fm-remote-secondmate-control.sh send' "$dir/ssh.log" | head -1 | cut -d: -f1)" \
      -lt "$(grep -n '^fm-remote-secondmate-control.sh relaunch' "$dir/ssh.log" | head -1 | cut -d: -f1)" ] \
     || fail "the remote mate was restarted before it was asked to persist"$'\n'"$(cat "$dir/ssh.log")"
@@ -558,6 +609,34 @@ test_remote_mate_restarts_over_the_transport_hop() {
   assert_contains "$(cat "$dir/home/state/sm2.meta")" "effort=high" \
     "remote restart must update effort in parent meta record"
   pass "T6 a remote mate restarts through the host-local control plane over the fm-on hop"
+}
+
+test_remote_exit_dialog_refusal_takes_priority_over_warning() {
+  local dir out rc
+  dir=$(new_case dialog-refusal)
+  setup_remote_case "$dir" sm2 dialog-refusal
+
+  out=$(FM_FAKE_ANSWER_STATUS="$dir/home/state/sm2.status" run_restart "$dir" sm2); rc=$?
+
+  expect_code 3 "$rc" "the remote exit dialog should leave the mate unreached: $out"
+  assert_contains "$out" 'unreached: sm2: the restart outcome is unknown: exit-delivered sm2' \
+    "the summary must include the remote relaunch refusal"
+  assert_contains "$out" 'Claude is showing its background-tasks exit confirmation' \
+    "the summary must name the dialog even when a warning came first"
+  pass "a remote restart reports the exit dialog refusal after a warning"
+}
+
+test_remote_exit_timeout_keeps_first_diagnostic() {
+  local dir out rc
+  dir=$(new_case exit-timeout)
+  setup_remote_case "$dir" sm2 exit-timeout opencode
+
+  out=$(FM_FAKE_ANSWER_STATUS="$dir/home/state/sm2.status" run_restart "$dir" sm2); rc=$?
+
+  expect_code 3 "$rc" "an ordinary exit timeout should leave the mate unreached: $out"
+  assert_contains "$out" 'unreached: sm2: the restart outcome is unknown: warning: ignoring an invalid configured effort token' \
+    "a generic exit timeout must preserve the first diagnostic"
+  pass "a remote restart preserves diagnostic order for an ordinary exit timeout"
 }
 
 # --- T7: an unreachable host is unknown, never a claimed reload --------------
@@ -573,6 +652,49 @@ test_unreachable_host_is_reported_unknown() {
   assert_contains "$out" "sm3:" "the unreachable mate must still be named"
   assert_contains "$out" "could not be delivered" "an unreachable host must be reported as undelivered, not as reloaded"
   pass "T7 an unreachable host is reported honestly instead of claimed as reloaded"
+}
+
+test_slow_exit_dialog_observation_does_not_block_restart() {
+  local dir out rc
+  dir=$(new_case slow-exit-dialog)
+  rm "$dir/fakebin/sleep"
+  setup_remote_case "$dir" sm1 slow-exit-dialog
+  add_local_mate "$dir" sm2
+  printf -- '- sm2 - local domain (home: %s; scope: things; projects: p; added 2026-09-03)\n' \
+    "$dir/sm2-home" >> "$dir/home/data/secondmates.md"
+  arm_answer "$dir" sm2
+
+  out=$(FM_TIMEOUT_MECHANISM_OVERRIDE=bash FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1 sm2); rc=$?
+
+  expect_code 3 "$rc" "the mate without a save reply should fall back to a nudge: $out"
+  [ "$(grep -Fxc 'fm-remote-secondmate-control.sh observe sm1 --exit-dialog' "$dir/ssh.log")" -eq 2 ] \
+    || fail "the stalled remote dialog probe must run before both the save request and the fallback"
+  assert_grep 'stop every background shell task you started' "$dir/ssh.log" \
+    "the preflight timeout must allow the remote save request"
+  assert_grep 're-read your AGENTS.md' "$dir/ssh.log" \
+    "the fallback timeout must allow the remote nudge"
+  assert_contains "$out" 'nudged: sm1: it did not confirm within 0s' \
+    "a late dialog response must leave the normal fallback available"
+  assert_contains "$out" 'restarted: sm2 (claude)' \
+    "the later mate must still restart after confirming its save request"
+  pass "a slow remote dialog observation does not suppress save requests or nudges"
+}
+
+test_slow_local_exit_dialog_observation_does_not_block_restart() {
+  local dir out rc
+  dir=$(new_case slow-local-exit-dialog)
+  rm "$dir/fakebin/sleep"
+  add_local_mate "$dir" sm1
+  arm_answer "$dir" sm1
+
+  out=$(FM_FAKE_LOCAL_EXIT_DIALOG="$ROOT/tests/fixtures/claude-exit/background-tasks.screen" \
+    FM_TIMEOUT_MECHANISM_OVERRIDE=bash FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1); rc=$?
+
+  [ -d "$dir/fake/delayed-dialog" ] || fail "the local dialog probe did not reach the pane"
+  expect_code 0 "$rc" "a late dialog response must leave the save and restart available: $out"
+  assert_contains "$out" 'restarted: sm1 (claude)' \
+    "the mate must restart after confirming its save request"
+  pass "a slow local dialog observation does not suppress the restart"
 }
 
 # --- T8: a local restart lands on this home's durable pin, and says which -----
@@ -632,8 +754,7 @@ test_concurrent_reply_cannot_release_persist_gate() {
   rec="$state/pending-replies/$corr"
   cat > "$dir/fake/on-doorbell" <<SH
 #!/usr/bin/env bash
-[ ! -e "$dir/fake/concurrent-created" ] || exit 0
-: > "$dir/fake/concurrent-created"
+[ -n "\${FM_PENDING_REPLY_EXISTING_CORR:-}" ] || exit 0
 mkdir -p "$state/pending-replies"
 cat > "$rec" <<EOF
 phase=awaiting_report
@@ -650,9 +771,14 @@ SH
 
   out=$(FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1); rc=$?
 
+  assert_grep "done [corr=$corr]: unrelated request answered" "$state/sm1.status" \
+    "the submitted persist request must have elicited the unrelated answer"
   expect_code 3 "$rc" "an unrelated concurrent answer must not release the persist gate"$'\n'"$out"
+  assert_contains "$out" "nudged: sm1: it did not confirm within 0s" \
+    "the unrelated answer must leave the persist request unanswered at the deadline"
   assert_not_contains "$out" "restarted: sm1" "the unrelated answer authorized a restart"
-  assert_no_grep '^/exit$' "$dir/fake/literal" "the unrelated answer stopped the mate"
+  ! grep -Fxq -e /exit -e /quit "$dir/fake/literal" \
+    || fail "the unrelated answer authorized an exit command"
   pass "T9 the persist gate retains its explicitly allocated correlation"
 }
 
@@ -667,8 +793,8 @@ test_persist_waits_are_polled_together() {
   out=$(FM_TEST_PERSIST_WAIT=3 run_restart "$dir" sm1 sm2); rc=$?
 
   expect_code 3 "$rc" "the unanswered mate should fall back after the confirmed mate restarts"$'\n'"$out"
-  exit_line=$(grep -n '^/exit$' "$dir/fake/literal" | head -1 | cut -d: -f1)
-  nudge_line=$(grep -n '^: Firstmate instruction waiting: ' "$dir/fake/literal" | tail -1 | cut -d: -f1)
+  exit_line=$(grep -n '^/exit$' "$dir/fake/submitted" | head -1 | cut -d: -f1)
+  nudge_line=$(grep -n '^: Firstmate instruction waiting: ' "$dir/fake/submitted" | tail -1 | cut -d: -f1)
   [ -n "$exit_line" ] && [ -n "$nudge_line" ] && [ "$exit_line" -lt "$nudge_line" ] \
     || fail "the first mate's timeout held the confirmed second mate behind it: $out"
   pass "T10 pending persist answers are polled as one fleet"
@@ -693,11 +819,33 @@ test_post_stop_failure_is_reported_unreached() {
   pass "T11 post-stop restart failure is never misreported as a nudge"
 }
 
+test_lost_lifecycle_enter_cannot_complete_restart() {
+  local phase dir out rc
+  for phase in exit launch; do
+    dir=$(new_case "lost-$phase-enter")
+    add_local_mate "$dir" sm1
+    arm_answer "$dir" sm1
+    out=$(FM_FAKE_DROP_SUBMIT="$phase" run_restart "$dir" sm1); rc=$?
+
+    expect_code 3 "$rc" "losing the $phase Enter should leave the restart unconfirmed: $out"
+    assert_contains "$out" "unreached: sm1:" "losing the $phase Enter should report the mate unreached"
+    case "$phase" in
+      exit) assert_contains "$out" "the agent did not stop" "a typed /exit must leave the original agent running" ;;
+      launch)
+        assert_grep 'encode launch-brief' "$dir/fake/literal" "the launch command must have reached the pane"
+        [ "$(cat "$dir/fake/command.fmses:fm-sm1")" = zsh ] \
+          || fail "a typed launch must leave the pane stopped"
+        ;;
+    esac
+  done
+  pass "restart requires submitted exit and replacement commands"
+}
+
 # --- T12: relaunch work does not stop polling other persist answers ----------
 test_relaunches_do_not_block_persist_polling() {
   local dir out rc
   dir=$(new_case relaunch-polling)
-  setup_remote_case "$dir" sm1 slow-relaunch
+  setup_remote_case "$dir" sm1 overlap-relaunch
   add_local_mate "$dir" sm2
   printf -- '- sm2 - local domain (home: %s; scope: things; projects: p; added 2026-09-03)\n' \
     "$dir/sm2-home" >> "$dir/home/data/secondmates.md"
@@ -827,8 +975,8 @@ test_already_current_mate_restarts_end_to_end() {
   assert_contains "$out" "summary: 1 of 1 restarted, 0 nudged, 0 unreached" \
     "the pass must report the reload it performed"
   # Persist strictly before replace, read off the pane transcript.
-  doorbell_line=$(grep -n '^: Firstmate instruction waiting: ' "$dir/fake/literal" | head -1 | cut -d: -f1)
-  exit_line=$(grep -n '^/exit$' "$dir/fake/literal" | head -1 | cut -d: -f1)
+  doorbell_line=$(grep -n '^: Firstmate instruction waiting: ' "$dir/fake/submitted" | head -1 | cut -d: -f1)
+  exit_line=$(grep -n '^/exit$' "$dir/fake/submitted" | head -1 | cut -d: -f1)
   [ -n "$doorbell_line" ] || fail "the persist request never reached the already-current mate"
   [ -n "$exit_line" ] || fail "the already-current mate was never stopped, so it was not restarted"
   [ "$doorbell_line" -lt "$exit_line" ] \
@@ -872,7 +1020,8 @@ test_already_current_unprovable_mate_stays_on_the_nudge_path() {
   assert_not_contains "$out" "restarted: sm1" "an unprovable mate must never be reported as reloaded"
   [ "$(cat "$dir/fake/command")" = "$before" ] \
     || fail "the unprovable mate's agent was stopped anyway"
-  assert_no_grep '^/exit$' "$dir/fake/literal" "nothing may be stopped on the nudge path"
+  ! grep -Fxq -e /exit -e /quit "$dir/fake/literal" \
+    || fail "the nudge-only path must not type an exit command"
   pass "T16 an already-current mate with an unprovable runtime keeps the honest nudge path"
 }
 
@@ -930,10 +1079,15 @@ test_refused_restart_falls_back_without_claiming_a_reload
 test_local_restart_uses_the_home_pin_and_reports_what_ran
 test_native_ultra_restart_keeps_local_and_remote_profiles
 test_remote_mate_restarts_over_the_transport_hop
+test_remote_exit_dialog_refusal_takes_priority_over_warning
+test_remote_exit_timeout_keeps_first_diagnostic
 test_unreachable_host_is_reported_unknown
+test_slow_exit_dialog_observation_does_not_block_restart
+test_slow_local_exit_dialog_observation_does_not_block_restart
 test_concurrent_reply_cannot_release_persist_gate
 test_persist_waits_are_polled_together
 test_post_stop_failure_is_reported_unreached
+test_lost_lifecycle_enter_cannot_complete_restart
 test_relaunches_do_not_block_persist_polling
 test_unpublished_worker_result_is_accounted_for
 test_result_published_while_reaping_is_honored
