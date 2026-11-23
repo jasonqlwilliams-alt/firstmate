@@ -212,6 +212,19 @@ fm_test_cleanup() {
   fi
 }
 
+# fm_test_remove_task_tmps <task-id>...: remove the task temp roots fm-spawn
+# created for these test-owned task ids, both the private /tmp/fm-<id>.XXXXXX
+# shape and the legacy fixed /tmp/fm-<id>.
+fm_test_remove_task_tmps() {
+  local id d
+  for id in "$@"; do
+    [ -n "$id" ] || continue
+    for d in "/tmp/fm-$id" "/tmp/fm-$id".??????; do
+      [ ! -e "$d" ] || rm -rf "$d"
+    done
+  done
+}
+
 fm_test_tmproot() {
   local prefix=${1:-fm-test} root tmp_base
   tmp_base=${TMPDIR:-/tmp}
