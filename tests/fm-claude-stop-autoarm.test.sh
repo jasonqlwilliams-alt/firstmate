@@ -1542,6 +1542,9 @@ SH
     return 0
   fi
 
+  if [ "$mode" = stop ]; then
+    export FM_GUARD_GRACE=120 FM_WATCHER_STALE_GRACE=120
+  fi
   "$dir/bin/fm-watch-arm.sh" > "$dir/outer.out" 2>&1 &
   arm_pid=$!
   if [ "$mode" = stop ]; then
