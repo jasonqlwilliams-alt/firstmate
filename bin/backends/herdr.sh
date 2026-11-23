@@ -2451,7 +2451,7 @@ fm_backend_herdr_recorded_endpoint_state() {  # <target>
   fm_backend_herdr_parse_target "$target" || { printf 'unreadable'; return 0; }
   identity=$(fm_backend_herdr_task_identity_state "$target")
   case "$identity" in
-    match) printf 'present' ;;
+    match) return 0 ;;
     mismatch) printf 'replaced' ;;
     missing) printf 'missing' ;;
     *)

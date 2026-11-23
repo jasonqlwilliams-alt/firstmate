@@ -357,6 +357,15 @@ window_key() {  # <window>
   printf '%s' "${key//./_}"
 }
 
+pane_hash_prefix() {  # <backend> <window> <meta>
+  local backend=$1 win=$2 meta=$3 incarnation owner
+  case "$backend" in herdr|zellij) ;; *) return 0 ;; esac
+  incarnation=$(fm_backend_endpoint_incarnation "$meta") || return 1
+  case "$incarnation" in "$backend:$win"$'\t'*) ;; *) return 1 ;; esac
+  owner=$(printf '%s\t%s' "${meta##*/}" "$incarnation" | hash_pane) || return 1
+  printf '%s\t' "$owner"
+}
+
 inbox_steer_escalate_unavailable() {  # <window> <task> <record>
   local w=$1 task=$2 rec=$3 reason
   reason="stale: $w (unread firstmate instruction: $rec is unhandled and the worker's agent has exited or its endpoint is missing, so the doorbell was not typed; recover the worker)"
@@ -507,7 +516,7 @@ inbox_steer_check() {  # <window> <task> <backend>
 signal_turnend_panes_churned() {  # <file> ...
   [ -e "$CONFIG/turnend-churn-absorb" ] || return 1
   local f base task meta kind w key backend label terminal prev now since now_s absorb_secs marker age
-  local rec_task task_index i j count hash_file hash_bytes created
+  local rec_task task_index i j count hash_file hash_bytes hash_prefix created
   local max_absorb_secs=9223372036854775807
   local -a signal_tasks=() signal_statuses=() snapshot_tasks=() snapshot_kinds=()
   local -a snapshot_windows=() snapshot_keys=() snapshot_backends=() snapshot_labels=()
@@ -596,15 +605,19 @@ signal_turnend_panes_churned() {  # <file> ...
     key=${snapshot_keys[$task_index]}
     backend=${snapshot_backends[$task_index]}
     label=${snapshot_labels[$task_index]}
+    meta="$STATE/${snapshot_tasks[$task_index]}.meta"
+    hash_prefix=$(pane_hash_prefix "$backend" "$w" "$meta") || return 1
     hash_file="$STATE/.hash-$key"
     hash_bytes=$(LC_ALL=C wc -c 2>/dev/null < "$hash_file") || return 1
     hash_bytes=${hash_bytes//[[:space:]]/}
-    [ "$hash_bytes" = 32 ] || return 1
+    [ "$hash_bytes" = "$((32 + ${#hash_prefix}))" ] || return 1
     prev=$(cat "$hash_file" 2>/dev/null) || return 1
+    case "$prev" in "$hash_prefix"*) prev=${prev#"$hash_prefix"} ;; *) return 1 ;; esac
     [[ $prev =~ ^[0-9a-f]{32}$ ]] || return 1
-    now=$(FM_BACKEND_HERDR_ENDPOINT_META="$STATE/${snapshot_tasks[$task_index]}.meta" \
+    now=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
       fm_backend_capture "$backend" "$w" 40 "$label" 2>/dev/null) || return 1
     [ -n "$now" ] || return 1
+    [ "$hash_prefix" = "$(pane_hash_prefix "$backend" "$w" "$meta")" ] || return 1
     [ "$(printf '%s' "$now" | hash_pane)" != "$prev" ] || return 1
     churned_keys+=("$key")
   done
@@ -2354,6 +2367,7 @@ EOF
       continue
     fi
     missing_marker="$STATE/$task.missing-endpoint"
+    hash_prefix=$(pane_hash_prefix "$backend" "$w" "$meta") || continue
     # Check loss for this record even if another task captured the same pane.
     if { [ "$backend" = herdr ] && [ "$herdr_meta" != "$meta" ]; } \
       || ! tail40=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
@@ -2362,6 +2376,7 @@ EOF
       case "$backend" in herdr|zellij) ;; *) seen="$seen|$w|" ;; esac
       continue
     fi
+    [ "$hash_prefix" = "$(pane_hash_prefix "$backend" "$w" "$meta")" ] || continue
     [ ! -e "$missing_marker" ] || rm -f "$missing_marker"
     case "$seen" in *"|$w|"*) continue ;; esac
     seen="$seen|$w|"
@@ -2374,6 +2389,14 @@ EOF
     ewf="$STATE/.wedge-escalations-$key"
     pf="$STATE/.paused-$key"   # flag: this key's stale is using the bounded pause cadence
     prev=$(cat "$hf" 2>/dev/null || true)
+    case "$prev" in
+      "$hash_prefix"*) prev=${prev#"$hash_prefix"} ;;
+      *)
+        clear_pause_tracking "$key"
+        rm -f "$STATE/.churn-since-$key"
+        prev=
+        ;;
+    esac
     # Busy match: a backend's native semantic state when available (herdr), else
     # the last 6 non-blank lines only (the TUI footer area, where every verified
     # harness renders its busy indicator) so busy-looking strings in displayed
@@ -2544,7 +2567,7 @@ EOF
         fi
       fi
     else
-      printf '%s' "$h" > "$hf"
+      printf '%s%s' "$hash_prefix" "$h" > "$hf"
       echo 0 > "$cf"
       paused_bound=1
       if [ "$busy_now" -eq 0 ] && busy_turn_over_age "$task"; then

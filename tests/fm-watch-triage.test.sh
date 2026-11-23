@@ -2750,7 +2750,8 @@ test_shared_pane_keeps_task_loss_and_stale_checks_independent() (
           cat > "$fakebin/herdr" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
-  'pane get w1:p2 --session shared') printf '%s\n' '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"current"}}}' ;;
+  'pane get w1:p2 --session shared')
+    printf '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"%s"}}}\n' "$FM_TEST_PANE_TERMINAL" ;;
   'pane read w1:p2 --source recent --lines 200 --session shared') printf '%s\n' 'idle replacement' ;;
   'agent get w1:p2 --session shared') printf '%s\n' '{"error":{"code":"agent_not_found"}}' ;;
   *) exit 1 ;;
@@ -2764,7 +2765,7 @@ SH
 case "$*" in
   'list-sessions --short --no-formatting') printf '%s\n' shared ;;
   '--session shared action list-panes --json') printf '%s\n' '[{"id":7,"tab_id":3,"is_plugin":false}]' ;;
-  '--session shared action list-tabs --json') printf '[{"tab_id":3,"name":"fm-%s"}]\n' "$FM_TEST_LIVE_TASK" ;;
+  '--session shared action list-tabs --json') printf '[{"tab_id":3,"name":"fm-%s"}]\n' "$FM_TEST_PANE_TASK" ;;
   '--session shared action dump-screen --pane-id 7') printf '%s\n' 'idle replacement' ;;
   *) exit 1 ;;
 esac
@@ -2776,11 +2777,19 @@ SH
       loss="stale: $target (the recorded endpoint is gone for task $lost)"
       fm_write_meta "$state/$lost.meta" "window=$target" "backend=$backend" kind=ship \
         spawn_gen=old herdr_terminal_id=old
+      : > "$state/.afk"
+      watch_bg "$state" "$fakebin" "$out" env FM_HOME="$dir" FM_TEST_PANE_TASK="$lost" FM_TEST_PANE_TERMINAL=old
+      pid=$!
+      wait_for_exit "$pid" 150 || fail "$backend $order: the original task never reached staleness"
+      pid=''
+      grep -Fxq "stale: $target" "$out" || fail "$backend $order: expected original stale: $(cat "$out")"
+      ack_stopped_cycle "$state" || fail "$backend $order: could not acknowledge the original stale wake"
+
       fm_write_meta "$state/$live.meta" "window=$target" "backend=$backend" kind=ship \
         spawn_gen=current herdr_terminal_id=current
 
       if [ "$backend" = herdr ]; then
-        watch_bg "$state" "$fakebin" "$out" env FM_HOME="$dir"
+        watch_bg "$state" "$fakebin" "$out" env FM_HOME="$dir" FM_TEST_PANE_TERMINAL=current
         pid=$!
         wait_for_exit "$pid" 150 || fail "$order: the lost Herdr record did not wake the watcher"
         pid=''
@@ -2789,8 +2798,7 @@ SH
         ack_stopped_cycle "$state" || fail "$order: could not acknowledge the Herdr loss"
       fi
 
-      watch_bg "$state" "$fakebin" "$out" env FM_HOME="$dir" FM_TEST_LIVE_TASK="$live" \
-        FM_FAKE_CREW_STATE='state: stopped · source: pane · idle replacement'
+      watch_bg "$state" "$fakebin" "$out" env FM_HOME="$dir" FM_TEST_PANE_TASK="$live" FM_TEST_PANE_TERMINAL=current
       pid=$!
       wait_for_exit "$pid" 150 || fail "$backend $order: the live task never reached normal staleness"
       pid=''

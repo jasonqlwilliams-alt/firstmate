@@ -1194,7 +1194,6 @@ fm_backend_recorded_endpoint_state() {  # <backend> <target> <meta>
     tmux)
       case "$(fm_backend_tmux_agent_state "$target")" in
         missing) printf 'missing' ;;
-        alive|dead|ambiguous) printf 'present' ;;
         *) printf 'unreadable' ;;
       esac
       ;;

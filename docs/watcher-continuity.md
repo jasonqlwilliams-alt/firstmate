@@ -60,7 +60,8 @@ The turn-end guard remains the final backstop rather than the normal continuity 
 
 When pane polling cannot read a local task's recorded endpoint and the backend confirms it is gone, the watcher queues `stale: <window> (the recorded endpoint is gone)` unless a matching [retained-copy park mark](#parking-a-task-with-its-copy-retained) suppresses the report.
 Herdr and Zellij check loss for each task record even when multiple records share the window key, and include `for task <task>` in the reason.
-Herdr uses the recorded terminal identity to confirm replacement, while Zellij requires a successful pane inventory that omits the terminal id and leaves a possible replacement unreadable.
+Herdr uses the recorded terminal identity to confirm replacement.
+Zellij reports absence only when a successful pane inventory omits the terminal id, so an occupied id can leave a replacement inconclusive.
 Physical absence clears the pane's pause tracking.
 A verified replacement leaves the current pane's tracking to its live task.
 A secondmate enters the loss path only while its latest status declares `paused:` or `captain-held:`.
@@ -69,6 +70,7 @@ A successful capture for that task re-arms its report, and teardown keeps the lo
 The wake keeps its window key for routing and has a separate deduplication identity, so the drain presents both the endpoint loss and any ordinary stale wake for that window, collapsing repeated loss rows to one.
 After handling both wakes, use the drain's [printed acknowledgement](#recovery-episode-acknowledgement) to retire them.
 Where the away daemon runs, it routes the loss to its escalation digest and keeps pause tracking cleared while the loss still matches the current endpoint, even if the wait remains declared.
+The away daemon's existing marker names can alias task IDs such as `worker.old` and `worker_old`.
 
 The [backend verification record](verification/runtime-backends.md#recorded-endpoint-loss) covers tmux, Herdr, and Zellij.
 The [watcher triage regressions](../tests/fm-watch-triage.test.sh) exercise both wake sequence orders, marking, and clearing.
