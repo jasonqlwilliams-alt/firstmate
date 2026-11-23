@@ -332,14 +332,13 @@ test_malformed_seen_signature_reads_the_whole_log() {
 test_stale_is_terminal_classifier() {
   local dir state
   dir=$(make_case classify-stale); state="$dir/state"
+  fm_write_meta "$state/term.meta" "window=default:w1:p2" "backend=herdr"
+  fm_write_meta "$state/nonterm.meta" "window=default:w1:p2" "backend=herdr"
   printf 'done: ready in branch fm/x\n' > "$state/term.status"
-  stale_is_terminal "sess:fm-term" "$state" || fail "terminal stale status not classified terminal"
-  fm_write_meta "$state/herdr-term.meta" "window=default:w1:p2" "backend=herdr"
-  printf 'done: ready in branch fm/herdr\n' > "$state/herdr-term.status"
-  stale_is_terminal "default:w1:p2" "$state" || fail "terminal herdr stale status not resolved through metadata"
   printf 'working: compiling\n' > "$state/nonterm.status"
-  stale_is_terminal "sess:fm-nonterm" "$state" && fail "non-terminal stale classified terminal"
-  stale_is_terminal "sess:fm-missing" "$state" && fail "stale with no status classified terminal"
+  stale_is_terminal term "$state" || fail "terminal status on the shared pane was missed"
+  stale_is_terminal nonterm "$state" && fail "non-terminal status on the shared pane was classified terminal"
+  stale_is_terminal missing "$state" && fail "stale with no status classified terminal"
   pass "stale_is_terminal: terminal status surfaces, non-terminal and no-status are benign"
 }
 
@@ -3633,6 +3632,76 @@ test_secondmate_unpause_clears_pause_tracking() {
   pass "a resumed secondmate clears pause and stale tracking before stale exemption"
 }
 
+test_zellij_secondmate_resume_restarts_pause_cadence() (
+  local dir state fakebin out statusf phase key=test_7 pid=''
+  dir=$(make_case zellij-secondmate-resume)
+  state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  statusf="$state/mate.status"
+  trap '[ -z "$pid" ] || reap "$pid"' EXIT
+  cat > "$fakebin/zellij" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'list-sessions --short --no-formatting') printf '%s\n' test ;;
+  '--session test action list-panes --json') printf '%s\n' '[{"id":7,"tab_id":3,"is_plugin":false}]' ;;
+  '--session test action list-tabs --json') printf '[{"tab_id":3,"name":"fm-%s"}]\n' "$(cat "$FM_HOME/tab")" ;;
+  '--session test action dump-screen --pane-id 7')
+    : > "$FM_HOME/captured"
+    printf '%s\n' 'idle secondmate'
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$fakebin/zellij"
+  export FM_HOME="$dir" FM_PAUSE_RESURFACE_SECS=240
+  fm_write_meta "$state/mate.meta" window=test:7 backend=zellij kind=secondmate spawn_gen=current
+  printf '%s\n' mate > "$dir/tab"
+  printf 'paused: waiting for the first release\n' > "$statusf"
+  set_mtime "$(( $(date +%s) - 500 ))" "$statusf"
+  printf '%s' "$(seen_sig "$statusf")" > "$state/.seen-mate_status"
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_for_exit "$pid" 150 || fail "the first Zellij pause did not re-surface"
+  pid=''
+  assert_contains "$(cat "$out")" "awaiting external" "the first wake was not a pause recheck"
+  assert_present "$state/.paused-resurfaced-$key" "the first pause did not record a recheck"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the first Zellij pause"
+  export FM_WATCH_HANDLING_SUCCESSOR=1
+
+  printf 'working: the first release landed\n' >> "$statusf"
+  printf '%s' "$(seen_sig "$statusf")" > "$state/.seen-mate_status"
+  rm -f "$dir/captured"
+  for phase in foreign mate; do
+    printf '%s\n' "$phase" > "$dir/tab"
+    watch_bg "$state" "$fakebin" "$out"
+    pid=$!
+    wait_poll_cycle "$state" "$pid" || fail "resumed Zellij secondmate woke the watcher: $(cat "$out")"
+    case "$phase" in
+      foreign) assert_present "$state/.paused-resurfaced-$key" "resume cleared tracking on a foreign Zellij tab" ;;
+      mate)
+        assert_absent "$state/.paused-$key" "verified resume retained pause tracking"
+        assert_absent "$state/.paused-resurfaced-$key" "verified resume retained the old recheck"
+        assert_absent "$state/.stale-$key" "verified resume retained stale tracking"
+        ;;
+    esac
+    assert_absent "$dir/captured" "resumed Zellij secondmate entered screen polling"
+    reap "$pid"
+    pid=''
+  done
+
+  printf 'paused: waiting for a different release\n' >> "$statusf"
+  printf '%s' "$(seen_sig "$statusf")" > "$state/.seen-mate_status"
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  for phase in 1 2 3; do
+    wait_poll_cycle "$state" "$pid" || fail "fresh Zellij pause re-surfaced before its interval: $(cat "$out")"
+  done
+  assert_present "$state/.paused-$key" "the watcher did not handle the fresh Zellij pause"
+  assert_absent "$state/.paused-resurfaced-$key" "the fresh Zellij pause recorded a premature recheck"
+  reap "$pid"
+  pid=''
+  pass "a verified Zellij secondmate resume clears the old cadence before its next pause"
+)
+
 test_nonterminal_stale_pause_transitions_reclassify_unchanged_hash() {
   local dir state fakebin out capture_file window key pane_hash sig pid i
   dir=$(make_case nonterminal-stale-pause-transition); state="$dir/state"; fakebin="$dir/fakebin"
@@ -5731,6 +5800,7 @@ test_secondmate_paused_resurfaces_in_normal_mode
 test_secondmate_captain_held_resurfaces_in_normal_mode
 test_secondmate_nonpaused_stale_remains_suppressed
 test_secondmate_unpause_clears_pause_tracking
+test_zellij_secondmate_resume_restarts_pause_cadence || exit 1
 test_nonterminal_stale_pause_transitions_reclassify_unchanged_hash
 test_nonterminal_paused_rechecks_authoritative_state
 test_paused_authoritative_working_preserves_wedge_timer

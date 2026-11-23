@@ -2363,7 +2363,15 @@ EOF
     # this guard: reaching it would require backlog reads for windows this gate
     # deliberately skips, putting that read on the ordinary poll hot path.
     if [ "$kind" = secondmate ] && ! status_is_paused_or_captain_held "$last"; then
-      case "$backend" in herdr|zellij) ;; *) seen="$seen|$w|" ;; esac
+      case "$backend" in
+        herdr) ;;
+        zellij)
+          if [ -e "$STATE/.paused-$key" ] && fm_backend_target_exists "$backend" "$w" "fm-$task" 2>/dev/null; then
+            clear_pause_tracking "$key"
+          fi
+          ;;
+        *) seen="$seen|$w|" ;;
+      esac
       continue
     fi
     missing_marker="$STATE/$task.missing-endpoint"
@@ -2432,7 +2440,7 @@ EOF
             printf '%s' "$h" > "$sf"
             wake "stale: $w"
           fi
-        elif stale_is_terminal "$w" "$STATE" "$task"; then
+        elif stale_is_terminal "$task" "$STATE"; then
           # The log's last line is captain-relevant - but that alone is not
           # proof the crew is actually done: a crew's own status log gets no
           # new entry once firstmate hands it to a no-mistakes validation

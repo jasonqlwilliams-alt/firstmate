@@ -521,9 +521,8 @@ clear_task_pause_tracking() {  # <task> <state>
   rm -f "$state/.subsuper-paused-$key" "$state/.subsuper-pause-until-due-$key" "$state/.subsuper-stale-$key"
 }
 
-clear_pause_tracking() {  # <window> <state> [task]
-  local win=$1 state=$2 task=${3:-} watcher_key
-  [ -n "$task" ] || task=$(window_to_task "$win" "$state")
+clear_pause_tracking() {  # <window> <state> <task>
+  local win=$1 state=$2 task=$3 watcher_key
   watcher_key=$(_stale_key "$win")
   clear_task_pause_tracking "$task" "$state"
   rm -f "$state/.paused-$watcher_key" "$state/.paused-rechecked-$watcher_key" "$state/.paused-resurfaced-$watcher_key" \
