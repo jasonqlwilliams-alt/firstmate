@@ -68,6 +68,7 @@ A refusal blocks the spawn rather than launching a worker that would park before
 The [agy composer rule](../../../../../bin/fm-composer-lib.sh) applies when the capture carries the pane's recorded harness `agy`, which the steering doorbell supplies.
 In a recognized frame, a draft captured on one composer row reads `pending`.
 Plain-text captures and frames containing multiple captured composer rows, a busy footer, or a feedback survey read `unknown`.
+Relaunch already publishes the replacement brief before model validation, so a failed relaunch after a hand edit adding the inbox locator to a legacy brief can leave the running worker receiving a short agy notice without ever having received the inbox path.
 See [Harness support](../../../../../docs/configuration.md#harness-support) for the doorbell's delivery checks and what a refusal leaves queued.
 Away-mode injection takes place in the supervisor pane, whose composer read omits the recorded harness required by this agy rule.
 

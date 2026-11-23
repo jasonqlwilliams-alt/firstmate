@@ -253,15 +253,25 @@ fm_task_inbox_body() {  # <record-path>
   return 1
 }
 
-_fm_task_inbox_brief_names_inbox() {  # <inbox-dir> <shell-quoted-path>
-  local data=${FM_DATA_OVERRIDE:-${FM_HOME:+$FM_HOME/data}} task=${1##*/} brief section
+_fm_task_inbox_brief_names_inbox() {  # <inbox-dir>
+  local inbox=$1 task=${1##*/} data=${FM_DATA_OVERRIDE:-${FM_HOME:+$FM_HOME/data}} brief section locator
+  local prefix="Firstmate steers you through durable message files in '" suffix="'." escaped_quote="'\\''"
   [ -n "$data" ] || return 1
   brief="$data/${task%.inbox}/launch-brief.md"
   if [ ! -e "$brief" ] && [ ! -L "$brief" ]; then
     brief="$data/${task%.inbox}/brief.md"
   fi
   section=$(fm_brief_heading_body "$brief" '# Firstmate instruction inbox' 2>/dev/null) || return 1
-  [ "${section%%$'\n'*}" = "Firstmate steers you through durable message files in '$2'." ]
+  locator=${section%%$'\n'*}
+  case "$locator" in
+    "$prefix"/*"$suffix") ;;
+    *) return 1 ;;
+  esac
+  locator=${locator#"$prefix"}
+  locator=${locator%"$suffix"}
+  [[ ${locator//"$escaped_quote"/} != *"'"* ]] || return 1
+  locator=${locator//"$escaped_quote"/"'"}
+  [ -d "$locator" ] && [ "$locator" -ef "$inbox" ]
 }
 
 # The constant doorbell line for the inbox containing a record.
@@ -278,11 +288,11 @@ fm_task_inbox_doorbell_line() {  # <record-path> [harness]
   case "$abs" in
     *[![:print:]]*) return 1 ;;
   esac
-  quoted=$(printf '%s' "$abs" | sed "s/'/'\\\\''/g")
-  if [ "${2:-}" = agy ] && _fm_task_inbox_brief_names_inbox "$abs" "$quoted"; then
+  if [ "${2:-}" = agy ] && _fm_task_inbox_brief_names_inbox "$dir"; then
     printf '%s' "$FM_TASK_INBOX_AGY_DOORBELL"
     return 0
   fi
+  quoted=$(printf '%s' "$abs" | sed "s/'/'\\\\''/g")
   printf ": Firstmate instruction waiting: list '%s'/*.msg and, in numeric order, read and act on each, then mv each handled file to '%s'/handled/." \
     "$quoted" "$quoted"
 }
