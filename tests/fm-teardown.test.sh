@@ -629,7 +629,7 @@ run_teardown() {
   # FM_DATA_OVERRIDE is pinned to the case dir because teardown closes this
   # home's backlog item itself; without it $DATA would resolve to the real
   # repo's own home and a test could mutate live records.
-  FM_HOME="${FM_HOME:-$case_dir/home}" FM_ROOT_OVERRIDE="$ROOT" \
+  FM_HOME="${FM_HOME:-$case_dir/home}" FM_ROOT_OVERRIDE="${FM_TEARDOWN_TEST_ROOT:-$ROOT}" \
   FM_STATE_OVERRIDE="$case_dir/state" \
   FM_DATA_OVERRIDE="$case_dir/data" \
   FM_CONFIG_OVERRIDE="$case_dir/config" \
@@ -1801,7 +1801,42 @@ test_persistent_index_lock_exhausts_retries_and_refuses_loudly() {
   [ -e "$lock" ] || fail "persistent-index-lock: lock file was removed"
   [ -f "$case_dir/state/task-x1.meta" ] \
     || fail "persistent-index-lock: teardown completed despite persistent lock"
+  [ "$(git -C "$case_dir/wt" symbolic-ref --short HEAD)" = fm/task-x1 ] \
+    || fail "persistent-index-lock: teardown left the task detached"
   pass "persistent index.lock exhausts retries and refuses without force-removing the lock"
+}
+
+test_non_lock_return_failure_preserves_checkout() {
+  local mode=$1 case_dir copy rc=0
+  case_dir=$(make_case "failed-return-$mode")
+  copy="$case_dir/wt"
+  write_meta "$case_dir" no-mistakes ship
+  land_shippable_commit "$case_dir"
+  add_lsof_no_holder "$case_dir"
+  printf 'configured hook\n' > "$copy/.fm-grok-turnend"
+  cat > "$case_dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+if [ "$FM_TEST_FAILED_RETURN_MODE" = moved ]; then
+  git -C "$3" update-ref --no-deref HEAD refs/heads/main || exit 2
+fi
+echo 'treehouse: simulated return error' >&2
+exit 1
+SH
+  chmod +x "$case_dir/fakebin/treehouse"
+  FM_TEST_FAILED_RETURN_MODE=$mode run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  expect_code 1 "$rc" "failed return ($mode): cleanup should fail"
+  assert_grep 'treehouse: simulated return error' "$case_dir/stderr" 'cleanup did not reach the failed return'
+  if [ "$mode" = moved ]; then
+    [ "$(git -C "$copy" rev-parse --abbrev-ref HEAD)" = HEAD ] \
+      && [ "$(git -C "$copy" rev-parse HEAD)" = "$(git -C "$copy" rev-parse main)" ] \
+      || fail 'failed return: teardown overwrote a changed HEAD'
+  else
+    [ "$(git -C "$copy" symbolic-ref --short HEAD)" = fm/task-x1 ] \
+      || fail 'failed return: teardown left the task detached'
+  fi
+  [ "$(cat "$copy/.fm-grok-turnend")" = 'configured hook' ] || fail 'failed return: teardown changed the task hook'
+  assert_present "$case_dir/state/task-x1.meta" 'failed return: teardown retired the task record'
+  pass "failed Treehouse return preserves checkout and hooks ($mode)"
 }
 
 test_empty_retry_wait_uses_default_without_aborting() {
@@ -2390,13 +2425,14 @@ SH
   pass "forced secondmate teardown preflights every Herdr child before cleanup mutation"
 }
 
-configure_secondmate_with_tmux_children() {  # <case-dir>
+configure_secondmate_with_tmux_children() {  # <case-dir> [child-b-worktree]
   local case_dir=$1 home="$1/secondmate-home" child child_wt
   mkdir -p "$home/state" "$home/data" "$home/config" "$home/projects"
   printf '%s\n' task-x1 > "$home/.fm-secondmate-home"
   printf '%s\n' "home=$home" >> "$case_dir/state/task-x1.meta"
   for child in child-a child-b; do
     child_wt="$case_dir/$child-wt"
+    [ "$child" != child-b ] || child_wt=${2:-$child_wt}
     git -C "$case_dir/project" worktree add -q -b "fm/$child" "$child_wt" main
     fm_write_meta "$home/state/$child.meta" \
       "window=firstmate:fm-$child" \
@@ -2407,6 +2443,51 @@ configure_secondmate_with_tmux_children() {  # <case-dir>
       "mode=local-only"
     : > "$home/state/$child.status"
   done
+}
+
+test_forced_secondmate_teardown_preflights_all_child_copies() {
+  local layout=$1 case_dir home child_b rc=0
+  case_dir=$(make_case "descendant-caller-$layout")
+  home="$case_dir/secondmate-home"
+  child_b="$case_dir/child-b-wt"
+  if [ "$layout" = pool ]; then
+    child_b="$case_dir/pool/2/project"
+    mkdir -p "$case_dir/pool/2"
+    printf '{}\n' > "$case_dir/pool/treehouse-state.json"
+  fi
+  git -C "$case_dir/project" worktree add -q --detach "$home" main
+  write_meta "$case_dir" local-only secondmate
+  configure_secondmate_with_tmux_children "$case_dir" "$child_b"
+
+  cat > "$case_dir/fakebin/lsof" <<'SH'
+#!/usr/bin/env bash
+[ "$*" = '-a -d cwd -Fpn' ] || exit 1
+printf 'p%s\nfcwd\nn%s\n' "$FM_TEST_CALLER_PID" "$FM_TEST_CALLER_CWD"
+SH
+  cat > "$case_dir/fakebin/treehouse" <<SH
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$case_dir/treehouse.log"
+SH
+  cat > "$case_dir/fakebin/tmux" <<SH
+#!/usr/bin/env bash
+case "\$1" in kill-*) printf '%s\n' "\$*" >> "$case_dir/kill.log" ;; esac
+SH
+  chmod +x "$case_dir/fakebin/lsof" "$case_dir/fakebin/treehouse" "$case_dir/fakebin/tmux"
+
+  (
+    cd "$child_b" || exit 1
+    FM_TEST_CALLER_PID=$BASHPID FM_TEST_CALLER_CWD=$(pwd -P) \
+      FM_TEARDOWN_TEST_ROOT="$case_dir/project" FM_TEARDOWN_GUARD_DONE=1 \
+      run_teardown "$case_dir" --force || exit $?
+  ) > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  expect_code 1 "$rc" "descendant caller ($layout): forced retirement should refuse"
+  assert_grep "is in Treehouse copy $child_b" "$case_dir/stderr" 'refusal did not identify the second child copy'
+  assert_absent "$case_dir/treehouse.log" 'refusal returned an earlier sibling before checking the second child'
+  assert_absent "$case_dir/kill.log" 'refusal killed an earlier sibling endpoint'
+  assert_present "$home/state/child-a.meta" 'refusal removed the first child record from the leased home'
+  assert_present "$home/state/child-b.meta" 'refusal removed the second child record from the leased home'
+  assert_present "$case_dir/state/task-x1.meta" 'refusal retired the leased home record'
+  pass "forced retirement preflights every child before touching the leased home ($layout)"
 }
 
 test_forced_secondmate_teardown_holds_descendant_lifecycle_locks() {
@@ -3642,6 +3723,9 @@ test_reparented_teardown_preserves_original_caller() (
     teardown_args=(--force)
   else
     write_meta "$case_dir" no-mistakes ship
+    if [ "$mode" = stale-edit ]; then
+      wt_commit_file "$case_dir" feature.txt landed
+    fi
     land_shippable_commit "$case_dir"
     copy="$case_dir/wt"
     task_branch=fm/task-x1
@@ -3651,7 +3735,7 @@ test_reparented_teardown_preserves_original_caller() (
   mkdir -p "${hook%/*}"
   printf 'configured hook\n' > "$hook"
   lock=$(git_index_lock_path "$copy")
-  [ "$mode" != stale ] || retries=0
+  case "$mode" in stale|stale-edit) retries=0 ;; esac
   mkfifo "$case_dir/result" || fail 'reparented teardown: could not create result pipe'
   if [ "$mode" = hidden ]; then
     configure_teardown_ancestry_ps "$case_dir"
@@ -3679,14 +3763,14 @@ done
 SH
   chmod +x "$case_dir/fakebin/lsof"
 
-  if [ "$mode" = stale ]; then
+  if [ "$retries" -eq 0 ]; then
     cat > "$case_dir/fakebin/rm" <<'SH'
 #!/usr/bin/env bash
 "$REAL_RM_FOR_TEST" "$@" || exit $?
 [ "$#" = 2 ] && [ "$2" = "$FM_TEST_REPARENT_LOCK" ] || exit 0
 : > "$FM_TEST_REPARENT_DIR/move-caller"
 for ((i=0; i<100; i++)); do
-  [[ ! "/proc/$FM_TEST_REAP_CALLER/cwd" -ef "$FM_TEST_REPARENT_DIR/wt" ]] || exit 0
+  [ ! -f "$FM_TEST_REPARENT_DIR/caller-moved" ] || exit 0
   sleep 0.05
 done
 exit 1
@@ -3718,7 +3802,7 @@ case "$FM_TEST_REPARENT_MODE" in
     done
     [ "$i" -lt 100 ] || exit 1
     ;;
-  stale)
+  stale|stale-edit)
     : > "$FM_TEST_REPARENT_LOCK"
     touch -t 200001010000 "$FM_TEST_REPARENT_LOCK"
     ;;
@@ -3780,13 +3864,17 @@ SH
       done
       exit 1
     ) || exit 1
-    if [ "$mode" = retry ] || [ "$mode" = stale ] || [ "$mode" = child ]; then
+    if [ "$mode" = retry ] || [ "$retries" -eq 0 ] || [ "$mode" = child ]; then
       for ((i=0; i<100; i++)); do
         [ ! -f "$case_dir/move-caller" ] || break
         sleep 0.05
       done
       [ "$i" -lt 100 ] || exit 1
       cd "$copy" || exit 1
+      if [ "$mode" = stale-edit ]; then
+        printf 'caller edit\n' > feature.txt
+      fi
+      : > "$case_dir/caller-moved"
     fi
     IFS= read -r -t 20 rc <&3 || exit 1
     printf 'survived\n' > "$case_dir/caller"
@@ -3823,7 +3911,12 @@ SH
     else
       expect_code 1 "$rc" "reparented teardown ($mode): cleanup should refuse an in-copy caller"
     fi
-    assert_grep 'teardown caller or ancestor (PID ' "$case_dir/stderr" 'missing caller refusal'
+    if [ "$mode" = stale-edit ]; then
+      assert_grep 'return aborted after stale-lock cleanup because safety checks failed' "$case_dir/stderr" 'missing safety refusal after the caller edit'
+      [ "$(cat "$copy/feature.txt")" = 'caller edit' ] || fail 'reparented teardown: refusal lost the caller edit'
+    else
+      assert_grep 'teardown caller or ancestor (PID ' "$case_dir/stderr" 'missing caller refusal'
+    fi
     assert_present "$copy" 'reparented teardown: refusal removed the copy'
     assert_present "$case_dir/state/task-x1.meta" 'reparented teardown: refusal retired task metadata'
     git -C "$copy" show-ref --verify --quiet "refs/heads/$task_branch" \
@@ -3837,7 +3930,7 @@ SH
       [ "$(cat "$case_dir/treehouse.log")" = return ] \
         || fail 'reparented teardown: Treehouse ran again after the caller moved inside'
     fi
-    if [ "$mode" = stale ]; then
+    if [ "$retries" -eq 0 ]; then
       assert_grep 'removed provably-stale git lock' "$case_dir/stderr" 'stale retry was not reached'
     fi
     if [ "$mode" = retry ]; then
@@ -3850,7 +3943,7 @@ SH
       fi
     fi
   fi
-  pass "cleanup reaps the leak and protects its original caller after reparenting ($mode)"
+  pass "cleanup protects its original caller after reparenting ($mode)"
 )
 
 test_lsof_absent_on_non_linux_reaps_tmux_process_group() {
@@ -4654,6 +4747,7 @@ test_reparented_teardown_preserves_original_caller inside || exit 1
 test_reparented_teardown_preserves_original_caller outside || exit 1
 test_reparented_teardown_preserves_original_caller retry || exit 1
 test_reparented_teardown_preserves_original_caller stale || exit 1
+test_reparented_teardown_preserves_original_caller stale-edit || exit 1
 test_reparented_teardown_preserves_original_caller hidden || exit 1
 test_reparented_teardown_preserves_original_caller before-start || exit 1
 test_reparented_teardown_preserves_original_caller child || exit 1
@@ -4680,6 +4774,8 @@ test_herdr_flat_teardown_refuses_records_on_unparseable_presence
 test_herdr_flat_teardown_preflight_refuses_before_changes
 test_forced_secondmate_herdr_child_preflight_refuses_before_changes
 test_forced_secondmate_teardown_holds_descendant_lifecycle_locks
+test_forced_secondmate_teardown_preflights_all_child_copies linked
+test_forced_secondmate_teardown_preflights_all_child_copies pool
 test_forced_secondmate_herdr_child_retains_records_when_close_unconfirmed
 test_forced_teardown_retains_nested_secondmate_home_when_grandchild_close_unconfirmed
 test_herdr_projection_teardown_retires_journal_only_after_confirmed_close
@@ -4715,6 +4811,8 @@ test_non_linked_index_lock_path_is_checked_from_worktree
 test_index_lock_mtime_read_failure_refuses
 test_transient_index_lock_clears_after_first_attempt_and_retry_succeeds
 test_persistent_index_lock_exhausts_retries_and_refuses_loudly
+test_non_lock_return_failure_preserves_checkout same
+test_non_lock_return_failure_preserves_checkout moved
 test_empty_retry_wait_uses_default_without_aborting
 test_fractional_legacy_retry_wait_refuses_without_arithmetic_error
 test_parked_own_run_is_aborted_before_teardown

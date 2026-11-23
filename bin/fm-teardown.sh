@@ -251,6 +251,7 @@
 # at startup before a wrapper exited. If either the ancestry or the cwd scan
 # cannot be verified, teardown refuses and retains the copy.
 # Only Treehouse can exclude a caller that enters the copy between teardown's final check and Treehouse's own scan.
+# Detection of reparenting before startup uses Linux process sessions and is unavailable on non-Linux hosts.
 #
 # Pre-teardown cleanup sequence (runs once every landed/discard-work safety
 # refusal above has already passed, and BEFORE any worktree return, branch
@@ -3053,6 +3054,10 @@ preflight_descendant_task_locks() {
   done
 }
 
+child_worktree_can_return_with_treehouse() {  # <project> <worktree>
+  [ -n "$1" ] && [ -d "$1" ] && [ -n "$2" ] && [ -d "$2" ] && command -v treehouse >/dev/null 2>&1
+}
+
 preflight_descendant_treehouse_slots() {
   local i state task_id meta kind backend target worktree project lock_path held owner_rc
   for ((i=0; i < ${#DESCENDANT_TASK_IDS[@]}; i++)); do
@@ -3100,17 +3105,20 @@ preflight_descendant_treehouse_slots() {
     if [ "$kind" = secondmate ] || [ "$backend" = orca ]; then
       continue
     fi
-    if ! fm_treehouse_pool_slot "$project" "$worktree"; then
-      continue
+    if fm_treehouse_pool_slot "$project" "$worktree"; then
+      fm_backend_validate_task_endpoint "$meta" "$task_id" || return 1
+      require_exclusive_worktree_slot_record "$meta" "$task_id" "$state" "$worktree" || return 1
+      owner_rc=0
+      require_owned_worktree_slot_record "$task_id" "$worktree" || owner_rc=$?
+      case "$owner_rc" in
+        0) ;;
+        "$TEARDOWN_SLOT_REASSIGNED_RC") continue ;;
+        *) return 1 ;;
+      esac
     fi
-    fm_backend_validate_task_endpoint "$meta" "$task_id" || return 1
-    require_exclusive_worktree_slot_record "$meta" "$task_id" "$state" "$worktree" || return 1
-    owner_rc=0
-    require_owned_worktree_slot_record "$task_id" "$worktree" || owner_rc=$?
-    case "$owner_rc" in
-      0|"$TEARDOWN_SLOT_REASSIGNED_RC") ;;
-      *) return 1 ;;
-    esac
+    if child_worktree_can_return_with_treehouse "$project" "$worktree"; then
+      require_treehouse_return_caller_outside "$worktree" || return "$TEARDOWN_TREEHOUSE_CALLER_REFUSED"
+    fi
   done
 }
 
@@ -3392,7 +3400,7 @@ cleanup_firstmate_home_children() {
       case "$child_owner_rc" in
         0)
           validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
-          if [ -n "$child_proj" ] && [ -d "$child_proj" ] && command -v treehouse >/dev/null 2>&1; then
+          if child_worktree_can_return_with_treehouse "$child_proj" "$child_wt"; then
             require_treehouse_return_caller_outside "$child_wt" || return "$TEARDOWN_TREEHOUSE_CALLER_REFUSED"
             child_treehouse=1
           fi
@@ -3786,6 +3794,7 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
   detached_task_ref=
   if branch=$(git -C "$WT" symbolic-ref --quiet HEAD 2>/dev/null) \
      && head=$(git -C "$WT" rev-parse --verify HEAD 2>/dev/null) \
+     && worktree_git_dir=$(git -C "$WT" rev-parse --absolute-git-dir 2>/dev/null) \
      && git -C "$WT" update-ref --no-deref HEAD "$head" "$head" 2>/dev/null; then
     detached_task_ref=$branch
   fi
@@ -3798,9 +3807,10 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
     post_lock_cleanup_check=validate_worktree_teardown_safety
   fi
   teardown_treehouse_return "$WT" "$PROJ" "worktree" "$post_lock_cleanup_check" || {
-    rc=$?
-    if [ "$rc" -eq "$TEARDOWN_TREEHOUSE_CALLER_REFUSED" ] && [ -n "$detached_task_ref" ]; then
-      git -C "$WT" symbolic-ref HEAD "$detached_task_ref" || \
+    if [ -n "$detached_task_ref" ] \
+       && ! git --git-dir="$worktree_git_dir" symbolic-ref --quiet HEAD >/dev/null 2>&1 \
+       && [ "$(git --git-dir="$worktree_git_dir" rev-parse --verify HEAD 2>/dev/null)" = "$head" ]; then
+      git --git-dir="$worktree_git_dir" symbolic-ref HEAD "$detached_task_ref" || \
         echo "error: could not restore $detached_task_ref as HEAD in $WT" >&2
     fi
     echo "error: treehouse return failed for worktree $WT; teardown aborted" >&2
