@@ -131,33 +131,38 @@ test_teardown_removes_tasktmp_dir() {
   pass "fm-teardown removes the dir pointed to by tasktmp= in meta"
 }
 
-test_teardown_preserves_shared_legacy_tasktmp() {
-  local id fake legacy_task_tmp
+test_teardown_preserves_shared_tasktmp() {
+  local variant=$1 id fake legacy_task_tmp task_tmp
   legacy_task_tmp=$(mktemp -d /tmp/fm-legacy-XXXXXX) || fail "could not allocate legacy fixture"
   FM_TEST_CLEANUP_DIRS+=("$legacy_task_tmp")
   id=${legacy_task_tmp#/tmp/fm-}
   mkdir "$legacy_task_tmp/gotmp"
   printf 'another home still needs this\n' > "$legacy_task_tmp/gotmp/keep"
-  fake=$(make_fake_root "$id" "$legacy_task_tmp")
+  task_tmp=$legacy_task_tmp
+  if [ "$variant" = symlink ]; then
+    task_tmp="$TMP_ROOT/tasktmp-link"
+    ln -s "$legacy_task_tmp" "$task_tmp"
+  fi
+  fake=$(make_fake_root "$id" "$task_tmp")
   if command -v lsof >/dev/null; then
     ( cd "$legacy_task_tmp/gotmp" && exec sleep 300 ) &
     LEGACY_SLEEPER_PID=$!
     LEGACY_SLEEPER_IDENTITY=$(fm_test_cwd_sleeper_identity "$LEGACY_SLEEPER_PID") \
       || fail "legacy sleeper did not start inside the shared root"
   else
-    printf 'skip: legacy task temp process preservation requires lsof\n'
+    printf 'skip: %s task temp process preservation requires lsof\n' "$variant"
   fi
   FM_HOME="$fake" bash "$fake/bin/fm-teardown.sh" "$id" > "$fake/teardown.log" 2>&1 \
-    || fail "legacy teardown failed: $(cat "$fake/teardown.log")"
-  [ ! -e "$fake/state/$id.meta" ] || fail "legacy teardown left the task record"
-  [ -f "$legacy_task_tmp/gotmp/keep" ] || fail "legacy teardown removed a potentially shared temp root"
+    || fail "$variant teardown failed: $(cat "$fake/teardown.log")"
+  [ ! -e "$fake/state/$id.meta" ] || fail "$variant teardown left the task record"
+  [ -f "$task_tmp/gotmp/keep" ] || fail "$variant teardown removed a potentially shared temp root or its link"
   if [ -n "$LEGACY_SLEEPER_IDENTITY" ]; then
     fm_test_owner_is_alive "$LEGACY_SLEEPER_PID" "$LEGACY_SLEEPER_IDENTITY" \
-      || fail "legacy teardown signalled a process in the shared temp root"
+      || fail "$variant teardown signalled a process in the shared temp root"
     fm_test_stop_sleeper "$LEGACY_SLEEPER_PID" "$LEGACY_SLEEPER_IDENTITY"
     LEGACY_SLEEPER_PID= LEGACY_SLEEPER_IDENTITY=
   fi
-  pass "fm-teardown preserves the legacy task temp directory for manual cleanup"
+  pass "fm-teardown leaves the $variant task temp path alone"
 }
 
 test_teardown_skips_gracefully_without_tasktmp() {
@@ -253,6 +258,7 @@ test_teardown_skips_gracefully_when_dir_missing() {
 }
 
 test_teardown_removes_tasktmp_dir
-test_teardown_preserves_shared_legacy_tasktmp
+test_teardown_preserves_shared_tasktmp legacy
+test_teardown_preserves_shared_tasktmp symlink
 test_teardown_skips_gracefully_without_tasktmp
 test_teardown_skips_gracefully_when_dir_missing

@@ -4065,11 +4065,20 @@ fi
 # alongside later. The short suffix keeps paths inside the socket-path limits
 # Go and tmux impose. GOTMPDIR (not TMPDIR) is the targeted knob: TMPDIR is too
 # broad (affects every program's temp, not just Go's).
-if [ "$RELAUNCH" -eq 1 ]; then
-  TASK_TMP=$(fm_meta_get "$RELAUNCH_META" tasktmp)
+task_tmp_meta="$STATE/$ID.meta"
+if [ "$RELAUNCH" -eq 1 ] || {
+  [ "$KIND" = secondmate ] && [ -f "$task_tmp_meta" ] && [ ! -L "$task_tmp_meta" ] \
+    && [ "$(fm_meta_get "$task_tmp_meta" kind)" = secondmate ] \
+    && [ "$(fm_meta_get "$task_tmp_meta" home)" = "$PROJ_ABS" ] \
+    && [ -z "$(fm_meta_get "$task_tmp_meta" remote_host)" ]
+}; then
+  TASK_TMP=$(fm_meta_get "$task_tmp_meta" tasktmp)
   case "$TASK_TMP" in
     "/tmp/fm-$ID") TASK_TMP= ;;
   esac
+  if [ ! -d "$TASK_TMP" ] || [ -L "$TASK_TMP" ] || [ ! -O "$TASK_TMP" ]; then
+    TASK_TMP=
+  fi
 fi
 if [ -z "$TASK_TMP" ]; then
   TASK_TMP=$(mktemp -d "/tmp/fm-$ID+XXXXXX") || {

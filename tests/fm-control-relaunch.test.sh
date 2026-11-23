@@ -407,6 +407,30 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
   pass "fm-control relaunch: a same-harness relaunch replaces the agent in the same endpoint and worktree"
 }
 
+test_relaunch_replaces_stale_task_temp_roots() {
+  local dir id=rl-stale-tmp stale_root target variant out rc task_tmp
+  for variant in missing symlink; do
+    dir=$(new_case "temp-$variant" "$id")
+    add_ship_task "$dir" "$id" claude
+    stale_root="$dir/recorded-temp"
+    target="$dir/other-temp"
+    if [ "$variant" = symlink ]; then
+      mkdir "$target"
+      ln -s "$target" "$stale_root"
+    fi
+    printf 'tasktmp=%s\n' "$stale_root" >> "$dir/home/state/$id.meta"
+    out=$(run_control "$dir" "$id" relaunch --note "continue after stale temp root"); rc=$?
+    expect_code 0 "$rc" "relaunch with a $variant root should succeed: $out"
+    task_tmp=$(meta_field "$dir" "$id" tasktmp)
+    [ -n "$task_tmp" ] && [ "$task_tmp" != "$stale_root" ] && [ -d "$task_tmp/gotmp" ] \
+      || fail "relaunch did not allocate a replacement for a $variant root"
+    assert_absent "$stale_root/gotmp" "relaunch wrote beneath the $variant root"
+    assert_grep "export GOTMPDIR=$task_tmp/gotmp" "$dir/fake/keys" \
+      "the replacement pane did not receive the new Go temp directory"
+  done
+  pass "fm-control relaunch: a missing or symlinked temp root gets a fresh allocation"
+}
+
 test_relaunch_from_linked_home_preserves_recorded_worktree() {
   local dir out rc head fetch_head
   dir=$(new_case linked-home rl42)
@@ -3261,6 +3285,7 @@ test_relaunch_discards_staging_when_exit_refuses
 test_relaunch_from_guarded_path
 
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
+test_relaunch_replaces_stale_task_temp_roots
 test_relaunch_from_linked_home_preserves_recorded_worktree
 test_relaunch_preserves_registered_merge_poll
 test_relaunch_and_pr_replacement_during_closure

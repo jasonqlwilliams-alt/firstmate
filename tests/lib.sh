@@ -221,6 +221,7 @@ fm_test_track_task_tmps() {
 set -eu
 path=$("$real_mktemp" "$@")
 case "${1:-}:$path" in
+  -d:/tmp/*/*) ;;
   -d:/tmp/fm-*) printf '%s\n' "$path" >> "$registry" ;;
 esac
 printf '%s\n' "$path"

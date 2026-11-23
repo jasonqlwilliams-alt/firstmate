@@ -1118,6 +1118,7 @@ TASK_TMP=$(fm_meta_get "$META" tasktmp)
 case "$TASK_TMP" in
   "/tmp/fm-$ID") TASK_TMP= ;;
 esac
+[ ! -L "$TASK_TMP" ] || TASK_TMP=
 BUSY_GEN=$(fm_meta_get "$META" busy_gen)
 if [ -z "$BUSY_GEN" ]; then
   BUSY_GEN=$(cat "$STATE/$ID.busy-gen" 2>/dev/null || true)

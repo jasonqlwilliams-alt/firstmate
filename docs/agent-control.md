@@ -99,7 +99,7 @@ An already registered PR merge poll remains armed and authenticated across relau
    A missing endpoint is already-stopped.
    The replacement retires the previous harness's per-task wiring, publishes the staged wiring, and activates the prepared busy generation where one was armed.
    A fresh spawn allocates a private temporary root, and existing tasks keep their recorded legacy `/tmp/fm-<id>` path until relaunch, with shared legacy roots left for manual cleanup.
-   Relaunch reuses the task's recorded private temporary root, so detached processes from the previous incarnation can still use it until they exit or teardown reaps them.
+   Relaunch and secondmate recovery reuse an existing private temporary root owned by the current user, so detached processes from the previous incarnation can still use it until they exit or teardown reaps them.
    A Codex `process-stopped-safe-quit-unconfirmed` result keeps the prepared replacement from launching and preserves the prior record and worktree for recovery.
    Kimi's installer reapplies its owned hook region to the current configuration after stop, preserving unrelated edits made during preparation and leaving an unchanged configuration file untouched.
 

@@ -33,7 +33,7 @@ TMUX_LOG="$TMP_ROOT/remote-tmux.log"
 TMUX_STATE="$TMP_ROOT/remote-tmux.state"
 CLAIMS="$TMP_ROOT/claims"
 mkdir -p "$PARENT/data" "$PARENT/state" "$PARENT/config" "$PARENT/projects" "$REMOTE_ROOT" "$CLAIMS"
-trap 'FM_HOME="$PARENT" FM_PROCEVENT_CLAIM_ROOT="$CLAIMS" "$ROOT/bin/fm-procevent.sh" sweep-home >/dev/null 2>&1 || true; if [ -f "$TMP_ROOT/remote-jobs/worker.pid" ]; then kill "$(cat "$TMP_ROOT/remote-jobs/worker.pid")" 2>/dev/null || true; fi; rm -rf -- "$TMP_ROOT"' EXIT
+trap 'FM_HOME="$PARENT" FM_PROCEVENT_CLAIM_ROOT="$CLAIMS" "$ROOT/bin/fm-procevent.sh" sweep-home >/dev/null 2>&1 || true; if [ -f "$TMP_ROOT/remote-jobs/worker.pid" ]; then kill "$(cat "$TMP_ROOT/remote-jobs/worker.pid")" 2>/dev/null || true; fi; fm_test_cleanup' EXIT
 
 # The remote host's tracked code root is this branch, as a real git repository:
 # fm-on and the remote entrypoint both require the dispatched command to be
@@ -182,12 +182,20 @@ grep -q 'export GOTMPDIR=' "$HERDR_LOG" || fail "the remote spawn should still r
 pass "disabled: a remote-routed second mate records and receives no carrier and stays enabled-off end to end"
 
 # --- enabled: one carrier is recorded by the parent and received remotely ----
+REMOTE_META="$REMOTE_HOME/state/parent-route/ios.meta"
+RECORDED_TASK_TMP=$(sed -n 's/^tasktmp=//p' "$REMOTE_META")
+[ -n "$RECORDED_TASK_TMP" ] && [ -d "$RECORDED_TASK_TMP/gotmp" ] \
+  || fail "the original remote spawn did not record a Go temp directory"
 : > "$PARENT/config/trace-context"
 freeze_parent_session
 reset_remote_herdr_fixture "$HERDR_STATE"   # the previous endpoint is gone; this is an ordinary relaunch
 : > "$HERDR_LOG"
 remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate >/dev/null 2>&1 \
   || fail "enabled remote secondmate spawn failed"
+[ "$(sed -n 's/^tasktmp=//p' "$REMOTE_META")" = "$RECORDED_TASK_TMP" ] \
+  || fail "remote secondmate recovery displaced its private temp root"
+assert_grep "export GOTMPDIR=$RECORDED_TASK_TMP/gotmp" "$HERDR_LOG" \
+  "the recovered remote endpoint did not receive its recorded Go temp directory"
 
 PARENT_TP=$(meta_traceparent "$PARENT/state/ios.meta")
 REMOTE_TP=$(meta_traceparent "$REMOTE_HOME/state/parent-route/ios.meta")

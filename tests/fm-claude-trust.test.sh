@@ -408,7 +408,6 @@ test_spawn_cleans_temp_root_when_publication_fails() {
   meta="$home/state/$id.meta"
   observed_root="$case_dir/root-at-publication"
   fakebin=$(make_spawn_fakebin "$case_dir/fake" claude)
-  fm_test_track_task_tmps "$fakebin"
   fm_test_spawn_home "$home" claude
   fm_git_worktree "$proj" "$wt" wt-publish-fails
   fm_test_spawn_brief "$home" "$id"
@@ -454,7 +453,6 @@ test_claude_spawn_pretrusts_its_worktree_and_reaches_the_brief() {
   launch_log="$case_dir/launch.log"
   mkdir -p "$config"
   fakebin=$(make_spawn_fakebin "$case_dir/fake" claude)
-  fm_test_track_task_tmps "$fakebin"
   fm_test_spawn_home "$home" claude
   fm_git_worktree "$proj" "$wt" wt-spawn
   fm_test_spawn_brief "$home" trustspawn

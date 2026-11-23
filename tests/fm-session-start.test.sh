@@ -1193,11 +1193,14 @@ EOF
 # --- session-start secondmate recovery boundary -----------------------------
 
 test_session_start_relaunches_missing_pi_secondmate() {
-  local rec root home fakebin mate log spawned out first_calls second_calls
+  local rec root home fakebin mate log spawned out first_calls second_calls task_tmp
   rec=$(prepare_session_start_secondmate secondmate-missing-pi)
   IFS='|' read -r root home fakebin mate log spawned <<EOF
 $rec
 EOF
+  task_tmp="$home/recovery-temp"
+  mkdir -p "$task_tmp/gotmp"
+  printf 'tasktmp=%s\n' "$task_tmp" >> "$home/state/$SESSION_START_SECOND_MATE_ID.meta"
 
   out=$(run_session_start_secondmate "$root" "$home" "$fakebin" "$mate" "$log" "$spawned" missing)
 
@@ -1218,6 +1221,8 @@ EOF
   assert_not_contains "$(cat "$log")" "kill-window" "the deferred stage tried to kill an already-absent window"
   assert_grep 'harness=pi' "$home/state/$SESSION_START_SECOND_MATE_ID.meta" \
     "the real respawn path did not preserve the Pi harness: $(cat "$home/state/$SESSION_START_SECOND_MATE_ID.meta")"
+  assert_grep "tasktmp=$task_tmp" "$home/state/$SESSION_START_SECOND_MATE_ID.meta" \
+    "secondmate recovery displaced its private temp root"
 
   first_calls=$(grep -c 'new-window' "$log" || true)
   rm -f "$home/state/.lock"

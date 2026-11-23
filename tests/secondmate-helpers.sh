@@ -18,6 +18,7 @@
 make_fake_tmux() {
   local dir=$1 fakebin capture
   fakebin=$(fm_fakebin "$dir")
+  fm_test_track_task_tmps "$fakebin"
   capture="$dir/pane.txt"
   # A real, positively identified empty agent composer. A blank capture is
   # deliberately unknown under the fleet-wide strict blank-row posture.
