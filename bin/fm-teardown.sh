@@ -1823,6 +1823,22 @@ attempt_treehouse_return() {  # <copy> <project>
   treehouse return --force "$1" || return 1
 }
 
+remove_untracked_treehouse_hooks() {
+  local copy hook parent tracked
+  copy=$(canonical_existing_dir "$1") || return 0
+  shift
+  for hook; do
+    [ -e "$copy/$hook" ] || [ -L "$copy/$hook" ] || continue
+    if [[ "$hook" == */* ]]; then
+      parent="$copy/${hook%/*}"
+      [ "$(canonical_existing_dir "$parent")" = "$parent" ] || continue
+    fi
+    if tracked=$(git -C "$copy" ls-tree --name-only HEAD -- "$hook" 2>/dev/null) && [ -z "$tracked" ]; then
+      rm -f -- "$copy/$hook"
+    fi
+  done
+}
+
 # Return a worktree/home via `treehouse return --force`, tolerating a transient or
 # stale git index.lock left by a killed crew process. See the script header.
 teardown_treehouse_return() {
@@ -3494,9 +3510,8 @@ cleanup_firstmate_home_children() {
       # already named the reassignment on stderr under the same lock.
       if [ "$child_treehouse" = 1 ]; then
         if teardown_treehouse_return "$child_wt" "$child_proj" "child worktree"; then
-          rm -f "$child_wt/.claude/settings.local.json" "$child_wt/.opencode/plugins/fm-turn-end.js" \
-            "$child_wt/.opencode/plugins/fm-busy-state.js" \
-            "$child_wt/.fm-grok-turnend" "$child_wt/.fm-kimi-turnend"
+          remove_untracked_treehouse_hooks "$child_wt" .claude/settings.local.json \
+            .opencode/plugins/fm-turn-end.js .opencode/plugins/fm-busy-state.js .fm-grok-turnend .fm-kimi-turnend
           fm_treehouse_slot_owner_release "$child_wt" "$child_id"
         else
           child_return_rc=$?
@@ -3840,13 +3855,12 @@ fi
 # dedicated process-event and firstmate-home removal machinery further below,
 # not by task-worktree cleanup.
 if [ "$KIND" != secondmate ] && teardown_owns_worktree; then
-  conclude_task_no_mistakes_run "$WT"
-  reap_task_worktree_processes worktree "$WT" "$TASK_TMP" || {
+  if ! conclude_task_no_mistakes_run "$WT" || ! reap_task_worktree_processes worktree "$WT" "$TASK_TMP"; then
     if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
       teardown_treehouse_backlog_rollback || exit 1
     fi
     exit 1
-  }
+  fi
 elif [ "$KIND" != secondmate ]; then
   reap_task_worktree_processes tasktmp "" "$TASK_TMP"
 fi
@@ -3856,6 +3870,7 @@ fi
 "$SCRIPT_DIR/fm-remote-job-reap-orphans.sh" >&2 || true
 
 # Best-effort: drop the local task branch so the shared repo does not accumulate refs.
+treehouse_task_ref=
 if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
   if [ "$ORCA_PATH_MATCH_VERIFIED" != 1 ]; then
     require_orca_worktree_path_match_if_present "$ORCA_WORKTREE_ID" "$WT" || exit 1
@@ -3894,6 +3909,7 @@ elif [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
   if [ "$FORCE" != "--force" ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ]; then
     post_lock_cleanup_check=validate_worktree_teardown_safety
   fi
+  treehouse_task_ref=$(git -C "$WT" symbolic-ref --quiet HEAD 2>/dev/null || true)
   teardown_treehouse_return "$WT" "$PROJ" "worktree" "$post_lock_cleanup_check" || {
     if [ -e "$WT" ] || [ -L "$WT" ]; then
       teardown_treehouse_backlog_rollback || exit 1
@@ -3901,8 +3917,8 @@ elif [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
     echo "error: treehouse return failed for worktree $WT; teardown aborted" >&2
     exit 1
   }
-  rm -f "$WT/.claude/settings.local.json" "$WT/.opencode/plugins/fm-turn-end.js" \
-    "$WT/.fm-grok-turnend" "$WT/.fm-kimi-turnend"
+  remove_untracked_treehouse_hooks "$WT" .claude/settings.local.json \
+    .opencode/plugins/fm-turn-end.js .fm-grok-turnend .fm-kimi-turnend
   # The slot is back in the pool, so this task's claim on it is spent. Dropping
   # it here - and only after a return that succeeded - keeps a returned slot
   # unclaimed until its next holder claims it, and leaves the claim in place
@@ -4085,6 +4101,11 @@ else
     echo "error: $ID's endpoint and local copy are cleaned up, but its task record could not be removed ($FM_BACKLOG_TRANSITION_ERROR)" >&2
     exit 1
   fi
+fi
+if [ "$treehouse_task_ref" = "refs/heads/fm/$ID" ] \
+   && treehouse_returned_head=$(git -C "$WT" rev-parse --abbrev-ref --verify HEAD 2>/dev/null) \
+   && [ "$treehouse_returned_head" = HEAD ]; then
+  git -C "$WT" branch -D -- "fm/$ID" >/dev/null 2>&1 || true
 fi
 teardown_release_meta_lock
 if [ "$KIND" != scout ] && [ "$KIND" != secondmate ] && [ "$MODE" != local-only ]; then

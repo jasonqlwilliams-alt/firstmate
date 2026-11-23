@@ -491,7 +491,8 @@ if [ "${1:-}" = return ]; then
     fi
     exit 128
   fi
-  exit 0
+  git -C "$wt" checkout --detach -q main
+  exit $?
 fi
 exit 0
 SH
@@ -1775,6 +1776,9 @@ test_transient_index_lock_clears_after_first_attempt_and_retry_succeeds() {
   [ "$(cat "$attempt_file")" = 2 ] \
     || fail "transient-index-lock: expected exactly 2 treehouse return attempts, got $(cat "$attempt_file")"
   assert_absent "$lock" "transient-index-lock: lock should remain cleared after success"
+  if git -C "$case_dir/wt" show-ref --verify --quiet refs/heads/fm/task-x1; then
+    fail 'successful lock retry retained the task branch'
+  fi
   pass "transient index.lock cleared after first failed return is retried successfully without force-remove"
 }
 
@@ -1835,6 +1839,14 @@ test_treehouse_owns_checkout_and_cancels_failed_close() {
   fi
   copy="$case_dir/wt"
   write_meta "$case_dir" no-mistakes ship
+  if [ "$mode" = success ]; then
+    mkdir -p "$case_dir/project/.claude" "$case_dir/shared-settings/plugins"
+    printf '{}\n' > "$case_dir/project/.claude/settings.local.json"
+    printf 'shared settings\n' > "$case_dir/shared-settings/plugins/fm-turn-end.js"
+    ln -s ../shared-settings "$case_dir/project/.opencode"
+    git -C "$case_dir/project" add -f .claude/settings.local.json .opencode
+    git -C "$case_dir/project" commit -qm 'Track project settings on main'
+  fi
   land_shippable_commit "$case_dir"
   seed_backlog_in_flight "$case_dir"
   printf 'PR closure evidence\n' > "$case_dir/state/task-x1.pr-poll-closed"
@@ -1860,8 +1872,6 @@ SH
     run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
   [ "$(cat "$case_dir/treehouse.log")" = "$expected_branch $tip" ] \
     || fail 'Treehouse did not receive the original checkout'
-  [ "$(git -C "$copy" rev-parse --verify refs/heads/fm/task-x1)" = "$tip" ] \
-    || fail 'teardown changed the task ref'
   if [ "$mode" = success ]; then
     expect_code 0 "$rc" 'Treehouse should return the copy and retire the record'
     assert_absent "$case_dir/state/task-x1.meta" 'successful return retained the task record'
@@ -1869,12 +1879,19 @@ SH
     [ "$(git -C "$copy" rev-parse --abbrev-ref HEAD)" = HEAD ] \
       && [ "$(git -C "$copy" rev-parse HEAD)" = "$(git -C "$copy" rev-parse main)" ] \
       || fail 'teardown changed the checkout left by Treehouse'
+    [ "$(cat "$copy/.claude/settings.local.json")" = '{}' ] || fail 'return removed tracked project settings'
+    [ "$(cat "$case_dir/shared-settings/plugins/fm-turn-end.js")" = 'shared settings' ] \
+      || fail 'return removed settings outside the returned copy'
+    assert_absent "$copy/.fm-grok-turnend" 'return retained an untracked task hook'
+    git -C "$copy" checkout -qb fm/task-x1 || fail 'a fresh dispatch could not create the same task branch'
   else
     expect_code 1 "$rc" "failed Treehouse return ($mode) should retain the copy"
     assert_grep 'treehouse: simulated return error before checkout' "$case_dir/stderr" 'cleanup did not reach the failed return'
     [ "$(git -C "$copy" rev-parse --abbrev-ref HEAD)" = "$expected_branch" ] \
       && [ "$(git -C "$copy" rev-parse HEAD)" = "$tip" ] \
       || fail 'failed return changed the retained checkout'
+    [ "$(git -C "$copy" rev-parse --verify refs/heads/fm/task-x1)" = "$tip" ] \
+      || fail 'failed return changed the task ref'
     [ "$(cat "$copy/.fm-grok-turnend")" = 'configured hook' ] || fail 'failed return changed the task hook'
     assert_pending_close_replay_preserves_task "$case_dir" task-x1 "$case_dir/home" \
       || fail 'startup replay changed the retained task'
@@ -2608,7 +2625,12 @@ test_forced_secondmate_teardown_holds_descendant_lifecycle_locks() {
   local case_dir home lock ready release holder_pid rc waited=0 child
   case_dir=$(make_case descendant-locks)
   write_meta "$case_dir" local-only secondmate
+  mkdir -p "$case_dir/project/.opencode/plugins"
+  printf 'project plugin\n' > "$case_dir/project/.opencode/plugins/fm-busy-state.js"
+  git -C "$case_dir/project" add -f .opencode/plugins/fm-busy-state.js
+  git -C "$case_dir/project" commit -qm 'Track project plugin on main'
   configure_secondmate_with_tmux_children "$case_dir"
+  printf 'task hook\n' > "$case_dir/child-a-wt/.fm-kimi-turnend"
   home="$case_dir/secondmate-home"
   : > "$case_dir/kill.log"
   : > "$case_dir/treehouse.log"
@@ -2675,6 +2697,9 @@ SH
     || fail "descendant-locks: uncontended retry retained retired task state"
   [ -s "$case_dir/kill.log" ] && [ -s "$case_dir/treehouse.log" ] \
     || fail "descendant-locks: uncontended retry did not perform endpoint and worktree cleanup"
+  [ "$(cat "$case_dir/child-a-wt/.opencode/plugins/fm-busy-state.js")" = 'project plugin' ] \
+    || fail 'child return removed a tracked project plugin'
+  assert_absent "$case_dir/child-a-wt/.fm-kimi-turnend" 'child return retained an untracked task hook'
   pass "forced secondmate teardown holds every descendant lifecycle and metadata lock"
 }
 
@@ -3482,6 +3507,8 @@ test_parked_own_run_refuses_when_abort_is_unconfirmed() {
   case_dir=$(make_case parked-run-abort-unconfirmed)
   write_meta "$case_dir" no-mistakes ship
   land_shippable_commit "$case_dir"
+  seed_backlog_in_flight "$case_dir"
+  printf 'PR closure evidence\n' > "$case_dir/state/task-x1.pr-poll-closed"
   head=$(git -C "$case_dir/wt" rev-parse HEAD)
   ( cd "$case_dir/wt" && exec sleep 300 ) &
   pid=$!
@@ -3510,7 +3537,9 @@ EOF
     "parked-run-abort-unconfirmed: teardown returned the worktree after refusing"
   kill -0 "$pid" 2>/dev/null || fail "parked-run-abort-unconfirmed: process reap ran before refusal"
   kill -KILL "$pid" 2>/dev/null || true
-  pass "teardown refuses before reap or removal when a task-owned run remains parked"
+  assert_pending_close_replay_preserves_task "$case_dir" task-x1 "$case_dir/home" \
+    || fail 'startup replay changed the retained task after a parked-run refusal'
+  pass "an unconfirmed parked-run abort preserves the copy and cancels the pending close"
 }
 
 test_another_branchs_parked_run_is_never_touched() {
@@ -4174,12 +4203,14 @@ SH
       [ "$(backlog_row_state "$case_dir")" = in_flight ] || fail 'startup replay closed a refused task'
     fi
     if [ "$mode" = retry ]; then
-      printf '#!/usr/bin/env bash\nexit 0\n' > "$case_dir/fakebin/treehouse"
+      printf '#!/usr/bin/env bash\ngit -C "$3" checkout --detach -q main\n' > "$case_dir/fakebin/treehouse"
       rm -f "$case_dir/fakebin/lsof"
       run_teardown "$case_dir" --legacy-record > "$case_dir/retry.stdout" 2> "$case_dir/retry.stderr" \
         || fail 'reparented teardown: subsequent cleanup from outside the copy failed'
       assert_absent "$case_dir/state/task-x1.meta" 'subsequent cleanup left the task record'
-      git -C "$copy" show-ref --verify --quiet "refs/heads/$task_branch" || fail 'subsequent cleanup deleted the task branch'
+      if git -C "$copy" show-ref --verify --quiet "refs/heads/$task_branch"; then
+        fail 'subsequent cleanup retained the task branch'
+      fi
     fi
   fi
   pass "cleanup protects its original caller after reparenting ($mode, prior close: $prior_close)"
@@ -4600,6 +4631,7 @@ SH
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FM_KEEP_CASE/treehouse.log"
 [ "${FM_KEEP_MODE:-}" != return-fails ] || exit 1
+git -C "$3" checkout --detach -q main || exit 1
 [ "${FM_KEEP_MODE:-}" != lost-after-return ] || : > "$FM_KEEP_CASE/closed"
 exit 0
 SH
@@ -4716,6 +4748,9 @@ test_keep_pane_retirement() {
   assert_absent "$case_dir/pool/1/.fm-slot-owner" "keep-pane leaked its slot claim"
   assert_absent "$case_dir/state/task-x1.meta" "keep-pane leaked task metadata"
   assert_absent "$case_dir/state/task-x1.herdr-presentation" "keep-pane leaked a correlated journal"
+  if git -C "$case_dir/wt" show-ref --verify --quiet refs/heads/fm/task-x1; then
+    fail 'successful keep-pane cleanup retained the task branch'
+  fi
   [ "$(backlog_row_state "$case_dir")" = "done" ] || fail "keep-pane failed backlog close"
   assert_grep 'pane default:wG:pQ preserved' "$case_dir/out" "keep-pane did not report preservation"
   pass "keep-pane retires a landed task and its own slot with exact pane survival and shell detachment"
@@ -4798,6 +4833,8 @@ test_keep_pane_retirement() {
     FM_KEEP_MODE="$mode" run_keep_pane_case "$case_dir" --keep-pane > "$case_dir/out" 2> "$case_dir/err" || rc=$?
     [ "$rc" -ne 0 ] || fail "keep-pane $mode unexpectedly succeeded"
     assert_present "$case_dir/state/task-x1.meta" "keep-pane $mode lost endpoint record"
+    git -C "$case_dir/wt" show-ref --verify --quiet refs/heads/fm/task-x1 \
+      || fail "keep-pane $mode lost the task branch"
     if [ "$mode" = return-fails ]; then
       assert_absent "$case_dir/state/task-x1.backlog-close" "keep-pane $mode left a replayable close"
     else
