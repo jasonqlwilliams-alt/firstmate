@@ -1549,6 +1549,18 @@ FM_CHECK_OUTPUT=
 FM_CHECK_RESULT=
 FM_CHECK_SIGNAL_PENDING=
 FM_PR_POLL_CLOSED_STAGE=
+WATCHER_CHECKPOINT_CLOSE=${FM_WATCH_CHECKPOINT_CLOSE:-}
+unset FM_WATCH_CHECKPOINT_CLOSE
+WATCHER_CHECKPOINT_SCANNED=0
+WATCHER_CHECKPOINT_INTERRUPTED=0
+
+watcher_interrupted() {
+  if [ -n "$WATCHER_CHECKPOINT_CLOSE" ]; then
+    trap '' HUP INT TERM
+    WATCHER_CHECKPOINT_INTERRUPTED=1
+  fi
+  exit 1
+}
 
 fm_check_output_cleanup() {
   [ -z "$FM_CHECK_OUTPUT" ] || rm -f -- "$FM_CHECK_OUTPUT"
@@ -1599,13 +1611,13 @@ run_check_capture() {
   FM_ACTIVE_CHECK_PGID=$FM_ACTIVE_CHECK_PID
   set +m
   pgid=$(ps -o pgid= -p "$FM_ACTIVE_CHECK_PID" 2>/dev/null | tr -d '[:space:]')
-  trap 'exit 1' HUP INT TERM
+  trap watcher_interrupted HUP INT TERM
   if [ -n "$pgid" ] && [ "$pgid" != "$FM_ACTIVE_CHECK_PGID" ]; then
     fm_active_check_stop || true
     fm_check_output_cleanup
     return 1
   fi
-  [ -z "$FM_CHECK_SIGNAL_PENDING" ] || exit 1
+  [ -z "$FM_CHECK_SIGNAL_PENDING" ] || watcher_interrupted
   wait "$FM_ACTIVE_CHECK_PID" 2>/dev/null || true
   FM_ACTIVE_CHECK_PID=
   fm_active_check_stop || return 1
@@ -1919,7 +1931,7 @@ reconcile_requests_detached() {
 }
 
 watcher_cleanup() {
-  local cleanup_status=0 owns_lock=0 transition=release-lock
+  local exit_status=$? cleanup_status=0 owns_lock=0 transition=release-lock
   if [ "$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)" = "${WATCHER_PID:-}" ]; then
     owns_lock=1
     if [ "${WATCHER_RECOVERY_PENDING:-0}" -eq 1 ] \
@@ -1936,10 +1948,18 @@ watcher_cleanup() {
     echo "watcher: recovery state could not be persisted; retaining stale lock evidence" >&2
     cleanup_status=1
   fi
+  if [ -n "$WATCHER_CHECKPOINT_CLOSE" ] && [ "$owns_lock" -eq 1 ] \
+    && [ "$cleanup_status" -eq 0 ] && [ ! -e "$WATCH_LOCK" ] && [ ! -L "$WATCH_LOCK" ]; then
+    if [ "$exit_status" -eq 0 ] && [ -n "${FM_WATCH_DELIVERED_REASON:-}" ]; then
+      printf 'wake\n' > "$WATCHER_CHECKPOINT_CLOSE"
+    elif [ "$WATCHER_CHECKPOINT_INTERRUPTED" -eq 1 ] && [ "$WATCHER_CHECKPOINT_SCANNED" -eq 1 ]; then
+      printf 'quiet\n' > "$WATCHER_CHECKPOINT_CLOSE"
+    fi
+  fi
   return "$cleanup_status"
 }
 trap watcher_cleanup EXIT
-trap 'exit 1' HUP INT TERM
+trap watcher_interrupted HUP INT TERM
 # This watcher's own pid, as recorded in the lock by fm_lock_claim (which writes
 # ${BASHPID:-$$} from this same main shell). Read directly, never via a command
 # substitution, so it matches the stored holder pid for the self-eviction check.
@@ -2604,5 +2624,6 @@ EOF
 
   # Terminal wait: a bounded native-event wait for push-capable homes (herdr),
   # else the blind poll sleep. See event_wait_or_sleep.
+  WATCHER_CHECKPOINT_SCANNED=1
   event_wait_or_sleep
 done

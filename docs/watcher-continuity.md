@@ -85,15 +85,24 @@ A relaunched worker or another task that reuses the same target remains eligible
 
 Codex and the unknown-harness foreground fallback run one bounded watcher cycle through `bin/fm-watch-checkpoint.sh`.
 The checkpoint returns the watcher result to its calling tool; it neither registers a model callback nor launches a successor.
-An actionable exit or quiet deadline releases the watcher lock, leaving a real interval without a polling watcher until the owning model handles the result and starts the next checkpoint.
+A clean checkpoint return releases the watcher lock, leaving an interval without a polling watcher until the owning model handles the result and starts the next checkpoint.
 Ending the model turn does not establish that next cycle, and a turn-end guard warning is a backstop rather than a callback adapter.
 The harness protocols own the drain, handle, generation-bound acknowledgement, and repeat sequence.
 Acknowledging an empty-queue recovery episode is still required when the drain requests it; omitting it can produce `check: rearm-resurface` on the next cycle.
 
-Under this foreground model the pull guard requires the same home, watcher path, process identity, and fresh beacon as a live watcher.
+The pull guard verifies a live watcher by its home, watcher path, process identity, and fresh beacon.
 A recent beacon after the checkpoint has returned does not prove that a watcher remains alive.
 Conversely, a running checkpoint wrapper or child PID does not prove complete lock publication, matching identity, or a fresh beacon: a suspended or stalled watcher can remain alive while polling has stopped.
 Inspect those facts at the warning's timestamp before classifying an alarm during a foreground call.
+While supervision is needed, the pull guard prints `NOTICE: between foreground checkpoints` when the watcher lock is absent and a clean-return receipt from the current lock-owning, attended Codex session is younger than `FM_GUARD_GRACE`.
+The notice clears the guard's banner deduplication state so a later lapse gets a full alarm.
+A quiet receipt requires a completed monitoring scan, and the guard checks that the beacon is still fresh when it reads that receipt.
+If the beacon ages past the grace during the checkpoint or while the result is being handled, the guard can alarm before the quiet receipt expires.
+A verified actionable wake can qualify even before the watcher writes its first beacon.
+When monitoring is needed and no live watcher qualifies, a missing or expired receipt or a retained watcher lock triggers the usual alarm.
+Read-only checks and sessions outside attended Codex foreground supervision use their usual liveness rules.
+If removal of the previous receipt fails at checkpoint startup or during away-posture archival, the guard can still accept that receipt in the same session until its age reaches the guard grace.
+[`fm-guard.sh`](../bin/fm-guard.sh) owns the receipt check and banner policy.
 An unacknowledged `state/.watcher-down` generation alone does not cause a watcher-health alarm; queued wakes have their own independent warning.
 
 A successful demonstration of a foreground wake, durable acknowledgement, and model-issued successor proves that sequence only.
