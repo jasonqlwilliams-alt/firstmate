@@ -255,6 +255,7 @@
 # Adoption by a Linux subreaper in the same session can hide a caller that reparented before teardown started.
 # A detached wrapper can present a different surviving session leader and hide the original caller.
 # An escaped cwd reported by lsof can prevent an exact path match.
+# If Treehouse changes the copy before reporting a lock error, a caller refusal on retry cannot undo the partial reset.
 # If Treehouse detaches the copy before a failed return, a later successful retry can leave the task branch behind because the retry starts with a detached HEAD.
 # If a successful return leaves a pending backlog close, a manual retry from inside the returned copy before startup replay can refuse and clear that marker, leaving the backlog item in flight.
 # Direct Treehouse acquisition bypasses Firstmate's project lock and can overlap post-return hook cleanup.
@@ -1828,25 +1829,32 @@ attempt_treehouse_return() {  # <copy> <project>
 
 remove_untracked_treehouse_hooks() {
   local copy
-  copy=$(canonical_existing_dir "$1") || return 0
+  copy=$(canonical_existing_dir "$1") || return 1
   shift
   perl -MErrno=ENOENT,ENOTDIR -e '
+    my $incomplete = 0;
     sub resolve_path {
       my ($dir, $path) = @_;
       my @resolved;
       for my $component (split m{/}, $path) {
         return if -l $dir;
-        opendir my $entries, $dir or return;
+        my @wanted = lstat "$dir/$component";
+        unless (@wanted) {
+          $incomplete = 1 if $! != ENOENT && $! != ENOTDIR;
+          return;
+        }
+        opendir my $entries, $dir or do { $incomplete = 1; return; };
         my @names = grep { $_ ne "." && $_ ne ".." } readdir $entries;
         my ($name) = grep { $_ eq $component } @names;
         unless (defined $name) {
-          my @wanted = lstat "$dir/$component";
-          return unless @wanted;
           my @matches = grep {
             my @entry = lstat "$dir/$_";
             @entry && $entry[0] == $wanted[0] && $entry[1] == $wanted[1]
           } @names;
-          return unless @matches == 1;
+          unless (@matches == 1) {
+            $incomplete = 1;
+            return;
+          }
           $name = $matches[0];
         }
         push @resolved, $name;
@@ -1860,13 +1868,17 @@ remove_untracked_treehouse_hooks() {
     for my $hook (@hooks) {
       my $actual = resolve_path($copy, $hook) // next;
       my @entry = lstat "$copy/$actual";
-      next unless @entry && !-d _;
+      unless (@entry) {
+        $incomplete = 1 if $! != ENOENT && $! != ENOTDIR;
+        next;
+      }
+      next if -d _;
       $candidates{$actual} = "$entry[0]:$entry[1]";
     }
-    exit 0 unless %candidates;
+    exit $incomplete unless %candidates;
 
     my %eligible = map { $_ => 1 } values %candidates;
-    open my $tracked, "-|", "git", "-C", $copy, "ls-files", "--cached", "-z" or exit 0;
+    open my $tracked, "-|", "git", "-C", $copy, "ls-files", "--cached", "-z" or exit 1;
     local $/ = "\0";
     while (my $path = <$tracked>) {
       chomp $path;
@@ -1879,25 +1891,38 @@ remove_untracked_treehouse_hooks() {
         if (defined $actual) {
           delete $candidates{$actual};
         } else {
+          $incomplete = 1;
           delete $eligible{$identity};
         }
       } elsif ($! != ENOENT && $! != ENOTDIR) {
-        exit 0;
-      }
-    }
-    close $tracked or exit 0;
-
-    for my $path (keys %candidates) {
-      my $identity = $candidates{$path};
-      next unless $eligible{$identity};
-      my @entry = lstat "$copy/$path";
-      next unless @entry && "$entry[0]:$entry[1]" eq $identity;
-      if (!unlink("$copy/$path") && $! != ENOENT) {
-        warn "could not remove task hook $copy/$path: $!\n";
         exit 1;
       }
     }
+    close $tracked or exit 1;
+
+    for my $path (sort keys %candidates) {
+      my $identity = $candidates{$path};
+      next unless $eligible{$identity};
+      my @entry = lstat "$copy/$path";
+      unless (@entry && "$entry[0]:$entry[1]" eq $identity) {
+        $incomplete = 1 if @entry || ($! != ENOENT && $! != ENOTDIR);
+        next;
+      }
+      if (!unlink("$copy/$path") && $! != ENOENT) {
+        warn "could not remove task hook $copy/$path: $!\n";
+        $incomplete = 1;
+      }
+    }
+    exit $incomplete;
   ' -- "$copy" "$@"
+}
+
+retire_returned_treehouse_copy() {
+  local copy=$1 id=$2
+  shift 2
+  remove_untracked_treehouse_hooks "$copy" "$@" \
+    || echo "warning: incomplete task hook cleanup in returned copy $copy" >&2
+  fm_treehouse_slot_owner_release "$copy" "$id"
 }
 
 # Return a worktree/home via `treehouse return --force`, tolerating a transient or
@@ -3576,9 +3601,8 @@ cleanup_firstmate_home_children() {
       # already named the reassignment on stderr under the same lock.
       if [ "$child_treehouse" = 1 ]; then
         if teardown_treehouse_return "$child_wt" "$child_proj" "child worktree"; then
-          remove_untracked_treehouse_hooks "$child_wt" .claude/settings.local.json \
+          retire_returned_treehouse_copy "$child_wt" "$child_id" .claude/settings.local.json \
             .opencode/plugins/fm-turn-end.js .opencode/plugins/fm-busy-state.js .fm-grok-turnend .fm-kimi-turnend
-          fm_treehouse_slot_owner_release "$child_wt" "$child_id"
         else
           child_return_rc=$?
           case "$child_return_rc" in
@@ -3985,13 +4009,8 @@ elif [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
      && [ "$treehouse_returned_head" = HEAD ]; then
     git -C "$WT" branch -D -- "fm/$ID" >/dev/null 2>&1 || true
   fi
-  remove_untracked_treehouse_hooks "$WT" .claude/settings.local.json \
+  retire_returned_treehouse_copy "$WT" "$ID" .claude/settings.local.json \
     .opencode/plugins/fm-turn-end.js .fm-grok-turnend .fm-kimi-turnend
-  # The slot is back in the pool, so this task's claim on it is spent. Dropping
-  # it here - and only after a return that succeeded - keeps a returned slot
-  # unclaimed until its next holder claims it, and leaves the claim in place
-  # whenever the return did not actually happen.
-  fm_treehouse_slot_owner_release "$WT" "$ID"
 fi
 
 HERDR_PRESENTATION_JOURNAL="$STATE/$ID.herdr-presentation"

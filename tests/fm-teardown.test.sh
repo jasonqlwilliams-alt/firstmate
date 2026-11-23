@@ -2778,6 +2778,73 @@ SH
   pass "forced secondmate teardown holds every descendant lifecycle and metadata lock"
 }
 
+test_return_retires_slot_after_hook_error() {
+  local layout=$1 failure=$2 case_dir copy worktree id home claim rc=0
+  if [ "$failure" = unlink ] && [ "$(id -u)" = 0 ]; then
+    printf 'skip: hook unlink permission fixture requires an unprivileged user\n'
+    return 0
+  fi
+  case_dir=$(make_case "returned-hook-error-$layout-$failure")
+  copy="$case_dir/pool/1/project"
+  mkdir -p "${copy%/*}"
+  printf '{}\n' > "$case_dir/pool/treehouse-state.json"
+  if [ "$layout" = child ]; then
+    write_meta "$case_dir" local-only secondmate
+    configure_secondmate_with_tmux_children "$case_dir" "$copy"
+    worktree=$copy
+    id=child-b
+    home="$case_dir/secondmate-home"
+  else
+    write_meta "$case_dir" local-only ship
+    worktree="$case_dir/wt"
+    git -C "$case_dir/project" worktree move "$worktree" "$copy"
+    ln -s "$copy" "$worktree"
+    id=task-x1
+    home="$case_dir"
+  fi
+  claim="${copy%/*}/.fm-slot-owner"
+  printf 'task=%s\nhome=%s\n' "$id" "$home" > "$claim"
+  add_lsof_no_holder "$case_dir"
+  cat > "$case_dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+set -eu
+[ "${3:-}" = "$FM_TEST_HOOK_WORKTREE" ] || exit 0
+mkdir -p "$3/.claude"
+printf 'task hook\n' > "$3/.claude/settings.local.json"
+printf 'task hook\n' > "$3/.fm-grok-turnend"
+if [ "$FM_TEST_HOOK_FAILURE" = unlink ]; then
+  chmod a-w "$3/.claude"
+fi
+: > "$FM_TEST_HOOK_RETURNED"
+SH
+  cat > "$case_dir/fakebin/git" <<'SH'
+#!/usr/bin/env bash
+if [ "$FM_TEST_HOOK_FAILURE" = index ] && [ -f "$FM_TEST_HOOK_RETURNED" ] \
+   && [ "${1:-}" = -C ] && [ "${3:-}" = ls-files ]; then
+  exit 1
+fi
+exec "$REAL_GIT_FOR_TEST" "$@"
+SH
+  chmod +x "$case_dir/fakebin/treehouse" "$case_dir/fakebin/git"
+  FM_TEST_HOOK_WORKTREE="$worktree" FM_TEST_HOOK_RETURNED="$case_dir/returned" FM_TEST_HOOK_FAILURE="$failure" \
+    run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  if [ -d "$copy/.claude" ]; then
+    chmod u+w "$copy/.claude"
+  fi
+  assert_present "$case_dir/returned" 'fixture did not reach the successful Treehouse return'
+  expect_code 0 "$rc" "hook cleanup failure interrupted retirement: $(cat "$case_dir/stderr")"
+  assert_grep 'incomplete task hook cleanup' "$case_dir/stderr" 'hook cleanup failure was not reported'
+  assert_absent "$claim" 'hook cleanup failure stranded the returned slot claim'
+  assert_absent "$home/state/$id.meta" 'hook cleanup failure stranded the retired task record'
+  assert_present "$copy/.claude/settings.local.json" 'hook cleanup removed the hook it could not verify or unlink'
+  if [ "$failure" = unlink ]; then
+    assert_absent "$copy/.fm-grok-turnend" 'one unlink failure prevented removal of another hook'
+  else
+    assert_present "$copy/.fm-grok-turnend" 'hook cleanup deleted a path without a readable index'
+  fi
+  pass "successful Treehouse return retires the slot after a reported hook cleanup error ($layout, $failure)"
+}
+
 test_forced_secondmate_herdr_child_retains_records_when_close_unconfirmed() {
   local case_dir home log closed rc
   case_dir=$(make_case herdr-child-unconfirmed-close)
@@ -4384,17 +4451,13 @@ count=0
 [ ! -f '$case_dir/lsof-count' ] || count=\$(cat '$case_dir/lsof-count')
 count=\$((count + 1))
 printf '%s\n' "\$count" > '$case_dir/lsof-count'
-if [ "\$count" -le 4 ]; then printf 'p%s\nfcwd\nn%s\n' '$pid' '$case_dir/wt'; fi
+if [ "\$count" -le 5 ]; then printf 'p%s\nfcwd\nn%s\n' '$pid' '$case_dir/wt'; fi
 EOF
   cat > "$case_dir/fakebin/ps" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = -p ] && [ "${2:-}" = "${FM_FAKE_REUSED_PID:-}" ] \
    && [ "${3:-}" = -o ] && [ "${4:-}" = lstart= ]; then
-  count=0
-  [ ! -f "$FM_FAKE_PS_COUNT" ] || count=$(cat "$FM_FAKE_PS_COUNT")
-  count=$((count + 1))
-  printf '%s\n' "$count" > "$FM_FAKE_PS_COUNT"
-  if [ "$count" -le 2 ]; then printf 'Tue Aug  4 10:00:00 2026\n'
+  if [ "$(cat "$FM_FAKE_CWD_SCAN_COUNT")" -lt 5 ]; then printf 'Tue Aug  4 10:00:00 2026\n'
   else printf 'Tue Aug  4 10:00:01 2026\n'; fi
   exit 0
 fi
@@ -4404,7 +4467,7 @@ SH
 
   rc=0
   FM_PROC_ROOT_OVERRIDE="$case_dir/no-proc" \
-  FM_FAKE_REUSED_PID="$pid" FM_FAKE_PS_COUNT="$case_dir/ps-count" \
+  FM_FAKE_REUSED_PID="$pid" FM_FAKE_CWD_SCAN_COUNT="$case_dir/lsof-count" \
     run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
 
   expect_code 0 "$rc" "reused-pid-identity: teardown should skip the replacement process"
@@ -4427,9 +4490,11 @@ test_exec_changed_process_is_still_reaped() {
   ( cd "$case_dir/wt" && exec perl -e '
       my ($marker, $done) = @ARGV;
       until (-e $marker) { select undef, undef, undef, 0.01; }
-      open my $fh, ">", $done or die "open";
-      close $fh;
-      exec "perl", "-e", '\''$SIG{TERM} = "IGNORE"; sleep 300'\'';
+      exec "bash", "-c", q{
+        trap "" TERM
+        : > "$1" || exit 1
+        exec sleep 300
+      }, "exec-changed-process", $done;
     ' "$marker" "$done_flag" ) &
   pid=$!
   disown
@@ -4454,6 +4519,7 @@ if [ -e "$FM_FAKE_EXEC_MARKER" ]; then
     sleep 0.01
     i=$((i + 1))
   done
+  [ -e "$FM_FAKE_EXEC_DONE" ] || exit 1
 fi
 exec "$REAL_LSOF_FOR_TEST" "$@"
 SH
@@ -4470,6 +4536,7 @@ SH
     kill -KILL "$pid" 2>/dev/null || true
   fi
   expect_code 0 "$rc" "exec-changed-process: teardown should succeed"
+  assert_present "$done_flag" 'exec-changed-process: replacement program did not become ready'
   [ "$survived" -eq 0 ] || fail "exec-changed-process: exec-changed leaked process survived teardown"
   pass "an exec change preserves birth identity and the process is reaped"
 }
@@ -5150,6 +5217,10 @@ test_herdr_flat_teardown_refuses_records_on_unparseable_presence
 test_herdr_flat_teardown_preflight_refuses_before_changes
 test_forced_secondmate_herdr_child_preflight_refuses_before_changes
 test_forced_secondmate_teardown_holds_descendant_lifecycle_locks
+test_return_retires_slot_after_hook_error direct unlink
+test_return_retires_slot_after_hook_error child unlink
+test_return_retires_slot_after_hook_error direct index
+test_return_retires_slot_after_hook_error child index
 test_forced_secondmate_teardown_preflights_all_child_copies linked
 test_forced_secondmate_teardown_preflights_all_child_copies pool
 test_child_removal_failure_preserves_copy lock
