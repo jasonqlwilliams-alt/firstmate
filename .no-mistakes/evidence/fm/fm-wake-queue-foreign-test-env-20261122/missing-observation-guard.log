@@ -1,0 +1,17 @@
+$ bin/fm-test-run.sh --jobs 1 tests/fm-wake-queue.test.sh
+Requested checkpoint budget: 4s. Injected watcher startup delay: 4.5s.
+FM_TEST_BEGIN 2026-11-23T21:19:03Z tests/fm-wake-queue.test.sh family=watcher-wake-lock expected_gate_skip=none
+ok - an abandoned same-process lock hold is reclaimed; a parent's live hold is not
+ok - without BASHPID a subshell cannot release or reclaim its parent lock and owns its own hold
+ok - bounded acquire hands ownership to the waiting caller after contention
+ok - presentation lock waits are bounded and retriable without weakening acknowledgement atomicity
+ok - malformed presentation locks report acquire failure instead of contention
+not ok - first: expected observation marker 1000	100-7 (exit 124)
+stdout: checkpoint: no actionable wake within 4s
+stderr: 
+actual marker: <missing>
+FM_TEST_END 2026-11-23T21:19:15Z tests/fm-wake-queue.test.sh exit=1 duration_ms=11251 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=1 skipped_gate=0 duration_ms=11293
+FM_TEST_SUMMARY_FAMILY family=watcher-wake-lock count=1 duration_ms=11251 failed=1
+FM_TEST_SLOWEST rank=1 script=tests/fm-wake-queue.test.sh duration_ms=11251
+Runner exit: 1 (expected 1 for this injected negative case).

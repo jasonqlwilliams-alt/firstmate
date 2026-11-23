@@ -1,0 +1,74 @@
+Firstmate 91432043 with private HOME, state, and tmux server. Clock and foreign queue rows are synthetic.
+Quiet phases refer to the foreign-stall alert. A checkpoint can also report normal watcher rearm recovery.
+Registered tmux endpoint: firstmate:fm-mate
+lsof available on the validation PATH: False
+
+First observation of an already-old row (clock=1000, startup delay=0s, elapsed=4.06s)
+$ bin/fm-watch-checkpoint.sh --seconds 4 → exit 124
+checkpoint: no actionable wake within 4s
+Persisted progress='1000\t100-7', stall marker=None
+Parent durable queue: [empty]
+Foreign row byte-for-byte unchanged: True
+
+Oldest row advances past the stall threshold (clock=1002, startup delay=0s, elapsed=0.32s)
+$ bin/fm-watch-checkpoint.sh --seconds 4 → exit 0
+check: rearm-resurface
+Persisted progress='1002\t100-8', stall marker=None
+Parent durable queue: [empty]
+Foreign row byte-for-byte unchanged: True
+
+Oldest row freezes for two synthetic seconds (clock=1004, startup delay=0s, elapsed=0.47s)
+$ bin/fm-watch-checkpoint.sh --seconds 4 → exit 0
+check: secondmate wake-loop stalled: mate=mate row=8 idle=2s
+Persisted progress='1002\t100-8', stall marker='100-8'
+Parent durable queue: 1004	1	check	secondmate-wake-loop-mate-100-8	check: secondmate wake-loop stalled: mate=mate row=8 idle=2s
+Foreign row byte-for-byte unchanged: True
+
+$ bin/fm-wake-drain.sh
+1004	1	check	secondmate-wake-loop-mate-100-8	check: secondmate wake-loop stalled: mate=mate row=8 idle=2s
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 2070141.1004.fg3F0I
+$ bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 2070141.1004.fg3F0I → exit 0; parent queue empty: True
+
+Acknowledged frozen row stays silent across restart (clock=1004, startup delay=0s, elapsed=4.07s)
+$ bin/fm-watch-checkpoint.sh --seconds 4 → exit 124
+checkpoint: no actionable wake within 4s
+Persisted progress='1002\t100-8', stall marker='100-8'
+Parent durable queue: [empty]
+Foreign row byte-for-byte unchanged: True
+
+Progress after acknowledgment clears the prior stall marker (clock=1010, startup delay=0s, elapsed=0.34s)
+$ bin/fm-watch-checkpoint.sh --seconds 4 → exit 0
+check: rearm-resurface
+Persisted progress='1010\t100-9', stall marker=None
+Parent durable queue: [empty]
+Foreign row byte-for-byte unchanged: True
+
+The new oldest row freezes (clock=1012, startup delay=0s, elapsed=0.47s)
+$ bin/fm-watch-checkpoint.sh --seconds 4 → exit 0
+check: secondmate wake-loop stalled: mate=mate row=9 idle=2s
+Persisted progress='1010\t100-9', stall marker='100-9'
+Parent durable queue: 1012	2	check	secondmate-wake-loop-mate-100-9	check: secondmate wake-loop stalled: mate=mate row=9 idle=2s
+Foreign row byte-for-byte unchanged: True
+
+Establish observation for the wall-clock budget comparison (clock=1002, startup delay=0s, elapsed=4.06s)
+$ bin/fm-watch-checkpoint.sh --seconds 4 → exit 124
+checkpoint: no actionable wake within 4s
+Persisted progress='1002\t100-8', stall marker=None
+Parent durable queue: [empty]
+Foreign row byte-for-byte unchanged: True
+
+One-second budget under controlled startup delay (clock=1004, startup delay=1.45s, elapsed=1.01s)
+$ bin/fm-watch-checkpoint.sh --seconds 1 → exit 124
+checkpoint: no actionable wake within 1s
+Persisted progress='1002\t100-8', stall marker=None
+Parent durable queue: [empty]
+Foreign row byte-for-byte unchanged: True
+
+Four-second budget under the same controlled startup delay (clock=1004, startup delay=1.45s, elapsed=1.91s)
+$ bin/fm-watch-checkpoint.sh --seconds 4 → exit 0
+check: secondmate wake-loop stalled: mate=mate row=8 idle=2s
+Persisted progress='1002\t100-8', stall marker='100-8'
+Parent durable queue: 1004	1	check	secondmate-wake-loop-mate-100-8	check: secondmate wake-loop stalled: mate=mate row=8 idle=2s
+Foreign row byte-for-byte unchanged: True
+
+Private tmux server exited with status 0.
