@@ -702,6 +702,16 @@ run_send_case() {  # <bin-root> <fakebin> <log> <home> -- <send args...>
     "$bin/bin/fm-send.sh" "$@" >/dev/null 2>&1
 }
 
+assert_tmux_key_destination() {  # <tmux-log> <pane> <key>
+  awk -F $'\x1f' -v pane="$2" -v key="$3" '
+    $2 == "send-keys" && $5 != "-l" {
+      if ($3 == "-t" && $4 == pane && $5 == key && NF == 5) received = 1
+      else wrong = 1
+    }
+    END { exit !(received && !wrong) }
+  ' "$1" || fail "fm-send should send only the named key $3 to pane $2"
+}
+
 # The byte-identical old-vs-new tmux log comparison this test used to run
 # covered the P1 backend extraction, which promised an unchanged command
 # sequence. The composer consolidation (fm-composer-thin-adapter-refactor-r1)
@@ -710,39 +720,42 @@ run_send_case() {  # <bin-root> <fakebin> <log> <home> -- <send args...>
 # verdict comes from one full styled capture instead of a second band capture -
 # so the current contract is asserted directly instead.
 test_send_tmux_contract() {
-  local fb log home rc
+  local fb log home rc pane
   fb=$(make_send_fakebin "$TMP_ROOT/send-fake")
   home="$TMP_ROOT/send-home"; mkdir -p "$home/state"
   log="$TMP_ROOT/send-new.log"
 
   # Case 1: --key path - target verified, named key sent, no typing.
-  run_send_case "$ROOT" "$fb" "$log" "$home" -- "sess:0.1" --key Escape
+  pane=sess:0.1
+  run_send_case "$ROOT" "$fb" "$log" "$home" -- "$pane" --key Escape
   rc=$?
   expect_code 0 "$rc" "fm-send --key should succeed against a live fake pane"
-  assert_contains "$(cat "$log")" $'\x1f''Escape' "fm-send --key did not send the named key"
+  assert_tmux_key_destination "$log" "$pane" Escape
   assert_not_contains "$(cat "$log")" $'\x1f''-l'$'\x1f' "fm-send --key must not type literal text"
 
   # Case 2: plain text - typed literally exactly once, submitted with Enter,
   # confirmed against the bordered-empty fake composer.
-  run_send_case "$ROOT" "$fb" "$log" "$home" -- "sess:0.1" hello captain
+  run_send_case "$ROOT" "$fb" "$log" "$home" -- "$pane" hello captain
   rc=$?
   expect_code 0 "$rc" "fm-send plain text should confirm against the empty fake composer"
-  assert_contains "$(cat "$log")" $'\x1f''send-keys'$'\x1f''-t'$'\x1f''sess:0.1'$'\x1f''-l'$'\x1f''hello captain' \
+  assert_contains "$(cat "$log")" $'\x1fsend-keys\x1f-t\x1f'"$pane"$'\x1f-l\x1fhello captain' \
     "fm-send did not send the literal text with send-keys -l"
   [ "$(grep -c $'\x1f''-l'$'\x1f' "$log")" -eq 1 ] \
     || fail "fm-send must type the text exactly once (Enter-only retries, never a retype)"
-  assert_contains "$(cat "$log")" $'\x1f''Enter' "fm-send did not submit with Enter"
+  assert_tmux_key_destination "$log" "$pane" Enter
 
   # Case 3: a slash command still opens the popup-settle path (verified in
   # tests/fm-send-popup-settle.test.sh) and ends in the same command shape:
   # one literal type, then Enter.
-  run_send_case "$ROOT" "$fb" "$log" "$home" -- "sess:win" /some-skill
+  pane=sess:win
+  run_send_case "$ROOT" "$fb" "$log" "$home" -- "$pane" /some-skill
   rc=$?
   expect_code 0 "$rc" "fm-send /skill should confirm against the empty fake composer"
-  assert_contains "$(cat "$log")" $'\x1f''send-keys'$'\x1f''-t'$'\x1f''sess:win'$'\x1f''-l'$'\x1f''/some-skill' \
+  assert_contains "$(cat "$log")" $'\x1fsend-keys\x1f-t\x1f'"$pane"$'\x1f-l\x1f/some-skill' \
     "fm-send /skill did not type the literal slash command"
   [ "$(grep -c $'\x1f''-l'$'\x1f' "$log")" -eq 1 ] \
     || fail "fm-send /skill must type the text exactly once"
+  assert_tmux_key_destination "$log" "$pane" Enter
 
   run_send_case "$ROOT" "$fb" "$log" "$home" -- "sess:0.99" --key Escape
   rc=$?
