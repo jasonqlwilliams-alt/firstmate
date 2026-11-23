@@ -92,6 +92,7 @@ EOF
 #!/usr/bin/env bash
 case "$*" in *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;; esac
 case "${1:-}" in
+  -V) printf 'tmux 3.2\n'; exit 0 ;;
   display-message) printf 'firstmate\n'; exit 0 ;;
   list-windows)
     if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
@@ -451,6 +452,7 @@ break_launch_delivery() {  # <case-dir>
 #!/usr/bin/env bash
 case "$*" in *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;; esac
 case "${1:-}" in
+  -V) printf 'tmux 3.2\n'; exit 0 ;;
   display-message) printf 'firstmate\n'; exit 0 ;;
   new-window) printf '@1\n'; exit 0 ;;
   send-keys) exit 1 ;;
@@ -504,6 +506,7 @@ case "\$*" in
   *"#{cursor_y}"*) printf '1\\n'; exit 0 ;;
 esac
 case "\${1:-}" in
+  -V) printf 'tmux 3.2\\n'; exit 0 ;;
   display-message) printf 'firstmate\\n'; exit 0 ;;
   new-window) printf '@1\\n'; exit 0 ;;
   list-windows) case "\$*" in *window_id*) printf '@1 firstmate:fm-$id\\n' | fm_fake_tmux_window_ids "\$@" ;; esac ;;

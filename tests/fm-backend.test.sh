@@ -661,29 +661,34 @@ make_send_fakebin() {  # <dir> -> echoes fakebin dir; logs every tmux call to $F
 #!/usr/bin/env bash
 set -u
 { printf 'tmux'; for a in "$@"; do printf '\x1f%s' "$a"; done; printf '\n'; } >> "${FM_TMUX_LOG:?}"
-case "${1:-}" in
-  send-keys) exit 0 ;;
+command=${1:-}
+case "$command" in
   display-message)
     for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
     printf 'fakepane\n'; exit 0 ;;
-  capture-pane)
-    start= end= target=
+  capture-pane|send-keys)
+    target=
+    shift
     while [ $# -gt 0 ]; do
       case "$1" in
-        -S) start=$2; shift 2 ;;
-        -E) end=$2; shift 2 ;;
         -t) target=$2; shift 2 ;;
+        -S|-E) shift 2 ;;
+        -l|Enter|Escape) break ;;
         *) shift ;;
       esac
     done
-    if [ "$target" != sess:win ] && [ "$target" != sess:0.1 ]; then
-      printf 'can\047t find pane: %s\n' "$target" >&2
-      exit 1
-    fi
-    if [ "$start" = 1 ] && [ "$end" = 1 ]; then
-      printf '│    │\n'
+    case "$target" in
+      sess:0.1) composer="$FM_TMUX_LOG.split" ;;
+      sess:win) composer="$FM_TMUX_LOG.window" ;;
+      *) printf 'can\047t find pane: %s\n' "$target" >&2; exit 1 ;;
+    esac
+    if [ "$command" = capture-pane ]; then
+      printf 'pane transcript\n❯ %s\n' "$(cat "$composer")"
     else
-      printf '╭────╮\n│    │\n╰────╯\n'
+      case "${1:-}" in
+        -l) printf '%s' "$2" > "$composer" ;;
+        Enter) : > "$composer" ;;
+      esac
     fi
     exit 0 ;;
 esac
@@ -697,6 +702,12 @@ run_send_case() {  # <bin-root> <fakebin> <log> <home> -- <send args...>
   local bin=$1 fb=$2 log=$3 home=$4; shift 4
   [ "${1:-}" = -- ] && shift
   : > "$log"
+  printf 'split draft' > "$log.split"
+  printf 'window draft' > "$log.window"
+  case "$1" in
+    sess:0.1) : > "$log.split" ;;
+    sess:win) : > "$log.window" ;;
+  esac
   env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$bin" FM_HOME="$home" FM_TMUX_LOG="$log" \
     FM_SEND_SETTLE=0 FM_SEND_SLEEP=0 \
     "$bin/bin/fm-send.sh" "$@" >/dev/null 2>&1
@@ -734,7 +745,7 @@ test_send_tmux_contract() {
   assert_not_contains "$(cat "$log")" $'\x1f''-l'$'\x1f' "fm-send --key must not type literal text"
 
   # Case 2: plain text - typed literally exactly once, submitted with Enter,
-  # confirmed against the bordered-empty fake composer.
+  # confirmed against the receiving pane's empty composer.
   run_send_case "$ROOT" "$fb" "$log" "$home" -- "$pane" hello captain
   rc=$?
   expect_code 0 "$rc" "fm-send plain text should confirm against the empty fake composer"
@@ -743,6 +754,8 @@ test_send_tmux_contract() {
   [ "$(grep -c $'\x1f''-l'$'\x1f' "$log")" -eq 1 ] \
     || fail "fm-send must type the text exactly once (Enter-only retries, never a retype)"
   assert_tmux_key_destination "$log" "$pane" Enter
+  [ ! -s "$log.split" ] && [ "$(cat "$log.window")" = 'window draft' ] \
+    || fail "plain text should clear the split composer while the other window keeps its draft"
 
   # Case 3: a slash command still opens the popup-settle path (verified in
   # tests/fm-send-popup-settle.test.sh) and ends in the same command shape:
@@ -756,6 +769,8 @@ test_send_tmux_contract() {
   [ "$(grep -c $'\x1f''-l'$'\x1f' "$log")" -eq 1 ] \
     || fail "fm-send /skill must type the text exactly once"
   assert_tmux_key_destination "$log" "$pane" Enter
+  [ ! -s "$log.window" ] && [ "$(cat "$log.split")" = 'split draft' ] \
+    || fail "a slash command should clear its window composer while the split pane keeps its draft"
 
   run_send_case "$ROOT" "$fb" "$log" "$home" -- "sess:0.99" --key Escape
   rc=$?
@@ -871,6 +886,7 @@ make_spawn_fakebin() {  # <dir> <fake-worktree-path> -> echoes fakebin dir
 set -u
 { printf 'tmux'; for a in "\$@"; do printf '\\x1f%s' "\$a"; done; printf '\\n'; } >> "\${FM_TMUX_LOG:?}"
 case "\${1:-}" in
+  -V) printf 'tmux 3.2\\n'; exit 0 ;;
   display-message)
     for a in "\$@"; do case "\$a" in *pane_current_path*) printf '%s\\n' "$wt"; exit 0 ;; esac; done
     printf 'firstmate\\n'; exit 0 ;;
@@ -935,6 +951,7 @@ make_spawn_symlink_fakebin() {  # <dir> <initial-project-path> <worktree-path> -
 set -u
 { printf 'tmux'; for a in "\$@"; do printf '\\x1f%s' "\$a"; done; printf '\\n'; } >> "\${FM_TMUX_LOG:?}"
 case "\${1:-}" in
+  -V) printf 'tmux 3.2\\n'; exit 0 ;;
   display-message)
     for a in "\$@"; do case "\$a" in *pane_current_path*)
       printf x >> "$counter"

@@ -109,6 +109,7 @@ case "$*" in
   *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
 esac
 case "${1:-}" in
+  -V) printf 'tmux 3.2\n'; exit 0 ;;
   display-message) printf 'firstmate\n'; exit 0 ;;
   list-windows)
     if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then

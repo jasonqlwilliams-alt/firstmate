@@ -76,6 +76,7 @@ case "$*" in
   *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
 esac
 case "${1:-}" in
+  -V) printf 'tmux 3.2\n'; exit 0 ;;
   show-environment)
     [ "${FM_FAKE_WORKER_META_KEY:-}" = present ] || exit 1
     printf 'META_API_KEY=worker-key\n'
@@ -458,7 +459,8 @@ set -u
 case "${1:-}" in
   display-message) printf 'fakepane\n'; exit 0 ;;
   has-session) exit 0 ;;
-  list-panes|list-windows) printf 'fm-send:0\n'; exit 0 ;;
+  list-windows) printf '@1 %s\n' "$FM_FAKE_TMUX_WINDOW" | fm_fake_tmux_window_ids "$@"; exit 0 ;;
+  list-panes) [ "${3:-}" = @1 ] || exit 1; printf '%%1\n'; exit 0 ;;
   send-keys)
     shift
     printf '%s\n' "$*" >> "$FM_FAKE_KEY_LOG"
@@ -470,14 +472,14 @@ exit 0
 SH
   chmod +x "$fakebin/tmux"
   fm_write_meta "$home/state/$id.meta" \
-    "window=fm-send:0" "endpoint_task_id=$id" "worktree=$case_dir" \
+    "window=fm-send:fm-$id" "endpoint_task_id=$id" "worktree=$case_dir" \
     "project=$case_dir" "harness=$harness" "kind=ship" "mode=no-mistakes" "yolo=off"
   printf '%s\n' "$case_dir|$home|$fakebin|$id"
 }
 
 run_send_key() {  # <home> <fakebin> <id> <key> <keylog>
   FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$1" FM_STATE_OVERRIDE="$1/state" \
-    FM_FAKE_KEY_LOG="$5" PATH="$2:$PATH" \
+    FM_FAKE_TMUX_WINDOW="fm-send:fm-$3" FM_FAKE_KEY_LOG="$5" PATH="$2:$PATH" \
     "$ROOT/bin/fm-send.sh" "$3" --key "$4" 2>&1
 }
 
@@ -495,10 +497,8 @@ EOF
     out=$(run_send_key "$home" "$fakebin" "$id" "$key" "$keylog")
     status=$?
     expect_code 0 "$status" "muse $key send should succeed: $out"
-    assert_grep "$key" "$keylog" "$key never reached the muse pane"
-    assert_grep 'C-u' "$keylog" "muse $key did not clear the restored composer"
-    [ "$(grep -c . "$keylog")" -ge 2 ] || fail "expected both the interrupt and the clear for $key"
-    head -1 "$keylog" | grep -q "$key" || fail "the clear was sent before the $key interrupt"
+    [ "$(cat "$keylog")" = "$(printf '%s\n' "-t fm-send:fm-$id $key" "-t fm-send:fm-$id C-u")" ] \
+      || fail "$key should reach the recorded Muse window before C-u"
   done
   pass "every accepted muse Escape alias clears the restored composer"
 }
@@ -511,9 +511,10 @@ $rec
 EOF
   keylog="$case_dir/keys.log"
   : > "$keylog"
-  run_send_key "$home" "$fakebin" "$id" Escape "$keylog" >/dev/null
-  assert_grep 'Escape' "$keylog" "Escape never reached the codex pane"
-  assert_no_grep 'C-u' "$keylog" "a non-muse interrupt sent a composer clear it does not need"
+  run_send_key "$home" "$fakebin" "$id" Escape "$keylog" >/dev/null \
+    || fail "Codex Escape should succeed"
+  [ "$(cat "$keylog")" = "-t fm-send:fm-$id Escape" ] \
+    || fail "Codex should receive only Escape in its recorded window"
   pass "the composer clear is scoped to muse and does not touch other adapters"
 }
 
@@ -527,10 +528,12 @@ $rec
 EOF
   keylog="$case_dir/keys.log"
   : > "$keylog"
-  out=$(FM_FAKE_KEY_FAIL='-t fm-send:0 C-u' run_send_key "$home" "$fakebin" "$id" Escape "$keylog")
+  out=$(FM_FAKE_KEY_FAIL="-t fm-send:fm-$id C-u" run_send_key "$home" "$fakebin" "$id" Escape "$keylog")
   status=$?
   [ "$status" -ne 0 ] || fail "a failed muse composer clear was reported as success"
   assert_contains "$out" "could not be cleared" "the failed clear did not explain the pane state"
+  [ "$(cat "$keylog")" = "$(printf '%s\n' "-t fm-send:fm-$id Escape" "-t fm-send:fm-$id C-u")" ] \
+    || fail "the failed clear should follow Escape to the recorded Muse window"
   pass "a failed muse composer clear fails loudly instead of leaving stale input"
 }
 

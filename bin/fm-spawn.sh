@@ -3300,7 +3300,7 @@ elif [ "$RELAUNCH" -eq 1 ] && [ "$RELAUNCH_RECREATE" -eq 1 ]; then
   # is not a one-way door.
   case "$BACKEND" in
     tmux)
-      SES=$(fm_backend_tmux_container_ensure)
+      SES=$(fm_backend_tmux_container_ensure) || exit 1
       T="$SES:$W"
       WID=$(fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
       WT_TARGET="$WID"
@@ -3336,7 +3336,7 @@ EOF
 else
 case "$BACKEND" in
   tmux)
-    SES=$(fm_backend_tmux_container_ensure)
+    SES=$(fm_backend_tmux_container_ensure) || exit 1
     T="$SES:$W"
     # #134 robustness (tmux): fm_backend_tmux_create_task captures a stable window
     # id and pins the window name (automatic-rename/allow-rename off) so a captain's

@@ -424,6 +424,7 @@ make_noop_tmux() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 case "${1:-}" in
+  -V) printf 'tmux 3.2\n' ;;
   new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@" ;;
   list-windows)
     if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
@@ -726,6 +727,7 @@ case "$*" in
   *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
 esac
 case "${1:-}" in
+  -V) printf 'tmux 3.2\n'; exit 0 ;;
   display-message) printf 'firstmate\n'; exit 0 ;;
   list-windows)
     if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then

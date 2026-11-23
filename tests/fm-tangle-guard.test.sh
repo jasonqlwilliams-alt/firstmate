@@ -233,9 +233,14 @@ case "$*" in
     exit 0 ;;
 esac
 case "${1:-}" in
+  -V) printf '%s\n' "${FM_FAKE_TMUX_VERSION:-tmux 3.2}"; exit 0 ;;
   display-message) printf 'firstmate\n'; exit 0 ;;
   new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@"; exit 0 ;;
   list-windows)
+    if [ "${FM_FAKE_TMUX_SERVER:-}" = legacy ] && [[ " $* " = *' -f '* ]]; then
+      printf 'unknown flag -f\n' >&2
+      exit 1
+    fi
     if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
       fm_fake_tmux_window_ids "$@" < "$0.windows"
     fi
@@ -268,7 +273,7 @@ run_spawn_record() {
 }
 
 test_spawn_tmux_window_construction() {
-  local home proj fakebin rec wt out status
+  local home proj fakebin rec wt out status client server diagnostic
   home="$TMP_ROOT/spawn-rec-home"
   mkdir -p "$home/data"
   proj=$(make_repo "$TMP_ROOT/spawn-rec-proj")
@@ -279,6 +284,22 @@ test_spawn_tmux_window_construction() {
   wt="$TMP_ROOT/spawn-rec-wt"
   git -C "$proj" worktree add -q --detach "$wt" >/dev/null 2>&1
 
+  while IFS='|' read -r client server diagnostic; do
+    : > "$rec"
+    out=$(FM_FAKE_TMUX_VERSION="$client" FM_FAKE_TMUX_SERVER="$server" \
+      run_spawn_record "$home" rec-win-gg7 "$proj" "$wt" "$fakebin" "$rec"); status=$?
+    expect_code 1 "$status" "spawn should refuse $client with a $server server: $out"
+    assert_contains "$out" "$diagnostic" "spawn did not explain the tmux prerequisite failure"
+    if grep -Eq '^tmux (new-session|new-window|send-keys)( |$)' "$rec"; then
+      fail "spawn allocated a tmux endpoint or requested a lease without compatible tmux"
+    fi
+    assert_absent "$home/state/rec-win-gg7.meta" "incompatible tmux should leave no worker record"
+  done <<'ROWS'
+tmux 3.1c|modern|requires a tmux client version 3.2
+tmux 3.2|legacy|could not verify list-windows -f support
+ROWS
+
+  : > "$rec"
   out=$(run_spawn_record "$home" rec-win-gg7 "$proj" "$wt" "$fakebin" "$rec"); status=$?
   expect_code 0 "$status" "spawn into a genuine worktree should succeed"
   assert_contains "$out" "spawned rec-win-gg7" "recording spawn did not report success"

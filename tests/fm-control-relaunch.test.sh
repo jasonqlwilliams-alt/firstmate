@@ -59,6 +59,7 @@ make_tmux_stub() {  # <dir>
 set -u
 D=$FM_FAKE_DIR
 case "${1:-}" in
+  -V) printf 'tmux 3.2\n'; exit 0 ;;
   send-keys)
     shift
     literal=0

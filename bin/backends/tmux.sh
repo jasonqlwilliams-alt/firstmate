@@ -91,10 +91,18 @@ fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> 
 # "firstmate" session exists. Mirrors fm-spawn.sh's container-ensure block;
 # prints the resolved session name.
 fm_backend_tmux_container_ensure() {
+  fm_backend_required_tool_available tmux tmux || {
+    if [ "$?" -eq 2 ]; then
+      echo "error: could not verify list-windows -f support on the tmux server. See docs/tmux-backend.md#setup." >&2
+    else
+      echo "error: spawning with tmux requires a tmux client version $FM_BACKEND_TMUX_MIN_VERSION or later" >&2
+    fi
+    return 1
+  }
   if [ -n "${TMUX:-}" ]; then
     tmux display-message -p '#S'
   else
-    tmux has-session -t firstmate 2>/dev/null || tmux new-session -d -s firstmate
+    tmux has-session -t firstmate 2>/dev/null || tmux new-session -d -s firstmate || return 1
     printf 'firstmate'
   fi
 }
