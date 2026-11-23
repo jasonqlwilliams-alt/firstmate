@@ -331,8 +331,12 @@ fm_backend_required_tool_available() {  # <backend> <tool>
       [[ "$version" =~ ^tmux[[:space:]]+([0-9]+)\.([0-9]+) ]] || return 1
       min_major=${FM_BACKEND_TMUX_MIN_VERSION%%.*}
       min_minor=${FM_BACKEND_TMUX_MIN_VERSION#*.}
-      [ "${BASH_REMATCH[1]}" -gt "$min_major" ] ||
-        { [ "${BASH_REMATCH[1]}" -eq "$min_major" ] && [ "${BASH_REMATCH[2]}" -ge "$min_minor" ]; }
+      if [ "${BASH_REMATCH[1]}" -lt "$min_major" ] ||
+        { [ "${BASH_REMATCH[1]}" -eq "$min_major" ] && [ "${BASH_REMATCH[2]}" -lt "$min_minor" ]; }; then
+        return 1
+      fi
+      fm_backend_source tmux || return 1
+      fm_tmux_window_filter_available
       ;;
     cmux:cmux)
       fm_backend_source cmux >/dev/null 2>&1 || return 1
@@ -1104,14 +1108,14 @@ fm_backend_codex_agent_pid() {  # <backend> <target>
 
 # fm_backend_target_exists: cheap, READ-ONLY existence check - does the
 # recorded TARGET endpoint still exist on BACKEND? This probe never starts a
-# server or session. For a bound Herdr target, status 0 means the pane matches,
-# status 1 means it is missing or foreign, and status 2 means its identity
+# server or session. For tmux and bound Herdr targets, status 0 means the pane
+# matches, status 1 means it is missing or foreign, and status 2 means its identity
 # could not be determined. Unbound Herdr targets use a direct presence read.
 fm_backend_target_exists() {  # <backend> <target> [expected-label] [explicit]
   local backend=$1 target=$2 expected_label=${3:-} session pane
   case "$backend" in
     tmux)
-      fm_backend_source tmux || return 1
+      fm_backend_source tmux || return 2
       fm_backend_tmux_target_exists "$target" "${4:-}"
       ;;
     herdr)

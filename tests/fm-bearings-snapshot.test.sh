@@ -39,7 +39,10 @@ SH
 #!/usr/bin/env bash
 case "${1:-}" in
   list-windows)
-    case "$*" in *window_id*) printf '%s\n' '@1 firstmate:fm-phase8' '@2 firstmate:fm-domain-alpha' | fm_fake_tmux_window_ids "$@" ;; esac ;;
+    case "$*" in
+      *window_id*) printf '%s\n' '@1 firstmate:fm-phase8' '@2 firstmate:fm-domain-alpha' \
+        '@3 firstmate:fm-duplicate' '@4 firstmate:fm-duplicate' | fm_fake_tmux_window_ids "$@" ;;
+    esac ;;
   list-panes) [ "$3" = @1 ] || [ "$3" = @2 ] ;;
   display-message) case "$*" in *dead-*) exit 1 ;; *) printf '%%1\n' ;; esac ;;
   capture-pane)
@@ -3111,6 +3114,21 @@ SH
   pass "current state and decision hints share one captured status observation"
 }
 
+test_duplicate_tmux_presence_stays_unknown() {
+  local home fakebin json
+  home=$(make_home duplicate-tmux)
+  fakebin=$(make_fakebin "$home")
+  fm_write_meta "$home/state/duplicate.meta" 'window=firstmate:fm-duplicate' 'kind=ship'
+  fm_write_meta "$home/state/closed.meta" 'window=firstmate:fm-closed' 'kind=ship'
+  json=$(PATH="$fakebin:$PATH" FM_HOME="$home" NET_LOG="$home/net.log" \
+    "$ROOT/bin/fm-fleet-snapshot.sh" --json) || fail "could not capture the fleet snapshot"
+  printf '%s' "$json" | jq -e '
+    any(.tasks[]; .id == "duplicate" and .endpoint.exists == null and .endpoint.status == "unknown")
+    and any(.tasks[]; .id == "closed" and .endpoint.exists == false and .endpoint.status == "absent")
+  ' >/dev/null || fail "the fleet snapshot should distinguish unresolved duplicate windows from a closed window: $json"
+  pass "duplicate tmux windows leave fleet presence unknown"
+}
+
 test_relaunched_task_does_not_inherit_reused_endpoint_state() {
   local home fakebin worktree json
   home=$(make_home endpoint-generation-race)
@@ -3512,6 +3530,7 @@ test_gate_and_landed_repo_and_empty_reason
 
 test_task_teardown_during_metadata_capture_does_not_abort_snapshot
 test_current_state_uses_captured_status_observation
+test_duplicate_tmux_presence_stays_unknown
 test_relaunched_task_does_not_inherit_reused_endpoint_state
 test_large_local_snapshot_overlaps_local_reads_without_projection_drift
 test_remote_ledgers_share_one_concurrent_budget_and_fall_back_to_cache

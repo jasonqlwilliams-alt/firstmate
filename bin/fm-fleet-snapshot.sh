@@ -665,7 +665,7 @@ prefetch_task_observations() {  # <meta> <id>
     if [ -n "$target" ]; then
       if FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_target_exists "$backend" "$target" "fm-$id" >/dev/null 2>&1; then
         endpoint_exists=true
-      elif [ "$?" -eq 2 ] && [ "$backend" = herdr ]; then
+      elif [ "$?" -eq 2 ] && [[ "$backend" = tmux || "$backend" = herdr ]]; then
         endpoint_exists=null
       else
         endpoint_exists=false

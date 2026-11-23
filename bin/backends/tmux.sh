@@ -53,9 +53,14 @@ fm_backend_tmux_capture() {  # <target> <lines> [explicit]
 }
 
 fm_backend_tmux_target_exists() {  # <target> [explicit]
-  local target
-  target=$(fm_tmux_exact_target "$@") || return 1
-  tmux list-panes -t "$target" -F '#{pane_id}' >/dev/null 2>&1
+  local target diagnostic
+  target=$(fm_tmux_exact_target "$@") || return $?
+  if [ "${2:-}" = explicit ]; then
+    diagnostic=$(tmux capture-pane -p -t "$target" -S 0 -E 0 2>&1 >/dev/null) && return 0
+  else
+    diagnostic=$(tmux list-panes -t "$target" -F '#{pane_id}' 2>&1 >/dev/null) && return 0
+  fi
+  fm_tmux_read_failure_status "$diagnostic"
 }
 
 # fm_backend_tmux_send_key: one named key.

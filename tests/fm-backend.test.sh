@@ -662,7 +662,6 @@ make_send_fakebin() {  # <dir> -> echoes fakebin dir; logs every tmux call to $F
 set -u
 { printf 'tmux'; for a in "$@"; do printf '\x1f%s' "$a"; done; printf '\n'; } >> "${FM_TMUX_LOG:?}"
 case "${1:-}" in
-  list-panes) [ "${3:-}" = sess:win ] || [ "${3:-}" = sess:0.1 ]; exit $? ;;
   send-keys) exit 0 ;;
   display-message)
     for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
@@ -677,7 +676,10 @@ case "${1:-}" in
         *) shift ;;
       esac
     done
-    [ "$target" = sess:win ] || [ "$target" = sess:0.1 ] || exit 1
+    if [ "$target" != sess:win ] && [ "$target" != sess:0.1 ]; then
+      printf 'can\047t find pane: %s\n' "$target" >&2
+      exit 1
+    fi
     if [ "$start" = 1 ] && [ "$end" = 1 ]; then
       printf '│    │\n'
     else

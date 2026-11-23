@@ -47,7 +47,8 @@ case "${1:-}" in
       exit 1
     fi
     exit 0 ;;
-  list-panes|display-message)
+  list-panes|display-message|capture-pane)
+    operation=$1
     target=
     cursor=0
     while [ $# -gt 0 ]; do
@@ -58,13 +59,13 @@ case "${1:-}" in
       esac
     done
     if [ -n "${FM_FAKE_TMUX_DEAD_TARGET:-}" ] && [ "$target" = "$FM_FAKE_TMUX_DEAD_TARGET" ]; then
+      printf 'can\047t find pane: %s\n' "$target" >&2
       exit 1
     fi
-    [ "$cursor" = 1 ] && { printf '1\n'; exit 0; }
-    printf '%%1\n'
-    exit 0 ;;
-  capture-pane)
-    if [ -s "$FM_TMUX_LOG.typed" ]; then
+    if [ "$operation" != capture-pane ]; then
+      [ "$cursor" = 1 ] && { printf '1\n'; exit 0; }
+      printf '%%1\n'
+    elif [ -s "$FM_TMUX_LOG.typed" ]; then
       printf 'fake agent\n› %s\n' "$(cat "$FM_TMUX_LOG.typed")"
     else
       printf '╭────╮\n│    │\n╰────╯\n'

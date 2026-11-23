@@ -313,7 +313,7 @@ ROWS
 }
 
 test_tmux_min_version() {
-  local home="$TMP_ROOT/tmux-floor/home" fakebin out version
+  local home="$TMP_ROOT/tmux-floor/home" fakebin out version server
   mkdir -p "$home"
   fakebin=$(make_fake_toolchain "$TMP_ROOT/tmux-floor")
   for version in 'tmux 3.0a' 'tmux 3.1c' 'tmux 3.2' 'tmux 3.2a' 'tmux 3.10' 'tmux 10.0' 'tmux development'; do
@@ -327,7 +327,35 @@ test_tmux_min_version() {
       *) assert_not_contains "$out" 'MISSING: tmux' "$version should satisfy the prerequisite" ;;
     esac
   done
-  pass "bootstrap enforces the tmux 3.2 minimum on the selected backend"
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$1" in
+  -V) printf '%s\n' 'tmux 3.2' ;;
+  list-windows)
+    case "$FM_FAKE_TMUX_SERVER" in
+      old)
+        for arg in "$@"; do
+          [ "$arg" = -f ] || continue
+          printf '%s\n' 'usage: list-windows [-a] [-F format] [-t target-session]' >&2
+          exit 1
+        done ;;
+      stopped) printf '%s\n' 'no server running on /tmp/tmux-test/default' >&2; exit 1 ;;
+      empty) printf '%s\n' 'no current target' >&2; exit 1 ;;
+      current) exit 0 ;;
+    esac ;;
+esac
+SH
+  for server in old stopped empty current; do
+    out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$home" FM_BACKEND=tmux \
+      FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_FAKE_TMUX_SERVER="$server" FM_BOOTSTRAP_DETECT_ONLY=1 \
+      "$ROOT/bin/fm-bootstrap.sh")
+    if [ "$server" = old ]; then
+      assert_contains "$out" 'MISSING: tmux (install:' "a current client with an incompatible server must fail the prerequisite"
+    else
+      assert_not_contains "$out" 'MISSING: tmux' "a $server tmux server should satisfy the prerequisite"
+    fi
+  done
+  pass "bootstrap checks the tmux client minimum and running server capability"
 }
 
 test_no_mistakes_min_version() {

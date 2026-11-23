@@ -902,7 +902,7 @@ secondmate_handoff_detect() {
 
 install_cmd() {
   case "$1" in
-    tmux) echo "brew install tmux  # or a platform package providing tmux >=$FM_BACKEND_TMUX_MIN_VERSION" ;;
+    tmux) echo "brew install tmux  # tmux >=$FM_BACKEND_TMUX_MIN_VERSION with a server that supports list-windows -f" ;;
     node|git|gh|curl|jq|orca|zellij) echo "brew install $1  # or the platform's package manager" ;;
     cmux) echo "brew install --cask cmux  # or see https://cmux.com" ;;
     treehouse) echo "curl -fsSL https://kunchenguid.github.io/treehouse/install.sh | sh" ;;

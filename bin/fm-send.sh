@@ -329,7 +329,7 @@ fm_send_count_colons() {  # <string>
 }
 
 fm_send_resolve_target() {  # <raw-target>
-  local raw=$1 meta pane_meta target backend assumed colons id session hint
+  local raw=$1 meta pane_meta target backend assumed colons id session hint diagnosis
 
   RESOLVED_TARGET=""
   TARGET_BACKEND=""
@@ -419,8 +419,14 @@ fm_send_resolve_target() {  # <raw-target>
         assumed=tmux
         TARGET_MODE=explicit
       fi
-      if ! fm_backend_target_exists "$assumed" "$raw" '' "$TARGET_MODE"; then
-        echo "error: explicit target '$raw' is not a live $assumed endpoint (tried meta=$STATE/$raw.meta; metadata window/terminal lookup; backend=$assumed). Use fm-<id> for a recorded task/lane, or pass a target whose backend endpoint can be verified." >&2
+      if fm_backend_target_exists "$assumed" "$raw" '' "$TARGET_MODE"; then
+        :
+      else
+        case "$?" in
+          2) diagnosis='could not be verified as' ;;
+          *) diagnosis='is not' ;;
+        esac
+        echo "error: explicit target '$raw' $diagnosis a live $assumed endpoint (tried meta=$STATE/$raw.meta; metadata window/terminal lookup; backend=$assumed). Use fm-<id> for a recorded task/lane, or pass a target whose backend endpoint can be verified." >&2
         return 1
       fi
       RESOLVED_TARGET=$raw

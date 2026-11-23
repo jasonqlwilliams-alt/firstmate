@@ -6,6 +6,8 @@ tmux is Firstmate's verified reference runtime backend and the fully supported b
 ## Setup
 
 Install tmux 3.2 or newer with `brew install tmux` or your platform package manager.
+A running tmux server must support `list-windows -f`.
+If the client was upgraded while an older server was running, start a new server after the old sessions are no longer needed.
 The universal harness and toolchain requirements are in [`configuration.md`](configuration.md#toolchain).
 
 tmux is the hard default when no explicit setting or runtime auto-detection selects another backend.

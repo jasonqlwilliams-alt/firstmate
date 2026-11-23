@@ -70,6 +70,27 @@ wait_for_marker() {  # <raw-target> <marker>
   fail "window $1 never showed $2"
 }
 
+split_pane=$(tmux split-window -d -P -F '#{pane_id}' -t "$SESSION:0" -- \
+  sh -c "printf '%s\\n' SPLIT-PANE-MARKER; exec '$SLEEP_BIN' 600") \
+  || fail "could not create the explicit split pane"
+split_index=$(tmux display-message -p -t "$split_pane" '#{pane_index}')
+explicit="$SESSION:0.$split_index"
+wait_for_marker "$split_pane" SPLIT-PANE-MARKER
+FM_HOME="$LAB/home" "$ROOT/bin/fm-peek.sh" "$explicit" 40 | grep -q SPLIT-PANE-MARKER \
+  || fail "fm-peek should read the explicitly selected split pane"
+fm_backend_target_exists tmux "$explicit" '' explicit \
+  || fail "a live explicit split pane should pass the presence probe"
+fm_backend_capture tmux "$split_index" 40 '' explicit | grep -q SPLIT-PANE-MARKER \
+  || fail "the bare index must select the live split pane"
+fm_backend_target_exists tmux "$split_index" '' explicit \
+  || fail "the presence probe should accept the bare pane index"
+if fm_backend_target_exists tmux "$SESSION:0.99" '' explicit; then
+  fail "the presence probe must reject a missing split pane in a live window"
+else
+  [ "$?" -eq 1 ] || fail "a missing pane should report absence"
+fi
+pass "explicit tmux pane syntax works for capture and presence"
+
 new_window "$SESSION" fm-mate MATE-ONE-MARKER
 new_window "$SESSION" fm-mate2 NEIGHBOUR-TWO-MARKER
 wait_for_marker "=$SESSION:=fm-mate" MATE-ONE-MARKER
@@ -149,28 +170,17 @@ new_window "$SESSION" fm-duplicate FIRST-DUPLICATE
 new_window "$SESSION" fm-duplicate SECOND-DUPLICATE
 [ "$(fm_backend_agent_state tmux "$SESSION:fm-duplicate")" = unreadable ] \
   || fail "two identically named windows must leave agent state unreadable"
-fm_backend_target_exists tmux "$SESSION:fm-duplicate" \
-  && fail "two identically named windows must not establish presence"
+if fm_backend_target_exists tmux "$SESSION:fm-duplicate"; then
+  fail "two identically named windows must not establish presence"
+else
+  [ "$?" -eq 2 ] || fail "duplicate windows must report unreadable presence"
+fi
 pass "duplicate worker names leave the endpoint unresolved"
 
 new_window "$SESSION" %worker2 PERCENT-NEIGHBOUR
 fm_backend_capture tmux "$SESSION:%worker" 40 >/dev/null 2>&1 \
   && fail "a missing percent-prefixed window name must not capture its neighbour"
 pass "a qualified percent-prefixed name reads exactly"
-
-split_pane=$(tmux split-window -d -P -F '#{pane_id}' -t "$SESSION:0" -- \
-  sh -c "printf '%s\\n' SPLIT-PANE-MARKER; exec '$SLEEP_BIN' 600") \
-  || fail "could not create the explicit split pane"
-split_index=$(tmux display-message -p -t "$split_pane" '#{pane_index}')
-explicit="$SESSION:0.$split_index"
-wait_for_marker "$split_pane" SPLIT-PANE-MARKER
-FM_HOME="$LAB/home" "$ROOT/bin/fm-peek.sh" "$explicit" 40 | grep -q SPLIT-PANE-MARKER \
-  || fail "fm-peek should read the explicitly selected split pane"
-fm_backend_target_exists tmux "$explicit" '' explicit \
-  || fail "a live explicit split pane should pass the presence probe"
-fm_backend_target_exists tmux "$SESSION:0.99" '' explicit \
-  && fail "the presence probe must reject a missing split pane in a live window"
-pass "explicit tmux pane syntax works for capture and presence"
 
 new_window "$SESSION" fm-café ACCENTED-WINDOW-MARKER
 accented_pane=$(tmux display-message -p -t "=$SESSION:=fm-café" '#{pane_id}')

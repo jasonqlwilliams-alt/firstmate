@@ -660,7 +660,7 @@ cmd_handover() {
   if ! probe_successor; then
     die "successor $SUCCESSOR_HARNESS did not answer its probe; refusing to leave the Claude helm"
   fi
-  helm_target_exists || die "helm target $HELM_TARGET is not a live $HELM_BACKEND pane"
+  helm_target_exists || die "could not verify helm target $HELM_TARGET as a live $HELM_BACKEND pane"
 
   local idle_timeout stow_timeout lock_timeout poll launch
   idle_timeout=${FM_BACKUP_HELM_IDLE_TIMEOUT:-1200}

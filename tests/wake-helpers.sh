@@ -199,6 +199,7 @@ case "${1:-}" in
     esac
     exit 0 ;;
   capture-pane)
+    [ "${FM_FAKE_TMUX_PANE_ALIVE:-1}" = 1 ] || exit 1
     # Honor a single-line band capture (-S N -E M, both non-negative) for the
     # composer reader's non-bordered compatibility fallback; otherwise (e.g. its
     # structural full-pane scan or fm_pane_is_busy's "-S -40" tail) return the whole capture. -e is accepted and

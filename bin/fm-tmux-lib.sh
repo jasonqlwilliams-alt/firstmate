@@ -56,6 +56,27 @@
 # so the tmux and herdr adapters cannot drift apart on what counts as ghost text.
 fm_tmux_strip_ghost() { fm_composer_strip_ghost; }
 
+fm_tmux_no_server_error() {  # <diagnostic>
+  case "$1" in
+    "no server running on "*|"error connecting to "*" (No such file or directory)"|"error connecting to "*" (Connection refused)") return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+fm_tmux_read_failure_status() {  # <diagnostic>
+  case "$1" in
+    "can't find session:"*|"can't find window:"*|"can't find pane:"*) return 1 ;;
+  esac
+  if fm_tmux_no_server_error "$1"; then return 1; fi
+  return 2
+}
+
+fm_tmux_window_filter_available() {
+  local diagnostic
+  diagnostic=$(tmux list-windows -a -f 0 2>&1 >/dev/null) && return 0
+  [ "$diagnostic" = 'no current target' ] || fm_tmux_no_server_error "$diagnostic"
+}
+
 # fm_tmux_exact_target: the read boundary for a recorded `session:window`
 # target. tmux resolves a session or window NAME that is not an exact match by
 # prefix (and, for a pane read, an absent window can fall back to another
@@ -92,12 +113,8 @@ fm_tmux_exact_target() {  # <target> [explicit]
   literal=${literal//\#\#\[/\#\{a:35\}\[}
   if ! inventory=$(tmux list-windows -t "=$session:" \
     -f "#{==:#{session_name}:#{window_name},$literal}" -F '#{window_id}' 2>&1); then
-    case "$inventory" in
-      *"can't find session:"*|*"no server running on "*|*"error connecting to "*" (No such file or directory)"|*"error connecting to "*" (Connection refused)")
-        return 1
-        ;;
-    esac
-    return 2
+    fm_tmux_read_failure_status "$inventory"
+    return $?
   fi
   case "$inventory" in
     '') return 1 ;;

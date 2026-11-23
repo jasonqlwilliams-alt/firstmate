@@ -299,7 +299,9 @@ make_fake_tmux() {
 set -u
 case "\${1:-}" in
   -V) printf '%s\n' 'tmux 3.2'; exit 0 ;;
-  list-windows) printf '%s\n' '@1 $live' | fm_fake_tmux_window_ids "\$@"; exit 0 ;;
+  list-windows)
+    [ "\${2:-}" = -a ] || printf '%s\n' '@1 $live' '@2 fm-sess:duplicate' '@3 fm-sess:duplicate' | fm_fake_tmux_window_ids "\$@"
+    exit 0 ;;
   list-panes) [ "\${3:-}" = '@1' ] || exit 1; printf '%%1\n'; exit 0 ;;
   display-message)
     target=""
@@ -1292,8 +1294,8 @@ EOF
     "SECONDMATE_LIVENESS: secondmate $SESSION_START_SECOND_MATE_ID: skipped: endpoint probe unreadable (backend=tmux)" \
     "session start did not distinguish transient unreadability from absence"
   [ ! -s "$log" ] || fail "session start touched a transiently unreadable target: $(cat "$log")"
-  assert_contains "$out" "endpoint: dead (backend=tmux window=firstmate:fm-$SESSION_START_SECOND_MATE_ID)" \
-    "the later cheap presence read should preserve the visible offline symptom"
+  assert_contains "$out" "endpoint: unknown (unreadable identity, backend=tmux window=firstmate:fm-$SESSION_START_SECOND_MATE_ID)" \
+    "the later cheap presence read should also report unreadability"
   pass "session start: transient tmux unreadability never licenses a relaunch"
 }
 
@@ -1348,12 +1350,15 @@ EOF
 
   printf 'window=fm-sess:live-window\nkind=ship\n' > "$home/state/task-live.meta"
   printf 'window=fm-sess:dead-window\nkind=ship\n' > "$home/state/task-dead.meta"
+  printf 'window=fm-sess:duplicate\nkind=ship\n' > "$home/state/task-duplicate.meta"
 
   out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
   assert_contains "$out" "endpoint: alive (backend=tmux window=fm-sess:live-window)" "live tmux endpoint not reported alive"
   assert_contains "$out" "endpoint: dead (backend=tmux window=fm-sess:dead-window)" "dead tmux endpoint not reported dead"
+  assert_contains "$out" "endpoint: unknown (unreadable identity, backend=tmux window=fm-sess:duplicate)" \
+    "duplicate tmux windows should leave endpoint presence unknown"
 
-  pass "tmux endpoint liveness is reported per task: alive for a live window, dead for a gone one"
+  pass "tmux endpoint liveness distinguishes live, gone, and ambiguous windows"
 }
 
 test_endpoint_liveness_herdr() {

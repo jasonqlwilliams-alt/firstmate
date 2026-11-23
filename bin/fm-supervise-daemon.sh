@@ -1643,8 +1643,8 @@ fm_super_main() {
 
   # --- validate supervisor target at startup (a missing target is a typo) ---
   if ! fm_backend_target_exists "$BACKEND" "$TARGET" '' explicit; then
-    echo "error: supervisor target '$TARGET' does not resolve to a $BACKEND pane; set FM_SUPERVISOR_TARGET" >&2
-    log "startup failed: target '$TARGET' not found (backend=$BACKEND)"
+    echo "error: could not verify supervisor target '$TARGET' as a $BACKEND pane; check FM_SUPERVISOR_TARGET" >&2
+    log "startup failed: could not verify target '$TARGET' (backend=$BACKEND)"
     fm_lock_release "$LOCK" 2>/dev/null || true
     rm -f "$PIDFILE" 2>/dev/null || true
     exit 1
@@ -1711,7 +1711,7 @@ fm_super_main() {
     # Catch-up signals persist in state/*.status and flow on the next run, so
     # this delays rather than loses work.
     if ! fm_backend_target_exists "$BACKEND" "$TARGET" '' explicit; then
-      log "warn: supervisor target '$TARGET' gone; backing off ${INJECT_FAIL_SLEEP}s, will retry"
+      log "warn: supervisor target '$TARGET' unavailable; backing off ${INJECT_FAIL_SLEEP}s, will retry"
       # Flush is pointless with no pane; preserve any buffered escalations.
       sleep "$INJECT_FAIL_SLEEP"
       continue
