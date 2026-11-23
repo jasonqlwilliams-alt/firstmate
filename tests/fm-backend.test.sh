@@ -875,7 +875,8 @@ case "\${1:-}" in
     for a in "\$@"; do case "\$a" in *pane_current_path*) printf '%s\\n' "$wt"; exit 0 ;; esac; done
     printf 'firstmate\\n'; exit 0 ;;
   new-window) printf '@1\\n'; exit 0 ;;
-  list-windows) exit 0 ;;
+  # The exact-window reads confirm the window this fake created.
+  list-windows) case "\$*" in *window_id*) printf '@1\\n' ;; esac; exit 0 ;;
 esac
 exit 0
 SH
@@ -946,7 +947,8 @@ case "\${1:-}" in
     ;; esac; done
     printf 'firstmate\\n'; exit 0 ;;
   new-window) printf '@1\\n'; exit 0 ;;
-  list-windows) exit 0 ;;
+  # The exact-window reads confirm the window this fake created.
+  list-windows) case "\$*" in *window_id*) printf '@1\\n' ;; esac; exit 0 ;;
 esac
 exit 0
 SH
