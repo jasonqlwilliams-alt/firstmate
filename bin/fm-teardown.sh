@@ -1735,20 +1735,16 @@ TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED=3
 TEARDOWN_PROCEVENT_RESTORE_FAILED=4
 TEARDOWN_TREEHOUSE_CALLER_REFUSED=5
 
-teardown_treehouse_close_matches_task() {  # <marker> <data-or-empty> <task-id> <state>
+teardown_treehouse_close_matches_task() {  # <marker> <task-id> <state>
   [ -e "$1" ] || [ -L "$1" ] || return 1
-  if [ -n "$2" ]; then
-    fm_backlog_close_marker_validate "$1" "$2" "$3" "$4" || return 1
-  else
-    fm_backlog_close_marker_read "$1" "$3" "$4" || return 1
-  fi
-  fm_backlog_meta_spawn_gen "$4/$3.meta" "$4" \
+  fm_backlog_close_marker_read "$1" "$2" "$3" \
+    && fm_backlog_meta_spawn_gen "$3/$2.meta" "$3" \
     && [ "$FM_BACKLOG_CLOSE_VALIDATED_SPAWN_GEN" = "$FM_BACKLOG_META_SPAWN_GEN" ]
 }
 
-teardown_cancel_matching_treehouse_close() {  # <marker> <data> <task-id> <state>
-  if teardown_treehouse_close_matches_task "$@" && ! fm_backlog_close_marker_remove "$1" "$4"; then
-    echo "error: could not cancel the pending backlog transition for $3 ($FM_BACKLOG_TRANSITION_ERROR)" >&2
+teardown_cancel_matching_treehouse_close() {  # <marker> <task-id> <state>
+  if teardown_treehouse_close_matches_task "$@" && ! fm_backlog_close_marker_remove "$1" "$3"; then
+    echo "error: could not cancel the pending backlog transition for $2 ($FM_BACKLOG_TRANSITION_ERROR)" >&2
     return 1
   fi
 }
@@ -1757,7 +1753,7 @@ teardown_descendant_return_failure() {  # <status> <state> <task-id> <copy>
   local rc=$1 state=$2 id=$3 copy=$4 marker
   if [ -e "$copy" ] || [ -L "$copy" ]; then
     marker=$(fm_backlog_close_marker_path "$state" "$id") || return 1
-    teardown_cancel_matching_treehouse_close "$marker" "" "$id" "$state" || return 1
+    teardown_cancel_matching_treehouse_close "$marker" "$id" "$state" || return 1
   fi
   return "$rc"
 }
@@ -3739,7 +3735,7 @@ teardown_treehouse_backlog_rollback() {
       return 1
     fi
   else
-    teardown_cancel_matching_treehouse_close "$BACKLOG_CLOSE_MARKER" "$DATA" "$ID" "$STATE" || return 1
+    teardown_cancel_matching_treehouse_close "$BACKLOG_CLOSE_MARKER" "$ID" "$STATE" || return 1
   fi
   if [ "$TEARDOWN_LEGACY_PRESTAMP_SIZE" -gt 0 ] && ! teardown_legacy_stamp_rollback; then
     echo "error: the legacy incarnation stamp on $ID's record could not be rolled back; re-run teardown with --legacy-record after reconciling its endpoint" >&2
@@ -3813,7 +3809,7 @@ if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
   }
   if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ] \
      && { [ -e "$BACKLOG_CLOSE_MARKER" ] || [ -L "$BACKLOG_CLOSE_MARKER" ]; } \
-     && ! teardown_treehouse_close_matches_task "$BACKLOG_CLOSE_MARKER" "$DATA" "$ID" "$STATE"; then
+     && ! teardown_treehouse_close_matches_task "$BACKLOG_CLOSE_MARKER" "$ID" "$STATE"; then
     if ! fm_backlog_record_present "$BACKLOG_CLOSE_MARKER" "pending-close record" "$STATE" \
        || ! BACKLOG_CLOSE_BACKUP=$(mktemp "$STATE/.$ID.backlog-close-before.XXXXXX") \
        || ! cp "$BACKLOG_CLOSE_MARKER" "$BACKLOG_CLOSE_BACKUP"; then

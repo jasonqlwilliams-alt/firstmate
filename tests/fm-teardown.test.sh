@@ -3971,7 +3971,7 @@ test_reparented_teardown_preserves_original_caller() (
     return 0
   fi
   local mode=$1 case_dir leak_pid rc=0 i lock retries=1 copy task_branch hook parent
-  local backlog_case=0 prior_close=${2:-none} prior_gen
+  local backlog_case=0 prior_close=${2:-none} prior_gen replay_data
   local -a teardown_args=()
   case_dir=$(make_case "reparented-teardown-$mode-$prior_close")
   if [[ "$mode" == child* ]]; then
@@ -4004,6 +4004,11 @@ test_reparented_teardown_preserves_original_caller() (
     hook="$copy/.claude/settings.local.json"
   fi
   if [ "$backlog_case" = 1 ]; then
+    replay_data="$case_dir/data"
+    if [ "$prior_close" = relocated ]; then
+      replay_data="$case_dir/relocated/data"
+      seed_backlog_in_flight "$case_dir" ship task-x1 "$replay_data" || fail 'could not seed the relocated backlog'
+    fi
     cp "$case_dir/state/task-x1.meta" "$case_dir/meta-before"
     if [ "$prior_close" != none ]; then
       prior_gen=teardown-test-task-x1
@@ -4012,7 +4017,7 @@ test_reparented_teardown_preserves_original_caller() (
         export FM_HOME="$case_dir/home"
         # shellcheck source=bin/fm-backlog-transition-lib.sh
         . "$ROOT/bin/fm-backlog-transition-lib.sh"
-        fm_backlog_close_marker_write "$case_dir/state" task-x1 "$case_dir/data" "$prior_gen" --note 'local main'
+        fm_backlog_close_marker_write "$case_dir/state" task-x1 "$replay_data" "$prior_gen" --note 'local main'
       ) || fail 'could not seed the pre-existing close marker'
       cp "$case_dir/state/task-x1.backlog-close" "$case_dir/close-before"
     fi
@@ -4238,17 +4243,10 @@ SH
         cmp -s "$case_dir/close-before" "$case_dir/state/task-x1.backlog-close" \
           || fail 'caller refusal changed a marker for another incarnation'
       fi
-      (
-        export FM_HOME="$case_dir/home"
-        # shellcheck source=bin/fm-backlog-transition-lib.sh
-        . "$ROOT/bin/fm-backlog-transition-lib.sh"
-        fm_backlog_close_marker_replay "$case_dir/state" "$case_dir/state/task-x1.backlog-close" "$case_dir/data"
-      ) || fail 'startup replay failed after caller refusal'
-      assert_absent "$case_dir/state/task-x1.backlog-close" 'caller refusal left a pending backlog transition'
+      assert_pending_close_replay_preserves_task "$case_dir" task-x1 "$case_dir/home" "$replay_data" \
+        || fail 'startup replay changed the retained task after caller refusal'
       cmp -s "$case_dir/meta-before" "$case_dir/state/task-x1.meta" \
         || fail 'caller refusal or startup replay changed the task record'
-      [ "$(cat "$case_dir/state/task-x1.pr-poll-closed")" = 'PR closure evidence' ] \
-        || fail 'caller refusal or startup replay lost PR closure evidence'
       [ "$(backlog_row_state "$case_dir")" = in_flight ] || fail 'startup replay closed a refused task'
     fi
     if [ "$mode" = retry ]; then
@@ -5089,10 +5087,12 @@ test_non_treehouse_reap_with_unverified_session tasktmp || exit 1
 test_reparented_teardown_preserves_original_caller inside || exit 1
 test_reparented_teardown_preserves_original_caller inside-backlog || exit 1
 test_reparented_teardown_preserves_original_caller inside-backlog matching || exit 1
+test_reparented_teardown_preserves_original_caller inside-backlog relocated || exit 1
 test_reparented_teardown_preserves_original_caller outside || exit 1
 test_reparented_teardown_preserves_original_caller retry || exit 1
 test_reparented_teardown_preserves_original_caller stale || exit 1
 test_reparented_teardown_preserves_original_caller stale matching || exit 1
+test_reparented_teardown_preserves_original_caller stale relocated || exit 1
 test_reparented_teardown_preserves_original_caller stale unrelated || exit 1
 test_reparented_teardown_preserves_original_caller stale-edit || exit 1
 test_reparented_teardown_preserves_original_caller hidden || exit 1
