@@ -48,7 +48,7 @@
 # FM_TASK_INBOX_GRACE_SECS is due one delivery attempt per grace period; an
 # attempt may ring or be refused by fm_task_inbox_ring's per-harness screen
 # gate (pending text, the Codex update picker, or an unproven screen on a
-# Codex or Rovo pane), and every refusal counts as an attempt. After
+# Codex, Rovo, or agy pane), and every refusal counts as an attempt. After
 # FM_TASK_INBOX_RING_MAX attempts without an acknowledgement it escalates. The
 # caller owns the busy and recovery-grade endpoint checks: a busy pane waits,
 # while a positively dead or missing endpoint skips delivery and the ladder and
@@ -279,29 +279,30 @@ fm_task_inbox_doorbell_line() {  # <record-path>
 #   - Every harness: the update picker gets no keystroke and no Enter, at
 #     either read, and a composer proven to hold pending text gets nothing
 #     typed, because our Enter could submit someone's half-typed content.
-#   - A pane recorded as harness=codex or harness=rovo additionally needs a
-#     proven-empty composer before typing and a composer proven to hold the
-#     doorbell before its Enter, rechecked briefly while the typed line
-#     renders. Rovo's idle placeholder chip reads empty only through its
-#     harness-scoped rule (bin/fm-composer-lib.sh "ROVO PLACEHOLDER CHIP").
+#   - A pane recorded as harness=codex, harness=rovo, or harness=agy
+#     additionally needs a proven-empty composer before typing and a composer
+#     proven to hold the doorbell before its Enter, rechecked briefly while
+#     the typed line renders. Rovo's idle placeholder chip and agy's `>` row
+#     read empty only through their harness-scoped rules (bin/fm-composer-lib.sh
+#     "ROVO PLACEHOLDER CHIP" and "AGY COMPOSER"); an agy pane is also refused
+#     when the doorbell would wrap its one composer row.
 #   - Every other harness keeps ringing on pending-unproven and unknown
 #     verdicts, because some verified harnesses' idle screens never classify
-#     empty (agy, grok 1.0.5; docs/verification), and refusing them would
-#     starve steering; each tightens as a follow-up once its idle verdict is
-#     proven.
+#     empty (grok 1.0.5; docs/verification), and refusing them would starve
+#     steering; each tightens as a follow-up once its idle verdict is proven.
 # Why: a doorbell Enter once confirmed Codex's update picker, which the plain
 # composer read as unknown (or pending, with the cursor on the selection
 # row), and the interrupted global install broke the shared Codex.
 # Returns:
 #   0 rang: typed and one Enter sent
-#   1 refused before typing: pending composer text, or a Codex or Rovo pane
-#     whose screen is not a proven-empty composer
+#   1 refused before typing: pending composer text, or a Codex, Rovo, or agy
+#     pane whose screen is not a proven-empty composer
 #   2 the backend send failed
 #   3 the endpoint is positively dead or missing (nothing typed; recovery owns
 #     the record)
 #   4 refused: the Codex global-update picker is on screen; no Enter was sent
 #     (nothing was typed when the picker was seen before typing)
-#   5 Codex or Rovo pane only: typed, but the composer never proved it holds
+#   5 Codex, Rovo, or agy pane only: typed, but the composer never proved it holds
 #     the doorbell, so the Enter was withheld
 # No return value is delivery proof; the acknowledgement move is the only
 # delivery signal, and every refusal leaves the durable record for the
@@ -309,14 +310,14 @@ fm_task_inbox_doorbell_line() {  # <record-path>
 # stays unread as a stuck steer (fm_task_inbox_due_action).
 fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label] [harness]
   local backend=$1 target=$2 rec=$3 label=${4:-} harness=${5:-} line screen i=0 strict=0
-  case "$harness" in codex|rovo) strict=1 ;; esac
+  case "$harness" in codex|rovo|agy) strict=1 ;; esac
   case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
     dead|missing) return 3 ;;
   esac
   if ! line=$(fm_task_inbox_doorbell_line "$rec"); then
     return 2
   fi
-  screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" '' "$harness" 2>/dev/null) \
+  screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" '' "$harness" "$line" 2>/dev/null) \
     || screen=unknown
   case "$screen" in
     empty) ;;
@@ -330,7 +331,7 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label] [har
   # add process-bound atomic delivery here unless an incident reopens this.
   fm_backend_send_literal "$backend" "$target" "$line" "$label" >/dev/null 2>&1 || return 2
   # Reread before the Enter: the picker appearing meanwhile stops the attempt
-  # on every harness, and a Codex or Rovo pane waits briefly for its composer
+  # on every harness, and a Codex, Rovo, or agy pane waits briefly for its composer
   # to show the typed doorbell.
   while :; do
     sleep 0.3

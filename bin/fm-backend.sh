@@ -1005,10 +1005,14 @@ fm_backend_composer_classify_snapshot() {  # <backend> <target>
 # into the snapshot's capability facts as harness=<name>, so the classifier
 # can apply that harness's own placeholder rule (bin/fm-composer-lib.sh
 # "ROVO PLACEHOLDER CHIP").
+# [fit-text] is the line a caller is about to type into an agy pane: an
+# `empty` verdict for harness agy reads `unknown` unless that line fits agy's
+# one composer row (fm_composer_agy_notice_fits), so it is never typed into a
+# row it would wrap.
 # Callers: the steering-inbox doorbell (bin/fm-task-inbox-lib.sh) and Codex
 # exit (bin/fm-control.sh).
-fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness]
-  local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} picker verdict kv styled=0
+fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [fit-text]
+  local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} fit=${6:-} picker verdict kv styled=0
   fm_backend_composer_snapshot "$backend" "$target" "$label" || { printf 'unknown'; return 0; }
   [ -n "$FM_COMPOSER_SNAPSHOT_SCREEN" ] || { printf 'unknown'; return 0; }
   case "$harness" in
@@ -1024,6 +1028,10 @@ fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [ex
     return 0
   fi
   verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target")
+  if [ "$verdict" = empty ] && [ "$harness" = agy ] && [ -n "$fit" ] \
+     && ! fm_composer_agy_notice_fits "$FM_COMPOSER_SNAPSHOT_CAPS" "$FM_COMPOSER_SNAPSHOT_SCREEN" "$fit"; then
+    verdict=unknown
+  fi
   if [ "$verdict" = unknown ] && [ -n "$expected" ]; then
     while IFS= read -r kv; do
       [ "$kv" != styled=1 ] || styled=1

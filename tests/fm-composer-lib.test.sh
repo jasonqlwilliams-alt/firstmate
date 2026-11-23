@@ -275,6 +275,80 @@ test_matrix_rovo_placeholder_chip_is_harness_scoped() {
   pass "matrix: rovo's placeholder chip reads empty only on a rovo pane, and typed text stays pending"
 }
 
+# agy_screen <composer-row> [footer] [below]: agy's composer as recorded live
+# (docs/verification/agy.md "Composer classification"): a transcript row, a
+# solid rule, the composer row, a solid rule, the footer, and optional rows
+# below it.
+agy_screen() {
+  local rule
+  rule=$(printf '─%.0s' $(seq 1 60))
+  printf 'transcript reply\n%s\n%s\n%s\n%s' "$rule" "$1" "$rule" "${2-? for shortcuts}"
+  [ -z "${3:-}" ] || printf '\n%s' "$3"
+}
+
+test_matrix_agy_composer_is_harness_scoped() {
+  # The recorded rows: an idle `>` glyph in truecolor 122;162;247, the
+  # first-use mode hint in truecolor 154;165;206, and typed text in the default
+  # foreground. Only the full recorded screen proves an empty agy composer.
+  local glyph hint idle typed agy_tmux agy_herdr out
+  glyph="${ESC}[0m${ESC}[38;2;122;162;247m>${ESC}[0m"
+  hint="$glyph ${ESC}[0m${ESC}[38;2;154;165;206mAccept-edits mode: file edits auto-approved (shift+tab to cycle)${ESC}[0m"
+  idle=$(agy_screen "$glyph" '? for shortcuts                      accept-edits · Gemini · high')
+  typed=$(agy_screen "$glyph zz probe")
+  agy_tmux="$CAPS_TMUX"$'\nharness=agy'
+  agy_herdr="$CAPS_STYLED"$'\nharness=agy'
+  assert_screen "agy idle on tmux" empty "$agy_tmux" "$idle" 2
+  assert_screen "agy idle on herdr" empty "$agy_herdr" "$idle"
+  assert_screen "agy first-use mode hint" empty "$agy_herdr" "$(agy_screen "$hint")"
+  assert_screen "agy typed on tmux" pending "$agy_tmux" "$typed" 2
+  assert_screen "agy typed on herdr" pending "$agy_herdr" "$typed"
+  # A draft that only repeats the hint's words is typed text, not the hint.
+  assert_screen "agy draft matching the hint text" pending "$agy_herdr" \
+    "$(agy_screen "$glyph Accept-edits mode: file edits auto-approved (shift+tab to cycle)")"
+  # Drive the frame and the footer apart: neither alone proves empty.
+  assert_screen "agy idle row over the busy footer" unknown "$agy_tmux" "$(agy_screen "$glyph" 'esc to cancel')" 2
+  assert_screen "agy idle row with no footer" unknown "$agy_tmux" "$(agy_screen "$glyph" '')" 2
+  assert_screen "agy idle frame with the survey below" unknown "$agy_herdr" \
+    "$(agy_screen "$glyph" '? for shortcuts' '[1] Good  [2] Fine  [3] Bad  [0] Skip')"
+  assert_screen "agy survey over the idle footer" unknown "$agy_herdr" \
+    $'transcript reply\n[1] Good  [2] Fine  [3] Bad  [0] Skip\n\n? for shortcuts'
+  # Anything outside the recorded screen stays unproven.
+  assert_screen "agy cursor off the composer row" unknown "$agy_tmux" "$idle" 0
+  assert_screen "agy on a plain capture" unknown "$CAPS_PLAIN"$'\nharness=agy' \
+    "$(printf '%s\n' "$idle" | fm_composer_strip_ansi)"
+  assert_screen "agy row without its glyph" unknown "$agy_tmux" "$(agy_screen '$ ')" 2
+  assert_screen "agy wrapped rows between the rules" unknown "$agy_herdr" \
+    "$(agy_screen "$glyph zz probe"$'\n  wrapped tail')"
+  assert_screen "agy draft divider forging a frame" unknown "$agy_herdr" \
+    "$(printf '%s\n' "$glyph draft text" "$(agy_screen "$glyph")" | sed '2d')"
+  assert_screen "agy bare prompt glyph elsewhere" unknown "$agy_tmux" $'transcript\n❯\nmore' 1
+  # Without the recorded harness the same idle screen keeps pi's reading, so
+  # pi is unchanged.
+  assert_screen "agy row under a pi identity" pending "$CAPS_TMUX" "$idle" 2 $'pi\tidle'
+  assert_screen "agy row with an absent identity" unknown "$CAPS_TMUX" "$idle" 2 probe-absent
+  # Post-type proof drops agy's glyph, and the fit check bounds the row.
+  out=$(fm_composer_extract_selected_content "$agy_herdr" "$typed")
+  [ "$out" = 'zz probe' ] || fail "agy's typed text should extract without its glyph, got '$out'"
+  fm_composer_holds_text "$agy_herdr" "$typed" 'zz probe' \
+    || fail "an agy composer holding typed text should hold exactly that text"
+  fm_composer_agy_notice_fits "$agy_herdr" "$idle" "$(printf 'x%.0s' $(seq 1 57))" \
+    || fail "a line leaving the last column free should fit agy's 60-column row"
+  ! fm_composer_agy_notice_fits "$agy_herdr" "$idle" "$(printf 'x%.0s' $(seq 1 58))" \
+    || fail "a line reaching agy's last column must not fit"
+  pass "matrix: agy's > row reads empty only on an agy pane's full recorded screen, typed text stays pending, and pi is unchanged"
+}
+
+test_matrix_pi_separated_row_unchanged() {
+  local rule screen typed
+  rule=$(printf '─%.0s' $(seq 1 60))
+  screen=$(printf 'transcript\n%s\n\n%s\nfooter' "$rule" "$rule")
+  typed=$(printf 'transcript\n%s\nhello\n%s\nfooter' "$rule" "$rule")
+  assert_screen "pi idle" empty "$CAPS_TMUX" "$screen" 2 $'pi\tidle'
+  assert_screen "pi working" unknown "$CAPS_TMUX" "$screen" 2 $'pi\tworking'
+  assert_screen "pi typed" pending "$CAPS_TMUX" "$typed" 2 $'pi\tidle'
+  pass "matrix: pi's separated row verdicts are unchanged by the agy rule"
+}
+
 test_matrix_muse_unchanged_by_rovo_scope() {
   # Muse's real `⟩` glyph sits at luminance ~149.9, inside the band the rovo
   # ceiling strips. On a muse pane (or with no harness fact) the fleet ceiling
@@ -752,6 +826,8 @@ test_matrix_claude_bare_nbsp_row
 test_matrix_codex_dim_hint_row
 test_matrix_muse_truecolor_glyph_survives_signal_loss
 test_matrix_rovo_placeholder_chip_is_harness_scoped
+test_matrix_agy_composer_is_harness_scoped
+test_matrix_pi_separated_row_unchanged
 test_matrix_muse_unchanged_by_rovo_scope
 test_matrix_cursor_reverse_video_placeholder_remnant
 test_matrix_herdr_halfblock_rule_bounds_bare_wrap

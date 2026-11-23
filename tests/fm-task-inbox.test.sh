@@ -710,9 +710,9 @@ test_watcher_dead_pane_ignores_stale_busy_state() {
 # into both. These cases rebuild that screen, using the picker rows recorded in
 # tests/fm-control.test.sh, in a REAL private tmux server (-L) and drive the real
 # ring and the real fm-send through it. The ring's gate is per harness: the
-# picker and pending text are refused on every harness, a Codex or Rovo pane
-# also needs a proven-empty composer, and any other harness still rings on an
-# unknown screen. The screens are drawn by a bash stub launched through a
+# picker and pending text are refused on every harness, a Codex, Rovo, or agy
+# pane also needs a proven-empty composer, and any other harness still rings on
+# an unknown screen. The screens are drawn by a bash stub launched through a
 # `codex`-, `agy`-, or `rovo`-named symlink to bash, so the pane's foreground process reads as a live
 # agent without any harness running. The stub logs
 # every byte it receives (KEY), every Enter (ENTER), and every submitted line
@@ -744,8 +744,13 @@ ring_lab_setup() {
 # Screen stub: <mode> <log>. Modes: empty, pending, unknown, picker-below,
 # picker-row, picker-after-key (empty until the first key, then the picker),
 # noecho (an empty composer that never renders what is typed), partial (a
-# composer that renders only a prefix of typed text), agy (agy's idle
-# shape: a `>` row between two solid rules, which classifies unknown), rovo
+# composer that renders only a prefix of typed text), agy (agy's recorded
+# idle shape: a truecolor `>` row between two full-width solid rules over the
+# `? for shortcuts` footer; typed text follows the glyph on that row),
+# agy-pending (the same composer already holding typed text), agy-busy (an
+# empty `>` row over the `esc to cancel` footer), agy-narrow (an idle composer
+# too narrow for the doorbell line), agy-survey (an idle frame with agy's
+# feedback survey below it), rovo
 # (rovo's recorded idle box: a rounded border around an inline placeholder
 # chip at truecolor 162;163;165 with the cursor on the chip row; typed text
 # replaces the chip at truecolor 206;207;210), rovo-pending (the same box
@@ -758,6 +763,7 @@ stty -echo -icanon min 1 time 0 2>/dev/null || true
 trap '[ -z "$old" ] || stty "$old" 2>/dev/null' EXIT
 [ "$mode" != pending ] || buf='half typed words'
 [ "$mode" != rovo-pending ] || buf='half typed words'
+[ "$mode" != agy-pending ] || buf='half typed words'
 picker() {
   printf '\033[2J\033[H'
   printf '%s\r\n' '  Update available · 0.162.1 → 0.999.0' \
@@ -785,8 +791,19 @@ composer() {
   printf '\r\n\r\n  \033[2m100%% context left\033[0m\033[%d;%dH' "$row" "$((3 + len))"
 }
 agy() {
-  local rule='────────────────────────────────────────'
-  printf '\033[2J\033[HAntigravity test stub\r\n\r\n%s\r\n>\r\n%s\r\n  ? for shortcuts\033[4;2H' "$rule" "$rule"
+  local width=$((cols - 2)) rule footer='? for shortcuts      accept-edits · Gemini · high'
+  [ "$mode" != agy-narrow ] || width=40
+  [ "$mode" != agy-busy ] || footer='esc to cancel'
+  rule=$(printf '─%.0s' $(seq 1 "$width"))
+  printf '\033[2J\033[HAntigravity test stub\r\n\r\n%s\r\n' "$rule"
+  if [ -z "$buf" ]; then
+    printf '\033[38;2;122;162;247m>\033[0m\r\n'
+  else
+    printf '\033[38;2;122;162;247m>\033[0m %s\r\n' "$buf"
+  fi
+  printf '%s\r\n%s' "$rule" "$footer"
+  [ "$mode" != agy-survey ] || printf '\r\n How'\''s the CLI experience so far? Help us improve:\r\n [1] Good  [2] Fine  [3] Bad  [0] Skip'
+  if [ -z "$buf" ]; then printf '\033[4;2H'; else printf '\033[4;%dH' "$((4 + ${#buf}))"; fi
 }
 rovo() {
   local w=$((cols - 4)) rule i=0 row=4 col=3
@@ -809,7 +826,7 @@ draw() {
     rovo|rovo-pending) rovo ;;
     picker-below|picker-row) picker ;;
     unknown|rovo-unknown) printf '\033[2J\033[H  Loading your session\r\n\r\n' ;;
-    agy) agy ;;
+    agy|agy-*) agy ;;
     *) composer ;;
   esac
 }
@@ -818,7 +835,7 @@ while IFS= read -r -n 1 ch; do
   if [ -z "$ch" ]; then
     printf 'ENTER\n' >> "$log"
     case "$mode" in
-      empty|pending|agy|partial|rovo|rovo-pending)
+      empty|pending|agy|agy-*|partial|rovo|rovo-pending)
         if [ -n "$buf" ]; then
           printf 'SUBMIT %s\n' "$buf" >> "$log"
           if [[ $buf =~ list\ \'([^\']+)\'/\*\.msg ]]; then
@@ -833,7 +850,7 @@ while IFS= read -r -n 1 ch; do
   else
     printf 'KEY %s\n' "$ch" >> "$log"
     case "$mode" in
-      empty|pending|agy|partial|rovo|rovo-pending) buf="$buf$ch" ;;
+      empty|pending|agy|agy-*|partial|rovo|rovo-pending) buf="$buf$ch" ;;
       picker-after-key) mode=picker-below ;;
     esac
   fi
@@ -841,32 +858,36 @@ while IFS= read -r -n 1 ch; do
 done
 STUB
   "$RING_TMUX" -L "$RING_SOCKET" new-session -d -s ring -x 200 -y 40
+  # agy panes are wide enough for the doorbell line to fit agy's one composer
+  # row, so its delivery path is exercised rather than its wrap refusal.
+  "$RING_TMUX" -L "$RING_SOCKET" new-session -d -s ringwide -x 400 -y 40
 }
 
 # Start one stub window and wait until its screen is drawn. Echoes its target.
 ring_stub_window() {  # <name> <mode> <log>
-  local name=$1 mode=$2 log=$3 i=0 marker agent=codex
+  local name=$1 mode=$2 log=$3 i=0 marker agent=codex session=ring
   : > "$log"
   case "$mode" in
-    agy) agent=agy ;;
+    agy|agy-*) agent=agy; session=ringwide ;;
     rovo|rovo-pending|rovo-unknown) agent=rovo ;;
   esac
-  "$RING_TMUX" -L "$RING_SOCKET" new-window -d -t ring: -n "$name" -- \
+  "$RING_TMUX" -L "$RING_SOCKET" new-window -d -t "$session:" -n "$name" -- \
     "$RING_LAB/bin/$agent" "$RING_LAB/screen-stub.sh" "$mode" "$log"
   case "$mode" in
     picker-below|picker-row) marker='esc skip' ;;
     unknown|rovo-unknown) marker='Loading your session' ;;
-    agy) marker='for shortcuts' ;;
+    agy-busy) marker='esc to cancel' ;;
+    agy|agy-*) marker='for shortcuts' ;;
     rovo|rovo-pending) marker='Context:' ;;
     *) marker='context left' ;;
   esac
   while [ "$i" -lt 100 ]; do
-    "$RING_TMUX" -L "$RING_SOCKET" capture-pane -p -t "ring:$name" 2>/dev/null | grep -qF "$marker" && break
+    "$RING_TMUX" -L "$RING_SOCKET" capture-pane -p -t "$session:$name" 2>/dev/null | grep -qF "$marker" && break
     sleep 0.1
     i=$((i + 1))
   done
   [ "$i" -lt 100 ] || fail "the $mode stub never drew its screen"
-  printf 'ring:%s\n' "$name"
+  printf '%s:%s\n' "$session" "$name"
 }
 
 # Ring one fresh record into a stub window through the real library, as the
@@ -946,10 +967,11 @@ test_ring_refuses_pending_and_unproven_codex_screens() {
     [ "$rc" = 1 ] || fail "the ring should refuse a $mode Codex screen with 1, got $rc"
     [ ! -s "$log" ] || fail "the ring typed into a $mode Codex screen:"$'\n'"$(cat "$log")"
   done
-  # Pending text is protected on every harness.
-  log="$RING_LAB/pending-agy.log"
-  target=$(ring_stub_window pending-agy pending "$log")
-  rc=$(ring_into "$state" pending-agy "$target" agy)
+  # Pending text is protected on every harness, including one outside the
+  # proven-empty rule.
+  log="$RING_LAB/pending-grok.log"
+  target=$(ring_stub_window pending-grok pending "$log")
+  rc=$(ring_into "$state" pending-grok "$target" grok)
   sleep 0.3
   [ "$rc" = 1 ] || fail "the ring should refuse pending composer text on any harness with 1, got $rc"
   [ ! -s "$log" ] || fail "the ring typed into pending composer text:"$'\n'"$(cat "$log")"
@@ -969,27 +991,65 @@ test_ring_refuses_pending_and_unproven_codex_screens() {
   pass "inbox: pending text gets no keystroke on any harness, and an unproven Codex screen gets no keystroke or no Enter"
 }
 
-# The other harnesses keep ringing on an unknown screen until their idle
-# verdicts are proven: agy's real idle shape classifies unknown, and its
-# doorbell must still be typed, submitted once, and acted on.
-test_ring_still_rings_an_agy_shaped_unknown_screen() {
+# agy's idle `>` row reads empty only through its agy-scoped rule, so the
+# doorbell is delivered into an idle agy composer the line fits.
+test_ring_delivers_into_an_idle_agy_composer() {
   local state target log rc verdict i=0
   ring_lab_setup
   state="$TMP_ROOT/ring-agy/state"
   mkdir -p "$state"
   log="$RING_LAB/agy.log"
   target=$(ring_stub_window agy agy "$log")
-  verdict=$(PATH="$RING_LAB/shim:$PATH" bash -c '. "$1"; fm_backend_composer_state tmux "$2"' _ \
+  verdict=$(PATH="$RING_LAB/shim:$PATH" bash -c '. "$1"; fm_backend_guarded_composer_state tmux "$2"' _ \
     "$ROOT/bin/fm-backend.sh" "$target")
-  [ "$verdict" = unknown ] || fail "the case is vacuous unless agy's idle shape classifies unknown, got $verdict"
+  [ "$verdict" != empty ] || fail "the case is vacuous unless agy's idle row is unproven without the harness fact"
+  verdict=$(PATH="$RING_LAB/shim:$PATH" bash -c '. "$1"; fm_backend_guarded_composer_state tmux "$2" "" "" agy' _ \
+    "$ROOT/bin/fm-backend.sh" "$target")
+  [ "$verdict" = empty ] || fail "agy's idle row should read empty on an agy pane, got $verdict"
   rc=$(ring_into "$state" t1 "$target" agy)
-  [ "$rc" = 0 ] || fail "an agy pane on an unknown idle screen should still be rung, got $rc"
+  [ "$rc" = 0 ] || fail "an idle agy composer should receive the doorbell, got $rc"
   while [ "$i" -lt 50 ] && [ -e "$state/t1.inbox/001.msg" ]; do sleep 0.1; i=$((i + 1)); done
   [ "$(grep -c '^ENTER' "$log")" = 1 ] || fail "the agy ring should press exactly one Enter:"$'\n'"$(cat "$log")"
   grep -qF "SUBMIT : Firstmate instruction waiting: list '$state/t1.inbox'/*.msg" "$log" \
     || fail "the agy stub never received the doorbell line:"$'\n'"$(cat "$log")"
   [ -f "$state/t1.inbox/handled/001.msg" ] || fail "the agy doorbell was not acted on"
-  pass "inbox: an agy-shaped unknown idle screen still receives the doorbell and one Enter"
+  pass "inbox: an idle agy composer reads empty and receives the doorbell with one Enter"
+}
+
+# An agy pane without proof - typed text, a busy footer, a composer row the
+# doorbell would wrap, or the feedback survey below the frame - gets nothing
+# typed, and the record stays queued for the re-ring ladder.
+test_ring_refuses_unproven_agy_screens() {
+  local state target log rc mode
+  ring_lab_setup
+  state="$TMP_ROOT/ring-agy-unproven/state"
+  mkdir -p "$state"
+  for mode in agy-pending agy-busy agy-narrow agy-survey; do
+    log="$RING_LAB/$mode.log"
+    target=$(ring_stub_window "$mode" "$mode" "$log")
+    rc=$(ring_into "$state" "$mode" "$target" agy)
+    sleep 0.3
+    [ "$rc" = 1 ] || fail "the ring should refuse a $mode screen with 1, got $rc"
+    [ ! -s "$log" ] || fail "the ring typed into a $mode screen:"$'\n'"$(cat "$log")"
+    [ -f "$state/$mode.inbox/001.msg" ] || fail "a refused agy ring must leave the durable record ($mode)"
+  done
+  pass "inbox: an agy pane with typed text, a busy footer, a too-narrow row, or the survey gets no keystroke"
+}
+
+# A harness outside the proven-empty rule keeps ringing on an unknown screen
+# until its idle verdict is proven, so its steering is never starved.
+test_ring_still_rings_an_unknown_screen_outside_the_strict_harnesses() {
+  local state target log rc i=0
+  ring_lab_setup
+  state="$TMP_ROOT/ring-grok-unknown/state"
+  mkdir -p "$state"
+  log="$RING_LAB/grok-unknown.log"
+  target=$(ring_stub_window grok-unknown unknown "$log")
+  rc=$(ring_into "$state" t1 "$target" grok)
+  [ "$rc" = 0 ] || fail "a grok pane on an unknown screen should still be rung, got $rc"
+  while [ "$i" -lt 50 ] && ! grep -q '^ENTER' "$log"; do sleep 0.1; i=$((i + 1)); done
+  [ "$(grep -c '^ENTER' "$log")" = 1 ] || fail "the grok ring should press exactly one Enter:"$'\n'"$(cat "$log")"
+  pass "inbox: a harness outside the proven-empty rule still rings an unknown screen with one Enter"
 }
 
 # Rovo's idle composer holds an inline placeholder chip that reads empty only
@@ -1126,7 +1186,9 @@ test_ring_refuses_the_codex_update_picker
 test_ring_refuses_a_picker_that_appears_while_typing
 test_ring_still_delivers_into_an_empty_composer
 test_ring_refuses_pending_and_unproven_codex_screens
-test_ring_still_rings_an_agy_shaped_unknown_screen
+test_ring_delivers_into_an_idle_agy_composer
+test_ring_refuses_unproven_agy_screens
+test_ring_still_rings_an_unknown_screen_outside_the_strict_harnesses
 test_ring_delivers_into_an_idle_rovo_composer
 test_ring_refuses_pending_and_unproven_rovo_screens
 test_fm_send_ring_through_picker_and_composer
