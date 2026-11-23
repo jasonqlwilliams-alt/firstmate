@@ -2103,15 +2103,10 @@ pids_with_cwd_under() {  # <scanner> <dir>...
 }
 
 task_process_identity() {  # <pid>
-  local pid=$1 proc_root stat_line starttime value
-  local -a stat_fields
+  local pid=$1 proc_root starttime value
   proc_root=${FM_PROC_ROOT_OVERRIDE:-/proc}
   if [ -r "$proc_root/$pid/stat" ]; then
-    stat_line=$(cat "$proc_root/$pid/stat" 2>/dev/null) || return 1
-    read -r -a stat_fields <<< "${stat_line##*)}"
-    [ "${#stat_fields[@]}" -ge 20 ] || return 1
-    starttime=${stat_fields[19]}
-    case "$starttime" in ''|*[!0-9]*) return 1 ;; esac
+    starttime=$(fm_proc_start_ticks "$proc_root/$pid/stat") || return 1
     printf 'starttime=%s\n' "$starttime"
     return 0
   fi
