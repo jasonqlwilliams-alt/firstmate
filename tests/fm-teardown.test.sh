@@ -4324,6 +4324,8 @@ SH
       [ "$(cat "$copy/feature.txt")" = 'caller edit' ] || fail 'reparented teardown: refusal lost the caller edit'
     else
       assert_grep 'teardown caller or ancestor (PID ' "$case_dir/stderr" 'missing caller refusal'
+      assert_grep 'Retry from a separate terminal outside the task copy.' "$case_dir/stderr" \
+        'caller refusal did not direct the operator to a separate terminal'
     fi
     assert_present "$copy" 'reparented teardown: refusal removed the copy'
     assert_present "$case_dir/state/task-x1.meta" 'reparented teardown: refusal retired task metadata'
@@ -4435,30 +4437,44 @@ EOF
   pass "an erroring lsof scan refuses teardown and preserves the task"
 }
 
-test_reused_pid_identity_is_not_force_killed() {
-  local case_dir rc pid
+test_reused_pid_identity_is_not_force_killed() (
+  local case_dir rc pid i
   case_dir=$(make_case reused-pid-identity)
   write_meta "$case_dir" no-mistakes ship
   land_shippable_commit "$case_dir"
 
-  perl -e '$SIG{TERM} = "IGNORE"; sleep 300' &
+  perl -MPOSIX -e '
+    my $dir = shift;
+    $SIG{TERM} = sub { open my $term, ">", "$dir/term" or die; };
+    open my $ready, ">", "$dir/ready" or die;
+    while (1) { POSIX::pause(); }
+  ' "$case_dir" &
   pid=$!
-  disown
-  sleep 0.2
+  trap 'kill -KILL "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT
+  for ((i=0; i<100; i++)); do
+    [ ! -f "$case_dir/ready" ] || break
+    sleep 0.05
+  done
+  assert_present "$case_dir/ready" 'reused-pid-identity: fixture process did not start'
   cat > "$case_dir/fakebin/lsof" <<EOF
 #!/usr/bin/env bash
-count=0
-[ ! -f '$case_dir/lsof-count' ] || count=\$(cat '$case_dir/lsof-count')
-count=\$((count + 1))
-printf '%s\n' "\$count" > '$case_dir/lsof-count'
-if [ "\$count" -le 5 ]; then printf 'p%s\nfcwd\nn%s\n' '$pid' '$case_dir/wt'; fi
+if [ ! -f '$case_dir/replacement-sampled' ]; then
+  printf 'p%s\nfcwd\nn%s\n' '$pid' '$case_dir/wt'
+fi
 EOF
   cat > "$case_dir/fakebin/ps" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = -p ] && [ "${2:-}" = "${FM_FAKE_REUSED_PID:-}" ] \
    && [ "${3:-}" = -o ] && [ "${4:-}" = lstart= ]; then
-  if [ "$(cat "$FM_FAKE_CWD_SCAN_COUNT")" -lt 5 ]; then printf 'Tue Aug  4 10:00:00 2026\n'
-  else printf 'Tue Aug  4 10:00:01 2026\n'; fi
+  if [ -f "$FM_FAKE_PID_EVENTS/post-term-sampled" ]; then
+    : > "$FM_FAKE_PID_EVENTS/replacement-sampled"
+    printf 'Tue Aug  4 10:00:01 2026\n'
+  else
+    if [ -f "$FM_FAKE_PID_EVENTS/term" ]; then
+      : > "$FM_FAKE_PID_EVENTS/post-term-sampled"
+    fi
+    printf 'Tue Aug  4 10:00:00 2026\n'
+  fi
   exit 0
 fi
 exec "$REAL_PS_FOR_TEST" "$@"
@@ -4467,16 +4483,16 @@ SH
 
   rc=0
   FM_PROC_ROOT_OVERRIDE="$case_dir/no-proc" \
-  FM_FAKE_REUSED_PID="$pid" FM_FAKE_CWD_SCAN_COUNT="$case_dir/lsof-count" \
+  FM_FAKE_REUSED_PID="$pid" FM_FAKE_PID_EVENTS="$case_dir" \
     run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
 
   expect_code 0 "$rc" "reused-pid-identity: teardown should skip the replacement process"
+  assert_present "$case_dir/replacement-sampled" 'reused-pid-identity: teardown did not sample the replacement identity'
   if ! kill -0 "$pid" 2>/dev/null; then
     fail "reused-pid-identity: teardown force-killed a process whose start time changed"
   fi
-  kill -KILL "$pid" 2>/dev/null || true
   pass "a reused pid with a different start time is never force-killed"
-}
+)
 
 test_exec_changed_process_is_still_reaped() {
   local case_dir rc pid marker done_flag survived=0
@@ -4626,17 +4642,15 @@ test_process_exit_during_identity_lookup_does_not_refuse() {
   wt_path=$(cd "$case_dir/wt" && pwd -P)
   cat > "$case_dir/fakebin/lsof" <<EOF
 #!/usr/bin/env bash
-count=0
-[ ! -f "$case_dir/lsof-count" ] || count=\$(cat "$case_dir/lsof-count")
-count=\$((count + 1))
-printf '%s\n' "\$count" > "$case_dir/lsof-count"
-if [ "\$count" -eq 2 ]; then
+if [ ! -f "$case_dir/missing-identity-sampled" ]; then
   printf 'p%s\nfcwd\nn%s\n' '$fake_pid' '$wt_path'
 fi
 EOF
   cat > "$case_dir/fakebin/ps" <<'SH'
 #!/usr/bin/env bash
-if [ "${1:-}" = -p ] && [ "${2:-}" = "${FM_FAKE_EXITED_PID:-}" ]; then
+if [ "${1:-}" = -p ] && [ "${2:-}" = "${FM_FAKE_EXITED_PID:-}" ] \
+   && [ "${3:-}" = -o ] && [ "${4:-}" = lstart= ]; then
+  : > "$FM_FAKE_MISSING_IDENTITY_SAMPLE"
   exit 1
 fi
 exec "$REAL_PS_FOR_TEST" "$@"
@@ -4649,9 +4663,11 @@ EOF
 
   rc=0
   FM_PROC_ROOT_OVERRIDE="$case_dir/no-proc" FM_FAKE_EXITED_PID="$fake_pid" \
+    FM_FAKE_MISSING_IDENTITY_SAMPLE="$case_dir/missing-identity-sampled" \
     run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
 
   expect_code 0 "$rc" "identity-exit-convergence: teardown should succeed"
+  assert_present "$case_dir/missing-identity-sampled" 'identity-exit-convergence: teardown did not sample the missing identity'
   assert_present "$case_dir/treehouse.log" \
     "identity-exit-convergence: teardown did not reach worktree return"
   ! grep -q REFUSED "$case_dir/stderr" || \
@@ -5292,7 +5308,7 @@ test_own_autonomous_run_is_left_alone
 test_leaked_tasktmp_process_is_reaped
 test_lsof_absent_on_non_linux_preserves_tmux_process_group
 test_lsof_error_refuses_before_removal
-test_reused_pid_identity_is_not_force_killed
+test_reused_pid_identity_is_not_force_killed || exit 1
 test_exec_changed_process_is_still_reaped
 test_process_spawned_during_grace_is_reaped_on_later_pass
 test_persistent_scan_refuses_after_bounded_retries

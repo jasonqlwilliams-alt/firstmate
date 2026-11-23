@@ -2317,7 +2317,7 @@ require_treehouse_return_caller_outside() {  # <copy>
   [ -n "$pids" ] || return 0
   for pid in $protected; do
     if task_pid_list_contains "$pids" "$pid"; then
-      echo "REFUSED: teardown caller or ancestor (PID $pid) is in Treehouse copy $dir; move outside the copy and retry." >&2
+      echo "REFUSED: teardown caller or ancestor (PID $pid) is in Treehouse copy $dir. Retry from a separate terminal outside the task copy." >&2
       return 1
     fi
   done
