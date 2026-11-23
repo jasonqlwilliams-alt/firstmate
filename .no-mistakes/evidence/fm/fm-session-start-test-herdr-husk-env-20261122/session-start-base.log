@@ -1,0 +1,41 @@
+Base test file (0464e0e2): original Herdr fixture and original case runner
+FM_TEST_BEGIN 2026-11-23T12:16:39Z {run-worktree}/.phase-session-start/base/tests/fm-session-start.test.sh family=session-bootstrap expected_gate_skip=none
+ok - populated-home startup completes its digest in 9s inside the default bound
+ok - context digest distinguishes ABSENT, empty-but-present, and populated files
+ok - a lock refusal prints a loud read-only banner, skips every mutating step, and still completes the digest
+ok - session start stays read-only when lock ownership cannot be published
+ok - locked session start freezes trace context and lock refusal leaves it unchanged
+ok - concurrent session-lock acquisition admits exactly one live harness
+ok - digest sections are ordered safety-preamble first, live fleet state before curated memory
+ok - the read-once contract is stated once, ahead of the sources it governs
+ok - session start: configured and auto-detected Herdr homes never require tmux
+ok - session start: an absent recorded tmux window relaunches its Pi secondmate exactly once, off the blocking path
+ok - session start: a deferred relaunch is always reported, so the digest's stale endpoint record cannot stand
+ok - session start: inactive reconciliation runs after the digest and retains its durable wake
+ok - session start: an unreachable host delays a reported check, not the digest
+ok - session start: a deferred result the digest outran still reaches the agent as a wake
+ok - session start: a read-only session declares its skipped network checks rather than dropping them
+ok - session start: the tasks-axi compatibility verdict is computed once and reused
+ok - session start: an existing ambiguous Pi process prevents duplicate recovery
+ok - session start: transient tmux unreadability never licenses a relaunch
+ok - session start: the proven bare-shell recovery path remains intact
+not ok - successful Herdr husk recovery should stay non-actionable (unexpected: 'SECONDMATE_LIVENESS:')
+--- output ---
+completed off the startup path in 2s: GitHub authentication, dead-secondmate relaunch, secondmate convergence, pending handoff delivery, project clone refresh with its drift reporting, inactive terminal-outcome reconciliation, and home-summary publication.
+SECONDMATE_LIVENESS: secondmate fmtest-herdr-8pEX5O: respawn failed after confirmed agent absence on existing endpoint: warning: secondmate fmtest-herdr-8pEX5O sync skipped before launch: not a git repo
+SECONDMATE_SYNC: secondmate fmtest-herdr-8pEX5O: skipped: not a git repo
+These ran AFTER the sections above were composed, so re-read any record a line here names.
+TIMINGS - where the deferred network checks spent their time (ms):
+  phase       gh-auth                                    start=+631     elapsed=4
+  phase       fleet-sync                                 start=+641     elapsed=1
+  secondmate  liveness fmtest-herdr-8pEX5O               start=+651     elapsed=939
+  phase       secondmate-liveness                        start=+643     elapsed=955
+  phase       secondmate-sync                            start=+1604    elapsed=260
+  phase       handoff-delivery                           start=+1869    elapsed=1
+  stage       network-checks probe_sweeps                start=+0       elapsed=1892
+  slowest: stage network-checks probe_sweeps 1892ms, phase secondmate-liveness 955ms, secondmate liveness fmtest-herdr-8pEX5O 939ms
+FM_TEST_END 2026-11-23T12:18:02Z {run-worktree}/.phase-session-start/base/tests/fm-session-start.test.sh exit=1 duration_ms=83680 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=1 skipped_gate=0 duration_ms=83732
+FM_TEST_SUMMARY_FAMILY family=session-bootstrap count=1 duration_ms=83680 failed=1
+FM_TEST_SLOWEST rank=1 script={run-worktree}/.phase-session-start/base/tests/fm-session-start.test.sh duration_ms=83680
+Command exit status: 1

@@ -1,0 +1,42 @@
+Base commit fixture (0464e0e2), default pre-launch Git sync
+Secondmate fixture Git repository: absent
+Pre-launch Git sync bypass: 0
+SECONDMATE_LIVENESS: secondmate fmtest-herdr-EfLyyd: respawn failed after confirmed agent absence on existing endpoint: warning: secondmate fmtest-herdr-EfLyyd sync skipped before launch: not a git repo
+pane close p-old
+tab create --workspace
+window=default:p-old
+backend=herdr
+herdr_session=default
+herdr_tab_id=t-old
+herdr_pane_id=p-old
+Command exit status: 0
+
+Base commit fixture (0464e0e2), pre-launch Git sync bypassed
+Secondmate fixture Git repository: absent
+Pre-launch Git sync bypass: 1
+SECONDMATE_LIVENESS: secondmate fmtest-herdr-XdmETe: respawn failed after confirmed agent absence on existing endpoint: error: Herdr task tab creation did not return a readable terminal identity; refusing launch
+pane close p-old
+tab create --workspace
+window=default:p-old
+backend=herdr
+herdr_session=default
+herdr_tab_id=t-old
+herdr_pane_id=p-old
+Command exit status: 0
+
+Target commit fixture (d8886b5e), default pre-launch Git sync
+Secondmate fixture Git repository: absent
+Pre-launch Git sync bypass: 0
+BOOTSTRAP_INFO: secondmate fmtest-herdr-3xt1D1 relaunched after confirmed agent absence on existing endpoint (backend=herdr)
+pane close p-old
+tab create --workspace
+pane get p-new
+pane send-text p-new
+pane get p-new
+pane send-keys p-new
+window=default:p-new
+backend=herdr
+herdr_session=default
+herdr_tab_id=t-new
+herdr_pane_id=p-new
+Command exit status: 0
