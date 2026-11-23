@@ -1,0 +1,123 @@
+Firstmate target 158ab98785fdf98fd95e4d08bdff7a67ee143af0
+Private local tmux socket and disposable Firstmate home with synthetic workers.
+Base comparison used the old command on the same closed-window setup.
+Blank capture rows and the disposable home path were shortened for readability.
+
+$ tmux -V
+tmux 3.7c
+
+Recorded worker while both windows exist
+$ bin/fm-peek.sh mate 40
+WORKER-SCREEN
+exit=0
+Recorded worker state = alive
+
+Closing the worker while its prefix-named neighbour remains open
+$ tmux kill-window -t =bay:=fm-mate
+$ tmux capture-pane -p -t bay:fm-mate
+NEIGHBOUR-SCREEN
+❯ neighbour draft
+$ [base 0464e0e2] bin/fm-peek.sh mate 40
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+NEIGHBOUR-SCREEN
+❯ neighbour draft
+$ bin/fm-peek.sh mate 40
+error: tmux window bay:fm-mate not found
+exit=1
+$ bin/fm-peek.sh mate2 40
+NEIGHBOUR-SCREEN
+❯ neighbour draft
+exit=0
+
+Recovery, composer and process reads of the closed endpoint
+closed worker recovery state = missing (exit=0)
+surviving neighbour recovery state = alive (exit=0)
+closed worker presence = [no output] (exit=1)
+closed worker composer = unknown (exit=0)
+surviving neighbour composer = pending (exit=0)
+closed worker busy state = unknown (exit=0)
+closed worker foreground process = [no output] (exit=0)
+surviving neighbour foreground process = codex (exit=0)
+$ bin/fm-crew-state.sh mate
+state: unknown · source: none · backend target gone: bay:fm-mate
+exit=0
+
+Running the Firstmate watcher with the same recorded windows
+$ bin/fm-watch.sh
+stale: bay:fm-mate (the recorded endpoint is gone)
+Durable watch queue row
+1795400474	1	stale	bay:fm-mate	stale: bay:fm-mate (the recorded endpoint is gone)
+
+Running fleet snapshot against linked and duplicate windows
+$ bin/fm-fleet-snapshot.sh --json
+[
+  {
+    "id": "duplicate",
+    "endpoint": {
+      "target": "bay:fm-duplicate",
+      "exists": null,
+      "status": "unknown"
+    }
+  },
+  {
+    "id": "mate",
+    "endpoint": {
+      "target": "bay:fm-mate",
+      "exists": false,
+      "status": "absent"
+    }
+  },
+  {
+    "id": "mate2",
+    "endpoint": {
+      "target": "bay:fm-mate2",
+      "exists": true,
+      "status": "unknown"
+    }
+  }
+]
+$ bin/fm-peek.sh duplicate 40
+error: could not resolve tmux window bay:fm-duplicate
+exit=1
+
+Read exact recorded names with punctuation and non-ASCII characters
+$ bin/fm-peek.sh dot.task 40
+DOTTED-WINDOW
+exit=0
+$ bin/fm-peek.sh accented 40
+ACCENTED-WINDOW
+exit=0
+
+Explicit split-pane selection with a different active pane
+$ bin/fm-peek.sh bay:0.1 40
+RECEIVER-B
+╭───────────────────────────╮
+│                           │
+╰───────────────────────────╯
+exit=0
+$ bin/fm-send.sh bay:0.1 --key Escape
+WARNING: watcher still down (same stale episode; last beat: 4s ago, grace 300s) - full banner already printed this episode.
+exit=0
+$ bin/fm-send.sh bay:0.1 split pane text
+WARNING: watcher still down (same stale episode; last beat: 4s ago, grace 300s) - full banner already printed this episode.
+exit=0
+Pane bay:0.1 received
+Escape received
+Enter received with text: split pane text
+Active pane bay:0.0 received no key or text.
+$ bin/fm-send.sh bay:0.99 --key Escape
+WARNING: watcher still down (same stale episode; last beat: 5s ago, grace 300s) - full banner already printed this episode.
+error: explicit target 'bay:0.99' is not a live tmux endpoint (tried meta=<disposable home>/state/bay:0.99.meta; metadata window/terminal lookup; backend=tmux). Use fm-<id> for a recorded task/lane, or pass a target whose backend endpoint can be verified.
+exit=1
+
+Closing a whole recorded session with a prefix-named session still live
+$ tmux kill-session -t =bay
+$ tmux capture-pane -p -t bay:fm-mate
+OTHER-SESSION-SCREEN
+$ bin/fm-peek.sh mate 40
+error: tmux window bay:fm-mate not found
+exit=1
+closed session agent state = missing (exit=0)
+$ bin/fm-peek.sh other 40
+OTHER-SESSION-SCREEN
+exit=0

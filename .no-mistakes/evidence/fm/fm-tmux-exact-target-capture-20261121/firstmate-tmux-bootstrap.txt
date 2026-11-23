@@ -1,0 +1,32 @@
+Firstmate target 158ab98785fdf98fd95e4d08bdff7a67ee143af0
+Private sockets with genuine tmux 3.2 and 3.1c builds.
+Bootstrap output is filtered to the tmux prerequisite diagnostics.
+
+Supported 3.2 client and running 3.2 server
+$ tmux -V
+tmux 3.2
+$ FM_BOOTSTRAP_DETECT_ONLY=1 FM_BOOTSTRAP_NETWORK=skip bin/fm-bootstrap.sh
+[no tmux diagnostic]
+
+Supported 3.2 client before its server starts
+$ tmux -V
+tmux 3.2
+$ FM_BOOTSTRAP_DETECT_ONLY=1 FM_BOOTSTRAP_NETWORK=skip bin/fm-bootstrap.sh
+[no tmux diagnostic]
+
+Unsupported 3.1c client and running 3.1c server
+$ tmux -V
+tmux 3.1c
+$ FM_BOOTSTRAP_DETECT_ONLY=1 FM_BOOTSTRAP_NETWORK=skip bin/fm-bootstrap.sh
+MISSING: tmux (install: brew install tmux  # or a platform package providing tmux >=3.2)
+
+Underlying capability on the running 3.1c server
+$ tmux list-windows -a -f 0
+tmux: unknown option -- f
+usage: list-windows [-a] [-F format] [-t target-session]
+
+Supported 3.2 client with the 3.1c server still running on its socket
+$ tmux -V
+tmux 3.2
+$ FM_BOOTSTRAP_DETECT_ONLY=1 FM_BOOTSTRAP_NETWORK=skip bin/fm-bootstrap.sh
+TMUX_SERVER: could not verify list-windows -f support. If an older server is running, start a new server after the old sessions are no longer needed. See docs/tmux-backend.md#setup.
