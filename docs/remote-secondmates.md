@@ -247,7 +247,7 @@ SSH exit 255 leaves completion unknown and the route preserved, exactly as every
 Session start and every remote launch converge the persistent remote home on the primary's own default-branch commit rather than on the Firstmate copy that host keeps.
 The [`secondmate-provisioning` skill](../.agents/skills/secondmate-provisioning/SKILL.md) owns the guarded convergence contract, including the distinct `/updatefirstmate` behavior, and [`bin/fm-remote-secondmate-control.sh`](../bin/fm-remote-secondmate-control.sh) owns the commit-import mechanics.
 Neither session start nor launch moves the host's own Firstmate copy, and an unsafe or unavailable target is reported and left untouched.
-A completed sync reports which watched instruction paths its advance changed, because the primary cannot diff a checkout it cannot read and needs that fact to decide whether the running remote agent must be replaced to actually reload.
+The updater uses the watched instruction paths reported by a remote sync in its status summary.
 
 Retire a remote second mate with the normal guarded command:
 

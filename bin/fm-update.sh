@@ -33,13 +33,10 @@
 #     that same tip whose runtime CANNOT prove a restart, so the older re-read
 #     steer is all that is honest for them)
 #
-# The two sets are disjoint, and restart is UNCONDITIONAL on a successful update
-# of that home. It is deliberately not gated on the git diff: replacing the agent
-# is the only thing that re-resolves the launch-time wiring - turn-end hooks,
-# harness flags, per-harness feature switches - which a running agent froze when
-# it started and which no changed_instr list describes. An unchanged tracked
-# surface therefore is NOT evidence that the running agent is already on the
-# current behavior, so an ALREADY-CURRENT home restarts too.
+# The two sets are disjoint. A restart-capable live mate at the target commit
+# is a restart candidate even if its files did not change, because replacing its
+# agent also re-resolves launch-time wiring. bin/fm-secondmate-restart.sh owns
+# the save confirmation and restart outcome for each candidate.
 #
 # Only two things keep a live mate out of the restart set, and neither is papered
 # over as a reload:
@@ -129,10 +126,8 @@ selector_claimed() {  # <selector>
   return 1
 }
 
-# Route one secondmate whose home this pass left on the target commit. Restart is
-# the outcome unless its runtime cannot prove one, in which case it keeps the
-# re-read steer and is reported as a nudge rather than as a reload. A stopped
-# endpoint has no agent to replace and is left to startup recovery.
+# Classify a secondmate whose home this pass left on the target commit. Leave
+# positively dead or missing endpoints to startup recovery.
 claim_settled_secondmate() {  # <id>
   local id=$1
   selector_claimed "fm-$id" && return 0
@@ -197,8 +192,8 @@ if [ -f "$SECONDMATES_MD" ]; then
             ;;
           current:*)
             echo "remote secondmate $id: already current on $SECONDMATE_REGISTRY_HOST (${remote_result#current: })"
-            # Already on the target commit is a SUCCESSFUL update of that home,
-            # so it earns the same restart as one that had to advance.
+            # An already-current home uses the same candidacy check as one
+            # that advanced.
             if [ -f "$STATE/$id.meta" ] && grep -qx 'kind=secondmate' "$STATE/$id.meta"; then
               claim_settled_secondmate "$id"
             fi

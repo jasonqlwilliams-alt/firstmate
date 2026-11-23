@@ -11,10 +11,7 @@
 # precedence. Replacing the agent is the only mechanism that guarantees the new
 # bytes are the ones read, and the only one that re-resolves the launch-time
 # wiring - harness, model, effort, turn-end hooks, and every other flag a harness
-# reads once at startup. That second half is why the update pass sends every live
-# mate here, including one already on the target commit: launch-time wiring is
-# not derivable from a git diff, so an unchanged tracked surface does not mean
-# the running agent is already on the current behavior.
+# reads once at startup.
 #
 # The cost of that guarantee is the conversation, which is why this command runs
 # in two phases and why the first one is a GATE, not a courtesy:
@@ -28,16 +25,15 @@
 #      every instruction update cost far more than the reload it is paying for.
 #      All requests go out before any restart, so a slow mate delays only its own
 #      restart instead of serializing the fleet behind it.
-#   B. RESTART. Only after that mate's own correlated answer lands on the parent
-#      channel AND includes the requested save receipt, read by
-#      bin/fm-secondmate-restart-lib.sh's fm_secondmate_persist_outcome. A
-#      negative or unclear answer STOPS the restart for that mate: its agent and
-#      conversation are left exactly as they are, with no re-read message on
-#      top, and the pass reports it. The gate is that answer, never a wall
-#      clock, so a mate that is mid-turn queues the request behind that turn;
-#      the bound below exists to end the wait, not to authorize a restart
-#      without the answer. On timeout the restart pass leaves settlement and
-#      recovery to the ordinary pending-reply machinery. Shared pending-reply
+#   B. RESTART. Only after that mate's own correlated answer on the parent
+#      channel is accepted as saved by fm_secondmate_persist_outcome in
+#      bin/fm-secondmate-restart-lib.sh.
+#      A negative or unclear answer or a failed status scan stops the restart for
+#      that mate. The pass reports the outcome and leaves its agent and
+#      conversation running without a re-read message. A mate that is mid-turn
+#      queues the request behind that turn. The bound below limits the wait.
+#      On timeout the restart pass leaves settlement and recovery to the
+#      ordinary pending-reply machinery. Shared pending-reply
 #      settlement can treat a correlation mentioned in another reply's note as
 #      an acknowledgement.
 #      The gate decides on replies visible during its scan, so a correction
@@ -72,9 +68,9 @@
 #   FM_SECONDMATE_PERSIST_WAIT  seconds to wait for one mate's persist answer (900)
 #   FM_SECONDMATE_PERSIST_POLL  seconds between checks of that answer (5)
 #
-# Output: one line per mate - restarted:, nudged:, unreached:, or stopped:
-# (it answered that its open work is not saved, or did not clearly say it is)
-# - then one summary: line.
+# Output: one restarted:, nudged:, unreached:, or stopped: line per mate,
+# followed by a summary: line. The stopped: outcome reports a negative or
+# unclear save outcome.
 #
 # Exit status: 0 every named mate restarted; 3 at least one was nudged, left
 # unreached, or stopped and every mate was still accounted for; 1 the input

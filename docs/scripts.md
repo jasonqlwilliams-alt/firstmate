@@ -27,9 +27,9 @@ Ask the worker to reissue the question with an unreserved key so it can enter `O
 | `fm-bearings-board.sh`   | Build the stable interactive `/bearings lavish` fleet board                          |
 | `fm-lineup-board.sh`    | Build the interactive model lineup board and apply its resolved choices             |
 | `fm-secondmate-reconcile.sh` | Queue Bearings reconcile requests for later supervision delivery and ask each mismatched home through its durable inbox with a per-home cooldown |
-| `fm-update.sh`           | Fast-forward-only self-update of firstmate and local or remote secondmate homes, classifying every live mate left on the target commit for restart or fallback nudge |
-| `fm-secondmate-restart.sh` | Persist open conversational work, then restart eligible second mates or report the fallback outcome |
-| `fm-secondmate-restart-lib.sh` | Shared second-mate restart capability and persistence-request contract |
+| [`fm-update.sh`](../bin/fm-update.sh) | Fast-forward Firstmate and secondmate homes and list candidates for the restart pass or a re-read request |
+| [`fm-secondmate-restart.sh`](../bin/fm-secondmate-restart.sh) | Run the second-mate save and restart pass and report each outcome |
+| [`fm-secondmate-restart-lib.sh`](../bin/fm-secondmate-restart-lib.sh) | Share second-mate restart capability checks and save-reply handling |
 | `fm-on.sh`               | Execute one tracked Firstmate command in a configured remote secondmate home, using its job worker except for the doctor bootstrap |
 | `fm-remote-job-lib.sh`   | Shared bounded remote job queue, worker readiness, LaunchAgent contract, and filesystem-composed PATH |
 | `fm-remote-job-worker.sh` | Long-lived remote queue worker for tracked `fm-*.sh` commands in the account runtime |

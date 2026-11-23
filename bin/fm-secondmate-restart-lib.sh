@@ -47,9 +47,10 @@ fm_secondmate_persist_request() {  # <running-harness>
 
 # Read the persist answers on <corr_id>'s parent channel. Publishes:
 #   FM_SECONDMATE_PERSIST_OUTCOME  saved|not-saved|unclear
-#   FM_SECONDMATE_PERSIST_NOTE     the negative or unclear answer's note, if any
-# Only a done with the requested save receipt is saved, and any contrary reply
-# already on the channel vetoes it.
+#   FM_SECONDMATE_PERSIST_NOTE     an explanation of the outcome, if available
+# A saved verdict requires a newline-terminated done with the requested save
+# receipt and a successful status scan. A contrary reply for the same request
+# visible in that scan vetoes the receipt.
 # blocked, failed, and needs-decision are the status vocabulary's negative
 # verbs. Other replies are unclear and also stop the restart.
 # The answer is the same correlated parent-channel line for a local and a remote
@@ -67,6 +68,8 @@ fm_secondmate_persist_outcome() {  # <state-dir> <corr_id>
   [ -f "$rec" ] || return 1
   status_file=$(fm_pending_reply_get "$rec" parent_status)
   [ -f "$status_file" ] || return 1
+  # Mark trailing fragments to distinguish a truncated record from a complete
+  # save receipt.
   if ! replies=$(
     set -o pipefail
     { cat "$status_file" && printf ' [unterminated status line]\n'; } |
