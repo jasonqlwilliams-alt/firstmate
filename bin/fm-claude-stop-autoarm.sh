@@ -133,11 +133,11 @@ fm_hook_payload_is_foreign_host "$PAYLOAD" && exit 0
 fm_primary_scope_matches "$FM_ROOT" "$STATE" || exit 0
 
 # --- identity: only the lock-owning session's hooks may arm ------------------
-# A prior session may have died after leaving its numeric harness pid in .lock.
-# Use the shared liveness predicate to recognize only that stale-owner case.
+# Use the shared liveness predicate before trying to reclaim a stale numeric
+# owner. See docs/watcher-continuity.md for the hook's reclaim boundary.
 # Defer the mutating claim until after the unchanged AFK and need gates, so an
-# idle or away home remains byte-for-byte inert. Missing or malformed locks are
-# uncertainty rather than stale-owner evidence and remain inert.
+# idle or away home remains byte-for-byte inert. A missing or malformed PID
+# line or an unreadable owner record keeps the hook inert.
 RECOVER_SESSION_LOCK=0
 if ! fm_session_lock_owned_by_self "$STATE"; then
   case "$FM_SESSION_LOCK_PID" in

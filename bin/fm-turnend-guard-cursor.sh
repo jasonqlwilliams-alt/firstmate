@@ -245,9 +245,8 @@ current_session_still_ours() {
   fm_session_lock_owned_by_self "$STATE" && [ "$FM_SESSION_LOCK_PID" = "$OWNER_ID" ]
 }
 
-# Only the lock-owning session may arm or wake. A prior session that died
-# leaving its numeric harness pid behind is the one recoverable
-# case, delegated to bin/fm-lock.sh so acquisition keeps its single owner.
+# Only the lock-owning session may arm or wake. A stale numeric owner is
+# recoverable through bin/fm-lock.sh, which serializes the claim.
 if ! fm_session_lock_owned_by_self "$STATE"; then
   case "$FM_SESSION_LOCK_PID" in ''|*[!0-9]*) exit 0 ;; esac
   fm_session_lock_owner_alive "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START" && exit 0

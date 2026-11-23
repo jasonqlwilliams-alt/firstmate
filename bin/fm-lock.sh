@@ -3,9 +3,7 @@
 # Writes the harness (agent) process PID found by walking the shell's ancestry,
 # which lives as long as the firstmate session - unlike the transient subshell
 # PID of any one tool call, which is dead moments after it is written.
-# The sidecar records that process's start time, so a pid the kernel later
-# reuses for an unrelated process no longer counts as the live owner; its format
-# and start-time matching are owned by bin/fm-session-lock-record-lib.sh.
+# bin/fm-session-lock-record-lib.sh owns the record format and start-time check.
 # Usage: fm-lock.sh           acquire; exit 1 unless ownership is verified
 #        fm-lock.sh status    print holder and liveness; always exits 0
 set -u

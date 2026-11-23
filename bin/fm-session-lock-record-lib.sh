@@ -4,8 +4,11 @@
 # ---------------------------------------------------------------------------
 # Session-lock owner record.
 #
-# state/.lock contains a single harness PID and is published by atomic rename.
-# state/.lock.start records that same PID on line 1 and start=<token> on line 2.
+# state/.lock contains a single harness PID, so in-process Pi, omp, and
+# OpenCode readers can keep using it across a live update.
+# When a start token is available, the writer publishes state/.lock.start
+# first, with that same PID on line 1 and start=<token> on line 2.
+# It then commits the PID line in state/.lock by atomic rename.
 # A missing sidecar or one naming a different PID leaves the lock in PID-only
 # mode. A sidecar naming the owner must provide a matching process start time.
 

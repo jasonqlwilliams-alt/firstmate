@@ -25,12 +25,11 @@
 #     session-lock holder, or FM_LEASE_HOLDER_PID - see bin/fm-lease.sh), and
 #     both actors live inside that one pi process, so a dead recorded pid
 #     means the process died; the lease is cleared at the next claim, guard,
-#     or sweep. Liveness requires a Pi calling context plus state/.lock, and
-#     the recorded pid must BE its current holder, so a lease left by an exited
-#     Pi session goes stale even if its pid was recycled by an unrelated
-#     process, and a non-Pi home never honors a leftover Pi lease. A lease held by the
-#     live current session but an abandoned branch conversation is recovered
-#     by the branch extension's generation-activation cleanup.
+#     or sweep. Liveness requires a Pi calling context and a live lease PID
+#     that matches state/.lock and passes the lock record's start-time check.
+#     A non-Pi home never honors a leftover Pi lease. The branch extension's
+#     generation-activation cleanup recovers a lease held by the live current
+#     session after its branch conversation is abandoned.
 #
 # THREAT MODEL (deliberate, captain-decided): these guards are
 # CONFUSED-AGENT-GRADE, the same grade bin/fm-gate-refuse-lib.sh documents
@@ -44,8 +43,8 @@
 # the actor variables readonly (see the Pi branch extension), so an
 # ACCIDENTAL override fails loudly inside the branch's own shell as well.
 #   - Guard semantics (fm_lease_guard): no lease, a same-actor lease, or a
-#     provably stale lease passes; a live lease held by the OTHER actor
-#     refuses with exit FM_LEASE_REFUSE_EXIT. In a Pi supervision context the
+#     lease that fails the liveness check passes. A live lease held by the
+#     OTHER actor refuses with exit FM_LEASE_REFUSE_EXIT. In a Pi context the
 #     guard retains the lease-command lock until fm_lease_guard_release, so the
 #     other actor cannot claim between the check and the guarded mutation. A
 #     home without the current Pi session lock cannot have a live lease, so
