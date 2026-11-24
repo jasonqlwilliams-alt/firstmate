@@ -438,7 +438,7 @@ Cursor typed-submit confirmation is verified on tmux and Herdr only.
 On Zellij, cmux, and Orca a typed-plane Cursor send (a harness-native invocation or an explicit backend target; ordinary text steers ride the durable inbox and exit 0 at enqueue) lands, but `fm-send` reports delivery unconfirmed and exits non-zero because their shared submit core does not consult the busy footer; [runtime backend verification](verification/runtime-backends.md#cursor-agent-cli) owns the evidence and transcript-state boundary.
 An ordinary text steer remains durably enqueued when its doorbell is withheld, and the watcher retries and escalates an unacknowledged local record.
 The gate refuses the Codex update picker on every harness and requires a proven-empty composer before typing to a Codex, Rovo, or agy worker, then proof that the composer holds the full doorbell before Enter.
-On backends without styled capture, including cmux and Orca, the gate always withholds the agy doorbell and the message stays queued in the inbox.
+The agy gate requires a styled capture, so cmux and Orca always leave agy steers queued without ringing.
 See [Claude background-tasks exit confirmation](agent-control.md#claude-background-tasks-exit-confirmation) for the Claude refusal and [`fm-task-inbox-lib.sh`](../bin/fm-task-inbox-lib.sh) for the exact gate and retry ladder.
 An agy pane uses the short notice `: Firstmate message waiting: read your inbox, act, mv to handled/.` when the path in the scaffolded Firstmate instruction inbox section points to the same inbox directory as the queued record.
 The doorbell checks the launch brief when present and uses the original task brief when there is no launch brief.
