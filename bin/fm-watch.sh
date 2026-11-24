@@ -1996,17 +1996,22 @@ reconcile_requests_detached() {
 
 watcher_cleanup() {
   local exit_status=$? cleanup_status=0 owns_lock=0 transition=release-lock
-  trap '' HUP INT TERM
+  if [ -n "$FM_ACTIVE_CHECK_PID$FM_ACTIVE_CHECK_PGID" ]; then
+    trap '' HUP INT TERM
+    fm_active_check_stop || cleanup_status=1
+    if [ "$WATCHER_CHECKPOINT_INTERRUPTED" -eq 0 ]; then
+      trap watcher_interrupted HUP INT TERM
+    fi
+    if [ "$cleanup_status" -ne 0 ]; then
+      echo "watcher: active capture cleanup failed during shutdown" >&2
+    fi
+  fi
   if [ "$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)" = "${WATCHER_PID:-}" ]; then
     owns_lock=1
     if [ "${WATCHER_RECOVERY_PENDING:-0}" -eq 1 ] \
       && [ "${FM_WATCH_DELIVERED_REASON:-}" = "check: rearm-resurface" ]; then
       transition=release-lock-existing
     fi
-  fi
-  if ! fm_active_check_stop; then
-    echo "watcher: active capture cleanup failed during shutdown" >&2
-    cleanup_status=1
   fi
   fm_check_output_cleanup
   fm_custom_check_snapshot_cleanup
