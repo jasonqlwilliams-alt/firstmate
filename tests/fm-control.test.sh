@@ -233,7 +233,9 @@ case "${1:-}" in
       else
         printf 'Codex\n›\n'
       fi
-    elif [ -f "$D/pane" ]; then cat "$D/pane"; else printf '╭────╮\n│    │\n╰────╯\n'; fi
+    elif [ -f "$D/pane" ]; then cat "$D/pane"
+    elif [ "$(cat "$D/command")" = claude ]; then printf '────────────────────────\n❯ \n────────────────────────\n'
+    else printf '╭────╮\n│    │\n╰────╯\n'; fi
     exit 0 ;;
   list-windows)
     if [ -f "$D/windows" ]; then

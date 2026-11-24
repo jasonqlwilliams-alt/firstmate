@@ -1070,6 +1070,11 @@ _fm_backend_guarded_composer_state() {
   picker=$(fm_composer_update_picker_scan "$FM_COMPOSER_SNAPSHOT_CAPS" \
     "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR" "$expected")
   [ "$picker" != active ] || { printf 'update-picker'; return 0; }
+  if [ "$harness" = claude ] && ! fm_composer_is_claude_frame \
+    "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR"; then
+    if [ "$picker" = below ]; then printf 'update-picker'; else printf 'unknown'; fi
+    return 0
+  fi
   if [ "$harness" = codex ] && [ "$picker" != below ] \
      && fm_composer_codex_signin_screen "$FM_COMPOSER_SNAPSHOT_SCREEN"; then
     printf 'sign-in'

@@ -62,11 +62,7 @@ case "${1:-}" in
     for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
-    if [ -s "$FM_SLEEP_LOG.pending" ]; then
-      printf 'Transcript\n❯ %s\n' "$(cat "$FM_SLEEP_LOG.pending")"
-    else
-      printf '╭────╮\n│    │\n╰────╯\n'
-    fi
+    printf '────────────────────────\n❯ %s\n────────────────────────\n' "$(cat "$FM_SLEEP_LOG.pending" 2>/dev/null)"
     exit 0 ;;
   list-windows)
     case "${*: -1}" in

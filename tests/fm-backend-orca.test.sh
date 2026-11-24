@@ -749,19 +749,27 @@ test_peek_send_and_crew_state_route_through_orca_meta() {
     FM_ROOT_OVERRIDE="$neutral" FM_STATE_OVERRIDE="$state" FM_SEND_SETTLE=0 \
     "$ROOT/bin/fm-peek.sh" "fm-$id" 10 )
   [ "$out" = ready ] || fail "fm-peek should read through Orca metadata, got '$out'"
+  printf '{"ok":true,"result":{"terminal":{"source":"screen","tail":["Codex","›"]}}}\n' > "$RESP/2.out"
+  out=$( PATH="$FB:$PATH" FM_ORCA_LOG="$LOG" FM_ORCA_RESPONSES="$RESP" \
+    FM_ROOT_OVERRIDE="$neutral" FM_HOME="$neutral" FM_STATE_OVERRIDE="$state" FM_SEND_SETTLE=0 \
+    "$ROOT/bin/fm-send.sh" "fm-$id" "wait for Claude" 2>&1 ) \
+    || fail "a Codex screen should still permit durable queueing: $out"
+  assert_contains "$out" 'blocked the doorbell' 'a Codex screen should refuse the Claude doorbell'
+  assert_not_contains "$(cat "$LOG")" $'terminal\x1f''send' 'the Claude doorbell wrote into Codex'
+  assert_present "$state/$id.inbox/001.msg" 'the refusal lost the inbox record'
   # The ring reads a proven-empty composer, types the doorbell, rereads the
   # composer holding exactly that doorbell, then sends one Enter.
   mkdir -p "$state/$id.inbox/handled"
   doorbell=$(bash -c '. "$1"; fm_task_inbox_doorbell_line "$2"' _ \
-    "$ROOT/bin/fm-task-inbox-lib.sh" "$state/$id.inbox/001.msg")
-  printf '{"ok":true,"result":{"terminal":{"tail":["Codex","›"]}}}\n' > "$RESP/2.out"
-  printf '{"ok":true,"result":{"send":{"handle":"term-io","accepted":true}}}\n' > "$RESP/3.out"
-  jq -nc --arg row "› $doorbell" '{ok:true,result:{terminal:{tail:["Codex",$row]}}}' > "$RESP/4.out"
-  printf '{"ok":true,"result":{"send":{"handle":"term-io","accepted":true}}}\n' > "$RESP/5.out"
+    "$ROOT/bin/fm-task-inbox-lib.sh" "$state/$id.inbox/002.msg")
+  printf '{"ok":true,"result":{"terminal":{"source":"screen","tail":["────────────────────────","❯","────────────────────────"]}}}\n' > "$RESP/3.out"
+  printf '{"ok":true,"result":{"send":{"handle":"term-io","accepted":true}}}\n' > "$RESP/4.out"
+  jq -nc --arg row "❯ $doorbell" '{ok:true,result:{terminal:{source:"screen",tail:["────────────────────────",$row,"────────────────────────"]}}}' > "$RESP/5.out"
+  printf '{"ok":true,"result":{"send":{"handle":"term-io","accepted":true}}}\n' > "$RESP/6.out"
   PATH="$FB:$PATH" FM_ORCA_LOG="$LOG" FM_ORCA_RESPONSES="$RESP" \
     FM_ROOT_OVERRIDE="$neutral" FM_HOME="$neutral" FM_STATE_OVERRIDE="$state" FM_SEND_SETTLE=0 \
     "$ROOT/bin/fm-send.sh" "fm-$id" "hello orca"
-  printf '{"ok":true,"result":{"terminal":{"tail":["idle prompt"]}}}\n' > "$RESP/6.out"
+  printf '{"ok":true,"result":{"terminal":{"tail":["idle prompt"]}}}\n' > "$RESP/7.out"
   out=$( PATH="$FB:$PATH" FM_ORCA_LOG="$LOG" FM_ORCA_RESPONSES="$RESP" \
     FM_ROOT_OVERRIDE="$ROOT" FM_STATE_OVERRIDE="$state" "$ROOT/bin/fm-crew-state.sh" "$id" )
   assert_contains "$out" "state: unknown" "crew-state should fall back cleanly for an idle Orca scout"
@@ -769,7 +777,7 @@ test_peek_send_and_crew_state_route_through_orca_meta() {
     "peek/crew-state did not read the recorded Orca terminal"
   assert_not_contains "$(cat "$LOG")" $'orca\x1f''terminal'$'\x1f''read'$'\x1f''--terminal'$'\x1f'"fm-$id" \
     "crew-state should not read the stable Orca alias as a terminal handle"
-  record="$state/$id.inbox/001.msg"
+  record="$state/$id.inbox/002.msg"
   [ -f "$record" ] || fail "send did not enqueue through the task inbox"
   body=$(bash -c '. "$1"; fm_task_inbox_body "$2"' _ "$ROOT/bin/fm-task-inbox-lib.sh" "$record")
   [ "$body" = "hello orca" ] || fail "Orca task inbox did not preserve the send body, got '$body'"

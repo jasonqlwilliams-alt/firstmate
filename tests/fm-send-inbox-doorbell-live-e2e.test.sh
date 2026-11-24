@@ -66,7 +66,7 @@ SH
 chmod +x "$SHIM_DIR/tmux"
 PATH="$SHIM_DIR:$PATH"
 # shellcheck source=/dev/null
-. "$ROOT/bin/fm-tmux-lib.sh"
+. "$ROOT/bin/fm-backend.sh"
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-task-inbox-lib.sh"
 
@@ -99,10 +99,10 @@ launch_cmd() {  # <name>
 # doorbells need a proven-empty composer, while other covered harnesses proceed with a note,
 # because its ring still fires on an unidentified idle screen (the composer
 # matrix guard, not this one, owns re-proving the classifier per release).
-wait_ready() {  # <window>
-  local win=$1 i=0 budget=60 verdict dismissed=0 screen
+wait_ready() {  # <window> <harness>
+  local win=$1 harness=$2 i=0 budget=60 verdict dismissed=0 screen
   while [ "$i" -lt "$budget" ]; do
-    verdict=$(fm_tmux_composer_state "$SESSION:$win")
+    verdict=$(fm_backend_guarded_composer_state tmux "$SESSION:$win" "$win" '' "$harness")
     [ "$verdict" = empty ] && return 0
     i=$((i + 1))
     # Dismiss one non-trust startup modal (update prompts), as the composer
@@ -133,7 +133,7 @@ check_harness_doorbell() {  # <name>
   tmux -L "$SOCKET" new-window -d -t "$SESSION:" -n "$win" -c "$ROOT" \
     -- bash -lc "$cmd" \
     || { FAILED=1; printf 'not ok - %s (%s): could not launch in the isolated tmux server\n' "$name" "$version" >&2; return 0; }
-  wait_ready "$win"; ready_rc=$?
+  wait_ready "$win" "$name"; ready_rc=$?
   if [ "$ready_rc" -eq 1 ]; then
     FAILED=1
     printf 'not ok - %s (%s): composer stayed visibly pending; the pane is not steerable\n' "$name" "$version" >&2

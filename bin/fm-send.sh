@@ -263,20 +263,75 @@ fm_send_id_from_meta() {  # <meta-file>
 # that the composer cleared or supplies fresh proof for the next Enter.
 fm_send_claude_submit() {  # <backend> <target> <label> <text> <retries> <enter-sleep> <settle>
   local backend=$1 target=$2 label=$3 text=$4 retries=$5 sleep_s=$6 settle=$7 screen attempt=0
+  local baseline=unknown raw_status footer_baseline=unknown confirm_sleep i
+  fm_backend_source "$backend" || { printf 'input-refused'; return 0; }
+  if [ "$backend" = tmux ]; then
+    baseline=$(fm_pane_busy_state "$target" claude)
+  fi
   screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" '' claude) || screen=unknown
   [ "$screen" = empty ] || { printf 'input-refused'; return 0; }
   fm_backend_send_literal "$backend" "$target" "$text" "$label" >/dev/null || { printf 'send-failed'; return 0; }
   sleep "$settle"
+  if [ "$backend" = herdr ] && fm_backend_herdr_parse_target "$target"; then
+    raw_status=$(fm_backend_herdr_agent_status_raw "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE") || raw_status=
+    baseline=$(fm_backend_herdr_classify_submit_agent_status "$raw_status")
+    if [ "$baseline" = idle ]; then
+      confirm_sleep=$(fm_backend_herdr_submit_confirm_budget "$sleep_s")
+    elif [ "$raw_status" != working ]; then
+      footer_baseline=$(fm_backend_herdr_rendered_busy_state "$target" claude)
+    fi
+  fi
   screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" "$text" claude) || screen=unknown
   [ "$screen" = pending ] || { printf 'enter-withheld'; return 0; }
   while :; do
-    fm_backend_send_key "$backend" "$target" Enter "$label" >/dev/null || { printf 'send-failed'; return 0; }
-    sleep "$sleep_s"
+    if ! fm_backend_send_key "$backend" "$target" Enter "$label" >/dev/null; then
+      [ "$attempt" -gt 0 ] || { printf 'send-failed'; return 0; }
+      break
+    fi
+    if [ "$backend:$baseline" = herdr:idle ]; then
+      if [ "$(fm_backend_herdr_wait_for_working "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE" \
+        "$confirm_sleep" "$FM_BACKEND_HERDR_SUBMIT_POLLS")" = busy ]; then
+        printf 'empty'
+        return 0
+      fi
+    else
+      sleep "$sleep_s"
+    fi
     screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" "$text" claude) || screen=unknown
+    if [ "$screen:$footer_baseline" = pending:idle ] \
+      && [ "$(fm_backend_herdr_rendered_busy_state "$target" claude)" = busy ]; then
+      printf 'empty'
+      return 0
+    fi
     attempt=$((attempt + 1))
     [ "$screen" = pending ] && [ "$attempt" -lt "$retries" ] || break
   done
-  printf '%s' "$screen"
+  case "$screen" in
+    empty) printf 'empty' ;;
+    pending)
+      case "$backend" in
+        tmux) fm_composer_queued_enter_verdict "$screen" "$(fm_pane_busy_state "$target" claude)" ;;
+        herdr)
+          i=0
+          [ "$baseline" != idle ] || i=1
+          fm_composer_queued_enter_verdict "$screen" "$(fm_backend_herdr_queued_enter_busy "$target" "$i")"
+          ;;
+        *) printf 'pending' ;;
+      esac
+      ;;
+    *)
+      if [ "$screen:$backend:$baseline" = unknown:tmux:idle ]; then
+        for ((i=0; i<retries; i++)); do
+          if [ "$(fm_pane_busy_state "$target" claude)" = busy ]; then
+            printf 'empty'
+            return 0
+          fi
+          [ "$((i + 1))" -ge "$retries" ] || sleep "$sleep_s"
+        done
+      fi
+      printf 'unconfirmed:%s' "$screen"
+      ;;
+  esac
 }
 
 # fm_send_clear_after_interrupt: muse RESTORES the interrupted prompt back into
@@ -1100,7 +1155,7 @@ else
       fi
       exit 1
       ;;
-    pending)
+    pending|unconfirmed:*)
       # The text was typed into the live target and Enter was sent; only the
       # submit read-back stayed unconfirmed (e.g. a busy harness queues the
       # steer and keeps rendering it). That is not a proven failure, so never
@@ -1112,7 +1167,7 @@ else
       # correlated report still resolves it and an unanswered one still
       # surfaces through the library's own reconciliation
       # (bin/fm-pending-reply-lib.sh).
-      echo "fm-send: text delivered to $T but submission is unconfirmed (verdict=pending; tried $RESOLUTION_TRIED); do not retype or blindly resend - verify with fm-peek.sh, then re-send '--key Enter' only if the composer still holds the text" >&2
+      echo "fm-send: text delivered to $T but submission is unconfirmed (verdict=${verdict#unconfirmed:}; tried $RESOLUTION_TRIED); do not retype or blindly resend - verify with fm-peek.sh, then re-send '--key Enter' only if the composer still holds the text" >&2
       exit 3
       ;;
     *)

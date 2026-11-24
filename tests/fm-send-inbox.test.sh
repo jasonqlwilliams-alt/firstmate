@@ -86,7 +86,16 @@ case "${1:-}" in
     case "${FM_FAKE_CLAUDE_CAPTURE:-}" in
       unreadable) exit 1 ;;
       wrong-text)
-        if [ -s "$FM_SEND_LOG.pending" ]; then printf 'Transcript\n❯ unrelated text\n'; exit 0; fi ;;
+        if [ -s "$FM_SEND_LOG.pending" ]; then
+          printf '────────────────────────\n❯ unrelated text\n────────────────────────\n'
+          exit 0
+        fi ;;
+      shell) printf 'Claude has exited.\n❯ %s\n' "$(cat "$FM_SEND_LOG.pending" 2>/dev/null)"; exit 0 ;;
+      shell-after-typing)
+        if [ -s "$FM_SEND_LOG.pending" ]; then
+          printf 'Claude has exited.\n❯ %s\n' "$(cat "$FM_SEND_LOG.pending")"
+          exit 0
+        fi ;;
       before) cat "$FM_FAKE_CLAUDE_SCREEN"; exit ;;
       after-typing)
         if [ -s "$FM_SEND_LOG.pending" ]; then cat "$FM_FAKE_CLAUDE_SCREEN"; exit; fi ;;
@@ -96,11 +105,11 @@ case "${1:-}" in
         if [ -s "$FM_SEND_LOG.keys" ]; then cat "$FM_FAKE_CLAUDE_SCREEN"; exit; fi ;;
     esac
     if [ -s "$FM_SEND_LOG.pending" ]; then
-      printf 'Transcript\n❯ %s\n' "$(cat "$FM_SEND_LOG.pending")"
+      printf '────────────────────────\n❯ %s\n────────────────────────\n' "$(cat "$FM_SEND_LOG.pending")"
     elif [ "${FM_FAKE_TMUX_COMPOSER:-}" = pending ]; then
       printf '╭──────────────╮\n│ leftover txt │\n╰──────────────╯\n'
     else
-      printf '╭────╮\n│    │\n╰────╯\n'
+      printf '────────────────────────\n❯ \n────────────────────────\n'
     fi
     exit 0 ;;
   list-windows)
@@ -256,7 +265,7 @@ test_claude_automatic_input_refuses_unproven_composers() {
   sed -e 's/❯ 1\. Exit/  1. Exit/' -e 's/    2\. Move/  ❯ 2. Move/' "$exact" > "$near"
   assert_contains "$(cat "$near")" '❯ 2. Move to background and exit' 'the near miss must render choice 2 as selected'
 
-  for mode in before unreadable; do
+  for mode in before unreadable shell; do
     for screen in "$exact" "$near"; do
       run_send "$dir" "$err" FM_FAKE_CLAUDE_CAPTURE="$mode" FM_FAKE_CLAUDE_SCREEN="$screen" -- t1 'queue this' \
         || fail 'an input refusal should preserve durable delivery'
@@ -270,7 +279,7 @@ test_claude_automatic_input_refuses_unproven_composers() {
     done
   done
 
-  for mode in after-typing unreadable-after-typing wrong-text; do
+  for mode in after-typing unreadable-after-typing wrong-text shell-after-typing; do
     run_send "$dir" "$err" FM_FAKE_CLAUDE_CAPTURE="$mode" FM_FAKE_CLAUDE_SCREEN="$near" -- t1 'queue this too' \
       || fail 'withholding Enter should preserve durable delivery'
     assert_contains "$(cat "$log")" 'Firstmate instruction waiting' 'the initial composer must permit the literal write'
@@ -283,7 +292,7 @@ test_claude_automatic_input_refuses_unproven_composers() {
   done
   rc=0
   run_send "$dir" "$err" FM_SEND_RETRIES=3 FM_FAKE_CLAUDE_CAPTURE=after-enter FM_FAKE_CLAUDE_SCREEN="$exact" -- t1 /help || rc=$?
-  expect_code 1 "$rc" 'a dialog after Enter must stop native submit retries'
+  expect_code 3 "$rc" 'a dialog after a delivered Enter must stop native submit retries and leave submission unconfirmed'
   [ "$(cat "$log.keys")" = Enter ] || fail 'native send retried Enter into the dialog'
 
   (
@@ -309,7 +318,7 @@ test_claude_automatic_input_refuses_unproven_composers() {
 
   mkdir "$dir/worktree" "$dir/project"
   printf 'worktree=%s\nproject=%s\n' "$dir/worktree" "$dir/project" >> "$meta"
-  for mode in before unreadable; do
+  for mode in before unreadable shell; do
     : > "$log.keys"
     rc=0
     out=$(PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" FM_SEND_LOG="$log" \

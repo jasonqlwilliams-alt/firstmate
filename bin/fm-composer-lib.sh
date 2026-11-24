@@ -642,10 +642,10 @@ fm_composer_classify_content() {  # <bordered> <content> [idle_re] [idle_case] [
 # exact positive proof they require (`empty`), so unrecognized future verdicts
 # fail safe by default.
 
-# _fm_composer_pi_separator_row: a solid pi separator - nothing but `─`, at
+# _fm_composer_horizontal_rule: a solid separator - nothing but `─`, at
 # least 8 columns wide. The width floor is a literal substring test so it is
 # byte-exact in every locale.
-_fm_composer_pi_separator_row() {  # <trimmed-row>
+_fm_composer_horizontal_rule() {  # <trimmed-row>
   local row=$1
   [ -n "$row" ] || return 1
   [ -z "${row//─/}" ] || return 1
@@ -704,7 +704,7 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap]
     # Pi separator rows: a solid `─` rule at least 8 columns wide. A separator
     # closes the preceding candidate and immediately opens the next, so an
     # earlier transcript rule can never outrank the live bottom composer pair.
-    if _fm_composer_pi_separator_row "$trimmed"; then
+    if _fm_composer_horizontal_rule "$trimmed"; then
       FM_COMPOSER_SCAN_PI_LAST_SEPARATOR=$row
       if [ "$pi_open" -ge 0 ]; then
         FM_COMPOSER_SCAN_PI_PAIR_FOUND=1
@@ -1185,6 +1185,26 @@ _fm_composer_select_cursorless() {
     fi
   fi
   [ -n "$FM_COMPOSER_SELECTED_KIND" ]
+}
+
+fm_composer_is_claude_frame() {  # <screen> [cursor-row]
+  local plain cy=${2:-} prompt glyph top bottom
+  plain=$(printf '%s\n' "$1" | fm_composer_strip_ansi)
+  _fm_composer_scan_screen "$plain" ''
+  _fm_composer_select_cursorless "$plain" || return 1
+  [ "$FM_COMPOSER_SELECTED_KIND" = bare ] || return 1
+  if [ -n "$cy" ]; then
+    [ "$cy" -ge "$FM_COMPOSER_SELECTED_FIRST" ] && [ "$cy" -le "$FM_COMPOSER_SELECTED_LAST" ] || return 1
+  fi
+  prompt=$(_fm_composer_screen_row "$FM_COMPOSER_SELECTED_FIRST" "$plain")
+  fm_composer_normalize_trim_var prompt
+  fm_composer_leading_agent_glyph_var glyph "$prompt" && [ "$glyph" = '❯' ] || return 1
+  [ "$FM_COMPOSER_SELECTED_FIRST" -gt 0 ] || return 1
+  top=$(_fm_composer_screen_row "$((FM_COMPOSER_SELECTED_FIRST - 1))" "$plain")
+  bottom=$(_fm_composer_screen_row "$((FM_COMPOSER_SELECTED_LAST + 1))" "$plain")
+  fm_composer_normalize_trim_var top
+  fm_composer_normalize_trim_var bottom
+  _fm_composer_horizontal_rule "$top" && [ "$top" = "$bottom" ]
 }
 
 fm_composer_extract_selected_content() {  # <caps> <screen> [rows]

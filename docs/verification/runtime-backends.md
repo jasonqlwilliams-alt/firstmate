@@ -372,6 +372,8 @@ This guard is the refresh command after any harness upgrade; it spends a small n
 The recorded-screen regression in `tests/fm-send-inbox.test.sh` exercises Claude input refusal and lifecycle-lock contention through the production entry points with a fake backend.
 The opt-in refresh command below runs Claude in a private named tmux session and submits a prompt to start a background task before opening the real exit confirmation.
 It exercises the ordinary doorbell, native command, and recovery interrupt paths, plus an explicit operator key.
+Supply a lab Anthropic API key through `FM_CLAUDE_AUTOMATIC_INPUT_API_KEY` before running the command.
+The guard skips when that variable is absent and creates its own Claude configuration.
 The live guard has yet to be run.
 
 ```sh

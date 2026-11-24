@@ -5,6 +5,11 @@ set -eu
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+fm_live_gate opt-in FM_CLAUDE_AUTOMATIC_INPUT_LIVE
+if [ -z "${FM_CLAUDE_AUTOMATIC_INPUT_API_KEY:-}" ]; then
+  printf 'skip: live: set FM_CLAUDE_AUTOMATIC_INPUT_API_KEY to a lab Anthropic API key\n'
+  exit 0
+fi
 fm_live_gate opt-in FM_CLAUDE_AUTOMATIC_INPUT_LIVE claude tmux git node
 
 VERSION=$(claude --version)
@@ -16,8 +21,6 @@ TARGET="$SESSION:$WINDOW"
 REAL_TMUX=$(command -v tmux)
 REAL_CLAUDE=$(command -v claude)
 WORKTREE="$LAB/worktree"
-SOURCE_CONFIG=${CLAUDE_CONFIG_DIR:-"$HOME/.claude"}
-SOURCE_STORE=${CLAUDE_CONFIG_DIR:-"$HOME"}/.claude.json
 
 live_fail() { fail "Claude $VERSION: $*"; }
 cleanup() {
@@ -28,17 +31,10 @@ trap cleanup EXIT
 
 export FM_HOME="$LAB/home" CLAUDE_CONFIG_DIR="$LAB/claude-config"
 umask 077
-mkdir -p "$FM_HOME/state" "$CLAUDE_CONFIG_DIR" "$LAB/bin"
+mkdir -p "$FM_HOME/state" "$CLAUDE_CONFIG_DIR" "$LAB/bin" "$LAB/user"
 fm_git_worktree "$LAB/project" "$WORKTREE" claude-input \
   || live_fail 'could not create the disposable linked worktree'
-if [ -f "$SOURCE_STORE" ]; then
-  cp "$SOURCE_STORE" "$CLAUDE_CONFIG_DIR/.claude.json"
-else
-  printf '{}\n' > "$CLAUDE_CONFIG_DIR/.claude.json"
-fi
-if [ -f "$SOURCE_CONFIG/.credentials.json" ]; then
-  cp "$SOURCE_CONFIG/.credentials.json" "$CLAUDE_CONFIG_DIR/.credentials.json"
-fi
+printf '{"hasCompletedOnboarding":true}\n' > "$CLAUDE_CONFIG_DIR/.claude.json"
 "$ROOT/bin/fm-claude-trust.sh" "$WORKTREE" "$LAB/project" >/dev/null \
   || live_fail 'could not register trust in the isolated Claude config'
 
@@ -50,15 +46,22 @@ SH
 chmod +x "$LAB/bin/tmux"
 export PATH="$LAB/bin:$PATH"
 unset TMUX TMUX_PANE
-tmux new-session -d -s "$SESSION" -n "$WINDOW" -x 160 -y 45 -c "$WORKTREE" \
-  env "CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR" CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false \
-  "$REAL_CLAUDE" --model haiku --tools Bash --allowedTools 'Bash(sleep 180)' \
+(
+  export HOME="$LAB/user" ANTHROPIC_API_KEY="$FM_CLAUDE_AUTOMATIC_INPUT_API_KEY"
+  unset FM_CLAUDE_AUTOMATIC_INPUT_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN \
+    ANTHROPIC_BASE_URL ANTHROPIC_CUSTOM_HEADERS CLAUDE_CODE_USE_BEDROCK \
+    CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
+  tmux new-session -d -s "$SESSION" -n "$WINDOW" -x 160 -y 45 -c "$WORKTREE" \
+    env "CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR" CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false \
+    "$REAL_CLAUDE" --model haiku --tools Bash --allowedTools 'Bash(sleep 180)'
+) \
   || live_fail 'could not launch the isolated tmux session'
 fm_write_meta "$FM_HOME/state/$TASK.meta" 'backend=tmux' "window=$TARGET" 'harness=claude' \
   "endpoint_task_id=$TASK" 'kind=ship' "worktree=$WORKTREE" "project=$LAB/project"
 
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-backend.sh"
+fm_backend_source tmux || live_fail 'could not load the tmux backend'
 wait_for_screen() {  # <verdict> <seconds>
   local i state
   for ((i=0; i<$2; i++)); do
@@ -69,10 +72,30 @@ wait_for_screen() {  # <verdict> <seconds>
   live_fail "expected screen verdict '$1', last observed '$state'"
 }
 
+wait_for_transcript_marker() {  # <present|absent>
+  local i screen seen
+  for ((i=0; i<60; i++)); do
+    if screen=$(tmux capture-pane -p -t "$TARGET") && [ -n "$screen" ]; then
+      seen=absent
+      if [[ "$screen" = *"$marker"* ]]; then seen=present; fi
+      if [ "$seen" = "$1" ] && [ "$(fm_pane_busy_state "$TARGET" claude)" = idle ] \
+        && [ "$(fm_backend_guarded_composer_state tmux "$TARGET" "$WINDOW" '' claude)" = empty ]; then
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+  live_fail "expected the transcript marker to be $1 with an idle composer"
+}
+
 wait_for_screen empty 60
+marker="firstmate-clear-probe-$$"
+tmux send-keys -t "$TARGET" -l "Reply with only OK. Transcript marker $marker"
+tmux send-keys -t "$TARGET" Enter
+wait_for_transcript_marker present
 FM_SEND_SETTLE=0 "$ROOT/bin/fm-send.sh" "$TASK" /clear \
   || live_fail 'a native command did not submit from the empty composer'
-wait_for_screen empty 30
+wait_for_transcript_marker absent
 
 "$ROOT/bin/fm-send.sh" "$TASK" \
   'Run exactly the Bash command sleep 180 with run_in_background set to true. Leave it running, reply BACKGROUND_READY, and acknowledge this instruction by moving its record as directed.' \

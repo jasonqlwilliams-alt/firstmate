@@ -115,8 +115,10 @@ static void out(const char *s) { for (; *s; s++) { if (*s == '\n') fputs("\r\n",
 static void composer(const char *typed) {
   printf("\033[2J\033[H");
   out("Claude stand-in transcript\n\n");
+  out("────────────────────────\n");
   out("\xe2\x9d\xaf ");
   out(typed);
+  out("\0337\n────────────────────────\0338");
   fflush(stdout);
 }
 static void dialog(const char *path) {
@@ -408,6 +410,9 @@ cat > "$TMP_ROOT/bin/herdr" <<'SH'
 #!/usr/bin/env bash
 set -u
 phase=$(cat "$FM_DIALOG_CASE/phase")
+composer() {
+  printf '────────────────────────\n❯ %s\n────────────────────────\n' "${1:-}"
+}
 case "$1 $2" in
   'status --json')
     printf '%s\n' '{"client":{"protocol":20,"version":"fixture"},"server":{"running":true,"protocol":20,"version":"fixture"}}'
@@ -421,6 +426,7 @@ case "$1 $2" in
       stopped:slow-liveness-stop|retry:slow-liveness-retry) sleep 1.1 ;;
     esac
     case "$phase" in
+      submit-working) printf '%s\n' '{"result":{"agent":{"agent_status":"working"}}}' ;;
       stopped)
         if [ "$FM_DIALOG_MODE" = single-stop ]; then
           printf 'stop-unreadable\n' > "$FM_DIALOG_CASE/phase"
@@ -452,7 +458,7 @@ case "$1 $2" in
       printf 'dialog\n' > "$FM_DIALOG_CASE/phase"
       sleep 9
       : > "$FM_DIALOG_CASE/read-completed"
-      printf 'Claude\n❯ \n'
+      composer
       exit 0
     fi
     styled=0
@@ -468,17 +474,18 @@ case "$1 $2" in
         done < <(
           case " $* " in
             *' --source visible '*) cat "$FM_DIALOG_FIXTURE" ;;
-            *) tail -n 3 "$FM_DIALOG_FIXTURE"; printf '\nClaude stand-in transcript\n❯ \n' ;;
+            *) tail -n 3 "$FM_DIALOG_FIXTURE"; composer ;;
           esac
         )
         ;;
-      typed|retry) printf 'Claude\n\033[1m❯ /exit\033[0m\n' ;;
-      doorbell-typed) printf 'Claude\n❯ %s\n' "$(head -n 1 "$FM_DIALOG_CASE/input")" ;;
+      typed|retry) composer /exit ;;
+      doorbell-typed|submit-typed|submit-retry) composer "$(head -n 1 "$FM_DIALOG_CASE/input")" ;;
+      submit-working) printf 'Redrawing viewport\n' ;;
       slow-stop)
         printf 'read\n' >> "$FM_DIALOG_CASE/reads"
         sleep 0.7
         node -p 'Date.now()' >> "$FM_DIALOG_CASE/read-times"
-        printf 'Claude\n❯ \n'
+        composer
         ;;
       stalled-stop)
         printf 'read\n' >> "$FM_DIALOG_CASE/reads"
@@ -490,12 +497,13 @@ case "$1 $2" in
       picker) printf 'Update now (runs npm install)\nSkip until next version\nesc skip\n' ;;
       unreadable) exit 1 ;;
       stopped) printf '$ \n' ;;
-      *) printf 'Claude\n❯ \n' ;;
+      *) composer ;;
     esac
     ;;
   'pane send-text')
     printf '%s\n' "$4" >> "$FM_DIALOG_CASE/input"
     case "$FM_DIALOG_MODE:$4" in
+      submit-*:*) printf 'submit-typed\n' > "$FM_DIALOG_CASE/phase" ;;
       doorbell-after*:*|dialog-after-typing:/exit) printf 'dialog\n' > "$FM_DIALOG_CASE/phase" ;;
       doorbell-slow:*) printf 'doorbell-typed\n' > "$FM_DIALOG_CASE/phase" ;;
       *:/exit) printf 'typed\n' > "$FM_DIALOG_CASE/phase" ;;
@@ -505,6 +513,9 @@ case "$1 $2" in
     printf '%s\n' "$4" >> "$FM_DIALOG_CASE/input"
     [ "$4" = enter ] || exit 0
     case "$phase:$FM_DIALOG_MODE" in
+      submit-typed:submit-native) printf 'submit-working\n' ;;
+      submit-typed:submit-retry-failed) printf 'submit-retry\n' ;;
+      submit-retry:submit-retry-failed|submit-typed:submit-first-failed) printf '%s\n' "$phase"; exit 1 ;;
       typed:retry|typed:slow-liveness-retry) printf 'retry\n' ;;
       typed:retry-stalled) printf 'retry\n' ;;
       retry:retry-stalled) sleep 6; : > "$FM_DIALOG_CASE/retry-completed"; printf 'stopped\n' ;;
@@ -664,6 +675,38 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-live
 done
 pass 'styled Herdr exit retries only a proven pending command, and exit and doorbell send no key to the dialog'
 
+for mode in submit-native submit-retry-failed submit-first-failed; do
+  export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/herdr-$mode"
+  mkdir -p "$FM_DIALOG_CASE/state"
+  cp "$meta" "$FM_DIALOG_CASE/state/exitdialog.meta"
+  printf 'composer\n' > "$FM_DIALOG_CASE/phase"
+  rc=0
+  out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$TMP_ROOT/home" FM_STATE_OVERRIDE="$FM_DIALOG_CASE/state" \
+    FM_ROOT_OVERRIDE="$ROOT" FM_SEND_SETTLE=0 FM_SEND_SLEEP=0 FM_BACKEND_HERDR_SUBMIT_MIN_SLEEP=0 \
+    "$ROOT/bin/fm-send.sh" exitdialog /help 2>&1) || rc=$?
+  input=$(cat "$FM_DIALOG_CASE/input")
+  corr=$(printf '%s\n' "$input" | sed -nE '1s/.*corr=([a-f0-9]{16}).*/\1/p')
+  [ -n "$corr" ] || fail "$mode did not type the correlated request: $out"
+  reply="$FM_DIALOG_CASE/state/pending-replies/$corr"
+  case "$mode" in
+    submit-native)
+      expect_code 0 "$rc" "native Herdr working state should confirm a turn during redraw: $out"
+      [ "$(grep -c '^enter$' "$FM_DIALOG_CASE/input")" -eq 1 ] || fail 'a confirmed submit should send one Enter'
+      grep -q '^delivered_epoch=[0-9]' "$reply" || fail 'the native acknowledgment did not commit reply delivery'
+      ;;
+    submit-retry-failed)
+      expect_code 3 "$rc" "a failed Enter retry should preserve unconfirmed delivery: $out"
+      [ "$(grep -c '^enter$' "$FM_DIALOG_CASE/input")" -eq 2 ] || fail 'the fixture did not receive the failed retry'
+      assert_present "$reply" 'a failed retry discarded the original reply expectation'
+      ;;
+    submit-first-failed)
+      expect_code 1 "$rc" "a failed first Enter should report delivery failure: $out"
+      assert_absent "$reply" 'a failed first Enter retained a known-undelivered reply expectation'
+      ;;
+  esac
+done
+pass 'Herdr native sends acknowledge working during redraw and retain reply tracking only after a delivered Enter'
+
 cat > "$TMP_ROOT/bin/fake-ssh" <<'SH'
 #!/usr/bin/env bash
 set -eu
@@ -741,7 +784,7 @@ cat > "$TMP_ROOT/bin/viewport-stub" <<'SH'
 set -eu
 viewport() {
   if [ "${FM_DIALOG_PHASE:-}" = after ] && [ ! -s "$FM_DIALOG_CASE/input" ]; then
-    printf 'Claude\n❯ \n'
+    printf '────────────────────────\n❯ \n────────────────────────\n'
   else
     cat "$FM_DIALOG_FIXTURE"
   fi
