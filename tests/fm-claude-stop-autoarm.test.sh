@@ -1505,7 +1505,7 @@ if [ ! -e "$FM_HOME/state/observing" ]; then
   fi
   printf '%s %s\n' "$$" "$transport_pid" > "$FM_HOME/state/observing"
   printf 'idle'
-  wait "$transport_pid"
+  wait "$transport_pid" && : > "$FM_HOME/state/observation-completed"
   exit
 fi
 printf 'busy'
@@ -1526,6 +1526,34 @@ SH
   }
   trap cleanup_observation EXIT
   trap 'exit 1' HUP INT TERM
+
+  if [ "$mode" = cleanup-failure ]; then
+    cat > "$dir/capture-failure.bash" <<'SH'
+if [ "$0" = "$FM_HOME/bin/fm-watch.sh" ]; then
+  kill() {
+    if [ "$*" = "-0 -- -${FM_ACTIVE_CHECK_PGID:-}" ]; then
+      return 0
+    fi
+    builtin kill "$@"
+  }
+  ps() {
+    if [ "$*" = '-ax -o pgid= -o stat=' ]; then
+      printf '%s D\n' "$FM_ACTIVE_CHECK_PGID"
+    else
+      command ps "$@"
+    fi
+  }
+fi
+SH
+    hook_rc=0
+    BASH_ENV="$dir/capture-failure.bash" "$dir/bin/fm-watch-checkpoint.sh" --seconds 20 \
+      > "$dir/outer.out" 2>&1 || hook_rc=$?
+    expect_code 1 "$hook_rc" "checkpoint must fail when remote capture cleanup fails ($(cat "$dir/outer.out"))"
+    assert_grep 'watcher: remote observation capture cleanup failed' "$dir/outer.out" "checkpoint must explain the capture failure"
+    [ ! -s "$state/.wake-queue" ] || fail "failed cleanup must not queue an actionable wake"
+    pass "checkpoint: a remote capture cleanup failure returns an error without a wake"
+    return 0
+  fi
 
   if [ "$mode" = lease ] || [ "$mode" = lease-no-gnu ]; then
     export FM_GUARD_GRACE=60 FM_CLAUDE_AUTOARM_LEASE_SECONDS=5
@@ -1570,6 +1598,7 @@ SH
     arm_pid=
     ! kill -0 "$ssh_pid" 2>/dev/null || fail "a normally stopped watcher did not reap SSH"
     ! kill -0 "$transport_pid" 2>/dev/null || fail "SSH left a transport running after watcher stop"
+    [ ! -e "$state/observation-completed" ] || fail "SSH finished naturally before the watcher stopped it"
     ssh_pid=
     transport_pid=
     [ ! -e "$state/.watch.lock" ] || fail "a normally stopped watcher did not release its lock"
@@ -1682,6 +1711,7 @@ SH
 )
 
 test_watcher_keeps_operation_budgets || exit $?
+test_stalled_remote_observation_liveness cleanup-failure || exit $?
 test_stalled_remote_observation_liveness lease || exit $?
 test_stalled_remote_observation_liveness lease-no-gnu || exit $?
 test_stalled_remote_observation_liveness stop || exit $?

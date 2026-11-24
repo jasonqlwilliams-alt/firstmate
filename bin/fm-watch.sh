@@ -1639,7 +1639,7 @@ watcher_start_capture() {
   pgid=$(ps -o pgid= -p "$FM_ACTIVE_CHECK_PID" 2>/dev/null | tr -d '[:space:]')
   trap watcher_interrupted HUP INT TERM
   if [ -n "$pgid" ] && [ "$pgid" != "$FM_ACTIVE_CHECK_PGID" ]; then
-    fm_active_check_stop || true
+    fm_active_check_stop || return 2
     fm_check_output_cleanup
     return 1
   fi
@@ -1667,8 +1667,11 @@ watcher_remote_observe() {
     return
   fi
   FM_PENDING_REPLY_OBSERVATION=unknown
-  watcher_start_capture exec "$runner" -k 0.1 "$WATCHER_WAIT_LIMIT" "$@" < /dev/null || return 0
-  watcher_finish_capture || return 1
+  watcher_start_capture exec "$runner" -k 0.1 "$WATCHER_WAIT_LIMIT" "$@" < /dev/null || {
+    [ "$?" -ne 1 ] || return 0
+    return 2
+  }
+  watcher_finish_capture || return 2
   [ "$FM_CAPTURE_RC" -ne 0 ] || FM_PENDING_REPLY_OBSERVATION=$FM_CHECK_RESULT
 }
 
@@ -2116,7 +2119,11 @@ while :; do
   # parent reports, observe backend busy/idle turn completion, send one recovery
   # repost after grace, and escalate once if the recovery turn is also missed.
   # No conversation scraping; unresolved records are never silently expired.
-  fm_pending_reply_tick "$STATE" watcher_remote_observe watcher_publish_beat || exit 0
+  fm_pending_reply_tick "$STATE" watcher_remote_observe watcher_publish_beat || {
+    [ "$?" -ne 1 ] || exit 0
+    echo "watcher: remote observation capture cleanup failed" >&2
+    exit 1
+  }
   watcher_publish_beat || exit 0
 
   # A live secondmate endpoint does not prove that its own wake loop is alive.

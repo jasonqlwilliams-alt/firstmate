@@ -1643,7 +1643,7 @@ fm_pending_reply_tick() {  # <state-dir> [remote-observer] [on-progress]
           if [ -n "$remote_host" ]; then
             "$on_progress" || return 1
             "$remote_observe" "$_FM_PENDING_REPLY_LIB_DIR/fm-on.sh" "$task_id" \
-              fm-remote-secondmate-control.sh observe "$task_id" || return 1
+              fm-remote-secondmate-control.sh observe "$task_id" || return
             observation=$FM_PENDING_REPLY_OBSERVATION
             case "$observation" in busy|idle|fallback-idle|unknown) ;; *) observation=unknown ;; esac
           else
