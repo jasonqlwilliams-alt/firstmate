@@ -1257,7 +1257,16 @@ test_fm_lock_status_still_works_with_shared_lib() {
 # Real bounded process lifetime, with a quiet arm and controlled changes to
 # demand/authority while it is parked. No actual fleet processes are touched.
 test_quiet_lease_renewal_gates() {
-  local mode dir out status
+  local mode dir out status runner check_term_cleanup=0
+  runner=$(
+    # shellcheck source=bin/fm-timeout-lib.sh
+    . "$ROOT/bin/fm-timeout-lib.sh"
+    fm_timeout_mechanism
+  )
+  if [[ "$runner" = timeout || "$runner" = gtimeout ]] \
+    && LC_ALL=C "$runner" --version 2>/dev/null | grep -Fq '(GNU coreutils)'; then
+    check_term_cleanup=1
+  fi
   for mode in demand held afk superseded alarm; do
     dir=$(make_primary_dir "$TMP_ROOT/lease-$mode")
     : > "$dir/state/task.meta"
@@ -1265,6 +1274,18 @@ test_quiet_lease_renewal_gates() {
 #!/usr/bin/env bash
 printf '%s\n' "$$" > "$FM_HOME/state/arm-ran"
 case "${LEASE_TEST_MODE}" in
+  demand)
+    if [ "$LEASE_TEST_TERM_CLEANUP" = 1 ]; then
+      arm_parent=$PPID
+      trap '
+        sleep 0.35
+        parent=$(ps -o ppid= -p "$$") || exit 1
+        [ "${parent//[[:space:]]/}" = "$arm_parent" ] || exit 1
+        : > "$FM_HOME/state/arm-term-cleanup"
+        exit 143
+      ' TERM
+    fi
+    ;;
   held) rm "$FM_HOME/state/task.meta" ;;
   afk) touch "$FM_HOME/state/.afk" ;;
   superseded) sed -i 's/epoch=1 /epoch=2 /' "$FM_HOME/state/.claude-autoarm-epoch" ;;
@@ -1273,10 +1294,14 @@ esac
 sleep 30
 SH
     chmod +x "$dir/bin/fm-watch-arm.sh"
-    out=$(LEASE_TEST_MODE="$mode" FM_CLAUDE_AUTOARM_LEASE_SECONDS=3 run_autoarm "$dir" 2>/dev/null); status=$?
+    out=$(LEASE_TEST_MODE="$mode" LEASE_TEST_TERM_CLEANUP="$check_term_cleanup" \
+      FM_CLAUDE_AUTOARM_LEASE_SECONDS=3 run_autoarm "$dir" 2>/dev/null); status=$?
     if [ "$mode" = demand ]; then
       expect_code 2 "$status" "quiet live demand needs an owned renewal"
       assert_contains "$out" 'check: claude-lease-renewal' "lease maintenance reason"
+      if [ "$check_term_cleanup" = 1 ]; then
+        assert_present "$dir/state/arm-term-cleanup" "GNU lease ended before the arm could finish TERM cleanup"
+      fi
       grep -q '^pending:handling:' "$dir/state/.watcher-down" || fail "renewal did not publish an acknowledgeable handling episode"
       assert_grep "session_pid=$(cat "$dir/state/.lock")" "$dir/state/.claude-autoarm-epoch" \
         "renewal did not bind the current owning session"
@@ -1534,8 +1559,11 @@ SH
 
   assert_capture_process_stopped() {
     local pid=$1 message=$2 process_status
-    process_status=$(ps -o stat= -p "$pid" 2>/dev/null | tr -d '[:space:]')
-    case "$process_status" in ''|Z*) ;; *) fail "$message" ;; esac
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || fail "invalid capture PID: $pid"
+    if process_status=$(ps -o stat= -p "$pid" 2>/dev/null); then
+      case "${process_status//[[:space:]]/}" in Z*) return 0 ;; esac
+    fi
+    ! kill -0 "$pid" 2>/dev/null || fail "$message"
   }
 
   if [[ "$mode" = cleanup-* ]]; then
