@@ -97,8 +97,9 @@ SH
   for milestone in "$ready" recovery-wait; do
     deadline=$((SECONDS + 8))
     until [ -s "$home/$milestone" ]; do
-      [ "$SECONDS" -lt "$deadline" ] && kill -0 "$child" 2>/dev/null \
-        || fail "watcher did not reach $milestone ($(cat "$home/watcher.out"))"
+      if [ "$SECONDS" -ge "$deadline" ] || ! kill -0 "$child" 2>/dev/null; then
+        fail "watcher did not reach $milestone ($(cat "$home/watcher.out"))"
+      fi
       sleep 0.05
     done
     if [ "$milestone" = "$ready" ]; then
