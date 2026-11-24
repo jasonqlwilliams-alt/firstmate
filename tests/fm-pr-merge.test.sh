@@ -77,6 +77,14 @@ write_github_red_json() {
 JSON
 }
 
+write_github_no_checks_json() {
+  local case_dir=$1 head=$2
+  printf '%s\n' "$head" > "$case_dir/github-head"
+  cat > "$case_dir/github-view.json" <<JSON
+{"state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"$head","statusCheckRollup":[]}
+JSON
+}
+
 assert_logged_gh_merge() {
   local case_dir=$1 number=$2 repo=$3 head line extra=
   shift 3
@@ -2546,6 +2554,186 @@ test_allow_red_refused_on_gitlab() {
   pass "fm-pr-merge refuses --allow-red on GitLab"
 }
 
+# A head with no checks at all has nothing green to prove, so it must never pass
+# the green gate vacuously; only a named attended waiver lets it through.
+test_github_zero_checks_refuse_and_allow_zero_checks_waives() {
+  local case_dir rc head
+  head=a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0
+  case_dir=$(make_case github-zero-checks)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks "$case_dir" "$head"
+  write_github_no_checks_json "$case_dir" "$head"
+  set +e
+  run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/90 \
+    > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "github-zero-checks: a head with no checks must refuse"
+  assert_grep 'no checks at head' "$case_dir/stderr" \
+    "github-zero-checks: the refusal did not say the head has no checks"
+  assert_no_grep 'every required check green' "$case_dir/stderr" \
+    "github-zero-checks: a head with no checks was reported green"
+  assert_no_grep 'pr merge' "$case_dir/gh.log" \
+    "github-zero-checks: gh pr merge ran on a PR with no checks"
+
+  case_dir=$(make_case github-allow-zero-checks)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks "$case_dir" "$head"
+  write_github_no_checks_json "$case_dir" "$head"
+  run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/91 \
+    --allow-zero-checks \
+    > "$case_dir/stdout" 2> "$case_dir/stderr" || fail "github-allow-zero-checks: the named waiver should merge"
+  assert_logged_gh_merge "$case_dir" 91 example/repo --squash
+
+  # With checks present the waiver changes nothing: a red check still refuses.
+  case_dir=$(make_case github-allow-zero-checks-red)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks "$case_dir" "$head"
+  write_github_red_json "$case_dir" "$head" lint
+  set +e
+  run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/92 \
+    --allow-zero-checks > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "github-allow-zero-checks-red: the zero-check waiver must not waive a red check"
+  assert_no_grep 'pr merge' "$case_dir/gh.log" \
+    "github-allow-zero-checks-red: gh pr merge ran on a red PR"
+  pass "fm-pr-merge refuses a head with no checks unless --allow-zero-checks waives it"
+}
+
+test_github_zero_checks_queue_retry_requires_explicit_waiver() {
+  local case_dir merge_status rc head
+  head=a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2
+  for merge_status in 0 1; do
+    case_dir=$(make_case "github-zero-checks-queue-retry-$merge_status")
+    mkdir -p "$case_dir/wt"
+    add_gh_mocks "$case_dir" "$head"
+    write_github_no_checks_json "$case_dir" "$head"
+    write_github_outcome "$case_dir" OPEN false false main
+    printf 'merge_method=REBASE\n' > "$case_dir/github-rules"
+    printf '%s\n' "$merge_status" > "$case_dir/github-merge-rc"
+
+    rc=0
+    run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/95 \
+      --allow-zero-checks > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+
+    expect_code 1 "$rc" "github-zero-checks-queue-retry-$merge_status: an unproved merge must fail"
+    assert_logged_gh_merge "$case_dir" 95 example/repo --squash
+    assert_grep '--attended-override -- --auto --rebase' "$case_dir/stderr" \
+      "github-zero-checks-queue-retry-$merge_status: retry guidance omitted the queue flags"
+    assert_grep 'if the head has no checks at retry time, explicitly add --allow-zero-checks before -- while attended' "$case_dir/stderr" \
+      "github-zero-checks-queue-retry-$merge_status: retry guidance omitted the waiver requirement"
+  done
+  pass "fm-pr-merge says when to supply the zero-check waiver again for a queue retry"
+}
+
+test_allow_zero_checks_is_attended_only() {
+  local case_dir rc head
+  head=a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+  case_dir=$(make_case github-allow-zero-checks-away)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks "$case_dir" "$head"
+  write_github_no_checks_json "$case_dir" "$head"
+  write_away_record "$case_dir" --grant task-x1
+  set +e
+  run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/93 \
+    --allow-zero-checks > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 2 "$rc" "github-allow-zero-checks-away: the waiver must be refused while away"
+  assert_grep '--allow-zero-checks is attended-only' "$case_dir/stderr" \
+    "github-allow-zero-checks-away: refusal did not name attended-only"
+  assert_no_grep 'pr merge' "$case_dir/gh.log" \
+    "github-allow-zero-checks-away: gh pr merge ran despite the away waiver"
+
+  case_dir=$(make_case github-allow-zero-checks-away-after-view)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks "$case_dir" "$head"
+  write_github_no_checks_json "$case_dir" "$head"
+  write_away_record "$case_dir" --grant task-x1
+  mv "$case_dir/state/.afk-contract" "$case_dir/away-record-after-view"
+  set +e
+  run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/93 \
+    --allow-zero-checks > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 2 "$rc" "github-allow-zero-checks-away-after-view: late away publication must refuse the waiver"
+  assert_no_grep 'pr merge' "$case_dir/gh.log" \
+    "github-allow-zero-checks-away-after-view: gh pr merge ran after late away publication"
+
+  case_dir=$(make_case github-allow-zero-checks-equals)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks "$case_dir" "$head"
+  write_github_no_checks_json "$case_dir" "$head"
+  set +e
+  run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/94 \
+    --allow-zero-checks=yes > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 2 "$rc" "github-allow-zero-checks-equals: the waiver takes no value"
+  assert_no_grep 'pr merge' "$case_dir/gh.log" \
+    "github-allow-zero-checks-equals: gh pr merge ran for a valued waiver"
+
+  case_dir=$(make_gitlab_case gitlab-allow-zero-checks)
+  set +e
+  run_pr_merge "$case_dir" task-x1 "$MR_URL" --allow-zero-checks \
+    > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 2 "$rc" "gitlab-allow-zero-checks: the waiver must not apply on GitLab"
+  [ ! -s "$case_dir/glab.log" ] || fail "gitlab-allow-zero-checks: glab ran despite the waiver"
+  pass "fm-pr-merge keeps --allow-zero-checks attended-only and GitHub-only"
+}
+
+test_attended_waivers_refuse_away_published_after_grant_read() {
+  local case_dir checkpoint head rc waiver
+  local -a waiver_args
+  head=a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3
+  for checkpoint in before-recording before-merge; do
+    for waiver in allow-red allow-zero-checks; do
+      case_dir=$(make_case "github-$waiver-away-$checkpoint")
+      mkdir -p "$case_dir/wt"
+      add_gh_mocks "$case_dir" "$head"
+      waiver_args=("--$waiver")
+      if [ "$waiver" = allow-red ]; then
+        write_github_red_json "$case_dir" "$head" lint
+        waiver_args+=(lint)
+      else
+        write_github_no_checks_json "$case_dir" "$head"
+      fi
+      write_away_record "$case_dir" --grant task-x1
+      mv "$case_dir/state/.afk-contract" "$case_dir/staged-away-record"
+      cat > "$case_dir/bash-env" <<'SH'
+if [[ ${0##*/} == fm-pr-merge.sh ]]; then
+  function [ {
+    local status=0 staged="$FM_STATE_OVERRIDE/../staged-away-record"
+    builtin [ "$@" || status=$?
+    if [[ $status == 1 && ${1-} == -f && ${2-} == "$FM_STATE_OVERRIDE/.afk-contract" && -f $staged ]] &&
+       { [[ $FM_TEST_AWAY_PUBLICATION_CHECKPOINT == before-recording ]] ||
+         grep -q 'statusCheckRollup' "$FM_TEST_GH_LOG"; }; then
+      mv "$staged" "$2" || exit 1
+    fi
+    return "$status"
+  }
+fi
+SH
+      rc=0
+      BASH_ENV="$case_dir/bash-env" FM_TEST_AWAY_PUBLICATION_CHECKPOINT="$checkpoint" \
+        run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/96 \
+        "${waiver_args[@]}" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+
+      assert_present "$case_dir/state/.afk-contract" "the away record was never published"
+      expect_code 2 "$rc" "$waiver must be refused after away publication $checkpoint"
+      assert_grep "--$waiver is attended-only" "$case_dir/stderr" "the refusal did not name --$waiver"
+      assert_no_grep 'pr merge' "$case_dir/gh.log" "gh pr merge ran after away publication $checkpoint"
+      if [ "$checkpoint" = before-recording ]; then
+        assert_absent "$case_dir/state/task-x1.check.sh" "the merge poll was armed after away publication"
+      fi
+    done
+  done
+  pass "fm-pr-merge refuses both waivers when away mode starts after the grant read"
+}
+
 test_gitlab_head_override_args_refuse_before_recording
 test_secondmate_merge_reports_upward_once
 test_secondmate_merge_reports_on_the_local_route
@@ -2572,3 +2760,7 @@ test_away_grant_and_yolo_and_hold_for_return
 test_away_grant_does_not_bypass_red_or_identity
 test_unreadable_away_record_refuses_merge
 test_allow_red_refused_on_gitlab
+test_github_zero_checks_refuse_and_allow_zero_checks_waives
+test_github_zero_checks_queue_retry_requires_explicit_waiver
+test_allow_zero_checks_is_attended_only
+test_attended_waivers_refuse_away_published_after_grant_read

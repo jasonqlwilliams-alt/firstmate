@@ -55,14 +55,15 @@ zellij_pane_id=<pane-id>
 ```
 
 Recorded pane ids are numeric and are never trusted alone after a session recreation.
-Metadata-routed operations also verify the owning tab's expected scoped or unambiguous legacy title.
+Metadata-routed pane reads and input require a single matching terminal pane in the inventory and verify its owning tab's expected scoped or unambiguous legacy title.
 An explicit raw `session:pane` target remains a pane-existence-only operator escape hatch.
 
 ## Current operation and safety
 
 Zellij's CLI action commands return exit 0 even for missing sessions or panes.
 The adapter therefore verifies session, terminal pane, and expected title before an operation and validates JSON or integer response shapes afterward.
-A pane can still disappear between verification and the operation; downstream submit, worktree-discovery, and stale detection report that narrow race rather than treating exit 0 as success.
+A pane can still disappear between verification and the operation, so submit and worktree discovery validate their results.
+The [watcher guide](watcher-continuity.md#recorded-endpoint-loss) covers inconclusive presence checks and failed captures during supervision.
 
 Every pane operation passes an explicit `--pane-id` because a new session can focus its release-notes plugin pane, whose numeric plugin id is in a separate namespace from terminal pane ids.
 

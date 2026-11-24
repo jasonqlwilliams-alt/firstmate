@@ -653,8 +653,12 @@ fi
 REBUILDING_SESSION_PID=$(fm_harness_ancestry_pid 2>/dev/null || true)
 print_agents_refresh_if_required "$REBUILDING_SESSION_PID"
 
+STARTUP_OWNER_PID='' STARTUP_OWNER_START=''
 if [ "$READ_ONLY" -eq 0 ]; then
   if [ "$REEMIT" -eq 0 ]; then
+    if fm_session_lock_owned_by_self "$STATE" && [ -n "$FM_SESSION_LOCK_START" ]; then
+      STARTUP_OWNER_PID=$FM_SESSION_LOCK_PID STARTUP_OWNER_START=$FM_SESSION_LOCK_START
+    fi
     rm -f "$COMPLETION_FILE" 2>/dev/null || true
   fi
   fm_trace_context_session_start "$CONFIG" "$STATE/.trace-context-effective"
@@ -989,13 +993,13 @@ EOF
 
 if [ "$READ_ONLY" -eq 0 ] && [ "$REEMIT" -eq 0 ]; then
   COMPLETION_RECORDED=0
-  COMPLETION_PID=$(cat "$STATE/.lock" 2>/dev/null || true)
-  case "$COMPLETION_PID" in
-    ''|*[!0-9]*) COMPLETION_PID= ;;
-  esac
   COMPLETION_TMP=$(mktemp "$STATE/.session-start-complete.XXXXXX" 2>/dev/null || true)
-  if [ -n "$COMPLETION_PID" ] && [ -n "$COMPLETION_TMP" ] \
-    && printf '%s\n' "$COMPLETION_PID" > "$COMPLETION_TMP" 2>/dev/null \
+  if [ -n "$STARTUP_OWNER_PID" ] && [ -n "$COMPLETION_TMP" ] \
+    && fm_session_lock_read "$STATE/.lock" \
+    && [ "$FM_SESSION_LOCK_PID" = "$STARTUP_OWNER_PID" ] \
+    && [ "$FM_SESSION_LOCK_START" = "$STARTUP_OWNER_START" ] \
+    && fm_session_lock_start_matches "$STARTUP_OWNER_PID" "$STARTUP_OWNER_START" \
+    && fm_session_lock_print_record "$STARTUP_OWNER_PID" "$STARTUP_OWNER_START" > "$COMPLETION_TMP" 2>/dev/null \
     && mv -f "$COMPLETION_TMP" "$COMPLETION_FILE" 2>/dev/null; then
     COMPLETION_RECORDED=1
   else
@@ -1003,7 +1007,7 @@ if [ "$READ_ONLY" -eq 0 ] && [ "$REEMIT" -eq 0 ]; then
     printf '\nSESSION_START_COMPLETION: not recorded - the next clear or compact will run a full startup.\n'
   fi
   if [ "$SESSION_SOURCE" = startup ] && [ "$COMPLETION_RECORDED" -eq 1 ] && [ -n "$AGENTS_START_HASH" ]; then
-    if ! write_agents_baseline "$COMPLETION_PID" "$AGENTS_START_HASH"; then
+    if ! write_agents_baseline "$STARTUP_OWNER_PID" "$AGENTS_START_HASH"; then
       printf '\nSESSION_START_AGENTS_BASELINE: not recorded - a later supported rebuild will re-emit AGENTS.md.\n'
     fi
   fi

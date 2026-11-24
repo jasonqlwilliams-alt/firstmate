@@ -21,7 +21,13 @@
 # name, still requires every other check green, and still binds the head. It is
 # refused while the away-posture record exists, and it never
 # applies on GitLab, where a merge already requires the head pipeline to have
-# succeeded. After gh returns success, GitHub's live state is read back and
+# succeeded.
+# A head with no checks at all is never green: with nothing to prove green, the
+# merge is refused unless an attended --allow-zero-checks, which takes no value,
+# waives exactly that condition. The waiver changes nothing when the head has at
+# least one check, so every check there must still be green or named by
+# --allow-red; it is refused while the away-posture record exists and never
+# applies on GitLab, for the same reasons as --allow-red. After gh returns success, GitHub's live state is read back and
 # accepted only when the pull request is merged or in the merge queue. gh's
 # GraphQL API supplies that queue-aware read; when that read fails, gh-axi's
 # own view still proves a landed merge, and every outcome it cannot prove
@@ -29,7 +35,7 @@
 # gh-axi view could not prove the outcome either.
 # If the pull request remains open and the base branch has an effective
 # merge_queue rule, the refusal names the queue's configured merge method and
-# the exact --attended-override -- --auto --<method> retry flags, unless the caller already passed
+# its required --auto --<method> forge flags, unless the caller already passed
 # that method with --auto to a merge command that returned success, in which
 # case it reports instead that the accepted request has not entered the queue
 # and the queue state has to be re-checked.
@@ -86,7 +92,7 @@
 # explicit captain instruction and never skips the live green check, the
 # away-grant check, or a captain hold.
 #
-# Usage: fm-pr-merge.sh <task-id> <pr-url> [--attended-override] [--allow-red <check-name>] [-- <extra forge merge args>]
+# Usage: fm-pr-merge.sh <task-id> <pr-url> [--attended-override] [--allow-red <check-name>] [--allow-zero-checks] [-- <extra forge merge args>]
 #
 # On GitLab, this script confirms the MR is actually merged before reporting it;
 # an auto-merge-queued or unconfirmed request leaves the poll armed and records
@@ -132,6 +138,7 @@ PROJECT_URL="https://$FM_PR_HOST/$FM_PR_PATH"
 shift 2
 ATTENDED_OVERRIDE=false
 ALLOW_RED=()
+ALLOW_ZERO_CHECKS=false
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --attended-override)
@@ -152,12 +159,24 @@ while [ "$#" -gt 0 ]; do
       echo "error: --allow-red requires a separate check name argument" >&2
       exit 2
       ;;
+    --allow-zero-checks)
+      ALLOW_ZERO_CHECKS=true
+      shift
+      ;;
+    --allow-zero-checks=*)
+      echo "error: --allow-zero-checks takes no value" >&2
+      exit 2
+      ;;
     --) shift; break ;;
     *) break ;;
   esac
 done
 if [ "${#ALLOW_RED[@]}" -gt 0 ] && [ "$PROVIDER" = gitlab ]; then
   echo "error: --allow-red does not apply to GitLab, where a merge already requires the head pipeline to have succeeded" >&2
+  exit 2
+fi
+if [ "$ALLOW_ZERO_CHECKS" = true ] && [ "$PROVIDER" = gitlab ]; then
+  echo "error: --allow-zero-checks does not apply to GitLab, where a merge already requires the head pipeline to have succeeded" >&2
   exit 2
 fi
 
@@ -489,7 +508,8 @@ github_checks_not_green() {
 # Sets FM_PR_MERGE_HEAD to the verified head on success.
 github_verify_mergeable() {
   local json fields line red name covered
-  local total=0 named=0 refusals=''
+  local total=0 named=0 refusals='' check_count='' verified_checks
+  verified_checks='every required check green'
   local state='' draft='' mergeable='' merge_state='' live_head=''
 
   if ! json=$(gh pr view "$URL" --repo "$PR_OWNER/$PR_REPO" --json state,isDraft,mergeable,mergeStateStatus,headRefOid,statusCheckRollup 2>/dev/null) \
@@ -537,6 +557,11 @@ FIELDS
     echo "error: could not read the GitHub pull request state before merging" >&2
     return 1
   fi
+  if ! check_count=$(printf '%s' "$json" | jq -r '.statusCheckRollup | length' 2>/dev/null) \
+    || ! [ "$check_count" -ge 0 ] 2>/dev/null; then
+    echo "error: could not read the GitHub pull request state before merging" >&2
+    return 1
+  fi
 
   case "$state" in
     [oO][pP][eE][nN]) ;;
@@ -554,6 +579,15 @@ FIELDS
   [ "$merge_state" != DIRTY ] \
     || refusals="$refusals  - mergeStateStatus is DIRTY (conflicts)
 "
+
+  if [ "$check_count" -eq 0 ]; then
+    if [ "$ALLOW_ZERO_CHECKS" = true ]; then
+      verified_checks='no checks, waived by --allow-zero-checks,'
+    else
+      refusals="$refusals  - the pull request has no checks at head $live_head, so nothing is green; an attended --allow-zero-checks waives this
+"
+    fi
+  fi
 
   uncovered=''
   while IFS= read -r name; do
@@ -579,8 +613,8 @@ EOF
     [ -z "$uncovered" ] || printf 'error: these checks are not green: %s\n' "$uncovered" >&2
     return 1
   fi
-  printf 'verified: %s is open and mergeable, with every required check green at head %s\n' \
-    "$URL" "$live_head" >&2
+  printf 'verified: %s is open and mergeable, with %s at head %s\n' \
+    "$URL" "$verified_checks" "$live_head" >&2
   FM_PR_MERGE_HEAD=$live_head
 }
 
@@ -820,10 +854,16 @@ EOF
 
 require_current_away_authority() {
   require_away_merge_grant || return 1
-  if fm_afk_contract_present "$STATE" && [ "${#ALLOW_RED[@]}" -gt 0 ]; then
+  if [ "${#ALLOW_RED[@]}" -eq 0 ] && [ "$ALLOW_ZERO_CHECKS" != true ]; then
+    return 0
+  fi
+  fm_afk_contract_present "$STATE" || return 0
+  if [ "${#ALLOW_RED[@]}" -gt 0 ]; then
     echo "error: --allow-red is attended-only; while the away-posture record exists the green check is absolute" >&2
     return 2
   fi
+  echo "error: --allow-zero-checks is attended-only; while the away-posture record exists the green check is absolute" >&2
+  return 2
 }
 
 require_recorded_pr_identity() {
@@ -895,6 +935,9 @@ github_report_queue_rules() {
       else
         printf 'error: base branch %s requires the merge queue; retry with: %s %s %s --attended-override -- --auto --%s\n' \
           "$FM_PR_GITHUB_BASE" "$0" "$ID" "$URL" "$queue_method" >&2
+        if [ "$ALLOW_ZERO_CHECKS" = true ]; then
+          printf 'error: if the head has no checks at retry time, explicitly add --allow-zero-checks before -- while attended\n' >&2
+        fi
       fi
       ;;
     conflicting)

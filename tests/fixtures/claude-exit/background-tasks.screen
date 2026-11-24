@@ -1,0 +1,7 @@
+ The following will stop when you exit:
+   · Bash(while true; do sleep 300; echo tick; done) · running
+   · Bash(sleep 1800 && echo reminder) · running
+
+ ❯ 1. Exit and stop tasks
+   2. Move to background and exit
+   3. Stay

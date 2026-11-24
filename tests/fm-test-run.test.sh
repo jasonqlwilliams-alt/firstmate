@@ -119,6 +119,7 @@ init_changed_fixture_repo() {
     fm-bearings-snapshot.test.sh \
     fm-backend-cmux.test.sh \
     fm-backend-zellij.test.sh \
+    fm-control-claude-exit-dialog.test.sh \
     fm-control-herdr-smoke.test.sh \
     fm-backend-orca.test.sh; do
     printf '#!/usr/bin/env bash\n# tests/lib.sh\n' >"$repo/tests/$script"
@@ -398,6 +399,8 @@ test_changed_dependency_selection_and_unmapped_failure() {
   listed=$(cd "$repo" && bin/fm-test-run.sh --list --changed --base HEAD)
   assert_contains "$listed" "tests/fm-procevent-quota.test.sh" \
     "timeout library selects quota polling coverage"
+  assert_contains "$listed" "tests/fm-control-claude-exit-dialog.test.sh" \
+    "timeout library selects Claude exit deadline coverage"
   git -C "$repo" add bin/fm-timeout-lib.sh
   git -C "$repo" -c user.name=test -c user.email=test@example.invalid commit -qm timeout-lib-change
 

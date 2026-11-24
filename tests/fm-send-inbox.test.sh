@@ -73,7 +73,12 @@ case "${1:-}" in
       printf '╭────╮\n│    │\n╰────╯\n'
     fi
     exit 0 ;;
-  list-windows) printf 'fm-t1\n'; exit 0 ;;
+  list-windows)
+    case "${*: -1}" in
+      $'#{window_name}\t#{pane_id}') printf 'fm-t1\t%%1\n' ;;
+      *) printf 'fm-t1\n' ;;
+    esac
+    exit 0 ;;
 esac
 exit 0
 SH
