@@ -1,0 +1,19 @@
+$ tmux 3.1c starts the private server with one window
+$ tmux -V
+tmux 3.2
+$ tmux list-windows -a -f 0
+usage: list-windows [-a] [-F format] [-t target-session]
+[exit 1]
+$ Firstmate tmux container preflight
+error: could not verify list-windows -f support on the tmux server. See docs/tmux-backend.md#setup.
+[exit 1]
+$ tmux list-sessions
+legacy
+
+$ Firstmate tmux container preflight with a 3.1c client
+error: spawning with tmux requires a tmux client version 3.2 or later
+[exit 1]
+
+$ Restart the private server with tmux 3.2, then run Firstmate preflight
+firstmate
+firstmate

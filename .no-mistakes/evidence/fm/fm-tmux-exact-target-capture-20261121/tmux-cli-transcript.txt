@@ -1,0 +1,79 @@
+Firstmate CLI with recorded synthetic workers on tmux 3.7c
+
+$ fm-peek mate 6
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+MATE SCREEN
+❯ mate draft
+
+$ agent state lab:fm-mate
+alive
+
+$ composer state lab:fm-mate
+pending
+
+$ agent state lab:fm-mate2
+alive
+
+$ composer state lab:fm-mate2
+pending
+
+$ tmux kill-window -t =lab:=fm-mate
+$ raw tmux capture-pane -p -t lab:fm-mate
+NEIGHBOUR SCREEN
+❯ neighbour draft
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+$ base commit fm-peek mate 6
+NEIGHBOUR SCREEN
+❯ neighbour draft
+
+$ target commit fm-peek mate 6
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: tmux window lab:fm-mate not found
+[exit 1]
+
+$ fm-crew-state mate
+state: unknown · source: none · backend target gone: lab:fm-mate
+[exit 0]
+
+$ agent state lab:fm-mate
+missing
+[exit 0]
+
+$ composer state lab:fm-mate
+unknown
+[exit 0]
+
+$ busy state lab:fm-mate
+unknown
+[exit 0]
+
+$ fm-peek mate2 6
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+NEIGHBOUR SCREEN
+❯ neighbour draft
+
+$ fm-send mate --key Escape
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: key 'Escape' not sent to lab:fm-mate (tmux send failed; tried meta={run-worktree}/.tmux-test.I0URnd/home/state/mate.meta; backend=from-meta)
+[exit 1]
+
+$ fm-peek lab:1.1 6
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+SPLIT READY
+❯
+
+$ fm-send lab:1.1 --key Escape
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+
+$ fm-send lab:1.1 /status
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+$ tmux capture-pane [selected split]
+SPLIT READY
+❯
+RECEIVED ESCAPE
+❯ /status
+SUBMITTED [/status]
+❯
+$ tmux capture-pane [adjacent pane]
+BASE READY
+❯
