@@ -6,8 +6,7 @@
 # data/fm-backend-design-d7/herdr-addendum.md ("Events as the core
 # abstraction"). P1 extracted the tmux command sequences that fm-send.sh,
 # fm-peek.sh, fm-watch.sh, fm-spawn.sh, and fm-teardown.sh already ran inline
-# into bin/backends/tmux.sh, with those SAME command sequences, so the default
-# (tmux) path stays byte-identical. P2 adds bin/backends/herdr.sh, an
+# into bin/backends/tmux.sh. P2 adds bin/backends/herdr.sh, an
 # EXPERIMENTAL spawn-capable backend behind `--backend herdr`/`FM_BACKEND=herdr`/
 # `config/backend`, and behind runtime auto-detection when firstmate itself is
 # running inside herdr with no explicit backend setting; see herdr-addendum.md and
@@ -1221,10 +1220,10 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label] [explicit]
 #   unverified - this backend has no recovery classifier.
 # Only `dead` and `missing` license recovery. Every `alive` is proven at
 # process level through the shared classifier in bin/fm-agent-process-lib.sh,
-# never from a registration or a rendered title alone. The tmux adapter
-# shares fm_backend_tmux_endpoint_state with loss reporting, and both use
-# fm_tmux_exact_target (bin/fm-tmux-lib.sh) to distinguish confirmed absence
-# from a lookup failure. The Herdr adapter reuses its strict husk classifier -
+# never from a registration or a rendered title alone. Tmux recovery and
+# endpoint-loss reporting use fm_tmux_exact_target (bin/fm-tmux-lib.sh) to
+# distinguish confirmed absence from a lookup failure.
+# The Herdr adapter reuses its strict husk classifier -
 # which verifies a registered agent against `pane process-info` and the real
 # process table, so a registration Herdr kept over a shell-only pane reads
 # `dead` here (issue #4115). A positively stopped session server maps to

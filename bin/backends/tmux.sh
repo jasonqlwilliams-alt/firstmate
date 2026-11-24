@@ -1,17 +1,11 @@
 #!/usr/bin/env bash
 # bin/backends/tmux.sh - the tmux session-provider adapter.
 #
-# Reference backend (AGENTS.md section 8; data/fm-backend-design-d7). P1 moves
-# the tmux command sequences that fm-send.sh, fm-peek.sh, fm-watch.sh,
-# fm-spawn.sh, and fm-teardown.sh already ran inline into named functions
-# here, running the EXACT same commands in the EXACT same order, so the
-# default (tmux, `backend=` absent) path stays byte-identical. Sourced only
-# through bin/fm-backend.sh's fm_backend_source, never directly.
+# The reference backend, sourced only through bin/fm-backend.sh's fm_backend_source.
+# See docs/tmux-backend.md for the operator contract.
 #
-# Worktree acquisition (running `treehouse get` inside the pane, and polling
-# its cwd) is unchanged by this extraction: P1 scopes only the session
-# provider, not the worktree provider, so fm-spawn.sh still drives that part
-# inline with these same send/current-path primitives.
+# fm-spawn.sh owns worktree acquisition and uses this adapter for pane input
+# and working-directory reads.
 #
 # The verified composer/busy-detection and verify-and-retry-submit primitives
 # already live in bin/fm-tmux-lib.sh, shared with the away-mode daemon
