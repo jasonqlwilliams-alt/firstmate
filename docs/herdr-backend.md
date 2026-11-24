@@ -357,7 +357,8 @@ The generic Herdr agent-liveness probe reuses that pane classifier and also chec
 A structurally gone pane, a session positively reported as having no running server, or a confirmed foreign terminal is `missing`.
 A matching or unbound pane is `dead` when agent-less or holding a stale registration over a shell-only pane, and `alive` when its registration is backed by a live process.
 An inconclusive probe or binding is `unreadable`.
-The session-start digest reports a foreign pane as dead for the recorded task and an unreadable binding as unknown.
+The regular Herdr endpoint check in the session-start digest reports a foreign pane as `dead` for the recorded task and an unreadable binding as `unknown`.
+See [parking a task with its copy retained](watcher-continuity.md#parking-a-task-with-its-copy-retained) for when the digest shows the parked verdict.
 Neither the stopped-server exception nor the stale-registration verdict widens husk detection or any close authority; those paths still refuse an unreadable pane, and a `stale-agent` pane is reused by recovery, never closed as a husk, because the shell it holds may be a nested worktree shell.
 Native registration still identifies Pi by name where tmux would see a generic interpreter; the process-level proof only decides whether that registration is backed by a running process.
 `tests/fm-backend-herdr-agent-exit-shell-e2e.test.sh` pins the live-Pi versus leftover-shell distinction; [`verification/runtime-backends.md`](verification/runtime-backends.md#agent-lifecycle-control) owns the versioned evidence.
