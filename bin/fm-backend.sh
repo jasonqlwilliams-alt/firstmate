@@ -1019,8 +1019,8 @@ fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
 # into the snapshot's capability facts as harness=<name>, so the classifier
 # can apply the harness-scoped rules in bin/fm-composer-lib.sh.
 # [remaining-ms] bounds the read; past it the verdict is timeout.
-# [fit-text] is the line a caller is about to type into an agy pane: an
-# `empty` verdict for harness agy reads `unknown` unless that line fits agy's
+# On an unbounded read, [fit-text] is the line a caller is about to type into an agy pane.
+# An `empty` verdict for harness agy reads `unknown` unless that line fits agy's
 # one composer row, so it is never typed into a row it would wrap.
 # Callers include the steering-inbox doorbell, Codex and Claude exit, and
 # the second-mate restart's local and remote screen observations.
@@ -1030,7 +1030,7 @@ fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [ex
     _fm_backend_guarded_composer_state "${@:1:5}" "$fit"
     return
   fi
-  if screen=$(fm_backend_run_timed "$limit_ms" _fm_backend_guarded_composer_state "${@:1:5}" "$fit"); then
+  if screen=$(fm_backend_run_timed "$limit_ms" _fm_backend_guarded_composer_state "${@:1:5}"); then
     printf '%s' "${screen:-unknown}"
   else
     rc=$?

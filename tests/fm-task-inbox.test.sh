@@ -1022,13 +1022,14 @@ test_agy_doorbell_width_boundary() {
   ring_lab_setup
   home="$TMP_ROOT/ring-agy"
   state="$home/state"
+  local -x FM_HOME="$home" FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$home/data"
   mkdir -p "$state" "$home/data/t1"
   printf '# Task\nRead the project notes.\n' > "$home/data/t1/brief.md"
   narrow_rec="$state/t1.inbox/001.msg"
   wide_rec="$state/t2.inbox/001.msg"
-  narrow_notice=$(FM_HOME="$home" inbox_lib "$state" fm_task_inbox_doorbell_line "$narrow_rec" agy) \
+  narrow_notice=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$narrow_rec" agy) \
     || fail "could not generate the narrow test doorbell"
-  wide_notice=$(FM_HOME="$home" inbox_lib "$state" fm_task_inbox_doorbell_line "$wide_rec" agy) \
+  wide_notice=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$wide_rec" agy) \
     || fail "could not generate the wide test doorbell"
   assert_contains "$narrow_notice" "list '$state/t1.inbox'/*.msg" "a legacy brief needs a path-bearing notice"
   assert_contains "$wide_notice" "list '$state/t2.inbox'/*.msg" "an absent brief needs a path-bearing notice"
@@ -1046,7 +1047,7 @@ test_agy_doorbell_width_boundary() {
   fm_write_meta "$state/t2.meta" "window=$wide" "backend=tmux" "kind=ship" "harness=agy"
   for task in t1 t2; do
     err="$home/$task.err"
-    PATH="$RING_LAB/shim:$PATH" FM_HOME="$home" \
+    PATH="$RING_LAB/shim:$PATH" \
       "$ROOT/bin/fm-send.sh" "$task" "please continue" >/dev/null 2>"$err" \
       || fail "fm-send did not enqueue the steer for $task:"$'\n'"$(cat "$err")"
   done
@@ -1070,31 +1071,32 @@ test_agy_short_doorbell_fits_an_ordinary_pane() {
   ring_lab_setup
   home="$TMP_ROOT/ring-agy-short"
   state="$home/équipe/state"
+  local -x FM_HOME="$home" FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$home/data"
   mkdir -p "$state"
   state_alias="$home/scout's state"
   ln -s "$state" "$state_alias" || fail "could not alias the inbox state directory"
   rec=$(inbox_lib "$state" fm_task_inbox_write "$state" t1 "please continue")
   ascii_rec="$state_alias/t1.inbox/${rec##*/}"
-  FM_HOME="$home" FM_STATE_OVERRIDE="$state_alias/" "$ROOT/bin/fm-brief.sh" t1 demo --scout >/dev/null \
+  FM_STATE_OVERRIDE="$state_alias/" "$ROOT/bin/fm-brief.sh" t1 demo --scout >/dev/null \
     || fail "could not scaffold the agy scout brief"
   agy_line=': Firstmate message waiting: read your inbox, act, mv to handled/.'
-  codex_line=$(FM_HOME="$home" inbox_lib "$state" fm_task_inbox_doorbell_line "$ascii_rec" codex) \
+  codex_line=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$ascii_rec" codex) \
     || fail "could not generate the codex doorbell"
   assert_contains "$codex_line" "list '$home/scout'\\''s state/t1.inbox'/*.msg" "other harnesses keep the path-bearing doorbell"
-  [ "$(FM_HOME="$home" inbox_lib "$state" fm_task_inbox_doorbell_line "$ascii_rec")" = "$codex_line" ] \
+  [ "$(inbox_lib "$state" fm_task_inbox_doorbell_line "$ascii_rec")" = "$codex_line" ] \
     || fail "a ring without a harness must keep today's doorbell"
-  if FM_HOME="$home" inbox_lib "$state" fm_task_inbox_doorbell_line "$rec" codex >/dev/null; then
+  if inbox_lib "$state" fm_task_inbox_doorbell_line "$rec" codex >/dev/null; then
     fail "a path-bearing notice should still reject a UTF-8 inbox path"
   fi
-  [ "$(FM_HOME="$home" inbox_lib "$state" fm_task_inbox_doorbell_line "$rec" agy)" = "$agy_line" ] \
+  [ "$(inbox_lib "$state" fm_task_inbox_doorbell_line "$rec" agy)" = "$agy_line" ] \
     || fail "an equivalent inbox locator in the scaffolded task brief should allow a short notice"
   printf '# Task\nRead the project notes.\n' > "$home/data/t1/launch-brief.md"
-  [ "$(FM_HOME="$home" inbox_lib "$state" fm_task_inbox_doorbell_line "$ascii_rec" agy)" = "$codex_line" ] \
+  [ "$(inbox_lib "$state" fm_task_inbox_doorbell_line "$ascii_rec" agy)" = "$codex_line" ] \
     || fail "a legacy launch brief needs a path-bearing notice even after the task brief is updated"
   cp "$home/data/t1/brief.md" "$home/data/t1/launch-brief.md"
   log="$RING_LAB/agy-ordinary.log"
   target=$(ring_stub_window agy-ordinary agy "$log" 80 "$state/t1.inbox")
-  FM_HOME="$home" PATH="$RING_LAB/shim:$PATH" \
+  PATH="$RING_LAB/shim:$PATH" \
     inbox_lib "$state" fm_task_inbox_ring tmux "$target" "$rec" "" agy || rc=$?
   [ "${rc:-0}" = 0 ] || fail "an idle 80-column agy composer should receive the short doorbell, got $rc"
   while [ "$i" -lt 50 ] && [ -e "$rec" ]; do sleep 0.1; i=$((i + 1)); done
@@ -1110,6 +1112,7 @@ test_ring_refuses_unproven_agy_screens() {
   local state target log rc mode notice
   ring_lab_setup
   state="$TMP_ROOT/ring-agy-unproven/state"
+  local -x FM_HOME="${state%/*}" FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="${state%/*}/data"
   mkdir -p "$state"
   for mode in agy-pending agy-busy agy-survey agy-forged; do
     log="$RING_LAB/$mode.log"
