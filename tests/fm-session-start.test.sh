@@ -420,6 +420,11 @@ mate_id=${FM_FAKE_SECOND_MATE_ID:?}
 killed="${state}.killed"
 spawned="${state}.spawned"
 printf '%s\n' "$*" >> "$log"
+case "${1:-}" in
+  workspace|tab|pane|agent)
+    [[ "${*: -2}" == '--session default' ]] || exit 1
+    ;;
+esac
 case "${1:-} ${2:-}" in
   "status --json")
     printf '%s\n' '{"client":{"protocol":14,"version":"test"},"server":{"running":true}}'
@@ -630,7 +635,7 @@ EOF
 
 run_session_start_herdr_secondmate() {
   local root=$1 home=$2 fakebin=$3 mate=$4 log=$5 state=$6
-  FM_BACKEND=herdr FM_FAKE_HERDR_LOG="$log" FM_FAKE_HERDR_STATE="$state" \
+  HERDR_SESSION=default FM_BACKEND=herdr FM_FAKE_HERDR_LOG="$log" FM_FAKE_HERDR_STATE="$state" \
     FM_FAKE_SECOND_MATE_ID="$SESSION_START_HERDR_SECOND_MATE_ID" \
     FM_FAKE_HARNESS_PID=$$ \
     run_session_start "$home" "$root" "$fakebin:$BASE_PATH"
@@ -1313,7 +1318,7 @@ EOF
 }
 
 test_session_start_relaunches_herdr_husk_secondmate() {
-  local rec root home fakebin mate log state out
+  local rec root home fakebin mate log state out meta
   rec=$(prepare_session_start_herdr_secondmate secondmate-herdr-husk)
   IFS='|' read -r root home fakebin mate log state <<EOF
 $rec
@@ -1326,8 +1331,10 @@ EOF
   assert_not_contains "$out" "SECONDMATE_LIVENESS:" "successful Herdr husk recovery should stay non-actionable"
   assert_contains "$(cat "$log")" "pane close p-old" "session start did not close the confirmed Herdr husk"
   assert_contains "$(cat "$log")" "tab create" "session start did not relaunch the Herdr secondmate"
-  assert_grep 'herdr_pane_id=p-new' "$home/state/$SESSION_START_HERDR_SECOND_MATE_ID.meta" \
-    "the real respawn path did not record the replacement Herdr pane"
+  meta="$home/state/$SESSION_START_HERDR_SECOND_MATE_ID.meta"
+  grep -Fxq 'window=default:p-new' "$meta" || fail "the replacement Herdr route was not recorded as default:p-new"
+  grep -Fxq 'herdr_session=default' "$meta" || fail "the replacement Herdr session was not recorded as default"
+  grep -Fxq 'herdr_pane_id=p-new' "$meta" || fail "the replacement Herdr pane was not recorded as p-new"
   pass "session start: a confirmed Herdr husk is closed and relaunched"
 }
 
