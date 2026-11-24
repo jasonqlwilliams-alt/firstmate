@@ -3026,7 +3026,7 @@ SH
 )
 
 test_shared_pane_keeps_task_loss_and_stale_checks_independent() (
-  local backend order dir state fakebin out pane target lost live loss rows pid=''
+  local backend order dir state fakebin out pane target lost live loss rows poll pid=''
   trap '[ -z "$pid" ] || reap "$pid"' EXIT
   for backend in herdr zellij; do
     for order in lost-first live-first; do
@@ -3105,10 +3105,21 @@ SH
         done
       else
         assert_absent "$state/$lost.missing-endpoint" "$order: an ambiguous Zellij replacement was treated as lost"
+        ack_stopped_cycle "$state" || fail "$backend $order: could not acknowledge the live task's stale wake"
       fi
+
+      watch_bg "$state" "$fakebin" "$out" env FM_HOME="$dir" FM_TEST_PANE_TASK="$live" FM_TEST_PANE_TERMINAL=current
+      pid=$!
+      for poll in 1 2 3; do
+        wait_poll_cycle "$state" "$pid" \
+          || fail "$backend $order: re-armed watcher did not stay quiet on poll $poll: $(cat "$out")"
+      done
+      reap "$pid"; pid=''
+      [ ! -s "$out" ] || fail "$backend $order: re-armed watcher emitted another wake: $(cat "$out")"
+      [ ! -s "$state/.wake-queue" ] || fail "$backend $order: re-armed watcher queued another wake: $(cat "$state/.wake-queue")"
     done
   done
-  pass "shared pane ids preserve named Herdr loss, conservative Zellij loss, and live stale checks in either record order"
+  pass "shared pane ids preserve loss handling and surface the unchanged live pane only once in either record order"
 )
 
 test_backlog_hold_suppresses_only_an_agentless_lane() {
