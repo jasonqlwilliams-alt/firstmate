@@ -24,7 +24,7 @@ SLEEP_BIN=$(command -v sleep) || { echo "skip: sleep not found"; exit 0; }
 
 REAL_TMUX=$(command -v tmux)
 SOCKET="fm-exact-target-$$"
-LAB=$(mktemp -d "${TMPDIR:-/tmp}/fm-exact-target.XXXXXX")
+LAB=$(mktemp -d "${TMPDIR:-/tmp}/fm-exact-target.XXXXXX") || exit 1
 SESSION=fmlab
 
 cleanup_all() {
@@ -252,3 +252,15 @@ until fm_backend_capture tmux "fmla:fm-dot.task" 40 2>/dev/null | grep -q DOTTED
   sleep 0.05
 done
 pass "dotted window name reads exactly"
+
+tmux new-session -d -s firstmate-lab -n fm-detached -c "$LAB/neighbour" \
+  || fail "could not create the prefix-named session"
+detached_session=$(fm_backend_tmux_container_ensure) || fail "could not ensure the detached session"
+[ "$detached_session" = firstmate ] || fail "unexpected detached session $detached_session"
+detached_window=$(fm_backend_tmux_create_task "$detached_session" fm-detached "$worker_cwd") \
+  || fail "a matching window in the prefix-named session must not block creation"
+[ "$(tmux display-message -p -t "$detached_window" '#{session_name}')" = firstmate ] \
+  || fail "the detached worker must belong to the literal firstmate session"
+[ "$(fm_backend_tmux_container_ensure)" = firstmate ] \
+  || fail "the literal firstmate session should be reusable"
+pass "detached spawn creates and reuses the literal firstmate session"

@@ -307,10 +307,8 @@ ROWS
     || fail "spawn must record the worktree discovered while the window is renamed"
 
   # Bug 1 fix: append-form window creation (trailing colon on the session target).
-  assert_grep "new-window -dP -F #{window_id} -t firstmate: -n fm-rec-win-gg7" "$rec" \
-    "new-window must append at the session (trailing colon) and capture the window id"
-  assert_no_grep "new-window -dP -F #{window_id} -t firstmate -n" "$rec" \
-    "new-window must not target the bare session name (collides under base-index 1)"
+  assert_grep "new-window -dP -F #{window_id} -t =firstmate: -n fm-rec-win-gg7" "$rec" \
+    "new-window must append in the exact session and capture the window id"
 
   # Bug 2 fix (a): pin the window name against automatic-rename / allow-rename.
   assert_grep "set-window-option -t @1 automatic-rename off" "$rec" \

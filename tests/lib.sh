@@ -618,7 +618,7 @@ fm_fake_tmux_new_window() {  # <inventory-file> <id> <new-window args...>
   shift 2
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      -t) session=${2%:}; shift ;;
+      -t) session=${2%:}; session=${session#=}; shift ;;
       -n) name=$2; shift ;;
     esac
     shift

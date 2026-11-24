@@ -41,9 +41,10 @@ case "${1:-}" in
   list-windows)
     case "$*" in
       *window_id*) printf '%s\n' '@1 firstmate:fm-phase8' '@2 firstmate:fm-domain-alpha' \
-        '@3 firstmate:fm-duplicate' '@4 firstmate:fm-duplicate' | fm_fake_tmux_window_ids "$@" ;;
+        '@3 firstmate:fm-duplicate' '@4 firstmate:fm-duplicate' '@5 fixture:captured-status' \
+        | fm_fake_tmux_window_ids "$@" ;;
     esac ;;
-  list-panes) [ "$3" = @1 ] || [ "$3" = @2 ] ;;
+  list-panes) case "$3" in @1|@2|@5) ;; *) exit 1 ;; esac ;;
   display-message) case "$*" in *dead-*) exit 1 ;; *) printf '%%1\n' ;; esac ;;
   capture-pane)
     case "$*" in
@@ -3148,10 +3149,16 @@ EOF
   printf 'working: old generation\n' > "$home/state/generation-race.status"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
-if [ "${1:-}" = list-windows ]; then
-  if mkdir "$RACE_ONCE" 2>/dev/null; then
-    tmp="$RACE_META.tmp.$$"
-    cat > "$tmp" <<EOF
+set -e
+case "${1:-}" in
+  list-windows)
+    printf '@1 fixture:fm-generation-race\n' | fm_fake_tmux_window_ids "$@"
+    ;;
+  list-panes)
+    [ "${3:-}" = @1 ] || exit 1
+    if mkdir "$RACE_ONCE" 2>/dev/null; then
+      tmp="$RACE_META.tmp.$$"
+      cat > "$tmp" <<EOF
 window=fixture:fm-generation-race
 worktree=$RACE_WORKTREE
 project=firstmate
@@ -3160,15 +3167,14 @@ kind=ship
 mode=no-mistakes
 spawn_gen=new-generation
 EOF
-    mv "$tmp" "$RACE_META"
-    printf 'needs-decision[replacement]: replacement-only decision https://github.com/acme/firstmate/pull/999\n' > "$RACE_STATUS"
-    mkdir -p "$(dirname "$RACE_REPORT")"
-    printf 'replacement-only report\n' > "$RACE_REPORT"
-  fi
-  # The old endpoint disappeared while a replacement reused the same target.
-  exit 1
-fi
-exit 0
+      mv "$tmp" "$RACE_META"
+      printf 'needs-decision[replacement]: replacement-only decision https://github.com/acme/firstmate/pull/999\n' > "$RACE_STATUS"
+      mkdir -p "$(dirname "$RACE_REPORT")"
+      printf 'replacement-only report\n' > "$RACE_REPORT"
+    fi
+    printf '%%1\n'
+    ;;
+esac
 SH
   chmod +x "$fakebin/tmux"
 
@@ -3179,6 +3185,8 @@ SH
     RACE_REPORT="$home/data/generation-race/report.md" RACE_WORKTREE="$worktree" \
     "$ROOT/bin/fm-fleet-snapshot.sh" --json) \
     || fail "fleet snapshot failed during endpoint generation race"
+  assert_grep 'spawn_gen=new-generation' "$home/state/generation-race.meta" \
+    "the pane lookup did not publish a replacement generation"
   printf '%s' "$json" | jq -e '
     .tasks[] | select(.id == "generation-race")
     | .spawn_gen == "old-generation"

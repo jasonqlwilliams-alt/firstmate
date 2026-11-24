@@ -154,7 +154,7 @@ case "${1:-}" in
       case "$1" in
         -n) name=$2; shift 2 ;;
         -c) cwd=$2; shift 2 ;;
-        -t) session=${2%:}; shift 2 ;;
+        -t) session=${2%:}; session=${session#=}; shift 2 ;;
         -F) shift 2 ;;
         -dP|-d|-P) shift ;;
         *) shift ;;

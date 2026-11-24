@@ -27,7 +27,7 @@ SLEEP_BIN=$(command -v sleep) || { echo "skip: sleep not found"; exit 0; }
 
 REAL_TMUX=$(command -v tmux)
 SOCKET="fm-liveness-$$"
-LAB=$(mktemp -d "${TMPDIR:-/tmp}/fm-liveness.XXXXXX")
+LAB=$(mktemp -d "${TMPDIR:-/tmp}/fm-liveness.XXXXXX") || exit 1
 SESSION=liveness
 
 cleanup_all() {
