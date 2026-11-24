@@ -2386,10 +2386,10 @@ muse_worker_meta_api_key_present() {
   if [ -n "${TMUX:-}" ]; then
     session=$(tmux display-message -p '#S' 2>/dev/null) || return 1
   else
-    tmux has-session -t '=firstmate' 2>/dev/null || return 1
+    tmux has-session -t firstmate 2>/dev/null || return 1
     session=firstmate
   fi
-  worker_env=$(tmux show-environment -t "=$session:" META_API_KEY 2>/dev/null) || return 1
+  worker_env=$(tmux show-environment -t "$session" META_API_KEY 2>/dev/null) || return 1
   case "$worker_env" in
     META_API_KEY=?*) return 0 ;;
   esac
