@@ -1,0 +1,38 @@
+Herdr 0.9.5 private socket ./herdr/sessions/fm-lab-doorbell/herdr.sock
+Before steer. Herdr rendered the RGB mode hint:
+Synthetic terminal input | Herdr mode hint
+
+─────────────────────────────────────────────────────────────────────────────────
+> Accept-edits mode: file edits auto-approved (shift+tab to cycle)
+─────────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+$ bin/fm-send.sh t2 'Check the synthetic report on Herdr.'
+exit=0
+fm-send: doorbell not typed because the screen in fm-lab-doorbell:w1:p1 blocked the doorbell; the steer is durably recorded at {run-worktree}/.agy-doorbell-lab/herdr-home/state/t2.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+Legacy task queued its record and sent no terminal input.
+t2.inbox/001.msg
+schema=fm-task-inbox.v1
+at=2026-11-24T07:18:26Z
+--
+Check the synthetic report on Herdr.
+$ bin/fm-send.sh t1 'Check the synthetic report on Herdr.'
+exit=0
+(no doorbell advisory)
+ENTER : Firstmate message waiting: read your inbox, act, mv to handled/.
+After steer:
+Synthetic terminal input | Herdr mode hint
+Submitted to pane: : Firstmate message waiting: read your inbox, act, mv to handled
+/.
+─────────────────────────────────────────────────────────────────────────────────
+>
+─────────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+t1.inbox/handled/001.msg
+schema=fm-task-inbox.v1
+at=2026-11-24T07:18:26Z
+--
+Check the synthetic report on Herdr.
+RESULT herdr_hint_fit PASS
+Herdr viewer reaped, wait status 0
+Herdr stop request exit 0
+Herdr server reaped, exit 0

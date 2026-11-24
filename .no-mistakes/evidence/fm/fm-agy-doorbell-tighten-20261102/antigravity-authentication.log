@@ -1,0 +1,5 @@
+1.5.16
+$ agy models
+Fetching available models...
+Error: Please sign in to view available models. Launch the CLI without arguments to sign in.
+exit=1

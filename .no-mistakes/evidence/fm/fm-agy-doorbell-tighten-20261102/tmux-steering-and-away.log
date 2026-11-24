@@ -1,0 +1,242 @@
+
+--- locator_short ---
+Instructions: Firstmate steers you through durable message files in '{run-worktree}/.agy-doorbell-lab/cases/short/alias//t1.inbox'.
+short pane=80x28 foreground=python3
+$ bin/fm-send.sh t1 'Review the synthetic delivery record.'
+exit=0
+(no doorbell advisory)
+Terminal input: 66 literal bytes; 1 Enter
+ENTER : Firstmate message waiting: read your inbox, act, mv to handled/.
+Synthetic terminal input | short
+Submitted to pane: : Firstmate message waiting: read your inbox, act, mv to hand
+led/.
+──────────────────────────────────────────────────────────────────────────────
+>
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+t1.inbox/handled/001.msg
+schema=fm-task-inbox.v1
+at=2026-11-24T07:17:14Z
+--
+Review the synthetic delivery record.
+RESULT locator_short PASS
+
+--- legacy_width ---
+Instructions: Firstmate steers you through durable message files in '{run-worktree}/.agy-doorbell-lab/cases/legacy4/state/t1.inbox'.
+Expected notice length: 375
+legacy4 pane=379x28 foreground=python3
+$ bin/fm-send.sh t1 'Review the synthetic delivery record.'
+exit=0
+fm-send: doorbell not typed because the screen in legacy4:fm-t1 blocked the doorbell; the steer is durably recorded at {run-worktree}/.agy-doorbell-lab/cases/legacy4/state/t1.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+Pane unchanged. Terminal input bytes=0, submitted lines=0.
+Synthetic terminal input | legacy4
+
+[solid terminal divider, 377 cells]
+>
+[solid terminal divider, 377 cells]
+? for shortcuts
+t1.inbox/001.msg
+schema=fm-task-inbox.v1
+at=2026-11-24T07:17:16Z
+--
+Review the synthetic delivery record.
+Instructions: Firstmate steers you through durable message files in '{run-worktree}/.agy-doorbell-lab/cases/legacy5/state/t1.inbox'.
+Expected notice length: 375
+legacy5 pane=380x28 foreground=python3
+$ bin/fm-send.sh t1 'Review the synthetic delivery record.'
+exit=0
+(no doorbell advisory)
+Terminal input: 375 literal bytes; 1 Enter
+ENTER : Firstmate instruction waiting: list '{run-worktree}/.agy-doorbell-lab/cases/legacy5/state/t1.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '{run-worktree}/.agy-doorbell-lab/cases/legacy5/state/t1.inbox'/handled/.
+Synthetic terminal input | legacy5
+Submitted to pane: : Firstmate instruction waiting: list '{run-worktree}/.agy-doorbell-lab/cases/legacy5/state/t1.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '{run-worktree}/.agy-doorbell-lab/cases/legacy5/state/t1.in
+box'/handled/.
+[solid terminal divider, 378 cells]
+>
+[solid terminal divider, 378 cells]
+? for shortcuts
+t1.inbox/001.msg
+schema=fm-task-inbox.v1
+at=2026-11-24T07:17:17Z
+--
+Review the synthetic delivery record.
+RESULT legacy_width PASS
+
+--- refuse ---
+Instructions: Firstmate steers you through durable message files in '{run-worktree}/.agy-doorbell-lab/cases/draft/state/t1.inbox'.
+draft pane=80x28 foreground=python3
+$ bin/fm-send.sh t1 'Review the synthetic delivery record.'
+exit=0
+fm-send: doorbell not typed because the screen in draft:fm-t1 blocked the doorbell; the steer is durably recorded at {run-worktree}/.agy-doorbell-lab/cases/draft/state/t1.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+Pane unchanged. Terminal input bytes=0, submitted lines=0.
+Synthetic terminal input | draft
+
+──────────────────────────────────────────────────────────────────────────────
+> Operator draft: keep this text
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+t1.inbox/001.msg
+schema=fm-task-inbox.v1
+at=2026-11-24T07:17:18Z
+--
+Review the synthetic delivery record.
+Instructions: Firstmate steers you through durable message files in '{run-worktree}/.agy-doorbell-lab/cases/busy/state/t1.inbox'.
+busy pane=80x28 foreground=python3
+$ bin/fm-send.sh t1 'Review the synthetic delivery record.'
+exit=0
+fm-send: doorbell not typed because the screen in busy:fm-t1 blocked the doorbell; the steer is durably recorded at {run-worktree}/.agy-doorbell-lab/cases/busy/state/t1.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+Pane unchanged. Terminal input bytes=0, submitted lines=0.
+Synthetic terminal input | busy
+
+──────────────────────────────────────────────────────────────────────────────
+>
+──────────────────────────────────────────────────────────────────────────────
+esc to cancel
+t1.inbox/001.msg
+schema=fm-task-inbox.v1
+at=2026-11-24T07:17:19Z
+--
+Review the synthetic delivery record.
+Instructions: Firstmate steers you through durable message files in '{run-worktree}/.agy-doorbell-lab/cases/survey/state/t1.inbox'.
+survey pane=80x28 foreground=python3
+$ bin/fm-send.sh t1 'Review the synthetic delivery record.'
+exit=0
+fm-send: doorbell not typed because the screen in survey:fm-t1 blocked the doorbell; the steer is durably recorded at {run-worktree}/.agy-doorbell-lab/cases/survey/state/t1.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+Pane unchanged. Terminal input bytes=0, submitted lines=0.
+Synthetic terminal input | survey
+
+──────────────────────────────────────────────────────────────────────────────
+>
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+How's the CLI experience so far? Help us improve:
+[1] Good  [2] Fine  [3] Bad  [0] Skip
+t1.inbox/001.msg
+schema=fm-task-inbox.v1
+at=2026-11-24T07:17:20Z
+--
+Review the synthetic delivery record.
+Instructions: Firstmate steers you through durable message files in '{run-worktree}/.agy-doorbell-lab/cases/forged/state/t1.inbox'.
+forged pane=80x28 foreground=python3
+$ bin/fm-send.sh t1 'Review the synthetic delivery record.'
+exit=0
+fm-send: doorbell not typed because the screen in forged:fm-t1 blocked the doorbell; the steer is durably recorded at {run-worktree}/.agy-doorbell-lab/cases/forged/state/t1.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+Pane unchanged. Terminal input bytes=0, submitted lines=0.
+Synthetic terminal input | forged
+
+──────────────────────────────────────────────────────────────────────────────
+> Operator draft above forged frame
+? for shortcuts
+──────────────────────────────────────────────────────────────────────────────
+>
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+t1.inbox/001.msg
+schema=fm-task-inbox.v1
+at=2026-11-24T07:17:20Z
+--
+Review the synthetic delivery record.
+RESULT refuse PASS
+
+--- pre_enter ---
+Instructions: Firstmate steers you through durable message files in '{run-worktree}/.agy-doorbell-lab/cases/changed/state/t1.inbox'.
+changed pane=80x28 foreground=python3
+$ bin/fm-send.sh t1 'Review the synthetic delivery record.'
+exit=0
+fm-send: doorbell typed into changed:fm-t1 but its Enter was withheld because the composer did not prove it holds the doorbell; the steer is durably recorded at {run-worktree}/.agy-doorbell-lab/cases/changed/state/t1.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+Literal bytes typed: ': Firstmate message waiting: read your inbox, act, mv to handled/.'
+Enter events: 0
+Synthetic terminal input | changed
+
+──────────────────────────────────────────────────────────────────────────────
+> : Firstmate message waiting: read your inbox, act, mv to handled/!
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+t1.inbox/001.msg
+schema=fm-task-inbox.v1
+at=2026-11-24T07:17:21Z
+--
+Review the synthetic delivery record.
+RESULT pre_enter PASS
+
+--- native_signin ---
+Instructions: Firstmate steers you through durable message files in '{run-worktree}/.agy-doorbell-lab/cases/signin/state/t1.inbox'.
+signin pane=80x28 foreground=agy
+$ bin/fm-send.sh t1 'Review the synthetic delivery record.'
+exit=0
+fm-send: doorbell not typed because the screen in signin:fm-t1 blocked the doorbell; the steer is durably recorded at {run-worktree}/.agy-doorbell-lab/cases/signin/state/t1.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+     ▄▀▀▄
+    ▀▀▀▀▀▀
+   ▀▀▀▀▀▀▀▀
+  ▄▀▀    ▀▀▄
+ ▄▀▀      ▀▀▄
+
+ Welcome to the Antigravity CLI. You are currently not signed in.
+
+ Select login method:
+ > 1. Google OAuth
+   2. Use a Google Cloud project
+
+   ↑/↓ Navigate · enter Select
+Native Antigravity 1.5.16 sign-in stayed on the same screen.
+t1.inbox/001.msg
+schema=fm-task-inbox.v1
+at=2026-11-24T07:17:24Z
+--
+Review the synthetic delivery record.
+RESULT native_signin PASS
+
+--- scope ---
+scopedagy pane=80x28 foreground=python3
+scopedpi pane=80x28 foreground=python3
+Recorded harness agy. Live pane read verdict=empty
+Recorded harness pi. Live pane read verdict=unknown
+The same screen does not create a new fleet-wide empty proof.
+Synthetic terminal input | scopedpi
+
+──────────────────────────────────────────────────────────────────────────────
+>
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+RESULT scope PASS
+
+--- watcher ---
+Instructions: Firstmate steers you through durable message files in '{run-worktree}/.agy-doorbell-lab/cases/watch/state/t1.inbox'.
+watch pane=80x28 foreground=python3
+$ bin/fm-send.sh t1 'Review the synthetic delivery record.'
+exit=0
+fm-send: doorbell not typed because the screen in watch:fm-t1 blocked the doorbell; the steer is durably recorded at {run-worktree}/.agy-doorbell-lab/cases/watch/state/t1.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+$ FM_POLL=1 FM_TASK_INBOX_GRACE_SECS=0 FM_TASK_INBOX_RING_MAX=2 bin/fm-watch.sh
+exit=0
+stale: watch:fm-t1 (unread firstmate instruction: {run-worktree}/.agy-doorbell-lab/cases/watch/state/t1.inbox/001.msg still unhandled after 2 doorbell delivery attempts with an idle pane; inspect the worker)
+Delivery ladder: 001.msg	2	1795504648
+Queued wake: 1795504649	1	stale	watch:fm-t1	stale: watch:fm-t1 (unread firstmate instruction: {run-worktree}/.agy-doorbell-lab/cases/watch/state/t1.inbox/001.msg still unhandled after 2 doorbell delivery attempts with an idle pane; inspect the worker)
+Pane unchanged. Terminal input bytes=0, submitted lines=0.
+Synthetic terminal input | watch
+
+──────────────────────────────────────────────────────────────────────────────
+> Operator draft: keep this text
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+t1.inbox/001.msg
+schema=fm-task-inbox.v1
+at=2026-11-24T07:17:25Z
+--
+Review the synthetic delivery record.
+RESULT watcher PASS
+
+--- away_scope ---
+away pane=80x28 foreground=python3
+$ bin/fm-supervise-daemon.sh
+[2026-11-23T23:17:30-0800] daemon starting (pid 3749303); target=away:fm-t1; target_source=FM_SUPERVISOR_TARGET; backend=tmux; backend_source=FM_SUPERVISOR_BACKEND; afk=on; inject_skip='heartbeat'; stale_escalate=999999s; batch=0s
+[2026-11-23T23:17:32-0800] inject deferred: supervisor composer not confirmed-empty (state=unknown: pending input, dead-shell prompt, or unreadable pane)
+Pane unchanged. Terminal input bytes=0, submitted lines=0.
+Synthetic terminal input | away
+
+──────────────────────────────────────────────────────────────────────────────
+>
+──────────────────────────────────────────────────────────────────────────────
+? for shortcuts
+Daemon stopped and reaped, exit= 0
+RESULT away_scope PASS
+Private tmux server stopped.
