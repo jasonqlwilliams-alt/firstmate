@@ -1612,12 +1612,7 @@ fm_active_check_stop() {
   done
   if [ -n "$pgid" ] && kill -0 -- "-$pgid" 2>/dev/null; then
     process_states=$(ps -ax -o pgid= -o stat= 2>/dev/null) || return 1
-    if printf '%s\n' "$process_states" | awk -v group="$pgid" '
-      $1 == group && $2 !~ /^Z/ { live = 1 }
-      END { exit !live }
-    '; then
-      return 1
-    fi
+    awk -v group="$pgid" '$1 == group && $2 !~ /^Z/ { exit 1 }' <<< "$process_states" || return 1
   fi
   FM_ACTIVE_CHECK_PID=
   FM_ACTIVE_CHECK_PGID=
