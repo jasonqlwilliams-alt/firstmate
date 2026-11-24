@@ -542,7 +542,7 @@ reconcile_pause_tracking() {  # <window> <state> <last-status-line> [task]
   watcher_key=$(_stale_key "$win")
   if task_has_current_endpoint_loss "$task" "$state"; then
     case "$(fm_backend_of_meta "$state/$task.meta")" in
-      herdr|zellij) clear_task_pause_tracking "$task" "$state" ;;
+      herdr) clear_task_pause_tracking "$task" "$state" ;;
       *) clear_pause_tracking "$win" "$state" "$task" ;;
     esac
   elif status_is_paused_or_captain_held "$last"; then

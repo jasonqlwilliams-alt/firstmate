@@ -895,21 +895,9 @@ test_queued_stale_does_not_start_tracking_replacement() {
   dir=$(make_supercase queued-stale-pane-reuse)
   state="$dir/state"
   export PATH="$dir/fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_ESCALATE_BATCH_SECS=999
-  cat > "$dir/fakebin/herdr" <<'SH'
-#!/usr/bin/env bash
-case "$*" in
-  'pane get w1:p2 --session shared')
-    printf '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"%s"}}}\n' "$FM_TEST_TERMINAL"
-    ;;
-  *) exit 1 ;;
-esac
-SH
-  chmod +x "$dir/fakebin/herdr"
-  export FM_TEST_TERMINAL=original
   fm_write_meta "$state/a-original.meta" "window=$win" backend=herdr kind=ship herdr_terminal_id=original
   append_wake "$state" stale "$win" "stale: $win" || fail "could not queue the original worker's stale wake"
 
-  export FM_TEST_TERMINAL=replacement
   fm_write_meta "$state/z-replacement.meta" "window=$win" backend=herdr kind=ship herdr_terminal_id=replacement
   handle_durable_wakes fallback "$state" || fail "could not handle the queued stale wake"
   assert_present "$state/.subsuper-stale-a-original" "the queued stale wake did not start tracking the original worker"
@@ -2916,7 +2904,6 @@ test_stale_paused_classifies_pause
 test_stale_captain_held_classifies_pause
 test_handle_wake_paused_records_pause_marker
 test_named_endpoint_loss_preserves_the_live_tasks_tracking
-# Isolate the fake Herdr PATH and daemon fixture state from the other cases.
 (test_queued_stale_does_not_start_tracking_replacement) || exit 1
 test_handle_wake_paused_signal_records_pause_marker
 test_handle_wake_terminal_signal_clears_pause_tracking

@@ -59,7 +59,7 @@ The turn-end guard remains the final backstop rather than the normal continuity 
 
 ## Recorded endpoint loss
 
-The watcher checks recorded endpoints per task, even when multiple task records share one pane target.
+On Herdr and Zellij, the watcher checks recorded endpoints per task, even when multiple task records share one pane target.
 It queues one loss wake per confirmed endpoint incarnation unless a matching [retained-copy park mark](#parking-a-task-with-its-copy-retained) suppresses the report.
 tmux queues `stale: <window> (the recorded endpoint is gone)`.
 Herdr queues `stale: <window> (the recorded endpoint is gone for task <task>)`.
