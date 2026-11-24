@@ -958,7 +958,7 @@ fm_backend_composer_state() {  # <backend> <target> [expected-label] -> empty|pe
 # fm_backend_composer_snapshot: one composer capture of <target> into the
 # snapshot globals (bin/fm-composer-lib.sh "Composer SNAPSHOT"). Call it
 # without command substitution; it fails when the capture fails.
-fm_backend_composer_snapshot() {  # <backend> <target> [expected-label]
+fm_backend_composer_snapshot() {  # <backend> <target> [expected-label] [visible]
   local backend=$1
   shift
   FM_COMPOSER_SNAPSHOT_SCREEN=
@@ -967,10 +967,10 @@ fm_backend_composer_snapshot() {  # <backend> <target> [expected-label]
   fm_backend_source "$backend" || return 1
   case "$backend" in
     tmux) fm_tmux_composer_snapshot "$1" ;;
-    herdr) fm_backend_herdr_composer_snapshot "$1" ;;
-    zellij) fm_backend_zellij_composer_snapshot "$@" ;;
-    orca) fm_backend_orca_composer_snapshot "$1" ;;
-    cmux) fm_backend_cmux_composer_snapshot "$@" ;;
+    herdr) fm_backend_herdr_composer_snapshot "$1" "${3:-}" ;;
+    zellij) fm_backend_zellij_composer_snapshot "$1" "${2:-}" "${3:-}" ;;
+    orca) fm_backend_orca_composer_snapshot "$1" "${3:-}" ;;
+    cmux) fm_backend_cmux_composer_snapshot "$1" "${2:-}" "${3:-}" ;;
     *) return 1 ;;
   esac
 }
@@ -986,32 +986,85 @@ fm_backend_composer_classify_snapshot() {  # <backend> <target> [fit-text]
   esac
 }
 
+fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
+  local limit_ms=$1
+  shift
+  [ "$limit_ms" -gt 0 ] || return 124
+  . "$FM_BACKEND_LIB_DIR/fm-timeout-lib.sh" || return 1
+  # shellcheck disable=SC2016  # Expansion is deliberately deferred to the child shell.
+  FM_HOME="$FM_HOME" FM_ROOT="$FM_ROOT" FM_BACKEND_HERDR_ENDPOINT_META="${FM_BACKEND_HERDR_ENDPOINT_META:-}" \
+    fm_run_timed --kill "$(fm_timeout_seconds "$limit_ms")" \
+    bash -uc '. "$1" && shift && "$@"' _ "$FM_BACKEND_LIB_DIR/fm-backend.sh" "$@" </dev/null 2>/dev/null
+)
+
 # fm_backend_guarded_composer_state: the composer verdict a caller must have
 # before it types into a pane or presses a confirming Enter there. It reads ONE
-# capture, refuses Codex's global-update picker on it first
+# capture, refuses Claude's active exit confirmation or Codex's global-update picker
 # (fm_composer_update_picker_scan in bin/fm-composer-lib.sh; its confirming
 # Enter runs a global `npm install` of Codex), and only then trusts the
 # backend's own composer verdict for that same capture, so a picker that
 # appears between two reads can never borrow an earlier read's verdict.
 # Prints update-picker, or the composer verdict otherwise:
 # empty|pending|pending-unproven|unknown, or sign-in for an explicitly recorded
-# Codex authentication screen (a stop-only verdict). An unreadable capture is
-# unknown. <expected-pending> is the exact text the caller just typed: on a
+# Codex authentication screen (a stop-only verdict), or exit-confirm for an
+# explicitly recorded Claude pane showing the background-tasks exit
+# confirmation (fm_composer_claude_exit_confirm_screen in bin/fm-composer-lib.sh;
+# a stop-only verdict). An unreadable capture is unknown, and a read that
+# exceeds an explicitly supplied deadline returns timeout.
+# <expected-pending> is the exact text the caller just typed: on a
 # plain (styled=0) capture, where a glyph row with trailing text reads unknown,
 # a composer holding exactly that text reads pending, and on a cursorless
 # capture it also proves picker rows above it are retained history.
 # [harness] is the pane's recorded harness; when it is a plain token it rides
 # into the snapshot's capability facts as harness=<name>, so the classifier
 # can apply the harness-scoped rules in bin/fm-composer-lib.sh.
+# [remaining-ms] bounds the read; past it the verdict is timeout.
 # [fit-text] is the line a caller is about to type into an agy pane: an
 # `empty` verdict for harness agy reads `unknown` unless that line fits agy's
 # one composer row, so it is never typed into a row it would wrap.
-# Callers: the steering-inbox doorbell (bin/fm-task-inbox-lib.sh) and Codex
-# exit (bin/fm-control.sh).
-fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [fit-text]
+# Callers include the steering-inbox doorbell, Codex and Claude exit, and
+# the second-mate restart's local and remote screen observations.
+fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [remaining-ms] [fit-text]
+  local limit_ms=${6:-} fit=${7:-} screen rc
+  if [ -z "$limit_ms" ]; then
+    _fm_backend_guarded_composer_state "${@:1:5}" "$fit"
+    return
+  fi
+  if screen=$(fm_backend_run_timed "$limit_ms" _fm_backend_guarded_composer_state "${@:1:5}" "$fit"); then
+    printf '%s' "${screen:-unknown}"
+  else
+    rc=$?
+    if [ "$rc" -eq 124 ]; then
+      printf 'timeout'
+    else
+      printf 'unknown'
+    fi
+  fi
+}
+
+_fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [fit-text]
   local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} fit=${6:-} picker verdict kv styled=0
-  fm_backend_composer_snapshot "$backend" "$target" "$label" || { printf 'unknown'; return 0; }
+  local capture=
+  if [ "$harness" = claude ]; then
+    capture=visible
+    if [ "$backend" = tmux ]; then
+      if ! fm_backend_source tmux || ! target=$(fm_backend_tmux_exact_pane "$target"); then
+        printf 'unknown'
+        return 0
+      fi
+    fi
+  fi
+  fm_backend_composer_snapshot "$backend" "$target" "$label" "$capture" || { printf 'unknown'; return 0; }
   [ -n "$FM_COMPOSER_SNAPSHOT_SCREEN" ] || { printf 'unknown'; return 0; }
+  if [ "$harness" = claude ]; then
+    if fm_composer_claude_exit_confirm_screen "$FM_COMPOSER_SNAPSHOT_SCREEN"; then
+      printf 'exit-confirm'
+      return 0
+    fi
+    if [ "$backend" != tmux ]; then
+      FM_COMPOSER_SNAPSHOT_SCREEN=$(printf '%s\n' "$FM_COMPOSER_SNAPSHOT_SCREEN" | tail -n "$FM_COMPOSER_CAPTURE_LINES")
+    fi
+  fi
   case "$harness" in
     ''|*[!a-z0-9-]*) ;;
     *) FM_COMPOSER_SNAPSHOT_CAPS="$FM_COMPOSER_SNAPSHOT_CAPS"$'\n'"harness=$harness" ;;
@@ -1155,12 +1208,12 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
 # Only `dead` and `missing` license recovery. Every `alive` is proven at
 # process level through the shared classifier in bin/fm-agent-process-lib.sh,
 # never from a registration or a rendered title alone. The tmux adapter
-# requires a successful session inventory and returns `missing` only when it
-# omits the exact window; the Herdr adapter reuses its strict husk classifier -
+# shares fm_backend_tmux_endpoint_state with loss reporting. The Herdr adapter
+# reuses its strict husk classifier -
 # which verifies a registered agent against `pane process-info` and the real
 # process table, so a registration Herdr kept over a shell-only pane reads
-# `dead` here (issue #4115) - then maps a positively stopped session server to
-# `missing` only in this recovery-grade view. Zellij remains unverified because
+# `dead` here (issue #4115). A positively stopped session server maps to
+# `missing` without widening husk detection. Zellij remains unverified because
 # its secondmate ghost-tab and agent-process recovery path has not been
 # empirically validated. Orca and cmux do not support secondmate spawns.
 # An optional expected-home binds Herdr secondmate recovery to the pane's
@@ -1192,6 +1245,32 @@ fm_backend_agent_alive() {  # <backend> <target>
     alive) printf 'alive' ;;
     dead|missing) printf 'dead' ;;
     *) printf 'unknown' ;;
+  esac
+}
+
+# fm_backend_endpoint_state: recorded-endpoint presence for loss reporting.
+# Prints present, missing, or unreadable. Recovery uses fm_backend_agent_state.
+fm_backend_endpoint_state() {  # <backend> <target> <expected-label>
+  local backend=$1 target=$2 expected_label=${3:-}
+  fm_backend_source "$backend" || { printf 'unreadable'; return 0; }
+  case "$backend" in
+    tmux) fm_backend_tmux_endpoint_state "$target" ;;
+    herdr)
+      fm_backend_herdr_parse_target "$target" || { printf 'unreadable'; return 0; }
+      case "$(fm_backend_herdr_task_identity_state "$target")" in
+        match) printf 'present' ;;
+        missing|mismatch) printf 'missing' ;;
+        *)
+          if [ "$(fm_backend_herdr_server_running_state "$FM_BACKEND_HERDR_SESSION")" = stopped ]; then
+            printf 'missing'
+          else
+            printf 'unreadable'
+          fi
+          ;;
+      esac
+      ;;
+    zellij) fm_backend_zellij_endpoint_state "$target" "$expected_label" ;;
+    *) printf 'unreadable' ;;
   esac
 }
 

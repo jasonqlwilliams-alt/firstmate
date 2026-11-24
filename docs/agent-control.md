@@ -62,6 +62,20 @@ Removing a worktree, closing an endpoint, or discarding work stays with [`bin/fm
 It is not deterministic across the verified adapters: codex, grok, and gemini resume only from a session id printed at exit, opencode continues the most recent session for the cwd, and claude, pi, pi-signed, omp, and kimi have no verified pane-resume contract.
 `relaunch` covers the same need on every adapter, because the brief on disk - not a harness-private session - is the durable instruction.
 
+### Claude background-tasks exit confirmation
+
+The second-mate restart asks a mate recorded as running Claude to stop its own background shell tasks when it asks the mate to save its open work.
+If the restart sees the confirmation before sending that request or a fallback re-read nudge, it reports the mate as `unreached` and leaves the dialog for manual recovery.
+
+The Claude exit path used by `exit` and `relaunch` checks the visible screen before interrupting a busy agent, before typing `/exit`, before submitting it, and while waiting for the agent to stop.
+A recognized confirmation stops that path with `exit=unconfirmed` before it sends further input, and a second-mate restart reports the mate as `unreached`.
+A submit retry requires a live agent and a capture showing `/exit` still in the composer.
+Stop checks, further screen reads, and retries after the first Enter share the `FM_CONTROL_EXIT_WAIT` budget.
+If the screen cannot be read in time, the restart may report a timeout without naming the dialog.
+
+For an ordinary steer to a Claude pane, the doorbell withholds typing if its first read recognizes the confirmation and withholds Enter if its post-typing read recognizes it.
+The [Claude adapter reference](../.agents/skills/harness-adapters/references/harness/claude.md#background-tasks-exit-confirmation) owns the screen layout and recognition limits.
+
 ## Transactional relaunch
 
 `relaunch` is the only verb that changes durable records, so it runs as a transaction with a journal at `state/<id>.control-relaunch`, the prior record preserved beside it, and a ship or scout's prior instructions preserved when a progress note is appended.
@@ -155,5 +169,6 @@ The empirical basis for each adapter's value is the `harness-adapters` skill's v
 ## Verification
 
 - `tests/fm-control.test.sh` - the adapter contract for every verified harness, the backend capability matrix, exact-id scoping, the closed verb list, the busy, idle, dead, and idempotent lifecycle cases, Codex picker and uncertain-screen refusals, slow quit and shell redraw, retained picker history, Herdr plain capture fallback, and marker non-regression, all against a stubbed session provider.
+- [`tests/fm-control-claude-exit-dialog.test.sh`](../tests/fm-control-claude-exit-dialog.test.sh) - captured-screen refusal, restart reporting, and near misses against a compiled stand-in in tmux and a styled Herdr stub, plus doorbell refusal with cmux, Zellij, and Orca stubs.
 - `tests/fm-control-relaunch.test.sh` - the relaunch transaction, preparation refusals, exited-shell recovery, registered merge-poll continuity, and rollback; [runtime verification](verification/runtime-backends.md) records the reusable evidence.
 - `tests/fm-control-herdr-smoke.test.sh` - the second state-verified backend against the real herdr binary, on an isolated throwaway lab session.

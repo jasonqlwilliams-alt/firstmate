@@ -73,7 +73,12 @@ case "${1:-}" in
       printf '╭────╮\n│    │\n╰────╯\n'
     fi
     exit 0 ;;
-  list-windows) printf 'fm-t1\n'; exit 0 ;;
+  list-windows)
+    case "${*: -1}" in
+      $'#{window_name}\t#{pane_id}') printf 'fm-t1\t%%1\n' ;;
+      *) printf 'fm-t1\n' ;;
+    esac
+    exit 0 ;;
 esac
 exit 0
 SH
@@ -172,7 +177,7 @@ test_pending_composer_skips_ring_advisorily() {
   expect_code 0 "$rc" "a skipped ring is still a sent steer"
   [ -f "$dir/home/state/t1.inbox/001.msg" ] || fail "the steer was not recorded"
   [ ! -s "$dir/send.log" ] || fail "a visibly pending composer should skip the ring:"$'\n'"$(cat "$dir/send.log")"
-  assert_contains "$(cat "$err")" "composer holds pending text" "fm-send should explain the pending-draft refusal"
+  assert_contains "$(cat "$err")" "blocked the doorbell" "fm-send should explain the pending-draft refusal"
   ! grep -qF 'A wider agy pane' "$err" || fail "fm-send should omit agy width advice for a Grok pane"
   assert_contains "$(cat "$err")" "watcher will retry, then escalate" \
     "the refusal notice should point at the retry and escalation"

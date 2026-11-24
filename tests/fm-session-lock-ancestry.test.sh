@@ -230,7 +230,7 @@ install_autoarm_scripts() {
   cp "$ROOT/bin/fm-primary-scope-lib.sh" "$dir/bin/fm-primary-scope-lib.sh"
   cp "$ROOT/bin/fm-supervision-lib.sh" "$dir/bin/fm-supervision-lib.sh"
   cp "$ROOT/bin/fm-wake-lib.sh" "$dir/bin/fm-wake-lib.sh"
-  cp "$ROOT/bin/fm-session-lock-lib.sh" "$dir/bin/fm-session-lock-lib.sh"
+  cp "$ROOT/bin/fm-session-lock-lib.sh" "$ROOT/bin/fm-session-lock-record-lib.sh" "$dir/bin/"
   cp "$ROOT/bin/fm-cursor-lib.sh" "$dir/bin/fm-cursor-lib.sh"
   cp "$ROOT/bin/fm-hook-host-lib.sh" "$dir/bin/fm-hook-host-lib.sh"
   cp "$ROOT/bin/fm-lock.sh" "$dir/bin/fm-lock.sh"
@@ -336,7 +336,7 @@ test_e2e_daemon_parented_session_claims_the_home() {
   daemon_pid=$(tr -d '[:space:]' < "$dir/state/daemon-pid")
   [ -n "$session_pid" ] && [ "$session_pid" != "$daemon_pid" ] \
     || fail "fixture did not produce a distinct daemon and session: session=$session_pid daemon=$daemon_pid"
-  lock_after=$(tr -d '[:space:]' < "$dir/state/.lock")
+  lock_after=$(cat "$dir/state/.lock")
   expect_code 2 "$(hook_rc "$dir")" "a session parented by a harness-named daemon must claim its home and rewake"
   [ -e "$dir/state/arm-ran" ] || fail "supervision never armed for a daemon-parented session"
   [ "$lock_after" = "$session_pid" ] || fail "the session lock moved off the session: expected $session_pid, got $lock_after"
@@ -350,13 +350,305 @@ test_e2e_daemon_parented_version_named_session_keeps_its_lock() {
   run_fixture_tree "$dir" "$VERSIONED_CLAUDE" "$NAMED_CLAUDE"
   session_pid=$(tr -d '[:space:]' < "$dir/state/session-pid")
   daemon_pid=$(tr -d '[:space:]' < "$dir/state/daemon-pid")
-  lock_after=$(tr -d '[:space:]' < "$dir/state/.lock")
+  lock_after=$(cat "$dir/state/.lock")
   [ "$lock_after" != "$daemon_pid" ] \
     || fail "the live session's lock was reclaimed as stale and rewritten to the shared daemon pid $daemon_pid"
   [ "$lock_after" = "$session_pid" ] || fail "the session lock moved off the session: expected $session_pid, got $lock_after"
   expect_code 2 "$(hook_rc "$dir")" "a version-named session under a daemon must claim its home and rewake"
   [ -e "$dir/state/arm-ran" ] || fail "supervision never armed for a version-named daemon-parented session"
   pass "session-lock e2e: a version-named session under a harness-named daemon keeps its own lock"
+}
+
+# --- owner record: start-time liveness and atomic publication ----------------
+# These cases run the REAL bin/fm-lock.sh under a harness-named copy of bash, so
+# the ancestry walk stops at that fixture process and never reaches this suite.
+
+CODEX_FIXTURE="$FAKEBIN/codex"
+ln -s /bin/bash "$CODEX_FIXTURE"
+
+lock_home() {  # <name>
+  local dir="$TMP_ROOT/owner-record/$1"
+  mkdir -p "$dir/state"
+  printf '%s' "$dir"
+}
+
+# Run fm-lock.sh with a harness-named parent; the trailing command keeps bash
+# from exec-replacing the fixture process with the script.
+fixture_start_time() {
+  local pid=$1 start
+  if [ -r "/proc/$pid/stat" ]; then
+    awk '{print "proc:" $22}' "/proc/$pid/stat"
+  else
+    start=$(TZ=UTC0 LC_ALL=C /bin/ps -p "$pid" -o lstart=) || return 1
+    printf 'lstart:%s\n' "$(printf '%s' "$start" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  fi
+}
+export -f fixture_start_time
+
+lock_as_harness() {  # <home> [args...]
+  local home=$1
+  shift
+  FM_HOME="$home" "$CODEX_FIXTURE" -c '
+    printf "%s\n" "$$" > "$FM_HOME/harness-pid"
+    fixture_start_time "$$" > "$FM_HOME/harness-start"
+    "$0" "$@"; rc=$?; exit "$rc"
+  ' "$ROOT/bin/fm-lock.sh" "$@"
+}
+
+start_live_harness() {  # sets LIVE_HARNESS_PID
+  "$CODEX_FIXTURE" -c 'sleep 120; exit 0' </dev/null >/dev/null 2>&1 &
+  LIVE_HARNESS_PID=$!
+  OWNER_RECORD_PIDS="${OWNER_RECORD_PIDS:-} $LIVE_HARNESS_PID"
+}
+
+cleanup_owner_record() {
+  local pid
+  for pid in ${OWNER_RECORD_PIDS:-}; do
+    pkill -P "$pid" 2>/dev/null || true
+    kill "$pid" 2>/dev/null || true
+  done
+}
+trap 'cleanup_owner_record; fm_test_cleanup' EXIT
+
+test_acquire_records_pid_and_start_time() {
+  local home pid start out
+  home=$(lock_home record)
+  out=$(lock_as_harness "$home" 2>&1) || fail "a harness caller could not take a free lock: $out"
+  pid=$(cat "$home/harness-pid")
+  start=$(cat "$home/harness-start")
+  cmp -s "$home/state/.lock" <(printf '%s\n' "$pid") || fail "the PID lock changed format"
+  cmp -s "$home/state/.lock.start" <(printf '%s\nstart=%s\n' "$pid" "$start") \
+    || fail "the sidecar did not record the fixture's PID and start time"
+  if ls "$home/state"/.lock-write.* >/dev/null 2>&1; then fail "a temporary owner record was left behind"; fi
+  pass "session lock: acquisition publishes one PID line and a separate start-time record"
+}
+
+test_reused_pid_with_other_start_time_is_not_an_owner() {
+  local home out status start stale replacement_pid replacement_start
+  home=$(lock_home reused)
+  start_live_harness
+  start=$(fixture_start_time "$LIVE_HARNESS_PID") || fail "no start time for the live fixture"
+  stale=$(fm_test_stale_start_token "$start") || fail "no different start time in the fixture's format"
+  # The recorded owner exited and the kernel gave its pid to an unrelated live
+  # harness-named process: same pid, different start time.
+  printf '%s\n' "$LIVE_HARNESS_PID" > "$home/state/.lock"
+  printf '%s\nstart=%s\n' "$LIVE_HARNESS_PID" "$stale" > "$home/state/.lock.start"
+  status=$(FM_HOME="$home" "$ROOT/bin/fm-lock.sh" status)
+  case "$status" in "lock: stale"*) ;; *) fail "a reused pid still reads as the live owner: $status" ;; esac
+  out=$(lock_as_harness "$home" 2>&1) || fail "a reused owner pid kept the home refused: $out"
+  replacement_pid=$(cat "$home/harness-pid")
+  replacement_start=$(cat "$home/harness-start")
+  cmp -s "$home/state/.lock" <(printf '%s\n' "$replacement_pid") || fail "takeover did not publish the replacement PID"
+  cmp -s "$home/state/.lock.start" <(printf '%s\nstart=%s\n' "$replacement_pid" "$replacement_start") \
+    || fail "takeover did not publish the replacement start time"
+  pass "session lock: a reused pid with a different start time no longer holds the lock"
+}
+
+test_live_owner_with_matching_start_time_keeps_the_lock() {
+  local home start out
+  home=$(lock_home live)
+  start_live_harness
+  start=$(fixture_start_time "$LIVE_HARNESS_PID") || fail "no start time for a live process"
+  printf '%s\n' "$LIVE_HARNESS_PID" > "$home/state/.lock"
+  printf '%s\nstart=%s\n' "$LIVE_HARNESS_PID" "$start" > "$home/state/.lock.start"
+  if out=$(lock_as_harness "$home" 2>&1); then fail "a second session took a live owner's lock: $out"; fi
+  cmp -s "$home/state/.lock" <(printf '%s\n' "$LIVE_HARNESS_PID") || fail "the live owner lost its lock"
+  cmp -s "$home/state/.lock.start" <(printf '%s\nstart=%s\n' "$LIVE_HARNESS_PID" "$start") \
+    || fail "a refused acquisition changed the live owner's start sidecar"
+  pass "session lock: a live owner whose start time matches keeps its lock"
+}
+
+test_legacy_pid_only_record_keeps_pid_only_liveness() {
+  local home out dead mismatched_pid
+  home=$(lock_home legacy-live)
+  start_live_harness
+  printf '%s\n' "$LIVE_HARNESS_PID" > "$home/state/.lock"
+  if out=$(lock_as_harness "$home" 2>&1); then fail "a legacy record naming a live harness was taken over: $out"; fi
+  mismatched_pid=$((LIVE_HARNESS_PID + 1))
+  printf '%s\nstart=proc:1\n' "$mismatched_pid" > "$home/state/.lock.start"
+  if out=$(lock_as_harness "$home" 2>&1); then fail "an unrelated sidecar displaced the live owner: $out"; fi
+  cmp -s "$home/state/.lock" <(printf '%s\n' "$LIVE_HARNESS_PID") || fail "the legacy owner lost its lock"
+  cmp -s "$home/state/.lock.start" <(printf '%s\nstart=proc:1\n' "$mismatched_pid") \
+    || fail "a refused acquisition changed the unrelated sidecar"
+  home=$(lock_home legacy-dead)
+  "$CODEX_FIXTURE" -c 'exit 0' &
+  dead=$!
+  wait "$dead"
+  printf '%s\n' "$dead" > "$home/state/.lock"
+  out=$(lock_as_harness "$home" 2>&1) || fail "a legacy record naming a dead pid was not recovered: $out"
+  cmp -s "$home/state/.lock.start" <(printf '%s\nstart=%s\n' "$(cat "$home/harness-pid")" "$(cat "$home/harness-start")") \
+    || fail "legacy takeover did not publish the new owner's start sidecar"
+  pass "session lock: a live legacy PID is honored with a missing or unrelated sidecar"
+}
+
+test_legacy_upgrade_during_own_sweep() {
+  local home out
+  home=$(lock_home legacy-upgrade)
+  out=$(FM_HOME="$home" "$CODEX_FIXTURE" -ec '
+    state="$FM_HOME/state"
+    printf "%s\n" "$$" > "$state/.lock"
+    ln "$state/.lock" "$state/lock-before"
+    printf "%s\n" "$$" > "$FM_HOME/harness-pid"
+    fixture_start_time "$$" > "$FM_HOME/harness-start"
+    mkdir "$state/.lock.acquire"
+    printf "%s\n" "$$" > "$state/.lock.acquire/pid"
+    printf "pid=%s\n" "$$" > "$state/.startup-network.status"
+    "$0"
+    [ ! -e "$state/.lock.start" ] && [ "$state/.lock" -ef "$state/lock-before" ] || exit 1
+    rm "$state/.lock.acquire/pid"
+    rmdir "$state/.lock.acquire"
+    "$0"; rc=$?; exit "$rc"
+  ' "$ROOT/bin/fm-lock.sh" 2>&1) || fail "legacy renewal or upgrade failed: $out"
+  [ "$home/state/.lock" -ef "$home/state/lock-before" ] || fail "upgrading the sidecar rewrote the owner file"
+  cmp -s "$home/state/.lock" <(printf '%s\n' "$(cat "$home/harness-pid")") || fail "upgrading the legacy claim changed the owner"
+  cmp -s "$home/state/.lock.start" <(printf '%s\nstart=%s\n' "$(cat "$home/harness-pid")" "$(cat "$home/harness-start")") \
+    || fail "a known start time did not upgrade the legacy claim"
+  pass "session lock: legacy renewal skips a held sweep and later adds a sidecar without rewriting the PID"
+}
+
+test_readers_see_only_complete_owner_lines() {
+  local home fakebin old_owner new_owner observed writer_pid i
+  home=$(lock_home atomic)
+  fakebin=$(fm_fakebin "$home/publication")
+  lock_as_harness "$home" >/dev/null 2>&1 || fail "seed acquisition failed"
+  old_owner=$(cat "$home/harness-pid")
+  cat > "$fakebin/mv" <<'SH'
+#!/usr/bin/env bash
+[ "${@: -1}" = "$FM_HOME/state/.lock" ] || exec /bin/mv "$@"
+: > "$FM_HOME/publishing"
+for ((i = 0; i < 500; i++)); do
+  if [ -e "$FM_HOME/reader-sampled" ]; then
+    /bin/mv "$@" || exit $?
+    cat "$FM_HOME/state/.lock" > "$FM_HOME/owner-after-rename"
+    exit $?
+  fi
+  sleep 0.01
+done
+exit 1
+SH
+  chmod +x "$fakebin/mv"
+  PATH="$fakebin:$PATH" lock_as_harness "$home" >/dev/null 2>&1 &
+  writer_pid=$!
+  for ((i = 0; i < 500; i++)); do
+    [ ! -e "$home/publishing" ] || break
+    sleep 0.01
+  done
+  [ -e "$home/publishing" ] || fail "the replacement owner never reached publication"
+  new_owner=$(cat "$home/harness-pid")
+  [ "$old_owner" != "$new_owner" ] || fail "the replacement fixture reused the first fixture's PID"
+  cmp -s "$home/state/.lock" <(printf '%s\n' "$old_owner") || fail "the pending rename changed the previous PID line"
+  cmp -s "$home/state/.lock.start" <(printf '%s\nstart=%s\n' "$new_owner" "$(cat "$home/harness-start")") \
+    || fail "the replacement sidecar was not published before the owner rename"
+  : > "$home/reader-sampled"
+  for ((i = 0; i < 500; i++)); do
+    observed=$(cat "$home/state/.lock")
+    case "$observed" in
+      "$new_owner") break ;;
+      "$old_owner") sleep 0.01 ;;
+      *) fail "a reader saw an invalid owner line during publication: '$observed'" ;;
+    esac
+  done
+  wait "$writer_pid" || fail "replacement acquisition failed"
+  cmp -s "$home/owner-after-rename" <(printf '%s\n' "$new_owner") \
+    || fail "the owner file did not contain the replacement PID at the rename boundary"
+  [ "$observed" = "$new_owner" ] || fail "the reader never saw the replacement owner"
+  pass "session lock: a reader across publication sees only complete fixture PIDs"
+}
+
+test_failed_start_lookup_preserves_only_legacy_liveness() {
+  local home proc status out
+  home=$(lock_home no-start)
+  proc="$home/proc"
+  start_live_harness
+  mkdir -p "$proc/$LIVE_HARNESS_PID"
+  printf 'unreadable start-time fixture\n' > "$proc/$LIVE_HARNESS_PID/stat"
+  printf '%s\n' "$LIVE_HARNESS_PID" > "$home/state/.lock"
+  printf '%s\nstart=%s\n' "$LIVE_HARNESS_PID" "$(fixture_start_time "$LIVE_HARNESS_PID")" > "$home/state/.lock.start"
+  status=$(FM_PROC_ROOT_OVERRIDE="$proc" FM_HOME="$home" "$ROOT/bin/fm-lock.sh" status)
+  case "$status" in "lock: stale"*) ;; *) fail "a versioned record survived a failed start lookup: $status" ;; esac
+  rm "$home/state/.lock.start"
+  status=$(FM_PROC_ROOT_OVERRIDE="$proc" FM_HOME="$home" "$ROOT/bin/fm-lock.sh" status)
+  [ "$status" = "lock: held by live harness pid $LIVE_HARNESS_PID" ] || fail "legacy liveness changed: $status"
+  rm "$home/state/.lock"
+  out=$(FM_HOME="$home" FM_PROC_ROOT_OVERRIDE="$proc" "$CODEX_FIXTURE" -ec '
+    mkdir -p "$FM_PROC_ROOT_OVERRIDE/$$"
+    printf "malformed\n" > "$FM_PROC_ROOT_OVERRIDE/$$/stat"
+    printf "%s\n" "$$" > "$FM_HOME/harness-pid"
+    "$0" || exit 1
+    mkdir "$FM_HOME/state/.lock.acquire"
+    printf "%s\n" "$$" > "$FM_HOME/state/.lock.acquire/pid"
+    printf "pid=%s\n" "$$" > "$FM_HOME/state/.startup-network.status"
+    "$0"; rc=$?; exit "$rc"
+  ' "$ROOT/bin/fm-lock.sh" 2>&1) || fail "legacy acquisition or renewal during a sweep failed: $out"
+  [ "$(cat "$home/state/.lock")" = "$(cat "$home/harness-pid")" ] || fail "failed acquisition lookup did not publish a PID-only record"
+  assert_absent "$home/state/.lock.start" "a failed lookup published a start sidecar"
+  [ -d "$home/state/.lock.acquire" ] || fail "the legacy owner disturbed the running sweep's claim"
+  pass "session lock: a failed lookup permits legacy acquisition and renewal during a sweep"
+}
+
+test_failed_renewal_preserves_recorded_start_time() {
+  local home out pid start
+  home=$(lock_home renewal-no-start)
+  out=$(FM_HOME="$home" "$CODEX_FIXTURE" -ec '
+    state="$FM_HOME/state"
+    printf "%s\n" "$$" > "$FM_HOME/harness-pid"
+    fixture_start_time "$$" > "$FM_HOME/harness-start"
+    "$0"
+    mkdir -p "$FM_HOME/proc/$$"
+    printf "malformed\n" > "$FM_HOME/proc/$$/stat"
+    if FM_PROC_ROOT_OVERRIDE="$FM_HOME/proc" "$0"; then
+      exit 1
+    fi
+    "$0" status
+  ' "$ROOT/bin/fm-lock.sh" 2>&1) || fail "an unverified renewal succeeded or the fixture failed: $out"
+  pid=$(cat "$home/harness-pid")
+  start=$(cat "$home/harness-start")
+  assert_contains "$out" "cannot verify session lock owner's start time" "renewal did not refuse the failed lookup"
+  assert_contains "$out" "lock: held by live harness pid $pid" "a restored lookup did not recognize the existing owner"
+  cmp -s "$home/state/.lock" <(printf '%s\n' "$pid") || fail "a failed renewal changed the owner PID"
+  cmp -s "$home/state/.lock.start" <(printf '%s\nstart=%s\n' "$pid" "$start") \
+    || fail "a failed renewal changed the recorded start time"
+  pass "session lock: a failed renewal preserves its existing start record"
+}
+
+test_ps_start_time_matches_across_timezones() {
+  local home proc start status
+  home=$(lock_home ps-timezones)
+  proc="$home/proc"
+  mkdir "$proc"
+  start_live_harness
+  start=$(TZ=UTC0 LC_ALL=C /bin/ps -p "$LIVE_HARNESS_PID" -o lstart= | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  [ -n "$start" ] || fail "ps did not report the fixture's UTC start time"
+  printf '%s\n' "$LIVE_HARNESS_PID" > "$home/state/.lock"
+  printf '%s\nstart=lstart:%s\n' "$LIVE_HARNESS_PID" "$start" > "$home/state/.lock.start"
+  status=$(TZ=PST8 FM_PROC_ROOT_OVERRIDE="$proc" FM_HOME="$home" "$ROOT/bin/fm-lock.sh" status)
+  [ "$status" = "lock: held by live harness pid $LIVE_HARNESS_PID" ] || fail "the ps fallback varied by timezone: $status"
+  pass "session lock: ps start times match across reader timezones"
+}
+
+test_malformed_records_are_not_owned() {
+  local dir status start extra
+  dir="$TMP_ROOT/owner-record/malformed"
+  mkdir -p "$dir/state"
+  printf 'not-a-pid\nstart=proc:1\n' > "$dir/state/.lock"
+  if bash -c '. "$0"; fm_session_lock_owned_by_self "$1"' "$LIB" "$dir/state"; then
+    fail "a non-numeric owner line was treated as owned"
+  fi
+  status=$(FM_HOME="$dir" "$ROOT/bin/fm-lock.sh" status)
+  case "$status" in "lock: stale"*) ;; *) fail "a non-numeric owner line was treated as a live owner: $status" ;; esac
+  : > "$dir/state/.lock"
+  status=$(FM_HOME="$dir" "$ROOT/bin/fm-lock.sh" status)
+  case "$status" in "lock: stale"*) ;; *) fail "an empty owner record was treated as a live owner: $status" ;; esac
+  start_live_harness
+  start=$(fixture_start_time "$LIVE_HARNESS_PID") || fail "no start time for a live process"
+  printf '%s\n' "$LIVE_HARNESS_PID" > "$dir/state/.lock"
+  for extra in '' 'started=proc:123' 'start=' "start=$start"$'\nextra'; do
+    printf '%s\n%s\n' "$LIVE_HARNESS_PID" "$extra" > "$dir/state/.lock.start"
+    status=$(FM_HOME="$dir" "$ROOT/bin/fm-lock.sh" status)
+    case "$status" in "lock: stale"*) ;; *) fail "a malformed owner record with a live PID was treated as live: $status" ;; esac
+  done
+  lock_as_harness "$dir" >/dev/null || fail "a malformed owner record blocked takeover"
+  pass "session lock: malformed or empty owner records are never owned"
 }
 
 test_version_named_session_is_identified_on_both_platforms
@@ -366,3 +658,13 @@ test_competing_version_named_session_is_seen_as_live
 test_e2e_version_named_session_claims_the_home
 test_e2e_daemon_parented_session_claims_the_home
 test_e2e_daemon_parented_version_named_session_keeps_its_lock
+test_acquire_records_pid_and_start_time
+test_reused_pid_with_other_start_time_is_not_an_owner
+test_live_owner_with_matching_start_time_keeps_the_lock
+test_legacy_pid_only_record_keeps_pid_only_liveness
+test_legacy_upgrade_during_own_sweep
+test_readers_see_only_complete_owner_lines
+test_failed_start_lookup_preserves_only_legacy_liveness
+test_failed_renewal_preserves_recorded_start_time
+test_ps_start_time_matches_across_timezones
+test_malformed_records_are_not_owned

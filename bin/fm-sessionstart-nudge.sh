@@ -16,6 +16,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 . "$SCRIPT_DIR/fm-primary-scope-lib.sh"
 # shellcheck source=bin/fm-operational-input.sh
 . "$SCRIPT_DIR/fm-operational-input.sh"
+# shellcheck source=bin/fm-session-lock-record-lib.sh
+. "$SCRIPT_DIR/fm-session-lock-record-lib.sh"
 
 fm_is_gate_agent "$FM_ROOT" && exit 0
 fm_primary_scope_matches "$FM_ROOT" "$STATE" || exit 0
@@ -23,10 +25,9 @@ fm_primary_scope_matches "$FM_ROOT" "$STATE" || exit 0
 lock_is_in_ancestry() {
   local lock_pid pid=$$ _
   [ -f "$STATE/.lock" ] || return 1
-  IFS= read -r lock_pid < "$STATE/.lock" 2>/dev/null || return 1
-  case "$lock_pid" in
-    ''|*[!0-9]*|1) return 1 ;;
-  esac
+  fm_session_lock_read "$STATE/.lock" || return 1
+  lock_pid=$FM_SESSION_LOCK_PID
+  fm_session_lock_start_matches "$lock_pid" "$FM_SESSION_LOCK_START" || return 1
   kill -0 "$lock_pid" 2>/dev/null || return 1
   for _ in 1 2 3 4 5 6 7 8; do
     [ "$pid" = "$lock_pid" ] && return 0

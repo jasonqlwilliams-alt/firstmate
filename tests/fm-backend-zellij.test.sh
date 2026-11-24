@@ -585,6 +585,23 @@ test_capture_fails_when_session_absent() {
   pass "fm_backend_zellij_capture: fails when the target session is not listed as active (session_exists pre-check)"
 }
 
+test_labeled_capture_rejects_ambiguous_pane_inventory() {
+  local dir fb status=0
+  dir="$TMP_ROOT/capture-ambiguous-pane"; mkdir -p "$dir/responses"
+  printf '%s\n' '[{"id":7,"tab_id":3,"is_plugin":false},{"id":7,"tab_id":4,"is_plugin":false}]' > "$dir/responses/1.out"
+  zellij_tab_response "$dir" 2 3 fm-label
+  printf 'worker output\n' > "$dir/responses/3.out"
+  fb=$(make_zellij_fakebin "$dir")
+  PATH="$fb:$PATH" FM_ZELLIJ_LOG="$dir/log" FM_ZELLIJ_RESPONSES="$dir/responses" \
+    FM_ZELLIJ_SESSION_LIST="firstmate" \
+    bash -c '. "$0/bin/backends/zellij.sh"; fm_backend_zellij_capture firstmate:7 5 fm-label' "$ROOT" \
+    >/dev/null 2>&1 || status=$?
+  [ "$status" -ne 0 ] || fail "labeled capture trusted the first of two matching terminal pane IDs"
+  assert_not_contains "$(cat "$dir/log")" $'\x1f''dump-screen' \
+    "labeled capture should stop before reading a screen when the pane inventory is ambiguous"
+  pass "fm_backend_zellij_capture: refuses duplicate terminal pane IDs before reading a screen"
+}
+
 test_send_key_normalizes_and_targets_pane() {
   local dir fb
   dir="$TMP_ROOT/sendkey"; mkdir -p "$dir/responses"
@@ -1325,6 +1342,7 @@ test_capture_small_reads_use_viewport_and_trim
 test_capture_large_reads_use_full_scrollback_and_trim
 test_capture_fails_when_pane_absent
 test_capture_fails_when_session_absent
+test_labeled_capture_rejects_ambiguous_pane_inventory
 test_send_key_normalizes_and_targets_pane
 test_send_literal_uses_paste_separator_for_option_shaped_text
 test_send_text_line_clears_partial_input_when_enter_fails

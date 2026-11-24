@@ -1018,7 +1018,7 @@ else
         if [ "$TARGET_HARNESS" = agy ]; then
           echo "fm-send: doorbell not typed into $T. Possible causes are pending text, a composer that could not be proven empty, or a composer row too narrow for the doorbell line. A wider agy pane can help the line fit. The steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer." >&2
         else
-          echo "fm-send: doorbell not typed because $T's composer holds pending text or, on a Codex or Rovo pane, is not proven empty; the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2
+          echo "fm-send: doorbell not typed because the screen in $T blocked the doorbell; the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2
         fi
         ;;
       2) echo "fm-send: doorbell did not reach $T; the steer is durably recorded at $INBOX_RECORD and the watcher will re-ring" >&2 ;;
