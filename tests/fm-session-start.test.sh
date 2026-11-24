@@ -1364,7 +1364,7 @@ EOF
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
-  'list-windows -t fm-sess -F #{window_name}') printf 'fm-mate2\n' ;;
+  'list-windows -t =fm-sess -F #{window_name}') printf 'fm-mate2\n' ;;
   'display-message -p -t fm-sess:fm-mate #{pane_id}'|'display-message -p -t fm-sess:fm-mate2 #{pane_id}')
     printf '%%1\n'
     ;;
