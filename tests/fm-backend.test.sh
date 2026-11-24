@@ -809,12 +809,6 @@ case "${1:-}" in
           printf '%s\n' '@4 sess:scratch' '@5 sess:scratch' | fm_fake_tmux_window_ids "$@"
         fi ;;
       foreign) printf '@7 other:win\n' | fm_fake_tmux_window_ids "$@" ;;
-      multiline)
-        if [ "$format" = '#{window_id}' ]; then
-          printf '@7 sess:decoy\n' | fm_fake_tmux_window_ids "$@"
-        else
-          printf '@7 sess:decoy\n@7 sess:win\n'
-        fi ;;
       unreadable) printf 'error connecting to fixture (Permission denied)\n' >&2; exit 1 ;;
       *) printf '@7 sess:win-neighbour\n@3 sess:win\n' | fm_fake_tmux_window_ids "$@" ;;
     esac ;;
@@ -862,11 +856,6 @@ test_peek_tmux_contract() {
     fail "fm-peek should reject the same window name in another session"
   fi
   assert_contains "$out" "window sess:win not found" "fm-peek should report a missing recorded window"
-  if out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" PEEK_INVENTORY=multiline \
-    "$ROOT/bin/fm-peek.sh" worker 2 2>&1); then
-    fail "fm-peek read a decoy whose multiline name resembles the missing worker"
-  fi
-  assert_contains "$out" "window sess:win not found" "a decoy must leave the recorded worker missing"
   if out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" PEEK_INVENTORY=unreadable \
     "$ROOT/bin/fm-peek.sh" worker 2 2>&1); then
     fail "fm-peek should fail when tmux cannot read the inventory"

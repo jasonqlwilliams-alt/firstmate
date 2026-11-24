@@ -168,6 +168,36 @@ out=$(FM_HOME="$LAB/home" "$ROOT/bin/fm-peek.sh" mate 40 2>&1) \
 case "$out" in *NEIGHBOUR-TWO-MARKER*) fail "fm-peek of a closed recorded worker showed the neighbour's screen" ;; esac
 pass "fm-peek: closed recorded worker reads as missing"
 
+multiline_target="$SESSION:fm-multiline-worker"
+multiline_name=$'fm-multiline-decoy\n'"$multiline_target"
+escaped_name="fm-multiline-decoy\\n$multiline_target"
+multiline_window=$(tmux new-window -dP -F '#{window_id}' -t "$SESSION:" -n "$escaped_name" -c "$LAB/neighbour" -- \
+  sh -c "printf '%s\n' MULTILINE-DECOY-MARKER; exec '$SLEEP_BIN' 600") \
+  || fail "could not create the multiline decoy window"
+if ! rename_error=$(tmux rename-window -t "$multiline_window" "$multiline_name" 2>&1); then
+  case "$rename_error" in
+    'invalid window name:'*) ;;
+    *) fail "could not attempt a multiline window name: $rename_error" ;;
+  esac
+fi
+stored_name=$(tmux display-message -p -t "$multiline_window" '#{window_name}') \
+  || fail "could not read the decoy name by its window ID"
+case "$stored_name" in
+  "$multiline_name"|"$escaped_name"|"fm-multiline-decoy\\\\n$multiline_target") ;;
+  *) fail "tmux did not store the decoy with the recorded worker target as its suffix" ;;
+esac
+wait_for_marker "$multiline_window" MULTILINE-DECOY-MARKER
+printf 'window=%s\n' "$multiline_target" > "$LAB/home/state/multiline-worker.meta"
+if out=$(FM_HOME="$LAB/home" "$ROOT/bin/fm-peek.sh" multiline-worker 40 2>&1); then
+  fail "fm-peek read the multiline decoy as the recorded worker: $out"
+fi
+case "$out" in
+  *MULTILINE-DECOY-MARKER*) fail "fm-peek returned the decoy screen" ;;
+  *"window $multiline_target not found"*) ;;
+  *) fail "fm-peek did not report the recorded worker missing: $out" ;;
+esac
+pass "fm-peek leaves the worker missing beside a newline-shaped decoy"
+
 # The surviving neighbour is still read exactly as itself.
 fm_backend_capture tmux "$SESSION:fm-mate2" 40 | grep -q NEIGHBOUR-TWO-MARKER \
   || fail "the surviving neighbour must still capture its own screen"

@@ -86,11 +86,21 @@ fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> 
   fm_tmux_submit_core "$@"
 }
 
+fm_backend_tmux_launch_session() {
+  local session=firstmate
+  if [ -n "${TMUX:-}" ]; then
+    session=$(tmux display-message -p '#S') || return 1
+    [ -n "$session" ] || return 1
+  fi
+  printf '%s\n' "$session"
+}
+
 # fm_backend_tmux_container_ensure: reuse the current tmux session when
 # firstmate itself runs inside tmux, else ensure a dedicated detached
 # "firstmate" session exists. Mirrors fm-spawn.sh's container-ensure block;
 # prints the resolved session name.
-fm_backend_tmux_container_ensure() {
+fm_backend_tmux_container_ensure() {  # [session]
+  local session=${1:-}
   fm_backend_required_tool_available tmux tmux || {
     if [ "$?" -eq 2 ]; then
       echo "error: could not verify list-windows -f support on the tmux server. See docs/tmux-backend.md#setup." >&2
@@ -99,12 +109,13 @@ fm_backend_tmux_container_ensure() {
     fi
     return 1
   }
-  if [ -n "${TMUX:-}" ]; then
-    tmux display-message -p '#S'
-  else
-    tmux has-session -t '=firstmate' 2>/dev/null || tmux new-session -d -s firstmate || return 1
-    printf 'firstmate'
+  if [ -z "$session" ]; then
+    session=$(fm_backend_tmux_launch_session) || return 1
   fi
+  if [ -z "${TMUX:-}" ]; then
+    tmux has-session -t "=$session" 2>/dev/null || tmux new-session -d -s "$session" || return 1
+  fi
+  printf '%s\n' "$session"
 }
 
 # fm_backend_tmux_create_task: create the task's window in <proj-abs>,

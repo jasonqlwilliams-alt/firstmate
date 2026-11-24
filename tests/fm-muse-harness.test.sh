@@ -72,24 +72,35 @@ make_spawn_fakebin() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+session=${FM_FAKE_MUSE_SESSION:-firstmate}
 case "$*" in
   *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
 esac
 case "${1:-}" in
   -V) printf 'tmux 3.2\n'; exit 0 ;;
+  has-session)
+    case "$3" in
+      "=$session"|"$session"|firstmate) exit 0 ;;
+      *) exit 1 ;;
+    esac
+    ;;
   show-environment)
+    case "$3" in
+      "=$session:"|"$session"|firstmate) ;;
+      *) exit 1 ;;
+    esac
     [ "${FM_FAKE_WORKER_META_KEY:-}" = present ] || exit 1
     printf 'META_API_KEY=worker-key\n'
     exit 0
     ;;
-  display-message) printf 'firstmate\n'; exit 0 ;;
+  display-message) printf '%s\n' "$session"; exit 0 ;;
   list-windows)
     if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
       fm_fake_tmux_window_ids "$@" < "$0.windows"
     fi
     exit 0 ;;
   new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@"; exit 0 ;;
-  has-session|new-session|kill-window) exit 0 ;;
+  new-session|kill-window) exit 0 ;;
   send-keys)
     prev=
     for arg in "$@"; do
@@ -151,7 +162,8 @@ run_muse_spawn() {  # <home> <proj> <wt> <fakebin> <id> [extra args...]
   FM_ROOT_OVERRIDE='' FM_HOME="$home" \
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
     FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
-    FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$wt" TMUX="fake,1,0" \
+    FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$wt" TMUX="${FM_TEST_MUSE_TMUX-fake,1,0}" \
+    FM_FAKE_MUSE_SESSION="${FM_TEST_MUSE_SESSION:-firstmate}" \
     FM_FAKE_LAUNCH_LOG="$home/launch.log" \
     FM_FAKE_MUSE_EXECUTABLE="$fakebin/muse" \
     FM_FAKE_MUSE_VERSIONED="$fakebin/muse-bin-test-version" \
@@ -357,6 +369,32 @@ EOF
   status=$?
   expect_code 0 "$status" "muse spawn should accept a stored credential"
   pass "muse spawn accepts a stored credential without META_API_KEY"
+}
+
+test_spawn_checks_credentials_in_its_destination_session() {
+  local name tmux_context session expected rec case_dir home proj wt fakebin id out status
+  while IFS='|' read -r name tmux_context session expected; do
+    rec=$(make_spawn_case "$name")
+    IFS='|' read -r case_dir home proj wt fakebin id <<EOF
+$rec
+EOF
+    out=$(FM_TEST_MUSE_KEY='' FM_TEST_MUSE_TMUX="$tmux_context" FM_TEST_MUSE_SESSION="$session" \
+      run_muse_spawn "$home" "$proj" "$wt" "$fakebin" "$id" --backend tmux --mode no-mistakes --yolo off)
+    status=$?
+    expect_code "$expected" "$status" "Muse spawn with a session key in $session: $out"
+    if [ "$expected" -eq 0 ]; then
+      grep -Fxq "window=$session:fm-$id" "$home/state/$id.meta" \
+        || fail "Muse did not launch in the session that holds its key"
+    else
+      assert_contains "$out" "no worker-reachable credential" "a neighbour's key must not satisfy preflight"
+      assert_absent "$fakebin/tmux.windows" "Muse allocated a worker without a destination credential"
+    fi
+  done <<'ROWS'
+detached-neighbor||firstmate-lab|1
+detached-exact||firstmate|0
+attached-session|fake,1,0|firstmate-lab|0
+ROWS
+  pass "Muse fresh spawn checks credentials in the session that receives the worker"
 }
 
 test_spawn_resolves_relative_xdg_roots() {
@@ -957,6 +995,7 @@ test_spawn_maps_effort_and_model
 test_spawn_refuses_without_credential
 test_spawn_refuses_caller_only_environment_credential
 test_spawn_accepts_stored_credential
+test_spawn_checks_credentials_in_its_destination_session
 test_spawn_resolves_relative_xdg_roots
 test_spawn_refuses_secondmate
 test_spawn_writes_busy_binding_and_teardown_removes_it
