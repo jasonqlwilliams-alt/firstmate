@@ -1158,10 +1158,21 @@ SH
 if [ -n "${FM_FAKE_TMUX_LOG:-}" ]; then
   printf '%s\n' "$*" >> "$FM_FAKE_TMUX_LOG"
 fi
+fixture_windows() {
+  sed -n 's/^window=//p' "${FM_HOME:?}"/state/*.meta
+}
 case "$*" in
   list-windows*)
-    sed -n 's/^window=[^:]*://p' "${FM_HOME:?}"/state/*.meta
+    case "$*" in
+      *'#{window_id}'*)
+        fixture_windows | awk '{ print "@" NR " " $0 }' | fm_fake_tmux_window_ids "$@" ;;
+      *) fixture_windows | cut -d: -f2- ;;
+    esac
     exit 0
+    ;;
+  list-panes*)
+    fixture_windows | awk -v target="$3" '"@" NR == target { print "%" NR; found = 1 } END { exit !found }'
+    exit $?
     ;;
   *display-message*'#{pane_current_command}'*) printf '%s\n' codex; exit 0 ;;
   *display-message*'#{pane_id}'*) printf '%s\n' '%1'; exit 0 ;;
@@ -1870,6 +1881,7 @@ EOF
 # updated and each live agent receives only its own changed-content instruction.
 test_config_reread_per_home_changed_sets_and_exact_bytes() {
   local w head log out err status instr_a instr_b multiline_json pointer
+  local id target inbox quoted_inbox expected actual
   w=$(new_world config-reread-per-home)
   head=$(git -C "$w/main" rev-parse HEAD)
   add_sm_worktree "$w" alpha "$head"
@@ -1973,7 +1985,17 @@ test_config_reread_per_home_changed_sets_and_exact_bytes() {
   assert_contains "$(inbox_stream "$w/home/state" alpha)" "$pointer" "reread send must point to the durable instruction file"
   assert_not_contains "$(inbox_stream "$w/home/state" alpha)" '"harness": "grok"' "sent message must not inline multiline JSON"
   assert_not_contains "$(inbox_stream "$w/home/state" alpha)" "Default worker" "sent message must not summarize"
-  assert_not_contains "$(cat "$log")" '"harness": "grok"' "the typed doorbell must not inline multiline JSON"
+  [ "$(grep -c '^send-keys ' "$log")" -eq 4 ] || fail "config reread should type and submit exactly two doorbells"
+  for id in alpha beta; do
+    target="firstmate:fm-$id"
+    inbox=$(cd "$w/home/state/$id.inbox" && pwd) || fail "$id inbox was not created"
+    quoted_inbox=$(printf '%s' "$inbox" | sed "s/'/'\\\\''/g")
+    expected=$(printf '%s\n' \
+      "send-keys -t $target -l : Firstmate instruction waiting: list '$quoted_inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '$quoted_inbox'/handled/." \
+      "send-keys -t $target Enter")
+    actual=$(grep -F "send-keys -t $target " "$log")
+    [ "$actual" = "$expected" ] || fail "$id should receive only its inbox doorbell followed by Enter: $actual"
+  done
   pass "B15 config reread is per-home, exact-byte, ordered, and pointer-only"
 }
 

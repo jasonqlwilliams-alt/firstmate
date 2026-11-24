@@ -71,13 +71,17 @@ wait_for_marker() {  # <raw-target> <marker>
   fail "window $1 never showed $2"
 }
 
+peek_lab() {
+  FM_HOME="$LAB/home" FM_STATE_OVERRIDE="$LAB/home/state" "$ROOT/bin/fm-peek.sh" "$@"
+}
+
 split_pane=$(tmux split-window -d -P -F '#{pane_id}' -t "$SESSION:0" -c "$LAB/base" -- \
   sh -c "printf '%s\\n' SPLIT-PANE-MARKER; exec '$SLEEP_BIN' 600") \
   || fail "could not create the explicit split pane"
 split_index=$(tmux display-message -p -t "$split_pane" '#{pane_index}')
 explicit="$SESSION:0.$split_index"
 wait_for_marker "$split_pane" SPLIT-PANE-MARKER
-FM_HOME="$LAB/home" "$ROOT/bin/fm-peek.sh" "$explicit" 40 | grep -q SPLIT-PANE-MARKER \
+peek_lab "$explicit" 40 | grep -q SPLIT-PANE-MARKER \
   || fail "fm-peek should read the explicitly selected split pane"
 fm_backend_target_exists tmux "$explicit" '' explicit \
   || fail "a live explicit split pane should pass the presence probe"
@@ -163,40 +167,48 @@ unset FM_TMUX_EXPLICIT_TARGET
 
 # End to end through fm-peek with a recorded task in a disposable home.
 printf 'window=%s:fm-mate\n' "$SESSION" > "$LAB/home/state/mate.meta"
-out=$(FM_HOME="$LAB/home" "$ROOT/bin/fm-peek.sh" mate 40 2>&1) \
+out=$(peek_lab mate 40 2>&1) \
   && fail "fm-peek of a closed recorded worker must fail, got: $out"
-case "$out" in *NEIGHBOUR-TWO-MARKER*) fail "fm-peek of a closed recorded worker showed the neighbour's screen" ;; esac
+case "$out" in
+  *NEIGHBOUR-TWO-MARKER*) fail "fm-peek of a closed recorded worker showed the neighbour's screen" ;;
+  *"window $SESSION:fm-mate not found"*) ;;
+  *) fail "fm-peek did not report the closed recorded window missing: $out" ;;
+esac
 pass "fm-peek: closed recorded worker reads as missing"
 
-multiline_target="$SESSION:fm-multiline-worker"
-multiline_name=$'fm-multiline-decoy\n'"$multiline_target"
-escaped_name="fm-multiline-decoy\\n$multiline_target"
-multiline_window=$(tmux new-window -dP -F '#{window_id}' -t "$SESSION:" -n "$escaped_name" -c "$LAB/neighbour" -- \
-  sh -c "printf '%s\n' MULTILINE-DECOY-MARKER; exec '$SLEEP_BIN' 600") \
-  || fail "could not create the multiline decoy window"
-if ! rename_error=$(tmux rename-window -t "$multiline_window" "$multiline_name" 2>&1); then
-  case "$rename_error" in
-    'invalid window name:'*) ;;
-    *) fail "could not attempt a multiline window name: $rename_error" ;;
+test_multiline_decoy() {
+  local target="$SESSION:fm-multiline-worker" name window stored_name raw_inventory out
+  name=$'fm-multiline-decoy\n'"$target"
+  if ! window=$(tmux new-window -dP -F '#{window_id}' -t "$SESSION:" -n "$name" -c "$LAB/neighbour" -- \
+    sh -c "printf '%s\n' MULTILINE-DECOY-MARKER; exec '$SLEEP_BIN' 600" 2>&1); then
+    case "$window" in
+      *'invalid window name:'*) printf 'skip: tmux rejects multiline window names\n'; return 0 ;;
+      *) fail "could not create the multiline decoy window: $window" ;;
+    esac
+  fi
+  stored_name=$(tmux display-message -p -t "$window" '#{window_name}') \
+    || fail "could not read the decoy name by its window ID"
+  if [ "$stored_name" != "$name" ]; then
+    printf 'skip: tmux does not preserve literal newlines in window names\n'
+    return 0
+  fi
+  raw_inventory=$(tmux list-windows -t "=$SESSION:" -F '#{session_name}:#{window_name}') \
+    || fail "could not read the raw multiline window inventory"
+  grep -Fxq -- "$target" <<< "$raw_inventory" \
+    || fail "raw tmux inventory did not expose the misleading worker line"
+  wait_for_marker "$window" MULTILINE-DECOY-MARKER
+  printf 'window=%s\n' "$target" > "$LAB/home/state/multiline-worker.meta"
+  if out=$(peek_lab multiline-worker 40 2>&1); then
+    fail "fm-peek read the multiline decoy as the recorded worker: $out"
+  fi
+  case "$out" in
+    *MULTILINE-DECOY-MARKER*) fail "fm-peek returned the decoy screen" ;;
+    *"window $target not found"*) ;;
+    *) fail "fm-peek did not report the recorded worker missing: $out" ;;
   esac
-fi
-stored_name=$(tmux display-message -p -t "$multiline_window" '#{window_name}') \
-  || fail "could not read the decoy name by its window ID"
-case "$stored_name" in
-  "$multiline_name"|"$escaped_name"|"fm-multiline-decoy\\\\n$multiline_target") ;;
-  *) fail "tmux did not store the decoy with the recorded worker target as its suffix" ;;
-esac
-wait_for_marker "$multiline_window" MULTILINE-DECOY-MARKER
-printf 'window=%s\n' "$multiline_target" > "$LAB/home/state/multiline-worker.meta"
-if out=$(FM_HOME="$LAB/home" "$ROOT/bin/fm-peek.sh" multiline-worker 40 2>&1); then
-  fail "fm-peek read the multiline decoy as the recorded worker: $out"
-fi
-case "$out" in
-  *MULTILINE-DECOY-MARKER*) fail "fm-peek returned the decoy screen" ;;
-  *"window $multiline_target not found"*) ;;
-  *) fail "fm-peek did not report the recorded worker missing: $out" ;;
-esac
-pass "fm-peek leaves the worker missing beside a newline-shaped decoy"
+  pass "fm-peek leaves the worker missing beside a multiline decoy"
+}
+test_multiline_decoy
 
 # The surviving neighbour is still read exactly as itself.
 fm_backend_capture tmux "$SESSION:fm-mate2" 40 | grep -q NEIGHBOUR-TWO-MARKER \
