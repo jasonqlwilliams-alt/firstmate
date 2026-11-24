@@ -263,8 +263,8 @@ for mode in restart-live-open restart-initial restart-clipped restart-narrow ini
     doorbell-*)
       rec="$TMP_ROOT/001.msg"
       printf 'schema=fm-task-inbox.v1\n--\nreview the open records\n' > "$rec"
-      out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" bash -c '. "$1"; fm_task_inbox_ring tmux "$2" "$3" fm-exitdialog claude' \
-        _ "$ROOT/bin/fm-task-inbox-lib.sh" "$target" "$rec" 2>&1) || rc=$?
+      out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" bash -c '. "$1"; fm_task_inbox_ring tmux "$2" "$3" fm-exitdialog claude "$4"' \
+        _ "$ROOT/bin/fm-task-inbox-lib.sh" "$target" "$rec" "$state/exitdialog.meta" 2>&1) || rc=$?
       ;;
     *) out=$(run_fixture fm-control.sh exitdialog exit 2>&1) || rc=$? ;;
   esac
@@ -473,6 +473,7 @@ case "$1 $2" in
         )
         ;;
       typed|retry) printf 'Claude\n\033[1m❯ /exit\033[0m\n' ;;
+      doorbell-typed) printf 'Claude\n❯ %s\n' "$(head -n 1 "$FM_DIALOG_CASE/input")" ;;
       slow-stop)
         printf 'read\n' >> "$FM_DIALOG_CASE/reads"
         sleep 0.7
@@ -496,6 +497,7 @@ case "$1 $2" in
     printf '%s\n' "$4" >> "$FM_DIALOG_CASE/input"
     case "$FM_DIALOG_MODE:$4" in
       doorbell-after*:*|dialog-after-typing:/exit) printf 'dialog\n' > "$FM_DIALOG_CASE/phase" ;;
+      doorbell-slow:*) printf 'doorbell-typed\n' > "$FM_DIALOG_CASE/phase" ;;
       *:/exit) printf 'typed\n' > "$FM_DIALOG_CASE/phase" ;;
     esac
     ;;
@@ -551,8 +553,8 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-live
       rec="$FM_DIALOG_CASE/001.msg"
       printf 'schema=fm-task-inbox.v1\n--\nreview the open records\n' > "$rec"
       PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
-        bash -c '. "$1"; fm_task_inbox_ring herdr fixture:p1 "$2" fm-exitdialog claude-latest' \
-        _ "$ROOT/bin/fm-task-inbox-lib.sh" "$rec" || rc=$?
+        bash -c '. "$1"; fm_task_inbox_ring herdr fixture:p1 "$2" fm-exitdialog claude-latest "$3"' \
+        _ "$ROOT/bin/fm-task-inbox-lib.sh" "$rec" "$meta" || rc=$?
       if [ "$mode" = doorbell-slow ]; then
         expect_code 0 "$rc" 'slow composer reads should allow normal doorbell delivery'
         assert_contains "$(cat "$FM_DIALOG_CASE/input")" 'Firstmate instruction waiting' 'the composer did not receive the doorbell text'
@@ -714,6 +716,26 @@ out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$FM_DIALOG_HOME" \
 [ "$out" = idle ] || fail "ordinary remote observation did not report the native idle state: $out"
 pass 'remote exit-dialog observation emits only a positive match'
 
+remote_state="$FM_DIALOG_HOME/state/parent-route"
+export FM_DIALOG_MODE=remote-send
+for phase in unreadable composer; do
+  printf '%s\n' "$phase" > "$FM_DIALOG_CASE/phase"
+  out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$FM_DIALOG_HOME" bash -c '
+    . "$1/bin/fm-wake-lib.sh"
+    if [ "$2" = composer ]; then
+      lock="$FM_HOME/state/parent-route/.control-exitdialog.lock"
+      fm_lock_try_acquire "$lock" || exit 91
+      trap '\''fm_lock_release "$lock"'\'' EXIT
+    fi
+    "$1/bin/fm-remote-secondmate-control.sh" send exitdialog "remote probe $2"
+  ' _ "$ROOT" "$phase" 2>&1) || fail "the remote refusal should still enqueue: $out"
+  assert_contains "$out" 'prevented typing the doorbell' 'the remote send did not report a refused doorbell'
+  assert_absent "$FM_DIALOG_CASE/input" 'the remote refusal sent terminal input'
+done
+assert_present "$remote_state/exitdialog.inbox/001.msg" 'the unreadable remote screen lost the durable record'
+assert_present "$remote_state/exitdialog.inbox/002.msg" 'the held remote lifecycle lock lost the durable record'
+pass 'remote steering preserves delivery while an unreadable screen or host-local lifecycle lock blocks the doorbell'
+
 cat > "$TMP_ROOT/bin/viewport-stub" <<'SH'
 #!/usr/bin/env bash
 set -eu
@@ -791,10 +813,12 @@ for mode in cmux zellij zellij-plain orca; do
     mkdir "$FM_DIALOG_CASE"
     rec="$FM_DIALOG_CASE/001.msg"
     printf 'schema=fm-task-inbox.v1\n--\nreview the open records\n' > "$rec"
+    stub_meta="$FM_DIALOG_CASE/exitdialog.meta"
+    fm_write_meta "$stub_meta" "backend=$backend" "window=$target" 'harness=claude'
     rc=0
     PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_DIALOG_PHASE="$when" FM_COMPOSER_CAPTURE_LINES="$capture_lines" \
-      bash -c '. "$1"; fm_task_inbox_ring "$2" "$3" "$4" "" claude' \
-      _ "$ROOT/bin/fm-task-inbox-lib.sh" "$backend" "$target" "$rec" || rc=$?
+      bash -c '. "$1"; fm_task_inbox_ring "$2" "$3" "$4" "" claude "$5"' \
+      _ "$ROOT/bin/fm-task-inbox-lib.sh" "$backend" "$target" "$rec" "$stub_meta" || rc=$?
     if [ "$when" = before ]; then
       expect_code 1 "$rc" "$mode $scenario should block typing when the dialog is already open"
       assert_absent "$FM_DIALOG_CASE/input" "$mode $scenario typed into the dialog"

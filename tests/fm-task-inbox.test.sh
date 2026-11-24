@@ -872,10 +872,12 @@ ring_stub_window() {  # <name> <mode> <log>
 # Ring one fresh record into a stub window through the real library, as the
 # recorded harness. Prints the ring's return code.
 ring_into() {  # <state> <task> <target> <harness>
-  local state=$1 task=$2 target=$3 harness=$4 rec rc=0
+  local state=$1 task=$2 target=$3 harness=$4 rec rc=0 meta
   rec=$(inbox_lib "$state" fm_task_inbox_write "$state" "$task" "please continue")
+  meta="$state/$task.meta"
+  fm_write_meta "$meta" "window=$target" "harness=$harness"
   PATH="$RING_LAB/shim:$PATH" \
-    inbox_lib "$state" fm_task_inbox_ring tmux "$target" "$rec" "" "$harness" || rc=$?
+    inbox_lib "$state" fm_task_inbox_ring tmux "$target" "$rec" "" "$harness" "$meta" || rc=$?
   printf '%s\n' "$rc"
 }
 

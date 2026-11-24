@@ -95,8 +95,8 @@ launch_cmd() {  # <name>
 # Wait for the harness to look steerable. 0 = the composer classified a
 # proven empty; 2 = the readiness budget expired without an empty verdict but
 # also without a pending one. The caller mirrors production's per-harness ring
-# gate (bin/fm-task-inbox-lib.sh) on 2: Codex fails, because its doorbell
-# needs a proven-empty composer, while any other harness proceeds with a note,
+# gate (bin/fm-task-inbox-lib.sh) on 2: Claude and Codex fail because their
+# doorbells need a proven-empty composer, while other covered harnesses proceed with a note,
 # because its ring still fires on an unidentified idle screen (the composer
 # matrix guard, not this one, owns re-proving the classifier per release).
 wait_ready() {  # <window>
@@ -141,8 +141,8 @@ check_harness_doorbell() {  # <name>
     tmux -L "$SOCKET" kill-window -t "$SESSION:$win" 2>/dev/null || true
     return 0
   fi
-  if [ "$ready_rc" -ne 0 ] && [ "$name" != codex ]; then
-    note "$name ($version): idle composer never classified empty; proceeding as production does (only a Codex pane needs a proven-empty composer)"
+  if [ "$ready_rc" -ne 0 ] && [ "$name" != codex ] && [ "$name" != claude ]; then
+    note "$name ($version): idle composer never classified empty; proceeding as production does for this harness"
   elif [ "$ready_rc" -ne 0 ]; then
     FAILED=1
     printf 'not ok - %s (%s): idle composer never classified empty, so the ring refuses its doorbell and every steer escalates as stuck\n' "$name" "$version" >&2
@@ -174,7 +174,7 @@ check_harness_doorbell() {  # <name>
     # message so a doorbell swallowed by a startup or update modal recovers
     # exactly as the production re-ring ladder recovers it.
     if [ "$i" -eq $((TIMEOUT / 2)) ] && [ -f "$rec" ]; then
-      fm_task_inbox_ring tmux "$SESSION:$win" "$rec" "" "$name" || true
+      fm_task_inbox_ring tmux "$SESSION:$win" "$rec" "" "$name" "$home/state/$task.meta" || true
       note "$name ($version): re-rang the doorbell once (watcher's role) at ${i}s"
     fi
     sleep 1

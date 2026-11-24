@@ -417,7 +417,8 @@ inbox_steer_check() {  # <window> <task> <backend>
   case "$verb" in
     ring)
       ring_rc=0
-      fm_task_inbox_ring "$backend" "$w" "$rec" "fm-$task" "$(fm_meta_get "$FM_BACKEND_HERDR_ENDPOINT_META" harness)" || ring_rc=$?
+      fm_task_inbox_ring "$backend" "$w" "$rec" "fm-$task" \
+        "$(fm_meta_get "$FM_BACKEND_HERDR_ENDPOINT_META" harness)" "$FM_BACKEND_HERDR_ENDPOINT_META" || ring_rc=$?
       if [ "$ring_rc" -eq 3 ]; then
         inbox_steer_escalate_unavailable "$w" "$task" "$rec"
         return 0

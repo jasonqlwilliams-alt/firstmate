@@ -73,7 +73,10 @@ A submit retry requires a live agent and a capture showing `/exit` still in the 
 Stop checks, further screen reads, and retries after the first Enter share the `FM_CONTROL_EXIT_WAIT` budget.
 If the screen cannot be read in time, the restart may report a timeout without naming the dialog.
 
-For an ordinary steer to a Claude pane, the doorbell withholds typing if its first read recognizes the confirmation and withholds Enter if its post-typing read recognizes it.
+The Claude doorbell and native command send hold the task's lifecycle lock from the first screen read through submission, including on watcher re-rings and the remote secondmate's host.
+They require a readable, proven-empty composer to type and a capture of the composer holding the exact line before each Enter.
+The standalone Claude recovery interrupt requires a readable, proven-empty composer under the same lock before sending Escape.
+An explicit operator key send remains available to act on a dialog.
 The [Claude adapter reference](../.agents/skills/harness-adapters/references/harness/claude.md#background-tasks-exit-confirmation) owns the screen layout and recognition limits.
 
 ## Transactional relaunch

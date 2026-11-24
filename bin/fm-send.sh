@@ -51,9 +51,7 @@
 # dead or missing endpoint directly to recovery without typing. An explicit
 # fire-and-forget record is excluded from that ladder.
 # bin/fm-task-inbox-lib.sh owns the record format, the doorbell line, and the
-# re-ring ladder, including the ring's per-harness screen gate (the Codex
-# update picker and pending composer text are refused on every harness, and a
-# Codex or Rovo pane also needs a proven-empty composer); a refused ring prints a
+# re-ring ladder, including the ring's per-harness screen gate. A refused ring prints a
 # notice, and the watcher retries an ordinary record before escalating it. No
 # composer verdict is delivery proof on this plane, and a failed or refused
 # ring never fails the send.
@@ -77,7 +75,9 @@
 # bin/fm-tmux-lib.sh. Tune with FM_SEND_RETRIES (default 3) / FM_SEND_SLEEP
 # (0.4). Slash commands, and codex `$...` skill invocations resolved through
 # harness meta, get a longer pre-Enter settle so completion popups do not
-# swallow Enter. A remote secondmate target has no typed text plane at all:
+# swallow Enter. Typed text to a recorded Claude worker uses the same
+# lifecycle lock and composer proof as the doorbell before writing or
+# submitting. A remote secondmate target has no typed text plane at all:
 # every remote text steer rides the inbox (a marked secondmate request already
 # reaches the harness as marker-prefixed chat rather than a parser command, so
 # routing a remote "/..." or "$..." through the record changes nothing the
@@ -257,6 +257,26 @@ fm_send_id_from_meta() {  # <meta-file>
   local base
   base=${1##*/}
   printf '%s' "${base%.meta}"
+}
+
+# Run under the Claude task's lifecycle lock. The post-Enter read confirms
+# that the composer cleared or supplies fresh proof for the next Enter.
+fm_send_claude_submit() {  # <backend> <target> <label> <text> <retries> <enter-sleep> <settle>
+  local backend=$1 target=$2 label=$3 text=$4 retries=$5 sleep_s=$6 settle=$7 screen attempt=0
+  screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" '' claude) || screen=unknown
+  [ "$screen" = empty ] || { printf 'input-refused'; return 0; }
+  fm_backend_send_literal "$backend" "$target" "$text" "$label" >/dev/null || { printf 'send-failed'; return 0; }
+  sleep "$settle"
+  screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" "$text" claude) || screen=unknown
+  [ "$screen" = pending ] || { printf 'enter-withheld'; return 0; }
+  while :; do
+    fm_backend_send_key "$backend" "$target" Enter "$label" >/dev/null || { printf 'send-failed'; return 0; }
+    sleep "$sleep_s"
+    screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" "$text" claude) || screen=unknown
+    attempt=$((attempt + 1))
+    [ "$screen" = pending ] && [ "$attempt" -lt "$retries" ] || break
+  done
+  printf '%s' "$screen"
 }
 
 # fm_send_clear_after_interrupt: muse RESTORES the interrupted prompt back into
@@ -1015,9 +1035,9 @@ else
     # because the watcher owns loss detection from here, either through its
     # bounded re-ring ladder or direct unavailable-endpoint recovery.
     ring_rc=0
-    fm_task_inbox_ring "$TARGET_BACKEND" "$T" "$INBOX_RECORD" "$EXPECTED_LABEL" "$TARGET_HARNESS" || ring_rc=$?
+    fm_task_inbox_ring "$TARGET_BACKEND" "$T" "$INBOX_RECORD" "$EXPECTED_LABEL" "$TARGET_HARNESS" "$TARGET_META" || ring_rc=$?
     case "$ring_rc" in
-      1) echo "fm-send: doorbell not typed because the screen in $T blocked the doorbell; the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2 ;;
+      1) echo "fm-send: doorbell not typed because the screen or lifecycle lock for $T blocked the doorbell; the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2 ;;
       2) echo "fm-send: doorbell did not reach $T; the steer is durably recorded at $INBOX_RECORD and the watcher will re-ring" >&2 ;;
       3) echo "fm-send: doorbell not typed because the agent in $T has exited; the steer is durably recorded at $INBOX_RECORD for recovery (stuck-crewmate-recovery), and the watcher will not re-ring a dead pane" >&2 ;;
       4) echo "fm-send: no doorbell Enter sent because $T shows the Codex global-update picker (never confirm it; Escape skips the update); the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2 ;;
@@ -1047,10 +1067,13 @@ else
   # block: remote text rides the inbox leg above, and remote --key exits
   # earlier.
   send_rc=0
-  if verdict=$(fm_backend_send_text_submit "$TARGET_BACKEND" "$T" "$MESSAGE" "$retries" "$sleep_s" "$settle" "$EXPECTED_LABEL"); then
-    :
+  if [ "$(fm_control_harness_family "$TARGET_HARNESS" || true)" = claude ]; then
+    verdict=$(fm_control_with_claude_input_lock "$TARGET_META" "$TARGET_BACKEND" "$T" \
+      fm_send_claude_submit "$TARGET_BACKEND" "$T" "$EXPECTED_LABEL" "$MESSAGE" "$retries" "$sleep_s" "$settle") \
+      || verdict='input-refused'
   else
-    send_rc=$?
+    verdict=$(fm_backend_send_text_submit "$TARGET_BACKEND" "$T" "$MESSAGE" "$retries" "$sleep_s" "$settle" "$EXPECTED_LABEL") \
+      || send_rc=$?
   fi
   if [ "$send_rc" -ne 0 ]; then
     fm_send_known_undelivered_cleanup || \
@@ -1065,6 +1088,16 @@ else
       fm_send_known_undelivered_cleanup || \
         echo "error: known-undelivered pending-reply state could not be reset for $TARGET_TASK_ID" >&2
       echo "error: text not sent to $T ($TARGET_BACKEND send failed; tried $RESOLUTION_TRIED)" >&2
+      exit 1
+      ;;
+    input-refused|enter-withheld)
+      fm_send_known_undelivered_cleanup || \
+        echo "error: known-undelivered pending-reply state could not be reset for $TARGET_TASK_ID" >&2
+      if [ "$verdict" = input-refused ]; then
+        echo "error: text not typed to $T (Claude input requires an empty composer and the task's lifecycle lock)" >&2
+      else
+        echo "error: text typed to $T but Enter was withheld (Claude's composer did not prove it holds the text); inspect the pane before retrying" >&2
+      fi
       exit 1
       ;;
     pending)

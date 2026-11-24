@@ -173,7 +173,7 @@ pending
 ```
 
 That second line is the measurement that keeps the pi path from being widened to agy: pi's row classifier reads agy's `>` glyph as typed content, so extending it would replace a safe `unknown` with a wrong `pending`, and `pending` is the one composer verdict that SKIPS a steering doorbell on a pane outside the proven-empty rule in `bin/fm-task-inbox-lib.sh`.
-`unknown` still rings the doorbell on an agy pane (only Codex and Rovo panes require a proven-empty composer), so steering works; the gap is left open and documented rather than closed with a change that would break it.
+`unknown` still rings the doorbell on an agy pane, so steering works while empty-composer classification remains unverified.
 
 ## Skills and no-mistakes validation trigger
 

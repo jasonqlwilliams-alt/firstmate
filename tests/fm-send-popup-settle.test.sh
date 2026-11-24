@@ -52,12 +52,28 @@ make_stubs() {  # <dir> -> echoes fakebin dir
 #!/usr/bin/env bash
 set -u
 case "${1:-}" in
-  send-keys) exit 0 ;;
+  send-keys)
+    case " $* " in
+      *' -l '*) printf '%s' "${*: -1}" > "$FM_SLEEP_LOG.pending" ;;
+      *' Enter '*) rm -f -- "$FM_SLEEP_LOG.pending" ;;
+    esac
+    exit 0 ;;
   display-message)
     for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
     printf 'fakepane\n'; exit 0 ;;
-  capture-pane) printf '╭────╮\n│    │\n╰────╯\n'; exit 0 ;;
-  list-windows) printf 'win\n'; exit 0 ;;
+  capture-pane)
+    if [ -s "$FM_SLEEP_LOG.pending" ]; then
+      printf 'Transcript\n❯ %s\n' "$(cat "$FM_SLEEP_LOG.pending")"
+    else
+      printf '╭────╮\n│    │\n╰────╯\n'
+    fi
+    exit 0 ;;
+  list-windows)
+    case "${*: -1}" in
+      $'#{window_name}\t#{pane_id}') printf 'win\t%%1\n' ;;
+      *) printf 'win\n' ;;
+    esac
+    exit 0 ;;
 esac
 exit 0
 SH
