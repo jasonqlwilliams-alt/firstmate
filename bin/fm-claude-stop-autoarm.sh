@@ -276,6 +276,9 @@ while [ "$attempt" -lt "$AUTOARM_ATTEMPTS" ]; do
     # demand record that could keep an otherwise idle home supervising itself.
     ACTIONABLE=1
     LEASE_EXPIRED=1
+    if [ -n "$OUT" ]; then
+      printf 'check: claude-lease-renewal quiet supervision lease elapsed; take one short drain/ack turn and stop to renew while demand remains.\n' > "$OUT"
+    fi
     break
   fi
   if [ -n "$OUT" ]; then
@@ -339,10 +342,6 @@ if [ "$LEASE_EXPIRED" -eq 1 ]; then
   if ! fm_autoarm_still_owner "$STATE" "$MY_GEN"; then
     [ -z "$OUT" ] || rm -f "$OUT" 2>/dev/null || true
     exit 0
-  fi
-  if [ -n "$OUT" ]; then
-    grep -Fx 'watcher: active capture cleanup failed during shutdown' "$OUT" >&2 || true
-    printf 'check: claude-lease-renewal quiet supervision lease elapsed; take one short drain/ack turn and stop to renew while demand remains.\n' > "$OUT"
   fi
   if fm_lock_try_acquire "$STATE/.watch.lock"; then
     # Reclaim only a provably dead lock through its existing serialized owner.

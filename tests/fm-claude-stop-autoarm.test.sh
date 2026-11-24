@@ -1258,14 +1258,13 @@ test_fm_lock_status_still_works_with_shared_lib() {
 # demand/authority while it is parked. No actual fleet processes are touched.
 test_quiet_lease_renewal_gates() {
   local mode dir out status
-  for mode in demand cleanup-failure held afk superseded alarm; do
+  for mode in demand held afk superseded alarm; do
     dir=$(make_primary_dir "$TMP_ROOT/lease-$mode")
     : > "$dir/state/task.meta"
     cat > "$dir/bin/fm-watch-arm.sh" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$$" > "$FM_HOME/state/arm-ran"
 case "${LEASE_TEST_MODE}" in
-  cleanup-failure) printf '%s\n' 'watcher: active capture cleanup failed during shutdown' >&2 ;;
   held) rm "$FM_HOME/state/task.meta" ;;
   afk) touch "$FM_HOME/state/.afk" ;;
   superseded) sed -i 's/epoch=1 /epoch=2 /' "$FM_HOME/state/.claude-autoarm-epoch" ;;
@@ -1275,12 +1274,9 @@ sleep 30
 SH
     chmod +x "$dir/bin/fm-watch-arm.sh"
     out=$(LEASE_TEST_MODE="$mode" FM_CLAUDE_AUTOARM_LEASE_SECONDS=3 run_autoarm "$dir" 2>/dev/null); status=$?
-    if [ "$mode" = demand ] || [ "$mode" = cleanup-failure ]; then
+    if [ "$mode" = demand ]; then
       expect_code 2 "$status" "quiet live demand needs an owned renewal"
       assert_contains "$out" 'check: claude-lease-renewal' "lease maintenance reason"
-      if [ "$mode" = cleanup-failure ]; then
-        assert_contains "$out" 'watcher: active capture cleanup failed during shutdown' "lease lost the arm's cleanup diagnostic"
-      fi
       grep -q '^pending:handling:' "$dir/state/.watcher-down" || fail "renewal did not publish an acknowledgeable handling episode"
       assert_grep "session_pid=$(cat "$dir/state/.lock")" "$dir/state/.claude-autoarm-epoch" \
         "renewal did not bind the current owning session"
@@ -1498,6 +1494,11 @@ test_stalled_remote_observation_liveness() (
 
   cat > "$FM_SSH_BIN" <<'SH'
 #!/usr/bin/env bash
+if [ "${FM_FIXTURE_CAPTURE_MODE:-}" = cleanup-checkpoint ] && [ ! -e "$FM_HOME/state/first-observation" ]; then
+  : > "$FM_HOME/state/first-observation" || exit 1
+  printf 'busy'
+  exit 0
+fi
 if [ ! -e "$FM_HOME/state/observing" ]; then
   if [ "${FM_FIXTURE_SSH_IGNORES_TERM:-0}" = 1 ]; then
     trap '' TERM
@@ -1534,14 +1535,17 @@ SH
   if [[ "$mode" = cleanup-* ]]; then
     cat > "$dir/capture-failure.bash" <<'SH'
 if [ "$0" = "$FM_HOME/bin/fm-watch.sh" ]; then
+  fixture_capture_survives() {
+    [ "$FM_FIXTURE_CAPTURE_MODE" != cleanup-checkpoint ] || [ -s "$FM_HOME/state/observing" ]
+  }
   kill() {
-    if [ "$*" = "-0 -- -${FM_ACTIVE_CHECK_PGID:-}" ]; then
+    if [ "$*" = "-0 -- -${FM_ACTIVE_CHECK_PGID:-}" ] && fixture_capture_survives; then
       return 0
     fi
     builtin kill "$@"
   }
   ps() {
-    if [ "$*" = '-ax -o pgid= -o stat=' ]; then
+    if [ "$*" = '-ax -o pgid= -o stat=' ] && fixture_capture_survives; then
       printf '%s D\n' "$FM_ACTIVE_CHECK_PGID"
     else
       command ps "$@"
@@ -1561,15 +1565,29 @@ SH
   fi
 
   if [ "$mode" = cleanup-checkpoint ]; then
+    ln -s /bin/bash "$dir/codex" || fail "could not install fake Codex ancestry"
     hook_rc=0
-    FM_GUARD_GRACE=120 FM_WATCHER_STALE_GRACE=120 "$dir/bin/fm-watch-checkpoint.sh" --seconds 8 \
-      > "$dir/outer.out" 2> "$dir/outer.err" || hook_rc=$?
+    FM_GUARD_GRACE=120 FM_WATCHER_STALE_GRACE=120 FM_POLL=1 FM_SUPERVISION_MODEL=persistent \
+      "$dir/codex" -c '
+        unset CLAUDECODE CURSOR_AGENT CURSOR_INVOKED_AS GEMINI_CLI PI_CODING_AGENT GROK_AGENT FM_OMP_HARNESS ANTIGRAVITY_AGENT
+        unset ATLASSIAN_AGENT_TYPE ROVODEV_CLI
+        printf "%s\n" "$$" > "$FM_HOME/state/.lock" || exit 1
+        "$FM_HOME/bin/fm-watch-checkpoint.sh" --seconds 12
+        status=$?
+        "$FM_HOME/bin/fm-guard.sh" > "$FM_HOME/guard.out" 2>&1
+        exit "$status"
+      ' > "$dir/outer.out" 2> "$dir/outer.err" || hook_rc=$?
     expect_code 124 "$hook_rc" "failed shutdown must preserve the checkpoint deadline status"
-    [ -s "$state/observing" ] || fail "checkpoint expired before it started the observation"
-    assert_grep 'checkpoint: no actionable wake within 8s' "$dir/outer.out" "checkpoint lost the deadline line"
+    [ "$(fm_pending_reply_get "$rec" turn_seen_busy)" = 1 ] || fail "checkpoint did not process the first observation"
+    [ -s "$state/observing" ] || fail "checkpoint expired before it started the second observation"
+    assert_grep 'checkpoint: no actionable wake within 12s' "$dir/outer.out" "checkpoint lost the deadline line"
     assert_grep 'watcher: active capture cleanup failed during shutdown' "$dir/outer.err" "checkpoint lost the cleanup diagnostic"
+    [ -f "$state/.last-checkpoint-return" ] || fail "checkpoint did not recognize the owning Codex session"
+    [ ! -s "$state/.last-checkpoint-return" ] || fail "failed cleanup recorded a clean checkpoint return"
+    assert_absent "$state/.watch.lock" "checkpoint shutdown did not release its lock"
+    assert_grep 'WATCHER DOWN' "$dir/guard.out" "failed cleanup hid the watcher-down warning"
     [ ! -s "$state/.wake-queue" ] || fail "checkpoint shutdown queued a wake"
-    pass "checkpoint: deadline forwards capture cleanup failure without a wake"
+    pass "checkpoint: failed cleanup preserves the deadline and watcher-down warning"
     return 0
   fi
 
