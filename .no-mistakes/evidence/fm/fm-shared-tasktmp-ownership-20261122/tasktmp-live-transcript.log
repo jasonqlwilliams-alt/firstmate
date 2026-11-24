@@ -1,0 +1,191 @@
+Firstmate task temporary directories
+Target 789d0a04428a0b23f4ac886fcedbd25751c9796f
+Recorded with real Firstmate CLI commands, tmux 3.7c, Treehouse 3.1.8, Herdr 0.9.5, and lsof 4.99.7.
+Disposable homes, Git repositories, and terminal workers used private /tmp, process and network namespaces.
+The terminal worker uses synthetic input and prints its actual PID and inherited GOTMPDIR.
+Evidence includes the command output, resulting task records, terminal observations, and filesystem/process assertions.
+Unrelated repeated CLI notices and the backlog tool’s generic help have been omitted.
+
+1. Same-ID launch, teardown isolation, and fresh respawn
+$ fm-spawn.sh lab-same {run-worktree}/.tasktmp-validation/live-fresh2/a/project --mode local-only --yolo off --harness claude --backend tmux
+spawned lab-same harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-lab-same worktree={run-worktree}/.tasktmp-validation/live-fresh2/pool/.treehouse/project-bf862a/1/project
+$ fm-spawn.sh lab-same {run-worktree}/.tasktmp-validation/live-fresh2/b/project --mode local-only --yolo off --harness claude --backend tmux
+spawned lab-same harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-lab-same worktree={run-worktree}/.tasktmp-validation/live-fresh2/pool/.treehouse/project-807e34/1/project
+both task records: A=/tmp/fm-lab-same+LXPSSI B=/tmp/fm-lab-same+wpn8Fp
+lab-same (home B) record: tasktmp=/tmp/fm-lab-same+wpn8Fp (mode 700), window=firstmate:fm-lab-same
+actual pane: worker PID=1688 GOTMPDIR=/tmp/fm-lab-same+wpn8Fp/gotmp
+lab-same (home A) record: tasktmp=/tmp/fm-lab-same+LXPSSI (mode 700), window=firstmate:fm-lab-same
+actual pane: worker PID=870 GOTMPDIR=/tmp/fm-lab-same+LXPSSI/gotmp
+ready detached workload PID=1729 cwd=/tmp/fm-lab-same+LXPSSI/gotmp
+ready detached workload PID=1737 cwd=/tmp/fm-lab-same+wpn8Fp/gotmp
+$ fm-teardown.sh lab-same --force
+teardown: reaping leaked worktree process(es) for lab-same: 251 870 1729
+teardown: force-killing leaked worktree process(es) for lab-same: 251
+🌳 Worktree returned to pool.
+teardown lab-same complete (window firstmate:fm-lab-same, worktree {run-worktree}/.tasktmp-validation/live-fresh2/pool/.treehouse/project-bf862a/1/project)
+after teardown A: root and record removed, PID 1729 exited on TERM; B: PID 1737 live, artifact=B artifact
+$ fm-spawn.sh lab-same {run-worktree}/.tasktmp-validation/live-fresh2/a/project --mode local-only --yolo off --harness claude --backend tmux
+spawned lab-same harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-lab-same worktree={run-worktree}/.tasktmp-validation/live-fresh2/pool/.treehouse/project-bf862a/1/project
+lab-same (new A incarnation) record: tasktmp=/tmp/fm-lab-same+ipHkRP (mode 700), window=firstmate:fm-lab-same
+actual pane: worker PID=3415 GOTMPDIR=/tmp/fm-lab-same+ipHkRP/gotmp
+
+2. Legacy, symlinked, missing, and absent task temporary directory records
+$ fm-spawn.sh lab-legacy {run-worktree}/.tasktmp-validation/live-guards/a/project --mode local-only --yolo off --harness claude --backend tmux
+spawned lab-legacy harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-lab-legacy worktree={run-worktree}/.tasktmp-validation/live-guards/pool/.treehouse/project-3ff4d8/1/project
+seeded persisted tasktmp (legacy): /tmp/fm-lab-legacy
+ready detached workload PID=861 cwd=/tmp/fm-lab-legacy/gotmp
+$ fm-teardown.sh lab-legacy --force
+teardown: reaping leaked worktree process(es) for lab-legacy: 222 840
+teardown: force-killing leaked worktree process(es) for lab-legacy: 222
+🌳 Worktree returned to pool.
+teardown lab-legacy complete (window firstmate:fm-lab-legacy, worktree {run-worktree}/.tasktmp-validation/live-guards/pool/.treehouse/project-3ff4d8/1/project)
+legacy after retirement: PID 861 live, artifact=another home still needs this
+$ fm-spawn.sh lab-symlink {run-worktree}/.tasktmp-validation/live-guards/a/project --mode local-only --yolo off --harness claude --backend tmux
+spawned lab-symlink harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-lab-symlink worktree={run-worktree}/.tasktmp-validation/live-guards/pool/.treehouse/project-3ff4d8/1/project
+seeded persisted tasktmp (symlink): /tmp/untrusted-tasktmp
+ready detached workload PID=2548 cwd=/tmp/other-task-owned/gotmp
+$ fm-teardown.sh lab-symlink --force
+teardown: reaping leaked worktree process(es) for lab-symlink: 1899 2525
+teardown: force-killing leaked worktree process(es) for lab-symlink: 1899
+🌳 Worktree returned to pool.
+teardown lab-symlink complete (window firstmate:fm-lab-symlink, worktree {run-worktree}/.tasktmp-validation/live-guards/pool/.treehouse/project-3ff4d8/1/project)
+symlink after retirement: PID 2548 live, artifact=another home still needs this
+$ fm-spawn.sh lab-missing {run-worktree}/.tasktmp-validation/live-guards/a/project --mode local-only --yolo off --harness claude --backend tmux
+spawned lab-missing harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-lab-missing worktree={run-worktree}/.tasktmp-validation/live-guards/pool/.treehouse/project-3ff4d8/1/project
+seeded persisted tasktmp (missing): /tmp/missing-tasktmp
+$ fm-teardown.sh lab-missing --force
+teardown: reaping leaked worktree process(es) for lab-missing: 3490 4119
+teardown: force-killing leaked worktree process(es) for lab-missing: 3490
+🌳 Worktree returned to pool.
+teardown lab-missing complete (window firstmate:fm-lab-missing, worktree {run-worktree}/.tasktmp-validation/live-guards/pool/.treehouse/project-3ff4d8/1/project)
+$ fm-spawn.sh lab-absent {run-worktree}/.tasktmp-validation/live-guards/a/project --mode local-only --yolo off --harness claude --backend tmux
+spawned lab-absent harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-lab-absent worktree={run-worktree}/.tasktmp-validation/live-guards/pool/.treehouse/project-3ff4d8/1/project
+seeded persisted tasktmp (absent): 
+$ fm-teardown.sh lab-absent --force
+teardown: reaping leaked worktree process(es) for lab-absent: 5068 5695
+teardown: force-killing leaked worktree process(es) for lab-absent: 5068
+🌳 Worktree returned to pool.
+teardown lab-absent complete (window firstmate:fm-lab-absent, worktree {run-worktree}/.tasktmp-validation/live-guards/pool/.treehouse/project-3ff4d8/1/project)
+
+3. Explicit relaunch with valid, missing, symlinked, and legacy roots
+$ fm-spawn.sh lab-relaunch {run-worktree}/.tasktmp-validation/live-relaunch2/a/project --mode local-only --yolo off --harness claude --backend tmux
+spawned lab-relaunch harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-lab-relaunch worktree={run-worktree}/.tasktmp-validation/live-relaunch2/pool/.treehouse/project-67f57b/1/project
+lab-relaunch before relaunch record: tasktmp=/tmp/fm-lab-relaunch+N9jdYD (mode 700), window=firstmate:fm-lab-relaunch
+actual pane: worker PID=837 GOTMPDIR=/tmp/fm-lab-relaunch+N9jdYD/gotmp
+$ fm-control.sh lab-relaunch relaunch --note Retain this task scratch
+relaunched lab-relaunch harness=claude from=claude model=default effort=default backend=tmux endpoint=firstmate:fm-lab-relaunch worktree={run-worktree}/.tasktmp-validation/live-relaunch2/pool/.treehouse/project-67f57b/1/project
+lab-relaunch after same-root relaunch record: tasktmp=/tmp/fm-lab-relaunch+N9jdYD (mode 700), window=firstmate:fm-lab-relaunch
+actual pane: worker PID=2200 GOTMPDIR=/tmp/fm-lab-relaunch+N9jdYD/gotmp
+preserved artifact=previous launch scratch
+seeded missing record: /tmp/fm-lab-relaunch+N9jdYD
+$ fm-control.sh lab-relaunch relaunch --note Replace the missing task scratch record
+relaunched lab-relaunch harness=claude from=claude model=default effort=default backend=tmux endpoint=firstmate:fm-lab-relaunch worktree={run-worktree}/.tasktmp-validation/live-relaunch2/pool/.treehouse/project-67f57b/1/project
+lab-relaunch after missing relaunch record: tasktmp=/tmp/fm-lab-relaunch+edsC6v (mode 700), window=firstmate:fm-lab-relaunch
+actual pane: worker PID=3627 GOTMPDIR=/tmp/fm-lab-relaunch+edsC6v/gotmp
+seeded symlink record: /tmp/relaunch-link
+$ fm-control.sh lab-relaunch relaunch --note Replace the symlink task scratch record
+relaunched lab-relaunch harness=claude from=claude model=default effort=default backend=tmux endpoint=firstmate:fm-lab-relaunch worktree={run-worktree}/.tasktmp-validation/live-relaunch2/pool/.treehouse/project-67f57b/1/project
+lab-relaunch after symlink relaunch record: tasktmp=/tmp/fm-lab-relaunch+BIzRI6 (mode 700), window=firstmate:fm-lab-relaunch
+actual pane: worker PID=5064 GOTMPDIR=/tmp/fm-lab-relaunch+BIzRI6/gotmp
+seeded legacy record: /tmp/fm-lab-relaunch
+$ fm-control.sh lab-relaunch relaunch --note Replace the legacy task scratch record
+relaunched lab-relaunch harness=claude from=claude model=default effort=default backend=tmux endpoint=firstmate:fm-lab-relaunch worktree={run-worktree}/.tasktmp-validation/live-relaunch2/pool/.treehouse/project-67f57b/1/project
+lab-relaunch after legacy relaunch record: tasktmp=/tmp/fm-lab-relaunch+Cu9avK (mode 700), window=firstmate:fm-lab-relaunch
+actual pane: worker PID=6491 GOTMPDIR=/tmp/fm-lab-relaunch+Cu9avK/gotmp
+$ fm-teardown.sh lab-relaunch --force
+teardown: reaping leaked worktree process(es) for lab-relaunch: 220 6491
+teardown: force-killing leaked worktree process(es) for lab-relaunch: 220
+🌳 Worktree returned to pool.
+teardown lab-relaunch complete (window firstmate:fm-lab-relaunch, worktree {run-worktree}/.tasktmp-validation/live-relaunch2/pool/.treehouse/project-67f57b/1/project)
+retirement removed the current root and preserved the legacy artifact
+
+4. Automatic local secondmate recovery
+$ fm-spawn.sh lab-mate /tmp/world/mate --secondmate --harness claude --backend tmux
+warning: secondmate lab-mate sync skipped before launch: primary default-branch commit cannot be resolved
+spawned lab-mate harness=claude kind=secondmate mode=secondmate yolo=off window=firstmate:fm-lab-mate worktree=/tmp/world/mate
+lab-mate initial record: tasktmp=/tmp/fm-lab-mate+e9hysm (mode 700), window=firstmate:fm-lab-mate
+actual pane: worker PID=665 GOTMPDIR=/tmp/fm-lab-mate+e9hysm/gotmp
+$ tmux kill-window -t firstmate:fm-lab-mate
+$ FM_BOOTSTRAP_NETWORK=only bin/fm-bootstrap.sh
+BOOTSTRAP_INFO: secondmate lab-mate relaunched after recorded endpoint confidently missing (backend=tmux)
+lab-mate recovered record: tasktmp=/tmp/fm-lab-mate+e9hysm (mode 700), window=firstmate:fm-lab-mate
+actual pane: worker PID=1700 GOTMPDIR=/tmp/fm-lab-mate+e9hysm/gotmp
+reused artifact=work across recovery
+seeded legacy tasktmp=/tmp/fm-lab-mate
+$ FM_BOOTSTRAP_NETWORK=only bin/fm-bootstrap.sh
+BOOTSTRAP_INFO: secondmate lab-mate relaunched after recorded endpoint confidently missing (backend=tmux)
+lab-mate recovered from legacy metadata record: tasktmp=/tmp/fm-lab-mate+SnD8VO (mode 700), window=firstmate:fm-lab-mate
+actual pane: worker PID=2660 GOTMPDIR=/tmp/fm-lab-mate+SnD8VO/gotmp
+legacy artifact=shared scratch
+
+5. Recovery on the selected host using Herdr
+{
+  "running": true,
+  "socket_path": null
+}
+== Host-local remote secondmate recovery in isolated Herdr ==
+$ bin/fm-remote-secondmate-control.sh launch lab-remote claude - - herdr
+schema=fm-remote-secondmate-control.v1
+backend=herdr
+target=fm-remote:w1:p2
+herdr_session=fm-remote
+harness=claude
+initial parent-route record: tasktmp=/tmp/fm-lab-remote+Cjzy9R pane=w1:p2
+actual pane: worker PID=896 GOTMPDIR=/tmp/fm-lab-remote+Cjzy9R/gotmp
+$ herdr --session fm-remote pane close w1:p2
+{"id":"cli:pane:close","result":{"type":"ok"}}
+$ bin/fm-remote-secondmate-control.sh state lab-remote --bound-home
+previous endpoint state=missing
+$ bin/fm-remote-secondmate-control.sh launch lab-remote claude - - herdr
+schema=fm-remote-secondmate-control.v1
+backend=herdr
+target=fm-remote:w2:p2
+herdr_session=fm-remote
+harness=claude
+recovered parent-route record: tasktmp=/tmp/fm-lab-remote+Cjzy9R pane=w2:p2
+actual pane: worker PID=2077 GOTMPDIR=/tmp/fm-lab-remote+Cjzy9R/gotmp
+recovered artifact=local scratch on the selected host
+
+6. Forced secondmate retirement with child task roots
+$ fm-spawn.sh lab-mate /tmp/world/mate --secondmate --harness claude --backend tmux
+warning: secondmate lab-mate sync skipped before launch: primary default-branch commit cannot be resolved
+spawned lab-mate harness=claude kind=secondmate mode=secondmate yolo=off window=firstmate:fm-lab-mate worktree=/tmp/world/mate
+lab-mate initial record: tasktmp=/tmp/fm-lab-mate+y5RfrL (mode 700), window=firstmate:fm-lab-mate
+actual pane: worker PID=666 GOTMPDIR=/tmp/fm-lab-mate+y5RfrL/gotmp
+$ fm-spawn.sh lab-child /tmp/world/mate/project --mode local-only --yolo off --harness claude --backend tmux
+spawned lab-child harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-lab-child worktree=/tmp/world/pool/.treehouse/project-f6f50b/1/project
+lab-child record: tasktmp=/tmp/fm-lab-child+eSA6R0 (mode 700), window=firstmate:fm-lab-child
+actual pane: worker PID=1514 GOTMPDIR=/tmp/fm-lab-child+eSA6R0/gotmp
+$ fm-teardown.sh lab-mate
+REFUSED: secondmate lab-mate still has in-flight work in /tmp/world/mate/state.
+Found lab-child.meta. Let that home finish or explicitly discard with --force.
+$ fm-teardown.sh lab-mate --force
+🌳 Worktree returned to pool.
+teardown lab-mate complete (window firstmate:fm-lab-mate, worktree /tmp/world/mate)
+child endpoint is absent from the actual tmux window inventory
+retired private parent and child roots /tmp/fm-lab-mate+y5RfrL and /tmp/fm-lab-child+eSA6R0
+legacy child artifact=shared child scratch, symlink target artifact=foreign child scratch
+
+7. Failed spawn before and after terminal handoff
+$ fm-spawn.sh lab-no-publish {run-worktree}/.tasktmp-validation/live-abort/a/project --mode local-only --yolo off --harness claude --backend tmux
+error: task record for lab-no-publish could not be published (task record publication failed at {run-worktree}/.tasktmp-validation/live-abort/a/state/lab-no-publish.meta)
+error: task record for lab-no-publish could not be published (task record publication failed at {run-worktree}/.tasktmp-validation/live-abort/a/state/lab-no-publish.meta)
+pre-handoff allocation /tmp/fm-lab-no-publish+1OVs8h and task record are absent after failure
+ok: added lab-late-abort (ship) -> Queued
+$ fm-spawn.sh lab-late-abort {run-worktree}/.tasktmp-validation/live-abort/a/projects/lab-project --mode local-only --yolo off --harness claude --backend tmux
+error: task lab-late-abort's backlog item could not be moved to In flight (injected backlog write failure); its record was removed - close out endpoint firstmate:fm-lab-late-abort and local copy {run-worktree}/.tasktmp-validation/live-abort/pool/.treehouse/lab-project-4202b3/1/lab-project by hand, then re-run the spawn
+warning: task lab-late-abort's temporary directory remains at /tmp/fm-lab-late-abort+7ed13Q; inspect it after closing endpoint firstmate:fm-lab-late-abort
+error: task lab-late-abort's backlog item could not be moved to In flight (injected backlog write failure); its record was removed - close out endpoint firstmate:fm-lab-late-abort and local copy {run-worktree}/.tasktmp-validation/live-abort/pool/.treehouse/lab-project-4202b3/1/lab-project by hand, then re-run the spawn
+worker PID=1548 GOTMPDIR=/tmp/fm-lab-late-abort+7ed13Q/gotmp
+  state: queued
+post-handoff worker and reported root /tmp/fm-lab-late-abort+7ed13Q both survived rollback, and task record was removed
+
+8. Failed automatic recovery reports retained scratch
+$ fm-spawn.sh lab-mate /tmp/world/mate --secondmate --harness claude --backend tmux
+warning: secondmate lab-mate sync skipped before launch: primary default-branch commit cannot be resolved
+spawned lab-mate harness=claude kind=secondmate mode=secondmate yolo=off window=firstmate:fm-lab-mate worktree=/tmp/world/mate
+lab-mate initial record: tasktmp=/tmp/fm-lab-mate+s6ih2m (mode 700), window=firstmate:fm-lab-mate
+actual pane: worker PID=665 GOTMPDIR=/tmp/fm-lab-mate+s6ih2m/gotmp
+$ FM_BOOTSTRAP_NETWORK=only bin/fm-bootstrap.sh (replacement launch text rejected)
+SECONDMATE_LIVENESS: secondmate lab-mate: respawn failed after recorded endpoint confidently missing: warning: secondmate lab-mate sync skipped before launch: primary default-branch commit cannot be resolved (warning: task lab-mate's temporary directory remains at /tmp/fm-lab-mate+s6ih2m; inspect it after closing endpoint firstmate:fm-lab-mate)
+record absent, artifact still reads secondmate scratch

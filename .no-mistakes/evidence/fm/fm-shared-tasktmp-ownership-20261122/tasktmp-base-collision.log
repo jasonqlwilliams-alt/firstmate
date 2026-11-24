@@ -1,0 +1,11 @@
+Base commit 80ad3594adf45b6ed2cd1880175b06590dabebab
+Real Firstmate and two isolated tmux homes with the same synthetic task ID.
+The isolation assertion exited 1 on this commit and exited 0 on the target.
+
+== Same-ID launch, teardown isolation, and fresh respawn ==
+$ fm-spawn.sh lab-same {run-worktree}/.tasktmp-validation/base-fresh/a/project --mode local-only --yolo off --harness claude --backend tmux
+spawned lab-same harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-lab-same worktree={run-worktree}/.tasktmp-validation/base-fresh/pool/.treehouse/project-3e3762/1/project
+$ fm-spawn.sh lab-same {run-worktree}/.tasktmp-validation/base-fresh/b/project --mode local-only --yolo off --harness claude --backend tmux
+spawned lab-same harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-lab-same worktree={run-worktree}/.tasktmp-validation/base-fresh/pool/.treehouse/project-459ffc/1/project
+both task records: A=/tmp/fm-lab-same B=/tmp/fm-lab-same
+FAILED: same-ID homes share temporary root /tmp/fm-lab-same
