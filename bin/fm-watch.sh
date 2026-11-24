@@ -671,6 +671,7 @@ recorded_endpoints() {
   local meta w task
   for meta in "$STATE"/*.meta; do
     [ -e "$meta" ] || continue
+    [ -z "$(fm_meta_get "$meta" remote_host)" ] || continue
     w=$(fm_backend_target_of_meta "$meta")
     [ -n "$w" ] || continue
     task=${meta##*/}
@@ -1160,17 +1161,34 @@ clear_pause_tracking() {  # <window-key>
   clear_stale_hash_tracking "$key"
 }
 
-report_missing_endpoint() {  # <backend> <window> <task> <window-key>
+check_recorded_endpoint() {  # <backend> <window> <task> <window-key>
   local backend=$1 win=$2 task=$3 key=$4 state incarnation lock reason status=0
   local meta="$STATE/$task.meta" marker="$STATE/$task.missing-endpoint"
   [ -z "$(fm_meta_get "$meta" remote_host)" ] || return 0
   incarnation=$(fm_backend_endpoint_incarnation "$meta") || return 0
   case "$incarnation" in "$backend:$win"$'\t'*) ;; *) return 0 ;; esac
-  state=$(fm_backend_recorded_endpoint_state "$backend" "$win" "$meta" 2>/dev/null) || return 0
-  case "$state" in missing|replaced) ;; *) return 0 ;; esac
+  state=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
+    fm_backend_endpoint_state "$backend" "$win" "fm-$task" 2>/dev/null) || return 0
+  case "$state" in
+    missing|replaced) ;;
+    present)
+      [ -e "$marker" ] || { [ "$backend" = zellij ] && [ -e "$STATE/.paused-$key" ]; } || return 0
+      ;;
+    *) return 0 ;;
+  esac
   lock=$(fm_meta_lock_path "$meta") || return 0
   fm_lock_try_acquire "$lock" || return 0
   if [ "$incarnation" != "$(fm_backend_endpoint_incarnation "$meta")" ]; then
+    fm_lock_release "$lock"
+    return 0
+  fi
+  if [ "$state" = present ]; then
+    # An idle Zellij mate reaches this check without capturing its screen.
+    # Only a matching tab can clear the pause tracking for its pane.
+    if [ "$backend" = zellij ] && [ -e "$STATE/.paused-$key" ]; then
+      clear_pause_tracking "$key"
+    fi
+    rm -f "$marker"
     fm_lock_release "$lock"
     return 0
   fi
@@ -1187,10 +1205,11 @@ report_missing_endpoint() {  # <backend> <window> <task> <window-key>
     fm_lock_release "$lock"
     return 0
   fi
-  case "$backend" in
-    herdr|zellij) reason="stale: $win ($FM_RECORDED_ENDPOINT_GONE for task $task)" ;;
-    *) reason="stale: $win ($FM_RECORDED_ENDPOINT_GONE)" ;;
-  esac
+  if [ "$backend" = herdr ]; then
+    reason="stale: $win ($FM_RECORDED_ENDPOINT_GONE for task $task)"
+  else
+    reason="stale: $win ($FM_RECORDED_ENDPOINT_GONE)"
+  fi
   { fm_wake_append stale "$win" "$reason" && printf '%s\n' "$incarnation" > "$marker"; } || status=1
   fm_lock_release "$lock"
   [ "$status" -eq 0 ] || exit 1
@@ -1608,6 +1627,18 @@ FM_CHECK_OUTPUT=
 FM_CHECK_RESULT=
 FM_CHECK_SIGNAL_PENDING=
 FM_PR_POLL_CLOSED_STAGE=
+WATCHER_CHECKPOINT_CLOSE=${FM_WATCH_CHECKPOINT_CLOSE:-}
+unset FM_WATCH_CHECKPOINT_CLOSE
+WATCHER_CHECKPOINT_SCANNED=0
+WATCHER_CHECKPOINT_INTERRUPTED=0
+
+watcher_interrupted() {
+  if [ -n "$WATCHER_CHECKPOINT_CLOSE" ]; then
+    trap '' HUP INT TERM
+    WATCHER_CHECKPOINT_INTERRUPTED=1
+  fi
+  exit 1
+}
 
 fm_check_output_cleanup() {
   [ -z "$FM_CHECK_OUTPUT" ] || rm -f -- "$FM_CHECK_OUTPUT"
@@ -1658,13 +1689,13 @@ run_check_capture() {
   FM_ACTIVE_CHECK_PGID=$FM_ACTIVE_CHECK_PID
   set +m
   pgid=$(ps -o pgid= -p "$FM_ACTIVE_CHECK_PID" 2>/dev/null | tr -d '[:space:]')
-  trap 'exit 1' HUP INT TERM
+  trap watcher_interrupted HUP INT TERM
   if [ -n "$pgid" ] && [ "$pgid" != "$FM_ACTIVE_CHECK_PGID" ]; then
     fm_active_check_stop || true
     fm_check_output_cleanup
     return 1
   fi
-  [ -z "$FM_CHECK_SIGNAL_PENDING" ] || exit 1
+  [ -z "$FM_CHECK_SIGNAL_PENDING" ] || watcher_interrupted
   wait "$FM_ACTIVE_CHECK_PID" 2>/dev/null || true
   FM_ACTIVE_CHECK_PID=
   fm_active_check_stop || return 1
@@ -1978,7 +2009,7 @@ reconcile_requests_detached() {
 }
 
 watcher_cleanup() {
-  local cleanup_status=0 owns_lock=0 transition=release-lock
+  local exit_status=$? cleanup_status=0 owns_lock=0 transition=release-lock
   if [ "$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)" = "${WATCHER_PID:-}" ]; then
     owns_lock=1
     if [ "${WATCHER_RECOVERY_PENDING:-0}" -eq 1 ] \
@@ -1995,10 +2026,18 @@ watcher_cleanup() {
     echo "watcher: recovery state could not be persisted; retaining stale lock evidence" >&2
     cleanup_status=1
   fi
+  if [ -n "$WATCHER_CHECKPOINT_CLOSE" ] && [ "$owns_lock" -eq 1 ] \
+    && [ "$cleanup_status" -eq 0 ] && [ ! -e "$WATCH_LOCK" ] && [ ! -L "$WATCH_LOCK" ]; then
+    if [ "$exit_status" -eq 0 ] && [ -n "${FM_WATCH_DELIVERED_REASON:-}" ]; then
+      printf 'wake\n' > "$WATCHER_CHECKPOINT_CLOSE"
+    elif [ "$WATCHER_CHECKPOINT_INTERRUPTED" -eq 1 ] && [ "$WATCHER_CHECKPOINT_SCANNED" -eq 1 ]; then
+      printf 'quiet\n' > "$WATCHER_CHECKPOINT_CLOSE"
+    fi
+  fi
   return "$cleanup_status"
 }
 trap watcher_cleanup EXIT
-trap 'exit 1' HUP INT TERM
+trap watcher_interrupted HUP INT TERM
 # This watcher's own pid, as recorded in the lock by fm_lock_claim (which writes
 # ${BASHPID:-$$} from this same main shell). Read directly, never via a command
 # substitution, so it matches the stored holder pid for the self-eviction check.
@@ -2380,15 +2419,16 @@ EOF
       herdr_meta=$(fm_backend_herdr_matching_meta "$w" "$STATE") || herdr_meta=
     fi
     case "$backend" in
-      herdr|zellij) ;; # Only a verified capture can claim this pane for stale tracking.
+      tmux|herdr|zellij) ;; # Presence and loss checks run for each recorded task.
       *) case "$seen" in *"|$w|"*) continue ;; esac ;;
     esac
     kind=$(fm_meta_get "$meta" kind)
     key=$(window_key "$w")
     last=$(last_status_line "$STATE/$task.status")
+    missing_marker="$STATE/$task.missing-endpoint"
     case "$backend" in
       herdr) [ "$herdr_meta" != "$meta" ] || clear_undeclared_pause_tracking "$key" "$w" "$task" "$last" ;;
-      zellij) ;; # The record's tab label is checked during capture.
+      zellij) ;; # Verify the tab in the presence or capture check before clearing tracking.
       *) clear_undeclared_pause_tracking "$key" "$w" "$task" "$last" ;;
     esac
     # An idle secondmate endpoint is healthy by design, so only a status-declared
@@ -2398,25 +2438,25 @@ EOF
     # this guard: reaching it would require backlog reads for windows this gate
     # deliberately skips, putting that read on the ordinary poll hot path.
     if [ "$kind" = secondmate ] && ! status_is_paused_or_captain_held "$last"; then
+      if [ "$backend" != herdr ] || [ "$herdr_meta" != "$meta" ] || [ -e "$missing_marker" ]; then
+        check_recorded_endpoint "$backend" "$w" "$task" "$key" || continue
+      fi
       case "$backend" in
-        herdr) ;;
-        zellij)
-          if [ -e "$STATE/.paused-$key" ] && fm_backend_target_exists "$backend" "$w" "fm-$task" 2>/dev/null; then
-            clear_pause_tracking "$key"
-          fi
-          ;;
+        tmux|herdr|zellij) ;;
         *) seen="$seen|$w|" ;;
       esac
       continue
     fi
-    missing_marker="$STATE/$task.missing-endpoint"
     hash_prefix=$(pane_hash_prefix "$backend" "$w" "$meta") || continue
     # Check loss for this record even if another task captured the same pane.
     if { [ "$backend" = herdr ] && [ "$herdr_meta" != "$meta" ]; } \
       || ! tail40=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
         fm_backend_capture "$backend" "$w" 40 "fm-$task" 2>/dev/null); then
-      report_missing_endpoint "$backend" "$w" "$task" "$key" || continue
-      case "$backend" in herdr|zellij) ;; *) seen="$seen|$w|" ;; esac
+      case "$backend" in
+        tmux|herdr) check_recorded_endpoint "$backend" "$w" "$task" "$key" || continue ;;
+        zellij) ;; # A failed capture cannot establish endpoint loss.
+        *) seen="$seen|$w|" ;;
+      esac
       continue
     fi
     [ "$hash_prefix" = "$(pane_hash_prefix "$backend" "$w" "$meta")" ] || continue
@@ -2689,5 +2729,6 @@ EOF
 
   # Terminal wait: a bounded native-event wait for push-capable homes (herdr),
   # else the blind poll sleep. See event_wait_or_sleep.
+  WATCHER_CHECKPOINT_SCANNED=1
   event_wait_or_sleep
 done

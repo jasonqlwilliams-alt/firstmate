@@ -36,10 +36,10 @@
 #      open loop owned by the ordinary pending-reply recovery ladder, not state
 #      this restart pass may close.
 #
-# A mate whose persist answer did not arrive or whose runtime cannot prove a
-# restart gets the ordinary re-read nudge and is reported as a nudge, never as a
-# clean reload. Once a relaunch is attempted, any failed or ambiguous result is
-# reported as unknown rather than attributing it to either incarnation.
+# A missing persist answer or an unsupported restart can fall back to the
+# ordinary re-read nudge. A failed or ambiguous relaunch leaves the outcome
+# unknown. See docs/agent-control.md, "Claude background-tasks exit
+# confirmation", for the case that goes straight to manual recovery.
 #
 # Placement changes the transport and nothing else. A local mate is restarted
 # with bin/fm-control.sh <id> relaunch; a remote mate is restarted by running THAT
@@ -91,6 +91,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 . "$SCRIPT_DIR/fm-secondmate-nudge-lib.sh"
 # shellcheck source=bin/fm-pending-reply-lib.sh
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
+# shellcheck source=bin/fm-timeout-lib.sh
+. "$SCRIPT_DIR/fm-timeout-lib.sh"
 
 PERSIST_WAIT=${FM_SECONDMATE_PERSIST_WAIT:-900}
 PERSIST_POLL=${FM_SECONDMATE_PERSIST_POLL:-5}
@@ -143,6 +145,9 @@ first_reported_line() {  # <text>
 # plainly which it was. A nudge is a partial reload and is never reported as more.
 fall_back_to_nudge() {  # <id> <reason>
   local id=$1 reason=$2 out
+  if report_open_exit_dialog "$id"; then
+    return 0
+  fi
   if out=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
     "$SCRIPT_DIR/fm-send.sh" "$id" "$FM_SECOND_MATE_NUDGE_MESSAGE" 2>&1); then
     nudged_count=$((nudged_count + 1))
@@ -157,6 +162,23 @@ fall_back_to_nudge() {  # <id> <reason>
 report_unreached() {  # <id> <reason>
   unreached_count=$((unreached_count + 1))
   printf 'unreached: %s: %s\n' "$1" "$2"
+}
+
+report_open_exit_dialog() {  # <id>
+  local id=$1 meta="$STATE/$1.meta" screen
+  [ -f "$meta" ] && [ ! -L "$meta" ] || return 1
+  [ "$(fm_meta_get "$meta" kind)" = secondmate ] || return 1
+  [ "$(fm_control_harness_family "$(fm_meta_get "$meta" harness)")" = claude ] || return 1
+  if [ -n "$(fm_meta_get "$meta" remote_host)" ]; then
+    screen=$(fm_run_timed 5 "$SCRIPT_DIR/fm-on.sh" "$id" \
+      fm-remote-secondmate-control.sh observe "$id" --exit-dialog </dev/null 2>/dev/null) || return 1
+  else
+    fm_backend_validate_task_endpoint "$meta" "$id" 2>/dev/null || return 1
+    screen=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_guarded_composer_state \
+      "$FM_BACKEND_VALIDATED_BACKEND" "$FM_BACKEND_VALIDATED_TARGET" "fm-$id" '' claude 5000 2>/dev/null) || return 1
+  fi
+  [ "$screen" = exit-confirm ] || return 1
+  report_unreached "$id" 'Claude is showing its background-tasks exit confirmation and needs manual recovery'
 }
 
 restart_mate() {  # <array-index>
@@ -183,7 +205,9 @@ restart_mate() {  # <array-index>
     return
   fi
 
-  restart_reason=$(first_reported_line "$restart_out")
+  restart_reason=$(first_reported_line "$(printf '%s\n' "$restart_out" \
+    | grep -E '^error: exit-(refused|typed|delivered) .* exit=unconfirmed; Claude is showing its background-tasks exit confirmation')")
+  [ -n "$restart_reason" ] || restart_reason=$(first_reported_line "$restart_out")
   [ -n "$restart_reason" ] || restart_reason="the restart failed without a reported reason"
   report_unreached "$id" "the restart outcome is unknown: $restart_reason"
 }
@@ -261,9 +285,15 @@ while [ "$i" -lt "${#IDS[@]}" ]; do
     i=$((i + 1))
     continue
   fi
+  if report_open_exit_dialog "$id"; then
+    PLAN[i]="done"
+    i=$((i + 1))
+    continue
+  fi
   PLACEMENT[i]=$FM_SECONDMATE_RESTART_PLACEMENT
   HOST[i]=$FM_SECONDMATE_RESTART_HOST
   HARNESS[i]=$FM_SECONDMATE_RESTART_HARNESS
+  persist_request=$(fm_secondmate_persist_request "$FM_SECONDMATE_RESTART_HARNESS")
   if [ "${PLACEMENT[i]}" = remote ]; then
     # A local relaunch re-resolves this home's durable secondmate pin on its own,
     # which is the one owner of that resolution. A remote one cannot: it runs in
@@ -287,14 +317,14 @@ while [ "$i" -lt "${#IDS[@]}" ]; do
   fi
 
   if ! corr=$(fm_pending_reply_create "$FM_HOME" "$STATE" "$id" \
-    "$FM_SECONDMATE_PERSIST_REQUEST"); then
+    "$persist_request"); then
     REASON[i]="its answer about the open work cannot be tracked, so a clean reload could not be proven"
     i=$((i + 1))
     continue
   fi
   if ! send_out=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
     FM_PENDING_REPLY_EXISTING_CORR="$corr" \
-    "$SCRIPT_DIR/fm-send.sh" "$id" "$FM_SECONDMATE_PERSIST_REQUEST" 2>&1); then
+    "$SCRIPT_DIR/fm-send.sh" "$id" "$persist_request" 2>&1); then
     fm_pending_reply_discard_undelivered "$STATE" "$corr" >/dev/null 2>&1 || true
     REASON[i]="the request to write down its open work could not be delivered: $(first_reported_line "$send_out")"
     i=$((i + 1))
@@ -317,12 +347,13 @@ pending_count=0
 restart_active_count=0
 i=0
 while [ "$i" -lt "${#IDS[@]}" ]; do
-  if [ "${PLAN[i]}" = persisted-pending ]; then
-    pending_count=$((pending_count + 1))
-  else
-    fall_back_to_nudge "${IDS[$i]}" "${REASON[i]}"
-    PLAN[i]="done"
-  fi
+  case "${PLAN[i]}" in
+    persisted-pending) pending_count=$((pending_count + 1)) ;;
+    fallback)
+      fall_back_to_nudge "${IDS[$i]}" "${REASON[i]}"
+      PLAN[i]="done"
+      ;;
+  esac
   i=$((i + 1))
 done
 

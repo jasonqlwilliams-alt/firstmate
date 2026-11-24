@@ -2445,25 +2445,6 @@ fm_backend_herdr_terminal_id_valid() {
   case "${1:-}" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
 }
 
-# Polling needs endpoint identity even when the pane's agent is unreadable.
-fm_backend_herdr_recorded_endpoint_state() {  # <target>
-  local target=$1 identity
-  fm_backend_herdr_parse_target "$target" || { printf 'unreadable'; return 0; }
-  identity=$(fm_backend_herdr_task_identity_state "$target")
-  case "$identity" in
-    match) return 0 ;;
-    mismatch) printf 'replaced' ;;
-    missing) printf 'missing' ;;
-    *)
-      if [ "$(fm_backend_herdr_server_running_state "$FM_BACKEND_HERDR_SESSION")" = stopped ]; then
-        printf 'missing'
-      else
-        printf 'unreadable'
-      fi
-      ;;
-  esac
-}
-
 # Preserve the secondmate recovery classifier's existing vocabulary.
 fm_backend_herdr_pane_home_state() {  # <session> <pane> <expected-home>
   local state
@@ -3232,25 +3213,33 @@ fm_backend_herdr_send_key() {  # <target> <key>
 # always request a generous fetch far above any realistic viewport height, then
 # trim to the caller's requested bound ourselves with `tail`.
 fm_backend_herdr_capture() {  # <target> <lines>
-  local lines=${2:-200} fetch out binding
+  _fm_backend_herdr_capture "$1" "${2:-200}"
+}
+
+_fm_backend_herdr_capture() {  # <target> <lines> [format] [visible]
+  local lines=$2 format=${3:-} scope=${4:-} fetch out binding
+  local -a args
   fm_backend_herdr_target_ready "$1" binding || return 1
-  case "$lines" in ''|*[!0-9]*) lines=200 ;; esac
-  fetch=$lines
-  case "$fetch" in ''|*[!0-9]*) fetch=200 ;; *) [ "$fetch" -ge 200 ] || fetch=200 ;; esac
-  out=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane read "$FM_BACKEND_HERDR_PANE" --source recent --lines "$fetch" 2>/dev/null) || return 1
+  if [ "$scope" = visible ]; then
+    args=(--source visible)
+  else
+    case "$lines" in *[!0-9]*) lines=200 ;; esac
+    fetch=$lines
+    [ "$fetch" -ge 200 ] || fetch=200
+    args=(--source recent --lines "$fetch")
+  fi
+  [ -z "$format" ] || args+=(--format "$format")
+  out=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane read "$FM_BACKEND_HERDR_PANE" "${args[@]}" 2>/dev/null) || return 1
   fm_backend_herdr_recheck_read_binding "$1" "$binding" || return 1
-  printf '%s' "$out" | tail -n "$lines"
+  if [ "$scope" = visible ]; then
+    printf '%s' "$out"
+  else
+    printf '%s' "$out" | tail -n "$lines"
+  fi
 }
 
 fm_backend_herdr_capture_ansi() {  # <target> <lines>
-  local lines=${2:-200} fetch out binding
-  fm_backend_herdr_target_ready "$1" binding || return 1
-  case "$lines" in ''|*[!0-9]*) lines=200 ;; esac
-  fetch=$lines
-  case "$fetch" in ''|*[!0-9]*) fetch=200 ;; *) [ "$fetch" -ge 200 ] || fetch=200 ;; esac
-  out=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane read "$FM_BACKEND_HERDR_PANE" --source recent --lines "$fetch" --format ansi 2>/dev/null) || return 1
-  fm_backend_herdr_recheck_read_binding "$1" "$binding" || return 1
-  printf '%s' "$out" | tail -n "$lines"
+  _fm_backend_herdr_capture "$1" "${2:-200}" ansi
 }
 
 # --- herdr composer capture and capability primitives -----------------------
@@ -3298,12 +3287,11 @@ fm_backend_herdr_composer_state() {  # <target> -> empty|pending|pending-unprove
 # fm_backend_herdr_composer_snapshot: one composer capture into the snapshot
 # globals (bin/fm-composer-lib.sh "Composer SNAPSHOT"), ANSI first and plain
 # as the styled=0 fallback; fails when the target or both captures fail.
-fm_backend_herdr_composer_snapshot() {  # <target>
-  local target=$1 cap styled
-  fm_backend_herdr_parse_target "$target" || return 1
-  if cap=$(fm_backend_herdr_capture_ansi "$target" "$FM_COMPOSER_CAPTURE_LINES" 2>/dev/null); then
+fm_backend_herdr_composer_snapshot() {  # <target> [visible]
+  local target=$1 scope=${2:-} cap styled
+  if cap=$(_fm_backend_herdr_capture "$target" "$FM_COMPOSER_CAPTURE_LINES" ansi "$scope" 2>/dev/null); then
     styled=1
-  elif cap=$(fm_backend_herdr_capture "$target" "$FM_COMPOSER_CAPTURE_LINES"); then
+  elif cap=$(_fm_backend_herdr_capture "$target" "$FM_COMPOSER_CAPTURE_LINES" '' "$scope"); then
     styled=0
   else
     return 1

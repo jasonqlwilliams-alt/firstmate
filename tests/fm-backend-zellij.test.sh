@@ -585,27 +585,37 @@ test_capture_fails_when_session_absent() {
   pass "fm_backend_zellij_capture: fails when the target session is not listed as active (session_exists pre-check)"
 }
 
-test_recorded_endpoint_state_requires_positive_absence() {
+test_endpoint_state_rejects_failed_pane_inventory() {
   local dir fb output
-  dir="$TMP_ROOT/recorded-presence"; mkdir -p "$dir/responses"
+  dir="$TMP_ROOT/failed-pane-inventory"; mkdir -p "$dir/responses"
   fb=$(make_zellij_fakebin "$dir")
-  zellij_pane_response "$dir" 1 8 3
-  zellij_pane_response "$dir" 2 7 3
-  printf '[{"id":"7","is_plugin":false}]\n' > "$dir/responses/3.out"
-  printf '[]\n' > "$dir/responses/4.out"
-  printf '1\n' > "$dir/responses/4.exit"
+  zellij_pane_response "$dir" 1 7 3
+  printf '1\n' > "$dir/responses/1.exit"
+  zellij_tab_response "$dir" 2 3 fm-label
 
+  # shellcheck disable=SC2016 # The child shell expands $0.
   output=$(PATH="$fb:$PATH" FM_ZELLIJ_LOG="$dir/log" FM_ZELLIJ_RESPONSES="$dir/responses" \
-    FM_ZELLIJ_SESSION_LIST=firstmate bash -c '
-      . "$1"
-      for probe in absent reused malformed failed; do
-        printf "%s: %s\n" "$probe" "$(fm_backend_recorded_endpoint_state zellij firstmate:7 unused.meta)"
-      done
-      printf "missing session: %s\n" "$(fm_backend_recorded_endpoint_state zellij other:7 unused.meta)"
-    ' _ "$ROOT/bin/fm-backend.sh")
-  [ "$output" = $'absent: missing\nreused: unreadable\nmalformed: unreadable\nfailed: unreadable\nmissing session: unreadable' ] \
-    || fail "unexpected Zellij endpoint loss verdicts: $output"
-  pass "Zellij reports physical pane absence only from a successful, well-formed inventory"
+    FM_ZELLIJ_SESSION_LIST=firstmate \
+    bash -c '. "$0/bin/fm-backend.sh"; fm_backend_endpoint_state zellij firstmate:7 fm-label' "$ROOT")
+  [ "$output" = unreadable ] || fail "Zellij trusted inventory output from a failed command: $output"
+  pass "Zellij treats a failed pane inventory as unreadable even if it prints valid JSON"
+}
+
+test_labeled_capture_rejects_ambiguous_pane_inventory() {
+  local dir fb status=0
+  dir="$TMP_ROOT/capture-ambiguous-pane"; mkdir -p "$dir/responses"
+  printf '%s\n' '[{"id":7,"tab_id":3,"is_plugin":false},{"id":7,"tab_id":4,"is_plugin":false}]' > "$dir/responses/1.out"
+  zellij_tab_response "$dir" 2 3 fm-label
+  printf 'worker output\n' > "$dir/responses/3.out"
+  fb=$(make_zellij_fakebin "$dir")
+  PATH="$fb:$PATH" FM_ZELLIJ_LOG="$dir/log" FM_ZELLIJ_RESPONSES="$dir/responses" \
+    FM_ZELLIJ_SESSION_LIST="firstmate" \
+    bash -c '. "$0/bin/backends/zellij.sh"; fm_backend_zellij_capture firstmate:7 5 fm-label' "$ROOT" \
+    >/dev/null 2>&1 || status=$?
+  [ "$status" -ne 0 ] || fail "labeled capture trusted the first of two matching terminal pane IDs"
+  assert_not_contains "$(cat "$dir/log")" $'\x1f''dump-screen' \
+    "labeled capture should stop before reading a screen when the pane inventory is ambiguous"
+  pass "fm_backend_zellij_capture: refuses duplicate terminal pane IDs before reading a screen"
 }
 
 test_send_key_normalizes_and_targets_pane() {
@@ -1348,7 +1358,8 @@ test_capture_small_reads_use_viewport_and_trim
 test_capture_large_reads_use_full_scrollback_and_trim
 test_capture_fails_when_pane_absent
 test_capture_fails_when_session_absent
-test_recorded_endpoint_state_requires_positive_absence
+test_endpoint_state_rejects_failed_pane_inventory
+test_labeled_capture_rejects_ambiguous_pane_inventory
 test_send_key_normalizes_and_targets_pane
 test_send_literal_uses_paste_separator_for_option_shaped_text
 test_send_text_line_clears_partial_input_when_enter_fails

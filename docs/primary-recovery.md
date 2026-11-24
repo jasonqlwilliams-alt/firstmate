@@ -33,6 +33,11 @@ On a timeout or unknown create/launch outcome, inspect the retained launch recei
 The command deliberately refuses a queued or unaccounted partial launch rather than sending the startup instruction again.
 Resolve any trust or first-use permission dialog interactively; the launcher does not answer it with keys.
 Never delete the session lock to make a second primary start.
+Run `bin/fm-lock.sh status` to inspect the current lock.
+Lock status reports a recorded owner as stale if its start time differs from the live process's start time or the lookup fails.
+Without a start record for the PID, the checks fall back to PID-only liveness, including for a new claim made when the start time is unavailable.
+If a takeover is interrupted after publishing the new start record but before replacing the PID line, this fallback can let a live harness that reused the old PID hold the lock until it exits.
+The [owner record](../bin/fm-session-lock-record-lib.sh) documents atomic publication of the PID line and compatibility with in-process readers.
 
 ## Finish recovery in the primary
 
@@ -52,7 +57,8 @@ bin/fm-primary-start.sh ready \
   --harness claude --workspace <exact-workspace-id>
 ```
 
-`agent_detected` proves an interactive primary was found; `primary_initialized` additionally binds its live process to the session lock and completed startup.
+`agent_detected` proves an interactive primary was found.
+`primary_initialized` additionally binds its live process to the session lock and [completed startup record](sessionstart-nudge.md#source-routing).
 `recovery_ready` requires the current successful locked startup generation and verified secondmate endpoint ownership.
 Readiness exits successfully for the initialized, recovered primary so it can gate a private layout.
 It performs no repairs or lifecycle actions and starts no server.

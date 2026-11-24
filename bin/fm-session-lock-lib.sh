@@ -16,6 +16,9 @@
 # shellcheck source=bin/fm-cursor-lib.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/fm-cursor-lib.sh"
 
+# shellcheck source=bin/fm-session-lock-record-lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/fm-session-lock-record-lib.sh"
+
 # Known harness command names; extend when a new adapter is verified. omp is
 # anchored exactly like pi: its process name is the bare word `omp` (verified,
 # omp 18.1.11), and a substring match would claim ompd or comp.
@@ -154,9 +157,8 @@ fm_harness_pid_alive() {
   fm_harness_process_matches "$comm" "$args"
 }
 
-# True when state dir $1 holds a session lock whose pid is ANY harness ancestor
-# of the current process: this script runs inside the session that owns the
-# home's fleet lock. Membership is the honest test of that question, because the
+# Ownership requires the start-time check and a lock PID that names ANY
+# harness ancestor of the current process. Check the whole chain because the
 # lock owner sits at an unknown depth in a contiguous Claude run - it is the
 # outermost pid when the hook fires inside the session's own nested worker chain,
 # and an inner pid when a harness-named daemon parents the session. A missing
@@ -164,15 +166,59 @@ fm_harness_pid_alive() {
 # ancestry that cannot be resolved all fail closed.
 fm_session_lock_owned_by_self() {
   local state=$1 lock_pid pids pid
-  lock_pid=$(cat "$state/.lock" 2>/dev/null || true)
-  case "$lock_pid" in
-    ''|*[!0-9]*) return 1 ;;
-  esac
+  fm_session_lock_read "$state/.lock" || return 1
+  lock_pid=$FM_SESSION_LOCK_PID
+  case "$lock_pid" in ''|0|1|*[!0-9]*) return 1 ;; esac
   pids=$(fm_harness_ancestry_pids) || return 1
   while IFS= read -r pid; do
-    [ "$pid" = "$lock_pid" ] && return 0
+    if [ "$pid" = "$lock_pid" ]; then
+      fm_session_lock_start_matches "$lock_pid" "$FM_SESSION_LOCK_START"
+      return $?
+    fi
   done <<EOF
 $pids
 EOF
   return 1
+}
+
+fm_session_lock_owner_alive() {  # <pid> <recorded-start>
+  fm_session_lock_start_matches "$1" "$2" && fm_harness_pid_alive "$1"
+}
+
+fm_session_lock_write_start() {  # <lock-file> <pid> <start>
+  local sidecar="$1.start" pid=$2 start=$3 tmp
+  [ -n "$start" ] && [ ! -d "$sidecar" ] || return 1
+  tmp=$(mktemp "${sidecar%/*}/.lock-write.XXXXXX" 2>/dev/null) || return 1
+  if fm_session_lock_print_record "$pid" "$start" > "$tmp" 2>/dev/null \
+    && mv -f "$tmp" "$sidecar" 2>/dev/null; then
+    return 0
+  fi
+  rm -f "$tmp" 2>/dev/null
+  return 1
+}
+
+fm_session_lock_write() {  # <lock-file> <pid> <start>
+  local lock=$1 pid=$2 start=$3 tmp
+  case "$pid" in ''|0|1|*[!0-9]*) return 1 ;; esac
+  tmp=$(mktemp "${lock%/*}/.lock-write.XXXXXX" 2>/dev/null) || return 1
+  if printf '%s\n' "$pid" > "$tmp" 2>/dev/null \
+    && {
+      if [ -n "$start" ]; then
+        fm_session_lock_write_start "$lock" "$pid" "$start"
+      else
+        rm -f "$lock.start" 2>/dev/null
+      fi
+    } \
+    && mv -f "$tmp" "$lock" 2>/dev/null; then
+    return 0
+  fi
+  rm -f "$tmp" 2>/dev/null
+  return 1
+}
+
+fm_session_start_completion_matches() {  # <completion-file> <pid> <start>
+  local file=$1 pid=$2 start=$3 completion
+  [ -n "$start" ] && [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  completion=$(cat "$file" 2>/dev/null) || return 1
+  [ "$completion" = "$(fm_session_lock_print_record "$pid" "$start")" ]
 }

@@ -1149,7 +1149,7 @@ On 2026-11-22, `bin/fm-herdr-lab.sh teardown "$session"` and `bin/fm-herdr-lab.s
 With both task records present, `bin/fm-watch.sh` printed `stale: <window> (the recorded endpoint is gone for task <lost-task>)` in both record orders.
 After `bin/fm-wake-drain.sh` and its printed acknowledgement command, the re-armed watcher printed `stale: <window>` for the idle replacement.
 Guarded Herdr teardown verified the unchanged default-session tripwire.
-On 2026-11-22, `bin/fm-test-run.sh tests/fm-backend-zellij.test.sh` reported `ok - Zellij reports physical pane absence only from a successful, well-formed inventory` using CLI fixtures for the Zellij 0.44.0 adapter.
+[`tests/fm-watch-triage.test.sh`](../../tests/fm-watch-triage.test.sh) exercises quiet Zellij capture failures and idle presence checks using CLI fixtures.
 [`tests/fm-wake-daemon-lifecycle-e2e.test.sh`](../../tests/fm-wake-daemon-lifecycle-e2e.test.sh) covers away-daemon escalation and later pause reconciliation for a closed tmux window.
 [`tests/fm-daemon.test.sh`](../../tests/fm-daemon.test.sh) exercises named Herdr loss escalation, tracking for the live task sharing the pane, and a loss delivered after the named task relaunches.
 [`tests/fm-teardown.test.sh`](../../tests/fm-teardown.test.sh) covers retaining the loss record after failed task retirement and removing it on a successful retry.

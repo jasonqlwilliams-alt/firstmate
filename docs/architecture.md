@@ -14,8 +14,7 @@ For an ordinary crew task, a wait is read from both of its records: the status l
 So a delivered ordinary crew task whose last line stays `done: PR ...` bounds repeated alarms from new pane hashes to the `FM_PAUSE_RESURFACE_SECS` cadence for the length of the captain's decision.
 The first hash still alarms, each new hash inside that window is absorbed, and a new hash after the window re-surfaces the hold; a terminal pane hash that never changes stays inert after its first alarm exactly as it did before this bound.
 The throttle is scoped to both the current captain-call lifecycle and the status-log state, so releasing and re-holding the same task without a status append starts a fresh window whose first new hash alarms.
-A secondmate reaches the stale path only for a wait declared in its status line, so a hold recorded only in the backlog while its last line is `working:` or `done:` is outside this guard.
-The secondmate gate deliberately skips backlog-only waits.
+The [watcher's secondmate polling rules](watcher-continuity.md#recorded-endpoint-loss) cover endpoint presence and declared waits.
 Repeated provably-working stale escalations on the same unchanged pane add an escalation count to the wake reason and, at `FM_WEDGE_DEMAND_INSPECT_COUNT`, a `demand-deep-inspection` marker.
 A pane holding a file newer than the start of its own quiet window, anywhere in the worktree recorded for that task, is deferred instead of escalated, because a crew writing source, then tests, then documentation behind a static pane is liveness that neither pane quietness nor the run step can show.
 That deferral re-surfaces on the same `FM_PAUSE_RESURFACE_SECS` cadence as a declared wait, with a reason naming the write evidence rather than a wedge, and it is bounded to one pruned, depth-bounded, wall-clock-bounded walk (`FM_WORKTREE_WRITE_PRUNE`, `FM_WORKTREE_WRITE_MAXDEPTH`, `FM_WORKTREE_WRITE_TIMEOUT`) taken only in the branch that was about to escalate, never on every poll.
@@ -136,10 +135,10 @@ It suppresses failed-looking closes when the same identity-matched watcher is he
 Cursor's `bin/fm-turnend-guard-cursor.sh` hook is the same between-turns shape in one synchronous step: it parks the awaited `stop` hook on the arm wrapper and translates an actionable close into one `followup_message`, with a generation baton that makes an older park still running after the next `stop` claim stand down instead of leaking a stale duplicate wake.
 The existing turn-end guard remains the final backstop for every harness-engine protocol, with pi-signed sharing Pi's protocol, omp's blocking `session_stop` hook compelling one continuation per turn, the `--claude` mode cooperating with the auto-arm claim, and Cursor's `--cursor` mode rendering a block as one bounded follow-up because its `stop` step cannot be blocked.
 Its `--restart` mode signals only the watcher recorded in the current home's `state/.watch.lock`, so restarting one home cannot kill sibling secondmate watchers.
-A pull-based guard (`bin/fm-guard.sh`) warns through supervision tool output if the primary checkout is tangled or if work, process-event sources, registered custom checks, or Relay polling has an unhealthy model-aware supervision verdict; on main it also warns when queued wakes are waiting for main itself to drain.
+A pull-based guard (`bin/fm-guard.sh`) reports a tangled primary checkout or a supervision lapse through tool output and warns main when queued wakes are waiting for main itself to drain.
 The drain script calls that guard after presenting the queue; records remain durable until the exact generation-bound acknowledgement printed by the drain succeeds after handling, and main may keep the queued-wakes warning visible until then.
 The Pi supervision branch's deliberate queued-wake warning exception is owned by [`pi-supervision-branch.md`](pi-supervision-branch.md#components-and-their-owners), while [`watcher-continuity.md`](watcher-continuity.md#per-actor-acknowledgement) owns the guard's per-actor counting, the advisory main gets for rows a live branch grant holds, and main's retirement of queue rows no actor could ever present or acknowledge.
-It leads with a prominent bordered tangle banner, while `bin/fm-guard.sh` owns the watcher-down banner and reminder policy so repeated guarded commands stay noisy without reprinting the full banner in the same episode.
+`bin/fm-guard.sh` owns the banner and reminder policy, and the [foreground checkpoint boundary](watcher-continuity.md#foreground-checkpoint-boundary) explains the Codex notice.
 On every verified primary harness, tracked hook integration gives the primary session a push-based backstop: when work, a process-event source, a registered custom check, or Relay polling needs supervision and no supervision owner provably holds this home with a fresh beacon, blocking-capable Stop hooks block and nonblocking turn-end integrations force one bounded follow-up.
 The guard covers the main primary and genuinely marked secondmate homes, exempts child crewmate/scout worktrees, is loop-safe per harness, and is documented in [turnend-guard.md](turnend-guard.md).
 
@@ -293,7 +292,7 @@ After seeding a secondmate, `fm-backlog-handoff.sh` validates the fleet-specific
 The [`fm-backlog-handoff.sh`](../bin/fm-backlog-handoff.sh) header owns route-specific wake outcomes, remote outbox release after receipt, and stable wake-correlation retry behavior.
 `tests/fm-backlog-handoff.test.sh` and `tests/fm-remote-backlog-handoff.test.sh` pin the local and remote delivery boundaries.
 An unreachable remote host is unknown rather than dead, preserves its route and durable work, and is never failed over or relaunched locally.
-Idle secondmate panes are healthy; teardown is explicit and refuses while the secondmate home has in-flight work unless the captain has approved discard with `--force`.
+Secondmate teardown is explicit and refuses while the secondmate home has in-flight work unless the captain has approved discard with `--force`.
 
 Secondmate homes converge conservatively to the primary's version and declared inherited local material at launch and during locked session start.
 The [`secondmate-provisioning` skill](../.agents/skills/secondmate-provisioning/SKILL.md) owns the full guarded sync, propagation, nudge, and mid-session local-material push contract.
@@ -326,14 +325,18 @@ Where a no-mistakes pipeline stores evidence in the repo, it publishes that PR-v
 This repo uses that setting, and its own `.no-mistakes/` directory remains local state that stays gitignored and is rejected by CI if tracked; [`configuration.md`](configuration.md) owns the setting.
 PR-based task merges go through `bin/fm-pr-merge.sh`, which records `pr=` and any available `pr_head=` through `bin/fm-pr-check.sh` before calling the forge CLI.
 The helper requires a full canonical URL and rejects malformed URLs or repo override flags before recording merge state.
-A `https://github.com/<owner>/<repo>/pull/<n>` URL requires `gh` and `jq`, is merged only after one live read confirms the pull request is open, not a draft, mergeable, conflict-free, and every unwaived check is green at the current head, then `gh pr merge` binds that verified head with `--match-head-commit`.
+A `https://github.com/<owner>/<repo>/pull/<n>` URL requires `gh` and `jq` to verify in one live read that the pull request is open, mergeable, out of draft, and free of conflicts.
+The helper verifies the checks in the same read, and `gh pr merge` binds the merge to the verified head with `--match-head-commit`.
 `--auto`, `--admin`, and branch-deletion flags are refused unless `--attended-override` is passed for an explicit captain instruction; that override never skips the live green check, the away-grant check, or a captain hold.
-An attended `--allow-red <check-name>` may appear once, waives only GitHub checks with that exact name, and is refused while the away-posture record exists.
+The GitHub head must have at least one check unless an attended operator passes `--allow-zero-checks`, and every unwaived check must be green.
+An attended `--allow-red <check-name>` may appear once and waives only GitHub checks with that exact name.
+The helper refuses both check waivers while the away-posture record exists, even for tasks with a merge grant or standing merge authority.
 A `https://<host>/<path>/-/merge_requests/<n>` URL (see [docs/gitlab-merge-watch.md](gitlab-merge-watch.md)) invokes `glab mr merge <n> -R https://<host>/<path>`, so the instance comes from the URL, and adds no merge-method flag because the project's own merge method applies.
 That path merges only after one live read of the merge request confirms it is open, mergeable, conflict-free, with blocking discussions resolved and a successful pipeline at the current head, and it binds the merge to that verified head; recorded metadata is never the authority for those conditions because a rebase leaves it stale.
 After either forge command returns, the script confirms the PR or MR actually landed, and only a confirmed landing records a landed outcome; a queued or unconfirmed request records none and leaves its poll armed.
 On GitLab an auto-merge-queued or unconfirmed request is reported without failing the run.
-On GitHub an outcome that is neither merged nor queued is refused loudly and non-zero, naming the observed state, and a base branch that requires the merge queue is refused with the concrete `--attended-override -- --auto --<method>` retry flags its configured method requires rather than having a merge method chosen on the caller's behalf.
+On GitHub an outcome that is neither merged nor queued is refused loudly and non-zero, naming the observed state.
+When the helper suggests a merge-queue retry, it names the configured forge flags and reminds an operator who used the zero-check waiver to supply it again if the head still has no checks.
 When the forge already accepted exactly those flags and the pull request still has not entered the queue, that refusal points at the queue state to re-check instead of echoing back the flags the caller just ran.
 An auto-merge request is held to the same standard: `--auto` that leaves the pull request neither merged nor queued is refused rather than reported as success.
 Every GitHub refusal states what it could not observe as plainly as what it did, so an unreadable branch-rule response, an unrecognised queue method, and a merge queue no available read can see are each named rather than left to look like a base branch with no queue at all.
@@ -354,7 +357,8 @@ A claim naming a different task releases nothing - teardown warns, names the cla
 Allocation and return serialize on one project lock per machine-local Firstmate tree: every home reachable through local parent links shares that lock, and a home seeded from another machine anchors its own, because a lock taken on this filesystem is neither held nor observable across that boundary.
 A Treehouse slot from a sibling clone remains recognizable when both clones resolve to the same repository identity; `bin/fm-wake-lib.sh` owns the pool membership and slot claim checks.
 Before the worktree is returned, teardown concludes the task's own no-mistakes run when it is parked at a gate, including a run whose head the task copy cannot resolve - the shared runs-ledger continuation proof is the only recognition for that case, so cleanup never orphans a parked run the pipeline advanced past the submitted head.
-[`bin/fm-teardown.sh`](../bin/fm-teardown.sh)'s header owns the landed-work proofs, slot-ownership proof, stale-record retire flag, orphaned-claim release flag, PR-discovery fallback, pre-teardown run conclusion, and stale-lock recovery procedure.
+[`bin/fm-teardown.sh`](../bin/fm-teardown.sh)'s header owns the landed-work proofs, slot-ownership proof, stale-record retire flag, orphaned-claim release flag, PR-discovery fallback, pre-teardown run conclusion, stale-lock recovery procedure, and limits of caller protection at the Treehouse boundary.
+[`tests/fm-teardown.test.sh`](../tests/fm-teardown.test.sh) covers caller refusals through initial returns, lock retries, and descendant cleanup.
 [`tests/fm-teardown-endpoint-safety.test.sh`](../tests/fm-teardown-endpoint-safety.test.sh) and [`tests/fm-secondmate-safety.test.sh`](../tests/fm-secondmate-safety.test.sh) pin the slot-collision boundary, and [`tests/fm-spawn-pool-base-freshen.test.sh`](../tests/fm-spawn-pool-base-freshen.test.sh) pins spawn occupancy.
 
 ## Optional Relay
@@ -433,7 +437,8 @@ The refresh also prunes local branches whose remote is gone and that no worktree
 ## Self-updates stay safe
 
 `/updatefirstmate` fast-forwards the running firstmate repo and registered secondmate homes from `origin` without touching project clones.
-It restarts every live second mate whose home the pass left on the target commit through a persist-gated replacement, including a home that needed no advance, because a restart is also the only thing that re-resolves launch-time harness wiring; the re-read nudge is retained only as the fallback for live agents whose runtime cannot prove a restart.
+It considers every live second mate whose home the pass left on the target commit for a persist-gated restart, including a home that needed no advance, because a restart also re-resolves launch-time harness wiring.
+The [Claude exit-dialog contract](agent-control.md#claude-background-tasks-exit-confirmation) covers the manual recovery case.
 For a remote route, the configured code root updates from its own origin on that host before the persistent home fast-forwards to the code-root commit.
 The update is fast-forward only: dirty, diverged, offline, and off-default targets are reported and left untouched.
 Local homes share the guarded fast-forward helper, while remote updates delegate the same safety decision to the configured host through the generic transport.
