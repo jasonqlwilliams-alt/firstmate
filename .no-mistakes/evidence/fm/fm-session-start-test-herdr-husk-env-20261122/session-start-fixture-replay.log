@@ -1,0 +1,74 @@
+Local Firstmate using synthetic Herdr and Pi. The replay selects only the relevant cases and captures the full fm-spawn.sh response without changing its exit status.
+
+=== Base revision: original fixture and sequential driver ===
+Firstmate Herdr requests and persisted route:
+pane close p-old --session default
+tab create --workspace ws1 --cwd {run-worktree}/.ss-0be81jac/tmp/fm-session-start-tests.GiJjqh/secondmate-herdr-husk/secondmate-fmtest-herdr-GiJjqh --label fm-fmtest-herdr-GiJjqh --no-focus --session default
+window=default:p-old
+herdr_session=default
+herdr_pane_id=p-old
+SECONDMATE_LIVENESS: secondmate fmtest-herdr-GiJjqh: respawn failed after confirmed agent absence on existing endpoint: warning: secondmate fmtest-herdr-GiJjqh sync skipped before launch: not a git repo
+warning: secondmate fmtest-herdr-GiJjqh sync skipped before launch: not a git repo
+error: Herdr task tab creation did not return a readable terminal identity; refusing launch
+not ok - successful Herdr husk recovery should stay non-actionable (unexpected: 'SECONDMATE_LIVENESS:')
+--- output ---
+completed off the startup path in 2s: GitHub authentication, dead-secondmate relaunch, secondmate convergence, pending handoff delivery, project clone refresh with its drift reporting, inactive terminal-outcome reconciliation, and home-summary publication.
+SECONDMATE_LIVENESS: secondmate fmtest-herdr-GiJjqh: respawn failed after confirmed agent absence on existing endpoint: warning: secondmate fmtest-herdr-GiJjqh sync skipped before launch: not a git repo
+SECONDMATE_SYNC: secondmate fmtest-herdr-GiJjqh: skipped: not a git repo
+These ran AFTER the sections above were composed, so re-read any record a line here names.
+TIMINGS - where the deferred network checks spent their time (ms):
+  phase       gh-auth                                    start=+505     elapsed=3
+  phase       fleet-sync                                 start=+514     elapsed=1
+  secondmate  liveness fmtest-herdr-GiJjqh               start=+525     elapsed=911
+  phase       secondmate-liveness                        start=+518     elapsed=925
+  phase       secondmate-sync                            start=+1448    elapsed=261
+  phase       handoff-delivery                           start=+1714    elapsed=1
+  stage       network-checks probe_sweeps                start=+1       elapsed=1735
+  slowest: stage network-checks probe_sweeps 1735ms, phase secondmate-liveness 925ms, secondmate liveness fmtest-herdr-GiJjqh 911ms
+exit=1
+
+=== Target revision: start with HERDR_SESSION=lab ===
+ok - session start: the proven bare-shell recovery path remains intact
+Firstmate Herdr requests and persisted route:
+pane close p-old --session default
+tab create --workspace ws1 --cwd {run-worktree}/.ss-0be81jac/tmp/fm-session-start-tests.wJhexY/secondmate-herdr-husk/secondmate-fmtest-herdr-wJhexY --label fm-fmtest-herdr-wJhexY --no-focus --session default
+window=default:p-new
+herdr_session=default
+herdr_pane_id=p-new
+BOOTSTRAP_INFO: secondmate fmtest-herdr-wJhexY relaunched after confirmed agent absence on existing endpoint (backend=herdr)
+warning: secondmate fmtest-herdr-wJhexY sync skipped before launch: not a git repo
+ok - session start: a confirmed Herdr husk is closed and relaunched
+ok - status tail is bounded to the configured line count, with the full log path always printed
+# fm-session-start.test.sh: all assertions passed
+exit=0
+
+=== Target revision: omit the terminal ID from the tab-create fixture response ===
+ok - session start: the proven bare-shell recovery path remains intact
+Firstmate Herdr requests and persisted route:
+pane close p-old --session default
+tab create --workspace ws1 --cwd {run-worktree}/.ss-0be81jac/tmp/fm-session-start-tests.Nm9Cew/secondmate-herdr-husk/secondmate-fmtest-herdr-Nm9Cew --label fm-fmtest-herdr-Nm9Cew --no-focus --session default
+window=default:p-old
+herdr_session=default
+herdr_pane_id=p-old
+SECONDMATE_LIVENESS: secondmate fmtest-herdr-Nm9Cew: respawn failed after confirmed agent absence on existing endpoint: warning: secondmate fmtest-herdr-Nm9Cew sync skipped before launch: not a git repo
+warning: secondmate fmtest-herdr-Nm9Cew sync skipped before launch: not a git repo
+error: Herdr task tab creation did not return a readable terminal identity; refusing launch
+not ok - successful Herdr husk recovery should stay non-actionable (unexpected: 'SECONDMATE_LIVENESS:')
+--- output ---
+completed off the startup path in 2s: GitHub authentication, dead-secondmate relaunch, secondmate convergence, pending handoff delivery, project clone refresh with its drift reporting, inactive terminal-outcome reconciliation, and home-summary publication.
+SECONDMATE_LIVENESS: secondmate fmtest-herdr-Nm9Cew: respawn failed after confirmed agent absence on existing endpoint: warning: secondmate fmtest-herdr-Nm9Cew sync skipped before launch: not a git repo
+SECONDMATE_SYNC: secondmate fmtest-herdr-Nm9Cew: skipped: not a git repo
+These ran AFTER the sections above were composed, so re-read any record a line here names.
+TIMINGS - where the deferred network checks spent their time (ms):
+  phase       gh-auth                                    start=+517     elapsed=5
+  phase       fleet-sync                                 start=+529     elapsed=0
+  secondmate  liveness fmtest-herdr-Nm9Cew               start=+537     elapsed=898
+  phase       secondmate-liveness                        start=+530     elapsed=913
+  phase       secondmate-sync                            start=+1447    elapsed=251
+  phase       handoff-delivery                           start=+1703    elapsed=1
+  stage       network-checks probe_sweeps                start=+0       elapsed=1723
+  slowest: stage network-checks probe_sweeps 1723ms, phase secondmate-liveness 913ms, secondmate liveness fmtest-herdr-Nm9Cew 898ms
+# test_session_start_relaunches_herdr_husk_secondmate exited 1
+ok - status tail is bounded to the configured line count, with the full log path always printed
+# fm-session-start.test.sh: 1 case(s) failed
+exit=1
