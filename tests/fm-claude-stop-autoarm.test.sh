@@ -30,6 +30,7 @@ install_autoarm_scripts() {
   cp "$ROOT/bin/fm-primary-scope-lib.sh" "$dir/bin/fm-primary-scope-lib.sh"
   cp "$ROOT/bin/fm-supervision-lib.sh" "$dir/bin/fm-supervision-lib.sh"
   cp "$ROOT/bin/fm-wake-lib.sh" "$dir/bin/fm-wake-lib.sh"
+  cp "$ROOT/bin/fm-session-lock-record-lib.sh" "$dir/bin/fm-session-lock-record-lib.sh"
   cp "$ROOT/bin/fm-session-lock-lib.sh" "$dir/bin/fm-session-lock-lib.sh"
   cp "$ROOT/bin/fm-cursor-lib.sh" "$dir/bin/fm-cursor-lib.sh"
   cp "$ROOT/bin/fm-hook-host-lib.sh" "$dir/bin/fm-hook-host-lib.sh"
@@ -289,7 +290,7 @@ test_reclaims_stale_session_lock_before_arming() {
 }
 
 test_inert_when_lock_held_by_other_harness() {
-  local dir other out status owner_after
+  local dir other out status
   dir=$(make_primary_dir "$TMP_ROOT/other-lock")
   : > "$dir/state/task.meta"
   write_arm_fixture "$dir" actionable
@@ -299,11 +300,11 @@ test_inert_when_lock_held_by_other_harness() {
   other=$!
   printf '%s\n' "$other" > "$dir/state/.lock"
   out=$(printf '%s\n' '{"session_id":"s"}' | FM_HOME="$dir" "$FAKE_CLAUDE" -c '"$FM_HOME/bin/fm-claude-stop-autoarm.sh"' 2>&1); status=$?
-  owner_after=$(cat "$dir/state/.lock")
   kill "$other" 2>/dev/null || true
   wait "$other" 2>/dev/null || true
   expect_code 0 "$status" "hook must stay inert when another live harness holds the session lock"
-  [ "$owner_after" = "$other" ] || fail "hook replaced another live harness owner: expected $other, got $owner_after"
+  cmp -s "$dir/state/.lock" <(printf '%s\n' "$other") || fail "hook replaced another live harness owner"
+  assert_absent "$dir/state/.lock.start" "competing Stop hook created another owner's start sidecar"
   [ ! -e "$dir/state/arm-ran" ] || fail "hook armed while another session owned the lock"
   [ ! -e "$dir/state/.claude-autoarm-epoch" ] || fail "hook wrote an epoch while another session owned the lock"
   pass "auto-arm: inert without arm, rewake, or lock replacement when another live harness owns the home"
@@ -334,7 +335,8 @@ test_stale_lock_recovery_preserves_afk_and_need_gates() {
   write_arm_fixture "$afk_dir" actionable
   out=$(printf '%s\n' '{"session_id":"stale-afk"}' | FM_HOME="$afk_dir" "$FAKE_CLAUDE" -c '"$FM_HOME/bin/fm-claude-stop-autoarm.sh"' 2>&1); status=$?
   expect_code 0 "$status" "a stale owner must not widen the AFK gate"
-  [ "$(cat "$afk_dir/state/.lock")" = 9999999 ] || fail "AFK stale lock was reclaimed despite away ownership"
+  cmp -s "$afk_dir/state/.lock" <(printf '9999999\n') || fail "AFK stale lock was reclaimed despite away ownership"
+  assert_absent "$afk_dir/state/.lock.start" "stale AFK home gained a start sidecar"
   [ ! -e "$afk_dir/state/arm-ran" ] || fail "stale AFK home armed"
 
   idle_dir=$(make_primary_dir "$TMP_ROOT/stale-idle")
@@ -342,7 +344,8 @@ test_stale_lock_recovery_preserves_afk_and_need_gates() {
   write_arm_fixture "$idle_dir" actionable
   out=$(printf '%s\n' '{"session_id":"stale-idle"}' | FM_HOME="$idle_dir" "$FAKE_CLAUDE" -c '"$FM_HOME/bin/fm-claude-stop-autoarm.sh"' 2>&1); status=$?
   expect_code 0 "$status" "a stale owner must not widen the supervision-need gate"
-  [ "$(cat "$idle_dir/state/.lock")" = 9999999 ] || fail "idle stale lock was reclaimed without supervision need"
+  cmp -s "$idle_dir/state/.lock" <(printf '9999999\n') || fail "idle stale lock was reclaimed without supervision need"
+  assert_absent "$idle_dir/state/.lock.start" "stale IDLE home gained a start sidecar"
   [ ! -e "$idle_dir/state/arm-ran" ] || fail "stale idle home armed"
   pass "auto-arm: stale-owner recovery leaves the AFK and supervision-need gates unchanged"
 }

@@ -43,17 +43,17 @@
 #     is not yet confirmed.
 #   - Mutation authority is leased. The worker outlives the command that launched
 #     it, so it takes the same acquisition lease a new session must hold before
-#     replacing a dead owner, re-checks the captured owner under that lease, and
+#     replacing a stale owner, re-checks the captured PID under that lease, and
 #     holds it through the bounded mutating run. A takeover stays read-only until
 #     that run settles, so old and new owners can never sweep concurrently.
 #
 # Usage: fm-startup-network.sh start --locked <0|1> --harvest-pid <pid>
 #          Launch the detached worker and return immediately. Single-flight: a
 #          running worker is reused only when its phases cover this request and,
-#          for locked work, it belongs to the same lock owner. A probe-only
+#          for locked work, its recorded lock PID matches. A probe-only
 #          worker therefore cannot satisfy a later locked request; the later
-#          request gets a distinct generation and runs the locked phases. A new
-#          owner also gets a distinct generation. --locked 1 asks
+#          request gets a distinct generation and runs the locked phases. A
+#          different lock PID also gets a distinct generation. --locked 1 asks
 #          for the inactive-outcome scan and mutating sweeps as well as the
 #          read-only probe; --locked 0 asks for the probe only. --harvest-pid
 #          names the session-start process
@@ -247,9 +247,11 @@ cmd_start() {  # <locked> <harvest-pid>
   # Captured HERE, at the moment the caller still holds the lock, and carried to
   # the worker: re-reading the lock later would only prove that SOME session
   # holds it, which is exactly the case this guard exists to reject.
-  lock_pid=$(cat "$STATE/.lock" 2>/dev/null || true)
-  if [ "$locked" = 1 ] && ! fm_session_lock_owned_by_self "$STATE"; then
-    return 1
+  if [ "$locked" = 1 ]; then
+    fm_session_lock_owned_by_self "$STATE" || return 1
+    lock_pid=$FM_SESSION_LOCK_PID
+  else
+    lock_pid=$(cat "$STATE/.lock" 2>/dev/null || true)
   fi
 
   fm_lock_acquire_wait "$PUBLISH_LOCK"
@@ -331,15 +333,9 @@ EOF
 # session held the lock a moment ago" is not enough for a worker that outlives
 # the command which launched it.
 #
-# The question is deliberately "does the lock still name the session that asked
-# for this work?", not "is that session still alive". The hazard being closed is
-# a SECOND session sweeping concurrently, and taking the lock is exactly what
-# rewrites this value - bin/fm-lock.sh overwrites a dead holder's pid with its
-# own. An unchanged value therefore proves no one else owns the sweeps, which is
-# the whole guarantee. Requiring liveness instead would refuse to finish work
-# nobody else has claimed, and the sweeps are idempotent, so finishing it is
-# strictly better than abandoning it. A missing, unreadable, or replaced lock all
-# fail closed to the read-only probe.
+# Compare the captured PID line under the acquisition lease. This lets the
+# worker finish its idempotent sweeps after the requesting process exits.
+# A missing, unreadable, or different PID line leaves only the read-only probe.
 lock_unchanged() {  # <expected-pid>
   local expected=$1 current
   case "$expected" in ''|*[!0-9]*) return 1 ;; esac
@@ -471,7 +467,7 @@ cmd_run() {  # <locked> <lock-pid> <generation>
     locked=0
   fi
   if [ "$locked" = 1 ]; then
-    [ "$internal" -eq 1 ] || lock_pid=$(cat "$STATE/.lock" 2>/dev/null || true)
+    [ "$internal" -eq 1 ] || lock_pid=$FM_SESSION_LOCK_PID
     if lock_unchanged "$lock_pid"; then
       sweep_locked=1
       phases=probe,sweeps
@@ -633,7 +629,8 @@ cmd_owner() {
   local owner=${1:-} identity
   case "$owner" in ''|*[!0-9]*) return 1 ;; esac
   [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] || return 1
-  [ "$(cat "$STATE/.lock")" = "$owner" ] && fm_harness_pid_alive "$owner" || return 1
+  fm_session_lock_read "$STATE/.lock" && [ "$FM_SESSION_LOCK_PID" = "$owner" ] \
+    && fm_session_lock_owner_alive "$owner" "$FM_SESSION_LOCK_START" || return 1
   [ -f "$STATUS_FILE" ] && [ ! -L "$STATUS_FILE" ] || return 1
   identity=$(lock_identity_value "$owner") || return 1
   awk -F= -v owner="$owner" -v identity="$identity" '

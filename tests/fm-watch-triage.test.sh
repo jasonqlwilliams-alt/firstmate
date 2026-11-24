@@ -2324,6 +2324,295 @@ test_missing_tmux_endpoint_surfaces_once() (
   done
 )
 
+# An idle second mate is healthy, but only while its recorded window exists.
+# Closing a local second mate's session must raise the same one-shot loss wake an
+# ordinary task does, while a live idle second mate stays silent.
+test_missing_secondmate_endpoint_surfaces_once() (
+  local tmux_bin socket dir state window out pid='' poll watch_env recovery_state
+  tmux_bin=$(command -v tmux) || { echo "skip: tmux is required for the second mate endpoint regression"; return 0; }
+  socket="fm-watch-mate-gone-$$-$RANDOM"
+  dir=$(fm_test_tmproot fm-watch-mate-gone) || fail "could not create the second mate endpoint fixture"
+  trap '[ -z "$pid" ] || reap "$pid"; "$tmux_bin" -L "$socket" kill-server 2>/dev/null || true' EXIT
+  mkdir -p "$dir/bin"
+  {
+    printf '#!/usr/bin/env bash\n'
+    cat <<'SH'
+for arg in "$@"; do
+  case "$arg" in
+    remote|remote:*|=remote|=remote:*) printf '%s\n' "$*" >> "$FM_FAKE_ROUTE_ERRORS" ;;
+  esac
+done
+if [ "$1" = capture-pane ]; then
+  printf '%s\n' "$*" >> "$FM_FAKE_ROUTE_ERRORS"
+fi
+SH
+    printf 'exec %q -L %q "$@"\n' "$tmux_bin" "$socket"
+  } > "$dir/bin/tmux"
+  chmod +x "$dir/bin/tmux"
+  state="$dir/home/state"; out="$dir/home/watch.out"
+  watch_env=(PATH="$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_FAKE_ROUTE_ERRORS="$dir/route-errors"
+    FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999
+    FM_PAUSE_RESURFACE_SECS=999999 FM_STALE_ESCALATE_SECS=999999)
+  mkdir -p "$state"
+  window="mates:fm-mate"
+  "$dir/bin/tmux" -f /dev/null new-session -d -s mates -c "$dir" || fail "could not start the private tmux server"
+  "$dir/bin/tmux" new-window -d -t mates: -n fm-mate -- bash --noprofile --norc -i \
+    || fail "could not create the second mate fixture window"
+  "$dir/bin/tmux" new-session -d -s mates-dev -n fm-mate -c "$dir" \
+    || fail "could not start the similarly named tmux session"
+  printf 'window=%s\nbackend=tmux\nkind=secondmate\nharness=codex\nspawn_gen=first\n' "$window" > "$state/mate.meta"
+  printf 'window=remote:peer\nbackend=tmux\nkind=secondmate\nremote_host=another-host\n' > "$state/peer.meta"
+  printf 'paused: awaiting an upstream release\n' > "$state/peer.status"
+  seen_sig "$state/peer.status" > "$state/.seen-peer_status"
+  printf 'working: idle under the parent\n' > "$state/mate.status"
+  env "${watch_env[@]}" "$WATCH" > "$out" & pid=$!
+  wait_for_exit "$pid" 150 || fail "the second mate status did not surface: $(cat "$out")"
+  pid=''
+  ack_stopped_cycle "$state" || fail "could not acknowledge the second mate status signal"
+
+  printf 'tmux:%s\tfirst\n' "$window" > "$state/mate.missing-endpoint"
+  env "${watch_env[@]}" "$WATCH" > "$out" & pid=$!
+  for poll in 1 2 3; do
+    wait_poll_cycle "$state" "$pid" || fail "a live idle second mate was not quiet on poll $poll: $(cat "$out")"
+  done
+  [ ! -s "$state/.wake-queue" ] || fail "a live idle second mate enqueued a wake: $(cat "$state/.wake-queue")"
+  [ ! -e "$state/mate.missing-endpoint" ] || fail "the live idle mate did not re-arm endpoint loss"
+  [ ! -s "$dir/route-errors" ] || fail "idle secondmate polling read a screen or a remote endpoint: $(cat "$dir/route-errors")"
+  reap "$pid"; pid=''
+  ack_stopped_cycle "$state" || fail "could not acknowledge the fixture watcher stop"
+
+  "$dir/bin/tmux" kill-session -t =mates || fail "could not close the recorded second mate session"
+  # shellcheck disable=SC2016 # The child shell expands $0 and $1.
+  recovery_state=$(env "${watch_env[@]}" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state tmux "$1"' "$ROOT" "$window")
+  [ "$recovery_state" = missing ] || fail "recovery read '$recovery_state' for the closed session"
+  env "${watch_env[@]}" "$WATCH" > "$out" & pid=$!
+  wait_for_exit "$pid" 150 || fail "closing the idle second mate window did not wake the watcher"
+  pid=''
+  grep -Fxq "stale: $window (the recorded endpoint is gone)" "$out" \
+    || fail "unexpected watcher output for the lost second mate: $(cat "$out")"
+  awk -F '\t' -v window="$window" '$3 == "stale" && $4 == window { n++ } END { exit(n != 1) }' "$state/.wake-queue" \
+    || fail "expected exactly one durable loss wake for the second mate"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the second mate loss wake"
+
+  env "${watch_env[@]}" "$WATCH" > "$out" & pid=$!
+  for poll in 1 2; do
+    wait_poll_cycle "$state" "$pid" || fail "the lost second mate was noisy on poll $poll: $(cat "$out")"
+  done
+  [ ! -s "$state/.wake-queue" ] || fail "later polls re-reported the lost second mate"
+  reap "$pid"; pid=''
+  pass "real tmux: closing the recorded session raises one loss wake despite a similarly named live session"
+)
+
+test_idle_herdr_secondmate_reuses_identity_read() (
+  local dir state trace target=idle-mates:w1:p2 pid=''
+  command -v jq >/dev/null 2>&1 || { echo "skip: jq is required by the Herdr adapter"; return 0; }
+  dir=$(fm_test_tmproot fm-watch-idle-herdr) || fail "could not create the idle Herdr fixture"
+  trap '[ -z "$pid" ] || reap "$pid"' EXIT
+  state="$dir/home/state"; trace="$dir/pane-reads"
+  mkdir -p "$state" "$dir/bin"
+  touch "$state/home-summary.json"
+  cat > "$dir/bin/herdr" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'pane get w1:p2 --session idle-mates')
+    if beat=$(cat "$FM_STATE_OVERRIDE/.last-watcher-beat" 2>/dev/null); then
+      printf '%s\n' "$beat" >> "$FM_FAKE_HERDR_PANE_READS"
+    fi
+    jq -n --arg cwd "$FM_HOME" '{result:{pane:{pane_id:"w1:p2",cwd:$cwd}}}'
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$dir/bin/herdr"
+  fm_write_meta "$state/mate.meta" "window=$target" backend=herdr kind=secondmate "worktree=$dir/home" spawn_gen=first
+  PATH="$dir/bin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_FAKE_HERDR_PANE_READS="$trace" \
+    FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$dir/watch.out" &
+  pid=$!
+  wait_poll_cycle "$state" "$pid" || fail "the idle Herdr mate did not stay quiet: $(cat "$dir/watch.out")"
+  [ -s "$trace" ] || fail "the watcher never read the idle mate's Herdr pane identity"
+  awk 'seen[$0]++ { exit 1 }' "$trace" || fail "the watcher repeated an idle Herdr identity read within a poll"
+
+  printf 'herdr:%s\tfirst\n' "$target" > "$state/mate.missing-endpoint"
+  wait_poll_cycle "$state" "$pid" || fail "the Herdr mate did not stay quiet with a loss marker: $(cat "$dir/watch.out")"
+  [ ! -e "$state/mate.missing-endpoint" ] || fail "the live idle Herdr mate did not re-arm endpoint loss"
+  [ ! -s "$state/.wake-queue" ] || fail "the live idle Herdr mate enqueued a wake"
+  reap "$pid"; pid=''
+  pass "herdr: a live idle second mate reuses its identity read and clears an existing loss marker"
+)
+
+install_fake_experimental_backends() {  # <fakebin>
+  local fakebin=$1
+  mkdir -p "$fakebin"
+  node -e '
+const tag = require("crypto").createHash("sha256").update(process.argv[1]).digest("hex").slice(0, 8);
+process.stdout.write("fm-firstmate-" + tag + "-lost");
+' "$(cd "${FM_ROOT_OVERRIDE:-$ROOT}" && pwd -P)" > "$fakebin/scoped-title" || return 1
+  cat > "$fakebin/zellij" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  "list-sessions --short --no-formatting")
+    echo list-sessions >> "${FM_FAKE_ENDPOINT_TRACE:-/dev/null}"
+    echo "remote"; exit 0
+    ;;
+  "--session remote action list-panes --json")
+    [ "$ZELLIJ_SESSION_NAME" = remote ] || exit 3
+    echo list-panes >> "${FM_FAKE_ENDPOINT_TRACE:-/dev/null}"
+    case "$FM_FAKE_ENDPOINT" in
+      reused-session) echo '[{"id":1,"tab_id":1,"is_plugin":false}]' ;;
+      empty-panes) echo '[]' ;;
+      bad-pane) echo '[{"id":7,"tab_id":1}]' ;;
+      unreadable) exit 1 ;;
+      *) echo '[{"id":7,"tab_id":1,"is_plugin":false}]' ;;
+    esac
+    exit 0
+    ;;
+  "--session remote action list-tabs --json")
+    [ "$ZELLIJ_SESSION_NAME" = remote ] || exit 3
+    echo list-tabs >> "${FM_FAKE_ENDPOINT_TRACE:-/dev/null}"
+    case "$FM_FAKE_ENDPOINT" in
+      renamed) echo '[{"tab_id":1,"name":"renamed"}]' ;;
+      bad-tab) echo '[{"tab_id":1,"name":7}]' ;;
+      tab-not-listed) echo '[{"tab_id":2,"name":"fm-elsewhere"}]' ;;
+      legacy) echo '[{"tab_id":1,"name":"fm-lost"}]' ;;
+      duplicate-legacy) echo '[{"tab_id":1,"name":"fm-lost"},{"tab_id":2,"name":"fm-lost"}]' ;;
+      *) printf '[{"tab_id":1,"name":"%s"}]\n' "$(cat "${0%/*}/scoped-title")" ;;
+    esac
+    exit 0
+    ;;
+esac
+printf 'zellij %s\n' "$*" >> "${0%/*}/route-errors"
+exit 3
+SH
+  cat > "$fakebin/cmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  "workspace list --json --id-format uuids")
+    echo workspace-list >> "${FM_FAKE_ENDPOINT_TRACE:-/dev/null}"
+    case "$FM_FAKE_ENDPOINT" in
+      out-of-window) echo '{"workspaces":[{"id":"ws-other","title":"other"}]}' ;;
+      renamed) echo '{"workspaces":[{"id":"ws-gone","title":"renamed"}]}' ;;
+      moved-surface)
+        printf '{"workspaces":[{"id":"ws-gone","title":"%s"},{"id":"ws-other","title":"Destination"}]}\n' "$(cat "${0%/*}/scoped-title")"
+        ;;
+      *) exit 1 ;;
+    esac
+    exit 0
+    ;;
+  "list-panes --workspace ws-gone --json --id-format uuids")
+    if [ "$FM_FAKE_ENDPOINT" = moved-surface ]; then
+      echo list-panes >> "${FM_FAKE_ENDPOINT_TRACE:-/dev/null}"
+      echo '{"panes":[]}'
+      exit 0
+    fi
+    ;;
+esac
+printf 'cmux %s\n' "$*" >> "${0%/*}/route-errors"
+exit 3
+SH
+  cat > "$fakebin/orca" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  "terminal read --terminal term-gone --limit 40 --json")
+    echo terminal-read >> "${FM_FAKE_ENDPOINT_TRACE:-/dev/null}"
+    echo '{"ok":false,"error":{"code":"terminal_handle_stale"}}'
+    exit 1
+    ;;
+esac
+printf 'orca %s\n' "$*" >> "${0%/*}/route-errors"
+exit 3
+SH
+  chmod +x "$fakebin/zellij" "$fakebin/cmux" "$fakebin/orca"
+}
+
+test_experimental_backend_unreadable_endpoints_stay_quiet() (
+  local dir state fakebin out trace pid='' backend target mode kind poll watch_env modes expected_reads read_name
+  command -v jq >/dev/null 2>&1 || { echo "skip: jq is required by the Zellij and cmux adapters"; return 0; }
+  command -v node >/dev/null 2>&1 || { echo "skip: node is required to generate fixture titles"; return 0; }
+  dir=$(fm_test_tmproot fm-watch-experimental-gone) || fail "could not create the experimental endpoint fixture"
+  trap '[ -z "$pid" ] || reap "$pid"' EXIT
+  fakebin="$dir/fakebin"
+  install_fake_experimental_backends "$fakebin" || fail "could not install the experimental backend fixtures"
+  for backend in zellij cmux orca; do
+    case "$backend" in
+      zellij) target="remote:7"; modes=(unreadable renamed reused-session) ;;
+      cmux) target="ws-gone:sf-gone"; modes=(out-of-window renamed moved-surface) ;;
+      orca) target="term-gone"; modes=(stale) ;;
+    esac
+    for mode in "${modes[@]}"; do
+      state="$dir/$backend-$mode/state"; out="$dir/$backend-$mode/watch.out"
+      trace="$dir/$backend-$mode/cli-trace"
+      watch_env=(PATH="$fakebin:$PATH" FM_HOME="$dir/$backend-$mode" FM_STATE_OVERRIDE="$state"
+        FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999
+        FM_PAUSE_RESURFACE_SECS=999999 FM_STALE_ESCALATE_SECS=999999)
+      mkdir -p "$state"
+      touch "$state/home-summary.json"
+      : > "$trace"
+      if [ "$backend" = orca ]; then
+        printf 'window=fm-lost\nterminal=%s\nbackend=orca\nkind=ship\nharness=codex\nspawn_gen=first\n' "$target" > "$state/lost.meta"
+      else
+        kind=ship
+        [ "$mode" != reused-session ] || kind=secondmate
+        printf 'window=%s\nbackend=%s\nkind=%s\nharness=codex\nspawn_gen=first\n' "$target" "$backend" "$kind" > "$state/lost.meta"
+      fi
+      env "${watch_env[@]}" FM_FAKE_ENDPOINT="$mode" FM_FAKE_ENDPOINT_TRACE="$trace" "$WATCH" > "$out" & pid=$!
+      for poll in 1 2; do
+        wait_poll_cycle "$state" "$pid" 600 \
+          || fail "[$backend/$mode] the watcher did not stay quiet through poll $poll (alive=$(kill -0 "$pid" 2>/dev/null && echo yes || echo no)): $(cat "$out")"
+      done
+      reap "$pid"; pid=''
+      case "$backend/$mode" in
+        zellij/renamed) expected_reads=(list-sessions list-panes list-tabs) ;;
+        zellij/unreadable) expected_reads=(list-sessions list-panes) ;;
+        zellij/*) expected_reads=(list-panes) ;;
+        cmux/moved-surface) expected_reads=(workspace-list list-panes) ;;
+        cmux/*) expected_reads=(workspace-list) ;;
+        orca/*) expected_reads=(terminal-read) ;;
+      esac
+      for read_name in "${expected_reads[@]}"; do
+        grep -Fxq "$read_name" "$trace" || fail "[$backend/$mode] the watcher did not reach $read_name"
+      done
+      if [ "$backend" = zellij ] && [ "$kind" != secondmate ]; then
+        awk '
+          $0 == "list-sessions" { pane_reads = 0 }
+          $0 == "list-panes" && ++pane_reads > 1 { exit 1 }
+        ' "$trace" || fail "[$backend/$mode] the watcher repeated the pane query after capture failed"
+      fi
+      [ ! -s "$state/.wake-queue" ] || fail "[$backend/$mode] an inconclusive probe enqueued a wake"
+      [ ! -e "$state/lost.missing-endpoint" ] || fail "[$backend/$mode] an inconclusive probe recorded a loss"
+      [ ! -s "$fakebin/route-errors" ] || fail "unexpected watcher backend route: $(cat "$fakebin/route-errors")"
+    done
+    case "$backend" in
+      zellij) pass "zellij: a reused session name stays quiet when the recorded pane is absent" ;;
+      orca) pass "orca: stale handles stay quiet after the capture fails" ;;
+      cmux) pass "cmux: the watcher stays quiet after a surface moves" ;;
+    esac
+  done
+)
+
+test_zellij_endpoint_state_boundary() (
+  local dir fakebin mode
+  command -v jq >/dev/null 2>&1 || { echo "skip: jq is required by the Zellij adapter"; return 0; }
+  command -v node >/dev/null 2>&1 || { echo "skip: node is required to generate fixture titles"; return 0; }
+  dir=$(fm_test_tmproot fm-endpoint-state-boundary) || fail "could not create the boundary fixture"
+  fakebin="$dir/fakebin"
+  install_fake_experimental_backends "$fakebin" || fail "could not install the experimental backend fixtures"
+  expect_endpoint_state() {  # <verdict> <mode> [label]
+    local got
+    got=$(PATH="$fakebin:$PATH" FM_FAKE_ENDPOINT=$2 FM_HOME="$dir" \
+      bash -c '. "$0/bin/fm-backend.sh"; fm_backend_endpoint_state zellij remote:7 "$1"' "$ROOT" "${3:-}")
+    [ "$got" = "$1" ] || fail "[zellij/$2] expected $1 for remote:7, got '$got'"
+    [ ! -s "$fakebin/route-errors" ] || fail "unexpected backend route: $(cat "$fakebin/route-errors")"
+  }
+  expect_endpoint_state present present fm-lost
+  expect_endpoint_state present legacy fm-lost
+  for mode in unreadable renamed reused-session empty-panes bad-pane bad-tab tab-not-listed duplicate-legacy; do
+    expect_endpoint_state unreadable "$mode" fm-lost
+  done
+  expect_endpoint_state unreadable present
+
+  pass "zellij: only matching, readable endpoint evidence establishes presence"
+)
+
 # A parked task whose worker window was deliberately closed while its isolated
 # copy is kept must not keep alarming about the expected endpoint loss once the
 # park mark is recorded. The mark leaves the copy and its unlanded work alone,
@@ -3537,7 +3826,7 @@ test_secondmate_unpause_clears_pause_tracking() {
   : > "$state/.stale-$key"
   : > "$state/.stale-since-$key"
   : > "$state/.wedge-escalations-$key"
-  watch_bg "$state" "$fakebin" "$out"
+  watch_bg "$state" "$fakebin" "$out" env FM_FAKE_TMUX_WINDOW="$window"
   pid=$!
   wait_poll_cycle "$state" "$pid" || fail "watcher exited while reconciling a resumed secondmate: $(cat "$out")"
   [ ! -e "$state/.paused-$key" ] || { reap "$pid"; fail "resumed secondmate retained the pause marker"; }
@@ -5628,6 +5917,10 @@ test_nonterminal_stale_paused_absorbed_then_resurfaced
 test_exited_declared_pause_is_bounded_but_live_gate_surfaces
 test_missing_tmux_endpoint_surfaces_once || exit 1
 test_endpoint_loss_and_ordinary_stale_are_presented_independently || exit 1
+test_missing_secondmate_endpoint_surfaces_once || exit 1
+test_idle_herdr_secondmate_reuses_identity_read || exit 1
+test_experimental_backend_unreadable_endpoints_stay_quiet || exit 1
+test_zellij_endpoint_state_boundary || exit 1
 test_parked_retained_copy_suppresses_endpoint_loss || exit 1
 test_park_wait_stops_when_home_is_retired || exit 1
 test_park_refuses_redirected_records || exit 1

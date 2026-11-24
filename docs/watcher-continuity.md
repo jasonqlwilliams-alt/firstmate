@@ -23,7 +23,8 @@ No synthetic maintenance record is queued, so renewal cannot create its own supe
 Handle renewal by draining and acknowledging any real wakes, then stop promptly: the next eligible Stop acquires the successor generation.
 `FM_CLAUDE_AUTOARM_LEASE_SECONDS` may shorten the lease for isolated tests; zero, invalid values, and values above 21,600 use the six-hour bound.
 The hook fires on every Stop, and an eligible primary with supervision need admits one home-scoped owner that foregrounds `bin/fm-watch-arm.sh` inside the hook-owned process tree.
-A numeric session-lock owner that fails the shared `fm_harness_pid_alive` predicate is reclaimed through `bin/fm-lock.sh` before auto-arm state changes, while a live owner, absent lock, or malformed lock keeps the competing hook inert.
+The hook reclaims a stale numeric session-lock owner through `bin/fm-lock.sh` before changing auto-arm state, using the [shared session-lock liveness check](primary-recovery.md#start).
+A live owner outside the hook's ancestry, an absent lock, or a malformed PID line keeps the hook inert.
 The stale-owner claim occurs only after the existing AFK and supervision-need gates pass.
 After each non-actionable arm close, the hook rechecks the identity-matched watcher lock and fresh beacon before retrying a bounded number of times.
 A cycle-end failure is benign when that live-watcher predicate is true, and the hook suppresses the arm output and continues silently.
@@ -58,22 +59,34 @@ The turn-end guard remains the final backstop rather than the normal continuity 
 
 ## Recorded endpoint loss
 
-When pane polling cannot read a local task's recorded endpoint and the backend confirms it is missing, the watcher clears pause tracking.
+When the backend confirms that a local task's recorded endpoint is missing, the watcher clears pause tracking.
 The watcher queues `stale: <window> (the recorded endpoint is gone)` once for that recorded endpoint unless a matching [retained-copy park mark](#parking-a-task-with-its-copy-retained) suppresses the report.
-tmux and Herdr supply the required missing verdict, and a secondmate enters this poll path only while its latest status declares `paused:` or `captain-held:`.
+Routine polling checks local idle secondmate presence without capturing their screens and skips recorded-endpoint polling for remote mates.
+A secondmate enters the pane-stale path only while its latest status declares `paused:` or `captain-held:`.
+A backlog hold alone leaves the secondmate on the idle polling path.
+
+The presence check in [`fm-backend.sh`](../bin/fm-backend.sh) returns `unreadable` when the evidence is inconclusive, and the watcher stays quiet.
+tmux and Herdr can confirm loss on an idle presence check or after a failed screen capture.
+For Zellij, an idle presence check can verify the recorded pane against its expected tab title.
+A missing pane or a changed title is inconclusive because the recorded session may have been renamed or replaced.
+Failed screen captures on Zellij, cmux, and Orca stay quiet in recorded-endpoint monitoring.
+A cmux surface can move out of its recorded workspace, and a successful capture can read another surface in that workspace.
+An Orca terminal can survive after its recorded handle goes stale.
+
 The report is keyed to the recorded backend, target, and spawn generation, so a relaunch can report a fresh loss even when it reuses the target.
-A successful capture also re-arms the report, and teardown keeps the loss record until it retires the task record.
+A successful capture or a positive presence verdict re-arms the report, and teardown keeps the loss record until it retires the task record.
 The wake keeps its window key for routing and has a separate deduplication identity, so the drain presents both the endpoint loss and any ordinary stale wake for that window, collapsing repeated loss rows to one.
 After handling both wakes, use the drain's [printed acknowledgement](#recovery-episode-acknowledgement) to retire them.
 Where the away daemon runs, it routes the loss to its escalation digest and keeps pause tracking cleared while the loss still matches the current endpoint, even if the wait remains declared.
 
 The [backend verification record](verification/runtime-backends.md#recorded-endpoint-loss) covers tmux and Herdr.
-The [watcher triage regressions](../tests/fm-watch-triage.test.sh) exercise both wake sequence orders, marking, and clearing.
+The [watcher triage regressions](../tests/fm-watch-triage.test.sh) cover wake ordering, park marks, idle secondmate polling, Zellij presence verdicts, and quiet capture failures on the experimental backends.
 
 ### Parking a task with its copy retained
 
 After deliberately closing a local ordinary task's worker window and retaining its isolated copy, use the `mark` action in [`fm-park-retained.sh`](../bin/fm-park-retained.sh) for that task.
-Marking requires the backend to confirm that the recorded endpoint is missing, and both park actions leave the copy and its work intact.
+Marking requires a recovery-grade `missing` verdict, currently available only on tmux and Herdr.
+Both park actions leave the copy and its work intact.
 Secondmates follow the reporting rule above.
 A loss wake queued before marking remains pending until [normal wake acknowledgement](#per-actor-acknowledgement).
 When resuming, use `clear` to remove the mark, including after the worker is running again.
@@ -85,15 +98,24 @@ A relaunched worker or another task that reuses the same target remains eligible
 
 Codex and the unknown-harness foreground fallback run one bounded watcher cycle through `bin/fm-watch-checkpoint.sh`.
 The checkpoint returns the watcher result to its calling tool; it neither registers a model callback nor launches a successor.
-An actionable exit or quiet deadline releases the watcher lock, leaving a real interval without a polling watcher until the owning model handles the result and starts the next checkpoint.
+A clean checkpoint return releases the watcher lock, leaving an interval without a polling watcher until the owning model handles the result and starts the next checkpoint.
 Ending the model turn does not establish that next cycle, and a turn-end guard warning is a backstop rather than a callback adapter.
 The harness protocols own the drain, handle, generation-bound acknowledgement, and repeat sequence.
 Acknowledging an empty-queue recovery episode is still required when the drain requests it; omitting it can produce `check: rearm-resurface` on the next cycle.
 
-Under this foreground model the pull guard requires the same home, watcher path, process identity, and fresh beacon as a live watcher.
+The pull guard verifies a live watcher by its home, watcher path, process identity, and fresh beacon.
 A recent beacon after the checkpoint has returned does not prove that a watcher remains alive.
 Conversely, a running checkpoint wrapper or child PID does not prove complete lock publication, matching identity, or a fresh beacon: a suspended or stalled watcher can remain alive while polling has stopped.
 Inspect those facts at the warning's timestamp before classifying an alarm during a foreground call.
+While supervision is needed, the pull guard prints `NOTICE: between foreground checkpoints` when the watcher lock is absent and a clean-return receipt from the current lock-owning, attended Codex session is younger than `FM_GUARD_GRACE`.
+The notice clears the guard's banner deduplication state so a later lapse gets a full alarm.
+A quiet receipt requires a completed monitoring scan, and the guard checks that the beacon is still fresh when it reads that receipt.
+If the beacon ages past the grace during the checkpoint or while the result is being handled, the guard can alarm before the quiet receipt expires.
+A verified actionable wake can qualify even before the watcher writes its first beacon.
+When monitoring is needed and no live watcher qualifies, a missing or expired receipt or a retained watcher lock triggers the usual alarm.
+Read-only checks and sessions outside attended Codex foreground supervision use their usual liveness rules.
+If removal of the previous receipt fails at checkpoint startup or during away-posture archival, the guard can still accept that receipt in the same session until its age reaches the guard grace.
+[`fm-guard.sh`](../bin/fm-guard.sh) owns the receipt check and banner policy.
 An unacknowledged `state/.watcher-down` generation alone does not cause a watcher-health alarm; queued wakes have their own independent warning.
 
 A successful demonstration of a foreground wake, durable acknowledgement, and model-issued successor proves that sequence only.

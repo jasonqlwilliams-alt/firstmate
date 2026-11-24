@@ -4,6 +4,8 @@
 FM_WAKE_LIB_DIR="${BASH_SOURCE[0]%/*}"
 [ "$FM_WAKE_LIB_DIR" != "${BASH_SOURCE[0]}" ] || FM_WAKE_LIB_DIR=.
 FM_WAKE_LIB_DIR="$(cd "$FM_WAKE_LIB_DIR" && pwd)"
+# shellcheck source=bin/fm-session-lock-record-lib.sh
+. "$FM_WAKE_LIB_DIR/fm-session-lock-record-lib.sh"
 FM_WAKE_DEFAULT_ROOT="$(cd "$FM_WAKE_LIB_DIR/.." && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-${FM_ROOT:-$FM_WAKE_DEFAULT_ROOT}}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
@@ -56,8 +58,7 @@ fm_pid_alive() {
 }
 
 fm_pid_identity() {
-  local pid=$1 out proc_root stat_line starttime cmdline_hex identity_key
-  local -a stat_fields
+  local pid=$1 out proc_root starttime cmdline_hex identity_key
   case "$pid" in
     ''|*[!0-9]*) return 1 ;;
   esac
@@ -69,14 +70,7 @@ fm_pid_identity() {
   # Git Bash/MSYS exposes these compatible files but its Cygwin ps rejects the
   # portable fallback's -o fields, so capability detection must not key on uname.
   if [ -r "$proc_root/$pid/stat" ] && [ -r "$proc_root/$pid/cmdline" ]; then
-    stat_line=$(cat "$proc_root/$pid/stat" 2>/dev/null) || return 1
-    # After the final comm delimiter, array index 19 is proc stat field 22.
-    read -r -a stat_fields <<< "${stat_line##*)}"
-    [ "${#stat_fields[@]}" -ge 20 ] || return 1
-    starttime=${stat_fields[19]}
-    case "$starttime" in
-      ''|*[!0-9]*) return 1 ;;
-    esac
+    starttime=$(fm_proc_start_ticks "$proc_root/$pid/stat") || return 1
     cmdline_hex=$(od -An -v -tx1 "$proc_root/$pid/cmdline" 2>/dev/null | tr -d '[:space:]') || return 1
     [ -n "$cmdline_hex" ] || return 1
     identity_key=proc-starttime
@@ -213,6 +207,29 @@ fm_supervision_model() {
   esac
 }
 
+fm_codex_checkpoint_session() {
+  local state=$1 pid identity digest
+  [ -f "$state/.lock" ] && [ ! -L "$state/.lock" ] || return 1
+  [ ! -e "$state/.afk" ] && [ ! -e "$state/.afk-contract" ] || return 1
+  [ "$("$FM_WAKE_LIB_DIR/fm-harness.sh")" = codex ] || return 1
+  [ "$(fm_supervision_model)" = persistent ] || return 1
+  # shellcheck source=bin/fm-session-lock-lib.sh
+  . "$FM_WAKE_LIB_DIR/fm-session-lock-lib.sh"
+  pid=$(fm_harness_ancestry_pid) || return 1
+  [ "$(cat "$state/.lock" 2>/dev/null)" = "$pid" ] || return 1
+  identity=$(fm_pid_identity "$pid") || return 1
+  if command -v shasum >/dev/null 2>&1; then
+    digest=$(printf '%s' "$identity" | shasum -a 256) || return 1
+  elif command -v sha256sum >/dev/null 2>&1; then
+    digest=$(printf '%s' "$identity" | sha256sum) || return 1
+  else
+    return 1
+  fi
+  digest=${digest%% *}
+  [ -n "$digest" ] || return 1
+  printf '%s %s\n' "$pid" "$digest"
+}
+
 # Pi primary supervision evidence. The Pi extensions record, in their state
 # markers, the exact build they loaded and the session process that loaded it, so
 # "a live Pi session owns supervision" is provable from durable state without a
@@ -240,13 +257,13 @@ fm_pi_extension_version() {
 # True when <marker> records <expected-version> and names the session process in
 # <session-lock>, i.e. the session holding this home loaded exactly this build.
 fm_pi_extension_loaded() {
-  local marker=$1 expected_version=$2 lock=$3 marker_version marker_pid lock_pid
+  local marker=$1 expected_version=$2 lock=$3 marker_version marker_pid
   [ -f "$marker" ] && [ -f "$lock" ] && [ -n "$expected_version" ] || return 1
   marker_version=$(sed -n '1p' "$marker")
   marker_pid=$(sed -n '2p' "$marker")
-  lock_pid=$(sed -n '1p' "$lock")
-  [ -n "$marker_pid" ] || return 1
-  [ "$marker_version" = "$expected_version" ] && [ "$marker_pid" = "$lock_pid" ]
+  fm_session_lock_read "$lock" || return 1
+  [ "$marker_version" = "$expected_version" ] && [ "$marker_pid" = "$FM_SESSION_LOCK_PID" ] \
+    && fm_session_lock_start_matches "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START"
 }
 
 # fm_pi_extension_owns_supervision <state> <root>
@@ -283,7 +300,7 @@ fm_extension_owns_supervision() {
 }
 
 fm_extension_pair_owns_supervision() {  # <state> <extension-dir> <source:marker>...
-  local state=$1 dir=$2 lock session_pid pair source marker version
+  local state=$1 dir=$2 lock pair source marker version
   shift 2
   lock="$state/.lock"
   for pair in "$@"; do
@@ -292,8 +309,7 @@ fm_extension_pair_owns_supervision() {  # <state> <extension-dir> <source:marker
     version=$(fm_pi_extension_version "$dir/$source") || return 1
     fm_pi_extension_loaded "$state/$marker" "$version" "$lock" || return 1
   done
-  session_pid=$(sed -n '1p' "$lock" 2>/dev/null)
-  fm_pid_alive "$session_pid"
+  fm_pid_alive "$FM_SESSION_LOCK_PID"
 }
 
 # Away-mode supervision evidence. While state/.afk exists the away-mode daemon
@@ -1934,7 +1950,9 @@ fm_autoarm_midturn_healthy() {  # <state-dir> [grace]
   [ -e "$state/.claude-autoarm-failure-alarmed" ] && return 1
   fm_autoarm_ledger_read "$state" || return 1
   [ "$FM_AUTOARM_OUTCOME" = rewake ] || return 1
-  lock_pid=$(sed -n '1p' "$state/.lock" 2>/dev/null || true)
+  fm_session_lock_read "$state/.lock" || return 1
+  lock_pid=$FM_SESSION_LOCK_PID
+  fm_session_lock_start_matches "$lock_pid" "$FM_SESSION_LOCK_START" || return 1
   [ -n "$FM_AUTOARM_SESSION" ] && [ "$FM_AUTOARM_SESSION" = "$lock_pid" ] || return 1
   fm_pid_alive "$lock_pid" || return 1
   fm_recovery_marker_read "$state/.watcher-down" || return 1

@@ -32,6 +32,22 @@ Inspect the pane to identify which dialog is on screen, and report it rather tha
 A launch under `config/claude-permission-mode=auto` never meets the bypass confirmation, because it does not request bypass mode: on 2.1.269 `claude --permission-mode auto` reached the composer directly with the footer `⏵⏵ auto mode on (shift+tab to cycle)`, so a captain who refuses the bypass dialog selects `auto` there instead of accepting it.
 The workspace-trust dialog is unaffected by the permission mode and still needs the pre-registration above.
 
+## Background-tasks exit confirmation
+
+When `/exit` lands while the session still runs background shell tasks, such as timers, Claude does not exit; it draws a confirmation instead.
+The earlier text layout was observed during second-mate restarts on 2026-11-21 and 2026-11-22 and is recorded in `../../../../../tests/fixtures/claude-exit/background-tasks.screen`.
+The Claude Code 2.1.330 capture is in `../../../../../tests/fixtures/claude-exit/claude-2.1.330.screen`.
+
+- Heading `The following will stop when you exit:`
+- List of running tasks
+- Choices `1. Exit and stop tasks`, `2. Move to background and exit`, and `3. Stay`, with the selection marker `❯` on choice 1
+- Optional final footer `Enter to confirm · Esc to cancel`
+
+At the default selection, Enter stops the tasks.
+[`fm_composer_claude_exit_confirm_screen`](../../../../../bin/fm-composer-lib.sh) recognizes the exact three adjacent choice rows shown above, with the marker on choice 1, at the end of the visible text after allowing for the optional footer.
+Each choice must fit on one terminal row, and the heading and task rows can wrap, be clipped, or be absent.
+[Agent lifecycle control](../../../../../docs/agent-control.md#claude-background-tasks-exit-confirmation) owns the restart, exit, and steering response.
+
 ## Composer ghost
 
 Completed turns can render dim predicted text inside an empty composer, indistinguishable in plain `tmux capture-pane`.
