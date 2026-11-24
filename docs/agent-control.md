@@ -126,14 +126,16 @@ Switching harness is therefore one ordinary relaunch rather than a separate mech
 
 ## Task temporary directories
 
-Firstmate allocates a private temporary directory for a new task even when another home uses the same task ID.
-On explicit task relaunch or automatic recovery of the same secondmate, Firstmate reuses the root on the agent's host if the recorded path directly names an existing private directory owned by the current user.
-Reusing it keeps temporary files and any detached processes still using the directory under the same recorded root.
-A missing or invalid root gets a fresh allocation, as does a legacy `/tmp/fm-<id>` root that same-ID tasks may share.
+Each fresh allocation creates a private temporary root independent of other homes using the same task ID.
+On explicit task relaunch or automatic recovery of the same secondmate, Firstmate can reuse the root across incarnations on the agent's host.
+Reuse requires an existing directory owned by the current user and rejects a symlink at the root path.
+Temporary files and any detached processes still using the directory can carry over to the replacement.
+A missing or invalid root gets a fresh allocation, as does the old fixed path `/tmp/fm-<id>` that same-ID tasks may share.
 
-Teardown removes the validated private root before retiring its task record, including child roots during forced secondmate home teardown.
-The working-directory scan of the temporary root applies to ordinary ship and scout teardown on hosts with `lsof`.
-Shared legacy roots are left for manual reconciliation.
+Teardown removes an eligible recorded root before retiring its task record, including child roots during forced secondmate home teardown.
+On hosts with `lsof`, direct ship and scout teardown scans for processes with a working directory under that root.
+Secondmate teardown and forced child cleanup can remove eligible roots without that scan.
+Teardown skips the fixed legacy path for both scanning and removal, leaving it for manual reconciliation.
 
 If a failed launch leaves an unrecorded temporary root, the launch warning identifies the exact path to inspect after closing the named endpoint.
 Bootstrap carries that warning into the failed secondmate recovery summary when it receives it.

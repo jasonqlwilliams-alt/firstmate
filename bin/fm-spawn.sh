@@ -400,9 +400,10 @@
 # success. A ship or scout dispatch therefore REFUSES up front, before any
 # endpoint, worktree, or record exists, unless the home's backlog has an
 # unheld, unblocked Queued or In flight item for the id; a transition that fails
-# after publication removes the record it just wrote rather than leaving a
-# worker the backlog does not own. A relaunch re-reads the row instead of
-# re-running the transition, so an eligible In-flight item is left untouched.
+# after publication attempts to roll back the new record and reports any
+# endpoint and local copy left for manual cleanup. A relaunch re-reads the row
+# instead of re-running the transition, so an eligible In-flight item is left
+# untouched.
 # The transition is
 # skipped entirely for --secondmate spawns (persistent agents are not work
 # items), on a config/backlog-backend=manual home, and in a markdown home that
@@ -4061,7 +4062,7 @@ fi
 # Per-task temp root: /tmp/fm-<id>+XXXXXX/ with Go's build temp nested at gotmp/.
 # mktemp creates the root atomically under a fresh random suffix, so no other
 # home spawning the same task id can share it. Go won't create GOTMPDIR, so mkdir
-# before it is used; fm-teardown removes the whole root recorded as tasktmp=.
+# before it is used. Record the root as tasktmp= for teardown to validate.
 # Nested (not a bare root used as GOTMPDIR) so other per-task temp can live
 # alongside later. The short suffix keeps paths inside the socket-path limits
 # Go and tmux impose. GOTMPDIR (not TMPDIR) is the targeted knob: TMPDIR is too
