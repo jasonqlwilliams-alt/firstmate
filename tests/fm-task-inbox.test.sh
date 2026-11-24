@@ -1053,9 +1053,6 @@ test_agy_doorbell_width_boundary() {
   done
   [ ! -s "$RING_LAB/agy-narrow.log" ] || fail "fm-send typed into the narrow agy composer"
   [ -f "$narrow_rec" ] || fail "fm-send did not record the steer after a width refusal"
-  err="$home/t1.err"
-  assert_contains "$(cat "$err")" "too narrow for the doorbell line" "fm-send should mention the agy width limit"
-  assert_contains "$(cat "$err")" "A wider agy pane" "fm-send should explain how to make room for the doorbell"
   while [ "$i" -lt 50 ] && [ ! -f "$state/t2.inbox/handled/001.msg" ]; do sleep 0.1; i=$((i + 1)); done
   [ -f "$state/t2.inbox/handled/001.msg" ] \
     || fail "fm-send did not deliver to the wide agy composer:"$'\n'"$(cat "$home/t2.err")"
@@ -1199,7 +1196,7 @@ test_fm_send_ring_through_picker_and_composer() {
   target=$(ring_stub_window send-picker picker-below "$log")
   fm_write_meta "$home/state/p1.meta" "window=$target" "backend=tmux" "kind=ship" "harness=codex"
   err="$TMP_ROOT/ring-send/picker.err"
-  PATH="$RING_LAB/shim:$PATH" FM_HOME="$home" \
+  PATH="$RING_LAB/shim:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
     "$ROOT/bin/fm-send.sh" p1 "please continue" >/dev/null 2>"$err" \
     || fail "a send refused at the picker is still a durably sent steer:"$'\n'"$(cat "$err")"
   sleep 0.3
@@ -1209,7 +1206,7 @@ test_fm_send_ring_through_picker_and_composer() {
   log="$RING_LAB/send-empty.log"
   target=$(ring_stub_window send-empty empty "$log")
   fm_write_meta "$home/state/e1.meta" "window=$target" "backend=tmux" "kind=ship" "harness=codex"
-  PATH="$RING_LAB/shim:$PATH" FM_HOME="$home" \
+  PATH="$RING_LAB/shim:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
     "$ROOT/bin/fm-send.sh" e1 "please continue" >/dev/null 2>"$err" \
     || fail "a send into an empty composer should succeed:"$'\n'"$(cat "$err")"
   local i=0

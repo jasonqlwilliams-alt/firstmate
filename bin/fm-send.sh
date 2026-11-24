@@ -1014,13 +1014,7 @@ else
     ring_rc=0
     fm_task_inbox_ring "$TARGET_BACKEND" "$T" "$INBOX_RECORD" "$EXPECTED_LABEL" "$TARGET_HARNESS" || ring_rc=$?
     case "$ring_rc" in
-      1)
-        if [ "$TARGET_HARNESS" = agy ]; then
-          echo "fm-send: doorbell not typed into $T. Possible causes are pending text, a composer that could not be proven empty, or a composer row too narrow for the doorbell line. A wider agy pane can help the line fit. The steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer." >&2
-        else
-          echo "fm-send: doorbell not typed because the screen in $T blocked the doorbell; the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2
-        fi
-        ;;
+      1) echo "fm-send: doorbell not typed because the screen in $T blocked the doorbell; the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2 ;;
       2) echo "fm-send: doorbell did not reach $T; the steer is durably recorded at $INBOX_RECORD and the watcher will re-ring" >&2 ;;
       3) echo "fm-send: doorbell not typed because the agent in $T has exited; the steer is durably recorded at $INBOX_RECORD for recovery (stuck-crewmate-recovery), and the watcher will not re-ring a dead pane" >&2 ;;
       4) echo "fm-send: no doorbell Enter sent because $T shows the Codex global-update picker (never confirm it; Escape skips the update); the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2 ;;

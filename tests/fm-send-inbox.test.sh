@@ -113,7 +113,7 @@ run_send() {  # <case-dir> <err-file> [env...] -- <fm-send args...>
   env PATH="$dir/fakebin:$PATH" \
     FM_ROOT_OVERRIDE="$dir/home" FM_HOME="$dir/home" FM_SEND_LOG="$dir/send.log" \
     FM_SEND_SETTLE=0 ${envs[@]+"${envs[@]}"} \
-    "$SEND" "$@" >/dev/null 2>"$err"
+    FM_STATE_OVERRIDE="$dir/home/state" "$SEND" "$@" >/dev/null 2>"$err"
 }
 
 record_body() {  # <record>
@@ -178,7 +178,6 @@ test_pending_composer_skips_ring_advisorily() {
   [ -f "$dir/home/state/t1.inbox/001.msg" ] || fail "the steer was not recorded"
   [ ! -s "$dir/send.log" ] || fail "a visibly pending composer should skip the ring:"$'\n'"$(cat "$dir/send.log")"
   assert_contains "$(cat "$err")" "blocked the doorbell" "fm-send should explain the pending-draft refusal"
-  ! grep -qF 'A wider agy pane' "$err" || fail "fm-send should omit agy width advice for a Grok pane"
   assert_contains "$(cat "$err")" "watcher will retry, then escalate" \
     "the refusal notice should point at the retry and escalation"
   pass "fm-send inbox: a visibly pending composer skips the ring, and the steer stays durably sent"
