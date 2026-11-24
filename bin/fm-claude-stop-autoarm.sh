@@ -254,7 +254,7 @@ while [ "$attempt" -lt "$AUTOARM_ATTEMPTS" ]; do
   if [ "$LEASE_REMAINING" -gt 0 ]; then
     # This runner waits and reaps its bounded child tree. It never detaches a
     # watcher or outlives this hook. Do not reset the lease for retries.
-    FM_GUARD_GRACE="$GRACE" fm_run_timed "$LEASE_REMAINING" \
+    FM_GUARD_GRACE="$GRACE" fm_run_timed --wait-on-term "$LEASE_REMAINING" \
       "$SCRIPT_DIR/fm-watch-arm.sh" >"${OUT:-/dev/null}" 2>&1
     ARM_RC=$?
   fi

@@ -1453,7 +1453,7 @@ SH
 )
 
 test_stalled_remote_observation_liveness() (
-  local mode=${1:-poll} dir state corr rec i watcher_pid hook_rc ssh_pid='' transport_pid='' ssh_status
+  local mode=${1:-poll} dir state corr rec i watcher_pid hook_rc ssh_pid='' transport_pid=''
   local arm_pid='' RUN_AUTOARM_BG_PID='' cleanup_signal=TERM
   if [ "$mode" != lease-no-gnu ] \
     && ! { LC_ALL=C timeout --version || true; LC_ALL=C gtimeout --version || true; } 2>/dev/null \
@@ -1531,6 +1531,12 @@ SH
   }
   trap cleanup_observation EXIT
   trap 'exit 1' HUP INT TERM
+
+  assert_capture_process_stopped() {
+    local pid=$1 message=$2 process_status
+    process_status=$(ps -o stat= -p "$pid" 2>/dev/null | tr -d '[:space:]')
+    case "$process_status" in ''|Z*) ;; *) fail "$message" ;; esac
+  }
 
   if [[ "$mode" = cleanup-* ]]; then
     cat > "$dir/capture-failure.bash" <<'SH'
@@ -1616,10 +1622,8 @@ SH
     read -r ssh_pid transport_pid < "$state/observing" || fail "lease ended before the watcher entered the remote observation"
     expect_code 2 "$hook_rc" "an active home must receive the lease renewal wake"
     assert_grep 'check: claude-lease-renewal' "$dir/hook.out" "expiry must use the ordinary lease handoff"
-    ssh_status=$(ps -o stat= -p "$ssh_pid" 2>/dev/null | tr -d '[:space:]')
-    case "$ssh_status" in ''|Z*) ;; *) fail "SSH survived the watcher's lease";; esac
-    ssh_status=$(ps -o stat= -p "$transport_pid" 2>/dev/null | tr -d '[:space:]')
-    case "$ssh_status" in ''|Z*) ;; *) fail "SSH transport survived the watcher's lease";; esac
+    assert_capture_process_stopped "$ssh_pid" "SSH survived the watcher's lease"
+    assert_capture_process_stopped "$transport_pid" "SSH transport survived the watcher's lease"
     ssh_pid=
     transport_pid=
     [ ! -e "$state/.watch.lock" ] || fail "lease expiry left a watcher lock behind"
@@ -1647,8 +1651,8 @@ SH
     hook_rc=$?
     [ "$hook_rc" -ne 124 ] || fail "arm did not stop: $(cat "$dir/outer.out")"
     arm_pid=
-    ! kill -0 "$ssh_pid" 2>/dev/null || fail "a normally stopped watcher did not reap SSH"
-    ! kill -0 "$transport_pid" 2>/dev/null || fail "SSH left a transport running after watcher stop"
+    assert_capture_process_stopped "$ssh_pid" "SSH survived watcher stop"
+    assert_capture_process_stopped "$transport_pid" "SSH transport survived watcher stop"
     [ ! -e "$state/observation-completed" ] || fail "SSH finished naturally before the watcher stopped it"
     ssh_pid=
     transport_pid=
@@ -1667,8 +1671,8 @@ SH
   done
   read -r ssh_pid transport_pid < "$state/observing" || fail "watcher never entered the remote observation"
   [ -e "$state/checked" ] || fail "the remote observation stalled the watcher past grace"
-  ! kill -0 "$ssh_pid" 2>/dev/null || fail "timed-out observation left the SSH wrapper running"
-  ! kill -0 "$transport_pid" 2>/dev/null || fail "timed-out observation left the transport running"
+  assert_capture_process_stopped "$ssh_pid" "timed-out observation left the SSH wrapper running"
+  assert_capture_process_stopped "$transport_pid" "timed-out observation left the transport running"
   ssh_pid=
   transport_pid=
   [ -z "$(fm_pending_reply_get "$rec" request_turn_completed_epoch)" ] \
