@@ -1,0 +1,69 @@
+Firstmate GNU Claude Stop lease before the signal-handling repair
+
+Process states: R running, S sleeping, Z exited (zombie), gone reaped.
+In the failed traced replays, the lease sent TERM and the watcher entered shutdown.
+The arm forwarded TERM before shutdown signalled the capture group.
+The second TERM interrupted shutdown, leaving the SSH fixture running when the hook renewed.
+
+GNU lease replay 1 | scenario exit 0
+  ok - auto-arm: lease expiry terminates the in-flight remote observation
+  After fixture teardown | watcher=gone, SSH wrapper=gone, SSH child=gone
+
+GNU lease replay 2 | scenario exit 1
+  not ok - SSH survived the watcher's lease
+  Stop hook published claude-lease-renewal
+  At 0.63s | watcher=R
+  At 0.65s | watcher=S
+  At 0.69s | watcher=S, SSH wrapper=S, SSH child=S
+  At 5.36s | watcher=gone, SSH wrapper=S, SSH child=S
+  At 5.90s | watcher=gone, SSH wrapper=S, SSH child=S
+  At 5.92s | watcher=gone, SSH wrapper=gone, SSH child=gone
+  After fixture teardown | watcher=gone, SSH wrapper=gone, SSH child=gone
+
+GNU lease replay 3 | scenario exit 1
+  not ok - SSH survived the watcher's lease
+  Stop hook published claude-lease-renewal
+  At 0.61s | watcher=S
+  At 0.91s | watcher=R
+  At 0.93s | watcher=S
+  At 1.00s | watcher=S, SSH wrapper=S, SSH child=S
+  At 5.45s | watcher=gone, SSH wrapper=S, SSH child=S
+  At 5.89s | watcher=gone, SSH wrapper=S, SSH child=S
+  After fixture teardown | watcher=gone, SSH wrapper=gone, SSH child=gone
+
+GNU lease replay 4 | scenario exit 1
+  not ok - SSH survived the watcher's lease
+  Stop hook published claude-lease-renewal
+  At 0.48s | watcher=S
+  At 0.54s | watcher=R
+  At 0.56s | watcher=S
+  At 0.70s | watcher=S, SSH wrapper=S, SSH child=S
+  At 5.34s | watcher=gone, SSH wrapper=S, SSH child=S
+  At 5.67s | watcher=gone, SSH wrapper=S, SSH child=S
+  After fixture teardown | watcher=gone, SSH wrapper=gone, SSH child=gone
+
+GNU lease replay 5 | scenario exit 1
+  not ok - SSH survived the watcher's lease
+  Stop hook published claude-lease-renewal
+  At 0.50s | watcher=R
+  At 0.52s | watcher=S
+  At 0.63s | watcher=R
+  At 0.65s | watcher=S
+  At 0.78s | watcher=S, SSH wrapper=S, SSH child=S
+  At 5.35s | watcher=gone, SSH wrapper=S, SSH child=S
+  At 5.66s | watcher=gone, SSH wrapper=S, SSH child=S
+  At 5.70s | watcher=gone, SSH wrapper=gone, SSH child=gone
+  After fixture teardown | watcher=gone, SSH wrapper=gone, SSH child=gone
+
+GNU lease replay 6 | scenario exit 1
+  not ok - SSH survived the watcher's lease
+  Stop hook published claude-lease-renewal
+  At 0.56s | watcher=R
+  At 0.60s | watcher=S
+  At 0.62s | watcher=R
+  At 0.65s | watcher=S
+  At 0.76s | watcher=R
+  At 0.78s | watcher=S, SSH wrapper=S, SSH child=S
+  At 4.45s | watcher=gone, SSH wrapper=S, SSH child=S
+  At 4.76s | watcher=gone, SSH wrapper=S, SSH child=S
+  After fixture teardown | watcher=gone, SSH wrapper=gone, SSH child=gone

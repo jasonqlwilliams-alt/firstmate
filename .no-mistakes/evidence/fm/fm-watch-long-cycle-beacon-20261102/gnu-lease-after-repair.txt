@@ -1,0 +1,25 @@
+Firstmate GNU Claude Stop lease after the signal-handling repair
+
+GNU lease replay 1 | scenario exit 0
+  ok - auto-arm: lease expiry terminates the in-flight remote observation
+  After the hook returned and assertions ran | watcher=gone, SSH wrapper=gone, SSH child=gone
+
+GNU lease replay 2 | scenario exit 0
+  ok - auto-arm: lease expiry terminates the in-flight remote observation
+  After the hook returned and assertions ran | watcher=gone, SSH wrapper=gone, SSH child=gone
+
+GNU lease replay 3 | scenario exit 0
+  ok - auto-arm: lease expiry terminates the in-flight remote observation
+  After the hook returned and assertions ran | watcher=gone, SSH wrapper=gone, SSH child=gone
+
+GNU lease replay 4 | scenario exit 0
+  ok - auto-arm: lease expiry terminates the in-flight remote observation
+  After the hook returned and assertions ran | watcher=gone, SSH wrapper=gone, SSH child=gone
+
+GNU lease replay 5 | scenario exit 0
+  ok - auto-arm: lease expiry terminates the in-flight remote observation
+  After the hook returned and assertions ran | watcher=gone, SSH wrapper=gone, SSH child=gone
+
+GNU lease replay 6 | scenario exit 0
+  ok - auto-arm: lease expiry terminates the in-flight remote observation
+  After the hook returned and assertions ran | watcher=gone, SSH wrapper=gone, SSH child=gone

@@ -1,0 +1,25 @@
+Firstmate Bash lease without GNU timeout after the signal-handling repair
+
+Bash lease without GNU timeout replay 1 | scenario exit 0
+  ok - auto-arm: lease-no-gnu expiry terminates the in-flight remote observation
+  After the hook returned and assertions ran | watcher=gone, SSH wrapper=gone, SSH child=gone
+
+Bash lease without GNU timeout replay 2 | scenario exit 0
+  ok - auto-arm: lease-no-gnu expiry terminates the in-flight remote observation
+  After the hook returned and assertions ran | watcher=gone, SSH wrapper=gone, SSH child=gone
+
+Bash lease without GNU timeout replay 3 | scenario exit 0
+  ok - auto-arm: lease-no-gnu expiry terminates the in-flight remote observation
+  After the hook returned and assertions ran | watcher=gone, SSH wrapper=gone, SSH child=gone
+
+Bash lease without GNU timeout replay 4 | scenario exit 0
+  ok - auto-arm: lease-no-gnu expiry terminates the in-flight remote observation
+  After the hook returned and assertions ran | watcher=gone, SSH wrapper=gone, SSH child=gone
+
+Bash lease without GNU timeout replay 5 | scenario exit 0
+  ok - auto-arm: lease-no-gnu expiry terminates the in-flight remote observation
+  After the hook returned and assertions ran | watcher=gone, SSH wrapper=gone, SSH child=gone
+
+Bash lease without GNU timeout replay 6 | scenario exit 0
+  ok - auto-arm: lease-no-gnu expiry terminates the in-flight remote observation
+  After the hook returned and assertions ran | watcher=gone, SSH wrapper=gone, SSH child=gone

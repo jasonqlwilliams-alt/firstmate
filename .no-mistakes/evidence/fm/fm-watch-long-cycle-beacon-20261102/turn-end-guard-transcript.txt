@@ -1,0 +1,20 @@
+Target | a long signal coalescing window
+  At 7.3s of an 11s coalescing window | beacon age 1.04s, 7 observed writes, no early wake
+  During coalescing turn-end hook | exit 0, silent
+  Watcher | exit 0, signal: example.status example.turn-ended
+  Durable queue | example.status and example.turn-ended
+
+Base | same long signal coalescing window
+  At 7.3s of an 11s coalescing window | beacon age 7.36s, 1 observed writes, no early wake
+  During coalescing turn-end hook | exit 2, TURN WOULD END BLIND - SUPERVISION IS OFF / last beat: 7s ago
+  Watcher | exit 0, signal: example.status example.turn-ended
+  Durable queue | example.status and example.turn-ended
+
+Target | a watcher is killed with a fresh beacon
+  Before SIGKILL turn-end hook | exit 0, silent
+  Watcher | killed, prior lock retained, beacon age 0.06s
+  After SIGKILL turn-end hook | exit 2, TURN WOULD END BLIND - SUPERVISION IS OFF / last beat: 0s ago
+
+Target | a watcher loses the singleton lock during a long wait
+  Watcher | exit 0 after 1.99s of a 30s poll wait
+  Home state | replacement lock retained and beacon unchanged

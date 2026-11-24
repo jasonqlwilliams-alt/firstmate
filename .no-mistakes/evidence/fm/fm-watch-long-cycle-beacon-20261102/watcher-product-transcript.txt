@@ -1,0 +1,72 @@
+Firstmate product output and local state from disposable homes
+
+Operations with independent budgets
+  Originating CLI | check-kept-its-budget
+  Pending reply | phase=recovery_sent
+  Process-event reconciliation | started=1
+  Process-event reconciliation | failed=0
+  Durable wake queue | Observed 1 row(s)
+
+Healthy serial check sweep
+  Originating CLI | watcher: started pid=<watcher> (beacon fresh)
+  Originating CLI | completed-slow-sweep
+  Guard response | No watcher warning
+  Stop hook response | completed-slow-sweep
+  Stop hook arm output | watcher: attached pid=<watcher> (beacon 0s)
+  Stop hook arm output | completed-slow-sweep
+  Durable wake queue | Observed 1 row(s)
+  Liveness beacon | 6 observed writes, longest interval between observed writes 5.1s
+
+Suspended watcher
+  Originating CLI | watcher: started pid=<watcher> (beacon fresh)
+  Originating CLI | completed-slow-sweep
+  Guard response | WATCHER DOWN
+  Stop hook response | auto-arm FAILED
+  Stop hook response | watcher: lock held by live pid <watcher> but heartbeat is stale for 9s (>+07s); inspect or stop that watcher before re-arming.
+  Stop hook arm output | watcher: lock held by live pid <watcher> but heartbeat is stale for 9s (>+07s); inspect or stop that watcher before re-arming.
+  Durable wake queue | Observed 1 row(s)
+  Liveness beacon | 5 observed writes, longest interval between observed writes 9.9s
+
+Remote observation timeout and long poll
+  Originating CLI | watcher: started pid=<watcher> (beacon fresh)
+  Originating CLI | completed-after-observation
+  Pending reply | Partial observation never confirmed turn completion
+  Pending reply | Subsequent observation recorded a busy turn
+  Guard response | No watcher warning
+  Stop hook response | completed-after-observation
+  Stop hook arm output | watcher: attached pid=<watcher> (beacon 2s)
+  Stop hook arm output | completed-after-observation
+  Durable wake queue | Observed 1 row(s)
+  Liveness beacon | 15 observed writes, longest interval between observed writes 4.0s
+
+Operator stop during observation
+  Executable shutdown check | SSH wrapper and transport stopped, watcher lock released before natural completion
+
+GNU Claude lease expires during observation
+  Stop hook response | claude-lease-renewal
+  Stop hook arm output | watcher: started pid=<watcher> (beacon fresh)
+  Stop hook arm output | claude-lease-renewal
+
+Bash Claude lease expires during observation without GNU timeout
+  Stop hook response | claude-lease-renewal
+  Stop hook arm output | watcher: started pid=<watcher> (beacon fresh)
+  Stop hook arm output | claude-lease-renewal
+
+Capture reports a surviving process group
+  Originating CLI | watcher: remote observation capture cleanup failed
+  Originating CLI | watcher: active capture cleanup failed during shutdown
+
+Capture process-state verification fails
+  Originating CLI | watcher: remote observation capture cleanup failed
+  Originating CLI | watcher: active capture cleanup failed during shutdown
+
+Checkpoint deadline during failed cleanup
+  Executable exit check | 124, no queued wake
+  Originating CLI | checkpoint: no actionable wake within 12s
+  Originating CLI stderr | watcher: active capture cleanup failed during shutdown
+  Checkpoint return receipt | Empty
+  Guard response | WATCHER DOWN
+
+Operator stop during failed cleanup
+  Executable exit check | 143
+  Originating CLI | watcher: active capture cleanup failed during shutdown
