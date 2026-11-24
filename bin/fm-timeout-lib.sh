@@ -10,12 +10,20 @@
 #       "gtimeout", "perl", or "bash". Set FM_TIMEOUT_MECHANISM_OVERRIDE=bash
 #       to force the dependency-free fallback.
 #
+#   fm_gnu_timeout
+#       Prints the name of an available GNU coreutils timeout executable or
+#       returns nonzero. This capability check is independent of the runner
+#       preference used by fm_run_timed.
+#
 #   fm_run_timed [--kill | --wait-on-term] <seconds> <command> [args...]
 #       Runs the command with a hard bound. Exit status is the command's own,
 #       except 124, which means the bound was hit (GNU timeout's convention,
 #       reproduced by the perl and bash fallbacks).
 #       --kill uses KILL at the deadline when a timed-out operation cannot
 #       safely continue during the normal TERM grace period.
+#       --wait-on-term lets a wrapped command finish handling TERM before the
+#       timeout or gtimeout shell wrapper exits, within the existing KILL
+#       allowance. The Perl and Bash fallbacks keep their normal TERM behavior.
 #
 # A non-positive bound is not a bound: `timeout 0` and the perl fallback's
 # `alarm 0` both disable the deadline, so callers must reject 0 before calling.

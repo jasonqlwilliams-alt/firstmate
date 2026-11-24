@@ -1575,8 +1575,12 @@ WATCHER_CHECKPOINT_SCANNED=0
 WATCHER_CHECKPOINT_INTERRUPTED=0
 
 watcher_interrupted() {
-  if [ -n "$WATCHER_CHECKPOINT_CLOSE" ]; then
+  # The lease and the arm can both signal the watcher. Protect an active
+  # capture before entering the EXIT trap so the second signal cannot skip it.
+  if [ -n "$WATCHER_CHECKPOINT_CLOSE$FM_ACTIVE_CHECK_PID$FM_ACTIVE_CHECK_PGID" ]; then
     trap '' HUP INT TERM
+  fi
+  if [ -n "$WATCHER_CHECKPOINT_CLOSE" ]; then
     WATCHER_CHECKPOINT_INTERRUPTED=1
   fi
   exit 1

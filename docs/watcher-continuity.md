@@ -110,6 +110,7 @@ Inspect those facts at the warning's timestamp before classifying an alarm durin
 While supervision is needed, the pull guard prints `NOTICE: between foreground checkpoints` when the watcher lock is absent and a clean-return receipt from the current lock-owning, attended Codex session is younger than `FM_GUARD_GRACE`.
 The notice clears the guard's banner deduplication state so a later lapse gets a full alarm.
 A quiet receipt requires a completed monitoring scan, and the guard checks that the beacon is still fresh when it reads that receipt.
+If active capture cleanup cannot be confirmed after the checkpoint deadline, the checkpoint reports the cleanup failure on stderr, returns 124, and records no clean return.
 If the beacon ages past the grace during the checkpoint or while the result is being handled, the guard can alarm before the quiet receipt expires.
 A verified actionable wake can qualify even before the watcher writes its first beacon.
 When monitoring is needed and no live watcher qualifies, a missing or expired receipt or a retained watcher lock triggers the usual alarm.
@@ -191,8 +192,9 @@ The beacon is a progress signal, so a watcher that stops reaching checkpoints st
 A native Herdr subscription waits uninterrupted, and an individual operation such as a check, recovery repost, or process-event launch keeps its own budget and can run past the freshness threshold between checkpoints.
 
 When GNU `timeout` or `gtimeout` is available, the watcher uses the sleep slice limit as a deadline for each remote pending-reply observation.
-At the deadline the capture process group gets a short shutdown allowance before KILL, and normal watcher shutdown also cleans up the active capture group.
-A timed-out observation yields `unknown`, supplies no turn-completion evidence, and can be retried on a later poll while the reply is still pending.
+At the deadline the capture process group gets a short shutdown allowance before KILL, and watcher shutdown also attempts to stop any active capture group.
+After confirmed cleanup, a timed-out observation yields `unknown`, supplies no turn-completion evidence, and can be retried on a later poll while the reply is still pending.
+If the watcher cannot verify that the remote capture group has no live members, it ends the cycle with an error.
 Without GNU timeout, the watcher uses the ordinary remote observation path, whose queue wait can exceed the liveness grace.
 
 ## Regression coverage
@@ -205,7 +207,7 @@ The same suite covers ordinary same-process session replacement for `/new`, `/re
 `tests/fm-subagent-pretool-check.test.sh` proves Claude retains only the non-status Bash seatbelts.
 `tests/fm-claude-stop-autoarm.test.sh` covers the auto-arm's scope, stale and live session owners, unchanged AFK and need boundaries, single-flight, bounded failure retries, benign live-watcher cycle ends, one-notice failure episodes, and exit-2 translation.
 It drives the real guard, watcher and Stop hook through a stalled remote observation, a long polling sleep, and a check sweep longer than the grace window, verifying delivery by the original owner and stale-beacon failure when the watcher stops making progress.
-It checks observation cleanup on normal shutdown and Claude lease expiry, and verifies that checks, recovery reposts, and process-event launches retain their operation budgets.
+It checks observation cleanup on normal shutdown and Claude lease expiry, the errors and checkpoint receipt behavior when cleanup cannot be confirmed, and the operation budgets for checks, recovery reposts, and process-event launches.
 It also covers generation-claim single-flight, stuck-claim supersession, superseded-owner silence, notice-marker refusal and retry, ownership-atomic episode reset, and the legacy upgrade shim; [`turnend-guard.md`](turnend-guard.md) owns those behavior contracts.
 `FM_CLAUDE_LIVE_E2E=1 tests/fm-claude-stop-autoarm-live-e2e.test.sh` starts with the reproduced stale-lock state, runs session start first, completes two immediate fixture cycles, and checks the competing-live-owner negative control.
 It also runs a real parked watcher with a 40-second lease and 60-second native deadline, delivers an inbox note after that original deadline with no additional human turn, checks singleton ownership and exact acknowledgements, and verifies that held backlog alone does not renew.
