@@ -1,0 +1,97 @@
+Firstmate startup endpoint status with real local tmux and synthetic task records.
+
+$ tmux -V
+tmux 3.7c
+
+$ tmux kill-window -t fleet:fm-mate
+
+$ tmux kill-window -t fleet:fm-unmarked
+
+$ tmux kill-window -t fleet:fm-stale
+
+$ tmux list-windows -t =fleet -F '#{window_name}'
+fm-mate2
+
+$ fm-park-retained.sh mate mark
+parked-retained: yes
+
+$ fm-park-retained.sh stale mark
+parked-retained: yes
+
+Recreated fleet:fm-stale, recorded synthetic spawn generation second, then closed it. The first generation's mark was retained.
+
+$ fm-session-start.sh [80ad3594adf45b6ed2cd1880175b06590dabebab, read-only, exit 0]
+--- mate ---
+endpoint: alive (backend=tmux window=fleet:fm-mate)
+--- mate2 ---
+endpoint: alive (backend=tmux window=fleet:fm-mate2)
+--- stale ---
+endpoint: alive (backend=tmux window=fleet:fm-stale)
+--- unmarked ---
+endpoint: alive (backend=tmux window=fleet:fm-unmarked)
+
+$ fm-session-start.sh [6ac4299f9839f3361d299ff7968ed6cd82a4c626, read-only, exit 0]
+--- mate ---
+endpoint: parked, copy retained (backend=tmux window=fleet:fm-mate)
+--- mate2 ---
+endpoint: alive (backend=tmux window=fleet:fm-mate2)
+--- stale ---
+endpoint: alive (backend=tmux window=fleet:fm-stale)
+--- unmarked ---
+endpoint: alive (backend=tmux window=fleet:fm-unmarked)
+
+$ cat synthetic retained work copy / draft.txt
+Retained synthetic work for mate
+Copy contents unchanged: True
+
+tmux_parked_with_live_neighbor: PASS
+
+Unmarked and stale rows preserved the base's presence verdict while the tmux session was running: True
+
+$ command -v tmux
+(exit 1, absent from PATH)
+
+$ fm-session-start.sh [6ac4299f9839f3361d299ff7968ed6cd82a4c626, tmux unavailable, read-only, exit 0]
+--- mate ---
+endpoint: parked, copy retained (backend=tmux window=fleet:fm-mate)
+--- mate2 ---
+endpoint: dead (backend=tmux window=fleet:fm-mate2)
+--- stale ---
+endpoint: dead (backend=tmux window=fleet:fm-stale)
+--- unmarked ---
+endpoint: dead (backend=tmux window=fleet:fm-unmarked)
+
+tmux_unreadable: PASS
+
+$ tmux kill-server
+(exit 0, private server exit 0)
+
+$ tmux list-sessions
+(exit 1)
+no server running on <private socket>
+
+$ fm-session-start.sh [80ad3594adf45b6ed2cd1880175b06590dabebab, tmux stopped, read-only, exit 0]
+--- mate ---
+endpoint: dead (backend=tmux window=fleet:fm-mate)
+--- mate2 ---
+endpoint: dead (backend=tmux window=fleet:fm-mate2)
+--- stale ---
+endpoint: dead (backend=tmux window=fleet:fm-stale)
+--- unmarked ---
+endpoint: dead (backend=tmux window=fleet:fm-unmarked)
+
+$ fm-session-start.sh [6ac4299f9839f3361d299ff7968ed6cd82a4c626, tmux stopped, read-only, exit 0]
+--- mate ---
+endpoint: parked, copy retained (backend=tmux window=fleet:fm-mate)
+--- mate2 ---
+endpoint: dead (backend=tmux window=fleet:fm-mate2)
+--- stale ---
+endpoint: dead (backend=tmux window=fleet:fm-stale)
+--- unmarked ---
+endpoint: dead (backend=tmux window=fleet:fm-unmarked)
+
+tmux_unmarked_gone: PASS
+
+tmux_stale_mark: PASS
+
+tmux_parked_with_live_neighbor: PASS

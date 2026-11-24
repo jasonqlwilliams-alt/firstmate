@@ -1,0 +1,65 @@
+Firstmate startup endpoint status with real local herdr and synthetic task records.
+
+$ herdr --version
+herdr 0.9.5
+Herdr status confirmed the default socket was inside the disposable config root.
+
+$ fm-herdr-lab.sh provision fm-lab-park-1854675-22746
+(exit 0)
+
+$ fm-herdr-lab.sh run fm-lab-park-1854675-22746 pane get w1:p1
+{"pane_id": "w1:p1", "terminal_id": "term_660fe4d1400e71"}
+
+$ fm-herdr-lab.sh run fm-lab-park-1854675-22746 pane get w2:p1
+{"pane_id": "w2:p1", "terminal_id": "term_660fe4d1453d32"}
+
+$ fm-herdr-lab.sh run fm-lab-park-1854675-22746 status --json
+server.running=true
+
+$ fm-herdr-lab.sh stop fm-lab-park-1854675-22746
+(exit 0)
+
+$ fm-herdr-lab.sh run fm-lab-park-1854675-22746 status --json
+server.running=false
+
+$ fm-herdr-lab.sh run fm-lab-park-1854675-22746 pane get w1:p1
+(exit 1)
+{"id":"cli:pane:get","error":{"code":"server_not_running","message":"no herdr server is running at /proc/1846331/fd/3/x/herdr/sessions/fm-lab-park-1854675-22746/herdr.sock; run `herdr session attach fm-lab-park-1854675-22746` to start or attach it"}}
+
+$ fm-park-retained.sh herdr-marked mark
+parked-retained: yes
+
+$ fm-session-start.sh [80ad3594adf45b6ed2cd1880175b06590dabebab, read-only, exit 0]
+--- herdr-marked ---
+endpoint: unknown (unreadable identity, backend=herdr window=fm-lab-park-1854675-22746:w1:p1)
+--- herdr-unmarked ---
+endpoint: unknown (unreadable identity, backend=herdr window=fm-lab-park-1854675-22746:w2:p1)
+
+$ fm-session-start.sh [6ac4299f9839f3361d299ff7968ed6cd82a4c626, read-only, exit 0]
+--- herdr-marked ---
+endpoint: parked, copy retained (backend=herdr window=fm-lab-park-1854675-22746:w1:p1)
+--- herdr-unmarked ---
+endpoint: unknown (unreadable identity, backend=herdr window=fm-lab-park-1854675-22746:w2:p1)
+
+$ cat synthetic retained work copy / draft.txt
+Retained synthetic work for herdr-marked
+Copy contents unchanged: True
+
+herdr_stopped: PASS
+
+$ command -v herdr
+(exit 1, absent from PATH)
+
+$ fm-session-start.sh [6ac4299f9839f3361d299ff7968ed6cd82a4c626, herdr unavailable, read-only, exit 0]
+--- herdr-marked ---
+endpoint: parked, copy retained (backend=herdr window=fm-lab-park-1854675-22746:w1:p1)
+--- herdr-unmarked ---
+endpoint: unknown (unreadable identity, backend=herdr window=fm-lab-park-1854675-22746:w2:p1)
+
+herdr_unreadable: PASS
+
+$ fm-herdr-lab.sh teardown fm-lab-park-1854675-22746
+(exit 0)
+
+
+Private Herdr tripwire server terminated and reaped (exit 0).
