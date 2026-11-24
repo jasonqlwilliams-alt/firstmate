@@ -78,6 +78,10 @@ Failed screen captures on Zellij, cmux, and Orca stay quiet in recorded-endpoint
 A cmux surface can move out of its recorded workspace, and a successful capture can read another surface in that workspace.
 An Orca terminal can survive after its recorded handle goes stale.
 
+On Herdr and Zellij, the watcher ties each saved pane hash to the task record and endpoint incarnation that supplied it.
+A capture for a different task or incarnation starts a fresh stale check even when the screen contents are identical.
+On upgrade, an older hash without that identity also starts a fresh check and can repeat a reminder once if the watcher cannot tie the saved reminder to the currently verified task.
+
 The report is keyed to the task record's backend, target, and spawn generation, so a relaunch can report a fresh loss even when it reuses the target.
 A successful capture or a positive presence verdict for that task re-arms its report, and teardown keeps the loss record until it retires the task record.
 The wake keeps its window key for routing, and the drain presents the latest loss row and the latest ordinary stale row separately for each window.
@@ -86,7 +90,6 @@ Where the away daemon runs, it routes the loss to its escalation digest.
 For a named loss, it clears the named task's daemon pause and stale markers if the loss record still matches the task's current endpoint incarnation, leaving shared pane tracking to the watcher.
 Pause reconciliation keeps that task's timers cleared while the loss record still matches, even if the task still declares a wait.
 The away daemon's existing marker names can alias task IDs such as `worker.old` and `worker_old`.
-On Herdr and Zellij, upgrading can repeat a reminder once if the watcher cannot tie the saved reminder to the currently verified task.
 
 The [backend verification record](verification/runtime-backends.md#recorded-endpoint-loss) covers tmux and Herdr.
 The [watcher triage regressions](../tests/fm-watch-triage.test.sh) cover wake ordering, park marks, idle secondmate polling, Zellij presence verdicts, and quiet capture failures on the experimental backends.
