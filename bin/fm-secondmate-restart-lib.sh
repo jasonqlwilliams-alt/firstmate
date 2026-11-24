@@ -28,14 +28,19 @@ _FM_SECONDMATE_RESTART_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/fm-control-lib.sh disable=SC1091
 . "$_FM_SECONDMATE_RESTART_LIB_DIR/fm-control-lib.sh"
 
-# The persist request the primary sends before it restarts anything. It is the
-# open-record half of /stow and nothing more: a restart needs the state of work
-# written down, not a memory curation pass, and bundling one would make every
-# instruction update cost far more than the reload it is paying for.
+# The persist request uses only the open-record part of /stow. Bundling a
+# memory curation pass would make every instruction update cost far more than
+# the reload it is paying for.
 # The mate answers through its parent channel, which is what resolves the
 # parent-owned reply expectation fm-send arms for a marked request; that
 # correlated answer, never the wall clock, is what releases the restart.
-FM_SECONDMATE_PERSIST_REQUEST='Firstmate was updated and I am about to restart your agent so it comes up on the current instructions and launch-time settings, which drops your conversation but keeps every durable record. Before that, persist the open work you are holding only in this conversation, following the /stow skill'"'"'s "Open-record persistence" section and nothing else from that skill: file a task for each open record that exists only in this conversation, including any captain call you had formed but never registered, and correct any task whose status no longer reflects what you now know. Do NOT run the memory, learnings, or captain-preference sweeps. Then reply on your parent channel saying it is done, or saying what you deliberately left alone and why.'
+fm_secondmate_persist_request() {  # <running-harness>
+  printf '%s' 'Firstmate was updated and I am about to restart your agent so it comes up on the current instructions and launch-time settings, which drops your conversation but keeps every durable record. Before that, persist the open work you are holding only in this conversation, following the /stow skill'"'"'s "Open-record persistence" section and nothing else from that skill: file a task for each open record that exists only in this conversation, including any captain call you had formed but never registered, and correct any task whose status no longer reflects what you now know. Do NOT run the memory, learnings, or captain-preference sweeps.'
+  if [ "$1" = claude ]; then
+    printf '%s' ' Also stop every background shell task you started, such as timers or sleep loops, because a running one makes the exit stop at a confirmation that the restart will not answer.'
+  fi
+  printf '%s' ' Then reply on your parent channel saying it is done, or saying what you deliberately left alone and why.'
+}
 
 # Resolve one mate's restart capability from its durable record alone.
 # Publishes, on success:

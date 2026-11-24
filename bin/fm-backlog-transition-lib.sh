@@ -45,7 +45,9 @@
 # The writer and replay share one complete-record validator, and teardown stages
 # that record before destructive cleanup, so it never publishes or acts on a close
 # replay would reject. The validator pins the data path to this home's configured
-# root before any recovery mutation, then re-runs exactly that close.
+# root before replay can run that close. Teardown's cancellation path uses the
+# shared record reader to match the task incarnation even if its data root has
+# moved. Reading the marker alone grants no authority to act on its data path.
 # `tasks-axi done` on an already-closed task backfills links
 # without moving the close date, so replay is idempotent. Spawn needs no marker:
 # it publishes the meta first, so a crash
@@ -838,8 +840,8 @@ fm_backlog_close_marker_path() {  # <state-dir> <id>
   printf '%s/%s.backlog-close\n' "$1" "$2"
 }
 
-fm_backlog_close_marker_validate() {  # <marker-path> <authorized-data-dir> <expected-id> <state-dir>
-  local marker=$1 authorized_data data_resolved expected_id=$3 state=$4
+fm_backlog_close_marker_read() {  # <marker-path> <expected-id> <state-dir>
+  local marker=$1 expected_id=$2 state=$3
   local id='' data='' marker_spawn_gen='' cleanup_incomplete=0 mode=close line raw_bytes arg_value
   local url_tail url_authority url_path url_host url_port host_rest host_label host_valid
   local percent_tail percent_valid
@@ -921,18 +923,6 @@ fm_backlog_close_marker_validate() {  # <marker-path> <authorized-data-dir> <exp
       return 1
       ;;
   esac
-  authorized_data=$(fm_backlog_data_absolute "$2") || {
-    FM_BACKLOG_TRANSITION_ERROR="authorized data directory cannot be resolved: $2"
-    return 1
-  }
-  data_resolved=$(fm_backlog_data_absolute "$data") || {
-    FM_BACKLOG_TRANSITION_ERROR="data directory in pending-close record cannot be resolved: $data"
-    return 1
-  }
-  if [ "$data_resolved" != "$authorized_data" ]; then
-    FM_BACKLOG_TRANSITION_ERROR="foreign data directory in pending-close record $marker"
-    return 1
-  fi
   case "${#args[@]}" in
     0) ;;
     2)
@@ -1003,11 +993,29 @@ fm_backlog_close_marker_validate() {  # <marker-path> <authorized-data-dir> <exp
     *) FM_BACKLOG_TRANSITION_ERROR="invalid pending-close arguments in $marker"; return 1 ;;
   esac
   FM_BACKLOG_CLOSE_VALIDATED_ID=$id
-  FM_BACKLOG_CLOSE_VALIDATED_DATA=$data_resolved
+  FM_BACKLOG_CLOSE_VALIDATED_DATA=$data
   FM_BACKLOG_CLOSE_VALIDATED_SPAWN_GEN=$marker_spawn_gen
   FM_BACKLOG_CLOSE_VALIDATED_CLEANUP_INCOMPLETE=$cleanup_incomplete
   FM_BACKLOG_CLOSE_VALIDATED_MODE=$mode
   FM_BACKLOG_CLOSE_VALIDATED_ARGS=("${args[@]+"${args[@]}"}")
+}
+
+fm_backlog_close_marker_validate() {  # <marker-path> <authorized-data-dir> <expected-id> <state-dir>
+  local marker=$1 authorized_data data_resolved
+  fm_backlog_close_marker_read "$marker" "$3" "$4" || return 1
+  authorized_data=$(fm_backlog_data_absolute "$2") || {
+    FM_BACKLOG_TRANSITION_ERROR="authorized data directory cannot be resolved: $2"
+    return 1
+  }
+  data_resolved=$(fm_backlog_data_absolute "$FM_BACKLOG_CLOSE_VALIDATED_DATA") || {
+    FM_BACKLOG_TRANSITION_ERROR="data directory in pending-close record cannot be resolved: $FM_BACKLOG_CLOSE_VALIDATED_DATA"
+    return 1
+  }
+  if [ "$data_resolved" != "$authorized_data" ]; then
+    FM_BACKLOG_TRANSITION_ERROR="foreign data directory in pending-close record $marker"
+    return 1
+  fi
+  FM_BACKLOG_CLOSE_VALIDATED_DATA=$data_resolved
 }
 
 # A leading `--retain` flag records the captain-held transition (`mode=retain`)

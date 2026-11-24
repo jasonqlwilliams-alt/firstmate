@@ -35,7 +35,7 @@ case "${1:-}" in
     session=
     prev=
     for arg in "$@"; do
-      if [ "$prev" = -t ]; then session=$arg; break; fi
+      if [ "$prev" = -t ]; then session=${arg#=}; break; fi
       prev=$arg
     done
     while IFS= read -r recorded; do
