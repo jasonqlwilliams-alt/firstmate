@@ -2419,7 +2419,7 @@ EOF
       herdr_meta=$(fm_backend_herdr_matching_meta "$w" "$STATE") || herdr_meta=
     fi
     case "$backend" in
-      tmux|herdr|zellij) ;; # Presence and loss checks run for each recorded task.
+      herdr|zellij) ;; # Presence and loss checks run for each recorded task.
       *) case "$seen" in *"|$w|"*) continue ;; esac ;;
     esac
     kind=$(fm_meta_get "$meta" kind)
@@ -2442,7 +2442,7 @@ EOF
         check_recorded_endpoint "$backend" "$w" "$task" "$key" || continue
       fi
       case "$backend" in
-        tmux|herdr|zellij) ;;
+        herdr|zellij) ;;
         *) seen="$seen|$w|" ;;
       esac
       continue
@@ -2454,7 +2454,9 @@ EOF
         fm_backend_capture "$backend" "$w" 40 "fm-$task" 2>/dev/null); then
       case "$backend" in
         tmux|herdr) check_recorded_endpoint "$backend" "$w" "$task" "$key" || continue ;;
-        zellij) ;; # A failed capture cannot establish endpoint loss.
+      esac
+      case "$backend" in
+        herdr|zellij) ;;
         *) seen="$seen|$w|" ;;
       esac
       continue
