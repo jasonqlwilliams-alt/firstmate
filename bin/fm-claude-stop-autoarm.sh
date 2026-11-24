@@ -133,18 +133,17 @@ fm_hook_payload_is_foreign_host "$PAYLOAD" && exit 0
 fm_primary_scope_matches "$FM_ROOT" "$STATE" || exit 0
 
 # --- identity: only the lock-owning session's hooks may arm ------------------
-# A prior session may have died after leaving its numeric harness pid in .lock.
-# Use the shared liveness predicate to recognize only that stale-owner case.
+# Use the shared liveness predicate before trying to reclaim a stale numeric
+# owner. See docs/watcher-continuity.md for the hook's reclaim boundary.
 # Defer the mutating claim until after the unchanged AFK and need gates, so an
-# idle or away home remains byte-for-byte inert. Missing or malformed locks are
-# uncertainty rather than stale-owner evidence and remain inert.
+# idle or away home remains byte-for-byte inert. A missing or malformed PID
+# line or an unreadable owner record keeps the hook inert.
 RECOVER_SESSION_LOCK=0
 if ! fm_session_lock_owned_by_self "$STATE"; then
-  LOCK_PID=$(cat "$STATE/.lock" 2>/dev/null || true)
-  case "$LOCK_PID" in
+  case "$FM_SESSION_LOCK_PID" in
     ''|*[!0-9]*) exit 0 ;;
   esac
-  fm_harness_pid_alive "$LOCK_PID" && exit 0
+  fm_session_lock_owner_alive "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START" && exit 0
   RECOVER_SESSION_LOCK=1
 fi
 
@@ -202,7 +201,7 @@ autoarm_commit() {  # <outcome> [marker-file]
   local outcome=$1 marker=${2:-} session_pid recovery
   if [ "$outcome" = rewake ]; then
     fm_session_lock_owned_by_self "$STATE" || return 2
-    session_pid=$(sed -n '1p' "$STATE/.lock" 2>/dev/null || true)
+    session_pid=$FM_SESSION_LOCK_PID
     fm_recovery_marker_snapshot "$STATE/.watcher-down" || return 2
     case "$FM_RECOVERY_MARKER_TOKEN" in
       # A quiet lease publishes a handling episode before retiring its arm.

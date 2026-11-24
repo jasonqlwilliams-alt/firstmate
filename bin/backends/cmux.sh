@@ -519,27 +519,29 @@ fm_backend_cmux_send_text_line() {  # <target> <text> [expected-label]
 # --lines value, so a caller asking for more than the viewport can see would
 # otherwise silently get less than it asked for with no way to tell why.
 fm_backend_cmux_capture() {  # <target> <lines> [expected-label]
+  _fm_backend_cmux_capture "$1" "${2:-200}" "${3:-}"
+}
+
+_fm_backend_cmux_capture() {  # <target> <lines> [expected-label] [visible]
   fm_backend_cmux_target_ready "$1" "${3:-}" || return 1
-  local lines=${2:-200} fetch raw out
-  case "$lines" in ''|*[!0-9]*) lines=200 ;; esac
-  fetch=$lines
-  case "$fetch" in ''|*[!0-9]*) fetch=200 ;; *) [ "$fetch" -ge 200 ] || fetch=200 ;; esac
-  raw=$(fm_backend_cmux_cli read-screen --workspace "$FM_BACKEND_CMUX_WORKSPACE" --surface "$FM_BACKEND_CMUX_SURFACE" --scrollback --lines "$fetch" --json 2>/dev/null) || return 1
+  local lines=$2 scope=${4:-} fetch raw out
+  local -a args=(read-screen --workspace "$FM_BACKEND_CMUX_WORKSPACE" --surface "$FM_BACKEND_CMUX_SURFACE")
+  if [ "$scope" != visible ]; then
+    case "$lines" in *[!0-9]*) lines=200 ;; esac
+    fetch=$lines
+    [ "$fetch" -ge 200 ] || fetch=200
+    args+=(--scrollback --lines "$fetch")
+  fi
+  raw=$(fm_backend_cmux_cli "${args[@]}" --json 2>/dev/null) || return 1
   out=$(printf '%s' "$raw" | jq -r '.text // empty' 2>/dev/null) || return 1
+  if [ "$scope" = visible ]; then
+    printf '%s' "$out"
+    return 0
+  fi
   printf '%s' "$out" | tail -n "$lines"
 }
 
-# fm_backend_cmux_composer_capture: the cmux composer screen - a bounded
-# plain-text tail of the surface. cmux's `read-screen` is plain text by
-# construction (its --help: "Read terminal text from a surface as plain
-# text"), which is why the capability descriptor below declares styled=0: the
-# shared classifier then degrades a glyph row carrying trailing text to
-# `unknown` instead of misreading an idle suggestion as unsent input.
-fm_backend_cmux_composer_capture() {  # <target> [expected-label]
-  fm_backend_cmux_capture "$1" "$FM_COMPOSER_CAPTURE_LINES" "${2:-}"
-}
-
-# fm_backend_cmux_composer_caps: static capability facts, not logic (see the
+# fm_backend_cmux_composer_caps: plain-text capture capabilities (see the
 # capability model in bin/fm-composer-lib.sh).
 fm_backend_cmux_composer_caps() {
   printf 'styled=0\ncursor=0\nidentity=0\nrows=%s\n' "$FM_COMPOSER_CAPTURE_LINES"
@@ -558,9 +560,9 @@ fm_backend_cmux_composer_state() {  # <target> [expected-label] -> empty|pending
 
 # fm_backend_cmux_composer_snapshot: one composer capture into the snapshot
 # globals (bin/fm-composer-lib.sh "Composer SNAPSHOT").
-fm_backend_cmux_composer_snapshot() {  # <target> [expected-label]
+fm_backend_cmux_composer_snapshot() {  # <target> [expected-label] [visible]
   local cap
-  cap=$(fm_backend_cmux_composer_capture "$1" "${2:-}") || return 1
+  cap=$(_fm_backend_cmux_capture "$1" "$FM_COMPOSER_CAPTURE_LINES" "${2:-}" "${3:-}") || return 1
   FM_COMPOSER_SNAPSHOT_SCREEN=$cap
   FM_COMPOSER_SNAPSHOT_CURSOR=
   FM_COMPOSER_SNAPSHOT_CAPS=$(fm_backend_cmux_composer_caps)

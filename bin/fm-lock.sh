@@ -3,6 +3,7 @@
 # Writes the harness (agent) process PID found by walking the shell's ancestry,
 # which lives as long as the firstmate session - unlike the transient subshell
 # PID of any one tool call, which is dead moments after it is written.
+# bin/fm-session-lock-record-lib.sh owns the record format and start-time check.
 # Usage: fm-lock.sh           acquire; exit 1 unless ownership is verified
 #        fm-lock.sh status    print holder and liveness; always exits 0
 set -u
@@ -25,11 +26,12 @@ mkdir -p "$STATE" 2>/dev/null || {
 
 if [ "${1:-}" = "status" ]; then
   if [ ! -f "$LOCK" ]; then echo "lock: free"; exit 0; fi
-  old=$(cat "$LOCK" 2>/dev/null) || {
+  fm_session_lock_read "$LOCK" || {
     echo "lock: unreadable"
     exit 0
   }
-  if fm_harness_pid_alive "$old"; then echo "lock: held by live harness pid $old"; else echo "lock: stale (pid $old dead or not a harness)"; fi
+  old=$FM_SESSION_LOCK_PID
+  if fm_session_lock_owner_alive "$old" "$FM_SESSION_LOCK_START"; then echo "lock: held by live harness pid $old"; else echo "lock: stale (pid $old dead, reused, or not a harness)"; fi
   exit 0
 fi
 
@@ -55,19 +57,27 @@ release_claim_lock() {
 trap release_claim_lock EXIT
 trap 'exit 1' HUP INT TERM
 
-if [ -f "$LOCK" ] && [ ! -L "$LOCK" ]; then
-  old=$(cat "$LOCK" 2>/dev/null || true)
+me_start=$(fm_pid_start_time "$me") || me_start=''
+legacy_self=0
+if [ -f "$LOCK" ] && [ ! -L "$LOCK" ] && fm_session_lock_read "$LOCK"; then
+  old=$FM_SESSION_LOCK_PID
   if [ "$old" = "$me" ]; then
-    echo "lock acquired: harness pid $me"
-    exit 0
-  fi
-  if fm_harness_pid_alive "$old"; then
+    if [ "$FM_SESSION_LOCK_START" = "$me_start" ]; then
+      echo "lock acquired: harness pid $me"
+      exit 0
+    fi
+    [ -n "$FM_SESSION_LOCK_START" ] || legacy_self=1
+  elif fm_session_lock_owner_alive "$old" "$FM_SESSION_LOCK_START"; then
     echo "error: another live firstmate session holds the lock (pid $old); operate read-only until resolved" >&2
     exit 1
   fi
 fi
 
 if ! fm_lock_try_acquire "$CLAIM_LOCK"; then
+  if [ "$legacy_self" -eq 1 ]; then
+    echo "lock acquired: harness pid $me"
+    exit 0
+  fi
   sweep_pid=$(sed -n 's/^pid=//p' "$STATE/.startup-network.status" 2>/dev/null | tail -1)
   if [ -n "${FM_LOCK_HELD_PID:-}" ] && [ "$FM_LOCK_HELD_PID" = "$sweep_pid" ]; then
     echo "error: the prior session's bounded startup sweep is finishing; operate read-only until it releases the fleet lock" >&2
@@ -77,29 +87,42 @@ if ! fm_lock_try_acquire "$CLAIM_LOCK"; then
 fi
 CLAIM_LOCK_HELD=1
 
+old=''
 if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
   if [ ! -f "$LOCK" ] || [ -L "$LOCK" ]; then
     echo "error: session lock is not a regular file; operate read-only until resolved" >&2
     exit 1
   fi
-  old=$(cat "$LOCK" 2>/dev/null) || {
+  fm_session_lock_read "$LOCK" || {
     echo "error: session lock is unreadable; operate read-only until resolved" >&2
     exit 1
   }
-  if [ "$old" != "$me" ] && fm_harness_pid_alive "$old"; then
+  old=$FM_SESSION_LOCK_PID
+  if [ "$old" != "$me" ] && fm_session_lock_owner_alive "$old" "$FM_SESSION_LOCK_START"; then
     echo "error: another live firstmate session holds the lock (pid $old); operate read-only until resolved" >&2
     exit 1
   fi
 fi
-if ! { printf '%s\n' "$me" > "$LOCK"; } 2>/dev/null; then
+if [ "$old" = "$me" ]; then
+  if [ "$FM_SESSION_LOCK_START" != "$me_start" ]; then
+    if [ -z "$me_start" ]; then
+      echo "error: cannot verify session lock owner's start time; operate read-only until resolved" >&2
+      exit 1
+    fi
+    fm_session_lock_write_start "$LOCK" "$me" "$me_start"
+  fi
+else
+  fm_session_lock_write "$LOCK" "$me" "$me_start"
+fi || {
   echo "error: cannot write session lock; operate read-only until resolved" >&2
   exit 1
-fi
-written=$(cat "$LOCK" 2>/dev/null) || {
+}
+fm_session_lock_read "$LOCK" || {
   echo "error: cannot verify session lock ownership; operate read-only until resolved" >&2
   exit 1
 }
-if [ ! -f "$LOCK" ] || [ -L "$LOCK" ] || [ "$written" != "$me" ]; then
+if [ ! -f "$LOCK" ] || [ -L "$LOCK" ] || [ "$FM_SESSION_LOCK_PID" != "$me" ] \
+  || [ "$FM_SESSION_LOCK_START" != "$me_start" ]; then
   echo "error: session lock ownership verification failed; operate read-only until resolved" >&2
   exit 1
 fi
