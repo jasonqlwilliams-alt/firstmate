@@ -2004,7 +2004,10 @@ watcher_cleanup() {
       transition=release-lock-existing
     fi
   fi
-  fm_active_check_stop || cleanup_status=1
+  if ! fm_active_check_stop; then
+    echo "watcher: active capture cleanup failed during shutdown" >&2
+    cleanup_status=1
+  fi
   fm_check_output_cleanup
   fm_custom_check_snapshot_cleanup
   fm_pr_closure_stage_cleanup

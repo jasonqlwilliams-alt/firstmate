@@ -1258,13 +1258,14 @@ test_fm_lock_status_still_works_with_shared_lib() {
 # demand/authority while it is parked. No actual fleet processes are touched.
 test_quiet_lease_renewal_gates() {
   local mode dir out status
-  for mode in demand held afk superseded alarm; do
+  for mode in demand cleanup-failure held afk superseded alarm; do
     dir=$(make_primary_dir "$TMP_ROOT/lease-$mode")
     : > "$dir/state/task.meta"
     cat > "$dir/bin/fm-watch-arm.sh" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$$" > "$FM_HOME/state/arm-ran"
 case "${LEASE_TEST_MODE}" in
+  cleanup-failure) printf '%s\n' 'watcher: active capture cleanup failed during shutdown' >&2 ;;
   held) rm "$FM_HOME/state/task.meta" ;;
   afk) touch "$FM_HOME/state/.afk" ;;
   superseded) sed -i 's/epoch=1 /epoch=2 /' "$FM_HOME/state/.claude-autoarm-epoch" ;;
@@ -1274,9 +1275,12 @@ sleep 30
 SH
     chmod +x "$dir/bin/fm-watch-arm.sh"
     out=$(LEASE_TEST_MODE="$mode" FM_CLAUDE_AUTOARM_LEASE_SECONDS=3 run_autoarm "$dir" 2>/dev/null); status=$?
-    if [ "$mode" = demand ]; then
+    if [ "$mode" = demand ] || [ "$mode" = cleanup-failure ]; then
       expect_code 2 "$status" "quiet live demand needs an owned renewal"
       assert_contains "$out" 'check: claude-lease-renewal' "lease maintenance reason"
+      if [ "$mode" = cleanup-failure ]; then
+        assert_contains "$out" 'watcher: active capture cleanup failed during shutdown' "lease lost the arm's cleanup diagnostic"
+      fi
       grep -q '^pending:handling:' "$dir/state/.watcher-down" || fail "renewal did not publish an acknowledgeable handling episode"
       assert_grep "session_pid=$(cat "$dir/state/.lock")" "$dir/state/.claude-autoarm-epoch" \
         "renewal did not bind the current owning session"
@@ -1527,7 +1531,7 @@ SH
   trap cleanup_observation EXIT
   trap 'exit 1' HUP INT TERM
 
-  if [ "$mode" = cleanup-failure ] || [ "$mode" = cleanup-unverified ]; then
+  if [[ "$mode" = cleanup-* ]]; then
     cat > "$dir/capture-failure.bash" <<'SH'
 if [ "$0" = "$FM_HOME/bin/fm-watch.sh" ]; then
   kill() {
@@ -1553,10 +1557,26 @@ if [ "$0" = "$FM_HOME/bin/fm-watch.sh" ]; then
   }
 fi
 SH
+    export FM_FIXTURE_CAPTURE_MODE="$mode" BASH_ENV="$dir/capture-failure.bash"
+  fi
+
+  if [ "$mode" = cleanup-checkpoint ]; then
+    hook_rc=0
+    FM_GUARD_GRACE=120 FM_WATCHER_STALE_GRACE=120 "$dir/bin/fm-watch-checkpoint.sh" --seconds 8 \
+      > "$dir/outer.out" 2> "$dir/outer.err" || hook_rc=$?
+    expect_code 124 "$hook_rc" "failed shutdown must preserve the checkpoint deadline status"
+    [ -s "$state/observing" ] || fail "checkpoint expired before it started the observation"
+    assert_grep 'checkpoint: no actionable wake within 8s' "$dir/outer.out" "checkpoint lost the deadline line"
+    assert_grep 'watcher: active capture cleanup failed during shutdown' "$dir/outer.err" "checkpoint lost the cleanup diagnostic"
+    [ ! -s "$state/.wake-queue" ] || fail "checkpoint shutdown queued a wake"
+    pass "checkpoint: deadline forwards capture cleanup failure without a wake"
+    return 0
+  fi
+
+  if [ "$mode" = cleanup-failure ] || [ "$mode" = cleanup-unverified ]; then
     touch "$state/finish" || fail "could not arrange an actionable check after observation"
     hook_rc=0
-    FM_FIXTURE_CAPTURE_MODE="$mode" BASH_ENV="$dir/capture-failure.bash" \
-      "$dir/bin/fm-watch-checkpoint.sh" --seconds 20 \
+    "$dir/bin/fm-watch-checkpoint.sh" --seconds 20 \
       > "$dir/outer.out" 2>&1 || hook_rc=$?
     if [ "$mode" = cleanup-unverified ]; then
       [ -e "$state/process-state-check-failed" ] || fail "process-state check error was not exercised"
@@ -1591,13 +1611,13 @@ SH
     return 0
   fi
 
-  if [ "$mode" = stop ]; then
+  if [ "$mode" = stop ] || [ "$mode" = cleanup-stop ]; then
     # shellcheck disable=SC2031 # Stop mode sets its own stale grace.
     export FM_GUARD_GRACE=120 FM_WATCHER_STALE_GRACE=120
   fi
   "$dir/bin/fm-watch-arm.sh" > "$dir/outer.out" 2>&1 &
   arm_pid=$!
-  if [ "$mode" = stop ]; then
+  if [ "$mode" = stop ] || [ "$mode" = cleanup-stop ]; then
     for ((i=0; i<160; i++)); do
       [ ! -s "$state/observing" ] || break
       kill -0 "$arm_pid" 2>/dev/null || break
@@ -1615,6 +1635,10 @@ SH
     ssh_pid=
     transport_pid=
     [ ! -e "$state/.watch.lock" ] || fail "a normally stopped watcher did not release its lock"
+    if [ "$mode" = cleanup-stop ]; then
+      expect_code 143 "$hook_rc" "cleanup failure must preserve the arm's TERM status"
+      assert_grep 'watcher: active capture cleanup failed during shutdown' "$dir/outer.out" "arm lost the cleanup diagnostic"
+    fi
     pass "auto-arm: a normally stopped watcher reaps its remote observation"
     return 0
   fi
@@ -1687,7 +1711,7 @@ test_watcher_keeps_operation_budgets() (
 case "$3" in
   observe) printf idle ;;
   send)
-    sleep 5
+    sleep 8
     printf '%s\n' "$5" > "$FM_HOME/reposted"
     ;;
   *) exit 1 ;;
@@ -1726,6 +1750,9 @@ SH
 test_watcher_keeps_operation_budgets || exit $?
 test_stalled_remote_observation_liveness cleanup-failure || exit $?
 test_stalled_remote_observation_liveness cleanup-unverified || exit $?
+test_stalled_remote_observation_liveness cleanup-checkpoint || exit $?
+test_stalled_remote_observation_liveness cleanup-stop || exit $?
+test_quiet_lease_renewal_gates
 test_stalled_remote_observation_liveness lease || exit $?
 test_stalled_remote_observation_liveness lease-no-gnu || exit $?
 test_stalled_remote_observation_liveness stop || exit $?
@@ -1775,7 +1802,5 @@ test_afk_mid_cycle_suppresses_rewake
 test_active_in_marked_secondmate_home
 test_long_poll_grace_reaches_arm_wrapper
 test_fm_lock_status_still_works_with_shared_lib
-
-test_quiet_lease_renewal_gates
 
 test_quiet_lease_preserves_live_lock
