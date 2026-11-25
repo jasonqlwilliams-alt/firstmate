@@ -451,6 +451,11 @@ case "$1 $2" in
   'pane read')
     if [ "$FM_DIALOG_MODE" = peek ]; then printf '%s\n' "$*" >> "$FM_DIALOG_CASE/reads"; fi
     if [ "$FM_DIALOG_MODE" = doorbell-slow ]; then sleep 5.5; fi
+    if [ "$phase:$FM_DIALOG_MODE" = doorbell-typed:doorbell-stalled ]; then
+      : > "$FM_DIALOG_CASE/read-started"
+      sleep 9
+      : > "$FM_DIALOG_CASE/read-completed"
+    fi
     if [ "$phase:$FM_DIALOG_MODE" = typed:guard-stalled ]; then
       : > "$FM_DIALOG_CASE/read-started"
       sleep 6
@@ -509,7 +514,7 @@ case "$1 $2" in
     case "$FM_DIALOG_MODE:$4" in
       submit-*:*) printf 'submit-typed\n' > "$FM_DIALOG_CASE/phase" ;;
       doorbell-after*:*|dialog-after-typing:/exit) printf 'dialog\n' > "$FM_DIALOG_CASE/phase" ;;
-      doorbell-slow:*) printf 'doorbell-typed\n' > "$FM_DIALOG_CASE/phase" ;;
+      doorbell-slow:*|doorbell-stalled:*) printf 'doorbell-typed\n' > "$FM_DIALOG_CASE/phase" ;;
       *:/exit) printf 'typed\n' > "$FM_DIALOG_CASE/phase" ;;
     esac
     ;;
@@ -551,7 +556,7 @@ fm_write_meta "$meta" 'backend=herdr' 'window=fixture:p1' 'endpoint_task_id=exit
 export FM_DIALOG_HOME="$TMP_ROOT/worktree"
 for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-liveness dialog-after-typing dialog-after-failed-enter late-dialog guard-stalled \
     retry retry-failure slow-liveness-retry retry-stalled enter-failure single-stop slow-liveness-stop slow-stop stalled-stop doorbell-before doorbell-before-picker \
-    doorbell-after doorbell-after-long doorbell-after-long-plain doorbell-after-clipped doorbell-slow; do
+    doorbell-after doorbell-after-long doorbell-after-long-plain doorbell-after-clipped doorbell-slow doorbell-stalled; do
   export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/herdr-$mode"
   case "$mode" in
     long-dialog|doorbell-after-long*) export FM_DIALOG_FIXTURE="$TMP_ROOT/long.screen" ;;
@@ -580,9 +585,14 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-live
         expect_code 1 "$rc" 'the dialog should prevent typing the doorbell'
         [ ! -s "$FM_DIALOG_CASE/input" ] || fail "the doorbell wrote into the dialog: $(cat "$FM_DIALOG_CASE/input")"
       else
-        expect_code 5 "$rc" 'the dialog should prevent submitting the doorbell'
+        expect_code 5 "$rc" 'the unreadable or unsafe screen should prevent submitting the doorbell'
         assert_contains "$(cat "$FM_DIALOG_CASE/input")" 'Firstmate instruction waiting' 'the composer did not receive the doorbell text'
-        [ "$(wc -l < "$FM_DIALOG_CASE/input")" -eq 1 ] || fail "the doorbell wrote to the dialog after typing: $(cat "$FM_DIALOG_CASE/input")"
+        [ "$(wc -l < "$FM_DIALOG_CASE/input")" -eq 1 ] || fail "the doorbell sent another key after typing: $(cat "$FM_DIALOG_CASE/input")"
+        if [ "$mode" = doorbell-stalled ]; then
+          assert_present "$FM_DIALOG_CASE/read-started" 'the test did not reach the stalled viewport read'
+          assert_absent "$FM_DIALOG_CASE/read-completed" 'the stalled viewport read held the lifecycle lock past its deadline'
+          assert_absent "${meta%/*}/.control-exitdialog.lock" 'the timed-out doorbell did not release the lifecycle lock'
+        fi
       fi
       continue
       ;;

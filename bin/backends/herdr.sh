@@ -3325,12 +3325,16 @@ fm_backend_herdr_composer_classify_snapshot() {  # <target>
 # harness whose native state never transitions. Without a harness argument the
 # shared matcher uses its union of verified tokens, which is what the submit
 # core wants: it has no recorded harness for the pane.
-fm_backend_herdr_rendered_busy_state() {  # <target> [harness] -> busy|idle|unknown
-  local target=$1 harness=${2:-} cap visible
-  cap=$(fm_backend_herdr_capture "$target" 40) || { printf 'unknown'; return 0; }
+fm_backend_herdr_rendered_busy_state() {  # <target> -> busy|idle|unknown
+  local target=$1 cap visible
+  if [ "${fm_submit_claude_backend:-}" = herdr ]; then
+    cap=$(fm_backend_run_timed "$FM_COMPOSER_CLAUDE_READ_MS" fm_backend_capture herdr "$target" 40) || cap=
+  else
+    cap=$(fm_backend_herdr_capture "$target" 40) || cap=
+  fi
   visible=$(printf '%s' "$cap" | grep -v '^[[:space:]]*$' | tail -12)
   [ -n "$visible" ] || { printf 'unknown'; return 0; }
-  if printf '%s' "$visible" | fm_busy_lines_match "$harness"; then
+  if printf '%s' "$visible" | fm_busy_lines_match; then
     printf 'busy'
   else
     printf 'idle'
@@ -3450,7 +3454,7 @@ fm_backend_herdr_send_text_submit() {  # <target> <text> <retries> <enter-sleep>
   if [ "$baseline" = idle ]; then
     allow_rendered=1
   else
-    footer_baseline=$(fm_backend_herdr_rendered_busy_state "$target" "${fm_submit_claude_backend:+claude}")
+    footer_baseline=$(fm_backend_herdr_rendered_busy_state "$target")
   fi
   while :; do
     fm_composer_submit_check_input "$target" pending "$enter_sent" || return 0
@@ -3485,7 +3489,7 @@ fm_backend_herdr_send_text_submit() {  # <target> <text> <retries> <enter-sleep>
       verdict=$(fm_composer_submit_state "$target" fm_backend_herdr_composer_state)
       if [ "$verdict" = pending ] && [ "$raw_status" != working ] \
         && [ "$footer_baseline" = idle ] \
-        && [ "$(fm_backend_herdr_rendered_busy_state "$target" "${fm_submit_claude_backend:+claude}")" = busy ]; then
+        && [ "$(fm_backend_herdr_rendered_busy_state "$target")" = busy ]; then
         verdict=busy
       fi
       case "$verdict" in

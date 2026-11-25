@@ -94,14 +94,23 @@ case "${1:-}" in
         *) exit 1 ;;
       esac
       composer=$(cat "$FM_SEND_LOG")
-      if [ "$claude_submit" = cleared ] && [ -s "$FM_SEND_LOG.keys" ]; then
-        if [ -e "$FM_SEND_LOG.redraw" ]; then
-          composer=
-        else
-          : > "$FM_SEND_LOG.redraw"
-        fi
+      case "$claude_submit" in
+        cleared|wrapped)
+          if [ -s "$FM_SEND_LOG.keys" ]; then
+            if [ -e "$FM_SEND_LOG.redraw" ]; then
+              composer=
+            else
+              : > "$FM_SEND_LOG.redraw"
+            fi
+          fi
+          ;;
+      esac
+      if [ "$claude_submit" = wrapped ] && [ -n "$composer" ]; then
+        printf '────────────────────────\n❯\302\240\033[1m%s\033[0m\n  %s\n────────────────────────\n' \
+          "${composer% /rename *} /rename" "${composer##* /rename }"
+      else
+        printf '────────────────────────\n❯ %s\n────────────────────────\n' "$composer"
       fi
-      printf '────────────────────────\n❯ %s\n────────────────────────\n' "$composer"
       exit 0
     fi
     if [ "${FM_FAKE_TMUX_PENDING:-0}" = 1 ]; then
@@ -736,7 +745,7 @@ test_remote_send_budget_bounds_busy_lane() {
 }
 
 test_local_secondmate_submit() {
-  local mode=$1 dir fb log home rc rec corr command='/audit the ledger'
+  local mode=$1 dir fb log home rc rec corr retries=3 command='/audit the ledger'
   dir="$TMP_ROOT/local-claude-$mode"; mkdir -p "$dir"
   fb=$(make_stubs "$dir"); log="$dir/send.log"
   home=$(setup_home "local-claude-$mode")
@@ -746,12 +755,16 @@ test_local_secondmate_submit() {
   # A harness-native slash invocation keeps the typed plane for a LOCAL marked
   # secondmate target, so this pins the kept armed-expectation semantics there.
   : > "$log"
-  if [ "$mode" = crlf ]; then
-    printf '%s\r\n' "$command" > "$dir/command"
-    IFS= read -r command < "$dir/command"
-  fi
+  case "$mode" in
+    crlf)
+      printf '%s\r\n' "$command" > "$dir/command"
+      IFS= read -r command < "$dir/command"
+      ;;
+    spinner) command='/audit explain … (12s)'; retries=1 ;;
+    wrapped) command=$'/rename New\302\240Title' ;;
+  esac
   rc=0
-  env PATH="$fb:$PATH" FM_FAKE_CLAUDE_SUBMIT="$mode" \
+  env PATH="$fb:$PATH" FM_FAKE_CLAUDE_SUBMIT="$mode" FM_SEND_RETRIES="$retries" \
     FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_SEND_LOG="$log" FM_SEND_SETTLE=0 \
     "$SEND" lsm "$command" >"$dir/out" 2>&1 || rc=$?
   rec=$(pending_record "$home")
@@ -764,12 +777,13 @@ test_local_secondmate_submit() {
       pass 'fm-send local: a CRLF Claude command is refused before any terminal write'
       return
       ;;
-    cleared)
+    cleared|wrapped)
       expect_code 0 "$rc" "composer clearance before a retry must confirm delivery: $(cat "$dir/out")"
+      assert_contains "$(cat "$log")" "$command" 'the original slash command must reach the composer'
       [ "$(cat "$log.keys")" = Enter ] || fail 'the cleared composer received another key'
       [ -n "$rec" ] && [ -n "$(fm_pending_reply_get "$rec" delivered_epoch)" ] \
         || fail 'the cleared composer did not commit reply delivery'
-      pass 'fm-send local: clearance after one Enter confirms delivery without another key'
+      pass "fm-send local: clearance after one Enter confirms delivery ($mode)"
       return
       ;;
   esac
@@ -780,12 +794,14 @@ test_local_secondmate_submit() {
     || fail "the pending-reply expectation must survive an unconfirmed local secondmate send"
   [ "$(fm_pending_reply_get "$rec" phase)" = awaiting_report ] \
     || fail "the surviving expectation must stay armed, got $(fm_pending_reply_get "$rec" phase)"
+  [ -z "$(fm_pending_reply_get "$rec" delivered_epoch)" ] \
+    || fail 'a swallowed Enter must leave delivery unconfirmed'
   # Armed means resolvable: the mate's correlated report still closes it.
   corr=$(fm_pending_reply_get "$rec" corr_id)
   printf 'done [corr=%s]: ledger clean\n' "$corr" > "$home/state/lsm.status"
   fm_pending_reply_try_resolve "$home/state" "$corr" \
     || fail "a correlated report must still resolve the preserved expectation"
-  pass "fm-send local: an unconfirmed secondmate send keeps its reply expectation armed"
+  pass "fm-send local: an unconfirmed secondmate send keeps its reply expectation armed ($mode)"
 }
 
 test_local_pending_reports_delivered_unconfirmed() {
@@ -855,5 +871,7 @@ test_local_pending_does_not_close_resolve_key
 test_local_secondmate_submit pending
 test_local_secondmate_submit cleared
 test_local_secondmate_submit crlf
+test_local_secondmate_submit spinner
+test_local_secondmate_submit wrapped
 
 echo "all fm-send-remote-delivery tests passed"

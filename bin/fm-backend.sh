@@ -68,6 +68,7 @@ FM_BACKEND_CONFIG_DIR="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 # codex-app remains deliberately absent; see docs/codex-app-backend.md.
 FM_BACKEND_KNOWN="tmux herdr zellij orca cmux"
 FM_BACKEND_SPAWN="tmux herdr zellij orca cmux"
+FM_COMPOSER_CLAUDE_READ_MS=7000
 
 # fm_backend_list_contains: whitespace-delimited membership without relying on
 # shell word splitting. fm-backend.sh is normally sourced by bash scripts, but
@@ -1034,6 +1035,9 @@ fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
 # the second-mate restart's local and remote screen observations.
 fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [remaining-ms] [automatic]
   local limit_ms=${6:-} screen rc
+  if [ -z "$limit_ms" ] && [ "${5:-}:${7:-}" = claude:automatic ]; then
+    limit_ms=$FM_COMPOSER_CLAUDE_READ_MS
+  fi
   set -- "$1" "$2" "${3:-}" "${4:-}" "${5:-}" "${7:-}"
   if [ -z "$limit_ms" ]; then
     _fm_backend_guarded_composer_state "$@"
@@ -1052,8 +1056,8 @@ fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [ex
 }
 
 _fm_backend_guarded_composer_state() {
-  local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} picker verdict kv styled=0
-  local mode=${6:-} capture=
+  local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} picker verdict styled=0
+  local mode=${6:-} capture= proof=
   if [ "$harness" = claude ]; then
     capture=visible
     if [ "$backend" = tmux ]; then
@@ -1078,15 +1082,16 @@ _fm_backend_guarded_composer_state() {
     ''|*[!a-z0-9-]*) ;;
     *) FM_COMPOSER_SNAPSHOT_CAPS="$FM_COMPOSER_SNAPSHOT_CAPS"$'\n'"harness=$harness" ;;
   esac
+  [ "$harness:$mode" != claude:automatic ] || proof=claude-frame
   picker=$(fm_composer_update_picker_scan "$FM_COMPOSER_SNAPSHOT_CAPS" \
-    "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR" "$expected")
+    "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR" "$expected" "$proof")
   [ "$picker" != active ] || { printf 'update-picker'; return 0; }
   if [ "$harness" = codex ] && [ "$picker" != below ] \
      && fm_composer_codex_signin_screen "$FM_COMPOSER_SNAPSHOT_SCREEN"; then
     printf 'sign-in'
     return 0
   fi
-  if [ "$harness:$mode" = claude:automatic ]; then
+  if [ "$proof" = claude-frame ]; then
     if ! fm_composer_is_claude_frame "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR"; then
       if [ "$picker" = below ]; then printf 'update-picker'; else printf 'unknown'; fi
       return 0
@@ -1098,20 +1103,13 @@ _fm_backend_guarded_composer_state() {
   else
     verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target")
   fi
-  if [ "$verdict" = unknown ] && [ -n "$expected" ]; then
-    while IFS= read -r kv; do
-      [ "$kv" != styled=1 ] || styled=1
-    done <<EOF
-$FM_COMPOSER_SNAPSHOT_CAPS
-EOF
-    if [ "$styled" = 0 ] \
-       && fm_composer_holds_text "$FM_COMPOSER_SNAPSHOT_CAPS" "$FM_COMPOSER_SNAPSHOT_SCREEN" "$expected"; then
+  case $'\n'"$FM_COMPOSER_SNAPSHOT_CAPS"$'\n' in *$'\nstyled=1\n'*) styled=1 ;; esac
+  if [ -n "$expected" ] && { [ "$verdict" = pending ] || { [ "$verdict" = unknown ] && [ "$styled" = 0 ]; }; }; then
+    if fm_composer_holds_text "$FM_COMPOSER_SNAPSHOT_CAPS" "$FM_COMPOSER_SNAPSHOT_SCREEN" "$expected" "$proof"; then
       verdict=pending
+    else
+      verdict=unknown
     fi
-  fi
-  if [ "$verdict" = pending ] && [ -n "$expected" ] \
-     && ! fm_composer_holds_text "$FM_COMPOSER_SNAPSHOT_CAPS" "$FM_COMPOSER_SNAPSHOT_SCREEN" "$expected"; then
-    verdict=unknown
   fi
   case "$verdict" in
     empty|pending|pending-unproven) printf '%s' "$verdict" ;;

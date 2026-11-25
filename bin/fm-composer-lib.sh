@@ -1428,16 +1428,46 @@ fm_composer_classify_snapshot_no_identity() {
   printf '%s' "$verdict"
 }
 
+fm_composer_claude_frame_rows() {  # <screen> <styled>
+  local content row first=1 nbsp=$'\302\240'
+  content=$(printf '%s\n' "$1" | sed -n "$((FM_COMPOSER_SELECTED_FIRST + 1)),$((FM_COMPOSER_SELECTED_LAST + 1))p")
+  if [ "$2" = 1 ]; then
+    content=$(printf '%s\n' "$content" | fm_composer_strip_ghost)
+  else
+    content=$(printf '%s\n' "$content" | fm_composer_strip_ansi)
+  fi
+  while IFS= read -r row; do
+    row=${row#"${row%%[! ]*}"}
+    if [ "$first" = 1 ]; then
+      case "$row" in ❯*) row=${row#❯} ;; *) return 1 ;; esac
+      case "$row" in
+        ' '*) row=${row# } ;;
+        "$nbsp"*) row=${row#"$nbsp"} ;;
+      esac
+    fi
+    row=${row%"${row##*[! ]}"}
+    [ -n "$row" ] || return 1
+    printf '%s\n' "$row"
+    first=0
+  done <<< "$content"
+}
+
 # fm_composer_holds_text: 0 when the selected composer's extracted content is
 # exactly <text>, allowing one optional space where displayed rows meet.
 # This is how a caller that just typed <text> proves the composer holds it on
 # a plain (styled=0) capture, where a glyph row with trailing text otherwise
 # reads unknown because ghost text cannot be told apart from typed text.
-fm_composer_holds_text() {  # <caps> <screen> <text>
+fm_composer_holds_text() {  # <caps> <screen> <text> [claude-frame]
   local content remaining row first=1
   remaining=$3
   [ -n "$remaining" ] || return 1
-  content=$(fm_composer_extract_selected_content "$1" "$2" rows 2>/dev/null) || return 1
+  if [ "${4:-}" = claude-frame ]; then
+    local styled=0
+    case $'\n'"$1"$'\n' in *$'\nstyled=1\n'*) styled=1 ;; esac
+    content=$(fm_composer_claude_frame_rows "$2" "$styled") || return 1
+  else
+    content=$(fm_composer_extract_selected_content "$1" "$2" rows 2>/dev/null) || return 1
+  fi
   [ -n "$content" ] || return 1
   while IFS= read -r row; do
     if [ "$first" = 0 ]; then
@@ -1471,7 +1501,7 @@ fm_composer_holds_text() {  # <caps> <screen> <text>
 #             are stale history above a live composer
 # Single owner of this recognition; bin/fm-backend.sh's
 # fm_backend_guarded_composer_state composes it with the adapter's verdict.
-fm_composer_update_picker_scan() {  # <caps> <screen> [cursor_row] [expected-text]
+fm_composer_update_picker_scan() {  # <caps> <screen> [cursor_row] [expected-text] [claude-frame]
   local caps=$1 screen=$2 cy=${3:-} expected=${4:-} cursor=0 kv plain tail before row
   local tail_caps tail_state
   while IFS= read -r kv; do
@@ -1496,7 +1526,9 @@ EOF
   tail_caps=$(printf 'styled=0\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
   tail_state=$(fm_composer_classify_screen "$tail_caps" "$tail" 2>/dev/null) || tail_state=unknown
   if [ "$tail_state" = empty ] \
-     || { [ -n "$expected" ] && fm_composer_holds_text "$tail_caps" "$tail" "$expected"; }; then
+     || { [ -n "$expected" ] \
+          && { [ "${5:-}" != claude-frame ] || fm_composer_is_claude_frame "$tail"; } \
+          && fm_composer_holds_text "$tail_caps" "$tail" "$expected" "${5:-}"; }; then
     printf 'retained'
   else
     printf 'active'

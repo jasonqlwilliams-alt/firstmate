@@ -39,6 +39,9 @@ mkdir -p "$FM_HOME/state" "$CLAUDE_CONFIG_DIR" "$LAB/bin" "$LAB/user"
 fm_git_worktree "$LAB/project" "$WORKTREE" claude-input \
   || live_fail 'could not create the disposable linked worktree'
 printf '{"hasCompletedOnboarding":true}\n' > "$CLAUDE_CONFIG_DIR/.claude.json"
+cat > "$CLAUDE_CONFIG_DIR/settings.json" <<'JSON'
+{"apiKeyHelper":"printf '%s\\n' \"$FM_CLAUDE_AUTOMATIC_INPUT_API_KEY\""}
+JSON
 "$ROOT/bin/fm-claude-trust.sh" "$WORKTREE" "$LAB/project" >/dev/null \
   || live_fail 'could not register trust in the isolated Claude config'
 
@@ -51,8 +54,8 @@ chmod +x "$LAB/bin/tmux"
 export PATH="$LAB/bin:$PATH"
 unset TMUX TMUX_PANE
 (
-  export HOME="$LAB/user" ANTHROPIC_API_KEY="$FM_CLAUDE_AUTOMATIC_INPUT_API_KEY"
-  unset FM_CLAUDE_AUTOMATIC_INPUT_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN \
+  export HOME="$LAB/user" FM_CLAUDE_AUTOMATIC_INPUT_API_KEY
+  unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN \
     ANTHROPIC_BASE_URL ANTHROPIC_CUSTOM_HEADERS CLAUDE_CODE_USE_BEDROCK \
     CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
   tmux new-session -d -s "$SESSION" -n "$WINDOW" -x 160 -y 45 -c "$WORKTREE" \

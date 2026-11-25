@@ -346,7 +346,7 @@ _fm_task_inbox_ring() {
       || screen=unknown
     case "$screen" in
       update-picker) return 4 ;;
-      exit-confirm) return 5 ;;
+      exit-confirm|timeout) return 5 ;;
       pending) break ;;
     esac
     [ "$strict" = 1 ] || break
