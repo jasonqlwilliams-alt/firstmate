@@ -1099,7 +1099,7 @@ _fm_backend_guarded_composer_state() {
     # The frame already locates the composer. Classify its full contents,
     # including rows below the cursor that a cursor-anchored read would miss.
     verdict=$(fm_composer_classify_screen "$FM_COMPOSER_SNAPSHOT_CAPS" \
-      "$FM_COMPOSER_SNAPSHOT_SCREEN" '' probe-absent)
+      "$FM_COMPOSER_SNAPSHOT_SCREEN" '' '' "$proof")
   else
     verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target")
   fi

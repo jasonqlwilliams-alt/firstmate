@@ -75,6 +75,7 @@ If the screen cannot be read in time, the restart may report a timeout without n
 
 The Claude doorbell and native command send hold the task's lifecycle lock from the first screen read through submission, including on watcher re-rings and the remote secondmate's host.
 They require a readable Claude composer frame with every input row empty before typing and a capture of that frame holding the exact line before each Enter.
+A composer containing only spaces reads as empty because a screen capture cannot distinguish typed spaces from padding, so a doorbell line can be typed ahead of those spaces.
 The pre-Enter check joins the composer's visible rows, so a soft wrap and a newline an operator inserts during delivery look the same to it.
 The standalone Claude recovery interrupt requires a readable, proven-empty composer under the same lock before sending Escape.
 An explicit operator key send remains available to act on a dialog.

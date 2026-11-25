@@ -107,7 +107,7 @@ case "${1:-}" in
       esac
       if [ "$claude_submit" = wrapped ] && [ -n "$composer" ]; then
         printf '────────────────────────\n❯\302\240\033[1m%s\033[0m\n  %s\n────────────────────────\n' \
-          "${composer% /rename *} /rename" "${composer##* /rename }"
+          "${composer% + *}" "+ ${composer##* + }"
       else
         printf '────────────────────────\n❯ %s\n────────────────────────\n' "$composer"
       fi
@@ -759,7 +759,7 @@ test_local_secondmate_submit() {
     crlf) command+=$'\r\n' ;;
     lf) command+=$'\n' ;;
     spinner) command='/audit explain … (12s)'; retries=1 ;;
-    wrapped) command=$'/rename New\302\240Title' ;;
+    wrapped) command=$'/rename Release\302\240A + B |' ;;
   esac
   rc=0
   env PATH="$fb:$PATH" FM_FAKE_CLAUDE_SUBMIT="$mode" FM_SEND_RETRIES="$retries" \

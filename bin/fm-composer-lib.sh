@@ -1033,11 +1033,13 @@ _fm_composer_wrap_region_ok() {  # <plain-screen> <glyph-row> <cursor-row>
 # prove it real and unknown otherwise (the same styled=0 degradation as the
 # glyph row itself).
 _fm_composer_classify_bare_wrap() {  # <screen> <styled> <glyph-row> <cursor-row>
-  local screen=$1 styled=$2 g=$3 cy=$4 row raw content glyph='' text_seen=0
+  local screen=$1 styled=$2 g=$3 cy=$4 row raw content glyph='' text_seen=0 strip=fm_composer_strip_ansi
+  [ "$styled" != 1 ] || strip=fm_composer_strip_ghost
   row=$g
   while [ "$row" -le "$cy" ]; do
     raw=$(_fm_composer_screen_row "$row" "$screen")
-    content=$(_fm_composer_row_content "$raw" "$styled")
+    content=$(printf '%s\n' "$raw" | "$strip")
+    fm_composer_normalize_trim_var content
     if [ "$row" -eq "$g" ] && fm_composer_leading_agent_glyph_var glyph "$content"; then
       content=${content#*"$glyph"}
     fi
@@ -1188,23 +1190,30 @@ _fm_composer_select_cursorless() {
 }
 
 fm_composer_is_claude_frame() {  # <screen> [cursor-row]
-  local plain cy=${2:-} prompt glyph top bottom
+  local plain cy=${2:-} prompt glyph top bottom first last
   plain=$(printf '%s\n' "$1" | fm_composer_strip_ansi)
   _fm_composer_scan_screen "$plain" ''
-  _fm_composer_select_cursorless "$plain" || return 1
-  [ "$FM_COMPOSER_SELECTED_KIND" = bare ] || return 1
+  [ "$FM_COMPOSER_SCAN_PI_PAIR_FOUND" = 1 ] || return 1
+  first=$((FM_COMPOSER_SCAN_PI_OPEN + 1))
+  last=$((FM_COMPOSER_SCAN_PI_CLOSE - 1))
+  [ "$first" -le "$last" ] || return 1
   if [ -n "$cy" ]; then
-    [ "$cy" -ge "$FM_COMPOSER_SELECTED_FIRST" ] && [ "$cy" -le "$FM_COMPOSER_SELECTED_LAST" ] || return 1
+    [ "$cy" -ge "$first" ] && [ "$cy" -le "$last" ] || return 1
   fi
-  prompt=$(_fm_composer_screen_row "$FM_COMPOSER_SELECTED_FIRST" "$plain")
-  fm_composer_normalize_trim_var prompt
-  fm_composer_leading_agent_glyph_var glyph "$prompt" && [ "$glyph" = '❯' ] || return 1
-  [ "$FM_COMPOSER_SELECTED_FIRST" -gt 0 ] || return 1
-  top=$(_fm_composer_screen_row "$((FM_COMPOSER_SELECTED_FIRST - 1))" "$plain")
-  bottom=$(_fm_composer_screen_row "$((FM_COMPOSER_SELECTED_LAST + 1))" "$plain")
+  top=$(_fm_composer_screen_row "$((first - 1))" "$plain")
+  bottom=$(_fm_composer_screen_row "$((last + 1))" "$plain")
   fm_composer_normalize_trim_var top
   fm_composer_normalize_trim_var bottom
-  _fm_composer_horizontal_rule "$top" && [ "$top" = "$bottom" ]
+  [ "$top" = "$bottom" ] || return 1
+  prompt=$(_fm_composer_screen_row "$first" "$plain")
+  fm_composer_normalize_trim_var prompt
+  fm_composer_leading_agent_glyph_var glyph "$prompt" && [ "$glyph" = '❯' ] || return 1
+  _fm_composer_scan_screen "$(printf '%s\n' "$plain" | tail -n "+$((last + 3))")" ''
+  [ "$FM_COMPOSER_SCAN_BARE_ROW" -lt 0 ] && [ "$FM_COMPOSER_SCAN_SHELL_ROW" -lt 0 ] \
+    && [ "$FM_COMPOSER_SCAN_BOX_BOTTOM" -lt 0 ] && [ "$FM_COMPOSER_SCAN_INCOMPLETE_BOX_FROM" -lt 0 ] \
+    && [ "$FM_COMPOSER_SCAN_LEFTBAR_END" -lt 0 ] || return 1
+  FM_COMPOSER_SELECTED_FIRST=$first
+  FM_COMPOSER_SELECTED_LAST=$last
 }
 
 fm_composer_extract_selected_content() {  # <caps> <screen> [rows]
@@ -1296,7 +1305,7 @@ EOF
   fi
 }
 
-fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity]
+fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity] [claude-frame]
   local caps=$1 screen=$2 cy=${3:-} identity=${4:-}
   local styled=0 cursor=0 has_identity=0 kv plain luma
   # Shadow the ghost ceiling for this capture's harness; read the inherited
@@ -1312,6 +1321,14 @@ fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity]
   done <<EOF
 $caps
 EOF
+  if [ "${5:-}" = claude-frame ]; then
+    if [ "$FM_COMPOSER_SELECTED_FIRST" -eq "$FM_COMPOSER_SELECTED_LAST" ]; then
+      _fm_composer_classify_bare_row "$screen" "$styled" "$FM_COMPOSER_SELECTED_FIRST"
+    else
+      _fm_composer_classify_bare_wrap "$screen" "$styled" "$FM_COMPOSER_SELECTED_FIRST" "$FM_COMPOSER_SELECTED_LAST"
+    fi
+    return
+  fi
   [ "$cursor" = 1 ] || cy=''
   if [ -n "$cy" ]; then
     case "$cy" in *[!0-9]*) printf 'unknown'; return 0 ;; esac

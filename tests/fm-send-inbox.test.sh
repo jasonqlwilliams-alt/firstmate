@@ -86,7 +86,7 @@ case "${1:-}" in
     case "${FM_FAKE_CLAUDE_CAPTURE:-}" in
       unreadable) exit 1 ;;
       multiline-draft)
-        printf '────────────────────────\n❯ \n  draft on the second row\n────────────────────────\n'
+        printf '────────────────────────\n❯ \n  ||\n────────────────────────\n'
         exit 0 ;;
       wrong-text)
         if [ -s "$FM_SEND_LOG.pending" ]; then
