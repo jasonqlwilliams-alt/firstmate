@@ -399,7 +399,7 @@ send_interrupt_keys() {
   [ -z "$clear" ] || fm_control_backend_supports_key "$BACKEND" "$clear" \
     || die "harness $HARNESS needs $clear to clear its composer after an interrupt, which the $BACKEND backend cannot deliver; refusing to leave the cancelled prompt where the next submitted line would concatenate onto it"
   if [ "$VERB:$HARNESS" = interrupt:claude ]; then
-    screen=$(claude_exit_screen_state '' 5000)
+    screen=$(fm_backend_guarded_composer_state "$BACKEND" "$T" "$LABEL" '' claude 5000 automatic)
     case "$screen" in
       empty) ;;
       exit-confirm) die "interrupt-refused $ID: Claude is showing its background-tasks exit confirmation" ;;

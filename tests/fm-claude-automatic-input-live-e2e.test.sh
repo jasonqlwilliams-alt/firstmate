@@ -65,7 +65,7 @@ fm_backend_source tmux || live_fail 'could not load the tmux backend'
 wait_for_screen() {  # <verdict> <seconds>
   local i state
   for ((i=0; i<$2; i++)); do
-    state=$(fm_backend_guarded_composer_state tmux "$TARGET" "$WINDOW" '' claude)
+    state=$(fm_backend_guarded_composer_state tmux "$TARGET" "$WINDOW" '' claude '' automatic)
     [ "$state" != "$1" ] || return 0
     sleep 1
   done
@@ -79,7 +79,7 @@ wait_for_transcript_marker() {  # <present|absent>
       seen=absent
       if [[ "$screen" = *"$marker"* ]]; then seen=present; fi
       if [ "$seen" = "$1" ] && [ "$(fm_pane_busy_state "$TARGET" claude)" = idle ] \
-        && [ "$(fm_backend_guarded_composer_state tmux "$TARGET" "$WINDOW" '' claude)" = empty ]; then
+        && [ "$(fm_backend_guarded_composer_state tmux "$TARGET" "$WINDOW" '' claude '' automatic)" = empty ]; then
         return 0
       fi
     fi

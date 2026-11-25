@@ -327,7 +327,7 @@ _fm_task_inbox_ring() {
   if ! line=$(fm_task_inbox_doorbell_line "$rec"); then
     return 2
   fi
-  screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" '' "$harness" 2>/dev/null) \
+  screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" '' "$harness" '' automatic 2>/dev/null) \
     || screen=unknown
   case "$screen" in
     empty) ;;
@@ -342,7 +342,7 @@ _fm_task_inbox_ring() {
   # Reread before Enter in case the screen changed during the literal send.
   while :; do
     sleep 0.3
-    screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" "$line" "$harness" 2>/dev/null) \
+    screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" "$line" "$harness" '' automatic 2>/dev/null) \
       || screen=unknown
     case "$screen" in
       update-picker) return 4 ;;

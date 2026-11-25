@@ -260,41 +260,43 @@ fm_pane_is_busy() {  # <target> [harness]
 # transition evidence could mark an undelivered message delivered.
 fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle]
   local target=$1 retries=$2 sleep_s=$3 baseline_idle=${4:-} i=0 j state busy_state
+  local enter_sent=0
   while :; do
-    tmux send-keys -t "$target" Enter 2>/dev/null || true
+    fm_composer_submit_check_input "$target" pending "$enter_sent" || return 0
+    if tmux send-keys -t "$target" Enter 2>/dev/null; then enter_sent=1; fi
     sleep "$sleep_s"
-    state=$(fm_tmux_composer_state "$target")
+    state=$(fm_composer_submit_state "$target" fm_tmux_composer_state)
     case "$state" in
       pending|pending-unproven) ;;
       unknown)
         if [ "$baseline_idle" = 1 ]; then
           j=0
           while [ "$j" -lt "$retries" ]; do
-            if fm_pane_is_busy "$target"; then
-              printf 'empty'
+            if fm_pane_is_busy "$target" "${fm_submit_claude_backend:+claude}"; then
+              fm_composer_submit_result empty "$enter_sent"
               return 0
             fi
             j=$((j + 1))
             [ "$j" -ge "$retries" ] || sleep "$sleep_s"
           done
         fi
-        printf 'unknown'
+        fm_composer_submit_result unknown "$enter_sent"
         return 0
         ;;
-      *) printf '%s' "$state"; return 0 ;;
+      *) fm_composer_submit_result "$state" "$enter_sent"; return 0 ;;
     esac
     i=$((i + 1))
     [ "$i" -lt "$retries" ] || break
   done
   if [ "$state" != pending ]; then
-    printf '%s' "$state"
+    fm_composer_submit_result "$state" "$enter_sent"
     return 0
   fi
   # Retries exhausted, composer still shows proven pending.
   # Busy conversion is owned by fm_composer_queued_enter_verdict.
   busy_state=idle
-  fm_pane_is_busy "$target" && busy_state=busy
-  fm_composer_queued_enter_verdict "$state" "$busy_state"
+  fm_pane_is_busy "$target" "${fm_submit_claude_backend:+claude}" && busy_state=busy
+  fm_composer_submit_result "$(fm_composer_queued_enter_verdict "$state" "$busy_state")" "$enter_sent"
 }
 
 fm_tmux_submit_core() {  # <target> <text> <retries> <enter-sleep> <settle>
@@ -302,8 +304,9 @@ fm_tmux_submit_core() {  # <target> <text> <retries> <enter-sleep> <settle>
   # The turn-started baseline must predate our own typing: a pane already
   # busy before the text lands can turn "busy" for reasons unrelated to our
   # Enter, so only a clean idle-to-busy transition may confirm a submit.
-  baseline_state=$(fm_pane_busy_state "$target")
+  baseline_state=$(fm_pane_busy_state "$target" "${fm_submit_claude_backend:+claude}")
   [ "$baseline_state" = idle ] && baseline_idle=1
+  fm_composer_submit_check_input "$target" empty || return 0
   tmux send-keys -t "$target" -l "$text" 2>/dev/null || { printf 'send-failed'; return 0; }
   sleep "$settle"
   fm_tmux_submit_enter_core "$target" "$retries" "$sleep_s" "$baseline_idle"

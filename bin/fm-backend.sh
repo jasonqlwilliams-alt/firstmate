@@ -860,9 +860,13 @@ fm_backend_send_literal() {  # <backend> <target> <text> [expected-label]
 # fm_backend_send_text_submit: type text once, then submit and verify,
 # retrying only the submission (never retyping). Echoes the backend's
 # proof-carrying verdict; callers require exact empty for confirmed delivery.
-fm_backend_send_text_submit() {  # <backend> <target> <text> <retries> <enter-sleep> <settle> [expected-label]
+# A caller holding the Claude lifecycle lock may opt into the automatic input
+# guard. Its context is scoped to this call and consumed by the submit cores.
+fm_backend_send_text_submit() {  # <backend> <target> <text> <retries> <enter-sleep> <settle> [expected-label] [claude]
   local backend=$1
   shift
+  local fm_submit_claude_backend='' fm_submit_label=${6:-} fm_submit_text=$2
+  [ "${7:-}" != claude ] || fm_submit_claude_backend=$backend
   fm_backend_source "$backend" || return 1
   case "$backend" in
     tmux) fm_backend_tmux_send_text_submit "$@" ;;
@@ -1020,15 +1024,17 @@ fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
 # into the snapshot's capability facts as harness=<name>, so the classifier
 # can apply that harness's own placeholder rule (bin/fm-composer-lib.sh
 # "ROVO PLACEHOLDER CHIP").
+# [automatic] requires the complete Claude composer frame for automatic input.
 # Callers include the steering-inbox doorbell, Codex and Claude exit, and
 # the second-mate restart's local and remote screen observations.
-fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [remaining-ms]
+fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [remaining-ms] [automatic]
   local limit_ms=${6:-} screen rc
+  set -- "$1" "$2" "${3:-}" "${4:-}" "${5:-}" "${7:-}"
   if [ -z "$limit_ms" ]; then
     _fm_backend_guarded_composer_state "$@"
     return
   fi
-  if screen=$(fm_backend_run_timed "$limit_ms" _fm_backend_guarded_composer_state "${@:1:5}"); then
+  if screen=$(fm_backend_run_timed "$limit_ms" _fm_backend_guarded_composer_state "$@"); then
     printf '%s' "${screen:-unknown}"
   else
     rc=$?
@@ -1042,7 +1048,7 @@ fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [ex
 
 _fm_backend_guarded_composer_state() {
   local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} picker verdict kv styled=0
-  local capture=
+  local mode=${6:-} capture=
   if [ "$harness" = claude ]; then
     capture=visible
     if [ "$backend" = tmux ]; then
@@ -1070,17 +1076,23 @@ _fm_backend_guarded_composer_state() {
   picker=$(fm_composer_update_picker_scan "$FM_COMPOSER_SNAPSHOT_CAPS" \
     "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR" "$expected")
   [ "$picker" != active ] || { printf 'update-picker'; return 0; }
-  if [ "$harness" = claude ] && ! fm_composer_is_claude_frame \
-    "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR"; then
-    if [ "$picker" = below ]; then printf 'update-picker'; else printf 'unknown'; fi
-    return 0
-  fi
   if [ "$harness" = codex ] && [ "$picker" != below ] \
      && fm_composer_codex_signin_screen "$FM_COMPOSER_SNAPSHOT_SCREEN"; then
     printf 'sign-in'
     return 0
   fi
-  verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target")
+  if [ "$harness:$mode" = claude:automatic ]; then
+    if ! fm_composer_is_claude_frame "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR"; then
+      if [ "$picker" = below ]; then printf 'update-picker'; else printf 'unknown'; fi
+      return 0
+    fi
+    # The frame already locates the composer. Classify its full contents,
+    # including rows below the cursor that a cursor-anchored read would miss.
+    verdict=$(fm_composer_classify_screen "$FM_COMPOSER_SNAPSHOT_CAPS" \
+      "$FM_COMPOSER_SNAPSHOT_SCREEN" '' probe-absent)
+  else
+    verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target")
+  fi
   if [ "$verdict" = unknown ] && [ -n "$expected" ]; then
     while IFS= read -r kv; do
       [ "$kv" != styled=1 ] || styled=1

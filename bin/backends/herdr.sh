@@ -3438,6 +3438,7 @@ fm_backend_herdr_send_text_submit() {  # <target> <text> <retries> <enter-sleep>
   local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 i=0 verdict baseline confirm_sleep
   local raw_status footer_baseline='' allow_rendered=0 enter_sent=0
   fm_backend_herdr_parse_target "$target" || { printf 'unknown'; return 0; }
+  fm_composer_submit_check_input "$target" empty || return 0
   fm_backend_herdr_send_literal "$target" "$text" || { printf 'send-failed'; return 0; }
   sleep "$settle"
   raw_status=$(fm_backend_herdr_agent_status_raw "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE") \
@@ -3449,9 +3450,10 @@ fm_backend_herdr_send_text_submit() {  # <target> <text> <retries> <enter-sleep>
   if [ "$baseline" = idle ]; then
     allow_rendered=1
   else
-    footer_baseline=$(fm_backend_herdr_rendered_busy_state "$target")
+    footer_baseline=$(fm_backend_herdr_rendered_busy_state "$target" "${fm_submit_claude_backend:+claude}")
   fi
   while :; do
+    fm_composer_submit_check_input "$target" pending "$enter_sent" || return 0
     if fm_backend_herdr_send_key "$target" Enter; then
       enter_sent=1
     elif [ "$enter_sent" -eq 0 ]; then
@@ -3468,28 +3470,29 @@ fm_backend_herdr_send_text_submit() {  # <target> <text> <retries> <enter-sleep>
         "$confirm_sleep" "$FM_BACKEND_HERDR_SUBMIT_POLLS")
       case "$verdict" in
         busy) printf 'empty'; return 0 ;;
-        unknown) printf 'unknown'; return 0 ;;
+        unknown) fm_composer_submit_result unknown "$enter_sent"; return 0 ;;
       esac
       # Native stayed idle. Composer empty is positive delivery (a landed
       # Claude turn that never flipped agent_status). Proven pending retries.
-      verdict=$(fm_backend_herdr_composer_state "$target")
+      verdict=$(fm_composer_submit_state "$target" fm_backend_herdr_composer_state)
       case "$verdict" in
         empty) printf 'empty'; return 0 ;;
         pending|pending-unproven) ;;
-        *) printf '%s' "$verdict"; return 0 ;;
+        *) fm_composer_submit_result "$verdict" "$enter_sent"; return 0 ;;
       esac
     else
       sleep "$sleep_s"
-      verdict=$(fm_backend_herdr_composer_state "$target")
+      verdict=$(fm_composer_submit_state "$target" fm_backend_herdr_composer_state)
       if [ "$verdict" = pending ] && [ "$raw_status" != working ] \
         && [ "$footer_baseline" = idle ] \
-        && [ "$(fm_backend_herdr_rendered_busy_state "$target")" = busy ]; then
+        && [ "$(fm_backend_herdr_rendered_busy_state "$target" "${fm_submit_claude_backend:+claude}")" = busy ]; then
         verdict=busy
       fi
       case "$verdict" in
         busy) printf 'empty'; return 0 ;;
         empty) printf 'empty'; return 0 ;;
-        unknown) printf 'unknown'; return 0 ;;
+        pending|pending-unproven) ;;
+        *) fm_composer_submit_result "$verdict" "$enter_sent"; return 0 ;;
       esac
     fi
     i=$((i + 1))

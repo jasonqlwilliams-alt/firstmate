@@ -85,6 +85,9 @@ case "${1:-}" in
   capture-pane)
     case "${FM_FAKE_CLAUDE_CAPTURE:-}" in
       unreadable) exit 1 ;;
+      multiline-draft)
+        printf '────────────────────────\n❯ \n  draft on the second row\n────────────────────────\n'
+        exit 0 ;;
       wrong-text)
         if [ -s "$FM_SEND_LOG.pending" ]; then
           printf '────────────────────────\n❯ unrelated text\n────────────────────────\n'
@@ -264,6 +267,11 @@ test_claude_automatic_input_refuses_unproven_composers() {
   near="$dir/choice-two.screen"
   sed -e 's/❯ 1\. Exit/  1. Exit/' -e 's/    2\. Move/  ❯ 2. Move/' "$exact" > "$near"
   assert_contains "$(cat "$near")" '❯ 2. Move to background and exit' 'the near miss must render choice 2 as selected'
+
+  run_send "$dir" "$err" FM_FAKE_CLAUDE_CAPTURE=multiline-draft -- t1 'queue with a draft' \
+    || fail 'a multiline draft should preserve durable delivery'
+  assert_contains "$(cat "$err")" 'blocked the doorbell' 'a blank cursor row hid a draft inside the Claude frame'
+  [ ! -s "$log" ] && [ ! -s "$log.keys" ] || fail 'a multiline draft received terminal input'
 
   for mode in before unreadable shell; do
     for screen in "$exact" "$near"; do

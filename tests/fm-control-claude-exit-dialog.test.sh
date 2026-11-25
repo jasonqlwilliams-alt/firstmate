@@ -411,6 +411,10 @@ cat > "$TMP_ROOT/bin/herdr" <<'SH'
 set -u
 phase=$(cat "$FM_DIALOG_CASE/phase")
 composer() {
+  if [ "$FM_DIALOG_MODE" = retry ]; then
+    printf '❯ %s\n' "${1:-}"
+    return
+  fi
   printf '────────────────────────\n❯ %s\n────────────────────────\n' "${1:-}"
 }
 case "$1 $2" in
@@ -479,7 +483,7 @@ case "$1 $2" in
         )
         ;;
       typed|retry) composer /exit ;;
-      doorbell-typed|submit-typed|submit-retry) composer "$(head -n 1 "$FM_DIALOG_CASE/input")" ;;
+      doorbell-typed|submit-typed|submit-retry|submit-retry-once) composer "$(head -n 1 "$FM_DIALOG_CASE/input")" ;;
       submit-working) printf 'Redrawing viewport\n' ;;
       slow-stop)
         printf 'read\n' >> "$FM_DIALOG_CASE/reads"
@@ -514,8 +518,10 @@ case "$1 $2" in
     [ "$4" = enter ] || exit 0
     case "$phase:$FM_DIALOG_MODE" in
       submit-typed:submit-native) printf 'submit-working\n' ;;
-      submit-typed:submit-retry-failed) printf 'submit-retry\n' ;;
-      submit-retry:submit-retry-failed|submit-typed:submit-first-failed) printf '%s\n' "$phase"; exit 1 ;;
+      submit-typed:submit-retry-success) printf 'submit-retry\n' ;;
+      submit-retry:submit-retry-success) printf 'submit-retry-once\n'; exit 1 ;;
+      submit-retry-once:submit-retry-success) printf 'submit-working\n' ;;
+      submit-typed:submit-first-failed) printf '%s\n' "$phase"; exit 1 ;;
       typed:retry|typed:slow-liveness-retry) printf 'retry\n' ;;
       typed:retry-stalled) printf 'retry\n' ;;
       retry:retry-stalled) sleep 6; : > "$FM_DIALOG_CASE/retry-completed"; printf 'stopped\n' ;;
@@ -675,7 +681,7 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-live
 done
 pass 'styled Herdr exit retries only a proven pending command, and exit and doorbell send no key to the dialog'
 
-for mode in submit-native submit-retry-failed submit-first-failed; do
+for mode in submit-native submit-retry-success submit-first-failed; do
   export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/herdr-$mode"
   mkdir -p "$FM_DIALOG_CASE/state"
   cp "$meta" "$FM_DIALOG_CASE/state/exitdialog.meta"
@@ -694,10 +700,11 @@ for mode in submit-native submit-retry-failed submit-first-failed; do
       [ "$(grep -c '^enter$' "$FM_DIALOG_CASE/input")" -eq 1 ] || fail 'a confirmed submit should send one Enter'
       grep -q '^delivered_epoch=[0-9]' "$reply" || fail 'the native acknowledgment did not commit reply delivery'
       ;;
-    submit-retry-failed)
-      expect_code 3 "$rc" "a failed Enter retry should preserve unconfirmed delivery: $out"
-      [ "$(grep -c '^enter$' "$FM_DIALOG_CASE/input")" -eq 2 ] || fail 'the fixture did not receive the failed retry'
-      assert_present "$reply" 'a failed retry discarded the original reply expectation'
+    submit-retry-success)
+      expect_code 0 "$rc" "a later Enter should land after a swallowed Enter and a failed retry: $out"
+      [ "$(wc -l < "$FM_DIALOG_CASE/input")" -eq 4 ] && \
+        [ "$(grep -c '^enter$' "$FM_DIALOG_CASE/input")" -eq 3 ] || fail 'the submit did not type once and retry Enter twice'
+      grep -q '^delivered_epoch=[0-9]' "$reply" || fail 'the successful retry did not commit reply delivery'
       ;;
     submit-first-failed)
       expect_code 1 "$rc" "a failed first Enter should report delivery failure: $out"

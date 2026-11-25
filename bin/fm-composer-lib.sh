@@ -1503,6 +1503,45 @@ EOF
   fi
 }
 
+# Backend submit cores share these checks when the dispatcher has opted into
+# automatic Claude input. Other submits continue using their adapter's reads.
+fm_composer_submit_state() {  # <target> <fallback-state-fn> [expected-label]
+  if [ -n "${fm_submit_claude_backend:-}" ]; then
+    fm_backend_guarded_composer_state "$fm_submit_claude_backend" "$1" \
+      "${fm_submit_label:-}" "${fm_submit_text:-}" claude '' automatic
+  else
+    "$2" "$1" "${3:-}"
+  fi
+}
+
+fm_composer_submit_check_input() {  # <target> <empty|pending> [enter-sent]
+  local expected='' state
+  [ -n "${fm_submit_claude_backend:-}" ] || return 0
+  [ "$2" != pending ] || expected=${fm_submit_text:-}
+  state=$(fm_backend_guarded_composer_state "$fm_submit_claude_backend" "$1" \
+    "${fm_submit_label:-}" "$expected" claude '' automatic) || state=unknown
+  [ "$state" != "$2" ] || return 0
+  case "$2:${3:-0}" in
+    empty:*) printf 'input-refused' ;;
+    pending:0) printf 'enter-withheld' ;;
+    *) printf 'unconfirmed:%s' "$state" ;;
+  esac
+  return 1
+}
+
+fm_composer_submit_result() {  # <verdict> <enter-sent>
+  if [ -z "${fm_submit_claude_backend:-}" ]; then
+    printf '%s' "$1"
+  elif [ "$2" = 0 ]; then
+    printf 'send-failed'
+  else
+    case "$1" in
+      empty|pending) printf '%s' "$1" ;;
+      *) printf 'unconfirmed:%s' "$1" ;;
+    esac
+  fi
+}
+
 # fm_composer_submit_retry_core: the ONE verify-and-retry-Enter submit loop
 # for the cursor-less backends (cmux, orca, zellij), parameterised by the
 # adapter's send-key and composer-state functions. The caller has already
@@ -1516,16 +1555,18 @@ EOF
 # fm_composer_queued_enter_verdict; no shape knowledge lives in any loop.
 fm_composer_submit_retry_core() {  # <send-key-fn> <state-fn> <target> <retries> <enter-sleep> [expected-label]
   local send_key_fn=$1 state_fn=$2 target=$3 retries=$4 sleep_s=$5 expected_label=${6:-} i=0 state
+  local enter_sent=0
   while :; do
-    "$send_key_fn" "$target" Enter "$expected_label" || true
+    fm_composer_submit_check_input "$target" pending "$enter_sent" || return 0
+    if "$send_key_fn" "$target" Enter "$expected_label"; then enter_sent=1; fi
     sleep "$sleep_s"
-    state=$("$state_fn" "$target" "$expected_label")
+    state=$(fm_composer_submit_state "$target" "$state_fn" "$expected_label")
     case "$state" in
       pending|pending-unproven) ;;
-      *) printf '%s' "$state"; return 0 ;;
+      *) fm_composer_submit_result "$state" "$enter_sent"; return 0 ;;
     esac
     i=$((i + 1))
-    [ "$i" -lt "$retries" ] || { printf '%s' "$state"; return 0; }
+    [ "$i" -lt "$retries" ] || { fm_composer_submit_result "$state" "$enter_sent"; return 0; }
   done
 }
 

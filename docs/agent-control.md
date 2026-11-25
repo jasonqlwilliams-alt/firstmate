@@ -74,7 +74,7 @@ Stop checks, further screen reads, and retries after the first Enter share the `
 If the screen cannot be read in time, the restart may report a timeout without naming the dialog.
 
 The Claude doorbell and native command send hold the task's lifecycle lock from the first screen read through submission, including on watcher re-rings and the remote secondmate's host.
-They require a readable, proven-empty composer to type and a capture of the composer holding the exact line before each Enter.
+They require a readable Claude composer frame with every input row empty before typing and a capture of that frame holding the exact line before each Enter.
 The standalone Claude recovery interrupt requires a readable, proven-empty composer under the same lock before sending Escape.
 An explicit operator key send remains available to act on a dialog.
 The [Claude adapter reference](../.agents/skills/harness-adapters/references/harness/claude.md#background-tasks-exit-confirmation) owns the screen layout and recognition limits.
