@@ -1055,7 +1055,7 @@ fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [ex
 
 _fm_backend_guarded_composer_state() {
   local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} picker verdict styled=0
-  local mode=${6:-} capture= proof= anchor
+  local mode=${6:-} capture='' proof='' anchor
   if [ "$harness" = claude ]; then
     capture=visible
     if [ "$backend" = tmux ]; then
