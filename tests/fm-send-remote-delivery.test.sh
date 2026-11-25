@@ -62,32 +62,60 @@ make_stubs() {  # <dir> -> echoes fakebin dir
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+claude_submit=${FM_FAKE_CLAUDE_SUBMIT:-}
 case "${1:-}" in
   send-keys)
     shift
     literal=0
+    target=
     while [ $# -gt 0 ]; do
       case "$1" in
-        -t) shift 2 ;;
+        -t) target=$2; shift 2 ;;
         -l) literal=1; shift ;;
         *) break ;;
       esac
     done
+    if [ -n "$claude_submit" ]; then
+      case "$target" in sess:fm-lsm|%1) ;; *) exit 1 ;; esac
+    fi
     if [ "$literal" = 1 ]; then
       printf '%s' "${1:-}" >> "$FM_SEND_LOG"
+    elif [ -n "$claude_submit" ]; then
+      printf '%s\n' "${1:-}" >> "$FM_SEND_LOG.keys"
     fi
     exit 0 ;;
   display-message)
     for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
+    if [ -n "$claude_submit" ]; then
+      case " $* " in
+        *' -t %1 '*|*' -t sess:fm-lsm '*) ;;
+        *) exit 1 ;;
+      esac
+      composer=$(cat "$FM_SEND_LOG")
+      if [ "$claude_submit" = cleared ] && [ -s "$FM_SEND_LOG.keys" ]; then
+        if [ -e "$FM_SEND_LOG.redraw" ]; then
+          composer=
+        else
+          : > "$FM_SEND_LOG.redraw"
+        fi
+      fi
+      printf '────────────────────────\n❯ %s\n────────────────────────\n' "$composer"
+      exit 0
+    fi
     if [ "${FM_FAKE_TMUX_PENDING:-0}" = 1 ]; then
       printf '╭────────────╮\n│ > steer    │\n╰────────────╯\n'
     else
       printf '╭────╮\n│    │\n╰────╯\n'
     fi
     exit 0 ;;
-  list-windows) exit 0 ;;
+  list-windows)
+    if [ -n "$claude_submit" ] && [ "${2:-} ${3:-}" = '-t =sess' ] \
+      && [ "${*: -1}" = $'#{window_name}\t#{pane_id}' ]; then
+      printf 'fm-lsm\t%%1\n'
+    fi
+    exit 0 ;;
 esac
 exit 0
 SH
@@ -707,23 +735,47 @@ test_remote_send_budget_bounds_busy_lane() {
   pass "fm-send remote: the remote leg is budget-bounded and stays idempotent across the bound"
 }
 
-test_local_secondmate_pending_keeps_expectation_armed() {
-  local dir fb log home rc rec corr
-  dir="$TMP_ROOT/local-pending-expectation"; mkdir -p "$dir"
+test_local_secondmate_submit() {
+  local mode=$1 dir fb log home rc rec corr command='/audit the ledger'
+  dir="$TMP_ROOT/local-claude-$mode"; mkdir -p "$dir"
   fb=$(make_stubs "$dir"); log="$dir/send.log"
-  home=$(setup_home local-pending-expectation)
+  home=$(setup_home "local-claude-$mode")
   fm_write_meta "$home/state/lsm.meta" \
     "window=sess:fm-lsm" "harness=claude" "kind=secondmate" "mode=secondmate" "home=$home/sm"
 
   # A harness-native slash invocation keeps the typed plane for a LOCAL marked
   # secondmate target, so this pins the kept armed-expectation semantics there.
   : > "$log"
+  if [ "$mode" = crlf ]; then
+    printf '%s\r\n' "$command" > "$dir/command"
+    IFS= read -r command < "$dir/command"
+  fi
   rc=0
-  env PATH="$fb:$PATH" FM_FAKE_TMUX_PENDING=1 \
+  env PATH="$fb:$PATH" FM_FAKE_CLAUDE_SUBMIT="$mode" \
     FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_SEND_LOG="$log" FM_SEND_SETTLE=0 \
-    "$SEND" lsm "/audit the ledger" >/dev/null 2>&1 || rc=$?
-  expect_code 3 "$rc" "an unconfirmed local secondmate submit must exit delivered-unconfirmed"
+    "$SEND" lsm "$command" >"$dir/out" 2>&1 || rc=$?
   rec=$(pending_record "$home")
+  case "$mode" in
+    crlf)
+      expect_code 1 "$rc" "a CRLF slash command must be refused before typing: $(cat "$dir/out")"
+      assert_contains "$(cat "$dir/out")" 'text not typed' 'the refusal must report that typing was blocked'
+      [ ! -s "$log" ] && [ ! -s "$log.keys" ] || fail 'the CRLF command sent terminal input'
+      [ -z "$rec" ] || fail 'the refused command retained a reply expectation'
+      pass 'fm-send local: a CRLF Claude command is refused before any terminal write'
+      return
+      ;;
+    cleared)
+      expect_code 0 "$rc" "composer clearance before a retry must confirm delivery: $(cat "$dir/out")"
+      [ "$(cat "$log.keys")" = Enter ] || fail 'the cleared composer received another key'
+      [ -n "$rec" ] && [ -n "$(fm_pending_reply_get "$rec" delivered_epoch)" ] \
+        || fail 'the cleared composer did not commit reply delivery'
+      pass 'fm-send local: clearance after one Enter confirms delivery without another key'
+      return
+      ;;
+  esac
+  expect_code 3 "$rc" "an unconfirmed local secondmate submit must exit delivered-unconfirmed"
+  assert_contains "$(cat "$log")" "$command" 'the slash command must reach the composer'
+  grep -Fxq 'Enter' "$log.keys" || fail 'the unconfirmed submit must have sent Enter'
   [ -n "$rec" ] \
     || fail "the pending-reply expectation must survive an unconfirmed local secondmate send"
   [ "$(fm_pending_reply_get "$rec" phase)" = awaiting_report ] \
@@ -800,6 +852,8 @@ test_remote_transport_loss_preserves_expectation
 test_remote_send_budget_bounds_busy_lane
 test_local_pending_reports_delivered_unconfirmed
 test_local_pending_does_not_close_resolve_key
-test_local_secondmate_pending_keeps_expectation_armed
+test_local_secondmate_submit pending
+test_local_secondmate_submit cleared
+test_local_secondmate_submit crlf
 
 echo "all fm-send-remote-delivery tests passed"

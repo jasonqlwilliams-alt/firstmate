@@ -66,7 +66,7 @@ SH
 chmod +x "$SHIM_DIR/tmux"
 PATH="$SHIM_DIR:$PATH"
 # shellcheck source=/dev/null
-. "$ROOT/bin/fm-backend.sh"
+. "$ROOT/bin/fm-tmux-lib.sh"
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-task-inbox-lib.sh"
 
@@ -102,7 +102,11 @@ launch_cmd() {  # <name>
 wait_ready() {  # <window> <harness>
   local win=$1 harness=$2 i=0 budget=60 verdict dismissed=0 screen
   while [ "$i" -lt "$budget" ]; do
-    verdict=$(fm_backend_guarded_composer_state tmux "$SESSION:$win" "$win" '' "$harness")
+    if [ "$harness" = claude ]; then
+      verdict=$(fm_backend_guarded_composer_state tmux "$SESSION:$win" "$win" '' claude '' automatic)
+    else
+      verdict=$(fm_tmux_composer_state "$SESSION:$win")
+    fi
     [ "$verdict" = empty ] && return 0
     i=$((i + 1))
     # Dismiss one non-trust startup modal (update prompts), as the composer

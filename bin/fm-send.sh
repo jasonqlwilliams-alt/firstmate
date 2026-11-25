@@ -1074,7 +1074,7 @@ else
       fm_send_known_undelivered_cleanup || \
         echo "error: known-undelivered pending-reply state could not be reset for $TARGET_TASK_ID" >&2
       if [ "$verdict" = input-refused ]; then
-        echo "error: text not typed to $T (Claude input requires an empty composer and the task's lifecycle lock)" >&2
+        echo "error: text not typed to $T (Claude input requires control-free text, an empty composer, and the task's lifecycle lock)" >&2
       else
         echo "error: text typed to $T but Enter was withheld (Claude's composer did not prove it holds the text); inspect the pane before retrying" >&2
       fi

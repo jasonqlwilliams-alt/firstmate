@@ -30,6 +30,10 @@ cleanup() {
 trap cleanup EXIT
 
 export FM_HOME="$LAB/home" CLAUDE_CONFIG_DIR="$LAB/claude-config"
+inbox="$FM_HOME/state/$TASK.inbox"
+printf -v list_inbox 'ls %q' "$inbox"
+printf -v read_record 'cat %q' "$inbox/001.msg"
+printf -v move_record 'mv %q %q' "$inbox/001.msg" "$inbox/handled/"
 umask 077
 mkdir -p "$FM_HOME/state" "$CLAUDE_CONFIG_DIR" "$LAB/bin" "$LAB/user"
 fm_git_worktree "$LAB/project" "$WORKTREE" claude-input \
@@ -53,7 +57,8 @@ unset TMUX TMUX_PANE
     CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
   tmux new-session -d -s "$SESSION" -n "$WINDOW" -x 160 -y 45 -c "$WORKTREE" \
     env "CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR" CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false \
-    "$REAL_CLAUDE" --model haiku --tools Bash --allowedTools 'Bash(sleep 180)'
+    "$REAL_CLAUDE" --model haiku --tools Bash --allowedTools 'Bash(sleep 180)' \
+    "Bash($list_inbox)" "Bash($read_record)" "Bash($move_record)"
 ) \
   || live_fail 'could not launch the isolated tmux session'
 fm_write_meta "$FM_HOME/state/$TASK.meta" 'backend=tmux' "window=$TARGET" 'harness=claude' \
@@ -98,13 +103,19 @@ FM_SEND_SETTLE=0 "$ROOT/bin/fm-send.sh" "$TASK" /clear \
 wait_for_transcript_marker absent
 
 "$ROOT/bin/fm-send.sh" "$TASK" \
-  'Run exactly the Bash command sleep 180 with run_in_background set to true. Leave it running, reply BACKGROUND_READY, and acknowledge this instruction by moving its record as directed.' \
+  "Use these exact Bash commands to handle the doorbell. List the inbox and read this record:
+$list_inbox
+$read_record
+Run the following command with run_in_background set to true and leave it running:
+sleep 180
+Then acknowledge this record with the following command and reply BACKGROUND_READY:
+$move_record" \
   || live_fail 'the doorbell could not enqueue the background-task instruction'
 for ((i=0; i<90; i++)); do
-  [ ! -f "$FM_HOME/state/$TASK.inbox/handled/001.msg" ] || break
+  [ ! -f "$inbox/handled/001.msg" ] || break
   sleep 1
 done
-[ -f "$FM_HOME/state/$TASK.inbox/handled/001.msg" ] || live_fail 'the doorbell did not reach the real worker'
+[ -f "$inbox/handled/001.msg" ] || live_fail 'the doorbell did not reach the real worker'
 wait_for_screen empty 30
 
 # Open the modal deliberately inside the private pane. Keep the confirmation

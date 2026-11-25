@@ -866,7 +866,12 @@ fm_backend_send_text_submit() {  # <backend> <target> <text> <retries> <enter-sl
   local backend=$1
   shift
   local fm_submit_claude_backend='' fm_submit_label=${6:-} fm_submit_text=$2
-  [ "${7:-}" != claude ] || fm_submit_claude_backend=$backend
+  if [ "${7:-}" = claude ]; then
+    case "$fm_submit_text" in
+      *[[:cntrl:]]*) printf 'input-refused'; return 0 ;;
+    esac
+    fm_submit_claude_backend=$backend
+  fi
   fm_backend_source "$backend" || return 1
   case "$backend" in
     tmux) fm_backend_tmux_send_text_submit "$@" ;;

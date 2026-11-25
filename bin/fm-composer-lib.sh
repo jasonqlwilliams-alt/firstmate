@@ -1521,9 +1521,10 @@ fm_composer_submit_check_input() {  # <target> <empty|pending> [enter-sent]
   state=$(fm_backend_guarded_composer_state "$fm_submit_claude_backend" "$1" \
     "${fm_submit_label:-}" "$expected" claude '' automatic) || state=unknown
   [ "$state" != "$2" ] || return 0
-  case "$2:${3:-0}" in
+  case "$2:${3:-0}:$state" in
     empty:*) printf 'input-refused' ;;
-    pending:0) printf 'enter-withheld' ;;
+    pending:0:*) printf 'enter-withheld' ;;
+    pending:1:empty) printf 'empty' ;;
     *) printf 'unconfirmed:%s' "$state" ;;
   esac
   return 1

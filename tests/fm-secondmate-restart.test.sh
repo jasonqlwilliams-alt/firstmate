@@ -48,14 +48,25 @@ make_stub() {  # <case-dir>
 #!/usr/bin/env bash
 set -u
 D=$FM_FAKE_DIR
+target=
+prev=
+for a in "$@"; do
+  if [ "$prev" = -t ]; then target=$a; break; fi
+  prev=$a
+done
+case "$target" in
+  %*)
+    target=$(awk -v pane="$target" '"%" NR == pane { print "fmses:" $0 }' "$D/windows")
+    [ -n "$target" ] || exit 1
+    ;;
+esac
 case "${1:-}" in
   send-keys)
     shift
     literal=0
-    target=
     while [ $# -gt 0 ]; do
       case "$1" in
-        -t) target=$2; shift 2 ;;
+        -t) shift 2 ;;
         -l) literal=1; shift ;;
         *) break ;;
       esac
@@ -99,10 +110,7 @@ case "${1:-}" in
     esac
     exit 0 ;;
   display-message)
-    target=
-    prev=
     for a in "$@"; do
-      if [ "$prev" = -t ]; then target=$a; fi
       case "$a" in
         *cursor_y*) printf '1\n'; exit 0 ;;
         *pane_current_command*)
@@ -110,7 +118,6 @@ case "${1:-}" in
           printf '\n'; exit 0 ;;
         *pane_current_path*) cat "$D/cwd"; printf '\n'; exit 0 ;;
       esac
-      prev=$a
     done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
@@ -118,7 +125,14 @@ case "${1:-}" in
       /bin/sleep 8
       cat "$FM_FAKE_LOCAL_EXIT_DIALOG"
     else
-      printf '> \n'
+      command=$(cat "$D/command.$target" 2>/dev/null || cat "$D/command")
+      if [ "$command" = claude ]; then
+        text=
+        if [ -f "$D/composer.$target" ]; then text=$(cat "$D/composer.$target"); fi
+        printf '────────────────────────\n❯ %s\n────────────────────────\n' "$text"
+      else
+        printf '> \n'
+      fi
     fi
     exit 0 ;;
   list-windows)
