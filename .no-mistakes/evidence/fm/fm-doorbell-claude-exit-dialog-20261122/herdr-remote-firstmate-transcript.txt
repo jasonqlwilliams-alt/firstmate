@@ -1,0 +1,61 @@
+Before the repair, this same driver recorded the note on an idle pane, typed the doorbell, then printed 'Enter was withheld'. The real Herdr viewport arrived with CRLF row endings.
+
+Herdr 0.9.5 with private configuration and socket. Host-local remote-control command and synthetic Claude screen.
+
+$ fm-remote-secondmate-control.sh state mate
+exit=0
+alive
+
+$ herdr --session fm-remote pane read w1:p1 --source visible
+exit=0
+  Background work is running
+  The following will stop when you exit:
+
+  shell · Synthetic background timer
+
+    1. Exit and stop tasks
+  ❯ 2. Move to background and exit
+    3. Stay
+
+  Enter to confirm · Esc to cancel
+
+$ fm-remote-secondmate-control.sh send mate 'Remote note with dialog open.'
+exit=0
+notice: the screen or lifecycle lock for fm-remote:w1:p1 prevented typing the doorbell; the steer is durably recorded at {run-worktree}/.fm-gate-live/remote-home/state/parent-route/mate.inbox/001.msg
+
+$ herdr --session fm-remote pane read w1:p1 --source visible
+exit=0
+  Background work is running
+  The following will stop when you exit:
+
+  shell · Synthetic background timer
+
+    1. Exit and stop tasks
+  ❯ 2. Move to background and exit
+    3. Stay
+
+  Enter to confirm · Esc to cancel
+
+001.msg is durable. The terminal received zero bytes.
+
+$ fm-remote-secondmate-control.sh key mate Escape
+exit=0
+
+
+$ fm-remote-secondmate-control.sh send mate 'Remote note during lifecycle action.'
+exit=0
+notice: the screen or lifecycle lock for fm-remote:w1:p1 prevented typing the doorbell; the steer is durably recorded at {run-worktree}/.fm-gate-live/remote-home/state/parent-route/mate.inbox/002.msg
+
+002.msg is durable. The terminal received zero bytes from delivery during the lock.
+
+$ fm-remote-secondmate-control.sh send mate 'Remote note after lifecycle action.'
+exit=0
+
+
+Terminal submissions: [": Firstmate instruction waiting: list '{run-worktree}/.fm-gate-live/remote-home/state/parent-route/mate.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '{run-worktree}/.fm-gate-live/remote-home/state/parent-route/mate.inbox'/handled/."]
+Acknowledged earlier and new records: ['001.msg', '002.msg', '003.msg']
+
+$ herdr --session fm-remote server stop
+exit=0
+
+Private Herdr server after cleanup: not_running. Server child exit=0.
