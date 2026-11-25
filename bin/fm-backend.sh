@@ -1005,7 +1005,9 @@ fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
   # shellcheck disable=SC2016  # Expansion is deliberately deferred to the child shell.
   FM_HOME="$FM_HOME" FM_ROOT="$FM_ROOT" FM_BACKEND_HERDR_ENDPOINT_META="${FM_BACKEND_HERDR_ENDPOINT_META:-}" \
     fm_run_timed --kill "$(fm_timeout_seconds "$limit_ms")" \
-    bash -uc '. "$1" && shift && "$@"' _ "$FM_BACKEND_LIB_DIR/fm-backend.sh" "$@" </dev/null 2>/dev/null
+    bash -uc 'unset fm_submit_claude_backend
+      . "$1" && { [ -z "$2" ] || fm_backend_source "$2"; } && shift 2 && "$@"' \
+    _ "$FM_BACKEND_LIB_DIR/fm-backend.sh" "${fm_submit_claude_backend:-}" "$@" </dev/null 2>/dev/null
 )
 
 # fm_backend_guarded_composer_state: the composer verdict a caller must have
@@ -1034,7 +1036,7 @@ fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
 # Callers include the steering-inbox doorbell, Codex and Claude exit, and
 # the second-mate restart's local and remote screen observations.
 fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [remaining-ms] [automatic]
-  local limit_ms=${6:-} screen rc
+  local limit_ms=${6:-} screen
   if [ -z "$limit_ms" ] && [ "${5:-}:${7:-}" = claude:automatic ]; then
     limit_ms=$FM_COMPOSER_CLAUDE_READ_MS
   fi
@@ -1046,18 +1048,13 @@ fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [ex
   if screen=$(fm_backend_run_timed "$limit_ms" _fm_backend_guarded_composer_state "$@"); then
     printf '%s' "${screen:-unknown}"
   else
-    rc=$?
-    if [ "$rc" -eq 124 ]; then
-      printf 'timeout'
-    else
-      printf 'unknown'
-    fi
+    case "$?" in 124) printf 'timeout' ;; *) printf 'unknown' ;; esac
   fi
 }
 
 _fm_backend_guarded_composer_state() {
   local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} picker verdict styled=0
-  local mode=${6:-} capture= proof=
+  local mode=${6:-} capture= proof= anchor
   if [ "$harness" = claude ]; then
     capture=visible
     if [ "$backend" = tmux ]; then
@@ -1082,18 +1079,21 @@ _fm_backend_guarded_composer_state() {
     ''|*[!a-z0-9-]*) ;;
     *) FM_COMPOSER_SNAPSHOT_CAPS="$FM_COMPOSER_SNAPSHOT_CAPS"$'\n'"harness=$harness" ;;
   esac
-  [ "$harness:$mode" != claude:automatic ] || proof=claude-frame
-  picker=$(fm_composer_update_picker_scan "$FM_COMPOSER_SNAPSHOT_CAPS" \
-    "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR" "$expected" "$proof")
+  anchor=$FM_COMPOSER_SNAPSHOT_CURSOR
+  if [ "$harness:$mode" = claude:automatic ] && fm_composer_is_claude_frame "$FM_COMPOSER_SNAPSHOT_SCREEN" "$anchor"; then
+    proof=claude-frame
+    anchor=$FM_COMPOSER_SELECTED_FIRST
+  fi
+  picker=$(fm_composer_update_picker_scan "$FM_COMPOSER_SNAPSHOT_SCREEN" "$anchor" "$expected")
   [ "$picker" != active ] || { printf 'update-picker'; return 0; }
   if [ "$harness" = codex ] && [ "$picker" != below ] \
      && fm_composer_codex_signin_screen "$FM_COMPOSER_SNAPSHOT_SCREEN"; then
     printf 'sign-in'
     return 0
   fi
-  if [ "$proof" = claude-frame ]; then
-    if ! fm_composer_is_claude_frame "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR"; then
-      if [ "$picker" = below ]; then printf 'update-picker'; else printf 'unknown'; fi
+  if [ "$harness:$mode" = claude:automatic ]; then
+    if [ -z "$proof" ]; then
+      if [ "$picker" = none ]; then printf 'unknown'; else printf 'update-picker'; fi
       return 0
     fi
     # The frame already locates the composer. Classify its full contents,

@@ -3647,6 +3647,10 @@ fm_backend_herdr_classify_submit_agent_status() {  # <raw-agent_status>
 # successful send-text), so re-checking server liveness on every poll would
 # only add latency without adding safety.
 fm_backend_herdr_agent_status_raw() {  # <session> <pane_id>
+  if [ "${fm_submit_claude_backend:-}" = herdr ]; then
+    fm_backend_run_timed "$FM_COMPOSER_CLAUDE_READ_MS" fm_backend_herdr_agent_status_raw "$@"
+    return
+  fi
   local session=$1 pane_id=$2 out binding
   binding=$(fm_backend_herdr_task_identity_state "$session:$pane_id" binding)
   fm_backend_herdr_require_task_identity "$session:$pane_id" "${binding%%:*}" || return 1

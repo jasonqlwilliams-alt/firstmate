@@ -319,9 +319,12 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label] [har
 }
 
 _fm_task_inbox_ring() {
-  local backend=$1 target=$2 rec=$3 label=${4:-} harness=${5:-} line screen i=0 strict=0
+  local backend=$1 target=$2 rec=$3 label=${4:-} harness=${5:-} line screen state i=0 strict=0
+  local -a probe=(fm_backend_agent_state)
   case "$harness" in claude|codex|rovo) strict=1 ;; esac
-  case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
+  [ "$harness" != claude ] || probe=(fm_backend_run_timed "$FM_COMPOSER_CLAUDE_READ_MS" "${probe[@]}")
+  state=$("${probe[@]}" "$backend" "$target" 2>/dev/null) || [ "$harness" != claude ] || return 1
+  case "$state" in
     dead|missing) return 3 ;;
   esac
   if ! line=$(fm_task_inbox_doorbell_line "$rec"); then

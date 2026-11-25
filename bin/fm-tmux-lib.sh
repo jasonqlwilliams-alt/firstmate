@@ -271,7 +271,7 @@ fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle
     state=$(fm_composer_submit_state "$target" fm_tmux_composer_state)
     case "$state" in
       pending|pending-unproven) ;;
-      unknown)
+      unknown|timeout)
         if [ "$baseline_idle" = 1 ]; then
           j=0
           while [ "$j" -lt "$retries" ]; do
@@ -283,7 +283,7 @@ fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle
             [ "$j" -ge "$retries" ] || sleep "$sleep_s"
           done
         fi
-        fm_composer_submit_result unknown "$enter_sent"
+        fm_composer_submit_result "$state" "$enter_sent"
         return 0
         ;;
       *) fm_composer_submit_result "$state" "$enter_sent"; return 0 ;;

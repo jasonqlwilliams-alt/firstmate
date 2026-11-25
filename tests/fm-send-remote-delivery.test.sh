@@ -756,10 +756,8 @@ test_local_secondmate_submit() {
   # secondmate target, so this pins the kept armed-expectation semantics there.
   : > "$log"
   case "$mode" in
-    crlf)
-      printf '%s\r\n' "$command" > "$dir/command"
-      IFS= read -r command < "$dir/command"
-      ;;
+    crlf) command+=$'\r\n' ;;
+    lf) command+=$'\n' ;;
     spinner) command='/audit explain … (12s)'; retries=1 ;;
     wrapped) command=$'/rename New\302\240Title' ;;
   esac
@@ -769,12 +767,12 @@ test_local_secondmate_submit() {
     "$SEND" lsm "$command" >"$dir/out" 2>&1 || rc=$?
   rec=$(pending_record "$home")
   case "$mode" in
-    crlf)
-      expect_code 1 "$rc" "a CRLF slash command must be refused before typing: $(cat "$dir/out")"
+    crlf|lf)
+      expect_code 1 "$rc" "a slash command ending in $mode must be refused before typing: $(cat "$dir/out")"
       assert_contains "$(cat "$dir/out")" 'text not typed' 'the refusal must report that typing was blocked'
-      [ ! -s "$log" ] && [ ! -s "$log.keys" ] || fail 'the CRLF command sent terminal input'
+      [ ! -s "$log" ] && [ ! -s "$log.keys" ] || fail "the $mode command sent terminal input"
       [ -z "$rec" ] || fail 'the refused command retained a reply expectation'
-      pass 'fm-send local: a CRLF Claude command is refused before any terminal write'
+      pass "fm-send local: a Claude command ending in $mode is refused before any terminal write"
       return
       ;;
     cleared|wrapped)
@@ -871,6 +869,7 @@ test_local_pending_does_not_close_resolve_key
 test_local_secondmate_submit pending
 test_local_secondmate_submit cleared
 test_local_secondmate_submit crlf
+test_local_secondmate_submit lf
 test_local_secondmate_submit spinner
 test_local_secondmate_submit wrapped
 

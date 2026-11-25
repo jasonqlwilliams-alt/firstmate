@@ -1492,43 +1492,32 @@ fm_composer_holds_text() {  # <caps> <screen> <text> [claude-frame]
 # of:
 #   none      the picker's rows are not on the screen
 #   active    the picker is the live screen; never type or press Enter
-#   below     cursor capture only: the cursor sits below the key hint; the
-#             live picker parks it on a blank row there, so this is retained
-#             history only when the same snapshot's composer verdict is a
-#             recognized composer (empty, pending, or pending-unproven)
-#   retained  cursorless capture only: what follows the key hint is a proven
-#             empty composer, or holds exactly <expected-text>, so the rows
-#             are stale history above a live composer
+#   below     the supplied row is below the key hint; the same snapshot
+#             still needs a recognized composer verdict
+#   retained  without a supplied row, the screen below the key hint proves
+#             an empty composer or one holding exactly <expected-text>
 # Single owner of this recognition; bin/fm-backend.sh's
 # fm_backend_guarded_composer_state composes it with the adapter's verdict.
-fm_composer_update_picker_scan() {  # <caps> <screen> [cursor_row] [expected-text] [claude-frame]
-  local caps=$1 screen=$2 cy=${3:-} expected=${4:-} cursor=0 kv plain tail before row
+fm_composer_update_picker_scan() {  # <screen> [anchor-row] [expected-text]
+  local screen=$1 anchor=${2:-} expected=${3:-} plain tail before row
   local tail_caps tail_state
-  while IFS= read -r kv; do
-    [ "$kv" != cursor=1 ] || cursor=1
-  done <<EOF
-$caps
-EOF
-  [ "$cursor" = 1 ] || cy=''
   plain=$(printf '%s\n' "$screen" | fm_composer_strip_ansi)
   case "$plain" in
     *'Update now (runs '*'Skip until next version'*'esc skip'*) ;;
     *) printf 'none'; return 0 ;;
   esac
   tail=${plain##*'esc skip'}
-  if [ -n "$cy" ]; then
-    case "$cy" in *[!0-9]*) printf 'active'; return 0 ;; esac
+  if [ -n "$anchor" ]; then
+    case "$anchor" in *[!0-9]*) printf 'active'; return 0 ;; esac
     before=${plain%"$tail"}
     row=$(printf '%s' "$before" | tr -cd '\n' | wc -c)
-    if [ "$cy" -gt "$row" ]; then printf 'below'; else printf 'active'; fi
+    if [ "$anchor" -gt "$row" ]; then printf 'below'; else printf 'active'; fi
     return 0
   fi
   tail_caps=$(printf 'styled=0\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
   tail_state=$(fm_composer_classify_screen "$tail_caps" "$tail" 2>/dev/null) || tail_state=unknown
   if [ "$tail_state" = empty ] \
-     || { [ -n "$expected" ] \
-          && { [ "${5:-}" != claude-frame ] || fm_composer_is_claude_frame "$tail"; } \
-          && fm_composer_holds_text "$tail_caps" "$tail" "$expected" "${5:-}"; }; then
+     || fm_composer_holds_text "$tail_caps" "$tail" "$expected"; then
     printf 'retained'
   else
     printf 'active'
