@@ -1454,6 +1454,8 @@ fm_composer_claude_frame_rows() {  # <screen> <styled>
     content=$(printf '%s\n' "$content" | fm_composer_strip_ansi)
   fi
   while IFS= read -r row; do
+    # Herdr can end captured viewport rows with CRLF.
+    row=${row%$'\r'}
     row=${row#"${row%%[! ]*}"}
     if [ "$first" = 1 ]; then
       case "$row" in ❯*) row=${row#❯} ;; *) return 1 ;; esac

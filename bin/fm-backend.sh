@@ -1014,16 +1014,16 @@ fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
 # before it types into a pane or presses a confirming Enter there. It reads ONE
 # capture, refuses Claude's active exit confirmation or Codex's global-update picker
 # (fm_composer_update_picker_scan in bin/fm-composer-lib.sh; its confirming
-# Enter runs a global `npm install` of Codex), and only then trusts the
-# backend's own composer verdict for that same capture, so a picker that
-# appears between two reads can never borrow an earlier read's verdict.
+# Enter runs a global `npm install` of Codex), and classifies the composer
+# from the same capture so a later picker cannot borrow an earlier verdict.
 # Prints update-picker, or the composer verdict otherwise:
 # empty|pending|pending-unproven|unknown, or sign-in for an explicitly recorded
 # Codex authentication screen (a stop-only verdict), or exit-confirm for an
 # explicitly recorded Claude pane showing the background-tasks exit
 # confirmation (fm_composer_claude_exit_confirm_screen in bin/fm-composer-lib.sh;
 # a stop-only verdict). An unreadable capture is unknown, and a read that
-# exceeds an explicitly supplied deadline returns timeout.
+# exceeds its deadline returns timeout. Automatic Claude reads use
+# FM_COMPOSER_CLAUDE_READ_MS unless the caller supplies a deadline.
 # <expected-pending> is the exact text the caller just typed: on a
 # plain (styled=0) capture, where a glyph row with trailing text reads unknown,
 # a composer holding exactly that text reads pending, and on a cursorless
@@ -1033,8 +1033,9 @@ fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
 # can apply that harness's own placeholder rule (bin/fm-composer-lib.sh
 # "ROVO PLACEHOLDER CHIP").
 # [automatic] requires the complete Claude composer frame for automatic input.
-# Callers include the steering-inbox doorbell, Codex and Claude exit, and
-# the second-mate restart's local and remote screen observations.
+# Callers include the steering-inbox doorbell, Claude native submission and
+# standalone interrupt, Codex and Claude exit, and the second-mate restart's
+# local and remote screen observations.
 fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [remaining-ms] [automatic]
   local limit_ms=${6:-} screen
   if [ -z "$limit_ms" ] && [ "${5:-}:${7:-}" = claude:automatic ]; then

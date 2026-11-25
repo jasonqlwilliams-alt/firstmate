@@ -415,6 +415,10 @@ composer() {
     printf '❯ %s\n' "${1:-}"
     return
   fi
+  if [ "$FM_DIALOG_MODE" = submit-crlf ]; then
+    printf '────────────────────────\r\n❯ %s\r\n────────────────────────\n' "${1:-}"
+    return
+  fi
   printf '────────────────────────\n❯ %s\n────────────────────────\n' "${1:-}"
 }
 case "$1 $2" in
@@ -522,7 +526,7 @@ case "$1 $2" in
     printf '%s\n' "$4" >> "$FM_DIALOG_CASE/input"
     [ "$4" = enter ] || exit 0
     case "$phase:$FM_DIALOG_MODE" in
-      submit-typed:submit-native) printf 'submit-working\n' ;;
+      submit-typed:submit-native|submit-typed:submit-crlf) printf 'submit-working\n' ;;
       submit-typed:submit-retry-success) printf 'submit-retry\n' ;;
       submit-retry:submit-retry-success) printf 'submit-retry-once\n'; exit 1 ;;
       submit-retry-once:submit-retry-success) printf 'submit-working\n' ;;
@@ -691,7 +695,7 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-live
 done
 pass 'styled Herdr exit retries only a proven pending command, and exit and doorbell send no key to the dialog'
 
-for mode in submit-native submit-retry-success submit-first-failed; do
+for mode in submit-native submit-crlf submit-retry-success submit-first-failed; do
   export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/herdr-$mode"
   mkdir -p "$FM_DIALOG_CASE/state"
   cp "$meta" "$FM_DIALOG_CASE/state/exitdialog.meta"
@@ -705,7 +709,7 @@ for mode in submit-native submit-retry-success submit-first-failed; do
   [ -n "$corr" ] || fail "$mode did not type the correlated request: $out"
   reply="$FM_DIALOG_CASE/state/pending-replies/$corr"
   case "$mode" in
-    submit-native)
+    submit-native|submit-crlf)
       expect_code 0 "$rc" "native Herdr working state should confirm a turn during redraw: $out"
       [ "$(grep -c '^enter$' "$FM_DIALOG_CASE/input")" -eq 1 ] || fail 'a confirmed submit should send one Enter'
       grep -q '^delivered_epoch=[0-9]' "$reply" || fail 'the native acknowledgment did not commit reply delivery'

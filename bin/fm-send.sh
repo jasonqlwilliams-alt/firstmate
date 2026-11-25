@@ -75,9 +75,12 @@
 # bin/fm-tmux-lib.sh. Tune with FM_SEND_RETRIES (default 3) / FM_SEND_SLEEP
 # (0.4). Slash commands, and codex `$...` skill invocations resolved through
 # harness meta, get a longer pre-Enter settle so completion popups do not
-# swallow Enter. Typed text to a recorded Claude worker uses the same
-# lifecycle lock and composer proof as the doorbell before writing or
-# submitting. A remote secondmate target has no typed text plane at all:
+# swallow Enter. Typed text to a recorded Claude worker must be free of
+# control characters. It uses the automatic Claude input guard described
+# in docs/agent-control.md. A pre-typing refusal or a withheld first Enter
+# exits 1. If proof fails after the backend accepted an Enter and cannot
+# confirm submission, exit 3 preserves any pending-reply expectation.
+# A remote secondmate target has no typed text plane at all:
 # every remote text steer rides the inbox (a marked secondmate request already
 # reaches the harness as marker-prefixed chat rather than a parser command, so
 # routing a remote "/..." or "$..." through the record changes nothing the

@@ -604,11 +604,9 @@ fm_backend_zellij_composer_observed_append() {  # <target> <before> <text> [expe
 
 # fm_backend_zellij_send_text_submit: type <text> into <target> once (raw,
 # unsubmitted, via send_literal), then drive the shared verify-and-retry-Enter
-# loop (bin/fm-composer-lib.sh: fm_composer_submit_retry_core) against the
-# real composer verdict above. Echoes empty|pending|unknown|send-failed, a
-# subset of the proof-carrying submit vocabulary. Only a positively classified
-# empty composer confirms delivery - a pane that merely CHANGED does not, so
-# the old heuristic's false "delivery confirmed" cannot recur.
+# loop (bin/fm-composer-lib.sh: fm_composer_submit_retry_core). The automatic
+# Claude guard supplies its own pre-write proof in place of the generic paste
+# check. Only a positively classified empty composer confirms delivery.
 fm_backend_zellij_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle> [expected-label]
   local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 expected_label=${6:-} before
   if [ -z "${fm_submit_claude_backend:-}" ]; then

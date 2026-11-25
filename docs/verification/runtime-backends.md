@@ -369,9 +369,13 @@ This guard is the refresh command after any harness upgrade; it spends a small n
 
 ### Claude automatic input and exit confirmation
 
-The recorded-screen regression in `tests/fm-send-inbox.test.sh` exercises Claude input refusal and lifecycle-lock contention through the production entry points with a fake backend.
+[`tests/fm-send-inbox.test.sh`](../../tests/fm-send-inbox.test.sh) exercises the production local send, watcher re-ring, and standalone interrupt paths against recorded screens and synthetic composer states, including lock contention and explicit key delivery.
+[`tests/fm-control-claude-exit-dialog.test.sh`](../../tests/fm-control-claude-exit-dialog.test.sh) uses a stand-in process on tmux and backend stubs to cover exit and restart reporting, remote enqueue when the doorbell is refused, and Herdr submit acknowledgement and retries.
+Its cmux, Zellij, and Orca cases cover refusal to ring at the exit confirmation.
+[`tests/fm-send-remote-delivery.test.sh`](../../tests/fm-send-remote-delivery.test.sh) covers wrapped native input and the local secondmate reply expectation when submit confirmation is unavailable.
 The opt-in refresh command below runs Claude in a private named tmux session and submits a prompt to start a background task before opening the real exit confirmation.
-It exercises the ordinary doorbell, native command, and recovery interrupt paths, plus an explicit operator key.
+It uses a transcript marker to verify that `/clear` submitted and an inbox acknowledgement to verify the doorbell reached the worker.
+It then checks refusals at the confirmation and verifies that explicit Escape dismisses it.
 Supply a lab Anthropic API key through `FM_CLAUDE_AUTOMATIC_INPUT_API_KEY` before running the command.
 The guard skips when that variable is absent and creates its own Claude configuration.
 The live guard has yet to be run.

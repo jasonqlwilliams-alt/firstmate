@@ -73,12 +73,16 @@ A submit retry requires a live agent and a capture showing `/exit` still in the 
 Stop checks, further screen reads, and retries after the first Enter share the `FM_CONTROL_EXIT_WAIT` budget.
 If the screen cannot be read in time, the restart may report a timeout without naming the dialog.
 
-The Claude doorbell and native command send hold the task's lifecycle lock from the first screen read through submission, including on watcher re-rings and the remote secondmate's host.
-They require a readable Claude composer frame with every input row empty before typing and a capture of that frame holding the exact line before each Enter.
+For tasks resolved as Claude, the doorbell and native command send recheck the recorded route under the task's lifecycle lock and hold it through submission.
+The same doorbell guard applies to watcher re-rings and on the remote secondmate's host.
+They require a readable Claude composer frame that classifies as empty across all its input rows before typing.
+Before each Enter, they match the text extracted from that frame to the line they typed.
+An unreadable screen or a dialog that lacks the exact confirmation layout still blocks the write when the composer proof fails.
 A composer containing only spaces reads as empty because a screen capture cannot distinguish typed spaces from padding, so a doorbell line can be typed ahead of those spaces.
 The pre-Enter check joins the composer's visible rows, so a soft wrap and a newline an operator inserts during delivery look the same to it.
+The lifecycle lock serializes Firstmate's guarded sends and lifecycle commands while terminal input or an exit outside those commands can still change the pane between capture and write.
 The standalone Claude recovery interrupt requires a readable, proven-empty composer under the same lock before sending Escape.
-An explicit operator key send remains available to act on a dialog.
+The operator can inspect the pane and use `fm-send.sh <task-id> --key Escape` to dismiss the confirmation explicitly.
 The [Claude adapter reference](../.agents/skills/harness-adapters/references/harness/claude.md#background-tasks-exit-confirmation) owns the screen layout and recognition limits.
 
 ## Transactional relaunch
@@ -174,6 +178,6 @@ The empirical basis for each adapter's value is the `harness-adapters` skill's v
 ## Verification
 
 - `tests/fm-control.test.sh` - the adapter contract for every verified harness, the backend capability matrix, exact-id scoping, the closed verb list, the busy, idle, dead, and idempotent lifecycle cases, Codex picker and uncertain-screen refusals, slow quit and shell redraw, retained picker history, Herdr plain capture fallback, and marker non-regression, all against a stubbed session provider.
-- [`tests/fm-control-claude-exit-dialog.test.sh`](../tests/fm-control-claude-exit-dialog.test.sh) - captured-screen refusal, restart reporting, and near misses against a compiled stand-in in tmux and a styled Herdr stub, plus doorbell refusal with cmux, Zellij, and Orca stubs.
+- [Claude automatic-input verification](verification/runtime-backends.md#claude-automatic-input-and-exit-confirmation) - portable coverage and live guard status for captured dialogs, submission, and restart reporting.
 - `tests/fm-control-relaunch.test.sh` - the relaunch transaction, preparation refusals, exited-shell recovery, registered merge-poll continuity, and rollback; [runtime verification](verification/runtime-backends.md) records the reusable evidence.
 - `tests/fm-control-herdr-smoke.test.sh` - the second state-verified backend against the real herdr binary, on an isolated throwaway lab session.
