@@ -131,7 +131,14 @@ BACKEND=$(fm_backend_of_meta "$META")
 TARGET=$(fm_backend_target_of_meta "$META")
 if ! ENDPOINT_STATE=$(FM_BACKEND_HERDR_ENDPOINT_META="$META" \
     fm_backend_agent_state "$BACKEND" "$TARGET" 2>/dev/null) || [ "$ENDPOINT_STATE" != missing ]; then
-  echo "error: task $ID's recorded endpoint could not be confirmed missing (${ENDPOINT_STATE:-unreadable})" >&2
+  case "$BACKEND:$ENDPOINT_STATE" in
+    zellij:unverified|orca:unverified|cmux:unverified)
+      echo "error: park mark refused for task $ID on $BACKEND because the backend cannot confirm endpoint loss" >&2
+      ;;
+    *)
+      echo "error: task $ID's recorded endpoint could not be confirmed missing (${ENDPOINT_STATE:-unreadable})" >&2
+      ;;
+  esac
   exit 1
 fi
 TMP=$(mktemp "$STATE/.fm-parked-retained.XXXXXX")

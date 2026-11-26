@@ -19,8 +19,8 @@
 # remote alike. The message is appended as a durable sequenced record under
 # the task's steering inbox (newlines are legal) - state/<id>.inbox/ for a
 # local task, or the remote home's host-local inbox reached through fm-on.sh
-# for a remote secondmate - and the terminal receives only one short constant
-# self-describing doorbell line plus Enter, best-effort. The durable record IS
+# for a remote secondmate - and the terminal receives only a doorbell line
+# plus Enter, best-effort. The durable record IS
 # the delivery, so the record's fate alone governs the exit: 0 = the steer is
 # durably sent (recorded); nonzero = nothing was confirmed delivered and a
 # resend is appropriate (unresolvable target, an endpoint that cannot be
@@ -50,11 +50,10 @@
 # available, escalates after the bounded ladder, and instead routes a positively
 # dead or missing endpoint directly to recovery without typing. An explicit
 # fire-and-forget record is excluded from that ladder.
-# bin/fm-task-inbox-lib.sh owns the record format, the doorbell line, and the
-# re-ring ladder, including the ring's per-harness screen gate. A refused ring prints a
-# notice, and the watcher retries an ordinary record before escalating it. No
-# composer verdict is delivery proof on this plane, and a failed or refused
-# ring never fails the send.
+# bin/fm-task-inbox-lib.sh owns the record format, doorbell notices and gate, and
+# re-ring ladder. A refused ring prints a notice. No composer verdict is
+# delivery proof on this plane, and a failed or refused ring never fails
+# the send.
 #
 # TYPED - the LOCAL text that must reach the terminal itself: a harness-native
 # invocation (a leading "/", or a leading "$" to a codex target) must reach

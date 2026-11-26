@@ -204,11 +204,9 @@ STATUS_FILE=$(shell_quote "$STATE/$ID.status")
 INBOX_DIR=$(shell_quote "$STATE/$ID.inbox")
 LIVE_STATE_SECTION="For live revisions, holds, or routing, read \`$DATA/system-state.md\` (skill \`system-state-card\`). Do not walk Atlas or \`C:\\continuum-system\` for those facts."
 
-# The receive-and-ack half of the steering-inbox contract, included in every
-# scaffold kind. The record format, doorbell line, and re-ring ladder are
-# owned by bin/fm-task-inbox-lib.sh; the doorbell itself is self-describing,
-# so this section is reinforcement for the natural-checkpoint habit, not the
-# only carrier of the instruction.
+# The receive-and-ack instructions establish the natural-checkpoint habit in
+# every scaffold kind. Keep the heading and inbox locator compatible with
+# their reader in bin/fm-task-inbox-lib.sh.
 IFS= read -r -d '' INBOX_SECTION <<EOF || true
 # Firstmate instruction inbox
 Firstmate steers you through durable message files in $INBOX_DIR.

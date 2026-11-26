@@ -156,7 +156,7 @@ run_send() {  # <case-dir> <err-file> [env...] -- <fm-send args...>
   env PATH="$dir/fakebin:$PATH" \
     FM_ROOT_OVERRIDE="$dir/home" FM_HOME="$dir/home" FM_SEND_LOG="$dir/send.log" \
     FM_SEND_SETTLE=0 ${envs[@]+"${envs[@]}"} \
-    "$SEND" "$@" >/dev/null 2>"$err"
+    FM_STATE_OVERRIDE="$dir/home/state" "$SEND" "$@" >/dev/null 2>"$err"
 }
 
 record_body() {  # <record>
@@ -215,11 +215,12 @@ test_resend_enqueues_new_sequence() {
 
 test_pending_composer_skips_ring_advisorily() {
   local dir err rc
-  dir=$(setup_case pendingskip); err="$dir/send.err"
+  dir=$(setup_case pendingskip grok); err="$dir/send.err"
   run_send "$dir" "$err" FM_FAKE_TMUX_COMPOSER=pending -- t1 "steer past a stuck composer"; rc=$?
   expect_code 0 "$rc" "a skipped ring is still a sent steer"
   [ -f "$dir/home/state/t1.inbox/001.msg" ] || fail "the steer was not recorded"
   [ ! -s "$dir/send.log" ] || fail "a visibly pending composer should skip the ring:"$'\n'"$(cat "$dir/send.log")"
+  assert_contains "$(cat "$err")" "blocked the doorbell" "fm-send should explain the pending-draft refusal"
   assert_contains "$(cat "$err")" "watcher will retry, then escalate" \
     "the refusal notice should point at the retry and escalation"
   pass "fm-send inbox: a visibly pending composer skips the ring, and the steer stays durably sent"

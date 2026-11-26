@@ -986,13 +986,12 @@ fm_backend_composer_snapshot() {  # <backend> <target> [expected-label] [visible
 }
 
 # fm_backend_composer_classify_snapshot: the backend's own composer verdict for
-# the current snapshot, identical to what fm_backend_composer_state would have
-# answered for that capture.
-fm_backend_composer_classify_snapshot() {  # <backend> <target>
+# the current snapshot, with an optional agy notice fit check.
+fm_backend_composer_classify_snapshot() {  # <backend> <target> [fit-text]
   case "$1" in
-    tmux) fm_tmux_composer_classify_snapshot "$2" ;;
-    herdr) fm_backend_herdr_composer_classify_snapshot "$2" ;;
-    zellij|orca|cmux) fm_composer_classify_snapshot_no_identity ;;
+    tmux) fm_tmux_composer_classify_snapshot "$2" "${3:-}" ;;
+    herdr) fm_backend_herdr_composer_classify_snapshot "$2" "${3:-}" ;;
+    zellij|orca|cmux) fm_composer_classify_snapshot_no_identity "${3:-}" ;;
     *) printf 'unknown' ;;
   esac
 }
@@ -1030,32 +1029,34 @@ fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
 # capture it also proves picker rows above it are retained history.
 # [harness] is the pane's recorded harness; when it is a plain token it rides
 # into the snapshot's capability facts as harness=<name>, so the classifier
-# can apply that harness's own placeholder rule (bin/fm-composer-lib.sh
-# "ROVO PLACEHOLDER CHIP").
+# can apply the harness-scoped rules in bin/fm-composer-lib.sh.
 # [automatic] requires the complete Claude composer frame for automatic input.
+# On an unbounded read, [fit-text] is the line a caller is about to type into an agy pane.
+# An `empty` verdict for harness agy reads `unknown` unless that line fits agy's
+# one composer row, so it is never typed into a row it would wrap.
 # Callers include the steering-inbox doorbell, Claude native submission and
 # standalone interrupt, Codex and Claude exit, and the second-mate restart's
 # local and remote screen observations.
-fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [remaining-ms] [automatic]
+fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [remaining-ms] [automatic] [fit-text]
   local limit_ms=${6:-} screen
   if [ -z "$limit_ms" ] && [ "${5:-}:${7:-}" = claude:automatic ]; then
     limit_ms=$FM_COMPOSER_CLAUDE_READ_MS
   fi
-  set -- "$1" "$2" "${3:-}" "${4:-}" "${5:-}" "${7:-}"
+  set -- "$1" "$2" "${3:-}" "${4:-}" "${5:-}" "${7:-}" "${8:-}"
   if [ -z "$limit_ms" ]; then
     _fm_backend_guarded_composer_state "$@"
     return
   fi
-  if screen=$(fm_backend_run_timed "$limit_ms" _fm_backend_guarded_composer_state "$@"); then
+  if screen=$(fm_backend_run_timed "$limit_ms" _fm_backend_guarded_composer_state "${@:1:6}"); then
     printf '%s' "${screen:-unknown}"
   else
     case "$?" in 124) printf 'timeout' ;; *) printf 'unknown' ;; esac
   fi
 }
 
-_fm_backend_guarded_composer_state() {
+_fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [automatic] [fit-text]
   local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} picker verdict styled=0
-  local mode=${6:-} capture='' proof='' anchor
+  local mode=${6:-} fit=${7:-} capture='' proof='' anchor
   if [ "$harness" = claude ]; then
     capture=visible
     if [ "$backend" = tmux ]; then
@@ -1100,9 +1101,9 @@ _fm_backend_guarded_composer_state() {
     # The frame already locates the composer. Classify its full contents,
     # including rows below the cursor that a cursor-anchored read would miss.
     verdict=$(fm_composer_classify_screen "$FM_COMPOSER_SNAPSHOT_CAPS" \
-      "$FM_COMPOSER_SNAPSHOT_SCREEN" '' '' "$proof")
+      "$FM_COMPOSER_SNAPSHOT_SCREEN" '' '' '' "$proof")
   else
-    verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target")
+    verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target" "$fit")
   fi
   case $'\n'"$FM_COMPOSER_SNAPSHOT_CAPS"$'\n' in *$'\nstyled=1\n'*) styled=1 ;; esac
   if [ -n "$expected" ] && { [ "$verdict" = pending ] || { [ "$verdict" = unknown ] && [ "$styled" = 0 ]; }; }; then
