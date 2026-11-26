@@ -1,0 +1,23 @@
+Target revision 4dbe6a899a3fd76b92efd225d59cc8e1bf233cb3
+Each command uses a separate local Firstmate home and a synthetic paused task with a retained copy.
+
+zellij
+$ bin/fm-park-retained.sh lost mark
+error: park mark refused for task lost on zellij because the backend cannot confirm endpoint loss
+exit: 1
+park mark: absent
+task record, pause status, and retained draft: unchanged
+
+orca
+$ bin/fm-park-retained.sh lost mark
+error: park mark refused for task lost on orca because the backend cannot confirm endpoint loss
+exit: 1
+park mark: absent
+task record, pause status, and retained draft: unchanged
+
+cmux
+$ bin/fm-park-retained.sh lost mark
+error: park mark refused for task lost on cmux because the backend cannot confirm endpoint loss
+exit: 1
+park mark: absent
+task record, pause status, and retained draft: unchanged

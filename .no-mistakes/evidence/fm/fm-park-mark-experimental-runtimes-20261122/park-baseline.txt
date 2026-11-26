@@ -1,0 +1,23 @@
+Baseline revision 80ad3594adf45b6ed2cd1880175b06590dabebab
+Each command uses a separate local Firstmate home and a synthetic paused task with a retained copy.
+
+zellij
+$ bin/fm-park-retained.sh lost mark
+error: task lost's recorded endpoint could not be confirmed missing (unverified)
+exit: 1
+park mark: absent
+task record, pause status, and retained draft: unchanged
+
+orca
+$ bin/fm-park-retained.sh lost mark
+error: task lost's recorded endpoint could not be confirmed missing (unverified)
+exit: 1
+park mark: absent
+task record, pause status, and retained draft: unchanged
+
+cmux
+$ bin/fm-park-retained.sh lost mark
+error: task lost's recorded endpoint could not be confirmed missing (unverified)
+exit: 1
+park mark: absent
+task record, pause status, and retained draft: unchanged

@@ -1,0 +1,26 @@
+ok - [zellij] park mark explains why the backend cannot confirm endpoint loss
+ok - [orca] park mark explains why the backend cannot confirm endpoint loss
+ok - [cmux] park mark explains why the backend cannot confirm endpoint loss
+
+Private tmux, closed worker before marking
+$ bin/fm-watch.sh
+stale: parked:fm-plain (the recorded endpoint is gone)
+
+Private tmux, open worker
+$ bin/fm-park-retained.sh held mark
+error: task held's recorded endpoint could not be confirmed missing (dead)
+park mark: absent
+
+Private tmux, same worker after closing its window
+$ bin/fm-park-retained.sh held mark
+parked-retained: yes
+state/held.parked-retained: tmux:parked:fm-held	first
+$ bin/fm-watch.sh
+No recorded endpoint-loss wake during three completed polls.
+
+Private tmux, after clearing
+$ bin/fm-park-retained.sh held clear
+parked-retained: no
+$ bin/fm-watch.sh
+stale: parked:fm-held (the recorded endpoint is gone)
+ok - real tmux: a parked retained-copy mark silences only its own incarnation's endpoint loss
