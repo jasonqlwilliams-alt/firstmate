@@ -522,10 +522,8 @@ cmd_sync() {
   rm -f "$report"
   case "$FF_STATUS" in
     # instr= names the watched instruction paths this advance changed, with no
-    # spaces so the whole result stays one parseable line. The parent needs it to
-    # decide whether the running agent must reload; an older parent ignores the
-    # suffix, and an older HOST omits it, which a parent must read as unknown
-    # rather than as "nothing changed".
+    # spaces so the whole result stays one parseable line. Older parents ignore
+    # the suffix and older hosts omit it, leaving the changed paths unknown.
     updated) printf 'synced: %s instr=%s\n' "$commit" "$(printf '%s' "$FF_INSTR" | tr -d ' ')" ;;
     current) printf 'current: %s\n' "$commit" ;;
     *) die "remote secondmate home sync skipped: ${out#remote home: skipped: }" ;;

@@ -33,13 +33,79 @@ _FM_SECONDMATE_RESTART_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # the reload it is paying for.
 # The mate answers through its parent channel, which is what resolves the
 # parent-owned reply expectation fm-send arms for a marked request; that
-# correlated answer, never the wall clock, is what releases the restart.
+# correlated answer, never the wall clock, is what releases the restart, and
+# only when fm_secondmate_persist_outcome reads it as saved.
+_FM_SECONDMATE_SAVED_RECEIPT='Saved all open work.'
 fm_secondmate_persist_request() {  # <running-harness>
+  printf 'After saving, reply exactly: done [corr=<request id>]: %s If blocked, report what is unwritten. ' "$_FM_SECONDMATE_SAVED_RECEIPT"
   printf '%s' 'Firstmate was updated and I am about to restart your agent so it comes up on the current instructions and launch-time settings, which drops your conversation but keeps every durable record. Before that, persist the open work you are holding only in this conversation, following the /stow skill'"'"'s "Open-record persistence" section and nothing else from that skill: file a task for each open record that exists only in this conversation, including any captain call you had formed but never registered, and correct any task whose status no longer reflects what you now know. Do NOT run the memory, learnings, or captain-preference sweeps.'
   if [ "$1" = claude ]; then
     printf '%s' ' Also stop every background shell task you started, such as timers or sleep loops, because a running one makes the exit stop at a confirmation that the restart will not answer.'
   fi
-  printf '%s' ' Then reply on your parent channel saying it is done, or saying what you deliberately left alone and why.'
+  printf '%s' ' Reply on your parent channel using the correlation ID from this request. If any required write failed or was skipped, reply with blocked [corr=<request id>]: <reason> and explain what was left unwritten. Only the exact save receipt lets the restart go ahead.'
+}
+
+# Read the persist answers on <corr_id>'s parent channel. Publishes:
+#   FM_SECONDMATE_PERSIST_OUTCOME  saved|not-saved|unclear
+#   FM_SECONDMATE_PERSIST_NOTE     an explanation of the outcome, if available
+# A saved verdict requires a newline-terminated done with the requested save
+# receipt and a successful status scan. A contrary reply for the same request
+# visible in that scan vetoes the receipt.
+# blocked, failed, and needs-decision are the status vocabulary's negative
+# verbs. Other replies are unclear and also stop the restart.
+# The answer is the same correlated parent-channel line for a local and a remote
+# mate, so placement plays no part here.
+FM_SECONDMATE_PERSIST_OUTCOME=""
+FM_SECONDMATE_PERSIST_NOTE=""
+fm_secondmate_persist_outcome() {  # <state-dir> <corr_id>
+  local state=$1 corr=$2 rec status_file replies line header note verb reply_token header_corr note_token
+  reply_token="\[corr=$corr\]|(^|[[:space:]])corr=$corr([[:space:]]|\[|$)"
+  header_corr="\[$FM_PENDING_REPLY_CORR_RE\]|(^|[[:space:]])$FM_PENDING_REPLY_CORR_RE([[:space:]]|\[|$)"
+  note_token="^[[:space:]]*(\[corr=$corr\]|corr=$corr)([[:space:]]|$)"
+  FM_SECONDMATE_PERSIST_OUTCOME=""
+  FM_SECONDMATE_PERSIST_NOTE=""
+  rec=$(fm_pending_reply_path "$state" "$corr")
+  [ -f "$rec" ] || return 1
+  status_file=$(fm_pending_reply_get "$rec" parent_status)
+  [ -f "$status_file" ] || return 1
+  # Mark trailing fragments to distinguish a truncated record from a complete
+  # save receipt.
+  if ! replies=$(
+    set -o pipefail
+    { cat "$status_file" && printf ' [unterminated status line]\n'; } |
+      { grep -aF -e "corr=$corr" || [ "$?" -eq 1 ]; } |
+      LC_ALL=C tr '\000' '?'
+  ); then
+    FM_SECONDMATE_PERSIST_OUTCOME=unclear
+    FM_SECONDMATE_PERSIST_NOTE="the parent status scan failed"
+    return 0
+  fi
+  while IFS= read -r line; do
+    case "$line" in
+      "done [corr=$corr]: $_FM_SECONDMATE_SAVED_RECEIPT"|"done [corr=$corr]: $_FM_SECONDMATE_SAVED_RECEIPT (via-helper)")
+        FM_SECONDMATE_PERSIST_OUTCOME=saved
+        continue
+        ;;
+      *:*) ;;
+      *) continue ;;
+    esac
+    verb=$(status_line_verb "$line")
+    case "$verb" in
+      ''|[!A-Za-z]*|*[!A-Za-z0-9_-]*) continue ;;
+    esac
+    header=${line%%:*}
+    note=$(status_line_note "$line")
+    if ! [[ "$header" =~ $reply_token ]]; then
+      [[ ! "$header" =~ $header_corr && "$note" =~ $note_token ]] || continue
+    fi
+    FM_SECONDMATE_PERSIST_NOTE=$(printf '%s' "$note" | LC_ALL=C tr -s '[:space:]' ' ')
+    case "$verb" in
+      blocked|failed|needs-decision) FM_SECONDMATE_PERSIST_OUTCOME=not-saved ;;
+      *) FM_SECONDMATE_PERSIST_OUTCOME=unclear ;;
+    esac
+    return 0
+  done <<< "$replies"
+  [ "$FM_SECONDMATE_PERSIST_OUTCOME" = saved ]
 }
 
 # Resolve one mate's restart capability from its durable record alone.

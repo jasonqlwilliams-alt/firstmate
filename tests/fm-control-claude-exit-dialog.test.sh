@@ -40,7 +40,7 @@ request=$(fm_task_inbox_body "$inbox/001.msg")
 [[ "$request" =~ corr=([0-9a-f]{16}) ]] || exit 1
 corr=${BASH_REMATCH[1]}
 mv "$inbox/001.msg" "$inbox/handled/001.msg"
-"$root/bin/fm-status-append.sh" "$state/exitdialog.status" "done [corr=$corr]: open work written down"
+"$root/bin/fm-status-append.sh" "$state/exitdialog.status" "done [corr=$corr]: Saved all open work."
 SH
 cat > "$control_bin/fm-spawn.sh" <<'SH'
 #!/usr/bin/env bash

@@ -11,10 +11,7 @@
 # precedence. Replacing the agent is the only mechanism that guarantees the new
 # bytes are the ones read, and the only one that re-resolves the launch-time
 # wiring - harness, model, effort, turn-end hooks, and every other flag a harness
-# reads once at startup. That second half is why the update pass sends every live
-# mate here, including one already on the target commit: launch-time wiring is
-# not derivable from a git diff, so an unchanged tracked surface does not mean
-# the running agent is already on the current behavior.
+# reads once at startup.
 #
 # The cost of that guarantee is the conversation, which is why this command runs
 # in two phases and why the first one is a GATE, not a courtesy:
@@ -28,17 +25,28 @@
 #      every instruction update cost far more than the reload it is paying for.
 #      All requests go out before any restart, so a slow mate delays only its own
 #      restart instead of serializing the fleet behind it.
-#   B. RESTART. Only after that mate's own correlated answer lands on the parent
-#      channel. The gate is that answer, never a wall clock, so a mate that is
-#      mid-turn queues the request behind that turn; the bound below exists to
-#      end the wait, not to authorize a restart without the answer. A timeout
-#      deliberately leaves that unanswered expectation open: it is a genuine
-#      open loop owned by the ordinary pending-reply recovery ladder, not state
-#      this restart pass may close.
+#   B. RESTART. Only after that mate's own correlated answer on the parent
+#      channel is accepted as saved by fm_secondmate_persist_outcome in
+#      bin/fm-secondmate-restart-lib.sh.
+#      A negative or unclear answer or a failed status scan stops the restart for
+#      that mate. The pass reports the outcome and leaves its agent and
+#      conversation running without a re-read message. A mate that is mid-turn
+#      queues the request behind that turn. The bound below limits the wait.
+#      On timeout the restart pass leaves settlement and recovery to the
+#      ordinary pending-reply machinery. Shared pending-reply
+#      settlement can treat a correlation mentioned in another reply's note as
+#      an acknowledgement.
+#      The gate decides on replies visible during its scan, so a correction
+#      that becomes visible afterward can miss the restart decision.
+#      Repair of a reply written to a local mate's own status file copies
+#      only the first matching reply to the parent channel, so the gate
+#      cannot see a later correction left in the mate's file.
 #
 # A missing persist answer or an unsupported restart can fall back to the
-# ordinary re-read nudge. A failed or ambiguous relaunch leaves the outcome
-# unknown. See docs/agent-control.md, "Claude background-tasks exit
+# ordinary re-read nudge. For an unconfirmed remote send, the pass reports
+# delivery failure without consulting any mirrored reply.
+# A failed or ambiguous relaunch leaves the outcome unknown.
+# See docs/agent-control.md, "Claude background-tasks exit
 # confirmation", for the case that goes straight to manual recovery.
 #
 # Placement changes the transport and nothing else. A local mate is restarted
@@ -60,16 +68,24 @@
 #   FM_SECONDMATE_PERSIST_WAIT  seconds to wait for one mate's persist answer (900)
 #   FM_SECONDMATE_PERSIST_POLL  seconds between checks of that answer (5)
 #
-# Exit status: 0 every named mate restarted; 3 at least one was nudged or left
-# unreached and every mate was still accounted for; 1 the input itself is
-# unusable; 2 invalid use.
+# Output: one restarted:, nudged:, unreached:, or stopped: line per mate,
+# followed by a summary: line. The stopped: outcome reports a negative or
+# unclear save outcome.
+#
+# Exit status: 0 every named mate restarted; 3 at least one was nudged, left
+# unreached, or stopped and every mate was still accounted for; 1 the input
+# itself is unusable; 2 invalid use.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 
 usage() {
-  sed -n '2,65{s/^# \{0,1\}//;p;}' "$0"
+  awk '
+    NR == 1 { next }
+    /^#/ { sub(/^# ?/, ""); print; next }
+    { exit }
+  ' "$0"
 }
 
 case "${1:-}" in
@@ -133,6 +149,7 @@ RESTART_RESULT=()
 restarted_count=0
 nudged_count=0
 unreached_count=0
+stopped_count=0
 
 # The first line of a command's output that carries anything, flattened to one
 # readable line with its "error: " prefix dropped. A refusal's own words are the
@@ -162,6 +179,29 @@ fall_back_to_nudge() {  # <id> <reason>
 report_unreached() {  # <id> <reason>
   unreached_count=$((unreached_count + 1))
   printf 'unreached: %s: %s\n' "$1" "$2"
+}
+
+# A resolved persist answer releases the restart only when it says the open work
+# is saved. Anything else leaves the mate exactly as it is: no stop, and no
+# re-read message on top of the answer it just gave.
+release_or_stop() {  # <array-index>
+  local i=$1 why
+  fm_secondmate_persist_outcome "$STATE" "${CORR[i]}" || return 1
+  fm_pending_reply_try_resolve "$STATE" "${CORR[i]}" || true
+  pending_count=$((pending_count - 1))
+  if [ "$FM_SECONDMATE_PERSIST_OUTCOME" = saved ]; then
+    launch_restart "$i"
+    return
+  fi
+  if [ "$FM_SECONDMATE_PERSIST_OUTCOME" = not-saved ]; then
+    why="it answered that its open work is not saved"
+  else
+    why="its answer did not confirm that its open work is saved"
+  fi
+  [ -z "$FM_SECONDMATE_PERSIST_NOTE" ] || why="$why: $FM_SECONDMATE_PERSIST_NOTE"
+  stopped_count=$((stopped_count + 1))
+  printf 'stopped: %s: %s, so its agent was left running untouched\n' "${IDS[$i]}" "$why"
+  PLAN[i]="done"
 }
 
 report_open_exit_dialog() {  # <id>
@@ -365,10 +405,8 @@ while [ "$((pending_count + restart_active_count))" -gt 0 ]; do
   # expired mate must not hold an already-confirmed mate behind its fallback.
   i=0
   while [ "$i" -lt "${#IDS[@]}" ]; do
-    if [ "${PLAN[i]}" = persisted-pending ] \
-      && fm_pending_reply_try_resolve "$STATE" "${CORR[i]}"; then
-      pending_count=$((pending_count - 1))
-      launch_restart "$i"
+    if [ "${PLAN[i]}" = persisted-pending ]; then
+      release_or_stop "$i" || true
     fi
     i=$((i + 1))
   done
@@ -381,10 +419,7 @@ while [ "$((pending_count + restart_active_count))" -gt 0 ]; do
     if [ "$now" -ge "${DEADLINE[i]}" ]; then
       # A reply can land after the fleet-wide resolution pass. Recheck at the
       # timeout decision so an answer already on disk wins over the fallback.
-      if fm_pending_reply_try_resolve "$STATE" "${CORR[i]}"; then
-        pending_count=$((pending_count - 1))
-        launch_restart "$i"
-      else
+      if ! release_or_stop "$i"; then
         fall_back_to_nudge "${IDS[$i]}" \
           "it did not confirm within ${PERSIST_WAIT}s that its open work is written down, so its conversation was not spent"
         PLAN[i]="done"
@@ -402,7 +437,7 @@ done
 
 # --- summary ---------------------------------------------------------------
 
-printf 'summary: %d of %d restarted, %d nudged, %d unreached\n' \
-  "$restarted_count" "${#IDS[@]}" "$nudged_count" "$unreached_count"
-[ "$((nudged_count + unreached_count))" -eq 0 ] || exit 3
+printf 'summary: %d of %d restarted, %d nudged, %d unreached, %d stopped\n' \
+  "$restarted_count" "${#IDS[@]}" "$nudged_count" "$unreached_count" "$stopped_count"
+[ "$((nudged_count + unreached_count + stopped_count))" -eq 0 ] || exit 3
 exit 0

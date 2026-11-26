@@ -6,8 +6,10 @@
 # transaction) against a lifecycle-modelling session-provider stub:
 #
 #   1. The persist request is a GATE. Nothing is stopped until that mate's own
-#      correlated answer lands on the parent channel, and a mate that never
-#      answers keeps its agent and gets the re-read message instead.
+#      correlated save receipt lands on the parent channel, a mate that
+#      never answers keeps its agent and gets the re-read message instead, and a
+#      mate whose answer is negative or unclear (local or remote) keeps its
+#      agent untouched and is reported as stopped.
 #   2. The order is persist THEN restart, observable in what reaches the pane.
 #   3. The persist request is the task-subset of /stow: it asks for open records
 #      and task status, and explicitly not for the memory, learnings, or
@@ -91,7 +93,10 @@ case "${1:-}" in
           corr=$(cat "$inbox"/*.msg 2>/dev/null \
             | grep -oE 'corr=[0-9a-f]{16}' | head -1)
           if [ -n "$corr" ]; then
-            printf 'done [%s]: open records written down\n' "$corr" \
+            header=${FM_FAKE_ANSWER_HEADER:-${FM_FAKE_ANSWER_VERB:-done} [$corr]}
+            note=${FM_FAKE_ANSWER_NOTE:-Saved all open work.}
+            printf '%s: %s\n' "${header//<corr>/$corr}" \
+              "${note//<corr>/$corr}" \
               >> "$(cat "$D/answer-status")"
           fi
         fi
@@ -284,9 +289,21 @@ run_restart() {  # <case-dir> <args...>
   return "$rc"
 }
 
+test_usage_includes_all_exit_statuses() {
+  local help invalid rc
+  help=$("$RESTART" --help); rc=$?
+  expect_code 0 "$rc" "help must succeed without a mate argument"
+  assert_contains "$help" 'itself is unusable; 2 invalid use.' \
+    "help must include the complete exit status description"
+  invalid=$("$RESTART" 2>&1); rc=$?
+  expect_code 2 "$rc" "missing mate arguments must be reported as invalid use"
+  [ "$invalid" = "$help" ] || fail "missing mate arguments must print the same full usage"
+  pass "help and invalid invocation show all exit statuses"
+}
+
 # --- T1: the persist request is the task subset of /stow, and it gates --------
 test_persist_gates_and_asks_only_for_open_records() {
-  local dir out rc request
+  local dir out rc request corr rec recovery
   dir=$(new_case gate)
   add_local_mate "$dir" sm1 pi
   printf 'pi' > "$dir/fake/command"
@@ -303,11 +320,13 @@ test_persist_gates_and_asks_only_for_open_records() {
     || fail "the agent was stopped without a confirmed persist"
   assert_absent "$dir/home/state/sm1.control-relaunch" \
     "a restart transaction was opened without a confirmed persist"
-  grep -h '^phase=' "$dir/home/state/pending-replies"/* | grep -q '^phase=awaiting_report$' \
+  request=$(cat "$dir/home/state/sm1.inbox/001.msg")
+  corr=$(printf '%s\n' "$request" | grep -oE 'corr=[0-9a-f]{16}' | head -1)
+  rec="$dir/home/state/pending-replies/${corr#corr=}"
+  grep -qx 'phase=awaiting_report' "$rec" \
     || fail "the timed-out persist expectation was closed instead of left to recovery"
 
   # The request the mate actually received is the open-record half of /stow only.
-  request=$(cat "$dir/home/state/sm1.inbox"/*.msg)
   assert_contains "$request" "Open-record persistence" "the request must reuse stow's open-record contract"
   assert_contains "$request" "file a task for each open record" "the request must ask for the unfiled open records"
   assert_contains "$request" "correct any task whose status" "the request must ask for stale task status"
@@ -315,6 +334,14 @@ test_persist_gates_and_asks_only_for_open_records() {
     "the request must flush an unregistered captain call"
   assert_contains "$request" "Do NOT run the memory, learnings, or captain-preference sweeps" \
     "the request must exclude the memory curation half of stow"
+  assert_contains "$request" 'done [corr=<request id>]: Saved all open work.' \
+    "the delivered request must tell the mate which receipt releases the gate"
+  recovery=$(
+    . "$ROOT/bin/fm-pending-reply-lib.sh"
+    fm_pending_reply_recovery_message "$rec"
+  )
+  assert_contains "$recovery" 'done [corr=<request id>]: Saved all open work.' \
+    "the emitted recovery prompt must preserve the required receipt"
   assert_not_contains "$request" "stop every background shell task" \
     "the running Pi mate must keep its background tasks when the replacement is Claude"
   pass "T1 persist is a gate, and asks for open records and task status only"
@@ -366,28 +393,23 @@ test_answer_between_resolution_and_timeout_wins() {
   dir=$(new_case answer-at-timeout-decision)
   add_local_mate "$dir" sm1
 
-  # Delay the modelled answer until the first resolution attempt has completed
-  # its unsuccessful status scan. The real pending-reply machinery publishes
-  # that scan signature with mv; this wrapper appends the correlated answer only
-  # after that publication, reproducing the boundary race deterministically.
-  cat > "$dir/fakebin/mv" <<'SH'
+  : > "$dir/home/state/sm1.status"
+  # Delay the modelled answer until the first status scan has already missed it.
+  cat > "$dir/fakebin/grep" <<'SH'
 #!/usr/bin/env bash
 set -u
-/bin/mv "$@" || exit $?
-target=${!#}
-case "$target" in
-  "${FM_FAKE_DIR%/fake}"/home/state/pending-replies/*)
-    if [ ! -e "$FM_FAKE_DIR/answer-after-scan" ] \
-      && grep -q '^parent_status_scan_signature=.' "$target"; then
-      : > "$FM_FAKE_DIR/answer-after-scan"
-      corr=${target##*/}
-      status=$(sed -n 's/^parent_status=//p' "$target")
-      printf 'done [corr=%s]: open records written down\n' "$corr" >> "$status"
-    fi
+command -p grep "$@"
+rc=$?
+case "$rc:${1:-}:${3:-}" in
+  1:-aF:corr=*)
+    corr=${3#corr=}
+    printf 'done [corr=%s]: Saved all open work. (via-helper)\n' "$corr" \
+      >> "${FM_FAKE_DIR%/fake}/home/state/sm1.status"
     ;;
 esac
+exit "$rc"
 SH
-  chmod +x "$dir/fakebin/mv"
+  chmod +x "$dir/fakebin/grep"
 
   out=$(FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1); rc=$?
 
@@ -517,7 +539,8 @@ case "${rargs[1]:-}" in
     # parent channel, carrying the correlation token the request embedded.
     if [ -n "${FM_FAKE_ANSWER_STATUS:-}" ]; then
       corr=$(printf '%s' "${rargs[3]:-}" | grep -oE 'corr=[0-9a-f]{16}' | head -1)
-      [ -z "$corr" ] || printf 'done [%s]: open records written down\n' "$corr" \
+      [ -z "$corr" ] || printf '%s [%s]: %s\n' "${FM_FAKE_ANSWER_VERB:-done}" "$corr" \
+        "${FM_FAKE_ANSWER_NOTE:-Saved all open work.}" \
         >> "$FM_FAKE_ANSWER_STATUS"
     fi
     ;;
@@ -732,7 +755,8 @@ test_native_ultra_restart_keeps_local_and_remote_profiles() {
 }
 
 # --- T9: an unrelated concurrent reply cannot release the persist gate -------
-test_concurrent_reply_cannot_release_persist_gate() {
+assert_concurrent_reply_does_not_change_persist_outcome() {
+  local note=$1 expected=$2 expected_code=$3 verb=${4:-} save_note=${5:-}
   local dir out rc state corr rec
   dir=$(new_case correlation)
   add_local_mate "$dir" sm1
@@ -752,21 +776,44 @@ delivered_epoch=1
 resolved_epoch=
 resolved_via=
 EOF
-printf 'done [corr=$corr]: unrelated request answered\n' >> "$state/sm1.status"
+printf 'done [corr=$corr]: %s\n' "$note" >> "$state/sm1.status"
 SH
   chmod +x "$dir/fake/on-doorbell"
+  if [ -n "$verb" ]; then
+    arm_answer "$dir" sm1
+  fi
 
-  out=$(FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1); rc=$?
+  out=$(FM_TEST_PERSIST_WAIT=0 FM_FAKE_ANSWER_VERB="$verb" FM_FAKE_ANSWER_NOTE="$save_note" \
+    run_restart "$dir" sm1); rc=$?
 
-  assert_grep "done [corr=$corr]: unrelated request answered" "$state/sm1.status" \
+  assert_grep "done [corr=$corr]:" "$state/sm1.status" \
     "the submitted persist request must have elicited the unrelated answer"
-  expect_code 3 "$rc" "an unrelated concurrent answer must not release the persist gate"$'\n'"$out"
-  assert_contains "$out" "nudged: sm1: it did not confirm within 0s" \
-    "the unrelated answer must leave the persist request unanswered at the deadline"
-  assert_not_contains "$out" "restarted: sm1" "the unrelated answer authorized a restart"
-  ! grep -Fxq -e /exit -e /quit "$dir/fake/literal" \
-    || fail "the unrelated answer authorized an exit command"
-  pass "T9 the persist gate retains its explicitly allocated correlation"
+  expect_code "$expected_code" "$rc" "the save request's own reply must determine the result"$'\n'"$out"
+  assert_contains "$out" "$expected" "the pass must report the save request's actual outcome"
+  assert_not_contains "$out" "audit complete" "the unrelated answer must not be reported as the save reply"
+  if [ -n "$verb" ]; then
+    assert_not_contains "$out" "nudged: sm1" "an actual save reply must settle the gate before timeout"
+  fi
+  if [ "$expected_code" -eq 0 ]; then
+    assert_grep '/exit' "$dir/fake/submitted" "a save receipt must release the restart"
+  else
+    ! grep -Fxq -e /exit -e /quit "$dir/fake/literal" \
+      || fail "a mate without a save receipt received an exit command"
+  fi
+}
+
+test_concurrent_reply_does_not_change_persist_outcome() {
+  local cross_reference="audit complete; save request corr=\$FM_PENDING_REPLY_EXISTING_CORR is blocked"
+  assert_concurrent_reply_does_not_change_persist_outcome 'unrelated request answered' \
+    'nudged: sm1: it did not confirm within 0s' 3
+  assert_concurrent_reply_does_not_change_persist_outcome "$cross_reference" \
+    'nudged: sm1: it did not confirm within 0s' 3
+  assert_concurrent_reply_does_not_change_persist_outcome "$cross_reference" \
+    'restarted: sm1 (claude)' 0 'done' 'Saved all open work.'
+  assert_concurrent_reply_does_not_change_persist_outcome "$cross_reference" \
+    'stopped: sm1: it answered that its open work is not saved: task store refused the write' \
+    3 blocked 'task store refused the write'
+  pass "T9 an unrelated reply cannot release or mask the save request's own outcome"
 }
 
 # --- T10: one unanswered mate does not hold a confirmed mate behind it -------
@@ -1056,6 +1103,250 @@ test_remote_secondmate_control_relaunch_updates_parent_record() {
   pass "T17 direct remote secondmate control relaunch updates parent record and preserves on failure"
 }
 
+# --- T18: only an explicit positive persist answer releases the restart -------
+# A mate that answers that it could not write its open records down, or answers
+# without the requested save receipt, keeps its agent and its conversation:
+# nothing is stopped, no re-read message is sent on top of its answer, and the
+# pass reports the stop in its output and exit status.
+assert_persist_answer_stops_local() {  # <verb> <note> <expected-fragment> <label> [with-receipt] [header]
+  local verb=$1 note=$2 fragment=$3 label=$4 initial=${5:-} header=${6:-} dir out rc
+  dir=$(new_case "stop-$verb")
+  add_local_mate "$dir" sm1
+  arm_answer "$dir" sm1
+  if [ "$initial" = with-receipt ]; then
+    cat > "$dir/fake/on-doorbell" <<'SH'
+#!/usr/bin/env bash
+printf 'done [corr=%s]: Saved all open work.\n' "$FM_PENDING_REPLY_EXISTING_CORR" \
+  >> "$(cat "$FM_FAKE_DIR/answer-status")"
+SH
+    chmod +x "$dir/fake/on-doorbell"
+  fi
+
+  out=$(FM_FAKE_ANSWER_VERB="$verb" FM_FAKE_ANSWER_NOTE="$note" FM_FAKE_ANSWER_HEADER="$header" \
+    run_restart "$dir" fm-sm1); rc=$?
+
+  if [ "$initial" = with-receipt ]; then
+    assert_contains "$(head -1 "$dir/home/state/sm1.status")" ']: Saved all open work.' \
+      "the mate must have sent the receipt before the correction"
+  fi
+  expect_code 3 "$rc" "$label must not count as a clean restart"$'\n'"$out"
+  assert_contains "$out" "stopped: sm1: $fragment" "$label must stop the restart and say why"
+  case "$note" in
+    *'<corr>'*)
+      note=${note#*'<corr>'}
+      note=${note#']'}
+      ;;
+  esac
+  assert_contains "$out" "$note" "$label must carry the mate's own words"
+  assert_not_contains "$out" "restarted: sm1" "$label must not restart the mate"
+  assert_not_contains "$out" "nudged: sm1" "$label must leave the mate untouched, without a re-read message"
+  assert_contains "$out" "summary: 0 of 1 restarted, 0 nudged, 0 unreached, 1 stopped" \
+    "$label must be counted as stopped"
+  ! grep -Eq '^/(exit|quit)$' "$dir/fake/literal" \
+    || fail "$label still stopped the agent"
+  assert_absent "$dir/home/state/sm1.control-relaunch" \
+    "$label still opened a restart transaction"
+  [ "$(grep -c '^: Firstmate instruction waiting: ' "$dir/fake/submitted")" -eq 1 ] \
+    || fail "$label must leave the mate with only the persist request"$'\n'"$(cat "$dir/fake/submitted")"
+}
+
+test_negative_persist_answer_stops_local_restart() {
+  assert_persist_answer_stops_local blocked "could not write the open records" \
+    "it answered that its open work is not saved" "a blocked answer"
+  assert_persist_answer_stops_local failed "task store refused the write" \
+    "it answered that its open work is not saved" "a failed answer"
+  assert_persist_answer_stops_local needs-decision "which records to keep" \
+    "it answered that its open work is not saved" "a needs-decision answer"
+  pass "T18 a negative persist answer stops the local restart and reports it"
+}
+
+test_unclear_persist_answer_stops_local_restart() {
+  assert_persist_answer_stops_local working "looking at it" \
+    "its answer did not confirm that its open work is saved" "a working answer"
+  assert_persist_answer_stops_local note "will get to it" \
+    "its answer did not confirm that its open work is saved" "a note answer"
+  assert_persist_answer_stops_local 'done' "saved one record; the other write failed" \
+    "its answer did not confirm that its open work is saved" "a partial save"
+  assert_persist_answer_stops_local 'done' "Saved all open work. One write failed." \
+    "its answer did not confirm that its open work is saved" "a contradicted receipt"
+  pass "T19 an unclear persist answer stops the local restart and reports it"
+}
+
+test_negative_persist_answer_stops_remote_restart() {
+  local dir out rc
+  dir=$(new_case remote-stop)
+  setup_remote_case "$dir" sm2 ok
+  export FM_FAKE_ANSWER_STATUS="$dir/home/state/sm2.status"
+  out=$(FM_FAKE_ANSWER_VERB=failed FM_FAKE_ANSWER_NOTE="could not write the open records" \
+    run_restart "$dir" fm-sm2); rc=$?
+  unset FM_FAKE_ANSWER_STATUS
+
+  expect_code 3 "$rc" "a remote negative answer must not count as a clean restart"$'\n'"$out"
+  assert_contains "$out" "stopped: sm2: it answered that its open work is not saved" \
+    "a remote negative answer must stop the restart and say why"
+  assert_not_contains "$out" "restarted: sm2" "a remote negative answer must not restart the mate"
+  ! grep -q '^fm-remote-secondmate-control.sh relaunch' "$dir/ssh.log" \
+    || fail "a remote negative answer still crossed the hop to relaunch"$'\n'"$(cat "$dir/ssh.log")"
+  [ "$(grep -c '^fm-remote-secondmate-control.sh send' "$dir/ssh.log")" -eq 1 ] \
+    || fail "a remote negative answer must leave the mate with only the persist request"$'\n'"$(cat "$dir/ssh.log")"
+  pass "T20 a negative persist answer stops the remote restart and reports it"
+}
+
+test_negative_or_unclear_reply_vetoes_save_receipt() {
+  assert_persist_answer_stops_local blocked 'one record was never written' \
+    'it answered that its open work is not saved' 'a blocked correction' with-receipt
+  assert_persist_answer_stops_local blocked 'one record was never written' \
+    'it answered that its open work is not saved' 'a recovery correction with repeated correlation' \
+    with-receipt 'blocked <corr> <corr> [key=save]'
+  assert_persist_answer_stops_local blocked 'one record was never written' \
+    'it answered that its open work is not saved' 'a correction with intervening tags' \
+    with-receipt 'blocked [key=save] [source=recovery] [<corr>]'
+  assert_persist_answer_stops_local blocked 'one record was never written' \
+    'it answered that its open work is not saved' 'a correction with brackets inside a source tag' \
+    with-receipt 'blocked [<corr>] [source=retry[2]]'
+  assert_persist_answer_stops_local blocked '[<corr>] one record could not be written' \
+    'it answered that its open work is not saved' 'a correction with a bracketed note-head correlation' \
+    with-receipt blocked
+  assert_persist_answer_stops_local blocked '<corr> one record could not be written' \
+    'it answered that its open work is not saved' 'a correction with a bare note-head correlation' \
+    with-receipt blocked
+  assert_persist_answer_stops_local blocked '[key=save] [<corr>] one record was never written' \
+    'it answered that its open work is not saved' 'a bracketed correlation after a note-head key' \
+    with-receipt blocked
+  assert_persist_answer_stops_local blocked '[key=save] <corr> one record was never written' \
+    'it answered that its open work is not saved' 'a bare correlation after a note-head key' \
+    with-receipt blocked
+  assert_persist_answer_stops_local note 'I may have missed a record' \
+    'its answer did not confirm that its open work is saved' 'an unclear correction' with-receipt
+  pass "a negative or unclear correction vetoes an earlier save receipt"
+}
+
+test_non_utf8_correction_vetoes_save_receipt() {
+  local utf8_locale
+  utf8_locale=$(locale -a | awk 'tolower($0) ~ /utf-?8$/ { print; exit }')
+  LC_ALL="${utf8_locale:-C}" assert_persist_answer_stops_local blocked \
+    $'one record was never written: caf\351' \
+    'it answered that its open work is not saved' 'a non-UTF-8 correction' with-receipt
+  pass "a non-UTF-8 correction vetoes an earlier save receipt"
+}
+
+test_incomplete_save_evidence_stops_restart() {
+  local mode dir out rc expected
+  for mode in unterminated scan-error; do
+    dir=$(new_case "$mode")
+    add_local_mate "$dir" sm1
+    cat > "$dir/fake/on-doorbell" <<'SH'
+#!/usr/bin/env bash
+corr=${FM_PENDING_REPLY_EXISTING_CORR:-}
+[ -n "$corr" ] || exit 0
+status="${FM_FAKE_DIR%/fake}/home/state/sm1.status"
+printf 'done [corr=%s]: Saved all open work.' "$corr" >> "$status"
+if [ "$FM_FAKE_SAVE_MODE" = scan-error ]; then
+  printf '\nblocked [corr=%s]: one record was never written\n' "$corr" >> "$status"
+fi
+SH
+    chmod +x "$dir/fake/on-doorbell"
+
+    if [ "$mode" = scan-error ]; then
+      cat > "$dir/fakebin/grep" <<'SH'
+#!/usr/bin/env bash
+case "${1:-}:${3:-}" in
+  -aF:corr=*)
+    head -1 "${FM_FAKE_DIR%/fake}/home/state/sm1.status"
+    exit 2
+    ;;
+esac
+command -p grep "$@"
+SH
+      chmod +x "$dir/fakebin/grep"
+      expected='the parent status scan failed'
+    else
+      expected='unterminated status line'
+    fi
+
+    out=$(FM_FAKE_SAVE_MODE="$mode" FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1); rc=$?
+
+    if [ "$mode" = scan-error ]; then
+      assert_grep 'one record was never written' "$dir/home/state/sm1.status" \
+        "the status file must contain the correction hidden by the scan error"
+    else
+      [ "$(tail -c 1 "$dir/home/state/sm1.status")" = . ] \
+        || fail "the partial receipt fixture must end before a newline"
+    fi
+    expect_code 3 "$rc" "$mode save evidence must not release the restart"$'\n'"$out"
+    assert_contains "$out" 'stopped: sm1: its answer did not confirm that its open work is saved' \
+      "$mode save evidence must be reported as unclear"
+    assert_contains "$out" "$expected" "the pass must report why $mode save evidence was inconclusive"
+    ! grep -Eq '^/(exit|quit)$' "$dir/fake/literal" \
+      || fail "$mode save evidence sent an exit command"
+  done
+  pass "a partial line or failed status scan cannot release the restart"
+}
+
+test_unrelated_headers_do_not_veto_save_receipt() {
+  local dir out rc
+  dir=$(new_case tag-first)
+  add_local_mate "$dir" sm1
+  arm_answer "$dir" sm1
+  cat > "$dir/fakebin/openssl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' abcdef0123456789
+SH
+  chmod +x "$dir/fakebin/openssl"
+  cat > "$dir/fake/on-doorbell" <<'SH'
+#!/usr/bin/env bash
+corr=${FM_PENDING_REPLY_EXISTING_CORR:-}
+[ -n "$corr" ] || exit 0
+printf '[key=save] blocked corr=%s: still writing\n' "$corr" \
+  >> "$(cat "$FM_FAKE_DIR/answer-status")"
+printf 'blocked [corr=%s]: a different correlation\n' "$(printf '%s' "$corr" | tr 'a-f' 'A-F')" \
+  >> "$(cat "$FM_FAKE_DIR/answer-status")"
+printf 'blocked [corr=ffffffffffffffff]: [corr=%s] another request is blocked\n' "$corr" \
+  >> "$(cat "$FM_FAKE_DIR/answer-status")"
+SH
+  chmod +x "$dir/fake/on-doorbell"
+
+  out=$(run_restart "$dir" sm1); rc=$?
+
+  assert_grep '[key=save] blocked corr=' "$dir/home/state/sm1.status" \
+    "the tag-first status must be present on the parent channel"
+  assert_grep 'blocked [corr=ABCDEF0123456789]' "$dir/home/state/sm1.status" \
+    "the case-changed reply must be present on the parent channel"
+  assert_grep 'blocked [corr=ffffffffffffffff]: [corr=abcdef0123456789]' "$dir/home/state/sm1.status" \
+    "the reply with conflicting header and note correlations must be present on the parent channel"
+  expect_code 0 "$rc" "only a reply with the issued correlation and a leading verb can veto the receipt"$'\n'"$out"
+  assert_contains "$out" 'restarted: sm1' "the pass must report the restart"
+  assert_grep '/exit' "$dir/fake/submitted" "the mate must receive the exit command"
+  pass "tag-first and differently correlated replies do not veto a save receipt"
+}
+
+test_operator_close_does_not_count_as_a_save_reply() {
+  local dir out rc
+  dir=$(new_case operator-close)
+  add_local_mate "$dir" sm1
+  cat > "$dir/fake/on-doorbell" <<'SH'
+#!/usr/bin/env bash
+corr=${FM_PENDING_REPLY_EXISTING_CORR:-}
+[ -n "$corr" ] || exit 0
+printf 'resolved [key=pending-reply-%s]: pending-reply-resolved: task=sm1 pending-reply-id=%s via=operator-resolve-key\n' \
+  "$corr" "$corr" >> "${FM_FAKE_DIR%/fake}/home/state/sm1.status"
+SH
+  chmod +x "$dir/fake/on-doorbell"
+
+  out=$(FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm1); rc=$?
+
+  assert_grep 'via=operator-resolve-key' "$dir/home/state/sm1.status" \
+    "the operator close must be present on the parent channel"
+  expect_code 3 "$rc" "an operator close does not confirm a save"$'\n'"$out"
+  assert_contains "$out" 'nudged: sm1: it did not confirm within 0s' \
+    "an operator close without a mate reply follows the timeout path"
+  assert_not_contains "$out" 'stopped: sm1' "an operator close is not a mate reply"
+  ! grep -Eq '^/(exit|quit)$' "$dir/fake/literal" \
+    || fail "an operator close released the restart"
+  pass "an operator closure leaves the save request unanswered at the restart gate"
+}
+
+test_usage_includes_all_exit_statuses
 test_persist_gates_and_asks_only_for_open_records
 test_persist_precedes_restart
 test_arrived_answer_precedes_deadline_check
@@ -1071,7 +1362,7 @@ test_remote_exit_timeout_keeps_first_diagnostic
 test_unreachable_host_is_reported_unknown
 test_slow_exit_dialog_observation_does_not_block_restart
 test_slow_local_exit_dialog_observation_does_not_block_restart
-test_concurrent_reply_cannot_release_persist_gate
+test_concurrent_reply_does_not_change_persist_outcome
 test_persist_waits_are_polled_together
 test_post_stop_failure_is_reported_unreached
 test_lost_lifecycle_enter_cannot_complete_restart
@@ -1081,5 +1372,13 @@ test_result_published_while_reaping_is_honored
 test_already_current_mate_restarts_end_to_end
 test_already_current_unprovable_mate_stays_on_the_nudge_path
 test_remote_secondmate_control_relaunch_updates_parent_record
+test_negative_persist_answer_stops_local_restart
+test_unclear_persist_answer_stops_local_restart
+test_negative_persist_answer_stops_remote_restart
+test_negative_or_unclear_reply_vetoes_save_receipt
+test_non_utf8_correction_vetoes_save_receipt
+test_incomplete_save_evidence_stops_restart
+test_unrelated_headers_do_not_veto_save_receipt
+test_operator_close_does_not_count_as_a_save_reply
 
 echo "# all fm-secondmate-restart tests passed"
