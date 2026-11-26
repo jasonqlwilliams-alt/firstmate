@@ -230,6 +230,20 @@ Valid cleanup removed only the exact task-bound target and left the control wind
 The metadata-only validation covers tmux, Herdr, Zellij, Orca, and cmux before backend dispatch.
 Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, and Muse share that backend cleanup boundary; their harness-specific hook files, tokens, transcript bindings, and session-log sidecars are cleaned only after it, so no harness needs a separate endpoint parser.
 
+The caller-safe window close was verified on 2026-11-26 with tmux 3.7c on Linux x86_64 using a private socket and disposable processes.
+
+```sh
+TMPDIR="$PWD" bin/fm-test-run.sh tests/fm-teardown-endpoint-safety.test.sh
+```
+
+```text
+ok - fm-teardown: missing exact windows and unreadable pane PIDs prevent the tmux close
+ok - fm-teardown: unreadable caller ancestry prevents the tmux close
+ok - fm-teardown: a background caller in the inactive tmux pane survives and cleanup finishes
+ok - fm-teardown: tmux refuses a close when the verified pane inventory changes
+ok - fm-teardown: exact tmux cleanup preserves invalid and prefix-matched neighbors while removing only the recorded target
+```
+
 ## Claude workspace trust
 
 Verified 2026-09-03 on Claude Code 2.1.259.

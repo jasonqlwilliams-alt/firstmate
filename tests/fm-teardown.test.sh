@@ -2710,7 +2710,10 @@ test_forced_secondmate_teardown_holds_descendant_lifecycle_locks() {
   : > "$case_dir/treehouse.log"
   cat > "$case_dir/fakebin/tmux" <<SH
 #!/usr/bin/env bash
-printf '%s\n' "\$*" >> "$case_dir/kill.log"
+case "\$1" in
+  list-windows) printf '@1:1:%s:\n' "\$\$" ;;
+  if-shell) printf '%s\n' "\$*" >> "$case_dir/kill.log" ;;
+esac
 exit 0
 SH
   cat > "$case_dir/fakebin/treehouse" <<SH
@@ -4412,7 +4415,9 @@ EOF
 #!/usr/bin/env bash
 if [ "${1:-}" = display-message ] && [ "${*: -1}" = '#{pane_pid}' ]; then
   cat "$CASE_DIR/target"
-elif [ "${1:-}" = kill-window ]; then
+elif [ "${1:-}" = list-windows ]; then
+  printf '@1:1:%s:\n' "$(cat "$CASE_DIR/target")"
+elif [ "${1:-}" = if-shell ]; then
   : > "$CASE_DIR/window-closed"
 fi
 SH
@@ -4487,7 +4492,12 @@ PL
   assert_absent "$case_dir/term" 'fallback sent TERM to the target group'
   assert_grep 'warning: lsof is unavailable on this platform; leaving leaked processes running for tmux task task-x1 because teardown cannot verify caller safety' \
     "$case_dir/stderr" "fallback did not explain why it skipped reaping: $(cat "$case_dir/stderr")"
-  assert_present "$case_dir/window-closed" 'teardown did not request endpoint closure'
+  if [ "$mode" = caller ]; then
+    assert_absent "$case_dir/window-closed" 'teardown requested closure of the caller window'
+    assert_grep 'is teardown or its ancestor' "$case_dir/stderr" 'caller window refusal had no diagnostic'
+  else
+    assert_present "$case_dir/window-closed" 'teardown did not request endpoint closure'
+  fi
   assert_absent "$case_dir/tasktmp" 'teardown left the task temp directory'
   assert_absent "$case_dir/state/task-x1.meta" 'teardown left the task record'
   assert_absent "$case_dir/state/task-x1.backlog-close" 'teardown left a pending backlog close'

@@ -5,6 +5,8 @@
 # scout tasks before reporting success (a secondmate teardown transitions none,
 # since secondmates are not backlog items), then refresh/prune the project's
 # clone for PR-based ship tasks.
+# The tmux window close is best-effort. Teardown warns and leaves the window
+# open unless it can verify that every pane is outside the caller's ancestry.
 # Removing state/<id>.meta and landing the backlog transition are one step, not
 # two: bin/fm-backlog-transition-lib.sh owns that invariant, and both halves run
 # under the task's own meta lock before this script reports success. Because the
@@ -2309,6 +2311,31 @@ task_pid_list_contains() {  # <pid-list> <pid>
   printf '%s\n' "$1" | grep -Fxq "$2"
 }
 
+teardown_close_tmux_window() {  # <session:window>
+  local target=$1 snapshot pane_pids protected pid
+  if ! fm_backend_source tmux || ! snapshot=$(fm_backend_tmux_close_snapshot "$target"); then
+    echo "warning: leaving tmux window $target open: cannot verify the exact window and its pane PIDs" >&2
+    return 1
+  fi
+  if [ "$TEARDOWN_LAUNCH_SESSION_VERIFIED" != 1 ] || [ -z "$TEARDOWN_REAP_PROTECTED_PIDS" ] \
+     || ! protected=$(task_reap_filter_pids "$TEARDOWN_REAP_PROTECTED_PIDS" "") \
+     || [[ "$protected" == 'incomplete '* ]]; then
+    echo "warning: leaving tmux window $target open: cannot verify teardown caller ancestry" >&2
+    return 1
+  fi
+  pane_pids=${snapshot#*:*:}
+  for pid in ${pane_pids//:/ }; do
+    if [[ " $protected " == *" $pid "* ]]; then
+      echo "warning: leaving tmux window $target open: pane PID $pid is teardown or its ancestor" >&2
+      return 1
+    fi
+  done
+  if ! fm_backend_tmux_close_if_unchanged "$snapshot"; then
+    echo "warning: tmux window $target close could not be confirmed against the verified pane snapshot" >&2
+    return 1
+  fi
+}
+
 require_treehouse_return_caller_outside() {  # <copy>
   local dir=$1 protected root scanner pids pid
   if [ "$TEARDOWN_LAUNCH_SESSION_VERIFIED" != 1 ] || [ -z "$TEARDOWN_REAP_PROTECTED_PIDS" ] \
@@ -3532,6 +3559,8 @@ cleanup_firstmate_home_children() {
           echo "error: herdr pane $child_t for child $child_id is not confirmed gone; retaining that child's durable identity records and stopping forced cleanup" >&2
           return 1
         fi
+      elif [ "$child_backend" = tmux ]; then
+        teardown_close_tmux_window "$child_t" || true
       elif [ "$child_backend" = zellij ]; then
         # Zellij titles are scoped by the owning home tag, so forced secondmate
         # cleanup must verify child tabs as that child home, not the parent.
@@ -4032,6 +4061,8 @@ elif [ "$BACKEND" = herdr ]; then
   else
     echo "warning: herdr session presentation lock path is unavailable; skipping the pane close rather than closing unlocked" >&2
   fi
+elif [ "$BACKEND" = tmux ]; then
+  teardown_close_tmux_window "$T" || true
 elif [ "$BACKEND" != orca ]; then
   fm_backend_kill "$BACKEND" "$T" "$(meta_value "$META" zellij_tab_id)" "fm-$ID" 2>/dev/null || true
 fi

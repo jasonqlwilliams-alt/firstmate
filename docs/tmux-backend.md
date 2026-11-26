@@ -46,6 +46,9 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 
 ## Current behavior and safety
 
+Teardown leaves a task window open with a warning if the window contains its caller or caller safety cannot be verified.
+The remaining cleanup proceeds, so an operator can close a retained window manually when it is safe.
+
 ### Exact window reads
 
 For a recorded `session:window` target, Firstmate filters tmux's inventory by literal session and window names and reads by window ID when the matches identify one distinct window.
@@ -131,4 +134,4 @@ tests/fm-tmux-submit-busy.test.sh
 tests/fm-bootstrap.test.sh
 ```
 
-[`verification/runtime-backends.md`](verification/runtime-backends.md#tmux) records the active foreground-process and submit evidence.
+[`verification/runtime-backends.md`](verification/runtime-backends.md#tmux) records the active foreground-process and submit evidence, including [cleanup endpoint identity](verification/runtime-backends.md#cleanup-endpoint-identity).
