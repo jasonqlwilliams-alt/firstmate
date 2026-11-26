@@ -4385,12 +4385,24 @@ SH
 )
 
 test_non_linux_process_group_reap() (
-  local mode=$1 case_dir test_path real_uname rc=0
-  case_dir=$(make_case "fallback-group-$mode")
+  local mode=$1 scope=${2:-worktree} case_dir test_path real_uname rc=0
+  case_dir=$(make_case "fallback-group-$mode-$scope")
   write_meta "$case_dir" local-only ship
-  git -C "$case_dir/project" worktree remove "$case_dir/wt" || exit 1
+  if [ "$scope" = tasktmp ]; then
+    mkdir -p "$case_dir/pool/1"
+    git -C "$case_dir/project" worktree move "$case_dir/wt" "$case_dir/pool/1/project" || exit 1
+    ln -s pool/1/project "$case_dir/wt"
+    printf '{}\n' > "$case_dir/pool/treehouse-state.json"
+    printf 'task=other-task\nhome=%s\n' "$case_dir/home" > "$case_dir/pool/1/.fm-slot-owner"
+  else
+    git -C "$case_dir/project" worktree remove "$case_dir/wt" || exit 1
+  fi
   mkdir "$case_dir/tasktmp"
   printf 'tasktmp=%s\n' "$case_dir/tasktmp" >> "$case_dir/state/task-x1.meta"
+  seed_backlog_in_flight "$case_dir" || fail 'could not seed the fallback backlog'
+  printf 'PR closure evidence\n' > "$case_dir/state/task-x1.pr-poll-closed"
+  ln -s "$(command -v tasks-axi)" "$case_dir/fakebin/tasks-axi"
+  ln -s "$(command -v node)" "$case_dir/fakebin/node"
   test_path=$(make_path_without_lsof "$case_dir")
   real_uname=$(command -v uname)
   cat > "$case_dir/fakebin/uname" <<EOF
@@ -4401,14 +4413,21 @@ EOF
 #!/usr/bin/env bash
 if [ "${1:-}" = display-message ] && [ "${*: -1}" = '#{pane_pid}' ]; then
   cat "$CASE_DIR/target"
+elif [ "${1:-}" = kill-window ]; then
+  : > "$CASE_DIR/window-closed"
 fi
 SH
   cat > "$case_dir/fakebin/ps" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
   '-u '*'-o pid=,command=') exit 0 ;;  # Disable the independent host-wide orphan sweep.
-  '-A -o pid= -o ppid= -o pgid=')
-    if [ "$TEST_MODE" = hidden ] || { [ "$TEST_MODE" = hidden-after-term ] && [ -e "$CASE_DIR/term" ]; }; then
+  '-A -o pid= -o ppid='|'-A -o pid= -o ppid= -o pgid=')
+    if [ "$TEST_MODE" = reparented ]; then
+      "$REAL_PS_FOR_TEST" "$@" | awk -v orphan="$(cat "$CASE_DIR/reparented")" '$1 == orphan { $2 = 1 } { print }'
+      exit
+    fi
+    if [ "${*: -1}" = pgid= ] \
+       && { [ "$TEST_MODE" = hidden ] || { [ "$TEST_MODE" = hidden-after-term ] && [ -e "$CASE_DIR/term" ]; }; }; then
       "$REAL_PS_FOR_TEST" "$@" | awk -v caller="$(cat "$CASE_DIR/caller")" '$1 != caller'
       exit
     fi
@@ -4425,7 +4444,8 @@ SH
     perl - "$TEARDOWN" "$REAL_PS_FOR_TEST" > "$case_dir/stdout" 2> "$case_dir/stderr" <<'PL' || rc=$?
 use strict;
 use warnings;
-use POSIX qw(WNOHANG);
+use POSIX qw(SIGKILL WIFSIGNALED WNOHANG WTERMSIG);
+use Time::HiRes qw(sleep);
 my ($teardown, $ps) = @ARGV;
 my $dir = $ENV{CASE_DIR};
 sub record {
@@ -4439,7 +4459,9 @@ setpgrp(0, 0) or die $!;
 record('caller', $$);
 my $mode = $ENV{TEST_MODE};
 my $leak;
-if ($mode ne 'caller' && $mode ne 'ancestor') {
+if ($mode eq 'caller' || $mode eq 'ancestor' || $mode eq 'reparented') {
+    $SIG{TERM} = sub { record('term', $$) };
+} else {
     $leak = fork // die $!;
     if (!$leak) {
         setpgrp(0, 0) or die $!;
@@ -4451,20 +4473,30 @@ if ($mode ne 'caller' && $mode ne 'ancestor') {
     }
     for (1..100) {
         last if -e "$dir/leak-ready";
-        select undef, undef, undef, 0.05;
+        sleep 0.05;
     }
     die 'leak group did not start' unless -e "$dir/leak-ready";
 }
 my $caller = $$;
 record('target', $leak // $caller);
-my $cleanup = fork // die $!;
+my $cleanup = (open my $output, '-|') // die $!;
 if (!$cleanup) {
     setpgrp(0, 0) or die $!;
     my $caller_group = qx($ps -o pgid= -p $caller);
     my $cleanup_group = qx($ps -o pgid= -p $$);
     die 'caller and cleanup must occupy separate groups'
         unless $caller_group =~ /^\s*$caller\s*$/ && $cleanup_group =~ /^\s*$$\s*$/;
-    if ($mode eq 'ancestor') {
+    if ($mode eq 'reparented') {
+        my $wrapper = $$;
+        my $child = fork // die $!;
+        exit 0 if $child;
+        for (1..100) {
+            last if getppid() != $wrapper;
+            sleep 0.05;
+        }
+        die 'teardown did not reparent' if getppid() == $wrapper;
+        record('reparented', $$);
+    } elsif ($mode eq 'ancestor') {
         my $child = fork // die $!;
         if ($child) {
             waitpid($child, 0);
@@ -4474,29 +4506,49 @@ if (!$cleanup) {
     chdir $dir or die $!;
     exec $teardown, 'task-x1' or die $!;
 }
-waitpid($cleanup, 0);
-record('cleanup-status', ($? & 127) ? 128 + ($? & 127) : $? >> 8);
+alarm 25;
+print while <$output>;
+close $output;
+my $cleanup_status = $?;
+alarm 0;
+record('cleanup-status', WIFSIGNALED($cleanup_status) ? 128 + WTERMSIG($cleanup_status) : $cleanup_status >> 8);
 if (defined $leak) {
     my $leak_finished = waitpid($leak, WNOHANG);
-    record('leak-finished', $leak_finished == $leak ? 1 : 0);
+    for (1..100) {
+        last if $leak_finished || $mode ne 'leak';
+        sleep 0.05;
+        $leak_finished = waitpid($leak, WNOHANG);
+    }
+    my $leak_status = $?;
+    die 'could not wait for the fixture leak' if $leak_finished == -1;
+    record('leak-status', !$leak_finished ? 'running'
+        : WIFSIGNALED($leak_status) && WTERMSIG($leak_status) == SIGKILL ? 'SIGKILL' : 'other exit');
     if (!$leak_finished) {
         kill 'KILL', $leak;
         waitpid($leak, 0);
     }
 }
 PL
-  [ "$rc" = 0 ] || fail "fallback-group-$mode: fixture exited $rc: $(cat "$case_dir/stderr")"
+  [ "$rc" = 0 ] || fail "fallback-group-$mode-$scope: fixture exited $rc: $(cat "$case_dir/stderr")"
   case "$mode" in
     caller|ancestor)
       assert_grep "refusing to signal a process group containing teardown or an ancestor" "$case_dir/stderr" \
         "fallback must protect the caller group: $(cat "$case_dir/stderr")"
-      expect_code 0 "$(cat "$case_dir/cleanup-status")" 'protected group should be skipped'
+      expect_code 1 "$(cat "$case_dir/cleanup-status")" 'protected group should refuse teardown'
+      assert_absent "$case_dir/term" 'fallback sent TERM to the caller group'
+      ;;
+    reparented)
+      assert_present "$case_dir/reparented" "fixture did not orphan teardown before startup: $(cat "$case_dir/stderr")"
+      expect_code 0 "$(cat "$case_dir/cleanup-status")" 'background wrapper did not exit successfully'
+      assert_grep "cannot verify teardown caller ancestry" "$case_dir/stderr" \
+        "fallback did not refuse the orphaned startup ancestry: $(cat "$case_dir/stderr")"
+      assert_absent "$case_dir/term" 'fallback sent TERM to the original caller group'
       ;;
     hidden|hidden-after-term)
-      assert_grep "cannot verify teardown caller ancestry" "$case_dir/stderr" 'fallback must report unverified ancestry'
+      assert_grep "cannot verify teardown caller ancestry" "$case_dir/stderr" \
+        "fallback did not report unverified ancestry: $(cat "$case_dir/stderr")"
       expect_code 1 "$(cat "$case_dir/cleanup-status")" 'unverified ancestry should refuse teardown'
-      assert_present "$case_dir/tasktmp" 'ancestry refusal removed the task temp directory'
-      expect_code 0 "$(cat "$case_dir/leak-finished")" 'fallback killed the fixture leak'
+      [ "$(cat "$case_dir/leak-status")" = running ] || fail 'fixture leak did not survive refusal'
       if [ "$mode" = hidden ]; then
         assert_absent "$case_dir/term" 'fallback sent TERM with hidden ancestry'
       else
@@ -4504,13 +4556,21 @@ PL
       fi
       ;;
     leak)
-      expect_code 0 "$(cat "$case_dir/cleanup-status")" 'unrelated group should be reaped'
+      expect_code 0 "$(cat "$case_dir/cleanup-status")" "unrelated group should be reaped: $(cat "$case_dir/stderr")"
       assert_present "$case_dir/term" 'fallback did not send TERM to the unrelated group'
       assert_grep 'force-killing leaked worktree process group' "$case_dir/stderr" 'fallback did not escalate'
-      expect_code 1 "$(cat "$case_dir/leak-finished")" 'unrelated group survived cleanup'
+      [ "$(cat "$case_dir/leak-status")" = SIGKILL ] || fail 'unrelated group did not die from SIGKILL'
+      assert_present "$case_dir/window-closed" 'teardown did not close the endpoint after reaping'
+      [ "$(backlog_row_state "$case_dir")" = done ] || fail 'successful teardown left the backlog item open'
       ;;
   esac
-  pass "non-Linux process-group fallback handles $mode"
+  if [ "$mode" != leak ]; then
+    assert_absent "$case_dir/window-closed" 'ancestry refusal closed the tmux window'
+    assert_present "$case_dir/tasktmp" 'ancestry refusal removed the task temp directory'
+    assert_pending_close_replay_preserves_task "$case_dir" task-x1 "$case_dir/home" \
+      || fail 'startup replay changed the retained task after a fallback refusal'
+  fi
+  pass "non-Linux process-group fallback handles $mode ($scope)"
 )
 
 test_lsof_absent_on_non_linux_preserves_tmux_process_group() {
@@ -5335,8 +5395,11 @@ SH
 
 test_non_linux_process_group_reap caller || exit 1
 test_non_linux_process_group_reap ancestor || exit 1
+test_non_linux_process_group_reap reparented || exit 1
 test_non_linux_process_group_reap hidden || exit 1
 test_non_linux_process_group_reap hidden-after-term || exit 1
+test_non_linux_process_group_reap hidden tasktmp || exit 1
+test_non_linux_process_group_reap hidden-after-term tasktmp || exit 1
 test_non_linux_process_group_reap leak || exit 1
 test_leaked_worktree_process_is_reaped
 test_lsof_absent_reaps_detached_linux_process visible || exit 1
