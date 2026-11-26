@@ -306,9 +306,7 @@
 #     which can be shared between homes. On Linux without lsof it uses
 #     `/proc/<pid>/cwd` for the owned worktree only. On other hosts without
 #     lsof, the early Treehouse preflight refuses before reaping. For cleanup
-#     without that preflight, teardown can only attempt to reap the tmux pane's
-#     process group. Before each signal, it skips any group containing teardown
-#     or a current or startup ancestor, and refuses cleanup if that check fails.
+#     without that preflight, teardown warns and skips this reap pass.
 #     Both scans can identify only processes whose working directory is readable.
 #     Both scans are bounded by process count and exclude teardown and its
 #     current and startup ancestors. Teardown sends TERM, then KILL after a
@@ -467,33 +465,16 @@ if [ "$KEEP_PANE" = 1 ] \
   exit 2
 fi
 
-task_reap_filter_pids() {  # <previously-protected-pids> <candidate-pids> [<target-pgid> <leader-pid>]
-  local parents group=${3:-} leader=${4:-}
-  local -a fields=(-A -o pid= -o ppid=)
+task_reap_filter_pids() {  # <previously-protected-pids> <candidate-pids>
+  local parents
   case "$1" in 'incomplete '*) return 1 ;; esac
-  [ -z "$group" ] || fields+=(-o pgid=)
-  parents=$(ps "${fields[@]}" 2>/dev/null) || return 1
-  printf '%s\n%s\n' "$parents" "$2" | awk -v self="$$" -v previous="$1" -v group="$group" -v leader="$leader" '
-    group != "" && NF {
-      if (NF != 3 || $1 !~ /^[0-9]+$/ || $2 !~ /^[0-9]+$/ ||
-          $3 !~ /^[0-9]+$/ || $1 in parent) {
-        invalid = 1
-        exit
-      }
-      parent[$1] = $2
-      pgid[$1] = $3
-      next
-    }
+  parents=$(ps -A -o pid= -o ppid= 2>/dev/null) || return 1
+  printf '%s\n%s\n' "$parents" "$2" | awk -v self="$$" -v previous="$1" '
     NF == 2 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { parent[$1] = $2 }
     /^[0-9]+$/ { candidates[$0] = 1; matched = 1 }
     END {
-      if (invalid) exit 1
       split(previous, saved, " ")
-      for (i in saved) {
-        excluded[saved[i]] = 1
-        if (saved[i] > 1 && saved[i] != self) startup_caller = 1
-      }
-      if (group != "" && !startup_caller) exit 1
+      for (i in saved) excluded[saved[i]] = 1
       for (cursor = self; cursor > 0; cursor = parent[cursor]) {
         if (cursor in ancestors) exit 1
         ancestors[cursor] = 1
@@ -501,19 +482,8 @@ task_reap_filter_pids() {  # <previously-protected-pids> <candidate-pids> [<targ
         if (!(cursor in parent)) break
       }
       if (cursor != 0) {
-        if (matched || group != "") exit 1
+        if (matched) exit 1
         printf "incomplete "
-      }
-      if (group != "") {
-        # A saved ancestor missing from the snapshot may be hidden.
-        for (pid in excluded) {
-          if (!(pid in pgid)) exit 1
-          if (pgid[pid] == group) protected = 1
-        }
-        if (protected) print "protected"
-        else if (pgid[leader] == group) print "clear"
-        else print "changed"
-        exit
       }
       for (pid in excluded) printf "%s ", pid
       print ""
@@ -2386,59 +2356,13 @@ task_pids_under_roots() {  # <scanner> <dir>...
   } <<< "$ancestry_scan"
 }
 
-reap_task_backend_process_group() {  # <label>
-  local label=$1 leader leader_start pgid group_safety signal
-  if [ "$BACKEND" != tmux ]; then
-    echo "warning: lsof is unavailable; cannot resolve a process-group fallback for $BACKEND task $ID" >&2
-    return 0
-  fi
-  leader=$(tmux display-message -p -t "$T" '#{pane_pid}' 2>/dev/null) || leader=""
-  case "$leader" in ''|*[!0-9]*)
-    echo "warning: lsof is unavailable; cannot resolve the tmux pane process group for $ID" >&2
-    return 0
-    ;;
-  esac
-  leader_start=$(task_process_identity "$leader") || {
-    echo "warning: lsof is unavailable; cannot identify the tmux pane process group for $ID" >&2
-    return 0
-  }
-  pgid=$(ps -o pgid= -p "$leader" 2>/dev/null) || pgid=""
-  pgid=$(fm_nm_trim "$pgid")
-  case "$pgid" in ''|*[!0-9]*|0|1)
-    echo "warning: lsof is unavailable; cannot resolve the tmux pane process group for $ID" >&2
-    return 0
-    ;;
-  esac
-  for signal in TERM KILL; do
-    task_process_identity_matches "$leader" "$leader_start" || return 0
-    if [ -z "$TEARDOWN_REAP_PROTECTED_PIDS" ] \
-       || ! group_safety=$(task_reap_filter_pids "$TEARDOWN_REAP_PROTECTED_PIDS" "" "$pgid" "$leader"); then
-      echo "REFUSED: cannot verify teardown caller ancestry for process group $pgid of $ID; preserving the worktree/tasktmp for manual inspection or retry." >&2
-      return 1
-    fi
-    if [ "$group_safety" = protected ]; then
-      echo "REFUSED: lsof is unavailable; refusing to signal a process group containing teardown or an ancestor for $ID" >&2
-      return 1
-    fi
-    [ "$group_safety" = clear ] || return 0
-    if [ "$signal" = TERM ]; then
-      echo "teardown: reaping leaked $label process group for $ID: $pgid" >&2
-      kill -TERM -- "-$pgid" 2>/dev/null || true
-      sleep 1
-    elif kill -0 -- "-$pgid" 2>/dev/null; then
-      echo "teardown: force-killing leaked $label process group for $ID: $pgid" >&2
-      kill -KILL -- "-$pgid" 2>/dev/null || true
-    fi
-  done
-}
-
 # See Fix 2 in the script header for scanner scope and refusal rules.
 reap_task_worktree_processes() {  # <label> <owned-worktree> <tasktmp>
   local label=$1 worktree=$2 tasktmp=$3 scanner pids pid identity current_pids i pass=1 max_passes=3
   local -a tracked_pids tracked_identities remaining_pids remaining_identities
   if ! scanner=$(task_cwd_scanner); then
-    reap_task_backend_process_group "$label"
-    return $?
+    echo "warning: lsof is unavailable on this platform; leaving leaked processes running for $BACKEND task $ID because teardown cannot verify caller safety" >&2
+    return 0
   fi
   set -- "$worktree"
   [ "$scanner" != lsof ] || set -- "$worktree" "$tasktmp"
@@ -3822,7 +3746,7 @@ teardown_legacy_stamp_rollback() {
   [ "$(wc -c < "$META" | tr -d ' ')" = "$TEARDOWN_LEGACY_PRESTAMP_SIZE" ]
 }
 
-teardown_backlog_rollback() {
+teardown_treehouse_backlog_rollback() {
   if [ -n "$BACKLOG_CLOSE_BACKUP" ]; then
     if ! fm_backlog_atomic_transition publish "$BACKLOG_CLOSE_BACKUP" "$BACKLOG_CLOSE_MARKER" "pending-close record" "$STATE"; then
       echo "error: could not restore the prior pending backlog transition for $ID from $BACKLOG_CLOSE_BACKUP ($FM_BACKLOG_TRANSITION_ERROR)" >&2
@@ -3848,7 +3772,7 @@ if teardown_owns_worktree && [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
        || ! cleanup_stale_lock_for_safety_check "$WT" \
        || ! validate_worktree_teardown_safety; then
       if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ] && { [ -e "$WT" ] || [ -L "$WT" ]; }; then
-        teardown_backlog_rollback || exit 1
+        teardown_treehouse_backlog_rollback || exit 1
       fi
       exit 1
     fi
@@ -3892,7 +3816,7 @@ BACKLOG_TRANSITION_FLAGS=()
 BACKLOG_SKIP_REASON=
 if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
   require_treehouse_return_caller_outside "$WT" || {
-    teardown_backlog_rollback || exit 1
+    teardown_treehouse_backlog_rollback || exit 1
     exit 1
   }
 fi
@@ -3901,7 +3825,8 @@ if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
     echo "error: the pending backlog $BACKLOG_TRANSITION for $ID is not replayable; refusing destructive teardown" >&2
     exit 1
   }
-  if { [ -e "$BACKLOG_CLOSE_MARKER" ] || [ -L "$BACKLOG_CLOSE_MARKER" ]; } \
+  if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ] \
+     && { [ -e "$BACKLOG_CLOSE_MARKER" ] || [ -L "$BACKLOG_CLOSE_MARKER" ]; } \
      && ! teardown_treehouse_close_matches_task "$BACKLOG_CLOSE_MARKER" "$ID" "$STATE"; then
     if ! fm_backlog_record_present "$BACKLOG_CLOSE_MARKER" "pending-close record" "$STATE" \
        || ! BACKLOG_CLOSE_BACKUP=$(mktemp "$STATE/.$ID.backlog-close-before.XXXXXX") \
@@ -3974,20 +3899,15 @@ fi
 # kind=secondmate: a secondmate home's own runtime lifecycle is owned by the
 # dedicated process-event and firstmate-home removal machinery further below,
 # not by task-worktree cleanup.
-if [ "$KIND" != secondmate ]; then
-  if teardown_owns_worktree; then
-    reap_args=(worktree "$WT" "$TASK_TMP")
-    conclude_task_no_mistakes_run "$WT" || {
-      teardown_backlog_rollback || exit 1
-      exit 1
-    }
-  else
-    reap_args=(tasktmp "" "$TASK_TMP")
-  fi
-  if ! reap_task_worktree_processes "${reap_args[@]}"; then
-    teardown_backlog_rollback || exit 1
+if [ "$KIND" != secondmate ] && teardown_owns_worktree; then
+  if ! conclude_task_no_mistakes_run "$WT" || ! reap_task_worktree_processes worktree "$WT" "$TASK_TMP"; then
+    if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
+      teardown_treehouse_backlog_rollback || exit 1
+    fi
     exit 1
   fi
+elif [ "$KIND" != secondmate ]; then
+  reap_task_worktree_processes tasktmp "" "$TASK_TMP"
 fi
 
 # Fix 3 (see script header): sweep remote job workers abandoned by an already
@@ -4017,12 +3937,12 @@ elif [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
   if [ "$KEEP_PANE" = 1 ]; then
     teardown_kept_shell_sample || {
       echo "REFUSED: the preserved pane is no longer a verified detached shell; retaining the copy and records." >&2
-      teardown_backlog_rollback || exit 1
+      teardown_treehouse_backlog_rollback || exit 1
       exit 1
     }
   fi
   require_treehouse_return_caller_outside "$WT" || {
-    teardown_backlog_rollback || exit 1
+    teardown_treehouse_backlog_rollback || exit 1
     exit 1
   }
   # Kills remaining processes in the worktree (including the agent), resets, returns
@@ -4036,7 +3956,7 @@ elif [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
   treehouse_task_ref=$(git -C "$WT" symbolic-ref --quiet HEAD 2>/dev/null || true)
   teardown_treehouse_return "$WT" "$PROJ" "worktree" "$post_lock_cleanup_check" || {
     if [ -e "$WT" ] || [ -L "$WT" ]; then
-      teardown_backlog_rollback || exit 1
+      teardown_treehouse_backlog_rollback || exit 1
     fi
     echo "error: treehouse return failed for worktree $WT; teardown aborted" >&2
     exit 1
