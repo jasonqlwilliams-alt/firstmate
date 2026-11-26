@@ -14,6 +14,8 @@
 # park mark must be non-symlinks. Both actions honor the Pi supervision lease.
 # Both actions operate on supervision state, and mark also checks the runtime
 # endpoint. The task's copy, branch, and work stay unread and untouched.
+# Mark refuses Zellij, Orca, and cmux because their adapters cannot provide
+# the recovery-grade missing verdict required to confirm endpoint loss.
 #
 # <state>/<id>.parked-retained stores backend:target, a tab, and the spawn
 # generation. fm_backend_endpoint_park_identity treats a legacy teardown
@@ -131,7 +133,14 @@ BACKEND=$(fm_backend_of_meta "$META")
 TARGET=$(fm_backend_target_of_meta "$META")
 if ! ENDPOINT_STATE=$(FM_BACKEND_HERDR_ENDPOINT_META="$META" \
     fm_backend_agent_state "$BACKEND" "$TARGET" 2>/dev/null) || [ "$ENDPOINT_STATE" != missing ]; then
-  echo "error: task $ID's recorded endpoint could not be confirmed missing (${ENDPOINT_STATE:-unreadable})" >&2
+  case "$BACKEND:$ENDPOINT_STATE" in
+    zellij:unverified|orca:unverified|cmux:unverified)
+      echo "error: park mark refused for task $ID on $BACKEND because the backend cannot confirm endpoint loss" >&2
+      ;;
+    *)
+      echo "error: task $ID's recorded endpoint could not be confirmed missing (${ENDPOINT_STATE:-unreadable})" >&2
+      ;;
+  esac
   exit 1
 fi
 TMP=$(mktemp "$STATE/.fm-parked-retained.XXXXXX")
