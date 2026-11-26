@@ -861,7 +861,7 @@ fm_backend_send_literal() {  # <backend> <target> <text> [expected-label]
   shift
   fm_backend_source "$backend" || return 1
   case "$backend" in
-    tmux) fm_backend_tmux_send_literal "$@" ;;
+    tmux) fm_backend_tmux_send_literal "$1" "$2" ;;
     herdr) fm_backend_herdr_send_literal "$@" ;;
     zellij) fm_backend_zellij_send_literal "$@" ;;
     orca) fm_backend_orca_send_literal "$@" ;;

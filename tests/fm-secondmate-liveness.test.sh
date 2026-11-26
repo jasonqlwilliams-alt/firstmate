@@ -142,8 +142,8 @@ test_tmux_agent_state_classifies() {
   pass "fm_backend_tmux_agent_state: separates live, dead, missing, ambiguous, and unreadable"
 }
 
-test_tmux_agent_state_rejects_malformed_targets_before_probe() {
-  local fakebin marker target out
+test_tmux_liveness_rejects_malformed_targets_before_probe() {
+  local fakebin marker probe target out
   fakebin=$(fm_fakebin "$TMP_ROOT/tmux-malformed")
   marker="$TMP_ROOT/tmux-malformed-called"
   cat > "$fakebin/tmux" <<'SH'
@@ -153,14 +153,16 @@ printf 'bash\n'
 SH
   chmod +x "$fakebin/tmux"
 
-  for target in sess sess: :win sess:win:extra; do
-    out=$(PATH="$fakebin:$BASE_PATH" FM_TEST_TMUX_MARKER="$marker" \
-      bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state tmux "$1"' "$ROOT" "$target")
-    [ "$out" = unreadable ] || fail "malformed tmux target '$target' should classify as unreadable, got '$out'"
-    [ ! -e "$marker" ] || fail "malformed tmux target '$target' invoked tmux"
+  for probe in fm_backend_agent_state fm_backend_endpoint_state; do
+    for target in sess sess: :win sess:win:extra; do
+      out=$(PATH="$fakebin:$BASE_PATH" FM_TEST_TMUX_MARKER="$marker" \
+        bash -c '. "$0/bin/fm-backend.sh"; "$1" tmux "$2"' "$ROOT" "$probe" "$target")
+      [ "$out" = unreadable ] || fail "$probe should classify malformed target '$target' as unreadable, got '$out'"
+      [ ! -e "$marker" ] || fail "$probe invoked tmux for malformed target '$target'"
+    done
   done
 
-  pass "fm_backend_tmux_agent_state: rejects malformed targets before probing tmux"
+  pass "tmux liveness probes reject malformed targets before invoking tmux"
 }
 
 # --- unit level: fm_backend_herdr_agent_state -------------------------------
@@ -608,7 +610,7 @@ test_herdr_secondmate_home_binding() {
 
 test_herdr_secondmate_home_binding
 test_tmux_agent_state_classifies
-test_tmux_agent_state_rejects_malformed_targets_before_probe
+test_tmux_liveness_rejects_malformed_targets_before_probe
 test_herdr_agent_state_preserves_husk_classifier
 test_agent_state_dispatcher_and_compatibility
 test_sweep_respawns_confirmed_dead_secondmate

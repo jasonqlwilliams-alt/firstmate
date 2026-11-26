@@ -1881,7 +1881,7 @@ EOF
 # updated and each live agent receives only its own changed-content instruction.
 test_config_reread_per_home_changed_sets_and_exact_bytes() {
   local w head log out err status instr_a instr_b multiline_json pointer
-  local id target inbox quoted_inbox expected actual
+  local endpoint id target inbox quoted_inbox expected actual
   w=$(new_world config-reread-per-home)
   head=$(git -C "$w/main" rev-parse HEAD)
   add_sm_worktree "$w" alpha "$head"
@@ -1986,8 +1986,8 @@ test_config_reread_per_home_changed_sets_and_exact_bytes() {
   assert_not_contains "$(inbox_stream "$w/home/state" alpha)" '"harness": "grok"' "sent message must not inline multiline JSON"
   assert_not_contains "$(inbox_stream "$w/home/state" alpha)" "Default worker" "sent message must not summarize"
   [ "$(grep -c '^send-keys ' "$log")" -eq 4 ] || fail "config reread should type and submit exactly two doorbells"
-  for id in alpha beta; do
-    target="firstmate:fm-$id"
+  for endpoint in 'alpha @1' 'beta @2'; do
+    read -r id target <<< "$endpoint"
     inbox=$(cd "$w/home/state/$id.inbox" && pwd) || fail "$id inbox was not created"
     quoted_inbox=$(printf '%s' "$inbox" | sed "s/'/'\\\\''/g")
     expected=$(printf '%s\n' \
