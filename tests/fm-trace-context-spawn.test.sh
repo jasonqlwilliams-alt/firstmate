@@ -40,6 +40,11 @@ case "${1:-}" in
   display-message) printf 'firstmate\n'; exit 0 ;;
   list-windows)
     if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
+      if [ -f "${FM_FAKE_LAUNCH_LOG:-}.fail-next-inventory" ]; then
+        mv "$FM_FAKE_LAUNCH_LOG.fail-next-inventory" "$FM_FAKE_LAUNCH_LOG.inventory-failed"
+        printf '%s\n' 'window inventory temporarily unreadable' >&2
+        exit 1
+      fi
       fm_fake_tmux_window_ids "$@" < "$0.windows"
       exit 0
     fi
@@ -95,6 +100,9 @@ case "${1:-}" in
           Enter|C-m) continue ;;
           *)
             printf '%s\n' "$a" >> "$FM_FAKE_LAUNCH_LOG"
+            if [ "${FM_FAKE_TRACEPARENT_LOOKUP_FAIL:-0}" = 1 ] && [[ "$a" = 'export FM_TASK_ID='* ]]; then
+              : > "$FM_FAKE_LAUNCH_LOG.fail-next-inventory"
+            fi
             if [ "${FM_FAKE_LAUNCH_PANE_UNREADABLE:-0}" = 1 ] && [[ "$a" = *claude* ]]; then
               : > "$FM_FAKE_LAUNCH_LOG.unreadable"
             fi
@@ -148,6 +156,7 @@ run_spawn() {
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
     FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
     FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$wt" TMUX="fake,1,0" \
+    FM_FAKE_TRACEPARENT_LOOKUP_FAIL="${FM_FAKE_TRACEPARENT_LOOKUP_FAIL:-0}" \
     FM_FAKE_TRACEPARENT_SEND_FAIL="${FM_FAKE_TRACEPARENT_SEND_FAIL:-0}" \
     FM_FAKE_TRACEPARENT_SEND_UNSAFE="${FM_FAKE_TRACEPARENT_SEND_UNSAFE:-0}" \
     FM_FAKE_TRACE_METADATA_APPEND_FAIL="${FM_FAKE_TRACE_METADATA_APPEND_FAIL:-0}" \
@@ -346,6 +355,27 @@ test_failed_delivery_omits_metadata_and_still_launches() {
     || fail "the failed TRACEPARENT export must not be recorded as delivered"
   grep -q 'claude' "$LAUNCH_LOG" || fail "the source task must still launch"
   pass "failed TRACEPARENT delivery omits metadata while the source task still launches"
+}
+
+test_unreadable_trace_target_omits_metadata_and_still_launches() {
+  local rec out status meta
+  rec=$(make_spawn_case tc-lookup-failure)
+  read_case_record "$rec"
+  : > "$HOME_DIR/config/trace-context"
+  start_trace_session "$HOME_DIR"
+
+  out=$(FM_FAKE_TRACEPARENT_LOOKUP_FAIL=1 \
+    run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$CASE_ID" "$PROJ_DIR")
+  status=$?
+  assert_present "$LAUNCH_LOG.inventory-failed" "the trace export lookup did not fail"
+  expect_code 0 "$status" "a lookup failure before typing must not abort spawn: $out"
+  meta="$HOME_DIR/state/$CASE_ID.meta"
+  assert_present "$meta" "spawn did not retain its task record"
+  ! grep -q '^traceparent=' "$meta" || fail "spawn claimed an undelivered trace carrier"
+  ! grep -q '^export TRACEPARENT=' "$LAUNCH_LOG" || fail "the trace export reached tmux send-keys"
+  grep -q '^unset TRACEPARENT; .*claude' "$LAUNCH_LOG" || fail "spawn did not launch without the carrier"
+  [ "$(cat "$LAUNCH_LOG.enter")" = @1 ] || fail "spawn did not submit the launch to the worker"
+  pass "an unreadable trace export target leaves no carrier and the worker still launches"
 }
 
 test_unsafe_delivery_refuses_to_append_launch() {
@@ -623,6 +653,7 @@ test_secondmate_carrier_and_snapshot_share_one_decision() {
 test_enabled_records_and_injects_identical_carrier_before_launch
 test_disabled_writes_and_injects_neither
 test_failed_delivery_omits_metadata_and_still_launches
+test_unreadable_trace_target_omits_metadata_and_still_launches
 test_unsafe_delivery_refuses_to_append_launch
 test_failed_metadata_append_unsets_carrier_and_still_launches
 test_unreadable_launch_pane_stops_before_enter

@@ -160,7 +160,7 @@ fm_backend_tmux_current_path() {  # <target>
 # inline in fm-spawn.sh.
 fm_backend_tmux_send_text_line() {  # <target> <text>
   local target
-  target=$(fm_tmux_exact_target "$1") || return $?
+  target=$(fm_tmux_exact_target "$1") || return 1
   tmux send-keys -t "$target" "$2" Enter
 }
 
