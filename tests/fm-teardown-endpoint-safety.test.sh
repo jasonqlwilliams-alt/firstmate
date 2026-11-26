@@ -347,9 +347,26 @@ isolated_tmux_window_exists() {  # <dir> <socket> <session> <window>
     | grep -Fqx "$4"
 }
 
+stub_case_ps() {  # <dir>
+  local dir=$1 real_ps
+  real_ps=$(command -v ps)
+  cat > "$dir/fakebin/ps" <<SH
+#!/usr/bin/env bash
+if [ "\${FM_TEST_PS_BLIND:-}" = 1 ] && [ "\$*" = '-A -o pid= -o ppid=' ]; then
+  exit 1
+fi
+if [ -n "\${FM_TEST_LAUNCH_TTY:-}" ] && [ "\$1 \$2" = '-o tty=' ]; then
+  printf '%s\n' "\${FM_TEST_LAUNCH_TTY}"
+  exit 0
+fi
+exec '$real_ps' "\$@"
+SH
+  chmod +x "$dir/fakebin/ps"
+}
+
 test_isolated_tmux_invalid_and_valid_cleanup() (
   local dir socket socket_id session='endpoint safety' target_id=target control=control target=fm-target
-  local prefix_target=fm-prefix prefix_survivor=fm-prefix2 rc caller_pane window_id waited=0 real_ps
+  local prefix_target=fm-prefix prefix_survivor=fm-prefix2 rc caller_pane window_id waited=0 control_tty real_uname
   [ -n "$REAL_TMUX" ] || { echo "skip - tmux not installed"; return 0; }
   dir=$(make_case isolated-real)
   socket=dedicated.sock
@@ -358,13 +375,15 @@ test_isolated_tmux_invalid_and_valid_cleanup() (
   unset TMUX TMUX_PANE
   trap '"$REAL_TMUX" -S "$socket" kill-server 2>/dev/null || true' EXIT
   "$REAL_TMUX" -f /dev/null -S "$socket" new-session -d -s "$session" -n "$control" 'exec sleep 60'
+  control_tty=$("$REAL_TMUX" -S "$socket" display-message -p -t "$session:$control" '#{pane_tty}')
+  [ -n "$control_tty" ] || fail "test control pane has no terminal"
   window_id=$("$REAL_TMUX" -S "$socket" new-window -dP -F '#{window_id}' \
     -t "$session:" -n "$target" 'exec sleep 60')
   printf '%s\n' "$socket_id" > "$dir/socket.identity"
   cat > "$dir/fakebin/tmux" <<SH
 #!/usr/bin/env bash
 set -eu
-[ -z "\${TMUX:-}" ] && [ -z "\${TMUX_PANE:-}" ] || exit 91
+[ -z "\${TMUX:-}" ] || exit 91
 [ "\${FM_TEST_TMUX_SOCKET:-}" = '$socket_id' ] || exit 92
 [ "\$(cat '$dir/socket.identity')" = '$socket_id' ] || exit 93
 printf 'tmux' >> "\${FM_RUNTIME_LOG:?}"
@@ -381,15 +400,17 @@ fi
 exec '$REAL_TMUX' -S '$socket' "\$@"
 SH
   chmod +x "$dir/fakebin/tmux"
-  real_ps=$(command -v ps)
-  cat > "$dir/fakebin/ps" <<SH
+  stub_case_ps "$dir"
+  real_uname=$(command -v uname)
+  cat > "$dir/fakebin/uname" <<SH
 #!/usr/bin/env bash
-if [ "\${FM_TEST_PS_BLIND:-}" = 1 ] && [ "\$*" = '-A -o pid= -o ppid=' ]; then
-  exit 1
+if [ "\${FM_TEST_NON_LINUX:-}" = 1 ] && [ "\${1:-}" = -s ]; then
+  printf 'Darwin\n'
+  exit 0
 fi
-exec '$real_ps' "\$@"
+exec '$real_uname' "\$@"
 SH
-  chmod +x "$dir/fakebin/ps"
+  chmod +x "$dir/fakebin/uname"
 
   fm_write_meta "$dir/home/state/invalid.meta" \
     "window=" "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
@@ -433,7 +454,7 @@ SH
   : > "$dir/runtime.log"
   run_case "$dir" prefix > "$dir/prefix.out" 2> "$dir/prefix.err" \
     || fail "cleanup with an absent exact target failed: $(cat "$dir/prefix.err")"
-  assert_contains "$(cat "$dir/prefix.err")" "cannot verify the exact window and its pane PIDs" \
+  assert_contains "$(cat "$dir/prefix.err")" "cannot verify the exact window and its pane inventory" \
     "missing exact window did not produce a warning"
   isolated_tmux_window_exists "$dir" "$socket" "$session" "$prefix_survivor" \
     || fail "teardown removed the prefix-matched neighbor"
@@ -445,7 +466,7 @@ SH
 
   FM_TEST_TMUX_BLIND=1 run_case "$dir" "$target_id" > "$dir/blind.out" 2> "$dir/blind.err" \
     || fail "cleanup with unreadable pane PIDs failed: $(cat "$dir/blind.err")"
-  assert_contains "$(cat "$dir/blind.err")" "cannot verify the exact window and its pane PIDs" \
+  assert_contains "$(cat "$dir/blind.err")" "cannot verify the exact window and its pane inventory" \
     "unreadable pane PIDs did not produce a warning"
   isolated_tmux_window_exists "$dir" "$socket" "$session" "$target" \
     || fail "teardown closed a window with unreadable pane PIDs"
@@ -473,7 +494,24 @@ export PATH="$PWD/fakebin:$PATH" FM_TEST_TMUX_SOCKET="$PWD/dedicated.sock"
 "$1/bin/fm-teardown.sh" "$2" --force > self.out 2> self.err &
 wait "$!"
 printf '%s\n' "$?" > self.status
+while [ ! -e reparent.start ]; do sleep 0.1; done
+bash -c 'bash reparented.sh "$@" </dev/null >/dev/null 2>&1 &' _ "$1" "$2" "$$"
+: > reparent.go
 exec sleep 60
+SH
+  cat > "$dir/reparented.sh" <<'SH'
+#!/usr/bin/env bash
+while [ ! -e reparent.go ]; do sleep 0.1; done
+ps -A -o pid= -o ppid= | awk -v child="$$" -v pane="$3" '
+  { parent[$1] = $2 }
+  END {
+    for (pid = child; pid > 0; pid = parent[pid]) {
+      if (pid == pane || !(pid in parent)) exit 1
+    }
+  }
+' || exit 1
+FM_TEST_NON_LINUX=1 "$1/bin/fm-teardown.sh" "$2" --force > reparent.out 2> reparent.err
+printf '%s\n' "$?" > reparent.status
 SH
   fm_write_meta "$dir/home/state/$target_id.meta" \
     "window=$session:$target" "worktree=$dir/nonexistent-worktree" \
@@ -503,7 +541,40 @@ SH
   fm_write_meta "$dir/home/state/$target_id.meta" \
     "window=$session:$target" "worktree=$dir/nonexistent-worktree" \
     "project=$dir/nonexistent-project" "kind=scout"
-  FM_TEST_TMUX_SPLIT_BEFORE_CLOSE=1 run_case "$dir" "$target_id" > "$dir/race.out" 2> "$dir/race.err" \
+  : > "$dir/reparent.start"
+  waited=0
+  while [ ! -s "$dir/reparent.status" ] && [ "$waited" -lt 150 ]; do
+    isolated_tmux_window_exists "$dir" "$socket" "$session" "$target" \
+      || fail "reparented teardown closed its launch window"
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  assert_present "$dir/reparent.status" "reparented teardown did not finish with the pane outside its ancestry"
+  expect_code 0 "$(cat "$dir/reparent.status")" "reparented teardown should finish remaining cleanup"
+  assert_contains "$(cat "$dir/reparent.err")" "uses teardown's controlling terminal" \
+    "reparented teardown did not identify the pane terminal"
+  assert_absent "$dir/home/state/$target_id.meta" "protecting the reparented caller interrupted record cleanup"
+  isolated_tmux_window_exists "$dir" "$socket" "$session" "$target" \
+    || fail "the reparented caller window did not survive teardown"
+  pass "fm-teardown: the controlling terminal protects a reparented background caller"
+
+  fm_write_meta "$dir/home/state/$target_id.meta" \
+    "window=$session:$target" "worktree=$dir/nonexistent-worktree" \
+    "project=$dir/nonexistent-project" "kind=scout"
+  TMUX_PANE=$caller_pane FM_TEST_LAUNCH_TTY=$control_tty run_case "$dir" "$target_id" \
+    > "$dir/marked.out" 2> "$dir/marked.err" \
+    || fail "cleanup with a launch pane marker failed: $(cat "$dir/marked.err")"
+  assert_contains "$(cat "$dir/marked.err")" "contains teardown's launch pane $caller_pane" \
+    "teardown did not identify the launch pane marker"
+  isolated_tmux_window_exists "$dir" "$socket" "$session" "$target" \
+    || fail "teardown closed the window containing its launch pane marker"
+  pass "fm-teardown: the launch pane marker protects a pane outside caller ancestry"
+
+  fm_write_meta "$dir/home/state/$target_id.meta" \
+    "window=$session:$target" "worktree=$dir/nonexistent-worktree" \
+    "project=$dir/nonexistent-project" "kind=scout"
+  FM_TEST_TMUX_SPLIT_BEFORE_CLOSE=1 FM_TEST_LAUNCH_TTY=$control_tty \
+    run_case "$dir" "$target_id" > "$dir/race.out" 2> "$dir/race.err" \
     || fail "cleanup with a late pane split failed: $(cat "$dir/race.err")"
   assert_contains "$(cat "$dir/race.err")" "close could not be confirmed against the verified pane snapshot" \
     "pane inventory change did not produce a warning"
@@ -514,7 +585,7 @@ SH
   fm_write_meta "$dir/home/state/$target_id.meta" \
     "window=$session:$target" "worktree=$dir/nonexistent-worktree" \
     "project=$dir/nonexistent-project" "kind=scout"
-  run_case "$dir" "$target_id" > "$dir/valid.out" 2> "$dir/valid.err" \
+  FM_TEST_LAUNCH_TTY=$control_tty run_case "$dir" "$target_id" > "$dir/valid.out" 2> "$dir/valid.err" \
     || fail "isolated valid endpoint teardown failed: $(cat "$dir/valid.err")"
   isolated_tmux_window_exists "$dir" "$socket" "$session" "$target" \
     && fail "valid cleanup did not remove the exact target window"
@@ -983,43 +1054,55 @@ test_sole_slot_record_still_tears_down() {
   pass "fm-teardown: a task that solely holds its slot still returns it"
 }
 
-test_recorded_endpoint_that_changed_directory_still_tears_down() {
-  local dir id=moved-task
+test_recorded_endpoint_that_changed_directory_still_tears_down() (
+  local dir id=moved-task socket=dedicated.sock control_tty waited=0
+  [ -n "$REAL_TMUX" ] || { echo "skip - tmux not installed"; return 0; }
 
   dir=$(make_case slot-endpoint-moved)
   mark_case_as_treehouse_pool "$dir"
   mkdir -p "$dir/other-directory"
-  # The exact recorded worker may legitimately cd outside its worktree. Its
-  # endpoint identity still owns the lifecycle; cwd alone must not brick it.
+  cd "$dir" || exit 1
+  unset TMUX TMUX_PANE
+  trap '"$REAL_TMUX" -S "$socket" kill-server 2>/dev/null || true' EXIT
+  "$REAL_TMUX" -f /dev/null -S "$socket" new-session -d -s firstmate -n control 'exec sleep 60' \
+    || fail "could not start private tmux server"
+  control_tty=$("$REAL_TMUX" -S "$socket" display-message -p -t firstmate:control '#{pane_tty}')
+  [ -n "$control_tty" ] || fail "test control pane has no terminal"
+  # shellcheck disable=SC2016 # $1 is the pane shell's destination.
+  "$REAL_TMUX" -S "$socket" new-window -d -t firstmate: -n "fm-$id" -c "$dir/worktree" \
+    bash -c 'cd "$1" && : > ready && exec sleep 60' _ "$dir/other-directory" \
+    || fail "could not start the recorded pane"
+  while [ ! -e "$dir/other-directory/ready" ] && [ "$waited" -lt 50 ]; do
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  [ "$("$REAL_TMUX" -S "$socket" display-message -p -t "firstmate:fm-$id" '#{pane_current_path}')" = "$(cd "$dir/other-directory" && pwd -P)" ] \
+    || fail "recorded pane did not leave its original worktree"
+
   cat > "$dir/fakebin/tmux" <<SH
 #!/usr/bin/env bash
-if [ "\${1:-}" = display-message ]; then
-  printf '%s\n' '$dir/other-directory'
-  exit 0
-fi
-printf 'tmux' >> "\${FM_RUNTIME_LOG:?}"
-printf ' <%s>' "\$@" >> "\${FM_RUNTIME_LOG:?}"
-printf '\n' >> "\${FM_RUNTIME_LOG:?}"
-if [ "\${1:-}" = list-windows ]; then
-  printf '@1:1:%s:\n' "\$\$"
-fi
-exit 0
+cd '$dir' || exit 1
+exec '$REAL_TMUX' -S '$socket' "\$@"
 SH
   chmod +x "$dir/fakebin/tmux"
+  stub_case_ps "$dir"
   fm_write_meta "$dir/home/state/$id.meta" \
     "window=firstmate:fm-$id" "endpoint_task_id=$id" \
     "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
 
-  run_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr" \
+  FM_TEST_LAUNCH_TTY=$control_tty run_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr" \
     || fail "teardown refused its recorded endpoint after it changed directory: $(cat "$dir/stderr")"
   assert_absent "$dir/home/state/$id.meta" "moved-endpoint teardown left the task record"
-  grep -Fq '<kill-window -t @1>' "$dir/runtime.log" \
-    || fail "moved-endpoint teardown did not stop the exact recorded worker: $(cat "$dir/runtime.log")"
+  if isolated_tmux_window_exists "$dir" "$socket" firstmate "fm-$id"; then
+    fail "moved-endpoint teardown did not close the recorded window: $(cat "$dir/stderr")"
+  fi
+  isolated_tmux_window_exists "$dir" "$socket" firstmate control \
+    || fail "moved-endpoint teardown closed the independent control window"
   grep -Fq "treehouse <return>" "$dir/runtime.log" \
     || fail "moved-endpoint teardown did not return its uncontested pool slot: $(cat "$dir/runtime.log")"
 
   pass "fm-teardown: an exact recorded endpoint still tears down after changing cwd outside its worktree"
-}
+)
 
 # --- Treehouse project-lock anchoring across home layouts --------------------
 #

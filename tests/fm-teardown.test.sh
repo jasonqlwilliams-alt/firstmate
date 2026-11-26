@@ -2660,7 +2660,7 @@ printf '%s\n' "\$*" >> "$case_dir/treehouse.log"
 SH
   cat > "$case_dir/fakebin/tmux" <<SH
 #!/usr/bin/env bash
-case "\$1" in kill-*) printf '%s\n' "\$*" >> "$case_dir/kill.log" ;; esac
+case "\$1" in if-shell|kill-window|list-windows) printf '%s\n' "\$*" >> "$case_dir/kill.log" ;; esac
 SH
   chmod +x "$case_dir/fakebin/lsof" "$case_dir/fakebin/treehouse" "$case_dir/fakebin/tmux"
 
@@ -2677,7 +2677,7 @@ SH
   expect_code 1 "$rc" "descendant caller ($layout): forced retirement should refuse"
   assert_grep "is in Treehouse copy $child_b" "$case_dir/stderr" 'refusal did not identify the second child copy'
   assert_absent "$case_dir/treehouse.log" 'refusal returned an earlier sibling before checking the second child'
-  assert_absent "$case_dir/kill.log" 'refusal killed an earlier sibling endpoint'
+  assert_absent "$case_dir/kill.log" 'refusal attempted cleanup of an earlier sibling endpoint'
   assert_present "$home/state/child-a.meta" 'refusal removed the first child record from the leased home'
   assert_present "$home/state/child-b.meta" 'refusal removed the second child record from the leased home'
   assert_pending_close_replay_preserves_task "$home" child-b "$home" "$backlog_data" \
@@ -2708,20 +2708,44 @@ test_forced_secondmate_teardown_holds_descendant_lifecycle_locks() {
   home="$case_dir/secondmate-home"
   : > "$case_dir/kill.log"
   : > "$case_dir/treehouse.log"
-  cat > "$case_dir/fakebin/tmux" <<SH
+  cat > "$case_dir/fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
-case "\$1" in
-  list-windows) printf '@1:1:%s:\n' "\$\$" ;;
-  if-shell) printf '%s\n' "\$*" >> "$case_dir/kill.log" ;;
+log="$(dirname "$0")/../kill.log"
+case "$1" in
+  list-windows)
+    [ "$#" = 7 ] && [ "$2 $3 $4 $6" = '-t =firstmate -f -F' ] || exit 1
+    case "$5" in
+      '#{==:#{window_name},fm-child-a}') printf '@11:1:%s:%%11:/dev/ttys011:\n' "$$" ;;
+      '#{==:#{window_name},fm-child-b}') printf '@12:1:%s:%%12:/dev/ttys012:\n' "$$" ;;
+      '#{==:#{window_name},fm-task-x1}') printf '@13:1:%s:%%13:/dev/ttys013:\n' "$$" ;;
+      *) exit 1 ;;
+    esac ;;
+  if-shell)
+    if [ "$#" = 7 ] && [ "$2 $3" = '-F -t' ] && [ "$6" = "kill-window -t $4" ] \
+      && [ "$7" = 'display-message -p changed' ]; then
+      printf '%s\n' "$4" >> "$log"
+    else
+      printf 'unexpected request\n' >> "$log"
+      exit 1
+    fi ;;
+  kill-window) printf 'unguarded close request\n' >> "$log"; exit 1 ;;
 esac
 exit 0
+SH
+  cat > "$case_dir/fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+if [ "$1 $2" = '-o tty=' ]; then
+  printf 'ttys099\n'
+  exit 0
+fi
+exec "$REAL_PS_FOR_TEST" "$@"
 SH
   cat > "$case_dir/fakebin/treehouse" <<SH
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> "$case_dir/treehouse.log"
 exit 0
 SH
-  chmod +x "$case_dir/fakebin/tmux" "$case_dir/fakebin/treehouse"
+  chmod +x "$case_dir/fakebin/tmux" "$case_dir/fakebin/ps" "$case_dir/fakebin/treehouse"
 
   lock="$home/state/.control-child-b.lock"
   ready="$case_dir/lock-ready"
@@ -2743,7 +2767,7 @@ SH
   [ -e "$ready" ] || fail "descendant-locks: the contending lifecycle action never acquired its lock"
 
   rc=0
-  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  TMUX_PANE= run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
   if [ "$rc" -eq 0 ]; then
     : > "$release"
     wait "$holder_pid" 2>/dev/null || true
@@ -2768,12 +2792,13 @@ SH
   : > "$release"
   wait "$holder_pid" 2>/dev/null || true
   rc=0
-  run_teardown "$case_dir" --force > "$case_dir/retry.stdout" 2> "$case_dir/retry.stderr" || rc=$?
+  TMUX_PANE= run_teardown "$case_dir" --force > "$case_dir/retry.stdout" 2> "$case_dir/retry.stderr" || rc=$?
   expect_code 0 "$rc" "descendant-locks: uncontended retry should complete"
   [ ! -e "$case_dir/state/task-x1.meta" ] && [ ! -d "$home" ] \
     || fail "descendant-locks: uncontended retry retained retired task state"
-  [ -s "$case_dir/kill.log" ] && [ -s "$case_dir/treehouse.log" ] \
-    || fail "descendant-locks: uncontended retry did not perform endpoint and worktree cleanup"
+  [ "$(sort "$case_dir/kill.log")" = "$(printf '@11\n@12\n@13')" ] \
+    || fail "descendant-locks: retry did not request guarded closure of both children and the parent: $(cat "$case_dir/kill.log")"
+  [ -s "$case_dir/treehouse.log" ] || fail "descendant-locks: uncontended retry did not return worktrees"
   [ "$(cat "$case_dir/child-a-wt/.OpenCode/Plugins/fm-busy-state.js")" = 'project plugin' ] \
     || fail 'child return removed a tracked project plugin'
   [ "$(cat "$case_dir/child-a-wt/.claude/settings.local.json")" = '{}' ] \
@@ -4416,21 +4441,32 @@ EOF
 if [ "${1:-}" = display-message ] && [ "${*: -1}" = '#{pane_pid}' ]; then
   cat "$CASE_DIR/target"
 elif [ "${1:-}" = list-windows ]; then
-  printf '@1:1:%s:\n' "$(cat "$CASE_DIR/target")"
-elif [ "${1:-}" = if-shell ]; then
-  : > "$CASE_DIR/window-closed"
+  [ "$#" = 7 ] && [ "$2 $3 $4 $6" = '-t =firstmate -f -F' ] \
+    && [ "$5" = '#{==:#{window_name},fm-task-x1}' ] || exit 1
+  printf '@17:1:%s:%s:/dev/ttys017:\n' "$(cat "$CASE_DIR/target")" '%17'
+elif [ "${1:-}" = if-shell ] || [ "${1:-}" = kill-window ]; then
+  if [ "$#" = 7 ] && [ "$1 $2 $3 $4" = 'if-shell -F -t @17' ] \
+    && [ "$6" = 'kill-window -t @17' ] && [ "$7" = 'display-message -p changed' ]; then
+    printf '%s\n' "$6" >> "$CASE_DIR/window-close-request"
+  else
+    printf 'unexpected request\n' >> "$CASE_DIR/window-close-request"
+    exit 1
+  fi
 fi
 SH
   cat > "$case_dir/fakebin/ps" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
+  '-o tty= -p '*)
+    if [ "$TEST_MODE" = headless ]; then printf '??\n'; else printf 'ttys099\n'; fi
+    exit 0 ;;
   '-u '*'-o pid=,command=') exit 0 ;;  # Disable the independent host-wide orphan sweep.
 esac
 exec "$REAL_PS_FOR_TEST" "$@"
 SH
   chmod +x "$case_dir/fakebin/uname" "$case_dir/fakebin/tmux" "$case_dir/fakebin/ps"
 
-  CASE_DIR=$case_dir TEST_MODE=$mode FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+  TMUX_PANE= CASE_DIR=$case_dir TEST_MODE=$mode FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$ROOT" \
     FM_STATE_OVERRIDE="$case_dir/state" FM_DATA_OVERRIDE="$case_dir/data" \
     FM_CONFIG_OVERRIDE="$case_dir/config" PATH="$case_dir/fakebin:$test_path" \
     FM_TEARDOWN_GUARD_DONE=1 FM_PROC_ROOT_OVERRIDE="$case_dir/no-proc" \
@@ -4451,7 +4487,7 @@ setpgrp(0, 0) or die $!;
 $SIG{TERM} = sub { record('term', $$) };
 my $caller = $$;
 my $leak;
-if ($ENV{TEST_MODE} eq 'leak') {
+if ($ENV{TEST_MODE} ne 'caller') {
     $leak = fork // die $!;
     if (!$leak) {
         setpgrp(0, 0) or die $!;
@@ -4493,10 +4529,16 @@ PL
   assert_grep 'warning: lsof is unavailable on this platform; leaving leaked processes running for tmux task task-x1 because teardown cannot verify caller safety' \
     "$case_dir/stderr" "fallback did not explain why it skipped reaping: $(cat "$case_dir/stderr")"
   if [ "$mode" = caller ]; then
-    assert_absent "$case_dir/window-closed" 'teardown requested closure of the caller window'
+    assert_absent "$case_dir/window-close-request" 'teardown requested closure of the caller window'
     assert_grep 'is teardown or its ancestor' "$case_dir/stderr" 'caller window refusal had no diagnostic'
+  elif [ "$mode" = headless ]; then
+    assert_absent "$case_dir/window-close-request" 'teardown requested closure without a verified terminal'
+    assert_grep 'cannot rule out the caller without a verified controlling terminal' \
+      "$case_dir/stderr" 'refusal without a verified terminal had no diagnostic'
   else
-    assert_present "$case_dir/window-closed" 'teardown did not request endpoint closure'
+    [ -f "$case_dir/window-close-request" ] \
+      && [ "$(cat "$case_dir/window-close-request")" = 'kill-window -t @17' ] \
+      || fail 'teardown did not request guarded closure of the recorded window'
   fi
   assert_absent "$case_dir/tasktmp" 'teardown left the task temp directory'
   assert_absent "$case_dir/state/task-x1.meta" 'teardown left the task record'
@@ -5331,6 +5373,7 @@ SH
 
 test_non_linux_skips_process_group_reap caller worktree || exit 1
 test_non_linux_skips_process_group_reap caller tasktmp || exit 1
+test_non_linux_skips_process_group_reap headless worktree || exit 1
 test_non_linux_skips_process_group_reap leak worktree || exit 1
 test_non_linux_skips_process_group_reap leak tasktmp || exit 1
 test_leaked_worktree_process_is_reaped

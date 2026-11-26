@@ -493,9 +493,14 @@ task_reap_filter_pids() {  # <previously-protected-pids> <candidate-pids>
   '
 }
 
+TEARDOWN_OS=$(uname -s) || TEARDOWN_OS=
+TEARDOWN_LAUNCH_TTY=$(LC_ALL=C ps -o tty= -p "$$" 2>/dev/null) || TEARDOWN_LAUNCH_TTY=
+TEARDOWN_LAUNCH_TTY=${TEARDOWN_LAUNCH_TTY//[[:space:]]/}
+TEARDOWN_LAUNCH_TTY=${TEARDOWN_LAUNCH_TTY#/dev/}
+[[ "$TEARDOWN_LAUNCH_TTY" =~ ^[[:alnum:]][[:alnum:]/._-]*$ ]] || TEARDOWN_LAUNCH_TTY=
 TEARDOWN_REAP_PROTECTED_PIDS=$(task_reap_filter_pids "" "") || TEARDOWN_REAP_PROTECTED_PIDS=
 TEARDOWN_LAUNCH_SESSION_VERIFIED=1
-if [ "$(uname -s)" = Linux ]; then
+if [ "$TEARDOWN_OS" = Linux ]; then
   TEARDOWN_LAUNCH_SESSION_VERIFIED=0
   launch_session_pid=$(ps -o sid= -p "$$" 2>/dev/null) || launch_session_pid=
   launch_session_pid=${launch_session_pid//[[:space:]]/}
@@ -2312,9 +2317,10 @@ task_pid_list_contains() {  # <pid-list> <pid>
 }
 
 teardown_close_tmux_window() {  # <session:window>
-  local target=$1 snapshot pane_pids protected pid
+  local target=$1 snapshot protected pid pane_id pane_tty i
+  local -a panes
   if ! fm_backend_source tmux || ! snapshot=$(fm_backend_tmux_close_snapshot "$target"); then
-    echo "warning: leaving tmux window $target open: cannot verify the exact window and its pane PIDs" >&2
+    echo "warning: leaving tmux window $target open: cannot verify the exact window and its pane inventory" >&2
     return 1
   fi
   if [ "$TEARDOWN_LAUNCH_SESSION_VERIFIED" != 1 ] || [ -z "$TEARDOWN_REAP_PROTECTED_PIDS" ] \
@@ -2323,13 +2329,28 @@ teardown_close_tmux_window() {  # <session:window>
     echo "warning: leaving tmux window $target open: cannot verify teardown caller ancestry" >&2
     return 1
   fi
-  pane_pids=${snapshot#*:*:}
-  for pid in ${pane_pids//:/ }; do
+  IFS=: read -r -a panes <<< "${snapshot#*:*:}"
+  for ((i = 0; i < ${#panes[@]}; i += 3)); do
+    pid=${panes[i]}
+    pane_id=${panes[i+1]}
+    pane_tty=${panes[i+2]}
     if [[ " $protected " == *" $pid "* ]]; then
       echo "warning: leaving tmux window $target open: pane PID $pid is teardown or its ancestor" >&2
       return 1
     fi
+    if [ "${TMUX_PANE:-}" = "$pane_id" ]; then
+      echo "warning: leaving tmux window $target open: it contains teardown's launch pane $pane_id" >&2
+      return 1
+    fi
+    if [ "$TEARDOWN_LAUNCH_TTY" = "${pane_tty#/dev/}" ]; then
+      echo "warning: leaving tmux window $target open: pane $pane_id uses teardown's controlling terminal $pane_tty" >&2
+      return 1
+    fi
   done
+  if [ "$TEARDOWN_OS" != Linux ] && [ -z "$TEARDOWN_LAUNCH_TTY" ]; then
+    echo "warning: leaving tmux window $target open: cannot rule out the caller without a verified controlling terminal" >&2
+    return 1
+  fi
   if ! fm_backend_tmux_close_if_unchanged "$snapshot"; then
     echo "warning: tmux window $target close could not be confirmed against the verified pane snapshot" >&2
     return 1
