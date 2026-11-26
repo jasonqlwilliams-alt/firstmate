@@ -304,10 +304,8 @@
 #     already removed it). reap_task_worktree_processes uses `lsof -a -d cwd`
 #     to find processes under the owned worktree and the private tasktmp.
 #     On Linux without lsof it uses
-#     `/proc/<pid>/cwd` for the owned worktree only. On other hosts without
-#     lsof, the early Treehouse preflight refuses before reaping. For cleanup
-#     without that preflight, teardown can only attempt to reap the tmux pane's
-#     process group.
+#     `/proc/<pid>/cwd` for the owned worktree only. See "Leaked-process
+#     cleanup" in docs/scripts.md for behavior without an available scanner.
 #     Both scans can identify only processes whose working directory is readable.
 #     Both scans are bounded by process count and exclude teardown and its
 #     current and startup ancestors. Teardown sends TERM, then KILL after a
@@ -2366,56 +2364,12 @@ task_pids_under_roots() {  # <scanner> <dir>...
   } <<< "$ancestry_scan"
 }
 
-reap_task_backend_process_group() {  # <label>
-  local label=$1 leader leader_start pgid current_pgid own_pgid
-  if [ "$BACKEND" != tmux ]; then
-    echo "warning: lsof is unavailable; cannot resolve a process-group fallback for $BACKEND task $ID" >&2
-    return 0
-  fi
-  leader=$(tmux display-message -p -t "$T" '#{pane_pid}' 2>/dev/null) || leader=""
-  case "$leader" in ''|*[!0-9]*)
-    echo "warning: lsof is unavailable; cannot resolve the tmux pane process group for $ID" >&2
-    return 0
-    ;;
-  esac
-  leader_start=$(task_process_identity "$leader") || {
-    echo "warning: lsof is unavailable; cannot identify the tmux pane process group for $ID" >&2
-    return 0
-  }
-  pgid=$(ps -o pgid= -p "$leader" 2>/dev/null) || pgid=""
-  pgid=$(printf '%s' "$pgid" | tr -d '[:space:]')
-  case "$pgid" in ''|*[!0-9]*|0|1)
-    echo "warning: lsof is unavailable; cannot resolve the tmux pane process group for $ID" >&2
-    return 0
-    ;;
-  esac
-  own_pgid=$(ps -o pgid= -p "$$" 2>/dev/null) || own_pgid=""
-  own_pgid=$(printf '%s' "$own_pgid" | tr -d '[:space:]')
-  if [ "$pgid" = "$own_pgid" ]; then
-    echo "warning: lsof is unavailable; refusing to signal teardown's own process group for $ID" >&2
-    return 0
-  fi
-  task_process_identity_matches "$leader" "$leader_start" || return 0
-  current_pgid=$(ps -o pgid= -p "$leader" 2>/dev/null) || current_pgid=""
-  current_pgid=$(printf '%s' "$current_pgid" | tr -d '[:space:]')
-  [ "$current_pgid" = "$pgid" ] || return 0
-  echo "teardown: reaping leaked $label process group for $ID: $pgid" >&2
-  kill -TERM -- "-$pgid" 2>/dev/null || true
-  sleep 1
-  if task_process_identity_matches "$leader" "$leader_start" \
-     && [ "$(ps -o pgid= -p "$leader" 2>/dev/null | tr -d '[:space:]')" = "$pgid" ] \
-     && kill -0 -- "-$pgid" 2>/dev/null; then
-    echo "teardown: force-killing leaked $label process group for $ID: $pgid" >&2
-    kill -KILL -- "-$pgid" 2>/dev/null || true
-  fi
-}
-
 # See Fix 2 in the script header for scanner scope and refusal rules.
 reap_task_worktree_processes() {  # <label> <owned-worktree> <tasktmp>
   local label=$1 worktree=$2 tasktmp=$3 scanner pids pid identity current_pids i pass=1 max_passes=3
   local -a tracked_pids tracked_identities remaining_pids remaining_identities
   if ! scanner=$(task_cwd_scanner); then
-    reap_task_backend_process_group "$label"
+    echo "warning: lsof is unavailable on this platform; leaving leaked processes running for $BACKEND task $ID because teardown cannot verify caller safety" >&2
     return 0
   fi
   set -- "$worktree"
