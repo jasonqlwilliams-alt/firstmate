@@ -333,14 +333,16 @@ All six installed harnesses' real idle composers reached a proven `empty` (Claud
 The strict blank-row posture held live (a blank shell row deferred injection), and a zellij pane changing for reasons unrelated to submission never confirmed a delivery, replacing the retired content-diff heuristic's false positive.
 Kimi was not installed on the verification machine; its bordered shape is pinned by the portable byte-capture regressions in `tests/fm-composer-lib.test.sh`, which also carry the other five adapters' capability profiles for every harness under both a UTF-8 locale and `LC_ALL=C`.
 This guard is the refresh command after an upgrade to any matrix-covered harness; rerun it and update the versions above rather than trusting this table across releases.
-Known staleness: on 2026-08-23 the steering-inbox doorbell run observed grok 1.0.5's idle composer classifying `unknown` (and sometimes pending-family), never `empty`, so the grok row above is stale for 1.0.5 and owes a refresh; steering is unaffected because only Codex and Rovo panes' doorbells require a proven-empty composer, but empty-requiring consumers (away-daemon injection, spawn readiness) should not trust the 1.0.0 grok result.
+The [2026-08-23 doorbell run](#steering-inbox-doorbell) observed `unknown` and occasional pending-family verdicts for Grok 1.0.5's idle composer.
+The Grok 1.0.0 result above needs a refresh before consumers that require `empty`, including away-daemon injection and spawn readiness, can rely on it for 1.0.5.
 Cursor is deliberately outside this cursor-anchored empty-composer matrix because its terminal cursor is parked outside the composer; tmux's Cursor-specific, process-identity-gated cursorless fallback is covered by the [Cursor Agent CLI](#cursor-agent-cli) section's separate live evidence and drift guard.
 
 `zellij action dump-screen --pane-id <id> --ansi` was verified at zellij 0.44.0 to preserve ANSI styling (real Claude Code rendered inside a zellij pane dumped `ESC[m` `❯` U+00A0 for its idle composer row), which is the capability the zellij composer classifier reads.
 
 ## Steering-inbox doorbell
 
-The steering channel's one behavioral assumption - a real worker agent follows the constant self-describing doorbell line (list the inbox, read and act on its records in numeric order, then `mv` each into `handled/`) - was verified on 2026-08-23 against every installed verified harness, on tmux 3.6a, macOS arm64, on an isolated private socket, driving the REAL `bin/fm-send.sh` end to end (durable record plus doorbell, with one mid-wait re-ring playing the watcher's role).
+The 2026-08-23 run verified the path-bearing doorbell against every installed verified harness on tmux 3.6a, macOS arm64, using an isolated private socket.
+It drove the real `bin/fm-send.sh` end to end, from durable enqueue to doorbell delivery, with one mid-wait re-ring playing the watcher's role.
 
 ```sh
 FM_SEND_INBOX_LIVE_E2E=1 tests/fm-send-inbox-doorbell-live-e2e.test.sh
@@ -359,12 +361,15 @@ ok - grok (grok 1.0.5 (5115b46bc909) [stable]): the doorbell reached a real work
 ok - muse (Muse Code 0.2.1 (0.2.1-R1215.1)): the doorbell reached a real worker, which acted and acked with the mv
 ```
 
-All six installed harnesses honored the doorbell contract with real model turns: each listed the inbox named by the doorbell, read its record, executed the instruction inside it, and acknowledged with the atomic `mv`.
-Two findings from the run shaped the shipped behavior: an OpenCode vendor update modal swallowed the first doorbell and the single re-ring recovered it, which is exactly the watcher ladder's job; and grok 1.0.5's idle composer never classifies `empty` (a classifier drift owned by the [Composer classification matrix](#composer-classification-matrix) guard, whose refresh for grok 1.0.5 is still owed), which is why the ring's composer pre-check skips only on an exact proven `pending` verdict for harnesses outside the Codex and Rovo proven-empty rule - ringing an ambiguous composer on those harnesses keeps steering available when the classifier cannot positively identify their idle screen.
-The current per-harness gate is owned by `bin/fm-task-inbox-lib.sh` and pinned by the fake-pane regressions in `tests/fm-task-inbox.test.sh`; the live run above predates it.
+In real model turns, all six installed harnesses listed the inbox named by the doorbell, read its record, executed the instruction inside it, and acknowledged it with an atomic `mv` into `handled/`.
+An OpenCode vendor update modal swallowed the first doorbell, and the watcher's re-ring recovered it.
+The Grok 1.0.5 worker acknowledged the doorbell despite the absence of an `empty` verdict during startup.
+The live run above predates the [current per-harness gate](../../bin/fm-task-inbox-lib.sh), which is covered by the stub-pane regressions in [`tests/fm-task-inbox.test.sh`](../../tests/fm-task-inbox.test.sh).
+The [agy verification record](agy.md#composer-classification) owns the separate composer captures and fixture coverage for agy.
 The live guard now fails Codex when its idle composer never classifies `empty`, and still proceeds with a note for the other harnesses it currently covers.
 Kimi was not installed on the verification machine; its receive path is the same one-line-plus-shell contract, and the portable ladder and enqueue regressions in `tests/fm-task-inbox.test.sh` and `tests/fm-send-inbox.test.sh` cover every harness-independent half.
-This guard is the refresh command after any harness upgrade; it spends a small number of real tokens per installed harness, reports an absent harness explicitly, and refuses a run that verified nothing.
+Use this guard after upgrading a harness it covers.
+It spends a small number of real tokens per covered and installed harness, reports an absent harness explicitly, and refuses a run that verified nothing.
 
 ## Gemini
 

@@ -41,6 +41,97 @@ test_quiet_checkpoint_exits_124_cleanly() {
   pass "quiet checkpoint exits 124 with a clean checkpoint line and no live lock"
 }
 
+test_stop_interrupts_watcher_recovery() (
+  local mode=$1 home child='' check_pid='' check_status ready=idle status=0 milestone deadline
+  home=$(make_home "stop-during-recovery-$mode")
+  export FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_ROOT_OVERRIDE="$ROOT"
+  export FM_POLL=20 FM_CHECK_INTERVAL=0 FM_HEARTBEAT=999999
+  trap '
+    if [ -n "$child" ]; then
+      kill -KILL "$child" 2>/dev/null || true
+      wait "$child" 2>/dev/null || true
+    fi
+    [ -z "$check_pid" ] || kill -KILL "$check_pid" 2>/dev/null || true
+  ' EXIT
+
+  if [ "$mode" = capture ]; then
+    ready=check-started
+    cat > "$FM_STATE_OVERRIDE/held.check.sh" <<'SH'
+trap '' TERM
+printf '%s\n' "$$" > "$FM_HOME/check-started"
+exec sleep 30
+SH
+    chmod 0700 "$FM_STATE_OVERRIDE/held.check.sh" || fail "could not set private check permissions"
+    "$ROOT/bin/fm-check-register.sh" held >/dev/null || fail "could not register a capture for shutdown"
+  fi
+
+  cat > "$home/sleeps.bash" <<'SH'
+if [ "$0" = "$FM_TEST_WATCH_ENTRY" ]; then
+  sleep() {
+    case "$1" in
+      20)
+        printf '%s\n' "$1" > "$FM_HOME/idle"
+        local i
+        for ((i = 0; i < 200; i++)); do command sleep 0.1; done
+        return
+        ;;
+      0.01)
+        if [ -f "$FM_STATE_OVERRIDE/.watcher-down.lock/pid" ] && [ ! -e "$FM_HOME/capture-stopping" ]; then
+          : > "$FM_HOME/capture-stopping"
+          kill -TERM "${BASHPID:-$$}"
+        fi
+        ;;
+      0.1)
+        if [ -f "$FM_STATE_OVERRIDE/.watcher-down.lock/pid" ]; then
+          printf '%s\n' "$1" > "$FM_HOME/recovery-wait"
+        fi
+        ;;
+    esac
+    command sleep "$@"
+  }
+fi
+SH
+  BASH_ENV="$home/sleeps.bash" FM_TEST_WATCH_ENTRY="$ROOT/bin/fm-watch.sh" FM_WATCH_CHECKPOINT_CLOSE='' \
+    "$ROOT/bin/fm-watch.sh" > "$home/watcher.out" 2>&1 &
+  child=$!
+  for milestone in "$ready" recovery-wait; do
+    deadline=$((SECONDS + 8))
+    until [ -s "$home/$milestone" ]; do
+      if [ "$SECONDS" -ge "$deadline" ] || ! kill -0 "$child" 2>/dev/null; then
+        fail "watcher did not reach $milestone ($(cat "$home/watcher.out"))"
+      fi
+      sleep 0.05
+    done
+    if [ "$milestone" = "$ready" ]; then
+      if [ "$mode" = capture ]; then
+        read -r check_pid < "$home/check-started" || fail "could not identify the captured check"
+      fi
+      mkdir "$FM_STATE_OVERRIDE/.watcher-down.lock" || fail "could not hold the recovery lock"
+      printf '%s\n' "${BASHPID:-$$}" > "$FM_STATE_OVERRIDE/.watcher-down.lock/pid"
+      kill -HUP "$child" || fail "could not start watcher shutdown"
+    fi
+  done
+  if [ "$mode" = capture ]; then
+    assert_present "$home/capture-stopping" "repeated TERM did not reach active capture cleanup"
+    if ! check_status=$(ps -o stat= -p "$check_pid" 2>/dev/null) \
+      || [[ "${check_status//[[:space:]]/}" != Z* ]]; then
+      ! kill -0 "$check_pid" 2>/dev/null || fail "captured check survived shutdown"
+    fi
+    check_pid=''
+  fi
+  kill -TERM "$child" || fail "could not interrupt watcher recovery"
+  deadline=$((SECONDS + 5))
+  while kill -0 "$child" 2>/dev/null; do
+    [ "$SECONDS" -lt "$deadline" ] || fail "watcher ignored TERM while waiting for the recovery lock"
+    sleep 0.05
+  done
+  wait "$child" || status=$?
+  child=''
+  expect_code 1 "$status" "repeated stop must interrupt recovery"
+  assert_present "$FM_STATE_OVERRIDE/.watch.lock/pid" "the blocked watcher unexpectedly released its lock"
+  pass "watcher: recovery accepts a second stop signal after $mode"
+)
+
 test_signal_passes_through_and_exits_zero() {
   local home out err status drained
   home=$(make_home signal)
@@ -491,6 +582,8 @@ test_receipt_removal_is_optional() (
 )
 
 test_quiet_checkpoint_exits_124_cleanly
+test_stop_interrupts_watcher_recovery idle || exit 1
+test_stop_interrupts_watcher_recovery capture || exit 1
 test_signal_passes_through_and_exits_zero
 test_registered_check_uses_preserved_watcher_environment
 test_existing_singleton_watcher_is_not_success

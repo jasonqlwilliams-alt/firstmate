@@ -214,13 +214,16 @@ fm_tmux_composer_snapshot() {  # <target> [explicit]
   FM_COMPOSER_SNAPSHOT_CAPS=$(fm_tmux_composer_caps)
 }
 
-# fm_tmux_composer_classify_snapshot: the verdict for the captured tmux snapshot.
-fm_tmux_composer_classify_snapshot() {
-  local target=${FM_COMPOSER_SNAPSHOT_TMUX_TARGET:-} verdict identity
+# fm_tmux_composer_classify_snapshot: the verdict for the captured tmux
+# snapshot. The exact window the snapshot was read from supplies the lazy
+# identity probe and the Cursor process check below; [fit-text] is forwarded
+# to the shared screen classifier.
+fm_tmux_composer_classify_snapshot() {  # [fit-text]
+  local target=${FM_COMPOSER_SNAPSHOT_TMUX_TARGET:-} fit=${1:-} verdict identity
   [ -n "$target" ] || { printf 'unknown'; return 0; }
   local cy=$FM_COMPOSER_SNAPSHOT_CURSOR pane=$FM_COMPOSER_SNAPSHOT_SCREEN
   local caps=$FM_COMPOSER_SNAPSHOT_CAPS
-  verdict=$(fm_composer_classify_screen "$caps" "$pane" "$cy")
+  verdict=$(fm_composer_classify_screen "$caps" "$pane" "$cy" '' "$fit")
   if [ "$verdict" = need-identity ]; then
     if ! identity=$(fm_tmux_composer_identity "$target") || [ -z "$identity" ]; then
       identity=probe-absent
@@ -237,7 +240,8 @@ fm_tmux_composer_classify_snapshot() {
   # Gated on Cursor's own structural process identity, never on the verdict
   # alone, so the strict blank-row posture that owns `unknown` for every other
   # harness is untouched.
-  if [ "$verdict" = unknown ] && fm_tmux_pane_is_cursor "$target"; then
+  if [ "$verdict" = unknown ] && [[ $'\n'"$caps"$'\n' != *$'\nharness=agy\n'* ]] &&
+     fm_tmux_pane_is_cursor "$target"; then
     verdict=$(fm_composer_classify_screen "$caps" "$pane" '')
   fi
   printf '%s' "$verdict"

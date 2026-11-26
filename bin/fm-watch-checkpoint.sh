@@ -170,6 +170,7 @@ fi
 
 if [ "$RC" -eq 124 ]; then
   printf 'checkpoint: no actionable wake within %ss\n' "$SECONDS_ARG" || exit 1
+  grep -Fx 'watcher: active capture cleanup failed during shutdown' "$ERR" >&2 || true
   if [ "$close" = quiet ]; then
     record_clean_return
   fi

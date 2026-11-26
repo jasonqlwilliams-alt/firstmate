@@ -162,18 +162,29 @@ OK
 
 ## Composer classification
 
-agy draws the `separated` shape - a content row between two solid horizontal rules - whose content row carries a bare `>` glyph.
-Fed a real captured idle pane, `bin/fm-composer-lib.sh` finds a valid separator pair and reaches the identity-gated verdict, which answers `unknown` because that verdict is scoped to an identity of exactly `pi`:
+agy draws one composer row between two solid horizontal rules, opening with agy's `>` glyph in truecolor `38;2;122;162;247`.
+Captured on 2026-11-02 with Antigravity CLI 1.4.12 through Herdr 0.9.5 (`herdr pane read <pane> --source visible --format ansi`) and in a private tmux server, the row took three shapes, and agy could replace it with a feedback survey:
+
+| State | Composer row (plain) | Text styling |
+|---|---|---|
+| Idle, after any input | `>` | none |
+| Idle or working, before the session's first input | `> Accept-edits mode: file edits auto-approved (shift+tab to cycle)` | truecolor `38;2;154;165;206` through Herdr, a palette colour under tmux |
+| Typed, not submitted | `> zz probe` | default foreground |
+| Idle after a completed turn, sometimes | rules and row absent; `How's the CLI experience so far? Help us improve:` / `[1] Good  [2] Fine  [3] Bad  [0] Skip` | - |
+
+The footer row below the composer read `? for shortcuts` at idle and `esc to cancel` while working, as measured on 1.1.27 above.
+Fed a real captured idle pane, pi's row rule reads the `>` glyph as typed content, which is why agy has its own harness-scoped rule rather than a widened pi one:
 
 ```
-$ _fm_composer_scan_screen "$plain" 8
-UNSAFE=0 BOX_TOP=-1 PI_PAIR_VALID=1 PI_OPEN=7 PI_CLOSE=9 SHELL_ROW=8
 $ fm_composer_classify_screen "styled=1 cursor=1 identity=1" "$screen" 8 "pi<TAB>idle"
 pending
 ```
 
-That second line is the measurement that keeps the pi path from being widened to agy: pi's row classifier reads agy's `>` glyph as typed content, so extending it would replace a safe `unknown` with a wrong `pending`, and `pending` is the one composer verdict that SKIPS a steering doorbell on a pane outside the proven-empty rule in `bin/fm-task-inbox-lib.sh`.
-`unknown` still rings the doorbell on an agy pane (only Codex and Rovo panes require a proven-empty composer), so steering works; the gap is left open and documented rather than closed with a change that would break it.
+The capture notes leave agy's live wrapping behavior and the exact tmux palette code for the mode hint unmeasured.
+[`tests/fm-composer-lib.test.sh`](../../tests/fm-composer-lib.test.sh) uses the recorded rows and truecolor values to check the classifier's verdicts, including refusal on plain-text and multirow captures.
+[`tests/fm-task-inbox.test.sh`](../../tests/fm-task-inbox.test.sh) uses an agy-shaped stub in a real tmux server to check screen refusals and the one-row fit boundary for the path-bearing notice.
+Its 80-column regression scaffolds a brief with a symlink alias for a UTF-8 inbox path, checks launch-brief precedence, and verifies that the stub submits the exact short notice and acknowledges the queued record.
+See [Harness support](../configuration.md#harness-support) for the operator-facing doorbell limits.
 
 ## Skills and no-mistakes validation trigger
 
@@ -218,4 +229,4 @@ After a full launch, tool call, interrupt, and exit cycle, the project directory
 ## Refreshing this record
 
 Re-run the commands above against the installed agy after a version bump, and run [`tests/fm-agy-harness.test.sh`](../../tests/fm-agy-harness.test.sh) for the portable half.
-A live opt-in guard in the `live-harness-optin` family does not yet exist for agy; adding one is the natural next step if agy is ever promoted beyond crewmate and scout work.
+The live [composer matrix](runtime-backends.md#composer-classification-matrix) and [doorbell guard](runtime-backends.md#steering-inbox-doorbell) currently omit agy.
