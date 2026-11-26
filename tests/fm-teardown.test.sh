@@ -4491,7 +4491,7 @@ PL
   assert_absent "$case_dir/tasktmp" 'teardown left the task temp directory'
   assert_absent "$case_dir/state/task-x1.meta" 'teardown left the task record'
   assert_absent "$case_dir/state/task-x1.backlog-close" 'teardown left a pending backlog close'
-  [ "$(backlog_row_state "$case_dir")" = done ] || fail 'teardown left the backlog item open'
+  [ "$(backlog_row_state "$case_dir")" = 'done' ] || fail 'teardown left the backlog item open'
   pass "non-Linux cleanup skips reaping the $mode group ($scope)"
 )
 
