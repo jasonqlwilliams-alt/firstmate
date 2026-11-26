@@ -304,9 +304,8 @@
 #     already removed it). reap_task_worktree_processes uses `lsof -a -d cwd`
 #     to find processes under the owned worktree and the recorded tasktmp,
 #     which can be shared between homes. On Linux without lsof it uses
-#     `/proc/<pid>/cwd` for the owned worktree only. On other hosts without
-#     lsof, the early Treehouse preflight refuses before reaping. For cleanup
-#     without that preflight, teardown warns and skips this reap pass.
+#     `/proc/<pid>/cwd` for the owned worktree only. See "Leaked-process
+#     cleanup" in docs/scripts.md for behavior without an available scanner.
 #     Both scans can identify only processes whose working directory is readable.
 #     Both scans are bounded by process count and exclude teardown and its
 #     current and startup ancestors. Teardown sends TERM, then KILL after a
