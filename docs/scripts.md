@@ -152,7 +152,7 @@ Ask the worker to reissue the question with an unreserved key so it can enter `O
 | `fm-merge-outcome-lib.sh` | Publish a confirmed merge's durable, role-routed supervision outcome                 |
 | `fm-parent-channel-lib.sh` | Resolve a secondmate home's parent channel and append a captain-facing outcome line to it at most once |
 | `fm-promote.sh`          | Promote a scout task in place to a protected ship task with an explicit delivery mode, and write the ship instructions carrying that mode's definition of done |
-| [`fm-teardown.sh`](../bin/fm-teardown.sh) | Return landed ship worktrees, reap leaked task processes, require completed scout deliverables, and retire secondmate homes ([Treehouse return safety](#treehouse-return-safety)) |
+| [`fm-teardown.sh`](../bin/fm-teardown.sh) | Return landed ship worktrees, run [leaked-process cleanup](#leaked-process-cleanup), require completed scout deliverables, and retire secondmate homes ([Treehouse return safety](#treehouse-return-safety)) |
 | `fm-harness.sh`          | Detect the running harness, resolve crew or secondmate harness, model, and effort, and validate the native-only `ultra` effort |
 | `fm-lock.sh`             | Per-home firstmate session lock                                                      |
 | `fm-x-lib.sh`            | Shared Relay config, relay, and reply-threading helpers                              |
@@ -181,3 +181,10 @@ This applies to task copies, descendant copies, and local secondmate homes lease
 Start cleanup from a separate terminal outside the copies being returned and keep that terminal outside until cleanup finishes.
 On hosts without Linux `/proc`, the working-directory check requires `lsof`.
 See the [teardown script header](../bin/fm-teardown.sh) for the limits of these checks and what a failed return attempt may already have changed.
+
+## Leaked-process cleanup
+
+On non-Linux hosts without `lsof`, `fm-teardown.sh` warns and skips reaping processes under the task's worktree or temporary directory because it cannot verify caller safety.
+Detached processes can survive even when teardown closes the task's endpoint and retires its records.
+[Treehouse returns](#treehouse-return-safety) require the working-directory check described above.
+The [teardown regression tests](../tests/fm-teardown.test.sh) cover the skipped reap both when the worktree is missing and when it belongs to another task.
