@@ -1,0 +1,141 @@
+Firstmate cleanup with real tmux, Git, tasks-axi, and disposable OS processes.
+Base 80ad3594adf45b6ed2cd1880175b06590dabebab. Target e38732b6afd561dbdd24c7139f7c6dd18ce8bf16.
+The Darwin cases run the real no-scanner fallback on Linux using uname -s=Darwin and PATH without lsof. tmux closes the exact task window, which can deliver SIGHUP independently of reaping. The Linux case uses a real Treehouse lease and reads the fixture process cwd from /proc.
+
+=== base, Darwin branch, missing copy, caller process ===
+Real tmux pane PID, PGID, SID: 92746 92746 92746. Pane cwd: <worktree>/.lab/c1/tasktmp. Backlog before: in_flight.
+$ bin/fm-teardown.sh task-x1
+Exit: 0
+stderr
+teardown: reaping leaked worktree process group for task-x1: 92746
+teardown: force-killing leaked worktree process group for task-x1: 92746
+stdout
+teardown task-x1 complete (window firstmate:fm-task-x1, worktree <worktree>/.lab/c1/wt)
+Backlog: task-x1 is closed in <worktree>/.lab/c1/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.
+Launch ancestry
+pane=92746; wrapper=92836; wrapper parent=92746
+cleanup PID=92837; cleanup PGID=92837
+Real tmux windows after: keeper
+Persisted state after: {'task temp present': False, 'task record present': False, 'pending backlog close present': False}; backlog=done
+Signals recorded by pane process: 'SIGTERM'; target terminated following escalation.
+Private tmux server exit: 0
+
+=== base, Darwin branch, reassigned copy, ancestor process ===
+Real tmux pane PID, PGID, SID: 96094 96094 96094. Pane cwd: <worktree>/.lab/c2/tasktmp. Backlog before: in_flight.
+$ bin/fm-teardown.sh task-x1
+Exit: 0
+stderr
+warning: task task-x1's recorded worktree <worktree>/.lab/c2/pool/1/project was reassigned to task other-task (home <worktree>/.lab/c2), which claimed that pool slot after this record was written; that slot is no longer task-x1's, so its processes, copy, and claim are left untouched and only task-x1's own cleanup runs.
+teardown: reaping leaked tasktmp process group for task-x1: 96094
+teardown: force-killing leaked tasktmp process group for task-x1: 96094
+stdout
+teardown task-x1 complete (window firstmate:fm-task-x1; pool slot <worktree>/.lab/c2/wt left to task other-task (home <worktree>/.lab/c2), which it was reassigned to)
+Backlog: task-x1 is closed in <worktree>/.lab/c2/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.
+Launch ancestry
+pane=96094; exited wrapper=96192; surviving wrapper=96193; surviving wrapper parent=92438
+cleanup PID=96202; cleanup PGID=96202
+Real tmux windows after: keeper
+Persisted state after: {'task temp present': False, 'task record present': False, 'pending backlog close present': False}; backlog=done
+Reassigned copy, branch, file, and owner retained.
+Signals recorded by pane process: 'SIGTERM'; target terminated following escalation.
+Private tmux server exit: 0
+
+=== target, Darwin branch, missing copy, caller process ===
+Real tmux pane PID, PGID, SID: 101433 101433 101433. Pane cwd: <worktree>/.lab/c3/tasktmp. Backlog before: in_flight.
+$ bin/fm-teardown.sh task-x1
+Exit: 0
+stderr
+warning: lsof is unavailable on this platform; leaving leaked processes running for tmux task task-x1 because teardown cannot verify caller safety
+stdout
+teardown task-x1 complete (window firstmate:fm-task-x1, worktree <worktree>/.lab/c3/wt)
+Backlog: task-x1 is closed in <worktree>/.lab/c3/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.
+Launch ancestry
+pane=101433; wrapper=101759; wrapper parent=101433
+cleanup PID=101766; cleanup PGID=101766
+Real tmux windows after: keeper
+Persisted state after: {'task temp present': False, 'task record present': False, 'pending backlog close present': False}; backlog=done
+Pane process acknowledged release after cleanup and exited normally.
+Signals recorded by pane process: 'SIGHUP'.
+Private tmux server exit: 0
+
+=== target, Darwin branch, reassigned copy, ancestor process ===
+Real tmux pane PID, PGID, SID: 104319 104319 104319. Pane cwd: <worktree>/.lab/c4/tasktmp. Backlog before: in_flight.
+$ bin/fm-teardown.sh task-x1
+Exit: 0
+stderr
+warning: task task-x1's recorded worktree <worktree>/.lab/c4/pool/1/project was reassigned to task other-task (home <worktree>/.lab/c4), which claimed that pool slot after this record was written; that slot is no longer task-x1's, so its processes, copy, and claim are left untouched and only task-x1's own cleanup runs.
+warning: lsof is unavailable on this platform; leaving leaked processes running for tmux task task-x1 because teardown cannot verify caller safety
+stdout
+teardown task-x1 complete (window firstmate:fm-task-x1; pool slot <worktree>/.lab/c4/wt left to task other-task (home <worktree>/.lab/c4), which it was reassigned to)
+Backlog: task-x1 is closed in <worktree>/.lab/c4/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.
+Launch ancestry
+pane=104319; exited wrapper=104341; surviving wrapper=104342; surviving wrapper parent=92438
+cleanup PID=104343; cleanup PGID=104343
+Real tmux windows after: keeper
+Persisted state after: {'task temp present': False, 'task record present': False, 'pending backlog close present': False}; backlog=done
+Reassigned copy, branch, file, and owner retained.
+Pane process acknowledged release after cleanup and exited normally.
+Signals recorded by pane process: 'SIGHUP'.
+Private tmux server exit: 0
+
+=== target, Darwin branch, missing copy, leak process ===
+Real tmux pane PID, PGID, SID: 105464 105464 105464. Pane cwd: <worktree>/.lab/c5/tasktmp. Backlog before: in_flight.
+$ bin/fm-teardown.sh task-x1
+Exit: 0
+stderr
+warning: lsof is unavailable on this platform; leaving leaked processes running for tmux task task-x1 because teardown cannot verify caller safety
+stdout
+teardown task-x1 complete (window firstmate:fm-task-x1, worktree <worktree>/.lab/c5/wt)
+Backlog: task-x1 is closed in <worktree>/.lab/c5/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.
+Real tmux windows after: keeper
+Persisted state after: {'task temp present': False, 'task record present': False, 'pending backlog close present': False}; backlog=done
+Pane process acknowledged release after cleanup and exited normally.
+Signals recorded by pane process: 'SIGHUP'.
+Private tmux server exit: 0
+
+=== target, Darwin branch, reassigned copy, leak process ===
+Real tmux pane PID, PGID, SID: 108753 108753 108753. Pane cwd: <worktree>/.lab/c6/tasktmp. Backlog before: in_flight.
+$ bin/fm-teardown.sh task-x1
+Exit: 0
+stderr
+warning: task task-x1's recorded worktree <worktree>/.lab/c6/pool/1/project was reassigned to task other-task (home <worktree>/.lab/c6), which claimed that pool slot after this record was written; that slot is no longer task-x1's, so its processes, copy, and claim are left untouched and only task-x1's own cleanup runs.
+warning: lsof is unavailable on this platform; leaving leaked processes running for tmux task task-x1 because teardown cannot verify caller safety
+stdout
+teardown task-x1 complete (window firstmate:fm-task-x1; pool slot <worktree>/.lab/c6/wt left to task other-task (home <worktree>/.lab/c6), which it was reassigned to)
+Backlog: task-x1 is closed in <worktree>/.lab/c6/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.
+Real tmux windows after: keeper
+Persisted state after: {'task temp present': False, 'task record present': False, 'pending backlog close present': False}; backlog=done
+Reassigned copy, branch, file, and owner retained.
+Pane process acknowledged release after cleanup and exited normally.
+Signals recorded by pane process: 'SIGHUP'.
+Private tmux server exit: 0
+
+=== target, Darwin branch, owned copy, leak process ===
+Real tmux pane PID, PGID, SID: 114111 114111 114111. Pane cwd: <worktree>/.lab/c7/wt. Backlog before: in_flight.
+$ bin/fm-teardown.sh task-x1
+Exit: 1
+stderr
+REFUSED: cannot verify caller working directories for Treehouse copy <worktree>/.lab/c7/wt; retaining it.
+Real tmux windows after: keeper, fm-task-x1
+Persisted state after: {'task temp present': True, 'task record present': True, 'pending backlog close present': False}; backlog=in_flight
+Owned copy still present.
+Pane process acknowledged release after cleanup and exited normally.
+Signals recorded by pane process: ''.
+Private tmux server exit: 0
+
+=== target, Linux branch, owned copy, leak process ===
+Real tmux pane PID, PGID, SID: 115891 115891 115891. Pane cwd: <worktree>/.lab/c8/pool/.treehouse/project-77e4ca/1/project. Backlog before: in_flight.
+$ bin/fm-teardown.sh task-x1
+Exit: 0
+stderr
+teardown: reaping leaked worktree process(es) for task-x1: 115891
+teardown: force-killing leaked worktree process(es) for task-x1: 115891
+stdout
+🌳 Worktree returned to pool.
+teardown task-x1 complete (window firstmate:fm-task-x1, worktree <worktree>/.lab/c8/pool/.treehouse/project-77e4ca/1/project)
+Backlog: task-x1 is closed in <worktree>/.lab/c8/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.
+Real tmux windows after: keeper
+Persisted state after: {'task temp present': False, 'task record present': False, 'pending backlog close present': False}; backlog=done
+Treehouse slot status: available; lease ID cleared.
+Signals recorded by pane process: 'SIGTERM'; target terminated following escalation.
+Private tmux server exit: 0
