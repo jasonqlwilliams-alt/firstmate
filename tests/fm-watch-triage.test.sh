@@ -2590,19 +2590,16 @@ test_experimental_backend_unreadable_endpoints_stay_quiet() (
 )
 
 test_park_mark_refuses_experimental_backends() (
-  local dir fakebin
-  command -v node >/dev/null 2>&1 || { echo "skip: node is required to generate fixture titles"; return 0; }
+  local dir
   dir=$(fm_test_tmproot fm-park-experimental) || fail "could not create the experimental park fixture"
-  fakebin="$dir/fakebin"
-  install_fake_experimental_backends "$fakebin" || fail "could not install the experimental backend fixtures"
 
-  expect_park_refusal() {  # <backend> <fixture-mode> <meta-fields...>
-    local backend=$1 mode=$2 state rc=0 output
-    shift 2
+  expect_park_refusal() {
+    local backend=$1 state rc=0 output
+    shift
     state="$dir/$backend/state"
     mkdir -p "$state"
     fm_write_meta "$state/lost.meta" "backend=$backend" kind=ship spawn_gen=first "$@"
-    output=$(PATH="$fakebin:$PATH" FM_HOME="$dir/$backend" FM_STATE_OVERRIDE="$state" FM_FAKE_ENDPOINT="$mode" \
+    output=$(FM_HOME="$dir/$backend" FM_STATE_OVERRIDE="$state" \
       "$ROOT/bin/fm-park-retained.sh" lost mark 2>&1) || rc=$?
     [ "$rc" -eq 1 ] || fail "[$backend] expected mark to exit 1, got $rc: $output"
     assert_contains "$output" "on $backend because the backend cannot confirm endpoint loss" \
@@ -2611,9 +2608,9 @@ test_park_mark_refuses_experimental_backends() (
     pass "[$backend] park mark explains why the backend cannot confirm endpoint loss"
   }
 
-  expect_park_refusal zellij empty-panes window=remote:7
-  expect_park_refusal orca stale window=fm-lost terminal=term-gone
-  expect_park_refusal cmux moved-surface window=ws-gone:sf-gone
+  expect_park_refusal zellij window=remote:7
+  expect_park_refusal orca window=fm-lost terminal=term-gone
+  expect_park_refusal cmux window=ws-gone:sf-gone
 )
 
 test_zellij_endpoint_state_boundary() (
