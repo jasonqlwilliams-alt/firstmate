@@ -84,8 +84,9 @@ The [watcher triage regressions](../tests/fm-watch-triage.test.sh) cover wake or
 
 ### Parking a task with its copy retained
 
-After deliberately closing a local ordinary task's worker window and retaining its isolated copy, use the `mark` action in [`fm-park-retained.sh`](../bin/fm-park-retained.sh) for that task.
-Marking requires a recovery-grade `missing` verdict, currently available only on tmux and Herdr.
+On tmux or Herdr, use the `mark` action in [`fm-park-retained.sh`](../bin/fm-park-retained.sh) after deliberately closing a local ordinary task's worker window and retaining its isolated copy.
+Marking requires a recovery-grade `missing` verdict for the recorded endpoint.
+On Zellij, Orca, and cmux, the command refuses to set the mark and explains that the backend cannot confirm endpoint loss.
 Both park actions leave the copy and its work intact.
 Secondmates follow the reporting rule above.
 A loss wake queued before marking remains pending until [normal wake acknowledgement](#per-actor-acknowledgement).

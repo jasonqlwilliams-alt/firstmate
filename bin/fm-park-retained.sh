@@ -14,8 +14,6 @@
 # park mark must be non-symlinks. Both actions honor the Pi supervision lease.
 # Both actions operate on supervision state, and mark also checks the runtime
 # endpoint. The task's copy, branch, and work stay unread and untouched.
-# Mark refuses Zellij, Orca, and cmux because their adapters cannot provide
-# the recovery-grade missing verdict required to confirm endpoint loss.
 #
 # <state>/<id>.parked-retained stores backend:target, a tab, and the spawn
 # generation. fm_backend_endpoint_park_identity treats a legacy teardown
