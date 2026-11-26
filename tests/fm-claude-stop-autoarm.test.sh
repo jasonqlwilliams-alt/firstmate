@@ -6,8 +6,8 @@
 # as a child of a fake harness (a bash symlink named "claude") whose pid is
 # written into the fixture home's state/.lock for ordinary owned-lock cases.
 # Stale-owner cases instead leave a dead recorded pid for the hook to reclaim
-# through the real fm-lock.sh path. The arm wrapper is a per-test fixture, so no
-# real watcher, model, or fleet state is touched.
+# through the real fm-lock.sh path. Most cases stub the arm wrapper. Integration
+# cases run the real watcher and arm entirely inside their fixture homes.
 # shellcheck disable=SC2016 # single quotes are deliberate: $FM_HOME expands inside the fake harness child, and grep needles are literal strings
 set -u
 
@@ -1257,7 +1257,16 @@ test_fm_lock_status_still_works_with_shared_lib() {
 # Real bounded process lifetime, with a quiet arm and controlled changes to
 # demand/authority while it is parked. No actual fleet processes are touched.
 test_quiet_lease_renewal_gates() {
-  local mode dir out status
+  local mode dir out status runner check_term_cleanup=0
+  runner=$(
+    # shellcheck source=bin/fm-timeout-lib.sh
+    . "$ROOT/bin/fm-timeout-lib.sh"
+    fm_timeout_mechanism
+  )
+  if [[ "$runner" = timeout || "$runner" = gtimeout ]] \
+    && LC_ALL=C "$runner" --version 2>/dev/null | grep -Fq '(GNU coreutils)'; then
+    check_term_cleanup=1
+  fi
   for mode in demand held afk superseded alarm; do
     dir=$(make_primary_dir "$TMP_ROOT/lease-$mode")
     : > "$dir/state/task.meta"
@@ -1265,6 +1274,18 @@ test_quiet_lease_renewal_gates() {
 #!/usr/bin/env bash
 printf '%s\n' "$$" > "$FM_HOME/state/arm-ran"
 case "${LEASE_TEST_MODE}" in
+  demand)
+    if [ "$LEASE_TEST_TERM_CLEANUP" = 1 ]; then
+      arm_parent=$PPID
+      trap '
+        sleep 0.35
+        parent=$(ps -o ppid= -p "$$") || exit 1
+        [ "${parent//[[:space:]]/}" = "$arm_parent" ] || exit 1
+        : > "$FM_HOME/state/arm-term-cleanup"
+        exit 143
+      ' TERM
+    fi
+    ;;
   held) rm "$FM_HOME/state/task.meta" ;;
   afk) touch "$FM_HOME/state/.afk" ;;
   superseded) sed -i 's/epoch=1 /epoch=2 /' "$FM_HOME/state/.claude-autoarm-epoch" ;;
@@ -1273,10 +1294,14 @@ esac
 sleep 30
 SH
     chmod +x "$dir/bin/fm-watch-arm.sh"
-    out=$(LEASE_TEST_MODE="$mode" FM_CLAUDE_AUTOARM_LEASE_SECONDS=3 run_autoarm "$dir" 2>/dev/null); status=$?
+    out=$(LEASE_TEST_MODE="$mode" LEASE_TEST_TERM_CLEANUP="$check_term_cleanup" \
+      FM_CLAUDE_AUTOARM_LEASE_SECONDS=3 run_autoarm "$dir" 2>/dev/null); status=$?
     if [ "$mode" = demand ]; then
       expect_code 2 "$status" "quiet live demand needs an owned renewal"
       assert_contains "$out" 'check: claude-lease-renewal' "lease maintenance reason"
+      if [ "$check_term_cleanup" = 1 ]; then
+        assert_present "$dir/state/arm-term-cleanup" "GNU lease ended before the arm could finish TERM cleanup"
+      fi
       grep -q '^pending:handling:' "$dir/state/.watcher-down" || fail "renewal did not publish an acknowledgeable handling episode"
       assert_grep "session_pid=$(cat "$dir/state/.lock")" "$dir/state/.claude-autoarm-epoch" \
         "renewal did not bind the current owning session"
@@ -1336,6 +1361,454 @@ test_quiet_lease_preserves_live_lock() {
   pass "auto-arm: lease retires only dead watcher locks and preserves live or identity-mismatched live holders"
 }
 
+wait_for_liveness_fixture() {
+  local pid=$1 attempts=$2 i
+  for ((i=0; i<attempts; i++)); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid"
+      return $?
+    fi
+    sleep 0.05
+  done
+  return 124
+}
+
+stop_liveness_fixture() {
+  local pid=$1
+  [ -n "$pid" ] || return 0
+  kill -TERM "$pid" 2>/dev/null || true
+  if wait_for_liveness_fixture "$pid" 60 2>/dev/null; then
+    return 0
+  elif [ "$?" -eq 124 ]; then
+    kill -KILL "$pid" 2>/dev/null || true
+    wait_for_liveness_fixture "$pid" 60 2>/dev/null || true
+  fi
+}
+
+test_slow_check_sweep_liveness() (
+  local mode=$1 dir state id i hook_rc
+  local arm_pid='' watcher_pid='' stopped=0 RUN_AUTOARM_BG_PID=''
+  dir=$(make_primary_dir "$TMP_ROOT/sweep-$mode")
+  state="$dir/state"
+  cp -R "$ROOT/bin/." "$dir/bin/" || fail "could not install watcher scripts"
+  cp "$ROOT/.tasks.toml" "$dir/.tasks.toml" || fail "could not install backlog configuration"
+  # shellcheck disable=SC2030 # These exports apply only to the fixture and its children.
+  export FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state" \
+    FM_GUARD_GRACE=8 FM_WATCHER_STALE_GRACE=+07 FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=35 \
+    FM_POLL=1 FM_HEARTBEAT=999999 FM_ARM_CONFIRM_TIMEOUT=4 \
+    FM_CLAUDE_AUTOARM_ATTEMPTS=1 FM_CLAUDE_AUTOARM_LEASE_SECONDS=24
+
+  # shellcheck disable=SC2329 # The fixture invokes this through its EXIT trap.
+  cleanup_sweep() {
+    if [ "$stopped" -eq 1 ]; then kill -CONT "$watcher_pid" 2>/dev/null || true; fi
+    touch "$state/finish"
+    stop_liveness_fixture "$arm_pid"
+    stop_liveness_fixture "$RUN_AUTOARM_BG_PID"
+  }
+  trap cleanup_sweep EXIT
+  trap 'exit 1' HUP INT TERM
+
+  # Each silent check is shorter than the grace window, but together they
+  # carry the cycle past it. Hold the final actionable check for the probe.
+  printf 'sleep 5\n' > "$state/a.check.sh"
+  cp "$state/a.check.sh" "$state/b.check.sh" || fail "could not install silent check"
+  cat > "$state/c.check.sh" <<'SH'
+touch "$FM_HOME/state/ready"
+until [ -f "$FM_HOME/state/finish" ]; do sleep 0.1; done
+echo completed-slow-sweep
+SH
+  for id in a b c; do
+    chmod 700 "$state/$id.check.sh"
+    "$dir/bin/fm-check-register.sh" "$id" >/dev/null || fail "could not register $id"
+  done
+  "$dir/bin/fm-watch-arm.sh" > "$dir/outer.out" 2>&1 &
+  arm_pid=$!
+  for ((i=0; i<300; i++)); do
+    [ ! -e "$state/ready" ] || break
+    kill -0 "$arm_pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  [ -f "$state/ready" ] || fail "sweep did not reach final check: $(cat "$dir/outer.out")"
+  watcher_pid=$(cat "$state/.watch.lock/pid") || fail "original watcher did not hold the lock"
+  assert_grep "watcher: started pid=$watcher_pid " "$dir/outer.out" "the original arm must own the watcher"
+  if [ "$mode" = stalled ]; then
+    kill -STOP "$watcher_pid" || fail "could not stop the watcher during the final check"
+    stopped=1
+    sleep "$((FM_GUARD_GRACE + 1))"
+  fi
+  "$dir/bin/fm-guard.sh" --read-only > "$dir/guard.out" 2>&1
+  run_autoarm_bg "$dir" "$dir/hook.out"
+  if [ "$mode" = healthy ]; then
+    assert_not_contains "$(cat "$dir/guard.out")" 'WATCHER DOWN' "a progressing sweep must stay fresh"
+    for ((i=0; i<120; i++)); do
+      grep -qsF "watcher: attached pid=$watcher_pid " "$state"/.claude-autoarm-output.* && break
+      kill -0 "$RUN_AUTOARM_BG_PID" 2>/dev/null || break
+      sleep 0.1
+    done
+    grep -qsF "watcher: attached pid=$watcher_pid " "$state"/.claude-autoarm-output.* \
+      || fail "Stop hook did not attach to the original watcher: $(cat "$dir/hook.out")"
+  else
+    assert_grep 'WATCHER DOWN' "$dir/guard.out" "a stopped watcher must become stale"
+    wait_for_liveness_fixture "$RUN_AUTOARM_BG_PID" 300
+    hook_rc=$?
+    [ "$hook_rc" -ne 124 ] || fail "Stop hook did not finish: $(cat "$dir/hook.out")"
+    RUN_AUTOARM_BG_PID=
+    expect_code 2 "$hook_rc" "the Stop hook must report the stalled watcher"
+    assert_grep 'auto-arm FAILED' "$dir/hook.out" "the stalled watcher must trigger the ordinary failure"
+    assert_grep 'heartbeat is stale' "$dir/hook.out" "the live lock must fail on beacon age"
+    kill -CONT "$watcher_pid" || fail "stalled watcher disappeared while it still held the lock"
+    stopped=0
+  fi
+  [ "$(cat "$state/.watch.lock/pid")" = "$watcher_pid" ] || fail "Stop hook replaced the original watcher"
+  touch "$state/finish"
+  wait_for_liveness_fixture "$arm_pid" 300 || fail "original watcher cycle did not succeed: $(cat "$dir/outer.out")"
+  arm_pid=
+  assert_grep 'completed-slow-sweep' "$dir/outer.out" "original watcher must deliver the final check"
+  [ "$(wc -l < "$state/.wake-queue" | tr -d ' ')" = 1 ] || fail "final check must queue exactly one wake"
+  if [ "$mode" = healthy ]; then
+    wait_for_liveness_fixture "$RUN_AUTOARM_BG_PID" 300
+    hook_rc=$?
+    [ "$hook_rc" -ne 124 ] || fail "Stop hook did not finish: $(cat "$dir/hook.out")"
+    RUN_AUTOARM_BG_PID=
+    expect_code 2 "$hook_rc" "the attached Stop hook must request a handling turn"
+    assert_grep 'completed-slow-sweep' "$dir/hook.out" "Stop hook must relay the original check output"
+    assert_not_contains "$(cat "$dir/hook.out")" 'auto-arm FAILED' "healthy sweep must never report arm failure"
+  fi
+  pass "auto-arm: $mode watcher during a long check sweep preserves singleton and wake delivery"
+)
+
+test_stalled_remote_observation_liveness() (
+  local mode=${1:-poll} dir state corr rec i watcher_pid hook_rc ssh_pid='' transport_pid=''
+  local arm_pid='' RUN_AUTOARM_BG_PID='' cleanup_signal=TERM
+  if [ "$mode" != lease-no-gnu ] \
+    && ! { LC_ALL=C timeout --version || true; LC_ALL=C gtimeout --version || true; } 2>/dev/null \
+      | grep -F '(GNU coreutils)' >/dev/null; then
+    printf 'ok - auto-arm: remote observation %s # SKIP GNU timeout unavailable\n' "$mode"
+    return 0
+  fi
+  dir=$(make_primary_dir "$TMP_ROOT/stalled-observation-$mode")
+  state="$dir/state"
+  cp -R "$ROOT/bin/." "$dir/bin/" || fail "could not install watcher scripts"
+  cp "$ROOT/.tasks.toml" "$dir/.tasks.toml" || fail "could not install backlog configuration"
+  git -C "$dir" add bin/fm-remote-secondmate-control.sh || fail "could not track the remote observation command"
+  mkdir -p "$dir/data"
+  printf '%s\n' "- mate - fixture (host: remote-mac; root: $dir; home: $dir/mate; scope: fixture; projects: alpha; added 2026-08-02)" \
+    > "$dir/data/secondmates.md"
+  fm_write_meta "$state/mate.meta" 'kind=secondmate' 'remote_host=remote-mac'
+  # shellcheck disable=SC2030,SC2031 # This fixture exports its own environment.
+  export FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state" \
+    FM_GUARD_GRACE=+8 FM_POLL=15 FM_CHECK_INTERVAL=0 FM_HEARTBEAT=999999 \
+    FM_ARM_CONFIRM_TIMEOUT=4 FM_CLAUDE_AUTOARM_ATTEMPTS=1 FM_CLAUDE_AUTOARM_LEASE_SECONDS=30
+  export FM_SSH_BIN="$dir/fixture-ssh"
+  if [ "$mode" = lease-no-gnu ]; then
+    mkdir "$dir/no-gnu" || fail "could not create the no-GNU fixture"
+    printf '%s\n' '#!/bin/sh' 'exit 127' > "$dir/no-gnu/timeout"
+    chmod 700 "$dir/no-gnu/timeout" || fail "could not mask timeout"
+    ln -s timeout "$dir/no-gnu/gtimeout" || fail "could not mask gtimeout"
+    # shellcheck disable=SC2030 # Only this fixture selects the Bash timeout mechanism.
+    export PATH="$dir/no-gnu:$PATH" FM_TIMEOUT_MECHANISM_OVERRIDE=bash
+    export FM_FIXTURE_SSH_IGNORES_TERM=1
+    cleanup_signal=KILL
+  fi
+
+  # shellcheck source=/dev/null
+  . "$dir/bin/fm-pending-reply-lib.sh"
+  corr=$(fm_pending_reply_create "$dir" "$state" mate observe) || fail "could not create reply expectation"
+  fm_pending_reply_mark_delivered "$state" "$corr" || fail "could not record delivery"
+  rec=$(fm_pending_reply_path "$state" "$corr")
+
+  cat > "$FM_SSH_BIN" <<'SH'
+#!/usr/bin/env bash
+if [ "${FM_FIXTURE_CAPTURE_MODE:-}" = cleanup-checkpoint ] && [ ! -e "$FM_HOME/state/first-observation" ]; then
+  : > "$FM_HOME/state/first-observation" || exit 1
+  printf 'busy'
+  exit 0
+fi
+if [ ! -e "$FM_HOME/state/observing" ]; then
+  if [ "${FM_FIXTURE_SSH_IGNORES_TERM:-0}" = 1 ]; then
+    trap '' TERM
+  fi
+  sleep 30 &
+  transport_pid=$!
+  if [ "${FM_FIXTURE_SSH_IGNORES_TERM:-0}" != 1 ]; then
+    trap 'wait "$transport_pid" 2>/dev/null; exit 1' TERM
+  fi
+  printf '%s %s\n' "$$" "$transport_pid" > "$FM_HOME/state/observing"
+  printf 'idle'
+  wait "$transport_pid" && : > "$FM_HOME/state/observation-completed"
+  exit
+fi
+printf 'busy'
+SH
+  cat > "$state/ready.check.sh" <<'SH'
+touch "$FM_HOME/state/checked"
+if [ -e "$FM_HOME/state/finish" ]; then echo completed-after-observation; fi
+SH
+  chmod 700 "$FM_SSH_BIN" "$state/ready.check.sh"
+  "$dir/bin/fm-check-register.sh" ready >/dev/null || fail "could not register the check"
+
+  # shellcheck disable=SC2329 # The fixture invokes this through its EXIT trap.
+  cleanup_observation() {
+    stop_liveness_fixture "$arm_pid"
+    stop_liveness_fixture "$RUN_AUTOARM_BG_PID"
+    if [ -n "$ssh_pid" ]; then kill "-$cleanup_signal" "$ssh_pid" 2>/dev/null || true; fi
+    if [ -n "$transport_pid" ]; then kill "-$cleanup_signal" "$transport_pid" 2>/dev/null || true; fi
+  }
+  trap cleanup_observation EXIT
+  trap 'exit 1' HUP INT TERM
+
+  assert_capture_process_stopped() {
+    local pid=$1 message=$2 process_status
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || fail "invalid capture PID: $pid"
+    if process_status=$(ps -o stat= -p "$pid" 2>/dev/null); then
+      case "${process_status//[[:space:]]/}" in Z*) return 0 ;; esac
+    fi
+    ! kill -0 "$pid" 2>/dev/null || fail "$message"
+  }
+
+  if [[ "$mode" = cleanup-* ]]; then
+    cat > "$dir/capture-failure.bash" <<'SH'
+if [ "$0" = "$FM_HOME/bin/fm-watch.sh" ]; then
+  fixture_capture_survives() {
+    [ "$FM_FIXTURE_CAPTURE_MODE" != cleanup-checkpoint ] || [ -s "$FM_HOME/state/observing" ]
+  }
+  kill() {
+    if [ "$*" = "-0 -- -${FM_ACTIVE_CHECK_PGID:-}" ] && fixture_capture_survives; then
+      return 0
+    fi
+    builtin kill "$@"
+  }
+  ps() {
+    if [ "$*" = '-ax -o pgid= -o stat=' ] && fixture_capture_survives; then
+      printf '%s D\n' "$FM_ACTIVE_CHECK_PGID"
+    else
+      command ps "$@"
+    fi
+  }
+  awk() {
+    if [ "$FM_FIXTURE_CAPTURE_MODE" = cleanup-unverified ] && [ "${1:-}" = -v ] \
+      && [ "${2:-}" = "group=${FM_ACTIVE_CHECK_PGID:-}" ]; then
+      : > "$FM_HOME/state/process-state-check-failed"
+      return 127
+    fi
+    command awk "$@"
+  }
+fi
+SH
+    export FM_FIXTURE_CAPTURE_MODE="$mode" BASH_ENV="$dir/capture-failure.bash"
+  fi
+
+  if [ "$mode" = cleanup-checkpoint ]; then
+    ln -s /bin/bash "$dir/codex" || fail "could not install fake Codex ancestry"
+    hook_rc=0
+    FM_GUARD_GRACE=120 FM_WATCHER_STALE_GRACE=120 FM_POLL=1 FM_SUPERVISION_MODEL=persistent \
+      "$dir/codex" -c '
+        unset CLAUDECODE CURSOR_AGENT CURSOR_INVOKED_AS GEMINI_CLI PI_CODING_AGENT GROK_AGENT FM_OMP_HARNESS ANTIGRAVITY_AGENT
+        unset ATLASSIAN_AGENT_TYPE ROVODEV_CLI
+        printf "%s\n" "$$" > "$FM_HOME/state/.lock" || exit 1
+        "$FM_HOME/bin/fm-watch-checkpoint.sh" --seconds 12
+        status=$?
+        "$FM_HOME/bin/fm-guard.sh" > "$FM_HOME/guard.out" 2>&1
+        exit "$status"
+      ' > "$dir/outer.out" 2> "$dir/outer.err" || hook_rc=$?
+    expect_code 124 "$hook_rc" "failed shutdown must preserve the checkpoint deadline status"
+    [ "$(fm_pending_reply_get "$rec" turn_seen_busy)" = 1 ] || fail "checkpoint did not process the first observation"
+    [ -s "$state/observing" ] || fail "checkpoint expired before it started the second observation"
+    assert_grep 'checkpoint: no actionable wake within 12s' "$dir/outer.out" "checkpoint lost the deadline line"
+    assert_grep 'watcher: active capture cleanup failed during shutdown' "$dir/outer.err" "checkpoint lost the cleanup diagnostic"
+    [ -f "$state/.last-checkpoint-return" ] || fail "checkpoint did not recognize the owning Codex session"
+    [ ! -s "$state/.last-checkpoint-return" ] || fail "failed cleanup recorded a clean checkpoint return"
+    assert_absent "$state/.watch.lock" "checkpoint shutdown did not release its lock"
+    assert_grep 'WATCHER DOWN' "$dir/guard.out" "failed cleanup hid the watcher-down warning"
+    [ ! -s "$state/.wake-queue" ] || fail "checkpoint shutdown queued a wake"
+    pass "checkpoint: failed cleanup preserves the deadline and watcher-down warning"
+    return 0
+  fi
+
+  if [ "$mode" = cleanup-failure ] || [ "$mode" = cleanup-unverified ]; then
+    touch "$state/finish" || fail "could not arrange an actionable check after observation"
+    hook_rc=0
+    "$dir/bin/fm-watch-checkpoint.sh" --seconds 20 \
+      > "$dir/outer.out" 2>&1 || hook_rc=$?
+    if [ "$mode" = cleanup-unverified ]; then
+      [ -e "$state/process-state-check-failed" ] || fail "process-state check error was not exercised"
+    fi
+    expect_code 1 "$hook_rc" "checkpoint must fail when remote capture cleanup fails ($(cat "$dir/outer.out"))"
+    assert_grep 'watcher: remote observation capture cleanup failed' "$dir/outer.out" "checkpoint must explain the capture failure"
+    [ ! -s "$state/.wake-queue" ] || fail "failed cleanup must not queue an actionable wake"
+    pass "checkpoint: $mode returns an error without a wake"
+    return 0
+  fi
+
+  if [ "$mode" = lease ] || [ "$mode" = lease-no-gnu ]; then
+    export FM_GUARD_GRACE=60 FM_CLAUDE_AUTOARM_LEASE_SECONDS=5
+    run_autoarm_bg "$dir" "$dir/hook.out"
+    wait_for_liveness_fixture "$RUN_AUTOARM_BG_PID" 300
+    hook_rc=$?
+    [ "$hook_rc" -ne 124 ] || fail "lease did not finish: $(cat "$dir/hook.out")"
+    RUN_AUTOARM_BG_PID=
+    read -r ssh_pid transport_pid < "$state/observing" || fail "lease ended before the watcher entered the remote observation"
+    expect_code 2 "$hook_rc" "an active home must receive the lease renewal wake"
+    assert_grep 'check: claude-lease-renewal' "$dir/hook.out" "expiry must use the ordinary lease handoff"
+    assert_capture_process_stopped "$ssh_pid" "SSH survived the watcher's lease"
+    assert_capture_process_stopped "$transport_pid" "SSH transport survived the watcher's lease"
+    ssh_pid=
+    transport_pid=
+    [ ! -e "$state/.watch.lock" ] || fail "lease expiry left a watcher lock behind"
+    [ -z "$(fm_pending_reply_get "$rec" request_turn_completed_epoch)" ] \
+      || fail "a cancelled observation must not prove the mate was idle"
+    pass "auto-arm: $mode expiry terminates the in-flight remote observation"
+    return 0
+  fi
+
+  if [ "$mode" = stop ] || [ "$mode" = cleanup-stop ]; then
+    # shellcheck disable=SC2031 # Stop mode sets its own stale grace.
+    export FM_GUARD_GRACE=120 FM_WATCHER_STALE_GRACE=120
+  fi
+  "$dir/bin/fm-watch-arm.sh" > "$dir/outer.out" 2>&1 &
+  arm_pid=$!
+  if [ "$mode" = stop ] || [ "$mode" = cleanup-stop ]; then
+    for ((i=0; i<160; i++)); do
+      [ ! -s "$state/observing" ] || break
+      kill -0 "$arm_pid" 2>/dev/null || break
+      sleep 0.05
+    done
+    read -r ssh_pid transport_pid < "$state/observing" || fail "the watcher did not enter the remote observation"
+    kill -TERM "$arm_pid" || fail "could not stop the arm"
+    wait_for_liveness_fixture "$arm_pid" 300
+    hook_rc=$?
+    [ "$hook_rc" -ne 124 ] || fail "arm did not stop: $(cat "$dir/outer.out")"
+    arm_pid=
+    assert_capture_process_stopped "$ssh_pid" "SSH survived watcher stop"
+    assert_capture_process_stopped "$transport_pid" "SSH transport survived watcher stop"
+    [ ! -e "$state/observation-completed" ] || fail "SSH finished naturally before the watcher stopped it"
+    ssh_pid=
+    transport_pid=
+    [ ! -e "$state/.watch.lock" ] || fail "a normally stopped watcher did not release its lock"
+    if [ "$mode" = cleanup-stop ]; then
+      expect_code 143 "$hook_rc" "cleanup failure must preserve the arm's TERM status"
+      assert_grep 'watcher: active capture cleanup failed during shutdown' "$dir/outer.out" "arm lost the cleanup diagnostic"
+    fi
+    pass "auto-arm: a normally stopped watcher reaps its remote observation"
+    return 0
+  fi
+  for ((i=0; i<160; i++)); do
+    [ ! -e "$state/checked" ] || break
+    kill -0 "$arm_pid" 2>/dev/null || break
+    sleep 0.05
+  done
+  read -r ssh_pid transport_pid < "$state/observing" || fail "watcher never entered the remote observation"
+  [ -e "$state/checked" ] || fail "the remote observation stalled the watcher past grace"
+  assert_capture_process_stopped "$ssh_pid" "timed-out observation left the SSH wrapper running"
+  assert_capture_process_stopped "$transport_pid" "timed-out observation left the transport running"
+  ssh_pid=
+  transport_pid=
+  [ -z "$(fm_pending_reply_get "$rec" request_turn_completed_epoch)" ] \
+    || fail "incomplete observation output was accepted as idle"
+  watcher_pid=$(cat "$state/.watch.lock/pid") || fail "original watcher did not hold the lock"
+
+  sleep 10
+  "$dir/bin/fm-guard.sh" --read-only > "$dir/guard.out" 2>&1
+  assert_not_contains "$(cat "$dir/guard.out")" 'WATCHER DOWN' "the terminal wait must stay fresh past grace"
+  [ "$(fm_pending_reply_get "$rec" turn_seen_busy)" = 0 ] || fail "beacon refresh shortened the configured poll"
+  run_autoarm_bg "$dir" "$dir/hook.out"
+  for ((i=0; i<120; i++)); do
+    grep -qsF "watcher: attached pid=$watcher_pid " "$state"/.claude-autoarm-output.* && break
+    kill -0 "$RUN_AUTOARM_BG_PID" 2>/dev/null || break
+    sleep 0.05
+  done
+  grep -qsF "watcher: attached pid=$watcher_pid " "$state"/.claude-autoarm-output.* \
+    || fail "Stop hook did not attach to the original watcher: $(cat "$dir/hook.out")"
+  touch "$state/finish"
+  wait_for_liveness_fixture "$arm_pid" 300 || fail "original watcher cycle did not succeed: $(cat "$dir/outer.out")"
+  arm_pid=
+  wait_for_liveness_fixture "$RUN_AUTOARM_BG_PID" 300
+  hook_rc=$?
+  [ "$hook_rc" -ne 124 ] || fail "Stop hook did not finish: $(cat "$dir/hook.out")"
+  RUN_AUTOARM_BG_PID=
+  expect_code 2 "$hook_rc" "the attached Stop hook must request a handling turn"
+  assert_grep 'completed-after-observation' "$dir/hook.out" "Stop hook must relay the original watcher's check"
+  [ "$(fm_pending_reply_get "$rec" turn_seen_busy)" = 1 ] || fail "the watcher did not retry the remote observation"
+  [ "$(wc -l < "$state/.wake-queue" | tr -d ' ')" = 1 ] || fail "the check must queue exactly one wake"
+  pass "auto-arm: stalled remote observation and long poll preserve singleton liveness and wake delivery"
+)
+
+test_watcher_keeps_operation_budgets() (
+  local dir state corr rec
+  dir=$(make_primary_dir "$TMP_ROOT/operation-budgets")
+  state="$dir/state"
+  cp -R "$ROOT/bin/." "$dir/bin/" || fail "could not install watcher scripts"
+  # shellcheck disable=SC2031 # This fixture exports its own environment.
+  export FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state" \
+    FM_GUARD_GRACE=12 FM_POLL=1 FM_CHECK_INTERVAL=0 FM_CHECK_TIMEOUT=15
+  export FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=10 FM_PROCEVENT_CLAIM_ROOT="$dir/claims"
+  export FM_PENDING_REPLY_GRACE_SECS=0
+  unset FM_SEND_REMOTE_BUDGET
+
+  fm_write_meta "$state/mate.meta" 'kind=secondmate' 'remote_host=remote-mac'
+  # shellcheck source=/dev/null
+  . "$dir/bin/fm-pending-reply-lib.sh"
+  # shellcheck source=bin/fm-timeout-lib.sh
+  . "$dir/bin/fm-timeout-lib.sh"
+  corr=$(fm_pending_reply_create "$dir" "$state" mate 'missing report') || fail "could not create reply expectation"
+  fm_pending_reply_mark_delivered "$state" "$corr" || fail "could not record delivery"
+  fm_pending_reply_mark_turn_completed "$state" "$corr" request || fail "could not record turn completion"
+  fm_pending_reply_note_remote_channel_caught_up "$state" mate || fail "could not record mirror progress"
+  rec=$(fm_pending_reply_path "$state" "$corr")
+
+  cat > "$dir/bin/fm-on.sh" <<'SH'
+#!/usr/bin/env bash
+case "$3" in
+  observe) printf idle ;;
+  send)
+    sleep 8
+    printf '%s\n' "$5" > "$FM_HOME/reposted"
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  mv "$dir/bin/fm-procevent.sh" "$dir/bin/fm-procevent-real.sh" || fail "could not wrap process-event CLI"
+  cat > "$dir/bin/fm-procevent.sh" <<'SH'
+#!/usr/bin/env bash
+case "$1" in
+  reconcile) exec "$FM_HOME/bin/fm-procevent-real.sh" "$@" > "$FM_HOME/reconcile.out" ;;
+  _start) sleep 7 ;;
+esac
+exec "$FM_HOME/bin/fm-procevent-real.sh" "$@"
+SH
+  cat > "$state/slow.check.sh" <<'SH'
+sleep 7
+echo check-kept-its-budget
+SH
+  chmod 700 "$dir/bin/fm-on.sh" "$dir/bin/fm-procevent.sh" "$state/slow.check.sh"
+  fm_test_track_procevent_home "$dir" "$FM_PROCEVENT_CLAIM_ROOT"
+  "$dir/bin/fm-procevent.sh" register lavish slow-start -- bash -c 'exit 1' >/dev/null \
+    || fail "could not register the delayed process-event source"
+  "$dir/bin/fm-check-register.sh" slow >/dev/null || fail "could not register the slow check"
+
+  fm_run_timed 35 "$dir/bin/fm-watch.sh" > "$dir/outer.out" 2>&1 \
+    || fail "watcher did not finish the cycle: $(cat "$dir/outer.out")"
+  assert_grep "corr=$corr" "$dir/reposted" "the delayed repost must reach the remote transport"
+  [ "$(fm_pending_reply_get "$rec" phase)" = recovery_sent ] || fail "the delayed repost was not confirmed"
+  assert_grep 'started=1' "$dir/reconcile.out" "the slow launch did not confirm: $(cat "$dir/reconcile.out")"
+  assert_grep 'failed=0' "$dir/reconcile.out" "the slow launch reported a failure: $(cat "$dir/reconcile.out")"
+  assert_grep 'check-kept-its-budget' "$dir/outer.out" "the slow check must run within its own timeout"
+  assert_not_contains "$(cat "$state/.wake-queue")" 'launch-failed' "a confirmed launch must not queue a false failure"
+  pass "auto-arm: a short grace preserves repost, launch confirmation, and check budgets"
+)
+
+test_watcher_keeps_operation_budgets || exit $?
+test_stalled_remote_observation_liveness cleanup-failure || exit $?
+test_stalled_remote_observation_liveness cleanup-unverified || exit $?
+test_stalled_remote_observation_liveness cleanup-checkpoint || exit $?
+test_stalled_remote_observation_liveness cleanup-stop || exit $?
+test_quiet_lease_renewal_gates
+test_stalled_remote_observation_liveness lease || exit $?
+test_stalled_remote_observation_liveness lease-no-gnu || exit $?
+test_stalled_remote_observation_liveness stop || exit $?
+test_stalled_remote_observation_liveness || exit $?
+test_slow_check_sweep_liveness healthy || exit $?
+test_slow_check_sweep_liveness stalled || exit $?
 test_inert_in_child_worktree
 test_inert_without_session_lock
 test_reclaims_stale_session_lock_before_arming
@@ -1379,7 +1852,5 @@ test_afk_mid_cycle_suppresses_rewake
 test_active_in_marked_secondmate_home
 test_long_poll_grace_reaches_arm_wrapper
 test_fm_lock_status_still_works_with_shared_lib
-
-test_quiet_lease_renewal_gates
 
 test_quiet_lease_preserves_live_lock
