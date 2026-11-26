@@ -454,7 +454,7 @@ case "$1 $2" in
     ;;
   'pane read')
     if [ "$FM_DIALOG_MODE" = peek ]; then printf '%s\n' "$*" >> "$FM_DIALOG_CASE/reads"; fi
-    if [ "$FM_DIALOG_MODE" = doorbell-slow ]; then sleep 5.5; fi
+    case "$FM_DIALOG_MODE" in doorbell-slow|interrupt-slow) sleep 5.5 ;; esac
     if [ "$phase:$FM_DIALOG_MODE" = doorbell-typed:doorbell-stalled ]; then
       : > "$FM_DIALOG_CASE/read-started"
       sleep 9
@@ -560,7 +560,7 @@ fm_write_meta "$meta" 'backend=herdr' 'window=fixture:p1' 'endpoint_task_id=exit
 export FM_DIALOG_HOME="$TMP_ROOT/worktree"
 for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-liveness dialog-after-typing dialog-after-failed-enter late-dialog guard-stalled \
     retry retry-failure slow-liveness-retry retry-stalled enter-failure single-stop slow-liveness-stop slow-stop stalled-stop doorbell-before doorbell-before-picker \
-    doorbell-after doorbell-after-long doorbell-after-long-plain doorbell-after-clipped doorbell-slow doorbell-stalled; do
+    doorbell-after doorbell-after-long doorbell-after-long-plain doorbell-after-clipped doorbell-slow doorbell-stalled interrupt-slow; do
   export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/herdr-$mode"
   case "$mode" in
     long-dialog|doorbell-after-long*) export FM_DIALOG_FIXTURE="$TMP_ROOT/long.screen" ;;
@@ -574,6 +574,14 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-live
   : > "$FM_DIALOG_CASE/input"
   rc=0
   case "$mode" in
+    interrupt-slow)
+      out=$(run_fixture fm-control.sh exitdialog interrupt 2>&1) || rc=$?
+      expect_code 0 "$rc" "the slow empty composer should allow the recovery interrupt: $out"
+      assert_contains "$out" 'interrupt-delivered exitdialog harness=claude backend=herdr verified=agent-alive' \
+        'the recovery interrupt did not verify that Claude stayed alive'
+      assert_equals escape "$(cat "$FM_DIALOG_CASE/input")" 'the recovery interrupt should send exactly one Escape'
+      continue
+      ;;
     doorbell-*)
       case "$mode" in doorbell-before*) printf 'dialog\n' > "$FM_DIALOG_CASE/phase" ;; esac
       rec="$FM_DIALOG_CASE/001.msg"
