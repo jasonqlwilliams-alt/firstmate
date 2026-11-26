@@ -194,8 +194,11 @@ fm_backend_tmux_close_snapshot() {  # <session:window>
   esac
   # Keep the literal task window name safe to interpolate into a tmux format.
   [[ "$window" =~ ^[a-zA-Z0-9._-]+$ ]] || return 1
-  snapshot=$(tmux list-windows -t "=${target%%:*}" -f "#{==:#{window_name},$window}" \
-    -F "$FM_TMUX_CLOSE_SNAPSHOT_FORMAT" 2>/dev/null) || return 1
+  snapshot=$(tmux list-windows -t "=${target%%:*}" \
+    -F "#{?#{==:#{window_name},$window},$FM_TMUX_CLOSE_SNAPSHOT_FORMAT,}" 2>/dev/null) || return 1
+  while [[ "$snapshot" == $'\n'* ]]; do
+    snapshot=${snapshot#$'\n'}
+  done
   [[ "$snapshot" =~ $FM_TMUX_CLOSE_SNAPSHOT_PATTERN ]] || return 1
   printf '%s\n' "$snapshot"
 }

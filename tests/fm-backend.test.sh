@@ -13,7 +13,7 @@
 #      diffs the two command logs byte-for-byte - the report's P1 checklist
 #      item "run current main scripts and refactored scripts against the same
 #      fake tools and compare command logs". The teardown old-vs-new case also
-#      overlays a content-historical permissive tmux kill fixture: after the
+#      uses a content-historical permissive tmux kill fixture: after the
 #      exact-selector change lands on the default branch, merge-base with main
 #      collapses to HEAD and can no longer supply that baseline.
 #   3. Asserts the `--backend`/`FM_BACKEND` selection refuses unknown backends
@@ -153,8 +153,6 @@ resolve_permissive_tmux_kill_ref() {
 # before it reaches the behavior under test.
 # FM_ROOT_OVERRIDE pointed at this dir's root makes
 # "$FM_ROOT/bin/fm-project-mode.sh" (etc.) resolve correctly.
-# The teardown conformance case applies its explicitly historical tmux adapter
-# after this complete baseline has been materialized.
 
 build_old_bin() {  # <name> -> echoes root dir (root/bin/<script> is the entry point)
   local name=$1 root archive
@@ -1009,13 +1007,35 @@ test_spawn_symlinked_project_prefix_avoids_false_refusal() {
 # --- old vs new: fm-teardown.sh ----------------------------------------------
 
 make_teardown_fakebin() {  # <dir> -> echoes fakebin dir; logs tmux+treehouse calls
-  local dir=$1 fb="$1/fakebin"
+  local dir=$1 fb="$1/fakebin" real_ps
   mkdir -p "$fb"
+  real_ps=$(command -v ps)
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
 { printf 'tmux'; for a in "$@"; do printf '\x1f%s' "$a"; done; printf '\n'; } >> "${FM_TMUX_LOG:?}"
+case "${1:-}" in
+  list-windows)
+    [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate -F' ] || exit 1
+    case "$5" in
+      '#{?#{==:#{window_name},fm-teardownconform1},'*) printf '@42:1:%s:%%42:/dev/ttys042:\n' "$$" ;;
+      *) exit 1 ;;
+    esac ;;
+  if-shell)
+    [ "$#" = 7 ] && [ "$2 $3 $4" = '-F -t @42' ] \
+      && [ "$6" = 'kill-window -t @42' ] && [ "$7" = 'display-message -p changed' ] || exit 1
+    printf 'guarded-close @42\n' >> "$FM_TMUX_LOG"
+    ;;
+esac
 exit 0
+SH
+  cat > "$fb/ps" <<SH
+#!/usr/bin/env bash
+if [ "\$1 \$2" = '-o tty=' ]; then
+  printf 'ttys099\n'
+  exit 0
+fi
+exec '$real_ps' "\$@"
 SH
   cat > "$fb/treehouse" <<'SH'
 #!/usr/bin/env bash
@@ -1023,7 +1043,7 @@ set -u
 { printf 'treehouse'; for a in "$@"; do printf '\x1f%s' "$a"; done; printf '\n'; } >> "${FM_TMUX_LOG:?}"
 exit 0
 SH
-  chmod +x "$fb/tmux" "$fb/treehouse"
+  chmod +x "$fb/tmux" "$fb/ps" "$fb/treehouse"
   printf '%s\n' "$fb"
 }
 
@@ -1036,27 +1056,18 @@ SH
 run_teardown_case() {
   local script=$1 fmroot=$2 fb=$3 log=$4 state=$5 data=$6 config=$7 id=$8
   : > "$log"
-  env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$fmroot" \
+  env TMUX= TMUX_PANE= PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$fmroot" \
     FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$config" \
     FM_TMUX_LOG="$log" \
     "$script" "$id"
 }
 
 test_teardown_conformance_old_vs_new() {
-  local old_bin fb proj wt id old_tmux_ref saved_base_ref
+  local old_bin fb proj wt id old_tmux_ref
   local state_old state_new config_old config_new data log_old log_new out_old out_new rc_old rc_new
-  # Force the post-squash topology inside this case: merge-base with main may
-  # equal HEAD on default-branch CI, and that must not make the legacy kill
-  # fixture self-referential. build_old_bin still uses BASE_REF for entrypoints;
-  # only the tmux kill adapter is pinned to the content-historical permissive ref.
-  saved_base_ref=$BASE_REF
-  BASE_REF=$(git -C "$ROOT" rev-parse HEAD)
   old_tmux_ref=$(resolve_permissive_tmux_kill_ref) \
-    || { BASE_REF=$saved_base_ref; fail "unable to locate a historical bin/backends/tmux.sh with permissive kill-window selectors"; }
-  old_bin=$(build_old_bin teardown-old)
-  git -C "$ROOT" show "$old_tmux_ref:bin/backends/tmux.sh" > "$old_bin/bin/backends/tmux.sh" \
-    || { BASE_REF=$saved_base_ref; fail "could not materialize historical tmux adapter from $old_tmux_ref"; }
-  BASE_REF=$saved_base_ref
+    || fail "unable to locate a historical bin/backends/tmux.sh with permissive kill-window selectors"
+  old_bin=$(BASE_REF="$old_tmux_ref" build_old_bin teardown-old) || fail "could not materialize historical teardown"
   proj="$TMP_ROOT/teardown-project"; wt="$TMP_ROOT/teardown-wt"
   id="teardownconform1"
   fm_git_worktree "$proj" "$wt" "fm/$id"
@@ -1088,17 +1099,11 @@ test_teardown_conformance_old_vs_new() {
   expect_code 0 "$rc_new" "new fm-teardown.sh (scout, report present) should succeed"$'\n'"$out_new"
   assert_contains "$(cat "$log_new")" "treehouse"$'\x1f''return'$'\x1f''--force'$'\x1f'"$wt" \
     "teardown did not call treehouse return --force <worktree>"
-  # The legacy fixture's adapter comes from BASE_REF, so its selector form is
-  # whatever the merge-base carried: permissive while the exact-selector change
-  # was still on a branch, exact for every branch cut after it landed on main.
-  # Pinning the old form here would make this case pass once and then fail
-  # forever, so the '=' exactness markers are normalized away and the legacy run
-  # is only required to have reached tmux window cleanup for this task. The
-  # exact-selector contract belongs to the current script, asserted below.
-  assert_contains "$(tr -d '=' < "$log_old")" "tmux"$'\x1f''kill-window'$'\x1f''-t'$'\x1f'"firstmate:fm-$id" \
+  assert_contains "$(cat "$log_old")" "tmux"$'\x1f''kill-window'$'\x1f''-t'$'\x1f'"firstmate:fm-$id" \
     "legacy teardown fixture did not exercise tmux window cleanup for the task"
-  assert_contains "$(cat "$log_new")" "tmux"$'\x1f''kill-window'$'\x1f''-t'$'\x1f'"=firstmate:=fm-$id" \
-    "teardown did not call tmux kill-window with exact session and window selectors"
+  grep -Fxq 'guarded-close @42' "$log_new" || fail "teardown did not request guarded closure of the recorded window"
+  assert_not_contains "$(cat "$log_new")" "tmux"$'\x1f''kill-window'$'\x1f' \
+    "teardown also requested unguarded closure"
 
   pass "fm-teardown.sh: treehouse return remains compatible while tmux cleanup uses exact selectors"
 }

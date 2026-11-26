@@ -36,7 +36,24 @@ case "${1:-}" in
     esac
     exit 0
     ;;
+  if-shell)
+    printf '%s\n' "$*" >> "$FM_FAKE_TMUX_LOG"
+    [ -r "$0.close-windows" ] && [ "$#" = 7 ] && [ "$2 $3" = '-F -t' ] \
+      && [ "$6" = "kill-window -t $4" ] && [ "$7" = 'display-message -p changed' ] || exit 1
+    printf 'guarded-close %s\n' "$4" >> "$FM_FAKE_TMUX_LOG"
+    exit 0
+    ;;
   list-windows)
+    if [ -r "$0.close-windows" ] && [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate -F' ]; then
+      while read -r name number; do
+        case "$5" in
+          '#{?#{==:#{window_name},'"$name"'},'*)
+            printf '@%s:1:%s:%%%s:/dev/ttys%s:\n' "$number" "$$" "$number" "$number"
+            ;;
+        esac
+      done < "$0.close-windows"
+      exit 0
+    fi
     session=
     prev=
     for arg in "$@"; do

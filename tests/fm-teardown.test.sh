@@ -2713,11 +2713,11 @@ test_forced_secondmate_teardown_holds_descendant_lifecycle_locks() {
 log="$(dirname "$0")/../kill.log"
 case "$1" in
   list-windows)
-    [ "$#" = 7 ] && [ "$2 $3 $4 $6" = '-t =firstmate -f -F' ] || exit 1
+    [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate -F' ] || exit 1
     case "$5" in
-      '#{==:#{window_name},fm-child-a}') printf '@11:1:%s:%%11:/dev/ttys011:\n' "$$" ;;
-      '#{==:#{window_name},fm-child-b}') printf '@12:1:%s:%%12:/dev/ttys012:\n' "$$" ;;
-      '#{==:#{window_name},fm-task-x1}') printf '@13:1:%s:%%13:/dev/ttys013:\n' "$$" ;;
+      '#{?#{==:#{window_name},fm-child-a},'*) printf '@11:1:%s:%%11:/dev/ttys011:\n' "$$" ;;
+      '#{?#{==:#{window_name},fm-child-b},'*) printf '@12:1:%s:%%12:/dev/ttys012:\n' "$$" ;;
+      '#{?#{==:#{window_name},fm-task-x1},'*) printf '@13:1:%s:%%13:/dev/ttys013:\n' "$$" ;;
       *) exit 1 ;;
     esac ;;
   if-shell)
@@ -4441,8 +4441,11 @@ EOF
 if [ "${1:-}" = display-message ] && [ "${*: -1}" = '#{pane_pid}' ]; then
   cat "$CASE_DIR/target"
 elif [ "${1:-}" = list-windows ]; then
-  [ "$#" = 7 ] && [ "$2 $3 $4 $6" = '-t =firstmate -f -F' ] \
-    && [ "$5" = '#{==:#{window_name},fm-task-x1}' ] || exit 1
+  [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate -F' ] || exit 1
+  case "$5" in
+    '#{?#{==:#{window_name},fm-task-x1},'*) ;;
+    *) exit 1 ;;
+  esac
   printf '@17:1:%s:%s:/dev/ttys017:\n' "$(cat "$CASE_DIR/target")" '%17'
 elif [ "${1:-}" = if-shell ] || [ "${1:-}" = kill-window ]; then
   if [ "$#" = 7 ] && [ "$1 $2 $3 $4" = 'if-shell -F -t @17' ] \

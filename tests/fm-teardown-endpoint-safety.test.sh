@@ -390,9 +390,14 @@ printf 'tmux' >> "\${FM_RUNTIME_LOG:?}"
 printf ' <%s>' "\$@" >> "\${FM_RUNTIME_LOG:?}"
 printf '\n' >> "\${FM_RUNTIME_LOG:?}"
 cd '$dir'
-if [ "\${FM_TEST_TMUX_BLIND:-}" = 1 ] && [ "\${1:-}" = list-windows ]; then
-  printf '@1:1::\n'
-  exit 0
+if [ "\${1:-}" = list-windows ]; then
+  for arg in "\$@"; do
+    [ "\$arg" != -f ] || exit 1
+  done
+  if [ "\${FM_TEST_TMUX_BLIND:-}" = 1 ]; then
+    printf '@1:1::\n'
+    exit 0
+  fi
 fi
 if [ "\${FM_TEST_TMUX_SPLIT_BEFORE_CLOSE:-}" = 1 ] && [ "\${1:-}" = if-shell ]; then
   '$REAL_TMUX' -S '$socket' split-window -d -t "\$4" 'exec sleep 60'
