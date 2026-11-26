@@ -1,0 +1,37 @@
+Target a44f403efc29c147b3e4dbd025a05c49069cc078
+
+Executed the Firstmate CLI locally with real tmux 3.7c and disposable homes. The sandbox isolated /tmp, process IDs, network access, and account configuration. Workspace paths are abbreviated to $LAB. The transcript uses fm <home> <socket> <pool-label> <entrypoint> <args> for the named bin/fm-*.sh entrypoint on that home and isolated tmux socket. Worker inputs and artifacts are synthetic.
+
+Uses real tmux and a compiled local stand-in at the Claude executable boundary. The probe reports its PID, actual 180-by-42 terminal grid, and inherited GOTMPDIR.
+
+
+Relaunch using a valid, missing, fixed legacy, and symlinked temp path
+
+$ fm $LAB/work/live-relaunch-final/home-A a $LAB/work/live-relaunch-final/pool-a fm-spawn relaunch-build $LAB/work/live-relaunch-final/home-A/projects/aproj --harness claude --scout
+spawned relaunch-build harness=claude kind=scout window=firstmate:fm-relaunch-build worktree=$LAB/work/live-relaunch-final/user/.treehouse/aproj-025be4/1/aproj
+Initial worker (PID, pane grid, GOTMPDIR): 793 180x42 /tmp/fm-relaunch-build+VFRO0h/gotmp
+
+$ fm $LAB/work/live-relaunch-final/home-A a $LAB/work/live-relaunch-final/pool-a fm-control relaunch-build relaunch --note Keep\ working\ on\ the\ disposable\ build\,\ scenario\ valid
+relaunched relaunch-build harness=claude from=claude model=default effort=default backend=tmux endpoint=firstmate:fm-relaunch-build worktree=$LAB/work/live-relaunch-final/user/.treehouse/aproj-025be4/1/aproj
+valid root before=/tmp/fm-relaunch-build+VFRO0h after=/tmp/fm-relaunch-build+VFRO0h; replacement worker (PID, pane grid, GOTMPDIR): 2167 180x42 /tmp/fm-relaunch-build+VFRO0h/gotmp
+Preserved file reads saved build state
+
+$ fm $LAB/work/live-relaunch-final/home-A a $LAB/work/live-relaunch-final/pool-a fm-control relaunch-build relaunch --note Keep\ working\ on\ the\ disposable\ build\,\ scenario\ missing
+relaunched relaunch-build harness=claude from=claude model=default effort=default backend=tmux endpoint=firstmate:fm-relaunch-build worktree=$LAB/work/live-relaunch-final/user/.treehouse/aproj-025be4/1/aproj
+missing root before=/tmp/fm-relaunch-build+VFRO0h after=/tmp/fm-relaunch-build+NsYPtF; replacement worker (PID, pane grid, GOTMPDIR): 3615 180x42 /tmp/fm-relaunch-build+NsYPtF/gotmp
+
+$ fm $LAB/work/live-relaunch-final/home-A a $LAB/work/live-relaunch-final/pool-a fm-control relaunch-build relaunch --note Keep\ working\ on\ the\ disposable\ build\,\ scenario\ legacy
+relaunched relaunch-build harness=claude from=claude model=default effort=default backend=tmux endpoint=firstmate:fm-relaunch-build worktree=$LAB/work/live-relaunch-final/user/.treehouse/aproj-025be4/1/aproj
+legacy root before=/tmp/fm-relaunch-build after=/tmp/fm-relaunch-build+3rcP4Y; replacement worker (PID, pane grid, GOTMPDIR): 5056 180x42 /tmp/fm-relaunch-build+3rcP4Y/gotmp
+Legacy file reads shared legacy state
+
+$ fm $LAB/work/live-relaunch-final/home-A a $LAB/work/live-relaunch-final/pool-a fm-control relaunch-build relaunch --note Keep\ working\ on\ the\ disposable\ build\,\ scenario\ symlink
+relaunched relaunch-build harness=claude from=claude model=default effort=default backend=tmux endpoint=firstmate:fm-relaunch-build worktree=$LAB/work/live-relaunch-final/user/.treehouse/aproj-025be4/1/aproj
+symlink root before=/tmp/recorded-symlink after=/tmp/fm-relaunch-build+l4TIet; replacement worker (PID, pane grid, GOTMPDIR): 6502 180x42 /tmp/fm-relaunch-build+l4TIet/gotmp
+Symlink and its target file survived. Target never acquired a gotmp directory.
+
+$ fm $LAB/work/live-relaunch-final/home-A a $LAB/work/live-relaunch-final/pool-a fm-teardown relaunch-build --force
+teardown: reaping leaked worktree process(es) for relaunch-build: 230 6502
+teardown: force-killing leaked worktree process(es) for relaunch-build: 230
+🌳 Worktree returned to pool.
+teardown relaunch-build complete (window firstmate:fm-relaunch-build, worktree $LAB/work/live-relaunch-final/user/.treehouse/aproj-025be4/1/aproj)

@@ -1,0 +1,36 @@
+Target a44f403efc29c147b3e4dbd025a05c49069cc078
+
+Executed the Firstmate CLI locally with real tmux 3.7c and disposable homes. The sandbox isolated /tmp, process IDs, network access, and account configuration. Workspace paths are abbreviated to $LAB. The transcript uses fm <home> <socket> <pool-label> <entrypoint> <args> for the named bin/fm-*.sh entrypoint on that home and isolated tmux socket. Worker inputs and artifacts are synthetic.
+
+Uses real bootstrap, teardown, tmux, Treehouse, and a compiled local worker probe. The successful restart is confirmed by a new worker PID and a preserved build file.
+
+
+Recovery after removing the recorded endpoint and forced retirement with two children
+
+$ fm $LAB/work/secondmate-recovery-retirement/parent a $LAB/work/secondmate-recovery-retirement/pool fm-spawn build-domain $LAB/work/secondmate-recovery-retirement/secondmate --secondmate
+spawned build-domain harness=claude kind=secondmate mode=secondmate yolo=off window=firstmate:fm-build-domain worktree=$LAB/work/secondmate-recovery-retirement/secondmate
+Initial secondmate (PID, pane grid, GOTMPDIR): 656 180x42 /tmp/fm-build-domain+ciff8W/gotmp
+
+$ tm a kill-window -t firstmate:fm-build-domain
+
+$ fm $LAB/work/secondmate-recovery-retirement/parent a $LAB/work/secondmate-recovery-retirement/pool fm-bootstrap
+Bootstrapped secondmate (PID, pane grid, GOTMPDIR): 1769 180x42 /tmp/fm-build-domain+ciff8W/gotmp
+Preserved file reads secondmate build state
+
+$ fm $LAB/work/secondmate-recovery-retirement/secondmate a $LAB/work/secondmate-recovery-retirement/pool fm-spawn child-build $LAB/work/secondmate-recovery-retirement/secondmate/projects/aproj $LAB/driver/worker\ $LAB/work/secondmate-recovery-retirement/child-build --scout
+spawned child-build harness=worker kind=scout window=firstmate:fm-child-build worktree=$LAB/work/secondmate-recovery-retirement/user/.treehouse/aproj-4852aa/1/aproj
+home=secondmate task=child-build record.tasktmp=/tmp/fm-child-build+ehywMO mode=700 worker.GOTMPDIR=/tmp/fm-child-build+ehywMO/gotmp worker.artifact=child-build
+
+$ fm $LAB/work/secondmate-recovery-retirement/secondmate a $LAB/work/secondmate-recovery-retirement/pool fm-spawn linked-build $LAB/work/secondmate-recovery-retirement/secondmate/projects/aproj $LAB/driver/worker\ $LAB/work/secondmate-recovery-retirement/linked-build --scout
+spawned linked-build harness=worker kind=scout window=firstmate:fm-linked-build worktree=$LAB/work/secondmate-recovery-retirement/user/.treehouse/aproj-4852aa/2/aproj
+home=secondmate task=linked-build record.tasktmp=/tmp/fm-linked-build+JKKYum mode=700 worker.GOTMPDIR=/tmp/fm-linked-build+JKKYum/gotmp worker.artifact=linked-build
+
+$ fm $LAB/work/secondmate-recovery-retirement/parent a $LAB/work/secondmate-recovery-retirement/pool fm-teardown build-domain
+REFUSED: secondmate build-domain still has in-flight work in $LAB/work/secondmate-recovery-retirement/secondmate/state.
+Found child-build.meta. Let that home finish or explicitly discard with --force.
+
+$ fm $LAB/work/secondmate-recovery-retirement/parent a $LAB/work/secondmate-recovery-retirement/pool fm-teardown build-domain --force
+🌳 Worktree returned to pool.
+🌳 Worktree returned to pool.
+teardown build-domain complete (window firstmate:fm-build-domain, worktree $LAB/work/secondmate-recovery-retirement/secondmate)
+Retired home and parent record absent. Removed secondmate root /tmp/fm-build-domain+ciff8W and child root /tmp/fm-child-build+ehywMO. Symlink target still reads leave this data.

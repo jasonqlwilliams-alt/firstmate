@@ -1,0 +1,76 @@
+Target a44f403efc29c147b3e4dbd025a05c49069cc078
+
+Executed the Firstmate CLI locally with real tmux 3.7c and disposable homes. The sandbox isolated /tmp, process IDs, network access, and account configuration. Workspace paths are abbreviated to $LAB. The transcript uses fm <home> <socket> <pool-label> <entrypoint> <args> for the named bin/fm-*.sh entrypoint on that home and isolated tmux socket. Worker inputs and artifacts are synthetic.
+
+Uses real Treehouse 3.1.8, lsof 4.99.4, and detached sleep processes with independently verified cwd. The base run intentionally asserts the previously reported destructive behavior.
+
+
+Base commit 31f1014fadcb34d63b7a222753b2cec6a0ef1d7a (reproduces reported failure)
+
+Firstmate base, tmux 3.7c, v3.1.8 with an isolated process table and /tmp
+Detached tmux pane grid 180x42 and 180x42
+
+$ fm $LAB/work/core-base-final/home-A a $LAB/work/core-base-final/pool-a fm-spawn same-build $LAB/work/core-base-final/home-A/projects/aproj $LAB/driver/worker\ $LAB/work/core-base-final/A-first --scout
+spawned same-build harness=worker kind=scout window=firstmate:fm-same-build worktree=$LAB/work/core-base-final/user/.treehouse/aproj-eae1c9/1/aproj
+
+$ fm $LAB/work/core-base-final/home-B b $LAB/work/core-base-final/pool-b fm-spawn same-build $LAB/work/core-base-final/home-B/projects/bproj $LAB/driver/worker\ $LAB/work/core-base-final/B-first --scout
+spawned same-build harness=worker kind=scout window=firstmate:fm-same-build worktree=$LAB/work/core-base-final/user/.treehouse/bproj-d11d8f/1/bproj
+home=home-A task=same-build record.tasktmp=/tmp/fm-same-build mode=755 worker.GOTMPDIR=/tmp/fm-same-build/gotmp worker.artifact=A-first
+home=home-B task=same-build record.tasktmp=/tmp/fm-same-build mode=755 worker.GOTMPDIR=/tmp/fm-same-build/gotmp worker.artifact=B-first
+Before cleanup, process cwd from lsof (A PID 2235, B PID 2238)
+p2235
+n/tmp/fm-same-build/gotmp
+p2238
+n/tmp/fm-same-build/gotmp
+
+$ fm $LAB/work/core-base-final/home-A a $LAB/work/core-base-final/pool-a fm-teardown same-build --force
+teardown: reaping leaked worktree process(es) for same-build: 468 2224 2235 2238
+teardown: force-killing leaked worktree process(es) for same-build: 468
+🌳 Worktree returned to pool.
+teardown same-build complete (window firstmate:fm-same-build, worktree $LAB/work/core-base-final/user/.treehouse/aproj-eae1c9/1/aproj)
+Home A root absent, process 2235 exit status 143
+Baseline reproduced both effects. Home B process 2238 exit status 143 and its artifact is gone.
+
+
+Target commit (cross-home cleanup, then a fresh same-ID launch)
+
+Firstmate target, tmux 3.7c, v3.1.8 with an isolated process table and /tmp
+Detached tmux pane grid 180x42 and 180x42
+
+$ fm $LAB/work/core-target-complete/home-A a $LAB/work/core-target-complete/pool-a fm-spawn same-build $LAB/work/core-target-complete/home-A/projects/aproj $LAB/driver/worker\ $LAB/work/core-target-complete/A-first --scout
+spawned same-build harness=worker kind=scout window=firstmate:fm-same-build worktree=$LAB/work/core-target-complete/user/.treehouse/aproj-a6b4d4/1/aproj
+
+$ fm $LAB/work/core-target-complete/home-B b $LAB/work/core-target-complete/pool-b fm-spawn same-build $LAB/work/core-target-complete/home-B/projects/bproj $LAB/driver/worker\ $LAB/work/core-target-complete/B-first --scout
+spawned same-build harness=worker kind=scout window=firstmate:fm-same-build worktree=$LAB/work/core-target-complete/user/.treehouse/bproj-f53add/1/bproj
+home=home-A task=same-build record.tasktmp=/tmp/fm-same-build+PBHvNN mode=700 worker.GOTMPDIR=/tmp/fm-same-build+PBHvNN/gotmp worker.artifact=A-first
+home=home-B task=same-build record.tasktmp=/tmp/fm-same-build+yzzMC1 mode=700 worker.GOTMPDIR=/tmp/fm-same-build+yzzMC1/gotmp worker.artifact=B-first
+Before cleanup, process cwd from lsof (A PID 1469, B PID 1472)
+p1469
+n/tmp/fm-same-build+PBHvNN/gotmp
+p1472
+n/tmp/fm-same-build+yzzMC1/gotmp
+
+$ fm $LAB/work/core-target-complete/home-A a $LAB/work/core-target-complete/pool-a fm-teardown same-build --force
+teardown: reaping leaked worktree process(es) for same-build: 458 1410 1469
+teardown: force-killing leaked worktree process(es) for same-build: 458
+🌳 Worktree returned to pool.
+teardown same-build complete (window firstmate:fm-same-build, worktree $LAB/work/core-target-complete/user/.treehouse/aproj-a6b4d4/1/aproj)
+Home A root absent, process 1469 exit status 143
+Home B process 1472 is still live at /tmp/fm-same-build+yzzMC1/gotmp. Its artifact still reads B-first.
+
+$ fm $LAB/work/core-target-complete/home-A a $LAB/work/core-target-complete/pool-a fm-spawn same-build $LAB/work/core-target-complete/home-A/projects/aproj $LAB/driver/worker\ $LAB/work/core-target-complete/A-second --scout
+spawned same-build harness=worker kind=scout window=firstmate:fm-same-build worktree=$LAB/work/core-target-complete/user/.treehouse/aproj-a6b4d4/1/aproj
+home=home-A task=same-build record.tasktmp=/tmp/fm-same-build+Hlrt6X mode=700 worker.GOTMPDIR=/tmp/fm-same-build+Hlrt6X/gotmp worker.artifact=A-second
+
+$ fm $LAB/work/core-target-complete/home-A a $LAB/work/core-target-complete/pool-a fm-teardown same-build --force
+teardown: reaping leaked worktree process(es) for same-build: 2319 2803
+teardown: force-killing leaked worktree process(es) for same-build: 2319
+🌳 Worktree returned to pool.
+teardown same-build complete (window firstmate:fm-same-build, worktree $LAB/work/core-target-complete/user/.treehouse/aproj-a6b4d4/1/aproj)
+
+$ fm $LAB/work/core-target-complete/home-B b $LAB/work/core-target-complete/pool-b fm-teardown same-build --force
+teardown: reaping leaked worktree process(es) for same-build: 479 1428 1472
+teardown: force-killing leaked worktree process(es) for same-build: 479
+🌳 Worktree returned to pool.
+teardown same-build complete (window firstmate:fm-same-build, worktree $LAB/work/core-target-complete/user/.treehouse/bproj-f53add/1/bproj)
+After each home cleaned its own worker, all three temporary roots were absent.

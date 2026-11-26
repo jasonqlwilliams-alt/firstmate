@@ -1,0 +1,50 @@
+Target a44f403efc29c147b3e4dbd025a05c49069cc078
+
+Executed the Firstmate CLI locally with real tmux 3.7c and disposable homes. The sandbox isolated /tmp, process IDs, network access, and account configuration. Workspace paths are abbreviated to $LAB. The transcript uses fm <home> <socket> <pool-label> <entrypoint> <args> for the named bin/fm-*.sh entrypoint on that home and isolated tmux socket. Worker inputs and artifacts are synthetic.
+
+Runs real cleanup with fixed legacy, symlinked, and absent tasktmp records. A detached sleep process and sentinel file stand for the other home in each case.
+
+
+Recorded-root compatibility and cleanup
+
+$ fm $LAB/work/legacy-guards-complete/home-A a $LAB/work/legacy-guards-complete/pool-a fm-spawn guard-legacy $LAB/work/legacy-guards-complete/home-A/projects/aproj $LAB/driver/worker\ $LAB/work/legacy-guards-complete/legacy-probe --scout
+spawned guard-legacy harness=worker kind=scout window=firstmate:fm-guard-legacy worktree=$LAB/work/legacy-guards-complete/user/.treehouse/aproj-6264e0/1/aproj
+home=home-A task=guard-legacy record.tasktmp=/tmp/fm-guard-legacy+3Rfz27 mode=700 worker.GOTMPDIR=/tmp/fm-guard-legacy+3Rfz27/gotmp worker.artifact=legacy-probe
+Upgrade fixture legacy. Recorded path=/tmp/fm-guard-legacy; other home <pid,cwd>
+p731
+n/tmp/fm-guard-legacy/gotmp
+
+$ fm $LAB/work/legacy-guards-complete/home-A a $LAB/work/legacy-guards-complete/pool-a fm-teardown guard-legacy --force
+teardown: reaping leaked worktree process(es) for guard-legacy: 230 702
+teardown: force-killing leaked worktree process(es) for guard-legacy: 230
+🌳 Worktree returned to pool.
+teardown guard-legacy complete (window firstmate:fm-guard-legacy, worktree $LAB/work/legacy-guards-complete/user/.treehouse/aproj-6264e0/1/aproj)
+After cleanup, task record absent, process 731 still running and sentinel reads other home build is intact
+
+$ fm $LAB/work/legacy-guards-complete/home-A a $LAB/work/legacy-guards-complete/pool-a fm-spawn guard-symlink $LAB/work/legacy-guards-complete/home-A/projects/aproj $LAB/driver/worker\ $LAB/work/legacy-guards-complete/symlink-probe --scout
+spawned guard-symlink harness=worker kind=scout window=firstmate:fm-guard-symlink worktree=$LAB/work/legacy-guards-complete/user/.treehouse/aproj-6264e0/1/aproj
+home=home-A task=guard-symlink record.tasktmp=/tmp/fm-guard-symlink+cGBGZd mode=700 worker.GOTMPDIR=/tmp/fm-guard-symlink+cGBGZd/gotmp worker.artifact=symlink-probe
+Upgrade fixture symlink. Recorded path=/tmp/scout-root-link; other home <pid,cwd>
+p2068
+n/tmp/other-home-build/gotmp
+
+$ fm $LAB/work/legacy-guards-complete/home-A a $LAB/work/legacy-guards-complete/pool-a fm-teardown guard-symlink --force
+teardown: reaping leaked worktree process(es) for guard-symlink: 1556 2038
+teardown: force-killing leaked worktree process(es) for guard-symlink: 1556
+🌳 Worktree returned to pool.
+teardown guard-symlink complete (window firstmate:fm-guard-symlink, worktree $LAB/work/legacy-guards-complete/user/.treehouse/aproj-6264e0/1/aproj)
+After cleanup, task record absent, process 2068 still running and sentinel reads other home build is intact
+
+$ fm $LAB/work/legacy-guards-complete/home-A a $LAB/work/legacy-guards-complete/pool-a fm-spawn guard-absent $LAB/work/legacy-guards-complete/home-A/projects/aproj $LAB/driver/worker\ $LAB/work/legacy-guards-complete/absent-probe --scout
+spawned guard-absent harness=worker kind=scout window=firstmate:fm-guard-absent worktree=$LAB/work/legacy-guards-complete/user/.treehouse/aproj-6264e0/1/aproj
+home=home-A task=guard-absent record.tasktmp=/tmp/fm-guard-absent+JfOH3U mode=700 worker.GOTMPDIR=/tmp/fm-guard-absent+JfOH3U/gotmp worker.artifact=absent-probe
+Upgrade fixture absent. Recorded path=<absent>; other home <pid,cwd>
+p3408
+n/tmp/unrecorded-other-home-build/gotmp
+
+$ fm $LAB/work/legacy-guards-complete/home-A a $LAB/work/legacy-guards-complete/pool-a fm-teardown guard-absent --force
+teardown: reaping leaked worktree process(es) for guard-absent: 2897 3379
+teardown: force-killing leaked worktree process(es) for guard-absent: 2897
+🌳 Worktree returned to pool.
+teardown guard-absent complete (window firstmate:fm-guard-absent, worktree $LAB/work/legacy-guards-complete/user/.treehouse/aproj-6264e0/1/aproj)
+After cleanup, task record absent, process 3408 still running and sentinel reads other home build is intact

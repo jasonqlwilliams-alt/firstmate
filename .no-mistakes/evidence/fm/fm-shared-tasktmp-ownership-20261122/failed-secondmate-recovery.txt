@@ -1,0 +1,18 @@
+Target a44f403efc29c147b3e4dbd025a05c49069cc078
+
+Executed the Firstmate CLI locally with real tmux 3.7c and disposable homes. The sandbox isolated /tmp, process IDs, network access, and account configuration. Workspace paths are abbreviated to $LAB. The transcript uses fm <home> <socket> <pool-label> <entrypoint> <args> for the named bin/fm-*.sh entrypoint on that home and isolated tmux socket. Worker inputs and artifacts are synthetic.
+
+Uses real bootstrap and tmux. The synthetic replacement worker receives GOTMPDIR and exits before reporting Kimi readiness, forcing the real recovery failure path.
+
+
+Failed recovery after removing the recorded endpoint
+
+$ fm $LAB/work/secondmate-recovery-abort/parent a $LAB/work/secondmate-recovery-abort/pool fm-spawn build-domain $LAB/work/secondmate-recovery-abort/secondmate --secondmate
+spawned build-domain harness=claude kind=secondmate mode=secondmate yolo=off window=firstmate:fm-build-domain worktree=$LAB/work/secondmate-recovery-abort/secondmate
+Initial secondmate (PID, pane grid, GOTMPDIR): 655 180x42 /tmp/fm-build-domain+2Ht4LJ/gotmp
+
+$ tm a kill-window -t firstmate:fm-build-domain
+
+$ fm $LAB/work/secondmate-recovery-abort/parent a $LAB/work/secondmate-recovery-abort/pool fm-bootstrap
+SECONDMATE_LIVENESS: secondmate build-domain: respawn failed after recorded endpoint confidently missing: error: kimi did not show a verified ready signal before brief delivery; inspect window firstmate:fm-build-domain (warning: task build-domain's temporary directory remains at /tmp/fm-build-domain+2Ht4LJ; inspect it after closing endpoint firstmate:fm-build-domain)
+Failed worker used /tmp/fm-build-domain+2Ht4LJ/gotmp; task record absent; preserved contents read secondmate build state

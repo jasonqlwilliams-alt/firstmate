@@ -1,0 +1,14 @@
+Target a44f403efc29c147b3e4dbd025a05c49069cc078
+
+Executed the Firstmate CLI locally with real tmux 3.7c and disposable homes. The sandbox isolated /tmp, process IDs, network access, and account configuration. Workspace paths are abbreviated to $LAB. The transcript uses fm <home> <socket> <pool-label> <entrypoint> <args> for the named bin/fm-*.sh entrypoint on that home and isolated tmux socket. Worker inputs and artifacts are synthetic.
+
+Runs real spawn and tmux. A command shim fails only the rename into the task record and independently records the mode and exact path of the existing staged root.
+
+
+Injected task record publication error
+
+$ fm $LAB/work/live-publication-abort/home-A a $LAB/work/live-publication-abort/pool-a fm-spawn unpublished-build $LAB/work/live-publication-abort/home-A/projects/aproj $LAB/driver/worker\ $LAB/work/live-publication-abort/started --scout
+error: task record for unpublished-build could not be published (task record publication failed at $LAB/work/live-publication-abort/home-A/state/unpublished-build.meta)
+🌳 Terminated lingering processes: bash (234)
+🌳 Worktree returned to pool.
+Publication observed an existing mode-700 root at /tmp/fm-unpublished-build+GEAicP. Spawn failed with status 1. Root, task record, and worker start marker are all absent.
