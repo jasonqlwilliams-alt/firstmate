@@ -307,7 +307,8 @@
 #     `/proc/<pid>/cwd` for the owned worktree only. On other hosts without
 #     lsof, the early Treehouse preflight refuses before reaping. For cleanup
 #     without that preflight, teardown can only attempt to reap the tmux pane's
-#     process group.
+#     process group. Before each signal, it skips any group containing teardown
+#     or a current or startup ancestor, and refuses cleanup if that check fails.
 #     Both scans can identify only processes whose working directory is readable.
 #     Both scans are bounded by process count and exclude teardown and its
 #     current and startup ancestors. Teardown sends TERM, then KILL after a
@@ -466,14 +467,27 @@ if [ "$KEEP_PANE" = 1 ] \
   exit 2
 fi
 
-task_reap_filter_pids() {  # <previously-protected-pids> <candidate-pids>
-  local parents
+task_reap_filter_pids() {  # <previously-protected-pids> <candidate-pids> [<target-pgid> <leader-pid>]
+  local parents group=${3:-} leader=${4:-}
+  local -a fields=(-A -o pid= -o ppid=)
   case "$1" in 'incomplete '*) return 1 ;; esac
-  parents=$(ps -A -o pid= -o ppid= 2>/dev/null) || return 1
-  printf '%s\n%s\n' "$parents" "$2" | awk -v self="$$" -v previous="$1" '
+  [ -z "$group" ] || fields+=(-o pgid=)
+  parents=$(ps "${fields[@]}" 2>/dev/null) || return 1
+  printf '%s\n%s\n' "$parents" "$2" | awk -v self="$$" -v previous="$1" -v group="$group" -v leader="$leader" '
+    group != "" && NF {
+      if (NF != 3 || $1 !~ /^[0-9]+$/ || $2 !~ /^[0-9]+$/ ||
+          $3 !~ /^[0-9]+$/ || $1 in parent) {
+        invalid = 1
+        exit
+      }
+      parent[$1] = $2
+      pgid[$1] = $3
+      next
+    }
     NF == 2 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { parent[$1] = $2 }
     /^[0-9]+$/ { candidates[$0] = 1; matched = 1 }
     END {
+      if (invalid) exit 1
       split(previous, saved, " ")
       for (i in saved) excluded[saved[i]] = 1
       for (cursor = self; cursor > 0; cursor = parent[cursor]) {
@@ -483,8 +497,19 @@ task_reap_filter_pids() {  # <previously-protected-pids> <candidate-pids>
         if (!(cursor in parent)) break
       }
       if (cursor != 0) {
-        if (matched) exit 1
+        if (matched || group != "") exit 1
         printf "incomplete "
+      }
+      if (group != "") {
+        # A saved ancestor missing from the snapshot may be hidden.
+        for (pid in excluded) {
+          if (!(pid in pgid)) exit 1
+          if (pgid[pid] == group) protected = 1
+        }
+        if (protected) print "protected"
+        else if (pgid[leader] == group) print "clear"
+        else print "changed"
+        exit
       }
       for (pid in excluded) printf "%s ", pid
       print ""
@@ -2358,7 +2383,7 @@ task_pids_under_roots() {  # <scanner> <dir>...
 }
 
 reap_task_backend_process_group() {  # <label>
-  local label=$1 leader leader_start pgid current_pgid own_pgid
+  local label=$1 leader leader_start pgid group_safety signal
   if [ "$BACKEND" != tmux ]; then
     echo "warning: lsof is unavailable; cannot resolve a process-group fallback for $BACKEND task $ID" >&2
     return 0
@@ -2374,31 +2399,33 @@ reap_task_backend_process_group() {  # <label>
     return 0
   }
   pgid=$(ps -o pgid= -p "$leader" 2>/dev/null) || pgid=""
-  pgid=$(printf '%s' "$pgid" | tr -d '[:space:]')
+  pgid=$(fm_nm_trim "$pgid")
   case "$pgid" in ''|*[!0-9]*|0|1)
     echo "warning: lsof is unavailable; cannot resolve the tmux pane process group for $ID" >&2
     return 0
     ;;
   esac
-  own_pgid=$(ps -o pgid= -p "$$" 2>/dev/null) || own_pgid=""
-  own_pgid=$(printf '%s' "$own_pgid" | tr -d '[:space:]')
-  if [ "$pgid" = "$own_pgid" ]; then
-    echo "warning: lsof is unavailable; refusing to signal teardown's own process group for $ID" >&2
-    return 0
-  fi
-  task_process_identity_matches "$leader" "$leader_start" || return 0
-  current_pgid=$(ps -o pgid= -p "$leader" 2>/dev/null) || current_pgid=""
-  current_pgid=$(printf '%s' "$current_pgid" | tr -d '[:space:]')
-  [ "$current_pgid" = "$pgid" ] || return 0
-  echo "teardown: reaping leaked $label process group for $ID: $pgid" >&2
-  kill -TERM -- "-$pgid" 2>/dev/null || true
-  sleep 1
-  if task_process_identity_matches "$leader" "$leader_start" \
-     && [ "$(ps -o pgid= -p "$leader" 2>/dev/null | tr -d '[:space:]')" = "$pgid" ] \
-     && kill -0 -- "-$pgid" 2>/dev/null; then
-    echo "teardown: force-killing leaked $label process group for $ID: $pgid" >&2
-    kill -KILL -- "-$pgid" 2>/dev/null || true
-  fi
+  for signal in TERM KILL; do
+    task_process_identity_matches "$leader" "$leader_start" || return 0
+    if [ -z "$TEARDOWN_REAP_PROTECTED_PIDS" ] \
+       || ! group_safety=$(task_reap_filter_pids "$TEARDOWN_REAP_PROTECTED_PIDS" "" "$pgid" "$leader"); then
+      echo "REFUSED: cannot verify teardown caller ancestry for process group $pgid of $ID; preserving the worktree/tasktmp for manual inspection or retry." >&2
+      return 1
+    fi
+    if [ "$group_safety" = protected ]; then
+      echo "warning: lsof is unavailable; refusing to signal a process group containing teardown or an ancestor for $ID" >&2
+      return 0
+    fi
+    [ "$group_safety" = clear ] || return 0
+    if [ "$signal" = TERM ]; then
+      echo "teardown: reaping leaked $label process group for $ID: $pgid" >&2
+      kill -TERM -- "-$pgid" 2>/dev/null || true
+      sleep 1
+    elif kill -0 -- "-$pgid" 2>/dev/null; then
+      echo "teardown: force-killing leaked $label process group for $ID: $pgid" >&2
+      kill -KILL -- "-$pgid" 2>/dev/null || true
+    fi
+  done
 }
 
 # See Fix 2 in the script header for scanner scope and refusal rules.
@@ -2406,7 +2433,7 @@ reap_task_worktree_processes() {  # <label> <owned-worktree> <tasktmp>
   local label=$1 worktree=$2 tasktmp=$3 scanner pids pid identity current_pids i pass=1 max_passes=3
   local -a tracked_pids tracked_identities remaining_pids remaining_identities
   if ! scanner=$(task_cwd_scanner); then
-    reap_task_backend_process_group "$label"
+    reap_task_backend_process_group "$label" || return 1
     return 0
   fi
   set -- "$worktree"
