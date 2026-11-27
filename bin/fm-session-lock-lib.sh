@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
-# Shared session-lock harness identity.
-#
-# ONE owner of the "which verified-harness process holds this home's session
-# lock, and does the current process descend from that same harness?" decision.
-# bin/fm-lock.sh uses it to acquire and inspect state/.lock;
-# bin/fm-claude-stop-autoarm.sh uses it to prove a Stop hook fires inside the
-# lock-owning primary session before it may arm or rewake.
-# This file is sourced by scripts and has no side effects on source.
+# Shared session-lock ownership and legacy harness identification.
+# bin/fm-lock.sh acquires and inspects a home's lock. Startup and hook readers
+# share the binding verifier here. This file has no side effects on source.
 
 # Cursor process identity is NOT expressible as a command-name pattern and is
 # deliberately not added to the tables below: Cursor's installed names are
@@ -167,6 +162,11 @@ fm_harness_pid_alive() {
 fm_session_lock_owned_by_self() {
   local state=$1 lock_pid pids pid
   fm_session_lock_read "$state/.lock" || return 1
+  if [ -n "$FM_SESSION_LOCK_GENERATION" ]; then
+    fm_session_owner_context && fm_session_owner_matches_context
+    return
+  fi
+  fm_session_owner_context_present && return 1
   lock_pid=$FM_SESSION_LOCK_PID
   case "$lock_pid" in ''|0|1|*[!0-9]*) return 1 ;; esac
   pids=$(fm_harness_ancestry_pids) || return 1
@@ -217,8 +217,87 @@ fm_session_lock_write() {  # <lock-file> <pid> <start>
 }
 
 fm_session_start_completion_matches() {  # <completion-file> <pid> <start>
-  local file=$1 pid=$2 start=$3 completion
+  local file=$1 pid=$2 start=$3 completion expected
+  file=$(fm_session_start_completion_path "$file" "${FM_SESSION_LOCK_GENERATION:-}")
   [ -n "$start" ] && [ -f "$file" ] && [ ! -L "$file" ] || return 1
   completion=$(cat "$file" 2>/dev/null) || return 1
-  [ "$completion" = "$(fm_session_lock_print_record "$pid" "$start")" ]
+  if [ -n "${FM_SESSION_LOCK_GENERATION:-}" ]; then
+    [ "$FM_SESSION_LOCK_PID" = "$pid" ] && [ "$FM_SESSION_LOCK_START" = "$start" ] || return 1
+    expected=$(fm_session_lock_receipt) || return 1
+  else
+    expected=$(fm_session_lock_print_record "$pid" "$start") || return 1
+  fi
+  [ "$completion" = "$expected" ]
+}
+
+# The environment carries the secret separately from the readable fingerprint.
+# A nested launcher always scrubs all five fields before selecting its home.
+fm_session_owner_clear() {
+  unset FM_SESSION_OWNER_ID FM_SESSION_OWNER_HOME FM_SESSION_OWNER_PID \
+    FM_SESSION_OWNER_START FM_SESSION_OWNER_KIND
+}
+
+fm_session_owner_bind() { # <pid> <launch|startup>
+  fm_session_owner_clear
+  FM_SESSION_OWNER_PID=$1 FM_SESSION_OWNER_KIND=$2
+  FM_SESSION_OWNER_HOME=$(fm_session_owner_home) || return 1
+  FM_SESSION_OWNER_START=$(fm_session_owner_token "$1") || return 1
+  FM_SESSION_OWNER_ID=$(od -An -N32 -v -tx1 /dev/urandom | tr -d '[:space:]')
+  [[ "$FM_SESSION_OWNER_ID" =~ ^[0-9a-f]{64}$ ]] || return 1
+  export FM_SESSION_OWNER_ID FM_SESSION_OWNER_HOME FM_SESSION_OWNER_PID \
+    FM_SESSION_OWNER_START FM_SESSION_OWNER_KIND
+}
+
+fm_session_owner_context_present() {
+  [ -n "${FM_SESSION_OWNER_ID:-}${FM_SESSION_OWNER_HOME:-}${FM_SESSION_OWNER_PID:-}${FM_SESSION_OWNER_START:-}${FM_SESSION_OWNER_KIND:-}" ]
+}
+
+fm_session_owner_context() {
+  fm_session_owner_enabled || return 1
+  [[ "${FM_SESSION_OWNER_ID:-}" =~ ^[0-9a-f]{64}$ ]] || return 1
+  [ -n "${FM_SESSION_OWNER_HOME:-}" ] && [ "$FM_SESSION_OWNER_HOME" = "$(fm_session_owner_home)" ] || return 1
+  case "${FM_SESSION_OWNER_KIND:-}" in launch|startup|native) ;; *) return 1 ;; esac
+  case "${FM_SESSION_OWNER_START:-}" in linux:*|darwin:*) ;; *) return 1 ;; esac
+  fm_session_owner_liveness "${FM_SESSION_OWNER_PID:-}" "$FM_SESSION_OWNER_START" || return 1
+  FM_SESSION_OWNER_FINGERPRINT=$(printf '%s\n%s\n' "$FM_SESSION_OWNER_HOME" "$FM_SESSION_OWNER_ID" | fm_session_owner_hash)
+}
+
+fm_session_owner_matches_context() {
+  [ "$FM_SESSION_LOCK_PID" = "${FM_SESSION_OWNER_PID:-}" ] \
+    && [ "$FM_SESSION_LOCK_START" = "${FM_SESSION_OWNER_START:-}" ] \
+    && [ "$FM_SESSION_LOCK_KIND" = "${FM_SESSION_OWNER_KIND:-}" ] \
+    && [ "$FM_SESSION_LOCK_FINGERPRINT" = "${FM_SESSION_OWNER_FINGERPRINT:-}" ]
+}
+
+fm_session_lock_receipt() {
+  if [ -n "${FM_SESSION_LOCK_GENERATION:-}" ]; then
+    printf '%s\nstart=%s\ngeneration=%s\n' "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START" "$FM_SESSION_LOCK_GENERATION"
+  else
+    fm_session_lock_print_record "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START"
+  fi
+}
+
+# Hooks never claim startup-only ownership and only attempt reclamation on
+# affirmative departure. The acquisition command rechecks under the mutex.
+fm_session_hook_may_recover() {
+  local state=$1 rc
+  fm_session_lock_read "$state/.lock" || return 1
+  if fm_session_owner_enabled || [ -n "$FM_SESSION_LOCK_GENERATION" ]; then
+    [ "${FM_SESSION_OWNER_KIND:-}" != startup ] && fm_session_owner_context || return 1
+    fm_session_owner_liveness "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START"
+    rc=$?
+    [ "$rc" -eq 2 ]
+  else
+    ! fm_session_lock_owner_alive "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START"
+  fi
+}
+
+fm_session_hook_owns_lock() {
+  fm_session_lock_owned_by_self "$1" && [ "$FM_SESSION_LOCK_KIND" != startup ]
+}
+
+
+fm_session_start_completion_path() {
+  local file=$1 generation=$2
+  printf '%s%s\n' "$file" "${generation:+.$generation}"
 }

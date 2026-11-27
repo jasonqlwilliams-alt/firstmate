@@ -36,6 +36,28 @@ _fm_wake_require_timeout() {
   . "$FM_WAKE_LIB_DIR/fm-timeout-lib.sh"
 }
 
+# Firstmate fleet mutation entry points reject a stale carried binding. The
+# network stage is the sole bounded exception and holds the acquisition mutex.
+fm_session_mutation_allowed() { # <action>
+  local action=$1
+  if [ -z "${FM_SESSION_OWNER_ID:-}${FM_SESSION_OWNER_HOME:-}${FM_SESSION_OWNER_PID:-}${FM_SESSION_OWNER_START:-}${FM_SESSION_OWNER_KIND:-}" ]; then
+    return 0
+  fi
+  (
+    # shellcheck source=bin/fm-session-lock-lib.sh
+    . "$FM_WAKE_LIB_DIR/fm-session-lock-lib.sh"
+    fm_session_lock_owned_by_self "$STATE" && exit 0
+    [ -n "${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-}" ] \
+      && [ -n "${FM_BOOTSTRAP_NETWORK_WORKER_PID:-}" ] \
+      && [ "$(cat "$STATE/.lock.acquire/pid" 2>/dev/null)" = "$FM_BOOTSTRAP_NETWORK_WORKER_PID" ] \
+      && fm_session_lock_read "$STATE/.lock" \
+      && [ "$FM_SESSION_LOCK_PID" = "${FM_BOOTSTRAP_NETWORK_LOCK_PID:-}" ] \
+      && [ "$FM_SESSION_LOCK_GENERATION" = "$FM_BOOTSTRAP_NETWORK_LOCK_GEN" ] && exit 0
+    printf 'error: %s refused because the session launch no longer owns this home\n' "$action" >&2
+    exit 1
+  )
+}
+
 # Pass a variable name to capture this frame's pid without forking it in $().
 # On Bash 3.2, exec a child shell so its PPID identifies this frame, unlike $$.
 fm_current_pid() {  # [output-variable]
@@ -215,9 +237,9 @@ fm_codex_checkpoint_session() {
   [ "$(fm_supervision_model)" = persistent ] || return 1
   # shellcheck source=bin/fm-session-lock-lib.sh
   . "$FM_WAKE_LIB_DIR/fm-session-lock-lib.sh"
-  pid=$(fm_harness_ancestry_pid) || return 1
-  [ "$(cat "$state/.lock" 2>/dev/null)" = "$pid" ] || return 1
-  identity=$(fm_pid_identity "$pid") || return 1
+  fm_session_hook_owns_lock "$state" || return 1
+  pid=$FM_SESSION_LOCK_PID
+  identity=${FM_SESSION_LOCK_GENERATION:-$(fm_pid_identity "$pid")} || return 1
   if command -v shasum >/dev/null 2>&1; then
     digest=$(printf '%s' "$identity" | shasum -a 256) || return 1
   elif command -v sha256sum >/dev/null 2>&1; then
@@ -257,11 +279,17 @@ fm_pi_extension_version() {
 # True when <marker> records <expected-version> and names the session process in
 # <session-lock>, i.e. the session holding this home loaded exactly this build.
 fm_pi_extension_loaded() {
-  local marker=$1 expected_version=$2 lock=$3 marker_version marker_pid
+  local marker=$1 expected_version=$2 lock=$3 marker_version marker_pid marker_generation
   [ -f "$marker" ] && [ -f "$lock" ] && [ -n "$expected_version" ] || return 1
   marker_version=$(sed -n '1p' "$marker")
   marker_pid=$(sed -n '2p' "$marker")
+  marker_generation=$(sed -n '3p' "$marker")
   fm_session_lock_read "$lock" || return 1
+  [ "$FM_SESSION_LOCK_GENERATION" = "$marker_generation" ] || return 1
+  if [ -n "$marker_generation" ]; then
+    [ "$FM_SESSION_LOCK_KIND" != startup ] || return 1
+    fm_session_owner_liveness "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START" || return 1
+  fi
   [ "$marker_version" = "$expected_version" ] && [ "$marker_pid" = "$FM_SESSION_LOCK_PID" ] \
     && fm_session_lock_start_matches "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START"
 }
@@ -580,11 +608,25 @@ fm_lock_mid_acquire_is_fresh() {
   return 1
 }
 
+fm_lock_claimant_occupied() { # <mutex-path> <pid>
+  local lockdir=$1 pid=$2 rc=0
+  case "$lockdir" in
+    "$STATE/.lock.acquire"|"$STATE/.lock.acquire.steal"*)
+      if fm_session_owner_enabled && fm_session_owner_pid_valid "$pid"; then
+        fm_session_owner_liveness "$pid" '' || rc=$?
+        [ "$rc" -ne 2 ]
+        return
+      fi
+      ;;
+  esac
+  fm_pid_alive "$pid"
+}
+
 fm_lock_recheck_stale_owner() {
   local lockdir=$1 expected_owner=$2 expected_pid=$3 mode=${4:-} actual_pid
   actual_pid=$(cat "$lockdir/pid" 2>/dev/null || true)
   [ "$actual_pid" = "$expected_pid" ] || return 1
-  if fm_pid_alive "$actual_pid"; then
+  if fm_lock_claimant_occupied "$lockdir" "$actual_pid"; then
     return 1
   fi
   if fm_lock_mid_acquire_is_fresh "$lockdir" "$actual_pid"; then
@@ -949,7 +991,7 @@ fm_lock_try_acquire() {
     FM_LOCK_HELD_PID=$(cat "$lockdir/pid" 2>/dev/null || true)
     return 1
   fi
-  if fm_pid_alive "$pid"; then
+  if fm_lock_claimant_occupied "$lockdir" "$pid"; then
     FM_LOCK_HELD_PID=$pid
     return 1
   fi
@@ -967,7 +1009,7 @@ fm_lock_try_acquire() {
   steal_owner=${FM_LOCK_OWNER_DIR:-}
 
   cur=$(cat "$lockdir/pid" 2>/dev/null || true)
-  if fm_pid_alive "$cur"; then
+  if fm_lock_claimant_occupied "$lockdir" "$cur"; then
     fm_lock_release "$steal"
     FM_LOCK_HELD_PID=$cur
     FM_LOCK_OWNER_DIR=
@@ -1885,11 +1927,13 @@ fm_autoarm_ledger_read() {  # <state-dir>
   FM_AUTOARM_OUTCOME=
   FM_AUTOARM_SESSION=
   FM_AUTOARM_RECOVERY=
+  FM_AUTOARM_SESSION_GENERATION=
   FM_AUTOARM_IDENTITY=
   FM_AUTOARM_GEN=$(_fm_autoarm_epoch_field "$epoch" epoch) || return 1
   FM_AUTOARM_OWNER=$(_fm_autoarm_epoch_field "$epoch" owner_pid) || return 1
   FM_AUTOARM_OUTCOME=$(_fm_autoarm_epoch_field "$epoch" outcome) || return 1
   FM_AUTOARM_SESSION=$(_fm_autoarm_epoch_field "$epoch" session_pid 2>/dev/null || true)
+  FM_AUTOARM_SESSION_GENERATION=$(_fm_autoarm_epoch_field "$epoch" session_generation 2>/dev/null || true)
   FM_AUTOARM_RECOVERY=$(_fm_autoarm_epoch_field "$epoch" recovery_generation 2>/dev/null || true)
   case "$FM_AUTOARM_GEN" in
     ''|*[!0-9]*) return 1 ;;
@@ -1915,6 +1959,12 @@ fm_autoarm_claim_open() {  # <state-dir> [grace]
   esac
   fm_autoarm_ledger_read "$state" || return 1
   [ "$FM_AUTOARM_OUTCOME" = arming ] || return 1
+  if fm_session_owner_enabled || [ -e "$state/.lock.owner-format" ]; then
+    fm_session_lock_read "$state/.lock" || return 1
+    [ -n "$FM_AUTOARM_SESSION_GENERATION" ] \
+      && [ "$FM_AUTOARM_SESSION_GENERATION" = "$FM_SESSION_LOCK_GENERATION" ] || return 1
+    fm_session_owner_liveness "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START" || return 1
+  fi
   fm_pid_alive "$FM_AUTOARM_OWNER" || return 1
   [ -n "$FM_AUTOARM_IDENTITY" ] || return 1
   current=$(fm_pid_identity "$FM_AUTOARM_OWNER" 2>/dev/null) || return 1
@@ -1953,7 +2003,8 @@ fm_autoarm_midturn_healthy() {  # <state-dir> [grace]
   fm_session_lock_read "$state/.lock" || return 1
   lock_pid=$FM_SESSION_LOCK_PID
   fm_session_lock_start_matches "$lock_pid" "$FM_SESSION_LOCK_START" || return 1
-  [ -n "$FM_AUTOARM_SESSION" ] && [ "$FM_AUTOARM_SESSION" = "$lock_pid" ] || return 1
+  [ -n "$FM_AUTOARM_SESSION" ] && [ "$FM_AUTOARM_SESSION" = "$lock_pid" ] \
+    && [ "$FM_AUTOARM_SESSION_GENERATION" = "$FM_SESSION_LOCK_GENERATION" ] || return 1
   fm_pid_alive "$lock_pid" || return 1
   fm_recovery_marker_read "$state/.watcher-down" || return 1
   recovery=${FM_RECOVERY_MARKER_TOKEN##*:}
@@ -1968,8 +2019,8 @@ fm_autoarm_midturn_healthy() {  # <state-dir> [grace]
 # when a competing claimant won the race (the ledger holds an open claim), and
 # 1 when the micro-mutex is contended, the mandatory identity cannot be
 # computed, or the write failed.
-fm_autoarm_claim_next() {  # <state-dir> [grace]
-  local state=$1 grace=${2:-${FM_GUARD_GRACE:-300}} lock epoch pid gen identity tmp
+fm_autoarm_claim_next() {  # <state-dir> [grace] [session-generation]
+  local state=$1 grace=${2:-${FM_GUARD_GRACE:-300}} session_generation=${3:-} lock epoch pid gen identity tmp
   lock="$state/.claude-autoarm.lock"
   epoch="$state/.claude-autoarm-epoch"
   FM_AUTOARM_MY_GEN=
@@ -1990,9 +2041,11 @@ fm_autoarm_claim_next() {  # <state-dir> [grace]
   esac
   gen=$((gen + 1))
   tmp="$epoch.tmp.$pid"
-  if ! printf 'epoch=%s owner_pid=%s outcome=arming updated_at=%s\n%s\n' \
-      "$gen" "$pid" "$(date +%s)" "$identity" > "$tmp" 2>/dev/null \
-    || ! mv -f "$tmp" "$epoch" 2>/dev/null; then
+  if ! {
+      printf 'epoch=%s owner_pid=%s outcome=arming updated_at=%s' "$gen" "$pid" "$(date +%s)"
+      [ -z "$session_generation" ] || printf ' session_generation=%s' "$session_generation"
+      printf '\n%s\n' "$identity"
+    } > "$tmp" 2>/dev/null || ! mv -f "$tmp" "$epoch" 2>/dev/null; then
     rm -f "$tmp" 2>/dev/null || true
     fm_lock_release "$lock"
     return 1
@@ -2011,8 +2064,8 @@ fm_autoarm_claim_next() {  # <state-dir> [grace]
 # ordering could permanently suppress a notice whose ledger write never won.
 # Returns 0 committed, 2 refused (superseded or required-marker failure), and 1
 # unable (bounded contention or ledger-write failure).
-fm_autoarm_write_owned() {  # <state-dir> <gen> <outcome> [marker-file] [session-pid] [recovery-generation]
-  local state=$1 gen=$2 outcome=$3 marker=${4:-} session=${5:-} recovery=${6:-} lock epoch pid identity tmp i
+fm_autoarm_write_owned() {  # <state-dir> <gen> <outcome> [marker-file] [session-pid] [recovery-generation] [session-generation]
+  local state=$1 gen=$2 outcome=$3 marker=${4:-} session=${5:-} recovery=${6:-} session_generation=${7:-} lock epoch pid identity tmp i
   lock="$state/.claude-autoarm.lock"
   epoch="$state/.claude-autoarm-epoch"
   pid=${BASHPID:-$$}
@@ -2028,12 +2081,14 @@ fm_autoarm_write_owned() {  # <state-dir> <gen> <outcome> [marker-file] [session
     return 2
   fi
   identity=$FM_AUTOARM_IDENTITY
+  session_generation=${session_generation:-$FM_AUTOARM_SESSION_GENERATION}
   tmp="$epoch.tmp.$pid"
   if ! {
       printf 'epoch=%s owner_pid=%s outcome=%s updated_at=%s' \
         "$gen" "$pid" "$outcome" "$(date +%s)"
       [ -z "$session" ] || printf ' session_pid=%s' "$session"
       [ -z "$recovery" ] || printf ' recovery_generation=%s' "$recovery"
+      [ -z "$session_generation" ] || printf ' session_generation=%s' "$session_generation"
       printf '\n'
       [ -z "$identity" ] || printf '%s\n' "$identity"
     } > "$tmp" 2>/dev/null || ! mv -f "$tmp" "$epoch" 2>/dev/null; then
@@ -2416,12 +2471,22 @@ fm_wake_branch_owner_matches() {  # <owner-file> [<pid>] [<generation>]
   IFS= read -r generation <&8 || { exec 8<&-; return 1; }
   if IFS= read -r extra <&8; then exec 8<&-; return 1; fi
   exec 8<&-
-  [ "$version" = fm-branch-eligible-owner-v1 ] || return 1
   case "$pid" in ''|*[!0-9]*|1) return 1 ;; esac
   case "$generation" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
   [ -z "$expected_pid" ] || [ "$pid" = "$expected_pid" ] || return 1
   [ -z "$expected_generation" ] || [ "$generation" = "$expected_generation" ] || return 1
-  current=$(fm_pid_identity "$pid" 2>/dev/null) || return 1
+  case "$version" in
+    fm-branch-eligible-owner-v1)
+      ! fm_session_owner_enabled && [ ! -e "$STATE/.lock.owner-format" ] || return 1
+      current=$(fm_pid_identity "$pid" 2>/dev/null) || return 1
+      ;;
+    fm-branch-eligible-owner-v2)
+      fm_session_lock_read "$STATE/.lock" && [ "$FM_SESSION_LOCK_PID" = "$pid" ] \
+        && fm_session_owner_liveness "$pid" "$FM_SESSION_LOCK_START" || return 1
+      current=$FM_SESSION_LOCK_GENERATION
+      ;;
+    *) return 1 ;;
+  esac
   [ -n "$current" ] && [ "$current" = "$identity" ]
 }
 

@@ -210,13 +210,24 @@ esac
 local_phase() { [ "$FM_BOOTSTRAP_NETWORK_PHASE" != only ]; }
 network_phase() { [ "$FM_BOOTSTRAP_NETWORK_PHASE" != skip ]; }
 
+# shellcheck source=bin/fm-session-lock-record-lib.sh
+. "$SCRIPT_DIR/fm-session-lock-record-lib.sh"
+
+if local_phase && fm_session_owner_enabled && [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ]; then
+  local_owner=$("$SCRIPT_DIR/fm-lock.sh" verify) || local_owner=''
+  if [ -z "$local_owner" ] || [ "$local_owner" != "${FM_BOOTSTRAP_LOCAL_OWNER_GEN:-}" ]; then
+    FM_BOOTSTRAP_DETECT_ONLY=1
+  fi
+fi
+
 network_mutation_authorized() {
-  local expected=${FM_BOOTSTRAP_NETWORK_LOCK_PID:-} current
-  [ -n "$expected" ] || return 0
-  case "$expected" in *[!0-9]*) return 1 ;; esac
-  [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] || return 1
-  current=$(cat "$STATE/.lock" 2>/dev/null) || return 1
-  [ "$current" = "$expected" ]
+  local expected=${FM_BOOTSTRAP_NETWORK_LOCK_PID:-}
+  if [ -z "$expected" ]; then
+    ! fm_session_owner_enabled
+    return
+  fi
+  fm_session_lock_read "$STATE/.lock" && [ "$FM_SESSION_LOCK_PID" = "$expected" ] \
+    && [ "$FM_SESSION_LOCK_GENERATION" = "${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-}" ]
 }
 
 network_sweep_authorized() {
