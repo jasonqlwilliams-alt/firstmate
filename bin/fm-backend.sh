@@ -391,11 +391,10 @@ fm_task_tmp_private_root() {  # <recorded-tasktmp> <task-id> [<expected-identity
 }
 
 fm_task_tmp_identity() {
-  if [ "$(uname -s)" = Darwin ]; then
-    /usr/bin/stat -f '%d:%i' "$1" 2>/dev/null
-  else
-    stat -c '%d:%i' "$1" 2>/dev/null
-  fi
+  case "${OSTYPE:-}" in
+    darwin*) /usr/bin/stat -f '%d:%i' "$1" 2>/dev/null ;;
+    *) stat -c '%d:%i' "$1" 2>/dev/null ;;
+  esac
 }
 
 # fm_backend_of_meta: the backend recorded in <meta-file>, defaulting to
