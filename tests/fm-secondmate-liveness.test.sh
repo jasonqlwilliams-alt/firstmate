@@ -333,7 +333,7 @@ case "${1:-}" in
     if [ "${FM_TEST_FAIL_LAUNCH:-0}" = 1 ]; then
       for a in "$@"; do
         if [ "$a" = -l ]; then
-          printf 'fixture rejected launch text\n' >&2
+          printf '%s\n' 'error: fixture rejected launch text' 'error: fixture could not restore terminal state' >&2
           exit 1
         fi
       done
@@ -494,16 +494,26 @@ test_sweep_never_acts_on_transient_unreadability() {
 }
 
 test_sweep_reports_missing_endpoint_relaunch_failure() {
-  local w fb tmuxfb log out
+  local w fb tmuxfb log out raw prefs
   w=$(new_world sweep-missing-failure)
   add_sm_home "$w" sm1 firstmate:fm-sm1 pi
-  printf 'drifted preferences\n' > "$w/sm1/data/captain-shared.md"
   fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
   log="$w/calls.log"; : > "$log"
+  prefs="$w/sm1/data/captain-shared.md"
+  printf 'drifted preferences\n' > "$prefs"
 
+  raw=$(PATH="$tmuxfb:$fb:$BASE_PATH" TMUX='' FM_BACKEND=tmux FM_HOME="$w/home" \
+    FM_TEST_PANE_CMD=missing FM_TMUX_CALL_LOG="$log" FM_SPAWN_NO_GUARD=1 FM_TEST_FAIL_NEW_WINDOW=1 \
+    "$ROOT/bin/fm-spawn.sh" sm1 --secondmate 2>&1) && fail "fixture drift: spawn unexpectedly succeeded"
+  case "$raw" in
+    *"SECONDMATE_SYNC: secondmate home $w/sm1: quarantined data/captain-shared.md drift at "*$'\n'*'create window failed: fixture refused new-window'*) ;;
+    *) fail "fixture drift: expected a spawn quarantine advisory before the tmux refusal: $raw" ;;
+  esac
+
+  printf 'drifted preferences\n' > "$prefs"
   out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" missing "$log" FM_TEST_FAIL_NEW_WINDOW=1)
 
-  assert_absent "$w/sm1/data/captain-shared.md" "fixture drift: inheritance did not quarantine the local preferences"
+  assert_absent "$prefs" "fixture drift: inheritance did not quarantine the local preferences"
   assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing: create window failed: fixture refused new-window" \
     "a failed missing-endpoint relaunch should retain its authorizing cause and name the backend refusal"
   assert_not_contains "$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed')" \
@@ -568,7 +578,7 @@ test_sweep_reports_task_temp_creation_failure() {
 }
 
 test_sweep_reports_retained_temp_root_after_failed_recovery() {
-  local w fb tmuxfb log out meta task_tmp
+  local w fb tmuxfb log out line meta task_tmp
   w=$(new_world sweep-retained-tasktmp)
   add_sm_home "$w" sm1 firstmate:fm-sm1 pi
   meta="$w/home/state/sm1.meta"
@@ -580,14 +590,15 @@ test_sweep_reports_retained_temp_root_after_failed_recovery() {
   log="$w/calls.log"; : > "$log"
 
   out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" missing "$log" FM_TEST_FAIL_LAUNCH=1)
+  line=$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed' || true)
 
   assert_absent "$meta" "failed recovery should roll back its task record"
   assert_present "$task_tmp/gotmp/keep" "failed recovery removed the reused temp root"
-  assert_contains "$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed')" \
-    "temporary directory remains at $task_tmp" "recovery failure summary omitted the retained temp root"
-  assert_contains "$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed')" \
-    "confidently missing: fixture rejected launch text (" "recovery failure summary did not lead with the launch refusal"
-  pass "sweep: failed recovery reports the exact temp root it retained"
+  assert_contains "$line" "confidently missing: error: fixture rejected launch text (error: fixture could not restore terminal state)" \
+    "recovery should preserve the launch refusal and the trailing failure context"
+  assert_contains "$line" ") (warning: task sm1's temporary directory remains at $task_tmp;" \
+    "recovery failure summary omitted the retained temp root"
+  pass "sweep: failed recovery reports the launch refusal, context, and retained temp root"
 }
 
 test_sweep_names_spawn_error_over_earlier_advisory() {
@@ -601,16 +612,9 @@ test_sweep_names_spawn_error_over_earlier_advisory() {
   out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" missing "$log")
   line=$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed' || true)
 
-  assert_contains "$line" "confidently missing: error: task sm1 has no brief at inaccessible data path $w/home/data/sm1/brief.md" \
-    "the liveness line should name spawn's own refusal"
-  assert_not_contains "$line" "sync skipped before launch" "a best-effort advisory displaced spawn's refusal"
+  assert_equals "SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing: error: task sm1 has no brief at inaccessible data path $w/home/data/sm1/brief.md" \
+    "$line" "the liveness line should name spawn's own refusal once"
 
-  # Pin the raw spawn output the line was chosen from (bootstrap prints only the
-  # summary), so the case above cannot go vacuous: the advisory precedes the
-  # refusal. Failed recovery rolled the record back.
-  {
-    printf 'window=firstmate:fm-sm1\nkind=secondmate\nharness=pi\nhome=%s\n' "$w/sm1"
-  } > "$w/home/state/sm1.meta"
   raw=$(PATH="$tmuxfb:$fb:$BASE_PATH" TMUX='' FM_BACKEND=tmux FM_HOME="$w/home" \
     FM_TEST_PANE_CMD=missing FM_TMUX_CALL_LOG="$log" FM_SPAWN_NO_GUARD=1 \
     "$ROOT/bin/fm-spawn.sh" sm1 --secondmate 2>&1) && fail "fixture drift: spawn unexpectedly succeeded"

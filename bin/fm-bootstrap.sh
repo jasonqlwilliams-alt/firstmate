@@ -747,8 +747,13 @@ report_secondmate_respawn_failure() {
   local id=$1 cause=$2 output=$3 status=$4 reason retained retained_prefix
   retained_prefix="warning: task $id's temporary directory remains at "
   reason=$(awk -v prefix="$retained_prefix" '
-    index($0, prefix) != 1 && /[^[:space:]]/ { last = $0 }
-    END { print last }
+    index($0, prefix) == 1 { next }
+    /^error:/ && !first { first = $0 }
+    /[^[:space:]]/ { last = $0 }
+    END {
+      if (first && first != last) printf "%s (%s)\n", first, last
+      else print last
+    }
   ' <<< "$output")
   reason=$(first_line "${reason:-no diagnostic (spawn exit status $status)}")
   retained=$(awk -v prefix="$retained_prefix" 'index($0, prefix) == 1 { print; exit }' <<< "$output")
