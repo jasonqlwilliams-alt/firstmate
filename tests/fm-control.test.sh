@@ -386,7 +386,7 @@ add_task() {
 # the stubbed provider on PATH. Echoes combined output; returns its exit code.
 run_control() {
   local dir=$1; shift
-  env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
+  env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$dir/home/state" FM_FAKE_DIR="$dir/fake" \
     FM_CONTROL_POLL=0.01 FM_CONTROL_SETTLE_WAIT=0.05 \
     FM_CONTROL_EXIT_WAIT=0.5 FM_CONTROL_LAUNCH_WAIT=0.05 \
     FM_FAKE_MUSE_LOG="${FM_FAKE_MUSE_LOG:-}" \
@@ -1175,7 +1175,7 @@ test_agent_that_does_not_stop_fails_closed() {
   alive_as "$dir" claude
   gen=$("$ROOT/bin/fm-busy-event.sh" arm "$dir/home/state" t1)
   printf 'busy_gen=%s\n' "$gen" >> "$dir/home/state/t1.meta"
-  out=$(env FM_FAKE_NEVER_DIES=1 PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" \
+  out=$(env FM_FAKE_NEVER_DIES=1 PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$dir/home/state" \
     FM_FAKE_DIR="$dir/fake" FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.5 \
     "$CONTROL" t1 exit 2>&1); rc=$?
   expect_code 1 "$rc" "an agent that ignores its exit command should fail closed"
@@ -1250,7 +1250,7 @@ test_fm_send_still_marks_the_same_secondmate_task() {
   add_task "$dir" domain claude secondmate
   log="$dir/fake/sendlog"
   : > "$log"
-  out=$(env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
+  out=$(env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$dir/home/state" FM_FAKE_DIR="$dir/fake" \
     FM_SEND_SETTLE=0 FM_ROOT_OVERRIDE="$dir/home" \
     "$SEND" domain "audit the build" 2>&1); rc=$?
   expect_code 0 "$rc" "fm-send to a secondmate should still succeed"$'\n'"$out"

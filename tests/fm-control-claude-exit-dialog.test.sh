@@ -15,6 +15,7 @@ command -v jq >/dev/null || { echo 'skip: jq not found'; exit 0; }
 command -v node >/dev/null || { echo 'skip: node not found'; exit 0; }
 TMP_ROOT=$(fm_test_tmproot fm-claude-exit-dialog)
 mkdir -p "$TMP_ROOT/bin" "$TMP_ROOT/home/state" "$TMP_ROOT/home/data" "$TMP_ROOT/home/config"
+export FM_STATE_OVERRIDE="$TMP_ROOT/home/state"
 printf 'claude default impossible\n' > "$TMP_ROOT/home/config/secondmate-harness"
 fm_git_worktree "$TMP_ROOT/project" "$TMP_ROOT/worktree" fixture-task
 printf 'exitdialog\n' > "$TMP_ROOT/worktree/.fm-secondmate-home"
@@ -745,7 +746,8 @@ decode() { printf '%s' "$1" | base64 --decode 2>/dev/null || printf '%s' "$1" | 
 args=()
 while IFS= read -r -d '' arg; do args+=("$arg"); done < <(decode "$4")
 printf '%s\n' "${args[*]}" >> "$FM_DIALOG_CASE/remote"
-FM_HOME="$FM_DIALOG_HOME" "$FM_ROOT_OVERRIDE/bin/${args[0]}" "${args[@]:1}"
+FM_HOME="$FM_DIALOG_HOME" FM_STATE_OVERRIDE="$FM_DIALOG_HOME/state" \
+  "$FM_ROOT_OVERRIDE/bin/${args[0]}" "${args[@]:1}"
 SH
 chmod +x "$TMP_ROOT/bin/fake-ssh"
 export FM_DIALOG_MODE=remote-restart FM_DIALOG_CASE="$TMP_ROOT/remote-restart" FM_DIALOG_FIXTURE="$LIVE_FIXTURE"
@@ -771,7 +773,7 @@ pass 'remote restart observes the already-open dialog on its bound host and repo
 export FM_DIALOG_FIXTURE="$TMP_ROOT/clipped.screen"
 for phase in dialog composer typed picker unreadable; do
   printf '%s\n' "$phase" > "$FM_DIALOG_CASE/phase"
-  PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$FM_DIALOG_HOME" \
+  PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$FM_DIALOG_HOME" FM_STATE_OVERRIDE="$FM_DIALOG_HOME/state" \
     "$ROOT/bin/fm-remote-secondmate-control.sh" observe exitdialog --exit-dialog > "$FM_DIALOG_CASE/observation" \
     || fail "remote exit-dialog observation failed on $phase"
   case "$phase" in
@@ -783,7 +785,7 @@ for phase in dialog composer typed picker unreadable; do
       ;;
   esac
 done
-out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$FM_DIALOG_HOME" \
+out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$FM_DIALOG_HOME" FM_STATE_OVERRIDE="$FM_DIALOG_HOME/state" \
   "$ROOT/bin/fm-remote-secondmate-control.sh" observe exitdialog) || fail 'ordinary remote observation failed'
 [ "$out" = idle ] || fail "ordinary remote observation did not report the native idle state: $out"
 pass 'remote exit-dialog observation emits only a positive match'
@@ -792,7 +794,7 @@ remote_state="$FM_DIALOG_HOME/state/parent-route"
 export FM_DIALOG_MODE=remote-send
 for phase in unreadable composer; do
   printf '%s\n' "$phase" > "$FM_DIALOG_CASE/phase"
-  out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$FM_DIALOG_HOME" bash -c '
+  out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$FM_DIALOG_HOME" FM_STATE_OVERRIDE="$FM_DIALOG_HOME/state" bash -c '
     . "$1/bin/fm-wake-lib.sh"
     if [ "$2" = composer ]; then
       lock="$FM_HOME/state/parent-route/.control-exitdialog.lock"

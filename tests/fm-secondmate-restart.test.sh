@@ -267,7 +267,7 @@ add_repo_backed_mate() {  # <case-dir> <id> [harness] [backend]
 run_update_in_case() {
   local dir=$1
   env PATH="$dir/fakebin:$PATH" FM_FAKE_DIR="$dir/fake" \
-    FM_ROOT_OVERRIDE="$dir/fmrepo" FM_HOME="$dir/home" \
+    FM_ROOT_OVERRIDE="$dir/fmrepo" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$dir/home/state" \
     FM_SSH_BIN="${FM_TEST_SSH_BIN:-ssh}" \
     "$ROOT/bin/fm-update.sh" 2>/dev/null
 }
@@ -286,7 +286,7 @@ run_restart() {  # <case-dir> <args...>
   env PATH="$dir/fakebin:$PATH" /bin/sleep 120 >/dev/null 2>&1 &
   pane_pid=$!
   env FM_FAKE_PANE_PID="$pane_pid" \
-    PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
+    PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$dir/home/state" FM_FAKE_DIR="$dir/fake" \
     FM_SPAWN_NO_GUARD=1 FM_SECONDMATE_PERSIST_POLL=1 \
     FM_SECONDMATE_PERSIST_WAIT="${FM_TEST_PERSIST_WAIT:-30}" \
     FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=2 FM_CONTROL_LAUNCH_WAIT=0.05 \
@@ -1037,7 +1037,7 @@ test_remote_secondmate_control_relaunch_updates_parent_record() {
   assert_contains "$(cat "$meta")" "effort=default" "setup should start with default effort"
 
   out=$(PATH="$dir/fakebin:$PATH" FM_SSH_BIN="${FM_TEST_SSH_BIN:-ssh}" \
-    FM_HOME="$dir/home" "$ROOT/bin/fm-remote-secondmate-control.sh" \
+    FM_HOME="$dir/home" FM_STATE_OVERRIDE="$dir/home/state" "$ROOT/bin/fm-remote-secondmate-control.sh" \
     relaunch sm2 codex gpt-6-astra high 2>&1); rc=$?
 
   expect_code 0 "$rc" "direct remote relaunch should succeed"$'\n'"$out"
@@ -1053,7 +1053,7 @@ test_remote_secondmate_control_relaunch_updates_parent_record() {
 
   export FM_FAKE_SSH_MODE=fail-relaunch
   out=$(PATH="$dir/fakebin:$PATH" FM_SSH_BIN="${FM_TEST_SSH_BIN:-ssh}" \
-    FM_HOME="$dir/home" "$ROOT/bin/fm-remote-secondmate-control.sh" \
+    FM_HOME="$dir/home" FM_STATE_OVERRIDE="$dir/home/state" "$ROOT/bin/fm-remote-secondmate-control.sh" \
     relaunch sm2 cursor cursor-grok-4.6-high high 2>&1); rc=$?
   unset FM_FAKE_SSH_MODE
 

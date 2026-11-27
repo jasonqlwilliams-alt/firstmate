@@ -30,6 +30,7 @@
 #      --resolve-key decision unconfirmed, and keeps a marked expectation
 #      armed.
 set -u
+unset FM_STATE_OVERRIDE
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -765,7 +766,7 @@ test_local_secondmate_submit() {
   esac
   rc=0
   env PATH="$fb:$PATH" FM_FAKE_CLAUDE_SUBMIT="$mode" FM_SEND_RETRIES="$retries" \
-    FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_SEND_LOG="$log" FM_SEND_SETTLE=0 \
+    FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_SEND_LOG="$log" FM_SEND_SETTLE=0 \
     "$SEND" lsm "$command" >"$dir/out" 2>&1 || rc=$?
   rec=$(pending_record "$home")
   case "$mode" in

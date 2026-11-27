@@ -266,6 +266,7 @@ test_harness_invocations_stay_typed() {
 test_claude_automatic_input_refuses_unproven_composers() {
   local dir err log meta exact near mode screen rc out lock text
   dir=$(setup_case claude-guard claude-latest); err="$dir/send.err"; log="$dir/send.log"
+  local -x FM_STATE_OVERRIDE="$dir/home/state"
   meta="$dir/home/state/t1.meta"
   exact="$ROOT/tests/fixtures/claude-exit/claude-2.1.330.screen"
   near="$dir/choice-two.screen"
@@ -363,7 +364,7 @@ test_claude_watcher_rering_respects_lifecycle_lock() (
   lock="$state/.control-t1.lock"
   fm_lock_try_acquire "$lock" || fail 'could not hold the actual lifecycle lock'
   trap '[ -z "$pid" ] || { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; }; fm_lock_release "$lock"' EXIT
-  env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+  env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$state" FM_ROOT_OVERRIDE="$ROOT" \
     FM_CREW_STATE_BIN=/bin/false FM_POLL=1 FM_TASK_INBOX_GRACE_SECS=1 FM_TASK_INBOX_RING_MAX=30 \
     FM_SEND_LOG="$dir/send.log" FM_FAKE_CLAUDE_LOCK="$lock" \
     "$ROOT/bin/fm-watch.sh" >"$dir/watch.out" 2>&1 &

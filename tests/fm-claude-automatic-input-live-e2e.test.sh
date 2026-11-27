@@ -30,6 +30,7 @@ cleanup() {
 trap cleanup EXIT
 
 export FM_HOME="$LAB/home" CLAUDE_CONFIG_DIR="$LAB/claude-config"
+export FM_STATE_OVERRIDE="$FM_HOME/state"
 inbox="$FM_HOME/state/$TASK.inbox"
 printf -v list_inbox 'ls %q' "$inbox"
 printf -v read_record 'cat %q' "$inbox/001.msg"
