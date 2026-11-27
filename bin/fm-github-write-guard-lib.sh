@@ -2,57 +2,55 @@
 # Shared target resolution for the gh and gh-axi delivery command shims.
 # Source after setting FM_GITHUB_GUARD_TOOL to gh or gh-axi.
 
-# shellcheck source=bin/fm-repository-policy-lib.sh
-. "$FM_DELIVERY_GUARD_ROOT/bin/fm-repository-policy-lib.sh"
-
 fm_github_guard_upper() { LC_ALL=C tr '[:lower:]' '[:upper:]'; }
 
 fm_github_guard_repo_flag() {  # <argv...>; prints explicit selector or empty
-  local want='' arg selector=''
+  local want='' arg
   for arg in "$@"; do
     if [ "$want" = repo ]; then
-      selector=$arg
-      want=''
-      continue
+      printf '%s\n' "$arg"
+      return 0
     fi
     case "$arg" in
-      --) break ;;
       -R|--repo) want=repo ;;
-      -R=*) selector=${arg#-R=} ;;
-      -R?*) selector=${arg#-R} ;;
-      --repo=*) selector=${arg#--repo=} ;;
+      -R?*) printf '%s\n' "${arg#-R}"; return 0 ;;
+      --repo=*) printf '%s\n' "${arg#--repo=}"; return 0 ;;
     esac
   done
-  printf '%s\n' "$selector"
+  return 0
 }
 
-fm_github_guard_effective_target() {  # <host> <selector>
-  local host=$1 selector=$2
-  case "$selector" in
-    */*/*) printf '%s\n' "$selector" ;;
-    */*) printf '%s/%s\n' "$host" "$selector" ;;
-    '') git remote get-url origin 2>/dev/null ;;
-    *) return 1 ;;
-  esac
+fm_github_guard_hostname() {  # <argv...>; prints explicit/ambient/default host
+  local want arg
+  want=
+  for arg in "$@"; do
+    if [ "$want" = host ]; then
+      printf '%s\n' "$arg"
+      return 0
+    fi
+    case "$arg" in
+      --hostname) want=host ;;
+      --hostname=*) printf '%s\n' "${arg#--hostname=}"; return 0 ;;
+    esac
+  done
+  printf '%s\n' "${GH_HOST:-github.com}"
 }
 
-fm_github_guard_authorize_target() {  # <checkout> <target> <pr|api> [<explicit-host>]
-  local identity host
-  identity=$(fm_repository_url_identity "$2") || {
-    printf 'REFUSED: pull-request has no verifiable GitHub repository target: %s.\n' "$2" >&2
-    return 1
-  }
-  host=${identity%%/*}
-  if [ "$#" -eq 4 ] && [ "$(printf '%s' "$4" | fm_github_guard_upper)" != "$(printf '%s' "$host" | fm_github_guard_upper)" ]; then
-    printf 'REFUSED: %s hostname does not match the pull-request repository host %s.\n' \
-      "$FM_GITHUB_GUARD_TOOL" "$host" >&2
-    return 1
+fm_github_guard_effective_target() {  # <argv...>
+  local target origin host
+  host=$(fm_github_guard_hostname "$@") || return 1
+  target=$(fm_github_guard_repo_flag "$@") || return 1
+  [ -n "$target" ] || target=${GH_REPO:-}
+  if [ -n "$target" ]; then
+    case "$target" in
+      */*/*) printf '%s\n' "$target" ;;
+      */*) printf '%s/%s\n' "$host" "$target" ;;
+      *) return 1 ;;
+    esac
+    return 0
   fi
-  "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr "$1" "$identity" || return $?
-  export GH_HOST="$host"
-  if [ "$3" = pr ]; then
-    export GH_REPO="${identity#*/}"
-  fi
+  origin=$(git remote get-url origin 2>/dev/null) || return 1
+  printf '%s\n' "$origin"
 }
 
 fm_github_guard_pr_mutation() {  # <argv...>
@@ -121,10 +119,10 @@ fm_github_guard_check_pr_body() {  # <repo> <argv...>
   return 0
 }
 
-fm_github_guard_check_api() {  # <checkout> <host> <api argv...>
-  local checkout=$1 host=$2
-  shift 2
-  local arg flag value separate positional_only=0 method='' path=''
+fm_github_guard_check_api() {  # <checkout> <api argv...>
+  local checkout=$1
+  shift
+  local arg flag value separate positional_only=0 method='' path='' host=${GH_HOST:-github.com}
   local owner repo has_fields=0 auth_override=0 input_file='' use_stdin=0
   local body_fields=() body_files=()
   while [ "$#" -gt 0 ]; do
@@ -152,11 +150,11 @@ fm_github_guard_check_api() {  # <checkout> <host> <api argv...>
     separate=0
     case "$arg" in
       --*=*) flag=${arg%%=*}; value=${arg#*=} ;;
-      -[HFXfptq]?*) flag=${arg:0:2}; value=${arg:2}; value=${value#=} ;;
+      -[HFXfptqR]?*) flag=${arg:0:2}; value=${arg:2}; value=${value#=} ;;
       *) flag=$arg; separate=1 ;;
     esac
     case "$flag" in
-      --hostname|--method|-X|--field|-F|--raw-field|-f|--header|-H|--input|--jq|-q|--template|-t|--preview|-p|--cache)
+      --hostname|--method|-X|--field|-F|--raw-field|-f|--header|-H|--input|--jq|-q|--template|-t|--preview|-p|--cache|--repo|-R)
         if [ "$separate" -eq 1 ]; then
           [ "$#" -gt 0 ] || break
           value=$1
@@ -216,7 +214,7 @@ fm_github_guard_check_api() {  # <checkout> <host> <api argv...>
     printf 'REFUSED: %s REST writes cannot supply an Authorization header.\n' "$FM_GITHUB_GUARD_TOOL" >&2
     return 1
   fi
-  fm_github_guard_authorize_target "$checkout" "$host/$owner/$repo" api "$host" || return $?
+  "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr "$checkout" "$host/$owner/$repo" || return $?
 
   for value in ${body_fields[@]+"${body_fields[@]}"}; do
     printf '%s' "$value" | "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr-body "$checkout" - || return $?
@@ -262,42 +260,23 @@ fm_github_guard_check_api() {  # <checkout> <host> <api argv...>
 }
 
 fm_github_guard_check() {  # <argv...>
-  local repo target selector='' host=${GH_HOST:-github.com}
+  local repo target
   repo=$(git rev-parse --show-toplevel 2>/dev/null) || {
     printf 'REFUSED: %s GitHub write ran outside an armed Git repository.\n' "$FM_GITHUB_GUARD_TOOL" >&2
     return 1
   }
-  local explicit_host=()
-  if [ "$FM_GITHUB_GUARD_TOOL" = gh-axi ] && [[ ${1:-} == pr || ${1:-} == api ]]; then
-    local args=("$1")
-    shift
-    while [ "$#" -gt 0 ]; do
-      case "$1" in
-        --hostname) [ "$#" -gt 1 ] || break; host=$2; explicit_host=("$host"); shift ;;
-        --hostname=?*) host=${1#*=}; explicit_host=("$host") ;;
-        --repo|-R) [ "$#" -gt 1 ] || break; selector=$2; shift ;;
-        --repo=?*|-R=?*) selector=${1#*=} ;;
-        *) args+=("$1") ;;
-      esac
-      shift
-    done
-    set -- "${args[@]}" "$@"
-  fi
   if fm_github_guard_pr_mutation "$@"; then
-    if [ "$FM_GITHUB_GUARD_TOOL" = gh ]; then
-      selector=$(fm_github_guard_repo_flag "$@")
-    fi
-    target=$(fm_github_guard_effective_target "$host" "${selector:-${GH_REPO:-}}") || {
+    target=$(fm_github_guard_effective_target "$@") || {
       printf 'REFUSED: %s could not resolve the pull-request repository before writing.\n' "$FM_GITHUB_GUARD_TOOL" >&2
       return 1
     }
-    fm_github_guard_authorize_target "$repo" "$target" pr ${explicit_host[@]+"${explicit_host[@]}"} || return $?
+    "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr "$repo" "$target" || return $?
     fm_github_guard_check_pr_body "$repo" "$@" || return $?
     return 0
   fi
   if [ "${1:-}" = api ]; then
     shift
-    fm_github_guard_check_api "$repo" "$host" "$@" || return $?
+    fm_github_guard_check_api "$repo" "$@" || return $?
   fi
   return 0
 }
