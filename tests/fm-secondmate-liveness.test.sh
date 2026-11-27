@@ -319,8 +319,8 @@ case "${1:-}" in
     [ "${1:-}" = kill-window ] && : > "${FM_TMUX_CALL_LOG}.killed"
     if [ "${1:-}" = new-window ]; then
       case "${FM_TEST_FAIL_NEW_WINDOW:-0}" in
-        1) printf 'create window failed: fixture refused new-window\n' >&2; exit 1 ;;
-        advisory-only) printf 'warning: fixture ignored a setting\n' >&2; exit 1 ;;
+        1) printf 'create window failed: fixture refused new-window\n\n \t\n' >&2; exit 1 ;;
+        silent) exit 1 ;;
       esac
       rm -f "${FM_TMUX_CALL_LOG}.killed"
       fm_fake_tmux_new_window "$0.windows" @1 "$@"
@@ -504,26 +504,47 @@ test_sweep_reports_missing_endpoint_relaunch_failure() {
   out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" missing "$log" FM_TEST_FAIL_NEW_WINDOW=1)
 
   assert_absent "$w/sm1/data/captain-shared.md" "fixture drift: inheritance did not quarantine the local preferences"
-  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing: error: create window failed: fixture refused new-window" \
+  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing: create window failed: fixture refused new-window" \
     "a failed missing-endpoint relaunch should retain its authorizing cause and name the backend refusal"
   assert_not_contains "$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed')" \
     "sync skipped before launch" "a best-effort advisory displaced the actionable refusal"
   pass "sweep: failed relaunch diagnostics distinguish a confidently missing endpoint"
 }
 
-test_sweep_reports_exit_status_without_error() {
+test_sweep_reports_exit_status_without_output() {
   local w fb tmuxfb log out
   w=$(new_world sweep-silent-failure)
   add_sm_home "$w" sm1 firstmate:fm-sm1 pi
-  printf 'drifted preferences\n' > "$w/sm1/data/captain-shared.md"
   fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
   log="$w/calls.log"; : > "$log"
 
-  out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" missing "$log" FM_TEST_FAIL_NEW_WINDOW=advisory-only)
+  out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" missing "$log" FM_SKIP_SECONDMATE_SYNC=1 FM_TEST_FAIL_NEW_WINDOW=silent)
 
   assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing: no diagnostic (spawn exit status 1)" \
-    "an advisory is not a spawn failure diagnostic"
-  pass "sweep: an advisory-only relaunch reports the spawn exit status"
+    "a silent spawn failure should report its exit status"
+  pass "sweep: a silent relaunch reports the spawn exit status"
+}
+
+test_sweep_reports_home_traversal_failure() {
+  local w fb tmuxfb log out line
+  w=$(new_world sweep-inaccessible-home)
+  add_sm_home "$w" sm1 firstmate:fm-sm1 pi
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  log="$w/calls.log"; : > "$log"
+
+  chmod u-x "$w/sm1" || fail "could not remove traversal permission from the fixture home"
+  if (cd "$w/sm1") 2>/dev/null; then
+    chmod u+x "$w/sm1"
+    printf '%s\n' 'ok - sweep: home traversal failure # SKIP current user can bypass directory permissions'
+    return
+  fi
+  out=$(LC_ALL=C run_bootstrap "$tmuxfb:$fb" "$w/home" missing "$log")
+  chmod u+x "$w/sm1"
+
+  line=$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed' || true)
+  assert_contains "$line" "cd: $w/sm1: Permission denied" "recovery failure should name the inaccessible home and permission error"
+  [ ! -s "$log" ] || fail "recovery acted on the endpoint despite the inaccessible home"
+  pass "sweep: an inaccessible secondmate home reports the permission error"
 }
 
 test_sweep_reports_task_temp_creation_failure() {
@@ -540,7 +561,7 @@ test_sweep_reports_task_temp_creation_failure() {
   out=$(LC_ALL=C run_bootstrap "$tmuxfb:$fb" "$w/home" missing "$log")
   line=$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed' || true)
 
-  assert_contains "$line" 'respawn failed after recorded endpoint confidently missing: error: mkdir:' \
+  assert_contains "$line" 'respawn failed after recorded endpoint confidently missing: mkdir:' \
     "recovery failure should name the mkdir error"
   assert_contains "$line" "$task_tmp/gotmp" "recovery failure should name the blocked directory"
   pass "sweep: a blocked Go temp directory reports the mkdir error"
@@ -565,7 +586,7 @@ test_sweep_reports_retained_temp_root_after_failed_recovery() {
   assert_contains "$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed')" \
     "temporary directory remains at $task_tmp" "recovery failure summary omitted the retained temp root"
   assert_contains "$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed')" \
-    "confidently missing: error: fixture rejected launch text (" "recovery failure summary did not lead with the launch refusal"
+    "confidently missing: fixture rejected launch text (" "recovery failure summary did not lead with the launch refusal"
   pass "sweep: failed recovery reports the exact temp root it retained"
 }
 
@@ -729,7 +750,8 @@ test_sweep_respawns_authoritatively_missing_pi_signed_secondmate
 test_sweep_never_acts_on_ambiguous_existing_process
 test_sweep_never_acts_on_transient_unreadability
 test_sweep_reports_missing_endpoint_relaunch_failure
-test_sweep_reports_exit_status_without_error
+test_sweep_reports_exit_status_without_output
+test_sweep_reports_home_traversal_failure
 test_sweep_reports_task_temp_creation_failure
 test_sweep_reports_retained_temp_root_after_failed_recovery
 test_sweep_names_spawn_error_over_earlier_advisory

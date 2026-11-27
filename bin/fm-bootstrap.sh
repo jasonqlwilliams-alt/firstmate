@@ -744,13 +744,14 @@ secondmate_recovery_spawn() (
 )
 
 report_secondmate_respawn_failure() {
-  local id=$1 cause=$2 output=$3 status=$4 reason retained
-  reason=$(awk '
-    /^error: remote host-local secondmate launch failed$/ { next }
-    /^error: / { print; exit }
+  local id=$1 cause=$2 output=$3 status=$4 reason retained retained_prefix
+  retained_prefix="warning: task $id's temporary directory remains at "
+  reason=$(awk -v prefix="$retained_prefix" '
+    index($0, prefix) != 1 && /[^[:space:]]/ { last = $0 }
+    END { print last }
   ' <<< "$output")
   reason=$(first_line "${reason:-no diagnostic (spawn exit status $status)}")
-  retained=$(awk -v prefix="warning: task $id's temporary directory remains at " 'index($0, prefix) == 1 { print; exit }' <<< "$output")
+  retained=$(awk -v prefix="$retained_prefix" 'index($0, prefix) == 1 { print; exit }' <<< "$output")
   if [ -n "$retained" ]; then
     reason="$reason ($retained)"
   fi
