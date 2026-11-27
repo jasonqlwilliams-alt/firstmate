@@ -286,14 +286,21 @@ fm_backend_capture tmux "$SESSION:fm-mate" 40 >/dev/null 2>&1 \
 pass "closed recorded session reads as missing despite a prefix-named session"
 
 # A window name carrying a dot is read exactly rather than parsed as a pane.
-new_window fmla fm-dot.task DOTTED-MARKER
-i=0
-until fm_backend_capture tmux "fmla:fm-dot.task" 40 2>/dev/null | grep -q DOTTED-MARKER; do
-  i=$((i + 1))
-  [ "$i" -lt 100 ] || fail "a dotted worker window name must capture its own screen"
-  sleep 0.05
-done
-pass "dotted window name reads exactly"
+new_window fmla fm-dot.0 DOTTED-MARKER
+new_window fmla fm-dot DECOY-MARKER
+dotted_inventory=$(tmux list-windows -t fmla -F '#{window_name} #{window_id}') \
+  || fail "could not list the dotted worker and its decoy"
+dotted_window=$(awk '$1 == "fm-dot.0" {print $2}' <<< "$dotted_inventory")
+decoy_window=$(awk '$1 == "fm-dot" {print $2}' <<< "$dotted_inventory")
+[ -n "$dotted_window" ] && [ -n "$decoy_window" ] && [ "$dotted_window" != "$decoy_window" ] \
+  || fail "could not identify two distinct windows for the dotted target"
+wait_for_marker "$dotted_window" DOTTED-MARKER
+wait_for_marker "$decoy_window" DECOY-MARKER
+tmux capture-pane -p -t fmla:fm-dot.0 | grep -Fq DECOY-MARKER \
+  || fail "precondition: native tmux capture must select the undotted decoy"
+fm_backend_capture tmux fmla:fm-dot.0 40 | grep -Fq DOTTED-MARKER \
+  || fail "a dotted worker window name must capture its own screen"
+pass "dotted window name reads exactly beside a live decoy"
 
 tmux new-session -d -s firstmate-lab -n fm-detached -c "$LAB/neighbour" \
   || fail "could not create the prefix-named session"

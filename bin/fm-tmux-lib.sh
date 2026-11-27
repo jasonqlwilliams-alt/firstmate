@@ -303,11 +303,9 @@ fm_pane_is_busy() {  # <target> [harness]
 }
 
 fm_tmux_submit_busy_state() {  # <target> [explicit]
-  if [ "${2:-}" = explicit ]; then
-    fm_tmux_resolved_busy_state "$1" ''
-  else
-    fm_pane_busy_state "$1"
-  fi
+  local target
+  target=$(fm_tmux_exact_target "$@") || { printf 'unknown'; return 0; }
+  fm_tmux_resolved_busy_state "$target" ''
 }
 
 # fm_tmux_submit_core: type <text> into <target> ONCE, then submit with Enter,
