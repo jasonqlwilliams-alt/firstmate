@@ -392,13 +392,13 @@ if ! fm_backend_send_literal tmux "$shadow_name:fm-session-id" 'session-write' |
   fail "could not send to literal session name"
 fi
 wait_for_marker "$shadow_pane" 'received: session-write'
-created=$(fm_backend_tmux_create_task "$shadow_name" fm-placement "$worker_cwd") \
+session_binding=$(fm_tmux_exact_session "$shadow_name") || fail "could not bind the literal session"
+created=$(fm_backend_tmux_create_task "$shadow_name" fm-placement "$worker_cwd" "$session_binding") \
   || fail "could not create a worker in the ID-shaped session name"
 [ "$(tmux list-windows -t "$shadow_id:" -f '#{==:#{window_name},fm-placement}' -F '#{session_id}')" = "$shadow_id" ] \
   || fail "spawn placed $created outside the literal session"
 tmux set-environment -t "$fmla_id" META_API_KEY decoy
 tmux set-environment -t "$shadow_id" META_API_KEY destination
-session_binding=$(fm_tmux_exact_session "$shadow_name") || fail "could not bind the literal session"
 [ "$(fm_tmux_session_command "$session_binding" show-environment '' META_API_KEY)" = 'META_API_KEY=destination' ] \
   || fail "the environment lookup must read the literal session, not the session ID it resembles"
 fm_backend_kill tmux "$shadow_name:fm-session-id" || fail "could not close the recorded literal-session worker"

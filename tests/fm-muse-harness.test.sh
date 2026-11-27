@@ -74,8 +74,24 @@ make_spawn_fakebin() {
 #!/usr/bin/env bash
 set -u
 session=${FM_FAKE_MUSE_SESSION:-firstmate}
-if [ "${1:-}" = list-sessions ] && [ "${3:-}" != "#{==:#{session_name},$session}" ]; then
-  [ -f "$0.created-session" ] && [ "$3" = "#{==:#{session_name},$(cat "$0.created-session")}" ] || exit 0
+session_name() {
+  case "${1%:}" in
+    '$1'|=firstmate|firstmate) printf 'firstmate' ;;
+    '$7'|"=$session"|"$session") printf '%s' "$session" ;;
+    *) return 1 ;;
+  esac
+}
+session_id() {
+  if [ "$1" = firstmate ]; then printf '$1'; else printf '$7'; fi
+}
+if [ "${1:-}" = list-sessions ]; then
+  name=${3#'#{==:#{session_name},'}
+  name=${name%\}}
+  if [ "$name" = "$session" ] ||
+     { [ "$name" = firstmate ] && { [ -n "${FM_FAKE_MUSE_DECOY_META_KEY:-}" ] || [ -f "$0.created-session" ]; }; }; then
+    printf 'tmux-session:100:1234567890:%s\n' "$(session_id "$name")"
+  fi
+  exit 0
 fi
 fm_fake_tmux_dispatch "$@"
 case "$*" in
@@ -90,21 +106,32 @@ case "${1:-}" in
     esac
     ;;
   show-environment)
-    case "$3" in
-      '$1'|"=$session:"|"$session"|firstmate) ;;
-      *) exit 1 ;;
-    esac
-    [ "${FM_FAKE_WORKER_META_KEY:-}" = present ] || exit 1
+    name=$(session_name "$3") || exit 1
+    if [ "$name" = "$session" ]; then
+      [ "${FM_FAKE_WORKER_META_KEY:-}" = present ] || exit 1
+    else
+      [ "${FM_FAKE_MUSE_DECOY_META_KEY:-}" = present ] || exit 1
+    fi
     printf 'META_API_KEY=worker-key\n'
     exit 0
     ;;
   display-message) printf '%s\n' "$session"; exit 0 ;;
   list-windows)
     if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
-      fm_fake_tmux_window_ids "$@" < "$0.windows"
+      IFS=' ' read -r window_id recorded < "$0.windows"
+      if [ "$2" = -t ]; then
+        FM_FAKE_TMUX_SESSION_NAME=$(session_name "$3") || exit 1
+      fi
+      FM_FAKE_TMUX_SESSION_ID=$(session_id "${recorded%%:*}") \
+        fm_fake_tmux_window_ids "$@" <<< "$window_id $recorded"
     fi
     exit 0 ;;
-  new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@"; exit 0 ;;
+  new-window)
+    name=$(session_name "$3") || exit 1
+    FM_FAKE_TMUX_SESSION_ID=$(session_id "$name") \
+      fm_fake_tmux_new_window "$0.windows" @1 "$1" -t "$name:" "${@:4}"
+    exit 0
+    ;;
   new-session)
     printf '%s\n' "${*: -1}" > "$0.created-session"
     printf "tmux-session:100:1234567890:\$1\n"
@@ -381,27 +408,31 @@ EOF
 }
 
 test_spawn_checks_credentials_in_its_destination_session() {
-  local name tmux_context session expected rec case_dir home proj wt fakebin id out status
-  while IFS='|' read -r name tmux_context session expected; do
+  local name tmux_context session worker_key decoy_key expected rec case_dir home proj wt fakebin id out status
+  while IFS='|' read -r name tmux_context session worker_key decoy_key expected; do
     rec=$(make_spawn_case "$name")
     IFS='|' read -r case_dir home proj wt fakebin id <<EOF
 $rec
 EOF
     out=$(FM_TEST_MUSE_KEY='' FM_TEST_MUSE_TMUX="$tmux_context" FM_TEST_MUSE_SESSION="$session" \
+      FM_TEST_MUSE_WORKER_KEY="$worker_key" FM_FAKE_MUSE_DECOY_META_KEY="$decoy_key" \
       run_muse_spawn "$home" "$proj" "$wt" "$fakebin" "$id" --backend tmux --mode no-mistakes --yolo off)
     status=$?
     expect_code "$expected" "$status" "Muse spawn with a session key in $session: $out"
     if [ "$expected" -eq 0 ]; then
       grep -Fxq "window=$session:fm-$id" "$home/state/$id.meta" \
         || fail "Muse did not launch in the session that holds its key"
+      grep -Fxq "@1 $session:fm-$id" "$fakebin/tmux.windows" \
+        || fail "Muse allocated the worker outside the session that holds its key"
     else
       assert_contains "$out" "no worker-reachable credential" "a neighbour's key must not satisfy preflight"
       assert_absent "$fakebin/tmux.windows" "Muse allocated a worker without a destination credential"
     fi
   done <<'ROWS'
-detached-neighbor||firstmate-lab|1
-detached-exact||firstmate|0
-attached-session|fake,1,0|firstmate-lab|0
+detached-neighbor||firstmate-lab|present||1
+detached-exact||firstmate|present||0
+attached-session|fake,1,0|firstmate-lab|present|absent|0
+attached-decoy-key|fake,1,0|firstmate-lab|absent|present|1
 ROWS
   pass "Muse fresh spawn checks credentials in the session that receives the worker"
 }

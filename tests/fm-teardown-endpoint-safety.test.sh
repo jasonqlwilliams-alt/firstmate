@@ -721,6 +721,23 @@ test_retire_stale_record_transfers_a_cross_home_claiming_dead_record() {
   assert_contains "$(cat "$dir/stderr")" "still has a live record" \
     "orphaned-claim release should refuse a claiming record that still exists"
 
+  cat > "$dir/fakebin/tmux" <<SH
+#!/usr/bin/env bash
+fm_fake_tmux_dispatch "\$@"
+replacement='$dir/replacement-window'
+case "\${1:-}" in
+  list-windows)
+    if [ -f "\$replacement" ]; then
+      printf '%s\n' '@29 firstmate:fm-$id' | fm_fake_tmux_window_ids "\$@"
+    else
+      : > "\$replacement"
+    fi
+    ;;
+  kill-window)
+    [ "\${3:-}" != %29 ] || rm -f -- "\$replacement"
+    ;;
+esac
+SH
   : > "$dir/runtime.log"
   set +e
   run_teardown "$dir" "$id" --force --retire-stale-record \
@@ -729,6 +746,7 @@ test_retire_stale_record_transfers_a_cross_home_claiming_dead_record() {
   set -e
   [ "$rc" -eq 0 ] || fail "retiring a claiming dead record occupied by another home failed: $(cat "$dir/stderr")"
   kill -0 "$worker" 2>/dev/null || fail "cross-home claiming-record retire killed the occupying worker"
+  assert_present "$dir/replacement-window" "retiring the absent owner closed a replacement with the same window name"
   assert_absent "$dir/home/state/$id.meta" "cross-home claiming-record retire left the dead record"
   assert_present "$second_home/state/$other.meta" \
     "cross-home claiming-record retire removed the occupying home's record"

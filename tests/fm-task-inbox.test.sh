@@ -119,7 +119,12 @@ case "${1:-}" in
     [ "${FM_FAKE_TMUX_MISSING:-0}" = 1 ] && exit 0
     case "$*" in
       *window_id*)
-        inventory=$(printf '@1 sess:fm-t1\n' | fm_fake_tmux_window_ids "$@")
+        inventory=$(
+          {
+            printf '@1 sess:fm-t1\n'
+            [ "${FM_FAKE_TMUX_DUPLICATE:-0}" != 1 ] || printf '@2 sess:fm-t1\n'
+          } | fm_fake_tmux_window_ids "$@"
+        )
         if [ -n "${FM_FAKE_SPLIT_ACTIVE:-}" ] && [ -f "$FM_FAKE_SPLIT_ACTIVE" ]; then
           sed 's/%1$/%2/' <<< "$inventory"
         else
@@ -693,6 +698,26 @@ test_watcher_escalates_once_after_budget() {
     || fail "the escalation must fire exactly once:"$'\n'"$(cat "$state/.wake-queue")"
   grep -qF 'stale:' "$out" || fail "the watcher should exit through the ordinary stale wake:"$'\n'"$(cat "$out")"
   pass "watcher: a spent ring budget emits exactly one ordinary stale wake for recovery"
+}
+
+test_watcher_escalates_ambiguous_tmux_window_without_input() {
+  local dir state pid rec
+  dir=$(setup_watch_case ambiguous-window)
+  state="$dir/state"
+  : > "$dir/keys"
+  rec=$(inbox_lib "$state" fm_task_inbox_write "$state" t1 "please continue")
+  age_path "$rec"
+  watch_bg "$state" "$dir/fakebin" "$dir/watch.out" FM_FAKE_TMUX_DUPLICATE=1 \
+    FM_FAKE_SPLIT_LOG="$dir/keys" FM_TASK_INBOX_RING_MAX=2
+  pid=$!
+  wait_watcher_gone "$pid" \
+    || { kill "$pid" 2>/dev/null; fail "an ambiguous window stalled the inbox ladder"; }
+  [ ! -s "$dir/keys" ] || fail "the watcher sent input to an ambiguous window"
+  [ "$(cut -f2 "$state/t1.inbox/.ring-state")" = 2 ] || fail "the unreadable attempts did not spend the budget"
+  [ "$(grep -Fc "$rec still unhandled after 2 doorbell delivery attempts" "$state/.wake-queue")" = 1 ] \
+    || fail "the watcher did not escalate the unhandled instruction once"
+  assert_present "$rec" "escalation removed the unhandled instruction"
+  pass "watcher: an ambiguous tmux window spends the retry budget without input"
 }
 
 test_watcher_dead_pane_escalates_once_without_ringing() {
@@ -1314,6 +1339,7 @@ test_watcher_quiet_on_healthy_inbox
 test_watcher_ack_silences_unwritable_ladder
 test_watcher_surfaces_unwritable_ladder
 test_watcher_escalates_once_after_budget
+test_watcher_escalates_ambiguous_tmux_window_without_input
 test_watcher_dead_pane_escalates_once_without_ringing
 test_watcher_dead_pane_ignores_stale_busy_state
 test_ring_refuses_the_codex_update_picker

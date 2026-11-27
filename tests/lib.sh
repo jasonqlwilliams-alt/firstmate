@@ -660,7 +660,7 @@ fm_fake_tmux_window_ids() {  # <tmux args...>, reads ID and name pairs from stdi
 export -f fm_fake_tmux_window_ids
 
 fm_fake_tmux_pane_row() {
-  printf "tmux-pane:100:1234567890:\$1:%s:%%%s\n" "$1" "${1#@}"
+  printf 'tmux-pane:100:1234567890:%s:%s:%%%s\n' "${FM_FAKE_TMUX_SESSION_ID:-\$1}" "$1" "${1#@}"
 }
 export -f fm_fake_tmux_pane_row
 

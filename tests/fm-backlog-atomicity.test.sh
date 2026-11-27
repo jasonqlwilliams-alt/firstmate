@@ -457,7 +457,8 @@ case "$*" in *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; e
 case "${1:-}" in
   -V) printf 'tmux 3.2\n'; exit 0 ;;
   display-message) printf 'firstmate\n'; exit 0 ;;
-  new-window) fm_fake_tmux_pane_row @1; exit 0 ;;
+  list-windows) [ ! -f "$0.windows" ] || fm_fake_tmux_window_ids "$@" < "$0.windows"; exit 0 ;;
+  new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@"; exit 0 ;;
   send-keys) exit 1 ;;
 esac
 exit 0

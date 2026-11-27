@@ -1108,6 +1108,19 @@ spawn_close_endpoint() {
   fi
 }
 
+spawn_verify_tmux_recorded_target() {
+  [ "$BACKEND" = tmux ] || return 0
+  local current
+  if current=$(fm_tmux_exact_target "$T") &&
+     [ "${current%:*}" = "${WT_TARGET%:*}" ] &&
+     { [ "$current" = "$WT_TARGET" ] ||
+       fm_tmux_pane_command "$WT_TARGET" display-message -p '#{pane_id}' >/dev/null; }; then
+    return 0
+  fi
+  echo "error: recorded tmux target $T no longer identifies the bound endpoint for task $ID" >&2
+  return 1
+}
+
 spawn_abort_cleanup() {
   local status=$? staged_file return_cmd
   [ -z "$RELAUNCH_PATH_PROBE" ] || rm -f -- "$RELAUNCH_PATH_PROBE" || true
@@ -3336,7 +3349,6 @@ if [ "$RELAUNCH" -eq 1 ] && [ "$RELAUNCH_RECREATE" -eq 0 ]; then
   # where the previous agent left it.
   T=$RELAUNCH_TARGET
   WT_TARGET=$RELAUNCH_PANE
-  SES=${T%%:*}
 elif [ "$RELAUNCH" -eq 1 ] && [ "$RELAUNCH_RECREATE" -eq 1 ]; then
   # The recorded pane is authoritatively gone. Recreate an endpoint in the
   # recorded worktree rather than adopting a missing target, so closing a pane
@@ -4781,7 +4793,6 @@ if [ "$RELAUNCH" -eq 1 ]; then
   SPAWN_META_TMP="$STATE/.$ID.meta.relaunch.${BASHPID:-$$}"
 else
   SPAWN_META_TMP="$STATE/.$ID.meta.spawn.${BASHPID:-$$}"
-  SPAWN_FRESH_COMMIT_PENDING=1
 fi
 SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
@@ -4847,7 +4858,14 @@ preserve_relaunch_meta() {
   echo "error: task record for $ID could not be prepared at $SPAWN_META_PATH" >&2
   exit 1
 }
+if ! spawn_verify_tmux_recorded_target; then
+  if [ "$RELAUNCH" -eq 0 ]; then
+    spawn_close_endpoint 2>/dev/null || true
+  fi
+  exit 1
+fi
 if [ "$RELAUNCH" -eq 0 ]; then
+  SPAWN_FRESH_COMMIT_PENDING=1
   if ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"; then
     echo "error: task record for $ID could not be published ($FM_BACKLOG_TRANSITION_ERROR)" >&2
     exit 1
@@ -5212,6 +5230,7 @@ if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
   fm_lock_acquire_wait "$SPAWN_META_LOCK"
   SPAWN_META_LOCK_HELD=1
 fi
+spawn_verify_tmux_recorded_target || exit 1
 SPAWN_DEFERRED_SIGNAL=
 if [ "$BACKLOG_TRANSITION" = 1 ]; then
   trap 'SPAWN_DEFERRED_SIGNAL=HUP' HUP

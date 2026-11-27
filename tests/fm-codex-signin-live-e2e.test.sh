@@ -109,14 +109,31 @@ trap 'exit 143' TERM
 
 global_mtimes > "$TMP_ROOT/mtimes-before" || exit 1
 VERSION=$(codex_version) || fail 'Codex --version failed before guard'
-cat > "$TMP_ROOT/bin/tmux" <<EOF
-#!/usr/bin/env bash
-case "\${1:-}" in
+{
+  printf '%s\n' '#!/usr/bin/env bash'
+  printf 'tmux_bin=%q\nsocket=%q\ninput_attempts=%q\n' "$TMUX_BIN" "$SOCKET" "$TMP_ROOT/input-attempts"
+  cat <<'SH'
+read_target='^[$][0-9]+:@[0-9]+\.%[0-9]+$'
+read_guard='^#\{==:#\{pid\}:#\{start_time\}:#\{session_id\}:#\{window_id\}:#\{pane_id\},[0-9]+:[0-9]+:[$][0-9]+:@[0-9]+:%[0-9]+\}$'
+read_display="^'display-message' '-t' '%[0-9]+' '-p' '#\{(pane_tty|pane_current_command|cursor_y|pane_id)\}'$"
+read_capture="^'capture-pane' '-t' '%[0-9]+' ('-p' '-S' '-[0-9]+'|'-e' '-p' '-S' '0' '-E' '-')$"
+read_panes="^'list-panes' '-t' '%[0-9]+' '-F' '#\{pane_id\}'$"
+case "${1:-}" in
   display-message|capture-pane|list-panes|list-windows|list-sessions|has-session|show-options|show-window-options|show-environment|list-clients|-V)
-    exec "$TMUX_BIN" -S "$SOCKET" "\$@" ;;
-  *) printf '%s\n' "\${1:-unknown}" >> "$TMP_ROOT/input-attempts"; exit 96 ;;
+    exec "$tmux_bin" -S "$socket" "$@" ;;
+  if-shell)
+    if [ "$#" -eq 7 ] && [ "$2" = -F ] && [ "$3" = -t ] &&
+       [[ $4 =~ $read_target && $5 =~ $read_guard ]] &&
+       [[ $6 =~ $read_display || $6 =~ $read_capture || $6 =~ $read_panes ]] &&
+       [ "$7" = 'show-options -s firstmate-tmux-binding-lost' ]; then
+      exec "$tmux_bin" -S "$socket" "$@"
+    fi
+    ;;
 esac
-EOF
+printf '%s\n' "${1:-unknown}" >> "$input_attempts"
+exit 96
+SH
+} > "$TMP_ROOT/bin/tmux"
 chmod +x "$TMP_ROOT/bin/tmux"
 export PATH="$TMP_ROOT/bin:$PATH"
 fm_git_init_commit "$TMP_ROOT/work"

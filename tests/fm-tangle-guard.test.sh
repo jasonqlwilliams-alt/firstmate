@@ -293,6 +293,10 @@ SH
   cat > "$fakebin/treehouse" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$TMUX_PANE" "$*" > "$FM_TREEHOUSE_TEST_RECEIPT"
+if [ -n "${FM_TREEHOUSE_TEST_RENAME_SESSION:-}" ]; then
+  tmux rename-session -t "$FM_TREEHOUSE_TEST_RENAME_SESSION" renamed || exit 1
+  tmux new-session -d -s '$0' -n "fm-$4" sleep 300 || exit 1
+fi
 printf '%s\n' "$FM_TREEHOUSE_TEST_SLOT"
 SH
   fm_fake_exit0 "$fakebin" codex
@@ -315,6 +319,18 @@ SH
   [ "$(cat "$rec")" = "$pane"$'\n''get --lease --lease-holder rec-win-gg7' ] \
     || fail "the new worker pane did not run the durable Treehouse lease command"
   pass "fm-spawn: appends a pinned window and acquires its lease in the worker pane"
+
+  "$real_tmux" -S "$socket" set-environment -t "$session_id" FM_TREEHOUSE_TEST_RENAME_SESSION "$session_id" \
+    || fail "could not arrange the session rename during spawn"
+  out=$(TMUX="$launch_env,${session_id#\$}" TMUX_PANE="$launcher" \
+    run_spawn "$home" rec-moved-gg8 "$proj" "$wt" "$fakebin"); status=$?
+  expect_code 1 "$status" "spawn should refuse to publish a stale recorded selector: $out"
+  assert_contains "$out" "no longer identifies the bound endpoint" "the refusal did not identify the stale selector"
+  assert_absent "$home/state/rec-moved-gg8.meta" "spawn published a record after its session name was reused"
+  [ "$("$real_tmux" -S "$socket" list-windows -a -F '#{session_name}:#{window_name}' |
+    awk -F: '$2 == "fm-rec-moved-gg8"')" = '$0:fm-rec-moved-gg8' ] \
+    || fail "spawn cleanup must close its own window and leave the replacement untouched"
+  pass "fm-spawn: refuses a stale selector when the session name is reused"
 )
 
 test_lib_classification

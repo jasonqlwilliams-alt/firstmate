@@ -1330,26 +1330,54 @@ test_legacy_record_without_the_flag_refuses() {
 }
 
 test_legacy_record_teardown_completes_when_landed_and_endpoint_dead() {
-  local case_dir out
-  case_dir=$(make_case legacy-allow)
-  write_legacy_meta "$case_dir" no-mistakes ship
-  seed_backlog_in_flight "$case_dir"
-  wt_commit "$case_dir" "landed legacy work"
-  add_fork_with_pushed_branch "$case_dir"
-  # The default fakebin tmux answers every query with success and no output, so
-  # the classifier reads the recorded window as authoritatively missing.
+  local case_dir out sampled
+  for sampled in missing dead; do
+    case_dir=$(make_case "legacy-allow-$sampled")
+    write_legacy_meta "$case_dir" no-mistakes ship
+    seed_backlog_in_flight "$case_dir"
+    wt_commit "$case_dir" "landed legacy work"
+    add_fork_with_pushed_branch "$case_dir"
+    cat > "$case_dir/fakebin/tmux" <<SH
+#!/usr/bin/env bash
+fm_fake_tmux_dispatch "\$@"
+replacement='$case_dir/replacement-window'
+case "\${1:-}" in
+  list-windows)
+    if [ -f "\$replacement" ]; then
+      printf '%s\n' '@29 firstmate:fm-task-x1' | fm_fake_tmux_window_ids "\$@"
+    elif [ '$sampled' = dead ]; then
+      printf '%s\n' '@13 firstmate:fm-task-x1' | fm_fake_tmux_window_ids "\$@"
+    else
+      : > "\$replacement"
+    fi
+    ;;
+  display-message)
+    if [ "\${3:-}" = %13 ] && [ "\${*: -1}" = '#{pane_current_command}' ]; then
+      printf 'bash\n'
+      : > "\$replacement"
+    fi
+    ;;
+  kill-window)
+    [ "\${3:-}" != %29 ] || rm -f -- "\$replacement"
+    ;;
+esac
+SH
+    chmod +x "$case_dir/fakebin/tmux"
 
-  out=$(run_teardown "$case_dir" --legacy-record) \
-    || fail "legacy-allow: teardown refused a landed legacy record with a dead endpoint"
-  [ "$(backlog_row_state "$case_dir")" = "done" ] \
-    || fail "legacy-allow: teardown returned success with its backlog item still open"
-  printf '%s\n' "$out" | grep -Fq 'legacy record accepted without spawn_gen: endpoint missing, incarnation legacy-' \
-    || fail "legacy-allow: the teardown line did not log the accepted legacy incarnation: $out"
-  assert_absent "$case_dir/state/task-x1.backlog-close" \
-    "legacy-allow: a landed legacy close left its pending-close record behind"
-  assert_absent "$case_dir/state/task-x1.meta" \
-    "legacy-allow: teardown left the task record behind"
-  pass "a landed legacy record with a dead endpoint tears down and logs its accepted incarnation"
+    out=$(run_teardown "$case_dir" --legacy-record) \
+      || fail "legacy-allow: teardown refused a landed legacy record with a $sampled endpoint"
+    [ "$(backlog_row_state "$case_dir")" = "done" ] \
+      || fail "legacy-allow: teardown returned success with its backlog item still open"
+    printf '%s\n' "$out" | grep -Fq "legacy record accepted without spawn_gen: endpoint $sampled, incarnation legacy-" \
+      || fail "legacy-allow: the teardown line did not log the accepted legacy incarnation: $out"
+    assert_absent "$case_dir/state/task-x1.backlog-close" \
+      "legacy-allow: a landed legacy close left its pending-close record behind"
+    assert_absent "$case_dir/state/task-x1.meta" \
+      "legacy-allow: teardown left the task record behind"
+    assert_present "$case_dir/replacement-window" \
+      "legacy-allow: teardown closed a replacement that reused the $sampled endpoint's name"
+  done
+  pass "a landed legacy record tears down without closing a replacement tmux window"
 }
 
 test_legacy_record_teardown_refuses_unlanded_work() {

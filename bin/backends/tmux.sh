@@ -108,11 +108,8 @@ fm_backend_tmux_container_ensure() {  # <session-name> [session-binding]
 # next free index (including with a non-default base-index). Return the pane
 # binding from new-window itself so a restarted server cannot supply a new
 # pane for the spawn commands. Pin the name before the shell changes cwd.
-fm_backend_tmux_create_task() {  # <session-name> <window-name> <proj-abs> [session-binding]
+fm_backend_tmux_create_task() {  # <session-name> <window-name> <proj-abs> <session-binding>
   local session=$1 name=$2 cwd=$3 binding=${4:-} duplicate created literal
-  if [ -z "$binding" ]; then
-    binding=$(fm_tmux_exact_session "$session") || return 1
-  fi
   literal=$(fm_tmux_format_literal "$name")
   duplicate=$(fm_tmux_session_command "$binding" list-windows : \
     -f "#{==:#{window_name},$literal}" -F '#{window_id}') || return 1

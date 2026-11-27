@@ -410,31 +410,35 @@ inbox_steer_check() {  # <window> <task> <backend>
       ;;
   esac
   if [ "$backend" = tmux ]; then
-    fm_backend_source tmux || return 0
-    if target=$(fm_tmux_exact_target "$w" 2>/dev/null); then
+    if ! fm_backend_source tmux; then
+      target=
+    elif target=$(fm_tmux_exact_target "$w" 2>/dev/null); then
       :
     elif [ "$?" -eq 1 ]; then
       inbox_steer_escalate_unavailable "$w" "$task" "$rec"
       return 0
-    else
+    fi
+  fi
+  if [ -n "$target" ]; then
+    agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)
+    case "$agent_state" in
+      dead|missing)
+        inbox_steer_escalate_unavailable "$w" "$task" "$rec"
+        return 0
+        ;;
+    esac
+    tail40=$(fm_backend_capture "$backend" "$target" 40 "fm-$task" 2>/dev/null) || tail40=
+    if window_is_busy "$target" "$tail40" "$task" "$backend"; then
       return 0
     fi
   fi
-  agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)
-  case "$agent_state" in
-    dead|missing)
-      inbox_steer_escalate_unavailable "$w" "$task" "$rec"
-      return 0
-      ;;
-  esac
-  tail40=$(fm_backend_capture "$backend" "$target" 40 "fm-$task" 2>/dev/null) || tail40=
-  if window_is_busy "$target" "$tail40" "$task" "$backend"; then
-    return 0
-  fi
   case "$verb" in
     ring)
-      ring_rc=0
-      fm_task_inbox_ring "$backend" "$target" "$rec" "fm-$task" "$(fm_meta_get "$FM_BACKEND_HERDR_ENDPOINT_META" harness)" || ring_rc=$?
+      ring_rc=2
+      if [ -n "$target" ]; then
+        ring_rc=0
+        fm_task_inbox_ring "$backend" "$target" "$rec" "fm-$task" "$(fm_meta_get "$FM_BACKEND_HERDR_ENDPOINT_META" harness)" || ring_rc=$?
+      fi
       if [ "$ring_rc" -eq 3 ]; then
         inbox_steer_escalate_unavailable "$w" "$task" "$rec"
         return 0
@@ -453,7 +457,7 @@ inbox_steer_check() {  # <window> <task> <backend>
       triage_log "steer-inbox delivery attempt: $task ${rec##*/} result=$ring_rc"
       ;;
     escalate)
-      reason="stale: $w (unread firstmate instruction: $rec still unhandled after $count doorbell delivery attempts with an idle pane; inspect the worker)"
+      reason="stale: $w (unread firstmate instruction: $rec still unhandled after $count doorbell delivery attempts; inspect the worker)"
       if [ ! -d "${rec%/*}" ] || [ ! -f "$rec" ]; then
         fm_task_inbox_due_action "$STATE" "$task" >/dev/null || true
         return 0
