@@ -44,7 +44,7 @@ TMP_ROOT=$(fm_test_tmproot fm-send-popup-settle)
 
 # Same stub shape as fm-send-settle.test.sh: a fake tmux that drives the submit
 # path to a clean "empty" verdict on the first Enter, and a fake sleep that records
-# every requested duration (one per line) into FM_SLEEP_LOG instead of sleeping.
+# the send's settle and retry delays (one per line) into FM_SLEEP_LOG instead of sleeping.
 make_stubs() {  # <dir> -> echoes fakebin dir
   local dir=$1 fb="$1/fakebin"
   mkdir -p "$fb"
@@ -52,11 +52,21 @@ make_stubs() {  # <dir> -> echoes fakebin dir
 #!/usr/bin/env bash
 set -u
 case "${1:-}" in
-  send-keys) exit 0 ;;
+  send-keys)
+    case " $* " in
+      *' -l '*) printf '%s' "${*: -1}" > "$FM_SLEEP_LOG.pending" ;;
+      *' Enter '*) rm -f -- "$FM_SLEEP_LOG.pending" ;;
+    esac
+    exit 0 ;;
   display-message)
-    for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
+    case "${*: -1}" in
+      '#{cursor_y}') printf '1\n'; exit 0 ;;
+      '#{pane_id}') printf '%%1\n'; exit 0 ;;
+    esac
     printf 'fakepane\n'; exit 0 ;;
-  capture-pane) printf '╭────╮\n│    │\n╰────╯\n'; exit 0 ;;
+  capture-pane)
+    printf '────────────────────────\n❯ %s\n────────────────────────\n' "$(cat "$FM_SLEEP_LOG.pending" 2>/dev/null)"
+    exit 0 ;;
   list-windows)
     case "$*" in *window_id*) printf '@1 sess:win\n' | fm_fake_tmux_window_ids "$@" ;; *) printf 'win\n' ;; esac
     exit 0 ;;
@@ -66,8 +76,10 @@ SH
   chmod +x "$fb/tmux"
   cat > "$fb/sleep" <<'SH'
 #!/usr/bin/env bash
-printf '%s\n' "${1:-}" >> "$FM_SLEEP_LOG"
-exit 0
+case "${1:-}" in
+  0.3|0.4|1.2) printf '%s\n' "$1" >> "$FM_SLEEP_LOG" ;;
+  *) exec /bin/sleep "$@" ;;
+esac
 SH
   chmod +x "$fb/sleep"
   printf '%s\n' "$fb"
@@ -107,7 +119,7 @@ first_settle() {  # <expected> <label> <harness|--explicit> <message> [selector-
   fi
   : > "$log"
   env FM_SEND_SETTLE=0 PATH="$fb:$PATH" \
-    FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_SLEEP_LOG="$log" \
+    FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_SLEEP_LOG="$log" \
     "$SEND" "$target" "$msg" 2>/dev/null; rc=$?
   expect_code 0 "$rc" "$label: send should succeed"
   first=$(head -1 "$log")
@@ -129,7 +141,7 @@ rides_inbox() {  # <label> <harness> <message>
   fm_write_meta "$home/state/popupcase.meta" "window=sess:win" "harness=$harness"
   : > "$log"
   env FM_SEND_SETTLE=0 PATH="$fb:$PATH" \
-    FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_SLEEP_LOG="$log" \
+    FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_SLEEP_LOG="$log" \
     "$SEND" fm-popupcase "$msg" 2>/dev/null; rc=$?
   expect_code 0 "$rc" "$label: send should succeed"
   grep -qF -- "$msg" "$home/state/popupcase.inbox/001.msg" \

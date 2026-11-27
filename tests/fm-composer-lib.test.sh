@@ -937,21 +937,20 @@ test_holds_text_survives_wrapping() {
 # proven below are the live picker, while a proven-empty composer or exactly the
 # caller's typed text below them makes the rows retained history.
 test_update_picker_scan_cursorless() {
-  local caps picker out
-  caps=$(printf 'styled=0\ncursor=0\nidentity=0\nrows=20')
+  local picker out
   # shellcheck disable=SC2016
   picker=$(printf '%s\n' '  Update available · 0.162.1 → 0.999.0' '' \
     '› 1. Update now (runs `npm install -g @openai/codex`)' '  2. Skip' \
     '  3. Skip until next version' '' '  enter continue · esc skip')
-  out=$(fm_composer_update_picker_scan "$caps" "$picker")
+  out=$(fm_composer_update_picker_scan "$picker")
   [ "$out" = active ] || fail "a bare picker should be active, got $out"
-  out=$(fm_composer_update_picker_scan "$caps" "$picker"$'\nCodex\n›')
+  out=$(fm_composer_update_picker_scan "$picker"$'\nCodex\n›')
   [ "$out" = retained ] || fail "a proven-empty composer below the picker should make it retained, got $out"
-  out=$(fm_composer_update_picker_scan "$caps" "$picker"$'\nCodex\n› /quit')
+  out=$(fm_composer_update_picker_scan "$picker"$'\nCodex\n› /quit')
   [ "$out" = active ] || fail "unproven text below the picker must keep it active, got $out"
-  out=$(fm_composer_update_picker_scan "$caps" "$picker"$'\nCodex\n› /quit' '' /quit)
+  out=$(fm_composer_update_picker_scan "$picker"$'\nCodex\n› /quit' '' /quit)
   [ "$out" = retained ] || fail "exactly the typed text below the picker should make it retained, got $out"
-  out=$(fm_composer_update_picker_scan "$caps" $'Codex\n›')
+  out=$(fm_composer_update_picker_scan $'Codex\n›')
   [ "$out" = none ] || fail "a screen without picker rows should be none, got $out"
   pass "fm_composer_update_picker_scan: cursorless picker is active unless a proven composer follows it"
 }

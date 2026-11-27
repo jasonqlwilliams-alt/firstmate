@@ -74,7 +74,11 @@
 # bin/fm-tmux-lib.sh. Tune with FM_SEND_RETRIES (default 3) / FM_SEND_SLEEP
 # (0.4). Slash commands, and codex `$...` skill invocations resolved through
 # harness meta, get a longer pre-Enter settle so completion popups do not
-# swallow Enter. A remote secondmate target has no typed text plane at all:
+# swallow Enter. The automatic Claude input guard and text limits are
+# documented in docs/agent-control.md. A pre-typing refusal or a withheld
+# first Enter exits 1. If the backend accepted an Enter but cannot confirm
+# submission, exit 3 preserves any pending-reply expectation.
+# A remote secondmate target has no typed text plane at all:
 # every remote text steer rides the inbox (a marked secondmate request already
 # reaches the harness as marker-prefixed chat rather than a parser command, so
 # routing a remote "/..." or "$..." through the record changes nothing the
@@ -1020,9 +1024,9 @@ else
     # because the watcher owns loss detection from here, either through its
     # bounded re-ring ladder or direct unavailable-endpoint recovery.
     ring_rc=0
-    fm_task_inbox_ring "$TARGET_BACKEND" "$T" "$INBOX_RECORD" "$EXPECTED_LABEL" "$TARGET_HARNESS" || ring_rc=$?
+    fm_task_inbox_ring "$TARGET_BACKEND" "$T" "$INBOX_RECORD" "$EXPECTED_LABEL" "$TARGET_HARNESS" "$TARGET_META" || ring_rc=$?
     case "$ring_rc" in
-      1) echo "fm-send: doorbell not typed because the screen in $T blocked the doorbell; the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2 ;;
+      1) echo "fm-send: doorbell not typed because the screen or lifecycle lock for $T blocked the doorbell; the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2 ;;
       2) echo "fm-send: doorbell did not reach $T; the steer is durably recorded at $INBOX_RECORD and the watcher will re-ring" >&2 ;;
       3) echo "fm-send: doorbell not typed because the agent in $T has exited; the steer is durably recorded at $INBOX_RECORD for recovery (stuck-crewmate-recovery), and the watcher will not re-ring a dead pane" >&2 ;;
       4) echo "fm-send: no doorbell Enter sent because $T shows the Codex global-update picker (never confirm it; Escape skips the update); the steer is durably recorded at $INBOX_RECORD and the watcher will retry, then escalate it as a stuck steer" >&2 ;;
@@ -1052,10 +1056,13 @@ else
   # block: remote text rides the inbox leg above, and remote --key exits
   # earlier.
   send_rc=0
-  if verdict=$(fm_backend_send_text_submit "$TARGET_BACKEND" "$T" "$MESSAGE" "$retries" "$sleep_s" "$settle" "$EXPECTED_LABEL" "$TARGET_MODE"); then
-    :
+  if [ "$(fm_control_harness_family "$TARGET_HARNESS" || true)" = claude ]; then
+    verdict=$(fm_control_with_claude_input_lock "$TARGET_META" "$TARGET_BACKEND" "$T" \
+      fm_backend_send_text_submit "$TARGET_BACKEND" "$T" "$MESSAGE" "$retries" "$sleep_s" "$settle" "$EXPECTED_LABEL" claude) \
+      || verdict='input-refused'
   else
-    send_rc=$?
+    verdict=$(fm_backend_send_text_submit "$TARGET_BACKEND" "$T" "$MESSAGE" "$retries" "$sleep_s" "$settle" "$EXPECTED_LABEL" "$TARGET_MODE") \
+      || send_rc=$?
   fi
   if [ "$send_rc" -ne 0 ]; then
     fm_send_known_undelivered_cleanup || \
@@ -1072,7 +1079,17 @@ else
       echo "error: text not sent to $T ($TARGET_BACKEND send failed; tried $RESOLUTION_TRIED)" >&2
       exit 1
       ;;
-    pending)
+    input-refused|enter-withheld)
+      fm_send_known_undelivered_cleanup || \
+        echo "error: known-undelivered pending-reply state could not be reset for $TARGET_TASK_ID" >&2
+      if [ "$verdict" = input-refused ]; then
+        echo "error: text not typed to $T (Claude input requires control-free text, an empty composer, and the task's lifecycle lock)" >&2
+      else
+        echo "error: text typed to $T but Enter was withheld (Claude's composer did not prove it holds the text); inspect the pane before retrying" >&2
+      fi
+      exit 1
+      ;;
+    pending|unconfirmed:*)
       # The text was typed into the live target and Enter was sent; only the
       # submit read-back stayed unconfirmed (e.g. a busy harness queues the
       # steer and keeps rendering it). That is not a proven failure, so never
@@ -1084,7 +1101,7 @@ else
       # correlated report still resolves it and an unanswered one still
       # surfaces through the library's own reconciliation
       # (bin/fm-pending-reply-lib.sh).
-      echo "fm-send: text delivered to $T but submission is unconfirmed (verdict=pending; tried $RESOLUTION_TRIED); do not retype or blindly resend - verify with fm-peek.sh, then re-send '--key Enter' only if the composer still holds the text" >&2
+      echo "fm-send: text delivered to $T but submission is unconfirmed (verdict=${verdict#unconfirmed:}; tried $RESOLUTION_TRIED); do not retype or blindly resend - verify with fm-peek.sh, then re-send '--key Enter' only if the composer still holds the text" >&2
       exit 3
       ;;
     *)

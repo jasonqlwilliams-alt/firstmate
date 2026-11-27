@@ -95,6 +95,27 @@ fm_control_harness_family() {  # <recorded-harness>
   esac
 }
 
+fm_control_lock_path() {  # <state-dir> <task-id>
+  printf '%s/.control-%s.lock' "$1" "$2"
+}
+
+# Take the same lock as lifecycle control before inspecting or writing a Claude
+# pane. Recheck the route under that lock in case lifecycle control ran since
+# the caller resolved the endpoint. A refused lock or route returns 1.
+fm_control_with_claude_input_lock() (  # <meta> <backend> <target> <command> [args...]
+  local meta=$1 backend=$2 target=$3 task lock
+  shift 3
+  task=${meta##*/}
+  [ -n "$meta" ] && [ "$task" != "$meta" ] && [ "${task%.meta}" != "$task" ] || return 1
+  lock=$(fm_control_lock_path "${meta%/*}" "${task%.meta}")
+  fm_lock_try_acquire "$lock" || return 1
+  trap 'fm_lock_release "$lock" || true' EXIT
+  [ -f "$meta" ] && [ "$(fm_backend_of_meta "$meta")" = "$backend" ] \
+    && [ "$(fm_backend_target_of_meta "$meta")" = "$target" ] \
+    && [ "$(fm_control_harness_family "$(fm_meta_get "$meta" harness)")" = claude ] || return 1
+  "$@"
+)
+
 # Which task kinds an adapter is verified to run. muse, gemini, rovo, and agy
 # are crewmate/scout adapters only: none has a primary supervision protocol,
 # and bin/fm-spawn.sh refuses a --secondmate launch on any of them. agy also

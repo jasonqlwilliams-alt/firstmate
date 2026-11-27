@@ -426,9 +426,9 @@ cmd_send() {
   esac
   FM_BACKEND_HERDR_ENDPOINT_META="$REMOTE_ENDPOINT_META" \
     fm_task_inbox_ring "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "$rec" "fm-$id" \
-    "$(fm_meta_get "$REMOTE_ENDPOINT_META" harness)" || ring_rc=$?
+    "$(fm_meta_get "$REMOTE_ENDPOINT_META" harness)" "$REMOTE_ENDPOINT_META" || ring_rc=$?
   case "$ring_rc" in
-    1) printf 'notice: the screen in %s prevented typing the doorbell; the steer is durably recorded at %s\n' "$REMOTE_ENDPOINT_TARGET" "$rec" >&2 ;;
+    1) printf 'notice: the screen or lifecycle lock for %s prevented typing the doorbell; the steer is durably recorded at %s\n' "$REMOTE_ENDPOINT_TARGET" "$rec" >&2 ;;
     2) printf 'notice: doorbell did not reach %s; the steer is durably recorded at %s\n' "$REMOTE_ENDPOINT_TARGET" "$rec" >&2 ;;
     3) printf 'notice: doorbell not typed because the agent in %s has exited; the steer is durably recorded at %s for recovery\n' "$REMOTE_ENDPOINT_TARGET" "$rec" >&2 ;;
     4) printf 'notice: no doorbell Enter sent because %s shows the Codex global-update picker; the steer is durably recorded at %s\n' "$REMOTE_ENDPOINT_TARGET" "$rec" >&2 ;;

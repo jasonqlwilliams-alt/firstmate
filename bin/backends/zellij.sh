@@ -604,19 +604,22 @@ fm_backend_zellij_composer_observed_append() {  # <target> <before> <text> [expe
 
 # fm_backend_zellij_send_text_submit: type <text> into <target> once (raw,
 # unsubmitted, via send_literal), then drive the shared verify-and-retry-Enter
-# loop (bin/fm-composer-lib.sh: fm_composer_submit_retry_core) against the
-# real composer verdict above. Echoes empty|pending|unknown|send-failed, a
-# subset of the proof-carrying submit vocabulary. Only a positively classified
-# empty composer confirms delivery - a pane that merely CHANGED does not, so
-# the old heuristic's false "delivery confirmed" cannot recur.
+# loop (bin/fm-composer-lib.sh: fm_composer_submit_retry_core). The automatic
+# Claude guard supplies its own pre-write proof in place of the generic paste
+# check. Only a positively classified empty composer confirms delivery.
 fm_backend_zellij_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle> [expected-label]
   local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 expected_label=${6:-} before
-  before=$(fm_backend_zellij_composer_content "$target" "$expected_label") \
-    || { printf 'send-failed'; return 0; }
+  if [ -z "${fm_submit_claude_backend:-}" ]; then
+    before=$(fm_backend_zellij_composer_content "$target" "$expected_label") \
+      || { printf 'send-failed'; return 0; }
+  fi
+  fm_composer_submit_check_input "$target" empty || return 0
   fm_backend_zellij_send_literal "$target" "$text" "$expected_label" || { printf 'send-failed'; return 0; }
   sleep "$settle"
-  fm_backend_zellij_composer_observed_append "$target" "$before" "$text" "$expected_label" \
-    || { printf 'send-failed'; return 0; }
+  if [ -z "${fm_submit_claude_backend:-}" ]; then
+    fm_backend_zellij_composer_observed_append "$target" "$before" "$text" "$expected_label" \
+      || { printf 'send-failed'; return 0; }
+  fi
   fm_composer_submit_retry_core fm_backend_zellij_send_key fm_backend_zellij_composer_state \
     "$target" "$retries" "$sleep_s" "$expected_label"
 }

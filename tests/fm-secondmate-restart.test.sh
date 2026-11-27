@@ -48,14 +48,25 @@ make_stub() {  # <case-dir>
 #!/usr/bin/env bash
 set -u
 D=$FM_FAKE_DIR
+target=
+prev=
+for a in "$@"; do
+  if [ "$prev" = -t ]; then target=$a; break; fi
+  prev=$a
+done
+case "$target" in
+  %*)
+    target=$(awk -v pane="$target" '"%" NR == pane { print "fmses:" $0 }' "$D/windows")
+    [ -n "$target" ] || exit 1
+    ;;
+esac
 case "${1:-}" in
   send-keys)
     shift
     literal=0
-    target=
     while [ $# -gt 0 ]; do
       case "$1" in
-        -t) target=$2; shift 2 ;;
+        -t) shift 2 ;;
         -l) literal=1; shift ;;
         *) break ;;
       esac
@@ -99,10 +110,7 @@ case "${1:-}" in
     esac
     exit 0 ;;
   display-message)
-    target=
-    prev=
     for a in "$@"; do
-      if [ "$prev" = -t ]; then target=$a; fi
       case "$a" in
         *cursor_y*) printf '1\n'; exit 0 ;;
         '#{pane_id}') printf '%%%s\n' "${target#@}"; exit 0 ;;
@@ -119,7 +127,6 @@ case "${1:-}" in
           printf '\n'; exit 0 ;;
         *pane_current_path*) cat "$D/cwd"; printf '\n'; exit 0 ;;
       esac
-      prev=$a
     done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
@@ -127,7 +134,14 @@ case "${1:-}" in
       /bin/sleep 8
       cat "$FM_FAKE_LOCAL_EXIT_DIALOG"
     else
-      printf '> \n'
+      command=$(cat "$D/command.$target" 2>/dev/null || cat "$D/command")
+      if [ "$command" = claude ]; then
+        text=
+        if [ -f "$D/composer.$target" ]; then text=$(cat "$D/composer.$target"); fi
+        printf '────────────────────────\n❯ %s\n────────────────────────\n' "$text"
+      else
+        printf '> \n'
+      fi
     fi
     exit 0 ;;
   list-windows)
@@ -262,7 +276,7 @@ add_repo_backed_mate() {  # <case-dir> <id> [harness] [backend]
 run_update_in_case() {
   local dir=$1
   env PATH="$dir/fakebin:$PATH" FM_FAKE_DIR="$dir/fake" \
-    FM_ROOT_OVERRIDE="$dir/fmrepo" FM_HOME="$dir/home" \
+    FM_ROOT_OVERRIDE="$dir/fmrepo" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$dir/home/state" \
     FM_SSH_BIN="${FM_TEST_SSH_BIN:-ssh}" \
     "$ROOT/bin/fm-update.sh" 2>/dev/null
 }
@@ -281,7 +295,7 @@ run_restart() {  # <case-dir> <args...>
   env PATH="$dir/fakebin:$PATH" /bin/sleep 120 >/dev/null 2>&1 &
   pane_pid=$!
   env FM_FAKE_PANE_PID="$pane_pid" \
-    PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
+    PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$dir/home/state" FM_FAKE_DIR="$dir/fake" \
     FM_SPAWN_NO_GUARD=1 FM_SECONDMATE_PERSIST_POLL=1 \
     FM_SECONDMATE_PERSIST_WAIT="${FM_TEST_PERSIST_WAIT:-30}" \
     FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=2 FM_CONTROL_LAUNCH_WAIT=0.05 \
@@ -1032,7 +1046,7 @@ test_remote_secondmate_control_relaunch_updates_parent_record() {
   assert_contains "$(cat "$meta")" "effort=default" "setup should start with default effort"
 
   out=$(PATH="$dir/fakebin:$PATH" FM_SSH_BIN="${FM_TEST_SSH_BIN:-ssh}" \
-    FM_HOME="$dir/home" "$ROOT/bin/fm-remote-secondmate-control.sh" \
+    FM_HOME="$dir/home" FM_STATE_OVERRIDE="$dir/home/state" "$ROOT/bin/fm-remote-secondmate-control.sh" \
     relaunch sm2 codex gpt-6-astra high 2>&1); rc=$?
 
   expect_code 0 "$rc" "direct remote relaunch should succeed"$'\n'"$out"
@@ -1048,7 +1062,7 @@ test_remote_secondmate_control_relaunch_updates_parent_record() {
 
   export FM_FAKE_SSH_MODE=fail-relaunch
   out=$(PATH="$dir/fakebin:$PATH" FM_SSH_BIN="${FM_TEST_SSH_BIN:-ssh}" \
-    FM_HOME="$dir/home" "$ROOT/bin/fm-remote-secondmate-control.sh" \
+    FM_HOME="$dir/home" FM_STATE_OVERRIDE="$dir/home/state" "$ROOT/bin/fm-remote-secondmate-control.sh" \
     relaunch sm2 cursor cursor-grok-4.6-high high 2>&1); rc=$?
   unset FM_FAKE_SSH_MODE
 

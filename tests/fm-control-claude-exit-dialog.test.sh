@@ -15,6 +15,7 @@ command -v jq >/dev/null || { echo 'skip: jq not found'; exit 0; }
 command -v node >/dev/null || { echo 'skip: node not found'; exit 0; }
 TMP_ROOT=$(fm_test_tmproot fm-claude-exit-dialog)
 mkdir -p "$TMP_ROOT/bin" "$TMP_ROOT/home/state" "$TMP_ROOT/home/data" "$TMP_ROOT/home/config"
+export FM_STATE_OVERRIDE="$TMP_ROOT/home/state"
 printf 'claude default impossible\n' > "$TMP_ROOT/home/config/secondmate-harness"
 fm_git_worktree "$TMP_ROOT/project" "$TMP_ROOT/worktree" fixture-task
 printf 'exitdialog\n' > "$TMP_ROOT/worktree/.fm-secondmate-home"
@@ -115,8 +116,10 @@ static void out(const char *s) { for (; *s; s++) { if (*s == '\n') fputs("\r\n",
 static void composer(const char *typed) {
   printf("\033[2J\033[H");
   out("Claude stand-in transcript\n\n");
+  out("────────────────────────\n");
   out("\xe2\x9d\xaf ");
   out(typed);
+  out("\0337\n────────────────────────\0338");
   fflush(stdout);
 }
 static void dialog(const char *path) {
@@ -264,8 +267,8 @@ for mode in restart-live-open restart-initial restart-clipped restart-narrow ini
     doorbell-*)
       rec="$TMP_ROOT/001.msg"
       printf 'schema=fm-task-inbox.v1\n--\nreview the open records\n' > "$rec"
-      out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" bash -c '. "$1"; fm_task_inbox_ring tmux "$2" "$3" fm-exitdialog claude' \
-        _ "$ROOT/bin/fm-task-inbox-lib.sh" "$target" "$rec" 2>&1) || rc=$?
+      out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" bash -c '. "$1"; fm_task_inbox_ring tmux "$2" "$3" fm-exitdialog claude "$4"' \
+        _ "$ROOT/bin/fm-task-inbox-lib.sh" "$target" "$rec" "$state/exitdialog.meta" 2>&1) || rc=$?
       ;;
     *) out=$(run_fixture fm-control.sh exitdialog exit 2>&1) || rc=$? ;;
   esac
@@ -426,6 +429,17 @@ cat > "$TMP_ROOT/bin/herdr" <<'SH'
 #!/usr/bin/env bash
 set -u
 phase=$(cat "$FM_DIALOG_CASE/phase")
+composer() {
+  if [ "$FM_DIALOG_MODE" = retry ]; then
+    printf '❯ %s\n' "${1:-}"
+    return
+  fi
+  if [ "$FM_DIALOG_MODE" = submit-crlf ]; then
+    printf '────────────────────────\r\n❯ %s\r\n────────────────────────\n' "${1:-}"
+    return
+  fi
+  printf '────────────────────────\n❯ %s\n────────────────────────\n' "${1:-}"
+}
 case "$1 $2" in
   'status --json')
     printf '%s\n' '{"client":{"protocol":20,"version":"fixture"},"server":{"running":true,"protocol":20,"version":"fixture"}}'
@@ -439,6 +453,7 @@ case "$1 $2" in
       stopped:slow-liveness-stop|retry:slow-liveness-retry) sleep 1.1 ;;
     esac
     case "$phase" in
+      submit-working) printf '%s\n' '{"result":{"agent":{"agent_status":"working"}}}' ;;
       stopped)
         if [ "$FM_DIALOG_MODE" = single-stop ]; then
           printf 'stop-unreadable\n' > "$FM_DIALOG_CASE/phase"
@@ -458,7 +473,12 @@ case "$1 $2" in
     ;;
   'pane read')
     if [ "$FM_DIALOG_MODE" = peek ]; then printf '%s\n' "$*" >> "$FM_DIALOG_CASE/reads"; fi
-    if [ "$FM_DIALOG_MODE" = doorbell-slow ]; then sleep 5.5; fi
+    case "$FM_DIALOG_MODE" in doorbell-slow|interrupt-slow) sleep 5.5 ;; esac
+    if [ "$phase:$FM_DIALOG_MODE" = doorbell-typed:doorbell-stalled ]; then
+      : > "$FM_DIALOG_CASE/read-started"
+      sleep 9
+      : > "$FM_DIALOG_CASE/read-completed"
+    fi
     if [ "$phase:$FM_DIALOG_MODE" = typed:guard-stalled ]; then
       : > "$FM_DIALOG_CASE/read-started"
       sleep 6
@@ -470,7 +490,7 @@ case "$1 $2" in
       printf 'dialog\n' > "$FM_DIALOG_CASE/phase"
       sleep 9
       : > "$FM_DIALOG_CASE/read-completed"
-      printf 'Claude\n❯ \n'
+      composer
       exit 0
     fi
     styled=0
@@ -486,16 +506,18 @@ case "$1 $2" in
         done < <(
           case " $* " in
             *' --source visible '*) cat "$FM_DIALOG_FIXTURE" ;;
-            *) tail -n 3 "$FM_DIALOG_FIXTURE"; printf '\nClaude stand-in transcript\n❯ \n' ;;
+            *) tail -n 3 "$FM_DIALOG_FIXTURE"; composer ;;
           esac
         )
         ;;
-      typed|retry) printf 'Claude\n\033[1m❯ /exit\033[0m\n' ;;
+      typed|retry) composer /exit ;;
+      doorbell-typed|submit-typed|submit-retry|submit-retry-once) composer "$(head -n 1 "$FM_DIALOG_CASE/input")" ;;
+      submit-working) printf 'Redrawing viewport\n' ;;
       slow-stop)
         printf 'read\n' >> "$FM_DIALOG_CASE/reads"
         sleep 0.7
         node -p 'Date.now()' >> "$FM_DIALOG_CASE/read-times"
-        printf 'Claude\n❯ \n'
+        composer
         ;;
       stalled-stop)
         printf 'read\n' >> "$FM_DIALOG_CASE/reads"
@@ -507,13 +529,15 @@ case "$1 $2" in
       picker) printf 'Update now (runs npm install)\nSkip until next version\nesc skip\n' ;;
       unreadable) exit 1 ;;
       stopped) printf '$ \n' ;;
-      *) printf 'Claude\n❯ \n' ;;
+      *) composer ;;
     esac
     ;;
   'pane send-text')
     printf '%s\n' "$4" >> "$FM_DIALOG_CASE/input"
     case "$FM_DIALOG_MODE:$4" in
+      submit-*:*) printf 'submit-typed\n' > "$FM_DIALOG_CASE/phase" ;;
       doorbell-after*:*|dialog-after-typing:/exit) printf 'dialog\n' > "$FM_DIALOG_CASE/phase" ;;
+      doorbell-slow:*|doorbell-stalled:*) printf 'doorbell-typed\n' > "$FM_DIALOG_CASE/phase" ;;
       *:/exit) printf 'typed\n' > "$FM_DIALOG_CASE/phase" ;;
     esac
     ;;
@@ -521,6 +545,11 @@ case "$1 $2" in
     printf '%s\n' "$4" >> "$FM_DIALOG_CASE/input"
     [ "$4" = enter ] || exit 0
     case "$phase:$FM_DIALOG_MODE" in
+      submit-typed:submit-native|submit-typed:submit-crlf) printf 'submit-working\n' ;;
+      submit-typed:submit-retry-success) printf 'submit-retry\n' ;;
+      submit-retry:submit-retry-success) printf 'submit-retry-once\n'; exit 1 ;;
+      submit-retry-once:submit-retry-success) printf 'submit-working\n' ;;
+      submit-typed:submit-first-failed) printf '%s\n' "$phase"; exit 1 ;;
       typed:retry|typed:slow-liveness-retry) printf 'retry\n' ;;
       typed:retry-stalled) printf 'retry\n' ;;
       retry:retry-stalled) sleep 6; : > "$FM_DIALOG_CASE/retry-completed"; printf 'stopped\n' ;;
@@ -550,7 +579,7 @@ fm_write_meta "$meta" 'backend=herdr' 'window=fixture:p1' 'endpoint_task_id=exit
 export FM_DIALOG_HOME="$TMP_ROOT/worktree"
 for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-liveness dialog-after-typing dialog-after-failed-enter late-dialog guard-stalled \
     retry retry-failure slow-liveness-retry retry-stalled enter-failure single-stop slow-liveness-stop slow-stop stalled-stop doorbell-before doorbell-before-picker \
-    doorbell-after doorbell-after-long doorbell-after-long-plain doorbell-after-clipped doorbell-slow; do
+    doorbell-after doorbell-after-long doorbell-after-long-plain doorbell-after-clipped doorbell-slow doorbell-stalled interrupt-slow; do
   export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/herdr-$mode"
   case "$mode" in
     long-dialog|doorbell-after-long*) export FM_DIALOG_FIXTURE="$TMP_ROOT/long.screen" ;;
@@ -564,13 +593,21 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-live
   : > "$FM_DIALOG_CASE/input"
   rc=0
   case "$mode" in
+    interrupt-slow)
+      out=$(run_fixture fm-control.sh exitdialog interrupt 2>&1) || rc=$?
+      expect_code 0 "$rc" "the slow empty composer should allow the recovery interrupt: $out"
+      assert_contains "$out" 'interrupt-delivered exitdialog harness=claude backend=herdr verified=agent-alive' \
+        'the recovery interrupt did not verify that Claude stayed alive'
+      assert_equals escape "$(cat "$FM_DIALOG_CASE/input")" 'the recovery interrupt should send exactly one Escape'
+      continue
+      ;;
     doorbell-*)
       case "$mode" in doorbell-before*) printf 'dialog\n' > "$FM_DIALOG_CASE/phase" ;; esac
       rec="$FM_DIALOG_CASE/001.msg"
       printf 'schema=fm-task-inbox.v1\n--\nreview the open records\n' > "$rec"
       PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
-        bash -c '. "$1"; fm_task_inbox_ring herdr fixture:p1 "$2" fm-exitdialog claude-latest' \
-        _ "$ROOT/bin/fm-task-inbox-lib.sh" "$rec" || rc=$?
+        bash -c '. "$1"; fm_task_inbox_ring herdr fixture:p1 "$2" fm-exitdialog claude-latest "$3"' \
+        _ "$ROOT/bin/fm-task-inbox-lib.sh" "$rec" "$meta" || rc=$?
       if [ "$mode" = doorbell-slow ]; then
         expect_code 0 "$rc" 'slow composer reads should allow normal doorbell delivery'
         assert_contains "$(cat "$FM_DIALOG_CASE/input")" 'Firstmate instruction waiting' 'the composer did not receive the doorbell text'
@@ -579,9 +616,14 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-live
         expect_code 1 "$rc" 'the dialog should prevent typing the doorbell'
         [ ! -s "$FM_DIALOG_CASE/input" ] || fail "the doorbell wrote into the dialog: $(cat "$FM_DIALOG_CASE/input")"
       else
-        expect_code 5 "$rc" 'the dialog should prevent submitting the doorbell'
+        expect_code 5 "$rc" 'the unreadable or unsafe screen should prevent submitting the doorbell'
         assert_contains "$(cat "$FM_DIALOG_CASE/input")" 'Firstmate instruction waiting' 'the composer did not receive the doorbell text'
-        [ "$(wc -l < "$FM_DIALOG_CASE/input")" -eq 1 ] || fail "the doorbell wrote to the dialog after typing: $(cat "$FM_DIALOG_CASE/input")"
+        [ "$(wc -l < "$FM_DIALOG_CASE/input")" -eq 1 ] || fail "the doorbell sent another key after typing: $(cat "$FM_DIALOG_CASE/input")"
+        if [ "$mode" = doorbell-stalled ]; then
+          assert_present "$FM_DIALOG_CASE/read-started" 'the test did not reach the stalled viewport read'
+          assert_absent "$FM_DIALOG_CASE/read-completed" 'the stalled viewport read held the lifecycle lock past its deadline'
+          assert_absent "${meta%/*}/.control-exitdialog.lock" 'the timed-out doorbell did not release the lifecycle lock'
+        fi
       fi
       continue
       ;;
@@ -680,6 +722,39 @@ for mode in dialog long-dialog picker-history dialog-unreadable dialog-slow-live
 done
 pass 'styled Herdr exit retries only a proven pending command, and exit and doorbell send no key to the dialog'
 
+for mode in submit-native submit-crlf submit-retry-success submit-first-failed; do
+  export FM_DIALOG_MODE="$mode" FM_DIALOG_CASE="$TMP_ROOT/herdr-$mode"
+  mkdir -p "$FM_DIALOG_CASE/state"
+  cp "$meta" "$FM_DIALOG_CASE/state/exitdialog.meta"
+  printf 'composer\n' > "$FM_DIALOG_CASE/phase"
+  rc=0
+  out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$TMP_ROOT/home" FM_STATE_OVERRIDE="$FM_DIALOG_CASE/state" \
+    FM_ROOT_OVERRIDE="$ROOT" FM_SEND_SETTLE=0 FM_SEND_SLEEP=0 FM_BACKEND_HERDR_SUBMIT_MIN_SLEEP=0 \
+    "$ROOT/bin/fm-send.sh" exitdialog /help 2>&1) || rc=$?
+  input=$(cat "$FM_DIALOG_CASE/input")
+  corr=$(printf '%s\n' "$input" | sed -nE '1s/.*corr=([a-f0-9]{16}).*/\1/p')
+  [ -n "$corr" ] || fail "$mode did not type the correlated request: $out"
+  reply="$FM_DIALOG_CASE/state/pending-replies/$corr"
+  case "$mode" in
+    submit-native|submit-crlf)
+      expect_code 0 "$rc" "native Herdr working state should confirm a turn during redraw: $out"
+      [ "$(grep -c '^enter$' "$FM_DIALOG_CASE/input")" -eq 1 ] || fail 'a confirmed submit should send one Enter'
+      grep -q '^delivered_epoch=[0-9]' "$reply" || fail 'the native acknowledgment did not commit reply delivery'
+      ;;
+    submit-retry-success)
+      expect_code 0 "$rc" "a later Enter should land after a swallowed Enter and a failed retry: $out"
+      [ "$(wc -l < "$FM_DIALOG_CASE/input")" -eq 4 ] && \
+        [ "$(grep -c '^enter$' "$FM_DIALOG_CASE/input")" -eq 3 ] || fail 'the submit did not type once and retry Enter twice'
+      grep -q '^delivered_epoch=[0-9]' "$reply" || fail 'the successful retry did not commit reply delivery'
+      ;;
+    submit-first-failed)
+      expect_code 1 "$rc" "a failed first Enter should report delivery failure: $out"
+      assert_absent "$reply" 'a failed first Enter retained a known-undelivered reply expectation'
+      ;;
+  esac
+done
+pass 'Herdr native sends acknowledge working during redraw and retain reply tracking only after a delivered Enter'
+
 cat > "$TMP_ROOT/bin/fake-ssh" <<'SH'
 #!/usr/bin/env bash
 set -eu
@@ -689,7 +764,8 @@ decode() { printf '%s' "$1" | base64 --decode 2>/dev/null || printf '%s' "$1" | 
 args=()
 while IFS= read -r -d '' arg; do args+=("$arg"); done < <(decode "$4")
 printf '%s\n' "${args[*]}" >> "$FM_DIALOG_CASE/remote"
-FM_HOME="$FM_DIALOG_HOME" "$FM_ROOT_OVERRIDE/bin/${args[0]}" "${args[@]:1}"
+FM_HOME="$FM_DIALOG_HOME" FM_STATE_OVERRIDE="$FM_DIALOG_HOME/state" \
+  "$FM_ROOT_OVERRIDE/bin/${args[0]}" "${args[@]:1}"
 SH
 chmod +x "$TMP_ROOT/bin/fake-ssh"
 export FM_DIALOG_MODE=remote-restart FM_DIALOG_CASE="$TMP_ROOT/remote-restart" FM_DIALOG_FIXTURE="$LIVE_FIXTURE"
@@ -715,7 +791,7 @@ pass 'remote restart observes the already-open dialog on its bound host and repo
 export FM_DIALOG_FIXTURE="$TMP_ROOT/clipped.screen"
 for phase in dialog composer typed picker unreadable; do
   printf '%s\n' "$phase" > "$FM_DIALOG_CASE/phase"
-  PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$FM_DIALOG_HOME" \
+  PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$FM_DIALOG_HOME" FM_STATE_OVERRIDE="$FM_DIALOG_HOME/state" \
     "$ROOT/bin/fm-remote-secondmate-control.sh" observe exitdialog --exit-dialog > "$FM_DIALOG_CASE/observation" \
     || fail "remote exit-dialog observation failed on $phase"
   case "$phase" in
@@ -727,17 +803,37 @@ for phase in dialog composer typed picker unreadable; do
       ;;
   esac
 done
-out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$FM_DIALOG_HOME" \
+out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$FM_DIALOG_HOME" FM_STATE_OVERRIDE="$FM_DIALOG_HOME/state" \
   "$ROOT/bin/fm-remote-secondmate-control.sh" observe exitdialog) || fail 'ordinary remote observation failed'
 [ "$out" = idle ] || fail "ordinary remote observation did not report the native idle state: $out"
 pass 'remote exit-dialog observation emits only a positive match'
+
+remote_state="$FM_DIALOG_HOME/state/parent-route"
+export FM_DIALOG_MODE=remote-send
+for phase in unreadable composer; do
+  printf '%s\n' "$phase" > "$FM_DIALOG_CASE/phase"
+  out=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_HOME="$FM_DIALOG_HOME" FM_STATE_OVERRIDE="$FM_DIALOG_HOME/state" bash -c '
+    . "$1/bin/fm-wake-lib.sh"
+    if [ "$2" = composer ]; then
+      lock="$FM_HOME/state/parent-route/.control-exitdialog.lock"
+      fm_lock_try_acquire "$lock" || exit 91
+      trap '\''fm_lock_release "$lock"'\'' EXIT
+    fi
+    "$1/bin/fm-remote-secondmate-control.sh" send exitdialog "remote probe $2"
+  ' _ "$ROOT" "$phase" 2>&1) || fail "the remote refusal should still enqueue: $out"
+  assert_contains "$out" 'prevented typing the doorbell' 'the remote send did not report a refused doorbell'
+  assert_absent "$FM_DIALOG_CASE/input" 'the remote refusal sent terminal input'
+done
+assert_present "$remote_state/exitdialog.inbox/001.msg" 'the unreadable remote screen lost the durable record'
+assert_present "$remote_state/exitdialog.inbox/002.msg" 'the held remote lifecycle lock lost the durable record'
+pass 'remote steering preserves delivery while an unreadable screen or host-local lifecycle lock blocks the doorbell'
 
 cat > "$TMP_ROOT/bin/viewport-stub" <<'SH'
 #!/usr/bin/env bash
 set -eu
 viewport() {
   if [ "${FM_DIALOG_PHASE:-}" = after ] && [ ! -s "$FM_DIALOG_CASE/input" ]; then
-    printf 'Claude\n❯ \n'
+    printf '────────────────────────\n❯ \n────────────────────────\n'
   else
     cat "$FM_DIALOG_FIXTURE"
   fi
@@ -809,10 +905,12 @@ for mode in cmux zellij zellij-plain orca; do
     mkdir "$FM_DIALOG_CASE"
     rec="$FM_DIALOG_CASE/001.msg"
     printf 'schema=fm-task-inbox.v1\n--\nreview the open records\n' > "$rec"
+    stub_meta="$FM_DIALOG_CASE/exitdialog.meta"
+    fm_write_meta "$stub_meta" "backend=$backend" "window=$target" 'harness=claude'
     rc=0
     PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" FM_DIALOG_PHASE="$when" FM_COMPOSER_CAPTURE_LINES="$capture_lines" \
-      bash -c '. "$1"; fm_task_inbox_ring "$2" "$3" "$4" "" claude' \
-      _ "$ROOT/bin/fm-task-inbox-lib.sh" "$backend" "$target" "$rec" || rc=$?
+      bash -c '. "$1"; fm_task_inbox_ring "$2" "$3" "$4" "" claude "$5"' \
+      _ "$ROOT/bin/fm-task-inbox-lib.sh" "$backend" "$target" "$rec" "$stub_meta" || rc=$?
     if [ "$when" = before ]; then
       expect_code 1 "$rc" "$mode $scenario should block typing when the dialog is already open"
       assert_absent "$FM_DIALOG_CASE/input" "$mode $scenario typed into the dialog"

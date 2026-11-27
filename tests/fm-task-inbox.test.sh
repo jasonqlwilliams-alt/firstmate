@@ -781,6 +781,10 @@ picker() {
 }
 composer() {
   local w=$((cols - 2)) i=0 row=3 len shown=$buf
+  if [ "$mode" = claude-picker-after-key ]; then
+    printf '\033[2J\033[H────────────────────────\r\n❯ \r\n────────────────────────\033[2;3H'
+    return
+  fi
   printf '\033[2J\033[H>_ Codex-shaped test stub\r\n\r\n'
   if [ -z "$buf" ]; then
     printf '› \033[2mAsk Codex to do anything\033[0m\r\n\r\n  \033[2m100%% context left\033[0m\033[3;3H'
@@ -869,7 +873,7 @@ while batch=$(dd bs=4096 count=1 2>/dev/null && printf '.'); do
       printf 'KEY %s\n' "$ch" >> "$log"
       case "$mode" in
         empty|pending|agy|agy-*|partial|rovo|rovo-pending) buf="$buf$ch" ;;
-        picker-after-key) mode=picker-below ;;
+        picker-after-key|claude-picker-after-key) mode=picker-below ;;
       esac
     fi
   done
@@ -897,6 +901,7 @@ ring_stub_window() {  # <name> <mode> <log> [pane-columns] [inbox-dir]
   fi
   case "$mode" in
     picker-below|picker-row) marker='esc skip' ;;
+    claude-picker-after-key) marker='❯' ;;
     unknown|rovo-unknown) marker='Loading your session' ;;
     agy-busy) marker='esc to cancel' ;;
     agy-forged) marker='accept-edits'; cursor_row=6 ;;
@@ -922,10 +927,12 @@ ring_stub_window() {  # <name> <mode> <log> [pane-columns] [inbox-dir]
 # Ring one fresh record into a stub window through the real library, as the
 # recorded harness. Prints the ring's return code.
 ring_into() {  # <state> <task> <target> <harness>
-  local state=$1 task=$2 target=$3 harness=$4 rec rc=0
+  local state=$1 task=$2 target=$3 harness=$4 rec rc=0 meta
   rec=$(inbox_lib "$state" fm_task_inbox_write "$state" "$task" "please continue")
+  meta="$state/$task.meta"
+  fm_write_meta "$meta" "window=$target" "harness=$harness"
   PATH="$RING_LAB/shim:$PATH" \
-    inbox_lib "$state" fm_task_inbox_ring tmux "$target" "$rec" "" "$harness" || rc=$?
+    inbox_lib "$state" fm_task_inbox_ring tmux "$target" "$rec" "" "$harness" "$meta" || rc=$?
   printf '%s\n' "$rc"
 }
 
@@ -949,13 +956,15 @@ test_ring_refuses_the_codex_update_picker() {
 }
 
 test_ring_refuses_a_picker_that_appears_while_typing() {
-  local state target log rc harness
+  local state target log rc harness mode
   ring_lab_setup
   state="$TMP_ROOT/ring-picker-late/state"
   mkdir -p "$state"
   for harness in codex claude; do
     log="$RING_LAB/picker-after-key-$harness.log"
-    target=$(ring_stub_window "late-$harness" picker-after-key "$log")
+    mode=picker-after-key
+    [ "$harness" != claude ] || mode=claude-picker-after-key
+    target=$(ring_stub_window "late-$harness" "$mode" "$log")
     rc=$(ring_into "$state" "late-$harness" "$target" "$harness")
     sleep 0.3
     [ "$rc" = 4 ] || fail "a picker that appears after the empty-composer check should stop the ring with 4 ($harness), got $rc"

@@ -67,6 +67,7 @@ FM_BACKEND_CONFIG_DIR="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 # codex-app remains deliberately absent; see docs/codex-app-backend.md.
 FM_BACKEND_KNOWN="tmux herdr zellij orca cmux"
 FM_BACKEND_SPAWN="tmux herdr zellij orca cmux"
+FM_COMPOSER_CLAUDE_READ_MS=7000
 
 # fm_backend_list_contains: whitespace-delimited membership without relying on
 # shell word splitting. fm-backend.sh is normally sourced by bash scripts, but
@@ -873,9 +874,18 @@ fm_backend_send_literal() {  # <backend> <target> <text> [expected-label]
 # fm_backend_send_text_submit: type text once, then submit and verify,
 # retrying only the submission (never retyping). Echoes the backend's
 # proof-carrying verdict; callers require exact empty for confirmed delivery.
-fm_backend_send_text_submit() {  # <backend> <target> <text> <retries> <enter-sleep> <settle> [expected-label] [explicit]
+# A caller holding the Claude lifecycle lock may opt into the automatic input
+# guard. Its context is scoped to this call and consumed by the submit cores.
+fm_backend_send_text_submit() {  # <backend> <target> <text> <retries> <enter-sleep> <settle> [expected-label] [claude|explicit]
   local backend=$1
   shift
+  local fm_submit_claude_backend='' fm_submit_label=${6:-} fm_submit_text=$2
+  if [ "${7:-}" = claude ]; then
+    case "$fm_submit_text" in
+      *[[:cntrl:]]*) printf 'input-refused'; return 0 ;;
+    esac
+    fm_submit_claude_backend=$backend
+  fi
   fm_backend_source "$backend" || return 1
   case "$backend" in
     tmux) fm_backend_tmux_send_text_submit "$1" "$2" "$3" "$4" "$5" "${7:-}" ;;
@@ -1008,23 +1018,25 @@ fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
   # shellcheck disable=SC2016  # Expansion is deliberately deferred to the child shell.
   FM_HOME="$FM_HOME" FM_ROOT="$FM_ROOT" FM_BACKEND_HERDR_ENDPOINT_META="${FM_BACKEND_HERDR_ENDPOINT_META:-}" \
     fm_run_timed --kill "$(fm_timeout_seconds "$limit_ms")" \
-    bash -uc '. "$1" && shift && "$@"' _ "$FM_BACKEND_LIB_DIR/fm-backend.sh" "$@" </dev/null 2>/dev/null
+    bash -uc 'unset fm_submit_claude_backend
+      . "$1" && { [ -z "$2" ] || fm_backend_source "$2"; } && shift 2 && "$@"' \
+    _ "$FM_BACKEND_LIB_DIR/fm-backend.sh" "${fm_submit_claude_backend:-}" "$@" </dev/null 2>/dev/null
 )
 
 # fm_backend_guarded_composer_state: the composer verdict a caller must have
 # before it types into a pane or presses a confirming Enter there. It reads ONE
 # capture, refuses Claude's active exit confirmation or Codex's global-update picker
 # (fm_composer_update_picker_scan in bin/fm-composer-lib.sh; its confirming
-# Enter runs a global `npm install` of Codex), and only then trusts the
-# backend's own composer verdict for that same capture, so a picker that
-# appears between two reads can never borrow an earlier read's verdict.
+# Enter runs a global `npm install` of Codex), and classifies the composer
+# from the same capture so a later picker cannot borrow an earlier verdict.
 # Prints update-picker, or the composer verdict otherwise:
 # empty|pending|pending-unproven|unknown, or sign-in for an explicitly recorded
 # Codex authentication screen (a stop-only verdict), or exit-confirm for an
 # explicitly recorded Claude pane showing the background-tasks exit
 # confirmation (fm_composer_claude_exit_confirm_screen in bin/fm-composer-lib.sh;
 # a stop-only verdict). An unreadable capture is unknown, and a read that
-# exceeds an explicitly supplied deadline returns timeout.
+# exceeds its deadline returns timeout. Automatic Claude reads use
+# FM_COMPOSER_CLAUDE_READ_MS unless the caller supplies a deadline.
 # <expected-pending> is the exact text the caller just typed: on a
 # plain (styled=0) capture, where a glyph row with trailing text reads unknown,
 # a composer holding exactly that text reads pending, and on a cursorless
@@ -1032,33 +1044,33 @@ fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
 # [harness] is the pane's recorded harness; when it is a plain token it rides
 # into the snapshot's capability facts as harness=<name>, so the classifier
 # can apply the harness-scoped rules in bin/fm-composer-lib.sh.
-# [remaining-ms] bounds the read; past it the verdict is timeout.
+# [automatic] requires the complete Claude composer frame for automatic input.
 # On an unbounded read, [fit-text] is the line a caller is about to type into an agy pane.
 # An `empty` verdict for harness agy reads `unknown` unless that line fits agy's
 # one composer row, so it is never typed into a row it would wrap.
-# Callers include the steering-inbox doorbell, Codex and Claude exit, and
-# the second-mate restart's local and remote screen observations.
-fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [remaining-ms] [fit-text]
-  local limit_ms=${6:-} fit=${7:-} screen rc
+# Callers include the steering-inbox doorbell, Claude native submission and
+# standalone interrupt, Codex and Claude exit, and the second-mate restart's
+# local and remote screen observations.
+fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [remaining-ms] [automatic] [fit-text]
+  local limit_ms=${6:-} screen
+  if [ -z "$limit_ms" ] && [ "${5:-}:${7:-}" = claude:automatic ]; then
+    limit_ms=$FM_COMPOSER_CLAUDE_READ_MS
+  fi
+  set -- "$1" "$2" "${3:-}" "${4:-}" "${5:-}" "${7:-}" "${8:-}"
   if [ -z "$limit_ms" ]; then
-    _fm_backend_guarded_composer_state "${@:1:5}" "$fit"
+    _fm_backend_guarded_composer_state "$@"
     return
   fi
-  if screen=$(fm_backend_run_timed "$limit_ms" _fm_backend_guarded_composer_state "${@:1:5}"); then
+  if screen=$(fm_backend_run_timed "$limit_ms" _fm_backend_guarded_composer_state "${@:1:6}"); then
     printf '%s' "${screen:-unknown}"
   else
-    rc=$?
-    if [ "$rc" -eq 124 ]; then
-      printf 'timeout'
-    else
-      printf 'unknown'
-    fi
+    case "$?" in 124) printf 'timeout' ;; *) printf 'unknown' ;; esac
   fi
 }
 
-_fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [fit-text]
-  local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} fit=${6:-} picker verdict kv styled=0
-  local capture=
+_fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [automatic] [fit-text]
+  local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} picker verdict styled=0
+  local mode=${6:-} fit=${7:-} capture='' proof='' anchor
   if [ "$harness" = claude ]; then
     capture=visible
     if [ "$backend" = tmux ]; then
@@ -1083,29 +1095,37 @@ _fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [e
     ''|*[!a-z0-9-]*) ;;
     *) FM_COMPOSER_SNAPSHOT_CAPS="$FM_COMPOSER_SNAPSHOT_CAPS"$'\n'"harness=$harness" ;;
   esac
-  picker=$(fm_composer_update_picker_scan "$FM_COMPOSER_SNAPSHOT_CAPS" \
-    "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR" "$expected")
+  anchor=$FM_COMPOSER_SNAPSHOT_CURSOR
+  if [ "$harness:$mode" = claude:automatic ] && fm_composer_is_claude_frame "$FM_COMPOSER_SNAPSHOT_SCREEN" "$anchor"; then
+    proof=claude-frame
+    anchor=$FM_COMPOSER_SELECTED_FIRST
+  fi
+  picker=$(fm_composer_update_picker_scan "$FM_COMPOSER_SNAPSHOT_SCREEN" "$anchor" "$expected")
   [ "$picker" != active ] || { printf 'update-picker'; return 0; }
   if [ "$harness" = codex ] && [ "$picker" != below ] \
      && fm_composer_codex_signin_screen "$FM_COMPOSER_SNAPSHOT_SCREEN"; then
     printf 'sign-in'
     return 0
   fi
-  verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target" "$fit")
-  if [ "$verdict" = unknown ] && [ -n "$expected" ]; then
-    while IFS= read -r kv; do
-      [ "$kv" != styled=1 ] || styled=1
-    done <<EOF
-$FM_COMPOSER_SNAPSHOT_CAPS
-EOF
-    if [ "$styled" = 0 ] \
-       && fm_composer_holds_text "$FM_COMPOSER_SNAPSHOT_CAPS" "$FM_COMPOSER_SNAPSHOT_SCREEN" "$expected"; then
-      verdict=pending
+  if [ "$harness:$mode" = claude:automatic ]; then
+    if [ -z "$proof" ]; then
+      if [ "$picker" = none ]; then printf 'unknown'; else printf 'update-picker'; fi
+      return 0
     fi
+    # The frame already locates the composer. Classify its full contents,
+    # including rows below the cursor that a cursor-anchored read would miss.
+    verdict=$(fm_composer_classify_screen "$FM_COMPOSER_SNAPSHOT_CAPS" \
+      "$FM_COMPOSER_SNAPSHOT_SCREEN" '' '' '' "$proof")
+  else
+    verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target" "$fit")
   fi
-  if [ "$verdict" = pending ] && [ -n "$expected" ] \
-     && ! fm_composer_holds_text "$FM_COMPOSER_SNAPSHOT_CAPS" "$FM_COMPOSER_SNAPSHOT_SCREEN" "$expected"; then
-    verdict=unknown
+  case $'\n'"$FM_COMPOSER_SNAPSHOT_CAPS"$'\n' in *$'\nstyled=1\n'*) styled=1 ;; esac
+  if [ -n "$expected" ] && { [ "$verdict" = pending ] || { [ "$verdict" = unknown ] && [ "$styled" = 0 ]; }; }; then
+    if fm_composer_holds_text "$FM_COMPOSER_SNAPSHOT_CAPS" "$FM_COMPOSER_SNAPSHOT_SCREEN" "$expected" "$proof"; then
+      verdict=pending
+    else
+      verdict=unknown
+    fi
   fi
   case "$verdict" in
     empty|pending|pending-unproven) printf '%s' "$verdict" ;;

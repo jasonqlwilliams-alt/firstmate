@@ -3325,12 +3325,16 @@ fm_backend_herdr_composer_classify_snapshot() {  # <target> [fit-text]
 # harness whose native state never transitions. Without a harness argument the
 # shared matcher uses its union of verified tokens, which is what the submit
 # core wants: it has no recorded harness for the pane.
-fm_backend_herdr_rendered_busy_state() {  # <target> [harness] -> busy|idle|unknown
-  local target=$1 harness=${2:-} cap visible
-  cap=$(fm_backend_herdr_capture "$target" 40) || { printf 'unknown'; return 0; }
+fm_backend_herdr_rendered_busy_state() {  # <target> -> busy|idle|unknown
+  local target=$1 cap visible
+  if [ "${fm_submit_claude_backend:-}" = herdr ]; then
+    cap=$(fm_backend_run_timed "$FM_COMPOSER_CLAUDE_READ_MS" fm_backend_capture herdr "$target" 40) || cap=
+  else
+    cap=$(fm_backend_herdr_capture "$target" 40) || cap=
+  fi
   visible=$(printf '%s' "$cap" | grep -v '^[[:space:]]*$' | tail -12)
   [ -n "$visible" ] || { printf 'unknown'; return 0; }
-  if printf '%s' "$visible" | fm_busy_lines_match "$harness"; then
+  if printf '%s' "$visible" | fm_busy_lines_match; then
     printf 'busy'
   else
     printf 'idle'
@@ -3438,6 +3442,7 @@ fm_backend_herdr_send_text_submit() {  # <target> <text> <retries> <enter-sleep>
   local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 i=0 verdict baseline confirm_sleep
   local raw_status footer_baseline='' allow_rendered=0 enter_sent=0
   fm_backend_herdr_parse_target "$target" || { printf 'unknown'; return 0; }
+  fm_composer_submit_check_input "$target" empty || return 0
   fm_backend_herdr_send_literal "$target" "$text" || { printf 'send-failed'; return 0; }
   sleep "$settle"
   raw_status=$(fm_backend_herdr_agent_status_raw "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE") \
@@ -3452,6 +3457,7 @@ fm_backend_herdr_send_text_submit() {  # <target> <text> <retries> <enter-sleep>
     footer_baseline=$(fm_backend_herdr_rendered_busy_state "$target")
   fi
   while :; do
+    fm_composer_submit_check_input "$target" pending "$enter_sent" || return 0
     if fm_backend_herdr_send_key "$target" Enter; then
       enter_sent=1
     elif [ "$enter_sent" -eq 0 ]; then
@@ -3468,19 +3474,19 @@ fm_backend_herdr_send_text_submit() {  # <target> <text> <retries> <enter-sleep>
         "$confirm_sleep" "$FM_BACKEND_HERDR_SUBMIT_POLLS")
       case "$verdict" in
         busy) printf 'empty'; return 0 ;;
-        unknown) printf 'unknown'; return 0 ;;
+        unknown) fm_composer_submit_result unknown "$enter_sent"; return 0 ;;
       esac
       # Native stayed idle. Composer empty is positive delivery (a landed
       # Claude turn that never flipped agent_status). Proven pending retries.
-      verdict=$(fm_backend_herdr_composer_state "$target")
+      verdict=$(fm_composer_submit_state "$target" fm_backend_herdr_composer_state)
       case "$verdict" in
         empty) printf 'empty'; return 0 ;;
         pending|pending-unproven) ;;
-        *) printf '%s' "$verdict"; return 0 ;;
+        *) fm_composer_submit_result "$verdict" "$enter_sent"; return 0 ;;
       esac
     else
       sleep "$sleep_s"
-      verdict=$(fm_backend_herdr_composer_state "$target")
+      verdict=$(fm_composer_submit_state "$target" fm_backend_herdr_composer_state)
       if [ "$verdict" = pending ] && [ "$raw_status" != working ] \
         && [ "$footer_baseline" = idle ] \
         && [ "$(fm_backend_herdr_rendered_busy_state "$target")" = busy ]; then
@@ -3489,7 +3495,8 @@ fm_backend_herdr_send_text_submit() {  # <target> <text> <retries> <enter-sleep>
       case "$verdict" in
         busy) printf 'empty'; return 0 ;;
         empty) printf 'empty'; return 0 ;;
-        unknown) printf 'unknown'; return 0 ;;
+        pending|pending-unproven) ;;
+        *) fm_composer_submit_result "$verdict" "$enter_sent"; return 0 ;;
       esac
     fi
     i=$((i + 1))
@@ -3640,6 +3647,10 @@ fm_backend_herdr_classify_submit_agent_status() {  # <raw-agent_status>
 # successful send-text), so re-checking server liveness on every poll would
 # only add latency without adding safety.
 fm_backend_herdr_agent_status_raw() {  # <session> <pane_id>
+  if [ "${fm_submit_claude_backend:-}" = herdr ]; then
+    fm_backend_run_timed "$FM_COMPOSER_CLAUDE_READ_MS" fm_backend_herdr_agent_status_raw "$@"
+    return
+  fi
   local session=$1 pane_id=$2 out binding
   binding=$(fm_backend_herdr_task_identity_state "$session:$pane_id" binding)
   fm_backend_herdr_require_task_identity "$session:$pane_id" "${binding%%:*}" || return 1

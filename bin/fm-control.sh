@@ -301,7 +301,7 @@ ID=$RAW_ID
 # shellcheck source=bin/fm-lease-lib.sh
 . "$SCRIPT_DIR/fm-lease-lib.sh"
 fm_lease_guard "$ID" "lifecycle control (fm-control)"
-CONTROL_LOCK="$STATE/.control-$ID.lock"
+CONTROL_LOCK=$(fm_control_lock_path "$STATE" "$ID")
 trap control_cleanup EXIT
 fm_lock_try_acquire "$CONTROL_LOCK" \
   || die "another lifecycle action is already running for task $ID"
@@ -390,7 +390,7 @@ require_state_verified_backend() {  # <verb>
 # an interrupt that cancels the turn but leaves the restored prompt in the
 # composer would make the next submitted line concatenate onto it.
 send_interrupt_keys() {
-  local key repeat clear i=0
+  local key repeat clear screen i=0
   key=$(fm_control_interrupt_key "$HARNESS")
   repeat=$(fm_control_interrupt_repeat "$HARNESS")
   clear=$(fm_control_interrupt_clear_key "$HARNESS")
@@ -398,6 +398,14 @@ send_interrupt_keys() {
     || die "harness $HARNESS interrupts with $key, which the $BACKEND backend cannot deliver; refusing to send a different key"
   [ -z "$clear" ] || fm_control_backend_supports_key "$BACKEND" "$clear" \
     || die "harness $HARNESS needs $clear to clear its composer after an interrupt, which the $BACKEND backend cannot deliver; refusing to leave the cancelled prompt where the next submitted line would concatenate onto it"
+  if [ "$VERB:$HARNESS" = interrupt:claude ]; then
+    screen=$(fm_backend_guarded_composer_state "$BACKEND" "$T" "$LABEL" '' claude '' automatic)
+    case "$screen" in
+      empty) ;;
+      exit-confirm) die "interrupt-refused $ID: Claude is showing its background-tasks exit confirmation" ;;
+      *) die "interrupt-refused $ID: the screen did not prove an empty Claude composer ($screen)" ;;
+    esac
+  fi
   while [ "$i" -lt "$repeat" ]; do
     fm_backend_send_key "$BACKEND" "$T" "$key" "$LABEL" \
       || die "interrupt key $key was not delivered to task $ID on $BACKEND"

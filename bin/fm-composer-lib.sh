@@ -641,7 +641,7 @@ fm_composer_classify_content() {  # <bordered> <content> [idle_re] [idle_case] [
 
 # --- The screen classifier ---------------------------------------------------
 #
-# fm_composer_classify_screen <caps> <screen> [cursor_row] [identity] [fit-text]
+# fm_composer_classify_screen <caps> <screen> [cursor_row] [identity] [fit-text] [claude-frame]
 #   <caps>       newline-separated key=value capability facts (see header).
 #   <screen>     the captured screen: ANSI-preserving when styled=1, plain
 #                otherwise.
@@ -1053,11 +1053,13 @@ _fm_composer_wrap_region_ok() {  # <plain-screen> <glyph-row> <cursor-row>
 # prove it real and unknown otherwise (the same styled=0 degradation as the
 # glyph row itself).
 _fm_composer_classify_bare_wrap() {  # <screen> <styled> <glyph-row> <cursor-row>
-  local screen=$1 styled=$2 g=$3 cy=$4 row raw content glyph='' text_seen=0
+  local screen=$1 styled=$2 g=$3 cy=$4 row raw content glyph='' text_seen=0 strip=fm_composer_strip_ansi
+  [ "$styled" != 1 ] || strip=fm_composer_strip_ghost
   row=$g
   while [ "$row" -le "$cy" ]; do
     raw=$(_fm_composer_screen_row "$row" "$screen")
-    content=$(_fm_composer_row_content "$raw" "$styled")
+    content=$(printf '%s\n' "$raw" | "$strip")
+    fm_composer_normalize_trim_var content
     if [ "$row" -eq "$g" ] && fm_composer_leading_agent_glyph_var glyph "$content"; then
       content=${content#*"$glyph"}
     fi
@@ -1207,6 +1209,33 @@ _fm_composer_select_cursorless() {
   [ -n "$FM_COMPOSER_SELECTED_KIND" ]
 }
 
+fm_composer_is_claude_frame() {  # <screen> [cursor-row]
+  local plain cy=${2:-} prompt glyph top bottom first last
+  plain=$(printf '%s\n' "$1" | fm_composer_strip_ansi)
+  _fm_composer_scan_screen "$plain" ''
+  [ "$FM_COMPOSER_SCAN_PI_PAIR_FOUND" = 1 ] || return 1
+  first=$((FM_COMPOSER_SCAN_PI_OPEN + 1))
+  last=$((FM_COMPOSER_SCAN_PI_CLOSE - 1))
+  [ "$first" -le "$last" ] || return 1
+  if [ -n "$cy" ]; then
+    [ "$cy" -ge "$first" ] && [ "$cy" -le "$last" ] || return 1
+  fi
+  top=$(_fm_composer_screen_row "$((first - 1))" "$plain")
+  bottom=$(_fm_composer_screen_row "$((last + 1))" "$plain")
+  fm_composer_normalize_trim_var top
+  fm_composer_normalize_trim_var bottom
+  [ "$top" = "$bottom" ] || return 1
+  prompt=$(_fm_composer_screen_row "$first" "$plain")
+  fm_composer_normalize_trim_var prompt
+  fm_composer_leading_agent_glyph_var glyph "$prompt" && [ "$glyph" = '❯' ] || return 1
+  _fm_composer_scan_screen "$(printf '%s\n' "$plain" | tail -n "+$((last + 3))")" ''
+  [ "$FM_COMPOSER_SCAN_BARE_ROW" -lt 0 ] && [ "$FM_COMPOSER_SCAN_SHELL_ROW" -lt 0 ] \
+    && [ "$FM_COMPOSER_SCAN_BOX_BOTTOM" -lt 0 ] && [ "$FM_COMPOSER_SCAN_INCOMPLETE_BOX_FROM" -lt 0 ] \
+    && [ "$FM_COMPOSER_SCAN_LEFTBAR_END" -lt 0 ] || return 1
+  FM_COMPOSER_SELECTED_FIRST=$first
+  FM_COMPOSER_SELECTED_LAST=$last
+}
+
 fm_composer_extract_selected_content() {  # <caps> <screen> [rows]
   local caps=$1 screen=$2 rows=${3:-} styled=0 kv plain row raw content glyph joined='' footer_re prompt_row=-1
   local leading_blank=1 placeholder_position=0 prompt_is_shell=0 luma agy=0
@@ -1302,7 +1331,7 @@ EOF
   fi
 }
 
-fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity] [fit-text]
+fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity] [fit-text] [claude-frame]
   local caps=$1 screen=$2 cy=${3:-} identity=${4:-} fit=${5:-}
   local styled=0 cursor=0 has_identity=0 agy=0 kv plain luma content
   # Shadow the ghost ceiling for this capture's harness; read the inherited
@@ -1319,6 +1348,14 @@ fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity] [fit-
   done <<EOF
 $caps
 EOF
+  if [ "${6:-}" = claude-frame ]; then
+    if [ "$FM_COMPOSER_SELECTED_FIRST" -eq "$FM_COMPOSER_SELECTED_LAST" ]; then
+      _fm_composer_classify_bare_row "$screen" "$styled" "$FM_COMPOSER_SELECTED_FIRST"
+    else
+      _fm_composer_classify_bare_wrap "$screen" "$styled" "$FM_COMPOSER_SELECTED_FIRST" "$FM_COMPOSER_SELECTED_LAST"
+    fi
+    return
+  fi
   [ "$cursor" = 1 ] || cy=''
   if [ -n "$cy" ]; then
     case "$cy" in *[!0-9]*) printf 'unknown'; return 0 ;; esac
@@ -1450,16 +1487,48 @@ fm_composer_classify_snapshot_no_identity() {  # [fit-text]
   printf '%s' "$verdict"
 }
 
+fm_composer_claude_frame_rows() {  # <screen> <styled>
+  local content row first=1 nbsp=$'\302\240'
+  content=$(printf '%s\n' "$1" | sed -n "$((FM_COMPOSER_SELECTED_FIRST + 1)),$((FM_COMPOSER_SELECTED_LAST + 1))p")
+  if [ "$2" = 1 ]; then
+    content=$(printf '%s\n' "$content" | fm_composer_strip_ghost)
+  else
+    content=$(printf '%s\n' "$content" | fm_composer_strip_ansi)
+  fi
+  while IFS= read -r row; do
+    # Herdr can end captured viewport rows with CRLF.
+    row=${row%$'\r'}
+    row=${row#"${row%%[! ]*}"}
+    if [ "$first" = 1 ]; then
+      case "$row" in ❯*) row=${row#❯} ;; *) return 1 ;; esac
+      case "$row" in
+        ' '*) row=${row# } ;;
+        "$nbsp"*) row=${row#"$nbsp"} ;;
+      esac
+    fi
+    row=${row%"${row##*[! ]}"}
+    [ -n "$row" ] || return 1
+    printf '%s\n' "$row"
+    first=0
+  done <<< "$content"
+}
+
 # fm_composer_holds_text: 0 when the selected composer's extracted content is
 # exactly <text>, allowing one optional space where displayed rows meet.
 # This is how a caller that just typed <text> proves the composer holds it on
 # a plain (styled=0) capture, where a glyph row with trailing text otherwise
 # reads unknown because ghost text cannot be told apart from typed text.
-fm_composer_holds_text() {  # <caps> <screen> <text>
+fm_composer_holds_text() {  # <caps> <screen> <text> [claude-frame]
   local content remaining row first=1
   remaining=$3
   [ -n "$remaining" ] || return 1
-  content=$(fm_composer_extract_selected_content "$1" "$2" rows 2>/dev/null) || return 1
+  if [ "${4:-}" = claude-frame ]; then
+    local styled=0
+    case $'\n'"$1"$'\n' in *$'\nstyled=1\n'*) styled=1 ;; esac
+    content=$(fm_composer_claude_frame_rows "$2" "$styled") || return 1
+  else
+    content=$(fm_composer_extract_selected_content "$1" "$2" rows 2>/dev/null) || return 1
+  fi
   [ -n "$content" ] || return 1
   while IFS= read -r row; do
     if [ "$first" = 0 ]; then
@@ -1484,44 +1553,75 @@ fm_composer_holds_text() {  # <caps> <screen> <text>
 # of:
 #   none      the picker's rows are not on the screen
 #   active    the picker is the live screen; never type or press Enter
-#   below     cursor capture only: the cursor sits below the key hint; the
-#             live picker parks it on a blank row there, so this is retained
-#             history only when the same snapshot's composer verdict is a
-#             recognized composer (empty, pending, or pending-unproven)
-#   retained  cursorless capture only: what follows the key hint is a proven
-#             empty composer, or holds exactly <expected-text>, so the rows
-#             are stale history above a live composer
+#   below     the supplied row is below the key hint; the same snapshot
+#             still needs a recognized composer verdict
+#   retained  without a supplied row, the screen below the key hint proves
+#             an empty composer or one holding exactly <expected-text>
 # Single owner of this recognition; bin/fm-backend.sh's
 # fm_backend_guarded_composer_state composes it with the adapter's verdict.
-fm_composer_update_picker_scan() {  # <caps> <screen> [cursor_row] [expected-text]
-  local caps=$1 screen=$2 cy=${3:-} expected=${4:-} cursor=0 kv plain tail before row
+fm_composer_update_picker_scan() {  # <screen> [anchor-row] [expected-text]
+  local screen=$1 anchor=${2:-} expected=${3:-} plain tail before row
   local tail_caps tail_state
-  while IFS= read -r kv; do
-    [ "$kv" != cursor=1 ] || cursor=1
-  done <<EOF
-$caps
-EOF
-  [ "$cursor" = 1 ] || cy=''
   plain=$(printf '%s\n' "$screen" | fm_composer_strip_ansi)
   case "$plain" in
     *'Update now (runs '*'Skip until next version'*'esc skip'*) ;;
     *) printf 'none'; return 0 ;;
   esac
   tail=${plain##*'esc skip'}
-  if [ -n "$cy" ]; then
-    case "$cy" in *[!0-9]*) printf 'active'; return 0 ;; esac
+  if [ -n "$anchor" ]; then
+    case "$anchor" in *[!0-9]*) printf 'active'; return 0 ;; esac
     before=${plain%"$tail"}
     row=$(printf '%s' "$before" | tr -cd '\n' | wc -c)
-    if [ "$cy" -gt "$row" ]; then printf 'below'; else printf 'active'; fi
+    if [ "$anchor" -gt "$row" ]; then printf 'below'; else printf 'active'; fi
     return 0
   fi
   tail_caps=$(printf 'styled=0\ncursor=0\nidentity=0\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
   tail_state=$(fm_composer_classify_screen "$tail_caps" "$tail" 2>/dev/null) || tail_state=unknown
   if [ "$tail_state" = empty ] \
-     || { [ -n "$expected" ] && fm_composer_holds_text "$tail_caps" "$tail" "$expected"; }; then
+     || fm_composer_holds_text "$tail_caps" "$tail" "$expected"; then
     printf 'retained'
   else
     printf 'active'
+  fi
+}
+
+# Backend submit cores share these checks when the dispatcher has opted into
+# automatic Claude input. Other submits continue using their adapter's reads.
+fm_composer_submit_state() {  # <target> <fallback-state-fn> [expected-label]
+  if [ -n "${fm_submit_claude_backend:-}" ]; then
+    fm_backend_guarded_composer_state "$fm_submit_claude_backend" "$1" \
+      "${fm_submit_label:-}" "${fm_submit_text:-}" claude '' automatic
+  else
+    "$2" "$1" "${3:-}"
+  fi
+}
+
+fm_composer_submit_check_input() {  # <target> <empty|pending> [enter-sent]
+  local expected='' state
+  [ -n "${fm_submit_claude_backend:-}" ] || return 0
+  [ "$2" != pending ] || expected=${fm_submit_text:-}
+  state=$(fm_backend_guarded_composer_state "$fm_submit_claude_backend" "$1" \
+    "${fm_submit_label:-}" "$expected" claude '' automatic) || state=unknown
+  [ "$state" != "$2" ] || return 0
+  case "$2:${3:-0}:$state" in
+    empty:*) printf 'input-refused' ;;
+    pending:0:*) printf 'enter-withheld' ;;
+    pending:1:empty) printf 'empty' ;;
+    *) printf 'unconfirmed:%s' "$state" ;;
+  esac
+  return 1
+}
+
+fm_composer_submit_result() {  # <verdict> <enter-sent>
+  if [ -z "${fm_submit_claude_backend:-}" ]; then
+    printf '%s' "$1"
+  elif [ "$2" = 0 ]; then
+    printf 'send-failed'
+  else
+    case "$1" in
+      empty|pending) printf '%s' "$1" ;;
+      *) printf 'unconfirmed:%s' "$1" ;;
+    esac
   fi
 }
 
@@ -1538,16 +1638,18 @@ EOF
 # fm_composer_queued_enter_verdict; no shape knowledge lives in any loop.
 fm_composer_submit_retry_core() {  # <send-key-fn> <state-fn> <target> <retries> <enter-sleep> [expected-label]
   local send_key_fn=$1 state_fn=$2 target=$3 retries=$4 sleep_s=$5 expected_label=${6:-} i=0 state
+  local enter_sent=0
   while :; do
-    "$send_key_fn" "$target" Enter "$expected_label" || true
+    fm_composer_submit_check_input "$target" pending "$enter_sent" || return 0
+    if "$send_key_fn" "$target" Enter "$expected_label"; then enter_sent=1; fi
     sleep "$sleep_s"
-    state=$("$state_fn" "$target" "$expected_label")
+    state=$(fm_composer_submit_state "$target" "$state_fn" "$expected_label")
     case "$state" in
       pending|pending-unproven) ;;
-      *) printf '%s' "$state"; return 0 ;;
+      *) fm_composer_submit_result "$state" "$enter_sent"; return 0 ;;
     esac
     i=$((i + 1))
-    [ "$i" -lt "$retries" ] || { printf '%s' "$state"; return 0; }
+    [ "$i" -lt "$retries" ] || { fm_composer_submit_result "$state" "$enter_sent"; return 0; }
   done
 }
 
