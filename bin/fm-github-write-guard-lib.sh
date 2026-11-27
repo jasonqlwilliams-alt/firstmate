@@ -253,6 +253,9 @@ fm_github_guard_check() {  # <argv...>
     if [ -n "$api_target" ]; then
       "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr "$repo" "$api_target" || return $?
       fm_github_guard_check_api_body "$repo" "$@" || return $?
+      if [ "$FM_GITHUB_GUARD_TOOL" = gh-axi ]; then
+        unset GH_REPO
+      fi
       return 0
     fi
   fi

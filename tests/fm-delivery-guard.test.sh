@@ -43,16 +43,31 @@ if [ "${1:-}" = api ]; then
     printf 'Error: "unknown flag: --repo"\ncode: UNKNOWN\n'
     exit 1
   fi
-  [ "${GH_HOST:-}" = github.com ] || exit 3
-  case " $* " in *" --hostname "*) exit 4 ;; esac
-  printf 'api_response:\n  body: %s\n  truncated: false\n' "${FAKE_GH_ACCOUNT:-captain}"
-  exit 0
+  if [ "${2:-}" = /user ]; then
+    [ "${GH_HOST:-}" = github.com ] || exit 3
+    case " $* " in *" --hostname "*) exit 4 ;; esac
+    printf 'api_response:\n  body: %s\n  truncated: false\n' "${FAKE_GH_ACCOUNT:-captain}"
+    exit 0
+  fi
 fi
 printf '%s\n' "$*" >> "${GH_AXI_LOG:?}"
 if [ -n "${CAPTURE_STDIN:-}" ]; then
   cat >> "${GH_AXI_LOG:?}"
 fi
-printf 'https://github.com/captain/widgets/pull/1\n'
+case "${1:-}:${2:-}" in
+  pr:create)
+    if [ -n "${GH_REPO:-}" ]; then
+      repo_url="https://github.com/$GH_REPO.git"
+    else
+      origin=$(git remote get-url origin) || exit 1
+      repo_url="https://github.com/${origin#git@github.com:}"
+    fi
+    printf 'repository=%s\n' "$repo_url" >> "$GH_AXI_LOG"
+    printf '%s/pull/1\n' "${repo_url%.git}"
+    ;;
+  api:*) printf 'api_response:\n  body:\n    number: 1\n  truncated: false\n' ;;
+  *) printf 'https://github.com/captain/widgets/pull/1\n' ;;
+esac
 SH
 cat > "$fakebin/gh" <<'SH'
 #!/usr/bin/env bash
@@ -222,7 +237,7 @@ EOF
 }
 
 test_gh_axi_pr_write_shim_refuses_and_allows() {
-  local rec repo home fakebin upstream fork gate out rc log
+  local rec repo home fakebin upstream fork gate out rc log fork_url
   rec=$(make_repo pr-shim)
   IFS='|' read -r repo home fakebin upstream fork gate <<EOF
 $rec
@@ -249,7 +264,12 @@ EOF
     "allowed gh-axi PR did not announce its repository"
   assert_grep 'pr create --title safe --body safe' "$log" \
     "allowed gh-axi PR did not reach the real executable"
+  fork_url=$(jq -er '.repositories.widgets.forkPushUrl' "$home/config/repository-policy.json") \
+    || fail "could not read the fixture's approved fork URL"
+  grep -Fqx -- "repository=$fork_url" "$log" \
+    || fail "delegated gh-axi PR did not select the policy fork using GH_REPO"
 
+  : > "$log"
   out=$(cd "$repo" && FM_HOME="$home" GH_REPO=captain/widgets GH_AXI_LOG="$log" \
     FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
     "$GH_AXI_SHIM" api graphql -f query=mutation 2>&1)
@@ -257,7 +277,7 @@ EOF
   [ "$rc" -ne 0 ] || fail "gh-axi shim should fail closed for unresolvable GraphQL mutations"
   assert_contains "$out" "GraphQL is unavailable in a guarded worker" \
     "GraphQL refusal did not explain why its repository cannot be proven"
-  out=$(cd "$repo" && FM_HOME="$home" GH_AXI_LOG="$log" \
+  out=$(cd "$repo" && FM_HOME="$home" GH_REPO=captain/widgets GH_AXI_LOG="$log" \
     FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
     "$GH_AXI_SHIM" api /repos/upstream/widgets/pulls --field title=unsafe 2>&1)
   rc=$?
@@ -271,15 +291,22 @@ EOF
   [ "$rc" -ne 0 ] || fail "lower-case API methods should be destination-guarded"
   assert_contains "$out" "pull-request would write to github.com/upstream/widgets" \
     "lower-case method refusal did not identify the unsafe repository"
+  [ ! -s "$log" ] || fail "refused gh-axi API command still reached the real executable"
+
+  out=$(cd "$repo" && FM_HOME="$home" GH_REPO=captain/widgets GH_AXI_LOG="$log" \
+    FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
+    "$GH_AXI_SHIM" api POST /repos/captain/widgets/pulls 2>&1)
+  rc=$?
+  expect_code 0 "$rc" "gh-axi REST PR create should succeed with an exported GH_REPO: $out"
+  assert_contains "$out" "DELIVERY TARGET: project=widgets action=pull-request repository=github.com/captain/widgets account=captain" \
+    "allowed gh-axi REST PR did not announce its repository and account"
+  grep -Fxq -- 'api POST /repos/captain/widgets/pulls' "$log" \
+    || fail "allowed gh-axi REST PR did not reach the real executable with the approved endpoint"
   pass "delivery guard: gh-axi PR writes are refused or allowed by the same durable target"
 }
 
-# An exported GH_REPO must not break the authenticated-account lookup, which
-# real gh-axi would otherwise forward to gh api as an unsupported --repo flag.
-# The pre-push guard still judges the push URL Git actually uses, and the PR
-# shim still judges GH_REPO as the effective pull-request repository.
-test_exported_gh_repo_is_validated_not_fatal() {
-  local rec repo home fakebin upstream fork gate out rc log selector
+test_pre_push_with_exported_gh_repo() {
+  local rec repo home fakebin upstream fork gate out rc log
   rec=$(make_repo gh-repo-env)
   IFS='|' read -r repo home fakebin upstream fork gate <<EOF
 $rec
@@ -316,30 +343,7 @@ EOF
   git --git-dir="$fork" show-ref --verify --quiet refs/heads/gh-repo-env \
     || fail "fork push with an unrelated GH_REPO did not reach the fork"
 
-  for selector in captain/widgets ''; do
-    : > "$log"
-    out=$(cd "$repo" && FM_HOME="$home" GH_REPO="$selector" GH_AXI_LOG="$log" \
-      FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
-      "$GH_AXI_SHIM" pr create --repo captain/widgets --title safe --body safe 2>&1)
-    rc=$?
-    expect_code 0 "$rc" "gh-axi PR create should succeed with GH_REPO='$selector': $out"
-    assert_not_contains "$out" "unknown flag" "GH_REPO='$selector' leaked into the account lookup"
-    assert_contains "$out" "DELIVERY TARGET: project=widgets action=pull-request repository=github.com/captain/widgets account=captain" \
-      "gh-axi PR with GH_REPO='$selector' did not announce its repository and account"
-    assert_grep 'pr create --repo captain/widgets --title safe --body safe' "$log" \
-      "gh-axi PR with GH_REPO='$selector' did not reach the real executable"
-  done
-
-  : > "$log"
-  out=$(cd "$repo" && FM_HOME="$home" GH_REPO=upstream/widgets GH_AXI_LOG="$log" \
-    FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
-    "$GH_AXI_SHIM" pr create --title unsafe --body unsafe 2>&1)
-  rc=$?
-  [ "$rc" -ne 0 ] || fail "gh-axi shim should refuse GH_REPO naming the unapproved repository"
-  assert_contains "$out" "pull-request would write to github.com/upstream/widgets" \
-    "unapproved GH_REPO PR refusal did not name the unsafe repository"
-  [ ! -s "$log" ] || fail "refused unapproved-GH_REPO PR still reached the real executable"
-  pass "delivery guard: exported GH_REPO is validated as a target without breaking the account lookup"
+  pass "delivery guard: exported GH_REPO does not interfere with checking the effective push URL"
 }
 
 
@@ -1185,7 +1189,7 @@ test_authenticated_account_mismatch_refuses
 test_effective_push_url_rewrite_refuses
 test_no_mistakes_checks_branch_and_pr_targets
 test_gh_axi_pr_write_shim_refuses_and_allows
-test_exported_gh_repo_is_validated_not_fatal
+test_pre_push_with_exported_gh_repo
 test_check_pr_body_patterns
 test_shims_refuse_pr_body_leaks
 test_pipeline_run_intent_leak_refused_and_suppressed
