@@ -1145,10 +1145,25 @@ if [ "${FM_TEARDOWN_GUARD_DONE:-0}" != 1 ]; then
 fi
 HOME_PATH=$(grep '^home=' "$META" | cut -d= -f2- || true)
 PR_URL=$(grep '^pr=' "$META" | tail -1 | cut -d= -f2- || true)
+
+teardown_resolve_task_tmp() {
+  local status=0
+  fm_task_tmp_private_root "$@" || status=$?
+  if [ "$status" -eq 2 ]; then
+    printf 'REFUSED: cannot inspect task temporary directory %s for %s; retaining the task record.\n' "$1" "$2" >&2
+  fi
+  return "$status"
+}
+
 TASK_TMP_RECORD=$(fm_meta_get "$META" tasktmp)
 TASK_TMP_IDENTITY=
-if task_tmp=$(fm_task_tmp_private_root "$TASK_TMP_RECORD" "$ID"); then
-  TASK_TMP_IDENTITY=$(fm_task_tmp_identity "$task_tmp") || TASK_TMP_IDENTITY=
+if task_tmp=$(teardown_resolve_task_tmp "$TASK_TMP_RECORD" "$ID"); then
+  TASK_TMP_IDENTITY=$(fm_task_tmp_identity "$task_tmp") || {
+    printf 'REFUSED: cannot identify task temporary directory %s for %s; retaining the task record.\n' "$task_tmp" "$ID" >&2
+    exit 1
+  }
+elif [ "$?" -eq 2 ]; then
+  exit 1
 fi
 BUSY_GEN=$(fm_meta_get "$META" busy_gen)
 if [ -z "$BUSY_GEN" ]; then
@@ -2328,7 +2343,7 @@ require_treehouse_return_caller_outside() {  # <copy>
 
 teardown_task_tmp_root() {
   [ -n "$TASK_TMP_IDENTITY" ] || return 1
-  fm_task_tmp_private_root "$TASK_TMP_RECORD" "$ID" "$TASK_TMP_IDENTITY"
+  teardown_resolve_task_tmp "$TASK_TMP_RECORD" "$ID" "$TASK_TMP_IDENTITY"
 }
 
 task_pids_under_roots() {  # <scanner> <worktree>
@@ -2344,6 +2359,8 @@ task_pids_under_roots() {  # <scanner> <worktree>
   fi
   if [ "$scanner" = lsof ] && task_tmp=$(teardown_task_tmp_root); then
     roots+=("$task_tmp")
+  elif [ "$?" -eq 2 ]; then
+    return 1
   fi
   [ -n "${roots[0]:-}" ] || return 0
   if ! pids=$(pids_with_cwd_under "$scanner" "${roots[@]}"); then
@@ -3592,8 +3609,10 @@ cleanup_firstmate_home_children() {
     fi
     retire_busy_state "$sub_state" "$child_id" "$child_busy_gen" || return 1
     status_retire_presentation_task "$sub_state" "$child_id" || return 1
-    if child_tmp=$(fm_task_tmp_private_root "$(fm_meta_get "$child_meta" tasktmp)" "$child_id"); then
+    if child_tmp=$(teardown_resolve_task_tmp "$(fm_meta_get "$child_meta" tasktmp)" "$child_id"); then
       rm -rf -- "$child_tmp" || return 1
+    elif [ "$?" -eq 2 ]; then
+      return 1
     fi
     fm_backlog_atomic_transition remove "$sub_state/$child_id.meta" "task record" "$sub_state" || return 1
     rm -f "$sub_state/$child_id.turn-ended" "$sub_state/$child_id.progress" \
@@ -4094,6 +4113,8 @@ fm_backend_clear_transition "$BACKEND" "$STATE" "$T" || true
 # Remove the private task temp root before removing its record below.
 if task_tmp=$(teardown_task_tmp_root); then
   rm -rf -- "$task_tmp"
+elif [ "$?" -eq 2 ]; then
+  exit 1
 fi
 remove_pr_poll_artifacts "$STATE" "$ID" || exit 1
 retire_busy_state "$STATE" "$ID" "$BUSY_GEN" || exit 1

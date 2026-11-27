@@ -139,6 +139,7 @@ Firstmate allocates a fresh root when the recorded path is missing, fails the re
 
 Teardown rechecks the recorded root's device and inode before scanning or removing it.
 Forced secondmate home teardown resolves each eligible child root immediately before removal.
+Teardown retains the task record if it cannot inspect an otherwise eligible root.
 Direct ship and scout teardown uses `lsof` to scan for processes with a readable working directory under the eligible root.
 Detached processes may survive secondmate teardown and forced child cleanup even when those operations remove the directory.
 Teardown leaves the fixed legacy directory for manual reconciliation under any spelling, skipping both the scan and removal for it.

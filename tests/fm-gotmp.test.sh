@@ -196,6 +196,39 @@ SH
   pass "fm-teardown preserves a replacement directory when the task root moves during $phase"
 }
 
+test_teardown_retains_uninspectable_tasktmp() {
+  local phase=$1 id task_tmp fake rc=0
+  id="td-inspect-$phase"
+  task_tmp="$TMP_ROOT/$id-private"
+  mkdir -p "$task_tmp/gotmp"
+  printf 'build output\n' > "$task_tmp/gotmp/artifact"
+  chmod 600 "$task_tmp"
+  if (cd "$task_tmp") 2>/dev/null; then
+    chmod 700 "$task_tmp"
+    printf 'skip: task temp inspection test requires directory permissions to restrict this user\n'
+    return 0
+  fi
+  fake=$(make_fake_root "$id" "$task_tmp")
+  cp "$fake/state/$id.meta" "$fake/meta.before"
+  if [ "$phase" = removal ]; then
+    chmod 700 "$task_tmp"
+    cat > "$fake/bin/fm-remote-job-reap-orphans.sh" <<'SH'
+#!/usr/bin/env bash
+chmod 600 "$INSPECTION_TEST_ROOT"
+SH
+    chmod +x "$fake/bin/fm-remote-job-reap-orphans.sh"
+  fi
+  FM_HOME="$fake" INSPECTION_TEST_ROOT="$task_tmp" \
+    bash "$fake/bin/fm-teardown.sh" "$id" > "$fake/teardown.log" 2>&1 || rc=$?
+  chmod 700 "$task_tmp"
+  expect_code 1 "$rc" "teardown should refuse an inspection failure during $phase: $(cat "$fake/teardown.log")"
+  assert_grep "cannot inspect task temporary directory $task_tmp" "$fake/teardown.log" \
+    "teardown did not identify the unreadable directory"
+  cmp -s "$fake/meta.before" "$fake/state/$id.meta" || fail "teardown changed or retired the task record"
+  assert_present "$task_tmp/gotmp/artifact" "teardown removed the build artifact"
+  pass "fm-teardown retains the task record when temp inspection fails during $phase"
+}
+
 test_teardown_preserves_shared_tasktmp() {
   local variant=$1 id fake legacy_task_tmp task_tmp
   legacy_task_tmp=$(mktemp -d /tmp/fm-legacy-XXXXXX) || fail "could not allocate legacy fixture"
@@ -352,6 +385,8 @@ for variant in doubled-slash trailing-slash trailing-dot linked-parent; do
 done
 test_teardown_preserves_replacement_tasktmp scan
 test_teardown_preserves_replacement_tasktmp cleanup
+test_teardown_retains_uninspectable_tasktmp capture
+test_teardown_retains_uninspectable_tasktmp removal
 test_teardown_preserves_shared_tasktmp legacy
 test_teardown_preserves_shared_tasktmp symlink
 for variant in symlink-dot doubled-slash dot-segment dotdot-segment trailing-dot linked-parent relative; do

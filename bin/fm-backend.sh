@@ -361,16 +361,16 @@ fm_meta_get() {  # <meta-file> <key>
 
 # fm_task_tmp_private_root: the single ownership check for a task's recorded
 # private temp root (meta tasktmp=). Prints the root's physical path when the
-# recorded value names a directory this task may reuse or remove, and returns
-# 1 otherwise. Paths are compared as directories, not strings: doubled
-# slashes, `.` segments and a trailing slash are dropped before the final
+# recorded value names a directory this task may reuse or remove.
+# Returns 1 when ineligible or 2 when inspection fails.
+# Doubled slashes, `.` segments and a trailing slash are dropped before the final
 # component is checked for a symlink, and the legacy shared root /tmp/fm-<id>
 # is recognised by device and inode however it is spelled, including through
 # `..` segments or a symlinked parent. A relative value is refused because it
 # depends on the reader's working directory, as is a final `..` component.
 # Callers act on the printed physical path, never on the recorded spelling.
 fm_task_tmp_private_root() {  # <recorded-tasktmp> <task-id> [<expected-identity>]
-  local recorded=$1 id=$2 expected=${3:-} part normalized='' physical
+  local recorded=$1 id=$2 expected=${3:-} part normalized='' physical identity
   local -a parts=()
   case "$recorded" in /*) ;; *) return 1 ;; esac
   IFS=/ read -r -a parts <<< "$recorded" || true
@@ -379,14 +379,15 @@ fm_task_tmp_private_root() {  # <recorded-tasktmp> <task-id> [<expected-identity
   done
   case "$normalized" in ''|*/..) return 1 ;; esac
   [ -d "$normalized" ] && [ ! -L "$normalized" ] && [ -O "$normalized" ] || return 1
-  physical=$(CDPATH='' cd -P -- "$normalized" 2>/dev/null && pwd -P && printf '.') || return 1
+  [ ! "$normalized" -ef "/tmp/fm-$id" ] || return 1
+  physical=$(CDPATH='' cd -P -- "$normalized" 2>/dev/null && pwd -P && printf '.') || return 2
   physical=${physical%$'\n.'}
   case "$physical" in ''|/|*$'\n'*) return 1 ;; esac
-  if [ -e "/tmp/fm-$id" ] && [ "$physical" -ef "/tmp/fm-$id" ]; then
-    return 1
-  fi
   [ "$recorded" -ef "$physical" ] || return 1
-  [ -z "$expected" ] || [ "$(fm_task_tmp_identity "$physical")" = "$expected" ] || return 1
+  if [ -n "$expected" ]; then
+    identity=$(fm_task_tmp_identity "$physical") || return 2
+    [ "$identity" = "$expected" ] || return 1
+  fi
   printf '%s\n' "$physical"
 }
 
