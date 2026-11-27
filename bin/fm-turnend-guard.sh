@@ -305,7 +305,7 @@ BUDGET_CHARGED_EPOCH=
 budget_account_current_epoch() {  # [observe|block]
   local mode=${1:-observe} current_epoch outcome old_session old_count old_epoch tmp initialized charged
   fm_lock_try_acquire "$BUDGET_LOCK" || return 1
-  current_epoch= outcome=
+  current_epoch='' outcome=''
   if read_current_autoarm; then
     current_epoch=$FM_AUTOARM_GEN outcome=$FM_AUTOARM_OUTCOME
   fi

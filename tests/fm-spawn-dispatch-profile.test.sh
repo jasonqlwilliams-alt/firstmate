@@ -1651,6 +1651,7 @@ test_terminal_creation_drops_launch_binding() (
   )
   fakebin=$(fm_fakebin "$dir")
   mkdir -p "$dir/home/config"
+  # shellcheck disable=SC2030 # The fake terminal tools are scoped to this subshell.
   export PATH="$fakebin:$PATH" FM_HOME="$dir/home" FM_TEST_TERMINAL_ENV="$dir" FM_ZELLIJ_SESSION=firstmate
   unset TMUX
   for name in "${binding_names[@]}"; do export "$name=fixture-binding"; done
@@ -1770,7 +1771,8 @@ SH
     || fail "secondmate fixture spawn failed: $out"
   launch=$(cat "$LAUNCH_LOG")
   run_fake_pane() {
-    # shellcheck disable=SC2016 # The launch binding is read by the fake pane.
+    # The launch binding is read by the fake pane, which uses its own fakebin prefix.
+    # shellcheck disable=SC2016,SC2031
     PATH="$FAKEBIN_DIR:$PATH" FM_HOME="$HOME_DIR" FM_TEST_SECOND_HOME="$sm" FM_TEST_PANE_LAUNCH="$1" \
       "$ROOT/bin/fm-session-launch.sh" -- /bin/bash -ec '
         export FM_TEST_PARENT_OWNER=$FM_SESSION_OWNER_ID

@@ -226,7 +226,10 @@ ensure_record() { # <fingerprint> <task> <incarnation> <state> <outcome-key> <or
     [ -z "$status_head" ] || printf 'status_head=%s\n' "$status_head"
   } > "$tmp" || { rm -f "$tmp"; return 1; }
   chmod 600 "$tmp" 2>/dev/null || true
-  reconcile_mutation_authorized && mv -f "$tmp" "$RECORD_PENDING" || { rm -f "$tmp"; return 1; }
+  if ! reconcile_mutation_authorized || ! mv -f "$tmp" "$RECORD_PENDING"; then
+    rm -f "$tmp"
+    return 1
+  fi
 }
 
 mark_reported() { # <record>
@@ -300,7 +303,10 @@ write_scan_marker() { # <cursor>
     printf 'cursor=%s\n' "$cursor"
   } > "$marker_tmp" || { rm -f "$marker_tmp"; return 1; }
   chmod 600 "$marker_tmp" 2>/dev/null || true
-  reconcile_mutation_authorized && mv -f "$marker_tmp" "$SCAN_MARKER" || { rm -f "$marker_tmp"; return 1; }
+  if ! reconcile_mutation_authorized || ! mv -f "$marker_tmp" "$SCAN_MARKER"; then
+    rm -f "$marker_tmp"
+    return 1
+  fi
 }
 
 meta_field() {

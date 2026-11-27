@@ -1090,7 +1090,7 @@ unit_away_drain_with_and_without_launch_ownership() {
     fi
     confirm_posture "$home" || fail "$mode away wake fixture could not confirm posture"
     # shellcheck disable=SC2016
-    out=$(FM_HOME="$home" FM_TEST_BIN="$ROOT/bin" FM_TEST_MODE="$mode" \
+    if out=$(FM_HOME="$home" FM_TEST_BIN="$ROOT/bin" FM_TEST_MODE="$mode" \
       "$ROOT/bin/fm-session-launch.sh" -- /bin/bash -ec '
         if [ "$FM_TEST_MODE" = launch-v1 ]; then "$FM_TEST_BIN/fm-lock.sh"; fi
         "$FM_TEST_BIN/fm-afk-launch.sh" start-native
@@ -1115,8 +1115,7 @@ unit_away_drain_with_and_without_launch_ownership() {
         )
         test "$(cat "$FM_HOME/classified")" = "fixture wake delegated to away"
         test ! -s "$STATE/.wake-queue"
-      ' 2>&1)
-    if [ "$?" -eq 0 ]; then
+      ' 2>&1); then
       pass "$mode away entry delegates wake presentation and acknowledgement"
     else
       fail "$mode away entry could not classify and acknowledge a wake: $out"
