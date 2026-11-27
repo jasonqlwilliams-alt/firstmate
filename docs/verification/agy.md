@@ -190,7 +190,7 @@ not ok - agy (1.5.18): idle composer never classified empty (last verdict: pendi
 ```
 
 The redacted screen is [`tests/fixtures/agy-composer/tmux-first-use-1.5.18.ansi`](../../tests/fixtures/agy-composer/tmux-first-use-1.5.18.ansi), with the cursor at column 2, row 27.
-The guard types only after an `empty` verdict, so agy's live wrapping of long input remains unmeasured.
+The wrapped-input capture is deferred until the agy classifier recognizes the tmux palette mode hint and the guard can confirm an idle, empty composer before typing.
 [`tests/fm-composer-lib.test.sh`](../../tests/fm-composer-lib.test.sh) uses the recorded rows and truecolor values to check the classifier's verdicts, including refusal on plain-text and multirow captures.
 [`tests/fm-task-inbox.test.sh`](../../tests/fm-task-inbox.test.sh) uses an agy-shaped stub in a real tmux server to check screen refusals and the one-row fit boundary for the path-bearing notice.
 Its 80-column regression scaffolds a brief with a symlink alias for a UTF-8 inbox path, checks launch-brief precedence, and verifies that the stub submits the exact short notice and acknowledges the queued record.
