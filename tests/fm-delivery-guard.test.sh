@@ -52,14 +52,12 @@ if [ -n "${CAPTURE_STDIN:-}" ]; then
   cat >> "${GH_AXI_LOG:?}"
 fi
 if [ "${1:-}:${2:-}" = pr:create ]; then
+  printf 'GH_REPO=%s\n' "${GH_REPO-<unset>}" >> "$GH_AXI_LOG"
   if [ -n "${GH_REPO:-}" ]; then
     repo_url="https://github.com/$GH_REPO.git"
-  else
-    origin=$(git remote get-url origin) || exit 1
-    repo_url="https://github.com/${origin#git@github.com:}"
+    printf 'repository=%s\n' "$repo_url" >> "$GH_AXI_LOG"
+    printf '%s/pull/1\n' "${repo_url%.git}"
   fi
-  printf 'repository=%s\nGH_REPO=%s\n' "$repo_url" "${GH_REPO-<unset>}" >> "$GH_AXI_LOG"
-  printf '%s/pull/1\n' "${repo_url%.git}"
   exit 0
 fi
 printf 'https://github.com/captain/widgets/pull/1\n'
@@ -293,9 +291,11 @@ EOF
     FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
     env -u GH_REPO "$GH_AXI_SHIM" pr create --title safe --body safe 2>&1)
   rc=$?
-  expect_code 0 "$rc" "gh-axi PR should use the approved origin with GH_REPO unset: $out"
-  grep -Fqx -- "repository=$fork_url" "$log" \
-    || fail "delegated gh-axi PR did not select the approved origin"
+  expect_code 0 "$rc" "gh-axi PR should pass the guard with GH_REPO unset: $out"
+  assert_contains "$out" "DELIVERY TARGET: project=widgets action=pull-request repository=github.com/captain/widgets account=captain" \
+    "gh-axi guard did not authorize the fixture repository with GH_REPO unset"
+  grep -Fqx -- 'pr create --title safe --body safe' "$log" \
+    || fail "gh-axi PR with GH_REPO unset did not reach the delegate"
   grep -Fqx -- 'GH_REPO=<unset>' "$log" \
     || fail "gh-axi shim supplied a selector for a PR with GH_REPO unset"
   pass "delivery guard: gh-axi PR writes are refused or allowed by the same durable target"
