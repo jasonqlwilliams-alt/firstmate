@@ -369,8 +369,8 @@ fm_meta_get() {  # <meta-file> <key>
 # `..` segments or a symlinked parent. A relative value is refused because it
 # depends on the reader's working directory, as is a final `..` component.
 # Callers act on the printed physical path, never on the recorded spelling.
-fm_task_tmp_private_root() {  # <recorded-tasktmp> <task-id>
-  local recorded=$1 id=$2 part normalized='' physical
+fm_task_tmp_private_root() {  # <recorded-tasktmp> <task-id> [<expected-identity>]
+  local recorded=$1 id=$2 expected=${3:-} part normalized='' physical
   local -a parts=()
   case "$recorded" in /*) ;; *) return 1 ;; esac
   IFS=/ read -r -a parts <<< "$recorded" || true
@@ -385,7 +385,17 @@ fm_task_tmp_private_root() {  # <recorded-tasktmp> <task-id>
   if [ -e "/tmp/fm-$id" ] && [ "$physical" -ef "/tmp/fm-$id" ]; then
     return 1
   fi
+  [ "$recorded" -ef "$physical" ] || return 1
+  [ -z "$expected" ] || [ "$(fm_task_tmp_identity "$physical")" = "$expected" ] || return 1
   printf '%s\n' "$physical"
+}
+
+fm_task_tmp_identity() {
+  if [ "$(uname -s)" = Darwin ]; then
+    /usr/bin/stat -f '%d:%i' "$1" 2>/dev/null
+  else
+    stat -c '%d:%i' "$1" 2>/dev/null
+  fi
 }
 
 # fm_backend_of_meta: the backend recorded in <meta-file>, defaulting to

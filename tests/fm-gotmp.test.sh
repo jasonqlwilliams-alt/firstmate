@@ -157,6 +157,45 @@ test_teardown_removes_tasktmp_dir_by_equivalent_spelling() {
   pass "fm-teardown removes its own task temp root recorded with a $variant spelling"
 }
 
+test_teardown_preserves_replacement_tasktmp() {
+  local phase=$1 id task_tmp alias fake hook
+  id="td-move-$phase"
+  task_tmp="$TMP_ROOT/$id-original/task-root"
+  alias="$TMP_ROOT/$id-link"
+  mkdir -p "$task_tmp"
+  ln -s "${task_tmp%/*}" "$alias"
+  fake=$(make_fake_root "$id" "$alias/task-root")
+  hook="$fake/bin/fm-remote-job-reap-orphans.sh"
+  if [ "$phase" = scan ]; then hook="$fake/bin/lsof"; fi
+  cat > "$hook" <<'SH'
+#!/usr/bin/env bash
+set -e
+mv "$MOVE_TASK_TMP" "$MOVE_TASK_TMP-new"
+mkdir "$MOVE_TASK_TMP"
+printf 'unrelated data\n' > "$MOVE_TASK_TMP/keep"
+if [ "$MOVE_TASK_PHASE" = cleanup ]; then
+  mkdir "$MOVE_TASK_TMP-parent"
+  mv "$MOVE_TASK_TMP-new" "$MOVE_TASK_TMP-parent/task-root"
+  rm "$MOVE_TASK_ALIAS"
+  ln -s "$MOVE_TASK_TMP-parent" "$MOVE_TASK_ALIAS"
+fi
+SH
+  chmod +x "$hook"
+  local rc=0
+  FM_HOME="$fake" PATH="$fake/bin:$PATH" MOVE_TASK_TMP="$task_tmp" MOVE_TASK_ALIAS="$alias" MOVE_TASK_PHASE="$phase" \
+    bash "$fake/bin/fm-teardown.sh" "$id" > "$fake/teardown.log" 2>&1 || rc=$?
+  assert_present "$task_tmp/keep" "teardown removed a replacement directory it did not own"
+  if [ "$phase" = scan ]; then
+    expect_code 1 "$rc" "teardown should refuse a root move during process enumeration: $(cat "$fake/teardown.log")"
+    assert_present "$fake/state/$id.meta" "teardown retired a task after an incomplete scan"
+    assert_present "$task_tmp-new" "teardown removed the moved root after an incomplete scan"
+  else
+    expect_code 0 "$rc" "teardown should follow the original root through the updated alias: $(cat "$fake/teardown.log")"
+    assert_absent "$alias/task-root" "teardown did not remove the moved root"
+  fi
+  pass "fm-teardown preserves a replacement directory when the task root moves during $phase"
+}
+
 test_teardown_preserves_shared_tasktmp() {
   local variant=$1 id fake legacy_task_tmp task_tmp
   legacy_task_tmp=$(mktemp -d /tmp/fm-legacy-XXXXXX) || fail "could not allocate legacy fixture"
@@ -311,6 +350,8 @@ test_teardown_removes_tasktmp_dir
 for variant in doubled-slash trailing-slash trailing-dot linked-parent; do
   test_teardown_removes_tasktmp_dir_by_equivalent_spelling "$variant"
 done
+test_teardown_preserves_replacement_tasktmp scan
+test_teardown_preserves_replacement_tasktmp cleanup
 test_teardown_preserves_shared_tasktmp legacy
 test_teardown_preserves_shared_tasktmp symlink
 for variant in symlink-dot doubled-slash dot-segment dotdot-segment trailing-dot linked-parent relative; do

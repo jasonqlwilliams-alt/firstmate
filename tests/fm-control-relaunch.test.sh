@@ -91,6 +91,7 @@ case "${1:-}" in
           fi
           ;;
         'export GOTMPDIR='*)
+          ( eval "$payload" && printf '%s\n' "$GOTMPDIR" ) > "$D/gotmpdir" || exit 1
           if [ -n "${FM_FAKE_TRACE_PREPARE:-}" ]; then
             : > "$FM_FAKE_TRACE_PREPARE"
             while [ ! -e "$FM_FAKE_TRACE_RELEASE" ]; do /bin/sleep 0.01; done
@@ -449,11 +450,11 @@ test_relaunch_replaces_stale_task_temp_roots() {
 }
 
 test_relaunch_keeps_task_temp_metadata_single_line() {
-  local dir id=rl-recorded-tmp variant parent recorded task_tmp out rc
+  local dir id=rl-recorded-tmp variant parent recorded task_tmp gotmpdir expected_gotmpdir out rc
   for variant in linked-parent newline-parent; do
     dir=$(new_case "$variant" "$id")
     add_ship_task "$dir" "$id" claude
-    parent="$dir/scratch"
+    parent="$dir/scratch space"
     if [ "$variant" = newline-parent ]; then
       mkdir "$parent"
       parent+=$'\narchive'
@@ -467,20 +468,52 @@ test_relaunch_keeps_task_temp_metadata_single_line() {
     task_tmp=$(meta_field "$dir" "$id" tasktmp)
     if [ "$variant" = linked-parent ]; then
       [ "$task_tmp" = "$recorded" ] || fail "relaunch rewrote the recorded spelling of the temp root"
-      assert_present "$parent/task-root/gotmp" "relaunch did not reuse the linked private root"
+      expected_gotmpdir="$parent/task-root/gotmp"
+      assert_present "$expected_gotmpdir" "relaunch did not reuse the linked private root"
+      rm "$dir/tmp-link"
     else
       case "$task_tmp" in
         /tmp/fm-"$id"+*) ;;
         *) fail "relaunch must record a fresh root for a multiline physical path: $task_tmp" ;;
       esac
-      assert_present "$task_tmp/gotmp" "relaunch did not create the fresh Go temp directory"
+      expected_gotmpdir="$task_tmp/gotmp"
+      assert_present "$expected_gotmpdir" "relaunch did not create the fresh Go temp directory"
       assert_absent "$parent/task-root/gotmp" "relaunch reused a multiline physical path"
-      assert_absent "$dir/scratch/gotmp" "relaunch used the unrelated prefix of the physical path"
+      assert_absent "$dir/scratch space/gotmp" "relaunch used the unrelated prefix of the physical path"
     fi
-    assert_grep "export GOTMPDIR=$task_tmp/gotmp" "$dir/fake/keys" \
-      "the replacement pane did not receive the recorded Go temp directory"
+    gotmpdir=$(cat "$dir/fake/gotmpdir")
+    [ "$gotmpdir" -ef "$expected_gotmpdir" ] \
+      || fail "the replacement pane did not receive the checked Go temp directory: $gotmpdir"
   done
   pass "fm-control relaunch: private roots keep their recorded spelling or get a fresh single-line record"
+}
+
+test_relaunch_refuses_repointed_task_temp_alias() {
+  local dir id legacy recorded out rc
+  legacy=$(mktemp -d /tmp/fm-rl-swap-XXXXXX) || fail "could not allocate a shared legacy root"
+  FM_TEST_CLEANUP_DIRS+=("$legacy")
+  id=${legacy#/tmp/fm-}
+  dir=$(new_case repointed-temp "$id")
+  add_ship_task "$dir" "$id" claude
+  mkdir -p "$dir/private/fm-$id"
+  ln -s "$dir/private" "$dir/tmp-link"
+  recorded="$dir/tmp-link/fm-$id"
+  printf 'tasktmp=%s\n' "$recorded" >> "$dir/home/state/$id.meta"
+  cp "$dir/home/state/$id.meta" "$dir/meta.before"
+  cat > "$dir/fake/before-exit" <<'SH'
+#!/usr/bin/env bash
+link="$FM_FAKE_DIR/../tmp-link"
+rm "$link" && ln -s /tmp "$link"
+SH
+  chmod +x "$dir/fake/before-exit"
+  out=$(run_control "$dir" "$id" relaunch --note "continue after temp root recovery"); rc=$?
+  expect_code 1 "$rc" "relaunch should refuse a temp alias changed during stop: $out"
+  assert_contains "$out" "temporary directory changed before metadata publication" "relaunch should identify the changed temp root"
+  [ "$recorded" -ef "$legacy" ] || fail "the handoff fixture did not repoint the alias"
+  cmp -s "$dir/meta.before" "$dir/home/state/$id.meta" || fail "relaunch published replacement metadata after the alias changed"
+  assert_absent "$dir/fake/gotmpdir" "relaunch exported a Go temp directory after the alias changed"
+  assert_absent "$legacy/gotmp" "relaunch touched the shared legacy directory"
+  pass "fm-control relaunch: a repointed task temp alias blocks metadata publication and launch"
 }
 
 test_relaunch_does_not_reuse_legacy_root_by_another_spelling() {
@@ -3371,6 +3404,7 @@ test_relaunch_from_guarded_path
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
 test_relaunch_replaces_stale_task_temp_roots
 test_relaunch_keeps_task_temp_metadata_single_line
+test_relaunch_refuses_repointed_task_temp_alias
 test_relaunch_does_not_reuse_legacy_root_by_another_spelling
 test_relaunch_from_linked_home_preserves_recorded_worktree
 test_relaunch_preserves_registered_merge_poll

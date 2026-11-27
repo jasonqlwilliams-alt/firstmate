@@ -1145,9 +1145,11 @@ if [ "${FM_TEARDOWN_GUARD_DONE:-0}" != 1 ]; then
 fi
 HOME_PATH=$(grep '^home=' "$META" | cut -d= -f2- || true)
 PR_URL=$(grep '^pr=' "$META" | tail -1 | cut -d= -f2- || true)
-# fm_task_tmp_private_root (bin/fm-backend.sh) owns which recorded root is
-# this task's own; TASK_TMP holds its physical path or is empty.
-TASK_TMP=$(fm_task_tmp_private_root "$(fm_meta_get "$META" tasktmp)" "$ID") || TASK_TMP=
+TASK_TMP_RECORD=$(fm_meta_get "$META" tasktmp)
+TASK_TMP_IDENTITY=
+if task_tmp=$(fm_task_tmp_private_root "$TASK_TMP_RECORD" "$ID"); then
+  TASK_TMP_IDENTITY=$(fm_task_tmp_identity "$task_tmp") || TASK_TMP_IDENTITY=
+fi
 BUSY_GEN=$(fm_meta_get "$META" busy_gen)
 if [ -z "$BUSY_GEN" ]; then
   BUSY_GEN=$(cat "$STATE/$ID.busy-gen" 2>/dev/null || true)
@@ -2324,22 +2326,32 @@ require_treehouse_return_caller_outside() {  # <copy>
   return 0
 }
 
-task_pids_under_roots() {  # <scanner> <dir>...
+teardown_task_tmp_root() {
+  [ -n "$TASK_TMP_IDENTITY" ] || return 1
+  fm_task_tmp_private_root "$TASK_TMP_RECORD" "$ID" "$TASK_TMP_IDENTITY"
+}
+
+task_pids_under_roots() {  # <scanner> <worktree>
   TASK_PIDS=
-  local scanner=$1 dir resolved pids ancestry_scan
+  local scanner=$1 worktree=$2 resolved pids ancestry_scan task_tmp=
   local -a roots=()
-  shift
-  for dir in "$@"; do
-    [ -n "$dir" ] && [ -d "$dir" ] || continue
-    if ! resolved=$(CDPATH='' cd -- "$dir" >/dev/null && pwd -P && printf '.'); then
-      echo "REFUSED: cannot resolve task directory $dir for $ID; preserving the worktree/tasktmp for manual inspection or retry." >&2
+  if [ -n "$worktree" ] && [ -d "$worktree" ]; then
+    if ! resolved=$(CDPATH='' cd -- "$worktree" >/dev/null && pwd -P && printf '.'); then
+      echo "REFUSED: cannot resolve task directory $worktree for $ID; preserving the worktree/tasktmp for manual inspection or retry." >&2
       return 1
     fi
     roots+=("${resolved%$'\n.'}")
-  done
+  fi
+  if [ "$scanner" = lsof ] && task_tmp=$(teardown_task_tmp_root); then
+    roots+=("$task_tmp")
+  fi
   [ -n "${roots[0]:-}" ] || return 0
   if ! pids=$(pids_with_cwd_under "$scanner" "${roots[@]}"); then
     echo "REFUSED: cannot determine leaked processes under ${roots[*]} for $ID ($scanner failed); preserving the worktree/tasktmp for manual inspection or retry." >&2
+    return 1
+  fi
+  if [ -n "$task_tmp" ] && [ "$(teardown_task_tmp_root)" != "$task_tmp" ]; then
+    echo "REFUSED: task $ID's temporary directory changed during the process scan." >&2
     return 1
   fi
   [ -n "$pids" ] || return 0
@@ -2356,17 +2368,15 @@ task_pids_under_roots() {  # <scanner> <dir>...
 }
 
 # See Fix 2 in the script header for scanner scope and refusal rules.
-reap_task_worktree_processes() {  # <label> <owned-worktree> <tasktmp>
-  local label=$1 worktree=$2 tasktmp=$3 scanner pids pid identity current_pids i pass=1 max_passes=3
+reap_task_worktree_processes() {  # <label> <owned-worktree>
+  local label=$1 worktree=$2 scanner pids pid identity current_pids i pass=1 max_passes=3
   local -a tracked_pids tracked_identities remaining_pids remaining_identities
   if ! scanner=$(task_cwd_scanner); then
     echo "warning: lsof is unavailable on this platform; leaving leaked processes running for $BACKEND task $ID because teardown cannot verify caller safety" >&2
     return 0
   fi
-  set -- "$worktree"
-  [ "$scanner" != lsof ] || set -- "$worktree" "$tasktmp"
   while [ "$pass" -le "$max_passes" ]; do
-    task_pids_under_roots "$scanner" "$@" || return 1
+    task_pids_under_roots "$scanner" "$worktree" || return 1
     pids=$TASK_PIDS
     [ -n "$pids" ] || return 0
     if [ "$KEEP_PANE" = 1 ] && task_pid_list_contains "$pids" "$KEPT_SHELL_PID"; then
@@ -2378,7 +2388,7 @@ reap_task_worktree_processes() {  # <label> <owned-worktree> <tasktmp>
     while IFS= read -r pid; do
       [ -n "$pid" ] || continue
       if ! identity=$(task_process_identity "$pid"); then
-        task_pids_under_roots "$scanner" "$@" || return 1
+        task_pids_under_roots "$scanner" "$worktree" || return 1
         if task_pid_list_contains "$TASK_PIDS" "$pid"; then
           echo "REFUSED: cannot verify leaked process $pid identity for $ID; preserving the worktree/tasktmp for manual inspection or retry." >&2
           return 1
@@ -2394,7 +2404,7 @@ EOF
       pass=$((pass + 1))
       continue
     fi
-    task_pids_under_roots "$scanner" "$@" || return 1
+    task_pids_under_roots "$scanner" "$worktree" || return 1
     current_pids=$TASK_PIDS
     echo "teardown: reaping leaked $label process(es) for $ID: $(printf '%s' "$pids" | tr '\n' ' ')" >&2
     for i in "${!tracked_pids[@]}"; do
@@ -2406,7 +2416,7 @@ EOF
       fi
     done
     sleep 1
-    task_pids_under_roots "$scanner" "$@" || return 1
+    task_pids_under_roots "$scanner" "$worktree" || return 1
     current_pids=$TASK_PIDS
     remaining_pids=()
     remaining_identities=()
@@ -2421,7 +2431,7 @@ EOF
     done
     if [ "${#remaining_pids[@]}" -gt 0 ]; then
       echo "teardown: force-killing leaked $label process(es) for $ID: ${remaining_pids[*]}" >&2
-      task_pids_under_roots "$scanner" "$@" || return 1
+      task_pids_under_roots "$scanner" "$worktree" || return 1
       current_pids=$TASK_PIDS
       for i in "${!remaining_pids[@]}"; do
         pid=${remaining_pids[$i]}
@@ -2434,7 +2444,7 @@ EOF
     fi
     pass=$((pass + 1))
   done
-  task_pids_under_roots "$scanner" "$@" || return 1
+  task_pids_under_roots "$scanner" "$worktree" || return 1
   [ -z "$TASK_PIDS" ] && return 0
   echo "REFUSED: leaked $label processes for $ID remain after $max_passes reap attempts; preserving the worktree/tasktmp for manual inspection or retry." >&2
   return 1
@@ -3903,14 +3913,14 @@ fi
 # dedicated process-event and firstmate-home removal machinery further below,
 # not by task-worktree cleanup.
 if [ "$KIND" != secondmate ] && teardown_owns_worktree; then
-  if ! conclude_task_no_mistakes_run "$WT" || ! reap_task_worktree_processes worktree "$WT" "$TASK_TMP"; then
+  if ! conclude_task_no_mistakes_run "$WT" || ! reap_task_worktree_processes worktree "$WT"; then
     if [ "$TEARDOWN_RETURNS_TASK_COPY" = 1 ]; then
       teardown_treehouse_backlog_rollback || exit 1
     fi
     exit 1
   fi
 elif [ "$KIND" != secondmate ]; then
-  reap_task_worktree_processes tasktmp "" "$TASK_TMP"
+  reap_task_worktree_processes tasktmp ""
 fi
 
 # Fix 3 (see script header): sweep remote job workers abandoned by an already
@@ -4082,8 +4092,8 @@ remove_grok_turnend_auth "$STATE" "$ID" || exit 1
 remove_kimi_turnend_auth "$STATE" "$ID" || exit 1
 fm_backend_clear_transition "$BACKEND" "$STATE" "$T" || true
 # Remove the private task temp root before removing its record below.
-if [ -n "$TASK_TMP" ] && fm_task_tmp_private_root "$TASK_TMP" "$ID" >/dev/null; then
-  rm -rf -- "$TASK_TMP"
+if task_tmp=$(teardown_task_tmp_root); then
+  rm -rf -- "$task_tmp"
 fi
 remove_pr_poll_artifacts "$STATE" "$ID" || exit 1
 retire_busy_state "$STATE" "$ID" "$BUSY_GEN" || exit 1

@@ -1018,6 +1018,7 @@ SPAWN_META_LOCK_HELD=0
 SPAWN_META_PUBLISH_STARTED=0
 TASK_TMP=
 TASK_TMP_RECORD=
+TASK_TMP_IDENTITY=
 SPAWN_TASK_TMP_CREATED=0
 SPAWN_TASK_TMP_HANDED_OFF=0
 SPAWN_FRESH_COMMIT_PENDING=0
@@ -1098,8 +1099,21 @@ spawn_abort_return_untouched_slot() {
   ' "$slot_state" >/dev/null 2>&1
 }
 
+spawn_task_tmp_is_current() {
+  [ -n "$TASK_TMP_IDENTITY" ] &&
+    [ "$(fm_task_tmp_private_root "$TASK_TMP_RECORD" "$ID" "$TASK_TMP_IDENTITY")" = "$TASK_TMP" ]
+}
+
+spawn_publish_task_meta() {
+  if ! spawn_task_tmp_is_current; then
+    FM_BACKLOG_TRANSITION_ERROR="temporary directory changed before metadata publication"
+    return 1
+  fi
+  fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"
+}
+
 spawn_abort_cleanup() {
-  local status=$? staged_file return_cmd
+  local status=$? staged_file return_cmd task_tmp_record=
   [ -z "$RELAUNCH_PATH_PROBE" ] || rm -f -- "$RELAUNCH_PATH_PROBE" || true
   for staged_file in "${RELAUNCH_WIRING_FILES[@]:-}"; do
     [ -z "$staged_file" ] || rm -f -- "$staged_file" || true
@@ -1165,6 +1179,9 @@ spawn_abort_cleanup() {
         fi
         mkdir -p "$STATE" 2>/dev/null || true
         if [ -d "$STATE" ]; then
+          if spawn_task_tmp_is_current; then
+            task_tmp_record=$TASK_TMP_RECORD
+          fi
           SPAWN_META_TMP="$STATE/.$ID.meta.orca-recovery.${BASHPID:-$$}"
           {
             echo "window=$W"
@@ -1176,7 +1193,7 @@ spawn_abort_cleanup() {
             echo "kind=$KIND"
             [ -z "${MODE:-}" ] || echo "mode=$MODE"
             [ -z "${YOLO:-}" ] || echo "yolo=$YOLO"
-            printf 'tasktmp=%s\n' "$TASK_TMP_RECORD"
+            printf 'tasktmp=%s\n' "$task_tmp_record"
             echo "model=${MODEL:-default}"
             echo "effort=${EFFORT:-default}"
             echo "backend=orca"
@@ -1257,7 +1274,8 @@ spawn_abort_cleanup() {
   [ -z "$SPAWN_SLOT_ACQUIRE_FILE" ] || rm -f -- "$SPAWN_SLOT_ACQUIRE_FILE" 2>/dev/null || true
   if [ "$status" -ne 0 ] && [ -n "$TASK_TMP" ] \
      && ! [ "$(fm_meta_get "$STATE/$ID.meta" tasktmp 2>/dev/null)" -ef "$TASK_TMP" ]; then
-    if [ "$SPAWN_TASK_TMP_CREATED" = 1 ] && [ "$SPAWN_TASK_TMP_HANDED_OFF" = 0 ]; then
+    if [ "$SPAWN_TASK_TMP_CREATED" = 1 ] && [ "$SPAWN_TASK_TMP_HANDED_OFF" = 0 ] \
+       && spawn_task_tmp_is_current; then
       rmdir -- "$TASK_TMP/gotmp" "$TASK_TMP" 2>/dev/null || true
     fi
     if [ -d "$TASK_TMP" ]; then
@@ -4092,13 +4110,14 @@ if [ "$RELAUNCH" -eq 1 ] || {
   fi
 fi
 if [ -z "$TASK_TMP" ]; then
-  TASK_TMP=$(mktemp -d "/tmp/fm-$ID+XXXXXX") || {
+  TASK_TMP_RECORD=$(mktemp -d "/tmp/fm-$ID+XXXXXX") || {
     echo "error: could not create a private task temp root under /tmp for $ID" >&2
     exit 1
   }
-  TASK_TMP_RECORD=$TASK_TMP
+  TASK_TMP=$(fm_task_tmp_private_root "$TASK_TMP_RECORD" "$ID") || exit 1
   SPAWN_TASK_TMP_CREATED=1
 fi
+TASK_TMP_IDENTITY=$(fm_task_tmp_identity "$TASK_TMP") || exit 1
 mkdir -p "$TASK_TMP/gotmp"
 
 # Per-harness turn-end hook where enabled: a file that touches
@@ -4832,7 +4851,7 @@ preserve_relaunch_meta() {
   exit 1
 }
 if [ "$RELAUNCH" -eq 0 ]; then
-  if ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"; then
+  if ! spawn_publish_task_meta; then
     echo "error: task record for $ID could not be published ($FM_BACKLOG_TRANSITION_ERROR)" >&2
     exit 1
   fi
@@ -4889,7 +4908,7 @@ spawn_report_preserved_state() {
 
 if [ "$RELAUNCH" -eq 1 ]; then
   SPAWN_META_PUBLISH_STARTED=1
-  if ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"; then
+  if ! spawn_publish_task_meta; then
     echo "error: replacement task record for $ID could not be published ($FM_BACKLOG_TRANSITION_ERROR)" >&2
     exit 1
   fi
@@ -5067,8 +5086,14 @@ spawn_record_traceparent() {
 # Export GOTMPDIR into the crewmate's pane shell so the agent and every child
 # process (go build, go test, ...) inherit it. Sent before the launch command so
 # the env is set when the agent starts; the brief sleep lets the export land.
+if ! spawn_task_tmp_is_current; then
+  echo "error: task $ID's temporary directory changed before launch delivery" >&2
+  exit 1
+fi
+launch_task_tmp=$TASK_TMP
+case "$TASK_TMP_RECORD" in /tmp/fm-"$ID"+??????) launch_task_tmp=$TASK_TMP_RECORD ;; esac
 SPAWN_TASK_TMP_HANDED_OFF=1
-spawn_send_text_line "$T" "export GOTMPDIR=$(printf '%q' "$TASK_TMP_RECORD/gotmp")"
+spawn_send_text_line "$T" "export GOTMPDIR=$(printf '%q' "$launch_task_tmp/gotmp")"
 # Mark the pane as a task worker so bin/fm-test-run.sh can refuse to run the
 # suite in the repository's primary checkout. Ship and scout workers are the
 # ones assigned an isolated worktree; a secondmate runs its own home instead.

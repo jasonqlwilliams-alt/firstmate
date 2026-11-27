@@ -130,12 +130,14 @@ Each fresh task dispatch creates a private temporary root on the agent's host, e
 An explicit task relaunch or recovery of the same recorded secondmate can reuse the root in that task's `tasktmp=` metadata on the agent's host.
 Reuse and teardown require an absolute recorded path naming an existing directory owned by the current user with no symlink at its final component.
 They check directory identity and use the resolved physical path for filesystem operations, including when the recorded spelling uses doubled slashes, `.` segments, a trailing slash, `..` segments, or a symlinked parent.
-Firstmate preserves the validated spelling in `tasktmp=` and uses that spelling for the launch's `GOTMPDIR`.
+Firstmate preserves the validated spelling in `tasktmp=` after checking that it still names the prepared directory.
+The launch uses the checked physical path for `GOTMPDIR` and retains the short `/tmp` spelling for ordinary allocations.
 Firstmate skips reuse and removal when the recorded path is relative, ends in `..`, or resolves to a physical path containing a newline.
 Temporary files and any detached processes still using the directory can carry over to the replacement.
 Firstmate allocates a fresh root when the recorded path is missing, fails the reuse checks, or names the old fixed directory `/tmp/fm-<id>` that same-ID tasks may share, however that path is spelled.
 
-Teardown removes an eligible recorded root before retiring its task record, including child roots during forced secondmate home teardown.
+Teardown rechecks the recorded root's device and inode before scanning or removing it.
+Forced secondmate home teardown resolves each eligible child root immediately before removal.
 Direct ship and scout teardown uses `lsof` to scan for processes with a readable working directory under the eligible root.
 Detached processes may survive secondmate teardown and forced child cleanup even when those operations remove the directory.
 Teardown leaves the fixed legacy directory for manual reconciliation under any spelling, skipping both the scan and removal for it.
