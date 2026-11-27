@@ -1,0 +1,45 @@
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.s7Shum/pool/.treehouse/owner-repo-93312d/1/owner-repo. Run 'treehouse return /tmp/fm-test-treehouse.s7Shum/pool/.treehouse/owner-repo-93312d/1/owner-repo' to release it.
+Aged an active lease fixture /tmp/fm-test-treehouse.s7Shum
+bin/fm-test-run.sh --jobs 1 tests/fm-test-run.test.sh
+FM_TEST_BEGIN 2026-11-27T16:21:09Z tests/fm-test-run.test.sh family=pure-contract-unit expected_gate_skip=none
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.zzdI3A/pool/.treehouse/fm-test-run.test.sh.repo-93312d/1/fm-test-run.test.sh.repo. Run 'treehouse return /tmp/fm-test-treehouse.zzdI3A/pool/.treehouse/fm-test-run.test.sh.repo-93312d/1/fm-test-run.test.sh.repo' to release it.
+Lease with TREEHOUSE_ROOT unset in command
+  suite fm-test-run.test.sh
+  root /tmp/fm-test-treehouse.zzdI3A/pool
+  checkout /tmp/fm-test-treehouse.zzdI3A/pool/.treehouse/fm-test-run.test.sh.repo-93312d/1/fm-test-run.test.sh.repo
+FM_TEST_END 2026-11-27T16:21:12Z tests/fm-test-run.test.sh exit=0 duration_ms=2794 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=3894
+FM_TEST_SUMMARY_FAMILY family=pure-contract-unit count=1 duration_ms=2794 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-test-run.test.sh duration_ms=2794
+Scratch directory removed when runner exited /tmp/fm-test-treehouse.zzdI3A
+Default HOME/.treehouse inventory and sentinel preserved
+d existing
+f existing/sentinel
+ee410d3e7f03471c1d5b2a44098ec732361fef0a9db04779ffdf18fcd7e90064  existing/sentinel
+Next runner preserved the old checkout with a live owner /tmp/fm-test-treehouse.s7Shum/pool/.treehouse/owner-repo-93312d/1/owner-repo
+Killed the checkout owner; lease path still present before first subsequent run /tmp/fm-test-treehouse.s7Shum/pool/.treehouse/owner-repo-93312d/1/owner-repo
+bin/fm-test-run.sh --jobs 1 tests/fm-test-run.test.sh
+FM_TEST_BEGIN 2026-11-27T16:21:14Z tests/fm-test-run.test.sh family=pure-contract-unit expected_gate_skip=none
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.JqiyT7/pool/.treehouse/fm-test-run.test.sh.repo-93312d/1/fm-test-run.test.sh.repo. Run 'treehouse return /tmp/fm-test-treehouse.JqiyT7/pool/.treehouse/fm-test-run.test.sh.repo-93312d/1/fm-test-run.test.sh.repo' to release it.
+Lease with TREEHOUSE_ROOT unset in command
+  suite fm-test-run.test.sh
+  root /tmp/fm-test-treehouse.JqiyT7/pool
+  checkout /tmp/fm-test-treehouse.JqiyT7/pool/.treehouse/fm-test-run.test.sh.repo-93312d/1/fm-test-run.test.sh.repo
+FM_TEST_END 2026-11-27T16:21:17Z tests/fm-test-run.test.sh exit=0 duration_ms=2721 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=3834
+FM_TEST_SUMMARY_FAMILY family=pure-contract-unit count=1 duration_ms=2721 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-test-run.test.sh duration_ms=2721
+Scratch directory removed when runner exited /tmp/fm-test-treehouse.JqiyT7
+Default HOME/.treehouse inventory and sentinel preserved
+d existing
+f existing/sentinel
+ee410d3e7f03471c1d5b2a44098ec732361fef0a9db04779ffdf18fcd7e90064  existing/sentinel
+Next runner reaped the dead owner’s scratch; unmarked control remained /tmp/fm-test-treehouse.00-unrelated/keep
+Default HOME/.treehouse inventory and sentinel preserved
+d existing
+f existing/sentinel
+ee410d3e7f03471c1d5b2a44098ec732361fef0a9db04779ffdf18fcd7e90064  existing/sentinel
+Scenario exit=0

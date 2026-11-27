@@ -1,0 +1,24 @@
+Private Linux lab with Treehouse v3.1.8 and herdr 0.7.4. Projects and terminal data are synthetic.
+$ bin/fm-test-run.sh --jobs 1 --per-script-timeout-secs 800 --fail-on-gate-skip "herdr not found" --json /tmp/fm-backend-herdr-presentation-e2e.json tests/fm-backend-herdr-presentation-e2e.test.sh
+FM_TEST_BEGIN 2026-11-27T16:39:59Z tests/fm-backend-herdr-presentation-e2e.test.sh family=real-herdr-gated expected_gate_skip=herdr,treehouse
+ok - real Herdr lab: an opted-out spawn retains the Stage 1 Herdr command sequence with zero ordering calls
+ok - real Herdr lab: a home that configured nothing falls back flat on below-floor herdr 0.7.4 with one naming warning
+ok - real Herdr lab: every projected create, task-tab create, seeded prune, and move preserves active workspace and tab
+ok - real Herdr lab: persisted-focused seeded prune proceeds when no live client is attached
+ok - real Herdr lab: bounded lock contention warns and falls back flat without projection or focus drift
+ok - real Herdr lab: flat and projected spawns reuse the Treehouse slot and record matching stable metadata with distinct task temp directories
+ok - real Herdr lab: concurrent primary workers form one stable contiguous block without active workspace/tab drift
+ok - real Herdr lab: forced workspace.move failure leaves a successful worker in default order with a warning and no cleanup
+ok - real Herdr lab: concurrent post-create abort cleanup stays serialized with exact focus restoration
+ok - real Herdr lab: Treehouse commands and metadata shape are byte-identical except for endpoint IDs and spawn incarnation
+ok - real Herdr lab: exact task-pane close removes the projected workspace with no unrestored wrong-focus interval
+not ok - concurrent projected teardowns changed active workspace/tab from w3/w3:t1 to w8/w8:t2
+FM_TEST_END 2026-11-27T16:45:41Z tests/fm-backend-herdr-presentation-e2e.test.sh exit=1 duration_ms=341984 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=1 skipped_gate=0 duration_ms=342031
+FM_TEST_SUMMARY_FAMILY family=real-herdr-gated count=1 duration_ms=341984 failed=1
+FM_TEST_SLOWEST rank=1 script=tests/fm-backend-herdr-presentation-e2e.test.sh duration_ms=341984
+fm-test-run: wrote timing artifact: /tmp/fm-backend-herdr-presentation-e2e.json
+Firstmate runner exit: 1
+Private Herdr session inventory: [{"name":"default","default":true,"running":true}]
+Default-home pool and test scratch pools after the suite: absent
+Disposable Herdr default server exit: 143

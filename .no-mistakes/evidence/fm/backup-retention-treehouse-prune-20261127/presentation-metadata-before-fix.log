@@ -1,0 +1,12 @@
+--- flat-spawn
++++ projected-spawn
+@@ -6,7 +6,7 @@
+ kind=ship
+ mode=no-mistakes
+ yolo=off
+-tasktmp=/tmp/fm-shape+xbycIS
++tasktmp=/tmp/fm-shape+bcfiuL
+ model=default
+ effort=default
+ spawn_gen=<spawn-incarnation>
+not ok - metadata changed beyond Herdr container IDs between opted-out and projected paths

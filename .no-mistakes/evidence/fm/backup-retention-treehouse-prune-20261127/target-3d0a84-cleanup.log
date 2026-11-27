@@ -1,0 +1,57 @@
+Firstmate working tree 3d0a84ff, private Linux environment, synthetic inputs.
+$ bash tests/fm-test-fixture-cleanup.test.sh
+ok - fm_test_tmproot cleans up its fixture root on normal exit
+ok - scratch cleanup failures preserve exit status and still clean independent fixtures
+ok - custom suite exits clean their scratch roots and preserve exit status
+ok - Codex identity refusal retains its endpoint and diagnostics while removing scratch
+ok - fm_test_tmproot cleans up its fixture root on SIGTERM
+ok - the cleanup registry cannot be injected through path precreation
+ok - failed fixture registration rolls back the new root
+ok - the orphan sweep reaps only old fixtures without a live owner
+ok - the orphan sweep reports failed removal and continues startup
+ok - runner and shared helpers isolate host Git config and preserve explicit config and outside commits
+ok - fm_touch_epoch preserves both epochs in the repeated DST hour
+ok - fake no-mistakes --version is the shared constant and overridable
+ok - the orphan sweep ignores FIFO markers and symlinks
+ok - init/doctor no-mistakes stub touches markers and refuses other verbs
+ok - fake gh authenticates and fake gh-axi reports the shared version
+ok - spawn fakebin answers pane path, logs -l payloads, and installs extra tools
+ok - spawn fixtures register only exact task temp allocations
+ok - the orphan sweep reaps read-only package fixtures
+ok - send stubs log typed text and fake ssh records argv with a controllable exit
+ok - spawn-home layout writes harness pin, beat, and brief
+FM_TEST_END 2026-11-27T16:43:08Z tests/fm-test-fixtures.test.sh exit=0 duration_ms=11153 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=11201
+FM_TEST_SUMMARY_FAMILY family=standalone count=1 duration_ms=11153 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-test-fixtures.test.sh duration_ms=11153
+$ Standalone fixture allocates a real lease, then runner startup compares its active and interrupted states
+ok - the orphan sweep reclaims standalone Treehouse pools after SIGKILL
+$ bin/fm-test-run.sh --jobs 1 tests/fm-test-fixtures.test.sh
+Cloning into '/tmp/fm-test-treehouse.aRBQn2/repo'...
+FM_TEST_BEGIN 2026-11-27T16:43:09Z tests/fm-test-fixtures.test.sh family=standalone expected_gate_skip=none
+ok - the runner passes a disposable root explicitly and leaves the live Treehouse root untouched
+tests/fm-test-fixtures.test.sh: line 83: 12556 Killed                     FM_TEST_CANCEL_DIR="$receipt" FM_TEST_ROOT_RECEIPT="$receipt/root" bash -c 'printf "%s\n" "$$" > "$FM_TEST_CANCEL_DIR/runner"; exec "$@"' _ "$dir/bin/fm-test-run.sh" --jobs "$jobs" --per-script-timeout-secs 0 "$script" > "$receipt/run.log" 2>&1
+tests/fm-test-fixtures.test.sh: line 83: 12784 Killed                     FM_TEST_CANCEL_DIR="$receipt" FM_TEST_ROOT_RECEIPT="$receipt/root" bash -c 'printf "%s\n" "$$" > "$FM_TEST_CANCEL_DIR/runner"; exec "$@"' _ "$dir/bin/fm-test-run.sh" --jobs "$jobs" --per-script-timeout-secs 0 "$script" > "$receipt/run.log" 2>&1
+ok - runner startup preserves live suites' pools and reaps them after interruption
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.aRBQn2/pool/.treehouse/repo-e698b5/1/repo. Run 'treehouse return /tmp/fm-test-treehouse.aRBQn2/pool/.treehouse/repo-e698b5/1/repo' to release it.
+FAILED: real checkout was never allocated by child (exit 143)
+Driver exit: 1
+ok - runner and shared helpers isolate host Git config and preserve explicit config and outside commits
+ok - fm_touch_epoch preserves both epochs in the repeated DST hour
+ok - fake no-mistakes --version is the shared constant and overridable
+ok - init/doctor no-mistakes stub touches markers and refuses other verbs
+ok - fake gh authenticates and fake gh-axi reports the shared version
+ok - spawn fakebin answers pane path, logs -l payloads, and installs extra tools
+ok - spawn fixtures register only exact task temp allocations
+ok - send stubs log typed text and fake ssh records argv with a controllable exit
+ok - spawn-home layout writes harness pin, beat, and brief
+FM_TEST_END 2026-11-27T16:43:25Z tests/fm-test-fixtures.test.sh exit=0 duration_ms=16932 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=16992
+FM_TEST_SUMMARY_FAMILY family=standalone count=1 duration_ms=16932 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-test-fixtures.test.sh duration_ms=16932
+$ Standalone fixture allocates a real lease, then runner startup compares its active and interrupted states
+touch: cannot touch '/tmp/fm-test-treehouse.T0CsC0/.fm-test-fixture': No such file or directory
+Driver exit: 1
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.fEAVAE/pool/.treehouse/repo-e698b5/1/repo. Run 'treehouse return /tmp/fm-test-treehouse.fEAVAE/pool/.treehouse/repo-e698b5/1/repo' to release it.

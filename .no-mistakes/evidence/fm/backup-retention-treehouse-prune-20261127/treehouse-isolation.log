@@ -1,0 +1,43 @@
+
+Manual reproduction with a real Git clone and Treehouse v3.1.8
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.edGboj/pool/.treehouse/repo-41afd4/1/repo. Run 'treehouse return /tmp/fm-test-treehouse.edGboj/pool/.treehouse/repo-41afd4/1/repo' to release it.
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.edGboj/pool/.treehouse/repo-41afd4/2/repo. Run 'treehouse return /tmp/fm-test-treehouse.edGboj/pool/.treehouse/repo-41afd4/2/repo' to release it.
+git fixture committed content was present at /tmp/fm-test-treehouse.edGboj/pool/.treehouse/repo-41afd4/1/repo
+second lease with root variables removed: /tmp/fm-test-treehouse.edGboj/pool/.treehouse/repo-41afd4/2/repo
+[{"path":"/tmp/fm-test-treehouse.edGboj/pool/.treehouse/repo-41afd4/1/repo","status":"leased","lease_holder":"manual"},{"path":"/tmp/fm-test-treehouse.edGboj/pool/.treehouse/repo-41afd4/2/repo","status":"leased","lease_holder":"scrubbed"}]
+manual scratch directory after EXIT: absent
+
+Firstmate test runner with real Treehouse allocation
+FM_TEST_BEGIN 2026-11-27T15:23:33Z tests/fm-test-run.test.sh family=pure-contract-unit expected_gate_skip=none
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.cLBnqV/pool/.treehouse/project-fm-test-run.test.sh-41afd4/1/project-fm-test-run.test.sh. Run 'treehouse return /tmp/fm-test-treehouse.cLBnqV/pool/.treehouse/project-fm-test-run.test.sh-41afd4/1/project-fm-test-run.test.sh' to release it.
+{"path":"/tmp/fm-test-treehouse.cLBnqV/pool/.treehouse/project-fm-test-run.test.sh-41afd4/1/project-fm-test-run.test.sh","status":"leased","lease_holder":"fm-test-run.test.sh"}
+FM_TEST_END 2026-11-27T15:23:33Z tests/fm-test-run.test.sh exit=0 duration_ms=251 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=315
+FM_TEST_SUMMARY_FAMILY family=pure-contract-unit count=1 duration_ms=251 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-test-run.test.sh duration_ms=251
+serial scratch directory after exit: absent (/tmp/fm-test-treehouse.cLBnqV)
+FM_TEST_BEGIN 2026-11-27T15:23:33Z tests/fm-brief.test.sh family=pure-contract-unit expected_gate_skip=none
+FM_TEST_BEGIN 2026-11-27T15:23:33Z tests/fm-test-run.test.sh family=pure-contract-unit expected_gate_skip=none
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.YbzPlw/pool/.treehouse/project-fm-test-run.test.sh-41afd4/1/project-fm-test-run.test.sh. Run 'treehouse return /tmp/fm-test-treehouse.YbzPlw/pool/.treehouse/project-fm-test-run.test.sh-41afd4/1/project-fm-test-run.test.sh' to release it.
+{"path":"/tmp/fm-test-treehouse.YbzPlw/pool/.treehouse/project-fm-test-run.test.sh-41afd4/1/project-fm-test-run.test.sh","status":"leased","lease_holder":"fm-test-run.test.sh"}
+FM_TEST_END 2026-11-27T15:23:34Z tests/fm-test-run.test.sh exit=0 duration_ms=289 gate_skip=false
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.9rqDsj/pool/.treehouse/project-fm-brief.test.sh-41afd4/1/project-fm-brief.test.sh. Run 'treehouse return /tmp/fm-test-treehouse.9rqDsj/pool/.treehouse/project-fm-brief.test.sh-41afd4/1/project-fm-brief.test.sh' to release it.
+{"path":"/tmp/fm-test-treehouse.9rqDsj/pool/.treehouse/project-fm-brief.test.sh-41afd4/1/project-fm-brief.test.sh","status":"leased","lease_holder":"fm-brief.test.sh"}
+FM_TEST_END 2026-11-27T15:23:34Z tests/fm-brief.test.sh exit=0 duration_ms=408 gate_skip=false
+FM_TEST_SUMMARY total=2 failed=0 skipped_gate=0 duration_ms=525
+FM_TEST_SUMMARY_FAMILY family=pure-contract-unit count=2 duration_ms=697 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-brief.test.sh duration_ms=408
+FM_TEST_SLOWEST rank=2 script=tests/fm-test-run.test.sh duration_ms=289
+fm-brief.test.sh.root scratch directory after exit: absent (/tmp/fm-test-treehouse.9rqDsj)
+fm-test-run.test.sh.root scratch directory after exit: absent (/tmp/fm-test-treehouse.YbzPlw)
+
+Default HOME/.treehouse inventory and file SHA-256 before and after were identical
+.
+./existing-pool
+./existing-pool/sentinel
+e7a5109d332e10b903cd1a19c2343fa5bacc424e670c9c6c9cf8cc92ce9fe278  ./existing-pool/sentinel

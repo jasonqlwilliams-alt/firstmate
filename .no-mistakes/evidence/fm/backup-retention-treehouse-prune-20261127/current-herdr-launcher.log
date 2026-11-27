@@ -1,0 +1,25 @@
+herdr 0.7.4
+v3.1.8
+Disposable session inventory before the suite: [{"name":"default","default":true,"running":true}]
+bin/fm-test-run.sh --jobs 1 --fail-on-gate-skip=treehouse --json /tmp/timing.json tests/fm-backend-herdr-launcher-workspace-e2e.test.sh
+FM_TEST_BEGIN 2026-11-27T15:54:38Z tests/fm-backend-herdr-launcher-workspace-e2e.test.sh family=real-herdr-gated expected_gate_skip=herdr,treehouse
+ok - real herdr E2E: with one 'firstmate' workspace and no herdr parent, a crewmate still lands in this home's own workspace without stealing focus
+ok - real herdr E2E: the normal unique-label path is unchanged when the launcher's own pane identifies the workspace
+ok - real herdr E2E: presentation spaces still create the isolated child workspace and bind it under the launcher's exact parent, without stealing focus
+ok - real herdr E2E: with two 'firstmate' workspaces, a worker spawned from inside the second one lands in that exact workspace
+ok - real herdr E2E: the duplicate-labeled sibling workspace is left entirely untouched and focus is preserved
+ok - real herdr E2E: with a duplicated home label, a projected worker still hangs off the launcher's exact workspace and the sibling stays untouched
+ok - real herdr E2E: an ambiguous home label with no launcher identity refuses before any worker endpoint exists
+ok - real herdr E2E: a launcher pane that no longer exists refuses before any worker endpoint exists
+ok - real herdr E2E: a secondmate launching its own worker gets the same exact-workspace guarantee, and its same-labeled sibling is untouched
+ok - real herdr E2E: a --secondmate launch still stands up that secondmate's own workspace instead of inheriting the launcher's
+ok - real herdr E2E: teardown closes only the worker's own pane and leaves the launcher, its workspace, and the same-labeled sibling intact
+ok - real herdr E2E: isolated lab session removed and default fleet session unchanged
+FM_TEST_END 2026-11-27T15:57:02Z tests/fm-backend-herdr-launcher-workspace-e2e.test.sh exit=0 duration_ms=143488 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=143556
+FM_TEST_SUMMARY_FAMILY family=real-herdr-gated count=1 duration_ms=143488 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-backend-herdr-launcher-workspace-e2e.test.sh duration_ms=143488
+fm-test-run: wrote timing artifact: /tmp/timing.json
+Disposable session inventory after the suite: [{"name":"default","default":true,"running":true}]
+Disposable Herdr default server exit: 0
+Default HOME pool and per-suite scratch pools after the suite: absent

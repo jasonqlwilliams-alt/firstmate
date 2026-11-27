@@ -1,0 +1,15 @@
+Persisted Firstmate worker metadata from the real named Herdr lab with a synthetic Git project.
+
+Projections disabled
+worktree=/tmp/fm-test-treehouse.9qIPHa/pool/.treehouse/project-cec9ee/2/project
+tasktmp=/tmp/fm-shape+vTgLjM
+herdr_workspace_id=w1
+herdr_tab_id=w1:t3
+herdr_pane_id=w1:p3
+
+Projections enabled
+worktree=/tmp/fm-test-treehouse.9qIPHa/pool/.treehouse/project-cec9ee/2/project
+tasktmp=/tmp/fm-shape+WkGgTY
+herdr_workspace_id=w4
+herdr_tab_id=w4:t2
+herdr_pane_id=w4:p2

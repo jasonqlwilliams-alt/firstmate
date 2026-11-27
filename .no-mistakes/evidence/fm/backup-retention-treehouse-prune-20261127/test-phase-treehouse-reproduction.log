@@ -1,0 +1,12 @@
+Run the CONTRIBUTING.md reproduction helper with a local disposable clone
+Cloning into '/tmp/fm-test-treehouse.UfTGJi/repo'...
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.UfTGJi/pool/.treehouse/repo-93312d/1/repo. Run 'treehouse return /tmp/fm-test-treehouse.UfTGJi/pool/.treehouse/repo-93312d/1/repo' to release it.
+Leased checkout /tmp/fm-test-treehouse.UfTGJi/pool/.treehouse/repo-93312d/1/repo
+Git verified the contents of the active checkout
+Reproduction scratch removed after Bash exited /tmp/fm-test-treehouse.UfTGJi
+Default HOME/.treehouse inventory and sentinel preserved
+d existing
+f existing/sentinel
+ee410d3e7f03471c1d5b2a44098ec732361fef0a9db04779ffdf18fcd7e90064  existing/sentinel
+Scenario exit=0

@@ -1,0 +1,68 @@
+herdr 0.7.4
+v3.1.8
+Private session inventory before the tests: [{"default":true,"name":"default","running":true}]
+
+Firstmate test runner executing tests/fm-backend-herdr-presentation-e2e.test.sh
+FM_TEST_BEGIN 2026-11-27T15:36:22Z tests/fm-backend-herdr-presentation-e2e.test.sh family=real-herdr-gated expected_gate_skip=herdr,treehouse
+ok - real Herdr lab: an opted-out spawn retains the Stage 1 Herdr command sequence with zero ordering calls
+ok - real Herdr lab: a home that configured nothing falls back flat on below-floor herdr 0.7.4 with one naming warning
+ok - real Herdr lab: every projected create, task-tab create, seeded prune, and move preserves active workspace and tab
+ok - real Herdr lab: persisted-focused seeded prune proceeds when no live client is attached
+ok - real Herdr lab: bounded lock contention warns and falls back flat without projection or focus drift
+ok - real Herdr lab: flat and projected spawns reuse the Treehouse slot and record matching stable metadata with distinct task temp directories
+ok - real Herdr lab: concurrent primary workers form one stable contiguous block without active workspace/tab drift
+ok - real Herdr lab: forced workspace.move failure leaves a successful worker in default order with a warning and no cleanup
+ok - real Herdr lab: Treehouse commands and metadata shape are byte-identical except for endpoint IDs and spawn incarnation
+ok - real Herdr lab: exact task-pane close removes the projected workspace with no unrestored wrong-focus interval
+Focus before parallel teardowns w3/w3:t1
+Order A pane w7:p2
+Order B pane w6:p2
+Focus after parallel teardowns w3/w3:t1
+Process and Treehouse return log for order-a
+Focus at first Treehouse return call w3/w3:t1
+🌳 Worktree returned to pool.
+/tmp/run/fm-herdr-presentation.C0tPZM/project: already current
+teardown order-a complete (window fm-lab-fm-herdr-present-145-10787:w7:p2, worktree /tmp/fm-test-treehouse.gxQc8O/pool/.treehouse/project-9f2d45/4/project)
+Backlog: order-a just finished (this home keeps no markdown backlog at /tmp/run/fm-herdr-presentation.C0tPZM/home/data/backlog.md). Update /tmp/run/fm-herdr-presentation.C0tPZM/home/data/backlog.md - move order-a to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+WARNING: watcher still down (same stale episode; last beat: 206s ago, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for order-a: 43011
+WARNING: watcher still down (same stale episode; last beat: 210s ago, grace 300s) - full banner already printed this episode.
+Process and Treehouse return log for order-b
+Focus at first Treehouse return call w3/w3:t1
+🌳 Worktree returned to pool.
+/tmp/run/fm-herdr-presentation.C0tPZM/project: already current
+teardown order-b complete (window fm-lab-fm-herdr-present-145-10787:w6:p2, worktree /tmp/fm-test-treehouse.gxQc8O/pool/.treehouse/project-9f2d45/3/project)
+Backlog: order-b just finished (this home keeps no markdown backlog at /tmp/run/fm-herdr-presentation.C0tPZM/home/data/backlog.md). Update /tmp/run/fm-herdr-presentation.C0tPZM/home/data/backlog.md - move order-b to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+WARNING: watcher still down (same stale episode; last beat: 198s ago, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for order-b: 40130
+WARNING: watcher still down (same stale episode; last beat: 205s ago, grace 300s) - full banner already printed this episode.
+Herdr event focus audit
+seeded-prune-refusal	w5/w5:t1	w5/w5:t1	w5:p1
+seeded-prune-refusal	w5/w5:t1	w5/w5:t1	w5:p1
+pane-close	w5/w5:t1	w5/w5:t2	w5:p1
+seeded-prune-refusal	w5/w5:t2	w5/w5:t2	w5:p1
+workspace-move	w5/w5:t2	w5/w5:t2	w5
+tab-create	w3/w3:t1	w3/w3:t1	fm-lock-contended
+workspace-create	w3/w3:t1	w3/w3:t1	└ order-b · p:dqJ8HZMlIEkFaeFtP-jzrA
+tab-create	w3/w3:t1	w3/w3:t1	fm-order-b
+pane-close	w3/w3:t1	w3/w3:t1	w6:p1
+workspace-move	w3/w3:t1	w3/w3:t1	w6
+workspace-create	w3/w3:t1	w3/w3:t1	└ order-a · p:_23RQsK6X84MRgexlAgABQ
+tab-create	w3/w3:t1	w3/w3:t1	fm-order-a
+pane-close	w3/w3:t1	w3/w3:t1	w7:p1
+workspace-move	w3/w3:t1	w3/w3:t1	w7
+workspace-create	w3/w3:t1	w3/w3:t1	└ order-fail · p:KiCMfrfudBIB703_IEptnA
+tab-create	w3/w3:t1	w3/w3:t1	fm-order-fail
+pane-close	w3/w3:t1	w3/w3:t1	w8:p1
+workspace-move	w3/w3:t1	w3/w3:t1	w4
+workspace-move	w3/w3:t1	w3/w3:t1	w6
+workspace-move	w3/w3:t1	w3/w3:t1	w7
+FM_TEST_END 2026-11-27T15:40:12Z tests/fm-backend-herdr-presentation-e2e.test.sh exit=0 duration_ms=229519 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=229582
+FM_TEST_SUMMARY_FAMILY family=real-herdr-gated count=1 duration_ms=229519 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-backend-herdr-presentation-e2e.test.sh duration_ms=229519
+fm-test-run: wrote timing artifact: /tmp/fm-backend-herdr-presentation-e2e.json
+
+Private session inventory after the tests: [{"default":true,"name":"default","running":true}]
+No per-suite Treehouse scratch or default-home pool remains if the checks above reported no residual path.
+Disposable default Herdr server exit: 0

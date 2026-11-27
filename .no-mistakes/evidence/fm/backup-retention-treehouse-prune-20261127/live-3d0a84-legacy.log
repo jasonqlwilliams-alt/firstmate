@@ -1,0 +1,5 @@
+Firstmate working tree 3d0a84ff, private Linux environment, synthetic inputs.
+fm-install-treehouse.sh: downloading treehouse-v2.0.1-linux-amd64.tar.gz from https://github.com/kunchenguid/treehouse/releases/download/v2.0.1/treehouse-v2.0.1-linux-amd64.tar.gz
+tar: treehouse: Cannot change ownership to uid 1001, gid 1001: Invalid argument
+tar: Exiting with failure status due to previous errors
+Driver exit: 2

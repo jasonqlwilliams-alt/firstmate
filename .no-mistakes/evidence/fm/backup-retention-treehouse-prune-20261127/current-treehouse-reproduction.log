@@ -1,0 +1,13 @@
+Maintainer reproduction using the helper from CONTRIBUTING.md and a private clone
+Cloning into '/tmp/fm-test-treehouse.BHjeR5/repo'...
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.BHjeR5/pool/.treehouse/repo-f03ee9/1/repo. Run 'treehouse return /tmp/fm-test-treehouse.BHjeR5/pool/.treehouse/repo-f03ee9/1/repo' to release it.
+/tmp/fm-test-treehouse.BHjeR5/pool/.treehouse/repo-f03ee9/1/repo
+Git verified the active leased checkout while the reproduction ran
+Reproduction scratch root removed on Bash exit /tmp/fm-test-treehouse.BHjeR5
+Default HOME/.treehouse inventory and sentinel remained identical
+.
+./existing-pool
+./existing-pool/sentinel
+./existing-pool/tmp
+df8eed8a6d8d5dc225e86dd7dc1cf3866287e6a65ecbe678baaa6323bc2cbbe4  ./existing-pool/sentinel

@@ -1,0 +1,33 @@
+Firstmate working tree 3d0a84ff, private Linux environment, synthetic inputs.
+$ bin/fm-test-run.sh --jobs 1 tests/fm-test-run.test.sh
+FM_TEST_BEGIN 2026-11-27T16:43:50Z tests/fm-test-run.test.sh family=pure-contract-unit expected_gate_skip=none
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.y5epTZ/pool/.treehouse/fm-test-run.test.sh.clone-e698b5/1/fm-test-run.test.sh.clone. Run 'treehouse return /tmp/fm-test-treehouse.y5epTZ/pool/.treehouse/fm-test-run.test.sh.clone-e698b5/1/fm-test-run.test.sh.clone' to release it.
+Suite fm-test-run.test.sh allocated and read /tmp/fm-test-treehouse.y5epTZ/pool/.treehouse/fm-test-run.test.sh.clone-e698b5/1/fm-test-run.test.sh.clone using real Treehouse with TREEHOUSE_ROOT unset in the child.
+FM_TEST_END 2026-11-27T16:44:12Z tests/fm-test-run.test.sh exit=0 duration_ms=22619 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=22686
+FM_TEST_SUMMARY_FAMILY family=pure-contract-unit count=1 duration_ms=22619 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-test-run.test.sh duration_ms=22619
+No fm-test-treehouse scratch roots remain.
+Synthetic default ~/.treehouse and its sentinel unchanged. Configured external checkout destinations absent.
+$ bin/fm-test-run.sh --jobs 2 tests/fm-test-run.test.sh tests/fm-composer-ghost.test.sh
+FM_TEST_BEGIN 2026-11-27T16:44:13Z tests/fm-composer-ghost.test.sh family=pure-contract-unit expected_gate_skip=none
+FM_TEST_BEGIN 2026-11-27T16:44:13Z tests/fm-test-run.test.sh family=pure-contract-unit expected_gate_skip=none
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.BfFP8s/pool/.treehouse/fm-composer-ghost.test.sh.clone-e698b5/1/fm-composer-ghost.test.sh.clone. Run 'treehouse return /tmp/fm-test-treehouse.BfFP8s/pool/.treehouse/fm-composer-ghost.test.sh.clone-e698b5/1/fm-composer-ghost.test.sh.clone' to release it.
+Suite fm-composer-ghost.test.sh allocated and read /tmp/fm-test-treehouse.BfFP8s/pool/.treehouse/fm-composer-ghost.test.sh.clone-e698b5/1/fm-composer-ghost.test.sh.clone using real Treehouse with TREEHOUSE_ROOT unset in the child.
+Suite fm-composer-ghost.test.sh observed both suites hold real worktrees at the same time.
+FM_TEST_END 2026-11-27T16:44:13Z tests/fm-composer-ghost.test.sh exit=0 duration_ms=257 gate_skip=false
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.vlX5An/pool/.treehouse/fm-test-run.test.sh.clone-e698b5/1/fm-test-run.test.sh.clone. Run 'treehouse return /tmp/fm-test-treehouse.vlX5An/pool/.treehouse/fm-test-run.test.sh.clone-e698b5/1/fm-test-run.test.sh.clone' to release it.
+Suite fm-test-run.test.sh allocated and read /tmp/fm-test-treehouse.vlX5An/pool/.treehouse/fm-test-run.test.sh.clone-e698b5/1/fm-test-run.test.sh.clone using real Treehouse with TREEHOUSE_ROOT unset in the child.
+Suite fm-test-run.test.sh observed both suites hold real worktrees at the same time.
+FM_TEST_END 2026-11-27T16:44:13Z tests/fm-test-run.test.sh exit=0 duration_ms=299 gate_skip=false
+FM_TEST_SUMMARY total=2 failed=0 skipped_gate=0 duration_ms=432
+FM_TEST_SUMMARY_FAMILY family=pure-contract-unit count=2 duration_ms=556 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-test-run.test.sh duration_ms=299
+FM_TEST_SLOWEST rank=2 script=tests/fm-composer-ghost.test.sh duration_ms=257
+Parallel suites received distinct roots /tmp/fm-test-treehouse.vlX5An/pool and /tmp/fm-test-treehouse.BfFP8s/pool.
+No fm-test-treehouse scratch roots remain.
+Synthetic default ~/.treehouse and its sentinel unchanged. Configured external checkout destinations absent.
+Driver exit: 0

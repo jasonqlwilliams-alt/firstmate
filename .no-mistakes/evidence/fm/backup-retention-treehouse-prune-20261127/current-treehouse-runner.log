@@ -1,0 +1,44 @@
+bin/fm-test-run.sh --jobs 1 tests/fm-test-run.test.sh (synthetic suite using real Treehouse)
+FM_TEST_BEGIN 2026-11-27T15:53:12Z tests/fm-test-run.test.sh family=pure-contract-unit expected_gate_skip=none
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.ITnfjI/pool/.treehouse/serial-fm-test-run.test.sh-f03ee9/1/serial-fm-test-run.test.sh. Run 'treehouse return /tmp/fm-test-treehouse.ITnfjI/pool/.treehouse/serial-fm-test-run.test.sh-f03ee9/1/serial-fm-test-run.test.sh' to release it.
+Treehouse lease with TREEHOUSE_ROOT unset in the command
+  suite fm-test-run.test.sh
+  root /tmp/fm-test-treehouse.ITnfjI/pool
+  checkout /tmp/fm-test-treehouse.ITnfjI/pool/.treehouse/serial-fm-test-run.test.sh-f03ee9/1/serial-fm-test-run.test.sh
+FM_TEST_END 2026-11-27T15:53:41Z tests/fm-test-run.test.sh exit=0 duration_ms=28613 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=28699
+FM_TEST_SUMMARY_FAMILY family=pure-contract-unit count=1 duration_ms=28613 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-test-run.test.sh duration_ms=28613
+Scratch root removed after suite exit /tmp/fm-test-treehouse.ITnfjI
+bin/fm-test-run.sh --jobs 2 tests/fm-test-run.test.sh tests/fm-brief.test.sh (synchronized synthetic suites using real Treehouse)
+FM_TEST_BEGIN 2026-11-27T15:53:41Z tests/fm-brief.test.sh family=pure-contract-unit expected_gate_skip=none
+FM_TEST_BEGIN 2026-11-27T15:53:41Z tests/fm-test-run.test.sh family=pure-contract-unit expected_gate_skip=none
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.86251c/pool/.treehouse/parallel-fm-test-run.test.sh-f03ee9/1/parallel-fm-test-run.test.sh. Run 'treehouse return /tmp/fm-test-treehouse.86251c/pool/.treehouse/parallel-fm-test-run.test.sh-f03ee9/1/parallel-fm-test-run.test.sh' to release it.
+Treehouse lease with TREEHOUSE_ROOT unset in the command
+  suite fm-test-run.test.sh
+  root /tmp/fm-test-treehouse.86251c/pool
+  checkout /tmp/fm-test-treehouse.86251c/pool/.treehouse/parallel-fm-test-run.test.sh-f03ee9/1/parallel-fm-test-run.test.sh
+Parallel peer used a separate scratch root /tmp/fm-test-treehouse.Lzut3E/pool
+FM_TEST_END 2026-11-27T15:53:42Z tests/fm-test-run.test.sh exit=0 duration_ms=371 gate_skip=false
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.Lzut3E/pool/.treehouse/parallel-fm-brief.test.sh-f03ee9/1/parallel-fm-brief.test.sh. Run 'treehouse return /tmp/fm-test-treehouse.Lzut3E/pool/.treehouse/parallel-fm-brief.test.sh-f03ee9/1/parallel-fm-brief.test.sh' to release it.
+Treehouse lease with TREEHOUSE_ROOT unset in the command
+  suite fm-brief.test.sh
+  root /tmp/fm-test-treehouse.Lzut3E/pool
+  checkout /tmp/fm-test-treehouse.Lzut3E/pool/.treehouse/parallel-fm-brief.test.sh-f03ee9/1/parallel-fm-brief.test.sh
+Parallel peer used a separate scratch root /tmp/fm-test-treehouse.86251c/pool
+FM_TEST_END 2026-11-27T15:53:42Z tests/fm-brief.test.sh exit=0 duration_ms=422 gate_skip=false
+FM_TEST_SUMMARY total=2 failed=0 skipped_gate=0 duration_ms=591
+FM_TEST_SUMMARY_FAMILY family=pure-contract-unit count=2 duration_ms=793 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-brief.test.sh duration_ms=422
+FM_TEST_SLOWEST rank=2 script=tests/fm-test-run.test.sh duration_ms=371
+Scratch root removed after suite exit /tmp/fm-test-treehouse.Lzut3E
+Scratch root removed after suite exit /tmp/fm-test-treehouse.86251c
+Default HOME/.treehouse inventory and sentinel remained identical
+.
+./existing-pool
+./existing-pool/sentinel
+./existing-pool/tmp
+df8eed8a6d8d5dc225e86dd7dc1cf3866287e6a65ecbe678baaa6323bc2cbbe4  ./existing-pool/sentinel

@@ -1,0 +1,19 @@
+Firstmate working tree 3d0a84ff, private Linux environment, synthetic inputs.
+$ bash -e (source shared Treehouse helper, clone, get --lease, inspect, exit)
+Cloning into '/tmp/fm-test-treehouse.NJfv2J/repo'...
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.NJfv2J/pool/.treehouse/repo-e698b5/1/repo. Run 'treehouse return /tmp/fm-test-treehouse.NJfv2J/pool/.treehouse/repo-e698b5/1/repo' to release it.
+Leased checkout: /tmp/fm-test-treehouse.NJfv2J/pool/.treehouse/repo-e698b5/1/repo
+Checkout contents: Synthetic checkout data
+base  main  (repository default)
+1     leased       /tmp/fm-test-treehouse.NJfv2J/pool/.treehouse/repo-e698b5/1/repo  (detached)
+No fm-test-treehouse scratch roots remain.
+Synthetic default ~/.treehouse and its sentinel unchanged. Configured external checkout destinations absent.
+$ bash (source tests/lib.sh directly and use real Treehouse, then exit)
+Cloning into '/tmp/fm-test-treehouse.vPHFu0/repo'...
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.vPHFu0/pool/.treehouse/repo-e698b5/1/repo. Run 'treehouse return /tmp/fm-test-treehouse.vPHFu0/pool/.treehouse/repo-e698b5/1/repo' to release it.
+Standalone suite checkout: /tmp/fm-test-treehouse.vPHFu0/pool/.treehouse/repo-e698b5/1/repo
+No fm-test-treehouse scratch roots remain.
+Synthetic default ~/.treehouse and its sentinel unchanged. Configured external checkout destinations absent.
+Driver exit: 0

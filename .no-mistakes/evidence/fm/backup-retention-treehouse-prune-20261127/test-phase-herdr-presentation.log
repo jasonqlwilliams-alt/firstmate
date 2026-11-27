@@ -1,0 +1,27 @@
+Workspace-local Herdr sockets used an inode-verified /proc fd alias for paths over Linux AF_UNIX length.
+herdr 0.7.4
+v3.1.8
+Herdr session inventory before suite [{"name":"default","default":true,"running":true}]
+bin/fm-test-run.sh --jobs 1 --fail-on-gate-skip=treehouse --per-script-timeout-secs 1200 --json {run-worktree}/.gate-check/presentation-retry/tmp/timing.json tests/fm-backend-herdr-presentation-e2e.test.sh
+FM_TEST_BEGIN 2026-11-27T16:18:42Z tests/fm-backend-herdr-presentation-e2e.test.sh family=real-herdr-gated expected_gate_skip=herdr,treehouse
+ok - real Herdr lab: an opted-out spawn retains the Stage 1 Herdr command sequence with zero ordering calls
+ok - real Herdr lab: a home that configured nothing falls back flat on below-floor herdr 0.7.4 with one naming warning
+ok - real Herdr lab: every projected create, task-tab create, seeded prune, and move preserves active workspace and tab
+ok - real Herdr lab: persisted-focused seeded prune proceeds when no live client is attached
+ok - real Herdr lab: bounded lock contention warns and falls back flat without projection or focus drift
+ok - real Herdr lab: flat and projected spawns reuse the Treehouse slot and record matching stable metadata with distinct task temp directories
+ok - real Herdr lab: concurrent primary workers form one stable contiguous block without active workspace/tab drift
+ok - real Herdr lab: forced workspace.move failure leaves a successful worker in default order with a warning and no cleanup
+ok - real Herdr lab: concurrent post-create abort cleanup stays serialized with exact focus restoration
+ok - real Herdr lab: Treehouse commands and metadata shape are byte-identical except for endpoint IDs and spawn incarnation
+ok - real Herdr lab: exact task-pane close removes the projected workspace with no unrestored wrong-focus interval
+not ok - concurrent projected teardowns changed active workspace/tab from w3/w3:t1 to w8/w8:t2
+FM_TEST_END 2026-11-27T16:23:35Z tests/fm-backend-herdr-presentation-e2e.test.sh exit=1 duration_ms=292737 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=1 skipped_gate=0 duration_ms=292809
+FM_TEST_SUMMARY_FAMILY family=real-herdr-gated count=1 duration_ms=292737 failed=1
+FM_TEST_SLOWEST rank=1 script=tests/fm-backend-herdr-presentation-e2e.test.sh duration_ms=292737
+fm-test-run: wrote timing artifact: {run-worktree}/.gate-check/presentation-retry/tmp/timing.json
+Herdr session inventory after suite [{"name":"default","default":true,"running":true}]
+Real Treehouse used /tmp/fm-test-treehouse.AvTP35/pool; scratch removed
+Default and per-suite Treehouse pools after the run were absent if no residual path was reported. Runner exit=1
+Disposable default server exit=0

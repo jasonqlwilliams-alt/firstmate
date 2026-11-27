@@ -1,0 +1,23 @@
+fm-install-treehouse.sh: downloading treehouse-v2.0.1-linux-amd64.tar.gz from https://github.com/kunchenguid/treehouse/releases/download/v2.0.1/treehouse-v2.0.1-linux-amd64.tar.gz
+fm-install-treehouse.sh: installed treehouse v2.0.1 to /tmp/legacy-tools/treehouse
+v2.0.1
+v2.0.1
+bin/fm-test-run.sh --jobs 1 --json /tmp/legacy.json tests/fm-treehouse-lease-safety.test.sh
+FM_TEST_BEGIN 2026-11-27T15:52:12Z tests/fm-treehouse-lease-safety.test.sh family=real-herdr-gated expected_gate_skip=treehouse
+skip: treehouse does not support --root
+fm-test-run: gate skip: tests/fm-treehouse-lease-safety.test.sh: treehouse does not support --root
+FM_TEST_END 2026-11-27T15:52:13Z tests/fm-treehouse-lease-safety.test.sh exit=0 duration_ms=89 gate_skip=true
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=1 duration_ms=144
+FM_TEST_SUMMARY_FAMILY family=real-herdr-gated count=1 duration_ms=89 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-treehouse-lease-safety.test.sh duration_ms=89
+fm-test-run: wrote timing artifact: /tmp/legacy.json
+{
+  "duration_ms": 89,
+  "exit": 0,
+  "expected_gate_skip": "treehouse",
+  "family": "real-herdr-gated",
+  "gate_skip": true,
+  "gate_skip_reason": "treehouse does not support --root",
+  "path": "tests/fm-treehouse-lease-safety.test.sh"
+}
+Treehouse 2.0.1 gate skipped before default pool creation

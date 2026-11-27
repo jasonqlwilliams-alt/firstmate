@@ -1,0 +1,22 @@
+bin/fm-test-run.sh --jobs 1 tests/fm-test-run.test.sh with an EBUSY stale pool before a stale removable pool
+rm: cannot remove '/tmp/fm-test-treehouse.00-busy': Device or resource busy
+warning: could not remove orphaned fixture /tmp/fm-test-treehouse.00-busy
+FM_TEST_BEGIN 2026-11-27T15:53:12Z tests/fm-test-run.test.sh family=pure-contract-unit expected_gate_skip=none
+🌳 Setting up worktree...
+🌳 Leased worktree at /tmp/fm-test-treehouse.J39Z66/pool/.treehouse/orphan-fm-test-run.test.sh-f03ee9/1/orphan-fm-test-run.test.sh. Run 'treehouse return /tmp/fm-test-treehouse.J39Z66/pool/.treehouse/orphan-fm-test-run.test.sh-f03ee9/1/orphan-fm-test-run.test.sh' to release it.
+Treehouse lease with TREEHOUSE_ROOT unset in the command
+  suite fm-test-run.test.sh
+  root /tmp/fm-test-treehouse.J39Z66/pool
+  checkout /tmp/fm-test-treehouse.J39Z66/pool/.treehouse/orphan-fm-test-run.test.sh-f03ee9/1/orphan-fm-test-run.test.sh
+FM_TEST_END 2026-11-27T15:53:41Z tests/fm-test-run.test.sh exit=0 duration_ms=28594 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=28679
+FM_TEST_SUMMARY_FAMILY family=pure-contract-unit count=1 duration_ms=28594 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-test-run.test.sh duration_ms=28594
+Scratch root removed after suite exit /tmp/fm-test-treehouse.J39Z66
+Busy pool remained, next stale fixture was reaped and selected suite ran
+Default HOME/.treehouse inventory and sentinel remained identical
+.
+./existing-pool
+./existing-pool/sentinel
+./existing-pool/tmp
+df8eed8a6d8d5dc225e86dd7dc1cf3866287e6a65ecbe678baaa6323bc2cbbe4  ./existing-pool/sentinel

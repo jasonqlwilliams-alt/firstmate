@@ -1,0 +1,4 @@
+fm-install-treehouse.sh: downloading treehouse-v3.1.8-linux-amd64.tar.gz from https://github.com/kunchenguid/treehouse/releases/download/v3.1.8/treehouse-v3.1.8-linux-amd64.tar.gz
+fm-install-treehouse.sh: installed treehouse v3.1.8 to {run-worktree}/.phase-live/tools/treehouse
+v3.1.8
+Treehouse installer exit: 0
