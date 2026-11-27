@@ -59,6 +59,7 @@ make_home() {  # <name> [task-id...]
   case_dir="$TMP_ROOT/$name"
   home="$case_dir/home"
   fakebin=$(fm_fakebin "$case_dir")
+  fm_test_track_task_tmps "$fakebin"
   mkdir -p "$home/state" "$home/config" "$home/data" "$home/projects"
   touch "$home/state/.last-watcher-beat"
   printf '%s\n' claude > "$home/config/crew-harness"

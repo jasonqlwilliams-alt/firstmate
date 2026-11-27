@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Behavior tests for per-task GOTMPDIR support (fm-gotmp).
 #
-# fm-spawn gives each task a temp root /tmp/fm-<id>/ with Go's build temp nested at
+# fm-spawn gives each task a private temp root with Go's build temp nested at
 # gotmp/, exports GOTMPDIR into the crewmate pane, and records tasktmp= in the task's
 # meta. fm-teardown reads tasktmp= and removes the whole root on cleanup.
 #
@@ -11,34 +11,13 @@
 # metadata publication, and the pane environment export.
 set -u
 
-# This suite does not source tests/lib.sh, so exempt its teardown subprocess from
-# the gate-lifecycle refusal (bin/fm-gate-refuse-lib.sh) the way lib.sh does for
-# the rest of the suite: the no-mistakes gate runs this suite from a gate worktree,
-# which the guard would otherwise refuse.
-export FM_GATE_REFUSE_BYPASS=1
-
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=tests/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 TEARDOWN="$ROOT/bin/fm-teardown.sh"
-
-fail() {
-  printf 'not ok - %s\n' "$1" >&2
-  exit 1
-}
-
-pass() {
-  printf 'ok - %s\n' "$1"
-}
-
-TMP_ROOT=
-
-cleanup() {
-  if [ -n "${TMP_ROOT:-}" ]; then
-    rm -rf "$TMP_ROOT"
-  fi
-}
-trap cleanup EXIT
-
-TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-gotmp-tests.XXXXXX")
+TMP_ROOT=$(fm_test_tmproot fm-gotmp-tests)
+LEGACY_SLEEPER_PID=
+LEGACY_SLEEPER_IDENTITY=
+trap 'fm_test_stop_sleeper "$LEGACY_SLEEPER_PID" "$LEGACY_SLEEPER_IDENTITY"; fm_test_cleanup' EXIT
 
 # Build a fake FM_HOME/FM_ROOT so the real fm-teardown.sh (symlinked in) resolves
 # state and helper scripts inside it. Stub the helper scripts fm-teardown calls so no
@@ -89,6 +68,7 @@ SH
   # requires the marker helper even for this ordinary-task teardown fixture.
   ln -s "$ROOT/bin/fm-pending-reply-lib.sh" "$fake/bin/fm-pending-reply-lib.sh"
   ln -s "$ROOT/bin/fm-marker-lib.sh" "$fake/bin/fm-marker-lib.sh"
+  ln -s "$ROOT/bin/fm-workset-lib.sh" "$fake/bin/fm-workset-lib.sh"
   ln -s "$ROOT/bin/fm-operational-input.sh" "$fake/bin/fm-operational-input.sh"
   # Ordinary teardown reports any final ledger outcome before removing records.
   ln -s "$ROOT/bin/fm-inactive-reconcile.sh" "$fake/bin/fm-inactive-reconcile.sh"
@@ -152,6 +132,41 @@ test_teardown_removes_tasktmp_dir() {
   pass "fm-teardown removes the dir pointed to by tasktmp= in meta"
 }
 
+test_teardown_preserves_shared_tasktmp() {
+  local variant=$1 id fake legacy_task_tmp task_tmp
+  legacy_task_tmp=$(mktemp -d /tmp/fm-legacy-XXXXXX) || fail "could not allocate legacy fixture"
+  FM_TEST_CLEANUP_DIRS+=("$legacy_task_tmp")
+  id=${legacy_task_tmp#/tmp/fm-}
+  mkdir "$legacy_task_tmp/gotmp"
+  printf 'another home still needs this\n' > "$legacy_task_tmp/gotmp/keep"
+  task_tmp=$legacy_task_tmp
+  if [ "$variant" = symlink ]; then
+    task_tmp="$TMP_ROOT/tasktmp-link"
+    ln -s "$legacy_task_tmp" "$task_tmp"
+  fi
+  fake=$(make_fake_root "$id" "$task_tmp")
+  if command -v lsof >/dev/null; then
+    ( cd "$legacy_task_tmp/gotmp" && exec sleep 300 ) &
+    LEGACY_SLEEPER_PID=$!
+    LEGACY_SLEEPER_IDENTITY=$(fm_test_cwd_sleeper_identity "$LEGACY_SLEEPER_PID") \
+      || fail "legacy sleeper did not start inside the shared root"
+  else
+    printf 'skip: %s task temp process preservation requires lsof\n' "$variant"
+  fi
+  FM_HOME="$fake" bash "$fake/bin/fm-teardown.sh" "$id" > "$fake/teardown.log" 2>&1 \
+    || fail "$variant teardown failed: $(cat "$fake/teardown.log")"
+  [ ! -e "$fake/state/$id.meta" ] || fail "$variant teardown left the task record"
+  [ -f "$task_tmp/gotmp/keep" ] || fail "$variant teardown removed a potentially shared temp root or its link"
+  if [ -n "$LEGACY_SLEEPER_IDENTITY" ]; then
+    fm_test_owner_is_alive "$LEGACY_SLEEPER_PID" "$LEGACY_SLEEPER_IDENTITY" \
+      || fail "$variant teardown signalled a process in the shared temp root"
+    fm_test_stop_sleeper "$LEGACY_SLEEPER_PID" "$LEGACY_SLEEPER_IDENTITY"
+    LEGACY_SLEEPER_PID=''
+    LEGACY_SLEEPER_IDENTITY=''
+  fi
+  pass "fm-teardown leaves the $variant task temp path alone"
+}
+
 test_teardown_skips_gracefully_without_tasktmp() {
   # Backward compat: a meta from a pre-fix task has no tasktmp= line. Teardown must
   # not error and must not remove anything.
@@ -191,6 +206,7 @@ SH
   ln -s "$ROOT/bin/fm-secondmate-parent-lib.sh" "$fake/bin/fm-secondmate-parent-lib.sh"
   ln -s "$ROOT/bin/fm-pending-reply-lib.sh" "$fake/bin/fm-pending-reply-lib.sh"
   ln -s "$ROOT/bin/fm-marker-lib.sh" "$fake/bin/fm-marker-lib.sh"
+  ln -s "$ROOT/bin/fm-workset-lib.sh" "$fake/bin/fm-workset-lib.sh"
   ln -s "$ROOT/bin/fm-operational-input.sh" "$fake/bin/fm-operational-input.sh"
   ln -s "$ROOT/bin/fm-inactive-reconcile.sh" "$fake/bin/fm-inactive-reconcile.sh"
   ln -s "$ROOT/bin/fm-parent-channel-lib.sh" "$fake/bin/fm-parent-channel-lib.sh"
@@ -245,5 +261,7 @@ test_teardown_skips_gracefully_when_dir_missing() {
 }
 
 test_teardown_removes_tasktmp_dir
+test_teardown_preserves_shared_tasktmp legacy
+test_teardown_preserves_shared_tasktmp symlink
 test_teardown_skips_gracefully_without_tasktmp
 test_teardown_skips_gracefully_when_dir_missing

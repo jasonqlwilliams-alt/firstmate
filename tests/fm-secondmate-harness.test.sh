@@ -421,6 +421,7 @@ test_propagate_lib() {
 make_noop_tmux() {
   local dir=$1 fakebin="$1/fakebin"
   mkdir -p "$fakebin"
+  fm_test_track_task_tmps "$fakebin"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -482,6 +483,7 @@ test_herdr_secondmate_launch_at_reused_pane() {
   mkdir -p "$primary"/{state,data,config,projects}
   make_seeded_home "$mate" mate
   fakebin=$(fm_fakebin "$world")
+  fm_test_track_task_tmps "$fakebin"
   fm_write_meta "$primary/state/old-worker.meta" "window=$pane" 'backend=herdr' 'kind=ship' \
     'herdr_terminal_id=term-dead-worker'
   cat > "$fakebin/herdr" <<'SH'
@@ -720,6 +722,7 @@ meta_field() { grep "^$2=" "$1" 2>/dev/null | tail -1 | cut -d= -f2-; }
 make_launch_capturing_tmux() {
   local dir=$1 fakebin="$1/fakebin"
   mkdir -p "$fakebin"
+  fm_test_track_task_tmps "$fakebin"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u

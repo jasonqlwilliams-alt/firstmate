@@ -743,6 +743,16 @@ secondmate_recovery_spawn() (
   FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$1" --secondmate
 )
 
+report_secondmate_respawn_failure() {
+  local id=$1 cause=$2 output=$3 reason retained
+  reason=$(first_line "$output")
+  retained=$(awk -v prefix="warning: task $id's temporary directory remains at " 'index($0, prefix) == 1 { print; exit }' <<< "$output")
+  if [ -n "$retained" ] && [ "$retained" != "$reason" ]; then
+    reason="$reason ($retained)"
+  fi
+  echo "SECONDMATE_LIVENESS: secondmate $id: respawn failed after $cause: $reason"
+}
+
 # One secondmate's liveness check. Split out of the sweep so each is individually
 # timed; every `return` here was a `continue` in the loop and means exactly the
 # same thing - move on to the next secondmate. Respawned ids are recorded through
@@ -811,7 +821,7 @@ secondmate_liveness_one() {  # <meta> <id>
           secondmate_note_respawned "$id"
           report_relaunch "$id" "$cause" "host=$remote_host"
         else
-          echo "SECONDMATE_LIVENESS: secondmate $id: respawn failed after $cause: $(first_line "$out")"
+          report_secondmate_respawn_failure "$id" "$cause" "$out"
         fi
         ;;
       ambiguous|unreadable|unverified)
@@ -860,7 +870,7 @@ secondmate_liveness_one() {  # <meta> <id>
         secondmate_note_respawned "$id"
         report_relaunch "$id" "$cause" "backend=$backend"
       else
-        echo "SECONDMATE_LIVENESS: secondmate $id: respawn failed after $cause: $(first_line "$out")"
+        report_secondmate_respawn_failure "$id" "$cause" "$out"
       fi
       ;;
     ambiguous)

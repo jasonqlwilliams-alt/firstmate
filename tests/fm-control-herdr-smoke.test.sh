@@ -22,6 +22,8 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=tests/lib.sh
+. "$ROOT/tests/lib.sh"
 
 fail() {
   printf 'not ok - %s\n' "$1" >&2
@@ -61,10 +63,13 @@ export HERDR_LAB_HELPER HERDR_ORIGINAL_PATH HERDR_LAB_SESSION="$SESSION" HERDR_S
 SCRATCH=
 CLEANED_UP=0
 cleanup_all() {
+  local status=0
   [ "$CLEANED_UP" -eq 0 ] || return 0
   CLEANED_UP=1
   [ -n "$SCRATCH" ] && rm -rf "$SCRATCH"
-  env PATH="$HERDR_ORIGINAL_PATH" "$HERDR_LAB_HELPER" teardown "$SESSION"
+  env PATH="$HERDR_ORIGINAL_PATH" "$HERDR_LAB_HELPER" teardown "$SESSION" || status=$?
+  fm_test_cleanup
+  return "$status"
 }
 trap cleanup_all EXIT
 "$HERDR_LAB_HELPER" provision "$SESSION" || fail "could not provision isolated Herdr lab session"
@@ -74,6 +79,7 @@ SCRATCH=$(cd "$SCRATCH" && pwd)
 HOME_DIR="$SCRATCH/home"
 FAKEBIN="$SCRATCH/fakebin"
 mkdir -p "$FAKEBIN"
+fm_test_track_task_tmps "$FAKEBIN"
 cat > "$FAKEBIN/herdr" <<'SH'
 #!/usr/bin/env bash
 set -eu

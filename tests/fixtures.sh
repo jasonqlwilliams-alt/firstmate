@@ -263,6 +263,7 @@ fm_test_make_spawn_fakebin() {
   local dir=$1 fakebin
   shift
   fakebin=$(fm_fakebin "$dir")
+  fm_test_track_task_tmps "$fakebin"
   fm_test_fake_tmux_spawn "$fakebin"
   fm_fake_exit0 "$fakebin" treehouse "$@"
   printf '%s\n' "$fakebin"

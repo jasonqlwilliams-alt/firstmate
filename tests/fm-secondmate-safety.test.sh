@@ -1899,12 +1899,20 @@ EOF
 }
 
 test_secondmate_force_teardown_discards_child_work() {
-  local home subhome childproj childwt fakebin log
+  local home subhome childproj childwt child_tmp other_tmp linked_tmp fakebin log
   home="$TMP_ROOT/force-teardown-home"
   subhome="$TMP_ROOT/force-teardown-subhome"
   childproj="$subhome/projects/alpha"
   childwt="$TMP_ROOT/force-child-worktree"
+  child_tmp="$TMP_ROOT/force-child-private"
+  other_tmp="$TMP_ROOT/other-home-private"
+  linked_tmp="$TMP_ROOT/force-child-linked"
   mkdir -p "$home/state" "$home/data" "$subhome/state"
+  mkdir -m 700 "$child_tmp" "$other_tmp" || fail "could not create task temp fixtures"
+  mkdir "$child_tmp/gotmp" || fail "could not create child GOTMPDIR fixture"
+  printf 'build artifact\n' > "$child_tmp/gotmp/build"
+  printf 'other home artifact\n' > "$other_tmp/keep"
+  ln -s "$other_tmp" "$linked_tmp" || fail "could not link task temp fixture"
   fm_git_worktree "$childproj" "$childwt" force-child
   printf 'domain\n' > "$subhome/.fm-secondmate-home"
   cat > "$home/state/domain.meta" <<EOF
@@ -1927,7 +1935,10 @@ harness=echo
 kind=ship
 mode=no-mistakes
 yolo=off
+tasktmp=$child_tmp
 EOF
+  fm_write_meta "$subhome/state/linked.meta" 'window=firstmate:fm-linked' "project=$childproj" \
+    "worktree=$TMP_ROOT/force-missing-worktree" 'harness=echo' 'kind=scout' "tasktmp=$linked_tmp"
   fakebin=$(make_fake_tmux "$TMP_ROOT/force-teardown-fake")
   log="$TMP_ROOT/force-teardown-fake/tmux.log"
   if PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_TMUX_LOG="$log" FM_FAKE_TMUX_CAPTURE="$TMP_ROOT/force-teardown-fake/pane.txt" \
@@ -1939,6 +1950,8 @@ EOF
     || fail "force teardown failed to discard child work"
   [ ! -d "$subhome" ] || fail "force teardown did not remove the retired secondmate home"
   [ ! -d "$childwt" ] || fail "force teardown did not remove child worktree"
+  [ ! -e "$child_tmp" ] || fail "force teardown did not remove the child's private temp root"
+  [ -L "$linked_tmp" ] && [ -f "$other_tmp/keep" ] || fail "force teardown touched a symlinked temp root"
   [ ! -e "$home/state/domain.meta" ] || fail "teardown did not clear parent meta"
   grep -F -- '- domain ' "$home/data/secondmates.md" >/dev/null && fail "force teardown did not remove secondmate registry route"
   grep -F 'kill-window -t =firstmate:=fm-child' "$log" >/dev/null || fail "force teardown did not kill child window"

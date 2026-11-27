@@ -41,11 +41,7 @@ BASE_PATH=${FM_TEST_BASE_PATH:-/usr/bin:/bin:/usr/sbin:/sbin}
 TMP_ROOT=$(fm_test_tmproot fm-session-start-tests)
 SESSION_START_TEST_HARNESS_PID=$$
 SESSION_START_SECOND_MATE_ID="fmtest-sm-${TMP_ROOT##*.}"
-SESSION_START_SECOND_MATE_TMP="/tmp/fm-$SESSION_START_SECOND_MATE_ID"
 SESSION_START_HERDR_SECOND_MATE_ID="fmtest-herdr-${TMP_ROOT##*.}"
-SESSION_START_HERDR_SECOND_MATE_TMP="/tmp/fm-$SESSION_START_HERDR_SECOND_MATE_ID"
-FM_TEST_CLEANUP_DIRS+=("$TMP_ROOT" "$SESSION_START_SECOND_MATE_TMP" "$SESSION_START_HERDR_SECOND_MATE_TMP")
-trap fm_test_cleanup EXIT
 fm_git_identity fmtest fmtest@example.invalid
 
 # --- world builders ----------------------------------------------------------
@@ -588,6 +584,7 @@ EOF
   make_fake_toolchain "$fakebin"
   make_fake_ps_claude "$fakebin"
   fm_fake_exit0 "$fakebin" pi
+  fm_test_track_task_tmps "$fakebin"
   make_fake_tmux_secondmate_recovery "$fakebin"
   : > "$log"
   printf '%s|%s|%s|%s|%s|%s\n' "$root" "$home" "$fakebin" "$mate" "$log" "$spawned"
@@ -635,6 +632,7 @@ EOF
   make_fake_toolchain "$fakebin"
   make_fake_ps_claude "$fakebin"
   fm_fake_exit0 "$fakebin" pi
+  fm_test_track_task_tmps "$fakebin"
   make_fake_herdr_secondmate_recovery "$fakebin"
   : > "$log"
   printf '%s|%s|%s|%s|%s|%s\n' "$root" "$home" "$fakebin" "$mate" "$log" "$state"
@@ -1209,11 +1207,14 @@ EOF
 # --- session-start secondmate recovery boundary -----------------------------
 
 test_session_start_relaunches_missing_pi_secondmate() {
-  local rec root home fakebin mate log spawned out first_calls second_calls
+  local rec root home fakebin mate log spawned out first_calls second_calls task_tmp
   rec=$(prepare_session_start_secondmate secondmate-missing-pi)
   IFS='|' read -r root home fakebin mate log spawned <<EOF
 $rec
 EOF
+  task_tmp="$home/recovery-temp"
+  mkdir -p "$task_tmp/gotmp"
+  printf 'tasktmp=%s\n' "$task_tmp" >> "$home/state/$SESSION_START_SECOND_MATE_ID.meta"
 
   out=$(run_session_start_secondmate "$root" "$home" "$fakebin" "$mate" "$log" "$spawned" missing)
 
@@ -1234,6 +1235,8 @@ EOF
   assert_not_contains "$(cat "$log")" "kill-window" "the deferred stage tried to kill an already-absent window"
   assert_grep 'harness=pi' "$home/state/$SESSION_START_SECOND_MATE_ID.meta" \
     "the real respawn path did not preserve the Pi harness: $(cat "$home/state/$SESSION_START_SECOND_MATE_ID.meta")"
+  assert_grep "tasktmp=$task_tmp" "$home/state/$SESSION_START_SECOND_MATE_ID.meta" \
+    "secondmate recovery displaced its private temp root"
 
   first_calls=$(grep -c 'new-window' "$log" || true)
   rm -f "$home/state/.lock"

@@ -43,7 +43,7 @@ TMP_ROOT=$(fm_test_tmproot fm-backend-tests)
 # HOME and reach the developer's real store, while empty falls through to it
 # and adds no launch prefix, since fm-spawn only prefixes a non-empty value.
 SPAWN_HOME="$TMP_ROOT/user-home"
-mkdir -p "$SPAWN_HOME"
+mkdir -p "$SPAWN_HOME/state"
 
 write_spawn_brief() {  # <file> <id>
   cat > "$1" <<EOF
@@ -870,6 +870,7 @@ test_peek_tmux_contract() {
 make_spawn_fakebin() {  # <dir> <fake-worktree-path> -> echoes fakebin dir
   local dir=$1 wt=$2 fb="$1/fakebin"
   mkdir -p "$fb"
+  fm_test_track_task_tmps "$fb"
   cat > "$fb/tmux" <<SH
 #!/usr/bin/env bash
 set -u
@@ -894,7 +895,7 @@ run_spawn_case() {  # <bin-root> <fakebin> <log> <state> <data> <config> <proj> 
   local bin=$1 fb=$2 log=$3 state=$4 data=$5 config=$6 proj=$7; shift 7
   [ "${1:-}" = -- ] && shift
   : > "$log"
-  env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$bin" HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' \
+  env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$bin" FM_HOME="$SPAWN_HOME" HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' \
     FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$config" \
     FM_PROJECTS_OVERRIDE="$TMP_ROOT/unused-projects" \
     FM_SPAWN_NO_GUARD=1 TMUX="fake,1,0" FM_TMUX_LOG="$log" \
@@ -934,6 +935,7 @@ run_spawn_case() {  # <bin-root> <fakebin> <log> <state> <data> <config> <proj> 
 make_spawn_symlink_fakebin() {  # <dir> <initial-project-path> <worktree-path> -> echoes fakebin dir
   local dir=$1 initial_path=$2 wt=$3 fb="$1/fakebin" counter="$1/poll-count"
   mkdir -p "$fb"
+  fm_test_track_task_tmps "$fb"
   : > "$counter"
   cat > "$fb/tmux" <<SH
 #!/usr/bin/env bash
@@ -996,8 +998,6 @@ run_spawn_symlink_case() {  # <label> <physical|logical>
   expect_code 0 "$rc" "fm-spawn.sh should succeed for a project reached through a symlinked prefix when the backend reports $first_reply cwd"$'\n'"$out"
   assert_contains "$out" "worktree=$wt" \
     "fm-spawn.sh did not resolve a symlinked-prefix project to its real worktree when the backend reports $first_reply cwd"
-
-  rm -rf "/tmp/fm-$id"
 }
 
 test_spawn_symlinked_project_prefix_avoids_false_refusal() {
@@ -1151,7 +1151,7 @@ test_spawn_default_backend_writes_no_meta_field() {
   state="$TMP_ROOT/nobackend-state"; config="$TMP_ROOT/nobackend-config"
   mkdir -p "$state" "$config"
 
-  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$ROOT" HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' \
+  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$SPAWN_HOME" HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' \
     FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$config" \
     FM_PROJECTS_OVERRIDE="$TMP_ROOT/unused-projects" FM_SPAWN_NO_GUARD=1 TMUX="fake,1,0" \
     FM_TMUX_LOG="$TMP_ROOT/nobackend.log" \
@@ -1159,7 +1159,6 @@ test_spawn_default_backend_writes_no_meta_field() {
   expect_code 0 $? "explicit --backend tmux should spawn successfully"$'\n'"$out"
   assert_no_grep 'backend=' "$state/$id.meta" \
     "an explicit --backend tmux (the default) must not write backend= to meta (P1 compatibility contract)"
-  rm -rf "/tmp/fm-$id"
   pass "fm-spawn.sh: an explicit --backend tmux resolves silently and writes no backend= (missing means tmux)"
 }
 
@@ -1175,7 +1174,7 @@ test_spawn_explicit_backend_flag_beats_autodetect_herdr_env() {
 
   # HERDR_ENV=1 is present (as if firstmate itself were running under herdr),
   # but an explicit --backend tmux flag must still win outright.
-  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$ROOT" HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' \
+  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$SPAWN_HOME" HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' \
     FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$config" \
     FM_PROJECTS_OVERRIDE="$TMP_ROOT/unused-projects" FM_SPAWN_NO_GUARD=1 TMUX="fake,1,0" HERDR_ENV=1 \
     FM_TMUX_LOG="$TMP_ROOT/explicit-backend.log" \
@@ -1183,7 +1182,6 @@ test_spawn_explicit_backend_flag_beats_autodetect_herdr_env() {
   expect_code 0 $? "explicit --backend tmux should spawn successfully even with HERDR_ENV=1 set"$'\n'"$out"
   assert_no_grep 'backend=' "$state/$id.meta" \
     "an explicit --backend tmux must win over an ambient HERDR_ENV=1 auto-detect marker"
-  rm -rf "/tmp/fm-$id"
   pass "fm-spawn.sh: explicit --backend tmux wins over an ambient HERDR_ENV=1 auto-detect marker"
 }
 
@@ -1202,7 +1200,7 @@ test_spawn_autodetect_nesting_resolves_tmux_silently() {
   # (tmux nested inside a herdr pane) - the full fm-spawn.sh pipeline, not just
   # fm_backend_name, must resolve this to tmux and stay completely silent about
   # it (today's default path, byte-identical).
-  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$ROOT" HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' \
+  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$SPAWN_HOME" HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' \
     FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$config" \
     FM_PROJECTS_OVERRIDE="$TMP_ROOT/unused-projects" FM_SPAWN_NO_GUARD=1 TMUX="fake,1,0" HERDR_ENV=1 \
     FM_TMUX_LOG="$TMP_ROOT/nest.log" \
@@ -1213,7 +1211,6 @@ test_spawn_autodetect_nesting_resolves_tmux_silently() {
   case "$out" in
     *NOTICE*) fail "auto-detecting tmux (even nested inside herdr) must stay silent, no NOTICE expected"$'\n'"$out" ;;
   esac
-  rm -rf "/tmp/fm-$id"
   pass "fm-spawn.sh: auto-detect resolves nested tmux-in-herdr to tmux and stays silent end to end"
 }
 

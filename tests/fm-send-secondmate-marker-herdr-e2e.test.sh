@@ -44,11 +44,13 @@ cleanup() {
     rc=1
   fi
   rm -rf "$TMP_ROOT"
+  fm_test_cleanup
   exit "$rc"
 }
 trap cleanup EXIT
 
 mkdir -p "$SENDER_HOME/state" "$SENDER_HOME/data" "$SENDER_HOME/config" "$SENDER_HOME/projects" "$FAKEBIN"
+fm_test_track_task_tmps "$FAKEBIN"
 
 # Route production adapter invocations through the same guarded helper as every
 # explicit E2E probe. The helper itself runs with the original PATH, preventing

@@ -227,6 +227,23 @@ fm_test_cleanup() {
   fi
 }
 
+fm_test_track_task_tmps() {
+  local fakebin=$1 real_mktemp
+  real_mktemp=$(command -v mktemp) || return 1
+  {
+    printf '#!/usr/bin/env bash\nreal_mktemp=%q\nregistry=%q\n' "$real_mktemp" "$FM_TEST_CLEANUP_REGISTRY"
+    cat <<'SH'
+set -eu
+path=$("$real_mktemp" "$@")
+if [ "$#" -eq 2 ] && [ "$1" = -d ] && [[ "$2" =~ ^/tmp/fm-[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}\+XXXXXX$ ]]; then
+  printf '%s\n' "$path" >> "$registry"
+fi
+printf '%s\n' "$path"
+SH
+  } > "$fakebin/mktemp"
+  chmod +x "$fakebin/mktemp"
+}
+
 fm_test_tmproot() {
   local prefix=${1:-fm-test} root tmp_base
   tmp_base=${TMPDIR:-/tmp}
@@ -399,6 +416,26 @@ fm_test_owner_is_alive() {  # <pid> <identity>
   case "$state" in ''|Z*) return 1 ;; esac
   identity=$(TZ=UTC0 fm_test_pid_identity "$1" 2>/dev/null) || return 1
   [ "$identity" = "$2" ]
+}
+
+fm_test_cwd_sleeper_identity() {
+  local pid=$1 command_name i
+  for ((i=0; i<100; i++)); do
+    command_name=$(ps -p "$pid" -o comm= 2>/dev/null) || return 1
+    case "$command_name" in
+      sleep|*/sleep) TZ=UTC0 fm_test_pid_identity "$pid"; return ;;
+    esac
+    sleep 0.05
+  done
+  return 1
+}
+
+fm_test_stop_sleeper() {
+  local pid=$1 identity=$2
+  if [ -n "$identity" ] && fm_test_owner_is_alive "$pid" "$identity"; then
+    kill "$pid" 2>/dev/null || return 0
+    wait "$pid" 2>/dev/null || true
+  fi
 }
 
 fm_test_finish_fixture_reaper() {  # <exit status>

@@ -321,6 +321,7 @@ make_fake_toolchain() {
   local dir=$1 fakebin
   fakebin="$dir/fakebin"
   mkdir -p "$fakebin"
+  fm_test_track_task_tmps "$fakebin"
   fm_fake_exit0 "$fakebin" node chrome-devtools-axi
   fm_fake_version_tool "$fakebin" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.46
   cat > "$fakebin/gh-axi" <<'SH'
@@ -808,6 +809,7 @@ test_spawn_fast_forwards_before_launch() {
   # tmux stub: accept every subcommand, print nothing (so no window pre-exists).
   fakebin="$w/fakebin"
   mkdir -p "$fakebin"
+  fm_test_track_task_tmps "$fakebin"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 exit 0
@@ -842,6 +844,7 @@ test_spawn_warns_when_sync_skipped_before_launch() {
   fakebin="$w/fakebin"
   err="$w/spawn.err"
   mkdir -p "$fakebin"
+  fm_test_track_task_tmps "$fakebin"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 exit 0
@@ -1351,6 +1354,7 @@ test_remote_launch_does_not_retarget_host_copy() {
   add_remote_home "$w" control "$w/forge.git" "$c1"
 
   fakebin=$(fm_fakebin "$w/launchfake")
+  fm_test_track_task_tmps "$fakebin"
   herdrbin="$w/herdrhost"
   mkdir -p "$herdrbin/bin"
   install_remote_herdr_fixture "$herdrbin" "$w/herdr.state" "$w/herdr.log" \
