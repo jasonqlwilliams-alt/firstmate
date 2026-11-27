@@ -1565,12 +1565,20 @@ SH
   PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$root" \
     "$ROOT/bin/fm-startup-network.sh" ready "$SESSION_START_TEST_HARNESS_PID" \
     || fail "the deferred network stage did not finish successfully"
-  jq -e 'any(.endpoints[]; .id == "task-parked" and .endpoint.exists == false)' \
+  jq -e 'any(.endpoints[]; .id == "task-parked"
+    and (.endpoint | has("exists") and .exists == null and .status == "unknown"))' \
     "$home/state/home-summary.json" >/dev/null \
-    || fail "the deferred home summary did not report the parked scout's endpoint as absent"
+    || fail "the deferred home summary did not preserve unknown endpoint presence for the parked scout"
   grep -Fxq 'task-parked' "$inactive_reads" \
     || fail "the deferred inactive scan did not complete the parked scout's state read"
-  [ ! -s "$log" ] || fail "startup read the other worker's pane or process details: $(cat "$log")"
+
+  out=$(FM_TEST_HERDR_REUSED=1 FM_TEST_HERDR_PROBE_LOG="$log" \
+    PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+    "$ROOT/bin/fm-fleet-snapshot.sh" --json)
+  printf '%s\n' "$out" | jq -e 'any(.tasks[]; .id == "task-parked"
+    and (.endpoint | has("exists") and .exists == null and .status == "unknown"))' >/dev/null \
+    || fail "the fleet snapshot did not preserve unknown endpoint presence for the parked scout"
+  [ ! -s "$log" ] || fail "startup or the fleet snapshot read the other worker's pane or process details: $(cat "$log")"
 
   PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
     "$ROOT/bin/fm-park-retained.sh" task-parked clear >/dev/null \
