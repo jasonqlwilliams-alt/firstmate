@@ -757,10 +757,8 @@ snapshot_pr_awaiting_merge() {  # <id> <registered-pr> <captured-status>
     esac
   done < "$status_log"
   [ "$(status_line_note "$last_done")" = "PR $pr checks green" ] || return 1
-  ! fm_pr_poll_merge_already_notified "$STATE" "$id" \
-      "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" \
-    && ! { fm_pr_poll_retirement_receipt_valid "$STATE" "$id" && [ "$FM_PR_RETIRE_URL" = "$pr" ]; } \
-    && ! fm_pr_poll_closed_recorded "$STATE" "$id" "$pr"
+  ! fm_pr_poll_terminal_recorded "$STATE" "$id" \
+    "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" "$pr"
 }
 
 task_json_one() {  # <captured-meta>

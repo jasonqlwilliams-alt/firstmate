@@ -43,7 +43,7 @@
 #      the branch's ACTIVE newest ledger row, anchored by the row immediately
 #      before it having ended at exactly this worktree's head - so an active fix
 #      round never reads as an older failed run (rule owned by
-#      fm_nm_runs_status_for_worktree in bin/fm-nm-run-lib.sh).
+#      fm_nm_runs_row_for_worktree in bin/fm-nm-run-lib.sh).
 #      More than one recorded run can bind to this worktree at once, and
 #      bin/fm-nm-run-lib.sh also owns which of them wins: a LIVE run always
 #      outranks a terminal one, so a terminal answer here is provisional until
@@ -93,8 +93,8 @@
 #
 # Read-only and side-effect free. Always exits 0 on a successful read regardless
 # of state; exit 2 only on a usage error (no id).
-# FM_CREW_STATE_REPORT_CANCELLED_NO_CI=1 lets the inactive scan request the PR
-# from an attributed cancelled run whose latest CI marker reports no checks.
+# FM_CREW_STATE_REPORT_CANCELLED_PR=1 includes the attributed run's PR in a
+# cancellation detail when available.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -124,7 +124,7 @@ LOG=${FM_CREW_STATE_STATUS_OVERRIDE:-"$STATE/$ID.status"}
 NM_TIMEOUT=${FM_CREW_STATE_NM_TIMEOUT:-10}
 case "$NM_TIMEOUT" in ''|*[!0-9]*) NM_TIMEOUT=10 ;; esac
 # How many of the most recent `no-mistakes runs` rows each ledger read
-# (fm_nm_runs_status_for_worktree in bin/fm-nm-run-lib.sh) scans, whether it is
+# (fm_nm_runs_row_for_worktree in bin/fm-nm-run-lib.sh) scans, whether it is
 # the cross-branch fallback or the live-sibling probe behind a terminal `axi
 # status` answer (docs/configuration.md owns the setting). Generous enough to
 # still find a branch's own run on a busy multi-crew fleet without listing the
@@ -526,8 +526,7 @@ nm_ci_checks_state() {
   case "$marker" in
     *"checks passed"*) printf 'green' ;;
     *"no CI checks reported - still monitoring"*) printf 'no-checks' ;;
-    *"no CI checks reported yet"*) printf 'no-checks-yet' ;;
-    *"checks failed"*|*"issues detected"*|*"CI checks running"*|*"base branch advanced"*"re-arming CI monitor timeout"*) printf 'not-ready' ;;
+    *"no CI checks reported yet"*|*"checks failed"*|*"issues detected"*|*"CI checks running"*|*"base branch advanced"*"re-arming CI monitor timeout"*) printf 'not-ready' ;;
     *) printf 'unknown' ;;
   esac
 }
@@ -539,7 +538,7 @@ nm_ci_checks_state() {
 # run-listing command is the top-level `no-mistakes runs` (the `axi` surface
 # has no runs-listing subcommand; tests/fm-crew-state.test.sh owns the
 # 2026-07-02 dead-code incident history this fallback replaced).
-# fm_nm_runs_status_for_worktree in bin/fm-nm-run-lib.sh is the ONE owner of
+# fm_nm_runs_row_for_worktree in bin/fm-nm-run-lib.sh is the ONE owner of
 # the ledger format, the newest-row-decides rule, its live-over-terminal
 # exception, and the anchored pipeline-continuation recognition
 # (model-routing-benchmark-hardening: an active fix round whose head object the
@@ -568,11 +567,11 @@ HAVE_RUN=0
 # RUN_SOURCE distinguishes the two ways HAVE_RUN=1 can happen: "full" means
 # $RUN_OUT is real `axi status` TOON with step/gate detail (including a
 # same-branch run the strict head rule rejected but the ledger proved is this
-# worktree's pipeline-owned continuation); "coarse" means only a bare status
-# word came back from the runs-list fallback, so the run-step block below skips
-# the TOON field parsing entirely for this crew.
+# worktree's pipeline-owned continuation); "coarse" means only the selected
+# runs-list row is available, so the run-step block skips TOON field parsing.
 RUN_SOURCE=full
 COARSE_STATUS=""
+COARSE_PR=""
 # Scouts and secondmates never drive a no-mistakes validation of their own
 # worktree, so skip the lookup for them and read state from pane/log directly.
 if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/null 2>&1; then
@@ -608,15 +607,19 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
       # `[ -n "$RUN_OUT" ]`: an empty/timed-out primary call means the CLI
       # itself did not respond, so retrying it immediately with a second
       # bounded call would just double the wait for no better answer.
-      COARSE_STATUS=$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" "$(nm_runs_list)")
-      if [ -n "$COARSE_STATUS" ]; then
+      ledger_row=$(fm_nm_runs_row_for_worktree "$WT" "$CREW_BRANCH" "$(nm_runs_list)")
+      if [ -n "$ledger_row" ]; then
         HAVE_RUN=1
-        # A branch-matching answer the strict rule rejected is this branch's
-        # own current run once the ledger proves the pipeline-owned
-        # continuation, so its axi TOON is the authoritative run detail
-        # (RUN_SOURCE stays full); only a foreign-branch answer leaves
-        # coarse status-word detail.
-        [ "$run_branch" = "$CREW_BRANCH" ] || RUN_SOURCE=coarse
+        IFS=$' \t' read -r COARSE_STATUS _ ledger_head _ _ COARSE_PR <<< "$ledger_row"
+        RUN_SOURCE=coarse
+        run_head=$(strip_quotes "$(nm_field head)")
+        if [ "$run_branch" = "$CREW_BRANCH" ] && [ "$COARSE_STATUS" = running ] \
+          && [[ "$run_head" == "$ledger_head"* ]] \
+          && [ -z "$(fm_nm_resolve_commit "$WT" "$ledger_head")" ] \
+          && fm_nm_run_is_active "$RUN_OUT" \
+          && { [ -z "$COARSE_PR" ] || [ "$COARSE_PR" = "$(strip_quotes "$(nm_field pr)")" ]; }; then
+          RUN_SOURCE=full
+        fi
       fi
     fi
   fi
@@ -627,7 +630,7 @@ fi
 if [ "$HAVE_RUN" = 1 ]; then
   RUN_STATE=working
   RUN_DETAIL=""
-  RUN_PR=""
+  RUN_PR=$COARSE_PR
   [ "$RUN_SOURCE" != full ] || RUN_PR=$(strip_quotes "$(nm_field pr)")
   CI_STEP_STATUS=""
   CI_LOG_STATE=""
@@ -742,10 +745,9 @@ if [ "$HAVE_RUN" = 1 ]; then
     elif [ "$CI_STEP_STATUS" = fixing ]; then
       CI_LOG_STATE=not-ready
     fi
-    case "$CI_LOG_STATE" in
-      not-ready|no-checks-yet) ;;
-      *) emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR" ;;
-    esac
+    if [ "$CI_LOG_STATE" != not-ready ]; then
+      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR"
+    fi
   fi
 
   # Reconcile the status log. A needs-decision/blocked log line that the run-step
@@ -788,12 +790,9 @@ if [ "$HAVE_RUN" = 1 ]; then
         ;;
     esac
   fi
-  if [ "${FM_CREW_STATE_REPORT_CANCELLED_NO_CI:-0}" = 1 ] \
-    && [ "$RUN_DETAIL" = 'run cancelled' ] && [ -n "$RUN_PR" ] \
-    && status_is_paused "$LOG_LINE"; then
-    case "$(nm_ci_checks_state)" in
-      no-checks|no-checks-yet) RUN_DETAIL="$RUN_DETAIL${SEP}no CI checks reported for PR: $RUN_PR" ;;
-    esac
+  if [ "${FM_CREW_STATE_REPORT_CANCELLED_PR:-0}" = 1 ] \
+    && [ "$RUN_DETAIL" = 'run cancelled' ] && [ -n "$RUN_PR" ]; then
+    RUN_DETAIL="$RUN_DETAIL${SEP}run PR: $RUN_PR"
   fi
   emit "$RUN_STATE" run-step "$RUN_DETAIL"
 fi

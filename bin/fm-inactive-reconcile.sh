@@ -49,11 +49,12 @@
 # fm-crew-state.sh as the sole current-state source.
 # Only a done or failed state is suspicious enough to create a durable terminal
 # outcome record or wake the supervisor.
-# A cancelled run is left paused when its latest CI marker reports no checks,
-# the child's latest status declares a pause, and the run's PR matches the
-# still-armed PR registration (bin/fm-pr-check.sh). Local merge, closure, or
-# retirement records disqualify the PR. A recorded closure also disqualifies a
-# reopened PR. Other failed readings still report.
+# A cancelled run is left paused when its PR matches the still-armed PR
+# registration (bin/fm-pr-check.sh) and the child's latest status declares
+# "paused: PR <number> open; ...; cancelled because CI never registers on this repository".
+# Local merge, closure, or retirement records disqualify the PR.
+# A recorded closure also disqualifies a reopened PR.
+# Other failed readings still report.
 # Working, paused, parked, blocked, unknown, persistent secondmates, and
 # captain-held work retain their existing supervision semantics.
 #
@@ -337,15 +338,17 @@ pr_for_task() { # <meta> [preferred-line]
 
 cancelled_ready_pr_awaiting_merge() { # <id> <state-line> <last-status-line>
   local id=$1 state_line=$2 last=$3
-  local prefix='state: failed · source: run-step · run cancelled · no CI checks reported for PR: '
+  local prefix='state: failed · source: run-step · run cancelled · run PR: '
   [[ "$state_line" == "$prefix"* ]] || return 1
   status_is_paused "$last" || return 1
   fm_pr_poll_artifacts_valid "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" || return 1
   [ "$FM_PR_REG_URL" = "${state_line#"$prefix"}" ] || return 1
-  ! fm_pr_poll_merge_already_notified "$STATE" "$id" \
-      "$FM_PR_REG_PROVIDER" "$FM_PR_REG_HOST" "$FM_PR_REG_PATH" "$FM_PR_REG_NUMBER" \
-    && ! { fm_pr_poll_retirement_receipt_valid "$STATE" "$id" && [ "$FM_PR_RETIRE_URL" = "$FM_PR_REG_URL" ]; } \
-    && ! fm_pr_poll_closed_recorded "$STATE" "$id" "$FM_PR_REG_URL"
+  case "$(status_line_note "$last")" in
+    "PR $FM_PR_REG_NUMBER open; "*"; cancelled because CI never registers on this repository") ;;
+    *) return 1 ;;
+  esac
+  ! fm_pr_poll_terminal_recorded "$STATE" "$id" \
+    "$FM_PR_REG_PROVIDER" "$FM_PR_REG_HOST" "$FM_PR_REG_PATH" "$FM_PR_REG_NUMBER" "$FM_PR_REG_URL"
 }
 
 home_secondmate_id() {
@@ -509,7 +512,7 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
   age=$(last_activity_age "$meta" "$status" "$turn")
   [ "$age" -ge "$FM_INACTIVE_RECONCILE_SECS" ] || return 0
   state_line=$(fm_run_timed "$timeout" env FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
-    FM_CREW_STATE_REPORT_CANCELLED_NO_CI=1 "$CREW_STATE_BIN" "$id" 2>/dev/null) || state_rc=$?
+    FM_CREW_STATE_REPORT_CANCELLED_PR=1 "$CREW_STATE_BIN" "$id" 2>/dev/null) || state_rc=$?
   [ "$state_rc" -ne 124 ] || return 3
   last=$(last_status_line "$status")
   if [ -n "$self" ]; then

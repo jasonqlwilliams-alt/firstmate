@@ -1070,6 +1070,13 @@ fm_pr_poll_closed_recorded() {
   grep -Fqx -- "$url" "$record"
 }
 
+fm_pr_poll_terminal_recorded() {  # <state> <id> <provider> <host> <path> <number> <url>
+  local state=$1 id=$2 provider=$3 host=$4 path=$5 number=$6 url=$7
+  fm_pr_poll_merge_already_notified "$state" "$id" "$provider" "$host" "$path" "$number" \
+    || { fm_pr_poll_retirement_receipt_valid "$state" "$id" && [ "$FM_PR_RETIRE_URL" = "$url" ]; } \
+    || fm_pr_poll_closed_recorded "$state" "$id" "$url"
+}
+
 fm_pr_poll_snapshot_prepare() {
   local state=$1 id=$2 template=$3
   FM_PR_POLL_CLOSED_STAGE=
