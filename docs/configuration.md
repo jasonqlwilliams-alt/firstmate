@@ -67,7 +67,9 @@ The current schema is:
 ```
 
 `approvedOwners` is the durable allowlist for destination repository owners.
-`approvedAccounts` is the durable allowlist for the GitHub account returned immediately before a write by `gh-axi api /user`; when omitted it defaults to `approvedOwners`.
+`approvedAccounts` is the durable allowlist for the GitHub account returned immediately before a write by `gh-axi api /user` on the destination host.
+It defaults to `approvedOwners` when omitted.
+The account lookup works with `GH_REPO` exported because it omits the variable from the lookup process.
 Every remotely delivered project needs an explicit `upstreamFetchUrl` and `forkPushUrl`, even when both URLs intentionally name the same captain-owned repository.
 Repository keys use letters, digits, dot, underscore, or dash and match registered project names; the firstmate code repository itself uses `firstmate`.
 GitHub URL transport spellings are normalized to one host/owner/repository identity for comparison, but no remote is added, renamed, removed, or rewritten.
@@ -82,17 +84,18 @@ These commands are checks only: policy never grants authority to deploy, restart
 `arm-refuse` installs that hook before policy validation, and `arm-all` covers every present configured clone at a locked session boundary, so within an armed home a missing or malformed policy refuses rather than leaving an unguarded checkout.
 When a policy file is present, `bin/fm-spawn.sh` calls that arming command before creating an endpoint and refuses the spawn if the policy is malformed or if a PR-based ship names a project the policy does not cover.
 When no policy file is present it arms nothing and refuses nothing.
-The hook checks Git's effective push URL rather than assuming a remote name.
+The hook checks Git's effective push URL regardless of the remote name or the value of `GH_REPO`.
 For a `no-mistakes` proxy push, the hook requires the effective destination to resolve to this checkout's registered gate under `${NM_HOME:-$HOME/.no-mistakes}/repos`.
 It then requires both the reported fork branch destination and upstream PR destination to match `forkPushUrl` before the local gate receives objects.
 Spawned workers in an armed home receive guarded `gh` and `gh-axi` command shims that apply the same repository and account check to pull-request and REST repository writes and refuse GraphQL calls whose mutation destination cannot be proven.
+For `gh-axi pr create` without an explicit repository selector, the shim checks a nonempty `GH_REPO` against the policy and passes it through on approval.
 Raw REST writes through `gh-axi api` require `GH_REPO` to be unset because `gh api` rejects the `--repo` flag that `gh-axi` adds when the variable is set.
 Their guarded `git` shim refuses `send-pack` and `--no-verify` hook bypasses.
 When no-mistakes starts validation with `git push --no-verify`, the shim strips the flag only from an armed checkout with the managed hook pinned and only for a direct push with no leading Git options, optional `-o` push options, the `no-mistakes` remote, and one branch refspec.
 Git must report a single effective push URL as an absolute filesystem path to the registered gate, which Git must open directly as a bare repository.
 This launch requires the remote configuration to use only `remote.no-mistakes.url`, `remote.no-mistakes.pushurl`, and `remote.no-mistakes.fetch`, with no `remotes.no-mistakes` group.
 The managed hook still authorizes both forge destinations, and ordinary proxy pushes can also identify the gate with a `file:///` URL.
-The [delivery guard regression tests](../tests/fm-delivery-guard.test.sh) cover the validator launch and the managed hook's refusals.
+The [delivery guard regression tests](../tests/fm-delivery-guard.test.sh) cover the validator launch, the managed hook's refusals, and guarded pushes and pull-request creation with `GH_REPO` exported.
 The `git` shim also checks `core.hooksPath` without regard to key capitalization in separate `-c` arguments, both `--config-env` forms, and `GIT_CONFIG_*` environment overrides.
 In an armed repository it also asks Git for the hooks directory each push actually resolves, including included files, rewritten repository config, and leading options in push aliases; it refuses unless that is the managed hooks directory and pins that directory for the push so a later config edit cannot redirect it.
 A worker that deletes every arming marker or rewrites the managed hook itself is beyond what a command shim can enforce.
