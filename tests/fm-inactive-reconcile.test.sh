@@ -143,6 +143,71 @@ prime_seen() { # <state> <status>
   ' _ "$ROOT/bin/fm-wake-lib.sh" "$1" "$2"
 }
 
+# A child whose validation run ended with the given no-mistakes outcome and
+# whose current state is read by the REAL fm-crew-state.sh, with a fake
+# no-mistakes reporting that run for the child's own worktree branch and head.
+NO_CI_PR=https://github.com/owner/repo/pull/7
+write_validated_child() { # <home> <id> <status-line> <run-outcome>
+  local home=$1 id=$2 status=$3 outcome=$4 wt gen head branch
+  wt="$home/projects/$id"
+  mkdir -p "$wt"
+  git -C "$wt" init -q
+  git -C "$wt" -c user.name=fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m init
+  head=$(git -C "$wt" rev-parse HEAD)
+  branch=$(git -C "$wt" symbolic-ref --short HEAD)
+  fm_write_meta "$home/state/$id.meta" \
+    "window=firstmate:fm-$id" "worktree=$wt" "project=alpha" \
+    'harness=claude' 'kind=ship' 'mode=no-mistakes' 'yolo=off' "spawn_gen=s$RANDOM"
+  gen=$("$ROOT/bin/fm-busy-event.sh" arm "$home/state" "$id")
+  "$ROOT/bin/fm-busy-event.sh" apply "$home/state" "$id" idle --gen "$gen" \
+    --source claude-hook --event stop
+  cat > "$home/run.txt" <<RUN
+run:
+  id: "run-$id"
+  branch: $branch
+  head: "$head"
+  status: $outcome
+  outcome: $outcome
+RUN
+  cat > "$WORLD/fakebin/no-mistakes" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = axi ] && [ "${2:-}" = status ]; then
+  cat "$FM_HOME/run.txt"
+fi
+SH
+  chmod +x "$WORLD/fakebin/no-mistakes"
+  printf '%s\n' "$status" > "$home/state/$id.status"
+}
+
+# Arm the PR exactly as a worker's ready signal does, through the real
+# fm-pr-check.sh. Its optional forge head lookup is answered by a silent stub,
+# then the forge log is reset so later scans prove they never touch the forge.
+register_pr() { # <home> <id>
+  local home=$1 id=$2 regbin="$WORLD/regbin"
+  mkdir -p "$regbin"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$regbin/gh"
+  chmod +x "$regbin/gh"
+  PATH="$regbin:$PATH" FM_ROOT_OVERRIDE="$WORLD/root" FM_HOME="$home" \
+    FM_STATE_OVERRIDE="$home/state" "$ROOT/bin/fm-pr-check.sh" "$id" "$NO_CI_PR" \
+    > "$WORLD/register.log" 2>&1 || fail "could not register the PR: $(cat "$WORLD/register.log")"
+}
+
+# Every scan of these children reads the real current-state source.
+run_real_reconcile() { # <home>
+  local home=$1
+  : > "$WORLD/forge.log"
+  age "$home/state/child.meta" "$home/state/child.status"
+  PATH="$WORLD/fakebin:$PATH" FM_ROOT_OVERRIDE="$WORLD/root" FM_HOME="$home" \
+    FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" FM_CONFIG_OVERRIDE="$home/config" \
+    FM_INACTIVE_RECONCILE_SECS=60 FM_FORGE_LOG="$WORLD/forge.log" "$RECON" scan --startup
+  [ ! -s "$WORLD/forge.log" ] || fail "reconciliation invoked a forge command: $(cat "$WORLD/forge.log")"
+}
+
+real_crew_state() { # <home>
+  PATH="$WORLD/fakebin:$PATH" FM_HOME="$1" FM_STATE_OVERRIDE="$1/state" \
+    "$ROOT/bin/fm-crew-state.sh" child 2>/dev/null
+}
+
 reap() { kill "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; }
 
 # The main retains a terminal presentation receipt until the corresponding wake
@@ -818,6 +883,79 @@ test_reconciliation_never_calls_forge() {
   pass "reconciliation makes zero forge or PR API calls"
 }
 
+NO_CI_PAUSE='paused: PR 7 open; awaiting the merge word; CI never registers on this repository'
+
+# A validation run cancelled on purpose because the repository registers no CI,
+# with its PR registered and open and the child's pause declared, is a ready PR
+# awaiting a merge decision, not a failure: no terminal outcome record, no
+# supervisor wake, and nothing on a secondmate's parent channel.
+test_no_ci_cancellation_with_ready_open_pr_is_not_failed() {
+  local line
+  make_world no-ci-main
+  write_validated_child "$MAIN" child "$NO_CI_PAUSE" cancelled
+  register_pr "$MAIN" child
+  line=$(real_crew_state "$MAIN")
+  [ "$line" = "state: failed · source: run-step · run cancelled" ] \
+    || fail "fixture must read as a cancelled run, got: $line"
+  run_real_reconcile "$MAIN"
+  [ "$(outcome_count "$MAIN" pending)" = 0 ] \
+    || fail "a deliberate no-CI cancellation with a ready open PR was recorded as failed"
+  ! grep -q 'inactive-outcome:' "$MAIN/state/.wake-queue" 2>/dev/null \
+    || fail "a deliberate no-CI cancellation with a ready open PR woke the supervisor as failed"
+
+  make_world no-ci-mate; bind_secondmate local
+  write_validated_child "$MATE" child "$NO_CI_PAUSE" cancelled
+  register_pr "$MATE" child
+  run_real_reconcile "$MATE"
+  ! grep -q '^failed' "$MAIN/state/mate.status" 2>/dev/null \
+    || fail "a secondmate reported a no-CI cancellation as failed: $(cat "$MAIN/state/mate.status")"
+  [ "$(outcome_count "$MATE" reported)" = 0 ] && [ "$(outcome_count "$MATE" pending)" = 0 ] \
+    || fail "a secondmate recorded a no-CI cancellation as a terminal outcome"
+  pass "a deliberate no-CI cancellation with a ready, open PR is not reported failed"
+}
+
+# Each missing piece of that evidence leaves a genuine failure reading reported.
+test_cancellation_without_full_evidence_still_reports_failed() {
+  make_world cancel-no-pause
+  write_validated_child "$MAIN" child 'working: validation under way' cancelled
+  register_pr "$MAIN" child
+  run_real_reconcile "$MAIN"
+  [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a cancellation without a declared pause was not reported failed"
+
+  make_world cancel-no-registration
+  write_validated_child "$MAIN" child "$NO_CI_PAUSE" cancelled
+  fm_write_meta "$MAIN/state/child.meta" \
+    "window=firstmate:fm-child" "worktree=$MAIN/projects/child" "project=alpha" \
+    'harness=claude' 'kind=ship' 'mode=no-mistakes' 'yolo=off' "pr=$NO_CI_PR"
+  run_real_reconcile "$MAIN"
+  [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a cancellation with no PR registration was not reported failed"
+
+  make_world genuine-failure
+  write_validated_child "$MAIN" child "$NO_CI_PAUSE" failed
+  register_pr "$MAIN" child
+  [ "$(real_crew_state "$MAIN")" = "state: failed · source: run-step · run failed" ] \
+    || fail "fixture must read as a failed run, got: $(real_crew_state "$MAIN")"
+  run_real_reconcile "$MAIN"
+  [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a genuinely failed run was not reported failed"
+
+  make_world cancel-pr-closed
+  write_validated_child "$MAIN" child "$NO_CI_PAUSE" cancelled
+  register_pr "$MAIN" child
+  (umask 077; printf '%s\n' "$NO_CI_PR" > "$MAIN/state/child.pr-poll-closed")
+  run_real_reconcile "$MAIN"
+  [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a cancellation whose PR closed was not reported failed"
+
+  make_world cancel-pr-merged
+  write_validated_child "$MAIN" child "$NO_CI_PAUSE" cancelled
+  register_pr "$MAIN" child
+  ( . "$ROOT/bin/fm-pr-lib.sh"
+    fm_pr_poll_merge_mark_notified "$MAIN/state" child github github.com owner/repo 7 ) \
+    || fail "could not record the PR merge in the fixture"
+  run_real_reconcile "$MAIN"
+  [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a cancellation whose PR merged was treated as awaiting merge"
+  pass "a cancellation missing any no-CI ready-PR evidence still reports failed"
+}
+
 test_main_direct_terminal_presentation_receipt
 test_local_secondmate_delivers_terminal_ledger_line
 test_busy_child_does_not_starve_later_ledger_outcomes
@@ -847,5 +985,7 @@ test_full_scan_budget_includes_wake_lock_wait
 test_notice_recovery_does_not_duplicate_wake
 test_missing_parent_binding_names_itself
 test_reconciliation_never_calls_forge
+test_no_ci_cancellation_with_ready_open_pr_is_not_failed
+test_cancellation_without_full_evidence_still_reports_failed
 
 echo "all inactive reconciliation tests passed"

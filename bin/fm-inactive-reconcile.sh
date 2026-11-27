@@ -49,6 +49,13 @@
 # fm-crew-state.sh as the sole current-state source.
 # Only a done or failed state is suspicious enough to create a durable terminal
 # outcome record or wake the supervisor.
+# One failed reading is not a failure: a validation run the child cancelled on
+# purpose because the repository registers no CI, recorded by the child's last
+# status line being a declared pause and by a still-armed PR registration
+# (bin/fm-pr-check.sh) for the PR in its metadata that local state has not
+# recorded as merged, closed, or retired. That PR is ready and open, awaiting a
+# merge decision, so the child is left to its pause instead of reported failed
+# (cancelled_ready_pr_awaiting_merge). Any other failed reading still reports.
 # Working, paused, parked, blocked, unknown, persistent secondmates, and
 # captain-held work retain their existing supervision semantics.
 #
@@ -96,6 +103,8 @@ CREW_STATE_BIN="${FM_INACTIVE_CREW_STATE_BIN:-$SCRIPT_DIR/fm-crew-state.sh}"
 . "$SCRIPT_DIR/fm-parent-channel-lib.sh"
 # shellcheck source=bin/fm-timeout-lib.sh
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
+# shellcheck source=bin/fm-pr-lib.sh
+. "$SCRIPT_DIR/fm-pr-lib.sh"
 
 FM_INACTIVE_RECONCILE_SECS=${FM_INACTIVE_RECONCILE_SECS:-900}
 case "$FM_INACTIVE_RECONCILE_SECS" in
@@ -328,6 +337,29 @@ pr_for_task() { # <meta> [preferred-line]
   clean_field "$value"
 }
 
+# 0 when a failed current-state reading is a deliberate no-CI cancellation
+# whose PR is ready and open (see the header): the run-step reports exactly a
+# cancelled run, the child's newest status line declares a pause, and the PR
+# recorded in metadata still has its valid armed registration with no local
+# merge, closure, or retirement record. Local durable evidence only.
+cancelled_ready_pr_awaiting_merge() { # <id> <meta> <state-line> <last-status-line>
+  local id=$1 meta=$2 state_line=$3 last=$4 pr
+  [ "$state_line" = "state: failed · source: run-step · run cancelled" ] || return 1
+  status_is_paused "$last" || return 1
+  [ "$(meta_field "$meta" kind)" != scout ] || return 1
+  pr=$(meta_field "$meta" pr)
+  fm_pr_url_parse "$pr" || return 1
+  [ "$FM_PR_URL" = "$pr" ] || return 1
+  fm_pr_poll_artifacts_valid "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" || return 1
+  [ "$FM_PR_REG_URL" = "$pr" ] || return 1
+  # The registration check reparses other URLs; restore this PR's identity.
+  fm_pr_url_parse "$pr" || return 1
+  ! fm_pr_poll_merge_already_notified "$STATE" "$id" \
+      "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" \
+    && ! { fm_pr_poll_retirement_receipt_valid "$STATE" "$id" && [ "$FM_PR_RETIRE_URL" = "$pr" ]; } \
+    && ! fm_pr_poll_closed_recorded "$STATE" "$id" "$pr"
+}
+
 home_secondmate_id() {
   fm_parent_channel_home_id "$FM_HOME"
 }
@@ -500,6 +532,10 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
     'state: failed '*) state='failed' ;;
     *) return 0 ;;
   esac
+  if [ "$state" = failed ] \
+    && cancelled_ready_pr_awaiting_merge "$id" "$meta" "$state_line" "$last"; then
+    return 0
+  fi
   pr=$(pr_for_task "$meta")
   incarnation=$(meta_incarnation "$meta")
   fingerprint=$(sha256_text "$incarnation|$id|$state|$pr|$(clean_field "$last")")
