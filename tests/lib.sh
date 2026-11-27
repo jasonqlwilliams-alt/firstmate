@@ -294,7 +294,12 @@ if [ "${FM_TEST_FIXTURE_REAPER_CHILD:-0}" != 1 ]; then
   # bin/fm-test-run.sh the runner's per-suite root is kept. A root created here
   # is removed with the rest of this suite's temp roots.
   # bin/fm-treehouse-scratch.sh owns the contract.
-  fm_treehouse_scratch_enter "${TMPDIR:-/tmp}" || fail "cannot isolate the test's Treehouse root"
+  FM_TEST_TREEHOUSE_PARENT=
+  if ! fm_treehouse_scratch_active; then
+    FM_TEST_TREEHOUSE_PARENT=$(fm_test_tmproot fm-test-treehouse) || fail "cannot create a fixture for the test's Treehouse root"
+  fi
+  fm_treehouse_scratch_enter "$FM_TEST_TREEHOUSE_PARENT" || fail "cannot isolate the test's Treehouse root"
+  unset FM_TEST_TREEHOUSE_PARENT
   if [ -n "$FM_TREEHOUSE_SCRATCH_CREATED" ]; then
     if ! fm_test_track_treehouse_scratch "$FM_TREEHOUSE_SCRATCH_CREATED"; then
       fm_treehouse_scratch_remove "$FM_TREEHOUSE_SCRATCH_CREATED"

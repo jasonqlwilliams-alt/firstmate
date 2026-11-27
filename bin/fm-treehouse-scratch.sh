@@ -7,7 +7,7 @@
 #   fm-treehouse-scratch.sh --help
 #
 # Use Treehouse v3.1.8 or newer through the scratch wrapper on PATH.
-# The wrapper fixes the pool root and checkout layout, rejects conflicting
+# The wrapper fixes the pool root and checkout layout, rejects explicit
 # location flags, and refuses worktree targets outside the scratch root.
 # Pass treehouse by name to `run`; direct binary paths are refused.
 # Commands must preserve the inherited PATH. Avoid login shells that rebuild it.
@@ -25,8 +25,8 @@
 #
 # Sourcing this file defines the functions below and changes nothing.
 # bin/fm-test-run.sh gives every suite it runs its own scratch root, and
-# tests/lib.sh and the standalone Herdr spawn fixture enter one for a suite
-# run on its own. A directory is treated as a scratch root only when it carries the marker
+# tests/lib.sh enters one for a suite run on its own.
+# A directory is treated as a scratch root only when it carries the marker
 # file this helper writes, so removal can never reach the real root or any
 # directory a caller merely named.
 
@@ -67,15 +67,9 @@ fm_treehouse_scratch_check_args() {
     if [ "$options" = 1 ] && [[ "$1" = -* ]]; then
       case "$1" in
         --) options=0; shift; continue ;;
-        --root|--root=*)
-          case "$1" in --root) shift; physical=${1-} ;; *) physical=${1#*=} ;; esac
-          [ "$root" = "$physical" ] ||
-            { fm_treehouse_scratch_refuse "use the scratch root for --root: $root"; return 1; }
-          ;;
-        --worktree-path|--worktree-path=*)
-          case "$1" in --worktree-path) shift; physical=${1-} ;; *) physical=${1#*=} ;; esac
-          [ "$FM_TREEHOUSE_SCRATCH_TEMPLATE" = "$physical" ] ||
-            { fm_treehouse_scratch_refuse "use the scratch layout for --worktree-path: $FM_TREEHOUSE_SCRATCH_TEMPLATE"; return 1; }
+        --root|--root=*|--worktree-path|--worktree-path=*)
+          fm_treehouse_scratch_refuse "scratch runs set ${1%%=*} automatically"
+          return 1
           ;;
         --all|--all=1|--all=t|--all=T|--all=true|--all=True|--all=TRUE) all=1 ;;
         --all=*) all=0 ;;

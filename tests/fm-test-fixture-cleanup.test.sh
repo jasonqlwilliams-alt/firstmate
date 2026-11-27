@@ -164,9 +164,39 @@ test_orphan_sweep_reaps_read_only_package_tree() {
   pass "the orphan sweep reaps read-only package fixtures"
 }
 
+test_orphan_sweep_reaps_standalone_treehouse_scratch() {
+  local harness receipt scratch pid attempt
+  harness=$(fm_test_tmproot fm-test-cleanup-treehouse)
+  receipt="$harness/scratch-path"
+  TMPDIR="$harness" env -u TREEHOUSE_ROOT -u FM_TREEHOUSE_SCRATCH_ROOT bash -ec '
+    . "$1"
+    mkdir "$TREEHOUSE_ROOT/slot"
+    : > "$TREEHOUSE_ROOT/slot/file"
+    chmod u-w "$TREEHOUSE_ROOT/slot"
+    printf "%s\n" "$TREEHOUSE_ROOT" > "$2"
+    exec sleep 30
+  ' _ "$LIB" "$receipt" &
+  pid=$!
+  for ((attempt=0; attempt<100; attempt++)); do
+    [ -s "$receipt" ] && break
+    sleep 0.05
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  [ -s "$receipt" ] || fail "standalone suite did not publish its scratch root"
+  scratch=$(cat "$receipt")
+  assert_present "$scratch/slot/file" "scratch fixture must survive SIGKILL before the sweep"
+
+  TMPDIR="$harness" FM_TEST_ORPHAN_MAX_AGE_SECONDS=0 FM_TEST_SKIP_ORPHAN_REAP=0 \
+    bash -ec '. "$1"' _ "$LIB" || fail "the next suite failed to run its orphan sweep"
+  assert_absent "$scratch" "the orphan sweep missed a killed suite's Treehouse scratch root"
+  pass "the orphan sweep reclaims standalone Treehouse pools after SIGKILL"
+}
+
 test_fixture_root_gone_after_normal_exit
 test_fixture_root_gone_after_sigterm
 test_cleanup_registry_resists_precreation
 test_fixture_registration_failure_rolls_back_root
 test_orphan_sweep_respects_fixture_ownership
 test_orphan_sweep_reaps_read_only_package_tree
+test_orphan_sweep_reaps_standalone_treehouse_scratch

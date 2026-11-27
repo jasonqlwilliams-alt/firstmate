@@ -1332,7 +1332,7 @@ families_for_changed_path() {
       printf '%s\n' pure-contract-unit
       # Only this script wraps each suite in run_script_bounded's fixture Git
       # isolation, and only a standalone-family script proves it.
-      printf '%s\n' "__script__:fm-test-fixtures.test.sh"
+      printf '%s\n' "__script__:fm-test-fixtures.test.sh" "__script__:fm-treehouse-scratch.test.sh"
       ;;
     bin/fm-test-isolation-proof.sh)
       # Same reason as the runner above: the proof drives every
@@ -2361,7 +2361,7 @@ run_script_bounded() {  # <script> <out> <stream> <id>
     log "could not create a scratch Treehouse root for $script"
     return 1
   }
-  local rc
+  local rc cleanup_output
   : "$id"
   set +e
   if [ "$stream" -eq 1 ]; then
@@ -2387,7 +2387,11 @@ run_script_bounded() {  # <script> <out> <stream> <id>
       "$script" "$PER_SCRIPT_TIMEOUT_SECS" >>"$out"
     [ "$stream" -eq 1 ] && tail -1 "$out"
   fi
-  fm_treehouse_scratch_remove "$FM_TREEHOUSE_SCRATCH_CREATED" >>"$out" 2>&1 || [ "$rc" -ne 0 ] || rc=1
+  cleanup_output=$(fm_treehouse_scratch_remove "$FM_TREEHOUSE_SCRATCH_CREATED" 2>&1) || [ "$rc" -ne 0 ] || rc=1
+  if [ -n "$cleanup_output" ]; then
+    printf '%s\n' "$cleanup_output" >>"$out"
+    [ "$stream" -ne 1 ] || printf '%s\n' "$cleanup_output"
+  fi
   return "$rc"
 }
 

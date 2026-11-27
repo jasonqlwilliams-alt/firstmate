@@ -28,8 +28,6 @@ set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
-pass() { printf 'ok - %s\n' "$1"; }
 assert_contains_local() {  # <haystack> <needle> <msg>
   case "$1" in
     *"$2"*) : ;;
@@ -41,7 +39,8 @@ command -v herdr >/dev/null 2>&1 || { echo "skip: herdr not found"; exit 0; }
 command -v jq >/dev/null 2>&1 || { echo "skip: jq not found (required by the herdr adapter)"; exit 0; }
 command -v treehouse >/dev/null 2>&1 || { echo "skip: treehouse not found (required by fm-spawn.sh)"; exit 0; }
 
-export FM_GATE_REFUSE_BYPASS=1
+# shellcheck source=tests/lib.sh
+. "$ROOT/tests/lib.sh"
 
 # shellcheck source=tests/herdr-test-safety.sh
 . "$ROOT/tests/herdr-test-safety.sh"
@@ -71,7 +70,7 @@ cleanup_all() {
   local cleanup_status=0
   [ -n "$WT" ] && command -v treehouse >/dev/null 2>&1 && treehouse return --force "$WT" >/dev/null 2>&1
   "$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION" || cleanup_status=$?
-  herdr_treehouse_scratch_cleanup || return 1
+  fm_test_cleanup || return 1
   rm -rf "$TMP_ROOT" || cleanup_status=$?
   return "$cleanup_status"
 }
@@ -82,7 +81,6 @@ on_exit() {
   exit "$status"
 }
 trap on_exit EXIT
-herdr_treehouse_scratch "$TMP_ROOT" || fail "could not isolate Treehouse in the fixture"
 "$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION" || fail "could not provision isolated Herdr lab session"
 
 # --- scratch world: FM_HOME with NO backend config, one throwaway project ---

@@ -110,7 +110,26 @@ test_runner_reports_cleanup_failure() {
     fail "runner passed a suite whose scratch cleanup was refused"
   fi
   assert_contains "$out" 'total=1 failed=1' "scratch cleanup failure is counted"
+  assert_contains "$out" 'fm-treehouse-scratch: refusing to remove' "serial output explains the scratch cleanup refusal"
   pass "scratch cleanup failure turns a passing suite into a failure"
+}
+
+test_runner_change_selects_scratch_regression() {
+  local repo="$TMP_ROOT/runner" listed
+  : > "$repo/tests/fm-treehouse-scratch.test.sh"
+  : > "$repo/tests/fm-backend-herdr-smoke.test.sh"
+  git -C "$repo" init -q
+  git -C "$repo" add .
+  git -C "$repo" -c user.name=test -c user.email=test@example.invalid commit -qm baseline ||
+    fail "could not commit the runner fixture baseline"
+  printf '\n' >> "$repo/bin/fm-test-run.sh"
+  listed=$(cd "$repo" && as_operator bin/fm-test-run.sh --list --changed --base HEAD) ||
+    fail "could not select tests for a runner-only change"
+  assert_contains "$listed" "tests/fm-treehouse-scratch.test.sh" "runner change selects the scratch regression"
+  case "$listed" in
+    *tests/fm-backend-herdr-smoke.test.sh*) fail "runner change selected the unrelated Herdr smoke test" ;;
+  esac
+  pass "runner-only changes select the scratch regression directly"
 }
 
 test_lib_standalone_and_inherited() {
@@ -209,7 +228,7 @@ test_cleanup_preserves_linked_object_permissions() {
   pass "scratch cleanup removes read-only directories and preserves hardlinked Git objects"
 }
 
-test_allocation_rejects_external_locations() {
+test_allocation_rejects_location_flags() {
   local wrapper="$ROOT/bin/fm-treehouse-scratch.sh" project="$TMP_ROOT/flag-project" option out
   local -a args
   fm_git_init_commit "$project"
@@ -223,14 +242,19 @@ test_allocation_rejects_external_locations() {
     if out=$(cd "$project" && as_operator "$wrapper" run treehouse "${args[@]}" 2>&1); then
       fail "Treehouse accepted an external location ($option)"
     fi
-    assert_contains "$out" "fm-treehouse-scratch: use the scratch" "location refusal ($option)"
+    assert_contains "$out" "fm-treehouse-scratch: scratch runs set --" "location refusal ($option)"
   done
-  (cd "$project" && as_operator "$wrapper" run bash -ec '
-    path=$(treehouse --root "$TREEHOUSE_ROOT" get --lease --worktree-path={pool}/{slot}/{repo})
-    test -d "$path"
-  ') || fail "explicit scratch locations were refused"
+  for option in --root --worktree-path; do
+    if out=$(cd "$project" && as_operator "$wrapper" run bash -ec '
+      case "$1" in --root) value=$TREEHOUSE_ROOT ;; *) value=$TREEHOUSE_WORKTREE_PATH ;; esac
+      treehouse get --lease "$1=$value"
+    ' _ "$option" 2>&1); then
+      fail "Treehouse accepted a redundant location flag ($option)"
+    fi
+    assert_contains "$out" "scratch runs set $option automatically" "redundant flag refusal"
+  done
   assert_no_pools "explicit location checks"
-  pass "explicit Treehouse flags cannot redirect allocations outside the scratch root"
+  pass "the scratch wrapper rejects explicit Treehouse location flags"
 }
 
 test_return_refuses_an_external_worktree() {
@@ -322,32 +346,15 @@ SH
   pass "older Treehouse leaves unrelated commands runnable and refuses allocation"
 }
 
-test_standalone_herdr_fixture_owns_root() {
-  local fixture="$TMP_ROOT/herdr-fixture" root
-  mkdir -p "$fixture"
-  root=$(as_operator bash -ec '
-    . "$1"
-    herdr_treehouse_scratch "$2"
-    mkdir -p "$TREEHOUSE_ROOT/readonly/sub"
-    : > "$TREEHOUSE_ROOT/readonly/sub/file"
-    chmod u-w "$TREEHOUSE_ROOT/readonly"
-    printf "%s\n" "$TREEHOUSE_ROOT"
-    herdr_treehouse_scratch_cleanup
-  ' _ "$ROOT/tests/herdr-test-safety.sh" "$fixture") || fail "standalone Herdr scratch setup failed"
-  case "$root" in "$fixture"/*) ;; *) fail "Herdr scratch root escaped its fixture: $root" ;; esac
-  assert_absent "$root" "Herdr scratch root survived fixture cleanup"
-  pass "standalone Herdr scratch is owned by the fixture directory"
-}
-
 test_runner_leaves_real_root_untouched
 test_runner_overrides_an_inherited_real_root
 test_runner_reports_cleanup_failure
+test_runner_change_selects_scratch_regression
 test_lib_standalone_and_inherited
 test_reproduction_helper
 test_dollar_sign_root_is_refused
 test_cleanup_preserves_linked_object_permissions
-test_allocation_rejects_external_locations
+test_allocation_rejects_location_flags
 test_return_refuses_an_external_worktree
 test_destroy_is_refused
 test_old_treehouse_is_refused_at_invocation
-test_standalone_herdr_fixture_owns_root
