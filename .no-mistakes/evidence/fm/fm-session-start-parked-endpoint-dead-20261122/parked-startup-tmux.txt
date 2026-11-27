@@ -1,0 +1,47 @@
+tmux 3.7c
+Base 31f1014fadcb34d63b7a222753b2cec6a0ef1d7a
+Target 1305a4391b8a0b5a7447d121dac0af55f88f2f7d
+
+$ tmux list-windows -t =fleet -F '#{window_name}' fm-review2
+$ fm-park-retained.sh review mark parked-retained: yes
+$ fm-park-retained.sh stale mark parked-retained: yes
+$ fm-session-start.sh (tmux-closed)
+lock acquired: harness pid 2560211
+Deferred startup completed under the lock and exited 0.
+--- review ---
+endpoint: parked, copy retained (backend=tmux window=fleet:fm-review)
+--- review2 ---
+endpoint: alive (backend=tmux window=fleet:fm-review2)
+--- ordinary ---
+endpoint: alive (backend=tmux window=fleet:ordinary-lost)
+$ fm-session-start.sh (base-tmux-closed)
+lock acquired: harness pid 2560211
+Deferred startup completed under the lock and exited 0.
+--- ordinary ---
+endpoint: alive (backend=tmux window=fleet:ordinary-lost)
+--- review ---
+endpoint: alive (backend=tmux window=fleet:fm-review)
+The unmarked tmux result is identical on baseline and target. The current mark changes the review row.
+The exact tmux window name now resolves to live pane %4 in a second disposable home.
+$ fm-session-start.sh (tmux-reused)
+lock acquired: harness pid 2560211
+Deferred startup completed under the lock and exited 0.
+--- review ---
+endpoint: parked, copy retained (backend=tmux window=fleet:fm-review)
+Recorded tmux requests for the recycled window: 0. The unmarked control did reach tmux.
+$ fm-session-start.sh (tmux-stale)
+lock acquired: harness pid 2560211
+Deferred startup completed under the lock and exited 0.
+--- stale ---
+endpoint: alive (backend=tmux window=fleet:stale-marked)
+$ fm-session-start.sh (tmux-unavailable)
+lock acquired: harness pid 2560211
+Deferred startup completed under the lock and exited 0.
+--- review ---
+endpoint: parked, copy retained (backend=tmux window=fleet:fm-review)
+--- stale ---
+endpoint: dead (backend=tmux window=fleet:stale-marked)
+--- ordinary ---
+endpoint: dead (backend=tmux window=fleet:ordinary-lost)
+Retained copy still contains its uncommitted file.
+Disposable backend sessions stopped and all child processes reaped.

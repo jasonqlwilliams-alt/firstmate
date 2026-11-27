@@ -1,0 +1,31 @@
+Target 1305a4391b8a0b5a7447d121dac0af55f88f2f7d
+
+Real Herdr herdr 0.9.5
+Closed the recorded pane, and the real Herdr server returned pane_not_found.
+$ fm-park-retained.sh recycled mark parked-retained: yes
+Stopped the named Herdr lab after marking the closed pane.
+$ fm-session-start.sh (herdr-stopped)
+lock acquired: harness pid 2514379
+Deferred startup completed under the lock and exited 0.
+--- recycled ---
+endpoint: parked, copy retained (backend=herdr window=fm-lab-park-2514547-28040:w1:p2)
+Reused Herdr pane w1:p2 has a different terminal identity, a registered synthetic worker, and a live foreground cwd in the second disposable home.
+The running Herdr server confirmed pane_not_found for the unmarked control.
+$ fm-session-start.sh (herdr-reused)
+lock acquired: harness pid 2514379
+Deferred startup completed under the lock and exited 0.
+--- recycled ---
+endpoint: parked, copy retained (backend=herdr window=fm-lab-park-2514547-28040:w1:p2)
+--- ordinary ---
+endpoint: dead (backend=herdr window=fm-lab-park-2514547-28040:w2:p2)
+Published home summary: {"target": "fm-lab-park-2514547-28040:w1:p2", "exists": null, "agent_alive": "not_checked", "status": "unknown", "observed_at": "2026-11-27T05:16:44Z", "freshness": "fresh"}
+Completed inactive reconciliation read: recycled => state: unknown · source: none · endpoint parked, copy retained
+$ fm-fleet-snapshot.sh --json
+Fleet snapshot: {"endpoint": {"target": "fm-lab-park-2514547-28040:w1:p2", "exists": null, "agent_alive": "not_checked", "status": "unknown", "observed_at": "2026-11-27T05:16:46Z", "freshness": "fresh"}, "current_state": {"state": "unknown", "source": "none", "detail": "endpoint parked, copy retained", "raw": "state: unknown \u00b7 source: none \u00b7 endpoint parked, copy retained", "observed_at": "2026-11-27T05:16:46Z", "freshness": "fresh"}}
+Herdr endpoint requests during marked startup and snapshot: []
+Retained copy still contains its uncommitted file.
+$ fm-park-retained.sh recycled clear parked-retained: no
+$ fm-fleet-snapshot.sh --json (after clearing)
+Fleet snapshot: {"endpoint": {"target": "fm-lab-park-2514547-28040:w1:p2", "exists": false, "agent_alive": "not_checked", "status": "absent", "observed_at": "2026-11-27T05:16:46Z", "freshness": "fresh"}, "current_state": {"state": "unknown", "source": "none", "detail": "backend target gone: fm-lab-park-2514547-28040:w1:p2", "raw": "state: unknown \u00b7 source: none \u00b7 backend target gone: fm-lab-park-2514547-28040:w1:p2", "observed_at": "2026-11-27T05:16:46Z", "freshness": "fresh"}}
+Herdr endpoint requests after clearing: ["pane get w1:p2 --session fm-lab-park-2514547-28040", "pane get w1:p2 --session fm-lab-park-2514547-28040", "pane get w1:p2 --session fm-lab-park-2514547-28040", "agent get w1:p2 --session fm-lab-park-2514547-28040", "pane process-info --pane w1:p2 --session fm-lab-park-2514547-28040", "pane process-info --pane w1:p2 --session fm-lab-park-2514547-28040", "pane process-info --pane w1:p2 --session fm-lab-park-2514547-28040", "pane process-info --pane w1:p2 --session fm-lab-park-2514547-28040", "pane process-info --pane w1:p2 --session fm-lab-park-2514547-28040", "pane process-info --pane w1:p2 --session fm-lab-park-2514547-28040", "pane process-info --pane w1:p2 --session fm-lab-park-2514547-28040", "pane process-info --pane w1:p2 --session fm-lab-park-2514547-28040", "pane process-info --pane w1:p2 --session fm-lab-park-2514547-28040", "pane process-info --pane w1:p2 --session fm-lab-park-2514547-28040", "pane get w1:p2 --session fm-lab-park-2514547-28040"]
+Disposable backend sessions stopped and all child processes reaped.
