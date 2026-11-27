@@ -820,9 +820,8 @@ spawn_remote_secondmate() {
   if [ "$rc" -ne 0 ]; then
     fm_lock_release "$registry_lock" || true
     fm_lock_release "$SPAWN_TASK_LOCK" || true
-    # Summary first, then the doctor's own text: a caller that reports only the
-    # first line, such as the startup liveness sweep, must still say something
-    # actionable.
+    # Lead with the route-specific refusal, then forward the doctor's output
+    # for repair details.
     if [ "$rc" -eq 255 ]; then
       echo "error: remote secondmate $id readiness could not be confirmed; preserved route $host:$home" >&2
     else
