@@ -448,7 +448,10 @@ On agy either notice must fit on one composer row and stop before the last colum
 An 80-column pane fits the short notice, and widening a pane can resolve a width refusal.
 When the full text cannot be confirmed after typing, an unsubmitted draft may remain in the composer.
 muse is verified for crewmate and scout launches ONLY, and `fm-spawn.sh` refuses it for a secondmate, because muse ships no usable hook surface for a primary session's turn-end supervision; [`docs/verification/muse.md`](verification/muse.md) owns that evidence.
-muse also needs a worker-reachable credential before spawning, and the portable fleet path is the `<config>/muse/auth.json` credential stored by `muse login`, because a caller-only `META_API_KEY` does not cross a long-lived backend daemon.
+Muse requires a worker-reachable credential before launch and refuses a fresh spawn without one before creating a worker endpoint.
+The portable credential is `<config>/muse/auth.json` from `muse login`, which preflight requires on backends other than tmux.
+For a new or recreated tmux window, preflight accepts `META_API_KEY` from the exact destination session, since a key set only in the caller's environment does not reach the worker.
+For an in-place tmux relaunch, it checks the invoking tmux session or uses tmux's `firstmate` session lookup when invoked outside tmux.
 gemini is likewise refused for secondmates because it has no primary supervision protocol; [its adapter reference](../.agents/skills/harness-adapters/references/harness/gemini.md) owns the credential precondition, canonical-launch wiring, and raw-launch limitations.
 rovo is likewise verified for crewmate and scout launches ONLY, refused for a secondmate for the same reason - no turn-end hook and no primary supervision protocol; [`docs/verification/rovo.md`](verification/rovo.md) owns that evidence, including the OAuth token's silent background refresh from a stored refresh token and both tmux and herdr pane liveness (herdr placement is verified live, with a Herdr-side agent-detection gap left open for recovery classification).
 agy (Antigravity CLI) is likewise verified for crewmate and scout launches ONLY and refused for a secondmate: it has no primary supervision protocol, and the captain's standing rule keeps Antigravity out of owning coding, refs, merges, and deploys.
@@ -540,13 +543,10 @@ Choose the minimum additions for the authentication method actually in use:
 | Provider login stored under the normal home directory | None for the environment contract; the same user still has access to that provider's stored login. |
 | Provider configured through environment variables | The exact credential and endpoint names required by that provider, for example `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`; a multi-provider tool needs each provider it will actually use. |
 | Custom provider store | Its configured location variables, such as `CODEX_HOME`, `GROK_HOME`, or `XDG_CONFIG_HOME`; Firstmate's existing explicit Claude and Muse store assignments still apply. |
-| Muse environment authentication | `META_API_KEY` in the tmux session environment checked below. Firstmate's preflight requires the stored-login path on other backends. |
+| Muse environment authentication | `META_API_KEY` when using [Muse's tmux session authentication](#harness-support). |
 | Git over SSH with an agent | `SSH_AUTH_SOCK`; add `GIT_SSH_COMMAND` only if the chosen transport requires that override. |
 | Git over SSH with a key file | No credential variable when normal SSH configuration selects the key; file permissions and any passphrase handling still apply. |
 | Git over HTTPS with a credential helper | Whatever the configured helper requires; a GitHub CLI helper using an environment token needs its selected `GH_TOKEN` or `GITHUB_TOKEN`. |
-
-For Muse environment authentication in a new or recreated tmux window, preflight checks `META_API_KEY` in the exact destination session.
-When Muse relaunches in place, preflight checks the invoking tmux session, or uses tmux's `firstmate` session lookup if invoked outside tmux.
 
 Verify the selected provider login and Git transport after opting in; Firstmate does not infer credentials from model names or install a secret manager.
 Raw launch commands run under noninteractive POSIX `sh` with this option and must use compatible syntax.
@@ -653,7 +653,7 @@ In that list, no-mistakes runs the validation pipeline, gh-axi and chrome-devtoo
 Lavish is a presentation-only dependency for visual decisions and reports; nonvisual work can proceed with plain text when it is unavailable.
 The per-backend delta is required only for the backend resolved from `FM_BACKEND`, then `config/backend`, then runtime auto-detection, then default `tmux`, so a home is never told to install a tool an inactive backend or feature would need.
 That delta is owned in code by `fm_backend_required_tools` in `bin/fm-backend.sh`: the resolved backend's own session-provider CLI (`tmux`, `herdr`, `zellij`, `orca`, or `cmux`), `jq` for the JSON-emitting adapters (`herdr`, `zellij`, `cmux`) whose spawn and liveness paths parse the backend's JSON output, and the `treehouse` worktree provider for every session-provider-only backend (`tmux`, `herdr`, `zellij`, `cmux`).
-Backend tool availability uses the adapter's own executable resolver, so bootstrap and spawn agree on supported non-`PATH` locations such as cmux's bundled CLI.
+Bootstrap and spawn share backend prerequisite checks, including cmux's bundled CLI lookup and the [tmux client and server requirements](tmux-backend.md#setup).
 An unknown resolved backend emits `BACKEND_INVALID` and blocks dispatch instead of silently dropping its dependency delta or falling back to tmux.
 Orca provides both the task worktree and terminal endpoint (see "Runtime backend" above), so `backend=orca` requires only `orca` on top of the universal toolchain and skips both `treehouse` and every other backend's session CLI.
 A herdr, zellij, or cmux home is therefore never told `tmux` is missing, and the `treehouse` durable-lease upgrade check runs only for the backends that actually use treehouse.

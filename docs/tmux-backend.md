@@ -49,7 +49,7 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 ### Exact window reads
 
 For a recorded `session:window` target, Firstmate filters tmux's inventory by literal session and window names and reads by window ID when the matches identify one distinct window.
-This prevents tmux's prefix matching from returning `fm-mate2` when the recorded `fm-mate` window closes.
+If the recorded `fm-mate` window closes while `fm-mate2` remains open, `fm-peek` reports the recorded window missing.
 Presence checks report a confirmed absent session or window as missing.
 An inconclusive inventory or matches to multiple window IDs leave the endpoint unreadable.
 With tmux `exit-empty off`, an empty server can leave a closed worker's endpoint unreadable until the server has a session again or stops.
@@ -97,8 +97,9 @@ The one remaining rendered-tail reader is Grok's isolated fallback inside that c
 The submit acknowledgement and away-mode supervisor-pane busy guard below still consult rendered output, but only to decide whether input can be delivered, never to decide recorded task state.
 The supervisor guard selects only the detected primary harness's signature rather than a global union of vendor patterns.
 
-Named key sends require a successful target-presence check before tmux sends the key.
-`bin/fm-tmux-lib.sh` owns exact type-and-submit mechanics.
+Named key sends require a successful target-presence check.
+tmux receives the caller's target for key and text delivery, and [recorded-window lookup](#exact-window-reads) applies to the composer and busy readbacks.
+`bin/fm-tmux-lib.sh` owns type-and-submit verification.
 It types a message once and retries Enter only until the composer clears.
 Only a proven empty composer is a positive delivery acknowledgement.
 Text left in established structure remains `pending`, text in ambiguous structure remains unproven, and unreadable or unsafe state remains unknown.

@@ -111,8 +111,9 @@ An unauthenticated launch does not exit; it waits indefinitely:
   Esc cancel
 ```
 
-That is why `bin/fm-spawn.sh` preflights worker-reachable `META_API_KEY` or `<config>/muse/auth.json` and refuses before creating an endpoint.
-A caller-only `META_API_KEY` is refused because a long-lived backend daemon does not inherit it, while the non-secret `XDG_CONFIG_HOME` and `XDG_DATA_HOME` roots are resolved to absolute paths before preflight and forwarding so the stored credential and session-log binding reach the same worker environment.
+See the [Muse launch credential requirements](../configuration.md#harness-support).
+[`tests/fm-muse-harness.test.sh`](../../tests/fm-muse-harness.test.sh) covers a fresh spawn with a session key in the destination and refusal when only a similarly named session has the key.
+The non-secret `XDG_CONFIG_HOME` and `XDG_DATA_HOME` roots are resolved to absolute paths before preflight and forwarding so the stored credential and session-log binding reach the same worker environment.
 
 ### Foreign personal context
 
