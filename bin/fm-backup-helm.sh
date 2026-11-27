@@ -606,7 +606,7 @@ lock_is_held_live() {
 # Its first message is the session-start instruction, so the successor takes
 # the helm and arms supervision without waiting for a captain message.
 build_launch_command() {
-  local bin prompt env_extra='' pre='' post='' flags='' word
+  local bin prompt env_extra='' pre='' post='' flags='' word launcher=''
   bin=$(successor_bin) || return 1
   # shellcheck source=bin/fm-operational-input.sh
   . "$SCRIPT_DIR/fm-operational-input.sh"
@@ -627,8 +627,11 @@ build_launch_command() {
     cursor) pre=' --trust --yolo'; post=" --workspace $(printf '%q' "$HELM_WORKSPACE")" ;;
     *) return 1 ;;
   esac
-  local launcher
-  printf -v launcher '%q -- ' "$SCRIPT_DIR/fm-session-launch.sh"
+  # shellcheck source=bin/fm-session-lock-record-lib.sh
+  . "$SCRIPT_DIR/fm-session-lock-record-lib.sh"
+  if fm_session_owner_enabled; then
+    printf -v launcher '%q -- ' "$SCRIPT_DIR/fm-session-launch.sh"
+  fi
   printf 'cd -- %q && FM_HOME=%q exec env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u FM_OMP_HARNESS%s %s%q%s%s%s %q\n' \
     "$HELM_WORKSPACE" "$FM_HOME" "$env_extra" "$launcher" "$bin" "$pre" "$flags" "$post" "$prompt"
 }

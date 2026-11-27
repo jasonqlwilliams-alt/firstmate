@@ -1091,10 +1091,23 @@ SH
     ''|Z*|X*) ;;
     *) fail "inactive scan pid $scan_pid survived the startup deadline" ;;
   esac
+  rm "$home/scan-waiter"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_STARTUP_NETWORK_TIMEOUT=8 \
+    FM_INACTIVE_RECONCILE_BUDGET_SECS=1 \
+    FM_TEST_REAL_SCAN="$ROOT/bin/fm-inactive-reconcile.sh" FM_FAKE_BOOTSTRAP_LOG="$log" \
+    PATH="$root/bin:$PATH" "$root/bin/fm-session-start.sh" 2>&1) || fail "bare startup failed: $out"
+  scan_pid=$(cat "$home/scan-waiter") || fail 'no scan waited during the local deadline fixture'
+  assert_contains "$out" 'completed during this startup' 'the local scan deadline did not leave time for bootstrap'
+  assert_not_contains "$out" 'hit the 8s bound' 'the waiting scan consumed the entire startup sweep'
+  assert_grep 'network=only detect_only=0' "$log" 'bootstrap did not run after the local scan deadline'
+  case "$(/bin/ps -p "$scan_pid" -o stat=)" in
+    ''|Z*|X*) ;;
+    *) fail "inactive scan pid $scan_pid survived the local deadline and sweep completion" ;;
+  esac
   rm -rf "$home/state/.inactive-outcome-reconcile.lock"
   FM_HOME="$home" "$root/bin/fm-session-launch.sh" -- "$root/bin/fm-lock.sh" >/dev/null \
     || fail 'the expired sweep still blocked the next launch'
-  pass 'fm-startup-network: a timed-out bare startup reaps the waiting inactive scan before takeover'
+  pass 'fm-startup-network: bare startup enforces both local and enclosing scan deadlines'
 }
 
 if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then

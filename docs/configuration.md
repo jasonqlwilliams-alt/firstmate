@@ -31,8 +31,9 @@ Ordinary dead-direct-report recovery is owned by `stuck-crewmate-recovery`, whil
 ## Launch-bound session ownership (config/session-lock-owner)
 
 The gitignored per-home file `config/session-lock-owner` enables launch-bound ownership when it contains `launch-v1`.
-It is absent by default and is independent for every primary and secondmate home.
-Enable it only on a clean restart of the home, after updating its startup and watcher scripts, hook registrations, and all loaded extensions to builds that understand the generation record.
+Leave it absent in every primary and secondmate home for this release.
+Before enabling any home, unbound recovery must retain the acquisition claim through its mutations, continuing network sweeps must end before their claim can be reclaimed, and worker delegation must verify the caller as well as the claim holder.
+Once those requirements are met, enable it only on a clean restart of the home, after updating its startup and watcher scripts, hook registrations, and all loaded extensions to builds that understand the generation record.
 Retire the versioned owner and its record before downgrading to a build that only reads the PID line.
 A writable home must stay in one host and PID namespace.
 The launch-bound provider uses Linux procfs or macOS libproc through `python3`.

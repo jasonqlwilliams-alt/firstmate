@@ -1580,6 +1580,29 @@ test_raw_ship_and_scout_keep_their_leading_command() {
   pass "legacy ship and scout raw launches preserve their leading shell command"
 }
 test_raw_ship_and_scout_keep_their_leading_command
+test_legacy_raw_secondmate_keeps_its_leading_command() {
+  local rec id=profile-legacy-raw-mate sm out launch
+  rec=$(make_spawn_case legacy-raw-mate codex "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  cat > "$FAKEBIN_DIR/claude" <<'SH'
+#!/bin/bash
+printf '%s\n' "$FM_HOME" "$FM_SUPERVISION_MODEL" "${CLAUDE_CONFIG_DIR-unset}"
+SH
+  chmod +x "$FAKEBIN_DIR/claude"
+  out=$(FM_TEST_CLAUDE_CONFIG_DIR="$CASE_DIR/primary-claude-config" \
+    run_spawn "$HOME_DIR" "$sm" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate --harness 'exec claude') \
+    || fail "legacy raw secondmate spawn failed: $out"
+  assert_contains "$out" "spawned $id harness=exec" "legacy secondmate changed its recorded adapter"
+  launch=$(cat "$LAUNCH_LOG")
+  out=$(env -u CLAUDE_CONFIG_DIR PATH="$FAKEBIN_DIR:$PATH" bash -c "$launch") \
+    || fail "legacy raw secondmate command did not execute directly"
+  [ "$out" = "$(printf '%s\npersistent\nunset' "$sm")" ] \
+    || fail "legacy raw secondmate changed its home, supervision, or Claude config: $out"
+  pass "a default-off raw secondmate keeps the legacy adapter and environment"
+}
+test_legacy_raw_secondmate_keeps_its_leading_command
 test_claude_threads_model_and_effort
 test_codex_threads_model_and_effort
 test_codex_omits_invalid_max_effort
@@ -1624,7 +1647,7 @@ echo "# all fm-spawn-dispatch-profile tests passed"
 test_secondmate_relaunch_rebinds_the_target_home() {
   local mode=$1 rec id sm out launch first second
   local -a harness_args=()
-  if [ "$mode" = raw ]; then harness_args=(--harness 'exec codex'); fi
+  if [ "$mode" = raw ]; then harness_args=(--harness 'exec -- codex'); fi
   id=profile-secondmate-owner-$mode
   rec=$(make_spawn_case "owner-relaunch-$mode" codex "$id")
   read_case_record "$rec"

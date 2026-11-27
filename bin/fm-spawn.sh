@@ -1604,6 +1604,23 @@ else
 fi
 [ -z "$HARNESS_ARG" ] || ARG3=$HARNESS_ARG
 
+SECONDMATE_OWNER_WRAPPER=0
+if [ "$KIND" = secondmate ]; then
+  if [ -z "$FIRSTMATE_HOME" ] && { [ -e "$STATE/$ID.meta" ] || [ -L "$STATE/$ID.meta" ]; }; then
+    fm_backlog_record_present "$STATE/$ID.meta" "task record" "$STATE" || {
+      echo "error: secondmate task record is unsafe: $FM_BACKLOG_TRANSITION_ERROR" >&2
+      exit 1
+    }
+    FIRSTMATE_HOME=$(grep '^home=' "$STATE/$ID.meta" | cut -d= -f2- || true)
+  fi
+  if [ -z "$FIRSTMATE_HOME" ]; then
+    FIRSTMATE_HOME=$(secondmate_registry_field "$DATA/secondmates.md" "$ID" home || true)
+  fi
+  if [ -n "$FIRSTMATE_HOME" ] && FM_HOME="$FIRSTMATE_HOME" fm_session_owner_enabled; then
+    SECONDMATE_OWNER_WRAPPER=1
+  fi
+fi
+
 shell_quote() {
   printf "'"
   printf '%s' "$1" | sed "s/'/'\\\\''/g"
@@ -2052,16 +2069,15 @@ case "$ARG3" in
     RAW_LAUNCH=1
     LAUNCH=$ARG3
     RAW_EXECUTABLE=$(perl -MText::ParseWords=shellwords -e '
-      my $leading = $ARGV[1] eq "secondmate";
-      my $exec_prefix = 0;
-      for my $word (shellwords($ARGV[0])) {
-        next if $word =~ /^[A-Za-z_][A-Za-z0-9_]*=/;
-        if ($leading && $word eq "exec") { $leading = 0; $exec_prefix = 1; next; }
-        next if $exec_prefix && $word eq "--";
-        print $word; exit 0;
+      my @words = shellwords($ARGV[0]);
+      shift @words while @words && $words[0] =~ /^[A-Za-z_][A-Za-z0-9_]*=/;
+      if ($ARGV[1] eq "1" && @words && $words[0] eq "exec") {
+        shift @words;
+        shift @words if @words && $words[0] eq "--";
       }
-      exit 1;
-    ' -- "$LAUNCH" "$KIND") || { echo "error: raw launch has no executable" >&2; exit 1; }
+      exit 1 unless @words;
+      print $words[0];
+    ' -- "$LAUNCH" "$SECONDMATE_OWNER_WRAPPER") || { echo "error: raw launch has no executable" >&2; exit 1; }
     HARNESS=$(basename -- "$RAW_EXECUTABLE")
     ;;
   '')
@@ -2713,19 +2729,6 @@ validate_firstmate_operational_dirs() {
     fi
   done
 }
-
-if [ "$KIND" = secondmate ]; then
-  if [ -z "$FIRSTMATE_HOME" ] && { [ -e "$STATE/$ID.meta" ] || [ -L "$STATE/$ID.meta" ]; }; then
-    fm_backlog_record_present "$STATE/$ID.meta" "task record" "$STATE" || {
-      echo "error: secondmate task record is unsafe: $FM_BACKLOG_TRANSITION_ERROR" >&2
-      exit 1
-    }
-    FIRSTMATE_HOME=$(grep '^home=' "$STATE/$ID.meta" | cut -d= -f2- || true)
-  fi
-  if [ -z "$FIRSTMATE_HOME" ]; then
-    FIRSTMATE_HOME=$(secondmate_registry_value "$ID" home || true)
-  fi
-fi
 
 if [ "$KIND" = secondmate ]; then
   [ -n "$FIRSTMATE_HOME" ] || { echo "error: no firstmate home supplied or registered for $ID" >&2; exit 1; }
@@ -4999,7 +5002,7 @@ LAUNCH=${LAUNCH//__WORKTREE__/$sq_worktree}
 raw_harness_unset=
 case "$HARNESS" in
   claude|codex|opencode|pi|pi-signed|grok|kimi|gemini|muse|rovo|agy)
-    if [ "$KIND" = secondmate ] && [ "$RAW_LAUNCH" -eq 1 ]; then
+    if [ "$SECONDMATE_OWNER_WRAPPER" -eq 1 ] && [ "$RAW_LAUNCH" -eq 1 ]; then
       raw_harness_unset=' CURSOR_AGENT CURSOR_INVOKED_AS GEMINI_CLI'
     else
       LAUNCH="env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI $LAUNCH"
@@ -5040,7 +5043,7 @@ if [ "$KIND" = secondmate ]; then
   # not enable them across the launch boundary (bin/fm-trace-context-lib.sh header).
   # Reuse the single frozen decision from the carrier resolution above so the
   # injected carrier and this on/off snapshot are guaranteed to agree.
-  if FM_HOME="$PROJ_ABS" fm_session_owner_enabled; then
+  if [ "$SECONDMATE_OWNER_WRAPPER" -eq 1 ]; then
     if [ "$RAW_LAUNCH" -eq 0 ]; then LAUNCH="exec env $LAUNCH"; fi
     LAUNCH="$(shell_quote "$PROJ_ABS/bin/fm-session-launch.sh") -- /bin/bash -c $(shell_quote "$LAUNCH")"
   fi
@@ -5048,7 +5051,7 @@ if [ "$KIND" = secondmate ]; then
 fi
 _fm_wake_require_classify || exit 1
 reserved_key_prefixes=${FM_CLASSIFY_RESERVED_KEY_PREFIXES:-$FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT}
-LAUNCH="unset FM_SESSION_OWNER_ID FM_SESSION_OWNER_HOME FM_SESSION_OWNER_PID FM_SESSION_OWNER_START FM_SESSION_OWNER_KIND FM_BOOTSTRAP_NETWORK_LOCK_PID FM_BOOTSTRAP_NETWORK_LOCK_GEN FM_BOOTSTRAP_NETWORK_WORKER_PID FM_BOOTSTRAP_NETWORK_WORKER_START FM_TIMEOUT_INHERIT_GROUP$raw_harness_unset; export FM_CLASSIFY_RESERVED_KEY_PREFIXES=$(shell_quote "$reserved_key_prefixes"); $LAUNCH"
+LAUNCH="unset FM_SESSION_OWNER_ID FM_SESSION_OWNER_HOME FM_SESSION_OWNER_PID FM_SESSION_OWNER_START FM_SESSION_OWNER_KIND FM_BOOTSTRAP_NETWORK_LOCK_PID FM_BOOTSTRAP_NETWORK_LOCK_GEN FM_BOOTSTRAP_NETWORK_WORKER_PID FM_BOOTSTRAP_NETWORK_WORKER_START FM_TIMEOUT_STARTUP_SCOPE$raw_harness_unset; export FM_CLASSIFY_RESERVED_KEY_PREFIXES=$(shell_quote "$reserved_key_prefixes"); $LAUNCH"
 if [ -z "$SPAWN_TRACEPARENT" ] && [ "$RELAUNCH" -eq 1 ]; then
   LAUNCH="unset TRACEPARENT; $LAUNCH"
 fi

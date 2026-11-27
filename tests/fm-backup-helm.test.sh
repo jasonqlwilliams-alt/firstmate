@@ -331,6 +331,7 @@ assert_contains "$send" "/stow" "driver recorded /stow"
 assert_contains "$send" "/exit" "driver recorded /exit"
 launch=$(cat "$LAUNCH_LOG")
 assert_contains "$launch" "$FAKEBIN/pi --approve" "driver launch starts interactive pi trusting the checkout"
+assert_contains "$launch" "-u FM_OMP_HARNESS $FAKEBIN/pi --approve" "default-off handover execs Pi directly"
 assert_contains "$launch" "FM_HOME=$H" "driver launch binds the home"
 assert_not_contains "$launch" " -p " "driver launch must not be headless"
 assert_present "$H/state/.lock" "successful handover must not delete the lock file"
@@ -341,6 +342,15 @@ PATH="$FAKEBIN:$PATH" bash -c "$launch" >/dev/null 2>&1 || true
 assert_contains "$(cat "$PROBE_LOG")" "cwd=$H fm_home=$H argv=--approve" "launch line starts pi in the checkout"
 assert_contains "$(cat "$PROBE_LOG")" "FIRSTMATE_OP: v1 session-start: Run \`bin/fm-session-start.sh\` now" "launch opens with the session-start instruction"
 pass "idle handover stows, exits, and launches the configured successor"
+
+: >"$LAUNCH_LOG"
+printf 'launch-v1\n' > "$H/config/session-lock-owner"
+FM_HOME="$H" FM_BACKUP_HELM_DRIVER="$FAKEBIN/idle-driver" \
+  helm handover --harness pi --backend tmux --target firstmate:0 --workspace "$H" >/dev/null \
+  || fail "enabled handover must succeed"
+assert_contains "$(cat "$LAUNCH_LOG")" "$ROOT/bin/fm-session-launch.sh -- $FAKEBIN/pi --approve" \
+  "enabled handover launches Pi through the ownership wrapper"
+rm "$H/config/session-lock-owner"
 
 : >"$SEND_LOG"
 : >"$LAUNCH_LOG"

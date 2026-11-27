@@ -229,7 +229,9 @@ network_mutation_authorized() {
   if [ -z "$expected" ]; then
     return 0
   fi
-  fm_session_lock_matches_generation "$STATE" "$expected" ''
+  case "$expected" in *[!0-9]*) return 1 ;; esac
+  [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] \
+    && [ "$(cat "$STATE/.lock" 2>/dev/null)" = "$expected" ]
 }
 
 network_sweep_authorized() {
@@ -257,7 +259,7 @@ bootstrap_parallel_begin() {
 bootstrap_parallel_spawn() {
   BOOTSTRAP_PAR_N=$((BOOTSTRAP_PAR_N + 1))
   (
-    network_mutation_authorized || exit 0
+    if fm_session_owner_mode_active "$STATE"; then network_mutation_authorized || exit 0; fi
     "$@"
   ) >"$BOOTSTRAP_PAR_DIR/$BOOTSTRAP_PAR_N.out" 2>"$BOOTSTRAP_PAR_DIR/$BOOTSTRAP_PAR_N.err" &
   printf '%s\n' "$!" > "$BOOTSTRAP_PAR_DIR/$BOOTSTRAP_PAR_N.pid"
@@ -346,20 +348,28 @@ fleet_sync() (
   [ -d "$PROJECTS" ] || return 0
 
   tmp=$(mktemp "${TMPDIR:-/tmp}/fm-fleet-sync.XXXXXX" 2>/dev/null) || return 0
-  if [ "${FM_TIMEOUT_INHERIT_GROUP:-0}" = 1 ]; then
-    "$FM_ROOT/bin/fm-fleet-sync.sh" >"$tmp" 2>/dev/null
-    fleet_sync_relay_filtered_output "$tmp"
+  timeout=$(fleet_sync_bootstrap_timeout)
+  if [ "${FM_TIMEOUT_STARTUP_SCOPE:-0}" = 1 ]; then
+    local rc=0
+    fm_run_timed "$timeout" "$FM_ROOT/bin/fm-fleet-sync.sh" >"$tmp" 2>/dev/null || rc=$?
+    if [ "$rc" -eq 124 ]; then
+      fleet_sync_relay_all_output "$tmp"
+      echo "FLEET_SYNC: fleet: skipped: bootstrap refresh timed out (timeout=${timeout}s elapsed=${timeout}s)"
+    else
+      fleet_sync_relay_filtered_output "$tmp"
+    fi
     rm -f "$tmp"
     return 0
   fi
-  timeout=$(fleet_sync_bootstrap_timeout)
   monitor_was_on=0
   case $- in *m*) monitor_was_on=1 ;; esac
   set -m 2>/dev/null || true
   "$FM_ROOT/bin/fm-fleet-sync.sh" >"$tmp" 2>/dev/null &
   pid=$!
-  trap 'kill -KILL -- "-$pid" 2>/dev/null || true' EXIT
-  trap 'exit 143' TERM
+  if fm_session_owner_mode_active "$STATE"; then
+    trap 'kill -KILL -- "-$pid" 2>/dev/null || true' EXIT
+    trap 'exit 143' TERM
+  fi
 
   start=$SECONDS
   while jobs -r -p | grep -qx "$pid"; do
@@ -1688,7 +1698,7 @@ if [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ]; then
     fleet_sync_out=$(mktemp "${TMPDIR:-/tmp}/fm-bootstrap-fleet.XXXXXX") || fleet_sync_out=
     if [ -n "$fleet_sync_out" ]; then
       (
-        network_mutation_authorized || exit 0
+        if fm_session_owner_mode_active "$STATE"; then network_mutation_authorized || exit 0; fi
         __fm_timing_stamp=$(fm_timing_now_ms)
         fleet_sync
         fm_timing_record phase fleet-sync "$__fm_timing_stamp"

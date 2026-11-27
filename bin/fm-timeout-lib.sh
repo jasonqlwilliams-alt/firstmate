@@ -162,6 +162,45 @@ fm_timeout_seconds() {  # <milliseconds>
   printf '%d.%03d' "$(( $1 / 1000 ))" "$(( $1 % 1000 ))"
 }
 
+fm_run_startup_deadline() {  # <group|child> <seconds> <signal> <command...>
+  node -e '
+    const { spawn } = require("node:child_process");
+    const [scope, seconds, signal, command, ...args] = process.argv.slice(1);
+    const group = scope === "group";
+    const child = spawn(command, args, {
+      detached: group,
+      env: group ? { ...process.env, FM_TIMEOUT_STARTUP_SCOPE: "1" } : process.env,
+      stdio: "inherit",
+    });
+    function send(nextSignal) {
+      if (!child.pid) return;
+      try {
+        process.kill(group ? -child.pid : child.pid, nextSignal);
+      } catch (error) {
+        if (error.code !== "ESRCH") throw error;
+      }
+    }
+    let expired = false;
+    let grace;
+    const deadline = setTimeout(() => {
+      expired = true;
+      send(signal);
+      if (signal === "SIGTERM") grace = setTimeout(() => send("SIGKILL"), 200);
+    }, Number(seconds) * 1000);
+    child.once("error", (error) => {
+      clearTimeout(deadline);
+      console.error(error.message);
+      process.exitCode = 127;
+    });
+    child.once("exit", (code, exitSignal) => {
+      if (group) send("SIGKILL");
+      clearTimeout(deadline);
+      clearTimeout(grace);
+      process.exitCode = expired ? 124 : code ?? (exitSignal === "SIGKILL" ? 137 : 143);
+    });
+  ' -- "$@"
+}
+
 fm_run_timed() {  # [--kill | --wait-on-term] <seconds> <command...>
   local seconds signal=TERM wait_on_term=0
   case "$1" in
@@ -170,8 +209,8 @@ fm_run_timed() {  # [--kill | --wait-on-term] <seconds> <command...>
   esac
   seconds=$1
   shift
-  if [ "${FM_TIMEOUT_INHERIT_GROUP:-0}" = 1 ]; then
-    "$@"
+  if [ "${FM_TIMEOUT_STARTUP_SCOPE:-0}" = 1 ]; then
+    fm_run_startup_deadline child "$seconds" "SIG$signal" "$@"
     return
   fi
   case "$(fm_timeout_mechanism)" in

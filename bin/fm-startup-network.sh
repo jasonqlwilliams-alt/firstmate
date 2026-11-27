@@ -157,10 +157,12 @@ status_get() {  # <key>
 
 lock_identity_value() {  # <pid>; encode the shared identity for this line record
   local identity
-  fm_session_lock_read "$STATE/.lock" && [ "$FM_SESSION_LOCK_PID" = "$1" ] || return 1
-  if [ -n "$FM_SESSION_LOCK_GENERATION" ]; then
-    printf '%s\n' "$FM_SESSION_LOCK_GENERATION"
-    return 0
+  if fm_session_owner_mode_active "$STATE"; then
+    fm_session_lock_read "$STATE/.lock" && [ "$FM_SESSION_LOCK_PID" = "$1" ] || return 1
+    if [ -n "$FM_SESSION_LOCK_GENERATION" ]; then
+      printf '%s\n' "$FM_SESSION_LOCK_GENERATION"
+      return 0
+    fi
   fi
   identity=$(fm_pid_identity "$1") || return 1
   printf '%s' "$identity" | base64 | tr -d '\r\n'
@@ -243,7 +245,7 @@ worker_covers_request() {  # <locked> <lock-pid> <identity>
   local locked=$1 lock_pid=$2 identity=$3
   [ "$locked" != 1 ] && return 0
   [ "$(status_get lock_pid)" = "$lock_pid" ] \
-    && [ "$(status_get lock_identity)" = "$identity" ] \
+    && { ! fm_session_owner_mode_active "$STATE" || [ "$(status_get lock_identity)" = "$identity" ]; } \
     && [ "$(status_get phases)" = probe,sweeps ]
 }
 
@@ -450,38 +452,60 @@ EOF
   fi
 }
 
-run_sweeps() {  # <lock-pid> <owner-generation> <sweep-budget>
-  local lock_pid=$1 lock_generation=$2 budget=$3 claim="$STATE/.lock.acquire"
-  if fm_session_owner_mode_active "$STATE"; then
-    fm_session_owner_context || return 75
-  fi
-  fm_lock_acquire_wait "$claim" startup-network || return 1
-  trap 'fm_lock_release "$STATE/.lock.acquire"' EXIT
-  fm_session_lock_matches_generation "$STATE" "$lock_pid" "$lock_generation" || return 75
-  if [ -n "$lock_generation" ]; then
-    fm_session_owner_context && fm_session_owner_matches_context || return 75
-  fi
-  fm_session_owner_clear
-
-  export FM_HOME FM_STATE_OVERRIDE="$STATE" FM_BOOTSTRAP_NETWORK=only
-  export FM_BOOTSTRAP_NETWORK_LOCK_PID="$lock_pid" FM_BOOTSTRAP_NETWORK_LOCK_GEN="$lock_generation"
-  export FM_BOOTSTRAP_NETWORK_WORKER_PID="$$" FM_BOOTSTRAP_NETWORK_WORKER_START
-  FM_BOOTSTRAP_NETWORK_WORKER_START=$(cat "$claim/start" 2>/dev/null) || FM_BOOTSTRAP_NETWORK_WORKER_START=
-  if [ -n "$lock_generation" ]; then fm_session_network_worker_owns_claim "$STATE" || return 75; fi
-  if [ "$FM_SESSION_LOCK_KIND" = startup ]; then
-    export FM_TIMEOUT_INHERIT_GROUP=1
-  fi
-  "$SCRIPT_DIR/fm-home-summary-refresh.sh" ||
+run_home_summary() {
+  env FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-home-summary-refresh.sh" ||
     printf 'HOME_SUMMARY: deferred publication failed; the prior ledger is retained; see the producer diagnostic above\n'
+}
+
+run_network_bootstrap() {  # <lock-pid> <sweep-budget>
   # shellcheck disable=SC2016
-  fm_run_timed "$budget" bash -c '
-    . "$1/fm-session-lock-record-lib.sh"
-    if [ -n "$FM_BOOTSTRAP_NETWORK_LOCK_GEN" ]; then
+  fm_run_timed "$2" env FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+    FM_BOOTSTRAP_NETWORK=only FM_BOOTSTRAP_NETWORK_LOCK_PID="$1" bash -c '
+    if [ -n "${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-}" ]; then
+      . "$1/fm-session-lock-record-lib.sh"
       fm_session_network_worker_owns_claim "$FM_STATE_OVERRIDE" || exit 75
     fi
     "$1/fm-inactive-reconcile.sh" scan --startup >/dev/null 2>&1 || true
     exec "$1/fm-bootstrap.sh"
   ' _ "$SCRIPT_DIR"
+}
+
+lock_unchanged() {  # <lock-pid> <owner-generation>
+  local expected=$1
+  if fm_session_owner_mode_active "$STATE"; then
+    [ -n "$2" ] && fm_session_lock_matches_generation "$STATE" "$expected" "$2"
+    return
+  fi
+  case "$expected" in ''|*[!0-9]*) return 1 ;; esac
+  [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] \
+    && [ "$(cat "$STATE/.lock" 2>/dev/null)" = "$expected" ]
+}
+
+run_sweeps() {  # <lock-pid> <owner-generation> <sweep-budget>
+  local lock_pid=$1 lock_generation=$2 budget=$3 claim="$STATE/.lock.acquire" kind
+  fm_session_owner_context || return 75
+  if [ "$FM_SESSION_OWNER_KIND" = startup ]; then
+    fm_lock_try_acquire "$claim" startup-network || return 75
+  else
+    fm_lock_acquire_wait "$claim" startup-network || return 1
+  fi
+  trap 'fm_lock_release "$STATE/.lock.acquire"' EXIT
+  lock_unchanged "$lock_pid" "$lock_generation" && fm_session_owner_context \
+    && fm_session_owner_matches_context || return 75
+  kind=$FM_SESSION_LOCK_KIND
+  fm_session_owner_clear
+
+  export FM_HOME FM_STATE_OVERRIDE="$STATE"
+  export FM_BOOTSTRAP_NETWORK_LOCK_PID="$lock_pid" FM_BOOTSTRAP_NETWORK_LOCK_GEN="$lock_generation"
+  export FM_BOOTSTRAP_NETWORK_WORKER_PID="$$" FM_BOOTSTRAP_NETWORK_WORKER_START
+  FM_BOOTSTRAP_NETWORK_WORKER_START=$(cat "$claim/start" 2>/dev/null) || return 75
+  fm_session_network_worker_owns_claim "$STATE" || return 75
+  if [ "$kind" = startup ]; then
+    fm_run_startup_deadline group "$budget" SIGKILL "$SCRIPT_DIR/fm-startup-network.sh" _checks "$lock_pid" "$budget"
+  else
+    run_home_summary
+    run_network_bootstrap "$lock_pid" "$budget"
+  fi
 }
 
 cmd_run() {  # <locked> <lock-pid> <network-generation> <owner-generation>
@@ -506,7 +530,7 @@ cmd_run() {  # <locked> <lock-pid> <network-generation> <owner-generation>
     if [ "$internal" -eq 0 ]; then
       lock_pid=$FM_SESSION_LOCK_PID lock_generation=$FM_SESSION_LOCK_GENERATION
     fi
-    if fm_session_lock_matches_generation "$STATE" "$lock_pid" "$lock_generation"; then
+    if lock_unchanged "$lock_pid" "$lock_generation"; then
       sweep_locked=1
       phases=probe,sweeps
     else
@@ -545,14 +569,25 @@ EOF
   stage_started=$(fm_timing_now_ms)
   rc=0
   if [ "$sweep_locked" -eq 1 ]; then
-    local claim_budget=$((budget + $(summary_budget) + 2))
-    local -a timeout_args=("$claim_budget")
-    if [ "${FM_SESSION_OWNER_KIND:-}" = startup ]; then
-      timeout_args=(--kill "$budget")
+    if [ -z "$lock_generation" ]; then
+      fm_lock_acquire_wait "$STATE/.lock.acquire"
+      if lock_unchanged "$lock_pid" ''; then
+        run_home_summary >>"$out" 2>&1
+        run_network_bootstrap "$lock_pid" "$budget" >>"$out" 2>&1 || rc=$?
+      else
+        sweep_locked=0
+        phases=probe
+        downgraded=1
+      fi
+      fm_lock_release "$STATE/.lock.acquire"
+    elif [ "${FM_SESSION_OWNER_KIND:-}" = startup ]; then
+      "$SCRIPT_DIR/fm-startup-network.sh" _sweep "$lock_pid" "$lock_generation" "$budget" >>"$out" 2>&1 || rc=$?
+    else
+      local claim_budget=$((budget + $(summary_budget) + 2))
+      fm_run_timed "$claim_budget" "$SCRIPT_DIR/fm-startup-network.sh" _sweep "$lock_pid" "$lock_generation" "$budget" \
+        >>"$out" 2>&1 || rc=$?
     fi
-    fm_run_timed "${timeout_args[@]}" "$SCRIPT_DIR/fm-startup-network.sh" _sweep "$lock_pid" "$lock_generation" "$budget" \
-      >>"$out" 2>&1 || rc=$?
-    if [ "$rc" -eq 75 ]; then
+    if [ -n "$lock_generation" ] && [ "$rc" -eq 75 ]; then
       sweep_locked=0
       phases=probe
       downgraded=1
@@ -655,9 +690,13 @@ cmd_owner() {
   local owner=${1:-} identity
   case "$owner" in ''|*[!0-9]*) return 1 ;; esac
   [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] || return 1
-  fm_session_lock_read "$STATE/.lock" && [ "$FM_SESSION_LOCK_PID" = "$owner" ] \
-    && [ "$FM_SESSION_LOCK_KIND" != startup ] \
-    && fm_session_owner_liveness "$owner" "$FM_SESSION_LOCK_START" || return 1
+  fm_session_lock_read "$STATE/.lock" && [ "$FM_SESSION_LOCK_PID" = "$owner" ] || return 1
+  if fm_session_owner_mode_active "$STATE"; then
+    [ "$FM_SESSION_LOCK_KIND" != startup ] \
+      && fm_session_owner_liveness "$owner" "$FM_SESSION_LOCK_START" || return 1
+  else
+    fm_session_lock_owner_alive "$owner" "$FM_SESSION_LOCK_START" || return 1
+  fi
   [ -f "$STATUS_FILE" ] && [ ! -L "$STATUS_FILE" ] || return 1
   identity=$(lock_identity_value "$owner") || return 1
   awk -F= -v owner="$owner" -v identity="$identity" '
@@ -749,11 +788,23 @@ case "$LOCKED" in 0|1) ;; *) LOCKED=0 ;; esac
 
 case "$MODE" in
   start) cmd_start "$LOCKED" "${HARVEST_PID:-0}" ;;
-  run) cmd_run "$LOCKED" "$LOCK_PID" "$GENERATION" "${LOCK_GENERATION:-}" || exit $? ;;
+  run)
+    if fm_session_owner_mode_active "$STATE"; then
+      cmd_run "$LOCKED" "$LOCK_PID" "$GENERATION" "${LOCK_GENERATION:-}" || exit $?
+    else
+      cmd_run "$LOCKED" "$LOCK_PID" "$GENERATION" ''
+    fi
+    ;;
   _sweep)
     [ "$#" -eq 3 ] || exit 2
     case "$3" in ''|*[!0-9]*|0) exit 2 ;; esac
     run_sweeps "$1" "$2" "$3"
+    exit $?
+    ;;
+  _checks)
+    [ "$#" -eq 2 ] && fm_session_network_worker_owns_claim "$STATE" || exit 75
+    run_home_summary
+    run_network_bootstrap "$@"
     exit $?
     ;;
   harvest) cmd_harvest "${HARVEST_PID:-}" ;;
