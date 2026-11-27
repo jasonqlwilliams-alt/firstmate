@@ -899,6 +899,7 @@ make_routine_bootstrap_fixture() {
   add_real_jq "$fakebin"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+fm_fake_tmux_dispatch "$@"
 case "${1:-}" in
   -V) printf '%s\n' 'tmux 3.2' ;;
   display-message)

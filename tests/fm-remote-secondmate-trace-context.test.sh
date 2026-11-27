@@ -51,6 +51,7 @@ trap 'FM_HOME="$PARENT" FM_PROCEVENT_CLAIM_ROOT="$CLAIMS" "$ROOT/bin/fm-proceven
 cat > "$REMOTE_ROOT/bin/tmux" <<SH
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "\$@"
 log='$TMUX_LOG'
 state='$TMUX_STATE'
 printf '%s\n' "\$*" >> "\$log"
@@ -60,6 +61,7 @@ case "\${1:-}" in
     [ -f "\$state" ] || exit 0
     name=\$(cut -d'|' -f1 "\$state")
     case "\$*" in
+      *window_id*) printf '@1 firstmate:%s\n' "\$name" | fm_fake_tmux_window_ids "\$@" ;;
       *'#{session_name}:#{window_name}'*) printf 'firstmate:%s\n' "\$name" ;;
       *) printf '%s\n' "\$name" ;;
     esac
@@ -72,7 +74,7 @@ case "\${1:-}" in
       shift
     done
     printf '%s|%s\n' "\$name" "\$cwd" > "\$state"
-    printf '@1\n'
+    fm_fake_tmux_pane_row @1
     exit 0
     ;;
   display-message)

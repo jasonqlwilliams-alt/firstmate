@@ -46,21 +46,24 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 
 ## Current behavior and safety
 
-### Exact window reads
+### Recorded pane targeting
 
-For a recorded `session:window` target, Firstmate filters tmux's inventory by literal session and window names and reads by window ID when the matches identify one distinct window.
+For a recorded `session:window` target, Firstmate matches both names literally in tmux's inventory and binds the active pane of the one matching window.
 If the recorded `fm-mate` window closes while `fm-mate2` remains open, `fm-peek` reports the recorded window missing.
-Presence checks report a confirmed absent session or window as missing.
-An inconclusive inventory or matches to multiple window IDs leave the endpoint unreadable.
-With tmux `exit-empty off`, an empty server can leave a closed worker's endpoint unreadable until the server has a session again or stops.
-If the tmux server restarts on the same socket between the inventory lookup and the read, the new server can reuse the resolved window ID.
+An inconclusive inventory or matches to multiple distinct windows leave the endpoint unreadable.
+On a tmux server with `exit-empty off`, a server with no remaining sessions may leave a closed endpoint unreadable until the server has a session again or stops.
+During a guarded operation, liveness, capture, and input use the same pane binding.
+Each tmux command verifies the server and the pane's membership in the recorded session before it runs.
+If that link is removed or tmux restarts on the same socket, the old binding cannot deliver input.
+Spawn cleanup also requires the binding returned by successful window creation.
 Explicit pane selectors such as `session:0.1` use native tmux syntax when they do not resolve to task metadata.
-[`fm_tmux_exact_target`](../bin/fm-tmux-lib.sh) implements the lookup, and [`fm-tmux-exact-target.test.sh`](../tests/fm-tmux-exact-target.test.sh) exercises it with a private tmux server.
+Fresh workers and Muse's destination credential check use literal session lookup as well.
+[`fm-tmux-lib.sh`](../bin/fm-tmux-lib.sh) owns the binding, and [`fm-tmux-exact-target.test.sh`](../tests/fm-tmux-exact-target.test.sh) exercises it with a private tmux server.
 
 ### Agent liveness probe
 
 A target-existence check proves only that the pane exists.
-After [resolving the recorded window](#exact-window-reads), the deeper tmux agent-liveness probe reads process names to distinguish a running harness from a bare idle shell.
+After [resolving the recorded window](#recorded-pane-targeting), the deeper tmux agent-liveness probe reads process names to distinguish a running harness from a bare idle shell.
 It classifies recognized Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, Muse, and Rovo process identities as `alive`, common shells as `dead`, an authoritatively absent window as `missing`, unreadable state as `unreadable`, and every other process as `ambiguous`.
 The process-name vocabulary behind those verdicts is owned by `bin/fm-agent-process-lib.sh` and shared with the Herdr adapter, which proves a registered agent against the same names ([herdr-backend.md](herdr-backend.md) "Restart and liveness behavior").
 Only `dead` and `missing` authorize recovery because a false dead result could launch a duplicate agent.
@@ -84,7 +87,7 @@ Run the real-harness guard after any harness upgrade and before trusting refresh
 
 Agent liveness and composer safety are separate checks.
 The tmux reader is a thin adapter over the fleet-wide classifier in `bin/fm-composer-lib.sh`: it contributes one styled full-pane capture, the `#{cursor_y}` cursor row, and foreground-process identity probes, and the shape containing the cursor - a complete bordered box (titled bottom borders tolerated), a bare agent-glyph row with its wrapped input, opencode's left bar, or Pi's identity-corroborated separator pair - normally decides the verdict.
-For a recorded task, the cursor, screen, and any follow-up identity probe use the window ID resolved for that snapshot.
+For a recorded task, the cursor, screen, and any follow-up identity probe use the [same pane binding](#recorded-pane-targeting).
 Real text in an identified shape is pending, while only positively proven emptiness reads empty.
 A blank or otherwise unidentified cursor row is `unknown` and every consumer defers, except that a foreground process proven to be Cursor is re-read cursorlessly because Cursor parks its terminal cursor below its footer.
 That identity-gated exception preserves the strict container-proof rule for every other pane, so a modal dialog, a dead shell between stale rules, or a mid-redraw pane is never an injection target.
@@ -97,8 +100,7 @@ The one remaining rendered-tail reader is Grok's isolated fallback inside that c
 The submit acknowledgement and away-mode supervisor-pane busy guard below still consult rendered output, but only to decide whether input can be delivered, never to decide recorded task state.
 The supervisor guard selects only the detected primary harness's signature rather than a global union of vendor patterns.
 
-Named key sends require a successful target-presence check.
-tmux receives the caller's target for key and text delivery, and [recorded-window lookup](#exact-window-reads) applies to the composer and busy readbacks.
+[Recorded pane targeting](#recorded-pane-targeting) also applies to named keys and verified submits.
 `bin/fm-tmux-lib.sh` owns type-and-submit verification.
 It types a message once and retries Enter only until the composer clears.
 Only a proven empty composer is a positive delivery acknowledgement.

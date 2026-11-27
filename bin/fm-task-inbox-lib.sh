@@ -343,6 +343,16 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label] [har
   local backend=$1 target=$2 rec=$3 label=${4:-} harness=${5:-} line screen i=0 strict=0
   [ "$(fm_control_harness_family "$harness" || true)" != claude ] || harness=claude
   case "$harness" in codex|rovo|agy) strict=1 ;; esac
+  if [ "$backend" = tmux ]; then
+    fm_backend_source tmux || return 2
+    if target=$(fm_tmux_exact_target "$target" 2>/dev/null); then
+      :
+    elif [ "$?" -eq 1 ]; then
+      return 3
+    else
+      return 2
+    fi
+  fi
   case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
     dead|missing) return 3 ;;
   esac

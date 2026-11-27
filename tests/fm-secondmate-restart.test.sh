@@ -47,7 +47,21 @@ make_stub() {  # <case-dir>
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 D=$FM_FAKE_DIR
+fixture_target() {
+  local target=$1 name file
+  case "$target" in
+    [@%]*)
+      name=$(sed -n "${target:1}p" "$D/windows" 2>/dev/null)
+      target="fmses:$name"
+      for file in "$D"/command.*:"$name"; do
+        [ ! -f "$file" ] || target=${file#"$D"/command.}
+      done
+      ;;
+  esac
+  printf '%s' "$target"
+}
 case "${1:-}" in
   send-keys)
     shift
@@ -60,6 +74,7 @@ case "${1:-}" in
         *) break ;;
       esac
     done
+    target=$(fixture_target "$target")
     payload=${1:-}
     if [ "$literal" = 1 ]; then
       printf '%s\n' "$payload" >> "$D/literal"
@@ -107,14 +122,7 @@ case "${1:-}" in
         *cursor_y*) printf '1\n'; exit 0 ;;
         '#{pane_id}') printf '%%%s\n' "${target#@}"; exit 0 ;;
         *pane_current_command*)
-          # Exact-window reads arrive by window id; map it back to the name
-          # the keyed state was written under.
-          case "$target" in
-            @*)
-              wname=$(sed -n "${target#@}p" "$D/windows" 2>/dev/null)
-              for f in "$D"/command.*:"$wname"; do [ -f "$f" ] && target=${f#"$D"/command.}; done
-              ;;
-          esac
+          target=$(fixture_target "$target")
           if [ -f "$D/command.$target" ]; then cat "$D/command.$target"; else cat "$D/command"; fi
           printf '\n'; exit 0 ;;
         *pane_current_path*) cat "$D/cwd"; printf '\n'; exit 0 ;;

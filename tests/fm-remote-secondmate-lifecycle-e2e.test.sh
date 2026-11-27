@@ -55,6 +55,7 @@ trap cleanup EXIT
 cat > "$REMOTE_ROOT/bin/tmux" <<SH
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "\$@"
 log='$TMUX_LOG'
 state='$TMUX_STATE'
 fail_send='$TMP_ROOT/tmux-send-fail'
@@ -64,7 +65,11 @@ case "\${1:-}" in
   list-windows)
     [ -f "\$state" ] || exit 0
     name=\$(cut -d'|' -f1 "\$state")
-    case "\$*" in *'#{session_name}:#{window_name}'*) printf 'firstmate:%s\n' "\$name" ;; *) printf '%s\n' "\$name" ;; esac
+    case "\$*" in
+      *window_id*) printf '@1 firstmate:%s\n' "\$name" | fm_fake_tmux_window_ids "\$@" ;;
+      *'#{session_name}:#{window_name}'*) printf 'firstmate:%s\n' "\$name" ;;
+      *) printf '%s\n' "\$name" ;;
+    esac
     exit 0
     ;;
   new-window)
@@ -74,7 +79,7 @@ case "\${1:-}" in
       shift
     done
     printf '%s|%s\n' "\$name" "\$cwd" > "\$state"
-    printf '@1\n'
+    fm_fake_tmux_pane_row @1
     exit 0
     ;;
   display-message)

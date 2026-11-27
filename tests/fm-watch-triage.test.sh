@@ -4543,6 +4543,7 @@ test_afk_busy_declared_pause_ticking_pane_hands_off_once() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 case "${1:-}" in
   list-windows)
     [ -n "${FM_FAKE_TMUX_WINDOW:-}" ] || exit 0

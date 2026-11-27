@@ -611,6 +611,7 @@ test_retire_stale_record_drops_the_unheld_copy_without_touching_the_slot() {
   claim_pool_slot "$dir" "$id" "$dir/home"
   cat > "$dir/fakebin/tmux" <<SH
 #!/usr/bin/env bash
+fm_fake_tmux_dispatch "\$@"
 printf 'tmux' >> "\${FM_RUNTIME_LOG:?}"
 printf ' <%s>' "\$@" >> "\${FM_RUNTIME_LOG:?}"
 printf '\\n' >> "\${FM_RUNTIME_LOG:?}"
@@ -623,7 +624,7 @@ case "\${1:-}" in
   display-message)
     for a in "\$@"; do
       case "\$a" in
-        *pane_current_command*) [ "\${4:-}" = @1 ] || exit 1; printf 'claude\\n'; exit 0 ;;
+        *pane_current_command*) [[ "\${3:-}" = %1 || "\${4:-}" = @1 ]] || exit 1; printf 'claude\\n'; exit 0 ;;
       esac
     done
     printf 'fakepane\\n'; exit 0 ;;

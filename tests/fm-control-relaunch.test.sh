@@ -44,6 +44,7 @@ make_tmux_stub() {  # <dir>
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 D=$FM_FAKE_DIR
 case "${1:-}" in
   -V) printf 'tmux 3.2\n'; exit 0 ;;
@@ -149,8 +150,9 @@ case "${1:-}" in
     done
     [ -z "$name" ] || printf '%s\n' "$name" >> "$D/windows"
     [ -z "$cwd" ] || printf '%s' "$cwd" > "$D/cwd"
+    [ "$session" != "\$1" ] || session=${FM_FAKE_TMUX_SESSION_NAME:-firstmate}
     [ -z "$session" ] || printf '%s\n' "$session" > "$D/session"
-    awk 'END { print "@" NR }' "$D/windows"
+    fm_fake_tmux_pane_row "$(awk 'END { print "@" NR }' "$D/windows")"
     exit 0 ;;
 esac
 exit 0
@@ -240,11 +242,13 @@ run_control() {  # <case-dir> <args...>
     env PATH="${FM_FAKE_PANE_PATH:-$dir/fakebin:$PATH}" /bin/sleep 120 >/dev/null 2>&1 &
   fi
   pane_pid=$!
+  # Give the guarded process probe room to start on a loaded host. These
+  # cases assert the lifecycle result independently of the elapsed timeout.
   env FM_FAKE_PANE_PID="$pane_pid" FM_FAKE_PANE_PATH="${FM_FAKE_PANE_PATH:-$dir/fakebin:$PATH}" \
     PATH="$dir/fakebin:$PATH" FM_HOME="${FM_FAKE_CONTROL_HOME:-$dir/home}" FM_FAKE_DIR="$dir/fake" \
     HOME="$dir/user-home" CLAUDE_CONFIG_DIR='' \
     FM_SPAWN_NO_GUARD=1 GROK_HOME="$dir/grokhome" \
-    FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.5 FM_CONTROL_LAUNCH_WAIT=0.05 \
+    FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=1.5 FM_CONTROL_LAUNCH_WAIT=0.05 \
     FM_TEST_GIT_DELEGATE="${FM_TEST_GIT_DELEGATE:-}" FM_FAKE_GIT_FAILURE="${FM_FAKE_GIT_FAILURE:-}" \
     FM_REAL_MV="${FM_REAL_MV:-}" FM_FAKE_COMPLETE_JOURNAL_MV_FAIL="${FM_FAKE_COMPLETE_JOURNAL_MV_FAIL:-}" \
     FM_FAKE_META_PUBLISH_MV_FAIL="${FM_FAKE_META_PUBLISH_MV_FAIL:-}" \

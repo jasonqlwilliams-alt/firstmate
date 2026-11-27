@@ -29,6 +29,7 @@ make_rovo_fakebin() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 printf '%s\n' "$*" >> "$FM_FAKE_TMUX_CALL_LOG"
 state=$(cat "$FM_FAKE_ROVO_STATE" 2>/dev/null || true)
 fake_screen() {
@@ -68,7 +69,7 @@ case "${1:-}" in
         sed -n 's/^new-window .*-n \([^ ]*\).*/\1/p' "$FM_FAKE_TMUX_CALL_LOG" | awk '{ print "@" NR " firstmate:" $0 }' | fm_fake_tmux_window_ids "$@" ;;
     esac
     exit 0 ;;
-  new-window) printf '@1\n'; exit 0 ;;
+  new-window) fm_fake_tmux_pane_row @1; exit 0 ;;
   has-session|new-session|kill-window) exit 0 ;;
   send-keys)
     prev=

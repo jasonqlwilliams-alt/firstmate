@@ -62,6 +62,7 @@ make_stubs() {  # <dir> -> echoes fakebin dir
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 case "${1:-}" in
   send-keys)
     shift

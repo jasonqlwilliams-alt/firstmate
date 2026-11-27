@@ -424,6 +424,7 @@ make_noop_tmux() {
   fm_test_track_task_tmps "$fakebin"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+fm_fake_tmux_dispatch "$@"
 case "${1:-}" in
   -V) printf 'tmux 3.2\n' ;;
   new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@" ;;
@@ -726,6 +727,7 @@ make_launch_capturing_tmux() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 case "$*" in
   *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
 esac
@@ -1158,6 +1160,7 @@ SH
   # FM_FAKE_TMUX_LOG / FM_FAKE_TMUX_FAIL_LITERAL for reread-nudge assertions.
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+fm_fake_tmux_dispatch "$@"
 if [ -n "${FM_FAKE_TMUX_LOG:-}" ]; then
   printf '%s\n' "$*" >> "$FM_FAKE_TMUX_LOG"
 fi

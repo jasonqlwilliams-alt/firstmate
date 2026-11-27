@@ -51,6 +51,7 @@ make_probe_tmux() {
   cat > "$fakebin/tmux" <<SH
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "\$@"
 case "\${1:-}" in
   display-message)
     for a in "\$@"; do case "\$a" in *pane_current_command*) printf '%s\n' '$comm'; exit 0 ;; esac; done
@@ -76,6 +77,7 @@ make_failed_probe_tmux() {
   cat > "$fakebin/tmux" <<SH
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "\$@"
 case "\${1:-}" in
   display-message)
     [ '$inventory' = unreadable ] && { printf '%s\n' node; exit 0; }
@@ -279,6 +281,7 @@ make_liveness_tmux() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 mode=${FM_TEST_PANE_CMD:-zsh}
 case "${1:-}" in
   -V) printf '%s\n' 'tmux 3.2'; exit 0 ;;

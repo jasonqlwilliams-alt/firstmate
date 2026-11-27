@@ -295,12 +295,13 @@ make_fake_tmux() {
   cat > "$fakebin/tmux" <<SH
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "\$@"
 case "\${1:-}" in
   -V) printf '%s\n' 'tmux 3.2'; exit 0 ;;
   list-windows)
-    [ "\${2:-}" = -a ] || printf '%s\n' '@1 $live' '@2 fm-sess:duplicate' '@3 fm-sess:duplicate' | fm_fake_tmux_window_ids "\$@"
+    printf '%s\n' '@1 $live' '@2 fm-sess:duplicate' '@3 fm-sess:duplicate' | fm_fake_tmux_window_ids "\$@"
     exit 0 ;;
-  list-panes) [ "\${3:-}" = '@1' ] || exit 1; printf '%%1\n'; exit 0 ;;
+  list-panes) [[ "\${3:-}" = @1 || "\${3:-}" = %1 ]] || exit 1; printf '%%1\n'; exit 0 ;;
   display-message)
     target=""
     prev=""
@@ -308,7 +309,7 @@ case "\${1:-}" in
       [ "\$prev" = "-t" ] && target="\$a"
       prev="\$a"
     done
-    case "\$target" in '$live'|@1) printf '%%1\n'; exit 0 ;; esac
+    case "\$target" in '$live'|@1|%1) printf '%%1\n'; exit 0 ;; esac
     exit 1
     ;;
 esac
@@ -326,6 +327,7 @@ make_fake_tmux_secondmate_recovery() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 mode=${FM_FAKE_TMUX_MODE:?}
 log=${FM_FAKE_TMUX_LOG:?}
 spawned=${FM_FAKE_TMUX_SPAWNED:?}
@@ -399,7 +401,7 @@ case "${1:-}" in
   new-window)
     printf '%s\n' "$*" >> "$log"
     : > "$spawned"
-    printf '%%1\n'
+    fm_fake_tmux_pane_row @1
     exit 0
     ;;
   set-window-option|send-keys) exit 0 ;;

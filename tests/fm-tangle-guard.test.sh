@@ -226,10 +226,11 @@ make_spawn_record_fakebin() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 [ -n "${FM_TMUX_REC:-}" ] && printf 'tmux %s\n' "$*" >> "$FM_TMUX_REC"
 case "$*" in
   *"#{pane_current_path}"*)
-    [ "${4:-}" = @1 ] && [ -f "$0.original-windows" ] || exit 1
+    [ "${3:-}" = %1 ] && [ -f "$0.original-windows" ] || exit 1
     printf '%s\n' "${FM_FAKE_PANE_PATH:-}"
     exit 0 ;;
 esac
@@ -249,7 +250,7 @@ case "${1:-}" in
   send-keys)
     case "${4:-}" in
       *'treehouse get --lease --lease-holder '*)
-        [ "${3:-}" = @1 ] || exit 1
+        [ "${3:-}" = %1 ] || exit 1
         mv "$0.windows" "$0.original-windows" || exit 1
         printf '@1 firstmate:renamed\n' > "$0.windows" || exit 1
         ;;
@@ -308,17 +309,17 @@ ROWS
     || fail "spawn must record the worktree discovered while the window is renamed"
 
   # Bug 1 fix: append-form window creation (trailing colon on the session target).
-  assert_grep "new-window -dP -F #{window_id} -t =firstmate: -n fm-rec-win-gg7" "$rec" \
-    "new-window must append in the exact session and capture the window id"
+  grep -Eq "new-window -t \\\$1: -dP -F tmux-pane:[^ ]+ -n fm-rec-win-gg7" "$rec" \
+    || fail "new-window must append in the exact session and capture the pane binding"
 
   # Bug 2 fix (a): pin the window name against automatic-rename / allow-rename.
-  assert_grep "set-window-option -t @1 automatic-rename off" "$rec" \
+  assert_grep "set-window-option -t %1 automatic-rename off" "$rec" \
     "must disable automatic-rename on the spawned window"
-  assert_grep "set-window-option -t @1 allow-rename off" "$rec" \
+  assert_grep "set-window-option -t %1 allow-rename off" "$rec" \
     "must disable allow-rename on the spawned window"
 
   # Bug 2 fix (b): treehouse-get and the worktree wait loop target the stable id.
-  grep -F 'send-keys -t @1 ' "$rec" \
+  grep -F 'send-keys -t %1 ' "$rec" \
     | grep -F 'treehouse get --lease --lease-holder rec-win-gg7' \
     | grep -Fq ' Enter' \
     || fail "durable treehouse get must be sent to the stable window id"

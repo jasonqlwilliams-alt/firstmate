@@ -30,22 +30,11 @@ fm_backend_tmux_resolve_bare_selector() {  # <name>
     || { echo "error: no window named $name" >&2; return 1; }
 }
 
-fm_backend_tmux_exact_pane() {  # <session:window>
-  local window pane
-  [[ $1 = *:* ]] || return 1
-  window=$(fm_tmux_exact_target "$1") || return 1
-  pane=$(tmux display-message -p -t "$window" '#{pane_id}' 2>/dev/null) || return 1
-  [[ $pane =~ ^%[0-9]+$ ]] || return 1
-  printf '%s\n' "$pane"
-}
-
-# fm_backend_tmux_capture: bounded plain-text pane capture of exactly the
-# recorded window (fm_tmux_exact_target, bin/fm-tmux-lib.sh), so a closed
-# window reads as missing even when a prefix-named neighbour survives.
+# Bounded plain-text capture of the recorded worker pane.
 fm_backend_tmux_capture() {  # <target> <lines> [explicit]
   local target
   if target=$(fm_tmux_exact_target "$1" "${3:-}"); then
-    tmux capture-pane -p -t "$target" -S -"$2"
+    fm_tmux_pane_command "$target" capture-pane -p -S -"$2"
   else
     case $? in
       1) echo "error: tmux window $1 not found" >&2 ;;
@@ -59,23 +48,22 @@ fm_backend_tmux_target_exists() {  # <target> [explicit]
   local target diagnostic
   target=$(fm_tmux_exact_target "$@") || return $?
   if [ "${2:-}" = explicit ]; then
-    diagnostic=$(tmux capture-pane -p -t "$target" -S 0 -E 0 2>&1 >/dev/null) && return 0
+    diagnostic=$(fm_tmux_pane_command "$target" capture-pane -p -S 0 -E 0 2>&1 >/dev/null) && return 0
   else
-    diagnostic=$(tmux list-panes -t "$target" -F '#{pane_id}' 2>&1 >/dev/null) && return 0
+    diagnostic=$(fm_tmux_pane_command "$target" list-panes -F '#{pane_id}' 2>&1 >/dev/null) && return 0
   fi
   fm_tmux_read_failure_status "$diagnostic"
 }
 
-# fm_backend_tmux_send_key: one named key.
 fm_backend_tmux_send_key() {  # <target> <key> [explicit]
-  fm_backend_tmux_target_exists "$1" "${3:-}" || return $?
-  tmux send-keys -t "$1" "$2"
+  local target
+  target=$(fm_tmux_exact_target "$1" "${3:-}") || return $?
+  if [[ ! $target =~ $FM_TMUX_PANE_PATTERN ]]; then
+    fm_backend_tmux_target_exists "$target" "${3:-}" || return $?
+  fi
+  fm_tmux_pane_command "$target" send-keys "$2"
 }
 
-# fm_backend_tmux_send_text_submit: type <text> into <target> once, then
-# submit with Enter, retried (Enter only, never retyped) until the composer
-# clears. Re-exports fm_tmux_submit_core (bin/fm-tmux-lib.sh) verbatim; see
-# that file for the composer-verification contract and echoed verdicts.
 fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle> [explicit]
   fm_tmux_submit_core "$@"
 }
@@ -91,10 +79,10 @@ fm_backend_tmux_launch_session() {
 
 # fm_backend_tmux_container_ensure: reuse the current tmux session when
 # firstmate itself runs inside tmux, else ensure a dedicated detached
-# "firstmate" session exists. Mirrors fm-spawn.sh's container-ensure block;
-# prints the resolved session name.
-fm_backend_tmux_container_ensure() {  # [session]
-  local session=${1:-}
+# "firstmate" session exists. Return the binding that spawn must use for
+# the duplicate check and placement, including when new-session created it.
+fm_backend_tmux_container_ensure() {  # <session-name> [session-binding]
+  local session=$1 binding=${2:-} escaped
   fm_backend_required_tool_available tmux tmux || {
     if [ "$?" -eq 2 ]; then
       echo "error: could not verify list-windows -f support on the tmux server. See docs/tmux-backend.md#setup." >&2
@@ -103,40 +91,48 @@ fm_backend_tmux_container_ensure() {  # [session]
     fi
     return 1
   }
-  if [ -z "$session" ]; then
-    session=$(fm_backend_tmux_launch_session) || return 1
+  if [ -z "$binding" ]; then
+    if binding=$(fm_tmux_exact_session "$session"); then
+      :
+    elif [ "$?" -eq 1 ] && [ -z "${TMUX:-}" ]; then
+      escaped=$session
+      # In argv mode tmux treats a terminal semicolon as a command delimiter.
+      case "$escaped" in *';') escaped="${escaped%;}\\;" ;; esac
+      binding=$(tmux new-session -dP -F "$FM_TMUX_SESSION_FORMAT" -s "$escaped") || return 1
+    else
+      return 1
+    fi
   fi
-  if [ -z "${TMUX:-}" ]; then
-    tmux has-session -t "=$session" 2>/dev/null || tmux new-session -d -s "$session" || return 1
-  fi
-  printf '%s\n' "$session"
+  [[ $binding =~ $FM_TMUX_SESSION_PATTERN ]] || return 1
+  printf '%s\n' "$binding"
 }
 
-# fm_backend_tmux_create_task: create the task's window in <proj-abs>,
-# refusing an existing <window-name> in <session>. Mirrors fm-spawn.sh's
-# duplicate-check-then-new-window sequence, including the exact error text
-# (session:window, matching how fm-spawn.sh composed its own $T). Prints the
-# created window's stable window id on stdout for the caller to target.
-#
-# Robustness (fm-spawn tmux window handling under a non-default captain config):
-#   - Capture a STABLE window id with -P -F '#{window_id}', and let tmux append
-#     at the next free index by targeting the session with a trailing colon
-#     ("=$ses:"), so a non-default base-index (e.g. base-index 1) cannot collide.
-#   - PIN the window name by disabling automatic-rename and allow-rename on the
-#     new window: the captain's tmux may rename the window away from fm-<id> once
-#     treehouse cd's into the worktree, which would break name-based targeting.
-# The returned window id lets callers target the window even if its name is ever
-# lost, so worktree discovery cannot fall back to the active client's window.
-fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs> -> prints window id
-  local ses=$1 wname=$2 proj_abs=$3 wid
-  if tmux list-windows -t "=$ses:" -F '#{window_name}' | grep -qx "$wname"; then
-    echo "error: window $ses:$wname already exists" >&2
+# Refuse a duplicate in the destination session and place the window at the
+# next free index (including with a non-default base-index). Return the pane
+# binding from new-window itself so a restarted server cannot supply a new
+# pane for the spawn commands. Pin the name before the shell changes cwd.
+fm_backend_tmux_create_task() {  # <session-name> <window-name> <proj-abs> [session-binding]
+  local session=$1 name=$2 cwd=$3 binding=${4:-} duplicate created literal
+  if [ -z "$binding" ]; then
+    binding=$(fm_tmux_exact_session "$session") || return 1
+  fi
+  literal=$(fm_tmux_format_literal "$name")
+  duplicate=$(fm_tmux_session_command "$binding" list-windows : \
+    -f "#{==:#{window_name},$literal}" -F '#{window_id}') || return 1
+  if [ -n "$duplicate" ]; then
+    echo "error: window $session:$name already exists" >&2
     return 1
   fi
-  wid=$(tmux new-window -dP -F '#{window_id}' -t "=$ses:" -n "$wname" -c "$proj_abs") || return 1
-  tmux set-window-option -t "$wid" automatic-rename off 2>/dev/null || true
-  tmux set-window-option -t "$wid" allow-rename off 2>/dev/null || true
-  printf '%s\n' "$wid"
+  created=$(fm_tmux_session_command "$binding" new-window : -dP -F "$FM_TMUX_PANE_FORMAT" -n "$name" -c "$cwd") || return 1
+  [[ $created =~ $FM_TMUX_PANE_PATTERN ]] || return 1
+  # A shell startup hook can rename the window before allow-rename is pinned.
+  if ! fm_tmux_pane_command "$created" set-window-option automatic-rename off ||
+     ! fm_tmux_pane_command "$created" set-window-option allow-rename off ||
+     ! fm_tmux_pane_command "$created" rename-window -- "$name"; then
+    fm_backend_tmux_kill "$session:$name" '' '' "$created" || true
+    return 1
+  fi
+  printf '%s\n' "$created"
 }
 
 # fm_backend_tmux_current_path: used by spawn to discover the worktree from
@@ -144,30 +140,27 @@ fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs> -> prints 
 fm_backend_tmux_current_path() {  # <target>
   local target
   target=$(fm_tmux_exact_target "$1") || return 1
-  tmux display-message -p -t "$target" '#{pane_current_path}' 2>/dev/null
+  fm_tmux_pane_command "$target" display-message -p '#{pane_current_path}' 2>/dev/null
 }
 
-# fm_backend_tmux_send_text_line: send one line of TEXT then Enter, with no
-# composer verification - used for the fixed spawn-time commands
-# (`treehouse get`, the GOTMPDIR export) that already ran this exact sequence
-# inline in fm-spawn.sh. Mirrors `tmux send-keys -t "$T" "<text>" Enter`.
+# Send a fixed spawn command and one named Enter in the same tmux command.
 fm_backend_tmux_send_text_line() {  # <target> <text>
-  tmux send-keys -t "$1" "$2" Enter
+  local target
+  target=$(fm_tmux_exact_target "$1") || return $?
+  fm_tmux_pane_command "$target" send-keys "$2" Enter
 }
 
-# fm_backend_tmux_send_literal: send TEXT as literal bytes with no
-# submission - the caller sends Enter separately (fm-spawn.sh's launch-command
-# send pauses between the literal send and Enter for the harness to settle).
-# Mirrors `tmux send-keys -t "$T" -l "<text>"`.
 fm_backend_tmux_send_literal() {  # <target> <text>
-  tmux send-keys -t "$1" -l "$2"
+  local target
+  target=$(fm_tmux_exact_target "$1") || return $?
+  fm_tmux_pane_command "$target" send-keys -l "$2"
 }
 
 # fm_backend_tmux_kill: remove one explicitly named task window, best-effort.
 # Empty, omitted, and malformed targets return nonzero before invoking tmux so
 # tmux can never interpret an empty target as the caller's current window.
-fm_backend_tmux_kill() {  # <target>
-  local target=${1:-} session window
+fm_backend_tmux_kill() {  # <target> [unused] [unused] [spawn-binding]
+  local target=${1:-} session window binding=${4:-}
   case "$target" in
     *:*)
       session=${target%%:*}
@@ -178,7 +171,12 @@ fm_backend_tmux_kill() {  # <target>
   case "$session:$window" in
     :*|*:|*:*:*) return 1 ;;
   esac
-  tmux kill-window -t "=$session:=$window" 2>/dev/null || true
+  if [ -n "$binding" ]; then
+    [[ $binding =~ $FM_TMUX_PANE_PATTERN ]] || return 1
+    fm_tmux_pane_command "$binding" kill-window 2>/dev/null || true
+  else
+    tmux kill-window -t "=$session:=$window" 2>/dev/null || true
+  fi
 }
 
 # fm_backend_tmux_current_command: <target>'s live foreground process name -
@@ -193,7 +191,7 @@ fm_backend_tmux_kill() {  # <target>
 fm_backend_tmux_current_command() {  # <target>
   local target
   target=$(fm_tmux_exact_target "$1") || return 1
-  tmux display-message -p -t "$target" '#{pane_current_command}' 2>/dev/null
+  fm_tmux_pane_command "$target" display-message -p '#{pane_current_command}' 2>/dev/null
 }
 
 # The process-name classifier every liveness signal below feeds
@@ -229,7 +227,7 @@ fm_backend_tmux_current_command() {  # <target>
 fm_backend_tmux_foreground_comms() {  # <target>
   local target tty pid pgid tpgid comm
   target=$(fm_tmux_exact_target "$1") || return 0
-  tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || return 0
+  tty=$(fm_tmux_pane_command "$target" display-message -p '#{pane_tty}' 2>/dev/null) || return 0
   [ -n "$tty" ] || return 0
   LC_ALL=C ps -t "${tty#/dev/}" -o pid=,pgid=,tpgid=,comm= 2>/dev/null \
     | while read -r pid pgid tpgid comm; do
@@ -245,7 +243,7 @@ fm_backend_tmux_foreground_comms() {  # <target>
 fm_backend_tmux_foreground_args() {  # <target>
   local target tty pid pgid tpgid comm args
   target=$(fm_tmux_exact_target "$1") || return 0
-  tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || return 0
+  tty=$(fm_tmux_pane_command "$target" display-message -p '#{pane_tty}' 2>/dev/null) || return 0
   [ -n "$tty" ] || return 0
   LC_ALL=C ps -t "${tty#/dev/}" -o pid=,pgid=,tpgid=,comm= 2>/dev/null \
     | while read -r pid pgid tpgid comm; do
@@ -259,7 +257,7 @@ fm_backend_tmux_foreground_args() {  # <target>
 fm_backend_tmux_foreground_pids() {  # <target>
   local target tty pid pgid tpgid comm
   target=$(fm_tmux_exact_target "$1") || return 0
-  tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || return 0
+  tty=$(fm_tmux_pane_command "$target" display-message -p '#{pane_tty}' 2>/dev/null) || return 0
   [ -n "$tty" ] || return 0
   LC_ALL=C ps -t "${tty#/dev/}" -o pid=,pgid=,tpgid=,comm= 2>/dev/null \
     | while read -r pid pgid tpgid comm; do
@@ -275,7 +273,7 @@ fm_backend_tmux_foreground_pids() {  # <target>
 fm_backend_tmux_foreground_leader_pid() {  # <target>
   local target tty pid pgid tpgid comm
   target=$(fm_tmux_exact_target "$1") || return 1
-  tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || return 1
+  tty=$(fm_tmux_pane_command "$target" display-message -p '#{pane_tty}' 2>/dev/null) || return 1
   [ -n "$tty" ] || return 1
   while read -r pid pgid tpgid comm; do
     [ -n "$comm" ] || continue
@@ -292,7 +290,7 @@ EOF
 fm_backend_tmux_foreground_argv0s() {  # <target>
   local target tty pid pgid tpgid comm args argv0
   target=$(fm_tmux_exact_target "$1") || return 0
-  tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || return 0
+  tty=$(fm_tmux_pane_command "$target" display-message -p '#{pane_tty}' 2>/dev/null) || return 0
   [ -n "$tty" ] || return 0
   LC_ALL=C ps -t "${tty#/dev/}" -o pid=,pgid=,tpgid=,comm= 2>/dev/null \
     | while read -r pid pgid tpgid comm; do
@@ -314,7 +312,7 @@ fm_backend_tmux_foreground_argv0s() {  # <target>
 fm_backend_tmux_endpoint_state() {  # <target>
   local target=$1 resolve_status
   [[ $target = *:* ]] || { printf 'unreadable'; return 0; }
-  if fm_tmux_exact_target "$target" >/dev/null; then
+  if fm_backend_tmux_target_exists "$target"; then
     resolve_status=0
   else
     resolve_status=$?
@@ -402,10 +400,15 @@ EOF
 $(fm_backend_tmux_foreground_args "$target")
 EOF
 
-  comm=$(fm_backend_tmux_current_command "$target") || {
-    printf 'unreadable'
+  if ! comm=$(fm_tmux_pane_command "$target" display-message -p '#{pane_current_command}' 2>&1); then
+    fm_tmux_read_failure_status "$comm" || resolve_status=$?
+    if [ "$resolve_status" -eq 1 ]; then
+      printf 'missing'
+    else
+      printf 'unreadable'
+    fi
     return 0
-  }
+  fi
   if [ "$(fm_agent_process_classify_name "$comm")" = agent ]; then
     printf 'alive'
     return 0

@@ -1,17 +1,11 @@
 #!/usr/bin/env bash
-# tests/fm-tmux-exact-target.test.sh - portable regression for exact window
-# targeting on tmux reads of a recorded worker window (bin/fm-tmux-lib.sh
-# fm_tmux_exact_target, used by bin/backends/tmux.sh).
+# tests/fm-tmux-exact-target.test.sh - verify recorded pane targeting for
+# capture, presence, input, and spawn. Raw tmux targets can select a prefix
+# neighbour, parse a dotted window name as a pane, or treat a session name
+# as an ID. A saved binding must also reject removed links and recycled IDs.
 #
-# The defect: tmux resolves a session or window name that is not an exact match
-# by prefix, so after a worker window `fm-mate` closed while `fm-mate2` still
-# existed, reads of the closed worker returned the neighbour's screen and the
-# closed worker looked alive. Every case first proves the masking condition is
-# present (a raw by-name read still lands on the neighbour), so the assertions
-# cannot pass vacuously.
-#
-# It runs REAL processes in a REAL tmux server on a private socket (`-L`) in a
-# disposable home, needs no harness or credentials, and sends no keys.
+# This suite uses a private tmux socket and disposable home with no harness
+# or credentials.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -72,7 +66,7 @@ wait_for_marker() {  # <raw-target> <marker>
 }
 
 peek_lab() {
-  FM_HOME="$LAB/home" FM_STATE_OVERRIDE="$LAB/home/state" "$ROOT/bin/fm-peek.sh" "$@"
+  FM_HOME="$LAB/home" FM_ROOT_OVERRIDE="$LAB/home" FM_STATE_OVERRIDE="$LAB/home/state" "$ROOT/bin/fm-peek.sh" "$@"
 }
 
 split_pane=$(tmux split-window -d -P -F '#{pane_id}' -t "$SESSION:0" -c "$LAB/base" -- \
@@ -302,14 +296,162 @@ fm_backend_capture tmux fmla:fm-dot.0 40 | grep -Fq DOTTED-MARKER \
   || fail "a dotted worker window name must capture its own screen"
 pass "dotted window name reads exactly beside a live decoy"
 
+# Real input consumers make a wrong send observable, independently of the
+# adapter's return status or capture targeting.
+# shellcheck disable=SC2016 # The pane shell expands its own marker and input.
+input_loop='printf "%s\n" "$1"; while IFS= read -r line; do printf "received: %s\n" "$line"; done'
+input_window() {  # <session-id> <name> <marker>
+  tmux new-window -dP -F '#{pane_id}' -t "$1:" -n "$2" -c "$LAB/wt" -- \
+    sh -c "$input_loop" sh "$3"
+}
+fmla_id=$(tmux display-message -p -t fmla: '#{session_id}')
+input_pane=$(input_window "$fmla_id" fm-input.0 INPUT-WORKER) || fail "could not create dotted input window"
+input_decoy=$(input_window "$fmla_id" fm-input INPUT-DECOY) || fail "could not create decoy input window"
+wait_for_marker "$input_pane" INPUT-WORKER
+wait_for_marker "$input_decoy" INPUT-DECOY
+tmux send-keys -t fmla:fm-input.0 precondition Enter || fail "raw key send failed"
+wait_for_marker "$input_decoy" 'received: precondition'
+fm_backend_send_literal tmux fmla:fm-input.0 'literal-write' || fail "literal send to dotted worker failed"
+fm_backend_send_key tmux fmla:fm-input.0 Enter || fail "key send to dotted worker failed"
+wait_for_marker "$input_pane" 'received: literal-write'
+tmux capture-pane -p -t "$input_decoy" | grep -q 'literal-write' \
+  && fail "the pane-0 decoy received the dotted worker's input"
+pass "literal text and Enter reach the exact dotted worker"
+
+payload="-- # literal \"' \$(unexpanded) \\ ;"
+if ! fm_backend_send_literal tmux fmla:fm-input.0 "$payload" ||
+   ! fm_backend_send_key tmux fmla:fm-input.0 Enter; then
+  fail "could not send literal tmux punctuation"
+fi
+wait_for_marker "$input_pane" 'received: -- # literal'
+tmux capture-pane -p -t "$input_pane" | grep -Fxq -- "received: $payload" \
+  || fail "the nested tmux command changed the literal payload"
+pass "tmux command punctuation is preserved as exact input"
+
+printf 'window=fmla:fm-input.0\n' > "$LAB/home/state/input.meta"
+fm_backend_send_literal tmux fmla:fm-input.0 'recorded-key' || fail "could not prepare the recorded key fixture"
+FM_HOME="$LAB/home" FM_ROOT_OVERRIDE="$LAB/home" FM_STATE_OVERRIDE="$LAB/home/state" \
+  "$ROOT/bin/fm-send.sh" input --key Enter || fail "fm-send rejected the recorded key target"
+wait_for_marker "$input_pane" 'received: recorded-key'
+pass "fm-send uses the recorded dotted name for named keys"
+
+original_pane=$(fm_tmux_exact_target fmla:fm-input.0) || fail "could not bind the original active pane"
+second_pane=$(tmux split-window -dP -F '#{pane_id}' -t "$input_pane" -- \
+  sh -c "printf '%s\n' SECOND-PANE; exec '$SLEEP_BIN' 600") || fail "could not create a split pane"
+tmux select-pane -t "$second_pane" || fail "could not change the active pane"
+if ! fm_backend_send_literal tmux "$original_pane" 'binding-kept' ||
+   ! fm_backend_send_key tmux "$original_pane" Enter; then
+  fail "the original pane binding did not deliver"
+fi
+wait_for_marker "$input_pane" 'received: binding-kept'
+tmux capture-pane -p -t "$second_pane" | grep -q 'binding-kept' && fail "the active split pane received the original pane's input"
+tmux select-pane -t "$input_pane" || fail "could not restore the active pane"
+pass "changing the active pane cannot retarget an existing binding"
+
+prefix_pane=$(input_window "$fmla_id" fm-prefix2 INPUT-PREFIX-NEIGHBOUR) || fail "could not create prefix neighbour"
+wait_for_marker "$prefix_pane" INPUT-PREFIX-NEIGHBOUR
+fm_backend_send_literal tmux fmla:fm-prefix 'missing-worker-write' >/dev/null 2>&1 \
+  && fail "literal text send accepted a missing worker beside a prefix neighbour"
+tmux capture-pane -p -t "$prefix_pane" | grep -q 'missing-worker-write' \
+  && fail "the neighbour received input for a missing worker"
+pass "a missing worker receives no input through its prefix neighbour"
+
+shadow_name=$fmla_id
+shadow_id=$(tmux new-session -dP -F '#{session_id}' -s "$shadow_name" -n base -c "$LAB/base") \
+  || fail "could not create a session literally named $shadow_name"
+shadow_pane=$(input_window "$shadow_id" fm-session-id INPUT-LITERAL-SESSION) || fail "could not create literal-session worker"
+id_decoy=$(input_window "$fmla_id" fm-session-id INPUT-ID-DECOY) || fail "could not create ID-session decoy"
+wait_for_marker "$shadow_pane" INPUT-LITERAL-SESSION
+wait_for_marker "$id_decoy" INPUT-ID-DECOY
+tmux capture-pane -p -t "$shadow_name:fm-session-id" | grep -q INPUT-ID-DECOY \
+  || fail "precondition: native tmux must interpret the literal session name as an ID"
+fm_backend_capture tmux "$shadow_name:fm-session-id" 40 | grep -q INPUT-LITERAL-SESSION \
+  || fail "the recorded session name must win over the matching session ID"
+if ! fm_backend_send_literal tmux "$shadow_name:fm-session-id" 'session-write' ||
+   ! fm_backend_send_key tmux "$shadow_name:fm-session-id" Enter; then
+  fail "could not send to literal session name"
+fi
+wait_for_marker "$shadow_pane" 'received: session-write'
+created=$(fm_backend_tmux_create_task "$shadow_name" fm-placement "$worker_cwd") \
+  || fail "could not create a worker in the ID-shaped session name"
+[ "$(tmux list-windows -t "$shadow_id:" -f '#{==:#{window_name},fm-placement}' -F '#{session_id}')" = "$shadow_id" ] \
+  || fail "spawn placed $created outside the literal session"
+tmux set-environment -t "$fmla_id" META_API_KEY decoy
+tmux set-environment -t "$shadow_id" META_API_KEY destination
+session_binding=$(fm_tmux_exact_session "$shadow_name") || fail "could not bind the literal session"
+[ "$(fm_tmux_session_command "$session_binding" show-environment '' META_API_KEY)" = 'META_API_KEY=destination' ] \
+  || fail "the environment lookup must read the literal session, not the session ID it resembles"
+pass "reads, writes, and spawn honor literal ID-shaped session names"
+
+linked_index=$(tmux display-message -p -t "$input_pane" '#{window_index}')
+tmux link-window -s "$fmla_id:$linked_index" -t "$shadow_id:99" || fail "could not link worker into another session"
+linked_binding=$(fm_tmux_exact_target fmla:fm-input.0) || fail "could not bind the recorded linked pane"
+fm_backend_target_exists tmux "$linked_binding" || fail "linked pane should be present before unlink"
+tmux unlink-window -t "$fmla_id:$linked_index" || fail "could not unlink worker from its recorded session"
+wait_for_marker "$input_pane" INPUT-WORKER
+fm_backend_target_exists tmux "$linked_binding" && fail "the old link still proved presence"
+fm_backend_capture tmux "$linked_binding" 40 2>/dev/null && fail "the old link still returned a screen"
+fm_backend_send_literal tmux "$linked_binding" 'unlinked-write' 2>/dev/null && fail "the old link still accepted text"
+fm_backend_send_key tmux "$linked_binding" Enter 2>/dev/null && fail "the old link still accepted Enter"
+tmux capture-pane -p -t "$input_pane" | grep -q 'unlinked-write' \
+  && fail "the surviving link received the removed link's text"
+pass "a bound worker becomes unavailable when its recorded session link is removed"
+
 tmux new-session -d -s firstmate-lab -n fm-detached -c "$LAB/neighbour" \
   || fail "could not create the prefix-named session"
-detached_session=$(fm_backend_tmux_container_ensure) || fail "could not ensure the detached session"
-[ "$detached_session" = firstmate ] || fail "unexpected detached session $detached_session"
-detached_window=$(fm_backend_tmux_create_task "$detached_session" fm-detached "$worker_cwd") \
+detached_name=$(fm_backend_tmux_launch_session) || fail "could not resolve the detached session name"
+[ "$detached_name" = firstmate ] || fail "unexpected detached session $detached_name"
+detached_session=$(fm_backend_tmux_container_ensure "$detached_name") || fail "could not ensure the detached session"
+detached_window=$(fm_backend_tmux_create_task "$detached_name" fm-detached "$worker_cwd" "$detached_session") \
   || fail "a matching window in the prefix-named session must not block creation"
-[ "$(tmux display-message -p -t "$detached_window" '#{session_name}')" = firstmate ] \
+[ "$(fm_tmux_pane_command "$detached_window" display-message -p '#{session_name}')" = firstmate ] \
   || fail "the detached worker must belong to the literal firstmate session"
-[ "$(fm_backend_tmux_container_ensure)" = firstmate ] \
+[ "$(fm_backend_tmux_container_ensure "$detached_name")" = "$detached_session" ] \
   || fail "the literal firstmate session should be reusable"
+fm_backend_kill tmux "$detached_name:fm-detached" '' '' "$detached_window" \
+  || fail "bound spawn cleanup failed"
+fm_backend_target_exists tmux "$detached_name:fm-detached" \
+  && fail "bound spawn cleanup did not close its own window"
+fm_backend_target_exists tmux firstmate-lab:fm-detached \
+  || fail "bound spawn cleanup closed the neighboring window"
 pass "detached spawn creates and reuses the literal firstmate session"
+
+# Restart the private server twice so both its old and replacement windows
+# have the same names, indices and pane/window IDs.
+restart_server() {  # <marker>
+  local attempt=0
+  tmux kill-server || fail "could not stop the private tmux server"
+  while tmux list-sessions >/dev/null 2>&1; do
+    [ "$attempt" -lt 100 ] || fail "the old private server did not stop"
+    sleep 0.05
+    attempt=$((attempt + 1))
+  done
+  tmux -f /dev/null new-session -d -s reuse -n fm-reuse -c "$LAB/wt" -- \
+    sh -c "$input_loop" sh "$1" \
+    || fail "could not start the replacement private tmux server"
+  wait_for_marker reuse:fm-reuse "$1"
+}
+restart_server BEFORE-RESTART
+before=$(fm_tmux_exact_target reuse:fm-reuse) || fail "could not bind the original server's pane"
+before_session=$(fm_tmux_exact_session reuse) || fail "could not bind the original server's session"
+restart_server AFTER-RESTART
+after=$(fm_tmux_exact_target reuse:fm-reuse) || fail "could not bind the replacement server's pane"
+[ "$before" != "$after" ] && [ "${before#*:*:*:}" = "${after#*:*:*:}" ] \
+  || fail "precondition: the replacement server must reuse the window and pane identities"
+fm_backend_target_exists tmux "$before" && fail "a binding from the stopped server still proved presence"
+fm_backend_send_literal tmux "$before" 'stale-server-write' 2>/dev/null \
+  && fail "a binding from the stopped server still accepted text"
+fm_backend_send_key tmux "$before" Enter 2>/dev/null \
+  && fail "a binding from the stopped server still accepted Enter"
+fm_backend_tmux_create_task reuse fm-stale-placement "$worker_cwd" "$before_session" 2>/dev/null \
+  && fail "a stopped server's session binding permitted new placement on its replacement"
+fm_backend_kill tmux reuse:fm-reuse '' '' "$before" || fail "stale spawn cleanup must remain best-effort"
+wait_for_marker reuse:fm-reuse AFTER-RESTART
+if ! fm_backend_send_literal tmux "$after" replacement-write ||
+   ! fm_backend_send_key tmux "$after" Enter; then
+  fail "the fresh binding could not write to the replacement server"
+fi
+wait_for_marker reuse:fm-reuse 'received: replacement-write'
+tmux capture-pane -p -t reuse:fm-reuse | grep -q 'stale-server-write' \
+  && fail "the replacement server received the stopped server's text"
+pass "a restarted tmux server cannot inherit a stale pane binding"

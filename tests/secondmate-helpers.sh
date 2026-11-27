@@ -26,6 +26,7 @@ make_fake_tmux() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 case "${1:-}" in
   -V) printf 'tmux 3.2\n'; exit 0 ;;
   has-session|new-session|new-window|send-keys|kill-window)
@@ -66,12 +67,12 @@ case "${1:-}" in
     exit 0
     ;;
   list-panes)
-    if [ "${3:-}" = @100 ] && [ -f "$0.windows" ]; then
+    if [[ "${3:-}" = @100 || "${3:-}" = %100 ]] && [ -f "$0.windows" ]; then
       printf '%%100\n'
       exit 0
     fi
     printf '%s\n' "${FM_FAKE_TMUX_WINDOW:-}" | awk -v target="${3:-}" '
-      length { n++; if ("@" n == target || $0 == target) present=1 }
+      length { n++; if ("@" n == target || "%" n == target || $0 == target) present=1 }
       END { exit !present }
     '
     ;;

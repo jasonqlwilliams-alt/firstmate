@@ -61,6 +61,7 @@ make_case() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 if [ "${1:-}" = "list-windows" ]; then
   case "$*" in *window_id*) _ids=1 ;; *) _ids=0 ;; esac
   if [ -n "${FM_FAKE_TMUX_WINDOWS:-}" ]; then
@@ -93,7 +94,7 @@ if [ "${1:-}" = "capture-pane" ]; then
     for _arg in "$@"; do
       if [ "$_prev" = -t ]; then
         case "$_arg" in
-          @*) _arg="test:$(printf '%s\n' "${FM_FAKE_TMUX_WINDOWS:-}" | sed -n "${_arg#@}p")" ;;
+          [@%]*) _arg="test:$(printf '%s\n' "${FM_FAKE_TMUX_WINDOWS:-}" | sed -n "${_arg:1}p")" ;;
         esac
         [ "$_arg" != "$FM_FAKE_TMUX_FORBIDDEN_TARGET" ] || exit 1
       fi
@@ -179,6 +180,7 @@ make_supercase() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 case "${1:-}" in
   display-message)
     [ "${FM_FAKE_TMUX_PANE_ALIVE:-1}" = "1" ] || exit 1
@@ -265,6 +267,7 @@ make_bordered_case() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 COMPOSER="${FM_FAKE_COMPOSER:?FM_FAKE_COMPOSER unset}"
 write_composer() {
   text=$1

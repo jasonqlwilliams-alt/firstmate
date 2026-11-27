@@ -789,6 +789,7 @@ make_peek_fakebin() {  # <dir> -> echoes fakebin dir
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 target= start= format=
 prev=
 for arg in "$@"; do
@@ -814,7 +815,7 @@ case "${1:-}" in
     esac ;;
   capture-pane)
     case "$target" in
-      @3|=sess:=win|sess:win)
+      %3|@3|=sess:=win|sess:win)
         printf '%s\n' 'oldest history' 'older history' 'latest history' | tail -n "${start#-}"
         printf 'recorded screen\n' ;;
       sess:0.1) printf 'explicit split pane\n' ;;
@@ -874,15 +875,18 @@ make_spawn_fakebin() {  # <dir> <fake-worktree-path> -> echoes fakebin dir
   cat > "$fb/tmux" <<SH
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "\$@"
 { printf 'tmux'; for a in "\$@"; do printf '\\x1f%s' "\$a"; done; printf '\\n'; } >> "\${FM_TMUX_LOG:?}"
 case "\${1:-}" in
   -V) printf 'tmux 3.2\\n'; exit 0 ;;
   display-message)
     for a in "\$@"; do case "\$a" in *pane_current_path*) printf '%s\\n' "$wt"; exit 0 ;; esac; done
     printf 'firstmate\\n'; exit 0 ;;
-  new-window) printf '@1\\n'; exit 0 ;;
+  new-window) fm_fake_tmux_new_window "\$0.windows" @1 "\$@"; exit 0 ;;
   # The exact-window reads confirm the window this fake created.
-  list-windows) case "\$*" in *window_id*) printf '@1\\n' ;; esac; exit 0 ;;
+  list-windows)
+    [ ! -f "\$0.windows" ] || fm_fake_tmux_window_ids "\$@" < "\$0.windows"
+    exit 0 ;;
 esac
 exit 0
 SH
@@ -940,6 +944,7 @@ make_spawn_symlink_fakebin() {  # <dir> <initial-project-path> <worktree-path> -
   cat > "$fb/tmux" <<SH
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "\$@"
 { printf 'tmux'; for a in "\$@"; do printf '\\x1f%s' "\$a"; done; printf '\\n'; } >> "\${FM_TMUX_LOG:?}"
 case "\${1:-}" in
   -V) printf 'tmux 3.2\\n'; exit 0 ;;
@@ -954,9 +959,11 @@ case "\${1:-}" in
       exit 0
     ;; esac; done
     printf 'firstmate\\n'; exit 0 ;;
-  new-window) printf '@1\\n'; exit 0 ;;
+  new-window) fm_fake_tmux_new_window "\$0.windows" @1 "\$@"; exit 0 ;;
   # The exact-window reads confirm the window this fake created.
-  list-windows) case "\$*" in *window_id*) printf '@1\\n' ;; esac; exit 0 ;;
+  list-windows)
+    [ ! -f "\$0.windows" ] || fm_fake_tmux_window_ids "\$@" < "\$0.windows"
+    exit 0 ;;
 esac
 exit 0
 SH

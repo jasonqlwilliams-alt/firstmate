@@ -634,7 +634,7 @@ fm_fakebin() {
 }
 
 fm_fake_tmux_window_ids() {  # <tmux args...>, reads ID and name pairs from stdin
-  local id name target
+  local id name target session=''
   while [ "$#" -ge 2 ] && [ "$1" != -f ]; do shift; done
   [ "$#" -ge 2 ] || return 1
   case "$2" in
@@ -642,26 +642,99 @@ fm_fake_tmux_window_ids() {  # <tmux args...>, reads ID and name pairs from stdi
       target=${2#'#{==:#{session_name}:#{window_name},'}
       target=${target%\}}
       ;;
+    '#{==:#{window_name},'*'}')
+      session=${FM_FAKE_TMUX_SESSION_NAME:-firstmate}
+      target=${2#'#{==:#{window_name},'}
+      target="$session:${target%\}}"
+      ;;
     *) return 1 ;;
   esac
   while IFS=' ' read -r id name; do
-    if [ "$name" = "$target" ]; then printf '%s\n' "$id"; fi
+    [ "$name" = "$target" ] || continue
+    case "$*" in
+      *'tmux-pane:'*) fm_fake_tmux_pane_row "$id" ;;
+      *) printf '%s\n' "$id" ;;
+    esac
   done
 }
 export -f fm_fake_tmux_window_ids
 
+fm_fake_tmux_pane_row() {
+  printf "tmux-pane:100:1234567890:\$1:%s:%s:0:%%%s\n" "${1#@}" "$1" "${1#@}"
+}
+export -f fm_fake_tmux_pane_row
+
+# Parse the quoted argv of a successful guard branch as data. The real server
+# suite covers tmux parsing and branch rejection.
+fm_fake_tmux_decode_guard() {  # <quoted command>
+  local rest=$1 arg
+  FM_FAKE_TMUX_ARGS=()
+  while [ -n "$rest" ]; do
+    arg=
+    while :; do
+      [[ $rest = \'* ]] || return 1
+      rest=${rest#\'}
+      [[ $rest = *\'* ]] || return 1
+      arg="$arg${rest%%\'*}"
+      rest=${rest#*\'}
+      [[ $rest = "\'"* ]] || break
+      arg="$arg'"
+      rest=${rest:2}
+    done
+    FM_FAKE_TMUX_ARGS+=("$arg")
+    [ -z "$rest" ] || [[ $rest = ' '* ]] || return 1
+    rest=${rest# }
+  done
+}
+export -f fm_fake_tmux_decode_guard
+
+fm_fake_tmux_dispatch() {
+  local arg session
+  local -a FM_FAKE_TMUX_ARGS=() args=()
+  case "${1:-}" in
+    list-sessions)
+      session=${3#'#{==:#{session_name},'}
+      export FM_FAKE_TMUX_SESSION_NAME=${session%\}}
+      printf '%s\n' "$FM_FAKE_TMUX_SESSION_NAME" > "$0.session"
+      printf "tmux-session:100:1234567890:\$1\n"
+      exit 0
+      ;;
+    if-shell)
+      fm_fake_tmux_decode_guard "$6" || exit 1
+      if [ -f "$0.session" ]; then
+        IFS= read -r FM_FAKE_TMUX_SESSION_NAME < "$0.session"
+        export FM_FAKE_TMUX_SESSION_NAME
+      fi
+      for arg in "${FM_FAKE_TMUX_ARGS[@]}"; do
+        # Older fixtures consume the already parsed send-keys arguments.
+        [ "$arg" != -- ] && args+=("$arg")
+      done
+      exec "$0" "${args[@]}"
+      ;;
+  esac
+}
+export -f fm_fake_tmux_dispatch
+
 fm_fake_tmux_new_window() {  # <inventory-file> <id> <new-window args...>
-  local inventory=$1 id=$2 session name
+  local inventory=$1 id=$2 session name format=''
   shift 2
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      -t) session=${2%:}; session=${session#=}; shift ;;
+      -t)
+        session=${2%:}; session=${session#=}
+        [ "$session" != "\$1" ] || session=${FM_FAKE_TMUX_SESSION_NAME:-firstmate}
+        shift
+        ;;
+      -F) format=$2; shift ;;
       -n) name=$2; shift ;;
     esac
     shift
   done
   printf '%s %s:%s\n' "$id" "$session" "$name" >> "$inventory"
-  printf '%s\n' "$id"
+  case "$format" in
+    'tmux-pane:'*) fm_fake_tmux_pane_row "$id" ;;
+    *) printf '%s\n' "$id" ;;
+  esac
 }
 export -f fm_fake_tmux_new_window
 

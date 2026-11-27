@@ -861,7 +861,7 @@ fm_backend_send_literal() {  # <backend> <target> <text> [expected-label]
   shift
   fm_backend_source "$backend" || return 1
   case "$backend" in
-    tmux) fm_backend_tmux_send_literal "$@" ;;
+    tmux) fm_backend_tmux_send_literal "$1" "$2" ;;
     herdr) fm_backend_herdr_send_literal "$@" ;;
     zellij) fm_backend_zellij_send_literal "$@" ;;
     orca) fm_backend_orca_send_literal "$@" ;;
@@ -1061,12 +1061,6 @@ _fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [e
   local capture=
   if [ "$harness" = claude ]; then
     capture=visible
-    if [ "$backend" = tmux ]; then
-      if ! fm_backend_source tmux || ! target=$(fm_backend_tmux_exact_pane "$target"); then
-        printf 'unknown'
-        return 0
-      fi
-    fi
   fi
   fm_backend_composer_snapshot "$backend" "$target" "$label" "$capture" || { printf 'unknown'; return 0; }
   [ -n "$FM_COMPOSER_SNAPSHOT_SCREEN" ] || { printf 'unknown'; return 0; }

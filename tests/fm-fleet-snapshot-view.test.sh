@@ -22,6 +22,7 @@ SH
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 target=""
 prev=""
 for arg in "$@"; do
@@ -30,7 +31,7 @@ for arg in "$@"; do
 done
 # Exact-window reads arrive by window id; map it back to the recorded name.
 case "$target" in
-  @*) target=$(sed -n 's/^window=[^:]*://p' "${FM_HOME:?}"/state/*.meta | sed -n "${target#@}p") ;;
+  [@%]*) target=$(sed -n 's/^window=[^:]*://p' "${FM_HOME:?}"/state/*.meta | sed -n "${target:1}p") ;;
 esac
 case "${1:-}" in
   list-windows)

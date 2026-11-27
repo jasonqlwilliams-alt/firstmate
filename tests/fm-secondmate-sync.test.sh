@@ -335,6 +335,7 @@ SH
   chmod +x "$fakebin/gh-axi"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+fm_fake_tmux_dispatch "$@"
 [ "${1:-}" != -V ] || { printf '%s\n' 'tmux 3.2'; exit 0; }
 state=${FM_STATE_OVERRIDE:-${FM_HOME:?}/state}
 case "$*" in
@@ -363,7 +364,7 @@ case "${1:-}" in
       esac
     done
     case "$target" in
-      @*) target=$(sed -n 's/^window=//p' "$state"/*.meta | awk -v id="$target" '"@" NR == id') ;;
+      [@%]*) target=$(sed -n 's/^window=//p' "$state"/*.meta | awk -v id="${target:1}" 'NR == id') ;;
     esac
     [ -n "$target" ] || exit 1
     composer="$0.$target.composer"

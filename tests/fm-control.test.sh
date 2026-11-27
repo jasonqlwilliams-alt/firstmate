@@ -79,6 +79,7 @@ make_tmux_stub() {  # <dir> -> echoes fakebin dir
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 D=$FM_FAKE_DIR
 codex_picker() {  # the live picker's rows (codex-rs/tui/src/update_prompt.rs, Codex 0.157.1-0.162.1)
   printf '%s\n' '  Update available · 0.162.1 → 0.999.0' \
