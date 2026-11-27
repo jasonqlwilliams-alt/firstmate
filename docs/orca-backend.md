@@ -51,8 +51,9 @@ Exact command flags and response parsing are owned by `bin/backends/orca.sh` and
 `fm-peek.sh` reads with `orca terminal read`.
 Orca uses its literal-send and Enter primitives for steering-inbox doorbells when the [shared screen gate](configuration.md#harness-support) allows them.
 On the typed plane, `fm-send.sh` verifies composer clearance through the fleet-wide classifier in `bin/fm-composer-lib.sh`, retrying Enter without retyping when a slash popup first fills an argument placeholder.
+See [Automatic Claude input](agent-control.md#claude-background-tasks-exit-confirmation) for when a typed send can write to a Claude task.
 The composer read is one bounded tail of the live terminal and never pages backward into scrollback, so a stale startup banner cannot compete with the bottom-anchored composer.
-A bare shell row is `unknown`, not an empty agent composer, and plain-text captures degrade a glyph row carrying trailing text to `unknown` rather than a false `pending`.
+The generic classifier treats a bare shell row or a glyph row carrying trailing text in a plain-text capture as `unknown`.
 The watcher has no native Orca busy signal, so each harness adapter's semantic lifecycle supplies worker state.
 Grok alone retains its isolated rendered-tail fallback.
 
