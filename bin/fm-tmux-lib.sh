@@ -200,6 +200,8 @@ fm_tmux_composer_state() {  # <target> [explicit] -> empty|pending|pending-unpro
 # fm_tmux_composer_snapshot: the cursor row and styled screen of one composer
 # read, into the snapshot globals (bin/fm-composer-lib.sh "Composer
 # SNAPSHOT"); fails when either read fails or the cursor row is not numeric.
+# The optional geometry mode reads `x y widthxheight` in the same tmux command
+# sequence as the screen, so capture exports need no separate cursor sample.
 fm_tmux_composer_snapshot() {  # <target> [explicit] [geometry]
   local target cy pane sample geometry=
   FM_COMPOSER_SNAPSHOT_TMUX_TARGET=

@@ -162,8 +162,9 @@ OK
 
 ## Composer classification
 
-agy draws one composer row between two solid horizontal rules, opening with agy's `>` glyph in truecolor `38;2;122;162;247`.
-Captured on 2026-11-02 with Antigravity CLI 1.4.12 through Herdr 0.9.5 (`herdr pane read <pane> --source visible --format ansi`) and in a private tmux server, the row took three shapes, and agy could replace it with a feedback survey:
+The idle and short-draft captures of Antigravity CLI 1.4.12 on 2026-11-02 showed one composer row between two solid horizontal rules.
+The captures used Herdr 0.9.5 (`herdr pane read <pane> --source visible --format ansi`) and a private tmux server.
+The row opened with agy's `>` glyph, recorded in truecolor `38;2;122;162;247`.
 
 | State | Composer row (plain) | Text styling |
 |---|---|---|
@@ -180,8 +181,9 @@ $ fm_composer_classify_screen "styled=1 cursor=1 identity=1" "$screen" 8 "pi<TAB
 pending
 ```
 
-Measured 2026-11-27 with Antigravity CLI 1.5.18 in a private 80x30 tmux 3.7c server, with network egress blocked and a private home, by [`tests/fm-agy-composer-live-e2e.test.sh`](../../tests/fm-agy-composer-live-e2e.test.sh): under tmux the first-use mode hint is palette colour `38;5;103` and the `>` glyph is `38;5;111`, not the truecolor values above.
-That row therefore reads `pending` on tmux, so the doorbell refuses an agy pane on tmux until its first input clears the hint.
+On 2026-11-27, [`tests/fm-agy-composer-live-e2e.test.sh`](../../tests/fm-agy-composer-live-e2e.test.sh) captured Antigravity CLI 1.5.18 in a private 80x30 tmux 3.7c server with network egress blocked and a private home.
+The capture shows the first-use mode hint in palette colour `38;5;103` and the `>` glyph in `38;5;111`.
+The classifier reads the recorded hint as `pending`, so the doorbell withholds typing while this hint is visible.
 The historical guard run reported the refusal before typing.
 
 ```
@@ -191,14 +193,15 @@ not ok - agy (1.5.18): idle composer never classified empty (last verdict: pendi
 
 The [redacted screen](agy-composer/tmux-first-use-1.5.18.ansi) has its [cursor](agy-composer/tmux-first-use-1.5.18.cursor) at column 2, row 27.
 The wrapped-input capture is deferred until the agy classifier recognizes the tmux palette mode hint and the guard can confirm an idle, empty composer before typing.
-Run the current guard with both opt-ins.
+The current guard exercises the doorbell's classifier on live drafts and keeps the probe text in the composer.
+Run it with both opt-ins.
 
 ```bash
 FM_AGY_COMPOSER_LIVE=1 FM_AGY_COMPOSER_LIVE_OAUTH=1 bash tests/fm-agy-composer-live-e2e.test.sh
 ```
 
 The OAuth opt-in authorizes copying the operator's sign-in token into the temporary profile with mode `0600` after the launcher verifies network isolation.
-The guard unlinks the token copy when it sees the signed-in startup banner or confirms an empty composer, before sending any keystrokes.
+The guard attempts to unlink the token copy when it sees the signed-in startup banner and requires its removal before sending any keystrokes.
 On normal exit or a handled signal such as TERM, the guard attempts to unlink the token before contacting tmux, including when it cannot stop the server.
 SIGKILL can interrupt cleanup, so the next enabled run checks for abandoned guard profiles under the same `TMPDIR` (default `/tmp`) before creating a new profile.
 The guard owns the profile marker, so the shared fixture sweep leaves it in place.
@@ -206,6 +209,7 @@ Cleanup preserves active runs and only stops a tmux server in the same socket di
 It removes the profile and marker after a successful stop or after establishing that the socket has no server for that profile.
 An inconclusive lookup or failed stop leaves the marker for a later enabled run to retry.
 Set `FM_AGY_COMPOSER_LIVE_CAPTURE_DIR` to save each wrapped screen and its cursor geometry together in a new subdirectory.
+The export uses the frame checked for wrapping and blanks the rows above the opening composer rule while preserving cursor coordinates.
 [`tests/fm-composer-lib.test.sh`](../../tests/fm-composer-lib.test.sh) uses the recorded rows and truecolor values to check the classifier's verdicts, including refusal on plain-text and multirow captures.
 [`tests/fm-task-inbox.test.sh`](../../tests/fm-task-inbox.test.sh) uses an agy-shaped stub in a real tmux server to check screen refusals and the one-row fit boundary for the path-bearing notice.
 Its 80-column regression scaffolds a brief with a symlink alias for a UTF-8 inbox path, checks launch-brief precedence, and verifies that the stub submits the exact short notice and acknowledges the queued record.
@@ -254,4 +258,4 @@ After a full launch, tool call, interrupt, and exit cycle, the project directory
 ## Refreshing this record
 
 Re-run the commands above against the installed agy after a version bump, and run [`tests/fm-agy-harness.test.sh`](../../tests/fm-agy-harness.test.sh) for the portable half.
-The live [composer matrix](runtime-backends.md#composer-classification-matrix) and [doorbell guard](runtime-backends.md#steering-inbox-doorbell) currently omit agy.
+Use the [agy-specific guard and fixture regressions](#composer-classification) to refresh composer verification.

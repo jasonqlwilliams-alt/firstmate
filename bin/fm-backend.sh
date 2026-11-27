@@ -1074,6 +1074,9 @@ _fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [e
   fm_backend_guarded_composer_classify_snapshot "$backend" "$target" "${4:-}" "$harness" "${6:-}"
 }
 
+# Requires a successful, nonempty snapshot from the supplied target. Callers
+# comparing expectations in command substitutions can reuse the captured screen
+# and keep this classifier's snapshot adjustments local to each verdict.
 fm_backend_guarded_composer_classify_snapshot() {  # <backend> <target> [expected-pending] [harness] [fit-text]
   local backend=$1 target=$2 expected=${3:-} harness=${4:-} fit=${5:-} picker verdict kv styled=0
   if [ "$harness" = claude ]; then

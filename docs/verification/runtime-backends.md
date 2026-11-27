@@ -336,6 +336,7 @@ This guard is the refresh command after an upgrade to any matrix-covered harness
 The [2026-08-23 doorbell run](#steering-inbox-doorbell) observed `unknown` and occasional pending-family verdicts for Grok 1.0.5's idle composer.
 The Grok 1.0.0 result above needs a refresh before consumers that require `empty`, including away-daemon injection and spawn readiness, can rely on it for 1.0.5.
 Cursor is deliberately outside this cursor-anchored empty-composer matrix because its terminal cursor is parked outside the composer; tmux's Cursor-specific, process-identity-gated cursorless fallback is covered by the [Cursor Agent CLI](#cursor-agent-cli) section's separate live evidence and drift guard.
+The [agy composer verification record](agy.md#composer-classification) owns its dedicated tmux guard and capture evidence.
 
 `zellij action dump-screen --pane-id <id> --ansi` was verified at zellij 0.44.0 to preserve ANSI styling (real Claude Code rendered inside a zellij pane dumped `ESC[m` `❯` U+00A0 for its idle composer row), which is the capability the zellij composer classifier reads.
 
