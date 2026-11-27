@@ -12,14 +12,14 @@
 #   fm-lease.sh claim <task> [--actor main|branch]
 #       Take the lease for the calling actor. Idempotent for the holder (the
 #       claim refreshes its own lease). Refuses with exit 6 while the other
-#       actor holds a live lease. A stale lease (dead pid, or a torn record)
-#       is cleared and re-claimed.
+#       actor holds a live lease or the existing lease's owner is uncertain.
+#       A stale lease (dead PID or torn lease record) can be replaced.
 #   fm-lease.sh release <task> [--actor main|branch]
 #       Drop the calling actor's lease. Releasing a lease the actor does not
 #       hold is a silent no-op, so a retry after a partial failure is safe.
 #       Naming the other actor is refused loudly.
 #   fm-lease.sh check <task>
-#       Print "<actor> <pid> <epoch> <live|stale>" for a held lease, or
+#       Print "<actor> <pid> <epoch> <live|stale|uncertain>" for a held lease, or
 #       nothing (exit 1) when the task is unleased.
 #   fm-lease.sh release-actor --actor main|branch
 #       Drop every lease the named actor holds; the Pi branch extension runs

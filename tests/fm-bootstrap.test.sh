@@ -1021,6 +1021,37 @@ test_local_bootstrap_accepts_verified_launch_owner() {
   pass 'bootstrap: standalone local reconciliation uses the verified launch owner'
 }
 
+test_startup_only_refreshes_local_project_clone() {
+  local case_dir home source project fakebin node_binary expected out
+  node_binary=$(command -v node) || return 0
+  [ "$(uname -s)" = Linux ] || return 0
+  case_dir="$TMP_ROOT/startup-only-clone-refresh"
+  home="$case_dir/home"
+  source="$case_dir/source"
+  project="$home/projects/synthetic"
+  mkdir -p "$home/config" "$home/projects" "$home/state"
+  printf 'manual\n' > "$home/config/backlog-backend"
+  printf 'launch-v1\n' > "$home/config/session-lock-owner"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  rm "$fakebin/node"
+  ln -s "$node_binary" "$fakebin/node"
+
+  fm_git_init_commit "$source" || fail 'could not initialize the synthetic project'
+  git clone -q "$source" "$project" || fail 'could not clone the synthetic project'
+  printf 'advanced while Firstmate was down\n' > "$source/README.md"
+  git -C "$source" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' \
+    commit -qam 'Advance the project' || fail 'could not advance the local origin'
+  expected=$(git -C "$source" rev-parse HEAD) || fail 'could not resolve the local origin tip'
+
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" PATH="$fakebin:$BASE_PATH" \
+    FM_STARTUP_NETWORK_TIMEOUT=25 FM_SESSION_START_TIMEOUT=40 "$ROOT/bin/fm-session-start.sh" 2>&1) \
+    || fail "standalone startup failed: $out"
+  assert_contains "$out" 'STARTUP-ONLY' 'standalone startup did not report its permitted lifetime'
+  [ "$(git -C "$project" rev-parse HEAD)" = "$expected" ] \
+    || fail 'standalone startup did not fast-forward the project clone to the local origin tip'
+  pass 'bootstrap: startup-only authority runs the real project refresh before returning'
+}
+
 test_network_sweeps_recheck_lock_ownership() {
   local case_dir fakebin fake_root marker out
   case_dir="$TMP_ROOT/network-lock-handoff"
@@ -1277,6 +1308,7 @@ test_routine_bootstrap_confirmations_are_silent
 test_routine_bootstrap_contract_runs_under_system_bash
 test_network_phase_partitions_the_run
 test_local_bootstrap_accepts_verified_launch_owner
+test_startup_only_refreshes_local_project_clone
 test_network_sweeps_recheck_lock_ownership
 test_network_phases_record_per_step_elapsed_times
 test_tasks_axi_verdict_handoff_is_consumed_once

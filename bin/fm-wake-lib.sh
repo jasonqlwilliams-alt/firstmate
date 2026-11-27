@@ -1896,6 +1896,8 @@ fm_failure_episode_reset() {
 #     "epoch=N owner_pid=P outcome=O updated_at=T" record. A "rewake" outcome
 #     also records "session_pid=S recovery_generation=G", binding that
 #     handling turn to its live session-lock owner and watcher recovery episode.
+#     Launch-bound claims also record "session_generation=H" for the verified
+#     session owner. Failure markers carry that same generation.
 #     Line 2 is the claiming process's pid-identity, the same identity every other
 #     supervision lock in this repo records (fm_pid_identity above). The
 #     identity is MANDATORY: a claimant that cannot record it does not claim
@@ -2051,7 +2053,8 @@ fm_autoarm_claim_open() {  # <state-dir> [grace]
 # The watcher runs only between turns; turn-end re-arms.
 #
 # Healthy means outcome=rewake with no exhausted-failure marker, bound to the
-# current session-lock pid and current watcher recovery generation. The rewake
+# current session-lock PID, its launch generation when present, and the current
+# watcher recovery generation. The rewake
 # ledger must also be at least as new as the last watcher beacon: a later beacon
 # proves another between-turns watcher cycle has begun, so the rewake belongs to
 # an earlier handling turn.

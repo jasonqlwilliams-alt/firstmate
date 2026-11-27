@@ -12,8 +12,9 @@
 #
 # Before activation a legacy .lock.start may hold the matching PID and
 # start=<token>. The legacy reader accepts a missing or differently keyed
-# sidecar as PID-only. The launch-v1 writer preserves that proof while sealing
-# the first transition.
+# sidecar as PID-only, including after a legacy publication stops between the
+# two renames. The launch-v1 writer preserves the legacy record it read while
+# sealing the first transition.
 
 fm_proc_start_ticks() {
   local path=$1 stat_line ticks

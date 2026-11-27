@@ -13,11 +13,12 @@ Ask the worker to reissue the question with an unreserved key so it can enter `O
 | Script                   | Purpose                                                                              |
 | ------------------------ | ------------------------------------------------------------------------------------ |
 | `fm-session-start.sh`    | Compose lock, bootstrap, and wake drain into the single ordered session-start digest |
+| `fm-session-launch.sh`   | Start a foreground harness with a fresh binding on an enabled home |
 | `fm-sessionstart-nudge.sh` | Print the native session-start hook nudge when the primary has not already run the digest |
 | `fm-sessionstart-run.sh` | Route a native session-open hook to the full digest, a context re-emit, or the nudge |
 | `fm-operational-input.sh` | Construct and parse the canonical cross-language operational-input protocol |
 | `fm-bootstrap.sh`        | Detect toolchain and fleet problems, run the locked session-start sweeps, and install approved tools |
-| `fm-startup-network.sh`  | Run session start's home-summary publication, network checks, and inactive-outcome scan off its blocking path, retaining reports and durable findings |
+| `fm-startup-network.sh`  | Run and report session start's home-summary publication, network checks, and inactive-outcome scan |
 | `fm-system-state-card.sh` | Generate the TTL 60m live SYSTEM_STATE card from probes, write `data/system-state.md`, and optionally publish it through Eleusis |
 | `fm-fleet-sync.sh`       | Refresh project clones with safe fast-forwards, self-heals, `STUCK:` reports, branch pruning, and bounded recovery from an orphaned `.git/packed-refs.lock` |
 | `fm-fleet-snapshot.sh`   | Print structured fleet snapshot JSON (schema `fm-fleet-snapshot.v1`) and refresh only its parent-side remote-ledger cache. See [secondmate home summary rules](architecture.md#registered-secondmate-current-state). |
@@ -52,8 +53,8 @@ Ask the worker to reissue the question with an unreserved key so it can enter `O
 | `fm-ensure-agents-md.sh` | Ensure a project's real `AGENTS.md`, its `CLAUDE.md` `@AGENTS.md` pointer, and self-governance guidance (explicit project mark documented in the helper's header and help) |
 | `fm-guard.sh`            | Warn on primary-checkout tangles, main-session pending wakes, and unhealthy supervision |
 | `fm-primary-scope-lib.sh` | Shared marker-or-plain-checkout primary-home predicate for tracked hooks             |
-| `fm-session-lock-lib.sh` | Shared session-lock harness ancestry, liveness, and owner publication |
-| [fm-session-lock-record-lib.sh](../bin/fm-session-lock-record-lib.sh) | Shared session-lock record parser and process start-time check |
+| `fm-session-lock-lib.sh` | Shared launch binding, session ownership verification, and legacy harness ancestry |
+| [fm-session-lock-record-lib.sh](../bin/fm-session-lock-record-lib.sh) | Shared session-lock record, process liveness proof, and owner publication |
 | `fm-claude-stop-autoarm.sh` | Claude Stop `asyncRewake` hook owning watcher continuity with demand-gated six-hour renewal and single-flight exit-2 rewake (docs/watcher-continuity.md) |
 | `fm-turnend-guard.sh`    | Shared primary turn-end guard predicate so no turn ends blind (docs/turnend-guard.md) |
 | `fm-turnend-guard-grok.sh` | Grok Stop-hook adapter for the primary turn-end guard                              |

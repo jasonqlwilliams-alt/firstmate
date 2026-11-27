@@ -23,8 +23,8 @@ No synthetic maintenance record is queued, so renewal cannot create its own supe
 Handle renewal by draining and acknowledging any real wakes, then stop promptly: the next eligible Stop acquires the successor generation.
 `FM_CLAUDE_AUTOARM_LEASE_SECONDS` may shorten the lease for isolated tests; zero, invalid values, and values above 21,600 use the six-hour bound.
 The hook fires on every Stop, and an eligible primary with supervision need admits one home-scoped owner that foregrounds `bin/fm-watch-arm.sh` inside the hook-owned process tree.
-The hook reclaims a stale numeric session-lock owner through `bin/fm-lock.sh` before changing auto-arm state, using the [shared session-lock liveness check](primary-recovery.md#start).
-A live owner outside the hook's ancestry, an absent lock, or a malformed PID line keeps the hook inert.
+The hook uses the [shared session-lock verifier](../bin/fm-session-lock-lib.sh) before changing auto-arm state and delegates stale-owner recovery to `bin/fm-lock.sh`.
+An absent lock, an unreadable owner record, or a live owner the hook cannot verify keeps it inert.
 The stale-owner claim occurs only after the existing AFK and supervision-need gates pass.
 After each non-actionable arm close, the hook rechecks the identity-matched watcher lock and fresh beacon before retrying a bounded number of times.
 A cycle-end failure is benign when that live-watcher predicate is true, and the hook suppresses the arm output and continues silently.
@@ -148,7 +148,8 @@ A live initial queue-lock holder produces one PID-naming advisory and skips the 
 Acknowledgement invocations and every other mutation-critical queue-lock acquire retain blocking semantics, so acknowledgement atomicity is unchanged.
 Main records its presented set in `state/.main-eligible-rows`.
 A branch grant is published through `bin/fm-wake-grant.sh` under that same lock in `state/.branch-eligible-rows`, bound to the live branch process and extension generation recorded in `state/.branch-eligible-owner`, and publication is refused if main already claimed any requested row.
-A main drain validates that owner evidence under the queue lock and reclaims the grant when its process is gone or its identity no longer matches.
+On a launch-bound home, the owner record also ties the grant to the current session-lock generation.
+A main drain validates that owner evidence under the queue lock and reclaims the grant when the check fails.
 A main drain claims every currently unclaimed row and excludes an active branch grant from both presentation and acknowledgement.
 Because that exclusion makes those rows invisible to main, `bin/fm-guard.sh`'s queued-wake warning counts only the rows the calling actor can itself present or retire, so an actor is never sent to a drain that provably has nothing for it.
 `bin/fm-wake-lib.sh` owns that per-actor count (`fm_wake_actor_pending_count`) alongside the grant row-list and owner-record reads that the drain and `bin/fm-wake-grant.sh` share.

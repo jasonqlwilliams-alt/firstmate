@@ -118,8 +118,9 @@
 #          the fleet lock, so a second concurrent session never race-mutates
 #          secondmate homes, pending handoff outboxes and receiver wakes,
 #          X-mode artifacts, project clones, or repair instructions.
-#          Unset/0 (the default) runs all six sweeps - this flag is purely
-#          additive.
+#          Unset/0 requests the mutating sweeps. In launch-bound mode, local
+#          mutations require a verified owner and network mutations require
+#          the startup worker's generation and acquisition claim.
 #          Set FM_BOOTSTRAP_NETWORK to split this run by whether a step talks to
 #          the network, so a session start can print its digest from local reads
 #          alone and run the network half off the digest's blocking path:
@@ -135,10 +136,9 @@
 #                 local pass.
 #          FM_BOOTSTRAP_DETECT_ONLY composes with it unchanged, so `only` plus
 #          detect-only is the read-only `gh auth status` probe on its own.
-#          bin/fm-startup-network.sh owns the deferral: it runs the `only` phase
-#          in a detached bounded worker and publishes the result. This file stays
-#          the single owner of every sweep, and the split changes only WHEN each
-#          runs, never WHETHER. During the network phase, project clone refresh
+#          bin/fm-startup-network.sh schedules the `only` phase and publishes
+#          its result. This file stays the single owner of every sweep.
+#          During the network phase, project clone refresh
 #          overlaps the independent secondmate work. Per-secondmate remote
 #          liveness workers run concurrently and finish before per-secondmate
 #          remote convergence workers run concurrently, because convergence
@@ -199,6 +199,8 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 # deferred network stage sets, so an ordinary bootstrap run records nothing.
 # shellcheck source=bin/fm-timing-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-timing-lib.sh"
+# shellcheck source=bin/fm-timeout-lib.sh
+. "$SCRIPT_DIR/fm-timeout-lib.sh"
 
 # Network-phase selection (see the header). An unrecognized value resolves to
 # `all` so a malformed override runs every step rather than silently dropping a

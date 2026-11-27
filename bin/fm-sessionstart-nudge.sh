@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Print the one-line session-start instruction only for a genuine firstmate
-# primary whose current harness session has not already acquired the home lock.
+# primary that cannot prove completed launch-bound startup or legacy ancestry
+# ownership of the home lock.
 # Every silence and error path exits 0 because Claude SessionStart exit 2 blocks
 # session initialization.
 set -u

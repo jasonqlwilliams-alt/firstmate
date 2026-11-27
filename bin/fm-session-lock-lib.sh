@@ -231,7 +231,7 @@ fm_session_start_completion_matches() {  # <completion-file> <pid> <start>
 }
 
 # The environment carries the secret separately from the readable fingerprint.
-# A nested launcher always scrubs all five fields before selecting its home.
+# The launch boundary clears inherited session and startup-worker authority.
 fm_session_owner_clear() {
   unset FM_SESSION_OWNER_ID FM_SESSION_OWNER_HOME FM_SESSION_OWNER_PID \
     FM_SESSION_OWNER_START FM_SESSION_OWNER_KIND FM_BOOTSTRAP_NETWORK_LOCK_PID \

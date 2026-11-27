@@ -6,7 +6,11 @@
 # Usage: fm-lock.sh           acquire; exit 1 unless ownership is verified
 #        fm-lock.sh status    print holder and liveness; always exits 0
 #        fm-lock.sh verify [engine-pid]  verify current ownership; print generation
+#        fm-lock.sh verify-hook         verify a continuing session; print generation
 #        fm-lock.sh bind-engine <pid>  issue a binding to the directly calling adapter
+# For a recorded owner in launch-v1 mode, status distinguishes a live owner,
+# positive evidence of exit or PID reuse, and uncertainty about the record or
+# process. Legacy status uses the harness identity and optional start token.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,17 +19,14 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 LOCK="$STATE/.lock"
 
-# Harness identity (FM_HARNESS_RE, ancestry walk, holder liveness) is owned by
-# the shared session-lock lib so the Claude Stop auto-arm applies the exact
-# same identity contract.
+# Share the launch-binding and legacy harness checks with the Stop hooks.
 # shellcheck source=bin/fm-session-lock-lib.sh
 . "$SCRIPT_DIR/fm-session-lock-lib.sh"
 
 if [ "${1:-}" = bind-engine ]; then
   fm_session_owner_enabled && [ "$#" -eq 2 ] && [ "$2" = "$PPID" ] || exit 1
-  # A native engine may take over the binding only from the foreground wrapper
-  # that directly launched it. A nested engine of an already-bound engine
-  # receives a fresh, competing binding, never its parent's identity.
+  # The engine must request a binding for itself. A nested engine gets a fresh
+  # binding, independent of any binding it inherited from its parent.
   fm_session_owner_bind "$2" native || exit 1
   printf '%s\n' "$FM_SESSION_OWNER_HOME" "$FM_SESSION_OWNER_PID" "$FM_SESSION_OWNER_START" \
     "$FM_SESSION_OWNER_ID" "$FM_SESSION_OWNER_KIND"

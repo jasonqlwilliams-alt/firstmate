@@ -15,13 +15,9 @@
 # fm-wake-drain.sh, and fm-startup-network.sh as real subprocesses and prints
 # their real output. It never re-implements their logic; all
 # sequencing/formatting logic added here stays local to this file. Those four
-# scripts remain fully working
-# standalone with unchanged default behavior - other flows (fm-bootstrap.sh
-# install <tools> after consent, /updatefirstmate, the afk daemon, existing
-# tests) still call them directly. The one seam this script needed -
-# bootstrap running its detect-only diagnostics without its six mutating
-# sweeps - is an opt-in FM_BOOTSTRAP_DETECT_ONLY=1 flag on fm-bootstrap.sh
-# itself (default unset/0 = unchanged behavior), not a fork.
+# scripts also have standalone entry points with their own authority checks.
+# This digest uses FM_BOOTSTRAP_DETECT_ONLY=1 for the bootstrap diagnostics
+# that are safe without mutation authority.
 #
 # ORDERING, and why LOCK now runs before BOOTSTRAP (the old AGENTS.md order
 # was bootstrap-then-lock):
@@ -34,11 +30,12 @@
 #                       (same-home backlog reconciliation,
 #                       secondmate convergence, secondmate liveness, pending remote
 #                       handoff retry, X-mode artifact writes, fleet sync) also run only when
-#                       locked; the four network sweeps run in the deferred
-#                       stage rather than this synchronous bootstrap section.
+#                       locked; the four network sweeps belong to the startup
+#                       network stage, outside this bootstrap section.
 #   3. wake-drain     - presents durable wakes and advances recovery handling
-#                       state, so it only runs when locked. The local bounded
-#                       inactive-outcome startup scan runs in the deferred worker.
+#                       state, so it only runs for a lock-owning continuing
+#                       session. The startup network stage owns the local
+#                       bounded inactive-outcome scan.
 #   4. supervision-instructions - the one emitted operating block for the
 #                       detected primary harness.
 #   5. read-once contract - the do-not-re-read contract covering every source
@@ -49,8 +46,9 @@
 #                       state/.afk daemon flag), and a cheap per-task
 #                       endpoint-liveness read:
 #                       read-only, always runs.
-#   7. network checks - the result of the deferred network stage started back at
-#                       step 1, harvested WITHOUT waiting for it.
+#   7. network checks - a continuing session harvests the deferred result
+#                       without waiting. Startup-only runs report the
+#                       foreground attempt after the local digest.
 #   8. context digest - data/projects.md, data/secondmates.md, data/captain.md,
 #                       data/captain-shared.md, data/learnings.md, plus one
 #                       SYSTEM_STATE pointer line (not the card body):
@@ -62,8 +60,8 @@
 # Those nine names are also the runtime-bound stage list below, so a truncated
 # startup can name exactly which of them never ran.
 #
-# NO NETWORK ON THE BLOCKING PATH. This digest runs on a session-open hook that
-# blocks session initialization, so anything it waits for is time the captain
+# NO NETWORK ON THE CONTINUING SESSION'S BLOCKING PATH. This digest runs on a
+# session-open hook that blocks initialization, so anything it waits for is time the captain
 # waits before the first turn - and every external-network call it used to make
 # was individually unbounded. One unreachable remote secondmate could burn the
 # entire FM_SESSION_START_TIMEOUT and truncate the digest, so a slow network
@@ -84,6 +82,9 @@
 # What this deliberately trades: on a slow network the digest prints "IN
 # PROGRESS" and names exactly which checks are not yet confirmed, instead of
 # waiting for them. It never reports an unconfirmed check as passed.
+# On an enabled home, startup without a launch binding can take a temporary
+# owner tied to the invocation. After successful local startup it attempts the
+# network stage in the foreground, with its budget capped by time remaining.
 #
 # ORDERING, and why FLEET STATE now runs before CONTEXT: this digest is
 # delivered through a harness that truncates an oversized payload from the TAIL,
@@ -174,8 +175,8 @@
 # local is not the same as bounded: tool version probes, the backlog listing,
 # and the per-task endpoint reads are all unbounded subprocesses. So the whole
 # digest still runs as ONE bounded child of this script
-# (FM_SESSION_START_TIMEOUT, default 120s). The deferred network stage
-# deliberately sits OUTSIDE that bound,
+# (FM_SESSION_START_TIMEOUT, default 120s). A continuing session's deferred
+# network stage sits outside that bound,
 # in its own process group under its own aggregate deadline, so a truncated
 # digest neither waits for it nor orphans it unbounded. The
 # child writes the digest straight to this script's stdout, so everything it
@@ -203,20 +204,19 @@
 #             re-emit the rest. Wake-queue presentation is NOT skipped: queued
 #             records are this turn's work queue, they arrived after startup,
 #             and a session that owns the lock is exactly the session that must
-#             handle and acknowledge them. Lock acquisition still runs, because
-#             ownership must be re-verified rather than assumed: fm-lock.sh already treats a lock
-#             this session's own harness holds as its own, so the re-emit
-#             proceeds, while a lock another live session took meanwhile still
+#             handle and acknowledge them. Lock acquisition still runs to
+#             verify ownership before re-emitting. A competing live owner
 #             produces the ordinary read-only path.
 #
 #   --source  The native session-open source, supplied only by
 #             fm-sessionstart-run.sh. A genuine `startup` that owns the active
 #             session lock records AGENTS.md's SHA-256 baseline only after the
-#             digest completion record is published, keyed to that lock's
-#             harness pid. No resume, clear, reset, compact, or other rebuild
+#             digest completion record is published, keyed to the lock's owner
+#             generation on launch-bound homes and harness PID on legacy homes.
+#             No resume, clear, reset, compact, or other rebuild
 #             creates or replaces it. Pi and pi-signed compaction are the only
 #             supported stale-cache rebuild pair: a missing baseline, a baseline
-#             for another harness pid, or a changed hash causes the complete
+#             for another owner, or a changed hash causes the complete
 #             current AGENTS.md to print before the bulky digest. The baseline
 #             remains immutable so every later drifted compaction refreshes
 #             again, while an equal baseline emits no instruction refresh.

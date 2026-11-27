@@ -9,14 +9,16 @@
 # those calls is individually bounded, so one unreachable host could consume the
 # whole FM_SESSION_START_TIMEOUT budget and truncate the digest outright, turning
 # a slow network into a startup that never printed the work queue at all.
-# This script runs exactly that work OFF the blocking path: the digest is
-# composed from bounded local reads while these checks run concurrently in a
+# For continuing sessions this script runs that work off the blocking path.
+# The digest uses bounded local reads while these checks run concurrently in a
 # detached worker, and their result is reported back inline when it finishes in
 # time, or as a durable wake when it does not. The locked startup's bounded
 # inactive-outcome scan also runs here because its local current-state reads can
 # be just as slow; that scan publishes its own findings to the durable wake queue.
 # Locked startup also publishes the home summary here, before the sweeps, so
 # sampling every worker cannot consume the blocking digest's runtime budget.
+# Startup-only runs this stage in the foreground after the local digest so the
+# run can report its result while the temporary startup owner still exists.
 #
 # WHAT IS PRESERVED. Nothing is dropped. bin/fm-bootstrap.sh remains the single
 # owner of every network sweep and still runs all of them, unchanged, via its
@@ -41,11 +43,10 @@
 #     suppresses the wake, so a claimant that exits first cannot lose the
 #     result. While the worker is still running the digest states by name what
 #     is not yet confirmed.
-#   - Mutation authority is leased. The worker outlives the command that launched
-#     it, so it takes the same acquisition lease a new session must hold before
-#     replacing a stale owner, re-checks the captured owner generation under that lease, and
-#     holds it through the bounded mutating run. Takeover is deferred until
-#     that run settles, so old and new owners can never sweep concurrently.
+#   - The worker takes the acquisition claim a successor needs to publish its
+#     owner record, then rechecks the captured owner under that claim before
+#     running the sweep. On a launch-bound home it passes the generation and
+#     claim holder proof to bootstrap and the inactive-outcome scan.
 #
 # Usage: fm-startup-network.sh start --locked <0|1> --harvest-pid <pid>
 #          Launch the detached worker and return immediately. Single-flight: a
@@ -74,7 +75,7 @@
 #          only a slow run raises.
 #        fm-startup-network.sh wait [<seconds>]
 #          Block until the report is published, up to <seconds> (default 120).
-#          For operators and tests only; a session start never waits.
+#          For operators and tests. Session start does not call wait.
 #        fm-startup-network.sh ready <lock-pid>
 #          Read-only: exit 0 only for a successfully published locked generation
 #          belonging to this live session owner. Exit 1 for incomplete work.
@@ -86,7 +87,8 @@
 # STATE, all under this home's state/ and gitignored with it:
 #   .startup-network.status   key=value record - generation, lock_pid, state,
 #                             pid, started, finished, rc, locked, phases, and
-#                             lock_identity (base64 of fm_pid_identity, one line),
+#                             lock_identity (the session-lock generation when
+#                             available, otherwise base64 of fm_pid_identity),
 #                             and whether the report was published. The single
 #                             source of truth for what ran and how it ended.
 #   .startup-network.report   the sweep output, byte for byte as
