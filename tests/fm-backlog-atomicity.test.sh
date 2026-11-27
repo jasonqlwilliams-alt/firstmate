@@ -91,7 +91,15 @@ EOF
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 case "$*" in *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;; esac
-case "${1:-}" in display-message) printf 'firstmate\n'; exit 0 ;; esac
+case "${1:-}" in
+  -V) printf 'tmux 3.2\n'; exit 0 ;;
+  display-message) printf 'firstmate\n'; exit 0 ;;
+  list-windows)
+    if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
+      fm_fake_tmux_window_ids "$@" < "$0.windows"
+    fi ;;
+  new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@"; exit 0 ;;
+esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
@@ -444,7 +452,9 @@ break_launch_delivery() {  # <case-dir>
 #!/usr/bin/env bash
 case "$*" in *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;; esac
 case "${1:-}" in
+  -V) printf 'tmux 3.2\n'; exit 0 ;;
   display-message) printf 'firstmate\n'; exit 0 ;;
+  new-window) printf '@1\n'; exit 0 ;;
   send-keys) exit 1 ;;
 esac
 exit 0
@@ -483,8 +493,8 @@ SH
   chmod +x "$case_dir/fakebin/treehouse"
 }
 
-interrupt_kimi_readiness() {  # <case-dir>
-  local case_dir=$1 home
+interrupt_kimi_readiness() {  # <case-dir> <task-id>
+  local case_dir=$1 id=$2 home
   home=$(home_of "$case_dir")
   mkdir -p "$home/.kimi-code"
   printf '# test config\n' > "$home/.kimi-code/config.toml"
@@ -496,7 +506,10 @@ case "\$*" in
   *"#{cursor_y}"*) printf '1\\n'; exit 0 ;;
 esac
 case "\${1:-}" in
+  -V) printf 'tmux 3.2\\n'; exit 0 ;;
   display-message) printf 'firstmate\\n'; exit 0 ;;
+  new-window) printf '@1\\n'; exit 0 ;;
+  list-windows) case "\$*" in *window_id*) printf '@1 firstmate:fm-$id\\n' | fm_fake_tmux_window_ids "\$@" ;; esac ;;
   capture-pane)
     if [ ! -f "$case_dir/kimi-interrupted" ]; then
       : > "$case_dir/kimi-interrupted"
@@ -1505,7 +1518,7 @@ test_dispatch_interruption_during_kimi_readiness_fails_before_commit() {
   case_dir=$(make_home dispatch-kimi-readiness-signal "$id")
   home=$(home_of "$case_dir")
   add_item "$case_dir" "$id"
-  interrupt_kimi_readiness "$case_dir"
+  interrupt_kimi_readiness "$case_dir" "$id"
 
   out=$(HOME="$home" FM_KIMI_READY_POLLS=2 FM_KIMI_POLL_INTERVAL=0 \
     run_spawn "$case_dir" "$id" "$case_dir/project" --harness kimi \

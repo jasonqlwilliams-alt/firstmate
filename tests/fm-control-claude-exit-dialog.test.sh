@@ -215,7 +215,8 @@ for session in fixture short narrow; do
   height=40
   case "$session" in short) height=24 ;; narrow) width=44 ;; esac
   "$TMUX_BIN" -f /dev/null -L "$SOCKET" new-session -d -s "$session" -n sentinel -x "$width" -y "$height" \
-    -c "$TMP_ROOT/worktree" /bin/bash --noprofile --norc || fail 'tmux fixture failed'
+    -c "$TMP_ROOT/worktree" /bin/bash --noprofile --norc -c \
+    'printf "%s\n" SENTINEL-SCREEN; exec /bin/bash --noprofile --norc' || fail 'tmux fixture failed'
 done
 "$TMUX_BIN" -f /dev/null -L "$SOCKET" set-option -g automatic-rename off
 "$TMUX_BIN" -f /dev/null -L "$SOCKET" set-option -g allow-rename off
@@ -393,11 +394,28 @@ fixture:fm-exitdialog unknown
 fix:fm-exitdialog-west unknown
 fixture:fm-exitdialog-west.0 unknown
 EOF
+neighbor_window=$("$TMUX_BIN" -f /dev/null -L "$SOCKET" display-message -p -t "$neighbor" '#{window_id}')
+[ -n "$neighbor_window" ] || fail 'could not identify the Claude dialog window'
 "$TMUX_BIN" -f /dev/null -L "$SOCKET" rename-window -t "$neighbor" sentinel.0 || fail 'could not name the dotted window'
+sentinel_window=$("$TMUX_BIN" -f /dev/null -L "$SOCKET" display-message -p -t 'fixture:=sentinel' '#{window_id}')
+[ -n "$sentinel_window" ] && [ "$sentinel_window" != "$neighbor_window" ] \
+  || fail 'could not identify a distinct undotted sentinel window'
+"$TMUX_BIN" -f /dev/null -L "$SOCKET" capture-pane -p -t "$neighbor_window" | grep -Fq '1. Exit and stop tasks' \
+  || fail 'the dotted window does not display the Claude exit dialog'
+"$TMUX_BIN" -f /dev/null -L "$SOCKET" capture-pane -p -t "$sentinel_window" | grep -Fq SENTINEL-SCREEN \
+  || fail 'the undotted window does not display the sentinel screen'
+"$TMUX_BIN" -f /dev/null -L "$SOCKET" capture-pane -p -t fixture:sentinel.0 | grep -Fq SENTINEL-SCREEN \
+  || fail 'precondition: native tmux capture must select the undotted sentinel'
 verdict=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" bash -c \
   '. "$1"; fm_backend_guarded_composer_state tmux "$2" "" "" claude' \
   _ "$ROOT/bin/fm-backend.sh" fixture:sentinel.0)
 [ "$verdict" = exit-confirm ] || fail "a dotted window name should resolve literally, got $verdict"
+"$TMUX_BIN" -f /dev/null -L "$SOCKET" link-window -d -s "$neighbor_window" -t fixture:99 \
+  || fail 'could not link the Claude dialog window to a second index'
+verdict=$(PATH="$TMP_ROOT/bin:$ORIGINAL_PATH" bash -c \
+  '. "$1"; fm_backend_guarded_composer_state tmux "$2" "" "" claude' \
+  _ "$ROOT/bin/fm-backend.sh" fixture:sentinel.0)
+[ "$verdict" = exit-confirm ] || fail "two links to one Claude dialog should still read exit-confirm, got $verdict"
 kill -TERM "$(cat "$TMP_ROOT/pid")"
 rm -f "$TMP_ROOT/pid" "$TMP_ROOT/keys"
 pass 'Claude dialog reads use the exact tmux session and window'

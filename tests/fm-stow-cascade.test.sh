@@ -52,10 +52,11 @@ chmod +x "$FAKEBIN/fake-ssh"
 
 # A tmux whose pane reports a running agent, so the local endpoint probe has a
 # real backend read to classify rather than a stubbed verdict.
-cat > "$FAKEBIN/tmux" <<'SH'
-#!/usr/bin/env bash
+cat <(printf '#!/usr/bin/env bash\n'; declare -f fm_fake_tmux_window_ids) - > "$FAKEBIN/tmux" <<'SH'
 set -u
 case "$*" in
+  *list-windows*window_id*)
+    [ -z "${FM_FAKE_TMUX_WINDOW:-}" ] || printf '@1 firstmate:%s\n' "$FM_FAKE_TMUX_WINDOW" | fm_fake_tmux_window_ids "$@" ;;
   *list-windows*) printf '%s\n' "${FM_FAKE_TMUX_WINDOW:-}" ;;
   *list-panes*) printf '%s\n' "${FM_FAKE_TMUX_PANE:-}" ;;
   *display-message*'#{pane_current_command}'*) printf '%s\n' "${FM_FAKE_TMUX_COMMAND:-claude}" ;;

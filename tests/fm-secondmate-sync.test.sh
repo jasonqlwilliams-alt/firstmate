@@ -334,21 +334,48 @@ SH
   chmod +x "$fakebin/gh-axi"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
-if [ -n "${FM_FAKE_TMUX_LOG:-}" ]; then
-  printf '%s\n' "$*" >> "$FM_FAKE_TMUX_LOG"
-fi
+[ "${1:-}" != -V ] || { printf '%s\n' 'tmux 3.2'; exit 0; }
+state=${FM_STATE_OVERRIDE:-${FM_HOME:?}/state}
 case "$*" in
   list-windows*)
-    sed -n 's/^window=[^:]*://p' "${FM_HOME:?}"/state/*.meta
+    case "$*" in
+      *window_id*) sed -n 's/^window=//p' "$state"/*.meta | awk '{ print "@" NR " " $0 }' | fm_fake_tmux_window_ids "$@" ;;
+      *) sed -n 's/^window=[^:]*://p' "$state"/*.meta ;;
+    esac
     exit 0
     ;;
   *display-message*'#{pane_current_command}'*) printf '%s\n' codex; exit 0 ;;
   *display-message*'#{pane_id}'*) printf '%s\n' '%1'; exit 0 ;;
   *display-message*'#{cursor_y}'*) printf '%s\n' 0; exit 0 ;;
-  *capture-pane*) printf '❯\n'; exit 0 ;;
-  *'send-keys'*' -l '*)
-    [ "${FM_FAKE_TMUX_FAIL_LITERAL:-0}" = 1 ] && exit 1
-    exit 0
+esac
+case "${1:-}" in
+  capture-pane|send-keys)
+    command=$1 target= literal=0
+    shift
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        -t) target=$2; shift 2 ;;
+        -l) literal=1; shift ;;
+        -e|-p) shift ;;
+        -S|-E) shift 2 ;;
+        *) break ;;
+      esac
+    done
+    case "$target" in
+      @*) target=$(sed -n 's/^window=//p' "$state"/*.meta | awk -v id="$target" '"@" NR == id') ;;
+    esac
+    [ -n "$target" ] || exit 1
+    composer="$0.$target.composer"
+    if [ "$command" = capture-pane ]; then
+      printf '❯'
+      [ ! -f "$composer" ] || printf ' %s' "$(cat "$composer")"
+      printf '\n'
+    elif [ "$literal" = 1 ]; then
+      printf '%s' "$1" >> "$composer"
+    elif [ "${1:-}" = Enter ]; then
+      printf '%s\n' "$(cat "$composer" 2>/dev/null)" >> "$0.$target.submitted"
+      rm -f "$composer"
+    fi
     ;;
 esac
 exit 0
@@ -407,8 +434,19 @@ SH
   chmod +x "$fakebin/jq"
 }
 
+assert_doorbell_submitted() {  # <fakebin> <worker-window> <inbox-directory>
+  local fakebin=$1 window=$2 inbox=$3 expected
+  expected=": Firstmate instruction waiting: list '$inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '$inbox'/handled/."
+  set -- "$fakebin"/tmux.*.submitted
+  [ "$#" -eq 1 ] && [ "$1" = "$fakebin/tmux.$window.submitted" ] && [ -f "$1" ] \
+    || fail "only $window should receive the doorbell submission"
+  printf '%s\n' "$expected" | cmp -s - "$1" \
+    || fail "$window should submit the inbox doorbell exactly once"
+  assert_absent "$fakebin/tmux.$window.composer" "the submitted doorbell should clear the draft"
+}
+
 test_bootstrap_sweep_nudges_only_instruction_change() {
-  local w c1 c2 c3 fakebin out info_line log marker_dir
+  local w c1 c2 c3 fakebin out info_line marker_dir
   w=$(new_world boot-sweep)
   c1=$(head_of "$w/main")
   add_sm_worktree "$w" sm-instr "$c1"        # behind by an instruction change
@@ -423,9 +461,8 @@ test_bootstrap_sweep_nudges_only_instruction_change() {
   printf 'sm-nonlive\n' > "$w/sm-nonlive/.fm-secondmate-home"
 
   fakebin=$(make_fake_toolchain "$w")
-  log="$w/tmux.log"
   out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$w/home" FM_ROOT_OVERRIDE="$w/main" \
-    FM_SEND_SETTLE=0 FM_FAKE_TMUX_LOG="$log" \
+    FM_SEND_SETTLE=0 \
     "$ROOT/bin/fm-bootstrap.sh" 2>/dev/null)
 
   info_line=$(printf '%s\n' "$out" | grep '^BOOTSTRAP_INFO: nudged fm-sm-instr ' || true)
@@ -436,13 +473,12 @@ test_bootstrap_sweep_nudges_only_instruction_change() {
   assert_not_contains "$out" "sm-readme" "readme-only advance is not nudged"
   assert_not_contains "$out" "sm-current" "already-current secondmate is not nudged"
   # The nudge rides fm-send's durable inbox plane: the marked message lands in
-  # the secondmate task's steering-inbox record while only the doorbell is typed.
+  # the secondmate task's steering-inbox record while the pane receives the doorbell.
   assert_contains "$(cat "$w/home/state/sm-instr.inbox/001.msg")" "[fm-from-firstmate]" \
     "nudge send should use the marked fm-send secondmate path"
   assert_contains "$(cat "$w/home/state/sm-instr.inbox/001.msg")" "firstmate was updated to the latest - please re-read your AGENTS.md" \
     "nudge send should enqueue the exact re-read message"
-  assert_contains "$(cat "$log")" "Firstmate instruction waiting" \
-    "nudge send should ring the doorbell at the secondmate pane"
+  assert_doorbell_submitted "$fakebin" firstmate:fm-sm-instr "$w/home/state/sm-instr.inbox"
   marker_dir="$w/home/state/.secondmate-nudge-pending"
   [ ! -e "$marker_dir/sm-instr.pending" ] || fail "successful nudge should clear its retry marker"
 
@@ -456,7 +492,7 @@ test_bootstrap_sweep_nudges_only_instruction_change() {
 }
 
 test_bootstrap_nudge_send_uses_state_override() {
-  local w c1 fakebin out log override_state marker
+  local w c1 fakebin out override_state marker
   w=$(new_world nudge-state-override)
   c1=$(head_of "$w/main")
   add_sm_worktree "$w" sm-instr "$c1"
@@ -466,10 +502,8 @@ test_bootstrap_nudge_send_uses_state_override() {
   mv "$w/home/state/sm-instr.meta" "$override_state/sm-instr.meta"
   touch "$override_state/.last-watcher-beat"
   fakebin=$(make_fake_toolchain "$w")
-  log="$w/tmux.log"
-
   out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$w/home" FM_ROOT_OVERRIDE="$w/main" \
-    FM_STATE_OVERRIDE="$override_state" FM_SEND_SETTLE=0 FM_FAKE_TMUX_LOG="$log" \
+    FM_STATE_OVERRIDE="$override_state" FM_SEND_SETTLE=0 \
     "$ROOT/bin/fm-bootstrap.sh" 2>/dev/null)
 
   assert_contains "$out" "BOOTSTRAP_INFO: nudged fm-sm-instr with" \
@@ -478,13 +512,14 @@ test_bootstrap_nudge_send_uses_state_override() {
     "effective-state nudge should not fail through FM_HOME/state"
   assert_contains "$(cat "$override_state/sm-instr.inbox/001.msg")" "[fm-from-firstmate]" \
     "effective-state nudge should still use secondmate marker metadata"
+  assert_doorbell_submitted "$fakebin" firstmate:fm-sm-instr "$override_state/sm-instr.inbox"
   marker="$override_state/.secondmate-nudge-pending/sm-instr.pending"
   assert_absent "$marker" "successful effective-state nudge should clear its retry marker"
   pass "T8a bootstrap nudge send respects FM_STATE_OVERRIDE"
 }
 
 test_bootstrap_nudge_retry_rejects_malformed_marker_id() {
-  local w c1 fakebin out marker log evil
+  local w c1 fakebin out marker evil
   w=$(new_world nudge-malformed-id)
   c1=$(head_of "$w/main")
   evil="$w/evil"
@@ -506,10 +541,8 @@ test_bootstrap_nudge_retry_rejects_malformed_marker_id() {
     printf 'home=%s\n' "$evil"
   } > "$w/home/escape.meta"
   fakebin=$(make_fake_toolchain "$w")
-  log="$w/tmux.log"
-
   out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$w/home" FM_ROOT_OVERRIDE="$w/main" \
-    FM_SEND_SETTLE=0 FM_FAKE_TMUX_LOG="$log" \
+    FM_SEND_SETTLE=0 \
     "$ROOT/bin/fm-bootstrap.sh" 2>/dev/null)
 
   assert_contains "$out" "NUDGE_SECONDMATES: secondmate ../escape: send failed: retry marker has unsafe id" \
@@ -517,7 +550,10 @@ test_bootstrap_nudge_retry_rejects_malformed_marker_id() {
   assert_not_contains "$out" "BOOTSTRAP_INFO: nudged fm-../escape" \
     "malformed retry marker id must never send through a path-traversed selector"
   assert_present "$marker" "malformed retry marker should remain for operator inspection"
-  assert_absent "$log" "malformed retry marker should not invoke fm-send"
+  assert_absent "$w/home/state/escape.inbox" "malformed retry marker should not enqueue a steer"
+  if compgen -G "$fakebin/tmux.*.composer" >/dev/null || compgen -G "$fakebin/tmux.*.submitted" >/dev/null; then
+    fail "malformed retry marker should leave every tmux composer untouched"
+  fi
   pass "T8f bootstrap nudge retry rejects malformed marker ids"
 }
 

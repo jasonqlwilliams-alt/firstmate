@@ -59,6 +59,7 @@ make_tmux_stub() {  # <dir>
 set -u
 D=$FM_FAKE_DIR
 case "${1:-}" in
+  -V) printf 'tmux 3.2\n'; exit 0 ;;
   send-keys)
     shift
     literal=0
@@ -134,24 +135,35 @@ case "${1:-}" in
       printf 'Welcome to Kimi Code!\ncontext: 1%% (2k/256k)\n'
     fi
     exit 0 ;;
-  list-windows) [ -f "$D/windows" ] && cat "$D/windows"; exit 0 ;;
+  list-windows)
+    [ -f "$D/windows" ] || exit 0
+    session=fmses
+    [ ! -f "$D/session" ] || session=$(cat "$D/session")
+    case "$*" in
+      *window_id*) awk -v session="$session" '{ print "@" NR " " session ":" $0 }' "$D/windows" | fm_fake_tmux_window_ids "$@" ;;
+      *) cat "$D/windows" ;;
+    esac
+    exit 0 ;;
   has-session|new-session|set-window-option) exit 0 ;;
   new-window)
     name=
     cwd=
+    session=
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
         -n) name=$2; shift 2 ;;
         -c) cwd=$2; shift 2 ;;
-        -t|-F) shift 2 ;;
+        -t) session=${2%:}; session=${session#=}; shift 2 ;;
+        -F) shift 2 ;;
         -dP|-d|-P) shift ;;
         *) shift ;;
       esac
     done
     [ -z "$name" ] || printf '%s\n' "$name" >> "$D/windows"
     [ -z "$cwd" ] || printf '%s' "$cwd" > "$D/cwd"
-    printf '@recreated\n'
+    [ -z "$session" ] || printf '%s\n' "$session" > "$D/session"
+    awk 'END { print "@" NR }' "$D/windows"
     exit 0 ;;
 esac
 exit 0

@@ -47,11 +47,19 @@ new_world() {
 #!/usr/bin/env bash
 set -u
 case "${1:-}" in
-  list-windows) cat "$FM_FAKE_DIR/windows" ;;
+  list-windows)
+    case "$*" in
+      *window_id*) awk '{ print "@" NR " main:" $0 }' "$FM_FAKE_DIR/windows" | fm_fake_tmux_window_ids "$@" ;;
+      *) cat "$FM_FAKE_DIR/windows" ;;
+    esac ;;
   display-message)
     target=
     for arg in "$@"; do
-      case "$arg" in main:fm-*) target=$arg ;; esac
+      case "$arg" in
+        main:fm-*) target=$arg ;;
+        # Exact-window reads arrive by window id; map it back to the name.
+        @*) target=main:$(sed -n "${arg#@}p" "$FM_FAKE_DIR/windows") ;;
+      esac
     done
     case "${*: -1}" in
       *pane_current_command*)

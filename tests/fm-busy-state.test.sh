@@ -365,6 +365,12 @@ test_dead_endpoint_overrides() {
   fm_backend_target_exists() { return 1; }
   out=$(fm_busy_classify_live tmux w1 claude t1 "$state")
   [ "$out" = "dead endpoint-gone" ] || fail "gone endpoint must classify dead, got '$out'"
+  # shellcheck disable=SC2329
+  fm_backend_target_exists() { return 2; }
+  out=$(fm_busy_classify_live tmux w1 claude t1 "$state")
+  [ "$out" = "unknown capture-failed" ] || fail "unreadable tmux endpoint must stay unknown, got '$out'"
+  out=$(fm_busy_classify_live herdr s:p claude t1 "$state")
+  [ "$out" = "dead endpoint-gone" ] || fail "Herdr's existing failure verdict must be preserved, got '$out'"
   # shellcheck disable=SC2329 # invoked indirectly through fm_busy_classify_live
   fm_backend_target_exists() { return 0; }
   out=$(fm_busy_classify_live tmux w1 claude t1 "$state")

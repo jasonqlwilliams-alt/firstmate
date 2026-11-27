@@ -28,9 +28,16 @@ for arg in "$@"; do
   if [ "$prev" = "-t" ]; then target=$arg; fi
   prev=$arg
 done
+# Exact-window reads arrive by window id; map it back to the recorded name.
+case "$target" in
+  @*) target=$(sed -n 's/^window=[^:]*://p' "${FM_HOME:?}"/state/*.meta | sed -n "${target#@}p") ;;
+esac
 case "${1:-}" in
   list-windows)
-    sed -n 's/^window=[^:]*://p' "${FM_HOME:?}"/state/*.meta
+    case "$*" in
+      *window_id*) sed -n 's/^window=//p' "${FM_HOME:?}"/state/*.meta | awk '{ print "@" NR " " $0 }' | fm_fake_tmux_window_ids "$@" ;;
+      *) sed -n 's/^window=[^:]*://p' "${FM_HOME:?}"/state/*.meta ;;
+    esac
     ;;
   display-message)
     case "$*" in

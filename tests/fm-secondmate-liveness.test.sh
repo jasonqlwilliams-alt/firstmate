@@ -55,7 +55,11 @@ case "\${1:-}" in
   display-message)
     for a in "\$@"; do case "\$a" in *pane_current_command*) printf '%s\n' '$comm'; exit 0 ;; esac; done
     exit 0 ;;
-  list-windows) printf '%s\n' win; exit 0 ;;
+  list-windows)
+    case "\$*" in
+      *window_id*) printf '%s\n' '@1 sess:win' | fm_fake_tmux_window_ids "\$@" ;;
+      *) printf '%s\n' win ;;
+    esac ;;
 esac
 exit 0
 SH
@@ -79,13 +83,15 @@ case "\${1:-}" in
     ;;
   list-windows)
     case '$inventory' in
-      missing) printf '%s\n' main ; exit 0 ;;
+      missing) name=main ;;
       missing-session) printf '%s\n' "can't find session: sess" >&2; exit 1 ;;
       missing-server) printf '%s\n' "no server running on /tmp/tmux-test/default" >&2; exit 1 ;;
       missing-socket) printf '%s\n' "error connecting to /tmp/tmux-test/default (No such file or directory)" >&2; exit 1 ;;
-      present) printf '%s\n' fm-sm1 ; exit 0 ;;
+      present) name=fm-sm1 ;;
       *) printf '%s\n' "permission denied" >&2; exit 1 ;;
     esac
+    printf '@1 sess:%s\n' "\$name" | fm_fake_tmux_window_ids "\$@"
+    exit 0
     ;;
 esac
 exit 1
@@ -136,8 +142,8 @@ test_tmux_agent_state_classifies() {
   pass "fm_backend_tmux_agent_state: separates live, dead, missing, ambiguous, and unreadable"
 }
 
-test_tmux_agent_state_rejects_malformed_targets_before_probe() {
-  local fakebin marker target out
+test_tmux_liveness_rejects_malformed_targets_before_probe() {
+  local fakebin marker probe target out
   fakebin=$(fm_fakebin "$TMP_ROOT/tmux-malformed")
   marker="$TMP_ROOT/tmux-malformed-called"
   cat > "$fakebin/tmux" <<'SH'
@@ -147,14 +153,16 @@ printf 'bash\n'
 SH
   chmod +x "$fakebin/tmux"
 
-  for target in sess sess: :win sess:win:extra; do
-    out=$(PATH="$fakebin:$BASE_PATH" FM_TEST_TMUX_MARKER="$marker" \
-      bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state tmux "$1"' "$ROOT" "$target")
-    [ "$out" = unreadable ] || fail "malformed tmux target '$target' should classify as unreadable, got '$out'"
-    [ ! -e "$marker" ] || fail "malformed tmux target '$target' invoked tmux"
+  for probe in fm_backend_agent_state fm_backend_endpoint_state; do
+    for target in sess sess: :win sess:win:extra; do
+      out=$(PATH="$fakebin:$BASE_PATH" FM_TEST_TMUX_MARKER="$marker" \
+        bash -c '. "$0/bin/fm-backend.sh"; "$1" tmux "$2"' "$ROOT" "$probe" "$target")
+      [ "$out" = unreadable ] || fail "$probe should classify malformed target '$target' as unreadable, got '$out'"
+      [ ! -e "$marker" ] || fail "$probe invoked tmux for malformed target '$target'"
+    done
   done
 
-  pass "fm_backend_tmux_agent_state: rejects malformed targets before probing tmux"
+  pass "tmux liveness probes reject malformed targets before invoking tmux"
 }
 
 # --- unit level: fm_backend_herdr_agent_state -------------------------------
@@ -272,6 +280,7 @@ make_liveness_tmux() {
 set -u
 mode=${FM_TEST_PANE_CMD:-zsh}
 case "${1:-}" in
+  -V) printf '%s\n' 'tmux 3.2'; exit 0 ;;
   display-message)
     for a in "$@"; do
       case "$a" in
@@ -287,17 +296,31 @@ case "${1:-}" in
     exit 0
     ;;
   list-windows)
+    if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
+      fm_fake_tmux_window_ids "$@" < "$0.windows"
+      exit 0
+    fi
     case "$mode" in
-      missing) printf '%s\n' main; exit 0 ;;
+      missing) name=main ;;
       unreadable) exit 1 ;;
-      *) [ -e "${FM_TMUX_CALL_LOG:?}.killed" ] || printf '%s\n' fm-sm1; exit 0 ;;
+      *) [ ! -e "${FM_TMUX_CALL_LOG:?}.killed" ] || exit 0; name=fm-sm1 ;;
     esac
+    case "$*" in
+      *window_id*) printf '@1 firstmate:%s\n' "$name" | fm_fake_tmux_window_ids "$@" ;;
+      *) printf '%s\n' "$name" ;;
+    esac
+    exit 0
     ;;
   new-window|kill-window)
     printf '%s\n' "$*" >> "${FM_TMUX_CALL_LOG:?}"
     [ "${1:-}" = kill-window ] && : > "${FM_TMUX_CALL_LOG}.killed"
     [ "${FM_TEST_FAIL_NEW_WINDOW:-0}" = 1 ] && [ "${1:-}" = new-window ] && exit 1
-    [ "${1:-}" = new-window ] && rm -f "${FM_TMUX_CALL_LOG}.killed"
+    if [ "${1:-}" = new-window ]; then
+      rm -f "${FM_TMUX_CALL_LOG}.killed"
+      fm_fake_tmux_new_window "$0.windows" @1 "$@"
+    else
+      rm -f "$0.windows"
+    fi
     exit 0
     ;;
   has-session) exit 0 ;;
@@ -587,7 +610,7 @@ test_herdr_secondmate_home_binding() {
 
 test_herdr_secondmate_home_binding
 test_tmux_agent_state_classifies
-test_tmux_agent_state_rejects_malformed_targets_before_probe
+test_tmux_liveness_rejects_malformed_targets_before_probe
 test_herdr_agent_state_preserves_husk_classifier
 test_agent_state_dispatcher_and_compatibility
 test_sweep_respawns_confirmed_dead_secondmate

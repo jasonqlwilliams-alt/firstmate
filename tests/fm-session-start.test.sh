@@ -71,7 +71,8 @@ new_world() {
 # test deliberately breaks one. Mirrors fm-bootstrap.test.sh's fixture.
 make_fake_toolchain() {
   local fakebin=$1
-  fm_fake_exit0 "$fakebin" tmux node chrome-devtools-axi
+  fm_fake_exit0 "$fakebin" node chrome-devtools-axi
+  fm_fake_version_tool "$fakebin" tmux FM_FAKE_TMUX_VERSION 'tmux 3.2' -V
   fm_fake_version_tool "$fakebin" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.46
   cat > "$fakebin/gh-axi" <<'SH'
 #!/usr/bin/env bash
@@ -292,15 +293,18 @@ SH
   chmod +x "$fakebin/ps"
 }
 
-# make_fake_tmux <fakebin> <live-target>: display-message succeeds only for
-# the given "session:window" target - the exact primitive
-# fm_backend_target_exists uses for a tmux endpoint liveness read.
+# make_fake_tmux <fakebin> <live-target>: one live window and pane.
 make_fake_tmux() {
   local fakebin=$1 live=$2
   cat > "$fakebin/tmux" <<SH
 #!/usr/bin/env bash
 set -u
 case "\${1:-}" in
+  -V) printf '%s\n' 'tmux 3.2'; exit 0 ;;
+  list-windows)
+    [ "\${2:-}" = -a ] || printf '%s\n' '@1 $live' '@2 fm-sess:duplicate' '@3 fm-sess:duplicate' | fm_fake_tmux_window_ids "\$@"
+    exit 0 ;;
+  list-panes) [ "\${3:-}" = '@1' ] || exit 1; printf '%%1\n'; exit 0 ;;
   display-message)
     target=""
     prev=""
@@ -308,7 +312,7 @@ case "\${1:-}" in
       [ "\$prev" = "-t" ] && target="\$a"
       prev="\$a"
     done
-    [ "\$target" = "$live" ] && { printf '%%1\n'; exit 0; }
+    case "\$target" in '$live'|@1) printf '%%1\n'; exit 0 ;; esac
     exit 1
     ;;
 esac
@@ -378,15 +382,18 @@ case "${1:-}" in
     if [ "$mode" = unreadable ] && [ ! -e "$spawned" ] && [ ! -e "$killed" ]; then
       exit 1
     fi
-    if [ -e "$spawned" ]; then
-      printf '%s\n' "$mate_window"
-    elif [ ! -e "$killed" ] && { [ "$mode" = ambiguous ] || [ "$mode" = shell ]; }; then
-      printf '%s\n' "$mate_window"
+    if [ -e "$spawned" ] || { [ ! -e "$killed" ] && { [ "$mode" = ambiguous ] || [ "$mode" = shell ]; }; }; then
+      name=$mate_window
     else
-      printf '%s\n' main
+      name=main
     fi
+    case "$*" in
+      *window_id*) printf '@1 firstmate:%s\n' "$name" | fm_fake_tmux_window_ids "$@" ;;
+      *) printf '%s\n' "$name" ;;
+    esac
     exit 0
     ;;
+  -V) printf '%s\n' 'tmux 3.2'; exit 0 ;;
   has-session) exit 0 ;;
   kill-window)
     printf '%s\n' "$*" >> "$log"
@@ -1294,8 +1301,8 @@ EOF
     "SECONDMATE_LIVENESS: secondmate $SESSION_START_SECOND_MATE_ID: skipped: endpoint probe unreadable (backend=tmux)" \
     "session start did not distinguish transient unreadability from absence"
   [ ! -s "$log" ] || fail "session start touched a transiently unreadable target: $(cat "$log")"
-  assert_contains "$out" "endpoint: dead (backend=tmux window=firstmate:fm-$SESSION_START_SECOND_MATE_ID)" \
-    "the later cheap presence read should preserve the visible offline symptom"
+  assert_contains "$out" "endpoint: unknown (unreadable identity, backend=tmux window=firstmate:fm-$SESSION_START_SECOND_MATE_ID)" \
+    "the later cheap presence read should also report unreadability"
   pass "session start: transient tmux unreadability never licenses a relaunch"
 }
 
@@ -1352,12 +1359,15 @@ EOF
 
   printf 'window=fm-sess:live-window\nkind=ship\n' > "$home/state/task-live.meta"
   printf 'window=fm-sess:dead-window\nkind=ship\n' > "$home/state/task-dead.meta"
+  printf 'window=fm-sess:duplicate\nkind=ship\n' > "$home/state/task-duplicate.meta"
 
   out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
   assert_contains "$out" "endpoint: alive (backend=tmux window=fm-sess:live-window)" "live tmux endpoint not reported alive"
   assert_contains "$out" "endpoint: dead (backend=tmux window=fm-sess:dead-window)" "dead tmux endpoint not reported dead"
+  assert_contains "$out" "endpoint: unknown (unreadable identity, backend=tmux window=fm-sess:duplicate)" \
+    "duplicate tmux windows should leave endpoint presence unknown"
 
-  pass "tmux endpoint liveness is reported per task: alive for a live window, dead for a gone one"
+  pass "tmux endpoint liveness distinguishes live, gone, and ambiguous windows"
 }
 
 test_endpoint_liveness_herdr() {

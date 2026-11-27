@@ -5,7 +5,9 @@ tmux is Firstmate's verified reference runtime backend and the fully supported b
 
 ## Setup
 
-Install tmux with `brew install tmux` or your platform package manager.
+Install tmux 3.2 or newer with `brew install tmux` or your platform package manager.
+A running tmux server must support `list-windows -f`.
+If the client was upgraded while an older server was running, start a new server after the old sessions are no longer needed.
 The universal harness and toolchain requirements are in [`configuration.md`](configuration.md#toolchain).
 
 tmux is the hard default when no explicit setting or runtime auto-detection selects another backend.
@@ -24,7 +26,7 @@ tmux new -s firstmate
 
 Crew tasks become windows in that session.
 `tmux display-message -p '#S'` prints its name.
-If the primary harness runs outside tmux, Firstmate creates or reuses a detached session named `firstmate`:
+If the primary harness runs outside tmux, Firstmate creates or reuses a detached session with the exact name `firstmate`.
 
 ```sh
 tmux attach -t firstmate
@@ -44,10 +46,21 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 
 ## Current behavior and safety
 
+### Exact window reads
+
+For a recorded `session:window` target, Firstmate filters tmux's inventory by literal session and window names and reads by window ID when the matches identify one distinct window.
+If the recorded `fm-mate` window closes while `fm-mate2` remains open, `fm-peek` reports the recorded window missing.
+Presence checks report a confirmed absent session or window as missing.
+An inconclusive inventory or matches to multiple window IDs leave the endpoint unreadable.
+With tmux `exit-empty off`, an empty server can leave a closed worker's endpoint unreadable until the server has a session again or stops.
+If the tmux server restarts on the same socket between the inventory lookup and the read, the new server can reuse the resolved window ID.
+Explicit pane selectors such as `session:0.1` use native tmux syntax when they do not resolve to task metadata.
+[`fm_tmux_exact_target`](../bin/fm-tmux-lib.sh) implements the lookup, and [`fm-tmux-exact-target.test.sh`](../tests/fm-tmux-exact-target.test.sh) exercises it with a private tmux server.
+
 ### Agent liveness probe
 
 A target-existence check proves only that the pane exists.
-The deeper tmux agent-liveness probe first matches the exact window name in the exact recorded session, then reads process names to distinguish a running harness from a bare idle shell.
+After [resolving the recorded window](#exact-window-reads), the deeper tmux agent-liveness probe reads process names to distinguish a running harness from a bare idle shell.
 It classifies recognized Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, Muse, and Rovo process identities as `alive`, common shells as `dead`, an authoritatively absent window as `missing`, unreadable state as `unreadable`, and every other process as `ambiguous`.
 The process-name vocabulary behind those verdicts is owned by `bin/fm-agent-process-lib.sh` and shared with the Herdr adapter, which proves a registered agent against the same names ([herdr-backend.md](herdr-backend.md) "Restart and liveness behavior").
 Only `dead` and `missing` authorize recovery because a false dead result could launch a duplicate agent.
@@ -71,6 +84,7 @@ Run the real-harness guard after any harness upgrade and before trusting refresh
 
 Agent liveness and composer safety are separate checks.
 The tmux reader is a thin adapter over the fleet-wide classifier in `bin/fm-composer-lib.sh`: it contributes one styled full-pane capture, the `#{cursor_y}` cursor row, and foreground-process identity probes, and the shape containing the cursor - a complete bordered box (titled bottom borders tolerated), a bare agent-glyph row with its wrapped input, opencode's left bar, or Pi's identity-corroborated separator pair - normally decides the verdict.
+For a recorded task, the cursor, screen, and any follow-up identity probe use the window ID resolved for that snapshot.
 Real text in an identified shape is pending, while only positively proven emptiness reads empty.
 A blank or otherwise unidentified cursor row is `unknown` and every consumer defers, except that a foreground process proven to be Cursor is re-read cursorlessly because Cursor parks its terminal cursor below its footer.
 That identity-gated exception preserves the strict container-proof rule for every other pane, so a modal dialog, a dead shell between stale rules, or a mid-redraw pane is never an injection target.
@@ -83,7 +97,9 @@ The one remaining rendered-tail reader is Grok's isolated fallback inside that c
 The submit acknowledgement and away-mode supervisor-pane busy guard below still consult rendered output, but only to decide whether input can be delivered, never to decide recorded task state.
 The supervisor guard selects only the detected primary harness's signature rather than a global union of vendor patterns.
 
-`bin/fm-tmux-lib.sh` owns exact type-and-submit mechanics.
+Named key sends require a successful target-presence check.
+tmux receives the caller's target for key and text delivery, and [recorded-window lookup](#exact-window-reads) applies to the composer and busy readbacks.
+`bin/fm-tmux-lib.sh` owns type-and-submit verification.
 It types a message once and retries Enter only until the composer clears.
 Only a proven empty composer is a positive delivery acknowledgement.
 Text left in established structure remains `pending`, text in ambiguous structure remains unproven, and unreadable or unsafe state remains unknown.

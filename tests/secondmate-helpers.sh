@@ -26,32 +26,53 @@ make_fake_tmux() {
 #!/usr/bin/env bash
 set -u
 case "${1:-}" in
+  -V) printf 'tmux 3.2\n'; exit 0 ;;
   has-session|new-session|new-window|send-keys|kill-window)
     printf '%s\n' "$*" >> "$FM_FAKE_TMUX_LOG"
+    case "$1" in
+      new-window) fm_fake_tmux_new_window "$0.windows" @100 "$@" ;;
+      kill-window) rm -f "$0.windows" ;;
+    esac
     exit 0
     ;;
   list-windows)
     session=
     prev=
     for arg in "$@"; do
-      if [ "$prev" = -t ]; then session=${arg#=}; break; fi
+      if [ "$prev" = -t ]; then session=${arg#=}; session=${session%:}; break; fi
       prev=$arg
     done
+    case "$*" in *window_id*) ids=1 ;; *) ids=0 ;; esac
+    n=0
     while IFS= read -r recorded; do
       [ -n "$recorded" ] || continue
+      n=$((n + 1))
       if [ -z "$session" ]; then
         printf '%s\n' "$recorded"
         continue
       fi
       case "$recorded" in
-        "$session":*) printf '%s\n' "${recorded#*:}" ;;
-        *:*) ;;
-        *) printf '%s\n' "$recorded" ;;
+        "$session":*) name=${recorded#*:} ;;
+        *:*) continue ;;
+        *) name=$recorded ;;
       esac
-    done <<EOF
-${FM_FAKE_TMUX_WINDOW:-}
-EOF
+      if [ "$ids" = 1 ]; then printf '@%s %s:%s\n' "$n" "$session" "$name"; else printf '%s\n' "$name"; fi
+    done <<< "${FM_FAKE_TMUX_WINDOW:-}" | if [ "$ids" = 1 ]; then
+      { cat; [ ! -f "$0.windows" ] || cat "$0.windows"; } | fm_fake_tmux_window_ids "$@"
+    else
+      cat
+    fi
     exit 0
+    ;;
+  list-panes)
+    if [ "${3:-}" = @100 ] && [ -f "$0.windows" ]; then
+      printf '%%100\n'
+      exit 0
+    fi
+    printf '%s\n' "${FM_FAKE_TMUX_WINDOW:-}" | awk -v target="${3:-}" '
+      length { n++; if ("@" n == target || $0 == target) present=1 }
+      END { exit !present }
+    '
     ;;
   display-message)
     case "$*" in

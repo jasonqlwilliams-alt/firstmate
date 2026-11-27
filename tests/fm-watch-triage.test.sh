@@ -4545,7 +4545,11 @@ test_afk_busy_declared_pause_ticking_pane_hands_off_once() {
 set -u
 case "${1:-}" in
   list-windows)
-    [ -n "${FM_FAKE_TMUX_WINDOW:-}" ] && printf '%s\n' "${FM_FAKE_TMUX_WINDOW#*:}"
+    [ -n "${FM_FAKE_TMUX_WINDOW:-}" ] || exit 0
+    case "$*" in
+      *window_id*) printf '@1 %s\n' "$FM_FAKE_TMUX_WINDOW" | fm_fake_tmux_window_ids "$@" ;;
+      *) printf '%s\n' "${FM_FAKE_TMUX_WINDOW#*:}" ;;
+    esac
     exit 0 ;;
   capture-pane)
     n=$(( $(cat "$FM_FAKE_TMUX_TICKS" 2>/dev/null || echo 0) + 1 ))

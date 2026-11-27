@@ -227,13 +227,35 @@ make_spawn_record_fakebin() {
 set -u
 [ -n "${FM_TMUX_REC:-}" ] && printf 'tmux %s\n' "$*" >> "$FM_TMUX_REC"
 case "$*" in
-  *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
+  *"#{pane_current_path}"*)
+    [ "${4:-}" = @1 ] && [ -f "$0.original-windows" ] || exit 1
+    printf '%s\n' "${FM_FAKE_PANE_PATH:-}"
+    exit 0 ;;
 esac
 case "${1:-}" in
+  -V) printf '%s\n' "${FM_FAKE_TMUX_VERSION:-tmux 3.2}"; exit 0 ;;
   display-message) printf 'firstmate\n'; exit 0 ;;
-  new-window) printf '%s\n' "@spawnwid"; exit 0 ;;
-  list-windows) exit 0 ;;
-  has-session|new-session|send-keys|set-window-option) exit 0 ;;
+  new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@"; exit 0 ;;
+  list-windows)
+    if [ "${FM_FAKE_TMUX_SERVER:-}" = legacy ] && [[ " $* " = *' -f '* ]]; then
+      printf 'unknown flag -f\n' >&2
+      exit 1
+    fi
+    if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
+      fm_fake_tmux_window_ids "$@" < "$0.windows"
+    fi
+    exit 0 ;;
+  send-keys)
+    case "${4:-}" in
+      *'treehouse get --lease --lease-holder '*)
+        [ "${3:-}" = @1 ] || exit 1
+        mv "$0.windows" "$0.original-windows" || exit 1
+        printf '@1 firstmate:renamed\n' > "$0.windows" || exit 1
+        ;;
+      'export GOTMPDIR='*) mv "$0.original-windows" "$0.windows" || exit 1 ;;
+    esac
+    exit 0 ;;
+  has-session|new-session|set-window-option) exit 0 ;;
 esac
 exit 0
 SH
@@ -251,40 +273,54 @@ run_spawn_record() {
 }
 
 test_spawn_tmux_window_construction() {
-  local home proj fakebin rec wt out status
+  local home proj fakebin rec wt out status client server diagnostic
   home="$TMP_ROOT/spawn-rec-home"
   mkdir -p "$home/data"
   proj=$(make_repo "$TMP_ROOT/spawn-rec-proj")
   fakebin=$(make_spawn_record_fakebin "$TMP_ROOT/spawn-rec-fake")
+  fm_test_fake_sleep_noop "$fakebin"
   rec="$TMP_ROOT/spawn-rec.log"
   : > "$rec"
   wt="$TMP_ROOT/spawn-rec-wt"
   git -C "$proj" worktree add -q --detach "$wt" >/dev/null 2>&1
 
+  while IFS='|' read -r client server diagnostic; do
+    : > "$rec"
+    out=$(FM_FAKE_TMUX_VERSION="$client" FM_FAKE_TMUX_SERVER="$server" \
+      run_spawn_record "$home" rec-win-gg7 "$proj" "$wt" "$fakebin" "$rec"); status=$?
+    expect_code 1 "$status" "spawn should refuse $client with a $server server: $out"
+    assert_contains "$out" "$diagnostic" "spawn did not explain the tmux prerequisite failure"
+    if grep -Eq '^tmux (new-session|new-window|send-keys)( |$)' "$rec"; then
+      fail "spawn allocated a tmux endpoint or requested a lease without compatible tmux"
+    fi
+    assert_absent "$home/state/rec-win-gg7.meta" "incompatible tmux should leave no worker record"
+  done <<'ROWS'
+tmux 3.1c|modern|requires a tmux client version 3.2
+tmux 3.2|legacy|could not verify list-windows -f support
+ROWS
+
+  : > "$rec"
   out=$(run_spawn_record "$home" rec-win-gg7 "$proj" "$wt" "$fakebin" "$rec"); status=$?
   expect_code 0 "$status" "spawn into a genuine worktree should succeed"
   assert_contains "$out" "spawned rec-win-gg7" "recording spawn did not report success"
+  grep -Fxq "worktree=$wt" "$home/state/rec-win-gg7.meta" \
+    || fail "spawn must record the worktree discovered while the window is renamed"
 
   # Bug 1 fix: append-form window creation (trailing colon on the session target).
-  assert_grep "new-window -dP -F #{window_id} -t firstmate: -n fm-rec-win-gg7" "$rec" \
-    "new-window must append at the session (trailing colon) and capture the window id"
-  assert_no_grep "new-window -dP -F #{window_id} -t firstmate -n" "$rec" \
-    "new-window must not target the bare session name (collides under base-index 1)"
+  assert_grep "new-window -dP -F #{window_id} -t =firstmate: -n fm-rec-win-gg7" "$rec" \
+    "new-window must append in the exact session and capture the window id"
 
   # Bug 2 fix (a): pin the window name against automatic-rename / allow-rename.
-  assert_grep "set-window-option -t @spawnwid automatic-rename off" "$rec" \
+  assert_grep "set-window-option -t @1 automatic-rename off" "$rec" \
     "must disable automatic-rename on the spawned window"
-  assert_grep "set-window-option -t @spawnwid allow-rename off" "$rec" \
+  assert_grep "set-window-option -t @1 allow-rename off" "$rec" \
     "must disable allow-rename on the spawned window"
 
   # Bug 2 fix (b): treehouse-get and the worktree wait loop target the stable id.
-  grep -F 'send-keys -t @spawnwid ' "$rec" \
+  grep -F 'send-keys -t @1 ' "$rec" \
     | grep -F 'treehouse get --lease --lease-holder rec-win-gg7' \
     | grep -Fq ' Enter' \
     || fail "durable treehouse get must be sent to the stable window id"
-  assert_grep "display-message -p -t @spawnwid #{pane_current_path}" "$rec" \
-    "the worktree wait loop must query the stable window id, not the name"
-
   pass "fm-spawn: appends windows by session-colon, pins the name, and targets the window id"
 }
 

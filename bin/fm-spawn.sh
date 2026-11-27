@@ -987,6 +987,7 @@ spawn_remote_secondmate() {
 }
 
 BACKEND=
+SES=
 ORCA_ABORT_CLEANUP=0
 ORCA_WORKTREE_ID=
 ORCA_TERMINAL=
@@ -2374,8 +2375,8 @@ resolve_rovo_binary() {
 # on an OAuth device-code prompt ("Sign in at this page ... Waiting for
 # approval...") waiting for a human who is not there, which would look to
 # supervision like a wedged worker rather than a missing credential.
-muse_worker_meta_api_key_present() {
-  local session worker_env
+muse_worker_meta_api_key_present() {  # [destination-session]
+  local destination=${1:-} session worker_env
   if [ "$LAUNCH_ENV_ENABLED" = 1 ]; then
     case $'\n'"$LAUNCH_ENV_NAMES"$'\n' in
       *$'\nMETA_API_KEY\n'*) ;;
@@ -2383,7 +2384,9 @@ muse_worker_meta_api_key_present() {
     esac
   fi
   [ "$BACKEND" = tmux ] || return 1
-  if [ -n "${TMUX:-}" ]; then
+  if [ -n "$destination" ]; then
+    session="=$destination:"
+  elif [ -n "${TMUX:-}" ]; then
     session=$(tmux display-message -p '#S' 2>/dev/null) || return 1
   else
     tmux has-session -t firstmate 2>/dev/null || return 1
@@ -2396,9 +2399,8 @@ muse_worker_meta_api_key_present() {
   return 1
 }
 
-muse_credential_present() {
-  local auth=$1
-  [ -s "$auth" ] || muse_worker_meta_api_key_present
+muse_credential_present() {  # <auth-file> [destination-session]
+  [ -s "$1" ] || muse_worker_meta_api_key_present "${2:-}"
 }
 
 model_flag_for_harness() {
@@ -2499,14 +2501,14 @@ effort_flag_for_harness() {
   esac
 }
 
-resolve_additional_launch_executables() {
+resolve_additional_launch_executables() {  # [destination-session]
   case "$LAUNCH" in
     *__MUSEBIN__*)
       MUSE_BIN=$(spawn_resolve_launch_binary resolve_muse_binary) || exit 1
       MUSE_CONFIG_HOME=$(resolve_directory_input XDG_CONFIG_HOME "${XDG_CONFIG_HOME:-${HOME:-}/.config}") || exit 1
       MUSE_DATA_HOME=$(resolve_directory_input XDG_DATA_HOME "${XDG_DATA_HOME:-${HOME:-}/.local/share}") || exit 1
       MUSE_AUTH_FILE="$MUSE_CONFIG_HOME/muse/auth.json"
-      if ! muse_credential_present "$MUSE_AUTH_FILE"; then
+      if ! muse_credential_present "$MUSE_AUTH_FILE" "${1:-}"; then
         if [ -n "${META_API_KEY:-}" ]; then
           echo "error: muse has no worker-reachable credential; META_API_KEY is set for fm-spawn but cannot be proven present in the $BACKEND worker environment. Store the fleet credential at '$MUSE_AUTH_FILE' with 'muse login' or 'muse auth set --api-key-stdin'. The secret will not be copied into the launch command." >&2
         else
@@ -2540,7 +2542,12 @@ resolve_additional_launch_executables() {
       ;;
   esac
 }
-[ "$RELAUNCH" -eq 1 ] || resolve_additional_launch_executables
+if [ "$RELAUNCH" -eq 0 ]; then
+  if [ "$BACKEND" = tmux ] && [ "$HARNESS" = muse ]; then
+    SES=$(fm_backend_tmux_launch_session) || exit 1
+  fi
+  resolve_additional_launch_executables "$SES"
+fi
 
 json_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
@@ -3300,7 +3307,7 @@ elif [ "$RELAUNCH" -eq 1 ] && [ "$RELAUNCH_RECREATE" -eq 1 ]; then
   # is not a one-way door.
   case "$BACKEND" in
     tmux)
-      SES=$(fm_backend_tmux_container_ensure)
+      SES=$(fm_backend_tmux_container_ensure) || exit 1
       T="$SES:$W"
       WID=$(fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
       WT_TARGET="$WID"
@@ -3336,7 +3343,7 @@ EOF
 else
 case "$BACKEND" in
   tmux)
-    SES=$(fm_backend_tmux_container_ensure)
+    SES=$(fm_backend_tmux_container_ensure "$SES") || exit 1
     T="$SES:$W"
     # #134 robustness (tmux): fm_backend_tmux_create_task captures a stable window
     # id and pins the window name (automatic-rename/allow-rename off) so a captain's
@@ -3899,7 +3906,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
   }
   resolve_launch_executables
   validate_launch_models
-  resolve_additional_launch_executables
+  if [ "$RELAUNCH_RECREATE" -eq 1 ]; then
+    resolve_additional_launch_executables "$SES"
+  else
+    resolve_additional_launch_executables
+  fi
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   # Check legacy or lost leases before get can reset any reusable slot.
   fm_treehouse_require_recorded_leases "$PROJ_ABS" "$STATE" || exit 1

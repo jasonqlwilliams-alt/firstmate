@@ -596,6 +596,38 @@ fm_fakebin() {
   printf '%s\n' "$fakebin"
 }
 
+fm_fake_tmux_window_ids() {  # <tmux args...>, reads ID and name pairs from stdin
+  local id name target
+  while [ "$#" -ge 2 ] && [ "$1" != -f ]; do shift; done
+  [ "$#" -ge 2 ] || return 1
+  case "$2" in
+    '#{==:#{session_name}:#{window_name},'*'}')
+      target=${2#'#{==:#{session_name}:#{window_name},'}
+      target=${target%\}}
+      ;;
+    *) return 1 ;;
+  esac
+  while IFS=' ' read -r id name; do
+    if [ "$name" = "$target" ]; then printf '%s\n' "$id"; fi
+  done
+}
+export -f fm_fake_tmux_window_ids
+
+fm_fake_tmux_new_window() {  # <inventory-file> <id> <new-window args...>
+  local inventory=$1 id=$2 session name
+  shift 2
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -t) session=${2%:}; session=${session#=}; shift ;;
+      -n) name=$2; shift ;;
+    esac
+    shift
+  done
+  printf '%s %s:%s\n' "$id" "$session" "$name" >> "$inventory"
+  printf '%s\n' "$id"
+}
+export -f fm_fake_tmux_new_window
+
 fm_fake_exit0() {
   local fakebin=$1 tool
   shift
@@ -644,15 +676,15 @@ SH
   chmod +x "$fakebin/fm-crash-inject"
 }
 
-# fm_fake_version_tool <fakebin> <tool> <override-env-var> <default-version>
-# The stub answers `--version` with <override-env-var> when that variable is set
+# fm_fake_version_tool <fakebin> <tool> <override-env-var> <default-version> [version-flag]
+# The stub answers the version flag (default `--version`) with <override-env-var> when that variable is set
 # and non-empty, and with <default-version> otherwise; every other invocation
 # exits 0. A case that needs to drive a version floor exports the variable.
 fm_fake_version_tool() {
-  local fakebin=$1 tool=$2 override=$3 default=$4
+  local fakebin=$1 tool=$2 override=$3 default=$4 version_flag=${5:---version}
   cat > "$fakebin/$tool" <<SH
 #!/usr/bin/env bash
-if [ "\${1:-}" = --version ]; then
+if [ "\${1:-}" = '$version_flag' ]; then
   printf '%s\n' "\${$override:-$default}"
   exit 0
 fi

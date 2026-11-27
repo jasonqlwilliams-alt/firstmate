@@ -36,13 +36,27 @@ case "$*" in
   *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
 esac
 case "${1:-}" in
+  -V) printf 'tmux 3.2\n'; exit 0 ;;
   display-message) printf 'firstmate\n'; exit 0 ;;
   list-windows)
+    if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
+      fm_fake_tmux_window_ids "$@" < "$0.windows"
+      exit 0
+    fi
     [ -z "${FM_FAKE_DUPLICATE_WINDOW:-}" ] || printf '%s\n' "$FM_FAKE_DUPLICATE_WINDOW"
     exit 0
     ;;
-  has-session|new-session|new-window|kill-window) exit 0 ;;
+  new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@"; exit 0 ;;
+  list-panes)
+    [ ! -f "${FM_FAKE_LAUNCH_LOG:-}.unreadable" ] || exit 1
+    printf '%%1\n'
+    exit 0
+    ;;
+  has-session|new-session|kill-window) exit 0 ;;
   send-keys)
+    if [ "${4:-}" = Enter ] && [ -n "${FM_FAKE_LAUNCH_LOG:-}" ]; then
+      printf '%s\n' "$3" >> "$FM_FAKE_LAUNCH_LOG.enter"
+    fi
     if [ "${FM_FAKE_TRACEPARENT_SEND_FAIL:-0}" = 1 ]; then
       for a in "$@"; do
         case "$a" in
@@ -79,7 +93,12 @@ case "${1:-}" in
           -t) skip_next=1; continue ;;
           -l) continue ;;
           Enter|C-m) continue ;;
-          *) printf '%s\n' "$a" >> "$FM_FAKE_LAUNCH_LOG" ;;
+          *)
+            printf '%s\n' "$a" >> "$FM_FAKE_LAUNCH_LOG"
+            if [ "${FM_FAKE_LAUNCH_PANE_UNREADABLE:-0}" = 1 ] && [[ "$a" = *claude* ]]; then
+              : > "$FM_FAKE_LAUNCH_LOG.unreadable"
+            fi
+            ;;
         esac
       done
     fi
@@ -368,6 +387,21 @@ test_failed_metadata_append_unsets_carrier_and_still_launches() {
   pass "failed traceparent metadata append removes the carrier from the launched task"
 }
 
+test_unreadable_launch_pane_stops_before_enter() {
+  local rec out status
+  rec=$(make_spawn_case launch-pane-unreadable)
+  read_case_record "$rec"
+
+  out=$(FM_FAKE_LAUNCH_PANE_UNREADABLE=1 \
+    run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$CASE_ID" "$PROJ_DIR")
+  status=$?
+  grep -q 'claude' "$LAUNCH_LOG" || fail "spawn never typed the launch command: $out"
+  [ -f "$LAUNCH_LOG.unreadable" ] || fail "the pane did not become unreadable after typing"
+  [ "$status" -ne 0 ] || fail "spawn must fail when it cannot read the launch pane"
+  [ ! -s "$LAUNCH_LOG.enter" ] || fail "spawn must withhold Enter when the launch pane read fails"
+  pass "spawn withholds Enter when the launch pane becomes unreadable after typing"
+}
+
 test_duplicate_secondmate_spawn_does_not_converge_trace_context() {
   local base prim sm id log fake out status
   base="$TMP_ROOT/duplicate-secondmate"
@@ -591,6 +625,7 @@ test_disabled_writes_and_injects_neither
 test_failed_delivery_omits_metadata_and_still_launches
 test_unsafe_delivery_refuses_to_append_launch
 test_failed_metadata_append_unsets_carrier_and_still_launches
+test_unreadable_launch_pane_stops_before_enter
 test_duplicate_secondmate_spawn_does_not_converge_trace_context
 test_relaunch_reuses_recorded_carrier
 test_session_start_freezes_env_override_and_ignores_later_edits

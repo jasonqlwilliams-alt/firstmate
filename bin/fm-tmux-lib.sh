@@ -56,27 +56,82 @@
 # so the tmux and herdr adapters cannot drift apart on what counts as ghost text.
 fm_tmux_strip_ghost() { fm_composer_strip_ghost; }
 
-# --- tmux composer capture and capability primitives ------------------------
+fm_tmux_no_server_error() {  # <diagnostic>
+  case "$1" in
+    "no server running on "*|"error connecting to "*" (No such file or directory)"|"error connecting to "*" (Connection refused)") return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+fm_tmux_read_failure_status() {  # <diagnostic>
+  case "$1" in
+    "can't find session:"*|"can't find window:"*|"can't find pane:"*) return 1 ;;
+  esac
+  if fm_tmux_no_server_error "$1"; then return 1; fi
+  return 2
+}
+
+fm_tmux_window_filter_available() {
+  local diagnostic
+  diagnostic=$(
+    # shellcheck source=bin/fm-timeout-lib.sh
+    . "$(dirname -- "${BASH_SOURCE[0]}")/fm-timeout-lib.sh"
+    fm_run_timed 3 tmux list-windows -a -f 0 2>&1 >/dev/null
+  ) && return 0
+  [ "$?" -ne 124 ] || return 1
+  [ "$diagnostic" = 'no current target' ] || fm_tmux_no_server_error "$diagnostic"
+}
+
+# fm_tmux_exact_target: the read boundary for a recorded `session:window`
+# target. tmux resolves a session or window NAME that is not an exact match by
+# prefix (and, for a pane read, an absent window can fall back to another
+# pane), so a closed `fm-mate` read by name silently returns a surviving
+# `fm-mate2`. This confirms the exact session and window in a successful
+# session inventory and prints its `@<id>` for the read. A window id cannot be
+# prefix-matched and stays dot-safe where a `.`-bearing name would be parsed
+# as a pane suffix.
 #
-# These four functions are the ONLY tmux-specific composer knowledge left:
-# how to capture a styled screen, how to read the cursor row, how to probe a
-# live pi agent, and the static capability facts. Every shape, glyph, border
-# family, and verdict decision lives in the shared owner
-# (bin/fm-composer-lib.sh, fm_composer_classify_screen), so a new harness
-# shape is taught there once and never here.
-
-# fm_tmux_composer_capture: the visible pane WITH ANSI styling. The styled
-# capture is consumed internally by the classifier and is NEVER surfaced
-# (fm-peek and every human/LLM-facing path stay plain).
-fm_tmux_composer_capture() {  # <target>
-  tmux capture-pane -e -p -t "$1" -S 0 -E - 2>/dev/null
+# Unqualified targets (including stable window and pane IDs) and selectors
+# explicitly supplied by a caller pass through unchanged.
+#
+# Status: 0 resolved (target printed); 1 the exact session or window is
+# definitively absent; 2 the target is malformed or the inventory is
+# inconclusive, including when it returns multiple distinct window IDs.
+fm_tmux_exact_target() {  # <target> [explicit]
+  local target=${1:-} session literal inventory id resolved=
+  [ -n "$target" ] || return 2
+  if [ "${2:-}" = explicit ]; then
+    printf '%s' "$target"
+    return 0
+  fi
+  case "$target" in
+    *:*:*|:*|*:) return 2 ;;
+    *:*) ;;
+    *) printf '%s' "$target"; return 0 ;;
+  esac
+  session=${target%%:*}
+  literal=${target//#/##}
+  literal=${literal//,/#,}
+  literal=${literal//\}/#\}}
+  literal=${literal//\#\#\[/\#\{a:35\}\[}
+  if ! inventory=$(tmux list-windows -t "=$session:" \
+    -f "#{==:#{session_name}:#{window_name},$literal}" -F '#{window_id}' 2>&1); then
+    fm_tmux_read_failure_status "$inventory"
+    return $?
+  fi
+  [ -n "$inventory" ] || return 1
+  while IFS= read -r id; do
+    case "$id" in
+      @*) case "${id#@}" in ''|*[!0-9]*) return 2 ;; esac ;;
+      *) return 2 ;;
+    esac
+    [ -z "$resolved" ] || [ "$id" = "$resolved" ] || return 2
+    resolved=$id
+  done <<< "$inventory"
+  printf '%s' "$resolved"
 }
 
-# fm_tmux_composer_cursor_row: the pane's cursor row, zero-based, relative to
-# the visible pane - tmux's genuine primitive that no other backend has.
-fm_tmux_composer_cursor_row() {  # <target>
-  tmux display-message -p -t "$1" '#{cursor_y}' 2>/dev/null
-}
+# --- tmux composer capture and capability primitives ------------------------
 
 # fm_tmux_composer_caps: the tmux capability descriptor - static data, not
 # logic (see the capability model in bin/fm-composer-lib.sh).
@@ -95,11 +150,11 @@ fm_tmux_composer_caps() {
 #     agent died to a shell has no pi foreground process and gets NO identity,
 #     which is exactly what keeps the strict blank-row rule honest: a blank
 #     row between two stale rules stays unknown.
-#   - status: pi's verified busy footer via fm_pane_is_busy, mapped onto the
-#     idle/working vocabulary herdr's probe reports natively.
+#   - status: pi's verified busy footer via fm_tmux_resolved_busy_state,
+#     mapped onto the idle/working vocabulary herdr's probe reports natively.
 # Prints "pi<TAB>idle" or "pi<TAB>working"; exits 1 when the pane is not a
 # live pi.
-fm_tmux_composer_identity() {  # <target>
+fm_tmux_composer_identity() {  # <resolved-target>
   local target=$1 tty pgid tpgid comm found=0 status
   tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || tty=
   case "$tty" in
@@ -122,7 +177,7 @@ EOF
     esac
   fi
   [ "$found" -eq 1 ] || return 1
-  status=$(fm_pane_busy_state "$target" pi)
+  status=$(fm_tmux_resolved_busy_state "$target" pi)
   case "$status" in
     busy) printf 'pi\tworking' ;;
     idle) printf 'pi\tidle' ;;
@@ -137,29 +192,36 @@ EOF
 # is fetched lazily, only when the classifier reports the verdict depends on
 # it (a pi separator pair under the cursor), so the common read never pays
 # for the process probe.
-fm_tmux_composer_state() {  # <target> -> empty|pending|pending-unproven|unknown
-  fm_tmux_composer_snapshot "$1" || { printf 'unknown'; return 0; }
-  fm_tmux_composer_classify_snapshot "$1"
+fm_tmux_composer_state() {  # <target> [explicit] -> empty|pending|pending-unproven|unknown
+  fm_tmux_composer_snapshot "$@" || { printf 'unknown'; return 0; }
+  fm_tmux_composer_classify_snapshot
 }
 
 # fm_tmux_composer_snapshot: the cursor row and styled screen of one composer
 # read, into the snapshot globals (bin/fm-composer-lib.sh "Composer
 # SNAPSHOT"); fails when either read fails or the cursor row is not numeric.
-fm_tmux_composer_snapshot() {  # <target>
-  local cy pane
-  cy=$(fm_tmux_composer_cursor_row "$1") || return 1
+fm_tmux_composer_snapshot() {  # <target> [explicit]
+  local target cy pane
+  FM_COMPOSER_SNAPSHOT_TMUX_TARGET=
+  # Resolve once so the cursor row and the screen come from the same window.
+  target=$(fm_tmux_exact_target "$@") || return 1
+  cy=$(tmux display-message -p -t "$target" '#{cursor_y}' 2>/dev/null) || return 1
   case "$cy" in ''|*[!0-9]*) return 1 ;; esac
-  pane=$(fm_tmux_composer_capture "$1") || return 1
+  pane=$(tmux capture-pane -e -p -t "$target" -S 0 -E - 2>/dev/null) || return 1
+  FM_COMPOSER_SNAPSHOT_TMUX_TARGET=$target
   FM_COMPOSER_SNAPSHOT_CURSOR=$cy
   FM_COMPOSER_SNAPSHOT_SCREEN=$pane
   FM_COMPOSER_SNAPSHOT_CAPS=$(fm_tmux_composer_caps)
 }
 
-# fm_tmux_composer_classify_snapshot: the tmux composer verdict for the
-# snapshot taken from <target>, which supplies the lazy identity probe and the
-# Cursor process check below.
-fm_tmux_composer_classify_snapshot() {  # <target> [fit-text]
-  local target=$1 fit=${2:-} cy=$FM_COMPOSER_SNAPSHOT_CURSOR pane=$FM_COMPOSER_SNAPSHOT_SCREEN verdict identity
+# fm_tmux_composer_classify_snapshot: the verdict for the captured tmux
+# snapshot. The exact window the snapshot was read from supplies the lazy
+# identity probe and the Cursor process check below; [fit-text] is forwarded
+# to the shared screen classifier.
+fm_tmux_composer_classify_snapshot() {  # [fit-text]
+  local target=${FM_COMPOSER_SNAPSHOT_TMUX_TARGET:-} fit=${1:-} verdict identity
+  [ -n "$target" ] || { printf 'unknown'; return 0; }
+  local cy=$FM_COMPOSER_SNAPSHOT_CURSOR pane=$FM_COMPOSER_SNAPSHOT_SCREEN
   local caps=$FM_COMPOSER_SNAPSHOT_CAPS
   verdict=$(fm_composer_classify_screen "$caps" "$pane" "$cy" '' "$fit")
   if [ "$verdict" = need-identity ]; then
@@ -192,7 +254,7 @@ fm_tmux_composer_classify_snapshot() {  # <target> [fit-text]
 # single owner is bin/fm-cursor-lib.sh. The foreground scoping (pgid = tpgid)
 # matches fm_tmux_composer_identity, so a pane whose agent exited to a shell has
 # no Cursor foreground process and gets no reclassification.
-fm_tmux_pane_is_cursor() {  # <target>
+fm_tmux_pane_is_cursor() {  # <resolved-target>
   local target=$1 tty pid pgid tpgid comm args argv0
   tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || return 1
   case "$tty" in /dev/*) ;; *) return 1 ;; esac
@@ -218,8 +280,14 @@ fm_pane_input_pending() {  # <target>
 # fm_pane_is_busy: 0 if the pane's last few non-blank lines show a busy footer
 # (an agent mid-turn). Scans a 40-line tail like fm-watch.sh.
 fm_pane_busy_state() {  # <target> [harness] -> busy|idle|unknown
-  local win=$1 harness=${2:-} tail40 visible
-  tail40=$(tmux capture-pane -p -t "$win" -S -40 2>/dev/null) \
+  local target
+  target=$(fm_tmux_exact_target "$1") || { printf 'unknown'; return 0; }
+  fm_tmux_resolved_busy_state "$target" "${2:-}"
+}
+
+fm_tmux_resolved_busy_state() {  # <resolved-target> <harness>
+  local target=$1 harness=$2 tail40 visible
+  tail40=$(tmux capture-pane -p -t "$target" -S -40 2>/dev/null) \
     || { printf 'unknown'; return 0; }
   visible=$(printf '%s' "$tail40" | grep -v '^[[:space:]]*$' | tail -12)
   [ -n "$visible" ] || { printf 'unknown'; return 0; }
@@ -231,7 +299,13 @@ fm_pane_busy_state() {  # <target> [harness] -> busy|idle|unknown
 }
 
 fm_pane_is_busy() {  # <target> [harness]
-  [ "$(fm_pane_busy_state "$1" "${2:-}")" = busy ]
+  [ "$(fm_pane_busy_state "$@")" = busy ]
+}
+
+fm_tmux_submit_busy_state() {  # <target> [explicit]
+  local target
+  target=$(fm_tmux_exact_target "$@") || { printf 'unknown'; return 0; }
+  fm_tmux_resolved_busy_state "$target" ''
 }
 
 # fm_tmux_submit_core: type <text> into <target> ONCE, then submit with Enter,
@@ -243,10 +317,10 @@ fm_pane_is_busy() {  # <target> [harness]
 # and queues it for after the current turn, but keeps the typed text visible in
 # the composer. Once the Enter-retry budget is spent and a structurally proven
 # composer still reads "pending", the submit core falls back to
-# `fm_pane_is_busy`: a busy pane means the Enter was accepted and queued (report
-# `empty` so the caller does not re-send), while an idle pane keeps `pending` as
-# a genuine swallow. Pending-unproven receives the same Enter retry budget but
-# never reaches this exception.
+# `fm_tmux_submit_busy_state`: a busy pane means the Enter was accepted and
+# queued (report `empty` so the caller does not re-send), while an idle pane
+# keeps `pending` as a genuine swallow. Pending-unproven receives the same
+# Enter retry budget but never reaches this exception.
 # Turn-started confirmation (the strict blank-row posture's counterpart): a
 # harness whose mid-turn screen the classifier cannot positively identify (pi
 # replaces its separated composer while working) reads `unknown` right after a
@@ -259,19 +333,19 @@ fm_pane_is_busy() {  # <target> [harness]
 # fm_tmux_submit_enter_core caller, or a pane already busy before typing) an
 # `unknown` verdict is preserved untouched: busy conversion without the
 # transition evidence could mark an undelivered message delivered.
-fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle]
-  local target=$1 retries=$2 sleep_s=$3 baseline_idle=${4:-} i=0 j state busy_state
+fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle] [explicit]
+  local target=$1 retries=$2 sleep_s=$3 baseline_idle=${4:-} mode=${5:-} i=0 j state
   while :; do
     tmux send-keys -t "$target" Enter 2>/dev/null || true
     sleep "$sleep_s"
-    state=$(fm_tmux_composer_state "$target")
+    state=$(fm_tmux_composer_state "$target" "$mode")
     case "$state" in
       pending|pending-unproven) ;;
       unknown)
         if [ "$baseline_idle" = 1 ]; then
           j=0
           while [ "$j" -lt "$retries" ]; do
-            if fm_pane_is_busy "$target"; then
+            if [ "$(fm_tmux_submit_busy_state "$target" "$mode")" = busy ]; then
               printf 'empty'
               return 0
             fi
@@ -293,19 +367,17 @@ fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle
   fi
   # Retries exhausted, composer still shows proven pending.
   # Busy conversion is owned by fm_composer_queued_enter_verdict.
-  busy_state=idle
-  fm_pane_is_busy "$target" && busy_state=busy
-  fm_composer_queued_enter_verdict "$state" "$busy_state"
+  fm_composer_queued_enter_verdict "$state" "$(fm_tmux_submit_busy_state "$target" "$mode")"
 }
 
-fm_tmux_submit_core() {  # <target> <text> <retries> <enter-sleep> <settle>
-  local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 baseline_idle='' baseline_state
+fm_tmux_submit_core() {  # <target> <text> <retries> <enter-sleep> <settle> [explicit]
+  local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 mode=${6:-} baseline_idle='' baseline_state
   # The turn-started baseline must predate our own typing: a pane already
   # busy before the text lands can turn "busy" for reasons unrelated to our
   # Enter, so only a clean idle-to-busy transition may confirm a submit.
-  baseline_state=$(fm_pane_busy_state "$target")
+  baseline_state=$(fm_tmux_submit_busy_state "$target" "$mode")
   [ "$baseline_state" = idle ] && baseline_idle=1
   tmux send-keys -t "$target" -l "$text" 2>/dev/null || { printf 'send-failed'; return 0; }
   sleep "$settle"
-  fm_tmux_submit_enter_core "$target" "$retries" "$sleep_s" "$baseline_idle"
+  fm_tmux_submit_enter_core "$target" "$retries" "$sleep_s" "$baseline_idle" "$mode"
 }

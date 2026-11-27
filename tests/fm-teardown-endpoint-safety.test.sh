@@ -615,11 +615,15 @@ printf 'tmux' >> "\${FM_RUNTIME_LOG:?}"
 printf ' <%s>' "\$@" >> "\${FM_RUNTIME_LOG:?}"
 printf '\\n' >> "\${FM_RUNTIME_LOG:?}"
 case "\${1:-}" in
-  list-windows) printf 'fm-$id\\n'; exit 0 ;;
+  list-windows)
+    case "\$*" in
+      *window_id*) printf '@1 firstmate:fm-$id\\n' | fm_fake_tmux_window_ids "\$@" ;;
+      *) printf 'fm-$id\\n' ;;
+    esac ;;
   display-message)
     for a in "\$@"; do
       case "\$a" in
-        *pane_current_command*) printf 'claude\\n'; exit 0 ;;
+        *pane_current_command*) [ "\${4:-}" = @1 ] || exit 1; printf 'claude\\n'; exit 0 ;;
       esac
     done
     printf 'fakepane\\n'; exit 0 ;;
@@ -627,6 +631,11 @@ esac
 exit 0
 SH
   chmod +x "$dir/fakebin/tmux"
+  [ "$(PATH="$dir/fakebin:$PATH" FM_RUNTIME_LOG="$dir/runtime.log" bash -c '
+    . "$1"
+    fm_backend_agent_state tmux "$2"
+  ' _ "$ROOT/bin/fm-backend.sh" "firstmate:fm-$id")" = alive ] \
+    || fail "the live claimer fixture must report a live agent"
   set +e
   run_teardown "$dir" "$id" --force --retire-stale-record \
     > "$dir/stdout" 2> "$dir/stderr"
