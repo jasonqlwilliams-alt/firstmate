@@ -22,6 +22,8 @@
 #   - bin/fm-bootstrap.sh's secondmate_liveness_sweep recovers only dead or
 #     missing endpoints, keeps successful recovery and already-live results
 #     silent by default, and reports ambiguous and unreadable targets distinctly.
+#   - A failed relaunch's liveness line names the refusal that stopped spawn,
+#     never an earlier best-effort warning such as a skipped pre-launch sync.
 #   - The sweep converges: once a secondmate reads alive, a later run never
 #     re-touches it (idempotent by construction, not by remembering what it
 #     already did).
@@ -315,7 +317,10 @@ case "${1:-}" in
   new-window|kill-window)
     printf '%s\n' "$*" >> "${FM_TMUX_CALL_LOG:?}"
     [ "${1:-}" = kill-window ] && : > "${FM_TMUX_CALL_LOG}.killed"
-    [ "${FM_TEST_FAIL_NEW_WINDOW:-0}" = 1 ] && [ "${1:-}" = new-window ] && exit 1
+    if [ "${FM_TEST_FAIL_NEW_WINDOW:-0}" = 1 ] && [ "${1:-}" = new-window ]; then
+      printf 'create window failed: fixture refused new-window\n' >&2
+      exit 1
+    fi
     if [ "${1:-}" = new-window ]; then
       rm -f "${FM_TMUX_CALL_LOG}.killed"
       fm_fake_tmux_new_window "$0.windows" @1 "$@"
@@ -497,8 +502,10 @@ test_sweep_reports_missing_endpoint_relaunch_failure() {
 
   out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" missing "$log" FM_TEST_FAIL_NEW_WINDOW=1)
 
-  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing" \
-    "a failed missing-endpoint relaunch should retain its authorizing cause"
+  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing: create window failed: fixture refused new-window" \
+    "a failed missing-endpoint relaunch should retain its authorizing cause and name the backend refusal"
+  assert_not_contains "$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed')" \
+    "sync skipped before launch" "a best-effort advisory displaced the actionable refusal"
   pass "sweep: failed relaunch diagnostics distinguish a confidently missing endpoint"
 }
 
@@ -520,7 +527,40 @@ test_sweep_reports_retained_temp_root_after_failed_recovery() {
   assert_present "$task_tmp/gotmp/keep" "failed recovery removed the reused temp root"
   assert_contains "$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed')" \
     "temporary directory remains at $task_tmp" "recovery failure summary omitted the retained temp root"
+  assert_contains "$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed')" \
+    "confidently missing: fixture rejected launch text (" "recovery failure summary did not lead with the launch refusal"
   pass "sweep: failed recovery reports the exact temp root it retained"
+}
+
+test_sweep_names_spawn_error_over_earlier_advisory() {
+  local w fb tmuxfb log out line raw
+  w=$(new_world sweep-spawn-error)
+  add_sm_home "$w" sm1 firstmate:fm-sm1 pi
+  rm -f "$w/sm1/data/charter.md"
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  log="$w/calls.log"; : > "$log"
+
+  out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" missing "$log")
+  line=$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed' || true)
+
+  assert_contains "$line" "confidently missing: error: task sm1 has no brief at inaccessible data path $w/home/data/sm1/brief.md" \
+    "the liveness line should name spawn's own refusal"
+  assert_not_contains "$line" "sync skipped before launch" "a best-effort advisory displaced spawn's refusal"
+
+  # Pin the raw spawn output the line was chosen from (bootstrap prints only the
+  # summary), so the case above cannot go vacuous: the advisory precedes the
+  # refusal. Failed recovery rolled the record back.
+  {
+    printf 'window=firstmate:fm-sm1\nkind=secondmate\nharness=pi\nhome=%s\n' "$w/sm1"
+  } > "$w/home/state/sm1.meta"
+  raw=$(PATH="$tmuxfb:$fb:$BASE_PATH" TMUX='' FM_BACKEND=tmux FM_HOME="$w/home" \
+    FM_TEST_PANE_CMD=missing FM_TMUX_CALL_LOG="$log" FM_SPAWN_NO_GUARD=1 \
+    "$ROOT/bin/fm-spawn.sh" sm1 --secondmate 2>&1) && fail "fixture drift: spawn unexpectedly succeeded"
+  [ "$(printf '%s\n' "$raw" | sed -n 1p)" = "warning: secondmate sm1 sync skipped before launch: not a git repo" ] \
+    || fail "fixture drift: spawn output no longer leads with the advisory: $raw"
+  assert_contains "$raw" "error: task sm1 has no brief" \
+    "fixture drift: spawn no longer refuses the charter-less home: $raw"
+  pass "sweep: failed relaunch names spawn's error over an earlier advisory"
 }
 
 test_sweep_never_acts_on_unverified_harness_dead_reading() {
@@ -653,6 +693,7 @@ test_sweep_never_acts_on_ambiguous_existing_process
 test_sweep_never_acts_on_transient_unreadability
 test_sweep_reports_missing_endpoint_relaunch_failure
 test_sweep_reports_retained_temp_root_after_failed_recovery
+test_sweep_names_spawn_error_over_earlier_advisory
 test_sweep_never_acts_on_unverified_harness_dead_reading
 test_sweep_converges_no_retouch_once_alive
 test_sweep_skipped_under_detect_only

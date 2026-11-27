@@ -743,9 +743,21 @@ secondmate_recovery_spawn() (
   FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$1" --secondmate
 )
 
+# Spawn output mixes best-effort advisories (warning:/notice:, such as a skipped
+# pre-launch sync) with the refusal that actually stopped the relaunch, and an
+# advisory often comes first. Name the refusal: spawn's own first error: line,
+# else the first non-advisory line (a backend tool's stderr), else line one.
+secondmate_respawn_failure_reason() {
+  local output=$1 line
+  line=$(printf '%s\n' "$output" | grep -m 1 '^error:' || true)
+  [ -n "$line" ] || line=$(printf '%s\n' "$output" | grep -m 1 -v -E '^(warning|notice):|^[[:space:]]*$' || true)
+  [ -n "$line" ] || line=$output
+  first_line "$line"
+}
+
 report_secondmate_respawn_failure() {
   local id=$1 cause=$2 output=$3 reason retained
-  reason=$(first_line "$output")
+  reason=$(secondmate_respawn_failure_reason "$output")
   retained=$(awk -v prefix="warning: task $id's temporary directory remains at " 'index($0, prefix) == 1 { print; exit }' <<< "$output")
   if [ -n "$retained" ] && [ "$retained" != "$reason" ]; then
     reason="$reason ($retained)"
