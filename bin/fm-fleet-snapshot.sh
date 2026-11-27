@@ -62,8 +62,10 @@
 #     against current_state; hints.pending_decision and hints.blocked_event are
 #     booleans derived from that set.
 #     endpoint.exists reflects the local backend presence read. A foreign
-#     Herdr pane is absent for the task. An unreadable Herdr binding or a probe
-#     skipped for a current retained park mark yields null.
+#     Herdr pane is absent for the task. An unreadable Herdr binding yields
+#     null. A current retained-copy park mark skips the probe and yields
+#     endpoint.exists=null and endpoint.status="unknown" in both the task row
+#     and the home summary.
 #     endpoint.agent_alive is populated for local secondmates only, where it is
 #     useful return-channel supervision data; remote secondmates use "unknown"
 #     without a probe, and other tasks use "not_checked".

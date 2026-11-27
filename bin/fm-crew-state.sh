@@ -9,7 +9,7 @@
 # re-validates), the log's last line stays stale. This helper never infers the
 # current state from a tail of the log: it reads the authoritative source (a
 # no-mistakes run-step attributed under bin/fm-nm-run-lib.sh's contract, else
-# the pane busy-signature) and reconciles the possibly-stale log against it.
+# the fallback below) and reconciles the possibly-stale log against it.
 #
 # The determinism lives entirely here - only run-step / pane / log reads plus
 # fixed mapping logic, no heuristics and no LLM. Output is one stable, parseable,
@@ -77,10 +77,13 @@
 #      running/fixing with recent reported activity: a killed or timed-out drive
 #      call is not daemon death, so that claim is answered by steering the crew
 #      to reattach, not by escalating.
-#   4. No run for this crew (pre-validation, or kind=scout): fall back to the
-#      recorded backend's pane busy state, then the status log's last line only
-#      when its verb maps to a recognized run-state. Decision-only events such as
-#      `resolved` never become current state or detail.
+#   4. No run for this crew (pre-validation, or kind=scout): a current
+#      retained-copy park mark returns unknown · none with detail
+#      "endpoint parked, copy retained" before any endpoint probe. Otherwise,
+#      for ordinary crew, exact busy reports working and exact idle permits
+#      status-log fallback. The last event supplies state only when its verb
+#      maps to a recognized run-state. Decision-only events such as `resolved`
+#      never become current state or detail.
 #   5. Missing meta or torn-down worktree: report unknown · none. If no run is
 #      attributed to this crew, a dead endpoint also reports unknown · none rather
 #      than trusting a stale status log. On tmux and herdr, which own a
