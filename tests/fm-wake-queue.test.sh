@@ -227,6 +227,35 @@ test_drain_dedupes_obvious_duplicates() {
   pass "drain collapses obvious duplicate heartbeat and signal records"
 }
 
+test_drain_preserves_each_named_endpoint_loss() {
+  local dir state out err window ordinary first second queued latest presented
+  dir=$(make_case named-loss-dedupe)
+  state="$dir/state"
+  out="$dir/drain.out"
+  err="$dir/drain.err"
+  window='fixture:w1:p7'
+  ordinary="stale: $window"
+  first="$ordinary (the recorded endpoint is gone for task worker.old)"
+  second="$ordinary (the recorded endpoint is gone for task worker_old)"
+  append_wake "$state" stale "$window" "$first" || fail "first loss append failed"
+  append_wake "$state" stale "$window" "$ordinary" || fail "ordinary stale append failed"
+  append_wake "$state" stale "$window" "$second" || fail "second loss append failed"
+  append_wake "$state" stale "$window" "$first" || fail "repeated loss append failed"
+  queued=$(cat "$state/.wake-queue")
+  latest=${queued##*$'\n'}
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" 2> "$err" || fail "named-loss drain failed: $(cat "$err")"
+  assert_equals "$queued" "$(cat "$state/.wake-queue")" "presentation must leave wakes queued until acknowledgement"
+  ack_drain_err "$state" "$err" || fail "could not acknowledge the recovered wakes"
+  [ ! -s "$state/.wake-queue" ] || fail "acknowledged wakes remained queued"
+
+  presented=$(awk -F '\t' -v w="$window" '$3 == "stale" && $4 == w { print $5 }' "$out")
+  assert_equals "$first"$'\n'"$ordinary"$'\n'"$second" "$presented" \
+    "recovery must present both task losses and the ordinary stale wake before acknowledging them"
+  grep -Fxq "$latest" "$out" || fail "repeated loss did not retain its newest queue row"
+  pass "drain presents distinct task losses on a shared window before acknowledging them"
+}
+
 # The drain runs at the top of every wake-handling turn, so it also asserts
 # watcher liveness via fm-guard.sh: a lapsed re-arm chain then surfaces even on a
 # plain drain-and-handle turn that runs no other supervision script. It must warn
@@ -1915,6 +1944,7 @@ test_historical_annotation_skips_announced_status() {
   pass "historical annotations replay nothing already announced and keep everything new"
 }
 
+test_drain_preserves_each_named_endpoint_loss
 test_self_held_lock_reclaims_instead_of_deadlocking
 test_subshell_lock_ownership_without_bashpid
 test_bounded_lock_handoff_after_contention

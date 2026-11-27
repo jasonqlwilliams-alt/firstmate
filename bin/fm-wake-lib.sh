@@ -2376,7 +2376,7 @@ fm_wake_print_deduped() {
         loss = "stale: " $4 " (" gone
         named = loss " for task "
         if ($5 == loss ")" || (index($5, named) == 1 && substr($5, length(named) + 1) ~ /^[A-Za-z0-9._-]+\)$/)) {
-          dedupe = dedupe SUBSEP "endpoint-gone"
+          dedupe = dedupe SUBSEP $5
         }
       }
       if (!(dedupe in seen)) {

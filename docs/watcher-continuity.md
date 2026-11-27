@@ -84,7 +84,8 @@ On upgrade, an older hash without that identity also starts a fresh check and ca
 
 The report is keyed to the task record's backend, target, and spawn generation, so a relaunch can report a fresh loss even when it reuses the target.
 A successful capture or a positive presence verdict for that task re-arms its report, and teardown keeps the loss record until it retires the task record.
-The wake keeps its window key for routing, and the drain presents the latest loss row and the latest ordinary stale row separately for each window.
+The wake keeps its window key for routing.
+For each window, the drain presents the latest loss row for each named task, the latest unnamed loss row, and the latest ordinary stale row.
 After handling the presented wakes, use the drain's [printed acknowledgement](#recovery-episode-acknowledgement) to retire them.
 Where the away daemon runs, it routes the loss to its escalation digest.
 For a named loss, it clears the named task's daemon pause and stale markers if the loss record still matches the task's current endpoint incarnation, leaving shared pane tracking to the watcher.
