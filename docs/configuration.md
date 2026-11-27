@@ -41,7 +41,7 @@ Start a foreground harness with `bin/fm-session-launch.sh -- <command> [args...]
 Firstmate's managed primary and secondmate launches invoke the launcher when their target home is ready.
 Pi and omp can bind directly from their native engine process.
 A detached or daemonizing adapter must bind from the continuing process and carry that binding to its trusted tool and hook execution environment.
-A standalone `bin/fm-session-start.sh` reports startup-only scope, leaves queued wakes pending, and gives its bounded network sweep time to finish under the shared acquisition mutex.
+A standalone `bin/fm-session-start.sh` reports startup-only scope, leaves queued wakes pending, and runs its network sweep in the foreground within its startup budget.
 Use the launcher to continue after a startup-only invocation.
 
 The [session-start adapter guide](sessionstart-nudge.md#source-routing) covers completion and re-emission.

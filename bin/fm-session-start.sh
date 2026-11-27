@@ -275,6 +275,12 @@ stage() {  # <stage-name>: breadcrumb for the parent's truncation banner
 # shellcheck source=bin/fm-session-lock-lib.sh
 . "$SCRIPT_DIR/fm-session-lock-lib.sh"
 
+RULE='================================================================================'
+SUBRULE='--------------------------------------------------------------------------------'
+
+section() { printf '\n%s\n%s\n%s\n' "$RULE" "$1" "$RULE"; }
+subsection() { printf '\n%s\n%s\n' "$1" "$SUBRULE"; }
+
 if fm_session_owner_enabled && ! fm_session_owner_context_present; then
   # The outer digest owns the whole bounded run, including its timeout child.
   fm_session_owner_bind "$$" startup || {
@@ -339,6 +345,23 @@ if [ -z "${FM_SESSION_START_STAGE_FILE:-}" ]; then
     printf '%s\n' "$BAR"
   fi
   rm -f "$SESSION_START_STAGE_FILE" 2>/dev/null || true
+  if [ "$STARTUP_ONLY" -eq 1 ] && [ "$SESSION_START_RC" -eq 0 ] \
+    && fm_session_lock_owned_by_self "$STATE"; then
+    section "NETWORK CHECKS"
+    network_remaining=$((SESSION_START_BUDGET - SECONDS))
+    network_budget=${FM_STARTUP_NETWORK_TIMEOUT:-120}
+    case "$network_budget" in ''|*[!0-9]*|0) network_budget=120 ;; esac
+    if [ "$network_remaining" -gt 0 ]; then
+      [ "$network_budget" -le "$network_remaining" ] || network_budget=$network_remaining
+      if FM_STARTUP_NETWORK_TIMEOUT="$network_budget" "$SCRIPT_DIR/fm-startup-network.sh" run --locked 1 2>&1; then
+        "$SCRIPT_DIR/fm-startup-network.sh" harvest --pid $$ 2>&1 || true
+      else
+        printf 'skipped (network stage could not start)\n'
+      fi
+    else
+      printf 'skipped (startup runtime bound reached)\n'
+    fi
+  fi
   exit 0
 fi
 
@@ -371,12 +394,6 @@ case "$STATUS_TAIL" in ''|*[!0-9]*) STATUS_TAIL=5 ;; esac
 QUEUED_LIMIT=${FM_SESSION_START_QUEUED_LIMIT:-20}
 case "$QUEUED_LIMIT" in ''|*[!0-9]*|0) QUEUED_LIMIT=20 ;; esac
 BACKLOG_FIELDS=blocked_by,hold_kind,hold_reason
-
-RULE='================================================================================'
-SUBRULE='--------------------------------------------------------------------------------'
-
-section() { printf '\n%s\n%s\n%s\n' "$RULE" "$1" "$RULE"; }
-subsection() { printf '\n%s\n%s\n' "$1" "$SUBRULE"; }
 
 # print_file_or_absent <path> <label>: full contents under a labeled
 # subsection, or an explicit ABSENT marker. Absence is semantically
@@ -707,10 +724,12 @@ if [ "$READ_ONLY" -eq 0 ]; then
   # read-only GitHub-auth probe is owed. A read-only session starts nothing at
   # all: it holds no mutation authority for the sweeps, and it must not spawn,
   # steer, or merge anyway, so it has no action left for an auth verdict to gate.
-  NETWORK_STAGE_LOCKED=1
-  [ "$REEMIT" -eq 0 ] || NETWORK_STAGE_LOCKED=0
-  "$SCRIPT_DIR/fm-startup-network.sh" start \
-    --locked "$NETWORK_STAGE_LOCKED" --harvest-pid $$ >/dev/null 2>&1 || true
+  if [ "$STARTUP_ONLY" -eq 0 ]; then
+    NETWORK_STAGE_LOCKED=1
+    [ "$REEMIT" -eq 0 ] || NETWORK_STAGE_LOCKED=0
+    "$SCRIPT_DIR/fm-startup-network.sh" start \
+      --locked "$NETWORK_STAGE_LOCKED" --harvest-pid $$ >/dev/null 2>&1 || true
+  fi
 fi
 
 # --- 2. bootstrap --------------------------------------------------------
@@ -965,13 +984,14 @@ fi
 # is a NON-BLOCKING read either way - whatever the worker has published by now is
 # printed, and whatever it has not is named as not yet confirmed.
 stage network-checks
-section "NETWORK CHECKS"
 if [ "$READ_ONLY" -eq 1 ]; then
+  section "NETWORK CHECKS"
   printf 'skipped (read-only session) - GitHub authentication, project clone refresh,\n'
   printf 'secondmate liveness and convergence, and pending handoff delivery were not run.\n'
   printf 'They need the fleet lock, and this session must not spawn, steer, or merge, so it\n'
   printf 'has no action they would gate. The session holding the lock runs them.\n'
-else
+elif [ "$STARTUP_ONLY" -eq 0 ]; then
+  section "NETWORK CHECKS"
   "$SCRIPT_DIR/fm-startup-network.sh" harvest --pid $$ 2>&1 || true
 fi
 

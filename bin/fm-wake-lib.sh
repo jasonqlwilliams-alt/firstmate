@@ -40,19 +40,27 @@ _fm_wake_require_timeout() {
 # network stage is the sole bounded exception and holds the acquisition mutex.
 fm_session_mutation_allowed() { # <action>
   local action=$1
-  if [ -z "${FM_SESSION_OWNER_ID:-}${FM_SESSION_OWNER_HOME:-}${FM_SESSION_OWNER_PID:-}${FM_SESSION_OWNER_START:-}${FM_SESSION_OWNER_KIND:-}" ]; then
+  if ! fm_session_owner_mode_active "$STATE" \
+    && [ -z "${FM_SESSION_OWNER_ID:-}${FM_SESSION_OWNER_HOME:-}${FM_SESSION_OWNER_PID:-}${FM_SESSION_OWNER_START:-}${FM_SESSION_OWNER_KIND:-}${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-}" ]; then
     return 0
   fi
   (
     # shellcheck source=bin/fm-session-lock-lib.sh
     . "$FM_WAKE_LIB_DIR/fm-session-lock-lib.sh"
-    fm_session_lock_owned_by_self "$STATE" && exit 0
-    [ -n "${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-}" ] \
-      && [ -n "${FM_BOOTSTRAP_NETWORK_WORKER_PID:-}" ] \
-      && [ "$(cat "$STATE/.lock.acquire/pid" 2>/dev/null)" = "$FM_BOOTSTRAP_NETWORK_WORKER_PID" ] \
-      && fm_session_lock_read "$STATE/.lock" \
-      && [ "$FM_SESSION_LOCK_PID" = "${FM_BOOTSTRAP_NETWORK_LOCK_PID:-}" ] \
-      && [ "$FM_SESSION_LOCK_GENERATION" = "$FM_BOOTSTRAP_NETWORK_LOCK_GEN" ] && exit 0
+    if [ -n "${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-}" ]; then
+      fm_session_network_worker_owns_claim "$STATE" && exit 0
+    else
+      fm_session_lock_owned_by_self "$STATE" && exit 0
+      if ! fm_session_owner_context_present; then
+        if [ ! -e "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ]; then
+          exit 0
+        fi
+        if fm_session_lock_read "$STATE/.lock"; then
+          fm_session_owner_liveness "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START"
+          [ "$?" -ne 2 ] || exit 0
+        fi
+      fi
+    fi
     printf 'error: %s refused because the session launch no longer owns this home\n' "$action" >&2
     exit 1
   )
@@ -439,6 +447,7 @@ fm_lock_clean_known_files() {
   local lockdir=$1
   rm -f \
     "$lockdir/pid" \
+    "$lockdir/start" \
     "$lockdir/fm-home" \
     "$lockdir/pid-identity" \
     "$lockdir/role" \
@@ -478,9 +487,23 @@ fm_lock_owner_dir() {
   mktemp -d "${lock_abs}.owner.XXXXXX" 2>/dev/null
 }
 
+fm_lock_uses_start_token() {
+  case "$1" in
+    "$STATE/.lock.acquire"|"$STATE/.lock.acquire.steal"*) fm_session_owner_mode_active "$STATE" ;;
+    *) return 1 ;;
+  esac
+}
+
 fm_lock_prepare_owner() {
-  local ownerdir=$1 mypid back
+  local ownerdir=$1 lockdir=$2 mode=$3 mypid start back
   fm_current_pid mypid || return 1
+  if fm_lock_uses_start_token "$lockdir"; then
+    start=$(fm_session_owner_token "$mypid") || return 1
+    printf '%s\n' "$start" > "$ownerdir/start" 2>/dev/null || return 1
+  fi
+  if [ "$mode" = startup-network ]; then
+    printf '%s\n' "$mode" > "$ownerdir/role" 2>/dev/null || return 1
+  fi
   printf '%s\n' "$mypid" > "$ownerdir/pid" 2>/dev/null || return 1
   back=$(cat "$ownerdir/pid" 2>/dev/null || true)
   [ "$back" = "$mypid" ]
@@ -530,7 +553,8 @@ fm_lock_claim_blocked_by_steal() {
 fm_lock_claim() {
   local lockdir=$1 ownerdir=$2 allowed_steal_owner=${3:-} mypid back
   fm_current_pid mypid || return 1
-  if ! { printf '%s\n' "$mypid" > "$ownerdir/pid"; } 2>/dev/null; then
+  if ! fm_lock_uses_start_token "$lockdir" \
+    && ! { printf '%s\n' "$mypid" > "$ownerdir/pid"; } 2>/dev/null; then
     fm_lock_discard_owner "$ownerdir"
     return 1
   fi
@@ -554,14 +578,15 @@ fm_lock_claim() {
 }
 
 fm_lock_try_create() {
-  local lockdir=$1 allowed_steal_owner=${2:-} ownerdir
+  local lockdir=$1 allowed_steal_owner=${2:-} mode=${3:-} ownerdir
   FM_LOCK_OWNER_DIR=
   ownerdir=$(fm_lock_owner_dir "$lockdir") || return 1
-  if [ -e "$lockdir" ] || [ -L "$lockdir" ]; then
+  if [ -e "$lockdir" ] || [ -L "$lockdir" ] \
+    || fm_lock_claim_blocked_by_steal "$lockdir" "$allowed_steal_owner"; then
     fm_lock_discard_owner "$ownerdir"
     return 1
   fi
-  if ! fm_lock_prepare_owner "$ownerdir"; then
+  if ! fm_lock_prepare_owner "$ownerdir" "$lockdir" "$mode"; then
     fm_lock_discard_owner "$ownerdir"
     return 1
   fi
@@ -609,16 +634,17 @@ fm_lock_mid_acquire_is_fresh() {
 }
 
 fm_lock_claimant_occupied() { # <mutex-path> <pid>
-  local lockdir=$1 pid=$2 rc=0
-  case "$lockdir" in
-    "$STATE/.lock.acquire"|"$STATE/.lock.acquire.steal"*)
-      if fm_session_owner_enabled && fm_session_owner_pid_valid "$pid"; then
-        fm_session_owner_token "$pid" >/dev/null || rc=$?
-        [ "$rc" -ne 2 ]
-        return
-      fi
-      ;;
-  esac
+  local lockdir=$1 pid=$2 rc=0 start
+  if fm_lock_uses_start_token "$lockdir" && fm_session_owner_pid_valid "$pid"; then
+    if [ -e "$lockdir/start" ] || [ -L "$lockdir/start" ]; then
+      start=$(cat "$lockdir/start" 2>/dev/null) && fm_session_owner_token_valid "$start" || return 0
+      fm_session_owner_liveness "$pid" "$start" || rc=$?
+    else
+      fm_session_owner_token "$pid" >/dev/null || rc=$?
+    fi
+    [ "$rc" -ne 2 ]
+    return
+  fi
   fm_pid_alive "$pid"
 }
 
@@ -686,10 +712,14 @@ _fm_recovery_marker_write_locked() {
 # new down stretch mints a new generation.
 # docs/watcher-continuity.md owns the recovery contract and sequence-safety rationale.
 _fm_recovery_marker_publish() {
-  local marker=$1 kind=${2:-downtime} lock saved_token generation='' status=pending
+  local marker=$1 kind=${2:-downtime} session_generation=${3-} lock saved_token generation='' status=pending
   case "$kind" in handling|downtime) ;; *) return 1 ;; esac
   lock="${marker}.lock"
   fm_lock_acquire_wait "$lock" || return 1
+  if [ "$#" -ge 3 ] && ! fm_autoarm_session_current "${marker%/*}" "$session_generation"; then
+    fm_lock_release "$lock"
+    return 1
+  fi
   if [ -d "$marker" ] && [ ! -L "$marker" ]; then
     fm_lock_release "$lock"
     return 1
@@ -892,7 +922,7 @@ fm_recovery_transition() {
   local marker=$1 action=$2 target=${3:-} value=${4:-}
   case "$action" in
     publish)
-      _fm_recovery_marker_publish "$marker" "${target:-downtime}"
+      _fm_recovery_marker_publish "$marker" "${target:-downtime}" "${@:4}"
       ;;
     acknowledge)
       _fm_recovery_marker_ack "$marker" "$target"
@@ -905,7 +935,7 @@ fm_recovery_transition() {
       ;;
     release-lock)
       [ -n "$target" ] || return 1
-      _fm_recovery_marker_publish "$marker" "${value:-downtime}" || return 1
+      _fm_recovery_marker_publish "$marker" "${value:-downtime}" "${@:5}" || return 1
       fm_lock_release "$target"
       ;;
     release-lock-existing)
@@ -929,7 +959,7 @@ fm_recovery_transition() {
 }
 
 fm_recovery_marker_publish() {
-  fm_recovery_transition "$1" publish "${2:-downtime}"
+  fm_recovery_transition "$1" publish "${2:-downtime}" "${@:3}"
 }
 
 fm_recovery_marker_ack() {
@@ -962,7 +992,7 @@ fm_lock_try_acquire() {
   [ "$parent" != "$lockdir" ] || parent=.
   [ -d "${parent:-/}" ] || return 1
 
-  if fm_lock_try_create "$lockdir"; then
+  if fm_lock_try_create "$lockdir" "" "$mode"; then
     return 0
   fi
 
@@ -985,7 +1015,7 @@ fm_lock_try_acquire() {
     # - the hang reproduced by the self-held reclaim regression in
     # tests/fm-wake-queue.test.sh - so reclaim the abandoned hold instead.
     fm_lock_remove_path "$lockdir" || true
-    if fm_lock_try_create "$lockdir"; then
+    if fm_lock_try_create "$lockdir" "" "$mode"; then
       return 0
     fi
     FM_LOCK_HELD_PID=$(cat "$lockdir/pid" 2>/dev/null || true)
@@ -1052,7 +1082,7 @@ fm_lock_try_acquire() {
   fi
   fm_lock_remove_path "$lockdir" || true
   rc=1
-  if fm_lock_try_create "$lockdir" "$steal_owner"; then
+  if fm_lock_try_create "$lockdir" "$steal_owner" "$mode"; then
     rc=0
     # shellcheck disable=SC2034 # Read by sourcing callers after lock acquisition.
     FM_LOCK_RECOVERED_PID=$cur
@@ -1072,7 +1102,7 @@ fm_lock_try_acquire() {
 fm_lock_acquire_wait() {
   local lockdir=$1 mode=${2:-} parent=${1%/*}
   [ "$parent" != "$lockdir" ] || parent=.
-  while ! fm_lock_try_acquire "$lockdir"; do
+  while ! fm_lock_try_acquire "$lockdir" "$mode"; do
     if [ "$mode" = existing-parent ] && [ ! -d "${parent:-/}" ]; then
       echo "error: lock directory disappeared: ${parent:-/}" >&2
       return 1
@@ -1959,12 +1989,7 @@ fm_autoarm_claim_open() {  # <state-dir> [grace]
   esac
   fm_autoarm_ledger_read "$state" || return 1
   [ "$FM_AUTOARM_OUTCOME" = arming ] || return 1
-  if fm_session_owner_mode_active "$state"; then
-    fm_session_lock_read "$state/.lock" || return 1
-    [ -n "$FM_AUTOARM_SESSION_GENERATION" ] \
-      && [ "$FM_AUTOARM_SESSION_GENERATION" = "$FM_SESSION_LOCK_GENERATION" ] || return 1
-    fm_session_owner_liveness "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START" || return 1
-  fi
+  fm_autoarm_session_current "$state" "$FM_AUTOARM_SESSION_GENERATION" || return 1
   fm_pid_alive "$FM_AUTOARM_OWNER" || return 1
   [ -n "$FM_AUTOARM_IDENTITY" ] || return 1
   current=$(fm_pid_identity "$FM_AUTOARM_OWNER" 2>/dev/null) || return 1
@@ -2019,6 +2044,17 @@ fm_autoarm_midturn_healthy() {  # <state-dir> [grace]
 # when a competing claimant won the race (the ledger holds an open claim), and
 # 1 when the micro-mutex is contended, the mandatory identity cannot be
 # computed, or the write failed.
+fm_autoarm_session_current() {  # <state-dir> <session-generation>
+  local state=$1 generation=$2
+  if [ -z "$generation" ]; then
+    [ ! -e "$state/.lock.owner-format" ] && [ ! -L "$state/.lock.owner-format" ]
+    return
+  fi
+  fm_session_lock_read "$state/.lock" && [ "$FM_SESSION_LOCK_GENERATION" = "$generation" ] \
+    && [ "$FM_SESSION_LOCK_KIND" != startup ] \
+    && fm_session_owner_liveness "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START"
+}
+
 fm_autoarm_claim_next() {  # <state-dir> [grace] [session-generation]
   local state=$1 grace=${2:-${FM_GUARD_GRACE:-300}} session_generation=${3:-} lock epoch pid gen identity tmp
   lock="$state/.claude-autoarm.lock"
@@ -2031,6 +2067,10 @@ fm_autoarm_claim_next() {  # <state-dir> [grace] [session-generation]
   identity=$(fm_pid_identity "$pid" 2>/dev/null) || return 1
   [ -n "$identity" ] || return 1
   fm_lock_try_acquire "$lock" || return 1
+  if ! fm_autoarm_session_current "$state" "$session_generation"; then
+    fm_lock_release "$lock"
+    return 2
+  fi
   if fm_autoarm_claim_open "$state" "$grace"; then
     fm_lock_release "$lock"
     return 2
@@ -2064,8 +2104,8 @@ fm_autoarm_claim_next() {  # <state-dir> [grace] [session-generation]
 # ordering could permanently suppress a notice whose ledger write never won.
 # Returns 0 committed, 2 refused (superseded or required-marker failure), and 1
 # unable (bounded contention or ledger-write failure).
-fm_autoarm_write_owned() {  # <state-dir> <gen> <outcome> [marker-file] [session-pid] [recovery-generation] [session-generation]
-  local state=$1 gen=$2 outcome=$3 marker=${4:-} session=${5:-} recovery=${6:-} session_generation=${7:-} lock epoch pid identity tmp i
+fm_autoarm_write_owned() {  # <state-dir> <gen> <outcome> [marker-file] [session-pid] [recovery-generation]
+  local state=$1 gen=$2 outcome=$3 marker=${4:-} session=${5:-} recovery=${6:-} session_generation lock epoch identity tmp i
   lock="$state/.claude-autoarm.lock"
   epoch="$state/.claude-autoarm-epoch"
   pid=${BASHPID:-$$}
@@ -2075,17 +2115,16 @@ fm_autoarm_write_owned() {  # <state-dir> <gen> <outcome> [marker-file] [session
     sleep 0.02
     i=$((i + 1))
   done
-  if ! fm_autoarm_ledger_read "$state" \
-    || [ "$FM_AUTOARM_GEN" != "$gen" ] || [ "$FM_AUTOARM_OWNER" != "$pid" ]; then
+  if ! fm_autoarm_still_owner "$state" "$gen"; then
     fm_lock_release "$lock"
     return 2
   fi
   identity=$FM_AUTOARM_IDENTITY
-  session_generation=${session_generation:-$FM_AUTOARM_SESSION_GENERATION}
-  tmp="$epoch.tmp.$pid"
+  session_generation=$FM_AUTOARM_SESSION_GENERATION
+  tmp="$epoch.tmp.$FM_AUTOARM_OWNER"
   if ! {
       printf 'epoch=%s owner_pid=%s outcome=%s updated_at=%s' \
-        "$gen" "$pid" "$outcome" "$(date +%s)"
+        "$gen" "$FM_AUTOARM_OWNER" "$outcome" "$(date +%s)"
       [ -z "$session" ] || printf ' session_pid=%s' "$session"
       [ -z "$recovery" ] || printf ' recovery_generation=%s' "$recovery"
       [ -z "$session_generation" ] || printf ' session_generation=%s' "$session_generation"
@@ -2096,7 +2135,7 @@ fm_autoarm_write_owned() {  # <state-dir> <gen> <outcome> [marker-file] [session
     fm_lock_release "$lock"
     return 1
   fi
-  if [ -n "$marker" ] && ! : > "$marker" 2>/dev/null; then
+  if [ -n "$marker" ] && { ! fm_autoarm_session_current "$state" "$session_generation" || ! : > "$marker" 2>/dev/null; }; then
     fm_lock_release "$lock"
     return 2
   fi
@@ -2111,16 +2150,15 @@ fm_autoarm_still_owner() {  # <state-dir> <gen>
   local state=$1 gen=$2 pid
   pid=${BASHPID:-$$}
   fm_autoarm_ledger_read "$state" || return 1
-  [ "$FM_AUTOARM_GEN" = "$gen" ] && [ "$FM_AUTOARM_OWNER" = "$pid" ]
+  [ "$FM_AUTOARM_GEN" = "$gen" ] && [ "$FM_AUTOARM_OWNER" = "$pid" ] \
+    && fm_autoarm_session_current "$state" "$FM_AUTOARM_SESSION_GENERATION"
 }
 
 fm_autoarm_reset_owned() {  # <state-dir> <gen>
-  local state=$1 gen=$2 lock pid
+  local state=$1 gen=$2 lock
   lock="$state/.claude-autoarm.lock"
-  pid=${BASHPID:-$$}
   fm_lock_try_acquire "$lock" || return 2
-  if ! fm_autoarm_ledger_read "$state" \
-    || [ "$FM_AUTOARM_GEN" != "$gen" ] || [ "$FM_AUTOARM_OWNER" != "$pid" ]; then
+  if ! fm_autoarm_still_owner "$state" "$gen"; then
     fm_lock_release "$lock"
     return 2
   fi
@@ -2197,14 +2235,15 @@ fm_autoarm_claim_abandoned() {  # <state-dir> [grace]
 # never blocks the reclaim of a proven-abandoned claim - it only disables the
 # TERM and the ledger graft below, keeping the documented bounded
 # upgrade-window residual instead of the deadlock.
-fm_autoarm_release_abandoned() {  # <state-dir> [grace]
-  local state=$1 grace=${2:-${FM_GUARD_GRACE:-300}} lock steal epoch lock_pid recorded current owner line1 tmp i
+fm_autoarm_release_abandoned() {  # <state-dir> [grace] [session-generation]
+  local state=$1 grace=${2:-${FM_GUARD_GRACE:-300}} session_generation=${3:-} lock steal epoch lock_pid recorded current owner line1 tmp i
   lock="$state/.claude-autoarm.lock"
   steal="$lock.steal"
   epoch="$state/.claude-autoarm-epoch"
   fm_autoarm_claim_abandoned "$state" "$grace" || return 1
   fm_lock_try_acquire "$steal" || return 1
-  if ! fm_autoarm_claim_abandoned "$state" "$grace"; then
+  if ! fm_autoarm_claim_abandoned "$state" "$grace" \
+    || ! fm_autoarm_session_current "$state" "$session_generation"; then
     fm_lock_release "$steal"
     return 1
   fi

@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # Acquire or inspect the per-home firstmate session lock.
 # A launch-v1 home admits the private launch binding, or holds startup-only
-# authority around a delegated command. The default format uses the legacy
+# authority around a standalone startup. The default format uses the legacy
 # harness ancestry. fm-session-lock-record-lib.sh owns both record formats.
 # Usage: fm-lock.sh           acquire; exit 1 unless ownership is verified
 #        fm-lock.sh status    print holder and liveness; always exits 0
 #        fm-lock.sh verify [engine-pid]  verify current ownership; print generation
 #        fm-lock.sh bind-engine <pid>  issue a binding to the directly calling adapter
-#        fm-lock.sh -- command [args...]  hold a startup-only lock for a command
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -87,32 +86,19 @@ release_claim_lock() {
 trap release_claim_lock EXIT
 trap 'exit 1' HUP INT TERM
 
+if [ "$#" -ne 0 ]; then
+  echo 'usage: fm-lock.sh [status|verify]' >&2
+  exit 2
+fi
 if fm_session_owner_mode_active "$STATE" || fm_session_owner_context_present; then
-  bounded=0
-  if [ "${1:-}" = -- ] && [ "$#" -ge 2 ]; then
-    bounded=1
-    shift
-    if ! fm_session_owner_context_present; then
-      fm_session_owner_bind "$$" startup || { echo 'error: cannot establish a startup-only owner lifetime' >&2; exit 1; }
-    fi
-  elif [ "$#" -ne 0 ]; then
-    echo 'usage: fm-lock.sh [status|verify|-- command [args...]]' >&2
-    exit 2
-  fi
   fm_session_owner_context || {
-    echo 'error: no valid session launch binding; enter through fm-session-launch.sh or use fm-lock.sh -- command' >&2
+    echo 'error: no valid session launch binding; enter through fm-session-launch.sh or run fm-session-start.sh' >&2
     exit 1
   }
   launch_candidate_may_replace() {
     fm_session_owner_liveness "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START"
     case $? in
       0)
-        # A launch already anchored to the legacy holder can upgrade it.
-        if [ "$FM_SESSION_LOCK_PID" = "$FM_SESSION_OWNER_PID" ] \
-          && [ "${FM_SESSION_LOCK_KIND:-legacy}" = legacy ] \
-          && [ "$FM_SESSION_OWNER_KIND" != startup ]; then
-          return 0
-        fi
         echo "error: another live firstmate session holds the lock (pid $FM_SESSION_LOCK_PID)" >&2
         return 1
         ;;
@@ -126,7 +112,6 @@ if fm_session_owner_mode_active "$STATE" || fm_session_owner_context_present; th
   if fm_session_lock_read "$LOCK"; then
     if fm_session_owner_matches_context; then
       printf 'lock acquired: %s pid %s\n' "$FM_SESSION_LOCK_KIND" "$FM_SESSION_LOCK_PID"
-      if [ "$bounded" -eq 1 ]; then "$@"; exit $?; fi
       exit 0
     fi
     launch_candidate_may_replace || exit 1
@@ -151,14 +136,9 @@ if fm_session_owner_mode_active "$STATE" || fm_session_owner_context_present; th
     exit 1
   fi
   printf 'lock acquired: %s pid %s\n' "$FM_SESSION_LOCK_KIND" "$FM_SESSION_LOCK_PID"
-  if [ "$bounded" -eq 1 ]; then "$@"; exit $?; fi
   exit 0
 fi
 
-if [ "$#" -ne 0 ]; then
-  echo 'error: starting a bounded lock command requires launch-v1 readiness' >&2
-  exit 2
-fi
 me=$(fm_harness_ancestry_pid) || { echo "error: cannot locate harness process in ancestry" >&2; exit 1; }
 probe=$(mktemp "$STATE/.lock-write.XXXXXX" 2>/dev/null) || {
   echo "error: cannot write session lock; operate read-only until resolved" >&2
@@ -190,7 +170,8 @@ if ! fm_lock_try_acquire "$CLAIM_LOCK"; then
     exit 0
   fi
   sweep_pid=$(sed -n 's/^pid=//p' "$STATE/.startup-network.status" 2>/dev/null | tail -1)
-  if [ -n "${FM_LOCK_HELD_PID:-}" ] && [ "$FM_LOCK_HELD_PID" = "$sweep_pid" ]; then
+  if [ "$(fm_lock_role "$CLAIM_LOCK" 2>/dev/null)" = startup-network ] \
+    || { [ -n "${FM_LOCK_HELD_PID:-}" ] && [ "$FM_LOCK_HELD_PID" = "$sweep_pid" ]; }; then
     echo "error: the prior session's bounded startup sweep is finishing; operate read-only until it releases the fleet lock" >&2
     exit 1
   fi

@@ -213,7 +213,7 @@ network_phase() { [ "$FM_BOOTSTRAP_NETWORK_PHASE" != skip ]; }
 # shellcheck source=bin/fm-session-lock-record-lib.sh
 . "$SCRIPT_DIR/fm-session-lock-record-lib.sh"
 
-if local_phase && fm_session_owner_enabled && [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ]; then
+if local_phase && fm_session_owner_mode_active "$STATE" && [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ]; then
   local_owner=$("$SCRIPT_DIR/fm-lock.sh" verify) || local_owner=''
   if [ -z "$local_owner" ] || [ "$local_owner" != "${FM_BOOTSTRAP_LOCAL_OWNER_GEN:-}" ]; then
     FM_BOOTSTRAP_DETECT_ONLY=1
@@ -222,12 +222,14 @@ fi
 
 network_mutation_authorized() {
   local expected=${FM_BOOTSTRAP_NETWORK_LOCK_PID:-}
-  if [ -z "$expected" ]; then
-    ! fm_session_owner_enabled
+  if fm_session_owner_mode_active "$STATE"; then
+    fm_session_network_worker_owns_claim "$STATE"
     return
   fi
-  fm_session_lock_read "$STATE/.lock" && [ "$FM_SESSION_LOCK_PID" = "$expected" ] \
-    && [ "$FM_SESSION_LOCK_GENERATION" = "${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-}" ]
+  if [ -z "$expected" ]; then
+    return 0
+  fi
+  fm_session_lock_matches_generation "$STATE" "$expected" ''
 }
 
 network_sweep_authorized() {
@@ -255,6 +257,7 @@ bootstrap_parallel_begin() {
 bootstrap_parallel_spawn() {
   BOOTSTRAP_PAR_N=$((BOOTSTRAP_PAR_N + 1))
   (
+    network_mutation_authorized || exit 0
     "$@"
   ) >"$BOOTSTRAP_PAR_DIR/$BOOTSTRAP_PAR_N.out" 2>"$BOOTSTRAP_PAR_DIR/$BOOTSTRAP_PAR_N.err" &
   printf '%s\n' "$!" > "$BOOTSTRAP_PAR_DIR/$BOOTSTRAP_PAR_N.pid"
@@ -338,7 +341,7 @@ fleet_sync_relay_all_output() {
   done < "$tmp"
 }
 
-fleet_sync() {
+fleet_sync() (
   [ -x "$FM_ROOT/bin/fm-fleet-sync.sh" ] || return 0
   [ -d "$PROJECTS" ] || return 0
 
@@ -349,6 +352,8 @@ fleet_sync() {
   set -m 2>/dev/null || true
   "$FM_ROOT/bin/fm-fleet-sync.sh" >"$tmp" 2>/dev/null &
   pid=$!
+  trap 'kill -KILL -- "-$pid" 2>/dev/null || true' EXIT
+  trap 'exit 143' TERM
 
   start=$SECONDS
   while jobs -r -p | grep -qx "$pid"; do
@@ -365,11 +370,12 @@ fleet_sync() {
     sleep 1
   done
   wait "$pid" 2>/dev/null || true
+  trap - EXIT TERM
   [ "$monitor_was_on" -eq 1 ] || set +m 2>/dev/null || true
 
   fleet_sync_relay_filtered_output "$tmp"
   rm -f "$tmp"
-}
+)
 
 secondmate_sync() {
   # shellcheck source=bin/fm-wake-lib.sh disable=SC1091
@@ -1676,6 +1682,7 @@ if [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ]; then
     fleet_sync_out=$(mktemp "${TMPDIR:-/tmp}/fm-bootstrap-fleet.XXXXXX") || fleet_sync_out=
     if [ -n "$fleet_sync_out" ]; then
       (
+        network_mutation_authorized || exit 0
         __fm_timing_stamp=$(fm_timing_now_ms)
         fleet_sync
         fm_timing_record phase fleet-sync "$__fm_timing_stamp"

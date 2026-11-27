@@ -939,7 +939,7 @@ test_killing_the_suite_reaps_detached_fixture_processes() {
 }
 
 test_launch_owner_startup_and_bounded_worker_handoff() {
-  local rec home root log launcher startup old new phase gen held_pid i out
+  local rec home root log launcher startup bare old new phase gen held_pid coordinator i out
   rec=$(new_world launch-owner-handoff)
   IFS='|' read -r home root log <<< "$rec"
   mkdir -p "$home/config"
@@ -974,13 +974,31 @@ SH
   startup="$root/bin/fm-session-start.sh"
 
   printf '100\t1\tcheck\tfixture\tqueued\n' > "$home/state/.wake-queue"
-  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_FAKE_BOOTSTRAP_LOG="$log" "$startup" 2>&1)     || fail "bare startup did not finish: $out"
+  : > "$home/hold-sweep"
+  # shellcheck disable=SC2016
+  FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_FAKE_BOOTSTRAP_LOG="$log" FM_FIXTURE_STARTUP="$startup" \
+    fm_test_start_fixture /bin/bash -ec '
+      "$FM_FIXTURE_STARTUP" > "$FM_HOME/bare-digest"
+      : > "$FM_HOME/bare-returned"
+    '
+  bare=$FM_TEST_FIXTURE_PID
+  for i in $(seq 1 300); do [ ! -e "$home/sweep-running" ] || break; sleep 0.05; done
+  [ -e "$home/sweep-running" ] || fail 'bare startup did not start the bounded sweep'
+  sleep 0.25
+  assert_absent "$home/bare-returned" 'bare startup left a mutating worker behind'
+  : > "$home/release-sweep"
+  wait "$bare" || fail 'bare startup failed after sweep release'
+  [ -e "$home/sweep-finished" ] || fail 'bare startup returned before sweep completion'
+  out=$(cat "$home/bare-digest")
   assert_contains "$out" 'STARTUP-ONLY' 'bare startup implied a continuing session'
   assert_contains "$out" 'skipped (startup-only)' 'bare startup attempted wake handling'
   assert_grep $'100\t1\tcheck\tfixture\tqueued' "$home/state/.wake-queue" 'bare startup removed a pending wake'
-  assert_absent "$home/state/.session-start-complete" 'bare startup advertised a continuing session'
-  run_stage "$home" "$root" wait 30 >/dev/null || fail 'the bare invocation worker did not finish'
+  if compgen -G "$home/state/.session-start-complete*" > /dev/null; then
+    fail 'bare startup advertised a continuing session'
+  fi
+  run_stage "$home" "$root" wait 1 >/dev/null || fail 'bare startup returned before publishing the network result'
   grep -E '^only 0 [a-f0-9]{64}$' "$log" >/dev/null || fail 'bounded worker did not carry the bare owner generation'
+  rm "$home/sweep-running" "$home/release-sweep" "$home/sweep-finished"
 
   : > "$home/hold-sweep"
   # shellcheck disable=SC2016 # The script uses the fixture's home and binding.
@@ -1010,6 +1028,8 @@ SH
   # A competing session cannot gain authority while the first launch's worker
   # is still writing, even after that launch exits.
   held_pid=$(cat "$home/state/.lock")
+  coordinator=$(sed -n 's/^pid=//p' "$home/state/.startup-network.status")
+  kill -KILL "$coordinator" || fail 'could not stop the disposable network coordinator'
   : > "$home/owner-exit"
   wait "$old" || fail 'the launch fixture could not exit'
   # shellcheck disable=SC2016 # The script uses the fixture's home and binding.

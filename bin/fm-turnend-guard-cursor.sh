@@ -248,10 +248,6 @@ current_session_still_ours() {
 
 # Only the lock-owning session may arm or wake. A stale numeric owner is
 # recoverable through bin/fm-lock.sh, which serializes the claim.
-if fm_session_owner_mode_active "$STATE"; then
-  [ ! -e "$STATE/.afk" ] && [ ! -e "$STATE/.afk-contract" ] || exit 0
-  fm_supervision_needed "$STATE" "$GRACE" || exit 0
-fi
 if ! fm_session_hook_owns_lock "$STATE"; then
   case "$FM_SESSION_LOCK_PID" in ''|*[!0-9]*) exit 0 ;; esac
   fm_session_hook_may_recover "$STATE" || exit 0

@@ -2052,8 +2052,11 @@ case "$ARG3" in
     RAW_LAUNCH=1
     LAUNCH=$ARG3
     RAW_EXECUTABLE=$(perl -MText::ParseWords=shellwords -e '
+      my $leading = 1;
       for my $word (shellwords($ARGV[0])) {
         next if $word =~ /^[A-Za-z_][A-Za-z0-9_]*=/;
+        if ($leading && $word eq "exec") { $leading = 0; next; }
+        next if !$leading && $word eq "--";
         print $word; exit 0;
       }
       exit 1;
@@ -4992,9 +4995,14 @@ case "$HARNESS" in
     ;;
 esac
 LAUNCH=${LAUNCH//__WORKTREE__/$sq_worktree}
+raw_harness_unset=
 case "$HARNESS" in
   claude|codex|opencode|pi|pi-signed|grok|kimi|gemini|muse|rovo|agy)
-    LAUNCH="env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI $LAUNCH"
+    if [ "$RAW_LAUNCH" -eq 1 ]; then
+      raw_harness_unset=' CURSOR_AGENT CURSOR_INVOKED_AS GEMINI_CLI'
+    else
+      LAUNCH="env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI $LAUNCH"
+    fi
     ;;
 esac
 # Crewmate panes are created by a long-lived tmux/herdr daemon that does not
@@ -5032,15 +5040,14 @@ if [ "$KIND" = secondmate ]; then
   # Reuse the single frozen decision from the carrier resolution above so the
   # injected carrier and this on/off snapshot are guaranteed to agree.
   if FM_HOME="$PROJ_ABS" fm_session_owner_enabled; then
-    # Templates are foreground commands (some start with environment assignments).
-    # Install the binding on the machine and in the pane that runs the session.
-    LAUNCH="$(shell_quote "$PROJ_ABS/bin/fm-session-launch.sh") -- /bin/bash -c $(shell_quote "exec env $LAUNCH")"
+    if [ "$RAW_LAUNCH" -eq 0 ]; then LAUNCH="exec env $LAUNCH"; fi
+    LAUNCH="$(shell_quote "$PROJ_ABS/bin/fm-session-launch.sh") -- /bin/bash -c $(shell_quote "$LAUNCH")"
   fi
   LAUNCH="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_PUBLIC_FOLLOWUP_PRIMARY_HOME=$sq_primary_home FM_HOME=$sq_home FM_TRACE_CONTEXT=$SPAWN_TRACE_EFFECTIVE FM_SUPERVISION_MODEL=$supervision_model $LAUNCH"
 fi
 _fm_wake_require_classify || exit 1
 reserved_key_prefixes=${FM_CLASSIFY_RESERVED_KEY_PREFIXES:-$FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT}
-LAUNCH="unset FM_SESSION_OWNER_ID FM_SESSION_OWNER_HOME FM_SESSION_OWNER_PID FM_SESSION_OWNER_START FM_SESSION_OWNER_KIND; export FM_CLASSIFY_RESERVED_KEY_PREFIXES=$(shell_quote "$reserved_key_prefixes"); $LAUNCH"
+LAUNCH="unset FM_SESSION_OWNER_ID FM_SESSION_OWNER_HOME FM_SESSION_OWNER_PID FM_SESSION_OWNER_START FM_SESSION_OWNER_KIND FM_BOOTSTRAP_NETWORK_LOCK_PID FM_BOOTSTRAP_NETWORK_LOCK_GEN FM_BOOTSTRAP_NETWORK_WORKER_PID FM_BOOTSTRAP_NETWORK_WORKER_START$raw_harness_unset; export FM_CLASSIFY_RESERVED_KEY_PREFIXES=$(shell_quote "$reserved_key_prefixes"); $LAUNCH"
 if [ -z "$SPAWN_TRACEPARENT" ] && [ "$RELAUNCH" -eq 1 ]; then
   LAUNCH="unset TRACEPARENT; $LAUNCH"
 fi

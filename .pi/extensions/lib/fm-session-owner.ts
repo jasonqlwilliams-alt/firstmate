@@ -34,18 +34,20 @@ function ownerEnv({ root, home, state }: OwnerPaths): NodeJS.ProcessEnv {
 
 export function bindNativeOwner(paths: OwnerPaths): boolean {
   if (!usesLaunchOwners(paths)) return true;
-  if (process.env.FM_SESSION_OWNER_PID === String(process.pid)) return true;
-  // Direct adapter invocation binds to the engine itself. An inherited native
-  // binding belongs to another engine and must never leak into its tool calls.
-  const result = spawnSync(`${paths.root}/bin/fm-lock.sh`, ["bind-engine", String(process.pid)], {
-    env: ownerEnv(paths),
-    encoding: "utf8",
-  });
-  for (const key of bindingKeys) delete process.env[key];
-  if (result.status !== 0) return false;
-  const values = result.stdout.trimEnd().split("\n");
-  if (values.length !== bindingKeys.length) return false;
-  bindingKeys.forEach((key, i) => { process.env[key] = values[i]; });
+  if (process.env.FM_SESSION_OWNER_PID !== String(process.pid)) {
+    // Direct adapter invocation binds to the engine itself. An inherited native
+    // binding belongs to another engine and must never leak into its tool calls.
+    const result = spawnSync(`${paths.root}/bin/fm-lock.sh`, ["bind-engine", String(process.pid)], {
+      env: ownerEnv(paths),
+      encoding: "utf8",
+    });
+    for (const key of bindingKeys) delete process.env[key];
+    if (result.status !== 0) return false;
+    const values = result.stdout.trimEnd().split("\n");
+    if (values.length !== bindingKeys.length) return false;
+    bindingKeys.forEach((key, i) => { process.env[key] = values[i]; });
+  }
+  spawnSync(`${paths.root}/bin/fm-lock.sh`, [], { env: ownerEnv(paths), stdio: "ignore" });
   return true;
 }
 

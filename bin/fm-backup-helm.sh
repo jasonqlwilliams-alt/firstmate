@@ -392,7 +392,12 @@ probe_successor() {
     probe_line refused "could not create a probe output file"
     return 1
   }
-  (cd "$dir" && fm_run_timed "$timeout" env "${PROBE_ENV_UNSET[@]}" "${argv[@]}" </dev/null >"$out" 2>&1)
+  (
+    # shellcheck source=bin/fm-session-lock-lib.sh
+    . "$SCRIPT_DIR/fm-session-lock-lib.sh"
+    fm_session_owner_clear
+    cd "$dir" && fm_run_timed "$timeout" env "${PROBE_ENV_UNSET[@]}" "${argv[@]}" </dev/null >"$out" 2>&1
+  )
   rc=$?
   if [ "$rc" -eq 0 ] && grep -qF "$expected" "$out"; then
     rm -f "$out"
@@ -591,7 +596,8 @@ lock_is_held_live() {
   fi
   status=$("$SCRIPT_DIR/fm-lock.sh" status)
   case "$status" in
-    'lock: held by live '*) return 0 ;;
+    'lock: held by live harness pid '*|'lock: held by live legacy pid '*|\
+    'lock: held by live launch pid '*|'lock: held by live native pid '*) return 0 ;;
     *) return 1 ;;
   esac
 }

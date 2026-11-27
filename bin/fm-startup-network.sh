@@ -249,6 +249,7 @@ worker_covers_request() {  # <locked> <lock-pid> <identity>
 
 cmd_start() {  # <locked> <harvest-pid>
   local locked=$1 harvest_pid=$2 lock_pid generation worker_pid phases started lock_generation='' identity
+  [ "${FM_SESSION_OWNER_KIND:-}" != startup ] || return 1
   mkdir -p "$STATE" 2>/dev/null || return 1
   # Captured HERE, at the moment the caller still holds the lock, and carried to
   # the worker: re-reading the lock later would only prove that SOME session
@@ -286,7 +287,6 @@ phases=$phases
 generation=$generation
 lock_pid=$lock_pid
 lock_identity=$identity
-lock_generation=$lock_generation
 EOF
   then
     fm_lock_release "$PUBLISH_LOCK"
@@ -322,7 +322,6 @@ phases=$phases
 generation=$generation
 lock_pid=$lock_pid
 lock_identity=$identity
-lock_generation=$lock_generation
 EOF
   then
     kill "$worker_pid" 2>/dev/null || true
@@ -345,12 +344,6 @@ EOF
 # Compare the captured owner under the acquisition lease. This lets the
 # worker finish its idempotent sweeps after the requesting process exits.
 # Missing, unreadable, or different owner proof leaves only the read-only probe.
-lock_unchanged() {  # <expected-pid> <expected-owner-generation>
-  local expected=$1 generation=$2
-  fm_session_lock_read "$STATE/.lock" && [ "$FM_SESSION_LOCK_PID" = "$expected" ] \
-    && [ "$FM_SESSION_LOCK_GENERATION" = "$generation" ]
-}
-
 # Bootstrap owns the meaning of its output protocol: silence is success,
 # BOOTSTRAP_INFO is an explicit completed no-action fact, and every other line
 # is a diagnostic. This delivery layer does not maintain a second semantic
@@ -452,11 +445,53 @@ lock_identity=$(status_get lock_identity)
 report_published=$report_published
 EOF
   fm_lock_release "$PUBLISH_LOCK"
-  await_delivery "$generation" "$state"
+  if [ "${FM_SESSION_OWNER_KIND:-}" != startup ]; then
+    await_delivery "$generation" "$state"
+  fi
+}
+
+run_sweeps() {  # <lock-pid> <owner-generation> <sweep-budget>
+  local lock_pid=$1 lock_generation=$2 budget=$3 claim="$STATE/.lock.acquire" deadline=$((SECONDS + $3))
+  if fm_session_owner_mode_active "$STATE"; then
+    fm_session_owner_context || return 75
+  fi
+  fm_lock_acquire_wait "$claim" startup-network || return 1
+  trap 'fm_lock_release "$STATE/.lock.acquire"' EXIT
+  fm_session_lock_matches_generation "$STATE" "$lock_pid" "$lock_generation" || return 75
+  if [ -n "$lock_generation" ]; then
+    fm_session_owner_context && fm_session_owner_matches_context || return 75
+  fi
+  fm_session_owner_clear
+
+  export FM_HOME FM_STATE_OVERRIDE="$STATE" FM_BOOTSTRAP_NETWORK=only
+  export FM_BOOTSTRAP_NETWORK_LOCK_PID="$lock_pid" FM_BOOTSTRAP_NETWORK_LOCK_GEN="$lock_generation"
+  export FM_BOOTSTRAP_NETWORK_WORKER_PID="$$" FM_BOOTSTRAP_NETWORK_WORKER_START
+  FM_BOOTSTRAP_NETWORK_WORKER_START=$(cat "$claim/start" 2>/dev/null) || FM_BOOTSTRAP_NETWORK_WORKER_START=
+  if [ -n "$lock_generation" ]; then fm_session_network_worker_owns_claim "$STATE" || return 75; fi
+  if [ "$FM_SESSION_LOCK_KIND" = startup ]; then
+    FM_HOME_SUMMARY_TIMEOUT=$(summary_budget)
+    [ "$FM_HOME_SUMMARY_TIMEOUT" -le "$budget" ] || FM_HOME_SUMMARY_TIMEOUT=$budget
+    export FM_HOME_SUMMARY_TIMEOUT
+  fi
+  "$SCRIPT_DIR/fm-home-summary-refresh.sh" ||
+    printf 'HOME_SUMMARY: deferred publication failed; the prior ledger is retained; see the producer diagnostic above\n'
+  if [ "$FM_SESSION_LOCK_KIND" = startup ]; then
+    budget=$((deadline - SECONDS))
+    [ "$budget" -gt 0 ] || return 124
+  fi
+  # shellcheck disable=SC2016
+  fm_run_timed "$budget" bash -c '
+    . "$1/fm-session-lock-record-lib.sh"
+    if [ -n "$FM_BOOTSTRAP_NETWORK_LOCK_GEN" ]; then
+      fm_session_network_worker_owns_claim "$FM_STATE_OVERRIDE" || exit 75
+    fi
+    "$1/fm-inactive-reconcile.sh" scan --startup >/dev/null 2>&1 || true
+    exec "$1/fm-bootstrap.sh"
+  ' _ "$SCRIPT_DIR"
 }
 
 cmd_run() {  # <locked> <lock-pid> <network-generation> <owner-generation>
-  local locked=$1 lock_pid=$2 generation=$3 lock_generation=$4 phases started budget out rc sweep_locked=0 downgraded=0 internal=0 lease_held=0 timings stage_started
+  local locked=$1 lock_pid=$2 generation=$3 lock_generation=$4 phases started budget out rc sweep_locked=0 downgraded=0 internal=0 timings stage_started
   mkdir -p "$STATE" 2>/dev/null || return 1
   started=$(now)
   budget=$(stage_budget)
@@ -477,7 +512,7 @@ cmd_run() {  # <locked> <lock-pid> <network-generation> <owner-generation>
     if [ "$internal" -eq 0 ]; then
       lock_pid=$FM_SESSION_LOCK_PID lock_generation=$FM_SESSION_LOCK_GENERATION
     fi
-    if lock_unchanged "$lock_pid" "$lock_generation"; then
+    if fm_session_lock_matches_generation "$STATE" "$lock_pid" "$lock_generation"; then
       sweep_locked=1
       phases=probe,sweeps
     else
@@ -500,8 +535,7 @@ locked=$sweep_locked
 phases=$phases
 generation=$generation
 lock_pid=$lock_pid
-lock_identity=$(lock_identity_value "$lock_pid" 2>/dev/null || true)
-lock_generation=$lock_generation
+lock_identity=${lock_generation:-$(lock_identity_value "$lock_pid" 2>/dev/null || true)}
 EOF
     fm_lock_release "$PUBLISH_LOCK"
   fi
@@ -517,37 +551,23 @@ EOF
   stage_started=$(fm_timing_now_ms)
   rc=0
   if [ "$sweep_locked" -eq 1 ]; then
-    fm_lock_acquire_wait "$STATE/.lock.acquire"
-    lease_held=1
-    if ! lock_unchanged "$lock_pid" "$lock_generation"; then
+    local claim_budget=$((budget + $(summary_budget) + 2))
+    if [ "${FM_SESSION_OWNER_KIND:-}" = startup ]; then
+      claim_budget=$((budget + 2))
+    fi
+    fm_run_timed "$claim_budget" "$SCRIPT_DIR/fm-startup-network.sh" _sweep "$lock_pid" "$lock_generation" "$budget" \
+      >>"$out" 2>&1 || rc=$?
+    if [ "$rc" -eq 75 ]; then
       sweep_locked=0
       phases=probe
       downgraded=1
     fi
   fi
-  if [ "$sweep_locked" -eq 1 ]; then
-    env FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
-      "$SCRIPT_DIR/fm-home-summary-refresh.sh" >>"$out" 2>&1 ||
-      printf 'HOME_SUMMARY: deferred publication failed; the prior ledger is retained; see the producer diagnostic above\n' >>"$out"
-  fi
-  # The inactive scan retains its own tighter per-scan bound. Findings
-  # need no report translation: the scan writes its ordinary durable
-  # inactive-outcome wakes directly. A child shell composes the two executable
-  # owners only so fm_run_timed can govern them as one process group.
-  if [ "$sweep_locked" -eq 1 ]; then
-    # shellcheck disable=SC2016  # Child-shell variables expand inside the bound.
-    fm_run_timed "$budget" env FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
-      FM_BOOTSTRAP_NETWORK=only FM_BOOTSTRAP_NETWORK_LOCK_PID="$lock_pid" FM_BOOTSTRAP_NETWORK_LOCK_GEN="$lock_generation" FM_BOOTSTRAP_NETWORK_WORKER_PID="$$" \
-      bash -c '
-        script_dir=$1
-        "$script_dir/fm-inactive-reconcile.sh" scan --startup >/dev/null 2>&1 || true
-        exec "$script_dir/fm-bootstrap.sh"
-      ' _ "$SCRIPT_DIR" >>"$out" 2>&1 || rc=$?
-  else
+  if [ "$sweep_locked" -eq 0 ]; then
+    rc=0
     fm_run_timed "$budget" env FM_BOOTSTRAP_NETWORK=only FM_BOOTSTRAP_DETECT_ONLY=1 \
       "$SCRIPT_DIR/fm-bootstrap.sh" >"$out" 2>&1 || rc=$?
   fi
-  [ "$lease_held" -eq 0 ] || fm_lock_release "$STATE/.lock.acquire"
   # The bounded run as a whole, so the per-phase records can be read against the
   # total even when the bound cut some of them off.
   fm_timing_record stage network-checks "$stage_started" "$phases"
@@ -576,7 +596,7 @@ EOF
 # --- harvest / report --------------------------------------------------------
 
 print_finished() {  # <state>
-  local state=$1 phases started finished took=unknown report_published
+  local state=$1 phases started finished took=unknown report_published scope='off the startup path'
   phases=$(status_get phases)
   started=$(status_get started)
   finished=$(status_get finished)
@@ -585,7 +605,8 @@ print_finished() {  # <state>
     ''|*[!0-9]*) ;;
     *) took=$((finished - started)) ;;
   esac
-  printf 'completed off the startup path in %ss: %s.\n' "$took" "$(phase_label "$phases")"
+  [ "${FM_SESSION_OWNER_KIND:-}" != startup ] || scope='during this startup'
+  printf 'completed %s in %ss: %s.\n' "$scope" "$took" "$(phase_label "$phases")"
   [ "$state" = 'done' ] || printf 'The stage itself did not finish cleanly (%s) - the NETWORK_CHECKS line below names what to rerun.\n' "$state"
   if [ "$report_published" = 0 ]; then
     printf 'NETWORK_CHECKS: could not publish the deferred check report, so %s results are unavailable; rerun %s/bin/fm-startup-network.sh run --locked %s\n' \
@@ -733,7 +754,13 @@ case "$LOCKED" in 0|1) ;; *) LOCKED=0 ;; esac
 
 case "$MODE" in
   start) cmd_start "$LOCKED" "${HARVEST_PID:-0}" ;;
-  run) cmd_run "$LOCKED" "$LOCK_PID" "$GENERATION" "${LOCK_GENERATION:-}" ;;
+  run) cmd_run "$LOCKED" "$LOCK_PID" "$GENERATION" "${LOCK_GENERATION:-}" || exit $? ;;
+  _sweep)
+    [ "$#" -eq 3 ] || exit 2
+    case "$3" in ''|*[!0-9]*|0) exit 2 ;; esac
+    run_sweeps "$1" "$2" "$3"
+    exit $?
+    ;;
   harvest) cmd_harvest "${HARVEST_PID:-}" ;;
   report) print_state; print_timings ;;
   ready) [ "$#" -eq 1 ] || { usage >&2; exit 2; }; cmd_ready "$1" || exit $? ;;

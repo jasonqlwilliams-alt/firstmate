@@ -227,15 +227,34 @@ fm_session_lock_read() {
   [ "$seal" = "$after" ]
 }
 
+fm_session_lock_matches_generation() { # <state-dir> <pid> <generation>
+  fm_session_lock_read "$1/.lock" && [ "$FM_SESSION_LOCK_PID" = "$2" ] \
+    && [ "$FM_SESSION_LOCK_GENERATION" = "$3" ] \
+    && { [ "$FM_SESSION_LOCK_KIND" != startup ] \
+      || fm_session_owner_liveness "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START"; }
+}
+
+fm_session_network_worker_owns_claim() { # <state-dir>
+  local state=$1 claim="$1/.lock.acquire" worker=${FM_BOOTSTRAP_NETWORK_WORKER_PID:-}
+  local start=${FM_BOOTSTRAP_NETWORK_WORKER_START:-} generation=${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-}
+  [ -n "$generation" ] && fm_session_owner_token_valid "$start" \
+    && [ "$(cat "$claim/pid" 2>/dev/null)" = "$worker" ] \
+    && [ "$(cat "$claim/start" 2>/dev/null)" = "$start" ] \
+    && fm_session_owner_liveness "$worker" "$start" \
+    && fm_session_lock_matches_generation "$state" "${FM_BOOTSTRAP_NETWORK_LOCK_PID:-}" "$generation"
+}
+
 # Exec the publisher in the process that took .lock.acquire. In particular,
 # no orphaned child can rename a record after that mutex becomes reclaimable.
 fm_session_owner_publish() { # <lock> <claim-owner-dir>
-  local lock=$1 claim_owner=$2 legacy='' next
+  local lock=$1 claim_owner=$2 legacy='' next claimant start
+  fm_current_pid claimant || return 1
+  start=$(fm_session_owner_token "$claimant") || return 1
   if [ -n "${FM_SESSION_LOCK_PID:-}" ] && [ -z "${FM_SESSION_LOCK_GENERATION:-}" ]; then
     legacy=$(fm_session_owner_format "$FM_SESSION_LOCK_PID" "${FM_SESSION_LOCK_START:-pid-only}" legacy "$FM_SESSION_OWNER_HOME" -) || return 1
   fi
   next=$(fm_session_owner_format "$FM_SESSION_OWNER_PID" "$FM_SESSION_OWNER_START" \
     "$FM_SESSION_OWNER_KIND" "$FM_SESSION_OWNER_HOME" "$FM_SESSION_OWNER_FINGERPRINT") || return 1
   exec node "${BASH_SOURCE[0]%/*}/fm-session-owner-publish.mjs" "$lock" "$claim_owner" \
-    "${FM_SESSION_LOCK_PID:-}" "$FM_SESSION_OWNER_PID" "$legacy" "$next"
+    "$start" "${FM_SESSION_LOCK_PID:-}" "$FM_SESSION_OWNER_PID" "$legacy" "$next"
 }

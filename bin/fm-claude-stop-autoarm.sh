@@ -145,7 +145,7 @@ if ! fm_session_hook_owns_lock "$STATE"; then
 fi
 
 # --- AFK: the away daemon owns the watcher and triage; never rewake ----------
-{ [ -e "$STATE/.afk" ] || [ -e "$STATE/.afk-contract" ]; } && exit 0
+[ -e "$STATE/.afk" ] && exit 0
 
 # --- need: whatever bin/fm-supervision-lib.sh counts as supervision need ------
 need_supervision() {
@@ -186,7 +186,7 @@ if [ "$CLAIM_RC" -ne 0 ]; then
   [ "$CLAIM_RC" -eq 2 ] && exit 0
   ROLE=$(fm_lock_role "$OWNER_LOCK" 2>/dev/null || true)
   [ -n "$ROLE" ] || exit 0
-  fm_autoarm_release_abandoned "$STATE" "$GRACE" || exit 0
+  fm_autoarm_release_abandoned "$STATE" "$GRACE" "$SESSION_OWNER_GENERATION" || exit 0
   fm_autoarm_claim_next "$STATE" "$GRACE" "$SESSION_OWNER_GENERATION" || exit 0
 fi
 MY_GEN=$FM_AUTOARM_MY_GEN
@@ -213,7 +213,7 @@ autoarm_commit() {  # <outcome> [marker-file]
         recovery=${FM_RECOVERY_MARKER_TOKEN##*:} ;;
       *) return 2 ;;
     esac
-    fm_autoarm_write_owned "$STATE" "$MY_GEN" "$outcome" "$marker" "$session_pid" "$recovery" "$SESSION_OWNER_GENERATION"
+    fm_autoarm_write_owned "$STATE" "$MY_GEN" "$outcome" "$marker" "$session_pid" "$recovery"
   elif [ -n "$marker" ]; then
     fm_autoarm_write_owned "$STATE" "$MY_GEN" "$outcome" "$marker"
   else
@@ -248,8 +248,7 @@ while [ "$attempt" -lt "$AUTOARM_ATTEMPTS" ]; do
   # A superseded owner must not start or attach another watcher or mutate any
   # watcher/wake state: re-verify generation ownership before every arm
   # invocation, first attempt and retries alike.
-  if ! fm_autoarm_still_owner "$STATE" "$MY_GEN" \
-    || { [ -n "$SESSION_OWNER_GENERATION" ] && ! autoarm_session_still_owns; }; then
+  if ! fm_autoarm_still_owner "$STATE" "$MY_GEN"; then
     [ -z "$OUT" ] || rm -f "$OUT" 2>/dev/null || true
     exit 0
   fi
@@ -353,10 +352,13 @@ if [ "$LEASE_EXPIRED" -eq 1 ]; then
     # Reclaim only a provably dead lock through its existing serialized owner.
     # Clearing it on the successor's startup would mint a second down episode
     # after the handling turn had already acknowledged the first one.
-    fm_recovery_transition "$STATE/.watcher-down" release-lock "$STATE/.watch.lock" handling || ACTIONABLE=0
+    if ! fm_recovery_transition "$STATE/.watcher-down" release-lock "$STATE/.watch.lock" handling "$SESSION_OWNER_GENERATION"; then
+      fm_lock_release "$STATE/.watch.lock"
+      ACTIONABLE=0
+    fi
   elif fm_watcher_healthy "$STATE" "$SCRIPT_DIR/fm-watch.sh" "$GRACE" "$FM_HOME"; then
     # An attached peer watcher remains live; never release its lock.
-    fm_recovery_marker_publish "$STATE/.watcher-down" handling || ACTIONABLE=0
+    fm_recovery_marker_publish "$STATE/.watcher-down" handling "$SESSION_OWNER_GENERATION" || ACTIONABLE=0
   else
     ACTIONABLE=0
   fi

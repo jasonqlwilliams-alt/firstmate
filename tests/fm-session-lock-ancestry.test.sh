@@ -742,7 +742,7 @@ test_independent_launches_cannot_share_an_owner() {
     "$FM_BIN/fm-lock.sh"
     "$FM_BIN/fm-lock.sh" verify > "$FM_HOME/a.generation"
     if FM_HOME="$FM_NEIGHBOR" "$FM_BIN/fm-lock.sh"; then exit 4; fi
-    "$FM_BIN/fm-session-launch.sh" --home "$FM_NEIGHBOR" -- /bin/bash -ec '\''
+    FM_HOME="$FM_NEIGHBOR" "$FM_BIN/fm-session-launch.sh" -- /bin/bash -ec '\''
       [ "$FM_SESSION_OWNER_HOME" = "$FM_HOME" ]
       "$FM_BIN/fm-lock.sh"
     '\''
@@ -753,6 +753,12 @@ test_independent_launches_cannot_share_an_owner() {
   owner=$!
   OWNER_RECORD_PIDS="${OWNER_RECORD_PIDS:-} $owner"
   owner_fixture_wait "$home/owner-ready"
+  printf '100\t1\tcheck\tfixture\tqueued\n' > "$home/state/.wake-queue"
+  if FM_HOME="$home" "$ROOT/bin/fm-wake-drain.sh" > "$home/unbound.out" 2>&1; then
+    fail "an unbound caller could present the live owner's wake"
+  fi
+  assert_grep 'session launch no longer owns this home' "$home/unbound.out" "unbound wake drain did not hit the ownership fence"
+  assert_absent "$home/state/.watch.lock" "unbound drain touched the watcher"
   FM_HOME="$home" FM_BIN="$ROOT/bin" "$launch" -- "$CODEX_FIXTURE" -c '
     /bin/ps -o pid=,ppid=,sid= -p "$$" > "$FM_HOME/b.ps"
     "$FM_BIN/fm-lock.sh"; rc=$?
@@ -786,9 +792,8 @@ test_independent_launches_cannot_share_an_owner() {
   assert_contains "$output" "another live firstmate session holds the lock" "known-harness ownership was not protected"
   : > "$home/known-exit"
   wait "$owner" || fail "known-harness owner fixture failed"
-  output=$(FM_HOME="$home" "$ROOT/bin/fm-lock.sh" -- /bin/bash -c 'exit 0') || fail "bounded acquisition failed after owner exit"
-  assert_contains "$output" "lock acquired: startup pid" "the bounded command did not use startup scope"
-  assert_contains "$(FM_HOME="$home" "$ROOT/bin/fm-lock.sh" status)" "lock: stale" "bounded command kept authority"
+  output=$(FM_HOME="$home" "$launch" -- "$ROOT/bin/fm-lock.sh") || fail "acquisition failed after owner exit"
+  assert_contains "$output" "lock acquired: launch pid" "a fresh launch did not acquire the stale lock"
   pass "session lock: sibling launches contend, stopped owners stay live and a nested home gets a fresh binding"
 }
 
@@ -806,6 +811,23 @@ test_unreadable_lifetime_does_not_allow_takeover() {
   FM_HOME="$home" FM_BIN="$ROOT/bin" FM_SUPERVISION_ACTOR=main "$ROOT/bin/fm-session-launch.sh" -- /bin/bash -ec '
     "$FM_BIN/fm-lock.sh"
     "$FM_BIN/fm-lease.sh" claim fixture
+    cp "$FM_HOME/state/.lease-fixture" "$FM_HOME/lease-original"
+    mkdir "$FM_HOME/lease-bin"
+    cat > "$FM_HOME/lease-bin/cat" <<'\''SH'\''
+#!/bin/bash
+case "${1:-}" in
+  "$FM_HOME/state/.lock.owner.$FM_SESSION_OWNER_PID")
+    if [ -e "$FM_HOME/lease-first-proof" ]; then exit 1; fi
+    : > "$FM_HOME/lease-first-proof"
+    ;;
+esac
+exec /bin/cat "$@"
+SH
+    chmod +x "$FM_HOME/lease-bin/cat"
+    rc=0
+    PATH="$FM_HOME/lease-bin:$PATH" FM_SUPERVISION_ACTOR=branch "$FM_BIN/fm-lease.sh" claim fixture || rc=$?
+    [ "$rc" -eq 6 ]
+    cmp -s "$FM_HOME/lease-original" "$FM_HOME/state/.lease-fixture"
     : > "$FM_HOME/owner-ready"
     while [ ! -e "$FM_HOME/owner-exit" ]; do sleep 0.05; done
   ' > "$home/owner.out" 2>&1 &
@@ -883,13 +905,14 @@ test_interrupted_publication_leaves_a_recoverable_record() {
       case "$out" in 'lock: stale'*|'lock: held by live launch'*) ;; *) fail "torn status during $timing $phase: $out" ;; esac
       competitor=
       if [ "$phase:$timing" != .lock:after ]; then
-        FM_HOME="$home" "$ROOT/bin/fm-lock.sh" -- /bin/bash -c ': > "$FM_HOME/competitor-admitted"' \
+        FM_HOME="$home" FM_BIN="$ROOT/bin" "$ROOT/bin/fm-session-launch.sh" -- /bin/bash -ec \
+          '"$FM_BIN/fm-lock.sh"; : > "$FM_HOME/competitor-admitted"' \
           > "$home/competitor.out" 2>&1 &
         competitor=$!
         OWNER_RECORD_PIDS="${OWNER_RECORD_PIDS:-} $competitor"
         sleep 0.2
         [ ! -e "$home/competitor-admitted" ] || fail "an entrant bypassed the publication mutex"
-      elif FM_HOME="$home" "$ROOT/bin/fm-lock.sh" -- true; then
+      elif FM_HOME="$home" "$ROOT/bin/fm-session-launch.sh" -- "$ROOT/bin/fm-lock.sh"; then
         fail "another launch entered while the committed owner was live"
       fi
       if [ -n "$competitor" ]; then
@@ -900,7 +923,7 @@ test_interrupted_publication_leaves_a_recoverable_record() {
       if [ "$phase:$timing" = .lock:after ]; then
         cmp -s "$home/state/.lock" <(printf '%s\n' "$attempt") || fail "committed PID is torn"
         assert_contains "$(FM_HOME="$home" "$ROOT/bin/fm-lock.sh" status)" "held by live launch" "the committed owner disappeared"
-        if FM_HOME="$home" "$ROOT/bin/fm-lock.sh" -- true; then fail "another launch entered after commit"; fi
+        if FM_HOME="$home" "$ROOT/bin/fm-session-launch.sh" -- "$ROOT/bin/fm-lock.sh"; then fail "another launch entered after commit"; fi
         : > "$home/resume-driver"
         wait "$attempt" || fail "interrupted publisher's committed session could not renew"
       else
@@ -951,10 +974,25 @@ test_same_pid_reuse_commits_at_the_proof() {
   pass "session lock: same-PID takeover commits at the proof rename and survives an interrupted publisher"
 }
 
+test_reused_publication_claimant_does_not_block_acquisition() {
+  local home claim boot
+  home=$(launch_owner_home reused-publication-claimant)
+  claim="$home/state/.lock.acquire"
+  mkdir "$claim"
+  boot=$(cat /proc/sys/kernel/random/boot_id)
+  printf '%s\n' "$$" > "$claim/pid"
+  printf 'linux:%s:0\n' "$boot" > "$claim/start"
+  FM_HOME="$home" timeout 5 "$ROOT/bin/fm-session-launch.sh" -- "$ROOT/bin/fm-lock.sh" \
+    || fail "a different lifetime at the claimant PID blocked publication"
+  assert_absent "$claim" "publisher left its acquisition claim behind"
+  pass "session lock: PID reuse cannot pin the publication mutex"
+}
+
 if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then
   test_unreadable_lifetime_does_not_allow_takeover
   test_interrupted_publication_leaves_a_recoverable_record
   test_same_pid_reuse_commits_at_the_proof
+  test_reused_publication_claimant_does_not_block_acquisition
 fi
 
 test_dead_launch_cannot_authorize_its_detached_child() {
@@ -980,7 +1018,7 @@ SH
   owner_fixture_wait "$home/executor-present"
   kill -KILL "$owner" || fail "could not kill the disposable launch anchor"
   wait "$owner" 2>/dev/null || true
-  FM_HOME="$home" "$ROOT/bin/fm-lock.sh" -- true || fail "SIGKILL did not release the dead launch"
+  FM_HOME="$home" "$ROOT/bin/fm-session-launch.sh" -- "$ROOT/bin/fm-lock.sh" || fail "SIGKILL did not release the dead launch"
   : > "$home/run-executor"
   owner_fixture_wait "$home/tool-status"
   [ "$(cat "$home/tool-status")" -ne 0 ] || fail "detached child mutated after losing its launch anchor"

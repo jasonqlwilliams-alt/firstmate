@@ -234,7 +234,8 @@ fm_session_start_completion_matches() {  # <completion-file> <pid> <start>
 # A nested launcher always scrubs all five fields before selecting its home.
 fm_session_owner_clear() {
   unset FM_SESSION_OWNER_ID FM_SESSION_OWNER_HOME FM_SESSION_OWNER_PID \
-    FM_SESSION_OWNER_START FM_SESSION_OWNER_KIND
+    FM_SESSION_OWNER_START FM_SESSION_OWNER_KIND FM_BOOTSTRAP_NETWORK_LOCK_PID \
+    FM_BOOTSTRAP_NETWORK_LOCK_GEN FM_BOOTSTRAP_NETWORK_WORKER_PID FM_BOOTSTRAP_NETWORK_WORKER_START
 }
 
 fm_session_owner_bind() { # <pid> <launch|startup>

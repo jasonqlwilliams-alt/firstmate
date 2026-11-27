@@ -29,21 +29,25 @@ async function dispatch(event, ...args) {
   for (const handler of handlers.get(event) ?? []) await handler(...args);
 }
 
-// The same native engine can migrate a live legacy PID-only record.
-writeFileSync(join(state, ".lock"), String(process.pid) + "\n");
+const legacy = spawnSync(process.execPath, ["--input-type=module", "-e", [
+  "import assert from 'node:assert/strict';",
+  "import { spawnSync } from 'node:child_process';",
+  "import { existsSync, writeFileSync } from 'node:fs';",
+  "const [watch, lock, state] = process.argv.slice(1);",
+  "writeFileSync(state + '/.lock', process.pid + '\\n');",
+  "(await import(watch)).default({ on() {}, registerCommand() {}, registerTool() {} });",
+  "assert.notEqual(spawnSync(lock).status, 0);",
+  "assert(!existsSync(state + '/.lock.owner-format'));",
+].join("\n"), watchUrl, executable("lock"), state], { env: process.env, encoding: "utf8" });
+assert.equal(legacy.status, 0, legacy.stderr);
 (await import(watchUrl)).default(harness);
 (await import(guardUrl)).default(harness);
 assert.equal(process.env.FM_SESSION_OWNER_KIND, "native");
 assert.equal(process.env.FM_SESSION_OWNER_PID, String(process.pid));
-const lock = call("lock");
-assert.equal(lock.status, 0, lock.stderr);
 const current = call("lock", "verify", String(process.pid));
 assert.equal(current.status, 0, current.stderr);
 const generation = current.stdout.trim();
 assert.match(generation, /^[a-f0-9]{64}$/);
-const result = await tool.execute("fixture", {});
-assert.match(result.content[0].text, /started .* extension arm child/);
-await dispatch(family === "pi" ? "agent_settled" : "session_stop", {});
 const marks = ["watch", "turnend"].map((part) => join(state, "." + family + "-" + part + "-extension-loaded"));
 for (const mark of marks) {
   const [build, pid, receipt] = readFileSync(mark, "utf8").trimEnd().split("\n");
@@ -51,6 +55,9 @@ for (const mark of marks) {
   assert.equal(pid, String(process.pid));
   assert.equal(receipt, generation);
 }
+const result = await tool.execute("fixture", {});
+assert.match(result.content[0].text, /started .* extension arm child/);
+await dispatch(family === "pi" ? "agent_settled" : "session_stop", {});
 const before = marks.map((path) => readFileSync(path, "utf8"));
 
 // A nested engine starts with an inherited environment. Loading its real

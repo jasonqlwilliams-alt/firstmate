@@ -65,6 +65,18 @@ if [ "$CMD" != check ] && fm_session_owner_mode_active "$STATE"; then
   OWNER_GEN=$FM_SESSION_LOCK_GENERATION
 fi
 
+lease_claim_available() {
+  local task=$1 actor=$2 rc=0
+  fm_lease_live "$task" || rc=$?
+  case "$rc" in
+    0) [ "$FM_LEASE_ACTOR" = "$actor" ] && return 0
+       echo "error: claim refused - task '$task' is leased to the $FM_LEASE_ACTOR supervision actor (state/.lease-$task)" >&2 ;;
+    1) return 0 ;;
+    *) echo "error: claim refused - cannot verify the lease for task '$task'" >&2 ;;
+  esac
+  return 1
+}
+
 case "$CMD" in
   claim|release)
     TASK=${1:-}
@@ -120,10 +132,7 @@ case "$CMD" in
       exit "$FM_LEASE_REFUSE_EXIT"
     fi
     LEASE=$(fm_lease_path "$TASK")
-    if fm_lease_live "$TASK" && [ "$FM_LEASE_ACTOR" != "$ACTOR" ]; then
-      echo "error: claim refused - task '$TASK' is leased to the $FM_LEASE_ACTOR supervision actor (state/.lease-$TASK)" >&2
-      exit "$FM_LEASE_REFUSE_EXIT"
-    fi
+    lease_claim_available "$TASK" "$ACTOR" || exit "$FM_LEASE_REFUSE_EXIT"
     # The lease outlives this CLI call, so its liveness pid must be the
     # long-lived supervising process: FM_LEASE_HOLDER_PID when the caller
     # provides one (the Pi branch extension passes the session-lock holder),
@@ -157,10 +166,7 @@ case "$CMD" in
     elif ! ln -- "$TMP" "$LEASE" 2>/dev/null; then
       # Lost the create race to the sibling actor; re-check who won.
       rm -f -- "$TMP"
-      if fm_lease_live "$TASK" && [ "$FM_LEASE_ACTOR" != "$ACTOR" ]; then
-        echo "error: claim refused - task '$TASK' was just leased to the $FM_LEASE_ACTOR supervision actor" >&2
-        exit "$FM_LEASE_REFUSE_EXIT"
-      fi
+      lease_claim_available "$TASK" "$ACTOR" || exit "$FM_LEASE_REFUSE_EXIT"
       TMP=$(mktemp "$STATE/.fm-lease-tmp.XXXXXX")
       write_lease > "$TMP"
       mv -f -- "$TMP" "$LEASE"

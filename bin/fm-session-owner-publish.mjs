@@ -7,14 +7,15 @@ import {
 } from "node:fs";
 import { dirname, basename, join } from "node:path";
 
-const [lock, claimant, oldPid, pid, legacyProof, newProof] = process.argv.slice(2);
+const [lock, claimant, start, oldPid, pid, legacyProof, newProof] = process.argv.slice(2);
 const claim = `${lock}.acquire`;
 const base = dirname(lock);
 const prefix = basename(lock);
 
 function ownsClaim() {
   return readlinkSync(claim) === claimant
-    && readFileSync(join(claimant, "pid"), "utf8") === `${process.pid}\n`;
+    && readFileSync(join(claimant, "pid"), "utf8") === `${process.pid}\n`
+    && readFileSync(join(claimant, "start"), "utf8") === `${start}\n`;
 }
 
 function replace(path, content) {
@@ -69,6 +70,7 @@ try {
     if (ownsClaim()) {
       unlinkSync(claim);
       unlinkSync(join(claimant, "pid"));
+      unlinkSync(join(claimant, "start"));
       rmdirSync(claimant);
     }
   } catch {

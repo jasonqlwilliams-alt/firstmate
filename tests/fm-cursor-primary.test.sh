@@ -736,10 +736,10 @@ SH
       invoke > "$FM_HOME/idle" 2>&1
       test ! -e "$FM_HOME/state/arm-ran"
       : > "$FM_HOME/state/work.meta"
-      : > "$FM_HOME/state/.afk-contract"
+      : > "$FM_HOME/state/.afk"
       invoke > "$FM_HOME/away" 2>&1
       test ! -e "$FM_HOME/state/arm-ran"
-      unlink "$FM_HOME/state/.afk-contract"
+      unlink "$FM_HOME/state/.afk"
 
       printf "%s\n" "$FM_FIXTURE_PAYLOAD" | "$FM_HOME/bin/fm-session-launch.sh" -- "$FM_HOME/bin/$FM_FIXTURE_HOOK"
       test ! -e "$FM_HOME/state/arm-ran"
@@ -773,6 +773,53 @@ SH
   pass "Claude and Cursor Stops use their launch binding and preserve idle and away gates"
 }
 
+test_stale_claude_stop_cannot_commit_failure() {
+  local dir owner waited
+  dir=$(make_primary_dir "$TMP_ROOT/stale-claude-stop")
+  mkdir -p "$dir/config"
+  printf 'launch-v1\n' > "$dir/config/session-lock-owner"
+  cp "$ROOT/bin/fm-session-launch.sh" "$ROOT/bin/fm-session-owner-publish.mjs" "$dir/bin/"
+  : > "$dir/state/work.meta"
+  cat > "$dir/bin/fm-watch-arm.sh" <<'SH'
+#!/bin/bash
+: > "$FM_HOME/arm-running"
+for _ in $(seq 1 300); do
+  [ ! -e "$FM_HOME/arm-exit" ] || exit 1
+  sleep 0.05
+done
+exit 1
+SH
+  chmod +x "$dir/bin/fm-watch-arm.sh"
+  FM_HOME="$dir" FM_FIXTURE_PAYLOAD="$CLAUDE_STOP_PAYLOAD" FM_CLAUDE_AUTOARM_ATTEMPTS=1 \
+    "$dir/bin/fm-session-launch.sh" -- /bin/bash -ec '
+      "$FM_HOME/bin/fm-lock.sh"
+      (
+        rc=0
+        "$FM_HOME/bin/fm-claude-stop-autoarm.sh" <<< "$FM_FIXTURE_PAYLOAD" 2>"$FM_HOME/hook.out" || rc=$?
+        printf "%s\n" "$rc" > "$FM_HOME/hook.rc"
+      ) &
+      for _ in $(seq 1 300); do
+        [ ! -e "$FM_HOME/owner-exit" ] || exit 0
+        sleep 0.05
+      done
+      exit 1
+    ' >/dev/null &
+  owner=$!
+  for waited in $(seq 1 300); do [ ! -e "$dir/arm-running" ] || break; sleep 0.05; done
+  [ -e "$dir/arm-running" ] || fail "Claude Stop did not reach the fixture arm"
+  cp "$dir/state/.claude-autoarm-epoch" "$dir/before-takeover"
+  : > "$dir/owner-exit"
+  wait "$owner" || fail "the old launch did not exit"
+  FM_HOME="$dir" "$dir/bin/fm-session-launch.sh" -- "$dir/bin/fm-lock.sh" || fail "the next launch did not acquire the lock"
+  : > "$dir/arm-exit"
+  for waited in $(seq 1 300); do [ ! -s "$dir/hook.rc" ] || break; sleep 0.05; done
+  [ "$(cat "$dir/hook.rc")" = 0 ] || fail "a stale Stop requested a Claude continuation"
+  assert_absent "$dir/state/.claude-autoarm-failure-notified" "a stale Stop consumed the failure notice"
+  cmp -s "$dir/before-takeover" "$dir/state/.claude-autoarm-epoch" || fail "a stale Stop changed the auto-arm ledger"
+  pass "Claude Stop refuses a failed arm outcome after the next launch acquires"
+}
+
 if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then
   test_versioned_stop_hooks_require_their_launch
+  test_stale_claude_stop_cannot_commit_failure
 fi

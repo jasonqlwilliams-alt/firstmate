@@ -36,6 +36,7 @@ make_spawn_fakebin() {
   fakebin=$(fm_test_make_spawn_fakebin "$dir")
   cat > "$fakebin/timeout" <<'SH'
 #!/usr/bin/env bash
+case "${1:-}" in -k|-s) shift 2 ;; esac
 shift
 exec "$@"
 SH
@@ -1603,9 +1604,11 @@ test_active_dispatch_profile_does_not_block_secondmate_launch
 echo "# all fm-spawn-dispatch-profile tests passed"
 
 test_secondmate_relaunch_rebinds_the_target_home() {
-  local rec id sm out launch first second
-  id=profile-secondmate-owner
-  rec=$(make_spawn_case owner-relaunch codex "$id")
+  local mode=$1 rec id sm out launch first second
+  local -a harness_args=()
+  if [ "$mode" = raw ]; then harness_args=(--harness 'exec codex'); fi
+  id=profile-secondmate-owner-$mode
+  rec=$(make_spawn_case "owner-relaunch-$mode" codex "$id")
   read_case_record "$rec"
   sm="$CASE_DIR/secondmate-home"
   make_seeded_secondmate_home "$sm" "$id"
@@ -1615,6 +1618,22 @@ test_secondmate_relaunch_rebinds_the_target_home() {
   for file in fm-session-launch.sh fm-lock.sh fm-session-lock-lib.sh fm-session-lock-record-lib.sh     fm-session-owner-publish.mjs fm-cursor-lib.sh fm-wake-lib.sh; do
     ln -s "$ROOT/bin/$file" "$sm/bin/$file"
   done
+  mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux-base"
+  cat > "$FAKEBIN_DIR/tmux" <<'SH'
+#!/bin/bash
+case "$*" in
+  *'#{pane_current_command}'*) printf 'bash\n'; exit 0 ;;
+  *'#{pane_tty}'*) exit 1 ;;
+esac
+if [ "$1" = send-keys ] && [ "${2:-}" = -t ] && [ "${5:-}" = Enter ]; then
+  payload=$4
+  case "$payload" in
+    'printf '*'.relaunch-path.'*) (set -C; eval "$payload"); exit $? ;;
+  esac
+fi
+exec "${0%/*}/tmux-base" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/tmux"
   cat > "$FAKEBIN_DIR/codex" <<'SH'
 #!/bin/bash
 set -eu
@@ -1636,7 +1655,8 @@ test "$(cat "$FM_HOME/detached-return")" = 0
 cmp "$FM_HOME/current-generation" "$FM_HOME/detached-generation"
 SH
   chmod +x "$FAKEBIN_DIR/codex"
-  out=$(run_spawn "$HOME_DIR" "$sm" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)     || fail "secondmate fixture spawn failed: $out"
+  out=$(run_spawn "$HOME_DIR" "$sm" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate "${harness_args[@]}") \
+    || fail "secondmate fixture spawn failed: $out"
   launch=$(cat "$LAUNCH_LOG")
   run_fake_pane() {
     # shellcheck disable=SC2016 # The launch binding is read by the fake pane.
@@ -1651,8 +1671,9 @@ SH
   [ "$(cat "$sm/state/.lock")" = "$(cat "$sm/harness-pid")" ] || fail "lock did not bind to the secondmate harness"
   unlink "$sm/detached-return"
   # The fake endpoint disappeared after the first launcher exited.
-  unlink "$FAKEBIN_DIR/tmux.windows"
-  out=$(run_spawn "$HOME_DIR" "$sm" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" --relaunch)     || fail "secondmate fixture relaunch failed: $out"
+  unlink "$FAKEBIN_DIR/tmux-base.windows"
+  out=$(run_spawn "$HOME_DIR" "$sm" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" --relaunch "${harness_args[@]}") \
+    || fail "secondmate fixture relaunch failed: $out"
   launch=$(cat "$LAUNCH_LOG")
   run_fake_pane "$launch" || fail "the relaunched secondmate did not acquire its isolated home"
   second=$(cat "$sm/detached-generation")
@@ -1662,5 +1683,6 @@ SH
 }
 
 if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then
-  test_secondmate_relaunch_rebinds_the_target_home
+  test_secondmate_relaunch_rebinds_the_target_home managed
+  test_secondmate_relaunch_rebinds_the_target_home raw
 fi

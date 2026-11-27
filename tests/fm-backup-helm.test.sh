@@ -42,6 +42,7 @@ if [ "\${1:-}" = "--help" ]; then
   exit 0
 fi
 printf 'cwd=%s fm_home=%s argv=%s\\n' "\$PWD" "\${FM_HOME:-unset}" "\$*" >> '$PROBE_LOG'
+[ -z "\${FM_SESSION_OWNER_ID:-}\${FM_SESSION_OWNER_HOME:-}\${FM_SESSION_OWNER_PID:-}\${FM_SESSION_OWNER_START:-}\${FM_SESSION_OWNER_KIND:-}" ] || exit 42
 prompt=\${!#}
 mode=\$(cat '$TMP_ROOT/mode-$1' 2>/dev/null || printf answer)
 case "\$mode" in
@@ -157,7 +158,9 @@ pass "condition classifies Claude all_models runway"
 
 # --- probe ------------------------------------------------------------------
 : > "$PROBE_LOG"
-out=$(FM_HOME=/should/not/leak helm probe --harness pi --model m1 --effort high) || fail "probe must succeed when the successor answers"
+out=$(FM_HOME=/should/not/leak FM_SESSION_OWNER_ID=parent-id FM_SESSION_OWNER_HOME=/parent \
+  FM_SESSION_OWNER_PID=42 FM_SESSION_OWNER_START=parent-start FM_SESSION_OWNER_KIND=launch \
+  helm probe --harness pi --model m1 --effort high) || fail "probe must clear the home and binding before invoking the successor"
 assert_contains "$out" "status=ok" "probe ok line"
 assert_contains "$out" "harness=pi model=m1 effort=high" "probe names the successor"
 probe_call=$(cat "$PROBE_LOG")
@@ -520,6 +523,30 @@ SH
     export FM_HOME="$home" FM_BACKUP_HELM_DRIVER='' FM_BACKEND_HERDR_CLIENT_SESSION=''
     export FM_STATE_OVERRIDE='' FM_SUPERVISOR_TARGET='' FM_SUPERVISOR_BACKEND='' TMUX_PANE=''
     export HERDR_ENV=1 HERDR_SESSION=helm-fixture HERDR_PANE_ID=w7:p2
+    if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then
+      startup_home="$TMP_ROOT/h-startup-in-progress"
+      new_home "$startup_home"
+      printf 'launch-v1\n' > "$startup_home/config/session-lock-owner"
+      # shellcheck disable=SC2016
+      FM_HOME="$startup_home" FM_HELM_TEST_BIN="$ROOT/bin" /bin/bash -ec '
+        . "$FM_HELM_TEST_BIN/fm-session-lock-lib.sh"
+        fm_session_owner_bind "$$" startup
+        "$FM_HELM_TEST_BIN/fm-lock.sh"
+        exec sleep 60
+      ' >/dev/null &
+      startup_holder=$!
+      trap 'kill "$holder" "$startup_holder" 2>/dev/null || true; wait "$holder" "$startup_holder" 2>/dev/null || true' EXIT
+      for _ in $(seq 1 100); do [ ! -e "$startup_home/state/.lock" ] || break; sleep 0.05; done
+      [ -e "$startup_home/state/.lock" ] || fail "startup owner did not acquire its home"
+      if out=$(FM_HOME="$startup_home" helm handover --workspace "$home" --backend herdr --target helm-fixture:w7:p2 --harness pi 2>&1); then
+        fail "handover admitted a successor over a live startup-only owner"
+      fi
+      assert_contains "$out" "session lock is neither held by a live harness nor free or stale" "handover misclassified the live startup owner"
+      if grep -q 'pane send-' "$FM_HELM_TEST_IO"; then fail "startup-only owner caused handover input"; fi
+      kill "$startup_holder" 2>/dev/null || true
+      wait "$startup_holder" 2>/dev/null || true
+      trap 'kill "$holder" 2>/dev/null || true; wait "$holder" 2>/dev/null || true' EXIT
+    fi
     out=$(helm arm --workspace "$home" --interval 0.1 --stable 1 --action-timeout 30) ||
       fail "could not arm the fixture: $out"
     assert_contains "$out" "target: helm-fixture:w7:p2" "arm did not select the supervisor pane"

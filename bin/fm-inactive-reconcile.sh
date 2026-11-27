@@ -573,6 +573,9 @@ scan_pass() { # <cursor> <after|through> <deadline> <secondmate-id-or-empty>
 
 scan() {
   local startup=${1:-0} self='' cursor deadline rc=0 marker_rc=0
+  if [ -n "${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-}" ]; then
+    fm_session_network_worker_owns_claim "$STATE" || return 1
+  fi
   mkdir -p "$STATE" "$OUTCOME_DIR" || return 1
   [ ! -L "$OUTCOME_DIR" ] || return 1
   if self=$(home_secondmate_id); then
