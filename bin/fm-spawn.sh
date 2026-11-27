@@ -3300,6 +3300,20 @@ if [ -e "$STATE/$ID.backlog-close" ] || [ -L "$STATE/$ID.backlog-close" ]; then
   exit 1
 fi
 
+spawn_with_failure_diagnostic() {
+  local diagnostic status=0
+  {
+    diagnostic=$("$@" 2>&1 >&3) || status=$?
+  } 3>&1
+  if [ -n "$diagnostic" ]; then
+    if [ "$status" -ne 0 ]; then
+      diagnostic=$(awk '!/^(error|warning|notice|SECONDMATE_SYNC):|^[[:space:]]*$/ { $0 = "error: " $0 } 1' <<< "$diagnostic")
+    fi
+    printf '%s\n' "$diagnostic" >&2
+  fi
+  return "$status"
+}
+
 W="fm-$ID"
 if [ "$RELAUNCH" -eq 1 ]; then
   # A secondmate's home already resolved WT above through the same validation a
@@ -3320,9 +3334,9 @@ elif [ "$RELAUNCH" -eq 1 ] && [ "$RELAUNCH_RECREATE" -eq 1 ]; then
   # is not a one-way door.
   case "$BACKEND" in
     tmux)
-      SES=$(fm_backend_tmux_container_ensure) || exit 1
+      SES=$(spawn_with_failure_diagnostic fm_backend_tmux_container_ensure) || exit 1
       T="$SES:$W"
-      WID=$(fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
+      WID=$(spawn_with_failure_diagnostic fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
       WT_TARGET="$WID"
       ;;
     herdr)
@@ -3356,7 +3370,7 @@ EOF
 else
 case "$BACKEND" in
   tmux)
-    SES=$(fm_backend_tmux_container_ensure "$SES") || exit 1
+    SES=$(spawn_with_failure_diagnostic fm_backend_tmux_container_ensure "$SES") || exit 1
     T="$SES:$W"
     # #134 robustness (tmux): fm_backend_tmux_create_task captures a stable window
     # id and pins the window name (automatic-rename/allow-rename off) so a captain's
@@ -3364,7 +3378,7 @@ case "$BACKEND" in
     # treehouse cd's into the worktree. WT_TARGET carries that stable id for the
     # rename-critical worktree-detection steps below; the persisted window= handle
     # stays $T (the name form), which is safe now that rename is disabled.
-    WID=$(fm_backend_tmux_create_task "$SES" "$W" "$PROJ_ABS") || exit 1
+    WID=$(spawn_with_failure_diagnostic fm_backend_tmux_create_task "$SES" "$W" "$PROJ_ABS") || exit 1
     WT_TARGET="$WID"
     ;;
   herdr)
@@ -5069,7 +5083,7 @@ spawn_record_traceparent() {
 # process (go build, go test, ...) inherit it. Sent before the launch command so
 # the env is set when the agent starts; the brief sleep lets the export land.
 SPAWN_TASK_TMP_HANDED_OFF=1
-spawn_send_text_line "$T" "export GOTMPDIR=$(printf '%q' "$TASK_TMP/gotmp")"
+spawn_with_failure_diagnostic spawn_send_text_line "$T" "export GOTMPDIR=$(printf '%q' "$TASK_TMP/gotmp")"
 # Mark the pane as a task worker so bin/fm-test-run.sh can refuse to run the
 # suite in the repository's primary checkout. Ship and scout workers are the
 # ones assigned an isolated worktree; a secondmate runs its own home instead.
@@ -5121,13 +5135,13 @@ if [ "$LAUNCH_ENV_ENABLED" = 1 ]; then
   LAUNCH="$LAUNCH_ENV_PREFIX /bin/sh -c $(shell_quote "$LAUNCH")"
 fi
 sleep 0.3
-spawn_send_literal "$T" "$LAUNCH"
+spawn_with_failure_diagnostic spawn_send_literal "$T" "$LAUNCH"
 sleep 0.3
 if [ "${HERDR_PROJECTED:-0}" -eq 1 ]; then
   HERDR_PROJECTION_ABORT_CLEANUP=0
   spawn_herdr_presentation_order_lock_release
 fi
-spawn_send_key "$T" Enter
+spawn_with_failure_diagnostic spawn_send_key "$T" Enter
 if [ "$HARNESS" = kimi ]; then
   if ! kimi_wait_for_ready; then
     kimi_spawn_fail "kimi did not show a verified ready signal before brief delivery"

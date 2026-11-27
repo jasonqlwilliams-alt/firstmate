@@ -216,6 +216,7 @@ test_agent_state_dispatcher_and_compatibility() {
 make_toolchain() {
   local dir=$1 fakebin
   fakebin=$(fm_fakebin "$dir")
+  fm_test_track_task_tmps "$fakebin" || return 1
   fm_fake_exit0 "$fakebin" node chrome-devtools-axi pi-signed
   fm_fake_version_tool "$fakebin" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.46
   cat > "$fakebin/gh-axi" <<'SH'
@@ -317,11 +318,11 @@ case "${1:-}" in
   new-window|kill-window)
     printf '%s\n' "$*" >> "${FM_TMUX_CALL_LOG:?}"
     [ "${1:-}" = kill-window ] && : > "${FM_TMUX_CALL_LOG}.killed"
-    if [ "${FM_TEST_FAIL_NEW_WINDOW:-0}" = 1 ] && [ "${1:-}" = new-window ]; then
-      printf 'create window failed: fixture refused new-window\n' >&2
-      exit 1
-    fi
     if [ "${1:-}" = new-window ]; then
+      case "${FM_TEST_FAIL_NEW_WINDOW:-0}" in
+        1) printf 'create window failed: fixture refused new-window\n' >&2; exit 1 ;;
+        advisory-only) printf 'warning: fixture ignored a setting\n' >&2; exit 1 ;;
+      esac
       rm -f "${FM_TMUX_CALL_LOG}.killed"
       fm_fake_tmux_new_window "$0.windows" @1 "$@"
     else
@@ -497,16 +498,52 @@ test_sweep_reports_missing_endpoint_relaunch_failure() {
   local w fb tmuxfb log out
   w=$(new_world sweep-missing-failure)
   add_sm_home "$w" sm1 firstmate:fm-sm1 pi
+  printf 'drifted preferences\n' > "$w/sm1/data/captain-shared.md"
   fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
   log="$w/calls.log"; : > "$log"
 
   out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" missing "$log" FM_TEST_FAIL_NEW_WINDOW=1)
 
-  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing: create window failed: fixture refused new-window" \
+  assert_absent "$w/sm1/data/captain-shared.md" "fixture drift: inheritance did not quarantine the local preferences"
+  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing: error: create window failed: fixture refused new-window" \
     "a failed missing-endpoint relaunch should retain its authorizing cause and name the backend refusal"
   assert_not_contains "$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed')" \
     "sync skipped before launch" "a best-effort advisory displaced the actionable refusal"
   pass "sweep: failed relaunch diagnostics distinguish a confidently missing endpoint"
+}
+
+test_sweep_reports_exit_status_without_error() {
+  local w fb tmuxfb log out
+  w=$(new_world sweep-silent-failure)
+  add_sm_home "$w" sm1 firstmate:fm-sm1 pi
+  printf 'drifted preferences\n' > "$w/sm1/data/captain-shared.md"
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  log="$w/calls.log"; : > "$log"
+
+  out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" missing "$log" FM_TEST_FAIL_NEW_WINDOW=advisory-only)
+
+  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing: no diagnostic (spawn exit status 1)" \
+    "an advisory is not a spawn failure diagnostic"
+  pass "sweep: an advisory-only relaunch reports the spawn exit status"
+}
+
+test_sweep_reports_task_temp_creation_failure() {
+  local w fb tmuxfb log out task_tmp
+  w=$(new_world sweep-temp-creation-failure)
+  add_sm_home "$w" sm1 firstmate:fm-sm1 pi
+  task_tmp="$w/worker-temp"
+  mkdir -p "$task_tmp"
+  : > "$task_tmp/gotmp"
+  printf 'tasktmp=%s\n' "$task_tmp" >> "$w/home/state/sm1.meta"
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  log="$w/calls.log"; : > "$log"
+
+  out=$(LC_ALL=C run_bootstrap "$tmuxfb:$fb" "$w/home" missing "$log")
+
+  assert_contains "$out" 'respawn failed after recorded endpoint confidently missing: mkdir:' \
+    "recovery failure should name the mkdir error"
+  assert_contains "$out" "$task_tmp/gotmp" "recovery failure should name the blocked directory"
+  pass "sweep: a blocked Go temp directory reports the mkdir error"
 }
 
 test_sweep_reports_retained_temp_root_after_failed_recovery() {
@@ -528,7 +565,7 @@ test_sweep_reports_retained_temp_root_after_failed_recovery() {
   assert_contains "$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed')" \
     "temporary directory remains at $task_tmp" "recovery failure summary omitted the retained temp root"
   assert_contains "$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed')" \
-    "confidently missing: fixture rejected launch text (" "recovery failure summary did not lead with the launch refusal"
+    "confidently missing: error: fixture rejected launch text (" "recovery failure summary did not lead with the launch refusal"
   pass "sweep: failed recovery reports the exact temp root it retained"
 }
 
@@ -556,10 +593,10 @@ test_sweep_names_spawn_error_over_earlier_advisory() {
   raw=$(PATH="$tmuxfb:$fb:$BASE_PATH" TMUX='' FM_BACKEND=tmux FM_HOME="$w/home" \
     FM_TEST_PANE_CMD=missing FM_TMUX_CALL_LOG="$log" FM_SPAWN_NO_GUARD=1 \
     "$ROOT/bin/fm-spawn.sh" sm1 --secondmate 2>&1) && fail "fixture drift: spawn unexpectedly succeeded"
-  [ "$(printf '%s\n' "$raw" | sed -n 1p)" = "warning: secondmate sm1 sync skipped before launch: not a git repo" ] \
-    || fail "fixture drift: spawn output no longer leads with the advisory: $raw"
-  assert_contains "$raw" "error: task sm1 has no brief" \
-    "fixture drift: spawn no longer refuses the charter-less home: $raw"
+  case "$raw" in
+    *'warning: secondmate sm1 sync skipped before launch: '*$'\n'*'error: task sm1 has no brief'*) ;;
+    *) fail "fixture drift: expected a sync advisory before the missing-brief refusal: $raw" ;;
+  esac
   pass "sweep: failed relaunch names spawn's error over an earlier advisory"
 }
 
@@ -692,6 +729,8 @@ test_sweep_respawns_authoritatively_missing_pi_signed_secondmate
 test_sweep_never_acts_on_ambiguous_existing_process
 test_sweep_never_acts_on_transient_unreadability
 test_sweep_reports_missing_endpoint_relaunch_failure
+test_sweep_reports_exit_status_without_error
+test_sweep_reports_task_temp_creation_failure
 test_sweep_reports_retained_temp_root_after_failed_recovery
 test_sweep_names_spawn_error_over_earlier_advisory
 test_sweep_never_acts_on_unverified_harness_dead_reading
