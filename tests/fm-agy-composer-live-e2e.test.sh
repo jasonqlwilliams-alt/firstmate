@@ -111,14 +111,12 @@ done
 cat 2>/dev/null > "$WORK/launch.sh" <<'SH' || fail "could not write the private launcher"
 #!/usr/bin/env bash
 set -u
-ip link set lo up || { echo 'launch refused: loopback did not come up'; exec sleep 300; }
+ip link set lo up || exit 1
 links=$(ip -o link show | awk -F': ' '{print $2}' | tr '\n' ' ')
-if [ "$links" != 'lo ' ]; then
-  echo "launch refused: namespace has interfaces beyond loopback: $links"; exec sleep 300
-fi
+[ "$links" = 'lo ' ] || exit 1
 exec unshare -U --map-user="$FM_AGY_UID" --map-group="$FM_AGY_GID" bash -c '
   if (exec 3<>/dev/tcp/1.1.1.1/443) 2>/dev/null; then
-    echo "launch refused: outbound connect succeeded"; exec sleep 300
+    exit 1
   fi
   agy --version 2>/dev/null > "$FM_AGY_VERSION_FILE" || true
   echo egress-blocked > "$FM_AGY_EGRESS_FILE"
@@ -129,7 +127,7 @@ chmod +x "$WORK/launch.sh" 2>/dev/null || fail "could not make the private launc
 # --- screen helpers -----------------------------------------------------------
 capture_styled() { "$REAL_TMUX" -L "$SOCKET" capture-pane -e -p -t "$WIN" 2>/dev/null; }
 
-save_capture() {  # <name> <styled-screen>
+save_capture() {  # <name> <styled-screen> <opening-rule-row>
   [ -n "$CAPTURE_DIR" ] || return 0
   local screen=$2 cursor
   [ -n "$screen" ] || fail "could not read a nonempty screen for capture $1"
@@ -141,7 +139,7 @@ save_capture() {  # <name> <styled-screen>
     mkdir -p -- "$CAPTURE_DIR" &&
       perl -pe '
         BEGIN {
-          ($work, $home, $user, $host) = splice @ARGV;
+          ($opening_row, $work, $home, $user, $host) = splice @ARGV;
           %redact = ($work => "<private>", $home => "<home>", $user => "<user>", $host => "<host>");
           $literal = join "|", map { quotemeta } sort { length($b) <=> length($a) } grep { length } keys %redact;
         }
@@ -149,8 +147,8 @@ save_capture() {  # <name> <styled-screen>
           \e\[[0-?]*[ -/]*[@-~](*SKIP)(*F)
           | [[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]+
           | ($literal)
-        }{defined $1 ? $redact{$1} : "<email>"}gex;
-      ' -- "$WORK" "$REAL_HOME" "$REAL_USER" "$REAL_HOST" <<< "$screen" > "$CAPTURE_DIR/$1.ansi" &&
+        }{defined $1 ? $redact{$1} : "<email>"}gex if $. < $opening_row;
+      ' -- "$3" "$WORK" "$REAL_HOME" "$REAL_USER" "$REAL_HOST" <<< "$screen" > "$CAPTURE_DIR/$1.ansi" &&
       printf '%s\n' "$cursor" > "$CAPTURE_DIR/$1.cursor"
   } 2>/dev/null || fail "could not write screen and cursor evidence for capture $1"
 }
@@ -161,24 +159,29 @@ guarded() {  # <expected-pending> [fit-text]
 
 # composer_frame <text>: positive identification of agy's framed composer
 # holding the guard's own text. Reads the rows between the LAST two solid rules,
-# requires the first to open with agy's `>` glyph, and compares the rows'
-# content with every space removed to <text> with every space removed: equal
-# proves the whole draft is in the frame however agy wrapped it. Prints the
-# number of framed content rows and the visible text of the first row.
+# requires the first to open with agy's `>` glyph, and compares the rows with
+# <text>, allowing a separator at each wrap boundary. Prints the opening
+# rule row, the number of content rows, and the visible text of the first row.
 composer_frame() {  # <text> (styled screen on stdin)
   fm_composer_strip_ansi | LC_ALL=C awk -v want="$1" '
     { sub(/\r$/, ""); row[NR] = $0; t = $0; gsub(/^[ \t]+|[ \t]+$/, "", t)
       if (t ~ /^(─)+$/ && length(t) >= 20) { start = stop; stop = NR } }
     END {
       if (!start || stop - start < 2) exit 1
-      first = row[start + 1]; sub(/^[ \t]+/, "", first)
-      if (!sub(/^> /, "", first)) exit 1
-      sub(/[ \t]+$/, "", first)
-      got = first
-      for (i = start + 2; i < stop; i++) got = got row[i]
-      gsub(/[ \t]/, "", got); gsub(/[ \t]/, "", want)
-      if (got != want) exit 1
-      print stop - start - 1
+      for (i = start + 1; i < stop; i++) {
+        text = row[i]
+        sub(/^[ \t]+/, "", text)
+        sub(/[ \t]+$/, "", text)
+        if (i == start + 1) {
+          if (!sub(/^> /, "", text)) exit 1
+          first = text
+        }
+        if (text == "" || substr(want, 1, length(text)) != text) exit 1
+        want = substr(want, length(text) + 1)
+        if (i + 1 < stop) sub(/^ /, "", want)
+      }
+      if (want != "") exit 1
+      print start, stop - start - 1
       print first
     }'
 }
@@ -224,8 +227,9 @@ if ! wait_for 90 verdict_is empty ''; then
   if [[ -n "$CAPTURE_DIR" && "$idle_verdict" == pending ]]; then
     screen=$(capture_styled) && [ -n "$screen" ] \
       || fail "could not read a nonempty screen for capture idle-unproven"
-    if [ "$(composer_frame "$FM_COMPOSER_AGY_MODE_HINT" <<< "$screen")" = "1"$'\n'"$FM_COMPOSER_AGY_MODE_HINT" ]; then
-      save_capture idle-unproven "$screen"
+    if frame=$(composer_frame "$FM_COMPOSER_AGY_MODE_HINT" <<< "$screen") &&
+      [ "${frame#* }" = "1"$'\n'"$FM_COMPOSER_AGY_MODE_HINT" ]; then
+      save_capture idle-unproven "$screen" "${frame%% *}"
     fi
   fi
   fail "idle composer never classified empty (last verdict: $idle_verdict)"
@@ -254,8 +258,9 @@ pass "a short typed draft classifies pending with its exact text"
 DRAFT="$SHORT $LONG"
 "$REAL_TMUX" -L "$SOCKET" send-keys -t "$WIN" -l " $LONG" 2>/dev/null || fail "could not extend the short draft"
 frame=$(wait_for 10 composer_holds "$DRAFT") || fail "the wrapped draft was never identified in agy's frame"
-rows=${frame%%$'\n'*}
-first_row=${frame#*$'\n'}
+layout=${frame#* }
+rows=${layout%%$'\n'*}
+first_row=${layout#*$'\n'}
 printf '# wrapped draft (%s bytes) occupies %s composer row(s) at %s columns\n' "${#DRAFT}" "$rows" "$WIDTH"
 [ "$rows" -gt 1 ] && [[ -n "$first_row" && "$DRAFT" = "$first_row"* && "$first_row" != "$DRAFT" ]] \
   || fail "a ${#DRAFT}-byte draft on a ${WIDTH}-column pane did not produce a distinct first row and continuation"
@@ -264,9 +269,9 @@ v_first=$(guarded "$first_row")
 v_plain=$(guarded '')
 printf '# wrapped verdicts (full draft, first row, no expectation) = %s, %s, %s\n' \
   "$v_draft" "$v_first" "$v_plain"
-screen=$(capture_styled) && [ "$(composer_frame "$DRAFT" <<< "$screen")" = "$frame" ] \
+screen=$(capture_styled) && frame=$(composer_frame "$DRAFT" <<< "$screen") && [ "${frame#* }" = "$layout" ] \
   || fail "the wrapped draft was no longer proven after the verdict reads"
-save_capture wrapped-draft "$screen"
+save_capture wrapped-draft "$screen" "${frame%% *}"
 case "$v_draft:$v_first:$v_plain" in
   empty:*|*:empty:*|*:empty) fail "a wrapped draft classified empty" ;;
   *:pending:*) fail "a wrapped draft proved the first row alone" ;;
