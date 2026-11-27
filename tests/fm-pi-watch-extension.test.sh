@@ -902,18 +902,52 @@ EOF
 
 # An unread second-mate pending-reply escalation keeps a later stale reminder
 # under the same task's window alias on main until the decision row is read.
-test_pi_unread_pending_reply_forces_later_stale_alias_to_main() {
-  local repo home plugin log stop out status
-  repo="$TMP_ROOT/pi-mixed-signal-root"
-  home="$TMP_ROOT/pi-mixed-signal-home"
-  log="$TMP_ROOT/pi-mixed-signal.log"
-  stop="$TMP_ROOT/pi-mixed-signal.stop"
+test_pi_stale_trigger_uses_its_task() {
+  local scenario=$1 dir repo home plugin log stop out status trigger queue live lost loss lost_window
+  dir="$TMP_ROOT/pi-stale-$scenario"
+  repo="$dir/repo"
+  home="$dir/home"
+  log="$dir/arm.log"
+  stop="$dir/stop"
   mkdir -p "$repo/bin" "$home/state" "$home/config" "$home/projects/approved"
   install_pi_watch_extension_fixture "$repo"
   plugin="$repo/.pi/extensions/fm-primary-pi-watch.ts"
-  printf 'project=%s/projects/approved\nwindow=fm-a\n' "$home" > "$home/state/task-a.meta"
-  printf 'blocked [key=pending-reply-0123456789abcdef]: pending-reply-missed: task=task-a pending-reply-id=0123456789abcdef request=finish report\n' \
-    > "$home/state/task-a.status"
+  case "$scenario" in
+    pending-reply)
+      printf 'project=%s/projects/approved\nwindow=fm-a\n' "$home" > "$home/state/task-a.meta"
+      printf 'blocked [key=pending-reply-0123456789abcdef]: pending-reply-missed: task=task-a pending-reply-id=0123456789abcdef request=finish report\n' \
+        > "$home/state/task-a.status"
+      trigger='stale: fm-a (routine reminder)'
+      queue=$(printf '1\t1\tsignal\ttask-a.status\tneeds-decision: task-a.status\n2\t2\tstale\tfm-a\t%s\n' "$trigger")
+      ;;
+    named-loss|second-loss|shared-stale|moved-stale)
+      live=z-live
+      lost=a-lost
+      lost_window=shared:w1:p2
+      if [ "$scenario" = shared-stale ]; then
+        live=a-live
+        lost=z-lost
+        printf 'needs-decision: choose how to proceed\nworking: waiting for the decision\n' > "$home/state/$live.status"
+      fi
+      if [ "$scenario" = moved-stale ]; then
+        lost_window=shared:w1:p4
+        printf 'needs-decision: choose how to proceed\nworking: waiting for the decision\n' > "$home/state/$lost.status"
+      fi
+      printf 'project=%s/projects/live\nwindow=shared:w1:p2\n' "$home" > "$home/state/$live.meta"
+      printf 'project=%s/projects/lost\nbackend=herdr\nwindow=%s\nspawn_gen=old\n' "$home" "$lost_window" > "$home/state/$lost.meta"
+      printf 'herdr:shared:w1:p2\told\n' > "$home/state/$lost.missing-endpoint"
+      printf 'project=%s/projects/approved\nwindow=shared:w1:p3\n' "$home" > "$home/state/unrelated.meta"
+      loss="stale: shared:w1:p2 (the recorded endpoint is gone for task $lost)"
+      trigger=$loss
+      case "$scenario" in shared-stale|moved-stale) trigger='stale: shared:w1:p2' ;; esac
+      queue=$(printf '1\t1\tstale\tshared:w1:p2\tstale: shared:w1:p2\n2\t2\tstale\tshared:w1:p2\t%s\n3\t3\tstale\tshared:w1:p3\tstale: shared:w1:p3\n' "$loss")
+      if [ "$scenario" = second-loss ]; then
+        printf 'project=%s/projects/lost\nbackend=herdr\nwindow=shared:w1:p2\nspawn_gen=new\n' "$home" > "$home/state/$lost.meta"
+        queue+=$(printf '\n4\t4\tstale\tshared:w1:p2\t%s\n' "$loss")
+        printf 'herdr:shared:w1:p2\tnew\n' > "$home/state/$lost.missing-endpoint"
+      fi
+      ;;
+  esac
   cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = --handling-delivered ]; then exit 0; fi
@@ -921,7 +955,7 @@ printf 'arm=%s\n' "$$" >> "${FM_ARM_LOG:?}"
 count=$(grep -c '^arm=' "$FM_ARM_LOG")
 if [ "$count" -eq 1 ]; then
   printf 'watcher: started pid=%s (beacon fresh)\n' "$$"
-  printf 'stale: fm-a (routine reminder)\n'
+  printf '%s\n' "$FM_TEST_TRIGGER"
   exit 0
 fi
 printf 'watcher: started pid=%s (beacon fresh) recovery-generation=fixture-generation\n' "$$"
@@ -930,6 +964,7 @@ while [ ! -e "$FM_STOP_FILE" ]; do sleep 0.02; done
 SH
   chmod +x "$repo/bin/fm-watch-arm.sh"
   out=$(PLUGIN="$plugin" FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_ARM_LOG="$log" FM_STOP_FILE="$stop" \
+    FM_TEST_TRIGGER="$trigger" FM_TEST_WAKE_QUEUE="$queue" \
     node --input-type=module 2>&1 <<'EOF'
 import { writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -965,8 +1000,7 @@ const pi = {
 writeFileSync(`${process.env.FM_HOME}/state/.lock`, `${process.pid}\n`);
 writeFileSync(
   `${process.env.FM_HOME}/state/.wake-queue`,
-  "1\t1\tsignal\ttask-a.status\tneeds-decision: task-a.status\n" +
-    "2\t2\tstale\tfm-a\tstale: fm-a (routine reminder)\n",
+  process.env.FM_TEST_WAKE_QUEUE + "\n",
 );
 const mod = await import(pathToFileURL(process.env.PLUGIN).href);
 mod.default(pi);
@@ -977,20 +1011,21 @@ for (let i = 0; i < 250 && offers.length === 0; i += 1) {
 for (let i = 0; i < 250 && !prompt; i += 1) {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
-if (offers.length !== 1 || offers[0].eligible !== false) {
-  throw new Error(`a later stale alias bypassed its unread decision: ${JSON.stringify(offers)}`);
+if (offers.length !== 1 || offers[0].eligible ||
+  offers[0].projects.join(",") !== `${process.env.FM_HOME}/projects/approved`) {
+  throw new Error(`the stale trigger used the wrong task scope: ${JSON.stringify(offers)}`);
 }
-if (!prompt.includes("FIRSTMATE WATCHER WAKE: stale: fm-a")) {
-  throw new Error(`a later stale alias with an unread decision did not wake main: ${prompt}`);
+if (!prompt.includes(`FIRSTMATE WATCHER WAKE: ${process.env.FM_TEST_TRIGGER}`)) {
+  throw new Error(`the stale trigger used the wrong delivery path: ${prompt}`);
 }
 writeFileSync(process.env.FM_STOP_FILE, "stop\n");
 process.exit(0);
 EOF
   )
   status=$?
-  expect_code 0 "$status" "an unread pending-reply escalation must keep a later stale alias on main: $out"
-  [ -z "$out" ] || fail "Pi unread pending-reply alias test printed output: $out"
-  pass "an unread pending-reply escalation keeps later stale aliases on main"
+  expect_code 0 "$status" "$scenario must route the stale trigger for the right task: $out"
+  [ -z "$out" ] || fail "Pi $scenario test printed output: $out"
+  pass "Pi routes stale triggers by task with mixed eligible rows ($scenario)"
 }
 
 # The captain's accepted rule names ONE coalesced trigger batch, not only a
@@ -2791,14 +2826,28 @@ EOF
 }
 
 test_pi_replacement_persistence_failure_stops_arm_child() {
-  local repo home plugin count marker out status
-  repo="$TMP_ROOT/pi-replacement-persistence-failure-root"
-  home="$TMP_ROOT/pi-replacement-persistence-failure-home"
-  count="$TMP_ROOT/pi-replacement-persistence-failure.count"
-  marker="$TMP_ROOT/pi-replacement-persistence-failure.marker"
+  local scenario=$1 dir repo home plugin count marker out status trigger
+  dir="$TMP_ROOT/pi-replacement-persistence-failure-$scenario"
+  repo="$dir/repo"
+  home="$dir/home"
+  count="$dir/count"
+  marker="$dir/child"
   mkdir -p "$repo/bin" "$home/state" "$home/config"
   install_pi_watch_extension_fixture "$repo"
   plugin="$repo/.pi/extensions/fm-primary-pi-watch.ts"
+  case "$scenario" in
+    signal)
+      trigger='signal: persistence failure actionable outcome'
+      ;;
+    named-loss)
+      trigger='stale: shared:w1:p2 (the recorded endpoint is gone for task a-lost)'
+      printf 'project=%s/projects/first\nbackend=herdr\nwindow=shared:w1:p2\nspawn_gen=old\n' "$home" > "$home/state/a-lost.meta"
+      printf 'herdr:shared:w1:p2\told\n' > "$home/state/a-lost.missing-endpoint"
+      printf 'project=%s/projects/second\nwindow=shared:w1:p3\n' "$home" > "$home/state/z-live.meta"
+      printf '1\t1\tstale\tshared:w1:p2\t%s\n1\t2\tstale\tshared:w1:p3\tstale: shared:w1:p3\n' "$trigger" \
+        > "$home/state/.wake-queue"
+      ;;
+  esac
   cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
 #!/usr/bin/env bash
 count=0
@@ -2807,7 +2856,7 @@ count=$((count + 1))
 printf '%s\n' "$count" > "$FM_ARM_COUNT"
 if [ "$count" -eq 1 ]; then
   printf 'watcher: started pid=%s\n' "$$"
-  printf 'signal: persistence failure actionable outcome\n'
+  printf '%s\n' "$FM_TEST_TRIGGER"
   exit 0
 fi
 cleanup() { rm -f "$FM_CHILD_MARKER"; }
@@ -2818,7 +2867,8 @@ printf 'watcher: started pid=%s\n' "$$"
 while :; do sleep 0.02; done
 SH
   chmod +x "$repo/bin/fm-watch-arm.sh"
-  out=$(PLUGIN="$plugin" FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_ARM_COUNT="$count" FM_CHILD_MARKER="$marker" node --input-type=module 2>&1 <<'EOF'
+  out=$(PLUGIN="$plugin" FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_ARM_COUNT="$count" FM_CHILD_MARKER="$marker" \
+    FM_TEST_TRIGGER="$trigger" node --input-type=module 2>&1 <<'EOF'
 import { existsSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -2826,6 +2876,8 @@ const handlers = new Map();
 let tool = null;
 let deliveryStarted = false;
 const prompts = [];
+let offeredToBranch = false;
+let replayProjects = [];
 const pi = {
   on(event, handler) {
     handlers.set(event, handler);
@@ -2838,7 +2890,18 @@ const pi = {
     deliveryStarted = true;
     prompts.push(message);
   },
-  events: { on() {}, emit() {} },
+  events: {
+    on() {},
+    emit(channel, offer) {
+      if (channel !== "fm-branch-supervision:dispatch") return;
+      if (offer.message.includes("could not persist a replacement-session actionable wake")) {
+        replayProjects = offer.projects;
+      }
+      if (!offer.eligible) return;
+      offeredToBranch = true;
+      offer.accept();
+    },
+  },
 };
 
 async function waitFor(pred, label) {
@@ -2869,8 +2932,13 @@ unlinkSync(`${process.env.FM_HOME}/state/extensions`);
 const replacementMod = await import(`${pathToFileURL(process.env.PLUGIN).href}?replacement=persistence-failure`);
 replacementMod.default(pi);
 await handlers.get("session_start")?.({ type: "session_start", reason: "new" }, {});
-await waitFor(() => prompts.length >= 2, "in-process handoff after persistence failure");
-if (!prompts[1].includes("signal: persistence failure actionable outcome")) {
+await waitFor(() => prompts.length >= 2 || offeredToBranch, "in-process handoff after persistence failure");
+if (offeredToBranch) throw new Error("the replacement routed a handoff failure to the branch");
+if (process.env.FM_TEST_TRIGGER.startsWith("stale:") &&
+    replayProjects.join(",") !== `${process.env.FM_HOME}/projects/second`) {
+  throw new Error("replaying the loss changed the scope of the unrelated stale wake");
+}
+if (!prompts[1].includes(process.env.FM_TEST_TRIGGER)) {
   throw new Error(`replacement lost the in-process actionable outcome: ${prompts.join(" | ")}`);
 }
 if (!prompts[1].includes("could not persist a replacement-session actionable wake")) {
@@ -2883,7 +2951,7 @@ EOF
   status=$?
   expect_code 0 "$status" "Pi replacement shutdown must stop its arm after handoff persistence fails"
   [ -z "$out" ] || fail "Pi replacement persistence-failure cleanup test printed output: $out"
-  pass "Pi replacement persistence failure still stops its arm child"
+  pass "Pi replacement persistence failure stops its arm child and replays the wake to main ($scenario)"
 }
 
 test_pi_process_exit_cleanup_listener_lifecycle() {
@@ -3994,7 +4062,11 @@ test_pi_branch_offer_flags_heartbeat
 test_pi_heartbeat_is_not_ridden_into_main_by_a_co_present_check
 test_pi_main_only_check_classes_stay_on_main
 test_pi_captain_held_signal_stays_on_main
-test_pi_unread_pending_reply_forces_later_stale_alias_to_main
+test_pi_stale_trigger_uses_its_task pending-reply
+test_pi_stale_trigger_uses_its_task named-loss
+test_pi_stale_trigger_uses_its_task second-loss
+test_pi_stale_trigger_uses_its_task shared-stale
+test_pi_stale_trigger_uses_its_task moved-stale
 test_pi_distinct_files_mixed_batch_routes_whole_batch_to_main
 test_pi_heartbeat_is_not_ridden_into_main_by_a_co_present_needs_decision
 test_pi_heartbeat_restoration_failure_stays_on_main
@@ -4014,7 +4086,8 @@ test_pi_streaming_time_delivery_keeps_the_successor_chain
 test_pi_successor_failure_during_delivery_is_retried_after_delivery
 test_pi_late_retiring_actionable_reaches_replacement
 test_pi_replacement_tokens_are_process_unique
-test_pi_replacement_persistence_failure_stops_arm_child
+test_pi_replacement_persistence_failure_stops_arm_child signal
+test_pi_replacement_persistence_failure_stops_arm_child named-loss
 test_pi_process_exit_cleanup_listener_lifecycle
 test_pi_process_exit_cleanup_stops_arm_child
 test_opencode_plugin_package_boundary_is_explicit_esm

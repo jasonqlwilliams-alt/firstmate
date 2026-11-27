@@ -1249,7 +1249,8 @@ fm_backend_agent_alive() {  # <backend> <target>
 }
 
 # fm_backend_endpoint_state: recorded-endpoint presence for loss reporting.
-# Prints present, missing, or unreadable. Recovery uses fm_backend_agent_state.
+# Prints present, missing, replaced, or unreadable. A verified replacement
+# leaves the live pane's tracking intact. Recovery uses fm_backend_agent_state.
 fm_backend_endpoint_state() {  # <backend> <target> <expected-label>
   local backend=$1 target=$2 expected_label=${3:-}
   fm_backend_source "$backend" || { printf 'unreadable'; return 0; }
@@ -1259,7 +1260,8 @@ fm_backend_endpoint_state() {  # <backend> <target> <expected-label>
       fm_backend_herdr_parse_target "$target" || { printf 'unreadable'; return 0; }
       case "$(fm_backend_herdr_task_identity_state "$target")" in
         match) printf 'present' ;;
-        missing|mismatch) printf 'missing' ;;
+        missing) printf 'missing' ;;
+        mismatch) printf 'replaced' ;;
         *)
           if [ "$(fm_backend_herdr_server_running_state "$FM_BACKEND_HERDR_SESSION")" = stopped ]; then
             printf 'missing'

@@ -59,25 +59,40 @@ The turn-end guard remains the final backstop rather than the normal continuity 
 
 ## Recorded endpoint loss
 
-When the backend confirms that a local task's recorded endpoint is missing, the watcher clears pause tracking.
-The watcher queues `stale: <window> (the recorded endpoint is gone)` once for that recorded endpoint unless a matching [retained-copy park mark](#parking-a-task-with-its-copy-retained) suppresses the report.
+On Herdr and Zellij, the watcher checks recorded endpoints per task, even when multiple task records share one pane target.
+It queues one loss wake per confirmed endpoint incarnation unless a matching [retained-copy park mark](#parking-a-task-with-its-copy-retained) suppresses the report.
+tmux queues `stale: <window> (the recorded endpoint is gone)`.
+Herdr queues `stale: <window> (the recorded endpoint is gone for task <task>)`.
 Routine polling checks local idle secondmate presence without capturing their screens and skips recorded-endpoint polling for remote mates.
 A secondmate enters the pane-stale path only while its latest status declares `paused:` or `captain-held:`.
 A backlog hold alone leaves the secondmate on the idle polling path.
 
 The presence check in [`fm-backend.sh`](../bin/fm-backend.sh) returns `unreadable` when the evidence is inconclusive, and the watcher stays quiet.
 tmux and Herdr can confirm loss on an idle presence check or after a failed screen capture.
-For Zellij, an idle presence check can verify the recorded pane against its expected tab title.
-A missing pane or a changed title is inconclusive because the recorded session may have been renamed or replaced.
+Herdr can confirm replacement using the [recorded worker binding](herdr-backend.md#restart-and-liveness-behavior).
+Physical absence clears the pane's pause tracking.
+A verified replacement leaves the current pane's tracking to its live task.
+On Zellij, the watcher uses the expected tab title to verify idle presence and screen capture for the live task, including after pane ID reuse.
+On the idle polling path, it clears a resumed secondmate's pause tracking only after verifying its tab.
+Missing panes and mismatched titles leave endpoint loss unconfirmed because the recorded session may have been renamed or replaced.
+The watcher leaves the old task's loss unreported after Zellij reuses its pane ID.
 Failed screen captures on Zellij, cmux, and Orca stay quiet in recorded-endpoint monitoring.
 A cmux surface can move out of its recorded workspace, and a successful capture can read another surface in that workspace.
 An Orca terminal can survive after its recorded handle goes stale.
 
-The report is keyed to the recorded backend, target, and spawn generation, so a relaunch can report a fresh loss even when it reuses the target.
-A successful capture or a positive presence verdict re-arms the report, and teardown keeps the loss record until it retires the task record.
-The wake keeps its window key for routing and has a separate deduplication identity, so the drain presents both the endpoint loss and any ordinary stale wake for that window, collapsing repeated loss rows to one.
-After handling both wakes, use the drain's [printed acknowledgement](#recovery-episode-acknowledgement) to retire them.
-Where the away daemon runs, it routes the loss to its escalation digest and keeps pause tracking cleared while the loss still matches the current endpoint, even if the wait remains declared.
+On Herdr and Zellij, the watcher ties each saved pane hash to the task record and endpoint incarnation that supplied it.
+A capture for a different task or incarnation starts a fresh stale check even when the screen contents are identical.
+On upgrade, an older hash without that identity also starts a fresh check and can repeat a reminder once if the watcher cannot tie the saved reminder to the currently verified task.
+
+The report is keyed to the task record's backend, target, and spawn generation, so a relaunch can report a fresh loss even when it reuses the target.
+A successful capture or a positive presence verdict for that task re-arms its report, and teardown keeps the loss record until it retires the task record.
+The wake keeps its window key for routing.
+During recovery, the drain presents the latest loss row for every named task on a window, along with the latest unnamed loss and ordinary stale rows for that window when present.
+Handle the presented wakes before running the drain's [printed acknowledgement](#recovery-episode-acknowledgement).
+Where the away daemon runs, it routes the loss to its escalation digest.
+For a named loss, it clears the named task's daemon pause and stale markers if the loss record still matches the task's current endpoint incarnation, leaving shared pane tracking to the watcher.
+Pause reconciliation keeps that task's timers cleared while the loss record still matches, even if the task still declares a wait.
+The away daemon's existing marker names can alias task IDs such as `worker.old` and `worker_old`.
 
 The [backend verification record](verification/runtime-backends.md#recorded-endpoint-loss) covers tmux and Herdr.
 The [watcher triage regressions](../tests/fm-watch-triage.test.sh) cover wake ordering, park marks, idle secondmate polling, Zellij presence verdicts, and quiet capture failures on the experimental backends.

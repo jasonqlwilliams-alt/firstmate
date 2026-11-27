@@ -1773,27 +1773,76 @@ EOF
 # main-owned in every mode, so the heartbeat case proven above and this one
 # resolve the same way.
 test_branch_predrain_recheck_excludes_new_main_owned_row_without_deferring_eligible_work() {
-  local repo home out status
-  repo="$TMP_ROOT/predrain-partial-root"
-  home="$TMP_ROOT/predrain-partial-home"
+  local scenario=$1 repo home out status
+  repo="$TMP_ROOT/predrain-partial-$scenario-root"
+  home="$TMP_ROOT/predrain-partial-$scenario-home"
   mkdir -p "$home/state" "$home/config"
   install_pi_branch_extension_fixture "$repo"
   PLUGIN="$repo/.pi/extensions/fm-branch-supervision.ts" FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" \
-    DRIVER_PRELUDE="$DRIVER_PRELUDE" node --input-type=module > "$TMP_ROOT/node-output" 2>&1 <<'EOF'
+    DRIVER_PRELUDE="$DRIVER_PRELUDE" FM_TEST_SCENARIO="$scenario" node --input-type=module > "$TMP_ROOT/node-output" 2>&1 <<'EOF'
 const prelude = process.env.DRIVER_PRELUDE;
 await eval(`(async () => { ${prelude}; globalThis.__t = { dispatch, fire, home, mainUserMessages }; })()`);
 const { dispatch, fire, home, mainUserMessages } = globalThis.__t;
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 await fire("session_start", {});
+const scenario = process.env.FM_TEST_SCENARIO;
+const stale = "stale: shared:w1:p2";
+const staleTrigger = scenario === "shared-trigger" || scenario === "moved-trigger";
+const loss = "stale\tshared:w1:p2\tstale: shared:w1:p2 (the recorded endpoint is gone for task a-lost)";
+const queuePath = `${home}/state/.wake-queue`;
+if (scenario === "second-loss" || staleTrigger) {
+  writeFileSync(`${home}/state/z-live.meta`, `project=${home}/projects/live\nwindow=shared:w1:p2\n`);
+}
 let releasePrompt;
-globalThis.__fmPromptGate = new Promise((resolve) => { releasePrompt = resolve; });
-const offer = dispatch("signal: task-local wake");
+if (!staleTrigger) {
+  globalThis.__fmPromptGate = new Promise((resolve) => { releasePrompt = resolve; });
+}
+const offer = dispatch(staleTrigger ? stale : "signal: task-local wake");
 if (!offer.accepted) throw new Error("eligible task-local offer was not accepted");
+if (staleTrigger) {
+  const staleRow = `2\t2\tstale\tshared:w1:p2\t${stale}\n`;
+  writeFileSync(queuePath, "1\t1\tsignal\tbranch-driver.status\tsignal: branch-driver.status\n" + staleRow);
+  const oldWindow = scenario === "moved-trigger" ? "shared:w1:p4" : "shared:w1:p2";
+  writeFileSync(`${home}/state/a-lost.meta`, `backend=herdr\nwindow=${oldWindow}\n`);
+  if (scenario === "moved-trigger") appendFileSync(queuePath, `3\t3\t${loss}\n`);
+  let rejected = false;
+  try {
+    await offer.settlement;
+  } catch {
+    rejected = true;
+  }
+  if (!rejected || (globalThis.__fmPrompts ?? []).length !== 0 ||
+    existsSync(`${home}/state/.branch-eligible-rows`)) {
+    throw new Error("a stale trigger that became ambiguous must fall back to main without opening a branch prompt");
+  }
+  if (!readFileSync(queuePath, "utf8").includes(staleRow)) {
+    throw new Error("the branch consumed a stale row that main must handle");
+  }
+  process.exit(0);
+}
 // A main-only notice arrives while main is still finishing its own earlier
 // turn - unacked, still sitting in the queue - between offer acceptance and
 // the branch's own drain.
-appendFileSync(`${home}/state/.wake-queue`, "2\t2\tcheck\tx-inbox\tcheck: pending x mention\n");
+let mainRows;
+if (scenario === "second-loss") {
+  const metadata = `project=${home}/projects/lost\nbackend=herdr\nwindow=shared:w1:p2\n`;
+  const metaPath = `${home}/state/a-lost.meta`;
+  const markerPath = `${home}/state/a-lost.missing-endpoint`;
+  const staleRow = `2\t2\tstale\tshared:w1:p2\t${stale}`;
+  appendFileSync(queuePath, staleRow + "\n");
+  writeFileSync(metaPath, metadata + "spawn_gen=old\n");
+  appendFileSync(queuePath, `3\t3\t${loss}\n`);
+  writeFileSync(markerPath, "herdr:shared:w1:p2\told\n");
+  writeFileSync(metaPath, metadata + "spawn_gen=new\n");
+  appendFileSync(queuePath, `4\t4\t${loss}\n`);
+  writeFileSync(markerPath, "herdr:shared:w1:p2\tnew\n");
+  writeFileSync(metaPath, metadata.replace("shared:w1:p2", "shared:w1:p4") + "spawn_gen=relaunched\n");
+  mainRows = [staleRow, `3\t3\t${loss}`, `4\t4\t${loss}`];
+} else {
+  mainRows = ["2\t2\tcheck\tx-inbox\tcheck: pending x mention"];
+  appendFileSync(queuePath, mainRows[0] + "\n");
+}
 for (let i = 0; i < 250 && !globalThis.__fmPromptStarted && mainUserMessages.length === 0; i += 1) {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
@@ -1804,11 +1853,12 @@ if (!globalThis.__fmPromptStarted) {
   throw new Error("the branch was never prompted even though its own row stayed eligible");
 }
 const snapshot = readFileSync(`${home}/state/.branch-eligible-rows`, "utf8").trim().split("\n");
-if (!snapshot.includes("1")) throw new Error(`eligible-row snapshot omitted the task-local row: ${snapshot}`);
-if (snapshot.includes("2")) throw new Error(`eligible-row snapshot granted the main-owned row: ${snapshot}`);
-const queue = readFileSync(`${home}/state/.wake-queue`, "utf8");
-if (!queue.includes("\tcheck\tx-inbox\t")) {
-  throw new Error(`the main-owned row must remain queued for main, untouched: ${queue}`);
+if (snapshot.length !== 1 || snapshot[0] !== "1") {
+  throw new Error(`branch grant must contain only its task-local row: ${snapshot}`);
+}
+const queue = readFileSync(queuePath, "utf8").split("\n");
+if (!mainRows.every((row) => queue.includes(row))) {
+  throw new Error(`main-owned rows must remain queued for main: ${queue}`);
 }
 releasePrompt();
 for (let i = 0; i < 250 && (globalThis.__fmPrompts ?? []).length === 0; i += 1) {
@@ -1825,7 +1875,7 @@ EOF
   status=$?
   out=$(cat "$TMP_ROOT/node-output")
   expect_code 0 "$status" "pre-drain eligibility re-check must exclude only the new main-owned row: $out"
-  pass "pre-drain eligibility re-check excludes a newly main-owned row without deferring eligible work"
+  pass "pre-drain eligibility re-check excludes main-owned rows without deferring eligible work ($scenario)"
 }
 
 # A needs-decision signal wakes main independently, but it must not veto an
@@ -3869,8 +3919,8 @@ if (needsDecisionMixed.eligibleSeqs.join(",") !== "2") {
 if (needsDecisionMixed.needsDecisionKeys.join(",") !== "task-a.status") {
   throw new Error(`needsDecisionKeys must name the excluded row: ${JSON.stringify(needsDecisionMixed)}`);
 }
-if (needsDecisionMixed.taskByWakeKey["task-a.status"] !== "task-a" ||
-  needsDecisionMixed.taskByWakeKey["fm-window"] !== "task-a") {
+if (needsDecisionMixed.taskByWakeKey.get("task-a.status") !== "task-a" ||
+  needsDecisionMixed.taskByWakeKey.get("fm-window") !== "task-a") {
   throw new Error(`status and stale aliases did not resolve to one task: ${JSON.stringify(needsDecisionMixed)}`);
 }
 if (needsDecisionMixed.corrupted) {
@@ -4082,6 +4132,22 @@ writeFileSync(
 const heartbeatUnresolvable = scopeForUnreadWake(state, true);
 if (heartbeatUnresolvable.eligible || !heartbeatUnresolvable.corrupted) {
   throw new Error(`an unresolvable row must still defer a heartbeat review: ${JSON.stringify(heartbeatUnresolvable)}`);
+}
+writeFileSync(`${state}/task-a.meta`, `project=${project}\nbackend=herdr\nwindow=shared:w1:p4\n`);
+writeFileSync(
+  `${state}/.wake-queue`,
+  [
+    "1\t1\tstale\tshared:w1:p2\tstale: shared:w1:p2",
+    "1\t2\tstale\tshared:w1:p2\tstale: shared:w1:p2 (the recorded endpoint is gone for task task-a)",
+    "1\t3\theartbeat\theartbeat\theartbeat",
+    "1\t4\tsignal\ttask-a.status\tsignal: task-a.status",
+  ].join("\n"),
+);
+for (const heartbeat of [true, false]) {
+  const vacatedPane = scopeForUnreadWake(state, heartbeat);
+  if (vacatedPane.eligible || !vacatedPane.corrupted || vacatedPane.eligibleSeqs.length !== 0) {
+    throw new Error(`an unresolved stale row on a vacated pane must return the wake to main (heartbeat=${heartbeat}): ${JSON.stringify(vacatedPane)}`);
+  }
 }
 writeFileSync(
   `${state}/.wake-queue`,
@@ -4938,7 +5004,10 @@ test_branch_cache_key_is_per_home_stable
 test_branch_default_on_heartbeat_afk_and_fallback
 test_branch_predrain_recheck_keeps_a_heartbeat_a_co_present_check_arrives_under
 test_branch_report_refuses_a_task_the_wake_did_not_name
-test_branch_predrain_recheck_excludes_new_main_owned_row_without_deferring_eligible_work
+test_branch_predrain_recheck_excludes_new_main_owned_row_without_deferring_eligible_work check
+test_branch_predrain_recheck_excludes_new_main_owned_row_without_deferring_eligible_work second-loss
+test_branch_predrain_recheck_excludes_new_main_owned_row_without_deferring_eligible_work shared-trigger
+test_branch_predrain_recheck_excludes_new_main_owned_row_without_deferring_eligible_work moved-trigger
 test_branch_predrain_needs_decision_keeps_routine_row_branch_eligible
 test_settled_branch_prompt_releases_unacknowledged_grant
 test_post_construction_provider_error_falls_back_latches_and_recovers_on_cooldown

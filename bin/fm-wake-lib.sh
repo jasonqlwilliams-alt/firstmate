@@ -2372,8 +2372,12 @@ fm_wake_print_deduped() {
       dedupe = $3 SUBSEP $4
       if ($3 == "heartbeat") {
         dedupe = "heartbeat"
-      } else if ($3 == "stale" && $5 == "stale: " $4 " (" gone ")") {
-        dedupe = dedupe SUBSEP "endpoint-gone"
+      } else if ($3 == "stale") {
+        loss = "stale: " $4 " (" gone
+        named = loss " for task "
+        if ($5 == loss ")" || (index($5, named) == 1 && substr($5, length(named) + 1) ~ /^[A-Za-z0-9._-]+\)$/)) {
+          dedupe = dedupe SUBSEP $5
+        }
       }
       if (!(dedupe in seen)) {
         order[++count] = dedupe

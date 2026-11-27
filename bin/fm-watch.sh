@@ -64,8 +64,8 @@
 #                          for human inspection only - never an automatic
 #                          interrupt, signal, or restart of the worker or its
 #                          tool process.
-#   stale: <window> (the recorded endpoint is gone)
-#                          reportable loss of the recorded local endpoint;
+#   stale: <window> (the recorded endpoint is gone [for task <task>])
+#                          reportable loss of the recorded local endpoint
 #                          see docs/watcher-continuity.md#recorded-endpoint-loss
 #   stale: <window> (unread firstmate instruction: ...)
 #                          the steering-inbox ladder spent its delivery-attempt
@@ -197,8 +197,10 @@ WATCHER_DOWNTIME_MARKER="$STATE/.watcher-down"
 # cannot shadow the BSD `-f` syntax.
 if [ "$(uname)" = Darwin ]; then
   stat_mtime() { /usr/bin/stat -f %m "$1" 2>/dev/null; }        # epoch seconds of mtime
+  stat_link_count() { /usr/bin/stat -f %l "$1" 2>/dev/null; }
 else
   stat_mtime() { stat -c %Y "$1" 2>/dev/null; }
+  stat_link_count() { stat -c %h "$1" 2>/dev/null; }
 fi
 # bin/fm-classify-lib.sh owns status reported-state signatures and presentation
 # markers, while bin/fm-wake-lib.sh owns their wake-facing routing, the legacy
@@ -363,6 +365,15 @@ window_key() {  # <window>
   printf '%s' "${key//./_}"
 }
 
+pane_hash_prefix() {  # <backend> <window> <meta>
+  local backend=$1 win=$2 meta=$3 incarnation owner
+  case "$backend" in herdr|zellij) ;; *) return 0 ;; esac
+  incarnation=$(fm_backend_endpoint_incarnation "$meta") || return 1
+  case "$incarnation" in "$backend:$win"$'\t'*) ;; *) return 1 ;; esac
+  owner=$(printf '%s\t%s' "${meta##*/}" "$incarnation" | hash_pane) || return 1
+  printf '%s\t' "$owner"
+}
+
 inbox_steer_escalate_unavailable() {  # <window> <task> <record>
   local w=$1 task=$2 rec=$3 reason
   reason="stale: $w (unread firstmate instruction: $rec is unhandled and the worker's agent has exited or its endpoint is missing, so the doorbell was not typed; recover the worker)"
@@ -513,7 +524,7 @@ inbox_steer_check() {  # <window> <task> <backend>
 signal_turnend_panes_churned() {  # <file> ...
   [ -e "$CONFIG/turnend-churn-absorb" ] || return 1
   local f base task meta kind w key backend label terminal prev now since now_s absorb_secs marker age
-  local rec_task task_index i j count hash_file hash_bytes created
+  local rec_task task_index i j count hash_file hash_bytes hash_prefix created
   local max_absorb_secs=9223372036854775807
   local -a signal_tasks=() signal_statuses=() snapshot_tasks=() snapshot_kinds=()
   local -a snapshot_windows=() snapshot_keys=() snapshot_backends=() snapshot_labels=()
@@ -602,15 +613,19 @@ signal_turnend_panes_churned() {  # <file> ...
     key=${snapshot_keys[$task_index]}
     backend=${snapshot_backends[$task_index]}
     label=${snapshot_labels[$task_index]}
+    meta="$STATE/${snapshot_tasks[$task_index]}.meta"
+    hash_prefix=$(pane_hash_prefix "$backend" "$w" "$meta") || return 1
     hash_file="$STATE/.hash-$key"
     hash_bytes=$(LC_ALL=C wc -c 2>/dev/null < "$hash_file") || return 1
     hash_bytes=${hash_bytes//[[:space:]]/}
-    [ "$hash_bytes" = 32 ] || return 1
+    [ "$hash_bytes" = "$((32 + ${#hash_prefix}))" ] || return 1
     prev=$(cat "$hash_file" 2>/dev/null) || return 1
+    case "$prev" in "$hash_prefix"*) prev=${prev#"$hash_prefix"} ;; *) return 1 ;; esac
     [[ $prev =~ ^[0-9a-f]{32}$ ]] || return 1
-    now=$(FM_BACKEND_HERDR_ENDPOINT_META="$STATE/${snapshot_tasks[$task_index]}.meta" \
+    now=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
       fm_backend_capture "$backend" "$w" 40 "$label" 2>/dev/null) || return 1
     [ -n "$now" ] || return 1
+    [ "$hash_prefix" = "$(pane_hash_prefix "$backend" "$w" "$meta")" ] || return 1
     [ "$(printf '%s' "$now" | hash_pane)" != "$prev" ] || return 1
     churned_keys+=("$key")
   done
@@ -1016,7 +1031,7 @@ handle_paused_stale() {  # <window> <task> <hash>
   age=$(( now - mtime ))
   last=$(last_status_line "$statusf")
   min_age=$PAUSE_RESURFACE_SECS
-  declaration="declared:$(fm_wake_signal_sig "$statusf" || true)"
+  declaration=$(stale_wait_declaration "$task")
   if task_hold_has_no_agent "$win" "$task"; then
     if afk_record_present; then
       triage_log "absorbed stale (backlog-held, no agent attached, awaiting return): $win"
@@ -1127,9 +1142,14 @@ busy_turn_bound_check() {  # <window> <task> <hash> <since-file> <escalation-fil
   return 1
 }
 
-clear_pause_state() {  # <window-key>
+clear_pause_flags() {  # <window-key>
   local key=$1
-  rm -f "$STATE/.paused-$key" "$STATE/.paused-rechecked-$key" "$STATE/.paused-resurfaced-$key"
+  rm -f "$STATE/.paused-$key" "$STATE/.paused-rechecked-$key"
+}
+
+clear_pause_state() {  # <window-key>
+  clear_pause_flags "$1"
+  rm -f "$STATE/.paused-resurfaced-$1"
 }
 
 # The hash-scoped half of clear_pause_tracking: the stale suppressor, its wedge
@@ -1148,18 +1168,19 @@ clear_pause_tracking() {  # <window-key>
   clear_stale_hash_tracking "$key"
 }
 
-check_recorded_endpoint() {  # <backend> <window> <meta> <window-key> <marker>
-  local backend=$1 win=$2 meta=$3 key=$4 marker=$5 state incarnation lock reason status=0 label
+check_recorded_endpoint() {  # <backend> <window> <task> <window-key>
+  local backend=$1 win=$2 task=$3 key=$4 state incarnation lock reason status=0
+  local meta="$STATE/$task.meta" marker="$STATE/$task.missing-endpoint"
   [ -z "$(fm_meta_get "$meta" remote_host)" ] || return 0
-  label=${meta##*/}
-  label="fm-${label%.meta}"
   incarnation=$(fm_backend_endpoint_incarnation "$meta") || return 0
   case "$incarnation" in "$backend:$win"$'\t'*) ;; *) return 0 ;; esac
   state=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
-    fm_backend_endpoint_state "$backend" "$win" "$label" 2>/dev/null) || return 0
+    fm_backend_endpoint_state "$backend" "$win" "fm-$task" 2>/dev/null) || return 0
   case "$state" in
-    missing) ;;
-    present) [ -e "$marker" ] || return 0 ;;
+    missing|replaced) ;;
+    present)
+      [ -e "$marker" ] || { [ "$backend" = zellij ] && [ -e "$STATE/.paused-$key" ]; } || return 0
+      ;;
     *) return 0 ;;
   esac
   lock=$(fm_meta_lock_path "$meta") || return 0
@@ -1169,11 +1190,16 @@ check_recorded_endpoint() {  # <backend> <window> <meta> <window-key> <marker>
     return 0
   fi
   if [ "$state" = present ]; then
+    # An idle Zellij mate reaches this check without capturing its screen.
+    # Only a matching tab can clear the pause tracking for its pane.
+    if [ "$backend" = zellij ] && [ -e "$STATE/.paused-$key" ]; then
+      clear_pause_tracking "$key"
+    fi
     rm -f "$marker"
     fm_lock_release "$lock"
     return 0
   fi
-  clear_pause_tracking "$key"
+  [ "$state" != missing ] || clear_pause_tracking "$key"
   # Leave a reused target eligible for an unmarked task's loss check.
   if fm_backend_endpoint_parked_retained "$meta"; then
     fm_lock_release "$lock"
@@ -1186,11 +1212,23 @@ check_recorded_endpoint() {  # <backend> <window> <meta> <window-key> <marker>
     fm_lock_release "$lock"
     return 0
   fi
-  reason="stale: $win ($FM_RECORDED_ENDPOINT_GONE)"
+  if [ "$backend" = herdr ]; then
+    reason="stale: $win ($FM_RECORDED_ENDPOINT_GONE for task $task)"
+  else
+    reason="stale: $win ($FM_RECORDED_ENDPOINT_GONE)"
+  fi
   { fm_wake_append stale "$win" "$reason" && printf '%s\n' "$incarnation" > "$marker"; } || status=1
   fm_lock_release "$lock"
   [ "$status" -eq 0 ] || exit 1
   wake "$reason"
+}
+
+clear_undeclared_pause_tracking() {  # <window-key> <window> <task> <last-status-line>
+  local key=$1 win=$2 task=$3 last=$4
+  if [ -e "$STATE/.paused-$key" ] && ! status_is_paused_or_captain_held "$last" \
+    && ! task_hold_has_no_agent "$win" "$task"; then
+    clear_pause_tracking "$key"
+  fi
 }
 
 # Reconcile a declared pause, captain-held status, or active captain backlog hold
@@ -1323,6 +1361,34 @@ stale_wait_throttled() {  # <window-key> <declaration>
     && [ "$(age_of "$throttle")" -lt "$PAUSE_RESURFACE_SECS" ]
 }
 
+current_wait_throttled() {  # <window-key> <task> <last-status-line> <kind>
+  local key=$1 task=$2 last=$3 kind=$4 declaration until reminder statusf="$STATE/$2.status" CAPTAIN_CALL_IDENTITY
+  reminder=$(cat "$STATE/.paused-resurfaced-$key" 2>/dev/null) || return 1
+  [ -f "$statusf" ] && [ -r "$statusf" ] && [ ! -L "$statusf" ] || return 1
+  [ "$(stat_link_count "$statusf")" = 1 ] || return 1
+  case "$(_fm_open_decisions_file_ident "$statusf")" in
+    strong:?*|weak:?*) ;;
+    *) return 1 ;;
+  esac
+  case "$reminder" in
+    captain-hold:*)
+      [ "$kind" != secondmate ] && task_captain_call_open "$task" || return 1
+      declaration=$(captain_call_declaration "$task" "$CAPTAIN_CALL_IDENTITY")
+      [[ "$declaration" != *: ]] || return 1
+      ;;
+    declared:*)
+      status_is_paused_or_captain_held "$last" || return 1
+      declaration=$(stale_wait_declaration "$task")
+      [ "$declaration" != declared: ] || return 1
+      if until=$(status_paused_until "$last") && [ "$(date +%s)" -ge "$until" ]; then
+        declaration="$declaration:due"
+      fi
+      ;;
+    *) return 1 ;;
+  esac
+  stale_wait_throttled "$key" "$declaration"
+}
+
 # The same bound, for a stale window whose last line IS captain-relevant. That
 # line is real and its first sight must still reach the captain, but a delivery
 # they are already holding has nothing new to say on the next pane tick.
@@ -1427,7 +1493,7 @@ surface_nonterminal_stale() {  # <window> <task> <hash>
     # poll - taking the throttle with it - and would hand the mate and dead-agent
     # cadences a declaration they were never given. Only the shared re-surface
     # marker is kept, which is the whole of what this bound needs.
-    rm -f "$STATE/.paused-$key" "$STATE/.paused-rechecked-$key"
+    clear_pause_flags "$key"
   else
     clear_pause_state "$key"
   fi
@@ -2427,18 +2493,20 @@ EOF
     if [ "$backend" = herdr ]; then
       fm_backend_source herdr || continue
       herdr_meta=$(fm_backend_herdr_matching_meta "$w" "$STATE") || herdr_meta=
-      [ -z "$herdr_meta" ] || [ "$herdr_meta" = "$meta" ] || continue
     fi
-    case "$seen" in *"|$w|"*) continue ;; esac
+    case "$backend" in
+      herdr|zellij) ;; # Presence and loss checks run for each recorded task.
+      *) case "$seen" in *"|$w|"*) continue ;; esac ;;
+    esac
     kind=$(fm_meta_get "$meta" kind)
     key=$(window_key "$w")
     last=$(last_status_line "$STATE/$task.status")
-    if ! status_is_paused_or_captain_held "$last" \
-      && ! task_hold_has_no_agent "$w" "$task" \
-      && [ -e "$STATE/.paused-$key" ]; then
-      clear_pause_tracking "$key"
-    fi
     missing_marker="$STATE/$task.missing-endpoint"
+    case "$backend" in
+      herdr) [ "$herdr_meta" != "$meta" ] || clear_undeclared_pause_tracking "$key" "$w" "$task" "$last" ;;
+      zellij) ;; # Verify the tab in the presence or capture check before clearing tracking.
+      *) clear_undeclared_pause_tracking "$key" "$w" "$task" "$last" ;;
+    esac
     # An idle secondmate endpoint is healthy by design, so only a status-declared
     # wait admits a mate to the pane-stale path. The shared predicate includes
     # a declared `captain-held` status. A hold recorded only
@@ -2447,24 +2515,33 @@ EOF
     # deliberately skips, putting that read on the ordinary poll hot path.
     if [ "$kind" = secondmate ] && ! status_is_paused_or_captain_held "$last"; then
       if [ "$backend" != herdr ] || [ "$herdr_meta" != "$meta" ] || [ -e "$missing_marker" ]; then
-        check_recorded_endpoint "$backend" "$w" "$meta" "$key" "$missing_marker" || continue
+        check_recorded_endpoint "$backend" "$w" "$task" "$key" || continue
       fi
-      seen="$seen|$w|"
+      case "$backend" in
+        herdr|zellij) ;;
+        *) seen="$seen|$w|" ;;
+      esac
       continue
     fi
-    # Herdr capture requires a unique live binding. A closed pane cannot
-    # satisfy that guard.
-    if { [ "$backend" = herdr ] && [ -z "$herdr_meta" ]; } \
+    hash_prefix=$(pane_hash_prefix "$backend" "$w" "$meta") || continue
+    # Check loss for this record even if another task captured the same pane.
+    if { [ "$backend" = herdr ] && [ "$herdr_meta" != "$meta" ]; } \
       || ! tail40=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
         fm_backend_capture "$backend" "$w" 40 "fm-$task" 2>/dev/null); then
       case "$backend" in
-        tmux|herdr) check_recorded_endpoint "$backend" "$w" "$meta" "$key" "$missing_marker" || continue ;;
+        tmux|herdr) check_recorded_endpoint "$backend" "$w" "$task" "$key" || continue ;;
       esac
-      seen="$seen|$w|"
+      case "$backend" in
+        herdr|zellij) ;;
+        *) seen="$seen|$w|" ;;
+      esac
       continue
     fi
-    seen="$seen|$w|"
+    [ "$hash_prefix" = "$(pane_hash_prefix "$backend" "$w" "$meta")" ] || continue
     [ ! -e "$missing_marker" ] || rm -f "$missing_marker"
+    case "$seen" in *"|$w|"*) continue ;; esac
+    seen="$seen|$w|"
+    [ "$backend" != zellij ] || clear_undeclared_pause_tracking "$key" "$w" "$task" "$last"
     h=$(printf '%s' "$tail40" | hash_pane)
     hf="$STATE/.hash-$key"
     cf="$STATE/.count-$key"
@@ -2473,6 +2550,19 @@ EOF
     ewf="$STATE/.wedge-escalations-$key"
     pf="$STATE/.paused-$key"   # flag: this key's stale is using the bounded pause cadence
     prev=$(cat "$hf" 2>/dev/null || true)
+    case "$prev" in
+      "$hash_prefix"*) prev=${prev#"$hash_prefix"} ;;
+      *)
+        if [[ $prev =~ ^[0-9a-f]{32}$ ]] && current_wait_throttled "$key" "$task" "$last" "$kind"; then
+          clear_pause_flags "$key"
+          clear_stale_hash_tracking "$key"
+        else
+          clear_pause_tracking "$key"
+        fi
+        rm -f "$STATE/.churn-since-$key"
+        prev=
+        ;;
+    esac
     # Busy match: a backend's native semantic state when available (herdr), else
     # the last 6 non-blank lines only (the TUI footer area, where every verified
     # harness renders its busy indicator) so busy-looking strings in displayed
@@ -2508,7 +2598,7 @@ EOF
             printf '%s' "$h" > "$sf"
             wake "stale: $w"
           fi
-        elif stale_is_terminal "$w" "$STATE"; then
+        elif stale_is_terminal "$task" "$STATE"; then
           # The log's last line is captain-relevant - but that alone is not
           # proof the crew is actually done: a crew's own status log gets no
           # new entry once firstmate hands it to a no-mistakes validation
@@ -2643,7 +2733,7 @@ EOF
         fi
       fi
     else
-      printf '%s' "$h" > "$hf"
+      printf '%s%s' "$hash_prefix" "$h" > "$hf"
       echo 0 > "$cf"
       paused_bound=1
       if [ "$busy_now" -eq 0 ] && busy_turn_over_age "$task"; then

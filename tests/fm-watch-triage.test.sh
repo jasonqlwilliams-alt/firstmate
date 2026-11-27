@@ -332,14 +332,13 @@ test_malformed_seen_signature_reads_the_whole_log() {
 test_stale_is_terminal_classifier() {
   local dir state
   dir=$(make_case classify-stale); state="$dir/state"
+  fm_write_meta "$state/term.meta" "window=default:w1:p2" "backend=herdr"
+  fm_write_meta "$state/nonterm.meta" "window=default:w1:p2" "backend=herdr"
   printf 'done: ready in branch fm/x\n' > "$state/term.status"
-  stale_is_terminal "sess:fm-term" "$state" || fail "terminal stale status not classified terminal"
-  fm_write_meta "$state/herdr-term.meta" "window=default:w1:p2" "backend=herdr"
-  printf 'done: ready in branch fm/herdr\n' > "$state/herdr-term.status"
-  stale_is_terminal "default:w1:p2" "$state" || fail "terminal herdr stale status not resolved through metadata"
   printf 'working: compiling\n' > "$state/nonterm.status"
-  stale_is_terminal "sess:fm-nonterm" "$state" && fail "non-terminal stale classified terminal"
-  stale_is_terminal "sess:fm-missing" "$state" && fail "stale with no status classified terminal"
+  stale_is_terminal term "$state" || fail "terminal status on the shared pane was missed"
+  stale_is_terminal nonterm "$state" && fail "non-terminal status on the shared pane was classified terminal"
+  stale_is_terminal missing "$state" && fail "stale with no status classified terminal"
   pass "stale_is_terminal: terminal status surfaces, non-terminal and no-status are benign"
 }
 
@@ -2268,10 +2267,14 @@ test_missing_tmux_endpoint_surfaces_once() (
   printf '#!/usr/bin/env bash\nexec %q -L %q "$@"\n' "$tmux_bin" "$socket" > "$dir/bin/tmux"
   chmod +x "$dir/bin/tmux"
   export FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999
+  # Only this private tmux fixture uses these watcher intervals.
+  # shellcheck disable=SC2030
   export FM_PAUSE_RESURFACE_SECS=999999 FM_STALE_ESCALATE_SECS=999999
   "$dir/bin/tmux" -f /dev/null new-session -d -s missing -c "$dir" || fail "could not start the private tmux server"
 
   for task in ordinary held; do
+    # Each watcher runs in its own fixture home within this subshell.
+    # shellcheck disable=SC2030
     export FM_HOME="$dir/$task"
     state="$FM_HOME/state"; out="$FM_HOME/watch.out"
     export FM_STATE_OVERRIDE="$state"
@@ -2534,7 +2537,7 @@ test_experimental_backend_unreadable_endpoints_stay_quiet() (
   install_fake_experimental_backends "$fakebin" || fail "could not install the experimental backend fixtures"
   for backend in zellij cmux orca; do
     case "$backend" in
-      zellij) target="remote:7"; modes=(unreadable renamed reused-session) ;;
+      zellij) target="remote:7"; modes=(unreadable renamed empty-panes reused-session) ;;
       cmux) target="ws-gone:sf-gone"; modes=(out-of-window renamed moved-surface) ;;
       orca) target="term-gone"; modes=(stale) ;;
     esac
@@ -2562,7 +2565,7 @@ test_experimental_backend_unreadable_endpoints_stay_quiet() (
       reap "$pid"; pid=''
       case "$backend/$mode" in
         zellij/renamed) expected_reads=(list-sessions list-panes list-tabs) ;;
-        zellij/unreadable) expected_reads=(list-sessions list-panes) ;;
+        zellij/unreadable|zellij/empty-panes) expected_reads=(list-sessions list-panes) ;;
         zellij/*) expected_reads=(list-panes) ;;
         cmux/moved-surface) expected_reads=(workspace-list list-panes) ;;
         cmux/*) expected_reads=(workspace-list) ;;
@@ -3039,11 +3042,108 @@ SH
   pid=$!
   wait_for_exit "$pid" 100 || fail "the unmarked Herdr worker's loss did not wake the watcher: $(cat "$dir/watch.out")"
   pid=''
-  grep -Fxq "stale: $target (the recorded endpoint is gone)" "$dir/watch.out" \
+  grep -Fxq "stale: $target (the recorded endpoint is gone for task z-unmarked)" "$dir/watch.out" \
     || fail "unexpected watcher output: $(cat "$dir/watch.out")"
   assert_present "$state/z-unmarked.missing-endpoint" "loss did not belong to the unmarked worker"
   assert_absent "$state/a-parked.missing-endpoint" "loss was also recorded for the parked worker"
   pass "a park mark leaves a recycled Herdr target eligible for an unmarked worker's loss"
+)
+
+test_shared_pane_keeps_task_loss_and_stale_checks_independent() (
+  local backend order dir state fakebin out pane target lost live loss rows poll pid=''
+  trap '[ -z "$pid" ] || reap "$pid"' EXIT
+  for backend in herdr zellij; do
+    for order in lost-first live-first; do
+      dir=$(make_case "shared-$backend-$order")
+      state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+      case "$order" in
+        lost-first) lost=a-lost; live=z-live ;;
+        live-first) live=a-live; lost=z-lost ;;
+      esac
+      case "$backend" in
+        herdr)
+          pane=w1:p2
+          cat > "$fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'pane get w1:p2 --session shared')
+    printf '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"%s"}}}\n' "$FM_TEST_PANE_TERMINAL" ;;
+  'pane read w1:p2 --source recent --lines 200 --session shared') printf '%s\n' 'idle replacement' ;;
+  'agent get w1:p2 --session shared') printf '%s\n' '{"error":{"code":"agent_not_found"}}' ;;
+  *) exit 1 ;;
+esac
+SH
+          ;;
+        zellij)
+          pane=7
+          cat > "$fakebin/zellij" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'list-sessions --short --no-formatting') printf '%s\n' shared ;;
+  '--session shared action list-panes --json') printf '%s\n' '[{"id":7,"tab_id":3,"is_plugin":false}]' ;;
+  '--session shared action list-tabs --json') printf '[{"tab_id":3,"name":"fm-%s"}]\n' "$FM_TEST_PANE_TASK" ;;
+  '--session shared action dump-screen --pane-id 7') printf '%s\n' 'idle replacement' ;;
+  *) exit 1 ;;
+esac
+SH
+          ;;
+      esac
+      chmod +x "$fakebin/$backend"
+      target="shared:$pane"
+      loss="stale: $target (the recorded endpoint is gone for task $lost)"
+      fm_write_meta "$state/$lost.meta" "window=$target" "backend=$backend" kind=ship \
+        spawn_gen=old herdr_terminal_id=old
+      : > "$state/.afk"
+      watch_bg "$state" "$fakebin" "$out" env FM_HOME="$dir" FM_TEST_PANE_TASK="$lost" FM_TEST_PANE_TERMINAL=old
+      pid=$!
+      wait_for_exit "$pid" 150 || fail "$backend $order: the original task never reached staleness"
+      pid=''
+      grep -Fxq "stale: $target" "$out" || fail "$backend $order: expected original stale: $(cat "$out")"
+      ack_stopped_cycle "$state" || fail "$backend $order: could not acknowledge the original stale wake"
+
+      fm_write_meta "$state/$live.meta" "window=$target" "backend=$backend" kind=ship \
+        spawn_gen=current herdr_terminal_id=current
+
+      if [ "$backend" = herdr ]; then
+        watch_bg "$state" "$fakebin" "$out" env FM_HOME="$dir" FM_TEST_PANE_TERMINAL=current
+        pid=$!
+        wait_for_exit "$pid" 150 || fail "$order: the lost Herdr record did not wake the watcher"
+        pid=''
+        grep -Fxq "$loss" "$out" || fail "$order: the Herdr loss named the wrong task: $(cat "$out")"
+        assert_present "$state/$lost.missing-endpoint" "$order: no loss marker for the lost record"
+        ack_stopped_cycle "$state" || fail "$order: could not acknowledge the Herdr loss"
+      fi
+
+      watch_bg "$state" "$fakebin" "$out" env FM_HOME="$dir" FM_TEST_PANE_TASK="$live" FM_TEST_PANE_TERMINAL=current
+      pid=$!
+      wait_for_exit "$pid" 150 || fail "$backend $order: the live task never reached normal staleness"
+      pid=''
+      grep -Fxq "stale: $target" "$out" || fail "$backend $order: expected ordinary stale: $(cat "$out")"
+      assert_absent "$state/$live.missing-endpoint" "$backend $order: published a loss for the live record"
+      if [ "$backend" = herdr ]; then
+        append_wake "$state" stale "$target" "$loss" || fail "$order: could not requeue the loss"
+        ack_stopped_cycle "$state" "$dir/drained" || fail "$order: could not drain both wake types"
+        for rows in "stale: $target" "$loss"; do
+          awk -F '\t' -v w="$target" -v p="$rows" '$3 == "stale" && $4 == w && $5 == p { n++ } END { exit(n != 1) }' \
+            "$dir/drained" || fail "$order: drain lost the wake keyed to the shared pane: $rows"
+        done
+      else
+        assert_absent "$state/$lost.missing-endpoint" "$order: Zellij reported a loss it cannot confirm after pane reuse"
+        ack_stopped_cycle "$state" || fail "$backend $order: could not acknowledge the live task's stale wake"
+      fi
+
+      watch_bg "$state" "$fakebin" "$out" env FM_HOME="$dir" FM_TEST_PANE_TASK="$live" FM_TEST_PANE_TERMINAL=current
+      pid=$!
+      for poll in 1 2 3; do
+        wait_poll_cycle "$state" "$pid" \
+          || fail "$backend $order: re-armed watcher did not stay quiet on poll $poll: $(cat "$out")"
+      done
+      reap "$pid"; pid=''
+      [ ! -s "$out" ] || fail "$backend $order: re-armed watcher emitted another wake: $(cat "$out")"
+      [ ! -s "$state/.wake-queue" ] || fail "$backend $order: re-armed watcher queued another wake: $(cat "$state/.wake-queue")"
+    done
+  done
+  pass "shared pane ids preserve loss handling and surface the unchanged live pane only once in either record order"
 )
 
 test_backlog_hold_suppresses_only_an_agentless_lane() {
@@ -3744,6 +3844,100 @@ test_reheld_captain_call_starts_its_own_resurface_window() {
   pass "a released-then-re-held task is a distinct captain call whose first sight still alarms"
 }
 
+test_herdr_legacy_hash_keeps_only_the_current_captain_call() (
+  local scenario=$1 dir state out throttle original reminder poll key=test_w1_p2 pid=''
+  local old_call new_call
+  command -v tasks-axi >/dev/null 2>&1 \
+    || { echo "skip: tasks-axi not found (legacy Herdr captain-call reminder)"; return 0; }
+  if [ "$scenario" = no-status ]; then
+    FM_CAPTAIN_HOLD_NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    export FM_CAPTAIN_HOLD_NOW
+  fi
+  dir=$(make_hold_home "herdr-legacy-call-$scenario" 'done: PR https://example.invalid/pull/1 checks green' hold) \
+    || fail "could not build a captain-held backlog fixture"
+  state="$dir/state"; out="$dir/watch.out"; throttle="$state/.paused-resurfaced-$key"
+  trap '[ -z "$pid" ] || reap "$pid"' EXIT
+  cat > "$dir/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'pane get w1:p2 --session test') printf '{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"%s"}}}\n' "$FM_TEST_TERMINAL" ;;
+  'pane read w1:p2 --source recent --lines 200 --session test') printf '%s\n' 'idle held worker' ;;
+  'agent get w1:p2 --session test') printf '%s\n' '{"result":{"agent":{"agent":"grok","agent_status":"idle"}}}' ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$dir/fakebin/herdr"
+  fm_write_meta "$state/held-merge.meta" window=test:w1:p2 kind=ship harness=grok backend=herdr \
+    herdr_terminal_id=current spawn_gen=current
+  # The watcher and captain-hold commands use this fixture's environment.
+  # shellcheck disable=SC2030,SC2031
+  export FM_HOME="$dir" FM_DATA_OVERRIDE="$dir/data" FM_CONFIG_OVERRIDE="$dir/config" FM_WATCH_HANDLING_SUCCESSOR=1
+  # The fake crew-state command reads this verdict from the watcher environment.
+  # shellcheck disable=SC2030
+  export FM_FAKE_CREW_STATE='state: unknown · source: none · no current-state source available'
+  export FM_TEST_TERMINAL=current
+  if [ "$scenario" = no-status ]; then
+    rm -f "$state/held-merge.status" "$state/.seen-held-merge_status"
+  fi
+  watch_bg "$state" "$dir/fakebin" "$out"
+  pid=$!
+  wait_for_exit "$pid" 150 || fail "the first held delivery did not surface"
+  pid=''
+  grep -Fxq 'stale: test:w1:p2' "$out" || fail "the first held delivery did not take the ordinary stale path"
+  original=$(cat "$throttle")
+  [[ "$original" == captain-hold:* ]] || fail "the first delivery did not arm a backlog-call reminder"
+  reminder=$(file_mtime "$throttle")
+  ack_stopped_cycle "$state" || fail "could not acknowledge the first held delivery"
+
+  printf '%s' "$(hash_text 'idle held worker')" > "$state/.hash-$key"
+  if [ "$scenario" = no-status ]; then
+    (cd "$dir" && tasks-axi add replacement 'replacement worker' --file data/backlog.md) >/dev/null \
+      || fail "could not add the replacement task"
+    run_hold "$dir" hold replacement --reason 'awaiting another captain decision' \
+      || fail "could not hold the replacement task"
+    old_call=$("$ROOT/bin/fm-captain-hold.sh" open held-merge --identity) || fail "could not read the first call"
+    new_call=$("$ROOT/bin/fm-captain-hold.sh" open replacement --identity) || fail "could not read the replacement call"
+    [ -n "$old_call" ] && [ "$old_call" = "$new_call" ] || fail "the fixture did not reproduce the shared call token"
+    rm -f "$state/held-merge.meta"
+    fm_write_meta "$state/replacement.meta" window=test:w1:p2 kind=ship harness=grok backend=herdr \
+      herdr_terminal_id=replacement spawn_gen=replacement
+    FM_TEST_TERMINAL=replacement
+    watch_bg "$state" "$dir/fakebin" "$out"
+    pid=$!
+    wait_for_exit "$pid" 150 || fail "the replacement inherited an unbound reminder without a status file"
+    pid=''
+    grep -Fxq 'stale: test:w1:p2' "$out" || fail "the replacement did not get its first stale wake"
+    pass "a replacement with the same call token gets its first wake without task-specific status evidence"
+    return 0
+  fi
+
+  printf '99\n' > "$state/.count-$key"
+  printf '1\n' > "$state/.stale-since-$key"
+  watch_bg "$state" "$dir/fakebin" "$out"
+  pid=$!
+  for poll in 1 2 3; do
+    wait_poll_cycle "$state" "$pid" || fail "legacy hash upgrade repeated the current call: $(cat "$out")"
+  done
+  [ "$(cat "$throttle")" = "$original" ] && [ "$(file_mtime "$throttle")" = "$reminder" ] \
+    || fail "legacy hash upgrade replaced the current call's reminder"
+  [ "$(cat "$state/.count-$key")" -lt 99 ] || fail "legacy hash upgrade kept the unbound count"
+  assert_absent "$state/.stale-since-$key" "legacy hash upgrade kept the unbound stale timer"
+  reap "$pid"
+  pid=''
+
+  printf 'go ahead\n' > "$dir/decision.txt"
+  run_hold "$dir" answer held-merge --decision-file "$dir/decision.txt" --release || fail "could not close the old captain call"
+  run_hold "$dir" hold held-merge --reason 'awaiting a different captain decision' || fail "could not open a new captain call"
+  printf '%s' "$(hash_text 'idle held worker')" > "$state/.hash-$key"
+  watch_bg "$state" "$dir/fakebin" "$out"
+  pid=$!
+  wait_for_exit "$pid" 150 || fail "legacy hash upgrade suppressed the new call"
+  pid=''
+  grep -Fxq 'stale: test:w1:p2' "$out" || fail "the new call did not get its first stale wake"
+  [ "$(cat "$throttle")" != "$original" ] || fail "the new call inherited the old reminder"
+  pass "the Herdr legacy hash upgrade preserves the open call's cadence and rechecks a new call"
+)
+
 
 
 test_secondmate_paused_resurfaces_in_normal_mode() {
@@ -3762,6 +3956,8 @@ test_secondmate_paused_resurfaces_in_normal_mode() {
   pane_hash=$(hash_text "idle awaiting external")
   printf '%s' "$pane_hash" > "$state/.hash-$key"
   printf '1\n' > "$state/.count-$key"
+  # This case supplies its own verdict for the fake crew-state command.
+  # shellcheck disable=SC2031
   export FM_FAKE_CREW_STATE='state: paused · source: status-log · awaiting the upstream release'
   PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
     FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" FM_PAUSE_RESURFACE_SECS=240 FM_POLL=1 FM_SIGNAL_GRACE=1 \
@@ -3859,6 +4055,111 @@ test_secondmate_unpause_clears_pause_tracking() {
   reap "$pid"
   pass "a resumed secondmate clears pause and stale tracking before stale exemption"
 }
+
+test_zellij_secondmate_resume_restarts_pause_cadence() (
+  local dir state fakebin out statusf phase throttle reminder legacy_hash key=test_7 pid=''
+  dir=$(make_case zellij-secondmate-resume)
+  state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  statusf="$state/mate.status"
+  trap '[ -z "$pid" ] || reap "$pid"' EXIT
+  cat > "$fakebin/zellij" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'list-sessions --short --no-formatting') printf '%s\n' test ;;
+  '--session test action list-panes --json') printf '%s\n' '[{"id":7,"tab_id":3,"is_plugin":false}]' ;;
+  '--session test action list-tabs --json') printf '[{"tab_id":3,"name":"fm-%s"}]\n' "$(cat "$FM_HOME/tab")" ;;
+  '--session test action dump-screen --pane-id 7')
+    : > "$FM_HOME/captured"
+    printf '%s\n' 'idle secondmate'
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$fakebin/zellij"
+  # This fixture sets its own home and pause interval before launching the watcher.
+  # shellcheck disable=SC2031
+  export FM_HOME="$dir" FM_PAUSE_RESURFACE_SECS=240
+  fm_write_meta "$state/mate.meta" window=test:7 backend=zellij kind=secondmate spawn_gen=current
+  printf '%s\n' mate > "$dir/tab"
+  printf 'paused: waiting for the first release\n' > "$statusf"
+  set_mtime "$(( $(date +%s) - 500 ))" "$statusf"
+  printf '%s' "$(seen_sig "$statusf")" > "$state/.seen-mate_status"
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_for_exit "$pid" 150 || fail "the first Zellij pause did not re-surface"
+  pid=''
+  assert_contains "$(cat "$out")" "awaiting external" "the first wake was not a pause recheck"
+  throttle="$state/.paused-resurfaced-$key"
+  assert_present "$throttle" "the first pause did not record a recheck"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the first Zellij pause"
+  # This assignment applies to the watcher launches after acknowledgement.
+  # shellcheck disable=SC2031
+  export FM_WATCH_HANDLING_SUCCESSOR=1
+
+  reminder=$(file_mtime "$throttle")
+  legacy_hash=$(hash_text 'idle secondmate')
+  printf '%s' "$legacy_hash" > "$state/.hash-$key"
+  printf '99\n' > "$state/.count-$key"
+  printf '1\n' > "$state/.stale-since-$key"
+  printf '2\n' > "$state/.wedge-escalations-$key"
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_poll_cycle "$state" "$pid" || fail "upgrading a legacy hash duplicated the current pause reminder: $(cat "$out")"
+  [ "$(file_mtime "$throttle")" = "$reminder" ] || fail "hash upgrade changed the current declaration's reminder time"
+  [ "$(cat "$state/.count-$key")" -lt 99 ] || fail "hash upgrade kept the unbound count"
+  assert_absent "$state/.stale-since-$key" "hash upgrade kept the unbound stale timer"
+  assert_absent "$state/.wedge-escalations-$key" "hash upgrade kept the unbound wedge count"
+  reap "$pid"
+  pid=''
+
+  printf '%s' "$legacy_hash" > "$state/.hash-$key"
+  printf 'declared:r1:foreign' > "$throttle"
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_for_exit "$pid" 150 || fail "hash upgrade let a foreign reminder suppress the current pause"
+  pid=''
+  assert_contains "$(cat "$out")" "awaiting external" "hash upgrade did not recheck the current pause"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the current pause after hash upgrade"
+
+  printf 'working: the first release landed\n' >> "$statusf"
+  printf '%s' "$(seen_sig "$statusf")" > "$state/.seen-mate_status"
+  printf 'zellij:test:7\tcurrent\n' > "$state/mate.missing-endpoint"
+  rm -f "$dir/captured"
+  for phase in foreign mate; do
+    printf '%s\n' "$phase" > "$dir/tab"
+    watch_bg "$state" "$fakebin" "$out"
+    pid=$!
+    wait_poll_cycle "$state" "$pid" || fail "resumed Zellij secondmate woke the watcher: $(cat "$out")"
+    case "$phase" in
+      foreign)
+        assert_present "$state/.paused-resurfaced-$key" "resume cleared tracking on a foreign Zellij tab"
+        assert_present "$state/mate.missing-endpoint" "a foreign Zellij tab re-armed the recorded task"
+        ;;
+      mate)
+        assert_absent "$state/.paused-$key" "verified resume retained pause tracking"
+        assert_absent "$state/.paused-resurfaced-$key" "verified resume retained the old recheck"
+        assert_absent "$state/.stale-$key" "verified resume retained stale tracking"
+        assert_absent "$state/mate.missing-endpoint" "the matching Zellij tab did not re-arm the recorded task"
+        ;;
+    esac
+    assert_absent "$dir/captured" "resumed Zellij secondmate entered screen polling"
+    reap "$pid"
+    pid=''
+  done
+
+  printf 'paused: waiting for a different release\n' >> "$statusf"
+  printf '%s' "$(seen_sig "$statusf")" > "$state/.seen-mate_status"
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  for phase in 1 2 3; do
+    wait_poll_cycle "$state" "$pid" || fail "fresh Zellij pause re-surfaced before its interval: $(cat "$out")"
+  done
+  assert_present "$state/.paused-$key" "the watcher did not handle the fresh Zellij pause"
+  assert_absent "$state/.paused-resurfaced-$key" "the fresh Zellij pause recorded a premature recheck"
+  reap "$pid"
+  pid=''
+  pass "a verified Zellij secondmate keeps its own reminder on upgrade and clears it on resume"
+)
 
 test_nonterminal_stale_pause_transitions_reclassify_unchanged_hash() {
   local dir state fakebin out capture_file window key pane_hash sig pid i
@@ -5950,6 +6251,7 @@ test_parked_retained_copy_suppresses_endpoint_loss || exit 1
 test_park_wait_stops_when_home_is_retired || exit 1
 test_park_refuses_redirected_records || exit 1
 test_parked_herdr_endpoint_does_not_hide_recycled_target_loss || exit 1
+test_shared_pane_keeps_task_loss_and_stale_checks_independent || exit 1
 test_backlog_hold_suppresses_only_an_agentless_lane
 test_absorbed_replacement_wait_does_not_inherit_the_old_throttle
 test_live_declared_wait_churn_honors_the_resurface_throttle
@@ -5958,10 +6260,13 @@ test_open_captain_call_bounds_stale_churn
 test_stale_churn_without_a_captain_call_still_alarms
 test_failed_wake_append_does_not_arm_the_captain_hold_throttle
 test_reheld_captain_call_starts_its_own_resurface_window
+test_herdr_legacy_hash_keeps_only_the_current_captain_call with-status || exit 1
+test_herdr_legacy_hash_keeps_only_the_current_captain_call no-status || exit 1
 test_secondmate_paused_resurfaces_in_normal_mode
 test_secondmate_captain_held_resurfaces_in_normal_mode
 test_secondmate_nonpaused_stale_remains_suppressed
 test_secondmate_unpause_clears_pause_tracking
+test_zellij_secondmate_resume_restarts_pause_cadence || exit 1
 test_nonterminal_stale_pause_transitions_reclassify_unchanged_hash
 test_nonterminal_paused_rechecks_authoritative_state
 test_paused_authoritative_working_preserves_wedge_timer

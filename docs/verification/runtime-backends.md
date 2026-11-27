@@ -1150,11 +1150,15 @@ Polling remained active and is covered as the fallback for capability, connect, 
 ### Recorded endpoint loss
 
 On 2026-11-21 on Linux x86_64, `bin/fm-test-run.sh tests/fm-watch-triage.test.sh` with tmux 3.7c verified a single stale wake per recorded incarnation for unmarked ordinary and captain-held windows, and cleared the held window's pause tracking on closure.
-The same poll path was verified in an isolated Herdr 0.9.5 lab with a task record bound to a shell pane.
-After `bin/fm-herdr-lab.sh run "$session" pane close "$pane"`, `bin/fm-watch.sh` printed `stale: <window> (the recorded endpoint is gone)` and queued one stale wake.
-After `bin/fm-wake-drain.sh` and the printed acknowledgement command, the re-armed watcher stayed quiet on later polls.
+On 2026-11-22, `bin/fm-herdr-lab.sh teardown "$session"` and `bin/fm-herdr-lab.sh provision "$session"` recycled a Herdr 0.9.5 pane id with a distinct terminal id.
+With both task records present, `bin/fm-watch.sh` printed `stale: <window> (the recorded endpoint is gone for task <lost-task>)` in both record orders.
+After `bin/fm-wake-drain.sh` and its printed acknowledgement command, the re-armed watcher printed `stale: <window>` for the idle replacement.
 Guarded Herdr teardown verified the unchanged default-session tripwire.
-[`tests/fm-wake-daemon-lifecycle-e2e.test.sh`](../../tests/fm-wake-daemon-lifecycle-e2e.test.sh) covers the away-daemon escalation and later pause reconciliation.
+[`tests/fm-watch-triage.test.sh`](../../tests/fm-watch-triage.test.sh) exercises quiet Zellij capture failures and idle presence checks using CLI fixtures.
+Its `test_shared_pane_keeps_task_loss_and_stale_checks_independent` regression checks both record orders on Herdr and Zellij, including a fresh stale wake for the replacement and quiet polls after that wake is acknowledged and the watcher re-arms on the unchanged screen.
+[`tests/fm-wake-queue.test.sh`](../../tests/fm-wake-queue.test.sh) exercises recovery with two distinct named losses, a repeated loss, and an ordinary stale wake on a single window before acknowledgement.
+[`tests/fm-wake-daemon-lifecycle-e2e.test.sh`](../../tests/fm-wake-daemon-lifecycle-e2e.test.sh) covers away-daemon escalation and later pause reconciliation for a closed tmux window.
+[`tests/fm-daemon.test.sh`](../../tests/fm-daemon.test.sh) exercises named Herdr loss escalation, tracking for the live task sharing the pane, and a loss delivered after the named task relaunches.
 [`tests/fm-teardown.test.sh`](../../tests/fm-teardown.test.sh) covers retaining the loss record after failed task retirement and removing it on a successful retry.
 
 ### Agent lifecycle control

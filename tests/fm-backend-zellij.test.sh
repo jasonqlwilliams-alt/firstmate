@@ -57,10 +57,10 @@ fi
 next=$(( $(cat "$COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 n=$next
 echo "$n" > "$COUNT_FILE"
+[ -f "$RESP/$n.out" ] && cat "$RESP/$n.out"
 if [ -f "$RESP/$n.exit" ]; then
   exit "$(cat "$RESP/$n.exit")"
 fi
-[ -f "$RESP/$n.out" ] && cat "$RESP/$n.out"
 exit 0
 SH
   chmod +x "$fb/zellij"
@@ -583,6 +583,22 @@ test_capture_fails_when_session_absent() {
   status=$?
   [ "$status" -ne 0 ] || fail "capture should fail when the session does not exist (never trust the CLI's unconditional exit 0)"
   pass "fm_backend_zellij_capture: fails when the target session is not listed as active (session_exists pre-check)"
+}
+
+test_endpoint_state_rejects_failed_pane_inventory() {
+  local dir fb output
+  dir="$TMP_ROOT/failed-pane-inventory"; mkdir -p "$dir/responses"
+  fb=$(make_zellij_fakebin "$dir")
+  zellij_pane_response "$dir" 1 7 3
+  printf '1\n' > "$dir/responses/1.exit"
+  zellij_tab_response "$dir" 2 3 fm-label
+
+  # shellcheck disable=SC2016 # The child shell expands $0.
+  output=$(PATH="$fb:$PATH" FM_ZELLIJ_LOG="$dir/log" FM_ZELLIJ_RESPONSES="$dir/responses" \
+    FM_ZELLIJ_SESSION_LIST=firstmate \
+    bash -c '. "$0/bin/fm-backend.sh"; fm_backend_endpoint_state zellij firstmate:7 fm-label' "$ROOT")
+  [ "$output" = unreadable ] || fail "Zellij trusted inventory output from a failed command: $output"
+  pass "Zellij treats a failed pane inventory as unreadable even if it prints valid JSON"
 }
 
 test_labeled_capture_rejects_ambiguous_pane_inventory() {
@@ -1342,6 +1358,7 @@ test_capture_small_reads_use_viewport_and_trim
 test_capture_large_reads_use_full_scrollback_and_trim
 test_capture_fails_when_pane_absent
 test_capture_fails_when_session_absent
+test_endpoint_state_rejects_failed_pane_inventory
 test_labeled_capture_rejects_ambiguous_pane_inventory
 test_send_key_normalizes_and_targets_pane
 test_send_literal_uses_paste_separator_for_option_shaped_text

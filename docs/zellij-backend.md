@@ -63,7 +63,7 @@ An explicit raw `session:pane` target remains a pane-existence-only operator esc
 Zellij's CLI action commands return exit 0 even for missing sessions or panes.
 The adapter therefore verifies session, terminal pane, and expected title before an operation and validates JSON or integer response shapes afterward.
 A pane can still disappear between verification and the operation, so submit and worktree discovery validate their results.
-The [watcher guide](watcher-continuity.md#recorded-endpoint-loss) covers inconclusive presence checks and failed captures during supervision.
+See the [watcher guide](watcher-continuity.md#recorded-endpoint-loss) for pane reuse, presence checks, and endpoint-loss reporting limits.
 
 Every pane operation passes an explicit `--pane-id` because a new session can focus its release-notes plugin pane, whose numeric plugin id is in a separate namespace from terminal pane ids.
 
