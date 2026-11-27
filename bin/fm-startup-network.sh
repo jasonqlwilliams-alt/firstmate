@@ -451,7 +451,7 @@ EOF
 }
 
 run_sweeps() {  # <lock-pid> <owner-generation> <sweep-budget>
-  local lock_pid=$1 lock_generation=$2 budget=$3 claim="$STATE/.lock.acquire" deadline=$((SECONDS + $3))
+  local lock_pid=$1 lock_generation=$2 budget=$3 claim="$STATE/.lock.acquire"
   if fm_session_owner_mode_active "$STATE"; then
     fm_session_owner_context || return 75
   fi
@@ -469,16 +469,10 @@ run_sweeps() {  # <lock-pid> <owner-generation> <sweep-budget>
   FM_BOOTSTRAP_NETWORK_WORKER_START=$(cat "$claim/start" 2>/dev/null) || FM_BOOTSTRAP_NETWORK_WORKER_START=
   if [ -n "$lock_generation" ]; then fm_session_network_worker_owns_claim "$STATE" || return 75; fi
   if [ "$FM_SESSION_LOCK_KIND" = startup ]; then
-    FM_HOME_SUMMARY_TIMEOUT=$(summary_budget)
-    [ "$FM_HOME_SUMMARY_TIMEOUT" -le "$budget" ] || FM_HOME_SUMMARY_TIMEOUT=$budget
-    export FM_HOME_SUMMARY_TIMEOUT
+    export FM_TIMEOUT_INHERIT_GROUP=1
   fi
   "$SCRIPT_DIR/fm-home-summary-refresh.sh" ||
     printf 'HOME_SUMMARY: deferred publication failed; the prior ledger is retained; see the producer diagnostic above\n'
-  if [ "$FM_SESSION_LOCK_KIND" = startup ]; then
-    budget=$((deadline - SECONDS))
-    [ "$budget" -gt 0 ] || return 124
-  fi
   # shellcheck disable=SC2016
   fm_run_timed "$budget" bash -c '
     . "$1/fm-session-lock-record-lib.sh"
@@ -552,10 +546,11 @@ EOF
   rc=0
   if [ "$sweep_locked" -eq 1 ]; then
     local claim_budget=$((budget + $(summary_budget) + 2))
+    local -a timeout_args=("$claim_budget")
     if [ "${FM_SESSION_OWNER_KIND:-}" = startup ]; then
-      claim_budget=$((budget + 2))
+      timeout_args=(--kill "$budget")
     fi
-    fm_run_timed "$claim_budget" "$SCRIPT_DIR/fm-startup-network.sh" _sweep "$lock_pid" "$lock_generation" "$budget" \
+    fm_run_timed "${timeout_args[@]}" "$SCRIPT_DIR/fm-startup-network.sh" _sweep "$lock_pid" "$lock_generation" "$budget" \
       >>"$out" 2>&1 || rc=$?
     if [ "$rc" -eq 75 ]; then
       sweep_locked=0

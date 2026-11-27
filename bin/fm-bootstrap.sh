@@ -346,6 +346,12 @@ fleet_sync() (
   [ -d "$PROJECTS" ] || return 0
 
   tmp=$(mktemp "${TMPDIR:-/tmp}/fm-fleet-sync.XXXXXX" 2>/dev/null) || return 0
+  if [ "${FM_TIMEOUT_INHERIT_GROUP:-0}" = 1 ]; then
+    "$FM_ROOT/bin/fm-fleet-sync.sh" >"$tmp" 2>/dev/null
+    fleet_sync_relay_filtered_output "$tmp"
+    rm -f "$tmp"
+    return 0
+  fi
   timeout=$(fleet_sync_bootstrap_timeout)
   monitor_was_on=0
   case $- in *m*) monitor_was_on=1 ;; esac

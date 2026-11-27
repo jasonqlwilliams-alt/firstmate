@@ -167,11 +167,31 @@ fm_primary_scope_matches "$FM_ROOT" "$STATE" || exit 0
 # --- the actual predicate ----------------------------------------------------
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
+SESSION_OWNER_GENERATION=
 if fm_session_owner_mode_active "$STATE"; then
   # shellcheck source=bin/fm-session-lock-lib.sh
   . "$SCRIPT_DIR/fm-session-lock-lib.sh"
   fm_session_hook_owns_lock "$STATE" || exit 0
+  SESSION_OWNER_GENERATION=$FM_SESSION_LOCK_GENERATION
 fi
+
+guard_session_current() {
+  fm_autoarm_session_current "$STATE" "$SESSION_OWNER_GENERATION"
+}
+
+read_current_autoarm() {
+  fm_autoarm_ledger_read "$STATE" \
+    && [ "$FM_AUTOARM_SESSION_GENERATION" = "$SESSION_OWNER_GENERATION" ] \
+    && guard_session_current
+}
+
+failure_notice_current() {
+  fm_autoarm_marker_current "$FAILURE_NOTICE" "$SESSION_OWNER_GENERATION"
+}
+
+failure_alarm_current() {
+  fm_autoarm_marker_current "$FAILURE_ALARM" "$SESSION_OWNER_GENERATION"
+}
 
 BUDGET_FILE="$STATE/.turnend-claude-blocks"
 BUDGET_LOCK="$STATE/.turnend-claude-blocks.lock"
@@ -179,23 +199,25 @@ OWNER_LOCK="$STATE/.claude-autoarm.lock"
 FAILURE_NOTICE="$STATE/.claude-autoarm-failure-notified"
 FAILURE_ALARM="$STATE/.claude-autoarm-failure-alarmed"
 SESSION_ID=$(printf '%s' "$PAYLOAD" | jq -r '.session_id // "unknown"' 2>/dev/null || printf 'unknown')
+SESSION_ID=${SESSION_OWNER_GENERATION:-$SESSION_ID}
 budget_reset() {
   [ "$CLAUDE_MODE" -eq 1 ] || return 0
   fm_lock_try_acquire "$BUDGET_LOCK" || return 0
-  rm -f "$BUDGET_FILE" 2>/dev/null || true
+  if guard_session_current; then rm -f "$BUDGET_FILE" 2>/dev/null || true; fi
   fm_lock_release "$BUDGET_LOCK"
 }
 
 fm_supervision_status "$STATE" "$GRACE"
 if [ "$FM_SUP_NEEDED" = false ]; then
-  [ -e "$FAILURE_NOTICE" ] || budget_reset
+  failure_notice_current || budget_reset
   exit 0
 fi
 # One owner of the "supervision is on, let this turn end" exit contract, shared
 # by every proof of supervision below.
 allow_supervised_stop() {
   [ "$CLAUDE_MODE" -eq 1 ] || exit 0
-  fm_failure_episode_reset "$STATE" && exit 0
+  fm_failure_episode_reset "$STATE" acquire "$SESSION_OWNER_GENERATION" && exit 0
+  guard_session_current || exit 0
   exit 2
 }
 
@@ -223,6 +245,7 @@ fi
 
 block_stop() {
   local afk x_mode reason rule
+  guard_session_current || exit 0
   afk=0
   [ -e "$STATE/.afk" ] && afk=1
   x_mode=0
@@ -282,8 +305,10 @@ BUDGET_CHARGED_EPOCH=
 budget_account_current_epoch() {  # [observe|block]
   local mode=${1:-observe} current_epoch outcome old_session old_count old_epoch tmp initialized charged
   fm_lock_try_acquire "$BUDGET_LOCK" || return 1
-  current_epoch=$(sed -n '1s/^epoch=\([0-9][0-9]*\) .*/\1/p' "$STATE/.claude-autoarm-epoch" 2>/dev/null || true)
-  outcome=$(sed -n '1s/^.*outcome=\([a-z][a-z-]*\) .*$/\1/p' "$STATE/.claude-autoarm-epoch" 2>/dev/null || true)
+  current_epoch= outcome=
+  if read_current_autoarm; then
+    current_epoch=$FM_AUTOARM_GEN outcome=$FM_AUTOARM_OUTCOME
+  fi
   initialized=0
   charged=0
   COUNT=0
@@ -311,7 +336,7 @@ budget_account_current_epoch() {  # [observe|block]
     charged=1
     case "$outcome" in
       failed|failed-suppressed)
-        if [ -e "$FAILURE_NOTICE" ]; then
+        if failure_notice_current; then
           initialized=1
           COUNT=0
         else
@@ -323,6 +348,7 @@ budget_account_current_epoch() {  # [observe|block]
   fi
   tmp="$BUDGET_FILE.tmp.$$"
   if ! printf 'session=%s\ncount=%s\nepoch=%s\n' "$SESSION_ID" "$COUNT" "$current_epoch" > "$tmp" 2>/dev/null \
+    || ! guard_session_current \
     || ! mv -f "$tmp" "$BUDGET_FILE" 2>/dev/null; then
     rm -f "$tmp" 2>/dev/null || true
     fm_lock_release "$BUDGET_LOCK"
@@ -337,6 +363,7 @@ budget_account_current_epoch() {  # [observe|block]
 
 autoarm_owns_recovery() {
   local pid role outcome age
+  guard_session_current || return 1
   fm_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$FM_HOME" && return 0
   # A live OPEN generation claim owns recovery: the ledger names a live,
   # identity-matched owner still arming that is not stuck (fm_autoarm_claim_open
@@ -347,7 +374,7 @@ autoarm_owns_recovery() {
   # cover a claim that finished moments ago, so a genuine handoff is not
   # duplicated, while a stale one now reaches the block.
   if fm_autoarm_claim_open "$STATE" "$GRACE"; then
-    [ ! -e "$FAILURE_NOTICE" ] || budget_account_current_epoch || true
+    ! failure_notice_current || budget_account_current_epoch || true
     return 0
   fi
   # Legacy shim: a pre-generation build's claim holds the owner lock with the
@@ -355,30 +382,31 @@ autoarm_owns_recovery() {
   # proof so an upgrade mid-session cannot double-arm.
   pid=$(cat "$OWNER_LOCK/pid" 2>/dev/null || true)
   role=$(fm_lock_role "$OWNER_LOCK" 2>/dev/null || true)
-  if fm_pid_alive "$pid" && [ "$role" = autoarm ] \
+  if [ -z "$SESSION_OWNER_GENERATION" ] && fm_pid_alive "$pid" && [ "$role" = autoarm ] \
     && ! fm_autoarm_claim_abandoned "$STATE" "$GRACE"; then
-    [ ! -e "$FAILURE_NOTICE" ] || budget_account_current_epoch || true
+    ! failure_notice_current || budget_account_current_epoch || true
     return 0
   fi
-  outcome=$(sed -n '1s/^.*outcome=\([a-z][a-z-]*\) .*$/\1/p' "$STATE/.claude-autoarm-epoch" 2>/dev/null || true)
+  read_current_autoarm || return 1
+  outcome=$FM_AUTOARM_OUTCOME
   case "$outcome" in
     rewake)
       age=$(fm_path_age "$STATE/.claude-autoarm-epoch")
       if [ "$age" -lt "$EPOCH_FRESH" ]; then
-        [ ! -e "$FAILURE_NOTICE" ] || budget_account_current_epoch || true
+        ! failure_notice_current || budget_account_current_epoch || true
         return 0
       fi
       ;;
     failed)
       age=$(fm_path_age "$STATE/.claude-autoarm-epoch")
-      if [ "$age" -lt "$EPOCH_FRESH" ] && [ -e "$FAILURE_NOTICE" ] \
+      if [ "$age" -lt "$EPOCH_FRESH" ] && failure_notice_current \
         && budget_account_current_epoch; then
         [ "$BUDGET_INITIALIZED_FAILURE" -eq 1 ] && return 0
       fi
       ;;
     failed-suppressed)
       age=$(fm_path_age "$STATE/.claude-autoarm-epoch")
-      if [ "$age" -lt "$EPOCH_FRESH" ] && [ -e "$FAILURE_NOTICE" ] \
+      if [ "$age" -lt "$EPOCH_FRESH" ] && failure_notice_current \
         && budget_account_current_epoch; then
         :
       fi
@@ -391,7 +419,7 @@ terminal_fail_open() {
   local pid role old_session old_count
   [ "$COUNT" -gt "$BLOCK_BUDGET" ] || return 1
   failure_episode_verified || return 1
-  [ ! -e "$FAILURE_ALARM" ] || return 1
+  ! failure_alarm_current || return 1
   # A live open generation claim is a concurrent recovery decision to step
   # aside for, exactly like the legacy live-owner case below.
   fm_autoarm_claim_open "$STATE" "$GRACE" && return 2
@@ -405,11 +433,11 @@ terminal_fail_open() {
     # episode's one attended alarm would never fire, so clear the abandoned
     # claim and let this decision finish instead. Failing to clear it
     # re-blocks rather than allowing.
-    if fm_pid_alive "$pid" && [ "$role" = autoarm ] \
+    if [ -z "$SESSION_OWNER_GENERATION" ] && fm_pid_alive "$pid" && [ "$role" = autoarm ] \
       && ! fm_autoarm_claim_abandoned "$STATE" "$GRACE"; then
       return 2
     fi
-    fm_autoarm_release_abandoned "$STATE" "$GRACE" || return 1
+    fm_autoarm_release_abandoned "$STATE" "$GRACE" "$SESSION_OWNER_GENERATION" || return 1
     fm_lock_try_acquire "$OWNER_LOCK" || return 1
   fi
   if ! fm_lock_set_role "$OWNER_LOCK" terminal-check; then
@@ -428,13 +456,13 @@ terminal_fail_open() {
   role=$(fm_lock_role "$OWNER_LOCK" 2>/dev/null || true)
   if [ "$role" != terminal-check ] || [ "$old_session" != "$SESSION_ID" ] \
     || [ "$old_count" -le "$BLOCK_BUDGET" ] || ! failure_episode_verified \
-    || [ -e "$FAILURE_ALARM" ]; then
+    || failure_alarm_current; then
     fm_lock_release "$BUDGET_LOCK"
     fm_lock_release "$OWNER_LOCK"
     return 1
   fi
   if fm_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$FM_HOME"; then
-    if ! fm_failure_episode_reset "$STATE" held; then
+    if ! fm_failure_episode_reset "$STATE" held "$SESSION_OWNER_GENERATION"; then
       fm_lock_release "$BUDGET_LOCK"
       fm_lock_release "$OWNER_LOCK"
       return 1
@@ -452,7 +480,7 @@ terminal_fail_open() {
     fm_lock_release "$OWNER_LOCK"
     return 2
   fi
-  if ! (set -C; : > "$FAILURE_ALARM") 2>/dev/null; then
+  if ! guard_session_current || ! write_failure_alarm; then
     fm_lock_release "$BUDGET_LOCK"
     fm_lock_release "$OWNER_LOCK"
     return 1
@@ -462,12 +490,18 @@ terminal_fail_open() {
   return 0
 }
 
+write_failure_alarm() {
+  if [ -z "$SESSION_OWNER_GENERATION" ]; then
+    (set -C; : > "$FAILURE_ALARM") 2>/dev/null
+  else
+    printf '%s' "$SESSION_OWNER_GENERATION" > "$FAILURE_ALARM" 2>/dev/null
+  fi
+}
+
 failure_episode_verified() {
-  local outcome
   [ ! -e "$STATE/.afk" ] || return 1
-  [ -e "$FAILURE_NOTICE" ] || return 1
-  outcome=$(sed -n '1s/^.*outcome=\([a-z][a-z-]*\) .*$/\1/p' "$STATE/.claude-autoarm-epoch" 2>/dev/null || true)
-  case "$outcome" in
+  failure_notice_current && read_current_autoarm || return 1
+  case "$FM_AUTOARM_OUTCOME" in
     failed|failed-suppressed) return 0 ;;
     *) return 1 ;;
   esac
@@ -477,7 +511,7 @@ i=0
 while [ "$i" -lt $((SYNC_WAIT_MS / 100)) ]; do
   if autoarm_owns_recovery; then
     if fm_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$FM_HOME"; then
-      fm_failure_episode_reset "$STATE" || exit 2
+      allow_supervised_stop
     fi
     exit 0
   fi
@@ -486,7 +520,7 @@ while [ "$i" -lt $((SYNC_WAIT_MS / 100)) ]; do
 done
 if autoarm_owns_recovery; then
   if fm_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$FM_HOME"; then
-    fm_failure_episode_reset "$STATE" || exit 2
+    allow_supervised_stop
   fi
   exit 0
 fi
@@ -496,6 +530,7 @@ fi
 budget_account_current_epoch block || block_stop
 terminal_fail_open
 terminal_status=$?
+guard_session_current || exit 0
 if [ "$terminal_status" -eq 0 ]; then
   if [ "$FM_SUP_IN_FLIGHT" -gt 0 ]; then
     NEED_DESC="$FM_SUP_IN_FLIGHT task(s) in flight"

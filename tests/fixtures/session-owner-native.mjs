@@ -15,6 +15,7 @@ const watchUrl = extension("fm-primary-" + family + "-watch");
 const guardUrl = extension("fm-primary-turnend-guard");
 const handlers = new Map();
 let tool;
+const delivered = [];
 const harness = {
   on(name, handler) {
     const group = handlers.get(name) ?? [];
@@ -23,10 +24,12 @@ const harness = {
   },
   registerCommand() {},
   registerTool(info) { tool = info; },
-  async sendUserMessage() {},
+  async sendUserMessage(content, options) { delivered.push({ content, options }); },
 };
 async function dispatch(event, ...args) {
-  for (const handler of handlers.get(event) ?? []) await handler(...args);
+  const results = [];
+  for (const handler of handlers.get(event) ?? []) results.push(await handler(...args));
+  return results;
 }
 
 const legacy = spawnSync(process.execPath, ["--input-type=module", "-e", [
@@ -57,7 +60,16 @@ for (const mark of marks) {
 }
 const result = await tool.execute("fixture", {});
 assert.match(result.content[0].text, /started .* extension arm child/);
-await dispatch(family === "pi" ? "agent_settled" : "session_stop", {});
+const stop = await dispatch(family === "pi" ? "agent_settled" : "session_stop", {});
+if (family === "pi") {
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0].options.deliverAs, "followUp");
+  assert.match(delivered[0].content, /fixture supervision needs a continuation/);
+} else {
+  const continuation = stop.find((entry) => entry?.continue);
+  assert.equal(continuation?.continue, true);
+  assert.match(continuation.additionalContext, /fixture supervision needs a continuation/);
+}
 const before = marks.map((path) => readFileSync(path, "utf8"));
 
 // A nested engine starts with an inherited environment. Loading its real
@@ -74,6 +86,16 @@ const nested = spawnSync(process.execPath, ["--input-type=module", "-e", [
 ].join("\n"), watchUrl, executable("lock")], { env: process.env, encoding: "utf8" });
 assert.equal(nested.status, 0, nested.stderr);
 assert.deepEqual(marks.map((path) => readFileSync(path, "utf8")), before);
+const unavailable = spawnSync(process.execPath, ["--input-type=module", "-e", [
+  "import assert from 'node:assert/strict';",
+  "const handlers = new Map();",
+  "(await import(process.argv[1])).default({ on(event, handler) { handlers.set(event, handler); } });",
+  "const result = await handlers.get('tool_call')({ type: 'tool_call', toolName: 'bash', input: { command: 'cd projects/managed' } });",
+  "assert.equal(result.block, true);",
+  "assert.match(result.reason, /fixture seatbelt refuses a project cd/);",
+  "assert.equal(handlers.has('agent_settled') || handlers.has('session_stop'), false);",
+].join("\n"), guardUrl], { env: { ...process.env, FM_PROC_ROOT_OVERRIDE: join(state, "unreadable-proc") }, encoding: "utf8" });
+assert.equal(unavailable.status, 0, unavailable.stderr);
 await dispatch("session_shutdown", {}, {});
 
 const completion = join(state, ".session-start-complete." + generation);

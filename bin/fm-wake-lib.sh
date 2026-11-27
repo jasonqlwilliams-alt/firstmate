@@ -50,14 +50,22 @@ fm_session_mutation_allowed() { # <action>
     if [ -n "${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-}" ]; then
       fm_session_network_worker_owns_claim "$STATE" && exit 0
     else
+      case "$action" in
+        fm-wake-drain|fm-branch-outcome-index)
+          fm_afk_daemon_owns_supervision "$STATE" "$PPID" && exit 0 ;;
+      esac
       fm_session_lock_owned_by_self "$STATE" && exit 0
       if ! fm_session_owner_context_present; then
-        if [ ! -e "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ]; then
-          exit 0
-        fi
-        if fm_session_lock_read "$STATE/.lock"; then
-          fm_session_owner_liveness "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START"
-          [ "$?" -ne 2 ] || exit 0
+        if fm_lock_try_acquire "$STATE/.lock.acquire"; then
+          trap 'fm_lock_release "$STATE/.lock.acquire"' EXIT
+          if [ ! -e "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ]; then
+            exit 0
+          fi
+          if fm_session_lock_read "$STATE/.lock"; then
+            local rc=0
+            fm_session_owner_liveness "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START" || rc=$?
+            [ "$rc" -ne 2 ] || exit 0
+          fi
         fi
       fi
     fi
@@ -85,6 +93,20 @@ fm_pid_alive() {
     ''|*[!0-9]*) return 1 ;;
   esac
   kill -0 "$pid" 2>/dev/null
+}
+
+fm_pid_has_ancestor() {
+  local pid=$1 ancestor=$2 parent depth=0
+  while [ "$depth" -lt 64 ]; do
+    fm_session_owner_pid_valid "$pid" || return 1
+    [ "$pid" != "$ancestor" ] || return 0
+    parent=$(ps -o ppid= -p "$pid" 2>/dev/null) || return 1
+    parent=${parent//[[:space:]]/}
+    [ "$parent" != "$pid" ] || return 1
+    pid=$parent
+    depth=$((depth + 1))
+  done
+  return 1
 }
 
 fm_pid_identity() {
@@ -365,10 +387,11 @@ fm_extension_pair_owns_supervision() {  # <state> <extension-dir> <source:marker
 # a daemon that stops restarting its watcher still fails supervision once the
 # beacon passes grace.
 fm_afk_daemon_owns_supervision() {
-  local state=$1 lockdir pid recorded current
+  local state=$1 expected_pid=${2:-} lockdir pid recorded current
   [ -e "$state/.afk" ] || return 1
   lockdir="$state/.supervise-daemon.lock"
   pid=$(cat "$lockdir/pid" 2>/dev/null) || return 1
+  [ -z "$expected_pid" ] || fm_pid_has_ancestor "$expected_pid" "$pid" || return 1
   fm_pid_alive "$pid" || return 1
   recorded=$(cat "$lockdir/pid-identity" 2>/dev/null) || return 1
   [ -n "$recorded" ] || return 1
@@ -581,8 +604,7 @@ fm_lock_try_create() {
   local lockdir=$1 allowed_steal_owner=${2:-} mode=${3:-} ownerdir
   FM_LOCK_OWNER_DIR=
   ownerdir=$(fm_lock_owner_dir "$lockdir") || return 1
-  if [ -e "$lockdir" ] || [ -L "$lockdir" ] \
-    || fm_lock_claim_blocked_by_steal "$lockdir" "$allowed_steal_owner"; then
+  if [ -e "$lockdir" ] || [ -L "$lockdir" ]; then
     fm_lock_discard_owner "$ownerdir"
     return 1
   fi
@@ -1832,6 +1854,10 @@ fm_failure_episode_reset() {
       ;;
     *) return 1 ;;
   esac
+  if [ "$#" -ge 3 ] && ! fm_autoarm_session_current "$state" "$3"; then
+    [ "$acquired" -eq 0 ] || fm_lock_release "$lock"
+    return 1
+  fi
   for path in \
     "$state/.turnend-claude-blocks" \
     "$state/.claude-autoarm-failure-notified" \
@@ -1950,7 +1976,8 @@ _fm_autoarm_epoch_field() {  # <epoch-file> <field>
 # line 2 - identity is never substituted from a lock, so a transient
 # micro-mutex hold or a reused pid can never authenticate a stale entry).
 fm_autoarm_ledger_read() {  # <state-dir>
-  local state=$1 epoch
+  local state=$1 epoch token
+  local -a fields=()
   epoch="$state/.claude-autoarm-epoch"
   FM_AUTOARM_GEN=
   FM_AUTOARM_OWNER=
@@ -1959,17 +1986,28 @@ fm_autoarm_ledger_read() {  # <state-dir>
   FM_AUTOARM_RECOVERY=
   FM_AUTOARM_SESSION_GENERATION=
   FM_AUTOARM_IDENTITY=
-  FM_AUTOARM_GEN=$(_fm_autoarm_epoch_field "$epoch" epoch) || return 1
-  FM_AUTOARM_OWNER=$(_fm_autoarm_epoch_field "$epoch" owner_pid) || return 1
-  FM_AUTOARM_OUTCOME=$(_fm_autoarm_epoch_field "$epoch" outcome) || return 1
-  FM_AUTOARM_SESSION=$(_fm_autoarm_epoch_field "$epoch" session_pid 2>/dev/null || true)
-  FM_AUTOARM_SESSION_GENERATION=$(_fm_autoarm_epoch_field "$epoch" session_generation 2>/dev/null || true)
-  FM_AUTOARM_RECOVERY=$(_fm_autoarm_epoch_field "$epoch" recovery_generation 2>/dev/null || true)
+  {
+    IFS=' ' read -r -a fields || return 1
+    IFS= read -r FM_AUTOARM_IDENTITY || true
+  } 2>/dev/null < "$epoch" || return 1
+  for token in ${fields[@]+"${fields[@]}"}; do
+    case "$token" in
+      epoch=?*) FM_AUTOARM_GEN=${token#*=} ;;
+      owner_pid=?*) FM_AUTOARM_OWNER=${token#*=} ;;
+      outcome=?*) FM_AUTOARM_OUTCOME=${token#*=} ;;
+      session_pid=?*) FM_AUTOARM_SESSION=${token#*=} ;;
+      session_generation=?*) FM_AUTOARM_SESSION_GENERATION=${token#*=} ;;
+      recovery_generation=?*) FM_AUTOARM_RECOVERY=${token#*=} ;;
+    esac
+  done
   case "$FM_AUTOARM_GEN" in
     ''|*[!0-9]*) return 1 ;;
   esac
-  FM_AUTOARM_IDENTITY=$(sed -n '2p' "$epoch" 2>/dev/null || true)
-  return 0
+  [ -n "$FM_AUTOARM_OWNER" ] && [ -n "$FM_AUTOARM_OUTCOME" ]
+}
+
+fm_autoarm_marker_current() {
+  [ -e "$1" ] && { [ -z "$2" ] || [ "$(cat "$1" 2>/dev/null)" = "$2" ]; }
 }
 
 # True while the CURRENT ledger claim is open and healthy - the defer predicate
@@ -2021,8 +2059,6 @@ fm_autoarm_claim_open() {  # <state-dir> [grace]
 # exists to stop.
 fm_autoarm_midturn_healthy() {  # <state-dir> [grace]
   local state=$1 lock_pid recovery epoch_mtime beacon_mtime
-  [ -e "$state/.claude-autoarm-failure-notified" ] && return 1
-  [ -e "$state/.claude-autoarm-failure-alarmed" ] && return 1
   fm_autoarm_ledger_read "$state" || return 1
   [ "$FM_AUTOARM_OUTCOME" = rewake ] || return 1
   fm_session_lock_read "$state/.lock" || return 1
@@ -2030,6 +2066,8 @@ fm_autoarm_midturn_healthy() {  # <state-dir> [grace]
   fm_session_lock_start_matches "$lock_pid" "$FM_SESSION_LOCK_START" || return 1
   [ -n "$FM_AUTOARM_SESSION" ] && [ "$FM_AUTOARM_SESSION" = "$lock_pid" ] \
     && [ "$FM_AUTOARM_SESSION_GENERATION" = "$FM_SESSION_LOCK_GENERATION" ] || return 1
+  fm_autoarm_marker_current "$state/.claude-autoarm-failure-notified" "$FM_SESSION_LOCK_GENERATION" && return 1
+  fm_autoarm_marker_current "$state/.claude-autoarm-failure-alarmed" "$FM_SESSION_LOCK_GENERATION" && return 1
   fm_pid_alive "$lock_pid" || return 1
   fm_recovery_marker_read "$state/.watcher-down" || return 1
   recovery=${FM_RECOVERY_MARKER_TOKEN##*:}
@@ -2135,7 +2173,10 @@ fm_autoarm_write_owned() {  # <state-dir> <gen> <outcome> [marker-file] [session
     fm_lock_release "$lock"
     return 1
   fi
-  if [ -n "$marker" ] && { ! fm_autoarm_session_current "$state" "$session_generation" || ! : > "$marker" 2>/dev/null; }; then
+  if [ -n "$marker" ] && {
+    ! fm_autoarm_session_current "$state" "$session_generation" \
+      || ! printf '%s' "$session_generation" > "$marker" 2>/dev/null
+  }; then
     fm_lock_release "$lock"
     return 2
   fi
@@ -2162,7 +2203,7 @@ fm_autoarm_reset_owned() {  # <state-dir> <gen>
     fm_lock_release "$lock"
     return 2
   fi
-  if ! fm_failure_episode_reset "$state"; then
+  if ! fm_failure_episode_reset "$state" acquire "$FM_AUTOARM_SESSION_GENERATION"; then
     fm_lock_release "$lock"
     return 1
   fi
@@ -2313,6 +2354,9 @@ fm_wake_append() {
 fm_wake_append_locked() {
   local kind=$1 key=$2 payload=$3 clean_key clean_payload epoch seq seq_file status
   local recovery_marker
+  if [ -n "${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-}" ]; then
+    fm_session_network_worker_owns_claim "$STATE" || return 1
+  fi
   case "$kind" in
     signal|stale|check|heartbeat) ;;
     *) printf 'fm_wake_append: invalid wake kind: %s\n' "$kind" >&2; return 2 ;;

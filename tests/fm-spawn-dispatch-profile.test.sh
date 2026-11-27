@@ -1562,6 +1562,24 @@ test_active_dispatch_profile_requires_explicit_harness_for_scout
 test_active_dispatch_profile_allows_explicit_harness
 test_active_dispatch_profile_allows_positional_harness
 test_active_dispatch_profile_allows_raw_launch_command
+test_raw_ship_and_scout_keep_their_leading_command() {
+  local kind rec id out
+  for kind in ship scout; do
+    id="profile-shell-$kind"
+    rec=$(make_spawn_case "raw-shell-$kind" codex "$id")
+    read_case_record "$rec"
+    if [ "$kind" = ship ]; then
+      out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+        "$id" "$PROJ_DIR" 'exec codex --example') || fail "$kind raw launch failed: $out"
+    else
+      out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+        "$id" "$PROJ_DIR" 'exec codex --example' --scout) || fail "$kind raw launch failed: $out"
+    fi
+    assert_contains "$out" "spawned $id harness=exec" "$kind raw launch changed its leading command"
+  done
+  pass "legacy ship and scout raw launches preserve their leading shell command"
+}
+test_raw_ship_and_scout_keep_their_leading_command
 test_claude_threads_model_and_effort
 test_codex_threads_model_and_effort
 test_codex_omits_invalid_max_effort

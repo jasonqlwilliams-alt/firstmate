@@ -2052,15 +2052,16 @@ case "$ARG3" in
     RAW_LAUNCH=1
     LAUNCH=$ARG3
     RAW_EXECUTABLE=$(perl -MText::ParseWords=shellwords -e '
-      my $leading = 1;
+      my $leading = $ARGV[1] eq "secondmate";
+      my $exec_prefix = 0;
       for my $word (shellwords($ARGV[0])) {
         next if $word =~ /^[A-Za-z_][A-Za-z0-9_]*=/;
-        if ($leading && $word eq "exec") { $leading = 0; next; }
-        next if !$leading && $word eq "--";
+        if ($leading && $word eq "exec") { $leading = 0; $exec_prefix = 1; next; }
+        next if $exec_prefix && $word eq "--";
         print $word; exit 0;
       }
       exit 1;
-    ' -- "$LAUNCH") || { echo "error: raw launch has no executable" >&2; exit 1; }
+    ' -- "$LAUNCH" "$KIND") || { echo "error: raw launch has no executable" >&2; exit 1; }
     HARNESS=$(basename -- "$RAW_EXECUTABLE")
     ;;
   '')
@@ -4998,7 +4999,7 @@ LAUNCH=${LAUNCH//__WORKTREE__/$sq_worktree}
 raw_harness_unset=
 case "$HARNESS" in
   claude|codex|opencode|pi|pi-signed|grok|kimi|gemini|muse|rovo|agy)
-    if [ "$RAW_LAUNCH" -eq 1 ]; then
+    if [ "$KIND" = secondmate ] && [ "$RAW_LAUNCH" -eq 1 ]; then
       raw_harness_unset=' CURSOR_AGENT CURSOR_INVOKED_AS GEMINI_CLI'
     else
       LAUNCH="env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI $LAUNCH"
@@ -5047,7 +5048,7 @@ if [ "$KIND" = secondmate ]; then
 fi
 _fm_wake_require_classify || exit 1
 reserved_key_prefixes=${FM_CLASSIFY_RESERVED_KEY_PREFIXES:-$FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT}
-LAUNCH="unset FM_SESSION_OWNER_ID FM_SESSION_OWNER_HOME FM_SESSION_OWNER_PID FM_SESSION_OWNER_START FM_SESSION_OWNER_KIND FM_BOOTSTRAP_NETWORK_LOCK_PID FM_BOOTSTRAP_NETWORK_LOCK_GEN FM_BOOTSTRAP_NETWORK_WORKER_PID FM_BOOTSTRAP_NETWORK_WORKER_START$raw_harness_unset; export FM_CLASSIFY_RESERVED_KEY_PREFIXES=$(shell_quote "$reserved_key_prefixes"); $LAUNCH"
+LAUNCH="unset FM_SESSION_OWNER_ID FM_SESSION_OWNER_HOME FM_SESSION_OWNER_PID FM_SESSION_OWNER_START FM_SESSION_OWNER_KIND FM_BOOTSTRAP_NETWORK_LOCK_PID FM_BOOTSTRAP_NETWORK_LOCK_GEN FM_BOOTSTRAP_NETWORK_WORKER_PID FM_BOOTSTRAP_NETWORK_WORKER_START FM_TIMEOUT_INHERIT_GROUP$raw_harness_unset; export FM_CLASSIFY_RESERVED_KEY_PREFIXES=$(shell_quote "$reserved_key_prefixes"); $LAUNCH"
 if [ -z "$SPAWN_TRACEPARENT" ] && [ "$RELAUNCH" -eq 1 ]; then
   LAUNCH="unset TRACEPARENT; $LAUNCH"
 fi

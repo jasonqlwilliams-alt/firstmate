@@ -1080,7 +1080,55 @@ e2e_tmux() {
 }
 
 unit_clear_stale
+unit_away_drain_with_and_without_launch_ownership() {
+  local home mode out
+  for mode in legacy launch-v1; do
+    home=$(mktemp -d "${TMPDIR:-/tmp}/fm-afk-wake.XXXXXX")
+    mkdir -p "$home/config" "$home/state"
+    if [ "$mode" = launch-v1 ]; then
+      printf 'launch-v1\n' > "$home/config/session-lock-owner"
+    fi
+    confirm_posture "$home" || fail "$mode away wake fixture could not confirm posture"
+    # shellcheck disable=SC2016
+    out=$(FM_HOME="$home" FM_TEST_BIN="$ROOT/bin" FM_TEST_MODE="$mode" \
+      "$ROOT/bin/fm-session-launch.sh" -- /bin/bash -ec '
+        if [ "$FM_TEST_MODE" = launch-v1 ]; then "$FM_TEST_BIN/fm-lock.sh"; fi
+        "$FM_TEST_BIN/fm-afk-launch.sh" start-native
+        . "$FM_TEST_BIN/fm-wake-lib.sh"
+        fm_wake_append check fixture "fixture wake delegated to away"
+        (
+          . "$FM_TEST_BIN/fm-session-lock-lib.sh"
+          fm_session_owner_clear
+          "$FM_TEST_BIN/fm-branch-outcome.sh" list
+          if [ "$FM_TEST_MODE" = launch-v1 ]; then
+            if "$FM_TEST_BIN/fm-wake-drain.sh"; then exit 4; fi
+          fi
+          . "$FM_TEST_BIN/fm-supervise-daemon.sh"
+          lock="$STATE/.supervise-daemon.lock"
+          fm_lock_try_acquire "$lock"
+          printf -v cleanup "fm_lock_release %q" "$lock"
+          trap "$cleanup" EXIT
+          fm_current_pid daemon_pid
+          fm_pid_identity "$daemon_pid" > "$lock/pid-identity"
+          handle_wake() { printf "%s\n" "$1" > "$FM_HOME/classified"; }
+          handle_durable_wakes "missing wake payload" "$STATE"
+        )
+        test "$(cat "$FM_HOME/classified")" = "fixture wake delegated to away"
+        test ! -s "$STATE/.wake-queue"
+      ' 2>&1)
+    if [ "$?" -eq 0 ]; then
+      pass "$mode away entry delegates wake presentation and acknowledgement"
+    else
+      fail "$mode away entry could not classify and acknowledge a wake: $out"
+    fi
+    rm -rf "$home"
+  done
+}
+
 unit_propose_confirm_records_the_posture_without_a_daemon
+if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then
+  unit_away_drain_with_and_without_launch_ownership
+fi
 unit_pi_never_launches_the_daemon
 unit_daemon_entry_requires_confirmation
 unit_failed_daemon_launch_preserves_confirmed_record

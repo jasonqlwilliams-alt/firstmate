@@ -94,7 +94,6 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
-fm_session_mutation_allowed "fm-branch-outcome" || exit 1
 # shellcheck source=bin/fm-classify-lib.sh
 . "$SCRIPT_DIR/fm-classify-lib.sh"
 
@@ -388,7 +387,7 @@ processed_init_locked() {
 }
 
 held_lock_owned_by_ancestor() {
-  local owner owner_pid pid parent depth=0
+  local owner owner_pid
   case "$PPID" in ''|*[!0-9]*|0|1) return 1 ;; esac
   if [ -L "$LOCK" ]; then
     owner=$(fm_lock_link_owner "$LOCK" 2>/dev/null) || return 1
@@ -405,21 +404,15 @@ held_lock_owned_by_ancestor() {
   # real pid becomes this script's parent. Walk the bounded live ancestry so
   # that legitimate drain shape is accepted without trusting an arbitrary
   # caller merely because it can name or observe the lock owner.
-  pid=$PPID
-  while [ "$depth" -lt 64 ]; do
-    [ "$pid" = "$owner_pid" ] && return 0
-    parent=$(ps -o ppid= -p "$pid" 2>/dev/null) || return 1
-    parent=${parent//[[:space:]]/}
-    case "$parent" in ''|*[!0-9]*|0|1) return 1 ;; esac
-    [ "$parent" != "$pid" ] || return 1
-    pid=$parent
-    depth=$((depth + 1))
-  done
-  return 1
+  fm_pid_has_ancestor "$PPID" "$owner_pid"
 }
 
 CMD=${1:-}
 shift 2>/dev/null || true
+case "$CMD" in
+  append|mark-read|mark-processed|startup-replay)
+    fm_session_mutation_allowed "fm-branch-outcome" || exit 1 ;;
+esac
 
 case "$CMD" in
   append)
@@ -580,10 +573,13 @@ case "$CMD" in
     fi
     [ "$#" -eq 0 ] || usage
     if [ "$HELD_LOCK" -eq 0 ]; then
+      fm_session_mutation_allowed "fm-branch-outcome" || exit 1
       fm_lock_acquire_wait "$LOCK"
     elif ! held_lock_owned_by_ancestor; then
       echo "error: --held-lock requires an ancestor process to own the outcome lock" >&2
       exit 1
+    else
+      fm_session_mutation_allowed "fm-branch-outcome-index" || exit 1
     fi
     if ! processed_init_locked; then
       if [ "$HELD_LOCK" -eq 0 ]; then

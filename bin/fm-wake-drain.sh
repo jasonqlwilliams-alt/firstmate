@@ -614,6 +614,10 @@ print_status_presentation() {  # [<deduped-raw-rows>]
     fi
     return 1
   fi
+  if ! fm_session_mutation_allowed "fm-wake-drain"; then
+    fm_lock_release "$lock"
+    return 1
+  fi
   snapshot=$(status_presentation_snapshot "$STATE") || {
     printf 'STATUS PRESENTATION INCOMPLETE: status snapshot could not be read.\n'
     rc=1
@@ -660,6 +664,7 @@ else
   exit 1
 fi
 DRAIN_LOCK_HELD=true
+fm_session_mutation_allowed "fm-wake-drain" || exit 1
 reclaim_stale_branch_grant_locked || exit 1
 [ "$ACTOR" != main ] || retire_unconsumable_rows_locked
 [ "$ACTOR" != branch ] || require_branch_eligible_rows || exit 1
@@ -704,6 +709,7 @@ if [ -n "$ACK_THROUGH" ]; then
   fi
   fm_lock_acquire_wait "$FM_WAKE_QUEUE_LOCK"
   DRAIN_LOCK_HELD=true
+  fm_session_mutation_allowed "fm-wake-drain" || exit 1
   DRAIN_TMP=$(mktemp "$STATE/.wake-queue.ack.XXXXXX") || exit 1
   chmod 0600 "$DRAIN_TMP" || exit 1
   if [ "$ACTOR" = branch ]; then

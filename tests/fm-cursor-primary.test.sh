@@ -754,12 +754,31 @@ SH
       test ! -e "$FM_HOME/state/arm-ran"
       rc=0
       invoke > "$FM_HOME/owned" 2>&1 || rc=$?
-      test "$rc" -le 2
+      case "$FM_FIXTURE_HOOK" in
+        fm-claude-stop-autoarm.sh)
+          test "$rc" -eq 2
+          grep -Fq "stale: fixture-win actionable" "$FM_HOME/owned"
+          ;;
+        fm-turnend-guard-cursor.sh)
+          test "$rc" -eq 0
+          jq -e ".followup_message | contains(\"stale: fixture-win needs a look\")" "$FM_HOME/owned" >/dev/null
+          ;;
+      esac
       test -s "$FM_HOME/state/arm-ran"
       test "$before" = "$("$FM_HOME/bin/fm-lock.sh" verify)"
     ' >/dev/null 2>"$dir/driver-error" || fail "$type versioned Stop fixture failed: $(cat "$dir/driver-error" "$dir/owned" 2>/dev/null)"
     status=$(FM_HOME="$dir" "$dir/bin/fm-lock.sh" status)
     assert_contains "$status" "lock: stale" "$type retained an exited launch"
+    if [ "$type" = claude ]; then
+      FM_HOME="$dir" FM_FIXTURE_PAYLOAD="$payload" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=0 \
+        "$dir/bin/fm-session-launch.sh" -- /bin/bash -ec '
+          "$FM_HOME/bin/fm-lock.sh"
+          rc=0
+          "$FM_HOME/bin/fm-turnend-guard.sh" --claude <<< "$FM_FIXTURE_PAYLOAD" 2>"$FM_HOME/sync-stop" || rc=$?
+          test "$rc" -eq 2
+          grep -Fq "TURN WOULD END BLIND" "$FM_HOME/sync-stop"
+        ' >/dev/null || fail "a fresh Claude launch accepted the previous launch's rewake"
+    fi
 
     # A new genuine launch can recover through the hook, using only its own
     # binding. An unbound hook after death must leave the old proof in place.

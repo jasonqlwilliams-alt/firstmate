@@ -1043,6 +1043,10 @@ SH
   [ -e "$home/second-entered" ] || fail 'next launcher never started'
   sleep 0.35
   [ "$(cat "$home/state/.lock")" = "$held_pid" ] || fail 'new launch took over during the prior bounded sweep'
+  if out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" "$root/bin/fm-wake-drain.sh" 2>&1); then
+    fail 'unbound wake drain entered during the prior generation sweep'
+  fi
+  assert_contains "$out" 'session launch no longer owns this home' 'wake drain missed the active acquisition claim'
   : > "$home/release-sweep"
   wait "$new" || fail 'next launcher failed after prior sweep release'
   [ -e "$home/sweep-finished" ] || fail 'the old bounded sweep did not finish'
@@ -1052,8 +1056,50 @@ SH
   pass 'fm-startup-network: startup-only scope and continuing sessions carry the generation through a fenced handoff'
 }
 
+test_bare_startup_reaps_the_waiting_inactive_scan() {
+  local rec home root log out scan_pid
+  rec=$(new_world bare-scan-deadline)
+  IFS='|' read -r home root log <<< "$rec"
+  mkdir -p "$home/config" "$home/state/.inactive-outcome-reconcile.lock"
+  printf 'launch-v1\n' > "$home/config/session-lock-owner"
+  printf 'manual\n' > "$home/config/backlog-backend"
+  printf '%s\n' "$$" > "$home/state/.inactive-outcome-reconcile.lock/pid"
+  ln -s "$ROOT/bin/fm-session-owner-publish.mjs" "$root/bin/fm-session-owner-publish.mjs"
+  ln -s "$ROOT/docs" "$root/docs"
+  unlink "$root/bin/fm-home-summary-refresh.sh"
+  printf '#!/bin/sh\nexit 0\n' > "$root/bin/fm-home-summary-refresh.sh"
+  unlink "$root/bin/fm-inactive-reconcile.sh"
+  cat > "$root/bin/fm-inactive-reconcile.sh" <<'SH'
+#!/bin/bash
+export FM_TEST_SCAN_ACTIVE=1
+exec "$FM_TEST_REAL_SCAN" "$@"
+SH
+  cat > "$root/bin/sleep" <<'SH'
+#!/bin/bash
+if [ "${FM_TEST_SCAN_ACTIVE:-0}" = 1 ] && [ "$1" = 0.1 ] && [ ! -e "$FM_HOME/scan-waiter" ]; then
+  printf '%s\n' "$PPID" > "$FM_HOME/scan-waiter"
+fi
+exec /bin/sleep "$@"
+SH
+  chmod +x "$root/bin/fm-home-summary-refresh.sh" "$root/bin/fm-inactive-reconcile.sh" "$root/bin/sleep"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_STARTUP_NETWORK_TIMEOUT=3 \
+    FM_TEST_REAL_SCAN="$ROOT/bin/fm-inactive-reconcile.sh" FM_FAKE_BOOTSTRAP_LOG="$log" \
+    PATH="$root/bin:$PATH" "$root/bin/fm-session-start.sh" 2>&1) || fail "bare startup failed: $out"
+  assert_contains "$out" 'hit the 3s bound' 'the scan did not reach the common startup deadline'
+  scan_pid=$(cat "$home/scan-waiter") || fail 'the inactive scan never waited on the held lock'
+  case "$(/bin/ps -p "$scan_pid" -o stat=)" in
+    ''|Z*|X*) ;;
+    *) fail "inactive scan pid $scan_pid survived the startup deadline" ;;
+  esac
+  rm -rf "$home/state/.inactive-outcome-reconcile.lock"
+  FM_HOME="$home" "$root/bin/fm-session-launch.sh" -- "$root/bin/fm-lock.sh" >/dev/null \
+    || fail 'the expired sweep still blocked the next launch'
+  pass 'fm-startup-network: a timed-out bare startup reaps the waiting inactive scan before takeover'
+}
+
 if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then
   test_launch_owner_startup_and_bounded_worker_handoff
+  test_bare_startup_reaps_the_waiting_inactive_scan
 fi
 
 test_wait_fails_without_a_published_stage

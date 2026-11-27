@@ -154,6 +154,10 @@ sha256_text() {
 
 record_path() { printf '%s/%s.%s\n' "$OUTCOME_DIR" "$1" "$2"; }
 
+reconcile_mutation_authorized() {
+  [ -z "${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-}" ] || fm_session_network_worker_owns_claim "$STATE"
+}
+
 record_value() {
   local record=$1 key=$2
   [ -f "$record" ] && [ ! -L "$record" ] || return 0
@@ -170,7 +174,10 @@ record_phase_set() {
   done < "$record"
   printf 'phase=%s\n' "$phase" >> "$tmp" || { rm -f "$tmp"; return 1; }
   chmod 600 "$tmp" 2>/dev/null || true
-  mv -f "$tmp" "$record"
+  if ! reconcile_mutation_authorized || ! mv -f "$tmp" "$record"; then
+    rm -f "$tmp"
+    return 1
+  fi
 }
 
 record_field_set() {
@@ -183,7 +190,10 @@ record_field_set() {
   done < "$record"
   printf '%s=%s\n' "$key" "$value" >> "$tmp" || { rm -f "$tmp"; return 1; }
   chmod 600 "$tmp" 2>/dev/null || true
-  mv -f "$tmp" "$record"
+  if ! reconcile_mutation_authorized || ! mv -f "$tmp" "$record"; then
+    rm -f "$tmp"
+    return 1
+  fi
 }
 
 ensure_record() { # <fingerprint> <task> <incarnation> <state> <outcome-key> <origin> <phase> <pr> [status-head]
@@ -198,7 +208,7 @@ ensure_record() { # <fingerprint> <task> <incarnation> <state> <outcome-key> <or
   if [ -f "$RECORD_PENDING" ] && [ ! -L "$RECORD_PENDING" ]; then
     return 0
   fi
-  mkdir -p "$OUTCOME_DIR" || return 1
+  reconcile_mutation_authorized && mkdir -p "$OUTCOME_DIR" || return 1
   [ ! -L "$OUTCOME_DIR" ] || return 1
   tmp=$(mktemp "$OUTCOME_DIR/.pending.XXXXXX") || return 1
   {
@@ -216,14 +226,14 @@ ensure_record() { # <fingerprint> <task> <incarnation> <state> <outcome-key> <or
     [ -z "$status_head" ] || printf 'status_head=%s\n' "$status_head"
   } > "$tmp" || { rm -f "$tmp"; return 1; }
   chmod 600 "$tmp" 2>/dev/null || true
-  mv -f "$tmp" "$RECORD_PENDING" || { rm -f "$tmp"; return 1; }
+  reconcile_mutation_authorized && mv -f "$tmp" "$RECORD_PENDING" || { rm -f "$tmp"; return 1; }
 }
 
 mark_reported() { # <record>
   local record=$1 reported
   [ -f "$record" ] && [ ! -L "$record" ] || return 1
   reported=${record%.pending}.reported
-  mv -f "$record" "$reported"
+  reconcile_mutation_authorized && mv -f "$record" "$reported"
 }
 
 queue_key_exists() { # <key>
@@ -290,7 +300,7 @@ write_scan_marker() { # <cursor>
     printf 'cursor=%s\n' "$cursor"
   } > "$marker_tmp" || { rm -f "$marker_tmp"; return 1; }
   chmod 600 "$marker_tmp" 2>/dev/null || true
-  mv -f "$marker_tmp" "$SCAN_MARKER" || { rm -f "$marker_tmp"; return 1; }
+  reconcile_mutation_authorized && mv -f "$marker_tmp" "$SCAN_MARKER" || { rm -f "$marker_tmp"; return 1; }
 }
 
 meta_field() {
@@ -336,7 +346,7 @@ report_to_parent() { # <task> <state> <outcome-key> <fingerprint> <pr>
   local task=$1 state=$2 outcome_key=$3 fingerprint=$4 pr=$5 line
   line="$state [key=$outcome_key]: inactive terminal child=$task fingerprint=$fingerprint"
   [ -z "$pr" ] || line="$line pr=$pr"
-  fm_parent_channel_report "$FM_HOME" "$STATE" "$line"
+  reconcile_mutation_authorized && fm_parent_channel_report "$FM_HOME" "$STATE" "$line"
 }
 
 # Queue the once-per-record notice that a parent report could not be written.
@@ -430,6 +440,7 @@ report_child_ledger_locked() { # <id> <meta>
   if [ -f "$data/$id/report.md" ] && [ ! -L "$data/$id/report.md" ]; then
     line="$line report=data/$id/report.md"
   fi
+  reconcile_mutation_authorized || return 1
   if fm_parent_channel_report "$FM_HOME" "$STATE" "$line"; then
     mark_reported "$RECORD_PENDING" || return 1
     return 0
@@ -573,9 +584,7 @@ scan_pass() { # <cursor> <after|through> <deadline> <secondmate-id-or-empty>
 
 scan() {
   local startup=${1:-0} self='' cursor deadline rc=0 marker_rc=0
-  if [ -n "${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-}" ]; then
-    fm_session_network_worker_owns_claim "$STATE" || return 1
-  fi
+  reconcile_mutation_authorized || return 1
   mkdir -p "$STATE" "$OUTCOME_DIR" || return 1
   [ ! -L "$OUTCOME_DIR" ] || return 1
   if self=$(home_secondmate_id); then
@@ -666,12 +675,14 @@ case "$mode" in
     [ "$#" -eq 2 ] || { printf 'usage: fm-inactive-reconcile.sh acknowledge <fingerprint>\n' >&2; exit 2; }
     fm_lock_acquire_wait "$SCAN_LOCK" || exit 1
     trap 'fm_lock_release "$SCAN_LOCK"' EXIT
+    fm_session_mutation_allowed "fm-wake-drain" || exit 1
     acknowledge "$2"
     ;;
   acknowledge-notice)
     [ "$#" -eq 2 ] || exit 2
     fm_lock_acquire_wait "$SCAN_LOCK" || exit 1
     trap 'fm_lock_release "$SCAN_LOCK"' EXIT
+    fm_session_mutation_allowed "fm-wake-drain" || exit 1
     acknowledge_notice "$2"
     ;;
   -h|--help)

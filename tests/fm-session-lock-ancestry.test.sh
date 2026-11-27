@@ -988,11 +988,51 @@ test_reused_publication_claimant_does_not_block_acquisition() {
   pass "session lock: PID reuse cannot pin the publication mutex"
 }
 
+test_paused_legacy_writer_cannot_cross_cutover() {
+  local home fakebin legacy active
+  home=$(lock_home paused-legacy-cutover)
+  fakebin=$(fm_fakebin "$home/publication")
+  mkdir -p "$home/config"
+  cat > "$fakebin/ps" <<'SH'
+#!/bin/bash
+if [ -e "$FM_HOME/hold-legacy" ] && [ "$*" = "-o comm= -p $FM_TEST_LEGACY_PID" ]; then
+  : > "$FM_HOME/legacy-in-flight"
+  while [ -e "$FM_HOME/hold-legacy" ]; do sleep 0.05; done
+fi
+exec /bin/ps "$@"
+SH
+  chmod +x "$fakebin/ps"
+  : > "$home/hold-legacy"
+  PATH="$fakebin:$PATH" FM_HOME="$home" FM_FIXTURE_LOCK="$ROOT/bin/fm-lock.sh" "$CODEX_FIXTURE" -c '
+    export FM_TEST_LEGACY_PID=$$
+    "$FM_FIXTURE_LOCK"; exit $?
+  ' > "$home/legacy-log" 2>&1 &
+  legacy=$!
+  OWNER_RECORD_PIDS="${OWNER_RECORD_PIDS:-} $legacy"
+  owner_fixture_wait "$home/legacy-in-flight"
+  printf 'launch-v1\n' > "$home/config/session-lock-owner"
+  FM_HOME="$home" FM_FIXTURE_LOCK="$ROOT/bin/fm-lock.sh" "$ROOT/bin/fm-session-launch.sh" -- /bin/bash -ec '
+    "$FM_FIXTURE_LOCK"
+    "$FM_FIXTURE_LOCK" verify > "$FM_HOME/active-generation"
+    while [ ! -e "$FM_HOME/owner-exit" ]; do sleep 0.05; done
+    test "$(cat "$FM_HOME/active-generation")" = "$("$FM_FIXTURE_LOCK" verify)"
+  ' > "$home/active-log" 2>&1 &
+  active=$!
+  OWNER_RECORD_PIDS="${OWNER_RECORD_PIDS:-} $active"
+  owner_fixture_wait "$home/active-generation"
+  rm "$home/hold-legacy"
+  if wait "$legacy"; then fail 'in-flight legacy writer acquired after versioned cutover'; fi
+  : > "$home/owner-exit"
+  wait "$active" || fail 'in-flight legacy writer damaged the live versioned record'
+  pass 'session lock: a legacy writer paused before cutover cannot replace a versioned owner'
+}
+
 if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then
   test_unreadable_lifetime_does_not_allow_takeover
   test_interrupted_publication_leaves_a_recoverable_record
   test_same_pid_reuse_commits_at_the_proof
   test_reused_publication_claimant_does_not_block_acquisition
+  test_paused_legacy_writer_cannot_cross_cutover
 fi
 
 test_dead_launch_cannot_authorize_its_detached_child() {

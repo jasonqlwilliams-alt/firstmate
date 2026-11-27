@@ -18,8 +18,9 @@ SH
 printf 'watcher: started pid=%s (beacon 0s) recovery-generation=fixture\n' "$$"
 sleep 30
 SH
-  printf '#!/bin/bash\nexit 0\n' > "$repo/bin/fm-turnend-guard.sh"
-  chmod +x "$repo/bin/fm-session-start.sh" "$repo/bin/fm-watch-arm.sh" "$repo/bin/fm-turnend-guard.sh"
+  printf '#!/bin/bash\ncat >/dev/null\nprintf "fixture supervision needs a continuation\\n" >&2\nexit 2\n' > "$repo/bin/fm-turnend-guard.sh"
+  printf '#!/bin/bash\nprintf "fixture seatbelt refuses a project cd\\n" >&2\nexit 2\n' > "$repo/bin/fm-cd-pretool-check.sh"
+  chmod +x "$repo/bin/fm-session-start.sh" "$repo/bin/fm-watch-arm.sh" "$repo/bin/fm-turnend-guard.sh" "$repo/bin/fm-cd-pretool-check.sh"
   out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_STATE_OVERRIDE="$home/state"     node "$ROOT/tests/fixtures/session-owner-native.mjs" "$family" "$repo" 2>&1)     || fail "$family engine generation fixture failed: $out"
   pass "$family native engine verifies its generation for startup receipts, nested engines and watcher markers"
 }

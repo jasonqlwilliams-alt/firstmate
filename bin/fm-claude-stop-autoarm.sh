@@ -324,7 +324,7 @@ if [ "$HEALTHY" -eq 1 ]; then
   fi
   if autoarm_commit failed-suppressed; then
     [ -z "$OUT" ] || rm -f "$OUT" 2>/dev/null || true
-    [ -e "$FAILURE_ALARM" ] && exit 0
+    fm_autoarm_marker_current "$FAILURE_ALARM" "$SESSION_OWNER_GENERATION" && exit 0
     exit 2
   fi
   [ -z "$OUT" ] || rm -f "$OUT" 2>/dev/null || true
@@ -333,7 +333,7 @@ fi
 
 # After the synchronous guard has consumed the episode's attended fail-open,
 # do not create another exit-2 continuation that could defeat it.
-if [ -e "$FAILURE_ALARM" ]; then
+if fm_autoarm_marker_current "$FAILURE_ALARM" "$SESSION_OWNER_GENERATION"; then
   autoarm_record failed-suppressed
   [ -z "$OUT" ] || rm -f "$OUT" 2>/dev/null || true
   exit 0
@@ -389,7 +389,7 @@ fi
 # creating a repeated operator notice or manual-arm loop. The notice marker
 # commits in the same owned critical section as the winning failed write, so a
 # losing generation can neither consume nor deliver it.
-if [ ! -e "$FAILURE_NOTICE" ]; then
+if ! fm_autoarm_marker_current "$FAILURE_NOTICE" "$SESSION_OWNER_GENERATION"; then
   if ! fm_autoarm_still_owner "$STATE" "$MY_GEN"; then
     [ -z "$OUT" ] || rm -f "$OUT" 2>/dev/null || true
     exit 0

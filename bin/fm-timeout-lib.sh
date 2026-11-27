@@ -170,6 +170,10 @@ fm_run_timed() {  # [--kill | --wait-on-term] <seconds> <command...>
   esac
   seconds=$1
   shift
+  if [ "${FM_TIMEOUT_INHERIT_GROUP:-0}" = 1 ]; then
+    "$@"
+    return
+  fi
   case "$(fm_timeout_mechanism)" in
     timeout) fm_run_external_timeout timeout "$seconds" "$signal" "$wait_on_term" "$@" ;;
     gtimeout) fm_run_external_timeout gtimeout "$seconds" "$signal" "$wait_on_term" "$@" ;;

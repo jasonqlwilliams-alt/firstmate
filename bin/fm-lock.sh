@@ -150,7 +150,14 @@ rm -f "$probe" 2>/dev/null || {
 }
 me_start=$(fm_pid_start_time "$me") || me_start=''
 legacy_self=0
+require_legacy_mode() {
+  if fm_session_owner_mode_active "$STATE" || [ -n "${FM_SESSION_LOCK_GENERATION:-}" ]; then
+    echo 'error: launch ownership is active; use a valid session binding' >&2
+    return 1
+  fi
+}
 if [ -f "$LOCK" ] && [ ! -L "$LOCK" ] && fm_session_lock_read "$LOCK"; then
+  require_legacy_mode || exit 1
   old=$FM_SESSION_LOCK_PID
   if [ "$old" = "$me" ]; then
     if [ "$FM_SESSION_LOCK_START" = "$me_start" ]; then
@@ -166,6 +173,7 @@ fi
 
 if ! fm_lock_try_acquire "$CLAIM_LOCK"; then
   if [ "$legacy_self" -eq 1 ]; then
+    require_legacy_mode || exit 1
     echo "lock acquired: harness pid $me"
     exit 0
   fi
@@ -178,6 +186,7 @@ if ! fm_lock_try_acquire "$CLAIM_LOCK"; then
   fm_lock_acquire_wait "$CLAIM_LOCK"
 fi
 CLAIM_LOCK_HELD=1
+require_legacy_mode || exit 1
 
 old=''
 if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
@@ -189,6 +198,7 @@ if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
     echo "error: session lock is unreadable; operate read-only until resolved" >&2
     exit 1
   }
+  require_legacy_mode || exit 1
   old=$FM_SESSION_LOCK_PID
   if [ "$old" != "$me" ] && fm_session_lock_owner_alive "$old" "$FM_SESSION_LOCK_START"; then
     echo "error: another live firstmate session holds the lock (pid $old); operate read-only until resolved" >&2
