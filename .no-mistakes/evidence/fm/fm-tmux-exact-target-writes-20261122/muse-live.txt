@@ -1,0 +1,22 @@
+$ tmux -V
+tmux 3.7c
+
+$ bin/fm-spawn.sh muse-route <project> muse --backend tmux --mode no-mistakes --yolo off
+Synthetic credential is present only in the decoy with numeric ID $0.
+error: muse has no worker-reachable credential; META_API_KEY cannot be proven present in the tmux worker environment and '<disposable-config>/muse/auth.json' is absent or empty. Store the fleet credential with 'muse login' or 'muse auth set --api-key-stdin'.
+Exit 1. Destination still has only its launcher window.
+
+$ bin/fm-spawn.sh muse-route <project> muse --backend tmux --mode no-mistakes --yolo off
+Synthetic credential is present only in the session literally named $0.
+spawned muse-route harness=muse kind=ship mode=no-mistakes yolo=off window=$0:fm-muse-route worktree=<disposable-treehouse-slot>
+window=$0:fm-muse-route
+$1 $0 fm-muse-route %3
+$0 number-decoy base %0
+$0 number-decoy fm-muse-route %1
+The launched process received the expected synthetic destination credential.
+
+$ bin/fm-control.sh muse-route interrupt
+interrupt-delivered muse-route harness=muse backend=tmux verified=agent-alive cancel=unconfirmed
+Muse worker: {"event": "key", "value": "Escape"}
+{"event": "key", "value": "C-u"}
+Numeric-ID decoy: {"event": "submit", "value": "id-decoy-probe"}

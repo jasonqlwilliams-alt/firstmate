@@ -1,0 +1,8 @@
+FM_TEST_BEGIN 2026-11-27T22:40:11Z tests/fm-teardown-endpoint-safety.test.sh family=backend-dispatch expected_gate_skip=none
+ok - fm-teardown: exact tmux cleanup preserves invalid and prefix-matched neighbors while removing only the recorded target
+FM_TEST_END 2026-11-27T22:41:17Z tests/fm-teardown-endpoint-safety.test.sh exit=0 duration_ms=65873 gate_skip=false
+FM_TEST_BEGIN 2026-11-27T22:41:17Z tests/fm-task-inbox.test.sh family=watcher-wake-lock expected_gate_skip=none
+ok - inbox: the ring refuses Codex's update picker on every harness, cursor below the rows or on the selection row, with nothing typed and no Enter
+ok - inbox: a picker that appears after the composer check stops the ring before its Enter on every harness
+ok - fm-send: the picker gets no keystroke, and an empty composer still gets the doorbell
+FM_TEST_END 2026-11-27T22:42:29Z tests/fm-task-inbox.test.sh exit=0 duration_ms=72231 gate_skip=false

@@ -1,0 +1,7 @@
+$ tmux -V
+tmux 3.7c
+
+$ bin/fm-spawn.sh muse-route <project> muse --backend tmux --mode no-mistakes --yolo off
+Synthetic credential is present only in the session literally named $0.
+error: muse has no worker-reachable credential; META_API_KEY cannot be proven present in the tmux worker environment and '<disposable-config>/muse/auth.json' is absent or empty. Store the fleet credential with 'muse login' or 'muse auth set --api-key-stdin'.
+Firstmate exit=1. Destination still has only its launcher window.

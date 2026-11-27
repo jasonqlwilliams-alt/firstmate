@@ -1,0 +1,6 @@
+$ bin/fm-watch.sh
+%3 active=1
+Aged inbox record: 001.msg	1
+Worker retry: {"event": "submit", "value": ": Firstmate instruction waiting: list '<disposable-home>/state/route.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<disposable-home>/state/route.inbox'/handled/."}
+Sibling: {"event": "submit", "value": "watch-sibling-probe"}
+Watcher handled SIGTERM and released its lock, exit=1

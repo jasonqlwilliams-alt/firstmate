@@ -1,0 +1,42 @@
+FM_TEST_BEGIN 2026-11-27T22:37:38Z tests/fm-tmux-exact-target.test.sh family=backend-dispatch expected_gate_skip=none
+ok - explicit tmux pane syntax works for capture and presence
+ok - open worker window reads its own screen
+ok - precondition: raw tmux resolves the closed name to the surviving neighbour
+ok - capture: closed worker window reads as missing, not the neighbour's screen
+ok - liveness: closed worker window reads as missing
+ok - agent state: closed worker window is missing
+ok - composer, busy, and process reads: closed worker window reads nothing
+ok - fm-peek: closed recorded worker reads as missing
+skip: tmux rejects multiline window names
+ok - duplicate worker names leave the endpoint unresolved
+ok - closed recorded session reads as missing despite a prefix-named session
+ok - dotted window name reads exactly beside a live decoy
+ok - literal text and Enter reach the exact dotted worker
+ok - tmux preserves punctuation and indentation in multiline input
+ok - fm-send uses the recorded dotted name for named keys
+ok - changing the active pane cannot retarget an existing binding
+ok - synchronized splits refuse guarded input without changing tmux options
+ok - a pane binding survives changes to window and pane indices
+ok - a missing worker receives no input through its prefix neighbour
+ok - reads, writes, spawn, and cleanup honor literal ID-shaped session names
+ok - a bound worker becomes unavailable when its recorded session link is removed
+ok - detached spawn creates and reuses the literal firstmate session
+ok - a restarted tmux server cannot inherit a stale pane binding
+FM_TEST_END 2026-11-27T22:37:42Z tests/fm-tmux-exact-target.test.sh exit=0 duration_ms=3598 gate_skip=false
+FM_TEST_BEGIN 2026-11-27T22:37:42Z tests/fm-backend-tmux-smoke.test.sh family=backend-dispatch expected_gate_skip=none
+ok - real tmux: fm_backend_tmux_create_task creates a window and refuses a duplicate
+ok - real tmux: fm_backend_tmux_send_text_line sends literal text and submits with Enter
+ok - real tmux: fm_backend_tmux_send_literal + fm_backend_tmux_send_key Enter submit as two separate steps
+ok - real tmux: fm_backend_tmux_capture's -S -N bound trims old history for a small window and reaches it for a large one
+ok - real tmux: fm_backend_tmux_resolve_bare_selector (list-live) finds the created window by name
+ok - real tmux: fm_backend_tmux_resolve_bare_selector fails for a window that does not exist
+ok - real tmux: kill removes the window and the readable session inventory authoritatively classifies it missing
+FM_TEST_END 2026-11-27T22:37:43Z tests/fm-backend-tmux-smoke.test.sh exit=0 duration_ms=492 gate_skip=false
+FM_TEST_BEGIN 2026-11-27T22:37:43Z tests/fm-tangle-guard.test.sh family=session-bootstrap expected_gate_skip=none
+ok - fm-spawn: appends a pinned window and acquires its lease in the worker pane
+ok - fm-spawn: refuses a stale selector when the session name is reused
+ok - fm-spawn: repairs metadata for the same live worker after a late rename
+FM_TEST_END 2026-11-27T22:38:12Z tests/fm-tangle-guard.test.sh exit=0 duration_ms=28923 gate_skip=false
+FM_TEST_BEGIN 2026-11-27T22:38:12Z tests/fm-backup-helm.test.sh family=standalone expected_gate_skip=none
+ok - tmux handover launches in the window at the explicit index
+FM_TEST_END 2026-11-27T22:38:19Z tests/fm-backup-helm.test.sh exit=0 duration_ms=7012 gate_skip=false
