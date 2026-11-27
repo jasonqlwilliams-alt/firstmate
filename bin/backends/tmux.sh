@@ -223,7 +223,7 @@ fm_backend_tmux_close_if_unchanged() {  # <session:window> <verified-close-snaps
   session_id=${session_id%%:*}
   scoped_target="$session_id:$window_id"
   session_match=$(fm_backend_tmux_close_session_match "${target%%:*}")
-  result=$(tmux if-shell -F -t "$scoped_target" "#{&&:$session_match,#{==:$FM_TMUX_CLOSE_SNAPSHOT_FORMAT,$snapshot}}" \
+  result=$(tmux if-shell -F -t "$scoped_target" "#{?#{&&:$session_match,#{==:$FM_TMUX_CLOSE_SNAPSHOT_FORMAT,$snapshot}},1,0}" \
     "kill-window -t '$scoped_target'" 'display-message -p changed' 2>/dev/null) || return 1
   [ -z "$result" ]
 }
