@@ -365,7 +365,7 @@ SH
 }
 
 test_isolated_tmux_invalid_and_valid_cleanup() (
-  local dir socket socket_id session='endpoint.v2 #S,} #[blue] safety' target_id=target control=control target=fm-target
+  local dir socket socket_id session target_id=target control=control target=fm-target
   local prefix_target=fm-prefix prefix_survivor=fm-prefix2 rc caller_pane window_id waited=0 control_tty real_uname
   local race child_home child changed_window server_pid job_sid job_tty client_pid client_name session_name_arg
   [ -n "$REAL_TMUX" ] || { echo "skip - tmux not installed"; return 0; }
@@ -376,7 +376,8 @@ test_isolated_tmux_invalid_and_valid_cleanup() (
   unset TMUX TMUX_PANE
   trap '"$REAL_TMUX" -S "$socket" kill-server 2>/dev/null || true' EXIT
   session_name_arg='endpoint.v2 ##S,} #[blue] safety'
-  "$REAL_TMUX" -f /dev/null -S "$socket" new-session -d -s "$session_name_arg" -n "$control" 'exec sleep 180'
+  session=$("$REAL_TMUX" -f /dev/null -S "$socket" new-session -dP -F '#{session_name}' \
+    -s "$session_name_arg" -n "$control" 'exec sleep 180') || fail "could not start private tmux session"
   control_tty=$("$REAL_TMUX" -S "$socket" display-message -p -t "$session:$control" '#{pane_tty}')
   [ -n "$control_tty" ] || fail "test control pane has no terminal"
   window_id=$("$REAL_TMUX" -S "$socket" new-window -dP -F '#{window_id}' \
@@ -1205,7 +1206,7 @@ test_sole_slot_record_still_tears_down() {
 }
 
 test_recorded_endpoint_that_changed_directory_still_tears_down() (
-  local dir id=moved-task socket=dedicated.sock session='firstmate;' control_tty waited=0
+  local dir id=moved-task socket=dedicated.sock session control_tty waited=0
   [ -n "$REAL_TMUX" ] || { echo "skip - tmux not installed"; return 0; }
 
   dir=$(make_case slot-endpoint-moved)
@@ -1214,7 +1215,8 @@ test_recorded_endpoint_that_changed_directory_still_tears_down() (
   cd "$dir" || exit 1
   unset TMUX TMUX_PANE
   trap '"$REAL_TMUX" -S "$socket" kill-server 2>/dev/null || true' EXIT
-  "$REAL_TMUX" -f /dev/null -S "$socket" new-session -d -s 'firstmate\;' -n control 'exec sleep 60' \
+  session=$("$REAL_TMUX" -f /dev/null -S "$socket" new-session -dP -F '#{session_name}' \
+    -s 'firstmate\;' -n control 'exec sleep 60') \
     || fail "could not start private tmux server"
   control_tty=$("$REAL_TMUX" -S "$socket" display-message -p -t "=$session:=control" '#{pane_tty}')
   [ -n "$control_tty" ] || fail "test control pane has no terminal"
