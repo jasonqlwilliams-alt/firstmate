@@ -35,20 +35,32 @@ test_fixture_root_gone_after_normal_exit() {
 }
 
 test_scratch_cleanup_failure_changes_only_a_successful_exit() {
-  local harness status expected rc output
+  local harness status expected rc output blocked scratch independent
   harness=$(fm_test_tmproot fm-test-cleanup-exit-status)
   for status in 0 7; do
     expected=$status
     [ "$status" -ne 0 ] || expected=1
     output=$(TMPDIR="$harness" env -u TREEHOUSE_ROOT -u FM_TREEHOUSE_SCRATCH_ROOT bash -uc '
       . "$1"
+      printf "%s\n" "$TREEHOUSE_ROOT" > "$3/refused"
       rm "$TREEHOUSE_ROOT/.fm-treehouse-scratch"
+      independent=$(fm_test_tmproot fm-test-cleanup-independent) || exit 9
+      unset FM_TREEHOUSE_SCRATCH_ROOT
+      fm_test_enter_treehouse_scratch "$independent"
+      printf "%s\n" "$independent" > "$3/independent"
+      printf "%s\n" "$TREEHOUSE_ROOT" > "$3/scratch"
       exit "$2"
-    ' _ "$LIB" "$status" 2>&1) && rc=0 || rc=$?
+    ' _ "$LIB" "$status" "$harness" 2>&1) && rc=0 || rc=$?
     assert_contains "$output" 'refusing to remove' "standalone cleanup reports the refused scratch root"
     expect_code "$expected" "$rc" "standalone cleanup preserves or upgrades exit status $status"
+    blocked=$(cat "$harness/refused") || fail "the child did not report the refused root"
+    independent=$(cat "$harness/independent") || fail "the child did not report the independent fixture"
+    scratch=$(cat "$harness/scratch") || fail "the child did not report the independent scratch root"
+    assert_present "$blocked" "parent cleanup bypassed the scratch removal guard"
+    assert_absent "$independent" "scratch refusal stopped independent fixture cleanup"
+    assert_absent "$scratch" "scratch refusal stopped cleanup of the next scratch root"
   done
-  pass "standalone scratch cleanup failures upgrade success and preserve failure"
+  pass "scratch cleanup failures preserve exit status and still clean independent fixtures"
 }
 
 test_fixture_root_gone_after_sigterm() {

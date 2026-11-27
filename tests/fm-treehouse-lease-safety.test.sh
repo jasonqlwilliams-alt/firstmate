@@ -7,8 +7,10 @@ set -u
 # shellcheck source=tests/fixtures.sh
 . "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
 command -v treehouse >/dev/null || { echo 'skip: treehouse not found'; exit 0; }
-TREEHOUSE_BIN=$(command -v treehouse)
 TMP_ROOT=$(fm_test_tmproot fm-treehouse-lease-safety)
+unset FM_TREEHOUSE_SCRATCH_ROOT
+fm_test_enter_treehouse_scratch "$TMP_ROOT"
+TREEHOUSE_BIN="$TREEHOUSE_ROOT/bin/treehouse"
 mkdir -p "$TMP_ROOT/home" "$TMP_ROOT/user" "$TMP_ROOT/state"
 HOME_DIR="$TMP_ROOT/home"
 PROJECT="$TMP_ROOT/project"
@@ -203,9 +205,8 @@ for abort_mode in clean base-mismatch modified committed recorded foreign-holder
     unset FM_TEST_CLAUDE_CONFIG_DIR
   fi
   printf 'tmux\n' > "$HOME_DIR/config/backend"
-  unset TREEHOUSE_ROOT FM_TREEHOUSE_SCRATCH_ROOT
-  fm_treehouse_scratch_enter "$CASE_ROOT" || fail 'could not create the abort fixture pool'
-  fm_test_track_treehouse_scratch "$FM_TREEHOUSE_SCRATCH_CREATED" || fail 'could not register the abort fixture pool'
+  unset FM_TREEHOUSE_SCRATCH_ROOT
+  fm_test_enter_treehouse_scratch "$CASE_ROOT"
   export XDG_CONFIG_HOME="$CASE_ROOT/user/.config" XDG_STATE_HOME="$CASE_ROOT/state"
   export FM_TEST_PROJECT="$PROJECT" FM_TEST_CWD="$CASE_ROOT/cwd" FM_TEST_TREEHOUSE_CALLS="$CASE_ROOT/treehouse-calls" FM_TEST_ABORT_MODE="$abort_mode" FM_TEST_HOME="$HOME_DIR" FM_TEST_ACQUIRED_HEAD="$CASE_ROOT/acquired-head"
   out=$(run_spawn "abort-$abort_mode"); rc=$?

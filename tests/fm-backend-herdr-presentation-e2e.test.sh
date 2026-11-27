@@ -11,18 +11,17 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/tests/lib.sh"
 HERDR_LAB_HELPER=${HERDR_LAB_HELPER:-$ROOT/bin/fm-herdr-lab.sh}
 
-fail() { printf 'not ok - %s\n' "$1" >&2; cleanup_all; exit 1; }
-pass() { printf 'ok - %s\n' "$1"; }
-
 command -v herdr >/dev/null 2>&1 || { echo "skip: herdr not found"; exit 0; }
 command -v jq >/dev/null 2>&1 || { echo "skip: jq not found"; exit 0; }
 command -v treehouse >/dev/null 2>&1 || { echo "skip: treehouse not found"; exit 0; }
 [ -x "$HERDR_LAB_HELPER" ] || { echo "skip: Herdr lab helper not executable at $HERDR_LAB_HELPER"; exit 0; }
 
+TMP_ROOT=$(fm_test_tmproot fm-herdr-presentation) || fail 'could not create the presentation fixture'
+unset FM_TREEHOUSE_SCRATCH_ROOT
+fm_test_enter_treehouse_scratch "$TMP_ROOT"
 REAL_TREEHOUSE="$TREEHOUSE_ROOT/bin/treehouse"
-TREEHOUSE_BACKEND=$(readlink "$REAL_TREEHOUSE-real") || exit 1
+TREEHOUSE_BACKEND=$(readlink "$REAL_TREEHOUSE-real") || fail 'could not resolve the fixture Treehouse binary'
 HERDR_ORIGINAL_PATH=$PATH
-TMP_ROOT=$(mktemp -d "$(cd "${TMPDIR:-/tmp}" && pwd -P)/fm-herdr-presentation.XXXXXX")
 FAKEBIN="$TMP_ROOT/fakebin"
 TREEHOUSE_RECORDER="$TMP_ROOT/record-treehouse"
 HERDR_CALL_LOG="$TMP_ROOT/herdr-calls.log"
@@ -299,7 +298,7 @@ LAB_READY=0
 RECORDED_WORKTREES=""
 LOCK_CONTENTION_OWNER_PID=
 cleanup_all() {
-  local wt
+  local wt cleanup_status=0
   if [ -n "$LOCK_CONTENTION_OWNER_PID" ]; then
     kill "$LOCK_CONTENTION_OWNER_PID" 2>/dev/null || true
     wait "$LOCK_CONTENTION_OWNER_PID" 2>/dev/null || true
@@ -314,13 +313,13 @@ $RECORDED_WORKTREES
 EOF
   if [ "$LAB_READY" -eq 1 ]; then
     PATH="$HERDR_ORIGINAL_PATH" \
-      "$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION" >/dev/null 2>&1 || true
+      "$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION" >/dev/null 2>&1 || cleanup_status=1
     LAB_READY=0
   fi
-  rm -rf "$TMP_ROOT"
-  fm_test_cleanup
+  fm_test_cleanup || cleanup_status=1
+  return "$cleanup_status"
 }
-trap cleanup_all EXIT
+trap 'fm_test_cleanup_exit "$?" cleanup_all' EXIT
 
 PATH="$HERDR_ORIGINAL_PATH" \
   "$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION" \
@@ -1505,6 +1504,3 @@ PATH="$HERDR_ORIGINAL_PATH" \
   || fail "guarded Herdr lab teardown or default-session tripwire verification failed"
 LAB_READY=0
 pass "real Herdr lab validation completed on Herdr $HERDR_VERSION with the default-session tripwire intact"
-
-cleanup_all
-trap - EXIT

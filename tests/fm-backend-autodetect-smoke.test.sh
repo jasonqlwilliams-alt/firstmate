@@ -50,19 +50,17 @@ command -v treehouse >/dev/null 2>&1 || { echo "skip: treehouse not found (requi
 # parent identity; the spawn below sets HERDR_ENV explicitly.
 herdr_forget_inherited_pane
 
-# TMP_ROOT is physically resolved (mktemp -d "$(pwd -P)"-relative) to keep this
+# TMP_ROOT is physically resolved to keep this
 # real-herdr smoke fixture free of unrelated OS symlink noise.
 # The old fm-spawn bug that originally motivated this fixture shape was fixed in
 # fm-spawn-symlink-guard-s8: fm-spawn.sh now normalizes PROJ_ABS and observed
 # backend cwd reads before the worktree-discovery comparison.
 # The dedicated regression is
 # tests/fm-backend.test.sh:test_spawn_symlinked_project_prefix_avoids_false_refusal.
-TMP_ROOT=$(mktemp -d "$(cd "${TMPDIR:-/tmp}" && pwd -P)/fm-backend-autodetect-smoke.XXXXXX")
+TMP_ROOT=$(fm_test_tmproot fm-backend-autodetect-smoke) || fail 'could not create the auto-detection fixture'
 HERDR_LAB_HELPER="$ROOT/bin/fm-herdr-lab.sh"
-HERDR_LAB_SESSION=$("$HERDR_LAB_HELPER" name fm-autodetect-smoke-concurrency-h3) || {
-  rm -rf "$TMP_ROOT"
+HERDR_LAB_SESSION=$("$HERDR_LAB_HELPER" name fm-autodetect-smoke-concurrency-h3) ||
   fail "could not generate an isolated Herdr lab session name"
-}
 export HERDR_SESSION="$HERDR_LAB_SESSION"
 ID="autodetectsmoke1"
 WT=
@@ -70,18 +68,10 @@ cleanup_all() {
   local cleanup_status=0
   [ -n "$WT" ] && command -v treehouse >/dev/null 2>&1 && treehouse return --force "$WT" >/dev/null 2>&1
   "$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION" || cleanup_status=$?
-  fm_test_cleanup || return 1
-  rm -rf "$TMP_ROOT" || cleanup_status=$?
+  fm_test_cleanup || cleanup_status=1
   return "$cleanup_status"
 }
-on_exit() {
-  local status=$? cleanup_status=0
-  cleanup_all || cleanup_status=$?
-  [ "$status" -ne 0 ] || status=$cleanup_status
-  trap - EXIT
-  exit "$status"
-}
-trap on_exit EXIT
+trap 'fm_test_cleanup_exit "$?" cleanup_all' EXIT
 "$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION" || fail "could not provision isolated Herdr lab session"
 
 # --- scratch world: FM_HOME with NO backend config, one throwaway project ---

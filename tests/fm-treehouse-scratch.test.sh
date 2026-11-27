@@ -114,22 +114,36 @@ test_runner_reports_cleanup_failure() {
   pass "scratch cleanup failure turns a passing suite into a failure"
 }
 
-test_runner_change_selects_scratch_regression() {
-  local repo="$TMP_ROOT/runner" listed
+test_source_changes_select_lifecycle_regressions() {
+  local repo="$TMP_ROOT/runner" source listed script scripts
   : > "$repo/tests/fm-treehouse-scratch.test.sh"
+  : > "$repo/tests/fm-treehouse-lease-safety.test.sh"
+  : > "$repo/tests/fm-test-fixture-cleanup.test.sh"
   : > "$repo/tests/fm-backend-herdr-smoke.test.sh"
+  : > "$repo/bin/fm-spawn.sh"
+  : > "$repo/tests/lib.sh"
   git -C "$repo" init -q
   git -C "$repo" add .
   git -C "$repo" -c user.name=test -c user.email=test@example.invalid commit -qm baseline ||
     fail "could not commit the runner fixture baseline"
-  printf '\n' >> "$repo/bin/fm-test-run.sh"
-  listed=$(cd "$repo" && as_operator bin/fm-test-run.sh --list --changed --base HEAD) ||
-    fail "could not select tests for a runner-only change"
-  assert_contains "$listed" "tests/fm-treehouse-scratch.test.sh" "runner change selects the scratch regression"
-  case "$listed" in
-    *tests/fm-backend-herdr-smoke.test.sh*) fail "runner change selected the unrelated Herdr smoke test" ;;
-  esac
-  pass "runner-only changes select the scratch regression directly"
+  while read -r source scripts; do
+    printf '\n' >> "$repo/$source"
+    listed=$(cd "$repo" && as_operator bin/fm-test-run.sh --list --changed --base HEAD) ||
+      fail "could not select tests for a change to $source"
+    for script in $scripts; do
+      assert_contains "$listed" "tests/$script" "$source selects $script"
+    done
+    case "$listed" in
+      *tests/fm-backend-herdr-smoke.test.sh*) fail "$source selected the unrelated Herdr smoke test" ;;
+    esac
+    git -C "$repo" restore -- "$source" || fail "could not reset $source"
+  done <<'ROWS'
+bin/fm-test-run.sh fm-treehouse-scratch.test.sh
+bin/fm-treehouse-scratch.sh fm-treehouse-scratch.test.sh fm-treehouse-lease-safety.test.sh fm-test-fixture-cleanup.test.sh
+bin/fm-spawn.sh fm-treehouse-lease-safety.test.sh
+tests/lib.sh fm-treehouse-scratch.test.sh fm-treehouse-lease-safety.test.sh fm-test-fixture-cleanup.test.sh
+ROWS
+  pass "source-only changes select the Treehouse lifecycle regressions directly"
 }
 
 test_lib_standalone_and_inherited() {
@@ -382,7 +396,7 @@ SH
 test_runner_leaves_real_root_untouched
 test_runner_overrides_an_inherited_real_root
 test_runner_reports_cleanup_failure
-test_runner_change_selects_scratch_regression
+test_source_changes_select_lifecycle_regressions
 test_lib_standalone_and_inherited
 test_reproduction_helper
 test_invalid_scratch_root_is_refused 'build$LABEL' 'dollar sign'

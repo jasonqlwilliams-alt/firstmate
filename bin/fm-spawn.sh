@@ -3936,7 +3936,14 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
     . "$SCRIPT_DIR/fm-treehouse-scratch.sh" || exit 1
     scratch_root=$(fm_treehouse_scratch_resolve_root "$FM_TREEHOUSE_SCRATCH_ROOT") || exit 1
     SPAWN_TREEHOUSE_BIN="$scratch_root/bin/treehouse"
-    if ! fm_treehouse_scratch_owned "$scratch_root" || [ ! -x "$SPAWN_TREEHOUSE_BIN" ] ||
+    if ! fm_treehouse_scratch_owned "$scratch_root"; then
+      echo "error: scratch Treehouse root is not owned: $scratch_root" >&2
+      exit 1
+    fi
+    if [ ! -e "$scratch_root/bin" ] && [ ! -L "$scratch_root/bin" ] &&
+      fixture_treehouse=$(type -P fm-test-treehouse) && [[ "$fixture_treehouse" = /* ]]; then
+      SPAWN_TREEHOUSE_BIN="$fixture_treehouse"
+    elif [ ! -x "$SPAWN_TREEHOUSE_BIN" ] ||
       [ ! "$SPAWN_TREEHOUSE_BIN" -ef "$SCRIPT_DIR/fm-treehouse-scratch.sh" ]; then
       echo "error: owned scratch Treehouse shim is unavailable at $SPAWN_TREEHOUSE_BIN" >&2
       exit 1

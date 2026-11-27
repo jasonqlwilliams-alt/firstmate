@@ -214,27 +214,35 @@ FM_TEST_STUB_MAX_BLOCK_SECONDS=${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}
 export FM_TEST_STUB_MAX_BLOCK_SECONDS
 
 fm_test_cleanup() {
-  local d
-  fm_test_reap_procevent_homes
+  local d scratch status=0
+  local -a dirs=("${FM_TEST_CLEANUP_DIRS[@]:-}") refused=()
+  fm_test_reap_procevent_homes || status=1
   if [ -f "$FM_TEST_CLEANUP_REGISTRY" ]; then
     while IFS= read -r d; do
       case "$d" in
-        treehouse-scratch$'\t'*) fm_treehouse_scratch_remove "${d#*$'\t'}" || return 1 ;;
+        treehouse-scratch$'\t'*)
+          scratch=${d#*$'\t'}
+          if ! fm_treehouse_scratch_remove "$scratch"; then
+            refused+=("$scratch")
+            status=1
+          fi
+          ;;
+        '') ;;
+        *) dirs+=("$d") ;;
       esac
     done < "$FM_TEST_CLEANUP_REGISTRY"
+    rm -f "$FM_TEST_CLEANUP_REGISTRY" || status=1
   fi
-  for d in "${FM_TEST_CLEANUP_DIRS[@]:-}"; do
-    [ -n "$d" ] && rm -rf "$d"
+  for d in "${dirs[@]}"; do
+    [ -n "$d" ] || continue
+    for scratch in "${refused[@]:-}"; do
+      [ -n "$scratch" ] || continue
+      case "$scratch/" in "$d/"*) continue 2 ;; esac
+      case "$d/" in "$scratch/"*) continue 2 ;; esac
+    done
+    rm -rf -- "$d" || status=1
   done
-  if [ -f "$FM_TEST_CLEANUP_REGISTRY" ]; then
-    while IFS= read -r d; do
-      case "$d" in
-        ''|treehouse-scratch$'\t'*) ;;
-        *) rm -rf "$d" ;;
-      esac
-    done < "$FM_TEST_CLEANUP_REGISTRY"
-    rm -f "$FM_TEST_CLEANUP_REGISTRY"
-  fi
+  return "$status"
 }
 
 fm_test_track_treehouse_scratch() {
@@ -243,8 +251,18 @@ fm_test_track_treehouse_scratch() {
 
 fm_test_cleanup_exit() {
   local status=$1
-  fm_test_cleanup || [ "$status" -ne 0 ] || status=1
+  shift
+  "$@" || [ "$status" -ne 0 ] || status=1
   exit "$status"
+}
+
+fm_test_enter_treehouse_scratch() {
+  fm_treehouse_scratch_enter "$1" || fail "cannot isolate the test's Treehouse root"
+  if [ -n "$FM_TREEHOUSE_SCRATCH_CREATED" ] &&
+    ! fm_test_track_treehouse_scratch "$FM_TREEHOUSE_SCRATCH_CREATED"; then
+    fm_treehouse_scratch_remove "$FM_TREEHOUSE_SCRATCH_CREATED"
+    fail "cannot register the test's Treehouse root for cleanup"
+  fi
 }
 
 fm_test_track_task_tmps() {
@@ -289,7 +307,7 @@ if [ "${FM_TEST_FIXTURE_REAPER_CHILD:-0}" != 1 ]; then
   }
   FM_TEST_PROCEVENT_REGISTRY=$(mktemp "${TMPDIR:-/tmp}/.fm-test-procevent.$$.XXXXXX") || return 1
 
-  trap 'fm_test_cleanup_exit "$?"' EXIT
+  trap 'fm_test_cleanup_exit "$?" fm_test_cleanup' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
   trap 'exit 129' HUP
@@ -304,14 +322,8 @@ if [ "${FM_TEST_FIXTURE_REAPER_CHILD:-0}" != 1 ]; then
   if ! fm_treehouse_scratch_active; then
     FM_TEST_TREEHOUSE_PARENT=$(fm_test_tmproot fm-test-treehouse) || fail "cannot create a fixture for the test's Treehouse root"
   fi
-  fm_treehouse_scratch_enter "$FM_TEST_TREEHOUSE_PARENT" || fail "cannot isolate the test's Treehouse root"
+  fm_test_enter_treehouse_scratch "$FM_TEST_TREEHOUSE_PARENT"
   unset FM_TEST_TREEHOUSE_PARENT
-  if [ -n "$FM_TREEHOUSE_SCRATCH_CREATED" ]; then
-    if ! fm_test_track_treehouse_scratch "$FM_TREEHOUSE_SCRATCH_CREATED"; then
-      fm_treehouse_scratch_remove "$FM_TREEHOUSE_SCRATCH_CREATED"
-      fail "cannot register the test's Treehouse root for cleanup"
-    fi
-  fi
 fi
 
 # --- detached fixture cleanup ----------------------------------------------
@@ -714,7 +726,10 @@ fm_fake_exit0() {
 #!/usr/bin/env bash
 exit 0
 SH
-    chmod +x "$fakebin/$tool"
+    chmod +x "$fakebin/$tool" || return 1
+    if [ "$tool" = treehouse ]; then
+      ln -sf treehouse "$fakebin/fm-test-treehouse" || return 1
+    fi
   done
 }
 

@@ -1334,6 +1334,10 @@ families_for_changed_path() {
       # isolation, and only a standalone-family script proves it.
       printf '%s\n' "__script__:fm-test-fixtures.test.sh" "__script__:fm-treehouse-scratch.test.sh"
       ;;
+    bin/fm-treehouse-scratch.sh)
+      printf '%s\n' "__script__:fm-treehouse-scratch.test.sh" \
+        "__script__:fm-test-fixture-cleanup.test.sh" "__script__:fm-treehouse-lease-safety.test.sh"
+      ;;
     bin/fm-test-isolation-proof.sh)
       # Same reason as the runner above: the proof drives every
       # pure-contract-unit script. It runs each candidate directly, never
@@ -1519,6 +1523,9 @@ families_for_changed_path() {
     bin/fm-peek.sh|bin/fm-composer*)
       printf '%s\n' backend-dispatch
       printf '%s\n' pure-contract-unit
+      if [ "$path" = bin/fm-spawn.sh ]; then
+        printf '%s\n' "__script__:fm-treehouse-lease-safety.test.sh"
+      fi
       ;;
     bin/fm-pi-system-vault-reviewer.sh)
       printf '%s\n' backend-dispatch
@@ -1590,7 +1597,12 @@ families_for_changed_path() {
         || printf '%s\n' "__unmapped__:$path"
       ;;
     tests/lib.sh|tests/*-helpers.sh|tests/fixtures.sh)
+      if [ "$path" = tests/lib.sh ]; then
+        printf '%s\n' "__script__:fm-test-fixture-cleanup.test.sh" \
+          "__script__:fm-treehouse-scratch.test.sh" "__script__:fm-treehouse-lease-safety.test.sh"
+      fi
       families_for_test_reference "$(basename "$path")" \
+        || [ "$path" = tests/lib.sh ] \
         || printf '%s\n' "__unmapped__:$path"
       ;;
     tests/fixtures/*/*)
