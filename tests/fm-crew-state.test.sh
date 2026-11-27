@@ -113,9 +113,17 @@ set -u
 [ "${FM_FAKE_TMUX_UNREADABLE:-0}" = 1 ] && { printf 'no current client\n' >&2; exit 1; }
 case "${1:-}" in
   list-windows)
-    # A successful but empty inventory: it omits the crew's window, so absence
-    # is proved by the answer rather than by an addressed call failing. Only
-    # reached once display-message has already failed.
+    # A successful inventory. While the crew's window is live it lists every
+    # recorded window, so the exact-window read finds it; when the window is
+    # gone it omits it, so absence is proved by the answer rather than by an
+    # addressed call failing.
+    [ "${FM_FAKE_TMUX_MISSING:-0}" = 1 ] && exit 0
+    n=0
+    for m in "${FM_STATE_OVERRIDE:-/nonexistent}"/*.meta; do
+      [ -f "$m" ] || continue
+      w=$(sed -n 's/^window=//p' "$m" | tail -n 1)
+      case "$w" in *:*) n=$((n + 1)); printf '@%s %s\n' "$n" "$w" ;; esac
+    done | fm_fake_tmux_window_ids "$@"
     ;;
   display-message)
     [ "${FM_FAKE_TMUX_MISSING:-0}" = 1 ] && exit 1

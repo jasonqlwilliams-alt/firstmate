@@ -86,12 +86,15 @@ case "${1:-}" in
     fi
     exit 0 ;;
   display-message)
-    for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
+    case "${*: -1}" in
+      '#{cursor_y}') printf '1\n'; exit 0 ;;
+      '#{pane_id}') printf '%%1\n'; exit 0 ;;
+    esac
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
     if [ -n "$claude_submit" ]; then
       case " $* " in
-        *' -t %1 '*|*' -t sess:fm-lsm '*) ;;
+        *' -t %1 '*|*' -t @3 '*|*' -t sess:fm-lsm '*) ;;
         *) exit 1 ;;
       esac
       composer=$(cat "$FM_SEND_LOG")
@@ -120,12 +123,7 @@ case "${1:-}" in
       printf '╭────╮\n│    │\n╰────╯\n'
     fi
     exit 0 ;;
-  list-windows)
-    if [ -n "$claude_submit" ] && [ "${2:-} ${3:-}" = '-t =sess' ] \
-      && [ "${*: -1}" = $'#{window_name}\t#{pane_id}' ]; then
-      printf 'fm-lsm\t%%1\n'
-    fi
-    exit 0 ;;
+  list-windows) case "$*" in *window_id*) printf '@1 sess:win\n@2 sess:fm-t2\n@3 sess:fm-lsm\n' | fm_fake_tmux_window_ids "$@" ;; esac; exit 0 ;;
 esac
 exit 0
 SH

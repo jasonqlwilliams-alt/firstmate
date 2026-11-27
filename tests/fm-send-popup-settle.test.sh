@@ -59,16 +59,16 @@ case "${1:-}" in
     esac
     exit 0 ;;
   display-message)
-    for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
+    case "${*: -1}" in
+      '#{cursor_y}') printf '1\n'; exit 0 ;;
+      '#{pane_id}') printf '%%1\n'; exit 0 ;;
+    esac
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
     printf '────────────────────────\n❯ %s\n────────────────────────\n' "$(cat "$FM_SLEEP_LOG.pending" 2>/dev/null)"
     exit 0 ;;
   list-windows)
-    case "${*: -1}" in
-      $'#{window_name}\t#{pane_id}') printf 'win\t%%1\n' ;;
-      *) printf 'win\n' ;;
-    esac
+    case "$*" in *window_id*) printf '@1 sess:win\n' | fm_fake_tmux_window_ids "$@" ;; *) printf 'win\n' ;; esac
     exit 0 ;;
 esac
 exit 0

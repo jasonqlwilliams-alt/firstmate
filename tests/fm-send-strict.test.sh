@@ -47,7 +47,8 @@ case "${1:-}" in
       exit 1
     fi
     exit 0 ;;
-  display-message)
+  list-panes|display-message|capture-pane)
+    operation=$1
     target=
     cursor=0
     while [ $# -gt 0 ]; do
@@ -58,20 +59,23 @@ case "${1:-}" in
       esac
     done
     if [ -n "${FM_FAKE_TMUX_DEAD_TARGET:-}" ] && [ "$target" = "$FM_FAKE_TMUX_DEAD_TARGET" ]; then
+      printf 'can\047t find pane: %s\n' "$target" >&2
       exit 1
     fi
-    [ "$cursor" = 1 ] && { printf '1\n'; exit 0; }
-    printf '%%1\n'
-    exit 0 ;;
-  capture-pane)
-    if [ -s "$FM_TMUX_LOG.typed" ]; then
+    if [ "$operation" != capture-pane ]; then
+      [ "$cursor" = 1 ] && { printf '1\n'; exit 0; }
+      printf '%%1\n'
+    elif [ -s "$FM_TMUX_LOG.typed" ]; then
       printf 'fake agent\n› %s\n' "$(cat "$FM_TMUX_LOG.typed")"
     else
       printf '╭────╮\n│    │\n╰────╯\n'
     fi
     exit 0 ;;
   list-windows)
-    printf 'foreign:%s\nfm-mpf-lane-m8\nfm-lane-ok\n' "${FM_FAKE_TMUX_WINDOW:-fm-lost}"
+    case "$*" in
+      *window_id*) printf '@1 sess:fm-mpf-lane-m8\n@2 sess:fm-lane-ok\n@3 sess:fm-lane-key\n' | fm_fake_tmux_window_ids "$@" ;;
+      *) printf 'foreign:%s\nfm-mpf-lane-m8\nfm-lane-ok\n' "${FM_FAKE_TMUX_WINDOW:-fm-lost}" ;;
+    esac
     exit 0 ;;
 esac
 exit 0

@@ -43,7 +43,7 @@ TMP_ROOT=$(fm_test_tmproot fm-backend-tests)
 # HOME and reach the developer's real store, while empty falls through to it
 # and adds no launch prefix, since fm-spawn only prefixes a non-empty value.
 SPAWN_HOME="$TMP_ROOT/user-home"
-mkdir -p "$SPAWN_HOME"
+mkdir -p "$SPAWN_HOME/state"
 
 write_spawn_brief() {  # <file> <id>
   cat > "$1" <<EOF
@@ -661,27 +661,36 @@ make_send_fakebin() {  # <dir> -> echoes fakebin dir; logs every tmux call to $F
 #!/usr/bin/env bash
 set -u
 { printf 'tmux'; for a in "$@"; do printf '\x1f%s' "$a"; done; printf '\n'; } >> "${FM_TMUX_LOG:?}"
-case "${1:-}" in
-  send-keys) exit 0 ;;
+command=${1:-}
+case "$command" in
   display-message)
     for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
     printf 'fakepane\n'; exit 0 ;;
-  capture-pane)
-    start= end=
+  capture-pane|send-keys)
+    target=
+    shift
     while [ $# -gt 0 ]; do
       case "$1" in
-        -S) start=$2; shift 2 ;;
-        -E) end=$2; shift 2 ;;
+        -t) target=$2; shift 2 ;;
+        -S|-E) shift 2 ;;
+        -l|Enter|Escape) break ;;
         *) shift ;;
       esac
     done
-    if [ "$start" = 1 ] && [ "$end" = 1 ]; then
-      printf '│    │\n'
+    case "$target" in
+      sess:0.1) composer="$FM_TMUX_LOG.split" ;;
+      sess:win) composer="$FM_TMUX_LOG.window" ;;
+      *) printf 'can\047t find pane: %s\n' "$target" >&2; exit 1 ;;
+    esac
+    if [ "$command" = capture-pane ]; then
+      printf 'pane transcript\n❯ %s\n' "$(cat "$composer")"
     else
-      printf '╭────╮\n│    │\n╰────╯\n'
+      case "${1:-}" in
+        -l) printf '%s' "$2" > "$composer" ;;
+        Enter) : > "$composer" ;;
+      esac
     fi
     exit 0 ;;
-  list-windows) exit 0 ;;
 esac
 exit 0
 SH
@@ -693,15 +702,25 @@ run_send_case() {  # <bin-root> <fakebin> <log> <home> -- <send args...>
   local bin=$1 fb=$2 log=$3 home=$4; shift 4
   [ "${1:-}" = -- ] && shift
   : > "$log"
+  printf 'split draft' > "$log.split"
+  printf 'window draft' > "$log.window"
+  case "$1" in
+    sess:0.1) : > "$log.split" ;;
+    sess:win) : > "$log.window" ;;
+  esac
   env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$bin" FM_HOME="$home" FM_TMUX_LOG="$log" \
     FM_SEND_SETTLE=0 FM_SEND_SLEEP=0 \
     "$bin/bin/fm-send.sh" "$@" >/dev/null 2>&1
 }
 
-strip_send_preflight() {  # <log>
-  local preflight
-  preflight=$'tmux\x1fdisplay-message\x1f-p\x1f-t\x1fsess:win\x1f#{pane_id}'
-  awk -v preflight="$preflight" '$0 != preflight { print }' "$1"
+assert_tmux_key_destination() {  # <tmux-log> <pane> <key>
+  awk -F $'\x1f' -v pane="$2" -v key="$3" '
+    $2 == "send-keys" && $5 != "-l" {
+      if ($3 == "-t" && $4 == pane && $5 == key && NF == 5) received = 1
+      else wrong = 1
+    }
+    END { exit !(received && !wrong) }
+  ' "$1" || fail "fm-send should send only the named key $3 to pane $2"
 }
 
 # The byte-identical old-vs-new tmux log comparison this test used to run
@@ -712,91 +731,138 @@ strip_send_preflight() {  # <log>
 # verdict comes from one full styled capture instead of a second band capture -
 # so the current contract is asserted directly instead.
 test_send_tmux_contract() {
-  local fb log home rc
+  local fb log home rc pane
   fb=$(make_send_fakebin "$TMP_ROOT/send-fake")
   home="$TMP_ROOT/send-home"; mkdir -p "$home/state"
   log="$TMP_ROOT/send-new.log"
 
   # Case 1: --key path - target verified, named key sent, no typing.
-  run_send_case "$ROOT" "$fb" "$log" "$home" -- "sess:win" --key Escape
+  pane=sess:0.1
+  run_send_case "$ROOT" "$fb" "$log" "$home" -- "$pane" --key Escape
   rc=$?
   expect_code 0 "$rc" "fm-send --key should succeed against a live fake pane"
-  assert_contains "$(cat "$log")" $'\x1f''display-message'$'\x1f''-p'$'\x1f''-t'$'\x1f''sess:win'$'\x1f''#{pane_id}' \
-    "fm-send --key did not verify the explicit tmux target before sending"
-  assert_contains "$(cat "$log")" $'\x1f''Escape' "fm-send --key did not send the named key"
+  assert_tmux_key_destination "$log" "$pane" Escape
   assert_not_contains "$(cat "$log")" $'\x1f''-l'$'\x1f' "fm-send --key must not type literal text"
 
   # Case 2: plain text - typed literally exactly once, submitted with Enter,
-  # confirmed against the bordered-empty fake composer.
-  run_send_case "$ROOT" "$fb" "$log" "$home" -- "sess:win" hello captain
+  # confirmed against the receiving pane's empty composer.
+  run_send_case "$ROOT" "$fb" "$log" "$home" -- "$pane" hello captain
   rc=$?
   expect_code 0 "$rc" "fm-send plain text should confirm against the empty fake composer"
-  assert_contains "$(cat "$log")" $'\x1f''send-keys'$'\x1f''-t'$'\x1f''sess:win'$'\x1f''-l'$'\x1f''hello captain' \
+  assert_contains "$(cat "$log")" $'\x1fsend-keys\x1f-t\x1f'"$pane"$'\x1f-l\x1fhello captain' \
     "fm-send did not send the literal text with send-keys -l"
   [ "$(grep -c $'\x1f''-l'$'\x1f' "$log")" -eq 1 ] \
     || fail "fm-send must type the text exactly once (Enter-only retries, never a retype)"
-  assert_contains "$(cat "$log")" $'\x1f''Enter' "fm-send did not submit with Enter"
+  assert_tmux_key_destination "$log" "$pane" Enter
+  [ ! -s "$log.split" ] && [ "$(cat "$log.window")" = 'window draft' ] \
+    || fail "plain text should clear the split composer while the other window keeps its draft"
 
   # Case 3: a slash command still opens the popup-settle path (verified in
   # tests/fm-send-popup-settle.test.sh) and ends in the same command shape:
   # one literal type, then Enter.
-  run_send_case "$ROOT" "$fb" "$log" "$home" -- "sess:win" /some-skill
+  pane=sess:win
+  run_send_case "$ROOT" "$fb" "$log" "$home" -- "$pane" /some-skill
   rc=$?
   expect_code 0 "$rc" "fm-send /skill should confirm against the empty fake composer"
-  assert_contains "$(cat "$log")" $'\x1f''send-keys'$'\x1f''-t'$'\x1f''sess:win'$'\x1f''-l'$'\x1f''/some-skill' \
+  assert_contains "$(cat "$log")" $'\x1fsend-keys\x1f-t\x1f'"$pane"$'\x1f-l\x1f/some-skill' \
     "fm-send /skill did not type the literal slash command"
   [ "$(grep -c $'\x1f''-l'$'\x1f' "$log")" -eq 1 ] \
     || fail "fm-send /skill must type the text exactly once"
+  assert_tmux_key_destination "$log" "$pane" Enter
+  [ ! -s "$log.window" ] && [ "$(cat "$log.split")" = 'split draft' ] \
+    || fail "a slash command should clear its window composer while the split pane keeps its draft"
+
+  run_send_case "$ROOT" "$fb" "$log" "$home" -- "sess:0.99" --key Escape
+  rc=$?
+  expect_code 1 "$rc" "fm-send should refuse a missing explicit pane"
+  assert_not_contains "$(cat "$log")" $'\x1f''send-keys'$'\x1f' \
+    "fm-send must not send a key to a missing explicit pane"
 
   pass "fm-send.sh: explicit tmux targets are verified; text types once and submits with Enter"
 }
 
-# --- old vs new: fm-peek.sh --------------------------------------------------
+# --- fm-peek.sh -------------------------------------------------------------
 
-make_peek_fakebin() {  # <dir> <capture-output> -> echoes fakebin dir
-  local dir=$1 payload=$2 fb="$1/fakebin"
+make_peek_fakebin() {  # <dir> -> echoes fakebin dir
+  local fb="$1/fakebin"
   mkdir -p "$fb"
-  printf '%s' "$payload" > "$dir/capture.out"
-  cat > "$fb/tmux" <<SH
+  cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
-{ printf 'tmux'; for a in "\$@"; do printf '\\x1f%s' "\$a"; done; printf '\\n'; } >> "\${FM_TMUX_LOG:?}"
-case "\${1:-}" in
-  capture-pane) cat "$dir/capture.out" ;;
+target= start= format=
+prev=
+for arg in "$@"; do
+  case "$prev" in
+    -t) target=$arg ;;
+    -S) start=$arg ;;
+    -F) format=$arg ;;
+  esac
+  prev=$arg
+done
+case "${1:-}" in
+  list-windows)
+    case "${PEEK_INVENTORY:-live}" in
+      adhoc)
+        if [ "$format" = '#{session_name}:#{window_name}' ]; then
+          printf '%s\n' 'sess:scratch' 'sess:scratch'
+        else
+          printf '%s\n' '@4 sess:scratch' '@5 sess:scratch' | fm_fake_tmux_window_ids "$@"
+        fi ;;
+      foreign) printf '@7 other:win\n' | fm_fake_tmux_window_ids "$@" ;;
+      unreadable) printf 'error connecting to fixture (Permission denied)\n' >&2; exit 1 ;;
+      *) printf '@7 sess:win-neighbour\n@3 sess:win\n' | fm_fake_tmux_window_ids "$@" ;;
+    esac ;;
+  capture-pane)
+    case "$target" in
+      @3|=sess:=win|sess:win)
+        printf '%s\n' 'oldest history' 'older history' 'latest history' | tail -n "${start#-}"
+        printf 'recorded screen\n' ;;
+      sess:0.1) printf 'explicit split pane\n' ;;
+      sess:scratch) printf 'ad hoc screen\n' ;;
+      *) printf 'neighbour screen\n' ;;
+    esac ;;
 esac
-exit 0
 SH
   chmod +x "$fb/tmux"
   printf '%s\n' "$fb"
 }
 
-test_peek_conformance_old_vs_new() {
-  local old_bin fb log_old log_new home out_old out_new payload neutral_root
-  payload=$'line one\nline two\ncaptain on deck'
-  old_bin=$(build_old_bin peek-old)
-  fb=$(make_peek_fakebin "$TMP_ROOT/peek-fake" "$payload")
+test_peek_tmux_contract() {
+  local fb home out neutral_root
+  fb=$(make_peek_fakebin "$TMP_ROOT/peek-fake")
   home="$TMP_ROOT/peek-home"; mkdir -p "$home/state"
-  log_old="$TMP_ROOT/peek-old.log"; log_new="$TMP_ROOT/peek-new.log"
-  # A fresh non-git dir keeps fm-guard.sh's worktree-tangle check inert (it warns
-  # to stderr, discarded below) - neither run needs FM_ROOT for anything beyond
-  # that guard, since STATE/HOME are already overridden directly.
+  fm_write_meta "$home/state/worker.meta" "window=sess:win"
   neutral_root="$TMP_ROOT/peek-neutral-root"; mkdir -p "$neutral_root"
 
-  : > "$log_old"
-  out_old=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" FM_TMUX_LOG="$log_old" \
-    "$old_bin/bin/fm-peek.sh" "sess:win" 25 2>/dev/null)
-  : > "$log_new"
-  out_new=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" FM_TMUX_LOG="$log_new" \
-    "$ROOT/bin/fm-peek.sh" "sess:win" 25 2>/dev/null)
+  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" \
+    "$ROOT/bin/fm-peek.sh" worker 2 2>/dev/null)
+  [ "$out" = $'older history\nlatest history\nrecorded screen' ] \
+    || fail "fm-peek should return the recorded screen and exactly two history lines"
+  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" \
+    "$ROOT/bin/fm-peek.sh" sess:0.1 2 2>/dev/null)
+  [ "$out" = 'explicit split pane' ] || fail "fm-peek should accept an explicit pane selector"
+  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" PEEK_INVENTORY=adhoc \
+    "$ROOT/bin/fm-peek.sh" scratch 2 2>/dev/null)
+  [ "$out" = 'ad hoc screen' ] || fail "an unrecorded bare name should retain its ad hoc capture"
+  fm_write_meta "$home/state/scratch-worker.meta" 'window=sess:scratch'
+  if out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" PEEK_INVENTORY=adhoc \
+    "$ROOT/bin/fm-peek.sh" scratch 2 2>&1); then
+    fail "a bare name that resolves to worker metadata should require a unique recorded target"
+  fi
+  assert_contains "$out" 'could not resolve tmux window sess:scratch' "duplicate recorded windows should be unreadable"
 
-  [ "$out_old" = "$out_new" ] || fail "fm-peek output differs old vs new"$'\n'"--- old ---"$'\n'"$out_old"$'\n'"--- new ---"$'\n'"$out_new"
-  [ "$out_new" = "$payload" ] || fail "fm-peek did not pass through the fake capture-pane output exactly"
-  diff -u "$log_old" "$log_new" > "$TMP_ROOT/peek-diff.txt" 2>&1 \
-    || fail "fm-peek: tmux command log differs old vs new"$'\n'"$(cat "$TMP_ROOT/peek-diff.txt")"
-  assert_contains "$(cat "$log_new")" $'\x1f''capture-pane'$'\x1f''-p'$'\x1f''-t'$'\x1f''sess:win'$'\x1f''-S'$'\x1f''-25' \
-    "fm-peek did not call capture-pane -p -t <target> -S -<lines> exactly"
+  if out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" PEEK_INVENTORY=foreign \
+    "$ROOT/bin/fm-peek.sh" worker 2 2>&1); then
+    fail "fm-peek should reject the same window name in another session"
+  fi
+  assert_contains "$out" "window sess:win not found" "fm-peek should report a missing recorded window"
+  if out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$neutral_root" FM_HOME="$home" PEEK_INVENTORY=unreadable \
+    "$ROOT/bin/fm-peek.sh" worker 2 2>&1); then
+    fail "fm-peek should fail when tmux cannot read the inventory"
+  fi
+  assert_contains "$out" "could not resolve tmux window sess:win" "fm-peek should report an unreadable inventory"
 
-  pass "fm-peek.sh: capture-pane invocation and output are byte-identical old vs new"
+  pass "fm-peek returns the selected pane and requested history and distinguishes lookup failures"
 }
 
 # --- old vs new: fm-spawn.sh --------------------------------------------------
@@ -804,15 +870,19 @@ test_peek_conformance_old_vs_new() {
 make_spawn_fakebin() {  # <dir> <fake-worktree-path> -> echoes fakebin dir
   local dir=$1 wt=$2 fb="$1/fakebin"
   mkdir -p "$fb"
+  fm_test_track_task_tmps "$fb"
   cat > "$fb/tmux" <<SH
 #!/usr/bin/env bash
 set -u
 { printf 'tmux'; for a in "\$@"; do printf '\\x1f%s' "\$a"; done; printf '\\n'; } >> "\${FM_TMUX_LOG:?}"
 case "\${1:-}" in
+  -V) printf 'tmux 3.2\\n'; exit 0 ;;
   display-message)
     for a in "\$@"; do case "\$a" in *pane_current_path*) printf '%s\\n' "$wt"; exit 0 ;; esac; done
     printf 'firstmate\\n'; exit 0 ;;
-  list-windows) exit 0 ;;
+  new-window) printf '@1\\n'; exit 0 ;;
+  # The exact-window reads confirm the window this fake created.
+  list-windows) case "\$*" in *window_id*) printf '@1\\n' ;; esac; exit 0 ;;
 esac
 exit 0
 SH
@@ -825,7 +895,7 @@ run_spawn_case() {  # <bin-root> <fakebin> <log> <state> <data> <config> <proj> 
   local bin=$1 fb=$2 log=$3 state=$4 data=$5 config=$6 proj=$7; shift 7
   [ "${1:-}" = -- ] && shift
   : > "$log"
-  env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$bin" HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' \
+  env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$bin" FM_HOME="$SPAWN_HOME" HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' \
     FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$config" \
     FM_PROJECTS_OVERRIDE="$TMP_ROOT/unused-projects" \
     FM_SPAWN_NO_GUARD=1 TMUX="fake,1,0" FM_TMUX_LOG="$log" \
@@ -865,12 +935,14 @@ run_spawn_case() {  # <bin-root> <fakebin> <log> <state> <data> <config> <proj> 
 make_spawn_symlink_fakebin() {  # <dir> <initial-project-path> <worktree-path> -> echoes fakebin dir
   local dir=$1 initial_path=$2 wt=$3 fb="$1/fakebin" counter="$1/poll-count"
   mkdir -p "$fb"
+  fm_test_track_task_tmps "$fb"
   : > "$counter"
   cat > "$fb/tmux" <<SH
 #!/usr/bin/env bash
 set -u
 { printf 'tmux'; for a in "\$@"; do printf '\\x1f%s' "\$a"; done; printf '\\n'; } >> "\${FM_TMUX_LOG:?}"
 case "\${1:-}" in
+  -V) printf 'tmux 3.2\\n'; exit 0 ;;
   display-message)
     for a in "\$@"; do case "\$a" in *pane_current_path*)
       printf x >> "$counter"
@@ -882,7 +954,9 @@ case "\${1:-}" in
       exit 0
     ;; esac; done
     printf 'firstmate\\n'; exit 0 ;;
-  list-windows) exit 0 ;;
+  new-window) printf '@1\\n'; exit 0 ;;
+  # The exact-window reads confirm the window this fake created.
+  list-windows) case "\$*" in *window_id*) printf '@1\\n' ;; esac; exit 0 ;;
 esac
 exit 0
 SH
@@ -924,8 +998,6 @@ run_spawn_symlink_case() {  # <label> <physical|logical>
   expect_code 0 "$rc" "fm-spawn.sh should succeed for a project reached through a symlinked prefix when the backend reports $first_reply cwd"$'\n'"$out"
   assert_contains "$out" "worktree=$wt" \
     "fm-spawn.sh did not resolve a symlinked-prefix project to its real worktree when the backend reports $first_reply cwd"
-
-  rm -rf "/tmp/fm-$id"
 }
 
 test_spawn_symlinked_project_prefix_avoids_false_refusal() {
@@ -1079,7 +1151,7 @@ test_spawn_default_backend_writes_no_meta_field() {
   state="$TMP_ROOT/nobackend-state"; config="$TMP_ROOT/nobackend-config"
   mkdir -p "$state" "$config"
 
-  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$ROOT" HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' \
+  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$SPAWN_HOME" HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' \
     FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$config" \
     FM_PROJECTS_OVERRIDE="$TMP_ROOT/unused-projects" FM_SPAWN_NO_GUARD=1 TMUX="fake,1,0" \
     FM_TMUX_LOG="$TMP_ROOT/nobackend.log" \
@@ -1087,7 +1159,6 @@ test_spawn_default_backend_writes_no_meta_field() {
   expect_code 0 $? "explicit --backend tmux should spawn successfully"$'\n'"$out"
   assert_no_grep 'backend=' "$state/$id.meta" \
     "an explicit --backend tmux (the default) must not write backend= to meta (P1 compatibility contract)"
-  rm -rf "/tmp/fm-$id"
   pass "fm-spawn.sh: an explicit --backend tmux resolves silently and writes no backend= (missing means tmux)"
 }
 
@@ -1103,7 +1174,7 @@ test_spawn_explicit_backend_flag_beats_autodetect_herdr_env() {
 
   # HERDR_ENV=1 is present (as if firstmate itself were running under herdr),
   # but an explicit --backend tmux flag must still win outright.
-  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$ROOT" HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' \
+  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$SPAWN_HOME" HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' \
     FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$config" \
     FM_PROJECTS_OVERRIDE="$TMP_ROOT/unused-projects" FM_SPAWN_NO_GUARD=1 TMUX="fake,1,0" HERDR_ENV=1 \
     FM_TMUX_LOG="$TMP_ROOT/explicit-backend.log" \
@@ -1111,7 +1182,6 @@ test_spawn_explicit_backend_flag_beats_autodetect_herdr_env() {
   expect_code 0 $? "explicit --backend tmux should spawn successfully even with HERDR_ENV=1 set"$'\n'"$out"
   assert_no_grep 'backend=' "$state/$id.meta" \
     "an explicit --backend tmux must win over an ambient HERDR_ENV=1 auto-detect marker"
-  rm -rf "/tmp/fm-$id"
   pass "fm-spawn.sh: explicit --backend tmux wins over an ambient HERDR_ENV=1 auto-detect marker"
 }
 
@@ -1130,7 +1200,7 @@ test_spawn_autodetect_nesting_resolves_tmux_silently() {
   # (tmux nested inside a herdr pane) - the full fm-spawn.sh pipeline, not just
   # fm_backend_name, must resolve this to tmux and stay completely silent about
   # it (today's default path, byte-identical).
-  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$ROOT" HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' \
+  out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$SPAWN_HOME" HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' \
     FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$config" \
     FM_PROJECTS_OVERRIDE="$TMP_ROOT/unused-projects" FM_SPAWN_NO_GUARD=1 TMUX="fake,1,0" HERDR_ENV=1 \
     FM_TMUX_LOG="$TMP_ROOT/nest.log" \
@@ -1141,7 +1211,6 @@ test_spawn_autodetect_nesting_resolves_tmux_silently() {
   case "$out" in
     *NOTICE*) fail "auto-detecting tmux (even nested inside herdr) must stay silent, no NOTICE expected"$'\n'"$out" ;;
   esac
-  rm -rf "/tmp/fm-$id"
   pass "fm-spawn.sh: auto-detect resolves nested tmux-in-herdr to tmux and stays silent end to end"
 }
 
@@ -1163,7 +1232,7 @@ test_meta_get_and_backend_of_meta
 test_resolve_selector_three_forms
 test_resolve_selector_retains_metadata
 test_send_tmux_contract
-test_peek_conformance_old_vs_new
+test_peek_tmux_contract
 test_spawn_symlinked_project_prefix_avoids_false_refusal
 test_teardown_conformance_old_vs_new
 test_spawn_refuses_unknown_backend_flag

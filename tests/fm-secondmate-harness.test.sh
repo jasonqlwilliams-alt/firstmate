@@ -421,8 +421,17 @@ test_propagate_lib() {
 make_noop_tmux() {
   local dir=$1 fakebin="$1/fakebin"
   mkdir -p "$fakebin"
+  fm_test_track_task_tmps "$fakebin"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+case "${1:-}" in
+  -V) printf 'tmux 3.2\n' ;;
+  new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@" ;;
+  list-windows)
+    if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
+      fm_fake_tmux_window_ids "$@" < "$0.windows"
+    fi ;;
+esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
@@ -474,6 +483,7 @@ test_herdr_secondmate_launch_at_reused_pane() {
   mkdir -p "$primary"/{state,data,config,projects}
   make_seeded_home "$mate" mate
   fakebin=$(fm_fakebin "$world")
+  fm_test_track_task_tmps "$fakebin"
   fm_write_meta "$primary/state/old-worker.meta" "window=$pane" 'backend=herdr' 'kind=ship' \
     'herdr_terminal_id=term-dead-worker'
   cat > "$fakebin/herdr" <<'SH'
@@ -712,6 +722,7 @@ meta_field() { grep "^$2=" "$1" 2>/dev/null | tail -1 | cut -d= -f2-; }
 make_launch_capturing_tmux() {
   local dir=$1 fakebin="$1/fakebin"
   mkdir -p "$fakebin"
+  fm_test_track_task_tmps "$fakebin"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
@@ -719,9 +730,15 @@ case "$*" in
   *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
 esac
 case "${1:-}" in
+  -V) printf 'tmux 3.2\n'; exit 0 ;;
   display-message) printf 'firstmate\n'; exit 0 ;;
-  list-windows) exit 0 ;;
-  has-session|new-session|new-window|kill-window) exit 0 ;;
+  list-windows)
+    if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
+      fm_fake_tmux_window_ids "$@" < "$0.windows"
+    fi
+    exit 0 ;;
+  new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@"; exit 0 ;;
+  has-session|new-session|kill-window) exit 0 ;;
   send-keys)
     if [ -n "${FM_FAKE_LAUNCH_LOG:-}" ]; then
       prev=
@@ -1144,10 +1161,21 @@ SH
 if [ -n "${FM_FAKE_TMUX_LOG:-}" ]; then
   printf '%s\n' "$*" >> "$FM_FAKE_TMUX_LOG"
 fi
+fixture_windows() {
+  sed -n 's/^window=//p' "${FM_HOME:?}"/state/*.meta
+}
 case "$*" in
   list-windows*)
-    sed -n 's/^window=[^:]*://p' "${FM_HOME:?}"/state/*.meta
+    case "$*" in
+      *'#{window_id}'*)
+        fixture_windows | awk '{ print "@" NR " " $0 }' | fm_fake_tmux_window_ids "$@" ;;
+      *) fixture_windows | cut -d: -f2- ;;
+    esac
     exit 0
+    ;;
+  list-panes*)
+    fixture_windows | awk -v target="$3" '"@" NR == target { print "%" NR; found = 1 } END { exit !found }'
+    exit $?
     ;;
   *display-message*'#{pane_current_command}'*) printf '%s\n' codex; exit 0 ;;
   *display-message*'#{pane_id}'*) printf '%s\n' '%1'; exit 0 ;;
@@ -1856,6 +1884,7 @@ EOF
 # updated and each live agent receives only its own changed-content instruction.
 test_config_reread_per_home_changed_sets_and_exact_bytes() {
   local w head log out err status instr_a instr_b multiline_json pointer
+  local id target inbox quoted_inbox expected actual
   w=$(new_world config-reread-per-home)
   head=$(git -C "$w/main" rev-parse HEAD)
   add_sm_worktree "$w" alpha "$head"
@@ -1959,7 +1988,17 @@ test_config_reread_per_home_changed_sets_and_exact_bytes() {
   assert_contains "$(inbox_stream "$w/home/state" alpha)" "$pointer" "reread send must point to the durable instruction file"
   assert_not_contains "$(inbox_stream "$w/home/state" alpha)" '"harness": "grok"' "sent message must not inline multiline JSON"
   assert_not_contains "$(inbox_stream "$w/home/state" alpha)" "Default worker" "sent message must not summarize"
-  assert_not_contains "$(cat "$log")" '"harness": "grok"' "the typed doorbell must not inline multiline JSON"
+  [ "$(grep -c '^send-keys ' "$log")" -eq 4 ] || fail "config reread should type and submit exactly two doorbells"
+  for id in alpha beta; do
+    target="firstmate:fm-$id"
+    inbox=$(cd "$w/home/state/$id.inbox" && pwd) || fail "$id inbox was not created"
+    quoted_inbox=$(printf '%s' "$inbox" | sed "s/'/'\\\\''/g")
+    expected=$(printf '%s\n' \
+      "send-keys -t $target -l : Firstmate instruction waiting: list '$quoted_inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '$quoted_inbox'/handled/." \
+      "send-keys -t $target Enter")
+    actual=$(grep -F "send-keys -t $target " "$log")
+    [ "$actual" = "$expected" ] || fail "$id should receive only its inbox doorbell followed by Enter: $actual"
+  done
   pass "B15 config reread is per-home, exact-byte, ordered, and pointer-only"
 }
 

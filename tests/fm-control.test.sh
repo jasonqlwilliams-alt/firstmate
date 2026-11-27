@@ -162,6 +162,7 @@ case "${1:-}" in
           exit 0 ;;
         *pane_current_command*) cat "$D/command"; printf '\n'; exit 0 ;;
         *pane_current_path*) cat "$D/cwd"; printf '\n'; exit 0 ;;
+        *pane_id*) printf '%%1\n'; exit 0 ;;
       esac
     done
     printf 'fakepane\n'; exit 0 ;;
@@ -239,10 +240,7 @@ case "${1:-}" in
     exit 0 ;;
   list-windows)
     if [ -f "$D/windows" ]; then
-      case "${*: -1}" in
-        $'#{window_name}\t#{pane_id}') awk '{print $0 "\t%1"}' "$D/windows" ;;
-        *) cat "$D/windows" ;;
-      esac
+      case "$*" in *window_id*) awk '{ print "@" NR " fmses:" $0 }' "$D/windows" | fm_fake_tmux_window_ids "$@" ;; *) cat "$D/windows" ;; esac
     fi
     exit 0 ;;
 esac

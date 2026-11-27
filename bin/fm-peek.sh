@@ -40,8 +40,11 @@ if [ -n "$FM_BACKEND_RESOLVED_LABEL" ] && [ -n "$(fm_meta_get "$TARGET_META" rem
 fi
 
 BACKEND=tmux
+TARGET_MODE=
 if [ -n "$TARGET_META" ]; then
   BACKEND=$(fm_backend_of_meta "$TARGET_META")
+else
+  TARGET_MODE=explicit
 fi
 FM_BACKEND_HERDR_ENDPOINT_META="$TARGET_META" \
-  fm_backend_capture "$BACKEND" "$FM_BACKEND_RESOLVED_TARGET" "$N" "$FM_BACKEND_RESOLVED_LABEL"
+  fm_backend_capture "$BACKEND" "$FM_BACKEND_RESOLVED_TARGET" "$N" "$FM_BACKEND_RESOLVED_LABEL" "$TARGET_MODE"

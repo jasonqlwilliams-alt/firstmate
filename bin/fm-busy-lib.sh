@@ -998,11 +998,13 @@ fm_busy_classify_live() {  # <backend> <target> <harness> <id> <state-dir> [expe
     printf 'unknown no-target'
     return 0
   fi
-  if ! fm_backend_target_exists "$backend" "$target" "$label" 2>/dev/null; then
+  if fm_backend_target_exists "$backend" "$target" "$label" 2>/dev/null; then
+    fm_busy_classify "$backend" "$target" "$harness" "$id" "$state"
+  elif [ "$?" -eq 2 ] && [ "$backend" = tmux ]; then
+    printf 'unknown capture-failed'
+  else
     printf 'dead endpoint-gone'
-    return 0
   fi
-  fm_busy_classify "$backend" "$target" "$harness" "$id" "$state"
 }
 
 # fm_busy_classify_meta: classify a task from its recorded metadata, so every

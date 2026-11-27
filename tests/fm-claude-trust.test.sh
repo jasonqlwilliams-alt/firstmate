@@ -365,13 +365,6 @@ test_corrupt_store_fails_closed() {
 }
 
 # A refused registration must abort the spawn before any per-task state exists.
-# The busy-state generation is armed after it, and nothing between that arm and
-# the far-later rollback arming can clear it, so a record stranded here would
-# read as a task busy forever for an id that has no meta at all. The per-task
-# temp root /tmp/fm-<id> is the other resource created on the way to the arm, and
-# nothing removes it either: fm-teardown finds it through tasktmp= in the task's
-# meta, which a refused spawn never publishes. The id carries this process's pid
-# so the temp-root assertion reads only this run's path.
 test_refused_spawn_leaves_no_task_state() {
   local case_dir home proj wt config fakebin out id
   case_dir="$TMP_ROOT/refused-spawn"
@@ -401,9 +394,50 @@ test_refused_spawn_leaves_no_task_state() {
     || fail "a refused spawn stranded a busy record nothing can clear"
   [ ! -e "$home/state/$id.busy-gen" ] \
     || fail "a refused spawn stranded a busy generation nothing can clear"
-  [ ! -e "/tmp/fm-$id" ] \
-    || { rm -rf "/tmp/fm-$id"; fail "a refused spawn stranded a temp root no teardown can find"; }
+  assert_absent "$home/state/$id.meta" "a trust-refused spawn published a task record"
   pass "fm-spawn.sh: a trust-refused claude spawn leaves no task state behind"
+}
+
+test_spawn_cleans_temp_root_when_publication_fails() {
+  local case_dir home proj wt fakebin id meta out rc task_tmp observed_root
+  case_dir="$TMP_ROOT/meta-publication-failure"
+  home="$case_dir/home"
+  proj="$case_dir/project"
+  wt="$case_dir/wt"
+  id=publishfails
+  meta="$home/state/$id.meta"
+  observed_root="$case_dir/root-at-publication"
+  fakebin=$(make_spawn_fakebin "$case_dir/fake" claude)
+  fm_test_spawn_home "$home" claude
+  fm_git_worktree "$proj" "$wt" wt-publish-fails
+  fm_test_spawn_brief "$home" "$id"
+  cat > "$fakebin/mv" <<'SH'
+#!/usr/bin/env bash
+set -u
+if [ "${!#}" = "$FM_TEST_REFUSE_META" ]; then
+  task_tmp=$(sed -n 's/^tasktmp=//p' "${@: -2:1}")
+  if [ -n "$task_tmp" ] && [ -d "$task_tmp/gotmp" ]; then
+    printf '%s\n' "$task_tmp" > "$FM_TEST_OBSERVED_ROOT"
+  fi
+  exit 1
+fi
+exec "$FM_TEST_REAL_MV" "$@"
+SH
+  chmod +x "$fakebin/mv"
+
+  out=$(FM_TEST_REFUSE_META="$meta" FM_TEST_OBSERVED_ROOT="$observed_root" FM_TEST_REAL_MV="$(command -v mv)" \
+    fm_test_run_spawn "$home" "$wt" "$fakebin" "$id" "$proj" claude \
+    --mode no-mistakes --yolo off)
+  rc=$?
+  expect_code 1 "$rc" "failed publication must abort the spawn: $out"
+  assert_contains "$out" "task record for $id could not be published" "spawn did not reach the publication failure"
+  assert_absent "$meta" "the failed spawn published a task record"
+  [ -s "$observed_root" ] || fail "publication must fail after a real Go temp directory exists"
+  task_tmp=$(cat "$observed_root")
+  grep -Fxq -- "$task_tmp" "$FM_TEST_CLEANUP_REGISTRY" \
+    || fail "the fixture did not record the task temp allocation: $task_tmp"
+  assert_absent "$task_tmp" "the failed spawn stranded its unhanded temp root: $task_tmp"
+  pass "fm-spawn.sh: an aborted publication removes the allocated temp root before pane handoff"
 }
 
 # The spawn half: a real fm-spawn of a claude worker must pre-register the
@@ -519,4 +553,5 @@ test_missing_node_is_refused
 test_scope_refusal_stays_fail_closed_without_node
 test_claude_spawn_pretrusts_its_worktree_and_reaches_the_brief
 test_refused_spawn_leaves_no_task_state
+test_spawn_cleans_temp_root_when_publication_fails
 test_cross_clone_pool_slot_provenance_and_refusals

@@ -184,7 +184,8 @@ See the [teardown script header](../bin/fm-teardown.sh) for the limits of these 
 
 ## Leaked-process cleanup
 
-On non-Linux hosts without `lsof`, `fm-teardown.sh` warns and skips reaping processes under the task's worktree or temporary directory because it cannot verify caller safety.
+On non-Linux hosts without `lsof`, `fm-teardown.sh` warns and skips leaked-process reaping because it cannot verify caller safety.
+See [task temporary directories](agent-control.md#task-temporary-directories) for the scope of temporary-directory scanning and removal.
 Detached processes can survive even when teardown closes the task's endpoint and retires its records.
 [Treehouse returns](#treehouse-return-safety) require the working-directory check described above.
 The [teardown regression tests](../tests/fm-teardown.test.sh) cover the skipped reap both when the worktree is missing and when it belongs to another task.

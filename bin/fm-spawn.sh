@@ -400,9 +400,10 @@
 # success. A ship or scout dispatch therefore REFUSES up front, before any
 # endpoint, worktree, or record exists, unless the home's backlog has an
 # unheld, unblocked Queued or In flight item for the id; a transition that fails
-# after publication removes the record it just wrote rather than leaving a
-# worker the backlog does not own. A relaunch re-reads the row instead of
-# re-running the transition, so an eligible In-flight item is left untouched.
+# after publication attempts to roll back the new record and reports any
+# endpoint and local copy left for manual cleanup. A relaunch re-reads the row
+# instead of re-running the transition, so an eligible In-flight item is left
+# untouched.
 # The transition is
 # skipped entirely for --secondmate spawns (persistent agents are not work
 # items), on a config/backlog-backend=manual home, and in a markdown home that
@@ -987,6 +988,7 @@ spawn_remote_secondmate() {
 }
 
 BACKEND=
+SES=
 ORCA_ABORT_CLEANUP=0
 ORCA_WORKTREE_ID=
 ORCA_TERMINAL=
@@ -1014,6 +1016,9 @@ SPAWN_META_TMP=
 SPAWN_META_LOCK=
 SPAWN_META_LOCK_HELD=0
 SPAWN_META_PUBLISH_STARTED=0
+TASK_TMP=
+SPAWN_TASK_TMP_CREATED=0
+SPAWN_TASK_TMP_HANDED_OFF=0
 SPAWN_FRESH_COMMIT_PENDING=0
 SPAWN_TASK_SET_LOCK=
 SPAWN_TASK_SET_LOCK_HELD=0
@@ -1249,6 +1254,15 @@ spawn_abort_cleanup() {
     fm_lock_release "$CONFIG_INHERIT_LOCK" || true
   fi
   [ -z "$SPAWN_SLOT_ACQUIRE_FILE" ] || rm -f -- "$SPAWN_SLOT_ACQUIRE_FILE" 2>/dev/null || true
+  if [ "$status" -ne 0 ] && [ -n "$TASK_TMP" ] \
+     && [ "$(fm_meta_get "$STATE/$ID.meta" tasktmp 2>/dev/null)" != "$TASK_TMP" ]; then
+    if [ "$SPAWN_TASK_TMP_CREATED" = 1 ] && [ "$SPAWN_TASK_TMP_HANDED_OFF" = 0 ]; then
+      rmdir -- "$TASK_TMP/gotmp" "$TASK_TMP" 2>/dev/null || true
+    fi
+    if [ -d "$TASK_TMP" ]; then
+      echo "warning: task $ID's temporary directory remains at $TASK_TMP; inspect it after closing endpoint $T" >&2
+    fi
+  fi
   return "$status"
 }
 trap spawn_abort_cleanup EXIT
@@ -2374,8 +2388,8 @@ resolve_rovo_binary() {
 # on an OAuth device-code prompt ("Sign in at this page ... Waiting for
 # approval...") waiting for a human who is not there, which would look to
 # supervision like a wedged worker rather than a missing credential.
-muse_worker_meta_api_key_present() {
-  local session worker_env
+muse_worker_meta_api_key_present() {  # [destination-session]
+  local destination=${1:-} session worker_env
   if [ "$LAUNCH_ENV_ENABLED" = 1 ]; then
     case $'\n'"$LAUNCH_ENV_NAMES"$'\n' in
       *$'\nMETA_API_KEY\n'*) ;;
@@ -2383,7 +2397,9 @@ muse_worker_meta_api_key_present() {
     esac
   fi
   [ "$BACKEND" = tmux ] || return 1
-  if [ -n "${TMUX:-}" ]; then
+  if [ -n "$destination" ]; then
+    session="=$destination:"
+  elif [ -n "${TMUX:-}" ]; then
     session=$(tmux display-message -p '#S' 2>/dev/null) || return 1
   else
     tmux has-session -t firstmate 2>/dev/null || return 1
@@ -2396,9 +2412,8 @@ muse_worker_meta_api_key_present() {
   return 1
 }
 
-muse_credential_present() {
-  local auth=$1
-  [ -s "$auth" ] || muse_worker_meta_api_key_present
+muse_credential_present() {  # <auth-file> [destination-session]
+  [ -s "$1" ] || muse_worker_meta_api_key_present "${2:-}"
 }
 
 model_flag_for_harness() {
@@ -2499,14 +2514,14 @@ effort_flag_for_harness() {
   esac
 }
 
-resolve_additional_launch_executables() {
+resolve_additional_launch_executables() {  # [destination-session]
   case "$LAUNCH" in
     *__MUSEBIN__*)
       MUSE_BIN=$(spawn_resolve_launch_binary resolve_muse_binary) || exit 1
       MUSE_CONFIG_HOME=$(resolve_directory_input XDG_CONFIG_HOME "${XDG_CONFIG_HOME:-${HOME:-}/.config}") || exit 1
       MUSE_DATA_HOME=$(resolve_directory_input XDG_DATA_HOME "${XDG_DATA_HOME:-${HOME:-}/.local/share}") || exit 1
       MUSE_AUTH_FILE="$MUSE_CONFIG_HOME/muse/auth.json"
-      if ! muse_credential_present "$MUSE_AUTH_FILE"; then
+      if ! muse_credential_present "$MUSE_AUTH_FILE" "${1:-}"; then
         if [ -n "${META_API_KEY:-}" ]; then
           echo "error: muse has no worker-reachable credential; META_API_KEY is set for fm-spawn but cannot be proven present in the $BACKEND worker environment. Store the fleet credential at '$MUSE_AUTH_FILE' with 'muse login' or 'muse auth set --api-key-stdin'. The secret will not be copied into the launch command." >&2
         else
@@ -2540,7 +2555,12 @@ resolve_additional_launch_executables() {
       ;;
   esac
 }
-[ "$RELAUNCH" -eq 1 ] || resolve_additional_launch_executables
+if [ "$RELAUNCH" -eq 0 ]; then
+  if [ "$BACKEND" = tmux ] && [ "$HARNESS" = muse ]; then
+    SES=$(fm_backend_tmux_launch_session) || exit 1
+  fi
+  resolve_additional_launch_executables "$SES"
+fi
 
 json_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
@@ -3300,7 +3320,7 @@ elif [ "$RELAUNCH" -eq 1 ] && [ "$RELAUNCH_RECREATE" -eq 1 ]; then
   # is not a one-way door.
   case "$BACKEND" in
     tmux)
-      SES=$(fm_backend_tmux_container_ensure)
+      SES=$(fm_backend_tmux_container_ensure) || exit 1
       T="$SES:$W"
       WID=$(fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
       WT_TARGET="$WID"
@@ -3336,7 +3356,7 @@ EOF
 else
 case "$BACKEND" in
   tmux)
-    SES=$(fm_backend_tmux_container_ensure)
+    SES=$(fm_backend_tmux_container_ensure "$SES") || exit 1
     T="$SES:$W"
     # #134 robustness (tmux): fm_backend_tmux_create_task captures a stable window
     # id and pins the window name (automatic-rename/allow-rename off) so a captain's
@@ -3899,7 +3919,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
   }
   resolve_launch_executables
   validate_launch_models
-  resolve_additional_launch_executables
+  if [ "$RELAUNCH_RECREATE" -eq 1 ]; then
+    resolve_additional_launch_executables "$SES"
+  else
+    resolve_additional_launch_executables
+  fi
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   # Check legacy or lost leases before get can reset any reusable slot.
   fm_treehouse_require_recorded_leases "$PROJ_ABS" "$STATE" || exit 1
@@ -4046,12 +4070,36 @@ if [ "$KIND" != secondmate ]; then
   esac
 fi
 
-# Per-task temp root: /tmp/fm-<id>/ with Go's build temp nested at gotmp/. Go won't
-# create GOTMPDIR, so mkdir before it is used; fm-teardown removes the whole root.
-# Nested (not a bare /tmp/fm-<id>/gotmp) so other per-task temp can live alongside
-# later, and teardown cleans one deterministic path. GOTMPDIR (not TMPDIR) is the
-# targeted knob: TMPDIR is too broad (affects every program's temp, not just Go's).
-TASK_TMP="/tmp/fm-$ID"
+# Per-task temp root: /tmp/fm-<id>+XXXXXX/ with Go's build temp nested at gotmp/.
+# mktemp creates the root atomically under a fresh random suffix, so no other
+# home spawning the same task id can share it. Go won't create GOTMPDIR, so mkdir
+# before it is used. Record the root as tasktmp= for teardown to validate.
+# Nested (not a bare root used as GOTMPDIR) so other per-task temp can live
+# alongside later. The short suffix keeps paths inside the socket-path limits
+# Go and tmux impose. GOTMPDIR (not TMPDIR) is the targeted knob: TMPDIR is too
+# broad (affects every program's temp, not just Go's).
+task_tmp_meta="$STATE/$ID.meta"
+if [ "$RELAUNCH" -eq 1 ] || {
+  [ "$KIND" = secondmate ] && [ -f "$task_tmp_meta" ] && [ ! -L "$task_tmp_meta" ] \
+    && [ "$(fm_meta_get "$task_tmp_meta" kind)" = secondmate ] \
+    && [ "$(fm_meta_get "$task_tmp_meta" home)" = "$PROJ_ABS" ] \
+    && [ -z "$(fm_meta_get "$task_tmp_meta" remote_host)" ]
+}; then
+  TASK_TMP=$(fm_meta_get "$task_tmp_meta" tasktmp)
+  case "$TASK_TMP" in
+    "/tmp/fm-$ID") TASK_TMP= ;;
+  esac
+  if [ ! -d "$TASK_TMP" ] || [ -L "$TASK_TMP" ] || [ ! -O "$TASK_TMP" ]; then
+    TASK_TMP=
+  fi
+fi
+if [ -z "$TASK_TMP" ]; then
+  TASK_TMP=$(mktemp -d "/tmp/fm-$ID+XXXXXX") || {
+    echo "error: could not create a private task temp root under /tmp for $ID" >&2
+    exit 1
+  }
+  SPAWN_TASK_TMP_CREATED=1
+fi
 mkdir -p "$TASK_TMP/gotmp"
 
 # Per-harness turn-end hook where enabled: a file that touches
@@ -5020,7 +5068,8 @@ spawn_record_traceparent() {
 # Export GOTMPDIR into the crewmate's pane shell so the agent and every child
 # process (go build, go test, ...) inherit it. Sent before the launch command so
 # the env is set when the agent starts; the brief sleep lets the export land.
-spawn_send_text_line "$T" "export GOTMPDIR=$TASK_TMP/gotmp"
+SPAWN_TASK_TMP_HANDED_OFF=1
+spawn_send_text_line "$T" "export GOTMPDIR=$(printf '%q' "$TASK_TMP/gotmp")"
 # Mark the pane as a task worker so bin/fm-test-run.sh can refuse to run the
 # suite in the repository's primary checkout. Ship and scout workers are the
 # ones assigned an isolated worktree; a secondmate runs its own home instead.
@@ -5172,7 +5221,7 @@ fi
 if [ "$SPAWN_BACKLOG_COMMIT_STATUS" -ne 0 ]; then
   if [ "$RELAUNCH" -eq 0 ]; then
     if spawn_fresh_commit_rollback; then
-      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
+      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
     else
       echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR), and failed-dispatch cleanup is incomplete; the provisional record may remain at $STATE/$ID.meta - close out endpoint $T and local copy $WT by hand, then remove the record and busy state before retrying" >&2
     fi

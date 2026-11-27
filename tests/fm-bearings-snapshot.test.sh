@@ -38,10 +38,17 @@ SH
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 case "${1:-}" in
+  list-windows)
+    case "$*" in
+      *window_id*) printf '%s\n' '@1 firstmate:fm-phase8' '@2 firstmate:fm-domain-alpha' \
+        '@3 firstmate:fm-duplicate' '@4 firstmate:fm-duplicate' '@5 fixture:captured-status' \
+        | fm_fake_tmux_window_ids "$@" ;;
+    esac ;;
+  list-panes) case "$3" in @1|@2|@5) ;; *) exit 1 ;; esac ;;
   display-message) case "$*" in *dead-*) exit 1 ;; *) printf '%%1\n' ;; esac ;;
   capture-pane)
     case "$*" in
-      *fm-domain-alpha*) printf 'stale terminal summary: Phase 7 started\n> \n' ;;
+      *fm-domain-alpha*|*' -t @2 '*) printf 'stale terminal summary: Phase 7 started\n> \n' ;;
       *) printf 'all quiet\n> \n' ;;
     esac
     ;;
@@ -3108,6 +3115,21 @@ SH
   pass "current state and decision hints share one captured status observation"
 }
 
+test_duplicate_tmux_presence_stays_unknown() {
+  local home fakebin json
+  home=$(make_home duplicate-tmux)
+  fakebin=$(make_fakebin "$home")
+  fm_write_meta "$home/state/duplicate.meta" 'window=firstmate:fm-duplicate' 'kind=ship'
+  fm_write_meta "$home/state/closed.meta" 'window=firstmate:fm-closed' 'kind=ship'
+  json=$(PATH="$fakebin:$PATH" FM_HOME="$home" NET_LOG="$home/net.log" \
+    "$ROOT/bin/fm-fleet-snapshot.sh" --json) || fail "could not capture the fleet snapshot"
+  printf '%s' "$json" | jq -e '
+    any(.tasks[]; .id == "duplicate" and .endpoint.exists == null and .endpoint.status == "unknown")
+    and any(.tasks[]; .id == "closed" and .endpoint.exists == false and .endpoint.status == "absent")
+  ' >/dev/null || fail "the fleet snapshot should distinguish unresolved duplicate windows from a closed window: $json"
+  pass "duplicate tmux windows leave fleet presence unknown"
+}
+
 test_relaunched_task_does_not_inherit_reused_endpoint_state() {
   local home fakebin worktree json
   home=$(make_home endpoint-generation-race)
@@ -3127,10 +3149,16 @@ EOF
   printf 'working: old generation\n' > "$home/state/generation-race.status"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
-if [ "${1:-}" = display-message ]; then
-  if mkdir "$RACE_ONCE" 2>/dev/null; then
-    tmp="$RACE_META.tmp.$$"
-    cat > "$tmp" <<EOF
+set -e
+case "${1:-}" in
+  list-windows)
+    printf '@1 fixture:fm-generation-race\n' | fm_fake_tmux_window_ids "$@"
+    ;;
+  list-panes)
+    [ "${3:-}" = @1 ] || exit 1
+    if mkdir "$RACE_ONCE" 2>/dev/null; then
+      tmp="$RACE_META.tmp.$$"
+      cat > "$tmp" <<EOF
 window=fixture:fm-generation-race
 worktree=$RACE_WORKTREE
 project=firstmate
@@ -3139,15 +3167,14 @@ kind=ship
 mode=no-mistakes
 spawn_gen=new-generation
 EOF
-    mv "$tmp" "$RACE_META"
-    printf 'needs-decision[replacement]: replacement-only decision https://github.com/acme/firstmate/pull/999\n' > "$RACE_STATUS"
-    mkdir -p "$(dirname "$RACE_REPORT")"
-    printf 'replacement-only report\n' > "$RACE_REPORT"
-  fi
-  # The old endpoint disappeared while a replacement reused the same target.
-  exit 1
-fi
-exit 0
+      mv "$tmp" "$RACE_META"
+      printf 'needs-decision[replacement]: replacement-only decision https://github.com/acme/firstmate/pull/999\n' > "$RACE_STATUS"
+      mkdir -p "$(dirname "$RACE_REPORT")"
+      printf 'replacement-only report\n' > "$RACE_REPORT"
+    fi
+    printf '%%1\n'
+    ;;
+esac
 SH
   chmod +x "$fakebin/tmux"
 
@@ -3158,6 +3185,8 @@ SH
     RACE_REPORT="$home/data/generation-race/report.md" RACE_WORKTREE="$worktree" \
     "$ROOT/bin/fm-fleet-snapshot.sh" --json) \
     || fail "fleet snapshot failed during endpoint generation race"
+  assert_grep 'spawn_gen=new-generation' "$home/state/generation-race.meta" \
+    "the pane lookup did not publish a replacement generation"
   printf '%s' "$json" | jq -e '
     .tasks[] | select(.id == "generation-race")
     | .spawn_gen == "old-generation"
@@ -3509,6 +3538,7 @@ test_gate_and_landed_repo_and_empty_reason
 
 test_task_teardown_during_metadata_capture_does_not_abort_snapshot
 test_current_state_uses_captured_status_observation
+test_duplicate_tmux_presence_stays_unknown
 test_relaunched_task_does_not_inherit_reused_endpoint_state
 test_large_local_snapshot_overlaps_local_reads_without_projection_drift
 test_remote_ledgers_share_one_concurrent_budget_and_fall_back_to_cache

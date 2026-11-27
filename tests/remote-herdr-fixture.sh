@@ -29,6 +29,7 @@
 install_remote_herdr_fixture() { # <remote-root> <state> <log> <send-fail> <socket>
   local remote_root=$1 state=$2 log=$3 send_fail=$4 socket=$5 script="$1/bin/herdr"
   mkdir -p "$remote_root/bin"
+  fm_test_track_task_tmps "$remote_root/bin"
   cat > "$script" <<SH
 #!/usr/bin/env bash
 set -u
@@ -59,31 +60,31 @@ case "${1:-} ${2:-}" in
   "workspace create")
     n=$(jq_state -r '.next'); wsid="w$n"; dn=$((n + 1))
     jq_state --arg wsid "$wsid" --arg wlabel "$label" --arg cwd "$cwd" \
-      --arg tabid "$wsid:t$dn" --arg paneid "$wsid:p$dn" \
+      --arg tabid "$wsid:t$dn" --arg paneid "$wsid:p$dn" --arg terminal "term-$dn" \
       '.workspaces += [{workspace_id:$wsid, label:$wlabel, cwd:$cwd}]
-       | .tabs += [{tab_id:$tabid, label:"1", workspace_id:$wsid, pane_id:$paneid}]
+       | .tabs += [{tab_id:$tabid, label:"1", workspace_id:$wsid, pane_id:$paneid, terminal_id:$terminal}]
        | .next = (.next + 2)' | save
-    printf '{"result":{"workspace":{"workspace_id":"%s","label":"%s"},"tab":{"tab_id":"%s"},"root_pane":{"pane_id":"%s"}}}\n' \
-      "$wsid" "$label" "$wsid:t$dn" "$wsid:p$dn"
+    printf '{"result":{"workspace":{"workspace_id":"%s","label":"%s"},"tab":{"tab_id":"%s"},"root_pane":{"pane_id":"%s","terminal_id":"%s"}}}\n' \
+      "$wsid" "$label" "$wsid:t$dn" "$wsid:p$dn" "term-$dn"
     ;;
   "tab list") jq_state --arg w "$ws" '{result:{tabs:[.tabs[]|select(.workspace_id==$w)]}}' ;;
   "tab create")
     n=$(jq_state -r '.next'); tabid="$ws:t$n"; paneid="$ws:p$n"
-    jq_state --arg w "$ws" --arg wlabel "$label" --arg cwd "$cwd" --arg tabid "$tabid" --arg paneid "$paneid" \
-      '.tabs += [{tab_id:$tabid, label:$wlabel, workspace_id:$w, pane_id:$paneid, cwd:$cwd}]
+    jq_state --arg w "$ws" --arg wlabel "$label" --arg cwd "$cwd" --arg tabid "$tabid" --arg paneid "$paneid" --arg terminal "term-$n" \
+      '.tabs += [{tab_id:$tabid, label:$wlabel, workspace_id:$w, pane_id:$paneid, terminal_id:$terminal, cwd:$cwd}]
        | .next = (.next + 1)' | save
-    printf '{"result":{"tab":{"tab_id":"%s"},"root_pane":{"pane_id":"%s"}}}\n' "$tabid" "$paneid"
+    printf '{"result":{"tab":{"tab_id":"%s"},"root_pane":{"pane_id":"%s","terminal_id":"%s"}}}\n' "$tabid" "$paneid" "term-$n"
     ;;
   "tab close")
     jq_state --arg t "${3:-}" '.tabs |= [.[]|select(.tab_id != $t)]' | save ;;
   "pane list")
-    jq_state --arg w "$ws" '{result:{panes:[.tabs[]|select(.workspace_id==$w)|{pane_id:.pane_id, tab_id:.tab_id}]}}' ;;
+    jq_state --arg w "$ws" '{result:{panes:[.tabs[]|select(.workspace_id==$w)|{pane_id, tab_id, terminal_id}]}}' ;;
   "pane get")
     pane=${3:-}
     if [ "$(jq_state -r --arg p "$pane" '[.tabs[]|select(.pane_id==$p)]|length')" = 0 ]; then
       printf '{"error":{"code":"pane_not_found","message":"%s"}}\n' "$pane"
     else
-      jq_state --arg p "$pane" '{result:{pane:([.tabs[]|select(.pane_id==$p)|{pane_id:.pane_id,cwd:.cwd}][0])}}'
+      jq_state --arg p "$pane" '{result:{pane:([.tabs[]|select(.pane_id==$p)|{pane_id, tab_id, workspace_id, terminal_id, cwd}][0])}}'
     fi
     ;;
   "pane close")

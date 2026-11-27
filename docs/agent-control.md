@@ -134,6 +134,24 @@ Switching harness is therefore one ordinary relaunch rather than a separate mech
 - If the launch owner already published the new record but no running agent can be confirmed, the new record is kept: the task is recorded on the new harness with no agent confirmed, which is exactly what recovery reconciles.
   Rewriting it back to the old harness would be a second, worse inaccuracy.
 
+## Task temporary directories
+
+Each fresh task dispatch creates a private temporary root on the agent's host, even when an earlier task or a task in another home has the same ID.
+An explicit task relaunch or recovery of the same recorded secondmate can reuse the root in that task's `tasktmp=` metadata on the agent's host.
+Reuse and teardown require an existing directory owned by the current user with no symlink at the recorded path.
+Temporary files and any detached processes still using the directory can carry over to the replacement.
+Firstmate allocates a fresh root when the recorded path is missing, fails the reuse checks, or is the old fixed path `/tmp/fm-<id>` that same-ID tasks may share.
+
+Teardown also requires an absolute path with no trailing slash.
+Teardown removes an eligible recorded root before retiring its task record, including child roots during forced secondmate home teardown.
+Direct ship and scout teardown uses `lsof` to scan for processes with a readable working directory under the eligible root.
+Detached processes may survive secondmate teardown and forced child cleanup even when those operations remove the directory.
+Teardown leaves the fixed legacy path for manual reconciliation, skipping both the scan and removal for that path.
+
+Spawn attempts to remove an empty root it just allocated if launch fails before handoff and the task record has no reference to it.
+If the root remains, the launch warning identifies the exact path to inspect after closing the named endpoint.
+When bootstrap receives that warning during failed secondmate recovery, it includes the path in the `SECONDMATE_LIVENESS` summary.
+
 ## Fail-closed boundaries
 
 - Targeting is exact.
@@ -180,5 +198,7 @@ The empirical basis for each adapter's value is the `harness-adapters` skill's v
 
 - `tests/fm-control.test.sh` - the adapter contract for every verified harness, the backend capability matrix, exact-id scoping, the closed verb list, the busy, idle, dead, and idempotent lifecycle cases, Codex picker and uncertain-screen refusals, slow quit and shell redraw, retained picker history, Herdr plain capture fallback, and marker non-regression, all against a stubbed session provider.
 - [Claude automatic-input verification](verification/runtime-backends.md#claude-automatic-input-and-exit-confirmation) - portable coverage and live guard status for captured dialogs, submission, and restart reporting.
-- `tests/fm-control-relaunch.test.sh` - the relaunch transaction, preparation refusals, exited-shell recovery, registered merge-poll continuity, and rollback; [runtime verification](verification/runtime-backends.md) records the reusable evidence.
+- `tests/fm-control-relaunch.test.sh` - the relaunch transaction, preparation refusals, exited-shell recovery, temporary-root reuse and migration, registered merge-poll continuity, and rollback; [runtime verification](verification/runtime-backends.md) records the reusable evidence.
+- [`tests/fm-kimi-harness.test.sh`](../tests/fm-kimi-harness.test.sh) and [`tests/fm-gotmp.test.sh`](../tests/fm-gotmp.test.sh) - same-ID isolation between homes and preservation of shared legacy roots.
+- [`tests/fm-secondmate-liveness.test.sh`](../tests/fm-secondmate-liveness.test.sh) - reporting the retained root after failed secondmate recovery.
 - `tests/fm-control-herdr-smoke.test.sh` - the second state-verified backend against the real herdr binary, on an isolated throwaway lab session.

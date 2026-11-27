@@ -848,7 +848,7 @@ for meta in "$STATE"/*.meta; do
     backend=$(fm_backend_of_meta "$meta")
     if FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_target_exists "$backend" "${target:-$window}" "fm-$id"; then
       printf 'endpoint: alive (backend=%s window=%s)\n' "$backend" "$window"
-    elif [ "$?" -eq 2 ] && [ "$backend" = herdr ]; then
+    elif [ "$?" -eq 2 ] && [[ "$backend" = tmux || "$backend" = herdr ]]; then
       printf 'endpoint: unknown (unreadable identity, backend=%s window=%s)\n' "$backend" "$window"
     else
       printf 'endpoint: dead (backend=%s window=%s)\n' "$backend" "$window"

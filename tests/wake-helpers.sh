@@ -62,10 +62,20 @@ make_case() {
 #!/usr/bin/env bash
 set -u
 if [ "${1:-}" = "list-windows" ]; then
+  case "$*" in *window_id*) _ids=1 ;; *) _ids=0 ;; esac
   if [ -n "${FM_FAKE_TMUX_WINDOWS:-}" ]; then
-    printf '%s\n' "$FM_FAKE_TMUX_WINDOWS"
+    _names=$FM_FAKE_TMUX_WINDOWS
   elif [ -n "${FM_FAKE_TMUX_WINDOW:-}" ]; then
-    printf '%s\n' "${FM_FAKE_TMUX_WINDOW#*:}"
+    _names=${FM_FAKE_TMUX_WINDOW#*:}
+  else
+    exit 0
+  fi
+  if [ "$_ids" = 1 ]; then
+    _session=${FM_FAKE_TMUX_WINDOW:-test}
+    printf '%s\n' "$_names" | awk -v session="${_session%%:*}" '{ print "@" NR " " session ":" $0 }' |
+      fm_fake_tmux_window_ids "$@"
+  else
+    printf '%s\n' "$_names"
   fi
   exit 0
 fi
@@ -81,8 +91,11 @@ if [ "${1:-}" = "capture-pane" ]; then
   if [ -n "${FM_FAKE_TMUX_FORBIDDEN_TARGET:-}" ]; then
     _prev=
     for _arg in "$@"; do
-      if [ "$_prev" = -t ] && [ "$_arg" = "$FM_FAKE_TMUX_FORBIDDEN_TARGET" ]; then
-        exit 1
+      if [ "$_prev" = -t ]; then
+        case "$_arg" in
+          @*) _arg="test:$(printf '%s\n' "${FM_FAKE_TMUX_WINDOWS:-}" | sed -n "${_arg#@}p")" ;;
+        esac
+        [ "$_arg" != "$FM_FAKE_TMUX_FORBIDDEN_TARGET" ] || exit 1
       fi
       _prev=$_arg
     done
@@ -90,6 +103,9 @@ if [ "${1:-}" = "capture-pane" ]; then
   if [ -n "${FM_FAKE_TMUX_CAPTURE:-}" ]; then
     cat "$FM_FAKE_TMUX_CAPTURE"
   fi
+  exit 0
+fi
+if [ "${1:-}" = "list-panes" ]; then
   exit 0
 fi
 if [ "${1:-}" = "display-message" ]; then
@@ -174,10 +190,16 @@ case "${1:-}" in
     done
     [ "$_print" = 1 ] && printf 'fakepane\n'
     exit 0 ;;
+  list-panes) [ "${FM_FAKE_TMUX_PANE_ALIVE:-1}" = 1 ]; exit $? ;;
   list-windows)
-    [ -n "${FM_FAKE_TMUX_WINDOW:-}" ] && printf '%s\n' "$FM_FAKE_TMUX_WINDOW"
+    [ -n "${FM_FAKE_TMUX_WINDOW:-}" ] || exit 0
+    case "$*" in
+      *window_id*) printf '@1 %s\n' "$FM_FAKE_TMUX_WINDOW" | fm_fake_tmux_window_ids "$@" ;;
+      *) printf '%s\n' "$FM_FAKE_TMUX_WINDOW" ;;
+    esac
     exit 0 ;;
   capture-pane)
+    [ "${FM_FAKE_TMUX_PANE_ALIVE:-1}" = 1 ] || exit 1
     # Honor a single-line band capture (-S N -E M, both non-negative) for the
     # composer reader's non-bordered compatibility fallback; otherwise (e.g. its
     # structural full-pane scan or fm_pane_is_busy's "-S -40" tail) return the whole capture. -e is accepted and
@@ -263,7 +285,9 @@ case "${1:-}" in
     [ "$print" = 1 ] && printf 'fakepane\n'
     exit 0 ;;
   capture-pane) cat "$COMPOSER" 2>/dev/null; exit 0 ;;
-  list-windows) exit 0 ;;
+  # The exact-window reads confirm the window in this inventory.
+  list-panes) exit 0 ;;
+  list-windows) printf '@1 sess:win\n' | fm_fake_tmux_window_ids "$@"; exit 0 ;;
   send-keys)
     shift
     text=""; is_enter=0; lit=0

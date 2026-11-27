@@ -57,11 +57,13 @@ esac
 SH
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+[ "${1:-}" != -V ] || { printf '%s\n' 'tmux 3.2'; exit 0; }
 [ -z "${FM_FAKE_TMUX_LOG:-}" ] || printf '%s\n' "$*" >> "$FM_FAKE_TMUX_LOG"
 case "$*" in
   *display-message*'#{pane_current_command}'*) printf '%s\n' codex ;;
   *display-message*'#{pane_id}'*) printf '%s\n' '%1' ;;
   *display-message*'#{cursor_y}'*) printf '%s\n' 0 ;;
+  *list-windows*window_id*) printf '%s\n' '@1 firstmate:fm-sm' | fm_fake_tmux_window_ids "$@" ;;
   *list-windows*) printf '%s\n' fm-sm ;;
   *capture-pane*) printf '❯\n' ;;
 esac

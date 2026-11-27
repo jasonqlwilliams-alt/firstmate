@@ -498,7 +498,7 @@ helm_target_exists() {
     driver target-exists
     return $?
   fi
-  fm_backend_target_exists "$HELM_BACKEND" "$HELM_TARGET"
+  fm_backend_target_exists "$HELM_BACKEND" "$HELM_TARGET" '' explicit
 }
 
 helm_busy() {
@@ -509,7 +509,7 @@ helm_busy() {
   local native tail
   native=$(fm_backend_busy_state "$HELM_BACKEND" "$HELM_TARGET" 2>/dev/null || printf 'unknown')
   [ "$native" = busy ] && return 0
-  tail=$(fm_backend_capture "$HELM_BACKEND" "$HELM_TARGET" 40 2>/dev/null) || return 0
+  tail=$(fm_backend_capture "$HELM_BACKEND" "$HELM_TARGET" 40 '' explicit 2>/dev/null) || return 0
   printf '%s' "$tail" | grep -v '^[[:space:]]*$' | tail -12 | fm_busy_lines_match claude
 }
 
@@ -518,7 +518,7 @@ helm_composer() {
     driver composer
     return $?
   fi
-  fm_backend_composer_state "$HELM_BACKEND" "$HELM_TARGET" 2>/dev/null || printf 'unknown'
+  fm_backend_composer_state "$HELM_BACKEND" "$HELM_TARGET" '' explicit 2>/dev/null || printf 'unknown'
 }
 
 helm_send_slash() {
@@ -527,7 +527,7 @@ helm_send_slash() {
     driver send "$text"
     return $?
   fi
-  verdict=$(fm_backend_send_text_submit "$HELM_BACKEND" "$HELM_TARGET" "$text" 4 0.8 0.8) || return 1
+  verdict=$(fm_backend_send_text_submit "$HELM_BACKEND" "$HELM_TARGET" "$text" 4 0.8 0.8 '' explicit) || return 1
   [ "$verdict" = empty ]
 }
 
@@ -541,7 +541,7 @@ helm_launch() {
     tmux)
       fm_backend_source tmux || return 1
       fm_backend_tmux_send_literal "$HELM_TARGET" "$cmd" || return 1
-      fm_backend_tmux_send_key "$HELM_TARGET" Enter
+      fm_backend_tmux_send_key "$HELM_TARGET" Enter explicit
       ;;
     herdr)
       fm_backend_source herdr || return 1
@@ -660,7 +660,12 @@ cmd_handover() {
   if ! probe_successor; then
     die "successor $SUCCESSOR_HARNESS did not answer its probe; refusing to leave the Claude helm"
   fi
-  helm_target_exists || die "helm target $HELM_TARGET is not a live $HELM_BACKEND pane"
+  helm_target_exists || {
+    if [ "$?" -eq 2 ] && [ "$HELM_BACKEND" = tmux ]; then
+      die "could not verify helm target $HELM_TARGET as a live $HELM_BACKEND pane"
+    fi
+    die "helm target $HELM_TARGET is not a live $HELM_BACKEND pane"
+  }
 
   local idle_timeout stow_timeout lock_timeout poll launch
   idle_timeout=${FM_BACKUP_HELM_IDLE_TIMEOUT:-1200}

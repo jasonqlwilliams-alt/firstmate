@@ -6,8 +6,7 @@
 # data/fm-backend-design-d7/herdr-addendum.md ("Events as the core
 # abstraction"). P1 extracted the tmux command sequences that fm-send.sh,
 # fm-peek.sh, fm-watch.sh, fm-spawn.sh, and fm-teardown.sh already ran inline
-# into bin/backends/tmux.sh, with those SAME command sequences, so the default
-# (tmux) path stays byte-identical. P2 adds bin/backends/herdr.sh, an
+# into bin/backends/tmux.sh. P2 adds bin/backends/herdr.sh, an
 # EXPERIMENTAL spawn-capable backend behind `--backend herdr`/`FM_BACKEND=herdr`/
 # `config/backend`, and behind runtime auto-detection when firstmate itself is
 # running inside herdr with no explicit backend setting; see herdr-addendum.md and
@@ -320,11 +319,25 @@ fm_backend_required_tools() {  # <backend>
   esac
 }
 
-fm_backend_required_tool_available() {  # <backend> <tool>
-  local backend=$1 tool=$2 required
+FM_BACKEND_TMUX_MIN_VERSION=3.2
+
+fm_backend_required_tool_available() {  # <backend> <tool>; status 2 means the tmux server probe failed
+  local backend=$1 tool=$2 required version min_major min_minor
   required=$(fm_backend_required_tools "$backend") || return 1
   fm_backend_list_contains "$required" "$tool" || return 1
   case "$backend:$tool" in
+    tmux:tmux)
+      version=$(tmux -V 2>/dev/null) || return 1
+      [[ "$version" =~ ^tmux[[:space:]]+([0-9]+)\.([0-9]+) ]] || return 1
+      min_major=${FM_BACKEND_TMUX_MIN_VERSION%%.*}
+      min_minor=${FM_BACKEND_TMUX_MIN_VERSION#*.}
+      if [ "${BASH_REMATCH[1]}" -lt "$min_major" ] ||
+        { [ "${BASH_REMATCH[1]}" -eq "$min_major" ] && [ "${BASH_REMATCH[2]}" -lt "$min_minor" ]; }; then
+        return 1
+      fi
+      fm_backend_source tmux || return 2
+      fm_tmux_window_filter_available || return 2
+      ;;
     cmux:cmux)
       fm_backend_source cmux >/dev/null 2>&1 || return 1
       fm_backend_cmux_bin >/dev/null 2>&1
@@ -813,12 +826,12 @@ fm_backend_resolve_selector() {  # <raw-target> <state-dir>
 # changing call sites.
 
 # fm_backend_capture: bounded plain-text session capture.
-fm_backend_capture() {  # <backend> <target> <lines> [expected-label]
+fm_backend_capture() {  # <backend> <target> <lines> [expected-label] [explicit]
   local backend=$1
   shift
   fm_backend_source "$backend" || return 1
   case "$backend" in
-    tmux) fm_backend_tmux_capture "$@" ;;
+    tmux) fm_backend_tmux_capture "$1" "$2" "${4:-}" ;;
     herdr) fm_backend_herdr_capture "$@" ;;
     zellij) fm_backend_zellij_capture "$@" ;;
     orca) fm_backend_orca_capture "$@" ;;
@@ -828,12 +841,12 @@ fm_backend_capture() {  # <backend> <target> <lines> [expected-label]
 }
 
 # fm_backend_send_key: one backend-supported named special key.
-fm_backend_send_key() {  # <backend> <target> <key> [expected-label]
+fm_backend_send_key() {  # <backend> <target> <key> [expected-label] [explicit]
   local backend=$1
   shift
   fm_backend_source "$backend" || return 1
   case "$backend" in
-    tmux) fm_backend_tmux_send_key "$@" ;;
+    tmux) fm_backend_tmux_send_key "$1" "$2" "${4:-}" ;;
     herdr) fm_backend_herdr_send_key "$@" ;;
     zellij) fm_backend_zellij_send_key "$@" ;;
     orca) fm_backend_orca_send_key "$@" ;;
@@ -863,7 +876,7 @@ fm_backend_send_literal() {  # <backend> <target> <text> [expected-label]
 # proof-carrying verdict; callers require exact empty for confirmed delivery.
 # A caller holding the Claude lifecycle lock may opt into the automatic input
 # guard. Its context is scoped to this call and consumed by the submit cores.
-fm_backend_send_text_submit() {  # <backend> <target> <text> <retries> <enter-sleep> <settle> [expected-label] [claude]
+fm_backend_send_text_submit() {  # <backend> <target> <text> <retries> <enter-sleep> <settle> [expected-label] [claude|explicit]
   local backend=$1
   shift
   local fm_submit_claude_backend='' fm_submit_label=${6:-} fm_submit_text=$2
@@ -875,7 +888,7 @@ fm_backend_send_text_submit() {  # <backend> <target> <text> <retries> <enter-sl
   fi
   fm_backend_source "$backend" || return 1
   case "$backend" in
-    tmux) fm_backend_tmux_send_text_submit "$@" ;;
+    tmux) fm_backend_tmux_send_text_submit "$1" "$2" "$3" "$4" "$5" "${7:-}" ;;
     herdr) fm_backend_herdr_send_text_submit "$@" ;;
     zellij) fm_backend_zellij_send_text_submit "$@" ;;
     orca) fm_backend_orca_send_text_submit "$@" ;;
@@ -951,12 +964,12 @@ fm_backend_busy_state() {  # <backend> <target>
 # fm_composer_classify_screen) - so no backend can hold a private shape
 # assumption; zellij's classifier reads `dump-screen --ansi`, which replaced
 # its old no-classifier content-diff reporting.
-fm_backend_composer_state() {  # <backend> <target> [expected-label] -> empty|pending|pending-unproven|unknown
+fm_backend_composer_state() {  # <backend> <target> [expected-label] [explicit] -> empty|pending|pending-unproven|unknown
   local backend=$1
   shift
   fm_backend_source "$backend" || { printf 'unknown'; return 0; }
   case "$backend" in
-    tmux) fm_tmux_composer_state "$@" ;;
+    tmux) fm_tmux_composer_state "$1" "${3:-}" ;;
     herdr) fm_backend_herdr_composer_state "$@" ;;
     orca) fm_backend_orca_composer_state "$@" ;;
     cmux) fm_backend_cmux_composer_state "$@" ;;
@@ -974,6 +987,7 @@ fm_backend_composer_snapshot() {  # <backend> <target> [expected-label] [visible
   FM_COMPOSER_SNAPSHOT_SCREEN=
   FM_COMPOSER_SNAPSHOT_CAPS=
   FM_COMPOSER_SNAPSHOT_CURSOR=
+  FM_COMPOSER_SNAPSHOT_TMUX_TARGET=
   fm_backend_source "$backend" || return 1
   case "$backend" in
     tmux) fm_tmux_composer_snapshot "$1" ;;
@@ -989,7 +1003,7 @@ fm_backend_composer_snapshot() {  # <backend> <target> [expected-label] [visible
 # the current snapshot, with an optional agy notice fit check.
 fm_backend_composer_classify_snapshot() {  # <backend> <target> [fit-text]
   case "$1" in
-    tmux) fm_tmux_composer_classify_snapshot "$2" "${3:-}" ;;
+    tmux) fm_tmux_composer_classify_snapshot "${3:-}" ;;
     herdr) fm_backend_herdr_composer_classify_snapshot "$2" "${3:-}" ;;
     zellij|orca|cmux) fm_composer_classify_snapshot_no_identity "${3:-}" ;;
     *) printf 'unknown' ;;
@@ -1167,14 +1181,15 @@ fm_backend_codex_agent_pid() {  # <backend> <target>
 
 # fm_backend_target_exists: cheap, READ-ONLY existence check - does the
 # recorded TARGET endpoint still exist on BACKEND? This probe never starts a
-# server or session. For a bound Herdr target, status 0 means the pane matches,
-# status 1 means it is missing or foreign, and status 2 means its identity
+# server or session. For tmux and bound Herdr targets, status 0 means the pane
+# matches, status 1 means it is missing or foreign, and status 2 means its identity
 # could not be determined. Unbound Herdr targets use a direct presence read.
-fm_backend_target_exists() {  # <backend> <target> [expected-label]
+fm_backend_target_exists() {  # <backend> <target> [expected-label] [explicit]
   local backend=$1 target=$2 expected_label=${3:-} session pane
   case "$backend" in
     tmux)
-      tmux display-message -p -t "$target" '#{pane_id}' >/dev/null 2>&1
+      fm_backend_source tmux || return 2
+      fm_backend_tmux_target_exists "$target" "${4:-}"
       ;;
     herdr)
       fm_backend_source herdr || return 2
@@ -1227,9 +1242,10 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
 #   unverified - this backend has no recovery classifier.
 # Only `dead` and `missing` license recovery. Every `alive` is proven at
 # process level through the shared classifier in bin/fm-agent-process-lib.sh,
-# never from a registration or a rendered title alone. The tmux adapter
-# shares fm_backend_tmux_endpoint_state with loss reporting. The Herdr adapter
-# reuses its strict husk classifier -
+# never from a registration or a rendered title alone. Tmux recovery and
+# endpoint-loss reporting use fm_tmux_exact_target (bin/fm-tmux-lib.sh) to
+# distinguish confirmed absence from a lookup failure.
+# The Herdr adapter reuses its strict husk classifier -
 # which verifies a registered agent against `pane process-info` and the real
 # process table, so a registration Herdr kept over a shell-only pane reads
 # `dead` here (issue #4115). A positively stopped session server maps to

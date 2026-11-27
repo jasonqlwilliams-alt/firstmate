@@ -8,7 +8,7 @@
 #          Lines: "MISSING: <tool> (install: <command>)",
 #                 "PRESENTATION_UNAVAILABLE: lavish-axi (requires >=<floor>; install: <command>) - nonvisual work may proceed with plain-text decisions and reports; install or upgrade before using Lavish",
 #                 "MISSING_MANUAL: <tool> (instructions: <url>)", "NEEDS_GH_AUTH",
-#                 "BACKEND_INVALID: <name> (known: <names>)",
+#                 "BACKEND_INVALID: <name> (known: <names>)", "TMUX_SERVER: <remediation>",
 #                 "STARTUP_MEMORY_BUDGET: invalid config/startup-memory-budget - <reason>",
 #                 "CREW_DISPATCH: invalid config/crew-dispatch.json - <reason>",
 #                 "FLEET_SYNC: <repo>: skipped|recovered|STUCK: <detail>",
@@ -743,6 +743,16 @@ secondmate_recovery_spawn() (
   FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$1" --secondmate
 )
 
+report_secondmate_respawn_failure() {
+  local id=$1 cause=$2 output=$3 reason retained
+  reason=$(first_line "$output")
+  retained=$(awk -v prefix="warning: task $id's temporary directory remains at " 'index($0, prefix) == 1 { print; exit }' <<< "$output")
+  if [ -n "$retained" ] && [ "$retained" != "$reason" ]; then
+    reason="$reason ($retained)"
+  fi
+  echo "SECONDMATE_LIVENESS: secondmate $id: respawn failed after $cause: $reason"
+}
+
 # One secondmate's liveness check. Split out of the sweep so each is individually
 # timed; every `return` here was a `continue` in the loop and means exactly the
 # same thing - move on to the next secondmate. Respawned ids are recorded through
@@ -811,7 +821,7 @@ secondmate_liveness_one() {  # <meta> <id>
           secondmate_note_respawned "$id"
           report_relaunch "$id" "$cause" "host=$remote_host"
         else
-          echo "SECONDMATE_LIVENESS: secondmate $id: respawn failed after $cause: $(first_line "$out")"
+          report_secondmate_respawn_failure "$id" "$cause" "$out"
         fi
         ;;
       ambiguous|unreadable|unverified)
@@ -860,7 +870,7 @@ secondmate_liveness_one() {  # <meta> <id>
         secondmate_note_respawned "$id"
         report_relaunch "$id" "$cause" "backend=$backend"
       else
-        echo "SECONDMATE_LIVENESS: secondmate $id: respawn failed after $cause: $(first_line "$out")"
+        report_secondmate_respawn_failure "$id" "$cause" "$out"
       fi
       ;;
     ambiguous)
@@ -902,7 +912,8 @@ secondmate_handoff_detect() {
 
 install_cmd() {
   case "$1" in
-    tmux|node|git|gh|curl|jq|orca|zellij) echo "brew install $1  # or the platform's package manager" ;;
+    tmux) echo "brew install tmux  # or a platform package providing tmux >=$FM_BACKEND_TMUX_MIN_VERSION" ;;
+    node|git|gh|curl|jq|orca|zellij) echo "brew install $1  # or the platform's package manager" ;;
     cmux) echo "brew install --cask cmux  # or see https://cmux.com" ;;
     treehouse) echo "curl -fsSL https://kunchenguid.github.io/treehouse/install.sh | sh" ;;
     no-mistakes) echo "curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh" ;;
@@ -1486,8 +1497,13 @@ detect_local_tools() {
     echo "BACKEND_INVALID: $BACKEND (known: $FM_BACKEND_KNOWN)"
   fi
   for t in $BACKEND_TOOLS; do
-    fm_backend_required_tool_available "$BACKEND" "$t" \
-      || missing_tool_diagnostic "$t"
+    fm_backend_required_tool_available "$BACKEND" "$t" || {
+      if [ "$?" -eq 2 ] && [ "$BACKEND:$t" = tmux:tmux ]; then
+        echo "TMUX_SERVER: could not verify list-windows -f support. If an older server is running, start a new server after the old sessions are no longer needed. See docs/tmux-backend.md#setup."
+      else
+        missing_tool_diagnostic "$t"
+      fi
+    }
   done
   for t in $COMMON_TOOLS; do
     command -v "$t" >/dev/null || missing_tool_diagnostic "$t"
