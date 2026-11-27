@@ -127,7 +127,10 @@ SH
   chmod +x "$fb/tmux"
   cat > "$fb/sleep" <<'SH'
 #!/usr/bin/env bash
-exit 0
+case "${1:-}" in
+  0.3|0.4|1.2) exit 0 ;;
+  *) exec /bin/sleep "$@" ;;
+esac
 SH
   chmod +x "$fb/sleep"
   printf '%s\n' "$fb"

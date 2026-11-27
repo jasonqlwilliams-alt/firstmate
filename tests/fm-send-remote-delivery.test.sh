@@ -131,7 +131,10 @@ SH
   chmod +x "$fb/tmux"
   cat > "$fb/sleep" <<'SH'
 #!/usr/bin/env bash
-exit 0
+case "${1:-}" in
+  0.3|0.4|1.2) exit 0 ;;
+  *) exec /bin/sleep "$@" ;;
+esac
 SH
   chmod +x "$fb/sleep"
   cat > "$fb/fake-ssh" <<'SH'
@@ -143,8 +146,7 @@ count=$((count + 1))
 printf '%s\n' "$count" > "$FM_SSH_COUNT"
 printf '%s\n' "$*" >> "$FM_SSH_LOG"
 if [ -n "${FM_FAKE_SSH_HANG:-}" ]; then
-  # A busy remote lane: the transport attempt never returns on its own. The
-  # real sleep, because the stubbed one on PATH returns immediately.
+  # A busy remote lane: the transport attempt never returns on its own.
   /bin/sleep "$FM_FAKE_SSH_HANG"
   exit 255
 fi

@@ -256,6 +256,11 @@ SH
   chmod +x "$fb/npm"
   cat > "$fb/sleep" <<'SH'
 #!/usr/bin/env bash
+case "${1:-}" in
+  0.3|1.2) exit 0 ;;
+  0.01) ;;
+  *) exec /bin/sleep "$@" ;;
+esac
 if [ -n "${FM_FAKE_MUSE_DISAPPEAR_BEFORE_ACK:-}" ] \
    && [ -e "$FM_FAKE_DIR/muse-ack-pending" ]; then
   rm -f "$FM_FAKE_DIR/muse-ack-pending"
