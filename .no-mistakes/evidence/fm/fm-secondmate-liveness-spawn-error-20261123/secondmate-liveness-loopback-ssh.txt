@@ -1,0 +1,31 @@
+Firstmate remote-route CLI validation using private loopback OpenSSH, the real Linux job worker,
+and a headless Herdr server with synthetic accounts and secondmate data.
+target = 7626ee19e6857cb9c8c4045c9ebd07deb689db46
+Bootstrap ran with FM_BOOTSTRAP_NETWORK=only. Only liveness lines are shown for bootstrap.
+The disposable workspace prefix is abbreviated as <fixture>.
+
+herdr 0.9.5
+
+Remote readiness at a private loopback OpenSSH endpoint.
+
+platform=linux
+required herdr=/tmp/h/.local/bin/herdr
+check remote-job-probe=ok: the remote job worker completed the required-tool probe
+check herdr-server=ok: session fm-remote is running
+ok: remote second-mate readiness confirmed on this host
+
+$ fm-on.sh sm-remote fm-remote-secondmate-control.sh state sm-remote --bound-home
+missing
+
+Pi is configured on the primary and deliberately absent on the isolated remote account.
+$ fm-spawn.sh sm-remote --secondmate
+error: pi executable not found on PATH; install it or select a different verified harness
+error: remote host-local secondmate launch failed
+spawn exit status 1
+
+$ fm-bootstrap.sh (deferred startup phase)
+SECONDMATE_LIVENESS: secondmate sm-remote: respawn failed after remote endpoint missing on its configured host: error: pi executable not found on PATH; install it or select a different verified harness (error: remote host-local secondmate launch failed)
+
+The host-local setup directory is obstructed by an existing regular file.
+$ fm-bootstrap.sh (deferred startup phase)
+SECONDMATE_LIVENESS: secondmate sm-remote: respawn failed after remote endpoint missing on its configured host: mkdir: cannot create directory '<fixture>/remote-mate/data/.parent-route': File exists

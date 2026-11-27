@@ -1,0 +1,36 @@
+Firstmate local CLI validation using a private tmux server and synthetic secondmate records.
+base = 86a565ae333826e488621eb87177596508835b3c
+target = 7626ee19e6857cb9c8c4045c9ebd07deb689db46
+Bootstrap ran with FM_BOOTSTRAP_NETWORK=only. Only liveness lines are shown for bootstrap.
+The disposable workspace prefix is abbreviated as <fixture>.
+
+tmux version: tmux 3.7c
+Initial and only tmux window: primary 100x30
+
+Missing charter and fallback brief. The Firstmate home path has two consecutive spaces.
+$ target/bin/fm-spawn.sh sm-brief --secondmate
+warning: secondmate sm-brief sync skipped before launch: not a git repo
+error: task sm-brief has no brief at inaccessible data path <fixture>/brief/First  Mate/data/sm-brief/brief.md
+spawn exit status 1
+$ base/bin/fm-bootstrap.sh (deferred startup phase)
+SECONDMATE_LIVENESS: secondmate sm-brief: respawn failed after recorded endpoint confidently missing: warning: secondmate sm-brief sync skipped before launch: not a git repo
+$ target/bin/fm-bootstrap.sh (deferred startup phase)
+SECONDMATE_LIVENESS: secondmate sm-brief: respawn failed after recorded endpoint confidently missing: error: task sm-brief has no brief at inaccessible data path <fixture>/brief/First  Mate/data/sm-brief/brief.md
+
+Secondmate home remains present but owner traversal is denied.
+$ target/bin/fm-bootstrap.sh (deferred startup phase)
+SECONDMATE_LIVENESS: secondmate sm-home: respawn failed after recorded endpoint confidently missing: <fixture>/target/bin/fm-spawn.sh: line 2605: cd: <fixture>/inaccessible/mate: Permission denied
+
+Reused worker Go temp path is a regular file.
+$ target/bin/fm-bootstrap.sh (deferred startup phase)
+SECONDMATE_LIVENESS: secondmate sm-temp: respawn failed after recorded endpoint confidently missing: mkdir: cannot create directory '<fixture>/temp/worker-temp/gotmp': File exists
+
+A tmux after-new-window hook closes the fresh worker window before the launch send.
+$ target/bin/fm-bootstrap.sh (deferred startup phase)
+SECONDMATE_LIVENESS: secondmate sm-retained: respawn failed after recorded endpoint confidently missing: can't find window: fm-sm-retained (warning: task sm-retained's temporary directory remains at <fixture>/retained/worker-temp; inspect it after closing endpoint firstmate:fm-sm-retained)
+Retained payload verified after the failed launch.
+
+The real tmux inventory hook removes its last session immediately after confirming the worker window is absent.
+$ target/bin/fm-bootstrap.sh (deferred startup phase)
+SECONDMATE_LIVENESS: secondmate sm-quiet: respawn failed after recorded endpoint confidently missing: no diagnostic (spawn exit status 1)
+After the hook, tmux display-message returned 0 with 1 bytes (newline only).

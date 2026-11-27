@@ -1,0 +1,28 @@
+Firstmate startup recovery with real tmux and disposable local homes
+Base: 86a565ae333826e488621eb87177596508835b3c
+Target: 7626ee19e6857cb9c8c4045c9ebd07deb689db46
+
+$ tmux -V
+tmux 3.7c
+$ tmux list-windows -t firstmate
+0: main* (1 panes) [120x40] [layout aafd,120x40,0,0,0] @0 (active)
+
+== Sync advisory and missing brief in a path with adjacent spaces ==
+$ FM_BOOTSTRAP_NETWORK=only fm-bootstrap.sh (base)
+SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing: warning: secondmate sm1 sync skipped before launch: not a git repo
+$ fm-spawn.sh sm1 --secondmate (target), exit 1
+warning: secondmate sm1 sync skipped before launch: not a git repo
+error: task sm1 has no brief at inaccessible data path {run-worktree}/.lv/brief/Primary  Home/data/sm1/brief.md
+$ FM_BOOTSTRAP_NETWORK=only fm-bootstrap.sh (target)
+SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing: error: task sm1 has no brief at inaccessible data path {run-worktree}/.lv/brief/Primary  Home/data/sm1/brief.md
+
+== Secondmate home loses directory traversal ==
+$ FM_BOOTSTRAP_NETWORK=only fm-bootstrap.sh (target)
+SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing: {run-worktree}/.lv/target/bin/fm-spawn.sh: line 2605: cd: {run-worktree}/.lv/traversal/secondmate: Permission denied
+
+== File obstructs creation of a reused Go temporary directory ==
+$ FM_BOOTSTRAP_NETWORK=only fm-bootstrap.sh (target)
+SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing: mkdir: cannot create directory '{run-worktree}/.lv/blocked/tasktmp/gotmp': File exists
+Obstructing file persists after the refusal.
+0: main* (1 panes) [120x40] [layout aafd,120x40,0,0,0] @0 (active)
+1: fm-sm1 (1 panes) [120x40] [layout aafe,120x40,0,0,1] @1

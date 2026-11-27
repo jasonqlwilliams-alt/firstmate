@@ -1,0 +1,16 @@
+Firstmate startup recovery with real tmux and Herdr. Both interruptions were induced by closing the actual disposable endpoint before the next real backend command.
+
+== Endpoint closes while tmux is about to receive the launch text ==
+tmux 3.7c
+$ FM_BOOTSTRAP_NETWORK=only fm-bootstrap.sh (target)
+Closed the disposable fm-sm1 window before delivering launch text.
+can't find window: fm-sm1
+SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing: can't find window: fm-sm1 (warning: task sm1's temporary directory remains at {run-worktree}/.lv/retained/tasktmp; inspect it after closing endpoint firstmate:fm-sm1)
+The reused directory still contains its original file, and the replacement record was removed.
+
+== Herdr workspace closes before creating the secondmate tab ==
+{"session":"fm-lab-drop","running":true,"client_version":"0.9.5"}
+$ FM_BOOTSTRAP_NETWORK=only fm-bootstrap.sh (target, pre-launch sync disabled)
+{"id":"cli:workspace:close","result":{"type":"ok"}}
+{"error":{"code":"workspace_not_found","message":"workspace w1 not found"},"id":"cli:tab:create"}
+SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing: no diagnostic (spawn exit status 1)

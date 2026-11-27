@@ -1,0 +1,42 @@
+Firstmate startup recovery over an isolated OpenSSH listener at 127.0.0.1:44219. The command used the real Firstmate SSH entrypoint, Linux job worker and remote launch scripts.
+
+{"session":"fm-remote","running":true,"client_version":"0.9.5"}
+$ fm-on.sh smremote fm-remote-doctor.sh
+mode=check
+path={run-worktree}/.lv/remote-root/bin:{run-worktree}/.lv/ro/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+entrypoint=yes
+platform=linux
+required git=/usr/bin/git
+required jq=/usr/bin/jq
+required herdr={run-worktree}/.lv/ro/.local/bin/herdr
+required tasks-axi={run-worktree}/.lv/ro/.local/bin/tasks-axi
+required treehouse={run-worktree}/.lv/ro/.local/bin/treehouse
+required harness=codex:{run-worktree}/.lv/ro/.local/bin/codex
+optional tmux=/usr/bin/tmux
+optional no-mistakes=absent
+optional gh=/usr/bin/gh
+check herdr=ok: {run-worktree}/.lv/ro/.local/bin/herdr
+check gui-session=skip: no Aqua login session applies on linux
+check remote-job-worker=ok: the Linux remote job worker is running
+check remote-job-worker-loaded=skip: Aqua launch agents do not apply on linux
+check remote-job-probe=ok: the remote job worker completed the required-tool probe
+check launchagent=skip: launch agents apply only on darwin
+check launchagent-scope=skip: launch agents apply only on darwin
+check launchagent-loaded=skip: launch agents apply only on darwin
+check herdr-server=ok: session fm-remote is running
+check entrypoint-link=ok: {run-worktree}/.lv/ro/.local/bin/fm-remote-entrypoint.sh
+ok: remote second-mate readiness confirmed on this host
+$ fm-on.sh smremote fm-remote-secondmate-control.sh state smremote --bound-home
+missing
+
+== Remote host has Codex but the pinned Pi executable is missing ==
+$ fm-spawn.sh smremote --secondmate
+error: pi executable not found on PATH; install it or select a different verified harness
+error: remote host-local secondmate launch failed
+$ FM_BOOTSTRAP_NETWORK=only fm-bootstrap.sh
+SECONDMATE_LIVENESS: secondmate smremote: respawn failed after remote endpoint missing on its configured host: error: pi executable not found on PATH; install it or select a different verified harness (error: remote host-local secondmate launch failed)
+
+== Remote parent-route directory is obstructed by a regular file ==
+$ FM_BOOTSTRAP_NETWORK=only fm-bootstrap.sh
+SECONDMATE_LIVENESS: secondmate smremote: respawn failed after remote endpoint missing on its configured host: mkdir: cannot create directory '{run-worktree}/.lv/remote-home/data/.parent-route': File exists
+The obstructing file and parent route survive the refusal.
