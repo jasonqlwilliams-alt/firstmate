@@ -99,6 +99,13 @@ case "${1:-}" in
     if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
       fm_fake_tmux_window_ids "$@" < "$0.windows"
     fi ;;
+  kill-window)
+    target=${*: -1}
+    target=${target#=}
+    target=${target/:=/:}
+    awk -v target="$target" '$2 != target' "$0.windows" > "$0.remaining" || exit 1
+    mv "$0.remaining" "$0.windows"
+    exit $? ;;
   new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@"; exit 0 ;;
 esac
 exit 0
@@ -3046,6 +3053,7 @@ test_secondmate_recovery_preserves_record_on_tasktmp_refusal() {
 base=${0%/fakebin/mkdir}
 /bin/mkdir "$@" || exit
 if [ "$#" -eq 2 ] && [ "$1" = -p ] && [ "$2" = "$base/private-temp/task/gotmp" ]; then
+  [ -s "$base/fakebin/tmux.windows" ] || exit 1
   rm "$base/temp-link" && ln -s "$base/other-temp" "$base/temp-link"
 fi
 SH
@@ -3057,7 +3065,8 @@ SH
     "recovery did not reach the task temp publication check"
   [ "$case_dir/temp-link" -ef "$case_dir/other-temp" ] || fail "the recovery fixture did not change the alias"
   cmp -s "$case_dir/prior.meta" "$meta" || fail "refused recovery changed or removed the previous task record"
-  pass "refused secondmate recovery preserves the prior task record"
+  [ ! -s "$case_dir/fakebin/tmux.windows" ] || fail "refused recovery left its replacement window open"
+  pass "refused secondmate recovery closes its replacement window and preserves the prior task record"
 }
 
 test_backend_resolution_preserves_config_errors
