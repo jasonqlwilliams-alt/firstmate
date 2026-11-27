@@ -1017,7 +1017,7 @@ set -u
 snapshot='@42:1:$1:fm-teardownconform1:2147483647:%42:/dev/ttys042:'
 case "${1:-}" in
   list-windows)
-    [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate -F' ] && [[ "$5" == *fm-teardownconform1* ]] || exit 1
+    [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate: -F' ] && [[ "$5" == *fm-teardownconform1* ]] || exit 1
     printf '%s\n' "$snapshot"
     ;;
   if-shell)

@@ -204,7 +204,7 @@ fm_backend_tmux_close_snapshot() {  # <session:window>
   # Keep the literal task window name safe to interpolate into a tmux format.
   [[ "$window" =~ ^[a-zA-Z0-9._-]+$ ]] || return 1
   session_match=$(fm_backend_tmux_close_session_match "${target%%:*}")
-  snapshot=$(tmux list-windows -t "=${target%%:*}" \
+  snapshot=$(tmux list-windows -t "=${target%%:*}:" \
     -F "#{?#{&&:$session_match,#{==:#{window_name},$window}},$FM_TMUX_CLOSE_SNAPSHOT_FORMAT,}" 2>/dev/null) || return 1
   while [[ "$snapshot" == $'\n'* ]]; do
     snapshot=${snapshot#$'\n'}

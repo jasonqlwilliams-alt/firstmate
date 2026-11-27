@@ -343,7 +343,7 @@ test_recorded_process_identity_cleanup_is_exact() {
 }
 
 isolated_tmux_window_exists() {  # <dir> <socket> <session> <window>
-  ( cd "$1" && "$REAL_TMUX" -S "$2" list-windows -t "$3" -F '#{window_name}' 2>/dev/null ) \
+  ( cd "$1" && "$REAL_TMUX" -S "$2" list-windows -t "=$3:" -F '#{window_name}' 2>/dev/null ) \
     | grep -Fqx "$4"
 }
 
@@ -365,7 +365,7 @@ SH
 }
 
 test_isolated_tmux_invalid_and_valid_cleanup() (
-  local dir socket socket_id session='endpoint #S,} #[blue] safety' target_id=target control=control target=fm-target
+  local dir socket socket_id session='endpoint.v2 #S,} #[blue] safety' target_id=target control=control target=fm-target
   local prefix_target=fm-prefix prefix_survivor=fm-prefix2 rc caller_pane window_id waited=0 control_tty real_uname
   local race child_home child changed_window server_pid job_sid job_tty client_pid client_name session_name_arg
   [ -n "$REAL_TMUX" ] || { echo "skip - tmux not installed"; return 0; }
@@ -375,7 +375,7 @@ test_isolated_tmux_invalid_and_valid_cleanup() (
   cd "$dir" || exit 1
   unset TMUX TMUX_PANE
   trap '"$REAL_TMUX" -S "$socket" kill-server 2>/dev/null || true' EXIT
-  session_name_arg='endpoint ##S,} #[blue] safety'
+  session_name_arg='endpoint.v2 ##S,} #[blue] safety'
   "$REAL_TMUX" -f /dev/null -S "$socket" new-session -d -s "$session_name_arg" -n "$control" 'exec sleep 180'
   control_tty=$("$REAL_TMUX" -S "$socket" display-message -p -t "$session:$control" '#{pane_tty}')
   [ -n "$control_tty" ] || fail "test control pane has no terminal"
@@ -411,7 +411,7 @@ if [ "\${1:-}" = if-shell ] && [ "\${4##*:}" = "\${FM_TEST_RACE_WINDOW:-}" ]; th
     split) '$REAL_TMUX' -S '$socket' split-window -d -t "\$4" 'exec sleep 180' ;;
     rename) '$REAL_TMUX' -S '$socket' rename-window -t "\$4" fm-renamed ;;
     move) '$REAL_TMUX' -S '$socket' move-window -s "\$4" -t relocated: ;;
-    session-rename) '$REAL_TMUX' -S '$socket' rename-session -t '=$session' renamed-session ;;
+    session-rename) '$REAL_TMUX' -S '$socket' rename-session -t '=$session:' renamed-session ;;
   esac
 fi
 exec '$REAL_TMUX' -S '$socket' "\$@"
@@ -664,7 +664,7 @@ SH
 
   "$REAL_TMUX" -S "$socket" select-window -t "$window_id"
   mkfifo "$dir/attached.in"
-  "$REAL_TMUX" -S "$socket" -C attach-session -t "=$session" \
+  "$REAL_TMUX" -S "$socket" -C attach-session -t "=$session:" \
     < "$dir/attached.in" > "$dir/attached.out" 2> "$dir/attached.err" &
   client_pid=$!
   exec 9>"$dir/attached.in"
@@ -675,7 +675,7 @@ SH
     waited=$((waited + 1))
   done
   client_name=$("$REAL_TMUX" -S "$socket" list-clients -F '#{client_name}')
-  isolated_tmux_window_exists "$dir" "$socket" "=$client_name" "$target" \
+  isolated_tmux_window_exists "$dir" "$socket" "$client_name" "$target" \
     || fail "tmux did not resolve the fixture client name to its session"
   fm_write_meta "$dir/home/state/$target_id.meta" \
     "window=$client_name:$target" "worktree=$dir/nonexistent-worktree" \
@@ -1205,7 +1205,7 @@ test_sole_slot_record_still_tears_down() {
 }
 
 test_recorded_endpoint_that_changed_directory_still_tears_down() (
-  local dir id=moved-task socket=dedicated.sock control_tty waited=0
+  local dir id=moved-task socket=dedicated.sock session='firstmate;' control_tty waited=0
   [ -n "$REAL_TMUX" ] || { echo "skip - tmux not installed"; return 0; }
 
   dir=$(make_case slot-endpoint-moved)
@@ -1214,19 +1214,19 @@ test_recorded_endpoint_that_changed_directory_still_tears_down() (
   cd "$dir" || exit 1
   unset TMUX TMUX_PANE
   trap '"$REAL_TMUX" -S "$socket" kill-server 2>/dev/null || true' EXIT
-  "$REAL_TMUX" -f /dev/null -S "$socket" new-session -d -s firstmate -n control 'exec sleep 60' \
+  "$REAL_TMUX" -f /dev/null -S "$socket" new-session -d -s 'firstmate\;' -n control 'exec sleep 60' \
     || fail "could not start private tmux server"
-  control_tty=$("$REAL_TMUX" -S "$socket" display-message -p -t firstmate:control '#{pane_tty}')
+  control_tty=$("$REAL_TMUX" -S "$socket" display-message -p -t "=$session:=control" '#{pane_tty}')
   [ -n "$control_tty" ] || fail "test control pane has no terminal"
   # shellcheck disable=SC2016 # $1 is the pane shell's destination.
-  "$REAL_TMUX" -S "$socket" new-window -d -t firstmate: -n "fm-$id" -c "$dir/worktree" \
+  "$REAL_TMUX" -S "$socket" new-window -d -t "=$session:" -n "fm-$id" -c "$dir/worktree" \
     bash -c 'cd "$1" && : > ready && exec sleep 60' _ "$dir/other-directory" \
     || fail "could not start the recorded pane"
   while [ ! -e "$dir/other-directory/ready" ] && [ "$waited" -lt 50 ]; do
     sleep 0.1
     waited=$((waited + 1))
   done
-  [ "$("$REAL_TMUX" -S "$socket" display-message -p -t "firstmate:fm-$id" '#{pane_current_path}')" = "$(cd "$dir/other-directory" && pwd -P)" ] \
+  [ "$("$REAL_TMUX" -S "$socket" display-message -p -t "=$session:=fm-$id" '#{pane_current_path}')" = "$(cd "$dir/other-directory" && pwd -P)" ] \
     || fail "recorded pane did not leave its original worktree"
 
   cat > "$dir/fakebin/tmux" <<SH
@@ -1237,16 +1237,16 @@ SH
   chmod +x "$dir/fakebin/tmux"
   stub_case_ps "$dir"
   fm_write_meta "$dir/home/state/$id.meta" \
-    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "window=$session:fm-$id" "endpoint_task_id=$id" \
     "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
 
   FM_TEST_LAUNCH_TTY=$control_tty run_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr" \
     || fail "teardown refused its recorded endpoint after it changed directory: $(cat "$dir/stderr")"
   assert_absent "$dir/home/state/$id.meta" "moved-endpoint teardown left the task record"
-  if isolated_tmux_window_exists "$dir" "$socket" firstmate "fm-$id"; then
+  if isolated_tmux_window_exists "$dir" "$socket" "$session" "fm-$id"; then
     fail "moved-endpoint teardown did not close the recorded window: $(cat "$dir/stderr")"
   fi
-  isolated_tmux_window_exists "$dir" "$socket" firstmate control \
+  isolated_tmux_window_exists "$dir" "$socket" "$session" control \
     || fail "moved-endpoint teardown closed the independent control window"
   grep -Fq "treehouse <return>" "$dir/runtime.log" \
     || fail "moved-endpoint teardown did not return its uncontested pool slot: $(cat "$dir/runtime.log")"

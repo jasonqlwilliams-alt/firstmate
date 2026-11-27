@@ -47,7 +47,7 @@ case "${1:-}" in
     exit 0
     ;;
   list-windows)
-    if [ -r "$0.close-windows" ] && [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate -F' ]; then
+    if [ -r "$0.close-windows" ] && [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate: -F' ]; then
       while read -r name number; do
         if [[ "$5" == *"$name"* ]]; then
           printf '@%s:1:$1:%s:2147483647:%%%s:/dev/ttys%s:\n' "$number" "$name" "$number" "$number"

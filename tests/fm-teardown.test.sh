@@ -2713,7 +2713,7 @@ test_forced_secondmate_teardown_holds_descendant_lifecycle_locks() {
 log="$(dirname "$0")/../kill.log"
 case "$1" in
   list-windows)
-    [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate -F' ] || exit 1
+    [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate: -F' ] || exit 1
     case "$5" in
       *fm-child-a*) number=11 name=fm-child-a ;;
       *fm-child-b*) number=12 name=fm-child-b ;;
@@ -4447,7 +4447,7 @@ snapshot='@17:1:$1:fm-task-x1:'"$(cat "$CASE_DIR/target")"':%17:/dev/ttys017:'
 if [ "${1:-}" = display-message ] && [ "${*: -1}" = '#{pane_pid}' ]; then
   cat "$CASE_DIR/target"
 elif [ "${1:-}" = list-windows ]; then
-  [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate -F' ] && [[ "$5" == *fm-task-x1* ]] || exit 1
+  [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate: -F' ] && [[ "$5" == *fm-task-x1* ]] || exit 1
   printf '%s\n' "$snapshot"
 elif [ "${1:-}" = if-shell ] || [ "${1:-}" = kill-window ]; then
   if [ "$#" = 7 ] && [ "$1 $2 $3 $4" = 'if-shell -F -t $1:@17' ] \
