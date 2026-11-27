@@ -46,12 +46,18 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 
 ## Current behavior and safety
 
-Teardown leaves a task window open with a warning when it cannot verify the recorded window and its pane inventory, cannot read caller ancestry, or finds caller evidence in a pane.
-On Linux, it also leaves the window open when the target tmux server is an ancestor in teardown's verified launch session.
-A server-launched job can escape that check outside Linux.
+### Task window cleanup
+
+Ordinary teardown and forced secondmate child cleanup require a complete window list for the exact recorded session, exactly one window with the recorded name, and a readable pane ID, PID, and terminal for each pane in that window.
+Teardown leaves the window open and warns if it cannot verify that information or read caller ancestry.
+It also leaves the window open and warns if a pane's PID matches teardown or an ancestor, or if a pane matches the launch pane ID or controlling terminal.
+On Linux, teardown also requires a verified launch process session and leaves the window open if a target tmux server in its launch ancestry shares that session or has an unreadable process session.
+Before closing the window by ID, tmux rechecks the recorded session name and the window and pane snapshot, so a moved or renamed window, a newly split pane, or an unreadable recheck stops the close and produces a warning.
+
+Outside Linux, a job launched by the target tmux server can evade caller detection.
 A wrapper that exits early after clearing the tmux environment can also hide the caller when no controlling terminal is available.
 Teardown may close the window in those cases if the other checks find no caller evidence.
-The remaining cleanup proceeds, so an operator can close a retained window manually when it is safe.
+A skipped or unconfirmed tmux close allows the rest of teardown to proceed, including task record removal, so an operator can close a retained window manually when it is safe.
 
 ### Exact window reads
 
@@ -138,4 +144,5 @@ tests/fm-tmux-submit-busy.test.sh
 tests/fm-bootstrap.test.sh
 ```
 
-[`verification/runtime-backends.md`](verification/runtime-backends.md#tmux) records the active foreground-process and submit evidence, including [cleanup endpoint identity](verification/runtime-backends.md#cleanup-endpoint-identity).
+[`verification/runtime-backends.md`](verification/runtime-backends.md#tmux) records the active foreground-process and submit evidence.
+See [cleanup endpoint identity](verification/runtime-backends.md#cleanup-endpoint-identity) for the window cleanup regression and its verification record.

@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # Tear down a finished task: return the treehouse worktree, release the Orca
-# worktree, or retire a secondmate home; kill the recorded runtime endpoint,
+# worktree, or retire a secondmate home; clean up the recorded runtime endpoint,
 # clear volatile state, and transition this home's backlog item for ship and
 # scout tasks before reporting success (a secondmate teardown transitions none,
 # since secondmates are not backlog items), then refresh/prune the project's
 # clone for PR-based ship tasks.
-# The tmux window close is best-effort. Teardown warns and leaves the window
-# open unless it can verify that every pane is outside the caller's ancestry.
+# See docs/tmux-backend.md#task-window-cleanup for tmux close guards and limits.
 # Removing state/<id>.meta and landing the backlog transition are one step, not
 # two: bin/fm-backlog-transition-lib.sh owns that invariant, and both halves run
 # under the task's own meta lock before this script reports success. Because the
@@ -167,9 +166,9 @@
 # mutation. Local and remote retirement serialize their destructive phase with
 # that mate's backlog-handoff lock under the registry lock. Pending handoff wake
 # state is retired with the home, and local removal failure restores that state
-# before preserving the route for retry. Teardown then discards child work, kills
-# child runtime endpoints, and removes the retired home. Removing a leased home
-# releases its durable treehouse lease so the pool slot is freed,
+# before preserving the route for retry. Teardown then discards child work,
+# cleans up child runtime endpoints, and removes the retired home. Removing a
+# leased home releases its durable treehouse lease so the pool slot is freed,
 # never left leased forever. If the treehouse return fails, teardown leaves the
 # leased home and state in place instead of hiding a still-held lease.
 # Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--retire-stale-record] [--keep-pane]
