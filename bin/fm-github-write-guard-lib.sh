@@ -61,58 +61,6 @@ fm_github_guard_pr_mutation() {  # <argv...>
   return 1
 }
 
-fm_github_guard_api_mutation_target() {  # <argv...>; prints repository target or empty
-  local method method_explicit arg path owner repo host
-  method=GET
-  method_explicit=0
-  path=''
-  host=$(fm_github_guard_hostname "$@") || return 1
-  for arg in "$@"; do
-    if [ "$method" = __next ]; then
-      method=$(printf '%s' "$arg" | fm_github_guard_upper)
-      method_explicit=1
-      continue
-    fi
-    case "$arg" in
-      [Gg][Ee][Tt]|[Pp][Oo][Ss][Tt]|[Pp][Uu][Tt]|[Pp][Aa][Tt][Cc][Hh]|[Dd][Ee][Ll][Ee][Tt][Ee]|[Hh][Ee][Aa][Dd])
-        method=$(printf '%s' "$arg" | fm_github_guard_upper); method_explicit=1
-        ;;
-      -X|--method) method=__next ;;
-      -X*|--method=*)
-        method=${arg#*=}; method=${method#-X}
-        method=$(printf '%s' "$method" | fm_github_guard_upper)
-        method_explicit=1
-        ;;
-      -f|-F|--field|--raw-field|--input)
-        [ "$method_explicit" -eq 1 ] || method=POST
-        ;;
-      -f*|-F*|--field=*|--raw-field=*|--input=*)
-        [ "$method_explicit" -eq 1 ] || method=POST
-        ;;
-      /*|repos/*) [ -n "$path" ] || path=$arg ;;
-      *) ;;
-    esac
-  done
-  case "$method" in POST|PUT|PATCH|DELETE) ;; *) return 0 ;; esac
-  path=${path#/}
-  case "$path" in
-    repos/*/*)
-      owner=${path#repos/}; owner=${owner%%/*}
-      repo=${path#repos/"$owner"/}; repo=${repo%%/*}
-      [ -n "$owner" ] && [ -n "$repo" ] || return 1
-      printf '%s/%s/%s\n' "$host" "$owner" "$repo"
-      ;;
-  esac
-}
-
-fm_github_guard_api_is_graphql() {  # <argv...>
-  local arg
-  for arg in "$@"; do
-    case "$arg" in graphql|/graphql) return 0 ;; esac
-  done
-  return 1
-}
-
 fm_github_guard_check_pr_body() {  # <repo> <argv...>
   local repo=$1
   shift
@@ -171,61 +119,148 @@ fm_github_guard_check_pr_body() {  # <repo> <argv...>
   return 0
 }
 
-fm_github_guard_check_api_body() {  # <repo> <argv...>
-  local repo=$1
+fm_github_guard_check_api() {  # <checkout> <api argv...>
+  local checkout=$1
   shift
-  local arg want='' body_text='' body_text_set=0 input_file=''
-  for arg in "$@"; do
-    if [ "$want" = field ]; then
-      case "$arg" in
-        body=*) body_text=${arg#body=}; body_text_set=1 ;;
-      esac
-      want=''
-      continue
-    elif [ "$want" = input ]; then
-      input_file=$arg
-      want=''
+  local arg flag value separate positional_only=0 method='' path='' host=${GH_HOST:-github.com}
+  local owner repo has_fields=0 auth_override=0 input_file='' use_stdin=0
+  local body_fields=() body_files=()
+  while [ "$#" -gt 0 ]; do
+    arg=$1
+    shift
+    if [ "$positional_only" -eq 1 ] || [[ $arg != -* ]]; then
+      if [ "$FM_GITHUB_GUARD_TOOL" = gh-axi ] && [ -z "$method$path" ]; then
+        case "$arg" in
+          [Gg][Ee][Tt]|[Pp][Oo][Ss][Tt]|[Pp][Uu][Tt]|[Pp][Aa][Tt][Cc][Hh]|[Dd][Ee][Ll][Ee][Tt][Ee]|[Hh][Ee][Aa][Dd])
+            method=$(printf '%s' "$arg" | fm_github_guard_upper)
+            continue
+            ;;
+        esac
+      fi
+      [ -n "$path" ] || path=$arg
       continue
     fi
+    if [ "$arg" = -- ]; then
+      positional_only=1
+      continue
+    fi
+    while [[ $arg == -i?* && $arg != -i=* ]]; do
+      arg=-${arg#-i}
+    done
+    separate=0
     case "$arg" in
-      -f|--field|-F|--raw-field) want=field ;;
-      -fbody=*|--field=body=*|-Fbody=*|--raw-field=body=*)
-        body_text=${arg#*=}; body_text_set=1
+      --*=*) flag=${arg%%=*}; value=${arg#*=} ;;
+      -[HFXfptqR]?*) flag=${arg:0:2}; value=${arg:2}; value=${value#=} ;;
+      *) flag=$arg; separate=1 ;;
+    esac
+    case "$flag" in
+      --hostname|--method|-X|--field|-F|--raw-field|-f|--header|-H|--input|--jq|-q|--template|-t|--preview|-p|--cache|--repo|-R)
+        if [ "$separate" -eq 1 ]; then
+          [ "$#" -gt 0 ] || break
+          value=$1
+          shift
+        fi
         ;;
-      --input) want=input ;;
-      --input=*) input_file=${arg#--input=} ;;
+      *) continue ;;
+    esac
+    case "$flag" in
+      --hostname) host=$value ;;
+      --method|-X)
+        if [ "$FM_GITHUB_GUARD_TOOL" = gh ]; then
+          method=$(printf '%s' "$value" | fm_github_guard_upper)
+        fi
+        ;;
+      --header|-H)
+        case "${value%%:*}" in
+          [Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]) auth_override=1 ;;
+        esac
+        ;;
+      --field|-F)
+        has_fields=1
+        case "$value" in
+          body=@*) body_files+=("${value#body=@}") ;;
+          body=*) body_fields+=("${value#body=}") ;;
+        esac
+        ;;
+      --raw-field|-f)
+        has_fields=1
+        case "$value" in
+          body=*) body_fields+=("${value#body=}") ;;
+        esac
+        ;;
+      --input) input_file=$value ;;
     esac
   done
 
-  if [ "$body_text_set" -eq 1 ]; then
-    printf '%s' "$body_text" | "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr-body "$repo" - || return $?
+  path=${path#/}
+  if [ "$path" = graphql ]; then
+    printf 'REFUSED: %s GraphQL is unavailable in a guarded worker because its mutation repository cannot be proven before writing.\n' \
+      "$FM_GITHUB_GUARD_TOOL" >&2
+    return 1
+  fi
+  if [ "$FM_GITHUB_GUARD_TOOL" = gh ] && [ -z "$method" ] &&
+    { [ "$has_fields" -eq 1 ] || [ -n "$input_file" ]; }; then
+    method=POST
+  fi
+  case "$method" in POST|PUT|PATCH|DELETE) ;; *) return 0 ;; esac
+  case "$path" in repos/*/*) ;; *) return 0 ;; esac
+  owner=${path#repos/}; owner=${owner%%/*}
+  repo=${path#repos/"$owner"/}; repo=${repo%%/*}
+  if [ -z "$owner" ] || [ -z "$repo" ]; then
+    printf 'REFUSED: %s could not resolve the GitHub API repository before writing.\n' "$FM_GITHUB_GUARD_TOOL" >&2
+    return 1
+  fi
+  if [ "$auth_override" -eq 1 ]; then
+    printf 'REFUSED: %s REST writes cannot supply an Authorization header.\n' "$FM_GITHUB_GUARD_TOOL" >&2
+    return 1
+  fi
+  "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr "$checkout" "$host/$owner/$repo" || return $?
+
+  for value in ${body_fields[@]+"${body_fields[@]}"}; do
+    printf '%s' "$value" | "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr-body "$checkout" - || return $?
+  done
+  [ -z "$input_file" ] || body_files+=("$input_file")
+  for value in ${body_files[@]+"${body_files[@]}"}; do
+    if [ "$value" = - ]; then
+      use_stdin=1
+      continue
+    fi
+    if [ ! -f "$value" ] || [ ! -r "$value" ]; then
+      printf 'REFUSED: %s REST body must come from a readable regular file or standard input.\n' "$FM_GITHUB_GUARD_TOOL" >&2
+      return 1
+    fi
+    [[ $value != -* ]] || value=./$value
+    "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr-body "$checkout" "$value" || return $?
+  done
+  if [ "$use_stdin" -eq 1 ]; then
+    if [ "$FM_GITHUB_GUARD_TOOL" = gh-axi ]; then
+      printf 'REFUSED: gh-axi REST body files cannot use standard input.\n' >&2
+      return 1
+    fi
+    local stdin_tmp rc
+    stdin_tmp=$(mktemp "${TMPDIR:-/tmp}/fm-delivery-api-stdin.XXXXXX") || {
+      printf 'REFUSED: %s cannot buffer API standard input for body inspection.\n' "$FM_GITHUB_GUARD_TOOL" >&2
+      return 1
+    }
+    cat > "$stdin_tmp" &&
+      "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr-body "$checkout" "$stdin_tmp"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      rm -f "$stdin_tmp"
+      return "$rc"
+    fi
+    FM_SAVED_STDIN_FILE=$stdin_tmp
+    export FM_SAVED_STDIN_FILE
   fi
 
-  if [ -n "$input_file" ]; then
-    if [ "$input_file" = "-" ]; then
-      local stdin_tmp rc
-      stdin_tmp=$(mktemp "${TMPDIR:-/tmp}/fm-delivery-api-stdin.XXXXXX") || {
-        printf 'REFUSED: %s cannot buffer API standard input for body inspection.\n' "$FM_GITHUB_GUARD_TOOL" >&2
-        return 1
-      }
-      cat > "$stdin_tmp"
-      "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr-body "$repo" "$stdin_tmp"
-      rc=$?
-      if [ "$rc" -ne 0 ]; then
-        rm -f "$stdin_tmp"
-        return "$rc"
-      fi
-      FM_SAVED_STDIN_FILE=$stdin_tmp
-      export FM_SAVED_STDIN_FILE
-    else
-      "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr-body "$repo" "$input_file" || return $?
-    fi
+  if [ "$FM_GITHUB_GUARD_TOOL" = gh-axi ]; then
+    unset GH_REPO
   fi
   return 0
 }
 
 fm_github_guard_check() {  # <argv...>
-  local repo target api_target
+  local repo target
   repo=$(git rev-parse --show-toplevel 2>/dev/null) || {
     printf 'REFUSED: %s GitHub write ran outside an armed Git repository.\n' "$FM_GITHUB_GUARD_TOOL" >&2
     return 1
@@ -241,23 +276,7 @@ fm_github_guard_check() {  # <argv...>
   fi
   if [ "${1:-}" = api ]; then
     shift
-    if fm_github_guard_api_is_graphql "$@"; then
-      printf 'REFUSED: %s GraphQL is unavailable in a guarded worker because its mutation repository cannot be proven before writing.\n' \
-        "$FM_GITHUB_GUARD_TOOL" >&2
-      return 1
-    fi
-    api_target=$(fm_github_guard_api_mutation_target "$@") || {
-      printf 'REFUSED: %s could not resolve the GitHub API repository before writing.\n' "$FM_GITHUB_GUARD_TOOL" >&2
-      return 1
-    }
-    if [ -n "$api_target" ]; then
-      "$FM_DELIVERY_GUARD_ROOT/bin/fm-delivery-guard.sh" check-pr "$repo" "$api_target" || return $?
-      fm_github_guard_check_api_body "$repo" "$@" || return $?
-      if [ "$FM_GITHUB_GUARD_TOOL" = gh-axi ]; then
-        unset GH_REPO
-      fi
-      return 0
-    fi
+    fm_github_guard_check_api "$repo" "$@" || return $?
   fi
   return 0
 }
