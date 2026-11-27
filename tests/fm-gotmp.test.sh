@@ -132,6 +132,31 @@ test_teardown_removes_tasktmp_dir() {
   pass "fm-teardown removes the dir pointed to by tasktmp= in meta"
 }
 
+test_teardown_removes_tasktmp_dir_by_equivalent_spelling() {
+  local variant=$1 id task_tmp recorded fake
+  id="td-sp-$variant"
+  task_tmp="$TMP_ROOT/fm-$id+private"
+  mkdir -p "$task_tmp/gotmp"
+  printf 'leftover\n' > "$task_tmp/gotmp/build-artifact"
+  case "$variant" in
+    doubled-slash) recorded="/${task_tmp//\//\/\/}" ;;
+    trailing-slash) recorded="$task_tmp/" ;;
+    trailing-dot) recorded="$task_tmp/." ;;
+    linked-parent)
+      ln -s "$TMP_ROOT" "$TMP_ROOT/root-link-$id"
+      recorded="$TMP_ROOT/root-link-$id/${task_tmp##*/}"
+      ;;
+  esac
+  [ "$recorded" -ef "$task_tmp" ] || fail "precondition: $recorded does not name $task_tmp"
+  fake=$(make_fake_root "$id" "$recorded")
+  FM_HOME="$fake" bash "$fake/bin/fm-teardown.sh" "$id" > "$fake/teardown.log" 2>&1 \
+    || fail "$variant teardown failed: $(cat "$fake/teardown.log")"
+  [ ! -e "$task_tmp" ] || fail "teardown did not recognise its own root through the $variant spelling $recorded"
+  [ "$variant" != linked-parent ] || [ -L "$TMP_ROOT/root-link-$id" ] \
+    || fail "teardown removed the symlinked parent instead of the task root"
+  pass "fm-teardown removes its own task temp root recorded with a $variant spelling"
+}
+
 test_teardown_preserves_shared_tasktmp() {
   local variant=$1 id fake legacy_task_tmp task_tmp
   legacy_task_tmp=$(mktemp -d /tmp/fm-legacy-XXXXXX) || fail "could not allocate legacy fixture"
@@ -140,10 +165,31 @@ test_teardown_preserves_shared_tasktmp() {
   mkdir "$legacy_task_tmp/gotmp"
   printf 'another home still needs this\n' > "$legacy_task_tmp/gotmp/keep"
   task_tmp=$legacy_task_tmp
-  if [ "$variant" = symlink ]; then
-    task_tmp="$TMP_ROOT/tasktmp-link"
-    ln -s "$legacy_task_tmp" "$task_tmp"
-  fi
+  case "$variant" in
+    symlink)
+      task_tmp="$TMP_ROOT/tasktmp-link"
+      ln -s "$legacy_task_tmp" "$task_tmp"
+      ;;
+    # Equivalent spellings of the shared legacy root that a literal string
+    # comparison with /tmp/fm-<id> does not recognise.
+    symlink-dot)
+      ln -s "$legacy_task_tmp" "$TMP_ROOT/tasktmp-link-dot"
+      task_tmp="$TMP_ROOT/tasktmp-link-dot/."
+      ;;
+    doubled-slash) task_tmp="//tmp//fm-$id" ;;
+    dot-segment) task_tmp="/tmp/./fm-$id" ;;
+    dotdot-segment) task_tmp="/tmp/../tmp/fm-$id" ;;
+    trailing-dot) task_tmp="/tmp/fm-$id/." ;;
+    linked-parent)
+      ln -s /tmp "$TMP_ROOT/tmp-link-$id"
+      task_tmp="$TMP_ROOT/tmp-link-$id/fm-$id"
+      ;;
+    relative)
+      task_tmp="../../../../../../../../../../../../../../../../tmp/fm-$id"
+      ;;
+  esac
+  [ "$variant" = relative ] || [ "$task_tmp" -ef "$legacy_task_tmp" ] \
+    || fail "precondition: $variant spelling $task_tmp does not name the shared root"
   fake=$(make_fake_root "$id" "$task_tmp")
   if command -v lsof >/dev/null; then
     ( cd "$legacy_task_tmp/gotmp" && exec sleep 300 ) &
@@ -153,10 +199,11 @@ test_teardown_preserves_shared_tasktmp() {
   else
     printf 'skip: %s task temp process preservation requires lsof\n' "$variant"
   fi
-  FM_HOME="$fake" bash "$fake/bin/fm-teardown.sh" "$id" > "$fake/teardown.log" 2>&1 \
+  ( cd "$fake" && FM_HOME="$fake" bash "$fake/bin/fm-teardown.sh" "$id" ) > "$fake/teardown.log" 2>&1 \
     || fail "$variant teardown failed: $(cat "$fake/teardown.log")"
   [ ! -e "$fake/state/$id.meta" ] || fail "$variant teardown left the task record"
-  [ -f "$task_tmp/gotmp/keep" ] || fail "$variant teardown removed a potentially shared temp root or its link"
+  [ -f "$legacy_task_tmp/gotmp/keep" ] || fail "$variant teardown removed a potentially shared temp root"
+  [ "$variant" != symlink ] || [ -L "$task_tmp" ] || fail "symlink teardown removed the recorded link"
   if [ -n "$LEGACY_SLEEPER_IDENTITY" ]; then
     fm_test_owner_is_alive "$LEGACY_SLEEPER_PID" "$LEGACY_SLEEPER_IDENTITY" \
       || fail "$variant teardown signalled a process in the shared temp root"
@@ -261,7 +308,13 @@ test_teardown_skips_gracefully_when_dir_missing() {
 }
 
 test_teardown_removes_tasktmp_dir
+for variant in doubled-slash trailing-slash trailing-dot linked-parent; do
+  test_teardown_removes_tasktmp_dir_by_equivalent_spelling "$variant"
+done
 test_teardown_preserves_shared_tasktmp legacy
 test_teardown_preserves_shared_tasktmp symlink
+for variant in symlink-dot doubled-slash dot-segment dotdot-segment trailing-dot linked-parent relative; do
+  test_teardown_preserves_shared_tasktmp "$variant"
+done
 test_teardown_skips_gracefully_without_tasktmp
 test_teardown_skips_gracefully_when_dir_missing

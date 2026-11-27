@@ -448,6 +448,38 @@ test_relaunch_replaces_stale_task_temp_roots() {
   pass "fm-control relaunch: a missing or symlinked temp root gets a fresh allocation"
 }
 
+test_relaunch_does_not_reuse_legacy_root_by_another_spelling() {
+  local dir id legacy variant recorded out rc task_tmp
+  for variant in doubled-slash dot-segment trailing-dot linked-parent relative; do
+    legacy=$(mktemp -d /tmp/fm-rlsp-XXXXXX) || fail "could not allocate the legacy temp root"
+    FM_TEST_CLEANUP_DIRS+=("$legacy")
+    id=${legacy#/tmp/fm-}
+    dir=$(new_case "legacy-$variant" "$id")
+    add_ship_task "$dir" "$id" claude
+    case "$variant" in
+      doubled-slash) recorded="//tmp//fm-$id" ;;
+      dot-segment) recorded="/tmp/./fm-$id" ;;
+      trailing-dot) recorded="/tmp/fm-$id/." ;;
+      linked-parent) ln -s /tmp "$dir/tmp-link"; recorded="$dir/tmp-link/fm-$id" ;;
+      relative) recorded="fm-$id" ;;
+    esac
+    printf 'tasktmp=%s\n' "$recorded" >> "$dir/home/state/$id.meta"
+    out=$( cd /tmp && run_control "$dir" "$id" relaunch --note "continue after legacy temp root" ); rc=$?
+    expect_code 0 "$rc" "relaunch with a $variant legacy root should succeed: $out"
+    task_tmp=$(meta_field "$dir" "$id" tasktmp)
+    if [ -z "$task_tmp" ] || [ ! -d "$task_tmp/gotmp" ] || [ "$task_tmp" -ef "$legacy" ]; then
+      fail "relaunch reused the shared legacy root through its $variant spelling ($task_tmp)"
+    fi
+    case "$task_tmp" in
+      /tmp/fm-"$id"+*) ;;
+      *) fail "relaunch recorded a non-canonical replacement root for $variant: $task_tmp" ;;
+    esac
+    FM_TEST_CLEANUP_DIRS+=("$task_tmp")
+    assert_absent "$legacy/gotmp" "relaunch wrote beneath the shared legacy root through its $variant spelling"
+  done
+  pass "fm-control relaunch: another spelling of the shared legacy root still gets a fresh allocation"
+}
+
 test_relaunch_from_linked_home_preserves_recorded_worktree() {
   local dir out rc head fetch_head
   dir=$(new_case linked-home rl42)
@@ -3303,6 +3335,7 @@ test_relaunch_from_guarded_path
 
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
 test_relaunch_replaces_stale_task_temp_roots
+test_relaunch_does_not_reuse_legacy_root_by_another_spelling
 test_relaunch_from_linked_home_preserves_recorded_worktree
 test_relaunch_preserves_registered_merge_poll
 test_relaunch_and_pr_replacement_during_closure

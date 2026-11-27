@@ -1255,7 +1255,7 @@ spawn_abort_cleanup() {
   fi
   [ -z "$SPAWN_SLOT_ACQUIRE_FILE" ] || rm -f -- "$SPAWN_SLOT_ACQUIRE_FILE" 2>/dev/null || true
   if [ "$status" -ne 0 ] && [ -n "$TASK_TMP" ] \
-     && [ "$(fm_meta_get "$STATE/$ID.meta" tasktmp 2>/dev/null)" != "$TASK_TMP" ]; then
+     && ! [ "$(fm_meta_get "$STATE/$ID.meta" tasktmp 2>/dev/null)" -ef "$TASK_TMP" ]; then
     if [ "$SPAWN_TASK_TMP_CREATED" = 1 ] && [ "$SPAWN_TASK_TMP_HANDED_OFF" = 0 ]; then
       rmdir -- "$TASK_TMP/gotmp" "$TASK_TMP" 2>/dev/null || true
     fi
@@ -4085,13 +4085,9 @@ if [ "$RELAUNCH" -eq 1 ] || {
     && [ "$(fm_meta_get "$task_tmp_meta" home)" = "$PROJ_ABS" ] \
     && [ -z "$(fm_meta_get "$task_tmp_meta" remote_host)" ]
 }; then
-  TASK_TMP=$(fm_meta_get "$task_tmp_meta" tasktmp)
-  case "$TASK_TMP" in
-    "/tmp/fm-$ID") TASK_TMP= ;;
-  esac
-  if [ ! -d "$TASK_TMP" ] || [ -L "$TASK_TMP" ] || [ ! -O "$TASK_TMP" ]; then
-    TASK_TMP=
-  fi
+  # fm_task_tmp_private_root (bin/fm-backend.sh) owns reuse eligibility and
+  # yields the physical path, which is what gets re-recorded below.
+  TASK_TMP=$(fm_task_tmp_private_root "$(fm_meta_get "$task_tmp_meta" tasktmp)" "$ID") || TASK_TMP=
 fi
 if [ -z "$TASK_TMP" ]; then
   TASK_TMP=$(mktemp -d "/tmp/fm-$ID+XXXXXX") || {

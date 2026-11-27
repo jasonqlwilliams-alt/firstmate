@@ -359,6 +359,34 @@ fm_meta_get() {  # <meta-file> <key>
   printf '%s' "$value"
 }
 
+# fm_task_tmp_private_root: the single ownership check for a task's recorded
+# private temp root (meta tasktmp=). Prints the root's physical path when the
+# recorded value names a directory this task may reuse or remove, and returns
+# 1 otherwise. Paths are compared as directories, not strings: doubled
+# slashes, `.` segments and a trailing slash are dropped before the final
+# component is checked for a symlink, and the legacy shared root /tmp/fm-<id>
+# is recognised by device and inode however it is spelled, including through
+# `..` segments or a symlinked parent. A relative value is refused because it
+# depends on the reader's working directory, as is a final `..` component.
+# Callers act on the printed physical path, never on the recorded spelling.
+fm_task_tmp_private_root() {  # <recorded-tasktmp> <task-id>
+  local recorded=$1 id=$2 part normalized='' physical
+  local -a parts=()
+  case "$recorded" in /*) ;; *) return 1 ;; esac
+  IFS=/ read -r -a parts <<< "$recorded" || true
+  for part in "${parts[@]}"; do
+    case "$part" in ''|.) ;; *) normalized="$normalized/$part" ;; esac
+  done
+  case "$normalized" in ''|*/..) return 1 ;; esac
+  [ -d "$normalized" ] && [ ! -L "$normalized" ] && [ -O "$normalized" ] || return 1
+  physical=$(CDPATH='' cd -P -- "$normalized" 2>/dev/null && pwd -P) || return 1
+  [ -n "$physical" ] && [ "$physical" != / ] || return 1
+  if [ -e "/tmp/fm-$id" ] && [ "$physical" -ef "/tmp/fm-$id" ]; then
+    return 1
+  fi
+  printf '%s\n' "$physical"
+}
+
 # fm_backend_of_meta: the backend recorded in <meta-file>, defaulting to
 # `tmux` when the field is absent - the P1 compatibility contract.
 fm_backend_of_meta() {  # <meta-file>

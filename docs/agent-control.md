@@ -128,15 +128,16 @@ Switching harness is therefore one ordinary relaunch rather than a separate mech
 
 Each fresh task dispatch creates a private temporary root on the agent's host, even when an earlier task or a task in another home has the same ID.
 An explicit task relaunch or recovery of the same recorded secondmate can reuse the root in that task's `tasktmp=` metadata on the agent's host.
-Reuse and teardown require an existing directory owned by the current user with no symlink at the recorded path.
+Reuse and teardown require an absolute recorded path naming an existing directory owned by the current user with no symlink at its final component.
+They compare that path as a directory rather than as text, so doubled slashes, `.` segments, a trailing slash, `..` segments, or a symlinked parent do not change which directory it names, and both act on its resolved physical path.
+A relative recorded path, or one ending in `..`, is never reused or removed.
 Temporary files and any detached processes still using the directory can carry over to the replacement.
-Firstmate allocates a fresh root when the recorded path is missing, fails the reuse checks, or is the old fixed path `/tmp/fm-<id>` that same-ID tasks may share.
+Firstmate allocates a fresh root when the recorded path is missing, fails the reuse checks, or names the old fixed directory `/tmp/fm-<id>` that same-ID tasks may share, however that path is spelled.
 
-Teardown also requires an absolute path with no trailing slash.
 Teardown removes an eligible recorded root before retiring its task record, including child roots during forced secondmate home teardown.
 Direct ship and scout teardown uses `lsof` to scan for processes with a readable working directory under the eligible root.
 Detached processes may survive secondmate teardown and forced child cleanup even when those operations remove the directory.
-Teardown leaves the fixed legacy path for manual reconciliation, skipping both the scan and removal for that path.
+Teardown leaves the fixed legacy directory for manual reconciliation under any spelling, skipping both the scan and removal for it.
 
 Spawn attempts to remove an empty root it just allocated if launch fails before handoff and the task record has no reference to it.
 If the root remains, the launch warning identifies the exact path to inspect after closing the named endpoint.
