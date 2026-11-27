@@ -200,15 +200,28 @@ fm_tmux_composer_state() {  # <target> [explicit] -> empty|pending|pending-unpro
 # fm_tmux_composer_snapshot: the cursor row and styled screen of one composer
 # read, into the snapshot globals (bin/fm-composer-lib.sh "Composer
 # SNAPSHOT"); fails when either read fails or the cursor row is not numeric.
-fm_tmux_composer_snapshot() {  # <target> [explicit]
-  local target cy pane
+# The optional geometry mode reads `x y widthxheight` in the same tmux command
+# sequence as the screen, so capture exports need no separate cursor sample.
+fm_tmux_composer_snapshot() {  # <target> [explicit] [geometry]
+  local target cy pane sample geometry=
   FM_COMPOSER_SNAPSHOT_TMUX_TARGET=
+  FM_COMPOSER_SNAPSHOT_TMUX_GEOMETRY=
   # Resolve once so the cursor row and the screen come from the same window.
   target=$(fm_tmux_exact_target "$@") || return 1
-  cy=$(tmux display-message -p -t "$target" '#{cursor_y}' 2>/dev/null) || return 1
-  case "$cy" in ''|*[!0-9]*) return 1 ;; esac
-  pane=$(tmux capture-pane -e -p -t "$target" -S 0 -E - 2>/dev/null) || return 1
+  if [ "${3:-}" = geometry ]; then
+    sample=$(tmux display-message -p -t "$target" '#{cursor_x} #{cursor_y} #{pane_width}x#{pane_height}' \; \
+      capture-pane -e -p -t "$target" -S 0 -E - 2>/dev/null) || return 1
+    geometry=${sample%%$'\n'*}
+    [[ "$sample" == *$'\n'* && "$geometry" =~ ^[0-9]+\ ([0-9]+)\ [0-9]+x[0-9]+$ ]] || return 1
+    cy=${BASH_REMATCH[1]}
+    pane=${sample#*$'\n'}
+  else
+    cy=$(tmux display-message -p -t "$target" '#{cursor_y}' 2>/dev/null) || return 1
+    case "$cy" in ''|*[!0-9]*) return 1 ;; esac
+    pane=$(tmux capture-pane -e -p -t "$target" -S 0 -E - 2>/dev/null) || return 1
+  fi
   FM_COMPOSER_SNAPSHOT_TMUX_TARGET=$target
+  FM_COMPOSER_SNAPSHOT_TMUX_GEOMETRY=$geometry
   FM_COMPOSER_SNAPSHOT_CURSOR=$cy
   FM_COMPOSER_SNAPSHOT_SCREEN=$pane
   FM_COMPOSER_SNAPSHOT_CAPS=$(fm_tmux_composer_caps)

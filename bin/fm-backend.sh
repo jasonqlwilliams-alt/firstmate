@@ -978,6 +978,7 @@ fm_backend_composer_snapshot() {  # <backend> <target> [expected-label] [visible
   FM_COMPOSER_SNAPSHOT_CAPS=
   FM_COMPOSER_SNAPSHOT_CURSOR=
   FM_COMPOSER_SNAPSHOT_TMUX_TARGET=
+  FM_COMPOSER_SNAPSHOT_TMUX_GEOMETRY=
   fm_backend_source "$backend" || return 1
   case "$backend" in
     tmux) fm_tmux_composer_snapshot "$1" ;;
@@ -1057,7 +1058,7 @@ fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [ex
 }
 
 _fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [fit-text]
-  local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} fit=${6:-} picker verdict kv styled=0
+  local backend=$1 target=$2 label=${3:-} harness=${5:-}
   local capture=
   if [ "$harness" = claude ]; then
     capture=visible
@@ -1070,6 +1071,14 @@ _fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [e
   fi
   fm_backend_composer_snapshot "$backend" "$target" "$label" "$capture" || { printf 'unknown'; return 0; }
   [ -n "$FM_COMPOSER_SNAPSHOT_SCREEN" ] || { printf 'unknown'; return 0; }
+  fm_backend_guarded_composer_classify_snapshot "$backend" "$target" "${4:-}" "$harness" "${6:-}"
+}
+
+# Requires a successful, nonempty snapshot from the supplied target. Callers
+# comparing expectations in command substitutions can reuse the captured screen
+# and keep this classifier's snapshot adjustments local to each verdict.
+fm_backend_guarded_composer_classify_snapshot() {  # <backend> <target> [expected-pending] [harness] [fit-text]
+  local backend=$1 target=$2 expected=${3:-} harness=${4:-} fit=${5:-} picker verdict kv styled=0
   if [ "$harness" = claude ]; then
     if fm_composer_claude_exit_confirm_screen "$FM_COMPOSER_SNAPSHOT_SCREEN"; then
       printf 'exit-confirm'

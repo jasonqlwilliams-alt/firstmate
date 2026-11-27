@@ -103,9 +103,9 @@
 # the fleet-wide ceiling unchanged. fm_composer_ghost_luma_for_caps owns that
 # choice, and each classifier entry point applies it.
 #
-# AGY COMPOSER: agy (Antigravity CLI) draws one composer row opening with a
-# bare `>` glyph between two solid `─` rules, over a `? for shortcuts` footer at
-# idle (docs/verification/agy.md "Composer classification"). pi's row rule would
+# AGY COMPOSER: captured idle and short-draft frames open with a bare `>`
+# glyph between two solid `─` rules, over a `? for shortcuts` footer at idle
+# (docs/verification/agy.md "Composer classification"). pi's row rule would
 # read that glyph as typed content, so caps carrying harness=agy take
 # _fm_composer_agy_content INSTEAD of every generic shape rule. It proves
 # `empty` only from the recorded screen exactly: a styled capture, the last

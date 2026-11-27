@@ -439,6 +439,7 @@ On Zellij, cmux, and Orca a typed-plane Cursor send (a harness-native invocation
 An ordinary text steer remains durably enqueued when its doorbell is withheld, and the watcher retries and escalates an unacknowledged local record.
 The gate refuses the Codex update picker on every harness and requires a proven-empty composer before typing to a Codex, Rovo, or agy worker, then proof that the composer holds the full doorbell before Enter.
 The agy gate requires a styled capture, so cmux and Orca always leave agy steers queued without ringing.
+The [agy tmux first-use hint capture](verification/agy.md#composer-classification) shows another screen that prevents the doorbell from ringing.
 See [Claude background-tasks exit confirmation](agent-control.md#claude-background-tasks-exit-confirmation) for the Claude refusal and [`fm-task-inbox-lib.sh`](../bin/fm-task-inbox-lib.sh) for the exact gate and retry ladder.
 An agy pane uses the short notice `: Firstmate message waiting: read your inbox, act, mv to handled/.` when the path in the scaffolded Firstmate instruction inbox section points to the same inbox directory as the queued record.
 The doorbell checks the launch brief when present and uses the original task brief when there is no launch brief.
