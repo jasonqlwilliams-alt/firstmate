@@ -372,6 +372,77 @@ test_rest_write_checks_request_header_and_resolved_body() {
   pass "delivery guard: both shims protect REST credentials and resolved bodies"
 }
 
+test_github_write_shims_pin_the_authorized_host() {
+  local rec repo home fakebin upstream fork gate out rc shim policy_url approved_host config
+  rec=$(make_repo delivery-host)
+  IFS='|' read -r repo home fakebin upstream fork gate <<< "$rec"
+  config="$home/gh-config"
+  mkdir -p "$config"
+  printf 'git.example.test:\n    user: other-account\n' > "$config/hosts.yml"
+  cat > "$fakebin/delegate" <<'SH'
+#!/usr/bin/env bash
+host=${GH_HOST:-$(sed -n '1s/:$//p' "$GH_CONFIG_DIR/hosts.yml")}
+printf 'delegate host=%s\n' "$host"
+SH
+  chmod +x "$fakebin/delegate"
+  FM_HOME="$home" PATH="$fakebin:$PATH" "$GUARD" arm widgets "$repo" >/dev/null \
+    || fail "guard arm failed for the GitHub host fixture"
+  policy_url=$(jq -er '.repositories.widgets.forkPushUrl' "$home/config/repository-policy.json") \
+    || fail "could not read the fixture's approved fork URL"
+  approved_host=${policy_url#https://}
+  approved_host=${approved_host%%/*}
+
+  local fixture_env=(FM_HOME="$home" PATH="$fakebin:$PATH" GH_CONFIG_DIR="$config" GH_REPO=captain/widgets
+    FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/delegate" FM_REAL_GH="$fakebin/delegate")
+  local api
+  for shim in "$GH_SHIM" "$GH_AXI_SHIM"; do
+    out=$(cd "$repo" && unset GH_HOST && env "${fixture_env[@]}" "$shim" pr create --title safe --body safe 2>&1)
+    rc=$?
+    expect_code 0 "$rc" "PR on the approved host should be allowed: $out"
+    assert_contains "$out" "repository=$approved_host/captain/widgets account=captain" \
+      "PR was not authorized for the policy fork and account"
+    assert_contains "$out" "delegate host=$approved_host" "PR delegate did not use the verified host"
+
+    if [ "$shim" = "$GH_AXI_SHIM" ]; then
+      api=(api POST /repos/captain/widgets/pulls --field head=feature --field base=main --field title=safe)
+    else
+      api=(api /repos/captain/widgets/pulls -X POST -f head=feature -f base=main -f title=safe)
+    fi
+    out=$(cd "$repo" && unset GH_HOST && env "${fixture_env[@]}" "$shim" "${api[@]}" 2>&1)
+    rc=$?
+    expect_code 0 "$rc" "REST write on the approved host should be allowed: $out"
+    assert_contains "$out" "repository=$approved_host/captain/widgets account=captain" \
+      "REST write was not authorized for the policy fork and account"
+    assert_contains "$out" "delegate host=$approved_host" "REST delegate did not use the verified host"
+
+    out=$(cd "$repo" && GH_HOST="$approved_host" env "${fixture_env[@]}" "$shim" "${api[@]}" \
+      --hostname=git.example.test 2>&1)
+    rc=$?
+    expect_code 1 "$rc" "REST write to an explicitly unapproved host should be refused: $out"
+    assert_contains "$out" "pull-request would write to git.example.test/captain/widgets" \
+      "REST refusal did not identify the explicitly selected host"
+    assert_not_contains "$out" "delegate host=" "REST write to an unapproved host reached the delegate"
+  done
+
+  out=$(cd "$repo" && unset GH_HOST && env "${fixture_env[@]}" \
+    "$GH_SHIM" pr create --repo=git.example.test/captain/widgets --title safe --body safe 2>&1)
+  rc=$?
+  expect_code 1 "$rc" "native gh should refuse a PR on the unapproved repository host: $out"
+  assert_contains "$out" "pull-request would write to git.example.test/captain/widgets" \
+    "native gh refusal did not identify the repository selector's host"
+  assert_not_contains "$out" "delegate host=" "native gh forwarded an unapproved repository selector"
+
+  out=$(cd "$repo" && unset GH_HOST && env "${fixture_env[@]}" \
+    GH_REPO="$approved_host/captain/widgets" "$GH_AXI_SHIM" pr --hostname git.example.test \
+    create --title safe --body safe 2>&1)
+  rc=$?
+  expect_code 1 "$rc" "gh-axi should refuse a hostname in conflict with the repository selector: $out"
+  assert_contains "$out" "hostname does not match the pull-request repository host $approved_host" \
+    "gh-axi refusal did not identify the hostname mismatch"
+  assert_not_contains "$out" "delegate host=" "gh-axi forwarded a conflicting hostname"
+  pass "delivery guard: both shims bind PR and REST writes to the authorized host"
+}
+
 test_pre_push_with_exported_gh_repo() {
   local rec repo home fakebin upstream fork gate out rc log
   rec=$(make_repo gh-repo-env)
@@ -1257,6 +1328,7 @@ test_effective_push_url_rewrite_refuses
 test_no_mistakes_checks_branch_and_pr_targets
 test_gh_axi_pr_write_shim_refuses_and_allows
 test_rest_write_checks_request_header_and_resolved_body
+test_github_write_shims_pin_the_authorized_host
 test_pre_push_with_exported_gh_repo
 test_check_pr_body_patterns
 test_shims_refuse_pr_body_leaks
