@@ -19,14 +19,55 @@ set -u
 
 TMP_ROOT=$(fm_test_tmproot fm-test-fixtures)
 
+test_runner_isolates_treehouse() (
+  local dir="$TMP_ROOT/treehouse-runner" home tmp root pool
+  home="$dir/home"
+  tmp="$home/.treehouse/tmp"
+  mkdir -p "$dir/bin" "$dir/tests" "$dir/tools" "$tmp"
+  cp "$ROOT/bin/fm-test-run.sh" "$dir/bin/"
+  cp "$ROOT/tests/git-config-helpers.sh" "$ROOT/tests/treehouse-test-helpers.sh" "$dir/tests/"
+  cat > "$dir/tools/treehouse" <<'SH'
+#!/usr/bin/env bash
+set -eu
+root="$HOME/.treehouse"
+if [ "${1:-}" = --root ]; then
+  root=$2
+  shift 2
+fi
+[ "$*" = 'get --lease' ]
+mkdir "$root/fixture-pool"
+printf '%s\n' "$root/fixture-pool"
+SH
+  chmod +x "$dir/tools/treehouse"
+  cat > "$dir/tests/fm-treehouse-lease-safety.test.sh" <<'SH'
+#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$TREEHOUSE_ROOT" > "$FM_TEST_ROOT_RECEIPT"
+env -u TREEHOUSE_ROOT treehouse get --lease > "$FM_TEST_POOL_RECEIPT"
+SH
+  export HOME="$home" PATH="$dir/tools:$PATH" TMPDIR="$tmp"
+  export FM_TEST_ROOT_RECEIPT="$dir/root" FM_TEST_POOL_RECEIPT="$dir/pool"
+  unset FM_TEST_TREEHOUSE_BIN FM_TEST_TREEHOUSE_DIR
+  "$dir/bin/fm-test-run.sh" --jobs 1 tests/fm-treehouse-lease-safety.test.sh > "$dir/run.log" 2>&1 ||
+    fail "Treehouse runner fixture failed: $(cat "$dir/run.log")"
+  root=$(cat "$dir/root") || fail "the test did not record its Treehouse root"
+  pool=$(cat "$dir/pool") || fail "the test did not record its pool"
+  assert_equals "$root/fixture-pool" "$pool" "Treehouse received the explicit test root"
+  case "$root" in "$home/.treehouse"/*) fail "the test root is inside the live root" ;; esac
+  assert_absent "$home/.treehouse/fixture-pool" "the test allocated a pool in the live root"
+  assert_absent "$(dirname "$root")" "the runner left its Treehouse directory behind"
+  assert_grep 'expected_gate_skip=treehouse' "$dir/run.log" "the suite reports its Treehouse prerequisite"
+  pass "the runner passes a disposable root explicitly and leaves the live Treehouse root untouched"
+)
+
 test_git_config_isolation() (
   local dir="$TMP_ROOT/git-config" helper jobs timeout fakebin rc
   mkdir -p "$dir/runner/bin" "$dir/runner/tests"
   git init -q "$dir/caller"
   git -C "$dir/caller" config commit.gpgsign false
   cd "$dir/caller" || exit 1
-  cp "$ROOT/bin/fm-test-run.sh" "$ROOT/bin/fm-timeout-lib.sh" "$ROOT/bin/fm-treehouse-scratch.sh" "$dir/runner/bin/"
-  cp "$ROOT/tests/git-config-helpers.sh" "$dir/runner/tests/"
+  cp "$ROOT/bin/fm-test-run.sh" "$ROOT/bin/fm-timeout-lib.sh" "$dir/runner/bin/"
+  cp "$ROOT/tests/git-config-helpers.sh" "$ROOT/tests/treehouse-test-helpers.sh" "$dir/runner/tests/"
   fakebin=$(fm_fakebin "$dir/standalone")
   fm_fake_exit0 "$fakebin" pi
   cat > "$fakebin/tmux" <<'SH'
@@ -296,6 +337,7 @@ test_spawn_home_layout() {
   pass "spawn-home layout writes harness pin, beat, and brief"
 }
 
+test_runner_isolates_treehouse || fail "Treehouse fixture isolation"
 test_git_config_isolation || fail "Git fixture config isolation"
 test_touch_epoch_preserves_repeated_dst_hour
 test_no_mistakes_version_constant

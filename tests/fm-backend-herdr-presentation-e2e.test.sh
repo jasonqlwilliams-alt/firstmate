@@ -17,13 +17,11 @@ command -v treehouse >/dev/null 2>&1 || { echo "skip: treehouse not found"; exit
 [ -x "$HERDR_LAB_HELPER" ] || { echo "skip: Herdr lab helper not executable at $HERDR_LAB_HELPER"; exit 0; }
 
 TMP_ROOT=$(fm_test_tmproot fm-herdr-presentation) || fail 'could not create the presentation fixture'
-unset FM_TREEHOUSE_SCRATCH_ROOT
-fm_test_enter_treehouse_scratch "$TMP_ROOT"
-REAL_TREEHOUSE="$TREEHOUSE_ROOT/bin/treehouse"
-TREEHOUSE_BACKEND=$(readlink "$REAL_TREEHOUSE-real") || fail 'could not resolve the fixture Treehouse binary'
-HERDR_ORIGINAL_PATH=$PATH
+REAL_TREEHOUSE=$(command -v treehouse)
+TREEHOUSE_BACKEND=$REAL_TREEHOUSE
+HERDR_ORIGINAL_PATH="$TMP_ROOT/treehouse-bin:$PATH"
 FAKEBIN="$TMP_ROOT/fakebin"
-TREEHOUSE_RECORDER="$TMP_ROOT/record-treehouse"
+TREEHOUSE_RECORDER="$TMP_ROOT/treehouse-bin/treehouse"
 HERDR_CALL_LOG="$TMP_ROOT/herdr-calls.log"
 TREEHOUSE_CALL_LOG="$TMP_ROOT/treehouse-calls.log"
 TREEHOUSE_LOCK_DIR="$TMP_ROOT/treehouse-call.lock"
@@ -31,7 +29,7 @@ MOVE_CALL_LOG="$TMP_ROOT/workspace-move-calls.log"
 FOCUS_AUDIT_LOG="$TMP_ROOT/focus-audit.log"
 ACTIVE_SEEDED_CONTROL="$TMP_ROOT/active-seeded-control"
 POST_CREATE_ABORT_CONTROL="$TMP_ROOT/post-create-abort-control"
-mkdir -p "$FAKEBIN"
+mkdir -p "$FAKEBIN" "$TMP_ROOT/treehouse-bin"
 fm_test_track_task_tmps "$FAKEBIN"
 : > "$HERDR_CALL_LOG"
 : > "$TREEHOUSE_CALL_LOG"
@@ -278,9 +276,8 @@ printf 'workspace-move\t%s\t%s\t%s\n' "$before" "$after" "$2" >> "$FOCUS_AUDIT_L
 exit "$status"
 SH
 chmod +x "$FAKEBIN/herdr" "$TREEHOUSE_RECORDER"
-ln -sf "$TREEHOUSE_RECORDER" "$REAL_TREEHOUSE-real" || exit 1
 chmod +x "$FAKEBIN/herdr-workspace-mover"
-export PATH="$FAKEBIN:$PATH"
+export PATH="$FAKEBIN:$HERDR_ORIGINAL_PATH"
 export FM_BACKEND_HERDR_WORKSPACE_MOVER="$FAKEBIN/herdr-workspace-mover"
 
 # shellcheck source=tests/herdr-test-safety.sh

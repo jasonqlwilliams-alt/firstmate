@@ -54,18 +54,23 @@ signal_verified_native() {
   kill -TERM "$NATIVE_PID"
 }
 
+cleanup_refused() {
+  fm_test_treehouse_remove "${FM_TEST_OWNED_TREEHOUSE:-}" || true
+  exit 1
+}
+
 cleanup() {
   local rc=$? i=0 endpoint_state
   trap - EXIT
   if [ -n "$NATIVE_PID" ]; then
     signal_verified_native || {
       printf 'not ok - %s: native process identity changed; refusing cleanup signal\n' "$VERSION" >&2
-      exit 1
+      cleanup_refused
     }
     while kill -0 "$NATIVE_PID" 2>/dev/null && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done
     if kill -0 "$NATIVE_PID" 2>/dev/null; then
       printf 'not ok - %s: native process remains; private endpoint retained\n' "$VERSION" >&2
-      exit 1
+      cleanup_refused
     fi
   fi
   if [ "$STARTED" -eq 1 ]; then
@@ -77,7 +82,7 @@ cleanup() {
     done
     case "$endpoint_state" in
       dead|missing) ;;
-      *) printf 'not ok - %s: endpoint identity is %s; private endpoint retained for inspection\n' "$VERSION" "$endpoint_state" >&2; exit 1 ;;
+      *) printf 'not ok - %s: endpoint identity is %s; private endpoint retained for inspection\n' "$VERSION" "$endpoint_state" >&2; cleanup_refused ;;
     esac
   fi
   "$TMUX_BIN" -S "$SOCKET" kill-server 2>/dev/null || true
@@ -100,8 +105,7 @@ cleanup() {
   if [ "$rc" -eq 0 ]; then
     printf 'ok - %s sign-in stopped without input; private processes gone and global mtimes unchanged\n' "$VERSION"
   fi
-  fm_test_cleanup
-  exit "$rc"
+  fm_test_cleanup_exit "$rc" fm_test_cleanup
 }
 trap cleanup EXIT
 trap 'exit 130' INT

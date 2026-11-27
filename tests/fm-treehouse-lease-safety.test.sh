@@ -8,9 +8,7 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
 command -v treehouse >/dev/null || { echo 'skip: treehouse not found'; exit 0; }
 TMP_ROOT=$(fm_test_tmproot fm-treehouse-lease-safety)
-unset FM_TREEHOUSE_SCRATCH_ROOT
-fm_test_enter_treehouse_scratch "$TMP_ROOT"
-TREEHOUSE_BIN="$TREEHOUSE_ROOT/bin/treehouse"
+TREEHOUSE_BIN=$(command -v treehouse)
 mkdir -p "$TMP_ROOT/home" "$TMP_ROOT/user" "$TMP_ROOT/state"
 HOME_DIR="$TMP_ROOT/home"
 PROJECT="$TMP_ROOT/project"
@@ -20,10 +18,9 @@ printf 'tmux\n' > "$HOME_DIR/config/backend"
 FAKEBIN=$(make_spawn_fakebin "$TMP_ROOT/fake")
 fm_fake_exit0 "$FAKEBIN" claude
 export XDG_CONFIG_HOME="$TMP_ROOT/user/.config" XDG_STATE_HOME="$TMP_ROOT/state"
-FM_TEST_REAL_TREEHOUSE=$(readlink "$TREEHOUSE_BIN-real") || fail 'could not resolve the fixture Treehouse binary'
+FM_TEST_REAL_TREEHOUSE=$TREEHOUSE_BIN
 export FM_TEST_REAL_TREEHOUSE FM_TEST_CWD="$TMP_ROOT/cwd" FM_TEST_PROJECT="$PROJECT" FM_TEST_TREEHOUSE_CALLS="$TMP_ROOT/treehouse-calls"
-rm "$FAKEBIN/treehouse" || fail 'could not remove the simulated Treehouse from the fixture PATH'
-cat > "$TMP_ROOT/record-treehouse" <<'EOF'
+cat > "$FAKEBIN/treehouse" <<'EOF'
 #!/usr/bin/env bash
 if [ "${1:-}" != --version ]; then
   printf '%s\n' "$*" >> "$FM_TEST_TREEHOUSE_CALLS"
@@ -34,8 +31,7 @@ if [ "${FM_TEST_ABORT_MODE:-}" = refresh-abort ] && [ "${1:-}" = get ]; then
 fi
 exec "$FM_TEST_REAL_TREEHOUSE" "$@"
 EOF
-chmod +x "$TMP_ROOT/record-treehouse"
-ln -sf "$TMP_ROOT/record-treehouse" "$TREEHOUSE_BIN-real" || fail 'could not bind the recording Treehouse binary to the scratch shim'
+chmod +x "$FAKEBIN/treehouse"
 printf 'worktree_path = "%s"\n' "$TMP_ROOT/escaped/{repo}-{slot}" > "$PROJECT/treehouse.toml"
 # The shell used by the initial legacy get exits immediately, leaving no
 # process-based protection. Every later acquisition comes from real fm-spawn.
@@ -60,8 +56,7 @@ if [ "${1:-}" = send-keys ]; then
     case "$arg" in
       *'treehouse get'*)
         (
-          unset TREEHOUSE_ROOT FM_TREEHOUSE_SCRATCH_ROOT TREEHOUSE_WORKTREE_PATH
-          export PATH="$FM_TEST_PANE_PATH:$PATH"
+          unset TREEHOUSE_ROOT TREEHOUSE_WORKTREE_PATH
           cd "$FM_TEST_PROJECT" && eval "$arg" && pwd > "$FM_TEST_CWD"
         ) || exit 1
         case "${FM_TEST_ABORT_MODE:-}" in
@@ -99,8 +94,7 @@ run_spawn() {
   local id=$1
   fm_test_spawn_brief "$HOME_DIR" "$id"
   printf '%s\n' "$PROJECT" > "$FM_TEST_CWD"
-  FM_TEST_PANE_PATH="$TREEHOUSE_ROOT/bin" \
-    fm_test_run_spawn "$HOME_DIR" "$SLOT" "$FAKEBIN" "$id" "$PROJECT" --scout --backend tmux
+  fm_test_run_spawn "$HOME_DIR" "$SLOT" "$FAKEBIN" "$id" "$PROJECT" --scout --backend tmux
 }
 out=$(run_spawn first); rc=$?
 expect_code 0 "$rc" "durable spawn failed: $out"
@@ -193,8 +187,6 @@ for abort_mode in clean base-mismatch modified committed recorded foreign-holder
     unset FM_TEST_CLAUDE_CONFIG_DIR
   fi
   printf 'tmux\n' > "$HOME_DIR/config/backend"
-  unset FM_TREEHOUSE_SCRATCH_ROOT
-  fm_test_enter_treehouse_scratch "$CASE_ROOT"
   export XDG_CONFIG_HOME="$CASE_ROOT/user/.config" XDG_STATE_HOME="$CASE_ROOT/state"
   export FM_TEST_PROJECT="$PROJECT" FM_TEST_CWD="$CASE_ROOT/cwd" FM_TEST_TREEHOUSE_CALLS="$CASE_ROOT/treehouse-calls" FM_TEST_ABORT_MODE="$abort_mode" FM_TEST_HOME="$HOME_DIR" FM_TEST_ACQUIRED_HEAD="$CASE_ROOT/acquired-head"
   out=$(run_spawn "abort-$abort_mode"); rc=$?

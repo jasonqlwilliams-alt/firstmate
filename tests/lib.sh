@@ -222,7 +222,7 @@ fm_test_cleanup() {
       case "$d" in
         treehouse-scratch$'\t'*)
           scratch=${d#*$'\t'}
-          if ! fm_treehouse_scratch_remove "$scratch"; then
+          if ! fm_test_treehouse_remove "$scratch"; then
             refused+=("$scratch")
             status=1
           fi
@@ -261,22 +261,6 @@ fm_test_cleanup_after() {
   fm_test_cleanup
 }
 
-fm_test_enter_treehouse_scratch() {
-  local parent=${1:-} outside
-  if ! fm_treehouse_scratch_active; then
-    outside=$(fm_treehouse_scratch_parent "$parent") || fail "cannot choose a Treehouse fixture parent"
-    if [ -z "$parent" ] || [ ! "$parent" -ef "$outside" ]; then
-      parent=$(TMPDIR="$outside" fm_test_tmproot fm-test-treehouse) || fail "cannot create a fixture for the test's Treehouse root"
-    fi
-  fi
-  fm_treehouse_scratch_enter "$parent" || fail "cannot isolate the test's Treehouse root"
-  if [ -n "$FM_TREEHOUSE_SCRATCH_CREATED" ] &&
-    ! fm_test_track_treehouse_scratch "$FM_TREEHOUSE_SCRATCH_CREATED"; then
-    fm_treehouse_scratch_remove "$FM_TREEHOUSE_SCRATCH_CREATED"
-    fail "cannot register the test's Treehouse root for cleanup"
-  fi
-}
-
 fm_test_track_task_tmps() {
   local fakebin=$1 real_mktemp
   real_mktemp=$(command -v mktemp) || return 1
@@ -308,8 +292,8 @@ fm_test_tmproot() {
   printf '%s\n' "$root"
 }
 
-# shellcheck source=bin/fm-treehouse-scratch.sh
-. "$ROOT/bin/fm-treehouse-scratch.sh" || fail "cannot load Treehouse scratch setup"
+# shellcheck source=tests/treehouse-test-helpers.sh
+. "$ROOT/tests/treehouse-test-helpers.sh" || fail "cannot load Treehouse test setup"
 
 if [ "${FM_TEST_FIXTURE_REAPER_CHILD:-0}" != 1 ]; then
   FM_TEST_CLEANUP_REGISTRY=$(mktemp "${FM_TEST_REGISTRY_DIR:-${TMPDIR:-/tmp}}/.fm-test-cleanup.$$.XXXXXX") || return 1
@@ -325,12 +309,16 @@ if [ "${FM_TEST_FIXTURE_REAPER_CHILD:-0}" != 1 ]; then
   trap 'exit 129' HUP
   trap 'exit 131' QUIT
 
-  # A suite run on its own still gets a disposable Treehouse root, so a fixture
-  # repository never creates a pool folder under the real one; under
-  # bin/fm-test-run.sh the runner's per-suite root is kept. A root created here
-  # is removed with the rest of this suite's temp roots.
-  # bin/fm-treehouse-scratch.sh owns the contract.
-  fm_test_enter_treehouse_scratch
+  FM_TEST_OWNED_TREEHOUSE=
+  if [ -z "${FM_TEST_TREEHOUSE_DIR:-}" ] || [ ! -f "$FM_TEST_TREEHOUSE_DIR/.fm-test-treehouse" ]; then
+    fm_test_treehouse_setup || fail "cannot create a Treehouse test directory"
+    FM_TEST_OWNED_TREEHOUSE=$FM_TEST_TREEHOUSE_DIR
+    if ! fm_test_track_treehouse_scratch "$FM_TEST_TREEHOUSE_DIR" ||
+      ! printf '%s\n%s\n' "$$" "$FM_TEST_OWNER_IDENTITY" > "$FM_TEST_TREEHOUSE_DIR/.fm-test-fixture"; then
+      fm_test_treehouse_remove "$FM_TEST_TREEHOUSE_DIR"
+      fail "cannot register the Treehouse test directory for cleanup"
+    fi
+  fi
 fi
 
 # --- detached fixture cleanup ----------------------------------------------
@@ -580,7 +568,7 @@ fm_test_reap_orphans() {
 # execution window repeating the same global stale-fixture scan.
 if [ "${FM_TEST_SKIP_ORPHAN_REAP:-0}" != 1 ]; then
   fm_test_reap_orphans
-  if fm_treehouse_scratch_in_git "${TMPDIR:-/tmp}"; then
+  if [ ! "${TMPDIR:-/tmp}" -ef /tmp ]; then
     fm_test_reap_orphans /tmp fm-test-treehouse.
   fi
 fi

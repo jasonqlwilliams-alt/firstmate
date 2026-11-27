@@ -121,7 +121,7 @@
 # tests/git-config-helpers.sh owns that contract and its limits. Each one also
 # runs under its own disposable TREEHOUSE_ROOT, removed when it exits, so no
 # suite creates a pool folder under the real Treehouse root;
-# bin/fm-treehouse-scratch.sh owns that contract.
+# tests/treehouse-test-helpers.sh owns that contract.
 #
 # Family labels, the changed-file map, and production portable-shard composition
 # live in this script only (one owner). The proven-isolated candidate set remains
@@ -316,7 +316,7 @@ family_for_basename() {
     fm-herdr-attached-viewer-live-e2e.test.sh|fm-herdr-session-cleanup-e2e.test.sh|\
     fm-backend-herdr-smoke.test.sh|fm-backend-herdr-workspace-per-home-e2e.test.sh|\
     fm-control-herdr-smoke.test.sh|fm-secondmate-herdr-identity-e2e.test.sh|fm-worker-herdr-identity-e2e.test.sh|\
-    fm-treehouse-scratch.test.sh|fm-treehouse-lease-safety.test.sh)
+    fm-treehouse-lease-safety.test.sh)
       printf '%s\n' real-herdr-gated
       ;;
     fm-backlog-handoff.test.sh|fm-on.test.sh|fm-remote-backlog-handoff.test.sh|\
@@ -413,8 +413,12 @@ family_for_basename() {
   esac
 }
 
-expected_gate_skip_for_family() {
-  case "$1" in
+expected_gate_skip_for_script() {
+  if [ "${1##*/}" = fm-treehouse-lease-safety.test.sh ]; then
+    printf '%s\n' treehouse
+    return
+  fi
+  case "$2" in
     real-herdr-gated) printf '%s\n' herdr ;;
     live-harness-optin) printf '%s\n' live-capability ;;
     cmux|zellij|orca) printf '%s\n' optional-binary ;;
@@ -1332,10 +1336,10 @@ families_for_changed_path() {
       printf '%s\n' pure-contract-unit
       # Only this script wraps each suite in run_script_bounded's fixture Git
       # isolation, and only a standalone-family script proves it.
-      printf '%s\n' "__script__:fm-test-fixtures.test.sh" "__script__:fm-treehouse-scratch.test.sh"
+      printf '%s\n' "__script__:fm-test-fixtures.test.sh"
       ;;
-    bin/fm-treehouse-scratch.sh)
-      printf '%s\n' "__script__:fm-treehouse-scratch.test.sh" \
+    tests/treehouse-test-helpers.sh)
+      printf '%s\n' "__script__:fm-test-fixtures.test.sh" \
         "__script__:fm-test-fixture-cleanup.test.sh" "__script__:fm-treehouse-lease-safety.test.sh"
       ;;
     bin/fm-test-isolation-proof.sh)
@@ -1599,7 +1603,7 @@ families_for_changed_path() {
     tests/lib.sh|tests/*-helpers.sh|tests/fixtures.sh)
       if [ "$path" = tests/lib.sh ]; then
         printf '%s\n' "__script__:fm-test-fixture-cleanup.test.sh" \
-          "__script__:fm-treehouse-scratch.test.sh" "__script__:fm-treehouse-lease-safety.test.sh"
+          "__script__:fm-treehouse-lease-safety.test.sh"
       fi
       families_for_test_reference "$(basename "$path")" \
         || [ "$path" = tests/lib.sh ] \
@@ -2256,10 +2260,9 @@ if [ "$PER_SCRIPT_TIMEOUT_SECS" -gt 0 ]; then
   . "$ROOT/bin/fm-timeout-lib.sh"
 fi
 
-# shellcheck source=bin/fm-treehouse-scratch.sh
-. "$ROOT/bin/fm-treehouse-scratch.sh" || die "could not load the Treehouse scratch helper"
-RUN_TMP_PARENT=$(fm_treehouse_scratch_parent) || die "could not choose a temporary working directory"
-RUN_TMP=$(mktemp -d "${RUN_TMP_PARENT%/}/fm-test-run.XXXXXX") || die "could not create the runner directory"
+# shellcheck source=tests/treehouse-test-helpers.sh
+. "$ROOT/tests/treehouse-test-helpers.sh" || die "could not load the Treehouse test helper"
+RUN_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-test-run.XXXXXX")
 RECORDS="$RUN_TMP/records.tsv"
 FAMILIES_TSV="$RUN_TMP/families.tsv"
 : >"$RECORDS"
@@ -2317,7 +2320,7 @@ record_script_result() {
   local base family expected gate_skip gate_reason fail_delta
   base=$(basename "$script")
   family=$(family_for_basename "$base")
-  expected=$(expected_gate_skip_for_family "$family")
+  expected=$(expected_gate_skip_for_script "$script" "$family")
 
   if [ -n "$FAIL_ON_GATE_SKIP" ] && detect_gate_skip_token "$out" "$FAIL_ON_GATE_SKIP"; then
     log "required gate skip token seen in $script: skip: $FAIL_ON_GATE_SKIP"
@@ -2364,13 +2367,8 @@ run_script_bounded() {  # <script> <out> <stream> <id>
   local GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
   # shellcheck source=tests/git-config-helpers.sh
   . "$ROOT/tests/git-config-helpers.sh" || return
-  # Each suite gets its own disposable Treehouse root, scoped the same way, so
-  # no fixture repository can create a pool folder under the real root and
-  # concurrent suites never share one; bin/fm-treehouse-scratch.sh owns the
-  # contract. The root is removed as soon as the suite exits.
-  local PATH=$PATH TREEHOUSE_ROOT FM_TREEHOUSE_SCRATCH_ROOT= FM_TREEHOUSE_SCRATCH_CREATED
-  local TREEHOUSE_WORKTREE_PATH TREEHOUSE_NO_UPDATE_CHECK
-  fm_treehouse_scratch_enter "$RUN_TMP" || {
+  local PATH=$PATH TREEHOUSE_ROOT FM_TEST_TREEHOUSE_DIR FM_TEST_TREEHOUSE_BIN=${FM_TEST_TREEHOUSE_BIN:-}
+  fm_test_treehouse_setup || {
     log "could not create a scratch Treehouse root for $script"
     return 1
   }
@@ -2400,7 +2398,7 @@ run_script_bounded() {  # <script> <out> <stream> <id>
       "$script" "$PER_SCRIPT_TIMEOUT_SECS" >>"$out"
     [ "$stream" -eq 1 ] && tail -1 "$out"
   fi
-  cleanup_output=$(fm_treehouse_scratch_remove "$FM_TREEHOUSE_SCRATCH_CREATED" 2>&1) || [ "$rc" -ne 0 ] || rc=1
+  cleanup_output=$(fm_test_treehouse_remove "$FM_TEST_TREEHOUSE_DIR" 2>&1) || [ "$rc" -ne 0 ] || rc=1
   if [ -n "$cleanup_output" ]; then
     printf '%s\n' "$cleanup_output" >>"$out"
     [ "$stream" -ne 1 ] || printf '%s\n' "$cleanup_output"
@@ -2413,7 +2411,7 @@ run_one_serial() {
   local base family expected out begin_iso begin_ms end_ms end_iso duration rc
   base=$(basename "$script")
   family=$(family_for_basename "$base")
-  expected=$(expected_gate_skip_for_family "$family")
+  expected=$(expected_gate_skip_for_script "$script" "$family")
   out="$RUN_TMP/out.$TOTAL"
   begin_iso=$(now_iso)
   begin_ms=$(now_ms)
@@ -2533,7 +2531,7 @@ else
     chmod 0700 "$work" "$work/tmp" || die "could not chmod 0700 worker root $work"
     base=$(basename "$script")
     family=$(family_for_basename "$base")
-    expected=$(expected_gate_skip_for_family "$family")
+    expected=$(expected_gate_skip_for_script "$script" "$family")
     printf 'FM_TEST_BEGIN %s %s family=%s expected_gate_skip=%s\n' \
       "$(now_iso)" "$script" "$family" "$expected"
     (

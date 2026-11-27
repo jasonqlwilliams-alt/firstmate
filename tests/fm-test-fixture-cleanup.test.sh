@@ -40,13 +40,13 @@ test_scratch_cleanup_failure_changes_only_a_successful_exit() {
   for status in 0 7; do
     expected=$status
     [ "$status" -ne 0 ] || expected=1
-    output=$(TMPDIR="$harness" env -u TREEHOUSE_ROOT -u FM_TREEHOUSE_SCRATCH_ROOT bash -uc '
+    output=$(TMPDIR="$harness" env -u TREEHOUSE_ROOT -u FM_TEST_TREEHOUSE_DIR bash -uc '
       . "$1"
       printf "%s\n" "$TREEHOUSE_ROOT" > "$3/refused"
-      rm "$TREEHOUSE_ROOT/.fm-treehouse-scratch"
+      rm "$FM_TEST_TREEHOUSE_DIR/.fm-test-treehouse"
       independent=$(fm_test_tmproot fm-test-cleanup-independent) || exit 9
-      unset FM_TREEHOUSE_SCRATCH_ROOT
-      fm_test_enter_treehouse_scratch "$independent"
+      fm_test_treehouse_setup
+      fm_test_track_treehouse_scratch "$FM_TEST_TREEHOUSE_DIR"
       printf "%s\n" "$independent" > "$3/independent"
       printf "%s\n" "$TREEHOUSE_ROOT" > "$3/scratch"
       exit "$2"
@@ -59,6 +59,8 @@ test_scratch_cleanup_failure_changes_only_a_successful_exit() {
     assert_present "$blocked" "parent cleanup bypassed the scratch removal guard"
     assert_absent "$independent" "scratch refusal stopped independent fixture cleanup"
     assert_absent "$scratch" "scratch refusal stopped cleanup of the next scratch root"
+    touch "$(dirname "$blocked")/.fm-test-treehouse" || fail "could not restore the test directory marker"
+    fm_test_treehouse_remove "$(dirname "$blocked")" || fail "could not remove the refused test directory"
   done
   pass "scratch cleanup failures preserve exit status and still clean independent fixtures"
 }
@@ -67,7 +69,7 @@ test_custom_exit_chains_scratch_cleanup() {
   local harness output rc status root
   harness=$(fm_test_tmproot fm-test-custom-exit)
   for status in 0 7; do
-    output=$(TMPDIR="$harness" env -u TREEHOUSE_ROOT -u FM_TREEHOUSE_SCRATCH_ROOT bash -uc '
+    output=$(TMPDIR="$harness" env -u TREEHOUSE_ROOT -u FM_TEST_TREEHOUSE_DIR bash -uc '
       . "$1"
       cleanup() {
         test -d "$TREEHOUSE_ROOT" || return 1
@@ -84,6 +86,45 @@ test_custom_exit_chains_scratch_cleanup() {
     assert_absent "$root" "the custom exit left its scratch root behind"
   done
   pass "custom suite exits clean their scratch roots and preserve exit status"
+}
+
+test_codex_refusal_keeps_diagnostics_without_scratch() {
+  local lab repo output rc root diagnostics
+  lab=$(fm_test_tmproot fm-test-codex-refusal)
+  repo="$lab/repo"
+  mkdir -p "$repo/tests" "$repo/bin" "$lab/tools" "$lab/home"
+  cp "$ROOT/tests/"{fm-codex-signin-live-e2e.test.sh,lib.sh,git-config-helpers.sh,treehouse-test-helpers.sh} "$repo/tests/"
+  cp "$ROOT/bin/"{fm-wake-lib.sh,fm-session-lock-record-lib.sh} "$repo/bin/"
+  printf '%s\n' 'fm_backend_codex_agent_pid() { return 1; }' \
+    'fm_backend_agent_state() { printf "%s\n" unknown; }' > "$repo/bin/fm-backend.sh"
+  printf '%s\n' 'fm_composer_codex_signin_screen() { return 0; }' > "$repo/bin/fm-composer-lib.sh"
+  fm_fake_exit0 "$lab/tools" sleep
+  cat > "$lab/tools/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$3" in
+  display-message) echo 12345 ;;
+  capture-pane) echo chooser ;;
+  kill-server) touch "$FM_TEST_CLEANUP_LAB/killed" ;;
+esac
+printf '%s\n' "${2%/*}" > "$FM_TEST_CLEANUP_LAB/diagnostics"
+SH
+  cat > "$lab/tools/codex" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$FM_TEST_TREEHOUSE_DIR" > "$FM_TEST_CLEANUP_LAB/scratch"
+printf '%s\n' 'codex fixture'
+SH
+  chmod +x "$lab/tools/tmux" "$lab/tools/codex"
+  output=$(env -u FM_TEST_TREEHOUSE_DIR HOME="$lab/home" TMPDIR="$lab" PATH="$lab/tools:$PATH" \
+    FM_TEST_CLEANUP_LAB="$lab" FM_CODEX_SIGNIN_LIVE=1 FM_CODEX_SIGNIN_CAPTURE= \
+    bash "$repo/tests/fm-codex-signin-live-e2e.test.sh" 2>&1) && rc=0 || rc=$?
+  expect_code 1 "$rc" "unknown Codex endpoint must fail"
+  assert_contains "$output" 'endpoint identity is unknown; private endpoint retained' "cleanup reached the endpoint refusal"
+  root=$(cat "$lab/scratch") || fail "the guard did not report its scratch directory"
+  diagnostics=$(cat "$lab/diagnostics") || fail "the guard did not report its diagnostic directory"
+  assert_absent "$root" "Codex refusal leaked scratch"
+  assert_present "$diagnostics/mtimes-before" "Codex refusal deleted its diagnostic fixture"
+  assert_absent "$lab/killed" "Codex refusal touched its private endpoint"
+  pass "Codex identity refusal retains its endpoint and diagnostics while removing scratch"
 }
 
 test_fixture_root_gone_after_sigterm() {
@@ -180,6 +221,7 @@ test_orphan_sweep_respects_fixture_ownership() {
   bash -c '
     # shellcheck source=tests/lib.sh
     . "'"$LIB"'"
+    fm_test_reap_orphans "$TMPDIR"
   '
 
   assert_absent "$stale_dir" \
@@ -209,6 +251,7 @@ test_orphan_sweep_reaps_read_only_package_tree() {
   bash -c '
     # shellcheck source=tests/lib.sh
     . "$1"
+    fm_test_reap_orphans "$TMPDIR"
   ' _ "$LIB"
 
   assert_absent "$stale_dir" \
@@ -220,7 +263,7 @@ test_orphan_sweep_reaps_standalone_treehouse_scratch() {
   local harness receipt scratch pid attempt
   harness=$(fm_test_tmproot fm-test-cleanup-treehouse)
   receipt="$harness/scratch-path"
-  TMPDIR="$harness" env -u TREEHOUSE_ROOT -u FM_TREEHOUSE_SCRATCH_ROOT bash -ec '
+  TMPDIR="$harness" env -u TREEHOUSE_ROOT -u FM_TEST_TREEHOUSE_DIR bash -ec '
     . "$1"
     mkdir "$TREEHOUSE_ROOT/slot"
     : > "$TREEHOUSE_ROOT/slot/file"
@@ -239,8 +282,9 @@ test_orphan_sweep_reaps_standalone_treehouse_scratch() {
   scratch=$(cat "$receipt")
   assert_present "$scratch/slot/file" "scratch fixture must survive SIGKILL before the sweep"
 
-  TMPDIR="$harness" FM_TEST_ORPHAN_MAX_AGE_SECONDS=0 FM_TEST_SKIP_ORPHAN_REAP=0 \
-    bash -ec '. "$1"' _ "$LIB" || fail "the next suite failed to run its orphan sweep"
+  TMPDIR="$harness" FM_TEST_ORPHAN_MAX_AGE_SECONDS=0 FM_TEST_SKIP_ORPHAN_REAP=1 \
+    bash -ec '. "$1"; fm_test_reap_orphans "$(dirname "$2")" "$(basename "$2")"' \
+    _ "$LIB" "$(dirname "$scratch")" || fail "the next suite failed to run its orphan sweep"
   assert_absent "$scratch" "the orphan sweep missed a killed suite's Treehouse scratch root"
   pass "the orphan sweep reclaims standalone Treehouse pools after SIGKILL"
 }
@@ -248,6 +292,7 @@ test_orphan_sweep_reaps_standalone_treehouse_scratch() {
 test_fixture_root_gone_after_normal_exit
 test_scratch_cleanup_failure_changes_only_a_successful_exit
 test_custom_exit_chains_scratch_cleanup
+test_codex_refusal_keeps_diagnostics_without_scratch
 test_fixture_root_gone_after_sigterm
 test_cleanup_registry_resists_precreation
 test_fixture_registration_failure_rolls_back_root
