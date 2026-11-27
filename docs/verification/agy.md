@@ -199,9 +199,12 @@ FM_AGY_COMPOSER_LIVE=1 FM_AGY_COMPOSER_LIVE_OAUTH=1 bash tests/fm-agy-composer-l
 
 The OAuth opt-in authorizes copying the operator's sign-in token into the temporary profile with mode `0600` after the launcher verifies network isolation.
 The guard unlinks the token copy when it sees the signed-in startup banner or confirms an empty composer, before sending any keystrokes.
-On normal exit or a handled signal such as TERM, it unlinks the token before asking its private tmux server to stop, then removes the temporary profile.
+On normal exit or a handled signal such as TERM, the guard attempts to unlink the token before contacting tmux, including when it cannot stop the server.
 SIGKILL can interrupt cleanup, so the next enabled run checks for abandoned guard profiles under the same `TMPDIR` (default `/tmp`) before creating a new profile.
-It preserves live owners, stops a prior server in the same tmux socket directory only when its session workspace matches the abandoned profile, and removes the abandoned profile.
+The guard owns the profile marker, so the shared fixture sweep leaves it in place.
+Cleanup preserves active runs and only stops a tmux server in the same socket directory when its session workspace matches the profile.
+It removes the profile and marker after a successful stop or after establishing that the socket has no server for that profile.
+An inconclusive lookup or failed stop leaves the marker for a later enabled run to retry.
 Set `FM_AGY_COMPOSER_LIVE_CAPTURE_DIR` to save each wrapped screen and its cursor geometry together in a new subdirectory.
 [`tests/fm-composer-lib.test.sh`](../../tests/fm-composer-lib.test.sh) uses the recorded rows and truecolor values to check the classifier's verdicts, including refusal on plain-text and multirow captures.
 [`tests/fm-task-inbox.test.sh`](../../tests/fm-task-inbox.test.sh) uses an agy-shaped stub in a real tmux server to check screen refusals and the one-row fit boundary for the path-bearing notice.

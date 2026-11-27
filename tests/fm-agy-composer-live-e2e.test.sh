@@ -54,39 +54,67 @@ VERSION=version-unknown
 fail() { printf 'not ok - agy (%s): %s\n' "$VERSION" "$1" >&2; exit 1; }
 pass() { printf 'ok - agy (%s): %s\n' "$VERSION" "$1"; }
 
+# shellcheck source=/dev/null
+. "$ROOT/bin/fm-tmux-lib.sh"
+
+remove_guard_profile() {  # <profile> <socket>
+  local profile=$1 socket=$2 token_dir workspace diagnostic lookup_status=0
+  token_dir="$profile/home/.gemini/antigravity-cli"
+  if [ "$(cd -P -- "$token_dir" 2>/dev/null && pwd -P)" = "$token_dir" ]; then
+    rm -f -- "$token_dir/antigravity-oauth-token" 2>/dev/null || true
+  fi
+  if workspace=$("$REAL_TMUX" -L "$socket" display-message -p -t "=$SESSION:" '#{session_path}' 2>&1); then
+    [ -n "$workspace" ] || return 1
+    if [ "$workspace" = "$profile/workspace" ]; then
+      diagnostic=$("$REAL_TMUX" -L "$socket" kill-server 2>&1) ||
+        fm_tmux_no_server_error "$diagnostic" || return 1
+    fi
+  else
+    fm_tmux_read_failure_status "$workspace" || lookup_status=$?
+    [ "$lookup_status" -eq 1 ] || return 1
+  fi
+  rm -rf -- "$profile" 2>/dev/null
+}
+
 reap_abandoned_runs() {
-  local marker prior owner identity old_socket workspace
-  for marker in "${TMPDIR:-/tmp}"/fm-agy-live.*/.fm-test-fixture; do
+  local marker prior owner identity
+  for marker in "$AGY_TMP_BASE"/fm-agy-live.*/.fm-agy-owner "$AGY_TMP_BASE"/fm-agy-live.*/.fm-test-fixture; do
     prior=${marker%/*}
     [ -d "$prior" ] && [ ! -L "$prior" ] && [ -O "$prior" ] &&
       [ -f "$marker" ] && [ ! -L "$marker" ] && [ -O "$marker" ] || continue
     { IFS= read -r owner && IFS= read -r identity; } < "$marker" || continue
     [[ "$owner" =~ ^[1-9][0-9]*$ && -n "$identity" ]] || continue
     fm_test_owner_is_alive "$owner" "$identity" && continue
-    old_socket="fm-agy-live-$owner"
-    if workspace=$("$REAL_TMUX" -L "$old_socket" display-message -p -t "=$SESSION:" '#{session_path}' 2>/dev/null) &&
-      [ "$workspace" = "$(cd -P -- "$prior" && pwd -P)/workspace" ]; then
-      "$REAL_TMUX" -L "$old_socket" kill-server 2>/dev/null || return 1
+    if [ "${marker##*/}" = .fm-test-fixture ]; then
+      [ ! -e "$prior/.fm-agy-owner" ] || continue
+      mv -- "$marker" "$prior/.fm-agy-owner" 2>/dev/null || return 1
     fi
-    rm -rf -- "$prior" 2>/dev/null || return 1
+    remove_guard_profile "$prior" "fm-agy-live-$owner" || return 1
   done
 }
+AGY_TMP_BASE=$(cd -P -- "${TMPDIR:-/tmp}" && pwd -P) || fail "could not resolve the private scratch base"
 reap_abandoned_runs || fail "could not remove an abandoned agy guard fixture"
 
-WORK=$(fm_test_tmproot fm-agy-live 2>/dev/null) && [ -n "$WORK" ] \
+WORK=$(mktemp -d "$AGY_TMP_BASE/fm-agy-live.XXXXXX" 2>/dev/null) && [ -n "$WORK" ] \
   || fail "could not allocate the private scratch root"
 TOKEN_COPY="$WORK/home/.gemini/antigravity-cli/antigravity-oauth-token"
 
 cleanup() {
-  rm -f -- "$TOKEN_COPY" 2>/dev/null || true
-  "$REAL_TMUX" -L "$SOCKET" kill-server 2>/dev/null || true
+  local status=$?
+  if ! remove_guard_profile "$WORK" "$SOCKET"; then
+    printf 'not ok - agy (%s): could not finish private fixture cleanup\n' "$VERSION" >&2
+    [ "$status" -ne 0 ] || status=1
+  fi
   fm_test_cleanup
+  exit "$status"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 trap 'exit 131' QUIT
+printf '%s\n%s\n' "$$" "$FM_TEST_OWNER_IDENTITY" > "$WORK/.fm-agy-owner" \
+  || fail "could not record private fixture ownership"
 
 # The library under test, driven against the private socket through a PATH
 # shim so its bare `tmux` calls stay isolated from any live fleet.
@@ -98,8 +126,6 @@ exec "$REAL_TMUX" -L "$SOCKET" "\$@"
 SH
 chmod +x "$SHIM_DIR/tmux" 2>/dev/null || fail "could not make the private tmux shim executable"
 PATH="$SHIM_DIR:$PATH"
-# shellcheck source=/dev/null
-. "$ROOT/bin/fm-tmux-lib.sh"
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-backend.sh"
 
