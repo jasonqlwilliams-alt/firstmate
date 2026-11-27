@@ -32,7 +32,7 @@ If the primary harness runs outside tmux, Firstmate creates or reuses a detached
 tmux attach -t firstmate
 ```
 
-Each task window is named `fm-<id>`.
+Firstmate creates task windows with the name `fm-<id>`.
 
 ```sh
 tmux list-windows -t <session-name>
@@ -52,15 +52,18 @@ For a recorded `session:window` target, Firstmate matches both names literally i
 If the recorded `fm-mate` window closes while `fm-mate2` remains open, `fm-peek` reports the recorded window missing.
 An inconclusive inventory or matches to multiple distinct windows leave the endpoint unreadable.
 On a tmux server with `exit-empty off`, a server with no remaining sessions may leave a closed endpoint unreadable until the server has a session again or stops.
-During a guarded operation, liveness, capture, and input use the same pane binding.
-Guarded input refuses while the target pane has synchronize-panes enabled.
-The binding uses stable IDs and survives changes to the window and pane indices.
-If the selector changes during launch, spawn updates the record to the worker's verified canonical name or records its exact binding when that name is unavailable.
-Each guarded tmux command verifies the server and the pane's membership in the recorded session before it runs.
-If that link is removed or tmux restarts on the same socket, the old binding cannot deliver input or close the endpoint.
+During a guarded operation, liveness, capture, and input use the same pane binding even if the active split or a window or pane index changes.
+Each guarded tmux command checks the server, session, window, and pane identities in its target context.
+Removing the window's recorded session link or restarting tmux on the same socket invalidates the binding for guarded input and cleanup.
+Guarded input refuses while tmux reports `synchronize-panes` enabled for the bound pane and leaves that option as configured.
+For an ordinary text steer, the refusal leaves the instruction queued in the durable inbox.
 Teardown resolves the recorded target through the same inventory, and recovery and failed-spawn cleanup use their existing bindings.
 Explicit pane selectors such as `session:0.1` use native tmux syntax when they do not resolve to task metadata.
-Fresh workers and Muse's destination credential check use literal session lookup as well.
+Spawn resolves the destination session name literally, including names that look like tmux session IDs, and uses that binding to place a new window.
+See [Muse credential preflight](configuration.md#harness-support) for how that check uses the destination session.
+Spawn refuses before publishing a task record if the recorded selector no longer identifies the bound worker window.
+If the selector changes after launch, spawn tries to republish a canonical name verified against the same window and falls back to recording the pane binding when that name is unavailable.
+If the repair fails, spawn reports an error and retains the worker and task record for reconciliation.
 [`fm-tmux-lib.sh`](../bin/fm-tmux-lib.sh) owns the binding, and [`fm-tmux-exact-target.test.sh`](../tests/fm-tmux-exact-target.test.sh) exercises it with a private tmux server.
 
 ### Agent liveness probe
@@ -136,4 +139,4 @@ tests/fm-tmux-submit-busy.test.sh
 tests/fm-bootstrap.test.sh
 ```
 
-[`verification/runtime-backends.md`](verification/runtime-backends.md#tmux) records the active foreground-process and submit evidence.
+[`verification/runtime-backends.md`](verification/runtime-backends.md#tmux) records the pane-targeting, foreground-process, and submit evidence.
