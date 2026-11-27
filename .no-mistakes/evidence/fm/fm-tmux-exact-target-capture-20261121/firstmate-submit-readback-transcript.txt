@@ -1,0 +1,52 @@
+The two panes are real tmux panes drawing synthetic composers. The active pane is idle. The selected busy pane retains the queued text after Enter. A separate recorded idle worker retains its text without queuing.
+
+$ TARGET bin/fm-peek.sh submit:0.1 10
+WARNING: watcher still down (same stale episode; last beat: 2s ago, grace 300s) - full banner already printed this episode.
+BUSY-SPLIT
+Working...
+❯
+exit=0
+
+$ TARGET bin/fm-send.sh submit:0.1 'queue this once'
+WARNING: watcher still down (same stale episode; last beat: 2s ago, grace 300s) - full banner already printed this episode.
+exit=0
+
+$ TARGET bin/fm-peek.sh submit:0.1 10
+WARNING: watcher still down (same stale episode; last beat: 3s ago, grace 300s) - full banner already printed this episode.
+❯ queue this
+BUSY-SPLIT
+Working...
+❯ queue this o
+BUSY-SPLIT
+Working...
+❯ queue this on
+BUSY-SPLIT
+Working...
+❯ queue this onc
+BUSY-SPLIT
+Working...
+❯ queue this once
+exit=0
+
+$ TARGET bin/fm-send.sh idle /synthetic
+WARNING: watcher still down (same stale episode; last beat: 3s ago, grace 300s) - full banner already printed this episode.
+fm-send: text delivered to submit:fm-idle but submission is unconfirmed (verdict=pending; tried meta=LAB/home/state/idle.meta; backend=from-meta); do not retype or blindly resend - verify with fm-peek.sh, then re-send '--key Enter' only if the composer still holds the text
+exit=3
+
+$ TARGET bin/fm-peek.sh idle 10
+WARNING: watcher still down (same stale episode; last beat: 5s ago, grace 300s) - full banner already printed this episode.
+IDLE-RECORDED
+❯ /synt
+IDLE-RECORDED
+❯ /synth
+IDLE-RECORDED
+❯ /synthe
+IDLE-RECORDED
+❯ /synthet
+IDLE-RECORDED
+❯ /syntheti
+IDLE-RECORDED
+❯ /synthetic
+exit=0
+
+Per-pane input logs confirm one text delivery and two Enter attempts per send.

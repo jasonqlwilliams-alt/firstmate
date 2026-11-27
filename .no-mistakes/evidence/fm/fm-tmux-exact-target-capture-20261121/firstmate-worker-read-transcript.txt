@@ -1,0 +1,79 @@
+Private tmux server with two disposable Firstmate worker records. Synthetic panes display distinct markers and the surviving pane has a draft and busy footer. BASE is 31f1014f and TARGET is 2369e884.
+
+$ TARGET bin/fm-peek.sh mate 10
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  2 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WORKER-ORIGINAL
+❯
+exit=0
+
+$ TARGET bin/fm-crew-state.sh mate
+state: done · source: status-log · earlier update
+exit=0
+
+$ TARGET adapter fm_backend_agent_state tmux fleet:fm-mate2
+alive
+exit=0
+
+$ TARGET adapter fm_backend_composer_state tmux fleet:fm-mate2
+pending
+exit=0
+
+$ TARGET adapter fm_pane_busy_state fleet:fm-mate2
+busy
+exit=0
+
+$ tmux kill-window -t @1
+
+exit=0
+
+$ tmux capture-pane -p -t fleet:fm-mate
+WORKER-SURVIVOR
+Working...
+❯ survivor draft
+exit=0
+
+$ BASE bin/fm-peek.sh mate 10
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+WORKER-SURVIVOR
+Working...
+❯ survivor draft
+exit=0
+
+$ BASE bin/fm-crew-state.sh mate
+state: done · source: status-log · earlier update
+exit=0
+
+$ TARGET bin/fm-peek.sh mate 10
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+error: tmux window fleet:fm-mate not found
+exit=1
+
+$ TARGET bin/fm-crew-state.sh mate
+state: unknown · source: none · backend target gone: fleet:fm-mate
+exit=0
+
+$ TARGET adapter fm_backend_agent_state tmux fleet:fm-mate
+missing
+exit=0
+
+$ TARGET adapter fm_backend_composer_state tmux fleet:fm-mate
+unknown
+exit=0
+
+$ TARGET adapter fm_pane_busy_state fleet:fm-mate
+unknown
+exit=0
+
+$ TARGET bin/fm-peek.sh mate2 10
+WARNING: watcher still down (same stale episode; last beat: 1s ago, grace 300s) - full banner already printed this episode.
+WORKER-SURVIVOR
+Working...
+❯ survivor draft
+exit=0
+
