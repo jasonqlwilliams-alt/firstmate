@@ -152,10 +152,10 @@ test_brief_assertion_precedes_branch() {
 
 # Spawn isolation uses the shared spawn fakebin (pane path + window ops).
 run_spawn() {
-  local home=$1 id=$2 proj=$3 pane=$4 fakebin=$5
+  local home=$1 id=$2 proj=$3 pane=$4 fakebin=$5 harness=${6:-codex}
   fm_test_spawn_brief "$home" "$id" brief
   fm_test_run_spawn "$home" "$pane" "$fakebin" \
-    "$id" "$proj" codex --mode no-mistakes --yolo off
+    "$id" "$proj" "$harness" --mode no-mistakes --yolo off
 }
 
 test_spawn_isolation_abort() {
@@ -241,7 +241,7 @@ run_spawn_record() {
 
 test_spawn_tmux_window_construction() (
   local home proj fakebin rec wt out status client server diagnostic
-  local real_tmux socket launcher pane launch_env session_id
+  local real_tmux socket launcher pane launch_env session_id decoy_id late_id late_meta
   home="$TMP_ROOT/spawn-rec-home"
   mkdir -p "$home/data"
   proj=$(make_repo "$TMP_ROOT/spawn-rec-proj")
@@ -320,17 +320,65 @@ SH
     || fail "the new worker pane did not run the durable Treehouse lease command"
   pass "fm-spawn: appends a pinned window and acquires its lease in the worker pane"
 
+  fm_fake_exit0 "$fakebin" pi
   "$real_tmux" -S "$socket" set-environment -t "$session_id" FM_TREEHOUSE_TEST_RENAME_SESSION "$session_id" \
     || fail "could not arrange the session rename during spawn"
   out=$(TMUX="$launch_env,${session_id#\$}" TMUX_PANE="$launcher" \
-    run_spawn "$home" rec-moved-gg8 "$proj" "$wt" "$fakebin"); status=$?
+    run_spawn "$home" rec-moved-gg8 "$proj" "$wt" "$fakebin" pi); status=$?
   expect_code 1 "$status" "spawn should refuse to publish a stale recorded selector: $out"
   assert_contains "$out" "no longer identifies the bound endpoint" "the refusal did not identify the stale selector"
   assert_absent "$home/state/rec-moved-gg8.meta" "spawn published a record after its session name was reused"
+  assert_absent "$home/state/rec-moved-gg8.busy-gen" "refused spawn left a busy generation"
+  assert_absent "$home/state/rec-moved-gg8.busy-state" "refused spawn left a busy record"
   [ "$("$real_tmux" -S "$socket" list-windows -a -F '#{session_name}:#{window_name}' |
     awk -F: '$2 == "fm-rec-moved-gg8"')" = '$0:fm-rec-moved-gg8' ] \
     || fail "spawn cleanup must close its own window and leave the replacement untouched"
   pass "fm-spawn: refuses a stale selector when the session name is reused"
+
+  decoy_id=$("$real_tmux" -S "$socket" list-sessions -f '#{==:#{session_name},$0}' -F '#{session_id}')
+  [ -n "$decoy_id" ] || fail "could not identify the early rename decoy"
+  "$real_tmux" -S "$socket" kill-session -t "$decoy_id" || fail "could not clear the early rename decoy"
+  "$real_tmux" -S "$socket" rename-session -t "$session_id" '$0' || fail "could not restore the destination name"
+  "$real_tmux" -S "$socket" set-environment -u -t "$session_id" FM_TREEHOUSE_TEST_RENAME_SESSION \
+    || fail "could not disarm the early rename"
+
+  late_id=rec-late-gg9
+  late_meta="$home/state/$late_id.meta"
+  cat > "$fakebin/codex" <<SH
+#!/usr/bin/env bash
+printf '%s\n' "\$TMUX_PANE" > "$home/late-worker"
+exec sleep 120
+SH
+  cat > "$fakebin/tmux" <<SH
+#!/usr/bin/env bash
+if [ "\${1:-}" = list-windows ] && [ -f "$late_meta" ] && [ ! -f "$home/before-rename.meta" ]; then
+  for (( attempt=0; attempt<100; attempt++ )); do
+    [ ! -s "$home/late-worker" ] || break
+    sleep 0.05
+  done
+  [ -s "$home/late-worker" ] || exit 1
+  cp "$late_meta" "$home/before-rename.meta" || exit 1
+  pane=\$(cat "$home/late-worker")
+  "$real_tmux" -S "$socket" rename-window -t "\$pane" operator-title || exit 1
+  "$real_tmux" -S "$socket" rename-session -t '$session_id' 'late destination' || exit 1
+  "$real_tmux" -S "$socket" new-session -d -s '\$0' -n 'fm-$late_id' sleep 120 || exit 1
+fi
+exec "$real_tmux" -S "$socket" "\$@"
+SH
+
+  out=$(TMUX="$launch_env,${session_id#\$}" TMUX_PANE="$launcher" \
+    run_spawn "$home" "$late_id" "$proj" "$wt" "$fakebin"); status=$?
+  expect_code 0 "$status" "spawn should repair a selector changed after the worker started: $out"
+  assert_contains "$out" "warning: repaired tmux target for task $late_id" "spawn did not report its repair"
+  assert_contains "$out" "window=late destination:fm-$late_id" "spawn did not report the repaired selector"
+  cmp -s <(sed '/^window=/d' "$home/before-rename.meta") <(sed '/^window=/d' "$late_meta") \
+    || fail "the repair changed launch metadata other than the window"
+  grep -Fxq "window=late destination:fm-$late_id" "$late_meta" \
+    || fail "spawn left a stale worker record after the session rename"
+  pane=$(cat "$home/late-worker")
+  [ "$("$real_tmux" -S "$socket" display-message -p -t "$pane" '#{session_name}:#{window_name}:#{pane_current_command}')" = \
+    "late destination:fm-$late_id:sleep" ] || fail "the original worker was closed or left untracked"
+  pass "fm-spawn: repairs metadata for the same live worker after a late rename"
 )
 
 test_lib_classification

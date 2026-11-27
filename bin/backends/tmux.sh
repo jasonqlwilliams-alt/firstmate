@@ -144,9 +144,9 @@ fm_backend_tmux_send_text_line() {  # <target> <text>
   fm_tmux_pane_command "$target" send-keys "$2" Enter
 }
 
-fm_backend_tmux_send_literal() {  # <target> <text>
+fm_backend_tmux_send_literal() {  # <target> <text> [explicit]
   local target
-  target=$(fm_tmux_exact_target "$1") || return $?
+  target=$(fm_tmux_exact_target "$1" "${3:-}") || return $?
   fm_tmux_pane_command "$target" send-keys -l "$2"
 }
 

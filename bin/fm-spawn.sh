@@ -1108,17 +1108,42 @@ spawn_close_endpoint() {
   fi
 }
 
-spawn_verify_tmux_recorded_target() {
-  [ "$BACKEND" = tmux ] || return 0
+spawn_verify_tmux_recorded_target() {  # <recorded-target>
   local current
-  if current=$(fm_tmux_exact_target "$T") &&
-     [ "${current%:*}" = "${WT_TARGET%:*}" ] &&
-     { [ "$current" = "$WT_TARGET" ] ||
-       fm_tmux_pane_command "$WT_TARGET" display-message -p '#{pane_id}' >/dev/null; }; then
-    return 0
+  current=$(fm_tmux_exact_target "$1") || return $?
+  [ "${current%:*}" = "${WT_TARGET%:*}" ] || return 2
+  [ "$current" = "$WT_TARGET" ] ||
+    fm_tmux_pane_command "$WT_TARGET" display-message -p '#{pane_id}' >/dev/null || return 2
+}
+
+spawn_repair_tmux_recorded_target() {
+  local session window name target meta="$STATE/$ID.meta" rc=0
+  session=$(fm_tmux_session_of_pane "$WT_TARGET") || return 1
+  window=${WT_TARGET%:*}
+  window=${window##*:}
+  name=$(fm_tmux_session_command "$session" display-message ":$window" -p '#{session_name}:') || return 1
+  case "${name%:}" in ''|*:*|*$'\n'*|*$'\r'*|*$'\t'*) return 1 ;; esac
+  [ "$name" != "${name%:}" ] || return 1
+  target="$name$W"
+  spawn_verify_tmux_recorded_target "$target" || rc=$?
+  if [ "$rc" -eq 1 ]; then
+    fm_tmux_pane_command "$WT_TARGET" display-message -p '#{pane_id}' >/dev/null || return 1
+    fm_tmux_session_command "$session" rename-window ":$window" -- "$W" || return 1
+    spawn_verify_tmux_recorded_target "$target" || return 1
+  elif [ "$rc" -ne 0 ]; then
+    return 1
   fi
-  echo "error: recorded tmux target $T no longer identifies the bound endpoint for task $ID" >&2
-  return 1
+  fm_backlog_meta_spawn_gen "$meta" "$STATE" && [ "$FM_BACKLOG_META_SPAWN_GEN" = "$SPAWN_GEN" ] || return 1
+  SPAWN_META_TMP="$STATE/.$ID.meta.window.${BASHPID:-$$}"
+  FM_SPAWN_REPAIRED_WINDOW="$target" awk -F= '
+    $1 == "window" { print "window=" ENVIRON["FM_SPAWN_REPAIRED_WINDOW"]; next }
+    { print }
+  ' "$meta" > "$SPAWN_META_TMP" &&
+    fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$meta" "task record" "$STATE" || return 1
+  SPAWN_META_TMP=
+  echo "warning: repaired tmux target for task $ID from $META_WINDOW to $target after launch" >&2
+  T=$target
+  META_WINDOW=$target
 }
 
 spawn_abort_cleanup() {
@@ -4793,6 +4818,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   SPAWN_META_TMP="$STATE/.$ID.meta.relaunch.${BASHPID:-$$}"
 else
   SPAWN_META_TMP="$STATE/.$ID.meta.spawn.${BASHPID:-$$}"
+  SPAWN_FRESH_COMMIT_PENDING=1
 fi
 SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
@@ -4858,14 +4884,14 @@ preserve_relaunch_meta() {
   echo "error: task record for $ID could not be prepared at $SPAWN_META_PATH" >&2
   exit 1
 }
-if ! spawn_verify_tmux_recorded_target; then
+if [ "$BACKEND" = tmux ] && ! spawn_verify_tmux_recorded_target "$T"; then
+  echo "error: recorded tmux target $T no longer identifies the bound endpoint for task $ID" >&2
   if [ "$RELAUNCH" -eq 0 ]; then
     spawn_close_endpoint 2>/dev/null || true
   fi
   exit 1
 fi
 if [ "$RELAUNCH" -eq 0 ]; then
-  SPAWN_FRESH_COMMIT_PENDING=1
   if ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"; then
     echo "error: task record for $ID could not be published ($FM_BACKLOG_TRANSITION_ERROR)" >&2
     exit 1
@@ -5230,7 +5256,15 @@ if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
   fm_lock_acquire_wait "$SPAWN_META_LOCK"
   SPAWN_META_LOCK_HELD=1
 fi
-spawn_verify_tmux_recorded_target || exit 1
+if [ "$BACKEND" = tmux ] && ! spawn_verify_tmux_recorded_target "$T"; then
+  SPAWN_FRESH_COMMIT_PENDING=0
+  RELAUNCH_RECREATE=0
+  if ! spawn_repair_tmux_recorded_target; then
+    echo "error: could not repair tmux target $T for launched task $ID; worker and task record retained for reconciliation" >&2
+    exit 1
+  fi
+  [ "$RELAUNCH" -ne 0 ] || SPAWN_FRESH_COMMIT_PENDING=1
+fi
 SPAWN_DEFERRED_SIGNAL=
 if [ "$BACKLOG_TRANSITION" = 1 ]; then
   trap 'SPAWN_DEFERRED_SIGNAL=HUP' HUP

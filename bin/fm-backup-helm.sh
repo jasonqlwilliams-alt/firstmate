@@ -540,7 +540,7 @@ helm_launch() {
   case "$HELM_BACKEND" in
     tmux)
       fm_backend_source tmux || return 1
-      fm_backend_tmux_send_literal "$HELM_TARGET" "$cmd" || return 1
+      fm_backend_tmux_send_literal "$HELM_TARGET" "$cmd" explicit || return 1
       fm_backend_tmux_send_key "$HELM_TARGET" Enter explicit
       ;;
     herdr)
