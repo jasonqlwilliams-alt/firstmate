@@ -134,9 +134,9 @@ case "${1:-}" in
     exit 0 ;;
   has-session|new-session|set-window-option) exit 0 ;;
   kill-window)
-    window=${*: -1}
-    window=${window##*:=}
-    awk -v window="$window" '$0 != window' "$D/windows" > "$D/windows.remaining" || exit 1
+    target=${*: -1}
+    window=${target##*:=}
+    awk -v target="$target" -v window="$window" '"@" NR != target && $0 != window' "$D/windows" > "$D/windows.remaining" || exit 1
     mv "$D/windows.remaining" "$D/windows"
     exit $? ;;
   new-window)

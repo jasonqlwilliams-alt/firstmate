@@ -1114,10 +1114,13 @@ spawn_task_tmp_is_current() {
 
 spawn_publish_task_meta() {
   if ! spawn_task_tmp_is_current; then
+    if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" = secondmate ]; then
+      SPAWN_ENDPOINT_ABORT_CLEANUP=1
+    fi
     FM_BACKLOG_TRANSITION_ERROR="temporary directory changed before metadata publication"
     return 1
   fi
-  if [ "$RELAUNCH" -eq 1 ] || [ "$SPAWN_ENDPOINT_ABORT_CLEANUP" = 1 ]; then
+  if [ "$RELAUNCH" -eq 1 ]; then
     SPAWN_META_PUBLISH_STARTED=1
   fi
   fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"
@@ -1217,7 +1220,13 @@ spawn_abort_cleanup() {
   if [ "$status" -ne 0 ] \
      && [ "$SPAWN_ENDPOINT_ABORT_CLEANUP" = 1 ] \
      && [ "$SPAWN_META_PUBLISH_STARTED" != 1 ]; then
-    fm_backend_kill "$BACKEND" "$T" "${ZELLIJ_TAB_ID:-}" "$W" 2>/dev/null || true
+    if [ "$BACKEND" = tmux ]; then
+      if [[ "${WID:-}" =~ ^@[0-9]+$ ]]; then
+        tmux kill-window -t "$WID" 2>/dev/null || true
+      fi
+    else
+      fm_backend_kill "$BACKEND" "$T" "${ZELLIJ_TAB_ID:-}" "$W" 2>/dev/null || true
+    fi
   fi
   if [ "$SPAWN_TASK_LOCK_HELD" = 1 ]; then
     SPAWN_TASK_LOCK_HELD=0
@@ -3326,15 +3335,6 @@ if [ -e "$STATE/$ID.backlog-close" ] || [ -L "$STATE/$ID.backlog-close" ]; then
 fi
 
 W="fm-$ID"
-task_tmp_meta="$STATE/$ID.meta"
-if [ "$RELAUNCH" -eq 0 ] && ! {
-  [ "$KIND" = secondmate ] && [ -f "$task_tmp_meta" ] && [ ! -L "$task_tmp_meta" ] \
-    && [ "$(fm_meta_get "$task_tmp_meta" kind)" = secondmate ] \
-    && [ "$(fm_meta_get "$task_tmp_meta" home)" = "$PROJ_ABS" ] \
-    && [ -z "$(fm_meta_get "$task_tmp_meta" remote_host)" ]
-}; then
-  task_tmp_meta=
-fi
 if [ "$RELAUNCH" -eq 1 ]; then
   # A secondmate's home already resolved WT above through the same validation a
   # fresh secondmate spawn uses; every other kind takes the recorded worktree.
@@ -3622,7 +3622,7 @@ EOF
     ;;
 esac
 fi
-if [ "$RELAUNCH_RECREATE" = 1 ] || { [ "$RELAUNCH" -eq 0 ] && [ -n "$task_tmp_meta" ]; }; then
+if [ "$RELAUNCH_RECREATE" = 1 ]; then
   SPAWN_ENDPOINT_ABORT_CLEANUP=1
 fi
 if [ "$BACKEND" = herdr ] && { [ "$RELAUNCH" -eq 0 ] || [ "$RELAUNCH_RECREATE" -eq 1 ]; }; then
@@ -4115,7 +4115,13 @@ fi
 # alongside later. The short suffix keeps paths inside the socket-path limits
 # Go and tmux impose. GOTMPDIR (not TMPDIR) is the targeted knob: TMPDIR is too
 # broad (affects every program's temp, not just Go's).
-if [ -n "$task_tmp_meta" ]; then
+task_tmp_meta="$STATE/$ID.meta"
+if [ "$RELAUNCH" -eq 1 ] || {
+  [ "$KIND" = secondmate ] && [ -f "$task_tmp_meta" ] && [ ! -L "$task_tmp_meta" ] \
+    && [ "$(fm_meta_get "$task_tmp_meta" kind)" = secondmate ] \
+    && [ "$(fm_meta_get "$task_tmp_meta" home)" = "$PROJ_ABS" ] \
+    && [ -z "$(fm_meta_get "$task_tmp_meta" remote_host)" ]
+}; then
   recorded_task_tmp=$(fm_meta_get "$task_tmp_meta" tasktmp)
   if TASK_TMP=$(fm_task_tmp_private_root "$recorded_task_tmp" "$ID"); then
     TASK_TMP_RECORD=$recorded_task_tmp
@@ -4129,7 +4135,12 @@ if [ -z "$TASK_TMP" ]; then
   TASK_TMP_RECORD=$TASK_TMP
   SPAWN_TASK_TMP_CREATED=1
 else
-  TASK_TMP_IDENTITY=$(fm_task_tmp_identity "$TASK_TMP") || exit 1
+  TASK_TMP_IDENTITY=$(fm_task_tmp_identity "$TASK_TMP") || {
+    if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" = secondmate ]; then
+      SPAWN_ENDPOINT_ABORT_CLEANUP=1
+    fi
+    exit 1
+  }
 fi
 mkdir -p "$TASK_TMP/gotmp"
 
@@ -4868,8 +4879,6 @@ if [ "$RELAUNCH" -eq 0 ]; then
     echo "error: task record for $ID could not be published ($FM_BACKLOG_TRANSITION_ERROR)" >&2
     exit 1
   fi
-  SPAWN_ENDPOINT_ABORT_CLEANUP=0
-  SPAWN_META_PUBLISH_STARTED=0
   SPAWN_META_TMP=
 fi
 
