@@ -1,0 +1,85 @@
+FirstMate base | baseline | tmux 3.7c
+Persisted tasktmp=/tmp/./fm-lab-baseline
+$ fm-teardown.sh lab-baseline
+teardown lab-baseline complete (window firstmate:fm-lab-baseline, worktree /tmp/baseline.fTt8nS/no-copy)
+Backlog: lab-baseline just finished (config/backlog-backend selects manual editing). Update /tmp/baseline.fTt8nS/home/data/backlog.md - move lab-baseline to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+[exit 0]
+Shared directory sentinel removed by teardown.
+Observed expected product behavior.
+FirstMate live | baseline | tmux 3.7c
+Persisted tasktmp=/tmp/./fm-lab-baseline
+$ fm-teardown.sh lab-baseline
+teardown lab-baseline complete (window firstmate:fm-lab-baseline, worktree /tmp/baseline.hnT4kZ/no-copy)
+Backlog: lab-baseline just finished (config/backlog-backend selects manual editing). Update /tmp/baseline.hnT4kZ/home/data/backlog.md - move lab-baseline to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+[exit 0]
+Shared directory and sentinel preserved.
+Observed expected product behavior.
+FirstMate live | refused | tmux 3.7c
+$ fm-spawn.sh lab-refused /tmp/refused.R8wxau/project --mode local-only --yolo off --harness bash\ /tmp/refused.R8wxau/worker.sh\ /tmp/refused.R8wxau/worker.out
+notice: lab-refused ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned lab-refused harness=bash kind=ship mode=local-only yolo=off window=firstmate:fm-lab-refused worktree=/tmp/refused.R8wxau/pool/.treehouse/project-fd0bdd/1/project
+[exit 0]
+WORKER_GOTMPDIR=/tmp/fm-lab-refused+SZb9vR/gotmp
+Persisted tasktmp=/tmp/refused.R8wxau//tmp-link/./fm-lab-refused/
+Detached process PID 904 cwd=/tmp/fm-lab-refused/gotmp
+$ fm-spawn.sh lab-refused --relaunch --harness bash\ /tmp/refused.R8wxau/worker.sh\ /tmp/refused.R8wxau/worker.out
+notice: lab-refused ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned lab-refused harness=bash kind=ship mode=local-only yolo=off window=firstmate:fm-lab-refused worktree=/tmp/refused.R8wxau/pool/.treehouse/project-fd0bdd/1/project
+[exit 0]
+WORKER_GOTMPDIR=/tmp/fm-lab-refused+hTIXG4/gotmp
+Persisted tasktmp=/tmp/fm-lab-refused+hTIXG4
+$ fm-teardown.sh lab-refused
+teardown: reaping leaked worktree process(es) for lab-refused: 1309
+teardown: force-killing leaked worktree process(es) for lab-refused: 1309
+🌳 Worktree returned to pool.
+teardown lab-refused complete (window firstmate:fm-lab-refused, worktree /tmp/refused.R8wxau/pool/.treehouse/project-fd0bdd/1/project)
+Backlog: lab-refused just finished (config/backlog-backend selects manual editing). Update /tmp/refused.R8wxau/home/data/backlog.md - move lab-refused to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+[exit 0]
+Unowned sentinel and cwd process preserved. Task metadata retired.
+Observed expected product behavior.
+FirstMate live | refused | tmux 3.7c
+$ fm-spawn.sh lab-refused /tmp/refused.0bKA7N/project --mode local-only --yolo off --harness bash\ /tmp/refused.0bKA7N/worker.sh\ /tmp/refused.0bKA7N/worker.out
+notice: lab-refused ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned lab-refused harness=bash kind=ship mode=local-only yolo=off window=firstmate:fm-lab-refused worktree=/tmp/refused.0bKA7N/pool/.treehouse/project-9048fd/1/project
+[exit 0]
+WORKER_GOTMPDIR=/tmp/fm-lab-refused+UA4ha1/gotmp
+Persisted tasktmp=private/
+Detached process PID 903 cwd=/tmp/refused.0bKA7N/private/gotmp
+$ fm-spawn.sh lab-refused --relaunch --harness bash\ /tmp/refused.0bKA7N/worker.sh\ /tmp/refused.0bKA7N/worker.out
+notice: lab-refused ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned lab-refused harness=bash kind=ship mode=local-only yolo=off window=firstmate:fm-lab-refused worktree=/tmp/refused.0bKA7N/pool/.treehouse/project-9048fd/1/project
+[exit 0]
+WORKER_GOTMPDIR=/tmp/fm-lab-refused+beE3MK/gotmp
+Persisted tasktmp=/tmp/fm-lab-refused+beE3MK
+$ fm-teardown.sh lab-refused
+teardown: reaping leaked worktree process(es) for lab-refused: 1308
+teardown: force-killing leaked worktree process(es) for lab-refused: 1308
+🌳 Worktree returned to pool.
+teardown lab-refused complete (window firstmate:fm-lab-refused, worktree /tmp/refused.0bKA7N/pool/.treehouse/project-9048fd/1/project)
+Backlog: lab-refused just finished (config/backlog-backend selects manual editing). Update /tmp/refused.0bKA7N/home/data/backlog.md - move lab-refused to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+[exit 0]
+Unowned sentinel and cwd process preserved. Task metadata retired.
+Observed expected product behavior.
+FirstMate live | refused | tmux 3.7c
+$ fm-spawn.sh lab-refused /tmp/refused.DzMhPk/project --mode local-only --yolo off --harness bash\ /tmp/refused.DzMhPk/worker.sh\ /tmp/refused.DzMhPk/worker.out
+notice: lab-refused ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned lab-refused harness=bash kind=ship mode=local-only yolo=off window=firstmate:fm-lab-refused worktree=/tmp/refused.DzMhPk/pool/.treehouse/project-830c9c/1/project
+[exit 0]
+WORKER_GOTMPDIR=/tmp/fm-lab-refused+tM5eLn/gotmp
+Persisted tasktmp=/tmp/refused.DzMhPk/leaf/.
+Detached process PID 903 cwd=/tmp/refused.DzMhPk/private/gotmp
+$ fm-spawn.sh lab-refused --relaunch --harness bash\ /tmp/refused.DzMhPk/worker.sh\ /tmp/refused.DzMhPk/worker.out
+notice: lab-refused ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned lab-refused harness=bash kind=ship mode=local-only yolo=off window=firstmate:fm-lab-refused worktree=/tmp/refused.DzMhPk/pool/.treehouse/project-830c9c/1/project
+[exit 0]
+WORKER_GOTMPDIR=/tmp/fm-lab-refused+D9oiyS/gotmp
+Persisted tasktmp=/tmp/fm-lab-refused+D9oiyS
+$ fm-teardown.sh lab-refused
+teardown: reaping leaked worktree process(es) for lab-refused: 1308
+teardown: force-killing leaked worktree process(es) for lab-refused: 1308
+🌳 Worktree returned to pool.
+teardown lab-refused complete (window firstmate:fm-lab-refused, worktree /tmp/refused.DzMhPk/pool/.treehouse/project-830c9c/1/project)
+Backlog: lab-refused just finished (config/backlog-backend selects manual editing). Update /tmp/refused.DzMhPk/home/data/backlog.md - move lab-refused to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+[exit 0]
+Unowned sentinel and cwd process preserved. Task metadata retired.
+Observed expected product behavior.

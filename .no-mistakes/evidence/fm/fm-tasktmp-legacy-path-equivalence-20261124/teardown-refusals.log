@@ -1,0 +1,19 @@
+FirstMate live | scan | tmux 3.7c
+Detached process PID 29 cwd=/tmp/scan.KUx89z/physical/private/gotmp
+$ fm-teardown.sh lab-scan
+REFUSED: task lab-scan's temporary directory changed during the process scan.
+[exit 1]
+Real lsof enumerated PID 29 before rename. Both directories, process and byte-identical task record survived.
+Observed expected product behavior.
+FirstMate live | permission | tmux 3.7c
+$ fm-teardown.sh lab-permission
+REFUSED: cannot inspect task temporary directory /tmp/permission.6jUKlW//alias/./pivot/../private/ for lab-permission; retaining the task record.
+[exit 1]
+After restoring search permission, the original build artifact and byte-identical task record were still present.
+Observed expected product behavior.
+FirstMate live | permission | tmux 3.7c
+$ fm-teardown.sh lab-permission
+REFUSED: cannot inspect task temporary directory /tmp/permission.nB2Hrk//alias/./pivot/../private/ for lab-permission; retaining the task record.
+[exit 1]
+After restoring search permission, the original build artifact and byte-identical task record were still present.
+Observed expected product behavior.

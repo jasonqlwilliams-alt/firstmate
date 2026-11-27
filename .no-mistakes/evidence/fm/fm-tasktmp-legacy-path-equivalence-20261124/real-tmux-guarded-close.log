@@ -1,0 +1,22 @@
+ok - explicit tmux pane syntax works for capture and presence
+ok - open worker window reads its own screen
+ok - precondition: raw tmux resolves the closed name to the surviving neighbour
+ok - capture: closed worker window reads as missing, not the neighbour's screen
+ok - liveness: closed worker window reads as missing
+ok - agent state: closed worker window is missing
+ok - composer, busy, and process reads: closed worker window reads nothing
+ok - fm-peek: closed recorded worker reads as missing
+skip: tmux rejects multiline window names
+ok - surviving neighbour still reads its own screen
+ok - repeated links to one window resolve to that window
+ok - duplicate worker names leave the endpoint unresolved
+ok - a qualified percent-prefixed name reads exactly
+ok - inventory preserves non-ASCII names from a C locale
+ok - inventory matches format punctuation in window names literally
+ok - inventory reads a session with a terminal semicolon
+ok - closed recorded session reads as missing despite a prefix-named session
+ok - dotted window name reads exactly beside a live decoy
+ok - detached spawn creates and reuses the literal firstmate session
+ok - guarded close closes the window the task created
+ok - guarded close leaves a window whose name no longer matches
+ok - guarded close leaves another home's window that reused the id after a restart

@@ -1,0 +1,62 @@
+FirstMate live | abort | tmux 3.7c
+$ fm-spawn.sh lab-abort --relaunch --harness bash\ /tmp/abort.L7arxS/worker.sh\ /tmp/abort.L7arxS/worker.out
+error: replacement task record for lab-abort could not be published (temporary directory changed before metadata publication)
+warning: task lab-abort's temporary directory remains at /tmp/abort.L7arxS/physical/private; inspect it after closing endpoint firstmate:fm-lab-abort
+[exit 1]
+@0 firstmate:helm
+@1 firstmate:neighbour
+@2 firstmate:fm-lab-abort
+After refusal:
+@0 firstmate:helm
+@1 firstmate:neighbour
+Prior task record and both scratch sentinels preserved. Worker did not launch.
+Observed expected product behavior.
+FirstMate live | abort | tmux 3.7c
+$ fm-spawn.sh lab-abort --secondmate --harness bash\ /tmp/abort.S3aTZw/worker.sh\ /tmp/abort.S3aTZw/worker.out
+error: task record for lab-abort could not be published (temporary directory changed before metadata publication)
+warning: task lab-abort's temporary directory remains at /tmp/abort.S3aTZw/physical/private; inspect it after closing endpoint firstmate:fm-lab-abort
+[exit 1]
+@0 firstmate:helm
+@1 firstmate:neighbour
+@2 firstmate:fm-lab-abort
+After refusal:
+@0 firstmate:helm
+@1 firstmate:neighbour
+Prior task record and both scratch sentinels preserved. Worker did not launch.
+Observed expected product behavior.
+FirstMate live | abort | tmux 3.7c
+$ fm-spawn.sh lab-abort --secondmate --harness bash\ /tmp/abort.8gw2cq/worker.sh\ /tmp/abort.8gw2cq/worker.out
+error: task record for lab-abort could not be published (temporary directory changed before metadata publication)
+warning: task lab-abort's temporary directory remains at /tmp/abort.8gw2cq/physical/private; inspect it after closing endpoint firstmate:fm-lab-abort
+[exit 1]
+@0 firstmate:helm
+@1 firstmate:neighbour
+@2 firstmate:fm-lab-abort
+After same-name replacement by another home:
+@0 firstmate:helm
+@1 firstmate:neighbour
+@3 firstmate:fm-lab-abort
+After refusal:
+@0 firstmate:helm
+@1 firstmate:neighbour
+@3 firstmate:fm-lab-abort
+Prior task record and both scratch sentinels preserved. Worker did not launch.
+Observed expected product behavior.
+FirstMate live | fresh-refusal | tmux 3.7c
+$ fm-spawn.sh lab-fresh-refusal --secondmate --harness bash\ /tmp/fresh-refusal.UVt7IS/worker.sh\ /tmp/fresh-refusal.UVt7IS/worker.out
+mktemp: failed to create directory via template ‘/tmp/fm-lab-fresh-refusal+XXXXXX’: Permission denied
+error: could not create a private task temp root under /tmp for lab-fresh-refusal
+[exit 1]
+@0 firstmate:helm
+@1 firstmate:fm-lab-fresh-refusal
+Prior task record survived. Recovery window remains open for the unrelated allocation failure.
+Observed expected product behavior.
+FirstMate live | late-refusal | tmux 3.7c
+$ fm-spawn.sh lab-late-refusal --relaunch --harness bash\ /tmp/late-refusal.WkC2Ah/worker.sh\ /tmp/late-refusal.WkC2Ah/worker.out
+error: task lab-late-refusal's temporary directory changed before launch delivery
+warning: task lab-late-refusal's temporary directory remains at /tmp/late-refusal.WkC2Ah/physical/private; inspect it after closing endpoint firstmate:fm-lab-late-refusal
+[exit 1]
+@0 firstmate:helm
+Persisted tasktmp=/tmp/late-refusal.WkC2Ah//alias/./pivot/../private/
+Published task record and both directories preserved, with no GOTMPDIR export or worker launch.
+Observed expected product behavior.

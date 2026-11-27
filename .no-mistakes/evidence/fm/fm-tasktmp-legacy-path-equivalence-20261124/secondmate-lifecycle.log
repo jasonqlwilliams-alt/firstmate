@@ -1,0 +1,21 @@
+FirstMate live | recovery | tmux 3.7c
+$ fm-spawn.sh lab-recovery --secondmate --harness bash\ /tmp/recovery.O4PLrL/worker.sh\ /tmp/recovery.O4PLrL/worker.out
+spawned lab-recovery harness=bash kind=secondmate mode=secondmate yolo=off window=firstmate:fm-lab-recovery worktree=/tmp/recovery.O4PLrL/mate
+[exit 0]
+WORKER_GOTMPDIR=/tmp/recovery.O4PLrL/physical/private/gotmp
+Persisted tasktmp=/tmp/recovery.O4PLrL//alias/./pivot/../private/
+Recovered secondmate saw its existing build artifact.
+Observed expected product behavior.
+FirstMate live | force-child | tmux 3.7c
+Before forced teardown:
+@0 firstmate:helm
+@1 firstmate:fm-lab-child
+@2 firstmate:fm-lab-held
+@3 firstmate:fm-lab-force-child
+$ fm-teardown.sh lab-force-child --force
+teardown lab-force-child complete (window firstmate:fm-lab-force-child, worktree /tmp/force-child.zbDDDe/mate)
+[exit 0]
+After forced teardown:
+@0 firstmate:helm
+Secondmate home and private child scratch absent. Shared child sentinel and alias present.
+Observed expected product behavior.

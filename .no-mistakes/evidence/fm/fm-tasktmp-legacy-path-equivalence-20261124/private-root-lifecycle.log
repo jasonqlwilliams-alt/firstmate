@@ -1,0 +1,23 @@
+FirstMate live | private | tmux 3.7c
+$ fm-spawn.sh lab-private /tmp/private.BHEabH/project --mode local-only --yolo off --harness bash\ /tmp/private.BHEabH/worker.sh\ /tmp/private.BHEabH/worker.out
+notice: lab-private ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned lab-private harness=bash kind=ship mode=local-only yolo=off window=firstmate:fm-lab-private worktree=/tmp/private.BHEabH/pool/.treehouse/project-44e253/1/project
+[exit 0]
+WORKER_GOTMPDIR=/tmp/fm-lab-private+TtOOBN/gotmp
+Persisted tasktmp=/tmp/private.BHEabH//alias/./pivot/../private/
+Detached process PID 904 cwd=/tmp/private.BHEabH/physical/private/gotmp
+$ fm-spawn.sh lab-private --relaunch --harness bash\ /tmp/private.BHEabH/worker.sh\ /tmp/private.BHEabH/worker.out
+notice: lab-private ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned lab-private harness=bash kind=ship mode=local-only yolo=off window=firstmate:fm-lab-private worktree=/tmp/private.BHEabH/pool/.treehouse/project-44e253/1/project
+[exit 0]
+WORKER_GOTMPDIR=/tmp/private.BHEabH/physical/private/gotmp
+Relaunch preserved recorded spelling and build artifact.
+$ fm-teardown.sh lab-private
+teardown: reaping leaked worktree process(es) for lab-private: 904 1309
+teardown: force-killing leaked worktree process(es) for lab-private: 1309
+🌳 Worktree returned to pool.
+teardown lab-private complete (window firstmate:fm-lab-private, worktree /tmp/private.BHEabH/pool/.treehouse/project-44e253/1/project)
+Backlog: lab-private just finished (config/backlog-backend selects manual editing). Update /tmp/private.BHEabH/home/data/backlog.md - move lab-private to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+[exit 0]
+Private root absent, parent alias present, task record and window absent, detached process exit=143.
+Observed expected product behavior.
