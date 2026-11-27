@@ -41,7 +41,7 @@ if [ "${1:-}" = send-keys ]; then
   for arg in "$@"; do
     case "$arg" in
       *'treehouse get'*)
-        (cd "$FM_TEST_PROJECT" && eval "$arg" && pwd > "$FM_TEST_CWD") || exit 1
+        (unset TREEHOUSE_ROOT; cd "$FM_TEST_PROJECT" && eval "$arg" && pwd > "$FM_TEST_CWD") || exit 1
         case "${FM_TEST_ABORT_MODE:-}" in
           clean|base-mismatch) git -C "$(cat "$FM_TEST_CWD")" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*' ;;
           modified) printf 'keep this work\n' > "$(cat "$FM_TEST_CWD")/preserved.txt" ;;

@@ -6,8 +6,8 @@
 #   fm-treehouse-scratch.sh run [--] <command> [args...]
 #   fm-treehouse-scratch.sh --help
 #
-# Treehouse places every pool it creates under its root, which TREEHOUSE_ROOT
-# overrides (only an explicit --root outranks it). A fixture repository or a
+# Treehouse v3.1.8 or newer honors TREEHOUSE_ROOT ahead of configured roots
+# (only an explicit --root outranks it). A fixture repository or a
 # reproduction that runs `treehouse get`, `status`, `return`, or `lease`
 # against the default root leaves a pool folder there that nothing ever
 # removes. `run` executes <command> with TREEHOUSE_ROOT pointed at a fresh
@@ -25,12 +25,26 @@
 #
 # Sourcing this file defines the functions below and changes nothing.
 # bin/fm-test-run.sh gives every suite it runs its own scratch root, and
-# tests/lib.sh and tests/herdr-test-safety.sh enter one for a suite run on its
-# own. A directory is treated as a scratch root only when it carries the marker
+# tests/lib.sh and the standalone Herdr spawn fixture enter one for a suite
+# run on its own. A directory is treated as a scratch root only when it carries the marker
 # file this helper writes, so removal can never reach the real root or any
 # directory a caller merely named.
 
 FM_TREEHOUSE_SCRATCH_MARKER=.fm-treehouse-scratch
+
+fm_treehouse_require_compatible() {
+  local version major minor patch
+  version=$(treehouse --version 2>/dev/null) || version=
+  if [[ "$version" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+    major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]} patch=${BASH_REMATCH[3]}
+    if (( 10#$major > 3 || (10#$major == 3 &&
+      (10#$minor > 1 || (10#$minor == 1 && 10#$patch >= 8))) )); then
+      return 0
+    fi
+  fi
+  printf 'Treehouse v3.1.8 or newer is required (found %s).\n' "${version:-none}" >&2
+  return 1
+}
 
 # Create a scratch root under <parent> (default ${TMPDIR:-/tmp}) and print its
 # physical path.
@@ -68,6 +82,11 @@ fm_treehouse_scratch_active() {
 fm_treehouse_scratch_enter() {  # [<parent>]
   local root
   FM_TREEHOUSE_SCRATCH_CREATED=
+  TREEHOUSE_NO_UPDATE_CHECK=1
+  export TREEHOUSE_NO_UPDATE_CHECK
+  if command -v treehouse >/dev/null 2>&1; then
+    fm_treehouse_require_compatible || return 1
+  fi
   fm_treehouse_scratch_active && return 0
   root=$(fm_treehouse_scratch_create "$@") || return 1
   TREEHOUSE_ROOT=$root

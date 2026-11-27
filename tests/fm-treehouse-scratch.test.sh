@@ -14,7 +14,10 @@ set -u
 
 TMP_ROOT=$(fm_test_tmproot fm-treehouse-scratch)
 FAKE_HOME="$TMP_ROOT/home"
-mkdir -p "$FAKE_HOME/.config"
+USER_ROOT="$TMP_ROOT/configured-user-root"
+REPO_ROOT="$TMP_ROOT/configured-repo-root"
+mkdir -p "$FAKE_HOME/.config/treehouse" "$USER_ROOT" "$REPO_ROOT"
+printf 'root = "%s"\n' "$USER_ROOT" > "$FAKE_HOME/.config/treehouse/config.toml"
 
 # Run a command as if from an operator shell: no inherited scratch root, and a
 # HOME whose default Treehouse root is the one that must stay untouched.
@@ -29,6 +32,8 @@ assert_no_pools() {  # <who>
   local extra
   extra=$(find "$FAKE_HOME/.treehouse" -mindepth 1 ! -name update-check.json 2>/dev/null)
   [ -z "$extra" ] || fail "$1 created pool folders under the real Treehouse root: $extra"
+  [ -z "$(ls -A "$USER_ROOT")" ] || fail "$1 wrote into the configured user root"
+  [ -z "$(ls -A "$REPO_ROOT")" ] || fail "$1 wrote into the configured repository root"
 }
 
 test_runner_leaves_real_root_untouched() {
@@ -48,14 +53,15 @@ if command -v treehouse >/dev/null 2>&1; then
   trap 'rm -rf "$proj"' EXIT
   git init -q -b main "$proj"
   git -C "$proj" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
-  (cd "$proj" && SHELL=/bin/true treehouse get --no-fetch </dev/null >/dev/null 2>&1)
-  ls "$TREEHOUSE_ROOT/.treehouse" | grep -q '^fm-scratch-proj'
+  printf 'root = "%s"\n' "$FM_CONFIGURED_REPO_ROOT" > "$proj/treehouse.toml"
+  path=$(cd "$proj" && treehouse get --lease --lease-holder fixture)
+  case "$path" in "$TREEHOUSE_ROOT"/*) [ -d "$path" ] ;; *) exit 1 ;; esac
 fi
 SH
   cp "$repo/tests/fm-test-run.test.sh" "$repo/tests/fm-test-isolation-proof.test.sh"
   for jobs in 1 2; do
     : > "$seen"
-    as_operator FM_TEST_SEEN="$seen" "$repo/bin/fm-test-run.sh" --jobs "$jobs" \
+    as_operator FM_TEST_SEEN="$seen" FM_CONFIGURED_REPO_ROOT="$REPO_ROOT" "$repo/bin/fm-test-run.sh" --jobs "$jobs" \
       tests/fm-test-run.test.sh tests/fm-test-isolation-proof.test.sh > "$log" 2>&1 \
       || fail "runner suite failed under a scratch root (jobs=$jobs): $(cat "$log")"
     assert_grep 'failed=0' "$log" "runner did not run the fixture suite (jobs=$jobs)"
@@ -76,7 +82,7 @@ test_runner_overrides_an_inherited_real_root() {
   local repo="$TMP_ROOT/runner" seen="$TMP_ROOT/override-seen" log="$TMP_ROOT/override.log" real="$TMP_ROOT/real-root"
   mkdir -p "$real"
   : > "$seen"
-  as_operator TREEHOUSE_ROOT="$real" FM_TEST_SEEN="$seen" "$repo/bin/fm-test-run.sh" \
+  as_operator TREEHOUSE_ROOT="$real" FM_TEST_SEEN="$seen" FM_CONFIGURED_REPO_ROOT="$REPO_ROOT" "$repo/bin/fm-test-run.sh" \
     tests/fm-test-run.test.sh > "$log" 2>&1 || fail "override run failed: $(cat "$log")"
   [ "$(cat "$seen")" != "$real" ] || fail "runner passed an inherited real TREEHOUSE_ROOT through"
   [ -z "$(ls -A "$real")" ] || fail "inherited real root gained entries: $(ls -A "$real")"
@@ -104,8 +110,15 @@ test_lib_standalone_and_inherited() {
 }
 
 test_reproduction_helper() {
-  local out rc root unmarked="$TMP_ROOT/unmarked"
-  out=$(as_operator "$ROOT/bin/fm-treehouse-scratch.sh" run bash -c 'printf "%s\n" "$TREEHOUSE_ROOT"; exit 7') && rc=0 || rc=$?
+  local out rc root unmarked="$TMP_ROOT/unmarked" project="$TMP_ROOT/repro-project"
+  fm_git_init_commit "$project"
+  out=$(as_operator "$ROOT/bin/fm-treehouse-scratch.sh" run bash -c '
+    if command -v treehouse >/dev/null 2>&1; then
+      path=$(cd "$1" && treehouse get --lease --lease-holder fixture) || exit 1
+      case "$path" in "$TREEHOUSE_ROOT"/*) [ -d "$path" ] || exit 1 ;; *) exit 1 ;; esac
+    fi
+    printf "%s\n" "$TREEHOUSE_ROOT"; exit 7
+  ' _ "$project") && rc=0 || rc=$?
   expect_code 7 "$rc" "run must propagate the command's exit status"
   root=$out
   case "$root" in "$FAKE_HOME"/*|'') fail "run used the real root: '$root'" ;; esac
@@ -120,7 +133,54 @@ test_reproduction_helper() {
   pass "fm-treehouse-scratch.sh run isolates a reproduction and removal refuses unmarked directories"
 }
 
+test_old_treehouse_is_refused() {
+  local fake_bin="$TMP_ROOT/old-bin" marker="$TMP_ROOT/reproduction-started" out
+  mkdir -p "$fake_bin"
+  cat > "$fake_bin/treehouse" <<'SH'
+#!/usr/bin/env bash
+[ "$1" = --version ] || exit 1
+printf 'v2.0.1\n'
+SH
+  chmod +x "$fake_bin/treehouse"
+  if out=$(as_operator PATH="$fake_bin:$PATH" "$ROOT/bin/fm-treehouse-scratch.sh" run touch "$marker" 2>&1); then
+    fail "reproduction accepted Treehouse v2.0.1"
+  fi
+  assert_contains "$out" "found v2.0.1" "refusal explains the incompatible tool"
+  assert_absent "$marker" "reproduction started before compatibility was established"
+
+  if out=$(as_operator PATH="$fake_bin:$PATH" bash -c '. "$1"; touch "$2"' \
+    _ "$ROOT/tests/lib.sh" "$marker" 2>&1); then
+    fail "direct test kept running after rejecting Treehouse v2.0.1: $out"
+  fi
+  assert_contains "$out" "found v2.0.1" "direct setup explains the incompatible tool"
+  assert_absent "$marker" "direct test continued after scratch setup failed"
+
+  if out=$(as_operator PATH="$fake_bin:$PATH" TREEHOUSE_ROOT="$TREEHOUSE_ROOT" \
+    FM_TREEHOUSE_SCRATCH_ROOT="$TREEHOUSE_ROOT" "$ROOT/bin/fm-treehouse-scratch.sh" \
+    run touch "$marker" 2>&1); then
+    fail "inherited scratch setup accepted Treehouse v2.0.1"
+  fi
+  assert_contains "$out" "found v2.0.1" "nested setup explains the incompatible tool"
+  assert_absent "$marker" "nested command ran with incompatible Treehouse"
+  pass "standalone and nested runs reject old Treehouse before running the command"
+}
+
+test_standalone_herdr_fixture_owns_root() {
+  local fixture="$TMP_ROOT/herdr-fixture" root
+  mkdir -p "$fixture"
+  root=$(as_operator bash -c '
+    . "$1" && herdr_treehouse_scratch "$2" && printf "%s\n" "$TREEHOUSE_ROOT"
+  ' _ "$ROOT/tests/herdr-test-safety.sh" "$fixture") || fail "standalone Herdr scratch setup failed"
+  case "$root" in "$fixture"/*) ;; *) fail "Herdr scratch root escaped its fixture: $root" ;; esac
+  assert_present "$root" "standalone Herdr scratch root was not created"
+  rm -rf -- "$fixture"
+  assert_absent "$root" "Herdr scratch root survived fixture cleanup"
+  pass "standalone Herdr scratch is owned by the fixture directory"
+}
+
 test_runner_leaves_real_root_untouched
 test_runner_overrides_an_inherited_real_root
 test_lib_standalone_and_inherited
 test_reproduction_helper
+test_old_treehouse_is_refused
+test_standalone_herdr_fixture_owns_root

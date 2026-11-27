@@ -14,7 +14,7 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 # shellcheck source=bin/fm-check-lib.sh
 . "$SCRIPT_DIR/fm-check-lib.sh"
 
-if [ "$#" -ne 1 ] || ! fm_pr_task_id_valid "$1"; then
+if [ "$#" -ne 1 ] || ! fm_custom_check_id_valid "$1"; then
   echo "error: invalid custom check registration" >&2
   exit 2
 fi

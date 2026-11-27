@@ -2353,7 +2353,7 @@ run_script_bounded() {  # <script> <out> <stream> <id>
   # no fixture repository can create a pool folder under the real root and
   # concurrent suites never share one; bin/fm-treehouse-scratch.sh owns the
   # contract. The root is removed as soon as the suite exits.
-  local TREEHOUSE_ROOT FM_TREEHOUSE_SCRATCH_ROOT FM_TREEHOUSE_SCRATCH_CREATED
+  local TREEHOUSE_ROOT FM_TREEHOUSE_SCRATCH_ROOT= FM_TREEHOUSE_SCRATCH_CREATED TREEHOUSE_NO_UPDATE_CHECK
   # shellcheck source=bin/fm-treehouse-scratch.sh
   . "$ROOT/bin/fm-treehouse-scratch.sh" || return
   fm_treehouse_scratch_enter "$RUN_TMP" || {

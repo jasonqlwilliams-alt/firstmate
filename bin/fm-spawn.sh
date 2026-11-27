@@ -3926,12 +3926,16 @@ if [ "$RELAUNCH" -eq 1 ]; then
   fi
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   # Check legacy or lost leases before get can reset any reusable slot.
-  fm_treehouse_require_recorded_leases "$PROJ_ABS" "$STATE" || exit 1
+  fm_treehouse_require_recorded_leases "$STATE" allocation "$PROJ_ABS" || exit 1
   SPAWN_SLOT_ACQUIRE_FILE=$(umask 077; mktemp "$STATE/.$ID.treehouse-acquire.XXXXXX") || exit 1
   # A process lease ends with the shell, while a task record can remain held.
   # Acquire durably and enter that exact path in the existing pane shell.
+  treehouse_root_flag=
+  if [ -n "${TREEHOUSE_ROOT:-}" ]; then
+    printf -v treehouse_root_flag ' --root %q' "$TREEHOUSE_ROOT"
+  fi
   # shellcheck disable=SC2016 # Expansion belongs to the destination pane shell.
-  spawn_send_text_line "$WT_TARGET" "fm_acquired_slot=\$(treehouse get --lease --lease-holder $(printf '%q' "$ID")) && fm_acquired_base=\$(git -C \"\$fm_acquired_slot\" rev-parse --verify HEAD) && printf '%s\n%s\n' \"\$fm_acquired_slot\" \"\$fm_acquired_base\" > $(printf '%q' "$SPAWN_SLOT_ACQUIRE_FILE") && cd -- \"\$fm_acquired_slot\""
+  spawn_send_text_line "$WT_TARGET" "fm_acquired_slot=\$(treehouse get --lease --lease-holder $(printf '%q' "$ID")$treehouse_root_flag) && fm_acquired_base=\$(git -C \"\$fm_acquired_slot\" rev-parse --verify HEAD) && printf '%s\n%s\n' \"\$fm_acquired_slot\" \"\$fm_acquired_base\" > $(printf '%q' "$SPAWN_SLOT_ACQUIRE_FILE") && cd -- \"\$fm_acquired_slot\""
 
   # Wait for the acquired path: the pane's cwd moves from project to worktree.
   # Target the stable window id, not the name: if the name is ever lost (e.g. an

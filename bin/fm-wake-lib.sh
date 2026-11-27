@@ -1628,7 +1628,7 @@ fm_treehouse_collect_owner_states() {  # <record-state>
     [ "$known" = 1 ] || FM_TREEHOUSE_OWNER_STATES+=("$home/state")
     reg="$home/data/secondmates.md"
     [ ! -e "$reg" ] && [ ! -L "$reg" ] && continue
-    [ -f "$reg" ] && [ ! -L "$reg" ] || {
+    [ -f "$reg" ] && [ ! -L "$reg" ] && [ -r "$reg" ] || {
       echo "REFUSED: local Firstmate registry is unsafe at $reg; nothing was changed" >&2
       return 1
     }
@@ -1655,7 +1655,7 @@ fm_treehouse_collect_owner_states() {  # <record-state>
           [ "$known" = 1 ] || homes+=("$child")
           ;;
       esac
-    done < "$reg"
+    done < "$reg" || return 1
   done
 }
 
@@ -1699,47 +1699,68 @@ fm_treehouse_slot_foreign_records() {  # <worktree> <exclude-meta>
   [ "$found" = 1 ]
 }
 
-# Refuse allocation before Treehouse can reset a recorded slot whose durable
-# lease is missing. Callers hold the project's allocation/return lock. Inspect
-# every reachable local home, including held and exited tasks: metadata, rather
-# than a running process, is the preservation boundary. This reads state only.
-fm_treehouse_require_recorded_leases() {  # <project> <record-state>
-  local project=$1 record_state=$2 state_dir meta field path slot pool state slot_name project_identity slot_identity
-  project_identity=$(fm_treehouse_repo_identity "$project") || return 1
+# Inspect reachable local homes, including held and exited tasks, for recorded
+# slots that lack durable leases. This reads state only.
+fm_treehouse_require_recorded_leases() {  # <record-state> <allocation <project> | prune [<unleased-checkout>...]>
+  local record_state=$1 operation=$2 state_dir meta meta_data line field path
+  local project project_identity slot pool state slot_name slot_identity candidate refusal='refusing Treehouse prune'
+  shift 2
+  if [ "$operation" = allocation ]; then
+    project=$1
+    project_identity=$(fm_treehouse_repo_identity "$project") || return 1
+    refusal='refusing allocation before Treehouse can reset that copy'
+  fi
   fm_treehouse_collect_owner_states "$record_state" || return 1
   for state_dir in "${FM_TREEHOUSE_OWNER_STATES[@]}"; do
+    [ ! -e "$state_dir" ] && [ ! -L "$state_dir" ] && continue
+    [ -d "$state_dir" ] && [ ! -L "$state_dir" ] && [ -r "$state_dir" ] && [ -x "$state_dir" ] || {
+      echo "REFUSED: cannot inspect task records in $state_dir before Treehouse $operation" >&2
+      return 1
+    }
     for meta in "$state_dir"/*.meta; do
       [ -e "$meta" ] || [ -L "$meta" ] || continue
-      [ -f "$meta" ] && [ ! -L "$meta" ] && [ -r "$meta" ] || {
-        echo "REFUSED: cannot inspect task record $meta before Treehouse allocation" >&2
+      [ -f "$meta" ] && [ ! -L "$meta" ] && meta_data=$(cat -- "$meta") || {
+        echo "REFUSED: cannot inspect task record $meta before Treehouse $operation" >&2
         return 1
       }
       for field in worktree home; do
-        path=$(_fm_treehouse_meta_field "$meta" "$field")
+        path=
+        while IFS= read -r line; do
+          case "$line" in "$field="*) path=${line#*=} ;; esac
+        done <<< "$meta_data"
         [ -n "$path" ] || continue
         slot=$(fm_treehouse_canonical_dir "$path") || continue
-        pool=${slot%/*}; slot_name=${pool##*/}; pool=${pool%/*}
-        state="$pool/treehouse-state.json"
-        if [ -f "$state" ] && [ ! -L "$state" ] \
-           && jq -e '.worktrees | type == "array"' "$state" >/dev/null 2>&1; then
-          jq -e --arg slot "$slot" '.worktrees | any(.[]; .path == $slot)' "$state" >/dev/null 2>&1 || continue
-          fm_treehouse_pool_slot "$project" "$slot" || continue
+        if [ "$operation" = prune ]; then
+          candidate=
+          for candidate in "$@"; do
+            [ "$candidate" != "$slot" ] || break
+          done
+          [ "$candidate" = "$slot" ] || continue
         else
-          case "$slot_name" in ''|*[!0-9]*) continue ;; esac
-          slot_identity=$(fm_treehouse_repo_identity "$slot") || {
-            echo "REFUSED: cannot verify recorded Treehouse-shaped path $slot before allocation; inspect task $(basename "$meta" .meta)" >&2
-            return 1
-          }
-          [ "$slot_identity" = "$project_identity" ] || continue
+          pool=${slot%/*}; slot_name=${pool##*/}; pool=${pool%/*}
+          state="$pool/treehouse-state.json"
+          if [ -f "$state" ] && [ ! -L "$state" ] \
+             && jq -e '.worktrees | type == "array"' "$state" >/dev/null 2>&1; then
+            jq -e --arg slot "$slot" '.worktrees | any(.[]; .path == $slot)' "$state" >/dev/null 2>&1 || continue
+            fm_treehouse_pool_slot "$project" "$slot" || continue
+          else
+            case "$slot_name" in ''|*[!0-9]*) continue ;; esac
+            slot_identity=$(fm_treehouse_repo_identity "$slot") || {
+              echo "REFUSED: cannot verify recorded Treehouse-shaped path $slot before allocation; inspect task $(basename "$meta" .meta)" >&2
+              return 1
+            }
+            [ "$slot_identity" = "$project_identity" ] || continue
+          fi
+          if [ ! -L "$state" ] && jq -e --arg slot "$slot" '
+            .worktrees | map(select(.path == $slot))
+            | length == 1 and .[0].leased == true
+          ' "$state" >/dev/null 2>&1; then
+            continue
+          fi
         fi
-        if [ -L "$state" ] || ! jq -e --arg slot "$slot" '
-          .worktrees | map(select(.path == $slot))
-          | length == 1 and .[0].leased == true
-        ' "$state" >/dev/null 2>&1; then
-          echo "REFUSED: Treehouse pool slot $slot is still recorded by task $(basename "$meta" .meta) ($field) but lacks a durable lease; refusing allocation before Treehouse can reset that copy" >&2
-          echo "Repair its lease with the state-only treehouse lease command, or retire a stale record with fm-teardown.sh <id> --retire-stale-record; no allocation was sent" >&2
-          return 1
-        fi
+        echo "REFUSED: Treehouse pool slot $slot is still recorded by task $(basename "$meta" .meta) ($field) but lacks a durable lease; $refusal" >&2
+        echo "Repair its lease with the state-only treehouse lease command, or retire a stale record with fm-teardown.sh <id> --retire-stale-record" >&2
+        return 1
       done
     done
   done

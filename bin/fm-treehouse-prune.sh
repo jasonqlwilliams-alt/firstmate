@@ -1,53 +1,16 @@
 #!/usr/bin/env bash
-# fm-treehouse-prune.sh - remove idle, available Treehouse pool slots on a
-# schedule, never a slot anything still holds.
+# fm-treehouse-prune.sh - schedule a daily Treehouse pool prune.
 #
 # Usage:
-#   fm-treehouse-prune.sh run [--dry-run]   sweep now and print each decision
-#   fm-treehouse-prune.sh check             watcher entry (see the header)
-#   fm-treehouse-prune.sh arm               write and register state/treehouse-prune.check.sh
-#   fm-treehouse-prune.sh disarm            retire the check and its records
-#   fm-treehouse-prune.sh status            print whether it is armed and the last sweep
+#   fm-treehouse-prune.sh arm       register the daily prune with this home's watcher
+#   fm-treehouse-prune.sh disarm    retire the registration and its records
 #   fm-treehouse-prune.sh --help
 #
-# Off by default: nothing is swept until a home runs `arm` (or `run` by hand).
-#
-# Pools swept are the pools of this home's own repository and of every clone
-# under its projects/ directory, at whatever root Treehouse resolves for them
-# (TREEHOUSE_ROOT, then Treehouse's own configuration). Each slot is read from
-# `treehouse status --json`, and one is removed only when every test passes:
-#
-#   - Treehouse reports it `available`, with no lease and no running process;
-#   - it is not listed in config/treehouse-prune-protected;
-#   - it carries no Firstmate slot-owner claim (.fm-slot-owner), readable or not;
-#   - no task record in any local home this machine can see (this home's root,
-#     and every locally registered secondmate home beneath it) names it as a
-#     worktree= or home=, per fm_treehouse_slot_foreign_records in
-#     bin/fm-wake-lib.sh; a home scan that cannot be trusted stops the sweep;
-#   - it is not itself a Firstmate home.
-#
-# A slot that passes is removed one at a time with `treehouse destroy <path>
-# --yes` and no --include-* flag, so Treehouse re-checks it at removal time and
-# skips anything dirty, unmerged, in use, or leased by then. A skipped slot is
-# kept and reported, never forced. Nothing outside a pool slot is touched; pool
-# folders themselves are left in place.
-#
-# config/treehouse-prune-protected (local, gitignored, not inherited) lists
-# protected slots: one absolute path per line, blank lines and `#` comments
-# ignored. A listed path protects the slot whose worktree, or whose slot
-# directory, is that path or lies beneath it. A relative or otherwise unusable
-# line stops the sweep rather than being skipped, so a typo cannot unprotect a
-# slot. docs/configuration.md owns the operator contract.
-#
-# `check` is what the watcher runs. It prints one line only when the last
-# sweep failed and that failure has not been reported yet, and nothing
-# otherwise. When FM_TREEHOUSE_PRUNE_INTERVAL seconds (default 86400, valid
-# 3600..2592000) have passed since the last sweep started and none is running,
-# it starts a sweep detached from the watcher, because removing gigabytes of
-# worktrees can outlast the watcher's per-check bound. The sweep's last output
-# is kept in state/.treehouse-prune.log and its result in state/.treehouse-prune.
+# The registered check runs the sweep in a separate session. See
+# docs/configuration.md for pool scope, protection, and sweep records.
 set -u
 export LC_ALL=C
+umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}}"
@@ -55,365 +18,231 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 CONFIG_DIR="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 PROJECTS_DIR="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
 PROTECTED_FILE="$CONFIG_DIR/treehouse-prune-protected"
-CHECK_ID=treehouse-prune
-CHECK_SHIM="$STATE/$CHECK_ID.check.sh"
-CHECK_TRUST="$STATE/$CHECK_ID.check-trust"
 RECORD="$STATE/.treehouse-prune"
 LOG="$STATE/.treehouse-prune.log"
 LOCK="$STATE/.treehouse-prune.lock"
-STATUS_SECS=60
-DESTROY_SECS=900
 
 usage() {
-  sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,7p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
-die_usage() {
+fail() {
   printf 'fm-treehouse-prune: %s\n' "$1" >&2
-  usage >&2
-  exit 2
+  return 1
 }
 
-INTERVAL=
+# shellcheck disable=SC2034 # read by bin/fm-wake-lib.sh at load
+FM_WAKE_NO_MKDIR=1
+# shellcheck source=bin/fm-wake-lib.sh
+. "$SCRIPT_DIR/fm-wake-lib.sh"
+# shellcheck source=bin/fm-pr-lib.sh
+. "$SCRIPT_DIR/fm-pr-lib.sh"
+# shellcheck source=bin/fm-check-lib.sh
+. "$SCRIPT_DIR/fm-check-lib.sh"
+# shellcheck source=bin/fm-timeout-lib.sh
+. "$SCRIPT_DIR/fm-timeout-lib.sh"
+# shellcheck source=bin/fm-treehouse-scratch.sh
+. "$SCRIPT_DIR/fm-treehouse-scratch.sh"
 
-# Only the actions that schedule read the interval, so a bad value never stops
-# a manual sweep or a disarm.
-load_interval() {
-  INTERVAL=${FM_TREEHOUSE_PRUNE_INTERVAL:-86400}
-  case "$INTERVAL" in
-    ''|*[!0-9]*) INTERVAL=-1 ;;
-  esac
-  if [ "$INTERVAL" -lt 3600 ] || [ "$INTERVAL" -gt 2592000 ]; then
-    printf 'fm-treehouse-prune: FM_TREEHOUSE_PRUNE_INTERVAL must be a whole number from 3600 to 2592000\n' >&2
-    exit 2
-  fi
-}
+CHECK_ID="$FM_TREEHOUSE_PRUNE_CHECK_ID"
+CHECK_SHIM="$STATE/$CHECK_ID.check.sh"
+CHECK_TRUST="$STATE/$CHECK_ID.check-trust"
 
-now_epoch() {
-  case "${FM_TREEHOUSE_PRUNE_NOW:-}" in
-    ''|*[!0-9]*) date +%s ;;
-    *) printf '%s\n' "$FM_TREEHOUSE_PRUNE_NOW" ;;
-  esac
-}
-
-canonical_dir() {  # <path>
-  [ -n "$1" ] && [ -d "$1" ] || return 1
-  CDPATH='' cd -P -- "$1" 2>/dev/null && pwd -P
-}
-
-# --- record -----------------------------------------------------------------
-
-record_get() {  # <key>
-  local line value=''
+record_get() {
   [ -f "$RECORD" ] && [ ! -L "$RECORD" ] || return 0
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in
-      "$1="*) value=${line#*=} ;;
-    esac
-  done < "$RECORD"
-  printf '%s' "$value"
+  sed -n "s/^$1=//p" "$RECORD"
 }
 
-# Rewrite the record with <key>=<value> pairs replacing their old values.
-record_set() {  # <key>=<value>...
-  local tmp pair key line keep
-  mkdir -p "$STATE" || return 1
-  tmp=$(umask 077; mktemp "$STATE/.treehouse-prune.XXXXXX") || return 1
-  if [ -f "$RECORD" ] && [ ! -L "$RECORD" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do
-      keep=1
-      for pair in "$@"; do
-        key=${pair%%=*}
-        case "$line" in "$key="*) keep=0 ;; esac
-      done
-      [ "$keep" = 0 ] || printf '%s\n' "$line"
-    done < "$RECORD" > "$tmp"
+record_set() {
+  local tmp
+  [ ! -d "$RECORD" ] || return 1
+  tmp=$(mktemp "$STATE/.treehouse-prune.XXXXXX") || return 1
+  if ! printf '%s\n' "last_start=$1" "last_result=$2" "reported=$3" > "$tmp" ||
+    ! mv -f -- "$tmp" "$RECORD"; then
+    rm -f -- "$tmp"
+    return 1
   fi
-  for pair in "$@"; do
-    printf '%s\n' "${pair//$'\n'/ }" >> "$tmp"
-  done
-  mv -f -- "$tmp" "$RECORD" || { rm -f -- "$tmp"; return 1; }
 }
 
-# --- protected slots ----------------------------------------------------------
+sweep_due() {
+  local last
+  last=$(record_get last_start)
+  case "$last" in ''|*[!0-9]*) last=0 ;; esac
+  [ "$(($1 - 10#$last))" -ge 86400 ]
+}
 
-PROTECTED=()
-
-load_protected() {
-  local line n=0 path
-  PROTECTED=()
+check_protected() {
+  local line list physical entry leased missing=0
   [ -e "$PROTECTED_FILE" ] || [ -L "$PROTECTED_FILE" ] || return 0
-  [ -f "$PROTECTED_FILE" ] && [ -r "$PROTECTED_FILE" ] || {
-    printf 'cannot read protected-slot list %s\n' "$PROTECTED_FILE"
+  [ -f "$PROTECTED_FILE" ] && list=$(cat -- "$PROTECTED_FILE") || {
+    printf 'Cannot read protected-slot list %s\n' "$PROTECTED_FILE"
     return 1
   }
-  while IFS= read -r line || [ -n "$line" ]; do
-    n=$((n + 1))
-    line=${line%%#*}
-    line=${line#"${line%%[![:space:]]*}"}
-    line=${line%"${line##*[![:space:]]}"}
-    [ -n "$line" ] || continue
-    case "$line" in
-      /*) ;;
-      *)
-        printf 'protected-slot list %s line %s is not an absolute path: %s\n' "$PROTECTED_FILE" "$n" "$line"
-        return 1
-        ;;
-    esac
-    path=${line%/}
-    [ -n "$path" ] || path=/
-    PROTECTED+=("$path")
-    # A listed path that exists is matched by its physical path as well.
-    if path=$(canonical_dir "$line"); then
-      PROTECTED+=("$path")
-    fi
-  done < "$PROTECTED_FILE"
+  while IFS= read -r line; do
+    case "${line#"${line%%[![:space:]]*}"}" in ''|\#*) continue ;; esac
+    [[ "$line" = /* ]] || { printf 'Expected an absolute protected-slot path: %s\n' "$line"; return 1; }
+    physical=$(fm_treehouse_canonical_dir "$line") || physical=
+    leased=0
+    for entry in "$@"; do
+      [ "$physical" = "${entry:1}" ] || continue
+      leased=${entry:0:1}
+      [ "$leased" = 1 ] || break
+    done
+    [ "$leased" = 0 ] || continue
+    printf 'Protected slot needs a Treehouse lease: %s\n' "$line"
+    missing=1
+  done <<< "$list"
+  return "$missing"
 }
 
-under() {  # <path> <prefix>
-  [ "$2" = / ] && return 0
-  case "$1" in
-    "$2"|"$2"/*) return 0 ;;
-  esac
-  return 1
-}
-
-protected_slot() {  # <worktree> <physical-worktree>
-  local p
-  for p in "${PROTECTED[@]+"${PROTECTED[@]}"}"; do
-    under "$1" "$p" && return 0
-    under "$2" "$p" && return 0
-    under "${1%/*}" "$p" && return 0
-    under "${2%/*}" "$p" && return 0
-  done
-  return 1
-}
-
-# --- sweep --------------------------------------------------------------------
-
-sweep_repos() {
-  local d
-  canonical_dir "$FM_HOME" >/dev/null && git -C "$FM_HOME" rev-parse --git-dir >/dev/null 2>&1 \
-    && canonical_dir "$FM_HOME"
-  for d in "$PROJECTS_DIR"/*/; do
-    [ -d "$d" ] || continue
-    git -C "$d" rev-parse --git-dir >/dev/null 2>&1 || continue
-    canonical_dir "$d"
-  done
-}
-
-# A slot that holds a Firstmate home must never go, even unclaimed.
-slot_is_home() {  # <physical-worktree>
-  local s home
-  for s in "${FM_TREEHOUSE_OWNER_STATES[@]+"${FM_TREEHOUSE_OWNER_STATES[@]}"}"; do
-    home=$(canonical_dir "${s%/state}") || continue
-    [ "$home" = "$1" ] && return 0
-  done
-  [ -f "$1/bin/fm-session-start.sh" ] && { [ -d "$1/state" ] || [ -d "$1/data" ]; }
-}
-
-# Prints decisions; returns 0 when the sweep completed, 1 when it stopped.
-sweep() {  # <dry-run 0|1>
-  local dry=$1 repo json rows name path status lease procs phys reason rc out
-  local removed=0 kept=0 seen='|' none_meta
-  command -v treehouse >/dev/null 2>&1 || { echo 'stopped: treehouse is not installed'; return 1; }
-  command -v jq >/dev/null 2>&1 || { echo 'stopped: jq is not installed'; return 1; }
-  load_protected || { echo 'stopped: protected-slot list is unusable'; return 1; }
-  # Every local home's records are read before anything is removed.
-  none_meta="$STATE/.treehouse-prune.none.meta"
-  fm_treehouse_collect_owner_states "$STATE" 2>&1 || { echo 'stopped: cannot read every local home'"'"'s task records'; return 1; }
-  while IFS= read -r repo; do
-    [ -n "$repo" ] || continue
-    json=$(cd "$repo" && fm_run_timed "$STATUS_SECS" treehouse status --json 2>/dev/null) || {
-      echo "stopped: treehouse status failed for $repo"
-      return 1
-    }
-    # Every field is non-empty, because read collapses adjacent tab separators.
-    rows=$(printf '%s' "$json" | jq -r '
-      if type == "array" then .[] else error("not an array") end
-      | [(.name // "-"), .path, (.status // "-"),
-         (if (.lease_id // "") == "" then "-" else "leased" end),
-         ((.processes // []) | length)]
-      | map(tostring) | @tsv') || { echo "stopped: unreadable treehouse status for $repo"; return 1; }
-    while IFS=$'\t' read -r name path status lease procs; do
-      [ -n "$path" ] || continue
-      case "$seen" in *"|$path|"*) continue ;; esac
-      seen="$seen$path|"
-      reason=
-      phys=$(canonical_dir "$path") || phys=$path
-      if [ "$status" != available ]; then
-        reason="treehouse reports it $status"
-      elif [ "$lease" != - ]; then
-        reason='leased'
-      elif [ "$procs" != 0 ]; then
-        reason='in use'
-      elif [ ! -d "$path" ]; then
-        reason='missing on disk'
-      elif protected_slot "$path" "$phys"; then
-        reason='protected'
-      elif [ -e "${phys%/*}/.fm-slot-owner" ] || [ -L "${phys%/*}/.fm-slot-owner" ]; then
-        reason='carries a Firstmate slot-owner claim'
-      elif slot_is_home "$phys"; then
-        reason='is a Firstmate home'
-      else
-        rc=0
-        out=$(fm_treehouse_slot_foreign_records "$phys" "$none_meta" 2>&1) || rc=$?
-        case "$rc" in
-          0) reason="named by task record $(printf '%s' "$out" | head -1 | cut -f1)" ;;
-          1) ;;
-          *) echo "stopped: cannot read every local home's task records: $out"; return 1 ;;
-        esac
+sweep() {
+  local dir repo json rows row leased name physical parent out rc=0
+  local -a repos=() slots=() unleased=()
+  fm_treehouse_require_compatible || return 1
+  for dir in "$FM_HOME" "$PROJECTS_DIR"/*/; do
+    repo=$(fm_treehouse_canonical_dir "$dir") || continue
+    [ "$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" = "$repo" ] || continue
+    repos+=("$repo")
+    json=$(cd "$repo" && fm_run_timed 60 treehouse status --json) || return 1
+    rows=$(jq -r '
+      if type == "array" then .[] else error("expected Treehouse status array") end
+      | select(.path | contains("\n") | not)
+      | [(if (.lease_id | type == "string" and length > 0) then "1" else "0" end), .name, .path]
+      | join("\t")
+    ' <<< "$json") || return 1
+    while IFS= read -r row; do
+      [ -n "$row" ] || continue
+      leased=${row%%$'\t'*}
+      row=${row#*$'\t'}
+      name=${row%%$'\t'*}
+      physical=$(fm_treehouse_canonical_dir "${row#*$'\t'}") || continue
+      slots+=("$leased$physical")
+      parent=${physical%/*}
+      if [ "${parent##*/}" = "$name" ]; then
+        slots+=("$leased$parent")
       fi
-      if [ -n "$reason" ]; then
-        printf 'kept %s: %s\n' "$path" "$reason"
-        kept=$((kept + 1))
-        continue
-      fi
-      if [ "$dry" = 1 ]; then
-        printf 'would remove %s\n' "$path"
-        removed=$((removed + 1))
-        continue
-      fi
-      rc=0
-      out=$(cd "$repo" && fm_run_timed "$DESTROY_SECS" treehouse destroy "$path" --yes 2>&1) || rc=$?
-      if [ "$rc" = 0 ] && [ ! -e "$path" ]; then
-        printf 'removed %s\n' "$path"
-        removed=$((removed + 1))
-      else
-        printf 'kept %s: treehouse declined: %s\n' "$path" \
-          "$(printf '%s\n' "$out" | grep -E 'did not destroy|error' | tail -1)"
-        kept=$((kept + 1))
-      fi
+      [ "$leased" = 1 ] || unleased+=("$physical")
     done <<< "$rows"
-    : "$name"
-  done < <(sweep_repos)
-  if [ "$dry" = 1 ]; then
-    printf 'summary: would remove %s, keep %s\n' "$removed" "$kept"
-  else
-    printf 'summary: removed %s, kept %s\n' "$removed" "$kept"
-  fi
-}
-
-action_run() {
-  local dry=0 rc=0 start out summary
-  case "${1:-}" in
-    '') ;;
-    --dry-run) dry=1 ;;
-    *) die_usage "unknown run option: $1" ;;
-  esac
-  mkdir -p "$STATE" || return 1
-  # shellcheck source=bin/fm-timeout-lib.sh
-  . "$SCRIPT_DIR/fm-timeout-lib.sh" || return 1
-  # shellcheck disable=SC2034 # read by bin/fm-wake-lib.sh at load
-  FM_WAKE_NO_MKDIR=1
-  # shellcheck source=bin/fm-wake-lib.sh
-  . "$SCRIPT_DIR/fm-wake-lib.sh" || return 1
-  if ! fm_lock_try_acquire "$LOCK"; then
-    echo 'fm-treehouse-prune: a sweep is already running' >&2
-    return 1
-  fi
-  start=$(now_epoch)
-  [ "$dry" = 1 ] || record_set "last_start=$start"
-  out=$(sweep "$dry") || rc=$?
-  printf '%s\n' "$out"
-  summary=$(printf '%s\n' "$out" | grep -E '^(summary|stopped):' | tail -1)
-  if [ "$dry" = 0 ]; then
-    if [ "$rc" = 0 ]; then
-      record_set "last_end=$(now_epoch)" "last_result=ok" "last_summary=$summary"
-    else
-      record_set "last_end=$(now_epoch)" "last_result=failed" "last_summary=$summary" "reported=0"
+  done
+  check_protected "${slots[@]+"${slots[@]}"}" || return 1
+  fm_treehouse_require_recorded_leases "$STATE" prune "${unleased[@]+"${unleased[@]}"}" || return 1
+  for repo in "${repos[@]+"${repos[@]}"}"; do
+    printf 'Pruning pool for %s\n' "$repo"
+    out=$(cd "$repo" && fm_run_timed 900 treehouse prune --yes 2>&1) || {
+      printf 'Treehouse prune exited %s\n' "$?"
+      rc=1
+    }
+    printf '%s\n' "$out"
+    if grep -Eq '^  (cleanup failed|remove failed):$' <<< "$out"; then
+      rc=1
     fi
-  fi
-  fm_lock_release "$LOCK"
+  done
   return "$rc"
 }
 
-action_check() {
-  local last now result reported summary
-  load_interval
-  result=$(record_get last_result)
-  reported=$(record_get reported)
-  if [ "$result" = failed ] && [ "$reported" != 1 ]; then
-    summary=$(record_get last_summary)
-    record_set "reported=1" || true
-    printf 'treehouse pool prune failed: %s (see state/.treehouse-prune.log)\n' "${summary:-no detail}" | cut -c1-500
-  fi
-  last=$(record_get last_start)
-  case "$last" in ''|*[!0-9]*) last=0 ;; esac
-  now=$(now_epoch)
-  [ $((now - last)) -ge "$INTERVAL" ] || return 0
-  # Recording the start here keeps the next poll from launching a second sweep
-  # before this one takes its lock; the sweep's own lock covers the rest.
-  record_set "last_start=$now" || return 0
-  # Detach the sweep from the watcher: new session, no inherited descriptors.
-  if command -v setsid >/dev/null 2>&1; then
-    setsid "$SCRIPT_DIR/fm-treehouse-prune.sh" run </dev/null >"$LOG" 2>&1 &
-  else
-    nohup "$SCRIPT_DIR/fm-treehouse-prune.sh" run </dev/null >"$LOG" 2>&1 &
-  fi
-  return 0
-}
-
-shim_content() {  # <home>
+shim_content() {
   printf '%s\n' \
     '#!/usr/bin/env bash' \
-    '# Auto-generated by fm-treehouse-prune.sh - scheduled Treehouse pool prune shim.' \
-    '# The watcher validates these bytes, then dispatches the trusted script.' \
     "export FM_HOME=$(printf '%q' "$1")" \
     "exec $(printf '%q' "$SCRIPT_DIR/fm-treehouse-prune.sh") check"
 }
 
-action_arm() {
-  local home tmp
-  home=$(canonical_dir "$FM_HOME") || { echo "fm-treehouse-prune: cannot resolve FM_HOME $FM_HOME" >&2; return 1; }
-  mkdir -p "$STATE" || return 1
-  [ -d "$STATE" ] && [ ! -L "$STATE" ] || { echo 'fm-treehouse-prune: state directory is unavailable' >&2; return 1; }
-  if [ -L "$CHECK_SHIM" ] || { [ -e "$CHECK_SHIM" ] && [ ! -f "$CHECK_SHIM" ]; }; then
-    echo "fm-treehouse-prune: refusing to replace $CHECK_SHIM" >&2
-    return 1
-  fi
-  tmp=$(umask 077; mktemp "$STATE/.treehouse-prune-check.XXXXXX") || return 1
-  if ! shim_content "$home" > "$tmp" || ! chmod 0700 "$tmp" || ! mv -f -- "$tmp" "$CHECK_SHIM"; then
+prune_registered() {
+  fm_custom_check_registered "$STATE" "$CHECK_ID" &&
+    cmp -s "$CHECK_SHIM" <(shim_content "$1")
+}
+
+check_present() {
+  [ -e "$CHECK_SHIM" ] || [ -L "$CHECK_SHIM" ] ||
+    [ -e "$CHECK_TRUST" ] || [ -L "$CHECK_TRUST" ]
+}
+
+action_sweep() {
+  local now tmp result=ok
+  prune_registered "$FM_HOME" || return 0
+  now=$(date +%s) && sweep_due "$now" || return 0
+  [ ! -d "$LOG" ] || return 1
+  tmp=$(mktemp "$STATE/.treehouse-prune-log.XXXXXX") || return 1
+  if ! mv -f -- "$tmp" "$LOG"; then
     rm -f -- "$tmp"
-    echo "fm-treehouse-prune: could not write $CHECK_SHIM" >&2
     return 1
   fi
-  if ! FM_HOME="$home" "$SCRIPT_DIR/fm-check-register.sh" "$CHECK_ID" >/dev/null; then
-    rm -f -- "$CHECK_SHIM" "$CHECK_TRUST"
-    echo "fm-treehouse-prune: could not register $CHECK_SHIM" >&2
+  record_set "$now" running 0 || return 1
+  sweep > "$LOG" 2>&1 || result=failed
+  record_set "$now" "$result" 0
+}
+
+action_check() {
+  local now last result
+  prune_registered "$FM_HOME" || return 0
+  result=$(record_get last_result)
+  if [ "$result" = running ] ||
+    { [ "$result" = failed ] && [ "$(record_get reported)" != 1 ]; }; then
+    last=$(record_get last_start)
+    record_set "$last" failed 1 || return 1
+    printf 'Treehouse pool prune failed. See state/.treehouse-prune.log.\n'
+  fi
+  now=$(date +%s) && sweep_due "$now" || return 0
+  fm_lock_release "$LOCK" || return 1
+  if ! command -v setsid >/dev/null 2>&1 ||
+    ! setsid "$BASH" -c "$(printf '%q _sweep &' "$SCRIPT_DIR/fm-treehouse-prune.sh")" </dev/null >/dev/null 2>&1; then
+    printf 'Treehouse pool prune could not start a separate session with setsid.\n'
     return 1
+  fi
+}
+
+action_arm() {
+  local tmp
+  if check_present; then
+    prune_registered "$FM_HOME" || { fail "refusing to replace $CHECK_SHIM or its trust binding"; return 1; }
+  else
+    tmp=$(mktemp "$STATE/.treehouse-prune-check.XXXXXX") || return 1
+    if ! shim_content "$FM_HOME" > "$tmp" || ! chmod 0700 "$tmp" ||
+      ! ln -- "$tmp" "$CHECK_SHIM"; then
+      rm -f -- "$tmp"
+      return 1
+    fi
+    rm -f -- "$tmp"
+    if ! "$SCRIPT_DIR/fm-check-register.sh" "$CHECK_ID" >/dev/null; then
+      rm -f -- "$CHECK_SHIM"
+      return 1
+    fi
   fi
   printf 'armed: state/%s.check.sh\n' "$CHECK_ID"
 }
 
 action_disarm() {
-  if [ -e "$CHECK_SHIM" ] || [ -e "$CHECK_TRUST" ] || [ -L "$CHECK_SHIM" ] || [ -L "$CHECK_TRUST" ]; then
+  if check_present; then
+    prune_registered "$FM_HOME" || { fail "refusing to retire $CHECK_SHIM or its trust binding"; return 1; }
     "$SCRIPT_DIR/fm-check-unregister.sh" "$CHECK_ID" >/dev/null || return 1
   fi
-  rm -f -- "$RECORD" "$LOG"
+  rm -f -- "$RECORD" "$LOG" || return 1
   printf 'disarmed: state/%s.check.sh\n' "$CHECK_ID"
 }
 
-action_status() {
-  load_interval
-  if [ -f "$CHECK_SHIM" ] && [ -f "$CHECK_TRUST" ]; then
-    echo 'armed: yes'
-  else
-    echo 'armed: no'
-  fi
-  printf 'interval: %ss\n' "$INTERVAL"
-  printf 'last start: %s\n' "$(record_get last_start)"
-  printf 'last result: %s\n' "$(record_get last_result)"
-  printf 'last summary: %s\n' "$(record_get last_summary)"
-}
-
-case "${1:-}" in
-  run) shift; [ "$#" -le 1 ] || die_usage 'too many arguments'; action_run "$@" ;;
-  check) action_check ;;
+[ "$#" -eq 1 ] || { usage >&2; exit 2; }
+case "$1" in
+  -h|--help) usage; exit ;;
+  arm)
+    command -v setsid >/dev/null 2>&1 || { fail 'setsid is required to arm the scheduled prune'; exit 1; }
+    fm_treehouse_require_compatible && mkdir -p "$STATE" || exit 1
+    ;;
+  disarm) [ -e "$STATE" ] || [ -L "$STATE" ] || exit 0 ;;
+  check|_sweep) ;;
+  *) usage >&2; exit 2 ;;
+esac
+[ -d "$STATE" ] && [ ! -L "$STATE" ] || { fail 'state directory is unavailable'; exit 1; }
+FM_HOME=$(fm_treehouse_canonical_dir "$FM_HOME") || exit 1
+export FM_HOME
+if ! fm_lock_try_acquire "$LOCK"; then
+  case "$1" in check|_sweep) exit 0 ;; esac
+  fail 'the scheduled prune is busy'
+  exit 1
+fi
+trap 'fm_lock_release "$LOCK"' EXIT
+case "$1" in
   arm) action_arm ;;
   disarm) action_disarm ;;
-  status) action_status ;;
-  -h|--help) usage ;;
-  '') die_usage 'missing action' ;;
-  *) die_usage "unknown action: $1" ;;
+  check) action_check ;;
+  _sweep) action_sweep ;;
 esac

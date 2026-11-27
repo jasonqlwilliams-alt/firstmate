@@ -13,25 +13,15 @@ set -u
 # which the no-mistakes gate runs from a gate worktree, must be exempt).
 export FM_GATE_REFUSE_BYPASS=1
 
-# Real Herdr suites drive the real fm-spawn, whose `treehouse get` must never
-# create a pool under the real Treehouse root. Under bin/fm-test-run.sh the
-# runner's per-suite root is kept; a suite run on its own gets one under
-# ${TMPDIR:-/tmp}, removed with tests/lib.sh's temp roots when that library was
-# sourced first and otherwise left there for the system to reclaim.
-# bin/fm-treehouse-scratch.sh owns the contract.
-# shellcheck source=bin/fm-treehouse-scratch.sh
-. "$(dirname "${BASH_SOURCE[0]}")/../bin/fm-treehouse-scratch.sh"
-fm_treehouse_scratch_enter "${TMPDIR:-/tmp}" || {
-  echo 'herdr-test-safety: could not create a scratch Treehouse root' >&2
-  exit 1
-}
-if [ -n "$FM_TREEHOUSE_SCRATCH_CREATED" ] && [ -n "${FM_TEST_CLEANUP_REGISTRY:-}" ]; then
-  printf '%s\n' "$FM_TREEHOUSE_SCRATCH_CREATED" >> "$FM_TEST_CLEANUP_REGISTRY"
-fi
-
 HERDR_TEST_SAFETY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=/dev/null
 . "$HERDR_TEST_SAFETY_DIR/bin/fm-herdr-lab.sh"
+
+herdr_treehouse_scratch() {
+  # shellcheck source=bin/fm-treehouse-scratch.sh
+  . "$HERDR_TEST_SAFETY_DIR/bin/fm-treehouse-scratch.sh"
+  fm_treehouse_scratch_enter "$1"
+}
 
 # herdr_forget_inherited_pane: drop the Herdr PANE identity this test process
 # inherited from whatever terminal it was started in.

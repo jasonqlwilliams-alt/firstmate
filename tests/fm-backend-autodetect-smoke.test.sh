@@ -81,6 +81,7 @@ on_exit() {
   exit "$status"
 }
 trap on_exit EXIT
+herdr_treehouse_scratch "$TMP_ROOT" || fail "could not isolate Treehouse in the fixture"
 "$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION" || fail "could not provision isolated Herdr lab session"
 
 # --- scratch world: FM_HOME with NO backend config, one throwaway project ---

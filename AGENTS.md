@@ -88,7 +88,7 @@ config/wedge-alarm  optional away-mode wedge-alarm active-alert directives; LOCA
 config/packet-router-inbox  optional absolute path to this home's Packet Router inbox/new directory; LOCAL, gitignored, and not inherited; see docs/configuration.md "Packet Router inbox"
 config/bearings-canvas-dir  optional local Bearings Canvas export destination; see docs/configuration.md "Bearings detail canvas export"
 config/watched-tools.json  optional list of the tools this home depends on, read by the update check armed with bin/fm-tool-update-check.sh; LOCAL, gitignored, firstmate-maintained but human-editable, and NOT inherited by secondmate homes; see docs/configuration.md "Watched tool updates"
-config/treehouse-prune-protected  optional absolute paths of Treehouse pool slots the default-off scheduled prune (bin/fm-treehouse-prune.sh) must never remove; LOCAL, gitignored, and NOT inherited by secondmate homes; see docs/configuration.md "Treehouse pool prune"
+config/treehouse-prune-protected  optional absolute paths of leased Treehouse pool slots verified before the daily prune; LOCAL, gitignored, and NOT inherited by secondmate homes; see docs/configuration.md "Treehouse pool prune"
 config/x-mode.env    generated Relay watcher cadence; LOCAL, gitignored; source before arming watcher when present
 data/                personal fleet records; LOCAL, gitignored as a whole
   backlog.md         task queue, dependencies, history
@@ -128,7 +128,7 @@ state/               runtime records and signals; gitignored
   .lease-<task>        per-task supervision lease naming which actor (main or branch) may change that task; bin/fm-lease-lib.sh owns the contract the guarded scripts enforce
   x-watch.check.sh   generated Relay poll shim; present only when opted in (section 14)
   tool-updates.check.sh  generated watched-tool update poll shim and its .check-trust binding; present only after bin/fm-tool-update-check.sh arm; its report record .tool-updates is what keeps one pending update from being reported on every poll
-  treehouse-prune.check.sh  generated scheduled Treehouse pool prune shim and its .check-trust binding; present only after bin/fm-treehouse-prune.sh arm; .treehouse-prune and .treehouse-prune.log hold the last sweep's result and output
+  treehouse-prune+schedule.check.sh  generated scheduled Treehouse pool prune shim and its .check-trust binding; present only after bin/fm-treehouse-prune.sh arm; .treehouse-prune and .treehouse-prune.log hold the last sweep's result and output
   mail.check.sh      generated received-mail poll shim and its .check-trust binding; present only after bin/fm-mail-check.sh arm; report record .mail-check (mail schema: docs/configuration.md "Mail plane")
   .mail-seen .mail-woken .mail-retry .mail-retry-pos .mail-turn .mail-seen.lock  mail-plane poll cursor, emission journal, transient-fetch retry set, retry-scan position, contended-slot turn flag, and overlapping-poll lock; written only by bin/fm-mail.sh (mail schema: docs/configuration.md "Mail plane")
   pending-replies/   parent-owned secondmate pending-reply records (correlation id, delivery vs reply, recovery, escalation); fm-pending-reply-lib.sh
