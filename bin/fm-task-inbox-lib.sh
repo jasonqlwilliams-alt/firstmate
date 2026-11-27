@@ -4,7 +4,7 @@
 #
 # ONE owner of the steering-inbox contract: the record format, sequence
 # allocation, the idempotent re-enqueue dedup, the handled/ acknowledgement,
-# the self-describing doorbell line, and the watcher's re-ring ladder policy.
+# the doorbell notices, and the watcher's re-ring ladder policy.
 # bin/fm-send.sh writes and rings locally, the host-local remote steer leg
 # (bin/fm-remote-secondmate-control.sh cmd_send) writes idempotently and rings
 # on the remote host, bin/fm-watch.sh polls and re-rings, and the brief
@@ -48,8 +48,8 @@
 # FM_TASK_INBOX_GRACE_SECS is due one delivery attempt per grace period; an
 # attempt may ring or be refused by fm_task_inbox_ring's per-harness screen
 # gate (pending text, the Codex update picker, the Claude exit confirmation,
-# or an unproven screen on a Codex or Rovo pane), and every refusal counts as
-# an attempt. After
+# or an unproven screen on a Codex, Rovo, or agy pane), and every refusal
+# counts as an attempt. After
 # FM_TASK_INBOX_RING_MAX attempts without an acknowledgement it escalates. The
 # caller owns the busy and recovery-grade endpoint checks: a busy pane waits,
 # while a positively dead or missing endpoint skips delivery and the ladder and
@@ -60,9 +60,6 @@
 # writing the deduplication marker: normal polls surface a message once, while a
 # crash or marker failure may produce a rare duplicate rather than silently lose
 # a wake.
-#
-# Inbox paths containing bytes outside printable ASCII are unsupported. The
-# doorbell refuses them rather than sending terminal control bytes to a pane.
 #
 # fm_task_inbox_ring requires bin/fm-backend.sh's dispatch (sourced below); the
 # other helpers are dependency-light. Sourced by bin/fm-send.sh, bin/fm-watch.sh,
@@ -80,6 +77,8 @@ _FM_TASK_INBOX_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$_FM_TASK_INBOX_LIB_DIR/fm-wake-lib.sh"
 # shellcheck source=/dev/null
 . "$_FM_TASK_INBOX_LIB_DIR/fm-backend.sh"
+# shellcheck source=bin/fm-dod-lib.sh
+. "$_FM_TASK_INBOX_LIB_DIR/fm-dod-lib.sh"
 # shellcheck source=/dev/null
 . "$_FM_TASK_INBOX_LIB_DIR/fm-control-lib.sh"
 
@@ -255,15 +254,41 @@ fm_task_inbox_body() {  # <record-path>
   return 1
 }
 
-# The constant self-describing doorbell line for the inbox containing a record.
-# Self-describing on purpose: a worker whose brief predates the inbox contract
-# still receives the complete instruction in the line itself. The leading `: `
-# is the POSIX shell no-op, so the same line typed into a pane whose agent has
-# exited (a bare shell) runs nothing; see the dead-pane note in the header.
-# A non-printable path fails without output so terminal controls never reach
-# the pane's line discipline.
-fm_task_inbox_doorbell_line() {  # <record-path>
-  local dir=${1%/*} abs quoted LC_ALL=C
+_fm_task_inbox_brief_names_inbox() {  # <inbox-dir>
+  local inbox=$1 task=${1##*/} data=${FM_DATA_OVERRIDE:-${FM_HOME:+$FM_HOME/data}} brief section locator
+  local prefix="Firstmate steers you through durable message files in '" suffix="'." escaped_quote="'\\''"
+  [ -n "$data" ] || return 1
+  brief="$data/${task%.inbox}/launch-brief.md"
+  if [ ! -e "$brief" ] && [ ! -L "$brief" ]; then
+    brief="$data/${task%.inbox}/brief.md"
+  fi
+  section=$(fm_brief_heading_body "$brief" '# Firstmate instruction inbox' 2>/dev/null) || return 1
+  locator=${section%%$'\n'*}
+  case "$locator" in
+    "$prefix"/*"$suffix") ;;
+    *) return 1 ;;
+  esac
+  locator=${locator#"$prefix"}
+  locator=${locator%"$suffix"}
+  [[ ${locator//"$escaped_quote"/} != *"'"* ]] || return 1
+  locator=${locator//"$escaped_quote"/"'"}
+  [ -d "$locator" ] && [ "$locator" -ef "$inbox" ]
+}
+
+# The path-bearing doorbell supplies the inbox location to workers whose
+# briefs omit it. agy can use a shorter line for its one-row composer when
+# the brief identifies the inbox. The printable ASCII check applies to the
+# embedded path so terminal control bytes cannot reach the pane through the
+# notice. Both notices start with the POSIX shell no-op `: ` to protect a bare
+# shell from a complete line typed after the worker exits.
+FM_TASK_INBOX_AGY_DOORBELL=': Firstmate message waiting: read your inbox, act, mv to handled/.'
+fm_task_inbox_doorbell_line() {  # <record-path> [harness]
+  local dir=${1%/*} abs quoted
+  if [ "${2:-}" = agy ] && _fm_task_inbox_brief_names_inbox "$dir"; then
+    printf '%s' "$FM_TASK_INBOX_AGY_DOORBELL"
+    return 0
+  fi
+  local LC_ALL=C
   abs=$(cd "$dir" 2>/dev/null && pwd) || abs=$dir
   case "$abs" in
     *[![:print:]]*) return 1 ;;
@@ -283,28 +308,33 @@ fm_task_inbox_doorbell_line() {  # <record-path>
 #     either read, and a composer proven to hold pending text gets nothing
 #     typed, because our Enter could submit someone's half-typed content.
 #   - For Claude's exit confirmation, see docs/agent-control.md.
-#   - A pane recorded as harness=codex or harness=rovo additionally needs a
-#     proven-empty composer before typing and a composer proven to hold the
-#     doorbell before its Enter, rechecked briefly while the typed line
-#     renders. Rovo's idle placeholder chip reads empty only through its
-#     harness-scoped rule (bin/fm-composer-lib.sh "ROVO PLACEHOLDER CHIP").
+#   - A pane recorded as harness=codex, harness=rovo, or harness=agy
+#     additionally needs a proven-empty composer before typing and a composer
+#     proven to hold the doorbell before its Enter, rechecked briefly while
+#     the typed line renders. Rovo's idle placeholder chip and agy's `>` row
+#     read empty only through their harness-scoped rules (bin/fm-composer-lib.sh
+#     "ROVO PLACEHOLDER CHIP" and "AGY COMPOSER"); an agy pane is also refused
+#     when the doorbell would wrap its one composer row.
 #   - Every other harness keeps ringing on pending-unproven and unknown
 #     verdicts, because some verified harnesses' idle screens never classify
-#     empty (agy, grok 1.0.5; docs/verification), and refusing them would
-#     starve steering; each tightens as a follow-up once its idle verdict is
-#     proven.
+#     empty (grok 1.0.5; docs/verification), and refusing them would starve
+#     steering; each tightens as a follow-up once its idle verdict is proven.
 # Why: a doorbell Enter once confirmed Codex's update picker, which the plain
 # composer read as unknown (or pending, with the cursor on the selection
 # row), and the interrupted global install broke the shared Codex.
 # Returns:
 #   0 rang: typed and one Enter sent
-#   1 refused before typing: the screen did not allow typing
-#   2 the backend send failed
+#   1 refused before typing: the screen did not allow typing (pending
+#     composer text, Claude's exit confirmation, a Codex, Rovo, or agy composer
+#     without empty proof, or an agy row too narrow for the doorbell)
+#   2 the notice could not be built or the backend send failed
 #   3 the endpoint is positively dead or missing (nothing typed; recovery owns
 #     the record)
 #   4 refused: the Codex global-update picker is on screen; no Enter was sent
 #     (nothing was typed when the picker was seen before typing)
-#   5 typed, but the screen did not allow an Enter
+#   5 typed, but the screen did not allow an Enter (Claude's exit
+#     confirmation appeared, or a Codex, Rovo, or agy composer never proved it
+#     holds the doorbell)
 # No return value is delivery proof; the acknowledgement move is the only
 # delivery signal, and every refusal leaves the durable record for the
 # watcher's ladder, which counts it as an attempt and escalates a record that
@@ -312,14 +342,14 @@ fm_task_inbox_doorbell_line() {  # <record-path>
 fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label] [harness]
   local backend=$1 target=$2 rec=$3 label=${4:-} harness=${5:-} line screen i=0 strict=0
   [ "$(fm_control_harness_family "$harness" || true)" != claude ] || harness=claude
-  case "$harness" in codex|rovo) strict=1 ;; esac
+  case "$harness" in codex|rovo|agy) strict=1 ;; esac
   case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
     dead|missing) return 3 ;;
   esac
-  if ! line=$(fm_task_inbox_doorbell_line "$rec"); then
+  if ! line=$(fm_task_inbox_doorbell_line "$rec" "$harness"); then
     return 2
   fi
-  screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" '' "$harness" 2>/dev/null) \
+  screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" '' "$harness" '' "$line" 2>/dev/null) \
     || screen=unknown
   case "$screen" in
     empty) ;;
@@ -332,7 +362,8 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label] [har
   # shell only a suffix; the `: ` prefix protects complete lines only. Do not
   # add process-bound atomic delivery here unless an incident reopens this.
   fm_backend_send_literal "$backend" "$target" "$line" "$label" >/dev/null 2>&1 || return 2
-  # Reread before Enter in case the screen changed during the literal send.
+  # Reread before Enter in case the screen changed during the literal send; a
+  # Codex, Rovo, or agy pane waits briefly for its composer to show the doorbell.
   while :; do
     sleep 0.3
     screen=$(fm_backend_guarded_composer_state "$backend" "$target" "$label" "$line" "$harness" 2>/dev/null) \

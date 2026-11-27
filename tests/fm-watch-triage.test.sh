@@ -2592,6 +2592,30 @@ test_experimental_backend_unreadable_endpoints_stay_quiet() (
   done
 )
 
+test_park_mark_refuses_experimental_backends() (
+  local dir
+  dir=$(fm_test_tmproot fm-park-experimental) || fail "could not create the experimental park fixture"
+
+  expect_park_refusal() {
+    local backend=$1 state rc=0 output
+    shift
+    state="$dir/$backend/state"
+    mkdir -p "$state"
+    fm_write_meta "$state/lost.meta" "backend=$backend" kind=ship spawn_gen=first "$@"
+    output=$(FM_HOME="$dir/$backend" FM_STATE_OVERRIDE="$state" \
+      "$ROOT/bin/fm-park-retained.sh" lost mark 2>&1) || rc=$?
+    [ "$rc" -eq 1 ] || fail "[$backend] expected mark to exit 1, got $rc: $output"
+    assert_contains "$output" "on $backend because the backend cannot confirm endpoint loss" \
+      "[$backend] refusal should name the backend and explain the missing confirmation"
+    assert_absent "$state/lost.parked-retained" "[$backend] refusal created a mark"
+    pass "[$backend] park mark explains why the backend cannot confirm endpoint loss"
+  }
+
+  expect_park_refusal zellij window=remote:7
+  expect_park_refusal orca window=fm-lost terminal=term-gone
+  expect_park_refusal cmux window=ws-gone:sf-gone
+)
+
 test_zellij_endpoint_state_boundary() (
   local dir fakebin mode
   command -v jq >/dev/null 2>&1 || { echo "skip: jq is required by the Zellij adapter"; return 0; }
@@ -6222,6 +6246,7 @@ test_missing_secondmate_endpoint_surfaces_once || exit 1
 test_idle_herdr_secondmate_reuses_identity_read || exit 1
 test_experimental_backend_unreadable_endpoints_stay_quiet || exit 1
 test_zellij_endpoint_state_boundary || exit 1
+test_park_mark_refuses_experimental_backends || exit 1
 test_parked_retained_copy_suppresses_endpoint_loss || exit 1
 test_park_wait_stops_when_home_is_retired || exit 1
 test_park_refuses_redirected_records || exit 1

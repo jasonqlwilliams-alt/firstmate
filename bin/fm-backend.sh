@@ -976,13 +976,12 @@ fm_backend_composer_snapshot() {  # <backend> <target> [expected-label] [visible
 }
 
 # fm_backend_composer_classify_snapshot: the backend's own composer verdict for
-# the current snapshot, identical to what fm_backend_composer_state would have
-# answered for that capture.
-fm_backend_composer_classify_snapshot() {  # <backend> <target>
+# the current snapshot, with an optional agy notice fit check.
+fm_backend_composer_classify_snapshot() {  # <backend> <target> [fit-text]
   case "$1" in
-    tmux) fm_tmux_composer_classify_snapshot "$2" ;;
-    herdr) fm_backend_herdr_composer_classify_snapshot "$2" ;;
-    zellij|orca|cmux) fm_composer_classify_snapshot_no_identity ;;
+    tmux) fm_tmux_composer_classify_snapshot "$2" "${3:-}" ;;
+    herdr) fm_backend_herdr_composer_classify_snapshot "$2" "${3:-}" ;;
+    zellij|orca|cmux) fm_composer_classify_snapshot_no_identity "${3:-}" ;;
     *) printf 'unknown' ;;
   esac
 }
@@ -1018,14 +1017,17 @@ fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
 # capture it also proves picker rows above it are retained history.
 # [harness] is the pane's recorded harness; when it is a plain token it rides
 # into the snapshot's capability facts as harness=<name>, so the classifier
-# can apply that harness's own placeholder rule (bin/fm-composer-lib.sh
-# "ROVO PLACEHOLDER CHIP").
+# can apply the harness-scoped rules in bin/fm-composer-lib.sh.
+# [remaining-ms] bounds the read; past it the verdict is timeout.
+# On an unbounded read, [fit-text] is the line a caller is about to type into an agy pane.
+# An `empty` verdict for harness agy reads `unknown` unless that line fits agy's
+# one composer row, so it is never typed into a row it would wrap.
 # Callers include the steering-inbox doorbell, Codex and Claude exit, and
 # the second-mate restart's local and remote screen observations.
-fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [remaining-ms]
-  local limit_ms=${6:-} screen rc
+fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [remaining-ms] [fit-text]
+  local limit_ms=${6:-} fit=${7:-} screen rc
   if [ -z "$limit_ms" ]; then
-    _fm_backend_guarded_composer_state "$@"
+    _fm_backend_guarded_composer_state "${@:1:5}" "$fit"
     return
   fi
   if screen=$(fm_backend_run_timed "$limit_ms" _fm_backend_guarded_composer_state "${@:1:5}"); then
@@ -1040,8 +1042,8 @@ fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [ex
   fi
 }
 
-_fm_backend_guarded_composer_state() {
-  local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} picker verdict kv styled=0
+_fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [expected-pending] [harness] [fit-text]
+  local backend=$1 target=$2 label=${3:-} expected=${4:-} harness=${5:-} fit=${6:-} picker verdict kv styled=0
   local capture=
   if [ "$harness" = claude ]; then
     capture=visible
@@ -1075,7 +1077,7 @@ _fm_backend_guarded_composer_state() {
     printf 'sign-in'
     return 0
   fi
-  verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target")
+  verdict=$(fm_backend_composer_classify_snapshot "$backend" "$target" "$fit")
   if [ "$verdict" = unknown ] && [ -n "$expected" ]; then
     while IFS= read -r kv; do
       [ "$kv" != styled=1 ] || styled=1

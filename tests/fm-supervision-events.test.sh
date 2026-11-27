@@ -5,8 +5,7 @@
 # guard lets this file source it to load
 # the functions WITHOUT acquiring the singleton lock or entering the blocking
 # loop; wake/sleep and the backend dispatchers are overridden so the exemptions,
-# capability memo, and fail-closed disable are asserted deterministically with no
-# real herdr, watcher process, or blocking sleeps.
+# capability memo, and fail-closed disable are asserted without launching Herdr.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -30,6 +29,8 @@ WAKE_LOG="$TMP/wakes"
 SLEEP_LOG="$TMP/sleeps"
 wake() { printf '%s\n' "$1" >> "$WAKE_LOG"; return 0; }
 sleep() { printf 'SLEEP\n' >> "$SLEEP_LOG"; }
+# shellcheck disable=SC2329 # Runtime override called by the isolated watcher.
+watcher_publish_beat() { return 0; }
 
 fm_backend_source herdr || fail "could not load the Herdr adapter"
 fm_backend_herdr_cli() {
@@ -112,6 +113,7 @@ reset_state
 fm_write_meta "$STATE_DIR/tk1.meta" "window=default:wG:pQ" "backend=herdr" "herdr_terminal_id=term-worker"
 record=$(fm_task_inbox_write "$STATE_DIR" tk1 'fixture steer') || fail "could not create a steer"
 terminal_calls="$TMP/terminal-calls"
+# shellcheck disable=SC2329 # The sourced watcher and backend code call these fixture functions.
 (
   fm_task_inbox_due_action() { printf 'ring %s' "$record"; }
   fm_backend_herdr_pane_agent_state() { printf 'live'; }
@@ -142,6 +144,162 @@ printf 'paused: waiting on the upstream release\n' > "$STATE_DIR/a-old.status"
 handle_push_transition herdr default "$(mkrec wG:pQ blocked)"
 [ -s "$WAKE_LOG" ] || fail "the old task's pause suppressed the live worker's blocked event"
 pass "handle_push_transition: a stale record sharing the slot cannot displace the bound worker"
+
+gnu_timeout_available() {
+  { LC_ALL=C timeout --version || true; LC_ALL=C gtimeout --version || true; } 2>/dev/null \
+    | grep -F '(GNU coreutils)' >/dev/null
+}
+
+test_optional_capture_failure() (
+  if ! gnu_timeout_available; then
+    printf '%s\n' 'ok - watcher: optional capture failure # SKIP GNU timeout unavailable'
+    return 0
+  fi
+  # shellcheck disable=SC2329 # The sourced watcher calls this fixture override.
+  mktemp() { return 1; }
+  # shellcheck disable=SC2030 # This fixture seeds its own observation state.
+  FM_PENDING_REPLY_OBSERVATION=idle
+  watcher_remote_observe printf busy || fail "remote capture failure must not stop supervision"
+  [ "$FM_PENDING_REPLY_OBSERVATION" = unknown ] || fail "remote capture failure must leave observation unknown"
+  pass "watcher: remote capture setup failure leaves observation unknown"
+)
+
+test_optional_capture_failure || exit $?
+
+mkdir -p "$TMP/no-perl"
+printf '%s\n' '#!/bin/sh' 'exit 127' > "$TMP/no-perl/perl"
+chmod 700 "$TMP/no-perl/perl"
+
+test_remote_wait_uses_elapsed_budget() (
+  if ! gnu_timeout_available; then
+    printf '%s\n' 'ok - watcher: without Perl, a remote observation gets its full elapsed budget # SKIP GNU timeout unavailable'
+    return 0
+  fi
+  local tick=$SECONDS i
+  # shellcheck disable=SC2030 # Mask Perl only in this fixture.
+  export PATH="$TMP/no-perl:$PATH"
+  WATCHER_WAIT_LIMIT=1
+  for ((i=0; i<100; i++)); do
+    [ "$SECONDS" -eq "$tick" ] || break
+    command sleep 0.02
+  done
+  command sleep 0.65
+  watcher_remote_observe bash -c 'sleep 0.55; printf busy' || fail "remote observation could not run"
+  # shellcheck disable=SC2031 # The call above sets the result in this subshell.
+  [ "$FM_PENDING_REPLY_OBSERVATION" = busy ] || fail "a subsecond reply was discarded within a one-second budget"
+  pass "watcher: without Perl, a remote observation gets its full elapsed budget"
+)
+
+test_remote_wait_uses_elapsed_budget || exit $?
+
+test_remote_wait_without_gnu_timeout() (
+  local no_timeout="$TMP/no-timeout"
+  mkdir -p "$no_timeout" || fail "could not create the no-timeout fixture"
+  ln -s "$TMP/no-perl/perl" "$no_timeout/timeout" || fail "could not mask timeout"
+  ln -s "$TMP/no-perl/perl" "$no_timeout/gtimeout" || fail "could not mask gtimeout"
+  # shellcheck disable=SC2030,SC2031 # Start from the inherited PATH and mask tools only here.
+  export PATH="$no_timeout:$TMP/no-perl:$PATH"
+  WATCHER_WAIT_LIMIT=1 watcher_remote_observe bash -c 'sleep 1.2; printf busy' \
+    || fail "direct remote observation could not run"
+  # shellcheck disable=SC2031 # The call above sets the result in this subshell.
+  [ "$FM_PENDING_REPLY_OBSERVATION" = busy ] || fail "the observation must still work without GNU timeout"
+  pass "watcher: without GNU timeout the direct observation still supplies its result"
+)
+
+test_remote_wait_without_gnu_timeout || exit $?
+
+test_remote_wait_rejects_late_success() (
+  local child='' i
+  if ! gnu_timeout_available; then
+    printf '%s\n' 'ok - watcher: a reply after the deadline stays unknown # SKIP GNU timeout unavailable'
+    return 0
+  fi
+  # shellcheck disable=SC2030,SC2031 # Start from the inherited PATH and mask Perl only here.
+  export PATH="$TMP/no-perl:$PATH"
+  trap '
+    if [ -n "$child" ]; then
+      kill -CONT "$child" 2>/dev/null || true
+      kill -TERM "$child" 2>/dev/null || true
+    fi
+  ' EXIT
+  (
+    trap 'fm_active_check_stop; fm_check_output_cleanup' EXIT
+    # shellcheck disable=SC2016 # The child Bash expands its positional argument.
+    WATCHER_WAIT_LIMIT=1 watcher_remote_observe bash -c '
+      touch "$1"
+      sleep 1.3
+      printf idle
+    ' _ "$TMP/observation-started" || exit 1
+    # shellcheck disable=SC2031 # The call above sets the result in this subshell.
+    printf '%s\n' "$FM_PENDING_REPLY_OBSERVATION"
+  ) > "$TMP/late-observation" 2>&1 &
+  child=$!
+  for ((i=0; i<100; i++)); do
+    [ ! -e "$TMP/observation-started" ] || break
+    kill -0 "$child" 2>/dev/null || break
+    command sleep 0.02
+  done
+  [ -e "$TMP/observation-started" ] || fail "remote observation did not start: $(cat "$TMP/late-observation")"
+  kill -STOP "$child" || fail "could not suspend observation owner"
+  command sleep 1.6
+  kill -CONT "$child" || fail "could not resume observation owner"
+  for ((i=0; i<150; i++)); do
+    kill -0 "$child" 2>/dev/null || break
+    command sleep 0.02
+  done
+  ! kill -0 "$child" 2>/dev/null || fail "observation did not finish: $(cat "$TMP/late-observation")"
+  wait "$child" || fail "observation failed: $(cat "$TMP/late-observation")"
+  child=
+  [ "$(cat "$TMP/late-observation")" = unknown ] || fail "a late idle reply was accepted"
+  pass "watcher: a reply after the deadline stays unknown when the watcher resumes"
+)
+
+test_remote_wait_rejects_late_success || exit $?
+
+test_remote_timeout_kills_term_resistant_observation() (
+  local dispatched="$TMP/dispatched" overran="$TMP/overran"
+  if ! gnu_timeout_available; then
+    printf '%s\n' 'ok - watcher: timeout kills a TERM-resistant observation # SKIP GNU timeout unavailable'
+    return 0
+  fi
+  # shellcheck disable=SC2031 # Each fixture inherits the original PATH.
+  export PATH="$TMP/no-perl:$PATH"
+  # shellcheck disable=SC2016 # The child Bash expands its positional arguments.
+  WATCHER_WAIT_LIMIT=1 watcher_remote_observe bash -c '
+    trap "" TERM
+    touch "$1"
+    sleep 1.45
+    touch "$2"
+    printf idle
+  ' _ "$dispatched" "$overran" || fail "remote observation could not run"
+  [ -e "$dispatched" ] || fail "remote observation did not dispatch"
+  [ ! -e "$overran" ] || fail "the remote command survived the deadline and kill-after allowance"
+  # shellcheck disable=SC2031 # The call above sets the result in this subshell.
+  [ "$FM_PENDING_REPLY_OBSERVATION" = unknown ] || fail "a killed observation supplied completion evidence"
+  pass "watcher: timeout kills a TERM-resistant observation"
+)
+
+test_remote_timeout_kills_term_resistant_observation || exit $?
+
+test_wait_preserves_sleep_units() (
+  reset_state
+  # shellcheck disable=SC2034 # The sourced watcher reads the wait limit.
+  WATCHER_WAIT_LIMIT=150
+  # shellcheck disable=SC2329 # The sourced watcher calls this fixture override.
+  sleep() { printf 'sleep %s\n' "$1" >> "$SLEEP_LOG"; }
+  # shellcheck disable=SC2329 # The sourced watcher calls this fixture override.
+  watcher_publish_beat() { printf 'beat\n' >> "$SLEEP_LOG"; }
+  POLL=6m event_wait_or_sleep
+  watcher_wait 0.05h
+  watcher_wait 0.0005d
+  [ "$(cat "$SLEEP_LOG")" = "$(printf '%s\n' \
+    'sleep 150' beat 'sleep 150' beat 'sleep 60' \
+    'sleep 150' beat 'sleep 30' 'sleep 43.2')" ] \
+    || fail "suffixed waits changed duration or missed a checkpoint: $(cat "$SLEEP_LOG")"
+  pass "watcher: sleep unit suffixes preserve duration and beacon checkpoints"
+)
+
+test_wait_preserves_sleep_units || exit $?
 
 # --- event_wait_or_sleep: secondmate windows are excluded from the pane list --
 
