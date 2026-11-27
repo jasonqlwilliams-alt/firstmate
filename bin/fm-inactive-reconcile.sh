@@ -49,8 +49,10 @@
 # fm-crew-state.sh as the sole current-state source.
 # Only a done or failed state is suspicious enough to create a durable terminal
 # outcome record or wake the supervisor.
-# For a cancelled run with a still-armed PR registration (bin/fm-pr-check.sh),
-# the wake and parent report say "run cancelled; registered PR awaiting a merge decision".
+# The wake and parent report say "run cancelled; registered PR awaiting a merge
+# decision" when the child declares the no-CI cancellation after the selected
+# run started, and the run and paused line match the armed PR registration.
+# Declaration: paused: PR <full registered URL> open; awaiting merge; cancelled because CI never registers on this repository
 # Local merge, closure, or retirement records disqualify the PR.
 # A recorded closure also disqualifies a reopened PR.
 # Other failed readings still report.
@@ -129,8 +131,10 @@ fi
 
 if [ "$(uname)" = Darwin ]; then
   file_mtime() { /usr/bin/stat -f %m "$1" 2>/dev/null; }
+  utc_minute() { date -u -r "$1" '+%Y-%m-%d %H:%M'; }
 else
   file_mtime() { stat -c %Y "$1" 2>/dev/null; }
+  utc_minute() { date -u -d "@$1" '+%Y-%m-%d %H:%M'; }
 fi
 
 reconcile_now() {
@@ -335,11 +339,25 @@ pr_for_task() { # <meta> [preferred-line]
   clean_field "$value"
 }
 
-registered_pr_without_terminal_record() { # <id>
-  local id=$1
+cancelled_run_declared_for_registered_pr() { # <id> <crew-state> <last-status-line> <status-file>
+  local id=$1 state_line=$2 last=$3 status=$4 evidence started run_pr paused
+  local prefix='state: failed · source: run-step · run cancelled · run started: '
+  local separator=' · run PR: '
+  [[ "$state_line" == "$prefix"*"$separator"* ]] || return 1
+  status_is_paused "$last" || return 1
+  evidence=${state_line#"$prefix"}
+  started=${evidence%%"$separator"*}
+  run_pr=${evidence#*"$separator"}
   fm_pr_poll_artifacts_valid "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" || return 1
-  ! fm_pr_poll_terminal_recorded "$STATE" "$id" \
-    "$FM_PR_REG_PROVIDER" "$FM_PR_REG_HOST" "$FM_PR_REG_PATH" "$FM_PR_REG_NUMBER" "$FM_PR_REG_URL"
+  [ "$run_pr" = "$FM_PR_REG_URL" ] || return 1
+  case "$(status_line_note "$last")" in
+    "PR $FM_PR_REG_URL open; "*"; cancelled because CI never registers on this repository") ;;
+    *) return 1 ;;
+  esac
+  paused=$(file_mtime "$status") && paused=$(utc_minute "$paused") || return 1
+  # The ledger gives minute precision. A retry starting in the pause's minute
+  # cannot be ordered against the declaration.
+  [[ "$started" < "$paused" ]]
 }
 
 home_secondmate_id() {
@@ -526,27 +544,25 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
   age=$(last_activity_age "$meta" "$status" "$turn")
   [ "$age" -ge "$FM_INACTIVE_RECONCILE_SECS" ] || return 0
   state_line=$(fm_run_timed "$timeout" env FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
-    "$CREW_STATE_BIN" "$id" 2>/dev/null) || state_rc=$?
+    FM_CREW_STATE_CANCELLED_RUN=1 "$CREW_STATE_BIN" "$id" 2>/dev/null) || state_rc=$?
   [ "$state_rc" -ne 124 ] || return 3
   last=$(last_status_line "$status")
   if [ -n "$self" ]; then
     case "$(status_line_verb "$last")" in done|failed) return 0 ;; esac
   fi
   case "$state_line" in
-    'state: failed · source: run-step · run cancelled'|\
-    'state: failed · source: run-step · run cancelled · status-log superseded (run failed)')
-      outcome=cancelled ;;
     'state: done '*) outcome=done ;;
     'state: failed '*) outcome=failed ;;
     *) return 0 ;;
   esac
   label=$outcome
   pr=''
-  if [ "$outcome" = cancelled ]; then
-    if registered_pr_without_terminal_record "$id"; then
-      pr=$(clean_field "$FM_PR_REG_URL")
-    else
-      label=failed
+  if [ "$outcome" = failed ] && cancelled_run_declared_for_registered_pr "$id" "$state_line" "$last" "$status"; then
+    outcome=cancelled
+    pr=$(clean_field "$FM_PR_REG_URL")
+    if ! fm_pr_poll_terminal_recorded "$STATE" "$id" \
+      "$FM_PR_REG_PROVIDER" "$FM_PR_REG_HOST" "$FM_PR_REG_PATH" "$FM_PR_REG_NUMBER" "$FM_PR_REG_URL"; then
+      label=cancelled
     fi
   fi
   [ -n "$pr" ] || pr=$(pr_for_task "$meta")

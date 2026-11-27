@@ -160,12 +160,12 @@ fm_nm_run_is_pipeline_owned_active() {  # <toon-output>
 # --limit N` listing (plain text, no run id, no quoting, newest-first, columns
 # "<status> <branch> <short-sha> <date> [<pr-url>]"; the `axi` surface has no
 # runs-listing subcommand - verified against the installed CLI). Prints the
-# status word of the branch's CURRENT run row, or nothing when the ledger
-# cannot prove attribution. When optional expected head $4 is supplied, its
-# abbreviated commit identity must match the newest row. The branch's NEWEST
+# branch's CURRENT run as tab-separated status, head, start minute and PR, or
+# nothing when the ledger cannot prove attribution. When optional expected head
+# $4 is supplied, its abbreviated commit identity must match the newest row. The branch's NEWEST
 # row alone decides; older rows are history and never answer for the present:
 #   - newest row's head resolves and matches the worktree (fm_nm_head_matches_worktree):
-#     its status word
+#     its result
 #   - newest row's head resolves but does not match: nothing (a newer run that
 #     is not this worktree's makes every older row stale history)
 #   - newest row's head does not resolve in this copy (the pipeline committed
@@ -175,7 +175,7 @@ fm_nm_run_is_pipeline_owned_active() {  # <toon-output>
 #     running), and the immediately older row for the SAME branch resolves to
 #     EXACTLY the worktree HEAD. The pipeline's own ledger then proves an
 #     unbroken run sequence from a run that ended at the submitted head to an
-#     active run on the same branch - the anchored active row's status word is
+#     active run on the same branch - the anchored active row's result is
 #     printed. Anything else (no anchor row, an anchor that is merely an
 #     ancestor, a terminal unresolvable row) prints nothing, so branch-name
 #     coincidence, arbitrary remote state, and other tasks' runs never match.
@@ -194,11 +194,11 @@ fm_nm_run_is_pipeline_owned_active() {  # <toon-output>
 # present. Nothing else widens: a newest row that does not bind still ends the
 # scan, a newest row whose class is live or unclassifiable is still answered
 # as-is, the anchored pipeline-continuation path is untouched, and with no live
-# sibling the newest terminal word is still what is printed.
+# sibling the newest terminal result is printed.
 # Read-only: git reads resolve objects in place; custody never changes.
-fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [expected-head]
+fm_nm_runs_result_for_worktree() {  # <worktree> <branch> <runs-list-output> [expected-head]
   local wt=$1 branch=$2 list=$3 expected_head=${4:-}
-  local local_full row_full row st br sha day clock pr extra year_num month_num day_num max_day pending_st=''
+  local local_full row_full row st br sha day clock pr extra year_num month_num day_num max_day result pending=''
   # Set only by the newest binding row when its status classifies terminal, and
   # printed when the scan ends without finding a live row for this worktree. It
   # is the sole reason the scan continues past the newest row, and every exit
@@ -237,6 +237,7 @@ fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [ex
     esac
     [ "$day_num" -ge 1 ] && [ "$day_num" -le "$max_day" ] || break
     [ "$br" = "$branch" ] || continue
+    printf -v result '%s\t%s\t%s %s\t%s' "$st" "$sha" "$day" "$clock" "$pr"
     if [ -n "$decided" ]; then
       # Live-over-terminal: the newest row bound to this worktree but is a
       # terminal record, so the older rows are searched for a live run that
@@ -248,15 +249,15 @@ fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [ex
       else
         [ -n "$decided_exact" ] || continue
       fi
-      decided=$st
+      decided=$result
       break
     fi
-    if [ -n "$pending_st" ]; then
+    if [ -n "$pending" ]; then
       # This is the row immediately older than the active unresolvable row:
       # the only admissible anchor, and only exact head equality proves the
       # worktree still sits at the submitted head.
       if [ "$(fm_nm_resolve_commit "$wt" "$sha")" = "$local_full" ]; then
-        decided=$pending_st
+        decided=$pending
       fi
       break
     fi
@@ -271,7 +272,7 @@ fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [ex
     row_full=$(fm_nm_resolve_commit "$wt" "$sha")
     if [ -n "$row_full" ]; then
       if fm_nm_head_matches_worktree "$wt" "$sha"; then
-        decided=$st
+        decided=$result
         # A live or unclassifiable word is this worktree's current answer and
         # ends the scan; only a terminal one keeps looking for a live sibling.
         if [ "$(fm_nm_run_status_class "$st")" = terminal ]; then
@@ -282,8 +283,14 @@ fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [ex
       break
     fi
     [ "$st" = running ] || break
-    pending_st=$st
+    pending=$result
   done <<< "$list"
   printf '%s' "$decided"
   return 0
+}
+
+fm_nm_runs_status_for_worktree() {  # <worktree> <branch> <runs-list-output> [expected-head]
+  local result
+  result=$(fm_nm_runs_result_for_worktree "$@")
+  printf '%s' "${result%%$'\t'*}"
 }
