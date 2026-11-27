@@ -30,9 +30,8 @@
 #   - the private tmux server is stopped on exit.
 #
 # Run explicitly with FM_AGY_COMPOSER_LIVE=1 (or FM_LIVE=1). Set
-# FM_AGY_COMPOSER_LIVE_CAPTURE_DIR to keep each styled screen the guard read,
-# with the account address, host name, user name, and private paths redacted;
-# that is how tests/fixtures/agy-composer/ was recorded. Refresh
+# FM_AGY_COMPOSER_LIVE_CAPTURE_DIR to keep the wrapped draft or the first-use
+# mode-hint refusal, with private identifiers redacted. Refresh
 # docs/verification/agy.md "Composer classification" from this guard's output
 # after any agy upgrade.
 set -u
@@ -130,11 +129,10 @@ chmod +x "$WORK/launch.sh" 2>/dev/null || fail "could not make the private launc
 # --- screen helpers -----------------------------------------------------------
 capture_styled() { "$REAL_TMUX" -L "$SOCKET" capture-pane -e -p -t "$WIN" 2>/dev/null; }
 
-save_capture() {  # <name>
+save_capture() {  # <name> <styled-screen>
   [ -n "$CAPTURE_DIR" ] || return 0
-  local screen cursor
-  screen=$(capture_styled) && [ -n "$screen" ] \
-    || fail "could not read a nonempty screen for capture $1"
+  local screen=$2 cursor
+  [ -n "$screen" ] || fail "could not read a nonempty screen for capture $1"
   cursor=$("$REAL_TMUX" -L "$SOCKET" display-message -p -t "$WIN" \
     '#{cursor_x} #{cursor_y} #{pane_width}x#{pane_height}' 2>/dev/null) \
     && [[ "$cursor" =~ ^[0-9]+\ [0-9]+\ [0-9]+x[0-9]+$ ]] \
@@ -161,14 +159,14 @@ guarded() {  # <expected-pending> [fit-text]
   fm_backend_guarded_composer_state tmux "$WIN" '' "$1" agy '' "${2:-}" 2>/dev/null
 }
 
-# composer_holds <text>: positive identification of agy's framed composer
+# composer_frame <text>: positive identification of agy's framed composer
 # holding the guard's own text. Reads the rows between the LAST two solid rules,
 # requires the first to open with agy's `>` glyph, and compares the rows'
 # content with every space removed to <text> with every space removed: equal
 # proves the whole draft is in the frame however agy wrapped it. Prints the
 # number of framed content rows and the visible text of the first row.
-composer_holds() {  # <text>
-  capture_styled | fm_composer_strip_ansi | LC_ALL=C awk -v want="$1" '
+composer_frame() {  # <text> (styled screen on stdin)
+  fm_composer_strip_ansi | LC_ALL=C awk -v want="$1" '
     { sub(/\r$/, ""); row[NR] = $0; t = $0; gsub(/^[ \t]+|[ \t]+$/, "", t)
       if (t ~ /^(─)+$/ && length(t) >= 20) { start = stop; stop = NR } }
     END {
@@ -183,6 +181,12 @@ composer_holds() {  # <text>
       print stop - start - 1
       print first
     }'
+}
+
+composer_holds() {  # <text>
+  local screen
+  screen=$(capture_styled) || return 1
+  composer_frame "$1" <<< "$screen"
 }
 
 wait_for() {  # <polls> <command...>: retry every 0.5s until success
@@ -201,7 +205,7 @@ verdict_is() {  # <want> <expected-pending> [fit-text]
 }
 
 # --- launch -------------------------------------------------------------------
-"$REAL_TMUX" -L "$SOCKET" new-session -d -s "$SESSION" -n agy -x "$WIDTH" -y 30 -c "$WORKSPACE" \
+"$REAL_TMUX" -L "$SOCKET" -f /dev/null new-session -d -s "$SESSION" -n agy -x "$WIDTH" -y 30 -c "$WORKSPACE" \
   -e HOME="$PRIV_HOME" -e XDG_CONFIG_HOME="$PRIV_HOME/.config" \
   -e XDG_CACHE_HOME="$PRIV_HOME/.cache" -e XDG_DATA_HOME="$PRIV_HOME/.local/share" \
   -e XDG_STATE_HOME="$PRIV_HOME/.local/state" \
@@ -216,10 +220,16 @@ printf '# agy %s launched with no network egress and a private home\n' "$VERSION
 
 # 1. Idle composer reads empty. No keystroke has been sent yet.
 if ! wait_for 90 verdict_is empty ''; then
-  save_capture idle-unproven
-  fail "idle composer never classified empty (last verdict: $(guarded ''))"
+  idle_verdict=$(guarded '')
+  if [[ -n "$CAPTURE_DIR" && "$idle_verdict" == pending ]]; then
+    screen=$(capture_styled) && [ -n "$screen" ] \
+      || fail "could not read a nonempty screen for capture idle-unproven"
+    if [ "$(composer_frame "$FM_COMPOSER_AGY_MODE_HINT" <<< "$screen")" = "1"$'\n'"$FM_COMPOSER_AGY_MODE_HINT" ]; then
+      save_capture idle-unproven "$screen"
+    fi
+  fi
+  fail "idle composer never classified empty (last verdict: $idle_verdict)"
 fi
-save_capture idle
 pass "idle composer classifies empty"
 
 # 2. Check fit on both sides of the composer width before typing.
@@ -233,11 +243,8 @@ pass "the fit check refuses the long notice and accepts the short notice"
 
 # 3. A short draft reads pending, holding exactly that text.
 "$REAL_TMUX" -L "$SOCKET" send-keys -t "$WIN" -l "$SHORT" 2>/dev/null || fail "could not type the short draft"
-if ! wait_for 10 verdict_is pending "$SHORT"; then
-  save_capture short-draft-unproven
-  fail "short draft never classified pending (last verdict: $(guarded "$SHORT"))"
-fi
-save_capture short-draft
+wait_for 10 verdict_is pending "$SHORT" \
+  || fail "short draft never classified pending (last verdict: $(guarded "$SHORT"))"
 wait_for 10 composer_holds "$SHORT" >/dev/null || fail "short draft was never identified in agy's frame"
 pass "a short typed draft classifies pending with its exact text"
 
@@ -246,11 +253,7 @@ pass "a short typed draft classifies pending with its exact text"
 # neither an empty verdict nor proof of a different text.
 DRAFT="$SHORT $LONG"
 "$REAL_TMUX" -L "$SOCKET" send-keys -t "$WIN" -l " $LONG" 2>/dev/null || fail "could not extend the short draft"
-if ! frame=$(wait_for 10 composer_holds "$DRAFT"); then
-  save_capture wrapped-draft-unidentified
-  fail "the wrapped draft was never identified in agy's frame"
-fi
-save_capture wrapped-draft
+frame=$(wait_for 10 composer_holds "$DRAFT") || fail "the wrapped draft was never identified in agy's frame"
 rows=${frame%%$'\n'*}
 first_row=${frame#*$'\n'}
 printf '# wrapped draft (%s bytes) occupies %s composer row(s) at %s columns\n' "${#DRAFT}" "$rows" "$WIDTH"
@@ -261,6 +264,9 @@ v_first=$(guarded "$first_row")
 v_plain=$(guarded '')
 printf '# wrapped verdicts (full draft, first row, no expectation) = %s, %s, %s\n' \
   "$v_draft" "$v_first" "$v_plain"
+screen=$(capture_styled) && [ "$(composer_frame "$DRAFT" <<< "$screen")" = "$frame" ] \
+  || fail "the wrapped draft was no longer proven after the verdict reads"
+save_capture wrapped-draft "$screen"
 case "$v_draft:$v_first:$v_plain" in
   empty:*|*:empty:*|*:empty) fail "a wrapped draft classified empty" ;;
   *:pending:*) fail "a wrapped draft proved the first row alone" ;;
