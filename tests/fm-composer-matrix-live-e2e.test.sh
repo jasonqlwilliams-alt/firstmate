@@ -53,7 +53,7 @@ cleanup() {
     zellij delete-session --force "$ZELLIJ_SESSION" >/dev/null 2>&1 || true
   fi
 }
-trap cleanup EXIT
+trap 'fm_test_cleanup_exit "$?" fm_test_cleanup_after cleanup' EXIT
 
 # The library under test, driven against the private socket through a PATH
 # shim so its bare `tmux` calls stay isolated from any live fleet.

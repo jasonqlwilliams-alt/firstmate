@@ -28,8 +28,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=tests/lib.sh
 . "$ROOT/tests/lib.sh"
 
-fail() { printf 'not ok - %s\n' "$1" >&2; cleanup_all; exit 1; }
-pass() { printf 'ok - %s\n' "$1"; }
 assert_contains_local() {  # <haystack> <needle> <msg>
   case "$1" in
     *"$2"*) : ;;
@@ -39,7 +37,7 @@ assert_contains_local() {  # <haystack> <needle> <msg>
 
 command -v herdr >/dev/null 2>&1 || { echo "skip: herdr not found"; exit 0; }
 command -v jq >/dev/null 2>&1 || { echo "skip: jq not found (required by the herdr adapter)"; exit 0; }
-command -v treehouse >/dev/null 2>&1 || { echo "skip: treehouse not found (required by fm-spawn.sh)"; exit 0; }
+fm_test_require_treehouse_root || exit 0
 
 # shellcheck source=tests/herdr-test-safety.sh
 . "$ROOT/tests/herdr-test-safety.sh"
@@ -48,37 +46,28 @@ command -v treehouse >/dev/null 2>&1 || { echo "skip: treehouse not found (requi
 # the terminal this suite was started in must not leak into any of them.
 herdr_forget_inherited_pane
 
-TMP_ROOT=$(mktemp -d "$(cd "${TMPDIR:-/tmp}" && pwd -P)/fm-herdr-launcher-e2e.XXXXXX")
+TMP_ROOT=$(fm_test_tmproot fm-herdr-launcher-e2e) || fail "could not create the Herdr launcher fixture"
 FAKEBIN=$(fm_fakebin "$TMP_ROOT")
 fm_test_track_task_tmps "$FAKEBIN"
 export PATH="$FAKEBIN:$PATH"
 HERDR_LAB_HELPER="$ROOT/bin/fm-herdr-lab.sh"
 HERDR_LAB_SESSION=$("$HERDR_LAB_HELPER" name fm-herdr-launcher-ws) || {
-  rm -rf "$TMP_ROOT"
-  printf 'not ok - could not generate an isolated Herdr lab session name\n' >&2
-  exit 1
+  fail "could not generate an isolated Herdr lab session name"
 }
 export HERDR_SESSION="$HERDR_LAB_SESSION"
 
 WORKTREES=()
-CLEANED=0
-# Idempotent: fail() cleans up before exiting and the EXIT trap fires after it,
-# so a second teardown would otherwise report the already-consumed fleet-state
-# tripwire as if the lab had gone wrong.
 cleanup_all() {
   local wt status=0
-  [ "$CLEANED" = 0 ] || return 0
-  CLEANED=1
   for wt in ${WORKTREES[@]+"${WORKTREES[@]}"}; do
     [ -n "$wt" ] && treehouse return --force "$wt" >/dev/null 2>&1
   done
   WORKTREES=()
   "$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION" || status=$?
-  rm -rf "$TMP_ROOT"
-  fm_test_cleanup
+  fm_test_cleanup || status=1
   return "$status"
 }
-trap cleanup_all EXIT
+trap 'fm_test_cleanup_exit "$?" cleanup_all' EXIT
 "$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION" || fail "could not provision isolated Herdr lab session"
 
 lab() { "$HERDR_LAB_HELPER" run "$HERDR_LAB_SESSION" "$@"; }

@@ -144,12 +144,6 @@ fm_test_prepend_lavish_fixture() {
 
 FM_TEST_CLEANUP_DIRS=()
 
-fm_test_pid_identity() {
-  local pid=$1
-  FM_STATE_OVERRIDE="${TMPDIR:-/tmp}" bash -c \
-    '. "$1"; fm_pid_identity "$2"' _ "$ROOT/bin/fm-wake-lib.sh" "$pid"
-}
-
 fm_test_stale_start_token() {
   local stale ticks
   case "$1" in
@@ -214,17 +208,43 @@ FM_TEST_STUB_MAX_BLOCK_SECONDS=${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}
 export FM_TEST_STUB_MAX_BLOCK_SECONDS
 
 fm_test_cleanup() {
-  local d
-  fm_test_reap_procevent_homes
-  for d in "${FM_TEST_CLEANUP_DIRS[@]:-}"; do
-    [ -n "$d" ] && rm -rf "$d"
-  done
+  local d scratch status=0
+  local -a dirs=("${FM_TEST_CLEANUP_DIRS[@]:-}")
+  fm_test_reap_procevent_homes || status=1
   if [ -f "$FM_TEST_CLEANUP_REGISTRY" ]; then
     while IFS= read -r d; do
-      [ -n "$d" ] && rm -rf "$d"
+      case "$d" in
+        treehouse-scratch$'\t'*)
+          scratch=${d#*$'\t'}
+          fm_test_treehouse_remove "$scratch" || status=1
+          ;;
+        '') ;;
+        *) dirs+=("$d") ;;
+      esac
     done < "$FM_TEST_CLEANUP_REGISTRY"
-    rm -f "$FM_TEST_CLEANUP_REGISTRY"
+    rm -f "$FM_TEST_CLEANUP_REGISTRY" || status=1
   fi
+  for d in "${dirs[@]}"; do
+    [ -n "$d" ] || continue
+    rm -rf -- "$d" || status=1
+  done
+  return "$status"
+}
+
+fm_test_track_treehouse_scratch() {
+  printf 'treehouse-scratch\t%s\n' "$1" >> "$FM_TEST_CLEANUP_REGISTRY"
+}
+
+fm_test_cleanup_exit() {
+  local status=$1
+  shift
+  "$@" || [ "$status" -ne 0 ] || status=1
+  exit "$status"
+}
+
+fm_test_cleanup_after() {
+  "$@" || true
+  fm_test_cleanup
 }
 
 fm_test_track_task_tmps() {
@@ -258,19 +278,32 @@ fm_test_tmproot() {
   printf '%s\n' "$root"
 }
 
+# shellcheck source=tests/treehouse-test-helpers.sh
+. "$ROOT/tests/treehouse-test-helpers.sh" || fail "cannot load Treehouse test setup"
+
 if [ "${FM_TEST_FIXTURE_REAPER_CHILD:-0}" != 1 ]; then
   FM_TEST_CLEANUP_REGISTRY=$(mktemp "${FM_TEST_REGISTRY_DIR:-${TMPDIR:-/tmp}}/.fm-test-cleanup.$$.XXXXXX") || return 1
-  FM_TEST_OWNER_IDENTITY=$(fm_test_pid_identity "$$") || {
+  FM_TEST_OWNER_IDENTITY=$(TZ=UTC0 fm_test_pid_identity "$$") || {
     rm -f "$FM_TEST_CLEANUP_REGISTRY"
     return 1
   }
   FM_TEST_PROCEVENT_REGISTRY=$(mktemp "${TMPDIR:-/tmp}/.fm-test-procevent.$$.XXXXXX") || return 1
 
-  trap fm_test_cleanup EXIT
-  trap 'fm_test_cleanup; exit 130' INT
-  trap 'fm_test_cleanup; exit 143' TERM
-  trap 'fm_test_cleanup; exit 129' HUP
-  trap 'fm_test_cleanup; exit 131' QUIT
+  trap 'fm_test_cleanup_exit "$?" fm_test_cleanup' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+  trap 'exit 131' QUIT
+
+  FM_TEST_OWNED_TREEHOUSE=
+  if [ -z "${FM_TEST_TREEHOUSE_DIR:-}" ] || [ ! -f "$FM_TEST_TREEHOUSE_DIR/.fm-test-treehouse" ]; then
+    fm_test_treehouse_setup "$$" "$FM_TEST_OWNER_IDENTITY" || fail "cannot create a Treehouse test directory"
+    FM_TEST_OWNED_TREEHOUSE=$FM_TEST_TREEHOUSE_DIR
+    if ! fm_test_track_treehouse_scratch "$FM_TEST_TREEHOUSE_DIR"; then
+      fm_test_treehouse_remove "$FM_TEST_TREEHOUSE_DIR"
+      fail "cannot register the Treehouse test directory for cleanup"
+    fi
+  fi
 fi
 
 # --- detached fixture cleanup ----------------------------------------------
@@ -467,7 +500,7 @@ fm_test_arm_fixture_reaper() {
       sleep 0.2
     done
     fm_test_reap_fixture_processes || exit 1
-    fm_test_cleanup
+    fm_test_cleanup || exit 1
     rm -rf -- "$TMPDIR"
   ' _ "$ROOT/tests/lib.sh" "$$" "$owner_identity" "$FM_TEST_CLEANUP_REGISTRY" \
     "$FM_TEST_PROCEVENT_REGISTRY" >/dev/null 2>&1 </dev/null &
@@ -480,46 +513,14 @@ fm_test_arm_fixture_reaper() {
   trap 'exit 131' QUIT
 }
 
-# fm_test_reap_orphans: best-effort sweep for fixture roots left behind by a
-# prior run that was killed hard enough to skip the traps above (e.g. a
-# SIGKILL timeout). Only removes directories carrying the .fm-test-fixture
-# marker fm_test_tmproot writes, so it never touches unrelated fm-* tmp dirs
-# from real (non-test) firstmate commands. The marker identifies the owning
-# shell across PID reuse, so the same live owner always wins over the age
-# fallback for dead or unowned roots.
-FM_TEST_ORPHAN_MAX_AGE_SECONDS=${FM_TEST_ORPHAN_MAX_AGE_SECONDS:-3600}
-
-fm_test_reap_orphans() {
-  local marker dir mtime now owner_pid owner_identity current_identity
-  now=$(date +%s)
-  for marker in "${TMPDIR:-/tmp}"/fm-*/.fm-test-fixture; do
-    [ -e "$marker" ] || continue
-    owner_pid=$(sed -n '1p' "$marker" 2>/dev/null) || owner_pid=
-    owner_identity=$(sed -n '2,$p' "$marker" 2>/dev/null) || owner_identity=
-    case "$owner_pid" in
-      '' | *[!0-9]*) ;;
-      *)
-        current_identity=$(fm_test_pid_identity "$owner_pid" 2>/dev/null) || current_identity=
-        if [ -n "$owner_identity" ] && [ "$current_identity" = "$owner_identity" ]; then
-          continue
-        fi
-        ;;
-    esac
-    mtime=$(stat -c %Y "$marker" 2>/dev/null || stat -f %m "$marker" 2>/dev/null) || continue
-    [ $((now - mtime)) -ge "$FM_TEST_ORPHAN_MAX_AGE_SECONDS" ] || continue
-    dir=$(dirname "$marker")
-    if [ -d "$dir" ] && [ ! -L "$dir" ]; then
-      find "$dir" -type d -exec chmod u+rwx {} + 2>/dev/null || true
-    fi
-    rm -rf "$dir"
-  done
-}
-
 # A parent coordinator can reap once before it starts isolated child sections.
 # Those children use their own EXIT cleanup and must not spend their bounded
 # execution window repeating the same global stale-fixture scan.
 if [ "${FM_TEST_SKIP_ORPHAN_REAP:-0}" != 1 ]; then
   fm_test_reap_orphans
+  if [ ! "${TMPDIR:-/tmp}" -ef /tmp ]; then
+    fm_test_reap_orphans /tmp fm-test-treehouse.
+  fi
 fi
 
 # --- live-capability gate ---------------------------------------------------

@@ -47,7 +47,7 @@ mkdir -p "$PROJECT/.pi/extensions/lib" "$HOME_DIR/state" "$HOME_DIR/config" "$SE
 cleanup() {
   "$TMUX" -L "$SOCKET" kill-server 2>/dev/null || true
 }
-trap cleanup EXIT
+trap 'fm_test_cleanup_exit "$?" fm_test_cleanup_after cleanup' EXIT
 
 cp "$ROOT/.pi/extensions/fm-branch-supervision.ts" "$PROJECT/.pi/extensions/fm-branch-supervision.ts"
 for lib in fm-async-exec fm-branch-dispatch fm-branch-model-picker fm-calm-visibility fm-native-contract fm-operational-input; do

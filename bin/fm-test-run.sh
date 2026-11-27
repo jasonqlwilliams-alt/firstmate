@@ -111,14 +111,18 @@
 # matching ^skip:) remain successful and are counted as skipped_gate; each one
 # is logged with its reason and recorded in the timing artifact.
 #
-# expected_gate_skip classes name why a family is allowed to skip: herdr (the
-# pinned real-Herdr lane), optional-binary (a backend whose binary is optional),
-# live-capability (a live-harness guard governed by fm_live_gate, which records
-# unavailable tools and explicit policy skips; see tests/lib.sh), or none.
+# expected_gate_skip classes identify a suite's expected capability gates: herdr,
+# treehouse, herdr,treehouse (either prerequisite), optional-binary (an optional
+# backend), live-capability (a live-harness guard governed by fm_live_gate, which
+# records unavailable tools and explicit policy skips; see tests/lib.sh), or none.
 #
 # Every selected script runs isolated from the host's global and system Git
 # configuration, including one that sources no test helper of its own;
 # tests/git-config-helpers.sh owns that contract and its limits.
+# The runner gives each suite a disposable TREEHOUSE_ROOT and, when Treehouse
+# is installed, a PATH wrapper that selects that root for test allocations.
+# The runner removes the scratch directory after the suite returns.
+# tests/treehouse-test-helpers.sh owns scratch setup and stale-fixture recovery.
 #
 # Family labels, the changed-file map, and production portable-shard composition
 # live in this script only (one owner). The proven-isolated candidate set remains
@@ -312,7 +316,8 @@ family_for_basename() {
     fm-backend-herdr-agent-exit-shell-e2e.test.sh|\
     fm-herdr-attached-viewer-live-e2e.test.sh|fm-herdr-session-cleanup-e2e.test.sh|\
     fm-backend-herdr-smoke.test.sh|fm-backend-herdr-workspace-per-home-e2e.test.sh|\
-    fm-control-herdr-smoke.test.sh|fm-secondmate-herdr-identity-e2e.test.sh|fm-worker-herdr-identity-e2e.test.sh)
+    fm-control-herdr-smoke.test.sh|fm-secondmate-herdr-identity-e2e.test.sh|fm-worker-herdr-identity-e2e.test.sh|\
+    fm-treehouse-lease-safety.test.sh)
       printf '%s\n' real-herdr-gated
       ;;
     fm-backlog-handoff.test.sh|fm-on.test.sh|fm-remote-backlog-handoff.test.sh|\
@@ -397,7 +402,7 @@ family_for_basename() {
     fm-backup-helm.test.sh|fm-primary-start.test.sh|fm-live-gate.test.sh|\
     fm-project-origin.test.sh|fm-public-followup.test.sh|fm-quota-choose.test.sh|\
     fm-remote-entrypoint.test.sh|fm-remote-secondmate-parent-binding.test.sh|\
-    fm-send-remote-delivery.test.sh|fm-spawn-pool-base-freshen.test.sh|fm-treehouse-lease-safety.test.sh|\
+    fm-send-remote-delivery.test.sh|fm-spawn-pool-base-freshen.test.sh|\
     fm-test-fixture-cleanup.test.sh|fm-test-fixtures.test.sh|\
     fm-voice-relay.test.sh|fm-wake-drain-open-decisions-cursor.test.sh|\
     fm-wake-drain-open-decisions.test.sh|fm-wake-drain-outcome-backstop.test.sh)
@@ -409,8 +414,16 @@ family_for_basename() {
   esac
 }
 
-expected_gate_skip_for_family() {
-  case "$1" in
+expected_gate_skip_for_script() {
+  case "${1##*/}" in
+    fm-treehouse-lease-safety.test.sh) printf '%s\n' treehouse; return ;;
+    fm-backend-autodetect-smoke.test.sh|fm-backend-herdr-launcher-workspace-e2e.test.sh|\
+    fm-backend-herdr-presentation-e2e.test.sh|fm-backend-herdr-workspace-per-home-e2e.test.sh)
+      printf '%s\n' herdr,treehouse
+      return
+      ;;
+  esac
+  case "$2" in
     real-herdr-gated) printf '%s\n' herdr ;;
     live-harness-optin) printf '%s\n' live-capability ;;
     cmux|zellij|orca) printf '%s\n' optional-binary ;;
@@ -1326,9 +1339,14 @@ families_for_changed_path() {
       # only proven by running them: its own contract test passing says the
       # runner's logic is right, not that the suite it drives still runs.
       printf '%s\n' pure-contract-unit
-      # Only this script wraps each suite in run_script_bounded's fixture Git
-      # isolation, and only a standalone-family script proves it.
-      printf '%s\n' "__script__:fm-test-fixtures.test.sh"
+      # The fixture suite covers the runner's Git and Treehouse isolation.
+      # The auto-detection smoke also covers inheritance by a real Herdr pane.
+      printf '%s\n' "__script__:fm-test-fixtures.test.sh" "__script__:fm-backend-autodetect-smoke.test.sh"
+      ;;
+    tests/treehouse-test-helpers.sh)
+      printf '%s\n' "__script__:fm-test-fixtures.test.sh" \
+        "__script__:fm-test-fixture-cleanup.test.sh" "__script__:fm-treehouse-lease-safety.test.sh" \
+        "__script__:fm-backend-autodetect-smoke.test.sh"
       ;;
     bin/fm-test-isolation-proof.sh)
       # Same reason as the runner above: the proof drives every
@@ -1586,7 +1604,12 @@ families_for_changed_path() {
         || printf '%s\n' "__unmapped__:$path"
       ;;
     tests/lib.sh|tests/*-helpers.sh|tests/fixtures.sh)
+      if [ "$path" = tests/lib.sh ]; then
+        printf '%s\n' "__script__:fm-test-fixture-cleanup.test.sh" \
+          "__script__:fm-treehouse-lease-safety.test.sh" "__script__:fm-backend-autodetect-smoke.test.sh"
+      fi
       families_for_test_reference "$(basename "$path")" \
+        || [ "$path" = tests/lib.sh ] \
         || printf '%s\n' "__unmapped__:$path"
       ;;
     tests/fixtures/*/*)
@@ -2240,6 +2263,11 @@ if [ "$PER_SCRIPT_TIMEOUT_SECS" -gt 0 ]; then
   . "$ROOT/bin/fm-timeout-lib.sh"
 fi
 
+# shellcheck source=tests/treehouse-test-helpers.sh
+. "$ROOT/tests/treehouse-test-helpers.sh" || die "could not load the Treehouse test helper"
+if [ "${FM_TEST_SKIP_ORPHAN_REAP:-0}" != 1 ]; then
+  fm_test_reap_orphans /tmp fm-test-treehouse.
+fi
 RUN_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-test-run.XXXXXX")
 RECORDS="$RUN_TMP/records.tsv"
 FAMILIES_TSV="$RUN_TMP/families.tsv"
@@ -2298,7 +2326,7 @@ record_script_result() {
   local base family expected gate_skip gate_reason fail_delta
   base=$(basename "$script")
   family=$(family_for_basename "$base")
-  expected=$(expected_gate_skip_for_family "$family")
+  expected=$(expected_gate_skip_for_script "$script" "$family")
 
   if [ -n "$FAIL_ON_GATE_SKIP" ] && detect_gate_skip_token "$out" "$FAIL_ON_GATE_SKIP"; then
     log "required gate skip token seen in $script: skip: $FAIL_ON_GATE_SKIP"
@@ -2337,15 +2365,21 @@ record_script_result() {
 # positive, a script that outruns it is terminated and reported as exit 124: a
 # hung script must become a bounded failure rather than an unbounded suite,
 # because an unbounded suite is what silently outruns its caller's budget.
-run_script_bounded() {  # <script> <out> <stream> <id>
+run_script_bounded() (  # <script> <out> <stream> <id>
   local script=$1 out=$2 stream=$3 id=$4
-  # Declaring the variables local first keeps the helper's export scoped to this
-  # call and its child script, so the runner's own environment is left as the
-  # caller had it.
-  local GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
+  local owner_pid owner_identity
+  owner_pid=${BASHPID:-$(exec sh -c 'printf "%s\n" "$PPID"')}
+  owner_identity=$(TZ=UTC0 fm_test_pid_identity "$owner_pid") || {
+    log "could not identify the suite process for $script"
+    return 1
+  }
   # shellcheck source=tests/git-config-helpers.sh
   . "$ROOT/tests/git-config-helpers.sh" || return
-  local rc
+  fm_test_treehouse_setup "$owner_pid" "$owner_identity" || {
+    log "could not create a scratch Treehouse root for $script"
+    return 1
+  }
+  local rc cleanup_output
   : "$id"
   set +e
   if [ "$stream" -eq 1 ]; then
@@ -2371,15 +2405,20 @@ run_script_bounded() {  # <script> <out> <stream> <id>
       "$script" "$PER_SCRIPT_TIMEOUT_SECS" >>"$out"
     [ "$stream" -eq 1 ] && tail -1 "$out"
   fi
+  cleanup_output=$(fm_test_treehouse_remove "$FM_TEST_TREEHOUSE_DIR" 2>&1) || [ "$rc" -ne 0 ] || rc=1
+  if [ -n "$cleanup_output" ]; then
+    printf '%s\n' "$cleanup_output" >>"$out"
+    [ "$stream" -ne 1 ] || printf '%s\n' "$cleanup_output"
+  fi
   return "$rc"
-}
+)
 
 run_one_serial() {
   local script=$1
   local base family expected out begin_iso begin_ms end_ms end_iso duration rc
   base=$(basename "$script")
   family=$(family_for_basename "$base")
-  expected=$(expected_gate_skip_for_family "$family")
+  expected=$(expected_gate_skip_for_script "$script" "$family")
   out="$RUN_TMP/out.$TOTAL"
   begin_iso=$(now_iso)
   begin_ms=$(now_ms)
@@ -2499,7 +2538,7 @@ else
     chmod 0700 "$work" "$work/tmp" || die "could not chmod 0700 worker root $work"
     base=$(basename "$script")
     family=$(family_for_basename "$base")
-    expected=$(expected_gate_skip_for_family "$family")
+    expected=$(expected_gate_skip_for_script "$script" "$family")
     printf 'FM_TEST_BEGIN %s %s family=%s expected_gate_skip=%s\n' \
       "$(now_iso)" "$script" "$family" "$expected"
     (

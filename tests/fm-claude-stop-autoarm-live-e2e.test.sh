@@ -38,7 +38,7 @@ cleanup() {
     rm -rf "$LAB"
   fi
 }
-trap cleanup EXIT
+trap 'fm_test_cleanup_exit "$?" fm_test_cleanup_after cleanup' EXIT
 
 mkdir -p "$LAB"
 # git clone of this worktree carries only committed state, so copy the

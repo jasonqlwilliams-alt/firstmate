@@ -2,6 +2,8 @@
 # Real Claude Code plus cmux submit-confirmation drift guard.
 # Run explicitly with FM_CMUX_CLAUDE_COMPOSER_LIVE=1; it creates and cleans up
 # only one exact fm-test- workspace through the normal scout lifecycle.
+# The running cmux app supplies its own pane environment, outside scratch
+# Treehouse isolation.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -26,15 +28,15 @@ cleanup() {
     FM_HOME="$LAB" "$ROOT/bin/fm-decision-hold.sh" complete "$TASK" --none >/dev/null 2>&1 || true
     FM_HOME="$LAB" "$ROOT/bin/fm-teardown.sh" "$TASK" >/dev/null 2>&1 || true
   }
-  [ -z "$LAB" ] || rm -rf -- "$LAB"
+  fm_test_cleanup
 }
 
 fm_live_gate opt-in FM_CMUX_CLAUDE_COMPOSER_LIVE claude cmux jq treehouse python3
 
 cmux ping >/dev/null 2>&1 || fail "FM_CMUX_CLAUDE_COMPOSER_LIVE=1 but the cmux socket is unavailable"
 
-LAB=$(mktemp -d "${TMPDIR:-/tmp}/fm-cmux-claude-composer.XXXXXX") || fail "could not create an isolated cmux Claude lab"
-trap cleanup EXIT
+LAB=$(fm_test_tmproot fm-cmux-claude-composer) || fail "could not create an isolated cmux Claude lab"
+trap 'fm_test_cleanup_exit "$?" cleanup' EXIT
 mkdir -p "$LAB/config" "$LAB/data/$TASK" "$LAB/projects/comms" "$LAB/state"
 printf 'cmux\n' > "$LAB/config/backend"
 

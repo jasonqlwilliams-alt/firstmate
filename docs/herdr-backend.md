@@ -29,8 +29,9 @@ An auto-detected Herdr spawn prints an opt-out notice.
 Spawn stops before creating a Herdr container or acquiring a task worktree when `herdr`, `jq`, or the protocol floor is unavailable.
 No separate first-run provisioning is required.
 
-The required CI lane uses the pinned installers in `bin/fm-install-herdr.sh` and `bin/fm-install-treehouse.sh`.
+The required CI lane uses the pinned installers in [`bin/fm-install-herdr.sh`](../bin/fm-install-herdr.sh) and [`bin/fm-install-treehouse.sh`](../bin/fm-install-treehouse.sh).
 Those script headers own release assets, checksums, download bounds, and post-install gates.
+The lane includes the [detached-pane lease regression](../tests/fm-treehouse-lease-safety.test.sh), which uses a simulated terminal and requires real Treehouse with `--root` and lease repair support.
 Real harness credential tests remain opt-in rather than part of default CI.
 
 ## Client selection

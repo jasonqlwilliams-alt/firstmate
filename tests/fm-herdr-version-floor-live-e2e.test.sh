@@ -57,7 +57,7 @@ LAB_SESSION=$("$LAB_HELPER" name fm-herdr-version-floor)
 cleanup() {
   local status=$?
   rm -rf "$TMP_ROOT"
-  exit "$status"
+  fm_test_cleanup_exit "$status" fm_test_cleanup
 }
 trap cleanup EXIT
 

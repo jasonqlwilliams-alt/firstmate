@@ -24,7 +24,7 @@ CODEX_VERSION=$(codex --version)
 cleanup() {
   rm -rf "$LAB"
 }
-trap cleanup EXIT
+trap 'fm_test_cleanup_exit "$?" fm_test_cleanup_after cleanup' EXIT
 
 mkdir -p "$LAB"
 git clone -q "$ROOT" "$PROJECT"

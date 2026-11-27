@@ -6,10 +6,15 @@ set -u
 
 # shellcheck source=tests/fixtures.sh
 . "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
-command -v treehouse >/dev/null || { echo 'skip: treehouse not found'; exit 0; }
+fm_test_require_treehouse_root || exit 0
 TREEHOUSE_BIN=$(command -v treehouse)
+if ! lease_help=$("$TREEHOUSE_BIN" lease --help 2>&1) ||
+  ! grep -Eq '^[[:space:]]*treehouse lease([[:space:]]|$)' <<< "$lease_help" ||
+  ! grep -Eq '(^|[[:space:]])--lease-holder([[:space:]]|$)' <<< "$lease_help"; then
+  printf 'skip: treehouse does not support lease repair\n'
+  exit 0
+fi
 TMP_ROOT=$(fm_test_tmproot fm-treehouse-lease-safety)
-trap fm_test_cleanup EXIT
 mkdir -p "$TMP_ROOT/home" "$TMP_ROOT/user" "$TMP_ROOT/state"
 HOME_DIR="$TMP_ROOT/home"
 PROJECT="$TMP_ROOT/project"
@@ -18,8 +23,20 @@ fm_test_spawn_home "$HOME_DIR" codex
 printf 'tmux\n' > "$HOME_DIR/config/backend"
 FAKEBIN=$(make_spawn_fakebin "$TMP_ROOT/fake")
 fm_fake_exit0 "$FAKEBIN" claude
-export TREEHOUSE_ROOT="$TMP_ROOT/pool" XDG_CONFIG_HOME="$TMP_ROOT/user/.config" XDG_STATE_HOME="$TMP_ROOT/state"
-export FM_TEST_REAL_TREEHOUSE="$TREEHOUSE_BIN" FM_TEST_CWD="$TMP_ROOT/cwd" FM_TEST_PROJECT="$PROJECT" FM_TEST_TREEHOUSE_CALLS="$TMP_ROOT/treehouse-calls"
+export XDG_CONFIG_HOME="$TMP_ROOT/user/.config" XDG_STATE_HOME="$TMP_ROOT/state"
+FM_TEST_REAL_TREEHOUSE=$TREEHOUSE_BIN
+export FM_TEST_REAL_TREEHOUSE FM_TEST_CWD="$TMP_ROOT/cwd" FM_TEST_PROJECT="$PROJECT" FM_TEST_TREEHOUSE_CALLS="$TMP_ROOT/treehouse-calls"
+cat > "$FAKEBIN/treehouse" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FM_TEST_TREEHOUSE_CALLS"
+if [ "${FM_TEST_ABORT_MODE:-}" = refresh-abort ] && [ "${1:-}" = get ]; then
+  shift
+  exec "$FM_TEST_REAL_TREEHOUSE" get --no-fetch "$@"
+fi
+exec "$FM_TEST_REAL_TREEHOUSE" "$@"
+EOF
+chmod +x "$FAKEBIN/treehouse"
+printf 'worktree_path = "%s"\n' "$TMP_ROOT/escaped/{repo}-{slot}" > "$PROJECT/treehouse.toml"
 # The shell used by the initial legacy get exits immediately, leaving no
 # process-based protection. Every later acquisition comes from real fm-spawn.
 cat > "$TMP_ROOT/shell" <<'EOF'
@@ -29,6 +46,7 @@ EOF
 chmod +x "$TMP_ROOT/shell"
 (cd "$PROJECT" && HOME="$TMP_ROOT/user" SHELL="$TMP_ROOT/shell" "$TREEHOUSE_BIN" get --no-fetch) >/dev/null || fail 'could not allocate legacy fixture'
 SLOT=$(cat "$FM_TEST_CWD")
+case "$SLOT" in "$TREEHOUSE_ROOT"/*) ;; *) fail "checkout escaped the scratch root: $SLOT" ;; esac
 # Keep the existing fake terminal mechanics, but execute only allocation shell
 # commands. Capturing the resulting cwd proves we entered the allocated copy.
 mv "$FAKEBIN/tmux" "$FAKEBIN/tmux-fixture"
@@ -41,7 +59,10 @@ if [ "${1:-}" = send-keys ]; then
   for arg in "$@"; do
     case "$arg" in
       *'treehouse get'*)
-        (cd "$FM_TEST_PROJECT" && eval "$arg" && pwd > "$FM_TEST_CWD") || exit 1
+        (
+          unset TREEHOUSE_ROOT TREEHOUSE_WORKTREE_PATH
+          cd "$FM_TEST_PROJECT" && eval "$arg" && pwd > "$FM_TEST_CWD"
+        ) || exit 1
         case "${FM_TEST_ABORT_MODE:-}" in
           clean|base-mismatch) git -C "$(cat "$FM_TEST_CWD")" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*' ;;
           modified) printf 'keep this work\n' > "$(cat "$FM_TEST_CWD")/preserved.txt" ;;
@@ -72,16 +93,7 @@ if [ "${1:-}" = send-keys ]; then
 fi
 exec "$(dirname "$0")/tmux-fixture" "$@"
 EOF
-cat > "$FAKEBIN/treehouse" <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >> "$FM_TEST_TREEHOUSE_CALLS"
-if [ "${FM_TEST_ABORT_MODE:-}" = refresh-abort ] && [ "${1:-}" = get ]; then
-  shift
-  exec "$FM_TEST_REAL_TREEHOUSE" get --no-fetch "$@"
-fi
-exec "$FM_TEST_REAL_TREEHOUSE" "$@"
-EOF
-chmod +x "$FAKEBIN/tmux" "$FAKEBIN/treehouse"
+chmod +x "$FAKEBIN/tmux"
 run_spawn() {
   local id=$1
   fm_test_spawn_brief "$HOME_DIR" "$id"
@@ -91,6 +103,7 @@ run_spawn() {
 out=$(run_spawn first); rc=$?
 expect_code 0 "$rc" "durable spawn failed: $out"
 [ "$(cat "$FM_TEST_CWD")" = "$SLOT" ] || fail 'spawn did not enter its leased slot'
+assert_absent "$TMP_ROOT/escaped" 'spawn created an out-of-fixture checkout'
 POOL_STATE="${SLOT%/*}/../treehouse-state.json"
 jq -e --arg slot "$SLOT" '.worktrees | any(.[]; .path == $slot and .leased == true)' "$POOL_STATE" >/dev/null || fail 'spawn left only process-based protection'
 next=$(cd "$PROJECT" && HOME="$TMP_ROOT/user" "$TREEHOUSE_BIN" get --lease --no-fetch --lease-holder next) || fail 'counterfactual durable get failed'
@@ -104,7 +117,11 @@ calls=$(wc -l < "$FM_TEST_TREEHOUSE_CALLS")
 out=$(run_spawn with-orca); rc=$?
 expect_code 0 "$rc" "Orca worktree record blocked Treehouse allocation: $out"
 [ "$(wc -l < "$FM_TEST_TREEHOUSE_CALLS")" -gt "$calls" ] || fail 'Orca counterexample never reached Treehouse allocation'
-[ "$(cat "$FM_TEST_CWD")" != "$ORCA_WT" ] || fail 'Treehouse allocated the Orca worktree'
+fresh=$(cat "$FM_TEST_CWD")
+[ "$fresh" != "$ORCA_WT" ] || fail 'Treehouse allocated the Orca worktree'
+case "$fresh" in "$TREEHOUSE_ROOT"/*) ;; *) fail "fresh pane checkout escaped the scratch root: $fresh" ;; esac
+[ "$fresh" != "$SLOT" ] && [ "$fresh" != "$next" ] || fail 'spawn reused a leased fixture slot'
+assert_absent "$TMP_ROOT/escaped" 'fresh pane allocation created an out-of-fixture checkout'
 assert_present "$HOME_DIR/state/orca.meta" 'spawn changed the Orca task record'
 pass 'unregistered Orca worktree in the same Git repository does not block Treehouse allocation'
 # Simulate the observed legacy/lost lease in isolated state only.
@@ -174,7 +191,7 @@ for abort_mode in clean base-mismatch modified committed recorded foreign-holder
     unset FM_TEST_CLAUDE_CONFIG_DIR
   fi
   printf 'tmux\n' > "$HOME_DIR/config/backend"
-  export TREEHOUSE_ROOT="$CASE_ROOT/pool" XDG_CONFIG_HOME="$CASE_ROOT/user/.config" XDG_STATE_HOME="$CASE_ROOT/state"
+  export XDG_CONFIG_HOME="$CASE_ROOT/user/.config" XDG_STATE_HOME="$CASE_ROOT/state"
   export FM_TEST_PROJECT="$PROJECT" FM_TEST_CWD="$CASE_ROOT/cwd" FM_TEST_TREEHOUSE_CALLS="$CASE_ROOT/treehouse-calls" FM_TEST_ABORT_MODE="$abort_mode" FM_TEST_HOME="$HOME_DIR" FM_TEST_ACQUIRED_HEAD="$CASE_ROOT/acquired-head"
   out=$(run_spawn "abort-$abort_mode"); rc=$?
   [ "$rc" -ne 0 ] || fail "the $abort_mode abort fixture unexpectedly launched"

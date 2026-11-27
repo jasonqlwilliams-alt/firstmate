@@ -32,7 +32,7 @@ CALLS="$LAB/quota-axi.calls"
 cleanup() {
   rm -rf "$LAB"
 }
-trap cleanup EXIT
+trap 'fm_test_cleanup_exit "$?" fm_test_cleanup_after cleanup' EXIT
 
 mkdir -p "$PROJECT/.agents/skills/quota-array-dispatch" "$FAKEBIN"
 cp "$OWNER" "$PROJECT/.agents/skills/quota-array-dispatch/SKILL.md"

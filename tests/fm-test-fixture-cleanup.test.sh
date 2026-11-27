@@ -34,6 +34,101 @@ test_fixture_root_gone_after_normal_exit() {
   pass "fm_test_tmproot cleans up its fixture root on normal exit"
 }
 
+test_scratch_cleanup_failure_changes_only_a_successful_exit() {
+  local harness status expected rc output blocked scratch independent
+  harness=$(fm_test_tmproot fm-test-cleanup-exit-status)
+  for status in 0 7; do
+    expected=$status
+    [ "$status" -ne 0 ] || expected=1
+    # shellcheck disable=SC2016 # The child Bash expands its own variables and arguments.
+    output=$(TMPDIR="$harness" env -u TREEHOUSE_ROOT -u FM_TEST_TREEHOUSE_DIR bash -uc '
+      . "$1"
+      printf "%s\n" "$TREEHOUSE_ROOT" > "$3/refused"
+      rm "$FM_TEST_TREEHOUSE_DIR/.fm-test-treehouse"
+      independent=$(fm_test_tmproot fm-test-cleanup-independent) || exit 9
+      fm_test_treehouse_setup "$$" "$FM_TEST_OWNER_IDENTITY" || exit 9
+      fm_test_track_treehouse_scratch "$FM_TEST_TREEHOUSE_DIR"
+      printf "%s\n" "$independent" > "$3/independent"
+      printf "%s\n" "$TREEHOUSE_ROOT" > "$3/scratch"
+      exit "$2"
+    ' _ "$LIB" "$status" "$harness" 2>&1) && rc=0 || rc=$?
+    assert_contains "$output" 'refusing to remove' "standalone cleanup reports the refused scratch root"
+    expect_code "$expected" "$rc" "standalone cleanup preserves or upgrades exit status $status"
+    blocked=$(cat "$harness/refused") || fail "the child did not report the refused root"
+    independent=$(cat "$harness/independent") || fail "the child did not report the independent fixture"
+    scratch=$(cat "$harness/scratch") || fail "the child did not report the independent scratch root"
+    assert_present "$blocked" "parent cleanup bypassed the scratch removal guard"
+    assert_absent "$independent" "scratch refusal stopped independent fixture cleanup"
+    assert_absent "$scratch" "scratch refusal stopped cleanup of the next scratch root"
+    touch "$(dirname "$blocked")/.fm-test-treehouse" || fail "could not restore the test directory marker"
+    fm_test_treehouse_remove "$(dirname "$blocked")" || fail "could not remove the refused test directory"
+  done
+  pass "scratch cleanup failures preserve exit status and still clean independent fixtures"
+}
+
+test_custom_exit_chains_scratch_cleanup() {
+  local harness output rc status root
+  harness=$(fm_test_tmproot fm-test-custom-exit)
+  for status in 0 7; do
+    # shellcheck disable=SC2016 # The child Bash expands the script and evaluates $? when its trap runs.
+    output=$(TMPDIR="$harness" env -u TREEHOUSE_ROOT -u FM_TEST_TREEHOUSE_DIR bash -uc '
+      . "$1"
+      cleanup() {
+        test -d "$TREEHOUSE_ROOT" || return 1
+        printf "custom cleanup ran\n"
+        return 9
+      }
+      trap '\''fm_test_cleanup_exit "$?" fm_test_cleanup_after cleanup'\'' EXIT
+      printf "%s\n" "$TREEHOUSE_ROOT" > "$3/root"
+      exit "$2"
+    ' _ "$LIB" "$status" "$harness" 2>&1) && rc=0 || rc=$?
+    expect_code "$status" "$rc" "custom cleanup preserves exit status $status"
+    assert_contains "$output" 'custom cleanup ran' "the suite cleanup ran before scratch removal"
+    root=$(cat "$harness/root") || fail "the child did not report its scratch root"
+    assert_absent "$root" "the custom exit left its scratch root behind"
+  done
+  pass "custom suite exits clean their scratch roots and preserve exit status"
+}
+
+test_codex_refusal_keeps_diagnostics_without_scratch() {
+  local lab repo output rc root diagnostics
+  lab=$(fm_test_tmproot fm-test-codex-refusal)
+  repo="$lab/repo"
+  mkdir -p "$repo/tests" "$repo/bin" "$lab/tools" "$lab/home"
+  cp "$ROOT/tests/"{fm-codex-signin-live-e2e.test.sh,lib.sh,git-config-helpers.sh,treehouse-test-helpers.sh} "$repo/tests/"
+  cp "$ROOT/bin/"{fm-wake-lib.sh,fm-session-lock-record-lib.sh} "$repo/bin/"
+  printf '%s\n' 'fm_backend_codex_agent_pid() { return 1; }' \
+    'fm_backend_agent_state() { printf "%s\n" unknown; }' > "$repo/bin/fm-backend.sh"
+  printf '%s\n' 'fm_composer_codex_signin_screen() { return 0; }' > "$repo/bin/fm-composer-lib.sh"
+  fm_fake_exit0 "$lab/tools" sleep
+  cat > "$lab/tools/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$3" in
+  display-message) echo 12345 ;;
+  capture-pane) echo chooser ;;
+  kill-server) touch "$FM_TEST_CLEANUP_LAB/killed" ;;
+esac
+printf '%s\n' "${2%/*}" > "$FM_TEST_CLEANUP_LAB/diagnostics"
+SH
+  cat > "$lab/tools/codex" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$FM_TEST_TREEHOUSE_DIR" > "$FM_TEST_CLEANUP_LAB/scratch"
+printf '%s\n' 'codex fixture'
+SH
+  chmod +x "$lab/tools/tmux" "$lab/tools/codex"
+  output=$(env -u FM_TEST_TREEHOUSE_DIR HOME="$lab/home" TMPDIR="$lab" PATH="$lab/tools:$PATH" \
+    FM_TEST_CLEANUP_LAB="$lab" FM_CODEX_SIGNIN_LIVE=1 FM_CODEX_SIGNIN_CAPTURE= \
+    bash "$repo/tests/fm-codex-signin-live-e2e.test.sh" 2>&1) && rc=0 || rc=$?
+  expect_code 1 "$rc" "unknown Codex endpoint must fail"
+  assert_contains "$output" 'endpoint identity is unknown; private endpoint retained' "cleanup reached the endpoint refusal"
+  root=$(cat "$lab/scratch") || fail "the guard did not report its scratch directory"
+  diagnostics=$(cat "$lab/diagnostics") || fail "the guard did not report its diagnostic directory"
+  assert_absent "$root" "Codex refusal leaked scratch"
+  assert_present "$diagnostics/mtimes-before" "Codex refusal deleted its diagnostic fixture"
+  assert_absent "$lab/killed" "Codex refusal touched its private endpoint"
+  pass "Codex identity refusal retains its endpoint and diagnostics while removing scratch"
+}
+
 test_fixture_root_gone_after_sigterm() {
   local harness dirfile child_dir pid tries
   harness=$(fm_test_tmproot fm-test-cleanup-sigterm-harness)
@@ -97,11 +192,25 @@ test_fixture_registration_failure_rolls_back_root() {
   pass "failed fixture registration rolls back the new root"
 }
 
+start_suite_for_orphan_sweep() (
+  export TMPDIR="$1" FM_TEST_STALE_TREEHOUSE_DIR="${2:-}"
+  stat() {
+    case "${!#}" in
+      "$TMPDIR"/*) command stat "$@" ;;
+      *) [ "${!#}" -ef "$FM_TEST_STALE_TREEHOUSE_DIR/.fm-test-fixture" ] && command stat "$@" ;;
+    esac
+  }
+  export -f stat
+  FM_TEST_SKIP_ORPHAN_REAP=0 FM_TEST_ORPHAN_MAX_AGE_SECONDS=3600 bash -ec '. "$1"' _ "$LIB"
+)
+
 test_orphan_sweep_respects_fixture_ownership() {
-  local harness dirfile active_dir stale_dir fresh_dir pid tries
+  local harness dirfile active_dir legacy_dir legacy_identity stale_dir fresh_dir pid tries
   harness=$(fm_test_tmproot fm-test-cleanup-orphan-harness)
   dirfile="$harness/active-dir"
-  bash -c '
+  # This child only creates the live fixture. The explicit sweep below is
+  # scoped to this test, so the simulated process lookup cannot reap other pools.
+  FM_TEST_SKIP_ORPHAN_REAP=1 TZ=EST5 FM_PROC_ROOT_OVERRIDE="$harness/no-proc" TMPDIR="$harness" bash -c '
     # shellcheck source=tests/lib.sh
     . "'"$LIB"'"
     d=$(fm_test_tmproot fm-test-cleanup-active)
@@ -119,16 +228,20 @@ test_orphan_sweep_respects_fixture_ownership() {
   active_dir=$(cat "$dirfile")
   touch -t 202001010000 "$active_dir/.fm-test-fixture"
 
-  stale_dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-test-cleanup-stale.XXXXXX")
+  legacy_dir=$(mktemp -d "$harness/fm-test-cleanup-legacy.XXXXXX")
+  legacy_identity=$(TZ=PST8 LC_ALL=C ps -p "$$" -o lstart= -o command= | sed 's/^[[:space:]]*//')
+  [ -n "$legacy_identity" ] || fail "could not record the legacy fixture identity"
+  printf '%s\n%s\n' "$$" "$legacy_identity" > "$legacy_dir/.fm-test-fixture"
+  touch -t 202001010000 "$legacy_dir/.fm-test-fixture"
+
+  stale_dir=$(mktemp -d "$harness/fm-test-cleanup-stale.XXXXXX")
   printf '%s\n%s\n' "$$" reused-process-identity > "$stale_dir/.fm-test-fixture"
   touch -t 202001010000 "$stale_dir/.fm-test-fixture"
-  fresh_dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-test-cleanup-fresh.XXXXXX")
+  fresh_dir=$(mktemp -d "$harness/fm-test-cleanup-fresh.XXXXXX")
   : > "$fresh_dir/.fm-test-fixture"
 
-  bash -c '
-    # shellcheck source=tests/lib.sh
-    . "'"$LIB"'"
-  '
+  TZ=PST8 FM_PROC_ROOT_OVERRIDE="$harness/no-proc" \
+    start_suite_for_orphan_sweep "$harness" || fail "the next suite did not start"
 
   assert_absent "$stale_dir" \
     "a stale fixture root whose PID was reused by another process was not reaped"
@@ -140,13 +253,66 @@ test_orphan_sweep_respects_fixture_ownership() {
   wait "$pid" 2>/dev/null
   assert_absent "$active_dir" \
     "the active fixture root survived its owning process's teardown"
+  assert_present "$legacy_dir" \
+    "the orphan reaper removed a live fixture with a legacy local-time identity"
   rm -rf "$fresh_dir"
   pass "the orphan sweep reaps only old fixtures without a live owner"
 }
 
+test_orphan_sweep_continues_after_removal_failure() (
+  local harness stuck_dir stale_dir output
+  harness=$(fm_test_tmproot fm-test-cleanup-removal-failure)
+  stuck_dir="$harness/fm-test-01-stuck"
+  stale_dir="$harness/fm-test-02-stale"
+  mkdir "$stuck_dir" "$stale_dir"
+  touch -t 202001010000 "$stuck_dir/.fm-test-fixture" "$stale_dir/.fm-test-fixture"
+  export FM_TEST_STUCK_ORPHAN="$stuck_dir"
+  rm() {
+    [ "${!#}" != "$FM_TEST_STUCK_ORPHAN" ] || return 1
+    command rm "$@"
+  }
+  export -f rm
+
+  output=$(start_suite_for_orphan_sweep "$harness" 2>&1) ||
+    fail "the next suite could not start after a removal failure: $output"
+  assert_contains "$output" "could not remove orphaned fixture $stuck_dir" \
+    "startup omitted the failed removal diagnostic"
+  assert_present "$stuck_dir" "the fixture with a failed removal should remain"
+  assert_absent "$stale_dir" "the orphan sweep skipped the next removable fixture"
+  pass "the orphan sweep reports failed removal and continues startup"
+)
+
+test_orphan_sweep_ignores_unsafe_markers() (
+  local harness fifo_dir link_dir link_marker target
+  harness=$(fm_test_tmproot fm-test-cleanup-unsafe-markers)
+  fifo_dir="$harness/fm-test-fifo"
+  link_dir="$harness/fm-test-dir-link"
+  link_marker="$harness/fm-test-marker-link"
+  target="$harness/target"
+  mkdir "$fifo_dir" "$link_marker" "$target"
+  mkfifo "$fifo_dir/.fm-test-fixture" || fail "could not create the FIFO marker fixture"
+  printf '%s\n' 0 stale > "$target/.fm-test-fixture"
+  ln -s "$target" "$link_dir"
+  ln -s "$target/.fm-test-fixture" "$link_marker/.fm-test-fixture"
+  touch -t 202001010000 "$fifo_dir/.fm-test-fixture" "$target/.fm-test-fixture"
+
+  . "$ROOT/bin/fm-timeout-lib.sh"
+  export LIB
+  export -f start_suite_for_orphan_sweep
+  # shellcheck disable=SC2016 # The child Bash expands its own positional argument.
+  fm_run_timed 10 bash -c 'start_suite_for_orphan_sweep "$1"' _ "$harness" ||
+    fail "suite startup did not complete with an unsafe fixture marker"
+  [ -p "$fifo_dir/.fm-test-fixture" ] || fail "startup touched a FIFO marker fixture"
+  [ -L "$link_dir" ] || fail "startup removed a symlink fixture directory"
+  [ -L "$link_marker/.fm-test-fixture" ] || fail "startup removed a symlink marker fixture"
+  assert_present "$target/.fm-test-fixture" "startup removed the symlink target"
+  pass "the orphan sweep ignores FIFO markers and symlinks"
+)
+
 test_orphan_sweep_reaps_read_only_package_tree() {
-  local stale_dir package_dir
-  stale_dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-test-cleanup-read-only.XXXXXX")
+  local harness stale_dir package_dir
+  harness=$(fm_test_tmproot fm-test-cleanup-read-only-harness)
+  stale_dir=$(mktemp -d "$harness/fm-test-cleanup-read-only.XXXXXX")
   package_dir="$stale_dir/packages/extension"
   mkdir -p "$package_dir"
   printf '%s\n%s\n' "$$" reused-process-identity > "$stale_dir/.fm-test-fixture"
@@ -154,19 +320,53 @@ test_orphan_sweep_reaps_read_only_package_tree() {
   chmod -R a-w "$stale_dir/packages"
   touch -t 202001010000 "$stale_dir/.fm-test-fixture"
 
-  bash -c '
-    # shellcheck source=tests/lib.sh
-    . "$1"
-  ' _ "$LIB"
+  start_suite_for_orphan_sweep "$harness" || fail "the next suite did not start"
 
   assert_absent "$stale_dir" \
     "the orphan reaper left a stale fixture containing a read-only package tree"
   pass "the orphan sweep reaps read-only package fixtures"
 }
 
+test_orphan_sweep_reaps_standalone_treehouse_scratch() {
+  local harness receipt scratch pid attempt
+  harness=$(fm_test_tmproot fm-test-cleanup-treehouse)
+  receipt="$harness/scratch-path"
+  # shellcheck disable=SC2016 # The child Bash expands its own variables and arguments.
+  TMPDIR="$harness" env -u TREEHOUSE_ROOT -u FM_TEST_TREEHOUSE_DIR bash -ec '
+    . "$1"
+    mkdir "$TREEHOUSE_ROOT/slot"
+    : > "$TREEHOUSE_ROOT/slot/file"
+    chmod u-w "$TREEHOUSE_ROOT/slot"
+    printf "%s\n" "$TREEHOUSE_ROOT" > "$2"
+    exec sleep 30
+  ' _ "$LIB" "$receipt" &
+  pid=$!
+  for ((attempt=0; attempt<100; attempt++)); do
+    [ -s "$receipt" ] && break
+    sleep 0.05
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  [ -s "$receipt" ] || fail "standalone suite did not publish its scratch root"
+  scratch=$(cat "$receipt")
+  assert_present "$scratch/slot/file" "scratch fixture must survive SIGKILL before the sweep"
+
+  touch -t 202001010000 "${scratch%/pool}/.fm-test-fixture" || fail "could not age the stale scratch record"
+  ln -s "${scratch%/pool}" "$harness/scratch-alias" || fail "could not alias the stale scratch directory"
+  start_suite_for_orphan_sweep "$harness" "$harness/scratch-alias" || fail "the next suite did not start"
+  assert_absent "$scratch" "the orphan sweep missed a killed suite's Treehouse scratch root"
+  pass "the orphan sweep reclaims standalone Treehouse pools after SIGKILL"
+}
+
 test_fixture_root_gone_after_normal_exit
+test_scratch_cleanup_failure_changes_only_a_successful_exit
+test_custom_exit_chains_scratch_cleanup
+test_codex_refusal_keeps_diagnostics_without_scratch
 test_fixture_root_gone_after_sigterm
 test_cleanup_registry_resists_precreation
 test_fixture_registration_failure_rolls_back_root
 test_orphan_sweep_respects_fixture_ownership
+test_orphan_sweep_continues_after_removal_failure
+test_orphan_sweep_ignores_unsafe_markers
 test_orphan_sweep_reaps_read_only_package_tree
+test_orphan_sweep_reaps_standalone_treehouse_scratch

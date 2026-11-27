@@ -11,18 +11,16 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/tests/lib.sh"
 HERDR_LAB_HELPER=${HERDR_LAB_HELPER:-$ROOT/bin/fm-herdr-lab.sh}
 
-fail() { printf 'not ok - %s\n' "$1" >&2; cleanup_all; exit 1; }
-pass() { printf 'ok - %s\n' "$1"; }
-
 command -v herdr >/dev/null 2>&1 || { echo "skip: herdr not found"; exit 0; }
 command -v jq >/dev/null 2>&1 || { echo "skip: jq not found"; exit 0; }
-command -v treehouse >/dev/null 2>&1 || { echo "skip: treehouse not found"; exit 0; }
+fm_test_require_treehouse_root || exit 0
 [ -x "$HERDR_LAB_HELPER" ] || { echo "skip: Herdr lab helper not executable at $HERDR_LAB_HELPER"; exit 0; }
 
+TMP_ROOT=$(fm_test_tmproot fm-herdr-presentation) || fail 'could not create the presentation fixture'
 REAL_TREEHOUSE=$(command -v treehouse)
-HERDR_ORIGINAL_PATH=$PATH
-TMP_ROOT=$(mktemp -d "$(cd "${TMPDIR:-/tmp}" && pwd -P)/fm-herdr-presentation.XXXXXX")
+HERDR_ORIGINAL_PATH="$TMP_ROOT/treehouse-bin:$PATH"
 FAKEBIN="$TMP_ROOT/fakebin"
+TREEHOUSE_RECORDER="$TMP_ROOT/treehouse-bin/treehouse"
 HERDR_CALL_LOG="$TMP_ROOT/herdr-calls.log"
 TREEHOUSE_CALL_LOG="$TMP_ROOT/treehouse-calls.log"
 TREEHOUSE_LOCK_DIR="$TMP_ROOT/treehouse-call.lock"
@@ -30,14 +28,14 @@ MOVE_CALL_LOG="$TMP_ROOT/workspace-move-calls.log"
 FOCUS_AUDIT_LOG="$TMP_ROOT/focus-audit.log"
 ACTIVE_SEEDED_CONTROL="$TMP_ROOT/active-seeded-control"
 POST_CREATE_ABORT_CONTROL="$TMP_ROOT/post-create-abort-control"
-mkdir -p "$FAKEBIN"
+mkdir -p "$FAKEBIN" "$TMP_ROOT/treehouse-bin"
 fm_test_track_task_tmps "$FAKEBIN"
 : > "$HERDR_CALL_LOG"
 : > "$TREEHOUSE_CALL_LOG"
 : > "$MOVE_CALL_LOG"
 : > "$FOCUS_AUDIT_LOG"
 REAL_MOVER="$ROOT/bin/backends/herdr-workspace-move.py"
-export REAL_TREEHOUSE REAL_MOVER HERDR_CALL_LOG TREEHOUSE_CALL_LOG TREEHOUSE_LOCK_DIR MOVE_CALL_LOG FOCUS_AUDIT_LOG HERDR_ORIGINAL_PATH HERDR_LAB_HELPER
+export REAL_TREEHOUSE REAL_MOVER HERDR_CALL_LOG TREEHOUSE_RECORDER TREEHOUSE_CALL_LOG TREEHOUSE_LOCK_DIR MOVE_CALL_LOG FOCUS_AUDIT_LOG HERDR_ORIGINAL_PATH HERDR_LAB_HELPER
 export ACTIVE_SEEDED_CONTROL POST_CREATE_ABORT_CONTROL TMP_ROOT
 
 # Log every production-adapter call, remove its already-validated trailing
@@ -151,6 +149,9 @@ if [ "${1:-} ${2:-}" = "pane get" ] && [ -d "$POST_CREATE_ABORT_CONTROL" ]; then
     break
   done
 fi
+if [ "${1:-} ${2:-}" = "pane run" ] && [[ "${4:-}" == *'$(treehouse get '* ]]; then
+  set -- "$1" "$2" "$3" "PATH=$(printf '%q' "${TREEHOUSE_RECORDER%/*}"):\$PATH; $4"
+fi
 if out=$(
   # Herdr can report pane_not_found on stderr.
   [ -z "$abort_task_dir" ] || exec 2>&1
@@ -210,7 +211,7 @@ fi
 exit "$status"
 SH
 
-cat > "$FAKEBIN/treehouse" <<'SH'
+cat > "$TREEHOUSE_RECORDER" <<'SH'
 #!/usr/bin/env bash
 set -u
 {
@@ -273,9 +274,9 @@ printf 'workspace-move\t%s\t%s\t%s\n' "$before" "$after" "$2" >> "$FOCUS_AUDIT_L
 [ -z "$out" ] || printf '%s\n' "$out"
 exit "$status"
 SH
-chmod +x "$FAKEBIN/herdr" "$FAKEBIN/treehouse"
+chmod +x "$FAKEBIN/herdr" "$TREEHOUSE_RECORDER"
 chmod +x "$FAKEBIN/herdr-workspace-mover"
-export PATH="$FAKEBIN:$PATH"
+export PATH="$FAKEBIN:$HERDR_ORIGINAL_PATH"
 export FM_BACKEND_HERDR_WORKSPACE_MOVER="$FAKEBIN/herdr-workspace-mover"
 
 # shellcheck source=tests/herdr-test-safety.sh
@@ -311,10 +312,9 @@ EOF
       "$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION" >/dev/null 2>&1 || true
     LAB_READY=0
   fi
-  rm -rf "$TMP_ROOT"
   fm_test_cleanup
 }
-trap cleanup_all EXIT
+trap 'fm_test_cleanup_exit "$?" cleanup_all' EXIT
 
 PATH="$HERDR_ORIGINAL_PATH" \
   "$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION" \
@@ -526,6 +526,7 @@ normalize_meta() {  # <meta>
     -e 's|^herdr_tab_id=.*$|herdr_tab_id=<herdr-container-id>|' \
     -e 's|^herdr_pane_id=.*$|herdr_pane_id=<herdr-container-id>|' \
     -e 's|^herdr_terminal_id=.*$|herdr_terminal_id=<herdr-terminal-id>|' \
+    -e 's|^tasktmp=.*$|tasktmp=<spawn-temp-root>|' \
     -e 's|^spawn_gen=.*$|spawn_gen=<spawn-incarnation>|' \
     "$1"
 }
@@ -612,7 +613,7 @@ FIRSTMATE_WSID=$(grep '^herdr_workspace_id=' "$ANCHOR_META" | cut -d= -f2-)
 
 # The same task id and project run once opted out and once projected, so
 # Treehouse commands and metadata can be compared after normalizing endpoint
-# IDs and the deliberately fresh per-spawn incarnation.
+# IDs and the deliberately fresh per-spawn values.
 : > "$TREEHOUSE_CALL_LOG"
 OFF_HERDR_START=$(log_line_count)
 OFF_MOVE_START=$(wc -l < "$MOVE_CALL_LOG" | tr -d '[:space:]')
@@ -622,7 +623,11 @@ OFF_HERDR_END=$(log_line_count)
 OFF_META="$TMP_ROOT/off.meta"
 cp "$HOME_DIR/state/shape.meta" "$OFF_META"
 OFF_WT=$(remember_meta_worktree "$OFF_META")
+OFF_TASK_TMP=$(sed -n 's/^tasktmp=//p' "$OFF_META")
+[ -d "$OFF_TASK_TMP" ] || fail "the opted-out spawn did not record an existing task temp directory"
 cp "$TREEHOUSE_CALL_LOG" "$TMP_ROOT/off-treehouse.log"
+grep -Fxq $'get\t--lease\t--lease-holder\tshape' "$TMP_ROOT/off-treehouse.log" \
+  || fail "the Treehouse recorder missed the opted-out shape acquisition"
 [ "$(wc -l < "$MOVE_CALL_LOG" | tr -d '[:space:]')" = "$OFF_MOVE_START" ] \
   || fail "opted-out spawn invoked the presentation-only workspace mover"
 OFF_HERDR_CALLS=$(sed -n "$((OFF_HERDR_START + 1)),${OFF_HERDR_END}p" "$HERDR_CALL_LOG")
@@ -710,6 +715,11 @@ assert_raw_presentation_mutations_preserved_since "$SHAPE_FOCUS_AUDIT_START" "pr
 ON_META="$TMP_ROOT/on.meta"
 cp "$HOME_DIR/state/shape.meta" "$ON_META"
 ON_WT=$(remember_meta_worktree "$ON_META")
+ON_TASK_TMP=$(sed -n 's/^tasktmp=//p' "$ON_META")
+[ -d "$ON_TASK_TMP" ] && [ "$ON_TASK_TMP" != "$OFF_TASK_TMP" ] \
+  || fail "the projected spawn did not record a fresh task temp directory"
+grep -Fxq $'get\t--lease\t--lease-holder\tshape' "$TREEHOUSE_CALL_LOG" \
+  || fail "the Treehouse recorder missed the projected shape acquisition"
 cmp -s "$TMP_ROOT/off-treehouse.log" "$TREEHOUSE_CALL_LOG" \
   || fail "Treehouse command sequence changed between opted-out and projected spawns"
 JOURNAL="$HOME_DIR/state/shape.herdr-presentation"
@@ -825,8 +835,9 @@ PROJECTION_ORDER_START=$(log_line_count)
 [ "$OFF_WT" = "$ON_WT" ] || fail "Treehouse did not reuse the same fixture worktree, so byte comparison is inconclusive"
 normalize_meta "$OFF_META" > "$TMP_ROOT/off.meta.normalized"
 normalize_meta "$ON_META" > "$TMP_ROOT/on.meta.normalized"
-cmp -s "$TMP_ROOT/off.meta.normalized" "$TMP_ROOT/on.meta.normalized" \
-  || fail "metadata changed beyond Herdr container IDs between opted-out and projected paths"
+diff -u "$TMP_ROOT/off.meta.normalized" "$TMP_ROOT/on.meta.normalized" \
+  || fail "stable metadata differed between opted-out and projected spawns"
+pass "real Herdr lab: flat and projected spawns reuse the Treehouse slot and record matching stable metadata with distinct task temp directories"
 
 # Two real primary spawns begin concurrently.
 # The fresh-spawn task-set lock may fail closed for one while the other
@@ -1499,6 +1510,3 @@ PATH="$HERDR_ORIGINAL_PATH" \
   || fail "guarded Herdr lab teardown or default-session tripwire verification failed"
 LAB_READY=0
 pass "real Herdr lab validation completed on Herdr $HERDR_VERSION with the default-session tripwire intact"
-
-cleanup_all
-trap - EXIT

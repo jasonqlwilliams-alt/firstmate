@@ -59,7 +59,7 @@ cleanup() {
   trap - EXIT
   "$TMUX_BIN" -f /dev/null -L "$SOCKET" kill-server 2>/dev/null || true
   rm -rf "$TMP_ROOT"
-  exit "$rc"
+  fm_test_cleanup_exit "$rc" fm_test_cleanup
 }
 trap cleanup EXIT
 

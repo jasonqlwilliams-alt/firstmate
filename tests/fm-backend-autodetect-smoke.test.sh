@@ -28,8 +28,6 @@ set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
-pass() { printf 'ok - %s\n' "$1"; }
 assert_contains_local() {  # <haystack> <needle> <msg>
   case "$1" in
     *"$2"*) : ;;
@@ -39,9 +37,10 @@ assert_contains_local() {  # <haystack> <needle> <msg>
 
 command -v herdr >/dev/null 2>&1 || { echo "skip: herdr not found"; exit 0; }
 command -v jq >/dev/null 2>&1 || { echo "skip: jq not found (required by the herdr adapter)"; exit 0; }
-command -v treehouse >/dev/null 2>&1 || { echo "skip: treehouse not found (required by fm-spawn.sh)"; exit 0; }
 
-export FM_GATE_REFUSE_BYPASS=1
+# shellcheck source=tests/lib.sh
+. "$ROOT/tests/lib.sh"
+fm_test_require_treehouse_root || exit 0
 
 # shellcheck source=tests/herdr-test-safety.sh
 . "$ROOT/tests/herdr-test-safety.sh"
@@ -51,19 +50,17 @@ export FM_GATE_REFUSE_BYPASS=1
 # parent identity; the spawn below sets HERDR_ENV explicitly.
 herdr_forget_inherited_pane
 
-# TMP_ROOT is physically resolved (mktemp -d "$(pwd -P)"-relative) to keep this
+# TMP_ROOT is physically resolved to keep this
 # real-herdr smoke fixture free of unrelated OS symlink noise.
 # The old fm-spawn bug that originally motivated this fixture shape was fixed in
 # fm-spawn-symlink-guard-s8: fm-spawn.sh now normalizes PROJ_ABS and observed
 # backend cwd reads before the worktree-discovery comparison.
 # The dedicated regression is
 # tests/fm-backend.test.sh:test_spawn_symlinked_project_prefix_avoids_false_refusal.
-TMP_ROOT=$(mktemp -d "$(cd "${TMPDIR:-/tmp}" && pwd -P)/fm-backend-autodetect-smoke.XXXXXX")
+TMP_ROOT=$(fm_test_tmproot fm-backend-autodetect-smoke) || fail 'could not create the auto-detection fixture'
 HERDR_LAB_HELPER="$ROOT/bin/fm-herdr-lab.sh"
-HERDR_LAB_SESSION=$("$HERDR_LAB_HELPER" name fm-autodetect-smoke-concurrency-h3) || {
-  rm -rf "$TMP_ROOT"
+HERDR_LAB_SESSION=$("$HERDR_LAB_HELPER" name fm-autodetect-smoke-concurrency-h3) ||
   fail "could not generate an isolated Herdr lab session name"
-}
 export HERDR_SESSION="$HERDR_LAB_SESSION"
 ID="autodetectsmoke1"
 WT=
@@ -71,16 +68,10 @@ cleanup_all() {
   local cleanup_status=0
   [ -n "$WT" ] && command -v treehouse >/dev/null 2>&1 && treehouse return --force "$WT" >/dev/null 2>&1
   "$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION" || cleanup_status=$?
-  rm -rf "$TMP_ROOT"
+  fm_test_cleanup || cleanup_status=1
   return "$cleanup_status"
 }
-on_exit() {
-  local status=$?
-  cleanup_all || status=$?
-  trap - EXIT
-  exit "$status"
-}
-trap on_exit EXIT
+trap 'fm_test_cleanup_exit "$?" cleanup_all' EXIT
 "$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION" || fail "could not provision isolated Herdr lab session"
 
 # --- scratch world: FM_HOME with NO backend config, one throwaway project ---
@@ -107,6 +98,7 @@ git -C "$PROJ" add README.md
 git -C "$PROJ" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm initial
 git clone --quiet --bare "$PROJ" "$PROJ.origin.git"
 git -C "$PROJ" remote add origin "file://$PROJ.origin.git"
+printf 'worktree_path = "%s"\n' "$TMP_ROOT/escaped/{repo}-{slot}" > "$PROJ/treehouse.toml"
 
 # --- spawn with NO explicit backend config; HERDR_ENV=1 is the only marker --
 
@@ -143,6 +135,8 @@ WT=$(grep '^worktree=' "$META" | cut -d= -f2-)
 if [ -z "$WT" ] || [ ! -d "$WT" ]; then
   fail "auto-detected spawn did not report a real worktree path"
 fi
+case "$WT" in "$TREEHOUSE_ROOT"/*) ;; *) fail "spawn checkout escaped the Treehouse scratch root: $WT" ;; esac
+[ ! -e "$TMP_ROOT/escaped" ] || fail "spawn created a checkout at the configured path outside the scratch root"
 
 PANE=$(grep '^herdr_pane_id=' "$META" | cut -d= -f2-)
 [ -n "$PANE" ] || fail "auto-detected spawn meta is missing herdr_pane_id"

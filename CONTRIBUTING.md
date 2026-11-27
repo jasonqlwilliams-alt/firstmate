@@ -127,6 +127,25 @@ Some of those loops are also catching a transient rather than waiting for a sett
 Discover tests by listing `tests/*.test.sh`: each is a self-contained bash script named `<subject>.test.sh`, and its header comment describes what it covers, so pass one to `bin/fm-test-run.sh` to focus on a subject with canonical timing output.
 Shared test helpers live in `tests/lib.sh` (reporters, temp roots, git fixtures), `tests/fixtures.sh` (fake toolchain and spawn-world builders), `tests/wake-helpers.sh`, `tests/secondmate-helpers.sh`, and `tests/git-config-helpers.sh` (fixture Git isolation from the host's global and system configuration, already sourced by `tests/lib.sh` and `tests/herdr-test-safety.sh`; a suite that sources neither must source it itself before its first Git operation so a direct invocation stays isolated).
 Source those instead of copying a fake toolchain into a new suite.
+See the [test runner header](bin/fm-test-run.sh) for Treehouse test isolation.
+Use the test helper from a Firstmate checkout to reproduce an issue in a disposable clone with a Treehouse build that supports `--root`.
+
+```bash
+bash -e <<'BASH'
+ROOT=$PWD
+. tests/treehouse-test-helpers.sh
+fm_test_require_treehouse_root
+owner_identity=$(TZ=UTC0 fm_test_pid_identity "$$")
+fm_test_treehouse_setup "$$" "$owner_identity"
+trap 'fm_test_treehouse_remove "$FM_TEST_TREEHOUSE_DIR"' EXIT
+git clone --no-local -- /path/to/fixture-repo "$FM_TEST_TREEHOUSE_DIR/repo"
+cd "$FM_TEST_TREEHOUSE_DIR/repo"
+treehouse get --lease
+BASH
+```
+
+Start any terminal server used for the reproduction inside this Bash session so it inherits the test PATH.
+Opt-in live tests against an already-running terminal app use that app's pane environment and are outside scratch Treehouse isolation.
 A fixture may shorten a production timeout to keep a failure path prompt, but never below what the real work inside that window costs on a loaded machine: a fork, an exec, a lock acquisition, a beacon publication, or a first-poll check.
 Where a case's assertion is not about the timeout itself, give that window headroom over the measured loaded cost, and bound the test's own waiting with iteration-counted poll loops, which stretch under load where a wall-clock budget does not.
 Tests that need a real optional backend or an explicit opt-in (real herdr/zellij/cmux smoke tests, the live Pi regression) skip themselves and print the tool or environment gate needed to enable them, so the portable suite remains safe on machines without those tools.
