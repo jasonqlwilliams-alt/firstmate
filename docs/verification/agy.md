@@ -181,17 +181,22 @@ pending
 ```
 
 Measured 2026-11-27 with Antigravity CLI 1.5.18 in a private 80x30 tmux 3.7c server, with network egress blocked and a private home, by [`tests/fm-agy-composer-live-e2e.test.sh`](../../tests/fm-agy-composer-live-e2e.test.sh): under tmux the first-use mode hint is palette colour `38;5;103` and the `>` glyph is `38;5;111`, not the truecolor values above.
-That row therefore reads `pending` on tmux, so the doorbell refuses an agy pane on tmux until its first input clears the hint:
+That row therefore reads `pending` on tmux, so the doorbell refuses an agy pane on tmux until its first input clears the hint.
+The historical guard run reported the refusal before typing.
 
 ```
-$ FM_AGY_COMPOSER_LIVE=1 bash tests/fm-agy-composer-live-e2e.test.sh
 # agy 1.5.18 launched with no network egress and a private home
 not ok - agy (1.5.18): idle composer never classified empty (last verdict: pending)
 ```
 
 The [redacted screen](agy-composer/tmux-first-use-1.5.18.ansi) has its [cursor](agy-composer/tmux-first-use-1.5.18.cursor) at column 2, row 27.
 The wrapped-input capture is deferred until the agy classifier recognizes the tmux palette mode hint and the guard can confirm an idle, empty composer before typing.
-To run the current guard, set `FM_AGY_COMPOSER_LIVE_OAUTH=1` alongside `FM_AGY_COMPOSER_LIVE=1` or `FM_LIVE=1`.
+Run the current guard with both opt-ins.
+
+```bash
+FM_AGY_COMPOSER_LIVE=1 FM_AGY_COMPOSER_LIVE_OAUTH=1 bash tests/fm-agy-composer-live-e2e.test.sh
+```
+
 The OAuth opt-in authorizes copying the operator's sign-in token into the temporary profile with mode `0600` after the launcher verifies network isolation.
 The guard removes the temporary profile on exit.
 Set `FM_AGY_COMPOSER_LIVE_CAPTURE_DIR` to save each wrapped screen and its cursor geometry together in a new subdirectory.

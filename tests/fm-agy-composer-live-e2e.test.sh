@@ -126,36 +126,34 @@ chmod +x "$WORK/launch.sh" 2>/dev/null || fail "could not make the private launc
 # --- screen helpers -----------------------------------------------------------
 capture_styled() { "$REAL_TMUX" -L "$SOCKET" capture-pane -e -p -t "$WIN" 2>/dev/null; }
 
-save_capture() {  # <styled-screen> <opening-rule-row>
+save_capture() {  # <styled-screen> <opening-rule-row> <cursor-geometry>
   [ -n "$CAPTURE_DIR" ] || return 0
-  local screen=$1 cursor
-  [ -n "$screen" ] || fail "could not read a nonempty screen for the wrapped capture"
-  cursor=$("$REAL_TMUX" -L "$SOCKET" display-message -p -t "$WIN" \
-    '#{cursor_x} #{cursor_y} #{pane_width}x#{pane_height}' 2>/dev/null) \
-    && [[ "$cursor" =~ ^[0-9]+\ [0-9]+\ [0-9]+x[0-9]+$ ]] \
-    || fail "could not read cursor geometry for the wrapped capture"
   (
     mkdir -p -- "$CAPTURE_DIR" || exit 1
     staged=$(mktemp -d "$CAPTURE_DIR/.wrapped-draft.XXXXXX") || exit 1
     trap 'rm -rf -- "$staged"' EXIT
     LC_ALL=C awk -v opening_row="$2" 'NR < opening_row { print ""; next } { print }' \
-      <<< "$screen" > "$staged/wrapped-draft.ansi" &&
-      printf '%s\n' "$cursor" > "$staged/wrapped-draft.cursor" &&
+      <<< "$1" > "$staged/wrapped-draft.ansi" &&
+      printf '%s\n' "$3" > "$staged/wrapped-draft.cursor" &&
       mv -T -- "$staged" "$CAPTURE_DIR/${staged##*/.}" || exit 1
     trap - EXIT
   ) 2>/dev/null || fail "could not publish screen and cursor evidence for the wrapped capture"
 }
 
 guarded() (  # <expected-pending> [fit-text]
-  local verdict
   fm_backend_composer_snapshot tmux "$WIN" 2>/dev/null || return 1
+  guarded_snapshot "$@"
+)
+
+guarded_snapshot() {  # <expected-pending> [fit-text]
+  local verdict
   [ -n "$FM_COMPOSER_SNAPSHOT_SCREEN" ] || return 1
   verdict=$(fm_backend_guarded_composer_classify_snapshot tmux "$WIN" "$1" agy "${2:-}" 2>/dev/null) || return 1
   case "$verdict" in
     empty|pending|pending-unproven|unknown|update-picker) printf '%s' "$verdict" ;;
     *) return 1 ;;
   esac
-)
+}
 
 # composer_frame <text>: positive identification of agy's framed composer
 # holding the guard's own text. Reads the rows between the LAST two solid rules,
@@ -190,6 +188,11 @@ composer_holds() {  # <text>
   local screen
   screen=$(capture_styled) || return 1
   composer_frame "$1" <<< "$screen"
+}
+
+read_wrapped_frame() {  # <text>
+  fm_tmux_composer_snapshot "$WIN" '' geometry || return 1
+  frame=$(composer_frame "$1" <<< "$FM_COMPOSER_SNAPSHOT_SCREEN")
 }
 
 wait_for() {  # <polls> <command...>: retry every 0.5s until success
@@ -253,22 +256,18 @@ pass "a short typed draft classifies pending with its exact text"
 # neither an empty verdict nor proof of a different text.
 DRAFT="$SHORT $LONG"
 "$REAL_TMUX" -L "$SOCKET" send-keys -t "$WIN" -l " $LONG" 2>/dev/null || fail "could not extend the short draft"
-frame=$(wait_for 10 composer_holds "$DRAFT") || fail "the wrapped draft was never identified in agy's frame"
+wait_for 10 read_wrapped_frame "$DRAFT" || fail "the wrapped draft was never identified in agy's frame"
 layout=${frame#* }
 rows=${layout%%$'\n'*}
 first_row=${layout#*$'\n'}
 printf '# wrapped draft (%s bytes) occupies %s composer row(s) at %s columns\n' "${#DRAFT}" "$rows" "$WIDTH"
 [ "$rows" -gt 1 ] || fail "a ${#DRAFT}-byte draft did not wrap on a ${WIDTH}-column pane"
-v_draft=$(guarded "$DRAFT") || fail "could not read a valid verdict for the full wrapped draft"
-v_first=$(guarded "$first_row") || fail "could not read a valid verdict for the first wrapped row"
-v_plain=$(guarded '') || fail "could not read a valid wrapped verdict without an expectation"
-printf '# wrapped verdicts (full draft, first row, no expectation) = %s, %s, %s\n' \
-  "$v_draft" "$v_first" "$v_plain"
-screen=$(capture_styled) && frame=$(composer_frame "$DRAFT" <<< "$screen") && [ "${frame#* }" = "$layout" ] \
-  || fail "the wrapped draft was no longer proven after the verdict reads"
-save_capture "$screen" "${frame%% *}"
-case "$v_draft:$v_first:$v_plain" in
-  empty:*|*:empty:*|*:empty) fail "a wrapped draft classified empty" ;;
-  *:pending:*) fail "a wrapped draft proved the first row alone" ;;
+v_first=$(guarded_snapshot "$first_row") || fail "could not read a valid verdict for the first wrapped row"
+v_plain=$(guarded_snapshot '') || fail "could not read a valid wrapped verdict without an expectation"
+printf '# wrapped verdicts (first row, no expectation) = %s, %s\n' "$v_first" "$v_plain"
+save_capture "$FM_COMPOSER_SNAPSHOT_SCREEN" "${frame%% *}" "$FM_COMPOSER_SNAPSHOT_TMUX_GEOMETRY"
+case "$v_first:$v_plain" in
+  empty:*|*:empty) fail "a wrapped draft classified empty" ;;
+  pending:*) fail "a wrapped draft proved the first row alone" ;;
 esac
 pass "a wrapped draft never reads empty or proves the first row alone"

@@ -978,6 +978,7 @@ fm_backend_composer_snapshot() {  # <backend> <target> [expected-label] [visible
   FM_COMPOSER_SNAPSHOT_CAPS=
   FM_COMPOSER_SNAPSHOT_CURSOR=
   FM_COMPOSER_SNAPSHOT_TMUX_TARGET=
+  FM_COMPOSER_SNAPSHOT_TMUX_GEOMETRY=
   fm_backend_source "$backend" || return 1
   case "$backend" in
     tmux) fm_tmux_composer_snapshot "$1" ;;
