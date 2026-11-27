@@ -1014,16 +1014,18 @@ make_teardown_fakebin() {  # <dir> -> echoes fakebin dir; logs tmux+treehouse ca
 #!/usr/bin/env bash
 set -u
 { printf 'tmux'; for a in "$@"; do printf '\x1f%s' "$a"; done; printf '\n'; } >> "${FM_TMUX_LOG:?}"
+snapshot='@42:1:$1:fm-teardownconform1:2147483647:%42:/dev/ttys042:'
 case "${1:-}" in
   list-windows)
     [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate -F' ] || exit 1
     case "$5" in
-      '#{?#{==:#{window_name},fm-teardownconform1},'*) printf '@42:1:%s:%%42:/dev/ttys042:\n' "$$" ;;
+      '#{?#{==:#{window_name},fm-teardownconform1},'*) printf '%s\n' "$snapshot" ;;
       *) exit 1 ;;
     esac ;;
   if-shell)
-    [ "$#" = 7 ] && [ "$2 $3 $4" = '-F -t @42' ] \
-      && [ "$6" = 'kill-window -t @42' ] && [ "$7" = 'display-message -p changed' ] || exit 1
+    [ "$#" = 7 ] && [ "$2 $3 $4" = '-F -t =firstmate:@42' ] \
+      && [ "$5" = '#{==:#{window_id}:#{pid}:#{session_id}:#{window_name}:#{P:#{pane_pid}:#{pane_id}:#{pane_tty}:},'"$snapshot}" ] \
+      && [ "$6" = "kill-window -t '\$1:@42'" ] && [ "$7" = 'display-message -p changed' ] || exit 1
     printf 'guarded-close @42\n' >> "$FM_TMUX_LOG"
     ;;
 esac

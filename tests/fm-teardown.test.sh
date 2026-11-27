@@ -2715,15 +2715,22 @@ case "$1" in
   list-windows)
     [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate -F' ] || exit 1
     case "$5" in
-      '#{?#{==:#{window_name},fm-child-a},'*) printf '@11:1:%s:%%11:/dev/ttys011:\n' "$$" ;;
-      '#{?#{==:#{window_name},fm-child-b},'*) printf '@12:1:%s:%%12:/dev/ttys012:\n' "$$" ;;
-      '#{?#{==:#{window_name},fm-task-x1},'*) printf '@13:1:%s:%%13:/dev/ttys013:\n' "$$" ;;
+      '#{?#{==:#{window_name},fm-child-a},'*) number=11 name=fm-child-a ;;
+      '#{?#{==:#{window_name},fm-child-b},'*) number=12 name=fm-child-b ;;
+      '#{?#{==:#{window_name},fm-task-x1},'*) number=13 name=fm-task-x1 ;;
       *) exit 1 ;;
-    esac ;;
+    esac
+    printf '@%s:1:$1:%s:2147483647:%%%s:/dev/ttys0%s:\n' "$number" "$name" "$number" "$number" \
+      | tee "$log.snapshot-@$number"
+    ;;
   if-shell)
-    if [ "$#" = 7 ] && [ "$2 $3" = '-F -t' ] && [ "$6" = "kill-window -t $4" ] \
+    window_id=${4#=firstmate:}
+    if [ "$#" = 7 ] && [ "$2 $3" = '-F -t' ] && [[ "$window_id" =~ ^@[0-9]+$ ]] \
+      && snapshot=$(cat "$log.snapshot-$window_id") \
+      && [ "$5" = '#{==:#{window_id}:#{pid}:#{session_id}:#{window_name}:#{P:#{pane_pid}:#{pane_id}:#{pane_tty}:},'"$snapshot}" ] \
+      && [ "$6" = "kill-window -t '\$1:$window_id'" ] \
       && [ "$7" = 'display-message -p changed' ]; then
-      printf '%s\n' "$4" >> "$log"
+      printf '%s\n' "$window_id" >> "$log"
     else
       printf 'unexpected request\n' >> "$log"
       exit 1
@@ -4438,6 +4445,7 @@ if [ "\${1:-}" = -s ]; then printf 'Darwin\n'; else exec '$real_uname' "\$@"; fi
 EOF
   cat > "$case_dir/fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+snapshot='@17:1:$1:fm-task-x1:'"$(cat "$CASE_DIR/target")"':%17:/dev/ttys017:'
 if [ "${1:-}" = display-message ] && [ "${*: -1}" = '#{pane_pid}' ]; then
   cat "$CASE_DIR/target"
 elif [ "${1:-}" = list-windows ]; then
@@ -4446,11 +4454,12 @@ elif [ "${1:-}" = list-windows ]; then
     '#{?#{==:#{window_name},fm-task-x1},'*) ;;
     *) exit 1 ;;
   esac
-  printf '@17:1:%s:%s:/dev/ttys017:\n' "$(cat "$CASE_DIR/target")" '%17'
+  printf '%s\n' "$snapshot"
 elif [ "${1:-}" = if-shell ] || [ "${1:-}" = kill-window ]; then
-  if [ "$#" = 7 ] && [ "$1 $2 $3 $4" = 'if-shell -F -t @17' ] \
-    && [ "$6" = 'kill-window -t @17' ] && [ "$7" = 'display-message -p changed' ]; then
-    printf '%s\n' "$6" >> "$CASE_DIR/window-close-request"
+  if [ "$#" = 7 ] && [ "$1 $2 $3 $4" = 'if-shell -F -t =firstmate:@17' ] \
+    && [ "$5" = '#{==:#{window_id}:#{pid}:#{session_id}:#{window_name}:#{P:#{pane_pid}:#{pane_id}:#{pane_tty}:},'"$snapshot}" ] \
+    && [ "$6" = "kill-window -t '\$1:@17'" ] && [ "$7" = 'display-message -p changed' ]; then
+    printf 'guarded-close @17\n' >> "$CASE_DIR/window-close-request"
   else
     printf 'unexpected request\n' >> "$CASE_DIR/window-close-request"
     exit 1
@@ -4534,13 +4543,9 @@ PL
   if [ "$mode" = caller ]; then
     assert_absent "$case_dir/window-close-request" 'teardown requested closure of the caller window'
     assert_grep 'is teardown or its ancestor' "$case_dir/stderr" 'caller window refusal had no diagnostic'
-  elif [ "$mode" = headless ]; then
-    assert_absent "$case_dir/window-close-request" 'teardown requested closure without a verified terminal'
-    assert_grep 'cannot rule out the caller without a verified controlling terminal' \
-      "$case_dir/stderr" 'refusal without a verified terminal had no diagnostic'
   else
     [ -f "$case_dir/window-close-request" ] \
-      && [ "$(cat "$case_dir/window-close-request")" = 'kill-window -t @17' ] \
+      && [ "$(cat "$case_dir/window-close-request")" = 'guarded-close @17' ] \
       || fail 'teardown did not request guarded closure of the recorded window'
   fi
   assert_absent "$case_dir/tasktmp" 'teardown left the task temp directory'

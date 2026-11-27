@@ -493,14 +493,14 @@ task_reap_filter_pids() {  # <previously-protected-pids> <candidate-pids>
   '
 }
 
-TEARDOWN_OS=$(uname -s) || TEARDOWN_OS=
 TEARDOWN_LAUNCH_TTY=$(LC_ALL=C ps -o tty= -p "$$" 2>/dev/null) || TEARDOWN_LAUNCH_TTY=
 TEARDOWN_LAUNCH_TTY=${TEARDOWN_LAUNCH_TTY//[[:space:]]/}
 TEARDOWN_LAUNCH_TTY=${TEARDOWN_LAUNCH_TTY#/dev/}
 [[ "$TEARDOWN_LAUNCH_TTY" =~ ^[[:alnum:]][[:alnum:]/._-]*$ ]] || TEARDOWN_LAUNCH_TTY=
 TEARDOWN_REAP_PROTECTED_PIDS=$(task_reap_filter_pids "" "") || TEARDOWN_REAP_PROTECTED_PIDS=
 TEARDOWN_LAUNCH_SESSION_VERIFIED=1
-if [ "$TEARDOWN_OS" = Linux ]; then
+launch_session_pid=
+if [ "$(uname -s)" = Linux ]; then
   TEARDOWN_LAUNCH_SESSION_VERIFIED=0
   launch_session_pid=$(ps -o sid= -p "$$" 2>/dev/null) || launch_session_pid=
   launch_session_pid=${launch_session_pid//[[:space:]]/}
@@ -2329,8 +2329,12 @@ teardown_close_tmux_window() {  # <session:window>
     echo "warning: leaving tmux window $target open: cannot verify teardown caller ancestry" >&2
     return 1
   fi
-  IFS=: read -r -a panes <<< "${snapshot#*:*:}"
-  for ((i = 0; i < ${#panes[@]}; i += 3)); do
+  IFS=: read -r -a panes <<< "$snapshot"
+  if [ "$launch_session_pid" = "${panes[1]}" ]; then
+    echo "warning: leaving tmux window $target open: teardown was launched by the target tmux server" >&2
+    return 1
+  fi
+  for ((i = 4; i < ${#panes[@]}; i += 3)); do
     pid=${panes[i]}
     pane_id=${panes[i+1]}
     pane_tty=${panes[i+2]}
@@ -2347,12 +2351,8 @@ teardown_close_tmux_window() {  # <session:window>
       return 1
     fi
   done
-  if [ "$TEARDOWN_OS" != Linux ] && [ -z "$TEARDOWN_LAUNCH_TTY" ]; then
-    echo "warning: leaving tmux window $target open: cannot rule out the caller without a verified controlling terminal" >&2
-    return 1
-  fi
-  if ! fm_backend_tmux_close_if_unchanged "$snapshot"; then
-    echo "warning: tmux window $target close could not be confirmed against the verified pane snapshot" >&2
+  if ! fm_backend_tmux_close_if_unchanged "$target" "$snapshot"; then
+    echo "warning: tmux window $target close could not be confirmed against the verified window and pane snapshot" >&2
     return 1
   fi
 }

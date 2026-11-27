@@ -183,8 +183,8 @@ fm_backend_tmux_kill() {  # <target>
 
 # Teardown snapshots the exact window and every pane PID before checking
 # caller ancestry. The server compares that snapshot again before closing.
-FM_TMUX_CLOSE_SNAPSHOT_FORMAT='#{window_id}:#{pid}:#{P:#{pane_pid}:#{pane_id}:#{pane_tty}:}'
-FM_TMUX_CLOSE_SNAPSHOT_PATTERN='^@[0-9]+:[1-9][0-9]*:([1-9][0-9]*:%[0-9]+:/dev/[[:alnum:]][[:alnum:]/._-]*:)+$'
+FM_TMUX_CLOSE_SNAPSHOT_FORMAT='#{window_id}:#{pid}:#{session_id}:#{window_name}:#{P:#{pane_pid}:#{pane_id}:#{pane_tty}:}'
+FM_TMUX_CLOSE_SNAPSHOT_PATTERN='^@[0-9]+:[1-9][0-9]*:\$[0-9]+:[a-zA-Z0-9._-]+:([1-9][0-9]*:%[0-9]+:/dev/[[:alnum:]][[:alnum:]/._-]*:)+$'
 fm_backend_tmux_close_snapshot() {  # <session:window>
   local target=$1 window=${1#*:} snapshot
   case "$target" in
@@ -203,12 +203,14 @@ fm_backend_tmux_close_snapshot() {  # <session:window>
   printf '%s\n' "$snapshot"
 }
 
-fm_backend_tmux_close_if_unchanged() {  # <verified-close-snapshot>
-  local snapshot=$1 window_id result
+fm_backend_tmux_close_if_unchanged() {  # <session:window> <verified-close-snapshot>
+  local target=$1 snapshot=$2 window_id session_id result
   [[ "$snapshot" =~ $FM_TMUX_CLOSE_SNAPSHOT_PATTERN ]] || return 1
   window_id=${snapshot%%:*}
-  result=$(tmux if-shell -F -t "$window_id" "#{==:$FM_TMUX_CLOSE_SNAPSHOT_FORMAT,$snapshot}" \
-    "kill-window -t $window_id" 'display-message -p changed' 2>/dev/null) || return 1
+  session_id=${snapshot#*:*:}
+  session_id=${session_id%%:*}
+  result=$(tmux if-shell -F -t "=${target%%:*}:$window_id" "#{==:$FM_TMUX_CLOSE_SNAPSHOT_FORMAT,$snapshot}" \
+    "kill-window -t '$session_id:$window_id'" 'display-message -p changed' 2>/dev/null) || return 1
   [ -z "$result" ]
 }
 
