@@ -177,14 +177,18 @@ fm_backend_tmux_send_literal() {  # <target> <text> [explicit]
 # Empty, omitted, and malformed targets return nonzero before invoking tmux so
 # tmux can never interpret an empty target as the caller's current window.
 fm_backend_tmux_kill() {  # <target>
-  local target=${1:-} window_id
+  local target=${1:-} session window
   case "$target" in
-    *:*:*|:*|*:) return 1 ;;
-    *:*) ;;
+    *:*)
+      session=${target%%:*}
+      window=${target#*:}
+      ;;
     *) return 1 ;;
   esac
-  window_id=$(fm_tmux_exact_target "$target") || return 0
-  tmux kill-window -t "$window_id" 2>/dev/null || true
+  case "$session:$window" in
+    :*|*:|*:*:*) return 1 ;;
+  esac
+  tmux kill-window -t "=$session:=$window" 2>/dev/null || true
 }
 
 # fm_backend_tmux_current_command: <target>'s live foreground process name -

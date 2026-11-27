@@ -150,8 +150,8 @@ fm_tmux_composer_caps() {
 #     agent died to a shell has no pi foreground process and gets NO identity,
 #     which is exactly what keeps the strict blank-row rule honest: a blank
 #     row between two stale rules stays unknown.
-#   - status: pi's verified busy footer via fm_pane_is_busy, mapped onto the
-#     idle/working vocabulary herdr's probe reports natively.
+#   - status: pi's verified busy footer via fm_tmux_resolved_busy_state,
+#     mapped onto the idle/working vocabulary herdr's probe reports natively.
 # Prints "pi<TAB>idle" or "pi<TAB>working"; exits 1 when the pane is not a
 # live pi.
 fm_tmux_composer_identity() {  # <resolved-target>
@@ -279,9 +279,9 @@ fm_pane_input_pending() {  # <target>
 
 # fm_pane_is_busy: 0 if the pane's last few non-blank lines show a busy footer
 # (an agent mid-turn). Scans a 40-line tail like fm-watch.sh.
-fm_pane_busy_state() {  # <target> [harness] [explicit] -> busy|idle|unknown
+fm_pane_busy_state() {  # <target> [harness] -> busy|idle|unknown
   local target
-  target=$(fm_tmux_exact_target "$1" "${3:-}") || { printf 'unknown'; return 0; }
+  target=$(fm_tmux_exact_target "$1") || { printf 'unknown'; return 0; }
   fm_tmux_resolved_busy_state "$target" "${2:-}"
 }
 
@@ -298,7 +298,7 @@ fm_tmux_resolved_busy_state() {  # <resolved-target> <harness>
   fi
 }
 
-fm_pane_is_busy() {  # <target> [harness] [explicit]
+fm_pane_is_busy() {  # <target> [harness]
   [ "$(fm_pane_busy_state "$@")" = busy ]
 }
 
@@ -311,10 +311,10 @@ fm_pane_is_busy() {  # <target> [harness] [explicit]
 # and queues it for after the current turn, but keeps the typed text visible in
 # the composer. Once the Enter-retry budget is spent and a structurally proven
 # composer still reads "pending", the submit core falls back to
-# `fm_pane_is_busy`: a busy pane means the Enter was accepted and queued (report
-# `empty` so the caller does not re-send), while an idle pane keeps `pending` as
-# a genuine swallow. Pending-unproven receives the same Enter retry budget but
-# never reaches this exception.
+# `fm_tmux_resolved_busy_state`: a busy pane means the Enter was accepted and
+# queued (report `empty` so the caller does not re-send), while an idle pane
+# keeps `pending` as a genuine swallow. Pending-unproven receives the same
+# Enter retry budget but never reaches this exception.
 # Turn-started confirmation (the strict blank-row posture's counterpart): a
 # harness whose mid-turn screen the classifier cannot positively identify (pi
 # replaces its separated composer while working) reads `unknown` right after a
@@ -328,7 +328,7 @@ fm_pane_is_busy() {  # <target> [harness] [explicit]
 # `unknown` verdict is preserved untouched: busy conversion without the
 # transition evidence could mark an undelivered message delivered.
 fm_tmux_submit_enter_core() {  # <resolved-target> <retries> <enter-sleep> [baseline-idle]
-  local target=$1 retries=$2 sleep_s=$3 baseline_idle=${4:-} i=0 j state busy_state
+  local target=$1 retries=$2 sleep_s=$3 baseline_idle=${4:-} i=0 j state
   while :; do
     tmux send-keys -t "$target" Enter 2>/dev/null || true
     sleep "$sleep_s"
@@ -339,7 +339,7 @@ fm_tmux_submit_enter_core() {  # <resolved-target> <retries> <enter-sleep> [base
         if [ "$baseline_idle" = 1 ]; then
           j=0
           while [ "$j" -lt "$retries" ]; do
-            if fm_pane_is_busy "$target" '' explicit; then
+            if [ "$(fm_tmux_resolved_busy_state "$target" '')" = busy ]; then
               printf 'empty'
               return 0
             fi
@@ -361,9 +361,7 @@ fm_tmux_submit_enter_core() {  # <resolved-target> <retries> <enter-sleep> [base
   fi
   # Retries exhausted, composer still shows proven pending.
   # Busy conversion is owned by fm_composer_queued_enter_verdict.
-  busy_state=idle
-  fm_pane_is_busy "$target" '' explicit && busy_state=busy
-  fm_composer_queued_enter_verdict "$state" "$busy_state"
+  fm_composer_queued_enter_verdict "$state" "$(fm_tmux_resolved_busy_state "$target" '')"
 }
 
 fm_tmux_submit_core() {  # <target> <text> <retries> <enter-sleep> <settle> [explicit]

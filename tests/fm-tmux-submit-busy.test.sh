@@ -12,11 +12,6 @@ set -u
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-tmux-submit-busy.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
-# Override fm_pane_is_busy for testing: FM_FAKE_PANE_BUSY=1 means busy.
-fm_pane_is_busy() {
-  [ "${FM_FAKE_PANE_BUSY:-0}" = 1 ]
-}
-
 make_submit_mock() {
   local dir=$1 fakebin="$1/fakebin"
   mkdir -p "$fakebin"
@@ -40,7 +35,11 @@ case "${1:-}" in
         exit 1
       fi
     fi
-    cat "$COMPOSER" 2>/dev/null; exit 0 ;;
+    cat "$COMPOSER" 2>/dev/null
+    if [[ " $* " = *' -S -40 '* ]] && [ "${FM_FAKE_PANE_BUSY:-0}" = 1 ]; then
+      printf '%s\n' 'Working...'
+    fi
+    exit 0 ;;
   send-keys)
     shift; is_enter=0
     while [ "$#" -gt 0 ]; do
@@ -233,24 +232,21 @@ test_busy_pane_ambiguous_pending_retries_without_conversion() {
 }
 
 test_unrecognized_state_skips_busy_conversion() {
-  local dir fakebin composer busy_called vfile
+  local dir fakebin composer vfile
   dir="$TMP_ROOT/unrecognized-state"
   fakebin=$(make_submit_mock "$dir")
   composer="$dir/composer"
-  busy_called="$dir/busy-called"
   vfile="$dir/verdict"
   printf '╭─────╮\n│ >   │\n╰─────╯\n' > "$composer"
   (
     # shellcheck disable=SC2329
     fm_tmux_composer_state() { printf 'future-state'; }
-    # shellcheck disable=SC2329
-    fm_pane_is_busy() { touch "$busy_called"; return 0; }
-    PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$composer" \
+    PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$composer" FM_FAKE_CAPTURE_COUNT="$dir/captures" \
       fm_tmux_submit_enter_core "win" 3 0.05 > "$vfile" 2>/dev/null
   ) || fail "unrecognized-state submit check failed"
   [ "$(cat "$vfile")" = future-state ] \
     || fail "unrecognized state should be preserved, got '$(cat "$vfile")'"
-  [ ! -e "$busy_called" ] \
+  [ ! -e "$dir/captures" ] \
     || fail "unrecognized state must not trigger busy conversion"
   pass "fm_tmux_submit_enter_core: unrecognized states skip busy conversion"
 }
