@@ -34,6 +34,7 @@ install_pi_watch_extension_fixture() {
   cp "$EXT" "$repo/.pi/extensions/fm-primary-pi-watch.ts"
   cp "$ROOT/.pi/extensions/lib/fm-branch-dispatch.ts" "$repo/.pi/extensions/lib/fm-branch-dispatch.ts"
   cp "$ROOT/.pi/extensions/lib/fm-native-contract.ts" "$repo/.pi/extensions/lib/fm-native-contract.ts"
+  cp "$ROOT/.pi/extensions/lib/fm-session-owner.ts" "$repo/.pi/extensions/lib/fm-session-owner.ts"
   cp "$ROOT/.pi/extensions/lib/fm-async-exec.ts" "$repo/.pi/extensions/lib/fm-async-exec.ts"
   cp "$ROOT/.pi/extensions/lib/fm-calm-visibility.ts" "$repo/.pi/extensions/lib/fm-calm-visibility.ts"
   cp "$ROOT/.pi/extensions/lib/fm-operational-input.ts" "$repo/.pi/extensions/lib/fm-operational-input.ts"
@@ -4032,3 +4033,14 @@ test_opencode_established_empty_close_honors_retry_limit
 test_opencode_actionable_close_rechecks_session_lock
 test_opencode_watch_arm_coordinates_with_turnend_guard
 test_opencode_healthy_arm_output_does_not_suppress_guard
+
+if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then
+  # shellcheck source=tests/fixtures/session-owner-native.sh
+  . "$ROOT/tests/fixtures/session-owner-native.sh"
+  repo="$TMP_ROOT/native-owner-pi"
+  mkdir -p "$repo/bin"
+  install_pi_watch_extension_fixture "$repo"
+  cp "$ROOT/.pi/extensions/fm-primary-turnend-guard.ts" "$repo/.pi/extensions/"
+  cp "$ROOT/.pi/extensions/lib/fm-sessionstart-supervisor.mjs" "$repo/.pi/extensions/lib/"
+  exercise_native_owner pi "$repo" "$repo"
+fi

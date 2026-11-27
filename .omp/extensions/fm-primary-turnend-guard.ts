@@ -26,6 +26,7 @@
 // before_agent_start returning { message } was verified to reach model context
 // on omp 18.1.11 (the model quoted an injected marker back), so omp qualifies
 // for the Run tier.
+import { bindNativeOwner, usesLaunchOwners, verifyNativeOwner } from "../../.pi/extensions/lib/fm-session-owner.ts";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -53,6 +54,7 @@ const extensionDir = dirname(extensionFile);
 const root = resolve(extensionDir, "../..");
 const fmHome = process.env.FM_HOME || process.env.FM_ROOT_OVERRIDE || root;
 const state = process.env.FM_STATE_OVERRIDE || `${fmHome}/state`;
+const ownerPaths = { root, home: fmHome, state };
 const marker = `${state}/.omp-turnend-extension-loaded`;
 const extensionVersion = `sha256:${createHash("sha256").update(readFileSync(extensionFile)).digest("hex")}`;
 
@@ -72,6 +74,10 @@ function pidAlive(pid: string): boolean {
 }
 
 function lockOwnership(): LockOwnership {
+  if (usesLaunchOwners(ownerPaths)) {
+    if (verifyNativeOwner(ownerPaths)) return "owned";
+    return existsSync(`${state}/.lock`) ? "other" : "missing";
+  }
   let lockPid = "";
   try {
     lockPid = readFileSync(`${state}/.lock`, "utf8").trim();
@@ -89,6 +95,12 @@ function lockOwnership(): LockOwnership {
 }
 
 function markLoaded(): void {
+  if (usesLaunchOwners(ownerPaths)) {
+    const generation = verifyNativeOwner(ownerPaths);
+    if (!generation) return;
+    writeFileSync(marker, `${extensionVersion}\n${process.pid}\n${generation}\n`);
+    return;
+  }
   if (!existsSync(state) || lockOwnership() === "other") return;
   writeFileSync(marker, `${extensionVersion}\n${process.pid}\n`);
 }
@@ -505,6 +517,20 @@ function runCdCheck(command: string): Promise<{ code: number; stderr: string }> 
 }
 
 export default function (pi: ExtensionAPI) {
+  pi.on?.("tool_call", async (event) => {
+    if (!event || event.type !== "tool_call" || event.toolName !== "bash") return {};
+    const command = String((event.input as { command?: unknown })?.command ?? "");
+    if (!command) return {};
+    const cdResult = await runCdCheck(command);
+    if (cdResult.code === 2) {
+      return { block: true, reason: cdResult.stderr.trim() || "denied by the cd-guard PreToolUse seatbelt" };
+    }
+    const result = await runPretoolCheck(command);
+    if (result.code !== 2) return {};
+    return { block: true, reason: result.stderr.trim() || "denied by the watcher-arm PreToolUse seatbelt" };
+  });
+
+  if (!bindNativeOwner(ownerPaths)) return;
   let sessionstartGeneration: SessionstartGeneration | null = null;
   let sessionstartExitListenerRegistered = false;
   let sessionStarts = 0;
@@ -580,23 +606,11 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  pi.on?.("tool_call", async (event) => {
-    if (!event || event.type !== "tool_call" || event.toolName !== "bash") return {};
-    const command = String((event.input as { command?: unknown })?.command ?? "");
-    if (!command) return {};
-    const cdResult = await runCdCheck(command);
-    if (cdResult.code === 2) {
-      return { block: true, reason: cdResult.stderr.trim() || "denied by the cd-guard PreToolUse seatbelt" };
-    }
-    const result = await runPretoolCheck(command);
-    if (result.code !== 2) return {};
-    return { block: true, reason: result.stderr.trim() || "denied by the watcher-arm PreToolUse seatbelt" };
-  });
-
   // The blocking turn boundary. Returning undefined lets the session settle;
   // returning { continue: true, additionalContext } compels one more agent
   // loop with the guard text attached (verified on omp 18.1.2 and 18.1.11).
   pi.on?.("session_stop", async (event) => {
+    if (usesLaunchOwners(ownerPaths) && lockOwnership() !== "owned") return undefined;
     const stopHookActive = Boolean(event && (event as { stop_hook_active?: unknown }).stop_hook_active === true);
     const result = await runGuard(stopHookActive);
     if (result.code !== 2) return undefined;

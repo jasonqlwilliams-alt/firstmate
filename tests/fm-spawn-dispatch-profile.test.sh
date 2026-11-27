@@ -36,6 +36,7 @@ make_spawn_fakebin() {
   fakebin=$(fm_test_make_spawn_fakebin "$dir")
   cat > "$fakebin/timeout" <<'SH'
 #!/usr/bin/env bash
+case "${1:-}" in -k|-s) shift 2 ;; esac
 shift
 exec "$@"
 SH
@@ -1561,6 +1562,47 @@ test_active_dispatch_profile_requires_explicit_harness_for_scout
 test_active_dispatch_profile_allows_explicit_harness
 test_active_dispatch_profile_allows_positional_harness
 test_active_dispatch_profile_allows_raw_launch_command
+test_raw_ship_and_scout_keep_their_leading_command() {
+  local kind rec id out
+  for kind in ship scout; do
+    id="profile-shell-$kind"
+    rec=$(make_spawn_case "raw-shell-$kind" codex "$id")
+    read_case_record "$rec"
+    if [ "$kind" = ship ]; then
+      out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+        "$id" "$PROJ_DIR" 'exec codex --example') || fail "$kind raw launch failed: $out"
+    else
+      out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+        "$id" "$PROJ_DIR" 'exec codex --example' --scout) || fail "$kind raw launch failed: $out"
+    fi
+    assert_contains "$out" "spawned $id harness=exec" "$kind raw launch changed its leading command"
+  done
+  pass "legacy ship and scout raw launches preserve their leading shell command"
+}
+test_raw_ship_and_scout_keep_their_leading_command
+test_legacy_raw_secondmate_keeps_its_leading_command() {
+  local rec id=profile-legacy-raw-mate sm out launch
+  rec=$(make_spawn_case legacy-raw-mate codex "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  cat > "$FAKEBIN_DIR/claude" <<'SH'
+#!/bin/bash
+printf '%s\n' "$FM_HOME" "$FM_SUPERVISION_MODEL" "${CLAUDE_CONFIG_DIR-unset}"
+SH
+  chmod +x "$FAKEBIN_DIR/claude"
+  out=$(FM_TEST_CLAUDE_CONFIG_DIR="$CASE_DIR/primary-claude-config" \
+    run_spawn "$HOME_DIR" "$sm" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate --harness 'exec claude') \
+    || fail "legacy raw secondmate spawn failed: $out"
+  assert_contains "$out" "spawned $id harness=exec" "legacy secondmate changed its recorded adapter"
+  launch=$(cat "$LAUNCH_LOG")
+  out=$(env -u CLAUDE_CONFIG_DIR PATH="$FAKEBIN_DIR:$PATH" bash -c "$launch") \
+    || fail "legacy raw secondmate command did not execute directly"
+  [ "$out" = "$(printf '%s\npersistent\nunset' "$sm")" ] \
+    || fail "legacy raw secondmate changed its home, supervision, or Claude config: $out"
+  pass "a default-off raw secondmate keeps the legacy adapter and environment"
+}
+test_legacy_raw_secondmate_keeps_its_leading_command
 test_claude_threads_model_and_effort
 test_codex_threads_model_and_effort
 test_codex_omits_invalid_max_effort
@@ -1600,4 +1642,160 @@ test_claude_crewmate_launch_carries_the_attribution_policy
 test_claude_secondmate_launch_carries_the_attribution_policy
 test_active_dispatch_profile_does_not_block_secondmate_launch
 
+test_terminal_creation_drops_launch_binding() (
+  local dir="$TMP_ROOT/terminal-binding" fakebin name boundary
+  local -a binding_names=(
+    FM_SESSION_OWNER_ID FM_SESSION_OWNER_HOME FM_SESSION_OWNER_PID FM_SESSION_OWNER_START FM_SESSION_OWNER_KIND
+    FM_BOOTSTRAP_NETWORK_LOCK_PID FM_BOOTSTRAP_NETWORK_LOCK_GEN FM_BOOTSTRAP_NETWORK_WORKER_PID
+    FM_BOOTSTRAP_NETWORK_WORKER_START FM_TIMEOUT_STARTUP_SCOPE
+  )
+  fakebin=$(fm_fakebin "$dir")
+  mkdir -p "$dir/home/config"
+  # shellcheck disable=SC2030 # The fake terminal tools are scoped to this subshell.
+  export PATH="$fakebin:$PATH" FM_HOME="$dir/home" FM_TEST_TERMINAL_ENV="$dir" FM_ZELLIJ_SESSION=firstmate
+  unset TMUX
+  for name in "${binding_names[@]}"; do export "$name=fixture-binding"; done
+
+  cat > "$fakebin/tmux" <<'SH'
+#!/bin/bash
+case "$1" in
+  -V) printf 'tmux 3.2\n' ;;
+  list-windows|set-window-option) exit 0 ;;
+  has-session) exit 1 ;;
+  new-session|new-window)
+    env > "$FM_TEST_TERMINAL_ENV/tmux-$1"
+    if [ "$1" = new-window ]; then printf '@1\n'; fi
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  cat > "$fakebin/zellij" <<'SH'
+#!/bin/bash
+case "$1" in
+  --version) printf 'zellij 0.44.0\n' ;;
+  list-sessions)
+    if [ -f "$FM_TEST_TERMINAL_ENV/zellij-started" ]; then printf 'firstmate\n'; fi
+    ;;
+  attach)
+    env > "$FM_TEST_TERMINAL_ENV/zellij-attach"
+    : > "$FM_TEST_TERMINAL_ENV/zellij-started"
+    ;;
+  --session)
+    case "$4" in
+      list-tabs) printf '[]\n' ;;
+      new-tab) env > "$FM_TEST_TERMINAL_ENV/zellij-new-tab"; printf '3\n' ;;
+      list-panes) printf '[{"id":7,"tab_id":3,"is_plugin":false}]\n' ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$fakebin/tmux" "$fakebin/zellij"
+  # shellcheck source=bin/fm-backend.sh
+  . "$ROOT/bin/fm-backend.sh"
+  fm_backend_source tmux || fail 'could not load tmux adapter'
+  [ "$(fm_backend_tmux_container_ensure)" = firstmate ] || fail 'could not start the fake tmux server'
+  [ "$(fm_backend_tmux_create_task firstmate fm-fixture "$FM_HOME")" = @1 ] || fail 'could not create a fake tmux window'
+  fm_backend_source zellij || fail 'could not load Zellij adapter'
+  [ "$(fm_backend_zellij_container_ensure)" = firstmate ] || fail 'could not start the fake Zellij server'
+  [ "$(fm_backend_zellij_create_task firstmate fm-fixture "$FM_HOME")" = '3 7' ] || fail 'could not create a fake Zellij tab'
+
+  for boundary in tmux-new-session tmux-new-window zellij-attach zellij-new-tab; do
+    assert_grep "FM_HOME=$dir/home" "$dir/$boundary" "$boundary did not receive the fixture environment"
+    for name in "${binding_names[@]}"; do
+      ! grep -q "^$name=" "$dir/$boundary" || fail "$boundary inherited $name"
+      [ "${!name}" = fixture-binding ] || fail "$boundary cleared the caller's $name"
+    done
+  done
+  pass 'cold terminal servers and worker windows do not inherit launch bindings'
+)
+
+test_terminal_creation_drops_launch_binding || exit 1
+
 echo "# all fm-spawn-dispatch-profile tests passed"
+
+test_secondmate_relaunch_rebinds_the_target_home() {
+  local mode=$1 rec id sm out launch first second
+  local -a harness_args=()
+  if [ "$mode" = raw ]; then harness_args=(--harness 'exec -- codex'); fi
+  id=profile-secondmate-owner-$mode
+  rec=$(make_spawn_case "owner-relaunch-$mode" codex "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  mkdir -p "$sm/config"
+  printf 'launch-v1\n' > "$sm/config/session-lock-owner"
+  printf 'launch-v1\n' > "$HOME_DIR/config/session-lock-owner"
+  for file in fm-session-launch.sh fm-lock.sh fm-session-lock-lib.sh fm-session-lock-record-lib.sh     fm-session-owner-publish.mjs fm-cursor-lib.sh fm-wake-lib.sh; do
+    ln -s "$ROOT/bin/$file" "$sm/bin/$file"
+  done
+  mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux-base"
+  cat > "$FAKEBIN_DIR/tmux" <<'SH'
+#!/bin/bash
+case "$*" in
+  *'#{pane_current_command}'*) printf 'bash\n'; exit 0 ;;
+  *'#{pane_tty}'*) exit 1 ;;
+esac
+if [ "$1" = send-keys ] && [ "${2:-}" = -t ] && [ "${5:-}" = Enter ]; then
+  payload=$4
+  case "$payload" in
+    'printf '*'.relaunch-path.'*) (set -C; eval "$payload"); exit $? ;;
+  esac
+fi
+exec "${0%/*}/tmux-base" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/tmux"
+  cat > "$FAKEBIN_DIR/codex" <<'SH'
+#!/bin/bash
+set -eu
+test "$FM_HOME" = "$FM_TEST_SECOND_HOME"
+test "$FM_SESSION_OWNER_HOME" = "$FM_HOME"
+test "$FM_TEST_PARENT_OWNER" != "$FM_SESSION_OWNER_ID"
+"$FM_HOME/bin/fm-lock.sh" >&2
+"$FM_HOME/bin/fm-lock.sh" verify > "$FM_HOME/current-generation"
+printf '%s\n' "$$" > "$FM_HOME/harness-pid"
+setsid -f /bin/bash -c '
+  "$FM_HOME/bin/fm-lock.sh" verify > "$FM_HOME/detached-generation"
+  printf "%s\n" "$?" > "$FM_HOME/detached-return"
+'
+for _ in $(seq 1 300); do
+  [ ! -s "$FM_HOME/detached-return" ] || break
+  sleep 0.05
+done
+test "$(cat "$FM_HOME/detached-return")" = 0
+cmp "$FM_HOME/current-generation" "$FM_HOME/detached-generation"
+SH
+  chmod +x "$FAKEBIN_DIR/codex"
+  out=$(run_spawn "$HOME_DIR" "$sm" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate "${harness_args[@]}") \
+    || fail "secondmate fixture spawn failed: $out"
+  launch=$(cat "$LAUNCH_LOG")
+  run_fake_pane() {
+    # The launch binding is read by the fake pane, which uses its own fakebin prefix.
+    # shellcheck disable=SC2016,SC2031
+    PATH="$FAKEBIN_DIR:$PATH" FM_HOME="$HOME_DIR" FM_TEST_SECOND_HOME="$sm" FM_TEST_PANE_LAUNCH="$1" \
+      "$ROOT/bin/fm-session-launch.sh" -- /bin/bash -ec '
+        export FM_TEST_PARENT_OWNER=$FM_SESSION_OWNER_ID
+        /bin/bash -c "$FM_TEST_PANE_LAUNCH"
+      '
+  }
+  run_fake_pane "$launch" || fail "the first secondmate launch did not acquire its own home"
+  first=$(cat "$sm/detached-generation")
+  [ "$(cat "$sm/state/.lock")" = "$(cat "$sm/harness-pid")" ] || fail "lock did not bind to the secondmate harness"
+  unlink "$sm/detached-return"
+  # The fake endpoint disappeared after the first launcher exited.
+  unlink "$FAKEBIN_DIR/tmux-base.windows"
+  out=$(run_spawn "$HOME_DIR" "$sm" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" --relaunch "${harness_args[@]}") \
+    || fail "secondmate fixture relaunch failed: $out"
+  launch=$(cat "$LAUNCH_LOG")
+  run_fake_pane "$launch" || fail "the relaunched secondmate did not acquire its isolated home"
+  second=$(cat "$sm/detached-generation")
+  [ -n "$first" ] && [ -n "$second" ] && [ "$first" != "$second" ] || fail "relaunch reused the secondmate generation"
+  assert_absent "$HOME_DIR/state/.lock" "secondmate launch used the primary home lock"
+  pass "secondmate spawn and relaunch bind a fresh target-home owner with no inherited primary identity"
+}
+
+if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then
+  test_secondmate_relaunch_rebinds_the_target_home managed
+  test_secondmate_relaunch_rebinds_the_target_home raw
+fi

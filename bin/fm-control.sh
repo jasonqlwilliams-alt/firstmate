@@ -160,6 +160,7 @@ if [ -n "${FM_STATE_OVERRIDE:-}" ]; then FM_STATE_OVERRIDE=$STATE; fi
 . "$SCRIPT_DIR/fm-pr-lib.sh"
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
+fm_session_mutation_allowed "fm-control" || exit 1
 # shellcheck source=bin/fm-timeout-lib.sh
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
 

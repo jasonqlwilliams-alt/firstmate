@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Print the one-line session-start instruction only for a genuine firstmate
-# primary whose current harness session has not already acquired the home lock.
+# primary that cannot prove completed launch-bound startup or legacy ancestry
+# ownership of the home lock.
 # Every silence and error path exits 0 because Claude SessionStart exit 2 blocks
 # session initialization.
 set -u
@@ -26,6 +27,13 @@ lock_is_in_ancestry() {
   local lock_pid pid=$$ _
   [ -f "$STATE/.lock" ] || return 1
   fm_session_lock_read "$STATE/.lock" || return 1
+  if fm_session_owner_enabled || [ -n "$FM_SESSION_LOCK_GENERATION" ]; then
+    # shellcheck source=bin/fm-session-lock-lib.sh
+    . "$SCRIPT_DIR/fm-session-lock-lib.sh"
+    fm_session_hook_owns_lock "$STATE" || return 1
+    fm_session_start_completion_matches "$STATE/.session-start-complete" "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START"
+    return
+  fi
   lock_pid=$FM_SESSION_LOCK_PID
   fm_session_lock_start_matches "$lock_pid" "$FM_SESSION_LOCK_START" || return 1
   kill -0 "$lock_pid" 2>/dev/null || return 1

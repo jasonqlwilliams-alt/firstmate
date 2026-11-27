@@ -61,6 +61,7 @@
 // readonly-variable shell prelude so an accidental override fails loudly
 // inside the branch's own shell. bin/fm-lease-lib.sh documents the grade and
 // its deliberate limits.
+import { usesLaunchOwners, verifyNativeOwner, verifyNativeOwnerAsync } from "./lib/fm-session-owner.ts";
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -122,6 +123,7 @@ const root = resolve(extensionDir, "../..");
 const fmHome = process.env.FM_HOME || process.env.FM_ROOT_OVERRIDE || root;
 const fmRoot = process.env.FM_ROOT_OVERRIDE || root;
 const state = process.env.FM_STATE_OVERRIDE || `${fmHome}/state`;
+const ownerPaths = { root, home: fmHome, state };
 const config = process.env.FM_CONFIG_OVERRIDE || `${fmHome}/config`;
 const afkFlag = join(state, ".afk");
 const sessionsDir = join(state, "branch-session");
@@ -194,13 +196,13 @@ type ProviderRecovery = {
   probeInFlight: boolean;
 };
 
-const scriptEnv = {
+const scriptEnvironment = () => ({
   ...process.env,
   FM_HOME: fmHome,
   FM_ROOT_OVERRIDE: fmRoot,
   FM_STATE_OVERRIDE: state,
   FM_CONFIG_OVERRIDE: config,
-};
+});
 
 function offerEligible(offer: BranchDispatchOffer): boolean {
   return offer.eligible === true;
@@ -371,7 +373,16 @@ function ownershipVerdict(lockPid: string, ancestryMatched: boolean): LockOwners
   return pidAlive(lockPid) ? "other" : "missing";
 }
 
+function nativeOwnership(owned: boolean): LockOwnership {
+  ownedLockPid = owned ? String(process.pid) : "";
+  if (owned) return "owned";
+  return existsSync(`${state}/.lock`) ? "other" : "missing";
+}
+
 async function lockOwnership(): Promise<LockOwnership> {
+  if (usesLaunchOwners(ownerPaths)) {
+    return nativeOwnership(Boolean(await verifyNativeOwnerAsync(ownerPaths)));
+  }
   const { lockPid, verdict } = readLockPid();
   if (verdict) return verdict;
   let pid = String(process.pid);
@@ -393,6 +404,9 @@ async function lockOwnership(): Promise<LockOwnership> {
 // than caching the authority: what blocks there is one branch shell command
 // about to spawn a shell anyway, never an arriving outcome.
 function lockOwnershipSync(): LockOwnership {
+  if (usesLaunchOwners(ownerPaths)) {
+    return nativeOwnership(Boolean(verifyNativeOwner(ownerPaths)));
+  }
   const { lockPid, verdict } = readLockPid();
   if (verdict) return verdict;
   let pid = String(process.pid);
@@ -894,7 +908,7 @@ export default function (pi: ExtensionAPI) {
     if (!(await generationOwnsLock(expectedGeneration))) return false;
     const result = await runCommandAsync("bash", [leaseScript, "release-actor", "--actor", "branch"], {
       cwd: fmRoot,
-      env: { ...scriptEnv, FM_SUPERVISION_ACTOR: "branch" },
+      env: { ...scriptEnvironment(), FM_SUPERVISION_ACTOR: "branch" },
     });
     return result.status === 0;
   }
@@ -924,7 +938,7 @@ export default function (pi: ExtensionAPI) {
   async function runOutcomeScript(args: string[]): Promise<{ ok: boolean; stdout: string; detail: string }> {
     const result = await runCommandAsync("bash", [outcomeScript, ...args], {
       cwd: fmRoot,
-      env: scriptEnv,
+      env: scriptEnvironment(),
     });
     if (result.status === 0) return { ok: true, stdout: (result.stdout || "").trim(), detail: "" };
     return {
@@ -1218,7 +1232,7 @@ export default function (pi: ExtensionAPI) {
     const effort = branchEffortSelection(pinned?.model);
     const prompt = await runCommandAsync("bash", [promptScript], {
       cwd: fmRoot,
-      env: scriptEnv,
+      env: scriptEnvironment(),
       maxBuffer: 4 * 1024 * 1024,
     });
     if (prompt.status !== 0 || !prompt.stdout || prompt.stdout.length < 1024) {
@@ -1299,7 +1313,7 @@ ${context.command}
 )`,
           env: {
             ...context.env,
-            ...scriptEnv,
+            ...scriptEnvironment(),
             FM_SUPERVISION_ACTOR: "branch",
             FM_LEASE_HOLDER_PID: leaseHolderPid,
           },

@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { encodeFirstmateOperationalInput } from "./lib/fm-operational-input.js";
 
@@ -112,6 +112,25 @@ function shouldArm(paths) {
 }
 
 async function sessionOwnsLock(paths) {
+  let launchOwners = false;
+  try {
+    lstatSync(`${paths.state}/.lock.owner-format`);
+    launchOwners = true;
+  } catch (error) {
+    launchOwners = error.code !== "ENOENT";
+  }
+  if (!launchOwners) {
+    try {
+      const gate = `${paths.home}/config/session-lock-owner`;
+      launchOwners = lstatSync(gate).isFile() && readFileSync(gate, "utf8").replace(/\n+$/, "") === "launch-v1";
+    } catch {}
+  }
+  if (launchOwners) {
+    const result = await runProcess(`${paths.root}/bin/fm-lock.sh`, ["verify-hook"], {
+      env: { ...process.env, FM_HOME: paths.home, FM_STATE_OVERRIDE: paths.state },
+    });
+    return result.code === 0;
+  }
   let lockPid = "";
   try {
     lockPid = readFileSync(`${paths.state}/.lock`, "utf8").trim();

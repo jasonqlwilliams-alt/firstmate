@@ -123,6 +123,8 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 # owner; this adapter contributes only capture and capability facts).
 # shellcheck source=bin/fm-composer-lib.sh
 . "$FM_BACKEND_ZELLIJ_ROOT/bin/fm-composer-lib.sh"
+# shellcheck source=bin/fm-session-lock-lib.sh
+. "$FM_BACKEND_ZELLIJ_ROOT/bin/fm-session-lock-lib.sh"
 
 # Verified minimum: report.md recommends "likely Zellij 0.44 or newer" for
 # returned pane/tab IDs and dump-screen --pane-id; empirically verified
@@ -236,7 +238,10 @@ fm_backend_zellij_session_exists() {  # <session>
 fm_backend_zellij_server_ensure() {  # <session>
   local session=$1 i
   fm_backend_zellij_session_exists "$session" && return 0
-  ( nohup zellij attach -b "$session" </dev/null >/dev/null 2>&1 & ) || return 1
+  (
+    fm_session_owner_clear || exit 1
+    nohup zellij attach -b "$session" </dev/null >/dev/null 2>&1 &
+  ) || return 1
   for i in $(seq 1 20); do
     fm_backend_zellij_session_exists "$session" && return 0
     sleep 0.5
@@ -351,7 +356,10 @@ fm_backend_zellij_create_task() {  # <session> <label> <cwd>
     return 1
   fi
   prev_active=$(printf '%s' "$tabs" | jq -r '.[]? | select(.active == true) | .tab_id' 2>/dev/null | head -1)
-  tab_id=$(fm_backend_zellij_cli "$session" action new-tab --cwd "$cwd" --name "$title" 2>/dev/null | tr -d '[:space:]')
+  tab_id=$(
+    fm_session_owner_clear &&
+      fm_backend_zellij_cli "$session" action new-tab --cwd "$cwd" --name "$title" 2>/dev/null | tr -d '[:space:]'
+  )
   case "$tab_id" in
     ''|*[!0-9]*)
       echo "error: zellij new-tab did not return a numeric tab id for '$title' (got '$tab_id'; session '$session' may not exist)" >&2

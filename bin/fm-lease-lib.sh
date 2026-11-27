@@ -13,6 +13,8 @@
 #
 # CONTRACT.
 #   - Lease file: $STATE/.lease-<task>, one line "<actor>\t<pid>\t<epoch>".
+#     Launch-bound leases append the session owner generation as a fourth
+#     tab-separated field.
 #     Written atomically (temp + ln for claim, temp + mv for a same-actor
 #     refresh), with inspection and mutation serialized by the home-local
 #     lease-command lock; leases never coordinate across firstmate homes.
@@ -27,6 +29,8 @@
 #     means the process died; the lease is cleared at the next claim, guard,
 #     or sweep. Liveness requires a Pi calling context and a live lease PID
 #     that matches state/.lock and passes the lock record's start-time check.
+#     Launch-bound leases also require a matching owner generation. The
+#     liveness check distinguishes stale leases from an uncertain owner proof.
 #     A non-Pi home never honors a leftover Pi lease. The branch extension's
 #     generation-activation cleanup recovers a lease held by the live current
 #     session after its branch conversation is abandoned.
@@ -43,8 +47,8 @@
 # the actor variables readonly (see the Pi branch extension), so an
 # ACCIDENTAL override fails loudly inside the branch's own shell as well.
 #   - Guard semantics (fm_lease_guard): no lease, a same-actor lease, or a
-#     lease that fails the liveness check passes. A live lease held by the
-#     OTHER actor refuses with exit FM_LEASE_REFUSE_EXIT. In a Pi context the
+#     stale lease passes. A live lease held by the other actor refuses with
+#     exit FM_LEASE_REFUSE_EXIT. In a Pi context the
 #     guard retains the lease-command lock until fm_lease_guard_release, so the
 #     other actor cannot claim between the check and the guarded mutation. A
 #     home without the current Pi session lock cannot have a live lease, so
@@ -105,22 +109,24 @@ fm_lease_path() {
   printf '%s/.lease-%s\n' "$STATE" "$1"
 }
 
-# fm_lease_read <task>: read the lease into FM_LEASE_ACTOR/FM_LEASE_PID/
-# FM_LEASE_EPOCH. Returns 1 when no lease file exists. A malformed lease
-# (unreadable actor or pid) reads as actor "" so callers treat it as stale
-# rather than blocking forever on a torn record.
+# fm_lease_read <task>: read the lease into FM_LEASE_ACTOR, FM_LEASE_PID,
+# FM_LEASE_EPOCH and FM_LEASE_OWNER_GEN. Returns 1 when no lease file exists.
+# A malformed lease (unreadable actor or PID) is treated as stale so a torn
+# record cannot block future claims forever.
 fm_lease_read() {
   local file line
   file=$(fm_lease_path "$1")
   FM_LEASE_ACTOR=
   FM_LEASE_PID=
   FM_LEASE_EPOCH=
+  FM_LEASE_OWNER_GEN=
   [ -e "$file" ] || return 1
   IFS= read -r line < "$file" 2>/dev/null || line=
   FM_LEASE_ACTOR=$(printf '%s' "$line" | cut -f1)
   FM_LEASE_PID=$(printf '%s' "$line" | cut -f2)
   # shellcheck disable=SC2034 # Consumed by sourcing callers (bin/fm-lease.sh check).
   FM_LEASE_EPOCH=$(printf '%s' "$line" | cut -f3)
+  FM_LEASE_OWNER_GEN=$(printf '%s' "$line" | cut -sf4)
   case "$FM_LEASE_ACTOR" in
     main|branch) ;;
     *) FM_LEASE_ACTOR= ;;
@@ -142,6 +148,14 @@ fm_lease_live() {
   fm_lease_read "$1" || return 1
   [ -n "$FM_LEASE_ACTOR" ] || return 1
   [ -n "$FM_LEASE_PID" ] || return 1
+  if fm_session_owner_mode_active "$STATE"; then
+    fm_session_lock_read "$STATE/.lock" || return 2
+    [ "$FM_LEASE_PID" = "$FM_SESSION_LOCK_PID" ] || return 1
+    [ "$FM_LEASE_OWNER_GEN" = "$FM_SESSION_LOCK_GENERATION" ] || return 1
+    local rc=0
+    fm_session_owner_liveness "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START" || rc=$?
+    case "$rc" in 0) return 0 ;; 2) return 1 ;; *) return 2 ;; esac
+  fi
   kill -0 "$FM_LEASE_PID" 2>/dev/null || return 1
   fm_session_lock_read "$STATE/.lock" || return 1
   [ "$FM_LEASE_PID" = "$FM_SESSION_LOCK_PID" ] \
@@ -151,11 +165,12 @@ fm_lease_live() {
 # fm_lease_clear_stale <task>: remove the lease file when it exists but is not
 # live. Silent; never touches a live lease.
 fm_lease_clear_stale() {
-  local file
+  local file rc
   file=$(fm_lease_path "$1")
   [ -e "$file" ] || return 0
-  fm_lease_live "$1" && return 0
-  rm -f -- "$file"
+  rc=0
+  fm_lease_live "$1" || rc=$?
+  case "$rc" in 0) return 0 ;; 1) rm -f -- "$file" ;; *) return 1 ;; esac
 }
 
 # fm_lease_guard <task> <action-label> [wait-mode]: refuse (exit FM_LEASE_REFUSE_EXIT) when

@@ -994,6 +994,64 @@ SH
   pass "bootstrap: FM_BOOTSTRAP_NETWORK partitions one run into local and network halves"
 }
 
+test_local_bootstrap_accepts_verified_launch_owner() {
+  local case_dir fakebin node_binary out
+  node_binary=$(command -v node) || return 0
+  [ "$(uname -s)" = Linux ] || return 0
+  case_dir="$TMP_ROOT/local-launch-owner"
+  mkdir -p "$case_dir/home/config"
+  printf 'manual\n' > "$case_dir/home/config/backlog-backend"
+  printf 'launch-v1\n' > "$case_dir/home/config/session-lock-owner"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  rm "$fakebin/node"
+  ln -s "$node_binary" "$fakebin/node"
+
+  FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" FM_BOOTSTRAP_NETWORK=skip \
+    PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-bootstrap.sh" >/dev/null \
+    || fail 'local bootstrap detect-only pass failed'
+  assert_absent "$case_dir/home/config/startup-memory-budget" 'unbound bootstrap published a local default'
+
+  # shellcheck disable=SC2016
+  out=$(FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" FM_BOOTSTRAP_NETWORK=skip \
+    PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-session-launch.sh" -- bash -ec '
+      "$1/bin/fm-lock.sh"
+      "$1/bin/fm-bootstrap.sh"
+    ' _ "$ROOT" 2>&1) || fail "standalone bootstrap failed: $out"
+  [ -s "$case_dir/home/config/startup-memory-budget" ] || fail 'verified local bootstrap did not publish the required default'
+  pass 'bootstrap: standalone local reconciliation uses the verified launch owner'
+}
+
+test_startup_only_refreshes_local_project_clone() {
+  local case_dir home source project fakebin node_binary expected out
+  node_binary=$(command -v node) || return 0
+  [ "$(uname -s)" = Linux ] || return 0
+  case_dir="$TMP_ROOT/startup-only-clone-refresh"
+  home="$case_dir/home"
+  source="$case_dir/source"
+  project="$home/projects/synthetic"
+  mkdir -p "$home/config" "$home/projects" "$home/state"
+  printf 'manual\n' > "$home/config/backlog-backend"
+  printf 'launch-v1\n' > "$home/config/session-lock-owner"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  rm "$fakebin/node"
+  ln -s "$node_binary" "$fakebin/node"
+
+  fm_git_init_commit "$source" || fail 'could not initialize the synthetic project'
+  git clone -q "$source" "$project" || fail 'could not clone the synthetic project'
+  printf 'advanced while Firstmate was down\n' > "$source/README.md"
+  git -C "$source" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' \
+    commit -qam 'Advance the project' || fail 'could not advance the local origin'
+  expected=$(git -C "$source" rev-parse HEAD) || fail 'could not resolve the local origin tip'
+
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" PATH="$fakebin:$BASE_PATH" \
+    FM_STARTUP_NETWORK_TIMEOUT=25 FM_SESSION_START_TIMEOUT=40 "$ROOT/bin/fm-session-start.sh" 2>&1) \
+    || fail "standalone startup failed: $out"
+  assert_contains "$out" 'STARTUP-ONLY' 'standalone startup did not report its permitted lifetime'
+  [ "$(git -C "$project" rev-parse HEAD)" = "$expected" ] \
+    || fail 'standalone startup did not fast-forward the project clone to the local origin tip'
+  pass 'bootstrap: startup-only authority runs the real project refresh before returning'
+}
+
 test_network_sweeps_recheck_lock_ownership() {
   local case_dir fakebin fake_root marker out
   case_dir="$TMP_ROOT/network-lock-handoff"
@@ -1249,6 +1307,8 @@ test_fleet_sync_timeout_is_computed_before_launch
 test_routine_bootstrap_confirmations_are_silent
 test_routine_bootstrap_contract_runs_under_system_bash
 test_network_phase_partitions_the_run
+test_local_bootstrap_accepts_verified_launch_owner
+test_startup_only_refreshes_local_project_clone
 test_network_sweeps_recheck_lock_ownership
 test_network_phases_record_per_step_elapsed_times
 test_tasks_axi_verdict_handoff_is_consumed_once

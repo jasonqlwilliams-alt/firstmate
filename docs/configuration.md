@@ -23,10 +23,32 @@ The producing PR and Relay helpers own the fields they append, `bin/fm-classify-
 Wake, watcher, away-mode, and Relay-specific state mechanics remain with their named scripts and reference sections rather than being duplicated into one exhaustive state tree here.
 
 `bin/fm-session-start.sh`'s header is the single owner of session-start ordering, composed commands, digest contents, and the digest's startup mechanism.
-`bin/fm-startup-network.sh`'s header owns the deferred startup stage that keeps every external-network call, the potentially slow inactive-outcome scan, and locked-start home-summary publication off that digest's blocking path, including its state files and the safety argument for running them later.
+`bin/fm-startup-network.sh`'s header owns the network stage and its state files, including the deferred mode that keeps slow checks off the continuing session's blocking path.
 `docs/sessionstart-nudge.md` owns the native session-open adapter tiers that run or nudge the digest command, and the source routing between them.
 `AGENTS.md` retains the run-once and read-once operator rules, lock-refusal safety, installation consent, and direct-report recovery boundaries because those facts apply at every session start.
 Ordinary dead-direct-report recovery is owned by `stuck-crewmate-recovery`, while persistent-secondmate recovery is owned by `secondmate-provisioning`.
+
+## Launch-bound session ownership (config/session-lock-owner)
+
+The gitignored per-home file `config/session-lock-owner` enables launch-bound ownership when it contains `launch-v1`.
+Leave it absent in every primary and secondmate home for this release.
+Before enabling any home, unbound recovery must retain the acquisition claim through its mutations, continuing network sweeps must end before their claim can be reclaimed, and worker delegation must verify the caller as well as the claim holder.
+Once those requirements are met, enable it only on a clean restart after every lock writer and authority reader for the home understands the generation record, including startup and watcher scripts, hook registrations, and loaded extensions.
+Removing the setting alone leaves the published format sealed.
+Retire the versioned owner and its sealed record before downgrading to a build that only reads legacy locks.
+A writable home must stay in one host and PID namespace.
+Publishing an owner requires Node.js and process start evidence from Linux procfs or macOS libproc through `python3`.
+
+On an enabled home, start a foreground harness with `bin/fm-session-launch.sh -- <command> [args...]` from the home.
+Primary recovery, backup helm, and secondmate spawn and relaunch select the launcher using the target home's setting.
+Pi and omp can bind directly from their native engine process.
+An adapter whose launcher exits before the session ends must bind from the continuing process and carry that binding to its trusted tools and hooks.
+On an enabled home, an unbound `bin/fm-session-start.sh` that acquires the lock reports `STARTUP-ONLY` and holds authority only for that invocation.
+It leaves queued wakes pending and attempts the network stage in the foreground if time remains after local startup.
+Use a launch-bound session to handle wakes or supervise the home afterward.
+
+The [session-start adapter guide](sessionstart-nudge.md#source-routing) covers completion and re-emission.
+[`bin/fm-session-lock-record-lib.sh`](../bin/fm-session-lock-record-lib.sh) owns the record format and process liveness proof.
 
 ## Repository delivery policy (config/repository-policy.json)
 
@@ -1187,13 +1209,13 @@ FM_SESSION_START_STATUS_TAIL=5   # state/*.status lines printed per task in the 
 FM_SESSION_START_QUEUED_LIMIT=20   # plain queued backlog rows in the session-start digest; in-flight, held, and blocked rows are never bounded and done rows are never listed
 FM_BOOTSTRAP_DETECT_ONLY=0   # internal/read-only session-start mode: skip bootstrap's mutating sweeps and print advisory TANGLE wording
 FM_BOOTSTRAP_NETWORK=all   # internal session-start phase split: all, skip (local steps only), or only (network steps only); see bin/fm-bootstrap.sh
-FM_STARTUP_NETWORK_TIMEOUT=120   # seconds bounding the deferred inactive-outcome scan plus network checks; hitting it prints an actionable NETWORK_CHECKS line
+FM_STARTUP_NETWORK_TIMEOUT=120   # seconds bounding the inactive-outcome scan and network checks; startup-only also caps the stage by the startup time remaining
 FM_TASKS_AXI_COMPATIBLE=   # internal one-hop handoff of an already-computed tasks-axi compatibility verdict (0 or 1); consumed when bin/fm-tasks-axi-lib.sh is sourced
 FM_GUARD_READ_ONLY=0    # internal/read-only guard mode: keep alarms but suppress drain, supervision repair, and checkout repair commands
 FM_GUARD_CONTINUE_LINE='This is a supervision warning only; the guarded operation WILL still run.'   # banner continuation line; fm-send.sh overrides it to name the requested message specifically
 FM_POLL=15              # seconds between watcher poll cycles
 FM_HOME_SUMMARY_INTERVAL=300   # seconds before a live watcher refreshes this home's state/home-summary.json even without a status signal; invalid or zero values use 300
-FM_HOME_SUMMARY_TIMEOUT=60     # seconds bounding each home-summary refresh, including startup's independent deferred attempt, lock acquisition, validation, and atomic publication; invalid or zero values use 60
+FM_HOME_SUMMARY_TIMEOUT=60     # seconds bounding each home-summary refresh, including lock acquisition, validation, and atomic publication; invalid or zero values use 60
 FM_HOME_SUMMARY_ERROR_LOG_MAX_BYTES=65536   # approximate size cap for state/.home-summary-refresh.log before it is trimmed to the newest 200 lines; invalid or zero values use 65536
 FM_HOME_SUMMARY_FAILURE_REPORT=2   # recorded publication failures since the ledger's own last publication before session start reports a HOME_SUMMARY line; invalid or zero values use 2
 FM_SNAPSHOT_CREW_STATE_TIMEOUT=10   # seconds bounding each local per-task current-state read inside bin/fm-fleet-snapshot.sh; remote endpoint liveness is not probed on the snapshot path

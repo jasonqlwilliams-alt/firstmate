@@ -601,17 +601,22 @@ EOF
   printf '%s\n' $$ > "$home/state/.lock"
   FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_SLEEP=6 \
     run_stage "$home" "$root" start --locked 1 --harvest-pid $$
-  while [ ! -s "$log" ] && [ "$waited" -lt 50 ]; do
+  while [ ! -s "$log" ] && [ "$waited" -lt 200 ]; do
     sleep 0.1
     waited=$((waited + 1))
   done
-  [ -s "$log" ] || fail "the mutating sweep never started"
+  [ -s "$log" ] || fail "the mutating sweep never started: $(cat "$home/state/.startup-network.status" 2>/dev/null)"
 
-  next_owner=$(/bin/ps -o ppid= -p $$ | tr -d ' ')
+  # The claimant must be a real fixture harness, not an ancestor of the test
+  # runner whose contiguous harness chain can include the developer session.
+  cp /bin/bash "$root/bin/codex-fixture"
   started=$(date +%s)
   rc=0
-  out=$(PATH="$root/bin:$PATH" FM_FAKE_HARNESS_PID="$next_owner" \
-    FM_HOME="$home" FM_ROOT_OVERRIDE="$root" fm_test_run_fixture "$root/bin/fm-lock.sh" 2>&1) || rc=$?
+  # shellcheck disable=SC2016 # Expand the home and PID in the fixture harness.
+  out=$(PATH="$root/bin:$PATH" FM_FAKE_HARNESS_PID='' FM_HOME="$home" FM_ROOT_OVERRIDE="$root" \
+    fm_test_run_fixture "$root/bin/codex-fixture" -c '
+      "$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; exit $?
+    ' 2>&1) || rc=$?
   elapsed=$(( $(date +%s) - started ))
   [ "$rc" -ne 0 ] || fail "lock takeover succeeded while the prior sweep was mutating"
   [ "$elapsed" -lt 4 ] || fail "lock takeover blocked ${elapsed}s behind deferred network work"
@@ -622,9 +627,14 @@ EOF
   assert_absent "$home/state/.lock.start" "the lease-blocked takeover created a sidecar"
 
   run_stage "$home" "$root" wait 30 >/dev/null || fail "the leased sweep never settled"
-  out=$(PATH="$root/bin:$PATH" FM_FAKE_HARNESS_PID="$next_owner" \
-    FM_HOME="$home" FM_ROOT_OVERRIDE="$root" fm_test_run_fixture "$root/bin/fm-lock.sh" 2>&1) \
-    || fail "lock takeover still failed after the sweep released its lease"
+  # shellcheck disable=SC2016 # Expand the home and PID in the fixture harness.
+  out=$(PATH="$root/bin:$PATH" FM_FAKE_HARNESS_PID='' FM_HOME="$home" FM_ROOT_OVERRIDE="$root" \
+    fm_test_run_fixture "$root/bin/codex-fixture" -c '
+      printf "%s\n" "$$" > "$FM_HOME/next-owner"
+      "$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; exit $?
+    ' 2>&1) \
+    || fail "lock takeover still failed after the sweep released its lease: $out"
+  next_owner=$(cat "$home/next-owner")
   assert_contains "$out" "lock acquired: harness pid $next_owner" \
     "acquisition did not report the fixture's next owner"
   [ "$(cat "$home/state/.lock")" = "$next_owner" ] \
@@ -927,6 +937,213 @@ test_killing_the_suite_reaps_detached_fixture_processes() {
   done
   pass "fm-startup-network: timeout and interruption reap detached fixture processes"
 }
+
+test_launch_owner_startup_and_bounded_worker_handoff() {
+  local rec home root log launcher startup bare old new phase gen held_pid coordinator i out
+  rec=$(new_world launch-owner-handoff)
+  IFS='|' read -r home root log <<< "$rec"
+  mkdir -p "$home/config"
+  printf 'launch-v1\n' > "$home/config/session-lock-owner"
+  printf 'manual\n' > "$home/config/backlog-backend"
+  ln -s "$ROOT/bin/fm-session-owner-publish.mjs" "$root/bin/fm-session-owner-publish.mjs"
+  ln -s "$ROOT/bin/fm-session-owner-darwin.py" "$root/bin/fm-session-owner-darwin.py"
+  ln -s "$ROOT/docs" "$root/docs"
+  for phase in fm-herdr-session-cleanup.sh fm-inactive-reconcile.sh fm-home-summary-refresh.sh; do
+    unlink "$root/bin/$phase"
+    printf '#!/bin/sh\nexit 0\n' > "$root/bin/$phase"
+    chmod +x "$root/bin/$phase"
+  done
+  cat > "$root/bin/fm-bootstrap.sh" <<'SH'
+#!/bin/bash
+set -eu
+generation=${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-}
+if [ "${FM_BOOTSTRAP_NETWORK:-}" = skip ] && [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" = 0 ]; then
+  generation=$("${0%/*}/fm-lock.sh" verify)
+fi
+printf '%s %s %s\n' "${FM_BOOTSTRAP_NETWORK:-}" "${FM_BOOTSTRAP_DETECT_ONLY:-0}" \
+  "${generation:-none}" >> "$FM_FAKE_BOOTSTRAP_LOG"
+if [ "${FM_BOOTSTRAP_NETWORK:-}" = only ] && [ -e "$FM_HOME/hold-sweep" ]; then
+  : > "$FM_HOME/sweep-running"
+  for _ in $(seq 1 300); do
+    if [ -e "$FM_HOME/release-sweep" ]; then
+      : > "$FM_HOME/sweep-finished"
+      exit 0
+    fi
+    sleep 0.05
+  done
+  exit 1
+fi
+SH
+  launcher="$root/bin/fm-session-launch.sh"
+  startup="$root/bin/fm-session-start.sh"
+
+  printf '100\t1\tcheck\tfixture\tqueued\n' > "$home/state/.wake-queue"
+  : > "$home/hold-sweep"
+  # shellcheck disable=SC2016
+  FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_FAKE_BOOTSTRAP_LOG="$log" FM_FIXTURE_STARTUP="$startup" \
+    fm_test_start_fixture /bin/bash -ec '
+      "$FM_FIXTURE_STARTUP" > "$FM_HOME/bare-digest"
+      : > "$FM_HOME/bare-returned"
+    '
+  bare=$FM_TEST_FIXTURE_PID
+  for i in $(seq 1 300); do [ ! -e "$home/sweep-running" ] || break; sleep 0.05; done
+  [ -e "$home/sweep-running" ] || fail 'bare startup did not start the bounded sweep'
+  sleep 0.25
+  assert_absent "$home/bare-returned" 'bare startup left a mutating worker behind'
+  : > "$home/release-sweep"
+  wait "$bare" || fail 'bare startup failed after sweep release'
+  [ -e "$home/sweep-finished" ] || fail 'bare startup returned before sweep completion'
+  out=$(cat "$home/bare-digest")
+  assert_contains "$out" 'STARTUP-ONLY' 'bare startup implied a continuing session'
+  assert_contains "$out" 'skipped (startup-only)' 'bare startup attempted wake handling'
+  assert_grep $'100\t1\tcheck\tfixture\tqueued' "$home/state/.wake-queue" 'bare startup removed a pending wake'
+  if compgen -G "$home/state/.session-start-complete*" > /dev/null; then
+    fail 'bare startup advertised a continuing session'
+  fi
+  run_stage "$home" "$root" wait 1 >/dev/null || fail 'bare startup returned before publishing the network result'
+  grep -E '^only 0 [a-f0-9]{64}$' "$log" >/dev/null || fail 'bounded worker did not carry the bare owner generation'
+  rm "$home/sweep-running" "$home/release-sweep" "$home/sweep-finished"
+
+  : > "$home/hold-sweep"
+  # shellcheck disable=SC2016 # The script uses the fixture's home and binding.
+  FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_FAKE_BOOTSTRAP_LOG="$log" FM_FIXTURE_STARTUP="$startup" \
+    fm_test_start_fixture "$launcher" -- /bin/bash -ec '
+      "$FM_FIXTURE_STARTUP" > "$FM_HOME/first-digest"
+      "$FM_ROOT_OVERRIDE/bin/fm-lock.sh" verify > "$FM_HOME/owner-gen"
+      : > "$FM_HOME/digest-finished"
+      while [ ! -e "$FM_HOME/owner-exit" ]; do sleep 0.05; done
+    '
+  old=$FM_TEST_FIXTURE_PID
+  for i in $(seq 1 300); do
+    [ ! -e "$home/digest-finished" ] || [ ! -e "$home/sweep-running" ] || break
+    sleep 0.05
+  done
+  [ -e "$home/digest-finished" ] && [ -e "$home/sweep-running" ] || fail "digest blocked or sweep did not start: $(cat "$log")"
+  gen=$(cat "$home/owner-gen")
+  assert_grep "skip 0 $gen" "$log" 'bootstrap missed the launch generation'
+  assert_grep "only 0 $gen" "$log" 'worker missed the launch generation'
+  assert_contains "$(cat "$home/first-digest")" 'lock acquired: launch pid' 'first launch did not hold mutating startup'
+
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_FAKE_BOOTSTRAP_LOG="$log" \
+    "$launcher" -- "$startup" 2>&1) || fail "read-only startup did not print its digest"
+  assert_contains "$out" 'READ-ONLY SESSION' 'a second live launch ran mutating startup'
+  [ "$(grep -c '^skip 0 ' "$log")" -eq 2 ] || fail 'a refused launch ran mutating bootstrap'
+
+  # A competing session cannot gain authority while the first launch's worker
+  # is still writing, even after that launch exits.
+  held_pid=$(cat "$home/state/.lock")
+  coordinator=$(sed -n 's/^pid=//p' "$home/state/.startup-network.status")
+  kill -KILL "$coordinator" || fail 'could not stop the disposable network coordinator'
+  : > "$home/owner-exit"
+  wait "$old" || fail 'the launch fixture could not exit'
+  # shellcheck disable=SC2016 # The script uses the fixture's home and binding.
+  FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_FAKE_BOOTSTRAP_LOG="$log" FM_FIXTURE_STARTUP="$startup" \
+    fm_test_start_fixture "$launcher" -- /bin/bash -ec '
+      : > "$FM_HOME/second-entered"
+      "$FM_FIXTURE_STARTUP" > "$FM_HOME/second-digest"
+    '
+  new=$FM_TEST_FIXTURE_PID
+  for i in $(seq 1 200); do [ ! -e "$home/second-entered" ] || break; sleep 0.05; done
+  [ -e "$home/second-entered" ] || fail 'next launcher never started'
+  sleep 0.35
+  [ "$(cat "$home/state/.lock")" = "$held_pid" ] || fail 'new launch took over during the prior bounded sweep'
+  if out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" "$root/bin/fm-wake-drain.sh" 2>&1); then
+    fail 'unbound wake drain entered during the prior generation sweep'
+  fi
+  assert_contains "$out" 'session launch no longer owns this home' 'wake drain missed the active acquisition claim'
+  : > "$home/release-sweep"
+  wait "$new" || fail 'next launcher failed after prior sweep release'
+  [ -e "$home/sweep-finished" ] || fail 'the old bounded sweep did not finish'
+  assert_contains "$(cat "$home/second-digest")" 'lock acquired: launch pid' 'next launch did not recover the home'
+  [ "$(cat "$home/state/.lock")" != "$held_pid" ] || fail 'next launch retained the previous owner'
+  run_stage "$home" "$root" wait 30 >/dev/null || fail 'the next launch worker did not settle'
+  pass 'fm-startup-network: startup-only scope and continuing sessions carry the generation through a fenced handoff'
+}
+
+test_bare_startup_reaps_the_waiting_inactive_scan() {
+  local rec home root log out scan_pid startup_pid status=0 i
+  rec=$(new_world bare-scan-deadline)
+  IFS='|' read -r home root log <<< "$rec"
+  mkdir -p "$home/config" "$home/state/.inactive-outcome-reconcile.lock"
+  printf 'launch-v1\n' > "$home/config/session-lock-owner"
+  printf 'manual\n' > "$home/config/backlog-backend"
+  printf '%s\n' "$$" > "$home/state/.inactive-outcome-reconcile.lock/pid"
+  ln -s "$ROOT/bin/fm-session-owner-publish.mjs" "$root/bin/fm-session-owner-publish.mjs"
+  ln -s "$ROOT/docs" "$root/docs"
+  unlink "$root/bin/fm-home-summary-refresh.sh"
+  printf '#!/bin/sh\nexit 0\n' > "$root/bin/fm-home-summary-refresh.sh"
+  unlink "$root/bin/fm-inactive-reconcile.sh"
+  cat > "$root/bin/fm-inactive-reconcile.sh" <<'SH'
+#!/bin/bash
+export FM_TEST_SCAN_ACTIVE=1
+exec "$FM_TEST_REAL_SCAN" "$@"
+SH
+  cat > "$root/bin/sleep" <<'SH'
+#!/bin/bash
+if [ "${FM_TEST_SCAN_ACTIVE:-0}" = 1 ] && [ "$1" = 0.1 ] && [ ! -e "$FM_HOME/scan-waiter" ]; then
+  printf '%s\n' "$PPID" > "$FM_HOME/scan-waiter"
+  /bin/bash -c 'trap "" TERM; printf "%s\n" "$$" > "$1"; exec /bin/sleep 30' _ "$FM_HOME/scan-child"
+  exit $?
+fi
+exec /bin/sleep "$@"
+SH
+  mv "$root/bin/fm-bootstrap.sh" "$root/bin/fm-bootstrap-fixture.sh"
+  cat > "$root/bin/fm-bootstrap.sh" <<'SH'
+#!/bin/bash
+if [ "${FM_BOOTSTRAP_NETWORK:-}" = only ]; then
+  read -r scan_pid < "$FM_HOME/scan-child" || exit 1
+  case "$(/bin/ps -p "$scan_pid" -o stat=)" in
+    ''|Z*|X*) ;;
+    *) printf 'inactive scan survived into bootstrap\n'; exit 1 ;;
+  esac
+fi
+exec "${0%/*}/fm-bootstrap-fixture.sh" "$@"
+SH
+  chmod +x "$root/bin/fm-home-summary-refresh.sh" "$root/bin/fm-inactive-reconcile.sh" \
+    "$root/bin/fm-bootstrap.sh" "$root/bin/sleep"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_STARTUP_NETWORK_TIMEOUT=3 \
+    FM_TEST_REAL_SCAN="$ROOT/bin/fm-inactive-reconcile.sh" FM_FAKE_BOOTSTRAP_LOG="$log" \
+    PATH="$root/bin:$PATH" "$root/bin/fm-session-start.sh" 2>&1) || fail "bare startup failed: $out"
+  assert_contains "$out" 'hit the 3s bound' 'the scan did not reach the common startup deadline'
+  scan_pid=$(cat "$home/scan-waiter") || fail 'the inactive scan never waited on the held lock'
+  case "$(/bin/ps -p "$scan_pid" -o stat=)" in
+    ''|Z*|X*) ;;
+    *) fail "inactive scan pid $scan_pid survived the startup deadline" ;;
+  esac
+  rm "$home/scan-waiter" "$home/scan-child"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_STARTUP_NETWORK_TIMEOUT=8 \
+    FM_INACTIVE_RECONCILE_BUDGET_SECS=1 \
+    FM_TEST_REAL_SCAN="$ROOT/bin/fm-inactive-reconcile.sh" FM_FAKE_BOOTSTRAP_LOG="$log" \
+    PATH="$root/bin:$PATH" "$root/bin/fm-session-start.sh" 2>&1) || fail "bare startup failed: $out"
+  [ -s "$home/scan-child" ] || fail 'no scan descendant waited during the local deadline fixture'
+  assert_contains "$out" 'completed during this startup' 'the local scan deadline did not leave time for bootstrap'
+  assert_not_contains "$out" 'hit the 8s bound' 'the waiting scan consumed the entire startup sweep'
+  assert_grep 'network=only detect_only=0' "$log" 'bootstrap did not run after the local scan deadline'
+  rm "$home/scan-waiter" "$home/scan-child"
+  FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_STARTUP_NETWORK_TIMEOUT=20 \
+    FM_TEST_REAL_SCAN="$ROOT/bin/fm-inactive-reconcile.sh" FM_FAKE_BOOTSTRAP_LOG="$log" \
+    PATH="$root/bin:$PATH" fm_test_start_fixture "$root/bin/fm-session-start.sh" > "$home/canceled-digest" 2>&1
+  startup_pid=$FM_TEST_FIXTURE_PID
+  for i in $(seq 1 200); do [ ! -s "$home/scan-child" ] || break; sleep 0.05; done
+  scan_pid=$(cat "$home/scan-child") || fail 'no scan descendant waited during the cancellation fixture'
+  kill -TERM "$startup_pid" || fail 'bare startup exited before cancellation'
+  wait "$startup_pid" || status=$?
+  [ "$status" -eq 143 ] || fail "canceled startup returned $status"
+  assert_absent "$home/state/.lock.acquire" 'canceled startup retained its sweep claim'
+  case "$(/bin/ps -p "$scan_pid" -o stat=)" in
+    ''|Z*|X*) ;;
+    *) fail "inactive scan pid $scan_pid survived startup cancellation" ;;
+  esac
+  rm -rf "$home/state/.inactive-outcome-reconcile.lock"
+  FM_HOME="$home" "$root/bin/fm-session-launch.sh" -- "$root/bin/fm-lock.sh" >/dev/null \
+    || fail 'the expired sweep still blocked the next launch'
+  pass 'fm-startup-network: bare startup enforces both local and enclosing scan deadlines'
+}
+
+if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then
+  test_launch_owner_startup_and_bounded_worker_handoff
+  test_bare_startup_reaps_the_waiting_inactive_scan
+fi
 
 test_wait_fails_without_a_published_stage
 test_start_returns_without_holding_the_callers_stdout

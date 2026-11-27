@@ -31,24 +31,25 @@ It takes `--source <name>` when the adapter knows the source natively, and other
 This deliberately inverts the previous nudge matcher, which fired on `startup|resume|clear` and excluded `compact`.
 Compaction is covered where a tracked adapter delivers that source because a compacted session has lost exactly the digest it needs, and resume is excluded from the run because it restores that digest instead of losing it.
 
-Current harness ownership of the lock and its matching `state/.session-start-complete` record together are the idempotency interlock for the whole scheme.
-The full digest clears that completion record after acquiring the lock and publishes it at the end of the digest only if the owner's PID and verified start time still match the pair captured at entry.
-A missing, stale, or PID-only completion record makes `clear` or `compact` run the full digest.
-`bin/fm-lock.sh` already treats a lock this session's own harness holds as its own, so a proven `clear` or `compact` re-emit re-verifies ownership and proceeds, while a lock another live session took meanwhile still produces the ordinary read-only digest.
-On a run-tier harness the nudge cannot also fire: `resume`, `reload`, and `fork` are the only sources routed to it, and on those its own ancestry check stays silent whenever this process already holds the lock.
+Current session ownership of the lock and a completion record for its owner together are the startup interlock.
+With [launch-bound ownership](configuration.md#launch-bound-session-ownership-configsession-lock-owner), the completion receipt is keyed to the verified owner generation and is published only for a continuing session.
+A missing or stale receipt makes `clear` or `compact` run the full digest, as does a PID-only receipt on a legacy home.
+A proven re-emit re-verifies current ownership before proceeding.
+The `resume`, `reload`, and `fork` nudge is suppressed only when the hook can verify its own completed launch generation, or the legacy ancestry check succeeds on a home using legacy locks.
 
 `bin/fm-session-start.sh --reemit` owns which work a re-emit skips, its true-start AGENTS.md baseline, and its supported stale-instruction refresh pairs; its header is the single owner of those mechanics.
 
 ## Runtime bound
 
 The run tier blocks either hook-driven session initialization or Pi's first provider preflight while the digest runs, so `bin/fm-session-start.sh` bounds itself rather than betting on an unbounded prerequisite.
-The digest makes no external-network call at all: every one it owes runs off the blocking path in the separately bounded deferred stage owned by `bin/fm-startup-network.sh`, so an unreachable host can no longer consume this budget.
+In a continuing session, the separately bounded stage owned by `bin/fm-startup-network.sh` keeps external-network calls off the digest's blocking path.
 What remains is still not individually bounded - tool version probes, the backlog listing, and the per-task endpoint reads are all local but unbounded subprocesses - so the whole digest runs as one bounded child, default 120s via `FM_SESSION_START_TIMEOUT`.
 The shared timeout owner falls back to a pure-Bash process-group watchdog when timeout, gtimeout, and perl are unavailable, so no supported host runs the digest unbounded.
 Because the child streams into the native transport as it runs, everything emitted before the bound was hit is retained for delivery; the parent then prints a `STARTUP TRUNCATED` banner naming the stage that did not finish and the stages that were therefore never emitted, and still exits 0.
 The registered hook timeouts sit above that budget so the harness never preempts the banner.
 The deferred startup stage runs in its own process group; a locked start publishes the home summary there under its own `FM_HOME_SUMMARY_TIMEOUT` bound before the separately bounded network checks and inactive-outcome scan.
 A truncated digest neither kills that work nor orphans unbounded network work.
+See [launch-bound ownership](configuration.md#launch-bound-session-ownership-configsession-lock-owner) for the standalone startup path.
 
 ## Shared wrapper and safety
 
@@ -60,8 +61,7 @@ The Guard Predicates section of [`turnend-guard.md`](turnend-guard.md#guard-pred
 The nudge payload starts with U+2063 and the stable `FIRSTMATE_OP: ` label, carries the current `session-start` protocol kind, and retains exactly ``Run `bin/fm-session-start.sh` now, exactly once, before executing any other instructions.`` as its body.
 The Ahoy skill owns the rule that this marked operational input is never a captain-authored session boundary, including its narrow legacy compatibility cases, and its own step 0 helm check is the fallback that protects a nudge-tier harness whose first command is a skill.
 
-Before printing, the nudge wrapper reads `state/.lock` and walks at most eight parents from its own pid in its own separate, hard-coded loop, independent of `bin/fm-lock.sh`'s ancestry walk (`fm_harness_ancestry_pid()` in `bin/fm-session-lock-lib.sh`, which now walks up to sixteen parents and can extend past a claude-named match to a still-more-ancestral one) and of Pi's `lockOwnership()`.
-The wrapper stays silent when that walk reaches the live lock owner and the record passes the [shared start-time check](primary-recovery.md#start).
+The nudge wrapper uses the [startup interlock](#source-routing) before printing.
 Every ordinary transport path in both wrappers exits 0, including malformed state and adapter errors, because a Claude SessionStart exit 2 blocks session initialization.
 The run wrapper's internal `--pi-prerequisite` mode uses silent exit 3 only for an intentional gate or scope stand-down, letting Pi distinguish ineligibility from an eligible empty native result without changing any harness hook's exit contract.
 A lock another session holds and a truncated digest therefore surface as digest text, while broken GitHub auth surfaces through the deferred network result inline or as a wake; none becomes a refusal to open the session.

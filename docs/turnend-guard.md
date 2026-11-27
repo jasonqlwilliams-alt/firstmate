@@ -43,7 +43,7 @@ Under the extension model (Pi, pi-signed, and omp) a live identity-matched watch
 A lock is genuinely unheld only when the lock directory or its symlinked owner directory is absent, or when the existing lock records no pid at all.
 Any lock with a recorded pid remains down when its pid, home, watcher path, or process identity fails the strict watcher health check.
 That ownership proof is `fm_extension_owns_supervision` in `bin/fm-wake-lib.sh`, which accepts either the Pi pair (`fm_pi_extension_owns_supervision`) or the omp pair (`fm_omp_extension_owns_supervision`).
-Both state markers must match the current on-disk builds and name the live session-lock PID, which must pass the [shared start-time check](primary-recovery.md#start).
+Both state markers must match the current on-disk builds and the live session-lock owner, including its generation on a [launch-bound home](configuration.md#launch-bound-session-ownership-configsession-lock-owner).
 omp never inherits the Pi tolerance because its proof is keyed on its own two files and markers.
 Requiring the turn-end guard extension as well as the watch extension is deliberate, because a home without that structural backstop has no benign hand-off to tolerate.
 Without that proof an unheld lock alarms exactly as it did before, so an unloaded, version-drifted, or exited Pi or omp session is loud immediately, and a cycle the extension never restores is loud once the beacon passes grace.
@@ -103,6 +103,7 @@ Claude runs the guard with `--claude`, which ignores `stop_hook_active` and coop
 Claude Code sets `stop_hook_active=true` on every stop after any stop-hook continuation, including `asyncRewake` rewakes, which re-opened the 2026-07-21 blind window under the default one-shot behavior.
 The Claude mode waits up to `FM_CLAUDE_AUTOARM_SYNC_WAIT_MS` (default 800 milliseconds) and allows the stop when the watcher is healthy, the auto-arm's generation claim is open, or `state/.claude-autoarm-epoch` contains a fresh actionable rewake owned by this event epoch.
 The claim is the ledger entry itself: the epoch sequence in `state/.claude-autoarm-epoch` is a monotonic claim generation, line 1 records the claim and terminal outcome, and line 2 records the claiming process's mandatory pid-identity; `fm_autoarm_claim_open` and `fm_autoarm_claim_next` in `bin/fm-wake-lib.sh` own the format contract.
+In launch-bound mode, the claim, failure markers, and blocked-stop budget are scoped to the session owner generation.
 An `arming` claim with a live, identity-matched owner stays open until both the entry and the watcher beacon reach the grace threshold, at which point the guard treats it as stuck.
 Anything else - a finished outcome, a dead or identity-mismatched owner, a stuck owner, an identityless entry, or no entry - lets the next Stop-owned firing take the next generation and arm; taking a newer generation is the reclaim, and a steady-state predecessor is never signalled or revoked.
 No mutex is held across arming or output: `state/.claude-autoarm.lock` survives only as a micro-mutex serializing individual ledger writes, and a superseded owner goes completely silent - ownership is re-verified before every arm invocation, episode-state mutation, ledger write, and continuation.
@@ -110,7 +111,7 @@ The irrevocable commit point of a translation is the exit status, because the ha
 A generation whose required marker cannot be created is refused and exits 0 silently even after printing; its terminal ledger entry is superseded by a later firing, which retries the notice.
 Without those boundaries a cycle that armed, delivered one rewake, and exited left both Stop participants deferring to its leftover lock indefinitely (2026-08-14: two tasks in flight, a beacon 40 minutes cold, every turn blind until an operator intervened), and a hook that hung mid-arm kept a live pid on the lock so the watcher was never auto-re-armed again (2026-08-26).
 Two bounded residuals are accepted intent, each costing at most one extra continuation turn absorbed by the durable idempotent wake queue: an owner that dies between its owned terminal write and its own process exit, and a hung old-build owner that resumes during the one legacy upgrade window.
-A legacy build's lock-holding claim (recognizable by its `autoarm` role file) still defers or reclaims under the legacy abandonment proof, with a live identity-verified stuck owner retired via TERM before its lock is removed and an unverified pid never signalled, so an upgrade mid-session can neither double-arm nor deadlock, and a failed reclaim re-blocks rather than allowing a blind stop.
+In legacy session-lock mode, a legacy build's lock-holding claim (recognizable by its `autoarm` role file) still defers or reclaims under the legacy abandonment proof, with a live identity-verified stuck owner retired via TERM before its lock is removed and an unverified pid never signalled, so an upgrade mid-session can neither double-arm nor deadlock, and a failed reclaim re-blocks rather than allowing a blind stop.
 Fresh `failed` and `failed-suppressed` outcomes enter or advance the failure progression instead of acting as unconditional recovery proof.
 The auto-arm itself rechecks the healthy watcher predicate and retries a bounded number of times before reporting a genuine failure.
 The first fresh exhausted-failure epoch preserves its handoff without consuming a blocked-stop count, while later fresh failed epochs advance the same monotonic progression instead of resetting it.
@@ -118,7 +119,7 @@ When none of those proofs appears, it re-blocks up to `FM_CLAUDE_TURNEND_BLOCK_B
 In Claude mode, positive watcher recovery clears the block budget, failure notice, and attended alarm together under the existing budget lock before either hook reports ordinary recovery.
 The one loud attended fail-open is available only when the auto-arm has recorded an exhausted failure, its one notice is already consumed, the block budget is exhausted, and a final check finds neither a healthy watcher nor an automatic continuation.
 Each epoch identity is charged at most once per Stop under the budget lock, and a re-block against an epoch the auto-arm did not advance past the previous re-block is charged as well.
-That second rule is what bounds an inert auto-arm: a hook kept silent by a session lock held by a live harness outside its ancestry, a hook that never fires, or a hook failing before its generation claim leaves the ledger frozen at its last outcome.
+That second rule bounds an inert auto-arm when the guard can still act but the hook stands down, never fires, or fails before claiming an epoch, leaving the ledger frozen at its last outcome.
 Charging only epoch changes let the count freeze with that ledger, so the guard re-blocked without limit and the attended fail-open was never reachable; `budget_account_current_epoch` in `bin/fm-turnend-guard.sh` owns the rule.
 Whenever both coordination locks are needed, positive auto-arm recovery and the terminal check acquire the auto-arm owner lock before the budget lock.
 After that alarm, the Stop auto-arm suppresses further exit-2 continuations until positive watcher recovery, so the final fail-open remains reachable.
@@ -163,7 +164,8 @@ That delivery is bounded and safe: only one park exists before the next `stop` c
 Each invocation publishes its sequence in `state/.cursor-park-owner` under the short publication and commit lock `state/.cursor-park-owner.lock`.
 The same bounded critical section covers the final owner and away-mode checks, follow-up output, and repair-budget commit, so the next `stop` claim makes an older park that is still running stand down without emitting or changing shared state.
 The lock is never held while the arm is sleeping, while the hook is polling, or while output is prepared.
-The park revalidates session ownership while polling and again inside the final commit section, but it deliberately does not hold the fleet session lock across output because an awaited hook must not block home-wide session acquisition; the remaining microsecond takeover window can produce at most one harmless wake that drains the durable queue.
+The park revalidates session ownership while polling and inside the final commit section, checking the original session owner generation on launch-bound homes.
+It leaves home-wide session acquisition free to proceed while it writes output, so a takeover after the final check can leave one follow-up for the durable queue handler.
 Without those records an older park still running after the next `stop` could leak one process and one stale duplicate wake.
 Cursor's `beforeSubmitPrompt` step fires once on a real captain message and does not fire for hook-driven follow-ups, so invalidating the park baton there would close the pre-claim window exactly.
 That hook is deliberately left to a follow-up alongside the deferred `preCompact` surface and is not registered in this change.

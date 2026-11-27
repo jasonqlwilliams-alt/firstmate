@@ -178,6 +178,10 @@ home_summary_refresh_once() {
     home_summary_fail "could not set the publication file mode"
     return 1
   fi
+  if [ -n "${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-}" ] && ! fm_session_network_worker_owns_claim "$STATE"; then
+    home_summary_fail "startup network worker no longer holds the acquisition mutex"
+    return 1
+  fi
   if ! mv -f -- "$HOME_SUMMARY_TMP" "$LEDGER" 2>/dev/null; then
     home_summary_fail "atomic ledger replacement failed: $LEDGER"
     return 1

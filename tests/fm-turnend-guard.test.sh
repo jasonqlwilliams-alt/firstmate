@@ -1089,6 +1089,7 @@ test_pi_extension_injects_once_per_logical_agent_run() {
   log="$TMP_ROOT/pi-logical-run-guard.log"
   mkdir -p "$repo/.pi/extensions/lib" "$repo/bin" "$home/state"
   cp "$ROOT/.pi/extensions/fm-primary-turnend-guard.ts" "$ext"
+  cp "$ROOT/.pi/extensions/lib/fm-session-owner.ts" "$ROOT/.pi/extensions/lib/fm-async-exec.ts" "$repo/.pi/extensions/lib/"
   cp "$ROOT/.pi/extensions/lib/fm-operational-input.ts" "$repo/.pi/extensions/lib/fm-operational-input.ts"
   cp "$ROOT/bin/fm-operational-input.sh" "$repo/bin/fm-operational-input.sh"
   cat > "$repo/bin/fm-turnend-guard.sh" <<'SH'
@@ -1104,7 +1105,7 @@ exit 0
 SH
   chmod +x "$repo/bin/fm-turnend-guard.sh" "$repo/bin/fm-arm-pretool-check.sh"
   out=$(PLUGIN="$ext" FM_HOME="$home" FM_GUARD_LOG="$log" node --input-type=module 2>&1 <<'EOF'
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const handlers = new Map();
@@ -1125,6 +1126,9 @@ const pi = {
 };
 const mod = await import(pathToFileURL(process.env.PLUGIN).href);
 mod.default(pi);
+const marker = `${process.env.FM_HOME}/state/.pi-turnend-extension-loaded`;
+unlinkSync(marker);
+mkdirSync(marker);
 if (handlers.has("turn_end")) throw new Error("guard still treats internal Pi turns as logical runs");
 const settled = handlers.get("agent_settled");
 if (!settled) throw new Error("agent_settled handler was not registered");
@@ -1155,6 +1159,7 @@ test_pi_extension_retries_after_followup_delivery_failure() {
   ext="$repo/.pi/extensions/fm-primary-turnend-guard.ts"
   mkdir -p "$repo/.pi/extensions/lib" "$repo/bin" "$home/state"
   cp "$ROOT/.pi/extensions/fm-primary-turnend-guard.ts" "$ext"
+  cp "$ROOT/.pi/extensions/lib/fm-session-owner.ts" "$ROOT/.pi/extensions/lib/fm-async-exec.ts" "$repo/.pi/extensions/lib/"
   cp "$ROOT/.pi/extensions/lib/fm-operational-input.ts" "$repo/.pi/extensions/lib/fm-operational-input.ts"
   cp "$ROOT/bin/fm-operational-input.sh" "$repo/bin/fm-operational-input.sh"
   cat > "$repo/bin/fm-turnend-guard.sh" <<'SH'

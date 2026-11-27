@@ -392,7 +392,12 @@ probe_successor() {
     probe_line refused "could not create a probe output file"
     return 1
   }
-  (cd "$dir" && fm_run_timed "$timeout" env "${PROBE_ENV_UNSET[@]}" "${argv[@]}" </dev/null >"$out" 2>&1)
+  (
+    # shellcheck source=bin/fm-session-lock-lib.sh
+    . "$SCRIPT_DIR/fm-session-lock-lib.sh"
+    fm_session_owner_clear
+    cd "$dir" && fm_run_timed "$timeout" env "${PROBE_ENV_UNSET[@]}" "${argv[@]}" </dev/null >"$out" 2>&1
+  )
   rc=$?
   if [ "$rc" -eq 0 ] && grep -qF "$expected" "$out"; then
     rm -f "$out"
@@ -591,7 +596,8 @@ lock_is_held_live() {
   fi
   status=$("$SCRIPT_DIR/fm-lock.sh" status)
   case "$status" in
-    'lock: held by live harness pid '*) return 0 ;;
+    'lock: held by live harness pid '*|'lock: held by live legacy pid '*|\
+    'lock: held by live launch pid '*|'lock: held by live native pid '*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -600,7 +606,7 @@ lock_is_held_live() {
 # Its first message is the session-start instruction, so the successor takes
 # the helm and arms supervision without waiting for a captain message.
 build_launch_command() {
-  local bin prompt env_extra='' pre='' post='' flags='' word
+  local bin prompt env_extra='' pre='' post='' flags='' word launcher=''
   bin=$(successor_bin) || return 1
   # shellcheck source=bin/fm-operational-input.sh
   . "$SCRIPT_DIR/fm-operational-input.sh"
@@ -621,8 +627,13 @@ build_launch_command() {
     cursor) pre=' --trust --yolo'; post=" --workspace $(printf '%q' "$HELM_WORKSPACE")" ;;
     *) return 1 ;;
   esac
-  printf 'cd -- %q && FM_HOME=%q exec env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u FM_OMP_HARNESS%s %q%s%s%s %q\n' \
-    "$HELM_WORKSPACE" "$FM_HOME" "$env_extra" "$bin" "$pre" "$flags" "$post" "$prompt"
+  # shellcheck source=bin/fm-session-lock-record-lib.sh
+  . "$SCRIPT_DIR/fm-session-lock-record-lib.sh"
+  if fm_session_owner_enabled; then
+    printf -v launcher '%q -- ' "$SCRIPT_DIR/fm-session-launch.sh"
+  fi
+  printf 'cd -- %q && FM_HOME=%q exec env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u FM_OMP_HARNESS%s %s%q%s%s%s %q\n' \
+    "$HELM_WORKSPACE" "$FM_HOME" "$env_extra" "$launcher" "$bin" "$pre" "$flags" "$post" "$prompt"
 }
 
 # --- handover ---------------------------------------------------------------

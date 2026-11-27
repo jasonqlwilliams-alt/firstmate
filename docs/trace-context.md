@@ -54,7 +54,7 @@ An actual disabled relaunch regenerates the task meta without `traceparent=`, so
 
 ### Enablement is home-session-scoped
 
-Each locked `bin/fm-session-start.sh` run resolves that home's `config/trace-context` plus `FM_TRACE_CONTEXT` exactly once into session-scoped effective state.
+In a continuing session, each locked `bin/fm-session-start.sh` run resolves that home's `config/trace-context` plus `FM_TRACE_CONTEXT` into session-scoped effective state.
 The decision is atomically published through a same-directory temporary file and bound to the current session lock, so a failed publication cannot reactivate a stale `on` record from an earlier session.
 Every spawn from that home reads only the frozen `on` or `off` decision.
 Later config or environment edits are ignored until that home starts a new session.

@@ -192,6 +192,10 @@ test_foreground_wake_acknowledgement_and_owned_successor() (
   export FM_POLL=1 FM_SIGNAL_GRACE=0 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999
   export FM_SUPERVISION_MODEL=persistent
   "$ROOT/bin/fm-lock.sh" >/dev/null || fail "fixture could not acquire the fleet lock"
+  if [ "$(uname -s)" = Linux ]; then
+    assert_grep 'start=proc:' "$home/state/.lock.start" 'legacy lock was not acquired through procfs'
+    export FM_PROC_ROOT_OVERRIDE="$home/unavailable-proc"
+  fi
   # Read the production health interface against watcher-written state only.
   # shellcheck source=bin/fm-wake-lib.sh
   . "$ROOT/bin/fm-wake-lib.sh"

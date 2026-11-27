@@ -34,10 +34,8 @@ The command deliberately refuses a queued or unaccounted partial launch rather t
 Resolve any trust or first-use permission dialog interactively; the launcher does not answer it with keys.
 Never delete the session lock to make a second primary start.
 Run `bin/fm-lock.sh status` to inspect the current lock.
-Lock status reports a recorded owner as stale if its start time differs from the live process's start time or the lookup fails.
-Without a start record for the PID, the checks fall back to PID-only liveness, including for a new claim made when the start time is unavailable.
-If a takeover is interrupted after publishing the new start record but before replacing the PID line, this fallback can let a live harness that reused the old PID hold the lock until it exits.
-The [owner record](../bin/fm-session-lock-record-lib.sh) documents atomic publication of the PID line and compatibility with in-process readers.
+Treat `uncertain` or `unreadable` as a reason to investigate before attempting recovery.
+See the [lock command](../bin/fm-lock.sh) for the status verdicts and [launch-bound ownership](configuration.md#launch-bound-session-ownership-configsession-lock-owner) for the per-home rollout.
 
 ## Finish recovery in the primary
 

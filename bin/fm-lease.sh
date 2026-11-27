@@ -12,14 +12,14 @@
 #   fm-lease.sh claim <task> [--actor main|branch]
 #       Take the lease for the calling actor. Idempotent for the holder (the
 #       claim refreshes its own lease). Refuses with exit 6 while the other
-#       actor holds a live lease. A stale lease (dead pid, or a torn record)
-#       is cleared and re-claimed.
+#       actor holds a live lease or the existing lease's owner is uncertain.
+#       A stale lease (dead PID or torn lease record) can be replaced.
 #   fm-lease.sh release <task> [--actor main|branch]
 #       Drop the calling actor's lease. Releasing a lease the actor does not
 #       hold is a silent no-op, so a retry after a partial failure is safe.
 #       Naming the other actor is refused loudly.
 #   fm-lease.sh check <task>
-#       Print "<actor> <pid> <epoch> <live|stale>" for a held lease, or
+#       Print "<actor> <pid> <epoch> <live|stale|uncertain>" for a held lease, or
 #       nothing (exit 1) when the task is unleased.
 #   fm-lease.sh release-actor --actor main|branch
 #       Drop every lease the named actor holds; the Pi branch extension runs
@@ -56,6 +56,26 @@ usage() {
 
 CMD=${1:-}
 shift 2>/dev/null || true
+
+OWNER_GEN=
+if [ "$CMD" != check ] && fm_session_owner_mode_active "$STATE"; then
+  # shellcheck source=bin/fm-session-lock-lib.sh
+  . "$SCRIPT_DIR/fm-session-lock-lib.sh"
+  fm_session_lock_owned_by_self "$STATE" || exit "$FM_LEASE_REFUSE_EXIT"
+  OWNER_GEN=$FM_SESSION_LOCK_GENERATION
+fi
+
+lease_claim_available() {
+  local task=$1 actor=$2 rc=0
+  fm_lease_live "$task" || rc=$?
+  case "$rc" in
+    0) [ "$FM_LEASE_ACTOR" = "$actor" ] && return 0
+       echo "error: claim refused - task '$task' is leased to the $FM_LEASE_ACTOR supervision actor (state/.lease-$task)" >&2 ;;
+    1) return 0 ;;
+    *) echo "error: claim refused - cannot verify the lease for task '$task'" >&2 ;;
+  esac
+  return 1
+}
 
 case "$CMD" in
   claim|release)
@@ -112,10 +132,7 @@ case "$CMD" in
       exit "$FM_LEASE_REFUSE_EXIT"
     fi
     LEASE=$(fm_lease_path "$TASK")
-    if fm_lease_live "$TASK" && [ "$FM_LEASE_ACTOR" != "$ACTOR" ]; then
-      echo "error: claim refused - task '$TASK' is leased to the $FM_LEASE_ACTOR supervision actor (state/.lease-$TASK)" >&2
-      exit "$FM_LEASE_REFUSE_EXIT"
-    fi
+    lease_claim_available "$TASK" "$ACTOR" || exit "$FM_LEASE_REFUSE_EXIT"
     # The lease outlives this CLI call, so its liveness pid must be the
     # long-lived supervising process: FM_LEASE_HOLDER_PID when the caller
     # provides one (the Pi branch extension passes the session-lock holder),
@@ -124,23 +141,34 @@ case "$CMD" in
     HOLDER_PID=${FM_LEASE_HOLDER_PID:-}
     case "$HOLDER_PID" in *[!0-9]*) HOLDER_PID= ;; esac
     if [ -z "$HOLDER_PID" ]; then
-      HOLDER_PID=$(head -n 1 "$STATE/.lock" 2>/dev/null | tr -cd '0-9' || true)
+      if [ -n "$OWNER_GEN" ]; then
+        HOLDER_PID=$FM_SESSION_LOCK_PID
+      else
+        HOLDER_PID=$(head -n 1 "$STATE/.lock" 2>/dev/null | tr -cd '0-9' || true)
+      fi
     fi
     [ -n "$HOLDER_PID" ] || HOLDER_PID=$$
+    if [ -n "$OWNER_GEN" ] && [ "$HOLDER_PID" != "$FM_SESSION_LOCK_PID" ]; then
+      exit "$FM_LEASE_REFUSE_EXIT"
+    fi
     TMP=$(mktemp "$STATE/.fm-lease-tmp.XXXXXX")
-    printf '%s\t%s\t%s\n' "$ACTOR" "$HOLDER_PID" "$(date +%s)" > "$TMP"
+    write_lease() {
+      if [ -n "$OWNER_GEN" ]; then
+        printf '%s\t%s\t%s\t%s\n' "$ACTOR" "$HOLDER_PID" "$(date +%s)" "$OWNER_GEN"
+      else
+        printf '%s\t%s\t%s\n' "$ACTOR" "$HOLDER_PID" "$(date +%s)"
+      fi
+    }
+    write_lease > "$TMP"
     if [ -e "$LEASE" ]; then
       # Same-actor refresh, or a stale/torn record: replace atomically.
       mv -f -- "$TMP" "$LEASE"
     elif ! ln -- "$TMP" "$LEASE" 2>/dev/null; then
       # Lost the create race to the sibling actor; re-check who won.
       rm -f -- "$TMP"
-      if fm_lease_live "$TASK" && [ "$FM_LEASE_ACTOR" != "$ACTOR" ]; then
-        echo "error: claim refused - task '$TASK' was just leased to the $FM_LEASE_ACTOR supervision actor" >&2
-        exit "$FM_LEASE_REFUSE_EXIT"
-      fi
+      lease_claim_available "$TASK" "$ACTOR" || exit "$FM_LEASE_REFUSE_EXIT"
       TMP=$(mktemp "$STATE/.fm-lease-tmp.XXXXXX")
-      printf '%s\t%s\t%s\n' "$ACTOR" "$HOLDER_PID" "$(date +%s)" > "$TMP"
+      write_lease > "$TMP"
       mv -f -- "$TMP" "$LEASE"
     else
       rm -f -- "$TMP"
@@ -158,7 +186,9 @@ case "$CMD" in
     ;;
   check)
     fm_lease_read "$TASK" || exit 1
-    if fm_lease_live "$TASK"; then LIVENESS=live; else LIVENESS=stale; fi
+    lease_rc=0
+    fm_lease_live "$TASK" || lease_rc=$?
+    case "$lease_rc" in 0) LIVENESS=live ;; 1) LIVENESS=stale ;; *) LIVENESS=uncertain ;; esac
     printf '%s %s %s %s\n' "${FM_LEASE_ACTOR:-unreadable}" "${FM_LEASE_PID:-0}" "${FM_LEASE_EPOCH:-0}" "$LIVENESS"
     ;;
   release-actor)

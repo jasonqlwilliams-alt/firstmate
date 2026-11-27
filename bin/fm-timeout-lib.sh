@@ -162,6 +162,96 @@ fm_timeout_seconds() {  # <milliseconds>
   printf '%d.%03d' "$(( $1 / 1000 ))" "$(( $1 % 1000 ))"
 }
 
+fm_cancel_startup_child() {
+  trap '' HUP INT TERM
+  kill -TERM "$startup_child" 2>/dev/null || true
+  wait "$startup_child" 2>/dev/null || true
+  exit "$1"
+}
+
+fm_run_startup_interruptible() {
+  local startup_child rc=0
+  "$@" &
+  startup_child=$!
+  trap 'fm_cancel_startup_child 129' HUP
+  trap 'fm_cancel_startup_child 130' INT
+  trap 'fm_cancel_startup_child 143' TERM
+  wait "$startup_child" || rc=$?
+  trap - HUP INT TERM
+  return "$rc"
+}
+
+fm_run_startup_deadline() {  # <seconds> <command...>; called as a background job
+  exec node -e '
+    const { execFileSync, spawn } = require("node:child_process");
+    const [seconds, command, ...args] = process.argv.slice(1);
+    const child = spawn(command, args, {
+      detached: true,
+      env: { ...process.env, FM_TIMEOUT_STARTUP_SCOPE: "1" },
+      stdio: "inherit",
+    });
+    function killGroup(group) {
+      try {
+        process.kill(-group, "SIGKILL");
+      } catch (error) {
+        if (error.code !== "ESRCH") throw error;
+      }
+    }
+    function sessionGroups(session) {
+      const options = { encoding: "utf8" };
+      if (process.platform === "darwin") {
+        const groups = execFileSync("python3", ["-c", `
+import os, subprocess, sys
+session = int(sys.argv[1])
+rows = subprocess.check_output(["/bin/ps", "-ax", "-o", "pid=", "-o", "pgid=", "-o", "stat="], text=True)
+for row in rows.splitlines():
+    pid, group, state = row.split()
+    if int(group) <= 1 or state[0] in "ZX":
+        continue
+    try:
+        if os.getsid(int(pid)) == session:
+            print(group)
+    except ProcessLookupError:
+        continue
+`, String(session)], options);
+        return new Set(groups.trim().split(/\s+/).filter(Boolean).map(Number));
+      }
+      const rows = execFileSync("/bin/ps", ["-ax", "-o", "pgid=", "-o", "sid=", "-o", "stat="], options);
+      return new Set(rows.trim().split("\n").map((row) => row.trim().split(/\s+/))
+        .filter(([group, sid, state]) => Number(group) > 1 && Number(sid) === session && !/^[ZX]/.test(state))
+        .map(([group]) => Number(group)));
+    }
+    let interrupted;
+    function stop(status) {
+      interrupted ??= status;
+      if (child.pid) killGroup(child.pid);
+    }
+    process.on("SIGHUP", () => stop(129));
+    process.on("SIGINT", () => stop(130));
+    process.on("SIGTERM", () => stop(143));
+    const deadline = setTimeout(() => stop(124), Number(seconds) * 1000);
+    child.once("error", (error) => {
+      clearTimeout(deadline);
+      console.error(error.message);
+      process.exitCode = 127;
+    });
+    child.once("exit", (code, exitSignal) => {
+      clearTimeout(deadline);
+      killGroup(child.pid);
+      function reap() {
+        const groups = sessionGroups(child.pid);
+        if (groups.size) {
+          for (const group of groups) killGroup(group);
+          setTimeout(reap, 20);
+          return;
+        }
+        process.exitCode = interrupted ?? code ?? (exitSignal === "SIGKILL" ? 137 : 143);
+      }
+      reap();
+    });
+  ' -- "$@"
+}
+
 fm_run_timed() {  # [--kill | --wait-on-term] <seconds> <command...>
   local seconds signal=TERM wait_on_term=0
   case "$1" in

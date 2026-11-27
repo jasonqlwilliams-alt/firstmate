@@ -78,6 +78,15 @@ primary_read_lock() {
     fm_session_lock_read "$STATE/.lock" || primary_die "cannot read session lock"
     PRIMARY_OWNER=$FM_SESSION_LOCK_PID PRIMARY_OWNER_START=$FM_SESSION_LOCK_START
     case "$PRIMARY_OWNER" in ''|*[!0-9]*|0|1) primary_die "malformed session lock" ;; esac
+    if fm_session_owner_enabled || [ -n "$FM_SESSION_LOCK_GENERATION" ]; then
+      fm_session_owner_liveness "$PRIMARY_OWNER" "$PRIMARY_OWNER_START"
+      case $? in
+        0) PRIMARY_LOCK=live ;;
+        2) PRIMARY_LOCK=stale ;;
+        *) primary_die "session owner liveness is uncertain" ;;
+      esac
+      return
+    fi
     PRIMARY_LOCK=stale
     if kill -0 "$PRIMARY_OWNER" 2>/dev/null; then
       comm=$(ps -p "$PRIMARY_OWNER" -o comm=) || primary_die "live lock owner cannot be inspected"
@@ -183,7 +192,7 @@ primary_owner_in_pane() {
 
 primary_mates_ready() {
   local registry="$FM_HOME/data/secondmates.md" line id meta expected host target backend route verdict seen='' endpoint
-  local meta_ids='' registry_ids='' found homes='' home_key session mate_pane info harness
+  local meta_ids='' registry_ids='' found seen_homes='' home_key session mate_pane info harness
   for meta in "$STATE"/*.meta; do
     [ -f "$meta" ] || continue
     [ "$(fm_meta_get "$meta" kind)" = secondmate ] || continue
@@ -219,8 +228,8 @@ primary_mates_ready() {
       expected=$(cd -- "$expected" 2>/dev/null && pwd -P) || return 1
     fi
     home_key="$host:$expected"
-    case "$homes" in *"|$home_key|"*) printf 'recovery_reason=duplicate secondmate home\n'; return 1 ;; esac
-    homes="$homes|$home_key|"
+    case "$seen_homes" in *"|$home_key|"*) printf 'recovery_reason=duplicate secondmate home\n'; return 1 ;; esac
+    seen_homes="$seen_homes|$home_key|"
     endpoint="$host:$backend:$target"
     case "$seen" in *"|$endpoint|"*) printf 'recovery_reason=duplicate endpoint for %s\n' "$id"; return 1 ;; esac
     seen="$seen|$endpoint|"
@@ -392,7 +401,11 @@ primary_start() {
   for name in "${FM_LAUNCH_CLEAR_NAMES[@]}" FM_ROOT FM_BACKEND FM_TASK_ID FM_OMP_HARNESS ANTIGRAVITY_AGENT GEMINI_CLI GEMINI_CLI_SYSTEM_SETTINGS_PATH GROK_HOOK_EVENT; do
     printf -v command '%s -u %q' "$command" "$name"
   done
-  printf -v command '%s %q %q %q %q' "$command" "FM_HOME=$FM_HOME" 'CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false' 'CLAUDE_CODE_SEND_FEEDBACK=0' "$PRIMARY_CLAUDE"
+  printf -v command '%s %q %q %q' "$command" "FM_HOME=$FM_HOME" 'CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false' 'CLAUDE_CODE_SEND_FEEDBACK=0'
+  if fm_session_owner_enabled; then
+    printf -v command '%s %q --' "$command" "$FM_HOME/bin/fm-session-launch.sh"
+  fi
+  printf -v command '%s %q' "$command" "$PRIMARY_CLAUDE"
   for flag in $CLAUDE_PERM_FLAG; do printf -v command '%s %q' "$command" "$flag"; done
   printf -v command '%s --settings %q %q' "$command" '{"feedbackDrafts":"off","attribution":{"commit":"","pr":"","sessionUrl":false}}' "$prompt"
   launch_pane=$PRIMARY_PANE

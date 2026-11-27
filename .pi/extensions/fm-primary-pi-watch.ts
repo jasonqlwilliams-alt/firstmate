@@ -21,9 +21,10 @@
 // consumes at the user message_start carrying the exact wake text; either
 // event finishes the pending record, and a still-unconsumed record rides the
 // replacement handoff.
+import { bindNativeOwner, usesLaunchOwners, verifyNativeOwner } from "./lib/fm-session-owner.ts";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
@@ -131,6 +132,7 @@ const root = resolve(extensionDir, "../..");
 const fmHome = process.env.FM_HOME || process.env.FM_ROOT_OVERRIDE || root;
 const fmRoot = process.env.FM_ROOT_OVERRIDE || root;
 const state = process.env.FM_STATE_OVERRIDE || `${fmHome}/state`;
+const ownerPaths = { root, home: fmHome, state };
 const config = process.env.FM_CONFIG_OVERRIDE || `${fmHome}/config`;
 const armScript = `${fmRoot}/bin/fm-watch-arm.sh`;
 const marker = `${state}/.pi-watch-extension-loaded`;
@@ -214,6 +216,10 @@ function pidAlive(pid: string): boolean {
 }
 
 function lockOwnership(): LockOwnership {
+  if (usesLaunchOwners(ownerPaths)) {
+    if (verifyNativeOwner(ownerPaths)) return "owned";
+    return existsSync(`${state}/.lock`) ? "other" : "missing";
+  }
   let lockPid = "";
   try {
     lockPid = readFileSync(`${state}/.lock`, "utf8").trim();
@@ -231,6 +237,12 @@ function lockOwnership(): LockOwnership {
 }
 
 function markLoaded(): void {
+  if (usesLaunchOwners(ownerPaths)) {
+    const generation = verifyNativeOwner(ownerPaths);
+    if (!generation) return;
+    writeFileSync(marker, `${extensionVersion}\n${process.pid}\n${generation}\n`);
+    return;
+  }
   if (lockOwnership() === "other") return;
   mkdirSync(state, { recursive: true });
   writeFileSync(marker, `${extensionVersion}\n${process.pid}\n`);
@@ -493,6 +505,7 @@ const cleanupOnProcessExit = () => {
 process.once("exit", cleanupOnProcessExit);
 
 export default function (pi: ExtensionAPI) {
+  if (!bindNativeOwner(ownerPaths)) return;
   let generation = createGeneration();
   activateGeneration(generation);
 

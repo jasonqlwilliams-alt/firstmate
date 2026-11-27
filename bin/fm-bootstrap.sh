@@ -118,8 +118,9 @@
 #          the fleet lock, so a second concurrent session never race-mutates
 #          secondmate homes, pending handoff outboxes and receiver wakes,
 #          X-mode artifacts, project clones, or repair instructions.
-#          Unset/0 (the default) runs all six sweeps - this flag is purely
-#          additive.
+#          Unset/0 requests the mutating sweeps. In launch-bound mode, local
+#          mutations require a verified owner and network mutations require
+#          the startup worker's generation and acquisition claim.
 #          Set FM_BOOTSTRAP_NETWORK to split this run by whether a step talks to
 #          the network, so a session start can print its digest from local reads
 #          alone and run the network half off the digest's blocking path:
@@ -135,10 +136,9 @@
 #                 local pass.
 #          FM_BOOTSTRAP_DETECT_ONLY composes with it unchanged, so `only` plus
 #          detect-only is the read-only `gh auth status` probe on its own.
-#          bin/fm-startup-network.sh owns the deferral: it runs the `only` phase
-#          in a detached bounded worker and publishes the result. This file stays
-#          the single owner of every sweep, and the split changes only WHEN each
-#          runs, never WHETHER. During the network phase, project clone refresh
+#          bin/fm-startup-network.sh schedules the `only` phase and publishes
+#          its result. This file stays the single owner of every sweep.
+#          During the network phase, project clone refresh
 #          overlaps the independent secondmate work. Per-secondmate remote
 #          liveness workers run concurrently and finish before per-secondmate
 #          remote convergence workers run concurrently, because convergence
@@ -199,6 +199,8 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 # deferred network stage sets, so an ordinary bootstrap run records nothing.
 # shellcheck source=bin/fm-timing-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-timing-lib.sh"
+# shellcheck source=bin/fm-timeout-lib.sh
+. "$SCRIPT_DIR/fm-timeout-lib.sh"
 
 # Network-phase selection (see the header). An unrecognized value resolves to
 # `all` so a malformed override runs every step rather than silently dropping a
@@ -210,13 +212,28 @@ esac
 local_phase() { [ "$FM_BOOTSTRAP_NETWORK_PHASE" != only ]; }
 network_phase() { [ "$FM_BOOTSTRAP_NETWORK_PHASE" != skip ]; }
 
+# shellcheck source=bin/fm-session-lock-record-lib.sh
+. "$SCRIPT_DIR/fm-session-lock-record-lib.sh"
+
+if local_phase && fm_session_owner_mode_active "$STATE" && [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ]; then
+  local_owner=$("$SCRIPT_DIR/fm-lock.sh" verify) || local_owner=''
+  if [ -z "$local_owner" ] || [ "$local_owner" = legacy ]; then
+    FM_BOOTSTRAP_DETECT_ONLY=1
+  fi
+fi
+
 network_mutation_authorized() {
-  local expected=${FM_BOOTSTRAP_NETWORK_LOCK_PID:-} current
-  [ -n "$expected" ] || return 0
+  local expected=${FM_BOOTSTRAP_NETWORK_LOCK_PID:-}
+  if fm_session_owner_mode_active "$STATE"; then
+    fm_session_network_worker_owns_claim "$STATE"
+    return
+  fi
+  if [ -z "$expected" ]; then
+    return 0
+  fi
   case "$expected" in *[!0-9]*) return 1 ;; esac
-  [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] || return 1
-  current=$(cat "$STATE/.lock" 2>/dev/null) || return 1
-  [ "$current" = "$expected" ]
+  [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] \
+    && [ "$(cat "$STATE/.lock" 2>/dev/null)" = "$expected" ]
 }
 
 network_sweep_authorized() {
@@ -244,6 +261,7 @@ bootstrap_parallel_begin() {
 bootstrap_parallel_spawn() {
   BOOTSTRAP_PAR_N=$((BOOTSTRAP_PAR_N + 1))
   (
+    if fm_session_owner_mode_active "$STATE"; then network_mutation_authorized || exit 0; fi
     "$@"
   ) >"$BOOTSTRAP_PAR_DIR/$BOOTSTRAP_PAR_N.out" 2>"$BOOTSTRAP_PAR_DIR/$BOOTSTRAP_PAR_N.err" &
   printf '%s\n' "$!" > "$BOOTSTRAP_PAR_DIR/$BOOTSTRAP_PAR_N.pid"
@@ -327,17 +345,33 @@ fleet_sync_relay_all_output() {
   done < "$tmp"
 }
 
-fleet_sync() {
+fleet_sync() (
   [ -x "$FM_ROOT/bin/fm-fleet-sync.sh" ] || return 0
   [ -d "$PROJECTS" ] || return 0
 
   tmp=$(mktemp "${TMPDIR:-/tmp}/fm-fleet-sync.XXXXXX" 2>/dev/null) || return 0
   timeout=$(fleet_sync_bootstrap_timeout)
+  if [ "${FM_TIMEOUT_STARTUP_SCOPE:-0}" = 1 ]; then
+    local rc=0
+    fm_run_timed "$timeout" "$FM_ROOT/bin/fm-fleet-sync.sh" >"$tmp" 2>/dev/null || rc=$?
+    if [ "$rc" -eq 124 ]; then
+      fleet_sync_relay_all_output "$tmp"
+      echo "FLEET_SYNC: fleet: skipped: bootstrap refresh timed out (timeout=${timeout}s elapsed=${timeout}s)"
+    else
+      fleet_sync_relay_filtered_output "$tmp"
+    fi
+    rm -f "$tmp"
+    return 0
+  fi
   monitor_was_on=0
   case $- in *m*) monitor_was_on=1 ;; esac
   set -m 2>/dev/null || true
   "$FM_ROOT/bin/fm-fleet-sync.sh" >"$tmp" 2>/dev/null &
   pid=$!
+  if fm_session_owner_mode_active "$STATE"; then
+    trap 'kill -KILL -- "-$pid" 2>/dev/null || true' EXIT
+    trap 'exit 143' TERM
+  fi
 
   start=$SECONDS
   while jobs -r -p | grep -qx "$pid"; do
@@ -354,11 +388,12 @@ fleet_sync() {
     sleep 1
   done
   wait "$pid" 2>/dev/null || true
+  trap - EXIT TERM
   [ "$monitor_was_on" -eq 1 ] || set +m 2>/dev/null || true
 
   fleet_sync_relay_filtered_output "$tmp"
   rm -f "$tmp"
-}
+)
 
 secondmate_sync() {
   # shellcheck source=bin/fm-wake-lib.sh disable=SC1091
@@ -1665,6 +1700,7 @@ if [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ]; then
     fleet_sync_out=$(mktemp "${TMPDIR:-/tmp}/fm-bootstrap-fleet.XXXXXX") || fleet_sync_out=
     if [ -n "$fleet_sync_out" ]; then
       (
+        if fm_session_owner_mode_active "$STATE"; then network_mutation_authorized || exit 0; fi
         __fm_timing_stamp=$(fm_timing_now_ms)
         fleet_sync
         fm_timing_record phase fleet-sync "$__fm_timing_stamp"

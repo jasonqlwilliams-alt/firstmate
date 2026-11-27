@@ -79,7 +79,7 @@ When the watch fires, the action is `bin/fm-backup-helm.sh handover` with the fr
 1. Probe the successor again.
    Fail closed before touching Claude if it does not answer or its executable cannot be resolved.
 2. Confirm the frozen pane still exists.
-3. If the session lock is held by a live harness, wait until the Claude pane is idle.
+3. If the session lock is held by a live continuing session, wait until the Claude pane is idle.
    A mid-turn Claude is waited out.
    The action does not send Escape, does not interrupt, and does not `/exit` through a busy turn.
    If the idle bound expires, the action fails, Claude keeps the helm, and the lock file is left untouched.
@@ -96,7 +96,7 @@ When the watch fires, the action is `bin/fm-backup-helm.sh handover` with the fr
    tmux and Herdr send into the existing pane; any other backend is refused.
 
 If the lock is already free or stale when the action starts, `/stow` and `/exit` are skipped and only the successor launch runs.
-If the lock is neither held by a live harness nor free or stale, the action fails closed and does not launch.
+Any other lock verdict blocks handover, including a live startup-only owner or an unreadable or uncertain lock.
 
 ## After it fires
 
