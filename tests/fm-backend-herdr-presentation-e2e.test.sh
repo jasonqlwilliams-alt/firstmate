@@ -19,10 +19,12 @@ command -v jq >/dev/null 2>&1 || { echo "skip: jq not found"; exit 0; }
 command -v treehouse >/dev/null 2>&1 || { echo "skip: treehouse not found"; exit 0; }
 [ -x "$HERDR_LAB_HELPER" ] || { echo "skip: Herdr lab helper not executable at $HERDR_LAB_HELPER"; exit 0; }
 
-REAL_TREEHOUSE=$(command -v treehouse)
+REAL_TREEHOUSE="$TREEHOUSE_ROOT/bin/treehouse"
+TREEHOUSE_BACKEND=$(readlink "$REAL_TREEHOUSE-real") || exit 1
 HERDR_ORIGINAL_PATH=$PATH
 TMP_ROOT=$(mktemp -d "$(cd "${TMPDIR:-/tmp}" && pwd -P)/fm-herdr-presentation.XXXXXX")
 FAKEBIN="$TMP_ROOT/fakebin"
+TREEHOUSE_RECORDER="$TMP_ROOT/record-treehouse"
 HERDR_CALL_LOG="$TMP_ROOT/herdr-calls.log"
 TREEHOUSE_CALL_LOG="$TMP_ROOT/treehouse-calls.log"
 TREEHOUSE_LOCK_DIR="$TMP_ROOT/treehouse-call.lock"
@@ -37,7 +39,7 @@ fm_test_track_task_tmps "$FAKEBIN"
 : > "$MOVE_CALL_LOG"
 : > "$FOCUS_AUDIT_LOG"
 REAL_MOVER="$ROOT/bin/backends/herdr-workspace-move.py"
-export REAL_TREEHOUSE REAL_MOVER HERDR_CALL_LOG TREEHOUSE_CALL_LOG TREEHOUSE_LOCK_DIR MOVE_CALL_LOG FOCUS_AUDIT_LOG HERDR_ORIGINAL_PATH HERDR_LAB_HELPER
+export TREEHOUSE_BACKEND REAL_MOVER HERDR_CALL_LOG TREEHOUSE_CALL_LOG TREEHOUSE_LOCK_DIR MOVE_CALL_LOG FOCUS_AUDIT_LOG HERDR_ORIGINAL_PATH HERDR_LAB_HELPER
 export ACTIVE_SEEDED_CONTROL POST_CREATE_ABORT_CONTROL TMP_ROOT
 
 # Log every production-adapter call, remove its already-validated trailing
@@ -210,9 +212,12 @@ fi
 exit "$status"
 SH
 
-cat > "$FAKEBIN/treehouse" <<'SH'
+cat > "$TREEHOUSE_RECORDER" <<'SH'
 #!/usr/bin/env bash
 set -u
+if [ "${1:-}" = --version ]; then
+  exec "$TREEHOUSE_BACKEND" "$@"
+fi
 {
   first=1
   for arg in "$@"; do
@@ -234,7 +239,7 @@ done
 release_treehouse_lock() { rmdir "$TREEHOUSE_LOCK_DIR" 2>/dev/null || true; }
 trap release_treehouse_lock EXIT
 trap 'exit 1' HUP INT TERM
-"$REAL_TREEHOUSE" "$@"
+"$TREEHOUSE_BACKEND" "$@"
 exit $?
 SH
 
@@ -273,7 +278,8 @@ printf 'workspace-move\t%s\t%s\t%s\n' "$before" "$after" "$2" >> "$FOCUS_AUDIT_L
 [ -z "$out" ] || printf '%s\n' "$out"
 exit "$status"
 SH
-chmod +x "$FAKEBIN/herdr" "$FAKEBIN/treehouse"
+chmod +x "$FAKEBIN/herdr" "$TREEHOUSE_RECORDER"
+ln -sf "$TREEHOUSE_RECORDER" "$REAL_TREEHOUSE-real" || exit 1
 chmod +x "$FAKEBIN/herdr-workspace-mover"
 export PATH="$FAKEBIN:$PATH"
 export FM_BACKEND_HERDR_WORKSPACE_MOVER="$FAKEBIN/herdr-workspace-mover"

@@ -34,6 +34,23 @@ test_fixture_root_gone_after_normal_exit() {
   pass "fm_test_tmproot cleans up its fixture root on normal exit"
 }
 
+test_scratch_cleanup_failure_changes_only_a_successful_exit() {
+  local harness status expected rc output
+  harness=$(fm_test_tmproot fm-test-cleanup-exit-status)
+  for status in 0 7; do
+    expected=$status
+    [ "$status" -ne 0 ] || expected=1
+    output=$(TMPDIR="$harness" env -u TREEHOUSE_ROOT -u FM_TREEHOUSE_SCRATCH_ROOT bash -uc '
+      . "$1"
+      rm "$TREEHOUSE_ROOT/.fm-treehouse-scratch"
+      exit "$2"
+    ' _ "$LIB" "$status" 2>&1) && rc=0 || rc=$?
+    assert_contains "$output" 'refusing to remove' "standalone cleanup reports the refused scratch root"
+    expect_code "$expected" "$rc" "standalone cleanup preserves or upgrades exit status $status"
+  done
+  pass "standalone scratch cleanup failures upgrade success and preserve failure"
+}
+
 test_fixture_root_gone_after_sigterm() {
   local harness dirfile child_dir pid tries
   harness=$(fm_test_tmproot fm-test-cleanup-sigterm-harness)
@@ -194,6 +211,7 @@ test_orphan_sweep_reaps_standalone_treehouse_scratch() {
 }
 
 test_fixture_root_gone_after_normal_exit
+test_scratch_cleanup_failure_changes_only_a_successful_exit
 test_fixture_root_gone_after_sigterm
 test_cleanup_registry_resists_precreation
 test_fixture_registration_failure_rolls_back_root

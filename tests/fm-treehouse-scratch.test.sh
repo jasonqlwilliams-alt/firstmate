@@ -181,15 +181,16 @@ test_reproduction_helper() {
   pass "fm-treehouse-scratch.sh run isolates a reproduction and removal refuses unmarked directories"
 }
 
-test_dollar_sign_root_is_refused() {
-  local wrapper="$ROOT/bin/fm-treehouse-scratch.sh" bad="$TMP_ROOT/build\$LABEL" alias="$TMP_ROOT/parent-link" parent root out
+test_invalid_scratch_root_is_refused() {
+  local name=$1 diagnostic=$2 wrapper="$ROOT/bin/fm-treehouse-scratch.sh"
+  local bad="$TMP_ROOT/$name" alias="$TMP_ROOT/$2-link" parent root out
   mkdir "$bad"
   ln -s "$bad" "$alias"
   for parent in "$bad" "$alias"; do
     if out=$(as_operator TMPDIR="$parent" "$wrapper" run true 2>&1); then
-      fail "scratch creation accepted a dollar sign in its parent path"
+      fail "scratch creation accepted $diagnostic in its parent path"
     fi
-    assert_contains "$out" 'scratch paths cannot contain a dollar sign' "scratch parent refusal"
+    assert_contains "$out" "scratch paths cannot contain a $diagnostic" "scratch parent refusal"
     [ -z "$(ls -A "$bad")" ] || fail "scratch creation left a directory in the refused parent"
   done
   root=$(fm_treehouse_scratch_create "$TMP_ROOT") || fail "could not create a fixture root for the reuse check"
@@ -197,14 +198,34 @@ test_dollar_sign_root_is_refused() {
   root="$bad/owned"
   fm_test_track_treehouse_scratch "$root" || fail "could not register the moved scratch root"
   if out=$(as_operator TREEHOUSE_ROOT="$root" FM_TREEHOUSE_SCRATCH_ROOT="$root" "$wrapper" run true 2>&1); then
-    fail "scratch setup reused a root with a dollar sign"
+    fail "scratch setup reused a root with a $diagnostic"
   fi
-  assert_contains "$out" 'scratch paths cannot contain a dollar sign' "scratch reuse refusal"
+  assert_contains "$out" "scratch paths cannot contain a $diagnostic" "scratch reuse refusal"
   if out=$(as_operator "$root/bin/treehouse" --version 2>&1); then
-    fail "scratch shim delegated from a root with a dollar sign"
+    fail "scratch shim delegated from a root with a $diagnostic"
   fi
-  assert_contains "$out" 'scratch paths cannot contain a dollar sign' "scratch invocation refusal"
-  pass "scratch root creation and reuse refuse paths Treehouse would expand"
+  assert_contains "$out" "scratch paths cannot contain a $diagnostic" "scratch invocation refusal"
+  pass "scratch root creation, reuse and invocation refuse a $diagnostic"
+}
+
+test_reentry_prefers_the_owned_shim() {
+  local shadow="$TMP_ROOT/shadow" wrapper="$ROOT/bin/fm-treehouse-scratch.sh" out
+  mkdir "$shadow"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 97' > "$shadow/treehouse"
+  chmod +x "$shadow/treehouse"
+  as_operator "$wrapper" run bash -ec '
+    export PATH="$1:$PATH"
+    "$2" run bash -ec "treehouse --version"
+  ' _ "$shadow" "$wrapper" || fail "scratch re-entry invoked the Treehouse shadow"
+  if out=$(as_operator "$wrapper" run bash -ec '
+    export PATH="$1:$PATH"
+    rm "$TREEHOUSE_ROOT/bin/treehouse"
+    "$2" run true
+  ' _ "$shadow" "$wrapper" 2>&1); then
+    fail "scratch re-entry accepted a missing Treehouse shim"
+  fi
+  assert_contains "$out" 'owned scratch Treehouse shim is unavailable' "missing shim refusal"
+  pass "scratch re-entry restores the owned shim at the front of PATH"
 }
 
 test_cleanup_preserves_linked_object_permissions() {
@@ -274,6 +295,11 @@ test_return_refuses_an_external_worktree() {
     fail "return used a checkout from another pool via cwd"
   fi
   assert_contains "$out" "return requires a path inside the scratch root" "cwd checkout refusal"
+  if out=$(cd "$project" && as_operator TREEHOUSE_DIR="$slot" "$wrapper" \
+    run treehouse return --all --all=false --force 2>&1); then
+    fail "disabled bulk return used an inherited checkout from another pool"
+  fi
+  assert_contains "$out" "return requires a path inside the scratch root" "disabled bulk return uses the path guard"
   if out=$(cd "$project" && as_operator "$wrapper" run treehouse return --force -- linked-slot 2>&1); then
     fail "return followed a symlink to another pool"
   fi
@@ -285,7 +311,14 @@ test_return_refuses_an_external_worktree() {
     : > "$slot/dirty"
     TREEHOUSE_DIR="$slot" treehouse return --force --if-lease-holder fixture
     test ! -e "$slot/dirty"
-  ') || fail "return did not clean the scratch checkout"
+    slot=$(treehouse get --lease --lease-holder bulk-fixture)
+    : > "$slot/dirty"
+    TREEHOUSE_DIR="$1" treehouse return --all --force
+    test ! -e "$slot/dirty"
+    jq -e --arg slot "$slot" '"'"'.worktrees | any(.[]; .path == $slot and .leased != true)'"'"' \
+      "${slot%/*/*}/treehouse-state.json" >/dev/null
+  ' _ "$slot") || fail "single or bulk return did not clean the scratch checkout"
+  assert_equals preserve "$(cat "$slot/dirty")" "bulk return changed the external checkout"
   mv "$slot" "$slot-moved" || fail "could not simulate a missing leased checkout"
   if out=$(cd "${slot%/*}" && as_operator "$wrapper" run treehouse return --force 2026 2>&1); then
     fail "return accepted a missing numeric checkout outside the scratch root"
@@ -352,7 +385,9 @@ test_runner_reports_cleanup_failure
 test_runner_change_selects_scratch_regression
 test_lib_standalone_and_inherited
 test_reproduction_helper
-test_dollar_sign_root_is_refused
+test_invalid_scratch_root_is_refused 'build$LABEL' 'dollar sign'
+test_invalid_scratch_root_is_refused 'build:label' 'PATH separator'
+test_reentry_prefers_the_owned_shim
 test_cleanup_preserves_linked_object_permissions
 test_allocation_rejects_location_flags
 test_return_refuses_an_external_worktree

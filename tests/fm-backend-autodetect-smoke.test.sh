@@ -75,8 +75,9 @@ cleanup_all() {
   return "$cleanup_status"
 }
 on_exit() {
-  local status=$?
-  cleanup_all || status=$?
+  local status=$? cleanup_status=0
+  cleanup_all || cleanup_status=$?
+  [ "$status" -ne 0 ] || status=$cleanup_status
   trap - EXIT
   exit "$status"
 }

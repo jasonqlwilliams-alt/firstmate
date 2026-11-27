@@ -241,6 +241,12 @@ fm_test_track_treehouse_scratch() {
   printf 'treehouse-scratch\t%s\n' "$1" >> "$FM_TEST_CLEANUP_REGISTRY"
 }
 
+fm_test_cleanup_exit() {
+  local status=$1
+  fm_test_cleanup || [ "$status" -ne 0 ] || status=1
+  exit "$status"
+}
+
 fm_test_track_task_tmps() {
   local fakebin=$1 real_mktemp
   real_mktemp=$(command -v mktemp) || return 1
@@ -283,11 +289,11 @@ if [ "${FM_TEST_FIXTURE_REAPER_CHILD:-0}" != 1 ]; then
   }
   FM_TEST_PROCEVENT_REGISTRY=$(mktemp "${TMPDIR:-/tmp}/.fm-test-procevent.$$.XXXXXX") || return 1
 
-  trap fm_test_cleanup EXIT
-  trap 'fm_test_cleanup; exit 130' INT
-  trap 'fm_test_cleanup; exit 143' TERM
-  trap 'fm_test_cleanup; exit 129' HUP
-  trap 'fm_test_cleanup; exit 131' QUIT
+  trap 'fm_test_cleanup_exit "$?"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+  trap 'exit 131' QUIT
 
   # A suite run on its own still gets a disposable Treehouse root, so a fixture
   # repository never creates a pool folder under the real one; under

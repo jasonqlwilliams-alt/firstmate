@@ -1025,6 +1025,7 @@ SPAWN_TASK_SET_LOCK_HELD=0
 SPAWN_TREEHOUSE_PROJECT_LOCK=
 SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
 SPAWN_SLOT_ACQUIRED=0
+SPAWN_TREEHOUSE_BIN=treehouse
 SPAWN_SLOT_CLAIMED=0
 SPAWN_SLOT_BASE=
 SPAWN_SLOT_LEASE_ID=
@@ -1090,7 +1091,7 @@ spawn_abort_return_untouched_slot() {
     | length == 1 and .[0].leased == true
       and .[0].lease_holder == $holder and .[0].lease_id == $lease
   ' "$slot_state" >/dev/null 2>&1 || return 1
-  treehouse return --force --if-lease-id "$SPAWN_SLOT_LEASE_ID" "$WT" >&2 || return 1
+  "$SPAWN_TREEHOUSE_BIN" return --force --if-lease-id "$SPAWN_SLOT_LEASE_ID" "$WT" >&2 || return 1
   jq -e --arg slot "$WT" '
     .worktrees | map(select(.path == $slot))
     | length == 1 and .[0].leased != true
@@ -3930,17 +3931,18 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   SPAWN_SLOT_ACQUIRE_FILE=$(umask 077; mktemp "$STATE/.$ID.treehouse-acquire.XXXXXX") || exit 1
   # A process lease ends with the shell, while a task record can remain held.
   # Acquire durably and enter that exact path in the existing pane shell.
-  treehouse_command=treehouse
-  if [ -n "${FM_TREEHOUSE_SCRATCH_ROOT:-}" ] &&
-    [ "${TREEHOUSE_ROOT:-}" = "$FM_TREEHOUSE_SCRATCH_ROOT" ] &&
-    [ -x "$TREEHOUSE_ROOT/bin/treehouse" ]; then
+  if [ -n "${FM_TREEHOUSE_SCRATCH_ROOT:-}" ]; then
     # shellcheck source=bin/fm-treehouse-scratch.sh
     . "$SCRIPT_DIR/fm-treehouse-scratch.sh" || exit 1
-    scratch_root=$(fm_treehouse_scratch_resolve_root "$TREEHOUSE_ROOT") || exit 1
-    treehouse_bin=$(type -P treehouse) || exit 1
-    printf -v treehouse_command 'TREEHOUSE_ROOT=%q TREEHOUSE_WORKTREE_PATH=%q TREEHOUSE_NO_UPDATE_CHECK=1 %q' \
-      "$scratch_root" "${TREEHOUSE_WORKTREE_PATH:-}" "$treehouse_bin"
+    scratch_root=$(fm_treehouse_scratch_resolve_root "$FM_TREEHOUSE_SCRATCH_ROOT") || exit 1
+    SPAWN_TREEHOUSE_BIN="$scratch_root/bin/treehouse"
+    if ! fm_treehouse_scratch_owned "$scratch_root" || [ ! -x "$SPAWN_TREEHOUSE_BIN" ] ||
+      [ ! "$SPAWN_TREEHOUSE_BIN" -ef "$SCRIPT_DIR/fm-treehouse-scratch.sh" ]; then
+      echo "error: owned scratch Treehouse shim is unavailable at $SPAWN_TREEHOUSE_BIN" >&2
+      exit 1
+    fi
   fi
+  printf -v treehouse_command '%q' "$SPAWN_TREEHOUSE_BIN"
   # shellcheck disable=SC2016 # Expansion belongs to the destination pane shell.
   spawn_send_text_line "$WT_TARGET" "fm_acquired_slot=\$($treehouse_command get --lease --lease-holder $(printf '%q' "$ID")) && fm_acquired_base=\$(git -C \"\$fm_acquired_slot\" rev-parse --verify HEAD) && printf '%s\n%s\n' \"\$fm_acquired_slot\" \"\$fm_acquired_base\" > $(printf '%q' "$SPAWN_SLOT_ACQUIRE_FILE") && cd -- \"\$fm_acquired_slot\""
 

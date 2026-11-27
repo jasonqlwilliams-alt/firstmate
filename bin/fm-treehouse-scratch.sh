@@ -53,15 +53,19 @@ fm_treehouse_scratch_refuse() {
 }
 
 fm_treehouse_scratch_resolve_root() {
-  local path=$1 resolved
-  case "$path" in *'$'*) fm_treehouse_scratch_refuse "scratch paths cannot contain a dollar sign: $path"; return 1 ;; esac
+  local path=$1 resolved candidate
   resolved=$(CDPATH='' cd -P -- "$path" && pwd -P) || return 1
-  case "$resolved" in *'$'*) fm_treehouse_scratch_refuse "scratch paths cannot contain a dollar sign: $resolved"; return 1 ;; esac
+  for candidate in "$path" "$resolved"; do
+    case "$candidate" in
+      *'$'*) fm_treehouse_scratch_refuse "scratch paths cannot contain a dollar sign: $candidate"; return 1 ;;
+      *:*) fm_treehouse_scratch_refuse "scratch paths cannot contain a PATH separator (:): $candidate"; return 1 ;;
+    esac
+  done
   printf '%s\n' "$resolved"
 }
 
 fm_treehouse_scratch_check_args() {
-  local root=$1 command= target= physical options=1 target_set=0 all=0 help=0
+  local root=$1 command= target= physical options=1 target_set=0 bulk= help=0
   shift
   while [ "$#" -gt 0 ]; do
     if [ "$options" = 1 ] && [[ "$1" = -* ]]; then
@@ -71,8 +75,8 @@ fm_treehouse_scratch_check_args() {
           fm_treehouse_scratch_refuse "scratch runs set ${1%%=*} automatically"
           return 1
           ;;
-        --all|--all=1|--all=t|--all=T|--all=true|--all=True|--all=TRUE) all=1 ;;
-        --all=*) all=0 ;;
+        --all) bulk=true ;;
+        --all=*) bulk=${1#*=} ;;
         --help|-h|--help=true|-h=true) help=1 ;;
         --help=*|-h=*) help=0 ;;
         --if-lease-id|--if-lease-holder)
@@ -94,8 +98,8 @@ fm_treehouse_scratch_check_args() {
     destroy) fm_treehouse_scratch_refuse 'destroy is unavailable in scratch runs'; return 1 ;;
     return)
       [ "$help" = 0 ] || return 0
-      [ "$all" = 0 ] || { fm_treehouse_scratch_refuse 'return requires a path inside the scratch root'; return 1; }
       if [ "$target_set" = 0 ]; then
+        case "$bulk" in 1|t|T|true|True|TRUE) return 0 ;; esac
         target=${TREEHOUSE_DIR:-.}
       fi
       ;;
@@ -170,10 +174,13 @@ fm_treehouse_scratch_enter() {  # [<parent>]
   fi
   FM_TREEHOUSE_SCRATCH_ROOT=$TREEHOUSE_ROOT
   if [ -x "$TREEHOUSE_ROOT/bin/treehouse" ]; then
-    case ":$PATH:" in
-      *":$TREEHOUSE_ROOT/bin:"*) ;;
+    case "$PATH" in
+      "$TREEHOUSE_ROOT/bin"|"$TREEHOUSE_ROOT/bin:"*) ;;
       *) PATH="$TREEHOUSE_ROOT/bin:$PATH" ;;
     esac
+  elif command -v treehouse >/dev/null 2>&1; then
+    fm_treehouse_scratch_refuse "owned scratch Treehouse shim is unavailable at $TREEHOUSE_ROOT/bin/treehouse"
+    return 1
   fi
   export PATH TREEHOUSE_ROOT FM_TREEHOUSE_SCRATCH_ROOT TREEHOUSE_WORKTREE_PATH TREEHOUSE_NO_UPDATE_CHECK
 }
