@@ -1,0 +1,22 @@
+$ FM_AGY_COMPOSER_LIVE=1 FM_AGY_COMPOSER_LIVE_OAUTH=1 bash tests/fm-agy-composer-live-e2e.test.sh
+Live tmux pane presented: sign-in chooser
+Launcher proved loopback-only network with failed outbound connect. The copied synthetic token was mode 0600.
+Snapshot and live tmux cursor and size agreed at 30 13 80x30.
+Firstmate classified the real screen as unknown.
+$ bin/fm-send.sh agy-probe 'Synthetic offline steering message'
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+fm-send: doorbell not typed because the screen in agylive:agy blocked the doorbell; the steer is durably recorded at <disposable-firstmate-home>/state/agy-probe.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+The synthetic message persisted in the task's steering inbox.
+The pane stayed at the same screen after the steer.
+# agy 1.5.18 launched with no network egress and a private home
+not ok - agy (1.5.18): idle composer never classified empty (last verdict: unknown)
+The guard exited 1 at idle proof, produced no wrapped capture, and removed its temporary profile and tmux server.
+
+Historical capture replay
+The checked-in styled frame at 2 27 80x30 classified pending.

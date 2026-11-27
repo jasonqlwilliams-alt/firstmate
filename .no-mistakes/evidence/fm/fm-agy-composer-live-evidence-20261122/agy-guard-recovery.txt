@@ -1,0 +1,9 @@
+$ FM_AGY_COMPOSER_LIVE=1 FM_AGY_COMPOSER_LIVE_OAUTH=1 bash tests/fm-agy-composer-live-e2e.test.sh
+SIGKILL interrupted a guard after actual agy startup and the synthetic token copy.
+The shared fixture sweep left the owner marker and live private tmux session intact.
+Temporarily made only the disposable socket unreachable to tmux clients.
+not ok - agy (version-unknown): could not remove an abandoned agy guard fixture
+The failed reap removed the copied token and retained the marker for retry.
+Restored socket access and verified the first private server still owned its session.
+An enabled rerun stopped the abandoned server and removed its profile before launching a fresh one.
+SIGTERM exited 143 and left no running private server, profile, or copied token.
