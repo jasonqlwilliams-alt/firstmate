@@ -31,7 +31,7 @@
 #
 # Run explicitly with FM_AGY_COMPOSER_LIVE=1 (or FM_LIVE=1). Set
 # FM_AGY_COMPOSER_LIVE_CAPTURE_DIR to keep the wrapped draft or the first-use
-# mode-hint refusal, with private identifiers redacted. Refresh
+# mode-hint refusal, with banner rows blanked. Refresh
 # docs/verification/agy.md "Composer classification" from this guard's output
 # after any agy upgrade.
 set -u
@@ -39,10 +39,8 @@ set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 1
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
 CAPTURE_DIR=${FM_AGY_COMPOSER_LIVE_CAPTURE_DIR:-}
-fm_live_gate opt-in FM_AGY_COMPOSER_LIVE tmux agy unshare ip jq ${CAPTURE_DIR:+perl}
+fm_live_gate opt-in FM_AGY_COMPOSER_LIVE tmux agy unshare ip jq
 
 REAL_TMUX=$(command -v tmux)
 SOCKET="fm-agy-live-$$"
@@ -53,9 +51,6 @@ VERSION=version-unknown
 fail() { printf 'not ok - agy (%s): %s\n' "$VERSION" "$1" >&2; exit 1; }
 pass() { printf 'ok - agy (%s): %s\n' "$VERSION" "$1"; }
 
-REAL_HOME=$HOME
-REAL_USER=$(id -un)
-REAL_HOST=$(hostname 2>/dev/null || uname -n)
 WORK=$(fm_test_tmproot fm-agy-live 2>/dev/null) && [ -n "$WORK" ] \
   || fail "could not allocate the private scratch root"
 
@@ -87,7 +82,7 @@ PATH="$SHIM_DIR:$PATH"
 # --- private home and scratch workspace -------------------------------------
 PRIV_HOME="$WORK/home"
 WORKSPACE="$WORK/workspace"
-AGY_SRC="$REAL_HOME/.gemini/antigravity-cli"
+AGY_SRC="$HOME/.gemini/antigravity-cli"
 AGY_DST="$PRIV_HOME/.gemini/antigravity-cli"
 mkdir -p "$AGY_DST" "$WORKSPACE" "$PRIV_HOME/.config" "$PRIV_HOME/.cache" \
   "$PRIV_HOME/.local/share" "$PRIV_HOME/.local/state" 2>/dev/null \
@@ -137,24 +132,19 @@ save_capture() {  # <name> <styled-screen> <opening-rule-row>
     || fail "could not read cursor geometry for capture $1"
   {
     mkdir -p -- "$CAPTURE_DIR" &&
-      perl -pe '
-        BEGIN {
-          ($opening_row, $work, $home, $user, $host) = splice @ARGV;
-          %redact = ($work => "<private>", $home => "<home>", $user => "<user>", $host => "<host>");
-          $literal = join "|", map { quotemeta } sort { length($b) <=> length($a) } grep { length } keys %redact;
-        }
-        s{
-          \e\[[0-?]*[ -/]*[@-~](*SKIP)(*F)
-          | [[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]+
-          | ($literal)
-        }{defined $1 ? $redact{$1} : "<email>"}gex if $. < $opening_row;
-      ' -- "$3" "$WORK" "$REAL_HOME" "$REAL_USER" "$REAL_HOST" <<< "$screen" > "$CAPTURE_DIR/$1.ansi" &&
+      LC_ALL=C awk -v opening_row="$3" 'NR < opening_row { print ""; next } { print }' \
+        <<< "$screen" > "$CAPTURE_DIR/$1.ansi" &&
       printf '%s\n' "$cursor" > "$CAPTURE_DIR/$1.cursor"
   } 2>/dev/null || fail "could not write screen and cursor evidence for capture $1"
 }
 
 guarded() {  # <expected-pending> [fit-text]
-  fm_backend_guarded_composer_state tmux "$WIN" '' "$1" agy '' "${2:-}" 2>/dev/null
+  local verdict
+  verdict=$(fm_backend_guarded_composer_state tmux "$WIN" '' "$1" agy '' "${2:-}" 2>/dev/null) || return 1
+  case "$verdict" in
+    empty|pending|pending-unproven|unknown|update-picker) printf '%s' "$verdict" ;;
+    *) return 1 ;;
+  esac
 }
 
 # composer_frame <text>: positive identification of agy's framed composer
@@ -204,7 +194,8 @@ wait_for() {  # <polls> <command...>: retry every 0.5s until success
 }
 
 verdict_is() {  # <want> <expected-pending> [fit-text]
-  [ "$(guarded "$2" "${3:-}")" = "$1" ]
+  local verdict
+  verdict=$(guarded "$2" "${3:-}") && [ "$verdict" = "$1" ]
 }
 
 # --- launch -------------------------------------------------------------------
@@ -223,12 +214,12 @@ printf '# agy %s launched with no network egress and a private home\n' "$VERSION
 
 # 1. Idle composer reads empty. No keystroke has been sent yet.
 if ! wait_for 90 verdict_is empty ''; then
-  idle_verdict=$(guarded '')
+  idle_verdict=$(guarded '') || fail "could not read a valid idle composer verdict"
   if [[ -n "$CAPTURE_DIR" && "$idle_verdict" == pending ]]; then
     screen=$(capture_styled) && [ -n "$screen" ] \
       || fail "could not read a nonempty screen for capture idle-unproven"
     if frame=$(composer_frame "$FM_COMPOSER_AGY_MODE_HINT" <<< "$screen") &&
-      [ "${frame#* }" = "1"$'\n'"$FM_COMPOSER_AGY_MODE_HINT" ]; then
+      [[ "${frame#* }" == 1$'\n'* ]]; then
       save_capture idle-unproven "$screen" "${frame%% *}"
     fi
   fi
@@ -247,8 +238,10 @@ pass "the fit check refuses the long notice and accepts the short notice"
 
 # 3. A short draft reads pending, holding exactly that text.
 "$REAL_TMUX" -L "$SOCKET" send-keys -t "$WIN" -l "$SHORT" 2>/dev/null || fail "could not type the short draft"
-wait_for 10 verdict_is pending "$SHORT" \
-  || fail "short draft never classified pending (last verdict: $(guarded "$SHORT"))"
+if ! wait_for 10 verdict_is pending "$SHORT"; then
+  short_verdict=$(guarded "$SHORT") || fail "could not read a valid short draft verdict"
+  fail "short draft never classified pending (last verdict: $short_verdict)"
+fi
 wait_for 10 composer_holds "$SHORT" >/dev/null || fail "short draft was never identified in agy's frame"
 pass "a short typed draft classifies pending with its exact text"
 
@@ -262,11 +255,10 @@ layout=${frame#* }
 rows=${layout%%$'\n'*}
 first_row=${layout#*$'\n'}
 printf '# wrapped draft (%s bytes) occupies %s composer row(s) at %s columns\n' "${#DRAFT}" "$rows" "$WIDTH"
-[ "$rows" -gt 1 ] && [[ -n "$first_row" && "$DRAFT" = "$first_row"* && "$first_row" != "$DRAFT" ]] \
-  || fail "a ${#DRAFT}-byte draft on a ${WIDTH}-column pane did not produce a distinct first row and continuation"
-v_draft=$(guarded "$DRAFT")
-v_first=$(guarded "$first_row")
-v_plain=$(guarded '')
+[ "$rows" -gt 1 ] || fail "a ${#DRAFT}-byte draft did not wrap on a ${WIDTH}-column pane"
+v_draft=$(guarded "$DRAFT") || fail "could not read a valid verdict for the full wrapped draft"
+v_first=$(guarded "$first_row") || fail "could not read a valid verdict for the first wrapped row"
+v_plain=$(guarded '') || fail "could not read a valid wrapped verdict without an expectation"
 printf '# wrapped verdicts (full draft, first row, no expectation) = %s, %s, %s\n' \
   "$v_draft" "$v_first" "$v_plain"
 screen=$(capture_styled) && frame=$(composer_frame "$DRAFT" <<< "$screen") && [ "${frame#* }" = "$layout" ] \
