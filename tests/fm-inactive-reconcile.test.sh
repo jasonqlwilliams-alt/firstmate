@@ -146,15 +146,9 @@ prime_seen() { # <state> <status>
 # A child whose validation run ended with the given no-mistakes outcome and
 # whose current state is read by the REAL fm-crew-state.sh, with a fake
 # no-mistakes reporting that run for the child's own worktree branch and head.
-NO_CI_PR=https://github.com/owner/repo/pull/7
-write_validation_ledger() { # <home> <id> <run-outcome> <run-pr>
-  local home=$1 wt="$1/projects/$2" outcome=$3 pr=$4 branch head
-  branch=$(git -C "$wt" symbolic-ref --short HEAD)
-  head=$(git -C "$wt" rev-parse --short HEAD)
-  printf '%s %s %s 2026-11-26 12:00 %s\n' "$outcome" "$branch" "$head" "$pr" > "$home/runs.txt"
-}
+CANCEL_PR=https://github.com/owner/repo/pull/7
 
-write_validated_child() { # <home> <id> <status-line> <run-outcome> [run-pr]
+write_validated_child() { # <home> <id> <status-line> <run-outcome>
   local home=$1 id=$2 status=$3 outcome=$4 wt gen head branch
   wt="$home/projects/$id"
   mkdir -p "$wt"
@@ -173,17 +167,14 @@ run:
   id: "run-$id"
   branch: $branch
   head: "$head"
-  pr: "${5:-$NO_CI_PR}"
   status: $outcome
   outcome: $outcome
 RUN
-  write_validation_ledger "$home" "$id" "$outcome" "${5:-$NO_CI_PR}"
-  printf '%s\n' 'no CI checks reported yet, waiting for checks to register...' > "$home/ci.log"
+  printf '%s %s %.8s 2026-11-26 12:00\n' "$outcome" "$branch" "$head" > "$home/runs.txt"
   cat > "$WORLD/fakebin/no-mistakes" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
   'axi status') cat "$FM_HOME/run.txt" ;;
-  'axi logs --step ci --run run-child') cat "$FM_HOME/ci.log" ;;
   'runs --limit '*) cat "$FM_HOME/runs.txt" ;;
 esac
 SH
@@ -200,7 +191,7 @@ register_pr() { # <home> <id>
   printf '#!/usr/bin/env bash\nexit 1\n' > "$regbin/gh"
   chmod +x "$regbin/gh"
   PATH="$regbin:$PATH" FM_ROOT_OVERRIDE="$WORLD/root" FM_HOME="$home" \
-    FM_STATE_OVERRIDE="$home/state" "$ROOT/bin/fm-pr-check.sh" "$id" "$NO_CI_PR" \
+    FM_STATE_OVERRIDE="$home/state" "$ROOT/bin/fm-pr-check.sh" "$id" "$CANCEL_PR" \
     > "$WORLD/register.log" 2>&1 || fail "could not register the PR: $(cat "$WORLD/register.log")"
 }
 
@@ -898,116 +889,90 @@ test_reconciliation_never_calls_forge() {
   pass "reconciliation makes zero forge or PR API calls"
 }
 
-NO_CI_PAUSE='paused: PR 7 open; awaiting the merge word; cancelled because CI never registers on this repository'
-
-# A validation run cancelled on purpose because the repository registers no CI,
-# with its PR registered and open and the child's pause declared, is a ready PR
-# awaiting a merge decision, not a failure: no terminal outcome record, no
-# supervisor wake, and nothing on a secondmate's parent channel.
-test_no_ci_cancellation_with_ready_open_pr_is_not_failed() {
-  local line
-  make_world no-ci-main
-  write_validated_child "$MAIN" child "$NO_CI_PAUSE" cancelled
+test_cancelled_run_with_open_pr_reports_awaiting_merge() {
+  local route parent_status offset line expected='run cancelled; PR open and waiting for a merge decision'
+  make_world cancelled-main
+  write_validated_child "$MAIN" child "paused: PR $CANCEL_PR open; awaiting merge" cancelled
   register_pr "$MAIN" child
   line=$(real_crew_state "$MAIN")
   [ "$line" = "state: failed · source: run-step · run cancelled" ] \
     || fail "fixture must read as a cancelled run, got: $line"
   run_real_reconcile "$MAIN"
-  [ "$(outcome_count "$MAIN" pending)" = 0 ] \
-    || fail "a deliberate no-CI cancellation with a ready open PR was recorded as failed"
-  ! grep -q 'inactive-outcome:' "$MAIN/state/.wake-queue" 2>/dev/null \
-    || fail "a deliberate no-CI cancellation with a ready open PR woke the supervisor as failed"
+  [ "$(outcome_count "$MAIN" pending)" = 1 ] && [ "$(wake_count "$MAIN" 'inactive-outcome:')" = 1 ] \
+    || fail "the cancelled run did not leave exactly one supervisor wake and receipt"
+  grep -Fq "child=child $expected pr=$CANCEL_PR" "$MAIN/state/.wake-queue" \
+    || fail "the supervisor wake did not report the cancelled run awaiting merge"
 
-  make_world no-ci-mate; bind_secondmate local
-  write_validated_child "$MATE" child "$NO_CI_PAUSE" cancelled
-  cat > "$MATE/run.txt" <<'RUN'
+  for route in local remote; do
+    make_world "cancelled-mate-$route"; bind_secondmate "$route"
+    write_validated_child "$MATE" child 'blocked: waiting for CI runner repair' cancelled
+    cat > "$MATE/run.txt" <<'RUN'
 run:
   id: run-sibling
   branch: fm/sibling
   head: aaaaaaa
   status: running
 RUN
-  register_pr "$MATE" child
-  line=$(real_crew_state "$MATE")
-  [ "$line" = "state: failed · source: run-step · run cancelled" ] \
-    || fail "the ledger must select the cancelled run while the sibling is active: $line"
-  run_real_reconcile "$MATE"
-  ! grep -q '^failed' "$MAIN/state/mate.status" 2>/dev/null \
-    || fail "a secondmate reported a no-CI cancellation as failed: $(cat "$MAIN/state/mate.status")"
-  [ "$(outcome_count "$MATE" reported)" = 0 ] && [ "$(outcome_count "$MATE" pending)" = 0 ] \
-    || fail "a secondmate recorded a no-CI cancellation as a terminal outcome"
-  pass "a deliberate no-CI cancellation with a ready, open PR is not reported failed"
+    register_pr "$MATE" child
+    if [ "$route" = local ]; then
+      parent_status="$MAIN/state/mate.status"
+    else
+      parent_status="$MATE/state/parent-replies.status"
+    fi
+    offset=$(wc -c < "$parent_status" | tr -d ' ')
+    line=$(real_crew_state "$MATE")
+    [ "$line" = "state: failed · source: run-step · run cancelled · status-log superseded (run failed)" ] \
+      || fail "the ledger must select the cancelled run while the sibling is active: $line"
+    run_real_reconcile "$MATE"
+    line=$(bash -c '. "$1"; status_span_first_actionable "$2" "$3"' _ \
+      "$ROOT/bin/fm-classify-lib.sh" "$parent_status" "$offset") \
+      || fail "the $route parent route did not receive an actionable cancellation report"
+    case "$line" in
+      'done [key=inactive-outcome-mate-child-cancelled]: inactive terminal child=child '*" $expected pr=$CANCEL_PR") ;;
+      *) fail "the $route parent report did not say the cancelled run awaits merge: $line" ;;
+    esac
+    (umask 077; printf '%s\n' "$CANCEL_PR" > "$MATE/state/child.pr-poll-closed")
+    run_real_reconcile "$MATE"
+    [ "$(outcome_count "$MATE" reported)" = 1 ] \
+      && [ "$(grep -c 'inactive-outcome-mate-child-' "$parent_status")" = 1 ] \
+      || fail "the $route parent received another report for the same cancellation after closure"
+  done
+  pass "open-PR cancellations produce a supervisor wake and actionable parent reports"
 }
 
-# Each missing piece of that evidence leaves a genuine failure reading reported.
-test_cancellation_without_full_evidence_still_reports_failed() {
-  make_world cancel-no-pause
-  write_validated_child "$MAIN" child 'working: validation under way' cancelled
-  register_pr "$MAIN" child
-  run_real_reconcile "$MAIN"
-  [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a cancellation without a declared pause was not reported failed"
-
-  make_world cancel-unrelated-pause
-  write_validated_child "$MAIN" child 'paused: waiting for the CI runner repair' cancelled
-  register_pr "$MAIN" child
-  run_real_reconcile "$MAIN"
-  [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a cancellation during an unrelated pause was not reported failed"
-
-  make_world cancel-pause-other-pr
-  write_validated_child "$MAIN" child "${NO_CI_PAUSE/PR 7/PR 8}" cancelled
-  register_pr "$MAIN" child
-  run_real_reconcile "$MAIN"
-  [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a pause naming a different PR suppressed a failure"
-
-  make_world cancel-other-pr
-  write_validated_child "$MAIN" child "$NO_CI_PAUSE" cancelled https://github.com/owner/repo/pull/8
-  register_pr "$MAIN" child
-  run_real_reconcile "$MAIN"
-  [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a cancellation for a different PR was not reported failed"
-
+test_other_terminal_failures_keep_failed_label() {
   make_world cancel-no-registration
-  write_validated_child "$MAIN" child "$NO_CI_PAUSE" cancelled
+  write_validated_child "$MAIN" child "paused: awaiting merge of $CANCEL_PR" cancelled
   fm_write_meta "$MAIN/state/child.meta" \
     "window=firstmate:fm-child" "worktree=$MAIN/projects/child" "project=alpha" \
-    'harness=claude' 'kind=ship' 'mode=no-mistakes' 'yolo=off' "pr=$NO_CI_PR"
+    'harness=claude' 'kind=ship' 'mode=no-mistakes' 'yolo=off' "pr=$CANCEL_PR"
   run_real_reconcile "$MAIN"
   [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a cancellation with no PR registration was not reported failed"
 
   make_world genuine-failure
-  write_validated_child "$MAIN" child "$NO_CI_PAUSE" failed
+  write_validated_child "$MAIN" child "paused: awaiting merge of $CANCEL_PR" failed
   register_pr "$MAIN" child
   [ "$(real_crew_state "$MAIN")" = "state: failed · source: run-step · run failed" ] \
     || fail "fixture must read as a failed run, got: $(real_crew_state "$MAIN")"
   run_real_reconcile "$MAIN"
   [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a genuinely failed run was not reported failed"
 
-  make_world same-branch-stale-cancelled-run
-  write_validated_child "$MAIN" child "$NO_CI_PAUSE" cancelled
-  git -C "$MAIN/projects/child" -c user.name=fixture -c user.email=fixture@example.invalid \
-    commit -q --allow-empty -m 'advance past the cancelled run'
-  write_validation_ledger "$MAIN" child failed "$NO_CI_PR"
-  register_pr "$MAIN" child
-  [ "$(real_crew_state "$MAIN")" = "state: failed · source: run-step · run failed" ] \
-    || fail "the current ledger row lent attribution to a stale same-branch cancellation"
-  run_real_reconcile "$MAIN"
-  [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a stale cancellation suppressed the current run's failure"
-
   make_world cancel-pr-closed
-  write_validated_child "$MAIN" child "$NO_CI_PAUSE" cancelled
+  write_validated_child "$MAIN" child "paused: awaiting merge of $CANCEL_PR" cancelled
   register_pr "$MAIN" child
-  (umask 077; printf '%s\n' "$NO_CI_PR" > "$MAIN/state/child.pr-poll-closed")
+  (umask 077; printf '%s\n' "$CANCEL_PR" > "$MAIN/state/child.pr-poll-closed")
   run_real_reconcile "$MAIN"
   [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a cancellation whose PR closed was not reported failed"
 
   make_world cancel-pr-merged
-  write_validated_child "$MAIN" child "$NO_CI_PAUSE" cancelled
+  write_validated_child "$MAIN" child "paused: awaiting merge of $CANCEL_PR" cancelled
   register_pr "$MAIN" child
   ( . "$ROOT/bin/fm-pr-lib.sh"
     fm_pr_poll_merge_mark_notified "$MAIN/state" child github github.com owner/repo 7 ) \
     || fail "could not record the PR merge in the fixture"
   run_real_reconcile "$MAIN"
   [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a cancellation whose PR merged was treated as awaiting merge"
-  pass "a cancellation missing any no-CI ready-PR evidence still reports failed"
+  pass "unregistered, closed, merged, and genuinely failed outcomes keep the failed label"
 }
 
 test_main_direct_terminal_presentation_receipt
@@ -1039,7 +1004,7 @@ test_full_scan_budget_includes_wake_lock_wait
 test_notice_recovery_does_not_duplicate_wake
 test_missing_parent_binding_names_itself
 test_reconciliation_never_calls_forge
-test_no_ci_cancellation_with_ready_open_pr_is_not_failed
-test_cancellation_without_full_evidence_still_reports_failed
+test_cancelled_run_with_open_pr_reports_awaiting_merge
+test_other_terminal_failures_keep_failed_label
 
 echo "all inactive reconciliation tests passed"
