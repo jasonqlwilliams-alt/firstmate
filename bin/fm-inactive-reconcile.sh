@@ -384,7 +384,7 @@ cancellation_already_published() { # <task> <secondmate-id-or-empty> <fingerprin
   fi
   destination=$(fm_parent_channel_destination "$FM_HOME" "$STATE") || return 1
   [ -f "$destination" ] && [ ! -L "$destination" ] || return 1
-  line=$(parent_report_line "$task" done "inactive-outcome-$self-$task-cancelled" "$fingerprint" "$pr" "$cancelled_pr_detail")
+  line=$(parent_report_line "$task" 'done' "inactive-outcome-$self-$task-cancelled" "$fingerprint" "$pr" "$cancelled_pr_detail")
   grep -Fqx -- "$line" "$destination" || return 1
   mark_reported "$pending" || return 2
 }
@@ -548,7 +548,7 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
     case "$(status_line_verb "$last")" in done|failed) return 0 ;; esac
   fi
   case "$state_line" in
-    'state: done '*) outcome=done ;;
+    'state: done '*) outcome='done' ;;
     'state: failed '*) outcome=failed ;;
     *) return 0 ;;
   esac
@@ -597,7 +597,7 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
   parent_verb=$label
   if [ "$label" = cancelled ]; then
     detail=$cancelled_pr_detail
-    parent_verb=done
+    parent_verb='done'
   fi
   if [ -n "$self" ]; then
     line=$(parent_report_line "$id" "$parent_verb" "$outcome_key" "$fingerprint" "$pr" "$detail")
