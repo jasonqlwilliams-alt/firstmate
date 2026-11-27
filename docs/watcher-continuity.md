@@ -88,12 +88,17 @@ On tmux or Herdr, use the `mark` action in [`fm-park-retained.sh`](../bin/fm-par
 Marking requires a recovery-grade `missing` verdict for the recorded endpoint.
 On Zellij, Orca, and cmux, the command refuses to set the mark and explains that the backend cannot confirm endpoint loss.
 Both park actions leave the copy and its work intact.
+With a current mark, the session-start fleet digest shows `endpoint: parked, copy retained` without probing the recorded endpoint, even when another worker now reuses that target.
+Without a current mark, the regular endpoint check reports `dead` when it detects that the recorded endpoint is gone.
+Deferred home-summary publication and inactive reconciliation also skip endpoint probes for tasks with a current mark.
 Secondmates follow the reporting rule above.
 A loss wake queued before marking remains pending until [normal wake acknowledgement](#per-actor-acknowledgement).
 When resuming, use `clear` to remove the mark, including after the worker is running again.
 Clearing restores reporting eligibility and preserves the existing loss deduplication, so an already reported loss stays deduplicated for that incarnation.
 A park mark applies only to the worker incarnation that was marked.
 A relaunched worker or another task that reuses the same target remains eligible for loss reporting.
+
+The [session-start regressions](../tests/fm-session-start.test.sh) cover current, stale, and absent marks, including exact window-name reuse on tmux and a recycled Herdr pane during deferred startup.
 
 ## Foreground checkpoint boundary
 

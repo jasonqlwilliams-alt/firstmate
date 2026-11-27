@@ -1360,6 +1360,241 @@ EOF
   pass "tmux endpoint liveness is reported per task: alive for a live window, dead for a gone one"
 }
 
+test_endpoint_liveness_parked_retained() {
+  local rec root home fakebin out id base_without_tmux
+  rec=$(new_world liveness-parked)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_claude "$fakebin"
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'list-windows -t =fm-sess -F #{window_name}') printf 'fm-mate2\n' ;;
+  'display-message -p -t fm-sess:fm-mate #{pane_id}'|'display-message -p -t fm-sess:fm-mate2 #{pane_id}')
+    printf '%%1\n'
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$fakebin/tmux"
+
+  printf 'window=fm-sess:fm-mate\nkind=ship\nspawn_gen=spawn-parked\n' > "$home/state/mate.meta"
+  printf 'window=fm-sess:fm-mate2\nkind=ship\n' > "$home/state/mate2.meta"
+  printf 'window=fm-sess:stale-window\nkind=ship\nspawn_gen=spawn-stale\n' > "$home/state/task-stale.meta"
+  printf 'window=fm-sess:dead-window\nkind=ship\nspawn_gen=spawn-dead\n' > "$home/state/task-dead.meta"
+  for id in mate task-stale; do
+    PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+      "$ROOT/bin/fm-park-retained.sh" "$id" mark >/dev/null \
+      || fail "could not park $id for the digest fixture"
+  done
+  # A relaunch moves task-stale to a new incarnation, so its old mark no longer binds.
+  printf 'window=fm-sess:stale-window\nkind=ship\nspawn_gen=spawn-stale-2\n' > "$home/state/task-stale.meta"
+
+  out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+  assert_contains "$out" "endpoint: parked, copy retained (backend=tmux window=fm-sess:fm-mate)" \
+    "the live neighboring window masked the parked tmux endpoint"
+  assert_contains "$out" "endpoint: alive (backend=tmux window=fm-sess:fm-mate2)" \
+    "the unmarked neighboring tmux window was not reported alive"
+  assert_contains "$out" "endpoint: dead (backend=tmux window=fm-sess:stale-window)" \
+    "a mark bound to an older incarnation hid a gone endpoint"
+  assert_contains "$out" "endpoint: dead (backend=tmux window=fm-sess:dead-window)" \
+    "unmarked gone endpoint not reported dead"
+
+  pass "a parked tmux endpoint takes precedence over its neighbor; stale and unmarked gone endpoints stay dead"
+
+  # Another home's worker can reuse the exact window name in a shared session.
+  # The current mark stays authoritative and the digest never reads that
+  # worker's process details.
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'list-windows -t =fm-sess -F #{window_name}') printf 'fm-mate\nfm-mate2\n' ;;
+  'display-message -p -t fm-sess:fm-mate #{pane_id}'|'display-message -p -t fm-sess:fm-mate2 #{pane_id}')
+    printf '%%1\n'
+    ;;
+  *' -t fm-sess:fm-mate '*)
+    printf '%s\n' "$*" >> "$FM_TEST_TMUX_PROBE_LOG"
+    case "$*" in
+      *'#{pane_current_command}'*) printf 'claude\n' ;;
+      *'#{pane_tty}'*) printf '/dev/pts/9\n' ;;
+      *'#{pane_pid}'*) printf '4242\n' ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$fakebin/tmux"
+  : > "$home/tmux-probe.log"
+  out=$(FM_TEST_TMUX_PROBE_LOG="$home/tmux-probe.log" run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+  assert_contains "$out" "endpoint: parked, copy retained (backend=tmux window=fm-sess:fm-mate)" \
+    "a live window reusing the exact parked name hid the current park mark"
+  [ ! -s "$home/tmux-probe.log" ] \
+    || fail "the digest probed the reused window's process details: $(cat "$home/tmux-probe.log")"
+
+  pass "a current park mark stays authoritative when a live window reuses its exact name"
+
+  rm -f "$fakebin/tmux"
+  base_without_tmux=$(fm_test_base_path_sans "$BASE_PATH" tmux) || fail "could not build a PATH without tmux"
+  out=$(run_session_start "$home" "$root" "$fakebin:$base_without_tmux")
+  assert_contains "$out" "endpoint: parked, copy retained (backend=tmux window=fm-sess:fm-mate)" \
+    "the current park mark disappeared when tmux was unavailable"
+  assert_contains "$out" "endpoint: dead (backend=tmux window=fm-sess:stale-window)" \
+    "the unavailable tmux executable made a stale park mark effective"
+  assert_contains "$out" "endpoint: dead (backend=tmux window=fm-sess:dead-window)" \
+    "the unmarked endpoint lost its dead verdict when tmux was unavailable"
+
+  pass "the current park mark remains visible when tmux is unavailable"
+}
+
+test_endpoint_liveness_parked_herdr_stopped_server() {
+  local rec root home fakebin out
+  rec=$(new_world liveness-parked-herdr)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_claude "$fakebin"
+  cat > "$fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'status --json --session stopped')
+    [ "${FM_TEST_HERDR_STATUS_UNREADABLE:-0}" = 0 ] || exit 1
+    printf '%s\n' '{"server":{"running":false}}'
+    ;;
+  'pane get '*\ --session\ stopped)
+    printf '%s\n' '{"error":{"code":"server_not_running"}}' >&2
+    exit 1
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$fakebin/herdr"
+
+  printf 'window=stopped:p-parked\nkind=ship\nbackend=herdr\nherdr_terminal_id=term-parked\nspawn_gen=spawn-parked\n' > "$home/state/task-parked.meta"
+  printf 'window=stopped:p-unmarked\nkind=ship\nbackend=herdr\nherdr_terminal_id=term-unmarked\n' > "$home/state/task-unmarked.meta"
+  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+    "$ROOT/bin/fm-park-retained.sh" task-parked mark >/dev/null \
+    || fail "could not mark the task on the stopped Herdr server"
+
+  out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+  assert_contains "$out" "endpoint: parked, copy retained (backend=herdr window=stopped:p-parked)" \
+    "the unreadable pane masked the parked endpoint on a stopped Herdr server"
+  assert_contains "$out" "endpoint: unknown (unreadable identity, backend=herdr window=stopped:p-unmarked)" \
+    "the unmarked Herdr endpoint lost its unreadable identity verdict"
+
+  pass "a current Herdr park mark uses the stopped server as proof of absence"
+
+  out=$(FM_TEST_HERDR_STATUS_UNREADABLE=1 run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+  assert_contains "$out" "endpoint: parked, copy retained (backend=herdr window=stopped:p-parked)" \
+    "the current park mark disappeared when the Herdr server status was unreadable"
+  assert_contains "$out" "endpoint: unknown (unreadable identity, backend=herdr window=stopped:p-unmarked)" \
+    "the unmarked endpoint lost its unknown verdict when the Herdr server status was unreadable"
+
+  pass "the current park mark remains visible when Herdr server status is unreadable"
+}
+
+test_parked_herdr_startup_leaves_reused_pane_unread() {
+  local rec root home fakebin worktree meta log out crew_state inactive_reads
+  rec=$(new_world liveness-parked-herdr-reused)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_claude "$fakebin"
+  worktree="${root%/root}/retained-copy"
+  fm_git_init_commit "$worktree"
+  log="$home/herdr-probes.log"
+  crew_state="$fakebin/record-inactive-read"
+  inactive_reads="$home/inactive-reads.log"
+  : > "$log"
+  cat > "$crew_state" <<'SH'
+#!/usr/bin/env bash
+set -eu
+"$FM_TEST_REAL_CREW_STATE" "$@"
+printf '%s\n' "$1" >> "$FM_TEST_INACTIVE_READS"
+SH
+  chmod +x "$crew_state"
+  cat > "$fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'pane get p-reused --session park-test')
+    if [ "${FM_TEST_HERDR_REUSED:-0}" = 1 ]; then
+      printf '%s\n' "$*" >> "$FM_TEST_HERDR_PROBE_LOG"
+      printf '%s\n' '{"result":{"pane":{"pane_id":"p-reused","terminal_id":"term-other-home","foreground_cwd":"/other-home/active-copy"}}}'
+    else
+      printf '%s\n' '{"error":{"code":"pane_not_found"}}' >&2
+      exit 1
+    fi
+    ;;
+  'agent get p-reused --session park-test')
+    printf '%s\n' "$*" >> "$FM_TEST_HERDR_PROBE_LOG"
+    printf '%s\n' '{"result":{"agent":{"agent_status":"idle"}}}'
+    ;;
+  'pane process-info --pane p-reused --session park-test')
+    printf '%s\n' "$*" >> "$FM_TEST_HERDR_PROBE_LOG"
+    printf '%s\n' '{"result":{"type":"pane_process_info","process_info":{"pane_id":"p-reused","shell_pid":4242,"foreground_processes":[{"pid":4243,"name":"claude","argv":["claude","--resume","other-session"]}]}}}'
+    ;;
+  'pane read p-reused '*)
+    printf '%s\n' "$*" >> "$FM_TEST_HERDR_PROBE_LOG"
+    exit 1
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$fakebin/herdr"
+
+  meta="$home/state/task-parked.meta"
+  fm_write_meta "$meta" 'window=park-test:p-reused' 'kind=scout' 'backend=herdr' \
+    'herdr_terminal_id=term-parked' 'spawn_gen=spawn-parked' "worktree=$worktree"
+  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+    "$ROOT/bin/fm-park-retained.sh" task-parked mark >/dev/null \
+    || fail "could not mark the scout while its pane was missing"
+  touch -t 202001010000 "$meta"
+
+  out=$(FM_FAKE_HARNESS_PID="$SESSION_START_TEST_HARNESS_PID" \
+    FM_TEST_HERDR_REUSED=1 FM_TEST_HERDR_PROBE_LOG="$log" FM_INACTIVE_RECONCILE_SECS=60 \
+    FM_INACTIVE_CREW_STATE_BIN="$crew_state" FM_TEST_REAL_CREW_STATE="$ROOT/bin/fm-crew-state.sh" \
+    FM_TEST_INACTIVE_READS="$inactive_reads" \
+    run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+  assert_contains "$out" "endpoint: parked, copy retained (backend=herdr window=park-test:p-reused)" \
+    "the recycled pane hid the current mark"
+  wait_for_network_stage "$home" "$root" || fail "the deferred network stage never published"
+  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$root" \
+    "$ROOT/bin/fm-startup-network.sh" ready "$SESSION_START_TEST_HARNESS_PID" \
+    || fail "the deferred network stage did not finish successfully"
+  jq -e 'any(.endpoints[]; .id == "task-parked"
+    and (.endpoint | has("exists") and .exists == null and .status == "unknown"))' \
+    "$home/state/home-summary.json" >/dev/null \
+    || fail "the deferred home summary did not preserve unknown endpoint presence for the parked scout"
+  grep -Fxq 'task-parked' "$inactive_reads" \
+    || fail "the deferred inactive scan did not complete the parked scout's state read"
+
+  out=$(FM_TEST_HERDR_REUSED=1 FM_TEST_HERDR_PROBE_LOG="$log" \
+    PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+    "$ROOT/bin/fm-fleet-snapshot.sh" --json)
+  printf '%s\n' "$out" | jq -e 'any(.tasks[]; .id == "task-parked"
+    and (.endpoint | has("exists") and .exists == null and .status == "unknown"))' >/dev/null \
+    || fail "the fleet snapshot did not preserve unknown endpoint presence for the parked scout"
+  [ ! -s "$log" ] || fail "startup or the fleet snapshot read the other worker's pane or process details: $(cat "$log")"
+
+  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+    "$ROOT/bin/fm-park-retained.sh" task-parked clear >/dev/null \
+    || fail "could not clear the scout's mark for the unmarked control"
+  out=$(FM_TEST_HERDR_REUSED=1 FM_TEST_HERDR_PROBE_LOG="$log" \
+    PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+    "$ROOT/bin/fm-fleet-snapshot.sh" --json)
+  printf '%s\n' "$out" | jq -e 'any(.tasks[]; .id == "task-parked" and .endpoint.exists == false
+    and .current_state.detail == "backend target gone: park-test:p-reused")' >/dev/null \
+    || fail "the ordinary unmarked snapshot did not reject the foreign binding"
+  grep -Fxq 'pane process-info --pane p-reused --session park-test' "$log" \
+    || fail "the unmarked control did not exercise the process probe"
+
+  pass "locked startup leaves a recycled Herdr pane unread when the scout's park mark is current"
+}
+
 test_endpoint_liveness_herdr() {
   local rec root home fakebin out
   rec=$(new_world liveness-herdr)
@@ -2769,6 +3004,9 @@ session_start_cases=(
   test_status_tail_line_cap
   test_orphan_status_logs_are_printed
   test_endpoint_liveness_tmux
+  test_endpoint_liveness_parked_retained
+  test_endpoint_liveness_parked_herdr_stopped_server
+  test_parked_herdr_startup_leaves_reused_pane_unread
   test_endpoint_liveness_herdr
   test_composition_invokes_real_scripts
   test_branch_outcome_replay_respects_captain_barrier_and_lease_sweep

@@ -62,7 +62,10 @@
 #     against current_state; hints.pending_decision and hints.blocked_event are
 #     booleans derived from that set.
 #     endpoint.exists reflects the local backend presence read. A foreign
-#     Herdr pane is absent for the task. An unreadable Herdr binding is null.
+#     Herdr pane is absent for the task. An unreadable Herdr binding yields
+#     null. A current retained-copy park mark skips the probe and yields
+#     endpoint.exists=null and endpoint.status="unknown" in both the task row
+#     and the home summary.
 #     endpoint.agent_alive is populated for local secondmates only, where it is
 #     useful return-channel supervision data; remote secondmates use "unknown"
 #     without a probe, and other tasks use "not_checked".
@@ -662,7 +665,7 @@ prefetch_task_observations() {  # <meta> <id>
     kind=$(meta_value "$meta" kind)
     backend=$(fm_backend_of_meta "$meta")
     target=$(fm_backend_target_of_meta "$meta")
-    if [ -n "$target" ]; then
+    if [ -n "$target" ] && ! fm_backend_endpoint_parked_retained "$meta" "$STATE/$id.parked-retained"; then
       if FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_target_exists "$backend" "$target" "fm-$id" >/dev/null 2>&1; then
         endpoint_exists=true
       elif [ "$?" -eq 2 ] && [ "$backend" = herdr ]; then

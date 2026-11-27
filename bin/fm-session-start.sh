@@ -46,8 +46,9 @@
 #   6. fleet digest   - a compact data/backlog.md identity/metadata listing,
 #                       every state/*.meta, a bounded state/*.status tail,
 #                       the away posture (state/.afk-contract and the legacy
-#                       state/.afk daemon flag), and a cheap per-task
-#                       endpoint-liveness read:
+#                       state/.afk daemon flag), and a per-task endpoint status.
+#                       See docs/watcher-continuity.md#parking-a-task-with-its-copy-retained
+#                       for the parked status.
 #                       read-only, always runs.
 #   7. network checks - the result of the deferred network stage started back at
 #                       step 1, harvested WITHOUT waiting for it.
@@ -846,7 +847,11 @@ for meta in "$STATE"/*.meta; do
   target=$(fm_backend_target_of_meta "$meta")
   if [ -n "$window" ]; then
     backend=$(fm_backend_of_meta "$meta")
-    if FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_target_exists "$backend" "${target:-$window}" "fm-$id"; then
+    # The mark binds to this task's endpoint incarnation, so it alone decides
+    # the row; probing could inspect another worker reusing the same target.
+    if fm_backend_endpoint_parked_retained "$meta"; then
+      printf 'endpoint: parked, copy retained (backend=%s window=%s)\n' "$backend" "$window"
+    elif FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_target_exists "$backend" "${target:-$window}" "fm-$id"; then
       printf 'endpoint: alive (backend=%s window=%s)\n' "$backend" "$window"
     elif [ "$?" -eq 2 ] && [ "$backend" = herdr ]; then
       printf 'endpoint: unknown (unreadable identity, backend=%s window=%s)\n' "$backend" "$window"

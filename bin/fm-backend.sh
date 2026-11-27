@@ -384,10 +384,9 @@ fm_backend_endpoint_park_identity() {  # <meta-file>
 }
 
 # The header of bin/fm-park-retained.sh owns the park mark contract.
-fm_backend_endpoint_parked_retained() {  # <meta-file>
-  local meta=$1 mark incarnation recorded
+fm_backend_endpoint_parked_retained() {  # <meta-file> [<mark-file>]
+  local meta=$1 mark=${2:-"${1%.meta}.parked-retained"} incarnation recorded
   case "$meta" in *.meta) ;; *) return 1 ;; esac
-  mark="${meta%.meta}.parked-retained"
   [ -f "$mark" ] && [ ! -L "$mark" ] || return 1
   incarnation=$(fm_backend_endpoint_park_identity "$meta") || return 1
   recorded=$(cat "$mark" 2>/dev/null) || return 1
