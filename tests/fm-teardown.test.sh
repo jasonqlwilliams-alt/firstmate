@@ -2772,7 +2772,7 @@ SH
   [ -e "$ready" ] || fail "descendant-locks: the contending lifecycle action never acquired its lock"
 
   rc=0
-  TMUX_PANE= run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  TMUX_PANE='' run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
   if [ "$rc" -eq 0 ]; then
     : > "$release"
     wait "$holder_pid" 2>/dev/null || true
@@ -2797,7 +2797,7 @@ SH
   : > "$release"
   wait "$holder_pid" 2>/dev/null || true
   rc=0
-  TMUX_PANE= run_teardown "$case_dir" --force > "$case_dir/retry.stdout" 2> "$case_dir/retry.stderr" || rc=$?
+  TMUX_PANE='' run_teardown "$case_dir" --force > "$case_dir/retry.stdout" 2> "$case_dir/retry.stderr" || rc=$?
   expect_code 0 "$rc" "descendant-locks: uncontended retry should complete"
   [ ! -e "$case_dir/state/task-x1.meta" ] && [ ! -d "$home" ] \
     || fail "descendant-locks: uncontended retry retained retired task state"
@@ -4472,7 +4472,7 @@ exec "$REAL_PS_FOR_TEST" "$@"
 SH
   chmod +x "$case_dir/fakebin/uname" "$case_dir/fakebin/tmux" "$case_dir/fakebin/ps"
 
-  TMUX_PANE= CASE_DIR=$case_dir TEST_MODE=$mode FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+  TMUX_PANE='' CASE_DIR=$case_dir TEST_MODE=$mode FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$ROOT" \
     FM_STATE_OVERRIDE="$case_dir/state" FM_DATA_OVERRIDE="$case_dir/data" \
     FM_CONFIG_OVERRIDE="$case_dir/config" PATH="$case_dir/fakebin:$test_path" \
     FM_TEARDOWN_GUARD_DONE=1 FM_PROC_ROOT_OVERRIDE="$case_dir/no-proc" \
