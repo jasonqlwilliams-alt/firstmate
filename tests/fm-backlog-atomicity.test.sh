@@ -3026,6 +3026,40 @@ test_a_persistent_secondmate_is_never_a_backlog_item() {
   pass "dispatching a persistent secondmate needs no backlog item"
 }
 
+test_secondmate_recovery_preserves_record_on_tasktmp_refusal() {
+  local case_dir id=atomic-mate-temp meta mate out rc=0
+  case_dir=$(make_home mate-temp-refusal)
+  mate="$case_dir/mate-home"
+  meta="$(home_of "$case_dir")/state/$id.meta"
+  mkdir -p "$mate/bin" "$mate/data" "$case_dir/private-temp/task" "$case_dir/other-temp/task"
+  printf '# Firstmate\n' > "$mate/AGENTS.md"
+  printf '%s\n' "$id" > "$mate/.fm-secondmate-home"
+  printf 'charter for %s\n' "$id" > "$mate/data/charter.md"
+  out=$(run_spawn "$case_dir" "$id" "$mate" --secondmate) || fail "secondmate spawn failed: $out"
+  rm -f "$case_dir/fakebin/tmux.windows"
+  ln -s "$case_dir/private-temp" "$case_dir/temp-link"
+  sed '/^tasktmp=/d' "$meta" > "$case_dir/prior.meta"
+  printf 'tasktmp=%s\n' "$case_dir/temp-link/task" >> "$case_dir/prior.meta"
+  cp "$case_dir/prior.meta" "$meta"
+  cat > "$case_dir/fakebin/mkdir" <<'SH'
+#!/usr/bin/env bash
+base=${0%/fakebin/mkdir}
+/bin/mkdir "$@" || exit
+if [ "$#" -eq 2 ] && [ "$1" = -p ] && [ "$2" = "$base/private-temp/task/gotmp" ]; then
+  rm "$base/temp-link" && ln -s "$base/other-temp" "$base/temp-link"
+fi
+SH
+  chmod +x "$case_dir/fakebin/mkdir"
+
+  out=$(run_spawn "$case_dir" "$id" --secondmate) || rc=$?
+  expect_code 1 "$rc" "secondmate recovery should refuse the changed alias: $out"
+  assert_contains "$out" "temporary directory changed before metadata publication" \
+    "recovery did not reach the task temp publication check"
+  [ "$case_dir/temp-link" -ef "$case_dir/other-temp" ] || fail "the recovery fixture did not change the alias"
+  cmp -s "$case_dir/prior.meta" "$meta" || fail "refused recovery changed or removed the previous task record"
+  pass "refused secondmate recovery preserves the prior task record"
+}
+
 test_backend_resolution_preserves_config_errors
 test_backend_resolution_preserves_precedence_and_defaults
 test_backlog_callers_refuse_unreadable_backend_config
@@ -3125,3 +3159,4 @@ test_environment_selected_adapter_is_not_forced_to_markdown
 test_manual_backend_home_dispatches_and_completes_without_touching_the_backlog
 test_a_secondmate_home_keeps_its_own_books
 test_a_persistent_secondmate_is_never_a_backlog_item
+test_secondmate_recovery_preserves_record_on_tasktmp_refusal

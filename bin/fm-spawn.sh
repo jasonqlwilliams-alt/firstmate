@@ -1040,8 +1040,12 @@ CONFIG_INHERIT_LOCK=
 CONFIG_INHERIT_LOCK_HELD=0
 
 spawn_fresh_commit_rollback() {
+  if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
+    echo "error: cannot roll back task $ID without its metadata lock" >&2
+    return 1
+  fi
   if fm_backlog_atomic_transition rollback "$STATE/$ID.meta" \
-      "$FM_ROOT/bin/fm-busy-event.sh" "$STATE" "$ID" "${BUSY_GEN:-}"; then
+      "$FM_ROOT/bin/fm-busy-event.sh" "$STATE" "$ID" "$SPAWN_GEN" "${BUSY_GEN:-}"; then
     SPAWN_FRESH_COMMIT_PENDING=0
     return 0
   fi
@@ -1100,6 +1104,7 @@ spawn_abort_return_untouched_slot() {
 }
 
 spawn_task_tmp_is_current() {
+  [ "$SPAWN_TASK_TMP_CREATED" != 1 ] || return 0
   [ -n "$TASK_TMP_IDENTITY" ] &&
     [ "$(fm_task_tmp_private_root "$TASK_TMP_RECORD" "$ID" "$TASK_TMP_IDENTITY")" = "$TASK_TMP" ]
 }
@@ -1274,8 +1279,7 @@ spawn_abort_cleanup() {
   [ -z "$SPAWN_SLOT_ACQUIRE_FILE" ] || rm -f -- "$SPAWN_SLOT_ACQUIRE_FILE" 2>/dev/null || true
   if [ "$status" -ne 0 ] && [ -n "$TASK_TMP" ] \
      && ! [ "$(fm_meta_get "$STATE/$ID.meta" tasktmp 2>/dev/null)" -ef "$TASK_TMP" ]; then
-    if [ "$SPAWN_TASK_TMP_CREATED" = 1 ] && [ "$SPAWN_TASK_TMP_HANDED_OFF" = 0 ] \
-       && spawn_task_tmp_is_current; then
+    if [ "$SPAWN_TASK_TMP_CREATED" = 1 ] && [ "$SPAWN_TASK_TMP_HANDED_OFF" = 0 ]; then
       rmdir -- "$TASK_TMP/gotmp" "$TASK_TMP" 2>/dev/null || true
     fi
     if [ -d "$TASK_TMP" ]; then
@@ -4110,14 +4114,15 @@ if [ "$RELAUNCH" -eq 1 ] || {
   fi
 fi
 if [ -z "$TASK_TMP" ]; then
-  TASK_TMP_RECORD=$(mktemp -d "/tmp/fm-$ID+XXXXXX") || {
+  TASK_TMP=$(mktemp -d "/tmp/fm-$ID+XXXXXX") || {
     echo "error: could not create a private task temp root under /tmp for $ID" >&2
     exit 1
   }
-  TASK_TMP=$(fm_task_tmp_private_root "$TASK_TMP_RECORD" "$ID") || exit 1
+  TASK_TMP_RECORD=$TASK_TMP
   SPAWN_TASK_TMP_CREATED=1
+else
+  TASK_TMP_IDENTITY=$(fm_task_tmp_identity "$TASK_TMP") || exit 1
 fi
-TASK_TMP_IDENTITY=$(fm_task_tmp_identity "$TASK_TMP") || exit 1
 mkdir -p "$TASK_TMP/gotmp"
 
 # Per-harness turn-end hook where enabled: a file that touches
@@ -5244,10 +5249,10 @@ else
 fi
 if [ "$SPAWN_BACKLOG_COMMIT_STATUS" -ne 0 ]; then
   if [ "$RELAUNCH" -eq 0 ]; then
-    if spawn_fresh_commit_rollback; then
+    if spawn_fresh_commit_rollback && [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ]; then
       echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
     else
-      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR), and failed-dispatch cleanup is incomplete; the provisional record may remain at $STATE/$ID.meta - close out endpoint $T and local copy $WT by hand, then remove the record and busy state before retrying" >&2
+      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR), and failed-dispatch cleanup is incomplete; inspect $STATE/$ID.meta, the busy state, endpoint $T, and local copy $WT before retrying" >&2
     fi
   else
     echo "error: task $ID was republished but its backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); fix the backlog and re-run the relaunch" >&2
