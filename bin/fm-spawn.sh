@@ -1112,26 +1112,20 @@ spawn_verify_tmux_recorded_target() {  # <recorded-target>
   local current
   current=$(fm_tmux_exact_target "$1") || return $?
   [ "${current%:*}" = "${WT_TARGET%:*}" ] || return 2
-  [ "$current" = "$WT_TARGET" ] ||
+  { [ "$current" = "$WT_TARGET" ] && [ "$1" != "$WT_TARGET" ]; } ||
     fm_tmux_pane_command "$WT_TARGET" display-message -p '#{pane_id}' >/dev/null || return 2
 }
 
 spawn_repair_tmux_recorded_target() {
-  local session window name target meta="$STATE/$ID.meta" rc=0
+  local session window name target=$WT_TARGET meta="$STATE/$ID.meta"
   session=$(fm_tmux_session_of_pane "$WT_TARGET") || return 1
   window=${WT_TARGET%:*}
   window=${window##*:}
-  name=$(fm_tmux_session_command "$session" display-message ":$window" -p '#{session_name}:') || return 1
-  case "${name%:}" in ''|*:*|*$'\n'*|*$'\r'*|*$'\t'*) return 1 ;; esac
-  [ "$name" != "${name%:}" ] || return 1
-  target="$name$W"
-  spawn_verify_tmux_recorded_target "$target" || rc=$?
-  if [ "$rc" -eq 1 ]; then
-    fm_tmux_pane_command "$WT_TARGET" display-message -p '#{pane_id}' >/dev/null || return 1
-    fm_tmux_session_command "$session" rename-window ":$window" -- "$W" || return 1
-    spawn_verify_tmux_recorded_target "$target" || return 1
-  elif [ "$rc" -ne 0 ]; then
-    return 1
+  if name=$(fm_tmux_session_command "$session" display-message ":$window" -p '#{session_name}:' 2>/dev/null); then
+    case "$name" in
+      :|*:*:*|*$'\n'*|*$'\r'*|*$'\t'*) ;;
+      *:) if spawn_verify_tmux_recorded_target "$name$W"; then target="$name$W"; fi ;;
+    esac
   fi
   fm_backlog_meta_spawn_gen "$meta" "$STATE" && [ "$FM_BACKLOG_META_SPAWN_GEN" = "$SPAWN_GEN" ] || return 1
   SPAWN_META_TMP="$STATE/.$ID.meta.window.${BASHPID:-$$}"
@@ -1584,6 +1578,9 @@ if [ "$RELAUNCH" -eq 1 ]; then
       RELAUNCH_STATE=missing
     else
       RELAUNCH_STATE=unreadable
+    fi
+    if [ "$RELAUNCH_STATE" = missing ] && [ "$RELAUNCH_TARGET" = "$RELAUNCH_PANE" ]; then
+      RELAUNCH_PANE=
     fi
   else
     RELAUNCH_STATE=$(FM_BACKEND_HERDR_ENDPOINT_META="$RELAUNCH_META" fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET")

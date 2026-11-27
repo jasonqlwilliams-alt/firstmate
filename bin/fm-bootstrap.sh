@@ -847,7 +847,7 @@ secondmate_liveness_one() {  # <meta> <id>
       agent_state=unreadable
     elif target=$(fm_tmux_exact_target "$target" 2>/dev/null); then
       agent_state=$(fm_backend_agent_state tmux "$target" 2>/dev/null) || agent_state=unreadable
-      [ "$agent_state" != missing ] || agent_state=unreadable
+      [ "$agent_state" != missing ] || [ "$target" = "$window" ] || agent_state=unreadable
     elif [ "$?" -eq 1 ]; then
       agent_state=missing
     else

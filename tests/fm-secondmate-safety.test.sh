@@ -1524,8 +1524,7 @@ test_fm_send_refuses_bare_window_without_home_meta() {
   fi
   grep -F "no metadata for fm-missing in $home/state" "$err" >/dev/null \
     || fail "fm-send did not explain missing home metadata"
-  grep -F 'send-keys -t other-session:fm-missing' "$log" >/dev/null \
-    && fail "fm-send fell back to a foreign same-name window"
+  grep -qs '^send-keys ' "$log" && fail "fm-send delivered input without this home's metadata"
   pass "fm-send refuses a bare firstmate window with no metadata in this home"
 }
 

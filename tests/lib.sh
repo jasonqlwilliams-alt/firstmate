@@ -691,6 +691,17 @@ fm_fake_tmux_decode_guard() {  # <quoted command>
 }
 export -f fm_fake_tmux_decode_guard
 
+fm_fake_tmux_send_args() {
+  case "${1:-}" in
+    send-keys) FM_FAKE_TMUX_ARGS=("$@") ;;
+    if-shell)
+      fm_fake_tmux_decode_guard "$6" && [ "${FM_FAKE_TMUX_ARGS[0]:-}" = send-keys ]
+      ;;
+    *) return 1 ;;
+  esac
+}
+export -f fm_fake_tmux_send_args
+
 fm_fake_tmux_dispatch() {
   local arg session
   local -a FM_FAKE_TMUX_ARGS=() args=()

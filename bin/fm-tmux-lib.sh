@@ -150,14 +150,18 @@ fm_tmux_exact_session() {  # <literal-session-name>
 # server before its reused IDs can resolve. The failure branch deliberately
 # raises a tmux error so a skipped write cannot report success.
 fm_tmux_guarded_command() {  # <context> <condition> <command> [args...]
-  local context=$1 condition=$2 command='' arg
+  local context=$1 condition=$2 command='' arg failure='show-options -s firstmate-tmux-binding-lost'
   shift 2
+  if [ "$1" = send-keys ]; then
+    condition="#{&&:$condition,#{==:#{pane_synchronized},0}}"
+    failure="show-options -s 'tmux refused input: pane binding lost or synchronize-panes is on'"
+  fi
   for arg in "$@"; do
     arg=${arg//\'/\'\\\'\'}
     arg=${arg//$'\n'/\'\\n\'}
     command="$command '$arg'"
   done
-  tmux if-shell -F -t "$context" "$condition" "${command# }" 'show-options -s firstmate-tmux-binding-lost'
+  tmux if-shell -F -t "$context" "$condition" "${command# }" "$failure"
 }
 
 fm_tmux_pane_command() {  # <bound-or-native-target> <command> [args...]

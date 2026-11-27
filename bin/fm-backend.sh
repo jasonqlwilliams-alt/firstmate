@@ -494,8 +494,11 @@ fm_backend_validate_task_endpoint() {  # <meta-file> <task-id>
       pane=${window#*:}
       if [ "$pane" = "$window" ] || [ "$pane" != "fm-$id" ] \
         || [ -z "$session" ]; then
-        echo "REFUSED: tmux endpoint '$window' is malformed or does not belong to task $id; preserving task state." >&2
-        return 1
+        if [ -z "$binding" ] || [[ $window != tmux-pane:* ]] ||
+           ! fm_backend_source tmux || [[ ! $window =~ $FM_TMUX_PANE_PATTERN ]]; then
+          echo "REFUSED: tmux endpoint '$window' is malformed or does not belong to task $id; preserving task state." >&2
+          return 1
+        fi
       fi
       ;;
     herdr)

@@ -241,7 +241,7 @@ run_spawn_record() {
 
 test_spawn_tmux_window_construction() (
   local home proj fakebin rec wt out status client server diagnostic
-  local real_tmux socket launcher pane launch_env session_id decoy_id late_id late_meta
+  local real_tmux socket launcher pane launch_env session_id decoy_id late_id late_meta repaired attempt
   home="$TMP_ROOT/spawn-rec-home"
   mkdir -p "$home/data"
   proj=$(make_repo "$TMP_ROOT/spawn-rec-proj")
@@ -346,8 +346,9 @@ SH
   late_meta="$home/state/$late_id.meta"
   cat > "$fakebin/codex" <<SH
 #!/usr/bin/env bash
+stty -echo || exit 1
 printf '%s\n' "\$TMUX_PANE" > "$home/late-worker"
-exec sleep 120
+while IFS= read -r line; do printf '%s\n' "\$line" >> "$home/late-input"; done
 SH
   cat > "$fakebin/tmux" <<SH
 #!/usr/bin/env bash
@@ -361,6 +362,7 @@ if [ "\${1:-}" = list-windows ] && [ -f "$late_meta" ] && [ ! -f "$home/before-r
   pane=\$(cat "$home/late-worker")
   "$real_tmux" -S "$socket" rename-window -t "\$pane" operator-title || exit 1
   "$real_tmux" -S "$socket" rename-session -t '$session_id' 'late destination' || exit 1
+  "$real_tmux" -S "$socket" new-window -d -t '$session_id:' -n 'fm-$late_id' sleep 120 || exit 1
   "$real_tmux" -S "$socket" new-session -d -s '\$0' -n 'fm-$late_id' sleep 120 || exit 1
 fi
 exec "$real_tmux" -S "$socket" "\$@"
@@ -370,14 +372,26 @@ SH
     run_spawn "$home" "$late_id" "$proj" "$wt" "$fakebin"); status=$?
   expect_code 0 "$status" "spawn should repair a selector changed after the worker started: $out"
   assert_contains "$out" "warning: repaired tmux target for task $late_id" "spawn did not report its repair"
-  assert_contains "$out" "window=late destination:fm-$late_id" "spawn did not report the repaired selector"
   cmp -s <(sed '/^window=/d' "$home/before-rename.meta") <(sed '/^window=/d' "$late_meta") \
     || fail "the repair changed launch metadata other than the window"
-  grep -Fxq "window=late destination:fm-$late_id" "$late_meta" \
-    || fail "spawn left a stale worker record after the session rename"
   pane=$(cat "$home/late-worker")
-  [ "$("$real_tmux" -S "$socket" display-message -p -t "$pane" '#{session_name}:#{window_name}:#{pane_current_command}')" = \
-    "late destination:fm-$late_id:sleep" ] || fail "the original worker was closed or left untracked"
+  [ "$("$real_tmux" -S "$socket" display-message -p -t "$pane" '#{session_name}:#{window_name}:#{pane_dead}')" = \
+    'late destination:operator-title:0' ] || fail "repair changed the operator's title or closed the worker"
+  repaired=$(sed -n 's/^window=//p' "$late_meta")
+  assert_contains "$out" "window=$repaired" "spawn did not report the repaired selector"
+  PATH="$fakebin:$PATH" bash -c '
+    . "$1/bin/fm-backend.sh"
+    fm_backend_validate_task_endpoint "$2" "$3" &&
+      fm_backend_target_exists tmux "$FM_BACKEND_VALIDATED_TARGET"
+  ' _ "$ROOT" "$late_meta" "$late_id" || fail "endpoint validation could not use the repaired record"
+  "$real_tmux" -S "$socket" send-keys -t "$pane" -l repaired-route-probe || fail "could not prime the worker input"
+  FM_HOME="$home" PATH="$fakebin:$PATH" "$ROOT/bin/fm-send.sh" "$late_id" --key Enter \
+    || fail "could not submit input through the repaired task record"
+  for (( attempt=0; attempt<100; attempt++ )); do
+    [ ! -s "$home/late-input" ] || break
+    sleep 0.05
+  done
+  [ "$(cat "$home/late-input")" = repaired-route-probe ] || fail "the repaired task route did not reach the original worker"
   pass "fm-spawn: repairs metadata for the same live worker after a late rename"
 )
 

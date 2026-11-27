@@ -1205,7 +1205,7 @@ teardown_probe_agent_state() {
     fi
   fi
   TEARDOWN_AGENT_STATE=$(FM_BACKEND_HERDR_ENDPOINT_META="$META" fm_backend_agent_state "$BACKEND" "$TEARDOWN_CLOSE_TARGET")
-  if [ "$BACKEND" = tmux ] && [ "$TEARDOWN_AGENT_STATE" = missing ]; then
+  if [ "$BACKEND" = tmux ] && [ "$TEARDOWN_CLOSE_TARGET" != "$T" ] && [ "$TEARDOWN_AGENT_STATE" = missing ]; then
     TEARDOWN_AGENT_STATE=unreadable
   fi
 }

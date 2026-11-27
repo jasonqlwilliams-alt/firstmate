@@ -2334,14 +2334,10 @@ test_config_reread_serializes_concurrent_pushes() {
   log="$w/config-reread-serialized.tmux.log"
   cat > "$fakebin/tmux" <<SH
 #!/usr/bin/env bash
-case "\$*" in
-  *send-keys*)
-    if (set -o noclobber; : > "$marker") 2>/dev/null; then
-      : > "$entered"
-      sleep 1
-    fi
-    ;;
-esac
+if fm_fake_tmux_send_args "\$@" && (set -o noclobber; : > "$marker") 2>/dev/null; then
+  : > "$entered"
+  sleep 1
+fi
 exec "$fakebin/tmux.real" "\$@"
 SH
   chmod +x "$fakebin/tmux"
@@ -2487,9 +2483,7 @@ test_config_reread_stops_after_failed_generation() {
   mv "$fakebin/tmux" "$fakebin/tmux.real"
   cat > "$fakebin/tmux" <<SH
 #!/usr/bin/env bash
-case "\$*" in
-  *send-keys*'.0000-fail'*) exit 1 ;;
-esac
+if fm_fake_tmux_send_args "\$@"; then exit 1; fi
 exec "$fakebin/tmux.real" "\$@"
 SH
   chmod +x "$fakebin/tmux"
