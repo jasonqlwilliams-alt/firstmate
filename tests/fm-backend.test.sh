@@ -1018,7 +1018,7 @@ snapshot='@42:1:$1:fm-teardownconform1:2147483647:%42:/dev/ttys042:'
 case "${1:-}" in
   list-windows)
     [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate: -F' ] && [[ "$5" == *fm-teardownconform1* ]] || exit 1
-    printf '%s\n' "$snapshot"
+    printf '%s|1\n' "$snapshot"
     ;;
   if-shell)
     [ "$#" = 7 ] && [ "$2 $3 $4" = '-F -t $1:@42' ] \

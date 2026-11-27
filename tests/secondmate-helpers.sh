@@ -48,9 +48,12 @@ case "${1:-}" in
     ;;
   list-windows)
     if [ -r "$0.close-windows" ] && [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate: -F' ]; then
+      count=$(awk 'END { print NR }' "$0.close-windows")
       while read -r name number; do
         if [[ "$5" == *"$name"* ]]; then
-          printf '@%s:1:$1:%s:2147483647:%%%s:/dev/ttys%s:\n' "$number" "$name" "$number" "$number"
+          printf '@%s:1:$1:%s:2147483647:%%%s:/dev/ttys%s:|%s\n' "$number" "$name" "$number" "$number" "$count"
+        else
+          printf -- '-|%s\n' "$count"
         fi
       done < "$0.close-windows"
       exit 0

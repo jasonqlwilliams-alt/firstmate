@@ -2720,7 +2720,7 @@ case "$1" in
       *fm-task-x1*) number=13 name=fm-task-x1 ;;
       *) exit 1 ;;
     esac
-    printf '@%s:1:$1:%s:2147483647:%%%s:/dev/ttys0%s:\n' "$number" "$name" "$number" "$number"
+    printf '@%s:1:$1:%s:2147483647:%%%s:/dev/ttys0%s:|3\n-|3\n-|3\n' "$number" "$name" "$number" "$number"
     ;;
   if-shell)
     window_id=${4#\$1:}
@@ -4448,7 +4448,7 @@ if [ "${1:-}" = display-message ] && [ "${*: -1}" = '#{pane_pid}' ]; then
   cat "$CASE_DIR/target"
 elif [ "${1:-}" = list-windows ]; then
   [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate: -F' ] && [[ "$5" == *fm-task-x1* ]] || exit 1
-  printf '%s\n' "$snapshot"
+  printf '%s|1\n' "$snapshot"
 elif [ "${1:-}" = if-shell ] || [ "${1:-}" = kill-window ]; then
   if [ "$#" = 7 ] && [ "$1 $2 $3 $4" = 'if-shell -F -t $1:@17' ] \
     && [[ "$5" == *'#{'* ]] \

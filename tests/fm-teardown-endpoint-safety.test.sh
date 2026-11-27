@@ -452,6 +452,7 @@ test_isolated_tmux_invalid_and_valid_cleanup() (
   local dir socket socket_id session target_id=target control=control target=fm-target
   local prefix_target=fm-prefix prefix_survivor=fm-prefix2 rc caller_pane window_id waited=0 control_tty real_uname
   local race child_home child changed_window server_pid job_sid job_tty client_pid client_name session_name_arg
+  local duplicate_id missing_row
   [ -n "$REAL_TMUX" ] || { echo "skip - tmux not installed"; return 0; }
   dir=$(make_case isolated-real)
   socket=dedicated.sock
@@ -481,6 +482,16 @@ if [ "\${1:-}" = list-windows ]; then
   for arg in "\$@"; do
     [ "\$arg" != -f ] || exit 1
   done
+  if [ -n "\${FM_TEST_TMUX_BLANK_WINDOW:-}" ]; then
+    inventory=\$('$REAL_TMUX' -S '$socket' "\$@")
+    awk -v id="\$FM_TEST_TMUX_BLANK_WINDOW" '
+      index(\$0, id ":") == 1 { print ""; blanked++; next }
+      { print }
+      END { if (blanked != 1) exit 1 }
+    ' <<< "\$inventory" || exit 95
+    printf '%s\n' "\$FM_TEST_TMUX_BLANK_WINDOW" > '$dir/blank-window.injected'
+    exit 0
+  fi
   if [ "\${FM_TEST_TMUX_MISSING_PANE_PID:-}" = 1 ]; then
     inventory=\$('$REAL_TMUX' -S '$socket' "\$@")
     pane=\$('$REAL_TMUX' -S '$socket' display-message -p -t '$window_id' '#{pane_pid}:#{pane_id}')
@@ -579,6 +590,25 @@ SH
     || fail "teardown closed a window with unreadable pane PIDs"
   assert_absent "$dir/home/state/$target_id.meta" "refusing the window close interrupted record cleanup"
   pass "fm-teardown: missing exact windows and unreadable pane PIDs prevent the tmux close"
+
+  duplicate_id=$("$REAL_TMUX" -S "$socket" new-window -dP -F '#{window_id}' \
+    -t "=$session:" -n "$target" 'exec sleep 60') || fail "could not stage a duplicate window"
+  for missing_row in "$window_id" "$duplicate_id"; do
+    fm_write_meta "$dir/home/state/$target_id.meta" \
+      "window=$session:$target" "worktree=$dir/nonexistent-worktree" \
+      "project=$dir/nonexistent-project" "kind=scout"
+    FM_TEST_TMUX_BLANK_WINDOW=$missing_row FM_TEST_LAUNCH_TTY=$control_tty \
+      run_case "$dir" "$target_id" > "$dir/blank.out" 2> "$dir/blank.err" \
+      || fail "cleanup with an unreadable window row failed: $(cat "$dir/blank.err")"
+    [ "$(cat "$dir/blank-window.injected")" = "$missing_row" ] \
+      || fail "fixture did not blank the intended window row"
+    assert_contains "$(cat "$dir/blank.err")" "cannot verify the exact window and its pane inventory" \
+      "an unreadable window row did not produce a warning"
+    [ "$("$REAL_TMUX" -S "$socket" list-windows -t "=$session:" -F '#{window_name}' | grep -Fxc "$target")" = 2 ] \
+      || fail "teardown closed a same-named window with an incomplete inventory"
+  done
+  "$REAL_TMUX" -S "$socket" kill-window -t "$duplicate_id"
+  pass "fm-teardown: blank inventory rows cannot hide a same-named window"
 
   fm_write_meta "$dir/home/state/$target_id.meta" \
     "window=$session:$target" "worktree=$dir/nonexistent-worktree" \

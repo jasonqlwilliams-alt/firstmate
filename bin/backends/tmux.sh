@@ -197,7 +197,7 @@ fm_backend_tmux_close_session_match() {
 }
 
 fm_backend_tmux_close_snapshot() {  # <session:window>
-  local target=$1 window=${1#*:} session_match snapshot
+  local target=$1 window=${1#*:} session_match inventory row window_count rows=0 snapshot=
   case "$target" in
     *:*:*|:*|*:) return 1 ;;
     *:*) ;;
@@ -206,12 +206,20 @@ fm_backend_tmux_close_snapshot() {  # <session:window>
   # Keep the literal task window name safe to interpolate into a tmux format.
   [[ "$window" =~ ^[a-zA-Z0-9._-]+$ ]] || return 1
   session_match=$(fm_backend_tmux_close_session_match "${target%%:*}")
-  snapshot=$(tmux list-windows -t "=${target%%:*}:" \
-    -F "#{?#{&&:$session_match,#{==:#{window_name},$window}},$FM_TMUX_CLOSE_SNAPSHOT_FORMAT,}" 2>/dev/null) || return 1
-  while [[ "$snapshot" == $'\n'* ]]; do
-    snapshot=${snapshot#$'\n'}
-  done
-  [[ "$snapshot" =~ $FM_TMUX_CLOSE_SNAPSHOT_PATTERN ]] || return 1
+  inventory=$(tmux list-windows -t "=${target%%:*}:" \
+    -F "#{?#{&&:$session_match,#{==:#{window_name},$window}},$FM_TMUX_CLOSE_SNAPSHOT_FORMAT,-}|#{E:session_windows}" 2>/dev/null) || return 1
+  window_count=${inventory%%$'\n'*}
+  window_count=${window_count##*|}
+  [[ "$window_count" =~ ^[1-9][0-9]*$ ]] || return 1
+  while IFS= read -r row; do
+    [[ "$row" == *"|$window_count" ]] || return 1
+    rows=$((rows + 1))
+    row=${row%|*}
+    [ "$row" = - ] && continue
+    [[ -z "$snapshot" && "$row" =~ $FM_TMUX_CLOSE_SNAPSHOT_PATTERN ]] || return 1
+    snapshot=$row
+  done <<< "$inventory"
+  [[ "$rows" = "$window_count" && -n "$snapshot" ]] || return 1
   printf '%s\n' "$snapshot"
 }
 
