@@ -1,0 +1,33 @@
+ok - explicit tmux pane syntax works for capture and presence
+ok - open worker window reads its own screen
+ok - precondition: raw tmux resolves the closed name to the surviving neighbour
+ok - capture: closed worker window reads as missing, not the neighbour's screen
+ok - liveness: closed worker window reads as missing
+ok - agent state: closed worker window is missing
+ok - composer, busy, and process reads: closed worker window reads nothing
+ok - fm-peek: closed recorded worker reads as missing
+skip: tmux rejects multiline window names
+ok - surviving neighbour still reads its own screen
+ok - repeated links to one window resolve to that window
+ok - duplicate worker names leave the endpoint unresolved
+ok - a qualified percent-prefixed name reads exactly
+ok - inventory preserves non-ASCII names from a C locale
+ok - inventory matches format punctuation in window names literally
+ok - inventory reads a session with a terminal semicolon
+ok - closed recorded session reads as missing despite a prefix-named session
+ok - dotted window name reads exactly beside a live decoy
+ok - literal text and Enter reach the exact dotted worker
+ok - tmux preserves punctuation and indentation in multiline input
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+ok - fm-send uses the recorded dotted name for named keys
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+ok - the inbox doorbell reaches the recorded dotted worker only
+ok - changing the active pane cannot retarget an existing binding
+ok - guarded input follows the bound pane's synchronization setting
+ok - a pane binding survives changes to window and pane indices
+ok - a missing worker receives no input through its prefix neighbour
+ok - reads, writes, and cleanup honor literal ID-shaped session names
+ok - a bound worker becomes unavailable when its recorded session link is removed
+ok - a binding cannot access a pane moved to another window
+ok - detached spawn creates and reuses the literal firstmate session
+ok - a restarted tmux server cannot inherit a stale pane binding

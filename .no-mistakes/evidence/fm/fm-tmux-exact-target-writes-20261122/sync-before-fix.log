@@ -1,0 +1,7 @@
+Running the current mixed-synchronization regression against ce73dbe90fafc88cd440bdfaeaf63db9c4e054c2 (before the fix)
+ok - fm-send uses the recorded dotted name for named keys
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+ok - the inbox doorbell reaches the recorded dotted worker only
+ok - changing the active pane cannot retarget an existing binding
+not ok - bound literal send accepted synchronized panes
+Pre-fix regression exit=1

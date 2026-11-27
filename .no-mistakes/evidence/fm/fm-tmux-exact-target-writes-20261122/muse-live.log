@@ -1,0 +1,9 @@
+A prefix-named session has the synthetic key. The launch session does not.
+error: muse has no worker-reachable credential; META_API_KEY cannot be proven present in the tmux worker environment and '{run-worktree}/.tg.2YxvKy/user/config/muse/auth.json' is absent or empty. Store the fleet credential with 'muse login' or 'muse auth set --api-key-stdin'.
+exit=1
+Set the synthetic key on the destination and retry the same task.
+warning: {run-worktree}/.tg.2YxvKy/home/data/check-muse/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+spawned check-muse harness=muse kind=ship mode=no-mistakes yolo=off window=firstmate:fm-check-muse worktree={run-worktree}/.tg.2YxvKy/worktrees/check-muse
+exit=0
+Worker receipt (pane, worktree and credential presence):
+%2 {run-worktree}/.tg.2YxvKy/worktrees/check-muse key-present

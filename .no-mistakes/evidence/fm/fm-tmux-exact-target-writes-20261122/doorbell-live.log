@@ -1,0 +1,34 @@
+
+Commit 86a565ae333826e488621eb87177596508835b3c
+Worker pane %2 and undotted decoy %3
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+exit=0
+Synthetic instruction for tmux routing
+worker received:
+probe-%2
+decoy received:
+: Firstmate instruction waiting: list '<disposable-home>/state/doorbell.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<disposable-home>/state/doorbell.inbox'/handled/.
+probe-%3
+
+Commit afa8fd01b621331888a09c76e8374c3543cf6741
+Worker pane %4 and undotted decoy %5
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+exit=0
+Synthetic instruction for tmux routing
+worker received:
+: Firstmate instruction waiting: list '<disposable-home>/state/doorbell.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<disposable-home>/state/doorbell.inbox'/handled/.
+probe-%4
+decoy received:
+probe-%5

@@ -1,0 +1,6 @@
+ok - fm_primary_tangle_branch: feature branch alarms; default/detached/non-git stay silent
+ok - fm-guard: bordered tangle banner fires only for a feature branch and suppresses repair commands in read-only mode
+ok - fm-bootstrap: TANGLE problem line fires only for a feature branch and suppresses repair commands in detect-only mode
+ok - fm-brief: ship brief asserts worktree isolation before the branch step
+ok - fm-spawn: aborts unless the resolved worktree is a genuine, isolated worktree
+ok - fm-spawn: appends a pinned window and acquires its lease in the worker pane

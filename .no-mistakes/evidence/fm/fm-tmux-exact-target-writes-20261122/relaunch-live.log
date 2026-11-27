@@ -1,0 +1,21 @@
+warning: {run-worktree}/.tg.h0LMtl/home/data/check-relaunch/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+spawned check-relaunch harness=codex kind=ship mode=no-mistakes yolo=off window=firstmate:fm-check-relaunch worktree={run-worktree}/.tg.h0LMtl/worktrees/check-relaunch
+exit=0
+window=firstmate:fm-check-relaunch
+worktree={run-worktree}/.tg.h0LMtl/worktrees/check-relaunch
+Live worker pane %2
+error: task check-relaunch's endpoint reads 'alive'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh check-relaunch exit)
+exit=1
+Stopping the synthetic process in pane %2 and retrying
+warning: {run-worktree}/.tg.h0LMtl/home/data/check-relaunch/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+spawned check-relaunch harness=codex kind=ship mode=no-mistakes yolo=off window=firstmate:fm-check-relaunch worktree={run-worktree}/.tg.h0LMtl/worktrees/check-relaunch
+exit=0
+Closing pane %2 and relaunching from the saved task record
+warning: {run-worktree}/.tg.h0LMtl/home/data/check-relaunch/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+spawned check-relaunch harness=codex kind=ship mode=no-mistakes yolo=off window=firstmate:fm-check-relaunch worktree={run-worktree}/.tg.h0LMtl/worktrees/check-relaunch
+exit=0
+All launch receipts (pane and working directory):
+%2 {run-worktree}/.tg.h0LMtl/worktrees/check-relaunch
+%2 {run-worktree}/.tg.h0LMtl/worktrees/check-relaunch
+%4 {run-worktree}/.tg.h0LMtl/worktrees/check-relaunch
+Prefix neighbor=fm-check-relaunch2 pane=%3 command=sleep

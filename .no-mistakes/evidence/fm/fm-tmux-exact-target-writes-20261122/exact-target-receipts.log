@@ -1,0 +1,72 @@
+ok - explicit tmux pane syntax works for capture and presence
+ok - open worker window reads its own screen
+ok - precondition: raw tmux resolves the closed name to the surviving neighbour
+ok - capture: closed worker window reads as missing, not the neighbour's screen
+ok - liveness: closed worker window reads as missing
+ok - agent state: closed worker window is missing
+ok - composer, busy, and process reads: closed worker window reads nothing
+Recorded fm-peek output: ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: tmux window fmlab:fm-mate not found
+ok - fm-peek: closed recorded worker reads as missing
+skip: tmux rejects multiline window names
+ok - surviving neighbour still reads its own screen
+ok - repeated links to one window resolve to that window
+ok - duplicate worker names leave the endpoint unresolved
+ok - a qualified percent-prefixed name reads exactly
+ok - inventory preserves non-ASCII names from a C locale
+ok - inventory matches format punctuation in window names literally
+ok - inventory reads a session with a terminal semicolon
+ok - closed recorded session reads as missing despite a prefix-named session
+ok - dotted window name reads exactly beside a live decoy
+Pane %16 received: dotted-decoy-probe
+ok - literal text and Enter reach the exact dotted worker
+ok - tmux preserves punctuation and indentation in multiline input
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+ok - fm-send uses the recorded dotted name for named keys
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+Pane %18 received: doorbell-decoy-probe
+ok - the inbox doorbell reaches the recorded dotted worker only
+Pane %19 received: active-split-probe
+ok - changing the active pane cannot retarget an existing binding
+Synchronization before rejected sends (pane, active, synchronized):
+%15 0 1
+%19 0 1
+%20 1 0
+Guard diagnostic: invalid option: tmux refused input: pane binding lost or synchronize-panes is on
+Synchronization before successful send (pane, active, synchronized):
+%15 0 0
+%19 1 1
+%20 0 0
+Bound pane %15 received: worker-pending-sync-probe
+Pane %19 received: sibling-pending-sync-probe
+Pane %20 received: active-pending-unsynced-probe
+ok - guarded input follows the bound pane's synchronization setting
+ok - a pane binding survives changes to window and pane indices
+Pane %21 received: prefix-neighbour-probe
+Missing selector fmla:fm-prefix, surviving pane %21
+ok - a missing worker receives no input through its prefix neighbour
+Pane %24 received: session-decoy-probe
+Recorded session name $4 resolved to session ID $5, worker pane %23; native ID lookup still reaches decoy %24
+$4 fmla fm-session-id %24
+ok - reads, writes, and cleanup honor literal ID-shaped session names
+Pane %15 received: surviving-link-probe
+Rejected stale binding tmux-pane:3423461:1795822089:$4:@14:%15; surviving link to same pane %15:
+$5 $4 fm-input.0 %15
+ok - a bound worker becomes unavailable when its recorded session link is removed
+Pane %25 received: moved-pane-probe
+Pane %26 received: destination-pane-probe
+Rejected stale binding tmux-pane:3423461:1795822089:$4:@22:%25
+fm-move-destination %26
+fm-move-destination %25
+ok - a binding cannot access a pane moved to another window
+ok - detached spawn creates and reuses the literal firstmate session
+Pane %0 received: restarted-server-probe
+Stale binding tmux-pane:3429749:1795822092:$0:@0:%0
+New binding tmux-pane:3429835:1795822092:$0:@0:%0
+ok - a restarted tmux server cannot inherit a stale pane binding

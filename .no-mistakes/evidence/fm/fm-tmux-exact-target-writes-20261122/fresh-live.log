@@ -1,0 +1,20 @@
+Fresh spawn retry after removing the exact window name collision
+warning: {run-worktree}/.tg.HIZDvo/home/data/check-fresh/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: window firstmate:fm-check-fresh already exists
+exit=1
+warning: {run-worktree}/.tg.HIZDvo/home/data/check-fresh/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+spawned check-fresh harness=codex kind=ship mode=no-mistakes yolo=off window=firstmate:fm-check-fresh worktree={run-worktree}/.tg.HIZDvo/worktrees/check-fresh
+exit=0
+Lease pane %4, launch from recorded worktree {run-worktree}/.tg.HIZDvo/worktrees/check-fresh, neighbor pane %2
+firstmate 1 initial %1
+firstmate 2 fm-check-fresh %4
+firstmate-lab 0 initial %0
+firstmate-lab 1 fm-check-fresh %2
+
+Operator renames the live window as the worker starts
+warning: {run-worktree}/.tg.HIZDvo/home/data/check-rename/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+Before launch submit returned, live window=firstmate:operator-title pane=%5
+spawned check-rename harness=codex kind=ship mode=no-mistakes yolo=off window=firstmate:fm-check-rename worktree={run-worktree}/.tg.HIZDvo/worktrees/check-rename
+exit=0
+Persisted window=firstmate:fm-check-rename
+Live window=firstmate:operator-title pane=%5 dead=0
