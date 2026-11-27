@@ -99,7 +99,15 @@ case "${1:-}" in
     if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
       fm_fake_tmux_window_ids "$@" < "$0.windows"
     fi ;;
+  kill-window)
+    target=${*: -1}
+    target=${target#=}
+    target=${target/:=/:}
+    awk -v target="$target" '$1 != target && $2 != target' "$0.windows" > "$0.remaining" || exit 1
+    mv "$0.remaining" "$0.windows"
+    exit $? ;;
   new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@"; exit 0 ;;
+  if-shell) fm_fake_tmux_if_shell_kill "$0.windows" "$@"; exit $? ;;
 esac
 exit 0
 SH
@@ -3026,6 +3034,72 @@ test_a_persistent_secondmate_is_never_a_backlog_item() {
   pass "dispatching a persistent secondmate needs no backlog item"
 }
 
+test_secondmate_recovery_temp_abort() {
+  local scenario=$1 case_dir id=atomic-mate-temp meta mate diagnostic out rc=0
+  case_dir=$(make_home "mate-temp-$scenario")
+  mate="$case_dir/mate-home"
+  meta="$(home_of "$case_dir")/state/$id.meta"
+  mkdir -p "$mate/bin" "$mate/data" "$case_dir/private-temp/task" "$case_dir/other-temp/task"
+  printf '# Firstmate\n' > "$mate/AGENTS.md"
+  printf '%s\n' "$id" > "$mate/.fm-secondmate-home"
+  printf 'charter for %s\n' "$id" > "$mate/data/charter.md"
+  out=$(run_spawn "$case_dir" "$id" "$mate" --secondmate) || fail "secondmate spawn failed: $out"
+  rm -f "$case_dir/fakebin/tmux.windows"
+  sed '/^tasktmp=/d' "$meta" > "$case_dir/prior.meta"
+  if [ "$scenario" = fresh-allocation ]; then
+    diagnostic="could not create a private task temp root"
+    mv "$case_dir/fakebin/mktemp" "$case_dir/fakebin/mktemp.real"
+    cat > "$case_dir/fakebin/mktemp" <<'SH'
+#!/usr/bin/env bash
+if [ "$#" -eq 2 ] && [ "$1" = -d ] && [ "$2" = /tmp/fm-atomic-mate-temp+XXXXXX ]; then
+  exit 1
+fi
+exec "$0.real" "$@"
+SH
+    chmod +x "$case_dir/fakebin/mktemp"
+  else
+    diagnostic="temporary directory changed before metadata publication"
+    ln -s "$case_dir/private-temp" "$case_dir/temp-link"
+    printf 'tasktmp=%s\n' "$case_dir/temp-link/task" >> "$case_dir/prior.meta"
+    if [ "$scenario" = reassigned ]; then
+      touch "$case_dir/reassign-window"
+    fi
+    cat > "$case_dir/fakebin/mkdir" <<'SH'
+#!/usr/bin/env bash
+base=${0%/fakebin/mkdir}
+/bin/mkdir "$@" || exit
+if [ "$#" -eq 2 ] && [ "$1" = -p ] && [ "$2" = "$base/private-temp/task/gotmp" ]; then
+  inventory="$base/fakebin/tmux.windows"
+  [ -s "$inventory" ] || exit 1
+  if [ -e "$base/reassign-window" ]; then
+    sed 's/^@1 /@2 /' "$inventory" > "$base/other-window"
+    cp "$base/other-window" "$inventory"
+  fi
+  rm "$base/temp-link" && ln -s "$base/other-temp" "$base/temp-link"
+fi
+SH
+    chmod +x "$case_dir/fakebin/mkdir"
+  fi
+  cp "$case_dir/prior.meta" "$meta"
+
+  out=$(run_spawn "$case_dir" "$id" --secondmate) || rc=$?
+  expect_code 1 "$rc" "secondmate recovery should refuse in the $scenario case: $out"
+  assert_contains "$out" "$diagnostic" "recovery did not reach the expected failure"
+  if [ "$scenario" != fresh-allocation ]; then
+    [ "$case_dir/temp-link" -ef "$case_dir/other-temp" ] || fail "the recovery fixture did not change the alias"
+  fi
+  cmp -s "$case_dir/prior.meta" "$meta" || fail "refused recovery changed or removed the previous task record"
+  case "$scenario" in
+    owned) [ ! -s "$case_dir/fakebin/tmux.windows" ] || fail "refused recovery left its replacement window open" ;;
+    reassigned)
+      assert_grep '@2 ' "$case_dir/other-window" "the fixture did not replace the created window ID"
+      cmp -s "$case_dir/other-window" "$case_dir/fakebin/tmux.windows" || fail "refused recovery closed another home's window" ;;
+    fresh-allocation)
+      assert_grep "fm-$id" "$case_dir/fakebin/tmux.windows" "fresh allocation failure closed the recovery window" ;;
+  esac
+  pass "secondmate recovery preserves its prior record and handles the $scenario window"
+}
+
 test_backend_resolution_preserves_config_errors
 test_backend_resolution_preserves_precedence_and_defaults
 test_backlog_callers_refuse_unreadable_backend_config
@@ -3125,3 +3199,6 @@ test_environment_selected_adapter_is_not_forced_to_markdown
 test_manual_backend_home_dispatches_and_completes_without_touching_the_backlog
 test_a_secondmate_home_keeps_its_own_books
 test_a_persistent_secondmate_is_never_a_backlog_item
+test_secondmate_recovery_temp_abort owned
+test_secondmate_recovery_temp_abort reassigned
+test_secondmate_recovery_temp_abort fresh-allocation

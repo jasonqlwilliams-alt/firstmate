@@ -503,6 +503,7 @@ test_spawn_preserves_orca_metadata_when_pathless_worktree_cleanup_fails() {
   assert_grep "window=fm-$id" "$state/$id.meta" "preserved pathless metadata missing stable window alias"
   assert_grep "backend=orca" "$state/$id.meta" "preserved pathless metadata missing backend=orca"
   assert_grep "orca_worktree_id=wt-pathless-cleanup" "$state/$id.meta" "preserved pathless metadata missing Orca worktree id"
+  [ "$(sed -n '/^tasktmp=/p' "$state/$id.meta")" = tasktmp= ] || fail "pathless cleanup should record an empty task temp field"
   assert_no_grep "terminal=" "$state/$id.meta" "preserved pathless metadata should not invent a terminal handle"
   pass "fm-spawn.sh --backend orca: preserves metadata when pathless cleanup fails"
 }

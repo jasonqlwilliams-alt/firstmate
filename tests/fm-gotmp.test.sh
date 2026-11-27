@@ -132,6 +132,105 @@ test_teardown_removes_tasktmp_dir() {
   pass "fm-teardown removes the dir pointed to by tasktmp= in meta"
 }
 
+test_teardown_removes_tasktmp_dir_by_equivalent_spelling() {
+  local variant=$1 id task_tmp recorded fake
+  id="td-sp-$variant"
+  task_tmp="$TMP_ROOT/fm-$id+private"
+  mkdir -p "$task_tmp/gotmp"
+  printf 'leftover\n' > "$task_tmp/gotmp/build-artifact"
+  case "$variant" in
+    doubled-slash) recorded="/${task_tmp//\//\/\/}" ;;
+    trailing-slash) recorded="$task_tmp/" ;;
+    trailing-dot) recorded="$task_tmp/." ;;
+    linked-parent)
+      ln -s "$TMP_ROOT" "$TMP_ROOT/root-link-$id"
+      recorded="$TMP_ROOT/root-link-$id/${task_tmp##*/}"
+      ;;
+  esac
+  [ "$recorded" -ef "$task_tmp" ] || fail "precondition: $recorded does not name $task_tmp"
+  fake=$(make_fake_root "$id" "$recorded")
+  FM_HOME="$fake" bash "$fake/bin/fm-teardown.sh" "$id" > "$fake/teardown.log" 2>&1 \
+    || fail "$variant teardown failed: $(cat "$fake/teardown.log")"
+  [ ! -e "$task_tmp" ] || fail "teardown did not recognise its own root through the $variant spelling $recorded"
+  [ "$variant" != linked-parent ] || [ -L "$TMP_ROOT/root-link-$id" ] \
+    || fail "teardown removed the symlinked parent instead of the task root"
+  pass "fm-teardown removes its own task temp root recorded with a $variant spelling"
+}
+
+test_teardown_preserves_replacement_tasktmp() {
+  local phase=$1 id task_tmp alias fake hook
+  id="td-move-$phase"
+  task_tmp="$TMP_ROOT/$id-original/task-root"
+  alias="$TMP_ROOT/$id-link"
+  mkdir -p "$task_tmp"
+  ln -s "${task_tmp%/*}" "$alias"
+  fake=$(make_fake_root "$id" "$alias/task-root")
+  hook="$fake/bin/fm-remote-job-reap-orphans.sh"
+  if [ "$phase" = scan ]; then hook="$fake/bin/lsof"; fi
+  cat > "$hook" <<'SH'
+#!/usr/bin/env bash
+set -e
+mv "$MOVE_TASK_TMP" "$MOVE_TASK_TMP-new"
+mkdir "$MOVE_TASK_TMP"
+printf 'unrelated data\n' > "$MOVE_TASK_TMP/keep"
+if [ "$MOVE_TASK_PHASE" = cleanup ]; then
+  mkdir "$MOVE_TASK_TMP-parent"
+  mv "$MOVE_TASK_TMP-new" "$MOVE_TASK_TMP-parent/task-root"
+  rm "$MOVE_TASK_ALIAS"
+  ln -s "$MOVE_TASK_TMP-parent" "$MOVE_TASK_ALIAS"
+fi
+SH
+  chmod +x "$hook"
+  local rc=0
+  FM_HOME="$fake" PATH="$fake/bin:$PATH" MOVE_TASK_TMP="$task_tmp" MOVE_TASK_ALIAS="$alias" MOVE_TASK_PHASE="$phase" \
+    bash "$fake/bin/fm-teardown.sh" "$id" > "$fake/teardown.log" 2>&1 || rc=$?
+  assert_present "$task_tmp/keep" "teardown removed a replacement directory it did not own"
+  if [ "$phase" = scan ]; then
+    expect_code 1 "$rc" "teardown should refuse a root move during process enumeration: $(cat "$fake/teardown.log")"
+    assert_present "$fake/state/$id.meta" "teardown retired a task after an incomplete scan"
+    assert_present "$task_tmp-new" "teardown removed the moved root after an incomplete scan"
+  else
+    expect_code 0 "$rc" "teardown should follow the original root through the updated alias: $(cat "$fake/teardown.log")"
+    assert_absent "$alias/task-root" "teardown did not remove the moved root"
+  fi
+  pass "fm-teardown preserves a replacement directory when the task root moves during $phase"
+}
+
+test_teardown_retains_uninspectable_tasktmp() {
+  local phase=$1 scope=$2 id task_tmp restricted fake rc=0
+  id="td-inspect-$phase-$scope"
+  task_tmp="$TMP_ROOT/$id-parent/private"
+  restricted=$task_tmp
+  [ "$scope" != parent ] || restricted=${task_tmp%/*}
+  mkdir -p "$task_tmp/gotmp"
+  printf 'build output\n' > "$task_tmp/gotmp/artifact"
+  chmod 600 "$restricted"
+  if (cd "$task_tmp") 2>/dev/null; then
+    chmod 700 "$restricted"
+    printf 'skip: task temp inspection test requires directory permissions to restrict this user\n'
+    return 0
+  fi
+  fake=$(make_fake_root "$id" "$task_tmp")
+  cp "$fake/state/$id.meta" "$fake/meta.before"
+  if [ "$phase" = removal ]; then
+    chmod 700 "$restricted"
+    cat > "$fake/bin/fm-remote-job-reap-orphans.sh" <<'SH'
+#!/usr/bin/env bash
+chmod 600 "$INSPECTION_TEST_ROOT"
+SH
+    chmod +x "$fake/bin/fm-remote-job-reap-orphans.sh"
+  fi
+  FM_HOME="$fake" INSPECTION_TEST_ROOT="$restricted" \
+    bash "$fake/bin/fm-teardown.sh" "$id" > "$fake/teardown.log" 2>&1 || rc=$?
+  chmod 700 "$restricted"
+  expect_code 1 "$rc" "teardown should refuse a $scope inspection failure during $phase: $(cat "$fake/teardown.log")"
+  assert_grep "cannot inspect task temporary directory $task_tmp" "$fake/teardown.log" \
+    "teardown did not identify the unreadable directory"
+  cmp -s "$fake/meta.before" "$fake/state/$id.meta" || fail "teardown changed or retired the task record"
+  assert_present "$task_tmp/gotmp/artifact" "teardown removed the build artifact"
+  pass "fm-teardown retains the task record when temp $scope inspection fails during $phase"
+}
+
 test_teardown_preserves_shared_tasktmp() {
   local variant=$1 id fake legacy_task_tmp task_tmp
   legacy_task_tmp=$(mktemp -d /tmp/fm-legacy-XXXXXX) || fail "could not allocate legacy fixture"
@@ -140,10 +239,31 @@ test_teardown_preserves_shared_tasktmp() {
   mkdir "$legacy_task_tmp/gotmp"
   printf 'another home still needs this\n' > "$legacy_task_tmp/gotmp/keep"
   task_tmp=$legacy_task_tmp
-  if [ "$variant" = symlink ]; then
-    task_tmp="$TMP_ROOT/tasktmp-link"
-    ln -s "$legacy_task_tmp" "$task_tmp"
-  fi
+  case "$variant" in
+    symlink)
+      task_tmp="$TMP_ROOT/tasktmp-link"
+      ln -s "$legacy_task_tmp" "$task_tmp"
+      ;;
+    # Equivalent spellings of the shared legacy root that a literal string
+    # comparison with /tmp/fm-<id> does not recognise.
+    symlink-dot)
+      ln -s "$legacy_task_tmp" "$TMP_ROOT/tasktmp-link-dot"
+      task_tmp="$TMP_ROOT/tasktmp-link-dot/."
+      ;;
+    doubled-slash) task_tmp="//tmp//fm-$id" ;;
+    dot-segment) task_tmp="/tmp/./fm-$id" ;;
+    dotdot-segment) task_tmp="/tmp/../tmp/fm-$id" ;;
+    trailing-dot) task_tmp="/tmp/fm-$id/." ;;
+    linked-parent)
+      ln -s /tmp "$TMP_ROOT/tmp-link-$id"
+      task_tmp="$TMP_ROOT/tmp-link-$id/fm-$id"
+      ;;
+    relative)
+      task_tmp="../../../../../../../../../../../../../../../../tmp/fm-$id"
+      ;;
+  esac
+  [ "$variant" = relative ] || [ "$task_tmp" -ef "$legacy_task_tmp" ] \
+    || fail "precondition: $variant spelling $task_tmp does not name the shared root"
   fake=$(make_fake_root "$id" "$task_tmp")
   if command -v lsof >/dev/null; then
     ( cd "$legacy_task_tmp/gotmp" && exec sleep 300 ) &
@@ -153,10 +273,11 @@ test_teardown_preserves_shared_tasktmp() {
   else
     printf 'skip: %s task temp process preservation requires lsof\n' "$variant"
   fi
-  FM_HOME="$fake" bash "$fake/bin/fm-teardown.sh" "$id" > "$fake/teardown.log" 2>&1 \
+  ( cd "$fake" && FM_HOME="$fake" bash "$fake/bin/fm-teardown.sh" "$id" ) > "$fake/teardown.log" 2>&1 \
     || fail "$variant teardown failed: $(cat "$fake/teardown.log")"
   [ ! -e "$fake/state/$id.meta" ] || fail "$variant teardown left the task record"
-  [ -f "$task_tmp/gotmp/keep" ] || fail "$variant teardown removed a potentially shared temp root or its link"
+  [ -f "$legacy_task_tmp/gotmp/keep" ] || fail "$variant teardown removed a potentially shared temp root"
+  [ "$variant" != symlink ] || [ -L "$task_tmp" ] || fail "symlink teardown removed the recorded link"
   if [ -n "$LEGACY_SLEEPER_IDENTITY" ]; then
     fm_test_owner_is_alive "$LEGACY_SLEEPER_PID" "$LEGACY_SLEEPER_IDENTITY" \
       || fail "$variant teardown signalled a process in the shared temp root"
@@ -261,7 +382,19 @@ test_teardown_skips_gracefully_when_dir_missing() {
 }
 
 test_teardown_removes_tasktmp_dir
+for variant in doubled-slash trailing-slash trailing-dot linked-parent; do
+  test_teardown_removes_tasktmp_dir_by_equivalent_spelling "$variant"
+done
+test_teardown_preserves_replacement_tasktmp scan
+test_teardown_preserves_replacement_tasktmp cleanup
+for scope in leaf parent; do
+  test_teardown_retains_uninspectable_tasktmp capture "$scope"
+  test_teardown_retains_uninspectable_tasktmp removal "$scope"
+done
 test_teardown_preserves_shared_tasktmp legacy
 test_teardown_preserves_shared_tasktmp symlink
+for variant in symlink-dot doubled-slash dot-segment dotdot-segment trailing-dot linked-parent relative; do
+  test_teardown_preserves_shared_tasktmp "$variant"
+done
 test_teardown_skips_gracefully_without_tasktmp
 test_teardown_skips_gracefully_when_dir_missing

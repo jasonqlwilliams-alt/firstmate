@@ -1016,7 +1016,10 @@ SPAWN_META_TMP=
 SPAWN_META_LOCK=
 SPAWN_META_LOCK_HELD=0
 SPAWN_META_PUBLISH_STARTED=0
+SPAWN_ENDPOINT_ABORT_CLEANUP=0
 TASK_TMP=
+TASK_TMP_RECORD=
+TASK_TMP_IDENTITY=
 SPAWN_TASK_TMP_CREATED=0
 SPAWN_TASK_TMP_HANDED_OFF=0
 SPAWN_FRESH_COMMIT_PENDING=0
@@ -1038,8 +1041,12 @@ CONFIG_INHERIT_LOCK=
 CONFIG_INHERIT_LOCK_HELD=0
 
 spawn_fresh_commit_rollback() {
+  if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
+    echo "error: cannot roll back task $ID without its metadata lock" >&2
+    return 1
+  fi
   if fm_backlog_atomic_transition rollback "$STATE/$ID.meta" \
-      "$FM_ROOT/bin/fm-busy-event.sh" "$STATE" "$ID" "${BUSY_GEN:-}"; then
+      "$FM_ROOT/bin/fm-busy-event.sh" "$STATE" "$ID" "$SPAWN_GEN" "${BUSY_GEN:-}"; then
     SPAWN_FRESH_COMMIT_PENDING=0
     return 0
   fi
@@ -1095,6 +1102,28 @@ spawn_abort_return_untouched_slot() {
     .worktrees | map(select(.path == $slot))
     | length == 1 and .[0].leased != true
   ' "$slot_state" >/dev/null 2>&1
+}
+
+spawn_task_tmp_is_current() {
+  if [ "$SPAWN_TASK_TMP_CREATED" = 1 ]; then
+    return 0
+  fi
+  [ -n "$TASK_TMP_IDENTITY" ] &&
+    [ "$(fm_task_tmp_private_root "$TASK_TMP_RECORD" "$ID" "$TASK_TMP_IDENTITY")" = "$TASK_TMP" ]
+}
+
+spawn_publish_task_meta() {
+  if ! spawn_task_tmp_is_current; then
+    if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" = secondmate ]; then
+      SPAWN_ENDPOINT_ABORT_CLEANUP=1
+    fi
+    FM_BACKLOG_TRANSITION_ERROR="temporary directory changed before metadata publication"
+    return 1
+  fi
+  if [ "$RELAUNCH" -eq 1 ]; then
+    SPAWN_META_PUBLISH_STARTED=1
+  fi
+  fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"
 }
 
 spawn_abort_cleanup() {
@@ -1175,7 +1204,7 @@ spawn_abort_cleanup() {
             echo "kind=$KIND"
             [ -z "${MODE:-}" ] || echo "mode=$MODE"
             [ -z "${YOLO:-}" ] || echo "yolo=$YOLO"
-            echo "tasktmp=${TASK_TMP:-}"
+            printf 'tasktmp=%s\n' "$TASK_TMP_RECORD"
             echo "model=${MODEL:-default}"
             echo "effort=${EFFORT:-default}"
             echo "backend=orca"
@@ -1186,6 +1215,17 @@ spawn_abort_cleanup() {
             || true
         fi
       fi
+    fi
+  fi
+  if [ "$status" -ne 0 ] \
+     && [ "$SPAWN_ENDPOINT_ABORT_CLEANUP" = 1 ] \
+     && [ "$SPAWN_META_PUBLISH_STARTED" != 1 ]; then
+    if [ "$BACKEND" = tmux ]; then
+      # The guarded close leaves the window open unless the created id still
+      # names this task's exact session and window (bin/backends/tmux.sh).
+      { fm_backend_source tmux && fm_backend_tmux_kill_created "$T" "${WID:-}"; } 2>/dev/null || true
+    else
+      fm_backend_kill "$BACKEND" "$T" "${ZELLIJ_TAB_ID:-}" "$W" 2>/dev/null || true
     fi
   fi
   if [ "$SPAWN_TASK_LOCK_HELD" = 1 ]; then
@@ -1243,19 +1283,13 @@ spawn_abort_cleanup() {
     fm_lock_release "$SPAWN_CONTROL_LOCK" || true
   fi
   [ -z "$SPAWN_META_TMP" ] || rm -f "$SPAWN_META_TMP" 2>/dev/null || true
-  if [ "$status" -ne 0 ] \
-     && [ "$RELAUNCH_RECREATE" = 1 ] \
-     && [ "${SPAWN_META_PUBLISH_STARTED:-0}" != 1 ] \
-     && [ -n "${T:-}" ] && [ -n "${BACKEND:-}" ]; then
-    fm_backend_kill "$BACKEND" "$T" 2>/dev/null || true
-  fi
   if [ "$CONFIG_INHERIT_LOCK_HELD" = 1 ]; then
     CONFIG_INHERIT_LOCK_HELD=0
     fm_lock_release "$CONFIG_INHERIT_LOCK" || true
   fi
   [ -z "$SPAWN_SLOT_ACQUIRE_FILE" ] || rm -f -- "$SPAWN_SLOT_ACQUIRE_FILE" 2>/dev/null || true
   if [ "$status" -ne 0 ] && [ -n "$TASK_TMP" ] \
-     && [ "$(fm_meta_get "$STATE/$ID.meta" tasktmp 2>/dev/null)" != "$TASK_TMP" ]; then
+     && ! [ "$(fm_meta_get "$STATE/$ID.meta" tasktmp 2>/dev/null)" -ef "$TASK_TMP" ]; then
     if [ "$SPAWN_TASK_TMP_CREATED" = 1 ] && [ "$SPAWN_TASK_TMP_HANDED_OFF" = 0 ]; then
       rmdir -- "$TASK_TMP/gotmp" "$TASK_TMP" 2>/dev/null || true
     fi
@@ -3588,6 +3622,9 @@ EOF
     ;;
 esac
 fi
+if [ "$RELAUNCH_RECREATE" = 1 ]; then
+  SPAWN_ENDPOINT_ABORT_CLEANUP=1
+fi
 if [ "$BACKEND" = herdr ] && { [ "$RELAUNCH" -eq 0 ] || [ "$RELAUNCH_RECREATE" -eq 1 ]; }; then
   fm_backend_herdr_terminal_id_valid "${HERDR_TERMINAL_ID:-}" || {
     echo "error: Herdr task $ID has no readable terminal identity; refusing launch" >&2
@@ -4085,12 +4122,9 @@ if [ "$RELAUNCH" -eq 1 ] || {
     && [ "$(fm_meta_get "$task_tmp_meta" home)" = "$PROJ_ABS" ] \
     && [ -z "$(fm_meta_get "$task_tmp_meta" remote_host)" ]
 }; then
-  TASK_TMP=$(fm_meta_get "$task_tmp_meta" tasktmp)
-  case "$TASK_TMP" in
-    "/tmp/fm-$ID") TASK_TMP= ;;
-  esac
-  if [ ! -d "$TASK_TMP" ] || [ -L "$TASK_TMP" ] || [ ! -O "$TASK_TMP" ]; then
-    TASK_TMP=
+  recorded_task_tmp=$(fm_meta_get "$task_tmp_meta" tasktmp)
+  if TASK_TMP=$(fm_task_tmp_private_root "$recorded_task_tmp" "$ID"); then
+    TASK_TMP_RECORD=$recorded_task_tmp
   fi
 fi
 if [ -z "$TASK_TMP" ]; then
@@ -4098,7 +4132,15 @@ if [ -z "$TASK_TMP" ]; then
     echo "error: could not create a private task temp root under /tmp for $ID" >&2
     exit 1
   }
+  TASK_TMP_RECORD=$TASK_TMP
   SPAWN_TASK_TMP_CREATED=1
+else
+  TASK_TMP_IDENTITY=$(fm_task_tmp_identity "$TASK_TMP") || {
+    if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" = secondmate ]; then
+      SPAWN_ENDPOINT_ABORT_CLEANUP=1
+    fi
+    exit 1
+  }
 fi
 mkdir -p "$TASK_TMP/gotmp"
 
@@ -4787,7 +4829,7 @@ preserve_relaunch_meta() {
   echo "kind=$KIND"
   [ -z "$MODE" ] || echo "mode=$MODE"
   [ -z "$YOLO" ] || echo "yolo=$YOLO"
-  echo "tasktmp=$TASK_TMP"
+  printf 'tasktmp=%s\n' "$TASK_TMP_RECORD"
   echo "model=${MODEL:-default}"
   echo "effort=${EFFORT:-default}"
   [ -z "$PI_POSTURE" ] || echo "pi_posture=$PI_POSTURE"
@@ -4833,7 +4875,7 @@ preserve_relaunch_meta() {
   exit 1
 }
 if [ "$RELAUNCH" -eq 0 ]; then
-  if ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"; then
+  if ! spawn_publish_task_meta; then
     echo "error: task record for $ID could not be published ($FM_BACKLOG_TRANSITION_ERROR)" >&2
     exit 1
   fi
@@ -4889,8 +4931,7 @@ spawn_report_preserved_state() {
 }
 
 if [ "$RELAUNCH" -eq 1 ]; then
-  SPAWN_META_PUBLISH_STARTED=1
-  if ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"; then
+  if ! spawn_publish_task_meta; then
     echo "error: replacement task record for $ID could not be published ($FM_BACKLOG_TRANSITION_ERROR)" >&2
     exit 1
   fi
@@ -5068,8 +5109,16 @@ spawn_record_traceparent() {
 # Export GOTMPDIR into the crewmate's pane shell so the agent and every child
 # process (go build, go test, ...) inherit it. Sent before the launch command so
 # the env is set when the agent starts; the brief sleep lets the export land.
+if ! spawn_task_tmp_is_current; then
+  echo "error: task $ID's temporary directory changed before launch delivery" >&2
+  exit 1
+fi
+launch_task_tmp=$TASK_TMP
+if [[ "$TASK_TMP_RECORD" =~ ^"/tmp/fm-$ID+"[A-Za-z0-9]{6}$ ]]; then
+  launch_task_tmp=$TASK_TMP_RECORD
+fi
 SPAWN_TASK_TMP_HANDED_OFF=1
-spawn_send_text_line "$T" "export GOTMPDIR=$(printf '%q' "$TASK_TMP/gotmp")"
+spawn_send_text_line "$T" "export GOTMPDIR=$(printf '%q' "$launch_task_tmp/gotmp")"
 # Mark the pane as a task worker so bin/fm-test-run.sh can refuse to run the
 # suite in the repository's primary checkout. Ship and scout workers are the
 # ones assigned an isolated worktree; a secondmate runs its own home instead.
@@ -5220,10 +5269,10 @@ else
 fi
 if [ "$SPAWN_BACKLOG_COMMIT_STATUS" -ne 0 ]; then
   if [ "$RELAUNCH" -eq 0 ]; then
-    if spawn_fresh_commit_rollback; then
+    if spawn_fresh_commit_rollback && [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ]; then
       echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
     else
-      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR), and failed-dispatch cleanup is incomplete; the provisional record may remain at $STATE/$ID.meta - close out endpoint $T and local copy $WT by hand, then remove the record and busy state before retrying" >&2
+      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR), and failed-dispatch cleanup is incomplete; inspect $STATE/$ID.meta, the busy state, endpoint $T, and local copy $WT before retrying" >&2
     fi
   else
     echo "error: task $ID was republished but its backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); fix the backlog and re-run the relaunch" >&2

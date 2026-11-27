@@ -788,8 +788,10 @@ fm_backlog_dispatch_transition() {
 }
 
 fm_backlog_dispatch_rollback() {
-  local meta=$1 busy_script=$2 state=$3 id=$4 gen=$5 failed=0
-  fm_backlog_record_remove "$meta" "provisional task record" "$state" || failed=1
+  local meta=$1 busy_script=$2 state=$3 id=$4 spawn_gen=$5 gen=$6 failed=0
+  if ( fm_backlog_meta_spawn_gen "$meta" "$state" && [ "$FM_BACKLOG_META_SPAWN_GEN" = "$spawn_gen" ] ); then
+    fm_backlog_record_remove "$meta" "provisional task record" "$state" || failed=1
+  fi
   if [ -n "$gen" ]; then
     "$busy_script" retire "$state" "$id" --gen "$gen" >/dev/null 2>&1 || failed=1
     if [ -e "$state/$id.busy-state" ] || [ -L "$state/$id.busy-state" ] \

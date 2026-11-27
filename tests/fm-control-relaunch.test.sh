@@ -91,6 +91,7 @@ case "${1:-}" in
           fi
           ;;
         'export GOTMPDIR='*)
+          ( eval "$payload" && printf '%s\n' "$GOTMPDIR" ) > "$D/gotmpdir" || exit 1
           if [ -n "${FM_FAKE_TRACE_PREPARE:-}" ]; then
             : > "$FM_FAKE_TRACE_PREPARE"
             while [ ! -e "$FM_FAKE_TRACE_RELEASE" ]; do /bin/sleep 0.01; done
@@ -132,6 +133,25 @@ case "${1:-}" in
     esac
     exit 0 ;;
   has-session|new-session|set-window-option) exit 0 ;;
+  if-shell)
+    # The guarded close (fm_backend_tmux_kill_created): window ids here are
+    # "@<row>" in a single session, so translate rows into id-qualified
+    # inventory lines for the shared fake.
+    session=fmses
+    [ ! -f "$D/session" ] || session=$(cat "$D/session")
+    awk -v session="$session" '{ print "@" NR " " session ":" $0 }' "$D/windows" > "$D/windows.qualified"
+    cp "$D/windows.qualified" "$D/windows.before-guard"
+    fm_fake_tmux_if_shell_kill "$D/windows.qualified" "$@" || exit 1
+    if ! cmp -s "$D/windows.qualified" "$D/windows.before-guard"; then
+      awk -v session="$session" '{ sub("^@[0-9]+ " session ":", ""); print }' "$D/windows.qualified" > "$D/windows"
+    fi
+    exit 0 ;;
+  kill-window)
+    target=${*: -1}
+    window=${target##*:=}
+    awk -v target="$target" -v window="$window" '"@" NR != target && $0 != window' "$D/windows" > "$D/windows.remaining" || exit 1
+    mv "$D/windows.remaining" "$D/windows"
+    exit $? ;;
   new-window)
     name=
     cwd=
@@ -446,6 +466,127 @@ test_relaunch_replaces_stale_task_temp_roots() {
       "the replacement pane did not receive the new Go temp directory"
   done
   pass "fm-control relaunch: a missing or symlinked temp root gets a fresh allocation"
+}
+
+test_relaunch_keeps_task_temp_metadata_single_line() {
+  local dir id=rl-recorded-tmp variant parent recorded task_tmp gotmpdir expected_gotmpdir out rc
+  for variant in linked-parent newline-parent; do
+    dir=$(new_case "$variant" "$id")
+    add_ship_task "$dir" "$id" claude
+    parent="$dir/scratch space"
+    if [ "$variant" = newline-parent ]; then
+      mkdir "$parent"
+      parent+=$'\narchive'
+    fi
+    mkdir -p "$parent/task-root"
+    ln -s "$parent" "$dir/tmp-link"
+    recorded="$dir/tmp-link/task-root"
+    printf 'tasktmp=%s\n' "$recorded" >> "$dir/home/state/$id.meta"
+    out=$(run_control "$dir" "$id" relaunch --note "continue after temp root recovery"); rc=$?
+    expect_code 0 "$rc" "relaunch with a $variant temp root should succeed: $out"
+    task_tmp=$(meta_field "$dir" "$id" tasktmp)
+    if [ "$variant" = linked-parent ]; then
+      [ "$task_tmp" = "$recorded" ] || fail "relaunch rewrote the recorded spelling of the temp root"
+      expected_gotmpdir="$parent/task-root/gotmp"
+      assert_present "$expected_gotmpdir" "relaunch did not reuse the linked private root"
+      rm "$dir/tmp-link"
+    else
+      case "$task_tmp" in
+        /tmp/fm-"$id"+*) ;;
+        *) fail "relaunch must record a fresh root for a multiline physical path: $task_tmp" ;;
+      esac
+      expected_gotmpdir="$task_tmp/gotmp"
+      assert_present "$expected_gotmpdir" "relaunch did not create the fresh Go temp directory"
+      assert_absent "$parent/task-root/gotmp" "relaunch reused a multiline physical path"
+      assert_absent "$dir/scratch space/gotmp" "relaunch used the unrelated prefix of the physical path"
+    fi
+    gotmpdir=$(cat "$dir/fake/gotmpdir")
+    [ "$gotmpdir" -ef "$expected_gotmpdir" ] \
+      || fail "the replacement pane did not receive the checked Go temp directory: $gotmpdir"
+  done
+  pass "fm-control relaunch: private roots keep their recorded spelling or get a fresh single-line record"
+}
+
+test_relaunch_refuses_repointed_task_temp_alias() {
+  local dir id legacy recorded out rc
+  legacy=$(mktemp -d /tmp/fm-rl-swap-XXXXXX) || fail "could not allocate a shared legacy root"
+  FM_TEST_CLEANUP_DIRS+=("$legacy")
+  id=${legacy#/tmp/fm-}
+  dir=$(new_case repointed-temp "$id")
+  add_ship_task "$dir" "$id" claude
+  mkdir -p "$dir/private/fm-$id"
+  ln -s "$dir/private" "$dir/tmp-link"
+  recorded="$dir/tmp-link/fm-$id"
+  printf 'tasktmp=%s\n' "$recorded" >> "$dir/home/state/$id.meta"
+  cp "$dir/home/state/$id.meta" "$dir/meta.before"
+  cat > "$dir/fake/before-exit" <<'SH'
+#!/usr/bin/env bash
+link="$FM_FAKE_DIR/../tmp-link"
+rm "$link" && ln -s /tmp "$link"
+SH
+  chmod +x "$dir/fake/before-exit"
+  out=$(run_control "$dir" "$id" relaunch --note "continue after temp root recovery"); rc=$?
+  expect_code 1 "$rc" "relaunch should refuse a temp alias changed during stop: $out"
+  assert_contains "$out" "temporary directory changed before metadata publication" "relaunch should identify the changed temp root"
+  [ "$recorded" -ef "$legacy" ] || fail "the handoff fixture did not repoint the alias"
+  cmp -s "$dir/meta.before" "$dir/home/state/$id.meta" || fail "relaunch published replacement metadata after the alias changed"
+  assert_absent "$dir/fake/gotmpdir" "relaunch exported a Go temp directory after the alias changed"
+  assert_absent "$legacy/gotmp" "relaunch touched the shared legacy directory"
+  pass "fm-control relaunch: a repointed task temp alias blocks metadata publication and launch"
+}
+
+test_relaunch_uses_physical_path_for_nested_tmp_alias() {
+  local dir id legacy parent_link recorded gotmpdir out rc
+  legacy=$(mktemp -d /tmp/fm-rl-nested-XXXXXX) || fail "could not reserve a unique task ID"
+  FM_TEST_CLEANUP_DIRS+=("$legacy")
+  id=${legacy#/tmp/fm-}
+  dir=$(new_case nested-tmp-alias "$id")
+  add_ship_task "$dir" "$id" claude
+  mkdir -p "$dir/private/cde"
+  parent_link="$legacy+ab"
+  ln -s "$dir/private" "$parent_link" || fail "could not create the parent alias"
+  FM_TEST_CLEANUP_DIRS+=("$parent_link")
+  recorded="$parent_link/cde"
+  printf 'tasktmp=%s\n' "$recorded" >> "$dir/home/state/$id.meta"
+  out=$(run_control "$dir" "$id" relaunch --note "continue with the existing temp root"); rc=$?
+  expect_code 0 "$rc" "relaunch should reuse the nested temp directory: $out"
+  [ "$(meta_field "$dir" "$id" tasktmp)" = "$recorded" ] || fail "relaunch rewrote the recorded spelling"
+  gotmpdir=$(cat "$dir/fake/gotmpdir")
+  rm "$parent_link" || fail "could not remove the test alias"
+  [ "$gotmpdir" -ef "$dir/private/cde/gotmp" ] || fail "the pane received the nested alias instead of the checked Go temp directory"
+  pass "fm-control relaunch: a nested /tmp alias uses the checked physical directory"
+}
+
+test_relaunch_does_not_reuse_legacy_root_by_another_spelling() {
+  local dir id legacy variant recorded out rc task_tmp
+  for variant in doubled-slash dot-segment trailing-dot linked-parent relative; do
+    legacy=$(mktemp -d /tmp/fm-rlsp-XXXXXX) || fail "could not allocate the legacy temp root"
+    FM_TEST_CLEANUP_DIRS+=("$legacy")
+    id=${legacy#/tmp/fm-}
+    dir=$(new_case "legacy-$variant" "$id")
+    add_ship_task "$dir" "$id" claude
+    case "$variant" in
+      doubled-slash) recorded="//tmp//fm-$id" ;;
+      dot-segment) recorded="/tmp/./fm-$id" ;;
+      trailing-dot) recorded="/tmp/fm-$id/." ;;
+      linked-parent) ln -s /tmp "$dir/tmp-link"; recorded="$dir/tmp-link/fm-$id" ;;
+      relative) recorded="fm-$id" ;;
+    esac
+    printf 'tasktmp=%s\n' "$recorded" >> "$dir/home/state/$id.meta"
+    out=$( cd /tmp && run_control "$dir" "$id" relaunch --note "continue after legacy temp root" ); rc=$?
+    expect_code 0 "$rc" "relaunch with a $variant legacy root should succeed: $out"
+    task_tmp=$(meta_field "$dir" "$id" tasktmp)
+    if [ -z "$task_tmp" ] || [ ! -d "$task_tmp/gotmp" ] || [ "$task_tmp" -ef "$legacy" ]; then
+      fail "relaunch reused the shared legacy root through its $variant spelling ($task_tmp)"
+    fi
+    case "$task_tmp" in
+      /tmp/fm-"$id"+*) ;;
+      *) fail "relaunch recorded a non-canonical replacement root for $variant: $task_tmp" ;;
+    esac
+    FM_TEST_CLEANUP_DIRS+=("$task_tmp")
+    assert_absent "$legacy/gotmp" "relaunch wrote beneath the shared legacy root through its $variant spelling"
+  done
+  pass "fm-control relaunch: another spelling of the shared legacy root still gets a fresh allocation"
 }
 
 test_relaunch_from_linked_home_preserves_recorded_worktree() {
@@ -1931,6 +2072,35 @@ test_spawn_relaunch_recreates_a_missing_endpoint() {
   pass "fm-spawn --relaunch: a missing endpoint is recreated into the recorded copy"
 }
 
+test_spawn_relaunch_closes_recreated_endpoint_on_temp_refusal() {
+  local dir id=rl-missing-temp meta out rc
+  dir=$(new_case missing-temp "$id")
+  add_ship_task "$dir" "$id" claude
+  : > "$dir/fake/windows"
+  printf 'zsh' > "$dir/fake/command"
+  mkdir "$dir/private-temp"
+  meta="$dir/home/state/$id.meta"
+  printf 'tasktmp=%s\n' "$dir/private-temp" >> "$meta"
+  cp "$meta" "$dir/meta.before"
+  cat > "$dir/fakebin/mkdir" <<'SH'
+#!/usr/bin/env bash
+base=${FM_FAKE_DIR%/*}
+/bin/mkdir "$@" || exit
+if [ "$#" -eq 2 ] && [ "$1" = -p ] && [ "$2" = "$base/private-temp/gotmp" ]; then
+  [ -s "$FM_FAKE_DIR/windows" ] || exit 1
+  mv "$base/private-temp" "$base/moved-temp"
+fi
+SH
+  chmod +x "$dir/fakebin/mkdir"
+  out=$(TMUX='' run_spawn "$dir" "$id" --relaunch --harness claude); rc=$?
+  expect_code 1 "$rc" "recreated endpoint relaunch should refuse the changed temp root: $out"
+  assert_contains "$out" "temporary directory changed before metadata publication" \
+    "relaunch did not reach the temp publication check"
+  cmp -s "$dir/meta.before" "$meta" || fail "the refusal did not preserve the prior task record"
+  [ ! -s "$dir/fake/windows" ] || fail "the refusal leaked the recreated window"
+  pass "fm-spawn closes an unpublished replacement endpoint after temp-root refusal"
+}
+
 test_control_relaunch_recreates_a_missing_endpoint() {
   local dir out rc window_after
   dir=$(new_case missing-control rl-missctl)
@@ -3303,6 +3473,10 @@ test_relaunch_from_guarded_path
 
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
 test_relaunch_replaces_stale_task_temp_roots
+test_relaunch_keeps_task_temp_metadata_single_line
+test_relaunch_refuses_repointed_task_temp_alias
+test_relaunch_uses_physical_path_for_nested_tmp_alias
+test_relaunch_does_not_reuse_legacy_root_by_another_spelling
 test_relaunch_from_linked_home_preserves_recorded_worktree
 test_relaunch_preserves_registered_merge_poll
 test_relaunch_and_pr_replacement_during_closure
@@ -3354,6 +3528,7 @@ test_agy_relaunch_allows_gemini_models
 test_spawn_relaunch_refuses_non_gemini_agy_models
 test_spawn_relaunch_refuses_a_live_agent
 test_spawn_relaunch_recreates_a_missing_endpoint
+test_spawn_relaunch_closes_recreated_endpoint_on_temp_refusal
 test_control_relaunch_recreates_a_missing_endpoint
 test_herdr_relaunch_recreates_missing_endpoint_without_confusing_worker_pane_for_launcher
 test_spawn_relaunch_refuses_a_symlinked_task_record_before_inspection
