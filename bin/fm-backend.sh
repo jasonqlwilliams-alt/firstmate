@@ -379,8 +379,9 @@ fm_task_tmp_private_root() {  # <recorded-tasktmp> <task-id>
   done
   case "$normalized" in ''|*/..) return 1 ;; esac
   [ -d "$normalized" ] && [ ! -L "$normalized" ] && [ -O "$normalized" ] || return 1
-  physical=$(CDPATH='' cd -P -- "$normalized" 2>/dev/null && pwd -P) || return 1
-  [ -n "$physical" ] && [ "$physical" != / ] || return 1
+  physical=$(CDPATH='' cd -P -- "$normalized" 2>/dev/null && pwd -P && printf '.') || return 1
+  physical=${physical%$'\n.'}
+  case "$physical" in ''|/|*$'\n'*) return 1 ;; esac
   if [ -e "/tmp/fm-$id" ] && [ "$physical" -ef "/tmp/fm-$id" ]; then
     return 1
   fi

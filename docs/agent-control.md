@@ -129,8 +129,9 @@ Switching harness is therefore one ordinary relaunch rather than a separate mech
 Each fresh task dispatch creates a private temporary root on the agent's host, even when an earlier task or a task in another home has the same ID.
 An explicit task relaunch or recovery of the same recorded secondmate can reuse the root in that task's `tasktmp=` metadata on the agent's host.
 Reuse and teardown require an absolute recorded path naming an existing directory owned by the current user with no symlink at its final component.
-They compare that path as a directory rather than as text, so doubled slashes, `.` segments, a trailing slash, `..` segments, or a symlinked parent do not change which directory it names, and both act on its resolved physical path.
-A relative recorded path, or one ending in `..`, is never reused or removed.
+They check directory identity and use the resolved physical path for filesystem operations, including when the recorded spelling uses doubled slashes, `.` segments, a trailing slash, `..` segments, or a symlinked parent.
+Firstmate preserves the validated spelling in `tasktmp=` and uses that spelling for the launch's `GOTMPDIR`.
+Firstmate skips reuse and removal when the recorded path is relative, ends in `..`, or resolves to a physical path containing a newline.
 Temporary files and any detached processes still using the directory can carry over to the replacement.
 Firstmate allocates a fresh root when the recorded path is missing, fails the reuse checks, or names the old fixed directory `/tmp/fm-<id>` that same-ID tasks may share, however that path is spelled.
 

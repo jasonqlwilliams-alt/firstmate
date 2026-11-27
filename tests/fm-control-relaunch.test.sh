@@ -448,6 +448,41 @@ test_relaunch_replaces_stale_task_temp_roots() {
   pass "fm-control relaunch: a missing or symlinked temp root gets a fresh allocation"
 }
 
+test_relaunch_keeps_task_temp_metadata_single_line() {
+  local dir id=rl-recorded-tmp variant parent recorded task_tmp out rc
+  for variant in linked-parent newline-parent; do
+    dir=$(new_case "$variant" "$id")
+    add_ship_task "$dir" "$id" claude
+    parent="$dir/scratch"
+    if [ "$variant" = newline-parent ]; then
+      mkdir "$parent"
+      parent+=$'\narchive'
+    fi
+    mkdir -p "$parent/task-root"
+    ln -s "$parent" "$dir/tmp-link"
+    recorded="$dir/tmp-link/task-root"
+    printf 'tasktmp=%s\n' "$recorded" >> "$dir/home/state/$id.meta"
+    out=$(run_control "$dir" "$id" relaunch --note "continue after temp root recovery"); rc=$?
+    expect_code 0 "$rc" "relaunch with a $variant temp root should succeed: $out"
+    task_tmp=$(meta_field "$dir" "$id" tasktmp)
+    if [ "$variant" = linked-parent ]; then
+      [ "$task_tmp" = "$recorded" ] || fail "relaunch rewrote the recorded spelling of the temp root"
+      assert_present "$parent/task-root/gotmp" "relaunch did not reuse the linked private root"
+    else
+      case "$task_tmp" in
+        /tmp/fm-"$id"+*) ;;
+        *) fail "relaunch must record a fresh root for a multiline physical path: $task_tmp" ;;
+      esac
+      assert_present "$task_tmp/gotmp" "relaunch did not create the fresh Go temp directory"
+      assert_absent "$parent/task-root/gotmp" "relaunch reused a multiline physical path"
+      assert_absent "$dir/scratch/gotmp" "relaunch used the unrelated prefix of the physical path"
+    fi
+    assert_grep "export GOTMPDIR=$task_tmp/gotmp" "$dir/fake/keys" \
+      "the replacement pane did not receive the recorded Go temp directory"
+  done
+  pass "fm-control relaunch: private roots keep their recorded spelling or get a fresh single-line record"
+}
+
 test_relaunch_does_not_reuse_legacy_root_by_another_spelling() {
   local dir id legacy variant recorded out rc task_tmp
   for variant in doubled-slash dot-segment trailing-dot linked-parent relative; do
@@ -3335,6 +3370,7 @@ test_relaunch_from_guarded_path
 
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
 test_relaunch_replaces_stale_task_temp_roots
+test_relaunch_keeps_task_temp_metadata_single_line
 test_relaunch_does_not_reuse_legacy_root_by_another_spelling
 test_relaunch_from_linked_home_preserves_recorded_worktree
 test_relaunch_preserves_registered_merge_poll

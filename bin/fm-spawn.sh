@@ -1017,6 +1017,7 @@ SPAWN_META_LOCK=
 SPAWN_META_LOCK_HELD=0
 SPAWN_META_PUBLISH_STARTED=0
 TASK_TMP=
+TASK_TMP_RECORD=
 SPAWN_TASK_TMP_CREATED=0
 SPAWN_TASK_TMP_HANDED_OFF=0
 SPAWN_FRESH_COMMIT_PENDING=0
@@ -1175,7 +1176,7 @@ spawn_abort_cleanup() {
             echo "kind=$KIND"
             [ -z "${MODE:-}" ] || echo "mode=$MODE"
             [ -z "${YOLO:-}" ] || echo "yolo=$YOLO"
-            echo "tasktmp=${TASK_TMP:-}"
+            printf 'tasktmp=%s\n' "$TASK_TMP_RECORD"
             echo "model=${MODEL:-default}"
             echo "effort=${EFFORT:-default}"
             echo "backend=orca"
@@ -4085,15 +4086,17 @@ if [ "$RELAUNCH" -eq 1 ] || {
     && [ "$(fm_meta_get "$task_tmp_meta" home)" = "$PROJ_ABS" ] \
     && [ -z "$(fm_meta_get "$task_tmp_meta" remote_host)" ]
 }; then
-  # fm_task_tmp_private_root (bin/fm-backend.sh) owns reuse eligibility and
-  # yields the physical path, which is what gets re-recorded below.
-  TASK_TMP=$(fm_task_tmp_private_root "$(fm_meta_get "$task_tmp_meta" tasktmp)" "$ID") || TASK_TMP=
+  recorded_task_tmp=$(fm_meta_get "$task_tmp_meta" tasktmp)
+  if TASK_TMP=$(fm_task_tmp_private_root "$recorded_task_tmp" "$ID"); then
+    TASK_TMP_RECORD=$recorded_task_tmp
+  fi
 fi
 if [ -z "$TASK_TMP" ]; then
   TASK_TMP=$(mktemp -d "/tmp/fm-$ID+XXXXXX") || {
     echo "error: could not create a private task temp root under /tmp for $ID" >&2
     exit 1
   }
+  TASK_TMP_RECORD=$TASK_TMP
   SPAWN_TASK_TMP_CREATED=1
 fi
 mkdir -p "$TASK_TMP/gotmp"
@@ -4783,7 +4786,7 @@ preserve_relaunch_meta() {
   echo "kind=$KIND"
   [ -z "$MODE" ] || echo "mode=$MODE"
   [ -z "$YOLO" ] || echo "yolo=$YOLO"
-  echo "tasktmp=$TASK_TMP"
+  printf 'tasktmp=%s\n' "$TASK_TMP_RECORD"
   echo "model=${MODEL:-default}"
   echo "effort=${EFFORT:-default}"
   [ -z "$PI_POSTURE" ] || echo "pi_posture=$PI_POSTURE"
@@ -5065,7 +5068,7 @@ spawn_record_traceparent() {
 # process (go build, go test, ...) inherit it. Sent before the launch command so
 # the env is set when the agent starts; the brief sleep lets the export land.
 SPAWN_TASK_TMP_HANDED_OFF=1
-spawn_send_text_line "$T" "export GOTMPDIR=$(printf '%q' "$TASK_TMP/gotmp")"
+spawn_send_text_line "$T" "export GOTMPDIR=$(printf '%q' "$TASK_TMP_RECORD/gotmp")"
 # Mark the pane as a task worker so bin/fm-test-run.sh can refuse to run the
 # suite in the repository's primary checkout. Ship and scout workers are the
 # ones assigned an isolated worktree; a secondmate runs its own home instead.
