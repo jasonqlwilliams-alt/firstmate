@@ -305,12 +305,12 @@ input_window() {  # <session-id> <name> <marker>
     sh -c "$input_loop" sh "$3"
 }
 probe_input() {
-  local pane=$1 probe=$2 prefix=${3:-}
+  local pane=$1 probe=$2
   if ! tmux send-keys -t "$pane" -l "$probe" || ! tmux send-keys -t "$pane" Enter; then
     fail "could not submit the probe to $pane"
   fi
-  wait_for_marker "$pane" "received: $prefix$probe"
-  tmux capture-pane -p -t "$pane" | grep -Fxq "received: $prefix$probe" \
+  wait_for_marker "$pane" "received: $probe"
+  tmux capture-pane -p -t "$pane" | grep -Fxq "received: $probe" \
     || fail "the probe in $pane did not receive exactly the expected bytes"
 }
 fmla_id=$(tmux display-message -p -t fmla: '#{session_id}')
@@ -388,52 +388,6 @@ wait_for_marker "$input_pane" 'received: binding-kept'
 probe_input "$second_pane" active-split-probe
 tmux select-pane -t "$input_pane" || fail "could not restore the active pane"
 pass "changing the active pane cannot retarget an existing binding"
-
-unsynced_pane=$(tmux split-window -dhP -F '#{pane_id}' -t "$second_pane" -- \
-  sh -c "$input_loop" sh UNSYNCED-PANE) || fail "could not create an unsynchronized split pane"
-wait_for_marker "$unsynced_pane" UNSYNCED-PANE
-tmux send-keys -t "$input_pane" -l 'worker-pending-' || fail "could not prepare worker input"
-tmux send-keys -t "$second_pane" -l 'sibling-pending-' || fail "could not prepare sibling input"
-tmux send-keys -t "$unsynced_pane" -l 'active-pending-' || fail "could not prepare active pane input"
-tmux set-window-option -t "$input_pane" synchronize-panes on || fail "could not enable synchronization"
-tmux set-option -p -t "$unsynced_pane" synchronize-panes off || fail "could not disable synchronization for the third pane"
-tmux select-pane -t "$unsynced_pane" || fail "could not activate the unsynchronized pane"
-[[ $(tmux display-message -p -t "$input_pane" '#{pane_synchronized}') = 1 &&
-   $(tmux display-message -p -t "$second_pane" '#{pane_synchronized}') = 1 ]] \
-  || fail "precondition: the bound pane and its sibling must both be synchronized"
-[[ $(tmux display-message -p -t "$unsynced_pane" '#{pane_active}:#{pane_synchronized}') = 1:0 ]] \
-  || fail "precondition: the active pane must be unsynchronized"
-if diagnostic=$(fm_backend_send_literal tmux "$original_pane" forbidden-literal 2>&1); then
-  fail "bound literal send accepted synchronized panes"
-fi
-[[ $diagnostic = *'synchronize-panes is on'* ]] || fail "synchronized send did not explain its refusal: $diagnostic"
-fm_backend_tmux_send_text_line "$original_pane" forbidden-line 2>/dev/null &&
-  fail "bound line send accepted synchronized panes"
-fm_backend_send_key tmux "$original_pane" Enter 2>/dev/null &&
-  fail "bound Enter accepted synchronized panes"
-fm_backend_capture tmux "$original_pane" 40 >/dev/null || fail "synchronization blocked a guarded read"
-[ "$(tmux show-window-options -v -t "$input_pane" synchronize-panes)" = on ] \
-  || fail "guarded input changed the operator's synchronization option"
-[[ $(tmux display-message -p -t "$input_pane" '#{pane_synchronized}') = 1 ]] \
-  || fail "the guarded refusal must leave the bound pane synchronized"
-tmux set-option -p -t "$input_pane" synchronize-panes off || fail "could not disable synchronization for the bound pane"
-tmux select-pane -t "$second_pane" || fail "could not activate the synchronized sibling"
-[[ $(tmux display-message -p -t "$input_pane" '#{pane_synchronized}') = 0 ]] \
-  || fail "precondition: the bound pane must be unsynchronized"
-[[ $(tmux display-message -p -t "$second_pane" '#{pane_active}:#{pane_synchronized}') = 1:1 ]] \
-  || fail "precondition: the active sibling must be synchronized"
-if ! fm_backend_send_literal tmux "$original_pane" sync-probe ||
-   ! fm_backend_send_key tmux "$original_pane" Enter; then
-  fail "the active sibling's synchronization blocked a send to the unsynchronized bound pane"
-fi
-wait_for_marker "$input_pane" '^received: worker-pending-sync-probe$'
-tmux set-window-option -t "$input_pane" synchronize-panes off || fail "could not restore unsynchronized panes"
-tmux set-option -pu -t "$input_pane" synchronize-panes || fail "could not restore the worker's inherited synchronization option"
-probe_input "$second_pane" sync-probe sibling-pending-
-probe_input "$unsynced_pane" unsynced-probe active-pending-
-tmux kill-pane -t "$unsynced_pane" || fail "could not close the extra split pane"
-tmux select-pane -t "$input_pane" || fail "could not restore the active pane"
-pass "guarded input follows the bound pane's synchronization setting"
 
 input_window_id=$(tmux display-message -p -t "$input_pane" '#{window_id}')
 tmux move-window -s "$fmla_id:$input_window_id" -t "$fmla_id:87" \

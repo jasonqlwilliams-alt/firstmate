@@ -152,10 +152,10 @@ test_brief_assertion_precedes_branch() {
 
 # Spawn isolation uses the shared spawn fakebin (pane path + window ops).
 run_spawn() {
-  local home=$1 id=$2 proj=$3 pane=$4 fakebin=$5 harness=${6:-codex}
+  local home=$1 id=$2 proj=$3 pane=$4 fakebin=$5
   fm_test_spawn_brief "$home" "$id" brief
   fm_test_run_spawn "$home" "$pane" "$fakebin" \
-    "$id" "$proj" "$harness" --mode no-mistakes --yolo off
+    "$id" "$proj" codex --mode no-mistakes --yolo off
 }
 
 test_spawn_isolation_abort() {

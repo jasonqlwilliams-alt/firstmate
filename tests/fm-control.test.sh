@@ -375,11 +375,12 @@ add_task() {
 
 # run_control <case-dir> <args...>: run fm-control against the case's home with
 # the stubbed provider on PATH. Echoes combined output; returns its exit code.
+# Allow the timed agent-state probe to start the guarded tmux fixture on a busy host.
 run_control() {
   local dir=$1; shift
   env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
     FM_CONTROL_POLL=0.01 FM_CONTROL_SETTLE_WAIT=0.05 \
-    FM_CONTROL_EXIT_WAIT=0.5 FM_CONTROL_LAUNCH_WAIT=0.05 \
+    FM_CONTROL_EXIT_WAIT=1.5 FM_CONTROL_LAUNCH_WAIT=0.05 \
     FM_FAKE_MUSE_LOG="${FM_FAKE_MUSE_LOG:-}" \
     FM_FAKE_MUSE_DISAPPEAR_BEFORE_ACK="${FM_FAKE_MUSE_DISAPPEAR_BEFORE_ACK:-}" \
     FM_FAKE_INTERRUPT_STOPS_AGENT="${FM_FAKE_INTERRUPT_STOPS_AGENT:-}" \

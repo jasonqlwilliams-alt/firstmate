@@ -134,30 +134,26 @@ fm_tmux_exact_target() {  # <target> [explicit]
 # The condition proves both IDs in that context and rejects a replacement
 # server before its reused IDs can resolve. The failure branch deliberately
 # raises a tmux error so a skipped write cannot report success.
-fm_tmux_guarded_command() {  # <context> <condition> <failure> <command> [args...]
-  local context=$1 condition=$2 failure=$3 command='' arg
-  shift 3
+fm_tmux_guarded_command() {  # <context> <condition> <command> [args...]
+  local context=$1 condition=$2 command='' arg
+  shift 2
   for arg in "$@"; do
     arg=${arg//\'/\'\\\'\'}
     arg=${arg//$'\n'/\'\\n\'}
     command="$command '$arg'"
   done
-  tmux if-shell -F -t "$context" "$condition" "${command# }" "$failure"
+  tmux if-shell -F -t "$context" "$condition" "${command# }" 'show-options -s firstmate-tmux-binding-lost'
 }
 
 fm_tmux_pane_command() {  # <bound-or-native-target> <command> [args...]
-  local target=$1 verb=$2 context identity pane pane_matches
-  local failure='show-options -s firstmate-tmux-binding-lost'
+  local target=$1 verb=$2 context identity pane
   shift 2
   if [[ $target =~ $FM_TMUX_PANE_PATTERN ]]; then
     pane=${BASH_REMATCH[5]}
     context="${BASH_REMATCH[3]}:${BASH_REMATCH[4]}"
     identity=${target#tmux-pane:}
     identity=${identity%:*}
-    pane_matches="#{==:#{pane_id},$pane}"
     if [ "$verb" = send-keys ]; then
-      pane_matches="#{&&:$pane_matches,#{==:#{pane_synchronized},0}}"
-      failure="show-options -s 'tmux refused input: pane binding lost or synchronize-panes is on'"
       case "${1:-}" in
         -l) shift; set -- -l -- "$@" ;;
         *) set -- -- "$@" ;;
@@ -166,8 +162,8 @@ fm_tmux_pane_command() {  # <bound-or-native-target> <command> [args...]
     # tmux can resolve a pane ID independently of the requested window.
     # Check membership in the window's pane list before targeting that ID.
     fm_tmux_guarded_command "$context" \
-      "#{&&:#{==:#{pid}:#{start_time}:#{session_id}:#{window_id},$identity},#{==:#{P:#{?$pane_matches,1,}},1}}" \
-      "$failure" "$verb" -t "$pane" "$@"
+      "#{&&:#{==:#{pid}:#{start_time}:#{session_id}:#{window_id},$identity},#{==:#{P:#{?#{==:#{pane_id},$pane},1,}},1}}" \
+      "$verb" -t "$pane" "$@"
   else
     tmux "$verb" -t "$target" "$@"
   fi

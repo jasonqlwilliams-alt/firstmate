@@ -350,8 +350,7 @@ fm_backend_validate "$BACKEND" || exit 1
 
 # --- shared helpers ---------------------------------------------------------
 
-# Pin the pane for the whole lifecycle operation, including its screen guards.
-# Keep the recorded selector for metadata, diagnostics, and replacement launch.
+# Pin the pane for an interrupt or exit and its screen guards.
 bind_control_target() {
   CONTROL_TARGET=$T
   CONTROL_LOOKUP_STATE=
@@ -369,10 +368,10 @@ bind_control_target() {
 }
 
 agent_state() {
-  if [ -n "$CONTROL_LOOKUP_STATE" ]; then
+  if [ -n "${CONTROL_LOOKUP_STATE:-}" ]; then
     printf '%s' "$CONTROL_LOOKUP_STATE"
   else
-    fm_backend_agent_state "$BACKEND" "$CONTROL_TARGET"
+    fm_backend_agent_state "$BACKEND" "${CONTROL_TARGET:-$T}"
   fi
 }
 
@@ -674,6 +673,7 @@ claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
 do_exit() {
   local state cmd verdict cancel screen interrupt_result=not-needed
   require_state_verified_backend exit
+  bind_control_target
   state=$(agent_state)
   case "$state" in
     dead|missing)
@@ -1131,7 +1131,6 @@ do_relaunch() {
     || die "the replacement for $ID published an endpoint this home cannot validate"
   T=$FM_BACKEND_VALIDATED_TARGET
   BACKEND=$FM_BACKEND_VALIDATED_BACKEND
-  bind_control_target
 
   state=$(wait_agent_state "$LAUNCH_WAIT" alive) || {
     die "the replacement agent for $ID did not come up within ${LAUNCH_WAIT}s (endpoint reads '$state')"
@@ -1145,9 +1144,11 @@ do_relaunch() {
 
 # --- verbs ------------------------------------------------------------------
 
-bind_control_target
+CONTROL_TARGET=
+CONTROL_LOOKUP_STATE=
 case "$VERB" in
   interrupt)
+    bind_control_target
     state=$(agent_state)
     case "$state" in
       alive) ;;

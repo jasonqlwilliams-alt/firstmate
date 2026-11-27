@@ -55,11 +55,10 @@ On a tmux server with `exit-empty off`, a server with no remaining sessions may 
 Within a guarded operation, liveness checks, capture, input, and any window close use the same pane binding even if the active split or a window or pane index changes.
 Each guarded tmux command checks the server, session, and window identities and verifies that the bound pane still belongs to that window.
 A guarded command refuses if the bound pane moves to another window, the recorded session loses its window link, or tmux restarts on the same socket.
-Guarded input checks the bound pane's effective `synchronize-panes` setting, even when a different split is active, and refuses input while that setting is on.
-The guard leaves the operator's tmux settings intact.
+Once the target is verified, tmux applies its configured input behavior, including any pane synchronization.
 If the recorded tmux target is ambiguous or its inventory is inconclusive, a due doorbell attempt counts toward the watcher's retry limit without sending input, and the instruction stays queued for recovery.
 Explicit pane selectors such as `session:0.1` use native tmux syntax when they do not resolve to task metadata.
-Spawn uses the binding returned by tmux at pane creation for startup reads, input, and any cleanup close.
+Fresh tmux startup uses the binding returned at pane creation for worktree discovery, input, and cleanup.
 [`fm-tmux-lib.sh`](../bin/fm-tmux-lib.sh) owns the binding, and [`fm-tmux-exact-target.test.sh`](../tests/fm-tmux-exact-target.test.sh) exercises it with a private tmux server.
 
 ### Agent liveness probe
