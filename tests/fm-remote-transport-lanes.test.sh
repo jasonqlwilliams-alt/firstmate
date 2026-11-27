@@ -45,7 +45,7 @@ cleanup_lane_fixture() {
   fi
   rm -rf -- "$TMP_ROOT"
 }
-trap cleanup_lane_fixture EXIT
+trap 'fm_test_cleanup_exit "$?" fm_test_cleanup_after cleanup_lane_fixture' EXIT
 
 cp "$ROOT/bin/fm-remote-job-lib.sh" "$ROOT/bin/fm-remote-job-worker.sh" \
   "$ROOT/bin/fm-remote-entrypoint.sh" "$ROOT/bin/fm-remote-delta-read.sh" \

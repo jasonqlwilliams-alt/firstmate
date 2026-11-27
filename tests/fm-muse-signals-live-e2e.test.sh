@@ -122,7 +122,7 @@ fi
 fm_live_gate opt-in FM_MUSE_SIGNALS_LIVE muse tmux node
 
 LAB=$(mktemp -d "${TMPDIR:-/tmp}/fm-muse-signals.XXXXXX") || fail "could not create the isolated Muse lab"
-trap cleanup EXIT
+trap 'fm_test_cleanup_exit "$?" fm_test_cleanup_after cleanup' EXIT
 mkdir -p "$LAB/bin" "$LAB/config" "$LAB/data" "$LAB/workspace"
 git -C "$LAB/workspace" init -q || fail "could not initialize the isolated Muse workspace"
 WORKSPACE=$(cd "$LAB/workspace" && pwd -P) || fail "could not resolve the isolated Muse workspace"
@@ -196,6 +196,3 @@ tmux capture-pane -e -p -t "$TARGET" -S 0 -E - > "$CAPTURE" \
 muse_prompt_glyph_is_bright "$CAPTURE" \
   || fail "Muse's real prompt glyph is missing a bright effective truecolor foreground"
 pass "Muse's real bright prompt glyph classifies as an empty composer"
-
-cleanup
-trap - EXIT

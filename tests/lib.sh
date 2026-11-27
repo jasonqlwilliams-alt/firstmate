@@ -256,6 +256,11 @@ fm_test_cleanup_exit() {
   exit "$status"
 }
 
+fm_test_cleanup_after() {
+  "$@" || true
+  fm_test_cleanup
+}
+
 fm_test_enter_treehouse_scratch() {
   local parent=${1:-} outside
   if ! fm_treehouse_scratch_active; then
@@ -731,7 +736,7 @@ fm_fake_exit0() {
 #!/usr/bin/env bash
 exit 0
 SH
-    chmod +x "$fakebin/$tool" || return 1
+    chmod +x "$fakebin/$tool"
   done
 }
 

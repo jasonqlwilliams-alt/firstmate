@@ -42,7 +42,7 @@ cleanup() {
   }
 }
 fail() { printf 'not ok - %s\n' "$1" >&2; cleanup; exit 1; }
-trap cleanup EXIT
+trap 'fm_test_cleanup_exit "$?" fm_test_cleanup_after cleanup' EXIT
 
 VERSION=$(lavish-axi --version 2>/dev/null | tr -d '[:space:]')
 note "lavish-axi ${VERSION:-version-unknown}"

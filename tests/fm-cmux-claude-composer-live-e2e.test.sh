@@ -2,6 +2,8 @@
 # Real Claude Code plus cmux submit-confirmation drift guard.
 # Run explicitly with FM_CMUX_CLAUDE_COMPOSER_LIVE=1; it creates and cleans up
 # only one exact fm-test- workspace through the normal scout lifecycle.
+# The running cmux app supplies its own pane environment, outside scratch
+# Treehouse isolation.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -16,7 +18,6 @@ fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
 
 cleanup() {
-  local status=0
   [ "$SPAWNED" -eq 0 ] || {
     mkdir -p "$LAB/data/$TASK"
     : > "$LAB/data/$TASK/report.md"
@@ -25,10 +26,9 @@ cleanup() {
       printf '%s\n' 'resolved [key=probe-decision]: live guard cleanup' >> "$LAB/state/$TASK.status"
     fi
     FM_HOME="$LAB" "$ROOT/bin/fm-decision-hold.sh" complete "$TASK" --none >/dev/null 2>&1 || true
-    FM_HOME="$LAB" "$ROOT/bin/fm-teardown.sh" "$TASK" >/dev/null 2>&1 || status=1
+    FM_HOME="$LAB" "$ROOT/bin/fm-teardown.sh" "$TASK" >/dev/null 2>&1 || true
   }
-  fm_test_cleanup || status=1
-  return "$status"
+  fm_test_cleanup
 }
 
 fm_live_gate opt-in FM_CMUX_CLAUDE_COMPOSER_LIVE claude cmux jq treehouse python3

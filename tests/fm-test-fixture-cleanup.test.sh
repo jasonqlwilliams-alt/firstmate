@@ -63,6 +63,29 @@ test_scratch_cleanup_failure_changes_only_a_successful_exit() {
   pass "scratch cleanup failures preserve exit status and still clean independent fixtures"
 }
 
+test_custom_exit_chains_scratch_cleanup() {
+  local harness output rc status root
+  harness=$(fm_test_tmproot fm-test-custom-exit)
+  for status in 0 7; do
+    output=$(TMPDIR="$harness" env -u TREEHOUSE_ROOT -u FM_TREEHOUSE_SCRATCH_ROOT bash -uc '
+      . "$1"
+      cleanup() {
+        test -d "$TREEHOUSE_ROOT" || return 1
+        printf "custom cleanup ran\n"
+        return 9
+      }
+      trap '\''fm_test_cleanup_exit "$?" fm_test_cleanup_after cleanup'\'' EXIT
+      printf "%s\n" "$TREEHOUSE_ROOT" > "$3/root"
+      exit "$2"
+    ' _ "$LIB" "$status" "$harness" 2>&1) && rc=0 || rc=$?
+    expect_code "$status" "$rc" "custom cleanup preserves exit status $status"
+    assert_contains "$output" 'custom cleanup ran' "the suite cleanup ran before scratch removal"
+    root=$(cat "$harness/root") || fail "the child did not report its scratch root"
+    assert_absent "$root" "the custom exit left its scratch root behind"
+  done
+  pass "custom suite exits clean their scratch roots and preserve exit status"
+}
+
 test_fixture_root_gone_after_sigterm() {
   local harness dirfile child_dir pid tries
   harness=$(fm_test_tmproot fm-test-cleanup-sigterm-harness)
@@ -224,6 +247,7 @@ test_orphan_sweep_reaps_standalone_treehouse_scratch() {
 
 test_fixture_root_gone_after_normal_exit
 test_scratch_cleanup_failure_changes_only_a_successful_exit
+test_custom_exit_chains_scratch_cleanup
 test_fixture_root_gone_after_sigterm
 test_cleanup_registry_resists_precreation
 test_fixture_registration_failure_rolls_back_root

@@ -57,7 +57,7 @@ cleanup_all() {
   local status=$?
   [ -n "$SCRATCH" ] && rm -rf "$SCRATCH"
   herdr_safe_stop_and_delete "$SESSION"
-  exit "$status"
+  fm_test_cleanup_exit "$status" fm_test_cleanup
 }
 trap cleanup_all EXIT
 fm_herdr_lab_prepare "$SESSION" || fail "could not prepare isolated Herdr lab session"

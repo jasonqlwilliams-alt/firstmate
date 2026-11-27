@@ -34,7 +34,7 @@ cleanup_remote_job_fixture() {
   fi
   rm -rf -- "$TMP_ROOT"
 }
-trap cleanup_remote_job_fixture EXIT
+trap 'fm_test_cleanup_exit "$?" fm_test_cleanup_after cleanup_remote_job_fixture' EXIT
 
 cp "$ROOT/bin/fm-remote-job-lib.sh" "$ROOT/bin/fm-remote-job-worker.sh" \
   "$ROOT/bin/fm-remote-delta-read.sh" "$REMOTE_ROOT/bin/"

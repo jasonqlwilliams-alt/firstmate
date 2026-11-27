@@ -38,6 +38,7 @@ fail() {
       trap - EXIT
       exec 3>&- 2>/dev/null || true
       [ -z "$OMP_PID" ] || kill -TERM "$OMP_PID" 2>/dev/null || true
+      fm_test_cleanup_exit 1 fm_test_cleanup
     fi
   fi
   exit 1
@@ -93,7 +94,7 @@ cleanup() {
   reap_lab
   rm -rf "$LAB"
 }
-trap cleanup EXIT
+trap 'fm_test_cleanup_exit "$?" fm_test_cleanup_after cleanup' EXIT
 
 # --- lab checkout: the tracked tree plus this working tree's pending edits ----
 mkdir -p "$LAB"

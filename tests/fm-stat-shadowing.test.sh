@@ -24,8 +24,7 @@ if [ "$(uname)" != Darwin ]; then
   exit 0
 fi
 
-TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-stat-shadowing.XXXXXX") || exit 1
-trap 'rm -rf "$TMP_ROOT"' EXIT
+TMP_ROOT=$(fm_test_tmproot fm-stat-shadowing) || exit 1
 
 # --- fake GNU stat that mimics ~/.local/bin/stat shadowing /usr/bin/stat -------
 

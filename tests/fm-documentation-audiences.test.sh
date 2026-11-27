@@ -7,8 +7,7 @@ set -u
 
 CHECK="$ROOT/bin/fm-doc-audience-check.sh"
 INVENTORY="$ROOT/docs/documentation-audiences.json"
-TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-doc-audiences.XXXXXX")
-trap 'rm -rf "$TMP_ROOT"' EXIT
+TMP_ROOT=$(fm_test_tmproot fm-doc-audiences) || exit 1
 
 run_expect_failure() {
   local expected=$1

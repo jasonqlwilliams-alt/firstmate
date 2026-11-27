@@ -43,7 +43,7 @@ cleanup_all() {
   "$REAL_TMUX" -L "$SOCKET" kill-server >/dev/null 2>&1 || true
   [ -n "${LAB:-}" ] && rm -rf "$LAB"
 }
-trap cleanup_all EXIT
+trap 'fm_test_cleanup_exit "$?" fm_test_cleanup_after cleanup_all' EXIT
 
 mkdir -p "$LAB/shim" "$LAB/wt"
 cat > "$LAB/shim/tmux" <<SH
@@ -149,6 +149,3 @@ if [ -n "$SKIPPED" ]; then
   note "unverified on this machine (not installed):$SKIPPED"
 fi
 note "checked $CHECKED installed harness(es)"
-
-cleanup_all
-trap - EXIT

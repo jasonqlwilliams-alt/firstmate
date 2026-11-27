@@ -45,7 +45,7 @@ cleanup() {
     rc=1
   fi
   rm -rf "$TMP_ROOT"
-  exit "$rc"
+  fm_test_cleanup_exit "$rc" fm_test_cleanup
 }
 trap cleanup EXIT
 

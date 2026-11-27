@@ -9,8 +9,7 @@ set -u
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-tmux-lib.sh"
 
-TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-tmux-submit-busy.XXXXXX")
-trap 'rm -rf "$TMP_ROOT"' EXIT
+TMP_ROOT=$(fm_test_tmproot fm-tmux-submit-busy) || exit 1
 
 make_submit_mock() {
   local dir=$1 fakebin="$1/fakebin"

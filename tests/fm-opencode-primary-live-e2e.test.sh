@@ -107,7 +107,7 @@ cleanup() {
   fi
   rm -rf "$LAB"
 }
-trap cleanup EXIT
+trap 'fm_test_cleanup_exit "$?" fm_test_cleanup_after cleanup' EXIT
 
 run_ahoy_case() {
   local label=$1 preceding=$2 expected=$3 db="$LAB/opencode-$1.db"
