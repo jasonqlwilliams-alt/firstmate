@@ -1,0 +1,283 @@
+Firstmate CLI with isolated home, tmux socket, PID namespace, and network namespace
+Base 86a565ae333826e488621eb87177596508835b3c
+Target 961ecbfdc385421fb178b20cb62b3f485e332b01
+tmux tmux 3.7c
+Codex WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/user/.codex"))
+codex-cli 0.172.0
+
+## base
+
+### Base reproducer for a private root recorded with a trailing slash
+tasktmp=/tmp/cases/base-private/private/
+@1
+$ {run-worktree}/.tasktmp-validation/base/bin/fm-teardown.sh base-private
+/tmp/cases/base-private/missing: skipped: not a directory
+teardown base-private complete (window firstmate:fm-base-private, worktree /tmp/cases/base-private/missing)
+Backlog: base-private just finished (config/backlog-backend selects manual editing). Update /tmp/cases/base-private/primary/data/backlog.md - move base-private to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+Observed orphaned artifact /tmp/cases/base-private/private/gotmp/artifact after cleanup retired the record
+
+### Base reproducer for a shared fixed root recorded through a parent alias
+tasktmp=/tmp/cases/base-shared/alias/fm-base-shared
+detached process pid=538 cwd=/tmp/fm-base-shared/gotmp
+@2
+$ {run-worktree}/.tasktmp-validation/base/bin/fm-teardown.sh base-shared
+teardown: reaping leaked worktree process(es) for base-shared: 538
+/tmp/cases/base-shared/missing: skipped: not a directory
+teardown base-shared complete (window firstmate:fm-base-shared, worktree /tmp/cases/base-shared/missing)
+Backlog: base-shared just finished (config/backlog-backend selects manual editing). Update /tmp/cases/base-shared/primary/data/backlog.md - move base-shared to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+detached process pid=538 wait_status=143
+Observed shared root removed and its detached process terminated
+Scenario harness exit 0 for base
+
+## private
+
+### Target cleanup of a private root using trailing
+tasktmp=/tmp/cases/private-trailing/scratch space/private/
+recorded directory device=2096 inode=7894580
+@1
+$ {run-worktree}/bin/fm-teardown.sh private-trailing
+/tmp/cases/private-trailing/missing: skipped: not a directory
+teardown private-trailing complete (window firstmate:fm-private-trailing, worktree /tmp/cases/private-trailing/missing)
+Backlog: private-trailing just finished (config/backlog-backend selects manual editing). Update /tmp/cases/private-trailing/primary/data/backlog.md - move private-trailing to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+Observed private root removed, record retired, and endpoint closed
+
+### Target cleanup of a private root using doubled
+tasktmp=/tmp/cases/private-doubled/scratch space//private
+recorded directory device=2096 inode=7894592
+@2
+$ {run-worktree}/bin/fm-teardown.sh private-doubled
+/tmp/cases/private-doubled/missing: skipped: not a directory
+teardown private-doubled complete (window firstmate:fm-private-doubled, worktree /tmp/cases/private-doubled/missing)
+Backlog: private-doubled just finished (config/backlog-backend selects manual editing). Update /tmp/cases/private-doubled/primary/data/backlog.md - move private-doubled to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+Observed private root removed, record retired, and endpoint closed
+
+### Target cleanup of a private root using dot
+tasktmp=/tmp/cases/private-dot/scratch space/./private/.
+recorded directory device=2096 inode=7894603
+@3
+$ {run-worktree}/bin/fm-teardown.sh private-dot
+/tmp/cases/private-dot/missing: skipped: not a directory
+teardown private-dot complete (window firstmate:fm-private-dot, worktree /tmp/cases/private-dot/missing)
+Backlog: private-dot just finished (config/backlog-backend selects manual editing). Update /tmp/cases/private-dot/primary/data/backlog.md - move private-dot to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+Observed private root removed, record retired, and endpoint closed
+
+### Target cleanup of a private root using linked
+tasktmp=/tmp/cases/private-linked/alias/private/
+recorded directory device=2096 inode=7894620
+@4
+detached process pid=2633 cwd=/tmp/cases/private-linked/scratch space/private/gotmp
+$ {run-worktree}/bin/fm-teardown.sh private-linked
+teardown: reaping leaked worktree process(es) for private-linked: 2633
+/tmp/cases/private-linked/missing: skipped: not a directory
+teardown private-linked complete (window firstmate:fm-private-linked, worktree /tmp/cases/private-linked/missing)
+Backlog: private-linked just finished (config/backlog-backend selects manual editing). Update /tmp/cases/private-linked/primary/data/backlog.md - move private-linked to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+detached process pid=2633 wait_status=143
+Observed private root removed, record retired, and endpoint closed
+
+### Target cleanup of a private root using dotdot
+tasktmp=/tmp/cases/private-dotdot/via-link/../private
+recorded directory device=2096 inode=7894634
+@5
+$ {run-worktree}/bin/fm-teardown.sh private-dotdot
+/tmp/cases/private-dotdot/missing: skipped: not a directory
+teardown private-dotdot complete (window firstmate:fm-private-dotdot, worktree /tmp/cases/private-dotdot/missing)
+Backlog: private-dotdot just finished (config/backlog-backend selects manual editing). Update /tmp/cases/private-dotdot/primary/data/backlog.md - move private-dotdot to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+Observed private root removed, record retired, and endpoint closed
+Scenario harness exit 0 for private
+
+## shared
+
+### Target cleanup of a task referencing the shared fixed root using exact
+detached process pid=3739 cwd=/tmp/fm-shared-exact/gotmp
+@1
+$ {run-worktree}/bin/fm-teardown.sh shared-exact
+/tmp/cases/shared-exact/missing: skipped: not a directory
+teardown shared-exact complete (window firstmate:fm-shared-exact, worktree /tmp/cases/shared-exact/missing)
+Backlog: shared-exact just finished (config/backlog-backend selects manual editing). Update /tmp/cases/shared-exact/primary/data/backlog.md - move shared-exact to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+Observed retained artifact and surviving detached process 3739 after record retirement
+
+### Target cleanup of a task referencing the shared fixed root using doubled
+tasktmp=/tmp//fm-shared-doubled
+detached process pid=4240 cwd=/tmp/fm-shared-doubled/gotmp
+@2
+$ {run-worktree}/bin/fm-teardown.sh shared-doubled
+/tmp/cases/shared-doubled/missing: skipped: not a directory
+teardown shared-doubled complete (window firstmate:fm-shared-doubled, worktree /tmp/cases/shared-doubled/missing)
+Backlog: shared-doubled just finished (config/backlog-backend selects manual editing). Update /tmp/cases/shared-doubled/primary/data/backlog.md - move shared-doubled to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+Observed retained artifact and surviving detached process 4240 after record retirement
+
+### Target cleanup of a task referencing the shared fixed root using dot
+tasktmp=/tmp/./fm-shared-dot/.
+detached process pid=4736 cwd=/tmp/fm-shared-dot/gotmp
+@3
+$ {run-worktree}/bin/fm-teardown.sh shared-dot
+/tmp/cases/shared-dot/missing: skipped: not a directory
+teardown shared-dot complete (window firstmate:fm-shared-dot, worktree /tmp/cases/shared-dot/missing)
+Backlog: shared-dot just finished (config/backlog-backend selects manual editing). Update /tmp/cases/shared-dot/primary/data/backlog.md - move shared-dot to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+Observed retained artifact and surviving detached process 4736 after record retirement
+
+### Target cleanup of a task referencing the shared fixed root using trailing
+tasktmp=/tmp/fm-shared-trailing/
+detached process pid=5232 cwd=/tmp/fm-shared-trailing/gotmp
+@4
+$ {run-worktree}/bin/fm-teardown.sh shared-trailing
+/tmp/cases/shared-trailing/missing: skipped: not a directory
+teardown shared-trailing complete (window firstmate:fm-shared-trailing, worktree /tmp/cases/shared-trailing/missing)
+Backlog: shared-trailing just finished (config/backlog-backend selects manual editing). Update /tmp/cases/shared-trailing/primary/data/backlog.md - move shared-trailing to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+Observed retained artifact and surviving detached process 5232 after record retirement
+
+### Target cleanup of a task referencing the shared fixed root using linked
+tasktmp=/tmp/cases/shared-linked/alias/fm-shared-linked/
+detached process pid=5729 cwd=/tmp/fm-shared-linked/gotmp
+@5
+$ {run-worktree}/bin/fm-teardown.sh shared-linked
+/tmp/cases/shared-linked/missing: skipped: not a directory
+teardown shared-linked complete (window firstmate:fm-shared-linked, worktree /tmp/cases/shared-linked/missing)
+Backlog: shared-linked just finished (config/backlog-backend selects manual editing). Update /tmp/cases/shared-linked/primary/data/backlog.md - move shared-linked to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+Observed retained artifact and surviving detached process 5729 after record retirement
+
+### Target cleanup of a task referencing the shared fixed root using dotdot
+tasktmp=/tmp/cases/shared-dotdot/via-link/../fm-shared-dotdot
+detached process pid=6227 cwd=/tmp/fm-shared-dotdot/gotmp
+@6
+$ {run-worktree}/bin/fm-teardown.sh shared-dotdot
+/tmp/cases/shared-dotdot/missing: skipped: not a directory
+teardown shared-dotdot complete (window firstmate:fm-shared-dotdot, worktree /tmp/cases/shared-dotdot/missing)
+Backlog: shared-dotdot just finished (config/backlog-backend selects manual editing). Update /tmp/cases/shared-dotdot/primary/data/backlog.md - move shared-dotdot to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+Observed retained artifact and surviving detached process 6227 after record retirement
+Scenario harness exit 0 for shared
+
+## reuse
+
+### Target relaunch reuses a private root through a stable parent alias and ..
+tasktmp=/tmp/cases/reuse-relaunch/via-link/../private
+$ relaunch reuse-relaunch
+relaunched reuse-relaunch harness=codex from=codex model=default effort=default backend=tmux endpoint=firstmate:fm-reuse-relaunch worktree=/tmp/cases/reuse-relaunch/mate
+exit=0
+tmux pane %1 160x45
+running codex pid=7683 GOTMPDIR=/tmp/cases/reuse-relaunch/scratch space/private/gotmp
+tasktmp=/tmp/cases/reuse-relaunch/via-link/../private
+Observed existing artifact from the original directory at /tmp/cases/reuse-relaunch/scratch space/private/gotmp/artifact
+
+### Target recovery reuses a private root through a stable parent alias and ..
+tasktmp=/tmp/cases/reuse-recovery/via-link/../private
+$ {run-worktree}/bin/fm-spawn.sh reuse-recovery --secondmate
+spawned reuse-recovery harness=codex kind=secondmate mode=secondmate yolo=off window=firstmate:fm-reuse-recovery worktree=/tmp/cases/reuse-recovery/mate
+exit=0
+tmux pane %2 160x45
+running codex pid=8492 GOTMPDIR=/tmp/cases/reuse-recovery/scratch space/private/gotmp
+tasktmp=/tmp/cases/reuse-recovery/via-link/../private
+Observed existing artifact from the original directory at /tmp/cases/reuse-recovery/scratch space/private/gotmp/artifact
+Scenario harness exit 0 for reuse
+
+## fresh
+
+### Target recovery allocates fresh scratch for shared-linked
+tasktmp=/tmp/cases/fresh-shared-linked/alias/fm-fresh-shared-linked/
+$ {run-worktree}/bin/fm-spawn.sh fresh-shared-linked --secondmate
+spawned fresh-shared-linked harness=codex kind=secondmate mode=secondmate yolo=off window=firstmate:fm-fresh-shared-linked worktree=/tmp/cases/fresh-shared-linked/mate
+exit=0
+tmux pane %1 160x45
+running codex pid=9254 GOTMPDIR=/tmp/fm-fresh-shared-linked+CQR6Nr/gotmp
+tasktmp=/tmp/fm-fresh-shared-linked+CQR6Nr
+
+### Target recovery allocates fresh scratch for shared-dotdot
+tasktmp=/tmp/cases/fresh-shared-dotdot/via-link/../fm-fresh-shared-dotdot
+$ {run-worktree}/bin/fm-spawn.sh fresh-shared-dotdot --secondmate
+spawned fresh-shared-dotdot harness=codex kind=secondmate mode=secondmate yolo=off window=firstmate:fm-fresh-shared-dotdot worktree=/tmp/cases/fresh-shared-dotdot/mate
+exit=0
+tmux pane %2 160x45
+running codex pid=9984 GOTMPDIR=/tmp/fm-fresh-shared-dotdot+Zfv7qV/gotmp
+tasktmp=/tmp/fm-fresh-shared-dotdot+Zfv7qV
+
+### Target recovery allocates fresh scratch for relative
+tasktmp=private
+$ {run-worktree}/bin/fm-spawn.sh fresh-relative --secondmate
+spawned fresh-relative harness=codex kind=secondmate mode=secondmate yolo=off window=firstmate:fm-fresh-relative worktree=/tmp/cases/fresh-relative/mate
+exit=0
+tmux pane %3 160x45
+running codex pid=10718 GOTMPDIR=/tmp/fm-fresh-relative+Kwcz41/gotmp
+tasktmp=/tmp/fm-fresh-relative+Kwcz41
+@4
+$ {run-worktree}/bin/fm-teardown.sh fresh-relative
+/tmp/cases/fresh-relative/missing: skipped: not a directory
+teardown fresh-relative complete (window firstmate:fm-fresh-relative, worktree /tmp/cases/fresh-relative/missing)
+Backlog: fresh-relative just finished (config/backlog-backend selects manual editing). Update /tmp/cases/fresh-relative/primary/data/backlog.md - move fresh-relative to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+Observed preserved artifact after cleanup using the ineligible spelling
+
+### Target recovery allocates fresh scratch for leafsymlink
+tasktmp=/tmp/cases/fresh-leafsymlink/leaf/./
+$ {run-worktree}/bin/fm-spawn.sh fresh-leafsymlink --secondmate
+spawned fresh-leafsymlink harness=codex kind=secondmate mode=secondmate yolo=off window=firstmate:fm-fresh-leafsymlink worktree=/tmp/cases/fresh-leafsymlink/mate
+exit=0
+tmux pane %5 160x45
+running codex pid=11952 GOTMPDIR=/tmp/fm-fresh-leafsymlink+5o2Bcq/gotmp
+tasktmp=/tmp/fm-fresh-leafsymlink+5o2Bcq
+@6
+$ {run-worktree}/bin/fm-teardown.sh fresh-leafsymlink
+/tmp/cases/fresh-leafsymlink/missing: skipped: not a directory
+teardown fresh-leafsymlink complete (window firstmate:fm-fresh-leafsymlink, worktree /tmp/cases/fresh-leafsymlink/missing)
+Backlog: fresh-leafsymlink just finished (config/backlog-backend selects manual editing). Update /tmp/cases/fresh-leafsymlink/primary/data/backlog.md - move fresh-leafsymlink to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+Observed preserved artifact after cleanup using the ineligible spelling
+
+### Target recovery allocates fresh scratch for finaldotdot
+tasktmp=/tmp/cases/fresh-finaldotdot/private/via/..
+$ {run-worktree}/bin/fm-spawn.sh fresh-finaldotdot --secondmate
+spawned fresh-finaldotdot harness=codex kind=secondmate mode=secondmate yolo=off window=firstmate:fm-fresh-finaldotdot worktree=/tmp/cases/fresh-finaldotdot/mate
+exit=0
+tmux pane %7 160x45
+running codex pid=13189 GOTMPDIR=/tmp/fm-fresh-finaldotdot+Bu5Vwr/gotmp
+tasktmp=/tmp/fm-fresh-finaldotdot+Bu5Vwr
+@8
+$ {run-worktree}/bin/fm-teardown.sh fresh-finaldotdot
+/tmp/cases/fresh-finaldotdot/missing: skipped: not a directory
+teardown fresh-finaldotdot complete (window firstmate:fm-fresh-finaldotdot, worktree /tmp/cases/fresh-finaldotdot/missing)
+Backlog: fresh-finaldotdot just finished (config/backlog-backend selects manual editing). Update /tmp/cases/fresh-finaldotdot/primary/data/backlog.md - move fresh-finaldotdot to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+Observed preserved artifact after cleanup using the ineligible spelling
+
+### Target recovery allocates fresh scratch for newline
+tasktmp=/tmp/cases/fresh-newline/alias/private
+$ {run-worktree}/bin/fm-spawn.sh fresh-newline --secondmate
+spawned fresh-newline harness=codex kind=secondmate mode=secondmate yolo=off window=firstmate:fm-fresh-newline worktree=/tmp/cases/fresh-newline/mate
+exit=0
+tmux pane %9 160x45
+running codex pid=14433 GOTMPDIR=/tmp/fm-fresh-newline+NmSK8w/gotmp
+tasktmp=/tmp/fm-fresh-newline+NmSK8w
+@10
+$ {run-worktree}/bin/fm-teardown.sh fresh-newline
+/tmp/cases/fresh-newline/missing: skipped: not a directory
+teardown fresh-newline complete (window firstmate:fm-fresh-newline, worktree /tmp/cases/fresh-newline/missing)
+Backlog: fresh-newline just finished (config/backlog-backend selects manual editing). Update /tmp/cases/fresh-newline/primary/data/backlog.md - move fresh-newline to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+Observed preserved artifact after cleanup using the ineligible spelling
+Scenario harness exit 0 for fresh
+
+## forced
+
+### Target forced retirement applies ownership checks to child temp roots
+@1
+@2
+child-private tasktmp=/tmp/cases/forced/alias-child-private/child-private/.
+@3
+child-shared tasktmp=/tmp/cases/forced/alias-child-shared/fm-child-shared/.
+$ {run-worktree}/bin/fm-teardown.sh forced-mate --force
+teardown forced-mate complete (window firstmate:fm-forced-mate, worktree /tmp/cases/forced/mate)
+exit=0
+Observed mate home, child windows, and private root removed. Shared artifact retained at /tmp/fm-child-shared/gotmp/artifact
+Scenario harness exit 0 for forced

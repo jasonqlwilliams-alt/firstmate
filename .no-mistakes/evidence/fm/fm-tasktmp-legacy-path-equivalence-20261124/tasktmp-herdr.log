@@ -1,0 +1,15 @@
+Private Herdr session fm-lab-tasktmp-abort-29-8882
+Herdr version 0.9.5
+$ bin/fm-spawn.sh herdr-abort /tmp/cases/herdr-abort/mate --secondmate
+spawned herdr-abort harness=codex kind=secondmate mode=secondmate yolo=off window=fm-lab-tasktmp-abort-29-8882:w1:p2 worktree=/tmp/cases/herdr-abort/mate
+{"id":"cli:pane:close","result":{"type":"ok"}}
+Closed initial pane w1:p2 to simulate a missing secondmate endpoint
+$ bin/fm-spawn.sh herdr-abort --secondmate
+error: task record for herdr-abort could not be published (temporary directory changed before metadata publication)
+warning: task herdr-abort's temporary directory remains at /tmp/cases/herdr-abort/old-parent/task; inspect it after closing endpoint fm-lab-tasktmp-abort-29-8882:w2:p2
+exit=1
+error: task record for herdr-abort could not be published (temporary directory changed before metadata publication)
+{"agent_status":"unknown","focused":true,"label":"fm-herdr-abort","number":2,"pane_count":1,"tab_id":"w2:t2","workspace_id":"w2"}
+Post-refusal tab inventory
+{"error":{"code":"workspace_not_found","message":"workspace w2 not found"},"id":"cli:tab:list"}
+Observed creation and removal of the real replacement Herdr tab w2:t2 and byte-identical prior record

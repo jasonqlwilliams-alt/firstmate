@@ -1,0 +1,84 @@
+Firstmate CLI with isolated home, tmux socket, PID namespace, and network namespace
+Base 86a565ae333826e488621eb87177596508835b3c
+Target 961ecbfdc385421fb178b20cb62b3f485e332b01
+tmux tmux 3.7c
+Codex WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/user/.codex"))
+codex-cli 0.172.0
+
+## scan_race
+
+### Directory identity changes while real lsof is enumerating working directories
+@1
+detached process pid=63 cwd=/tmp/cases/scan-race/old-parent/task/gotmp
+detached process pid=75 cwd=/tmp/cases/scan-race/new-parent/task/gotmp
+$ {run-worktree}/bin/fm-teardown.sh scan-race
+REFUSED: task scan-race's temporary directory changed during the process scan.
+exit=1
+Alias switched to /tmp/cases/scan-race/new-parent at real lsof invocation
+Observed both artifacts and both detached processes preserved. Prior task record is byte-identical.
+Scenario harness exit 0 for scan_race
+
+## inspect
+
+### Directory loses search permission at initial inspection
+@1
+$ {run-worktree}/bin/fm-teardown.sh inspect-initial
+REFUSED: cannot inspect task temporary directory /tmp/cases/inspect-initial/scratch/private for inspect-initial; retaining the task record.
+exit=1
+Observed preserved build artifact and byte-identical task record after the inspection error
+
+### Directory loses search permission at late inspection
+@2
+$ {run-worktree}/bin/fm-teardown.sh inspect-late
+REFUSED: cannot inspect task temporary directory /tmp/cases/inspect-late/scratch/private for inspect-late; retaining the task record.
+exit=1
+Search permission revoked after real tmux closed the task window
+Observed preserved build artifact and byte-identical task record after the inspection error
+Scenario harness exit 0 for inspect
+
+## abort_before_publication
+
+### Refused launch and real tmux window ownership in owned case
+$ {run-worktree}/bin/fm-spawn.sh abort-owned --secondmate
+error: task record for abort-owned could not be published (temporary directory changed before metadata publication)
+warning: task abort-owned's temporary directory remains at /tmp/cases/abort-owned/old-parent/task; inspect it after closing endpoint firstmate:fm-abort-owned
+exit=1
+Current real tmux windows
+@0 helm
+Window created by this attempt @1
+Observed byte-identical prior task record and expected remaining windows
+
+### Refused launch and real tmux window ownership in reassigned case
+$ {run-worktree}/bin/fm-spawn.sh abort-reassigned --secondmate
+error: task record for abort-reassigned could not be published (temporary directory changed before metadata publication)
+warning: task abort-reassigned's temporary directory remains at /tmp/cases/abort-reassigned/old-parent/task; inspect it after closing endpoint firstmate:fm-abort-reassigned
+exit=1
+Current real tmux windows
+@0 helm
+@3 fm-abort-reassigned
+Window created by this attempt @2
+Same-named window created by another synthetic home @3
+Observed byte-identical prior task record and expected remaining windows
+
+### Refused launch and real tmux window ownership in fresh-allocation case
+$ {run-worktree}/bin/fm-spawn.sh abort-fresh-allocation --secondmate
+Injected fresh scratch allocation failure
+error: could not create a private task temp root under /tmp for abort-fresh-allocation
+exit=1
+Current real tmux windows
+@0 helm
+@4 fm-abort-fresh-allocation
+Observed byte-identical prior task record and expected remaining windows
+
+### Refused launch and real tmux window ownership in relaunch-owned case
+$ relaunch abort-relaunch-owned
+error: replacement task record for abort-relaunch-owned could not be published (temporary directory changed before metadata publication)
+warning: task abort-relaunch-owned's temporary directory remains at /tmp/cases/abort-relaunch-owned/old-parent/task; inspect it after closing endpoint firstmate:fm-abort-relaunch-owned
+error: the replacement agent for abort-relaunch-owned could not be launched on codex
+error: abort-relaunch-owned's agent was stopped but the replacement did not launch; no agent is running, and its work plus the recorded progress note are preserved at /tmp/cases/abort-relaunch-owned/mate
+exit=1
+Current real tmux windows
+@0 helm
+Window created by this attempt @5
+Observed byte-identical prior task record and expected remaining windows
+Scenario harness exit 0 for abort_before_publication
