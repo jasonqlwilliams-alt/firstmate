@@ -37,6 +37,10 @@ SH
   cat > "$fake/tmux" <<'SH'
 #!/usr/bin/env bash
 case "${1:-}" in
+  list-windows)
+    if [ "${5:-}" = '#{==:#{session_name}:#{window_name},firstmate:fm-mate}' ]; then
+      printf '@1\n'
+    fi ;;
   display-message) printf '%%1\n' ;;
   capture-pane) printf 'idle\n> \n' ;;
 esac

@@ -545,7 +545,8 @@ nm_ci_checks_state() {
 # task copy never fetched used to be rejected here, letting the older failed row
 # answer as current), so both attribution routes share one rule.
 # The same reader is also consulted when `axi status` DID bind this branch's run
-# but that run is terminal, to find a live sibling run for this worktree.
+# but that run is terminal, to find a live sibling or select evidence for a
+# cancelled run.
 nm_runs_list() {
   TZ=UTC nm_run runs --limit "$FM_CREW_STATE_RUNS_LIMIT"
 }

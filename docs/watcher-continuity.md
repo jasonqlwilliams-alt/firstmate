@@ -57,6 +57,18 @@ No adapter starts a replacement with shell `&`.
 
 The turn-end guard remains the final backstop rather than the normal continuity mechanism and cooperates with the auto-arm in its `--claude` mode.
 
+## Inactive validation outcomes
+
+The inactive-outcome scan reports `run cancelled; registered PR awaiting a merge decision` in the supervisor wake or secondmate parent report when the child deliberately cancelled validation because the repository registers no CI.
+The selected cancelled run and the child's latest `paused:` line must name the same full PR URL as the active registration, and the run must have started in an earlier UTC minute than the pause.
+The [reconciler header](../bin/fm-inactive-reconcile.sh) gives the pause syntax.
+The scan uses local PR records without querying the forge.
+If the scan finds a recorded merge, a valid merge-poll retirement receipt, or a recorded closure while preparing the first notice, it uses failure wording.
+A recorded closure still counts after a reopen.
+An already published cancellation notice stays deduplicated after closure or merge.
+Other cancellations and genuine failures use ordinary failure reporting, with a separate receipt from the cancellation notice so a later failure can still surface.
+The [inactive reconciliation regressions](../tests/fm-inactive-reconcile.test.sh) cover both notification routes, PR lifecycle changes, and later failures.
+
 ## Recorded endpoint loss
 
 When the backend confirms that a local task's recorded endpoint is missing, the watcher clears pause tracking.

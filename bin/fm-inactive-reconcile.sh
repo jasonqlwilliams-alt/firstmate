@@ -49,13 +49,10 @@
 # fm-crew-state.sh as the sole current-state source.
 # Only a done or failed state is suspicious enough to create a durable terminal
 # outcome record or wake the supervisor.
-# The wake and parent report say "run cancelled; registered PR awaiting a merge
-# decision" when the child declares the no-CI cancellation after the selected
-# run started, and the run and paused line match the armed PR registration.
-# Declaration: paused: PR <full registered URL> open; awaiting merge; cancelled because CI never registers on this repository
-# Local merge, closure, or retirement records disqualify the PR.
-# A recorded closure also disqualifies a reopened PR.
-# Other failed readings still report.
+# See docs/watcher-continuity.md#inactive-validation-outcomes for notification rules.
+# The note in a no-CI pause begins with "PR <full registered URL> open; " and ends with
+# "; cancelled because CI never registers on this repository". For example:
+#   paused: PR <full registered URL> open; awaiting merge; cancelled because CI never registers on this repository
 # Working, paused, parked, blocked, unknown, persistent secondmates, and
 # captain-held work retain their existing supervision semantics.
 #
