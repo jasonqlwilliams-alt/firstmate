@@ -381,18 +381,16 @@ inbox_steer_escalate_unavailable() {  # <window> <task> <record>
 # Steering-inbox loss detection, one cheap check per recorded window per poll.
 # Quiet when healthy: an absent, empty, or handled inbox costs one directory
 # glob and produces nothing. When the ladder (fm_task_inbox_due_action, the
-# policy owner) reports a due action, a busy pane just waits - the record is
-# durable and the worker will reach a turn boundary - an idle pane gets one
-# delivery attempt, and a spent attempt budget surfaces as an ordinary stale
-# wake for stuck-crewmate-recovery, and a pane whose agent is positively dead
+# policy owner) reports a due action, a bound busy pane waits for a turn
+# boundary. See docs/tmux-backend.md for inconclusive binding behavior.
+# A spent attempt budget surfaces as an ordinary stale wake for
+# stuck-crewmate-recovery, and a pane whose agent is positively dead
 # or missing skips the ladder altogether: it is never typed into and surfaces
 # as that same stale wake exactly once. If the attempt's ladder write fails while
 # its record remains unhandled, that unwritable state surfaces through the same
 # stale path instead of silently re-ringing forever; acknowledgement or teardown
-# still makes the race quiet. The attempt is data-plane typing or a refusal
-# by the ring's per-harness screen gate (bin/fm-task-inbox-lib.sh
-# fm_task_inbox_ring), never a wake, so normal retries keep the watcher
-# blocking. Runs for secondmates
+# still makes the race quiet. Normal retries keep the watcher blocking.
+# Runs for secondmates
 # too: their pane-staleness exemption is about quiet panes being healthy,
 # while an unacknowledged instruction past the ladder is a stuck steer.
 inbox_steer_check() {  # <window> <task> <backend>

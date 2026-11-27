@@ -52,14 +52,14 @@ For a recorded `session:window` target, Firstmate matches both names literally i
 If the recorded `fm-mate` window closes while `fm-mate2` remains open, `fm-peek` reports the recorded window missing.
 An inconclusive inventory or matches to multiple distinct windows leave the endpoint unreadable.
 On a tmux server with `exit-empty off`, a server with no remaining sessions may leave a closed endpoint unreadable until the server has a session again or stops.
-During a guarded operation, liveness, capture, and input use the same pane binding even if the active split or a window or pane index changes.
-Each guarded tmux command checks the server, session, window, and pane identities in its target context.
+Within a guarded operation, liveness checks, capture, input, and any window close use the same pane binding even if the active split or a window or pane index changes.
+Each guarded tmux command checks the server, session, and window identities and verifies that the bound pane still belongs to that window.
 A guarded command refuses if the bound pane moves to another window, the recorded session loses its window link, or tmux restarts on the same socket.
-Guarded input refuses while tmux reports `synchronize-panes` enabled for the bound pane and leaves that option as configured.
-For an ordinary text steer, the refusal leaves the instruction queued in the durable inbox.
-Teardown resolves the recorded target through the same inventory, and recovery and failed-spawn cleanup use their existing bindings.
+Guarded input checks the bound pane's effective `synchronize-panes` setting, even when a different split is active, and refuses input while that setting is on.
+The guard leaves the operator's tmux settings intact.
+If the recorded tmux target is ambiguous or its inventory is inconclusive, a due doorbell attempt counts toward the watcher's retry limit without sending input, and the instruction stays queued for recovery.
 Explicit pane selectors such as `session:0.1` use native tmux syntax when they do not resolve to task metadata.
-Spawn uses the binding returned by tmux when it creates the worker pane for startup reads and input.
+Spawn uses the binding returned by tmux at pane creation for startup reads, input, and any cleanup close.
 [`fm-tmux-lib.sh`](../bin/fm-tmux-lib.sh) owns the binding, and [`fm-tmux-exact-target.test.sh`](../tests/fm-tmux-exact-target.test.sh) exercises it with a private tmux server.
 
 ### Agent liveness probe
@@ -102,10 +102,11 @@ The one remaining rendered-tail reader is Grok's isolated fallback inside that c
 The submit acknowledgement and away-mode supervisor-pane busy guard below still consult rendered output, but only to decide whether input can be delivered, never to decide recorded task state.
 The supervisor guard selects only the detected primary harness's signature rather than a global union of vendor patterns.
 
-[Recorded pane targeting](#recorded-pane-targeting) also applies to named keys and verified submits.
+[Recorded pane targeting](#recorded-pane-targeting) also applies to inbox doorbells, named keys, and verified submits.
 `bin/fm-tmux-lib.sh` owns type-and-submit verification.
-It types a message once and retries Enter only until the composer clears.
-Only a proven empty composer is a positive delivery acknowledgement.
+It types a message once and retries Enter within the attempt budget while the composer reads `pending` or `pending-unproven`.
+If sending Enter fails, the submit reports `unknown` immediately.
+A composer proven empty confirms delivery.
 Text left in established structure remains `pending`, text in ambiguous structure remains unproven, and unreadable or unsafe state remains unknown.
 An ordinary local `fm-send.sh` text steer and every remote text steer no longer ride this verified submit at all: they become durable steering-inbox records plus best-effort constant doorbell lines (`bin/fm-task-inbox-lib.sh`).
 The verdicts above are delivery-critical only for the local typed plane - harness-native invocations and explicit backend targets - where `fm-send.sh` still never retypes or assumes a confirmed submit for an unconfirmed verdict; its header owns the distinct delivered-unconfirmed exit status and operator response.

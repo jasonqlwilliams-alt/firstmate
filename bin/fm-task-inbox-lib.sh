@@ -327,7 +327,8 @@ fm_task_inbox_doorbell_line() {  # <record-path> [harness]
 #   1 refused before typing: the screen did not allow typing (pending
 #     composer text, Claude's exit confirmation, a Codex, Rovo, or agy composer
 #     without empty proof, or an agy row too narrow for the doorbell)
-#   2 the notice could not be built or the backend send failed
+#   2 the tmux binding was inconclusive, the notice could not be built, or the
+#     backend send failed
 #   3 the endpoint is positively dead or missing (nothing typed; recovery owns
 #     the record)
 #   4 refused: the Codex global-update picker is on screen; no Enter was sent
