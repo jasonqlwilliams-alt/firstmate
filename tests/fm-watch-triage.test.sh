@@ -3128,7 +3128,7 @@ SH
             "$dir/drained" || fail "$order: drain lost the wake keyed to the shared pane: $rows"
         done
       else
-        assert_absent "$state/$lost.missing-endpoint" "$order: an ambiguous Zellij replacement was treated as lost"
+        assert_absent "$state/$lost.missing-endpoint" "$order: Zellij reported a loss it cannot confirm after pane reuse"
         ack_stopped_cycle "$state" || fail "$backend $order: could not acknowledge the live task's stale wake"
       fi
 
