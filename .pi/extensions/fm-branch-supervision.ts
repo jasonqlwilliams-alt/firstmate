@@ -101,6 +101,8 @@ import {
   FM_BRANCH_DISPATCH_EVENT,
   releaseEligibleRowsSnapshot,
   scopeForUnreadWake,
+  staleWakeKey,
+  taskForWakeKey,
   writeEligibleRowsSnapshot,
   type BranchDispatchOffer,
 } from "./lib/fm-branch-dispatch.ts";
@@ -1416,6 +1418,10 @@ ${context.command}
         if (!(await actingAsOwner(acceptedGeneration))) throw new Error("supervision session no longer owns the fleet lock");
         const heartbeat = /^heartbeat($|:)/.test(message);
         const scope = scopeForUnreadWake(state, heartbeat);
+        const staleKey = staleWakeKey(message);
+        if (staleKey !== undefined && taskForWakeKey(scope.taskByWakeKey, staleKey) === null) {
+          throw new Error("the stale wake's window is recorded by multiple tasks");
+        }
         // A newly-arrived main-owned (check-kind) row never bounces this
         // whole recheck back to main - scopeForUnreadWake excludes it from
         // eligibleSeqs rather than vetoing the scan, in a heartbeat review as

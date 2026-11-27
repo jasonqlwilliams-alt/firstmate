@@ -1786,16 +1786,42 @@ const { dispatch, fire, home, mainUserMessages } = globalThis.__t;
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 await fire("session_start", {});
+const scenario = process.env.FM_TEST_SCENARIO;
+const stale = "stale: shared:w1:p2";
+const queuePath = `${home}/state/.wake-queue`;
+if (scenario === "second-loss" || scenario === "shared-trigger") {
+  writeFileSync(`${home}/state/z-live.meta`, `project=${home}/projects/live\nwindow=shared:w1:p2\n`);
+}
 let releasePrompt;
-globalThis.__fmPromptGate = new Promise((resolve) => { releasePrompt = resolve; });
-const offer = dispatch("signal: task-local wake");
+if (scenario !== "shared-trigger") {
+  globalThis.__fmPromptGate = new Promise((resolve) => { releasePrompt = resolve; });
+}
+const offer = dispatch(scenario === "shared-trigger" ? stale : "signal: task-local wake");
 if (!offer.accepted) throw new Error("eligible task-local offer was not accepted");
+if (scenario === "shared-trigger") {
+  const staleRow = `2\t2\tstale\tshared:w1:p2\t${stale}\n`;
+  writeFileSync(queuePath, "1\t1\tsignal\tbranch-driver.status\tsignal: branch-driver.status\n" + staleRow);
+  writeFileSync(`${home}/state/a-lost.meta`, "backend=herdr\nwindow=shared:w1:p2\n");
+  let rejected = false;
+  try {
+    await offer.settlement;
+  } catch {
+    rejected = true;
+  }
+  if (!rejected || (globalThis.__fmPrompts ?? []).length !== 0 ||
+    existsSync(`${home}/state/.branch-eligible-rows`)) {
+    throw new Error("a stale trigger that became ambiguous must fall back to main without opening a branch prompt");
+  }
+  if (!readFileSync(queuePath, "utf8").includes(staleRow)) {
+    throw new Error("the branch consumed a stale row that main must handle");
+  }
+  process.exit(0);
+}
 // A main-only notice arrives while main is still finishing its own earlier
 // turn - unacked, still sitting in the queue - between offer acceptance and
 // the branch's own drain.
-const queuePath = `${home}/state/.wake-queue`;
 let mainRows;
-if (process.env.FM_TEST_SCENARIO === "second-loss") {
+if (scenario === "second-loss") {
   const metadata = `project=${home}/projects/lost\nbackend=herdr\nwindow=shared:w1:p2\n`;
   const metaPath = `${home}/state/a-lost.meta`;
   const markerPath = `${home}/state/a-lost.missing-endpoint`;
@@ -1806,7 +1832,9 @@ if (process.env.FM_TEST_SCENARIO === "second-loss") {
   writeFileSync(metaPath, metadata + "spawn_gen=new\n");
   appendFileSync(queuePath, `3\t3\t${loss}\n`);
   writeFileSync(markerPath, "herdr:shared:w1:p2\tnew\n");
-  mainRows = [`2\t2\t${loss}`, `3\t3\t${loss}`];
+  const staleRow = `4\t4\tstale\tshared:w1:p2\t${stale}`;
+  appendFileSync(queuePath, staleRow + "\n");
+  mainRows = [`2\t2\t${loss}`, `3\t3\t${loss}`, staleRow];
 } else {
   mainRows = ["2\t2\tcheck\tx-inbox\tcheck: pending x mention"];
   appendFileSync(queuePath, mainRows[0] + "\n");
@@ -3887,8 +3915,8 @@ if (needsDecisionMixed.eligibleSeqs.join(",") !== "2") {
 if (needsDecisionMixed.needsDecisionKeys.join(",") !== "task-a.status") {
   throw new Error(`needsDecisionKeys must name the excluded row: ${JSON.stringify(needsDecisionMixed)}`);
 }
-if (needsDecisionMixed.taskByWakeKey["task-a.status"] !== "task-a" ||
-  needsDecisionMixed.taskByWakeKey["fm-window"] !== "task-a") {
+if (needsDecisionMixed.taskByWakeKey.get("task-a.status") !== "task-a" ||
+  needsDecisionMixed.taskByWakeKey.get("fm-window") !== "task-a") {
   throw new Error(`status and stale aliases did not resolve to one task: ${JSON.stringify(needsDecisionMixed)}`);
 }
 if (needsDecisionMixed.corrupted) {
@@ -4958,6 +4986,7 @@ test_branch_predrain_recheck_keeps_a_heartbeat_a_co_present_check_arrives_under
 test_branch_report_refuses_a_task_the_wake_did_not_name
 test_branch_predrain_recheck_excludes_new_main_owned_row_without_deferring_eligible_work check
 test_branch_predrain_recheck_excludes_new_main_owned_row_without_deferring_eligible_work second-loss
+test_branch_predrain_recheck_excludes_new_main_owned_row_without_deferring_eligible_work shared-trigger
 test_branch_predrain_needs_decision_keeps_routine_row_branch_eligible
 test_settled_branch_prompt_releases_unacknowledged_grant
 test_post_construction_provider_error_falls_back_latches_and_recovers_on_cooldown

@@ -63,7 +63,7 @@ export interface UnreadWakeScope {
    * to main.
    */
   needsDecisionKeys: string[];
-  taskByWakeKey: Record<string, string>;
+  taskByWakeKey: ReadonlyMap<string, string | null>;
 }
 
 const EMPTY_SCOPE: UnreadWakeScope = {
@@ -74,7 +74,7 @@ const EMPTY_SCOPE: UnreadWakeScope = {
   eligibleTasks: [],
   corrupted: false,
   needsDecisionKeys: [],
-  taskByWakeKey: {},
+  taskByWakeKey: new Map(),
 };
 const UNSAFE_SCOPE: UnreadWakeScope = {
   status: "unsafe",
@@ -84,7 +84,7 @@ const UNSAFE_SCOPE: UnreadWakeScope = {
   eligibleTasks: [],
   corrupted: true,
   needsDecisionKeys: [],
-  taskByWakeKey: {},
+  taskByWakeKey: new Map(),
 };
 
 // scopeForUnreadWake is the single owner of branch-eligibility classification
@@ -191,6 +191,18 @@ export function isNamedEndpointLoss(payload: string): boolean {
   return /^stale: \S+ \(the recorded endpoint is gone for task [A-Za-z0-9._-]+\)(?:\r?\n|$)/.test(payload);
 }
 
+export function staleWakeKey(message: string): string | undefined {
+  return /^stale:\s*(\S+)/.exec(message)?.[1];
+}
+
+export function taskForWakeKey(
+  tasks: UnreadWakeScope["taskByWakeKey"],
+  key: string,
+): string | null | undefined {
+  const exact = tasks.get(key);
+  return exact === undefined ? tasks.get(key.replace(/^fm-/, "")) : exact;
+}
+
 export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWakeScope {
   let queue = "";
   try {
@@ -206,7 +218,8 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
   const metadata = new Map<string, string>();
   // The task id behind each key a signal or stale row may carry: the task id
   // itself, or the endpoint its metadata records.
-  const taskByKey = new Map<string, string>();
+  const taskByKey = new Map<string, string | null>();
+  const windowClaimCounts = new Map<string, number>();
   try {
     for (const name of readdirSync(state)) {
       if (!name.endsWith(".meta")) continue;
@@ -214,6 +227,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
       const fields = readFileSync(`${state}/${name}`, "utf8").split(/\r?\n/);
       const project = fields.find((line) => line.startsWith("project="))?.slice(8) ?? "";
       const window = fields.find((line) => line.startsWith("window="))?.slice(7) ?? "";
+      if (window) windowClaimCounts.set(window, (windowClaimCounts.get(window) ?? 0) + 1);
       if (project) {
         metadata.set(task, project);
         taskByKey.set(task, task);
@@ -227,6 +241,9 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
     }
   } catch {
     return UNSAFE_SCOPE;
+  }
+  for (const [window, count] of windowClaimCounts) {
+    if (count > 1) taskByKey.set(window, null);
   }
 
   const eligibleSeqs: string[] = [];
@@ -271,7 +288,9 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
       project = metadata.get(task) ?? "";
     } else if (kind === "stale") {
       if (isNamedEndpointLoss(fields[4])) continue;
-      task = taskByKey.get(key) ?? taskByKey.get(key.replace(/^fm-/, "")) ?? "";
+      const owner = taskForWakeKey(taskByKey, key);
+      if (owner === null) continue;
+      task = owner ?? "";
       project = metadata.get(key) ?? metadata.get(key.replace(/^fm-/, "")) ?? "";
       if (task) {
         const statusPath = `${state}/${task}.status`;
@@ -338,7 +357,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
     eligibleTasks: [...eligibleTasks],
     corrupted: false,
     needsDecisionKeys,
-    taskByWakeKey: Object.fromEntries(taskByKey),
+    taskByWakeKey: taskByKey,
   };
 }
 

@@ -35,6 +35,8 @@ import {
   FM_BRANCH_DISPATCH_EVENT,
   isNamedEndpointLoss,
   scopeForUnreadWake,
+  staleWakeKey,
+  taskForWakeKey,
 } from "./lib/fm-branch-dispatch.ts";
 import {
   type CalmPresentationState,
@@ -614,20 +616,20 @@ export default function (pi: ExtensionAPI) {
     // unread decision row: until that row is read, a later signal or stale
     // trigger for the same task stays on main. Other tasks and heartbeat
     // handling remain independent.
+    const staleKey = staleWakeKey(message);
     const triggerKeys = /^signal:/.test(message)
       ? message
         .slice("signal:".length)
         .split(/\s+/)
         .filter(Boolean)
         .map((path) => path.split("/").pop() ?? path)
-      : /^stale:/.test(message)
-        ? [message.slice("stale:".length).trim().split(/\s+/, 1)[0]].filter(Boolean)
-        : [];
-    const taskIdentity = (key: string): string =>
-      scope.taskByWakeKey[key] ?? scope.taskByWakeKey[key.replace(/^fm-/, "")] ?? key;
+      : staleKey ? [staleKey] : [];
+    const taskIdentity = (key: string): string => taskForWakeKey(scope.taskByWakeKey, key) ?? key;
     const needsDecisionTasks = new Set(scope.needsDecisionKeys.map(taskIdentity));
     const isNeedsDecisionTrigger = triggerKeys.some((key) => needsDecisionTasks.has(taskIdentity(key)));
-    const eligible = !isCheckTrigger && !isNamedEndpointLoss(message) && !isNeedsDecisionTrigger && scope.eligible;
+    const isSharedPaneTrigger = staleKey !== undefined && taskForWakeKey(scope.taskByWakeKey, staleKey) === null;
+    const eligible = !isCheckTrigger && !isNamedEndpointLoss(message) && !isNeedsDecisionTrigger &&
+      !isSharedPaneTrigger && scope.eligible;
     const offer = createBranchDispatchOffer(message, scope.projects, heartbeat, eligible);
     pi.events?.emit?.(FM_BRANCH_DISPATCH_EVENT, offer);
     return offer.accepted ? offer.settlement : null;

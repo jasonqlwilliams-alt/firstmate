@@ -903,7 +903,7 @@ EOF
 # An unread second-mate pending-reply escalation keeps a later stale reminder
 # under the same task's window alias on main until the decision row is read.
 test_pi_stale_trigger_uses_its_task() {
-  local scenario=$1 dir repo home plugin log stop out status trigger queue
+  local scenario=$1 dir repo home plugin log stop out status trigger queue live lost loss
   dir="$TMP_ROOT/pi-stale-$scenario"
   repo="$dir/repo"
   home="$dir/home"
@@ -920,16 +920,26 @@ test_pi_stale_trigger_uses_its_task() {
       trigger='stale: fm-a (routine reminder)'
       queue=$(printf '1\t1\tsignal\ttask-a.status\tneeds-decision: task-a.status\n2\t2\tstale\tfm-a\t%s\n' "$trigger")
       ;;
-    named-loss|second-loss)
-      printf 'project=%s/projects/approved\nwindow=shared:w1:p2\n' "$home" > "$home/state/z-live.meta"
-      printf 'project=%s/projects/lost\nbackend=herdr\nwindow=shared:w1:p2\nspawn_gen=old\n' "$home" > "$home/state/a-lost.meta"
-      printf 'herdr:shared:w1:p2\told\n' > "$home/state/a-lost.missing-endpoint"
-      trigger='stale: shared:w1:p2 (the recorded endpoint is gone for task a-lost)'
-      queue=$(printf '1\t1\tstale\tshared:w1:p2\t%s\n2\t2\tstale\tshared:w1:p2\tstale: shared:w1:p2\n' "$trigger")
+    named-loss|second-loss|shared-stale)
+      live=z-live
+      lost=a-lost
+      if [ "$scenario" = shared-stale ]; then
+        live=a-live
+        lost=z-lost
+        printf 'needs-decision: choose how to proceed\nworking: waiting for the decision\n' > "$home/state/$live.status"
+      fi
+      printf 'project=%s/projects/live\nwindow=shared:w1:p2\n' "$home" > "$home/state/$live.meta"
+      printf 'project=%s/projects/lost\nbackend=herdr\nwindow=shared:w1:p2\nspawn_gen=old\n' "$home" > "$home/state/$lost.meta"
+      printf 'herdr:shared:w1:p2\told\n' > "$home/state/$lost.missing-endpoint"
+      printf 'project=%s/projects/approved\nwindow=shared:w1:p3\n' "$home" > "$home/state/unrelated.meta"
+      loss="stale: shared:w1:p2 (the recorded endpoint is gone for task $lost)"
+      trigger=$loss
+      [ "$scenario" != shared-stale ] || trigger='stale: shared:w1:p2'
+      queue=$(printf '1\t1\tstale\tshared:w1:p2\t%s\n2\t2\tstale\tshared:w1:p2\tstale: shared:w1:p2\n3\t3\tstale\tshared:w1:p3\tstale: shared:w1:p3\n' "$loss")
       if [ "$scenario" = second-loss ]; then
-        printf 'project=%s/projects/lost\nbackend=herdr\nwindow=shared:w1:p2\nspawn_gen=new\n' "$home" > "$home/state/a-lost.meta"
-        queue+=$(printf '\n3\t3\tstale\tshared:w1:p2\t%s\n' "$trigger")
-        printf 'herdr:shared:w1:p2\tnew\n' > "$home/state/a-lost.missing-endpoint"
+        printf 'project=%s/projects/lost\nbackend=herdr\nwindow=shared:w1:p2\nspawn_gen=new\n' "$home" > "$home/state/$lost.meta"
+        queue+=$(printf '\n4\t4\tstale\tshared:w1:p2\t%s\n' "$loss")
+        printf 'herdr:shared:w1:p2\tnew\n' > "$home/state/$lost.missing-endpoint"
       fi
       ;;
   esac
@@ -2828,8 +2838,8 @@ test_pi_replacement_persistence_failure_stops_arm_child() {
       trigger='stale: shared:w1:p2 (the recorded endpoint is gone for task a-lost)'
       printf 'project=%s/projects/first\nbackend=herdr\nwindow=shared:w1:p2\nspawn_gen=old\n' "$home" > "$home/state/a-lost.meta"
       printf 'herdr:shared:w1:p2\told\n' > "$home/state/a-lost.missing-endpoint"
-      printf 'project=%s/projects/second\nwindow=shared:w1:p2\n' "$home" > "$home/state/z-live.meta"
-      printf '1\t1\tstale\tshared:w1:p2\t%s\n1\t2\tstale\tshared:w1:p2\tstale: shared:w1:p2\n' "$trigger" \
+      printf 'project=%s/projects/second\nwindow=shared:w1:p3\n' "$home" > "$home/state/z-live.meta"
+      printf '1\t1\tstale\tshared:w1:p2\t%s\n1\t2\tstale\tshared:w1:p3\tstale: shared:w1:p3\n' "$trigger" \
         > "$home/state/.wake-queue"
       ;;
   esac
@@ -4050,6 +4060,7 @@ test_pi_captain_held_signal_stays_on_main
 test_pi_stale_trigger_uses_its_task pending-reply
 test_pi_stale_trigger_uses_its_task named-loss
 test_pi_stale_trigger_uses_its_task second-loss
+test_pi_stale_trigger_uses_its_task shared-stale
 test_pi_distinct_files_mixed_batch_routes_whole_batch_to_main
 test_pi_heartbeat_is_not_ridden_into_main_by_a_co_present_needs_decision
 test_pi_heartbeat_restoration_failure_stays_on_main
