@@ -50,7 +50,7 @@
 # Only a done or failed state is suspicious enough to create a durable terminal
 # outcome record or wake the supervisor.
 # For a cancelled run with a still-armed PR registration (bin/fm-pr-check.sh),
-# the wake and parent report say "run cancelled; PR open and waiting for a merge decision".
+# the wake and parent report say "run cancelled; registered PR awaiting a merge decision".
 # Local merge, closure, or retirement records disqualify the PR.
 # A recorded closure also disqualifies a reopened PR.
 # Other failed readings still report.
@@ -69,10 +69,10 @@
 # New fm-terminal-outcome.v1 receipts contain schema, fingerprint, task_id,
 # incarnation, state, outcome_key, origin, phase, pr, created_epoch, and
 # notice_emitted, plus optional status_head and ledger_claim fields. The
-# inactive-path fingerprint binds the spawn incarnation, task id, terminal
-# state, PR text, and sanitized last status; the ledger-path fingerprint instead
-# binds the incarnation, task id, terminal state, literal `ledger` origin, and
-# complete terminal ledger line.
+# inactive-path fingerprint binds the spawn incarnation, task id, outcome kind
+# (done, failed, or cancelled), PR text, and sanitized last status.
+# The ledger-path fingerprint binds the incarnation, task id, terminal state,
+# literal `ledger` origin, and complete terminal ledger line.
 # When a terminal ledger append races just after the inactive path's final read,
 # ledger_claim binds that one ledger fingerprint to the already-delivered
 # inactive receipt so the two publishers cannot report one completion twice.
@@ -335,7 +335,7 @@ pr_for_task() { # <meta> [preferred-line]
   clean_field "$value"
 }
 
-registered_pr_is_open() { # <id>
+registered_pr_without_terminal_record() { # <id>
   local id=$1
   fm_pr_poll_artifacts_valid "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" || return 1
   ! fm_pr_poll_terminal_recorded "$STATE" "$id" \
@@ -395,7 +395,7 @@ claim_inactive_report_for_ledger() { # <task> <incarnation> <state> <ledger-fing
     [ "$(record_value "$record" incarnation)" = "$incarnation" ] || continue
     [ "$(record_value "$record" state)" = "$state" ] || continue
     key=$(record_value "$record" outcome_key)
-    case "$key" in inactive-outcome-*) ;; *) continue ;; esac
+    case "$key" in inactive-outcome-*-"$state") ;; *) continue ;; esac
     [ "$(record_value "$record" status_head)" = "$predecessor_head" ] || continue
     claim=$(record_value "$record" ledger_claim)
     if [ "$claim" = "$ledger_fingerprint" ]; then
@@ -489,8 +489,8 @@ report_child() { # <id>
 }
 
 reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeout>
-  local id=$1 meta=$2 self=${3:-} timeout=$4 status turn last age state_line state pr incarnation fingerprint outcome_key payload kind state_rc=0
-  local label parent_verb detail=''
+  local id=$1 meta=$2 self=${3:-} timeout=$4 status turn last age state_line pr incarnation fingerprint outcome_key payload kind state_rc=0
+  local outcome label parent_verb detail=''
   [ -f "$meta" ] && [ ! -L "$meta" ] || return 0
   kind=$(meta_field "$meta" kind)
   [ "$kind" = secondmate ] && return 0
@@ -512,31 +512,33 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
     case "$(status_line_verb "$last")" in done|failed) return 0 ;; esac
   fi
   case "$state_line" in
-    'state: done '*) state='done' ;;
-    'state: failed '*) state='failed' ;;
-    *) return 0 ;;
-  esac
-  label=$state
-  pr=''
-  case "$state_line" in
     'state: failed · source: run-step · run cancelled'|\
     'state: failed · source: run-step · run cancelled · status-log superseded (run failed)')
-      if registered_pr_is_open "$id"; then
-        label=cancelled
-        pr=$(clean_field "$FM_PR_REG_URL")
-      fi
-      ;;
+      outcome=cancelled ;;
+    'state: done '*) outcome=done ;;
+    'state: failed '*) outcome=failed ;;
+    *) return 0 ;;
   esac
+  label=$outcome
+  pr=''
+  if [ "$outcome" = cancelled ]; then
+    if registered_pr_without_terminal_record "$id"; then
+      pr=$(clean_field "$FM_PR_REG_URL")
+    else
+      label=failed
+    fi
+  fi
   [ -n "$pr" ] || pr=$(pr_for_task "$meta")
   incarnation=$(meta_incarnation "$meta")
-  fingerprint=$(sha256_text "$incarnation|$id|$state|$pr|$(clean_field "$last")")
+  fingerprint=$(sha256_text "$incarnation|$id|$outcome|$pr|$(clean_field "$last")")
   outcome_key="inactive-outcome-${self:-main}-$id-$label"
-  ensure_record "$fingerprint" "$id" "$incarnation" "$state" "$outcome_key" direct "upstream" "$pr" "$(sha256_text "$last")" || return 1
+  ensure_record "$fingerprint" "$id" "$incarnation" "$outcome" "$outcome_key" direct "upstream" "$pr" "$(sha256_text "$last")" || return 1
   [ -n "$RECORD_PENDING" ] || return 0
   outcome_key=$(record_value "$RECORD_PENDING" outcome_key)
-  parent_verb=$state
-  if [ "${outcome_key##*-}" = cancelled ]; then
-    detail='run cancelled; PR open and waiting for a merge decision'
+  label=${outcome_key##*-}
+  parent_verb=$label
+  if [ "$label" = cancelled ]; then
+    detail='run cancelled; registered PR awaiting a merge decision'
     parent_verb=done
   fi
   if [ -n "$self" ]; then
@@ -544,12 +546,12 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
       mark_reported "$RECORD_PENDING" || return 1
     else
       notice_parent_report_failed "$RECORD_PENDING" "$fingerprint" \
-        "inactive terminal outcome needs parent report: child=$id ${detail:-state=$state}"
+        "inactive terminal outcome needs parent report: child=$id ${detail:-state=$label}"
     fi
     return 0
   fi
   record_phase_set "$RECORD_PENDING" presentation || return 1
-  payload="inactive terminal outcome awaiting captain presentation: child=$id ${detail:-state=$state}"
+  payload="inactive terminal outcome awaiting captain presentation: child=$id ${detail:-state=$label}"
   [ -z "$pr" ] || payload="$payload pr=$pr"
   queue_presentation "$RECORD_PENDING" "$fingerprint" "$payload" || true
 }

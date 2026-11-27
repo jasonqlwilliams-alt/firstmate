@@ -148,29 +148,34 @@ prime_seen() { # <state> <status>
 # no-mistakes reporting that run for the child's own worktree branch and head.
 CANCEL_PR=https://github.com/owner/repo/pull/7
 
-write_validated_child() { # <home> <id> <status-line> <run-outcome>
-  local home=$1 id=$2 status=$3 outcome=$4 wt gen head branch
-  wt="$home/projects/$id"
-  mkdir -p "$wt"
-  git -C "$wt" init -q
-  git -C "$wt" -c user.name=fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m init
+write_validation_outcome() { # <home> <id> <run-id> <run-outcome>
+  local home=$1 wt="$1/projects/$2" run_id=$3 outcome=$4 head branch
   head=$(git -C "$wt" rev-parse HEAD)
   branch=$(git -C "$wt" symbolic-ref --short HEAD)
-  fm_write_meta "$home/state/$id.meta" \
-    "window=firstmate:fm-$id" "worktree=$wt" "project=alpha" \
-    'harness=claude' 'kind=ship' 'mode=no-mistakes' 'yolo=off' "spawn_gen=s$RANDOM"
-  gen=$("$ROOT/bin/fm-busy-event.sh" arm "$home/state" "$id")
-  "$ROOT/bin/fm-busy-event.sh" apply "$home/state" "$id" idle --gen "$gen" \
-    --source claude-hook --event stop
   cat > "$home/run.txt" <<RUN
 run:
-  id: "run-$id"
+  id: "$run_id"
   branch: $branch
   head: "$head"
   status: $outcome
   outcome: $outcome
 RUN
   printf '%s %s %.8s 2026-11-26 12:00\n' "$outcome" "$branch" "$head" > "$home/runs.txt"
+}
+
+write_validated_child() { # <home> <id> <status-line> <run-outcome>
+  local home=$1 id=$2 status=$3 outcome=$4 wt gen
+  wt="$home/projects/$id"
+  mkdir -p "$wt"
+  git -C "$wt" init -q
+  git -C "$wt" -c user.name=fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m init
+  fm_write_meta "$home/state/$id.meta" \
+    "window=firstmate:fm-$id" "worktree=$wt" "project=alpha" \
+    'harness=claude' 'kind=ship' 'mode=no-mistakes' 'yolo=off' "spawn_gen=s$RANDOM"
+  gen=$("$ROOT/bin/fm-busy-event.sh" arm "$home/state" "$id")
+  "$ROOT/bin/fm-busy-event.sh" apply "$home/state" "$id" idle --gen "$gen" \
+    --source claude-hook --event stop
+  write_validation_outcome "$home" "$id" "run-$id" "$outcome"
   cat > "$WORLD/fakebin/no-mistakes" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
@@ -889,10 +894,10 @@ test_reconciliation_never_calls_forge() {
   pass "reconciliation makes zero forge or PR API calls"
 }
 
-test_cancelled_run_with_open_pr_reports_awaiting_merge() {
-  local route parent_status offset line expected='run cancelled; PR open and waiting for a merge decision'
+test_cancelled_run_with_registered_pr_reports_awaiting_merge() {
+  local route parent_status offset line expected='run cancelled; registered PR awaiting a merge decision'
   make_world cancelled-main
-  write_validated_child "$MAIN" child "paused: PR $CANCEL_PR open; awaiting merge" cancelled
+  write_validated_child "$MAIN" child 'working: waiting for validation' cancelled
   register_pr "$MAIN" child
   line=$(real_crew_state "$MAIN")
   [ "$line" = "state: failed · source: run-step · run cancelled" ] \
@@ -937,7 +942,7 @@ RUN
       && [ "$(grep -c 'inactive-outcome-mate-child-' "$parent_status")" = 1 ] \
       || fail "the $route parent received another report for the same cancellation after closure"
   done
-  pass "open-PR cancellations produce a supervisor wake and actionable parent reports"
+  pass "registered-PR cancellations produce a supervisor wake and actionable parent reports"
 }
 
 test_other_terminal_failures_keep_failed_label() {
@@ -975,6 +980,58 @@ test_other_terminal_failures_keep_failed_label() {
   pass "unregistered, closed, merged, and genuinely failed outcomes keep the failed label"
 }
 
+test_failed_retry_after_cancellation_gets_its_own_report() {
+  local home route
+  for route in main local; do
+    make_world "failed-retry-$route"
+    if [ "$route" = main ]; then
+      home=$MAIN
+    else
+      bind_secondmate local
+      home=$MATE
+    fi
+    write_validated_child "$home" child "paused: awaiting merge of $CANCEL_PR" cancelled
+    register_pr "$home" child
+    run_real_reconcile "$home"
+    if [ "$route" = main ]; then
+      [ "$(wake_count "$MAIN" 'child=child run cancelled')" = 1 ] \
+        || fail "fixture did not queue the cancellation"
+    else
+      [ "$(grep -c 'inactive-outcome-mate-child-cancelled' "$MAIN/state/mate.status")" = 1 ] \
+        || fail "fixture did not deliver the cancellation"
+    fi
+
+    write_validation_outcome "$home" child run-retry failed
+    run_real_reconcile "$home"
+    run_real_reconcile "$home"
+    if [ "$route" = main ]; then
+      [ "$(outcome_count "$MAIN" pending)" = 2 ] && [ "$(wake_count "$MAIN" 'child=child state=failed')" = 1 ] \
+        || fail "the failed retry did not get its own supervisor wake and receipt"
+    else
+      [ "$(outcome_count "$MATE" reported)" = 2 ] \
+        && [ "$(grep -c '^failed \[key=inactive-outcome-mate-child-failed\]' "$MAIN/state/mate.status")" = 1 ] \
+        || fail "the failed retry did not get its own parent report and receipt"
+    fi
+  done
+  pass "a failed retry gets a distinct report with the same PR and status line"
+}
+
+test_failed_ledger_append_after_cancellation_gets_its_own_report() {
+  make_world appended-failed; bind_secondmate local
+  write_validated_child "$MATE" child "paused: awaiting merge of $CANCEL_PR" cancelled
+  register_pr "$MATE" child
+  run_real_reconcile "$MATE"
+  [ "$(grep -c 'inactive-outcome-mate-child-cancelled' "$MAIN/state/mate.status")" = 1 ] \
+    || fail "fixture did not deliver the cancellation"
+
+  printf 'failed: retry exhausted\n' >> "$MATE/state/child.status"
+  run_real_reconcile "$MATE"
+  run_report "$MATE" child || fail "teardown-side reporting did not accept the delivered failure"
+  [ "$(grep -c '^failed \[key=child-outcome-child-failed-.*\]: child child failed: retry exhausted' "$MAIN/state/mate.status")" = 1 ] \
+    || fail "the explicit failure was not delivered exactly once after cancellation"
+  pass "a failed ledger append gets a distinct report after cancellation"
+}
+
 test_main_direct_terminal_presentation_receipt
 test_local_secondmate_delivers_terminal_ledger_line
 test_busy_child_does_not_starve_later_ledger_outcomes
@@ -1004,7 +1061,9 @@ test_full_scan_budget_includes_wake_lock_wait
 test_notice_recovery_does_not_duplicate_wake
 test_missing_parent_binding_names_itself
 test_reconciliation_never_calls_forge
-test_cancelled_run_with_open_pr_reports_awaiting_merge
+test_cancelled_run_with_registered_pr_reports_awaiting_merge
 test_other_terminal_failures_keep_failed_label
+test_failed_retry_after_cancellation_gets_its_own_report
+test_failed_ledger_append_after_cancellation_gets_its_own_report
 
 echo "all inactive reconciliation tests passed"
