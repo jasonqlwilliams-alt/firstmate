@@ -82,12 +82,12 @@ fm_tmux_window_filter_available() {
   [ "$diagnostic" = 'no current target' ] || fm_tmux_no_server_error "$diagnostic"
 }
 
-# fm_tmux_exact_target: the shared boundary for a recorded `session:window`
+# fm_tmux_exact_target: the read boundary for a recorded `session:window`
 # target. tmux resolves a session or window NAME that is not an exact match by
 # prefix (and, for a pane read, an absent window can fall back to another
 # pane), so a closed `fm-mate` read by name silently returns a surviving
 # `fm-mate2`. This confirms the exact session and window in a successful
-# session inventory and prints its `@<id>`. A window id cannot be
+# session inventory and prints its `@<id>` for the read. A window id cannot be
 # prefix-matched and stays dot-safe where a `.`-bearing name would be parsed
 # as a pane suffix.
 #
@@ -302,6 +302,14 @@ fm_pane_is_busy() {  # <target> [harness]
   [ "$(fm_pane_busy_state "$@")" = busy ]
 }
 
+fm_tmux_submit_busy_state() {  # <target> [explicit]
+  if [ "${2:-}" = explicit ]; then
+    fm_tmux_resolved_busy_state "$1" ''
+  else
+    fm_pane_busy_state "$1"
+  fi
+}
+
 # fm_tmux_submit_core: type <text> into <target> ONCE, then submit with Enter,
 # verifying the composer cleared. Retries Enter ONLY — never retypes, because a
 # swallowed Enter leaves our text in the composer and retyping would duplicate
@@ -311,7 +319,7 @@ fm_pane_is_busy() {  # <target> [harness]
 # and queues it for after the current turn, but keeps the typed text visible in
 # the composer. Once the Enter-retry budget is spent and a structurally proven
 # composer still reads "pending", the submit core falls back to
-# `fm_tmux_resolved_busy_state`: a busy pane means the Enter was accepted and
+# `fm_tmux_submit_busy_state`: a busy pane means the Enter was accepted and
 # queued (report `empty` so the caller does not re-send), while an idle pane
 # keeps `pending` as a genuine swallow. Pending-unproven receives the same
 # Enter retry budget but never reaches this exception.
@@ -327,19 +335,19 @@ fm_pane_is_busy() {  # <target> [harness]
 # fm_tmux_submit_enter_core caller, or a pane already busy before typing) an
 # `unknown` verdict is preserved untouched: busy conversion without the
 # transition evidence could mark an undelivered message delivered.
-fm_tmux_submit_enter_core() {  # <resolved-target> <retries> <enter-sleep> [baseline-idle]
-  local target=$1 retries=$2 sleep_s=$3 baseline_idle=${4:-} i=0 j state
+fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle] [explicit]
+  local target=$1 retries=$2 sleep_s=$3 baseline_idle=${4:-} mode=${5:-} i=0 j state
   while :; do
     tmux send-keys -t "$target" Enter 2>/dev/null || true
     sleep "$sleep_s"
-    state=$(fm_tmux_composer_state "$target" explicit)
+    state=$(fm_tmux_composer_state "$target" "$mode")
     case "$state" in
       pending|pending-unproven) ;;
       unknown)
         if [ "$baseline_idle" = 1 ]; then
           j=0
           while [ "$j" -lt "$retries" ]; do
-            if [ "$(fm_tmux_resolved_busy_state "$target" '')" = busy ]; then
+            if [ "$(fm_tmux_submit_busy_state "$target" "$mode")" = busy ]; then
               printf 'empty'
               return 0
             fi
@@ -361,18 +369,17 @@ fm_tmux_submit_enter_core() {  # <resolved-target> <retries> <enter-sleep> [base
   fi
   # Retries exhausted, composer still shows proven pending.
   # Busy conversion is owned by fm_composer_queued_enter_verdict.
-  fm_composer_queued_enter_verdict "$state" "$(fm_tmux_resolved_busy_state "$target" '')"
+  fm_composer_queued_enter_verdict "$state" "$(fm_tmux_submit_busy_state "$target" "$mode")"
 }
 
 fm_tmux_submit_core() {  # <target> <text> <retries> <enter-sleep> <settle> [explicit]
-  local target text=$2 retries=$3 sleep_s=$4 settle=$5 baseline_idle='' baseline_state
-  target=$(fm_tmux_exact_target "$1" "${6:-}") || { printf 'send-failed'; return 0; }
+  local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 mode=${6:-} baseline_idle='' baseline_state
   # The turn-started baseline must predate our own typing: a pane already
   # busy before the text lands can turn "busy" for reasons unrelated to our
   # Enter, so only a clean idle-to-busy transition may confirm a submit.
-  baseline_state=$(fm_tmux_resolved_busy_state "$target" '')
+  baseline_state=$(fm_tmux_submit_busy_state "$target" "$mode")
   [ "$baseline_state" = idle ] && baseline_idle=1
   tmux send-keys -t "$target" -l "$text" 2>/dev/null || { printf 'send-failed'; return 0; }
   sleep "$settle"
-  fm_tmux_submit_enter_core "$target" "$retries" "$sleep_s" "$baseline_idle"
+  fm_tmux_submit_enter_core "$target" "$retries" "$sleep_s" "$baseline_idle" "$mode"
 }

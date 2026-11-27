@@ -56,13 +56,8 @@ fm_backend_tmux_capture() {  # <target> <lines> [explicit]
 }
 
 fm_backend_tmux_target_exists() {  # <target> [explicit]
-  local target
+  local target diagnostic
   target=$(fm_tmux_exact_target "$@") || return $?
-  fm_backend_tmux_resolved_target_exists "$target" "${2:-}"
-}
-
-fm_backend_tmux_resolved_target_exists() {  # <resolved-target> [explicit]
-  local target=$1 diagnostic
   if [ "${2:-}" = explicit ]; then
     diagnostic=$(tmux capture-pane -p -t "$target" -S 0 -E 0 2>&1 >/dev/null) && return 0
   else
@@ -73,10 +68,8 @@ fm_backend_tmux_resolved_target_exists() {  # <resolved-target> [explicit]
 
 # fm_backend_tmux_send_key: one named key.
 fm_backend_tmux_send_key() {  # <target> <key> [explicit]
-  local target
-  target=$(fm_tmux_exact_target "$1" "${3:-}") || return $?
-  fm_backend_tmux_resolved_target_exists "$target" "${3:-}" || return $?
-  tmux send-keys -t "$target" "$2"
+  fm_backend_tmux_target_exists "$1" "${3:-}" || return $?
+  tmux send-keys -t "$1" "$2"
 }
 
 # fm_backend_tmux_send_text_submit: type <text> into <target> once, then
@@ -157,20 +150,17 @@ fm_backend_tmux_current_path() {  # <target>
 # fm_backend_tmux_send_text_line: send one line of TEXT then Enter, with no
 # composer verification - used for the fixed spawn-time commands
 # (`treehouse get`, the GOTMPDIR export) that already ran this exact sequence
-# inline in fm-spawn.sh.
+# inline in fm-spawn.sh. Mirrors `tmux send-keys -t "$T" "<text>" Enter`.
 fm_backend_tmux_send_text_line() {  # <target> <text>
-  local target
-  target=$(fm_tmux_exact_target "$1") || return 1
-  tmux send-keys -t "$target" "$2" Enter
+  tmux send-keys -t "$1" "$2" Enter
 }
 
 # fm_backend_tmux_send_literal: send TEXT as literal bytes with no
 # submission - the caller sends Enter separately (fm-spawn.sh's launch-command
 # send pauses between the literal send and Enter for the harness to settle).
-fm_backend_tmux_send_literal() {  # <target> <text> [explicit]
-  local target
-  target=$(fm_tmux_exact_target "$1" "${3:-}") || return $?
-  tmux send-keys -t "$target" -l "$2"
+# Mirrors `tmux send-keys -t "$T" -l "<text>"`.
+fm_backend_tmux_send_literal() {  # <target> <text>
+  tmux send-keys -t "$1" -l "$2"
 }
 
 # fm_backend_tmux_kill: remove one explicitly named task window, best-effort.

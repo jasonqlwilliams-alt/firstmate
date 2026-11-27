@@ -11,7 +11,7 @@
 # cannot pass vacuously.
 #
 # It runs REAL processes in a REAL tmux server on a private socket (`-L`) in a
-# disposable home and needs no harness or credentials.
+# disposable home, needs no harness or credentials, and sends no keys.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -47,7 +47,7 @@ export PATH
 unset TMUX TMUX_PANE
 
 # shellcheck source=/dev/null
-. "$ROOT/bin/fm-task-inbox-lib.sh"
+. "$ROOT/bin/fm-backend.sh"
 fm_backend_source tmux || fail "fm_backend_source tmux failed"
 
 "$REAL_TMUX" -L "$SOCKET" -f /dev/null new-session -d -s "$SESSION" -n base -c "$LAB/base" \
@@ -285,48 +285,15 @@ fm_backend_capture tmux "$SESSION:fm-mate" 40 >/dev/null 2>&1 \
   || fail "agent state in a closed recorded session must be missing"
 pass "closed recorded session reads as missing despite a prefix-named session"
 
-new_draft_window() {  # <name> <marker> -> prints window ID
-  tmux new-window -dP -F '#{window_id}' -t fmla: -n "$1" -c "$LAB/wt" -- \
-    awk -v marker="$2" '
-      BEGIN { print marker; printf "❯ "; fflush() }
-      { print "SUBMITTED " $0; printf "❯ "; fflush() }
-    '
-}
-
-dotted_target=fmla:fm-dot.0
-dotted_window=$(new_draft_window fm-dot.0 DOTTED-MARKER) || fail "could not create the dotted worker"
-draft_window=$(new_draft_window fm-dot DRAFT-MARKER) || fail "could not create the worker with a draft"
-wait_for_marker "$dotted_window" DOTTED-MARKER
-wait_for_marker "$draft_window" DRAFT-MARKER
-tmux send-keys -t "$draft_window" -l 'neighbour draft' || fail "could not type the neighbouring draft"
-wait_for_marker "$draft_window" 'neighbour draft'
-tmux capture-pane -p -t "$dotted_target" | grep -Fq 'neighbour draft' \
-  || fail "precondition: a raw dotted target must select the neighbour's pane zero"
-fm_backend_capture tmux "$dotted_target" 40 | grep -Fq DOTTED-MARKER \
-  || fail "a recorded dotted target must capture its own screen"
-[ "$(fm_backend_composer_state tmux "$dotted_target")" = empty ] \
-  || fail "the dotted worker's composer must start empty"
-[ "$(fm_backend_composer_state tmux fmla:fm-dot)" = pending ] \
-  || fail "the neighbouring worker must have a pending draft"
-draft_before=$(tmux capture-pane -p -t "$draft_window") || fail "could not capture the pending draft"
-
-steer_record=$(fm_task_inbox_write "$LAB/home/state" dot.0 'dotted worker steer') \
-  || fail "could not write the dotted worker's steer"
-fm_task_inbox_ring tmux "$dotted_target" "$steer_record" fm-dot.0 pi \
-  || fail "could not ring the dotted worker's inbox"
-wait_for_marker "$dotted_window" 'SUBMITTED : Firstmate instruction waiting:'
-[ "$(tmux capture-pane -p -t "$draft_window")" = "$draft_before" ] \
-  || fail "the inbox ring changed the neighbouring draft"
-pass "dotted worker receives and submits its doorbell without changing the neighbouring draft"
-
-fm_backend_tmux_send_text_line "$dotted_target" LINE-REGRESSION || fail "could not send a line to the dotted worker"
-wait_for_marker "$dotted_window" 'SUBMITTED LINE-REGRESSION'
-[ "$(fm_backend_send_text_submit tmux "$dotted_target" TYPED-REGRESSION 1 0.05 0.05)" = empty ] \
-  || fail "verified submit did not confirm delivery to the dotted worker"
-wait_for_marker "$dotted_window" 'SUBMITTED TYPED-REGRESSION'
-[ "$(tmux capture-pane -p -t "$draft_window")" = "$draft_before" ] \
-  || fail "line or verified submit changed the neighbouring draft"
-pass "dotted worker receives line and verified submit input without changing the neighbouring draft"
+# A window name carrying a dot is read exactly rather than parsed as a pane.
+new_window fmla fm-dot.task DOTTED-MARKER
+i=0
+until fm_backend_capture tmux "fmla:fm-dot.task" 40 2>/dev/null | grep -q DOTTED-MARKER; do
+  i=$((i + 1))
+  [ "$i" -lt 100 ] || fail "a dotted worker window name must capture its own screen"
+  sleep 0.05
+done
+pass "dotted window name reads exactly"
 
 tmux new-session -d -s firstmate-lab -n fm-detached -c "$LAB/neighbour" \
   || fail "could not create the prefix-named session"
