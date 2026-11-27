@@ -755,7 +755,7 @@ report_secondmate_respawn_failure() {
       else print last
     }
   ' <<< "$output")
-  reason=$(first_line "${reason:-no diagnostic (spawn exit status $status)}")
+  reason="${reason:-no diagnostic (spawn exit status $status)}"
   retained=$(awk -v prefix="$retained_prefix" 'index($0, prefix) == 1 { print; exit }' <<< "$output")
   if [ -n "$retained" ]; then
     reason="$reason ($retained)"

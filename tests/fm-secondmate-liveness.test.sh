@@ -603,7 +603,7 @@ test_sweep_reports_retained_temp_root_after_failed_recovery() {
 
 test_sweep_names_spawn_error_over_earlier_advisory() {
   local w fb tmuxfb log out line raw
-  w=$(new_world sweep-spawn-error)
+  w=$(new_world 'sweep  spawn-error')
   add_sm_home "$w" sm1 firstmate:fm-sm1 pi
   rm -f "$w/sm1/data/charter.md"
   fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
