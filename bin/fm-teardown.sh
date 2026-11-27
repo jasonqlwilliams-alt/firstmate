@@ -2317,7 +2317,7 @@ task_pid_list_contains() {  # <pid-list> <pid>
 }
 
 teardown_close_tmux_window() {  # <session:window>
-  local target=$1 snapshot protected pid pane_id pane_tty i
+  local target=$1 snapshot protected server_pid server_sid pid pane_id pane_tty i
   local -a panes
   if ! fm_backend_source tmux || ! snapshot=$(fm_backend_tmux_close_snapshot "$target"); then
     echo "warning: leaving tmux window $target open: cannot verify the exact window and its pane inventory" >&2
@@ -2330,9 +2330,18 @@ teardown_close_tmux_window() {  # <session:window>
     return 1
   fi
   IFS=: read -r -a panes <<< "$snapshot"
-  if [ "$launch_session_pid" = "${panes[1]}" ]; then
-    echo "warning: leaving tmux window $target open: teardown was launched by the target tmux server" >&2
-    return 1
+  server_pid=${panes[1]}
+  if [ -n "$launch_session_pid" ] && [[ " $TEARDOWN_REAP_PROTECTED_PIDS " == *" $server_pid "* ]]; then
+    server_sid=$(ps -o sid= -p "$server_pid" 2>/dev/null) || server_sid=
+    server_sid=${server_sid//[[:space:]]/}
+    if [[ ! "$server_sid" =~ ^[1-9][0-9]*$ ]]; then
+      echo "warning: leaving tmux window $target open: cannot verify the target tmux server's process session" >&2
+      return 1
+    fi
+    if [ "$launch_session_pid" = "$server_sid" ]; then
+      echo "warning: leaving tmux window $target open: teardown was launched by the target tmux server" >&2
+      return 1
+    fi
   fi
   for ((i = 4; i < ${#panes[@]}; i += 3)); do
     pid=${panes[i]}

@@ -364,6 +364,90 @@ SH
   chmod +x "$dir/fakebin/ps"
 }
 
+write_tmux_server_job() {  # <dir>
+  cat > "$1/server-job.sh" <<'SH'
+#!/usr/bin/env bash
+unset TMUX TMUX_PANE
+export FM_HOME="$PWD/home" FM_ROOT_OVERRIDE=$1 FM_RUNTIME_LOG="$PWD/runtime.log"
+export PATH="$PWD/fakebin:$PATH" FM_TEST_TMUX_SOCKET="$PWD/dedicated.sock"
+ps -o sid= -o tty= -p "$$" > server.identity
+"$1/bin/fm-teardown.sh" "$2" --force > server.out 2> server.err
+printf '%s\n' "$?" > server.status
+SH
+}
+
+test_foreground_tmux_server_launched_cleanup() (
+  local dir socket=dedicated.sock session=foreground target=fm-target control=control
+  local leader_pid server_pid job_sid job_tty waited=0
+  [ "$(uname -s)" = Linux ] && [ -n "$REAL_TMUX" ] || return 0
+  dir=$(make_case foreground-tmux)
+  cd "$dir" || exit 1
+  unset TMUX TMUX_PANE
+  perl -MPOSIX=setsid -e 'setsid() > 0 or die; exec @ARGV' \
+    bash -c '"$@" & wait "$!"' _ "$REAL_TMUX" -f /dev/null -S "$socket" -D &
+  leader_pid=$!
+  trap '
+    "$REAL_TMUX" -S "$socket" kill-server 2>/dev/null || kill "$leader_pid" 2>/dev/null || true
+    wait "$leader_pid" 2>/dev/null || true
+  ' EXIT
+  while [ ! -S "$socket" ] && [ "$waited" -lt 100 ]; do
+    sleep 0.05
+    waited=$((waited + 1))
+  done
+  "$REAL_TMUX" -S "$socket" new-session -ds "$session" -n "$control" 'exec sleep 60' \
+    || fail "could not start foreground tmux fixture"
+  server_pid=$("$REAL_TMUX" -S "$socket" display-message -p '#{pid}')
+  cat > "$dir/fakebin/tmux" <<SH
+#!/usr/bin/env bash
+cd '$dir' || exit 1
+exec '$REAL_TMUX' -S '$socket' "\$@"
+SH
+  write_tmux_server_job "$dir"
+  fm_write_meta "$dir/home/state/target.meta" \
+    "window=$session:$target" "worktree=$dir/missing" "project=$dir/missing" "kind=scout"
+  # shellcheck disable=SC2016
+  "$REAL_TMUX" -S "$socket" new-window -d -t "$session:" -n "$target" bash -c '
+    "$2" -S dedicated.sock run-shell -b -t "$TMUX_PANE" "bash \"$PWD/server-job.sh\" \"$1\" target"
+    exec sleep 60
+  ' _ "$ROOT" "$REAL_TMUX" || fail "could not launch teardown from the target pane"
+  waited=0
+  while [ ! -s server.status ] && [ "$waited" -lt 150 ]; do
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  assert_present server.status "the foreground-server job did not finish"
+  read -r job_sid job_tty < server.identity
+  [ "$job_sid" = "$leader_pid" ] && [ "$job_sid" != "$server_pid" ] && [ "$job_tty" = '?' ] \
+    || fail "foreground run-shell did not inherit a separate headless session leader"
+  expect_code 0 "$(cat server.status)" "foreground-server teardown should finish remaining cleanup"
+  assert_contains "$(cat server.err)" "teardown was launched by the target tmux server" \
+    "foreground-server teardown did not warn about the originating window"
+  assert_absent "$dir/home/state/target.meta" "foreground-server teardown did not retire its record"
+  isolated_tmux_window_exists "$dir" "$socket" "$session" "$target" \
+    || fail "foreground-server teardown closed its originating window"
+  pass "fm-teardown: a foreground-server job leaves its originating window open"
+
+  fm_write_meta "$dir/home/state/target.meta" \
+    "window=$session:$target" "worktree=$dir/missing" "project=$dir/missing" "kind=scout"
+  rm -f server.status
+  "$REAL_TMUX" -S "$socket" respawn-pane -k -t "$session:$control" \
+    "bash '$dir/server-job.sh' '$ROOT' target; exec sleep 60" \
+    || fail "could not launch teardown from the control pane"
+  waited=0
+  while [ ! -s server.status ] && [ "$waited" -lt 150 ]; do
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  assert_present server.status "teardown from the control pane did not finish"
+  expect_code 0 "$(cat server.status)" "teardown from the control pane should succeed"
+  if isolated_tmux_window_exists "$dir" "$socket" "$session" "$target"; then
+    fail "teardown kept the target when launched from a separate pane session: $(cat server.err)"
+  fi
+  isolated_tmux_window_exists "$dir" "$socket" "$session" "$control" \
+    || fail "teardown closed the control window"
+  pass "fm-teardown: a different pane session can close the recorded target"
+)
+
 test_isolated_tmux_invalid_and_valid_cleanup() (
   local dir socket socket_id session target_id=target control=control target=fm-target
   local prefix_target=fm-prefix prefix_survivor=fm-prefix2 rc caller_pane window_id waited=0 control_tty real_uname
@@ -541,15 +625,7 @@ ps -A -o pid= -o ppid= | awk -v child="$$" -v pane="$3" '
 FM_TEST_NON_LINUX=1 "$1/bin/fm-teardown.sh" "$2" --force > reparent.out 2> reparent.err
 printf '%s\n' "$?" > reparent.status
 SH
-  cat > "$dir/server-job.sh" <<'SH'
-#!/usr/bin/env bash
-unset TMUX TMUX_PANE
-export FM_HOME="$PWD/home" FM_ROOT_OVERRIDE=$1 FM_RUNTIME_LOG="$PWD/runtime.log"
-export PATH="$PWD/fakebin:$PATH" FM_TEST_TMUX_SOCKET="$PWD/dedicated.sock"
-ps -o sid= -o tty= -p "$$" > server.identity
-"$1/bin/fm-teardown.sh" "$2" --force > server.out 2> server.err
-printf '%s\n' "$?" > server.status
-SH
+  write_tmux_server_job "$dir"
   fm_write_meta "$dir/home/state/$target_id.meta" \
     "window=$session:$target" "worktree=$dir/nonexistent-worktree" \
     "project=$dir/nonexistent-project" "kind=scout"
@@ -1674,6 +1750,7 @@ test_metadata_lock_serializes_destructive_cleanup
 test_supported_backend_endpoint_records_validate
 test_tmux_empty_target_refuses_without_invocation
 test_recorded_process_identity_cleanup_is_exact
+test_foreground_tmux_server_launched_cleanup
 test_isolated_tmux_invalid_and_valid_cleanup
 test_bare_relative_origin_shares_project_lock_with_clone
 test_reused_pool_slot_refuses_before_touching_the_other_task

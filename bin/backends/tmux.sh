@@ -186,12 +186,14 @@ fm_backend_tmux_kill() {  # <target>
 FM_TMUX_CLOSE_SNAPSHOT_FORMAT='#{window_id}:#{pid}:#{session_id}:#{window_name}:#{P:#{pane_pid}:#{pane_id}:#{pane_tty}:}'
 FM_TMUX_CLOSE_SNAPSHOT_PATTERN='^@[0-9]+:[1-9][0-9]*:\$[0-9]+:[a-zA-Z0-9._-]+:([1-9][0-9]*:%[0-9]+:/dev/[[:alnum:]][[:alnum:]/._-]*:)+$'
 fm_backend_tmux_close_session_match() {
-  local session=$1
-  session=${session//#/##}
-  session=${session//,/#,}
-  session=${session//\}/#\}}
-  session=${session//"##["/'#{l:#[}'}
-  printf '#{==:#{session_name},%s}' "$session"
+  local session=$1 prefix literal=
+  while [[ "$session" == *['#,}']* ]]; do
+    prefix=${session%%['#,}']*}
+    session=${session#"$prefix"}
+    literal+="$prefix#{=-1;l:#${session:0:1}}"
+    session=${session:1}
+  done
+  printf '#{==:#{session_name},%s%s}' "$literal" "$session"
 }
 
 fm_backend_tmux_close_snapshot() {  # <session:window>
