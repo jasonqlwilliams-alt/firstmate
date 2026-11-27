@@ -1,0 +1,29 @@
+herdr 0.9.5
+Private Herdr server reports running.
+$ herdr pane run <private pane> <synthetic screen replay>
+Replay PTY: 119 columns by 40 rows
+Herdr accepted the synthetic agent registration through pane.report_agent.
+$ fm-remote-secondmate-control.sh state mate --bound-home [exit 0]
+alive
+$ fm-remote-secondmate-control.sh send mate 'Queue synthetic remote item R44.' [exit 0]
+notice: the screen or lifecycle lock for fm-remote:w1:p1 prevented typing the doorbell; the steer is durably recorded at LAB/replay/home/state/parent-route/mate.inbox/001.msg
+mate.inbox/001.msg: Queue synthetic remote item R44.
+Pane input: zero bytes
+$ fm-remote-secondmate-control.sh key mate Escape [exit 0]
+
+Pane input: one operator Escape
+$ fm-remote-secondmate-control.sh send mate 'Queue synthetic remote item R44.' [exit 0]
+
+mate.inbox/handled/001.msg: Queue synthetic remote item R44.
+Herdr pane input on retry: doorbell literal and one Enter
+$ fm-remote-secondmate-control.sh send mate 'Queue synthetic remote item R45 when viewport read fails.' [exit 0]
+notice: the screen or lifecycle lock for fm-remote:w1:p1 prevented typing the doorbell; the steer is durably recorded at LAB/replay/home/state/parent-route/mate.inbox/002.msg
+Capture exit 1: {"error":{"code":"pane_not_found","message":"pane w999:p999 not found"},"id":"cli:pane:read"}
+Capture exit 1: {"error":{"code":"pane_not_found","message":"pane w999:p999 not found"},"id":"cli:pane:read"}
+mate.inbox/002.msg: Queue synthetic remote item R45 when viewport read fails.
+Pane input during failed capture: zero bytes
+$ fm-remote-secondmate-control.sh key mate Escape [exit 0]
+
+The same terminal accepted explicit Escape while capture was faulty.
+Result: pass
+Herdr server exit: 0

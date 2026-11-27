@@ -1,0 +1,159 @@
+tmux 3.7c
+
+## Local steer into proven composer
+$ fm-send.sh task 'Please review synthetic item R42.' [exit 0]
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+task.inbox/handled/001.msg: Please review synthetic item R42.
+Pane input: path-bearing doorbell literal followed by exactly one Enter
+Result: pass
+
+## Local steer with unsafe or missing screen evidence
+$ fm-send.sh task 'Queue synthetic steer with dialog screen.' [exit 0]
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+fm-send: doorbell not typed because the screen or lifecycle lock for dialog:fm-task blocked the doorbell; the steer is durably recorded at LAB/dialog/home/state/task.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+task.inbox/001.msg: Queue synthetic steer with dialog screen.
+Pane input: zero bytes
+$ fm-send.sh task 'Queue synthetic steer with choice-two screen.' [exit 0]
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+fm-send: doorbell not typed because the screen or lifecycle lock for choice-two:fm-task blocked the doorbell; the steer is durably recorded at LAB/choice-two/home/state/task.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+task.inbox/001.msg: Queue synthetic steer with choice-two screen.
+Pane input: zero bytes
+$ fm-send.sh task 'Queue synthetic steer with blank-cursor screen.' [exit 0]
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+fm-send: doorbell not typed because the screen or lifecycle lock for blank-cursor:fm-task blocked the doorbell; the steer is durably recorded at LAB/blank-cursor/home/state/task.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+task.inbox/001.msg: Queue synthetic steer with blank-cursor screen.
+Pane input: zero bytes
+$ fm-send.sh task 'Queue synthetic steer with unreadable screen.' [exit 0]
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+fm-send: doorbell not typed because the screen or lifecycle lock for unreadable:fm-task blocked the doorbell; the steer is durably recorded at LAB/unreadable/home/state/task.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+task.inbox/001.msg: Queue synthetic steer with unreadable screen.
+Pane input: zero bytes
+$ fm-send.sh task 'Queue synthetic steer with draft screen.' [exit 0]
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+fm-send: doorbell not typed because the screen or lifecycle lock for draft:fm-task blocked the doorbell; the steer is durably recorded at LAB/draft/home/state/task.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+task.inbox/001.msg: Queue synthetic steer with draft screen.
+Pane input: zero bytes
+Result: pass
+
+## Dialog appears after local doorbell typing
+$ fm-send.sh task 'Queue steer while recorded choice-two dialog appears.' [exit 0]
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+fm-send: doorbell typed into late:fm-task but its Enter was withheld because the composer did not prove it holds the doorbell; the steer is durably recorded at LAB/late/home/state/task.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+task.inbox/001.msg: Queue steer while recorded choice-two dialog appears.
+Pane input: doorbell literal, zero Enter presses
+Result: pass
+
+## Immediate send and watcher respect lifecycle lock
+$ fm-control.sh task exit [exit 1]
+error: another lifecycle action is already running for task task
+Pane input: zero bytes
+$ fm-send.sh task 'Retry synthetic item R43 after lifecycle activity.' [exit 0]
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+fm-send: doorbell not typed because the screen or lifecycle lock for watcher:fm-task blocked the doorbell; the steer is durably recorded at LAB/watcher/home/state/task.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+task.inbox/001.msg: Retry synthetic item R43 after lifecycle activity.
+Pane input: zero bytes
+$ fm-watch.sh [private Firstmate home]
+Ring ledger while lock held: 001.msg	1	1795761602
+task.inbox/001.msg: Retry synthetic item R43 after lifecycle activity.
+Pane input: zero bytes
+task.inbox/handled/001.msg: Retry synthetic item R43 after lifecycle activity.
+Pane input: path-bearing doorbell literal followed by exactly one Enter
+Result: pass
+
+## Native command uses guarded typing and submission
+$ fm-send.sh task /help [exit 0]
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Pane input: /help followed by exactly one Enter
+$ fm-send.sh task /help [exit 1]
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: text not typed to native-dialog:fm-task (Claude input requires control-free text, an empty composer, and the task's lifecycle lock)
+Pane input: zero bytes
+$ fm-send.sh task /help [exit 1]
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: text typed to native-after:fm-task but Enter was withheld (Claude's composer did not prove it holds the text); inspect the pane before retrying
+Pane input: /help literal, zero Enter presses
+Result: pass
+
+## Recovery interrupt versus explicit operator key
+$ fm-control.sh task interrupt [exit 1]
+error: interrupt-refused task: the screen did not prove an empty Claude composer (unknown)
+Pane input: zero bytes
+$ fm-send.sh task --key Escape [exit 0]
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 7s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Pane input: one operator Escape
+$ fm-control.sh task interrupt [exit 0]
+interrupt-delivered task harness=claude backend=tmux verified=agent-alive cancel=unconfirmed
+Pane input: one additional Escape from the recovery interrupt
+Result: pass

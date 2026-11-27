@@ -1,0 +1,6 @@
+Base 86a565ae333826e488621eb87177596508835b3c
+Real tmux showed the recorded dialog with choice two selected.
+$ fm-send.sh task 'Queue synthetic steer with choice-two screen.' [exit 0]
+task.inbox/001.msg: Queue synthetic steer with choice-two screen.
+Pane input: path-bearing doorbell literal and one Enter reached the open choice-two dialog.
+The updated commit sent zero bytes in the same recorded-screen scenario.

@@ -1,0 +1,297 @@
+FM_TEST_BEGIN 2026-11-27T06:31:25Z tests/fm-task-inbox.test.sh family=watcher-wake-lock expected_gate_skip=none
+ok - inbox: a steer is written durably and round-trips byte-exact with a self-describing doorbell
+ok - inbox: a hostile-path doorbell executes as a no-op in bare shells
+ok - inbox: terminal-control paths are rejected without typing
+ok - inbox: the ring skips dead or missing endpoints and still rings live or unclassifiable endpoints
+ok - inbox: the idempotent enqueue dedups an exact re-run onto the same record, handled or not
+ok - inbox: idempotent enqueue follows a record concurrently moved to handled
+ok - inbox: the handled mv is the idempotent ack and sequences are never reissued
+ok - inbox: concurrent writers serialize on the sequence lock and lose nothing
+ok - inbox: a writer retries when a competing lock vanishes after its failed claim
+ok - inbox: ladder bookkeeping ignores a concurrently removed inbox
+ok - inbox: fire-and-forget records stay durable and outside the ladder
+ok - inbox: the re-ring ladder paces by grace, escalates once, and resets on ack
+ok - watcher: an unhandled aged message on an idle pane re-rings without waking firstmate, and the ack silences it
+ok - watcher: a busy pane just waits - the record is durable and no doorbell is typed
+ok - watcher: a healthy or empty inbox stays completely silent
+ok - watcher: acknowledgement silences an unwritable ladder without a stale wake
+ok - watcher: unwritable ladder bookkeeping surfaces a stale wake after the doorbell
+ok - watcher: a spent ring budget emits exactly one ordinary stale wake for recovery
+ok - watcher: a positively dead pane is never typed into and surfaces exactly one stale wake
+ok - watcher: dead-pane recovery overrides stale busy state
+ok - inbox: the ring refuses Codex's update picker on every harness, cursor below the rows or on the selection row, with nothing typed and no Enter
+ok - inbox: a picker that appears after the composer check stops the ring before its Enter on every harness
+ok - inbox: an ordinary empty composer still receives the doorbell and exactly one Enter
+ok - inbox: pending text gets no keystroke on any harness, and an unproven Codex screen gets no keystroke or no Enter
+ok - fm-send: equal-length agy notices are refused at the last column and delivered with one more column
+ok - inbox: an equivalent scaffolded locator allows the short agy notice for a UTF-8 inbox in an 80-column pane
+ok - inbox: an agy pane with a draft or an unproven frame gets no keystroke
+ok - inbox: a harness outside the proven-empty rule still rings an unknown screen with one Enter
+ok - inbox: an idle rovo composer's placeholder chip reads empty and receives the doorbell with one Enter
+ok - inbox: a rovo pane holding typed text or an unproven screen gets no keystroke
+ok - fm-send: the picker gets no keystroke, and an empty composer still gets the doorbell
+not ok - the watcher never escalated refused picker rings (cursor row 3)
+FM_TEST_END 2026-11-27T06:32:58Z tests/fm-task-inbox.test.sh exit=1 duration_ms=93678 gate_skip=false
+FM_TEST_BEGIN 2026-11-27T06:32:58Z tests/fm-send-inbox.test.sh family=backend-dispatch expected_gate_skip=none
+ok - fm-send inbox: the payload is recorded durably and only the doorbell is typed
+ok - fm-send inbox: newlines are legal and the terminal can no longer truncate a steer
+ok - fm-send inbox: a re-send is a new durable record, never a retyped payload
+ok - fm-send inbox: a visibly pending composer skips the ring, and the steer stays durably sent
+ok - fm-send inbox: a failed doorbell is still a durably sent steer
+ok - fm-send planes: slash and codex $skill invocations stay typed; plain $-text rides the inbox
+ok - Claude automatic input requires proof at both writes and holds the lifecycle lock, while explicit keys reach the dialog
+ok - Claude watcher re-rings count a lifecycle refusal and retry the durable steer
+ok - fm-send planes: an explicit backend target keeps the typed plane
+ok - fm-send planes: the --key lifecycle path never touches the inbox
+ok - fm-send inbox: a secondmate steer records marker+corr in the body and is delivered at enqueue
+ok - fm-send inbox: lost reply bookkeeping never invites a resend, and the delivered steer is never duplicated
+ok - fm-send inbox: metadata lock contention fails bounded without enqueue
+ok - fm-send inbox: an unwritable record is a loud local failure that leaves no false expectation
+FM_TEST_END 2026-11-27T06:35:36Z tests/fm-send-inbox.test.sh exit=0 duration_ms=157950 gate_skip=false
+FM_TEST_BEGIN 2026-11-27T06:35:36Z tests/fm-send-popup-settle.test.sh family=pure-contract-unit expected_gate_skip=none
+ok - fm-send popup-settle: codex $skill -> long settle -> 1.2s
+ok - fm-send popup-settle: codex $skill exact task id -> long settle -> 1.2s
+ok - fm-send popup-settle: claude $-message -> inbox plane, fast doorbell
+ok - fm-send popup-settle: claude "$5/month" -> inbox plane, fast doorbell
+ok - fm-send popup-settle: explicit target $message -> fast path (unknown harness) -> 0.3s
+ok - fm-send popup-settle: claude /command -> long settle (slash unchanged) -> 1.2s
+ok - fm-send popup-settle: codex /command -> long settle (slash unchanged) -> 1.2s
+ok - fm-send popup-settle: codex plain text -> inbox plane, fast doorbell
+FM_TEST_END 2026-11-27T06:35:48Z tests/fm-send-popup-settle.test.sh exit=0 duration_ms=11281 gate_skip=false
+FM_TEST_BEGIN 2026-11-27T06:35:48Z tests/fm-send-remote-delivery.test.sh family=standalone expected_gate_skip=none
+ok - fm-send remote: a text steer lands as a durable remote inbox record and exits 0 at enqueue
+ok - fm-send remote: the printed correlation-reusing resend deduplicates onto the same record
+ok - fm-send remote: a failed retry cannot erase an earlier ambiguous delivery
+ok - fm-send remote: fire-and-forget delivery is idempotent without reply recovery
+ok - remote control: send revalidates endpoint ownership under the metadata lock
+ok - fm-send remote: enqueue revalidates the parent route under its metadata lock
+ok - fm-send remote: expected host is enforced by final route validation
+ok - fm-send remote: a --resolve-key answer closes its decision at enqueue
+ok - fm-send remote: every remote text, harness-native included, rides the inbox
+ok - fm-send remote: a real remote failure still fails loudly with the remote diagnostics
+ok - fm-send remote: exit 3 from the remote leg is a failure, never a delivery claim
+ok - fm-send remote: ssh 255 fails with resend-safe guidance and preserves the expectation
+ok - fm-send remote: the remote leg is budget-bounded and stays idempotent across the bound
+ok - fm-send local: an unconfirmed submit exits 3 with an honest non-error report
+ok - fm-send local: an unconfirmed submit still never closes a --resolve-key decision
+ok - fm-send local: an unconfirmed secondmate send keeps its reply expectation armed (pending)
+ok - fm-send local: clearance after one Enter confirms delivery (cleared)
+ok - fm-send local: a Claude command ending in crlf is refused before any terminal write
+ok - fm-send local: a Claude command ending in lf is refused before any terminal write
+ok - fm-send local: an unconfirmed secondmate send keeps its reply expectation armed (spinner)
+ok - fm-send local: clearance after one Enter confirms delivery (wrapped)
+all fm-send-remote-delivery tests passed
+FM_TEST_END 2026-11-27T06:36:24Z tests/fm-send-remote-delivery.test.sh exit=0 duration_ms=36630 gate_skip=false
+FM_TEST_BEGIN 2026-11-27T06:36:24Z tests/fm-control-claude-exit-dialog.test.sh family=backend-dispatch expected_gate_skip=none
+ok - Perl timeout cancels the child even when it is delayed before exec
+restart-live-open exit=3: unreached: exitdialog: Claude is showing its background-tasks exit confirmation and needs manual recovery
+summary: 0 of 1 restarted, 0 nudged, 1 unreached
+restart-initial exit=3: unreached: exitdialog: Claude is showing its background-tasks exit confirmation and needs manual recovery
+summary: 0 of 1 restarted, 0 nudged, 1 unreached
+restart-clipped exit=3: unreached: exitdialog: Claude is showing its background-tasks exit confirmation and needs manual recovery
+summary: 0 of 1 restarted, 0 nudged, 1 unreached
+restart-narrow exit=3: unreached: exitdialog: Claude is showing its background-tasks exit confirmation and needs manual recovery
+summary: 0 of 1 restarted, 0 nudged, 1 unreached
+initial-clipped exit=1: error: exit-refused exitdialog interrupt=not-needed exit-command=not-sent exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+initial-narrow exit=1: error: exit-refused exitdialog interrupt=not-needed exit-command=not-sent exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+exit-clipped exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+exit-narrow exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+doorbell-normal exit=1: 
+doorbell-clipped exit=1: 
+doorbell-narrow exit=1: 
+restart-unsubmitted exit=3: nudged: exitdialog: it did not confirm within 5s that its open work is written down, so its conversation was not spent
+summary: 0 of 1 restarted, 1 nudged, 0 unreached
+restart exit=3: unreached: exitdialog: the restart outcome is unknown: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+summary: 0 of 1 restarted, 0 nudged, 1 unreached
+exit exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+plain exit=0: stopped exitdialog harness=claude backend=tmux endpoint=fixture:fm-exitdialog worktree={run-worktree}/.phase-test.E1G7DL/tmp/fm-claude-exit-dialog.WOqC58/worktree
+initial-dialog exit=1: error: exit-refused exitdialog interrupt=not-needed exit-command=not-sent exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+initial-busy exit=1: error: exit-refused exitdialog interrupt=not-needed exit-command=not-sent agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+picker-history exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+changed-heading exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+no-list exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+no-stay exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; the agent did not stop within 2s
+selection-on-2 exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; the agent did not stop within 2s
+relabeled exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; the agent did not stop within 2s
+extra-choice exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; the agent did not stop within 2s
+history exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; the agent did not stop within 2s
+history-plain exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; the agent did not stop within 2s
+ok - tmux exit and restart leave the exact dialog untouched and report it; near misses stay unrecognized
+ok - Claude dialog reads use the exact tmux session and window
+herdr dialog exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+herdr long-dialog exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+herdr picker-history exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+herdr dialog-unreadable exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=unreadable exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+herdr dialog-slow-liveness exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=unreadable exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+herdr dialog-after-typing exit=1: error: exit-typed exitdialog interrupt=not-needed exit-command=typed exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+herdr dialog-after-failed-enter exit=1: error: exit-typed exitdialog interrupt=not-needed exit-command=typed agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+herdr late-dialog exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+herdr guard-stalled exit=1: error: exit-typed exitdialog interrupt=not-needed exit-command=typed exit=unconfirmed; the Claude viewport read timed out
+herdr retry exit=0: stopped exitdialog harness=claude backend=herdr endpoint=fixture:p1 worktree={run-worktree}/.phase-test.E1G7DL/tmp/fm-claude-exit-dialog.WOqC58/worktree
+herdr retry-failure exit=0: stopped exitdialog harness=claude backend=herdr endpoint=fixture:p1 worktree={run-worktree}/.phase-test.E1G7DL/tmp/fm-claude-exit-dialog.WOqC58/worktree
+herdr slow-liveness-retry exit=0: stopped exitdialog harness=claude backend=herdr endpoint=fixture:p1 worktree={run-worktree}/.phase-test.E1G7DL/tmp/fm-claude-exit-dialog.WOqC58/worktree
+herdr retry-stalled exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; the agent did not stop within 4s
+herdr enter-failure exit=1: error: exit-typed exitdialog interrupt=not-needed exit-command=typed agent-state=alive exit=unconfirmed; the agent did not stop within 8s
+herdr single-stop exit=0: stopped exitdialog harness=claude backend=herdr endpoint=fixture:p1 worktree={run-worktree}/.phase-test.E1G7DL/tmp/fm-claude-exit-dialog.WOqC58/worktree
+herdr slow-liveness-stop exit=0: stopped exitdialog harness=claude backend=herdr endpoint=fixture:p1 worktree={run-worktree}/.phase-test.E1G7DL/tmp/fm-claude-exit-dialog.WOqC58/worktree
+herdr slow-stop exit=1: error: exit-delivered exitdialog interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; the agent did not stop within 4s
+herdr stalled-stop exit=0: stopped exitdialog harness=claude backend=herdr endpoint=fixture:p1 worktree={run-worktree}/.phase-test.E1G7DL/tmp/fm-claude-exit-dialog.WOqC58/worktree
+not ok - slow composer reads should allow normal doorbell delivery: expected exit 0, got 5
+FM_TEST_END 2026-11-27T06:40:37Z tests/fm-control-claude-exit-dialog.test.sh exit=1 duration_ms=252676 gate_skip=false
+FM_TEST_BEGIN 2026-11-27T06:40:37Z tests/fm-control.test.sh family=backend-dispatch expected_gate_skip=none
+ok - fm-control exit: every verified harness gets its own verified exit command
+ok - fm-control exit: Codex picker and uncertain screen refuse before confirmation
+ok - fm-control exit: process death cannot confirm an uncertain Codex submission
+ok - fm-control exit: transient uncertainty cannot earn a retry Enter
+ok - fm-control exit: Herdr plain capture preserves narrow Codex quit
+ok - fm-control exit: a slow Codex quit is awaited without another Enter
+ok - fm-control exit: retained picker history above a current tmux composer allows quit
+ok - fm-control interrupt: every verified harness gets its own verified key and repeat count
+ok - fm-control interrupt: opencode needs a double Escape, claude a single one
+ok - fm-control: a harness with no verified control mechanics is refused, not guessed at
+ok - fm-control-lib: a recorded harness resolves to its verified adapter without guessing
+ok - fm-control: prefixed recorded harnesses reach interrupt and exit mechanics
+ok - fm-control-lib: the backend key matrix matches each adapter's real send-key surface
+ok - fm-control-lib: adapter capability is per task kind, not per adapter alone
+ok - fm-control interrupt: a backend that cannot deliver the harness's key refuses instead of sending another
+ok - fm-control: a backend that cannot prove an agent stopped refuses exit and relaunch
+ok - fm-control-lib: stop-proving verbs are gated on the backends that really classify agent state
+ok - fm-control: a legacy window label is refused and the exact task id is named
+ok - fm-control: an explicit backend endpoint is never a control target
+ok - fm-control: an unrecorded task id is refused
+ok - fm-control: a record whose endpoint identity names another task is refused
+ok - fm-control: a remotely placed secondmate is refused by placement, not by a metadata complaint
+ok - fm-control: interrupt and exit lock before task-state resolution
+ok - fm-control: the verb list is closed - no raw keys, arbitrary text, or clear verb
+ok - fm-control: resume is refused with the determinism reason and the alternative
+ok - fm-control: profile and note flags belong to relaunch only
+ok - fm-control exit: an already-stopped agent is idempotent success with no bytes sent
+ok - fm-control exit: a missing endpoint is idempotent already-stopped success
+ok - fm-control interrupt: refuses when no agent is running rather than keying a shell
+ok - fm-control exit: an endpoint whose process cannot be attributed refuses
+ok - fm-control exit: a busy agent receives interrupt delivery before the exit command
+ok - fm-control exit: an idle agent goes straight to its exit command
+ok - fm-control interrupt: unconfirmed delivery preserves observed busy state
+ok - fm-control interrupt: muse confirms cancellation from its session log
+ok - fm-control interrupt: postconditions are revalidated after acknowledgement polling
+ok - fm-control exit: an interrupt-stopped agent satisfies the gone-state postcondition
+ok - fm-control exit: a stubborn agent reports delivered input and an unconfirmed exit
+ok - fm-control interrupt: grok reports delivery without claiming cancellation
+ok - fm-control interrupt: grok's idle footer does not confirm cancellation
+ok - fm-control: a lifecycle command to a secondmate is unmarked and opens no reply expectation
+ok - fm-control's arrival leaves fm-send's from-firstmate marking untouched
+FM_TEST_END 2026-11-27T06:45:28Z tests/fm-control.test.sh exit=0 duration_ms=290606 gate_skip=false
+FM_TEST_BEGIN 2026-11-27T06:45:28Z tests/fm-composer-lib.test.sh family=pure-contract-unit expected_gate_skip=none
+ok - fm_composer_classify_content: a bare shell prompt glyph (>/$/%/#) reads unknown, never empty
+ok - fm_composer_classify_content: stripped unbordered content is unknown except verified agent glyphs
+ok - fm_composer_classify_content: a bare shell prompt carrying a command is not empty
+ok - fm_composer_classify_content: a bare prompt glyph inside a bordered composer box reads empty (claude's own idle composer)
+ok - fm_composer_classify_content: agent prompt glyphs (❯ claude, › codex, ⟩ muse) read empty bordered or bare
+ok - fm_composer_classify_content: an empty composer reads empty
+ok - fm_composer_classify_content: idle matching is limited to proven placeholder positions
+ok - fm_composer_classify_content: idle matching preserves the caller's case mode
+ok - fm_composer_classify_content: real unsubmitted text reads pending (including a popup argument-hint fill)
+ok - matrix: claude's ❯+NBSP row reads empty on every profile in both locales (#1988)
+ok - matrix: codex's dim hint is empty when styling proves it, unknown (never pending) when it cannot
+ok - matrix: muse's ⟩ reads empty everywhere and survives losing the styled-glyph signal
+ok - matrix: rovo's placeholder chip reads empty only on a rovo pane, and typed text stays pending
+ok - matrix: agy's > row reads empty only on an agy pane's full recorded screen, typed text stays pending, and pi is unchanged
+ok - matrix: muse's glyph-coloured input still reads pending outside a rovo pane
+ok - matrix: cursor's reverse-video placeholder remnant reads empty; real typed text stays pending
+ok - matrix: herdr half-block rules bound a bare composer's wrap region
+ok - matrix: omp's status row bounds the bare composer's wrap region
+ok - matrix: pi's separated composer needs identity + structure; the blank row alone never proves it
+ok - matrix: opencode's left-bar composer reads empty everywhere and scans the full active run
+ok - matrix: grok's titled bottom border is tolerated as a title, not read as ambiguity
+ok - matrix: kimi's bordered shell-glyph box reads empty through the shared owner (spawn's fourth copy retired)
+ok - matrix: the real claude-in-zellij --ansi dump reads empty in both locales
+ok - strict posture: blank and unidentified rows are unknown, never injectable empty
+ok - fm_composer_classify_screen: the bare composer's wrap region stays identified; structure breaks it
+ok - fm_composer_classify_screen: a row-leading agent glyph reanchors the live composer
+ok - fm_composer_classify_screen: a lower dead shell invalidates only cursorless stale composers
+ok - fm_composer_classify_screen: cursorless bare wrap regions participate in verdicts
+ok - fm_composer_classify_screen: cursorless containers reject only contiguous unclaimed activity
+ok - fm_composer_classify_screen: the bottom-most candidate wins; stale banners cannot
+ok - fm_composer_classify_screen: incomplete lower structure invalidates stale boxes
+ok - fm_composer_classify_screen: titled bottoms retain full box geometry
+ok - fm_composer_classify_screen: a proven box tolerates a bottom-border cursor
+ok - fm_composer_extract_selected_content: scopes user content and excludes furniture
+ok - fm_composer_queued_enter_verdict: pending + busy returns empty (queued Enter)
+ok - fm_composer_queued_enter_verdict: pending + idle/unknown stays pending
+ok - fm_composer_queued_enter_verdict: only proven pending is converted
+ok - fm_composer_holds_text: a wrapped typed line is proven, other text is not
+ok - fm_composer_update_picker_scan: cursorless picker is active unless a proven composer follows it
+FM_TEST_END 2026-11-27T06:45:37Z tests/fm-composer-lib.test.sh exit=0 duration_ms=9204 gate_skip=false
+FM_TEST_BEGIN 2026-11-27T06:45:37Z tests/fm-backend-orca.test.sh family=orca expected_gate_skip=optional-binary
+ok - fm_backend_orca_capture: parses result.terminal.tail and calls terminal read
+ok - fm_backend_orca_capture: falls back to result text fields
+ok - fm_backend_orca_capture: fails closed on Orca read error JSON
+ok - fm_backend_orca_runtime_check: accepts reachable ready runtime
+ok - fm_backend_orca_runtime_check: fails closed when runtime is not ready
+ok - fm_backend_orca_send_text_submit: verifies empty composer after Enter with one bounded read
+ok - fm_backend_orca_send_text_submit: a borderless claude composer confirms delivery (the missing #2029 shape)
+ok - fm_backend_orca_composer_state: a stale startup banner cannot outrank the live composer row
+ok - fm_backend_orca_send_text_submit: retries Enter while composer remains pending
+ok - fm_backend_orca_composer_state: a slash-command popup's argument-hint placeholder still reads pending
+ok - fm_backend_orca_composer_state: a bare dead-shell prompt reads unknown (unsafe-for-injection), never empty
+ok - fm_backend_orca_send_text_submit: a slash-command popup's placeholder fill on Enter #1 does not short-circuit as submitted; Enter #2 is retried and lands it
+ok - fm_backend_orca_send_literal: sends text without submitting
+ok - fm_backend_orca_send_text_submit: reports send-failed when Orca send fails
+ok - Orca send helpers: fail closed on ok:false JSON
+ok - fm_backend_orca_send_key: Enter maps to empty enter, C-c maps to interrupt
+ok - fm_backend_orca_send_key: refuses unsupported keys loudly
+ok - fm_backend_orca_send_key: refuses Escape instead of mapping it to interrupt
+ok - fm_backend_orca_kill: calls terminal close and stays best-effort
+ok - fm_backend_orca_remove_worktree: refuses empty worktree ids
+ok - fm_backend_orca_remove_worktree: fails closed on ok:false JSON
+ok - fm_backend_orca_worktree_path: resolves an Orca worktree id to its path
+ok - fm-backend dispatcher: accepts orca and routes capture through bin/backends/orca.sh
+ok - fm_backend_orca_json_get: ignores undocumented terminal id shapes
+ok - Orca lifecycle helpers: register repo, create worktree, create terminal, parse stable ids
+ok - fm_backend_orca_worktree_create: removes created worktree when path is missing
+ok - fm-spawn.sh --backend orca: preserves metadata when pathless cleanup fails
+ok - fm-spawn.sh --backend orca: reuses implicit terminal, records metadata, launches harness
+ok - fm-spawn.sh --backend orca --secondmate: refuses before secondmate-home mutation
+ok - fm-spawn.sh --backend orca: refuses before mutation when Orca runtime is not ready
+ok - fm-spawn.sh --backend orca: refuses non-isolated worktrees and closes implicit terminals
+ok - fm-spawn.sh --backend orca: removes worktree when terminal creation fails
+ok - fm-spawn.sh --backend orca: preserves metadata when abort cleanup fails
+ok - fm-spawn.sh --backend orca: releases terminal and worktree on later aborts
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: watcher still down (same stale episode; last beat: 3s ago, grace 300s) - full banner already printed this episode.
+ok - fm-peek/fm-send/fm-crew-state route through backend=orca metadata and its durable inbox
+ok - fm-peek/fm-crew-state: Orca read error JSON fails closed
+ok - fm_backend_target_exists: Orca ok:false read JSON is not live
+not ok - Orca scout teardown should succeed once report exists
+fm-captain-hold: compatible tasks-axi is required
+REFUSED: scout task orcateardownz3 has not passed the captain-call completion gate.
+Inventory its report and any visual review through bin/fm-captain-hold.sh before teardown.: expected exit 0, got 1
+FM_TEST_END 2026-11-27T06:46:10Z tests/fm-backend-orca.test.sh exit=1 duration_ms=33166 gate_skip=false
+FM_TEST_BEGIN 2026-11-27T06:46:10Z tests/fm-secondmate-restart.test.sh family=secondmate expected_gate_skip=none
+ok - T1 persist is a gate, and asks for open records and task status only
+not ok - a confirmed persist should restart the mate
+unreached: sm1: the restart outcome is unknown: secondmate home cannot be inside the firstmate repo: {run-worktree}/.phase-test.E1G7DL/tmp/fm-secondmate-restart.gHXSFH/order-8049/sm1-home
+summary: 0 of 1 restarted, 0 nudged, 1 unreached: expected exit 0, got 3
+FM_TEST_END 2026-11-27T06:46:18Z tests/fm-secondmate-restart.test.sh exit=1 duration_ms=7519 gate_skip=false
+FM_TEST_SUMMARY total=9 failed=4 skipped_gate=0 duration_ms=893351
+FM_TEST_SUMMARY_FAMILY family=backend-dispatch count=3 duration_ms=701232 failed=1
+FM_TEST_SUMMARY_FAMILY family=orca count=1 duration_ms=33166 failed=1
+FM_TEST_SUMMARY_FAMILY family=pure-contract-unit count=2 duration_ms=20485 failed=0
+FM_TEST_SUMMARY_FAMILY family=secondmate count=1 duration_ms=7519 failed=1
+FM_TEST_SUMMARY_FAMILY family=standalone count=1 duration_ms=36630 failed=0
+FM_TEST_SUMMARY_FAMILY family=watcher-wake-lock count=1 duration_ms=93678 failed=1
+FM_TEST_SLOWEST rank=1 script=tests/fm-control.test.sh duration_ms=290606
+FM_TEST_SLOWEST rank=2 script=tests/fm-control-claude-exit-dialog.test.sh duration_ms=252676
+FM_TEST_SLOWEST rank=3 script=tests/fm-send-inbox.test.sh duration_ms=157950
+FM_TEST_SLOWEST rank=4 script=tests/fm-task-inbox.test.sh duration_ms=93678
+FM_TEST_SLOWEST rank=5 script=tests/fm-send-remote-delivery.test.sh duration_ms=36630
+FM_TEST_SLOWEST rank=6 script=tests/fm-backend-orca.test.sh duration_ms=33166
+FM_TEST_SLOWEST rank=7 script=tests/fm-send-popup-settle.test.sh duration_ms=11281
+FM_TEST_SLOWEST rank=8 script=tests/fm-composer-lib.test.sh duration_ms=9204
+FM_TEST_SLOWEST rank=9 script=tests/fm-secondmate-restart.test.sh duration_ms=7519
