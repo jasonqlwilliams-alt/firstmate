@@ -48,7 +48,7 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 
 ### Task window cleanup
 
-Ordinary teardown and forced secondmate child cleanup require a complete window list for the exact recorded session, exactly one window with the recorded name, and a readable pane ID, PID, and terminal for each pane in that window.
+In ordinary teardown and forced secondmate child cleanup, closing a tmux window requires a complete window list for the exact recorded session, exactly one window with the recorded name, and a readable pane ID, PID, and terminal for each pane in that window.
 Teardown leaves the window open and warns if it cannot verify that information or read caller ancestry.
 It also leaves the window open and warns if a pane's PID matches teardown or an ancestor, or if a pane matches the launch pane ID or controlling terminal.
 On Linux, teardown also requires a verified launch process session and leaves the window open if a target tmux server in its launch ancestry shares that session or has an unreadable process session.

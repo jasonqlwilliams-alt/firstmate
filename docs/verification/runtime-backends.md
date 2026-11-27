@@ -243,6 +243,7 @@ ok - fm-teardown: exact tmux cleanup preserves invalid and prefix-matched neighb
 ```
 
 The current [endpoint safety regression](../../tests/fm-teardown-endpoint-safety.test.sh) also covers unreadable rows among same-named windows, window and session changes, Linux foreground-server jobs, and a late pane split during forced secondmate cleanup.
+It checks that linking a second exact-name window into the recorded session before the close preserves both windows, and that valid cleanup preserves a same-named window in another session.
 
 ## Claude workspace trust
 
