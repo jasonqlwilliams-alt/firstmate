@@ -46,9 +46,11 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 
 ## Current behavior and safety
 
-Teardown leaves a task window open with a warning when it cannot verify the recorded window and its pane inventory, cannot read caller ancestry, finds the caller in a pane, or detects a job launched by the target tmux server on Linux.
-Outside Linux, a server-launched job or a launch through a wrapper that exits early and scrubs the tmux environment can leave no caller evidence when the job has no controlling terminal.
-Teardown may close the window in those cases.
+Teardown leaves a task window open with a warning when it cannot verify the recorded window and its pane inventory, cannot read caller ancestry, or finds caller evidence in a pane.
+On Linux, it also leaves the window open when the target tmux server is the verified launch session leader.
+A server-launched job can escape that check outside Linux or when the server inherits another process's session, as it can with `tmux -D`.
+A wrapper that exits early after clearing the tmux environment can also hide the caller when no controlling terminal is available.
+Teardown may close the window in those cases if the other checks find no caller evidence.
 The remaining cleanup proceeds, so an operator can close a retained window manually when it is safe.
 
 ### Exact window reads

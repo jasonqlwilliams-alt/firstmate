@@ -39,10 +39,10 @@ case "${1:-}" in
   if-shell)
     printf '%s\n' "$*" >> "$FM_FAKE_TMUX_LOG"
     [ "$#" = 7 ] && [ "$2 $3" = '-F -t' ] || exit 1
-    window_id=${4#=firstmate:}
-    [[ "$window_id" =~ ^@[0-9]+$ ]] || exit 1
+    window_id=${4#\$1:}
+    [ "$4" = "\$1:$window_id" ] && [[ "$window_id" =~ ^@[0-9]+$ ]] || exit 1
     snapshot=$(cat "$0.snapshot-$window_id") || exit 1
-    [ "$5" = '#{==:#{window_id}:#{pid}:#{session_id}:#{window_name}:#{P:#{pane_pid}:#{pane_id}:#{pane_tty}:},'"$snapshot}" ] \
+    [ "$5" = '#{&&:#{==:#{session_name},firstmate},#{==:#{window_id}:#{pid}:#{session_id}:#{window_name}:#{P:#{pane_pid}:#{pane_id}:#{pane_tty}:},'"$snapshot}}" ] \
       && [ "$6" = "kill-window -t '\$1:$window_id'" ] && [ "$7" = 'display-message -p changed' ] || exit 1
     printf 'guarded-close %s\n' "$window_id" >> "$FM_FAKE_TMUX_LOG"
     exit 0
@@ -51,7 +51,7 @@ case "${1:-}" in
     if [ -r "$0.close-windows" ] && [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate -F' ]; then
       while read -r name number; do
         case "$5" in
-          '#{?#{==:#{window_name},'"$name"'},'*)
+          '#{?#{&&:#{==:#{session_name},firstmate},#{==:#{window_name},'"$name"'}},'*)
             printf '@%s:1:$1:%s:2147483647:%%%s:/dev/ttys%s:\n' "$number" "$name" "$number" "$number" \
               | tee "$0.snapshot-@$number"
             ;;

@@ -365,9 +365,9 @@ SH
 }
 
 test_isolated_tmux_invalid_and_valid_cleanup() (
-  local dir socket socket_id session='endpoint safety' target_id=target control=control target=fm-target
+  local dir socket socket_id session='endpoint #S,} safety' target_id=target control=control target=fm-target
   local prefix_target=fm-prefix prefix_survivor=fm-prefix2 rc caller_pane window_id waited=0 control_tty real_uname
-  local race child_home child changed_window server_pid job_sid job_tty
+  local race child_home child changed_window server_pid job_sid job_tty client_pid client_name session_name_arg
   [ -n "$REAL_TMUX" ] || { echo "skip - tmux not installed"; return 0; }
   dir=$(make_case isolated-real)
   socket=dedicated.sock
@@ -375,7 +375,8 @@ test_isolated_tmux_invalid_and_valid_cleanup() (
   cd "$dir" || exit 1
   unset TMUX TMUX_PANE
   trap '"$REAL_TMUX" -S "$socket" kill-server 2>/dev/null || true' EXIT
-  "$REAL_TMUX" -f /dev/null -S "$socket" new-session -d -s "$session" -n "$control" 'exec sleep 180'
+  session_name_arg=${session//#/##}
+  "$REAL_TMUX" -f /dev/null -S "$socket" new-session -d -s "$session_name_arg" -n "$control" 'exec sleep 180'
   control_tty=$("$REAL_TMUX" -S "$socket" display-message -p -t "$session:$control" '#{pane_tty}')
   [ -n "$control_tty" ] || fail "test control pane has no terminal"
   window_id=$("$REAL_TMUX" -S "$socket" new-window -dP -F '#{window_id}' \
@@ -405,6 +406,7 @@ if [ "\${1:-}" = if-shell ] && [ "\${4##*:}" = "\${FM_TEST_RACE_WINDOW:-}" ]; th
     split) '$REAL_TMUX' -S '$socket' split-window -d -t "\$4" 'exec sleep 180' ;;
     rename) '$REAL_TMUX' -S '$socket' rename-window -t "\$4" fm-renamed ;;
     move) '$REAL_TMUX' -S '$socket' move-window -s "\$4" -t relocated: ;;
+    session-rename) '$REAL_TMUX' -S '$socket' rename-session -t '=$session' renamed-session ;;
   esac
 fi
 exec '$REAL_TMUX' -S '$socket' "\$@"
@@ -649,6 +651,45 @@ SH
     fi
   done
   pass "fm-teardown: tmux refuses a close after a window rename or session move"
+
+  "$REAL_TMUX" -S "$socket" select-window -t "$window_id"
+  mkfifo "$dir/attached.in"
+  "$REAL_TMUX" -S "$socket" -C attach-session -t "=$session" \
+    < "$dir/attached.in" > "$dir/attached.out" 2> "$dir/attached.err" &
+  client_pid=$!
+  exec 9>"$dir/attached.in"
+  waited=0
+  until [ "$("$REAL_TMUX" -S "$socket" list-clients -F '#{session_name}:#{window_id}')" = "$session:$window_id" ]; do
+    [ "$waited" -lt 50 ] || fail "control client did not attach to the target window"
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  client_name=$("$REAL_TMUX" -S "$socket" list-clients -F '#{client_name}')
+  isolated_tmux_window_exists "$dir" "$socket" "=$client_name" "$target" \
+    || fail "tmux did not resolve the fixture client name to its session"
+  fm_write_meta "$dir/home/state/$target_id.meta" \
+    "window=$client_name:$target" "worktree=$dir/nonexistent-worktree" \
+    "project=$dir/nonexistent-project" "kind=scout"
+  run_case "$dir" "$target_id" > "$dir/alias.out" 2> "$dir/alias.err" \
+    || fail "cleanup with a client name as its recorded session failed: $(cat "$dir/alias.err")"
+  assert_contains "$(cat "$dir/alias.err")" "cannot verify the exact window and its pane inventory" \
+    "client-name lookup did not report an unverifiable session"
+  isolated_tmux_window_exists "$dir" "$socket" "$session" "$target" || fail "teardown closed a window through a client alias"
+
+  fm_write_meta "$dir/home/state/$target_id.meta" \
+    "window=$session:$target" "worktree=$dir/nonexistent-worktree" \
+    "project=$dir/nonexistent-project" "kind=scout"
+  FM_TEST_TMUX_RACE=session-rename FM_TEST_RACE_WINDOW=$window_id \
+    run_case "$dir" "$target_id" > "$dir/session-rename.out" 2> "$dir/session-rename.err" \
+    || fail "cleanup during a session rename failed: $(cat "$dir/session-rename.err")"
+  assert_contains "$(cat "$dir/session-rename.err")" "close could not be confirmed against the verified window and pane snapshot" \
+    "session rename did not produce a warning"
+  [ "$("$REAL_TMUX" -S "$socket" list-clients -F '#{session_name}:#{window_id}')" = "renamed-session:$window_id" ] \
+    || fail "the attached client did not retain the target after its session was renamed"
+  "$REAL_TMUX" -S "$socket" rename-session -t '=renamed-session' "$session_name_arg"
+  exec 9>&-
+  wait "$client_pid"
+  pass "fm-teardown: tmux preserves the attached window when its recorded session name is wrong or changes"
 
   fm_write_meta "$dir/home/state/$target_id.meta" \
     "window=$session:$target" "worktree=$dir/nonexistent-worktree" \

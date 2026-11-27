@@ -1019,12 +1019,12 @@ case "${1:-}" in
   list-windows)
     [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate -F' ] || exit 1
     case "$5" in
-      '#{?#{==:#{window_name},fm-teardownconform1},'*) printf '%s\n' "$snapshot" ;;
+      '#{?#{&&:#{==:#{session_name},firstmate},#{==:#{window_name},fm-teardownconform1}},'*) printf '%s\n' "$snapshot" ;;
       *) exit 1 ;;
     esac ;;
   if-shell)
-    [ "$#" = 7 ] && [ "$2 $3 $4" = '-F -t =firstmate:@42' ] \
-      && [ "$5" = '#{==:#{window_id}:#{pid}:#{session_id}:#{window_name}:#{P:#{pane_pid}:#{pane_id}:#{pane_tty}:},'"$snapshot}" ] \
+    [ "$#" = 7 ] && [ "$2 $3 $4" = '-F -t $1:@42' ] \
+      && [ "$5" = '#{&&:#{==:#{session_name},firstmate},#{==:#{window_id}:#{pid}:#{session_id}:#{window_name}:#{P:#{pane_pid}:#{pane_id}:#{pane_tty}:},'"$snapshot}}" ] \
       && [ "$6" = "kill-window -t '\$1:@42'" ] && [ "$7" = 'display-message -p changed' ] || exit 1
     printf 'guarded-close @42\n' >> "$FM_TMUX_LOG"
     ;;

@@ -2715,19 +2715,19 @@ case "$1" in
   list-windows)
     [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate -F' ] || exit 1
     case "$5" in
-      '#{?#{==:#{window_name},fm-child-a},'*) number=11 name=fm-child-a ;;
-      '#{?#{==:#{window_name},fm-child-b},'*) number=12 name=fm-child-b ;;
-      '#{?#{==:#{window_name},fm-task-x1},'*) number=13 name=fm-task-x1 ;;
+      '#{?#{&&:#{==:#{session_name},firstmate},#{==:#{window_name},fm-child-a}},'*) number=11 name=fm-child-a ;;
+      '#{?#{&&:#{==:#{session_name},firstmate},#{==:#{window_name},fm-child-b}},'*) number=12 name=fm-child-b ;;
+      '#{?#{&&:#{==:#{session_name},firstmate},#{==:#{window_name},fm-task-x1}},'*) number=13 name=fm-task-x1 ;;
       *) exit 1 ;;
     esac
     printf '@%s:1:$1:%s:2147483647:%%%s:/dev/ttys0%s:\n' "$number" "$name" "$number" "$number" \
       | tee "$log.snapshot-@$number"
     ;;
   if-shell)
-    window_id=${4#=firstmate:}
-    if [ "$#" = 7 ] && [ "$2 $3" = '-F -t' ] && [[ "$window_id" =~ ^@[0-9]+$ ]] \
+    window_id=${4#\$1:}
+    if [ "$#" = 7 ] && [ "$2 $3" = '-F -t' ] && [ "$4" = "\$1:$window_id" ] && [[ "$window_id" =~ ^@[0-9]+$ ]] \
       && snapshot=$(cat "$log.snapshot-$window_id") \
-      && [ "$5" = '#{==:#{window_id}:#{pid}:#{session_id}:#{window_name}:#{P:#{pane_pid}:#{pane_id}:#{pane_tty}:},'"$snapshot}" ] \
+      && [ "$5" = '#{&&:#{==:#{session_name},firstmate},#{==:#{window_id}:#{pid}:#{session_id}:#{window_name}:#{P:#{pane_pid}:#{pane_id}:#{pane_tty}:},'"$snapshot}}" ] \
       && [ "$6" = "kill-window -t '\$1:$window_id'" ] \
       && [ "$7" = 'display-message -p changed' ]; then
       printf '%s\n' "$window_id" >> "$log"
@@ -4451,13 +4451,13 @@ if [ "${1:-}" = display-message ] && [ "${*: -1}" = '#{pane_pid}' ]; then
 elif [ "${1:-}" = list-windows ]; then
   [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate -F' ] || exit 1
   case "$5" in
-    '#{?#{==:#{window_name},fm-task-x1},'*) ;;
+    '#{?#{&&:#{==:#{session_name},firstmate},#{==:#{window_name},fm-task-x1}},'*) ;;
     *) exit 1 ;;
   esac
   printf '%s\n' "$snapshot"
 elif [ "${1:-}" = if-shell ] || [ "${1:-}" = kill-window ]; then
-  if [ "$#" = 7 ] && [ "$1 $2 $3 $4" = 'if-shell -F -t =firstmate:@17' ] \
-    && [ "$5" = '#{==:#{window_id}:#{pid}:#{session_id}:#{window_name}:#{P:#{pane_pid}:#{pane_id}:#{pane_tty}:},'"$snapshot}" ] \
+  if [ "$#" = 7 ] && [ "$1 $2 $3 $4" = 'if-shell -F -t $1:@17' ] \
+    && [ "$5" = '#{&&:#{==:#{session_name},firstmate},#{==:#{window_id}:#{pid}:#{session_id}:#{window_name}:#{P:#{pane_pid}:#{pane_id}:#{pane_tty}:},'"$snapshot}}" ] \
     && [ "$6" = "kill-window -t '\$1:@17'" ] && [ "$7" = 'display-message -p changed' ]; then
     printf 'guarded-close @17\n' >> "$CASE_DIR/window-close-request"
   else
