@@ -266,6 +266,18 @@ if [ "${FM_TEST_FIXTURE_REAPER_CHILD:-0}" != 1 ]; then
   }
   FM_TEST_PROCEVENT_REGISTRY=$(mktemp "${TMPDIR:-/tmp}/.fm-test-procevent.$$.XXXXXX") || return 1
 
+  # A suite run on its own still gets a disposable Treehouse root, so a fixture
+  # repository never creates a pool folder under the real one; under
+  # bin/fm-test-run.sh the runner's per-suite root is kept. A root created here
+  # is removed with the rest of this suite's temp roots.
+  # bin/fm-treehouse-scratch.sh owns the contract.
+  # shellcheck source=bin/fm-treehouse-scratch.sh
+  . "$ROOT/bin/fm-treehouse-scratch.sh" || return 1
+  fm_treehouse_scratch_enter "${TMPDIR:-/tmp}" || return 1
+  if [ -n "$FM_TREEHOUSE_SCRATCH_CREATED" ]; then
+    printf '%s\n' "$FM_TREEHOUSE_SCRATCH_CREATED" >> "$FM_TEST_CLEANUP_REGISTRY" || return 1
+  fi
+
   trap fm_test_cleanup EXIT
   trap 'fm_test_cleanup; exit 130' INT
   trap 'fm_test_cleanup; exit 143' TERM

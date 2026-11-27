@@ -118,7 +118,10 @@
 #
 # Every selected script runs isolated from the host's global and system Git
 # configuration, including one that sources no test helper of its own;
-# tests/git-config-helpers.sh owns that contract and its limits.
+# tests/git-config-helpers.sh owns that contract and its limits. Each one also
+# runs under its own disposable TREEHOUSE_ROOT, removed when it exits, so no
+# suite creates a pool folder under the real Treehouse root;
+# bin/fm-treehouse-scratch.sh owns that contract.
 #
 # Family labels, the changed-file map, and production portable-shard composition
 # live in this script only (one owner). The proven-isolated candidate set remains
@@ -398,6 +401,7 @@ family_for_basename() {
     fm-project-origin.test.sh|fm-public-followup.test.sh|fm-quota-choose.test.sh|\
     fm-remote-entrypoint.test.sh|fm-remote-secondmate-parent-binding.test.sh|\
     fm-send-remote-delivery.test.sh|fm-spawn-pool-base-freshen.test.sh|fm-treehouse-lease-safety.test.sh|\
+    fm-treehouse-prune.test.sh|fm-treehouse-scratch.test.sh|\
     fm-test-fixture-cleanup.test.sh|fm-test-fixtures.test.sh|\
     fm-voice-relay.test.sh|fm-wake-drain-open-decisions-cursor.test.sh|\
     fm-wake-drain-open-decisions.test.sh|fm-wake-drain-outcome-backstop.test.sh)
@@ -2345,6 +2349,17 @@ run_script_bounded() {  # <script> <out> <stream> <id>
   local GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
   # shellcheck source=tests/git-config-helpers.sh
   . "$ROOT/tests/git-config-helpers.sh" || return
+  # Each suite gets its own disposable Treehouse root, scoped the same way, so
+  # no fixture repository can create a pool folder under the real root and
+  # concurrent suites never share one; bin/fm-treehouse-scratch.sh owns the
+  # contract. The root is removed as soon as the suite exits.
+  local TREEHOUSE_ROOT FM_TREEHOUSE_SCRATCH_ROOT FM_TREEHOUSE_SCRATCH_CREATED
+  # shellcheck source=bin/fm-treehouse-scratch.sh
+  . "$ROOT/bin/fm-treehouse-scratch.sh" || return
+  fm_treehouse_scratch_enter "$RUN_TMP" || {
+    log "could not create a scratch Treehouse root for $script"
+    return 1
+  }
   local rc
   : "$id"
   set +e
@@ -2371,6 +2386,7 @@ run_script_bounded() {  # <script> <out> <stream> <id>
       "$script" "$PER_SCRIPT_TIMEOUT_SECS" >>"$out"
     [ "$stream" -eq 1 ] && tail -1 "$out"
   fi
+  fm_treehouse_scratch_remove "$FM_TREEHOUSE_SCRATCH_CREATED" >>"$out" 2>&1 || true
   return "$rc"
 }
 

@@ -749,6 +749,29 @@ The sweep must finish inside `FM_CHECK_TIMEOUT` (default 30), because a run the 
 So a budget larger than that timeout allows is cut down to what fits instead of being refused, and the cut is reported in the report line.
 A budget that is not a whole number from 1 to 120 is still refused outright.
 
+## Treehouse pool prune (config/treehouse-prune-protected)
+
+Every idle Treehouse pool slot is a full worktree, and Treehouse keeps an available slot forever.
+[`bin/fm-treehouse-prune.sh`](../bin/fm-treehouse-prune.sh) removes available slots on a schedule, and it is off until a home arms it.
+It sweeps the pools of the home's own repository and of every clone under its `projects/`, at whatever root Treehouse resolves for them.
+
+A slot is removed only when Treehouse reports it available, with no lease and no running process, and it is not protected, carries no Firstmate slot-owner claim, is not named by any local home's task record, and is not itself a Firstmate home.
+Each removal is a separate `treehouse destroy <slot> --yes` with no `--include-*` flag, so Treehouse re-checks the slot at removal time and keeps anything dirty, unmerged, in use, or leased by then.
+A home scan that cannot be trusted stops the whole sweep rather than guessing.
+
+`config/treehouse-prune-protected` is an optional local, gitignored list of slots that must never be pruned.
+Put one absolute path per line; blank lines and `#` comments are ignored.
+A listed path protects the slot whose worktree or slot directory is that path or lies beneath it, so listing a pool directory protects every slot in that pool.
+A relative or unreadable entry stops the sweep instead of being skipped, so a typo cannot leave a slot unprotected.
+This file is not inherited by secondmate homes.
+
+Preview a sweep with `bin/fm-treehouse-prune.sh run --dry-run`, or sweep once by hand with `run`.
+Arm the schedule once per home with `bin/fm-treehouse-prune.sh arm`, which writes `state/treehouse-prune.check.sh` and binds it with `bin/fm-check-register.sh` like the watched tool check above, so the existing watcher drives it on its normal cadence.
+The check starts a sweep detached from the watcher once `FM_TREEHOUSE_PRUNE_INTERVAL` seconds (default 86400, valid 3600 to 2592000) have passed since the last one started, because removing large worktrees can outlast the watcher's per-check bound.
+It stays silent unless the last sweep failed, which it reports once as a `check:` wake.
+`state/.treehouse-prune` holds the last sweep's result and `state/.treehouse-prune.log` its full output.
+`bin/fm-treehouse-prune.sh status` shows whether the home is armed and the last result, and `disarm` removes the check, its trust binding, and both records.
+
 ## Mail plane (.env)
 
 The mail plane (bin/fm-mail.sh) reads unseen IMAP messages and sends one SMTP message.
