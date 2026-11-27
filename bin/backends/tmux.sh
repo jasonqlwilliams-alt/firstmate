@@ -181,6 +181,27 @@ fm_backend_tmux_kill() {  # <target>
   tmux kill-window -t "=$session:=$window" 2>/dev/null || true
 }
 
+# fm_backend_tmux_kill_created: close the window an aborted spawn created,
+# identified by the `@<id>` its creation returned, only while that same window
+# still carries the recorded session and window name. Window ids are unique
+# only within one tmux server lifetime, so after a server restart the same id
+# can name another home's window. The id, session name and window name are
+# compared and the window closed inside one tmux command, so nothing can
+# change between the check and the close; any mismatch, malformed argument or
+# missing window leaves every window open. Status: nonzero when the guarded
+# command could not run; a zero status does not prove the window closed.
+fm_backend_tmux_kill_created() {  # <session:window> <@window-id>
+  local target=${1:-} id=${2:-} session window condition
+  case "$target" in
+    :*|*:|*:*:*) return 1 ;;
+    *:*) session=${target%%:*}; window=${target#*:} ;;
+    *) return 1 ;;
+  esac
+  [[ "$id" =~ ^@[0-9]+$ ]] || return 1
+  condition="#{&&:#{==:#{window_id},$id},#{&&:#{==:#{session_name},$(fm_tmux_format_literal "$session")},#{==:#{window_name},$(fm_tmux_format_literal "$window")}}}"
+  tmux if-shell -F -t "$id" "$condition" "kill-window -t $id" 2>/dev/null
+}
+
 # fm_backend_tmux_current_command: <target>'s live foreground process name -
 # tmux's own `#{pane_current_command}`, already resolved from the pty's
 # foreground process group (verified empirically with real tmux 3.6a: a

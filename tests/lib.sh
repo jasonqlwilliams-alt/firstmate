@@ -665,6 +665,33 @@ fm_fake_tmux_new_window() {  # <inventory-file> <id> <new-window args...>
 }
 export -f fm_fake_tmux_new_window
 
+# fm_fake_tmux_if_shell_kill: the fake tmux side of the guarded close in
+# bin/backends/tmux.sh (fm_backend_tmux_kill_created). For
+# `if-shell -F -t <id> <condition> kill-window...`, it removes the inventory
+# row only when that row is exactly "<id> <session>:<window>" for the session
+# and window names the condition compares, so a reused id under another name
+# survives as it does under real tmux.
+fm_fake_tmux_if_shell_kill() {  # <inventory-file> if-shell <args...>
+  local inventory=$1 id='' condition='' re session window
+  shift 2
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -F) ;;
+      -t) id=$2; shift ;;
+      *) [ -n "$condition" ] || condition=$1 ;;
+    esac
+    shift
+  done
+  re='#\{==:#\{session_name\},(.*)\},#\{==:#\{window_name\},(.*)\}\}\}$'
+  [[ "$condition" =~ $re ]] || return 0
+  session=${BASH_REMATCH[1]}
+  window=${BASH_REMATCH[2]}
+  [ -f "$inventory" ] || return 1
+  awk -v row="$id $session:$window" '$0 != row' "$inventory" > "$inventory.remaining" || return 1
+  mv "$inventory.remaining" "$inventory"
+}
+export -f fm_fake_tmux_if_shell_kill
+
 fm_fake_exit0() {
   local fakebin=$1 tool
   shift

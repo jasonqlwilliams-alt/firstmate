@@ -313,3 +313,47 @@ detached_window=$(fm_backend_tmux_create_task "$detached_session" fm-detached "$
 [ "$(fm_backend_tmux_container_ensure)" = firstmate ] \
   || fail "the literal firstmate session should be reusable"
 pass "detached spawn creates and reuses the literal firstmate session"
+
+# An aborted spawn closes the window it created by that window's id. Window ids
+# are unique only within one tmux server lifetime, so after a server restart
+# the recorded id can name another home's window. The guarded close must leave
+# that window open and still close the task's own window. tmux display-message
+# succeeds silently for a missing target, so presence is read from the inventory.
+window_present() { tmux list-windows -a -F '#{window_id} #{session_name}:#{window_name}' 2>/dev/null | grep -Fxq -- "$1"; }
+# A server just killed can still be exiting on the socket, so a restart retries.
+restart_server() {  # <session> <window> <dir>
+  local attempt
+  "$REAL_TMUX" -L "$SOCKET" kill-server >/dev/null 2>&1 || true
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    "$REAL_TMUX" -L "$SOCKET" -f /dev/null new-session -d -s "$1" -n "$2" -c "$3" >/dev/null 2>&1 && return 0
+    "$SLEEP_BIN" 0.3
+  done
+  return 1
+}
+created=$(fm_backend_tmux_create_task firstmate fm-created "$worker_cwd") \
+  || fail "could not create the task window"
+fm_backend_tmux_kill_created firstmate:fm-created "$created" || true
+window_present "$created firstmate:fm-created" \
+  && fail "the guarded close must close the task's own window"
+pass "guarded close closes the window the task created"
+
+own=$(fm_backend_tmux_create_task firstmate fm-renamed "$worker_cwd") \
+  || fail "could not create the window to rename"
+tmux rename-window -t "$own" fm-other-task || fail "could not rename the window"
+fm_backend_tmux_kill_created firstmate:fm-renamed "$own" || true
+window_present "$own firstmate:fm-other-task" \
+  || fail "the guarded close must leave a window that no longer carries the task name"
+pass "guarded close leaves a window whose name no longer matches"
+
+restart_server firstmate fm-reused "$LAB/wt" \
+  || fail "could not start the task's tmux server"
+reused_id=$(tmux display-message -p -t '=firstmate:=fm-reused' '#{window_id}') \
+  || fail "could not read the task window id"
+restart_server other-home fm-other "$LAB/neighbour" \
+  || fail "could not restart the tmux server for another home"
+window_present "$reused_id other-home:fm-other" \
+  || fail "precondition: the restarted server must reuse the recorded window id $reused_id"
+fm_backend_tmux_kill_created firstmate:fm-reused "$reused_id" || true
+window_present "$reused_id other-home:fm-other" \
+  || fail "the guarded close closed another home's window that reused the id"
+pass "guarded close leaves another home's window that reused the id after a restart"

@@ -133,6 +133,19 @@ case "${1:-}" in
     esac
     exit 0 ;;
   has-session|new-session|set-window-option) exit 0 ;;
+  if-shell)
+    # The guarded close (fm_backend_tmux_kill_created): window ids here are
+    # "@<row>" in a single session, so translate rows into id-qualified
+    # inventory lines for the shared fake.
+    session=fmses
+    [ ! -f "$D/session" ] || session=$(cat "$D/session")
+    awk -v session="$session" '{ print "@" NR " " session ":" $0 }' "$D/windows" > "$D/windows.qualified"
+    cp "$D/windows.qualified" "$D/windows.before-guard"
+    fm_fake_tmux_if_shell_kill "$D/windows.qualified" "$@" || exit 1
+    if ! cmp -s "$D/windows.qualified" "$D/windows.before-guard"; then
+      awk -v session="$session" '{ sub("^@[0-9]+ " session ":", ""); print }' "$D/windows.qualified" > "$D/windows"
+    fi
+    exit 0 ;;
   kill-window)
     target=${*: -1}
     window=${target##*:=}

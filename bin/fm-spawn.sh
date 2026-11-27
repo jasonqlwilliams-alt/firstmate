@@ -1221,9 +1221,9 @@ spawn_abort_cleanup() {
      && [ "$SPAWN_ENDPOINT_ABORT_CLEANUP" = 1 ] \
      && [ "$SPAWN_META_PUBLISH_STARTED" != 1 ]; then
     if [ "$BACKEND" = tmux ]; then
-      if [[ "${WID:-}" =~ ^@[0-9]+$ ]]; then
-        tmux kill-window -t "$WID" 2>/dev/null || true
-      fi
+      # The guarded close leaves the window open unless the created id still
+      # names this task's exact session and window (bin/backends/tmux.sh).
+      { fm_backend_source tmux && fm_backend_tmux_kill_created "$T" "${WID:-}"; } 2>/dev/null || true
     else
       fm_backend_kill "$BACKEND" "$T" "${ZELLIJ_TAB_ID:-}" "$W" 2>/dev/null || true
     fi

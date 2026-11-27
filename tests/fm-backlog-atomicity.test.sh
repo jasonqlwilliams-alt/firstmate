@@ -107,6 +107,7 @@ case "${1:-}" in
     mv "$0.remaining" "$0.windows"
     exit $? ;;
   new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@"; exit 0 ;;
+  if-shell) fm_fake_tmux_if_shell_kill "$0.windows" "$@"; exit $? ;;
 esac
 exit 0
 SH

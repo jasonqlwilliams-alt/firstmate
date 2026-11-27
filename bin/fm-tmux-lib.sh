@@ -82,6 +82,18 @@ fm_tmux_window_filter_available() {
   [ "$diagnostic" = 'no current target' ] || fm_tmux_no_server_error "$diagnostic"
 }
 
+# fm_tmux_format_literal: <text> escaped so a tmux format comparison such as
+# #{==:...,<literal>} matches it literally rather than expanding `#`, `,`, `}`
+# or a `#[` style sequence inside it.
+fm_tmux_format_literal() {  # <text>
+  local literal=${1:-}
+  literal=${literal//#/##}
+  literal=${literal//,/#,}
+  literal=${literal//\}/#\}}
+  literal=${literal//\#\#\[/\#\{a:35\}\[}
+  printf '%s' "$literal"
+}
+
 # fm_tmux_exact_target: the read boundary for a recorded `session:window`
 # target. tmux resolves a session or window NAME that is not an exact match by
 # prefix (and, for a pane read, an absent window can fall back to another
@@ -110,10 +122,7 @@ fm_tmux_exact_target() {  # <target> [explicit]
     *) printf '%s' "$target"; return 0 ;;
   esac
   session=${target%%:*}
-  literal=${target//#/##}
-  literal=${literal//,/#,}
-  literal=${literal//\}/#\}}
-  literal=${literal//\#\#\[/\#\{a:35\}\[}
+  literal=$(fm_tmux_format_literal "$target")
   if ! inventory=$(tmux list-windows -t "=$session:" \
     -f "#{==:#{session_name}:#{window_name},$literal}" -F '#{window_id}' 2>&1); then
     fm_tmux_read_failure_status "$inventory"
