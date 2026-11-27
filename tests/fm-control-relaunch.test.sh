@@ -133,6 +133,12 @@ case "${1:-}" in
     esac
     exit 0 ;;
   has-session|new-session|set-window-option) exit 0 ;;
+  kill-window)
+    window=${*: -1}
+    window=${window##*:=}
+    awk -v window="$window" '$0 != window' "$D/windows" > "$D/windows.remaining" || exit 1
+    mv "$D/windows.remaining" "$D/windows"
+    exit $? ;;
   new-window)
     name=
     cwd=
@@ -2053,6 +2059,35 @@ test_spawn_relaunch_recreates_a_missing_endpoint() {
   pass "fm-spawn --relaunch: a missing endpoint is recreated into the recorded copy"
 }
 
+test_spawn_relaunch_closes_recreated_endpoint_on_temp_refusal() {
+  local dir id=rl-missing-temp meta out rc
+  dir=$(new_case missing-temp "$id")
+  add_ship_task "$dir" "$id" claude
+  : > "$dir/fake/windows"
+  printf 'zsh' > "$dir/fake/command"
+  mkdir "$dir/private-temp"
+  meta="$dir/home/state/$id.meta"
+  printf 'tasktmp=%s\n' "$dir/private-temp" >> "$meta"
+  cp "$meta" "$dir/meta.before"
+  cat > "$dir/fakebin/mkdir" <<'SH'
+#!/usr/bin/env bash
+base=${FM_FAKE_DIR%/*}
+/bin/mkdir "$@" || exit
+if [ "$#" -eq 2 ] && [ "$1" = -p ] && [ "$2" = "$base/private-temp/gotmp" ]; then
+  [ -s "$FM_FAKE_DIR/windows" ] || exit 1
+  mv "$base/private-temp" "$base/moved-temp"
+fi
+SH
+  chmod +x "$dir/fakebin/mkdir"
+  out=$(TMUX='' run_spawn "$dir" "$id" --relaunch --harness claude); rc=$?
+  expect_code 1 "$rc" "recreated endpoint relaunch should refuse the changed temp root: $out"
+  assert_contains "$out" "temporary directory changed before metadata publication" \
+    "relaunch did not reach the temp publication check"
+  cmp -s "$dir/meta.before" "$meta" || fail "the refusal did not preserve the prior task record"
+  [ ! -s "$dir/fake/windows" ] || fail "the refusal leaked the recreated window"
+  pass "fm-spawn closes an unpublished replacement endpoint after temp-root refusal"
+}
+
 test_control_relaunch_recreates_a_missing_endpoint() {
   local dir out rc window_after
   dir=$(new_case missing-control rl-missctl)
@@ -3480,6 +3515,7 @@ test_agy_relaunch_allows_gemini_models
 test_spawn_relaunch_refuses_non_gemini_agy_models
 test_spawn_relaunch_refuses_a_live_agent
 test_spawn_relaunch_recreates_a_missing_endpoint
+test_spawn_relaunch_closes_recreated_endpoint_on_temp_refusal
 test_control_relaunch_recreates_a_missing_endpoint
 test_herdr_relaunch_recreates_missing_endpoint_without_confusing_worker_pane_for_launcher
 test_spawn_relaunch_refuses_a_symlinked_task_record_before_inspection

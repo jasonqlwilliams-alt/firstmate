@@ -1116,6 +1116,9 @@ spawn_publish_task_meta() {
     FM_BACKLOG_TRANSITION_ERROR="temporary directory changed before metadata publication"
     return 1
   fi
+  if [ "$RELAUNCH" -eq 1 ]; then
+    SPAWN_META_PUBLISH_STARTED=1
+  fi
   fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"
 }
 
@@ -4911,7 +4914,6 @@ spawn_report_preserved_state() {
 }
 
 if [ "$RELAUNCH" -eq 1 ]; then
-  SPAWN_META_PUBLISH_STARTED=1
   if ! spawn_publish_task_meta; then
     echo "error: replacement task record for $ID could not be published ($FM_BACKLOG_TRANSITION_ERROR)" >&2
     exit 1

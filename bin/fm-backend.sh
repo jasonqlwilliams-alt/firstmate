@@ -378,7 +378,17 @@ fm_task_tmp_private_root() {  # <recorded-tasktmp> <task-id> [<expected-identity
     case "$part" in ''|.) ;; *) normalized="$normalized/$part" ;; esac
   done
   case "$normalized" in ''|*/..) return 1 ;; esac
-  [ -d "$normalized" ] && [ ! -L "$normalized" ] && [ -O "$normalized" ] || return 1
+  [ ! -L "$normalized" ] || return 1
+  if [ ! -d "$normalized" ]; then
+    if perl -MErrno=ENOENT,ENOTDIR -e '
+      exit 0 if lstat $ARGV[0];
+      exit(($! == ENOENT || $! == ENOTDIR) ? 0 : 1);
+    ' -- "$normalized"; then
+      return 1
+    fi
+    return 2
+  fi
+  [ -O "$normalized" ] || return 1
   [ ! "$normalized" -ef "/tmp/fm-$id" ] || return 1
   physical=$(CDPATH='' cd -P -- "$normalized" 2>/dev/null && pwd -P && printf '.') || return 2
   physical=${physical%$'\n.'}
