@@ -365,7 +365,7 @@ SH
 }
 
 test_isolated_tmux_invalid_and_valid_cleanup() (
-  local dir socket socket_id session='endpoint #S,} safety' target_id=target control=control target=fm-target
+  local dir socket socket_id session='endpoint #S,} #[blue] safety' target_id=target control=control target=fm-target
   local prefix_target=fm-prefix prefix_survivor=fm-prefix2 rc caller_pane window_id waited=0 control_tty real_uname
   local race child_home child changed_window server_pid job_sid job_tty client_pid client_name session_name_arg
   [ -n "$REAL_TMUX" ] || { echo "skip - tmux not installed"; return 0; }
@@ -375,7 +375,7 @@ test_isolated_tmux_invalid_and_valid_cleanup() (
   cd "$dir" || exit 1
   unset TMUX TMUX_PANE
   trap '"$REAL_TMUX" -S "$socket" kill-server 2>/dev/null || true' EXIT
-  session_name_arg=${session//#/##}
+  session_name_arg='endpoint ##S,} #[blue] safety'
   "$REAL_TMUX" -f /dev/null -S "$socket" new-session -d -s "$session_name_arg" -n "$control" 'exec sleep 180'
   control_tty=$("$REAL_TMUX" -S "$socket" display-message -p -t "$session:$control" '#{pane_tty}')
   [ -n "$control_tty" ] || fail "test control pane has no terminal"

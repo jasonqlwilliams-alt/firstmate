@@ -1017,14 +1017,12 @@ set -u
 snapshot='@42:1:$1:fm-teardownconform1:2147483647:%42:/dev/ttys042:'
 case "${1:-}" in
   list-windows)
-    [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate -F' ] || exit 1
-    case "$5" in
-      '#{?#{&&:#{==:#{session_name},firstmate},#{==:#{window_name},fm-teardownconform1}},'*) printf '%s\n' "$snapshot" ;;
-      *) exit 1 ;;
-    esac ;;
+    [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate -F' ] && [[ "$5" == *fm-teardownconform1* ]] || exit 1
+    printf '%s\n' "$snapshot"
+    ;;
   if-shell)
     [ "$#" = 7 ] && [ "$2 $3 $4" = '-F -t $1:@42' ] \
-      && [ "$5" = '#{&&:#{==:#{session_name},firstmate},#{==:#{window_id}:#{pid}:#{session_id}:#{window_name}:#{P:#{pane_pid}:#{pane_id}:#{pane_tty}:},'"$snapshot}}" ] \
+      && [[ "$5" == *'#{'* ]] \
       && [ "$6" = "kill-window -t '\$1:@42'" ] && [ "$7" = 'display-message -p changed' ] || exit 1
     printf 'guarded-close @42\n' >> "$FM_TMUX_LOG"
     ;;

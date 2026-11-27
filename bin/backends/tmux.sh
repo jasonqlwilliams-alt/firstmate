@@ -190,6 +190,7 @@ fm_backend_tmux_close_session_match() {
   session=${session//#/##}
   session=${session//,/#,}
   session=${session//\}/#\}}
+  session=${session//"##["/'#{l:#[}'}
   printf '#{==:#{session_name},%s}' "$session"
 }
 
