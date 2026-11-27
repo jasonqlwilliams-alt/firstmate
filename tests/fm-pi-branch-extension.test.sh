@@ -4133,6 +4133,22 @@ const heartbeatUnresolvable = scopeForUnreadWake(state, true);
 if (heartbeatUnresolvable.eligible || !heartbeatUnresolvable.corrupted) {
   throw new Error(`an unresolvable row must still defer a heartbeat review: ${JSON.stringify(heartbeatUnresolvable)}`);
 }
+writeFileSync(`${state}/task-a.meta`, `project=${project}\nbackend=herdr\nwindow=shared:w1:p4\n`);
+writeFileSync(
+  `${state}/.wake-queue`,
+  [
+    "1\t1\tstale\tshared:w1:p2\tstale: shared:w1:p2",
+    "1\t2\tstale\tshared:w1:p2\tstale: shared:w1:p2 (the recorded endpoint is gone for task task-a)",
+    "1\t3\theartbeat\theartbeat\theartbeat",
+    "1\t4\tsignal\ttask-a.status\tsignal: task-a.status",
+  ].join("\n"),
+);
+for (const heartbeat of [true, false]) {
+  const vacatedPane = scopeForUnreadWake(state, heartbeat);
+  if (vacatedPane.eligible || !vacatedPane.corrupted || vacatedPane.eligibleSeqs.length !== 0) {
+    throw new Error(`an unresolved stale row on a vacated pane must return the wake to main (heartbeat=${heartbeat}): ${JSON.stringify(vacatedPane)}`);
+  }
+}
 writeFileSync(
   `${state}/.wake-queue`,
   [

@@ -251,7 +251,9 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
     if (fields.length < 5 || !/^[0-9]+$/.test(fields[1])) return UNSAFE_SCOPE;
     if (fields[2] !== "stale") continue;
     const loss = NAMED_ENDPOINT_LOSS.exec(fields[4]);
-    if (loss && loss[1] === fields[3] && loss[2] !== windowOwners.get(loss[1])) {
+    if (!loss || loss[1] !== fields[3]) continue;
+    const owner = windowOwners.get(loss[1]);
+    if (typeof owner === "string" && owner !== loss[2]) {
       taskByKey.set(loss[1], null);
     }
   }
