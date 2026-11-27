@@ -396,7 +396,7 @@ inbox_steer_escalate_unavailable() {  # <window> <task> <record>
 # too: their pane-staleness exemption is about quiet panes being healthy,
 # while an unacknowledged instruction past the ladder is a stuck steer.
 inbox_steer_check() {  # <window> <task> <backend>
-  local w=$1 task=$2 backend=$3 action verb rec count tail40 reason ring_rc agent_state
+  local w=$1 task=$2 backend=$3 target=$1 action verb rec count tail40 reason ring_rc agent_state
   local FM_BACKEND_HERDR_ENDPOINT_META="$STATE/$task.meta"
   action=$(fm_task_inbox_due_action "$STATE" "$task") || return 0
   verb=${action%% *}
@@ -409,21 +409,32 @@ inbox_steer_check() {  # <window> <task> <backend>
       rec=${rec% *}
       ;;
   esac
-  agent_state=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null || true)
+  if [ "$backend" = tmux ]; then
+    fm_backend_source tmux || return 0
+    if target=$(fm_tmux_exact_target "$w" 2>/dev/null); then
+      :
+    elif [ "$?" -eq 1 ]; then
+      inbox_steer_escalate_unavailable "$w" "$task" "$rec"
+      return 0
+    else
+      return 0
+    fi
+  fi
+  agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)
   case "$agent_state" in
     dead|missing)
       inbox_steer_escalate_unavailable "$w" "$task" "$rec"
       return 0
       ;;
   esac
-  tail40=$(fm_backend_capture "$backend" "$w" 40 "fm-$task" 2>/dev/null) || tail40=
-  if window_is_busy "$w" "$tail40" "$task" "$backend"; then
+  tail40=$(fm_backend_capture "$backend" "$target" 40 "fm-$task" 2>/dev/null) || tail40=
+  if window_is_busy "$target" "$tail40" "$task" "$backend"; then
     return 0
   fi
   case "$verb" in
     ring)
       ring_rc=0
-      fm_task_inbox_ring "$backend" "$w" "$rec" "fm-$task" "$(fm_meta_get "$FM_BACKEND_HERDR_ENDPOINT_META" harness)" || ring_rc=$?
+      fm_task_inbox_ring "$backend" "$target" "$rec" "fm-$task" "$(fm_meta_get "$FM_BACKEND_HERDR_ENDPOINT_META" harness)" || ring_rc=$?
       if [ "$ring_rc" -eq 3 ]; then
         inbox_steer_escalate_unavailable "$w" "$task" "$rec"
         return 0

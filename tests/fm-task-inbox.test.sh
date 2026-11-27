@@ -69,6 +69,9 @@ set -u
 fm_fake_tmux_dispatch "$@"
 case "${1:-}" in
   send-keys)
+    if [ -n "${FM_FAKE_SPLIT_LOG:-}" ]; then
+      printf '%s %s\n' "${3:-}" "${4:-}" >> "$FM_FAKE_SPLIT_LOG"
+    fi
     shift
     literal=0
     while [ $# -gt 0 ]; do
@@ -99,17 +102,32 @@ case "${1:-}" in
     done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
-    if [ -n "${FM_FAKE_TMUX_TYPED:-}" ] && [ -s "$FM_FAKE_TMUX_TYPED" ]; then
+    if [ -n "${FM_FAKE_SPLIT_ACTIVE:-}" ] && [ "${3:-}" = %2 ]; then
+      printf 'BUSYTOKEN active\n'
+    elif [ -n "${FM_FAKE_TMUX_TYPED:-}" ] && [ -s "$FM_FAKE_TMUX_TYPED" ]; then
       printf 'fake agent\n› %s\n' "$(cat "$FM_FAKE_TMUX_TYPED")"
     elif [ -n "${FM_FAKE_TMUX_CAPTURE:-}" ] && [ -f "$FM_FAKE_TMUX_CAPTURE" ]; then
       cat "$FM_FAKE_TMUX_CAPTURE"
     else
       printf '╭────╮\n│    │\n╰────╯\n'
     fi
+    if [ -n "${FM_FAKE_SPLIT_ACTIVE:-}" ] && [ "${3:-}" = %1 ]; then
+      : > "$FM_FAKE_SPLIT_ACTIVE"
+    fi
     exit 0 ;;
   list-windows)
     [ "${FM_FAKE_TMUX_MISSING:-0}" = 1 ] && exit 0
-    case "$*" in *window_id*) printf '@1 sess:fm-t1\n' | fm_fake_tmux_window_ids "$@" ;; *) printf 'fm-t1\n' ;; esac
+    case "$*" in
+      *window_id*)
+        inventory=$(printf '@1 sess:fm-t1\n' | fm_fake_tmux_window_ids "$@")
+        if [ -n "${FM_FAKE_SPLIT_ACTIVE:-}" ] && [ -f "$FM_FAKE_SPLIT_ACTIVE" ]; then
+          sed 's/%1$/%2/' <<< "$inventory"
+        else
+          printf '%s\n' "$inventory"
+        fi
+        ;;
+      *) printf 'fm-t1\n' ;;
+    esac
     exit 0 ;;
 esac
 exit 0
@@ -556,6 +574,28 @@ test_watcher_waits_on_busy_pane() {
   [ ! -s "$log" ] || fail "a busy pane should wait, not ring:"$'\n'"$(cat "$log")"
   [ ! -s "$state/.wake-queue" ] || fail "a busy wait queued a wake:"$'\n'"$(cat "$state/.wake-queue")"
   pass "watcher: a busy pane just waits - the record is durable and no doorbell is typed"
+}
+
+test_watcher_rerings_the_pane_that_passed_the_busy_check() {
+  local dir state pid rec i=0
+  dir=$(setup_watch_case rering-split)
+  state="$dir/state"
+  rec=$(inbox_lib "$state" fm_task_inbox_write "$state" t1 "please continue")
+  age_path "$rec"
+  : > "$dir/keys"
+  watch_bg "$state" "$dir/fakebin" "$dir/watch.out" \
+    FM_FAKE_TMUX_AGENT=grok FM_BUSY_REGEX=BUSYTOKEN \
+    FM_FAKE_SPLIT_ACTIVE="$dir/busy-split-selected" FM_FAKE_SPLIT_LOG="$dir/keys"
+  pid=$!
+  until grep -q ' Enter$' "$dir/keys" || [ "$i" -ge 100 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+  assert_present "$dir/busy-split-selected" "capture did not switch the active pane to the busy split"
+  [ "$(cat "$dir/keys")" = $'%1 -l\n%1 Enter' ] \
+    || fail "the idle pane should receive the doorbell and Enter: $(cat "$dir/keys")"
+  pass "watcher: the doorbell stays on the pane that passed its busy check"
 }
 
 test_watcher_quiet_on_healthy_inbox() {
@@ -1269,6 +1309,7 @@ test_fire_and_forget_records_never_enter_the_ladder
 test_ring_ladder_policy
 test_watcher_rerings_idle_pane_quietly
 test_watcher_waits_on_busy_pane
+test_watcher_rerings_the_pane_that_passed_the_busy_check
 test_watcher_quiet_on_healthy_inbox
 test_watcher_ack_silences_unwritable_ladder
 test_watcher_surfaces_unwritable_ladder

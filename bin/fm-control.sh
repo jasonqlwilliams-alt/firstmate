@@ -1052,6 +1052,8 @@ do_relaunch() {
   local -a spawn_args
 
   require_state_verified_backend relaunch
+  [ "$CONTROL_LOOKUP_STATE" != unreadable ] \
+    || die "task $ID's recorded tmux endpoint could not be resolved"
   resolve_relaunch_profile
 
   case "$KIND" in
@@ -1132,7 +1134,13 @@ do_relaunch() {
     || die "the replacement for $ID published an endpoint this home cannot validate"
   T=$FM_BACKEND_VALIDATED_TARGET
   BACKEND=$FM_BACKEND_VALIDATED_BACKEND
-  if [ "$BACKEND" != tmux ] || [ -n "$CONTROL_LOOKUP_STATE" ]; then
+  if [ "$BACKEND" = tmux ]; then
+    if ! IFS= read -r CONTROL_TARGET < "$RELAUNCH_PREPARE_DIR/tmux-pane" ||
+       [[ ! $CONTROL_TARGET =~ $FM_TMUX_PANE_PATTERN ]]; then
+      die "the replacement for $ID did not report its launched tmux pane"
+    fi
+    CONTROL_LOOKUP_STATE=
+  else
     bind_control_target
   fi
 

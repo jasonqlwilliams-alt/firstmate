@@ -1165,19 +1165,26 @@ if [ -n "${FM_FAKE_TMUX_LOG:-}" ]; then
   printf '%s\n' "$*" >> "$FM_FAKE_TMUX_LOG"
 fi
 fixture_windows() {
-  sed -n 's/^window=//p' "${FM_HOME:?}"/state/*.meta
+  if [ -n "${FM_FAKE_TMUX_INVENTORY:-}" ]; then
+    cat "$FM_FAKE_TMUX_INVENTORY"
+  else
+    sed -n 's/^window=//p' "${FM_HOME:?}"/state/*.meta | awk '{ print "@" NR " " $0 }'
+  fi
 }
 case "$*" in
   list-windows*)
     case "$*" in
       *'#{window_id}'*)
-        fixture_windows | awk '{ print "@" NR " " $0 }' | fm_fake_tmux_window_ids "$@" ;;
+        fixture_windows | fm_fake_tmux_window_ids "$@" ;;
       *) fixture_windows | cut -d: -f2- ;;
     esac
     exit 0
     ;;
   list-panes*)
-    fixture_windows | awk -v target="$3" '"@" NR == target { print "%" NR; found = 1 } END { exit !found }'
+    fixture_windows | awk -v target="$3" '
+      substr($1, 2) == substr(target, 2) { print "%" substr($1, 2); found = 1 }
+      END { exit !found }
+    '
     exit $?
     ;;
   *display-message*'#{pane_current_command}'*) printf '%s\n' codex; exit 0 ;;
@@ -1912,7 +1919,8 @@ test_config_reread_per_home_changed_sets_and_exact_bytes() {
   record_live_watcher_fixture "$w/home"
   log="$w/config-reread-per-home.tmux.log"
   err="$w/config-reread-per-home.err"
-  out=$(run_config_push "$w" "$log" 2>"$err"); status=$?
+  printf '%s\n' '@42 firstmate:fm-beta' '@17 firstmate:fm-alpha' > "$w/tmux.inventory"
+  out=$(FM_FAKE_TMUX_INVENTORY="$w/tmux.inventory" run_config_push "$w" "$log" 2>"$err"); status=$?
   expect_code 0 "$status" "per-home reread config push should succeed"
   [ ! -s "$err" ] || fail "unexpected stderr: $(cat "$err")"
 
@@ -1992,8 +2000,7 @@ test_config_reread_per_home_changed_sets_and_exact_bytes() {
   assert_not_contains "$(inbox_stream "$w/home/state" alpha)" '"harness": "grok"' "sent message must not inline multiline JSON"
   assert_not_contains "$(inbox_stream "$w/home/state" alpha)" "Default worker" "sent message must not summarize"
   [ "$(grep -c '^send-keys ' "$log")" -eq 4 ] || fail "config reread should type and submit exactly two doorbells"
-  for id in alpha beta; do
-    target="firstmate:fm-$id"
+  while read -r id target; do
     inbox=$(cd "$w/home/state/$id.inbox" && pwd) || fail "$id inbox was not created"
     quoted_inbox=$(printf '%s' "$inbox" | sed "s/'/'\\\\''/g")
     expected=$(printf '%s\n' \
@@ -2001,7 +2008,10 @@ test_config_reread_per_home_changed_sets_and_exact_bytes() {
       "send-keys -t $target Enter")
     actual=$(grep -F "send-keys -t $target " "$log")
     [ "$actual" = "$expected" ] || fail "$id should receive only its inbox doorbell followed by Enter: $actual"
-  done
+  done <<'ROWS'
+alpha %17
+beta %42
+ROWS
   pass "B15 config reread is per-home, exact-byte, ordered, and pointer-only"
 }
 

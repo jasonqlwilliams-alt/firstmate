@@ -660,7 +660,7 @@ fm_fake_tmux_window_ids() {  # <tmux args...>, reads ID and name pairs from stdi
 export -f fm_fake_tmux_window_ids
 
 fm_fake_tmux_pane_row() {
-  printf "tmux-pane:100:1234567890:\$1:%s:%s:0:%%%s\n" "${1#@}" "$1" "${1#@}"
+  printf "tmux-pane:100:1234567890:\$1:%s:%%%s\n" "$1" "${1#@}"
 }
 export -f fm_fake_tmux_pane_row
 
@@ -677,8 +677,11 @@ fm_fake_tmux_decode_guard() {  # <quoted command>
       [[ $rest = *\'* ]] || return 1
       arg="$arg${rest%%\'*}"
       rest=${rest#*\'}
-      [[ $rest = "\'"* ]] || break
-      arg="$arg'"
+      case "$rest" in
+        "\'"*) arg="$arg'" ;;
+        '\n'*) arg="$arg"$'\n' ;;
+        *) break ;;
+      esac
       rest=${rest:2}
     done
     FM_FAKE_TMUX_ARGS+=("$arg")

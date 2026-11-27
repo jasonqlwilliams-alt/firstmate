@@ -94,8 +94,8 @@ fm_tmux_format_literal() {
   printf '%s' "$literal"
 }
 
-FM_TMUX_PANE_FORMAT='tmux-pane:#{pid}:#{start_time}:#{session_id}:#{window_index}:#{window_id}:#{pane_index}:#{pane_id}'
-FM_TMUX_PANE_PATTERN='^tmux-pane:([0-9]+):([0-9]+):(\$[0-9]+):([0-9]+):(@[0-9]+):([0-9]+):(%[0-9]+)$'
+FM_TMUX_PANE_FORMAT='tmux-pane:#{pid}:#{start_time}:#{session_id}:#{window_id}:#{pane_id}'
+FM_TMUX_PANE_PATTERN='^tmux-pane:([0-9]+):([0-9]+):(\$[0-9]+):(@[0-9]+):(%[0-9]+)$'
 FM_TMUX_SESSION_FORMAT='tmux-session:#{pid}:#{start_time}:#{session_id}'
 FM_TMUX_SESSION_PATTERN='^tmux-session:([0-9]+):([0-9]+):(\$[0-9]+)$'
 
@@ -124,9 +124,9 @@ fm_tmux_exact_target() {  # <target> [explicit]
     [[ $row =~ $FM_TMUX_PANE_PATTERN ]] || return 2
     # Multiple links to a single window are legal. Keep the first link.
     if [ -z "$match" ]; then
-      match=$row window=${BASH_REMATCH[5]}
+      match=$row window=${BASH_REMATCH[4]}
     else
-      [ "${BASH_REMATCH[5]}" = "$window" ] || return 2
+      [ "${BASH_REMATCH[4]}" = "$window" ] || return 2
     fi
   done <<< "$inventory"
   printf '%s' "$match"
@@ -146,8 +146,6 @@ fm_tmux_exact_session() {  # <literal-session-name>
 }
 
 # The format guard and its non-waiting command run on the same server queue.
-# Use only numeric indices for the guard's context: tmux can jump to another
-# session when asked for an @window or %pane ID, even in a qualified selector.
 # The condition proves both IDs in that context and rejects a replacement
 # server before its reused IDs can resolve. The failure branch deliberately
 # raises a tmux error so a skipped write cannot report success.
@@ -155,7 +153,9 @@ fm_tmux_guarded_command() {  # <context> <condition> <command> [args...]
   local context=$1 condition=$2 command='' arg
   shift 2
   for arg in "$@"; do
-    command="$command '${arg//\'/\'\\\'\'}'"
+    arg=${arg//\'/\'\\\'\'}
+    arg=${arg//$'\n'/\'\\n\'}
+    command="$command '$arg'"
   done
   tmux if-shell -F -t "$context" "$condition" "${command# }" 'show-options -s firstmate-tmux-binding-lost'
 }
@@ -164,9 +164,9 @@ fm_tmux_pane_command() {  # <bound-or-native-target> <command> [args...]
   local target=$1 verb=$2 context identity pane
   shift 2
   if [[ $target =~ $FM_TMUX_PANE_PATTERN ]]; then
-    context="${BASH_REMATCH[3]}:${BASH_REMATCH[4]}.${BASH_REMATCH[6]}"
-    pane=${BASH_REMATCH[7]}
-    identity="${BASH_REMATCH[1]}:${BASH_REMATCH[2]}:${BASH_REMATCH[3]}:${BASH_REMATCH[5]}:$pane"
+    pane=${BASH_REMATCH[5]}
+    context="${BASH_REMATCH[3]}:${BASH_REMATCH[4]}.$pane"
+    identity=${target#tmux-pane:}
     if [ "$verb" = send-keys ]; then
       case "${1:-}" in
         -l) shift; set -- -l -- "$@" ;;

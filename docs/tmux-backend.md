@@ -53,9 +53,10 @@ If the recorded `fm-mate` window closes while `fm-mate2` remains open, `fm-peek`
 An inconclusive inventory or matches to multiple distinct windows leave the endpoint unreadable.
 On a tmux server with `exit-empty off`, a server with no remaining sessions may leave a closed endpoint unreadable until the server has a session again or stops.
 During a guarded operation, liveness, capture, and input use the same pane binding.
-Each tmux command verifies the server and the pane's membership in the recorded session before it runs.
-If that link is removed or tmux restarts on the same socket, the old binding cannot deliver input.
-Spawn cleanup also requires the binding returned by successful window creation.
+The binding uses stable IDs and survives changes to the window and pane indices.
+Each guarded tmux command verifies the server and the pane's membership in the recorded session before it runs.
+If that link is removed or tmux restarts on the same socket, the old binding cannot deliver input or close the endpoint.
+Teardown resolves the recorded target through the same inventory, and recovery and failed-spawn cleanup use their existing bindings.
 Explicit pane selectors such as `session:0.1` use native tmux syntax when they do not resolve to task metadata.
 Fresh workers and Muse's destination credential check use literal session lookup as well.
 [`fm-tmux-lib.sh`](../bin/fm-tmux-lib.sh) owns the binding, and [`fm-tmux-exact-target.test.sh`](../tests/fm-tmux-exact-target.test.sh) exercises it with a private tmux server.

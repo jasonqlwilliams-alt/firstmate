@@ -337,22 +337,11 @@ mate_id=${FM_FAKE_SECOND_MATE_ID:?}
 mate_window="fm-$mate_id"
 case "${1:-}" in
   display-message)
-    target=
     format=
-    prev=
     for arg in "$@"; do
-      [ "$prev" = -t ] && target=$arg
-      prev=$arg
       case "$arg" in '#{'*) format=$arg ;; esac
     done
-    if [ "${target#%}" != "$target" ]; then
-      case "$format" in
-        *pane_current_path*) printf '%s\n' "$mate_home" ;;
-        *pane_current_command*) printf '%s\n' node ;;
-        *) printf '%s\n' "$target" ;;
-      esac
-      exit 0
-    fi
+    case "$format" in *pane_current_path*) printf '%s\n' "$mate_home"; exit 0 ;; esac
     if [ -e "$spawned" ]; then
       case "$format" in
         *pane_current_command*) printf '%s\n' node ;;
@@ -394,6 +383,7 @@ case "${1:-}" in
   -V) printf '%s\n' 'tmux 3.2'; exit 0 ;;
   has-session) exit 0 ;;
   kill-window)
+    [ "${3:-}" = %1 ] || exit 1
     printf '%s\n' "$*" >> "$log"
     : > "$killed"
     exit 0
@@ -1323,8 +1313,7 @@ EOF
 
   out=$(network_stage_report "$home" "$root")
   assert_not_contains "$out" "SECONDMATE_LIVENESS:" "successful bare-shell recovery should stay non-actionable"
-  assert_contains "$(cat "$log")" "kill-window -t =firstmate:=fm-$SESSION_START_SECOND_MATE_ID" \
-    "the proven bare-shell path did not remove its existing dead endpoint"
+  assert_present "$spawned.killed" "the proven bare-shell path did not remove its existing dead endpoint"
   assert_contains "$(cat "$log")" "new-window" "the proven bare-shell path did not relaunch"
   pass "session start: the proven bare-shell recovery path remains intact"
 }

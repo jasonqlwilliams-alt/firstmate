@@ -4410,9 +4410,12 @@ if [ "\${1:-}" = -s ]; then printf 'Darwin\n'; else exec '$real_uname' "\$@"; fi
 EOF
   cat > "$case_dir/fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+fm_fake_tmux_dispatch "$@"
 if [ "${1:-}" = display-message ] && [ "${*: -1}" = '#{pane_pid}' ]; then
   cat "$CASE_DIR/target"
-elif [ "${1:-}" = kill-window ]; then
+elif [ "${1:-}" = list-windows ]; then
+  printf '%s\n' '@1 firstmate:fm-task-x1' | fm_fake_tmux_window_ids "$@"
+elif [ "${1:-}" = kill-window ] && [ "${3:-}" = %1 ]; then
   : > "$CASE_DIR/window-closed"
 fi
 SH

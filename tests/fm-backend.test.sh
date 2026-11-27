@@ -913,10 +913,8 @@ run_spawn_case() {  # <bin-root> <fakebin> <log> <state> <data> <config> <proj> 
 # stable window id, pin the window name (automatic-rename/allow-rename off), and
 # target that id for the rename-critical spawn steps (robustness under a
 # captain's non-default tmux config). A byte-identical old-vs-new diff can no
-# longer hold there by design. That intended sequence is now authoritatively and
-# comprehensively verified - via a recording fake-tmux - by
-# tests/fm-tangle-guard.test.sh ("fm-spawn: appends windows by session-colon,
-# pins the name, and targets the window id"), and the real tmux create/kill path
+# longer hold there by design. Spawn placement, name pinning, and command receipt
+# are verified on a private server by tests/fm-tangle-guard.test.sh, and the real tmux create/kill path
 # by tests/fm-backend-tmux-smoke.test.sh. The send/peek/teardown conformance
 # tests below remain pure extractions and stay. (make_spawn_fakebin and
 # run_spawn_case are retained: test_spawn_default_backend_writes_no_meta_field
@@ -1021,7 +1019,11 @@ make_teardown_fakebin() {  # <dir> -> echoes fakebin dir; logs tmux+treehouse ca
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 { printf 'tmux'; for a in "$@"; do printf '\x1f%s' "$a"; done; printf '\n'; } >> "${FM_TMUX_LOG:?}"
+if [ "${1:-}" = list-windows ]; then
+  printf '%s\n' '@17 firstmate:fm-teardownconform1' | fm_fake_tmux_window_ids "$@"
+fi
 exit 0
 SH
   cat > "$fb/treehouse" <<'SH'
@@ -1104,8 +1106,8 @@ test_teardown_conformance_old_vs_new() {
   # exact-selector contract belongs to the current script, asserted below.
   assert_contains "$(tr -d '=' < "$log_old")" "tmux"$'\x1f''kill-window'$'\x1f''-t'$'\x1f'"firstmate:fm-$id" \
     "legacy teardown fixture did not exercise tmux window cleanup for the task"
-  assert_contains "$(cat "$log_new")" "tmux"$'\x1f''kill-window'$'\x1f''-t'$'\x1f'"=firstmate:=fm-$id" \
-    "teardown did not call tmux kill-window with exact session and window selectors"
+  assert_contains "$(cat "$log_new")" "tmux"$'\x1f''kill-window'$'\x1f''-t'$'\x1f''%17' \
+    "teardown did not close the fixture's recorded worker pane"
 
   pass "fm-teardown.sh: treehouse return remains compatible while tmux cleanup uses exact selectors"
 }

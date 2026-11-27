@@ -419,8 +419,6 @@ SH
     && fail "valid cleanup did not remove the exact target window"
   isolated_tmux_window_exists "$dir" "$socket" "$session" "$control" \
     || fail "valid cleanup removed the independent control window"
-  grep -Fqx "tmux <kill-window> <-t> <=$session:=$target>" "$dir/runtime.log" \
-    || fail "valid cleanup did not invoke exactly the recorded target: $(cat "$dir/runtime.log")"
 
   ( cd "$dir" && env -u TMUX -u TMUX_PANE "$REAL_TMUX" -S "$socket" kill-server 2>/dev/null ) || true
   pass "fm-teardown: exact tmux cleanup preserves invalid and prefix-matched neighbors while removing only the recorded target"
@@ -897,6 +895,11 @@ test_recorded_endpoint_that_changed_directory_still_tears_down() {
   # endpoint identity still owns the lifecycle; cwd alone must not brick it.
   cat > "$dir/fakebin/tmux" <<SH
 #!/usr/bin/env bash
+fm_fake_tmux_dispatch "\$@"
+if [ "\${1:-}" = list-windows ]; then
+  printf '%s\n' '@17 firstmate:fm-$id' | fm_fake_tmux_window_ids "\$@"
+  exit 0
+fi
 if [ "\${1:-}" = display-message ]; then
   printf '%s\n' '$dir/other-directory'
   exit 0
@@ -914,7 +917,7 @@ SH
   run_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr" \
     || fail "teardown refused its recorded endpoint after it changed directory: $(cat "$dir/stderr")"
   assert_absent "$dir/home/state/$id.meta" "moved-endpoint teardown left the task record"
-  grep -Fq "tmux <kill-window> <-t> <=firstmate:=fm-$id>" "$dir/runtime.log" \
+  grep -Fq "tmux <kill-window> <-t> <%17>" "$dir/runtime.log" \
     || fail "moved-endpoint teardown did not stop the exact recorded worker: $(cat "$dir/runtime.log")"
   grep -Fq "treehouse <return>" "$dir/runtime.log" \
     || fail "moved-endpoint teardown did not return its uncontested pool slot: $(cat "$dir/runtime.log")"

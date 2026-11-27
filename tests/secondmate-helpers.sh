@@ -50,7 +50,14 @@ case "${1:-}" in
       [ -n "$recorded" ] || continue
       n=$((n + 1))
       if [ -z "$session" ]; then
-        printf '%s\n' "$recorded"
+        if [ "$ids" = 1 ]; then
+          case "$recorded" in
+            *:*) printf '@%s %s\n' "$n" "$recorded" ;;
+            *) printf '@%s firstmate:%s\n' "$n" "$recorded" ;;
+          esac
+        else
+          printf '%s\n' "$recorded"
+        fi
         continue
       fi
       case "$recorded" in

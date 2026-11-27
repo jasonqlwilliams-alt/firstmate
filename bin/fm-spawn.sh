@@ -1102,7 +1102,7 @@ spawn_abort_return_untouched_slot() {
 spawn_close_endpoint() {
   if [ "$BACKEND" = tmux ]; then
     [ -n "${WT_TARGET:-}" ] || return 0
-    fm_backend_tmux_kill "$T" '' '' "$WT_TARGET"
+    fm_backend_tmux_kill "$WT_TARGET"
   else
     fm_backend_kill "$BACKEND" "$T" "$@"
   fi
@@ -1532,22 +1532,26 @@ if [ "$RELAUNCH" -eq 1 ]; then
   }
   RELAUNCH_PANE=$RELAUNCH_TARGET
   if [ "$BACKEND" = tmux ]; then
-    if RELAUNCH_PANE=$(fm_tmux_exact_target "$RELAUNCH_TARGET"); then
+    if [ -n "$RELAUNCH_PREPARE" ] && [ -n "${FM_CONTROL_RELAUNCH_TMUX_PANE:-}" ]; then
+      RELAUNCH_PANE=$FM_CONTROL_RELAUNCH_TMUX_PANE
+      [[ $RELAUNCH_PANE =~ $FM_TMUX_PANE_PATTERN ]] || exit 1
+      RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_PANE")
+    elif RELAUNCH_PANE=$(fm_tmux_exact_target "$RELAUNCH_TARGET"); then
+      if [ -n "$RELAUNCH_PREPARE" ]; then
+        echo "error: task $ID's tmux endpoint appeared during relaunch preparation" >&2
+        exit 1
+      fi
       RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_PANE")
     elif [ "$?" -eq 1 ]; then
       RELAUNCH_STATE=missing
     else
       RELAUNCH_STATE=unreadable
     fi
-    if [ -n "$RELAUNCH_PREPARE" ] && [ "$RELAUNCH_PANE" != "${FM_CONTROL_RELAUNCH_TMUX_PANE:-}" ]; then
-      echo "error: task $ID's tmux pane changed during relaunch preparation" >&2
-      exit 1
-    fi
   else
     RELAUNCH_STATE=$(FM_BACKEND_HERDR_ENDPOINT_META="$RELAUNCH_META" fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET")
   fi
   RELAUNCH_RECREATE=0
-  if [ "$RELAUNCH_STATE" = missing ]; then
+  if [ "$RELAUNCH_STATE" = missing ] && { [ "$BACKEND" != tmux ] || [ -z "$RELAUNCH_PANE" ]; }; then
     RELAUNCH_RECREATE=1
   elif [ "$RELAUNCH_STATE" = dead ] || { [ -n "$RELAUNCH_PREPARE" ] && [ "$RELAUNCH_STATE" = alive ]; }; then
     :
@@ -4900,6 +4904,9 @@ spawn_report_preserved_state() {
 }
 
 if [ "$RELAUNCH" -eq 1 ]; then
+  if [ -n "$RELAUNCH_PREPARE" ] && [ "$BACKEND" = tmux ]; then
+    printf '%s\n' "$WT_TARGET" > "$RELAUNCH_PREPARE/tmux-pane" || exit 1
+  fi
   SPAWN_META_PUBLISH_STARTED=1
   if ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"; then
     echo "error: replacement task record for $ID could not be published ($FM_BACKLOG_TRANSITION_ERROR)" >&2

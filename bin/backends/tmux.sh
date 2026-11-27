@@ -82,7 +82,7 @@ fm_backend_tmux_launch_session() {
 # "firstmate" session exists. Return the binding that spawn must use for
 # the duplicate check and placement, including when new-session created it.
 fm_backend_tmux_container_ensure() {  # <session-name> [session-binding]
-  local session=$1 binding=${2:-} escaped
+  local session=$1 binding=${2:-}
   fm_backend_required_tool_available tmux tmux || {
     if [ "$?" -eq 2 ]; then
       echo "error: could not verify list-windows -f support on the tmux server. See docs/tmux-backend.md#setup." >&2
@@ -94,11 +94,8 @@ fm_backend_tmux_container_ensure() {  # <session-name> [session-binding]
   if [ -z "$binding" ]; then
     if binding=$(fm_tmux_exact_session "$session"); then
       :
-    elif [ "$?" -eq 1 ] && [ -z "${TMUX:-}" ]; then
-      escaped=$session
-      # In argv mode tmux treats a terminal semicolon as a command delimiter.
-      case "$escaped" in *';') escaped="${escaped%;}\\;" ;; esac
-      binding=$(tmux new-session -dP -F "$FM_TMUX_SESSION_FORMAT" -s "$escaped") || return 1
+    elif [ "$?" -eq 1 ] && [ -z "${TMUX:-}" ] && [ "$session" = firstmate ]; then
+      binding=$(tmux new-session -dP -F "$FM_TMUX_SESSION_FORMAT" -s firstmate) || return 1
     else
       return 1
     fi
@@ -129,7 +126,7 @@ fm_backend_tmux_create_task() {  # <session-name> <window-name> <proj-abs> [sess
   if ! fm_tmux_pane_command "$created" set-window-option automatic-rename off ||
      ! fm_tmux_pane_command "$created" set-window-option allow-rename off ||
      ! fm_tmux_pane_command "$created" rename-window -- "$name"; then
-    fm_backend_tmux_kill "$session:$name" '' '' "$created" || true
+    fm_backend_tmux_kill "$created" || true
     return 1
   fi
   printf '%s\n' "$created"
@@ -156,26 +153,16 @@ fm_backend_tmux_send_literal() {  # <target> <text>
   fm_tmux_pane_command "$target" send-keys -l "$2"
 }
 
-# fm_backend_tmux_kill: remove one explicitly named task window, best-effort.
+# fm_backend_tmux_kill: remove one recorded or bound task window, best-effort.
 # Empty, omitted, and malformed targets return nonzero before invoking tmux so
 # tmux can never interpret an empty target as the caller's current window.
-fm_backend_tmux_kill() {  # <target> [unused] [unused] [spawn-binding]
-  local target=${1:-} session window binding=${4:-}
-  case "$target" in
-    *:*)
-      session=${target%%:*}
-      window=${target#*:}
-      ;;
-    *) return 1 ;;
-  esac
-  case "$session:$window" in
-    :*|*:|*:*:*) return 1 ;;
-  esac
-  if [ -n "$binding" ]; then
-    [[ $binding =~ $FM_TMUX_PANE_PATTERN ]] || return 1
-    fm_tmux_pane_command "$binding" kill-window 2>/dev/null || true
+fm_backend_tmux_kill() {  # <recorded-or-bound-target>
+  local target=${1:-}
+  case "$target" in *:*) ;; *) return 1 ;; esac
+  if target=$(fm_tmux_exact_target "$target"); then
+    fm_tmux_pane_command "$target" kill-window 2>/dev/null || true
   else
-    tmux kill-window -t "=$session:=$window" 2>/dev/null || true
+    [ "$?" -eq 1 ]
   fi
 }
 

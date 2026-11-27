@@ -206,19 +206,6 @@ test_spawn_isolation_abort() {
 
 # --- GUARD 1c: fm-spawn tmux window construction ----------------------------
 
-# The prevention guard also depends on fm-spawn building robust tmux commands
-# under a non-default tmux config (base-index 1, automatic-rename on). A RECORDING
-# fake tmux logs every invocation and returns a sentinel window id, so these
-# assertions pin the command construction deterministically, with no live tmux:
-#   - window creation targets the session with a trailing colon (append form), so
-#     tmux appends at the next free index instead of the active window index, which
-#     collides under base-index 1;
-#   - the window id is captured (-P -F #{window_id}) and automatic-rename/allow-rename
-#     are disabled so the fm-<id> name survives treehouse cd'ing into the worktree;
-#   - the treehouse-get send-keys and the worktree wait loop target that stable
-#     window id, never the (possibly-renamed) name - a lost name would let
-#     display-message fall back to the active client's window and misread firstmate's
-#     OWN pane as the worktree, tangling a hook into the primary checkout.
 make_spawn_record_fakebin() {
   local dir=$1 fakebin
   fakebin=$(fm_fakebin "$dir")
@@ -226,38 +213,16 @@ make_spawn_record_fakebin() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
-fm_fake_tmux_dispatch "$@"
 [ -n "${FM_TMUX_REC:-}" ] && printf 'tmux %s\n' "$*" >> "$FM_TMUX_REC"
-case "$*" in
-  *"#{pane_current_path}"*)
-    [ "${3:-}" = %1 ] && [ -f "$0.original-windows" ] || exit 1
-    printf '%s\n' "${FM_FAKE_PANE_PATH:-}"
-    exit 0 ;;
-esac
 case "${1:-}" in
   -V) printf '%s\n' "${FM_FAKE_TMUX_VERSION:-tmux 3.2}"; exit 0 ;;
   display-message) printf 'firstmate\n'; exit 0 ;;
-  new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@"; exit 0 ;;
   list-windows)
     if [ "${FM_FAKE_TMUX_SERVER:-}" = legacy ] && [[ " $* " = *' -f '* ]]; then
       printf 'unknown flag -f\n' >&2
       exit 1
     fi
-    if [[ "$*" = *window_id* ]] && [ -f "$0.windows" ]; then
-      fm_fake_tmux_window_ids "$@" < "$0.windows"
-    fi
     exit 0 ;;
-  send-keys)
-    case "${4:-}" in
-      *'treehouse get --lease --lease-holder '*)
-        [ "${3:-}" = %1 ] || exit 1
-        mv "$0.windows" "$0.original-windows" || exit 1
-        printf '@1 firstmate:renamed\n' > "$0.windows" || exit 1
-        ;;
-      'export GOTMPDIR='*) mv "$0.original-windows" "$0.windows" || exit 1 ;;
-    esac
-    exit 0 ;;
-  has-session|new-session|set-window-option) exit 0 ;;
 esac
 exit 0
 SH
@@ -274,13 +239,13 @@ run_spawn_record() {
     "$id" "$proj" codex --mode no-mistakes --yolo off
 }
 
-test_spawn_tmux_window_construction() {
+test_spawn_tmux_window_construction() (
   local home proj fakebin rec wt out status client server diagnostic
+  local real_tmux socket launcher pane launch_env session_id
   home="$TMP_ROOT/spawn-rec-home"
   mkdir -p "$home/data"
   proj=$(make_repo "$TMP_ROOT/spawn-rec-proj")
   fakebin=$(make_spawn_record_fakebin "$TMP_ROOT/spawn-rec-fake")
-  fm_test_fake_sleep_noop "$fakebin"
   rec="$TMP_ROOT/spawn-rec.log"
   : > "$rec"
   wt="$TMP_ROOT/spawn-rec-wt"
@@ -301,34 +266,60 @@ tmux 3.1c|modern|requires a tmux client version 3.2
 tmux 3.2|legacy|could not verify list-windows -f support
 ROWS
 
+  real_tmux=$(command -v tmux) || { printf 'skip - real tmux spawn placement requires tmux\n'; return 0; }
+  socket="$TMP_ROOT/spawn.sock"
+  unset TMUX TMUX_PANE
+  trap '"$real_tmux" -S "$socket" kill-server 2>/dev/null || true' EXIT
+  mkdir -p "$home/user-home"
+  HOME="$home/user-home" "$real_tmux" -S "$socket" -f /dev/null new-session -d -s decoy -n initial -c "$proj" sleep 300 \
+    || fail "could not start the private tmux server"
+  "$real_tmux" -S "$socket" set-option -g base-index 1 || fail "could not set base-index"
+  "$real_tmux" -S "$socket" set-option -g default-shell "$BASH" || fail "could not set the fixture shell"
+  "$real_tmux" -S "$socket" set-option -g default-command 'exec bash --noprofile --norc' \
+    || fail "could not set the fixture shell command"
+  "$real_tmux" -S "$socket" set-window-option -g automatic-rename on || fail "could not enable automatic-rename"
+  "$real_tmux" -S "$socket" set-window-option -g allow-rename on || fail "could not enable allow-rename"
+  launcher=$("$real_tmux" -S "$socket" new-session -dP -F '#{pane_id}' -s '$0' -n initial -c "$proj") \
+    || fail "could not create the literal ID-shaped destination"
+  session_id=$("$real_tmux" -S "$socket" display-message -p -t "$launcher" '#{session_id}')
+  launch_env=$("$real_tmux" -S "$socket" display-message -p -t "$launcher" '#{socket_path},#{pid}')
+  "$real_tmux" -S "$socket" set-environment -t "$session_id" PATH "$fakebin:$PATH" || fail "could not set the worker PATH"
+  "$real_tmux" -S "$socket" set-environment -t "$session_id" FM_TREEHOUSE_TEST_SLOT "$wt" || fail "could not set the fixture slot"
+  "$real_tmux" -S "$socket" set-environment -t "$session_id" FM_TREEHOUSE_TEST_RECEIPT "$rec" || fail "could not set the receipt path"
+  cat > "$fakebin/tmux" <<SH
+#!/usr/bin/env bash
+exec "$real_tmux" -S "$socket" "\$@"
+SH
+  cat > "$fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$TMUX_PANE" "$*" > "$FM_TREEHOUSE_TEST_RECEIPT"
+printf '%s\n' "$FM_TREEHOUSE_TEST_SLOT"
+SH
+  fm_fake_exit0 "$fakebin" codex
+
   : > "$rec"
-  out=$(run_spawn_record "$home" rec-win-gg7 "$proj" "$wt" "$fakebin" "$rec"); status=$?
-  expect_code 0 "$status" "spawn into a genuine worktree should succeed"
-  assert_contains "$out" "spawned rec-win-gg7" "recording spawn did not report success"
+  out=$(TMUX="$launch_env,${session_id#\$}" TMUX_PANE="$launcher" \
+    run_spawn "$home" rec-win-gg7 "$proj" "$wt" "$fakebin"); status=$?
+  expect_code 0 "$status" "spawn into a genuine worktree should succeed: $out"
+  assert_contains "$out" "spawned rec-win-gg7" "spawn did not report success"
   grep -Fxq "worktree=$wt" "$home/state/rec-win-gg7.meta" \
-    || fail "spawn must record the worktree discovered while the window is renamed"
-
-  # Bug 1 fix: append-form window creation (trailing colon on the session target).
-  grep -Eq "new-window -t \\\$1: -dP -F tmux-pane:[^ ]+ -n fm-rec-win-gg7" "$rec" \
-    || fail "new-window must append in the exact session and capture the pane binding"
-
-  # Bug 2 fix (a): pin the window name against automatic-rename / allow-rename.
-  assert_grep "set-window-option -t %1 automatic-rename off" "$rec" \
-    "must disable automatic-rename on the spawned window"
-  assert_grep "set-window-option -t %1 allow-rename off" "$rec" \
-    "must disable allow-rename on the spawned window"
-
-  # Bug 2 fix (b): treehouse-get and the worktree wait loop target the stable id.
-  grep -F 'send-keys -t %1 ' "$rec" \
-    | grep -F 'treehouse get --lease --lease-holder rec-win-gg7' \
-    | grep -Fq ' Enter' \
-    || fail "durable treehouse get must be sent to the stable window id"
-  pass "fm-spawn: appends windows by session-colon, pins the name, and targets the window id"
-}
+    || fail "spawn must record the worktree the worker entered"
+  [ "$("$real_tmux" -S "$socket" list-windows -t "$session_id:" -F '#{window_index} #{window_name}')" = \
+    $'1 initial\n2 fm-rec-win-gg7' ] || fail "spawn must append its pinned window to the literal session"
+  [ "$("$real_tmux" -S "$socket" list-windows -t '$0:' -F '#{window_name}')" = initial ] \
+    || fail "spawn changed the ID-shaped session's decoy"
+  pane=$("$real_tmux" -S "$socket" display-message -p -t "$session_id:2" '#{pane_id}')
+  [ "$("$real_tmux" -S "$socket" show-window-options -v -t "$pane" automatic-rename)" = off ] &&
+    [ "$("$real_tmux" -S "$socket" show-window-options -v -t "$pane" allow-rename)" = off ] \
+    || fail "spawn did not pin both rename options on the worker"
+  [ "$(cat "$rec")" = "$pane"$'\n''get --lease --lease-holder rec-win-gg7' ] \
+    || fail "the new worker pane did not run the durable Treehouse lease command"
+  pass "fm-spawn: appends a pinned window and acquires its lease in the worker pane"
+)
 
 test_lib_classification
 test_guard_banner
 test_bootstrap_line
 test_brief_assertion_precedes_branch
 test_spawn_isolation_abort
-test_spawn_tmux_window_construction
+test_spawn_tmux_window_construction || exit $?
