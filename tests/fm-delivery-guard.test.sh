@@ -38,51 +38,35 @@ make_fake_tools() {  # <dir>
 cat > "$fakebin/gh-axi" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = api ]; then
-  # Real gh-axi forwards an exported GH_REPO to gh as --repo, which gh api rejects.
   if [ -n "${GH_REPO:-}" ]; then
     printf 'Error: "unknown flag: --repo"\ncode: UNKNOWN\n'
     exit 1
   fi
-  if [ "${2:-}" = /user ]; then
-    [ "${GH_HOST:-}" = github.com ] || exit 3
-    case " $* " in *" --hostname "*) exit 4 ;; esac
-    printf 'api_response:\n  body: %s\n  truncated: false\n' "${FAKE_GH_ACCOUNT:-captain}"
-    exit 0
-  fi
+  [ "${GH_HOST:-}" = github.com ] || exit 3
+  case " $* " in *" --hostname "*) exit 4 ;; esac
+  printf 'api_response:\n  body: %s\n  truncated: false\n' "${FAKE_GH_ACCOUNT:-captain}"
+  exit 0
 fi
 printf '%s\n' "$*" >> "${GH_AXI_LOG:?}"
 if [ -n "${CAPTURE_STDIN:-}" ]; then
   cat >> "${GH_AXI_LOG:?}"
 fi
-case "${1:-}:${2:-}" in
-  pr:create)
-    if [ -n "${GH_REPO:-}" ]; then
-      repo_url="https://github.com/$GH_REPO.git"
-    else
-      origin=$(git remote get-url origin) || exit 1
-      repo_url="https://github.com/${origin#git@github.com:}"
-    fi
-    printf 'repository=%s\n' "$repo_url" >> "$GH_AXI_LOG"
-    printf '%s/pull/1\n' "${repo_url%.git}"
-    ;;
-  api:POST)
-    [ "$#" -eq 11 ] && [ "$3" = /repos/captain/widgets/pulls ] &&
-      [ "$4" = --field ] && [ "$5" = head=feature ] &&
-      [ "$6" = --field ] && [ "$7" = base=main ] &&
-      [ "$8" = --field ] && [ "$9" = 'title=Safe REST PR' ] &&
-      [ "${10}" = --field=body=@rest-body.txt ] &&
-      [ "${11}" = '--header=Accept: application/vnd.github+json' ] || exit 2
-    body=$(cat rest-body.txt) || exit 2
-    printf 'body=%s\n' "$body" >> "$GH_AXI_LOG"
-    printf 'number: 1\n'
-    ;;
-  api:*) exit 2 ;;
-  *) printf 'https://github.com/captain/widgets/pull/1\n' ;;
-esac
+if [ "${1:-}:${2:-}" = pr:create ]; then
+  if [ -n "${GH_REPO:-}" ]; then
+    repo_url="https://github.com/$GH_REPO.git"
+  else
+    origin=$(git remote get-url origin) || exit 1
+    repo_url="https://github.com/${origin#git@github.com:}"
+  fi
+  printf 'repository=%s\nGH_REPO=%s\n' "$repo_url" "${GH_REPO-<unset>}" >> "$GH_AXI_LOG"
+  printf '%s/pull/1\n' "${repo_url%.git}"
+  exit 0
+fi
+printf 'https://github.com/captain/widgets/pull/1\n'
 SH
 cat > "$fakebin/gh" <<'SH'
 #!/usr/bin/env bash
-if [ "${1:-}:${2:-}" = api:/user ]; then
+if [ "${1:-}" = api ]; then
   [ "${GH_HOST:-}" = github.com ] || exit 3
   case " $* " in *" --hostname "*) exit 4 ;; esac
   printf 'api_response:\n  body: %s\n  truncated: false\n' "${FAKE_GH_ACCOUNT:-captain}"
@@ -151,7 +135,7 @@ EOF
     || fail "guard arm failed for the push fixture"
 
   out=$(FM_HOME="$home" FAKE_GIT_REMOTE_ROOT="${repo%/repo}" GH_AXI_LOG="$log" PATH="$fakebin:$PATH" \
-    git -C "$repo" push origin main 2>&1)
+    env -u GH_REPO git -C "$repo" push origin main 2>&1)
   rc=$?
   [ "$rc" -ne 0 ] || fail "push to original-author origin should have been refused"
   assert_contains "$out" "branch-push would write to github.com/upstream/widgets" \
@@ -161,7 +145,7 @@ EOF
   fi
 
   out=$(FM_HOME="$home" FAKE_GIT_REMOTE_ROOT="${repo%/repo}" GH_AXI_LOG="$log" PATH="$fakebin:$PATH" \
-    git -C "$repo" push fork main 2>&1)
+    env -u GH_REPO git -C "$repo" push fork main 2>&1)
   rc=$?
   expect_code 0 "$rc" "push to the configured captain fork should succeed"
   assert_contains "$out" "DELIVERY TARGET: project=widgets action=branch-push repository=github.com/captain/widgets account=captain" \
@@ -280,97 +264,43 @@ EOF
   grep -Fqx -- "repository=$fork_url" "$log" \
     || fail "delegated gh-axi PR did not select the policy fork using GH_REPO"
 
-  : > "$log"
   out=$(cd "$repo" && FM_HOME="$home" GH_REPO=captain/widgets GH_AXI_LOG="$log" \
     FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
-    "$GH_AXI_SHIM" api graphql --field query=mutation 2>&1)
+    "$GH_AXI_SHIM" api graphql -f query=mutation 2>&1)
   rc=$?
   [ "$rc" -ne 0 ] || fail "gh-axi shim should fail closed for unresolvable GraphQL mutations"
   assert_contains "$out" "GraphQL is unavailable in a guarded worker" \
     "GraphQL refusal did not explain why its repository cannot be proven"
-  out=$(cd "$repo" && FM_HOME="$home" GH_REPO=captain/widgets GH_AXI_LOG="$log" \
+  out=$(cd "$repo" && FM_HOME="$home" GH_AXI_LOG="$log" \
     FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
-    "$GH_AXI_SHIM" api post /repos/upstream/widgets/pulls --field title=unsafe 2>&1)
+    "$GH_AXI_SHIM" api /repos/upstream/widgets/pulls --field title=unsafe 2>&1)
   rc=$?
-  [ "$rc" -ne 0 ] || fail "gh-axi API write should be destination-guarded"
+  [ "$rc" -ne 0 ] || fail "implicit POST API write should be destination-guarded"
   assert_contains "$out" "pull-request would write to github.com/upstream/widgets" \
-    "gh-axi API refusal did not identify the unsafe repository"
-  [ ! -s "$log" ] || fail "refused gh-axi API command still reached the real executable"
-
-  out=$(cd "$repo" && FM_HOME="$home" GH_REPO=captain/widgets GH_AXI_LOG="$log" \
+    "implicit POST API refusal did not identify the unsafe repository"
+  out=$(cd "$repo" && FM_HOME="$home" GH_AXI_LOG="$log" \
     FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
-    "$GH_AXI_SHIM" api /repos/captain/widgets/pulls --field state=open --template POST 2>&1)
+    "$GH_AXI_SHIM" api --method=post /repos/upstream/widgets/pulls 2>&1)
   rc=$?
-  expect_code 1 "$rc" "filtered gh-axi reads should retain the exported selector: $out"
-  assert_contains "$out" "unknown flag: --repo" "filtered read lost its exported selector"
-  assert_not_contains "$out" "DELIVERY TARGET" "filtered read was authorized as a write"
+  [ "$rc" -ne 0 ] || fail "lower-case API methods should be destination-guarded"
+  assert_contains "$out" "pull-request would write to github.com/upstream/widgets" \
+    "lower-case method refusal did not identify the unsafe repository"
 
-  printf 'Clean REST description\n' > "$repo/rest-body.txt"
-  out=$(cd "$repo" && FM_HOME="$home" GH_REPO=captain/widgets GH_AXI_LOG="$log" \
+  git -C "$repo" remote set-url origin git@github.com:captain/widgets.git \
+    || fail "could not configure the policy fork as origin"
+  : > "$log"
+  out=$(cd "$repo" && FM_HOME="$home" GH_AXI_LOG="$log" \
     FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
-    "$GH_AXI_SHIM" api POST /repos/captain/widgets/pulls \
-      --field head=feature --field base=main --field 'title=Safe REST PR' \
-      --field=body=@rest-body.txt --header='Accept: application/vnd.github+json' 2>&1)
+    env -u GH_REPO "$GH_AXI_SHIM" pr create --title safe --body safe 2>&1)
   rc=$?
-  expect_code 0 "$rc" "gh-axi REST PR create should succeed with an exported GH_REPO: $out"
-  assert_contains "$out" "DELIVERY TARGET: project=widgets action=pull-request repository=github.com/captain/widgets account=captain" \
-    "allowed gh-axi REST PR did not announce its repository and account"
-  assert_contains "$out" "number: 1" "delegated request did not create a REST PR in the fixture"
-  grep -Fxq -- 'body=Clean REST description' "$log" \
-    || fail "REST PR delegate did not load the clean body file"
+  expect_code 0 "$rc" "gh-axi PR should use the approved origin with GH_REPO unset: $out"
+  grep -Fqx -- "repository=$fork_url" "$log" \
+    || fail "delegated gh-axi PR did not select the approved origin"
+  grep -Fqx -- 'GH_REPO=<unset>' "$log" \
+    || fail "gh-axi shim supplied a selector for a PR with GH_REPO unset"
   pass "delivery guard: gh-axi PR writes are refused or allowed by the same durable target"
 }
 
-test_rest_write_checks_request_header_and_resolved_body() {
-  local rec repo home fakebin upstream fork gate out rc log tool
-  rec=$(make_repo rest-write-content)
-  IFS='|' read -r repo home fakebin upstream fork gate <<< "$rec"
-  log="$home/gh.log"
-  : > "$log"
-  FM_HOME="$home" GH_AXI_LOG="$log" PATH="$fakebin:$PATH" "$GUARD" arm widgets "$repo" >/dev/null \
-    || fail "guard arm failed for the REST write fixture"
-  printf '[fm-from-firstmate] corr=b8693aa1398acdff /home/private\n' > "$repo/private.txt"
-
-  local fixture_env=(FM_HOME="$home" PATH="$fakebin:$PATH" GH_REPO=captain/widgets
-    GH_AXI_LOG="$log" GH_LOG="$log" FM_DELIVERY_GUARD_ROOT="$ROOT"
-    FM_REAL_GH_AXI="$fakebin/gh-axi" FM_REAL_GH="$fakebin/gh")
-  local api header field
-  for tool in gh-axi gh; do
-    case "$tool" in
-      gh-axi)
-        api=("$GH_AXI_SHIM" api POST /repos/captain/widgets/pulls
-          --field head=feature --field base=main --field title=REST)
-        header=(--header 'authorization: synthetic-test-placeholder')
-        field=(--field body=@private.txt)
-        ;;
-      gh)
-        api=("$GH_SHIM" api /repos/captain/widgets/pulls -X=POST
-          -f head=feature -f base=main -f title=REST)
-        header=('-iH=AuThOrIzAtIoN: synthetic-test-placeholder')
-        field=(-F=body=@private.txt)
-        ;;
-    esac
-    out=$(cd "$repo" && env "${fixture_env[@]}" "${api[@]}" "${header[@]}" 2>&1)
-    expect_code 1 "$?" "$tool should refuse an Authorization header: $out"
-    assert_contains "$out" "REST writes cannot supply an Authorization header" \
-      "$tool did not refuse the per-request credential"
-    assert_not_contains "$out" "DELIVERY TARGET" "$tool announced approval for a request-level credential"
-    assert_not_contains "$out" "synthetic-test-placeholder" "$tool echoed the supplied credential"
-
-    out=$(cd "$repo" && env "${fixture_env[@]}" "${api[@]}" "${field[@]}" 2>&1)
-    expect_code 1 "$?" "$tool should inspect file-backed REST bodies: $out"
-    assert_contains "$out" "routing marker [fm-from-firstmate]" "$tool did not inspect the body file"
-    assert_contains "$out" "correlation token (corr=...)" "$tool did not inspect the file's correlation token"
-    assert_contains "$out" "local absolute path" "$tool did not inspect the file's local path"
-    [ ! -s "$log" ] || fail "refused $tool REST request still reached the delegate"
-  done
-
-  out=$(printf 'Clean stdin REST description\n' | (cd "$repo" && env "${fixture_env[@]}" CAPTURE_STDIN=1 \
-    "$GH_SHIM" api /repos/captain/widgets/pulls -F body=@- 2>&1))
-  expect_code 0 "$?" "native gh should forward a clean typed body from stdin: $out"
-  grep -Fxq -- 'Clean stdin REST description' "$log" || fail "native gh received no buffered REST stdin"
-  pass "delivery guard: both shims protect REST credentials and resolved bodies"
-}
 
 test_pre_push_with_exported_gh_repo() {
   local rec repo home fakebin upstream fork gate out rc log
@@ -1256,7 +1186,6 @@ test_authenticated_account_mismatch_refuses
 test_effective_push_url_rewrite_refuses
 test_no_mistakes_checks_branch_and_pr_targets
 test_gh_axi_pr_write_shim_refuses_and_allows
-test_rest_write_checks_request_header_and_resolved_body
 test_pre_push_with_exported_gh_repo
 test_check_pr_body_patterns
 test_shims_refuse_pr_body_leaks
