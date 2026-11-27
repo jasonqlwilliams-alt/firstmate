@@ -4412,7 +4412,9 @@ EOF
 #!/usr/bin/env bash
 if [ "${1:-}" = display-message ] && [ "${*: -1}" = '#{pane_pid}' ]; then
   cat "$CASE_DIR/target"
-elif [ "${1:-}" = kill-window ]; then
+elif [ "${1:-}" = list-windows ] && [[ "$*" = *'#{window_id}'* ]]; then
+  printf '@1 firstmate:fm-task-x1\n' | fm_fake_tmux_window_ids "$@"
+elif [ "$*" = 'kill-window -t @1' ]; then
   : > "$CASE_DIR/window-closed"
 fi
 SH

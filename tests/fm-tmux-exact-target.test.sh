@@ -328,6 +328,15 @@ wait_for_marker "$dotted_window" 'SUBMITTED TYPED-REGRESSION'
   || fail "line or verified submit changed the neighbouring draft"
 pass "dotted worker receives line and verified submit input without changing the neighbouring draft"
 
+fm_backend_kill tmux "$dotted_target" || fail "could not close the recorded dotted worker"
+draft_after=$(tmux capture-pane -p -t "$draft_window") \
+  || fail "dotted worker cleanup removed the neighbouring worker"
+[ "$draft_after" = "$draft_before" ] || fail "dotted worker cleanup changed the neighbouring draft"
+if tmux list-panes -t "$dotted_window" >/dev/null 2>&1; then
+  fail "dotted worker cleanup left the recorded window open"
+fi
+pass "closing the dotted worker preserves the neighbouring window and its draft"
+
 tmux new-session -d -s firstmate-lab -n fm-detached -c "$LAB/neighbour" \
   || fail "could not create the prefix-named session"
 detached_session=$(fm_backend_tmux_container_ensure) || fail "could not ensure the detached session"

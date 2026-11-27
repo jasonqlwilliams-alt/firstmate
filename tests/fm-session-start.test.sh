@@ -1318,7 +1318,7 @@ EOF
 
   out=$(network_stage_report "$home" "$root")
   assert_not_contains "$out" "SECONDMATE_LIVENESS:" "successful bare-shell recovery should stay non-actionable"
-  assert_contains "$(cat "$log")" "kill-window -t =firstmate:=fm-$SESSION_START_SECOND_MATE_ID" \
+  assert_contains "$(cat "$log")" 'kill-window -t @1' \
     "the proven bare-shell path did not remove its existing dead endpoint"
   assert_contains "$(cat "$log")" "new-window" "the proven bare-shell path did not relaunch"
   pass "session start: the proven bare-shell recovery path remains intact"

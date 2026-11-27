@@ -1015,6 +1015,9 @@ make_teardown_fakebin() {  # <dir> -> echoes fakebin dir; logs tmux+treehouse ca
 #!/usr/bin/env bash
 set -u
 { printf 'tmux'; for a in "$@"; do printf '\x1f%s' "$a"; done; printf '\n'; } >> "${FM_TMUX_LOG:?}"
+if [ "${1:-}" = list-windows ] && [[ "$*" = *'#{window_id}'* ]]; then
+  printf '@1 %s\n' "$FM_FAKE_TMUX_WINDOW" | fm_fake_tmux_window_ids "$@"
+fi
 exit 0
 SH
   cat > "$fb/treehouse" <<'SH'
@@ -1038,7 +1041,7 @@ run_teardown_case() {
   : > "$log"
   env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$fmroot" \
     FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$config" \
-    FM_TMUX_LOG="$log" \
+    FM_TMUX_LOG="$log" FM_FAKE_TMUX_WINDOW="firstmate:fm-$id" \
     "$script" "$id"
 }
 
@@ -1097,8 +1100,8 @@ test_teardown_conformance_old_vs_new() {
   # exact-selector contract belongs to the current script, asserted below.
   assert_contains "$(tr -d '=' < "$log_old")" "tmux"$'\x1f''kill-window'$'\x1f''-t'$'\x1f'"firstmate:fm-$id" \
     "legacy teardown fixture did not exercise tmux window cleanup for the task"
-  assert_contains "$(cat "$log_new")" "tmux"$'\x1f''kill-window'$'\x1f''-t'$'\x1f'"=firstmate:=fm-$id" \
-    "teardown did not call tmux kill-window with exact session and window selectors"
+  assert_contains "$(cat "$log_new")" "tmux"$'\x1f''kill-window'$'\x1f''-t'$'\x1f@1' \
+    "teardown did not close the recorded window by its tmux ID"
 
   pass "fm-teardown.sh: treehouse return remains compatible while tmux cleanup uses exact selectors"
 }

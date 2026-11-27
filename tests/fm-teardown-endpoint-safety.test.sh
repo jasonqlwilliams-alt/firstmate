@@ -349,13 +349,15 @@ isolated_tmux_window_exists() {  # <dir> <socket> <session> <window>
 
 test_isolated_tmux_invalid_and_valid_cleanup() {
   local dir socket socket_id session='endpoint safety' target_id=target control=control target=fm-target
-  local prefix_target=fm-prefix prefix_survivor=fm-prefix2 rc
+  local prefix_target=fm-prefix prefix_survivor=fm-prefix2 window_id rc
   [ -n "$REAL_TMUX" ] || { echo "skip - tmux not installed"; return 0; }
   dir=$(make_case isolated-real)
   socket=dedicated.sock
   socket_id="$dir/$socket"
   ( cd "$dir" && env -u TMUX -u TMUX_PANE "$REAL_TMUX" -S "$socket" new-session -d -s "$session" -n "$control" )
-  ( cd "$dir" && env -u TMUX -u TMUX_PANE "$REAL_TMUX" -S "$socket" new-window -d -t "$session:" -n "$target" )
+  window_id=$(cd "$dir" && env -u TMUX -u TMUX_PANE "$REAL_TMUX" -S "$socket" \
+    new-window -dP -F '#{window_id}' -t "$session:" -n "$target") \
+    || fail "could not create the recorded window"
   printf '%s\n' "$socket_id" > "$dir/socket.identity"
   cat > "$dir/fakebin/tmux" <<SH
 #!/usr/bin/env bash
@@ -419,7 +421,7 @@ SH
     && fail "valid cleanup did not remove the exact target window"
   isolated_tmux_window_exists "$dir" "$socket" "$session" "$control" \
     || fail "valid cleanup removed the independent control window"
-  grep -Fqx "tmux <kill-window> <-t> <=$session:=$target>" "$dir/runtime.log" \
+  grep -Fqx "tmux <kill-window> <-t> <$window_id>" "$dir/runtime.log" \
     || fail "valid cleanup did not invoke exactly the recorded target: $(cat "$dir/runtime.log")"
 
   ( cd "$dir" && env -u TMUX -u TMUX_PANE "$REAL_TMUX" -S "$socket" kill-server 2>/dev/null ) || true
@@ -900,6 +902,10 @@ if [ "\${1:-}" = display-message ]; then
   printf '%s\n' '$dir/other-directory'
   exit 0
 fi
+if [ "\${1:-}" = list-windows ] && [[ "\$*" = *'#{window_id}'* ]]; then
+  printf '@1 firstmate:fm-%s\n' '$id' | fm_fake_tmux_window_ids "\$@"
+  exit 0
+fi
 printf 'tmux' >> "\${FM_RUNTIME_LOG:?}"
 printf ' <%s>' "\$@" >> "\${FM_RUNTIME_LOG:?}"
 printf '\n' >> "\${FM_RUNTIME_LOG:?}"
@@ -913,7 +919,7 @@ SH
   run_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr" \
     || fail "teardown refused its recorded endpoint after it changed directory: $(cat "$dir/stderr")"
   assert_absent "$dir/home/state/$id.meta" "moved-endpoint teardown left the task record"
-  grep -Fq "tmux <kill-window> <-t> <=firstmate:=fm-$id>" "$dir/runtime.log" \
+  grep -Fqx 'tmux <kill-window> <-t> <@1>' "$dir/runtime.log" \
     || fail "moved-endpoint teardown did not stop the exact recorded worker: $(cat "$dir/runtime.log")"
   grep -Fq "treehouse <return>" "$dir/runtime.log" \
     || fail "moved-endpoint teardown did not return its uncontested pool slot: $(cat "$dir/runtime.log")"
