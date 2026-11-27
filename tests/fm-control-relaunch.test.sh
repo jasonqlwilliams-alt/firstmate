@@ -516,6 +516,28 @@ SH
   pass "fm-control relaunch: a repointed task temp alias blocks metadata publication and launch"
 }
 
+test_relaunch_uses_physical_path_for_nested_tmp_alias() {
+  local dir id legacy parent_link recorded gotmpdir out rc
+  legacy=$(mktemp -d /tmp/fm-rl-nested-XXXXXX) || fail "could not reserve a unique task ID"
+  FM_TEST_CLEANUP_DIRS+=("$legacy")
+  id=${legacy#/tmp/fm-}
+  dir=$(new_case nested-tmp-alias "$id")
+  add_ship_task "$dir" "$id" claude
+  mkdir -p "$dir/private/cde"
+  parent_link="$legacy+ab"
+  ln -s "$dir/private" "$parent_link" || fail "could not create the parent alias"
+  FM_TEST_CLEANUP_DIRS+=("$parent_link")
+  recorded="$parent_link/cde"
+  printf 'tasktmp=%s\n' "$recorded" >> "$dir/home/state/$id.meta"
+  out=$(run_control "$dir" "$id" relaunch --note "continue with the existing temp root"); rc=$?
+  expect_code 0 "$rc" "relaunch should reuse the nested temp directory: $out"
+  [ "$(meta_field "$dir" "$id" tasktmp)" = "$recorded" ] || fail "relaunch rewrote the recorded spelling"
+  gotmpdir=$(cat "$dir/fake/gotmpdir")
+  rm "$parent_link" || fail "could not remove the test alias"
+  [ "$gotmpdir" -ef "$dir/private/cde/gotmp" ] || fail "the pane received the nested alias instead of the checked Go temp directory"
+  pass "fm-control relaunch: a nested /tmp alias uses the checked physical directory"
+}
+
 test_relaunch_does_not_reuse_legacy_root_by_another_spelling() {
   local dir id legacy variant recorded out rc task_tmp
   for variant in doubled-slash dot-segment trailing-dot linked-parent relative; do
@@ -3405,6 +3427,7 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
 test_relaunch_replaces_stale_task_temp_roots
 test_relaunch_keeps_task_temp_metadata_single_line
 test_relaunch_refuses_repointed_task_temp_alias
+test_relaunch_uses_physical_path_for_nested_tmp_alias
 test_relaunch_does_not_reuse_legacy_root_by_another_spelling
 test_relaunch_from_linked_home_preserves_recorded_worktree
 test_relaunch_preserves_registered_merge_poll

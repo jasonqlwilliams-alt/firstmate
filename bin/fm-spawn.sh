@@ -1104,7 +1104,9 @@ spawn_abort_return_untouched_slot() {
 }
 
 spawn_task_tmp_is_current() {
-  [ "$SPAWN_TASK_TMP_CREATED" != 1 ] || return 0
+  if [ "$SPAWN_TASK_TMP_CREATED" = 1 ]; then
+    return 0
+  fi
   [ -n "$TASK_TMP_IDENTITY" ] &&
     [ "$(fm_task_tmp_private_root "$TASK_TMP_RECORD" "$ID" "$TASK_TMP_IDENTITY")" = "$TASK_TMP" ]
 }
@@ -1118,7 +1120,7 @@ spawn_publish_task_meta() {
 }
 
 spawn_abort_cleanup() {
-  local status=$? staged_file return_cmd task_tmp_record=
+  local status=$? staged_file return_cmd
   [ -z "$RELAUNCH_PATH_PROBE" ] || rm -f -- "$RELAUNCH_PATH_PROBE" || true
   for staged_file in "${RELAUNCH_WIRING_FILES[@]:-}"; do
     [ -z "$staged_file" ] || rm -f -- "$staged_file" || true
@@ -1184,9 +1186,6 @@ spawn_abort_cleanup() {
         fi
         mkdir -p "$STATE" 2>/dev/null || true
         if [ -d "$STATE" ]; then
-          if spawn_task_tmp_is_current; then
-            task_tmp_record=$TASK_TMP_RECORD
-          fi
           SPAWN_META_TMP="$STATE/.$ID.meta.orca-recovery.${BASHPID:-$$}"
           {
             echo "window=$W"
@@ -1198,7 +1197,7 @@ spawn_abort_cleanup() {
             echo "kind=$KIND"
             [ -z "${MODE:-}" ] || echo "mode=$MODE"
             [ -z "${YOLO:-}" ] || echo "yolo=$YOLO"
-            printf 'tasktmp=%s\n' "$task_tmp_record"
+            printf 'tasktmp=%s\n' "$TASK_TMP_RECORD"
             echo "model=${MODEL:-default}"
             echo "effort=${EFFORT:-default}"
             echo "backend=orca"
@@ -5096,7 +5095,9 @@ if ! spawn_task_tmp_is_current; then
   exit 1
 fi
 launch_task_tmp=$TASK_TMP
-case "$TASK_TMP_RECORD" in /tmp/fm-"$ID"+??????) launch_task_tmp=$TASK_TMP_RECORD ;; esac
+if [[ "$TASK_TMP_RECORD" =~ ^"/tmp/fm-$ID+"[A-Za-z0-9]{6}$ ]]; then
+  launch_task_tmp=$TASK_TMP_RECORD
+fi
 SPAWN_TASK_TMP_HANDED_OFF=1
 spawn_send_text_line "$T" "export GOTMPDIR=$(printf '%q' "$launch_task_tmp/gotmp")"
 # Mark the pane as a task worker so bin/fm-test-run.sh can refuse to run the
