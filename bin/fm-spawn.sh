@@ -1097,47 +1097,15 @@ spawn_abort_return_untouched_slot() {
   ' "$slot_state" >/dev/null 2>&1
 }
 
-# A tmux close during spawn cleanup is authorized only for the pane whose
-# creation returned a binding. The recorded name may now belong to a successor.
+# A tmux close during spawn cleanup uses the pane binding from creation.
+# The recorded name may now belong to a successor.
 spawn_close_endpoint() {
   if [ "$BACKEND" = tmux ]; then
-    [ -n "${WT_TARGET:-}" ] || return 0
+    [[ ${WT_TARGET:-} =~ $FM_TMUX_PANE_PATTERN ]] || return 0
     fm_backend_tmux_kill "$WT_TARGET"
   else
     fm_backend_kill "$BACKEND" "$T" "$@"
   fi
-}
-
-spawn_verify_tmux_recorded_target() {  # <recorded-target>
-  local current
-  current=$(fm_tmux_exact_target "$1") || return $?
-  [ "${current%:*}" = "${WT_TARGET%:*}" ] || return 2
-  { [ "$current" = "$WT_TARGET" ] && [ "$1" != "$WT_TARGET" ]; } ||
-    fm_tmux_pane_command "$WT_TARGET" display-message -p '#{pane_id}' >/dev/null || return 2
-}
-
-spawn_repair_tmux_recorded_target() {
-  local session window name target=$WT_TARGET meta="$STATE/$ID.meta"
-  session=$(fm_tmux_session_of_pane "$WT_TARGET") || return 1
-  window=${WT_TARGET%:*}
-  window=${window##*:}
-  if name=$(fm_tmux_session_command "$session" display-message ":$window" -p '#{session_name}:' 2>/dev/null); then
-    case "$name" in
-      :|*:*:*|*$'\n'*|*$'\r'*|*$'\t'*) ;;
-      *:) if spawn_verify_tmux_recorded_target "$name$W"; then target="$name$W"; fi ;;
-    esac
-  fi
-  fm_backlog_meta_spawn_gen "$meta" "$STATE" && [ "$FM_BACKLOG_META_SPAWN_GEN" = "$SPAWN_GEN" ] || return 1
-  SPAWN_META_TMP="$STATE/.$ID.meta.window.${BASHPID:-$$}"
-  FM_SPAWN_REPAIRED_WINDOW="$target" awk -F= '
-    $1 == "window" { print "window=" ENVIRON["FM_SPAWN_REPAIRED_WINDOW"]; next }
-    { print }
-  ' "$meta" > "$SPAWN_META_TMP" &&
-    fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$meta" "task record" "$STATE" || return 1
-  SPAWN_META_TMP=
-  echo "warning: repaired tmux target for task $ID from $META_WINDOW to $target after launch" >&2
-  T=$target
-  META_WINDOW=$target
 }
 
 spawn_abort_cleanup() {
@@ -1563,30 +1531,17 @@ if [ "$RELAUNCH" -eq 1 ]; then
     exit 1
   }
   RELAUNCH_PANE=$RELAUNCH_TARGET
-  if [ "$BACKEND" = tmux ]; then
-    if [ -n "$RELAUNCH_PREPARE" ] && [ -n "${FM_CONTROL_RELAUNCH_TMUX_PANE:-}" ]; then
-      RELAUNCH_PANE=$FM_CONTROL_RELAUNCH_TMUX_PANE
-      [[ $RELAUNCH_PANE =~ $FM_TMUX_PANE_PATTERN ]] || exit 1
-      RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_PANE")
-    elif RELAUNCH_PANE=$(fm_tmux_exact_target "$RELAUNCH_TARGET"); then
-      if [ -n "$RELAUNCH_PREPARE" ]; then
-        echo "error: task $ID's tmux endpoint appeared during relaunch preparation" >&2
-        exit 1
-      fi
-      RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_PANE")
-    elif [ "$?" -eq 1 ]; then
-      RELAUNCH_STATE=missing
-    else
-      RELAUNCH_STATE=unreadable
-    fi
-    if [ "$RELAUNCH_STATE" = missing ] && [ "$RELAUNCH_TARGET" = "$RELAUNCH_PANE" ]; then
-      RELAUNCH_PANE=
-    fi
-  else
+  if [ "$BACKEND" != tmux ]; then
     RELAUNCH_STATE=$(FM_BACKEND_HERDR_ENDPOINT_META="$RELAUNCH_META" fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET")
+  elif RELAUNCH_PANE=$(fm_tmux_exact_target "$RELAUNCH_TARGET"); then
+    RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_PANE")
+  elif [ "$?" -eq 1 ]; then
+    RELAUNCH_STATE=missing
+  else
+    RELAUNCH_STATE=unreadable
   fi
   RELAUNCH_RECREATE=0
-  if [ "$RELAUNCH_STATE" = missing ] && { [ "$BACKEND" != tmux ] || [ -z "$RELAUNCH_PANE" ]; }; then
+  if [ "$RELAUNCH_STATE" = missing ]; then
     RELAUNCH_RECREATE=1
   elif [ "$RELAUNCH_STATE" = dead ] || { [ -n "$RELAUNCH_PREPARE" ] && [ "$RELAUNCH_STATE" = alive ]; }; then
     :
@@ -2451,8 +2406,8 @@ resolve_rovo_binary() {
 # on an OAuth device-code prompt ("Sign in at this page ... Waiting for
 # approval...") waiting for a human who is not there, which would look to
 # supervision like a wedged worker rather than a missing credential.
-muse_worker_meta_api_key_present() {  # [session-binding]
-  local session_binding=${1:-} worker_env
+muse_worker_meta_api_key_present() {  # [destination-session]
+  local destination=${1:-} session worker_env
   if [ "$LAUNCH_ENV_ENABLED" = 1 ]; then
     case $'\n'"$LAUNCH_ENV_NAMES"$'\n' in
       *$'\nMETA_API_KEY\n'*) ;;
@@ -2460,15 +2415,22 @@ muse_worker_meta_api_key_present() {  # [session-binding]
     esac
   fi
   [ "$BACKEND" = tmux ] || return 1
-  [ -n "$session_binding" ] || return 1
-  worker_env=$(fm_tmux_session_command "$session_binding" show-environment '' META_API_KEY 2>/dev/null) || return 1
+  if [ -n "$destination" ]; then
+    session="=$destination:"
+  elif [ -n "${TMUX:-}" ]; then
+    session=$(tmux display-message -p '#S' 2>/dev/null) || return 1
+  else
+    tmux has-session -t firstmate 2>/dev/null || return 1
+    session=firstmate
+  fi
+  worker_env=$(tmux show-environment -t "$session" META_API_KEY 2>/dev/null) || return 1
   case "$worker_env" in
     META_API_KEY=?*) return 0 ;;
   esac
   return 1
 }
 
-muse_credential_present() {  # <auth-file> [session-binding]
+muse_credential_present() {  # <auth-file> [destination-session]
   [ -s "$1" ] || muse_worker_meta_api_key_present "${2:-}"
 }
 
@@ -2570,7 +2532,7 @@ effort_flag_for_harness() {
   esac
 }
 
-resolve_additional_launch_executables() {  # [tmux-session-binding]
+resolve_additional_launch_executables() {  # [destination-session]
   case "$LAUNCH" in
     *__MUSEBIN__*)
       MUSE_BIN=$(spawn_resolve_launch_binary resolve_muse_binary) || exit 1
@@ -2611,13 +2573,11 @@ resolve_additional_launch_executables() {  # [tmux-session-binding]
       ;;
   esac
 }
-SPAWN_TMUX_SESSION=
 if [ "$RELAUNCH" -eq 0 ]; then
   if [ "$BACKEND" = tmux ] && [ "$HARNESS" = muse ]; then
     SES=$(fm_backend_tmux_launch_session) || exit 1
-    SPAWN_TMUX_SESSION=$(fm_tmux_exact_session "$SES") || SPAWN_TMUX_SESSION=
   fi
-  resolve_additional_launch_executables "$SPAWN_TMUX_SESSION"
+  resolve_additional_launch_executables "$SES"
 fi
 
 json_escape() {
@@ -3371,16 +3331,16 @@ if [ "$RELAUNCH" -eq 1 ] && [ "$RELAUNCH_RECREATE" -eq 0 ]; then
   # where the previous agent left it.
   T=$RELAUNCH_TARGET
   WT_TARGET=$RELAUNCH_PANE
+  SES=${T%%:*}
 elif [ "$RELAUNCH" -eq 1 ] && [ "$RELAUNCH_RECREATE" -eq 1 ]; then
   # The recorded pane is authoritatively gone. Recreate an endpoint in the
   # recorded worktree rather than adopting a missing target, so closing a pane
   # is not a one-way door.
   case "$BACKEND" in
     tmux)
-      SES=$(fm_backend_tmux_launch_session) || exit 1
-      SPAWN_TMUX_SESSION=$(fm_backend_tmux_container_ensure "$SES") || exit 1
+      SES=$(fm_backend_tmux_container_ensure) || exit 1
       T="$SES:$W"
-      WT_TARGET=$(fm_backend_tmux_create_task "$SES" "$W" "$WT" "$SPAWN_TMUX_SESSION") || exit 1
+      WT_TARGET=$(fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
       ;;
     herdr)
       HERDR_LABEL_HOME=$FM_HOME
@@ -3413,12 +3373,9 @@ EOF
 else
 case "$BACKEND" in
   tmux)
-    if [ -z "$SES" ]; then
-      SES=$(fm_backend_tmux_launch_session) || exit 1
-    fi
-    SPAWN_TMUX_SESSION=$(fm_backend_tmux_container_ensure "$SES" "$SPAWN_TMUX_SESSION") || exit 1
+    SES=$(fm_backend_tmux_container_ensure "$SES") || exit 1
     T="$SES:$W"
-    WT_TARGET=$(fm_backend_tmux_create_task "$SES" "$W" "$PROJ_ABS" "$SPAWN_TMUX_SESSION") || exit 1
+    WT_TARGET=$(fm_backend_tmux_create_task "$SES" "$W" "$PROJ_ABS") || exit 1
     ;;
   herdr)
     # fm_backend_herdr_workspace_label resolves the target workspace from
@@ -3969,10 +3926,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
   }
   resolve_launch_executables
   validate_launch_models
-  if [ "$BACKEND" = tmux ] && [ "$HARNESS" = muse ]; then
-    SPAWN_TMUX_SESSION=$(fm_tmux_session_of_pane "$WT_TARGET") || exit 1
+  if [ "$RELAUNCH_RECREATE" -eq 1 ]; then
+    resolve_additional_launch_executables "$SES"
+  else
+    resolve_additional_launch_executables
   fi
-  resolve_additional_launch_executables "$SPAWN_TMUX_SESSION"
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   # Check legacy or lost leases before get can reset any reusable slot.
   fm_treehouse_require_recorded_leases "$PROJ_ABS" "$STATE" || exit 1
@@ -4881,13 +4839,6 @@ preserve_relaunch_meta() {
   echo "error: task record for $ID could not be prepared at $SPAWN_META_PATH" >&2
   exit 1
 }
-if [ "$BACKEND" = tmux ] && ! spawn_verify_tmux_recorded_target "$T"; then
-  echo "error: recorded tmux target $T no longer identifies the bound endpoint for task $ID" >&2
-  if [ "$RELAUNCH" -eq 0 ]; then
-    spawn_close_endpoint 2>/dev/null || true
-  fi
-  exit 1
-fi
 if [ "$RELAUNCH" -eq 0 ]; then
   if ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"; then
     echo "error: task record for $ID could not be published ($FM_BACKLOG_TRANSITION_ERROR)" >&2
@@ -4945,9 +4896,6 @@ spawn_report_preserved_state() {
 }
 
 if [ "$RELAUNCH" -eq 1 ]; then
-  if [ -n "$RELAUNCH_PREPARE" ] && [ "$BACKEND" = tmux ]; then
-    printf '%s\n' "$WT_TARGET" > "$RELAUNCH_PREPARE/tmux-pane" || exit 1
-  fi
   SPAWN_META_PUBLISH_STARTED=1
   if ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"; then
     echo "error: replacement task record for $ID could not be published ($FM_BACKLOG_TRANSITION_ERROR)" >&2
@@ -5252,15 +5200,6 @@ if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
   SPAWN_META_LOCK=$(fm_meta_lock_path "$STATE/$ID.meta") || exit 1
   fm_lock_acquire_wait "$SPAWN_META_LOCK"
   SPAWN_META_LOCK_HELD=1
-fi
-if [ "$BACKEND" = tmux ] && ! spawn_verify_tmux_recorded_target "$T"; then
-  SPAWN_FRESH_COMMIT_PENDING=0
-  RELAUNCH_RECREATE=0
-  if ! spawn_repair_tmux_recorded_target; then
-    echo "error: could not repair tmux target $T for launched task $ID; worker and task record retained for reconciliation" >&2
-    exit 1
-  fi
-  [ "$RELAUNCH" -ne 0 ] || SPAWN_FRESH_COMMIT_PENDING=1
 fi
 SPAWN_DEFERRED_SIGNAL=
 if [ "$BACKLOG_TRANSITION" = 1 ]; then

@@ -49,7 +49,6 @@ D=$FM_FAKE_DIR
 case "${1:-}" in
   -V) printf 'tmux 3.2\n'; exit 0 ;;
   send-keys)
-    [ "${3:-}" != %42 ] || exit 1
     shift
     literal=0
     while [ $# -gt 0 ]; do
@@ -105,10 +104,6 @@ case "${1:-}" in
     fi
     exit 0 ;;
   display-message)
-    if [ "${3:-}" = %42 ]; then
-      case "${*: -1}" in '#{pane_current_command}') printf '%s\n' zsh ;; esac
-      exit 0
-    fi
     for a in "$@"; do
       case "$a" in
         *cursor_y*) printf '1\n'; exit 0 ;;
@@ -133,18 +128,7 @@ case "${1:-}" in
     session=fmses
     [ ! -f "$D/session" ] || session=$(cat "$D/session")
     case "$*" in
-      *window_id*)
-        inventory=$(awk -v session="$session" '{ print "@" NR " " session ":" $0 }' "$D/windows" |
-          fm_fake_tmux_window_ids "$@")
-        if [ -n "$inventory" ]; then
-          if [ -f "$D/other-split-active" ]; then
-            sed 's/%1$/%42/' <<< "$inventory"
-          else
-            printf '%s\n' "$inventory"
-            [ ! -f "$D/switch-after-binding" ] || : > "$D/other-split-active"
-          fi
-        fi
-        ;;
+      *window_id*) awk -v session="$session" '{ print "@" NR " " session ":" $0 }' "$D/windows" | fm_fake_tmux_window_ids "$@" ;;
       *) cat "$D/windows" ;;
     esac
     exit 0 ;;
@@ -166,7 +150,6 @@ case "${1:-}" in
     done
     [ -z "$name" ] || printf '%s\n' "$name" >> "$D/windows"
     [ -z "$cwd" ] || printf '%s' "$cwd" > "$D/cwd"
-    [ "$session" != "\$1" ] || session=${FM_FAKE_TMUX_SESSION_NAME:-firstmate}
     [ -z "$session" ] || printf '%s\n' "$session" > "$D/session"
     fm_fake_tmux_pane_row "$(awk 'END { print "@" NR }' "$D/windows")"
     exit 0 ;;
@@ -1957,11 +1940,6 @@ test_control_relaunch_recreates_a_missing_endpoint() {
   add_ship_task "$dir" rl-missctl claude
   : > "$dir/fake/windows"
   printf 'zsh' > "$dir/fake/command"
-  cat > "$dir/fake/before-launch" <<'SH'
-#!/usr/bin/env bash
-: > "$FM_FAKE_DIR/other-split-active"
-SH
-  chmod +x "$dir/fake/before-launch"
   out=$(TMUX='' run_control "$dir" rl-missctl relaunch --note "pane was closed; continue"); rc=$?
   expect_code 0 "$rc" "control relaunch of a missing endpoint should succeed"$'\n'"$out"
   assert_contains "$out" "relaunched rl-missctl harness=claude from=claude" \
@@ -1980,21 +1958,7 @@ SH
     "the replacement should have been launched into the recreated endpoint"
   [ "$(journal_field "$dir" rl-missctl phase)" = complete ] \
     || fail "the transaction journal should end complete"
-  assert_present "$dir/fake/other-split-active" "the fixture must select a different split before post-launch verification"
   pass "fm-control relaunch: a missing endpoint is recreated instead of becoming a one-way door"
-}
-
-test_control_relaunch_keeps_bound_pane_when_active_split_changes() {
-  local dir out rc
-  dir=$(new_case active-split rl-split)
-  add_ship_task "$dir" rl-split claude
-  : > "$dir/fake/switch-after-binding"
-  out=$(run_control "$dir" rl-split relaunch --note "continue in the original pane"); rc=$?
-  expect_code 0 "$rc" "an active split switch must not derail a bound relaunch: $out"
-  assert_present "$dir/fake/other-split-active" "the fixture did not select the other split"
-  assert_grep 'encode launch-brief' "$dir/fake/literal" "the original pane did not receive the replacement launch"
-  [ "$(journal_field "$dir" rl-split phase)" = complete ] || fail "the replacement was not verified"
-  pass "fm-control relaunch: an active split change leaves the original pane bound"
 }
 
 test_herdr_relaunch_recreates_missing_endpoint_without_confusing_worker_pane_for_launcher() {
@@ -3394,7 +3358,6 @@ test_spawn_relaunch_refuses_non_gemini_agy_models
 test_spawn_relaunch_refuses_a_live_agent
 test_spawn_relaunch_recreates_a_missing_endpoint
 test_control_relaunch_recreates_a_missing_endpoint
-test_control_relaunch_keeps_bound_pane_when_active_split_changes
 test_herdr_relaunch_recreates_missing_endpoint_without_confusing_worker_pane_for_launcher
 test_spawn_relaunch_refuses_a_symlinked_task_record_before_inspection
 test_spawn_relaunch_keeps_its_early_meta_lock_continuous

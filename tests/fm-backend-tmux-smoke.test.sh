@@ -64,15 +64,14 @@ tmux -f /dev/null new-session -d -s "$SESSION" -x 200 -y 50 \
   || fail "real tmux: new-session failed"
 tmux set-option -t "$SESSION" default-command 'exec /bin/bash --noprofile --norc -i' \
   || fail "could not set a disposable worker shell"
-session_binding=$(fm_tmux_exact_session "$SESSION") || fail "could not bind the private session"
-fm_backend_tmux_create_task "$SESSION" "$WINDOW" "$HOME" "$session_binding" \
+fm_backend_tmux_create_task "$SESSION" "$WINDOW" "$HOME" \
   || fail "fm_backend_tmux_create_task failed to create the task window"
 tmux list-windows -t "$SESSION" -F '#{window_name}' | grep -qx "$WINDOW" \
   || fail "created window is not visible in the real session"
 
 # A second create for the SAME window name must refuse (mirrors fm-spawn.sh's
 # duplicate-window guard).
-if fm_backend_tmux_create_task "$SESSION" "$WINDOW" "$HOME" "$session_binding" 2>/dev/null; then
+if fm_backend_tmux_create_task "$SESSION" "$WINDOW" "$HOME" 2>/dev/null; then
   fail "fm_backend_tmux_create_task should refuse an existing window name"
 fi
 pass "real tmux: fm_backend_tmux_create_task creates a window and refuses a duplicate"

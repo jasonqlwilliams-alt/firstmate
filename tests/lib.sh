@@ -634,18 +634,13 @@ fm_fakebin() {
 }
 
 fm_fake_tmux_window_ids() {  # <tmux args...>, reads ID and name pairs from stdin
-  local id name target session=''
+  local id name target
   while [ "$#" -ge 2 ] && [ "$1" != -f ]; do shift; done
   [ "$#" -ge 2 ] || return 1
   case "$2" in
     '#{==:#{session_name}:#{window_name},'*'}')
       target=${2#'#{==:#{session_name}:#{window_name},'}
       target=${target%\}}
-      ;;
-    '#{==:#{window_name},'*'}')
-      session=${FM_FAKE_TMUX_SESSION_NAME:-firstmate}
-      target=${2#'#{==:#{window_name},'}
-      target="$session:${target%\}}"
       ;;
     *) return 1 ;;
   esac
@@ -703,22 +698,11 @@ fm_fake_tmux_send_args() {
 export -f fm_fake_tmux_send_args
 
 fm_fake_tmux_dispatch() {
-  local arg session
+  local arg
   local -a FM_FAKE_TMUX_ARGS=() args=()
   case "${1:-}" in
-    list-sessions)
-      session=${3#'#{==:#{session_name},'}
-      export FM_FAKE_TMUX_SESSION_NAME=${session%\}}
-      printf '%s\n' "$FM_FAKE_TMUX_SESSION_NAME" > "$0.session"
-      printf "tmux-session:100:1234567890:\$1\n"
-      exit 0
-      ;;
     if-shell)
       fm_fake_tmux_decode_guard "$6" || exit 1
-      if [ -f "$0.session" ]; then
-        IFS= read -r FM_FAKE_TMUX_SESSION_NAME < "$0.session"
-        export FM_FAKE_TMUX_SESSION_NAME
-      fi
       for arg in "${FM_FAKE_TMUX_ARGS[@]}"; do
         # Older fixtures consume the already parsed send-keys arguments.
         [ "$arg" != -- ] && args+=("$arg")
@@ -736,7 +720,6 @@ fm_fake_tmux_new_window() {  # <inventory-file> <id> <new-window args...>
     case "$1" in
       -t)
         session=${2%:}; session=${session#=}
-        [ "$session" != "\$1" ] || session=${FM_FAKE_TMUX_SESSION_NAME:-firstmate}
         shift
         ;;
       -F) format=$2; shift ;;

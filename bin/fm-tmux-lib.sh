@@ -96,8 +96,6 @@ fm_tmux_format_literal() {
 
 FM_TMUX_PANE_FORMAT='tmux-pane:#{pid}:#{start_time}:#{session_id}:#{window_id}:#{pane_id}'
 FM_TMUX_PANE_PATTERN='^tmux-pane:([0-9]+):([0-9]+):(\$[0-9]+):(@[0-9]+):(%[0-9]+)$'
-FM_TMUX_SESSION_FORMAT='tmux-session:#{pid}:#{start_time}:#{session_id}'
-FM_TMUX_SESSION_PATTERN='^tmux-session:([0-9]+):([0-9]+):(\$[0-9]+)$'
 
 # Status: 0 bound; 1 absent; 2 malformed or inconclusive. Explicit tmux
 # selectors and unqualified native IDs retain their existing semantics.
@@ -132,19 +130,6 @@ fm_tmux_exact_target() {  # <target> [explicit]
   printf '%s' "$match"
 }
 
-fm_tmux_exact_session() {  # <literal-session-name>
-  local literal inventory
-  [ -n "$1" ] || return 2
-  literal=$(fm_tmux_format_literal "$1")
-  if ! inventory=$(tmux list-sessions -f "#{==:#{session_name},$literal}" -F "$FM_TMUX_SESSION_FORMAT" 2>&1); then
-    fm_tmux_read_failure_status "$inventory"
-    return $?
-  fi
-  [ -n "$inventory" ] || return 1
-  [[ $inventory =~ $FM_TMUX_SESSION_PATTERN ]] || return 2
-  printf '%s' "$inventory"
-}
-
 # The format guard and its non-waiting command run on the same server queue.
 # The condition proves both IDs in that context and rejects a replacement
 # server before its reused IDs can resolve. The failure branch deliberately
@@ -169,34 +154,23 @@ fm_tmux_pane_command() {  # <bound-or-native-target> <command> [args...]
   shift 2
   if [[ $target =~ $FM_TMUX_PANE_PATTERN ]]; then
     pane=${BASH_REMATCH[5]}
-    context="${BASH_REMATCH[3]}:${BASH_REMATCH[4]}.$pane"
+    context="${BASH_REMATCH[3]}:${BASH_REMATCH[4]}"
     identity=${target#tmux-pane:}
+    identity=${identity%:*}
     if [ "$verb" = send-keys ]; then
       case "${1:-}" in
         -l) shift; set -- -l -- "$@" ;;
         *) set -- -- "$@" ;;
       esac
     fi
+    # tmux can resolve a pane ID independently of the requested window.
+    # Check membership in the window's pane list before targeting that ID.
     fm_tmux_guarded_command "$context" \
-      "#{==:#{pid}:#{start_time}:#{session_id}:#{window_id}:#{pane_id},$identity}" "$verb" -t "$pane" "$@"
+      "#{&&:#{==:#{pid}:#{start_time}:#{session_id}:#{window_id},$identity},#{==:#{P:#{?#{==:#{pane_id},$pane},1,}},1}}" \
+      "$verb" -t "$pane" "$@"
   else
     tmux "$verb" -t "$target" "$@"
   fi
-}
-
-fm_tmux_session_of_pane() {  # <bound-pane>
-  [[ $1 =~ $FM_TMUX_PANE_PATTERN ]] || return 2
-  printf 'tmux-session:%s:%s:%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
-}
-
-fm_tmux_session_command() {  # <bound-session> <command> <target-suffix> [args...]
-  local binding=$1 verb=$2 suffix=$3 session identity
-  shift 3
-  [[ $binding =~ $FM_TMUX_SESSION_PATTERN ]] || return 2
-  session=${BASH_REMATCH[3]}
-  identity="${BASH_REMATCH[1]}:${BASH_REMATCH[2]}:$session"
-  fm_tmux_guarded_command "$session:" \
-    "#{==:#{pid}:#{start_time}:#{session_id},$identity}" "$verb" -t "$session$suffix" "$@"
 }
 
 # --- tmux composer capture and capability primitives ------------------------

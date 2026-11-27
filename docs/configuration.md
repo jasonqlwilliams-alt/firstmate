@@ -246,8 +246,7 @@ Use a task selector for secondmate routing and its message marker.
 These five sentences are the single owner of the task-selector vocabulary; backend guides and other documents point here instead of restating the resolution order.
 `fm-teardown.sh <id>` takes a task id directly and validates the complete metadata-only endpoint identity before any runtime dispatch or cleanup mutation.
 Missing, empty, duplicate, malformed, backend-inconsistent, or task-mismatched endpoint records are preserved and refused.
-Legacy tmux metadata remains cleanup-compatible when its exact window name is `fm-<id>`.
-Opaque endpoints require a matching `endpoint_task_id=`, including the tmux pane binding used in [launch route repair](tmux-backend.md#recorded-pane-targeting).
+Legacy tmux metadata remains cleanup-compatible when its exact window name is `fm-<id>`; opaque non-tmux endpoints require their recorded `endpoint_task_id=` binding.
 `FM_HOME` determines Herdr's home label: the primary home uses `firstmate`, and a secondmate home marked by `.fm-secondmate-home` uses `2ndmate-<secondmate-id>`.
 [`herdr-backend.md`](herdr-backend.md#watching-and-task-containers) owns launcher-bound workspace placement, the label-only fallback, collision handling, and recovery behavior.
 The local `config/herdr-presentation-spaces` file instead opts a home out of, or explicitly in to, Herdr's default-on disposable single-task visual projection; [Presentation spaces](herdr-backend.md#presentation-spaces) owns its accepted values, default, Herdr version floor, migration, behavior, safety limits, recovery contract, and narrow locked session-start cleanup of exact restored idle-shell children.
@@ -449,11 +448,10 @@ On agy either notice must fit on one composer row and stop before the last colum
 An 80-column pane fits the short notice, and widening a pane can resolve a width refusal.
 When the full text cannot be confirmed after typing, an unsubmitted draft may remain in the composer.
 muse is verified for crewmate and scout launches ONLY, and `fm-spawn.sh` refuses it for a secondmate, because muse ships no usable hook surface for a primary session's turn-end supervision; [`docs/verification/muse.md`](verification/muse.md) owns that evidence.
-Muse refuses a fresh spawn before creating a worker endpoint if credential preflight fails.
+Muse requires a worker-reachable credential before launch and refuses a fresh spawn without one before creating a worker endpoint.
 The portable credential is `<config>/muse/auth.json` from `muse login`, which preflight requires on backends other than tmux.
-For a new or recreated tmux window, preflight can use `META_API_KEY` from the session bound for placement.
-For an in-place tmux relaunch, it checks the session bound to the existing worker pane.
-A key set only in the caller's environment does not satisfy preflight.
+For a new or recreated tmux window, preflight accepts `META_API_KEY` from the exact destination session, since a key set only in the caller's environment does not reach the worker.
+For an in-place tmux relaunch, it checks the invoking tmux session or uses tmux's `firstmate` session lookup when invoked outside tmux.
 gemini is likewise refused for secondmates because it has no primary supervision protocol; [its adapter reference](../.agents/skills/harness-adapters/references/harness/gemini.md) owns the credential precondition, canonical-launch wiring, and raw-launch limitations.
 rovo is likewise verified for crewmate and scout launches ONLY, refused for a secondmate for the same reason - no turn-end hook and no primary supervision protocol; [`docs/verification/rovo.md`](verification/rovo.md) owns that evidence, including the OAuth token's silent background refresh from a stored refresh token and both tmux and herdr pane liveness (herdr placement is verified live, with a Herdr-side agent-detection gap left open for recovery classification).
 agy (Antigravity CLI) is likewise verified for crewmate and scout launches ONLY and refused for a secondmate: it has no primary supervision protocol, and the captain's standing rule keeps Antigravity out of owning coding, refs, merges, and deploys.

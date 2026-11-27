@@ -79,10 +79,10 @@ fm_backend_tmux_launch_session() {
 
 # fm_backend_tmux_container_ensure: reuse the current tmux session when
 # firstmate itself runs inside tmux, else ensure a dedicated detached
-# "firstmate" session exists. Return the binding that spawn must use for
-# the duplicate check and placement, including when new-session created it.
-fm_backend_tmux_container_ensure() {  # <session-name> [session-binding]
-  local session=$1 binding=${2:-}
+# "firstmate" session exists. Mirrors fm-spawn.sh's container-ensure block;
+# prints the resolved session name.
+fm_backend_tmux_container_ensure() {  # [session]
+  local session=${1:-}
   fm_backend_required_tool_available tmux tmux || {
     if [ "$?" -eq 2 ]; then
       echo "error: could not verify list-windows -f support on the tmux server. See docs/tmux-backend.md#setup." >&2
@@ -91,42 +91,28 @@ fm_backend_tmux_container_ensure() {  # <session-name> [session-binding]
     fi
     return 1
   }
-  if [ -z "$binding" ]; then
-    if binding=$(fm_tmux_exact_session "$session"); then
-      :
-    elif [ "$?" -eq 1 ] && [ -z "${TMUX:-}" ] && [ "$session" = firstmate ]; then
-      binding=$(tmux new-session -dP -F "$FM_TMUX_SESSION_FORMAT" -s firstmate) || return 1
-    else
-      return 1
-    fi
+  if [ -z "$session" ]; then
+    session=$(fm_backend_tmux_launch_session) || return 1
   fi
-  [[ $binding =~ $FM_TMUX_SESSION_PATTERN ]] || return 1
-  printf '%s\n' "$binding"
+  if [ -z "${TMUX:-}" ]; then
+    tmux has-session -t "=$session" 2>/dev/null || tmux new-session -d -s "$session" || return 1
+  fi
+  printf '%s\n' "$session"
 }
 
-# Refuse a duplicate in the destination session and place the window at the
-# next free index (including with a non-default base-index). Return the pane
-# binding from new-window itself so a restarted server cannot supply a new
-# pane for the spawn commands. Pin the name before the shell changes cwd.
-fm_backend_tmux_create_task() {  # <session-name> <window-name> <proj-abs> <session-binding>
-  local session=$1 name=$2 cwd=$3 binding=${4:-} duplicate created literal
-  literal=$(fm_tmux_format_literal "$name")
-  duplicate=$(fm_tmux_session_command "$binding" list-windows : \
-    -f "#{==:#{window_name},$literal}" -F '#{window_id}') || return 1
-  if [ -n "$duplicate" ]; then
-    echo "error: window $session:$name already exists" >&2
+# Keep spawn's existing placement and return the new pane's binding from the
+# creating command. Later launch input must never resolve a replacement pane.
+fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs>
+  local ses=$1 wname=$2 proj_abs=$3 pane
+  if tmux list-windows -t "=$ses:" -F '#{window_name}' | grep -qx "$wname"; then
+    echo "error: window $ses:$wname already exists" >&2
     return 1
   fi
-  created=$(fm_tmux_session_command "$binding" new-window : -dP -F "$FM_TMUX_PANE_FORMAT" -n "$name" -c "$cwd") || return 1
-  [[ $created =~ $FM_TMUX_PANE_PATTERN ]] || return 1
-  # A shell startup hook can rename the window before allow-rename is pinned.
-  if ! fm_tmux_pane_command "$created" set-window-option automatic-rename off ||
-     ! fm_tmux_pane_command "$created" set-window-option allow-rename off ||
-     ! fm_tmux_pane_command "$created" rename-window -- "$name"; then
-    fm_backend_tmux_kill "$created" || true
-    return 1
-  fi
-  printf '%s\n' "$created"
+  pane=$(tmux new-window -dP -F "$FM_TMUX_PANE_FORMAT" -t "=$ses:" -n "$wname" -c "$proj_abs") || return 1
+  [[ $pane =~ $FM_TMUX_PANE_PATTERN ]] || return 1
+  fm_tmux_pane_command "$pane" set-window-option automatic-rename off 2>/dev/null || true
+  fm_tmux_pane_command "$pane" set-window-option allow-rename off 2>/dev/null || true
+  printf '%s\n' "$pane"
 }
 
 # fm_backend_tmux_current_path: used by spawn to discover the worktree from

@@ -1052,8 +1052,6 @@ do_relaunch() {
   local -a spawn_args
 
   require_state_verified_backend relaunch
-  [ "$CONTROL_LOOKUP_STATE" != unreadable ] \
-    || die "task $ID's recorded tmux endpoint could not be resolved"
   resolve_relaunch_profile
 
   case "$KIND" in
@@ -1098,7 +1096,6 @@ do_relaunch() {
   journal_write preparing "${CHECKPOINT_LINES[@]}" "$note_line" "relaunch_tx=$RELAUNCH_TX"
   FM_CONTROL_RELAUNCH_TX="$RELAUNCH_TX" \
     FM_CONTROL_RELAUNCH_PREPARE="$RELAUNCH_PREPARE_DIR" \
-    FM_CONTROL_RELAUNCH_TMUX_PANE="${CONTROL_TARGET:-}" \
     "$SCRIPT_DIR/fm-spawn.sh" "${spawn_args[@]}" >/dev/null &
   RELAUNCH_SPAWN_PID=$!
   local prepare_deadline=$((SECONDS + ${FM_CONTROL_PREPARE_WAIT:-90}))
@@ -1134,15 +1131,7 @@ do_relaunch() {
     || die "the replacement for $ID published an endpoint this home cannot validate"
   T=$FM_BACKEND_VALIDATED_TARGET
   BACKEND=$FM_BACKEND_VALIDATED_BACKEND
-  if [ "$BACKEND" = tmux ]; then
-    if ! IFS= read -r CONTROL_TARGET < "$RELAUNCH_PREPARE_DIR/tmux-pane" ||
-       [[ ! $CONTROL_TARGET =~ $FM_TMUX_PANE_PATTERN ]]; then
-      die "the replacement for $ID did not report its launched tmux pane"
-    fi
-    CONTROL_LOOKUP_STATE=
-  else
-    bind_control_target
-  fi
+  bind_control_target
 
   state=$(wait_agent_state "$LAUNCH_WAIT" alive) || {
     die "the replacement agent for $ID did not come up within ${LAUNCH_WAIT}s (endpoint reads '$state')"

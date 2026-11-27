@@ -241,7 +241,7 @@ run_spawn_record() {
 
 test_spawn_tmux_window_construction() (
   local home proj fakebin rec wt out status client server diagnostic
-  local real_tmux socket launcher pane launch_env session_id decoy_id late_id late_meta repaired attempt
+  local real_tmux socket launcher pane launch_env session_id
   home="$TMP_ROOT/spawn-rec-home"
   mkdir -p "$home/data"
   proj=$(make_repo "$TMP_ROOT/spawn-rec-proj")
@@ -279,8 +279,8 @@ ROWS
     || fail "could not set the fixture shell command"
   "$real_tmux" -S "$socket" set-window-option -g automatic-rename on || fail "could not enable automatic-rename"
   "$real_tmux" -S "$socket" set-window-option -g allow-rename on || fail "could not enable allow-rename"
-  launcher=$("$real_tmux" -S "$socket" new-session -dP -F '#{pane_id}' -s '$0' -n initial -c "$proj") \
-    || fail "could not create the literal ID-shaped destination"
+  launcher=$("$real_tmux" -S "$socket" new-session -dP -F '#{pane_id}' -s workers -n initial -c "$proj") \
+    || fail "could not create the worker session"
   session_id=$("$real_tmux" -S "$socket" display-message -p -t "$launcher" '#{session_id}')
   launch_env=$("$real_tmux" -S "$socket" display-message -p -t "$launcher" '#{socket_path},#{pid}')
   "$real_tmux" -S "$socket" set-environment -t "$session_id" PATH "$fakebin:$PATH" || fail "could not set the worker PATH"
@@ -293,10 +293,6 @@ SH
   cat > "$fakebin/treehouse" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$TMUX_PANE" "$*" > "$FM_TREEHOUSE_TEST_RECEIPT"
-if [ -n "${FM_TREEHOUSE_TEST_RENAME_SESSION:-}" ]; then
-  tmux rename-session -t "$FM_TREEHOUSE_TEST_RENAME_SESSION" renamed || exit 1
-  tmux new-session -d -s '$0' -n "fm-$4" sleep 300 || exit 1
-fi
 printf '%s\n' "$FM_TREEHOUSE_TEST_SLOT"
 SH
   fm_fake_exit0 "$fakebin" codex
@@ -309,90 +305,19 @@ SH
   grep -Fxq "worktree=$wt" "$home/state/rec-win-gg7.meta" \
     || fail "spawn must record the worktree the worker entered"
   [ "$("$real_tmux" -S "$socket" list-windows -t "$session_id:" -F '#{window_index} #{window_name}')" = \
-    $'1 initial\n2 fm-rec-win-gg7' ] || fail "spawn must append its pinned window to the literal session"
-  [ "$("$real_tmux" -S "$socket" list-windows -t '$0:' -F '#{window_name}')" = initial ] \
-    || fail "spawn changed the ID-shaped session's decoy"
+    $'1 initial\n2 fm-rec-win-gg7' ] || fail "spawn must append its pinned window to the worker session"
+  [ "$("$real_tmux" -S "$socket" list-windows -t decoy: -F '#{window_name}')" = initial ] \
+    || fail "spawn changed the other session"
   pane=$("$real_tmux" -S "$socket" display-message -p -t "$session_id:2" '#{pane_id}')
-  [ "$("$real_tmux" -S "$socket" show-window-options -v -t "$pane" automatic-rename)" = off ] &&
-    [ "$("$real_tmux" -S "$socket" show-window-options -v -t "$pane" allow-rename)" = off ] \
-    || fail "spawn did not pin both rename options on the worker"
+  if [ "$("$real_tmux" -S "$socket" show-window-options -v -t "$pane" automatic-rename)" != off ] ||
+     [ "$("$real_tmux" -S "$socket" show-window-options -v -t "$pane" allow-rename)" != off ]; then
+    fail "spawn did not pin both rename options on the worker"
+  fi
   [ "$(cat "$rec")" = "$pane"$'\n''get --lease --lease-holder rec-win-gg7' ] \
     || fail "the new worker pane did not run the durable Treehouse lease command"
   pass "fm-spawn: appends a pinned window and acquires its lease in the worker pane"
 
-  fm_fake_exit0 "$fakebin" pi
-  "$real_tmux" -S "$socket" set-environment -t "$session_id" FM_TREEHOUSE_TEST_RENAME_SESSION "$session_id" \
-    || fail "could not arrange the session rename during spawn"
-  out=$(TMUX="$launch_env,${session_id#\$}" TMUX_PANE="$launcher" \
-    run_spawn "$home" rec-moved-gg8 "$proj" "$wt" "$fakebin" pi); status=$?
-  expect_code 1 "$status" "spawn should refuse to publish a stale recorded selector: $out"
-  assert_contains "$out" "no longer identifies the bound endpoint" "the refusal did not identify the stale selector"
-  assert_absent "$home/state/rec-moved-gg8.meta" "spawn published a record after its session name was reused"
-  assert_absent "$home/state/rec-moved-gg8.busy-gen" "refused spawn left a busy generation"
-  assert_absent "$home/state/rec-moved-gg8.busy-state" "refused spawn left a busy record"
-  [ "$("$real_tmux" -S "$socket" list-windows -a -F '#{session_name}:#{window_name}' |
-    awk -F: '$2 == "fm-rec-moved-gg8"')" = '$0:fm-rec-moved-gg8' ] \
-    || fail "spawn cleanup must close its own window and leave the replacement untouched"
-  pass "fm-spawn: refuses a stale selector when the session name is reused"
 
-  decoy_id=$("$real_tmux" -S "$socket" list-sessions -f '#{==:#{session_name},$0}' -F '#{session_id}')
-  [ -n "$decoy_id" ] || fail "could not identify the early rename decoy"
-  "$real_tmux" -S "$socket" kill-session -t "$decoy_id" || fail "could not clear the early rename decoy"
-  "$real_tmux" -S "$socket" rename-session -t "$session_id" '$0' || fail "could not restore the destination name"
-  "$real_tmux" -S "$socket" set-environment -u -t "$session_id" FM_TREEHOUSE_TEST_RENAME_SESSION \
-    || fail "could not disarm the early rename"
-
-  late_id=rec-late-gg9
-  late_meta="$home/state/$late_id.meta"
-  cat > "$fakebin/codex" <<SH
-#!/usr/bin/env bash
-stty -echo || exit 1
-printf '%s\n' "\$TMUX_PANE" > "$home/late-worker"
-while IFS= read -r line; do printf '%s\n' "\$line" >> "$home/late-input"; done
-SH
-  cat > "$fakebin/tmux" <<SH
-#!/usr/bin/env bash
-if [ "\${1:-}" = list-windows ] && [ -f "$late_meta" ] && [ ! -f "$home/before-rename.meta" ]; then
-  for (( attempt=0; attempt<100; attempt++ )); do
-    [ ! -s "$home/late-worker" ] || break
-    sleep 0.05
-  done
-  [ -s "$home/late-worker" ] || exit 1
-  cp "$late_meta" "$home/before-rename.meta" || exit 1
-  pane=\$(cat "$home/late-worker")
-  "$real_tmux" -S "$socket" rename-window -t "\$pane" operator-title || exit 1
-  "$real_tmux" -S "$socket" rename-session -t '$session_id' 'late destination' || exit 1
-  "$real_tmux" -S "$socket" new-window -d -t '$session_id:' -n 'fm-$late_id' sleep 120 || exit 1
-  "$real_tmux" -S "$socket" new-session -d -s '\$0' -n 'fm-$late_id' sleep 120 || exit 1
-fi
-exec "$real_tmux" -S "$socket" "\$@"
-SH
-
-  out=$(TMUX="$launch_env,${session_id#\$}" TMUX_PANE="$launcher" \
-    run_spawn "$home" "$late_id" "$proj" "$wt" "$fakebin"); status=$?
-  expect_code 0 "$status" "spawn should repair a selector changed after the worker started: $out"
-  assert_contains "$out" "warning: repaired tmux target for task $late_id" "spawn did not report its repair"
-  cmp -s <(sed '/^window=/d' "$home/before-rename.meta") <(sed '/^window=/d' "$late_meta") \
-    || fail "the repair changed launch metadata other than the window"
-  pane=$(cat "$home/late-worker")
-  [ "$("$real_tmux" -S "$socket" display-message -p -t "$pane" '#{session_name}:#{window_name}:#{pane_dead}')" = \
-    'late destination:operator-title:0' ] || fail "repair changed the operator's title or closed the worker"
-  repaired=$(sed -n 's/^window=//p' "$late_meta")
-  assert_contains "$out" "window=$repaired" "spawn did not report the repaired selector"
-  PATH="$fakebin:$PATH" bash -c '
-    . "$1/bin/fm-backend.sh"
-    fm_backend_validate_task_endpoint "$2" "$3" &&
-      fm_backend_target_exists tmux "$FM_BACKEND_VALIDATED_TARGET"
-  ' _ "$ROOT" "$late_meta" "$late_id" || fail "endpoint validation could not use the repaired record"
-  "$real_tmux" -S "$socket" send-keys -t "$pane" -l repaired-route-probe || fail "could not prime the worker input"
-  FM_HOME="$home" PATH="$fakebin:$PATH" "$ROOT/bin/fm-send.sh" "$late_id" --key Enter \
-    || fail "could not submit input through the repaired task record"
-  for (( attempt=0; attempt<100; attempt++ )); do
-    [ ! -s "$home/late-input" ] || break
-    sleep 0.05
-  done
-  [ "$(cat "$home/late-input")" = repaired-route-probe ] || fail "the repaired task route did not reach the original worker"
-  pass "fm-spawn: repairs metadata for the same live worker after a late rename"
 )
 
 test_lib_classification
