@@ -3934,9 +3934,12 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   if [ -n "${FM_TREEHOUSE_SCRATCH_ROOT:-}" ] &&
     [ "${TREEHOUSE_ROOT:-}" = "$FM_TREEHOUSE_SCRATCH_ROOT" ] &&
     [ -x "$TREEHOUSE_ROOT/bin/treehouse" ]; then
+    # shellcheck source=bin/fm-treehouse-scratch.sh
+    . "$SCRIPT_DIR/fm-treehouse-scratch.sh" || exit 1
+    scratch_root=$(fm_treehouse_scratch_resolve_root "$TREEHOUSE_ROOT") || exit 1
     treehouse_bin=$(type -P treehouse) || exit 1
     printf -v treehouse_command 'TREEHOUSE_ROOT=%q TREEHOUSE_WORKTREE_PATH=%q TREEHOUSE_NO_UPDATE_CHECK=1 %q' \
-      "$TREEHOUSE_ROOT" "${TREEHOUSE_WORKTREE_PATH:-}" "$treehouse_bin"
+      "$scratch_root" "${TREEHOUSE_WORKTREE_PATH:-}" "$treehouse_bin"
   fi
   # shellcheck disable=SC2016 # Expansion belongs to the destination pane shell.
   spawn_send_text_line "$WT_TARGET" "fm_acquired_slot=\$($treehouse_command get --lease --lease-holder $(printf '%q' "$ID")) && fm_acquired_base=\$(git -C \"\$fm_acquired_slot\" rev-parse --verify HEAD) && printf '%s\n%s\n' \"\$fm_acquired_slot\" \"\$fm_acquired_base\" > $(printf '%q' "$SPAWN_SLOT_ACQUIRE_FILE") && cd -- \"\$fm_acquired_slot\""

@@ -129,6 +129,7 @@ Shared test helpers live in `tests/lib.sh` (reporters, temp roots, git fixtures)
 Source those instead of copying a fake toolchain into a new suite.
 Test runs use a disposable `TREEHOUSE_ROOT` for both Treehouse pool state and checkouts, and the scratch wrapper checks for Treehouse 3.1.8 or newer when invoked.
 Use `bin/fm-treehouse-scratch.sh run <command>` to give a reproduction the same isolation.
+Preserve the inherited PATH in reproduction commands and avoid login shells that rebuild it.
 The required Herdr CI lane supplies the pinned binary for the scratch allocation and detached-pane lease regressions.
 A fixture may shorten a production timeout to keep a failure path prompt, but never below what the real work inside that window costs on a loaded machine: a fork, an exec, a lock acquisition, a beacon publication, or a first-poll check.
 Where a case's assertion is not about the timeout itself, give that window headroom over the measured loaded cost, and bound the test's own waiting with iteration-counted poll loops, which stretch under load where a wall-clock budget does not.

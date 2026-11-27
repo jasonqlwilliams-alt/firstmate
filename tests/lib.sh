@@ -216,15 +216,29 @@ export FM_TEST_STUB_MAX_BLOCK_SECONDS
 fm_test_cleanup() {
   local d
   fm_test_reap_procevent_homes
+  if [ -f "$FM_TEST_CLEANUP_REGISTRY" ]; then
+    while IFS= read -r d; do
+      case "$d" in
+        treehouse-scratch$'\t'*) fm_treehouse_scratch_remove "${d#*$'\t'}" || return 1 ;;
+      esac
+    done < "$FM_TEST_CLEANUP_REGISTRY"
+  fi
   for d in "${FM_TEST_CLEANUP_DIRS[@]:-}"; do
     [ -n "$d" ] && rm -rf "$d"
   done
   if [ -f "$FM_TEST_CLEANUP_REGISTRY" ]; then
     while IFS= read -r d; do
-      [ -n "$d" ] && rm -rf "$d"
+      case "$d" in
+        ''|treehouse-scratch$'\t'*) ;;
+        *) rm -rf "$d" ;;
+      esac
     done < "$FM_TEST_CLEANUP_REGISTRY"
     rm -f "$FM_TEST_CLEANUP_REGISTRY"
   fi
+}
+
+fm_test_track_treehouse_scratch() {
+  printf 'treehouse-scratch\t%s\n' "$1" >> "$FM_TEST_CLEANUP_REGISTRY"
 }
 
 fm_test_track_task_tmps() {
@@ -258,6 +272,9 @@ fm_test_tmproot() {
   printf '%s\n' "$root"
 }
 
+# shellcheck source=bin/fm-treehouse-scratch.sh
+. "$ROOT/bin/fm-treehouse-scratch.sh" || fail "cannot load Treehouse scratch setup"
+
 if [ "${FM_TEST_FIXTURE_REAPER_CHILD:-0}" != 1 ]; then
   FM_TEST_CLEANUP_REGISTRY=$(mktemp "${FM_TEST_REGISTRY_DIR:-${TMPDIR:-/tmp}}/.fm-test-cleanup.$$.XXXXXX") || return 1
   FM_TEST_OWNER_IDENTITY=$(fm_test_pid_identity "$$") || {
@@ -277,11 +294,9 @@ if [ "${FM_TEST_FIXTURE_REAPER_CHILD:-0}" != 1 ]; then
   # bin/fm-test-run.sh the runner's per-suite root is kept. A root created here
   # is removed with the rest of this suite's temp roots.
   # bin/fm-treehouse-scratch.sh owns the contract.
-  # shellcheck source=bin/fm-treehouse-scratch.sh
-  . "$ROOT/bin/fm-treehouse-scratch.sh" || fail "cannot load Treehouse scratch setup"
   fm_treehouse_scratch_enter "${TMPDIR:-/tmp}" || fail "cannot isolate the test's Treehouse root"
   if [ -n "$FM_TREEHOUSE_SCRATCH_CREATED" ]; then
-    if ! printf '%s\n' "$FM_TREEHOUSE_SCRATCH_CREATED" >> "$FM_TEST_CLEANUP_REGISTRY"; then
+    if ! fm_test_track_treehouse_scratch "$FM_TREEHOUSE_SCRATCH_CREATED"; then
       fm_treehouse_scratch_remove "$FM_TREEHOUSE_SCRATCH_CREATED"
       fail "cannot register the test's Treehouse root for cleanup"
     fi
@@ -482,7 +497,7 @@ fm_test_arm_fixture_reaper() {
       sleep 0.2
     done
     fm_test_reap_fixture_processes || exit 1
-    fm_test_cleanup
+    fm_test_cleanup || exit 1
     rm -rf -- "$TMPDIR"
   ' _ "$ROOT/tests/lib.sh" "$$" "$owner_identity" "$FM_TEST_CLEANUP_REGISTRY" \
     "$FM_TEST_PROCEVENT_REGISTRY" >/dev/null 2>&1 </dev/null &

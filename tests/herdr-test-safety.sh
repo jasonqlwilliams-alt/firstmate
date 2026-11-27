@@ -23,6 +23,11 @@ herdr_treehouse_scratch() {
   fm_treehouse_scratch_enter "$1"
 }
 
+herdr_treehouse_scratch_cleanup() {
+  [ -z "${FM_TREEHOUSE_SCRATCH_CREATED:-}" ] ||
+    fm_treehouse_scratch_remove "$FM_TREEHOUSE_SCRATCH_CREATED"
+}
+
 # herdr_forget_inherited_pane: drop the Herdr PANE identity this test process
 # inherited from whatever terminal it was started in.
 #

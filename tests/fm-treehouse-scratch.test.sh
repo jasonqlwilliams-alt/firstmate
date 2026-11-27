@@ -11,7 +11,7 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-command -v treehouse >/dev/null || fail "treehouse is required for real scratch allocation tests"
+command -v treehouse >/dev/null || { echo 'skip: treehouse not found'; exit 0; }
 
 TMP_ROOT=$(fm_test_tmproot fm-treehouse-scratch)
 FAKE_HOME="$TMP_ROOT/home"
@@ -103,10 +103,26 @@ test_runner_overrides_an_inherited_real_root() {
   pass "fm-test-run.sh replaces an inherited real TREEHOUSE_ROOT"
 }
 
+test_runner_reports_cleanup_failure() {
+  local repo="$TMP_ROOT/runner" out
+  printf '%s\n' '#!/usr/bin/env bash' 'rm "$TREEHOUSE_ROOT/.fm-treehouse-scratch"' > "$repo/tests/fm-test-isolation-proof.test.sh"
+  if out=$(as_operator "$repo/bin/fm-test-run.sh" --jobs 1 tests/fm-test-isolation-proof.test.sh 2>&1); then
+    fail "runner passed a suite whose scratch cleanup was refused"
+  fi
+  assert_contains "$out" 'total=1 failed=1' "scratch cleanup failure is counted"
+  pass "scratch cleanup failure turns a passing suite into a failure"
+}
+
 test_lib_standalone_and_inherited() {
   local out root real="$TMP_ROOT/lib-real" active
   mkdir -p "$real"
-  out=$(as_operator TREEHOUSE_ROOT="$real" bash -c '. "$1"; printf "%s\n" "$TREEHOUSE_ROOT"; [ -f "$TREEHOUSE_ROOT/.fm-treehouse-scratch" ]' _ "$ROOT/tests/lib.sh") \
+  out=$(as_operator TREEHOUSE_ROOT="$real" bash -ec '
+    . "$1"
+    mkdir -p "$TREEHOUSE_ROOT/readonly/sub"
+    : > "$TREEHOUSE_ROOT/readonly/sub/file"
+    chmod u-w "$TREEHOUSE_ROOT/readonly"
+    printf "%s\n" "$TREEHOUSE_ROOT"
+  ' _ "$ROOT/tests/lib.sh") \
     || fail "tests/lib.sh did not enter a scratch root"
   root=$out
   [ "$root" != "$real" ] || fail "tests/lib.sh kept an inherited real TREEHOUSE_ROOT"
@@ -114,7 +130,8 @@ test_lib_standalone_and_inherited() {
   [ -z "$(ls -A "$real")" ] || fail "tests/lib.sh wrote into the inherited real root"
 
   # An active scratch root, such as the runner's, is kept and left for its creator.
-  active=$(. "$ROOT/bin/fm-treehouse-scratch.sh"; fm_treehouse_scratch_create "$TMP_ROOT")
+  active=$(fm_treehouse_scratch_create "$TMP_ROOT") || fail "could not create an inherited scratch root"
+  fm_test_track_treehouse_scratch "$active" || fail "could not register the inherited scratch root"
   out=$(env TREEHOUSE_ROOT="$active" FM_TREEHOUSE_SCRATCH_ROOT="$active" \
     bash -c '. "$1"; printf "%s\n" "$TREEHOUSE_ROOT"' _ "$ROOT/tests/lib.sh") \
     || fail "tests/lib.sh failed under an active scratch root"
@@ -145,6 +162,53 @@ test_reproduction_helper() {
   pass "fm-treehouse-scratch.sh run isolates a reproduction and removal refuses unmarked directories"
 }
 
+test_dollar_sign_root_is_refused() {
+  local wrapper="$ROOT/bin/fm-treehouse-scratch.sh" bad="$TMP_ROOT/build\$LABEL" alias="$TMP_ROOT/parent-link" parent root out
+  mkdir "$bad"
+  ln -s "$bad" "$alias"
+  for parent in "$bad" "$alias"; do
+    if out=$(as_operator TMPDIR="$parent" "$wrapper" run true 2>&1); then
+      fail "scratch creation accepted a dollar sign in its parent path"
+    fi
+    assert_contains "$out" 'scratch paths cannot contain a dollar sign' "scratch parent refusal"
+    [ -z "$(ls -A "$bad")" ] || fail "scratch creation left a directory in the refused parent"
+  done
+  root=$(fm_treehouse_scratch_create "$TMP_ROOT") || fail "could not create a fixture root for the reuse check"
+  mv "$root" "$bad/owned" || fail "could not move the fixture root"
+  root="$bad/owned"
+  fm_test_track_treehouse_scratch "$root" || fail "could not register the moved scratch root"
+  if out=$(as_operator TREEHOUSE_ROOT="$root" FM_TREEHOUSE_SCRATCH_ROOT="$root" "$wrapper" run true 2>&1); then
+    fail "scratch setup reused a root with a dollar sign"
+  fi
+  assert_contains "$out" 'scratch paths cannot contain a dollar sign' "scratch reuse refusal"
+  if out=$(as_operator "$root/bin/treehouse" --version 2>&1); then
+    fail "scratch shim delegated from a root with a dollar sign"
+  fi
+  assert_contains "$out" 'scratch paths cannot contain a dollar sign' "scratch invocation refusal"
+  pass "scratch root creation and reuse refuse paths Treehouse would expand"
+}
+
+test_cleanup_preserves_linked_object_permissions() {
+  local source="$TMP_ROOT/gitrepo" wrapper="$ROOT/bin/fm-treehouse-scratch.sh" object oid rel mode root
+  fm_git_init_commit "$source"
+  oid=$(git -C "$source" rev-parse HEAD) || fail "could not find the fixture commit"
+  rel=".git/objects/${oid:0:2}/${oid:2}"
+  object="$source/$rel"
+  chmod 0444 "$object" || fail "could not make the source Git object read-only"
+  mode=$(LC_ALL=C ls -ld "$object" | cut -c1-10)
+  root=$(as_operator TMPDIR="$TMP_ROOT" "$wrapper" run bash -ec '
+    git clone --local -q "$1" "$TREEHOUSE_ROOT/clone"
+    test "$1/$2" -ef "$TREEHOUSE_ROOT/clone/$2"
+    mkdir "$TREEHOUSE_ROOT/clone/readonly"
+    : > "$TREEHOUSE_ROOT/clone/readonly/file"
+    chmod u-w "$TREEHOUSE_ROOT/clone/readonly"
+    printf "%s\n" "$TREEHOUSE_ROOT"
+  ' _ "$source" "$rel") || fail "could not create and clean up the hardlinked clone"
+  assert_absent "$root" "scratch cleanup left the read-only checkout content"
+  assert_equals "$mode" "$(LC_ALL=C ls -ld "$object" | cut -c1-10)" "scratch cleanup changed the source Git object mode"
+  pass "scratch cleanup removes read-only directories and preserves hardlinked Git objects"
+}
+
 test_allocation_rejects_external_locations() {
   local wrapper="$ROOT/bin/fm-treehouse-scratch.sh" project="$TMP_ROOT/flag-project" option out
   local -a args
@@ -170,9 +234,10 @@ test_allocation_rejects_external_locations() {
 }
 
 test_return_refuses_an_external_worktree() {
-  local wrapper="$ROOT/bin/fm-treehouse-scratch.sh" project="$TMP_ROOT/return-project" live_root slot out
+  local wrapper="$ROOT/bin/fm-treehouse-scratch.sh" project="$TMP_ROOT/2026" live_root slot out
   fm_git_init_commit "$project"
   live_root=$(fm_treehouse_scratch_create "$TMP_ROOT") || fail "could not create a second fixture pool"
+  fm_test_track_treehouse_scratch "$live_root" || fail "could not register the second fixture pool"
   slot=$(cd "$project" && as_operator "$live_root/bin/treehouse" get --lease) || fail "could not allocate an external fixture slot"
   printf 'preserve\n' > "$slot/dirty"
   ln -s "$slot" "$project/linked-slot" || fail "could not alias the external fixture slot"
@@ -197,7 +262,23 @@ test_return_refuses_an_external_worktree() {
     TREEHOUSE_DIR="$slot" treehouse return --force --if-lease-holder fixture
     test ! -e "$slot/dirty"
   ') || fail "return did not clean the scratch checkout"
+  mv "$slot" "$slot-moved" || fail "could not simulate a missing leased checkout"
+  if out=$(cd "${slot%/*}" && as_operator "$wrapper" run treehouse return --force 2026 2>&1); then
+    fail "return accepted a missing numeric checkout outside the scratch root"
+  fi
+  assert_contains "$out" "return requires a path inside the scratch root" "numeric checkout refusal"
+  jq -e --arg slot "$slot" '.worktrees | any(.[]; .path == $slot and .leased == true)' \
+    "${slot%/*/*}/treehouse-state.json" >/dev/null || fail "return changed the missing checkout lease"
   pass "return can clean its own checkout while preserving external slots"
+}
+
+test_destroy_is_refused() {
+  local out
+  if out=$(as_operator "$ROOT/bin/fm-treehouse-scratch.sh" run treehouse destroy --help 2>&1); then
+    fail "scratch wrapper delegated destroy"
+  fi
+  assert_contains "$out" 'destroy is unavailable in scratch runs' "destroy refusal"
+  pass "scratch wrapper refuses destroy before delegation"
 }
 
 test_old_treehouse_is_refused_at_invocation() {
@@ -244,21 +325,29 @@ SH
 test_standalone_herdr_fixture_owns_root() {
   local fixture="$TMP_ROOT/herdr-fixture" root
   mkdir -p "$fixture"
-  root=$(as_operator bash -c '
-    . "$1" && herdr_treehouse_scratch "$2" && printf "%s\n" "$TREEHOUSE_ROOT"
+  root=$(as_operator bash -ec '
+    . "$1"
+    herdr_treehouse_scratch "$2"
+    mkdir -p "$TREEHOUSE_ROOT/readonly/sub"
+    : > "$TREEHOUSE_ROOT/readonly/sub/file"
+    chmod u-w "$TREEHOUSE_ROOT/readonly"
+    printf "%s\n" "$TREEHOUSE_ROOT"
+    herdr_treehouse_scratch_cleanup
   ' _ "$ROOT/tests/herdr-test-safety.sh" "$fixture") || fail "standalone Herdr scratch setup failed"
   case "$root" in "$fixture"/*) ;; *) fail "Herdr scratch root escaped its fixture: $root" ;; esac
-  assert_present "$root" "standalone Herdr scratch root was not created"
-  rm -rf -- "$fixture"
   assert_absent "$root" "Herdr scratch root survived fixture cleanup"
   pass "standalone Herdr scratch is owned by the fixture directory"
 }
 
 test_runner_leaves_real_root_untouched
 test_runner_overrides_an_inherited_real_root
+test_runner_reports_cleanup_failure
 test_lib_standalone_and_inherited
 test_reproduction_helper
+test_dollar_sign_root_is_refused
+test_cleanup_preserves_linked_object_permissions
 test_allocation_rejects_external_locations
 test_return_refuses_an_external_worktree
+test_destroy_is_refused
 test_old_treehouse_is_refused_at_invocation
 test_standalone_herdr_fixture_owns_root

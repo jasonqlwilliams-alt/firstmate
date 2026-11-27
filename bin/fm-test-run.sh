@@ -2387,7 +2387,7 @@ run_script_bounded() {  # <script> <out> <stream> <id>
       "$script" "$PER_SCRIPT_TIMEOUT_SECS" >>"$out"
     [ "$stream" -eq 1 ] && tail -1 "$out"
   fi
-  fm_treehouse_scratch_remove "$FM_TREEHOUSE_SCRATCH_CREATED" >>"$out" 2>&1 || true
+  fm_treehouse_scratch_remove "$FM_TREEHOUSE_SCRATCH_CREATED" >>"$out" 2>&1 || [ "$rc" -ne 0 ] || rc=1
   return "$rc"
 }
 

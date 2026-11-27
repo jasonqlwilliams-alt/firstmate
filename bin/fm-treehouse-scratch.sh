@@ -10,6 +10,7 @@
 # The wrapper fixes the pool root and checkout layout, rejects conflicting
 # location flags, and refuses worktree targets outside the scratch root.
 # Pass treehouse by name to `run`; direct binary paths are refused.
+# Commands must preserve the inherited PATH. Avoid login shells that rebuild it.
 # The run command executes <command> with TREEHOUSE_ROOT pointed at a fresh
 # private directory under ${TMPDIR:-/tmp}, then removes that directory and
 # exits with the command's status. A caller already running under a scratch
@@ -51,6 +52,14 @@ fm_treehouse_scratch_refuse() {
   return 1
 }
 
+fm_treehouse_scratch_resolve_root() {
+  local path=$1 resolved
+  case "$path" in *'$'*) fm_treehouse_scratch_refuse "scratch paths cannot contain a dollar sign: $path"; return 1 ;; esac
+  resolved=$(CDPATH='' cd -P -- "$path" && pwd -P) || return 1
+  case "$resolved" in *'$'*) fm_treehouse_scratch_refuse "scratch paths cannot contain a dollar sign: $resolved"; return 1 ;; esac
+  printf '%s\n' "$resolved"
+}
+
 fm_treehouse_scratch_check_args() {
   local root=$1 command= target= physical options=1 target_set=0 all=0 help=0
   shift
@@ -87,17 +96,15 @@ fm_treehouse_scratch_check_args() {
     fi
     shift
   done
-  [ "$help" = 0 ] || return 0
   case "$command" in
+    destroy) fm_treehouse_scratch_refuse 'destroy is unavailable in scratch runs'; return 1 ;;
     return)
+      [ "$help" = 0 ] || return 0
+      [ "$all" = 0 ] || { fm_treehouse_scratch_refuse 'return requires a path inside the scratch root'; return 1; }
       if [ "$target_set" = 0 ]; then
-        [ "$all" = 0 ] || return 0
         target=${TREEHOUSE_DIR:-.}
-      elif [ ! -d "$target" ]; then
-        case "$target" in ''|*[!0-9]*) ;; *) return 0 ;; esac
       fi
       ;;
-    destroy) [ "$target_set" = 1 ] || return 0 ;;
     *) return 0 ;;
   esac
   case "/$target/" in
@@ -116,8 +123,9 @@ fm_treehouse_scratch_create() {  # [<parent>]
   local parent=${1:-${TMPDIR:-/tmp}} root tool wrapper
   parent=${parent%/}
   [ -n "$parent" ] || parent=/
+  parent=$(fm_treehouse_scratch_resolve_root "$parent") || return 1
+  parent=${parent%/}
   root=$(umask 077; mktemp -d "$parent/fm-treehouse-root.XXXXXX") || return 1
-  root=$(CDPATH='' cd -P -- "$root" && pwd -P) || return 1
   printf 'fm-treehouse-scratch-v1\n' > "$root/$FM_TREEHOUSE_SCRATCH_MARKER" || {
     rm -rf -- "$root"
     return 1
@@ -160,11 +168,13 @@ fm_treehouse_scratch_enter() {  # [<parent>]
   FM_TREEHOUSE_SCRATCH_CREATED=
   TREEHOUSE_NO_UPDATE_CHECK=1
   TREEHOUSE_WORKTREE_PATH=$FM_TREEHOUSE_SCRATCH_TEMPLATE
-  if ! fm_treehouse_scratch_active; then
+  if fm_treehouse_scratch_active; then
+    TREEHOUSE_ROOT=$(fm_treehouse_scratch_resolve_root "$TREEHOUSE_ROOT") || return 1
+  else
     FM_TREEHOUSE_SCRATCH_CREATED=$(fm_treehouse_scratch_create "$@") || return 1
     TREEHOUSE_ROOT=$FM_TREEHOUSE_SCRATCH_CREATED
-    FM_TREEHOUSE_SCRATCH_ROOT=$TREEHOUSE_ROOT
   fi
+  FM_TREEHOUSE_SCRATCH_ROOT=$TREEHOUSE_ROOT
   if [ -x "$TREEHOUSE_ROOT/bin/treehouse" ]; then
     case ":$PATH:" in
       *":$TREEHOUSE_ROOT/bin:"*) ;;
@@ -183,8 +193,7 @@ fm_treehouse_scratch_remove() {  # <path>
     printf 'fm-treehouse-scratch: refusing to remove %s: not a scratch root\n' "$root" >&2
     return 1
   }
-  # Worktree checkouts can carry read-only files; make them removable first.
-  chmod -R u+w -- "$root" 2>/dev/null || true
+  find "$root" -type d ! -perm -0700 -exec chmod u+rwx {} \; 2>/dev/null || true
   rm -rf -- "$root"
 }
 
@@ -247,7 +256,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   set -u
   if [ "${0##*/}" = treehouse ]; then
     tool=$(readlink "$0-real") || exit 1
-    root=${0%/bin/treehouse}
+    root=$(fm_treehouse_scratch_resolve_root "${0%/bin/treehouse}") || exit 1
     fm_treehouse_scratch_owned "$root" || exit 1
     fm_treehouse_scratch_check_args "$root" "$@" || exit 1
     export TREEHOUSE_ROOT="$root"
