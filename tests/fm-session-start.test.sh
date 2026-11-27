@@ -1404,6 +1404,38 @@ SH
 
   pass "a parked tmux endpoint takes precedence over its neighbor; stale and unmarked gone endpoints stay dead"
 
+  # Another home's worker can reuse the exact window name in a shared session.
+  # The current mark stays authoritative and the digest never reads that
+  # worker's process details.
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'list-windows -t =fm-sess -F #{window_name}') printf 'fm-mate\nfm-mate2\n' ;;
+  'display-message -p -t fm-sess:fm-mate #{pane_id}'|'display-message -p -t fm-sess:fm-mate2 #{pane_id}')
+    printf '%%1\n'
+    ;;
+  *' -t fm-sess:fm-mate '*)
+    printf '%s\n' "$*" >> "$FM_TEST_TMUX_PROBE_LOG"
+    case "$*" in
+      *'#{pane_current_command}'*) printf 'claude\n' ;;
+      *'#{pane_tty}'*) printf '/dev/pts/9\n' ;;
+      *'#{pane_pid}'*) printf '4242\n' ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$fakebin/tmux"
+  : > "$home/tmux-probe.log"
+  out=$(FM_TEST_TMUX_PROBE_LOG="$home/tmux-probe.log" run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+  assert_contains "$out" "endpoint: parked, copy retained (backend=tmux window=fm-sess:fm-mate)" \
+    "a live window reusing the exact parked name hid the current park mark"
+  [ ! -s "$home/tmux-probe.log" ] \
+    || fail "the digest probed the reused window's process details: $(cat "$home/tmux-probe.log")"
+
+  pass "a current park mark stays authoritative when a live window reuses its exact name"
+
   rm -f "$fakebin/tmux"
   base_without_tmux=$(fm_test_base_path_sans "$BASE_PATH" tmux) || fail "could not build a PATH without tmux"
   out=$(run_session_start "$home" "$root" "$fakebin:$base_without_tmux")

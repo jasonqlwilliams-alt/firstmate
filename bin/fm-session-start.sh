@@ -847,9 +847,9 @@ for meta in "$STATE"/*.meta; do
   target=$(fm_backend_target_of_meta "$meta")
   if [ -n "$window" ]; then
     backend=$(fm_backend_of_meta "$meta")
-    if fm_backend_endpoint_parked_retained "$meta" &&
-        endpoint_state=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_agent_state "$backend" "$target" 2>/dev/null) &&
-        [[ "$endpoint_state" = missing || "$endpoint_state" = unreadable ]]; then
+    # The mark binds to this task's endpoint incarnation, so it alone decides
+    # the row; probing could inspect another worker reusing the same target.
+    if fm_backend_endpoint_parked_retained "$meta"; then
       printf 'endpoint: parked, copy retained (backend=%s window=%s)\n' "$backend" "$window"
     elif FM_BACKEND_HERDR_ENDPOINT_META="$meta" fm_backend_target_exists "$backend" "${target:-$window}" "fm-$id"; then
       printf 'endpoint: alive (backend=%s window=%s)\n' "$backend" "$window"
