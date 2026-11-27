@@ -1497,7 +1497,7 @@ SH
 }
 
 test_parked_herdr_startup_leaves_reused_pane_unread() {
-  local rec root home fakebin worktree meta log out
+  local rec root home fakebin worktree meta log out crew_state inactive_reads
   rec=$(new_world liveness-parked-herdr-reused)
   IFS='|' read -r root home fakebin <<EOF
 $rec
@@ -1507,19 +1507,30 @@ EOF
   worktree="${root%/root}/retained-copy"
   fm_git_init_commit "$worktree"
   log="$home/herdr-probes.log"
+  crew_state="$fakebin/record-inactive-read"
+  inactive_reads="$home/inactive-reads.log"
   : > "$log"
+  cat > "$crew_state" <<'SH'
+#!/usr/bin/env bash
+set -eu
+"$FM_TEST_REAL_CREW_STATE" "$@"
+printf '%s\n' "$1" >> "$FM_TEST_INACTIVE_READS"
+SH
+  chmod +x "$crew_state"
   cat > "$fakebin/herdr" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
   'pane get p-reused --session park-test')
     if [ "${FM_TEST_HERDR_REUSED:-0}" = 1 ]; then
-      printf '%s\n' '{"result":{"pane":{"pane_id":"p-reused","terminal_id":"term-other-home"}}}'
+      printf '%s\n' "$*" >> "$FM_TEST_HERDR_PROBE_LOG"
+      printf '%s\n' '{"result":{"pane":{"pane_id":"p-reused","terminal_id":"term-other-home","foreground_cwd":"/other-home/active-copy"}}}'
     else
       printf '%s\n' '{"error":{"code":"pane_not_found"}}' >&2
       exit 1
     fi
     ;;
   'agent get p-reused --session park-test')
+    printf '%s\n' "$*" >> "$FM_TEST_HERDR_PROBE_LOG"
     printf '%s\n' '{"result":{"agent":{"agent_status":"idle"}}}'
     ;;
   'pane process-info --pane p-reused --session park-test')
@@ -1545,15 +1556,20 @@ SH
 
   out=$(FM_FAKE_HARNESS_PID="$SESSION_START_TEST_HARNESS_PID" \
     FM_TEST_HERDR_REUSED=1 FM_TEST_HERDR_PROBE_LOG="$log" FM_INACTIVE_RECONCILE_SECS=60 \
+    FM_INACTIVE_CREW_STATE_BIN="$crew_state" FM_TEST_REAL_CREW_STATE="$ROOT/bin/fm-crew-state.sh" \
+    FM_TEST_INACTIVE_READS="$inactive_reads" \
     run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
   assert_contains "$out" "endpoint: parked, copy retained (backend=herdr window=park-test:p-reused)" \
     "the recycled pane hid the current mark"
   wait_for_network_stage "$home" "$root" || fail "the deferred network stage never published"
+  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$root" \
+    "$ROOT/bin/fm-startup-network.sh" ready "$SESSION_START_TEST_HARNESS_PID" \
+    || fail "the deferred network stage did not finish successfully"
   jq -e 'any(.endpoints[]; .id == "task-parked" and .endpoint.exists == false)' \
     "$home/state/home-summary.json" >/dev/null \
-    || fail "the deferred home summary did not sample the parked scout and reject the foreign binding"
-  grep -Fxq 'cursor=' "$home/state/.inactive-outcome-reconcile" \
-    || fail "the deferred inactive scan did not complete"
+    || fail "the deferred home summary did not report the parked scout's endpoint as absent"
+  grep -Fxq 'task-parked' "$inactive_reads" \
+    || fail "the deferred inactive scan did not complete the parked scout's state read"
   [ ! -s "$log" ] || fail "startup read the other worker's pane or process details: $(cat "$log")"
 
   PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
@@ -1561,9 +1577,10 @@ SH
     || fail "could not clear the scout's mark for the unmarked control"
   out=$(FM_TEST_HERDR_REUSED=1 FM_TEST_HERDR_PROBE_LOG="$log" \
     PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
-    "$ROOT/bin/fm-crew-state.sh" task-parked)
-  assert_contains "$out" "backend target gone: park-test:p-reused" \
-    "the ordinary unmarked read did not reject the foreign binding"
+    "$ROOT/bin/fm-fleet-snapshot.sh" --json)
+  printf '%s\n' "$out" | jq -e 'any(.tasks[]; .id == "task-parked" and .endpoint.exists == false
+    and .current_state.detail == "backend target gone: park-test:p-reused")' >/dev/null \
+    || fail "the ordinary unmarked snapshot did not reject the foreign binding"
   grep -Fxq 'pane process-info --pane p-reused --session park-test' "$log" \
     || fail "the unmarked control did not exercise the process probe"
 
