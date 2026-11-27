@@ -10,12 +10,20 @@
 #       "gtimeout", "perl", or "bash". Set FM_TIMEOUT_MECHANISM_OVERRIDE=bash
 #       to force the dependency-free fallback.
 #
-#   fm_run_timed [--kill] <seconds> <command> [args...]
+#   fm_gnu_timeout
+#       Prints the name of an available GNU coreutils timeout executable or
+#       returns nonzero. This capability check is independent of the runner
+#       preference used by fm_run_timed.
+#
+#   fm_run_timed [--kill | --wait-on-term] <seconds> <command> [args...]
 #       Runs the command with a hard bound. Exit status is the command's own,
 #       except 124, which means the bound was hit (GNU timeout's convention,
 #       reproduced by the perl and bash fallbacks).
 #       --kill uses KILL at the deadline when a timed-out operation cannot
 #       safely continue during the normal TERM grace period.
+#       --wait-on-term lets a wrapped command finish handling TERM before the
+#       timeout or gtimeout shell wrapper exits, within the existing KILL
+#       allowance. The Perl and Bash fallbacks keep their normal TERM behavior.
 #
 # A non-positive bound is not a bound: `timeout 0` and the perl fallback's
 # `alarm 0` both disable the deadline, so callers must reject 0 before calling.
@@ -41,6 +49,17 @@ fm_timeout_mechanism() {
   else
     printf 'bash\n'
   fi
+}
+
+fm_gnu_timeout() {
+  local runner version
+  for runner in timeout gtimeout; do
+    version=$(LC_ALL=C command "$runner" --version 2>/dev/null </dev/null) || continue
+    case "$version" in
+      *'(GNU coreutils)'*) printf '%s\n' "$runner"; return 0 ;;
+    esac
+  done
+  return 1
 }
 
 fm_run_bash_timeout() {
@@ -91,9 +110,9 @@ fm_run_bash_timeout() {
 }
 
 fm_run_external_timeout() {
-  local runner=$1 seconds=$2 signal=$3 status_file runner_pid runner_rc command_rc
+  local runner=$1 seconds=$2 signal=$3 wait_on_term=$4 status_file runner_pid runner_rc command_rc
   local -a timeout_args
-  shift 3
+  shift 4
   timeout_args=(-k 1)
   [ "$signal" != KILL ] || timeout_args=(-s KILL)
   status_file=$(mktemp "${TMPDIR:-/tmp}/fm-timeout-status.XXXXXX" 2>/dev/null) || return 124
@@ -105,12 +124,15 @@ fm_run_external_timeout() {
   # shellcheck disable=SC2016  # Expansion is deliberately deferred to the child shell.
   "$runner" "${timeout_args[@]}" "$seconds" bash -c '
     status_file=$1
-    shift
+    if [ "$2" = 1 ]; then
+      trap "exit 143" TERM
+    fi
+    shift 2
     "$@"
     command_rc=$?
     printf "%s\n" "$command_rc" > "$status_file"
     exit "$command_rc"
-  ' _ "$status_file" "$@" &
+  ' _ "$status_file" "$wait_on_term" "$@" &
   runner_pid=$!
   if wait "$runner_pid"; then
     runner_rc=0
@@ -140,17 +162,17 @@ fm_timeout_seconds() {  # <milliseconds>
   printf '%d.%03d' "$(( $1 / 1000 ))" "$(( $1 % 1000 ))"
 }
 
-fm_run_timed() {  # [--kill] <seconds> <command...>
-  local seconds signal=TERM
-  if [ "$1" = --kill ]; then
-    signal=KILL
-    shift
-  fi
+fm_run_timed() {  # [--kill | --wait-on-term] <seconds> <command...>
+  local seconds signal=TERM wait_on_term=0
+  case "$1" in
+    --kill) signal=KILL; shift ;;
+    --wait-on-term) wait_on_term=1; shift ;;
+  esac
   seconds=$1
   shift
   case "$(fm_timeout_mechanism)" in
-    timeout) fm_run_external_timeout timeout "$seconds" "$signal" "$@" ;;
-    gtimeout) fm_run_external_timeout gtimeout "$seconds" "$signal" "$@" ;;
+    timeout) fm_run_external_timeout timeout "$seconds" "$signal" "$wait_on_term" "$@" ;;
+    gtimeout) fm_run_external_timeout gtimeout "$seconds" "$signal" "$wait_on_term" "$@" ;;
     perl)
       perl -MTime::HiRes=alarm -MPOSIX=setpgid -MErrno=EACCES,ESRCH -e '
         my ($timeout, $signal) = splice @ARGV, 0, 2;

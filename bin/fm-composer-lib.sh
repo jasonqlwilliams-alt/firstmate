@@ -38,9 +38,9 @@
 #   rows=<n>    the capture's bounded row count (informational).
 #   harness=<name>  the pane's RECORDED harness, appended by a caller that
 #               knows it (bin/fm-backend.sh's fm_backend_guarded_composer_state);
-#               adapters never infer it. Only harness-scoped placeholder rules
-#               read it (see "ROVO PLACEHOLDER CHIP" below); absent, every
-#               harness gets the fleet-wide rules.
+#               adapters never infer it. Only harness-scoped rules read it
+#               (see "ROVO PLACEHOLDER CHIP" and "AGY COMPOSER" below);
+#               absent, every harness gets the fleet-wide rules.
 #
 # THE STRICT BLANK-ROW RULE (captain decision blank-row-injection-posture,
 # 2026-08-09): a blank or otherwise unidentified input row with no positive
@@ -102,6 +102,20 @@
 # measured values, and every other harness keeps
 # the fleet-wide ceiling unchanged. fm_composer_ghost_luma_for_caps owns that
 # choice, and each classifier entry point applies it.
+#
+# AGY COMPOSER: agy (Antigravity CLI) draws one composer row opening with a
+# bare `>` glyph between two solid `─` rules, over a `? for shortcuts` footer at
+# idle (docs/verification/agy.md "Composer classification"). pi's row rule would
+# read that glyph as typed content, so caps carrying harness=agy take
+# _fm_composer_agy_content INSTEAD of every generic shape rule. It proves
+# `empty` only from the recorded screen exactly: a styled capture, the last
+# rule pair holding exactly one row, the cursor (when known) on that row, no
+# `>` row directly above the opening rule, no earlier rule, the row holding
+# only the glyph or agy's exact mode hint in its recorded colour, and the
+# idle footer as the only text below the closing rule. Typed text after the
+# glyph is `pending`; anything else - a plain capture, wrapped rows, the feedback
+# survey, extra text below the composer - stays `unknown`, so a caller that
+# needs proof refuses. An optional fit check limits a notice to that one row.
 #
 # UNICODE WHITESPACE (issue #1988; open PRs #1995/#2047 target the same
 # defect and #1995's naming is adopted here so the implementations converge):
@@ -423,6 +437,12 @@ FM_COMPOSER_SHELL_PROMPT_GLYPHS=$(printf '%s\n' '>' '$' '%' '#')
 # matching is case-insensitive.
 FM_COMPOSER_IDLE_RE_DEFAULT='^Type a message\.\.\.$|^Ask anything\.\.\.|^Plan, search, build anything$|^Add a follow-up$'
 
+# AGY ONLY (AGY COMPOSER above): the exact mode hint agy draws after its `>`
+# glyph until a session's first input, and the truecolor it was recorded in
+# (agy 1.4.12 through Herdr). Under any other colour the hint is unrecognised.
+FM_COMPOSER_AGY_MODE_HINT='Accept-edits mode: file edits auto-approved (shift+tab to cycle)'
+FM_COMPOSER_AGY_MODE_HINT_SGR='38;2;154;165;206'
+
 # Opencode draws a mode/model footer line INSIDE its left-bar composer
 # ("Build · GPT-5.5 Fast OpenAI · high"). It is composer furniture, not typed
 # text, and only the run's LAST row is ever matched against it.
@@ -621,7 +641,7 @@ fm_composer_classify_content() {  # <bordered> <content> [idle_re] [idle_case] [
 
 # --- The screen classifier ---------------------------------------------------
 #
-# fm_composer_classify_screen <caps> <screen> [cursor_row] [identity]
+# fm_composer_classify_screen <caps> <screen> [cursor_row] [identity] [fit-text]
 #   <caps>       newline-separated key=value capability facts (see header).
 #   <screen>     the captured screen: ANSI-preserving when styled=1, plain
 #                otherwise.
@@ -1189,7 +1209,7 @@ _fm_composer_select_cursorless() {
 
 fm_composer_extract_selected_content() {  # <caps> <screen> [rows]
   local caps=$1 screen=$2 rows=${3:-} styled=0 kv plain row raw content glyph joined='' footer_re prompt_row=-1
-  local leading_blank=1 placeholder_position=0 prompt_is_shell=0 luma
+  local leading_blank=1 placeholder_position=0 prompt_is_shell=0 luma agy=0
   # Shadow the ghost ceiling for this capture's harness; read the inherited
   # value before the shadow exists.
   luma=$(fm_composer_ghost_luma_for_caps "$caps")
@@ -1197,10 +1217,16 @@ fm_composer_extract_selected_content() {  # <caps> <screen> [rows]
   footer_re=${FM_COMPOSER_LEFTBAR_FOOTER_RE:-$FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT}
   while IFS= read -r kv; do
     [ "$kv" = styled=1 ] && styled=1
+    [ "$kv" = harness=agy ] && agy=1
   done <<EOF
 $caps
 EOF
   plain=$(printf '%s\n' "$screen" | fm_composer_strip_ansi)
+  if [ "$agy" = 1 ]; then
+    _fm_composer_scan_screen "$plain" ''
+    _fm_composer_agy_content "$screen" "$plain" "$styled" ''
+    return $?
+  fi
   _fm_composer_scan_screen "$plain" '' 1
   _fm_composer_select_cursorless "$plain" || return 1
   row=$FM_COMPOSER_SELECTED_FIRST
@@ -1276,9 +1302,9 @@ EOF
   fi
 }
 
-fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity]
-  local caps=$1 screen=$2 cy=${3:-} identity=${4:-}
-  local styled=0 cursor=0 has_identity=0 kv plain luma
+fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity] [fit-text]
+  local caps=$1 screen=$2 cy=${3:-} identity=${4:-} fit=${5:-}
+  local styled=0 cursor=0 has_identity=0 agy=0 kv plain luma content
   # Shadow the ghost ceiling for this capture's harness; read the inherited
   # value before the shadow exists.
   luma=$(fm_composer_ghost_luma_for_caps "$caps")
@@ -1288,6 +1314,7 @@ fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity]
       styled=1) styled=1 ;;
       cursor=1) cursor=1 ;;
       identity=1) has_identity=1 ;;
+      harness=agy) agy=1 ;;
     esac
   done <<EOF
 $caps
@@ -1298,6 +1325,21 @@ EOF
   fi
   plain=$(printf '%s\n' "$screen" | fm_composer_strip_ansi)
   _fm_composer_scan_screen "$plain" "$cy"
+  # An agy pane is read ONLY by its own rule (AGY COMPOSER): no generic shape
+  # may prove it empty.
+  if [ "$agy" = 1 ]; then
+    if ! content=$(_fm_composer_agy_content "$screen" "$plain" "$styled" "$cy"); then
+      printf 'unknown'
+    elif [ -n "$content" ]; then
+      printf 'pending'
+    elif [ -n "$fit" ] && ! _fm_composer_agy_notice_fits \
+      "$(_fm_composer_screen_row "$FM_COMPOSER_SCAN_PI_CLOSE" "$plain")" "$fit"; then
+      printf 'unknown'
+    else
+      printf 'empty'
+    fi
+    return 0
+  fi
   if [ -n "$cy" ]; then
     # Cursor mode (tmux): the shape CONTAINING the cursor is the composer.
     if [ "$FM_COMPOSER_SCAN_UNSAFE" = 1 ]; then
@@ -1400,10 +1442,10 @@ EOF
 # fm_composer_classify_snapshot_no_identity: the verdict for the snapshot on a
 # backend with no agent-identity probe, so an identity-dependent shape (pi's
 # separated pair) stays unknown.
-fm_composer_classify_snapshot_no_identity() {
+fm_composer_classify_snapshot_no_identity() {  # [fit-text]
   local verdict
   verdict=$(fm_composer_classify_screen "$FM_COMPOSER_SNAPSHOT_CAPS" \
-    "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR")
+    "$FM_COMPOSER_SNAPSHOT_SCREEN" "$FM_COMPOSER_SNAPSHOT_CURSOR" '' "${1:-}")
   [ "$verdict" != need-identity ] || verdict=unknown
   printf '%s' "$verdict"
 }
@@ -1606,6 +1648,65 @@ _fm_composer_pi_verdict() {  # <screen> <styled> <has_identity> <identity>
     idle|done) printf 'empty' ;;
     *) printf 'unknown' ;;
   esac
+}
+
+_fm_composer_agy_frame() {  # <plain-screen> <cursor-row-or-empty>
+  local plain=$1 cy=$2 open close line above='' seen=0
+  open=$FM_COMPOSER_SCAN_PI_OPEN
+  close=$FM_COMPOSER_SCAN_PI_CLOSE
+  [ "$FM_COMPOSER_SCAN_PI_PAIR_VALID" = 1 ] \
+    && [ $((close - open)) -eq 2 ] || return 1
+  [ -z "$cy" ] || [ "$cy" = $((open + 1)) ] || return 1
+  while IFS= read -r line; do
+    fm_composer_normalize_trim_var line
+    if _fm_composer_pi_separator_row "$line"; then return 1; fi
+    above=$line
+  done <<< "$(printf '%s\n' "$plain" | head -n "$open")"
+  case "$above" in '>'*) return 1 ;; esac
+  # The idle footer must be the only text below the closing rule.
+  while IFS= read -r line; do
+    fm_composer_normalize_trim_var line
+    [ -n "$line" ] || continue
+    seen=$((seen + 1))
+    case "$seen:$line" in
+      '1:? for shortcuts'|'1:? for shortcuts '*) ;;
+      *) return 1 ;;
+    esac
+  done <<EOF
+$(printf '%s\n' "$plain" | tail -n "+$((close + 2))")
+EOF
+  [ "$seen" = 1 ]
+}
+
+_fm_composer_agy_content() {  # <screen> <plain-screen> <styled> <cursor-row-or-empty>
+  local screen=$1 plain=$2 styled=$3 cy=$4 prompt_row row raw
+  [ "$styled" = 1 ] && _fm_composer_agy_frame "$plain" "$cy" || return 1
+  prompt_row=$((FM_COMPOSER_SCAN_PI_OPEN + 1))
+  row=$(_fm_composer_screen_row "$prompt_row" "$plain")
+  # Herdr serializes terminal rows with CRLF. Drop the terminator and keep draft spaces.
+  row=${row%$'\r'}
+  case "$row" in
+    '>'|'> '*) row=${row#>}; row=${row# } ;;
+    *) return 1 ;;
+  esac
+  if [ "$row" = "$FM_COMPOSER_AGY_MODE_HINT" ]; then
+    raw=$(_fm_composer_screen_row "$prompt_row" "$screen")
+    case "$raw" in
+      *"$FM_COMPOSER_AGY_MODE_HINT_SGR"m"$FM_COMPOSER_AGY_MODE_HINT"*) return 0 ;;
+    esac
+  fi
+  printf '%s' "$row"
+}
+
+# _fm_composer_agy_notice_fits: 0 when <text>, typed after agy's `>` glyph,
+# stays on one row without reaching the last column of the validated rule.
+# Counting <text> in bytes never undercounts its cells.
+_fm_composer_agy_notice_fits() {  # <closing-rule> <text>
+  local rule=$1 width len
+  fm_composer_normalize_trim_var rule
+  width=$(printf '%s' "$rule" | LC_ALL=C wc -c)
+  len=$(printf '%s' "$2" | LC_ALL=C wc -c)
+  [ $((len + 2)) -lt $((width / 3)) ]
 }
 
 # Positive identification of Codex's initial authentication choice screen.

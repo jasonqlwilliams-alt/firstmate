@@ -109,11 +109,8 @@ esac
 # shellcheck source=bin/fm-hook-host-lib.sh
 . "$SCRIPT_DIR/fm-hook-host-lib.sh"
 
-# fm-watch.sh touches the liveness beacon once per cycle, immediately before
-# its terminal wait, so a healthy watcher's beacon can legitimately age up to
-# FM_POLL seconds between touches (docs/turnend-guard.md "Guard grace and the
-# poll cadence"). fm_poll_derived_grace (bin/fm-wake-lib.sh) is the single
-# owner of that max(300, poll+60) derivation.
+# See docs/turnend-guard.md "Guard grace and the poll cadence" for the shared
+# grace calculation.
 GRACE=${FM_GUARD_GRACE:-$(fm_poll_derived_grace)}
 
 # Consume the Stop payload once. The decisions below are state-based; the
@@ -257,7 +254,7 @@ while [ "$attempt" -lt "$AUTOARM_ATTEMPTS" ]; do
   if [ "$LEASE_REMAINING" -gt 0 ]; then
     # This runner waits and reaps its bounded child tree. It never detaches a
     # watcher or outlives this hook. Do not reset the lease for retries.
-    FM_GUARD_GRACE="$GRACE" fm_run_timed "$LEASE_REMAINING" \
+    FM_GUARD_GRACE="$GRACE" fm_run_timed --wait-on-term "$LEASE_REMAINING" \
       "$SCRIPT_DIR/fm-watch-arm.sh" >"${OUT:-/dev/null}" 2>&1
     ARM_RC=$?
   fi

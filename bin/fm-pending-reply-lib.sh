@@ -1534,12 +1534,17 @@ fm_pending_reply_tick_one() {  # <state-dir> <corr_id> <busy_state> [secondmate-
   return 0
 }
 
+fm_pending_reply_remote_observe() {
+  FM_PENDING_REPLY_OBSERVATION=$("$@" < /dev/null 2>/dev/null) || FM_PENDING_REPLY_OBSERVATION=unknown
+}
+
 # Scan the active workset for this parent state. Safe to call every poll.
 # Never scrapes secondmate conversation; uses only parent status, backend busy
 # state, and optional secondmate-home wrong-home path checks.
-fm_pending_reply_tick() {  # <state-dir>
-  local state=$1 dir scan_dir rec candidate corr task_id phase delivered meta backend target label busy sm_home harness remote_host
-  local observation observation_task found i
+fm_pending_reply_tick() {  # <state-dir> [remote-observer] [on-progress]
+  local state=$1 remote_observe=${2:-fm_pending_reply_remote_observe} on_progress=${3:-true}
+  local dir scan_dir rec candidate corr task_id phase delivered meta backend target label busy sm_home harness remote_host
+  local observation observation_task found i FM_PENDING_REPLY_OBSERVATION
   local -a observation_tasks=() observation_values=()
   dir=$(fm_pending_reply_dir "$state")
   [ -d "$dir" ] || return 0
@@ -1551,6 +1556,7 @@ fm_pending_reply_tick() {  # <state-dir>
     case "${candidate##*/}" in .*) continue ;; esac
     rec="$dir/${candidate##*/}"
     [ -f "$rec" ] || continue
+    "$on_progress" || return 1
     corr=$(fm_pending_reply_get "$rec" corr_id)
     [ -n "$corr" ] || corr=${rec##*/}
     task_id=$(fm_pending_reply_get "$rec" task_id)
@@ -1635,8 +1641,10 @@ fm_pending_reply_tick() {  # <state-dir>
         done
         if [ "$found" = 0 ]; then
           if [ -n "$remote_host" ]; then
-            observation=$("$_FM_PENDING_REPLY_LIB_DIR/fm-on.sh" "$task_id" \
-              fm-remote-secondmate-control.sh observe "$task_id" < /dev/null 2>/dev/null || printf 'unknown')
+            "$on_progress" || return 1
+            "$remote_observe" "$_FM_PENDING_REPLY_LIB_DIR/fm-on.sh" "$task_id" \
+              fm-remote-secondmate-control.sh observe "$task_id" || return
+            observation=$FM_PENDING_REPLY_OBSERVATION
             case "$observation" in busy|idle|fallback-idle|unknown) ;; *) observation=unknown ;; esac
           else
             observation=$(FM_BACKEND_HERDR_ENDPOINT_META="$meta" \
@@ -1648,6 +1656,7 @@ fm_pending_reply_tick() {  # <state-dir>
         busy=$(fm_pending_reply_busy_state_from_observation "$rec" "$observation")
       fi
     fi
+    "$on_progress" || return 1
     fm_pending_reply_tick_one "$state" "$corr" "$busy" "$sm_home" || true
   done
   return 0

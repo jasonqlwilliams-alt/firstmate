@@ -23,7 +23,7 @@ The router owns that task-kind boundary, and `../../../../bin/fm-spawn.sh` refus
 | Model discovery | `agy models` prints one `<id><TAB><label>` row per model the authenticated account can use. The observed live list (Gemini 3.8/3.7/3.6 Flash at three efforts each, Gemini 3.1 Pro, Claude Sonnet 4.6, Claude Opus 4.6 Thinking, GPT-OSS 120B) is per-account and must never be hardcoded; a listed id is not thereby allowed (see "Model rule"). `agy -p "/usage"` reports quota. |
 | Marker | `ANTIGRAVITY_AGENT=1` on tool subprocesses, alongside `ANTIGRAVITY_AGENTAPI_EXE`, `ANTIGRAVITY_CONVERSATION_ID`, `ANTIGRAVITY_LS_ADDRESS`, `ANTIGRAVITY_LS_VERSION`, `ANTIGRAVITY_PROJECT_ID`, `ANTIGRAVITY_SOURCE_METADATA`, and `ANTIGRAVITY_TRAJECTORY_ID`. Only `ANTIGRAVITY_AGENT` is an identity; the rest carry a path, an id, or a version. |
 | Process name | `comm=agy` for the supervised pane process; `../../../bin/backends/tmux.sh` classifies that anchored name `agent`. |
-| Composer | The existing `separated` shape - content rows between two solid `-` rules - whose content row carries a bare shell-family `>` glyph, with a footer that reads `? for shortcuts` at idle and `esc to cancel` while working. See "Composer verdict" below for the bounded consequence. |
+| Composer | One content row between two solid `-` rules, opening with agy's `>` glyph, over a footer that reads `? for shortcuts` at idle and `esc to cancel` while working. An agy-scoped rule reads it; see "Composer verdict" below. |
 | Autonomy | `--dangerously-skip-permissions` auto-approves every tool request; verified running a bash tool call in a supervised pane with no approval gate. It does NOT cover the workspace-trust dialog. |
 | Trust | A real dialog on any folder agy has never seen - see "Workspace trust" below. |
 | Resume | `-c/--continue`, `--conversation <id>`, and the id printed at exit; no verified pane-resume contract, so use deterministic relaunch. |
@@ -63,14 +63,14 @@ Firstmate's key plane cannot answer a dialog: it carries only Enter, Escape and 
 Accepting the dialog by hand was verified to append exactly that path, and the next launch in the same worktree showed no dialog.
 A refusal blocks the spawn rather than launching a worker that would park before reading its brief.
 
-## Composer verdict: a known, bounded gap
+## Composer verdict
 
-agy draws the `separated` shape the shared classifier already knows, but its content row carries a bare `>` glyph rather than pi's blank row.
-The shared classifier answers `unknown` for an idle agy composer, because `_fm_composer_pi_verdict` in `../../../bin/fm-composer-lib.sh` is gated on an identity of exactly `pi`.
-This is deliberately left as is rather than widened, and the measurement is why: fed a real captured agy pane, pi's own row classifier returns `pending`, because the `>` glyph reads as typed content.
-Extending the pi path to agy would therefore turn a safe `unknown` into a wrong `pending`, and `pending` is the ONE composer verdict that skips a steering doorbell on a pane outside the proven-empty rule (`../../../bin/fm-task-inbox-lib.sh`), so the "fix" would starve steering rather than improve it.
-Under `unknown` the doorbell still rings on an agy pane, because only Codex and Rovo panes require a proven-empty composer, so ordinary steering works; the practical cost is bounded to away-mode injection, which declines to type into a pane it cannot prove empty, and agy is a crewmate/scout adapter that away mode never injects into anyway.
-A real fix needs a harness-scoped glyph rule the shared classifier does not currently carry.
+The [agy composer rule](../../../../../bin/fm-composer-lib.sh) applies when the capture carries the pane's recorded harness `agy`, which the steering doorbell supplies.
+In a recognized frame, a draft captured on one composer row reads `pending`.
+Plain-text captures and frames containing multiple captured composer rows, a busy footer, or a feedback survey read `unknown`.
+Relaunch already publishes the replacement brief before model validation, so a failed relaunch after a hand edit adding the inbox locator to a legacy brief can leave the running worker receiving a short agy notice without ever having received the inbox path.
+See [Harness support](../../../../../docs/configuration.md#harness-support) for the doorbell's delivery checks and what a refusal leaves queued.
+Away-mode injection takes place in the supervisor pane, whose composer read omits the recorded harness required by this agy rule.
 
 ## Skills and no-mistakes validation trigger
 
@@ -94,4 +94,4 @@ agy is deliberately absent from `../../../bin/fm-session-lock-lib.sh`, which own
 ## Verification
 
 `../../../../tests/fm-agy-harness.test.sh` is the portable regression: detection and marker precedence with real processes, tmux liveness, the control tables, busy-source trust, the launch line, the hook wiring, the trust pre-registration, the effort cap, model validation, the Gemini-only model rule, and the secondmate refusal.
-`../../../../docs/verification/agy.md` owns the dated live evidence behind each fact above and the commands that refresh it.
+[agy adapter verification](../../../../../docs/verification/agy.md) owns the dated evidence and the commands that refresh it, including the [composer and doorbell regressions](../../../../../docs/verification/agy.md#composer-classification).
