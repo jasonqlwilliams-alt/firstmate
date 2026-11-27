@@ -73,17 +73,20 @@ A submit retry requires a live agent and a capture showing `/exit` still in the 
 Stop checks, further screen reads, and retries after the first Enter share the `FM_CONTROL_EXIT_WAIT` budget.
 If the screen cannot be read in time, the restart may report a timeout without naming the dialog.
 
-For tasks resolved as Claude, the doorbell and native command send recheck the recorded route under the task's lifecycle lock and hold it through submission.
+The automatic input guard applies to inbox doorbells and other typed sends that resolve to a task recorded as Claude, including native commands and explicit backend targets matched to that record.
 The same doorbell guard applies to watcher re-rings and on the remote secondmate's host.
+Guarded sends recheck the recorded route under the task's lifecycle lock and hold it through submission.
 They require a readable Claude composer frame that classifies as empty across all its input rows before typing.
-Before each Enter, they match the text extracted from that frame to the line they typed.
-An unreadable screen or a dialog that lacks the exact confirmation layout still blocks the write when the composer proof fails.
-If the guard withholds the first Enter after typing, inspect the pane before retrying because the line may still be in the composer.
+Before each Enter, they require the frame to hold the text they typed.
+An unreadable screen or a dialog that obscures the composer blocks the write even when the exact confirmation layout is absent.
+Guarded typed sends refuse text containing control characters, including tabs and newlines.
+If the guard withholds the first Enter after typing, inspect the pane before retrying because the text may still be in the composer.
+The [`fm-send.sh` header](../bin/fm-send.sh) owns the exit status and retry guidance when a typed send is refused or submission remains unconfirmed.
 A composer containing only spaces reads as empty because a screen capture cannot distinguish typed spaces from padding, so a doorbell line can be typed ahead of those spaces.
 The pre-Enter check joins the composer's visible rows, so a soft wrap and a newline an operator inserts during delivery look the same to it.
 The lifecycle lock serializes Firstmate's guarded sends and lifecycle commands while terminal input or an exit outside those commands can still change the pane between capture and write.
-The standalone Claude recovery interrupt requires a readable, proven-empty composer under the same lock before sending Escape.
-The operator can inspect the pane and use `fm-send.sh <task-id> --key Escape` to dismiss the confirmation explicitly.
+The standalone Claude recovery interrupt requires a readable, proven-empty composer under the same lock before sending Escape and reports `interrupt-refused` if that proof fails.
+On a backend that supports Escape, an operator can inspect the pane and use `fm-send.sh <task-id> --key Escape` to dismiss the confirmation explicitly.
 The [Claude adapter reference](../.agents/skills/harness-adapters/references/harness/claude.md#background-tasks-exit-confirmation) owns the screen layout and recognition limits.
 
 ## Transactional relaunch

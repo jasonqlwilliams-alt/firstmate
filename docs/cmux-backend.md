@@ -95,7 +95,7 @@ On the typed plane, literal send and Enter are separate calls subject to the [au
 Enter, Escape, and Ctrl-C are supported.
 The composer verifier is a thin adapter: it captures a bounded plain-text tail and hands it with cmux's capability facts to the fleet-wide classifier in `bin/fm-composer-lib.sh`, which owns every shape, including Claude's borderless `❯` row with its U+00A0 separator.
 `read-screen` is plain text with no cursor primitive, so the generic classifier treats a glyph row carrying trailing text as `unknown` because the row could contain the harness's idle suggestion.
-An unstructured bare prompt is `unknown`, and a slash-popup placeholder remains `pending`, so only Enter is retried and text is never retyped.
+The generic classifier reads an unstructured bare prompt as `unknown` and a slash-popup placeholder as `pending`, allowing the generic submit path to retry Enter without retyping.
 cmux exposes no native generic agent busy signal, so supervision uses capture/hash polling for screen changes and each harness adapter's semantic lifecycle for worker state.
 Grok alone retains its isolated rendered-tail fallback.
 

@@ -440,7 +440,7 @@ An ordinary text steer remains durably enqueued when its doorbell is withheld, a
 The gate refuses the Codex update picker on every harness.
 For Codex, Rovo, and agy workers, the gate requires a proven-empty composer before typing and proof that the composer holds the full doorbell before Enter.
 The agy gate requires a styled capture, so cmux and Orca always leave agy steers queued without ringing.
-See [Automatic Claude input](agent-control.md#claude-background-tasks-exit-confirmation) for Claude's doorbell guard and [`fm-task-inbox-lib.sh`](../bin/fm-task-inbox-lib.sh) for the exact gate and retry ladder.
+See [Automatic Claude input](agent-control.md#claude-background-tasks-exit-confirmation) for Claude doorbells and typed sends, and [`fm-task-inbox-lib.sh`](../bin/fm-task-inbox-lib.sh) for the exact doorbell gate and retry ladder.
 An agy pane uses the short notice `: Firstmate message waiting: read your inbox, act, mv to handled/.` when the path in the scaffolded Firstmate instruction inbox section points to the same inbox directory as the queued record.
 The doorbell checks the launch brief when present and uses the original task brief when there is no launch brief.
 Equivalent paths, including symlink aliases, qualify for the short notice, and the inbox path may contain UTF-8 characters.

@@ -377,6 +377,17 @@ It spends a small number of real tokens per covered and installed harness, repor
 [`tests/fm-control-claude-exit-dialog.test.sh`](../../tests/fm-control-claude-exit-dialog.test.sh) uses a stand-in process on tmux and backend stubs to cover exit and restart reporting, remote enqueue when the doorbell is refused, and Herdr submit acknowledgement and retries.
 Its cmux, Zellij, and Orca cases cover refusal to ring at the exit confirmation.
 [`tests/fm-send-remote-delivery.test.sh`](../../tests/fm-send-remote-delivery.test.sh) covers wrapped native input and the local secondmate reply expectation when submit confirmation is unavailable.
+Run the affected portable regressions through the test runner without launching a real harness.
+
+```sh
+bin/fm-test-run.sh \
+  tests/fm-backend-orca.test.sh tests/fm-composer-lib.test.sh \
+  tests/fm-control-claude-exit-dialog.test.sh tests/fm-control.test.sh \
+  tests/fm-secondmate-restart.test.sh tests/fm-send-inbox.test.sh \
+  tests/fm-send-popup-settle.test.sh tests/fm-send-remote-delivery.test.sh \
+  tests/fm-task-inbox.test.sh
+```
+
 The opt-in refresh command below runs Claude in a private named tmux session and submits a prompt to start a background task before opening the real exit confirmation.
 It uses a transcript marker to verify that `/clear` submitted and an inbox acknowledgement to verify the doorbell reached the worker.
 It then checks refusals at the confirmation and verifies that explicit Escape dismisses it.
