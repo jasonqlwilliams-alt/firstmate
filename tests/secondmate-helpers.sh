@@ -36,7 +36,28 @@ case "${1:-}" in
     esac
     exit 0
     ;;
+  if-shell)
+    printf '%s\n' "$*" >> "$FM_FAKE_TMUX_LOG"
+    [ -r "$0.close-windows" ] && [ "$#" = 7 ] && [ "$2 $3" = '-F -t' ] || exit 1
+    window_id=${4#\$1:}
+    [ "$4" = "\$1:$window_id" ] && [[ "$window_id" =~ ^@[0-9]+$ ]] || exit 1
+    [[ "$5" == *'#{'* ]] \
+      && [ "$6" = "kill-window -t '\$1:$window_id'" ] && [ "$7" = 'display-message -p changed' ] || exit 1
+    printf 'guarded-close %s\n' "$window_id" >> "$FM_FAKE_TMUX_LOG"
+    exit 0
+    ;;
   list-windows)
+    if [ -r "$0.close-windows" ] && [ "$#" = 5 ] && [ "$2 $3 $4" = '-t =firstmate: -F' ]; then
+      count=$(awk 'END { print NR }' "$0.close-windows")
+      while read -r name number; do
+        if [[ "$5" == *"$name"* ]]; then
+          printf '@%s:1:$1:%s:2147483647:%%%s:/dev/ttys%s:|%s\n' "$number" "$name" "$number" "$number" "$count"
+        else
+          printf -- '-|%s\n' "$count"
+        fi
+      done < "$0.close-windows"
+      exit 0
+    fi
     session=
     prev=
     for arg in "$@"; do

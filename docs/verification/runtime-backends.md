@@ -215,20 +215,35 @@ tests/fm-backend-orca.test.sh
 tests/fm-backend-cmux.test.sh
 ```
 
-Bounded output from the incident regression:
+Bounded output from the metadata and process identity checks:
 
 ```text
 ok - fm-teardown: missing, empty, malformed, ambiguous, and task-mismatched endpoints refuse before every mutation or runtime call
 ok - cleanup identity: valid tmux, Herdr, Zellij, Orca, and cmux records validate while every empty backend target refuses
 ok - tmux backend: direct empty target returns nonzero without invoking tmux
 ok - process cleanup: creation-time PID identity removes only the exact child and preserves the control child
-ok - fm-teardown: dedicated-socket invalid cleanup preserves target/control and valid cleanup removes only the exact target
 ```
 
-The dedicated tmux cell removed ambient tmux variables, required a socket-bound wrapper, kept one target and one independent control window, and proved the wrapper was not called for invalid metadata or a direct empty target.
-Valid cleanup removed only the exact task-bound target and left the control window live.
+The dedicated tmux cell removed ambient tmux variables, used a socket-bound wrapper and an independent control window, and proved the wrapper was never called for invalid metadata or a direct empty target.
 The metadata-only validation covers tmux, Herdr, Zellij, Orca, and cmux before backend dispatch.
 Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, and Muse share that backend cleanup boundary; their harness-specific hook files, tokens, transcript bindings, and session-log sidecars are cleaned only after it, so no harness needs a separate endpoint parser.
+
+The 2026-11-26 verification of [tmux caller protection](../tmux-backend.md#task-window-cleanup) used tmux 3.7c on Linux x86_64 with a private socket and disposable processes.
+
+```sh
+TMPDIR="$PWD" bin/fm-test-run.sh tests/fm-teardown-endpoint-safety.test.sh
+```
+
+```text
+ok - fm-teardown: missing exact windows and unreadable pane PIDs prevent the tmux close
+ok - fm-teardown: unreadable caller ancestry prevents the tmux close
+ok - fm-teardown: a background caller in the inactive tmux pane survives and cleanup finishes
+ok - fm-teardown: tmux refuses a close when the verified pane inventory changes
+ok - fm-teardown: exact tmux cleanup preserves invalid and prefix-matched neighbors while removing only the recorded target
+```
+
+The current [endpoint safety regression](../../tests/fm-teardown-endpoint-safety.test.sh) also covers unreadable rows among same-named windows, window and session changes, Linux foreground-server jobs, and a late pane split during forced secondmate cleanup.
+It checks that linking a second exact-name window into the recorded session before the close preserves both windows, and that valid cleanup preserves a same-named window in another session.
 
 ## Claude workspace trust
 

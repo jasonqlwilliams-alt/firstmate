@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Tear down a finished task: return the treehouse worktree, release the Orca
-# worktree, or retire a secondmate home; kill the recorded runtime endpoint,
+# worktree, or retire a secondmate home; clean up the recorded runtime endpoint,
 # clear volatile state, and transition this home's backlog item for ship and
 # scout tasks before reporting success (a secondmate teardown transitions none,
 # since secondmates are not backlog items), then refresh/prune the project's
 # clone for PR-based ship tasks.
+# See docs/tmux-backend.md#task-window-cleanup for tmux close guards and limits.
 # Removing state/<id>.meta and landing the backlog transition are one step, not
 # two: bin/fm-backlog-transition-lib.sh owns that invariant, and both halves run
 # under the task's own meta lock before this script reports success. Because the
@@ -165,9 +166,9 @@
 # mutation. Local and remote retirement serialize their destructive phase with
 # that mate's backlog-handoff lock under the registry lock. Pending handoff wake
 # state is retired with the home, and local removal failure restores that state
-# before preserving the route for retry. Teardown then discards child work, kills
-# child runtime endpoints, and removes the retired home. Removing a leased home
-# releases its durable treehouse lease so the pool slot is freed,
+# before preserving the route for retry. Teardown then discards child work,
+# cleans up child runtime endpoints, and removes the retired home. Removing a
+# leased home releases its durable treehouse lease so the pool slot is freed,
 # never left leased forever. If the treehouse return fails, teardown leaves the
 # leased home and state in place instead of hiding a still-held lease.
 # Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--retire-stale-record] [--keep-pane]
@@ -491,8 +492,13 @@ task_reap_filter_pids() {  # <previously-protected-pids> <candidate-pids>
   '
 }
 
+TEARDOWN_LAUNCH_TTY=$(LC_ALL=C ps -o tty= -p "$$" 2>/dev/null) || TEARDOWN_LAUNCH_TTY=
+TEARDOWN_LAUNCH_TTY=${TEARDOWN_LAUNCH_TTY//[[:space:]]/}
+TEARDOWN_LAUNCH_TTY=${TEARDOWN_LAUNCH_TTY#/dev/}
+[[ "$TEARDOWN_LAUNCH_TTY" =~ ^[[:alnum:]][[:alnum:]/._-]*$ ]] || TEARDOWN_LAUNCH_TTY=
 TEARDOWN_REAP_PROTECTED_PIDS=$(task_reap_filter_pids "" "") || TEARDOWN_REAP_PROTECTED_PIDS=
 TEARDOWN_LAUNCH_SESSION_VERIFIED=1
+launch_session_pid=
 if [ "$(uname -s)" = Linux ]; then
   TEARDOWN_LAUNCH_SESSION_VERIFIED=0
   launch_session_pid=$(ps -o sid= -p "$$" 2>/dev/null) || launch_session_pid=
@@ -2309,6 +2315,56 @@ task_pid_list_contains() {  # <pid-list> <pid>
   printf '%s\n' "$1" | grep -Fxq "$2"
 }
 
+teardown_close_tmux_window() {  # <session:window>
+  local target=$1 snapshot protected server_pid server_sid pid pane_id pane_tty i
+  local -a panes
+  if ! fm_backend_source tmux || ! snapshot=$(fm_backend_tmux_close_snapshot "$target"); then
+    echo "warning: leaving tmux window $target open: cannot verify the exact window and its pane inventory" >&2
+    return 1
+  fi
+  if [ "$TEARDOWN_LAUNCH_SESSION_VERIFIED" != 1 ] || [ -z "$TEARDOWN_REAP_PROTECTED_PIDS" ] \
+     || ! protected=$(task_reap_filter_pids "$TEARDOWN_REAP_PROTECTED_PIDS" "") \
+     || [[ "$protected" == 'incomplete '* ]]; then
+    echo "warning: leaving tmux window $target open: cannot verify teardown caller ancestry" >&2
+    return 1
+  fi
+  IFS=: read -r -a panes <<< "$snapshot"
+  server_pid=${panes[1]}
+  if [ -n "$launch_session_pid" ] && [[ " $TEARDOWN_REAP_PROTECTED_PIDS " == *" $server_pid "* ]]; then
+    server_sid=$(ps -o sid= -p "$server_pid" 2>/dev/null) || server_sid=
+    server_sid=${server_sid//[[:space:]]/}
+    if [[ ! "$server_sid" =~ ^[1-9][0-9]*$ ]]; then
+      echo "warning: leaving tmux window $target open: cannot verify the target tmux server's process session" >&2
+      return 1
+    fi
+    if [ "$launch_session_pid" = "$server_sid" ]; then
+      echo "warning: leaving tmux window $target open: teardown was launched by the target tmux server" >&2
+      return 1
+    fi
+  fi
+  for ((i = 4; i < ${#panes[@]}; i += 3)); do
+    pid=${panes[i]}
+    pane_id=${panes[i+1]}
+    pane_tty=${panes[i+2]}
+    if [[ " $protected " == *" $pid "* ]]; then
+      echo "warning: leaving tmux window $target open: pane PID $pid is teardown or its ancestor" >&2
+      return 1
+    fi
+    if [ "${TMUX_PANE:-}" = "$pane_id" ]; then
+      echo "warning: leaving tmux window $target open: it contains teardown's launch pane $pane_id" >&2
+      return 1
+    fi
+    if [ "$TEARDOWN_LAUNCH_TTY" = "${pane_tty#/dev/}" ]; then
+      echo "warning: leaving tmux window $target open: pane $pane_id uses teardown's controlling terminal $pane_tty" >&2
+      return 1
+    fi
+  done
+  if ! fm_backend_tmux_close_if_unchanged "$target" "$snapshot"; then
+    echo "warning: tmux window $target close could not be confirmed against the verified window and pane snapshot" >&2
+    return 1
+  fi
+}
+
 require_treehouse_return_caller_outside() {  # <copy>
   local dir=$1 protected root scanner pids pid
   if [ "$TEARDOWN_LAUNCH_SESSION_VERIFIED" != 1 ] || [ -z "$TEARDOWN_REAP_PROTECTED_PIDS" ] \
@@ -3532,6 +3588,8 @@ cleanup_firstmate_home_children() {
           echo "error: herdr pane $child_t for child $child_id is not confirmed gone; retaining that child's durable identity records and stopping forced cleanup" >&2
           return 1
         fi
+      elif [ "$child_backend" = tmux ]; then
+        teardown_close_tmux_window "$child_t" || true
       elif [ "$child_backend" = zellij ]; then
         # Zellij titles are scoped by the owning home tag, so forced secondmate
         # cleanup must verify child tabs as that child home, not the parent.
@@ -4032,6 +4090,8 @@ elif [ "$BACKEND" = herdr ]; then
   else
     echo "warning: herdr session presentation lock path is unavailable; skipping the pane close rather than closing unlocked" >&2
   fi
+elif [ "$BACKEND" = tmux ]; then
+  teardown_close_tmux_window "$T" || true
 elif [ "$BACKEND" != orca ]; then
   fm_backend_kill "$BACKEND" "$T" "$(meta_value "$META" zellij_tab_id)" "fm-$ID" 2>/dev/null || true
 fi

@@ -181,6 +181,63 @@ fm_backend_tmux_kill() {  # <target>
   tmux kill-window -t "=$session:=$window" 2>/dev/null || true
 }
 
+# Teardown snapshots the exact window and every pane PID before checking
+# caller ancestry. The server compares that snapshot again before closing.
+FM_TMUX_CLOSE_SNAPSHOT_FORMAT='#{window_id}:#{pid}:#{session_id}:#{window_name}:#{P:#{pane_pid}:#{pane_id}:#{pane_tty}:}'
+FM_TMUX_CLOSE_SNAPSHOT_PATTERN='^@[0-9]+:[1-9][0-9]*:\$[0-9]+:[a-zA-Z0-9._-]+:([1-9][0-9]*:%[0-9]+:/dev/[[:alnum:]][[:alnum:]/._-]*:)+$'
+fm_backend_tmux_close_session_match() {
+  local session=$1 prefix literal=
+  while [[ "$session" == *['#,}']* ]]; do
+    prefix=${session%%['#,}']*}
+    session=${session#"$prefix"}
+    literal+="$prefix#{=-1;l:#${session:0:1}}"
+    session=${session:1}
+  done
+  printf '#{==:#{session_name},%s%s}' "$literal" "$session"
+}
+
+fm_backend_tmux_close_snapshot() {  # <session:window>
+  local target=$1 window=${1#*:} session_match inventory row window_count rows=0 snapshot=
+  case "$target" in
+    *:*:*|:*|*:) return 1 ;;
+    *:*) ;;
+    *) return 1 ;;
+  esac
+  # Keep the literal task window name safe to interpolate into a tmux format.
+  [[ "$window" =~ ^[a-zA-Z0-9._-]+$ ]] || return 1
+  session_match=$(fm_backend_tmux_close_session_match "${target%%:*}")
+  inventory=$(tmux list-windows -t "=${target%%:*}:" \
+    -F "#{?#{&&:$session_match,#{==:#{window_name},$window}},$FM_TMUX_CLOSE_SNAPSHOT_FORMAT,-}|#{E:session_windows}" 2>/dev/null) || return 1
+  window_count=${inventory%%$'\n'*}
+  window_count=${window_count##*|}
+  [[ "$window_count" =~ ^[1-9][0-9]*$ ]] || return 1
+  while IFS= read -r row; do
+    [[ "$row" == *"|$window_count" ]] || return 1
+    rows=$((rows + 1))
+    row=${row%|*}
+    [ "$row" = - ] && continue
+    [[ -z "$snapshot" && "$row" =~ $FM_TMUX_CLOSE_SNAPSHOT_PATTERN ]] || return 1
+    snapshot=$row
+  done <<< "$inventory"
+  [[ "$rows" = "$window_count" && -n "$snapshot" ]] || return 1
+  printf '%s\n' "$snapshot"
+}
+
+fm_backend_tmux_close_if_unchanged() {  # <session:window> <verified-close-snapshot>
+  local target=$1 snapshot=$2 window_id session_id window_name scoped_target result
+  local session_match snapshot_match matching_windows
+  [[ "$snapshot" =~ $FM_TMUX_CLOSE_SNAPSHOT_PATTERN ]] || return 1
+  IFS=: read -r window_id _ session_id window_name _ <<< "$snapshot"
+  scoped_target="$session_id:$window_id"
+  session_match=$(fm_backend_tmux_close_session_match "${target%%:*}")
+  snapshot_match="#{&&:$session_match,#{==:$FM_TMUX_CLOSE_SNAPSHOT_FORMAT,$snapshot}}"
+  matching_windows="#{W:#{?#{==:#{window_name},$window_name},#{window_id},}}"
+  result=$(tmux if-shell -F -t "$scoped_target" \
+    "#{?#{&&:$snapshot_match,#{==:$matching_windows,$window_id}},1,0}" \
+    "kill-window -t '$scoped_target'" 'display-message -p changed' 2>/dev/null) || return 1
+  [ -z "$result" ]
+}
+
 # fm_backend_tmux_current_command: <target>'s live foreground process name -
 # tmux's own `#{pane_current_command}`, already resolved from the pty's
 # foreground process group (verified empirically with real tmux 3.6a: a

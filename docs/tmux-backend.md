@@ -46,6 +46,20 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 
 ## Current behavior and safety
 
+### Task window cleanup
+
+In ordinary teardown and forced secondmate child cleanup, closing a tmux window requires a complete window list for the exact recorded session, exactly one window with the recorded name, and a readable pane ID, PID, and terminal for each pane in that window.
+Teardown leaves the window open and warns if it cannot verify that information or read caller ancestry.
+It also leaves the window open and warns if a pane's PID matches teardown or an ancestor, or if a pane matches the launch pane ID or controlling terminal.
+On Linux, teardown also requires a verified launch process session and leaves the window open if a target tmux server in its launch ancestry shares that session or has an unreadable process session.
+Before closing the window by ID, tmux rechecks that the recorded session and window name still identify exactly the verified window and that its pane inventory is unchanged.
+A moved or renamed window, a second exact-name match in the recorded session, a newly split pane, or an unreadable recheck stops the close and produces a warning.
+
+Outside Linux, a job launched by the target tmux server can evade caller detection.
+A wrapper that exits early after clearing the tmux environment can also hide the caller when no controlling terminal is available.
+Teardown may close the window in those cases if the other checks find no caller evidence.
+A skipped or unconfirmed tmux close allows the rest of teardown to proceed, including task record removal, so an operator can close a retained window manually when it is safe.
+
 ### Exact window reads
 
 For a recorded `session:window` target, Firstmate filters tmux's inventory by literal session and window names and reads by window ID when the matches identify one distinct window.
@@ -132,3 +146,4 @@ tests/fm-bootstrap.test.sh
 ```
 
 [`verification/runtime-backends.md`](verification/runtime-backends.md#tmux) records the active foreground-process and submit evidence.
+See [cleanup endpoint identity](verification/runtime-backends.md#cleanup-endpoint-identity) for the window cleanup regression and its verification record.
