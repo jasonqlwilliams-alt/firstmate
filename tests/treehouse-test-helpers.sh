@@ -94,9 +94,14 @@ fm_test_reap_orphans() {
         if [ -n "$owner_identity" ] && [ "$current_identity" = "$owner_identity" ]; then
           continue
         fi
+        if [ -n "$owner_identity" ] && [ ! -f "$dir/.fm-test-treehouse" ] &&
+          current_identity=$(fm_test_pid_identity "$owner_pid" 2>/dev/null) &&
+          [ "$current_identity" = "$owner_identity" ]; then
+          continue
+        fi
         ;;
     esac
     find "$dir" -type d -exec chmod u+rwx {} + 2>/dev/null || true
-    rm -rf "$dir"
+    rm -rf -- "$dir" || printf 'warning: could not remove orphaned fixture %s\n' "$dir" >&2
   done
 }

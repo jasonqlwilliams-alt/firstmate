@@ -203,10 +203,10 @@ start_suite_for_orphan_sweep() (
 )
 
 test_orphan_sweep_respects_fixture_ownership() {
-  local harness dirfile active_dir stale_dir fresh_dir pid tries
+  local harness dirfile active_dir legacy_dir legacy_identity stale_dir fresh_dir pid tries
   harness=$(fm_test_tmproot fm-test-cleanup-orphan-harness)
   dirfile="$harness/active-dir"
-  TZ=UTC0 FM_PROC_ROOT_OVERRIDE="$harness/no-proc" TMPDIR="$harness" bash -c '
+  TZ=EST5 FM_PROC_ROOT_OVERRIDE="$harness/no-proc" TMPDIR="$harness" bash -c '
     # shellcheck source=tests/lib.sh
     . "'"$LIB"'"
     d=$(fm_test_tmproot fm-test-cleanup-active)
@@ -223,6 +223,12 @@ test_orphan_sweep_respects_fixture_ownership() {
   [ -s "$dirfile" ] || fail "the active child never published its fixture root before the wait timed out"
   active_dir=$(cat "$dirfile")
   touch -t 202001010000 "$active_dir/.fm-test-fixture"
+
+  legacy_dir=$(mktemp -d "$harness/fm-test-cleanup-legacy.XXXXXX")
+  legacy_identity=$(TZ=PST8 LC_ALL=C ps -p "$$" -o lstart= -o command= | sed 's/^[[:space:]]*//')
+  [ -n "$legacy_identity" ] || fail "could not record the legacy fixture identity"
+  printf '%s\n%s\n' "$$" "$legacy_identity" > "$legacy_dir/.fm-test-fixture"
+  touch -t 202001010000 "$legacy_dir/.fm-test-fixture"
 
   stale_dir=$(mktemp -d "$harness/fm-test-cleanup-stale.XXXXXX")
   printf '%s\n%s\n' "$$" reused-process-identity > "$stale_dir/.fm-test-fixture"
@@ -243,9 +249,34 @@ test_orphan_sweep_respects_fixture_ownership() {
   wait "$pid" 2>/dev/null
   assert_absent "$active_dir" \
     "the active fixture root survived its owning process's teardown"
+  assert_present "$legacy_dir" \
+    "the orphan reaper removed a live fixture with a legacy local-time identity"
   rm -rf "$fresh_dir"
   pass "the orphan sweep reaps only old fixtures without a live owner"
 }
+
+test_orphan_sweep_continues_after_removal_failure() (
+  local harness stuck_dir stale_dir output
+  harness=$(fm_test_tmproot fm-test-cleanup-removal-failure)
+  stuck_dir="$harness/fm-test-01-stuck"
+  stale_dir="$harness/fm-test-02-stale"
+  mkdir "$stuck_dir" "$stale_dir"
+  touch -t 202001010000 "$stuck_dir/.fm-test-fixture" "$stale_dir/.fm-test-fixture"
+  export FM_TEST_STUCK_ORPHAN="$stuck_dir"
+  rm() {
+    [ "${!#}" != "$FM_TEST_STUCK_ORPHAN" ] || return 1
+    command rm "$@"
+  }
+  export -f rm
+
+  output=$(start_suite_for_orphan_sweep "$harness" 2>&1) ||
+    fail "the next suite could not start after a removal failure: $output"
+  assert_contains "$output" "could not remove orphaned fixture $stuck_dir" \
+    "startup omitted the failed removal diagnostic"
+  assert_present "$stuck_dir" "the fixture with a failed removal should remain"
+  assert_absent "$stale_dir" "the orphan sweep skipped the next removable fixture"
+  pass "the orphan sweep reports failed removal and continues startup"
+)
 
 test_orphan_sweep_ignores_unsafe_markers() (
   local harness fifo_dir link_dir link_marker target
@@ -329,6 +360,7 @@ test_fixture_root_gone_after_sigterm
 test_cleanup_registry_resists_precreation
 test_fixture_registration_failure_rolls_back_root
 test_orphan_sweep_respects_fixture_ownership
+test_orphan_sweep_continues_after_removal_failure
 test_orphan_sweep_ignores_unsafe_markers
 test_orphan_sweep_reaps_read_only_package_tree
 test_orphan_sweep_reaps_standalone_treehouse_scratch

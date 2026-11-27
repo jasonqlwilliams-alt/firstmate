@@ -1532,9 +1532,6 @@ families_for_changed_path() {
     bin/fm-peek.sh|bin/fm-composer*)
       printf '%s\n' backend-dispatch
       printf '%s\n' pure-contract-unit
-      if [ "$path" = bin/fm-spawn.sh ]; then
-        printf '%s\n' "__script__:fm-treehouse-lease-safety.test.sh" "__script__:fm-backend-autodetect-smoke.test.sh"
-      fi
       ;;
     bin/fm-pi-system-vault-reviewer.sh)
       printf '%s\n' backend-dispatch
