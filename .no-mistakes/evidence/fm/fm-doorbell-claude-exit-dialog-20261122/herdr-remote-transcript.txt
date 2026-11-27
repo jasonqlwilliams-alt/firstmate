@@ -1,0 +1,20 @@
+Firstmate 43a3c71e | Disposable Herdr session
+The host-local remote control command used a real Herdr server with a synthetic terminal endpoint.
+Private Herdr server is running. herdr 0.9.5
+$ <repo>/bin/fm-remote-secondmate-control.sh state mate
+[exit 0] alive
+
+$ <repo>/bin/fm-remote-secondmate-control.sh send mate 'store the remote payload while the exit dialog is open'
+[exit 0] 
+notice: the screen or lifecycle lock for fm-remote:w2:p1 prevented typing the doorbell; the steer is durably recorded at <lab>/mate/state/parent-route/mate.inbox/001.msg
+Remote inbox record 001.msg preserved payload 'store the remote payload while the exit dialog is open'.
+Real Herdr pane unchanged. The terminal input journal is empty.
+$ <repo>/bin/fm-remote-secondmate-control.sh send mate 'store the remote payload with a proven empty composer'
+[exit 0] 
+
+Remote inbox record 002.msg preserved payload 'store the remote payload with a proven empty composer'.
+Terminal received exactly one literal doorbell and one Enter: ": Firstmate instruction waiting: list '<lab>/mate/state/parent-route/mate.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<lab>/mate/state/parent-route/mate.inbox'/handled/.".
+$ herdr server stop --session fm-remote
+[exit 0] 
+
+Herdr server exit 0. Stopped session confirmed: True.

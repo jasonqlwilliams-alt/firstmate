@@ -1,261 +1,106 @@
-
-=== local delivery ===
-
-$ bin/fm-send.sh deliver 'Review the synthetic note.'
-exit=0
-●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-●  WATCHER DOWN - SUPERVISION IS OFF
-●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
-●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
-●  This is a supervision warning only; the requested message WILL still be sent.
-●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
-●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Terminal submissions: [": Firstmate instruction waiting: list '{run-worktree}/.fm-gate-live/firstmate/state/deliver.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '{run-worktree}/.fm-gate-live/firstmate/state/deliver.inbox'/handled/."]
-Handled 001.msg body: Review the synthetic note.
-
-
-=== local refusals ===
-
-$ bin/fm-send.sh block-exact 'Keep this queued.'
-exit=0
-WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
-fm-send: doorbell not typed because the screen or lifecycle lock for fm-test-block-exact:fm-block-exact blocked the doorbell; the steer is durably recorded at {run-worktree}/.fm-gate-live/firstmate/state/block-exact.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
-
-exact: 001.msg still queued and terminal received zero bytes.
-
-$ bin/fm-send.sh block-second 'Keep this queued.'
-exit=0
-WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
-fm-send: doorbell not typed because the screen or lifecycle lock for fm-test-block-second:fm-block-second blocked the doorbell; the steer is durably recorded at {run-worktree}/.fm-gate-live/firstmate/state/block-second.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
-
-Pane block-second (34,9)
-  Background work is running
-  The following will stop when you exit:
-
-  shell · Synthetic background timer
-
-    1. Exit and stop tasks
-  ❯ 2. Move to background and exit
-    3. Stay
-
-  Enter to confirm · Esc to cancel
-
-second: 001.msg still queued and terminal received zero bytes.
-
-$ bin/fm-send.sh block-blank 'Keep this queued.'
-exit=0
-WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
-fm-send: doorbell not typed because the screen or lifecycle lock for fm-test-block-blank:fm-block-blank blocked the doorbell; the steer is durably recorded at {run-worktree}/.fm-gate-live/firstmate/state/block-blank.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
-
-Pane block-blank (0,4)
-  Background work is running
-  The following will stop when you exit:
-
-  shell · Synthetic background timer
-
-  ❯ 1. Exit and stop tasks
-    2. Move to background and exit
-    3. Stay
-
-  Enter to confirm · Esc to cancel
-
-blank: 001.msg still queued and terminal received zero bytes.
-
-$ bin/fm-send.sh block-draft 'Keep this queued.'
-exit=0
-WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
-fm-send: doorbell not typed because the screen or lifecycle lock for fm-test-block-draft:fm-block-draft blocked the doorbell; the steer is durably recorded at {run-worktree}/.fm-gate-live/firstmate/state/block-draft.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
-
-Pane block-draft (2,3)
-Synthetic Claude terminal
-
-──────────────────────────────────────────────────────────────────────
-❯
-  operator draft on the next row
-──────────────────────────────────────────────────────────────────────
-
-draft: 001.msg still queued and terminal received zero bytes.
-
-$ tmux capture-pane -p -t fm-test-block-unreadable:fm-block-unreadable
-exit=75
-synthetic capture transport error
-
-$ bin/fm-send.sh block-unreadable 'Keep this queued.'
-exit=0
-WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
-fm-send: doorbell not typed because the screen or lifecycle lock for fm-test-block-unreadable:fm-block-unreadable blocked the doorbell; the steer is durably recorded at {run-worktree}/.fm-gate-live/firstmate/state/block-unreadable.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
-
-unreadable: 001.msg still queued and terminal received zero bytes.
-
-$ bin/fm-send.sh block-unreadable --key Escape
-exit=0
-WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
-
-
-=== redraw between reads ===
-
-$ bin/fm-send.sh during 'Record survives a redraw.'
-exit=0
-WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
-fm-send: doorbell typed into fm-test-during:fm-during but its Enter was withheld because the composer did not prove it holds the doorbell; the steer is durably recorded at {run-worktree}/.fm-gate-live/firstmate/state/during.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
-
-Pane during (34,9)
-  Background work is running
-  The following will stop when you exit:
-
-  shell · Synthetic background timer
-
-    1. Exit and stop tasks
-  ❯ 2. Move to background and exit
-    3. Stay
-
-  Enter to confirm · Esc to cancel
-
-Terminal read b": Firstmate instruction waiting: list '{run-worktree}/.fm-gate-live/firstmate/state/during.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '{run-worktree}/.fm-gate-live/firstmate/state/during.inbox'/handled/.". No Enter and no selected menu action.
-
-
-=== exit versus send ===
-
-$ bin/fm-send.sh lock-send 'Racing exit body.' (concurrent)
-
-$ bin/fm-control.sh lock-send exit
-exit=1
-error: another lifecycle action is already running for task lock-send
-
-exit=0
-WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
-
-Terminal submissions: [": Firstmate instruction waiting: list '{run-worktree}/.fm-gate-live/firstmate/state/lock-send.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '{run-worktree}/.fm-gate-live/firstmate/state/lock-send.inbox'/handled/."]
-Handled 001.msg body: Racing exit body.
-
-$ bin/fm-control.sh lock-send exit
-exit=1
-error: exit-delivered lock-send interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
-
-Pane lock-send (34,9)
-  Background work is running
-  The following will stop when you exit:
-
-  shell · Synthetic background timer
-
-  ❯ 1. Exit and stop tasks
-    2. Move to background and exit
-    3. Stay
-
-  Enter to confirm · Esc to cancel
-
-
-=== watcher re-ring ===
-
-$ bin/fm-control.sh watch exit (concurrent)
-
-$ bin/fm-send.sh watch 'Retry the synthetic note.'
-exit=0
-WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
-fm-send: doorbell not typed because the screen or lifecycle lock for fm-test-watch:fm-watch blocked the doorbell; the steer is durably recorded at {run-worktree}/.fm-gate-live/firstmate/state/watch.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
-
-$ bin/fm-watch.sh (concurrent)
-
-While /exit held the lifecycle lock, watcher persisted .ring-state = '001.msg\t1\t1795640953'. Pane received zero bytes.
-
-exit=1
-error: exit-delivered watch interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
-
-$ bin/fm-send.sh watch --key Escape
-exit=0
-
-
-After operator Escape and lock release, pane submissions were ['/exit', ": Firstmate instruction waiting: list '{run-worktree}/.fm-gate-live/firstmate/state/watch.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '{run-worktree}/.fm-gate-live/firstmate/state/watch.inbox'/handled/."]. Worker moved 001.msg to handled/.
-
-After observing the retry, sent SIGTERM to the disposable watcher. Its signal handler exited with status 1.
-
-
-=== native commands ===
-
-$ bin/fm-send.sh native '/rename AAAAAAAAAAAAAAAAAA + B' (concurrent)
-
-Pane native (5,4)
-Synthetic Claude terminal
-
-──────────────────────────────
-❯ /rename AAAAAAAAAAAAAAAAAA
-  + B
-──────────────────────────────
-
-exit=0
-●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-●  WATCHER DOWN - SUPERVISION IS OFF
-●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
-●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
-●  This is a supervision warning only; the requested message WILL still be sent.
-●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
-●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Native terminal submission: ['/rename AAAAAAAAAAAAAAAAAA + B']
-
-$ bin/fm-send.sh native-exact /help
-exit=1
-WARNING: watcher still down (same stale episode; last beat: 4s ago, grace 300s) - full banner already printed this episode.
-error: text not typed to fm-test-native-exact:fm-native-exact (Claude input requires control-free text, an empty composer, and the task's lifecycle lock)
-
-exact: terminal received zero bytes.
-
-$ bin/fm-send.sh native-unreadable /help
-exit=1
-WARNING: watcher still down (same stale episode; last beat: 4s ago, grace 300s) - full banner already printed this episode.
-error: text not typed to fm-test-native-unreadable:fm-native-unreadable (Claude input requires control-free text, an empty composer, and the task's lifecycle lock)
-
-unreadable: terminal received zero bytes.
-
-$ bin/fm-send.sh native-redraw /help
-exit=1
-WARNING: watcher still down (same stale episode; last beat: 4s ago, grace 300s) - full banner already printed this episode.
-error: text typed to fm-test-native-redraw:fm-native-redraw but Enter was withheld (Claude's composer did not prove it holds the text); inspect the pane before retrying
-
-When the modal replaced the composer after typing /help, the terminal saw the literal and no Enter.
-
-
-=== recovery and explicit keys ===
-
-$ bin/fm-control.sh recover interrupt
-exit=1
-error: interrupt-refused recover: Claude is showing its background-tasks exit confirmation
-
-Pane recover (34,9)
-  Background work is running
-  The following will stop when you exit:
-
-  shell · Synthetic background timer
-
-  ❯ 1. Exit and stop tasks
-    2. Move to background and exit
-    3. Stay
-
-  Enter to confirm · Esc to cancel
-
-$ bin/fm-send.sh recover --key Down
-exit=0
-WARNING: watcher still down (same stale episode; last beat: 7s ago, grace 300s) - full banner already printed this episode.
-
-$ bin/fm-send.sh recover --key Down
-exit=0
-WARNING: watcher still down (same stale episode; last beat: 7s ago, grace 300s) - full banner already printed this episode.
-
-$ bin/fm-send.sh recover --key Enter
-exit=0
-WARNING: watcher still down (same stale episode; last beat: 7s ago, grace 300s) - full banner already printed this episode.
-
-Explicit keys selected choice 3 (Stay); automatic interrupt had sent zero bytes.
-
-$ bin/fm-control.sh recover interrupt
-exit=0
-interrupt-delivered recover harness=claude backend=tmux verified=agent-alive cancel=unconfirmed
-
-After Stay, recovery delivered Escape to the empty composer.
-
-$ bin/fm-control.sh recovery-read interrupt
-exit=1
-error: interrupt-refused recovery-read: the screen did not prove an empty Claude composer (unknown)
-
-Recovery also delivered zero bytes when capture failed on a writable pane.
+Firstmate 43a3c71e | Disposable tmux session
+Firstmate commands ran against a synthetic terminal endpoint with a real PTY.
+The tmux launcher forwarded to the real server. Selected cases injected a capture error or paused before an Enter.
+The key journal was recorded at the terminal endpoint. Supervisor warnings from the intentionally detached lab were omitted.
+
+=== watcher ===
+$ <repo>/bin/fm-send.sh rering 'retry this queued synthetic request'
+[exit 0]
+fm-send: doorbell not typed because the screen or lifecycle lock for proof:fm-rering blocked the doorbell; the steer is durably recorded at <lab>~/rering.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+Durable record 001.msg contains the original payload 'retry this queued synthetic request'.
+$ <repo>/bin/fm-watch.sh
+Watcher retry state after refusal:
+001.msg	1	1795739477
+Terminal input journal is empty.
+Terminal received exactly one literal line and one Enter: ": Firstmate instruction waiting: list '<lab>~/rering.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<lab>~/rering.inbox'/handled/."
+Watcher outcomes from its triage log:
+[2026-11-26T16:31:17-0800] steer-inbox delivery attempt: rering 001.msg result=1
+[2026-11-26T16:31:20-0800] steer-inbox delivery attempt: rering 001.msg result=0
+Sending the watcher a shutdown signal after observing both retry outcomes.
+Watcher exit 1. 
+PASS watcher
+
+=== local-ready ===
+$ <repo>/bin/fm-send.sh local 'inspect the synthetic build status'
+[exit 0]
+Durable record 001.msg contains the original payload 'inspect the synthetic build status'.
+Terminal received exactly one literal line and one Enter: ": Firstmate instruction waiting: list '<lab>~/local.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<lab>~/local.inbox'/handled/."
+PASS local-ready
+
+=== local-near-miss ===
+$ <repo>/bin/fm-send.sh modal 'leave this steer queued'
+[exit 0]
+fm-send: doorbell not typed because the screen or lifecycle lock for proof:fm-modal blocked the doorbell; the steer is durably recorded at <lab>~/modal.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+Durable record 001.msg contains the original payload 'leave this steer queued'.
+Terminal input journal is empty.
+PASS local-near-miss
+
+=== local-unreadable ===
+$ tmux capture-pane -p -t proof:fm-unreadable
+[exit 1] synthetic capture transport failure
+$ <repo>/bin/fm-send.sh unreadable 'store while capture is unavailable'
+[exit 0]
+fm-send: doorbell not typed because the screen or lifecycle lock for proof:fm-unreadable blocked the doorbell; the steer is durably recorded at <lab>~/unreadable.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+Durable record 001.msg contains the original payload 'store while capture is unavailable'.
+Terminal input journal is empty.
+$ <repo>/bin/fm-send.sh unreadable --key Escape
+[exit 0]
+An explicit key reached the same real tmux pane while capture was faulted.
+PASS local-unreadable
+
+=== between-reads ===
+$ <repo>/bin/fm-send.sh between 'retain this steer when the confirmation opens'
+[exit 0]
+fm-send: doorbell typed into proof:fm-between but its Enter was withheld because the composer did not prove it holds the doorbell; the steer is durably recorded at <lab>~/between.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+Durable record 001.msg contains the original payload 'retain this steer when the confirmation opens'.
+The complete literal doorbell reached the terminal. The independent key journal contains no Enter.
+PASS between-reads
+
+=== lifecycle ===
+$ <repo>/bin/fm-control.sh lock exit
+$ <repo>/bin/fm-send.sh lock 'queue this while exit owns the terminal'
+[exit 0]
+fm-send: doorbell not typed because the screen or lifecycle lock for proof:fm-lock blocked the doorbell; the steer is durably recorded at <lab>~/lock.inbox/001.msg and the watcher will retry, then escalate it as a stuck steer
+Durable record 001.msg contains the original payload 'queue this while exit owns the terminal'.
+$ <repo>/bin/fm-send.sh lock /help
+[exit 1]
+error: text not typed to proof:fm-lock (Claude input requires control-free text, an empty composer, and the task's lifecycle lock)
+[exit 1] error: exit-delivered lock interrupt=not-needed exit-command=delivered agent-state=alive exit=unconfirmed; Claude is showing its background-tasks exit confirmation because the session still runs background tasks, and no key was sent to it
+$ <repo>/bin/fm-send.sh lock --key Escape
+[exit 0]
+$ <repo>/bin/fm-send.sh lock 'send owns the terminal until its final Enter'
+$ <repo>/bin/fm-control.sh lock exit
+[exit 1] error: another lifecycle action is already running for task lock
+[exit 0]
+Durable record 002.msg contains the original payload 'send owns the terminal until its final Enter'.
+Terminal received exactly one literal line and one Enter: ": Firstmate instruction waiting: list '<lab>~/lock.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '<lab>~/lock.inbox'/handled/."
+PASS lifecycle
+
+=== native ===
+$ <repo>/bin/fm-send.sh native '/rename RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR + B'
+[exit 0]
+Terminal received exactly one literal line and one Enter: '/rename RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR + B'
+$ <repo>/bin/fm-send.sh native /help
+[exit 1]
+error: text not typed to proof:fm-native (Claude input requires control-free text, an empty composer, and the task's lifecycle lock)
+Terminal input journal is empty.
+$ <repo>/bin/fm-send.sh native /help
+[exit 1]
+error: text typed to proof:fm-native but Enter was withheld (Claude's composer did not prove it holds the text); inspect the pane before retrying
+$ <repo>/bin/fm-send.sh native /help
+[exit 3]
+fm-send: text delivered to proof:fm-native but submission is unconfirmed (verdict=exit-confirm; tried meta=<lab>~/native.meta; backend=from-meta); do not retype or blindly resend - verify with fm-peek.sh, then re-send '--key Enter' only if the composer still holds the text
+Terminal received exactly one literal line and one Enter: '/help'
+PASS native
+
+=== recovery ===
+$ <repo>/bin/fm-control.sh interrupt interrupt
+[exit 1] error: interrupt-refused interrupt: Claude is showing its background-tasks exit confirmation
+Terminal input journal is empty.
+$ <repo>/bin/fm-send.sh interrupt --key Escape
+[exit 0]
+$ <repo>/bin/fm-control.sh interrupt interrupt
+[exit 0] interrupt-delivered interrupt harness=claude backend=tmux verified=agent-alive cancel=unconfirmed
+One explicit Escape reached the modal. One automatic recovery Escape reached the now-empty composer.
+PASS recovery
+Private tmux server stopped. All Firstmate subprocesses were reaped.
