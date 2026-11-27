@@ -40,6 +40,7 @@ test_scratch_cleanup_failure_changes_only_a_successful_exit() {
   for status in 0 7; do
     expected=$status
     [ "$status" -ne 0 ] || expected=1
+    # shellcheck disable=SC2016 # The child Bash expands its own variables and arguments.
     output=$(TMPDIR="$harness" env -u TREEHOUSE_ROOT -u FM_TEST_TREEHOUSE_DIR bash -uc '
       . "$1"
       printf "%s\n" "$TREEHOUSE_ROOT" > "$3/refused"
@@ -69,6 +70,7 @@ test_custom_exit_chains_scratch_cleanup() {
   local harness output rc status root
   harness=$(fm_test_tmproot fm-test-custom-exit)
   for status in 0 7; do
+    # shellcheck disable=SC2016 # The child Bash expands the script and evaluates $? when its trap runs.
     output=$(TMPDIR="$harness" env -u TREEHOUSE_ROOT -u FM_TEST_TREEHOUSE_DIR bash -uc '
       . "$1"
       cleanup() {
@@ -297,6 +299,7 @@ test_orphan_sweep_ignores_unsafe_markers() (
   . "$ROOT/bin/fm-timeout-lib.sh"
   export LIB
   export -f start_suite_for_orphan_sweep
+  # shellcheck disable=SC2016 # The child Bash expands its own positional argument.
   fm_run_timed 10 bash -c 'start_suite_for_orphan_sweep "$1"' _ "$harness" ||
     fail "suite startup did not complete with an unsafe fixture marker"
   [ -p "$fifo_dir/.fm-test-fixture" ] || fail "startup touched a FIFO marker fixture"
@@ -328,6 +331,7 @@ test_orphan_sweep_reaps_standalone_treehouse_scratch() {
   local harness receipt scratch pid attempt
   harness=$(fm_test_tmproot fm-test-cleanup-treehouse)
   receipt="$harness/scratch-path"
+  # shellcheck disable=SC2016 # The child Bash expands its own variables and arguments.
   TMPDIR="$harness" env -u TREEHOUSE_ROOT -u FM_TEST_TREEHOUSE_DIR bash -ec '
     . "$1"
     mkdir "$TREEHOUSE_ROOT/slot"

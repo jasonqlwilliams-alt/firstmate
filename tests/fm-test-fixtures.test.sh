@@ -59,6 +59,7 @@ if [ -n "${FM_TEST_CANCEL_DIR:-}" ]; then
   exit 1
 fi
 SH
+  # shellcheck disable=SC2030 # The fake Treehouse PATH belongs only to this test's subshell.
   export HOME="$home" PATH="$dir/tools:$PATH" TMPDIR="$tmp"
   export FM_TEST_ROOT_RECEIPT="$dir/root" FM_TEST_POOL_RECEIPT="$dir/pool"
   unset FM_TEST_TREEHOUSE_BIN FM_TEST_TREEHOUSE_DIR
@@ -233,6 +234,7 @@ SH
     done
   done
   rc=0
+  # shellcheck disable=SC2031 # This fixture uses its own fake tools and the inherited PATH.
   FM_SESSIONSTART_INSTRUCTION_REFRESH_LIVE_E2E=1 FM_SESSIONSTART_INSTRUCTION_REFRESH_REF=HEAD \
     FM_SESSIONSTART_INSTRUCTION_REFRESH_EXPECT=updated \
     FM_TEST_STANDALONE_COMMIT="$dir/global-standalone-commit" PATH="$fakebin:$PATH" \
