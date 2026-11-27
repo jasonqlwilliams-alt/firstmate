@@ -49,13 +49,11 @@
 # fm-crew-state.sh as the sole current-state source.
 # Only a done or failed state is suspicious enough to create a durable terminal
 # outcome record or wake the supervisor.
-# One failed reading is not a failure: a validation run the child cancelled on
-# purpose because the repository registers no CI, recorded by the child's last
-# status line being a declared pause and by a still-armed PR registration
-# (bin/fm-pr-check.sh) for the PR in its metadata that local state has not
-# recorded as merged, closed, or retired. That PR is ready and open, awaiting a
-# merge decision, so the child is left to its pause instead of reported failed
-# (cancelled_ready_pr_awaiting_merge). Any other failed reading still reports.
+# A cancelled run is left paused when its latest CI marker reports no checks,
+# the child's latest status declares a pause, and the run's PR matches the
+# still-armed PR registration (bin/fm-pr-check.sh). Local merge, closure, or
+# retirement records disqualify the PR. A recorded closure also disqualifies a
+# reopened PR. Other failed readings still report.
 # Working, paused, parked, blocked, unknown, persistent secondmates, and
 # captain-held work retain their existing supervision semantics.
 #
@@ -337,27 +335,17 @@ pr_for_task() { # <meta> [preferred-line]
   clean_field "$value"
 }
 
-# 0 when a failed current-state reading is a deliberate no-CI cancellation
-# whose PR is ready and open (see the header): the run-step reports exactly a
-# cancelled run, the child's newest status line declares a pause, and the PR
-# recorded in metadata still has its valid armed registration with no local
-# merge, closure, or retirement record. Local durable evidence only.
-cancelled_ready_pr_awaiting_merge() { # <id> <meta> <state-line> <last-status-line>
-  local id=$1 meta=$2 state_line=$3 last=$4 pr
-  [ "$state_line" = "state: failed · source: run-step · run cancelled" ] || return 1
+cancelled_ready_pr_awaiting_merge() { # <id> <state-line> <last-status-line>
+  local id=$1 state_line=$2 last=$3
+  local prefix='state: failed · source: run-step · run cancelled · no CI checks reported for PR: '
+  [[ "$state_line" == "$prefix"* ]] || return 1
   status_is_paused "$last" || return 1
-  [ "$(meta_field "$meta" kind)" != scout ] || return 1
-  pr=$(meta_field "$meta" pr)
-  fm_pr_url_parse "$pr" || return 1
-  [ "$FM_PR_URL" = "$pr" ] || return 1
   fm_pr_poll_artifacts_valid "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" || return 1
-  [ "$FM_PR_REG_URL" = "$pr" ] || return 1
-  # The registration check reparses other URLs; restore this PR's identity.
-  fm_pr_url_parse "$pr" || return 1
+  [ "$FM_PR_REG_URL" = "${state_line#"$prefix"}" ] || return 1
   ! fm_pr_poll_merge_already_notified "$STATE" "$id" \
-      "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" \
-    && ! { fm_pr_poll_retirement_receipt_valid "$STATE" "$id" && [ "$FM_PR_RETIRE_URL" = "$pr" ]; } \
-    && ! fm_pr_poll_closed_recorded "$STATE" "$id" "$pr"
+      "$FM_PR_REG_PROVIDER" "$FM_PR_REG_HOST" "$FM_PR_REG_PATH" "$FM_PR_REG_NUMBER" \
+    && ! { fm_pr_poll_retirement_receipt_valid "$STATE" "$id" && [ "$FM_PR_RETIRE_URL" = "$FM_PR_REG_URL" ]; } \
+    && ! fm_pr_poll_closed_recorded "$STATE" "$id" "$FM_PR_REG_URL"
 }
 
 home_secondmate_id() {
@@ -521,7 +509,7 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
   age=$(last_activity_age "$meta" "$status" "$turn")
   [ "$age" -ge "$FM_INACTIVE_RECONCILE_SECS" ] || return 0
   state_line=$(fm_run_timed "$timeout" env FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
-    "$CREW_STATE_BIN" "$id" 2>/dev/null) || state_rc=$?
+    FM_CREW_STATE_REPORT_CANCELLED_NO_CI=1 "$CREW_STATE_BIN" "$id" 2>/dev/null) || state_rc=$?
   [ "$state_rc" -ne 124 ] || return 3
   last=$(last_status_line "$status")
   if [ -n "$self" ]; then
@@ -533,7 +521,7 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
     *) return 0 ;;
   esac
   if [ "$state" = failed ] \
-    && cancelled_ready_pr_awaiting_merge "$id" "$meta" "$state_line" "$last"; then
+    && cancelled_ready_pr_awaiting_merge "$id" "$state_line" "$last"; then
     return 0
   fi
   pr=$(pr_for_task "$meta")

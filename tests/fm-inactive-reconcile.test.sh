@@ -147,7 +147,7 @@ prime_seen() { # <state> <status>
 # whose current state is read by the REAL fm-crew-state.sh, with a fake
 # no-mistakes reporting that run for the child's own worktree branch and head.
 NO_CI_PR=https://github.com/owner/repo/pull/7
-write_validated_child() { # <home> <id> <status-line> <run-outcome>
+write_validated_child() { # <home> <id> <status-line> <run-outcome> [run-pr]
   local home=$1 id=$2 status=$3 outcome=$4 wt gen head branch
   wt="$home/projects/$id"
   mkdir -p "$wt"
@@ -166,14 +166,17 @@ run:
   id: "run-$id"
   branch: $branch
   head: "$head"
+  pr: "${5:-$NO_CI_PR}"
   status: $outcome
   outcome: $outcome
 RUN
+  printf '%s\n' 'no CI checks reported yet, waiting for checks to register...' > "$home/ci.log"
   cat > "$WORLD/fakebin/no-mistakes" <<'SH'
 #!/usr/bin/env bash
-if [ "${1:-}" = axi ] && [ "${2:-}" = status ]; then
-  cat "$FM_HOME/run.txt"
-fi
+case "$*" in
+  'axi status') cat "$FM_HOME/run.txt" ;;
+  'axi logs --step ci --run run-child') cat "$FM_HOME/ci.log" ;;
+esac
 SH
   chmod +x "$WORLD/fakebin/no-mistakes"
   printf '%s\n' "$status" > "$home/state/$id.status"
@@ -199,7 +202,10 @@ run_real_reconcile() { # <home>
   age "$home/state/child.meta" "$home/state/child.status"
   PATH="$WORLD/fakebin:$PATH" FM_ROOT_OVERRIDE="$WORLD/root" FM_HOME="$home" \
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" FM_CONFIG_OVERRIDE="$home/config" \
-    FM_INACTIVE_RECONCILE_SECS=60 FM_FORGE_LOG="$WORLD/forge.log" "$RECON" scan --startup
+    FM_INACTIVE_RECONCILE_SECS=60 FM_FORGE_LOG="$WORLD/forge.log" "$RECON" scan --startup \
+    || fail "inactive reconciliation scan failed for $home"
+  grep -Fxq 'cursor=' "$home/state/.inactive-outcome-reconcile" \
+    || fail "inactive reconciliation did not complete its pass for $home"
   [ ! -s "$WORLD/forge.log" ] || fail "reconciliation invoked a forge command: $(cat "$WORLD/forge.log")"
 }
 
@@ -921,6 +927,19 @@ test_cancellation_without_full_evidence_still_reports_failed() {
   register_pr "$MAIN" child
   run_real_reconcile "$MAIN"
   [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a cancellation without a declared pause was not reported failed"
+
+  make_world cancel-unrelated-pause
+  write_validated_child "$MAIN" child 'paused: waiting for the CI runner repair' cancelled
+  printf '%s\n' 'CI checks running, waiting for results...' 'checks failed' >> "$MAIN/ci.log"
+  register_pr "$MAIN" child
+  run_real_reconcile "$MAIN"
+  [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a cancellation during an unrelated pause was not reported failed"
+
+  make_world cancel-other-pr
+  write_validated_child "$MAIN" child "$NO_CI_PAUSE" cancelled https://github.com/owner/repo/pull/8
+  register_pr "$MAIN" child
+  run_real_reconcile "$MAIN"
+  [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a cancellation for a different PR was not reported failed"
 
   make_world cancel-no-registration
   write_validated_child "$MAIN" child "$NO_CI_PAUSE" cancelled

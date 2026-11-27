@@ -93,6 +93,8 @@
 #
 # Read-only and side-effect free. Always exits 0 on a successful read regardless
 # of state; exit 2 only on a usage error (no id).
+# FM_CREW_STATE_REPORT_CANCELLED_NO_CI=1 lets the inactive scan request the PR
+# from an attributed cancelled run whose latest CI marker reports no checks.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -524,7 +526,8 @@ nm_ci_checks_state() {
   case "$marker" in
     *"checks passed"*) printf 'green' ;;
     *"no CI checks reported - still monitoring"*) printf 'no-checks' ;;
-    *"no CI checks reported yet"*|*"checks failed"*|*"issues detected"*|*"CI checks running"*|*"base branch advanced"*"re-arming CI monitor timeout"*) printf 'not-ready' ;;
+    *"no CI checks reported yet"*) printf 'no-checks-yet' ;;
+    *"checks failed"*|*"issues detected"*|*"CI checks running"*|*"base branch advanced"*"re-arming CI monitor timeout"*) printf 'not-ready' ;;
     *) printf 'unknown' ;;
   esac
 }
@@ -739,9 +742,10 @@ if [ "$HAVE_RUN" = 1 ]; then
     elif [ "$CI_STEP_STATUS" = fixing ]; then
       CI_LOG_STATE=not-ready
     fi
-    if [ "$CI_LOG_STATE" != not-ready ]; then
-      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR"
-    fi
+    case "$CI_LOG_STATE" in
+      not-ready|no-checks-yet) ;;
+      *) emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR" ;;
+    esac
   fi
 
   # Reconcile the status log. A needs-decision/blocked log line that the run-step
@@ -782,6 +786,13 @@ if [ "$HAVE_RUN" = 1 ]; then
       checks\ green:*)
         [ -z "$RUN_PR" ] || RUN_DETAIL="$RUN_DETAIL${SEP}run PR: $RUN_PR"
         ;;
+    esac
+  fi
+  if [ "${FM_CREW_STATE_REPORT_CANCELLED_NO_CI:-0}" = 1 ] \
+    && [ "$RUN_DETAIL" = 'run cancelled' ] && [ -n "$RUN_PR" ] \
+    && status_is_paused "$LOG_LINE"; then
+    case "$(nm_ci_checks_state)" in
+      no-checks|no-checks-yet) RUN_DETAIL="$RUN_DETAIL${SEP}no CI checks reported for PR: $RUN_PR" ;;
     esac
   fi
   emit "$RUN_STATE" run-step "$RUN_DETAIL"
