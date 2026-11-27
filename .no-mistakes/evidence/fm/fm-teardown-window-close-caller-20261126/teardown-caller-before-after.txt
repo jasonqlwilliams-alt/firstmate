@@ -1,0 +1,38 @@
+Disposable Linux tmux sessions and synthetic Firstmate task records
+Base 6757ce42aa099dbfca426bc3967f10b6985b7867
+Target 8e9a5e00b5515f82e621a8273c6e7a30c0ee8ef3
+tmux 3.7c
+
+--- base-caller ---
+session='safety' caller=%2 tty=/dev/pts/41 active=0 caller_window=target
+Before teardown:
+@0 control panes=1
+@1 fm-target panes=2
+After teardown:
+@0 control panes=1
+task_record_present=True
+caller_signal=SIGHUP
+
+--- fixed-caller ---
+session='safety' caller=%2 tty=/dev/pts/41 active=0 caller_window=target
+Before teardown:
+@0 control panes=1
+@1 fm-target panes=2
+After teardown:
+@0 control panes=1
+@1 fm-target panes=2
+task_record_present=False
+Live caller pane %2: (excerpt)
+warning: leaving tmux window safety:fm-target open: pane PID 2318020 is teardown or its ancestor
+caller still running, teardown exit 0
+
+--- fixed-external ---
+session='ops.v2 #[blue],};' caller=%2 tty=/dev/pts/41 active=0 caller_window=control
+Before teardown:
+@0 control panes=2
+@1 fm-target panes=1
+After teardown:
+@0 control panes=2
+task_record_present=False
+Live caller pane %2: (excerpt)
+caller still running, teardown exit 0

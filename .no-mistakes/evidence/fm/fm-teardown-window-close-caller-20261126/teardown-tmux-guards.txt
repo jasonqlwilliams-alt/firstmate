@@ -1,0 +1,93 @@
+
+fm-teardown: a foreground-server job leaves its originating window open
+warning: leaving tmux window foreground:fm-target open: teardown was launched by the target tmux server
+foreground @0 control panes=1
+foreground @1 fm-target panes=1
+
+fm-teardown: a different pane session can close the recorded target
+foreground @0 control panes=1
+
+fm-teardown: missing exact windows and unreadable pane PIDs prevent the tmux close
+warning: leaving tmux window endpoint.v2 #S,} #[blue] safety:fm-prefix open: cannot verify the exact window and its pane inventory
+warning: leaving tmux window endpoint.v2 #S,} #[blue] safety:fm-target open: cannot verify the exact window and its pane inventory
+endpoint.v2 #S,} #[blue] safety @0 control panes=1
+endpoint.v2 #S,} #[blue] safety @1 fm-target panes=1
+endpoint.v2 #S,} #[blue] safety @2 fm-prefix2 panes=1
+
+Duplicate window case with blank row for @1
+warning: leaving tmux window endpoint.v2 #S,} #[blue] safety:fm-target open: cannot verify the exact window and its pane inventory
+@0 control panes=1
+@1 fm-target panes=1
+@2 fm-prefix2 panes=1
+@3 fm-target panes=1
+
+Duplicate window case with blank row for @3
+warning: leaving tmux window endpoint.v2 #S,} #[blue] safety:fm-target open: cannot verify the exact window and its pane inventory
+@0 control panes=1
+@1 fm-target panes=1
+@2 fm-prefix2 panes=1
+@3 fm-target panes=1
+
+fm-teardown: unreadable caller ancestry prevents the tmux close
+warning: leaving tmux window endpoint.v2 #S,} #[blue] safety:fm-target open: cannot verify teardown caller ancestry
+endpoint.v2 #S,} #[blue] safety @0 control panes=1
+endpoint.v2 #S,} #[blue] safety @1 fm-target panes=1
+endpoint.v2 #S,} #[blue] safety @2 fm-prefix2 panes=1
+
+fm-teardown: a background caller in the inactive tmux pane survives and cleanup finishes
+warning: leaving tmux window endpoint.v2 #S,} #[blue] safety:fm-target open: pane PID 2472503 is teardown or its ancestor
+endpoint.v2 #S,} #[blue] safety @0 control panes=1
+endpoint.v2 #S,} #[blue] safety @1 fm-target panes=2
+endpoint.v2 #S,} #[blue] safety @2 fm-prefix2 panes=1
+
+fm-teardown: the controlling terminal protects a reparented background caller
+warning: leaving tmux window endpoint.v2 #S,} #[blue] safety:fm-target open: pane %4 uses teardown's controlling terminal /dev/pts/46
+endpoint.v2 #S,} #[blue] safety @0 control panes=1
+endpoint.v2 #S,} #[blue] safety @1 fm-target panes=2
+endpoint.v2 #S,} #[blue] safety @2 fm-prefix2 panes=1
+
+fm-teardown: a server-launched job leaves its originating window open
+warning: leaving tmux window endpoint.v2 #S,} #[blue] safety:fm-target open: teardown was launched by the target tmux server
+endpoint.v2 #S,} #[blue] safety @0 control panes=1
+endpoint.v2 #S,} #[blue] safety @1 fm-target panes=2
+endpoint.v2 #S,} #[blue] safety @2 fm-prefix2 panes=1
+
+fm-teardown: the launch pane marker protects a pane outside caller ancestry
+warning: leaving tmux window endpoint.v2 #S,} #[blue] safety:fm-target open: it contains teardown's launch pane %4
+endpoint.v2 #S,} #[blue] safety @0 control panes=1
+endpoint.v2 #S,} #[blue] safety @1 fm-target panes=2
+endpoint.v2 #S,} #[blue] safety @2 fm-prefix2 panes=1
+
+fm-teardown: tmux refuses a close when the verified pane inventory changes
+warning: tmux window endpoint.v2 #S,} #[blue] safety:fm-target close could not be confirmed against the verified window and pane snapshot
+endpoint.v2 #S,} #[blue] safety @0 control panes=1
+endpoint.v2 #S,} #[blue] safety @1 fm-target panes=3
+endpoint.v2 #S,} #[blue] safety @2 fm-prefix2 panes=1
+
+fm-teardown: tmux refuses a close after a window rename or session move
+warning: tmux window endpoint.v2 #S,} #[blue] safety:fm-target close could not be confirmed against the verified window and pane snapshot
+warning: tmux window endpoint.v2 #S,} #[blue] safety:fm-target close could not be confirmed against the verified window and pane snapshot
+endpoint.v2 #S,} #[blue] safety @0 control panes=1
+endpoint.v2 #S,} #[blue] safety @1 fm-target panes=3
+endpoint.v2 #S,} #[blue] safety @2 fm-prefix2 panes=1
+relocated @4 relocated-control panes=1
+
+fm-teardown: tmux preserves the attached window when its recorded session name is wrong or changes
+warning: leaving tmux window client-2504301:fm-target open: cannot verify the exact window and its pane inventory
+warning: tmux window endpoint.v2 #S,} #[blue] safety:fm-target close could not be confirmed against the verified window and pane snapshot
+endpoint.v2 #S,} #[blue] safety @0 control panes=1
+endpoint.v2 #S,} #[blue] safety @1 fm-target panes=3
+endpoint.v2 #S,} #[blue] safety @2 fm-prefix2 panes=1
+relocated @4 relocated-control panes=1
+
+fm-teardown: exact tmux cleanup preserves invalid and prefix-matched neighbors while removing only the recorded target
+endpoint.v2 #S,} #[blue] safety @0 control panes=1
+endpoint.v2 #S,} #[blue] safety @2 fm-prefix2 panes=1
+relocated @4 relocated-control panes=1
+
+fm-teardown: forced cleanup preserves a changed child and closes the unchanged child
+warning: tmux window endpoint.v2 #S,} #[blue] safety:fm-changed close could not be confirmed against the verified window and pane snapshot
+endpoint.v2 #S,} #[blue] safety @0 control panes=1
+endpoint.v2 #S,} #[blue] safety @2 fm-prefix2 panes=1
+endpoint.v2 #S,} #[blue] safety @6 fm-changed panes=2
+relocated @4 relocated-control panes=1
