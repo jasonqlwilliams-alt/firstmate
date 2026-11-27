@@ -965,6 +965,44 @@ RUN
   pass "registered-PR cancellations produce a supervisor wake and actionable parent reports"
 }
 
+test_published_cancellation_stays_delivered_after_merge() {
+  local parent_status
+  make_world cancellation-merge-retirement; bind_secondmate local
+  write_validated_child "$MATE" child "$CANCEL_PAUSE" cancelled
+  register_pr "$MATE" child
+  run_real_reconcile "$MATE"
+  parent_status="$MAIN/state/mate.status"
+  [ "$(grep -c '^done \[key=inactive-outcome-mate-child-cancelled\]' "$parent_status")" = 1 ] \
+    || fail "fixture did not deliver the cancellation before merge"
+
+  prime_seen "$MATE/state" "$MATE/state/child.status"
+  cat > "$WORLD/fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' gh >> "${FM_FORGE_LOG:?}"
+[ "$*" = 'pr view https://github.com/owner/repo/pull/7 --repo owner/repo --json state -q .state' ] || exit 97
+printf '%s\n' MERGED
+SH
+  bash -c '. "$1"; shift; fm_run_timed 10 "$@"' _ "$ROOT/bin/fm-timeout-lib.sh" \
+    env PATH="$WORLD/fakebin:$PATH" FM_ROOT_OVERRIDE="$WORLD/root" FM_HOME="$MATE" \
+      FM_STATE_OVERRIDE="$MATE/state" FM_DATA_OVERRIDE="$MATE/data" FM_CONFIG_OVERRIDE="$MATE/config" \
+      FM_FORGE_LOG="$WORLD/forge.log" FM_INACTIVE_RECONCILE_SECS=60 \
+      FM_POLL=1 FM_SIGNAL_GRACE=0 FM_CHECK_INTERVAL=0 FM_HEARTBEAT=999999 \
+      "$WATCH" > "$WORLD/watch.log" 2>&1 || fail "merge watcher failed: $(cat "$WORLD/watch.log")"
+  grep -Fxq "done [key=merged-child]: merged child $CANCEL_PR" "$parent_status" \
+    || fail "watcher did not report the merge"
+  [ ! -e "$MATE/state/child.pr-poll-registration" ] || fail "watcher did not retire the PR poll"
+
+  run_real_reconcile "$MATE"
+  [ "$(grep -c 'inactive-outcome-mate-child-' "$parent_status")" = 1 ] \
+    || fail "merge retirement duplicated the cancellation already published to the parent: $(cat "$parent_status")"
+
+  write_validation_outcome "$MATE" child run-retry cancelled "$CANCEL_PR" "$((CANCEL_PAUSE_TIME + 15))"
+  run_real_reconcile "$MATE"
+  [ "$(grep -c '^failed \[key=inactive-outcome-mate-child-failed\]' "$parent_status")" = 1 ] \
+    || fail "merge retirement hid a later cancellation outside the declared pause"
+  pass "merge retirement preserves the published cancellation and reports a later retry"
+}
+
 test_other_terminal_failures_keep_failed_label() {
   make_world cancel-no-registration
   write_validated_child "$MAIN" child "$CANCEL_PAUSE" cancelled
@@ -1180,6 +1218,7 @@ test_notice_recovery_does_not_duplicate_wake
 test_missing_parent_binding_names_itself
 test_reconciliation_never_calls_forge
 test_cancelled_run_with_registered_pr_reports_awaiting_merge
+test_published_cancellation_stays_delivered_after_merge
 test_other_terminal_failures_keep_failed_label
 test_unrelated_cancellation_keeps_failure_notice
 test_unpublished_cancellation_reports_failure_after_closure

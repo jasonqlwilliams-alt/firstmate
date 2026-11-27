@@ -339,8 +339,8 @@ pr_for_task() { # <meta> [preferred-line]
   clean_field "$value"
 }
 
-cancelled_run_declared_for_registered_pr() { # <id> <crew-state> <last-status-line> <status-file>
-  local id=$1 state_line=$2 last=$3 status=$4 evidence started run_pr paused
+cancelled_run_declared_for_pr() { # <meta> <crew-state> <last-status-line> <status-file>
+  local meta=$1 state_line=$2 last=$3 status=$4 evidence started run_pr paused
   local prefix='state: failed · source: run-step · run cancelled · run started: '
   local separator=' · run PR: '
   [[ "$state_line" == "$prefix"*"$separator"* ]] || return 1
@@ -348,10 +348,10 @@ cancelled_run_declared_for_registered_pr() { # <id> <crew-state> <last-status-li
   evidence=${state_line#"$prefix"}
   started=${evidence%%"$separator"*}
   run_pr=${evidence#*"$separator"}
-  fm_pr_poll_artifacts_valid "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" || return 1
-  [ "$run_pr" = "$FM_PR_REG_URL" ] || return 1
+  fm_pr_metadata_identity_parse "$meta" || return 1
+  [ "$run_pr" = "$FM_PR_META_URL" ] || return 1
   case "$(status_line_note "$last")" in
-    "PR $FM_PR_REG_URL open; "*"; cancelled because CI never registers on this repository") ;;
+    "PR $FM_PR_META_URL open; "*"; cancelled because CI never registers on this repository") ;;
     *) return 1 ;;
   esac
   paused=$(file_mtime "$status") && paused=$(utc_minute "$paused") || return 1
@@ -557,12 +557,20 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
   esac
   label=$outcome
   pr=''
-  if [ "$outcome" = failed ] && cancelled_run_declared_for_registered_pr "$id" "$state_line" "$last" "$status"; then
-    outcome=cancelled
-    pr=$(clean_field "$FM_PR_REG_URL")
-    if ! fm_pr_poll_terminal_recorded "$STATE" "$id" \
-      "$FM_PR_REG_PROVIDER" "$FM_PR_REG_HOST" "$FM_PR_REG_PATH" "$FM_PR_REG_NUMBER" "$FM_PR_REG_URL"; then
-      label=cancelled
+  if [ "$outcome" = failed ] && cancelled_run_declared_for_pr "$meta" "$state_line" "$last" "$status"; then
+    if fm_pr_poll_artifacts_valid "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh"; then
+      outcome=cancelled
+      pr=$FM_PR_REG_URL
+      if ! fm_pr_poll_terminal_recorded "$STATE" "$id" \
+        "$FM_PR_REG_PROVIDER" "$FM_PR_REG_HOST" "$FM_PR_REG_PATH" "$FM_PR_REG_NUMBER" "$pr"; then
+        label=cancelled
+      fi
+    # The watcher removes the poll after a merge. Its merge marker preserves
+    # the PR identity needed to find the prior cancellation receipt.
+    elif fm_pr_poll_merge_already_notified "$STATE" "$id" \
+      "$FM_PR_META_PROVIDER" "$FM_PR_META_HOST" "$FM_PR_META_PATH" "$FM_PR_META_NUMBER"; then
+      outcome=cancelled
+      pr=$FM_PR_META_URL
     fi
   fi
   [ -n "$pr" ] || pr=$(pr_for_task "$meta")
