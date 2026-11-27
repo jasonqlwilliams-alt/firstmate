@@ -627,9 +627,9 @@ export default function (pi: ExtensionAPI) {
     const taskIdentity = (key: string): string => taskForWakeKey(scope.taskByWakeKey, key) ?? key;
     const needsDecisionTasks = new Set(scope.needsDecisionKeys.map(taskIdentity));
     const isNeedsDecisionTrigger = triggerKeys.some((key) => needsDecisionTasks.has(taskIdentity(key)));
-    const isSharedPaneTrigger = staleKey !== undefined && taskForWakeKey(scope.taskByWakeKey, staleKey) === null;
+    const isAmbiguousStaleTrigger = staleKey !== undefined && taskForWakeKey(scope.taskByWakeKey, staleKey) === null;
     const eligible = !isCheckTrigger && !isNamedEndpointLoss(message) && !isNeedsDecisionTrigger &&
-      !isSharedPaneTrigger && scope.eligible;
+      !isAmbiguousStaleTrigger && scope.eligible;
     const offer = createBranchDispatchOffer(message, scope.projects, heartbeat, eligible);
     pi.events?.emit?.(FM_BRANCH_DISPATCH_EVENT, offer);
     return offer.accepted ? offer.settlement : null;

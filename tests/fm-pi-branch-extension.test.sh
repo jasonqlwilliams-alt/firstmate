@@ -1788,20 +1788,24 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 await fire("session_start", {});
 const scenario = process.env.FM_TEST_SCENARIO;
 const stale = "stale: shared:w1:p2";
+const staleTrigger = scenario === "shared-trigger" || scenario === "moved-trigger";
+const loss = "stale\tshared:w1:p2\tstale: shared:w1:p2 (the recorded endpoint is gone for task a-lost)";
 const queuePath = `${home}/state/.wake-queue`;
-if (scenario === "second-loss" || scenario === "shared-trigger") {
+if (scenario === "second-loss" || staleTrigger) {
   writeFileSync(`${home}/state/z-live.meta`, `project=${home}/projects/live\nwindow=shared:w1:p2\n`);
 }
 let releasePrompt;
-if (scenario !== "shared-trigger") {
+if (!staleTrigger) {
   globalThis.__fmPromptGate = new Promise((resolve) => { releasePrompt = resolve; });
 }
-const offer = dispatch(scenario === "shared-trigger" ? stale : "signal: task-local wake");
+const offer = dispatch(staleTrigger ? stale : "signal: task-local wake");
 if (!offer.accepted) throw new Error("eligible task-local offer was not accepted");
-if (scenario === "shared-trigger") {
+if (staleTrigger) {
   const staleRow = `2\t2\tstale\tshared:w1:p2\t${stale}\n`;
   writeFileSync(queuePath, "1\t1\tsignal\tbranch-driver.status\tsignal: branch-driver.status\n" + staleRow);
-  writeFileSync(`${home}/state/a-lost.meta`, "backend=herdr\nwindow=shared:w1:p2\n");
+  const oldWindow = scenario === "moved-trigger" ? "shared:w1:p4" : "shared:w1:p2";
+  writeFileSync(`${home}/state/a-lost.meta`, `backend=herdr\nwindow=${oldWindow}\n`);
+  if (scenario === "moved-trigger") appendFileSync(queuePath, `3\t3\t${loss}\n`);
   let rejected = false;
   try {
     await offer.settlement;
@@ -1825,16 +1829,16 @@ if (scenario === "second-loss") {
   const metadata = `project=${home}/projects/lost\nbackend=herdr\nwindow=shared:w1:p2\n`;
   const metaPath = `${home}/state/a-lost.meta`;
   const markerPath = `${home}/state/a-lost.missing-endpoint`;
-  const loss = "stale\tshared:w1:p2\tstale: shared:w1:p2 (the recorded endpoint is gone for task a-lost)";
+  const staleRow = `2\t2\tstale\tshared:w1:p2\t${stale}`;
+  appendFileSync(queuePath, staleRow + "\n");
   writeFileSync(metaPath, metadata + "spawn_gen=old\n");
-  appendFileSync(queuePath, `2\t2\t${loss}\n`);
+  appendFileSync(queuePath, `3\t3\t${loss}\n`);
   writeFileSync(markerPath, "herdr:shared:w1:p2\told\n");
   writeFileSync(metaPath, metadata + "spawn_gen=new\n");
-  appendFileSync(queuePath, `3\t3\t${loss}\n`);
+  appendFileSync(queuePath, `4\t4\t${loss}\n`);
   writeFileSync(markerPath, "herdr:shared:w1:p2\tnew\n");
-  const staleRow = `4\t4\tstale\tshared:w1:p2\t${stale}`;
-  appendFileSync(queuePath, staleRow + "\n");
-  mainRows = [`2\t2\t${loss}`, `3\t3\t${loss}`, staleRow];
+  writeFileSync(metaPath, metadata.replace("shared:w1:p2", "shared:w1:p4") + "spawn_gen=relaunched\n");
+  mainRows = [staleRow, `3\t3\t${loss}`, `4\t4\t${loss}`];
 } else {
   mainRows = ["2\t2\tcheck\tx-inbox\tcheck: pending x mention"];
   appendFileSync(queuePath, mainRows[0] + "\n");
@@ -4987,6 +4991,7 @@ test_branch_report_refuses_a_task_the_wake_did_not_name
 test_branch_predrain_recheck_excludes_new_main_owned_row_without_deferring_eligible_work check
 test_branch_predrain_recheck_excludes_new_main_owned_row_without_deferring_eligible_work second-loss
 test_branch_predrain_recheck_excludes_new_main_owned_row_without_deferring_eligible_work shared-trigger
+test_branch_predrain_recheck_excludes_new_main_owned_row_without_deferring_eligible_work moved-trigger
 test_branch_predrain_needs_decision_keeps_routine_row_branch_eligible
 test_settled_branch_prompt_releases_unacknowledged_grant
 test_post_construction_provider_error_falls_back_latches_and_recovers_on_cooldown

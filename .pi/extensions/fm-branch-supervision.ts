@@ -1420,7 +1420,7 @@ ${context.command}
         const scope = scopeForUnreadWake(state, heartbeat);
         const staleKey = staleWakeKey(message);
         if (staleKey !== undefined && taskForWakeKey(scope.taskByWakeKey, staleKey) === null) {
-          throw new Error("the stale wake's window is recorded by multiple tasks");
+          throw new Error("the stale wake's window has ambiguous task ownership");
         }
         // A newly-arrived main-owned (check-kind) row never bounces this
         // whole recheck back to main - scopeForUnreadWake excludes it from

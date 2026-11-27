@@ -187,8 +187,10 @@ function hasOpenNeedsDecision(
   return [...open.values()].includes("needs-decision");
 }
 
+const NAMED_ENDPOINT_LOSS = /^stale: (\S+) \(the recorded endpoint is gone for task ([A-Za-z0-9._-]+)\)(?:\r?\n|$)/;
+
 export function isNamedEndpointLoss(payload: string): boolean {
-  return /^stale: \S+ \(the recorded endpoint is gone for task [A-Za-z0-9._-]+\)(?:\r?\n|$)/.test(payload);
+  return NAMED_ENDPOINT_LOSS.test(payload);
 }
 
 export function staleWakeKey(message: string): string | undefined {
@@ -211,7 +213,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
     return UNSAFE_SCOPE;
   }
 
-  const rows = queue.split(/\r?\n/).filter((line) => line.length > 0);
+  const rows = queue.split(/\r?\n/).filter((line) => line.length > 0).map((line) => line.split("\t"));
   if (rows.length === 0) return EMPTY_SCOPE;
 
   const projects = new Set<string>();
@@ -219,7 +221,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
   // The task id behind each key a signal or stale row may carry: the task id
   // itself, or the endpoint its metadata records.
   const taskByKey = new Map<string, string | null>();
-  const windowClaimCounts = new Map<string, number>();
+  const windowOwners = new Map<string, string | null>();
   try {
     for (const name of readdirSync(state)) {
       if (!name.endsWith(".meta")) continue;
@@ -227,7 +229,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
       const fields = readFileSync(`${state}/${name}`, "utf8").split(/\r?\n/);
       const project = fields.find((line) => line.startsWith("project="))?.slice(8) ?? "";
       const window = fields.find((line) => line.startsWith("window="))?.slice(7) ?? "";
-      if (window) windowClaimCounts.set(window, (windowClaimCounts.get(window) ?? 0) + 1);
+      if (window) windowOwners.set(window, windowOwners.has(window) ? null : task);
       if (project) {
         metadata.set(task, project);
         taskByKey.set(task, task);
@@ -242,8 +244,16 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
   } catch {
     return UNSAFE_SCOPE;
   }
-  for (const [window, count] of windowClaimCounts) {
-    if (count > 1) taskByKey.set(window, null);
+  for (const [window, owner] of windowOwners) {
+    if (owner === null) taskByKey.set(window, null);
+  }
+  for (const fields of rows) {
+    if (fields.length < 5 || !/^[0-9]+$/.test(fields[1])) return UNSAFE_SCOPE;
+    if (fields[2] !== "stale") continue;
+    const loss = NAMED_ENDPOINT_LOSS.exec(fields[4]);
+    if (loss && loss[1] === fields[3] && loss[2] !== windowOwners.get(loss[1])) {
+      taskByKey.set(loss[1], null);
+    }
   }
 
   const eligibleSeqs: string[] = [];
@@ -256,9 +266,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean): UnreadWak
     .split(/\s+/)
     .filter(Boolean);
   const decisionConfig = `${resolveVerb}\0${heldVerb}\0${reservedPrefixes.join("\0")}`;
-  for (const line of rows) {
-    const fields = line.split("\t");
-    if (fields.length < 5 || !/^[0-9]+$/.test(fields[1])) return UNSAFE_SCOPE;
+  for (const fields of rows) {
     const seq = fields[1];
     const kind = fields[2];
     const key = fields[3];
