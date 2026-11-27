@@ -209,17 +209,14 @@ export FM_TEST_STUB_MAX_BLOCK_SECONDS
 
 fm_test_cleanup() {
   local d scratch status=0
-  local -a dirs=("${FM_TEST_CLEANUP_DIRS[@]:-}") refused=()
+  local -a dirs=("${FM_TEST_CLEANUP_DIRS[@]:-}")
   fm_test_reap_procevent_homes || status=1
   if [ -f "$FM_TEST_CLEANUP_REGISTRY" ]; then
     while IFS= read -r d; do
       case "$d" in
         treehouse-scratch$'\t'*)
           scratch=${d#*$'\t'}
-          if ! fm_test_treehouse_remove "$scratch"; then
-            refused+=("$scratch")
-            status=1
-          fi
+          fm_test_treehouse_remove "$scratch" || status=1
           ;;
         '') ;;
         *) dirs+=("$d") ;;
@@ -229,11 +226,6 @@ fm_test_cleanup() {
   fi
   for d in "${dirs[@]}"; do
     [ -n "$d" ] || continue
-    for scratch in "${refused[@]:-}"; do
-      [ -n "$scratch" ] || continue
-      case "$scratch/" in "$d/"*) continue 2 ;; esac
-      case "$d/" in "$scratch/"*) continue 2 ;; esac
-    done
     rm -rf -- "$d" || status=1
   done
   return "$status"
@@ -519,41 +511,6 @@ fm_test_arm_fixture_reaper() {
   trap 'exit 143' TERM
   trap 'exit 129' HUP
   trap 'exit 131' QUIT
-}
-
-# fm_test_reap_orphans: best-effort sweep for fixture roots left behind by a
-# prior run that was killed hard enough to skip the traps above (e.g. a
-# SIGKILL timeout). Only removes directories carrying the .fm-test-fixture
-# marker fm_test_tmproot writes, so it never touches unrelated fm-* tmp dirs
-# from real (non-test) firstmate commands. The marker identifies the owning
-# shell across PID reuse, so the same live owner always wins over the age
-# fallback for dead or unowned roots.
-FM_TEST_ORPHAN_MAX_AGE_SECONDS=${FM_TEST_ORPHAN_MAX_AGE_SECONDS:-3600}
-
-fm_test_reap_orphans() {
-  local marker dir mtime now owner_pid owner_identity current_identity
-  now=$(date +%s)
-  for marker in "${1:-${TMPDIR:-/tmp}}"/"${2:-fm-}"*/.fm-test-fixture; do
-    [ -e "$marker" ] || continue
-    owner_pid=$(sed -n '1p' "$marker" 2>/dev/null) || owner_pid=
-    owner_identity=$(sed -n '2,$p' "$marker" 2>/dev/null) || owner_identity=
-    case "$owner_pid" in
-      '' | *[!0-9]*) ;;
-      *)
-        current_identity=$(fm_test_pid_identity "$owner_pid" 2>/dev/null) || current_identity=
-        if [ -n "$owner_identity" ] && [ "$current_identity" = "$owner_identity" ]; then
-          continue
-        fi
-        ;;
-    esac
-    mtime=$(stat -c %Y "$marker" 2>/dev/null || stat -f %m "$marker" 2>/dev/null) || continue
-    [ $((now - mtime)) -ge "$FM_TEST_ORPHAN_MAX_AGE_SECONDS" ] || continue
-    dir=$(dirname "$marker")
-    if [ -d "$dir" ] && [ ! -L "$dir" ]; then
-      find "$dir" -type d -exec chmod u+rwx {} + 2>/dev/null || true
-    fi
-    rm -rf "$dir"
-  done
 }
 
 # A parent coordinator can reap once before it starts isolated child sections.

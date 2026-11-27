@@ -2263,7 +2263,9 @@ fi
 
 # shellcheck source=tests/treehouse-test-helpers.sh
 . "$ROOT/tests/treehouse-test-helpers.sh" || die "could not load the Treehouse test helper"
-RUN_OWNER_IDENTITY=$(fm_test_pid_identity "$$") || die "could not identify the test runner"
+if [ "${FM_TEST_SKIP_ORPHAN_REAP:-0}" != 1 ]; then
+  fm_test_reap_orphans /tmp fm-test-treehouse.
+fi
 RUN_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-test-run.XXXXXX")
 RECORDS="$RUN_TMP/records.tsv"
 FAMILIES_TSV="$RUN_TMP/families.tsv"
@@ -2361,16 +2363,17 @@ record_script_result() {
 # positive, a script that outruns it is terminated and reported as exit 124: a
 # hung script must become a bounded failure rather than an unbounded suite,
 # because an unbounded suite is what silently outruns its caller's budget.
-run_script_bounded() {  # <script> <out> <stream> <id>
+run_script_bounded() (  # <script> <out> <stream> <id>
   local script=$1 out=$2 stream=$3 id=$4
-  # Declaring the variables local first keeps the helper's export scoped to this
-  # call and its child script, so the runner's own environment is left as the
-  # caller had it.
-  local GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
+  local owner_pid owner_identity
+  owner_pid=${BASHPID:-$(exec sh -c 'printf "%s\n" "$PPID"')}
+  owner_identity=$(fm_test_pid_identity "$owner_pid") || {
+    log "could not identify the suite process for $script"
+    return 1
+  }
   # shellcheck source=tests/git-config-helpers.sh
   . "$ROOT/tests/git-config-helpers.sh" || return
-  local PATH=$PATH TREEHOUSE_ROOT FM_TEST_TREEHOUSE_DIR FM_TEST_TREEHOUSE_BIN=${FM_TEST_TREEHOUSE_BIN:-}
-  fm_test_treehouse_setup "$$" "$RUN_OWNER_IDENTITY" || {
+  fm_test_treehouse_setup "$owner_pid" "$owner_identity" || {
     log "could not create a scratch Treehouse root for $script"
     return 1
   }
@@ -2406,7 +2409,7 @@ run_script_bounded() {  # <script> <out> <stream> <id>
     [ "$stream" -ne 1 ] || printf '%s\n' "$cleanup_output"
   fi
   return "$rc"
-}
+)
 
 run_one_serial() {
   local script=$1

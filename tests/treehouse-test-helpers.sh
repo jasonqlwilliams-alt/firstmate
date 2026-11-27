@@ -52,3 +52,37 @@ fm_test_treehouse_setup() {
   fi
   export FM_TEST_TREEHOUSE_DIR="$dir" TREEHOUSE_ROOT="$dir/pool"
 }
+
+# fm_test_reap_orphans: best-effort sweep for fixture roots left behind by a
+# prior run that was killed hard enough to skip the traps above (e.g. a
+# SIGKILL timeout). Only removes directories carrying the .fm-test-fixture
+# marker written at allocation, so it never touches unrelated fm-* tmp dirs
+# from real (non-test) firstmate commands. The marker identifies the owning
+# shell across PID reuse, so the same live owner always wins over the age
+# fallback for dead or unowned roots.
+FM_TEST_ORPHAN_MAX_AGE_SECONDS=${FM_TEST_ORPHAN_MAX_AGE_SECONDS:-3600}
+
+fm_test_reap_orphans() {
+  local marker dir mtime now owner_pid owner_identity current_identity
+  now=$(date +%s)
+  for marker in "${1:-${TMPDIR:-/tmp}}"/"${2:-fm-}"*/.fm-test-fixture; do
+    dir=${marker%/*}
+    [ -d "$dir" ] && [ ! -L "$dir" ] && [ -O "$dir" ] || continue
+    [ -f "$marker" ] && [ ! -L "$marker" ] && [ -O "$marker" ] || continue
+    mtime=$(stat -c %Y "$marker" 2>/dev/null || stat -f %m "$marker" 2>/dev/null) || continue
+    [ $((now - mtime)) -ge "$FM_TEST_ORPHAN_MAX_AGE_SECONDS" ] || continue
+    owner_pid=$(sed -n '1p' "$marker" 2>/dev/null) || owner_pid=
+    owner_identity=$(sed -n '2,$p' "$marker" 2>/dev/null) || owner_identity=
+    case "$owner_pid" in
+      '' | *[!0-9]*) ;;
+      *)
+        current_identity=$(fm_test_pid_identity "$owner_pid" 2>/dev/null) || current_identity=
+        if [ -n "$owner_identity" ] && [ "$current_identity" = "$owner_identity" ]; then
+          continue
+        fi
+        ;;
+    esac
+    find "$dir" -type d -exec chmod u+rwx {} + 2>/dev/null || true
+    rm -rf "$dir"
+  done
+}

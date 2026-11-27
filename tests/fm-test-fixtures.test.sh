@@ -21,6 +21,7 @@ TMP_ROOT=$(fm_test_tmproot fm-test-fixtures)
 
 test_runner_isolates_treehouse() (
   local dir="$TMP_ROOT/treehouse-runner" home tmp root pool
+  local script jobs runner_pid receipt owner_pid owner_state attempt
   home="$dir/home"
   tmp="$home/.treehouse/tmp"
   mkdir -p "$dir/bin" "$dir/tests" "$dir/tools" "$tmp"
@@ -45,8 +46,17 @@ SH
 set -eu
 printf '%s\n' "$TREEHOUSE_ROOT" > "$FM_TEST_ROOT_RECEIPT"
 env -u TREEHOUSE_ROOT treehouse get --lease > "$FM_TEST_POOL_RECEIPT"
-if [ -n "${FM_TEST_CANCEL_PID_FILE:-}" ]; then
-  kill -KILL "$(cat "$FM_TEST_CANCEL_PID_FILE")"
+if [ -n "${FM_TEST_CANCEL_DIR:-}" ]; then
+  printf '%s\n' "$PPID" > "$FM_TEST_CANCEL_DIR/owner"
+  kill -KILL "$(cat "$FM_TEST_CANCEL_DIR/runner")"
+  for ((attempt=0; attempt<300; attempt++)); do
+    if [ -e "$FM_TEST_CANCEL_DIR/stop" ]; then
+      kill -KILL "$PPID"
+      exit 0
+    fi
+    sleep 0.1
+  done
+  exit 1
 fi
 SH
   export HOME="$home" PATH="$dir/tools:$PATH" TMPDIR="$tmp"
@@ -63,19 +73,54 @@ SH
   assert_grep 'expected_gate_skip=treehouse' "$dir/run.log" "the suite reports its Treehouse prerequisite"
   pass "the runner passes a disposable root explicitly and leaves the live Treehouse root untouched"
 
-  rm "$dir/root"
-  export FM_TEST_CANCEL_PID_FILE="$dir/pid"
-  if bash -c 'printf "%s\n" "$$" > "$FM_TEST_CANCEL_PID_FILE"; exec "$@"' \
-    _ "$dir/bin/fm-test-run.sh" --jobs 1 tests/fm-treehouse-lease-safety.test.sh > "$dir/cancel.log" 2>&1; then
-    fail "the interrupted runner unexpectedly succeeded"
-  fi
-  root=$(cat "$dir/root") || fail "the interrupted run did not record its Treehouse root"
-  root=${root%/pool}
-  fm_test_track_treehouse_scratch "$root" || fail "could not register the interrupted fixture for cleanup"
-  assert_present "$root/pool/fixture-pool" "the runner was interrupted during its suite"
-  assert_equals "$(cat "$dir/pid")" "$(sed -n '1p' "$root/.fm-test-fixture")" "the orphan record identifies the interrupted runner"
-  [ -n "$(sed -n '2p' "$root/.fm-test-fixture")" ] || fail "the orphan record omitted the runner identity"
-  pass "an interrupted runner leaves an owned Treehouse directory eligible for the orphan sweep"
+  cp "$dir/tests/fm-treehouse-lease-safety.test.sh" "$dir/tests/fm-test-run.test.sh"
+  printf '%s\n' 'exit 0' > "$dir/tests/fm-test-isolation-proof.test.sh"
+  stat() {
+    case "${!#}" in
+      "${FM_TEST_CANCEL_MARKER:-}") command stat "$@" ;;
+      *) return 1 ;;
+    esac
+  }
+  export -f stat
+
+  for jobs in 1 2; do
+    receipt="$dir/cancel-$jobs"
+    mkdir "$receipt"
+    script=tests/fm-treehouse-lease-safety.test.sh
+    [ "$jobs" -eq 1 ] || script=tests/fm-test-run.test.sh
+    if FM_TEST_CANCEL_DIR="$receipt" FM_TEST_ROOT_RECEIPT="$receipt/root" \
+      bash -c 'printf "%s\n" "$$" > "$FM_TEST_CANCEL_DIR/runner"; exec "$@"' \
+      _ "$dir/bin/fm-test-run.sh" --jobs "$jobs" --per-script-timeout-secs 0 "$script" > "$receipt/run.log" 2>&1; then
+      fail "the interrupted runner unexpectedly succeeded"
+    fi
+    runner_pid=$(cat "$receipt/runner") || fail "the runner did not publish its PID"
+    owner_pid=$(cat "$receipt/owner") || fail "the interrupted suite did not publish its supervisor PID"
+    root=$(cat "$receipt/root") || fail "the interrupted run did not record its Treehouse root"
+    root=${root%/pool}
+    fm_test_track_treehouse_scratch "$root" || fail "could not register the interrupted fixture for cleanup"
+    [ "$owner_pid" != "$runner_pid" ] || fail "the suite supervisor did not survive runner cancellation"
+    assert_present "$root/pool/fixture-pool" "the runner was interrupted during its suite"
+    touch -t 202001010000 "$root/.fm-test-fixture" || fail "could not age the interrupted owner's record"
+
+    export FM_TEST_CANCEL_MARKER="$root/.fm-test-fixture"
+    FM_TEST_SKIP_ORPHAN_REAP=0 FM_TEST_ORPHAN_MAX_AGE_SECONDS=3600 \
+      "$dir/bin/fm-test-run.sh" --jobs 1 tests/fm-test-isolation-proof.test.sh > "$receipt/sweep.log" 2>&1 ||
+      fail "the runner failed during startup recovery: $(cat "$receipt/sweep.log")"
+    assert_present "$root/pool/fixture-pool" "runner startup deleted a live suite's pool (jobs=$jobs)"
+
+    touch "$receipt/stop"
+    for ((attempt=0; attempt<100; attempt++)); do
+      owner_state=$(ps -p "$owner_pid" -o stat= 2>/dev/null) || break
+      case "$owner_state" in ''|Z*) break ;; esac
+      sleep 0.05
+    done
+    [ "$attempt" -lt 100 ] || fail "the interrupted suite supervisor did not exit"
+    FM_TEST_SKIP_ORPHAN_REAP=0 FM_TEST_ORPHAN_MAX_AGE_SECONDS=3600 \
+      "$dir/bin/fm-test-run.sh" --jobs 1 tests/fm-test-isolation-proof.test.sh > "$receipt/sweep.log" 2>&1 ||
+      fail "the runner failed during startup recovery: $(cat "$receipt/sweep.log")"
+    assert_absent "$root" "runner startup left a dead suite's pool behind (jobs=$jobs)"
+  done
+  pass "runner startup preserves live suites' pools and reaps them after interruption"
 )
 
 test_git_config_isolation() (

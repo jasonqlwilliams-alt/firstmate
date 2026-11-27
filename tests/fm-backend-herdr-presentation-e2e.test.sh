@@ -35,7 +35,7 @@ fm_test_track_task_tmps "$FAKEBIN"
 : > "$MOVE_CALL_LOG"
 : > "$FOCUS_AUDIT_LOG"
 REAL_MOVER="$ROOT/bin/backends/herdr-workspace-move.py"
-export REAL_TREEHOUSE REAL_MOVER HERDR_CALL_LOG TREEHOUSE_CALL_LOG TREEHOUSE_LOCK_DIR MOVE_CALL_LOG FOCUS_AUDIT_LOG HERDR_ORIGINAL_PATH HERDR_LAB_HELPER
+export REAL_TREEHOUSE REAL_MOVER HERDR_CALL_LOG TREEHOUSE_RECORDER TREEHOUSE_CALL_LOG TREEHOUSE_LOCK_DIR MOVE_CALL_LOG FOCUS_AUDIT_LOG HERDR_ORIGINAL_PATH HERDR_LAB_HELPER
 export ACTIVE_SEEDED_CONTROL POST_CREATE_ABORT_CONTROL TMP_ROOT
 
 # Log every production-adapter call, remove its already-validated trailing
@@ -148,6 +148,9 @@ if [ "${1:-} ${2:-}" = "pane get" ] && [ -d "$POST_CREATE_ABORT_CONTROL" ]; then
     abort_task_dir=$task_dir
     break
   done
+fi
+if [ "${1:-} ${2:-}" = "pane run" ] && [[ "${4:-}" == *'$(treehouse get '* ]]; then
+  set -- "$1" "$2" "$3" "PATH=$(printf '%q' "${TREEHOUSE_RECORDER%/*}"):\$PATH; $4"
 fi
 if out=$(
   # Herdr can report pane_not_found on stderr.
@@ -620,6 +623,8 @@ OFF_META="$TMP_ROOT/off.meta"
 cp "$HOME_DIR/state/shape.meta" "$OFF_META"
 OFF_WT=$(remember_meta_worktree "$OFF_META")
 cp "$TREEHOUSE_CALL_LOG" "$TMP_ROOT/off-treehouse.log"
+grep -Fxq $'get\t--lease\t--lease-holder\tshape' "$TMP_ROOT/off-treehouse.log" \
+  || fail "the Treehouse recorder missed the opted-out shape acquisition"
 [ "$(wc -l < "$MOVE_CALL_LOG" | tr -d '[:space:]')" = "$OFF_MOVE_START" ] \
   || fail "opted-out spawn invoked the presentation-only workspace mover"
 OFF_HERDR_CALLS=$(sed -n "$((OFF_HERDR_START + 1)),${OFF_HERDR_END}p" "$HERDR_CALL_LOG")
@@ -707,6 +712,8 @@ assert_raw_presentation_mutations_preserved_since "$SHAPE_FOCUS_AUDIT_START" "pr
 ON_META="$TMP_ROOT/on.meta"
 cp "$HOME_DIR/state/shape.meta" "$ON_META"
 ON_WT=$(remember_meta_worktree "$ON_META")
+grep -Fxq $'get\t--lease\t--lease-holder\tshape' "$TREEHOUSE_CALL_LOG" \
+  || fail "the Treehouse recorder missed the projected shape acquisition"
 cmp -s "$TMP_ROOT/off-treehouse.log" "$TREEHOUSE_CALL_LOG" \
   || fail "Treehouse command sequence changed between opted-out and projected spawns"
 JOURNAL="$HOME_DIR/state/shape.herdr-presentation"

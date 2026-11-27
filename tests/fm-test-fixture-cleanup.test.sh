@@ -246,6 +246,32 @@ test_orphan_sweep_respects_fixture_ownership() {
   pass "the orphan sweep reaps only old fixtures without a live owner"
 }
 
+test_orphan_sweep_ignores_unsafe_markers() (
+  local harness fifo_dir link_dir link_marker target
+  harness=$(fm_test_tmproot fm-test-cleanup-unsafe-markers)
+  fifo_dir="$harness/fm-test-fifo"
+  link_dir="$harness/fm-test-dir-link"
+  link_marker="$harness/fm-test-marker-link"
+  target="$harness/target"
+  mkdir "$fifo_dir" "$link_marker" "$target"
+  mkfifo "$fifo_dir/.fm-test-fixture" || fail "could not create the FIFO marker fixture"
+  printf '%s\n' 0 stale > "$target/.fm-test-fixture"
+  ln -s "$target" "$link_dir"
+  ln -s "$target/.fm-test-fixture" "$link_marker/.fm-test-fixture"
+  touch -t 202001010000 "$fifo_dir/.fm-test-fixture" "$target/.fm-test-fixture"
+
+  . "$ROOT/bin/fm-timeout-lib.sh"
+  export LIB
+  export -f start_suite_for_orphan_sweep
+  fm_run_timed 10 bash -c 'start_suite_for_orphan_sweep "$1"' _ "$harness" ||
+    fail "suite startup did not complete with an unsafe fixture marker"
+  [ -p "$fifo_dir/.fm-test-fixture" ] || fail "startup touched a FIFO marker fixture"
+  [ -L "$link_dir" ] || fail "startup removed a symlink fixture directory"
+  [ -L "$link_marker/.fm-test-fixture" ] || fail "startup removed a symlink marker fixture"
+  assert_present "$target/.fm-test-fixture" "startup removed the symlink target"
+  pass "the orphan sweep ignores FIFO markers and symlinks"
+)
+
 test_orphan_sweep_reaps_read_only_package_tree() {
   local harness stale_dir package_dir
   harness=$(fm_test_tmproot fm-test-cleanup-read-only-harness)
@@ -301,5 +327,6 @@ test_fixture_root_gone_after_sigterm
 test_cleanup_registry_resists_precreation
 test_fixture_registration_failure_rolls_back_root
 test_orphan_sweep_respects_fixture_ownership
+test_orphan_sweep_ignores_unsafe_markers
 test_orphan_sweep_reaps_read_only_package_tree
 test_orphan_sweep_reaps_standalone_treehouse_scratch
