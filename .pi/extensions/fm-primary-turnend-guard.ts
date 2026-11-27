@@ -614,10 +614,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_settled", async () => {
-    if (usesLaunchOwners(ownerPaths)) {
-      if (lockOwnership() !== "owned") return;
-      markLoaded();
-    }
+    if (usesLaunchOwners(ownerPaths) && lockOwnership() !== "owned") return;
     if (guardFollowupActive) {
       guardFollowupActive = false;
       return;

@@ -1642,6 +1642,76 @@ test_claude_crewmate_launch_carries_the_attribution_policy
 test_claude_secondmate_launch_carries_the_attribution_policy
 test_active_dispatch_profile_does_not_block_secondmate_launch
 
+test_terminal_creation_drops_launch_binding() (
+  local dir="$TMP_ROOT/terminal-binding" fakebin name boundary
+  local -a binding_names=(
+    FM_SESSION_OWNER_ID FM_SESSION_OWNER_HOME FM_SESSION_OWNER_PID FM_SESSION_OWNER_START FM_SESSION_OWNER_KIND
+    FM_BOOTSTRAP_NETWORK_LOCK_PID FM_BOOTSTRAP_NETWORK_LOCK_GEN FM_BOOTSTRAP_NETWORK_WORKER_PID
+    FM_BOOTSTRAP_NETWORK_WORKER_START FM_TIMEOUT_STARTUP_SCOPE
+  )
+  fakebin=$(fm_fakebin "$dir")
+  mkdir -p "$dir/home/config"
+  export PATH="$fakebin:$PATH" FM_HOME="$dir/home" FM_TEST_TERMINAL_ENV="$dir" FM_ZELLIJ_SESSION=firstmate
+  unset TMUX
+  for name in "${binding_names[@]}"; do export "$name=fixture-binding"; done
+
+  cat > "$fakebin/tmux" <<'SH'
+#!/bin/bash
+case "$1" in
+  -V) printf 'tmux 3.2\n' ;;
+  list-windows|set-window-option) exit 0 ;;
+  has-session) exit 1 ;;
+  new-session|new-window)
+    env > "$FM_TEST_TERMINAL_ENV/tmux-$1"
+    if [ "$1" = new-window ]; then printf '@1\n'; fi
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  cat > "$fakebin/zellij" <<'SH'
+#!/bin/bash
+case "$1" in
+  --version) printf 'zellij 0.44.0\n' ;;
+  list-sessions)
+    if [ -f "$FM_TEST_TERMINAL_ENV/zellij-started" ]; then printf 'firstmate\n'; fi
+    ;;
+  attach)
+    env > "$FM_TEST_TERMINAL_ENV/zellij-attach"
+    : > "$FM_TEST_TERMINAL_ENV/zellij-started"
+    ;;
+  --session)
+    case "$4" in
+      list-tabs) printf '[]\n' ;;
+      new-tab) env > "$FM_TEST_TERMINAL_ENV/zellij-new-tab"; printf '3\n' ;;
+      list-panes) printf '[{"id":7,"tab_id":3,"is_plugin":false}]\n' ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$fakebin/tmux" "$fakebin/zellij"
+  # shellcheck source=bin/fm-backend.sh
+  . "$ROOT/bin/fm-backend.sh"
+  fm_backend_source tmux || fail 'could not load tmux adapter'
+  [ "$(fm_backend_tmux_container_ensure)" = firstmate ] || fail 'could not start the fake tmux server'
+  [ "$(fm_backend_tmux_create_task firstmate fm-fixture "$FM_HOME")" = @1 ] || fail 'could not create a fake tmux window'
+  fm_backend_source zellij || fail 'could not load Zellij adapter'
+  [ "$(fm_backend_zellij_container_ensure)" = firstmate ] || fail 'could not start the fake Zellij server'
+  [ "$(fm_backend_zellij_create_task firstmate fm-fixture "$FM_HOME")" = '3 7' ] || fail 'could not create a fake Zellij tab'
+
+  for boundary in tmux-new-session tmux-new-window zellij-attach zellij-new-tab; do
+    assert_grep "FM_HOME=$dir/home" "$dir/$boundary" "$boundary did not receive the fixture environment"
+    for name in "${binding_names[@]}"; do
+      ! grep -q "^$name=" "$dir/$boundary" || fail "$boundary inherited $name"
+      [ "${!name}" = fixture-binding ] || fail "$boundary cleared the caller's $name"
+    done
+  done
+  pass 'cold terminal servers and worker windows do not inherit launch bindings'
+)
+
+test_terminal_creation_drops_launch_binding || exit 1
+
 echo "# all fm-spawn-dispatch-profile tests passed"
 
 test_secondmate_relaunch_rebinds_the_target_home() {

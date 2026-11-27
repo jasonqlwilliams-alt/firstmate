@@ -107,7 +107,9 @@ fm_backend_tmux_container_ensure() {  # [session]
     session=$(fm_backend_tmux_launch_session) || return 1
   fi
   if [ -z "${TMUX:-}" ]; then
-    tmux has-session -t "=$session" 2>/dev/null || tmux new-session -d -s "$session" || return 1
+    tmux has-session -t "=$session" 2>/dev/null || (
+      fm_session_owner_clear && tmux new-session -d -s "$session"
+    ) || return 1
   fi
   printf '%s\n' "$session"
 }
@@ -133,7 +135,9 @@ fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs> -> prints 
     echo "error: window $ses:$wname already exists" >&2
     return 1
   fi
-  wid=$(tmux new-window -dP -F '#{window_id}' -t "=$ses:" -n "$wname" -c "$proj_abs") || return 1
+  wid=$(
+    fm_session_owner_clear && tmux new-window -dP -F '#{window_id}' -t "=$ses:" -n "$wname" -c "$proj_abs"
+  ) || return 1
   tmux set-window-option -t "$wid" automatic-rename off 2>/dev/null || true
   tmux set-window-option -t "$wid" allow-rename off 2>/dev/null || true
   printf '%s\n' "$wid"

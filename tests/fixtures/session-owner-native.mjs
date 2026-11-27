@@ -1,7 +1,7 @@
 // Drive the real Pi/omp watch and turn-end extensions with a fake engine API.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -60,7 +60,12 @@ for (const mark of marks) {
 }
 const result = await tool.execute("fixture", {});
 assert.match(result.content[0].text, /started .* extension arm child/);
+const savedMarker = marks[1] + ".saved";
+renameSync(marks[1], savedMarker);
+mkdirSync(marks[1]);
 const stop = await dispatch(family === "pi" ? "agent_settled" : "session_stop", {});
+rmdirSync(marks[1]);
+renameSync(savedMarker, marks[1]);
 if (family === "pi") {
   assert.equal(delivered.length, 1);
   assert.equal(delivered[0].options.deliverAs, "followUp");
