@@ -526,6 +526,7 @@ normalize_meta() {  # <meta>
     -e 's|^herdr_tab_id=.*$|herdr_tab_id=<herdr-container-id>|' \
     -e 's|^herdr_pane_id=.*$|herdr_pane_id=<herdr-container-id>|' \
     -e 's|^herdr_terminal_id=.*$|herdr_terminal_id=<herdr-terminal-id>|' \
+    -e 's|^tasktmp=.*$|tasktmp=<spawn-temp-root>|' \
     -e 's|^spawn_gen=.*$|spawn_gen=<spawn-incarnation>|' \
     "$1"
 }
@@ -612,7 +613,7 @@ FIRSTMATE_WSID=$(grep '^herdr_workspace_id=' "$ANCHOR_META" | cut -d= -f2-)
 
 # The same task id and project run once opted out and once projected, so
 # Treehouse commands and metadata can be compared after normalizing endpoint
-# IDs and the deliberately fresh per-spawn incarnation.
+# IDs and the deliberately fresh per-spawn values.
 : > "$TREEHOUSE_CALL_LOG"
 OFF_HERDR_START=$(log_line_count)
 OFF_MOVE_START=$(wc -l < "$MOVE_CALL_LOG" | tr -d '[:space:]')
@@ -622,6 +623,8 @@ OFF_HERDR_END=$(log_line_count)
 OFF_META="$TMP_ROOT/off.meta"
 cp "$HOME_DIR/state/shape.meta" "$OFF_META"
 OFF_WT=$(remember_meta_worktree "$OFF_META")
+OFF_TASK_TMP=$(sed -n 's/^tasktmp=//p' "$OFF_META")
+[ -d "$OFF_TASK_TMP" ] || fail "the opted-out spawn did not record an existing task temp directory"
 cp "$TREEHOUSE_CALL_LOG" "$TMP_ROOT/off-treehouse.log"
 grep -Fxq $'get\t--lease\t--lease-holder\tshape' "$TMP_ROOT/off-treehouse.log" \
   || fail "the Treehouse recorder missed the opted-out shape acquisition"
@@ -712,6 +715,9 @@ assert_raw_presentation_mutations_preserved_since "$SHAPE_FOCUS_AUDIT_START" "pr
 ON_META="$TMP_ROOT/on.meta"
 cp "$HOME_DIR/state/shape.meta" "$ON_META"
 ON_WT=$(remember_meta_worktree "$ON_META")
+ON_TASK_TMP=$(sed -n 's/^tasktmp=//p' "$ON_META")
+[ -d "$ON_TASK_TMP" ] && [ "$ON_TASK_TMP" != "$OFF_TASK_TMP" ] \
+  || fail "the projected spawn did not record a fresh task temp directory"
 grep -Fxq $'get\t--lease\t--lease-holder\tshape' "$TREEHOUSE_CALL_LOG" \
   || fail "the Treehouse recorder missed the projected shape acquisition"
 cmp -s "$TMP_ROOT/off-treehouse.log" "$TREEHOUSE_CALL_LOG" \
@@ -829,8 +835,9 @@ PROJECTION_ORDER_START=$(log_line_count)
 [ "$OFF_WT" = "$ON_WT" ] || fail "Treehouse did not reuse the same fixture worktree, so byte comparison is inconclusive"
 normalize_meta "$OFF_META" > "$TMP_ROOT/off.meta.normalized"
 normalize_meta "$ON_META" > "$TMP_ROOT/on.meta.normalized"
-cmp -s "$TMP_ROOT/off.meta.normalized" "$TMP_ROOT/on.meta.normalized" \
-  || fail "metadata changed beyond Herdr container IDs between opted-out and projected paths"
+diff -u "$TMP_ROOT/off.meta.normalized" "$TMP_ROOT/on.meta.normalized" \
+  || fail "stable metadata differed between opted-out and projected spawns"
+pass "real Herdr lab: flat and projected spawns reuse the Treehouse slot and record matching stable metadata with distinct task temp directories"
 
 # Two real primary spawns begin concurrently.
 # The fresh-spawn task-set lock may fail closed for one while the other
