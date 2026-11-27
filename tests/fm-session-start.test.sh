@@ -1496,6 +1496,80 @@ SH
   pass "the current park mark remains visible when Herdr server status is unreadable"
 }
 
+test_parked_herdr_startup_leaves_reused_pane_unread() {
+  local rec root home fakebin worktree meta log out
+  rec=$(new_world liveness-parked-herdr-reused)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_claude "$fakebin"
+  worktree="${root%/root}/retained-copy"
+  fm_git_init_commit "$worktree"
+  log="$home/herdr-probes.log"
+  : > "$log"
+  cat > "$fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'pane get p-reused --session park-test')
+    if [ "${FM_TEST_HERDR_REUSED:-0}" = 1 ]; then
+      printf '%s\n' '{"result":{"pane":{"pane_id":"p-reused","terminal_id":"term-other-home"}}}'
+    else
+      printf '%s\n' '{"error":{"code":"pane_not_found"}}' >&2
+      exit 1
+    fi
+    ;;
+  'agent get p-reused --session park-test')
+    printf '%s\n' '{"result":{"agent":{"agent_status":"idle"}}}'
+    ;;
+  'pane process-info --pane p-reused --session park-test')
+    printf '%s\n' "$*" >> "$FM_TEST_HERDR_PROBE_LOG"
+    printf '%s\n' '{"result":{"type":"pane_process_info","process_info":{"pane_id":"p-reused","shell_pid":4242,"foreground_processes":[{"pid":4243,"name":"claude","argv":["claude","--resume","other-session"]}]}}}'
+    ;;
+  'pane read p-reused '*)
+    printf '%s\n' "$*" >> "$FM_TEST_HERDR_PROBE_LOG"
+    exit 1
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$fakebin/herdr"
+
+  meta="$home/state/task-parked.meta"
+  fm_write_meta "$meta" 'window=park-test:p-reused' 'kind=scout' 'backend=herdr' \
+    'herdr_terminal_id=term-parked' 'spawn_gen=spawn-parked' "worktree=$worktree"
+  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+    "$ROOT/bin/fm-park-retained.sh" task-parked mark >/dev/null \
+    || fail "could not mark the scout while its pane was missing"
+  touch -t 202001010000 "$meta"
+
+  out=$(FM_FAKE_HARNESS_PID="$SESSION_START_TEST_HARNESS_PID" \
+    FM_TEST_HERDR_REUSED=1 FM_TEST_HERDR_PROBE_LOG="$log" FM_INACTIVE_RECONCILE_SECS=60 \
+    run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+  assert_contains "$out" "endpoint: parked, copy retained (backend=herdr window=park-test:p-reused)" \
+    "the recycled pane hid the current mark"
+  wait_for_network_stage "$home" "$root" || fail "the deferred network stage never published"
+  jq -e 'any(.endpoints[]; .id == "task-parked" and .endpoint.exists == false)' \
+    "$home/state/home-summary.json" >/dev/null \
+    || fail "the deferred home summary did not sample the parked scout and reject the foreign binding"
+  grep -Fxq 'cursor=' "$home/state/.inactive-outcome-reconcile" \
+    || fail "the deferred inactive scan did not complete"
+  [ ! -s "$log" ] || fail "startup read the other worker's pane or process details: $(cat "$log")"
+
+  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+    "$ROOT/bin/fm-park-retained.sh" task-parked clear >/dev/null \
+    || fail "could not clear the scout's mark for the unmarked control"
+  out=$(FM_TEST_HERDR_REUSED=1 FM_TEST_HERDR_PROBE_LOG="$log" \
+    PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+    "$ROOT/bin/fm-crew-state.sh" task-parked)
+  assert_contains "$out" "backend target gone: park-test:p-reused" \
+    "the ordinary unmarked read did not reject the foreign binding"
+  grep -Fxq 'pane process-info --pane p-reused --session park-test' "$log" \
+    || fail "the unmarked control did not exercise the process probe"
+
+  pass "locked startup leaves a recycled Herdr pane unread when the scout's park mark is current"
+}
+
 test_endpoint_liveness_herdr() {
   local rec root home fakebin out
   rec=$(new_world liveness-herdr)
@@ -2907,6 +2981,7 @@ session_start_cases=(
   test_endpoint_liveness_tmux
   test_endpoint_liveness_parked_retained
   test_endpoint_liveness_parked_herdr_stopped_server
+  test_parked_herdr_startup_leaves_reused_pane_unread
   test_endpoint_liveness_herdr
   test_composition_invokes_real_scripts
   test_branch_outcome_replay_respects_captain_barrier_and_lease_sweep

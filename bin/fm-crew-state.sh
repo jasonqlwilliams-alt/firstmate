@@ -795,6 +795,9 @@ fi
 # both classifier-backed backends (tmux and herdr) - and every death-class
 # verdict reports unknown rather than trusting a possibly-stale status log as
 # the current state.
+if fm_backend_endpoint_parked_retained "$META" "$STATE/$ID.parked-retained"; then
+  emit unknown none "endpoint parked, copy retained"
+fi
 [ -n "$BACKEND_TARGET" ] || emit unknown none "no backend target recorded"
 if ! pane_readable "$BACKEND_TARGET"; then
   # A failed probe is not itself evidence the pane is gone: the herdr CLI can
