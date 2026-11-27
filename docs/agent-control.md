@@ -131,21 +131,24 @@ An explicit task relaunch or recovery of the same recorded secondmate can reuse 
 Reuse and teardown require an absolute recorded path naming an existing directory owned by the current user with no symlink at its final component.
 They check directory identity and use the resolved physical path for filesystem operations, including when the recorded spelling uses doubled slashes, `.` segments, a trailing slash, `..` segments, or a stable symlinked parent.
 A symlinked parent must continue to name the same directory during and between relaunch and teardown commands.
-Firstmate preserves the validated spelling in `tasktmp=` after checking that it still names the prepared directory.
+For a reused root, Firstmate preserves the recorded spelling in `tasktmp=` and rechecks the prepared directory's identity and physical path before publishing the replacement record and again before sending `GOTMPDIR`.
+A reused-root refusal before publication preserves the prior record and attempts to close any endpoint created for that relaunch or recovery.
 The launch uses the checked physical path for `GOTMPDIR` and retains the short `/tmp` spelling for ordinary allocations.
-Firstmate skips reuse and removal when the recorded path is relative, ends in `..`, or resolves to a physical path containing a newline.
+Firstmate skips reuse and removal for relative paths, a final `..` component, the filesystem root, and physical paths containing a newline.
 Temporary files and any detached processes still using the directory can carry over to the replacement.
 Firstmate allocates a fresh root when the recorded path is missing, fails the reuse checks, or names the old fixed directory `/tmp/fm-<id>` that same-ID tasks may share, however that path is spelled.
 
 Teardown rechecks the recorded root's device and inode before scanning or removing it.
 Forced secondmate home teardown resolves each eligible child root immediately before removal.
-Teardown retains the task record if it cannot inspect an otherwise eligible root.
+An inspection error stops the current teardown before it removes the task record.
 Direct ship and scout teardown uses `lsof` to scan for processes with a readable working directory under the eligible root.
+When the scan includes that root, teardown checks its physical path and identity again before acting on the results.
 Detached processes may survive secondmate teardown and forced child cleanup even when those operations remove the directory.
 Teardown leaves the fixed legacy directory for manual reconciliation under any spelling, skipping both the scan and removal for it.
 
-Spawn attempts to remove an empty root it just allocated if launch fails before handoff and the task record has no reference to it.
-If the root remains, the launch warning identifies the exact path to inspect after closing the named endpoint.
+On abort, spawn uses directory identity to check whether the current task record refers to the root.
+Before handoff, an aborted spawn tries to remove an unreferenced root it allocated, using `rmdir` so any remaining files are preserved.
+If an unreferenced root remains, the launch warning identifies its path for inspection after endpoint closure.
 When bootstrap receives that warning during failed secondmate recovery, it includes the path in the `SECONDMATE_LIVENESS` summary.
 
 ## Fail-closed boundaries
