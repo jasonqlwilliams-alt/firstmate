@@ -368,7 +368,7 @@ fm_meta_get() {  # <meta-file> <key>
 # is recognised by device and inode however it is spelled, including through
 # `..` segments or a symlinked parent. A relative value is refused because it
 # depends on the reader's working directory, as is a final `..` component.
-# Callers act on the printed physical path, never on the recorded spelling.
+# Callers use the printed physical path for filesystem checks and operations.
 fm_task_tmp_private_root() {  # <recorded-tasktmp> <task-id> [<expected-identity>]
   local recorded=$1 id=$2 expected=${3:-} part normalized='' physical identity
   local -a parts=()

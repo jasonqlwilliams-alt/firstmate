@@ -57,6 +57,12 @@ If the tmux server restarts on the same socket between the inventory lookup and 
 Explicit pane selectors such as `session:0.1` use native tmux syntax when they do not resolve to task metadata.
 [`fm_tmux_exact_target`](../bin/fm-tmux-lib.sh) implements the lookup, and [`fm-tmux-exact-target.test.sh`](../tests/fm-tmux-exact-target.test.sh) exercises it with a private tmux server.
 
+### Aborted replacement cleanup
+
+When an aborted relaunch or secondmate recovery attempts to close a window it created, tmux checks the creation-time window ID, session name, and window name in the same command that closes the window.
+A mismatch leaves the window open.
+The [private-server regression](../tests/fm-tmux-exact-target.test.sh) covers a renamed window and reuse of the window ID under a different session and name after a server restart.
+
 ### Agent liveness probe
 
 A target-existence check proves only that the pane exists.

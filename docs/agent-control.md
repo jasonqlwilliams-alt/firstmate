@@ -132,7 +132,7 @@ Reuse and teardown require an absolute recorded path naming an existing director
 They check directory identity and use the resolved physical path for filesystem operations, including when the recorded spelling uses doubled slashes, `.` segments, a trailing slash, `..` segments, or a stable symlinked parent.
 A symlinked parent must continue to name the same directory during and between relaunch and teardown commands.
 For a reused root, Firstmate preserves the recorded spelling in `tasktmp=` and rechecks the prepared directory's identity and physical path before publishing the replacement record and again before sending `GOTMPDIR`.
-A reused-root refusal before publication preserves the prior record and attempts to close any endpoint created for that relaunch or recovery.
+If the reused root's identity or physical path cannot be confirmed before publication, Firstmate preserves the prior record and attempts to close any endpoint created by that relaunch or recovery, subject to [tmux's abort cleanup guard](tmux-backend.md#aborted-replacement-cleanup) on that backend.
 The launch uses the checked physical path for `GOTMPDIR` and retains the short `/tmp` spelling for ordinary allocations.
 Firstmate skips reuse and removal for relative paths, a final `..` component, the filesystem root, and physical paths containing a newline.
 Temporary files and any detached processes still using the directory can carry over to the replacement.
