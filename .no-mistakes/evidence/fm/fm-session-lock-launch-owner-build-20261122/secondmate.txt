@@ -1,0 +1,37 @@
+spawn CLI
+spawned partner harness=pi kind=secondmate mode=secondmate yolo=off window=firstmate:fm-partner worktree=<lab>/partner
+[exit 0]
+
+state/.lock = 16180 (one PID line)
+.lock.owner.16180 = v1	16180	linux:<boot-id>:5314048	launch	<lab>/partner	c5a423aec99ceb139dec2bf4fc323da97e40058582617ceb5e25d1418001846a
+Generation = 14d2beb151856018478c53ae87cf8deb6481658371faf7d1404b15d733805182
+
+Pi's watcher receipt names its own generation
+sha256:aceea88c6f1cc7e1d570aa22daf325a0f2b6f8da2a9fa0899a6949aa2cb471f4
+16180
+14d2beb151856018478c53ae87cf8deb6481658371faf7d1404b15d733805182
+
+tmux pane metadata
+firstmate:fm-partner 150x42
+
+The real tmux server had no exported owner or worker delegation fields.
+
+relaunch CLI
+spawned partner harness=pi kind=secondmate mode=secondmate yolo=off window=firstmate:fm-partner worktree=<lab>/partner
+[exit 0]
+
+state/.lock = 31943 (one PID line)
+.lock.owner.31943 = v1	31943	linux:<boot-id>:5314900	launch	<lab>/partner	316d7e75d049cd659cb3ce672449d9bcab243f49ce26b1a8bbb16e72f5a959f2
+Generation = 80d4d93302dc3a3d7e6dd6350f195ce38990aba8191a96ea090d3a3c292aae89
+
+Pi's watcher receipt names its own generation
+sha256:aceea88c6f1cc7e1d570aa22daf325a0f2b6f8da2a9fa0899a6949aa2cb471f4
+31943
+80d4d93302dc3a3d7e6dd6350f195ce38990aba8191a96ea090d3a3c292aae89
+
+tmux pane metadata
+firstmate:fm-partner 150x42
+
+The real tmux server had no exported owner or worker delegation fields.
+
+The primary's independent generation remained verified across both launches.

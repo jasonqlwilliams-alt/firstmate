@@ -1,0 +1,94 @@
+legacy.log
+lock acquired: harness pid 3756727
+
+$ <lab>/primary/bin/fm-lock.sh status
+lock: held by live harness pid 3756727
+[exit 0]
+
+Default home publishes a single PID and legacy start sidecar. Versioned evidence is absent.
+
+$ <lab>/primary/bin/fm-session-launch.sh -- <lab>/primary/bin/fm-lock.sh
+error: another live firstmate session holds the lock (pid 3756727)
+[exit 1]
+
+state/.lock = 3757381 (one PID line)
+.lock.owner.3757381 = v1	3757381	linux:<boot-id>:5288252	launch	<lab>/primary	d9512bf59018b4f5f11271181cf800f6399b5debe39605cba2c5a7492437e01e
+Generation = e33782857a021703ad9eeea106c615b1d091e34d17faa0b4638cf2c7c84c0e6c
+
+Separate Linux session with ancestry lookup denied, then fm-lock.sh verify
+3757690 3757690 bash
+e33782857a021703ad9eeea106c615b1d091e34d17faa0b4638cf2c7c84c0e6c
+
+state/.lock = 3757766 (one PID line)
+.lock.owner.3757766 = v1	3757766	linux:<boot-id>:5288281	launch	<lab>/neighbor	279d24becda7a1437e6ca300045cc022404e9b8b17b37f01de78c9a6a2420f6d
+Generation = 2029f898765870509b5732531e62fd2784169109d2b3d3a30a71c6c4befcedf8
+
+launch.log
+lock acquired: launch pid 3757381
+error: no valid session launch binding; enter through fm-session-launch.sh or run fm-session-start.sh
+
+Fresh nested launch in the neighbor home
+lock acquired: launch pid 3757766
+2029f898765870509b5732531e62fd2784169109d2b3d3a30a71c6c4befcedf8
+
+$ <lab>/primary/bin/fm-session-launch.sh -- <lab>/primary/bin/fm-lock.sh
+error: another live firstmate session holds the lock (pid 3757381)
+[exit 1]
+
+$ <lab>/primary/bin/fm-lock.sh status
+lock: held by live launch pid 3757381
+[exit 0]
+
+$ <lab>/primary/bin/fm-lock.sh verify
+
+[exit 1]
+
+A caller reconstructing its environment from the readable record, using the fingerprint as its launch ID, received no authorization.
+
+$ <lab>/primary/bin/fm-lock.sh status
+lock: uncertain (unreadable owner record)
+[exit 0]
+
+$ <lab>/primary/bin/fm-session-launch.sh -- <lab>/primary/bin/fm-lock.sh
+error: session owner record is unreadable
+[exit 1]
+
+$ <lab>/primary/bin/fm-lock.sh status
+lock: uncertain (cannot inspect pid 3757381)
+[exit 0]
+
+$ <lab>/primary/bin/fm-session-launch.sh -- /bin/bash -ec 
+probe="$FM_HOME/unreadable-proc"
+mkdir -p "$probe/$$"
+ln -s "/proc/$$/stat" "$probe/$$/stat"
+FM_PROC_ROOT_OVERRIDE="$probe" "$FM_HOME/bin/fm-lock.sh"
+
+error: cannot verify liveness of recorded session owner pid 3757381
+[exit 1]
+
+$ <lab>/primary/bin/fm-lock.sh status
+lock: stale (pid 3757381 exited or was reused)
+[exit 0]
+
+$ <lab>/primary/bin/fm-session-launch.sh -- /bin/bash -ec 
+"$FM_HOME/bin/fm-lock.sh"
+"$FM_HOME/bin/fm-lock.sh" verify
+
+lock acquired: launch pid 3759144
+7bc56852aabc62a3b36995a30833e133127911f415c806516b37f9ca3607e3e3
+[exit 0]
+
+state/.lock = 3759144 (one PID line)
+.lock.owner.3759144 = v1	3759144	linux:<boot-id>:5288370	launch	<lab>/primary	baa1881c0c60f33e2b24dc483a21f1bcf340a3a9d5a74047a0157f766a52897e
+Generation = 7bc56852aabc62a3b36995a30833e133127911f415c806516b37f9ca3607e3e3
+
+Existing live process and publisher fault cases
+$ bash tests/fm-session-lock-ancestry.test.sh
+ok - session lock: a true detached launch retains one generation across exec and detached tools with denied ps
+ok - session lock: sibling launches contend, stopped owners stay live and a nested home gets a fresh binding
+ok - session lock: a killed publisher at each different-PID commit boundary leaves one recoverable owner
+ok - session lock: same-PID takeover commits at the proof rename and survives an interrupted publisher
+ok - session lock: PID reuse cannot pin the publication mutex
+ok - session lock: a legacy writer paused before cutover cannot replace a versioned owner
+ok - session lock: a reparented executor loses mutation authority on anchor SIGKILL
+[exit 0]

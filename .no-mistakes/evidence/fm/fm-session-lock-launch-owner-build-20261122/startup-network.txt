@@ -1,0 +1,80 @@
+state/.lock = 3630279 (one PID line)
+.lock.owner.3630279 = v1	3630279	linux:<boot-id>:5281719	launch	<lab>/home	d57507b841f4c3b2c575620d9a2b83e362e276e00fb57abbfa3ded220c016662
+Generation = 7d5b431bfd960c6f1fcc552ed316441ee025b9422a52b5e7258b255419bbbde1
+
+$ <lab>~/fm-lock.sh status
+lock: held by live launch pid 3630279
+[exit 0]
+
+$ <lab>~/fm-session-launch.sh -- <lab>~/fm-lock.sh
+error: another live firstmate session holds the lock (pid 3630279)
+[exit 1]
+
+NETWORK_CHECKS: fleet lock ownership changed before project clone refresh, so this stale worker skipped that sweep
+NETWORK_CHECKS: fleet lock ownership changed before dead-secondmate relaunch, so this stale worker skipped that sweep
+NETWORK_CHECKS: fleet lock ownership changed before secondmate convergence, so this stale worker skipped that sweep
+NETWORK_CHECKS: fleet lock ownership changed before pending handoff delivery, so this stale worker skipped that sweep
+
+Before git-upload-pack release, project HEAD = ba87d2b8fd3c8decd0ed246104e14e76484acf48
+
+$ <lab>~/fm-startup-network.sh ready 3630279
+
+[exit 1]
+
+.session-start-complete.7d5b431bfd960c6f1fcc552ed316441ee025b9422a52b5e7258b255419bbbde1
+3630279
+start=linux:<boot-id>:5281719
+generation=7d5b431bfd960c6f1fcc552ed316441ee025b9422a52b5e7258b255419bbbde1
+
+$ <lab>~/fm-startup-network.sh ready 3630279
+
+[exit 0]
+
+$ <lab>~/fm-startup-network.sh report
+completed off the startup path in 7s: GitHub authentication, dead-secondmate relaunch, secondmate convergence, pending handoff delivery, project clone refresh with its drift reporting, inactive terminal-outcome reconciliation, and home-summary publication.
+NEEDS_GH_AUTH
+These ran AFTER the sections above were composed, so re-read any record a line here names.
+TIMINGS - where the deferred network checks spent their time (ms):
+  phase       gh-auth                                    start=+3746    elapsed=181
+  phase       secondmate-liveness                        start=+4168    elapsed=28
+  phase       secondmate-sync                            start=+4364    elapsed=103
+  phase       handoff-delivery                           start=+4606    elapsed=2
+  clone       sync synthetic                             start=+4692    elapsed=1090
+  phase       fleet-sync                                 start=+4211    elapsed=2062
+  stage       network-checks probe_sweeps                start=+2       elapsed=6325
+  slowest: stage network-checks probe_sweeps 6325ms, phase fleet-sync 2062ms, clone sync synthetic 1090ms
+[exit 0]
+
+.startup-network.status
+state=done
+locked=1
+phases=probe,sweeps
+lock_pid=3630279
+lock_identity=7d5b431bfd960c6f1fcc552ed316441ee025b9422a52b5e7258b255419bbbde1
+rc=0
+
+After the authorized sweep, project HEAD = e90f0744e52f7d4effdfa284ad37178eac3c6ac2
+after startup
+
+Worker published state/home-summary.json
+
+startup.log
+lock acquired: launch pid 3630279
+1795773178	1	check	synthetic	local synthetic queue item
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 3637598.1795773181.DxXmyQ
+
+$ <lab>~/fm-startup-network.sh ready 3630279
+
+[exit 1]
+
+$ <lab>~/fm-lock.sh status
+lock: stale (pid 3630279 exited or was reused)
+[exit 0]
+
+$ <lab>~/fm-session-launch.sh -- /bin/bash -ec 
+"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"
+"$FM_ROOT_OVERRIDE/bin/fm-lock.sh" verify
+
+lock acquired: launch pid 3656561
+7b0e092af70a49dee97e1c02a205e29d8809d06534b4da3d247f10fb245aa100
+[exit 0]

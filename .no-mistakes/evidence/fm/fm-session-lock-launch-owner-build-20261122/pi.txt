@@ -1,0 +1,37 @@
+$ pi --version
+1.5.0
+[exit 0]
+
+state/.lock = 253651 (one PID line)
+.lock.owner.253651 = v1	253651	linux:<boot-id>:5325557	native	<lab>/home	395652f3431b2d7b2966fe3abc3c7c5a23f739292d3d1268d2ce75941ee53b97
+Generation = 75a1d3734118017c869e1da59ab00056550dd058903cc013385bc7fa19a77312
+
+.pi-watch-extension-loaded
+sha256:aceea88c6f1cc7e1d570aa22daf325a0f2b6f8da2a9fa0899a6949aa2cb471f4
+253651
+75a1d3734118017c869e1da59ab00056550dd058903cc013385bc7fa19a77312
+
+.pi-turnend-extension-loaded
+sha256:f9f21aec13390eac064de54d4699e0ade2854b2113092fba117891b2cc9cd68e
+253651
+75a1d3734118017c869e1da59ab00056550dd058903cc013385bc7fa19a77312
+
+253651
+start=linux:<boot-id>:5325557
+generation=75a1d3734118017c869e1da59ab00056550dd058903cc013385bc7fa19a77312
+
+ Warning: watcher: read-only - session lock is held by another firstmate session
+
+state/.lock = 253651 (one PID line)
+.lock.owner.253651 = v1	253651	linux:<boot-id>:5325557	native	<lab>/home	395652f3431b2d7b2966fe3abc3c7c5a23f739292d3d1268d2ce75941ee53b97
+Generation = 75a1d3734118017c869e1da59ab00056550dd058903cc013385bc7fa19a77312
+
+Both extension receipts still name the first engine after the second engine's arm request.
+
+Competing pi engine exited 0.
+
+Owning pi engine exited 0.
+
+$ <lab>~/fm-lock.sh status
+lock: stale (pid 253651 exited or was reused)
+[exit 0]

@@ -1,0 +1,23 @@
+startup.log
+lock acquired: startup pid 3328388
+STARTUP-ONLY - lock authority expires when this invocation ends. Use bin/fm-session-launch.sh for continued work.
+skipped (startup-only) - queued wakes remain pending for a session.
+completed during this startup in 2s: GitHub authentication, dead-secondmate relaunch, secondmate convergence, pending handoff delivery, project clone refresh with its drift reporting, inactive terminal-outcome reconciliation, and home-summary publication.
+
+$ <lab>~/fm-startup-network.sh report
+completed off the startup path in 2s: GitHub authentication, dead-secondmate relaunch, secondmate convergence, pending handoff delivery, project clone refresh with its drift reporting, inactive terminal-outcome reconciliation, and home-summary publication.
+NEEDS_GH_AUTH
+These ran AFTER the sections above were composed, so re-read any record a line here names.
+TIMINGS - where the deferred network checks spent their time (ms):
+  phase       gh-auth                                    start=+1256    elapsed=63
+  phase       secondmate-liveness                        start=+1398    elapsed=9
+  phase       fleet-sync                                 start=+1399    elapsed=10
+  phase       secondmate-sync                            start=+1454    elapsed=18
+  phase       handoff-delivery                           start=+1513    elapsed=1
+  stage       network-checks probe_sweeps                start=+1       elapsed=1587
+  slowest: stage network-checks probe_sweeps 1587ms, phase gh-auth 63ms, phase secondmate-sync 18ms
+[exit 0]
+
+Project HEAD after exit 0 = e01149d16f5d10d444be1b348bc60c908f6afeac (expected 2b7fc32cc149d730f4443a05f2644422d5bc1fff)
+
+Check stopped: AssertionError('Startup exited before the authorized sweep reached the local Git remote')

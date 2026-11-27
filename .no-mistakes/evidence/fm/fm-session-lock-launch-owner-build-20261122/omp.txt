@@ -1,0 +1,37 @@
+$ omp --version
+omp/18.1.11
+[exit 0]
+
+state/.lock = 171066 (one PID line)
+.lock.owner.171066 = v1	171066	linux:<boot-id>:5320909	native	<lab>/home	b2d28f797db9ccfa27bf18278da4eea1f75f0b78e380c9e086d2d710cfd4cdec
+Generation = 9ff9d8282f5bc50e1193e74f1fcc7ab89bb7d41afb7c87939482470d9898958a
+
+.omp-watch-extension-loaded
+sha256:b2d0dbe65d899a4761be4ae51222e8142e5c052d97bf76af62fc3ce11ee91add
+171066
+9ff9d8282f5bc50e1193e74f1fcc7ab89bb7d41afb7c87939482470d9898958a
+
+.omp-turnend-extension-loaded
+sha256:5472b52700e8c0e54a5266904a8d9ee4b7e13f48f02aa9fb79612df3acc2cd4e
+171066
+9ff9d8282f5bc50e1193e74f1fcc7ab89bb7d41afb7c87939482470d9898958a
+
+171066
+start=linux:<boot-id>:5320909
+generation=9ff9d8282f5bc50e1193e74f1fcc7ab89bb7d41afb7c87939482470d9898958a
+
+ Warning: watcher: read-only - session lock is held by another firstmate session
+
+state/.lock = 171066 (one PID line)
+.lock.owner.171066 = v1	171066	linux:<boot-id>:5320909	native	<lab>/home	b2d28f797db9ccfa27bf18278da4eea1f75f0b78e380c9e086d2d710cfd4cdec
+Generation = 9ff9d8282f5bc50e1193e74f1fcc7ab89bb7d41afb7c87939482470d9898958a
+
+Both extension receipts still name the first engine after the second engine's arm request.
+
+Competing omp engine exited 0.
+
+Owning omp engine exited 0.
+
+$ <lab>~/fm-lock.sh status
+lock: stale (pid 171066 exited or was reused)
+[exit 0]

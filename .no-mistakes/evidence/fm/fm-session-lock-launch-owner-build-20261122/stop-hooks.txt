@@ -1,0 +1,61 @@
+state/.lock = 3629902 (one PID line)
+.lock.owner.3629902 = v1	3629902	linux:<boot-id>:5281707	launch	<lab>/claude	8a0f6b592da12f45043778aba7ec340d3bd4428ce9df6b1148a65e6be994be62
+Generation = 9b45192aa9d9da0c7b1a5d7c12821cdfabdec593f119c4f9e181ddc795fae457
+
+claude synthetic Stop payload = {"session_id": "synthetic-claude", "stop_hook_active": false}
+
+$ <lab>/claude/bin/fm-claude-stop-autoarm.sh
+
+[exit 0]
+
+$ <lab>/claude/bin/fm-session-launch.sh -- <lab>/claude/bin/fm-claude-stop-autoarm.sh
+
+[exit 0]
+
+claude unbound and independent launch left watcher, beacon, and Stop ownership state absent
+
+claude owner started real watcher PID 3633060
+
+claude owner Stop output
+firstmate watcher wake - one supervision event needs a handling turn now.
+check: rearm-resurface
+Run bin/fm-wake-drain.sh first, handle the wake, then run its exact WAKE_ACK_REQUIRED --ack-through command. Until that post-handling acknowledgement, interruption leaves the wake durable for idempotent re-handling. This Stop hook owns watcher continuity: when the handling turn ends, the next needed cycle arms automatically - do NOT run bin/fm-watch-arm.sh after an ordinary wake.
+[exit 2]
+
+claude persisted queue
+1795773178	1	check	synthetic	queued fixture supervision
+
+$ <lab>/claude/bin/fm-lock.sh status
+lock: stale (pid 3629902 exited or was reused)
+[exit 0]
+
+state/.lock = 3638306 (one PID line)
+.lock.owner.3638306 = v1	3638306	linux:<boot-id>:5282023	launch	<lab>/cursor	49375ea50103c05177f9950b5c28cba9e72d4cfc988e9728c57dc3501657c2e3
+Generation = 2cf75cf0db5cb9775624bc989bbc9f65c5d39697f4d5983465a39455fc61970e
+
+cursor synthetic Stop payload = {"session_id": "synthetic-cursor", "generation_id": "synthetic-001", "loop_count": 0, "status": "completed", "cursor_version": "local protocol fixture", "hook_event_name": "stop"}
+
+$ <lab>/cursor/bin/fm-turnend-guard-cursor.sh
+
+[exit 0]
+
+$ <lab>/cursor/bin/fm-session-launch.sh -- <lab>/cursor/bin/fm-turnend-guard-cursor.sh
+
+[exit 0]
+
+cursor unbound and independent launch left watcher, beacon, and Stop ownership state absent
+
+cursor owner started real watcher PID 3643257
+
+cursor owner Stop output
+{
+  "followup_message": "⁣FIRSTMATE_OP: v1 watcher: firstmate watcher wake - one supervision event needs a handling turn now.\ncheck: rearm-resurface\n\nRun bin/fm-wake-drain.sh first, handle the wake, then run its exact WAKE_ACK_REQUIRED --ack-through command. Until that post-handling acknowledgement, interruption leaves the wake durable for idempotent re-handling. This stop hook owns watcher continuity: when the handling turn ends, the next needed cycle parks automatically - do NOT run bin/fm-watch-arm.sh after an ordinary wake."
+}
+[exit 0]
+
+cursor persisted queue
+1795773181	1	check	synthetic	queued fixture supervision
+
+$ <lab>/cursor/bin/fm-lock.sh status
+lock: stale (pid 3638306 exited or was reused)
+[exit 0]

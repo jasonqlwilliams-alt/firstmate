@@ -1,0 +1,26 @@
+$ <local-dependencies>/opencode --version
+1.19.6
+[exit 0]
+
+state/.lock = 38232 (one PID line)
+.lock.owner.38232 = v1	38232	linux:<boot-id>:5315115	launch	<lab>/home	e83df8e192f8197bdf786bf47eec51d95404e0acd98c1f820b5fda7998f6cab7
+Generation = d68c392c80a946f783311344f2ba9c3e0b8f331fbeff18aed9dc22e95b25699d
+
+unbound OpenCode POST /session/{id}/message status 200, assistant part LOCAL_RESPONSE
+
+Unbound OpenCode finished the same local turn. Watcher and beacon remained absent.
+
+owner OpenCode POST /session/{id}/message status 200, assistant part LOCAL_RESPONSE
+
+Owning OpenCode finished the same local turn. Real watcher PID 52633 published a beacon.
+
+state/.lock = 38232 (one PID line)
+.lock.owner.38232 = v1	38232	linux:<boot-id>:5315115	launch	<lab>/home	e83df8e192f8197bdf786bf47eec51d95404e0acd98c1f820b5fda7998f6cab7
+Generation = d68c392c80a946f783311344f2ba9c3e0b8f331fbeff18aed9dc22e95b25699d
+
+Loopback model requests
+[('/v1/chat/completions', 'local'), ('/v1/chat/completions', 'local'), ('/v1/chat/completions', 'local'), ('/v1/chat/completions', 'local')]
+
+OpenCode server stopped with exit -15.
+
+OpenCode server stopped with exit -15.
