@@ -239,15 +239,6 @@ EOF
   : > "$log"
   FM_HOME="$home" GH_AXI_LOG="$log" PATH="$fakebin:$PATH" "$GUARD" arm widgets "$repo" >/dev/null
 
-  out=$(cd "$repo" && FM_HOME="$home" GH_REPO=upstream/widgets GH_AXI_LOG="$log" \
-    FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
-    "$GH_AXI_SHIM" pr create --title unsafe --body unsafe 2>&1)
-  rc=$?
-  [ "$rc" -ne 0 ] || fail "gh-axi shim should refuse a third-party PR target"
-  assert_contains "$out" "pull-request would write to github.com/upstream/widgets" \
-    "gh-axi refusal did not name the unsafe repository"
-  [ ! -s "$log" ] || fail "refused gh-axi PR command still reached the real executable"
-
   out=$(cd "$repo" && FM_HOME="$home" GH_REPO=captain/widgets GH_AXI_LOG="$log" \
     FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
     "$GH_AXI_SHIM" pr create --title safe --body safe 2>&1)
@@ -287,6 +278,15 @@ EOF
   git -C "$repo" remote set-url origin git@github.com:captain/widgets.git \
     || fail "could not configure the policy fork as origin"
   : > "$log"
+  out=$(cd "$repo" && FM_HOME="$home" GH_REPO=upstream/widgets GH_AXI_LOG="$log" \
+    FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
+    "$GH_AXI_SHIM" pr create --title unsafe --body unsafe 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "gh-axi should refuse an unapproved GH_REPO with an approved origin"
+  assert_contains "$out" "pull-request would write to github.com/upstream/widgets" \
+    "gh-axi refusal did not name the unsafe repository"
+  [ ! -s "$log" ] || fail "refused gh-axi PR command still reached the real executable"
+
   out=$(cd "$repo" && FM_HOME="$home" GH_AXI_LOG="$log" \
     FM_DELIVERY_GUARD_ROOT="$ROOT" FM_REAL_GH_AXI="$fakebin/gh-axi" PATH="$fakebin:$PATH" \
     env -u GH_REPO "$GH_AXI_SHIM" pr create --title safe --body safe 2>&1)
@@ -323,14 +323,14 @@ EOF
   git --git-dir="$fork" show-ref --verify --quiet refs/heads/main \
     || fail "approved GH_REPO push did not reach the fork"
 
-  out=$(FM_HOME="$home" FAKE_GIT_REMOTE_ROOT="${repo%/repo}" GH_REPO=upstream/widgets GH_AXI_LOG="$log" \
+  out=$(FM_HOME="$home" FAKE_GIT_REMOTE_ROOT="${repo%/repo}" GH_REPO=captain/widgets GH_AXI_LOG="$log" \
     PATH="$fakebin:$PATH" git -C "$repo" push origin main:gh-repo-env 2>&1)
   rc=$?
-  [ "$rc" -ne 0 ] || fail "upstream push should be refused with GH_REPO naming the unapproved repository"
+  [ "$rc" -ne 0 ] || fail "upstream push should be refused with GH_REPO naming the approved fork"
   assert_contains "$out" "branch-push would write to github.com/upstream/widgets" \
-    "unapproved GH_REPO push refusal did not name the unsafe repository"
+    "upstream push refusal did not name the unsafe repository"
   if git --git-dir="$upstream" show-ref --verify --quiet refs/heads/gh-repo-env; then
-    fail "refused unapproved-GH_REPO push still wrote a branch"
+    fail "refused upstream push still wrote a branch"
   fi
 
   out=$(FM_HOME="$home" FAKE_GIT_REMOTE_ROOT="${repo%/repo}" GH_REPO=upstream/widgets GH_AXI_LOG="$log" \
