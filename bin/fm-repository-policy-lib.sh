@@ -221,8 +221,11 @@ fm_repository_authenticated_account() {  # <github-host>
     return 1
   fi
   # gh-axi selects a host through GH_HOST; unlike gh it deliberately does not
-  # expose a --hostname flag on its api surface.
-  output=$(GH_HOST="$host" gh-axi api /user --jq .login 2>&1) || {
+  # expose a --hostname flag on its api surface.  The account is not
+  # repository-scoped, and gh-axi forwards an exported GH_REPO to gh api as an
+  # unsupported --repo flag, so the lookup drops GH_REPO; callers still
+  # validate GH_REPO or the push URL as the effective target.
+  output=$(unset GH_REPO; GH_HOST="$host" gh-axi api /user --jq .login 2>&1) || {
     printf 'REFUSED: could not resolve the authenticated GitHub account for %s: %s\n' "$host" "$output" >&2
     return 1
   }
