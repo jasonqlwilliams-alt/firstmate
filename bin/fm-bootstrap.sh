@@ -43,11 +43,19 @@
 #          syncs or inheritance failures for live secondmate homes, plus
 #          quarantine diagnostics for divergent shared captain-preference
 #          copies; no-op/current and successful updates stay quiet.
-#          SECONDMATE_LIVENESS lines report only actionable failures from the
-#          recovery-grade state owned by bin/fm-backend.sh's
+#          SECONDMATE_LIVENESS lines report skipped or failed recovery based on
+#          the recovery-grade state owned by bin/fm-backend.sh's
 #          fm_backend_agent_state: skipped distinguishes an existing ambiguous
 #          process, an unreadable target, and an unverified backend; respawn
-#          failed names whether the endpoint was missing or agent-less.
+#          failed names whether the endpoint was missing or agent-less and
+#          summarizes the spawn output for both local and remote relaunches.
+#          The summary leads with the first error: line when present and adds
+#          the final nonblank line if different. With no error: line, it uses
+#          the final nonblank line alone, or the spawn exit status if there is
+#          no such line. Selection preserves whitespace within each line and
+#          skips the task's retained-directory warning (docs/agent-control.md,
+#          Task temporary directories).
+#          See tests/fm-secondmate-liveness.test.sh for regression coverage.
 #          Already-live and successfully relaunched secondmates are silent
 #          unless FM_BOOTSTRAP_VERBOSE_FACTS=1 requests BOOTSTRAP_INFO facts.
 #          A TANGLE line means the firstmate primary checkout (FM_ROOT) is stranded
