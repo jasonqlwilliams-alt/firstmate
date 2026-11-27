@@ -1,0 +1,291 @@
+Firstmate live CLI with disposable Git worktrees and homes. Real gh uses an HTTPS loopback forge. Validation run status and ledger are synthetic external input.
+
+### qualifies
+
+baseline-qualifying-primary (main)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+$ bin/fm-inactive-reconcile.sh scan --startup at base 86a565ae3338
+actionable: inactive terminal outcome awaiting captain presentation: child=child state=failed pr=https://github.com/firstmate-fixture/no-ci/pull/7
+1795816084	1	check	inactive-outcome:939b0639f4523ff9c8bc84f913614957	inactive terminal outcome awaiting captain presentation: child=child state=failed pr=https://github.com/firstmate-fixture/no-ci/pull/7
+
+qualifying-primary (main)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+real gh independently confirms loopback PR state:
+{"isDraft":false,"state":"OPEN"}
+$ bin/fm-watch.sh
+check: inactive-outcome
+$ bin/fm-wake-drain.sh
+1795816086	1	check	inactive-outcome:15296ffa81689769346abbd03f6e0e23	inactive terminal outcome awaiting captain presentation: child=child run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 577301.1795816086.4zG3Sy
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  After draining queued wakes, use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+1795816086	1	check	inactive-outcome:15296ffa81689769346abbd03f6e0e23	inactive terminal outcome awaiting captain presentation: child=child run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+$ bin/fm-inactive-reconcile.sh scan --startup
+1795816086	1	check	inactive-outcome:15296ffa81689769346abbd03f6e0e23	inactive terminal outcome awaiting captain presentation: child=child run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+
+qualifying-local (local)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring (repo-wide status points to a running sibling)
+$ bin/fm-inactive-reconcile.sh scan --startup
+$ bin/fm-inactive-reconcile.sh scan --startup
+done [key=inactive-outcome-mate-child-cancelled]: inactive terminal child=child fingerprint=15296ffa81689769346abbd03f6e0e23 run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+
+qualifying-remote (remote)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring (repo-wide status points to a running sibling)
+$ bin/fm-inactive-reconcile.sh scan --startup
+$ bin/fm-inactive-reconcile.sh scan --startup
+done [key=inactive-outcome-mate-child-cancelled]: inactive terminal child=child fingerprint=15296ffa81689769346abbd03f6e0e23 run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+PASS: qualifies
+
+### rejects_unrelated
+
+unrelated-pause
+
+unrelated-pause (main)
+child status: paused: waiting for CI runner repair until 2026-12-01T08:00:00Z
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+$ bin/fm-crew-state.sh child
+state: failed · source: run-step · run cancelled
+$ bin/fm-inactive-reconcile.sh scan --startup
+actionable: inactive terminal outcome awaiting captain presentation: child=child run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+1795816092	1	check	inactive-outcome:4e3fe9656d4d83fc4274242aad741b74	inactive terminal outcome awaiting captain presentation: child=child run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+Expected a new state=failed notice for this cancellation. Observed: 1795816092	1	check	inactive-outcome:4e3fe9656d4d83fc4274242aad741b74	inactive terminal outcome awaiting captain presentation: child=child run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+
+wrong-run-pr
+
+wrong-run-pr (main)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+validation input: run-unrelated-pr, cancelled, https://github.com/firstmate-fixture/no-ci/pull/8, CI log: no CI checks reported - still monitoring
+$ bin/fm-crew-state.sh child
+state: failed · source: run-step · run cancelled
+$ bin/fm-inactive-reconcile.sh scan --startup
+actionable: inactive terminal outcome awaiting captain presentation: child=child run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+1795816093	1	check	inactive-outcome:15296ffa81689769346abbd03f6e0e23	inactive terminal outcome awaiting captain presentation: child=child run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+Expected a new state=failed notice for this cancellation. Observed: 1795816093	1	check	inactive-outcome:15296ffa81689769346abbd03f6e0e23	inactive terminal outcome awaiting captain presentation: child=child run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+
+cancelled-retry
+
+cancelled-retry (main)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+$ bin/fm-inactive-reconcile.sh scan --startup
+actionable: inactive terminal outcome awaiting captain presentation: child=child run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+validation input: run-retry, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: checks failed
+$ bin/fm-crew-state.sh child
+state: failed · source: run-step · run cancelled
+1795816095	1	check	inactive-outcome:15296ffa81689769346abbd03f6e0e23	inactive terminal outcome awaiting captain presentation: child=child run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+$ bin/fm-inactive-reconcile.sh scan --startup
+1795816095	1	check	inactive-outcome:15296ffa81689769346abbd03f6e0e23	inactive terminal outcome awaiting captain presentation: child=child run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+Expected a new state=failed notice for this cancellation. Observed: (no new notice)
+
+stale-same-branch-run
+
+stale-same-branch-run (main)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+current worktree/ledger: failed on e93fb0ba, while axi status still returns the earlier cancellation
+$ bin/fm-crew-state.sh child
+state: failed · source: run-step · run cancelled
+$ bin/fm-inactive-reconcile.sh scan --startup
+actionable: inactive terminal outcome awaiting captain presentation: child=child run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+1795816097	1	check	inactive-outcome:15296ffa81689769346abbd03f6e0e23	inactive terminal outcome awaiting captain presentation: child=child run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+Expected a new state=failed notice for this cancellation. Observed: 1795816097	1	check	inactive-outcome:15296ffa81689769346abbd03f6e0e23	inactive terminal outcome awaiting captain presentation: child=child run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+FAIL: rejects_unrelated: incorrect cancellation handling: unrelated-pause, wrong-run-pr, cancelled-retry, stale-same-branch-run
+
+### genuine_failures
+
+actual-failure (local)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, failed, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+$ bin/fm-inactive-reconcile.sh scan --startup
+failed [key=inactive-outcome-mate-child-failed]: inactive terminal child=child fingerprint=939b0639f4523ff9c8bc84f913614957 pr=https://github.com/firstmate-fixture/no-ci/pull/7
+
+unregistered (main)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-inactive-reconcile.sh scan --startup
+actionable: inactive terminal outcome awaiting captain presentation: child=child state=failed
+$ bin/fm-inactive-reconcile.sh scan --startup
+1795816099	1	check	inactive-outcome:1f76faf7666ae104746415f73c8c5f6c	inactive terminal outcome awaiting captain presentation: child=child state=failed
+PASS: genuine_failures
+
+### lifecycle
+
+lifecycle-CLOSED (main)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+$ bin/fm-inactive-reconcile.sh scan --startup
+$ bin/fm-watch.sh
+watcher stopped after recording closure, exit 1
+watcher closure record: https://github.com/firstmate-fixture/no-ci/pull/7
+loopback forge: gh GraphQL state response CLOSED
+$ bin/fm-inactive-reconcile.sh scan --startup
+actionable: inactive terminal outcome awaiting captain presentation: child=child state=failed pr=https://github.com/firstmate-fixture/no-ci/pull/7
+1795816102	1	check	inactive-outcome:939b0639f4523ff9c8bc84f913614957	inactive terminal outcome awaiting captain presentation: child=child state=failed pr=https://github.com/firstmate-fixture/no-ci/pull/7
+
+lifecycle-MERGED (main)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+$ bin/fm-inactive-reconcile.sh scan --startup
+$ bin/fm-watch.sh
+check: <disposable>/lifecycle-MERGED/main/state/child.check.sh: merged
+watcher retired the merged PR registration
+loopback forge: gh GraphQL state response MERGED
+$ bin/fm-inactive-reconcile.sh scan --startup
+actionable: inactive terminal outcome awaiting captain presentation: child=child state=failed pr=https://github.com/firstmate-fixture/no-ci/pull/7
+1795816106	2	check	inactive-outcome:939b0639f4523ff9c8bc84f913614957	inactive terminal outcome awaiting captain presentation: child=child state=failed pr=https://github.com/firstmate-fixture/no-ci/pull/7
+
+published-then-closed (remote)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+$ bin/fm-inactive-reconcile.sh scan --startup
+done [key=inactive-outcome-mate-child-cancelled]: inactive terminal child=child fingerprint=15296ffa81689769346abbd03f6e0e23 run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+$ bin/fm-inactive-reconcile.sh scan --startup
+$ bin/fm-watch.sh
+watcher stopped after recording closure, exit 1
+watcher closure record: https://github.com/firstmate-fixture/no-ci/pull/7
+loopback forge: gh GraphQL state response CLOSED
+$ bin/fm-inactive-reconcile.sh scan --startup
+done [key=inactive-outcome-mate-child-cancelled]: inactive terminal child=child fingerprint=15296ffa81689769346abbd03f6e0e23 run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+PASS: lifecycle
+
+### blocked_delivery
+
+blocked-primary (main)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+$ bin/fm-inactive-reconcile.sh scan --startup
+<worktree>/bin/fm-wake-lib.sh: line 2244: <disposable>/blocked-primary/main/state/.wake-queue: Is a directory
+$ bin/fm-inactive-reconcile.sh scan --startup
+$ bin/fm-watch.sh
+watcher stopped after recording closure, exit 1
+watcher closure record: https://github.com/firstmate-fixture/no-ci/pull/7
+loopback forge: gh GraphQL state response CLOSED
+$ bin/fm-inactive-reconcile.sh scan --startup
+actionable: inactive terminal outcome awaiting captain presentation: child=child state=failed pr=https://github.com/firstmate-fixture/no-ci/pull/7
+1795816111	2	check	inactive-outcome:939b0639f4523ff9c8bc84f913614957	inactive terminal outcome awaiting captain presentation: child=child state=failed pr=https://github.com/firstmate-fixture/no-ci/pull/7
+
+blocked-parent (local)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+$ bin/fm-inactive-reconcile.sh scan --startup
+<worktree>/bin/fm-wake-lib.sh: line 2244: <disposable>/blocked-parent/mate/state/.wake-queue: Is a directory
+$ bin/fm-inactive-reconcile.sh scan --startup
+$ bin/fm-watch.sh
+watcher stopped after recording closure, exit 1
+watcher closure record: https://github.com/firstmate-fixture/no-ci/pull/7
+loopback forge: gh GraphQL state response CLOSED
+$ bin/fm-inactive-reconcile.sh scan --startup
+actionable: inactive terminal outcome needs parent report: child=child state=failed
+1795816115	2	check	inactive-reconcile:939b0639f4523ff9c8bc84f913614957	inactive terminal outcome needs parent report: child=child state=failed
+$ bin/fm-inactive-reconcile.sh scan --startup
+failed [key=inactive-outcome-mate-child-failed]: inactive terminal child=child fingerprint=939b0639f4523ff9c8bc84f913614957 pr=https://github.com/firstmate-fixture/no-ci/pull/7
+PASS: blocked_delivery
+
+### receipt_identity
+
+retry-main (main)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+$ bin/fm-inactive-reconcile.sh scan --startup
+actionable: inactive terminal outcome awaiting captain presentation: child=child run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+validation input: run-new-failure, failed, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: checks failed
+$ bin/fm-inactive-reconcile.sh scan --startup
+actionable: inactive terminal outcome awaiting captain presentation: child=child state=failed pr=https://github.com/firstmate-fixture/no-ci/pull/7
+$ bin/fm-inactive-reconcile.sh scan --startup
+1795816117	1	check	inactive-outcome:15296ffa81689769346abbd03f6e0e23	inactive terminal outcome awaiting captain presentation: child=child run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+1795816117	2	check	inactive-outcome:939b0639f4523ff9c8bc84f913614957	inactive terminal outcome awaiting captain presentation: child=child state=failed pr=https://github.com/firstmate-fixture/no-ci/pull/7
+
+retry-local (local)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+$ bin/fm-inactive-reconcile.sh scan --startup
+validation input: run-new-failure, failed, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: checks failed
+$ bin/fm-inactive-reconcile.sh scan --startup
+$ bin/fm-inactive-reconcile.sh scan --startup
+done [key=inactive-outcome-mate-child-cancelled]: inactive terminal child=child fingerprint=15296ffa81689769346abbd03f6e0e23 run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+failed [key=inactive-outcome-mate-child-failed]: inactive terminal child=child fingerprint=939b0639f4523ff9c8bc84f913614957 pr=https://github.com/firstmate-fixture/no-ci/pull/7
+
+ledger-failure (local)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+$ bin/fm-inactive-reconcile.sh scan --startup
+child status: failed: retry exhausted
+$ bin/fm-inactive-reconcile.sh scan --startup
+$ bin/fm-inactive-reconcile.sh report child
+done [key=inactive-outcome-mate-child-cancelled]: inactive terminal child=child fingerprint=15296ffa81689769346abbd03f6e0e23 run cancelled; registered PR awaiting a merge decision pr=https://github.com/firstmate-fixture/no-ci/pull/7
+failed [key=child-outcome-child-failed-88de61f8]: child child failed: retry exhausted pr=https://github.com/firstmate-fixture/no-ci/pull/7 mode=no-mistakes yolo=off
+
+ordinary-failure-dedup (local)
+child status: paused: PR https://github.com/firstmate-fixture/no-ci/pull/7 open; awaiting merge; cancelled because CI never registers on this repository
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-inactive-reconcile.sh scan --startup
+child status: failed: validation was cancelled
+$ bin/fm-inactive-reconcile.sh report child
+failed [key=inactive-outcome-mate-child-failed]: inactive terminal child=child fingerprint=1f76faf7666ae104746415f73c8c5f6c
+PASS: receipt_identity
+
+### fleet_snapshot
+
+fleet-snapshot (local)
+child status: done: PR https://github.com/firstmate-fixture/no-ci/pull/7 checks green
+validation input: run-original, cancelled, https://github.com/firstmate-fixture/no-ci/pull/7, CI log: no CI checks reported - still monitoring
+$ bin/fm-pr-check.sh child https://github.com/firstmate-fixture/no-ci/pull/7
+armed: state/child.check.sh
+$ bin/fm-fleet-snapshot.sh --secondmate-home-summary
+{"invalidity": {"ids": [], "kind": null}, "reason": null, "schema": "fm-secondmate-home-summary.v1", "valid": true}
+$ bin/fm-inactive-reconcile.sh scan --startup
+$ bin/fm-watch.sh
+watcher stopped after recording closure, exit 1
+watcher closure record: https://github.com/firstmate-fixture/no-ci/pull/7
+loopback forge: gh GraphQL state response CLOSED
+$ bin/fm-fleet-snapshot.sh --secondmate-home-summary
+{"invalidity": {"ids": ["child"], "kind": "terminal_in_flight"}, "reason": "in-flight backlog item has terminal child state: child=failed", "schema": "fm-secondmate-home-summary.v1", "valid": false}
+PASS: fleet_snapshot
+Scenario driver completed. Failures: rejects_unrelated
