@@ -20,7 +20,7 @@
 #   - agy runs with HOME (and every XDG base) pointed at a private copy holding
 #     only its settings (trust narrowed to one scratch workspace, so no trust
 #     dialog), installation id, onboarding records, and sign-in token; the
-#     copy is deleted on exit and the real home is never written;
+#     token copy is removed after startup and the real home is never written;
 #   - agy runs in its own network namespace with only loopback up, so it has no
 #     network egress; the guard refuses to launch agy unless the namespace
 #     proves that before exec;
@@ -36,7 +36,7 @@
 set -u
 
 # shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 1
+FM_TEST_SKIP_ORPHAN_REAP=1 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 1
 
 CAPTURE_DIR=${FM_AGY_COMPOSER_LIVE_CAPTURE_DIR:-}
 if [ "${FM_AGY_COMPOSER_LIVE_OAUTH:-}" != 1 ]; then
@@ -54,10 +54,31 @@ VERSION=version-unknown
 fail() { printf 'not ok - agy (%s): %s\n' "$VERSION" "$1" >&2; exit 1; }
 pass() { printf 'ok - agy (%s): %s\n' "$VERSION" "$1"; }
 
+reap_abandoned_runs() {
+  local marker prior owner identity old_socket workspace
+  for marker in "${TMPDIR:-/tmp}"/fm-agy-live.*/.fm-test-fixture; do
+    prior=${marker%/*}
+    [ -d "$prior" ] && [ ! -L "$prior" ] && [ -O "$prior" ] &&
+      [ -f "$marker" ] && [ ! -L "$marker" ] && [ -O "$marker" ] || continue
+    { IFS= read -r owner && IFS= read -r identity; } < "$marker" || continue
+    [[ "$owner" =~ ^[1-9][0-9]*$ && -n "$identity" ]] || continue
+    fm_test_owner_is_alive "$owner" "$identity" && continue
+    old_socket="fm-agy-live-$owner"
+    if workspace=$("$REAL_TMUX" -L "$old_socket" display-message -p -t "=$SESSION:" '#{session_path}' 2>/dev/null) &&
+      [ "$workspace" = "$(cd -P -- "$prior" && pwd -P)/workspace" ]; then
+      "$REAL_TMUX" -L "$old_socket" kill-server 2>/dev/null || return 1
+    fi
+    rm -rf -- "$prior" 2>/dev/null || return 1
+  done
+}
+reap_abandoned_runs || fail "could not remove an abandoned agy guard fixture"
+
 WORK=$(fm_test_tmproot fm-agy-live 2>/dev/null) && [ -n "$WORK" ] \
   || fail "could not allocate the private scratch root"
+TOKEN_COPY="$WORK/home/.gemini/antigravity-cli/antigravity-oauth-token"
 
 cleanup() {
+  rm -f -- "$TOKEN_COPY" 2>/dev/null || true
   "$REAL_TMUX" -L "$SOCKET" kill-server 2>/dev/null || true
   fm_test_cleanup
 }
@@ -116,7 +137,7 @@ exec unshare -U --map-user="$FM_AGY_UID" --map-group="$FM_AGY_GID" bash -c '
   if (exec 3<>/dev/tcp/1.1.1.1/443) 2>/dev/null; then
     exit 1
   fi
-  install -m 600 -- "$FM_AGY_OAUTH_SOURCE" "$HOME/.gemini/antigravity-cli/antigravity-oauth-token" || exit 1
+  install -m 600 -- "$FM_AGY_OAUTH_SOURCE" "$FM_AGY_OAUTH_COPY" || exit 1
   agy --version 2>/dev/null > "$FM_AGY_VERSION_FILE" || true
   echo egress-blocked > "$FM_AGY_EGRESS_FILE"
   cd "$FM_AGY_WORKSPACE" && exec agy'
@@ -124,8 +145,6 @@ SH
 chmod +x "$WORK/launch.sh" 2>/dev/null || fail "could not make the private launcher executable"
 
 # --- screen helpers -----------------------------------------------------------
-capture_styled() { "$REAL_TMUX" -L "$SOCKET" capture-pane -e -p -t "$WIN" 2>/dev/null; }
-
 save_capture() {  # <styled-screen> <opening-rule-row> <cursor-geometry>
   [ -n "$CAPTURE_DIR" ] || return 0
   (
@@ -139,11 +158,6 @@ save_capture() {  # <styled-screen> <opening-rule-row> <cursor-geometry>
     trap - EXIT
   ) 2>/dev/null || fail "could not publish screen and cursor evidence for the wrapped capture"
 }
-
-guarded() (  # <expected-pending> [fit-text]
-  fm_backend_composer_snapshot tmux "$WIN" 2>/dev/null || return 1
-  guarded_snapshot "$@"
-)
 
 guarded_snapshot() {  # <expected-pending> [fit-text]
   local verdict
@@ -184,15 +198,32 @@ composer_frame() {  # <text> (styled screen on stdin)
     }'
 }
 
-composer_holds() {  # <text>
-  local screen
-  screen=$(capture_styled) || return 1
-  composer_frame "$1" <<< "$screen"
+read_snapshot() {
+  fm_tmux_composer_snapshot "$WIN" '' geometry && [ -n "$FM_COMPOSER_SNAPSHOT_SCREEN" ]
 }
 
-read_wrapped_frame() {  # <text>
-  fm_tmux_composer_snapshot "$WIN" '' geometry || return 1
+read_frame() {  # <text>
+  read_snapshot || return 1
   frame=$(composer_frame "$1" <<< "$FM_COMPOSER_SNAPSHOT_SCREEN")
+}
+
+read_idle() {
+  idle_verdict=
+  read_snapshot || return 1
+  idle_verdict=$(guarded_snapshot '') || idle_verdict=
+  if [ -e "$TOKEN_COPY" ] && fm_composer_strip_ansi <<< "$FM_COMPOSER_SNAPSHOT_SCREEN" |
+    LC_ALL=C awk '
+      /Antigravity CLI [0-9]+\.[0-9]+\.[0-9]+/ { banner = NR }
+      banner && NR == banner + 1 && /[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]+/ { signed_in = 1 }
+      END { exit !signed_in }
+    '; then
+    rm -f -- "$TOKEN_COPY" 2>/dev/null
+  fi
+  [ "$idle_verdict" = empty ]
+}
+
+read_short_draft() {  # <text>
+  read_frame "$1" && [[ "${frame#* }" == 1$'\n'* ]] && verdict_is pending "$1"
 }
 
 wait_for() {  # <polls> <command...>: retry every 0.5s until success
@@ -208,7 +239,7 @@ wait_for() {  # <polls> <command...>: retry every 0.5s until success
 
 verdict_is() {  # <want> <expected-pending> [fit-text]
   local verdict
-  verdict=$(guarded "$2" "${3:-}") && [ "$verdict" = "$1" ]
+  verdict=$(guarded_snapshot "$2" "${3:-}") && [ "$verdict" = "$1" ]
 }
 
 # --- launch -------------------------------------------------------------------
@@ -218,6 +249,7 @@ verdict_is() {  # <want> <expected-pending> [fit-text]
   -e XDG_STATE_HOME="$PRIV_HOME/.local/state" \
   -e FM_AGY_UID="$(id -u)" -e FM_AGY_GID="$(id -g)" -e FM_AGY_WORKSPACE="$WORKSPACE" \
   -e FM_AGY_OAUTH_SOURCE="$AGY_SRC/antigravity-oauth-token" \
+  -e FM_AGY_OAUTH_COPY="$TOKEN_COPY" \
   -e FM_AGY_VERSION_FILE="$WORK/version" -e FM_AGY_EGRESS_FILE="$WORK/egress" \
   -- unshare -rn "$WORK/launch.sh" 2>/dev/null \
   || fail "could not start the isolated tmux server"
@@ -227,10 +259,10 @@ VERSION=$(grep -m 1 -Ex '[0-9]+\.[0-9]+\.[0-9]+' "$WORK/version" 2>/dev/null) ||
 printf '# agy %s launched with no network egress and a private home\n' "$VERSION"
 
 # 1. Idle composer reads empty. No keystroke has been sent yet.
-if ! wait_for 90 verdict_is empty ''; then
-  idle_verdict=$(guarded '') || fail "could not read a valid idle composer verdict"
-  fail "idle composer never classified empty (last verdict: $idle_verdict)"
+if ! wait_for 90 read_idle; then
+  fail "idle composer never classified empty (last verdict: ${idle_verdict:-unavailable})"
 fi
+rm -f -- "$TOKEN_COPY" 2>/dev/null || fail "could not remove the temporary agy sign-in token"
 pass "idle composer classifies empty"
 
 # 2. Check fit on both sides of the composer width before typing.
@@ -244,11 +276,11 @@ pass "the fit check refuses the long notice and accepts the short notice"
 
 # 3. A short draft reads pending, holding exactly that text.
 "$REAL_TMUX" -L "$SOCKET" send-keys -t "$WIN" -l "$SHORT" 2>/dev/null || fail "could not type the short draft"
-if ! wait_for 10 verdict_is pending "$SHORT"; then
-  short_verdict=$(guarded "$SHORT") || fail "could not read a valid short draft verdict"
-  fail "short draft never classified pending (last verdict: $short_verdict)"
-fi
-wait_for 10 composer_holds "$SHORT" >/dev/null || fail "short draft was never identified in agy's frame"
+wait_for 10 read_short_draft "$SHORT" || fail "short draft was never proven and classified pending in one frame"
+v_other=$(guarded_snapshot 'zz prose') || fail "could not read a valid verdict for the mismatched short draft"
+case "$v_other" in
+  empty|pending) fail "short draft classified empty or proved a different expectation" ;;
+esac
 pass "a short typed draft classifies pending with its exact text"
 
 # 4. Extend it into a draft that wraps the composer row. The doorbell's Enter
@@ -256,7 +288,7 @@ pass "a short typed draft classifies pending with its exact text"
 # neither an empty verdict nor proof of a different text.
 DRAFT="$SHORT $LONG"
 "$REAL_TMUX" -L "$SOCKET" send-keys -t "$WIN" -l " $LONG" 2>/dev/null || fail "could not extend the short draft"
-wait_for 10 read_wrapped_frame "$DRAFT" || fail "the wrapped draft was never identified in agy's frame"
+wait_for 10 read_frame "$DRAFT" || fail "the wrapped draft was never identified in agy's frame"
 layout=${frame#* }
 rows=${layout%%$'\n'*}
 first_row=${layout#*$'\n'}
