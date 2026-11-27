@@ -1105,7 +1105,7 @@ exit 0
 SH
   chmod +x "$repo/bin/fm-turnend-guard.sh" "$repo/bin/fm-arm-pretool-check.sh"
   out=$(PLUGIN="$ext" FM_HOME="$home" FM_GUARD_LOG="$log" node --input-type=module 2>&1 <<'EOF'
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const handlers = new Map();
@@ -1126,6 +1126,9 @@ const pi = {
 };
 const mod = await import(pathToFileURL(process.env.PLUGIN).href);
 mod.default(pi);
+const marker = `${process.env.FM_HOME}/state/.pi-turnend-extension-loaded`;
+unlinkSync(marker);
+mkdirSync(marker);
 if (handlers.has("turn_end")) throw new Error("guard still treats internal Pi turns as logical runs");
 const settled = handlers.get("agent_settled");
 if (!settled) throw new Error("agent_settled handler was not registered");

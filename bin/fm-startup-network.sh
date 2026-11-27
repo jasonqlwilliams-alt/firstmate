@@ -501,7 +501,8 @@ run_sweeps() {  # <lock-pid> <owner-generation> <sweep-budget>
   FM_BOOTSTRAP_NETWORK_WORKER_START=$(cat "$claim/start" 2>/dev/null) || return 75
   fm_session_network_worker_owns_claim "$STATE" || return 75
   if [ "$kind" = startup ]; then
-    fm_run_startup_deadline group "$budget" SIGKILL "$SCRIPT_DIR/fm-startup-network.sh" _checks "$lock_pid" "$budget"
+    fm_run_startup_interruptible fm_run_startup_deadline "$budget" \
+      "$SCRIPT_DIR/fm-startup-network.sh" _checks "$lock_pid" "$budget"
   else
     run_home_summary
     run_network_bootstrap "$lock_pid" "$budget"
@@ -581,7 +582,8 @@ EOF
       fi
       fm_lock_release "$STATE/.lock.acquire"
     elif [ "${FM_SESSION_OWNER_KIND:-}" = startup ]; then
-      "$SCRIPT_DIR/fm-startup-network.sh" _sweep "$lock_pid" "$lock_generation" "$budget" >>"$out" 2>&1 || rc=$?
+      fm_run_startup_interruptible "$SCRIPT_DIR/fm-startup-network.sh" _sweep "$lock_pid" "$lock_generation" "$budget" \
+        >>"$out" 2>&1 || rc=$?
     else
       local claim_budget=$((budget + $(summary_budget) + 2))
       fm_run_timed "$claim_budget" "$SCRIPT_DIR/fm-startup-network.sh" _sweep "$lock_pid" "$lock_generation" "$budget" \

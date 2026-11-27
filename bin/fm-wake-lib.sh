@@ -260,16 +260,22 @@ fm_supervision_model() {
 }
 
 fm_codex_checkpoint_session() {
-  local state=$1 pid identity digest
+  local state=$1 pid identity='' digest
   [ -f "$state/.lock" ] && [ ! -L "$state/.lock" ] || return 1
   [ ! -e "$state/.afk" ] && [ ! -e "$state/.afk-contract" ] || return 1
   [ "$("$FM_WAKE_LIB_DIR/fm-harness.sh")" = codex ] || return 1
   [ "$(fm_supervision_model)" = persistent ] || return 1
   # shellcheck source=bin/fm-session-lock-lib.sh
   . "$FM_WAKE_LIB_DIR/fm-session-lock-lib.sh"
-  fm_session_hook_owns_lock "$state" || return 1
-  pid=$FM_SESSION_LOCK_PID
-  identity=${FM_SESSION_LOCK_GENERATION:-$(fm_pid_identity "$pid")} || return 1
+  if fm_session_owner_mode_active "$state"; then
+    fm_session_hook_owns_lock "$state" || return 1
+    pid=$FM_SESSION_LOCK_PID
+    identity=$FM_SESSION_LOCK_GENERATION
+  else
+    pid=$(fm_harness_ancestry_pid) || return 1
+    [ "$(cat "$state/.lock" 2>/dev/null)" = "$pid" ] || return 1
+  fi
+  [ -n "$identity" ] || identity=$(fm_pid_identity "$pid") || return 1
   if command -v shasum >/dev/null 2>&1; then
     digest=$(printf '%s' "$identity" | shasum -a 256) || return 1
   elif command -v sha256sum >/dev/null 2>&1; then

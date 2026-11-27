@@ -956,8 +956,12 @@ test_launch_owner_startup_and_bounded_worker_handoff() {
   cat > "$root/bin/fm-bootstrap.sh" <<'SH'
 #!/bin/bash
 set -eu
+generation=${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-}
+if [ "${FM_BOOTSTRAP_NETWORK:-}" = skip ] && [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" = 0 ]; then
+  generation=$("${0%/*}/fm-lock.sh" verify)
+fi
 printf '%s %s %s\n' "${FM_BOOTSTRAP_NETWORK:-}" "${FM_BOOTSTRAP_DETECT_ONLY:-0}" \
-  "${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-${FM_BOOTSTRAP_LOCAL_OWNER_GEN:-none}}" >> "$FM_FAKE_BOOTSTRAP_LOG"
+  "${generation:-none}" >> "$FM_FAKE_BOOTSTRAP_LOG"
 if [ "${FM_BOOTSTRAP_NETWORK:-}" = only ] && [ -e "$FM_HOME/hold-sweep" ]; then
   : > "$FM_HOME/sweep-running"
   for _ in $(seq 1 300); do
@@ -1057,7 +1061,7 @@ SH
 }
 
 test_bare_startup_reaps_the_waiting_inactive_scan() {
-  local rec home root log out scan_pid
+  local rec home root log out scan_pid startup_pid status=0 i
   rec=$(new_world bare-scan-deadline)
   IFS='|' read -r home root log <<< "$rec"
   mkdir -p "$home/config" "$home/state/.inactive-outcome-reconcile.lock"
@@ -1078,10 +1082,25 @@ SH
 #!/bin/bash
 if [ "${FM_TEST_SCAN_ACTIVE:-0}" = 1 ] && [ "$1" = 0.1 ] && [ ! -e "$FM_HOME/scan-waiter" ]; then
   printf '%s\n' "$PPID" > "$FM_HOME/scan-waiter"
+  /bin/bash -c 'trap "" TERM; printf "%s\n" "$$" > "$1"; exec /bin/sleep 30' _ "$FM_HOME/scan-child"
+  exit $?
 fi
 exec /bin/sleep "$@"
 SH
-  chmod +x "$root/bin/fm-home-summary-refresh.sh" "$root/bin/fm-inactive-reconcile.sh" "$root/bin/sleep"
+  mv "$root/bin/fm-bootstrap.sh" "$root/bin/fm-bootstrap-fixture.sh"
+  cat > "$root/bin/fm-bootstrap.sh" <<'SH'
+#!/bin/bash
+if [ "${FM_BOOTSTRAP_NETWORK:-}" = only ]; then
+  read -r scan_pid < "$FM_HOME/scan-child" || exit 1
+  case "$(/bin/ps -p "$scan_pid" -o stat=)" in
+    ''|Z*|X*) ;;
+    *) printf 'inactive scan survived into bootstrap\n'; exit 1 ;;
+  esac
+fi
+exec "${0%/*}/fm-bootstrap-fixture.sh" "$@"
+SH
+  chmod +x "$root/bin/fm-home-summary-refresh.sh" "$root/bin/fm-inactive-reconcile.sh" \
+    "$root/bin/fm-bootstrap.sh" "$root/bin/sleep"
   out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_STARTUP_NETWORK_TIMEOUT=3 \
     FM_TEST_REAL_SCAN="$ROOT/bin/fm-inactive-reconcile.sh" FM_FAKE_BOOTSTRAP_LOG="$log" \
     PATH="$root/bin:$PATH" "$root/bin/fm-session-start.sh" 2>&1) || fail "bare startup failed: $out"
@@ -1091,18 +1110,29 @@ SH
     ''|Z*|X*) ;;
     *) fail "inactive scan pid $scan_pid survived the startup deadline" ;;
   esac
-  rm "$home/scan-waiter"
+  rm "$home/scan-waiter" "$home/scan-child"
   out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_STARTUP_NETWORK_TIMEOUT=8 \
     FM_INACTIVE_RECONCILE_BUDGET_SECS=1 \
     FM_TEST_REAL_SCAN="$ROOT/bin/fm-inactive-reconcile.sh" FM_FAKE_BOOTSTRAP_LOG="$log" \
     PATH="$root/bin:$PATH" "$root/bin/fm-session-start.sh" 2>&1) || fail "bare startup failed: $out"
-  scan_pid=$(cat "$home/scan-waiter") || fail 'no scan waited during the local deadline fixture'
+  [ -s "$home/scan-child" ] || fail 'no scan descendant waited during the local deadline fixture'
   assert_contains "$out" 'completed during this startup' 'the local scan deadline did not leave time for bootstrap'
   assert_not_contains "$out" 'hit the 8s bound' 'the waiting scan consumed the entire startup sweep'
   assert_grep 'network=only detect_only=0' "$log" 'bootstrap did not run after the local scan deadline'
+  rm "$home/scan-waiter" "$home/scan-child"
+  FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_STARTUP_NETWORK_TIMEOUT=20 \
+    FM_TEST_REAL_SCAN="$ROOT/bin/fm-inactive-reconcile.sh" FM_FAKE_BOOTSTRAP_LOG="$log" \
+    PATH="$root/bin:$PATH" fm_test_start_fixture "$root/bin/fm-session-start.sh" > "$home/canceled-digest" 2>&1
+  startup_pid=$FM_TEST_FIXTURE_PID
+  for i in $(seq 1 200); do [ ! -s "$home/scan-child" ] || break; sleep 0.05; done
+  scan_pid=$(cat "$home/scan-child") || fail 'no scan descendant waited during the cancellation fixture'
+  kill -TERM "$startup_pid" || fail 'bare startup exited before cancellation'
+  wait "$startup_pid" || status=$?
+  [ "$status" -eq 143 ] || fail "canceled startup returned $status"
+  assert_absent "$home/state/.lock.acquire" 'canceled startup retained its sweep claim'
   case "$(/bin/ps -p "$scan_pid" -o stat=)" in
     ''|Z*|X*) ;;
-    *) fail "inactive scan pid $scan_pid survived the local deadline and sweep completion" ;;
+    *) fail "inactive scan pid $scan_pid survived startup cancellation" ;;
   esac
   rm -rf "$home/state/.inactive-outcome-reconcile.lock"
   FM_HOME="$home" "$root/bin/fm-session-launch.sh" -- "$root/bin/fm-lock.sh" >/dev/null \

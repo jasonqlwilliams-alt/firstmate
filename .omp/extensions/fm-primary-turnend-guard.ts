@@ -610,8 +610,10 @@ export default function (pi: ExtensionAPI) {
   // returning { continue: true, additionalContext } compels one more agent
   // loop with the guard text attached (verified on omp 18.1.2 and 18.1.11).
   pi.on?.("session_stop", async (event) => {
-    if (usesLaunchOwners(ownerPaths) && lockOwnership() !== "owned") return undefined;
-    markLoaded();
+    if (usesLaunchOwners(ownerPaths)) {
+      if (lockOwnership() !== "owned") return undefined;
+      markLoaded();
+    }
     const stopHookActive = Boolean(event && (event as { stop_hook_active?: unknown }).stop_hook_active === true);
     const result = await runGuard(stopHookActive);
     if (result.code !== 2) return undefined;

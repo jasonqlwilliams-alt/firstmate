@@ -215,7 +215,7 @@ network_phase() { [ "$FM_BOOTSTRAP_NETWORK_PHASE" != skip ]; }
 
 if local_phase && fm_session_owner_mode_active "$STATE" && [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ]; then
   local_owner=$("$SCRIPT_DIR/fm-lock.sh" verify) || local_owner=''
-  if [ -z "$local_owner" ] || [ "$local_owner" != "${FM_BOOTSTRAP_LOCAL_OWNER_GEN:-}" ]; then
+  if [ -z "$local_owner" ] || [ "$local_owner" = legacy ]; then
     FM_BOOTSTRAP_DETECT_ONLY=1
   fi
 fi

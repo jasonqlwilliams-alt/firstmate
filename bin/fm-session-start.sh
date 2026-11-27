@@ -353,7 +353,8 @@ if [ -z "${FM_SESSION_START_STAGE_FILE:-}" ]; then
     case "$network_budget" in ''|*[!0-9]*|0) network_budget=120 ;; esac
     if [ "$network_remaining" -gt 0 ]; then
       [ "$network_budget" -le "$network_remaining" ] || network_budget=$network_remaining
-      if FM_STARTUP_NETWORK_TIMEOUT="$network_budget" "$SCRIPT_DIR/fm-startup-network.sh" run --locked 1 2>&1; then
+      if FM_STARTUP_NETWORK_TIMEOUT="$network_budget" fm_run_startup_interruptible \
+        "$SCRIPT_DIR/fm-startup-network.sh" run --locked 1 2>&1; then
         "$SCRIPT_DIR/fm-startup-network.sh" harvest --pid $$ 2>&1 || true
       else
         printf 'skipped (network stage could not start)\n'
@@ -747,7 +748,7 @@ elif [ "$REEMIT" -eq 1 ]; then
 else
   BOOT_OUT=$(
     "$SCRIPT_DIR/fm-herdr-session-cleanup.sh" 2>&1 || true
-    FM_BOOTSTRAP_NETWORK=skip FM_BOOTSTRAP_LOCAL_OWNER_GEN="$STARTUP_OWNER_GEN" FM_TASKS_AXI_COMPATIBLE="$TASKS_AXI_COMPATIBLE" \
+    FM_BOOTSTRAP_NETWORK=skip FM_TASKS_AXI_COMPATIBLE="$TASKS_AXI_COMPATIBLE" \
       "$SCRIPT_DIR/fm-bootstrap.sh" 2>&1
   )
 fi

@@ -475,7 +475,7 @@ SH
   chmod +x "$repo/bin/"*.sh
   out=$(FM_GUARD_LOG="$TMP_ROOT/guard/guard.log" FM_HOME="$home" EXT="$repo/.omp/extensions/fm-primary-turnend-guard.ts" node --input-type=module 2>&1 <<'EOF'
 import { pathToFileURL } from "node:url";
-import { readFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, unlinkSync } from "node:fs";
 const handlers = new Map();
 const pi = { on(e, h) { handlers.set(e, h); }, sendMessage() {} };
 const mod = await import(pathToFileURL(process.env.EXT).href);
@@ -497,6 +497,9 @@ const allowed = await handlers.get("tool_call")({ type: "tool_call", toolName: "
 if (allowed.block) throw new Error("an ordinary command was blocked");
 const blocked = await handlers.get("tool_call")({ type: "tool_call", toolName: "bash", input: { command: "bin/fm-watch-arm.sh &" } }, {});
 if (blocked.block !== true || !blocked.reason.includes("seatbelt")) throw new Error(`backgrounded arm was not blocked: ${JSON.stringify(blocked)}`);
+const marker = `${process.env.FM_HOME}/state/.omp-turnend-extension-loaded`;
+unlinkSync(marker);
+mkdirSync(marker);
 const r1 = await handlers.get("session_stop")({ type: "session_stop", stop_hook_active: false }, {});
 if (r1?.continue !== true) throw new Error(`guard exit 2 did not compel a continuation: ${JSON.stringify(r1)}`);
 if (!r1.additionalContext.startsWith("⁣FIRSTMATE_OP: v1 turn-end-guard: ")) throw new Error(`continuation context is not typed operational input: ${r1.additionalContext}`);
@@ -505,7 +508,6 @@ const r2 = await handlers.get("session_stop")({ type: "session_stop", stop_hook_
 if (r2 !== undefined) throw new Error(`the flagged second stop must stand down, got ${JSON.stringify(r2)}`);
 const payloads = readFileSync(process.env.FM_GUARD_LOG, "utf8").trim().split("\n");
 if (payloads.join("|") !== '{"stop_hook_active":false}|{"stop_hook_active":true}') throw new Error(`guard payloads were ${payloads.join("|")}`);
-if (!existsSync(`${process.env.FM_HOME}/state/.omp-turnend-extension-loaded`)) throw new Error("loaded marker was not written");
 await handlers.get("session_shutdown")({}, {});
 EOF
 )
