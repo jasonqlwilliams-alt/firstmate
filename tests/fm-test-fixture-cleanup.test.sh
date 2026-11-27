@@ -45,7 +45,7 @@ test_scratch_cleanup_failure_changes_only_a_successful_exit() {
       printf "%s\n" "$TREEHOUSE_ROOT" > "$3/refused"
       rm "$FM_TEST_TREEHOUSE_DIR/.fm-test-treehouse"
       independent=$(fm_test_tmproot fm-test-cleanup-independent) || exit 9
-      fm_test_treehouse_setup
+      fm_test_treehouse_setup "$$" "$FM_TEST_OWNER_IDENTITY" || exit 9
       fm_test_track_treehouse_scratch "$FM_TEST_TREEHOUSE_DIR"
       printf "%s\n" "$independent" > "$3/independent"
       printf "%s\n" "$TREEHOUSE_ROOT" > "$3/scratch"
@@ -194,8 +194,8 @@ start_suite_for_orphan_sweep() (
   export TMPDIR="$1" FM_TEST_STALE_TREEHOUSE_DIR="${2:-}"
   stat() {
     case "${!#}" in
-      "$TMPDIR"/*|"$FM_TEST_STALE_TREEHOUSE_DIR/.fm-test-fixture") command stat "$@" ;;
-      *) return 1 ;;
+      "$TMPDIR"/*) command stat "$@" ;;
+      *) [ "${!#}" -ef "$FM_TEST_STALE_TREEHOUSE_DIR/.fm-test-fixture" ] && command stat "$@" ;;
     esac
   }
   export -f stat
@@ -206,7 +206,7 @@ test_orphan_sweep_respects_fixture_ownership() {
   local harness dirfile active_dir stale_dir fresh_dir pid tries
   harness=$(fm_test_tmproot fm-test-cleanup-orphan-harness)
   dirfile="$harness/active-dir"
-  TMPDIR="$harness" bash -c '
+  TZ=UTC0 FM_PROC_ROOT_OVERRIDE="$harness/no-proc" TMPDIR="$harness" bash -c '
     # shellcheck source=tests/lib.sh
     . "'"$LIB"'"
     d=$(fm_test_tmproot fm-test-cleanup-active)
@@ -230,7 +230,8 @@ test_orphan_sweep_respects_fixture_ownership() {
   fresh_dir=$(mktemp -d "$harness/fm-test-cleanup-fresh.XXXXXX")
   : > "$fresh_dir/.fm-test-fixture"
 
-  start_suite_for_orphan_sweep "$harness" || fail "the next suite did not start"
+  TZ=PST8 FM_PROC_ROOT_OVERRIDE="$harness/no-proc" \
+    start_suite_for_orphan_sweep "$harness" || fail "the next suite did not start"
 
   assert_absent "$stale_dir" \
     "a stale fixture root whose PID was reused by another process was not reaped"
@@ -314,7 +315,8 @@ test_orphan_sweep_reaps_standalone_treehouse_scratch() {
   assert_present "$scratch/slot/file" "scratch fixture must survive SIGKILL before the sweep"
 
   touch -t 202001010000 "${scratch%/pool}/.fm-test-fixture" || fail "could not age the stale scratch record"
-  start_suite_for_orphan_sweep "$harness" "${scratch%/pool}" || fail "the next suite did not start"
+  ln -s "${scratch%/pool}" "$harness/scratch-alias" || fail "could not alias the stale scratch directory"
+  start_suite_for_orphan_sweep "$harness" "$harness/scratch-alias" || fail "the next suite did not start"
   assert_absent "$scratch" "the orphan sweep missed a killed suite's Treehouse scratch root"
   pass "the orphan sweep reclaims standalone Treehouse pools after SIGKILL"
 }

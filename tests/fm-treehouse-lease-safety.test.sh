@@ -6,7 +6,7 @@ set -u
 
 # shellcheck source=tests/fixtures.sh
 . "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
-command -v treehouse >/dev/null || { echo 'skip: treehouse not found'; exit 0; }
+fm_test_require_treehouse_root || exit 0
 TMP_ROOT=$(fm_test_tmproot fm-treehouse-lease-safety)
 TREEHOUSE_BIN=$(command -v treehouse)
 mkdir -p "$TMP_ROOT/home" "$TMP_ROOT/user" "$TMP_ROOT/state"

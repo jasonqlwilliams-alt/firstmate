@@ -128,19 +128,23 @@ Discover tests by listing `tests/*.test.sh`: each is a self-contained bash scrip
 Shared test helpers live in `tests/lib.sh` (reporters, temp roots, git fixtures), `tests/fixtures.sh` (fake toolchain and spawn-world builders), `tests/wake-helpers.sh`, `tests/secondmate-helpers.sh`, and `tests/git-config-helpers.sh` (fixture Git isolation from the host's global and system configuration, already sourced by `tests/lib.sh` and `tests/herdr-test-safety.sh`; a suite that sources neither must source it itself before its first Git operation so a direct invocation stays isolated).
 Source those instead of copying a fake toolchain into a new suite.
 Test runs use a disposable `TREEHOUSE_ROOT` for Treehouse pools and checkouts.
-Use the test helper from a Firstmate checkout to reproduce an issue with a Treehouse build that supports `--root`:
+Use the test helper from a Firstmate checkout to reproduce an issue in a disposable clone with a Treehouse build that supports `--root`.
 
 ```bash
-(
-  . tests/treehouse-test-helpers.sh
-  fm_test_treehouse_setup || exit 1
-  trap 'fm_test_treehouse_remove "$FM_TEST_TREEHOUSE_DIR"' EXIT
-  cd /path/to/fixture-repo || exit 1
-  treehouse get --lease
-)
+bash -e <<'BASH'
+ROOT=$PWD
+. tests/treehouse-test-helpers.sh
+fm_test_require_treehouse_root
+owner_identity=$(fm_test_pid_identity "$$")
+fm_test_treehouse_setup "$$" "$owner_identity"
+trap 'fm_test_treehouse_remove "$FM_TEST_TREEHOUSE_DIR"' EXIT
+git clone --no-local -- /path/to/fixture-repo "$FM_TEST_TREEHOUSE_DIR/repo"
+cd "$FM_TEST_TREEHOUSE_DIR/repo"
+treehouse get --lease
+BASH
 ```
 
-Start any terminal server used for the reproduction inside this subshell so it inherits the test PATH.
+Start any terminal server used for the reproduction inside this Bash session so it inherits the test PATH.
 Opt-in live tests against an already-running terminal app use that app's pane environment and are outside scratch Treehouse isolation.
 The required Herdr CI lane supplies the pinned binary for the detached-pane lease regression.
 A fixture may shorten a production timeout to keep a failure path prompt, but never below what the real work inside that window costs on a loaded machine: a fork, an exec, a lock acquisition, a beacon publication, or a first-poll check.

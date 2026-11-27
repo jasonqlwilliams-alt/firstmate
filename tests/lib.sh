@@ -447,7 +447,7 @@ fm_test_owner_is_alive() {  # <pid> <identity>
   local state identity
   state=$(ps -p "$1" -o stat= 2>/dev/null) || return 1
   case "$state" in ''|Z*) return 1 ;; esac
-  identity=$(TZ=UTC0 fm_test_pid_identity "$1" 2>/dev/null) || return 1
+  identity=$(fm_test_pid_identity "$1" 2>/dev/null) || return 1
   [ "$identity" = "$2" ]
 }
 
@@ -456,7 +456,7 @@ fm_test_cwd_sleeper_identity() {
   for ((i=0; i<100; i++)); do
     command_name=$(ps -p "$pid" -o comm= 2>/dev/null) || return 1
     case "$command_name" in
-      sleep|*/sleep) TZ=UTC0 fm_test_pid_identity "$pid"; return ;;
+      sleep|*/sleep) fm_test_pid_identity "$pid"; return ;;
     esac
     sleep 0.05
   done
@@ -483,7 +483,7 @@ fm_test_finish_fixture_reaper() {  # <exit status>
 
 fm_test_arm_fixture_reaper() {
   local monitor_was_on=0 owner_identity
-  owner_identity=$(TZ=UTC0 fm_test_pid_identity "$$") || return 1
+  owner_identity=$(fm_test_pid_identity "$$") || return 1
   FM_TEST_FIXTURE_REAPER_DIR=$1
   FM_TEST_FIXTURE_SESSIONS="$FM_TEST_FIXTURE_REAPER_DIR/sessions"
   mkdir "$FM_TEST_FIXTURE_SESSIONS" "$FM_TEST_FIXTURE_REAPER_DIR/children" || return 1

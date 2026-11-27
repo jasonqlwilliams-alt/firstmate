@@ -76,10 +76,7 @@ SH
   cp "$dir/tests/fm-treehouse-lease-safety.test.sh" "$dir/tests/fm-test-run.test.sh"
   printf '%s\n' 'exit 0' > "$dir/tests/fm-test-isolation-proof.test.sh"
   stat() {
-    case "${!#}" in
-      "${FM_TEST_CANCEL_MARKER:-}") command stat "$@" ;;
-      *) return 1 ;;
-    esac
+    [ "${!#}" -ef "${FM_TEST_CANCEL_MARKER:-}" ] && command stat "$@"
   }
   export -f stat
 
@@ -102,7 +99,8 @@ SH
     assert_present "$root/pool/fixture-pool" "the runner was interrupted during its suite"
     touch -t 202001010000 "$root/.fm-test-fixture" || fail "could not age the interrupted owner's record"
 
-    export FM_TEST_CANCEL_MARKER="$root/.fm-test-fixture"
+    ln -s "$root" "$receipt/scratch-alias" || fail "could not alias the interrupted scratch directory"
+    export FM_TEST_CANCEL_MARKER="$receipt/scratch-alias/.fm-test-fixture"
     FM_TEST_SKIP_ORPHAN_REAP=0 FM_TEST_ORPHAN_MAX_AGE_SECONDS=3600 \
       "$dir/bin/fm-test-run.sh" --jobs 1 tests/fm-test-isolation-proof.test.sh > "$receipt/sweep.log" 2>&1 ||
       fail "the runner failed during startup recovery: $(cat "$receipt/sweep.log")"

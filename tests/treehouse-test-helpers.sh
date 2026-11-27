@@ -2,7 +2,7 @@
 
 fm_test_pid_identity() {
   local pid=$1
-  FM_STATE_OVERRIDE="${TMPDIR:-/tmp}" bash -c \
+  TZ=UTC0 FM_STATE_OVERRIDE="${TMPDIR:-/tmp}" bash -c \
     '. "$1"; fm_pid_identity "$2"' _ "$ROOT/bin/fm-wake-lib.sh" "$pid"
 }
 
@@ -17,7 +17,21 @@ fm_test_treehouse_remove() {
   rm -rf -- "$dir"
 }
 
+fm_test_require_treehouse_root() {
+  local binary=${FM_TEST_TREEHOUSE_BIN:-} help
+  if [ -z "$binary" ] && ! binary=$(type -P treehouse); then
+    printf 'skip: treehouse not found\n'
+    return 1
+  fi
+  if ! help=$(TREEHOUSE_NO_UPDATE_CHECK=1 "$binary" get --help 2>&1) ||
+    ! grep -Eq '(^|[[:space:]])--root([[:space:]]|$)' <<< "$help"; then
+    printf 'skip: treehouse does not support --root\n'
+    return 1
+  fi
+}
+
 fm_test_treehouse_setup() {
+  [ "$#" -eq 2 ] && [ -n "$1" ] && [ -n "$2" ] || return 1
   local parent live dir binary=${FM_TEST_TREEHOUSE_BIN:-}
   parent=$(cd -P /tmp && pwd -P) || return 1
   live=$(cd -P "${HOME:?}/.treehouse" 2>/dev/null && pwd -P) || live=
@@ -32,7 +46,7 @@ fm_test_treehouse_setup() {
     rm -rf -- "$dir"
     return 1
   fi
-  if [ "$#" -ne 0 ] && ! printf '%s\n%s\n' "$1" "$2" > "$dir/.fm-test-fixture"; then
+  if ! printf '%s\n%s\n' "$1" "$2" > "$dir/.fm-test-fixture"; then
     fm_test_treehouse_remove "$dir"
     return 1
   fi
