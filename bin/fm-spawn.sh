@@ -3301,6 +3301,10 @@ if [ -e "$STATE/$ID.backlog-close" ] || [ -L "$STATE/$ID.backlog-close" ]; then
 fi
 
 spawn_with_failure_diagnostic() {
+  if [ "$KIND" != secondmate ] || [ "$RELAUNCH" -eq 1 ]; then
+    "$@"
+    return
+  fi
   local diagnostic status=0
   {
     diagnostic=$("$@" 2>&1 >&3) || status=$?
@@ -3334,9 +3338,9 @@ elif [ "$RELAUNCH" -eq 1 ] && [ "$RELAUNCH_RECREATE" -eq 1 ]; then
   # is not a one-way door.
   case "$BACKEND" in
     tmux)
-      SES=$(spawn_with_failure_diagnostic fm_backend_tmux_container_ensure) || exit 1
+      SES=$(fm_backend_tmux_container_ensure) || exit 1
       T="$SES:$W"
-      WID=$(spawn_with_failure_diagnostic fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
+      WID=$(fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
       WT_TARGET="$WID"
       ;;
     herdr)
@@ -4114,7 +4118,7 @@ if [ -z "$TASK_TMP" ]; then
   }
   SPAWN_TASK_TMP_CREATED=1
 fi
-mkdir -p "$TASK_TMP/gotmp"
+spawn_with_failure_diagnostic mkdir -p "$TASK_TMP/gotmp"
 
 # Per-harness turn-end hook where enabled: a file that touches
 # state/<id>.turn-ended when the agent finishes a turn. Worktree-resident hooks

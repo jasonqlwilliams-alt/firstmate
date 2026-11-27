@@ -216,7 +216,6 @@ test_agent_state_dispatcher_and_compatibility() {
 make_toolchain() {
   local dir=$1 fakebin
   fakebin=$(fm_fakebin "$dir")
-  fm_test_track_task_tmps "$fakebin" || return 1
   fm_fake_exit0 "$fakebin" node chrome-devtools-axi pi-signed
   fm_fake_version_tool "$fakebin" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.46
   cat > "$fakebin/gh-axi" <<'SH'
@@ -528,7 +527,7 @@ test_sweep_reports_exit_status_without_error() {
 }
 
 test_sweep_reports_task_temp_creation_failure() {
-  local w fb tmuxfb log out task_tmp
+  local w fb tmuxfb log out line task_tmp
   w=$(new_world sweep-temp-creation-failure)
   add_sm_home "$w" sm1 firstmate:fm-sm1 pi
   task_tmp="$w/worker-temp"
@@ -539,10 +538,11 @@ test_sweep_reports_task_temp_creation_failure() {
   log="$w/calls.log"; : > "$log"
 
   out=$(LC_ALL=C run_bootstrap "$tmuxfb:$fb" "$w/home" missing "$log")
+  line=$(printf '%s\n' "$out" | grep '^SECONDMATE_LIVENESS: secondmate sm1: respawn failed' || true)
 
-  assert_contains "$out" 'respawn failed after recorded endpoint confidently missing: mkdir:' \
+  assert_contains "$line" 'respawn failed after recorded endpoint confidently missing: error: mkdir:' \
     "recovery failure should name the mkdir error"
-  assert_contains "$out" "$task_tmp/gotmp" "recovery failure should name the blocked directory"
+  assert_contains "$line" "$task_tmp/gotmp" "recovery failure should name the blocked directory"
   pass "sweep: a blocked Go temp directory reports the mkdir error"
 }
 
