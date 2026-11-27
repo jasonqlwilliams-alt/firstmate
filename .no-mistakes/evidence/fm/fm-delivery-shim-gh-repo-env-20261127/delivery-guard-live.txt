@@ -1,0 +1,163 @@
+git version 2.55.0
+gh version 2.100.0 (2026-09-04)
+0.1.30
+Firstmate test entry points: guard arm, managed pre-push hook, worker gh-axi shim.
+Synthetic Git traffic goes to disposable bare repositories through git-receive-pack.
+Synthetic GitHub API traffic goes through a localhost HTTPS emulator. No external endpoint.
+
+[baseline push with exported GH_REPO]
+origin=upstream/widgets fork=captain/widgets GH_REPO=captain/widgets
+$ git push fork HEAD:refs/heads/delivery-test
+REFUSED: could not resolve the authenticated GitHub account for github.com: error: "unknown flag: --repo"
+code: UNKNOWN
+error: failed to push some refs to 'github.com:captain/widgets.git'
+exit=1
+Local forge requests: []
+refs/heads/delivery-test: source=c7b544019ba6395e0ccd2dcfb71415ac6aa2c527 fork=<absent> upstream=<absent>
+Observed contract PASS [baseline push reproduces unknown flag before Git stores the branch]
+
+[baseline push with GH_REPO unset]
+origin=upstream/widgets fork=captain/widgets GH_REPO=<unset>
+$ git push fork HEAD:refs/heads/delivery-test
+DELIVERY TARGET: project=widgets action=branch-push repository=github.com/captain/widgets account=captain
+To github.com:captain/widgets.git
+ * [new branch]      HEAD -> delivery-test
+exit=0
+Local forge requests: [{"login": "captain", "method": "GET", "path": "/user"}]
+refs/heads/delivery-test: source=b30f3950fb5b635bb51373b0cf128f47612c56c0 fork=b30f3950fb5b635bb51373b0cf128f47612c56c0 upstream=<absent>
+Observed contract PASS [baseline unset control successfully pushes the same branch]
+
+[baseline PR with exported GH_REPO]
+origin=upstream/widgets fork=captain/widgets GH_REPO=captain/widgets
+$ gh-axi pr create --title "Local delivery PR" --body "Synthetic delivery check. Preserve spaces and punctuation." --base main --head delivery-test
+REFUSED: could not resolve the authenticated GitHub account for github.com: error: "unknown flag: --repo"
+code: UNKNOWN
+exit=1
+Local forge requests: []
+refs/heads/delivery-test: source=58e3c81bf1854d2bb9d847cde9a9872146586e81 fork=<absent> upstream=<absent>
+Observed contract PASS [baseline PR reproduces unknown flag before any request]
+
+[baseline PR with GH_REPO unset and approved origin]
+origin=captain/widgets fork=captain/widgets GH_REPO=<unset>
+$ gh-axi pr create --title "Local delivery PR" --body "Synthetic delivery check. Preserve spaces and punctuation." --base main --head delivery-test
+DELIVERY TARGET: project=widgets action=pull-request repository=github.com/captain/widgets account=captain
+created:
+  number: 12
+  url: "https://github.com/captain/widgets/pull/12"
+help[2]:
+  Run `gh-axi pr view 12` to see the full PR
+  Run `gh-axi pr checks 12` to monitor CI
+exit=0
+Local forge requests: [{"login": "captain", "method": "GET", "path": "/user"}, {"login": "captain", "method": "GET", "path": "/user"}, {"method": "POST", "operation": "repository", "path": "/graphql", "repository": "captain/widgets"}, {"method": "POST", "operation": "repository", "path": "/graphql", "repository": "captain/widgets"}, {"input": {"baseRefName": "main", "body": "Synthetic delivery check. Preserve spaces and punctuation.", "draft": false, "headRefName": "delivery-test", "maintainerCanModify": true, "repositoryId": "R_LOCAL_FORK", "title": "Local delivery PR"}, "method": "POST", "operation": "createPullRequest", "path": "/graphql", "repository": "captain/widgets"}]
+refs/heads/delivery-test: source=58e3c81bf1854d2bb9d847cde9a9872146586e81 fork=<absent> upstream=<absent>
+Observed contract PASS [baseline unset control creates a PR with approved origin]
+
+[1. approved push with exported GH_REPO]
+origin=upstream/widgets fork=captain/widgets GH_REPO=captain/widgets
+$ git push fork HEAD:refs/heads/delivery-test
+DELIVERY TARGET: project=widgets action=branch-push repository=github.com/captain/widgets account=captain
+To github.com:captain/widgets.git
+ * [new branch]      HEAD -> delivery-test
+exit=0
+Local forge requests: [{"login": "captain", "method": "GET", "path": "/user"}]
+refs/heads/delivery-test: source=b34b39d1b3e11a90c597a8722a41cce397250819 fork=b34b39d1b3e11a90c597a8722a41cce397250819 upstream=<absent>
+Observed contract PASS [1]
+
+[2. upstream push with GH_REPO naming the approved fork]
+origin=upstream/widgets fork=captain/widgets GH_REPO=captain/widgets
+$ git push origin HEAD:refs/heads/delivery-test
+REFUSED: branch-push would write to github.com/upstream/widgets, but project widgets permits only github.com/captain/widgets.
+error: failed to push some refs to 'github.com:upstream/widgets.git'
+exit=1
+Local forge requests: []
+refs/heads/delivery-test: source=166b24640675ebb531c5987a18387fb22d3172f7 fork=<absent> upstream=<absent>
+Observed contract PASS [2]
+
+[3. approved push with GH_REPO naming the unapproved upstream]
+origin=upstream/widgets fork=captain/widgets GH_REPO=upstream/widgets
+$ git push fork HEAD:refs/heads/delivery-test
+DELIVERY TARGET: project=widgets action=branch-push repository=github.com/captain/widgets account=captain
+To github.com:captain/widgets.git
+ * [new branch]      HEAD -> delivery-test
+exit=0
+Local forge requests: [{"login": "captain", "method": "GET", "path": "/user"}]
+refs/heads/delivery-test: source=166b24640675ebb531c5987a18387fb22d3172f7 fork=166b24640675ebb531c5987a18387fb22d3172f7 upstream=<absent>
+Observed contract PASS [3]
+
+[4. approved PR with exported GH_REPO and unapproved origin]
+origin=upstream/widgets fork=captain/widgets GH_REPO=captain/widgets
+$ gh-axi pr create --title "Local delivery PR" --body "Synthetic delivery check. Preserve spaces and punctuation." --base main --head delivery-test
+DELIVERY TARGET: project=widgets action=pull-request repository=github.com/captain/widgets account=captain
+created:
+  number: 12
+  url: "https://github.com/captain/widgets/pull/12"
+help[2]:
+  Run `gh-axi pr view 12 -R captain/widgets` to see the full PR
+  Run `gh-axi pr checks 12 -R captain/widgets` to monitor CI
+exit=0
+Local forge requests: [{"login": "captain", "method": "GET", "path": "/user"}, {"login": "captain", "method": "GET", "path": "/user"}, {"method": "POST", "operation": "repository", "path": "/graphql", "repository": "captain/widgets"}, {"method": "POST", "operation": "repository", "path": "/graphql", "repository": "captain/widgets"}, {"input": {"baseRefName": "main", "body": "Synthetic delivery check. Preserve spaces and punctuation.", "draft": false, "headRefName": "delivery-test", "maintainerCanModify": true, "repositoryId": "R_LOCAL_FORK", "title": "Local delivery PR"}, "method": "POST", "operation": "createPullRequest", "path": "/graphql", "repository": "captain/widgets"}]
+refs/heads/delivery-test: source=2ab729bd24f92147de99cee8fac526ab264b6b9e fork=<absent> upstream=<absent>
+Observed contract PASS [4]
+
+[5. unapproved PR with GH_REPO naming upstream and approved origin]
+origin=captain/widgets fork=captain/widgets GH_REPO=upstream/widgets
+$ gh-axi pr create --title "Local delivery PR" --body "Synthetic delivery check. Preserve spaces and punctuation." --base main --head delivery-test
+REFUSED: pull-request would write to github.com/upstream/widgets, but project widgets permits only github.com/captain/widgets.
+exit=1
+Local forge requests: []
+refs/heads/delivery-test: source=cdf5cacabd45a2e6f23dd93f0c5efa475bb1fd52 fork=<absent> upstream=<absent>
+Observed contract PASS [5]
+
+[6. approved PR with GH_REPO unset]
+origin=captain/widgets fork=captain/widgets GH_REPO=<unset>
+$ gh-axi pr create --title "Local delivery PR" --body "Synthetic delivery check. Preserve spaces and punctuation." --base main --head delivery-test
+DELIVERY TARGET: project=widgets action=pull-request repository=github.com/captain/widgets account=captain
+created:
+  number: 12
+  url: "https://github.com/captain/widgets/pull/12"
+help[2]:
+  Run `gh-axi pr view 12` to see the full PR
+  Run `gh-axi pr checks 12` to monitor CI
+exit=0
+Local forge requests: [{"login": "captain", "method": "GET", "path": "/user"}, {"login": "captain", "method": "GET", "path": "/user"}, {"method": "POST", "operation": "repository", "path": "/graphql", "repository": "captain/widgets"}, {"method": "POST", "operation": "repository", "path": "/graphql", "repository": "captain/widgets"}, {"input": {"baseRefName": "main", "body": "Synthetic delivery check. Preserve spaces and punctuation.", "draft": false, "headRefName": "delivery-test", "maintainerCanModify": true, "repositoryId": "R_LOCAL_FORK", "title": "Local delivery PR"}, "method": "POST", "operation": "createPullRequest", "path": "/graphql", "repository": "captain/widgets"}]
+refs/heads/delivery-test: source=12ccbb0114d5ab90923964a620af6ba405f2fb71 fork=<absent> upstream=<absent>
+Observed contract PASS [6]
+
+[7. approved push with a disallowed authenticated account]
+origin=upstream/widgets fork=captain/widgets GH_REPO=captain/widgets
+$ git push fork HEAD:refs/heads/delivery-test
+REFUSED: authenticated GitHub account fixture-other is not captain-approved in <disposable-fixture>/fm-home/config/repository-policy.json; branch-push would target github.com/captain/widgets.
+error: failed to push some refs to 'github.com:captain/widgets.git'
+exit=1
+Local forge requests: [{"login": "fixture-other", "method": "GET", "path": "/user"}]
+refs/heads/delivery-test: source=222d042b675edba6caba8ab8255e6a4ea443f9e1 fork=<absent> upstream=<absent>
+Observed contract PASS [7]
+
+[8a. raw REST write with GH_REPO set]
+origin=upstream/widgets fork=captain/widgets GH_REPO=captain/widgets
+$ gh-axi api POST /repos/captain/widgets/pulls --field "title=Local delivery PR" --field "body=Synthetic delivery check. Preserve spaces and punctuation." --field base=main --field head=delivery-test
+DELIVERY TARGET: project=widgets action=pull-request repository=github.com/captain/widgets account=captain
+error: "DELIVERY TARGET: project=widgets action=pull-request repository=github.com/captain/widgets account=captain"
+code: UNKNOWN
+exit=1
+Local forge requests: [{"login": "captain", "method": "GET", "path": "/user"}, {"login": "captain", "method": "GET", "path": "/user"}]
+refs/heads/delivery-test: source=a76a14e0e5e87d84414804538eef9df5eb4b68e6 fork=<absent> upstream=<absent>
+
+[8a control. raw REST CLI without worker shim on PATH]
+origin=upstream/widgets fork=captain/widgets GH_REPO=captain/widgets
+$ gh-axi api POST /repos/captain/widgets/pulls --field "title=Local delivery PR" --field "body=Synthetic delivery check. Preserve spaces and punctuation." --field base=main --field head=delivery-test
+error: "unknown flag: --repo"
+code: UNKNOWN
+exit=1
+Local forge requests: []
+refs/heads/delivery-test: source=e26be10fc3813d599fb5676d5fe50bf230a8348f fork=<absent> upstream=<absent>
+
+[8b. raw REST write with GH_REPO unset]
+origin=upstream/widgets fork=captain/widgets GH_REPO=<unset>
+$ gh-axi api POST /repos/captain/widgets/pulls --field "title=Local delivery PR" --field "body=Synthetic delivery check. Preserve spaces and punctuation." --field base=main --field head=delivery-test
+DELIVERY TARGET: project=widgets action=pull-request repository=github.com/captain/widgets account=captain
+number: 13
+exit=0
+Local forge requests: [{"login": "captain", "method": "GET", "path": "/user"}, {"login": "captain", "method": "GET", "path": "/user"}, {"input": {"base": "main", "body": "Synthetic delivery check. Preserve spaces and punctuation.", "head": "delivery-test", "title": "Local delivery PR"}, "method": "POST", "path": "/repos/captain/widgets/pulls"}]
+refs/heads/delivery-test: source=e26be10fc3813d599fb5676d5fe50bf230a8348f fork=<absent> upstream=<absent>
+Observed contract PASS [8]
