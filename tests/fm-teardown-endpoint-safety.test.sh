@@ -396,8 +396,13 @@ if [ "\${1:-}" = list-windows ]; then
   for arg in "\$@"; do
     [ "\$arg" != -f ] || exit 1
   done
-  if [ "\${FM_TEST_TMUX_BLIND:-}" = 1 ]; then
-    printf '@1:1::\n'
+  if [ "\${FM_TEST_TMUX_MISSING_PANE_PID:-}" = 1 ]; then
+    inventory=\$('$REAL_TMUX' -S '$socket' "\$@")
+    pane=\$('$REAL_TMUX' -S '$socket' display-message -p -t '$window_id' '#{pane_pid}:#{pane_id}')
+    pane_entry=":\$pane:"
+    [[ -n "\$pane" && "\$inventory" == *"\$pane_entry"* ]] || exit 94
+    missing_pid="::\${pane#*:}:"
+    printf '%s\n' "\${inventory/"\$pane_entry"/"\$missing_pid"}" | tee '$dir/missing-pid.snapshot'
     exit 0
   fi
 fi
@@ -476,10 +481,15 @@ SH
     "worktree=$dir/nonexistent-worktree" "project=$dir/nonexistent-project" \
     "kind=scout" "mode=no-mistakes"
 
-  FM_TEST_TMUX_BLIND=1 run_case "$dir" "$target_id" > "$dir/blind.out" 2> "$dir/blind.err" \
+  : > "$dir/runtime.log"
+  FM_TEST_TMUX_MISSING_PANE_PID=1 run_case "$dir" "$target_id" > "$dir/blind.out" 2> "$dir/blind.err" \
     || fail "cleanup with unreadable pane PIDs failed: $(cat "$dir/blind.err")"
+  [ -s "$dir/missing-pid.snapshot" ] || fail "fixture did not remove a PID from the live tmux snapshot"
   assert_contains "$(cat "$dir/blind.err")" "cannot verify the exact window and its pane inventory" \
     "unreadable pane PIDs did not produce a warning"
+  if grep -Eq '^tmux <(if-shell|kill-window)>' "$dir/runtime.log"; then
+    fail "teardown requested a window close with a missing pane PID"
+  fi
   isolated_tmux_window_exists "$dir" "$socket" "$session" "$target" \
     || fail "teardown closed a window with unreadable pane PIDs"
   assert_absent "$dir/home/state/$target_id.meta" "refusing the window close interrupted record cleanup"
