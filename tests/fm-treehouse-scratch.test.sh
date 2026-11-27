@@ -195,6 +195,40 @@ test_reproduction_helper() {
   pass "fm-treehouse-scratch.sh run isolates a reproduction and removal refuses unmarked directories"
 }
 
+test_checkout_tmpdir_keeps_git_excludes() {
+  local owner="$TMP_ROOT/exclude-owner" checkout="$TMP_ROOT/exclude-linked"
+  local project="$TMP_ROOT/exclude-project" seen="$TMP_ROOT/exclude-seen"
+  local probe="$TMP_ROOT/exclude-probe" repo="$TMP_ROOT/runner" root
+  fm_git_init_commit "$owner"
+  git -C "$owner" worktree add -q --detach "$checkout" || fail "could not create the linked temp checkout"
+  mkdir "$checkout/tmp"
+  fm_git_init_commit "$project"
+  printf '%s\n' '/keep-this-ignore' > "$owner/.git/info/exclude"
+  cp "$owner/.git/info/exclude" "$TMP_ROOT/exclude-before"
+  cat > "$probe" <<'SH'
+set -eu
+cd "$FM_TEST_PROJECT"
+slot=$(treehouse get --lease --lease-holder exclude-probe)
+case "$slot" in "$TREEHOUSE_ROOT"/*) test -d "$slot" ;; *) exit 1 ;; esac
+printf '%s\n' "$TREEHOUSE_ROOT" >> "$FM_TEST_SEEN"
+SH
+  as_operator TMPDIR="$checkout/tmp" FM_TEST_PROJECT="$project" FM_TEST_SEEN="$seen" \
+    "$ROOT/bin/fm-treehouse-scratch.sh" run bash "$probe" || fail "reproduction with checkout-local TMPDIR failed"
+  as_operator TMPDIR="$checkout/tmp" FM_TEST_PROJECT="$project" FM_TEST_SEEN="$seen" \
+    bash -ec '. "$1"; . "$2"' _ "$ROOT/tests/lib.sh" "$probe" || fail "standalone suite with checkout-local TMPDIR failed"
+  cp "$probe" "$repo/tests/fm-test-isolation-proof.test.sh"
+  as_operator TMPDIR="$checkout/tmp" FM_TEST_PROJECT="$project" FM_TEST_SEEN="$seen" \
+    "$repo/bin/fm-test-run.sh" --jobs 1 tests/fm-test-isolation-proof.test.sh \
+    > "$TMP_ROOT/exclude-runner.log" 2>&1 || fail "runner with checkout-local TMPDIR failed: $(cat "$TMP_ROOT/exclude-runner.log")"
+  [ "$(wc -l < "$seen")" -eq 3 ] || fail "a scratch entry point did not report a successful allocation"
+  while IFS= read -r root; do
+    case "$root" in "$checkout"/*|'') fail "scratch root landed in the checkout: $root" ;; esac
+    assert_absent "$root" "checkout-local TMPDIR left a scratch root behind"
+  done < "$seen"
+  cmp -s "$TMP_ROOT/exclude-before" "$owner/.git/info/exclude" || fail "scratch allocation changed the shared Git exclude file"
+  pass "reproductions, standalone suites, and the runner keep scratch pools outside Git"
+}
+
 test_invalid_scratch_root_is_refused() {
   local name=$1 diagnostic=$2 wrapper="$ROOT/bin/fm-treehouse-scratch.sh"
   local bad="$TMP_ROOT/$name" alias="$TMP_ROOT/$2-link" parent root out
@@ -399,6 +433,7 @@ test_runner_reports_cleanup_failure
 test_source_changes_select_lifecycle_regressions
 test_lib_standalone_and_inherited
 test_reproduction_helper
+test_checkout_tmpdir_keeps_git_excludes
 test_invalid_scratch_root_is_refused 'build$LABEL' 'dollar sign'
 test_invalid_scratch_root_is_refused 'build:label' 'PATH separator'
 test_reentry_prefers_the_owned_shim

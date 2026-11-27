@@ -257,7 +257,14 @@ fm_test_cleanup_exit() {
 }
 
 fm_test_enter_treehouse_scratch() {
-  fm_treehouse_scratch_enter "$1" || fail "cannot isolate the test's Treehouse root"
+  local parent=${1:-} outside
+  if ! fm_treehouse_scratch_active; then
+    outside=$(fm_treehouse_scratch_parent "$parent") || fail "cannot choose a Treehouse fixture parent"
+    if [ -z "$parent" ] || [ ! "$parent" -ef "$outside" ]; then
+      parent=$(TMPDIR="$outside" fm_test_tmproot fm-test-treehouse) || fail "cannot create a fixture for the test's Treehouse root"
+    fi
+  fi
+  fm_treehouse_scratch_enter "$parent" || fail "cannot isolate the test's Treehouse root"
   if [ -n "$FM_TREEHOUSE_SCRATCH_CREATED" ] &&
     ! fm_test_track_treehouse_scratch "$FM_TREEHOUSE_SCRATCH_CREATED"; then
     fm_treehouse_scratch_remove "$FM_TREEHOUSE_SCRATCH_CREATED"
@@ -318,12 +325,7 @@ if [ "${FM_TEST_FIXTURE_REAPER_CHILD:-0}" != 1 ]; then
   # bin/fm-test-run.sh the runner's per-suite root is kept. A root created here
   # is removed with the rest of this suite's temp roots.
   # bin/fm-treehouse-scratch.sh owns the contract.
-  FM_TEST_TREEHOUSE_PARENT=
-  if ! fm_treehouse_scratch_active; then
-    FM_TEST_TREEHOUSE_PARENT=$(fm_test_tmproot fm-test-treehouse) || fail "cannot create a fixture for the test's Treehouse root"
-  fi
-  fm_test_enter_treehouse_scratch "$FM_TEST_TREEHOUSE_PARENT"
-  unset FM_TEST_TREEHOUSE_PARENT
+  fm_test_enter_treehouse_scratch
 fi
 
 # --- detached fixture cleanup ----------------------------------------------
@@ -545,7 +547,7 @@ FM_TEST_ORPHAN_MAX_AGE_SECONDS=${FM_TEST_ORPHAN_MAX_AGE_SECONDS:-3600}
 fm_test_reap_orphans() {
   local marker dir mtime now owner_pid owner_identity current_identity
   now=$(date +%s)
-  for marker in "${TMPDIR:-/tmp}"/fm-*/.fm-test-fixture; do
+  for marker in "${1:-${TMPDIR:-/tmp}}"/"${2:-fm-}"*/.fm-test-fixture; do
     [ -e "$marker" ] || continue
     owner_pid=$(sed -n '1p' "$marker" 2>/dev/null) || owner_pid=
     owner_identity=$(sed -n '2,$p' "$marker" 2>/dev/null) || owner_identity=
@@ -573,6 +575,9 @@ fm_test_reap_orphans() {
 # execution window repeating the same global stale-fixture scan.
 if [ "${FM_TEST_SKIP_ORPHAN_REAP:-0}" != 1 ]; then
   fm_test_reap_orphans
+  if fm_treehouse_scratch_in_git "${TMPDIR:-/tmp}"; then
+    fm_test_reap_orphans /tmp fm-test-treehouse.
+  fi
 fi
 
 # --- live-capability gate ---------------------------------------------------
@@ -727,9 +732,6 @@ fm_fake_exit0() {
 exit 0
 SH
     chmod +x "$fakebin/$tool" || return 1
-    if [ "$tool" = treehouse ]; then
-      ln -sf treehouse "$fakebin/fm-test-treehouse" || return 1
-    fi
   done
 }
 

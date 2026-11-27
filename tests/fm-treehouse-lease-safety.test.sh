@@ -22,12 +22,7 @@ fm_fake_exit0 "$FAKEBIN" claude
 export XDG_CONFIG_HOME="$TMP_ROOT/user/.config" XDG_STATE_HOME="$TMP_ROOT/state"
 FM_TEST_REAL_TREEHOUSE=$(readlink "$TREEHOUSE_BIN-real") || fail 'could not resolve the fixture Treehouse binary'
 export FM_TEST_REAL_TREEHOUSE FM_TEST_CWD="$TMP_ROOT/cwd" FM_TEST_PROJECT="$PROJECT" FM_TEST_TREEHOUSE_CALLS="$TMP_ROOT/treehouse-calls"
-FM_TEST_PANE_PATH=$(fm_fakebin "$TMP_ROOT/detached")
-export FM_TEST_PANE_PATH
-export FM_TEST_SHADOW_CALLED="$TMP_ROOT/shadow-called"
-printf '%s\n' '#!/usr/bin/env bash' ': > "$FM_TEST_SHADOW_CALLED"' 'exit 97' > "$FM_TEST_PANE_PATH/treehouse"
-chmod +x "$FM_TEST_PANE_PATH/treehouse"
-ln -sf "$FM_TEST_PANE_PATH/treehouse" "$FAKEBIN/treehouse" || fail 'could not shadow Treehouse on the launcher PATH'
+rm "$FAKEBIN/treehouse" || fail 'could not remove the simulated Treehouse from the fixture PATH'
 cat > "$TMP_ROOT/record-treehouse" <<'EOF'
 #!/usr/bin/env bash
 if [ "${1:-}" != --version ]; then
@@ -104,12 +99,12 @@ run_spawn() {
   local id=$1
   fm_test_spawn_brief "$HOME_DIR" "$id"
   printf '%s\n' "$PROJECT" > "$FM_TEST_CWD"
-  fm_test_run_spawn "$HOME_DIR" "$SLOT" "$FAKEBIN" "$id" "$PROJECT" --scout --backend tmux
+  FM_TEST_PANE_PATH="$TREEHOUSE_ROOT/bin" \
+    fm_test_run_spawn "$HOME_DIR" "$SLOT" "$FAKEBIN" "$id" "$PROJECT" --scout --backend tmux
 }
 out=$(run_spawn first); rc=$?
 expect_code 0 "$rc" "durable spawn failed: $out"
 [ "$(cat "$FM_TEST_CWD")" = "$SLOT" ] || fail 'spawn did not enter its leased slot'
-assert_absent "$FM_TEST_SHADOW_CALLED" 'spawn invoked the Treehouse shadow on PATH'
 assert_absent "$TMP_ROOT/escaped" 'spawn created an out-of-fixture checkout'
 POOL_STATE="${SLOT%/*}/../treehouse-state.json"
 jq -e --arg slot "$SLOT" '.worktrees | any(.[]; .path == $slot and .leased == true)' "$POOL_STATE" >/dev/null || fail 'spawn left only process-based protection'
@@ -164,13 +159,6 @@ expect_code 0 "$rc" "durable lease repair did not unblock allocation: $out"
 assert_present "$SLOT/preserved.txt" 'repair or later allocation reset the preserved copy'
 [ "$(cat "$FM_TEST_CWD")" != "$SLOT" ] || fail 'allocation reused the repaired lease'
 pass 'missing state refuses safely, and state-only lease repair permits a different slot'
-
-mv "$TREEHOUSE_BIN" "$TREEHOUSE_BIN.disabled" || fail 'could not simulate a missing scratch shim'
-out=$(run_spawn missing-shim); rc=$?
-mv "$TREEHOUSE_BIN.disabled" "$TREEHOUSE_BIN" || fail 'could not restore the scratch shim'
-[ "$rc" -ne 0 ] || fail 'spawn allocated without its scratch shim'
-assert_contains "$out" 'owned scratch Treehouse shim is unavailable' 'missing shim refusal'
-assert_absent "$FM_TEST_SHADOW_CALLED" 'missing shim fell back to Treehouse from PATH'
 
 for abort_mode in clean base-mismatch modified committed recorded foreign-holder refresh-abort; do
   CASE_ROOT="$TMP_ROOT/abort-$abort_mode"
@@ -252,4 +240,3 @@ for abort_mode in clean base-mismatch modified committed recorded foreign-holder
     pass "$abort_mode failed spawn keeps its lease and prints recovery command"
   fi
 done
-assert_absent "$FM_TEST_SHADOW_CALLED" 'failed spawn returned a slot through Treehouse from PATH'

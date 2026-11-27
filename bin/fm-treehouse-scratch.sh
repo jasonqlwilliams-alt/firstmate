@@ -12,7 +12,7 @@
 # Pass treehouse by name to `run`; direct binary paths are refused.
 # Commands must preserve the inherited PATH. Avoid login shells that rebuild it.
 # The run command executes <command> with TREEHOUSE_ROOT pointed at a fresh
-# private directory under ${TMPDIR:-/tmp}, then removes that directory and
+# private directory outside any Git checkout, then removes that directory and
 # exits with the command's status. A caller already running under a scratch
 # root this helper created keeps it, so nested use shares one root and only
 # its creator removes it.
@@ -62,6 +62,24 @@ fm_treehouse_scratch_resolve_root() {
     esac
   done
   printf '%s\n' "$resolved"
+}
+
+fm_treehouse_scratch_in_git() (
+  unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_CEILING_DIRECTORIES
+  GIT_DISCOVERY_ACROSS_FILESYSTEM=1 git -C "$1" rev-parse --git-dir >/dev/null 2>&1
+)
+
+fm_treehouse_scratch_parent() {
+  local parent
+  parent=$(fm_treehouse_scratch_resolve_root "${1:-${TMPDIR:-/tmp}}") || return 1
+  if fm_treehouse_scratch_in_git "$parent"; then
+    parent=$(fm_treehouse_scratch_resolve_root /tmp) || return 1
+    if fm_treehouse_scratch_in_git "$parent"; then
+      fm_treehouse_scratch_refuse "no temporary parent outside Git: $parent"
+      return 1
+    fi
+  fi
+  printf '%s\n' "$parent"
 }
 
 fm_treehouse_scratch_check_args() {
@@ -115,13 +133,10 @@ fm_treehouse_scratch_check_args() {
   esac
 }
 
-# Create a scratch root under <parent> (default ${TMPDIR:-/tmp}) and print its
-# physical path.
+# Create a scratch root under a temporary parent outside Git.
 fm_treehouse_scratch_create() {  # [<parent>]
-  local parent=${1:-${TMPDIR:-/tmp}} root tool wrapper
-  parent=${parent%/}
-  [ -n "$parent" ] || parent=/
-  parent=$(fm_treehouse_scratch_resolve_root "$parent") || return 1
+  local parent root tool wrapper
+  parent=$(fm_treehouse_scratch_parent "${1:-}") || return 1
   parent=${parent%/}
   root=$(umask 077; mktemp -d "$parent/fm-treehouse-root.XXXXXX") || return 1
   printf 'fm-treehouse-scratch-v1\n' > "$root/$FM_TREEHOUSE_SCRATCH_MARKER" || {
@@ -168,6 +183,10 @@ fm_treehouse_scratch_enter() {  # [<parent>]
   TREEHOUSE_WORKTREE_PATH=$FM_TREEHOUSE_SCRATCH_TEMPLATE
   if fm_treehouse_scratch_active; then
     TREEHOUSE_ROOT=$(fm_treehouse_scratch_resolve_root "$TREEHOUSE_ROOT") || return 1
+    if fm_treehouse_scratch_in_git "$TREEHOUSE_ROOT"; then
+      fm_treehouse_scratch_refuse "scratch root is inside Git: $TREEHOUSE_ROOT"
+      return 1
+    fi
   else
     FM_TREEHOUSE_SCRATCH_CREATED=$(fm_treehouse_scratch_create "$@") || return 1
     TREEHOUSE_ROOT=$FM_TREEHOUSE_SCRATCH_CREATED
@@ -259,6 +278,10 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     tool=$(readlink "$0-real") || exit 1
     root=$(fm_treehouse_scratch_resolve_root "${0%/bin/treehouse}") || exit 1
     fm_treehouse_scratch_owned "$root" || exit 1
+    if fm_treehouse_scratch_in_git "$root"; then
+      fm_treehouse_scratch_refuse "scratch root is inside Git: $root"
+      exit 1
+    fi
     fm_treehouse_scratch_check_args "$root" "$@" || exit 1
     export TREEHOUSE_ROOT="$root"
     export TREEHOUSE_NO_UPDATE_CHECK=1 TREEHOUSE_WORKTREE_PATH="$FM_TREEHOUSE_SCRATCH_TEMPLATE"

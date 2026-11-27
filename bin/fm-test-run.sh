@@ -2256,7 +2256,10 @@ if [ "$PER_SCRIPT_TIMEOUT_SECS" -gt 0 ]; then
   . "$ROOT/bin/fm-timeout-lib.sh"
 fi
 
-RUN_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-test-run.XXXXXX")
+# shellcheck source=bin/fm-treehouse-scratch.sh
+. "$ROOT/bin/fm-treehouse-scratch.sh" || die "could not load the Treehouse scratch helper"
+RUN_TMP_PARENT=$(fm_treehouse_scratch_parent) || die "could not choose a temporary working directory"
+RUN_TMP=$(mktemp -d "${RUN_TMP_PARENT%/}/fm-test-run.XXXXXX") || die "could not create the runner directory"
 RECORDS="$RUN_TMP/records.tsv"
 FAMILIES_TSV="$RUN_TMP/families.tsv"
 : >"$RECORDS"
@@ -2367,8 +2370,6 @@ run_script_bounded() {  # <script> <out> <stream> <id>
   # contract. The root is removed as soon as the suite exits.
   local PATH=$PATH TREEHOUSE_ROOT FM_TREEHOUSE_SCRATCH_ROOT= FM_TREEHOUSE_SCRATCH_CREATED
   local TREEHOUSE_WORKTREE_PATH TREEHOUSE_NO_UPDATE_CHECK
-  # shellcheck source=bin/fm-treehouse-scratch.sh
-  . "$ROOT/bin/fm-treehouse-scratch.sh" || return
   fm_treehouse_scratch_enter "$RUN_TMP" || {
     log "could not create a scratch Treehouse root for $script"
     return 1
