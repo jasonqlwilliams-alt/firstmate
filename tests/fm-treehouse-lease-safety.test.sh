@@ -6,7 +6,7 @@ set -u
 
 # shellcheck source=tests/fixtures.sh
 . "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
-command -v treehouse >/dev/null || { echo 'skip: treehouse not found'; exit 0; }
+command -v treehouse >/dev/null || fail 'treehouse is required for real lease and pane tests'
 TREEHOUSE_BIN=$(command -v treehouse)
 TMP_ROOT=$(fm_test_tmproot fm-treehouse-lease-safety)
 trap fm_test_cleanup EXIT
@@ -20,6 +20,10 @@ FAKEBIN=$(make_spawn_fakebin "$TMP_ROOT/fake")
 fm_fake_exit0 "$FAKEBIN" claude
 export XDG_CONFIG_HOME="$TMP_ROOT/user/.config" XDG_STATE_HOME="$TMP_ROOT/state"
 export FM_TEST_REAL_TREEHOUSE="$TREEHOUSE_BIN" FM_TEST_CWD="$TMP_ROOT/cwd" FM_TEST_PROJECT="$PROJECT" FM_TEST_TREEHOUSE_CALLS="$TMP_ROOT/treehouse-calls"
+FM_TEST_PANE_PATH=$(fm_fakebin "$TMP_ROOT/detached")
+export FM_TEST_PANE_PATH
+printf '%s\n' '#!/usr/bin/env bash' 'exit 97' > "$FM_TEST_PANE_PATH/treehouse"
+chmod +x "$FM_TEST_PANE_PATH/treehouse"
 printf 'worktree_path = "%s"\n' "$TMP_ROOT/escaped/{repo}-{slot}" > "$PROJECT/treehouse.toml"
 # The shell used by the initial legacy get exits immediately, leaving no
 # process-based protection. Every later acquisition comes from real fm-spawn.
@@ -43,7 +47,11 @@ if [ "${1:-}" = send-keys ]; then
   for arg in "$@"; do
     case "$arg" in
       *'treehouse get'*)
-        (unset TREEHOUSE_ROOT TREEHOUSE_WORKTREE_PATH; cd "$FM_TEST_PROJECT" && eval "$arg" && pwd > "$FM_TEST_CWD") || exit 1
+        (
+          unset TREEHOUSE_ROOT FM_TREEHOUSE_SCRATCH_ROOT TREEHOUSE_WORKTREE_PATH
+          export PATH="$FM_TEST_PANE_PATH:$PATH"
+          cd "$FM_TEST_PROJECT" && eval "$arg" && pwd > "$FM_TEST_CWD"
+        ) || exit 1
         case "${FM_TEST_ABORT_MODE:-}" in
           clean|base-mismatch) git -C "$(cat "$FM_TEST_CWD")" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*' ;;
           modified) printf 'keep this work\n' > "$(cat "$FM_TEST_CWD")/preserved.txt" ;;
@@ -181,7 +189,10 @@ for abort_mode in clean base-mismatch modified committed recorded foreign-holder
     unset FM_TEST_CLAUDE_CONFIG_DIR
   fi
   printf 'tmux\n' > "$HOME_DIR/config/backend"
-  export TREEHOUSE_ROOT="$CASE_ROOT/pool" XDG_CONFIG_HOME="$CASE_ROOT/user/.config" XDG_STATE_HOME="$CASE_ROOT/state"
+  unset TREEHOUSE_ROOT FM_TREEHOUSE_SCRATCH_ROOT
+  fm_treehouse_scratch_enter "$CASE_ROOT" || fail 'could not create the abort fixture pool'
+  export FM_TEST_REAL_TREEHOUSE="$TREEHOUSE_ROOT/bin/treehouse"
+  export XDG_CONFIG_HOME="$CASE_ROOT/user/.config" XDG_STATE_HOME="$CASE_ROOT/state"
   export FM_TEST_PROJECT="$PROJECT" FM_TEST_CWD="$CASE_ROOT/cwd" FM_TEST_TREEHOUSE_CALLS="$CASE_ROOT/treehouse-calls" FM_TEST_ABORT_MODE="$abort_mode" FM_TEST_HOME="$HOME_DIR" FM_TEST_ACQUIRED_HEAD="$CASE_ROOT/acquired-head"
   out=$(run_spawn "abort-$abort_mode"); rc=$?
   [ "$rc" -ne 0 ] || fail "the $abort_mode abort fixture unexpectedly launched"

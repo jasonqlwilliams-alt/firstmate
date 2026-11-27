@@ -6,12 +6,11 @@
 #   fm-treehouse-scratch.sh run [--] <command> [args...]
 #   fm-treehouse-scratch.sh --help
 #
-# Treehouse v3.1.8 or newer honors scratch root and checkout settings ahead of
-# user and repository configuration. Explicit Treehouse flags retain their
-# normal precedence. A fixture repository or a reproduction that runs
-# `treehouse get`, `status`, `return`, or `lease`
-# against the default root leaves a pool folder there that nothing ever
-# removes. `run` executes <command> with TREEHOUSE_ROOT pointed at a fresh
+# Use Treehouse v3.1.8 or newer through the scratch wrapper on PATH.
+# The wrapper fixes the pool root and checkout layout, rejects conflicting
+# location flags, and refuses worktree targets outside the scratch root.
+# Pass treehouse by name to `run`; direct binary paths are refused.
+# The run command executes <command> with TREEHOUSE_ROOT pointed at a fresh
 # private directory under ${TMPDIR:-/tmp}, then removes that directory and
 # exits with the command's status. A caller already running under a scratch
 # root this helper created keeps it, so nested use shares one root and only
@@ -45,6 +44,70 @@ fm_treehouse_require_compatible() {
   fi
   printf 'Treehouse v3.1.8 or newer is required (found %s).\n' "${version:-none}" >&2
   return 1
+}
+
+fm_treehouse_scratch_refuse() {
+  printf 'fm-treehouse-scratch: %s\n' "$1" >&2
+  return 1
+}
+
+fm_treehouse_scratch_check_args() {
+  local root=$1 command= target= physical options=1 target_set=0 all=0 help=0
+  shift
+  while [ "$#" -gt 0 ]; do
+    if [ "$options" = 1 ] && [[ "$1" = -* ]]; then
+      case "$1" in
+        --) options=0; shift; continue ;;
+        --root|--root=*)
+          case "$1" in --root) shift; physical=${1-} ;; *) physical=${1#*=} ;; esac
+          [ "$root" = "$physical" ] ||
+            { fm_treehouse_scratch_refuse "use the scratch root for --root: $root"; return 1; }
+          ;;
+        --worktree-path|--worktree-path=*)
+          case "$1" in --worktree-path) shift; physical=${1-} ;; *) physical=${1#*=} ;; esac
+          [ "$FM_TREEHOUSE_SCRATCH_TEMPLATE" = "$physical" ] ||
+            { fm_treehouse_scratch_refuse "use the scratch layout for --worktree-path: $FM_TREEHOUSE_SCRATCH_TEMPLATE"; return 1; }
+          ;;
+        --all|--all=1|--all=t|--all=T|--all=true|--all=True|--all=TRUE) all=1 ;;
+        --all=*) all=0 ;;
+        --help|-h|--help=true|-h=true) help=1 ;;
+        --help=*|-h=*) help=0 ;;
+        --if-lease-id|--if-lease-holder)
+          if [ "$command" = return ] && [ "$#" -gt 1 ]; then shift; fi
+          ;;
+      esac
+      shift
+      continue
+    fi
+    if [ -z "$command" ]; then
+      command=$1
+    elif [ "$target_set" = 0 ]; then
+      target=$1
+      target_set=1
+    fi
+    shift
+  done
+  [ "$help" = 0 ] || return 0
+  case "$command" in
+    return)
+      if [ "$target_set" = 0 ]; then
+        [ "$all" = 0 ] || return 0
+        target=${TREEHOUSE_DIR:-.}
+      elif [ ! -d "$target" ]; then
+        case "$target" in ''|*[!0-9]*) ;; *) return 0 ;; esac
+      fi
+      ;;
+    destroy) [ "$target_set" = 1 ] || return 0 ;;
+    *) return 0 ;;
+  esac
+  case "/$target/" in
+    */../*) fm_treehouse_scratch_refuse "$command requires a path inside the scratch root: $target"; return 1 ;;
+  esac
+  physical=$(CDPATH='' cd -P -- "${target:-.}" 2>/dev/null && pwd -P) || physical=
+  case "$physical" in
+    "$root"/*) return 0 ;;
+    *) fm_treehouse_scratch_refuse "$command requires a path inside the scratch root: $target" ;;
+  esac
 }
 
 # Create a scratch root under <parent> (default ${TMPDIR:-/tmp}) and print its
@@ -136,7 +199,7 @@ EOF
 }
 
 fm_treehouse_scratch_main() {
-  local rc created
+  local rc created tool
   case "${1:-}" in
     -h|--help) fm_treehouse_scratch_usage; return 0 ;;
     run) shift ;;
@@ -144,10 +207,24 @@ fm_treehouse_scratch_main() {
   esac
   [ "${1:-}" != -- ] || shift
   [ "$#" -gt 0 ] || { fm_treehouse_scratch_usage >&2; return 2; }
+  if [[ "$1" = */* ]]; then
+    tool=$(type -P treehouse) || tool=
+    case "${1##*/}" in
+      treehouse|treehouse.exe) fm_treehouse_scratch_refuse 'invoke treehouse by name, without a binary path'; return 1 ;;
+    esac
+    if [ -n "$tool" ] && { [ "$1" -ef "$tool" ] || [ "$1" -ef "$tool-real" ]; }; then
+      fm_treehouse_scratch_refuse 'invoke treehouse by name, without a binary path'
+      return 1
+    fi
+  fi
   fm_treehouse_scratch_enter "${TMPDIR:-/tmp}" || {
     echo 'fm-treehouse-scratch: could not create a scratch Treehouse root' >&2
     return 1
   }
+  if [ "$1" = treehouse ] && [ -x "$TREEHOUSE_ROOT/bin/treehouse" ]; then
+    shift
+    set -- "$TREEHOUSE_ROOT/bin/treehouse" "$@"
+  fi
   created=$FM_TREEHOUSE_SCRATCH_CREATED
   if [ -n "$created" ]; then
     # shellcheck disable=SC2064 # bind this run's root now.
@@ -170,7 +247,10 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   set -u
   if [ "${0##*/}" = treehouse ]; then
     tool=$(readlink "$0-real") || exit 1
-    export TREEHOUSE_ROOT="${TREEHOUSE_ROOT:-${0%/bin/treehouse}}"
+    root=${0%/bin/treehouse}
+    fm_treehouse_scratch_owned "$root" || exit 1
+    fm_treehouse_scratch_check_args "$root" "$@" || exit 1
+    export TREEHOUSE_ROOT="$root"
     export TREEHOUSE_NO_UPDATE_CHECK=1 TREEHOUSE_WORKTREE_PATH="$FM_TREEHOUSE_SCRATCH_TEMPLATE"
     fm_treehouse_require_compatible "$tool" || exit 1
     exec "$tool" "$@"

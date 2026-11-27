@@ -39,8 +39,8 @@ assert_no_pools() {  # <who>
 }
 
 test_runner_leaves_real_root_untouched() {
-  local repo="$TMP_ROOT/runner" seen="$TMP_ROOT/runner-seen" log="$TMP_ROOT/runner.log" root
-  mkdir -p "$repo/bin" "$repo/tests"
+  local repo="$TMP_ROOT/runner" seen="$TMP_ROOT/runner-seen" log="$TMP_ROOT/runner.log" root jobs rendezvous
+  mkdir -p "$repo/bin" "$repo/tests" "$TMP_ROOT/rendezvous"
   cp "$ROOT/bin/fm-test-run.sh" "$ROOT/bin/fm-timeout-lib.sh" "$ROOT/bin/fm-treehouse-scratch.sh" "$repo/bin/"
   cp "$ROOT/tests/git-config-helpers.sh" "$repo/tests/"
   # The fixture suite records its root and allocates a real slot.
@@ -56,12 +56,26 @@ git -C "$proj" -c user.name=t -c user.email=t@example.invalid commit -q --allow-
 printf 'root = "%s"\nworktree_path = "%s"\n' "$FM_CONFIGURED_REPO_ROOT" "$HOME/.treehouse/repo-{repo}-{slot}" > "$proj/treehouse.toml"
 path=$(cd "$proj" && treehouse get --lease --lease-holder fixture)
 case "$path" in "$TREEHOUSE_ROOT"/*) [ -d "$path" ] ;; *) exit 1 ;; esac
+if [ -n "$FM_TEST_RENDEZVOUS" ]; then
+  : > "$FM_TEST_RENDEZVOUS/${0##*/}"
+  for ((attempt=0; attempt<200; attempt++)); do
+    if [ -f "$FM_TEST_RENDEZVOUS/fm-test-run.test.sh" ] &&
+      [ -f "$FM_TEST_RENDEZVOUS/fm-brief.test.sh" ]; then
+      exit 0
+    fi
+    sleep 0.05
+  done
+  echo 'fixture workers did not run concurrently' >&2
+  exit 1
+fi
 SH
-  cp "$repo/tests/fm-test-run.test.sh" "$repo/tests/fm-test-isolation-proof.test.sh"
+  cp "$repo/tests/fm-test-run.test.sh" "$repo/tests/fm-brief.test.sh"
   for jobs in 1 2; do
     : > "$seen"
-    as_operator FM_TEST_SEEN="$seen" FM_CONFIGURED_REPO_ROOT="$REPO_ROOT" "$repo/bin/fm-test-run.sh" --jobs "$jobs" \
-      tests/fm-test-run.test.sh tests/fm-test-isolation-proof.test.sh > "$log" 2>&1 \
+    rendezvous=
+    [ "$jobs" -ne 2 ] || rendezvous="$TMP_ROOT/rendezvous"
+    as_operator FM_TEST_RENDEZVOUS="$rendezvous" FM_TEST_SEEN="$seen" FM_CONFIGURED_REPO_ROOT="$REPO_ROOT" \
+      "$repo/bin/fm-test-run.sh" --jobs "$jobs" tests/fm-test-run.test.sh tests/fm-brief.test.sh > "$log" 2>&1 \
       || fail "runner suite failed under a scratch root (jobs=$jobs): $(cat "$log")"
     assert_grep 'failed=0' "$log" "runner did not run the fixture suite (jobs=$jobs)"
     [ "$(sort -u "$seen" | wc -l)" -eq 2 ] \
@@ -82,7 +96,7 @@ test_runner_overrides_an_inherited_real_root() {
   mkdir -p "$real"
   : > "$seen"
   as_operator TREEHOUSE_ROOT="$real" TREEHOUSE_WORKTREE_PATH="$real/env-{repo}-{slot}" \
-    FM_TEST_SEEN="$seen" FM_CONFIGURED_REPO_ROOT="$REPO_ROOT" "$repo/bin/fm-test-run.sh" \
+    FM_TEST_RENDEZVOUS= FM_TEST_SEEN="$seen" FM_CONFIGURED_REPO_ROOT="$REPO_ROOT" "$repo/bin/fm-test-run.sh" \
     tests/fm-test-run.test.sh > "$log" 2>&1 || fail "override run failed: $(cat "$log")"
   [ "$(cat "$seen")" != "$real" ] || fail "runner passed an inherited real TREEHOUSE_ROOT through"
   [ -z "$(ls -A "$real")" ] || fail "inherited real root gained entries: $(ls -A "$real")"
@@ -113,10 +127,10 @@ test_reproduction_helper() {
   local out rc root unmarked="$TMP_ROOT/unmarked" project="$TMP_ROOT/repro-project"
   fm_git_init_commit "$project"
   out=$(as_operator "$ROOT/bin/fm-treehouse-scratch.sh" run bash -c '
-    path=$(cd "$1" && treehouse get --lease --lease-holder fixture) || exit 1
+    path=$(cd "$1" && TREEHOUSE_ROOT="$2" treehouse get --lease --lease-holder fixture) || exit 1
     case "$path" in "$TREEHOUSE_ROOT"/*) [ -d "$path" ] || exit 1 ;; *) exit 1 ;; esac
     printf "%s\n" "$TREEHOUSE_ROOT"; exit 7
-  ' _ "$project") && rc=0 || rc=$?
+  ' _ "$project" "$USER_ROOT") && rc=0 || rc=$?
   expect_code 7 "$rc" "run must propagate the command's exit status"
   root=$out
   case "$root" in "$FAKE_HOME"/*|'') fail "run used the real root: '$root'" ;; esac
@@ -129,6 +143,61 @@ test_reproduction_helper() {
   expect_code 1 "$rc" "remove must refuse a directory without the scratch marker"
   assert_present "$unmarked/keep" "remove deleted an unmarked directory"
   pass "fm-treehouse-scratch.sh run isolates a reproduction and removal refuses unmarked directories"
+}
+
+test_allocation_rejects_external_locations() {
+  local wrapper="$ROOT/bin/fm-treehouse-scratch.sh" project="$TMP_ROOT/flag-project" option out
+  local -a args
+  fm_git_init_commit "$project"
+  for option in root-split root-equals path-split path-equals; do
+    case "$option" in
+      root-split) args=(--root "$FAKE_HOME" get --lease) ;;
+      root-equals) args=(get --lease "--root=$FAKE_HOME") ;;
+      path-split) args=(get --lease --worktree-path "$FAKE_HOME/.treehouse/{repo}-{slot}") ;;
+      path-equals) args=(get --lease "--worktree-path=$FAKE_HOME/.treehouse/{repo}-{slot}") ;;
+    esac
+    if out=$(cd "$project" && as_operator "$wrapper" run treehouse "${args[@]}" 2>&1); then
+      fail "Treehouse accepted an external location ($option)"
+    fi
+    assert_contains "$out" "fm-treehouse-scratch: use the scratch" "location refusal ($option)"
+  done
+  (cd "$project" && as_operator "$wrapper" run bash -ec '
+    path=$(treehouse --root "$TREEHOUSE_ROOT" get --lease --worktree-path={pool}/{slot}/{repo})
+    test -d "$path"
+  ') || fail "explicit scratch locations were refused"
+  assert_no_pools "explicit location checks"
+  pass "explicit Treehouse flags cannot redirect allocations outside the scratch root"
+}
+
+test_return_refuses_an_external_worktree() {
+  local wrapper="$ROOT/bin/fm-treehouse-scratch.sh" project="$TMP_ROOT/return-project" live_root slot out
+  fm_git_init_commit "$project"
+  live_root=$(fm_treehouse_scratch_create "$TMP_ROOT") || fail "could not create a second fixture pool"
+  slot=$(cd "$project" && as_operator "$live_root/bin/treehouse" get --lease) || fail "could not allocate an external fixture slot"
+  printf 'preserve\n' > "$slot/dirty"
+  ln -s "$slot" "$project/linked-slot" || fail "could not alias the external fixture slot"
+
+  if out=$(cd "$project" && as_operator TREEHOUSE_DIR="$slot" "$wrapper" run treehouse return --force 2>&1); then
+    fail "return used an inherited checkout from another pool"
+  fi
+  assert_contains "$out" "return requires a path inside the scratch root" "inherited checkout refusal"
+  if out=$(cd "$slot" && as_operator TREEHOUSE_DIR= "$wrapper" run treehouse return --force 2>&1); then
+    fail "return used a checkout from another pool via cwd"
+  fi
+  assert_contains "$out" "return requires a path inside the scratch root" "cwd checkout refusal"
+  if out=$(cd "$project" && as_operator "$wrapper" run treehouse return --force -- linked-slot 2>&1); then
+    fail "return followed a symlink to another pool"
+  fi
+  assert_contains "$out" "return requires a path inside the scratch root" "explicit checkout refusal"
+  assert_equals preserve "$(cat "$slot/dirty")" "return changed the external checkout"
+
+  (cd "$project" && as_operator "$wrapper" run bash -ec '
+    slot=$(treehouse get --lease --lease-holder fixture)
+    : > "$slot/dirty"
+    TREEHOUSE_DIR="$slot" treehouse return --force --if-lease-holder fixture
+    test ! -e "$slot/dirty"
+  ') || fail "return did not clean the scratch checkout"
+  pass "return can clean its own checkout while preserving external slots"
 }
 
 test_old_treehouse_is_refused_at_invocation() {
@@ -164,6 +233,11 @@ SH
   assert_contains "$out" "found v2.0.1" "invocation explains the incompatible tool"
   assert_present "$FM_TEST_OLD_PROBED" "Treehouse was not checked at invocation"
   assert_absent "$FM_TEST_OLD_CALLED" "the old Treehouse received an allocation command"
+  if out=$(as_operator "$ROOT/bin/fm-treehouse-scratch.sh" run -- "$fake_bin/treehouse" get --lease 2>&1); then
+    fail "reproduction ran a direct Treehouse binary"
+  fi
+  assert_contains "$out" "invoke treehouse by name" "direct binary refusal"
+  assert_absent "$FM_TEST_OLD_CALLED" "a direct Treehouse binary received an allocation command"
   pass "older Treehouse leaves unrelated commands runnable and refuses allocation"
 }
 
@@ -184,5 +258,7 @@ test_runner_leaves_real_root_untouched
 test_runner_overrides_an_inherited_real_root
 test_lib_standalone_and_inherited
 test_reproduction_helper
+test_allocation_rejects_external_locations
+test_return_refuses_an_external_worktree
 test_old_treehouse_is_refused_at_invocation
 test_standalone_herdr_fixture_owns_root
