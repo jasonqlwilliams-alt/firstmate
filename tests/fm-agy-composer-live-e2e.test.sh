@@ -6,7 +6,7 @@
 # vendor-rendered rows, so per .agents/skills/firstmate-coding-guidelines it
 # must be proven against the REAL Antigravity CLI. This guard launches one
 # bare agy in an isolated tmux server and, through the same guarded composer
-# read the steering doorbell uses (fm_backend_guarded_composer_state with the
+# classifier the steering doorbell uses (with the
 # recorded harness agy), requires:
 #   - the idle composer to read `empty`;
 #   - the fit check to accept a short notice and refuse one too long for the
@@ -20,8 +20,7 @@
 #   - agy runs with HOME (and every XDG base) pointed at a private copy holding
 #     only its settings (trust narrowed to one scratch workspace, so no trust
 #     dialog), installation id, onboarding records, and sign-in token; the
-#     copy is deleted on exit
-#     and the real home is never written;
+#     copy is deleted on exit and the real home is never written;
 #   - agy runs in its own network namespace with only loopback up, so it has no
 #     network egress; the guard refuses to launch agy unless the namespace
 #     proves that before exec;
@@ -29,9 +28,9 @@
 #     own proven draft;
 #   - the private tmux server is stopped on exit.
 #
-# Run explicitly with FM_AGY_COMPOSER_LIVE=1 (or FM_LIVE=1). Set
-# FM_AGY_COMPOSER_LIVE_CAPTURE_DIR to keep the wrapped draft or the first-use
-# mode-hint refusal, with banner rows blanked. Refresh
+# Run with FM_AGY_COMPOSER_LIVE_OAUTH=1 and FM_AGY_COMPOSER_LIVE=1 (or FM_LIVE=1).
+# Set FM_AGY_COMPOSER_LIVE_CAPTURE_DIR to keep each wrapped-draft pair in a new
+# subdirectory, with banner rows blanked. Refresh
 # docs/verification/agy.md "Composer classification" from this guard's output
 # after any agy upgrade.
 set -u
@@ -40,7 +39,11 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 1
 
 CAPTURE_DIR=${FM_AGY_COMPOSER_LIVE_CAPTURE_DIR:-}
-fm_live_gate opt-in FM_AGY_COMPOSER_LIVE tmux agy unshare ip jq
+if [ "${FM_AGY_COMPOSER_LIVE_OAUTH:-}" != 1 ]; then
+  printf '%s\n' 'skip: live: set FM_AGY_COMPOSER_LIVE_OAUTH=1 to authorize an isolated copy of the agy sign-in token'
+  exit 0
+fi
+fm_live_gate opt-in FM_AGY_COMPOSER_LIVE tmux agy unshare ip jq install
 
 REAL_TMUX=$(command -v tmux)
 SOCKET="fm-agy-live-$$"
@@ -94,7 +97,7 @@ jq --arg ws "$WORKSPACE" '.trustedWorkspaces = [$ws]' "$AGY_SRC/settings.json" 2
 # Without its onboarding records a fresh home opens agy's first-run colour
 # scheme picker instead of the composer (observed live on 1.5.18).
 mkdir -p "$AGY_DST/cache" 2>/dev/null || fail "could not create the private cache"
-for f in installation_id antigravity-oauth-token jetski_state.pbtxt \
+for f in installation_id jetski_state.pbtxt \
   cache/onboarding.json cache/nux_state.json; do
   [ ! -f "$AGY_SRC/$f" ] || cp -p "$AGY_SRC/$f" "$AGY_DST/$f" 2>/dev/null \
     || fail "could not copy a private agy record"
@@ -113,6 +116,7 @@ exec unshare -U --map-user="$FM_AGY_UID" --map-group="$FM_AGY_GID" bash -c '
   if (exec 3<>/dev/tcp/1.1.1.1/443) 2>/dev/null; then
     exit 1
   fi
+  install -m 600 -- "$FM_AGY_OAUTH_SOURCE" "$HOME/.gemini/antigravity-cli/antigravity-oauth-token" || exit 1
   agy --version 2>/dev/null > "$FM_AGY_VERSION_FILE" || true
   echo egress-blocked > "$FM_AGY_EGRESS_FILE"
   cd "$FM_AGY_WORKSPACE" && exec agy'
@@ -122,30 +126,36 @@ chmod +x "$WORK/launch.sh" 2>/dev/null || fail "could not make the private launc
 # --- screen helpers -----------------------------------------------------------
 capture_styled() { "$REAL_TMUX" -L "$SOCKET" capture-pane -e -p -t "$WIN" 2>/dev/null; }
 
-save_capture() {  # <name> <styled-screen> <opening-rule-row>
+save_capture() {  # <styled-screen> <opening-rule-row>
   [ -n "$CAPTURE_DIR" ] || return 0
-  local screen=$2 cursor
-  [ -n "$screen" ] || fail "could not read a nonempty screen for capture $1"
+  local screen=$1 cursor
+  [ -n "$screen" ] || fail "could not read a nonempty screen for the wrapped capture"
   cursor=$("$REAL_TMUX" -L "$SOCKET" display-message -p -t "$WIN" \
     '#{cursor_x} #{cursor_y} #{pane_width}x#{pane_height}' 2>/dev/null) \
     && [[ "$cursor" =~ ^[0-9]+\ [0-9]+\ [0-9]+x[0-9]+$ ]] \
-    || fail "could not read cursor geometry for capture $1"
-  {
-    mkdir -p -- "$CAPTURE_DIR" &&
-      LC_ALL=C awk -v opening_row="$3" 'NR < opening_row { print ""; next } { print }' \
-        <<< "$screen" > "$CAPTURE_DIR/$1.ansi" &&
-      printf '%s\n' "$cursor" > "$CAPTURE_DIR/$1.cursor"
-  } 2>/dev/null || fail "could not write screen and cursor evidence for capture $1"
+    || fail "could not read cursor geometry for the wrapped capture"
+  (
+    mkdir -p -- "$CAPTURE_DIR" || exit 1
+    staged=$(mktemp -d "$CAPTURE_DIR/.wrapped-draft.XXXXXX") || exit 1
+    trap 'rm -rf -- "$staged"' EXIT
+    LC_ALL=C awk -v opening_row="$2" 'NR < opening_row { print ""; next } { print }' \
+      <<< "$screen" > "$staged/wrapped-draft.ansi" &&
+      printf '%s\n' "$cursor" > "$staged/wrapped-draft.cursor" &&
+      mv -T -- "$staged" "$CAPTURE_DIR/${staged##*/.}" || exit 1
+    trap - EXIT
+  ) 2>/dev/null || fail "could not publish screen and cursor evidence for the wrapped capture"
 }
 
-guarded() {  # <expected-pending> [fit-text]
+guarded() (  # <expected-pending> [fit-text]
   local verdict
-  verdict=$(fm_backend_guarded_composer_state tmux "$WIN" '' "$1" agy '' "${2:-}" 2>/dev/null) || return 1
+  fm_backend_composer_snapshot tmux "$WIN" 2>/dev/null || return 1
+  [ -n "$FM_COMPOSER_SNAPSHOT_SCREEN" ] || return 1
+  verdict=$(fm_backend_guarded_composer_classify_snapshot tmux "$WIN" "$1" agy "${2:-}" 2>/dev/null) || return 1
   case "$verdict" in
     empty|pending|pending-unproven|unknown|update-picker) printf '%s' "$verdict" ;;
     *) return 1 ;;
   esac
-}
+)
 
 # composer_frame <text>: positive identification of agy's framed composer
 # holding the guard's own text. Reads the rows between the LAST two solid rules,
@@ -204,25 +214,18 @@ verdict_is() {  # <want> <expected-pending> [fit-text]
   -e XDG_CACHE_HOME="$PRIV_HOME/.cache" -e XDG_DATA_HOME="$PRIV_HOME/.local/share" \
   -e XDG_STATE_HOME="$PRIV_HOME/.local/state" \
   -e FM_AGY_UID="$(id -u)" -e FM_AGY_GID="$(id -g)" -e FM_AGY_WORKSPACE="$WORKSPACE" \
+  -e FM_AGY_OAUTH_SOURCE="$AGY_SRC/antigravity-oauth-token" \
   -e FM_AGY_VERSION_FILE="$WORK/version" -e FM_AGY_EGRESS_FILE="$WORK/egress" \
   -- unshare -rn "$WORK/launch.sh" 2>/dev/null \
   || fail "could not start the isolated tmux server"
 
-wait_for 20 test -s "$WORK/egress" || fail "launcher never proved egress blocked; agy was not started"
+wait_for 20 test -s "$WORK/egress" || fail "isolated launcher did not complete egress checks and OAuth setup"
 VERSION=$(grep -m 1 -Ex '[0-9]+\.[0-9]+\.[0-9]+' "$WORK/version" 2>/dev/null) || VERSION=version-unknown
 printf '# agy %s launched with no network egress and a private home\n' "$VERSION"
 
 # 1. Idle composer reads empty. No keystroke has been sent yet.
 if ! wait_for 90 verdict_is empty ''; then
   idle_verdict=$(guarded '') || fail "could not read a valid idle composer verdict"
-  if [[ -n "$CAPTURE_DIR" && "$idle_verdict" == pending ]]; then
-    screen=$(capture_styled) && [ -n "$screen" ] \
-      || fail "could not read a nonempty screen for capture idle-unproven"
-    if frame=$(composer_frame "$FM_COMPOSER_AGY_MODE_HINT" <<< "$screen") &&
-      [[ "${frame#* }" == 1$'\n'* ]]; then
-      save_capture idle-unproven "$screen" "${frame%% *}"
-    fi
-  fi
   fail "idle composer never classified empty (last verdict: $idle_verdict)"
 fi
 pass "idle composer classifies empty"
@@ -263,7 +266,7 @@ printf '# wrapped verdicts (full draft, first row, no expectation) = %s, %s, %s\
   "$v_draft" "$v_first" "$v_plain"
 screen=$(capture_styled) && frame=$(composer_frame "$DRAFT" <<< "$screen") && [ "${frame#* }" = "$layout" ] \
   || fail "the wrapped draft was no longer proven after the verdict reads"
-save_capture wrapped-draft "$screen" "${frame%% *}"
+save_capture "$screen" "${frame%% *}"
 case "$v_draft:$v_first:$v_plain" in
   empty:*|*:empty:*|*:empty) fail "a wrapped draft classified empty" ;;
   *:pending:*) fail "a wrapped draft proved the first row alone" ;;

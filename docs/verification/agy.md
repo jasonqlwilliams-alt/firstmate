@@ -191,6 +191,10 @@ not ok - agy (1.5.18): idle composer never classified empty (last verdict: pendi
 
 The [redacted screen](agy-composer/tmux-first-use-1.5.18.ansi) has its [cursor](agy-composer/tmux-first-use-1.5.18.cursor) at column 2, row 27.
 The wrapped-input capture is deferred until the agy classifier recognizes the tmux palette mode hint and the guard can confirm an idle, empty composer before typing.
+To run the current guard, set `FM_AGY_COMPOSER_LIVE_OAUTH=1` alongside `FM_AGY_COMPOSER_LIVE=1` or `FM_LIVE=1`.
+The OAuth opt-in authorizes copying the operator's sign-in token into the temporary profile with mode `0600` after the launcher verifies network isolation.
+The guard removes the temporary profile on exit.
+Set `FM_AGY_COMPOSER_LIVE_CAPTURE_DIR` to save each wrapped screen and its cursor geometry together in a new subdirectory.
 [`tests/fm-composer-lib.test.sh`](../../tests/fm-composer-lib.test.sh) uses the recorded rows and truecolor values to check the classifier's verdicts, including refusal on plain-text and multirow captures.
 [`tests/fm-task-inbox.test.sh`](../../tests/fm-task-inbox.test.sh) uses an agy-shaped stub in a real tmux server to check screen refusals and the one-row fit boundary for the path-bearing notice.
 Its 80-column regression scaffolds a brief with a symlink alias for a UTF-8 inbox path, checks launch-brief precedence, and verifies that the stub submits the exact short notice and acknowledges the queued record.
