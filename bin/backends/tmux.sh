@@ -224,14 +224,16 @@ fm_backend_tmux_close_snapshot() {  # <session:window>
 }
 
 fm_backend_tmux_close_if_unchanged() {  # <session:window> <verified-close-snapshot>
-  local target=$1 snapshot=$2 window_id session_id session_match scoped_target result
+  local target=$1 snapshot=$2 window_id session_id window_name scoped_target result
+  local session_match snapshot_match matching_windows
   [[ "$snapshot" =~ $FM_TMUX_CLOSE_SNAPSHOT_PATTERN ]] || return 1
-  window_id=${snapshot%%:*}
-  session_id=${snapshot#*:*:}
-  session_id=${session_id%%:*}
+  IFS=: read -r window_id _ session_id window_name _ <<< "$snapshot"
   scoped_target="$session_id:$window_id"
   session_match=$(fm_backend_tmux_close_session_match "${target%%:*}")
-  result=$(tmux if-shell -F -t "$scoped_target" "#{?#{&&:$session_match,#{==:$FM_TMUX_CLOSE_SNAPSHOT_FORMAT,$snapshot}},1,0}" \
+  snapshot_match="#{&&:$session_match,#{==:$FM_TMUX_CLOSE_SNAPSHOT_FORMAT,$snapshot}}"
+  matching_windows="#{W:#{?#{==:#{window_name},$window_name},#{window_id},}}"
+  result=$(tmux if-shell -F -t "$scoped_target" \
+    "#{?#{&&:$snapshot_match,#{==:$matching_windows,$window_id}},1,0}" \
     "kill-window -t '$scoped_target'" 'display-message -p changed' 2>/dev/null) || return 1
   [ -z "$result" ]
 }

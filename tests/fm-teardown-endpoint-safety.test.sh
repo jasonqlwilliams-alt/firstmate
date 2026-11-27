@@ -507,6 +507,7 @@ if [ "\${1:-}" = if-shell ] && [ "\${4##*:}" = "\${FM_TEST_RACE_WINDOW:-}" ]; th
     split) '$REAL_TMUX' -S '$socket' split-window -d -t "\$4" 'exec sleep 180' ;;
     rename) '$REAL_TMUX' -S '$socket' rename-window -t "\$4" fm-renamed ;;
     move) '$REAL_TMUX' -S '$socket' move-window -s "\$4" -t relocated: ;;
+    link) '$REAL_TMUX' -S '$socket' link-window -s "\$FM_TEST_TMUX_LINK_WINDOW" -t '=$session:' ;;
     session-rename) '$REAL_TMUX' -S '$socket' rename-session -t '=$session:' renamed-session ;;
   esac
 fi
@@ -769,6 +770,22 @@ SH
   done
   pass "fm-teardown: tmux refuses a close after a window rename or session move"
 
+  duplicate_id=$("$REAL_TMUX" -S "$socket" new-window -dP -F '#{window_id}' \
+    -t relocated: -n "$target" 'exec sleep 180') || fail "could not stage a duplicate in the other session"
+  fm_write_meta "$dir/home/state/$target_id.meta" \
+    "window=$session:$target" "worktree=$dir/nonexistent-worktree" \
+    "project=$dir/nonexistent-project" "kind=scout"
+  FM_TEST_TMUX_RACE=link FM_TEST_RACE_WINDOW=$window_id FM_TEST_TMUX_LINK_WINDOW=$duplicate_id \
+    FM_TEST_LAUNCH_TTY=$control_tty run_case "$dir" "$target_id" > "$dir/link.out" 2> "$dir/link.err" \
+    || fail "cleanup during a window link failed: $(cat "$dir/link.err")"
+  assert_contains "$(cat "$dir/link.err")" "close could not be confirmed against the verified window and pane snapshot" \
+    "late duplicate window did not produce a warning"
+  [ "$("$REAL_TMUX" -S "$socket" list-windows -t "=$session:" -F '#{window_name}' | grep -Fxc "$target")" = 2 ] \
+    || fail "teardown did not preserve both same-named windows in the recorded session"
+  "$REAL_TMUX" -S "$socket" unlink-window -t "=$session:$duplicate_id" \
+    || fail "could not remove the late link from the recorded session"
+  pass "fm-teardown: tmux refuses a close when a second exact-name window is linked before it"
+
   "$REAL_TMUX" -S "$socket" select-window -t "$window_id"
   mkfifo "$dir/attached.in"
   "$REAL_TMUX" -S "$socket" -C attach-session -t "=$session:" \
@@ -817,6 +834,8 @@ SH
     && fail "valid cleanup did not remove the exact target window"
   isolated_tmux_window_exists "$dir" "$socket" "$session" "$control" \
     || fail "valid cleanup removed the independent control window"
+  isolated_tmux_window_exists "$dir" "$socket" relocated "$target" \
+    || fail "valid cleanup removed the same-named window in the other session"
   pass "fm-teardown: exact tmux cleanup preserves invalid and prefix-matched neighbors while removing only the recorded target"
 
   child_home="$dir/secondmate"

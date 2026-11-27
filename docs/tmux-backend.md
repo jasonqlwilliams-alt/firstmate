@@ -52,7 +52,8 @@ Ordinary teardown and forced secondmate child cleanup require a complete window 
 Teardown leaves the window open and warns if it cannot verify that information or read caller ancestry.
 It also leaves the window open and warns if a pane's PID matches teardown or an ancestor, or if a pane matches the launch pane ID or controlling terminal.
 On Linux, teardown also requires a verified launch process session and leaves the window open if a target tmux server in its launch ancestry shares that session or has an unreadable process session.
-Before closing the window by ID, tmux rechecks the recorded session name and the window and pane snapshot, so a moved or renamed window, a newly split pane, or an unreadable recheck stops the close and produces a warning.
+Before closing the window by ID, tmux rechecks that the recorded session and window name still identify exactly the verified window and that its pane inventory is unchanged.
+A moved or renamed window, a second exact-name match in the recorded session, a newly split pane, or an unreadable recheck stops the close and produces a warning.
 
 Outside Linux, a job launched by the target tmux server can evade caller detection.
 A wrapper that exits early after clearing the tmux environment can also hide the caller when no controlling terminal is available.
