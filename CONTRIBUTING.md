@@ -135,7 +135,7 @@ bash -e <<'BASH'
 ROOT=$PWD
 . tests/treehouse-test-helpers.sh
 fm_test_require_treehouse_root
-owner_identity=$(fm_test_pid_identity "$$")
+owner_identity=$(TZ=UTC0 fm_test_pid_identity "$$")
 fm_test_treehouse_setup "$$" "$owner_identity"
 trap 'fm_test_treehouse_remove "$FM_TEST_TREEHOUSE_DIR"' EXIT
 git clone --no-local -- /path/to/fixture-repo "$FM_TEST_TREEHOUSE_DIR/repo"

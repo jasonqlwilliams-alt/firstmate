@@ -7,8 +7,14 @@ set -u
 # shellcheck source=tests/fixtures.sh
 . "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
 fm_test_require_treehouse_root || exit 0
-TMP_ROOT=$(fm_test_tmproot fm-treehouse-lease-safety)
 TREEHOUSE_BIN=$(command -v treehouse)
+if ! lease_help=$("$TREEHOUSE_BIN" lease --help 2>&1) ||
+  ! grep -Eq '^[[:space:]]*treehouse lease([[:space:]]|$)' <<< "$lease_help" ||
+  ! grep -Eq '(^|[[:space:]])--lease-holder([[:space:]]|$)' <<< "$lease_help"; then
+  printf 'skip: treehouse does not support lease repair\n'
+  exit 0
+fi
+TMP_ROOT=$(fm_test_tmproot fm-treehouse-lease-safety)
 mkdir -p "$TMP_ROOT/home" "$TMP_ROOT/user" "$TMP_ROOT/state"
 HOME_DIR="$TMP_ROOT/home"
 PROJECT="$TMP_ROOT/project"

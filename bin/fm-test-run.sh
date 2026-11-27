@@ -111,10 +111,10 @@
 # matching ^skip:) remain successful and are counted as skipped_gate; each one
 # is logged with its reason and recorded in the timing artifact.
 #
-# expected_gate_skip classes name why a family is allowed to skip: herdr (the
-# pinned real-Herdr lane), optional-binary (a backend whose binary is optional),
-# live-capability (a live-harness guard governed by fm_live_gate, which records
-# unavailable tools and explicit policy skips; see tests/lib.sh), or none.
+# expected_gate_skip classes name why a suite is allowed to skip: herdr,
+# treehouse, herdr,treehouse (either prerequisite), optional-binary (an optional
+# backend), live-capability (a live-harness guard governed by fm_live_gate, which
+# records unavailable tools and explicit policy skips; see tests/lib.sh), or none.
 #
 # Every selected script runs isolated from the host's global and system Git
 # configuration, including one that sources no test helper of its own;
@@ -414,10 +414,14 @@ family_for_basename() {
 }
 
 expected_gate_skip_for_script() {
-  if [ "${1##*/}" = fm-treehouse-lease-safety.test.sh ]; then
-    printf '%s\n' treehouse
-    return
-  fi
+  case "${1##*/}" in
+    fm-treehouse-lease-safety.test.sh) printf '%s\n' treehouse; return ;;
+    fm-backend-autodetect-smoke.test.sh|fm-backend-herdr-launcher-workspace-e2e.test.sh|\
+    fm-backend-herdr-presentation-e2e.test.sh|fm-backend-herdr-workspace-per-home-e2e.test.sh)
+      printf '%s\n' herdr,treehouse
+      return
+      ;;
+  esac
   case "$2" in
     real-herdr-gated) printf '%s\n' herdr ;;
     live-harness-optin) printf '%s\n' live-capability ;;
@@ -2367,7 +2371,7 @@ run_script_bounded() (  # <script> <out> <stream> <id>
   local script=$1 out=$2 stream=$3 id=$4
   local owner_pid owner_identity
   owner_pid=${BASHPID:-$(exec sh -c 'printf "%s\n" "$PPID"')}
-  owner_identity=$(fm_test_pid_identity "$owner_pid") || {
+  owner_identity=$(TZ=UTC0 fm_test_pid_identity "$owner_pid") || {
     log "could not identify the suite process for $script"
     return 1
   }

@@ -2,7 +2,7 @@
 
 fm_test_pid_identity() {
   local pid=$1
-  TZ=UTC0 FM_STATE_OVERRIDE="${TMPDIR:-/tmp}" bash -c \
+  FM_STATE_OVERRIDE="${TMPDIR:-/tmp}" bash -c \
     '. "$1"; fm_pid_identity "$2"' _ "$ROOT/bin/fm-wake-lib.sh" "$pid"
 }
 
@@ -90,7 +90,7 @@ fm_test_reap_orphans() {
     case "$owner_pid" in
       '' | *[!0-9]*) ;;
       *)
-        current_identity=$(fm_test_pid_identity "$owner_pid" 2>/dev/null) || current_identity=
+        current_identity=$(TZ=UTC0 fm_test_pid_identity "$owner_pid" 2>/dev/null) || current_identity=
         if [ -n "$owner_identity" ] && [ "$current_identity" = "$owner_identity" ]; then
           continue
         fi
