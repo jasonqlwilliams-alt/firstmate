@@ -4,6 +4,25 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
+fm_session_mutation_allowed "fm-wake-grant" || exit 1
+
+if fm_session_owner_mode_active "$STATE"; then
+  # shellcheck source=bin/fm-session-lock-lib.sh
+  . "$SCRIPT_DIR/fm-session-lock-lib.sh"
+  fm_session_hook_owns_lock "$STATE" || exit 1
+  OWNER_FORMAT=fm-branch-eligible-owner-v2
+else
+  OWNER_FORMAT=fm-branch-eligible-owner-v1
+fi
+
+current_identity() {
+  if [ "$OWNER_FORMAT" = fm-branch-eligible-owner-v2 ]; then
+    fm_session_hook_owns_lock "$STATE" && [ "$FM_SESSION_LOCK_PID" = "$1" ] || return 1
+    printf '%s\n' "$FM_SESSION_LOCK_GENERATION"
+  else
+    fm_pid_identity "$1"
+  fi
+}
 
 BRANCH_ROWS="$STATE/.branch-eligible-rows"
 BRANCH_OWNER="$STATE/.branch-eligible-owner"
@@ -36,14 +55,14 @@ case "${1:-}" in
     [ "$#" -eq 3 ] || exit 2
     case "$pid" in ''|*[!0-9]*|1) exit 2 ;; esac
     case "$generation" in ''|*[!A-Za-z0-9._-]*) exit 2 ;; esac
-    identity=$(fm_pid_identity "$pid" 2>/dev/null) || exit 1
+    identity=$(current_identity "$pid" 2>/dev/null) || exit 1
     [ -n "$identity" ] || exit 1
     TMP=$(mktemp "$STATE/.branch-eligible-owner.tmp.XXXXXX") || exit 1
-    printf '%s\n%s\n%s\n%s\n' fm-branch-eligible-owner-v1 "$pid" "$identity" "$generation" > "$TMP" || exit 1
+    printf '%s\n%s\n%s\n%s\n' "$OWNER_FORMAT" "$pid" "$identity" "$generation" > "$TMP" || exit 1
     chmod 0600 "$TMP" || exit 1
     fm_lock_acquire_wait "$FM_WAKE_QUEUE_LOCK"
     LOCK_HELD=true
-    [ "$(fm_pid_identity "$pid" 2>/dev/null || true)" = "$identity" ] || exit 1
+    [ "$(current_identity "$pid" 2>/dev/null || true)" = "$identity" ] || exit 1
     rm -f -- "$BRANCH_ROWS" || exit 1
     _fm_atomic_replace "$TMP" "$BRANCH_OWNER" || exit 1
     TMP=

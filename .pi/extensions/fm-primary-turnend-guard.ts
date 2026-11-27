@@ -1,3 +1,4 @@
+import { bindNativeOwner, usesLaunchOwners, verifyNativeOwner } from "./lib/fm-session-owner.ts";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -19,6 +20,7 @@ const extensionDir = dirname(extensionFile);
 const root = resolve(extensionDir, "../..");
 const fmHome = process.env.FM_HOME || process.env.FM_ROOT_OVERRIDE || root;
 const state = process.env.FM_STATE_OVERRIDE || `${fmHome}/state`;
+const ownerPaths = { root, home: fmHome, state };
 const marker = `${state}/.pi-turnend-extension-loaded`;
 const extensionVersion = `sha256:${createHash("sha256").update(readFileSync(extensionFile)).digest("hex")}`;
 
@@ -38,6 +40,10 @@ function pidAlive(pid: string): boolean {
 }
 
 function lockOwnership(): LockOwnership {
+  if (usesLaunchOwners(ownerPaths)) {
+    if (verifyNativeOwner(ownerPaths)) return "owned";
+    return existsSync(`${state}/.lock`) ? "other" : "missing";
+  }
   let lockPid = "";
   try {
     lockPid = readFileSync(`${state}/.lock`, "utf8").trim();
@@ -55,6 +61,12 @@ function lockOwnership(): LockOwnership {
 }
 
 function markLoaded(): void {
+  if (usesLaunchOwners(ownerPaths)) {
+    const generation = verifyNativeOwner(ownerPaths);
+    if (!generation) return;
+    writeFileSync(marker, `${extensionVersion}\n${process.pid}\n${generation}\n`);
+    return;
+  }
   if (!existsSync(state) || lockOwnership() === "other") return;
   writeFileSync(marker, `${extensionVersion}\n${process.pid}\n`);
 }
@@ -509,6 +521,7 @@ function runCdCheck(command: string): Promise<{ code: number; stderr: string }> 
 }
 
 export default function (pi: ExtensionAPI) {
+  if (!bindNativeOwner(ownerPaths)) return;
   let sessionstartGeneration: SessionstartGeneration | null = null;
   let sessionstartExitListenerRegistered = false;
   const cleanupSessionstartOnProcessExit = (): void => {
@@ -601,6 +614,8 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_settled", async () => {
+    if (usesLaunchOwners(ownerPaths) && lockOwnership() !== "owned") return;
+    markLoaded();
     if (guardFollowupActive) {
       guardFollowupActive = false;
       return;

@@ -294,6 +294,7 @@ META="$STATE/$ID.meta"
 
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
+fm_session_mutation_allowed "fm-pr-merge" || exit 1
 # Role partition: merging is MAIN-owned; the Pi supervision branch reports the
 # green PR and never merges (contract: bin/fm-lease-lib.sh; no-op in homes
 # without a branch actor). This precedes reading the task record, because the

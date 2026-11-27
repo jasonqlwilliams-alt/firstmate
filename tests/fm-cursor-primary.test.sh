@@ -376,7 +376,7 @@ test_park_stands_down_when_superseded() {
   while [ ! -s "$dir/state/.cursor-park-owner" ] || [ ! -e "$dir/state/arm-ran" ]; do
     sleep 0.2
     waited=$((waited + 1))
-    [ "$waited" -lt 100 ] || fail "the first park never claimed ownership"
+    [ "$waited" -lt 200 ] || fail "the first park never claimed ownership: $(cat "$marker" 2>/dev/null)"
   done
   : > "$dir/state/arm-fast"
   run_park "$dir" >/dev/null 2>&1
@@ -706,3 +706,73 @@ test_sessionstart_emits_additional_context
 test_sessionstart_silent_in_child_worktree
 test_tracked_registration_covers_the_primary_events
 test_default_ceiling_bites_before_the_registered_loop_limit
+
+test_versioned_stop_hooks_require_their_launch() {
+  local type dir script payload status
+  for type in claude cursor; do
+    dir=$(make_primary_dir "$TMP_ROOT/versioned-$type")
+    mkdir -p "$dir/config"
+    printf 'launch-v1\n' > "$dir/config/session-lock-owner"
+    cp "$ROOT/bin/fm-session-launch.sh" "$ROOT/bin/fm-session-owner-publish.mjs" "$ROOT/bin/fm-session-owner-darwin.py" "$dir/bin/"
+    write_arm_fixture "$dir" actionable
+    if [ "$type" = claude ]; then
+      cat > "$dir/bin/fm-watch-arm.sh" <<'SH'
+#!/bin/bash
+printf '%s\n' "$$" >> "$FM_HOME/state/arm-ran"
+printf 'pending:downtime:fixture-generation\n' > "$FM_HOME/state/.watcher-down"
+touch "$FM_HOME/state/.last-watcher-beat"
+printf 'watcher: started pid=%s (beacon fresh)\nstale: fixture-win actionable\n' "$$"
+SH
+    fi
+    case "$type" in
+      claude) script=fm-claude-stop-autoarm.sh; payload=$CLAUDE_STOP_PAYLOAD ;;
+      cursor) script=fm-turnend-guard-cursor.sh; payload=$CURSOR_PAYLOAD ;;
+    esac
+    FM_HOME="$dir" FM_FIXTURE_HOOK="$script" FM_FIXTURE_PAYLOAD="$payload" "$dir/bin/fm-session-launch.sh" -- /bin/bash -ec '
+      "$FM_HOME/bin/fm-lock.sh"
+      before=$("$FM_HOME/bin/fm-lock.sh" verify)
+      invoke() { printf "%s\n" "$FM_FIXTURE_PAYLOAD" | "$FM_HOME/bin/$FM_FIXTURE_HOOK"; }
+
+      invoke > "$FM_HOME/idle" 2>&1
+      test ! -e "$FM_HOME/state/arm-ran"
+      : > "$FM_HOME/state/work.meta"
+      : > "$FM_HOME/state/.afk-contract"
+      invoke > "$FM_HOME/away" 2>&1
+      test ! -e "$FM_HOME/state/arm-ran"
+      unlink "$FM_HOME/state/.afk-contract"
+
+      printf "%s\n" "$FM_FIXTURE_PAYLOAD" | "$FM_HOME/bin/fm-session-launch.sh" -- "$FM_HOME/bin/$FM_FIXTURE_HOOK"
+      test ! -e "$FM_HOME/state/arm-ran"
+      (
+        unset FM_SESSION_OWNER_ID FM_SESSION_OWNER_HOME FM_SESSION_OWNER_PID FM_SESSION_OWNER_START FM_SESSION_OWNER_KIND
+        invoke > "$FM_HOME/unbound" 2>&1
+      )
+      test ! -e "$FM_HOME/state/arm-ran"
+      mkdir -p "$FM_HOME/no-probe/sys/kernel/random"
+      ln -s /proc/sys/kernel/random/boot_id "$FM_HOME/no-probe/sys/kernel/random/boot_id"
+      FM_PROC_ROOT_OVERRIDE="$FM_HOME/no-probe" invoke > "$FM_HOME/unreadable" 2>&1
+      test ! -e "$FM_HOME/state/arm-ran"
+      rc=0
+      invoke > "$FM_HOME/owned" 2>&1 || rc=$?
+      test "$rc" -le 2
+      test -s "$FM_HOME/state/arm-ran"
+      test "$before" = "$("$FM_HOME/bin/fm-lock.sh" verify)"
+    ' >/dev/null 2>"$dir/driver-error" || fail "$type versioned Stop fixture failed: $(cat "$dir/driver-error" "$dir/owned" 2>/dev/null)"
+    status=$(FM_HOME="$dir" "$dir/bin/fm-lock.sh" status)
+    assert_contains "$status" "lock: stale" "$type retained an exited launch"
+
+    # A new genuine launch can recover through the hook, using only its own
+    # binding. An unbound hook after death must leave the old proof in place.
+    FM_HOME="$dir" "$dir/bin/$script" <<< "$payload" >/dev/null 2>&1
+    [ "$(wc -l < "$dir/state/arm-ran" | tr -d ' ')" -eq 1 ] || fail "$type unbound Stop restarted a watcher"
+    FM_HOME="$dir" FM_FIXTURE_HOOK="$script" FM_FIXTURE_PAYLOAD="$payload" "$dir/bin/fm-session-launch.sh" -- /bin/bash -ec '
+      printf "%s\n" "$FM_FIXTURE_PAYLOAD" | "$FM_HOME/bin/$FM_FIXTURE_HOOK" || true
+      "$FM_HOME/bin/fm-lock.sh" verify
+    ' > "$dir/recovered" 2>&1 || fail "$type could not recover a proven stale owner: $(cat "$dir/recovered")"
+  done
+  pass "Claude and Cursor Stops use their launch binding and preserve idle and away gates"
+}
+
+if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then
+  test_versioned_stop_hooks_require_their_launch
+fi

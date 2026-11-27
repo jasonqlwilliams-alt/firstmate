@@ -591,7 +591,7 @@ lock_is_held_live() {
   fi
   status=$("$SCRIPT_DIR/fm-lock.sh" status)
   case "$status" in
-    'lock: held by live harness pid '*) return 0 ;;
+    'lock: held by live '*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -621,8 +621,10 @@ build_launch_command() {
     cursor) pre=' --trust --yolo'; post=" --workspace $(printf '%q' "$HELM_WORKSPACE")" ;;
     *) return 1 ;;
   esac
-  printf 'cd -- %q && FM_HOME=%q exec env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u FM_OMP_HARNESS%s %q%s%s%s %q\n' \
-    "$HELM_WORKSPACE" "$FM_HOME" "$env_extra" "$bin" "$pre" "$flags" "$post" "$prompt"
+  local launcher
+  printf -v launcher '%q -- ' "$SCRIPT_DIR/fm-session-launch.sh"
+  printf 'cd -- %q && FM_HOME=%q exec env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u FM_OMP_HARNESS%s %s%q%s%s%s %q\n' \
+    "$HELM_WORKSPACE" "$FM_HOME" "$env_extra" "$launcher" "$bin" "$pre" "$flags" "$post" "$prompt"
 }
 
 # --- handover ---------------------------------------------------------------

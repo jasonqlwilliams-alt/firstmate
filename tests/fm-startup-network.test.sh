@@ -601,17 +601,22 @@ EOF
   printf '%s\n' $$ > "$home/state/.lock"
   FM_FAKE_BOOTSTRAP_LOG="$log" FM_FAKE_BOOTSTRAP_SLEEP=6 \
     run_stage "$home" "$root" start --locked 1 --harvest-pid $$
-  while [ ! -s "$log" ] && [ "$waited" -lt 50 ]; do
+  while [ ! -s "$log" ] && [ "$waited" -lt 200 ]; do
     sleep 0.1
     waited=$((waited + 1))
   done
-  [ -s "$log" ] || fail "the mutating sweep never started"
+  [ -s "$log" ] || fail "the mutating sweep never started: $(cat "$home/state/.startup-network.status" 2>/dev/null)"
 
-  next_owner=$(/bin/ps -o ppid= -p $$ | tr -d ' ')
+  # The claimant must be a real fixture harness, not an ancestor of the test
+  # runner whose contiguous harness chain can include the developer session.
+  cp /bin/bash "$root/bin/codex-fixture"
   started=$(date +%s)
   rc=0
-  out=$(PATH="$root/bin:$PATH" FM_FAKE_HARNESS_PID="$next_owner" \
-    FM_HOME="$home" FM_ROOT_OVERRIDE="$root" fm_test_run_fixture "$root/bin/fm-lock.sh" 2>&1) || rc=$?
+  # shellcheck disable=SC2016 # Expand the home and PID in the fixture harness.
+  out=$(PATH="$root/bin:$PATH" FM_FAKE_HARNESS_PID='' FM_HOME="$home" FM_ROOT_OVERRIDE="$root" \
+    fm_test_run_fixture "$root/bin/codex-fixture" -c '
+      "$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; exit $?
+    ' 2>&1) || rc=$?
   elapsed=$(( $(date +%s) - started ))
   [ "$rc" -ne 0 ] || fail "lock takeover succeeded while the prior sweep was mutating"
   [ "$elapsed" -lt 4 ] || fail "lock takeover blocked ${elapsed}s behind deferred network work"
@@ -622,9 +627,14 @@ EOF
   assert_absent "$home/state/.lock.start" "the lease-blocked takeover created a sidecar"
 
   run_stage "$home" "$root" wait 30 >/dev/null || fail "the leased sweep never settled"
-  out=$(PATH="$root/bin:$PATH" FM_FAKE_HARNESS_PID="$next_owner" \
-    FM_HOME="$home" FM_ROOT_OVERRIDE="$root" fm_test_run_fixture "$root/bin/fm-lock.sh" 2>&1) \
-    || fail "lock takeover still failed after the sweep released its lease"
+  # shellcheck disable=SC2016 # Expand the home and PID in the fixture harness.
+  out=$(PATH="$root/bin:$PATH" FM_FAKE_HARNESS_PID='' FM_HOME="$home" FM_ROOT_OVERRIDE="$root" \
+    fm_test_run_fixture "$root/bin/codex-fixture" -c '
+      printf "%s\n" "$$" > "$FM_HOME/next-owner"
+      "$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; exit $?
+    ' 2>&1) \
+    || fail "lock takeover still failed after the sweep released its lease: $out"
+  next_owner=$(cat "$home/next-owner")
   assert_contains "$out" "lock acquired: harness pid $next_owner" \
     "acquisition did not report the fixture's next owner"
   [ "$(cat "$home/state/.lock")" = "$next_owner" ] \
@@ -927,6 +937,104 @@ test_killing_the_suite_reaps_detached_fixture_processes() {
   done
   pass "fm-startup-network: timeout and interruption reap detached fixture processes"
 }
+
+test_launch_owner_startup_and_bounded_worker_handoff() {
+  local rec home root log launcher startup old new phase gen held_pid i out
+  rec=$(new_world launch-owner-handoff)
+  IFS='|' read -r home root log <<< "$rec"
+  mkdir -p "$home/config"
+  printf 'launch-v1\n' > "$home/config/session-lock-owner"
+  printf 'manual\n' > "$home/config/backlog-backend"
+  ln -s "$ROOT/bin/fm-session-owner-publish.mjs" "$root/bin/fm-session-owner-publish.mjs"
+  ln -s "$ROOT/bin/fm-session-owner-darwin.py" "$root/bin/fm-session-owner-darwin.py"
+  ln -s "$ROOT/docs" "$root/docs"
+  for phase in fm-herdr-session-cleanup.sh fm-inactive-reconcile.sh fm-home-summary-refresh.sh; do
+    unlink "$root/bin/$phase"
+    printf '#!/bin/sh\nexit 0\n' > "$root/bin/$phase"
+    chmod +x "$root/bin/$phase"
+  done
+  cat > "$root/bin/fm-bootstrap.sh" <<'SH'
+#!/bin/bash
+set -eu
+printf '%s %s %s\n' "${FM_BOOTSTRAP_NETWORK:-}" "${FM_BOOTSTRAP_DETECT_ONLY:-0}" \
+  "${FM_BOOTSTRAP_NETWORK_LOCK_GEN:-${FM_BOOTSTRAP_LOCAL_OWNER_GEN:-none}}" >> "$FM_FAKE_BOOTSTRAP_LOG"
+if [ "${FM_BOOTSTRAP_NETWORK:-}" = only ] && [ -e "$FM_HOME/hold-sweep" ]; then
+  : > "$FM_HOME/sweep-running"
+  for _ in $(seq 1 300); do
+    if [ -e "$FM_HOME/release-sweep" ]; then
+      : > "$FM_HOME/sweep-finished"
+      exit 0
+    fi
+    sleep 0.05
+  done
+  exit 1
+fi
+SH
+  launcher="$root/bin/fm-session-launch.sh"
+  startup="$root/bin/fm-session-start.sh"
+
+  printf '100\t1\tcheck\tfixture\tqueued\n' > "$home/state/.wake-queue"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_FAKE_BOOTSTRAP_LOG="$log" "$startup" 2>&1)     || fail "bare startup did not finish: $out"
+  assert_contains "$out" 'STARTUP-ONLY' 'bare startup implied a continuing session'
+  assert_contains "$out" 'skipped (startup-only)' 'bare startup attempted wake handling'
+  assert_grep $'100\t1\tcheck\tfixture\tqueued' "$home/state/.wake-queue" 'bare startup removed a pending wake'
+  assert_absent "$home/state/.session-start-complete" 'bare startup advertised a continuing session'
+  run_stage "$home" "$root" wait 30 >/dev/null || fail 'the bare invocation worker did not finish'
+  grep -E '^only 0 [a-f0-9]{64}$' "$log" >/dev/null || fail 'bounded worker did not carry the bare owner generation'
+
+  : > "$home/hold-sweep"
+  # shellcheck disable=SC2016 # The script uses the fixture's home and binding.
+  FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_FAKE_BOOTSTRAP_LOG="$log" FM_FIXTURE_STARTUP="$startup" \
+    fm_test_start_fixture "$launcher" -- /bin/bash -ec '
+      "$FM_FIXTURE_STARTUP" > "$FM_HOME/first-digest"
+      "$FM_ROOT_OVERRIDE/bin/fm-lock.sh" verify > "$FM_HOME/owner-gen"
+      : > "$FM_HOME/digest-finished"
+      while [ ! -e "$FM_HOME/owner-exit" ]; do sleep 0.05; done
+    '
+  old=$FM_TEST_FIXTURE_PID
+  for i in $(seq 1 300); do
+    [ ! -e "$home/digest-finished" ] || [ ! -e "$home/sweep-running" ] || break
+    sleep 0.05
+  done
+  [ -e "$home/digest-finished" ] && [ -e "$home/sweep-running" ] || fail "digest blocked or sweep did not start: $(cat "$log")"
+  gen=$(cat "$home/owner-gen")
+  assert_grep "skip 0 $gen" "$log" 'bootstrap missed the launch generation'
+  assert_grep "only 0 $gen" "$log" 'worker missed the launch generation'
+  assert_contains "$(cat "$home/first-digest")" 'lock acquired: launch pid' 'first launch did not hold mutating startup'
+
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_FAKE_BOOTSTRAP_LOG="$log" \
+    "$launcher" -- "$startup" 2>&1) || fail "read-only startup did not print its digest"
+  assert_contains "$out" 'READ-ONLY SESSION' 'a second live launch ran mutating startup'
+  [ "$(grep -c '^skip 0 ' "$log")" -eq 2 ] || fail 'a refused launch ran mutating bootstrap'
+
+  # A competing session cannot gain authority while the first launch's worker
+  # is still writing, even after that launch exits.
+  held_pid=$(cat "$home/state/.lock")
+  : > "$home/owner-exit"
+  wait "$old" || fail 'the launch fixture could not exit'
+  # shellcheck disable=SC2016 # The script uses the fixture's home and binding.
+  FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_FAKE_BOOTSTRAP_LOG="$log" FM_FIXTURE_STARTUP="$startup" \
+    fm_test_start_fixture "$launcher" -- /bin/bash -ec '
+      : > "$FM_HOME/second-entered"
+      "$FM_FIXTURE_STARTUP" > "$FM_HOME/second-digest"
+    '
+  new=$FM_TEST_FIXTURE_PID
+  for i in $(seq 1 200); do [ ! -e "$home/second-entered" ] || break; sleep 0.05; done
+  [ -e "$home/second-entered" ] || fail 'next launcher never started'
+  sleep 0.35
+  [ "$(cat "$home/state/.lock")" = "$held_pid" ] || fail 'new launch took over during the prior bounded sweep'
+  : > "$home/release-sweep"
+  wait "$new" || fail 'next launcher failed after prior sweep release'
+  [ -e "$home/sweep-finished" ] || fail 'the old bounded sweep did not finish'
+  assert_contains "$(cat "$home/second-digest")" 'lock acquired: launch pid' 'next launch did not recover the home'
+  [ "$(cat "$home/state/.lock")" != "$held_pid" ] || fail 'next launch retained the previous owner'
+  run_stage "$home" "$root" wait 30 >/dev/null || fail 'the next launch worker did not settle'
+  pass 'fm-startup-network: startup-only scope and continuing sessions carry the generation through a fenced handoff'
+}
+
+if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then
+  test_launch_owner_startup_and_bounded_worker_handoff
+fi
 
 test_wait_fails_without_a_published_stage
 test_start_returns_without_holding_the_callers_stdout

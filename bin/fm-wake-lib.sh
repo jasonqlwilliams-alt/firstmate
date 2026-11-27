@@ -613,7 +613,7 @@ fm_lock_claimant_occupied() { # <mutex-path> <pid>
   case "$lockdir" in
     "$STATE/.lock.acquire"|"$STATE/.lock.acquire.steal"*)
       if fm_session_owner_enabled && fm_session_owner_pid_valid "$pid"; then
-        fm_session_owner_liveness "$pid" '' || rc=$?
+        fm_session_owner_token "$pid" >/dev/null || rc=$?
         [ "$rc" -ne 2 ]
         return
       fi
@@ -1959,7 +1959,7 @@ fm_autoarm_claim_open() {  # <state-dir> [grace]
   esac
   fm_autoarm_ledger_read "$state" || return 1
   [ "$FM_AUTOARM_OUTCOME" = arming ] || return 1
-  if fm_session_owner_enabled || [ -e "$state/.lock.owner-format" ]; then
+  if fm_session_owner_mode_active "$state"; then
     fm_session_lock_read "$state/.lock" || return 1
     [ -n "$FM_AUTOARM_SESSION_GENERATION" ] \
       && [ "$FM_AUTOARM_SESSION_GENERATION" = "$FM_SESSION_LOCK_GENERATION" ] || return 1
@@ -2477,7 +2477,7 @@ fm_wake_branch_owner_matches() {  # <owner-file> [<pid>] [<generation>]
   [ -z "$expected_generation" ] || [ "$generation" = "$expected_generation" ] || return 1
   case "$version" in
     fm-branch-eligible-owner-v1)
-      ! fm_session_owner_enabled && [ ! -e "$STATE/.lock.owner-format" ] || return 1
+      ! fm_session_owner_mode_active "$STATE" || return 1
       current=$(fm_pid_identity "$pid" 2>/dev/null) || return 1
       ;;
     fm-branch-eligible-owner-v2)

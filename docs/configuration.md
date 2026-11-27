@@ -28,6 +28,25 @@ Wake, watcher, away-mode, and Relay-specific state mechanics remain with their n
 `AGENTS.md` retains the run-once and read-once operator rules, lock-refusal safety, installation consent, and direct-report recovery boundaries because those facts apply at every session start.
 Ordinary dead-direct-report recovery is owned by `stuck-crewmate-recovery`, while persistent-secondmate recovery is owned by `secondmate-provisioning`.
 
+## Launch-bound session ownership (config/session-lock-owner)
+
+The gitignored per-home file `config/session-lock-owner` enables launch-bound ownership when it contains `launch-v1`.
+It is absent by default and is independent for every primary and secondmate home.
+Enable it only on a clean restart of the home, after updating its startup and watcher scripts, hook registrations, and all loaded extensions to builds that understand the generation record.
+Retire the versioned owner and its record before downgrading to a build that only reads the PID line.
+A writable home must stay in one host and PID namespace.
+The launch-bound provider uses Linux procfs or macOS libproc through `python3`.
+
+Start a foreground harness with `bin/fm-session-launch.sh -- <command> [args...]` from the home.
+Firstmate's managed primary and secondmate launches invoke the launcher when their target home is ready.
+Pi and omp can bind directly from their native engine process.
+A detached or daemonizing adapter must bind from the continuing process and carry that binding to its trusted tool and hook execution environment.
+A standalone `bin/fm-session-start.sh` reports startup-only scope, leaves queued wakes pending, and gives its bounded network sweep time to finish under the shared acquisition mutex.
+Use the launcher to continue after a startup-only invocation.
+
+The [session-start adapter guide](sessionstart-nudge.md#source-routing) covers completion and re-emission.
+`bin/fm-session-lock-record-lib.sh` owns the record format and liveness verdict.
+
 ## Repository delivery policy (config/repository-policy.json)
 
 The optional, primary-authoritative, gitignored `config/repository-policy.json` is the single owner of repository write destinations for the fleet.

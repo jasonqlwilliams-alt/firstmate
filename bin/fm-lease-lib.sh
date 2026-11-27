@@ -115,12 +115,14 @@ fm_lease_read() {
   FM_LEASE_ACTOR=
   FM_LEASE_PID=
   FM_LEASE_EPOCH=
+  FM_LEASE_OWNER_GEN=
   [ -e "$file" ] || return 1
   IFS= read -r line < "$file" 2>/dev/null || line=
   FM_LEASE_ACTOR=$(printf '%s' "$line" | cut -f1)
   FM_LEASE_PID=$(printf '%s' "$line" | cut -f2)
   # shellcheck disable=SC2034 # Consumed by sourcing callers (bin/fm-lease.sh check).
   FM_LEASE_EPOCH=$(printf '%s' "$line" | cut -f3)
+  FM_LEASE_OWNER_GEN=$(printf '%s' "$line" | cut -sf4)
   case "$FM_LEASE_ACTOR" in
     main|branch) ;;
     *) FM_LEASE_ACTOR= ;;
@@ -142,6 +144,14 @@ fm_lease_live() {
   fm_lease_read "$1" || return 1
   [ -n "$FM_LEASE_ACTOR" ] || return 1
   [ -n "$FM_LEASE_PID" ] || return 1
+  if fm_session_owner_mode_active "$STATE"; then
+    fm_session_lock_read "$STATE/.lock" || return 2
+    [ "$FM_LEASE_PID" = "$FM_SESSION_LOCK_PID" ] || return 1
+    [ "$FM_LEASE_OWNER_GEN" = "$FM_SESSION_LOCK_GENERATION" ] || return 1
+    local rc=0
+    fm_session_owner_liveness "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START" || rc=$?
+    case "$rc" in 0) return 0 ;; 2) return 1 ;; *) return 2 ;; esac
+  fi
   kill -0 "$FM_LEASE_PID" 2>/dev/null || return 1
   fm_session_lock_read "$STATE/.lock" || return 1
   [ "$FM_LEASE_PID" = "$FM_SESSION_LOCK_PID" ] \
@@ -151,11 +161,12 @@ fm_lease_live() {
 # fm_lease_clear_stale <task>: remove the lease file when it exists but is not
 # live. Silent; never touches a live lease.
 fm_lease_clear_stale() {
-  local file
+  local file rc
   file=$(fm_lease_path "$1")
   [ -e "$file" ] || return 0
-  fm_lease_live "$1" && return 0
-  rm -f -- "$file"
+  rc=0
+  fm_lease_live "$1" || rc=$?
+  case "$rc" in 0) return 0 ;; 1) rm -f -- "$file" ;; *) return 1 ;; esac
 }
 
 # fm_lease_guard <task> <action-label> [wait-mode]: refuse (exit FM_LEASE_REFUSE_EXIT) when

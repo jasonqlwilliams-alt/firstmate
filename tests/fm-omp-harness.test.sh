@@ -446,6 +446,7 @@ install_omp_extension_fixture() {  # <repo>
   local repo=$1
   mkdir -p "$repo/.omp/extensions" "$repo/.pi/extensions/lib" "$repo/bin" "$repo/node_modules/typebox"
   cp "$ROOT/.omp/extensions/fm-primary-turnend-guard.ts" "$ROOT/.omp/extensions/fm-primary-omp-watch.ts" "$repo/.omp/extensions/"
+  cp "$ROOT/.pi/extensions/lib/fm-session-owner.ts" "$ROOT/.pi/extensions/lib/fm-async-exec.ts" "$repo/.pi/extensions/lib/"
   cp "$ROOT/.pi/extensions/lib/fm-operational-input.ts" "$ROOT/.pi/extensions/lib/fm-sessionstart-supervisor.mjs" "$repo/.pi/extensions/lib/"
   cp "$ROOT/bin/fm-operational-input.sh" "$repo/bin/"
   chmod +x "$repo/bin/fm-operational-input.sh"
@@ -585,3 +586,11 @@ test_control_composer_and_model_tables
 test_ownership_proof_is_omp_keyed
 test_turnend_guard_extension_compels_one_continuation
 test_watch_extension_arms_and_delivers
+
+if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then
+  # shellcheck source=tests/fixtures/session-owner-native.sh
+  . "$ROOT/tests/fixtures/session-owner-native.sh"
+  repo="$TMP_ROOT/native-owner-omp"
+  install_omp_extension_fixture "$repo"
+  exercise_native_owner omp "$repo" "$repo"
+fi

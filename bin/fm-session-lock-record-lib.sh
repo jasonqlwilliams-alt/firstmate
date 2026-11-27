@@ -88,6 +88,10 @@ fm_session_owner_enabled() {
   [ -f "$gate" ] && [ ! -L "$gate" ] && [ "$(cat "$gate" 2>/dev/null)" = launch-v1 ]
 }
 
+fm_session_owner_mode_active() { # <state-dir>
+  fm_session_owner_enabled || [ -e "$1/.lock.owner-format" ] || [ -L "$1/.lock.owner-format" ]
+}
+
 fm_session_owner_home() {
   local home
   home=$(cd -- "${FM_HOME:?}" 2>/dev/null && pwd -P) || return 1

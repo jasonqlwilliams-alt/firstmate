@@ -174,6 +174,7 @@ SH
     pi)
       mkdir -p "$lab/.pi/extensions/lib"
       cp "$ROOT/.pi/extensions/fm-primary-turnend-guard.ts" "$lab/.pi/extensions/"
+      cp "$ROOT/.pi/extensions/lib/fm-session-owner.ts" "$ROOT/.pi/extensions/lib/fm-async-exec.ts" "$lab/.pi/extensions/lib/"
       cp "$ROOT/.pi/extensions/lib/fm-operational-input.ts" \
         "$ROOT/.pi/extensions/lib/fm-sessionstart-supervisor.mjs" "$lab/.pi/extensions/lib/"
       cp "$ROOT/bin/fm-operational-input.sh" "$lab/bin/"
@@ -350,6 +351,7 @@ probe_pi_sessionstart_prerequisite() {
   git -C "$project" config user.name fmtest
   printf '# Offline Pi startup-prerequisite lab\n' > "$project/AGENTS.md"
   cp "$ROOT/.pi/extensions/fm-primary-turnend-guard.ts" "$project/.pi/extensions/"
+  cp "$ROOT/.pi/extensions/lib/fm-session-owner.ts" "$ROOT/.pi/extensions/lib/fm-async-exec.ts" "$project/.pi/extensions/lib/"
   cp "$ROOT/.pi/extensions/lib/fm-operational-input.ts" \
     "$ROOT/.pi/extensions/lib/fm-sessionstart-supervisor.mjs" "$project/.pi/extensions/lib/"
   cp "$ROOT/bin/fm-operational-input.sh" "$project/bin/"

@@ -136,16 +136,16 @@ fm_primary_scope_matches "$FM_ROOT" "$STATE" || exit 0
 # idle or away home remains byte-for-byte inert. A missing or malformed PID
 # line or an unreadable owner record keeps the hook inert.
 RECOVER_SESSION_LOCK=0
-if ! fm_session_lock_owned_by_self "$STATE"; then
+if ! fm_session_hook_owns_lock "$STATE"; then
   case "$FM_SESSION_LOCK_PID" in
     ''|*[!0-9]*) exit 0 ;;
   esac
-  fm_session_lock_owner_alive "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START" && exit 0
+  fm_session_hook_may_recover "$STATE" || exit 0
   RECOVER_SESSION_LOCK=1
 fi
 
 # --- AFK: the away daemon owns the watcher and triage; never rewake ----------
-[ -e "$STATE/.afk" ] && exit 0
+{ [ -e "$STATE/.afk" ] || [ -e "$STATE/.afk-contract" ]; } && exit 0
 
 # --- need: whatever bin/fm-supervision-lib.sh counts as supervision need ------
 need_supervision() {
@@ -159,8 +159,13 @@ need_supervision || exit 0
 # before touching any auto-arm state.
 if [ "$RECOVER_SESSION_LOCK" -eq 1 ]; then
   "$SCRIPT_DIR/fm-lock.sh" >/dev/null 2>&1 || exit 0
-  fm_session_lock_owned_by_self "$STATE" || exit 0
+  fm_session_hook_owns_lock "$STATE" || exit 0
 fi
+
+SESSION_OWNER_GENERATION=$FM_SESSION_LOCK_GENERATION
+autoarm_session_still_owns() {
+  fm_session_hook_owns_lock "$STATE" && [ "$FM_SESSION_LOCK_GENERATION" = "$SESSION_OWNER_GENERATION" ]
+}
 
 # --- single-flight generation claim --------------------------------------------
 # Claude runs one background process per firing with no dedupe. Exactly one
@@ -175,14 +180,14 @@ fi
 # shim defers to while genuinely deciding and reclaims once when proven
 # abandoned.
 fm_autoarm_claim_open "$STATE" "$GRACE" && exit 0
-fm_autoarm_claim_next "$STATE" "$GRACE"
+fm_autoarm_claim_next "$STATE" "$GRACE" "$SESSION_OWNER_GENERATION"
 CLAIM_RC=$?
 if [ "$CLAIM_RC" -ne 0 ]; then
   [ "$CLAIM_RC" -eq 2 ] && exit 0
   ROLE=$(fm_lock_role "$OWNER_LOCK" 2>/dev/null || true)
   [ -n "$ROLE" ] || exit 0
   fm_autoarm_release_abandoned "$STATE" "$GRACE" || exit 0
-  fm_autoarm_claim_next "$STATE" "$GRACE" || exit 0
+  fm_autoarm_claim_next "$STATE" "$GRACE" "$SESSION_OWNER_GENERATION" || exit 0
 fi
 MY_GEN=$FM_AUTOARM_MY_GEN
 [ -n "$MY_GEN" ] || exit 0
@@ -197,7 +202,7 @@ MY_GEN=$FM_AUTOARM_MY_GEN
 autoarm_commit() {  # <outcome> [marker-file]
   local outcome=$1 marker=${2:-} session_pid recovery
   if [ "$outcome" = rewake ]; then
-    fm_session_lock_owned_by_self "$STATE" || return 2
+    autoarm_session_still_owns || return 2
     session_pid=$FM_SESSION_LOCK_PID
     fm_recovery_marker_snapshot "$STATE/.watcher-down" || return 2
     case "$FM_RECOVERY_MARKER_TOKEN" in
@@ -208,7 +213,7 @@ autoarm_commit() {  # <outcome> [marker-file]
         recovery=${FM_RECOVERY_MARKER_TOKEN##*:} ;;
       *) return 2 ;;
     esac
-    fm_autoarm_write_owned "$STATE" "$MY_GEN" "$outcome" "$marker" "$session_pid" "$recovery"
+    fm_autoarm_write_owned "$STATE" "$MY_GEN" "$outcome" "$marker" "$session_pid" "$recovery" "$SESSION_OWNER_GENERATION"
   elif [ -n "$marker" ]; then
     fm_autoarm_write_owned "$STATE" "$MY_GEN" "$outcome" "$marker"
   else
@@ -243,7 +248,8 @@ while [ "$attempt" -lt "$AUTOARM_ATTEMPTS" ]; do
   # A superseded owner must not start or attach another watcher or mutate any
   # watcher/wake state: re-verify generation ownership before every arm
   # invocation, first attempt and retries alike.
-  if ! fm_autoarm_still_owner "$STATE" "$MY_GEN"; then
+  if ! fm_autoarm_still_owner "$STATE" "$MY_GEN" \
+    || { [ -n "$SESSION_OWNER_GENERATION" ] && ! autoarm_session_still_owns; }; then
     [ -z "$OUT" ] || rm -f "$OUT" 2>/dev/null || true
     exit 0
   fi

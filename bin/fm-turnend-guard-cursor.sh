@@ -242,19 +242,25 @@ park_still_ours() {
 }
 
 current_session_still_ours() {
-  fm_session_lock_owned_by_self "$STATE" && [ "$FM_SESSION_LOCK_PID" = "$OWNER_ID" ]
+  fm_session_hook_owns_lock "$STATE" && [ "$FM_SESSION_LOCK_PID" = "$OWNER_ID" ] \
+    && [ "$FM_SESSION_LOCK_GENERATION" = "$OWNER_GENERATION" ]
 }
 
 # Only the lock-owning session may arm or wake. A stale numeric owner is
 # recoverable through bin/fm-lock.sh, which serializes the claim.
-if ! fm_session_lock_owned_by_self "$STATE"; then
+if fm_session_owner_mode_active "$STATE"; then
+  [ ! -e "$STATE/.afk" ] && [ ! -e "$STATE/.afk-contract" ] || exit 0
+  fm_supervision_needed "$STATE" "$GRACE" || exit 0
+fi
+if ! fm_session_hook_owns_lock "$STATE"; then
   case "$FM_SESSION_LOCK_PID" in ''|*[!0-9]*) exit 0 ;; esac
-  fm_session_lock_owner_alive "$FM_SESSION_LOCK_PID" "$FM_SESSION_LOCK_START" && exit 0
+  fm_session_hook_may_recover "$STATE" || exit 0
   "$SCRIPT_DIR/fm-lock.sh" >/dev/null 2>&1 || exit 0
-  fm_session_lock_owned_by_self "$STATE" || exit 0
+  fm_session_hook_owns_lock "$STATE" || exit 0
 fi
 
 OWNER_ID=$FM_SESSION_LOCK_PID
+OWNER_GENERATION=$FM_SESSION_LOCK_GENERATION
 
 PARK_SEQ=
 claim_park || exit 0

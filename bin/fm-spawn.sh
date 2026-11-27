@@ -534,6 +534,7 @@ fi
 . "$SCRIPT_DIR/fm-ff-lib.sh"
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
+fm_session_mutation_allowed "fm-spawn" || exit 1
 fm_backlog_directory_present "$STATE" "state directory" || {
   echo "error: spawn refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
   exit 1
@@ -5030,11 +5031,16 @@ if [ "$KIND" = secondmate ]; then
   # not enable them across the launch boundary (bin/fm-trace-context-lib.sh header).
   # Reuse the single frozen decision from the carrier resolution above so the
   # injected carrier and this on/off snapshot are guaranteed to agree.
+  if FM_HOME="$PROJ_ABS" fm_session_owner_enabled; then
+    # Templates are foreground commands (some start with environment assignments).
+    # Install the binding on the machine and in the pane that runs the session.
+    LAUNCH="$(shell_quote "$PROJ_ABS/bin/fm-session-launch.sh") -- /bin/bash -c $(shell_quote "exec env $LAUNCH")"
+  fi
   LAUNCH="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_PUBLIC_FOLLOWUP_PRIMARY_HOME=$sq_primary_home FM_HOME=$sq_home FM_TRACE_CONTEXT=$SPAWN_TRACE_EFFECTIVE FM_SUPERVISION_MODEL=$supervision_model $LAUNCH"
 fi
 _fm_wake_require_classify || exit 1
 reserved_key_prefixes=${FM_CLASSIFY_RESERVED_KEY_PREFIXES:-$FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT}
-LAUNCH="export FM_CLASSIFY_RESERVED_KEY_PREFIXES=$(shell_quote "$reserved_key_prefixes"); $LAUNCH"
+LAUNCH="unset FM_SESSION_OWNER_ID FM_SESSION_OWNER_HOME FM_SESSION_OWNER_PID FM_SESSION_OWNER_START FM_SESSION_OWNER_KIND; export FM_CLASSIFY_RESERVED_KEY_PREFIXES=$(shell_quote "$reserved_key_prefixes"); $LAUNCH"
 if [ -z "$SPAWN_TRACEPARENT" ] && [ "$RELAUNCH" -eq 1 ]; then
   LAUNCH="unset TRACEPARENT; $LAUNCH"
 fi

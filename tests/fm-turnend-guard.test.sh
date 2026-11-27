@@ -1089,6 +1089,7 @@ test_pi_extension_injects_once_per_logical_agent_run() {
   log="$TMP_ROOT/pi-logical-run-guard.log"
   mkdir -p "$repo/.pi/extensions/lib" "$repo/bin" "$home/state"
   cp "$ROOT/.pi/extensions/fm-primary-turnend-guard.ts" "$ext"
+  cp "$ROOT/.pi/extensions/lib/fm-session-owner.ts" "$ROOT/.pi/extensions/lib/fm-async-exec.ts" "$repo/.pi/extensions/lib/"
   cp "$ROOT/.pi/extensions/lib/fm-operational-input.ts" "$repo/.pi/extensions/lib/fm-operational-input.ts"
   cp "$ROOT/bin/fm-operational-input.sh" "$repo/bin/fm-operational-input.sh"
   cat > "$repo/bin/fm-turnend-guard.sh" <<'SH'
@@ -1155,6 +1156,7 @@ test_pi_extension_retries_after_followup_delivery_failure() {
   ext="$repo/.pi/extensions/fm-primary-turnend-guard.ts"
   mkdir -p "$repo/.pi/extensions/lib" "$repo/bin" "$home/state"
   cp "$ROOT/.pi/extensions/fm-primary-turnend-guard.ts" "$ext"
+  cp "$ROOT/.pi/extensions/lib/fm-session-owner.ts" "$ROOT/.pi/extensions/lib/fm-async-exec.ts" "$repo/.pi/extensions/lib/"
   cp "$ROOT/.pi/extensions/lib/fm-operational-input.ts" "$repo/.pi/extensions/lib/fm-operational-input.ts"
   cp "$ROOT/bin/fm-operational-input.sh" "$repo/bin/fm-operational-input.sh"
   cat > "$repo/bin/fm-turnend-guard.sh" <<'SH'

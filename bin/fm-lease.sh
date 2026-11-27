@@ -57,6 +57,14 @@ usage() {
 CMD=${1:-}
 shift 2>/dev/null || true
 
+OWNER_GEN=
+if [ "$CMD" != check ] && fm_session_owner_mode_active "$STATE"; then
+  # shellcheck source=bin/fm-session-lock-lib.sh
+  . "$SCRIPT_DIR/fm-session-lock-lib.sh"
+  fm_session_lock_owned_by_self "$STATE" || exit "$FM_LEASE_REFUSE_EXIT"
+  OWNER_GEN=$FM_SESSION_LOCK_GENERATION
+fi
+
 case "$CMD" in
   claim|release)
     TASK=${1:-}
@@ -124,11 +132,25 @@ case "$CMD" in
     HOLDER_PID=${FM_LEASE_HOLDER_PID:-}
     case "$HOLDER_PID" in *[!0-9]*) HOLDER_PID= ;; esac
     if [ -z "$HOLDER_PID" ]; then
-      HOLDER_PID=$(head -n 1 "$STATE/.lock" 2>/dev/null | tr -cd '0-9' || true)
+      if [ -n "$OWNER_GEN" ]; then
+        HOLDER_PID=$FM_SESSION_LOCK_PID
+      else
+        HOLDER_PID=$(head -n 1 "$STATE/.lock" 2>/dev/null | tr -cd '0-9' || true)
+      fi
     fi
     [ -n "$HOLDER_PID" ] || HOLDER_PID=$$
+    if [ -n "$OWNER_GEN" ] && [ "$HOLDER_PID" != "$FM_SESSION_LOCK_PID" ]; then
+      exit "$FM_LEASE_REFUSE_EXIT"
+    fi
     TMP=$(mktemp "$STATE/.fm-lease-tmp.XXXXXX")
-    printf '%s\t%s\t%s\n' "$ACTOR" "$HOLDER_PID" "$(date +%s)" > "$TMP"
+    write_lease() {
+      if [ -n "$OWNER_GEN" ]; then
+        printf '%s\t%s\t%s\t%s\n' "$ACTOR" "$HOLDER_PID" "$(date +%s)" "$OWNER_GEN"
+      else
+        printf '%s\t%s\t%s\n' "$ACTOR" "$HOLDER_PID" "$(date +%s)"
+      fi
+    }
+    write_lease > "$TMP"
     if [ -e "$LEASE" ]; then
       # Same-actor refresh, or a stale/torn record: replace atomically.
       mv -f -- "$TMP" "$LEASE"
@@ -140,7 +162,7 @@ case "$CMD" in
         exit "$FM_LEASE_REFUSE_EXIT"
       fi
       TMP=$(mktemp "$STATE/.fm-lease-tmp.XXXXXX")
-      printf '%s\t%s\t%s\n' "$ACTOR" "$HOLDER_PID" "$(date +%s)" > "$TMP"
+      write_lease > "$TMP"
       mv -f -- "$TMP" "$LEASE"
     else
       rm -f -- "$TMP"
@@ -158,7 +180,9 @@ case "$CMD" in
     ;;
   check)
     fm_lease_read "$TASK" || exit 1
-    if fm_lease_live "$TASK"; then LIVENESS=live; else LIVENESS=stale; fi
+    lease_rc=0
+    fm_lease_live "$TASK" || lease_rc=$?
+    case "$lease_rc" in 0) LIVENESS=live ;; 1) LIVENESS=stale ;; *) LIVENESS=uncertain ;; esac
     printf '%s %s %s %s\n' "${FM_LEASE_ACTOR:-unreadable}" "${FM_LEASE_PID:-0}" "${FM_LEASE_EPOCH:-0}" "$LIVENESS"
     ;;
   release-actor)

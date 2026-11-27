@@ -47,7 +47,11 @@ fi
 if [ "${1:-}" = "status" ]; then
   if [ ! -e "$LOCK" ] && [ ! -L "$LOCK" ]; then echo "lock: free"; exit 0; fi
   fm_session_lock_read "$LOCK" || {
-    echo "lock: unreadable"
+    if fm_session_owner_mode_active "$STATE"; then
+      echo "lock: uncertain (unreadable owner record)"
+    else
+      echo "lock: unreadable"
+    fi
     exit 0
   }
   old=$FM_SESSION_LOCK_PID
@@ -83,8 +87,7 @@ release_claim_lock() {
 trap release_claim_lock EXIT
 trap 'exit 1' HUP INT TERM
 
-if fm_session_owner_enabled || fm_session_owner_context_present \
-  || [ -e "$LOCK.owner-format" ] || [ -L "$LOCK.owner-format" ]; then
+if fm_session_owner_mode_active "$STATE" || fm_session_owner_context_present; then
   bounded=0
   if [ "${1:-}" = -- ] && [ "$#" -ge 2 ]; then
     bounded=1

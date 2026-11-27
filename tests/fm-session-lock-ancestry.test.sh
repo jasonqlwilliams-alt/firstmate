@@ -263,7 +263,7 @@ make_primary_home() {  # <dir>
 #!/usr/bin/env bash
 if [ "${FM_FIXTURE_ORPHAN_HERE:-0}" = 1 ]; then
   i=0
-  while [ "$i" -lt 200 ] && [ "$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')" != 1 ]; do
+  while [ "$i" -lt 200 ] && [ "$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')" = "$FM_FIXTURE_LAUNCH_PARENT" ]; do
     sleep 0.05
     i=$((i + 1))
   done
@@ -276,7 +276,7 @@ SH
   cat > "$dir/daemon.sh" <<'SH'
 #!/usr/bin/env bash
 i=0
-while [ "$i" -lt 200 ] && [ "$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')" != 1 ]; do
+while [ "$i" -lt 200 ] && [ "$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')" = "$FM_FIXTURE_LAUNCH_PARENT" ]; do
   sleep 0.05
   i=$((i + 1))
 done
@@ -288,17 +288,16 @@ SH
 }
 
 # Start the fixture tree detached from this suite's own process tree: the
-# launcher exits immediately, so the tree is reparented to init and the ancestry
-# walk terminates inside the fixture. Returns once the hook has recorded its exit
+# launcher exits immediately, so the tree is reparented to the OS reaper. Returns once the hook has recorded its exit
 # code.
 run_fixture_tree() {  # <dir> <session-bin> [<daemon-bin>]
   local dir=$1 session_bin=$2 daemon_bin=${3:-} i
   if [ -n "$daemon_bin" ]; then
     FM_HOME="$dir" FM_SESSION_BIN="$session_bin" FM_FIXTURE_ORPHAN_HERE=0 \
-      bash -c '"$0" "$1" &' "$daemon_bin" "$dir/daemon.sh"
+      bash -c 'export FM_FIXTURE_LAUNCH_PARENT=$$; "$0" "$1" &' "$daemon_bin" "$dir/daemon.sh"
   else
     FM_HOME="$dir" FM_FIXTURE_ORPHAN_HERE=1 \
-      bash -c '"$0" "$1" &' "$session_bin" "$dir/session.sh"
+      bash -c 'export FM_FIXTURE_LAUNCH_PARENT=$$; "$0" "$1" &' "$session_bin" "$dir/session.sh"
   fi
   i=0
   while [ "$i" -lt 400 ] && [ ! -s "$dir/state/hook.rc" ]; do
@@ -668,3 +667,375 @@ test_failed_start_lookup_preserves_only_legacy_liveness
 test_failed_renewal_preserves_recorded_start_time
 test_ps_start_time_matches_across_timezones
 test_malformed_records_are_not_owned
+
+launch_owner_home() {
+  local home
+  home=$(lock_home "$1")
+  mkdir -p "$home/config"
+  printf 'launch-v1\n' > "$home/config/session-lock-owner"
+  printf '%s\n' "$home"
+}
+
+owner_fixture_wait() {
+  local file=$1 i
+  for i in $(seq 1 300); do
+    [ ! -e "$file" ] || return 0
+    sleep 0.05
+  done
+  fail "timed out waiting for launch fixture: $file"
+}
+
+test_launch_binding_survives_exec_and_detachment() {
+  local home generation
+  home=$(launch_owner_home launch-detach)
+  mkdir -p "$home/no-ps"
+  printf '#!/bin/sh\nexit 1\n' > "$home/no-ps/ps"
+  chmod +x "$home/no-ps/ps"
+  cat > "$home/driver" <<'SH'
+#!/bin/bash
+set -eu
+. "$FM_BIN/fm-session-lock-lib.sh"
+/bin/ps -o pid=,ppid=,sid=,comm= -p "$$" > "$FM_HOME/ancestry"
+if fm_harness_ancestry_pid > "$FM_HOME/unexpected-ancestry"; then exit 1; fi
+"$FM_BIN/fm-lock.sh" > "$FM_HOME/acquire"
+"$FM_BIN/fm-lock.sh" verify > "$FM_HOME/before"
+exec /bin/bash "$FM_HOME/after-exec"
+SH
+  cat > "$home/after-exec" <<'SH'
+set -eu
+"$FM_BIN/fm-lock.sh" verify > "$FM_HOME/after"
+PATH="$FM_HOME/no-ps:$PATH" setsid -f /bin/bash -c '
+  "$FM_BIN/fm-lock.sh" verify > "$FM_HOME/detached"
+  echo "$?" > "$FM_HOME/detached-status"
+'
+for _ in $(seq 1 200); do
+  if [ -s "$FM_HOME/detached-status" ]; then : > "$FM_HOME/result"; exit 0; fi
+  sleep 0.05
+done
+SH
+  chmod +x "$home/driver"
+  FM_BIN="$ROOT/bin" FM_HOME="$home" setsid -f "$ROOT/bin/fm-session-launch.sh" -- "$home/driver"     </dev/null >"$home/exec.log" 2>&1 || fail "detached launch failed"
+  owner_fixture_wait "$home/result"
+  awk '$1 == $3 && $2 != $1 && $4 !~ /(claude|codex)/ {ok=1} END {exit !ok}' "$home/ancestry"     || fail "T1 fixture did not detach from harness ancestry"
+  [ ! -s "$home/unexpected-ancestry" ] || fail "detached fixture found a harness"
+  [ "$(cat "$home/detached-status")" = 0 ] || fail "detached caller with denied ps lost the lock"
+  generation=$(cat "$home/before")
+  [[ "$generation" =~ ^[0-9a-f]{64}$ ]] || fail "the launch did not publish a versioned generation"
+  cmp -s "$home/before" "$home/after" || fail "exec changed the owner generation"
+  cmp -s "$home/before" "$home/detached" || fail "detached verification changed the owner generation"
+  local verdict attempt
+  for attempt in $(seq 1 100); do
+    verdict=$(FM_HOME="$home" "$ROOT/bin/fm-lock.sh" status)
+    case "$verdict" in 'lock: stale'*) break ;; esac
+    sleep 0.05
+  done
+  assert_contains "$verdict" "lock: stale" "exited launch remains live"
+  pass "session lock: a true detached launch retains one generation across exec and detached tools with denied ps"
+}
+
+test_independent_launches_cannot_share_an_owner() {
+  local home neighbor owner output owner_pid challenger launch="$ROOT/bin/fm-session-launch.sh"
+  home=$(launch_owner_home competing-launches)
+  neighbor=$(launch_owner_home second-home)
+  FM_HOME="$home" FM_BIN="$ROOT/bin" FM_NEIGHBOR="$neighbor" "$launch" -- /bin/bash -ec '
+    /bin/ps -o pid=,ppid=,sid= -p "$$" > "$FM_HOME/a.ps"
+    "$FM_BIN/fm-lock.sh"
+    "$FM_BIN/fm-lock.sh" verify > "$FM_HOME/a.generation"
+    if FM_HOME="$FM_NEIGHBOR" "$FM_BIN/fm-lock.sh"; then exit 4; fi
+    "$FM_BIN/fm-session-launch.sh" --home "$FM_NEIGHBOR" -- /bin/bash -ec '\''
+      [ "$FM_SESSION_OWNER_HOME" = "$FM_HOME" ]
+      "$FM_BIN/fm-lock.sh"
+    '\''
+    : > "$FM_HOME/owner-ready"
+    while [ ! -e "$FM_HOME/owner-exit" ]; do sleep 0.05; done
+    "$FM_BIN/fm-lock.sh" verify > "$FM_HOME/renewed"
+  ' > "$home/a.out" 2>&1 &
+  owner=$!
+  OWNER_RECORD_PIDS="${OWNER_RECORD_PIDS:-} $owner"
+  owner_fixture_wait "$home/owner-ready"
+  FM_HOME="$home" FM_BIN="$ROOT/bin" "$launch" -- "$CODEX_FIXTURE" -c '
+    /bin/ps -o pid=,ppid=,sid= -p "$$" > "$FM_HOME/b.ps"
+    "$FM_BIN/fm-lock.sh"; rc=$?
+    exit "$rc"
+  ' > "$home/b.out" 2>&1 &
+  challenger=$!
+  if wait "$challenger"; then fail "two independent sibling launches acquired one home"; fi
+  output=$(cat "$home/b.out")
+  assert_contains "$output" "another live firstmate session holds the lock" "known name replaced a live launch"
+  [ "$(awk '{print $2, $3}' "$home/a.ps")" = "$(awk '{print $2, $3}' "$home/b.ps")" ]     || fail "competitors did not share a live parent and SID"
+  owner_pid=$(awk '{print $1}' "$home/a.ps")
+  kill -STOP "$owner_pid" || fail "could not stop the disposable owner"
+  assert_contains "$(FM_HOME="$home" "$ROOT/bin/fm-lock.sh" status)" "held by live launch" "a stopped owner was treated as stale"
+  kill -CONT "$owner_pid" || fail "could not resume the disposable owner"
+  if FM_HOME="$home" FM_BIN="$ROOT/bin" "$CODEX_FIXTURE" -c '"$FM_BIN/fm-lock.sh"; exit $?'; then
+    fail "a transient harness name supplied launch authority"
+  fi
+  : > "$home/owner-exit"
+  wait "$owner" || fail "owner fixture failed: $(cat "$home/a.out")"
+  cmp -s "$home/a.generation" "$home/renewed" || fail "renewal changed the generation"
+  FM_HOME="$home" FM_BIN="$ROOT/bin" "$launch" -- "$CODEX_FIXTURE" -ec '
+    "$FM_BIN/fm-lock.sh"
+    : > "$FM_HOME/known-ready"
+    while [ ! -e "$FM_HOME/known-exit" ]; do sleep 0.05; done
+  ' > "$home/known.out" 2>&1 &
+  owner=$!
+  OWNER_RECORD_PIDS="${OWNER_RECORD_PIDS:-} $owner"
+  owner_fixture_wait "$home/known-ready"
+  output=$(FM_HOME="$home" "$launch" -- "$ROOT/bin/fm-lock.sh" 2>&1) \
+    && fail "an unnamed launch replaced a known-harness owner"
+  assert_contains "$output" "another live firstmate session holds the lock" "known-harness ownership was not protected"
+  : > "$home/known-exit"
+  wait "$owner" || fail "known-harness owner fixture failed"
+  output=$(FM_HOME="$home" "$ROOT/bin/fm-lock.sh" -- /bin/bash -c 'exit 0') || fail "bounded acquisition failed after owner exit"
+  assert_contains "$output" "lock acquired: startup pid" "the bounded command did not use startup scope"
+  assert_contains "$(FM_HOME="$home" "$ROOT/bin/fm-lock.sh" status)" "lock: stale" "bounded command kept authority"
+  pass "session lock: sibling launches contend, stopped owners stay live and a nested home gets a fresh binding"
+}
+
+if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then
+  test_launch_binding_survives_exec_and_detachment
+  test_independent_launches_cannot_share_an_owner
+fi
+
+test_unreadable_lifetime_does_not_allow_takeover() {
+  local home proc owner verdict output
+  home=$(launch_owner_home unreadable-lifetime)
+  proc="$home/proc"
+  mkdir -p "$proc/sys/kernel/random"
+  ln -s /proc/sys/kernel/random/boot_id "$proc/sys/kernel/random/boot_id"
+  FM_HOME="$home" FM_BIN="$ROOT/bin" FM_SUPERVISION_ACTOR=main "$ROOT/bin/fm-session-launch.sh" -- /bin/bash -ec '
+    "$FM_BIN/fm-lock.sh"
+    "$FM_BIN/fm-lease.sh" claim fixture
+    : > "$FM_HOME/owner-ready"
+    while [ ! -e "$FM_HOME/owner-exit" ]; do sleep 0.05; done
+  ' > "$home/owner.out" 2>&1 &
+  owner=$!
+  OWNER_RECORD_PIDS="${OWNER_RECORD_PIDS:-} $owner"
+  owner_fixture_wait "$home/owner-ready"
+  verdict=$(FM_HOME="$home" FM_PROC_ROOT_OVERRIDE="$proc" "$ROOT/bin/fm-lock.sh" status)
+  assert_contains "$verdict" "lock: uncertain" "an unavailable live start token was reported stale"
+  verdict=$(FM_HOME="$home" FM_PROC_ROOT_OVERRIDE="$proc" FM_SUPERVISION_ACTOR=main "$ROOT/bin/fm-lease.sh" check fixture)
+  assert_contains "$verdict" "uncertain" "a lease with uncheckable liveness was reported stale"
+  output=$(FM_HOME="$home" FM_BIN="$ROOT/bin" "$ROOT/bin/fm-session-launch.sh" -- /bin/bash -ec '
+    mkdir -p "$FM_HOME/proc/$$"
+    ln -s "/proc/$$/stat" "$FM_HOME/proc/$$/stat"
+    FM_PROC_ROOT_OVERRIDE="$FM_HOME/proc" "$FM_BIN/fm-lock.sh"
+  ' 2>&1) && fail "liveness uncertainty allowed a takeover"
+  assert_contains "$output" "cannot verify liveness of recorded session owner" "the rejected contender did not reach the owner liveness probe"
+  [ -f "$home/state/.lease-fixture" ] || fail "the active lease was removed"
+  : > "$home/owner-exit"
+  wait "$owner" || fail "disposable lease owner failed"
+  pass "session lock: an unreadable live process remains occupied and preserves its lease"
+}
+
+install_publication_interrupter() {
+  cat > "$1" <<'JS'
+const fs = require("node:fs");
+const path = require("node:path");
+const originalRename = fs.renameSync;
+fs.renameSync = (from, to) => {
+  const phase = process.env.FM_TEST_RENAME_PHASE;
+  const name = path.basename(to);
+  const ownProof = ".lock.owner." + process.env.FM_SESSION_OWNER_PID;
+  const oldProof = ".lock.owner." + process.env.FM_TEST_OLD_PID;
+  if (!phase || !process.argv[1]?.endsWith("fm-session-owner-publish.mjs") ||
+      !(phase === name || (phase === "new-proof" && name === ownProof) ||
+        (phase === "legacy-proof" && name === oldProof))) {
+    return originalRename(from, to);
+  }
+  if (process.env.FM_TEST_INTERRUPTION === "after") originalRename(from, to);
+  fs.writeFileSync(process.env.FM_HOME + "/paused-publisher", String(process.pid) + "\n");
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20_000);
+  if (process.env.FM_TEST_INTERRUPTION === "before") originalRename(from, to);
+};
+require("node:module").syncBuiltinESMExports();
+JS
+}
+
+test_interrupted_publication_leaves_a_recoverable_record() {
+  local home phase timing attempt publisher old out competitor
+  for timing in before after; do
+    for phase in legacy-proof .lock.owner-format new-proof .lock; do
+      home=$(launch_owner_home "crash-${timing}-${phase}")
+      # Seed actual legacy ownership with an ended lifetime. Keep that PID
+      # as the commit pointer until the publisher renames the new PID line.
+      lock_as_harness_without_gate() { # <fixture home>
+        mv "$1/config/session-lock-owner" "$1/gate"
+        lock_as_harness "$1" >/dev/null || return 1
+        mv "$1/gate" "$1/config/session-lock-owner"
+      }
+      lock_as_harness_without_gate "$home" || fail "could not establish a legacy record for crash test"
+      old=$(cat "$home/state/.lock")
+      install_publication_interrupter "$home/pause.cjs"
+      FM_HOME="$home" FM_BIN="$ROOT/bin" FM_TEST_OLD_PID="$old" \
+        FM_TEST_RENAME_PHASE="$phase" FM_TEST_INTERRUPTION="$timing" \
+        NODE_OPTIONS="--require=\"$home/pause.cjs\"" "$ROOT/bin/fm-session-launch.sh" -- /bin/bash -c '
+          "$FM_BIN/fm-lock.sh" && exit 4
+          : > "$FM_HOME/interrupted"
+          while [ ! -e "$FM_HOME/resume-driver" ]; do sleep 0.05; done
+          "$FM_BIN/fm-lock.sh" verify
+        ' > "$home/attempt.out" 2>&1 &
+      attempt=$!
+      OWNER_RECORD_PIDS="${OWNER_RECORD_PIDS:-} $attempt"
+      owner_fixture_wait "$home/paused-publisher"
+      publisher=$(cat "$home/paused-publisher")
+      out=$(FM_HOME="$home" "$ROOT/bin/fm-lock.sh" status)
+      case "$out" in 'lock: stale'*|'lock: held by live launch'*) ;; *) fail "torn status during $timing $phase: $out" ;; esac
+      competitor=
+      if [ "$phase:$timing" != .lock:after ]; then
+        FM_HOME="$home" "$ROOT/bin/fm-lock.sh" -- /bin/bash -c ': > "$FM_HOME/competitor-admitted"' \
+          > "$home/competitor.out" 2>&1 &
+        competitor=$!
+        OWNER_RECORD_PIDS="${OWNER_RECORD_PIDS:-} $competitor"
+        sleep 0.2
+        [ ! -e "$home/competitor-admitted" ] || fail "an entrant bypassed the publication mutex"
+      elif FM_HOME="$home" "$ROOT/bin/fm-lock.sh" -- true; then
+        fail "another launch entered while the committed owner was live"
+      fi
+      if [ -n "$competitor" ]; then
+        cmp -s "$home/state/.lock" <(printf '%s\n' "$old") || fail "publication exposed a partial PID line"
+      fi
+      kill -KILL "$publisher" || fail "could not stop disposable publisher at $timing $phase"
+      owner_fixture_wait "$home/interrupted"
+      if [ "$phase:$timing" = .lock:after ]; then
+        cmp -s "$home/state/.lock" <(printf '%s\n' "$attempt") || fail "committed PID is torn"
+        assert_contains "$(FM_HOME="$home" "$ROOT/bin/fm-lock.sh" status)" "held by live launch" "the committed owner disappeared"
+        if FM_HOME="$home" "$ROOT/bin/fm-lock.sh" -- true; then fail "another launch entered after commit"; fi
+        : > "$home/resume-driver"
+        wait "$attempt" || fail "interrupted publisher's committed session could not renew"
+      else
+        wait "$competitor" || fail "interrupted replacement was not recoverable: $(cat "$home/competitor.out")"
+        : > "$home/resume-driver"
+        if wait "$attempt"; then fail "uncommitted launch obtained authority after takeover"; fi
+      fi
+    done
+  done
+  pass "session lock: a killed publisher at each different-PID commit boundary leaves one recoverable owner"
+}
+
+test_same_pid_reuse_commits_at_the_proof() {
+  local home timing publisher attempt pid out
+  for timing in before after; do
+    home=$(launch_owner_home "same-pid-$timing")
+    install_publication_interrupter "$home/pause.cjs"
+    FM_HOME="$home" FM_BIN="$ROOT/bin" FM_TEST_INTERRUPTION="$timing" "$ROOT/bin/fm-session-launch.sh" -- /bin/bash -ec '
+      "$FM_BIN/fm-lock.sh"
+      proof="$FM_HOME/state/.lock.owner.$$"
+      awk -F "\t" '\''BEGIN {OFS="\t"} {sub(/:[0-9]+$/, ":0", $3); print}'\'' "$proof" > "$proof.fixture"
+      mv "$proof.fixture" "$proof"
+      export FM_TEST_RENAME_PHASE=new-proof NODE_OPTIONS="--require=\"$FM_HOME/pause.cjs\""
+      if "$FM_BIN/fm-lock.sh"; then exit 4; fi
+      : > "$FM_HOME/interrupted"
+      while [ ! -e "$FM_HOME/resume-driver" ]; do sleep 0.05; done
+      unset FM_TEST_RENAME_PHASE NODE_OPTIONS
+      "$FM_BIN/fm-lock.sh"
+      "$FM_BIN/fm-lock.sh" verify
+    ' > "$home/attempt.out" 2>&1 &
+    attempt=$!
+    OWNER_RECORD_PIDS="${OWNER_RECORD_PIDS:-} $attempt"
+    owner_fixture_wait "$home/paused-publisher"
+    publisher=$(cat "$home/paused-publisher")
+    pid=$(cat "$home/state/.lock")
+    [ "$attempt" = "$pid" ] || fail "same-PID fixture changed the PID line"
+    out=$(FM_HOME="$home" "$ROOT/bin/fm-lock.sh" status)
+    if [ "$timing" = before ]; then
+      assert_contains "$out" "lock: stale" "the fixture start mismatch was not proof of PID reuse"
+    else
+      assert_contains "$out" "held by live launch" "an atomically replaced same-PID proof was not visible"
+    fi
+    kill -KILL "$publisher" || fail "could not stop disposable same-PID publisher"
+    owner_fixture_wait "$home/interrupted"
+    : > "$home/resume-driver"
+    wait "$attempt" || fail "the current launch could not resume same-PID recovery: $(cat "$home/attempt.out")"
+  done
+  pass "session lock: same-PID takeover commits at the proof rename and survives an interrupted publisher"
+}
+
+if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then
+  test_unreadable_lifetime_does_not_allow_takeover
+  test_interrupted_publication_leaves_a_recoverable_record
+  test_same_pid_reuse_commits_at_the_proof
+fi
+
+test_dead_launch_cannot_authorize_its_detached_child() {
+  local home owner
+  home=$(launch_owner_home orphaned-tool)
+  cat > "$home/executor" <<'SH'
+#!/bin/bash
+set -eu
+: > "$FM_HOME/executor-present"
+for _ in $(seq 1 300); do [ ! -e "$FM_HOME/run-executor" ] || break; sleep 0.05; done
+rc=0
+"$FM_BIN/fm-watch-arm.sh" > "$FM_HOME/tool-output" 2>&1 || rc=$?
+printf '%s\n' "$rc" > "$FM_HOME/tool-status"
+SH
+  chmod +x "$home/executor"
+  FM_HOME="$home" FM_BIN="$ROOT/bin" "$ROOT/bin/fm-session-launch.sh" -- /bin/bash -ec '
+    "$FM_BIN/fm-lock.sh"
+    setsid -f "$FM_HOME/executor" </dev/null >/dev/null 2>&1
+    while :; do sleep 0.05; done
+  ' > "$home/owner.out" 2>&1 &
+  owner=$!
+  OWNER_RECORD_PIDS="${OWNER_RECORD_PIDS:-} $owner"
+  owner_fixture_wait "$home/executor-present"
+  kill -KILL "$owner" || fail "could not kill the disposable launch anchor"
+  wait "$owner" 2>/dev/null || true
+  FM_HOME="$home" "$ROOT/bin/fm-lock.sh" -- true || fail "SIGKILL did not release the dead launch"
+  : > "$home/run-executor"
+  owner_fixture_wait "$home/tool-status"
+  [ "$(cat "$home/tool-status")" -ne 0 ] || fail "detached child mutated after losing its launch anchor"
+  assert_grep "session launch no longer owns this home" "$home/tool-output" "detached child did not hit the ownership fence"
+  pass "session lock: a reparented executor loses mutation authority on anchor SIGKILL"
+}
+
+if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then
+  test_dead_launch_cannot_authorize_its_detached_child
+fi
+
+test_daemon_adapter_binds_the_continuing_process() {
+  local home wrapper
+  home=$(launch_owner_home daemon-adapter)
+  cat > "$home/engine.mjs" <<'JS'
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
+const lock = process.env.FM_BIN + "/fm-lock.sh";
+const call = (...args) => spawnSync(lock, args, { encoding: "utf8" });
+assert.notEqual(process.env.FM_SESSION_OWNER_PID, String(process.pid));
+assert.notEqual(call("verify").status, 0, "the foreground wrapper has exited");
+const initial = process.env.FM_SESSION_OWNER_ID;
+const result = call("bind-engine", String(process.pid));
+assert.equal(result.status, 0, result.stderr);
+const fields = ["HOME", "PID", "START", "ID", "KIND"];
+result.stdout.trimEnd().split("\n").forEach((value, i) => {
+  process.env["FM_SESSION_OWNER_" + fields[i]] = value;
+});
+assert.equal(process.env.FM_SESSION_OWNER_KIND, "native");
+assert.notEqual(process.env.FM_SESSION_OWNER_ID, initial);
+const acquired = call();
+assert.equal(acquired.status, 0, acquired.stderr);
+const verified = call("verify", String(process.pid));
+assert.equal(verified.status, 0, verified.stderr);
+writeFileSync(process.env.FM_HOME + "/native-generation", verified.stdout);
+JS
+  FM_HOME="$home" FM_BIN="$ROOT/bin" "$ROOT/bin/fm-session-launch.sh" -- /bin/bash -ec '
+    "$FM_BIN/fm-lock.sh"
+    "$FM_BIN/fm-lock.sh" verify > "$FM_HOME/wrapper-generation"
+    setsid -f /bin/bash -c '\''
+      for _ in $(seq 1 300); do [ ! -e "$FM_HOME/parent-exited" ] || break; sleep 0.05; done
+      exec node "$FM_HOME/engine.mjs"
+    '\'' </dev/null > "$FM_HOME/engine.out" 2>&1
+  ' > "$home/wrapper.out" 2>&1 &
+  wrapper=$!
+  wait "$wrapper" || fail "foreground wrapper fixture failed"
+  : > "$home/parent-exited"
+  owner_fixture_wait "$home/native-generation"
+  if cmp -s "$home/wrapper-generation" "$home/native-generation"; then
+    fail "the daemonizing adapter inherited its finished wrapper generation"
+  fi
+  pass "session lock: a daemonizing adapter binds the continuing engine on its ready callback"
+}
+
+if command -v node >/dev/null 2>&1 && [ "$(uname -s)" = Linux ]; then
+  test_daemon_adapter_binds_the_continuing_process
+fi
