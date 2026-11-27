@@ -180,7 +180,17 @@ $ fm_composer_classify_screen "styled=1 cursor=1 identity=1" "$screen" 8 "pi<TAB
 pending
 ```
 
-The capture notes leave agy's live wrapping behavior and the exact tmux palette code for the mode hint unmeasured.
+Measured 2026-11-27 with Antigravity CLI 1.5.18 in a private 80x30 tmux 3.7c server, with network egress blocked and a private home, by [`tests/fm-agy-composer-live-e2e.test.sh`](../../tests/fm-agy-composer-live-e2e.test.sh): under tmux the first-use mode hint is palette colour `38;5;103` and the `>` glyph is `38;5;111`, not the truecolor values above.
+That row therefore reads `pending` on tmux, so the doorbell refuses an agy pane on tmux until its first input clears the hint:
+
+```
+$ FM_AGY_COMPOSER_LIVE=1 bash tests/fm-agy-composer-live-e2e.test.sh
+# agy 1.5.18 launched with no network egress and a private home
+not ok - agy (1.5.18): idle composer never classified empty (last verdict: pending)
+```
+
+The redacted screen is [`tests/fixtures/agy-composer/tmux-first-use-1.5.18.ansi`](../../tests/fixtures/agy-composer/tmux-first-use-1.5.18.ansi), with the cursor at column 2, row 27.
+The guard types only after an `empty` verdict, so agy's live wrapping of long input remains unmeasured.
 [`tests/fm-composer-lib.test.sh`](../../tests/fm-composer-lib.test.sh) uses the recorded rows and truecolor values to check the classifier's verdicts, including refusal on plain-text and multirow captures.
 [`tests/fm-task-inbox.test.sh`](../../tests/fm-task-inbox.test.sh) uses an agy-shaped stub in a real tmux server to check screen refusals and the one-row fit boundary for the path-bearing notice.
 Its 80-column regression scaffolds a brief with a symlink alias for a UTF-8 inbox path, checks launch-brief precedence, and verifies that the stub submits the exact short notice and acknowledges the queued record.

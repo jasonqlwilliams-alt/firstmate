@@ -139,7 +139,10 @@ capture_styled() { tmux -L "$SOCKET" capture-pane -e -p -t "$WIN" 2>/dev/null; }
 save_capture() {  # <name>
   [ -n "$CAPTURE_DIR" ] || return 0
   mkdir -p "$CAPTURE_DIR"
-  capture_styled | sed \
+  # agy's banner shows the signed-in account address, so mail addresses go
+  # first, before the user-name pass could leave part of one behind.
+  capture_styled | sed -E \
+    -e 's#[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]+#<email>#g' \
     -e "s#$WORK#<private>#g" -e "s#$REAL_HOME#<home>#g" \
     -e "s#$REAL_USER#<user>#g" -e "s#$REAL_HOST#<host>#g" > "$CAPTURE_DIR/$1.ansi"
   tmux -L "$SOCKET" display-message -p -t "$WIN" '#{cursor_x} #{cursor_y} #{pane_width}x#{pane_height}' \
