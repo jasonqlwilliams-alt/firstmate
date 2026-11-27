@@ -1,0 +1,34 @@
+Product warnings from local Linux tmux 3.7c and synthetic Firstmate records
+foreground tmux server or unrelated control pane [err] warning: leaving tmux window foreground:fm-target open: teardown was launched by the target tmux server
+missing window with similar name [err] warning: leaving tmux window endpoint.v2 #S,} #[blue] safety:fm-prefix open: cannot verify the exact window and its pane inventory
+missing pane PID [err] warning: leaving tmux window endpoint.v2 #S,} #[blue] safety:fm-target open: cannot verify the exact window and its pane inventory
+unreadable row with duplicate names [err] warning: leaving tmux window endpoint.v2 #S,} #[blue] safety:fm-target open: cannot verify the exact window and its pane inventory
+unreadable caller ancestry [err] warning: leaving tmux window endpoint.v2 #S,} #[blue] safety:fm-target open: cannot verify teardown caller ancestry
+background caller in inactive pane [err] warning: leaving tmux window endpoint.v2 #S,} #[blue] safety:fm-target open: pane PID 1981969 is teardown or its ancestor
+reparented caller with the platform branch set to Darwin [err] warning: leaving tmux window endpoint.v2 #S,} #[blue] safety:fm-target open: pane %4 uses teardown's controlling terminal /dev/pts/46
+daemonized tmux server job [err] warning: leaving tmux window endpoint.v2 #S,} #[blue] safety:fm-target open: teardown was launched by the target tmux server
+launch pane marker [err] warning: leaving tmux window endpoint.v2 #S,} #[blue] safety:fm-target open: it contains teardown's launch pane %4
+late split [err] warning: tmux window endpoint.v2 #S,} #[blue] safety:fm-target close could not be confirmed against the verified window and pane snapshot
+late window rename [err] warning: tmux window endpoint.v2 #S,} #[blue] safety:fm-target close could not be confirmed against the verified window and pane snapshot
+late window move [err] warning: tmux window endpoint.v2 #S,} #[blue] safety:fm-target close could not be confirmed against the verified window and pane snapshot
+late link creates duplicate [err] warning: tmux window endpoint.v2 #S,} #[blue] safety:fm-target close could not be confirmed against the verified window and pane snapshot
+client alias in place of the recorded session [err] warning: leaving tmux window client-2029350:fm-target open: cannot verify the exact window and its pane inventory
+late session rename [err] warning: tmux window endpoint.v2 #S,} #[blue] safety:fm-target close could not be confirmed against the verified window and pane snapshot
+forced secondmate with one late split [err] warning: tmux window endpoint.v2 #S,} #[blue] safety:fm-changed close could not be confirmed against the verified window and pane snapshot
+
+Verified windows, panes, and records from the private-server cases
+ok - fm-teardown: a foreground-server job leaves its originating window open
+ok - fm-teardown: a different pane session can close the recorded target
+ok - fm-teardown: missing exact windows and unreadable pane PIDs prevent the tmux close
+ok - fm-teardown: blank inventory rows cannot hide a same-named window
+ok - fm-teardown: unreadable caller ancestry prevents the tmux close
+ok - fm-teardown: a background caller in the inactive tmux pane survives and cleanup finishes
+ok - fm-teardown: the controlling terminal protects a reparented background caller
+ok - fm-teardown: a server-launched job leaves its originating window open
+ok - fm-teardown: the launch pane marker protects a pane outside caller ancestry
+ok - fm-teardown: tmux refuses a close when the verified pane inventory changes
+ok - fm-teardown: tmux refuses a close after a window rename or session move
+ok - fm-teardown: tmux refuses a close when a second exact-name window is linked before it
+ok - fm-teardown: tmux preserves the attached window when its recorded session name is wrong or changes
+ok - fm-teardown: exact tmux cleanup preserves invalid and prefix-matched neighbors while removing only the recorded target
+ok - fm-teardown: forced cleanup preserves a changed child and closes the unchanged child

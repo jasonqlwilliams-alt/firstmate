@@ -1,0 +1,30 @@
+Local Linux with tmux 3.7c
+Disposable tmux server and scout record per revision
+A background job runs bin/fm-teardown.sh target --force from the inactive split with TMUX and TMUX_PANE cleared.
+
+Base 86a565ae333826e488621eb87177596508835b3c
+Caller %2 active=0 tty=/dev/pts/41 size=100x13
+Before teardown
+@0 control panes=1
+@1 fm-target panes=2
+After teardown
+@0 control panes=1
+Task record present True
+Caller signal SIGHUP
+Private tmux server exited with status 0
+
+Target 8d5a744d80b129f56c2a0522f0cc33caf360943a
+Caller %2 active=0 tty=/dev/pts/41 size=100x13
+Before teardown
+@0 control panes=1
+@1 fm-target panes=2
+After teardown
+@0 control panes=1
+@1 fm-target panes=2
+Task record present False
+Caller signal none observed
+Surviving caller pane (excerpt)
+caller launched teardown in the background
+warning: leaving tmux window safety:fm-target open: pane PID 1824055 is teardown or its ancestor
+teardown_exit=0
+Private tmux server exited with status 0
