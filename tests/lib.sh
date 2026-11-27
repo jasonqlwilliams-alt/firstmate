@@ -144,12 +144,6 @@ fm_test_prepend_lavish_fixture() {
 
 FM_TEST_CLEANUP_DIRS=()
 
-fm_test_pid_identity() {
-  local pid=$1
-  FM_STATE_OVERRIDE="${TMPDIR:-/tmp}" bash -c \
-    '. "$1"; fm_pid_identity "$2"' _ "$ROOT/bin/fm-wake-lib.sh" "$pid"
-}
-
 fm_test_stale_start_token() {
   local stale ticks
   case "$1" in
@@ -311,10 +305,9 @@ if [ "${FM_TEST_FIXTURE_REAPER_CHILD:-0}" != 1 ]; then
 
   FM_TEST_OWNED_TREEHOUSE=
   if [ -z "${FM_TEST_TREEHOUSE_DIR:-}" ] || [ ! -f "$FM_TEST_TREEHOUSE_DIR/.fm-test-treehouse" ]; then
-    fm_test_treehouse_setup || fail "cannot create a Treehouse test directory"
+    fm_test_treehouse_setup "$$" "$FM_TEST_OWNER_IDENTITY" || fail "cannot create a Treehouse test directory"
     FM_TEST_OWNED_TREEHOUSE=$FM_TEST_TREEHOUSE_DIR
-    if ! fm_test_track_treehouse_scratch "$FM_TEST_TREEHOUSE_DIR" ||
-      ! printf '%s\n%s\n' "$$" "$FM_TEST_OWNER_IDENTITY" > "$FM_TEST_TREEHOUSE_DIR/.fm-test-fixture"; then
+    if ! fm_test_track_treehouse_scratch "$FM_TEST_TREEHOUSE_DIR"; then
       fm_test_treehouse_remove "$FM_TEST_TREEHOUSE_DIR"
       fail "cannot register the Treehouse test directory for cleanup"
     fi

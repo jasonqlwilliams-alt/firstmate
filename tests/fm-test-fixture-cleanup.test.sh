@@ -190,11 +190,23 @@ test_fixture_registration_failure_rolls_back_root() {
   pass "failed fixture registration rolls back the new root"
 }
 
+start_suite_for_orphan_sweep() (
+  export TMPDIR="$1" FM_TEST_STALE_TREEHOUSE_DIR="${2:-}"
+  stat() {
+    case "${!#}" in
+      "$TMPDIR"/*|"$FM_TEST_STALE_TREEHOUSE_DIR/.fm-test-fixture") command stat "$@" ;;
+      *) return 1 ;;
+    esac
+  }
+  export -f stat
+  FM_TEST_SKIP_ORPHAN_REAP=0 FM_TEST_ORPHAN_MAX_AGE_SECONDS=3600 bash -ec '. "$1"' _ "$LIB"
+)
+
 test_orphan_sweep_respects_fixture_ownership() {
   local harness dirfile active_dir stale_dir fresh_dir pid tries
   harness=$(fm_test_tmproot fm-test-cleanup-orphan-harness)
   dirfile="$harness/active-dir"
-  bash -c '
+  TMPDIR="$harness" bash -c '
     # shellcheck source=tests/lib.sh
     . "'"$LIB"'"
     d=$(fm_test_tmproot fm-test-cleanup-active)
@@ -212,17 +224,13 @@ test_orphan_sweep_respects_fixture_ownership() {
   active_dir=$(cat "$dirfile")
   touch -t 202001010000 "$active_dir/.fm-test-fixture"
 
-  stale_dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-test-cleanup-stale.XXXXXX")
+  stale_dir=$(mktemp -d "$harness/fm-test-cleanup-stale.XXXXXX")
   printf '%s\n%s\n' "$$" reused-process-identity > "$stale_dir/.fm-test-fixture"
   touch -t 202001010000 "$stale_dir/.fm-test-fixture"
-  fresh_dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-test-cleanup-fresh.XXXXXX")
+  fresh_dir=$(mktemp -d "$harness/fm-test-cleanup-fresh.XXXXXX")
   : > "$fresh_dir/.fm-test-fixture"
 
-  bash -c '
-    # shellcheck source=tests/lib.sh
-    . "'"$LIB"'"
-    fm_test_reap_orphans "$TMPDIR"
-  '
+  start_suite_for_orphan_sweep "$harness" || fail "the next suite did not start"
 
   assert_absent "$stale_dir" \
     "a stale fixture root whose PID was reused by another process was not reaped"
@@ -239,8 +247,9 @@ test_orphan_sweep_respects_fixture_ownership() {
 }
 
 test_orphan_sweep_reaps_read_only_package_tree() {
-  local stale_dir package_dir
-  stale_dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-test-cleanup-read-only.XXXXXX")
+  local harness stale_dir package_dir
+  harness=$(fm_test_tmproot fm-test-cleanup-read-only-harness)
+  stale_dir=$(mktemp -d "$harness/fm-test-cleanup-read-only.XXXXXX")
   package_dir="$stale_dir/packages/extension"
   mkdir -p "$package_dir"
   printf '%s\n%s\n' "$$" reused-process-identity > "$stale_dir/.fm-test-fixture"
@@ -248,11 +257,7 @@ test_orphan_sweep_reaps_read_only_package_tree() {
   chmod -R a-w "$stale_dir/packages"
   touch -t 202001010000 "$stale_dir/.fm-test-fixture"
 
-  bash -c '
-    # shellcheck source=tests/lib.sh
-    . "$1"
-    fm_test_reap_orphans "$TMPDIR"
-  ' _ "$LIB"
+  start_suite_for_orphan_sweep "$harness" || fail "the next suite did not start"
 
   assert_absent "$stale_dir" \
     "the orphan reaper left a stale fixture containing a read-only package tree"
@@ -282,9 +287,8 @@ test_orphan_sweep_reaps_standalone_treehouse_scratch() {
   scratch=$(cat "$receipt")
   assert_present "$scratch/slot/file" "scratch fixture must survive SIGKILL before the sweep"
 
-  TMPDIR="$harness" FM_TEST_ORPHAN_MAX_AGE_SECONDS=0 FM_TEST_SKIP_ORPHAN_REAP=1 \
-    bash -ec '. "$1"; fm_test_reap_orphans "$(dirname "$2")" "$(basename "$2")"' \
-    _ "$LIB" "$(dirname "$scratch")" || fail "the next suite failed to run its orphan sweep"
+  touch -t 202001010000 "${scratch%/pool}/.fm-test-fixture" || fail "could not age the stale scratch record"
+  start_suite_for_orphan_sweep "$harness" "${scratch%/pool}" || fail "the next suite did not start"
   assert_absent "$scratch" "the orphan sweep missed a killed suite's Treehouse scratch root"
   pass "the orphan sweep reclaims standalone Treehouse pools after SIGKILL"
 }

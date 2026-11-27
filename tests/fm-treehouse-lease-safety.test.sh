@@ -22,9 +22,7 @@ FM_TEST_REAL_TREEHOUSE=$TREEHOUSE_BIN
 export FM_TEST_REAL_TREEHOUSE FM_TEST_CWD="$TMP_ROOT/cwd" FM_TEST_PROJECT="$PROJECT" FM_TEST_TREEHOUSE_CALLS="$TMP_ROOT/treehouse-calls"
 cat > "$FAKEBIN/treehouse" <<'EOF'
 #!/usr/bin/env bash
-if [ "${1:-}" != --version ]; then
-  printf '%s\n' "$*" >> "$FM_TEST_TREEHOUSE_CALLS"
-fi
+printf '%s\n' "$*" >> "$FM_TEST_TREEHOUSE_CALLS"
 if [ "${FM_TEST_ABORT_MODE:-}" = refresh-abort ] && [ "${1:-}" = get ]; then
   shift
   exec "$FM_TEST_REAL_TREEHOUSE" get --no-fetch "$@"

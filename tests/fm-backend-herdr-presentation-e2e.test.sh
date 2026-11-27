@@ -18,7 +18,6 @@ command -v treehouse >/dev/null 2>&1 || { echo "skip: treehouse not found"; exit
 
 TMP_ROOT=$(fm_test_tmproot fm-herdr-presentation) || fail 'could not create the presentation fixture'
 REAL_TREEHOUSE=$(command -v treehouse)
-TREEHOUSE_BACKEND=$REAL_TREEHOUSE
 HERDR_ORIGINAL_PATH="$TMP_ROOT/treehouse-bin:$PATH"
 FAKEBIN="$TMP_ROOT/fakebin"
 TREEHOUSE_RECORDER="$TMP_ROOT/treehouse-bin/treehouse"
@@ -36,7 +35,7 @@ fm_test_track_task_tmps "$FAKEBIN"
 : > "$MOVE_CALL_LOG"
 : > "$FOCUS_AUDIT_LOG"
 REAL_MOVER="$ROOT/bin/backends/herdr-workspace-move.py"
-export TREEHOUSE_BACKEND REAL_MOVER HERDR_CALL_LOG TREEHOUSE_CALL_LOG TREEHOUSE_LOCK_DIR MOVE_CALL_LOG FOCUS_AUDIT_LOG HERDR_ORIGINAL_PATH HERDR_LAB_HELPER
+export REAL_TREEHOUSE REAL_MOVER HERDR_CALL_LOG TREEHOUSE_CALL_LOG TREEHOUSE_LOCK_DIR MOVE_CALL_LOG FOCUS_AUDIT_LOG HERDR_ORIGINAL_PATH HERDR_LAB_HELPER
 export ACTIVE_SEEDED_CONTROL POST_CREATE_ABORT_CONTROL TMP_ROOT
 
 # Log every production-adapter call, remove its already-validated trailing
@@ -212,9 +211,6 @@ SH
 cat > "$TREEHOUSE_RECORDER" <<'SH'
 #!/usr/bin/env bash
 set -u
-if [ "${1:-}" = --version ]; then
-  exec "$TREEHOUSE_BACKEND" "$@"
-fi
 {
   first=1
   for arg in "$@"; do
@@ -236,7 +232,7 @@ done
 release_treehouse_lock() { rmdir "$TREEHOUSE_LOCK_DIR" 2>/dev/null || true; }
 trap release_treehouse_lock EXIT
 trap 'exit 1' HUP INT TERM
-"$TREEHOUSE_BACKEND" "$@"
+"$REAL_TREEHOUSE" "$@"
 exit $?
 SH
 

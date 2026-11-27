@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 
+fm_test_pid_identity() {
+  local pid=$1
+  FM_STATE_OVERRIDE="${TMPDIR:-/tmp}" bash -c \
+    '. "$1"; fm_pid_identity "$2"' _ "$ROOT/bin/fm-wake-lib.sh" "$pid"
+}
+
 fm_test_treehouse_remove() {
   local dir=${1:-}
   [ -n "$dir" ] && [ -e "$dir" ] || return 0
@@ -24,6 +30,10 @@ fm_test_treehouse_setup() {
   dir=$(umask 077; mktemp -d "${parent%/}/fm-test-treehouse.XXXXXX") || return 1
   if ! touch "$dir/.fm-test-treehouse" || ! mkdir "$dir/pool"; then
     rm -rf -- "$dir"
+    return 1
+  fi
+  if [ "$#" -ne 0 ] && ! printf '%s\n%s\n' "$1" "$2" > "$dir/.fm-test-fixture"; then
+    fm_test_treehouse_remove "$dir"
     return 1
   fi
   if [ -n "$binary" ] || binary=$(type -P treehouse); then

@@ -93,6 +93,7 @@ init_changed_fixture_repo() {
   mkdir -p "$repo/bin" "$repo/tests"
   cp "$RUNNER" "$repo/bin/fm-test-run.sh"
   cp "$ROOT/tests/git-config-helpers.sh" "$ROOT/tests/treehouse-test-helpers.sh" "$repo/tests/"
+  cp "$ROOT/bin/fm-wake-lib.sh" "$ROOT/bin/fm-session-lock-record-lib.sh" "$repo/bin/"
   chmod +x "$repo/bin/fm-test-run.sh"
   for script in \
     fm-brief.test.sh \
@@ -178,6 +179,7 @@ init_primary_and_linked_worktree() {
     mkdir -p "$tree/bin" "$tree/tests"
     cp "$RUNNER" "$tree/bin/fm-test-run.sh"
     cp "$ROOT/tests/git-config-helpers.sh" "$ROOT/tests/treehouse-test-helpers.sh" "$tree/tests/"
+    cp "$ROOT/bin/fm-wake-lib.sh" "$ROOT/bin/fm-session-lock-record-lib.sh" "$tree/bin/"
     chmod +x "$tree/bin/fm-test-run.sh"
     cat >"$tree/tests/probe.test.sh" <<PROBE
 #!/usr/bin/env bash
@@ -505,6 +507,7 @@ PY
   mkdir -p "$timeout_repo/bin" "$timeout_repo/tests"
   cp "$RUNNER" "$timeout_repo/bin/fm-test-run.sh"
   cp "$ROOT/tests/git-config-helpers.sh" "$ROOT/tests/treehouse-test-helpers.sh" "$timeout_repo/tests/"
+  cp "$ROOT/bin/fm-wake-lib.sh" "$ROOT/bin/fm-session-lock-record-lib.sh" "$timeout_repo/bin/"
   cat >"$timeout_repo/bin/fm-timeout-lib.sh" <<'SH'
 fm_run_timed() {
   [ "$1" -eq 900 ] || return 99
@@ -657,6 +660,7 @@ test_family_proofs_run_in_separate_concurrent_phases() {
   mkdir -p "$repo/bin" "$repo/tests"
   cp "$RUNNER" "$repo/bin/fm-test-run.sh"
   cp "$ROOT/tests/git-config-helpers.sh" "$ROOT/tests/treehouse-test-helpers.sh" "$repo/tests/"
+  cp "$ROOT/bin/fm-wake-lib.sh" "$ROOT/bin/fm-session-lock-record-lib.sh" "$repo/bin/"
   cp "$ROOT/bin/fm-timeout-lib.sh" "$repo/bin/fm-timeout-lib.sh"
   chmod +x "$repo/bin/fm-test-run.sh"
   for script in \
@@ -1285,6 +1289,7 @@ test_unmapped_new_test_never_inherits_family_concurrency() {
   mkdir -p "$repo/bin" "$repo/tests"
   cp "$RUNNER" "$repo/bin/fm-test-run.sh"
   cp "$ROOT/tests/git-config-helpers.sh" "$ROOT/tests/treehouse-test-helpers.sh" "$repo/tests/"
+  cp "$ROOT/bin/fm-wake-lib.sh" "$ROOT/bin/fm-session-lock-record-lib.sh" "$repo/bin/"
   chmod +x "$repo/bin/fm-test-run.sh"
   # Two members of the proven residual family, plus a test basename the family
   # map has never seen - the shape of any test added tomorrow.
@@ -1363,6 +1368,7 @@ test_per_script_timeout_bounds_a_hang() {
   mkdir -p "$repo/bin" "$repo/tests"
   cp "$RUNNER" "$runner"
   cp "$ROOT/tests/git-config-helpers.sh" "$ROOT/tests/treehouse-test-helpers.sh" "$repo/tests/"
+  cp "$ROOT/bin/fm-wake-lib.sh" "$ROOT/bin/fm-session-lock-record-lib.sh" "$repo/bin/"
   cp "$ROOT/bin/fm-timeout-lib.sh" "$repo/bin/fm-timeout-lib.sh"
   grandchild_pid="$tmp/grandchild.pid"
   cat >"$repo/$hang" <<'SH'
@@ -1427,6 +1433,7 @@ test_max_wall_ms_is_a_result_not_advice() {
   mkdir -p "$repo/bin" "$repo/tests"
   cp "$RUNNER" "$runner"
   cp "$ROOT/tests/git-config-helpers.sh" "$ROOT/tests/treehouse-test-helpers.sh" "$repo/tests/"
+  cp "$ROOT/bin/fm-wake-lib.sh" "$ROOT/bin/fm-session-lock-record-lib.sh" "$repo/bin/"
   cat >"$repo/$fast" <<'SH'
 #!/usr/bin/env bash
 sleep 1
@@ -1492,6 +1499,7 @@ test_jobs_parallel_scheduler_and_failure_propagation() {
   mkdir -p "$repo/bin" "$repo/tests" "$evidence" "$fake_bin"
   cp "$RUNNER" "$runner"
   cp "$ROOT/tests/git-config-helpers.sh" "$ROOT/tests/treehouse-test-helpers.sh" "$repo/tests/"
+  cp "$ROOT/bin/fm-wake-lib.sh" "$ROOT/bin/fm-session-lock-record-lib.sh" "$repo/bin/"
   cat >"$fake_bin/stat" <<'SH'
 #!/usr/bin/env bash
 if [ "$1" = "-c" ] && [ "$2" = "%a" ]; then

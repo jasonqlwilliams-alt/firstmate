@@ -1336,11 +1336,12 @@ families_for_changed_path() {
       printf '%s\n' pure-contract-unit
       # Only this script wraps each suite in run_script_bounded's fixture Git
       # isolation, and only a standalone-family script proves it.
-      printf '%s\n' "__script__:fm-test-fixtures.test.sh"
+      printf '%s\n' "__script__:fm-test-fixtures.test.sh" "__script__:fm-backend-autodetect-smoke.test.sh"
       ;;
     tests/treehouse-test-helpers.sh)
       printf '%s\n' "__script__:fm-test-fixtures.test.sh" \
-        "__script__:fm-test-fixture-cleanup.test.sh" "__script__:fm-treehouse-lease-safety.test.sh"
+        "__script__:fm-test-fixture-cleanup.test.sh" "__script__:fm-treehouse-lease-safety.test.sh" \
+        "__script__:fm-backend-autodetect-smoke.test.sh"
       ;;
     bin/fm-test-isolation-proof.sh)
       # Same reason as the runner above: the proof drives every
@@ -1528,7 +1529,7 @@ families_for_changed_path() {
       printf '%s\n' backend-dispatch
       printf '%s\n' pure-contract-unit
       if [ "$path" = bin/fm-spawn.sh ]; then
-        printf '%s\n' "__script__:fm-treehouse-lease-safety.test.sh"
+        printf '%s\n' "__script__:fm-treehouse-lease-safety.test.sh" "__script__:fm-backend-autodetect-smoke.test.sh"
       fi
       ;;
     bin/fm-pi-system-vault-reviewer.sh)
@@ -1603,7 +1604,7 @@ families_for_changed_path() {
     tests/lib.sh|tests/*-helpers.sh|tests/fixtures.sh)
       if [ "$path" = tests/lib.sh ]; then
         printf '%s\n' "__script__:fm-test-fixture-cleanup.test.sh" \
-          "__script__:fm-treehouse-lease-safety.test.sh"
+          "__script__:fm-treehouse-lease-safety.test.sh" "__script__:fm-backend-autodetect-smoke.test.sh"
       fi
       families_for_test_reference "$(basename "$path")" \
         || [ "$path" = tests/lib.sh ] \
@@ -2262,6 +2263,7 @@ fi
 
 # shellcheck source=tests/treehouse-test-helpers.sh
 . "$ROOT/tests/treehouse-test-helpers.sh" || die "could not load the Treehouse test helper"
+RUN_OWNER_IDENTITY=$(fm_test_pid_identity "$$") || die "could not identify the test runner"
 RUN_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-test-run.XXXXXX")
 RECORDS="$RUN_TMP/records.tsv"
 FAMILIES_TSV="$RUN_TMP/families.tsv"
@@ -2368,7 +2370,7 @@ run_script_bounded() {  # <script> <out> <stream> <id>
   # shellcheck source=tests/git-config-helpers.sh
   . "$ROOT/tests/git-config-helpers.sh" || return
   local PATH=$PATH TREEHOUSE_ROOT FM_TEST_TREEHOUSE_DIR FM_TEST_TREEHOUSE_BIN=${FM_TEST_TREEHOUSE_BIN:-}
-  fm_test_treehouse_setup || {
+  fm_test_treehouse_setup "$$" "$RUN_OWNER_IDENTITY" || {
     log "could not create a scratch Treehouse root for $script"
     return 1
   }

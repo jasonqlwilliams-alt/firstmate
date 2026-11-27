@@ -26,6 +26,7 @@ test_runner_isolates_treehouse() (
   mkdir -p "$dir/bin" "$dir/tests" "$dir/tools" "$tmp"
   cp "$ROOT/bin/fm-test-run.sh" "$dir/bin/"
   cp "$ROOT/tests/git-config-helpers.sh" "$ROOT/tests/treehouse-test-helpers.sh" "$dir/tests/"
+  cp "$ROOT/bin/fm-wake-lib.sh" "$ROOT/bin/fm-session-lock-record-lib.sh" "$dir/bin/"
   cat > "$dir/tools/treehouse" <<'SH'
 #!/usr/bin/env bash
 set -eu
@@ -44,6 +45,9 @@ SH
 set -eu
 printf '%s\n' "$TREEHOUSE_ROOT" > "$FM_TEST_ROOT_RECEIPT"
 env -u TREEHOUSE_ROOT treehouse get --lease > "$FM_TEST_POOL_RECEIPT"
+if [ -n "${FM_TEST_CANCEL_PID_FILE:-}" ]; then
+  kill -KILL "$(cat "$FM_TEST_CANCEL_PID_FILE")"
+fi
 SH
   export HOME="$home" PATH="$dir/tools:$PATH" TMPDIR="$tmp"
   export FM_TEST_ROOT_RECEIPT="$dir/root" FM_TEST_POOL_RECEIPT="$dir/pool"
@@ -58,6 +62,20 @@ SH
   assert_absent "$(dirname "$root")" "the runner left its Treehouse directory behind"
   assert_grep 'expected_gate_skip=treehouse' "$dir/run.log" "the suite reports its Treehouse prerequisite"
   pass "the runner passes a disposable root explicitly and leaves the live Treehouse root untouched"
+
+  rm "$dir/root"
+  export FM_TEST_CANCEL_PID_FILE="$dir/pid"
+  if bash -c 'printf "%s\n" "$$" > "$FM_TEST_CANCEL_PID_FILE"; exec "$@"' \
+    _ "$dir/bin/fm-test-run.sh" --jobs 1 tests/fm-treehouse-lease-safety.test.sh > "$dir/cancel.log" 2>&1; then
+    fail "the interrupted runner unexpectedly succeeded"
+  fi
+  root=$(cat "$dir/root") || fail "the interrupted run did not record its Treehouse root"
+  root=${root%/pool}
+  fm_test_track_treehouse_scratch "$root" || fail "could not register the interrupted fixture for cleanup"
+  assert_present "$root/pool/fixture-pool" "the runner was interrupted during its suite"
+  assert_equals "$(cat "$dir/pid")" "$(sed -n '1p' "$root/.fm-test-fixture")" "the orphan record identifies the interrupted runner"
+  [ -n "$(sed -n '2p' "$root/.fm-test-fixture")" ] || fail "the orphan record omitted the runner identity"
+  pass "an interrupted runner leaves an owned Treehouse directory eligible for the orphan sweep"
 )
 
 test_git_config_isolation() (
@@ -68,6 +86,7 @@ test_git_config_isolation() (
   cd "$dir/caller" || exit 1
   cp "$ROOT/bin/fm-test-run.sh" "$ROOT/bin/fm-timeout-lib.sh" "$dir/runner/bin/"
   cp "$ROOT/tests/git-config-helpers.sh" "$ROOT/tests/treehouse-test-helpers.sh" "$dir/runner/tests/"
+  cp "$ROOT/bin/fm-wake-lib.sh" "$ROOT/bin/fm-session-lock-record-lib.sh" "$dir/runner/bin/"
   fakebin=$(fm_fakebin "$dir/standalone")
   fm_fake_exit0 "$fakebin" pi
   cat > "$fakebin/tmux" <<'SH'
