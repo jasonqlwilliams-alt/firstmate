@@ -69,8 +69,8 @@
 # New fm-terminal-outcome.v1 receipts contain schema, fingerprint, task_id,
 # incarnation, state, outcome_key, origin, phase, pr, created_epoch, and
 # notice_emitted, plus optional status_head and ledger_claim fields. The
-# inactive-path fingerprint binds the spawn incarnation, task id, outcome kind
-# (done, failed, or cancelled), PR text, and sanitized last status.
+# inactive-path fingerprint binds the spawn incarnation, task id, reporting
+# state (done, failed, or relabelled cancelled), PR text, and sanitized last status.
 # The ledger-path fingerprint binds the incarnation, task id, terminal state,
 # literal `ledger` origin, and complete terminal ledger line.
 # When a terminal ledger append races just after the inactive path's final read,
@@ -346,12 +346,32 @@ home_secondmate_id() {
   fm_parent_channel_home_id "$FM_HOME"
 }
 
-report_to_parent() { # <task> <verb> <outcome-key> <fingerprint> <pr> <detail>
+cancelled_pr_detail='run cancelled; registered PR awaiting a merge decision'
+
+parent_report_line() { # <task> <verb> <outcome-key> <fingerprint> <pr> <detail>
   local task=$1 verb=$2 outcome_key=$3 fingerprint=$4 pr=$5 detail=$6 line
   line="$verb [key=$outcome_key]: inactive terminal child=$task fingerprint=$fingerprint"
   [ -z "$detail" ] || line="$line $detail"
   [ -z "$pr" ] || line="$line pr=$pr"
-  fm_parent_channel_report "$FM_HOME" "$STATE" "$line"
+  printf '%s' "$line"
+}
+
+cancellation_already_published() { # <task> <secondmate-id-or-empty> <fingerprint> <pr>
+  local task=$1 self=$2 fingerprint=$3 pr=$4 pending destination line
+  if [ -f "$(record_path "$fingerprint" reported)" ] || [ -f "$(record_path "$fingerprint" presented)" ]; then
+    return 0
+  fi
+  pending=$(record_path "$fingerprint" pending)
+  [ -f "$pending" ] && [ ! -L "$pending" ] || return 1
+  if [ -z "$self" ]; then
+    queue_key_exists "inactive-outcome:$fingerprint"
+    return
+  fi
+  destination=$(fm_parent_channel_destination "$FM_HOME" "$STATE") || return 1
+  [ -f "$destination" ] && [ ! -L "$destination" ] || return 1
+  line=$(parent_report_line "$task" done "inactive-outcome-$self-$task-cancelled" "$fingerprint" "$pr" "$cancelled_pr_detail")
+  grep -Fqx -- "$line" "$destination" || return 1
+  mark_reported "$pending" || return 2
 }
 
 # Queue the once-per-record notice that a parent report could not be written.
@@ -395,7 +415,7 @@ claim_inactive_report_for_ledger() { # <task> <incarnation> <state> <ledger-fing
     [ "$(record_value "$record" incarnation)" = "$incarnation" ] || continue
     [ "$(record_value "$record" state)" = "$state" ] || continue
     key=$(record_value "$record" outcome_key)
-    case "$key" in inactive-outcome-*-"$state") ;; *) continue ;; esac
+    case "$key" in inactive-outcome-*) ;; *) continue ;; esac
     [ "$(record_value "$record" status_head)" = "$predecessor_head" ] || continue
     claim=$(record_value "$record" ledger_claim)
     if [ "$claim" = "$ledger_fingerprint" ]; then
@@ -491,6 +511,7 @@ report_child() { # <id>
 reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeout>
   local id=$1 meta=$2 self=${3:-} timeout=$4 status turn last age state_line pr incarnation fingerprint outcome_key payload kind state_rc=0
   local outcome label parent_verb detail=''
+  local identity evidence line cancelled_fingerprint='' cancelled_pending=''
   [ -f "$meta" ] && [ ! -L "$meta" ] || return 0
   kind=$(meta_field "$meta" kind)
   [ "$kind" = secondmate ] && return 0
@@ -530,19 +551,36 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
   fi
   [ -n "$pr" ] || pr=$(pr_for_task "$meta")
   incarnation=$(meta_incarnation "$meta")
-  fingerprint=$(sha256_text "$incarnation|$id|$outcome|$pr|$(clean_field "$last")")
+  identity="$incarnation|$id"
+  evidence="$pr|$(clean_field "$last")"
+  if [ "$outcome" != "$label" ]; then
+    cancelled_fingerprint=$(sha256_text "$identity|cancelled|$evidence")
+    if cancellation_already_published "$id" "$self" "$cancelled_fingerprint" "$pr"; then
+      return 0
+    elif [ "$?" -eq 2 ]; then
+      return 1
+    fi
+    cancelled_pending=$(record_path "$cancelled_fingerprint" pending)
+  fi
+  fingerprint=$(sha256_text "$identity|$label|$evidence")
   outcome_key="inactive-outcome-${self:-main}-$id-$label"
-  ensure_record "$fingerprint" "$id" "$incarnation" "$outcome" "$outcome_key" direct "upstream" "$pr" "$(sha256_text "$last")" || return 1
+  ensure_record "$fingerprint" "$id" "$incarnation" "$label" "$outcome_key" direct "upstream" "$pr" "$(sha256_text "$last")" || return 1
+  if [ -n "$cancelled_pending" ] && [ -f "$cancelled_pending" ] && [ ! -L "$cancelled_pending" ]; then
+    if [ -n "$RECORD_PENDING" ] && [ -n "$self" ] \
+      && { [ "$(record_value "$cancelled_pending" notice_emitted)" = 1 ] || queue_key_exists "inactive-reconcile:$cancelled_fingerprint"; }; then
+      record_field_set "$RECORD_PENDING" notice_emitted 1 || return 1
+    fi
+    rm -f -- "$cancelled_pending" || return 1
+  fi
   [ -n "$RECORD_PENDING" ] || return 0
-  outcome_key=$(record_value "$RECORD_PENDING" outcome_key)
-  label=${outcome_key##*-}
   parent_verb=$label
   if [ "$label" = cancelled ]; then
-    detail='run cancelled; registered PR awaiting a merge decision'
+    detail=$cancelled_pr_detail
     parent_verb=done
   fi
   if [ -n "$self" ]; then
-    if report_to_parent "$id" "$parent_verb" "$outcome_key" "$fingerprint" "$pr" "$detail"; then
+    line=$(parent_report_line "$id" "$parent_verb" "$outcome_key" "$fingerprint" "$pr" "$detail")
+    if fm_parent_channel_report "$FM_HOME" "$STATE" "$line"; then
       mark_reported "$RECORD_PENDING" || return 1
     else
       notice_parent_report_failed "$RECORD_PENDING" "$fingerprint" \

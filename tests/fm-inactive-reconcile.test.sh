@@ -895,7 +895,7 @@ test_reconciliation_never_calls_forge() {
 }
 
 test_cancelled_run_with_registered_pr_reports_awaiting_merge() {
-  local route parent_status offset line expected='run cancelled; registered PR awaiting a merge decision'
+  local route parent_status offset line receipt expected='run cancelled; registered PR awaiting a merge decision'
   make_world cancelled-main
   write_validated_child "$MAIN" child 'working: waiting for validation' cancelled
   register_pr "$MAIN" child
@@ -907,6 +907,10 @@ test_cancelled_run_with_registered_pr_reports_awaiting_merge() {
     || fail "the cancelled run did not leave exactly one supervisor wake and receipt"
   grep -Fq "child=child $expected pr=$CANCEL_PR" "$MAIN/state/.wake-queue" \
     || fail "the supervisor wake did not report the cancelled run awaiting merge"
+  (umask 077; printf '%s\n' "$CANCEL_PR" > "$MAIN/state/child.pr-poll-closed")
+  run_real_reconcile "$MAIN"
+  [ "$(outcome_count "$MAIN" pending)" = 1 ] && [ "$(wake_count "$MAIN" 'inactive-outcome:')" = 1 ] \
+    || fail "closure duplicated the cancellation already queued for the supervisor"
 
   for route in local remote; do
     make_world "cancelled-mate-$route"; bind_secondmate "$route"
@@ -936,6 +940,11 @@ RUN
       'done [key=inactive-outcome-mate-child-cancelled]: inactive terminal child=child '*" $expected pr=$CANCEL_PR") ;;
       *) fail "the $route parent report did not say the cancelled run awaits merge: $line" ;;
     esac
+    if [ "$route" = remote ]; then
+      for receipt in "$MATE/state/terminal-outcomes/"*.reported; do
+        mv -- "$receipt" "${receipt%.reported}.pending" || fail "could not model interrupted receipt finalization"
+      done
+    fi
     (umask 077; printf '%s\n' "$CANCEL_PR" > "$MATE/state/child.pr-poll-closed")
     run_real_reconcile "$MATE"
     [ "$(outcome_count "$MATE" reported)" = 1 ] \
@@ -978,6 +987,64 @@ test_other_terminal_failures_keep_failed_label() {
   run_real_reconcile "$MAIN"
   [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a cancellation whose PR merged was treated as awaiting merge"
   pass "unregistered, closed, merged, and genuinely failed outcomes keep the failed label"
+}
+
+test_unpublished_cancellation_reports_failure_after_closure() {
+  make_world cancellation-queue-recovery
+  write_validated_child "$MAIN" child 'working: waiting for validation' cancelled
+  register_pr "$MAIN" child
+  mkdir "$MAIN/state/.wake-queue"
+  run_real_reconcile "$MAIN"
+  [ "$(outcome_count "$MAIN" pending)" = 1 ] || fail "the blocked wake did not leave a pending cancellation"
+
+  (umask 077; printf '%s\n' "$CANCEL_PR" > "$MAIN/state/child.pr-poll-closed")
+  rmdir "$MAIN/state/.wake-queue"
+  run_real_reconcile "$MAIN"
+  [ "$(outcome_count "$MAIN" pending)" = 1 ] && [ "$(wake_count "$MAIN" 'child=child state=failed')" = 1 ] \
+    || fail "the first supervisor wake after closure did not report failure"
+
+  make_world cancellation-parent-recovery; bind_secondmate local
+  write_validated_child "$MATE" child 'working: waiting for validation' cancelled
+  register_pr "$MATE" child
+  mv "$MAIN/state/mate.status" "$WORLD/ready.status"
+  mkdir "$MAIN/state/mate.status" "$MATE/state/.wake-queue"
+  run_real_reconcile "$MATE"
+  [ "$(outcome_count "$MATE" pending)" = 1 ] || fail "the blocked parent route did not leave a pending cancellation"
+
+  (umask 077; printf '%s\n' "$CANCEL_PR" > "$MATE/state/child.pr-poll-closed")
+  rmdir "$MATE/state/.wake-queue"
+  run_real_reconcile "$MATE"
+  [ "$(wake_count "$MATE" 'needs parent report: child=child state=failed')" = 1 ] \
+    || fail "the first parent-delivery diagnostic after closure did not report failure"
+  rmdir "$MAIN/state/mate.status"
+  mv "$WORLD/ready.status" "$MAIN/state/mate.status"
+  run_real_reconcile "$MATE"
+  [ "$(outcome_count "$MATE" pending)" = 0 ] && [ "$(outcome_count "$MATE" reported)" = 1 ] \
+    && [ "$(grep -c '^failed \[key=inactive-outcome-mate-child-failed\]' "$MAIN/state/mate.status")" = 1 ] \
+    || fail "the first parent report after closure did not report failure"
+  pass "an undelivered cancellation is reported as failed after closure"
+}
+
+test_unqualified_cancellation_keeps_failure_identity() {
+  make_world unregistered-cancellation-upgrade
+  write_validated_child "$MAIN" child 'working: waiting for validation' cancelled
+  age "$MAIN/state/child.meta" "$MAIN/state/child.status"
+  FM_FAKE_CREW_STATE=failed run_reconcile "$MAIN" --startup
+  [ "$(wake_count "$MAIN" 'child=child state=failed')" = 1 ] || fail "fixture did not queue the ordinary failure"
+  run_real_reconcile "$MAIN"
+  [ "$(outcome_count "$MAIN" pending)" = 1 ] && [ "$(wake_count "$MAIN" 'inactive-outcome:')" = 1 ] \
+    || fail "an unregistered cancellation duplicated an existing ordinary failure wake"
+
+  make_world unregistered-cancellation-ledger; bind_secondmate local
+  write_validated_child "$MATE" child 'working: waiting for validation' cancelled
+  run_real_reconcile "$MATE"
+  [ "$(grep -c '^failed \[key=inactive-outcome-mate-child-failed\]' "$MAIN/state/mate.status")" = 1 ] \
+    || fail "fixture did not deliver the unregistered cancellation as a failure"
+  printf 'failed: validation was cancelled\n' >> "$MATE/state/child.status"
+  run_report "$MATE" child || fail "teardown-side reporting did not reconcile the failed ledger line"
+  [ "$(wc -l < "$MAIN/state/mate.status" | tr -d ' ')" = 1 ] \
+    || fail "the failed ledger append duplicated the ordinary cancellation failure report"
+  pass "unregistered cancellations retain ordinary failure receipts and ledger deduplication"
 }
 
 test_failed_retry_after_cancellation_gets_its_own_report() {
@@ -1063,6 +1130,8 @@ test_missing_parent_binding_names_itself
 test_reconciliation_never_calls_forge
 test_cancelled_run_with_registered_pr_reports_awaiting_merge
 test_other_terminal_failures_keep_failed_label
+test_unpublished_cancellation_reports_failure_after_closure
+test_unqualified_cancellation_keeps_failure_identity
 test_failed_retry_after_cancellation_gets_its_own_report
 test_failed_ledger_append_after_cancellation_gets_its_own_report
 
