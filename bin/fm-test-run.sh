@@ -315,7 +315,8 @@ family_for_basename() {
     fm-backend-herdr-agent-exit-shell-e2e.test.sh|\
     fm-herdr-attached-viewer-live-e2e.test.sh|fm-herdr-session-cleanup-e2e.test.sh|\
     fm-backend-herdr-smoke.test.sh|fm-backend-herdr-workspace-per-home-e2e.test.sh|\
-    fm-control-herdr-smoke.test.sh|fm-secondmate-herdr-identity-e2e.test.sh|fm-worker-herdr-identity-e2e.test.sh)
+    fm-control-herdr-smoke.test.sh|fm-secondmate-herdr-identity-e2e.test.sh|fm-worker-herdr-identity-e2e.test.sh|\
+    fm-treehouse-scratch.test.sh)
       printf '%s\n' real-herdr-gated
       ;;
     fm-backlog-handoff.test.sh|fm-on.test.sh|fm-remote-backlog-handoff.test.sh|\
@@ -401,7 +402,6 @@ family_for_basename() {
     fm-project-origin.test.sh|fm-public-followup.test.sh|fm-quota-choose.test.sh|\
     fm-remote-entrypoint.test.sh|fm-remote-secondmate-parent-binding.test.sh|\
     fm-send-remote-delivery.test.sh|fm-spawn-pool-base-freshen.test.sh|fm-treehouse-lease-safety.test.sh|\
-    fm-treehouse-prune.test.sh|fm-treehouse-scratch.test.sh|\
     fm-test-fixture-cleanup.test.sh|fm-test-fixtures.test.sh|\
     fm-voice-relay.test.sh|fm-wake-drain-open-decisions-cursor.test.sh|\
     fm-wake-drain-open-decisions.test.sh|fm-wake-drain-outcome-backstop.test.sh)
@@ -2353,7 +2353,8 @@ run_script_bounded() {  # <script> <out> <stream> <id>
   # no fixture repository can create a pool folder under the real root and
   # concurrent suites never share one; bin/fm-treehouse-scratch.sh owns the
   # contract. The root is removed as soon as the suite exits.
-  local TREEHOUSE_ROOT FM_TREEHOUSE_SCRATCH_ROOT= FM_TREEHOUSE_SCRATCH_CREATED TREEHOUSE_NO_UPDATE_CHECK
+  local PATH=$PATH TREEHOUSE_ROOT FM_TREEHOUSE_SCRATCH_ROOT= FM_TREEHOUSE_SCRATCH_CREATED
+  local TREEHOUSE_WORKTREE_PATH TREEHOUSE_NO_UPDATE_CHECK
   # shellcheck source=bin/fm-treehouse-scratch.sh
   . "$ROOT/bin/fm-treehouse-scratch.sh" || return
   fm_treehouse_scratch_enter "$RUN_TMP" || {

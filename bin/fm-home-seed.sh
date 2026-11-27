@@ -394,7 +394,7 @@ acquire_treehouse_home() {
     echo "error: another Treehouse allocation or return is in progress; refusing to race it" >&2
     return 1
   }
-  if ! fm_treehouse_require_recorded_leases "$STATE" allocation "$FM_ROOT"; then
+  if ! fm_treehouse_require_recorded_leases "$FM_ROOT" "$STATE"; then
     fm_lock_release "$lock"
     return 1
   fi

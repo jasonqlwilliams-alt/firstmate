@@ -6,9 +6,10 @@
 #   fm-treehouse-scratch.sh run [--] <command> [args...]
 #   fm-treehouse-scratch.sh --help
 #
-# Treehouse v3.1.8 or newer honors TREEHOUSE_ROOT ahead of configured roots
-# (only an explicit --root outranks it). A fixture repository or a
-# reproduction that runs `treehouse get`, `status`, `return`, or `lease`
+# Treehouse v3.1.8 or newer honors scratch root and checkout settings ahead of
+# user and repository configuration. Explicit Treehouse flags retain their
+# normal precedence. A fixture repository or a reproduction that runs
+# `treehouse get`, `status`, `return`, or `lease`
 # against the default root leaves a pool folder there that nothing ever
 # removes. `run` executes <command> with TREEHOUSE_ROOT pointed at a fresh
 # private directory under ${TMPDIR:-/tmp}, then removes that directory and
@@ -16,9 +17,8 @@
 # root this helper created keeps it, so nested use shares one root and only
 # its creator removes it.
 #
-# The root reaches only processes started under it. A reproduction that types
-# commands into a terminal server started elsewhere must start that server
-# under `run` too, or pass TREEHOUSE_ROOT to it explicitly. Removing the root
+# The scratch environment reaches processes started under it. Start any
+# terminal server used by a reproduction under `run` too. Removing the root
 # removes every pool slot inside it; a linked worktree's administrative entry in
 # the backing repository is left for `git worktree prune`, which this helper
 # never runs, because the backing repository may not be disposable.
@@ -31,10 +31,11 @@
 # directory a caller merely named.
 
 FM_TREEHOUSE_SCRATCH_MARKER=.fm-treehouse-scratch
+FM_TREEHOUSE_SCRATCH_TEMPLATE='{pool}/{slot}/{repo}'
 
 fm_treehouse_require_compatible() {
   local version major minor patch
-  version=$(treehouse --version 2>/dev/null) || version=
+  version=$("$1" --version 2>/dev/null) || version=
   if [[ "$version" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
     major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]} patch=${BASH_REMATCH[3]}
     if (( 10#$major > 3 || (10#$major == 3 &&
@@ -49,7 +50,7 @@ fm_treehouse_require_compatible() {
 # Create a scratch root under <parent> (default ${TMPDIR:-/tmp}) and print its
 # physical path.
 fm_treehouse_scratch_create() {  # [<parent>]
-  local parent=${1:-${TMPDIR:-/tmp}} root
+  local parent=${1:-${TMPDIR:-/tmp}} root tool wrapper
   parent=${parent%/}
   [ -n "$parent" ] || parent=/
   root=$(umask 077; mktemp -d "$parent/fm-treehouse-root.XXXXXX") || return 1
@@ -58,6 +59,19 @@ fm_treehouse_scratch_create() {  # [<parent>]
     rm -rf -- "$root"
     return 1
   }
+  if tool=$(type -P treehouse); then
+    case "$(readlink "$tool" 2>/dev/null)" in
+      */fm-treehouse-scratch.sh) tool=$(readlink "$tool-real") || tool= ;;
+    esac
+    if [ -z "$tool" ] ||
+      ! tool=$(CDPATH='' cd -P -- "$(dirname "$tool")" && printf '%s/%s\n' "$PWD" "${tool##*/}") ||
+      ! wrapper=$(CDPATH='' cd -P -- "$(dirname "${BASH_SOURCE[0]}")" && printf '%s/fm-treehouse-scratch.sh\n' "$PWD") ||
+      ! mkdir "$root/bin" || ! ln -s "$tool" "$root/bin/treehouse-real" ||
+      ! ln -s "$wrapper" "$root/bin/treehouse"; then
+      fm_treehouse_scratch_remove "$root"
+      return 1
+    fi
+  fi
   printf '%s\n' "$root"
 }
 
@@ -80,19 +94,21 @@ fm_treehouse_scratch_active() {
 # Sets FM_TREEHOUSE_SCRATCH_CREATED to the root this call created, or to empty
 # when it kept an active one; the creator owns removal.
 fm_treehouse_scratch_enter() {  # [<parent>]
-  local root
   FM_TREEHOUSE_SCRATCH_CREATED=
   TREEHOUSE_NO_UPDATE_CHECK=1
-  export TREEHOUSE_NO_UPDATE_CHECK
-  if command -v treehouse >/dev/null 2>&1; then
-    fm_treehouse_require_compatible || return 1
+  TREEHOUSE_WORKTREE_PATH=$FM_TREEHOUSE_SCRATCH_TEMPLATE
+  if ! fm_treehouse_scratch_active; then
+    FM_TREEHOUSE_SCRATCH_CREATED=$(fm_treehouse_scratch_create "$@") || return 1
+    TREEHOUSE_ROOT=$FM_TREEHOUSE_SCRATCH_CREATED
+    FM_TREEHOUSE_SCRATCH_ROOT=$TREEHOUSE_ROOT
   fi
-  fm_treehouse_scratch_active && return 0
-  root=$(fm_treehouse_scratch_create "$@") || return 1
-  TREEHOUSE_ROOT=$root
-  FM_TREEHOUSE_SCRATCH_ROOT=$root
-  export TREEHOUSE_ROOT FM_TREEHOUSE_SCRATCH_ROOT
-  FM_TREEHOUSE_SCRATCH_CREATED=$root
+  if [ -x "$TREEHOUSE_ROOT/bin/treehouse" ]; then
+    case ":$PATH:" in
+      *":$TREEHOUSE_ROOT/bin:"*) ;;
+      *) PATH="$TREEHOUSE_ROOT/bin:$PATH" ;;
+    esac
+  fi
+  export PATH TREEHOUSE_ROOT FM_TREEHOUSE_SCRATCH_ROOT TREEHOUSE_WORKTREE_PATH TREEHOUSE_NO_UPDATE_CHECK
 }
 
 # Remove a scratch root. Refuses anything not carrying the marker.
@@ -152,6 +168,13 @@ fm_treehouse_scratch_main() {
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   set -u
+  if [ "${0##*/}" = treehouse ]; then
+    tool=$(readlink "$0-real") || exit 1
+    export TREEHOUSE_ROOT="${TREEHOUSE_ROOT:-${0%/bin/treehouse}}"
+    export TREEHOUSE_NO_UPDATE_CHECK=1 TREEHOUSE_WORKTREE_PATH="$FM_TREEHOUSE_SCRATCH_TEMPLATE"
+    fm_treehouse_require_compatible "$tool" || exit 1
+    exec "$tool" "$@"
+  fi
   fm_treehouse_scratch_main "$@"
   exit $?
 fi

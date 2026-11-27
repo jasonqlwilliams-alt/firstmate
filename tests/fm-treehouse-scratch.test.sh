@@ -11,13 +11,15 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+command -v treehouse >/dev/null || fail "treehouse is required for real scratch allocation tests"
 
 TMP_ROOT=$(fm_test_tmproot fm-treehouse-scratch)
 FAKE_HOME="$TMP_ROOT/home"
 USER_ROOT="$TMP_ROOT/configured-user-root"
 REPO_ROOT="$TMP_ROOT/configured-repo-root"
 mkdir -p "$FAKE_HOME/.config/treehouse" "$USER_ROOT" "$REPO_ROOT"
-printf 'root = "%s"\n' "$USER_ROOT" > "$FAKE_HOME/.config/treehouse/config.toml"
+printf 'root = "%s"\nworktree_path = "%s"\n' "$USER_ROOT" "$FAKE_HOME/.treehouse/user-{repo}-{slot}" \
+  > "$FAKE_HOME/.config/treehouse/config.toml"
 
 # Run a command as if from an operator shell: no inherited scratch root, and a
 # HOME whose default Treehouse root is the one that must stay untouched.
@@ -41,22 +43,19 @@ test_runner_leaves_real_root_untouched() {
   mkdir -p "$repo/bin" "$repo/tests"
   cp "$ROOT/bin/fm-test-run.sh" "$ROOT/bin/fm-timeout-lib.sh" "$ROOT/bin/fm-treehouse-scratch.sh" "$repo/bin/"
   cp "$ROOT/tests/git-config-helpers.sh" "$repo/tests/"
-  # The fixture suite records the root it was given and, when Treehouse is
-  # installed, allocates a real pool slot from a fixture repository.
+  # The fixture suite records its root and allocates a real slot.
   cat > "$repo/tests/fm-test-run.test.sh" <<'SH'
 #!/usr/bin/env bash
 set -eu
 printf '%s\n' "${TREEHOUSE_ROOT:-}" >> "$FM_TEST_SEEN"
 [ -n "${TREEHOUSE_ROOT:-}" ] && [ -f "$TREEHOUSE_ROOT/.fm-treehouse-scratch" ]
-if command -v treehouse >/dev/null 2>&1; then
-  proj=$(mktemp -d "${TMPDIR:-/tmp}/fm-scratch-proj.XXXXXX")
-  trap 'rm -rf "$proj"' EXIT
-  git init -q -b main "$proj"
-  git -C "$proj" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
-  printf 'root = "%s"\n' "$FM_CONFIGURED_REPO_ROOT" > "$proj/treehouse.toml"
-  path=$(cd "$proj" && treehouse get --lease --lease-holder fixture)
-  case "$path" in "$TREEHOUSE_ROOT"/*) [ -d "$path" ] ;; *) exit 1 ;; esac
-fi
+proj=$(mktemp -d "${TMPDIR:-/tmp}/fm-scratch-proj.XXXXXX")
+trap 'rm -rf "$proj"' EXIT
+git init -q -b main "$proj"
+git -C "$proj" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
+printf 'root = "%s"\nworktree_path = "%s"\n' "$FM_CONFIGURED_REPO_ROOT" "$HOME/.treehouse/repo-{repo}-{slot}" > "$proj/treehouse.toml"
+path=$(cd "$proj" && treehouse get --lease --lease-holder fixture)
+case "$path" in "$TREEHOUSE_ROOT"/*) [ -d "$path" ] ;; *) exit 1 ;; esac
 SH
   cp "$repo/tests/fm-test-run.test.sh" "$repo/tests/fm-test-isolation-proof.test.sh"
   for jobs in 1 2; do
@@ -82,7 +81,8 @@ test_runner_overrides_an_inherited_real_root() {
   local repo="$TMP_ROOT/runner" seen="$TMP_ROOT/override-seen" log="$TMP_ROOT/override.log" real="$TMP_ROOT/real-root"
   mkdir -p "$real"
   : > "$seen"
-  as_operator TREEHOUSE_ROOT="$real" FM_TEST_SEEN="$seen" FM_CONFIGURED_REPO_ROOT="$REPO_ROOT" "$repo/bin/fm-test-run.sh" \
+  as_operator TREEHOUSE_ROOT="$real" TREEHOUSE_WORKTREE_PATH="$real/env-{repo}-{slot}" \
+    FM_TEST_SEEN="$seen" FM_CONFIGURED_REPO_ROOT="$REPO_ROOT" "$repo/bin/fm-test-run.sh" \
     tests/fm-test-run.test.sh > "$log" 2>&1 || fail "override run failed: $(cat "$log")"
   [ "$(cat "$seen")" != "$real" ] || fail "runner passed an inherited real TREEHOUSE_ROOT through"
   [ -z "$(ls -A "$real")" ] || fail "inherited real root gained entries: $(ls -A "$real")"
@@ -113,10 +113,8 @@ test_reproduction_helper() {
   local out rc root unmarked="$TMP_ROOT/unmarked" project="$TMP_ROOT/repro-project"
   fm_git_init_commit "$project"
   out=$(as_operator "$ROOT/bin/fm-treehouse-scratch.sh" run bash -c '
-    if command -v treehouse >/dev/null 2>&1; then
-      path=$(cd "$1" && treehouse get --lease --lease-holder fixture) || exit 1
-      case "$path" in "$TREEHOUSE_ROOT"/*) [ -d "$path" ] || exit 1 ;; *) exit 1 ;; esac
-    fi
+    path=$(cd "$1" && treehouse get --lease --lease-holder fixture) || exit 1
+    case "$path" in "$TREEHOUSE_ROOT"/*) [ -d "$path" ] || exit 1 ;; *) exit 1 ;; esac
     printf "%s\n" "$TREEHOUSE_ROOT"; exit 7
   ' _ "$project") && rc=0 || rc=$?
   expect_code 7 "$rc" "run must propagate the command's exit status"
@@ -133,36 +131,40 @@ test_reproduction_helper() {
   pass "fm-treehouse-scratch.sh run isolates a reproduction and removal refuses unmarked directories"
 }
 
-test_old_treehouse_is_refused() {
-  local fake_bin="$TMP_ROOT/old-bin" marker="$TMP_ROOT/reproduction-started" out
+test_old_treehouse_is_refused_at_invocation() {
+  local fake_bin="$TMP_ROOT/old-bin" repo="$TMP_ROOT/runner" out
+  local FM_TEST_OLD_PROBED="$TMP_ROOT/old-probed" FM_TEST_OLD_CALLED="$TMP_ROOT/old-called"
+  local FM_TEST_UNRELATED_RAN="$TMP_ROOT/unrelated-ran"
+  export FM_TEST_OLD_PROBED FM_TEST_OLD_CALLED FM_TEST_UNRELATED_RAN
   mkdir -p "$fake_bin"
   cat > "$fake_bin/treehouse" <<'SH'
 #!/usr/bin/env bash
-[ "$1" = --version ] || exit 1
-printf 'v2.0.1\n'
+if [ "$1" = --version ]; then
+  : > "$FM_TEST_OLD_PROBED"
+  printf 'v2.0.1\n'
+else
+  : > "$FM_TEST_OLD_CALLED"
+fi
 SH
   chmod +x "$fake_bin/treehouse"
-  if out=$(as_operator PATH="$fake_bin:$PATH" "$ROOT/bin/fm-treehouse-scratch.sh" run touch "$marker" 2>&1); then
-    fail "reproduction accepted Treehouse v2.0.1"
-  fi
-  assert_contains "$out" "found v2.0.1" "refusal explains the incompatible tool"
-  assert_absent "$marker" "reproduction started before compatibility was established"
+  printf '%s\n' '#!/usr/bin/env bash' 'touch "$FM_TEST_UNRELATED_RAN"' > "$repo/tests/fm-test-isolation-proof.test.sh"
+  as_operator PATH="$fake_bin:$PATH" "$repo/bin/fm-test-run.sh" tests/fm-test-isolation-proof.test.sh \
+    || fail "old Treehouse blocked a runner suite that did not call it"
+  assert_present "$FM_TEST_UNRELATED_RAN" "unrelated runner suite did not execute"
+  as_operator PATH="$fake_bin:$PATH" bash -ec '. "$1"; test -d "$TREEHOUSE_ROOT"' _ "$ROOT/tests/lib.sh" \
+    || fail "old Treehouse blocked direct fixture setup"
+  as_operator PATH="$fake_bin:$PATH" "$ROOT/bin/fm-treehouse-scratch.sh" run true \
+    || fail "old Treehouse blocked a reproduction that did not call it"
+  assert_absent "$FM_TEST_OLD_PROBED" "scratch setup probed Treehouse without an invocation"
 
-  if out=$(as_operator PATH="$fake_bin:$PATH" bash -c '. "$1"; touch "$2"' \
-    _ "$ROOT/tests/lib.sh" "$marker" 2>&1); then
-    fail "direct test kept running after rejecting Treehouse v2.0.1: $out"
+  if out=$(as_operator PATH="$fake_bin:$PATH" "$ROOT/bin/fm-treehouse-scratch.sh" \
+    run "$ROOT/bin/fm-treehouse-scratch.sh" run treehouse get --lease 2>&1); then
+    fail "a nested reproduction ran an incompatible Treehouse"
   fi
-  assert_contains "$out" "found v2.0.1" "direct setup explains the incompatible tool"
-  assert_absent "$marker" "direct test continued after scratch setup failed"
-
-  if out=$(as_operator PATH="$fake_bin:$PATH" TREEHOUSE_ROOT="$TREEHOUSE_ROOT" \
-    FM_TREEHOUSE_SCRATCH_ROOT="$TREEHOUSE_ROOT" "$ROOT/bin/fm-treehouse-scratch.sh" \
-    run touch "$marker" 2>&1); then
-    fail "inherited scratch setup accepted Treehouse v2.0.1"
-  fi
-  assert_contains "$out" "found v2.0.1" "nested setup explains the incompatible tool"
-  assert_absent "$marker" "nested command ran with incompatible Treehouse"
-  pass "standalone and nested runs reject old Treehouse before running the command"
+  assert_contains "$out" "found v2.0.1" "invocation explains the incompatible tool"
+  assert_present "$FM_TEST_OLD_PROBED" "Treehouse was not checked at invocation"
+  assert_absent "$FM_TEST_OLD_CALLED" "the old Treehouse received an allocation command"
+  pass "older Treehouse leaves unrelated commands runnable and refuses allocation"
 }
 
 test_standalone_herdr_fixture_owns_root() {
@@ -182,5 +184,5 @@ test_runner_leaves_real_root_untouched
 test_runner_overrides_an_inherited_real_root
 test_lib_standalone_and_inherited
 test_reproduction_helper
-test_old_treehouse_is_refused
+test_old_treehouse_is_refused_at_invocation
 test_standalone_herdr_fixture_owns_root

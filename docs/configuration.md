@@ -749,29 +749,6 @@ The sweep must finish inside `FM_CHECK_TIMEOUT` (default 30), because a run the 
 So a budget larger than that timeout allows is cut down to what fits instead of being refused, and the cut is reported in the report line.
 A budget that is not a whole number from 1 to 120 is still refused outright.
 
-## Treehouse pool prune (config/treehouse-prune-protected)
-
-Every idle Treehouse pool slot is a full worktree.
-[`bin/fm-treehouse-prune.sh`](../bin/fm-treehouse-prune.sh) runs a daily sweep of the home's own repository pool and the pools of its clones under `projects/`.
-Treehouse resolves the root for each repository, and a sweep includes eligible slots from other clones that share one of those pools by repository name and origin.
-The sweep requires Treehouse 3.1.8 or newer and delegates removal to `treehouse prune --yes`.
-Treehouse keeps leased and reserved slots, slots with running processes, and slots with dirty or unlanded work.
-Acquire a lease before entering a slot directly so that entry is coordinated with a concurrent sweep.
-The sweep stops before pruning if a local task record cannot be read or a task still names a slot in those pools that lacks a durable lease.
-
-Before adding a slot to the optional local `config/treehouse-prune-protected` file, run `treehouse lease <name>` from its repository with the slot name shown by `treehouse status`.
-A Treehouse lease protects the slot across every home that shares its pool.
-List one absolute checkout or its immediate numbered slot directory per line.
-Blank lines and whole lines beginning with `#` after optional indentation are ignored.
-The sweep checks that every listed path resolves to a leased slot in its pools and stops if any listed path lacks a verified lease.
-Each secondmate maintains its own optional list.
-
-Run `bin/fm-treehouse-prune.sh arm` to enable the sweep for a home, which requires `setsid` so the worker can continue in a separate session after the watcher check returns.
-The watcher starts a sweep when at least 24 hours have passed since the previous start.
-The owner-only `state/.treehouse-prune` record tracks the latest start and result, and `state/.treehouse-prune.log` holds the details, including any slots that need a lease.
-A failed or interrupted sweep produces one watcher wake pointing to the log.
-Run `bin/fm-treehouse-prune.sh disarm` to remove the schedule and both records.
-
 ## Mail plane (.env)
 
 The mail plane (bin/fm-mail.sh) reads unseen IMAP messages and sends one SMTP message.

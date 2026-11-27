@@ -108,6 +108,7 @@ git -C "$PROJ" add README.md
 git -C "$PROJ" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm initial
 git clone --quiet --bare "$PROJ" "$PROJ.origin.git"
 git -C "$PROJ" remote add origin "file://$PROJ.origin.git"
+printf 'worktree_path = "%s"\n' "$TMP_ROOT/escaped/{repo}-{slot}" > "$PROJ/treehouse.toml"
 
 # --- spawn with NO explicit backend config; HERDR_ENV=1 is the only marker --
 
@@ -144,6 +145,8 @@ WT=$(grep '^worktree=' "$META" | cut -d= -f2-)
 if [ -z "$WT" ] || [ ! -d "$WT" ]; then
   fail "auto-detected spawn did not report a real worktree path"
 fi
+case "$WT" in "$TREEHOUSE_ROOT"/*) ;; *) fail "spawn checkout escaped the Treehouse scratch root: $WT" ;; esac
+[ ! -e "$TMP_ROOT/escaped" ] || fail "spawn created a checkout at the configured path outside the scratch root"
 
 PANE=$(grep '^herdr_pane_id=' "$META" | cut -d= -f2-)
 [ -n "$PANE" ] || fail "auto-detected spawn meta is missing herdr_pane_id"
