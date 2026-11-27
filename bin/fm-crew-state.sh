@@ -93,6 +93,8 @@
 #
 # Read-only and side-effect free. Always exits 0 on a successful read regardless
 # of state; exit 2 only on a usage error (no id).
+# FM_CREW_STATE_CANCELLED_RUN=1 adds the selected cancellation's start minute
+# and PR to the run detail for inactive reconciliation.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -543,9 +545,10 @@ nm_ci_checks_state() {
 # task copy never fetched used to be rejected here, letting the older failed row
 # answer as current), so both attribution routes share one rule.
 # The same reader is also consulted when `axi status` DID bind this branch's run
-# but that run is terminal, to find a live sibling run for this worktree.
+# but that run is terminal, to find a live sibling or select evidence for a
+# cancelled run.
 nm_runs_list() {
-  nm_run runs --limit "$FM_CREW_STATE_RUNS_LIMIT"
+  TZ=UTC nm_run runs --limit "$FM_CREW_STATE_RUNS_LIMIT"
 }
 
 # CREW_BRANCH is empty at detached HEAD (a just-spawned crew, or a scout's
@@ -565,11 +568,12 @@ HAVE_RUN=0
 # RUN_SOURCE distinguishes the two ways HAVE_RUN=1 can happen: "full" means
 # $RUN_OUT is real `axi status` TOON with step/gate detail (including a
 # same-branch run the strict head rule rejected but the ledger proved is this
-# worktree's pipeline-owned continuation); "coarse" means only a bare status
-# word came back from the runs-list fallback, so the run-step block below skips
-# the TOON field parsing entirely for this crew.
+# worktree's pipeline-owned continuation); "coarse" uses the selected ledger
+# result and skips TOON step and gate parsing.
 RUN_SOURCE=full
-COARSE_STATUS=""
+LEDGER_STATUS=""
+LEDGER_STARTED=""
+LEDGER_PR=""
 # Scouts and secondmates never drive a no-mistakes validation of their own
 # worktree, so skip the lookup for them and read state from pane/log directly.
 if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/null 2>&1; then
@@ -583,37 +587,26 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
     if [ -n "$run_branch" ] && [ "$run_branch" = "$CREW_BRANCH" ] \
       && { nm_run_head_matches_worktree || fm_nm_run_is_pipeline_owned_active "$RUN_OUT"; }; then
       HAVE_RUN=1
-      # Live-over-terminal (bin/fm-nm-run-lib.sh). Bare `axi status` answers
-      # with the most-recently-touched run, which after a pipeline crash is the
-      # dead run sitting at this worktree's exact commit while the live run
-      # that replaced it validates a descendant commit on the same branch. Both
-      # bind, so a terminal answer is provisional until the ledger has been
-      # asked whether this worktree also has a live run. Only a live word
-      # displaces it: a terminal run with no live sibling keeps its full
-      # `axi status` step and gate detail rather than degrading to the ledger.
-      if ! fm_nm_run_is_active "$RUN_OUT"; then
-        live_status=$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" "$(nm_runs_list)")
-        if [ "$(fm_nm_run_status_class "$live_status")" = live ]; then
-          COARSE_STATUS=$live_status
-          RUN_SOURCE=coarse
-        fi
-      fi
-    else
-      # The active-or-most-recent run is for another branch, or it names this
-      # branch with a head this copy cannot verify (a pipeline-advanced fix
-      # round, or a rewritten tip). Deliberately nested inside
-      # `[ -n "$RUN_OUT" ]`: an empty/timed-out primary call means the CLI
-      # itself did not respond, so retrying it immediately with a second
-      # bounded call would just double the wait for no better answer.
-      COARSE_STATUS=$(fm_nm_runs_status_for_worktree "$WT" "$CREW_BRANCH" "$(nm_runs_list)")
-      if [ -n "$COARSE_STATUS" ]; then
+    fi
+    # A terminal full answer may predate a live sibling or a newer retry.
+    # Cancellation evidence always comes from the selected ledger run.
+    if [ "$HAVE_RUN" = 0 ] || ! fm_nm_run_is_active "$RUN_OUT"; then
+      IFS=$'\t' read -r LEDGER_STATUS ledger_head LEDGER_STARTED LEDGER_PR \
+        <<< "$(fm_nm_runs_result_for_worktree "$WT" "$CREW_BRANCH" "$(nm_runs_list)")"
+      if [ -n "$LEDGER_STATUS" ] && [ "$HAVE_RUN" = 0 ]; then
         HAVE_RUN=1
-        # A branch-matching answer the strict rule rejected is this branch's
-        # own current run once the ledger proves the pipeline-owned
-        # continuation, so its axi TOON is the authoritative run detail
-        # (RUN_SOURCE stays full); only a foreign-branch answer leaves
-        # coarse status-word detail.
-        [ "$run_branch" = "$CREW_BRANCH" ] || RUN_SOURCE=coarse
+        RUN_SOURCE=coarse
+        run_head=$(strip_quotes "$(nm_field head)")
+        if [ "$run_branch" = "$CREW_BRANCH" ] && [ "$LEDGER_STATUS" = running ] \
+          && [[ "$run_head" == "$ledger_head"* ]] \
+          && [ -z "$(fm_nm_resolve_commit "$WT" "$ledger_head")" ] \
+          && fm_nm_run_is_active "$RUN_OUT"; then
+          RUN_SOURCE=full
+        fi
+      elif [ "$LEDGER_STATUS" = running ] || { [ "$(fm_nm_run_status_class "$LEDGER_STATUS")" = terminal ] \
+        && { [ "$(strip_quotes "$(nm_field outcome)")" = cancelled ] \
+          || [ "$(strip_quotes "$(nm_field status)")" = cancelled ]; }; }; then
+        RUN_SOURCE=coarse
       fi
     fi
   fi
@@ -638,7 +631,7 @@ if [ "$HAVE_RUN" = 1 ]; then
     # surfaced by each supervisor's span classification (fm-classify-lib.sh's
     # status_span_first_actionable) regardless of this coarse-vs-full
     # distinction, so a real gate is never silently missed.
-    case "$COARSE_STATUS" in
+    case "$LEDGER_STATUS" in
       running)   RUN_STATE=working; RUN_DETAIL="validating (background run)" ;;
       completed) RUN_STATE="done";  RUN_DETAIL="run completed" ;;
       failed)
@@ -653,7 +646,7 @@ if [ "$HAVE_RUN" = 1 ]; then
           RUN_STATE=failed; RUN_DETAIL="run failed"
         fi ;;
       cancelled) RUN_STATE=failed;  RUN_DETAIL="run cancelled" ;;
-      *)         RUN_STATE=unknown; RUN_DETAIL="runs list status: $COARSE_STATUS" ;;
+      *)         RUN_STATE=unknown; RUN_DETAIL="runs list status: $LEDGER_STATUS" ;;
     esac
   else
     status=$(strip_quotes "$(nm_field status)")
@@ -783,6 +776,10 @@ if [ "$HAVE_RUN" = 1 ]; then
         [ -z "$RUN_PR" ] || RUN_DETAIL="$RUN_DETAIL${SEP}run PR: $RUN_PR"
         ;;
     esac
+  fi
+  if [ "${FM_CREW_STATE_CANCELLED_RUN:-0}" = 1 ] && [ "$RUN_DETAIL" = 'run cancelled' ] \
+    && [ "$LEDGER_STATUS" = cancelled ] && [ -n "$LEDGER_PR" ]; then
+    RUN_DETAIL="$RUN_DETAIL${SEP}run started: $LEDGER_STARTED${SEP}run PR: $LEDGER_PR"
   fi
   emit "$RUN_STATE" run-step "$RUN_DETAIL"
 fi

@@ -37,6 +37,10 @@ SH
   cat > "$fake/tmux" <<'SH'
 #!/usr/bin/env bash
 case "${1:-}" in
+  list-windows)
+    if [ "${5:-}" = '#{==:#{session_name}:#{window_name},firstmate:fm-mate}' ]; then
+      printf '@1\n'
+    fi ;;
   display-message) printf '%%1\n' ;;
   capture-pane) printf 'idle\n> \n' ;;
 esac
@@ -141,6 +145,93 @@ prime_seen() { # <state> <status>
     . "$1"
     fm_wake_status_mark_current "$2" "$3"
   ' _ "$ROOT/bin/fm-wake-lib.sh" "$1" "$2"
+}
+
+# A child whose validation run ended with the given no-mistakes outcome and
+# whose current state is read by the REAL fm-crew-state.sh, with a fake
+# no-mistakes reporting that run for the child's own worktree branch and head.
+CANCEL_PR=https://github.com/owner/repo/pull/7
+CANCEL_PAUSE="paused: PR $CANCEL_PR open; awaiting merge; cancelled because CI never registers on this repository"
+CANCEL_PAUSE_TIME=$(( ($(date +%s) / 60 - 3) * 60 + 15 ))
+
+fixture_utc_minute() {
+  date -u -r "$1" '+%Y-%m-%d %H:%M' 2>/dev/null || date -u -d "@$1" '+%Y-%m-%d %H:%M'
+}
+
+write_validation_outcome() { # <home> <id> <run-id> <run-outcome> [run-pr] [start-epoch]
+  local home=$1 wt="$1/projects/$2" run_id=$3 outcome=$4 pr=${5:-$CANCEL_PR} head branch started
+  head=$(git -C "$wt" rev-parse HEAD)
+  branch=$(git -C "$wt" symbolic-ref --short HEAD)
+  started=$(fixture_utc_minute "${6:-$((CANCEL_PAUSE_TIME - 120))}")
+  cat > "$home/run.txt" <<RUN
+run:
+  id: "$run_id"
+  branch: $branch
+  head: "$head"
+  pr: "$pr"
+  status: $outcome
+  outcome: $outcome
+RUN
+  printf '%s %s %.8s %s %s\n' "$outcome" "$branch" "$head" "$started" "$pr" > "$home/runs.txt"
+  printf '%s\n' 'no CI checks reported - still monitoring' > "$home/ci.log"
+}
+
+write_validated_child() { # <home> <id> <status-line> <run-outcome>
+  local home=$1 id=$2 status=$3 outcome=$4 wt gen
+  wt="$home/projects/$id"
+  mkdir -p "$wt"
+  git -C "$wt" init -q
+  git -C "$wt" -c user.name=fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m init
+  fm_write_meta "$home/state/$id.meta" \
+    "window=firstmate:fm-$id" "worktree=$wt" "project=alpha" \
+    'harness=claude' 'kind=ship' 'mode=no-mistakes' 'yolo=off' "spawn_gen=s$RANDOM"
+  gen=$("$ROOT/bin/fm-busy-event.sh" arm "$home/state" "$id")
+  "$ROOT/bin/fm-busy-event.sh" apply "$home/state" "$id" idle --gen "$gen" \
+    --source claude-hook --event stop
+  write_validation_outcome "$home" "$id" "run-$id" "$outcome"
+  cat > "$WORLD/fakebin/no-mistakes" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'axi status') cat "$FM_HOME/run.txt" ;;
+  'axi logs --step ci --run '*) cat "$FM_HOME/ci.log" ;;
+  'runs --limit '*) cat "$FM_HOME/runs.txt" ;;
+esac
+SH
+  chmod +x "$WORLD/fakebin/no-mistakes"
+  printf '%s\n' "$status" > "$home/state/$id.status"
+}
+
+# Arm the PR exactly as a worker's ready signal does, through the real
+# fm-pr-check.sh. Its optional forge head lookup is answered by a silent stub,
+# then the forge log is reset so later scans prove they never touch the forge.
+register_pr() { # <home> <id>
+  local home=$1 id=$2 regbin="$WORLD/regbin"
+  mkdir -p "$regbin"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$regbin/gh"
+  chmod +x "$regbin/gh"
+  PATH="$regbin:$PATH" FM_ROOT_OVERRIDE="$WORLD/root" FM_HOME="$home" \
+    FM_STATE_OVERRIDE="$home/state" "$ROOT/bin/fm-pr-check.sh" "$id" "$CANCEL_PR" \
+    > "$WORLD/register.log" 2>&1 || fail "could not register the PR: $(cat "$WORLD/register.log")"
+}
+
+# Every scan of these children reads the real current-state source.
+run_real_reconcile() { # <home>
+  local home=$1
+  : > "$WORLD/forge.log"
+  age "$home/state/child.meta"
+  set_mtime "$CANCEL_PAUSE_TIME" "$home/state/child.status"
+  PATH="$WORLD/fakebin:$PATH" FM_ROOT_OVERRIDE="$WORLD/root" FM_HOME="$home" \
+    FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" FM_CONFIG_OVERRIDE="$home/config" \
+    FM_INACTIVE_RECONCILE_SECS=60 FM_FORGE_LOG="$WORLD/forge.log" "$RECON" scan --startup \
+    || fail "inactive reconciliation scan failed for $home"
+  grep -Fxq 'cursor=' "$home/state/.inactive-outcome-reconcile" \
+    || fail "inactive reconciliation did not complete its pass for $home"
+  [ ! -s "$WORLD/forge.log" ] || fail "reconciliation invoked a forge command: $(cat "$WORLD/forge.log")"
+}
+
+real_crew_state() { # <home>
+  PATH="$WORLD/fakebin:$PATH" FM_HOME="$1" FM_STATE_OVERRIDE="$1/state" \
+    "$ROOT/bin/fm-crew-state.sh" child 2>/dev/null
 }
 
 reap() { kill "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; }
@@ -818,6 +909,289 @@ test_reconciliation_never_calls_forge() {
   pass "reconciliation makes zero forge or PR API calls"
 }
 
+test_cancelled_run_with_registered_pr_reports_awaiting_merge() {
+  local route parent_status offset line receipt expected='run cancelled; registered PR awaiting a merge decision'
+  make_world cancelled-main
+  write_validated_child "$MAIN" child "$CANCEL_PAUSE" cancelled
+  register_pr "$MAIN" child
+  line=$(real_crew_state "$MAIN")
+  [ "$line" = "state: failed · source: run-step · run cancelled" ] \
+    || fail "fixture must read as a cancelled run, got: $line"
+  run_real_reconcile "$MAIN"
+  [ "$(outcome_count "$MAIN" pending)" = 1 ] && [ "$(wake_count "$MAIN" 'inactive-outcome:')" = 1 ] \
+    || fail "the cancelled run did not leave exactly one supervisor wake and receipt"
+  grep -Fq "child=child $expected pr=$CANCEL_PR" "$MAIN/state/.wake-queue" \
+    || fail "the supervisor wake did not report the cancelled run awaiting merge"
+  (umask 077; printf '%s\n' "$CANCEL_PR" > "$MAIN/state/child.pr-poll-closed")
+  run_real_reconcile "$MAIN"
+  [ "$(outcome_count "$MAIN" pending)" = 1 ] && [ "$(wake_count "$MAIN" 'inactive-outcome:')" = 1 ] \
+    || fail "closure duplicated the cancellation already queued for the supervisor"
+
+  for route in local remote; do
+    make_world "cancelled-mate-$route"; bind_secondmate "$route"
+    write_validated_child "$MATE" child "$CANCEL_PAUSE" cancelled
+    cat > "$MATE/run.txt" <<'RUN'
+run:
+  id: run-sibling
+  branch: fm/sibling
+  head: aaaaaaa
+  status: running
+RUN
+    register_pr "$MATE" child
+    if [ "$route" = local ]; then
+      parent_status="$MAIN/state/mate.status"
+    else
+      parent_status="$MATE/state/parent-replies.status"
+    fi
+    offset=$(wc -c < "$parent_status" | tr -d ' ')
+    line=$(real_crew_state "$MATE")
+    [ "$line" = "state: failed · source: run-step · run cancelled" ] \
+      || fail "the ledger must select the cancelled run while the sibling is active: $line"
+    run_real_reconcile "$MATE"
+    line=$(bash -c '. "$1"; status_span_first_actionable "$2" "$3"' _ \
+      "$ROOT/bin/fm-classify-lib.sh" "$parent_status" "$offset") \
+      || fail "the $route parent route did not receive an actionable cancellation report"
+    case "$line" in
+      'done [key=inactive-outcome-mate-child-cancelled]: inactive terminal child=child '*" $expected pr=$CANCEL_PR") ;;
+      *) fail "the $route parent report did not say the cancelled run awaits merge: $line" ;;
+    esac
+    if [ "$route" = remote ]; then
+      for receipt in "$MATE/state/terminal-outcomes/"*.reported; do
+        mv -- "$receipt" "${receipt%.reported}.pending" || fail "could not model interrupted receipt finalization"
+      done
+    fi
+    (umask 077; printf '%s\n' "$CANCEL_PR" > "$MATE/state/child.pr-poll-closed")
+    run_real_reconcile "$MATE"
+    [ "$(outcome_count "$MATE" reported)" = 1 ] \
+      && [ "$(grep -c 'inactive-outcome-mate-child-' "$parent_status")" = 1 ] \
+      || fail "the $route parent received another report for the same cancellation after closure"
+  done
+  pass "registered-PR cancellations produce a supervisor wake and actionable parent reports"
+}
+
+test_published_cancellation_stays_delivered_after_merge() {
+  local parent_status
+  make_world cancellation-merge-retirement; bind_secondmate local
+  write_validated_child "$MATE" child "$CANCEL_PAUSE" cancelled
+  register_pr "$MATE" child
+  run_real_reconcile "$MATE"
+  parent_status="$MAIN/state/mate.status"
+  [ "$(grep -c '^done \[key=inactive-outcome-mate-child-cancelled\]' "$parent_status")" = 1 ] \
+    || fail "fixture did not deliver the cancellation before merge"
+
+  prime_seen "$MATE/state" "$MATE/state/child.status"
+  cat > "$WORLD/fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' gh >> "${FM_FORGE_LOG:?}"
+[ "$*" = 'pr view https://github.com/owner/repo/pull/7 --repo owner/repo --json state -q .state' ] || exit 97
+printf '%s\n' MERGED
+SH
+  bash -c '. "$1"; shift; fm_run_timed 10 "$@"' _ "$ROOT/bin/fm-timeout-lib.sh" \
+    env PATH="$WORLD/fakebin:$PATH" FM_ROOT_OVERRIDE="$WORLD/root" FM_HOME="$MATE" \
+      FM_STATE_OVERRIDE="$MATE/state" FM_DATA_OVERRIDE="$MATE/data" FM_CONFIG_OVERRIDE="$MATE/config" \
+      FM_FORGE_LOG="$WORLD/forge.log" FM_INACTIVE_RECONCILE_SECS=60 \
+      FM_POLL=1 FM_SIGNAL_GRACE=0 FM_CHECK_INTERVAL=0 FM_HEARTBEAT=999999 \
+      "$WATCH" > "$WORLD/watch.log" 2>&1 || fail "merge watcher failed: $(cat "$WORLD/watch.log")"
+  grep -Fxq "done [key=merged-child]: merged child $CANCEL_PR" "$parent_status" \
+    || fail "watcher did not report the merge"
+  [ ! -e "$MATE/state/child.pr-poll-registration" ] || fail "watcher did not retire the PR poll"
+
+  run_real_reconcile "$MATE"
+  [ "$(grep -c 'inactive-outcome-mate-child-' "$parent_status")" = 1 ] \
+    || fail "merge retirement duplicated the cancellation already published to the parent: $(cat "$parent_status")"
+
+  write_validation_outcome "$MATE" child run-retry cancelled "$CANCEL_PR" "$((CANCEL_PAUSE_TIME + 15))"
+  run_real_reconcile "$MATE"
+  [ "$(grep -c '^failed \[key=inactive-outcome-mate-child-failed\]' "$parent_status")" = 1 ] \
+    || fail "merge retirement hid a later cancellation outside the declared pause"
+  pass "merge retirement preserves the published cancellation and reports a later retry"
+}
+
+test_other_terminal_failures_keep_failed_label() {
+  make_world cancel-no-registration
+  write_validated_child "$MAIN" child "$CANCEL_PAUSE" cancelled
+  fm_write_meta "$MAIN/state/child.meta" \
+    "window=firstmate:fm-child" "worktree=$MAIN/projects/child" "project=alpha" \
+    'harness=claude' 'kind=ship' 'mode=no-mistakes' 'yolo=off' "pr=$CANCEL_PR"
+  run_real_reconcile "$MAIN"
+  [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a cancellation with no PR registration was not reported failed"
+
+  make_world genuine-failure
+  write_validated_child "$MAIN" child "$CANCEL_PAUSE" failed
+  register_pr "$MAIN" child
+  [ "$(real_crew_state "$MAIN")" = "state: failed · source: run-step · run failed" ] \
+    || fail "fixture must read as a failed run, got: $(real_crew_state "$MAIN")"
+  run_real_reconcile "$MAIN"
+  [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a genuinely failed run was not reported failed"
+
+  make_world cancel-pr-closed
+  write_validated_child "$MAIN" child "$CANCEL_PAUSE" cancelled
+  register_pr "$MAIN" child
+  (umask 077; printf '%s\n' "$CANCEL_PR" > "$MAIN/state/child.pr-poll-closed")
+  run_real_reconcile "$MAIN"
+  [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a cancellation whose PR closed was not reported failed"
+
+  make_world cancel-pr-merged
+  write_validated_child "$MAIN" child "$CANCEL_PAUSE" cancelled
+  register_pr "$MAIN" child
+  ( . "$ROOT/bin/fm-pr-lib.sh"
+    fm_pr_poll_merge_mark_notified "$MAIN/state" child github github.com owner/repo 7 ) \
+    || fail "could not record the PR merge in the fixture"
+  run_real_reconcile "$MAIN"
+  [ "$(wake_count "$MAIN" 'state=failed')" = 1 ] || fail "a cancellation whose PR merged was treated as awaiting merge"
+  pass "unregistered, closed, merged, and genuinely failed outcomes keep the failed label"
+}
+
+test_unrelated_cancellation_keeps_failure_notice() {
+  local scenario
+  if [ "$#" -eq 0 ]; then
+    set -- unrelated-pause wrong-pause-pr wrong-run-pr cancelled-retry stale-same-branch-run
+  fi
+  for scenario in "$@"; do
+    make_world "$scenario"
+    write_validated_child "$MAIN" child "$CANCEL_PAUSE" cancelled
+    register_pr "$MAIN" child
+    case "$scenario" in
+      unrelated-pause)
+        printf '%s\n' 'paused: waiting for CI runner repair' > "$MAIN/state/child.status" ;;
+      wrong-pause-pr)
+        printf '%s\n' "${CANCEL_PAUSE/"$CANCEL_PR"/"${CANCEL_PR%/*}/8"}" > "$MAIN/state/child.status" ;;
+      wrong-run-pr)
+        write_validation_outcome "$MAIN" child run-other-pr cancelled "${CANCEL_PR%/*}/8" ;;
+      cancelled-retry)
+        run_real_reconcile "$MAIN"
+        [ "$(wake_count "$MAIN" 'child=child run cancelled')" = 1 ] \
+          || fail "the original cancellation did not produce a merge-wait notice"
+        cp "$MAIN/runs.txt" "$WORLD/older-row"
+        write_validation_outcome "$MAIN" child run-retry cancelled "$CANCEL_PR" "$((CANCEL_PAUSE_TIME + 15))"
+        cat "$WORLD/older-row" >> "$MAIN/runs.txt"
+        printf '%s\n' 'checks failed' > "$MAIN/ci.log" ;;
+      stale-same-branch-run)
+        cp "$MAIN/run.txt" "$WORLD/older-run"
+        git -C "$MAIN/projects/child" -c user.name=fixture -c user.email=fixture@example.invalid \
+          commit -q --allow-empty -m retry
+        write_validation_outcome "$MAIN" child run-retry failed
+        mv "$WORLD/older-run" "$MAIN/run.txt"
+        assert_contains "$(real_crew_state "$MAIN")" 'run failed' \
+          "current-head failure must win over older same-branch cancellation" ;;
+    esac
+    run_real_reconcile "$MAIN"
+    [ "$(wake_count "$MAIN" 'child=child state=failed')" = 1 ] \
+      || fail "$scenario did not produce a failure notice"
+  done
+  pass "unrelated and stale cancellations preserve the failure notice"
+}
+
+test_unpublished_cancellation_reports_failure_after_closure() {
+  make_world cancellation-queue-recovery
+  write_validated_child "$MAIN" child "$CANCEL_PAUSE" cancelled
+  register_pr "$MAIN" child
+  mkdir "$MAIN/state/.wake-queue"
+  run_real_reconcile "$MAIN"
+  [ "$(outcome_count "$MAIN" pending)" = 1 ] || fail "the blocked wake did not leave a pending cancellation"
+
+  (umask 077; printf '%s\n' "$CANCEL_PR" > "$MAIN/state/child.pr-poll-closed")
+  rmdir "$MAIN/state/.wake-queue"
+  run_real_reconcile "$MAIN"
+  [ "$(outcome_count "$MAIN" pending)" = 1 ] && [ "$(wake_count "$MAIN" 'child=child state=failed')" = 1 ] \
+    || fail "the first supervisor wake after closure did not report failure"
+
+  make_world cancellation-parent-recovery; bind_secondmate local
+  write_validated_child "$MATE" child "$CANCEL_PAUSE" cancelled
+  register_pr "$MATE" child
+  mv "$MAIN/state/mate.status" "$WORLD/ready.status"
+  mkdir "$MAIN/state/mate.status" "$MATE/state/.wake-queue"
+  run_real_reconcile "$MATE"
+  [ "$(outcome_count "$MATE" pending)" = 1 ] || fail "the blocked parent route did not leave a pending cancellation"
+
+  (umask 077; printf '%s\n' "$CANCEL_PR" > "$MATE/state/child.pr-poll-closed")
+  rmdir "$MATE/state/.wake-queue"
+  run_real_reconcile "$MATE"
+  [ "$(wake_count "$MATE" 'needs parent report: child=child state=failed')" = 1 ] \
+    || fail "the first parent-delivery diagnostic after closure did not report failure"
+  rmdir "$MAIN/state/mate.status"
+  mv "$WORLD/ready.status" "$MAIN/state/mate.status"
+  run_real_reconcile "$MATE"
+  [ "$(outcome_count "$MATE" pending)" = 0 ] && [ "$(outcome_count "$MATE" reported)" = 1 ] \
+    && [ "$(grep -c '^failed \[key=inactive-outcome-mate-child-failed\]' "$MAIN/state/mate.status")" = 1 ] \
+    || fail "the first parent report after closure did not report failure"
+  pass "an undelivered cancellation is reported as failed after closure"
+}
+
+test_unqualified_cancellation_keeps_failure_identity() {
+  make_world unregistered-cancellation-upgrade
+  write_validated_child "$MAIN" child 'working: waiting for validation' cancelled
+  age "$MAIN/state/child.meta" "$MAIN/state/child.status"
+  FM_FAKE_CREW_STATE=failed run_reconcile "$MAIN" --startup
+  [ "$(wake_count "$MAIN" 'child=child state=failed')" = 1 ] || fail "fixture did not queue the ordinary failure"
+  run_real_reconcile "$MAIN"
+  [ "$(outcome_count "$MAIN" pending)" = 1 ] && [ "$(wake_count "$MAIN" 'inactive-outcome:')" = 1 ] \
+    || fail "an unregistered cancellation duplicated an existing ordinary failure wake"
+
+  make_world unregistered-cancellation-ledger; bind_secondmate local
+  write_validated_child "$MATE" child 'working: waiting for validation' cancelled
+  run_real_reconcile "$MATE"
+  [ "$(grep -c '^failed \[key=inactive-outcome-mate-child-failed\]' "$MAIN/state/mate.status")" = 1 ] \
+    || fail "fixture did not deliver the unregistered cancellation as a failure"
+  printf 'failed: validation was cancelled\n' >> "$MATE/state/child.status"
+  run_report "$MATE" child || fail "teardown-side reporting did not reconcile the failed ledger line"
+  [ "$(wc -l < "$MAIN/state/mate.status" | tr -d ' ')" = 1 ] \
+    || fail "the failed ledger append duplicated the ordinary cancellation failure report"
+  pass "unregistered cancellations retain ordinary failure receipts and ledger deduplication"
+}
+
+test_failed_retry_after_cancellation_gets_its_own_report() {
+  local home route
+  for route in main local; do
+    make_world "failed-retry-$route"
+    if [ "$route" = main ]; then
+      home=$MAIN
+    else
+      bind_secondmate local
+      home=$MATE
+    fi
+    write_validated_child "$home" child "$CANCEL_PAUSE" cancelled
+    register_pr "$home" child
+    run_real_reconcile "$home"
+    if [ "$route" = main ]; then
+      [ "$(wake_count "$MAIN" 'child=child run cancelled')" = 1 ] \
+        || fail "fixture did not queue the cancellation"
+    else
+      [ "$(grep -c 'inactive-outcome-mate-child-cancelled' "$MAIN/state/mate.status")" = 1 ] \
+        || fail "fixture did not deliver the cancellation"
+    fi
+
+    write_validation_outcome "$home" child run-retry failed
+    run_real_reconcile "$home"
+    run_real_reconcile "$home"
+    if [ "$route" = main ]; then
+      [ "$(outcome_count "$MAIN" pending)" = 2 ] && [ "$(wake_count "$MAIN" 'child=child state=failed')" = 1 ] \
+        || fail "the failed retry did not get its own supervisor wake and receipt"
+    else
+      [ "$(outcome_count "$MATE" reported)" = 2 ] \
+        && [ "$(grep -c '^failed \[key=inactive-outcome-mate-child-failed\]' "$MAIN/state/mate.status")" = 1 ] \
+        || fail "the failed retry did not get its own parent report and receipt"
+    fi
+  done
+  pass "a failed retry gets a distinct report with the same PR and status line"
+}
+
+test_failed_ledger_append_after_cancellation_gets_its_own_report() {
+  make_world appended-failed; bind_secondmate local
+  write_validated_child "$MATE" child "$CANCEL_PAUSE" cancelled
+  register_pr "$MATE" child
+  run_real_reconcile "$MATE"
+  [ "$(grep -c 'inactive-outcome-mate-child-cancelled' "$MAIN/state/mate.status")" = 1 ] \
+    || fail "fixture did not deliver the cancellation"
+
+  printf 'failed: retry exhausted\n' >> "$MATE/state/child.status"
+  run_real_reconcile "$MATE"
+  run_report "$MATE" child || fail "teardown-side reporting did not accept the delivered failure"
+  [ "$(grep -c '^failed \[key=child-outcome-child-failed-.*\]: child child failed: retry exhausted' "$MAIN/state/mate.status")" = 1 ] \
+    || fail "the explicit failure was not delivered exactly once after cancellation"
+  pass "a failed ledger append gets a distinct report after cancellation"
+}
+
 test_main_direct_terminal_presentation_receipt
 test_local_secondmate_delivers_terminal_ledger_line
 test_busy_child_does_not_starve_later_ledger_outcomes
@@ -847,5 +1221,13 @@ test_full_scan_budget_includes_wake_lock_wait
 test_notice_recovery_does_not_duplicate_wake
 test_missing_parent_binding_names_itself
 test_reconciliation_never_calls_forge
+test_cancelled_run_with_registered_pr_reports_awaiting_merge
+test_published_cancellation_stays_delivered_after_merge
+test_other_terminal_failures_keep_failed_label
+test_unrelated_cancellation_keeps_failure_notice
+test_unpublished_cancellation_reports_failure_after_closure
+test_unqualified_cancellation_keeps_failure_identity
+test_failed_retry_after_cancellation_gets_its_own_report
+test_failed_ledger_append_after_cancellation_gets_its_own_report
 
 echo "all inactive reconciliation tests passed"
