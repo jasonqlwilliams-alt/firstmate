@@ -111,17 +111,18 @@
 # matching ^skip:) remain successful and are counted as skipped_gate; each one
 # is logged with its reason and recorded in the timing artifact.
 #
-# expected_gate_skip classes name why a suite is allowed to skip: herdr,
+# expected_gate_skip classes identify a suite's expected capability gates: herdr,
 # treehouse, herdr,treehouse (either prerequisite), optional-binary (an optional
 # backend), live-capability (a live-harness guard governed by fm_live_gate, which
 # records unavailable tools and explicit policy skips; see tests/lib.sh), or none.
 #
 # Every selected script runs isolated from the host's global and system Git
 # configuration, including one that sources no test helper of its own;
-# tests/git-config-helpers.sh owns that contract and its limits. Each one also
-# runs under its own disposable TREEHOUSE_ROOT, removed when it exits, so no
-# suite creates a pool folder under the real Treehouse root;
-# tests/treehouse-test-helpers.sh owns that contract.
+# tests/git-config-helpers.sh owns that contract and its limits.
+# The runner gives each suite a disposable TREEHOUSE_ROOT and, when Treehouse
+# is installed, a PATH wrapper that selects that root for test allocations.
+# The runner removes the scratch directory after the suite returns.
+# tests/treehouse-test-helpers.sh owns scratch setup and stale-fixture recovery.
 #
 # Family labels, the changed-file map, and production portable-shard composition
 # live in this script only (one owner). The proven-isolated candidate set remains
@@ -1338,8 +1339,8 @@ families_for_changed_path() {
       # only proven by running them: its own contract test passing says the
       # runner's logic is right, not that the suite it drives still runs.
       printf '%s\n' pure-contract-unit
-      # Only this script wraps each suite in run_script_bounded's fixture Git
-      # isolation, and only a standalone-family script proves it.
+      # The fixture suite covers the runner's Git and Treehouse isolation.
+      # The auto-detection smoke also covers inheritance by a real Herdr pane.
       printf '%s\n' "__script__:fm-test-fixtures.test.sh" "__script__:fm-backend-autodetect-smoke.test.sh"
       ;;
     tests/treehouse-test-helpers.sh)

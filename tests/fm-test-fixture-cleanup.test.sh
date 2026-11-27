@@ -206,7 +206,9 @@ test_orphan_sweep_respects_fixture_ownership() {
   local harness dirfile active_dir legacy_dir legacy_identity stale_dir fresh_dir pid tries
   harness=$(fm_test_tmproot fm-test-cleanup-orphan-harness)
   dirfile="$harness/active-dir"
-  TZ=EST5 FM_PROC_ROOT_OVERRIDE="$harness/no-proc" TMPDIR="$harness" bash -c '
+  # This child only creates the live fixture. The explicit sweep below is
+  # scoped to this test, so the simulated process lookup cannot reap other pools.
+  FM_TEST_SKIP_ORPHAN_REAP=1 TZ=EST5 FM_PROC_ROOT_OVERRIDE="$harness/no-proc" TMPDIR="$harness" bash -c '
     # shellcheck source=tests/lib.sh
     . "'"$LIB"'"
     d=$(fm_test_tmproot fm-test-cleanup-active)
