@@ -1512,6 +1512,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   RELAUNCH_TARGET=$FM_BACKEND_VALIDATED_TARGET
   fm_backend_validate_spawn "$BACKEND" || exit 1
   fm_backend_source "$BACKEND" || exit 1
+  [ "$BACKEND" != tmux ] || fm_tmux_use_relaunch_routing
   # A relaunch must PROVE the previous agent is gone before it launches another
   # one into the same endpoint, and only tmux and herdr have a recovery-grade
   # classifier that can (bin/fm-control-lib.sh owns that capability table).
@@ -3358,14 +3359,9 @@ case "$BACKEND" in
   tmux)
     SES=$(fm_backend_tmux_container_ensure "$SES") || exit 1
     T="$SES:$W"
-    # #134 robustness (tmux): fm_backend_tmux_create_task captures a stable window
-    # id and pins the window name (automatic-rename/allow-rename off) so a captain's
-    # non-default tmux config cannot rename the window away from fm-<id> once
-    # treehouse cd's into the worktree. WT_TARGET carries that stable id for the
-    # rename-critical worktree-detection steps below; the persisted window= handle
-    # stays $T (the name form), which is safe now that rename is disabled.
-    WID=$(fm_backend_tmux_create_task "$SES" "$W" "$PROJ_ABS") || exit 1
-    WT_TARGET="$WID"
+    # The adapter pins the window name and returns the new pane binding for
+    # worktree discovery and fresh startup input. Metadata keeps the name.
+    WT_TARGET=$(fm_backend_tmux_create_task "$SES" "$W" "$PROJ_ABS") || exit 1
     ;;
   herdr)
     # fm_backend_herdr_workspace_label resolves the target workspace from
@@ -3603,12 +3599,11 @@ if [ "$KIND" = secondmate ] && [ "$RELAUNCH" -eq 0 ]; then
     propagate_inheritable_config "$CONFIG" "$PROJ_ABS/config" \
     || echo "warning: secondmate $ID trace-context inheritance failed for $PROJ_ABS" >&2
 fi
-# #134 robustness: only tmux needs a worktree-detection target distinct from $T -
-# its rename-safe stable window id, set as WT_TARGET=$WID in the tmux branch above.
-# Every other backend addresses its pane/surface by the id already in $T, so default
-# WT_TARGET to $T for them (and for any future backend) - the shared treehouse-get +
-# worktree-detection steps below must never reference an unbound WT_TARGET under set -u.
+# Non-tmux backends already address the runtime endpoint by its recorded ID.
 : "${WT_TARGET:=$T}"
+# Keep fresh startup reads, input, and cleanup tied to the pane just created.
+STARTUP_TARGET=$T
+[ "$RELAUNCH" -ne 0 ] || STARTUP_TARGET=$WT_TARGET
 spawn_send_text_line() {  # <target> <text>
   case "$BACKEND" in
     tmux) fm_backend_tmux_send_text_line "$1" "$2" ;;
@@ -3646,7 +3641,7 @@ spawn_send_key() {  # <target> <key>
 }
 
 kimi_capture() {
-  fm_backend_capture "$BACKEND" "$T" 120 "$W" 2>/dev/null || true
+  fm_backend_capture "$BACKEND" "$STARTUP_TARGET" 120 "$W" 2>/dev/null || true
 }
 
 # Kimi launch-readiness and delivery route their composer-emptiness half
@@ -3658,7 +3653,7 @@ kimi_capture() {
 # claude's did. The banner and brief-echo greps below are launch-progress
 # signals, not composer shapes, so they stay here.
 kimi_composer_is_empty() {
-  [ "$(fm_backend_composer_state "$BACKEND" "$T" "$W" 2>/dev/null)" = empty ]
+  [ "$(fm_backend_composer_state "$BACKEND" "$STARTUP_TARGET" "$W" 2>/dev/null)" = empty ]
 }
 
 kimi_wait_for_ready() {
@@ -3710,11 +3705,11 @@ kimi_spawn_fail() {  # <detail>
 # like kimi. The banner and context-usage greps are launch-progress signals, not
 # composer shapes.
 rovo_capture() {
-  fm_backend_capture "$BACKEND" "$T" 120 "$W" 2>/dev/null || true
+  fm_backend_capture "$BACKEND" "$STARTUP_TARGET" 120 "$W" 2>/dev/null || true
 }
 
 rovo_composer_is_empty() {
-  [ "$(fm_backend_composer_state "$BACKEND" "$T" "$W" 2>/dev/null)" = empty ]
+  [ "$(fm_backend_composer_state "$BACKEND" "$STARTUP_TARGET" "$W" 2>/dev/null)" = empty ]
 }
 
 rovo_wait_for_ready() {
@@ -3782,7 +3777,7 @@ rovo_endpoint_cleanup() {
   [ "$BACKEND" = orca ] && return 0
   local tab_id=
   [ "$BACKEND" = zellij ] && tab_id=$ZELLIJ_TAB_ID
-  fm_backend_kill "$BACKEND" "$T" "$tab_id" "fm-$ID" 2>/dev/null || true
+  fm_backend_kill "$BACKEND" "$STARTUP_TARGET" "$tab_id" "fm-$ID" 2>/dev/null || true
 }
 
 # Only send shell commands after the recovery-grade classifier proves that
@@ -3934,10 +3929,9 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   spawn_send_text_line "$WT_TARGET" "fm_acquired_slot=\$(treehouse get --lease --lease-holder $(printf '%q' "$ID")) && fm_acquired_base=\$(git -C \"\$fm_acquired_slot\" rev-parse --verify HEAD) && printf '%s\n%s\n' \"\$fm_acquired_slot\" \"\$fm_acquired_base\" > $(printf '%q' "$SPAWN_SLOT_ACQUIRE_FILE") && cd -- \"\$fm_acquired_slot\""
 
   # Wait for the acquired path: the pane's cwd moves from project to worktree.
-  # Target the stable window id, not the name: if the name is ever lost (e.g. an
-  # automatic-rename slips through), display-message -t <bad-name> falls back to the
-  # active client's window, which would misread firstmate's OWN pane path as the
-  # worktree and tangle a hook into the primary checkout. The window id never lies.
+  # The tmux binding from window creation keeps an active-split change or a
+  # reused ID on a replacement server from supplying the wrong cwd, which
+  # could tangle a hook into the primary checkout.
   # The project comparison is physical: spawn_worktree_isolated screens each
   # read against PROJ_ABS_REAL, not PROJ_ABS, because a symlinked project prefix
   # would otherwise make the pane's OS-level cwd read differ from PROJ_ABS on
@@ -5069,25 +5063,25 @@ spawn_record_traceparent() {
 # process (go build, go test, ...) inherit it. Sent before the launch command so
 # the env is set when the agent starts; the brief sleep lets the export land.
 SPAWN_TASK_TMP_HANDED_OFF=1
-spawn_send_text_line "$T" "export GOTMPDIR=$(printf '%q' "$TASK_TMP/gotmp")"
+spawn_send_text_line "$STARTUP_TARGET" "export GOTMPDIR=$(printf '%q' "$TASK_TMP/gotmp")"
 # Mark the pane as a task worker so bin/fm-test-run.sh can refuse to run the
 # suite in the repository's primary checkout. Ship and scout workers are the
 # ones assigned an isolated worktree; a secondmate runs its own home instead.
 # The id reached a validated bare-slug charset above, so it carries no shell
 # syntax of its own.
 if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
-  spawn_send_text_line "$T" "export FM_TASK_ID=$ID"
+  spawn_send_text_line "$STARTUP_TARGET" "export FM_TASK_ID=$ID"
 fi
 # The repository delivery guard is inert while this home configures no policy,
 # so an unconfigured home keeps its unguarded PATH exactly as before.
 if [ "$KIND" != secondmate ] && [ "$DELIVERY_POLICY_PRESENT" -eq 1 ]; then
-  spawn_send_text_line "$T" "export FM_DELIVERY_GUARD_ROOT=$sq_delivery_root FM_REAL_GH_AXI=$sq_real_gh_axi FM_REAL_GH=$sq_real_gh FM_REAL_GIT=$sq_real_git PATH=$sq_delivery_shims:\$PATH"
+  spawn_send_text_line "$STARTUP_TARGET" "export FM_DELIVERY_GUARD_ROOT=$sq_delivery_root FM_REAL_GH_AXI=$sq_real_gh_axi FM_REAL_GH=$sq_real_gh FM_REAL_GIT=$sq_real_git PATH=$sq_delivery_shims:\$PATH"
 fi
 # Send through the exact channel that already ships GOTMPDIR, so every backend
 # and harness - ship, scout, and secondmate - gets it before launch. Skipped
 # entirely when trace context is off.
 if [ -n "$SPAWN_TRACEPARENT" ]; then
-  if spawn_send_text_line "$T" "export TRACEPARENT=$SPAWN_TRACEPARENT"; then
+  if spawn_send_text_line "$STARTUP_TARGET" "export TRACEPARENT=$SPAWN_TRACEPARENT"; then
     if ! spawn_record_traceparent; then
       LAUNCH="unset TRACEPARENT; $LAUNCH"
     fi
@@ -5121,13 +5115,13 @@ if [ "$LAUNCH_ENV_ENABLED" = 1 ]; then
   LAUNCH="$LAUNCH_ENV_PREFIX /bin/sh -c $(shell_quote "$LAUNCH")"
 fi
 sleep 0.3
-spawn_send_literal "$T" "$LAUNCH"
+spawn_send_literal "$STARTUP_TARGET" "$LAUNCH"
 sleep 0.3
 if [ "${HERDR_PROJECTED:-0}" -eq 1 ]; then
   HERDR_PROJECTION_ABORT_CLEANUP=0
   spawn_herdr_presentation_order_lock_release
 fi
-spawn_send_key "$T" Enter
+spawn_send_key "$STARTUP_TARGET" Enter
 if [ "$HARNESS" = kimi ]; then
   if ! kimi_wait_for_ready; then
     kimi_spawn_fail "kimi did not show a verified ready signal before brief delivery"
@@ -5138,7 +5132,7 @@ if [ "$HARNESS" = kimi ]; then
   KIMI_SUBMIT_SLEEP=${FM_KIMI_SUBMIT_SLEEP:-${FM_KIMI_POLL_INTERVAL:-0.5}}
   KIMI_SUBMIT_SETTLE=${FM_KIMI_SUBMIT_SETTLE:-0}
   if ! KIMI_SUBMIT_VERDICT=$(fm_backend_send_text_submit \
-      "$BACKEND" "$T" "$KIMI_POINTER" "$KIMI_SUBMIT_RETRIES" \
+      "$BACKEND" "$STARTUP_TARGET" "$KIMI_POINTER" "$KIMI_SUBMIT_RETRIES" \
       "$KIMI_SUBMIT_SLEEP" "$KIMI_SUBMIT_SETTLE" "$W"); then
     kimi_spawn_fail "kimi brief pointer could not be submitted"
     exit 1
@@ -5162,7 +5156,7 @@ if [ "$HARNESS" = rovo ]; then
   ROVO_SUBMIT_SLEEP=${FM_ROVO_SUBMIT_SLEEP:-${FM_ROVO_POLL_INTERVAL:-0.5}}
   ROVO_SUBMIT_SETTLE=${FM_ROVO_SUBMIT_SETTLE:-0}
   if ! ROVO_SUBMIT_VERDICT=$(fm_backend_send_text_submit \
-      "$BACKEND" "$T" "$ROVO_POINTER" "$ROVO_SUBMIT_RETRIES" \
+      "$BACKEND" "$STARTUP_TARGET" "$ROVO_POINTER" "$ROVO_SUBMIT_RETRIES" \
       "$ROVO_SUBMIT_SLEEP" "$ROVO_SUBMIT_SETTLE" "$W"); then
     rovo_spawn_fail "rovo brief pointer could not be submitted into window $T"
     exit 1

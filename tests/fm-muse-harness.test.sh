@@ -74,6 +74,7 @@ make_spawn_fakebin() {
 #!/usr/bin/env bash
 set -u
 session=${FM_FAKE_MUSE_SESSION:-firstmate}
+fm_fake_tmux_dispatch "$@"
 case "$*" in
   *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
 esac
@@ -495,11 +496,12 @@ make_send_case() {  # <name> <harness>
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 case "${1:-}" in
   display-message) printf 'fakepane\n'; exit 0 ;;
   has-session) exit 0 ;;
   list-windows) printf '@1 %s\n' "$FM_FAKE_TMUX_WINDOW" | fm_fake_tmux_window_ids "$@"; exit 0 ;;
-  list-panes) [ "${3:-}" = @1 ] || exit 1; printf '%%1\n'; exit 0 ;;
+  list-panes) [[ "${3:-}" = @1 || "${3:-}" = %1 ]] || exit 1; printf '%%1\n'; exit 0 ;;
   send-keys)
     shift
     printf '%s\n' "$*" >> "$FM_FAKE_KEY_LOG"
@@ -536,7 +538,7 @@ EOF
     out=$(run_send_key "$home" "$fakebin" "$id" "$key" "$keylog")
     status=$?
     expect_code 0 "$status" "muse $key send should succeed: $out"
-    [ "$(cat "$keylog")" = "$(printf '%s\n' "-t fm-send:fm-$id $key" "-t fm-send:fm-$id C-u")" ] \
+    [ "$(cat "$keylog")" = "$(printf '%s\n' "-t %1 $key" "-t %1 C-u")" ] \
       || fail "$key should reach the recorded Muse window before C-u"
   done
   pass "every accepted muse Escape alias clears the restored composer"
@@ -552,7 +554,7 @@ EOF
   : > "$keylog"
   run_send_key "$home" "$fakebin" "$id" Escape "$keylog" >/dev/null \
     || fail "Codex Escape should succeed"
-  [ "$(cat "$keylog")" = "-t fm-send:fm-$id Escape" ] \
+  [ "$(cat "$keylog")" = "-t %1 Escape" ] \
     || fail "Codex should receive only Escape in its recorded window"
   pass "the composer clear is scoped to muse and does not touch other adapters"
 }
@@ -567,11 +569,11 @@ $rec
 EOF
   keylog="$case_dir/keys.log"
   : > "$keylog"
-  out=$(FM_FAKE_KEY_FAIL="-t fm-send:fm-$id C-u" run_send_key "$home" "$fakebin" "$id" Escape "$keylog")
+  out=$(FM_FAKE_KEY_FAIL="-t %1 C-u" run_send_key "$home" "$fakebin" "$id" Escape "$keylog")
   status=$?
   [ "$status" -ne 0 ] || fail "a failed muse composer clear was reported as success"
   assert_contains "$out" "could not be cleared" "the failed clear did not explain the pane state"
-  [ "$(cat "$keylog")" = "$(printf '%s\n' "-t fm-send:fm-$id Escape" "-t fm-send:fm-$id C-u")" ] \
+  [ "$(cat "$keylog")" = "$(printf '%s\n' "-t %1 Escape" "-t %1 C-u")" ] \
     || fail "the failed clear should follow Escape to the recorded Muse window"
   pass "a failed muse composer clear fails loudly instead of leaving stale input"
 }

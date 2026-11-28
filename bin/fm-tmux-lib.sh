@@ -65,7 +65,7 @@ fm_tmux_no_server_error() {  # <diagnostic>
 
 fm_tmux_read_failure_status() {  # <diagnostic>
   case "$1" in
-    "can't find session:"*|"can't find window:"*|"can't find pane:"*) return 1 ;;
+    "invalid option: firstmate-tmux-binding-lost"|"can't find session:"*|"can't find window:"*|"can't find pane:"*) return 1 ;;
   esac
   if fm_tmux_no_server_error "$1"; then return 1; fi
   return 2
@@ -82,25 +82,33 @@ fm_tmux_window_filter_available() {
   [ "$diagnostic" = 'no current target' ] || fm_tmux_no_server_error "$diagnostic"
 }
 
-# fm_tmux_exact_target: the read boundary for a recorded `session:window`
-# target. tmux resolves a session or window NAME that is not an exact match by
-# prefix (and, for a pane read, an absent window can fall back to another
-# pane), so a closed `fm-mate` read by name silently returns a surviving
-# `fm-mate2`. This confirms the exact session and window in a successful
-# session inventory and prints its `@<id>` for the read. A window id cannot be
-# prefix-matched and stays dot-safe where a `.`-bearing name would be parsed
-# as a pane suffix.
-#
-# Unqualified targets (including stable window and pane IDs) and selectors
-# explicitly supplied by a caller pass through unchanged.
-#
-# Status: 0 resolved (target printed); 1 the exact session or window is
-# definitively absent; 2 the target is malformed or the inventory is
-# inconclusive, including when it returns multiple distinct window IDs.
+# Inventory emits only numeric identities, so arbitrary names (including
+# terminal newlines) cannot masquerade as separate matches. Escape literals
+# for a tmux format operand, independently of tmux command argument quoting.
+fm_tmux_format_literal() {
+  local literal=$1
+  literal=${literal//#/##}
+  literal=${literal//,/#,}
+  literal=${literal//\}/#\}}
+  literal=${literal//\#\#\[/\#\{a:35\}\[}
+  printf '%s' "$literal"
+}
+
+FM_TMUX_PANE_FORMAT='tmux-pane:#{pid}:#{start_time}:#{session_id}:#{window_id}:#{pane_id}'
+FM_TMUX_PANE_PATTERN='^tmux-pane:([0-9]+):([0-9]+):(\$[0-9]+):(@[0-9]+):(%[0-9]+)$'
+FM_TMUX_RELAUNCH_ROUTING=0
+
+fm_tmux_use_relaunch_routing() {
+  FM_TMUX_RELAUNCH_ROUTING=1
+}
+
+# Status: 0 bound; 1 absent; 2 malformed or inconclusive. Explicit tmux
+# selectors and unqualified native IDs retain their existing semantics.
 fm_tmux_exact_target() {  # <target> [explicit]
-  local target=${1:-} session literal inventory id resolved=
+  local target=${1:-} literal inventory row row_window match='' window='' format=$FM_TMUX_PANE_FORMAT
+  local -a scope=(-a)
   [ -n "$target" ] || return 2
-  if [ "${2:-}" = explicit ]; then
+  if [[ $target =~ $FM_TMUX_PANE_PATTERN ]] || [ "${2:-}" = explicit ]; then
     printf '%s' "$target"
     return 0
   fi
@@ -109,26 +117,72 @@ fm_tmux_exact_target() {  # <target> [explicit]
     *:*) ;;
     *) printf '%s' "$target"; return 0 ;;
   esac
-  session=${target%%:*}
-  literal=${target//#/##}
-  literal=${literal//,/#,}
-  literal=${literal//\}/#\}}
-  literal=${literal//\#\#\[/\#\{a:35\}\[}
-  if ! inventory=$(tmux list-windows -t "=$session:" \
-    -f "#{==:#{session_name}:#{window_name},$literal}" -F '#{window_id}' 2>&1); then
+  if [ "$FM_TMUX_RELAUNCH_ROUTING" = 1 ]; then
+    scope=(-t "=${target%%:*}:")
+    format='#{window_id}'
+  fi
+  literal=$(fm_tmux_format_literal "$target")
+  if ! inventory=$(tmux list-windows "${scope[@]}" \
+    -f "#{==:#{session_name}:#{window_name},$literal}" -F "$format" 2>&1); then
     fm_tmux_read_failure_status "$inventory"
     return $?
   fi
   [ -n "$inventory" ] || return 1
-  while IFS= read -r id; do
-    case "$id" in
-      @*) case "${id#@}" in ''|*[!0-9]*) return 2 ;; esac ;;
-      *) return 2 ;;
-    esac
-    [ -z "$resolved" ] || [ "$id" = "$resolved" ] || return 2
-    resolved=$id
+  while IFS= read -r row; do
+    if [ "$FM_TMUX_RELAUNCH_ROUTING" = 1 ]; then
+      [[ $row =~ ^@[0-9]+$ ]] || return 2
+      row_window=$row
+    else
+      [[ $row =~ $FM_TMUX_PANE_PATTERN ]] || return 2
+      row_window=${BASH_REMATCH[4]}
+    fi
+    # Multiple links to a single window are legal. Keep the first link.
+    if [ -z "$match" ]; then
+      match=$row window=$row_window
+    else
+      [ "$row_window" = "$window" ] || return 2
+    fi
   done <<< "$inventory"
-  printf '%s' "$resolved"
+  printf '%s' "$match"
+}
+
+# The format guard and its non-waiting command run on the same server queue.
+# The condition proves both IDs in that context and rejects a replacement
+# server before its reused IDs can resolve. The failure branch deliberately
+# raises a tmux error so a skipped write cannot report success.
+fm_tmux_guarded_command() {  # <context> <condition> <command> [args...]
+  local context=$1 condition=$2 command='' arg
+  shift 2
+  for arg in "$@"; do
+    arg=${arg//\'/\'\\\'\'}
+    arg=${arg//$'\n'/\'\\n\'}
+    command="$command '$arg'"
+  done
+  tmux if-shell -F -t "$context" "$condition" "${command# }" 'show-options -s firstmate-tmux-binding-lost'
+}
+
+fm_tmux_pane_command() {  # <bound-or-native-target> <command> [args...]
+  local target=$1 verb=$2 context identity pane
+  shift 2
+  if [[ $target =~ $FM_TMUX_PANE_PATTERN ]]; then
+    pane=${BASH_REMATCH[5]}
+    context="${BASH_REMATCH[3]}:${BASH_REMATCH[4]}"
+    identity=${target#tmux-pane:}
+    identity=${identity%:*}
+    if [ "$verb" = send-keys ]; then
+      case "${1:-}" in
+        -l) shift; set -- -l -- "$@" ;;
+        *) set -- -- "$@" ;;
+      esac
+    fi
+    # tmux can resolve a pane ID independently of the requested window.
+    # Check membership in the window's pane list before targeting that ID.
+    fm_tmux_guarded_command "$context" \
+      "#{&&:#{==:#{pid}:#{start_time}:#{session_id}:#{window_id},$identity},#{==:#{P:#{?#{==:#{pane_id},$pane},1,}},1}}" \
+      "$verb" -t "$pane" "$@"
+  else
+    tmux "$verb" -t "$target" "$@"
+  fi
 }
 
 # --- tmux composer capture and capability primitives ------------------------
@@ -156,7 +210,7 @@ fm_tmux_composer_caps() {
 # live pi.
 fm_tmux_composer_identity() {  # <resolved-target>
   local target=$1 tty pgid tpgid comm found=0 status
-  tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || tty=
+  tty=$(fm_tmux_pane_command "$target" display-message -p '#{pane_tty}' 2>/dev/null) || tty=
   case "$tty" in
     /dev/*)
       while read -r _ pgid tpgid comm; do
@@ -171,7 +225,7 @@ EOF
       ;;
   esac
   if [ "$found" -ne 1 ]; then
-    comm=$(tmux display-message -p -t "$target" '#{pane_current_command}' 2>/dev/null) || comm=
+    comm=$(fm_tmux_pane_command "$target" display-message -p '#{pane_current_command}' 2>/dev/null) || comm=
     case "${comm##*/}" in
       pi|pi-signed|pi-launcher) found=1 ;;
     esac
@@ -203,11 +257,11 @@ fm_tmux_composer_state() {  # <target> [explicit] -> empty|pending|pending-unpro
 fm_tmux_composer_snapshot() {  # <target> [explicit]
   local target cy pane
   FM_COMPOSER_SNAPSHOT_TMUX_TARGET=
-  # Resolve once so the cursor row and the screen come from the same window.
+  # Resolve once so the cursor row and the screen come from the same pane.
   target=$(fm_tmux_exact_target "$@") || return 1
-  cy=$(tmux display-message -p -t "$target" '#{cursor_y}' 2>/dev/null) || return 1
+  cy=$(fm_tmux_pane_command "$target" display-message -p '#{cursor_y}' 2>/dev/null) || return 1
   case "$cy" in ''|*[!0-9]*) return 1 ;; esac
-  pane=$(tmux capture-pane -e -p -t "$target" -S 0 -E - 2>/dev/null) || return 1
+  pane=$(fm_tmux_pane_command "$target" capture-pane -e -p -S 0 -E - 2>/dev/null) || return 1
   FM_COMPOSER_SNAPSHOT_TMUX_TARGET=$target
   FM_COMPOSER_SNAPSHOT_CURSOR=$cy
   FM_COMPOSER_SNAPSHOT_SCREEN=$pane
@@ -215,7 +269,7 @@ fm_tmux_composer_snapshot() {  # <target> [explicit]
 }
 
 # fm_tmux_composer_classify_snapshot: the verdict for the captured tmux
-# snapshot. The exact window the snapshot was read from supplies the lazy
+# snapshot. The bound pane the snapshot was read from supplies the lazy
 # identity probe and the Cursor process check below; [fit-text] is forwarded
 # to the shared screen classifier.
 fm_tmux_composer_classify_snapshot() {  # [fit-text]
@@ -256,7 +310,7 @@ fm_tmux_composer_classify_snapshot() {  # [fit-text]
 # no Cursor foreground process and gets no reclassification.
 fm_tmux_pane_is_cursor() {  # <resolved-target>
   local target=$1 tty pid pgid tpgid comm args argv0
-  tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || return 1
+  tty=$(fm_tmux_pane_command "$target" display-message -p '#{pane_tty}' 2>/dev/null) || return 1
   case "$tty" in /dev/*) ;; *) return 1 ;; esac
   while read -r pid pgid tpgid comm; do
     [ -n "$comm" ] || continue
@@ -287,7 +341,7 @@ fm_pane_busy_state() {  # <target> [harness] -> busy|idle|unknown
 
 fm_tmux_resolved_busy_state() {  # <resolved-target> <harness>
   local target=$1 harness=$2 tail40 visible
-  tail40=$(tmux capture-pane -p -t "$target" -S -40 2>/dev/null) \
+  tail40=$(fm_tmux_pane_command "$target" capture-pane -p -S -40 2>/dev/null) \
     || { printf 'unknown'; return 0; }
   visible=$(printf '%s' "$tail40" | grep -v '^[[:space:]]*$' | tail -12)
   [ -n "$visible" ] || { printf 'unknown'; return 0; }
@@ -335,8 +389,14 @@ fm_tmux_submit_busy_state() {  # <target> [explicit]
 # transition evidence could mark an undelivered message delivered.
 fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle] [explicit]
   local target=$1 retries=$2 sleep_s=$3 baseline_idle=${4:-} mode=${5:-} i=0 j state
+  if [ "$FM_TMUX_RELAUNCH_ROUTING" = 0 ]; then
+    target=$(fm_tmux_exact_target "$target" "$mode") || { printf 'unknown'; return 0; }
+  fi
   while :; do
-    tmux send-keys -t "$target" Enter 2>/dev/null || true
+    if ! fm_tmux_pane_command "$target" send-keys Enter 2>/dev/null && [ "$FM_TMUX_RELAUNCH_ROUTING" = 0 ]; then
+      printf 'unknown'
+      return 0
+    fi
     sleep "$sleep_s"
     state=$(fm_tmux_composer_state "$target" "$mode")
     case "$state" in
@@ -375,9 +435,12 @@ fm_tmux_submit_core() {  # <target> <text> <retries> <enter-sleep> <settle> [exp
   # The turn-started baseline must predate our own typing: a pane already
   # busy before the text lands can turn "busy" for reasons unrelated to our
   # Enter, so only a clean idle-to-busy transition may confirm a submit.
+  if [ "$FM_TMUX_RELAUNCH_ROUTING" = 0 ]; then
+    target=$(fm_tmux_exact_target "$target" "$mode") || { printf 'send-failed'; return 0; }
+  fi
   baseline_state=$(fm_tmux_submit_busy_state "$target" "$mode")
   [ "$baseline_state" = idle ] && baseline_idle=1
-  tmux send-keys -t "$target" -l "$text" 2>/dev/null || { printf 'send-failed'; return 0; }
+  fm_tmux_pane_command "$target" send-keys -l "$text" 2>/dev/null || { printf 'send-failed'; return 0; }
   sleep "$settle"
   fm_tmux_submit_enter_core "$target" "$retries" "$sleep_s" "$baseline_idle" "$mode"
 }

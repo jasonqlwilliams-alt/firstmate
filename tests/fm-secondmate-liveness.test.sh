@@ -51,6 +51,7 @@ make_probe_tmux() {
   cat > "$fakebin/tmux" <<SH
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "\$@"
 case "\${1:-}" in
   display-message)
     for a in "\$@"; do case "\$a" in *pane_current_command*) printf '%s\n' '$comm'; exit 0 ;; esac; done
@@ -76,6 +77,7 @@ make_failed_probe_tmux() {
   cat > "$fakebin/tmux" <<SH
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "\$@"
 case "\${1:-}" in
   display-message)
     [ '$inventory' = unreadable ] && { printf '%s\n' node; exit 0; }
@@ -279,6 +281,7 @@ make_liveness_tmux() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 mode=${FM_TEST_PANE_CMD:-zsh}
 case "${1:-}" in
   -V) printf '%s\n' 'tmux 3.2'; exit 0 ;;
@@ -313,13 +316,14 @@ case "${1:-}" in
     exit 0
     ;;
   new-window|kill-window)
+    [ "$1" != kill-window ] || [ "${3:-}" = %1 ] || exit 1
     printf '%s\n' "$*" >> "${FM_TMUX_CALL_LOG:?}"
-    [ "${1:-}" = kill-window ] && : > "${FM_TMUX_CALL_LOG}.killed"
     [ "${FM_TEST_FAIL_NEW_WINDOW:-0}" = 1 ] && [ "${1:-}" = new-window ] && exit 1
     if [ "${1:-}" = new-window ]; then
       rm -f "${FM_TMUX_CALL_LOG}.killed"
       fm_fake_tmux_new_window "$0.windows" @1 "$@"
     else
+      : > "${FM_TMUX_CALL_LOG}.killed"
       rm -f "$0.windows"
     fi
     exit 0
@@ -397,8 +401,8 @@ test_sweep_respawns_confirmed_dead_secondmate() {
 
   assert_not_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: respawned" \
     "a successfully respawned secondmate should be handled silently"
-  assert_contains "$(cat "$log")" "kill-window -t =firstmate:=fm-sm1" \
-    "the stale endpoint must be killed before respawn (tmux refuses a same-named window over a live one)"
+  [ "$(sed -n '1p' "$log")" = 'kill-window -t %1' ] \
+    || fail "the fixture's stale pane must be killed before respawn"
   assert_contains "$(cat "$log")" "new-window" \
     "a confirmed-dead secondmate should actually be relaunched"
   pass "sweep: a confirmed-dead secondmate endpoint is killed and respawned"

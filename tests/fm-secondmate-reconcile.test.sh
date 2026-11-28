@@ -268,7 +268,7 @@ test_the_cooldown_starts_when_delivery_finishes() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
-if [ "${1:-}" = send-keys ]; then sleep 2; fi
+if fm_fake_tmux_send_args "$@"; then sleep 2; fi
 exec "$(dirname "$0")/tmux-real" "$@"
 SH
   chmod +x "$fakebin/tmux"
@@ -528,7 +528,7 @@ test_teardown_cannot_leave_its_replacement_in_cooldown() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
-if [ "${1:-}" = send-keys ]; then
+if fm_fake_tmux_send_args "$@"; then
   : > "$FM_FAKE_TMUX_SEND_SIGNAL"
   while [ ! -f "$FM_FAKE_TMUX_SEND_RELEASE" ]; do sleep 0.01; done
 fi

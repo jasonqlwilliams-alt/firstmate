@@ -91,6 +91,7 @@ EOF
 
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+fm_fake_tmux_dispatch "$@"
 case "$*" in *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;; esac
 case "${1:-}" in
   -V) printf 'tmux 3.2\n'; exit 0 ;;
@@ -451,11 +452,13 @@ break_launch_delivery() {  # <case-dir>
   local case_dir=$1
   cat > "$case_dir/fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+fm_fake_tmux_dispatch "$@"
 case "$*" in *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;; esac
 case "${1:-}" in
   -V) printf 'tmux 3.2\n'; exit 0 ;;
   display-message) printf 'firstmate\n'; exit 0 ;;
-  new-window) printf '@1\n'; exit 0 ;;
+  list-windows) [ ! -f "$0.windows" ] || fm_fake_tmux_window_ids "$@" < "$0.windows"; exit 0 ;;
+  new-window) fm_fake_tmux_new_window "$0.windows" @1 "$@"; exit 0 ;;
   send-keys) exit 1 ;;
 esac
 exit 0
@@ -502,6 +505,7 @@ interrupt_kimi_readiness() {  # <case-dir> <task-id>
   fm_fake_exit0 "$case_dir/fakebin" kimi
   cat > "$case_dir/fakebin/tmux" <<SH
 #!/usr/bin/env bash
+fm_fake_tmux_dispatch "\$@"
 case "\$*" in
   *"#{pane_current_path}"*) printf '%s\\n' "\${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
   *"#{cursor_y}"*) printf '1\\n'; exit 0 ;;
@@ -509,8 +513,8 @@ esac
 case "\${1:-}" in
   -V) printf 'tmux 3.2\\n'; exit 0 ;;
   display-message) printf 'firstmate\\n'; exit 0 ;;
-  new-window) printf '@1\\n'; exit 0 ;;
-  list-windows) case "\$*" in *window_id*) printf '@1 firstmate:fm-$id\\n' | fm_fake_tmux_window_ids "\$@" ;; esac ;;
+  new-window) fm_fake_tmux_new_window "\$0.windows" @1 "\$@"; exit 0 ;;
+  list-windows) [ ! -f "\$0.windows" ] || fm_fake_tmux_window_ids "\$@" < "\$0.windows" ;;
   capture-pane)
     if [ ! -f "$case_dir/kimi-interrupted" ]; then
       : > "$case_dir/kimi-interrupted"

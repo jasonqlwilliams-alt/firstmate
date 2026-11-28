@@ -57,6 +57,7 @@ esac
 SH
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+fm_fake_tmux_dispatch "$@"
 [ "${1:-}" != -V ] || { printf '%s\n' 'tmux 3.2'; exit 0; }
 [ -z "${FM_FAKE_TMUX_LOG:-}" ] || printf '%s\n' "$*" >> "$FM_FAKE_TMUX_LOG"
 case "$*" in

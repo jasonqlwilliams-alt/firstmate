@@ -1136,6 +1136,7 @@ fi
 fm_backend_validate_task_endpoint "$META" "$ID" || exit 1
 BACKEND=$FM_BACKEND_VALIDATED_BACKEND
 T=$FM_BACKEND_VALIDATED_TARGET
+TEARDOWN_CLOSE_TARGET=$T
 WT=$(fm_meta_get "$META" worktree)
 PROJ=$(fm_meta_get "$META" project)
 T_ORCA=
@@ -1185,6 +1186,30 @@ fi
 MODE=$(grep '^mode=' "$META" | cut -d= -f2- || true)
 [ -n "$MODE" ] || MODE=no-mistakes
 
+teardown_probe_agent_state() {
+  if [ "$BACKEND" = tmux ]; then
+    if [ "$TEARDOWN_CLOSE_TARGET" = "$T" ]; then
+      if ! fm_backend_source tmux; then
+        TEARDOWN_AGENT_STATE=unreadable
+        return
+      elif TEARDOWN_CLOSE_TARGET=$(fm_tmux_exact_target "$T" 2>/dev/null); then
+        :
+      elif [ "$?" -ne 1 ]; then
+        TEARDOWN_AGENT_STATE=unreadable
+        return
+      fi
+    fi
+    if [ -z "$TEARDOWN_CLOSE_TARGET" ]; then
+      TEARDOWN_AGENT_STATE=missing
+      return
+    fi
+  fi
+  TEARDOWN_AGENT_STATE=$(FM_BACKEND_HERDR_ENDPOINT_META="$META" fm_backend_agent_state "$BACKEND" "$TEARDOWN_CLOSE_TARGET")
+  if [ "$BACKEND" = tmux ] && [ "$TEARDOWN_CLOSE_TARGET" != "$T" ] && [ "$TEARDOWN_AGENT_STATE" = missing ]; then
+    TEARDOWN_AGENT_STATE=unreadable
+  fi
+}
+
 # A record accepted as a legacy incarnation (no spawn_gen, --legacy-record
 # given) may be torn down only when its recorded endpoint is confidently gone
 # or agent-less; only the recovery-grade classifier's dead and missing license
@@ -1194,7 +1219,8 @@ MODE=$(grep '^mode=' "$META" | cut -d= -f2- || true)
 # passed, immediately before the close marker binds to it, so any refusal
 # leaves the record byte-identical.
 if [ "$TEARDOWN_LEGACY_PENDING" = 1 ]; then
-  TEARDOWN_LEGACY_ENDPOINT=$(FM_BACKEND_HERDR_ENDPOINT_META="$META" fm_backend_agent_state "$BACKEND" "$T")
+  teardown_probe_agent_state
+  TEARDOWN_LEGACY_ENDPOINT=$TEARDOWN_AGENT_STATE
   case "$TEARDOWN_LEGACY_ENDPOINT" in
     dead|missing) ;;
     *)
@@ -2621,7 +2647,8 @@ require_retire_stale_slot_record() {
   fm_treehouse_slot_owner_state "$slot" "$ID"
   case "$FM_TREEHOUSE_SLOT_OWNER" in
     mine)
-      case "$(FM_BACKEND_HERDR_ENDPOINT_META="$META" fm_backend_agent_state "$BACKEND" "$T")" in
+      teardown_probe_agent_state
+      case "$TEARDOWN_AGENT_STATE" in
         dead|missing) ;;
         *)
           echo "REFUSED: task $ID still owns the slot claim on $slot; --retire-stale-record is for the record that no longer holds the slot. Retire the other record, then tear this one down ordinarily." >&2
@@ -4032,8 +4059,8 @@ elif [ "$BACKEND" = herdr ]; then
   else
     echo "warning: herdr session presentation lock path is unavailable; skipping the pane close rather than closing unlocked" >&2
   fi
-elif [ "$BACKEND" != orca ]; then
-  fm_backend_kill "$BACKEND" "$T" "$(meta_value "$META" zellij_tab_id)" "fm-$ID" 2>/dev/null || true
+elif [ "$BACKEND" != orca ] && [ -n "$TEARDOWN_CLOSE_TARGET" ]; then
+  fm_backend_kill "$BACKEND" "$TEARDOWN_CLOSE_TARGET" "$(meta_value "$META" zellij_tab_id)" "fm-$ID" 2>/dev/null || true
 fi
 if [ "$KEEP_PANE" = 1 ]; then
   :

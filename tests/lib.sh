@@ -645,23 +645,93 @@ fm_fake_tmux_window_ids() {  # <tmux args...>, reads ID and name pairs from stdi
     *) return 1 ;;
   esac
   while IFS=' ' read -r id name; do
-    if [ "$name" = "$target" ]; then printf '%s\n' "$id"; fi
+    [ "$name" = "$target" ] || continue
+    case "$*" in
+      *'tmux-pane:'*) fm_fake_tmux_pane_row "$id" ;;
+      *) printf '%s\n' "$id" ;;
+    esac
   done
 }
 export -f fm_fake_tmux_window_ids
 
+fm_fake_tmux_pane_row() {
+  printf 'tmux-pane:100:1234567890:%s:%s:%%%s\n' "\$1" "$1" "${1#@}"
+}
+export -f fm_fake_tmux_pane_row
+
+# Parse the quoted argv of a successful guard branch as data. The real server
+# suite covers tmux parsing and branch rejection.
+fm_fake_tmux_decode_guard() {  # <quoted command>
+  local rest=$1 arg
+  FM_FAKE_TMUX_ARGS=()
+  while [ -n "$rest" ]; do
+    arg=
+    while :; do
+      [[ $rest = \'* ]] || return 1
+      rest=${rest#\'}
+      [[ $rest = *\'* ]] || return 1
+      arg="$arg${rest%%\'*}"
+      rest=${rest#*\'}
+      case "$rest" in
+        "\'"*) arg="$arg'" ;;
+        '\n'*) arg="$arg"$'\n' ;;
+        *) break ;;
+      esac
+      rest=${rest:2}
+    done
+    FM_FAKE_TMUX_ARGS+=("$arg")
+    [ -z "$rest" ] || [[ $rest = ' '* ]] || return 1
+    rest=${rest# }
+  done
+}
+export -f fm_fake_tmux_decode_guard
+
+fm_fake_tmux_send_args() {
+  case "${1:-}" in
+    send-keys) FM_FAKE_TMUX_ARGS=("$@") ;;
+    if-shell)
+      fm_fake_tmux_decode_guard "$6" && [ "${FM_FAKE_TMUX_ARGS[0]:-}" = send-keys ]
+      ;;
+    *) return 1 ;;
+  esac
+}
+export -f fm_fake_tmux_send_args
+
+fm_fake_tmux_dispatch() {
+  local arg
+  local -a FM_FAKE_TMUX_ARGS=() args=()
+  case "${1:-}" in
+    if-shell)
+      fm_fake_tmux_decode_guard "$6" || exit 1
+      for arg in "${FM_FAKE_TMUX_ARGS[@]}"; do
+        # Older fixtures consume the already parsed send-keys arguments.
+        [ "$arg" != -- ] && args+=("$arg")
+      done
+      exec "$0" "${args[@]}"
+      ;;
+  esac
+}
+export -f fm_fake_tmux_dispatch
+
 fm_fake_tmux_new_window() {  # <inventory-file> <id> <new-window args...>
-  local inventory=$1 id=$2 session name
+  local inventory=$1 id=$2 session name format=''
   shift 2
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      -t) session=${2%:}; session=${session#=}; shift ;;
+      -t)
+        session=${2%:}; session=${session#=}
+        shift
+        ;;
+      -F) format=$2; shift ;;
       -n) name=$2; shift ;;
     esac
     shift
   done
   printf '%s %s:%s\n' "$id" "$session" "$name" >> "$inventory"
-  printf '%s\n' "$id"
+  case "$format" in
+    'tmux-pane:'*) fm_fake_tmux_pane_row "$id" ;;
+    *) printf '%s\n' "$id" ;;
+  esac
 }
 export -f fm_fake_tmux_new_window
 

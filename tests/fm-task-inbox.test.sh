@@ -66,8 +66,12 @@ make_watch_stubs() {  # <dir> -> echoes fakebin dir
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 case "${1:-}" in
   send-keys)
+    if [ -n "${FM_FAKE_SPLIT_LOG:-}" ]; then
+      printf '%s %s\n' "${3:-}" "${4:-}" >> "$FM_FAKE_SPLIT_LOG"
+    fi
     shift
     literal=0
     while [ $# -gt 0 ]; do
@@ -98,17 +102,37 @@ case "${1:-}" in
     done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
-    if [ -n "${FM_FAKE_TMUX_TYPED:-}" ] && [ -s "$FM_FAKE_TMUX_TYPED" ]; then
+    if [ -n "${FM_FAKE_SPLIT_ACTIVE:-}" ] && [ "${3:-}" = %2 ]; then
+      printf 'BUSYTOKEN active\n'
+    elif [ -n "${FM_FAKE_TMUX_TYPED:-}" ] && [ -s "$FM_FAKE_TMUX_TYPED" ]; then
       printf 'fake agent\n› %s\n' "$(cat "$FM_FAKE_TMUX_TYPED")"
     elif [ -n "${FM_FAKE_TMUX_CAPTURE:-}" ] && [ -f "$FM_FAKE_TMUX_CAPTURE" ]; then
       cat "$FM_FAKE_TMUX_CAPTURE"
     else
       printf '╭────╮\n│    │\n╰────╯\n'
     fi
+    if [ -n "${FM_FAKE_SPLIT_ACTIVE:-}" ] && [ "${3:-}" = %1 ]; then
+      : > "$FM_FAKE_SPLIT_ACTIVE"
+    fi
     exit 0 ;;
   list-windows)
     [ "${FM_FAKE_TMUX_MISSING:-0}" = 1 ] && exit 0
-    case "$*" in *window_id*) printf '@1 sess:fm-t1\n' | fm_fake_tmux_window_ids "$@" ;; *) printf 'fm-t1\n' ;; esac
+    case "$*" in
+      *window_id*)
+        inventory=$(
+          {
+            printf '@1 sess:fm-t1\n'
+            [ "${FM_FAKE_TMUX_DUPLICATE:-0}" != 1 ] || printf '@2 sess:fm-t1\n'
+          } | fm_fake_tmux_window_ids "$@"
+        )
+        if [ -n "${FM_FAKE_SPLIT_ACTIVE:-}" ] && [ -f "$FM_FAKE_SPLIT_ACTIVE" ]; then
+          sed 's/%1$/%2/' <<< "$inventory"
+        else
+          printf '%s\n' "$inventory"
+        fi
+        ;;
+      *) printf 'fm-t1\n' ;;
+    esac
     exit 0 ;;
 esac
 exit 0
@@ -557,6 +581,28 @@ test_watcher_waits_on_busy_pane() {
   pass "watcher: a busy pane just waits - the record is durable and no doorbell is typed"
 }
 
+test_watcher_rerings_the_pane_that_passed_the_busy_check() {
+  local dir state pid rec i=0
+  dir=$(setup_watch_case rering-split)
+  state="$dir/state"
+  rec=$(inbox_lib "$state" fm_task_inbox_write "$state" t1 "please continue")
+  age_path "$rec"
+  : > "$dir/keys"
+  watch_bg "$state" "$dir/fakebin" "$dir/watch.out" \
+    FM_FAKE_TMUX_AGENT=grok FM_BUSY_REGEX=BUSYTOKEN \
+    FM_FAKE_SPLIT_ACTIVE="$dir/busy-split-selected" FM_FAKE_SPLIT_LOG="$dir/keys"
+  pid=$!
+  until grep -q ' Enter$' "$dir/keys" || [ "$i" -ge 100 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+  assert_present "$dir/busy-split-selected" "capture did not switch the active pane to the busy split"
+  [ "$(cat "$dir/keys")" = $'%1 -l\n%1 Enter' ] \
+    || fail "the idle pane should receive the doorbell and Enter: $(cat "$dir/keys")"
+  pass "watcher: the doorbell stays on the pane that passed its busy check"
+}
+
 test_watcher_quiet_on_healthy_inbox() {
   local dir state out log pid
   dir=$(setup_watch_case healthy)
@@ -652,6 +698,26 @@ test_watcher_escalates_once_after_budget() {
     || fail "the escalation must fire exactly once:"$'\n'"$(cat "$state/.wake-queue")"
   grep -qF 'stale:' "$out" || fail "the watcher should exit through the ordinary stale wake:"$'\n'"$(cat "$out")"
   pass "watcher: a spent ring budget emits exactly one ordinary stale wake for recovery"
+}
+
+test_watcher_escalates_ambiguous_tmux_window_without_input() {
+  local dir state pid rec
+  dir=$(setup_watch_case ambiguous-window)
+  state="$dir/state"
+  : > "$dir/keys"
+  rec=$(inbox_lib "$state" fm_task_inbox_write "$state" t1 "please continue")
+  age_path "$rec"
+  watch_bg "$state" "$dir/fakebin" "$dir/watch.out" FM_FAKE_TMUX_DUPLICATE=1 \
+    FM_FAKE_SPLIT_LOG="$dir/keys" FM_TASK_INBOX_RING_MAX=2
+  pid=$!
+  wait_watcher_gone "$pid" \
+    || { kill "$pid" 2>/dev/null; fail "an ambiguous window stalled the inbox ladder"; }
+  [ ! -s "$dir/keys" ] || fail "the watcher sent input to an ambiguous window"
+  [ "$(cut -f2 "$state/t1.inbox/.ring-state")" = 2 ] || fail "the unreadable attempts did not spend the budget"
+  [ "$(grep -Fc "$rec still unhandled after 2 doorbell delivery attempts" "$state/.wake-queue")" = 1 ] \
+    || fail "the watcher did not escalate the unhandled instruction once"
+  assert_present "$rec" "escalation removed the unhandled instruction"
+  pass "watcher: an ambiguous tmux window spends the retry budget without input"
 }
 
 test_watcher_dead_pane_escalates_once_without_ringing() {
@@ -1268,10 +1334,12 @@ test_fire_and_forget_records_never_enter_the_ladder
 test_ring_ladder_policy
 test_watcher_rerings_idle_pane_quietly
 test_watcher_waits_on_busy_pane
+test_watcher_rerings_the_pane_that_passed_the_busy_check
 test_watcher_quiet_on_healthy_inbox
 test_watcher_ack_silences_unwritable_ladder
 test_watcher_surfaces_unwritable_ladder
 test_watcher_escalates_once_after_budget
+test_watcher_escalates_ambiguous_tmux_window_without_input
 test_watcher_dead_pane_escalates_once_without_ringing
 test_watcher_dead_pane_ignores_stale_busy_state
 test_ring_refuses_the_codex_update_picker

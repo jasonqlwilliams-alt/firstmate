@@ -44,20 +44,26 @@ make_tmux_stub() {  # <dir>
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 D=$FM_FAKE_DIR
 case "${1:-}" in
   -V) printf 'tmux 3.2\n'; exit 0 ;;
   send-keys)
     shift
     literal=0
+    target=
     while [ $# -gt 0 ]; do
       case "$1" in
-        -t) shift 2 ;;
+        -t) target=$2; shift 2 ;;
         -l) literal=1; shift ;;
         *) break ;;
       esac
     done
     payload=${1:-}
+    if [ -f "$D/native-input-target" ] && [ "$target" != "$(cat "$D/native-input-target")" ]; then
+      printf '%s\n' "$target" >> "$D/wrong-input-target"
+      exit 1
+    fi
     if [ "$literal" = 1 ]; then
       printf '%s\n' "$payload" >> "$D/literal"
       case "$payload" in
@@ -105,9 +111,14 @@ case "${1:-}" in
   display-message)
     for a in "$@"; do
       case "$a" in
+        '#{pane_id}') printf '%%1\n'; exit 0 ;;
         *cursor_y*) printf '1\n'; exit 0 ;;
         *pane_current_command*) cat "$D/command"; printf '\n'; exit 0 ;;
         *pane_current_path*)
+          if [ -f "$D/cwd-target" ]; then
+            while [ "$#" -ge 2 ] && [ "$1" != -t ]; do shift; done
+            [ "${2:-}" = "$(cat "$D/cwd-target")" ] || exit 1
+          fi
           if [ -n "${FM_FAKE_CWD_RACE_READY:-}" ]; then
             : > "$FM_FAKE_CWD_RACE_READY"
             /bin/sleep 1
@@ -136,13 +147,14 @@ case "${1:-}" in
     name=
     cwd=
     session=
+    format=
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
         -n) name=$2; shift 2 ;;
         -c) cwd=$2; shift 2 ;;
         -t) session=${2%:}; session=${session#=}; shift 2 ;;
-        -F) shift 2 ;;
+        -F) format=$2; shift 2 ;;
         -dP|-d|-P) shift ;;
         *) shift ;;
       esac
@@ -150,7 +162,11 @@ case "${1:-}" in
     [ -z "$name" ] || printf '%s\n' "$name" >> "$D/windows"
     [ -z "$cwd" ] || printf '%s' "$cwd" > "$D/cwd"
     [ -z "$session" ] || printf '%s\n' "$session" > "$D/session"
-    awk 'END { print "@" NR }' "$D/windows"
+    window_id=$(awk 'END { print "@" NR }' "$D/windows")
+    case "$format" in
+      '#{window_id}') printf '%s\n' "$window_id" ;;
+      *) fm_fake_tmux_pane_row "$window_id" ;;
+    esac
     exit 0 ;;
 esac
 exit 0
@@ -240,11 +256,13 @@ run_control() {  # <case-dir> <args...>
     env PATH="${FM_FAKE_PANE_PATH:-$dir/fakebin:$PATH}" /bin/sleep 120 >/dev/null 2>&1 &
   fi
   pane_pid=$!
+  # Give the guarded process probe room to start on a loaded host. These
+  # cases assert the lifecycle result independently of the elapsed timeout.
   env FM_FAKE_PANE_PID="$pane_pid" FM_FAKE_PANE_PATH="${FM_FAKE_PANE_PATH:-$dir/fakebin:$PATH}" \
     PATH="$dir/fakebin:$PATH" FM_HOME="${FM_FAKE_CONTROL_HOME:-$dir/home}" FM_FAKE_DIR="$dir/fake" \
     HOME="$dir/user-home" CLAUDE_CONFIG_DIR='' \
     FM_SPAWN_NO_GUARD=1 GROK_HOME="$dir/grokhome" \
-    FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.5 FM_CONTROL_LAUNCH_WAIT=0.05 \
+    FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=1.5 FM_CONTROL_LAUNCH_WAIT=0.05 \
     FM_TEST_GIT_DELEGATE="${FM_TEST_GIT_DELEGATE:-}" FM_FAKE_GIT_FAILURE="${FM_FAKE_GIT_FAILURE:-}" \
     FM_REAL_MV="${FM_REAL_MV:-}" FM_FAKE_COMPLETE_JOURNAL_MV_FAIL="${FM_FAKE_COMPLETE_JOURNAL_MV_FAIL:-}" \
     FM_FAKE_META_PUBLISH_MV_FAIL="${FM_FAKE_META_PUBLISH_MV_FAIL:-}" \
@@ -1912,6 +1930,7 @@ test_spawn_relaunch_recreates_a_missing_endpoint() {
   add_ship_task "$dir" rl-missing claude
   : > "$dir/fake/windows"
   printf 'zsh' > "$dir/fake/command"
+  printf '@1\n' > "$dir/fake/cwd-target"
   out=$(TMUX='' run_spawn "$dir" rl-missing --relaunch --harness claude); rc=$?
   expect_code 0 "$rc" "relaunching a missing endpoint should recreate it"$'\n'"$out"
   window_after=$(meta_field "$dir" rl-missing window)
@@ -1929,6 +1948,28 @@ test_spawn_relaunch_recreates_a_missing_endpoint() {
   [ "$(cat "$dir/fake/command")" = claude ] \
     || fail "the recreated endpoint did not launch the replacement agent"
   pass "fm-spawn --relaunch: a missing endpoint is recreated into the recorded copy"
+}
+
+test_spawn_relaunch_preserves_native_tmux_input() {
+  local id=rl-native.0 dir out rc
+  dir=$(new_case native-input "$id")
+  add_ship_task "$dir" "$id" claude
+  printf '%s\n' fm-rl-native >> "$dir/fake/windows"
+  printf 'fmses:fm-rl-native.0\n' > "$dir/fake/native-input-target"
+  printf 'zsh\n' > "$dir/fake/command"
+  printf '%s\n' "$dir/home" > "$dir/fake/cwd"
+  printf 'kimi\n' > "$dir/fake/becomes"
+  printf '#!/bin/sh\nexit 0\n' > "$dir/fakebin/kimi"
+  chmod +x "$dir/fakebin/kimi"
+  mkdir -p "$dir/user-home/.kimi-code"
+  printf 'default_model = "original"\n' > "$dir/user-home/.kimi-code/config.toml"
+  out=$(run_spawn "$dir" "$id" --relaunch --harness kimi); rc=$?
+  expect_code 0 "$rc" "the dotted relaunch should use native input for the shell and Kimi"$'\n'"$out"
+  assert_absent "$dir/fake/wrong-input-target" "relaunch sent input through a resolved pane ID"
+  [ "$(cat "$dir/fake/path-probe-cwd")" = "$dir/wt" ] || fail "the PATH probe ran before worktree return"
+  assert_grep 'Read the brief at' "$dir/fake/literal" "Kimi did not receive the brief pointer"
+  [ "$(grep -Fxc Enter "$dir/fake/keys")" -eq 2 ] || fail "the shell and Kimi each need one Enter"
+  pass "fm-spawn --relaunch: shell and Kimi input retain the native dotted selector"
 }
 
 test_control_relaunch_recreates_a_missing_endpoint() {
@@ -3353,6 +3394,7 @@ test_agy_relaunch_refuses_non_gemini_models_before_stop
 test_agy_relaunch_allows_gemini_models
 test_spawn_relaunch_refuses_non_gemini_agy_models
 test_spawn_relaunch_refuses_a_live_agent
+test_spawn_relaunch_preserves_native_tmux_input
 test_spawn_relaunch_recreates_a_missing_endpoint
 test_control_relaunch_recreates_a_missing_endpoint
 test_herdr_relaunch_recreates_missing_endpoint_without_confusing_worker_pane_for_launcher

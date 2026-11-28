@@ -267,14 +267,14 @@ fm_send_id_from_meta() {  # <meta-file>
 # WHICH adapters need that clear, and which key clears them, comes from the one
 # control-plane capability table (bin/fm-control-lib.sh) rather than a second
 # copy here - the same table bin/fm-control.sh's interrupt verb reads.
-fm_send_clear_after_interrupt() {  # <key>
-  local key=$1 family clear
+fm_send_clear_after_interrupt() {  # <key> <operation-target>
+  local key=$1 target=$2 family clear
   [ "$key" = Escape ] || return 0
   family=$(fm_control_harness_family "$TARGET_HARNESS") || return 0
   clear=$(fm_control_interrupt_clear_key "$family") || return 0
   [ -n "$clear" ] || return 0
   [ "$TARGET_BACKEND" != remote ] || return 0
-  if ! fm_backend_send_key "$TARGET_BACKEND" "$T" "$clear" "$EXPECTED_LABEL" "$TARGET_MODE"; then
+  if ! fm_backend_send_key "$TARGET_BACKEND" "$target" "$clear" "$EXPECTED_LABEL" "$TARGET_MODE"; then
     echo "error: Escape reached $T, but the $TARGET_HARNESS composer could not be cleared; it still holds the restored prompt. Clear it before sending the next message." >&2
     return 1
   fi
@@ -715,6 +715,13 @@ if [ "${1:-}" = "--key" ]; then
   esac
   key=$2
   semantic_key=$(fm_send_normalize_key "$key")
+  KEY_TARGET=$T
+  if [ "$TARGET_BACKEND" = tmux ]; then
+    if ! fm_backend_source tmux || ! KEY_TARGET=$(fm_tmux_exact_target "$T" "$TARGET_MODE"); then
+      echo "error: key '$key' not sent to $T (could not bind the tmux pane; tried $RESOLUTION_TRIED)" >&2
+      exit 1
+    fi
+  fi
   if [ "$TARGET_BACKEND" = remote ]; then
     FM_SEND_REMOTE_BUDGET=${FM_SEND_REMOTE_BUDGET:-30}
     case "$FM_SEND_REMOTE_BUDGET" in
@@ -728,11 +735,11 @@ if [ "${1:-}" = "--key" ]; then
       echo "error: key '$key' not sent to remote secondmate $TARGET_REMOTE_ID; completion may be unknown" >&2
       exit 1
     fi
-  elif ! fm_backend_send_key "$TARGET_BACKEND" "$T" "$key" "$EXPECTED_LABEL" "$TARGET_MODE"; then
+  elif ! fm_backend_send_key "$TARGET_BACKEND" "$KEY_TARGET" "$key" "$EXPECTED_LABEL" "$TARGET_MODE"; then
     echo "error: key '$key' not sent to $T ($TARGET_BACKEND send failed; tried $RESOLUTION_TRIED)" >&2
     exit 1
   fi
-  fm_send_clear_after_interrupt "$semantic_key" || exit 1
+  fm_send_clear_after_interrupt "$semantic_key" "$KEY_TARGET" || exit 1
   fm_send_record_interrupt "$semantic_key" || exit 1
 else
   MESSAGE=$*

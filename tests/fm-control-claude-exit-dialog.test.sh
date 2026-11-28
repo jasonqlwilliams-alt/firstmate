@@ -187,8 +187,11 @@ C
 cc -o "$TMP_ROOT/bin/claude" "$TMP_ROOT/stub.c" || fail 'could not compile the Claude stand-in'
 cat > "$TMP_ROOT/bin/tmux" <<EOF
 #!/usr/bin/env bash
-if [ "\${FM_DIALOG_DROP_ENTER:-0}" = 1 ] && [ "\$1" = send-keys ] && [ "\${*: -1}" = Enter ]; then
-  exit 0
+if [ "\${FM_DIALOG_DROP_ENTER:-0}" = 1 ]; then
+  case "\$1" in
+    send-keys) [ "\${*: -1}" != Enter ] || exit 0 ;;
+    if-shell) [[ "\${6:-}" != "'send-keys' "*" 'Enter'" ]] || exit 0 ;;
+  esac
 fi
 exec "$TMUX_BIN" -f /dev/null -L "$SOCKET" "\$@"
 EOF

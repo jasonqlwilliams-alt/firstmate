@@ -165,7 +165,7 @@ EOF
   basebin=$(make_fake_tmux "$TMP_ROOT/known-fail-fake")
   cat > "$rejectbin/tmux" <<'SH'
 #!/usr/bin/env bash
-[ "${1:-}" != send-keys ] || exit 1
+if fm_fake_tmux_send_args "$@"; then exit 1; fi
 exec "$FM_BASE_TMUX" "$@"
 SH
   chmod +x "$rejectbin/tmux"
@@ -211,7 +211,7 @@ EOF
   basebin=$(make_fake_tmux "$TMP_ROOT/reconcile-race-fake")
   cat > "$blockbin/tmux" <<'SH'
 #!/usr/bin/env bash
-if [ "${1:-}" = send-keys ]; then
+if fm_fake_tmux_send_args "$@"; then
   touch "$FM_RECONCILE_RACE_ENTERED"
   while [ ! -f "$FM_RECONCILE_RACE_RELEASE" ]; do sleep 0.02; done
   exit 1

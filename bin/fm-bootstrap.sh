@@ -842,7 +842,18 @@ secondmate_liveness_one() {  # <meta> <id>
       expected_home=$SECONDMATE_REGISTRY_MATCH_HOME
     fi
   fi
-  if [ "$backend" = herdr ] && [ -z "$expected_home" ]; then
+  if [ "$backend" = tmux ]; then
+    if ! fm_backend_source tmux; then
+      agent_state=unreadable
+    elif target=$(fm_tmux_exact_target "$target" 2>/dev/null); then
+      agent_state=$(fm_backend_agent_state tmux "$target" 2>/dev/null) || agent_state=unreadable
+      [ "$agent_state" != missing ] || [ "$target" = "$window" ] || agent_state=unreadable
+    elif [ "$?" -eq 1 ]; then
+      agent_state=missing
+    else
+      agent_state=unreadable
+    fi
+  elif [ "$backend" = herdr ] && [ -z "$expected_home" ]; then
     agent_state=unreadable
   else
     agent_state=$(fm_backend_agent_state "$backend" "$target" "$expected_home" 2>/dev/null) || agent_state=unreadable

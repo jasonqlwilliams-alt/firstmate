@@ -455,6 +455,7 @@ test_secondmate_active_turn_defers_stall_until_the_turn_ends() {
   fakebin="$dir/fakebin"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+fm_fake_tmux_dispatch "$@"
 case "${1:-}" in
   list-windows)
     case "$*" in *window_id*) printf '%s\n' '@1 firstmate:fm-mate' | fm_fake_tmux_window_ids "$@" ;; *) printf '%s\n' 'firstmate:fm-mate' ;; esac ;;
@@ -511,6 +512,7 @@ test_secondmate_stall_marker_rejects_symlink() {
   fakebin="$dir/fakebin"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+fm_fake_tmux_dispatch "$@"
 case "${1:-}" in
   list-windows)
     case "$*" in *window_id*) printf '%s\n' '@1 firstmate:fm-mate' | fm_fake_tmux_window_ids "$@" ;; *) printf '%s\n' 'firstmate:fm-mate' ;; esac ;;

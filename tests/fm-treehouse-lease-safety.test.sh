@@ -37,8 +37,8 @@ cat > "$FAKEBIN/tmux" <<'EOF'
 case "$*" in
   *'#{pane_current_path}'*) cat "$FM_TEST_CWD"; exit 0 ;;
 esac
-if [ "${1:-}" = send-keys ]; then
-  for arg in "$@"; do
+if fm_fake_tmux_send_args "$@"; then
+  for arg in "${FM_FAKE_TMUX_ARGS[@]}"; do
     case "$arg" in
       *'treehouse get'*)
         (cd "$FM_TEST_PROJECT" && eval "$arg" && pwd > "$FM_TEST_CWD") || exit 1

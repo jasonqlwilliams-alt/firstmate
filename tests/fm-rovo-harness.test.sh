@@ -29,6 +29,7 @@ make_rovo_fakebin() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 printf '%s\n' "$*" >> "$FM_FAKE_TMUX_CALL_LOG"
 state=$(cat "$FM_FAKE_ROVO_STATE" 2>/dev/null || true)
 fake_screen() {
@@ -68,8 +69,12 @@ case "${1:-}" in
         sed -n 's/^new-window .*-n \([^ ]*\).*/\1/p' "$FM_FAKE_TMUX_CALL_LOG" | awk '{ print "@" NR " firstmate:" $0 }' | fm_fake_tmux_window_ids "$@" ;;
     esac
     exit 0 ;;
-  new-window) printf '@1\n'; exit 0 ;;
-  has-session|new-session|kill-window) exit 0 ;;
+  new-window) fm_fake_tmux_pane_row @1; exit 0 ;;
+  has-session|new-session) exit 0 ;;
+  kill-window)
+    [ "${3:-}" = %1 ] || exit 1
+    printf 'closed\n' > "$FM_FAKE_ROVO_STATE"
+    exit 0 ;;
   send-keys)
     prev=
     literal=
@@ -312,7 +317,7 @@ test_rovo_readiness_gate_precedes_pointer() {
   assert_grep 'failed: rovo did not show a verified ready signal' "$HOME_DIR/state/$id.status" \
     "rovo readiness failure did not leave a supervisor-visible failure"
   [ ! -s "$CASE_DIR/pointer.log" ] || fail "rovo pointer was sent before an observable ready signal"
-  grep -q "kill-window.*fm-$id" "$CASE_DIR/tmux-calls.log" \
+  grep -Fxq closed "$CASE_DIR/rovo.state" \
     || fail "a failed rovo readiness gate must tear down the exact endpoint it created instead of leaking an orphaned --yolo process"
   pass "fm-spawn: rovo never sends the brief pointer before an observable ready signal, and tears down the created endpoint on failure"
 }
@@ -333,7 +338,7 @@ test_rovo_unconfirmed_delivery_fails_loudly() {
     "unconfirmed rovo delivery lacked a loud diagnostic"
   assert_grep 'failed: rovo brief pointer delivery was not confirmed' "$HOME_DIR/state/$id.status" \
     "unconfirmed rovo delivery did not leave a supervisor-visible failure"
-  grep -q "kill-window.*fm-$id" "$CASE_DIR/tmux-calls.log" \
+  grep -Fxq closed "$CASE_DIR/rovo.state" \
     || fail "an unconfirmed rovo delivery must tear down the exact endpoint it created instead of leaking an orphaned --yolo process"
   pass "fm-spawn: rovo treats a silent pointer drop as a failed spawn, and tears down the created endpoint"
 }

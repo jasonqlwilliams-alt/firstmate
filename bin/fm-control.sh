@@ -350,12 +350,37 @@ fm_backend_validate "$BACKEND" || exit 1
 
 # --- shared helpers ---------------------------------------------------------
 
+# Pin the pane for an interrupt or exit and its screen guards.
+bind_control_target() {
+  CONTROL_TARGET=$T
+  CONTROL_LOOKUP_STATE=
+  [ "$BACKEND" = tmux ] && [ "$VERB" != relaunch ] || return 0
+  if ! fm_backend_source tmux; then
+    CONTROL_TARGET=
+    CONTROL_LOOKUP_STATE=unreadable
+  elif CONTROL_TARGET=$(fm_tmux_exact_target "$T"); then
+    :
+  elif [ "$?" -eq 1 ]; then
+    CONTROL_LOOKUP_STATE=missing
+  else
+    CONTROL_LOOKUP_STATE=unreadable
+  fi
+}
+
 agent_state() {
-  fm_backend_agent_state "$BACKEND" "$T"
+  if [ -n "${CONTROL_LOOKUP_STATE:-}" ]; then
+    printf '%s' "$CONTROL_LOOKUP_STATE"
+  else
+    fm_backend_agent_state "$BACKEND" "${CONTROL_TARGET:-$T}"
+  fi
 }
 
 busy_verdict() {
-  fm_busy_classify_meta "$META" "$ID" "$STATE"
+  if [ "$VERB" = relaunch ]; then
+    fm_busy_classify_meta "$META" "$ID" "$STATE"
+  else
+    fm_busy_classify "$BACKEND" "$CONTROL_TARGET" "$RECORDED_HARNESS" "$ID" "$STATE"
+  fi
 }
 
 # wait_agent_state <wanted...> <timeout>: poll until agent_state prints one of
@@ -399,12 +424,12 @@ send_interrupt_keys() {
   [ -z "$clear" ] || fm_control_backend_supports_key "$BACKEND" "$clear" \
     || die "harness $HARNESS needs $clear to clear its composer after an interrupt, which the $BACKEND backend cannot deliver; refusing to leave the cancelled prompt where the next submitted line would concatenate onto it"
   while [ "$i" -lt "$repeat" ]; do
-    fm_backend_send_key "$BACKEND" "$T" "$key" "$LABEL" \
+    fm_backend_send_key "$BACKEND" "$CONTROL_TARGET" "$key" "$LABEL" \
       || die "interrupt key $key was not delivered to task $ID on $BACKEND"
     i=$((i + 1))
     [ "$i" -ge "$repeat" ] || sleep 0.2
   done
-  [ -z "$clear" ] || fm_backend_send_key "$BACKEND" "$T" "$clear" "$LABEL" \
+  [ -z "$clear" ] || fm_backend_send_key "$BACKEND" "$CONTROL_TARGET" "$clear" "$LABEL" \
     || die "interrupt key $key reached task $ID, but $clear did not, so its composer still holds the cancelled prompt; clear it before the next lifecycle action"
 }
 
@@ -452,7 +477,7 @@ deliver_interrupt() {
 
 verify_interrupt_running() {
   local proof after
-  fm_backend_target_exists "$BACKEND" "$T" "$LABEL" || {
+  fm_backend_target_exists "$BACKEND" "$CONTROL_TARGET" "$LABEL" || {
     if [ "$?" -eq 2 ] && [ "$BACKEND" = tmux ]; then
       die "could not verify task $ID's endpoint after interrupting it; no further control action is safe"
     fi
@@ -487,7 +512,7 @@ retire_busy_incarnation() {
 # (fm_backend_guarded_composer_state in bin/fm-backend.sh, which owns the Codex
 # global-update picker recognition) for this task's endpoint.
 codex_exit_screen_state() {  # [expected-pending] -> update-picker|empty|pending|pending-unproven|unknown
-  fm_backend_guarded_composer_state "$BACKEND" "$T" "$LABEL" "${1:-}" codex
+  fm_backend_guarded_composer_state "$BACKEND" "$CONTROL_TARGET" "$LABEL" "${1:-}" codex
 }
 
 # Codex exit owns its literal/Enter sequence so every Enter is preceded by a
@@ -500,7 +525,7 @@ codex_exit_submit() {  # <literal-exit-command>
     empty) ;;
     *) die "task $ID's Codex composer is '$screen', not proven empty; refusing to type $cmd" ;;
   esac
-  fm_backend_send_literal "$BACKEND" "$T" "$cmd" "$LABEL" \
+  fm_backend_send_literal "$BACKEND" "$CONTROL_TARGET" "$cmd" "$LABEL" \
     || die "the Codex exit text could not be sent to task $ID on $BACKEND"
   sleep 1.2
   while [ "$i" -lt "$EXIT_RETRIES" ]; do
@@ -510,7 +535,7 @@ codex_exit_submit() {  # <literal-exit-command>
       pending) ;;
       *) die "task $ID's Codex composer is '$screen' after exit text; refusing a confirming Enter" ;;
     esac
-    fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null 2>&1 || true
+    fm_backend_send_key "$BACKEND" "$CONTROL_TARGET" Enter "$LABEL" >/dev/null 2>&1 || true
     i=$((i + 1))
     # An accepted /quit restores the terminal while Codex keeps shutting down
     # for seconds, so wait, bounded, for the process to exit. An update picker
@@ -544,13 +569,13 @@ codex_exit_submit() {  # <literal-exit-command>
 # immediately before TERM. An unreadable or changed observation refuses.
 codex_signin_exit() {
   local pid identity current_identity current_pid state
-  pid=$(fm_backend_codex_agent_pid "$BACKEND" "$T") \
+  pid=$(fm_backend_codex_agent_pid "$BACKEND" "$CONTROL_TARGET") \
     || die "task $ID shows Codex sign-in but its exact native process cannot be verified; refusing to signal"
   identity=$(LC_ALL=C ps -p "$pid" -o lstart= -o comm= 2>/dev/null) \
     || die "task $ID's Codex process identity is unreadable; refusing to signal"
   [ -n "$identity" ] && [ "$(codex_exit_screen_state)" = sign-in ] \
     || die "task $ID's Codex sign-in screen changed; refusing to signal"
-  current_pid=$(fm_backend_codex_agent_pid "$BACKEND" "$T") \
+  current_pid=$(fm_backend_codex_agent_pid "$BACKEND" "$CONTROL_TARGET") \
     || die "task $ID's Codex endpoint identity changed; refusing to signal"
   current_identity=$(LC_ALL=C ps -p "$pid" -o lstart= -o comm= 2>/dev/null) \
     || die "task $ID's Codex process disappeared before signalling"
@@ -568,7 +593,7 @@ codex_signin_exit() {
 # the first Enter, so retries require a fresh pending verdict for /exit.
 # See docs/agent-control.md for the Claude exit and recovery contract.
 claude_exit_screen_state() {  # [expected-pending] [remaining-ms]
-  fm_backend_guarded_composer_state "$BACKEND" "$T" "$LABEL" "${1:-}" claude "${2:-}"
+  fm_backend_guarded_composer_state "$BACKEND" "$CONTROL_TARGET" "$LABEL" "${1:-}" claude "${2:-}"
 }
 
 claude_exit_unconfirmed() {  # <interrupt-result> <exit-command-state> <reason> [observed-agent-state]
@@ -596,11 +621,11 @@ claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
   local cmd=$1 interrupt_result=$2 screen='' state=unreadable sample submission=typed attempts=1
   local budget_ms poll_ms deadline now remaining delay probe_ms
   claude_exit_guard_input "$interrupt_result" not-sent
-  fm_backend_send_literal "$BACKEND" "$T" "$cmd" "$LABEL" \
+  fm_backend_send_literal "$BACKEND" "$CONTROL_TARGET" "$cmd" "$LABEL" \
     || die "the exit command could not be sent to task $ID on $BACKEND"
   sleep 1.2
   claude_exit_guard_input "$interrupt_result" typed "$cmd"
-  if fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null 2>&1; then
+  if fm_backend_send_key "$BACKEND" "$CONTROL_TARGET" Enter "$LABEL" >/dev/null 2>&1; then
     submission=delivered
   fi
   read -r budget_ms poll_ms < <(awk -v wait="$EXIT_WAIT" -v poll="$POLL" 'BEGIN{printf "%.0f %.0f\n", wait * 1000, poll * 1000}')
@@ -620,7 +645,7 @@ claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
 
     probe_ms=$(( (remaining + 1) / 2 ))
     [ "$screen" != timeout ] || probe_ms=$(( remaining - remaining / 4 ))
-    if sample=$(fm_backend_run_timed "$probe_ms" fm_backend_agent_state "$BACKEND" "$T"); then
+    if sample=$(fm_backend_run_timed "$probe_ms" fm_backend_agent_state "$BACKEND" "$CONTROL_TARGET"); then
       state=$sample
       [ "$state" != dead ] || return 0
     else
@@ -636,7 +661,7 @@ claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
     now=$(fm_monotonic_ms) || break
     remaining=$(( deadline - now ))
     if [ "$remaining" -gt 0 ] && [ "$screen" = pending ] && [ "$sample" = alive ] && [ "$attempts" -lt "$EXIT_RETRIES" ]; then
-      if fm_backend_run_timed "$(( (remaining + 1) / 2 ))" fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" >/dev/null; then
+      if fm_backend_run_timed "$(( (remaining + 1) / 2 ))" fm_backend_send_key "$BACKEND" "$CONTROL_TARGET" Enter "$LABEL" >/dev/null; then
         submission=delivered
       fi
       attempts=$((attempts + 1))
@@ -652,6 +677,7 @@ claude_exit_submit() {  # <literal-exit-command> <interrupt-result>
 do_exit() {
   local state cmd verdict cancel screen interrupt_result=not-needed
   require_state_verified_backend exit
+  bind_control_target
   state=$(agent_state)
   case "$state" in
     dead|missing)
@@ -709,7 +735,7 @@ do_exit() {
   elif [ "$HARNESS" = claude ]; then
     claude_exit_submit "$cmd" "$interrupt_result"
   else
-    verdict=$(fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" 1.2 "$LABEL") \
+    verdict=$(fm_backend_send_text_submit "$BACKEND" "$CONTROL_TARGET" "$cmd" "$EXIT_RETRIES" "$POLL" 1.2 "$LABEL") \
       || die "the exit command could not be sent to task $ID on $BACKEND"
     [ "$verdict" != send-failed ] \
       || die "the exit command could not be sent to task $ID on $BACKEND"
@@ -1030,6 +1056,10 @@ do_relaunch() {
   local -a spawn_args
 
   require_state_verified_backend relaunch
+  if [ "$BACKEND" = tmux ]; then
+    fm_backend_source tmux || exit 1
+    fm_tmux_use_relaunch_routing
+  fi
   resolve_relaunch_profile
 
   case "$KIND" in
@@ -1122,8 +1152,11 @@ do_relaunch() {
 
 # --- verbs ------------------------------------------------------------------
 
+CONTROL_TARGET=
+CONTROL_LOOKUP_STATE=
 case "$VERB" in
   interrupt)
+    bind_control_target
     state=$(agent_state)
     case "$state" in
       alive) ;;

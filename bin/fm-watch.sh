@@ -381,22 +381,20 @@ inbox_steer_escalate_unavailable() {  # <window> <task> <record>
 # Steering-inbox loss detection, one cheap check per recorded window per poll.
 # Quiet when healthy: an absent, empty, or handled inbox costs one directory
 # glob and produces nothing. When the ladder (fm_task_inbox_due_action, the
-# policy owner) reports a due action, a busy pane just waits - the record is
-# durable and the worker will reach a turn boundary - an idle pane gets one
-# delivery attempt, and a spent attempt budget surfaces as an ordinary stale
-# wake for stuck-crewmate-recovery, and a pane whose agent is positively dead
+# policy owner) reports a due action, a bound busy pane waits for a turn
+# boundary. See docs/tmux-backend.md for inconclusive binding behavior.
+# A spent attempt budget surfaces as an ordinary stale wake for
+# stuck-crewmate-recovery, and a pane whose agent is positively dead
 # or missing skips the ladder altogether: it is never typed into and surfaces
 # as that same stale wake exactly once. If the attempt's ladder write fails while
 # its record remains unhandled, that unwritable state surfaces through the same
 # stale path instead of silently re-ringing forever; acknowledgement or teardown
-# still makes the race quiet. The attempt is data-plane typing or a refusal
-# by the ring's per-harness screen gate (bin/fm-task-inbox-lib.sh
-# fm_task_inbox_ring), never a wake, so normal retries keep the watcher
-# blocking. Runs for secondmates
+# still makes the race quiet. Normal retries keep the watcher blocking.
+# Runs for secondmates
 # too: their pane-staleness exemption is about quiet panes being healthy,
 # while an unacknowledged instruction past the ladder is a stuck steer.
 inbox_steer_check() {  # <window> <task> <backend>
-  local w=$1 task=$2 backend=$3 action verb rec count tail40 reason ring_rc agent_state
+  local w=$1 task=$2 backend=$3 target=$1 action verb rec count tail40 reason ring_rc agent_state
   local FM_BACKEND_HERDR_ENDPOINT_META="$STATE/$task.meta"
   action=$(fm_task_inbox_due_action "$STATE" "$task") || return 0
   verb=${action%% *}
@@ -409,21 +407,36 @@ inbox_steer_check() {  # <window> <task> <backend>
       rec=${rec% *}
       ;;
   esac
-  agent_state=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null || true)
-  case "$agent_state" in
-    dead|missing)
+  if [ "$backend" = tmux ]; then
+    if ! fm_backend_source tmux; then
+      target=
+    elif target=$(fm_tmux_exact_target "$w" 2>/dev/null); then
+      :
+    elif [ "$?" -eq 1 ]; then
       inbox_steer_escalate_unavailable "$w" "$task" "$rec"
       return 0
-      ;;
-  esac
-  tail40=$(fm_backend_capture "$backend" "$w" 40 "fm-$task" 2>/dev/null) || tail40=
-  if window_is_busy "$w" "$tail40" "$task" "$backend"; then
-    return 0
+    fi
+  fi
+  if [ -n "$target" ]; then
+    agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)
+    case "$agent_state" in
+      dead|missing)
+        inbox_steer_escalate_unavailable "$w" "$task" "$rec"
+        return 0
+        ;;
+    esac
+    tail40=$(fm_backend_capture "$backend" "$target" 40 "fm-$task" 2>/dev/null) || tail40=
+    if window_is_busy "$target" "$tail40" "$task" "$backend"; then
+      return 0
+    fi
   fi
   case "$verb" in
     ring)
-      ring_rc=0
-      fm_task_inbox_ring "$backend" "$w" "$rec" "fm-$task" "$(fm_meta_get "$FM_BACKEND_HERDR_ENDPOINT_META" harness)" || ring_rc=$?
+      ring_rc=2
+      if [ -n "$target" ]; then
+        ring_rc=0
+        fm_task_inbox_ring "$backend" "$target" "$rec" "fm-$task" "$(fm_meta_get "$FM_BACKEND_HERDR_ENDPOINT_META" harness)" || ring_rc=$?
+      fi
       if [ "$ring_rc" -eq 3 ]; then
         inbox_steer_escalate_unavailable "$w" "$task" "$rec"
         return 0
@@ -442,7 +455,7 @@ inbox_steer_check() {  # <window> <task> <backend>
       triage_log "steer-inbox delivery attempt: $task ${rec##*/} result=$ring_rc"
       ;;
     escalate)
-      reason="stale: $w (unread firstmate instruction: $rec still unhandled after $count doorbell delivery attempts with an idle pane; inspect the worker)"
+      reason="stale: $w (unread firstmate instruction: $rec still unhandled after $count doorbell delivery attempts; inspect the worker)"
       if [ ! -d "${rec%/*}" ] || [ ! -f "$rec" ]; then
         fm_task_inbox_due_action "$STATE" "$task" >/dev/null || true
         return 0

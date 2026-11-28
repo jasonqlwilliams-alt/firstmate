@@ -789,6 +789,7 @@ make_peek_fakebin() {  # <dir> -> echoes fakebin dir
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 target= start= format=
 prev=
 for arg in "$@"; do
@@ -814,7 +815,7 @@ case "${1:-}" in
     esac ;;
   capture-pane)
     case "$target" in
-      @3|=sess:=win|sess:win)
+      %3|@3|=sess:=win|sess:win)
         printf '%s\n' 'oldest history' 'older history' 'latest history' | tail -n "${start#-}"
         printf 'recorded screen\n' ;;
       sess:0.1) printf 'explicit split pane\n' ;;
@@ -874,15 +875,18 @@ make_spawn_fakebin() {  # <dir> <fake-worktree-path> -> echoes fakebin dir
   cat > "$fb/tmux" <<SH
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "\$@"
 { printf 'tmux'; for a in "\$@"; do printf '\\x1f%s' "\$a"; done; printf '\\n'; } >> "\${FM_TMUX_LOG:?}"
 case "\${1:-}" in
   -V) printf 'tmux 3.2\\n'; exit 0 ;;
   display-message)
     for a in "\$@"; do case "\$a" in *pane_current_path*) printf '%s\\n' "$wt"; exit 0 ;; esac; done
     printf 'firstmate\\n'; exit 0 ;;
-  new-window) printf '@1\\n'; exit 0 ;;
+  new-window) fm_fake_tmux_new_window "\$0.windows" @1 "\$@"; exit 0 ;;
   # The exact-window reads confirm the window this fake created.
-  list-windows) case "\$*" in *window_id*) printf '@1\\n' ;; esac; exit 0 ;;
+  list-windows)
+    [ ! -f "\$0.windows" ] || fm_fake_tmux_window_ids "\$@" < "\$0.windows"
+    exit 0 ;;
 esac
 exit 0
 SH
@@ -909,10 +913,8 @@ run_spawn_case() {  # <bin-root> <fakebin> <log> <state> <data> <config> <proj> 
 # stable window id, pin the window name (automatic-rename/allow-rename off), and
 # target that id for the rename-critical spawn steps (robustness under a
 # captain's non-default tmux config). A byte-identical old-vs-new diff can no
-# longer hold there by design. That intended sequence is now authoritatively and
-# comprehensively verified - via a recording fake-tmux - by
-# tests/fm-tangle-guard.test.sh ("fm-spawn: appends windows by session-colon,
-# pins the name, and targets the window id"), and the real tmux create/kill path
+# longer hold there by design. Spawn placement, name pinning, and command receipt
+# are verified on a private server by tests/fm-tangle-guard.test.sh, and the real tmux create/kill path
 # by tests/fm-backend-tmux-smoke.test.sh. The send/peek/teardown conformance
 # tests below remain pure extractions and stay. (make_spawn_fakebin and
 # run_spawn_case are retained: test_spawn_default_backend_writes_no_meta_field
@@ -940,6 +942,7 @@ make_spawn_symlink_fakebin() {  # <dir> <initial-project-path> <worktree-path> -
   cat > "$fb/tmux" <<SH
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "\$@"
 { printf 'tmux'; for a in "\$@"; do printf '\\x1f%s' "\$a"; done; printf '\\n'; } >> "\${FM_TMUX_LOG:?}"
 case "\${1:-}" in
   -V) printf 'tmux 3.2\\n'; exit 0 ;;
@@ -954,9 +957,11 @@ case "\${1:-}" in
       exit 0
     ;; esac; done
     printf 'firstmate\\n'; exit 0 ;;
-  new-window) printf '@1\\n'; exit 0 ;;
+  new-window) fm_fake_tmux_new_window "\$0.windows" @1 "\$@"; exit 0 ;;
   # The exact-window reads confirm the window this fake created.
-  list-windows) case "\$*" in *window_id*) printf '@1\\n' ;; esac; exit 0 ;;
+  list-windows)
+    [ ! -f "\$0.windows" ] || fm_fake_tmux_window_ids "\$@" < "\$0.windows"
+    exit 0 ;;
 esac
 exit 0
 SH
@@ -1014,7 +1019,11 @@ make_teardown_fakebin() {  # <dir> -> echoes fakebin dir; logs tmux+treehouse ca
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 { printf 'tmux'; for a in "$@"; do printf '\x1f%s' "$a"; done; printf '\n'; } >> "${FM_TMUX_LOG:?}"
+if [ "${1:-}" = list-windows ]; then
+  printf '%s\n' '@17 firstmate:fm-teardownconform1' | fm_fake_tmux_window_ids "$@"
+fi
 exit 0
 SH
   cat > "$fb/treehouse" <<'SH'
@@ -1097,8 +1106,8 @@ test_teardown_conformance_old_vs_new() {
   # exact-selector contract belongs to the current script, asserted below.
   assert_contains "$(tr -d '=' < "$log_old")" "tmux"$'\x1f''kill-window'$'\x1f''-t'$'\x1f'"firstmate:fm-$id" \
     "legacy teardown fixture did not exercise tmux window cleanup for the task"
-  assert_contains "$(cat "$log_new")" "tmux"$'\x1f''kill-window'$'\x1f''-t'$'\x1f'"=firstmate:=fm-$id" \
-    "teardown did not call tmux kill-window with exact session and window selectors"
+  assert_contains "$(cat "$log_new")" "tmux"$'\x1f''kill-window'$'\x1f''-t'$'\x1f''%17' \
+    "teardown did not close the fixture's recorded worker pane"
 
   pass "fm-teardown.sh: treehouse return remains compatible while tmux cleanup uses exact selectors"
 }

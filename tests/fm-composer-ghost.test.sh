@@ -45,6 +45,7 @@ make_fake_tmux() {  # <dir>
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 case "${1:-}" in
   display-message)
     for a in "$@"; do case "$a" in *cursor_y*) printf '%s\n' "${FM_FAKE_CY:-0}"; exit 0 ;; esac; done
@@ -691,17 +692,22 @@ test_snapshot_identity_stays_with_captured_window() (
   # shellcheck disable=SC2329
   tmux() {
     local window='' prev='' arg
+    local -a FM_FAKE_TMUX_ARGS=()
     if [ "$1" = list-windows ]; then
-      if [ -e "$switched" ]; then printf '@2\n'; else printf '@1\n'; fi
+      if [ -e "$switched" ]; then fm_fake_tmux_pane_row @2; else fm_fake_tmux_pane_row @1; fi
       return 0
+    fi
+    if [ "$1" = if-shell ]; then
+      fm_fake_tmux_decode_guard "$6" || return 1
+      set -- "${FM_FAKE_TMUX_ARGS[@]}"
     fi
     for arg in "$@"; do
       [ "$prev" != -t ] || window=$arg
       prev=$arg
     done
     case "$window" in
-      @1) [ ! -e "$switched" ] || return 1 ;;
-      @2) [ -e "$switched" ] || return 1 ;;
+      %1) [ ! -e "$switched" ] || return 1 ;;
+      %2) [ -e "$switched" ] || return 1 ;;
       *) return 1 ;;
     esac
     case "$1" in
@@ -713,9 +719,9 @@ test_snapshot_identity_stays_with_captured_window() (
             if [ "$fixture_agent" = cursor-agent ]; then printf '/dev/composer-fixture\n'; fi ;;
         esac ;;
       capture-pane)
-        if [ "$window" = @1 ]; then
+        if [ "$window" = %1 ]; then
           printf '%s\n' "$captured"
-          if [ "$replace_after_capture" = 1 ] && [ "$2" = -e ]; then : > "$switched"; fi
+          if [ "$replace_after_capture" = 1 ] && [[ " $* " = *" -e "* ]]; then : > "$switched"; fi
         else
           printf '%s\n' "$replacement"
         fi ;;

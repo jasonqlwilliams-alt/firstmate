@@ -8,6 +8,20 @@ Exact task chronology, branch names, temporary homes, local paths, process ids, 
 
 ## tmux
 
+On 2026-11-27, tmux 3.7c on Linux passed `bin/fm-test-run.sh tests/fm-tmux-exact-target.test.sh` on a private socket.
+The suite verified these outcomes with real panes and includes a restart that reuses the old server's numeric window and pane IDs.
+
+```text
+ok - literal text and Enter reach the exact dotted worker
+ok - fm-send uses the recorded dotted name for named keys
+ok - the inbox doorbell reaches the recorded dotted worker only
+ok - changing the active pane cannot retarget an existing binding
+ok - reads, writes, and cleanup honor literal ID-shaped session names
+ok - a bound worker becomes unavailable when its recorded session link is removed
+ok - a binding cannot access a pane moved to another window
+ok - a restarted tmux server cannot inherit a stale pane binding
+```
+
 Foreground-process behavior was verified on 2026-07-07 with tmux 3.6a on macOS.
 
 ```sh

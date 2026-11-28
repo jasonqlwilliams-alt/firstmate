@@ -37,6 +37,7 @@ exit 0
 SH
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
+fm_fake_tmux_dispatch "$@"
 case "${1:-}" in
   list-windows)
     case "$*" in
@@ -44,11 +45,11 @@ case "${1:-}" in
         '@3 firstmate:fm-duplicate' '@4 firstmate:fm-duplicate' '@5 fixture:captured-status' \
         | fm_fake_tmux_window_ids "$@" ;;
     esac ;;
-  list-panes) case "$3" in @1|@2|@5) ;; *) exit 1 ;; esac ;;
+  list-panes) case "$3" in @1|@2|@5|%1|%2|%5) ;; *) exit 1 ;; esac ;;
   display-message) case "$*" in *dead-*) exit 1 ;; *) printf '%%1\n' ;; esac ;;
   capture-pane)
     case "$*" in
-      *fm-domain-alpha*|*' -t @2 '*) printf 'stale terminal summary: Phase 7 started\n> \n' ;;
+      *fm-domain-alpha*|*' -t @2 '*|*' -t %2 '*) printf 'stale terminal summary: Phase 7 started\n> \n' ;;
       *) printf 'all quiet\n> \n' ;;
     esac
     ;;
@@ -3149,13 +3150,14 @@ EOF
   printf 'working: old generation\n' > "$home/state/generation-race.status"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+fm_fake_tmux_dispatch "$@"
 set -e
 case "${1:-}" in
   list-windows)
     printf '@1 fixture:fm-generation-race\n' | fm_fake_tmux_window_ids "$@"
     ;;
   list-panes)
-    [ "${3:-}" = @1 ] || exit 1
+    [[ "${3:-}" = @1 || "${3:-}" = %1 ]] || exit 1
     if mkdir "$RACE_ONCE" 2>/dev/null; then
       tmp="$RACE_META.tmp.$$"
       cat > "$tmp" <<EOF

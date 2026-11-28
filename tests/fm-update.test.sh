@@ -46,6 +46,7 @@ new_world() {
   cat > "$w/fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+fm_fake_tmux_dispatch "$@"
 case "${1:-}" in
   list-windows)
     case "$*" in
@@ -58,7 +59,7 @@ case "${1:-}" in
       case "$arg" in
         main:fm-*) target=$arg ;;
         # Exact-window reads arrive by window id; map it back to the name.
-        @*) target=main:$(sed -n "${arg#@}p" "$FM_FAKE_DIR/windows") ;;
+        [@%]*) target=main:$(sed -n "${arg:1}p" "$FM_FAKE_DIR/windows") ;;
       esac
     done
     case "${*: -1}" in

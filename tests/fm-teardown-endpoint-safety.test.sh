@@ -419,8 +419,6 @@ SH
     && fail "valid cleanup did not remove the exact target window"
   isolated_tmux_window_exists "$dir" "$socket" "$session" "$control" \
     || fail "valid cleanup removed the independent control window"
-  grep -Fqx "tmux <kill-window> <-t> <=$session:=$target>" "$dir/runtime.log" \
-    || fail "valid cleanup did not invoke exactly the recorded target: $(cat "$dir/runtime.log")"
 
   ( cd "$dir" && env -u TMUX -u TMUX_PANE "$REAL_TMUX" -S "$socket" kill-server 2>/dev/null ) || true
   pass "fm-teardown: exact tmux cleanup preserves invalid and prefix-matched neighbors while removing only the recorded target"
@@ -611,6 +609,7 @@ test_retire_stale_record_drops_the_unheld_copy_without_touching_the_slot() {
   claim_pool_slot "$dir" "$id" "$dir/home"
   cat > "$dir/fakebin/tmux" <<SH
 #!/usr/bin/env bash
+fm_fake_tmux_dispatch "\$@"
 printf 'tmux' >> "\${FM_RUNTIME_LOG:?}"
 printf ' <%s>' "\$@" >> "\${FM_RUNTIME_LOG:?}"
 printf '\\n' >> "\${FM_RUNTIME_LOG:?}"
@@ -623,7 +622,7 @@ case "\${1:-}" in
   display-message)
     for a in "\$@"; do
       case "\$a" in
-        *pane_current_command*) [ "\${4:-}" = @1 ] || exit 1; printf 'claude\\n'; exit 0 ;;
+        *pane_current_command*) [[ "\${3:-}" = %1 || "\${4:-}" = @1 ]] || exit 1; printf 'claude\\n'; exit 0 ;;
       esac
     done
     printf 'fakepane\\n'; exit 0 ;;
@@ -722,6 +721,23 @@ test_retire_stale_record_transfers_a_cross_home_claiming_dead_record() {
   assert_contains "$(cat "$dir/stderr")" "still has a live record" \
     "orphaned-claim release should refuse a claiming record that still exists"
 
+  cat > "$dir/fakebin/tmux" <<SH
+#!/usr/bin/env bash
+fm_fake_tmux_dispatch "\$@"
+replacement='$dir/replacement-window'
+case "\${1:-}" in
+  list-windows)
+    if [ -f "\$replacement" ]; then
+      printf '%s\n' '@29 firstmate:fm-$id' | fm_fake_tmux_window_ids "\$@"
+    else
+      : > "\$replacement"
+    fi
+    ;;
+  kill-window)
+    [ "\${3:-}" != %29 ] || rm -f -- "\$replacement"
+    ;;
+esac
+SH
   : > "$dir/runtime.log"
   set +e
   run_teardown "$dir" "$id" --force --retire-stale-record \
@@ -730,6 +746,7 @@ test_retire_stale_record_transfers_a_cross_home_claiming_dead_record() {
   set -e
   [ "$rc" -eq 0 ] || fail "retiring a claiming dead record occupied by another home failed: $(cat "$dir/stderr")"
   kill -0 "$worker" 2>/dev/null || fail "cross-home claiming-record retire killed the occupying worker"
+  assert_present "$dir/replacement-window" "retiring the absent owner closed a replacement with the same window name"
   assert_absent "$dir/home/state/$id.meta" "cross-home claiming-record retire left the dead record"
   assert_present "$second_home/state/$other.meta" \
     "cross-home claiming-record retire removed the occupying home's record"
@@ -896,6 +913,11 @@ test_recorded_endpoint_that_changed_directory_still_tears_down() {
   # endpoint identity still owns the lifecycle; cwd alone must not brick it.
   cat > "$dir/fakebin/tmux" <<SH
 #!/usr/bin/env bash
+fm_fake_tmux_dispatch "\$@"
+if [ "\${1:-}" = list-windows ]; then
+  printf '%s\n' '@17 firstmate:fm-$id' | fm_fake_tmux_window_ids "\$@"
+  exit 0
+fi
 if [ "\${1:-}" = display-message ]; then
   printf '%s\n' '$dir/other-directory'
   exit 0
@@ -913,7 +935,7 @@ SH
   run_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr" \
     || fail "teardown refused its recorded endpoint after it changed directory: $(cat "$dir/stderr")"
   assert_absent "$dir/home/state/$id.meta" "moved-endpoint teardown left the task record"
-  grep -Fq "tmux <kill-window> <-t> <=firstmate:=fm-$id>" "$dir/runtime.log" \
+  grep -Fq "tmux <kill-window> <-t> <%17>" "$dir/runtime.log" \
     || fail "moved-endpoint teardown did not stop the exact recorded worker: $(cat "$dir/runtime.log")"
   grep -Fq "treehouse <return>" "$dir/runtime.log" \
     || fail "moved-endpoint teardown did not return its uncontested pool slot: $(cat "$dir/runtime.log")"

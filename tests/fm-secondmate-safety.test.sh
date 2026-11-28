@@ -1524,8 +1524,7 @@ test_fm_send_refuses_bare_window_without_home_meta() {
   fi
   grep -F "no metadata for fm-missing in $home/state" "$err" >/dev/null \
     || fail "fm-send did not explain missing home metadata"
-  grep -F 'send-keys -t other-session:fm-missing' "$log" >/dev/null \
-    && fail "fm-send fell back to a foreign same-name window"
+  grep -qs '^send-keys ' "$log" && fail "fm-send delivered input without this home's metadata"
   pass "fm-send refuses a bare firstmate window with no metadata in this home"
 }
 
@@ -1946,6 +1945,7 @@ EOF
     fail "teardown allowed a secondmate with in-flight child work"
   fi
   PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_TMUX_LOG="$log" FM_FAKE_TMUX_CAPTURE="$TMP_ROOT/force-teardown-fake/pane.txt" \
+    FM_FAKE_TMUX_WINDOW=$'firstmate:fm-child\nfirstmate:fm-domain' \
     "$ROOT/bin/fm-teardown.sh" domain --force >/dev/null 2>/dev/null \
     || fail "force teardown failed to discard child work"
   [ ! -d "$subhome" ] || fail "force teardown did not remove the retired secondmate home"
@@ -1954,8 +1954,8 @@ EOF
   [ -L "$linked_tmp" ] && [ -f "$other_tmp/keep" ] || fail "force teardown touched a symlinked temp root"
   [ ! -e "$home/state/domain.meta" ] || fail "teardown did not clear parent meta"
   grep -F -- '- domain ' "$home/data/secondmates.md" >/dev/null && fail "force teardown did not remove secondmate registry route"
-  grep -F 'kill-window -t =firstmate:=fm-child' "$log" >/dev/null || fail "force teardown did not kill child window"
-  grep -F 'kill-window -t =firstmate:=fm-domain' "$log" >/dev/null || fail "force teardown did not kill parent window"
+  grep -Fxq 'kill-window -t %1' "$log" || fail "force teardown did not kill child window"
+  grep -Fxq 'kill-window -t %2' "$log" || fail "force teardown did not kill parent window"
   pass "secondmate force teardown discards child work"
 }
 
@@ -2126,11 +2126,12 @@ EOF
     fakebin=$(make_fake_tmux "$TMP_ROOT/symlink-inside-teardown-fake-$opdir")
     log="$TMP_ROOT/symlink-inside-teardown-fake-$opdir/tmux.log"
     PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_TMUX_LOG="$log" FM_FAKE_TMUX_CAPTURE="$TMP_ROOT/symlink-inside-teardown-fake-$opdir/pane.txt" \
+      FM_FAKE_TMUX_WINDOW=firstmate:fm-domain \
       "$ROOT/bin/fm-teardown.sh" domain --force >/dev/null 2>"$err" \
       || fail "force teardown refused $opdir symlinked inside the secondmate home"
     [ ! -e "$subhome" ] || fail "force teardown did not remove subhome with inside $opdir symlink"
     [ ! -e "$home/state/domain.meta" ] || fail "force teardown did not clear parent meta for inside $opdir symlink"
-    grep -F 'kill-window -t =firstmate:=fm-domain' "$log" >/dev/null || fail "force teardown did not kill parent window for inside $opdir symlink"
+    grep -Fxq 'kill-window -t %1' "$log" || fail "force teardown did not kill parent window for inside $opdir symlink"
   done
   pass "force teardown allows non-state operational directory symlinks inside the subhome"
 }

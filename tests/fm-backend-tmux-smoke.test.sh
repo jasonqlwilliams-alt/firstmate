@@ -48,6 +48,7 @@ SH
 chmod +x "$SHIM_DIR/tmux"
 PATH="$SHIM_DIR:$PATH"
 export PATH
+unset TMUX TMUX_PANE
 
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-backend.sh"
@@ -59,9 +60,11 @@ TARGET="$SESSION:$WINDOW"
 
 # --- create session ----------------------------------------------------------
 
-tmux new-session -d -s "$SESSION" -x 200 -y 50 \
+tmux -f /dev/null new-session -d -s "$SESSION" -x 200 -y 50 \
   || fail "real tmux: new-session failed"
-fm_backend_tmux_create_task "$SESSION" "$WINDOW" "$HOME" \
+tmux set-option -t "$SESSION" default-command 'exec /bin/bash --noprofile --norc -i' \
+  || fail "could not set a disposable worker shell"
+binding=$(fm_backend_tmux_create_task "$SESSION" "$WINDOW" "$HOME") \
   || fail "fm_backend_tmux_create_task failed to create the task window"
 tmux list-windows -t "$SESSION" -F '#{window_name}' | grep -qx "$WINDOW" \
   || fail "created window is not visible in the real session"
@@ -75,26 +78,13 @@ pass "real tmux: fm_backend_tmux_create_task creates a window and refuses a dupl
 
 # --- send text + Enter -------------------------------------------------------
 
-# A newly-created interactive shell can exist before its startup files and line
-# editor are ready to accept Enter. Prove command execution with an output token
-# that does not appear contiguously in the command, retrying the harmless probe
-# until the shell acknowledges it.
-SHELL_READY=false
-for _ in $(seq 1 100); do
-  tmux send-keys -t "$TARGET" C-c
-  tmux send-keys -t "$TARGET" -l "printf 'shell-%s\\n' ready"
-  tmux send-keys -t "$TARGET" Enter
-  if wait_for_capture_text "$TARGET" "shell-ready" 10; then
-    SHELL_READY=true
-    break
-  fi
-done
-[ "$SHELL_READY" = true ] || fail "the tmux task shell did not become ready"
+# Wait for the clean shell's prompt before sending any keystroke.
+wait_for_capture_text "$TARGET" 'bash-' || fail "the tmux task shell did not become ready"
 
 tmux send-keys -t "$TARGET" "cd /tmp && PS1='smoke\$ ' && clear && printf 'setup-%s\\n' ready" Enter
 wait_for_capture_text "$TARGET" "setup-ready" || fail "the tmux task shell did not complete setup"
 
-fm_backend_tmux_send_text_line "$TARGET" "printf 'captain-on-deck-%s\\n' line" \
+fm_backend_tmux_send_text_line "$binding" "printf 'captain-on-deck-%s\\n' line" \
   || fail "fm_backend_tmux_send_text_line failed"
 wait_for_capture_text "$TARGET" "captain-on-deck-line" \
   || fail "fm_backend_tmux_send_text_line did not execute"
@@ -126,7 +116,8 @@ pass "real tmux: fm_backend_tmux_send_literal + fm_backend_tmux_send_key Enter s
 # earliest lines scroll out of a small window) while a large one reaches back
 # far enough to still see the earliest line - the same -S -N bounding fm-peek.sh
 # and fm-watch.sh rely on for a bounded, cheap pane read.
-fm_backend_tmux_send_text_line "$TARGET" "for i in \$(seq 1 80); do echo tag-line-\$i; done"
+fm_backend_tmux_send_text_line "$binding" "for i in \$(seq 1 80); do echo tag-line-\$i; done" \
+  || fail "fm_backend_tmux_send_text_line failed to produce numbered output"
 wait_for_capture_text "$TARGET" "tag-line-80" \
   || fail "the numbered output did not complete before capture"
 small=$(fm_backend_tmux_capture "$TARGET" 3) || fail "fm_backend_tmux_capture (small window) failed"

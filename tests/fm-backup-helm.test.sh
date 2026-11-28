@@ -539,4 +539,45 @@ SH
   pass "armed Herdr handover reaches the live supervisor when a dead worker claimed its pane ID"
 }
 
+test_tmux_handover_at_explicit_index() (
+  local real_tmux socket home fixture_bin pane out
+  real_tmux=$(command -v tmux) || { echo 'skip: tmux not installed'; return 0; }
+  socket="fm-backup-helm-index-$$"
+  home="$TMP_ROOT/h-tmux-index"
+  fixture_bin="$home/bin"
+  new_home "$home"
+  unset TMUX TMUX_PANE FM_ROOT_OVERRIDE FM_STATE_OVERRIDE
+  trap '"$real_tmux" -L "$socket" kill-server 2>/dev/null || true' EXIT
+  cat > "$fixture_bin/tmux" <<SH
+#!/usr/bin/env bash
+exec "$real_tmux" -L "$socket" "\$@"
+SH
+  cat > "$fixture_bin/pi" <<SH
+#!/usr/bin/env bash
+if [ "\${1:-}" = --approve ]; then
+  printf '%s\n' "\$TMUX_PANE" > "$home/successor-pane"
+else
+  exec "$FAKEBIN/pi" "\$@"
+fi
+SH
+  chmod +x "$fixture_bin/tmux" "$fixture_bin/pi"
+  HOME="$home" "$real_tmux" -L "$socket" -f /dev/null new-session -d -s firstmate -n helm \
+    /bin/bash --noprofile --norc -i || fail "could not start the private tmux helm"
+  "$real_tmux" -L "$socket" new-window -d -t firstmate:1 -n 0 \
+    /bin/bash --noprofile --norc -i || fail "could not create the window named 0"
+  pane=$("$real_tmux" -L "$socket" display-message -p -t firstmate:0 '#{pane_id}') \
+    || fail "could not identify the helm pane"
+  out=$(FM_HOME="$home" FM_BACKUP_HELM_DRIVER='' PATH="$fixture_bin:$FAKEBIN:$PATH" \
+    "$BIN" handover --harness pi --backend tmux --target firstmate:0 --workspace "$home" 2>&1) \
+    || fail "handover at the native tmux window index failed: $out"
+  for (( attempt=0; attempt<100; attempt++ )); do
+    [ ! -s "$home/successor-pane" ] || break
+    sleep 0.05
+  done
+  [ "$(cat "$home/successor-pane")" = "$pane" ] \
+    || fail "handover did not launch the successor in the window at index 0"
+  pass "tmux handover launches in the window at the explicit index"
+)
+
 test_herdr_handover_at_reused_pane
+test_tmux_handover_at_explicit_index
