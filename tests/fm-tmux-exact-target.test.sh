@@ -426,6 +426,17 @@ tmux capture-pane -p -t "$shadow_name:fm-session-id" | grep -q INPUT-ID-DECOY \
   || fail "precondition: native tmux must interpret the literal session name as an ID"
 fm_backend_capture tmux "$shadow_name:fm-session-id" 40 | grep -q INPUT-LITERAL-SESSION \
   || fail "the recorded session name must win over the matching session ID"
+(
+  fm_tmux_use_relaunch_routing
+  target="$shadow_name:fm-session-id"
+  [ "$(fm_backend_agent_state tmux "$target")" = missing ] || exit 1
+  [ "$(fm_backend_run_timed 2000 fm_backend_agent_state tmux "$target")" = missing ] || exit 1
+  fm_backend_tmux_current_path "$target" >/dev/null && exit 1
+  status=0
+  fm_backend_target_exists tmux "$target" || status=$?
+  [ "$status" -eq 1 ]
+) || fail "relaunch must recreate when main's session-scoped lookup cannot admit the recorded worker"
+pass "relaunch admission treats a session-ID collision as missing"
 if ! fm_backend_send_literal tmux "$shadow_name:fm-session-id" 'session-write' ||
    ! fm_backend_send_key tmux "$shadow_name:fm-session-id" Enter; then
   fail "could not send to literal session name"

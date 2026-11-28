@@ -48,6 +48,7 @@
 FM_BACKEND_SCRIPT=${BASH_SOURCE[0]:-$0}
 FM_BACKEND_LIB_DIR="$(cd "$(dirname "$FM_BACKEND_SCRIPT")" && pwd)"
 unset FM_BACKEND_SCRIPT
+FM_TMUX_RELAUNCH_ROUTING=0
 FM_BACKEND_DEFAULT_ROOT="$(cd "$FM_BACKEND_LIB_DIR/.." && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-${FM_ROOT:-$FM_BACKEND_DEFAULT_ROOT}}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
@@ -1008,7 +1009,15 @@ fm_backend_run_timed() (  # <milliseconds> <backend-function> [args...]
   # shellcheck disable=SC2016  # Expansion is deliberately deferred to the child shell.
   FM_HOME="$FM_HOME" FM_ROOT="$FM_ROOT" FM_BACKEND_HERDR_ENDPOINT_META="${FM_BACKEND_HERDR_ENDPOINT_META:-}" \
     fm_run_timed --kill "$(fm_timeout_seconds "$limit_ms")" \
-    bash -uc '. "$1" && shift && "$@"' _ "$FM_BACKEND_LIB_DIR/fm-backend.sh" "$@" </dev/null 2>/dev/null
+    bash -uc '
+      . "$1" || exit 1
+      if [ "$2" = 1 ]; then
+        fm_backend_source tmux || exit 1
+        fm_tmux_use_relaunch_routing
+      fi
+      shift 2
+      "$@"
+    ' _ "$FM_BACKEND_LIB_DIR/fm-backend.sh" "${FM_TMUX_RELAUNCH_ROUTING:-0}" "$@" </dev/null 2>/dev/null
 )
 
 # fm_backend_guarded_composer_state: the composer verdict a caller must have
@@ -1061,6 +1070,9 @@ _fm_backend_guarded_composer_state() {  # <backend> <target> [expected-label] [e
   local capture=
   if [ "$harness" = claude ]; then
     capture=visible
+    if [ "$backend" = tmux ] && [ "${FM_TMUX_RELAUNCH_ROUTING:-0}" = 1 ]; then
+      target=$(fm_backend_tmux_exact_pane "$target") || { printf 'unknown'; return 0; }
+    fi
   fi
   fm_backend_composer_snapshot "$backend" "$target" "$label" "$capture" || { printf 'unknown'; return 0; }
   [ -n "$FM_COMPOSER_SNAPSHOT_SCREEN" ] || { printf 'unknown'; return 0; }

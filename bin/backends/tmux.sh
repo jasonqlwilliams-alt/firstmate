@@ -30,6 +30,15 @@ fm_backend_tmux_resolve_bare_selector() {  # <name>
     || { echo "error: no window named $name" >&2; return 1; }
 }
 
+fm_backend_tmux_exact_pane() {  # <session:window>
+  local window pane
+  [[ $1 = *:* ]] || return 1
+  window=$(fm_tmux_exact_target "$1") || return 1
+  pane=$(tmux display-message -p -t "$window" '#{pane_id}' 2>/dev/null) || return 1
+  [[ $pane =~ ^%[0-9]+$ ]] || return 1
+  printf '%s\n' "$pane"
+}
+
 # Bounded plain-text capture of the recorded worker pane.
 fm_backend_tmux_capture() {  # <target> <lines> [explicit]
   local target
@@ -55,20 +64,18 @@ fm_backend_tmux_target_exists() {  # <target> [explicit]
   fm_tmux_read_failure_status "$diagnostic"
 }
 
-fm_backend_tmux_send_key() {  # <target> <key> [explicit|native-input]
+fm_backend_tmux_send_key() {  # <target> <key> [explicit]
   local target=$1 mode=${3:-}
-  if [ "$mode" = native-input ]; then
-    fm_backend_tmux_target_exists "$target" || return $?
-  else
+  if [ "$FM_TMUX_RELAUNCH_ROUTING" = 0 ]; then
     target=$(fm_tmux_exact_target "$target" "$mode") || return $?
-    if [[ ! $target =~ $FM_TMUX_PANE_PATTERN ]]; then
-      fm_backend_tmux_target_exists "$target" "$mode" || return $?
-    fi
+  fi
+  if [[ ! $target =~ $FM_TMUX_PANE_PATTERN ]]; then
+    fm_backend_tmux_target_exists "$target" "$mode" || return $?
   fi
   fm_tmux_pane_command "$target" send-keys "$2"
 }
 
-fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle> [explicit|native-input]
+fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle> [explicit]
   fm_tmux_submit_core "$@"
 }
 
@@ -104,9 +111,9 @@ fm_backend_tmux_container_ensure() {  # [session]
   printf '%s\n' "$session"
 }
 
-fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs> [window-id]
+fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs>
   local ses=$1 wname=$2 proj_abs=$3 format=$FM_TMUX_PANE_FORMAT target
-  [ "${4:-}" != window-id ] || format='#{window_id}'
+  [ "$FM_TMUX_RELAUNCH_ROUTING" = 0 ] || format='#{window_id}'
   if tmux list-windows -t "=$ses:" -F '#{window_name}' | grep -qx "$wname"; then
     echo "error: window $ses:$wname already exists" >&2
     return 1
@@ -129,15 +136,15 @@ fm_backend_tmux_current_path() {  # <target>
 }
 
 # Send a fixed spawn command and one named Enter in the same tmux command.
-fm_backend_tmux_send_text_line() {  # <target> <text> [explicit]
-  local target
-  target=$(fm_tmux_exact_target "$1" "${3:-}") || return $?
-  fm_tmux_pane_command "$target" send-keys "$2" Enter
+fm_backend_tmux_send_text_line() {  # <target> <text>
+  fm_tmux_pane_command "$1" send-keys "$2" Enter
 }
 
 fm_backend_tmux_send_literal() {  # <target> <text> [explicit]
-  local target
-  target=$(fm_tmux_exact_target "$1" "${3:-}") || return $?
+  local target=$1
+  if [ "$FM_TMUX_RELAUNCH_ROUTING" = 0 ]; then
+    target=$(fm_tmux_exact_target "$target" "${3:-}") || return $?
+  fi
   fm_tmux_pane_command "$target" send-keys -l "$2"
 }
 
@@ -147,7 +154,10 @@ fm_backend_tmux_send_literal() {  # <target> <text> [explicit]
 fm_backend_tmux_kill() {  # <recorded-or-bound-target>
   local target=${1:-}
   case "$target" in *:*) ;; *) return 1 ;; esac
-  if target=$(fm_tmux_exact_target "$target"); then
+  if [ "$FM_TMUX_RELAUNCH_ROUTING" = 1 ]; then
+    case "$target" in :*|*:|*:*:*) return 1 ;; esac
+    tmux kill-window -t "=${target%%:*}:=${target#*:}" 2>/dev/null || true
+  elif target=$(fm_tmux_exact_target "$target"); then
     fm_tmux_pane_command "$target" kill-window 2>/dev/null || true
   else
     [ "$?" -eq 1 ]
@@ -376,7 +386,9 @@ $(fm_backend_tmux_foreground_args "$target")
 EOF
 
   if ! comm=$(fm_tmux_pane_command "$target" display-message -p '#{pane_current_command}' 2>&1); then
-    fm_tmux_read_failure_status "$comm" || resolve_status=$?
+    if [[ $target =~ $FM_TMUX_PANE_PATTERN ]]; then
+      fm_tmux_read_failure_status "$comm" || resolve_status=$?
+    fi
     if [ "$resolve_status" -eq 1 ]; then
       printf 'missing'
     else

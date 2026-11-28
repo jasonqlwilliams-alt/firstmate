@@ -354,7 +354,7 @@ fm_backend_validate "$BACKEND" || exit 1
 bind_control_target() {
   CONTROL_TARGET=$T
   CONTROL_LOOKUP_STATE=
-  [ "$BACKEND" = tmux ] || return 0
+  [ "$BACKEND" = tmux ] && [ "$VERB" != relaunch ] || return 0
   if ! fm_backend_source tmux; then
     CONTROL_TARGET=
     CONTROL_LOOKUP_STATE=unreadable
@@ -376,7 +376,11 @@ agent_state() {
 }
 
 busy_verdict() {
-  fm_busy_classify "$BACKEND" "$CONTROL_TARGET" "$RECORDED_HARNESS" "$ID" "$STATE"
+  if [ "$VERB" = relaunch ]; then
+    fm_busy_classify_meta "$META" "$ID" "$STATE"
+  else
+    fm_busy_classify "$BACKEND" "$CONTROL_TARGET" "$RECORDED_HARNESS" "$ID" "$STATE"
+  fi
 }
 
 # wait_agent_state <wanted...> <timeout>: poll until agent_state prints one of
@@ -1052,6 +1056,10 @@ do_relaunch() {
   local -a spawn_args
 
   require_state_verified_backend relaunch
+  if [ "$BACKEND" = tmux ]; then
+    fm_backend_source tmux || exit 1
+    fm_tmux_use_relaunch_routing
+  fi
   resolve_relaunch_profile
 
   case "$KIND" in

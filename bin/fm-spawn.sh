@@ -1512,6 +1512,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   RELAUNCH_TARGET=$FM_BACKEND_VALIDATED_TARGET
   fm_backend_validate_spawn "$BACKEND" || exit 1
   fm_backend_source "$BACKEND" || exit 1
+  [ "$BACKEND" != tmux ] || fm_tmux_use_relaunch_routing
   # A relaunch must PROVE the previous agent is gone before it launches another
   # one into the same endpoint, and only tmux and herdr have a recovery-grade
   # classifier that can (bin/fm-control-lib.sh owns that capability table).
@@ -1699,12 +1700,16 @@ spawn_pane_leader_pid() {
 }
 
 spawn_pane_launch_path() {
-  local pid attempt probe_command
+  local pid attempt probe_command probe_target
   if [ "$RELAUNCH_STATE" = dead ] || [ "$RELAUNCH_RECREATE" -eq 1 ]; then
     RELAUNCH_PATH_PROBE=$(mktemp "$STATE/.$ID.relaunch-path.XXXXXXXX") || return 1
     rm -f -- "$RELAUNCH_PATH_PROBE"
     probe_command="printf '%s\\n%s\\n' \"\$PATH\" \"\$HOME\" > $(shell_quote "$RELAUNCH_PATH_PROBE")"
-    spawn_send_text_line "$STARTUP_TARGET" "$probe_command" || return 1
+    # A missing endpoint was just recreated into $T; a dead pane still lives at
+    # the recorded target. Both are agent-free shells that can print PATH.
+    probe_target=$T
+    [ "$RELAUNCH_RECREATE" -eq 1 ] || probe_target=$RELAUNCH_TARGET
+    "fm_backend_${BACKEND}_send_text_line" "$probe_target" "$probe_command" || return 1
     for ((attempt = 0; attempt < 50; attempt++)); do
       if [ -f "$RELAUNCH_PATH_PROBE" ] \
         && { IFS= read -r SPAWN_LAUNCH_PATH && IFS= read -r SPAWN_LAUNCH_HOME; } < "$RELAUNCH_PATH_PROBE"; then
@@ -3318,7 +3323,8 @@ elif [ "$RELAUNCH" -eq 1 ] && [ "$RELAUNCH_RECREATE" -eq 1 ]; then
     tmux)
       SES=$(fm_backend_tmux_container_ensure) || exit 1
       T="$SES:$W"
-      WT_TARGET=$(fm_backend_tmux_create_task "$SES" "$W" "$WT" window-id) || exit 1
+      WID=$(fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
+      WT_TARGET="$WID"
       ;;
     herdr)
       HERDR_LABEL_HOME=$FM_HOME
@@ -3598,13 +3604,9 @@ fi
 # Keep fresh startup reads, input, and cleanup tied to the pane just created.
 STARTUP_TARGET=$T
 [ "$RELAUNCH" -ne 0 ] || STARTUP_TARGET=$WT_TARGET
-TMUX_STARTUP_INPUT_MODE=
-if [ "$BACKEND" = tmux ] && [ "$RELAUNCH" -eq 1 ]; then
-  TMUX_STARTUP_INPUT_MODE=native-input
-fi
 spawn_send_text_line() {  # <target> <text>
   case "$BACKEND" in
-    tmux) fm_backend_tmux_send_text_line "$1" "$2" explicit ;;
+    tmux) fm_backend_tmux_send_text_line "$1" "$2" ;;
     herdr) fm_backend_herdr_send_text_line "$1" "$2" ;;
     zellij) fm_backend_zellij_send_text_line "$1" "$2" "$W" ;;
     orca) fm_backend_orca_send_text_line "$1" "$2" ;;
@@ -3621,7 +3623,7 @@ spawn_current_path() {  # <target>
 }
 spawn_send_literal() {  # <target> <text>
   case "$BACKEND" in
-    tmux) fm_backend_tmux_send_literal "$1" "$2" explicit ;;
+    tmux) fm_backend_tmux_send_literal "$1" "$2" ;;
     herdr) fm_backend_herdr_send_literal "$1" "$2" ;;
     zellij) fm_backend_zellij_send_literal "$1" "$2" "$W" ;;
     orca) fm_backend_orca_send_literal "$1" "$2" ;;
@@ -3630,7 +3632,7 @@ spawn_send_literal() {  # <target> <text>
 }
 spawn_send_key() {  # <target> <key>
   case "$BACKEND" in
-    tmux) fm_backend_tmux_send_key "$1" "$2" "$TMUX_STARTUP_INPUT_MODE" ;;
+    tmux) fm_backend_tmux_send_key "$1" "$2" ;;
     herdr) fm_backend_herdr_send_key "$1" "$2" ;;
     zellij) fm_backend_zellij_send_key "$1" "$2" "$W" ;;
     orca) fm_backend_orca_send_key "$1" "$2" ;;
@@ -5132,7 +5134,7 @@ if [ "$HARNESS" = kimi ]; then
   KIMI_SUBMIT_SETTLE=${FM_KIMI_SUBMIT_SETTLE:-0}
   if ! KIMI_SUBMIT_VERDICT=$(fm_backend_send_text_submit \
       "$BACKEND" "$STARTUP_TARGET" "$KIMI_POINTER" "$KIMI_SUBMIT_RETRIES" \
-      "$KIMI_SUBMIT_SLEEP" "$KIMI_SUBMIT_SETTLE" "$W" ${TMUX_STARTUP_INPUT_MODE:+"$TMUX_STARTUP_INPUT_MODE"}); then
+      "$KIMI_SUBMIT_SLEEP" "$KIMI_SUBMIT_SETTLE" "$W"); then
     kimi_spawn_fail "kimi brief pointer could not be submitted"
     exit 1
   fi
@@ -5156,7 +5158,7 @@ if [ "$HARNESS" = rovo ]; then
   ROVO_SUBMIT_SETTLE=${FM_ROVO_SUBMIT_SETTLE:-0}
   if ! ROVO_SUBMIT_VERDICT=$(fm_backend_send_text_submit \
       "$BACKEND" "$STARTUP_TARGET" "$ROVO_POINTER" "$ROVO_SUBMIT_RETRIES" \
-      "$ROVO_SUBMIT_SLEEP" "$ROVO_SUBMIT_SETTLE" "$W" ${TMUX_STARTUP_INPUT_MODE:+"$TMUX_STARTUP_INPUT_MODE"}); then
+      "$ROVO_SUBMIT_SLEEP" "$ROVO_SUBMIT_SETTLE" "$W"); then
     rovo_spawn_fail "rovo brief pointer could not be submitted into window $T"
     exit 1
   fi

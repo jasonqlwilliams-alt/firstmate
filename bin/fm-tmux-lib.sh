@@ -96,11 +96,17 @@ fm_tmux_format_literal() {
 
 FM_TMUX_PANE_FORMAT='tmux-pane:#{pid}:#{start_time}:#{session_id}:#{window_id}:#{pane_id}'
 FM_TMUX_PANE_PATTERN='^tmux-pane:([0-9]+):([0-9]+):(\$[0-9]+):(@[0-9]+):(%[0-9]+)$'
+FM_TMUX_RELAUNCH_ROUTING=0
+
+fm_tmux_use_relaunch_routing() {
+  FM_TMUX_RELAUNCH_ROUTING=1
+}
 
 # Status: 0 bound; 1 absent; 2 malformed or inconclusive. Explicit tmux
 # selectors and unqualified native IDs retain their existing semantics.
 fm_tmux_exact_target() {  # <target> [explicit]
-  local target=${1:-} literal inventory row match='' window=''
+  local target=${1:-} literal inventory row row_window match='' window='' format=$FM_TMUX_PANE_FORMAT
+  local -a scope=(-a)
   [ -n "$target" ] || return 2
   if [[ $target =~ $FM_TMUX_PANE_PATTERN ]] || [ "${2:-}" = explicit ]; then
     printf '%s' "$target"
@@ -111,20 +117,30 @@ fm_tmux_exact_target() {  # <target> [explicit]
     *:*) ;;
     *) printf '%s' "$target"; return 0 ;;
   esac
+  if [ "$FM_TMUX_RELAUNCH_ROUTING" = 1 ]; then
+    scope=(-t "=${target%%:*}:")
+    format='#{window_id}'
+  fi
   literal=$(fm_tmux_format_literal "$target")
-  if ! inventory=$(tmux list-windows -a \
-    -f "#{==:#{session_name}:#{window_name},$literal}" -F "$FM_TMUX_PANE_FORMAT" 2>&1); then
+  if ! inventory=$(tmux list-windows "${scope[@]}" \
+    -f "#{==:#{session_name}:#{window_name},$literal}" -F "$format" 2>&1); then
     fm_tmux_read_failure_status "$inventory"
     return $?
   fi
   [ -n "$inventory" ] || return 1
   while IFS= read -r row; do
-    [[ $row =~ $FM_TMUX_PANE_PATTERN ]] || return 2
+    if [ "$FM_TMUX_RELAUNCH_ROUTING" = 1 ]; then
+      [[ $row =~ ^@[0-9]+$ ]] || return 2
+      row_window=$row
+    else
+      [[ $row =~ $FM_TMUX_PANE_PATTERN ]] || return 2
+      row_window=${BASH_REMATCH[4]}
+    fi
     # Multiple links to a single window are legal. Keep the first link.
     if [ -z "$match" ]; then
-      match=$row window=${BASH_REMATCH[4]}
+      match=$row window=$row_window
     else
-      [ "${BASH_REMATCH[4]}" = "$window" ] || return 2
+      [ "$row_window" = "$window" ] || return 2
     fi
   done <<< "$inventory"
   printf '%s' "$match"
@@ -371,13 +387,13 @@ fm_tmux_submit_busy_state() {  # <target> [explicit]
 # fm_tmux_submit_enter_core caller, or a pane already busy before typing) an
 # `unknown` verdict is preserved untouched: busy conversion without the
 # transition evidence could mark an undelivered message delivered.
-fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle] [explicit|native-input]
+fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle] [explicit]
   local target=$1 retries=$2 sleep_s=$3 baseline_idle=${4:-} mode=${5:-} i=0 j state
-  if [ "$mode" != native-input ]; then
+  if [ "$FM_TMUX_RELAUNCH_ROUTING" = 0 ]; then
     target=$(fm_tmux_exact_target "$target" "$mode") || { printf 'unknown'; return 0; }
   fi
   while :; do
-    if ! fm_tmux_pane_command "$target" send-keys Enter 2>/dev/null && [ "$mode" != native-input ]; then
+    if ! fm_tmux_pane_command "$target" send-keys Enter 2>/dev/null && [ "$FM_TMUX_RELAUNCH_ROUTING" = 0 ]; then
       printf 'unknown'
       return 0
     fi
@@ -414,12 +430,12 @@ fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle
   fm_composer_queued_enter_verdict "$state" "$(fm_tmux_submit_busy_state "$target" "$mode")"
 }
 
-fm_tmux_submit_core() {  # <target> <text> <retries> <enter-sleep> <settle> [explicit|native-input]
+fm_tmux_submit_core() {  # <target> <text> <retries> <enter-sleep> <settle> [explicit]
   local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 mode=${6:-} baseline_idle='' baseline_state
   # The turn-started baseline must predate our own typing: a pane already
   # busy before the text lands can turn "busy" for reasons unrelated to our
   # Enter, so only a clean idle-to-busy transition may confirm a submit.
-  if [ "$mode" != native-input ]; then
+  if [ "$FM_TMUX_RELAUNCH_ROUTING" = 0 ]; then
     target=$(fm_tmux_exact_target "$target" "$mode") || { printf 'send-failed'; return 0; }
   fi
   baseline_state=$(fm_tmux_submit_busy_state "$target" "$mode")
