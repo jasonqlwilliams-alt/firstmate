@@ -36,7 +36,7 @@ README.md            public overview and development notes
 .agents/skills/      firstmate-loaded internal skills, committed; each carries metadata.internal=true for installers
 .claude/skills       symlink to .agents/skills for claude compatibility
 skills/              standalone public installer-facing skills, committed; not loaded by firstmate
-bin/                 helper scripts, committed; read each script's header before first use
+bin/                 tracked helper scripts (see AGENTS.md section 2 for the first-use rule)
 .env                 optional Relay pairing token (presence-gates AGENTS.md section 14) and mail-plane credentials (schema: "Mail plane" below); LOCAL, gitignored
 config/crew-harness  crewmate harness override; LOCAL, gitignored; absent or "default" = same as firstmate. Inherited as the literal file: a concrete primary adapter value also controls a secondmate home's own crewmates (AGENTS.md section 4)
 config/claude-permission-mode  optional one-token permission posture for every Claude worker launch; LOCAL, gitignored; inherited by secondmate homes; see "Claude permission mode" below

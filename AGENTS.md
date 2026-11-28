@@ -51,6 +51,7 @@ Never add an agent name as a commit co-author.
 
 Use [docs/configuration.md](docs/configuration.md#per-path-listing) as needed for the operational-home layout, per-path listing, and configuration schemas.
 Each producing script's header and help own exact child fields and mutation mechanics.
+Read each `bin/` helper's header before first use.
 `FM_HOME` selects an instance's private `data/`, `state/`, `config/`, and `projects/`, while scripts continue to come from their tracked code root.
 Each secondmate has a persistent isolated `FM_HOME`, including its own state, backlog, projects, and session lock.
 `bin/fm-send.sh` fails closed unless `FM_HOME` is explicit, so a steer cannot silently resolve against another home.
