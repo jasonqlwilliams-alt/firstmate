@@ -3929,10 +3929,9 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   spawn_send_text_line "$WT_TARGET" "fm_acquired_slot=\$(treehouse get --lease --lease-holder $(printf '%q' "$ID")) && fm_acquired_base=\$(git -C \"\$fm_acquired_slot\" rev-parse --verify HEAD) && printf '%s\n%s\n' \"\$fm_acquired_slot\" \"\$fm_acquired_base\" > $(printf '%q' "$SPAWN_SLOT_ACQUIRE_FILE") && cd -- \"\$fm_acquired_slot\""
 
   # Wait for the acquired path: the pane's cwd moves from project to worktree.
-  # Target the stable window id, not the name: if the name is ever lost (e.g. an
-  # automatic-rename slips through), display-message -t <bad-name> falls back to the
-  # active client's window, which would misread firstmate's OWN pane path as the
-  # worktree and tangle a hook into the primary checkout. The window id never lies.
+  # The tmux binding from window creation keeps an active-split change or a
+  # reused ID on a replacement server from supplying the wrong cwd, which
+  # could tangle a hook into the primary checkout.
   # The project comparison is physical: spawn_worktree_isolated screens each
   # read against PROJ_ABS_REAL, not PROJ_ABS, because a symlinked project prefix
   # would otherwise make the pane's OS-level cwd read differ from PROJ_ABS on

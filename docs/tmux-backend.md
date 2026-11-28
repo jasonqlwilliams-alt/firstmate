@@ -48,7 +48,7 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 
 ### Recorded pane targeting
 
-For a recorded `session:window` target, Firstmate matches both names literally in tmux's inventory and binds the active pane of the one matching window.
+At the start of a guarded operation on a recorded `session:window` target, Firstmate matches both names literally in tmux's inventory and binds the active pane of the one matching window.
 If the recorded `fm-mate` window closes while `fm-mate2` remains open, `fm-peek` reports the recorded window missing.
 An inconclusive inventory or matches to multiple distinct windows leave the endpoint unreadable.
 On a tmux server with `exit-empty off`, a server with no remaining sessions may leave a closed endpoint unreadable until the server has a session again or stops.
@@ -59,15 +59,19 @@ Once the target is verified, tmux applies its configured input behavior, includi
 If the recorded tmux target is ambiguous or its inventory is inconclusive, a due doorbell attempt counts toward the watcher's retry limit without sending input, and the instruction stays queued for recovery.
 Explicit pane selectors such as `session:0.1` use native tmux syntax when they do not resolve to task metadata.
 Fresh tmux startup uses the binding returned at pane creation for worktree discovery, input, and cleanup.
+Standalone `interrupt` and `exit` use recorded pane bindings.
+During `relaunch`, both the stop and launch steps use session-scoped window lookup for liveness and native tmux selectors for input.
+When relaunch recreates a missing endpoint, it uses the new window ID for worktree discovery.
 [`fm-tmux-lib.sh`](../bin/fm-tmux-lib.sh) owns the binding, and [`fm-tmux-exact-target.test.sh`](../tests/fm-tmux-exact-target.test.sh) exercises it with a private tmux server.
 
 ### Agent liveness probe
 
 A target-existence check proves only that the pane exists.
 After [resolving the recorded window](#recorded-pane-targeting), the deeper tmux agent-liveness probe reads process names to distinguish a running harness from a bare idle shell.
-It classifies recognized Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, Muse, and Rovo process identities as `alive`, common shells as `dead`, an authoritatively absent window as `missing`, unreadable state as `unreadable`, and every other process as `ambiguous`.
+It classifies recognized Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, Muse, and Rovo process identities as `alive`, common shells as `dead`, an absent recorded window or lost pane binding as `missing`, unreadable state as `unreadable`, and every other process as `ambiguous`.
 The process-name vocabulary behind those verdicts is owned by `bin/fm-agent-process-lib.sh` and shared with the Herdr adapter, which proves a registered agent against the same names ([herdr-backend.md](herdr-backend.md) "Restart and liveness behavior").
 Only `dead` and `missing` authorize recovery because a false dead result could launch a duplicate agent.
+Secondmate startup recovery and teardown checks that require an agent-free endpoint treat `missing` after a successful pane binding as `unreadable`.
 
 For positive attribution, the probe combines two independent name sources rather than making either one load-bearing.
 `#{pane_current_command}` and the pane tty foreground process group's kernel `comm` values expose different name fields, and which one retains executable identity is platform-dependent.
@@ -88,7 +92,7 @@ Run the real-harness guard after any harness upgrade and before trusting refresh
 
 Agent liveness and composer safety are separate checks.
 The tmux reader is a thin adapter over the fleet-wide classifier in `bin/fm-composer-lib.sh`: it contributes one styled full-pane capture, the `#{cursor_y}` cursor row, and foreground-process identity probes, and the shape containing the cursor - a complete bordered box (titled bottom borders tolerated), a bare agent-glyph row with its wrapped input, opencode's left bar, or Pi's identity-corroborated separator pair - normally decides the verdict.
-For a recorded task, the cursor, screen, and any follow-up identity probe use the [same pane binding](#recorded-pane-targeting).
+In a guarded snapshot, the cursor, screen, and any follow-up identity probe use the [same pane binding](#recorded-pane-targeting).
 Real text in an identified shape is pending, while only positively proven emptiness reads empty.
 A blank or otherwise unidentified cursor row is `unknown` and every consumer defers, except that a foreground process proven to be Cursor is re-read cursorlessly because Cursor parks its terminal cursor below its footer.
 That identity-gated exception preserves the strict container-proof rule for every other pane, so a modal dialog, a dead shell between stale rules, or a mid-redraw pane is never an injection target.
@@ -104,11 +108,13 @@ The supervisor guard selects only the detected primary harness's signature rathe
 [Recorded pane targeting](#recorded-pane-targeting) also applies to inbox doorbells, named keys, and verified submits.
 `bin/fm-tmux-lib.sh` owns type-and-submit verification.
 It types a message once and retries Enter within the attempt budget while the composer reads `pending` or `pending-unproven`.
-If sending Enter fails, the submit reports `unknown` immediately.
+If sending Enter fails outside relaunch, the submit reports `unknown` immediately.
+During relaunch, the submit still reads the composer after a failed Enter and applies the same pending-text retry rule.
 A composer proven empty confirms delivery.
 Text left in established structure remains `pending`, text in ambiguous structure remains unproven, and unreadable or unsafe state remains unknown.
 An ordinary local `fm-send.sh` text steer and every remote text steer no longer ride this verified submit at all: they become durable steering-inbox records plus best-effort constant doorbell lines (`bin/fm-task-inbox-lib.sh`).
-The verdicts above are delivery-critical only for the local typed plane - harness-native invocations and explicit backend targets - where `fm-send.sh` still never retypes or assumes a confirmed submit for an unconfirmed verdict; its header owns the distinct delivered-unconfirmed exit status and operator response.
+`fm-send.sh` uses these verdicts for local harness-native invocations and explicit backend targets.
+Its header owns the delivered-unconfirmed exit status and operator response.
 
 OpenCode 1.18.4 has one busy-queue exception.
 While OpenCode is mid-turn, Enter queues the message but leaves its text visible until the turn completes.
