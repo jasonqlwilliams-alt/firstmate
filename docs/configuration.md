@@ -8,7 +8,8 @@ The shared orchestrator behavior lives in [`AGENTS.md`](../AGENTS.md) - edit it 
 
 ## Operational home layout and state
 
-This section is the single owner of the top-level operational-home layout; producer script headers and their help own exact child-file fields and mutation contracts.
+This section owns the operational-home layout and per-path listing.
+Producer script headers and their help own exact file fields and mutation contracts.
 The tracked code root contains the shared instruction, skill, documentation, workflow, and `bin/` surfaces, while each effective `FM_HOME` contains private operational directories.
 `data/` holds durable private fleet records such as the project and secondmate registries, captain preferences, optional shared captain preferences, learnings, backlog, briefs, scout reports, and explicitly installed content-addressed extension packages under `data/extensions/packages/`.
 `state/` holds runtime records such as task metadata, append-only status events, endpoint signals, watcher and wake-queue coordination, inactive terminal-outcome receipts under `state/terminal-outcomes/`, enabled extension working namespaces under `state/extensions/`, away-mode state, generated Relay artifacts, parent-side remote ledger copies under `state/secondmate-summary-cache/`, one-shot Bearings reconcile requests under `state/reconcile-notify/`, private secondmate config-reread generations with their retry and quarantine state, per-task steering-inbox records under `state/<id>.inbox/` (`bin/fm-task-inbox-lib.sh`), and parent-owned secondmate pending-reply records under `state/pending-replies/` (`bin/fm-pending-reply-lib.sh`).
@@ -20,7 +21,115 @@ Untracked files and directories whose names begin with `scratchpad` are also git
 
 `bin/fm-spawn.sh` owns the base task-metadata fields it emits, while the runtime-backend section below owns backend-specific fields and selector interpretation.
 The producing PR and Relay helpers own the fields they append, `bin/fm-classify-lib.sh` owns status-event vocabulary, and `bin/fm-crew-state.sh` owns current-state reconciliation.
-Wake, watcher, away-mode, and Relay-specific state mechanics remain with their named scripts and reference sections rather than being duplicated into one exhaustive state tree here.
+Wake, watcher, away-mode, and Relay-specific state mechanics remain with their named scripts and reference sections; the per-path listing below names each path's purpose and owner without restating those mechanics.
+
+### Per-path listing
+
+See [Layout and state in `AGENTS.md`](../AGENTS.md#2-layout-and-state) for the always-loaded handling rules.
+Entries marked "never touch" are written only by their owning scripts; do not edit, delete, or recreate them by hand.
+
+```
+AGENTS.md            always-loaded supervisor contract (CLAUDE.md is a real @AGENTS.md pointer to it)
+CONTRIBUTING.md      contributor workflow and repo conventions
+README.md            public overview and development notes
+.github/workflows/   shared CI and PR enforcement, committed
+.tasks.toml          tracked tasks-axi configuration (see "Backlog backend" below)
+.agents/skills/      firstmate-loaded internal skills, committed; each carries metadata.internal=true for installers
+.claude/skills       symlink to .agents/skills for claude compatibility
+skills/              standalone public installer-facing skills, committed; not loaded by firstmate
+bin/                 tracked helper scripts (see AGENTS.md section 2 for the first-use rule)
+.env                 optional Relay pairing token and mail-plane credentials (see "Relay" and "Mail plane" below); LOCAL, gitignored
+config/crew-harness  static crewmate harness override (see "Harness support" below)
+config/claude-permission-mode  Claude worker permission posture (see "Claude permission mode" below)
+config/crew-dispatch.json  firstmate-maintained, human-editable dispatch rules (see "Crew dispatch profiles" below)
+config/cursor-model-allowlist  spawn-time Cursor model lock (see "Cursor model allowlist" below)
+config/secondmate-harness  primary's secondmate launch profile (see "Harness support" below)
+config/backup-helm-successor  successor primary for the Claude-runway backup helm (see docs/backup-helm.md "Successor")
+config/backlog-backend  routine backlog backend override (see "Backlog backend" below)
+config/backend  runtime session-provider backend override (see "Runtime backend" below)
+config/calm     Pi Calm presentation preference (see "Pi Calm preference" below)
+config/supervision-branch-model config/supervision-branch-effort  Pi supervision branch pins (see "Pi supervision branch model and effort" below)
+config/startup-memory-budget  startup prompt-memory allowance (see "Startup memory budget" below)
+config/stow-pass-horizon  /stow pass-count decay flag (see "Stow pass horizon" below)
+config/herdr-presentation-spaces  Herdr task projection preference (see docs/herdr-backend.md "Presentation spaces" and "Runtime backend" below)
+config/trace-context  native W3C trace-context opt-in (see "Trace context propagation" below)
+config/turnend-churn-absorb  pane-churn wake absorption opt-in (see "Turn-end pane-churn absorb" below)
+config/repository-policy.json  repository delivery guard opt-in (see "Repository delivery policy" below)
+config/cmux-socket-password  optional cmux control-socket password (see docs/cmux-backend.md "Setup")
+config/wedge-alarm  away-mode active-alert directives (see docs/wedge-alarm.md "Channels")
+config/packet-router-inbox  home-local Packet Router destination (see "Packet Router inbox" below)
+config/bearings-canvas-dir  optional local Bearings Canvas export destination; see "Bearings detail canvas export" below
+config/watched-tools.json  firstmate-maintained, human-editable tool list (see "Watched tool updates" below)
+config/x-mode.env    generated Relay watcher cadence (see "Relay" below)
+data/                personal fleet records; LOCAL, gitignored as a whole
+  backlog.md         task queue, dependencies, history
+  captain.md         canonical domain-local captain preferences (see "Captain Preferences" below)
+  captain-shared.md  shared captain preferences (see "Captain Preferences" below)
+  learnings.md       fleet-local operational knowledge (see "Operational learnings" below)
+  projects.md        thin fleet navigation registry recording each project's standing delivery posture; firstmate-private, parsed for mechanical sync and seeding by fm-project-mode.sh (AGENTS.md section 6)
+  secondmates.md      local and remote secondmate routing table; firstmate-private, maintained by the secondmate seed helpers (AGENTS.md section 6)
+  system-state.md    generated live-facts overlay (see "Generated system-state card" below)
+  <id>/brief.md      per-task crewmate brief, or per-secondmate charter brief when kind=secondmate
+  <id>/report.md     scout task deliverable, written by the crewmate; survives teardown
+projects/            gitignored project clones (see AGENTS.md section 1, hard rule 1, for write authority)
+state/               runtime records and signals; gitignored
+  upstream-sync/      bare upstream/fork caches, per-project check state and locks, validation logs, and review packets; owned by bin/fm-upstream-sync.sh
+  <id>.status        append-only task wake-event log (see AGENTS.md section 2 and bin/fm-classify-lib.sh)
+  <id>.turn-ended    touched by turn-end hooks
+  <id>.progress      touched for observed native-harness activity inside one Pi turn; bin/fm-busy-event.sh owns its generation binding and bin/fm-watch.sh reads it beside turn-ended for the busy-age bound only, never as a completed turn
+  <id>.grok-turnend-token   firstmate-owned grok hook registry token for the task; removed by teardown
+  <id>.kimi-turnend-token   firstmate-owned Kimi hook registry token for the task; removed by teardown
+  <id>.gemini-settings.json  firstmate-owned per-task Gemini settings carrying the busy-state and turn-end hooks, reached through GEMINI_CLI_SYSTEM_SETTINGS_PATH so nothing is written into the project's own .gemini/; removed by teardown
+  <id>.muse-session  muse busy-source binding (sessions root plus task worktree) written by fm-spawn; removed by teardown
+  <id>.cursor-session  cursor busy-source binding (projects root, task worktree, prior conversations) written by fm-spawn; removed by teardown
+  <id>.reconcile-nudged  epoch second of the last inventory-reconcile nudge sent to this secondmate; bin/fm-secondmate-reconcile.sh owns its per-home cooldown window
+  <id>.backlog-close  the exact backlog transition a teardown recorded before removing the task's record, so an interrupted cleanup can still be finished at the next session start; bin/fm-backlog-transition-lib.sh owns its format and replay, and a landed transition removes it
+  <id>.inbox/          durable steering inbox: sequenced firstmate instruction records the worker acknowledges by moving them into its handled/ subdirectory; written by fm-send, with ordinary records re-rung and escalated by the watcher while explicit fire-and-forget records are excluded from that ladder, and removed by teardown (bin/fm-task-inbox-lib.sh)
+  <id>.meta          task metadata; each producer script's header owns its exact fields and mutation contract, with this document routing operator-facing backend and trace-context details
+  <id>.herdr-presentation  quarantinable attempt and restart-binding journal for Herdr's optional visual projection; never task or endpoint authority; see docs/herdr-backend.md "Presentation spaces"
+  <id>.check.sh      authenticated slow poll; the watcher dispatches validated PR data and the byte-identified Relay shim through trusted repository scripts, runs registered custom checks from hash-validated private snapshots, and rejects every other state check without execution
+  <id>.check-trust   private content binding created by fm-check-register.sh for an intentional custom check
+  <id>.pr-poll       private validated data sidecar for the byte-static PR merge poll
+  <id>.pr-poll-registration  private transactional provenance record binding the task, canonical metadata identity, sidecar, and static poll publication
+  <id>.pr-poll-retirement  private identity-bound crash-recovery receipt for one exact validated merged result; removed after its poll artifacts retire
+  <id>.pr-poll-merge-notified  canonical PR identity of the last merge outcome delivered for this task; bin/fm-pr-lib.sh owns the marker format and identity mechanics, while bin/fm-merge-outcome-lib.sh owns locked publication, duplicate suppression, and replacement
+  branch-outcomes.jsonl .branch-outcomes-cursor .branch-outcomes-processed .<task>.branch-outcome-index .branch-outcome-index-ready  Pi supervision-branch durable outcome store, its read cursor, main's processed marker, bounded latest per-task status-coverage caches, and their recovery marker; bin/fm-branch-outcome.sh owns the formats
+  branch-session/ .branch-session .branch-mirror-cursor  the branch's per-main-session conversations, the pointer to the current one, and the dialog-mirror cursor; extension-owned (docs/pi-supervision-branch.md)
+  .branch-eligible-rows .branch-eligible-owner .main-eligible-rows  per-actor wake-row claims and branch-owner evidence; docs/watcher-continuity.md owns the acknowledgement contract
+  .lease-<task>        per-task supervision lease naming which actor (main or branch) may change that task; bin/fm-lease-lib.sh owns the contract the guarded scripts enforce
+  x-watch.check.sh   generated Relay poll shim (see "Relay" below)
+  tool-updates.check.sh  generated watched-tool poll shim (see "Watched tool updates" below for its trust binding and .tool-updates record)
+  mail.check.sh      generated received-mail poll shim and its .check-trust binding; present only after bin/fm-mail-check.sh arm; report record .mail-check (mail schema: "Mail plane" below)
+  .mail-seen .mail-woken .mail-retry .mail-retry-pos .mail-turn .mail-seen.lock  mail-plane poll cursor, emission journal, transient-fetch retry set, retry-scan position, contended-slot turn flag, and overlapping-poll lock; written only by bin/fm-mail.sh (mail schema: "Mail plane" below)
+  pending-replies/   parent-owned secondmate pending-reply records (see bin/fm-pending-reply-lib.sh)
+  procevent/         registered process-to-event sources, one private record per canonical source id; written only by bin/fm-procevent.sh, and their presence alone keeps supervision required (AGENTS.md section 13)
+  procevent-inbox/   private captured results and their durable handled-acknowledgement markers; source output lives here and never in an event line
+  decision-bindings/ private records marking a captured-answer source as feeding the keyed-answer intake, with a legacy origin on pre-collapse records; written only by bin/fm-captain-hold.sh bind, dropped by unbind and by source retirement (AGENTS.md section 13; docs/captain-hold-lifecycle.md)
+  reconcile-requests/ private open obligations to re-check a captain call whose board selection was `reconcile`; written only by bin/fm-captain-hold.sh, retired by its verify-then-decide outcomes or a normal answer that settles the call (AGENTS.md section 13; docs/captain-hold-lifecycle.md)
+  when/              private condition->action watch specs, their trust bindings, and single-fire markers; written only by bin/fm-procevent-when.sh (AGENTS.md section 13's process-event-sources trigger)
+  inbox/             captain notes captured out of band by bin/fm-inbox.sh, including the voice handover's queued requests; each note appends one `check` wake and stays pending until acknowledged with `bin/fm-inbox.sh drain --ack <id>`, which moves it to inbox/handled/ (docs/voice-relay.md)
+  x-inbox/           generated Relay pending mention payloads; fmx-respond drains it (AGENTS.md section 14)
+  x-context/         generated Relay durable per-request reply context and one-wake offer markers, keyed by request_id; survives inbox cleanup and expires within seven days (AGENTS.md section 14; bin/fm-x-lib.sh)
+  x-outbox/          generated Relay dry-run reply and dismiss previews; inspect it when FMX_DRY_RUN is set (AGENTS.md section 14)
+  public-followup/   generated private transport for promised public replies: retained open-loop registrations, typed terminal-result inbox, results staged for an owning home on another machine, accepted/rejected ledgers, and retirement receipts (AGENTS.md section 14; bin/fm-public-followup.sh)
+  x-poll.error x-poll.claim-error  generated Relay and offer-claim diagnostic dedupe markers
+  .startup-network.*  status, report, per-step elapsed timings, inline-print claim, and lock for the deferred startup stage, including home-summary publication; bin/fm-startup-network.sh
+  .wake-queue        durable queued wakes (see bin/fm-wake-lib.sh for row format and docs/watcher-continuity.md for acknowledgement)
+  .watcher-down      private generation-bound recovery state coupling watcher downtime, durable wake presentation, and post-handling acknowledgement; never touch
+  .<id>.open-decisions-cursor  per-task byte cursor and folded open-decision set bounding the OPEN DECISIONS scan's cost to new status-log appends; written only by fm-classify-lib.sh's status_open_decisions_incremental, removed by teardown, safe to delete (forces one full re-fold)
+  .status-presentation-cursor .status-presentation-lock  fleet-wide per-task status identity plus independent annotation and outcome-backstop byte offsets, with a serialization lock preventing already-presented lines from replaying while preserving delayed signal annotations; owned by fm-classify-lib.sh, with each task's row retired by teardown
+  .afk-contract      the away-posture record: the captain's verbatim away words, expected return, reach profile, spend cap, and structured mandate clauses; written only by bin/fm-afk-contract.sh after the captain confirms the read-back, archived under afk-contracts/ at return; its presence IS the away posture in every harness
+  afk-contracts/     archived away-posture records: one final record per away window keyed by entry time, plus any superseded mandates from that window
+  .afk               durable away-mode daemon flag on the harnesses that still launch the daemon (never on Pi); present = sub-supervisor may inject escalations (set by the daemon entry, cleared on user return)
+  .watch.lock .wake-queue.lock watcher singleton and queue serialization locks
+  .claude-autoarm.lock .claude-autoarm-epoch .claude-autoarm-failure-notified .claude-autoarm-failure-alarmed .turnend-claude-blocks .turnend-claude-blocks.lock   Claude Stop auto-arm single-flight, epoch, failure-episode, attended-alarm, guard-budget, and budget-lock records; never touch
+  .cursor-park-owner .cursor-park-owner.lock .turnend-cursor-blocks   Cursor stop-hook owner record, publication and commit lock, and bounded repair-nag budget; never touch
+  .hash-* .count-* .stale-* .stale-since-* .churn-since-* .paused-* .wedge-escalations-* .writing-* .seen-* .hb-surfaced-* .last-* .heartbeat-streak   watcher internals; never touch
+  .watch-triage.log  watcher's absorbed-wake debug log (size-capped); never relied on, safe to delete
+  .last-watcher-beat watcher liveness beacon (see docs/watcher-continuity.md)
+  .subsuper-* .supervise-daemon.*   sub-supervisor internals; never touch
+.no-mistakes/        local validation state and evidence; gitignored
+```
 
 `bin/fm-session-start.sh`'s header is the single owner of session-start ordering, composed commands, digest contents, and the digest's startup mechanism.
 `bin/fm-startup-network.sh`'s header owns the deferred startup stage that keeps every external-network call, the potentially slow inactive-outcome scan, and locked-start home-summary publication off that digest's blocking path, including its state files and the safety argument for running them later.
@@ -133,7 +242,7 @@ A genuinely no-op heartbeat is absorbed in bash and never reaches Pi, and every 
 A legacy `state/.afk` daemon flag still declines every wake offer, the away-posture record alone does not, and a broken branch still falls back to today's wake-to-main path.
 The branch's role stays bounded exactly as the captain-approved architecture set it: it cannot merge a PR, land local work, or freshly spawn, and every existing captain gate remains unchanged.
 Homes on any other primary harness never load this feature and are entirely unaffected.
-`AGENTS.md`'s `state/` inventory routes the branch's runtime files to their format and lifecycle owners.
+The [per-path listing](#per-path-listing) routes the branch's runtime files to their format and lifecycle owners.
 A captain-facing (verdict `captain`) branch outcome persists as one exact, sequence-keyed visible transcript entry and then opens one sequence-keyed processing turn on main, which stays open until main acknowledges that sequence through its `fm_branch_processed` tool.
 The branch prompt's "Verdict: routine or captain" section owns the distinction between captain-facing, unsolicited routine, and unchanged-review outcomes.
 The generated [Pi supervision protocol](supervision-protocols/pi.md) owns main's event ownership, acknowledgement duty, and conversational treatment for merged outcomes, while the persisted entry itself owns captain visibility.
@@ -206,6 +315,7 @@ Bootstrap requires compatible `tasks-axi` on every profile; see "Toolchain" belo
 Set the local, gitignored `config/backlog-backend` file to `manual` to force manual backlog editing and suppress the verbose `BOOTSTRAP_INFO: tasks-axi available` fact, not missing-tool reporting.
 A `manual` home owns its backlog file outright: the lifecycle transitions above are skipped there, dispatch and completion never fail over the file's contents, and a completed teardown prints the hand edit that is owed instead.
 Absent or `tasks-axi` selects the tasks-axi path.
+The primary's setting propagates to secondmate homes through the [declared inheritance contract](../bin/fm-config-inherit-lib.sh).
 On the default markdown adapter, tasks-axi and manual edits produce the same `## In flight`, `## Queued`, and `## Done` sections.
 
 The tracked `.tasks.toml` paths resolve against the directory tasks-axi runs in, not `FM_HOME`, so a bare `tasks-axi` run from the code root addresses the code root's `data/` whenever the home lives elsewhere.
