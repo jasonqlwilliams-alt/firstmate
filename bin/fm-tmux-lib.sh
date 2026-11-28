@@ -371,11 +371,16 @@ fm_tmux_submit_busy_state() {  # <target> [explicit]
 # fm_tmux_submit_enter_core caller, or a pane already busy before typing) an
 # `unknown` verdict is preserved untouched: busy conversion without the
 # transition evidence could mark an undelivered message delivered.
-fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle] [explicit]
+fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle] [explicit|native-input]
   local target=$1 retries=$2 sleep_s=$3 baseline_idle=${4:-} mode=${5:-} i=0 j state
-  target=$(fm_tmux_exact_target "$target" "$mode") || { printf 'unknown'; return 0; }
+  if [ "$mode" != native-input ]; then
+    target=$(fm_tmux_exact_target "$target" "$mode") || { printf 'unknown'; return 0; }
+  fi
   while :; do
-    fm_tmux_pane_command "$target" send-keys Enter 2>/dev/null || { printf 'unknown'; return 0; }
+    if ! fm_tmux_pane_command "$target" send-keys Enter 2>/dev/null && [ "$mode" != native-input ]; then
+      printf 'unknown'
+      return 0
+    fi
     sleep "$sleep_s"
     state=$(fm_tmux_composer_state "$target" "$mode")
     case "$state" in
@@ -409,12 +414,14 @@ fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle
   fm_composer_queued_enter_verdict "$state" "$(fm_tmux_submit_busy_state "$target" "$mode")"
 }
 
-fm_tmux_submit_core() {  # <target> <text> <retries> <enter-sleep> <settle> [explicit]
+fm_tmux_submit_core() {  # <target> <text> <retries> <enter-sleep> <settle> [explicit|native-input]
   local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 mode=${6:-} baseline_idle='' baseline_state
   # The turn-started baseline must predate our own typing: a pane already
   # busy before the text lands can turn "busy" for reasons unrelated to our
   # Enter, so only a clean idle-to-busy transition may confirm a submit.
-  target=$(fm_tmux_exact_target "$target" "$mode") || { printf 'send-failed'; return 0; }
+  if [ "$mode" != native-input ]; then
+    target=$(fm_tmux_exact_target "$target" "$mode") || { printf 'send-failed'; return 0; }
+  fi
   baseline_state=$(fm_tmux_submit_busy_state "$target" "$mode")
   [ "$baseline_state" = idle ] && baseline_idle=1
   fm_tmux_pane_command "$target" send-keys -l "$text" 2>/dev/null || { printf 'send-failed'; return 0; }

@@ -55,16 +55,20 @@ fm_backend_tmux_target_exists() {  # <target> [explicit]
   fm_tmux_read_failure_status "$diagnostic"
 }
 
-fm_backend_tmux_send_key() {  # <target> <key> [explicit]
-  local target
-  target=$(fm_tmux_exact_target "$1" "${3:-}") || return $?
-  if [[ ! $target =~ $FM_TMUX_PANE_PATTERN ]]; then
-    fm_backend_tmux_target_exists "$target" "${3:-}" || return $?
+fm_backend_tmux_send_key() {  # <target> <key> [explicit|native-input]
+  local target=$1 mode=${3:-}
+  if [ "$mode" = native-input ]; then
+    fm_backend_tmux_target_exists "$target" || return $?
+  else
+    target=$(fm_tmux_exact_target "$target" "$mode") || return $?
+    if [[ ! $target =~ $FM_TMUX_PANE_PATTERN ]]; then
+      fm_backend_tmux_target_exists "$target" "$mode" || return $?
+    fi
   fi
   fm_tmux_pane_command "$target" send-keys "$2"
 }
 
-fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle> [explicit]
+fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle> [explicit|native-input]
   fm_tmux_submit_core "$@"
 }
 
@@ -100,19 +104,20 @@ fm_backend_tmux_container_ensure() {  # [session]
   printf '%s\n' "$session"
 }
 
-# Keep spawn's existing placement and return the new pane's binding from the
-# creating command. Later launch input must never resolve a replacement pane.
-fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs>
-  local ses=$1 wname=$2 proj_abs=$3 pane
+fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs> [window-id]
+  local ses=$1 wname=$2 proj_abs=$3 format=$FM_TMUX_PANE_FORMAT target
+  [ "${4:-}" != window-id ] || format='#{window_id}'
   if tmux list-windows -t "=$ses:" -F '#{window_name}' | grep -qx "$wname"; then
     echo "error: window $ses:$wname already exists" >&2
     return 1
   fi
-  pane=$(tmux new-window -dP -F "$FM_TMUX_PANE_FORMAT" -t "=$ses:" -n "$wname" -c "$proj_abs") || return 1
-  [[ $pane =~ $FM_TMUX_PANE_PATTERN ]] || return 1
-  fm_tmux_pane_command "$pane" set-window-option automatic-rename off 2>/dev/null || true
-  fm_tmux_pane_command "$pane" set-window-option allow-rename off 2>/dev/null || true
-  printf '%s\n' "$pane"
+  target=$(tmux new-window -dP -F "$format" -t "=$ses:" -n "$wname" -c "$proj_abs") || return 1
+  if [ "$format" = "$FM_TMUX_PANE_FORMAT" ]; then
+    [[ $target =~ $FM_TMUX_PANE_PATTERN ]] || return 1
+  fi
+  fm_tmux_pane_command "$target" set-window-option automatic-rename off 2>/dev/null || true
+  fm_tmux_pane_command "$target" set-window-option allow-rename off 2>/dev/null || true
+  printf '%s\n' "$target"
 }
 
 # fm_backend_tmux_current_path: used by spawn to discover the worktree from
@@ -124,9 +129,9 @@ fm_backend_tmux_current_path() {  # <target>
 }
 
 # Send a fixed spawn command and one named Enter in the same tmux command.
-fm_backend_tmux_send_text_line() {  # <target> <text>
+fm_backend_tmux_send_text_line() {  # <target> <text> [explicit]
   local target
-  target=$(fm_tmux_exact_target "$1") || return $?
+  target=$(fm_tmux_exact_target "$1" "${3:-}") || return $?
   fm_tmux_pane_command "$target" send-keys "$2" Enter
 }
 
