@@ -1,0 +1,122 @@
+Scenario binding on target
+$ bash -c '. "$1"; shift; fm_backend_source tmux && "$@"' backend fm-backend.sh fm_tmux_exact_target fleet:fm-bound
+tmux-pane:3932223:1795826997:$0:@2:%2
+[exit 0]
+$ /usr/bin/tmux -S LAB/s link-window -s '$0:@2' -t '$1:77'
+[exit 0]
+$ /usr/bin/tmux -S LAB/s select-pane -t %3
+[exit 0]
+$ /usr/bin/tmux -S LAB/s move-window -s '$0:@2' -t '$0:87'
+[exit 0]
+$ bash -c '. "$1"; shift; fm_backend_source tmux && "$@"' backend fm-backend.sh fm_backend_send_literal tmux 'tmux-pane:3932223:1795826997:$0:@2:%2' 'after focus and index changes'
+[exit 0]
+$ bash -c '. "$1"; shift; fm_backend_source tmux && "$@"' backend fm-backend.sh fm_backend_send_key tmux 'tmux-pane:3932223:1795826997:$0:@2:%2' Enter
+[exit 0]
+%2 receipt: START receiver cwd=LAB grid=110x36 key-present=False
+SUBMIT after focus and index changes
+$ /usr/bin/tmux -S LAB/s unlink-window -t '$0:87'
+[exit 0]
+$ /usr/bin/tmux -S LAB/s list-windows -a -F '#{session_name}:#{window_name} #{session_id}:#{window_id}.#{pane_id} #{pane_current_command}'
+fleet:main $0:@0.%0 bash
+mirror:main $1:@1.%1 bash
+mirror:fm-bound $1:@2.%3 python3
+[exit 0]
+$ bash -c '. "$1"; shift; fm_backend_source tmux && "$@"' backend fm-backend.sh fm_backend_target_exists tmux 'tmux-pane:3932223:1795826997:$0:@2:%2'
+[exit 1]
+$ bash -c '. "$1"; shift; fm_backend_source tmux && "$@"' backend fm-backend.sh fm_backend_capture tmux 'tmux-pane:3932223:1795826997:$0:@2:%2' 40
+invalid option: firstmate-tmux-binding-lost
+[exit 1]
+$ bash -c '. "$1"; shift; fm_backend_source tmux && "$@"' backend fm-backend.sh fm_backend_send_literal tmux 'tmux-pane:3932223:1795826997:$0:@2:%2' 'stale text'
+invalid option: firstmate-tmux-binding-lost
+[exit 1]
+$ bash -c '. "$1"; shift; fm_backend_source tmux && "$@"' backend fm-backend.sh fm_backend_send_key tmux 'tmux-pane:3932223:1795826997:$0:@2:%2' Enter
+invalid option: firstmate-tmux-binding-lost
+[exit 1]
+$ bash -c '. "$1"; shift; fm_backend_source tmux && "$@"' backend fm-backend.sh fm_backend_kill tmux 'tmux-pane:3932223:1795826997:$0:@2:%2'
+[exit 0]
+%2 receipt: START receiver cwd=LAB grid=110x36 key-present=False
+SUBMIT after focus and index changes
+SUBMIT surviving link probe
+Verified binding
+Scenario teardown on target
+$ fm-tasks-axi.sh add legacy.0 'Disposable legacy scout' --kind scout
+ok: added legacy.0 (scout) -> Queued
+task:
+  id: legacy.0
+  title: Disposable legacy scout
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+  hold_kind: "-"
+  hold_until: "-"
+  kind: scout
+  repo: "-"
+  priority: "-"
+  created: 2026-11-27
+  closed: "-"
+  deps: none
+  links: none
+  body: ""
+help[2]:
+  - Run `tasks-axi start legacy.0` to move it to in flight
+  - Run `tasks-axi block legacy.0 --by <other>` to record a dependency
+[exit 0]
+$ fm-tasks-axi.sh start legacy.0
+ok: start legacy.0 -> In flight
+help[1]:
+  - Run `tasks-axi done legacy.0 --pr <url>` when it ships
+[exit 0]
+$ /usr/bin/tmux -S LAB/s list-windows -a -F '#{session_name}:#{window_name} #{session_id}:#{window_id}.#{pane_id} #{pane_current_command}'
+$0:main $1:@1.%1 bash
+$0:fm-legacy.0 $1:@2.%2 bash
+$0:fm-legacy $1:@4.%4 python3
+id-decoy:main $0:@0.%0 bash
+id-decoy:fm-legacy.0 $0:@3.%3 python3
+[exit 0]
+$ fm-captain-hold.sh complete legacy.0 --none
+complete: legacy.0 captain-call inventory reviewed
+[exit 0]
+$ fm-teardown.sh legacy.0 --legacy-record
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 2s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown legacy.0 complete (window $0:fm-legacy.0, worktree LAB/already-returned, legacy record accepted without spawn_gen: endpoint dead, incarnation legacy-20261128T005000Z-3935995)
+Backlog: legacy.0 is closed in LAB/home/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.
+[exit 0]
+$ /usr/bin/tmux -S LAB/s list-windows -a -F '#{session_name}:#{window_name} #{session_id}:#{window_id}.#{pane_id} #{pane_current_command}'
+$0:main $1:@1.%1 bash
+$0:fm-legacy $1:@4.%4 python3
+id-decoy:main $0:@0.%0 bash
+id-decoy:fm-legacy.0 $0:@3.%3 python3
+[exit 0]
+%3 receipt: START receiver cwd=LAB/project grid=220x36 key-present=False
+SUBMIT survived teardown
+%4 receipt: START receiver cwd=LAB/project grid=220x36 key-present=False
+SUBMIT survived teardown
+$ fm-tasks-axi.sh show legacy.0
+task:
+  id: legacy.0
+  title: Disposable legacy scout data/legacy.0/report.md
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+  hold_kind: "-"
+  hold_until: "-"
+  kind: scout
+  repo: "-"
+  priority: "-"
+  created: "-"
+  closed: 2026-11-27
+  deps: none
+  links: "report:data/legacy.0/report.md"
+  body: ""
+[exit 0]
+Verified teardown

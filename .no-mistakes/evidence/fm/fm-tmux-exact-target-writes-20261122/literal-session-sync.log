@@ -1,0 +1,28 @@
+Scenario sync on target
+%2 receipt: START receiver cwd=LAB grid=110x36 key-present=False
+%3 receipt: START receiver cwd=LAB grid=109x36 key-present=False
+%4 receipt: START receiver cwd=LAB grid=220x36 key-present=False
+$ /usr/bin/tmux -S LAB/s show-window-options -t %2 synchronize-panes
+synchronize-panes on
+[exit 0]
+$ /usr/bin/tmux -S LAB/s list-windows -a -F '#{session_name}:#{window_name} #{session_id}:#{window_id}.#{pane_id} #{pane_current_command}'
+$0:main $1:@1.%1 bash
+$0:fm-sync $1:@2.%2 python3
+id-decoy:main $0:@0.%0 bash
+id-decoy:fm-sync $0:@3.%4 python3
+[exit 0]
+$ fm-send.sh sync 'synchronized instruction'
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[exit 0]
+%2 receipt: START receiver cwd=LAB grid=110x36 key-present=False
+SUBMIT : Firstmate instruction waiting: list 'LAB/home/state/sync.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to 'LAB/home/state/sync.inbox'/handled/.
+%3 receipt: START receiver cwd=LAB grid=109x36 key-present=False
+SUBMIT : Firstmate instruction waiting: list 'LAB/home/state/sync.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to 'LAB/home/state/sync.inbox'/handled/.
+ID-matched decoy %4 received zero submits
+Verified sync

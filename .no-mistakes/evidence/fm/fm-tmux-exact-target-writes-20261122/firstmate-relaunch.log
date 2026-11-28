@@ -1,0 +1,102 @@
+Scenario relaunch on target
+$ fm-control.sh reuse relaunch --note 'Resume the synthetic task.'
+warning: LAB/home/data/reuse/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: reuse ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+relaunched reuse harness=claude from=claude model=default effort=default backend=tmux endpoint=fleet:fm-reuse worktree=LAB/worktree
+[exit 0]
+%1 receipt: START claude cwd=LAB/worktree grid=220x36 key-present=False
+In-place relaunch kept its pane and the uncommitted worktree file
+$ fm-control.sh reuse relaunch --note 'The old tmux window was closed.'
+warning: LAB/home/data/reuse/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: reuse ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+relaunched reuse harness=claude from=claude model=default effort=default backend=tmux endpoint=firstmate:fm-reuse worktree=LAB/worktree
+[exit 0]
+$ /usr/bin/tmux -S LAB/s list-windows -a -F '#{session_name}:#{window_name} #{session_id}:#{window_id}.#{pane_id} #{pane_current_command}'
+firstmate:bash $1:@2.%2 bash
+firstmate:fm-reuse $1:@3.%3 python3
+fleet:main $0:@0.%0 bash
+[exit 0]
+%3 receipt: START claude cwd=LAB/worktree grid=220x36 key-present=False
+Verified relaunch
+Scenario collision on base
+$ /usr/bin/tmux -S LAB/s list-windows -a -F '#{session_name}:#{window_name} #{session_id}:#{window_id}.#{pane_id} #{pane_current_command}'
+$0:main $1:@1.%1 bash
+$0:fm-collision $1:@3.%3 bash
+id-decoy:main $0:@0.%0 bash
+id-decoy:fm-collision $0:@2.%2 bash
+[exit 0]
+$ fm-spawn.sh collision --relaunch
+warning: LAB/home/data/collision/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: collision ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned collision harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-collision worktree=LAB/worktree
+[exit 0]
+$ /usr/bin/tmux -S LAB/s list-windows -a -F '#{session_name}:#{window_name} #{session_id}:#{window_id}.#{pane_id} #{pane_current_command}'
+$0:main $1:@1.%1 bash
+$0:fm-collision $1:@3.%3 bash
+firstmate:bash $2:@4.%4 bash
+firstmate:fm-collision $2:@5.%5 python3
+id-decoy:main $0:@0.%0 bash
+id-decoy:fm-collision $0:@2.%2 bash
+[exit 0]
+%5 receipt: START claude cwd=LAB/worktree grid=220x36 key-present=False
+Verified collision
+Scenario collision on target
+$ /usr/bin/tmux -S LAB/s list-windows -a -F '#{session_name}:#{window_name} #{session_id}:#{window_id}.#{pane_id} #{pane_current_command}'
+$0:main $1:@1.%1 bash
+$0:fm-collision $1:@3.%3 bash
+id-decoy:main $0:@0.%0 bash
+id-decoy:fm-collision $0:@2.%2 bash
+[exit 0]
+$ fm-spawn.sh collision --relaunch
+warning: LAB/home/data/collision/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: collision ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned collision harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-collision worktree=LAB/worktree
+[exit 0]
+$ /usr/bin/tmux -S LAB/s list-windows -a -F '#{session_name}:#{window_name} #{session_id}:#{window_id}.#{pane_id} #{pane_current_command}'
+$0:main $1:@1.%1 bash
+$0:fm-collision $1:@3.%3 bash
+firstmate:bash $2:@4.%4 bash
+firstmate:fm-collision $2:@5.%5 python3
+id-decoy:main $0:@0.%0 bash
+id-decoy:fm-collision $0:@2.%2 bash
+[exit 0]
+%5 receipt: START claude cwd=LAB/worktree grid=220x36 key-present=False
+Verified collision
+Scenario native on base
+Native tmux selects %2; the literal window holds %1
+$ fm-spawn.sh native.0 --relaunch --harness kimi
+warning: LAB/home/data/native.0/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: native.0 ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+error: kimi did not show a verified ready signal before brief delivery; inspect window fleet:fm-native.0
+[exit 1]
+%2 receipt: START kimi cwd=LAB/worktree grid=220x36 key-present=False
+$ /usr/bin/tmux -S LAB/s list-windows -a -F '#{session_name}:#{window_name} #{session_id}:#{window_id}.#{pane_id} #{pane_current_command}'
+fleet:main $0:@0.%0 bash
+fleet:fm-native.0 $0:@1.%1 bash
+fleet:fm-native $0:@2.%2 python3
+[exit 0]
+The native selector launched the undotted pane. The literal window had no readiness signal, so no brief was submitted.
+Verified native
+Scenario native on target
+Native tmux selects %2; the literal window holds %1
+$ fm-spawn.sh native.0 --relaunch --harness kimi
+warning: LAB/home/data/native.0/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: native.0 ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+error: kimi did not show a verified ready signal before brief delivery; inspect window fleet:fm-native.0
+[exit 1]
+%2 receipt: START kimi cwd=LAB/worktree grid=220x36 key-present=False
+$ /usr/bin/tmux -S LAB/s list-windows -a -F '#{session_name}:#{window_name} #{session_id}:#{window_id}.#{pane_id} #{pane_current_command}'
+fleet:main $0:@0.%0 bash
+fleet:fm-native.0 $0:@1.%1 bash
+fleet:fm-native $0:@2.%2 python3
+[exit 0]
+The native selector launched the undotted pane. The literal window had no readiness signal, so no brief was submitted.
+$ fm-spawn.sh kimi-reuse --relaunch --harness kimi
+warning: LAB/home/data/kimi-reuse/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: kimi-reuse ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned kimi-reuse harness=kimi kind=ship mode=local-only yolo=off window=fleet:fm-kimi-reuse worktree=LAB/worktree
+[exit 0]
+%3 receipt: START kimi cwd=LAB/worktree grid=220x36 key-present=False
+ENTER 1 composer still pending (177 characters)
+SUBMIT Read the brief at LAB/home/data/kimi-reuse/launch-brief.md and follow it exactly.
+Verified native

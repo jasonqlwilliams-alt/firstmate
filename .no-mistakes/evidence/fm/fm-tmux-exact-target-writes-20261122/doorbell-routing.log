@@ -1,0 +1,65 @@
+Scenario dotted on base
+%1 receipt: START receiver cwd=LAB grid=220x36 key-present=False
+%2 receipt: START receiver cwd=LAB grid=220x36 key-present=False
+%2 receipt: START receiver cwd=LAB grid=220x36 key-present=False
+SUBMIT native-selector-probe
+$ fm-send.sh build.0 'review synthetic changes'
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[exit 0]
+%2 receipt: START receiver cwd=LAB grid=220x36 key-present=False
+SUBMIT native-selector-probe
+SUBMIT : Firstmate instruction waiting: list 'LAB/home/state/build.0.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to 'LAB/home/state/build.0.inbox'/handled/.
+Base reproduced the regression: decoy %2 got the inbox doorbell and recorded worker %1 got zero submits
+Verified dotted
+Scenario dotted on target
+%1 receipt: START receiver cwd=LAB grid=220x36 key-present=False
+%2 receipt: START receiver cwd=LAB grid=220x36 key-present=False
+%2 receipt: START receiver cwd=LAB grid=220x36 key-present=False
+SUBMIT native-selector-probe
+$ fm-send.sh build.0 'review synthetic changes'
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  use the foreground fallback bin/fm-watch-checkpoint.sh --seconds 180; drain, handle, acknowledge, and repeat after each return. This harness has no verified exit callback; the owning model must continue the loop.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[exit 0]
+%1 receipt: START receiver cwd=LAB grid=220x36 key-present=False
+SUBMIT : Firstmate instruction waiting: list 'LAB/home/state/build.0.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to 'LAB/home/state/build.0.inbox'/handled/.
+Inbox record 001.msg: schema=fm-task-inbox.v1
+at=2026-11-28T00:49:06Z
+--
+review synthetic changes
+$ fm-send.sh build.0 --key Enter
+WARNING: watcher still down (same stale episode; last beat: 3s ago, grace 300s) - full banner already printed this episode.
+[exit 0]
+%1 receipt: START receiver cwd=LAB grid=220x36 key-present=False
+SUBMIT : Firstmate instruction waiting: list 'LAB/home/state/build.0.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to 'LAB/home/state/build.0.inbox'/handled/.
+SUBMIT draft for named key
+$ fm-peek.sh build.0 10
+WARNING: watcher still down (same stale episode; last beat: 3s ago, grace 300s) - full banner already printed this episode.
+LAB receiver READY
+❯ : Firstmate instruction waiting: list 'LAB/home/state/build.0.inbox'/*.msg and, in numeric order, read and act on each, th
+en mv each handled file to 'LAB/home/state/build.0.inbox'/handled/.
+LAB receiver READY
+❯ draft for named key
+LAB receiver READY
+❯
+[exit 0]
+%3 receipt: START receiver cwd=LAB grid=220x36 key-present=False
+$ fm-peek.sh build.0 10
+WARNING: watcher still down (same stale episode; last beat: 4s ago, grace 300s) - full banner already printed this episode.
+error: tmux window fleet:fm-build.0 not found
+[exit 1]
+$ fm-send.sh build.0 --key Enter
+WARNING: watcher still down (same stale episode; last beat: 4s ago, grace 300s) - full banner already printed this episode.
+error: key 'Enter' not sent to fleet:fm-build.0 (could not bind the tmux pane; tried meta=LAB/home/state/build.0.meta; backend=from-meta)
+[exit 1]
+Verified dotted
